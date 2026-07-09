@@ -14,7 +14,9 @@ import { PembelianPage } from "./pages/produksi/PembelianPage";
 import { ProduksiPage } from "./pages/produksi/ProduksiPage";
 import { CabangPage } from "./pages/pengaturan/CabangPage";
 import { KaryawanPage } from "./pages/pengaturan/KaryawanPage";
+import { PenyimpananPage } from "./pages/pengaturan/PenyimpananPage";
 import { PerusahaanPage } from "./pages/pengaturan/PerusahaanPage";
+import { SupplierPage } from "./pages/pengaturan/SupplierPage";
 import { StokPage } from "./pages/stok/StokPage";
 import { SistemPage } from "./pages/superadmin/SistemPage";
 import { TenantsPage } from "./pages/superadmin/TenantsPage";
@@ -65,6 +67,8 @@ export default function App() {
                   <Route path="/pengaturan/perusahaan" element={<PerusahaanPage />} />
                   <Route path="/pengaturan/cabang" element={<CabangPage />} />
                   <Route path="/pengaturan/karyawan" element={<KaryawanPage />} />
+                  <Route path="/pengaturan/supplier" element={<SupplierPage />} />
+                  <Route path="/pengaturan/penyimpanan" element={<PenyimpananPage />} />
                 </>
               )}
             </>

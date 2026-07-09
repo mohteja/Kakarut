@@ -33,6 +33,7 @@ export async function hitungSaldoCabang(
       SELECT SUM(pr.qty) AS qty
       FROM productions pr
       WHERE pr.branch_id = ${branchId} AND pr.ingredient_id = i.id
+        AND pr.status = 'dikonfirmasi'
         AND (b.created_at IS NULL OR pr.waktu > b.created_at)
     ) p ON TRUE
     LEFT JOIN LATERAL (

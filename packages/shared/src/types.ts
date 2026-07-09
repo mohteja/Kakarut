@@ -77,6 +77,23 @@ export interface StokRowDto {
   status: StokStatus;
 }
 
+export interface SupplierDto {
+  id: string;
+  nama: string;
+  telepon: string | null;
+  alamat: string | null;
+  catatan: string | null;
+  is_active: boolean;
+}
+
+export interface PenyimpananDto {
+  id: string;
+  branch_id: string;
+  nama: string;
+  catatan: string | null;
+  is_active: boolean;
+}
+
 export interface SaleItemInput {
   menu_id: string;
   qty: number;

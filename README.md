@@ -16,6 +16,7 @@ perusahaan tersebut di-seed sebagai tenant pertama untuk testing nyata.
 - **Paket Yamin (harga khusus)**: HPP dasar × markup + topping tanpa markup.
 - **Stok per cabang**: saldo = opname + masuk − terpakai (konsumsi otomatis dari resep saat penjualan); status Aman / Menipis / Habis.
 - **Dua jalur penambahan stok**: **Produksi Bahan Baku** (bahan buatan sendiri — baso, kuah, aci) dan **Beli Bahan Baku** (beli jadi — kemasan, powder, buah; dengan catatan total harga). Setiap bahan punya **jenis pengadaan** (`produksi`/`beli`) dan hanya bisa ditambah lewat jalurnya.
+- **Faktur penerimaan stok**: penambahan stok lewat form faktur multi-item — sumber (**master supplier**), qty dalam **pcs atau batch** (dengan info isi per batch), **tempat penyimpanan** (master per cabang: freezer/gudang/dll). Faktur berstatus *Menunggu konfirmasi*; **stok baru terhitung setelah "Konfirmasi Ada"** (barang benar-benar diterima) — mendukung stock opname.
 - **Snapshot historis**: harga, HPP, dan konsumsi bahan disimpan saat transaksi — perubahan harga/resep tidak mengubah histori.
 - **Laporan harian**: omzet, HPP terpakai, estimasi profit, item terjual, konsumsi bahan, kalkulator BEP.
 - **Printer thermal**: cetak struk ESC/POS langsung dari browser — **Bluetooth (BLE)**, **USB (WebUSB)**, **aplikasi RawBT** (Android, printer Bluetooth klasik), atau dialog cetak browser; auto-print setelah pembayaran, potong kertas, buka laci kas.
@@ -110,8 +111,10 @@ Semua di bawah `/api`, autentikasi `Bearer <JWT>` kecuali `POST /auth/login` dan
 | Kategori | `GET/POST /kategori`, `PATCH /kategori/:id` |
 | Menu | `GET /menu` (dengan hpp, hpp_dine_in, harga_saran, food_cost), `POST/PUT/DELETE`, `GET /menu/panduan-markup` |
 | Penjualan | `POST /penjualan`, `GET /penjualan?tanggal=`, `DELETE /penjualan/:id` (void) |
-| Produksi | `POST /produksi` (`qty` atau `batch:true`; hanya bahan jenis `produksi`), `GET /produksi?tanggal=` |
-| Pembelian | `POST /pembelian` (hanya bahan jenis `beli`; `total_harga` opsional, default proporsional harga beli), `GET /pembelian?tanggal=` |
+| Produksi | `POST /produksi/faktur` (multi-item, status menunggu), `POST /produksi/konfirmasi/:fakturId`, `POST /produksi` (langsung), `GET /produksi?tanggal=` — hanya bahan jenis `produksi` |
+| Pembelian | `POST /pembelian/faktur`, `POST /pembelian/konfirmasi/:fakturId`, `POST /pembelian`, `GET /pembelian?tanggal=` — hanya bahan jenis `beli`; `total_harga` default proporsional harga beli |
+| Supplier | `GET/POST /supplier`, `PATCH /supplier/:id` |
+| Penyimpanan | `GET/POST /penyimpanan` (per cabang), `PATCH /penyimpanan/:id` |
 | Stok | `GET /stok`, `POST /stok/opname`, `GET /stok/opname` |
 | Laporan | `GET /laporan?tanggal=`, `GET /laporan/bep?biaya_tetap=` |
 | Upload | `POST /upload?tujuan=menu\|logo` (multipart, ≤5 MB) |

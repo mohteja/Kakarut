@@ -26,6 +26,7 @@ import {
   menuComponents,
   menus,
   stockOpnames,
+  storageLocations,
   users,
 } from "../db/schema";
 import seedData from "./data/basooopa-backend-data.json";
@@ -204,6 +205,12 @@ async function main() {
       email: env.SEED_KASIR_EMAIL.toLowerCase(),
       password: env.SEED_KASIR_PASSWORD,
     });
+
+    // 3b. Tempat penyimpanan default cabang Pusat
+    await tx
+      .insert(storageLocations)
+      .values({ companyId: company.id, branchId: branch.id, nama: "Gudang Utama" })
+      .onConflictDoNothing();
 
     // 4. Kategori menu sesuai catOrder
     const categoryIdByName = new Map<string, string>();

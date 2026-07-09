@@ -105,6 +105,12 @@ export function Layout() {
                   <NavLink to="/pengaturan/karyawan" className={linkClass}>
                     👥 Karyawan
                   </NavLink>
+                  <NavLink to="/pengaturan/supplier" className={linkClass}>
+                    🚚 Supplier
+                  </NavLink>
+                  <NavLink to="/pengaturan/penyimpanan" className={linkClass}>
+                    🗃 Tempat Penyimpanan
+                  </NavLink>
                 </>
               )}
             </>

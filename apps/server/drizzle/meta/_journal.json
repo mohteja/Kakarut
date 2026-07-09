@@ -22,6 +22,13 @@
       "when": 1783603480156,
       "tag": "0002_parched_risque",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1783606269274,
+      "tag": "0003_perfect_thing",
+      "breakpoints": true
     }
   ]
 }

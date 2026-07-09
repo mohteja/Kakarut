@@ -158,6 +158,41 @@ cek "pembelian 1 batch plastik +100" "abs(V - ($PLASTIK_SALDO + 100)) < 0.001" \
   "$(stok_of "$(api "$KASIR" GET /stok)" "plastik take away")"
 cek "total_harga pembelian terisi (harga_beli)" "V == 15000" "$(echo "$BELI" | jq '.totalHarga // 0')"
 
+echo "== 11. Faktur penerimaan: supplier, tempat, konfirmasi baru menambah stok =="
+SUP=$(api "$OWNER" POST /supplier '{"nama":"Toko Plastik Jaya"}')
+SUP_ID=$(echo "$SUP" | jq -r '.id // empty')
+if [ -z "$SUP_ID" ]; then SUP_ID=$(api "$OWNER" GET /supplier | jq -r '[.[] | select(.nama=="Toko Plastik Jaya")][0].id'); fi
+[ -n "$SUP_ID" ] && ok "supplier dibuat/tersedia"
+TMP=$(api "$OWNER" POST /penyimpanan '{"nama":"Rak Uji"}')
+TMP_ID=$(echo "$TMP" | jq -r '.id // empty')
+if [ -z "$TMP_ID" ]; then TMP_ID=$(api "$OWNER" GET /penyimpanan | jq -r '[.[] | select(.nama=="Rak Uji")][0].id'); fi
+[ -n "$TMP_ID" ] && ok "tempat penyimpanan dibuat/tersedia"
+
+SEDOTAN_ID=$(echo "$BAHAN" | jq -r '[.[] | select(.slug == "sedotan")][0].id')
+PLASTIK_SEBELUM=$(stok_of "$(api "$KASIR" GET /stok)" "plastik take away")
+SEDOTAN_SEBELUM=$(stok_of "$(api "$KASIR" GET /stok)" "sedotan")
+FKT=$(api "$KASIR" POST /pembelian/faktur "{\"supplier_id\":\"$SUP_ID\",\"no_faktur\":\"INV-UJI-1\",\"items\":[{\"ingredient_id\":\"$PLASTIK_ID\",\"mode\":\"batch\",\"jumlah\":2,\"storage_location_id\":\"$TMP_ID\"},{\"ingredient_id\":\"$SEDOTAN_ID\",\"mode\":\"pcs\",\"jumlah\":50}]}")
+FKT_ID=$(echo "$FKT" | jq -r .faktur_id)
+cek "faktur 2 baris tersimpan (menunggu)" "V == 2" "$(echo "$FKT" | jq .jumlah_baris)"
+cek "stok plastik BELUM berubah (menunggu konfirmasi)" "abs(V - $PLASTIK_SEBELUM) < 0.001" \
+  "$(stok_of "$(api "$KASIR" GET /stok)" "plastik take away")"
+api "$KASIR" POST "/pembelian/konfirmasi/$FKT_ID" > /dev/null
+cek "setelah konfirmasi: plastik +200 (2 batch)" "abs(V - ($PLASTIK_SEBELUM + 200)) < 0.001" \
+  "$(stok_of "$(api "$KASIR" GET /stok)" "plastik take away")"
+cek "setelah konfirmasi: sedotan +50 (pcs)" "abs(V - ($SEDOTAN_SEBELUM + 50)) < 0.001" \
+  "$(stok_of "$(api "$KASIR" GET /stok)" "sedotan")"
+cek "konfirmasi ulang ditolak (404)" "V == 404" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/pembelian/konfirmasi/$FKT_ID" -H "Authorization: Bearer $KASIR")"
+# faktur produksi: mode batch = n × isi
+URAT_SEBELUM=$(stok_of "$(api "$KASIR" GET /stok)" "baso urat besar")
+FKP=$(api "$KASIR" POST /produksi/faktur "{\"items\":[{\"ingredient_id\":\"$URATB_ID\",\"mode\":\"batch\",\"jumlah\":1,\"storage_location_id\":\"$TMP_ID\"}]}")
+api "$KASIR" POST "/produksi/konfirmasi/$(echo "$FKP" | jq -r .faktur_id)" > /dev/null
+cek "faktur produksi 1 batch urat = +90" "abs(V - ($URAT_SEBELUM + 90)) < 0.001" \
+  "$(stok_of "$(api "$KASIR" GET /stok)" "baso urat besar")"
+# item lintas jalur dalam faktur ditolak
+cek "faktur pembelian berisi bahan produksi ditolak (400)" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/pembelian/faktur" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d "{\"items\":[{\"ingredient_id\":\"$URATB_ID\",\"mode\":\"pcs\",\"jumlah\":1}]}")"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

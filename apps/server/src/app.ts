@@ -20,7 +20,9 @@ import { kategoriRoutes } from "./modules/kategori/routes";
 import { laporanRoutes } from "./modules/laporan/routes";
 import { menuRoutes } from "./modules/menu/routes";
 import { penjualanRoutes } from "./modules/penjualan/routes";
+import { penyimpananRoutes } from "./modules/penyimpanan/routes";
 import { pembelianRoutes, produksiRoutes } from "./modules/produksi/routes";
+import { supplierRoutes } from "./modules/supplier/routes";
 import { stokRoutes } from "./modules/stok/routes";
 import { uploadRoutes } from "./modules/upload/routes";
 import { karyawanRoutes } from "./modules/users/routes";
@@ -49,6 +51,8 @@ export function createApp() {
     .route("/penjualan", penjualanRoutes)
     .route("/produksi", produksiRoutes)
     .route("/pembelian", pembelianRoutes)
+    .route("/supplier", supplierRoutes)
+    .route("/penyimpanan", penyimpananRoutes)
     .route("/stok", stokRoutes)
     .route("/laporan", laporanRoutes)
     .route("/upload", uploadRoutes);

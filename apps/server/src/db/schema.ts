@@ -20,6 +20,8 @@ export const bahanKategoriEnum = pgEnum("bahan_kategori", ["baso", "minuman", "l
 export const menuTipeEnum = pgEnum("menu_tipe", ["regular", "paket"]);
 /** jalur pengadaan bahan: diproduksi sendiri vs dibeli jadi */
 export const pengadaanEnum = pgEnum("pengadaan", ["produksi", "beli"]);
+/** status penerimaan stok masuk: menunggu konfirmasi "ya, ada" vs terkonfirmasi */
+export const konfirmasiStatusEnum = pgEnum("konfirmasi_status", ["menunggu", "dikonfirmasi"]);
 
 // ===== Tenancy & identitas =====
 
@@ -88,6 +90,43 @@ export const memberships = pgTable(
     uniqueIndex("memberships_user_company_uq").on(t.userId, t.companyId),
     check("memberships_cashier_branch_ck", sql`${t.role} <> 'cashier' OR ${t.branchId} IS NOT NULL`),
   ],
+);
+
+/** Master supplier / sumber pengadaan (per perusahaan). */
+export const suppliers = pgTable(
+  "suppliers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    nama: text("nama").notNull(),
+    telepon: text("telepon"),
+    alamat: text("alamat"),
+    catatan: text("catatan"),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("suppliers_company_nama_uq").on(t.companyId, t.nama)],
+);
+
+/** Master tempat penyimpanan (per cabang) — rujukan lokasi barang saat opname. */
+export const storageLocations = pgTable(
+  "storage_locations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    branchId: uuid("branch_id")
+      .notNull()
+      .references(() => branches.id, { onDelete: "cascade" }),
+    nama: text("nama").notNull(),
+    catatan: text("catatan"),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("storage_locations_branch_nama_uq").on(t.branchId, t.nama)],
 );
 
 // ===== Katalog (per company) =====
@@ -271,6 +310,16 @@ export const productions = pgTable(
     tipe: pengadaanEnum("tipe").notNull().default("produksi"),
     /** total harga saat tipe='beli' (catatan pengeluaran, opsional) */
     totalHarga: numeric("total_harga", { precision: 14, scale: 2, mode: "number" }),
+    /** pengelompokan baris satu faktur penerimaan */
+    fakturId: uuid("faktur_id"),
+    /** nomor faktur/nota dari supplier (opsional) */
+    noFaktur: text("no_faktur"),
+    supplierId: uuid("supplier_id").references(() => suppliers.id),
+    storageLocationId: uuid("storage_location_id").references(() => storageLocations.id),
+    /** stok baru terhitung setelah 'dikonfirmasi' (barang benar-benar ada) */
+    status: konfirmasiStatusEnum("status").notNull().default("dikonfirmasi"),
+    confirmedBy: uuid("confirmed_by").references(() => users.id),
+    confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
     isBatch: boolean("is_batch").notNull().default(false),
     catatan: text("catatan"),
     userId: uuid("user_id").references(() => users.id),
