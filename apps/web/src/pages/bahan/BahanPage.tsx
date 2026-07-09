@@ -22,6 +22,7 @@ interface FormState {
   harga_beli: string;
   isi: string;
   kategori: "baso" | "minuman" | "lain";
+  pengadaan: "produksi" | "beli";
   catatan: string;
   is_packaging: boolean;
   is_complement: boolean;
@@ -32,6 +33,7 @@ const kosong: FormState = {
   harga_beli: "",
   isi: "1",
   kategori: "lain",
+  pengadaan: "beli",
   catatan: "",
   is_packaging: false,
   is_complement: false,
@@ -53,6 +55,7 @@ export function BahanPage() {
         harga_beli: Number(f.harga_beli),
         isi: Number(f.isi),
         kategori: f.kategori,
+        pengadaan: f.pengadaan,
         catatan: f.catatan || null,
         is_packaging: f.is_packaging,
         is_complement: f.is_complement,
@@ -115,6 +118,7 @@ export function BahanPage() {
             <tr>
               <th className={thClass}>Nama</th>
               <th className={thClass}>Kategori</th>
+              <th className={thClass}>Jenis</th>
               <th className={`${thClass} text-right`}>Harga Beli</th>
               <th className={`${thClass} text-right`}>Isi</th>
               <th className={`${thClass} text-right`}>Harga / Unit</th>
@@ -139,6 +143,17 @@ export function BahanPage() {
                   )}
                 </td>
                 <td className={tdClass}>{b.kategori}</td>
+                <td className={tdClass}>
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                      b.pengadaan === "produksi"
+                        ? "bg-orange-100 text-orange-700"
+                        : "bg-teal-100 text-teal-700"
+                    }`}
+                  >
+                    {b.pengadaan === "produksi" ? "Produksi sendiri" : "Beli jadi"}
+                  </span>
+                </td>
                 <td className={`${tdClass} text-right`}>{formatRupiah(b.harga_beli)}</td>
                 <td className={`${tdClass} text-right`}>{formatAngka(b.isi)}</td>
                 <td className={`${tdClass} text-right font-semibold`}>
@@ -156,6 +171,7 @@ export function BahanPage() {
                         harga_beli: String(b.harga_beli),
                         isi: String(b.isi),
                         kategori: b.kategori,
+                        pengadaan: b.pengadaan,
                         catatan: b.catatan ?? "",
                         is_packaging: b.is_packaging,
                         is_complement: b.is_complement,
@@ -229,19 +245,36 @@ export function BahanPage() {
                 Harga per unit: {formatRupiah(Number(form.harga_beli) / Number(form.isi))}
               </div>
             )}
-            <div>
-              <label className="mb-1 block text-sm font-medium">Kategori</label>
-              <select
-                value={form.kategori}
-                onChange={(e) =>
-                  setForm({ ...form, kategori: e.target.value as FormState["kategori"] })
-                }
-                className={inputClass}
-              >
-                <option value="baso">baso</option>
-                <option value="minuman">minuman</option>
-                <option value="lain">lain</option>
-              </select>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="mb-1 block text-sm font-medium">Kategori</label>
+                <select
+                  value={form.kategori}
+                  onChange={(e) =>
+                    setForm({ ...form, kategori: e.target.value as FormState["kategori"] })
+                  }
+                  className={inputClass}
+                >
+                  <option value="baso">baso</option>
+                  <option value="minuman">minuman</option>
+                  <option value="lain">lain</option>
+                </select>
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium">Jenis pengadaan</label>
+                <select
+                  value={form.pengadaan}
+                  onChange={(e) =>
+                    setForm({ ...form, pengadaan: e.target.value as FormState["pengadaan"] })
+                  }
+                  className={inputClass}
+                >
+                  <option value="beli">Beli jadi (jalur: Beli Bahan Baku)</option>
+                  <option value="produksi">
+                    Produksi sendiri (jalur: Produksi Bahan Baku)
+                  </option>
+                </select>
+              </div>
             </div>
             <div>
               <label className="mb-1 block text-sm font-medium">Catatan</label>

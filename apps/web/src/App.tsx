@@ -10,6 +10,7 @@ import { LaporanPage } from "./pages/laporan/LaporanPage";
 import { LoginPage } from "./pages/LoginPage";
 import { MenuFormPage } from "./pages/menu/MenuFormPage";
 import { MenuListPage } from "./pages/menu/MenuListPage";
+import { PembelianPage } from "./pages/produksi/PembelianPage";
 import { ProduksiPage } from "./pages/produksi/ProduksiPage";
 import { CabangPage } from "./pages/pengaturan/CabangPage";
 import { KaryawanPage } from "./pages/pengaturan/KaryawanPage";
@@ -51,6 +52,7 @@ export default function App() {
               <Route path="/kasir" element={<KasirPage />} />
               <Route path="/stok" element={<StokPage />} />
               <Route path="/produksi" element={<ProduksiPage />} />
+              <Route path="/pembelian" element={<PembelianPage />} />
               <Route path="/laporan" element={<LaporanPage />} />
               {/* printer = pengaturan per perangkat → semua peran, termasuk kasir */}
               <Route path="/pengaturan/printer" element={<PrinterPage />} />

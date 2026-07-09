@@ -71,7 +71,10 @@ export function Layout() {
                 📦 Stok
               </NavLink>
               <NavLink to="/produksi" className={linkClass}>
-                🏭 Produksi
+                🏭 Produksi Bahan Baku
+              </NavLink>
+              <NavLink to="/pembelian" className={linkClass}>
+                🛒 Beli Bahan Baku
               </NavLink>
               <NavLink to="/laporan" className={linkClass}>
                 📊 Laporan

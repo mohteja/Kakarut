@@ -1,4 +1,10 @@
-import type { BahanKategori, MenuTipe, StokStatus, UserRole } from "./constants";
+import type {
+  BahanKategori,
+  JenisPengadaan,
+  MenuTipe,
+  StokStatus,
+  UserRole,
+} from "./constants";
 
 /** Payload JWT / hasil login */
 export interface AuthUser {
@@ -19,6 +25,7 @@ export interface BahanDto {
   isi: number;
   harga_per_unit: number;
   kategori: BahanKategori;
+  pengadaan: JenisPengadaan;
   catatan: string | null;
   is_packaging: boolean;
   is_complement: boolean;
