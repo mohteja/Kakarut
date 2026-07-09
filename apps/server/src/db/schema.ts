@@ -144,6 +144,8 @@ export const ingredients = pgTable(
     isi: numeric("isi", { precision: 12, scale: 4, mode: "number" }).notNull(),
     /** satuan isi/gramasi: pcs, gr, ml, butir, porsi, dst */
     satuan: text("satuan").notNull().default("pcs"),
+    /** lacak stok: dipotong saat menjual, ditambah saat membeli/produksi */
+    trackStok: boolean("track_stok").notNull().default(true),
     kategori: bahanKategoriEnum("kategori").notNull().default("lain"),
     pengadaan: pengadaanEnum("pengadaan").notNull().default("beli"),
     catatan: text("catatan"),

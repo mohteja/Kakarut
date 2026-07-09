@@ -18,6 +18,8 @@ export async function hitungSaldoCabang(
       i.nama        AS nama,
       i.kategori    AS kategori,
       i.isi         AS isi,
+      t.id          AS tempat_id,
+      t.nama        AS tempat,
       COALESCE(b.qty, 0) AS stok_awal,
       COALESCE(p.qty, 0) AS produksi,
       COALESCE(u.qty, 0) AS terpakai
@@ -42,7 +44,17 @@ export async function hitungSaldoCabang(
       WHERE sc.branch_id = ${branchId} AND sc.ingredient_id = i.id
         AND (b.created_at IS NULL OR sc.waktu > b.created_at)
     ) u ON TRUE
-    WHERE i.company_id = ${companyId} AND i.is_active
+    LEFT JOIN LATERAL (
+      -- tempat penyimpanan dari entri masuk terkonfirmasi terakhir
+      SELECT sl.id, sl.nama
+      FROM productions pr
+      JOIN storage_locations sl ON sl.id = pr.storage_location_id
+      WHERE pr.branch_id = ${branchId} AND pr.ingredient_id = i.id
+        AND pr.status = 'dikonfirmasi' AND pr.storage_location_id IS NOT NULL
+      ORDER BY pr.waktu DESC
+      LIMIT 1
+    ) t ON TRUE
+    WHERE i.company_id = ${companyId} AND i.is_active AND i.track_stok
     ORDER BY i.nama
   `);
 
@@ -57,6 +69,8 @@ export async function hitungSaldoCabang(
       nama: String(row.nama),
       kategori: row.kategori as StokRowDto["kategori"],
       isi: Number(row.isi),
+      tempat: row.tempat != null ? String(row.tempat) : null,
+      tempat_id: row.tempat_id != null ? String(row.tempat_id) : null,
       stok_awal: stokAwal,
       produksi,
       terpakai,

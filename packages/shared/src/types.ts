@@ -25,6 +25,8 @@ export interface BahanDto {
   isi: number;
   /** satuan isi/gramasi: pcs, gr, ml, butir, porsi, dst */
   satuan: string;
+  /** lacak stok: dipotong saat menjual, ditambah saat membeli/produksi */
+  track_stok: boolean;
   harga_per_unit: number;
   kategori: BahanKategori;
   pengadaan: JenisPengadaan;
@@ -40,6 +42,7 @@ export interface KomponenDto {
   nama: string;
   qty: number;
   satuan: string;
+  track_stok: boolean;
   harga_per_unit: number;
   is_packaging: boolean;
   is_complement: boolean;
@@ -73,6 +76,9 @@ export interface StokRowDto {
   nama: string;
   kategori: BahanKategori;
   isi: number;
+  /** tempat penyimpanan dari entri masuk terkonfirmasi terakhir */
+  tempat: string | null;
+  tempat_id: string | null;
   stok_awal: number;
   produksi: number;
   terpakai: number;

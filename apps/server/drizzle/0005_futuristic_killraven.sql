@@ -1,0 +1,1 @@
+ALTER TABLE "ingredients" ADD COLUMN "track_stok" boolean DEFAULT true NOT NULL;

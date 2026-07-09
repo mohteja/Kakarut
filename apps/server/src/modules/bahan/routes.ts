@@ -14,6 +14,8 @@ const BahanBody = z.object({
   harga_beli: z.number().nonnegative(),
   isi: z.number().positive(),
   satuan: z.string().trim().min(1).max(20).default("pcs"),
+  /** lacak stok saat membeli & menjual */
+  track_stok: z.boolean().default(true),
   kategori: z.enum(["baso", "minuman", "lain"]).default("lain"),
   /** jalur pengadaan: produksi sendiri atau beli jadi */
   pengadaan: z.enum(["produksi", "beli"]).default("beli"),
@@ -30,6 +32,7 @@ function toDto(row: typeof ingredients.$inferSelect): BahanDto {
     harga_beli: row.hargaBeli,
     isi: row.isi,
     satuan: row.satuan,
+    track_stok: row.trackStok,
     harga_per_unit: hargaPerUnit(row.hargaBeli, row.isi),
     kategori: row.kategori,
     pengadaan: row.pengadaan,
@@ -73,6 +76,7 @@ export const bahanRoutes = new Hono<AppEnv>()
         hargaBeli: body.harga_beli,
         isi: body.isi,
         satuan: body.satuan,
+        trackStok: body.track_stok,
         kategori: body.kategori,
         pengadaan: body.pengadaan,
         catatan: body.catatan ?? null,
@@ -96,6 +100,7 @@ export const bahanRoutes = new Hono<AppEnv>()
           ...(body.harga_beli !== undefined && { hargaBeli: body.harga_beli }),
           ...(body.isi !== undefined && { isi: body.isi }),
           ...(body.satuan !== undefined && { satuan: body.satuan }),
+          ...(body.track_stok !== undefined && { trackStok: body.track_stok }),
           ...(body.kategori !== undefined && { kategori: body.kategori }),
           ...(body.pengadaan !== undefined && { pengadaan: body.pengadaan }),
           ...(body.catatan !== undefined && { catatan: body.catatan }),

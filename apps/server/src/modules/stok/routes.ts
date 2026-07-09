@@ -49,9 +49,17 @@ export const stokRoutes = new Hono<AppEnv>()
       const valid = await db
         .select({ id: ingredients.id })
         .from(ingredients)
-        .where(and(eq(ingredients.companyId, auth.company_id!), inArray(ingredients.id, ids)));
+        .where(
+          and(
+            eq(ingredients.companyId, auth.company_id!),
+            eq(ingredients.trackStok, true),
+            inArray(ingredients.id, ids),
+          ),
+        );
       if (valid.length !== ids.length) {
-        throw new HTTPException(400, { message: "Ada bahan yang tidak valid" });
+        throw new HTTPException(400, {
+          message: "Ada bahan yang tidak valid atau stoknya tidak dilacak",
+        });
       }
 
       const [company] = await db

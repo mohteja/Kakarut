@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import type { StokRowDto } from "@kakarut/shared";
+import type { PenyimpananDto, StokRowDto } from "@kakarut/shared";
 import {
   Card,
   ErrorText,
@@ -28,10 +28,15 @@ export function StokPage() {
     queryKey: ["stok", branchQuery],
     queryFn: () => api<StokRowDto[]>(`/stok${branchQuery}`),
   });
+  const { data: tempatList = [] } = useQuery({
+    queryKey: ["penyimpanan", branchQuery],
+    queryFn: () => api<PenyimpananDto[]>(`/penyimpanan${branchQuery}`),
+  });
 
   const [modeOpname, setModeOpname] = useState(false);
   const [opnameQty, setOpnameQty] = useState<Record<string, string>>({});
   const [cari, setCari] = useState("");
+  const [filterTempat, setFilterTempat] = useState<string>("semua");
 
   const simpanOpname = useMutation({
     mutationFn: () => {
@@ -56,9 +61,15 @@ export function StokPage() {
 
   if (isLoading) return <Spinner />;
 
-  const tampil = (stok ?? []).filter((s) =>
-    s.nama.toLowerCase().includes(cari.toLowerCase()),
-  );
+  const tampil = (stok ?? [])
+    .filter((s) => s.nama.toLowerCase().includes(cari.toLowerCase()))
+    .filter((s) =>
+      filterTempat === "semua"
+        ? true
+        : filterTempat === "tanpa"
+          ? s.tempat_id === null
+          : s.tempat_id === filterTempat,
+    );
   const jumlahDiisi = Object.values(opnameQty).filter((v) => v !== "").length;
 
   return (
@@ -104,18 +115,43 @@ export function StokPage() {
       )}
       <ErrorText error={simpanOpname.error} />
 
-      <input
-        value={cari}
-        onChange={(e) => setCari(e.target.value)}
-        placeholder="Cari bahan…"
-        className={`${inputClass} mb-3 max-w-xs`}
-      />
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <input
+          value={cari}
+          onChange={(e) => setCari(e.target.value)}
+          placeholder="Cari bahan…"
+          className={`${inputClass} max-w-56`}
+        />
+        <select
+          value={filterTempat}
+          onChange={(e) => setFilterTempat(e.target.value)}
+          className={`${inputClass} max-w-56`}
+          aria-label="Filter tempat penyimpanan"
+        >
+          <option value="semua">Semua tempat penyimpanan</option>
+          {tempatList.map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.nama}
+            </option>
+          ))}
+          <option value="tanpa">Tanpa tempat</option>
+        </select>
+        {filterTempat !== "semua" && (
+          <button
+            onClick={() => setFilterTempat("semua")}
+            className="text-sm font-medium text-orange-600 hover:underline"
+          >
+            Reset filter
+          </button>
+        )}
+      </div>
 
       <Card className="overflow-x-auto">
         <table className="w-full">
           <thead className="border-b border-stone-200 bg-stone-50">
             <tr>
               <th className={thClass}>Bahan</th>
+              <th className={thClass}>Tempat</th>
               <th className={`${thClass} text-right`}>Stok Awal</th>
               <th className={`${thClass} text-right`} title="Produksi + pembelian setelah opname terakhir">
                 Masuk
@@ -130,6 +166,7 @@ export function StokPage() {
             {tampil.map((s) => (
               <tr key={s.ingredient_id} className="hover:bg-stone-50">
                 <td className={`${tdClass} font-medium`}>{s.nama}</td>
+                <td className={`${tdClass} text-stone-500`}>{s.tempat ?? "—"}</td>
                 <td className={`${tdClass} text-right`}>{formatAngka(s.stok_awal)}</td>
                 <td className={`${tdClass} text-right text-green-700`}>
                   {s.produksi > 0 ? `+${formatAngka(s.produksi)}` : "—"}

@@ -90,7 +90,8 @@ export function FakturModal({
     queryFn: () => api<PenyimpananDto[]>(`/penyimpanan${branchQuery}`),
   });
 
-  const bahanJalur = (bahan ?? []).filter((b) => b.pengadaan === tipe);
+  // hanya bahan sesuai jalur DAN yang dilacak stoknya
+  const bahanJalur = (bahan ?? []).filter((b) => b.pengadaan === tipe && b.track_stok);
 
   const [supplierId, setSupplierId] = useState("");
   const [noFaktur, setNoFaktur] = useState("");
