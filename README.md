@@ -14,7 +14,8 @@ perusahaan tersebut di-seed sebagai tenant pertama untuk testing nyata.
 - **Kasir (POS)**: tab kategori, keranjang, mode **dine-in / bawa pulang** (per transaksi & per baris), PB1 opsional, struk cetak.
 - **Aturan dine-in sesuai spec**: komponen kemasan take-away tidak dihitung & tidak dikonsumsi; complement saos & sambal ×0,5.
 - **Paket Yamin (harga khusus)**: HPP dasar × markup + topping tanpa markup.
-- **Stok per cabang**: saldo = opname + produksi − terpakai (konsumsi otomatis dari resep saat penjualan); status Aman / Menipis / Habis.
+- **Stok per cabang**: saldo = opname + masuk − terpakai (konsumsi otomatis dari resep saat penjualan); status Aman / Menipis / Habis.
+- **Dua jalur penambahan stok**: **Produksi Bahan Baku** (bahan buatan sendiri — baso, kuah, aci) dan **Beli Bahan Baku** (beli jadi — kemasan, powder, buah; dengan catatan total harga). Setiap bahan punya **jenis pengadaan** (`produksi`/`beli`) dan hanya bisa ditambah lewat jalurnya.
 - **Snapshot historis**: harga, HPP, dan konsumsi bahan disimpan saat transaksi — perubahan harga/resep tidak mengubah histori.
 - **Laporan harian**: omzet, HPP terpakai, estimasi profit, item terjual, konsumsi bahan, kalkulator BEP.
 - **Printer thermal**: cetak struk ESC/POS langsung dari browser — **Bluetooth (BLE)**, **USB (WebUSB)**, **aplikasi RawBT** (Android, printer Bluetooth klasik), atau dialog cetak browser; auto-print setelah pembayaran, potong kertas, buka laci kas.
@@ -79,8 +80,20 @@ npm run e2e -w @kakarut/web  # Playwright: login → POS → checkout → struk 
 3. (Opsional) isi kredensial **Cloudflare R2** (`R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`,
    `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, `R2_PUBLIC_URL`) — tanpa ini upload
    tersimpan di disk lokal server.
-4. `npm run db:migrate && npm run seed` (seed opsional di produksi).
+4. `npm run seed` untuk deploy pertama (membuat super-admin + tenant contoh).
 5. `npm run build && npm start` — aplikasi lengkap di satu port.
+
+### Migrasi database otomatis
+
+Setiap rilis fitur baru menyertakan file migrasi di `apps/server/drizzle/`.
+Saat server start, migrasi yang belum terpasang **diterapkan otomatis**
+(`AUTO_MIGRATE`, default aktif) — deploy versi baru tidak butuh langkah manual.
+Aman dijalankan berulang dan multi-instance (advisory lock PostgreSQL).
+
+- Pantau & jalankan manual: panel super-admin → **Sistem & Migrasi**
+  (`GET/POST /api/admin/sistem`).
+- Nonaktifkan dengan `AUTO_MIGRATE=false` bila migrasi dikelola terpisah
+  (mis. entrypoint Docker/CI menjalankan `npm run db:migrate`).
 
 ## Ringkasan API
 
@@ -97,7 +110,8 @@ Semua di bawah `/api`, autentikasi `Bearer <JWT>` kecuali `POST /auth/login` dan
 | Kategori | `GET/POST /kategori`, `PATCH /kategori/:id` |
 | Menu | `GET /menu` (dengan hpp, hpp_dine_in, harga_saran, food_cost), `POST/PUT/DELETE`, `GET /menu/panduan-markup` |
 | Penjualan | `POST /penjualan`, `GET /penjualan?tanggal=`, `DELETE /penjualan/:id` (void) |
-| Produksi | `POST /produksi` (`qty` atau `batch:true`), `GET /produksi?tanggal=` |
+| Produksi | `POST /produksi` (`qty` atau `batch:true`; hanya bahan jenis `produksi`), `GET /produksi?tanggal=` |
+| Pembelian | `POST /pembelian` (hanya bahan jenis `beli`; `total_harga` opsional, default proporsional harga beli), `GET /pembelian?tanggal=` |
 | Stok | `GET /stok`, `POST /stok/opname`, `GET /stok/opname` |
 | Laporan | `GET /laporan?tanggal=`, `GET /laporan/bep?biaya_tetap=` |
 | Upload | `POST /upload?tujuan=menu\|logo` (multipart, ≤5 MB) |

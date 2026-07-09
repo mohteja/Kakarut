@@ -11,6 +11,7 @@ import {
   type BahanDto,
   type MenuDto,
 } from "@kakarut/shared";
+import { ImageUpload } from "../../components/ImageUpload";
 import {
   Card,
   ErrorText,
@@ -69,8 +70,6 @@ export function MenuFormPage() {
   const [isActive, setIsActive] = useState(true);
   const [komponen, setKomponen] = useState<KomponenForm[]>([]);
   const dimuat = useRef(false);
-  const fileRef = useRef<HTMLInputElement>(null);
-  const [uploadError, setUploadError] = useState<unknown>(null);
 
   // muat data saat edit
   useEffect(() => {
@@ -149,21 +148,6 @@ export function MenuFormPage() {
       navigate("/menu");
     },
   });
-
-  async function uploadGambar(file: File) {
-    setUploadError(null);
-    try {
-      const fd = new FormData();
-      fd.append("file", file);
-      const { url } = await api<{ url: string }>("/upload?tujuan=menu", {
-        method: "POST",
-        formData: fd,
-      });
-      setImageUrl(url);
-    } catch (e) {
-      setUploadError(e);
-    }
-  }
 
   if (!bahan || !kategori || (id && !menuEdit)) return <Spinner />;
 
@@ -281,22 +265,7 @@ export function MenuFormPage() {
             </div>
             <div>
               <label className="mb-1 block text-sm font-medium">Foto menu</label>
-              <div className="flex items-center gap-3">
-                {imageUrl && (
-                  <img src={imageUrl} alt="" className="h-12 w-12 rounded-lg object-cover" />
-                )}
-                <input
-                  ref={fileRef}
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp"
-                  onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    if (f) void uploadGambar(f);
-                  }}
-                  className="text-sm"
-                />
-              </div>
-              <ErrorText error={uploadError} />
+              <ImageUpload value={imageUrl} onChange={setImageUrl} tujuan="menu" placeholder="🍜" />
             </div>
           </div>
         </Card>

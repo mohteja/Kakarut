@@ -139,6 +139,25 @@ else
   gagal "nomor struk tabrakan/gagal setelah void: $VC_NOMOR"
 fi
 
+echo "== 10. Jalur pengadaan: produksi vs beli bahan baku =="
+BAHAN=$(api "$KASIR" GET /bahan)
+cek "baso urat besar berjenis produksi" "V == 1" \
+  "$(echo "$BAHAN" | jq '[.[] | select(.slug == "baso urat besar")][0].pengadaan == "produksi" | if . then 1 else 0 end')"
+PLASTIK_ID=$(echo "$BAHAN" | jq -r '[.[] | select(.slug == "plastik take away")][0].id')
+cek "plastik take away berjenis beli" "V == 1" \
+  "$(echo "$BAHAN" | jq '[.[] | select(.slug == "plastik take away")][0].pengadaan == "beli" | if . then 1 else 0 end')"
+# jalur salah harus ditolak 400
+cek "produksi bahan 'beli jadi' ditolak (400)" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/produksi" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d "{\"ingredient_id\":\"$PLASTIK_ID\",\"batch\":true}")"
+cek "pembelian bahan 'produksi' ditolak (400)" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/pembelian" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d "{\"ingredient_id\":\"$URATB_ID\",\"batch\":true}")"
+# jalur benar menambah stok
+PLASTIK_SALDO=$(stok_of "$(api "$KASIR" GET /stok)" "plastik take away")
+BELI=$(api "$KASIR" POST /pembelian "{\"ingredient_id\":\"$PLASTIK_ID\",\"batch\":true}")
+cek "pembelian 1 batch plastik +100" "abs(V - ($PLASTIK_SALDO + 100)) < 0.001" \
+  "$(stok_of "$(api "$KASIR" GET /stok)" "plastik take away")"
+cek "total_harga pembelian terisi (harga_beli)" "V == 15000" "$(echo "$BELI" | jq '.totalHarga // 0')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]
