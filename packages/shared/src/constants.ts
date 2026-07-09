@@ -24,3 +24,5 @@ export type StokStatus = "habis" | "menipis" | "aman";
 export type UserRole = "owner" | "admin" | "cashier";
 export type MenuTipe = "regular" | "paket";
 export type BahanKategori = "baso" | "minuman" | "lain";
+/** jalur pengadaan bahan baku: diproduksi sendiri vs dibeli jadi */
+export type JenisPengadaan = "produksi" | "beli";

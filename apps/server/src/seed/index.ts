@@ -70,6 +70,46 @@ const PAKET_TOPPINGS: { bahan: string; qty: number }[] = [
 ];
 const PAKET_KATEGORI = "Paket Yamin";
 
+/**
+ * Bahan yang DIPRODUKSI SENDIRI (jalur "Produksi Bahan Baku"); sisanya
+ * dianggap dibeli jadi (jalur "Beli Bahan Baku"). Klasifikasi awal — bisa
+ * diubah per bahan lewat UI.
+ */
+const BAHAN_PRODUKSI_SENDIRI = new Set([
+  "baso urat besar",
+  "baso urat sedang",
+  "baso urat kecil",
+  "baso halus besar",
+  "baso halus sedang",
+  "baso halus kecil",
+  "baso tahu",
+  "siomay",
+  "baso aci original",
+  "baso aci jando",
+  "baso aci keju",
+  "aci lember",
+  "cirawang",
+  "tetelan ori, oseng pedas gurih / pedas manis",
+  "jando ori, oseng pedas manis / pedas gurih",
+  "ceker tulang lunak ori, oseng pedas gurih / pedas manis",
+  "kikil ori, oseng pedas gurih / pedas manis",
+  "oseng tetelan pedas gurih / pedas manis",
+  "oseng jando pedas gurih / pedas manis",
+  "kerupuk pangsit",
+  "topping mie dkk",
+  "complement saos & sambal",
+  "kuah dan bumbu",
+  "risol mayooopa",
+  "risol tetelan pedas gurih",
+  "risol jando pedas manis",
+  "nasi putih",
+  "minyak bawang",
+  "konsentrat gula / gula cair",
+  "pudding mangga",
+  "nutri jelly mangga",
+  "nutri jelly kelapa",
+]);
+
 const tanggalHariIni = (tz: string) =>
   new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(new Date());
 
@@ -193,6 +233,7 @@ async function main() {
           kategori: (["baso", "minuman", "lain"].includes(m.kategori)
             ? m.kategori
             : "lain") as "baso" | "minuman" | "lain",
+          pengadaan: BAHAN_PRODUKSI_SENDIRI.has(m.id) ? "produksi" : "beli",
           catatan: m.catatan || null,
           isPackaging: packagingSet.has(m.id),
           isComplement: m.id === complementSlug,
@@ -203,6 +244,7 @@ async function main() {
             nama: m.nama,
             hargaBeli: m.harga_beli,
             isi: m.isi,
+            pengadaan: BAHAN_PRODUKSI_SENDIRI.has(m.id) ? "produksi" : "beli",
             isPackaging: packagingSet.has(m.id),
             isComplement: m.id === complementSlug,
             isActive: true,

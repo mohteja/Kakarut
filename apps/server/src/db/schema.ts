@@ -18,6 +18,8 @@ import {
 export const userRoleEnum = pgEnum("user_role", ["owner", "admin", "cashier"]);
 export const bahanKategoriEnum = pgEnum("bahan_kategori", ["baso", "minuman", "lain"]);
 export const menuTipeEnum = pgEnum("menu_tipe", ["regular", "paket"]);
+/** jalur pengadaan bahan: diproduksi sendiri vs dibeli jadi */
+export const pengadaanEnum = pgEnum("pengadaan", ["produksi", "beli"]);
 
 // ===== Tenancy & identitas =====
 
@@ -102,6 +104,7 @@ export const ingredients = pgTable(
     hargaBeli: numeric("harga_beli", { precision: 14, scale: 2, mode: "number" }).notNull(),
     isi: numeric("isi", { precision: 12, scale: 4, mode: "number" }).notNull(),
     kategori: bahanKategoriEnum("kategori").notNull().default("lain"),
+    pengadaan: pengadaanEnum("pengadaan").notNull().default("beli"),
     catatan: text("catatan"),
     isPackaging: boolean("is_packaging").notNull().default(false),
     isComplement: boolean("is_complement").notNull().default(false),
@@ -264,6 +267,10 @@ export const productions = pgTable(
       .notNull()
       .references(() => ingredients.id),
     qty: numeric("qty", { precision: 16, scale: 6, mode: "number" }).notNull(),
+    /** jalur penambahan: produksi sendiri atau pembelian */
+    tipe: pengadaanEnum("tipe").notNull().default("produksi"),
+    /** total harga saat tipe='beli' (catatan pengeluaran, opsional) */
+    totalHarga: numeric("total_harga", { precision: 14, scale: 2, mode: "number" }),
     isBatch: boolean("is_batch").notNull().default(false),
     catatan: text("catatan"),
     userId: uuid("user_id").references(() => users.id),

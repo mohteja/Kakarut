@@ -117,7 +117,9 @@ export function StokPage() {
             <tr>
               <th className={thClass}>Bahan</th>
               <th className={`${thClass} text-right`}>Stok Awal</th>
-              <th className={`${thClass} text-right`}>Produksi</th>
+              <th className={`${thClass} text-right`} title="Produksi + pembelian setelah opname terakhir">
+                Masuk
+              </th>
               <th className={`${thClass} text-right`}>Terpakai</th>
               <th className={`${thClass} text-right`}>Saldo</th>
               <th className={thClass}>Status</th>

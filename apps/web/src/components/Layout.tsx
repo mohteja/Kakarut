@@ -54,9 +54,14 @@ export function Layout() {
 
         <nav className="flex flex-1 flex-col gap-1">
           {isSuperAdmin ? (
-            <NavLink to="/superadmin" className={linkClass}>
-              🏢 Tenant
-            </NavLink>
+            <>
+              <NavLink to="/superadmin" end className={linkClass}>
+                🏢 Tenant
+              </NavLink>
+              <NavLink to="/superadmin/sistem" className={linkClass}>
+                🗄 Sistem &amp; Migrasi
+              </NavLink>
+            </>
           ) : (
             <>
               <NavLink to="/kasir" className={linkClass}>
@@ -66,7 +71,10 @@ export function Layout() {
                 📦 Stok
               </NavLink>
               <NavLink to="/produksi" className={linkClass}>
-                🏭 Produksi
+                🏭 Produksi Bahan Baku
+              </NavLink>
+              <NavLink to="/pembelian" className={linkClass}>
+                🛒 Beli Bahan Baku
               </NavLink>
               <NavLink to="/laporan" className={linkClass}>
                 📊 Laporan

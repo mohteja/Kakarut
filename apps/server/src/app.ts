@@ -10,6 +10,7 @@ import {
   requireSuperAdmin,
   type AppEnv,
 } from "./middleware/auth";
+import { adminSystemRoutes } from "./modules/admin-system/routes";
 import { adminTenantsRoutes } from "./modules/admin-tenants/routes";
 import { authRoutes } from "./modules/auth/routes";
 import { bahanRoutes } from "./modules/bahan/routes";
@@ -19,7 +20,7 @@ import { kategoriRoutes } from "./modules/kategori/routes";
 import { laporanRoutes } from "./modules/laporan/routes";
 import { menuRoutes } from "./modules/menu/routes";
 import { penjualanRoutes } from "./modules/penjualan/routes";
-import { produksiRoutes } from "./modules/produksi/routes";
+import { pembelianRoutes, produksiRoutes } from "./modules/produksi/routes";
 import { stokRoutes } from "./modules/stok/routes";
 import { uploadRoutes } from "./modules/upload/routes";
 import { karyawanRoutes } from "./modules/users/routes";
@@ -34,7 +35,8 @@ export function createApp() {
     .route("/auth", authRoutes)
     // Platform super-admin
     .use("/admin/*", requireAuth, requireSuperAdmin)
-    .route("/admin/tenants", adminTenantsRoutes);
+    .route("/admin/tenants", adminTenantsRoutes)
+    .route("/admin/sistem", adminSystemRoutes);
 
   // Rute internal perusahaan (butuh membership)
   const tenant = new Hono<AppEnv>()
@@ -46,6 +48,7 @@ export function createApp() {
     .route("/menu", menuRoutes)
     .route("/penjualan", penjualanRoutes)
     .route("/produksi", produksiRoutes)
+    .route("/pembelian", pembelianRoutes)
     .route("/stok", stokRoutes)
     .route("/laporan", laporanRoutes)
     .route("/upload", uploadRoutes);

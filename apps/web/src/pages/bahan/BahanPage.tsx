@@ -22,6 +22,7 @@ interface FormState {
   harga_beli: string;
   isi: string;
   kategori: "baso" | "minuman" | "lain";
+  pengadaan: "produksi" | "beli";
   catatan: string;
   is_packaging: boolean;
   is_complement: boolean;
@@ -32,6 +33,7 @@ const kosong: FormState = {
   harga_beli: "",
   isi: "1",
   kategori: "lain",
+  pengadaan: "beli",
   catatan: "",
   is_packaging: false,
   is_complement: false,
@@ -45,6 +47,10 @@ export function BahanPage() {
   });
   const [form, setForm] = useState<FormState | null>(null);
   const [cari, setCari] = useState("");
+  const [filterJenis, setFilterJenis] = useState<"semua" | "produksi" | "beli">("semua");
+  const [filterKategori, setFilterKategori] = useState<"semua" | "baso" | "minuman" | "lain">(
+    "semua",
+  );
 
   const simpan = useMutation({
     mutationFn: (f: FormState) => {
@@ -53,6 +59,7 @@ export function BahanPage() {
         harga_beli: Number(f.harga_beli),
         isi: Number(f.isi),
         kategori: f.kategori,
+        pengadaan: f.pengadaan,
         catatan: f.catatan || null,
         is_packaging: f.is_packaging,
         is_complement: f.is_complement,
@@ -84,9 +91,19 @@ export function BahanPage() {
 
   if (isLoading) return <Spinner />;
 
-  const tampil = (bahan ?? []).filter((b) =>
-    b.nama.toLowerCase().includes(cari.toLowerCase()),
-  );
+  const semua = bahan ?? [];
+  const jumlah = (fn: (b: BahanDto) => boolean) => semua.filter(fn).length;
+  const tampil = semua
+    .filter((b) => b.nama.toLowerCase().includes(cari.toLowerCase()))
+    .filter((b) => (filterJenis === "semua" ? true : b.pengadaan === filterJenis))
+    .filter((b) => (filterKategori === "semua" ? true : b.kategori === filterKategori));
+  const adaFilter = cari !== "" || filterJenis !== "semua" || filterKategori !== "semua";
+
+  function resetFilter() {
+    setCari("");
+    setFilterJenis("semua");
+    setFilterKategori("semua");
+  }
 
   return (
     <div>
@@ -97,15 +114,48 @@ export function BahanPage() {
           </button>
         }
       >
-        Bahan Baku ({bahan?.length ?? 0})
+        Bahan Baku ({adaFilter ? `${tampil.length} dari ${semua.length}` : semua.length})
       </PageTitle>
 
-      <input
-        value={cari}
-        onChange={(e) => setCari(e.target.value)}
-        placeholder="Cari bahan…"
-        className={`${inputClass} mb-3 max-w-xs`}
-      />
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <input
+          value={cari}
+          onChange={(e) => setCari(e.target.value)}
+          placeholder="Cari bahan…"
+          className={`${inputClass} max-w-56`}
+        />
+        <select
+          value={filterJenis}
+          onChange={(e) => setFilterJenis(e.target.value as typeof filterJenis)}
+          className={`${inputClass} max-w-56`}
+          aria-label="Filter jenis pengadaan"
+        >
+          <option value="semua">Semua jenis ({semua.length})</option>
+          <option value="produksi">
+            Produksi sendiri ({jumlah((b) => b.pengadaan === "produksi")})
+          </option>
+          <option value="beli">Beli jadi ({jumlah((b) => b.pengadaan === "beli")})</option>
+        </select>
+        <select
+          value={filterKategori}
+          onChange={(e) => setFilterKategori(e.target.value as typeof filterKategori)}
+          className={`${inputClass} max-w-48`}
+          aria-label="Filter kategori"
+        >
+          <option value="semua">Semua kategori</option>
+          <option value="baso">baso ({jumlah((b) => b.kategori === "baso")})</option>
+          <option value="minuman">minuman ({jumlah((b) => b.kategori === "minuman")})</option>
+          <option value="lain">lain ({jumlah((b) => b.kategori === "lain")})</option>
+        </select>
+        {adaFilter && (
+          <button
+            onClick={resetFilter}
+            className="text-sm font-medium text-orange-600 hover:underline"
+          >
+            Reset filter
+          </button>
+        )}
+      </div>
 
       <ErrorText error={hapus.error} />
 
@@ -115,6 +165,7 @@ export function BahanPage() {
             <tr>
               <th className={thClass}>Nama</th>
               <th className={thClass}>Kategori</th>
+              <th className={thClass}>Jenis</th>
               <th className={`${thClass} text-right`}>Harga Beli</th>
               <th className={`${thClass} text-right`}>Isi</th>
               <th className={`${thClass} text-right`}>Harga / Unit</th>
@@ -139,6 +190,17 @@ export function BahanPage() {
                   )}
                 </td>
                 <td className={tdClass}>{b.kategori}</td>
+                <td className={tdClass}>
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                      b.pengadaan === "produksi"
+                        ? "bg-orange-100 text-orange-700"
+                        : "bg-teal-100 text-teal-700"
+                    }`}
+                  >
+                    {b.pengadaan === "produksi" ? "Produksi sendiri" : "Beli jadi"}
+                  </span>
+                </td>
                 <td className={`${tdClass} text-right`}>{formatRupiah(b.harga_beli)}</td>
                 <td className={`${tdClass} text-right`}>{formatAngka(b.isi)}</td>
                 <td className={`${tdClass} text-right font-semibold`}>
@@ -156,6 +218,7 @@ export function BahanPage() {
                         harga_beli: String(b.harga_beli),
                         isi: String(b.isi),
                         kategori: b.kategori,
+                        pengadaan: b.pengadaan,
                         catatan: b.catatan ?? "",
                         is_packaging: b.is_packaging,
                         is_complement: b.is_complement,
@@ -176,6 +239,19 @@ export function BahanPage() {
                 </td>
               </tr>
             ))}
+            {tampil.length === 0 && (
+              <tr>
+                <td colSpan={8} className="py-8 text-center text-sm text-stone-400">
+                  Tidak ada bahan yang cocok dengan filter.{" "}
+                  <button
+                    onClick={resetFilter}
+                    className="font-medium text-orange-600 hover:underline"
+                  >
+                    Reset filter
+                  </button>
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </Card>
@@ -229,19 +305,36 @@ export function BahanPage() {
                 Harga per unit: {formatRupiah(Number(form.harga_beli) / Number(form.isi))}
               </div>
             )}
-            <div>
-              <label className="mb-1 block text-sm font-medium">Kategori</label>
-              <select
-                value={form.kategori}
-                onChange={(e) =>
-                  setForm({ ...form, kategori: e.target.value as FormState["kategori"] })
-                }
-                className={inputClass}
-              >
-                <option value="baso">baso</option>
-                <option value="minuman">minuman</option>
-                <option value="lain">lain</option>
-              </select>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="mb-1 block text-sm font-medium">Kategori</label>
+                <select
+                  value={form.kategori}
+                  onChange={(e) =>
+                    setForm({ ...form, kategori: e.target.value as FormState["kategori"] })
+                  }
+                  className={inputClass}
+                >
+                  <option value="baso">baso</option>
+                  <option value="minuman">minuman</option>
+                  <option value="lain">lain</option>
+                </select>
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium">Jenis pengadaan</label>
+                <select
+                  value={form.pengadaan}
+                  onChange={(e) =>
+                    setForm({ ...form, pengadaan: e.target.value as FormState["pengadaan"] })
+                  }
+                  className={inputClass}
+                >
+                  <option value="beli">Beli jadi (jalur: Beli Bahan Baku)</option>
+                  <option value="produksi">
+                    Produksi sendiri (jalur: Produksi Bahan Baku)
+                  </option>
+                </select>
+              </div>
             </div>
             <div>
               <label className="mb-1 block text-sm font-medium">Catatan</label>
