@@ -1,0 +1,24 @@
+{
+  "name": "kakarut",
+  "private": true,
+  "version": "0.1.0",
+  "description": "SaaS POS multi-tenant untuk bisnis F&B (HPP, stok, kasir, laporan)",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev-db": "bash scripts/dev-db.sh",
+    "db:migrate": "npm run db:migrate -w @kakarut/server",
+    "seed": "npm run seed -w @kakarut/server",
+    "dev:server": "npm run dev -w @kakarut/server",
+    "dev:web": "npm run dev -w @kakarut/web",
+    "build": "npm run build -w @kakarut/web",
+    "start": "npm run start -w @kakarut/server",
+    "test": "npm run test -w @kakarut/server",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
