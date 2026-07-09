@@ -23,6 +23,8 @@ export interface BahanDto {
   nama: string;
   harga_beli: number;
   isi: number;
+  /** satuan isi/gramasi: pcs, gr, ml, butir, porsi, dst */
+  satuan: string;
   harga_per_unit: number;
   kategori: BahanKategori;
   pengadaan: JenisPengadaan;
@@ -37,6 +39,7 @@ export interface KomponenDto {
   slug: string;
   nama: string;
   qty: number;
+  satuan: string;
   harga_per_unit: number;
   is_packaging: boolean;
   is_complement: boolean;

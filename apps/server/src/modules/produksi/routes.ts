@@ -262,6 +262,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
           ingredient_id: productions.ingredientId,
           bahan: ingredients.nama,
           isi: ingredients.isi,
+          satuan: ingredients.satuan,
           qty: productions.qty,
           total_harga: productions.totalHarga,
           is_batch: productions.isBatch,

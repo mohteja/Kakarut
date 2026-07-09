@@ -21,6 +21,7 @@ interface FormState {
   nama: string;
   harga_beli: string;
   isi: string;
+  satuan: string;
   kategori: "baso" | "minuman" | "lain";
   pengadaan: "produksi" | "beli";
   catatan: string;
@@ -32,6 +33,7 @@ const kosong: FormState = {
   nama: "",
   harga_beli: "",
   isi: "1",
+  satuan: "pcs",
   kategori: "lain",
   pengadaan: "beli",
   catatan: "",
@@ -58,6 +60,7 @@ export function BahanPage() {
         nama: f.nama,
         harga_beli: Number(f.harga_beli),
         isi: Number(f.isi),
+        satuan: f.satuan.trim() || "pcs",
         kategori: f.kategori,
         pengadaan: f.pengadaan,
         catatan: f.catatan || null,
@@ -202,7 +205,9 @@ export function BahanPage() {
                   </span>
                 </td>
                 <td className={`${tdClass} text-right`}>{formatRupiah(b.harga_beli)}</td>
-                <td className={`${tdClass} text-right`}>{formatAngka(b.isi)}</td>
+                <td className={`${tdClass} text-right`}>
+                  {formatAngka(b.isi)} <span className="text-stone-400">{b.satuan}</span>
+                </td>
                 <td className={`${tdClass} text-right font-semibold`}>
                   {formatRupiah(b.harga_per_unit)}
                 </td>
@@ -217,6 +222,7 @@ export function BahanPage() {
                         nama: b.nama,
                         harga_beli: String(b.harga_beli),
                         isi: String(b.isi),
+                        satuan: b.satuan,
                         kategori: b.kategori,
                         pengadaan: b.pengadaan,
                         catatan: b.catatan ?? "",
@@ -272,7 +278,7 @@ export function BahanPage() {
                 className={inputClass}
               />
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-3 gap-3">
               <div>
                 <label className="mb-1 block text-sm font-medium">Harga beli (Rp)</label>
                 <input
@@ -287,7 +293,7 @@ export function BahanPage() {
               </div>
               <div>
                 <label className="mb-1 block text-sm font-medium">
-                  Isi (unit per pembelian)
+                  Isi/gramasi per pembelian
                 </label>
                 <input
                   required
@@ -299,10 +305,26 @@ export function BahanPage() {
                   className={inputClass}
                 />
               </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium">Satuan</label>
+                <input
+                  required
+                  list="satuan-list-bahan"
+                  value={form.satuan}
+                  onChange={(e) => setForm({ ...form, satuan: e.target.value })}
+                  className={inputClass}
+                />
+                <datalist id="satuan-list-bahan">
+                  {["pcs", "gr", "ml", "butir", "porsi", "lembar", "ikat"].map((s) => (
+                    <option key={s} value={s} />
+                  ))}
+                </datalist>
+              </div>
             </div>
             {Number(form.harga_beli) > 0 && Number(form.isi) > 0 && (
               <div className="rounded-lg bg-orange-50 px-3 py-2 text-sm text-orange-800">
-                Harga per unit: {formatRupiah(Number(form.harga_beli) / Number(form.isi))}
+                Harga per {form.satuan || "unit"}:{" "}
+                {formatRupiah(Number(form.harga_beli) / Number(form.isi))}
               </div>
             )}
             <div className="grid grid-cols-2 gap-3">

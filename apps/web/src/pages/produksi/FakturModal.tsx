@@ -263,7 +263,7 @@ export function FakturModal({
                         <option value="">— pilih bahan —</option>
                         {bahanJalur.map((x) => (
                           <option key={x.id} value={x.id}>
-                            {x.nama} (1 batch = {formatAngka(x.isi)})
+                            {x.nama} (1 batch = {formatAngka(x.isi)} {x.satuan})
                           </option>
                         ))}
                       </select>
@@ -342,7 +342,9 @@ export function FakturModal({
                   {b && it.mode === "batch" && Number(it.jumlah) > 0 && (
                     <div className="mt-2 text-xs text-orange-700">
                       {formatAngka(Number(it.jumlah))} batch × {formatAngka(b.isi)} ={" "}
-                      <b>{formatAngka(qtyPcs)} pcs</b>
+                      <b>
+                        {formatAngka(qtyPcs)} {b.satuan}
+                      </b>
                     </div>
                   )}
                 </div>

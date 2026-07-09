@@ -114,6 +114,91 @@ const BAHAN_PRODUKSI_SENDIRI = new Set([
 const tanggalHariIni = (tz: string) =>
   new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(new Date());
 
+/**
+ * Satuan isi/gramasi per bahan (klasifikasi awal, bisa diedit per bahan):
+ * butir = item baso; porsi = racikan per-porsi; ml/gr = cairan/berat;
+ * sisanya pcs.
+ */
+const SATUAN_BUTIR = new Set([
+  "baso urat besar",
+  "baso urat sedang",
+  "baso urat kecil",
+  "baso halus besar",
+  "baso halus sedang",
+  "baso halus kecil",
+  "baso tahu",
+  "siomay",
+  "baso aci original",
+  "baso aci jando",
+  "baso aci keju",
+  "aci lember",
+  "cirawang",
+]);
+const SATUAN_PORSI = new Set([
+  "tetelan ori, oseng pedas gurih / pedas manis",
+  "jando ori, oseng pedas manis / pedas gurih",
+  "ceker tulang lunak ori, oseng pedas gurih / pedas manis",
+  "kikil ori, oseng pedas gurih / pedas manis",
+  "oseng tetelan pedas gurih / pedas manis",
+  "oseng jando pedas gurih / pedas manis",
+  "topping mie dkk",
+  "complement saos & sambal",
+  "kuah dan bumbu",
+  "risol mayooopa",
+  "risol tetelan pedas gurih",
+  "risol jando pedas manis",
+  "nasi putih",
+  "nutri jelly kelapa",
+]);
+const SATUAN_ML = new Set([
+  "minyak bawang",
+  "kecap ikan",
+  "chilli oil",
+  "saos sambal",
+  "kecap manis",
+  "cuka",
+  "air panas",
+  "air biasa",
+  "es batu",
+  "soda",
+  "syrup double fresh mangga",
+  "marjan strawberry",
+  "marjan lemon",
+  "marjan leci",
+  "evavorasi",
+  "skm",
+  "skm cokelat",
+  "konsentrat gula / gula cair",
+  "ice cream",
+  "pudding mangga",
+  "nutri jelly mangga",
+]);
+const SATUAN_GR = new Set([
+  "msg",
+  "bawang goreng",
+  "seledri",
+  "sambal kacang",
+  "buah naga",
+  "kweni",
+  "mangga harumanis",
+  "alpukat super",
+  "strawberry",
+  "kiwi",
+  "nata de coco",
+  "biji selasih",
+  "pisang lumut",
+  "powder drink lemon tea",
+  "powder drink leci tea",
+]);
+
+function satuanUntuk(slug: string): string {
+  if (SATUAN_BUTIR.has(slug)) return "butir";
+  if (SATUAN_PORSI.has(slug)) return "porsi";
+  if (SATUAN_ML.has(slug)) return "ml";
+  if (SATUAN_GR.has(slug)) return "gr";
+  return "pcs";
+}
+
 async function main() {
   const packagingSet = new Set(data._meta.komponen_kemasan_take_away);
   const complementSlug = data._meta.komponen_complement;
@@ -237,6 +322,7 @@ async function main() {
           nama: m.nama,
           hargaBeli: m.harga_beli,
           isi: m.isi,
+          satuan: satuanUntuk(m.id),
           kategori: (["baso", "minuman", "lain"].includes(m.kategori)
             ? m.kategori
             : "lain") as "baso" | "minuman" | "lain",
@@ -251,6 +337,7 @@ async function main() {
             nama: m.nama,
             hargaBeli: m.harga_beli,
             isi: m.isi,
+            satuan: satuanUntuk(m.id),
             pengadaan: BAHAN_PRODUKSI_SENDIRI.has(m.id) ? "produksi" : "beli",
             isPackaging: packagingSet.has(m.id),
             isComplement: m.id === complementSlug,

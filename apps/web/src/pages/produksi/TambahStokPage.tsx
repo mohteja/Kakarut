@@ -19,6 +19,7 @@ interface StokMasukRow {
   id: string;
   bahan: string;
   isi: number;
+  satuan: string;
   qty: number;
   total_harga: number | null;
   is_batch: boolean;
@@ -193,7 +194,7 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                     <tr key={r.id}>
                       <td className={`${tdClass} font-medium`}>{r.bahan}</td>
                       <td className={`${tdClass} text-right`}>
-                        +{formatAngka(r.qty)}
+                        +{formatAngka(r.qty)} {r.satuan}
                         {r.is_batch && (
                           <span className="ml-1 text-xs text-stone-400">
                             ({formatAngka(r.qty / r.isi)} batch × {formatAngka(r.isi)})

@@ -158,6 +158,14 @@ cek "pembelian 1 batch plastik +100" "abs(V - ($PLASTIK_SALDO + 100)) < 0.001" \
   "$(stok_of "$(api "$KASIR" GET /stok)" "plastik take away")"
 cek "total_harga pembelian terisi (harga_beli)" "V == 15000" "$(echo "$BELI" | jq '.totalHarga // 0')"
 
+echo "== 10b. Satuan bahan =="
+cek "mie basah bersatuan pcs" "V == 1" \
+  "$(echo "$BAHAN" | jq '[.[] | select(.slug == "mie basah")][0].satuan == "pcs" | if . then 1 else 0 end')"
+cek "minyak bawang bersatuan ml" "V == 1" \
+  "$(api "$KASIR" GET /bahan | jq '[.[] | select(.slug == "minyak bawang")][0].satuan == "ml" | if . then 1 else 0 end')"
+cek "komponen menu memuat satuan" "V == 1" \
+  "$(echo "$MENUS" | jq '[.[] | select(.nama | startswith("BMB Original"))][0].komponen[0] | has("satuan") | if . then 1 else 0 end')"
+
 echo "== 11. Faktur penerimaan: supplier, tempat, konfirmasi baru menambah stok =="
 SUP=$(api "$OWNER" POST /supplier '{"nama":"Toko Plastik Jaya"}')
 SUP_ID=$(echo "$SUP" | jq -r '.id // empty')

@@ -35,6 +35,15 @@ interface KomponenForm {
   qty: string;
 }
 
+/** Edit inline data master bahan dari form resep (gramasi/satuan/harga). */
+interface BahanOverride {
+  isi: string;
+  satuan: string;
+  harga_beli: string;
+}
+
+const SATUAN_UMUM = ["pcs", "gr", "ml", "butir", "porsi", "lembar", "ikat"];
+
 export function MenuFormPage() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -69,6 +78,7 @@ export function MenuFormPage() {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [isActive, setIsActive] = useState(true);
   const [komponen, setKomponen] = useState<KomponenForm[]>([]);
+  const [override, setOverride] = useState<Record<string, BahanOverride>>({});
   const dimuat = useRef(false);
 
   // muat data saat edit
@@ -92,12 +102,42 @@ export function MenuFormPage() {
 
   const bahanById = useMemo(() => new Map((bahan ?? []).map((b) => [b.id, b])), [bahan]);
 
+  /** Data bahan dengan edit inline (gramasi/satuan/harga) diterapkan. */
+  function bahanView(id: string) {
+    const b = bahanById.get(id);
+    if (!b) return undefined;
+    const o = override[id];
+    const isi = o ? Number(o.isi) : b.isi;
+    const hargaBeli = o ? Number(o.harga_beli) : b.harga_beli;
+    return {
+      ...b,
+      isi,
+      satuan: o?.satuan ?? b.satuan,
+      harga_beli: hargaBeli,
+      harga_per_unit: isi > 0 ? hargaBeli / isi : 0,
+    };
+  }
+
+  function ubahOverride(id: string, patch: Partial<BahanOverride>) {
+    const b = bahanById.get(id);
+    if (!b) return;
+    setOverride((prev) => ({
+      ...prev,
+      [id]: {
+        isi: prev[id]?.isi ?? String(b.isi),
+        satuan: prev[id]?.satuan ?? b.satuan,
+        harga_beli: prev[id]?.harga_beli ?? String(b.harga_beli),
+        ...patch,
+      },
+    }));
+  }
+
   // Preview HPP live (rumus sama dengan server, dari @kakarut/shared)
   const preview = useMemo(() => {
     const komponenHpp = komponen
       .filter((k) => k.ingredient_id && Number(k.qty) > 0)
       .map((k) => {
-        const b = bahanById.get(k.ingredient_id)!;
+        const b = bahanView(k.ingredient_id);
         return {
           qty: Number(k.qty),
           hargaPerUnit: b?.harga_per_unit ?? 0,
@@ -121,10 +161,37 @@ export function MenuFormPage() {
     }
     const saran = hargaSaran(ownHpp, Number(mult) || 0);
     return { hpp: ownHpp, hppDineIn: ownHppDineIn, saran, bulat: hargaJualBulat(saran) };
-  }, [komponen, bahanById, tipe, mult, baseMenuId, baseMult, menus]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [komponen, bahanById, override, tipe, mult, baseMenuId, baseMult, menus]);
 
   const simpan = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
+      // Terapkan dulu edit inline data bahan (gramasi/satuan/harga) —
+      // berlaku global ke semua resep, seperti tabel bahan di Excel
+      const bahanBerubah = Object.entries(override).filter(([bid, o]) => {
+        const b = bahanById.get(bid);
+        return (
+          b &&
+          Number(o.isi) > 0 &&
+          Number(o.harga_beli) >= 0 &&
+          (Number(o.isi) !== b.isi ||
+            Number(o.harga_beli) !== b.harga_beli ||
+            o.satuan.trim() !== b.satuan)
+        );
+      });
+      await Promise.all(
+        bahanBerubah.map(([bid, o]) =>
+          api(`/bahan/${bid}`, {
+            method: "PUT",
+            body: {
+              isi: Number(o.isi),
+              harga_beli: Number(o.harga_beli),
+              satuan: o.satuan.trim() || "pcs",
+            },
+          }),
+        ),
+      );
+
       const body = {
         nama,
         category_id: categoryId,
@@ -145,6 +212,8 @@ export function MenuFormPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["menu"] });
+      queryClient.invalidateQueries({ queryKey: ["bahan"] }); // edit inline master
+      queryClient.invalidateQueries({ queryKey: ["stok"] });
       navigate("/menu");
     },
   });
@@ -283,56 +352,125 @@ export function MenuFormPage() {
               + Tambah bahan
             </button>
           </div>
-          <div className="space-y-2">
+          <div className="space-y-3">
             {komponen.map((k, i) => {
-              const b = k.ingredient_id ? bahanById.get(k.ingredient_id) : undefined;
+              const b = k.ingredient_id ? bahanView(k.ingredient_id) : undefined;
+              const hargaKomponen = b ? b.harga_per_unit * Number(k.qty || 0) : 0;
               return (
-                <div key={i} className="flex items-center gap-2">
-                  <select
-                    value={k.ingredient_id}
-                    onChange={(e) => {
-                      const copy = [...komponen];
-                      copy[i] = { ...copy[i], ingredient_id: e.target.value };
-                      setKomponen(copy);
-                    }}
-                    className={`${inputClass} flex-1`}
-                  >
-                    <option value="">— pilih bahan —</option>
-                    {bahan.map((x) => (
-                      <option key={x.id} value={x.id}>
-                        {x.nama} ({formatRupiah(x.harga_per_unit)}/unit)
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    type="number"
-                    min="0.0001"
-                    step="any"
-                    value={k.qty}
-                    onChange={(e) => {
-                      const copy = [...komponen];
-                      copy[i] = { ...copy[i], qty: e.target.value };
-                      setKomponen(copy);
-                    }}
-                    className="w-24 rounded-lg border border-stone-300 px-2 py-2 text-right text-sm"
-                  />
-                  <div className="w-24 text-right text-sm text-stone-500">
-                    {b ? formatRupiah(b.harga_per_unit * Number(k.qty || 0)) : "—"}
+                <div key={i} className="rounded-lg border border-stone-200 p-3">
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={k.ingredient_id}
+                      onChange={(e) => {
+                        const copy = [...komponen];
+                        copy[i] = { ...copy[i], ingredient_id: e.target.value };
+                        setKomponen(copy);
+                      }}
+                      className={`${inputClass} flex-1`}
+                    >
+                      <option value="">— pilih bahan —</option>
+                      {bahan.map((x) => (
+                        <option key={x.id} value={x.id}>
+                          {x.nama} — {formatRupiah(x.harga_beli)} / {x.isi} {x.satuan}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => setKomponen(komponen.filter((_, j) => j !== i))}
+                      className="text-red-500 hover:text-red-700"
+                      aria-label="Hapus komponen"
+                    >
+                      ✕
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setKomponen(komponen.filter((_, j) => j !== i))}
-                    className="text-red-500 hover:text-red-700"
-                    aria-label="Hapus komponen"
-                  >
-                    ✕
-                  </button>
+                  {b && (
+                    <>
+                      <div className="mt-2 grid grid-cols-2 gap-2 md:grid-cols-4">
+                        <div>
+                          <label className="mb-1 block text-xs font-medium text-stone-500">
+                            Takaran ({b.satuan})
+                          </label>
+                          <input
+                            type="number"
+                            min="0.0001"
+                            step="any"
+                            value={k.qty}
+                            onChange={(e) => {
+                              const copy = [...komponen];
+                              copy[i] = { ...copy[i], qty: e.target.value };
+                              setKomponen(copy);
+                            }}
+                            className={inputClass}
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs font-medium text-stone-500">
+                            Gramasi/isi kemasan
+                          </label>
+                          <input
+                            type="number"
+                            min="0.0001"
+                            step="any"
+                            value={override[b.id]?.isi ?? String(b.isi)}
+                            onChange={(e) => ubahOverride(b.id, { isi: e.target.value })}
+                            className={inputClass}
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs font-medium text-stone-500">
+                            Satuan
+                          </label>
+                          <input
+                            list="satuan-list"
+                            value={override[b.id]?.satuan ?? b.satuan}
+                            onChange={(e) => ubahOverride(b.id, { satuan: e.target.value })}
+                            className={inputClass}
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs font-medium text-stone-500">
+                            Harga bahan (Rp)
+                          </label>
+                          <input
+                            type="number"
+                            min="0"
+                            step="any"
+                            value={override[b.id]?.harga_beli ?? String(b.harga_beli)}
+                            onChange={(e) => ubahOverride(b.id, { harga_beli: e.target.value })}
+                            className={inputClass}
+                          />
+                        </div>
+                      </div>
+                      <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-sm">
+                        <span className="text-stone-500">
+                          Harga per {b.satuan}:{" "}
+                          <b className="text-stone-700">{formatRupiah(b.harga_per_unit)}</b>
+                        </span>
+                        <span className="text-stone-500">
+                          Harga komponen:{" "}
+                          <b className="text-orange-600">{formatRupiah(hargaKomponen)}</b>
+                        </span>
+                      </div>
+                    </>
+                  )}
                 </div>
               );
             })}
             {komponen.length === 0 && (
               <div className="py-4 text-center text-sm text-stone-400">
                 Belum ada komponen. HPP = 0.
+              </div>
+            )}
+            <datalist id="satuan-list">
+              {SATUAN_UMUM.map((s) => (
+                <option key={s} value={s} />
+              ))}
+            </datalist>
+            {Object.keys(override).length > 0 && (
+              <div className="rounded-lg bg-yellow-50 px-3 py-2 text-xs text-yellow-800">
+                Perubahan gramasi/satuan/harga ikut memperbarui data <b>Bahan Baku</b>{" "}
+                (berlaku ke semua resep yang memakai bahan tsb) — diterapkan saat Simpan Menu.
               </div>
             )}
           </div>

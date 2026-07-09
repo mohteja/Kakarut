@@ -1,0 +1,1 @@
+ALTER TABLE "ingredients" ADD COLUMN "satuan" text DEFAULT 'pcs' NOT NULL;
