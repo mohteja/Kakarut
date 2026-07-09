@@ -2,6 +2,8 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { Layout } from "./components/Layout";
 import { useAuth } from "./context/AuthContext";
 import { BranchProvider } from "./context/BranchContext";
+import { PrinterProvider } from "./context/PrinterContext";
+import { PrinterPage } from "./pages/pengaturan/PrinterPage";
 import { BahanPage } from "./pages/bahan/BahanPage";
 import { KasirPage } from "./pages/kasir/KasirPage";
 import { LaporanPage } from "./pages/laporan/LaporanPage";
@@ -33,6 +35,7 @@ export default function App() {
 
   return (
     <BranchProvider>
+      <PrinterProvider>
       <Routes>
         <Route path="/login" element={<Navigate to={beranda} replace />} />
         <Route element={<Layout />}>
@@ -43,6 +46,8 @@ export default function App() {
               <Route path="/stok" element={<StokPage />} />
               <Route path="/produksi" element={<ProduksiPage />} />
               <Route path="/laporan" element={<LaporanPage />} />
+              {/* printer = pengaturan per perangkat → semua peran, termasuk kasir */}
+              <Route path="/pengaturan/printer" element={<PrinterPage />} />
               {isManajemen && (
                 <>
                   <Route path="/bahan" element={<BahanPage />} />
@@ -59,6 +64,7 @@ export default function App() {
           <Route path="*" element={<Navigate to={beranda} replace />} />
         </Route>
       </Routes>
+      </PrinterProvider>
     </BranchProvider>
   );
 }

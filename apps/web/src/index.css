@@ -1,6 +1,9 @@
 @import "tailwindcss";
 
 @media print {
+  @page {
+    margin: 0;
+  }
   body * {
     visibility: hidden;
   }
@@ -13,5 +16,13 @@
     left: 0;
     top: 0;
     width: 100%;
+    padding: 2mm;
+  }
+  /* lebar kertas thermal saat mencetak lewat driver printer */
+  #struk-print[data-paper="58"] {
+    width: 58mm;
+  }
+  #struk-print[data-paper="80"] {
+    width: 80mm;
   }
 }
