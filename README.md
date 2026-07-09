@@ -17,6 +17,7 @@ perusahaan tersebut di-seed sebagai tenant pertama untuk testing nyata.
 - **Stok per cabang**: saldo = opname + produksi − terpakai (konsumsi otomatis dari resep saat penjualan); status Aman / Menipis / Habis.
 - **Snapshot historis**: harga, HPP, dan konsumsi bahan disimpan saat transaksi — perubahan harga/resep tidak mengubah histori.
 - **Laporan harian**: omzet, HPP terpakai, estimasi profit, item terjual, konsumsi bahan, kalkulator BEP.
+- **Printer thermal**: cetak struk ESC/POS langsung dari browser — **Bluetooth (BLE)**, **USB (WebUSB)**, **aplikasi RawBT** (Android, printer Bluetooth klasik), atau dialog cetak browser; auto-print setelah pembayaran, potong kertas, buka laci kas.
 - **Upload gambar** (menu/logo) ke **Cloudflare R2**, fallback disk lokal saat development.
 
 ## Arsitektur
@@ -102,6 +103,23 @@ Semua di bawah `/api`, autentikasi `Bearer <JWT>` kecuali `POST /auth/login` dan
 | Upload | `POST /upload?tujuan=menu\|logo` (multipart, ≤5 MB) |
 
 Owner/admin memilih cabang via `?branch_id=`; kasir otomatis terkunci ke cabangnya.
+
+## Printer thermal
+
+Pengaturan di menu **🖨 Printer** (tersimpan **per perangkat** — atur di tiap kasir/tablet).
+Semua pencetakan dilakukan dari browser (server cloud tidak bisa menjangkau printer di toko).
+
+| Metode | Untuk | Catatan |
+|---|---|---|
+| Cetak Browser (default) | Printer dengan driver terpasang | `window.print()` dengan CSS 58/80mm |
+| Bluetooth (BLE) | Printer 58mm murah (EPPOS, Panda, ZJ-58xx, Xprinter), Epson TM-P, Star SM-L | Chrome/Edge di Android/PC, wajib **HTTPS**; iPhone: pakai browser Bluefy |
+| USB (WebUSB) | Printer USB di PC/Android (OTG)/ChromeOS | Windows kadang perlu driver WinUSB (Zadig) |
+| Aplikasi RawBT | Printer Bluetooth klasik (bukan BLE) di Android | Pasang RawBT dari Play Store; tanpa auto-print |
+
+Fitur: lebar kertas 58/80mm (32/48 kolom, bisa override), **cetak otomatis setelah pembayaran**
+(BLE/USB yang sudah terhubung), potong kertas (auto-cutter), buka laci kas (RJ11), Cetak Tes,
+pengaturan chunk BLE untuk printer yang lambat. Teks footer struk & tampil/sembunyikan alamat
+diatur per perusahaan di **Pengaturan → Perusahaan**.
 
 ## Aturan bisnis inti (dari spec Basooopa)
 

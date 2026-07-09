@@ -14,6 +14,8 @@ const PatchBody = z.object({
   logo_url: z.string().nullish(),
   pb1_enabled: z.boolean().optional(),
   pb1_rate: z.number().min(0).max(100).optional(),
+  receipt_footer: z.string().trim().max(200).nullish(),
+  receipt_show_alamat: z.boolean().optional(),
 });
 
 export const companyRoutes = new Hono<AppEnv>()
@@ -38,6 +40,10 @@ export const companyRoutes = new Hono<AppEnv>()
         ...(body.logo_url !== undefined && { logoUrl: body.logo_url }),
         ...(body.pb1_enabled !== undefined && { pb1Enabled: body.pb1_enabled }),
         ...(body.pb1_rate !== undefined && { pb1Rate: body.pb1_rate }),
+        ...(body.receipt_footer !== undefined && { receiptFooter: body.receipt_footer || null }),
+        ...(body.receipt_show_alamat !== undefined && {
+          receiptShowAlamat: body.receipt_show_alamat,
+        }),
         updatedAt: new Date(),
       })
       .where(eq(companies.id, auth.company_id!))

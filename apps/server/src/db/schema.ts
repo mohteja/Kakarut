@@ -33,6 +33,8 @@ export const companies = pgTable("companies", {
   pb1Rate: numeric("pb1_rate", { precision: 5, scale: 2, mode: "number" })
     .notNull()
     .default(10),
+  receiptFooter: text("receipt_footer"),
+  receiptShowAlamat: boolean("receipt_show_alamat").notNull().default(true),
   plan: text("plan").notNull().default("free"),
   planExpiresAt: timestamp("plan_expires_at", { withTimezone: true }),
   isActive: boolean("is_active").notNull().default(true),
