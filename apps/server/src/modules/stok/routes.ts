@@ -7,7 +7,7 @@ import { db } from "../../db/client";
 import { companies, ingredients, stockOpnames } from "../../db/schema";
 import { pastikanCabang, requireRole, resolveBranchId, type AppEnv } from "../../middleware/auth";
 import { tanggalDi } from "../../lib/time";
-import { hitungSaldoCabang } from "./service";
+import { hitungSaldoCabang, kartuStok } from "./service";
 
 const OpnameBody = z.object({
   branch_id: z.string().uuid().optional(),
@@ -27,6 +27,51 @@ export const stokRoutes = new Hono<AppEnv>()
     const auth = c.get("auth");
     const branchId = await resolveBranchId(c);
     return c.json(await hitungSaldoCabang(auth.company_id!, branchId));
+  })
+  /** Kartu stok: buku besar mutasi satu bahan (halaman terpisah di web). */
+  .get("/kartu/:ingredientId", async (c) => {
+    const auth = c.get("auth");
+    const branchId = await resolveBranchId(c);
+
+    const [ing] = await db
+      .select()
+      .from(ingredients)
+      .where(
+        and(
+          eq(ingredients.id, c.req.param("ingredientId")),
+          eq(ingredients.companyId, auth.company_id!),
+        ),
+      );
+    if (!ing) throw new HTTPException(404, { message: "Bahan tidak ditemukan" });
+    if (!ing.trackStok) {
+      throw new HTTPException(400, {
+        message: `Stok "${ing.nama}" tidak dilacak — tidak ada kartu stok`,
+      });
+    }
+
+    const [company] = await db
+      .select({ timezone: companies.timezone })
+      .from(companies)
+      .where(eq(companies.id, auth.company_id!));
+    const tz = company?.timezone ?? "Asia/Jakarta";
+    const tanggalValid = /^\d{4}-\d{2}-\d{2}$/;
+    const sampaiQ = c.req.query("sampai");
+    const dariQ = c.req.query("dari");
+    const sampai = sampaiQ && tanggalValid.test(sampaiQ) ? sampaiQ : tanggalDi(tz);
+    const dari =
+      dariQ && tanggalValid.test(dariQ)
+        ? dariQ
+        : tanggalDi(tz, new Date(Date.now() - 29 * 24 * 3600 * 1000));
+
+    return c.json(
+      await kartuStok({
+        branchId,
+        ingredientId: ing.id,
+        dari,
+        sampai,
+        bahan: { id: ing.id, nama: ing.nama, slug: ing.slug, satuan: ing.satuan },
+      }),
+    );
   })
   .post(
     "/opname",

@@ -103,6 +103,31 @@ export interface PenyimpananDto {
   is_active: boolean;
 }
 
+export type MutasiJenis = "opname" | "produksi" | "beli" | "penjualan";
+
+/** Satu baris kartu stok (buku besar mutasi per bahan). */
+export interface MutasiStok {
+  waktu: string;
+  jenis: MutasiJenis;
+  keterangan: string | null;
+  masuk: number | null;
+  keluar: number | null;
+  /** saldo berjalan setelah mutasi ini */
+  saldo: number;
+}
+
+export interface KartuStokDto {
+  bahan: { id: string; nama: string; slug: string; satuan: string };
+  periode: { dari: string; sampai: string };
+  saldo_awal: number;
+  saldo_akhir: number;
+  total_masuk: number;
+  total_keluar: number;
+  /** true bila mutasi melebihi batas 500 baris (persempit periode) */
+  terpotong: boolean;
+  mutasi: MutasiStok[];
+}
+
 export interface SaleItemInput {
   menu_id: string;
   qty: number;

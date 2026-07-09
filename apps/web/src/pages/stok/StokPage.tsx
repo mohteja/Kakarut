@@ -159,6 +159,7 @@ export function StokPage() {
               <th className={`${thClass} text-right`}>Terpakai</th>
               <th className={`${thClass} text-right`}>Saldo</th>
               <th className={thClass}>Status</th>
+              <th className={thClass}></th>
               {modeOpname && <th className={`${thClass} text-right`}>Stok Fisik</th>}
             </tr>
           </thead>
@@ -177,6 +178,17 @@ export function StokPage() {
                 <td className={`${tdClass} text-right font-bold`}>{formatAngka(s.saldo)}</td>
                 <td className={tdClass}>
                   <StatusBadge status={s.status} />
+                </td>
+                <td className={`${tdClass} whitespace-nowrap text-right`}>
+                  <a
+                    href={`/stok/kartu/${s.ingredient_id}${branchQuery}`}
+                    target="_blank"
+                    rel="noopener"
+                    className="text-sm font-medium text-orange-600 hover:underline"
+                    title="Buka kartu stok di tab baru"
+                  >
+                    📄 Kartu
+                  </a>
                 </td>
                 {modeOpname && (
                   <td className={`${tdClass} text-right`}>

@@ -223,6 +223,19 @@ api "$OWNER" PUT "/bahan/$SUKRO_ID" '{"track_stok":true}' > /dev/null
 cek "track_stok dikembalikan, sukro tampil lagi di /stok" "V == 1" \
   "$(api "$KASIR" GET /stok | jq '[.[] | select(.slug == "sukro cikur")] | length')"
 
+echo "== 13. Kartu stok =="
+KARTU=$(api "$KASIR" GET "/stok/kartu/$PLASTIK_ID")
+SALDO_STOK=$(stok_of "$(api "$KASIR" GET /stok)" "plastik take away")
+cek "saldo akhir kartu == saldo di /stok" "abs(V - $SALDO_STOK) < 0.001" "$(echo "$KARTU" | jq .saldo_akhir)"
+cek "kartu memuat mutasi pembelian" "V >= 1" "$(echo "$KARTU" | jq '[.mutasi[] | select(.jenis == "beli")] | length')"
+cek "kartu memuat mutasi penjualan" "V >= 1" "$(echo "$KARTU" | jq '[.mutasi[] | select(.jenis == "penjualan")] | length')"
+# opname me-reset saldo berjalan
+api "$OWNER" POST /stok/opname "{\"items\":[{\"ingredient_id\":\"$PLASTIK_ID\",\"qty\":500}],\"catatan\":\"opname kartu\"}" > /dev/null
+KARTU2=$(api "$KASIR" GET "/stok/kartu/$PLASTIK_ID")
+cek "baris opname me-reset saldo ke 500" "V == 500" \
+  "$(echo "$KARTU2" | jq '[.mutasi[] | select(.jenis == "opname")] | last | .saldo')"
+cek "saldo akhir kartu == 500 (opname terbaru)" "V == 500" "$(echo "$KARTU2" | jq .saldo_akhir)"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]
