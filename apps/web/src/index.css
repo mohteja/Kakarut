@@ -1,0 +1,17 @@
+@import "tailwindcss";
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #struk-print,
+  #struk-print * {
+    visibility: visible;
+  }
+  #struk-print {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+  }
+}

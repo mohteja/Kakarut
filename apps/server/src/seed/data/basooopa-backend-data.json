@@ -1,0 +1,2945 @@
+{
+ "_meta": {
+  "sumber": "HPP BASO (revisi).xlsx",
+  "tanggal": "2026-07-09",
+  "mata_uang": "IDR",
+  "catatan_satuan": "harga_beli dibagi isi = harga per unit. Untuk item baso, 'isi' = jumlah butir/porsi hasil 1 batch pembelian (mis. 1 batch urat besar Rp249.000 = 90 butir). Untuk minuman/kemasan, 'isi' = jumlah unit per pembelian (gr/ml/pcs). Item racikan per-porsi (kuah, complement, topping) punya isi=1 = 1 porsi.",
+  "aturan_markup_persen": {
+   "food_set": 100,
+   "menu_baru_food": 100,
+   "minuman_segar": "150-175",
+   "teh": 150,
+   "frozen_dessert": "100-150",
+   "yamin_satuan": 200,
+   "side_dish": "250-350",
+   "oseng": 0,
+   "paket_yamin": 0
+  },
+  "rumus": {
+   "harga_per_unit": "master.harga_beli / master.isi",
+   "hpp_menu": "SUM(komponen.qty * harga_per_unit(komponen.bahan))",
+   "harga_saran": "hpp_menu * mult",
+   "harga_jual_bulat": "ROUND(harga_saran / 1000) * 1000",
+   "food_cost_persen": "hpp_menu / harga_jual * 100",
+   "paket_yamin_hpp": "hpp(base_yamin) + 2*urat_kecil + 2*aci_original",
+   "paket_yamin_saran": "hpp(base_yamin)*base_mult + (2*urat_kecil + 2*aci_original)  [overhead topping 0]",
+   "hpp_dine_in": "hpp_menu tanpa komponen kemasan take-away, complement dikali 0.5",
+   "saldo_stok": "stok_awal + total_diproduksi - total_terpakai",
+   "terpakai": "SUM per transaksi: komponen.qty * jumlah_porsi_terjual"
+  },
+  "komponen_kemasan_take_away": [
+   "plastik take away",
+   "kresek take away",
+   "cup 16 oz ( 500 ml )",
+   "sedotan",
+   "plastik cup",
+   "sendok higienis",
+   "kresek transparent",
+   "sumpit"
+  ],
+  "komponen_complement": "complement saos & sambal"
+ },
+ "catOrder": [
+  "Menu Baru",
+  "Paket Premium",
+  "Simple & Favorit Set",
+  "Pure Baso",
+  "Yamin",
+  "Paket Yamin",
+  "Side Dish & Topping",
+  "Teh & Basic",
+  "Minuman Segar",
+  "Frozen Ice",
+  "Dessert"
+ ],
+ "masters": [
+  {
+   "id": "baso urat besar",
+   "nama": "Baso urat besar",
+   "harga_beli": 249000,
+   "isi": 90,
+   "kategori": "baso",
+   "catatan": "sapi 1 kg, ayam 2 kg, biang 40, urat 15, giling 15 toal jadi 4,8 kg bahan"
+  },
+  {
+   "id": "baso urat sedang",
+   "nama": "Baso urat sedang",
+   "harga_beli": 249000,
+   "isi": 105,
+   "kategori": "baso",
+   "catatan": "sapi 1/2 kg, ayam 1 kg, biang 25, urat 28, giling 6"
+  },
+  {
+   "id": "baso urat kecil",
+   "nama": "Baso urat kecil",
+   "harga_beli": 249000,
+   "isi": 330,
+   "kategori": "baso",
+   "catatan": "sapi 1/2 kg, ayam 1 kg, biang 25, urat 28, giling 7"
+  },
+  {
+   "id": "baso halus besar",
+   "nama": "Baso halus besar",
+   "harga_beli": 178500,
+   "isi": 56,
+   "kategori": "baso",
+   "catatan": "ayam 2 kg, biang 36, giling 10, jadi bahan 3 kg"
+  },
+  {
+   "id": "baso halus sedang",
+   "nama": "Baso halus sedang",
+   "harga_beli": 178500,
+   "isi": 85,
+   "kategori": "baso",
+   "catatan": "ayam 2 kg, biang 36, giling 10, jadi bahan 3 kg"
+  },
+  {
+   "id": "baso halus kecil",
+   "nama": "Baso halus kecil",
+   "harga_beli": 178500,
+   "isi": 250,
+   "kategori": "baso",
+   "catatan": "ayam 2 kg, biang 36, giling 10, jadi bahan 3 kg"
+  },
+  {
+   "id": "baso tahu",
+   "nama": "Baso tahu",
+   "harga_beli": 123000,
+   "isi": 50,
+   "kategori": "baso",
+   "catatan": ""
+  },
+  {
+   "id": "siomay",
+   "nama": "Siomay",
+   "harga_beli": 95000,
+   "isi": 50,
+   "kategori": "baso",
+   "catatan": ""
+  },
+  {
+   "id": "baso aci original",
+   "nama": "Baso aci original",
+   "harga_beli": 25000,
+   "isi": 70,
+   "kategori": "baso",
+   "catatan": ""
+  },
+  {
+   "id": "baso aci jando",
+   "nama": "Baso aci jando",
+   "harga_beli": 40000,
+   "isi": 80,
+   "kategori": "baso",
+   "catatan": ""
+  },
+  {
+   "id": "baso aci keju",
+   "nama": "Baso aci keju",
+   "harga_beli": 76000,
+   "isi": 80,
+   "kategori": "baso",
+   "catatan": ""
+  },
+  {
+   "id": "aci lember",
+   "nama": "Aci lember",
+   "harga_beli": 35000,
+   "isi": 45,
+   "kategori": "baso",
+   "catatan": ""
+  },
+  {
+   "id": "cirawang",
+   "nama": "Cirawang",
+   "harga_beli": 50000,
+   "isi": 90,
+   "kategori": "baso",
+   "catatan": ""
+  },
+  {
+   "id": "tetelan ori, oseng pedas gurih / pedas manis",
+   "nama": "Tetelan ori, oseng pedas gurih / pedas manis",
+   "harga_beli": 125000,
+   "isi": 20,
+   "kategori": "baso",
+   "catatan": "tetelan 90, bamer baput 10, cengek 10, bumbu 15 ( jadi bahan 700 gr, 35 gr per porsi )"
+  },
+  {
+   "id": "jando ori, oseng pedas manis / pedas gurih",
+   "nama": "Jando ori, oseng pedas manis / pedas gurih",
+   "harga_beli": 110000,
+   "isi": 20,
+   "kategori": "baso",
+   "catatan": "jando 75, bamer baput 10, cengek 10, bumbu 15  ( jadi bahan 700 gr, 35 gr per porsi )"
+  },
+  {
+   "id": "ceker tulang lunak ori, oseng pedas gurih / pedas manis",
+   "nama": "Ceker tulang lunak ori, oseng pedas gurih / pedas manis",
+   "harga_beli": 65000,
+   "isi": 30,
+   "kategori": "baso",
+   "catatan": "cengek 30, bamer baput 10, cengek 10, bumbu 15"
+  },
+  {
+   "id": "kikil ori, oseng pedas gurih / pedas manis",
+   "nama": "kikil ori, oseng pedas gurih / pedas manis",
+   "harga_beli": 130000,
+   "isi": 40,
+   "kategori": "baso",
+   "catatan": ""
+  },
+  {
+   "id": "kerupuk kulit",
+   "nama": "Kerupuk kulit",
+   "harga_beli": 2500,
+   "isi": 1,
+   "kategori": "baso",
+   "catatan": ""
+  },
+  {
+   "id": "kerupuk putih",
+   "nama": "Kerupuk putih",
+   "harga_beli": 1000,
+   "isi": 1,
+   "kategori": "baso",
+   "catatan": ""
+  },
+  {
+   "id": "kerupuk pangsit",
+   "nama": "Kerupuk pangsit",
+   "harga_beli": 36000,
+   "isi": 75,
+   "kategori": "baso",
+   "catatan": "1 liter minyak, 1 kg kulit pangsit"
+  },
+  {
+   "id": "sukro cikur",
+   "nama": "Sukro cikur",
+   "harga_beli": 1000,
+   "isi": 1,
+   "kategori": "baso",
+   "catatan": ""
+  },
+  {
+   "id": "pilus garuda",
+   "nama": "Pilus garuda",
+   "harga_beli": 2500,
+   "isi": 1,
+   "kategori": "baso",
+   "catatan": ""
+  },
+  {
+   "id": "topping mie dkk",
+   "nama": "Topping mie dkk",
+   "harga_beli": 2610,
+   "isi": 1,
+   "kategori": "baso",
+   "catatan": "bihun 300, mie 600, toge 600, sayur 600, bagor 450, seledri 60"
+  },
+  {
+   "id": "complement saos & sambal",
+   "nama": "Complement saos & sambal",
+   "harga_beli": 2482,
+   "isi": 1,
+   "kategori": "baso",
+   "catatan": "saos 540, kecap 692, cuka, 500, sambal 750"
+  },
+  {
+   "id": "kuah dan bumbu",
+   "nama": "Kuah dan bumbu",
+   "harga_beli": 2772,
+   "isi": 1,
+   "kategori": "baso",
+   "catatan": ""
+  },
+  {
+   "id": "plastik take away",
+   "nama": "plastik take away",
+   "harga_beli": 15000,
+   "isi": 100,
+   "kategori": "baso",
+   "catatan": ""
+  },
+  {
+   "id": "kresek take away",
+   "nama": "kresek take away",
+   "harga_beli": 24000,
+   "isi": 100,
+   "kategori": "baso",
+   "catatan": ""
+  },
+  {
+   "id": "mie basah",
+   "nama": "Mie Basah",
+   "harga_beli": 14000,
+   "isi": 15,
+   "kategori": "baso",
+   "catatan": ""
+  },
+  {
+   "id": "minyak bawang",
+   "nama": "Minyak Bawang",
+   "harga_beli": 700,
+   "isi": 1,
+   "kategori": "baso",
+   "catatan": ""
+  },
+  {
+   "id": "msg",
+   "nama": "Msg",
+   "harga_beli": 50000,
+   "isi": 1000,
+   "kategori": "baso",
+   "catatan": ""
+  },
+  {
+   "id": "kecap ikan",
+   "nama": "Kecap Ikan",
+   "harga_beli": 32000,
+   "isi": 700,
+   "kategori": "baso",
+   "catatan": ""
+  },
+  {
+   "id": "bawang goreng",
+   "nama": "Bawang goreng",
+   "harga_beli": 90000,
+   "isi": 1000,
+   "kategori": "baso",
+   "catatan": ""
+  },
+  {
+   "id": "chilli oil",
+   "nama": "Chilli Oil",
+   "harga_beli": 38000,
+   "isi": 500,
+   "kategori": "baso",
+   "catatan": ""
+  },
+  {
+   "id": "saos sambal",
+   "nama": "Saos sambal",
+   "harga_beli": 12000,
+   "isi": 500,
+   "kategori": "baso",
+   "catatan": ""
+  },
+  {
+   "id": "sambal kacang",
+   "nama": "Sambal Kacang",
+   "harga_beli": 35000,
+   "isi": 900,
+   "kategori": "baso",
+   "catatan": ""
+  },
+  {
+   "id": "sendok higienis",
+   "nama": "Sendok higienis",
+   "harga_beli": 30000,
+   "isi": 100,
+   "kategori": "baso",
+   "catatan": ""
+  },
+  {
+   "id": "sumpit",
+   "nama": "Sumpit",
+   "harga_beli": 12000,
+   "isi": 50,
+   "kategori": "baso",
+   "catatan": ""
+  },
+  {
+   "id": "kecap manis",
+   "nama": "kecap manis",
+   "harga_beli": 22000,
+   "isi": 520,
+   "kategori": "baso",
+   "catatan": ""
+  },
+  {
+   "id": "cuka",
+   "nama": "Cuka",
+   "harga_beli": 6000,
+   "isi": 100,
+   "kategori": "baso",
+   "catatan": ""
+  },
+  {
+   "id": "oseng tetelan pedas gurih / pedas manis",
+   "nama": "Oseng Tetelan pedas gurih / pedas manis",
+   "harga_beli": 125000,
+   "isi": 20,
+   "kategori": "baso",
+   "catatan": ""
+  },
+  {
+   "id": "oseng jando pedas gurih / pedas manis",
+   "nama": "Oseng Jando pedas gurih / pedas manis",
+   "harga_beli": 110000,
+   "isi": 20,
+   "kategori": "baso",
+   "catatan": ""
+  },
+  {
+   "id": "ekstra mie / bihun",
+   "nama": "Ekstra Mie / Bihun",
+   "harga_beli": 1500,
+   "isi": 5,
+   "kategori": "baso",
+   "catatan": ""
+  },
+  {
+   "id": "ekstra sayur / toge",
+   "nama": "Ekstra Sayur / Toge",
+   "harga_beli": 20000,
+   "isi": 40,
+   "kategori": "baso",
+   "catatan": ""
+  },
+  {
+   "id": "nasi putih",
+   "nama": "Nasi Putih",
+   "harga_beli": 17500,
+   "isi": 10,
+   "kategori": "baso",
+   "catatan": ""
+  },
+  {
+   "id": "risol mayooopa",
+   "nama": "Risol Mayooopa",
+   "harga_beli": 62500,
+   "isi": 20,
+   "kategori": "baso",
+   "catatan": ""
+  },
+  {
+   "id": "risol tetelan pedas gurih",
+   "nama": "Risol tetelan pedas gurih",
+   "harga_beli": 77000,
+   "isi": 25,
+   "kategori": "baso",
+   "catatan": ""
+  },
+  {
+   "id": "risol jando pedas manis",
+   "nama": "Risol jando pedas manis",
+   "harga_beli": 80000,
+   "isi": 25,
+   "kategori": "baso",
+   "catatan": ""
+  },
+  {
+   "id": "jasmine tea",
+   "nama": "Jasmine tea",
+   "harga_beli": 91500,
+   "isi": 33,
+   "kategori": "minuman",
+   "catatan": "powder 1kg, ongkir19"
+  },
+  {
+   "id": "lemone tea",
+   "nama": "Lemone tea",
+   "harga_beli": 91500,
+   "isi": 33,
+   "kategori": "minuman",
+   "catatan": ""
+  },
+  {
+   "id": "lychee tea",
+   "nama": "Lychee tea",
+   "harga_beli": 91500,
+   "isi": 33,
+   "kategori": "minuman",
+   "catatan": ""
+  },
+  {
+   "id": "honey lemonade",
+   "nama": "Honey lemonade",
+   "harga_beli": 91500,
+   "isi": 33,
+   "kategori": "minuman",
+   "catatan": ""
+  },
+  {
+   "id": "air panas",
+   "nama": "Air panas",
+   "harga_beli": 21000,
+   "isi": 15000,
+   "kategori": "minuman",
+   "catatan": "air galon 15L"
+  },
+  {
+   "id": "air biasa",
+   "nama": "Air biasa",
+   "harga_beli": 21000,
+   "isi": 15000,
+   "kategori": "minuman",
+   "catatan": ""
+  },
+  {
+   "id": "es batu",
+   "nama": "Es batu",
+   "harga_beli": 20000,
+   "isi": 15000,
+   "kategori": "minuman",
+   "catatan": ""
+  },
+  {
+   "id": "cup 16 oz ( 500 ml )",
+   "nama": "Cup 16 oz ( 500 ml )",
+   "harga_beli": 38750,
+   "isi": 25,
+   "kategori": "minuman",
+   "catatan": ""
+  },
+  {
+   "id": "plastik cup",
+   "nama": "Plastik Cup",
+   "harga_beli": 15000,
+   "isi": 100,
+   "kategori": "minuman",
+   "catatan": ""
+  },
+  {
+   "id": "sedotan",
+   "nama": "Sedotan",
+   "harga_beli": 15000,
+   "isi": 100,
+   "kategori": "minuman",
+   "catatan": ""
+  },
+  {
+   "id": "teh tawar / teh manis",
+   "nama": "Teh tawar / teh manis",
+   "harga_beli": 43000,
+   "isi": 28,
+   "kategori": "minuman",
+   "catatan": ""
+  },
+  {
+   "id": "buah naga",
+   "nama": "Buah Naga",
+   "harga_beli": 28000,
+   "isi": 1000,
+   "kategori": "minuman",
+   "catatan": ""
+  },
+  {
+   "id": "jeruk peras",
+   "nama": "jeruk peras",
+   "harga_beli": 20000,
+   "isi": 15,
+   "kategori": "minuman",
+   "catatan": "per kilo"
+  },
+  {
+   "id": "kweni",
+   "nama": "kweni",
+   "harga_beli": 20000,
+   "isi": 1000,
+   "kategori": "minuman",
+   "catatan": ""
+  },
+  {
+   "id": "mangga harumanis",
+   "nama": "mangga harumanis",
+   "harga_beli": 30000,
+   "isi": 1000,
+   "kategori": "minuman",
+   "catatan": ""
+  },
+  {
+   "id": "alpukat super",
+   "nama": "alpukat super",
+   "harga_beli": 28000,
+   "isi": 1000,
+   "kategori": "minuman",
+   "catatan": ""
+  },
+  {
+   "id": "strawberry",
+   "nama": "strawberry",
+   "harga_beli": 60000,
+   "isi": 1000,
+   "kategori": "minuman",
+   "catatan": "per kiraan isi 1 kg"
+  },
+  {
+   "id": "lemon peras",
+   "nama": "lemon peras",
+   "harga_beli": 17000,
+   "isi": 8,
+   "kategori": "minuman",
+   "catatan": ""
+  },
+  {
+   "id": "kiwi",
+   "nama": "kiwi",
+   "harga_beli": 85000,
+   "isi": 1000,
+   "kategori": "minuman",
+   "catatan": ""
+  },
+  {
+   "id": "leci kaleng",
+   "nama": "leci kaleng",
+   "harga_beli": 28500,
+   "isi": 22,
+   "kategori": "minuman",
+   "catatan": ""
+  },
+  {
+   "id": "ice cream",
+   "nama": "ice cream",
+   "harga_beli": 185000,
+   "isi": 8000,
+   "kategori": "minuman",
+   "catatan": ""
+  },
+  {
+   "id": "soda",
+   "nama": "soda",
+   "harga_beli": 5500,
+   "isi": 250,
+   "kategori": "minuman",
+   "catatan": ""
+  },
+  {
+   "id": "nata de coco",
+   "nama": "nata de coco",
+   "harga_beli": 15000,
+   "isi": 1000,
+   "kategori": "minuman",
+   "catatan": ""
+  },
+  {
+   "id": "biji selasih",
+   "nama": "biji selasih",
+   "harga_beli": 12000,
+   "isi": 100,
+   "kategori": "minuman",
+   "catatan": ""
+  },
+  {
+   "id": "syrup double fresh mangga",
+   "nama": "syrup double fresh mangga",
+   "harga_beli": 38000,
+   "isi": 650,
+   "kategori": "minuman",
+   "catatan": ""
+  },
+  {
+   "id": "marjan strawberry",
+   "nama": "marjan strawberry",
+   "harga_beli": 25000,
+   "isi": 460,
+   "kategori": "minuman",
+   "catatan": ""
+  },
+  {
+   "id": "marjan lemon",
+   "nama": "marjan lemon",
+   "harga_beli": 25000,
+   "isi": 460,
+   "kategori": "minuman",
+   "catatan": ""
+  },
+  {
+   "id": "marjan leci",
+   "nama": "marjan leci",
+   "harga_beli": 25000,
+   "isi": 460,
+   "kategori": "minuman",
+   "catatan": ""
+  },
+  {
+   "id": "evavorasi",
+   "nama": "evavorasi",
+   "harga_beli": 20000,
+   "isi": 380,
+   "kategori": "minuman",
+   "catatan": ""
+  },
+  {
+   "id": "skm",
+   "nama": "SKM",
+   "harga_beli": 15000,
+   "isi": 490,
+   "kategori": "minuman",
+   "catatan": ""
+  },
+  {
+   "id": "konsentrat gula / gula cair",
+   "nama": "Konsentrat Gula / Gula cair",
+   "harga_beli": 23000,
+   "isi": 1800,
+   "kategori": "minuman",
+   "catatan": ""
+  },
+  {
+   "id": "nutri jelly mangga",
+   "nama": "nutri jelly mangga",
+   "harga_beli": 12000,
+   "isi": 600,
+   "kategori": "minuman",
+   "catatan": "2000 gas dan air"
+  },
+  {
+   "id": "pisang lumut",
+   "nama": "Pisang lumut",
+   "harga_beli": 15000,
+   "isi": 1000,
+   "kategori": "minuman",
+   "catatan": ""
+  },
+  {
+   "id": "nutri jelly kelapa",
+   "nama": "nutri jelly kelapa",
+   "harga_beli": 7500,
+   "isi": 1,
+   "kategori": "minuman",
+   "catatan": ""
+  },
+  {
+   "id": "yakult",
+   "nama": "yakult",
+   "harga_beli": 2000,
+   "isi": 65,
+   "kategori": "minuman",
+   "catatan": ""
+  },
+  {
+   "id": "skm cokelat",
+   "nama": "SKM cokelat",
+   "harga_beli": 17000,
+   "isi": 560,
+   "kategori": "minuman",
+   "catatan": ""
+  },
+  {
+   "id": "nutrisari jeruk nipis",
+   "nama": "Nutrisari jeruk nipis",
+   "harga_beli": 2400,
+   "isi": 11,
+   "kategori": "minuman",
+   "catatan": ""
+  },
+  {
+   "id": "kresek transparent",
+   "nama": "kresek transparent",
+   "harga_beli": 24000,
+   "isi": 50,
+   "kategori": "minuman",
+   "catatan": ""
+  },
+  {
+   "id": "pudding mangga",
+   "nama": "pudding mangga",
+   "harga_beli": 16000,
+   "isi": 650,
+   "kategori": "minuman",
+   "catatan": "nutrijell 14, air 1000, gas 1000"
+  },
+  {
+   "id": "powder drink lemon tea",
+   "nama": "Powder drink lemon tea",
+   "harga_beli": 74500,
+   "isi": 1000,
+   "kategori": "minuman",
+   "catatan": ""
+  },
+  {
+   "id": "powder drink leci tea",
+   "nama": "Powder drink leci tea",
+   "harga_beli": 74500,
+   "isi": 1000,
+   "kategori": "minuman",
+   "catatan": ""
+  },
+  {
+   "id": "air mineral 330 ml",
+   "nama": "Air Mineral 330 ml",
+   "harga_beli": 50000,
+   "isi": 24,
+   "kategori": "minuman",
+   "catatan": ""
+  },
+  {
+   "id": "seledri",
+   "nama": "Seledri",
+   "harga_beli": 3000,
+   "isi": 250,
+   "kategori": "baso",
+   "catatan": ""
+  }
+ ],
+ "recipes": [
+  {
+   "menu": "Premium Basooopa A (PBA)",
+   "kategori": "Paket Premium",
+   "mult": 2.0,
+   "jual": 34000,
+   "komponen": [
+    {
+     "bahan": "baso urat besar",
+     "qty": 1.0
+    },
+    {
+     "bahan": "baso halus kecil",
+     "qty": 0.7576
+    },
+    {
+     "bahan": "baso tahu",
+     "qty": 1.0
+    },
+    {
+     "bahan": "siomay",
+     "qty": 1.0
+    },
+    {
+     "bahan": "baso aci original",
+     "qty": 3.0
+    },
+    {
+     "bahan": "topping mie dkk",
+     "qty": 1.0
+    },
+    {
+     "bahan": "complement saos & sambal",
+     "qty": 1.0
+    },
+    {
+     "bahan": "kuah dan bumbu",
+     "qty": 1.0
+    },
+    {
+     "bahan": "plastik take away",
+     "qty": 1.0
+    },
+    {
+     "bahan": "kresek take away",
+     "qty": 1.0
+    }
+   ],
+   "hpp_wb": 16993.0,
+   "saran_wb": 33986.01
+  },
+  {
+   "menu": "Premium Basooopa B (PBB)",
+   "kategori": "Paket Premium",
+   "mult": 2.0,
+   "jual": 37000,
+   "komponen": [
+    {
+     "bahan": "baso urat besar",
+     "qty": 1.0
+    },
+    {
+     "bahan": "baso halus besar",
+     "qty": 1.0
+    },
+    {
+     "bahan": "siomay",
+     "qty": 1.0
+    },
+    {
+     "bahan": "aci lember",
+     "qty": 1.0
+    },
+    {
+     "bahan": "baso aci jando",
+     "qty": 3.0
+    },
+    {
+     "bahan": "topping mie dkk",
+     "qty": 1.0
+    },
+    {
+     "bahan": "complement saos & sambal",
+     "qty": 1.0
+    },
+    {
+     "bahan": "kuah dan bumbu",
+     "qty": 1.0
+    },
+    {
+     "bahan": "plastik take away",
+     "qty": 1.0
+    },
+    {
+     "bahan": "kresek take away",
+     "qty": 1.0
+    }
+   ],
+   "hpp_wb": 18385.94,
+   "saran_wb": 36771.89
+  },
+  {
+   "menu": "Premium Basooopa C (PBC)",
+   "kategori": "Paket Premium",
+   "mult": 2.0,
+   "jual": 33000,
+   "komponen": [
+    {
+     "bahan": "baso halus besar",
+     "qty": 1.0
+    },
+    {
+     "bahan": "baso urat kecil",
+     "qty": 1.0
+    },
+    {
+     "bahan": "baso tahu",
+     "qty": 1.0
+    },
+    {
+     "bahan": "cirawang",
+     "qty": 1.0
+    },
+    {
+     "bahan": "baso aci jando",
+     "qty": 3.0
+    },
+    {
+     "bahan": "topping mie dkk",
+     "qty": 1.0
+    },
+    {
+     "bahan": "complement saos & sambal",
+     "qty": 1.0
+    },
+    {
+     "bahan": "kuah dan bumbu",
+     "qty": 1.0
+    },
+    {
+     "bahan": "plastik take away",
+     "qty": 1.0
+    },
+    {
+     "bahan": "kresek take away",
+     "qty": 1.0
+    }
+   ],
+   "hpp_wb": 16711.6,
+   "saran_wb": 33423.2
+  },
+  {
+   "menu": "Simple Set 1 ( SS1 )",
+   "kategori": "Simple & Favorit Set",
+   "mult": 2.0,
+   "jual": 28000,
+   "komponen": [
+    {
+     "bahan": "baso urat kecil",
+     "qty": 3.0
+    },
+    {
+     "bahan": "baso aci jando",
+     "qty": 3.0
+    },
+    {
+     "bahan": "siomay",
+     "qty": 1.0
+    },
+    {
+     "bahan": "topping mie dkk",
+     "qty": 1.0
+    },
+    {
+     "bahan": "complement saos & sambal",
+     "qty": 1.0
+    },
+    {
+     "bahan": "kuah dan bumbu",
+     "qty": 1.0
+    },
+    {
+     "bahan": "plastik take away",
+     "qty": 1.0
+    },
+    {
+     "bahan": "kresek take away",
+     "qty": 1.0
+    }
+   ],
+   "hpp_wb": 13917.64,
+   "saran_wb": 27835.27
+  },
+  {
+   "menu": "Simple Set 2 ( SS2 )",
+   "kategori": "Simple & Favorit Set",
+   "mult": 2.0,
+   "jual": 30000,
+   "komponen": [
+    {
+     "bahan": "baso urat kecil",
+     "qty": 2.0
+    },
+    {
+     "bahan": "cirawang",
+     "qty": 2.0
+    },
+    {
+     "bahan": "baso tahu",
+     "qty": 1.0
+    },
+    {
+     "bahan": "aci lember",
+     "qty": 2.0
+    },
+    {
+     "bahan": "topping mie dkk",
+     "qty": 1.0
+    },
+    {
+     "bahan": "complement saos & sambal",
+     "qty": 1.0
+    },
+    {
+     "bahan": "kuah dan bumbu",
+     "qty": 1.0
+    },
+    {
+     "bahan": "plastik take away",
+     "qty": 1.0
+    },
+    {
+     "bahan": "kresek take away",
+     "qty": 1.0
+    }
+   ],
+   "hpp_wb": 14889.76,
+   "saran_wb": 29779.52
+  },
+  {
+   "menu": "Simple Set 3 ( SS3 )",
+   "kategori": "Simple & Favorit Set",
+   "mult": 2.0,
+   "jual": 28000,
+   "komponen": [
+    {
+     "bahan": "baso halus kecil",
+     "qty": 3.0
+    },
+    {
+     "bahan": "baso aci original",
+     "qty": 3.0
+    },
+    {
+     "bahan": "baso tahu",
+     "qty": 1.0
+    },
+    {
+     "bahan": "topping mie dkk",
+     "qty": 1.0
+    },
+    {
+     "bahan": "complement saos & sambal",
+     "qty": 1.0
+    },
+    {
+     "bahan": "kuah dan bumbu",
+     "qty": 1.0
+    },
+    {
+     "bahan": "plastik take away",
+     "qty": 1.0
+    },
+    {
+     "bahan": "kresek take away",
+     "qty": 1.0
+    }
+   ],
+   "hpp_wb": 13927.43,
+   "saran_wb": 27854.86
+  },
+  {
+   "menu": "Favorit Set 1 ( FS 1 )",
+   "kategori": "Simple & Favorit Set",
+   "mult": 2.0,
+   "jual": 24000,
+   "komponen": [
+    {
+     "bahan": "baso urat besar",
+     "qty": 1.0
+    },
+    {
+     "bahan": "baso halus kecil",
+     "qty": 2.0
+    },
+    {
+     "bahan": "baso aci jando",
+     "qty": 2.0
+    },
+    {
+     "bahan": "cirawang",
+     "qty": 2.0
+    },
+    {
+     "bahan": "complement saos & sambal",
+     "qty": 1.0
+    },
+    {
+     "bahan": "kuah dan bumbu",
+     "qty": 1.0
+    },
+    {
+     "bahan": "plastik take away",
+     "qty": 1.0
+    },
+    {
+     "bahan": "kresek take away",
+     "qty": 1.0
+    }
+   ],
+   "hpp_wb": 11949.78,
+   "saran_wb": 23899.56
+  },
+  {
+   "menu": "Favorit Set 2 ( FS 2 )",
+   "kategori": "Simple & Favorit Set",
+   "mult": 2.0,
+   "jual": 25000,
+   "komponen": [
+    {
+     "bahan": "baso halus besar",
+     "qty": 1.0
+    },
+    {
+     "bahan": "baso urat kecil",
+     "qty": 2.0
+    },
+    {
+     "bahan": "baso aci original",
+     "qty": 2.0
+    },
+    {
+     "bahan": "aci lember",
+     "qty": 2.0
+    },
+    {
+     "bahan": "complement saos & sambal",
+     "qty": 1.0
+    },
+    {
+     "bahan": "kuah dan bumbu",
+     "qty": 1.0
+    },
+    {
+     "bahan": "plastik take away",
+     "qty": 1.0
+    },
+    {
+     "bahan": "kresek take away",
+     "qty": 1.0
+    }
+   ],
+   "hpp_wb": 12610.43,
+   "saran_wb": 25220.86
+  },
+  {
+   "menu": "Urat Lover Set ( ULS )",
+   "kategori": "Pure Baso",
+   "mult": 2.0,
+   "jual": 23000,
+   "komponen": [
+    {
+     "bahan": "baso urat besar",
+     "qty": 1.0
+    },
+    {
+     "bahan": "baso urat kecil",
+     "qty": 4.0
+    },
+    {
+     "bahan": "complement saos & sambal",
+     "qty": 1.0
+    },
+    {
+     "bahan": "kuah dan bumbu",
+     "qty": 1.0
+    },
+    {
+     "bahan": "plastik take away",
+     "qty": 1.0
+    },
+    {
+     "bahan": "kresek take away",
+     "qty": 1.0
+    }
+   ],
+   "hpp_wb": 11428.85,
+   "saran_wb": 22857.7
+  },
+  {
+   "menu": "Halus Lover Set ( HLS )",
+   "kategori": "Pure Baso",
+   "mult": 2.0,
+   "jual": 23000,
+   "komponen": [
+    {
+     "bahan": "baso halus besar",
+     "qty": 1.0
+    },
+    {
+     "bahan": "baso halus kecil",
+     "qty": 4.0
+    },
+    {
+     "bahan": "complement saos & sambal",
+     "qty": 1.0
+    },
+    {
+     "bahan": "kuah dan bumbu",
+     "qty": 1.0
+    },
+    {
+     "bahan": "plastik take away",
+     "qty": 1.0
+    },
+    {
+     "bahan": "kresek take away",
+     "qty": 1.0
+    }
+   ],
+   "hpp_wb": 11687.5,
+   "saran_wb": 23375
+  },
+  {
+   "menu": "Twin Meatball Set ( TMS )",
+   "kategori": "Pure Baso",
+   "mult": 2.0,
+   "jual": 29000,
+   "komponen": [
+    {
+     "bahan": "baso urat besar",
+     "qty": 1.0
+    },
+    {
+     "bahan": "baso halus besar",
+     "qty": 1.0
+    },
+    {
+     "bahan": "baso urat kecil",
+     "qty": 2.0
+    },
+    {
+     "bahan": "baso halus kecil",
+     "qty": 2.0
+    },
+    {
+     "bahan": "complement saos & sambal",
+     "qty": 1.0
+    },
+    {
+     "bahan": "kuah dan bumbu",
+     "qty": 1.0
+    },
+    {
+     "bahan": "plastik take away",
+     "qty": 1.0
+    },
+    {
+     "bahan": "kresek take away",
+     "qty": 1.0
+    }
+   ],
+   "hpp_wb": 14535.26,
+   "saran_wb": 29070.52
+  },
+  {
+   "menu": "BMB Original (Yamin Ori)",
+   "kategori": "Yamin",
+   "mult": 3.0,
+   "jual": 10000,
+   "komponen": [
+    {
+     "bahan": "mie basah",
+     "qty": 1.0
+    },
+    {
+     "bahan": "minyak bawang",
+     "qty": 0.7025
+    },
+    {
+     "bahan": "msg",
+     "qty": 5.0
+    },
+    {
+     "bahan": "kecap ikan",
+     "qty": 1.5
+    },
+    {
+     "bahan": "bawang goreng",
+     "qty": 7.5
+    },
+    {
+     "bahan": "seledri",
+     "qty": 7.5
+    },
+    {
+     "bahan": "sendok higienis",
+     "qty": 1.0
+    },
+    {
+     "bahan": "sumpit",
+     "qty": 1.0
+    },
+    {
+     "bahan": "plastik take away",
+     "qty": 1.0
+    },
+    {
+     "bahan": "kresek take away",
+     "qty": 1.0
+    }
+   ],
+   "hpp_wb": 3438.68,
+   "saran_wb": 10316.04
+  },
+  {
+   "menu": "BMB Misdasem (Yamin Misdasem)",
+   "kategori": "Yamin",
+   "mult": 2.0,
+   "jual": 13000,
+   "komponen": [
+    {
+     "bahan": "mie basah",
+     "qty": 1.0
+    },
+    {
+     "bahan": "minyak bawang",
+     "qty": 0.7025
+    },
+    {
+     "bahan": "msg",
+     "qty": 5.0
+    },
+    {
+     "bahan": "kecap ikan",
+     "qty": 1.5
+    },
+    {
+     "bahan": "chilli oil",
+     "qty": 5.0
+    },
+    {
+     "bahan": "kecap manis",
+     "qty": 15.0
+    },
+    {
+     "bahan": "cuka",
+     "qty": 2.5
+    },
+    {
+     "bahan": "saos sambal",
+     "qty": 30.0
+    },
+    {
+     "bahan": "sambal kacang",
+     "qty": 30.0
+    },
+    {
+     "bahan": "bawang goreng",
+     "qty": 7.5
+    },
+    {
+     "bahan": "sendok higienis",
+     "qty": 1.0
+    },
+    {
+     "bahan": "sumpit",
+     "qty": 1.0
+    },
+    {
+     "bahan": "plastik take away",
+     "qty": 1.0
+    },
+    {
+     "bahan": "kresek take away",
+     "qty": 1.0
+    }
+   ],
+   "hpp_wb": 6399.96,
+   "saran_wb": 12799.92
+  },
+  {
+   "menu": "Tembakan Pertama (Baso Aci Ori)",
+   "kategori": "Menu Baru",
+   "mult": 2.0,
+   "jual": 16000,
+   "komponen": [
+    {
+     "bahan": "baso aci original",
+     "qty": 4.0
+    },
+    {
+     "bahan": "cirawang",
+     "qty": 2.0
+    },
+    {
+     "bahan": "kuah dan bumbu",
+     "qty": 1.0
+    },
+    {
+     "bahan": "complement saos & sambal",
+     "qty": 1.0
+    },
+    {
+     "bahan": "plastik take away",
+     "qty": 1.0
+    },
+    {
+     "bahan": "kresek take away",
+     "qty": 1.0
+    }
+   ],
+   "hpp_wb": 8183.68,
+   "saran_wb": 16367.37
+  },
+  {
+   "menu": "Porsi Bazooka (Hero)",
+   "kategori": "Menu Baru",
+   "mult": 2.0,
+   "jual": 25000,
+   "komponen": [
+    {
+     "bahan": "baso urat besar",
+     "qty": 1.0
+    },
+    {
+     "bahan": "baso aci jando",
+     "qty": 2.0
+    },
+    {
+     "bahan": "baso aci original",
+     "qty": 2.0
+    },
+    {
+     "bahan": "topping mie dkk",
+     "qty": 1.0
+    },
+    {
+     "bahan": "complement saos & sambal",
+     "qty": 1.0
+    },
+    {
+     "bahan": "kuah dan bumbu",
+     "qty": 1.0
+    },
+    {
+     "bahan": "plastik take away",
+     "qty": 1.0
+    },
+    {
+     "bahan": "kresek take away",
+     "qty": 1.0
+    }
+   ],
+   "hpp_wb": 12734.95,
+   "saran_wb": 25469.9
+  },
+  {
+   "menu": "Mangkok Baso Standar",
+   "kategori": "Menu Baru",
+   "mult": 2.0,
+   "jual": 22000,
+   "komponen": [
+    {
+     "bahan": "baso urat kecil",
+     "qty": 2.0
+    },
+    {
+     "bahan": "baso halus kecil",
+     "qty": 2.0
+    },
+    {
+     "bahan": "topping mie dkk",
+     "qty": 1.0
+    },
+    {
+     "bahan": "complement saos & sambal",
+     "qty": 1.0
+    },
+    {
+     "bahan": "kuah dan bumbu",
+     "qty": 1.0
+    },
+    {
+     "bahan": "plastik take away",
+     "qty": 1.0
+    },
+    {
+     "bahan": "kresek take away",
+     "qty": 1.0
+    }
+   ],
+   "hpp_wb": 11191.09,
+   "saran_wb": 22382.18
+  },
+  {
+   "menu": "Sop Buah Basooopa",
+   "kategori": "Dessert",
+   "mult": 2.5,
+   "jual": 13000,
+   "komponen": [
+    {
+     "bahan": "alpukat super",
+     "qty": 30.0
+    },
+    {
+     "bahan": "buah naga",
+     "qty": 30.0
+    },
+    {
+     "bahan": "mangga harumanis",
+     "qty": 30.0
+    },
+    {
+     "bahan": "nata de coco",
+     "qty": 40.0
+    },
+    {
+     "bahan": "biji selasih",
+     "qty": 3.0
+    },
+    {
+     "bahan": "skm",
+     "qty": 30.0
+    },
+    {
+     "bahan": "marjan strawberry",
+     "qty": 10.0
+    },
+    {
+     "bahan": "es batu",
+     "qty": 150.0
+    }
+   ],
+   "hpp_wb": 5201.85,
+   "saran_wb": 13004.61
+  },
+  {
+   "menu": "Es Teh Manis (dine-in)",
+   "kategori": "Teh & Basic",
+   "mult": 2.75,
+   "jual": 5000,
+   "komponen": [
+    {
+     "bahan": "teh tawar / teh manis",
+     "qty": 1.0
+    },
+    {
+     "bahan": "es batu",
+     "qty": 200.0
+    }
+   ],
+   "hpp_wb": 1802.38,
+   "saran_wb": 4956.55
+  },
+  {
+   "menu": "Teh Tawar Hangat",
+   "kategori": "Teh & Basic",
+   "mult": 2.0,
+   "jual": 3000,
+   "komponen": [
+    {
+     "bahan": "teh tawar / teh manis",
+     "qty": 1.0
+    },
+    {
+     "bahan": "air panas",
+     "qty": 100.0
+    }
+   ],
+   "hpp_wb": 1675.71,
+   "saran_wb": 3351.43
+  },
+  {
+   "menu": "Lemon Tea Breeze",
+   "kategori": "Teh & Basic",
+   "mult": 2.5,
+   "jual": 17000,
+   "komponen": [
+    {
+     "bahan": "powder drink lemon tea",
+     "qty": 25.0
+    },
+    {
+     "bahan": "lemon peras",
+     "qty": 1.0
+    },
+    {
+     "bahan": "es batu",
+     "qty": 200.0
+    },
+    {
+     "bahan": "air biasa",
+     "qty": 125.0
+    },
+    {
+     "bahan": "konsentrat gula / gula cair",
+     "qty": 50.0
+    },
+    {
+     "bahan": "sedotan",
+     "qty": 1.0
+    },
+    {
+     "bahan": "plastik cup",
+     "qty": 1.0
+    },
+    {
+     "bahan": "cup 16 oz ( 500 ml )",
+     "qty": 1.0
+    }
+   ],
+   "hpp_wb": 6918.06,
+   "saran_wb": 17295.15
+  },
+  {
+   "menu": "Lychee Tea Breeze",
+   "kategori": "Teh & Basic",
+   "mult": 2.5,
+   "jual": 17000,
+   "komponen": [
+    {
+     "bahan": "powder drink leci tea",
+     "qty": 25.0
+    },
+    {
+     "bahan": "konsentrat gula / gula cair",
+     "qty": 50.0
+    },
+    {
+     "bahan": "es batu",
+     "qty": 200.0
+    },
+    {
+     "bahan": "leci kaleng",
+     "qty": 1.0
+    },
+    {
+     "bahan": "marjan leci",
+     "qty": 16.0
+    },
+    {
+     "bahan": "air biasa",
+     "qty": 112.0
+    },
+    {
+     "bahan": "sedotan",
+     "qty": 1.0
+    },
+    {
+     "bahan": "plastik cup",
+     "qty": 1.0
+    },
+    {
+     "bahan": "cup 16 oz ( 500 ml )",
+     "qty": 1.0
+    }
+   ],
+   "hpp_wb": 6939.88,
+   "saran_wb": 17349.7
+  },
+  {
+   "menu": "Lemon Lychee Fusion",
+   "kategori": "Teh & Basic",
+   "mult": 2.5,
+   "jual": 18000,
+   "komponen": [
+    {
+     "bahan": "powder drink lemon tea",
+     "qty": 30.0
+    },
+    {
+     "bahan": "marjan leci",
+     "qty": 16.0
+    },
+    {
+     "bahan": "konsentrat gula / gula cair",
+     "qty": 50.0
+    },
+    {
+     "bahan": "air biasa",
+     "qty": 112.0
+    },
+    {
+     "bahan": "es batu",
+     "qty": 250.0
+    },
+    {
+     "bahan": "leci kaleng",
+     "qty": 1.0
+    },
+    {
+     "bahan": "cup 16 oz ( 500 ml )",
+     "qty": 1.0
+    },
+    {
+     "bahan": "sedotan",
+     "qty": 1.0
+    },
+    {
+     "bahan": "plastik cup",
+     "qty": 1.0
+    }
+   ],
+   "hpp_wb": 7379.04,
+   "saran_wb": 18447.6
+  },
+  {
+   "menu": "Mango Fresh Blast",
+   "kategori": "Teh & Basic",
+   "mult": 2.75,
+   "jual": 18000,
+   "komponen": [
+    {
+     "bahan": "mangga harumanis",
+     "qty": 85.0
+    },
+    {
+     "bahan": "syrup double fresh mangga",
+     "qty": 16.0
+    },
+    {
+     "bahan": "konsentrat gula / gula cair",
+     "qty": 50.0
+    },
+    {
+     "bahan": "air biasa",
+     "qty": 200.0
+    },
+    {
+     "bahan": "es batu",
+     "qty": 250.0
+    },
+    {
+     "bahan": "cup 16 oz ( 500 ml )",
+     "qty": 1.0
+    },
+    {
+     "bahan": "sedotan",
+     "qty": 1.0
+    },
+    {
+     "bahan": "plastik cup",
+     "qty": 1.0
+    }
+   ],
+   "hpp_wb": 6587.61,
+   "saran_wb": 18115.92
+  },
+  {
+   "menu": "Alpukat Sultan",
+   "kategori": "Teh & Basic",
+   "mult": 2.75,
+   "jual": 23000,
+   "komponen": [
+    {
+     "bahan": "alpukat super",
+     "qty": 70.0
+    },
+    {
+     "bahan": "skm",
+     "qty": 50.0
+    },
+    {
+     "bahan": "evavorasi",
+     "qty": 16.0
+    },
+    {
+     "bahan": "konsentrat gula / gula cair",
+     "qty": 50.0
+    },
+    {
+     "bahan": "air biasa",
+     "qty": 100.0
+    },
+    {
+     "bahan": "es batu",
+     "qty": 250.0
+    },
+    {
+     "bahan": "skm cokelat",
+     "qty": 30.0
+    },
+    {
+     "bahan": "cup 16 oz ( 500 ml )",
+     "qty": 1.0
+    },
+    {
+     "bahan": "sedotan",
+     "qty": 1.0
+    },
+    {
+     "bahan": "plastik cup",
+     "qty": 1.0
+    }
+   ],
+   "hpp_wb": 8205.65,
+   "saran_wb": 22565.55
+  },
+  {
+   "menu": "Pink Berry Splash",
+   "kategori": "Teh & Basic",
+   "mult": 3.0,
+   "jual": 18000,
+   "komponen": [
+    {
+     "bahan": "strawberry",
+     "qty": 70.0
+    },
+    {
+     "bahan": "konsentrat gula / gula cair",
+     "qty": 50.0
+    },
+    {
+     "bahan": "marjan strawberry",
+     "qty": 16.0
+    },
+    {
+     "bahan": "air biasa",
+     "qty": 100.0
+    },
+    {
+     "bahan": "es batu",
+     "qty": 250.0
+    },
+    {
+     "bahan": "cup 16 oz ( 500 ml )",
+     "qty": 0.0
+    },
+    {
+     "bahan": "sedotan",
+     "qty": 0.0
+    },
+    {
+     "bahan": "plastik cup",
+     "qty": 0.0
+    }
+   ],
+   "hpp_wb": 6181.79,
+   "saran_wb": 18545.36
+  },
+  {
+   "menu": "Lemon Chill Booster",
+   "kategori": "Teh & Basic",
+   "mult": 3.5,
+   "jual": 15000,
+   "komponen": [
+    {
+     "bahan": "konsentrat gula / gula cair",
+     "qty": 50.0
+    },
+    {
+     "bahan": "marjan lemon",
+     "qty": 16.0
+    },
+    {
+     "bahan": "lemon peras",
+     "qty": 0.75
+    },
+    {
+     "bahan": "es batu",
+     "qty": 200.0
+    },
+    {
+     "bahan": "biji selasih",
+     "qty": 5.0
+    },
+    {
+     "bahan": "air biasa",
+     "qty": 112.0
+    },
+    {
+     "bahan": "sedotan",
+     "qty": 1.0
+    },
+    {
+     "bahan": "plastik cup",
+     "qty": 1.0
+    }
+   ],
+   "hpp_wb": 4425.67,
+   "saran_wb": 15489.85
+  },
+  {
+   "menu": "Lime Blast Cooler",
+   "kategori": "Teh & Basic",
+   "mult": 2.75,
+   "jual": 19000,
+   "komponen": [
+    {
+     "bahan": "konsentrat gula / gula cair",
+     "qty": 50.0
+    },
+    {
+     "bahan": "nutrisari jeruk nipis",
+     "qty": 11.0
+    },
+    {
+     "bahan": "lemon peras",
+     "qty": 0.4
+    },
+    {
+     "bahan": "es batu",
+     "qty": 200.0
+    },
+    {
+     "bahan": "biji selasih",
+     "qty": 5.0
+    },
+    {
+     "bahan": "air biasa",
+     "qty": 113.0
+    },
+    {
+     "bahan": "cup 16 oz ( 500 ml )",
+     "qty": 1.0
+    },
+    {
+     "bahan": "sedotan",
+     "qty": 1.0
+    },
+    {
+     "bahan": "plastik cup",
+     "qty": 1.0
+    }
+   ],
+   "hpp_wb": 6763.76,
+   "saran_wb": 18600.33
+  },
+  {
+   "menu": "Dragon Banana Bliss",
+   "kategori": "Minuman Segar",
+   "mult": 2.75,
+   "jual": 19000,
+   "komponen": [
+    {
+     "bahan": "buah naga",
+     "qty": 50.0
+    },
+    {
+     "bahan": "pisang lumut",
+     "qty": 35.0
+    },
+    {
+     "bahan": "skm",
+     "qty": 50.0
+    },
+    {
+     "bahan": "es batu",
+     "qty": 140.0
+    },
+    {
+     "bahan": "evavorasi",
+     "qty": 16.0
+    },
+    {
+     "bahan": "air biasa",
+     "qty": 100.0
+    },
+    {
+     "bahan": "konsentrat gula / gula cair",
+     "qty": 50.0
+    },
+    {
+     "bahan": "sedotan",
+     "qty": 1.0
+    },
+    {
+     "bahan": "plastik cup",
+     "qty": 1.0
+    },
+    {
+     "bahan": "cup 16 oz ( 500 ml )",
+     "qty": 1.0
+    }
+   ],
+   "hpp_wb": 7113.27,
+   "saran_wb": 19561.5
+  },
+  {
+   "menu": "Jeruk Seger Basooopa",
+   "kategori": "Minuman Segar",
+   "mult": 2.75,
+   "jual": 19000,
+   "komponen": [
+    {
+     "bahan": "jeruk peras",
+     "qty": 3.0
+    },
+    {
+     "bahan": "konsentrat gula / gula cair",
+     "qty": 50.0
+    },
+    {
+     "bahan": "es batu",
+     "qty": 200.0
+    },
+    {
+     "bahan": "biji selasih",
+     "qty": 5.0
+    },
+    {
+     "bahan": "air biasa",
+     "qty": 112.0
+    },
+    {
+     "bahan": "sedotan",
+     "qty": 1.0
+    },
+    {
+     "bahan": "plastik cup",
+     "qty": 1.0
+    },
+    {
+     "bahan": "cup 16 oz ( 500 ml )",
+     "qty": 1.0
+    }
+   ],
+   "hpp_wb": 7512.36,
+   "saran_wb": 20658.98
+  },
+  {
+   "menu": "Kweni Tropicana",
+   "kategori": "Minuman Segar",
+   "mult": 2.75,
+   "jual": 14000,
+   "komponen": [
+    {
+     "bahan": "kweni",
+     "qty": 60.0
+    },
+    {
+     "bahan": "syrup double fresh mangga",
+     "qty": 16.0
+    },
+    {
+     "bahan": "konsentrat gula / gula cair",
+     "qty": 50.0
+    },
+    {
+     "bahan": "air biasa",
+     "qty": 100.0
+    },
+    {
+     "bahan": "es batu",
+     "qty": 250.0
+    },
+    {
+     "bahan": "cup 16 oz ( 500 ml )",
+     "qty": 1.0
+    },
+    {
+     "bahan": "sedotan",
+     "qty": 1.0
+    },
+    {
+     "bahan": "plastik cup",
+     "qty": 1.0
+    }
+   ],
+   "hpp_wb": 5097.61,
+   "saran_wb": 14018.42
+  },
+  {
+   "menu": "Mango Fresh Blast",
+   "kategori": "Minuman Segar",
+   "mult": 2.75,
+   "jual": 18000,
+   "komponen": [
+    {
+     "bahan": "mangga harumanis",
+     "qty": 85.0
+    },
+    {
+     "bahan": "syrup double fresh mangga",
+     "qty": 16.0
+    },
+    {
+     "bahan": "konsentrat gula / gula cair",
+     "qty": 50.0
+    },
+    {
+     "bahan": "air biasa",
+     "qty": 200.0
+    },
+    {
+     "bahan": "es batu",
+     "qty": 250.0
+    },
+    {
+     "bahan": "cup 16 oz ( 500 ml )",
+     "qty": 1.0
+    },
+    {
+     "bahan": "sedotan",
+     "qty": 1.0
+    },
+    {
+     "bahan": "plastik cup",
+     "qty": 1.0
+    }
+   ],
+   "hpp_wb": 6587.61,
+   "saran_wb": 18115.92
+  },
+  {
+   "menu": "Alpukat Sultan",
+   "kategori": "Minuman Segar",
+   "mult": 2.75,
+   "jual": 23000,
+   "komponen": [
+    {
+     "bahan": "alpukat super",
+     "qty": 70.0
+    },
+    {
+     "bahan": "skm",
+     "qty": 50.0
+    },
+    {
+     "bahan": "evavorasi",
+     "qty": 16.0
+    },
+    {
+     "bahan": "konsentrat gula / gula cair",
+     "qty": 50.0
+    },
+    {
+     "bahan": "air biasa",
+     "qty": 100.0
+    },
+    {
+     "bahan": "es batu",
+     "qty": 250.0
+    },
+    {
+     "bahan": "skm cokelat",
+     "qty": 30.0
+    },
+    {
+     "bahan": "cup 16 oz ( 500 ml )",
+     "qty": 1.0
+    },
+    {
+     "bahan": "sedotan",
+     "qty": 1.0
+    },
+    {
+     "bahan": "plastik cup",
+     "qty": 1.0
+    }
+   ],
+   "hpp_wb": 8205.65,
+   "saran_wb": 22565.55
+  },
+  {
+   "menu": "Pink Berry Splash",
+   "kategori": "Minuman Segar",
+   "mult": 3.0,
+   "jual": 18000,
+   "komponen": [
+    {
+     "bahan": "strawberry",
+     "qty": 70.0
+    },
+    {
+     "bahan": "konsentrat gula / gula cair",
+     "qty": 50.0
+    },
+    {
+     "bahan": "marjan strawberry",
+     "qty": 16.0
+    },
+    {
+     "bahan": "air biasa",
+     "qty": 100.0
+    },
+    {
+     "bahan": "es batu",
+     "qty": 250.0
+    },
+    {
+     "bahan": "cup 16 oz ( 500 ml )",
+     "qty": 0.0
+    },
+    {
+     "bahan": "sedotan",
+     "qty": 0.0
+    },
+    {
+     "bahan": "plastik cup",
+     "qty": 0.0
+    }
+   ],
+   "hpp_wb": 6181.79,
+   "saran_wb": 18545.36
+  },
+  {
+   "menu": "Lemon Chill Booster",
+   "kategori": "Minuman Segar",
+   "mult": 3.5,
+   "jual": 15000,
+   "komponen": [
+    {
+     "bahan": "konsentrat gula / gula cair",
+     "qty": 50.0
+    },
+    {
+     "bahan": "marjan lemon",
+     "qty": 16.0
+    },
+    {
+     "bahan": "lemon peras",
+     "qty": 0.75
+    },
+    {
+     "bahan": "es batu",
+     "qty": 200.0
+    },
+    {
+     "bahan": "biji selasih",
+     "qty": 5.0
+    },
+    {
+     "bahan": "air biasa",
+     "qty": 112.0
+    },
+    {
+     "bahan": "sedotan",
+     "qty": 1.0
+    },
+    {
+     "bahan": "plastik cup",
+     "qty": 1.0
+    }
+   ],
+   "hpp_wb": 4425.67,
+   "saran_wb": 15489.85
+  },
+  {
+   "menu": "Lime Blast Cooler",
+   "kategori": "Minuman Segar",
+   "mult": 2.75,
+   "jual": 19000,
+   "komponen": [
+    {
+     "bahan": "konsentrat gula / gula cair",
+     "qty": 50.0
+    },
+    {
+     "bahan": "nutrisari jeruk nipis",
+     "qty": 11.0
+    },
+    {
+     "bahan": "lemon peras",
+     "qty": 0.4
+    },
+    {
+     "bahan": "es batu",
+     "qty": 200.0
+    },
+    {
+     "bahan": "biji selasih",
+     "qty": 5.0
+    },
+    {
+     "bahan": "air biasa",
+     "qty": 113.0
+    },
+    {
+     "bahan": "cup 16 oz ( 500 ml )",
+     "qty": 1.0
+    },
+    {
+     "bahan": "sedotan",
+     "qty": 1.0
+    },
+    {
+     "bahan": "plastik cup",
+     "qty": 1.0
+    }
+   ],
+   "hpp_wb": 6763.76,
+   "saran_wb": 18600.33
+  },
+  {
+   "menu": "Berry Snow Fantasy",
+   "kategori": "Frozen Ice",
+   "mult": 2.0,
+   "jual": 22000,
+   "komponen": [
+    {
+     "bahan": "strawberry",
+     "qty": 70.0
+    },
+    {
+     "bahan": "marjan strawberry",
+     "qty": 16.0
+    },
+    {
+     "bahan": "konsentrat gula / gula cair",
+     "qty": 50.0
+    },
+    {
+     "bahan": "es batu",
+     "qty": 120.0
+    },
+    {
+     "bahan": "air biasa",
+     "qty": 150.0
+    },
+    {
+     "bahan": "ice cream",
+     "qty": 25.0
+    },
+    {
+     "bahan": "konsentrat gula / gula cair",
+     "qty": 50.0
+    },
+    {
+     "bahan": "strawberry",
+     "qty": 28.5714
+    },
+    {
+     "bahan": "sendok higienis",
+     "qty": 1.0
+    },
+    {
+     "bahan": "cup 16 oz ( 500 ml )",
+     "qty": 1.0
+    },
+    {
+     "bahan": "kresek transparent",
+     "qty": 1.0
+    }
+   ],
+   "hpp_wb": 11339.75,
+   "saran_wb": 22679.51
+  },
+  {
+   "menu": "Avocado Snow Cream",
+   "kategori": "Frozen Ice",
+   "mult": 2.5,
+   "jual": 22000,
+   "komponen": [
+    {
+     "bahan": "alpukat super",
+     "qty": 90.0
+    },
+    {
+     "bahan": "skm",
+     "qty": 52.0
+    },
+    {
+     "bahan": "evavorasi",
+     "qty": 16.0
+    },
+    {
+     "bahan": "konsentrat gula / gula cair",
+     "qty": 50.0
+    },
+    {
+     "bahan": "air biasa",
+     "qty": 100.0
+    },
+    {
+     "bahan": "es batu",
+     "qty": 120.0
+    },
+    {
+     "bahan": "ice cream",
+     "qty": 25.0
+    },
+    {
+     "bahan": "sendok higienis",
+     "qty": 1.0
+    },
+    {
+     "bahan": "cup 16 oz ( 500 ml )",
+     "qty": 1.0
+    },
+    {
+     "bahan": "kresek transparent",
+     "qty": 1.0
+    }
+   ],
+   "hpp_wb": 8800.96,
+   "saran_wb": 22002.39
+  },
+  {
+   "menu": "Mango Snow Paradise",
+   "kategori": "Frozen Ice",
+   "mult": 2.5,
+   "jual": 20000,
+   "komponen": [
+    {
+     "bahan": "mangga harumanis",
+     "qty": 115.0
+    },
+    {
+     "bahan": "syrup double fresh mangga",
+     "qty": 16.0
+    },
+    {
+     "bahan": "konsentrat gula / gula cair",
+     "qty": 50.0
+    },
+    {
+     "bahan": "air biasa",
+     "qty": 50.0
+    },
+    {
+     "bahan": "es batu",
+     "qty": 110.0
+    },
+    {
+     "bahan": "ice cream",
+     "qty": 25.0
+    },
+    {
+     "bahan": "sendok higienis",
+     "qty": 1.0
+    },
+    {
+     "bahan": "cup 16 oz ( 500 ml )",
+     "qty": 1.0
+    },
+    {
+     "bahan": "kresek transparent",
+     "qty": 1.0
+    }
+   ],
+   "hpp_wb": 8149.07,
+   "saran_wb": 20372.66
+  },
+  {
+   "menu": "Dragon Mango Avalanche",
+   "kategori": "Frozen Ice",
+   "mult": 2.5,
+   "jual": 24000,
+   "komponen": [
+    {
+     "bahan": "mangga harumanis",
+     "qty": 115.0
+    },
+    {
+     "bahan": "syrup double fresh mangga",
+     "qty": 16.0
+    },
+    {
+     "bahan": "konsentrat gula / gula cair",
+     "qty": 50.0
+    },
+    {
+     "bahan": "air biasa",
+     "qty": 50.0
+    },
+    {
+     "bahan": "es batu",
+     "qty": 110.0
+    },
+    {
+     "bahan": "ice cream",
+     "qty": 25.0
+    },
+    {
+     "bahan": "buah naga",
+     "qty": 50.0
+    },
+    {
+     "bahan": "sendok higienis",
+     "qty": 1.0
+    },
+    {
+     "bahan": "cup 16 oz ( 500 ml )",
+     "qty": 1.0
+    },
+    {
+     "bahan": "kresek transparent",
+     "qty": 1.0
+    }
+   ],
+   "hpp_wb": 9549.07,
+   "saran_wb": 23872.66
+  },
+  {
+   "menu": "Golden Mango Delight",
+   "kategori": "Dessert",
+   "mult": 2.25,
+   "jual": 23000,
+   "komponen": [
+    {
+     "bahan": "mangga harumanis",
+     "qty": 70.0
+    },
+    {
+     "bahan": "syrup double fresh mangga",
+     "qty": 16.0
+    },
+    {
+     "bahan": "yakult",
+     "qty": 65.0
+    },
+    {
+     "bahan": "es batu",
+     "qty": 75.0
+    },
+    {
+     "bahan": "nata de coco",
+     "qty": 50.0
+    },
+    {
+     "bahan": "biji selasih",
+     "qty": 5.0
+    },
+    {
+     "bahan": "ice cream",
+     "qty": 30.0
+    },
+    {
+     "bahan": "pudding mangga",
+     "qty": 30.0
+    },
+    {
+     "bahan": "sendok higienis",
+     "qty": 1.0
+    },
+    {
+     "bahan": "cup 16 oz ( 500 ml )",
+     "qty": 1.0
+    },
+    {
+     "bahan": "kresek transparent",
+     "qty": 1.0
+    }
+   ],
+   "hpp_wb": 10247.6,
+   "saran_wb": 23057.09
+  },
+  {
+   "menu": "Berry Mango Paradise",
+   "kategori": "Dessert",
+   "mult": 2.0,
+   "jual": 24000,
+   "komponen": [
+    {
+     "bahan": "mangga harumanis",
+     "qty": 70.0
+    },
+    {
+     "bahan": "syrup double fresh mangga",
+     "qty": 16.0
+    },
+    {
+     "bahan": "yakult",
+     "qty": 65.0
+    },
+    {
+     "bahan": "strawberry",
+     "qty": 28.5714
+    },
+    {
+     "bahan": "es batu",
+     "qty": 75.0
+    },
+    {
+     "bahan": "nata de coco",
+     "qty": 50.0
+    },
+    {
+     "bahan": "biji selasih",
+     "qty": 5.0
+    },
+    {
+     "bahan": "ice cream",
+     "qty": 30.0
+    },
+    {
+     "bahan": "pudding mangga",
+     "qty": 30.0
+    },
+    {
+     "bahan": "sendok higienis",
+     "qty": 1.0
+    },
+    {
+     "bahan": "cup 16 oz ( 500 ml )",
+     "qty": 1.0
+    },
+    {
+     "bahan": "kresek transparent",
+     "qty": 1.0
+    }
+   ],
+   "hpp_wb": 11961.88,
+   "saran_wb": 23923.76
+  },
+  {
+   "menu": "Kiwi Mango Paradise",
+   "kategori": "Dessert",
+   "mult": 2.0,
+   "jual": 25000,
+   "komponen": [
+    {
+     "bahan": "mangga harumanis",
+     "qty": 70.0
+    },
+    {
+     "bahan": "kiwi",
+     "qty": 25.0
+    },
+    {
+     "bahan": "syrup double fresh mangga",
+     "qty": 16.0
+    },
+    {
+     "bahan": "yakult",
+     "qty": 65.0
+    },
+    {
+     "bahan": "es batu",
+     "qty": 75.0
+    },
+    {
+     "bahan": "nata de coco",
+     "qty": 50.0
+    },
+    {
+     "bahan": "biji selasih",
+     "qty": 5.0
+    },
+    {
+     "bahan": "ice cream",
+     "qty": 30.0
+    },
+    {
+     "bahan": "pudding mangga",
+     "qty": 30.0
+    },
+    {
+     "bahan": "sendok higienis",
+     "qty": 1.0
+    },
+    {
+     "bahan": "cup 16 oz ( 500 ml )",
+     "qty": 1.0
+    },
+    {
+     "bahan": "kresek transparent",
+     "qty": 1.0
+    }
+   ],
+   "hpp_wb": 12372.6,
+   "saran_wb": 24745.19
+  },
+  {
+   "menu": "Avocado Dream Bowl",
+   "kategori": "Dessert",
+   "mult": 2.5,
+   "jual": 22000,
+   "komponen": [
+    {
+     "bahan": "alpukat super",
+     "qty": 70.0
+    },
+    {
+     "bahan": "pisang lumut",
+     "qty": 50.0
+    },
+    {
+     "bahan": "skm",
+     "qty": 50.0
+    },
+    {
+     "bahan": "evavorasi",
+     "qty": 16.0
+    },
+    {
+     "bahan": "es batu",
+     "qty": 75.0
+    },
+    {
+     "bahan": "nata de coco",
+     "qty": 50.0
+    },
+    {
+     "bahan": "ice cream",
+     "qty": 30.0
+    },
+    {
+     "bahan": "sendok higienis",
+     "qty": 1.0
+    },
+    {
+     "bahan": "cup 16 oz ( 500 ml )",
+     "qty": 1.0
+    },
+    {
+     "bahan": "kresek transparent",
+     "qty": 1.0
+    }
+   ],
+   "hpp_wb": 8956.47,
+   "saran_wb": 22391.17
+  },
+  {
+   "menu": "1 Baso urat besar",
+   "kategori": "Side Dish & Topping",
+   "mult": 2.5,
+   "jual": 7000,
+   "komponen": [
+    {
+     "bahan": "baso urat besar",
+     "qty": 1
+    }
+   ],
+   "hpp_wb": 2766.67,
+   "saran_wb": 6916.67
+  },
+  {
+   "menu": "1 Baso halus besar",
+   "kategori": "Side Dish & Topping",
+   "mult": 2.5,
+   "jual": 8000,
+   "komponen": [
+    {
+     "bahan": "baso halus besar",
+     "qty": 1
+    }
+   ],
+   "hpp_wb": 3187.5,
+   "saran_wb": 7968.75
+  },
+  {
+   "menu": "1 Baso Tahu",
+   "kategori": "Side Dish & Topping",
+   "mult": 2.5,
+   "jual": 6000,
+   "komponen": [
+    {
+     "bahan": "baso tahu",
+     "qty": 1
+    }
+   ],
+   "hpp_wb": 2460.0,
+   "saran_wb": 6150.0
+  },
+  {
+   "menu": "1 Siomay",
+   "kategori": "Side Dish & Topping",
+   "mult": 2.5,
+   "jual": 5000,
+   "komponen": [
+    {
+     "bahan": "siomay",
+     "qty": 1
+    }
+   ],
+   "hpp_wb": 1900.0,
+   "saran_wb": 4750.0
+  },
+  {
+   "menu": "2 Baso urat kecil",
+   "kategori": "Side Dish & Topping",
+   "mult": 3.5,
+   "jual": 5000,
+   "komponen": [
+    {
+     "bahan": "baso urat kecil",
+     "qty": 2
+    }
+   ],
+   "hpp_wb": 1509.09,
+   "saran_wb": 5281.82
+  },
+  {
+   "menu": "2 Baso halus kecil",
+   "kategori": "Side Dish & Topping",
+   "mult": 3.5,
+   "jual": 5000,
+   "komponen": [
+    {
+     "bahan": "baso halus kecil",
+     "qty": 2
+    }
+   ],
+   "hpp_wb": 1428.0,
+   "saran_wb": 4998.0
+  },
+  {
+   "menu": "2 Baso aci jando",
+   "kategori": "Side Dish & Topping",
+   "mult": 3.0,
+   "jual": 3000,
+   "komponen": [
+    {
+     "bahan": "baso aci jando",
+     "qty": 2
+    }
+   ],
+   "hpp_wb": 1000.0,
+   "saran_wb": 3000.0
+  },
+  {
+   "menu": "2 Cirawang",
+   "kategori": "Side Dish & Topping",
+   "mult": 2.5,
+   "jual": 3000,
+   "komponen": [
+    {
+     "bahan": "cirawang",
+     "qty": 2
+    }
+   ],
+   "hpp_wb": 1111.11,
+   "saran_wb": 2777.78
+  },
+  {
+   "menu": "2 Baso aci ori",
+   "kategori": "Side Dish & Topping",
+   "mult": 2.5,
+   "jual": 2000,
+   "komponen": [
+    {
+     "bahan": "baso aci original",
+     "qty": 2
+    }
+   ],
+   "hpp_wb": 714.29,
+   "saran_wb": 1785.71
+  },
+  {
+   "menu": "2 Aci lember",
+   "kategori": "Side Dish & Topping",
+   "mult": 2.5,
+   "jual": 4000,
+   "komponen": [
+    {
+     "bahan": "aci lember",
+     "qty": 2
+    }
+   ],
+   "hpp_wb": 1555.56,
+   "saran_wb": 3888.89
+  },
+  {
+   "menu": "Oseng Tetelan (ori/pedas gurih/pedas manis)",
+   "kategori": "Side Dish & Topping",
+   "mult": 1.0,
+   "jual": 6500,
+   "komponen": [
+    {
+     "bahan": "tetelan ori, oseng pedas gurih / pedas manis",
+     "qty": 1
+    }
+   ],
+   "hpp_wb": 6250.0,
+   "saran_wb": 6250.0
+  },
+  {
+   "menu": "Oseng Jando (ori/pedas manis/pedas gurih)",
+   "kategori": "Side Dish & Topping",
+   "mult": 1.0,
+   "jual": 6500,
+   "komponen": [
+    {
+     "bahan": "jando ori, oseng pedas manis / pedas gurih",
+     "qty": 1
+    }
+   ],
+   "hpp_wb": 5500.0,
+   "saran_wb": 5500.0
+  },
+  {
+   "menu": "Risol Mayooopa",
+   "kategori": "Side Dish & Topping",
+   "mult": 2.0,
+   "jual": 6500,
+   "komponen": [
+    {
+     "bahan": "risol mayooopa",
+     "qty": 1
+    }
+   ],
+   "hpp_wb": 3125.0,
+   "saran_wb": 6250.0
+  },
+  {
+   "menu": "Risol Tetelan Pedas Gurih",
+   "kategori": "Side Dish & Topping",
+   "mult": 2.0,
+   "jual": 6500,
+   "komponen": [
+    {
+     "bahan": "risol tetelan pedas gurih",
+     "qty": 1
+    }
+   ],
+   "hpp_wb": 3080.0,
+   "saran_wb": 6160.0
+  },
+  {
+   "menu": "Risol Jando Pedas Manis",
+   "kategori": "Side Dish & Topping",
+   "mult": 2.0,
+   "jual": 6500,
+   "komponen": [
+    {
+     "bahan": "risol jando pedas manis",
+     "qty": 1
+    }
+   ],
+   "hpp_wb": 3200.0,
+   "saran_wb": 6400.0
+  },
+  {
+   "menu": "Nasi Putih",
+   "kategori": "Side Dish & Topping",
+   "mult": 2.857,
+   "jual": 5000,
+   "komponen": [
+    {
+     "bahan": "nasi putih",
+     "qty": 1
+    }
+   ],
+   "hpp_wb": 1750.0,
+   "saran_wb": 4999.75
+  },
+  {
+   "menu": "Kerupuk Pangsit",
+   "kategori": "Side Dish & Topping",
+   "mult": 2.083,
+   "jual": 1000,
+   "komponen": [
+    {
+     "bahan": "kerupuk pangsit",
+     "qty": 1
+    }
+   ],
+   "hpp_wb": 480.0,
+   "saran_wb": 999.84
+  }
+ ],
+ "paketYamin": [
+  {
+   "menu": "Paket Yamin Original",
+   "base": "BMB Original (Yamin Ori)",
+   "base_mult": 2.5,
+   "jual": 11000
+  },
+  {
+   "menu": "Paket Yamin Misdasem",
+   "base": "BMB Misdasem (Yamin Misdasem)",
+   "base_mult": 2.0,
+   "jual": 15000
+  }
+ ]
+}

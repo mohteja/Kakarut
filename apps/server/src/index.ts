@@ -1,0 +1,44 @@
+import { serve } from "@hono/node-server";
+import { serveStatic } from "@hono/node-server/serve-static";
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { createApp } from "./app";
+import { env } from "./config/env";
+import { getStorage, localUploadDir } from "./modules/upload/storage";
+
+const app = createApp();
+const here = path.dirname(fileURLToPath(import.meta.url));
+
+// File upload mode lokal → sajikan dari disk
+const storage = getStorage();
+if (storage.mode === "local") {
+  app.use(
+    "/uploads/*",
+    serveStatic({
+      root: path.relative(process.cwd(), localUploadDir),
+      rewriteRequestPath: (p) => p.replace(/^\/uploads/, ""),
+    }),
+  );
+}
+
+// SPA hasil build (apps/web/dist) — satu proses untuk API + frontend
+const webDist = path.resolve(here, "../../web/dist");
+if (existsSync(webDist)) {
+  app.use("/*", serveStatic({ root: path.relative(process.cwd(), webDist) }));
+  const indexHtml = readFileSync(path.join(webDist, "index.html"), "utf8");
+  app.notFound((c) => {
+    if (c.req.path.startsWith("/api") || c.req.path.startsWith("/uploads")) {
+      return c.json({ error: "Tidak ditemukan" }, 404);
+    }
+    return c.html(indexHtml); // history fallback untuk react-router
+  });
+} else {
+  app.notFound((c) => c.json({ error: "Tidak ditemukan" }, 404));
+}
+
+serve({ fetch: app.fetch, port: env.PORT }, (info) => {
+  console.log(`Kakarut POS berjalan di http://localhost:${info.port}`);
+  console.log(`Mode penyimpanan upload: ${storage.mode}`);
+  console.log(`Frontend: ${existsSync(webDist) ? "tersedia (dist)" : "belum di-build"}`);
+});
