@@ -15,6 +15,7 @@ import { CabangPage } from "./pages/pengaturan/CabangPage";
 import { KaryawanPage } from "./pages/pengaturan/KaryawanPage";
 import { PerusahaanPage } from "./pages/pengaturan/PerusahaanPage";
 import { StokPage } from "./pages/stok/StokPage";
+import { SistemPage } from "./pages/superadmin/SistemPage";
 import { TenantsPage } from "./pages/superadmin/TenantsPage";
 
 export default function App() {
@@ -39,7 +40,12 @@ export default function App() {
       <Routes>
         <Route path="/login" element={<Navigate to={beranda} replace />} />
         <Route element={<Layout />}>
-          {isSuperAdmin && <Route path="/superadmin" element={<TenantsPage />} />}
+          {isSuperAdmin && (
+            <>
+              <Route path="/superadmin" element={<TenantsPage />} />
+              <Route path="/superadmin/sistem" element={<SistemPage />} />
+            </>
+          )}
           {!isSuperAdmin && (
             <>
               <Route path="/kasir" element={<KasirPage />} />

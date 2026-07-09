@@ -79,8 +79,20 @@ npm run e2e -w @kakarut/web  # Playwright: login → POS → checkout → struk 
 3. (Opsional) isi kredensial **Cloudflare R2** (`R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`,
    `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, `R2_PUBLIC_URL`) — tanpa ini upload
    tersimpan di disk lokal server.
-4. `npm run db:migrate && npm run seed` (seed opsional di produksi).
+4. `npm run seed` untuk deploy pertama (membuat super-admin + tenant contoh).
 5. `npm run build && npm start` — aplikasi lengkap di satu port.
+
+### Migrasi database otomatis
+
+Setiap rilis fitur baru menyertakan file migrasi di `apps/server/drizzle/`.
+Saat server start, migrasi yang belum terpasang **diterapkan otomatis**
+(`AUTO_MIGRATE`, default aktif) — deploy versi baru tidak butuh langkah manual.
+Aman dijalankan berulang dan multi-instance (advisory lock PostgreSQL).
+
+- Pantau & jalankan manual: panel super-admin → **Sistem & Migrasi**
+  (`GET/POST /api/admin/sistem`).
+- Nonaktifkan dengan `AUTO_MIGRATE=false` bila migrasi dikelola terpisah
+  (mis. entrypoint Docker/CI menjalankan `npm run db:migrate`).
 
 ## Ringkasan API
 

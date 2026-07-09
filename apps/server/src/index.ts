@@ -5,7 +5,17 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createApp } from "./app";
 import { env } from "./config/env";
+import { runMigrations } from "./db/migrate";
 import { getStorage, localUploadDir } from "./modules/upload/storage";
+
+// Migrasi otomatis saat boot: deploy versi baru langsung menerapkan skema
+// terbaru. Idempotent + advisory lock (aman multi-instance).
+// Nonaktifkan dengan AUTO_MIGRATE=false bila migrasi dikelola terpisah.
+if (env.AUTO_MIGRATE) {
+  console.log("Menjalankan migrasi database (AUTO_MIGRATE)…");
+  await runMigrations();
+  console.log("Migrasi database selesai.");
+}
 
 const app = createApp();
 const here = path.dirname(fileURLToPath(import.meta.url));

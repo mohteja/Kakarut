@@ -10,6 +10,7 @@ import {
   requireSuperAdmin,
   type AppEnv,
 } from "./middleware/auth";
+import { adminSystemRoutes } from "./modules/admin-system/routes";
 import { adminTenantsRoutes } from "./modules/admin-tenants/routes";
 import { authRoutes } from "./modules/auth/routes";
 import { bahanRoutes } from "./modules/bahan/routes";
@@ -34,7 +35,8 @@ export function createApp() {
     .route("/auth", authRoutes)
     // Platform super-admin
     .use("/admin/*", requireAuth, requireSuperAdmin)
-    .route("/admin/tenants", adminTenantsRoutes);
+    .route("/admin/tenants", adminTenantsRoutes)
+    .route("/admin/sistem", adminSystemRoutes);
 
   // Rute internal perusahaan (butuh membership)
   const tenant = new Hono<AppEnv>()

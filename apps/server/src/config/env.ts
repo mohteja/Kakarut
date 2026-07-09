@@ -15,6 +15,12 @@ const EnvSchema = z.object({
   JWT_SECRET: z.string().optional(),
   JWT_EXPIRES_IN: z.string().default("12h"),
 
+  /** jalankan migrasi database otomatis saat server start (default: aktif) */
+  AUTO_MIGRATE: z
+    .string()
+    .default("true")
+    .transform((v) => v !== "false" && v !== "0"),
+
   R2_ACCOUNT_ID: z.string().optional(),
   R2_ACCESS_KEY_ID: z.string().optional(),
   R2_SECRET_ACCESS_KEY: z.string().optional(),

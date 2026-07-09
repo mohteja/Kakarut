@@ -54,9 +54,14 @@ export function Layout() {
 
         <nav className="flex flex-1 flex-col gap-1">
           {isSuperAdmin ? (
-            <NavLink to="/superadmin" className={linkClass}>
-              🏢 Tenant
-            </NavLink>
+            <>
+              <NavLink to="/superadmin" end className={linkClass}>
+                🏢 Tenant
+              </NavLink>
+              <NavLink to="/superadmin/sistem" className={linkClass}>
+                🗄 Sistem &amp; Migrasi
+              </NavLink>
+            </>
           ) : (
             <>
               <NavLink to="/kasir" className={linkClass}>
