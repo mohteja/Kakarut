@@ -19,6 +19,8 @@ interface Company {
   pb1Enabled: boolean;
   pb1Rate: number;
   plan: string;
+  receiptFooter: string | null;
+  receiptShowAlamat: boolean;
 }
 
 export function PerusahaanPage() {
@@ -34,6 +36,8 @@ export function PerusahaanPage() {
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [pb1Enabled, setPb1Enabled] = useState(false);
   const [pb1Rate, setPb1Rate] = useState("10");
+  const [receiptFooter, setReceiptFooter] = useState("");
+  const [receiptShowAlamat, setReceiptShowAlamat] = useState(true);
   const [uploadError, setUploadError] = useState<unknown>(null);
 
   useEffect(() => {
@@ -44,6 +48,8 @@ export function PerusahaanPage() {
     setLogoUrl(company.logoUrl);
     setPb1Enabled(company.pb1Enabled);
     setPb1Rate(String(company.pb1Rate));
+    setReceiptFooter(company.receiptFooter ?? "");
+    setReceiptShowAlamat(company.receiptShowAlamat);
   }, [company]);
 
   const simpan = useMutation({
@@ -57,6 +63,8 @@ export function PerusahaanPage() {
           logo_url: logoUrl,
           pb1_enabled: pb1Enabled,
           pb1_rate: Number(pb1Rate),
+          receipt_footer: receiptFooter || null,
+          receipt_show_alamat: receiptShowAlamat,
         },
       }),
     onSuccess: () => {
@@ -116,6 +124,25 @@ export function PerusahaanPage() {
             />
           </div>
           <ErrorText error={uploadError} />
+        </div>
+        <div className="rounded-lg border border-stone-200 p-3">
+          <div className="mb-2 text-sm font-semibold text-stone-700">Struk</div>
+          <label className="mb-1 block text-sm font-medium">Teks footer struk</label>
+          <input
+            value={receiptFooter}
+            onChange={(e) => setReceiptFooter(e.target.value)}
+            maxLength={200}
+            placeholder="mis. Terima kasih! Ikuti IG @basooopa"
+            className={inputClass}
+          />
+          <label className="mt-2 flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={receiptShowAlamat}
+              onChange={(e) => setReceiptShowAlamat(e.target.checked)}
+            />
+            Tampilkan alamat &amp; telepon di struk
+          </label>
         </div>
         <div className="rounded-lg border border-stone-200 p-3">
           <label className="flex items-center gap-2 text-sm font-medium">
