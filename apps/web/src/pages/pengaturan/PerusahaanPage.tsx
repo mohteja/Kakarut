@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
+import { ImageUpload } from "../../components/ImageUpload";
 import {
   Card,
   ErrorText,
@@ -38,7 +39,6 @@ export function PerusahaanPage() {
   const [pb1Rate, setPb1Rate] = useState("10");
   const [receiptFooter, setReceiptFooter] = useState("");
   const [receiptShowAlamat, setReceiptShowAlamat] = useState(true);
-  const [uploadError, setUploadError] = useState<unknown>(null);
 
   useEffect(() => {
     if (!company) return;
@@ -73,21 +73,6 @@ export function PerusahaanPage() {
     },
   });
 
-  async function uploadLogo(file: File) {
-    setUploadError(null);
-    try {
-      const fd = new FormData();
-      fd.append("file", file);
-      const { url } = await api<{ url: string }>("/upload?tujuan=logo", {
-        method: "POST",
-        formData: fd,
-      });
-      setLogoUrl(url);
-    } catch (e) {
-      setUploadError(e);
-    }
-  }
-
   if (isLoading || !company) return <Spinner />;
 
   return (
@@ -111,19 +96,7 @@ export function PerusahaanPage() {
         </div>
         <div>
           <label className="mb-1 block text-sm font-medium">Logo</label>
-          <div className="flex items-center gap-3">
-            {logoUrl && <img src={logoUrl} alt="logo" className="h-12 w-12 rounded-lg object-cover" />}
-            <input
-              type="file"
-              accept="image/jpeg,image/png,image/webp"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) void uploadLogo(f);
-              }}
-              className="text-sm"
-            />
-          </div>
-          <ErrorText error={uploadError} />
+          <ImageUpload value={logoUrl} onChange={setLogoUrl} tujuan="logo" placeholder="🏪" />
         </div>
         <div className="rounded-lg border border-stone-200 p-3">
           <div className="mb-2 text-sm font-semibold text-stone-700">Struk</div>
