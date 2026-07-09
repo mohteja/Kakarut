@@ -47,6 +47,10 @@ export function BahanPage() {
   });
   const [form, setForm] = useState<FormState | null>(null);
   const [cari, setCari] = useState("");
+  const [filterJenis, setFilterJenis] = useState<"semua" | "produksi" | "beli">("semua");
+  const [filterKategori, setFilterKategori] = useState<"semua" | "baso" | "minuman" | "lain">(
+    "semua",
+  );
 
   const simpan = useMutation({
     mutationFn: (f: FormState) => {
@@ -87,9 +91,19 @@ export function BahanPage() {
 
   if (isLoading) return <Spinner />;
 
-  const tampil = (bahan ?? []).filter((b) =>
-    b.nama.toLowerCase().includes(cari.toLowerCase()),
-  );
+  const semua = bahan ?? [];
+  const jumlah = (fn: (b: BahanDto) => boolean) => semua.filter(fn).length;
+  const tampil = semua
+    .filter((b) => b.nama.toLowerCase().includes(cari.toLowerCase()))
+    .filter((b) => (filterJenis === "semua" ? true : b.pengadaan === filterJenis))
+    .filter((b) => (filterKategori === "semua" ? true : b.kategori === filterKategori));
+  const adaFilter = cari !== "" || filterJenis !== "semua" || filterKategori !== "semua";
+
+  function resetFilter() {
+    setCari("");
+    setFilterJenis("semua");
+    setFilterKategori("semua");
+  }
 
   return (
     <div>
@@ -100,15 +114,48 @@ export function BahanPage() {
           </button>
         }
       >
-        Bahan Baku ({bahan?.length ?? 0})
+        Bahan Baku ({adaFilter ? `${tampil.length} dari ${semua.length}` : semua.length})
       </PageTitle>
 
-      <input
-        value={cari}
-        onChange={(e) => setCari(e.target.value)}
-        placeholder="Cari bahan…"
-        className={`${inputClass} mb-3 max-w-xs`}
-      />
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <input
+          value={cari}
+          onChange={(e) => setCari(e.target.value)}
+          placeholder="Cari bahan…"
+          className={`${inputClass} max-w-56`}
+        />
+        <select
+          value={filterJenis}
+          onChange={(e) => setFilterJenis(e.target.value as typeof filterJenis)}
+          className={`${inputClass} max-w-56`}
+          aria-label="Filter jenis pengadaan"
+        >
+          <option value="semua">Semua jenis ({semua.length})</option>
+          <option value="produksi">
+            Produksi sendiri ({jumlah((b) => b.pengadaan === "produksi")})
+          </option>
+          <option value="beli">Beli jadi ({jumlah((b) => b.pengadaan === "beli")})</option>
+        </select>
+        <select
+          value={filterKategori}
+          onChange={(e) => setFilterKategori(e.target.value as typeof filterKategori)}
+          className={`${inputClass} max-w-48`}
+          aria-label="Filter kategori"
+        >
+          <option value="semua">Semua kategori</option>
+          <option value="baso">baso ({jumlah((b) => b.kategori === "baso")})</option>
+          <option value="minuman">minuman ({jumlah((b) => b.kategori === "minuman")})</option>
+          <option value="lain">lain ({jumlah((b) => b.kategori === "lain")})</option>
+        </select>
+        {adaFilter && (
+          <button
+            onClick={resetFilter}
+            className="text-sm font-medium text-orange-600 hover:underline"
+          >
+            Reset filter
+          </button>
+        )}
+      </div>
 
       <ErrorText error={hapus.error} />
 
@@ -192,6 +239,19 @@ export function BahanPage() {
                 </td>
               </tr>
             ))}
+            {tampil.length === 0 && (
+              <tr>
+                <td colSpan={8} className="py-8 text-center text-sm text-stone-400">
+                  Tidak ada bahan yang cocok dengan filter.{" "}
+                  <button
+                    onClick={resetFilter}
+                    className="font-medium text-orange-600 hover:underline"
+                  >
+                    Reset filter
+                  </button>
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </Card>
