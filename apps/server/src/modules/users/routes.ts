@@ -54,6 +54,9 @@ export const karyawanRoutes = new Hono<AppEnv>()
   .post("/", zValidator("json", KaryawanBody), async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");
+    if (body.role === "owner" && auth.role !== "owner") {
+      throw new HTTPException(403, { message: "Hanya owner yang boleh menambah owner" });
+    }
     if (body.role === "cashier") {
       if (!body.branch_id) {
         throw new HTTPException(400, { message: "Kasir wajib punya cabang" });
@@ -98,6 +101,17 @@ export const karyawanRoutes = new Hono<AppEnv>()
         and(eq(memberships.userId, userId), eq(memberships.companyId, auth.company_id!)),
       );
     if (!member) throw new HTTPException(404, { message: "Karyawan tidak ditemukan" });
+
+    // Guard hierarki: admin tidak boleh menyentuh akun owner ataupun
+    // memberikan peran owner (mencegah eskalasi privilese).
+    if (auth.role !== "owner") {
+      if (member.role === "owner") {
+        throw new HTTPException(403, { message: "Hanya owner yang boleh mengubah akun owner" });
+      }
+      if (body.role === "owner") {
+        throw new HTTPException(403, { message: "Hanya owner yang boleh memberi peran owner" });
+      }
+    }
 
     const targetRole = body.role ?? member.role;
     const targetBranch =

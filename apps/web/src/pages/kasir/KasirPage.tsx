@@ -35,6 +35,14 @@ export function KasirPage() {
     queryKey: ["kategori"],
     queryFn: () => api<Kategori[]>("/kategori"),
   });
+  // Setelan PB1 terbaru dari server (snapshot login bisa basi bila
+  // pengaturan perusahaan diubah saat sesi kasir masih terbuka)
+  const { data: me } = useQuery({
+    queryKey: ["me"],
+    queryFn: () =>
+      api<{ company: { pb1_enabled: boolean; pb1_rate: number } | null }>("/auth/me"),
+  });
+  const pb1Conf = me?.company ?? auth?.company;
 
   const [aktifKategori, setAktifKategori] = useState<string | null>(null);
   const [cart, setCart] = useState<CartLine[]>([]);
@@ -84,9 +92,7 @@ export function KasirPage() {
   }
 
   const subtotal = cart.reduce((a, l) => a + l.menu.harga_jual * l.qty, 0);
-  const pb1 = auth?.company?.pb1_enabled
-    ? Math.round(subtotal * (auth.company.pb1_rate / 100))
-    : 0;
+  const pb1 = pb1Conf?.pb1_enabled ? Math.round(subtotal * (pb1Conf.pb1_rate / 100)) : 0;
 
   const bayar = useMutation({
     mutationFn: () =>
@@ -267,7 +273,7 @@ export function KasirPage() {
           </div>
           {pb1 > 0 && (
             <div className="flex justify-between text-sm text-stone-600">
-              <span>PB1 ({auth?.company?.pb1_rate}%)</span>
+              <span>PB1 ({pb1Conf?.pb1_rate}%)</span>
               <span>{formatRupiah(pb1)}</span>
             </div>
           )}

@@ -1,6 +1,7 @@
 import { zValidator } from "@hono/zod-validator";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { Hono } from "hono";
+import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { db } from "../../db/client";
 import { companies, ingredients, stockOpnames } from "../../db/schema";
@@ -38,6 +39,21 @@ export const stokRoutes = new Hono<AppEnv>()
         ? await pastikanCabang(body.branch_id, auth.company_id!)
         : await resolveBranchId(c);
 
+      // Gabungkan duplikat (entri terakhir menang) — dua baris opname dengan
+      // created_at identik membuat baseline saldo tidak deterministik.
+      const qtyByIngredient = new Map<string, number>();
+      for (const item of body.items) qtyByIngredient.set(item.ingredient_id, item.qty);
+
+      // Semua bahan harus milik perusahaan pemanggil
+      const ids = [...qtyByIngredient.keys()];
+      const valid = await db
+        .select({ id: ingredients.id })
+        .from(ingredients)
+        .where(and(eq(ingredients.companyId, auth.company_id!), inArray(ingredients.id, ids)));
+      if (valid.length !== ids.length) {
+        throw new HTTPException(400, { message: "Ada bahan yang tidak valid" });
+      }
+
       const [company] = await db
         .select({ timezone: companies.timezone })
         .from(companies)
@@ -47,11 +63,11 @@ export const stokRoutes = new Hono<AppEnv>()
       const rows = await db
         .insert(stockOpnames)
         .values(
-          body.items.map((item) => ({
+          [...qtyByIngredient].map(([ingredientId, qty]) => ({
             companyId: auth.company_id!,
             branchId,
-            ingredientId: item.ingredient_id,
-            qty: item.qty,
+            ingredientId,
+            qty,
             opnameDate: today,
             catatan: body.catatan ?? null,
             userId: auth.sub,

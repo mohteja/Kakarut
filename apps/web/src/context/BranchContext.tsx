@@ -24,7 +24,7 @@ export function BranchProvider({ children }: { children: ReactNode }) {
   const { auth } = useAuth();
   const isKasir = auth?.user.role === "cashier";
   const [branchId, setBranchId] = useState<string | null>(
-    () => localStorage.getItem("kakarut.branch") || null,
+    () => (isKasir ? null : localStorage.getItem("kakarut.branch") || null),
   );
 
   const { data: cabang = [] } = useQuery({
@@ -33,9 +33,16 @@ export function BranchProvider({ children }: { children: ReactNode }) {
     enabled: Boolean(auth?.user.company_id) && !isKasir,
   });
 
+  // Validasi pilihan tersimpan: bila bukan cabang aktif milik perusahaan ini
+  // (mis. sisa dari akun/perusahaan lain di browser yang sama), reset ke
+  // cabang aktif pertama.
   useEffect(() => {
-    if (!isKasir && !branchId && cabang.length > 0) {
-      setBranchId(cabang[0].id);
+    if (isKasir || cabang.length === 0) return;
+    const valid = branchId && cabang.some((b) => b.id === branchId && b.is_active);
+    if (!valid) {
+      const pertama = cabang.find((b) => b.is_active) ?? cabang[0];
+      localStorage.setItem("kakarut.branch", pertama.id);
+      setBranchId(pertama.id);
     }
   }, [cabang, branchId, isKasir]);
 
@@ -44,6 +51,7 @@ export function BranchProvider({ children }: { children: ReactNode }) {
     setBranchId(id);
   };
 
+  // Kasir tidak pernah mengirim branch_id — server mengunci ke cabangnya.
   const branchQuery = !isKasir && branchId ? `?branch_id=${branchId}` : "";
 
   return (

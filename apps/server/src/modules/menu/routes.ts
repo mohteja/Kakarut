@@ -1,11 +1,11 @@
 import { zValidator } from "@hono/zod-validator";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { PANDUAN_MARKUP } from "@kakarut/shared";
-import { db } from "../../db/client";
-import { menuComponents, menus } from "../../db/schema";
+import { db, type Tx } from "../../db/client";
+import { ingredients, menuComponents, menus } from "../../db/schema";
 import { requireRole, type AppEnv } from "../../middleware/auth";
 import { loadKatalog, toMenuDto } from "./service";
 
@@ -38,18 +38,51 @@ function validatePaket(body: z.infer<typeof MenuBody>) {
   }
 }
 
+/** Semua referensi (bahan komponen, menu dasar) harus milik perusahaan pemanggil. */
+async function validateRefs(
+  companyId: string,
+  body: z.infer<typeof MenuBody>,
+  selfId?: string,
+) {
+  const ids = [...new Set(body.komponen.map((k) => k.ingredient_id))];
+  if (ids.length > 0) {
+    const rows = await db
+      .select({ id: ingredients.id })
+      .from(ingredients)
+      .where(and(eq(ingredients.companyId, companyId), inArray(ingredients.id, ids)));
+    if (rows.length !== ids.length) {
+      throw new HTTPException(400, { message: "Ada bahan yang tidak valid" });
+    }
+  }
+  if (body.tipe === "paket" && body.base_menu_id) {
+    if (selfId && body.base_menu_id === selfId) {
+      throw new HTTPException(400, { message: "Menu dasar tidak boleh menu itu sendiri" });
+    }
+    const [base] = await db
+      .select({ id: menus.id, tipe: menus.tipe })
+      .from(menus)
+      .where(and(eq(menus.id, body.base_menu_id), eq(menus.companyId, companyId)));
+    if (!base || base.tipe !== "regular") {
+      throw new HTTPException(400, {
+        message: "Menu dasar harus menu reguler milik perusahaan Anda",
+      });
+    }
+  }
+}
+
 async function replaceKomponen(
+  tx: Tx,
   menuId: string,
   komponen: { ingredient_id: string; qty: number }[],
 ) {
-  await db.delete(menuComponents).where(eq(menuComponents.menuId, menuId));
+  await tx.delete(menuComponents).where(eq(menuComponents.menuId, menuId));
   if (komponen.length > 0) {
     // gabungkan bahan duplikat dengan menjumlah qty
     const byIngredient = new Map<string, number>();
     for (const k of komponen) {
       byIngredient.set(k.ingredient_id, (byIngredient.get(k.ingredient_id) ?? 0) + k.qty);
     }
-    await db.insert(menuComponents).values(
+    await tx.insert(menuComponents).values(
       [...byIngredient].map(([ingredientId, qty]) => ({ menuId, ingredientId, qty })),
     );
   }
@@ -79,24 +112,28 @@ export const menuRoutes = new Hono<AppEnv>()
     const auth = c.get("auth");
     const body = c.req.valid("json");
     validatePaket(body);
-    const [row] = await db
-      .insert(menus)
-      .values({
-        companyId: auth.company_id!,
-        categoryId: body.category_id,
-        nama: body.nama,
-        tipe: body.tipe,
-        mult: body.tipe === "regular" ? body.mult : null,
-        baseMenuId: body.tipe === "paket" ? body.base_menu_id : null,
-        baseMult: body.tipe === "paket" ? body.base_mult : null,
-        hargaJual: body.harga_jual,
-        imageUrl: body.image_url ?? null,
-        isActive: body.is_active,
-      })
-      .onConflictDoNothing()
-      .returning();
-    if (!row) throw new HTTPException(409, { message: `Menu "${body.nama}" sudah ada` });
-    await replaceKomponen(row.id, body.komponen);
+    await validateRefs(auth.company_id!, body);
+    const row = await db.transaction(async (tx) => {
+      const [menu] = await tx
+        .insert(menus)
+        .values({
+          companyId: auth.company_id!,
+          categoryId: body.category_id,
+          nama: body.nama,
+          tipe: body.tipe,
+          mult: body.tipe === "regular" ? body.mult : null,
+          baseMenuId: body.tipe === "paket" ? body.base_menu_id : null,
+          baseMult: body.tipe === "paket" ? body.base_mult : null,
+          hargaJual: body.harga_jual,
+          imageUrl: body.image_url ?? null,
+          isActive: body.is_active,
+        })
+        .onConflictDoNothing()
+        .returning();
+      if (!menu) throw new HTTPException(409, { message: `Menu "${body.nama}" sudah ada` });
+      await replaceKomponen(tx, menu.id, body.komponen);
+      return menu;
+    });
     const katalog = await loadKatalog(db, auth.company_id!);
     return c.json(toMenuDto(katalog.rows.find((r) => r.id === row.id)!, katalog), 201);
   })
@@ -108,26 +145,30 @@ export const menuRoutes = new Hono<AppEnv>()
       const auth = c.get("auth");
       const body = c.req.valid("json");
       validatePaket(body);
-      const [row] = await db
-        .update(menus)
-        .set({
-          categoryId: body.category_id,
-          nama: body.nama,
-          tipe: body.tipe,
-          mult: body.tipe === "regular" ? body.mult : null,
-          baseMenuId: body.tipe === "paket" ? body.base_menu_id : null,
-          baseMult: body.tipe === "paket" ? body.base_mult : null,
-          hargaJual: body.harga_jual,
-          imageUrl: body.image_url ?? null,
-          isActive: body.is_active,
-          updatedAt: new Date(),
-        })
-        .where(
-          and(eq(menus.id, c.req.param("id")), eq(menus.companyId, auth.company_id!)),
-        )
-        .returning();
-      if (!row) throw new HTTPException(404, { message: "Menu tidak ditemukan" });
-      await replaceKomponen(row.id, body.komponen);
+      await validateRefs(auth.company_id!, body, c.req.param("id"));
+      const row = await db.transaction(async (tx) => {
+        const [menu] = await tx
+          .update(menus)
+          .set({
+            categoryId: body.category_id,
+            nama: body.nama,
+            tipe: body.tipe,
+            mult: body.tipe === "regular" ? body.mult : null,
+            baseMenuId: body.tipe === "paket" ? body.base_menu_id : null,
+            baseMult: body.tipe === "paket" ? body.base_mult : null,
+            hargaJual: body.harga_jual,
+            imageUrl: body.image_url ?? null,
+            isActive: body.is_active,
+            updatedAt: new Date(),
+          })
+          .where(
+            and(eq(menus.id, c.req.param("id")), eq(menus.companyId, auth.company_id!)),
+          )
+          .returning();
+        if (!menu) throw new HTTPException(404, { message: "Menu tidak ditemukan" });
+        await replaceKomponen(tx, menu.id, body.komponen);
+        return menu;
+      });
       const katalog = await loadKatalog(db, auth.company_id!);
       return c.json(toMenuDto(katalog.rows.find((r) => r.id === row.id)!, katalog));
     },

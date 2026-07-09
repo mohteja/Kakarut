@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { HTTPException } from "hono/http-exception";
 import { hitungPb1, qtyEfektif, type SaleItemInput } from "@kakarut/shared";
 import { db } from "../../db/client";
@@ -93,11 +93,16 @@ export async function createSale(params: CreateSaleParams) {
     const pb1Amount = company.pb1Enabled ? hitungPb1(subtotal, company.pb1Rate) : 0;
     const saleDate = tanggalDi(company.timezone);
 
-    const [{ count }] = await tx
-      .select({ count: sql<number>`count(*)::int` })
+    // Urutan diambil dari nomor TERBESAR hari itu (bukan count) supaya void
+    // (hard delete) di tengah hari tidak membuat nomor bekas terpakai lagi.
+    const [last] = await tx
+      .select({ nomor: sales.nomor })
       .from(sales)
-      .where(and(eq(sales.branchId, branch.id), eq(sales.saleDate, saleDate)));
-    const nomor = `${kodeCabang(branch.nama)}-${saleDate.replaceAll("-", "")}-${String(count + 1).padStart(4, "0")}`;
+      .where(and(eq(sales.branchId, branch.id), eq(sales.saleDate, saleDate)))
+      .orderBy(desc(sales.nomor))
+      .limit(1);
+    const seq = last ? parseInt(last.nomor.slice(-4), 10) + 1 : 1;
+    const nomor = `${kodeCabang(branch.nama)}-${saleDate.replaceAll("-", "")}-${String(seq).padStart(4, "0")}`;
 
     const [sale] = await tx
       .insert(sales)

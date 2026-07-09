@@ -51,6 +51,12 @@ export function MenuFormPage() {
     queryKey: ["menu"],
     queryFn: () => api<MenuDto[]>("/menu"),
   });
+  // Muat via /menu/:id (bukan daftar aktif) agar menu nonaktif tetap bisa diedit
+  const { data: menuEdit } = useQuery({
+    queryKey: ["menu", id],
+    queryFn: () => api<MenuDto>(`/menu/${id}`),
+    enabled: Boolean(id),
+  });
 
   const [nama, setNama] = useState("");
   const [categoryId, setCategoryId] = useState("");
@@ -60,6 +66,7 @@ export function MenuFormPage() {
   const [baseMult, setBaseMult] = useState("2");
   const [hargaJual, setHargaJual] = useState("");
   const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [isActive, setIsActive] = useState(true);
   const [komponen, setKomponen] = useState<KomponenForm[]>([]);
   const dimuat = useRef(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -67,9 +74,8 @@ export function MenuFormPage() {
 
   // muat data saat edit
   useEffect(() => {
-    if (!id || dimuat.current || !menus) return;
-    const m = menus.find((x) => x.id === id);
-    if (!m) return;
+    if (!id || dimuat.current || !menuEdit) return;
+    const m = menuEdit;
     dimuat.current = true;
     setNama(m.nama);
     setCategoryId(m.category_id);
@@ -79,10 +85,11 @@ export function MenuFormPage() {
     setBaseMult(String(m.base_mult ?? 2));
     setHargaJual(String(m.harga_jual));
     setImageUrl(m.image_url);
+    setIsActive(m.is_active);
     setKomponen(
       m.komponen.map((k) => ({ ingredient_id: k.ingredient_id, qty: String(k.qty) })),
     );
-  }, [id, menus]);
+  }, [id, menuEdit]);
 
   const bahanById = useMemo(() => new Map((bahan ?? []).map((b) => [b.id, b])), [bahan]);
 
@@ -128,6 +135,7 @@ export function MenuFormPage() {
         base_mult: tipe === "paket" ? Number(baseMult) : null,
         harga_jual: Number(hargaJual),
         image_url: imageUrl,
+        is_active: isActive,
         komponen: komponen
           .filter((k) => k.ingredient_id && Number(k.qty) > 0)
           .map((k) => ({ ingredient_id: k.ingredient_id, qty: Number(k.qty) })),
@@ -157,7 +165,7 @@ export function MenuFormPage() {
     }
   }
 
-  if (!bahan || !kategori || (id && !menus)) return <Spinner />;
+  if (!bahan || !kategori || (id && !menuEdit)) return <Spinner />;
 
   return (
     <div className="max-w-4xl">

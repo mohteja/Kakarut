@@ -59,7 +59,10 @@ export function PerusahaanPage() {
           pb1_rate: Number(pb1Rate),
         },
       }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["company"] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["company"] });
+      queryClient.invalidateQueries({ queryKey: ["me"] }); // PB1 dipakai kasir
+    },
   });
 
   async function uploadLogo(file: File) {

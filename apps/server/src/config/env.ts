@@ -12,7 +12,7 @@ const EnvSchema = z.object({
     .string()
     .default("postgres://postgres@127.0.0.1:5433/kakarut"),
   PORT: z.coerce.number().default(3000),
-  JWT_SECRET: z.string().default("dev-secret-kakarut-ganti-di-produksi"),
+  JWT_SECRET: z.string().optional(),
   JWT_EXPIRES_IN: z.string().default("12h"),
 
   R2_ACCOUNT_ID: z.string().optional(),
@@ -34,7 +34,22 @@ const EnvSchema = z.object({
     .transform((v) => v !== "false" && v !== "0"),
 });
 
-export const env = EnvSchema.parse(process.env);
+const parsed = EnvSchema.parse(process.env);
+
+// JWT_SECRET wajib di produksi — tanpa ini siapa pun bisa memalsukan token.
+if (!parsed.JWT_SECRET) {
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("JWT_SECRET wajib di-set di produksi (lihat .env.example)");
+  }
+  console.warn(
+    "PERINGATAN: JWT_SECRET belum di-set — memakai secret development. JANGAN dipakai di produksi.",
+  );
+}
+
+export const env = {
+  ...parsed,
+  JWT_SECRET: parsed.JWT_SECRET ?? "dev-secret-kakarut-hanya-development",
+};
 
 export const r2Configured = Boolean(
   env.R2_ACCOUNT_ID &&

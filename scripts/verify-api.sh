@@ -122,6 +122,23 @@ UJI=$(login "uji@example.com" "UjiCoba123!")
 cek "tenant baru punya 0 menu (isolasi)" "V == 0" "$(api "$UJI" GET /menu | jq 'length')"
 cek "tenant baru punya 0 bahan (isolasi)" "V == 0" "$(api "$UJI" GET /bahan | jq 'length')"
 
+echo "== 9. Void transaksi: stok pulih & nomor struk tidak tabrakan =="
+COMP_A=$(stok_of "$(api "$KASIR" GET /stok)" "complement saos & sambal")
+VA=$(api "$KASIR" POST /penjualan "{\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")
+VA_ID=$(echo "$VA" | jq -r .sale.id)
+VB=$(api "$KASIR" POST /penjualan "{\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")
+VB_NOMOR=$(echo "$VB" | jq -r .sale.nomor)
+api "$OWNER" DELETE "/penjualan/$VA_ID" > /dev/null   # void transaksi pertama (bukan yang terakhir)
+cek "stok complement pulih setelah void" "abs(V - ($COMP_A - 1)) < 0.001" \
+  "$(stok_of "$(api "$KASIR" GET /stok)" "complement saos & sambal")"
+VC=$(api "$KASIR" POST /penjualan "{\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")
+VC_NOMOR=$(echo "$VC" | jq -r .sale.nomor)
+if [ "$VC_NOMOR" != "null" ] && [ "$VC_NOMOR" != "$VB_NOMOR" ]; then
+  ok "transaksi baru setelah void sukses ($VC_NOMOR ≠ $VB_NOMOR)"
+else
+  gagal "nomor struk tabrakan/gagal setelah void: $VC_NOMOR"
+fi
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

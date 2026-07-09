@@ -61,7 +61,9 @@ export async function api<T = unknown>(
     body: opts.formData ?? (opts.body !== undefined ? JSON.stringify(opts.body) : undefined),
   });
 
-  if (res.status === 401) {
+  // 401 pada endpoint selain login = sesi berakhir → paksa ke halaman login.
+  // Login yang gagal harus tetap menampilkan pesan asli dari server.
+  if (res.status === 401 && !path.startsWith("/auth/login")) {
     saveAuth(null);
     window.location.href = "/login";
     throw new ApiError(401, "Sesi berakhir, silakan login ulang");

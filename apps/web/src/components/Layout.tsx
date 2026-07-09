@@ -37,11 +37,13 @@ export function Layout() {
             className="mb-4 w-full rounded-lg border border-stone-700 bg-stone-800 px-2 py-1.5 text-sm text-white"
             aria-label="Pilih cabang"
           >
-            {cabang.map((b) => (
-              <option key={b.id} value={b.id}>
-                Cabang: {b.nama}
-              </option>
-            ))}
+            {cabang
+              .filter((b) => b.is_active)
+              .map((b) => (
+                <option key={b.id} value={b.id}>
+                  Cabang: {b.nama}
+                </option>
+              ))}
           </select>
         )}
         {!isSuperAdmin && role === "cashier" && auth.branch && (

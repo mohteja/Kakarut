@@ -12,6 +12,7 @@ import {
   tdClass,
   thClass,
 } from "../../components/ui";
+import { useAuth } from "../../context/AuthContext";
 import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatAngka, formatWaktu, hariIniWIB } from "../../lib/format";
@@ -26,8 +27,10 @@ interface ProduksiRow {
 }
 
 export function ProduksiPage() {
+  const { auth } = useAuth();
   const { branchQuery, branchId } = useBranch();
   const queryClient = useQueryClient();
+  const isKasir = auth?.user.role === "cashier";
 
   const { data: bahan } = useQuery({
     queryKey: ["bahan"],
@@ -53,7 +56,7 @@ export function ProduksiPage() {
       api("/produksi", {
         method: "POST",
         body: {
-          ...(branchId ? { branch_id: branchId } : {}),
+          ...(!isKasir && branchId ? { branch_id: branchId } : {}),
           ingredient_id: bahanId,
           ...(opts.batch ? { batch: true } : { qty: Number(qty) }),
         },
