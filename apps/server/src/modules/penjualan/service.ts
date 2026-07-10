@@ -95,6 +95,7 @@ export async function createSale(params: CreateSaleParams) {
         hppSatuan,
         qty: item.qty,
         isDineIn: dineIn,
+        catatan: item.catatan?.trim() || null,
         lineTotal,
       });
 

@@ -342,6 +342,8 @@ export const saleItems = pgTable(
     hppSatuan: numeric("hpp_satuan", { precision: 16, scale: 4, mode: "number" }).notNull(),
     qty: numeric("qty", { precision: 10, scale: 2, mode: "number" }).notNull(),
     isDineIn: boolean("is_dine_in").notNull().default(false),
+    // catatan personalisasi per baris (mis. "tanpa gula", "tanpa mie")
+    catatan: text("catatan"),
     lineTotal: numeric("line_total", { precision: 14, scale: 2, mode: "number" }).notNull(),
   },
   (t) => [index("sale_items_sale_idx").on(t.saleId)],

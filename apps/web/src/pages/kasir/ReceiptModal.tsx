@@ -26,6 +26,7 @@ export interface SaleResult {
     qty: number;
     lineTotal: number;
     isDineIn: boolean;
+    catatan: string | null;
   }[];
   branch_nama: string;
 }
@@ -88,6 +89,7 @@ export function ReceiptModal({
         hargaSatuan: it.hargaSatuan,
         lineTotal: it.lineTotal,
         tag: it.isDineIn !== data.sale.isDineIn ? (it.isDineIn ? "DI" : "TA") : null,
+        catatan: it.catatan,
       })),
       subtotal: data.sale.subtotal,
       pb1Amount: data.sale.pb1Amount,
@@ -152,6 +154,7 @@ export function ReceiptModal({
                 </span>
                 <span>{formatRupiah(it.lineTotal)}</span>
               </div>
+              {it.catatan && <div className="text-stone-500">* {it.catatan}</div>}
             </div>
           ))}
           <hr className="my-2 border-dashed border-stone-400" />

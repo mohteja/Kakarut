@@ -27,7 +27,13 @@ const DATA: ReceiptData = {
   waktu: "09/07 14.30",
   isDineIn: false,
   items: [
-    { nama: "Premium Basooopa A (PBA)", qty: 1, hargaSatuan: 34000, lineTotal: 34000 },
+    {
+      nama: "Premium Basooopa A (PBA)",
+      qty: 1,
+      hargaSatuan: 34000,
+      lineTotal: 34000,
+      catatan: "tanpa gula",
+    },
     { nama: "Es Teh Manis (dine-in)", qty: 2, hargaSatuan: 5000, lineTotal: 10000, tag: "DI" },
   ],
   subtotal: 44000,
@@ -165,6 +171,11 @@ describe("buildReceiptBytes", () => {
     expect(all).toContain("(DI)");
     expect(all).toContain("Ikuti IG @basooopa");
     expect(all).toContain("Catatan: tanpa sambal");
+  });
+
+  it("mencetak catatan personalisasi per baris (mis. tanpa gula)", () => {
+    const all = textLines(bytes).join("\n");
+    expect(all).toContain("* tanpa gula");
   });
 
   it("tanpa cut & drawer secara default", () => {

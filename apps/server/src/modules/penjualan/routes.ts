@@ -20,6 +20,7 @@ const SaleBody = z.object({
         menu_id: z.string().uuid(),
         qty: z.number().positive(),
         is_dine_in: z.boolean().optional(),
+        catatan: z.string().nullish(),
       }),
     )
     .min(1),

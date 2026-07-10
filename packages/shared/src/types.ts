@@ -311,6 +311,8 @@ export interface SaleItemInput {
   qty: number;
   /** override per baris; default mengikuti is_dine_in transaksi */
   is_dine_in?: boolean;
+  /** catatan personalisasi per baris (mis. "tanpa gula") */
+  catatan?: string | null;
 }
 
 /** Baris riwayat transaksi kasir (untuk cek pesanan / cetak ulang struk). */

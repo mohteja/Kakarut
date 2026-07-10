@@ -14,6 +14,8 @@ interface CartLine {
   qty: number;
   /** null = ikut pengaturan transaksi */
   dineInOverride: boolean | null;
+  /** catatan personalisasi baris (mis. "tanpa gula") */
+  catatan: string;
 }
 
 interface Kategori {
@@ -105,8 +107,12 @@ export function KasirPage() {
         copy[idx] = { ...copy[idx], qty: copy[idx].qty + 1 };
         return copy;
       }
-      return [...prev, { menu, qty: 1, dineInOverride: null }];
+      return [...prev, { menu, qty: 1, dineInOverride: null, catatan: "" }];
     });
+  }
+
+  function ubahCatatanLine(menuId: string, val: string) {
+    setCart((prev) => prev.map((l) => (l.menu.id === menuId ? { ...l, catatan: val } : l)));
   }
 
   function ubahQty(menuId: string, delta: number) {
@@ -143,6 +149,7 @@ export function KasirPage() {
             menu_id: l.menu.id,
             qty: l.qty,
             ...(l.dineInOverride !== null ? { is_dine_in: l.dineInOverride } : {}),
+            ...(l.catatan.trim() ? { catatan: l.catatan.trim() } : {}),
           })),
         },
       }),
@@ -325,6 +332,12 @@ export function KasirPage() {
                     </button>
                   </div>
                 </div>
+                <input
+                  value={l.catatan}
+                  onChange={(e) => ubahCatatanLine(l.menu.id, e.target.value)}
+                  placeholder="Catatan (mis. tanpa gula, tanpa mie)"
+                  className="mt-2 w-full rounded-lg border border-stone-200 bg-stone-50 px-2 py-1 text-xs focus:border-orange-400 focus:bg-white focus:outline-none"
+                />
               </div>
             );
           })}

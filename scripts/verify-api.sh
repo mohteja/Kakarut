@@ -462,6 +462,19 @@ BR=$(api "$OWNER" GET /cabang | jq -r '.[0].id')
 cek "owner GET /meja?branch_id ok (>=5)" "V >= 5" \
   "$(api "$OWNER" GET "/meja?branch_id=$BR" | jq 'length')"
 
+echo "== 20. Catatan personalisasi per baris menu =="
+MEJA_D=$(api "$KASIR" GET /meja | jq -r '[.[] | select(.tipe == "dine_in" and .is_active)][0].id')
+MENU_C=$(api "$KASIR" GET /menu | jq -r '[.[] | select(.tipe == "regular")][0].id')
+S_CAT=$(api "$KASIR" POST /penjualan "{\"meja_id\":\"$MEJA_D\",\"items\":[{\"menu_id\":\"$MENU_C\",\"qty\":1,\"catatan\":\"tanpa gula\"}]}")
+S_CAT_ID=$(echo "$S_CAT" | jq -r '.sale.id')
+cek "item menyimpan catatan (respons POST)" "V == 1" \
+  "$(echo "$S_CAT" | jq '([.items[] | select(.catatan == "tanpa gula")] | length == 1) | if . then 1 else 0 end')"
+cek "detail transaksi memuat catatan baris" "V == 1" \
+  "$(api "$KASIR" GET "/penjualan/$S_CAT_ID" | jq '([.items[] | select(.catatan == "tanpa gula")] | length == 1) | if . then 1 else 0 end')"
+S_NOCAT=$(api "$KASIR" POST /penjualan "{\"meja_id\":\"$MEJA_D\",\"items\":[{\"menu_id\":\"$MENU_C\",\"qty\":1}]}")
+cek "item tanpa catatan → null" "V == 1" \
+  "$(echo "$S_NOCAT" | jq '(.items[0].catatan == null) | if . then 1 else 0 end')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]
