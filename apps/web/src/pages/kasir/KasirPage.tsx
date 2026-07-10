@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import type { MejaDto, MenuDto } from "@kakarut/shared";
 import { Card, ErrorText, Spinner, btnPrimary } from "../../components/ui";
@@ -36,7 +36,7 @@ export function KasirPage() {
     queryKey: ["kategori"],
     queryFn: () => api<Kategori[]>("/kategori"),
   });
-  const { data: mejaList = [] } = useQuery({
+  const { data: mejaList = [], isLoading: mejaLoading } = useQuery({
     queryKey: ["meja", branchQuery],
     queryFn: () => api<MejaDto[]>(`/meja${branchQuery}`),
   });
@@ -52,6 +52,9 @@ export function KasirPage() {
   const [aktifKategori, setAktifKategori] = useState<string | null>(null);
   const [cart, setCart] = useState<CartLine[]>([]);
   const [mejaId, setMejaId] = useState<string | null>(null);
+  // Modal pilih meja muncul lebih dulu tiap memulai transaksi (sebelum keranjang).
+  // Otomatis untuk kasir; owner/admin membukanya lewat tombol "Pilih/Ganti".
+  const [mejaModalOpen, setMejaModalOpen] = useState(isKasir);
   const [catatan, setCatatan] = useState("");
   const [struk, setStruk] = useState<SaleResult | null>(null);
 
@@ -62,6 +65,16 @@ export function KasirPage() {
   // Meja menentukan mode transaksi: meja bernomor = dine-in (default), meja
   // Ruang Tunggu = bawa pulang. Sebelum meja dipilih, tampilan default dine-in.
   const dineIn = mejaTerpilih ? mejaTerpilih.tipe === "dine_in" : true;
+
+  // Bila meja terpilih dinonaktifkan/dihapus dari master, lepaskan pilihan.
+  useEffect(() => {
+    if (mejaId && !mejaAktif.some((m) => m.id === mejaId)) setMejaId(null);
+  }, [mejaId, mejaAktif]);
+
+  function pilihMeja(id: string) {
+    setMejaId(id);
+    setMejaModalOpen(false);
+  }
 
   const kategoriTampil = useMemo(() => {
     const adaMenu = new Set((menus ?? []).map((m) => m.category_id));
@@ -128,6 +141,7 @@ export function KasirPage() {
       setCart([]);
       setCatatan("");
       setMejaId(null);
+      // modal pilih meja dibuka lagi saat struk ditutup (transaksi berikutnya)
       queryClient.invalidateQueries({ queryKey: ["stok"] });
       queryClient.invalidateQueries({ queryKey: ["laporan"] });
       queryClient.invalidateQueries({ queryKey: ["penjualan"] });
@@ -218,52 +232,36 @@ export function KasirPage() {
           </Link>
         </div>
 
-        {/* Pilih meja — wajib sebelum bayar. Meja Ruang Tunggu = bawa pulang. */}
-        <div className="mb-3 rounded-lg border border-stone-200 bg-stone-50 p-2">
-          <div className="mb-1.5 flex items-center justify-between px-0.5">
-            <span className="text-xs font-semibold text-stone-600">Pilih Meja</span>
-            <span
-              className={`text-xs font-medium ${
-                !mejaTerpilih ? "text-stone-400" : dineIn ? "text-blue-600" : "text-amber-600"
-              }`}
-            >
-              {mejaTerpilih ? (dineIn ? "Dine-in" : "Bawa pulang") : "Belum dipilih"}
-            </span>
-          </div>
-          <div className="flex flex-wrap gap-1.5">
-            {mejaDineIn.map((m) => (
-              <button
-                key={m.id}
-                onClick={() => setMejaId(m.id)}
-                className={`rounded-lg px-2.5 py-1 text-sm font-medium ${
-                  mejaId === m.id
-                    ? "bg-blue-600 text-white"
-                    : "border border-stone-300 bg-white text-stone-700 hover:border-blue-400"
-                }`}
-              >
-                {m.nama}
-              </button>
-            ))}
-            {mejaTakeaway.map((m) => (
-              <button
-                key={m.id}
-                onClick={() => setMejaId(m.id)}
-                className={`rounded-lg px-2.5 py-1 text-sm font-medium ${
-                  mejaId === m.id
-                    ? "bg-amber-500 text-white"
-                    : "border border-amber-300 bg-amber-50 text-amber-700 hover:border-amber-400"
-                }`}
-              >
-                🥡 {m.nama}
-              </button>
-            ))}
-            {mejaAktif.length === 0 && (
-              <Link to="/pengaturan/meja" className="text-xs text-orange-600 hover:underline">
-                Belum ada meja — atur dulu →
-              </Link>
+        {/* Meja terpilih (dipilih lewat modal di awal transaksi) + tombol ganti */}
+        <button
+          onClick={() => setMejaModalOpen(true)}
+          className={`mb-3 flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left ${
+            mejaTerpilih
+              ? dineIn
+                ? "border-blue-200 bg-blue-50"
+                : "border-amber-200 bg-amber-50"
+              : "border-dashed border-stone-300 bg-stone-50"
+          }`}
+        >
+          <span className="min-w-0">
+            <span className="block text-xs text-stone-500">Meja</span>
+            {mejaTerpilih ? (
+              <span className="font-semibold text-stone-800">
+                {mejaTerpilih.tipe === "takeaway" ? `🥡 ${mejaTerpilih.nama}` : mejaTerpilih.nama}
+                <span
+                  className={`ml-2 text-xs font-medium ${dineIn ? "text-blue-600" : "text-amber-600"}`}
+                >
+                  {dineIn ? "Dine-in" : "Bawa pulang"}
+                </span>
+              </span>
+            ) : (
+              <span className="font-semibold text-stone-400">Belum dipilih</span>
             )}
-          </div>
-        </div>
+          </span>
+          <span className="shrink-0 text-sm font-medium text-orange-600">
+            {mejaTerpilih ? "Ganti" : "Pilih"}
+          </span>
+        </button>
 
         <div className="space-y-2 md:flex-1 md:overflow-y-auto">
           {cart.length === 0 && (
@@ -359,7 +357,112 @@ export function KasirPage() {
         </div>
       </Card>
 
-      {struk && <ReceiptModal data={struk} onClose={() => setStruk(null)} />}
+      {/* Modal pilih meja — muncul lebih dulu tiap memulai transaksi */}
+      {mejaModalOpen && !struk && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setMejaModalOpen(false)}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-1 flex items-center justify-between">
+              <h2 className="text-lg font-bold text-stone-800">Pilih Meja</h2>
+              <button
+                onClick={() => setMejaModalOpen(false)}
+                className="text-stone-400 hover:text-stone-700"
+                aria-label="Tutup"
+              >
+                ✕
+              </button>
+            </div>
+            <p className="mb-4 text-sm text-stone-500">
+              Pilih meja untuk memulai transaksi. Meja bernomor = dine-in; <b>Ruang Tunggu</b> =
+              bawa pulang (take away).
+            </p>
+
+            {mejaLoading ? (
+              <div className="p-6 text-center text-sm text-stone-400">Memuat meja…</div>
+            ) : mejaAktif.length === 0 ? (
+              <div className="rounded-lg bg-stone-50 p-6 text-center text-sm text-stone-500">
+                Belum ada meja aktif.{" "}
+                <Link
+                  to="/pengaturan/meja"
+                  onClick={() => setMejaModalOpen(false)}
+                  className="font-medium text-orange-600 hover:underline"
+                >
+                  Atur meja dulu →
+                </Link>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {mejaDineIn.length > 0 && (
+                  <div>
+                    <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-stone-400">
+                      Meja makan (Dine-in)
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+                      {mejaDineIn.map((m) => (
+                        <button
+                          key={m.id}
+                          onClick={() => pilihMeja(m.id)}
+                          className={`rounded-xl border px-2 py-3 text-sm font-semibold ${
+                            mejaId === m.id
+                              ? "border-blue-600 bg-blue-600 text-white"
+                              : "border-stone-300 bg-white text-stone-700 hover:border-blue-400"
+                          }`}
+                        >
+                          {m.nama}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {mejaTakeaway.length > 0 && (
+                  <div>
+                    <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-stone-400">
+                      Bawa pulang
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      {mejaTakeaway.map((m) => (
+                        <button
+                          key={m.id}
+                          onClick={() => pilihMeja(m.id)}
+                          className={`rounded-xl border px-3 py-3 text-left text-sm font-semibold ${
+                            mejaId === m.id
+                              ? "border-amber-500 bg-amber-500 text-white"
+                              : "border-amber-300 bg-amber-50 text-amber-700 hover:border-amber-400"
+                          }`}
+                        >
+                          🥡 {m.nama} — Take away
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <Link
+                  to="/pengaturan/meja"
+                  onClick={() => setMejaModalOpen(false)}
+                  className="block text-center text-xs text-stone-400 hover:text-orange-600 hover:underline"
+                >
+                  ⚙ Atur / tambah meja
+                </Link>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {struk && (
+        <ReceiptModal
+          data={struk}
+          onClose={() => {
+            setStruk(null);
+            setMejaModalOpen(isKasir); // kasir: lanjut pilih meja transaksi berikutnya
+          }}
+        />
+      )}
     </div>
   );
 }

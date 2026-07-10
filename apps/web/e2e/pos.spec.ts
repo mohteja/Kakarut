@@ -21,6 +21,10 @@ test("kasir: POS → tambah menu → dine-in → checkout → struk", async ({ p
   await login(page, KASIR_EMAIL, KASIR_PASS);
   await expect(page).toHaveURL(/\/kasir/);
 
+  // modal pilih meja muncul lebih dulu → pilih meja bernomor (= dine-in)
+  await expect(page.getByRole("heading", { name: "Pilih Meja" })).toBeVisible();
+  await page.getByRole("button", { name: "Meja 1", exact: true }).click();
+
   // tab kategori dari catOrder tampil
   await expect(page.getByRole("button", { name: "Paket Premium" })).toBeVisible();
   await page.getByRole("button", { name: "Paket Premium" }).click();
@@ -28,9 +32,6 @@ test("kasir: POS → tambah menu → dine-in → checkout → struk", async ({ p
   // tambah PBA ke keranjang
   await page.getByRole("button", { name: /Premium Basooopa A/ }).click();
   await expect(page.getByText("Keranjang")).toBeVisible();
-
-  // pilih meja (wajib sebelum bayar) → meja bernomor = dine-in
-  await page.getByRole("button", { name: "Meja 1", exact: true }).click();
 
   // bayar
   await page.getByRole("button", { name: /Bayar & Cetak Struk/ }).click();
