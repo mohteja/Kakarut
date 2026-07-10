@@ -24,6 +24,7 @@ interface FormState {
   satuan: string;
   kategori: "baso" | "minuman" | "lain";
   pengadaan: "produksi" | "beli";
+  track_stok: boolean;
   catatan: string;
   is_packaging: boolean;
   is_complement: boolean;
@@ -36,6 +37,7 @@ const kosong: FormState = {
   satuan: "pcs",
   kategori: "lain",
   pengadaan: "beli",
+  track_stok: true,
   catatan: "",
   is_packaging: false,
   is_complement: false,
@@ -63,6 +65,7 @@ export function BahanPage() {
         satuan: f.satuan.trim() || "pcs",
         kategori: f.kategori,
         pengadaan: f.pengadaan,
+        track_stok: f.track_stok,
         catatan: f.catatan || null,
         is_packaging: f.is_packaging,
         is_complement: f.is_complement,
@@ -191,6 +194,11 @@ export function BahanPage() {
                       Complement
                     </span>
                   )}
+                  {!b.track_stok && (
+                    <span className="ml-2 rounded-full bg-stone-200 px-2 py-0.5 text-xs text-stone-500">
+                      Stok tidak dilacak
+                    </span>
+                  )}
                 </td>
                 <td className={tdClass}>{b.kategori}</td>
                 <td className={tdClass}>
@@ -225,6 +233,7 @@ export function BahanPage() {
                         satuan: b.satuan,
                         kategori: b.kategori,
                         pengadaan: b.pengadaan,
+                        track_stok: b.track_stok,
                         catatan: b.catatan ?? "",
                         is_packaging: b.is_packaging,
                         is_complement: b.is_complement,
@@ -366,6 +375,20 @@ export function BahanPage() {
                 className={inputClass}
               />
             </div>
+            <label className="flex items-center gap-2 rounded-lg border border-stone-200 p-3 text-sm font-medium">
+              <input
+                type="checkbox"
+                checked={form.track_stok}
+                onChange={(e) => setForm({ ...form, track_stok: e.target.checked })}
+              />
+              <span>
+                Lacak stok bahan ini
+                <span className="block text-xs font-normal text-stone-500">
+                  Dipotong otomatis saat menjual, ditambah saat membeli/produksi, dan tampil
+                  di halaman Stok. Tanpa centang: hanya dipakai untuk hitung HPP.
+                </span>
+              </span>
+            </label>
             <div className="flex gap-4 text-sm">
               <label className="flex items-center gap-2">
                 <input

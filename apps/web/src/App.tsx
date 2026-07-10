@@ -17,6 +17,9 @@ import { KaryawanPage } from "./pages/pengaturan/KaryawanPage";
 import { PenyimpananPage } from "./pages/pengaturan/PenyimpananPage";
 import { PerusahaanPage } from "./pages/pengaturan/PerusahaanPage";
 import { SupplierPage } from "./pages/pengaturan/SupplierPage";
+import { KartuStokPage } from "./pages/stok/KartuStokPage";
+import { OpnamePage } from "./pages/stok/OpnamePage";
+import { OpnameRiwayatPage } from "./pages/stok/OpnameRiwayatPage";
 import { StokPage } from "./pages/stok/StokPage";
 import { SistemPage } from "./pages/superadmin/SistemPage";
 import { TenantsPage } from "./pages/superadmin/TenantsPage";
@@ -42,6 +45,13 @@ export default function App() {
       <PrinterProvider>
       <Routes>
         <Route path="/login" element={<Navigate to={beranda} replace />} />
+        {/* Opname = layar penuh tanpa sidebar (dipakai langsung di device) */}
+        {!isSuperAdmin && (
+          <>
+            <Route path="/stok/opname" element={<OpnamePage />} />
+            <Route path="/stok/opname/riwayat" element={<OpnameRiwayatPage />} />
+          </>
+        )}
         <Route element={<Layout />}>
           {isSuperAdmin && (
             <>
@@ -53,6 +63,7 @@ export default function App() {
             <>
               <Route path="/kasir" element={<KasirPage />} />
               <Route path="/stok" element={<StokPage />} />
+              <Route path="/stok/kartu/:ingredientId" element={<KartuStokPage />} />
               <Route path="/produksi" element={<ProduksiPage />} />
               <Route path="/pembelian" element={<PembelianPage />} />
               <Route path="/laporan" element={<LaporanPage />} />

@@ -76,6 +76,11 @@ function pastikanJalur(
   id: string,
 ) {
   if (!ing) throw new HTTPException(404, { message: `Bahan tidak ditemukan (${id})` });
+  if (!ing.trackStok) {
+    throw new HTTPException(400, {
+      message: `Stok "${ing.nama}" tidak dilacak — centang "Lacak stok" di halaman Bahan Baku dulu`,
+    });
+  }
   if (ing.pengadaan !== tipe) {
     throw new HTTPException(400, {
       message: `"${ing.nama}" berjenis ${ing.pengadaan === "beli" ? "beli jadi" : "produksi sendiri"} — tambah stok lewat menu ${LABEL[ing.pengadaan].jalur}`,

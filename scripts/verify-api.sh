@@ -201,6 +201,63 @@ cek "faktur produksi 1 batch urat = +90" "abs(V - ($URAT_SEBELUM + 90)) < 0.001"
 cek "faktur pembelian berisi bahan produksi ditolak (400)" "V == 400" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/pembelian/faktur" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d "{\"items\":[{\"ingredient_id\":\"$URATB_ID\",\"mode\":\"pcs\",\"jumlah\":1}]}")"
 
+echo "== 12. Lacak stok per bahan & tempat penyimpanan di stok =="
+# baris stok memuat tempat penyimpanan terakhir (dari faktur §11 ke "Rak Uji")
+cek "stok plastik memuat tempat 'Rak Uji'" "V == 1" \
+  "$(api "$KASIR" GET /stok | jq '[.[] | select(.slug == "plastik take away")][0].tempat == "Rak Uji" | if . then 1 else 0 end')"
+
+SUKRO_ID=$(echo "$BAHAN" | jq -r '[.[] | select(.slug == "sukro cikur")][0].id')
+api "$OWNER" PUT "/bahan/$SUKRO_ID" '{"track_stok":false}' > /dev/null
+cek "bahan tak dilacak hilang dari /stok" "V == 0" \
+  "$(api "$KASIR" GET /stok | jq '[.[] | select(.slug == "sukro cikur")] | length')"
+cek "faktur pembelian bahan tak dilacak ditolak (400)" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/pembelian/faktur" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d "{\"items\":[{\"ingredient_id\":\"$SUKRO_ID\",\"mode\":\"pcs\",\"jumlah\":5}]}")"
+# penjualan menu ber-bahan tak dilacak: bahan lain tetap terpotong, sukro tidak
+SS2_ID=$(echo "$MENUS" | jq -r '[.[] | select(.nama | startswith("Simple Set 2"))][0].id')
+KONSUMSI_SEBELUM=$(api "$OWNER" GET /laporan | jq '[.konsumsi_bahan[] | select(.slug == "sukro cikur")] | length')
+URATK_SEBELUM=$(stok_of "$(api "$KASIR" GET /stok)" "baso urat kecil")
+api "$KASIR" POST /penjualan "{\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$SS2_ID\",\"qty\":1}]}" > /dev/null
+cek "bahan terlacak tetap terpotong (urat kecil −2)" "abs(V - ($URATK_SEBELUM - 2)) < 0.001" \
+  "$(stok_of "$(api "$KASIR" GET /stok)" "baso urat kecil")"
+api "$OWNER" PUT "/bahan/$SUKRO_ID" '{"track_stok":true}' > /dev/null
+cek "track_stok dikembalikan, sukro tampil lagi di /stok" "V == 1" \
+  "$(api "$KASIR" GET /stok | jq '[.[] | select(.slug == "sukro cikur")] | length')"
+
+echo "== 13. Kartu stok =="
+KARTU=$(api "$KASIR" GET "/stok/kartu/$PLASTIK_ID")
+SALDO_STOK=$(stok_of "$(api "$KASIR" GET /stok)" "plastik take away")
+cek "saldo akhir kartu == saldo di /stok" "abs(V - $SALDO_STOK) < 0.001" "$(echo "$KARTU" | jq .saldo_akhir)"
+cek "kartu memuat mutasi pembelian" "V >= 1" "$(echo "$KARTU" | jq '[.mutasi[] | select(.jenis == "beli")] | length')"
+cek "kartu memuat mutasi penjualan" "V >= 1" "$(echo "$KARTU" | jq '[.mutasi[] | select(.jenis == "penjualan")] | length')"
+# opname me-reset saldo berjalan
+api "$OWNER" POST /stok/opname "{\"items\":[{\"ingredient_id\":\"$PLASTIK_ID\",\"qty\":500}],\"catatan\":\"opname kartu\"}" > /dev/null
+KARTU2=$(api "$KASIR" GET "/stok/kartu/$PLASTIK_ID")
+cek "baris opname me-reset saldo ke 500" "V == 500" \
+  "$(echo "$KARTU2" | jq '[.mutasi[] | select(.jenis == "opname")] | last | .saldo')"
+cek "saldo akhir kartu == 500 (opname terbaru)" "V == 500" "$(echo "$KARTU2" | jq .saldo_akhir)"
+
+echo "== 14. Stock opname: kasir, snapshot sistem, selisih, riwayat =="
+# saldo sistem plastik saat ini
+PLASTIK_SISTEM=$(stok_of "$(api "$KASIR" GET /stok)" "plastik take away")
+FISIK=$(python3 -c "print($PLASTIK_SISTEM - 3)")   # sengaja kurang 3
+OP=$(api "$KASIR" POST /stok/opname "{\"catatan\":\"opname uji\",\"items\":[{\"ingredient_id\":\"$PLASTIK_ID\",\"qty\":$FISIK}]}")
+SESI=$(echo "$OP" | jq -r .session_id)
+[ "$SESI" != "null" ] && ok "kasir boleh opname, dapat session_id"
+cek "ringkasan: 1 kurang" "V == 1" "$(echo "$OP" | jq .ringkasan.kurang)"
+cek "ringkasan: total_selisih = -3" "abs(V - (-3)) < 0.001" "$(echo "$OP" | jq .ringkasan.total_selisih)"
+cek "saldo /stok jadi fisik" "abs(V - $FISIK) < 0.001" \
+  "$(stok_of "$(api "$KASIR" GET /stok)" "plastik take away")"
+cek "riwayat opname memuat sesi baru" "V >= 1" \
+  "$(api "$KASIR" GET /stok/opname/riwayat | jq --arg s "$SESI" '[.[] | select(.session_id == $s)] | length')"
+DETAIL=$(api "$KASIR" GET "/stok/opname/sesi/$SESI")
+cek "detail sesi: system_qty tersimpan" "abs(V - $PLASTIK_SISTEM) < 0.001" \
+  "$(echo "$DETAIL" | jq '.items[0].system_qty')"
+cek "detail sesi: selisih = -3" "abs(V - (-3)) < 0.001" "$(echo "$DETAIL" | jq '.items[0].selisih')"
+api "$OWNER" PUT "/bahan/$SUKRO_ID" '{"track_stok":false}' > /dev/null
+cek "opname bahan tak dilacak ditolak (400)" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/stok/opname" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"items\":[{\"ingredient_id\":\"$SUKRO_ID\",\"qty\":1}]}")"
+api "$OWNER" PUT "/bahan/$SUKRO_ID" '{"track_stok":true}' > /dev/null
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

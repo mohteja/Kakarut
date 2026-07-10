@@ -50,6 +50,7 @@ export async function loadKatalog(dbx: Db | Tx, companyId: string): Promise<Kata
         hargaBeli: ingredients.hargaBeli,
         isi: ingredients.isi,
         satuan: ingredients.satuan,
+        trackStok: ingredients.trackStok,
         isPackaging: ingredients.isPackaging,
         isComplement: ingredients.isComplement,
       })
@@ -69,6 +70,7 @@ export async function loadKatalog(dbx: Db | Tx, companyId: string): Promise<Kata
         nama: comp.nama,
         qty: comp.qty,
         satuan: comp.satuan,
+        track_stok: comp.trackStok,
         harga_per_unit: hargaPerUnit(comp.hargaBeli, comp.isi),
         is_packaging: comp.isPackaging,
         is_complement: comp.isComplement,

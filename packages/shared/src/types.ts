@@ -25,6 +25,8 @@ export interface BahanDto {
   isi: number;
   /** satuan isi/gramasi: pcs, gr, ml, butir, porsi, dst */
   satuan: string;
+  /** lacak stok: dipotong saat menjual, ditambah saat membeli/produksi */
+  track_stok: boolean;
   harga_per_unit: number;
   kategori: BahanKategori;
   pengadaan: JenisPengadaan;
@@ -40,6 +42,7 @@ export interface KomponenDto {
   nama: string;
   qty: number;
   satuan: string;
+  track_stok: boolean;
   harga_per_unit: number;
   is_packaging: boolean;
   is_complement: boolean;
@@ -73,6 +76,10 @@ export interface StokRowDto {
   nama: string;
   kategori: BahanKategori;
   isi: number;
+  satuan: string;
+  /** tempat penyimpanan dari entri masuk terkonfirmasi terakhir */
+  tempat: string | null;
+  tempat_id: string | null;
   stok_awal: number;
   produksi: number;
   terpakai: number;
@@ -95,6 +102,62 @@ export interface PenyimpananDto {
   nama: string;
   catatan: string | null;
   is_active: boolean;
+}
+
+export interface OpnameRingkasan {
+  dihitung: number;
+  cocok: number;
+  lebih: number;
+  kurang: number;
+  total_selisih: number;
+}
+
+export interface OpnameSesiRow {
+  session_id: string;
+  waktu: string;
+  oleh: string | null;
+  jumlah_item: number;
+  jumlah_selisih: number;
+  catatan: string | null;
+}
+
+export interface OpnameSesiDetail {
+  session_id: string;
+  waktu: string;
+  oleh: string | null;
+  catatan: string | null;
+  items: {
+    nama: string;
+    satuan: string;
+    system_qty: number | null;
+    qty_fisik: number;
+    selisih: number | null;
+  }[];
+}
+
+export type MutasiJenis = "opname" | "produksi" | "beli" | "penjualan";
+
+/** Satu baris kartu stok (buku besar mutasi per bahan). */
+export interface MutasiStok {
+  waktu: string;
+  jenis: MutasiJenis;
+  keterangan: string | null;
+  masuk: number | null;
+  keluar: number | null;
+  /** saldo berjalan setelah mutasi ini */
+  saldo: number;
+}
+
+export interface KartuStokDto {
+  bahan: { id: string; nama: string; slug: string; satuan: string };
+  periode: { dari: string; sampai: string };
+  saldo_awal: number;
+  saldo_akhir: number;
+  total_masuk: number;
+  total_keluar: number;
+  /** true bila mutasi melebihi batas 500 baris (persempit periode) */
+  terpotong: boolean;
+  mutasi: MutasiStok[];
 }
 
 export interface SaleItemInput {

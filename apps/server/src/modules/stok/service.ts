@@ -1,5 +1,12 @@
 import { sql } from "drizzle-orm";
-import { saldoStok, statusStok, type StokRowDto } from "@kakarut/shared";
+import {
+  saldoStok,
+  statusStok,
+  type KartuStokDto,
+  type MutasiJenis,
+  type MutasiStok,
+  type StokRowDto,
+} from "@kakarut/shared";
 import { db } from "../../db/client";
 
 /**
@@ -18,6 +25,9 @@ export async function hitungSaldoCabang(
       i.nama        AS nama,
       i.kategori    AS kategori,
       i.isi         AS isi,
+      i.satuan      AS satuan,
+      t.id          AS tempat_id,
+      t.nama        AS tempat,
       COALESCE(b.qty, 0) AS stok_awal,
       COALESCE(p.qty, 0) AS produksi,
       COALESCE(u.qty, 0) AS terpakai
@@ -42,7 +52,17 @@ export async function hitungSaldoCabang(
       WHERE sc.branch_id = ${branchId} AND sc.ingredient_id = i.id
         AND (b.created_at IS NULL OR sc.waktu > b.created_at)
     ) u ON TRUE
-    WHERE i.company_id = ${companyId} AND i.is_active
+    LEFT JOIN LATERAL (
+      -- tempat penyimpanan dari entri masuk terkonfirmasi terakhir
+      SELECT sl.id, sl.nama
+      FROM productions pr
+      JOIN storage_locations sl ON sl.id = pr.storage_location_id
+      WHERE pr.branch_id = ${branchId} AND pr.ingredient_id = i.id
+        AND pr.status = 'dikonfirmasi' AND pr.storage_location_id IS NOT NULL
+      ORDER BY pr.waktu DESC
+      LIMIT 1
+    ) t ON TRUE
+    WHERE i.company_id = ${companyId} AND i.is_active AND i.track_stok
     ORDER BY i.nama
   `);
 
@@ -57,6 +77,9 @@ export async function hitungSaldoCabang(
       nama: String(row.nama),
       kategori: row.kategori as StokRowDto["kategori"],
       isi: Number(row.isi),
+      satuan: String(row.satuan),
+      tempat: row.tempat != null ? String(row.tempat) : null,
+      tempat_id: row.tempat_id != null ? String(row.tempat_id) : null,
       stok_awal: stokAwal,
       produksi,
       terpakai,
@@ -64,4 +87,137 @@ export async function hitungSaldoCabang(
       status: statusStok(stokAwal, produksi, terpakai),
     };
   });
+}
+
+const BATAS_MUTASI = 500;
+
+/**
+ * Kartu stok: buku besar mutasi satu bahan pada satu cabang dalam rentang
+ * tanggal. Saldo berjalan mengikuti aturan saldo yang sama dengan
+ * hitungSaldoCabang: opname ME-RESET saldo; masuk (produksi/pembelian
+ * terkonfirmasi) menambah; konsumsi penjualan mengurangi.
+ */
+export async function kartuStok(params: {
+  branchId: string;
+  ingredientId: string;
+  /** YYYY-MM-DD (timezone perusahaan) */
+  dari: string;
+  sampai: string;
+  bahan: { id: string; nama: string; slug: string; satuan: string };
+}): Promise<KartuStokDto> {
+  const { branchId, ingredientId, dari, sampai, bahan } = params;
+
+  // Saldo awal periode: baseline opname terakhir SEBELUM `dari` + masuk −
+  // keluar antara baseline dan `dari` (pola yang sama dgn saldo live).
+  const awalRes = await db.execute(sql`
+    WITH baseline AS (
+      SELECT qty, created_at FROM stock_opnames
+      WHERE branch_id = ${branchId} AND ingredient_id = ${ingredientId}
+        AND opname_date < ${dari}
+      ORDER BY created_at DESC LIMIT 1
+    )
+    SELECT
+      COALESCE((SELECT qty FROM baseline), 0) AS baseline_qty,
+      COALESCE((
+        SELECT SUM(pr.qty) FROM productions pr
+        WHERE pr.branch_id = ${branchId} AND pr.ingredient_id = ${ingredientId}
+          AND pr.status = 'dikonfirmasi' AND pr.prod_date < ${dari}
+          AND (NOT EXISTS (SELECT 1 FROM baseline) OR pr.waktu > (SELECT created_at FROM baseline))
+      ), 0) AS masuk,
+      COALESCE((
+        SELECT SUM(sc.qty) FROM sale_consumptions sc
+        JOIN sales s ON s.id = sc.sale_id
+        WHERE sc.branch_id = ${branchId} AND sc.ingredient_id = ${ingredientId}
+          AND s.sale_date < ${dari}
+          AND (NOT EXISTS (SELECT 1 FROM baseline) OR sc.waktu > (SELECT created_at FROM baseline))
+      ), 0) AS keluar
+  `);
+  const awal = awalRes.rows[0] as Record<string, unknown>;
+  const saldoAwal = Number(awal.baseline_qty) + Number(awal.masuk) - Number(awal.keluar);
+
+  // Semua mutasi dalam rentang, urut waktu
+  const mutasiRes = await db.execute(sql`
+    SELECT * FROM (
+      SELECT so.created_at AS waktu, 'opname' AS jenis, so.qty AS qty,
+             so.catatan AS catatan, NULL AS nomor, NULL AS supplier,
+             NULL AS tempat, false AS is_batch
+      FROM stock_opnames so
+      WHERE so.branch_id = ${branchId} AND so.ingredient_id = ${ingredientId}
+        AND so.opname_date >= ${dari} AND so.opname_date <= ${sampai}
+      UNION ALL
+      SELECT pr.waktu, pr.tipe::text AS jenis, pr.qty, pr.catatan,
+             pr.no_faktur AS nomor, sp.nama AS supplier, sl.nama AS tempat, pr.is_batch
+      FROM productions pr
+      LEFT JOIN suppliers sp ON sp.id = pr.supplier_id
+      LEFT JOIN storage_locations sl ON sl.id = pr.storage_location_id
+      WHERE pr.branch_id = ${branchId} AND pr.ingredient_id = ${ingredientId}
+        AND pr.status = 'dikonfirmasi'
+        AND pr.prod_date >= ${dari} AND pr.prod_date <= ${sampai}
+      UNION ALL
+      SELECT sc.waktu, 'penjualan' AS jenis, sc.qty, NULL AS catatan,
+             s.nomor, NULL AS supplier, NULL AS tempat, false AS is_batch
+      FROM sale_consumptions sc
+      JOIN sales s ON s.id = sc.sale_id
+      WHERE sc.branch_id = ${branchId} AND sc.ingredient_id = ${ingredientId}
+        AND s.sale_date >= ${dari} AND s.sale_date <= ${sampai}
+    ) m
+    ORDER BY m.waktu ASC
+    LIMIT ${BATAS_MUTASI + 1}
+  `);
+
+  const terpotong = mutasiRes.rows.length > BATAS_MUTASI;
+  const rows = mutasiRes.rows.slice(0, BATAS_MUTASI) as Record<string, unknown>[];
+
+  let saldo = saldoAwal;
+  let totalMasuk = 0;
+  let totalKeluar = 0;
+  const mutasi: MutasiStok[] = rows.map((r) => {
+    const jenis = String(r.jenis) as MutasiJenis;
+    const qty = Number(r.qty);
+    let masuk: number | null = null;
+    let keluar: number | null = null;
+    let keterangan: string | null = null;
+
+    if (jenis === "opname") {
+      saldo = qty; // opname me-reset saldo
+      keterangan = r.catatan ? String(r.catatan) : "Penyesuaian stok fisik";
+    } else if (jenis === "penjualan") {
+      keluar = qty;
+      totalKeluar += qty;
+      saldo -= qty;
+      keterangan = r.nomor ? `Struk ${r.nomor}` : null;
+    } else {
+      masuk = qty;
+      totalMasuk += qty;
+      saldo += qty;
+      const bagian = [
+        r.supplier ? String(r.supplier) : null,
+        r.nomor ? `No. ${r.nomor}` : null,
+        r.tempat ? `→ ${r.tempat}` : null,
+        r.is_batch ? "batch" : null,
+        r.catatan ? String(r.catatan) : null,
+      ].filter(Boolean);
+      keterangan = bagian.length > 0 ? bagian.join(" · ") : null;
+    }
+
+    return {
+      waktu: new Date(r.waktu as string | Date).toISOString(),
+      jenis,
+      keterangan,
+      masuk,
+      keluar,
+      saldo,
+    };
+  });
+
+  return {
+    bahan,
+    periode: { dari, sampai },
+    saldo_awal: saldoAwal,
+    saldo_akhir: saldo,
+    total_masuk: totalMasuk,
+    total_keluar: totalKeluar,
+    terpotong,
+    mutasi,
+  };
 }

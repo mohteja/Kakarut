@@ -144,6 +144,8 @@ export const ingredients = pgTable(
     isi: numeric("isi", { precision: 12, scale: 4, mode: "number" }).notNull(),
     /** satuan isi/gramasi: pcs, gr, ml, butir, porsi, dst */
     satuan: text("satuan").notNull().default("pcs"),
+    /** lacak stok: dipotong saat menjual, ditambah saat membeli/produksi */
+    trackStok: boolean("track_stok").notNull().default(true),
     kategori: bahanKategoriEnum("kategori").notNull().default("lain"),
     pengadaan: pengadaanEnum("pengadaan").notNull().default("beli"),
     catatan: text("catatan"),
@@ -350,6 +352,12 @@ export const stockOpnames = pgTable(
     qty: numeric("qty", { precision: 16, scale: 6, mode: "number" }).notNull(),
     opnameDate: date("opname_date").notNull(),
     catatan: text("catatan"),
+    /** pengelompokan satu sesi opname */
+    sessionId: uuid("session_id"),
+    /** snapshot saldo sistem saat opname (untuk bandingkan fisik vs sistem) */
+    systemQty: numeric("system_qty", { precision: 16, scale: 6, mode: "number" }),
+    /** qty_fisik − system_qty */
+    selisih: numeric("selisih", { precision: 16, scale: 6, mode: "number" }),
     userId: uuid("user_id").references(() => users.id),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },

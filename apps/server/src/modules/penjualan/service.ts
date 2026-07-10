@@ -80,6 +80,9 @@ export async function createSale(params: CreateSaleParams) {
           : []),
       ];
       for (const k of sumberKomponen) {
+        // bahan yang tidak dilacak stoknya: tetap masuk HPP, tapi tidak
+        // menghasilkan catatan konsumsi
+        if (!k.track_stok) continue;
         const qty =
           qtyEfektif(
             { qty: k.qty, isPackaging: k.is_packaging, isComplement: k.is_complement },
