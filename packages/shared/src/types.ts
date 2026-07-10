@@ -123,8 +123,8 @@ export interface RekomendasiBahanRow {
   satuan: string;
   kategori: BahanKategori;
   pengadaan: JenisPengadaan;
-  /** pemakaian hari ini (dari penjualan) */
-  terpakai_hari_ini: number;
+  /** pemakaian pada periode "terpakai" terpilih (default hari ini) */
+  terpakai: number;
   /** stok tersisa saat ini */
   sisa: number;
   /** pemakaian pada periode acuan */
@@ -144,6 +144,8 @@ export interface RekomendasiBeli {
   /** tanggal hari ini (tz perusahaan) */
   hari_ini: string;
   acuan: AcuanPeriode;
+  /** periode kolom "terpakai" (default hari ini; dari===sampai bila satu tanggal) */
+  pakai: { dari: string; sampai: string };
   menu_terlaris: MenuTerlaris[];
   bahan: RekomendasiBahanRow[];
 }
@@ -166,6 +168,20 @@ export interface PenyimpananDto {
    * opname di cabang). Terisi = terkunci hanya untuk mereka (owner/admin bebas).
    */
   petugas: PetugasRingkas[];
+}
+
+/** jenis meja: meja makan (dine-in) vs "Ruang Tunggu" untuk take away. */
+export type MejaTipe = "dine_in" | "takeaway";
+
+/** Master meja per cabang + posisi denah (persen 0..100). */
+export interface MejaDto {
+  id: string;
+  branch_id: string;
+  nama: string;
+  tipe: MejaTipe;
+  pos_x: number;
+  pos_y: number;
+  is_active: boolean;
 }
 
 export type PenyesuaianKategori =
@@ -297,6 +313,22 @@ export interface SaleItemInput {
   qty: number;
   /** override per baris; default mengikuti is_dine_in transaksi */
   is_dine_in?: boolean;
+  /** catatan personalisasi per baris (mis. "tanpa gula") */
+  catatan?: string | null;
+}
+
+/** Baris riwayat transaksi kasir (untuk cek pesanan / cetak ulang struk). */
+export interface RiwayatTransaksiRow {
+  id: string;
+  nomor: string;
+  waktu: string;
+  total: number;
+  is_dine_in: boolean;
+  /** label meja terpilih (null bila transaksi lama tanpa meja) */
+  meja: string | null;
+  /** jumlah baris menu pada transaksi */
+  jumlah_item: number;
+  kasir: string | null;
 }
 
 export interface LaporanHarian {

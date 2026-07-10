@@ -37,6 +37,8 @@ export const klarifikasiStatusEnum = pgEnum("klarifikasi_status", ["belum", "sud
  * ('disetujui') hanya setelah owner/admin menyetujui selisih yang diklarifikasi.
  */
 export const penyesuaianStatusEnum = pgEnum("penyesuaian_status", ["menunggu", "disetujui"]);
+/** jenis meja: meja makan biasa (dine-in) vs meja "Ruang Tunggu" untuk take away */
+export const mejaTipeEnum = pgEnum("meja_tipe", ["dine_in", "takeaway"]);
 
 // ===== Tenancy & identitas =====
 
@@ -170,6 +172,31 @@ export const storageLocationPetugas = pgTable(
   (t) => [uniqueIndex("storage_location_petugas_uq").on(t.storageLocationId, t.userId)],
 );
 
+/**
+ * Master meja (per cabang) — dipilih kasir saat memulai transaksi. Posisi
+ * posX/posY disimpan dalam persen (0..100) agar tata letak denah bebas resolusi.
+ * Selalu ada minimal satu meja bertipe "takeaway" (Ruang Tunggu) per cabang.
+ */
+export const meja = pgTable(
+  "meja",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    branchId: uuid("branch_id")
+      .notNull()
+      .references(() => branches.id, { onDelete: "cascade" }),
+    nama: text("nama").notNull(),
+    tipe: mejaTipeEnum("tipe").notNull().default("dine_in"),
+    posX: integer("pos_x").notNull().default(0),
+    posY: integer("pos_y").notNull().default(0),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("meja_branch_nama_uq").on(t.branchId, t.nama)],
+);
+
 // ===== Katalog (per company) =====
 
 export const ingredients = pgTable(
@@ -280,6 +307,9 @@ export const sales = pgTable(
       .references(() => users.id),
     nomor: text("nomor").notNull(),
     isDineIn: boolean("is_dine_in").notNull().default(false),
+    // meja terpilih saat transaksi (nullable — transaksi lama/tanpa meja tetap valid)
+    mejaId: uuid("meja_id").references(() => meja.id, { onDelete: "set null" }),
+    mejaLabel: text("meja_label"),
     subtotal: numeric("subtotal", { precision: 14, scale: 2, mode: "number" }).notNull(),
     pb1Amount: numeric("pb1_amount", { precision: 14, scale: 2, mode: "number" })
       .notNull()
@@ -312,6 +342,8 @@ export const saleItems = pgTable(
     hppSatuan: numeric("hpp_satuan", { precision: 16, scale: 4, mode: "number" }).notNull(),
     qty: numeric("qty", { precision: 10, scale: 2, mode: "number" }).notNull(),
     isDineIn: boolean("is_dine_in").notNull().default(false),
+    // catatan personalisasi per baris (mis. "tanpa gula", "tanpa mie")
+    catatan: text("catatan"),
     lineTotal: numeric("line_total", { precision: 14, scale: 2, mode: "number" }).notNull(),
   },
   (t) => [index("sale_items_sale_idx").on(t.saleId)],

@@ -21,6 +21,11 @@ test("kasir: POS → tambah menu → dine-in → checkout → struk", async ({ p
   await login(page, KASIR_EMAIL, KASIR_PASS);
   await expect(page).toHaveURL(/\/kasir/);
 
+  // modal pilih meja muncul lebih dulu → cari & pilih meja bernomor (= dine-in)
+  await expect(page.getByRole("heading", { name: "Pilih Meja" })).toBeVisible();
+  await page.getByPlaceholder(/Cari meja/).fill("1");
+  await page.getByRole("button", { name: /Meja 1/ }).click();
+
   // tab kategori dari catOrder tampil
   await expect(page.getByRole("button", { name: "Paket Premium" })).toBeVisible();
   await page.getByRole("button", { name: "Paket Premium" }).click();
@@ -29,8 +34,8 @@ test("kasir: POS → tambah menu → dine-in → checkout → struk", async ({ p
   await page.getByRole("button", { name: /Premium Basooopa A/ }).click();
   await expect(page.getByText("Keranjang")).toBeVisible();
 
-  // aktifkan dine-in level transaksi
-  await page.getByRole("button", { name: "Dine-in", exact: true }).click();
+  // catatan personalisasi baris menu
+  await page.getByPlaceholder(/tanpa gula/).fill("tanpa gula");
 
   // bayar
   await page.getByRole("button", { name: /Bayar & Cetak Struk/ }).click();
@@ -40,9 +45,17 @@ test("kasir: POS → tambah menu → dine-in → checkout → struk", async ({ p
   await expect(page.locator("#struk-print")).toContainText("TOTAL");
   await expect(page.locator("#struk-print")).toContainText(/PUSAT-\d{8}-\d{4}/);
   await expect(page.locator("#struk-print")).toContainText("Dine-in");
+  await expect(page.locator("#struk-print")).toContainText("Meja: Meja 1");
+  await expect(page.locator("#struk-print")).toContainText("tanpa gula");
 
   await page.getByRole("button", { name: "Transaksi Baru" }).click();
   await expect(page.locator("#struk-print")).toHaveCount(0);
+
+  // cetak ulang dari Riwayat harus tetap memuat catatan per baris
+  await page.goto("/kasir/riwayat");
+  await page.getByRole("button", { name: /PUSAT-\d{8}-\d{4}/ }).first().click();
+  await expect(page.locator("#struk-print")).toBeVisible();
+  await expect(page.locator("#struk-print")).toContainText("tanpa gula");
 });
 
 test("owner: stok menunjukkan pemakaian & laporan menampilkan omzet", async ({ page }) => {

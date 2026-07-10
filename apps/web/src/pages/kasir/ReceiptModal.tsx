@@ -16,6 +16,7 @@ export interface SaleResult {
     total: number;
     waktu: string;
     isDineIn: boolean;
+    mejaLabel: string | null;
     catatan: string | null;
   };
   items: {
@@ -25,6 +26,7 @@ export interface SaleResult {
     qty: number;
     lineTotal: number;
     isDineIn: boolean;
+    catatan: string | null;
   }[];
   branch_nama: string;
 }
@@ -39,7 +41,16 @@ interface CompanyStruk {
   receiptShowAlamat: boolean;
 }
 
-export function ReceiptModal({ data, onClose }: { data: SaleResult; onClose: () => void }) {
+export function ReceiptModal({
+  data,
+  onClose,
+  autoPrintOnOpen = true,
+}: {
+  data: SaleResult;
+  onClose: () => void;
+  /** false saat cetak ulang dari riwayat (jangan auto-print, user cetak manual) */
+  autoPrintOnOpen?: boolean;
+}) {
   const { auth } = useAuth();
   const { settings, isThermal, canAutoPrint, printReceipt } = usePrinter();
   const { data: company } = useQuery({
@@ -71,12 +82,14 @@ export function ReceiptModal({ data, onClose }: { data: SaleResult; onClose: () 
       nomor: data.sale.nomor,
       waktu: waktuStr,
       isDineIn: data.sale.isDineIn,
+      mejaLabel: data.sale.mejaLabel,
       items: data.items.map((it) => ({
         nama: it.menuNama,
         qty: it.qty,
         hargaSatuan: it.hargaSatuan,
         lineTotal: it.lineTotal,
         tag: it.isDineIn !== data.sale.isDineIn ? (it.isDineIn ? "DI" : "TA") : null,
+        catatan: it.catatan,
       })),
       subtotal: data.sale.subtotal,
       pb1Amount: data.sale.pb1Amount,
@@ -102,7 +115,7 @@ export function ReceiptModal({ data, onClose }: { data: SaleResult; onClose: () 
   // Cetak otomatis sekali per transaksi (BLE/USB yang sudah terhubung).
   // Tunggu data company termuat agar header/footer struk lengkap.
   useEffect(() => {
-    if (!settings.autoPrint || !canAutoPrint || !company) return;
+    if (!autoPrintOnOpen || !settings.autoPrint || !canAutoPrint || !company) return;
     if (autoPrintedFor.current === data.sale.id) return;
     autoPrintedFor.current = data.sale.id;
     void cetakThermal();
@@ -128,6 +141,7 @@ export function ReceiptModal({ data, onClose }: { data: SaleResult; onClose: () 
             <div>
               {formatWaktu(data.sale.waktu)} · {data.sale.isDineIn ? "Dine-in" : "Bawa pulang"}
             </div>
+            {data.sale.mejaLabel && <div>Meja: {data.sale.mejaLabel}</div>}
           </div>
           <hr className="my-2 border-dashed border-stone-400" />
           {data.items.map((it) => (
@@ -140,6 +154,7 @@ export function ReceiptModal({ data, onClose }: { data: SaleResult; onClose: () 
                 </span>
                 <span>{formatRupiah(it.lineTotal)}</span>
               </div>
+              {it.catatan && <div className="text-stone-500">* {it.catatan}</div>}
             </div>
           ))}
           <hr className="my-2 border-dashed border-stone-400" />
@@ -183,7 +198,7 @@ export function ReceiptModal({ data, onClose }: { data: SaleResult; onClose: () 
             onClick={onClose}
             className={`${isThermal ? btnSecondary : btnPrimary} flex-1`}
           >
-            Transaksi Baru
+            {autoPrintOnOpen ? "Transaksi Baru" : "Tutup"}
           </button>
         </div>
       </div>

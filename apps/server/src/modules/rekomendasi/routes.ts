@@ -28,11 +28,16 @@ export const rekomendasiRoutes = new Hono<AppEnv>().get("/beli", async (c) => {
   const acuan: AcuanJenis =
     acuanQ === "7hari" ? "7hari" : acuanQ === "rentang" ? "rentang" : "minggu_lalu";
 
+  // terima hanya format tanggal YYYY-MM-DD; selain itu diabaikan (default hari ini)
+  const tgl = (s?: string) => (s && /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : undefined);
+
   const hasil = await rekomendasiBeli(auth.company_id!, branchId, tz, {
     target,
     acuan,
     dari: c.req.query("dari") ?? undefined,
     sampai: c.req.query("sampai") ?? undefined,
+    pakaiDari: tgl(c.req.query("pakai_dari")),
+    pakaiSampai: tgl(c.req.query("pakai_sampai")),
   });
   return c.json(hasil);
 });

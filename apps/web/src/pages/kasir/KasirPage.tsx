@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
-import type { MenuDto } from "@kakarut/shared";
+import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
+import type { MejaDto, MenuDto } from "@kakarut/shared";
 import { Card, ErrorText, Spinner, btnPrimary } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { useBranch } from "../../context/BranchContext";
@@ -13,6 +14,8 @@ interface CartLine {
   qty: number;
   /** null = ikut pengaturan transaksi */
   dineInOverride: boolean | null;
+  /** catatan personalisasi baris (mis. "tanpa gula") */
+  catatan: string;
 }
 
 interface Kategori {
@@ -35,6 +38,10 @@ export function KasirPage() {
     queryKey: ["kategori"],
     queryFn: () => api<Kategori[]>("/kategori"),
   });
+  const { data: mejaList = [], isLoading: mejaLoading } = useQuery({
+    queryKey: ["meja", branchQuery],
+    queryFn: () => api<MejaDto[]>(`/meja${branchQuery}`),
+  });
   // Setelan PB1 terbaru dari server (snapshot login bisa basi bila
   // pengaturan perusahaan diubah saat sesi kasir masih terbuka)
   const { data: me } = useQuery({
@@ -46,9 +53,40 @@ export function KasirPage() {
 
   const [aktifKategori, setAktifKategori] = useState<string | null>(null);
   const [cart, setCart] = useState<CartLine[]>([]);
-  const [dineIn, setDineIn] = useState(false);
+  const [mejaId, setMejaId] = useState<string | null>(null);
+  // Modal pilih meja muncul lebih dulu tiap memulai transaksi (sebelum keranjang).
+  // Otomatis untuk kasir; owner/admin membukanya lewat tombol "Pilih/Ganti".
+  const [mejaModalOpen, setMejaModalOpen] = useState(isKasir);
+  const [mejaCari, setMejaCari] = useState("");
   const [catatan, setCatatan] = useState("");
   const [struk, setStruk] = useState<SaleResult | null>(null);
+
+  const mejaAktif = useMemo(() => mejaList.filter((m) => m.is_active), [mejaList]);
+  const mejaTerpilih = mejaAktif.find((m) => m.id === mejaId) ?? null;
+  // Meja menentukan mode transaksi: meja bernomor = dine-in (default), meja
+  // Ruang Tunggu = bawa pulang. Sebelum meja dipilih, tampilan default dine-in.
+  const dineIn = mejaTerpilih ? mejaTerpilih.tipe === "dine_in" : true;
+  // Pencarian meja: cocok sebagian (mis. ketik "8" → "Meja 8"), tak harus persis.
+  const mejaCocok = useMemo(() => {
+    const q = mejaCari.trim().toLowerCase();
+    if (!q) return mejaAktif;
+    return mejaAktif.filter((m) => m.nama.toLowerCase().includes(q));
+  }, [mejaAktif, mejaCari]);
+
+  // Bila meja terpilih dinonaktifkan/dihapus dari master, lepaskan pilihan.
+  useEffect(() => {
+    if (mejaId && !mejaAktif.some((m) => m.id === mejaId)) setMejaId(null);
+  }, [mejaId, mejaAktif]);
+
+  // Reset kotak pencarian tiap modal dibuka.
+  useEffect(() => {
+    if (mejaModalOpen) setMejaCari("");
+  }, [mejaModalOpen]);
+
+  function pilihMeja(id: string) {
+    setMejaId(id);
+    setMejaModalOpen(false);
+  }
 
   const kategoriTampil = useMemo(() => {
     const adaMenu = new Set((menus ?? []).map((m) => m.category_id));
@@ -69,8 +107,12 @@ export function KasirPage() {
         copy[idx] = { ...copy[idx], qty: copy[idx].qty + 1 };
         return copy;
       }
-      return [...prev, { menu, qty: 1, dineInOverride: null }];
+      return [...prev, { menu, qty: 1, dineInOverride: null, catatan: "" }];
     });
+  }
+
+  function ubahCatatanLine(menuId: string, val: string) {
+    setCart((prev) => prev.map((l) => (l.menu.id === menuId ? { ...l, catatan: val } : l)));
   }
 
   function ubahQty(menuId: string, delta: number) {
@@ -101,11 +143,13 @@ export function KasirPage() {
         body: {
           ...(!isKasir && branchId ? { branch_id: branchId } : {}),
           is_dine_in: dineIn,
+          meja_id: mejaId ?? undefined,
           catatan: catatan || undefined,
           items: cart.map((l) => ({
             menu_id: l.menu.id,
             qty: l.qty,
             ...(l.dineInOverride !== null ? { is_dine_in: l.dineInOverride } : {}),
+            ...(l.catatan.trim() ? { catatan: l.catatan.trim() } : {}),
           })),
         },
       }),
@@ -113,6 +157,8 @@ export function KasirPage() {
       setStruk(data);
       setCart([]);
       setCatatan("");
+      setMejaId(null);
+      // modal pilih meja dibuka lagi saat struk ditutup (transaksi berikutnya)
       queryClient.invalidateQueries({ queryKey: ["stok"] });
       queryClient.invalidateQueries({ queryKey: ["laporan"] });
       queryClient.invalidateQueries({ queryKey: ["penjualan"] });
@@ -186,22 +232,53 @@ export function KasirPage() {
       {/* Keranjang — di bawah pada mobile, kanan pada desktop */}
       <Card className="flex w-full shrink-0 flex-col p-4 md:w-96">
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-lg font-bold text-stone-800">Keranjang</h2>
-          <div className="flex overflow-hidden rounded-lg border border-stone-300 text-sm">
-            <button
-              onClick={() => setDineIn(false)}
-              className={`px-3 py-1.5 font-medium ${!dineIn ? "bg-orange-600 text-white" : "bg-white text-stone-600"}`}
+          <div className="flex items-baseline gap-2">
+            <h2 className="text-lg font-bold text-stone-800">Keranjang</h2>
+            <Link
+              to="/kasir/riwayat"
+              className="text-xs font-medium text-orange-600 hover:underline"
             >
-              Bawa Pulang
-            </button>
-            <button
-              onClick={() => setDineIn(true)}
-              className={`px-3 py-1.5 font-medium ${dineIn ? "bg-orange-600 text-white" : "bg-white text-stone-600"}`}
-            >
-              Dine-in
-            </button>
+              🕘 Riwayat
+            </Link>
           </div>
+          <Link
+            to="/pengaturan/meja"
+            className="text-xs font-medium text-stone-400 hover:text-orange-600 hover:underline"
+          >
+            ⚙ Atur meja
+          </Link>
         </div>
+
+        {/* Meja terpilih (dipilih lewat modal di awal transaksi) + tombol ganti */}
+        <button
+          onClick={() => setMejaModalOpen(true)}
+          className={`mb-3 flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left ${
+            mejaTerpilih
+              ? dineIn
+                ? "border-blue-200 bg-blue-50"
+                : "border-amber-200 bg-amber-50"
+              : "border-dashed border-stone-300 bg-stone-50"
+          }`}
+        >
+          <span className="min-w-0">
+            <span className="block text-xs text-stone-500">Meja</span>
+            {mejaTerpilih ? (
+              <span className="font-semibold text-stone-800">
+                {mejaTerpilih.tipe === "takeaway" ? `🥡 ${mejaTerpilih.nama}` : mejaTerpilih.nama}
+                <span
+                  className={`ml-2 text-xs font-medium ${dineIn ? "text-blue-600" : "text-amber-600"}`}
+                >
+                  {dineIn ? "Dine-in" : "Bawa pulang"}
+                </span>
+              </span>
+            ) : (
+              <span className="font-semibold text-stone-400">Belum dipilih</span>
+            )}
+          </span>
+          <span className="shrink-0 text-sm font-medium text-orange-600">
+            {mejaTerpilih ? "Ganti" : "Pilih"}
+          </span>
+        </button>
 
         <div className="space-y-2 md:flex-1 md:overflow-y-auto">
           {cart.length === 0 && (
@@ -255,6 +332,12 @@ export function KasirPage() {
                     </button>
                   </div>
                 </div>
+                <input
+                  value={l.catatan}
+                  onChange={(e) => ubahCatatanLine(l.menu.id, e.target.value)}
+                  placeholder="Catatan (mis. tanpa gula, tanpa mie)"
+                  className="mt-2 w-full rounded-lg border border-stone-200 bg-stone-50 px-2 py-1 text-xs focus:border-orange-400 focus:bg-white focus:outline-none"
+                />
               </div>
             );
           })}
@@ -282,9 +365,14 @@ export function KasirPage() {
             <span>{formatRupiah(subtotal + pb1)}</span>
           </div>
           <ErrorText error={bayar.error} />
+          {cart.length > 0 && !mejaId && (
+            <div className="text-center text-xs font-medium text-amber-600">
+              Pilih meja dulu sebelum bayar.
+            </div>
+          )}
           <button
             onClick={() => bayar.mutate()}
-            disabled={cart.length === 0 || bayar.isPending}
+            disabled={cart.length === 0 || !mejaId || bayar.isPending}
             className={`${btnPrimary} w-full py-3 text-base`}
           >
             {bayar.isPending ? "Memproses…" : "Bayar & Cetak Struk"}
@@ -292,7 +380,116 @@ export function KasirPage() {
         </div>
       </Card>
 
-      {struk && <ReceiptModal data={struk} onClose={() => setStruk(null)} />}
+      {/* Modal pilih meja — muncul lebih dulu tiap memulai transaksi */}
+      {mejaModalOpen && !struk && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setMejaModalOpen(false)}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-1 flex items-center justify-between">
+              <h2 className="text-lg font-bold text-stone-800">Pilih Meja</h2>
+              <button
+                onClick={() => setMejaModalOpen(false)}
+                className="text-stone-400 hover:text-stone-700"
+                aria-label="Tutup"
+              >
+                ✕
+              </button>
+            </div>
+            <p className="mb-4 text-sm text-stone-500">
+              Pilih meja untuk memulai transaksi. Meja bernomor = dine-in; <b>Ruang Tunggu</b> =
+              bawa pulang (take away).
+            </p>
+
+            {mejaLoading ? (
+              <div className="p-6 text-center text-sm text-stone-400">Memuat meja…</div>
+            ) : mejaAktif.length === 0 ? (
+              <div className="rounded-lg bg-stone-50 p-6 text-center text-sm text-stone-500">
+                Belum ada meja aktif.{" "}
+                <Link
+                  to="/pengaturan/meja"
+                  onClick={() => setMejaModalOpen(false)}
+                  className="font-medium text-orange-600 hover:underline"
+                >
+                  Atur meja dulu →
+                </Link>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {/* Pencarian: ketik nomor/kata, cocok sebagian (mis. "8" → Meja 8) */}
+                <input
+                  autoFocus
+                  value={mejaCari}
+                  onChange={(e) => setMejaCari(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && mejaCocok.length === 1) pilihMeja(mejaCocok[0].id);
+                  }}
+                  placeholder="Cari meja… (mis. 8 atau ruang tunggu)"
+                  className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm focus:border-orange-500 focus:outline-none"
+                />
+                <div className="max-h-72 space-y-1.5 overflow-y-auto">
+                  {mejaCocok.length === 0 && (
+                    <div className="py-6 text-center text-sm text-stone-400">
+                      Tidak ada meja cocok "{mejaCari}".
+                    </div>
+                  )}
+                  {mejaCocok.map((m) => {
+                    const takeaway = m.tipe === "takeaway";
+                    const dipilih = mejaId === m.id;
+                    return (
+                      <button
+                        key={m.id}
+                        onClick={() => pilihMeja(m.id)}
+                        className={`flex w-full items-center justify-between rounded-lg border px-3 py-2.5 text-left text-sm font-semibold ${
+                          dipilih
+                            ? takeaway
+                              ? "border-amber-500 bg-amber-500 text-white"
+                              : "border-blue-600 bg-blue-600 text-white"
+                            : takeaway
+                              ? "border-amber-300 bg-amber-50 text-amber-800 hover:border-amber-400"
+                              : "border-stone-200 bg-white text-stone-700 hover:border-blue-400"
+                        }`}
+                      >
+                        <span>
+                          {takeaway ? `🥡 ${m.nama}` : m.nama}
+                        </span>
+                        <span
+                          className={`text-xs font-medium ${
+                            dipilih ? "text-white/80" : takeaway ? "text-amber-600" : "text-blue-600"
+                          }`}
+                        >
+                          {takeaway ? "Take away" : "Dine-in"}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <Link
+                  to="/pengaturan/meja"
+                  onClick={() => setMejaModalOpen(false)}
+                  className="block text-center text-xs text-stone-400 hover:text-orange-600 hover:underline"
+                >
+                  ⚙ Atur / tambah meja
+                </Link>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {struk && (
+        <ReceiptModal
+          data={struk}
+          onClose={() => {
+            setStruk(null);
+            setMejaModalOpen(isKasir); // kasir: lanjut pilih meja transaksi berikutnya
+          }}
+        />
+      )}
     </div>
   );
 }

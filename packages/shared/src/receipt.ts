@@ -11,6 +11,8 @@ export interface ReceiptItem {
   lineTotal: number;
   /** penanda per baris, mis. "DI" saat item dine-in di transaksi bawa pulang */
   tag?: string | null;
+  /** catatan personalisasi per baris (mis. "tanpa gula") */
+  catatan?: string | null;
 }
 
 export interface ReceiptData {
@@ -24,6 +26,8 @@ export interface ReceiptData {
   /** waktu yang SUDAH diformat (mis. "09/07 14.30") */
   waktu: string;
   isDineIn: boolean;
+  /** label meja terpilih (mis. "Meja 3" / "Ruang Tunggu"); null bila tak ada */
+  mejaLabel?: string | null;
   items: ReceiptItem[];
   subtotal: number;
   pb1Amount: number;
@@ -66,6 +70,7 @@ export function buildReceiptBytes(data: ReceiptData, opts: ReceiptOptions): Uint
   b.align("left").divider();
   b.line(data.nomor, data.waktu);
   b.text(data.isDineIn ? "Dine-in" : "Bawa pulang");
+  if (data.mejaLabel) b.text(`Meja: ${data.mejaLabel}`);
   b.divider();
 
   // Item
@@ -74,6 +79,7 @@ export function buildReceiptBytes(data: ReceiptData, opts: ReceiptOptions): Uint
     const qtyStr = Number.isInteger(it.qty) ? String(it.qty) : it.qty.toFixed(2);
     const tag = it.tag ? ` (${it.tag})` : "";
     b.line(`  ${qtyStr} x ${formatRupiahAscii(it.hargaSatuan)}${tag}`, formatRupiahAscii(it.lineTotal));
+    if (it.catatan?.trim()) b.text(`  * ${it.catatan.trim()}`);
   }
   b.divider();
 
