@@ -352,6 +352,12 @@ export const stockOpnames = pgTable(
     qty: numeric("qty", { precision: 16, scale: 6, mode: "number" }).notNull(),
     opnameDate: date("opname_date").notNull(),
     catatan: text("catatan"),
+    /** pengelompokan satu sesi opname */
+    sessionId: uuid("session_id"),
+    /** snapshot saldo sistem saat opname (untuk bandingkan fisik vs sistem) */
+    systemQty: numeric("system_qty", { precision: 16, scale: 6, mode: "number" }),
+    /** qty_fisik − system_qty */
+    selisih: numeric("selisih", { precision: 16, scale: 6, mode: "number" }),
     userId: uuid("user_id").references(() => users.id),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },

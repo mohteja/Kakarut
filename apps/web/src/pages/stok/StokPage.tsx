@@ -1,9 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import type { PenyimpananDto, StokRowDto } from "@kakarut/shared";
 import {
   Card,
-  ErrorText,
   PageTitle,
   Spinner,
   StatusBadge,
@@ -13,16 +13,12 @@ import {
   tdClass,
   thClass,
 } from "../../components/ui";
-import { useAuth } from "../../context/AuthContext";
 import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatAngka } from "../../lib/format";
 
 export function StokPage() {
-  const { auth } = useAuth();
-  const { branchQuery, branchId } = useBranch();
-  const queryClient = useQueryClient();
-  const isManajemen = auth?.user.role === "owner" || auth?.user.role === "admin";
+  const { branchQuery } = useBranch();
 
   const { data: stok, isLoading } = useQuery({
     queryKey: ["stok", branchQuery],
@@ -33,31 +29,8 @@ export function StokPage() {
     queryFn: () => api<PenyimpananDto[]>(`/penyimpanan${branchQuery}`),
   });
 
-  const [modeOpname, setModeOpname] = useState(false);
-  const [opnameQty, setOpnameQty] = useState<Record<string, string>>({});
   const [cari, setCari] = useState("");
   const [filterTempat, setFilterTempat] = useState<string>("semua");
-
-  const simpanOpname = useMutation({
-    mutationFn: () => {
-      const items = Object.entries(opnameQty)
-        .filter(([, v]) => v !== "")
-        .map(([ingredient_id, v]) => ({ ingredient_id, qty: Number(v) }));
-      return api("/stok/opname", {
-        method: "POST",
-        body: {
-          ...(branchId ? { branch_id: branchId } : {}),
-          items,
-          catatan: "Opname dari halaman stok",
-        },
-      });
-    },
-    onSuccess: () => {
-      setModeOpname(false);
-      setOpnameQty({});
-      queryClient.invalidateQueries({ queryKey: ["stok"] });
-    },
-  });
 
   if (isLoading) return <Spinner />;
 
@@ -70,50 +43,23 @@ export function StokPage() {
           ? s.tempat_id === null
           : s.tempat_id === filterTempat,
     );
-  const jumlahDiisi = Object.values(opnameQty).filter((v) => v !== "").length;
 
   return (
     <div>
       <PageTitle
         aksi={
-          isManajemen ? (
-            modeOpname ? (
-              <div className="flex gap-2">
-                <button
-                  onClick={() => {
-                    setModeOpname(false);
-                    setOpnameQty({});
-                  }}
-                  className={btnSecondary}
-                >
-                  Batal
-                </button>
-                <button
-                  onClick={() => simpanOpname.mutate()}
-                  disabled={jumlahDiisi === 0 || simpanOpname.isPending}
-                  className={btnPrimary}
-                >
-                  Simpan Opname ({jumlahDiisi})
-                </button>
-              </div>
-            ) : (
-              <button onClick={() => setModeOpname(true)} className={btnPrimary}>
-                📋 Mode Opname
-              </button>
-            )
-          ) : undefined
+          <div className="flex gap-2">
+            <Link to="/stok/opname/riwayat" className={btnSecondary}>
+              🕑 Riwayat
+            </Link>
+            <Link to="/stok/opname" className={btnPrimary}>
+              📋 Stok Opname
+            </Link>
+          </div>
         }
       >
         Stok Bahan
       </PageTitle>
-
-      {modeOpname && (
-        <div className="mb-3 rounded-lg bg-blue-50 px-4 py-2 text-sm text-blue-800">
-          Isi kolom <b>Stok Fisik</b> hanya untuk bahan yang dihitung ulang — baris kosong
-          tidak diubah. Opname me-reset baseline saldo bahan tsb.
-        </div>
-      )}
-      <ErrorText error={simpanOpname.error} />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <input
@@ -160,7 +106,6 @@ export function StokPage() {
               <th className={`${thClass} text-right`}>Saldo</th>
               <th className={thClass}>Status</th>
               <th className={thClass}></th>
-              {modeOpname && <th className={`${thClass} text-right`}>Stok Fisik</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-stone-100">
@@ -190,21 +135,6 @@ export function StokPage() {
                     📄 Kartu
                   </a>
                 </td>
-                {modeOpname && (
-                  <td className={`${tdClass} text-right`}>
-                    <input
-                      type="number"
-                      min="0"
-                      step="any"
-                      value={opnameQty[s.ingredient_id] ?? ""}
-                      onChange={(e) =>
-                        setOpnameQty({ ...opnameQty, [s.ingredient_id]: e.target.value })
-                      }
-                      placeholder={formatAngka(s.saldo)}
-                      className="w-24 rounded-lg border border-stone-300 px-2 py-1 text-right text-sm"
-                    />
-                  </td>
-                )}
               </tr>
             ))}
           </tbody>

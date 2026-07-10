@@ -1,11 +1,13 @@
+import { randomUUID } from "node:crypto";
 import { zValidator } from "@hono/zod-validator";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
+import type { OpnameRingkasan } from "@kakarut/shared";
 import { db } from "../../db/client";
-import { companies, ingredients, stockOpnames } from "../../db/schema";
-import { pastikanCabang, requireRole, resolveBranchId, type AppEnv } from "../../middleware/auth";
+import { companies, ingredients, stockOpnames, users } from "../../db/schema";
+import { pastikanCabang, resolveBranchId, type AppEnv } from "../../middleware/auth";
 import { tanggalDi } from "../../lib/time";
 import { hitungSaldoCabang, kartuStok } from "./service";
 
@@ -73,63 +75,179 @@ export const stokRoutes = new Hono<AppEnv>()
       }),
     );
   })
-  .post(
-    "/opname",
-    requireRole("owner", "admin"),
-    zValidator("json", OpnameBody),
-    async (c) => {
-      const auth = c.get("auth");
-      const body = c.req.valid("json");
-      const branchId = body.branch_id
-        ? await pastikanCabang(body.branch_id, auth.company_id!)
-        : await resolveBranchId(c);
+  /**
+   * Stock opname: bandingkan fisik vs sistem. Semua peran (kasir terkunci
+   * cabangnya). Menyimpan snapshot saldo sistem + selisih per sesi, dan
+   * qty fisik jadi baseline saldo baru.
+   */
+  .post("/opname", zValidator("json", OpnameBody), async (c) => {
+    const auth = c.get("auth");
+    const body = c.req.valid("json");
+    const branchId = body.branch_id
+      ? await pastikanCabang(body.branch_id, auth.company_id!)
+      : await resolveBranchId(c);
+    if (auth.role === "cashier" && branchId !== auth.branch_id) {
+      throw new HTTPException(403, { message: "Kasir hanya boleh opname di cabangnya" });
+    }
 
-      // Gabungkan duplikat (entri terakhir menang) — dua baris opname dengan
-      // created_at identik membuat baseline saldo tidak deterministik.
-      const qtyByIngredient = new Map<string, number>();
-      for (const item of body.items) qtyByIngredient.set(item.ingredient_id, item.qty);
+    // Gabungkan duplikat (entri terakhir menang)
+    const qtyByIngredient = new Map<string, number>();
+    for (const item of body.items) qtyByIngredient.set(item.ingredient_id, item.qty);
 
-      // Semua bahan harus milik perusahaan pemanggil
-      const ids = [...qtyByIngredient.keys()];
-      const valid = await db
-        .select({ id: ingredients.id })
-        .from(ingredients)
-        .where(
-          and(
-            eq(ingredients.companyId, auth.company_id!),
-            eq(ingredients.trackStok, true),
-            inArray(ingredients.id, ids),
-          ),
-        );
-      if (valid.length !== ids.length) {
-        throw new HTTPException(400, {
-          message: "Ada bahan yang tidak valid atau stoknya tidak dilacak",
-        });
-      }
+    const ids = [...qtyByIngredient.keys()];
+    const valid = await db
+      .select({ id: ingredients.id })
+      .from(ingredients)
+      .where(
+        and(
+          eq(ingredients.companyId, auth.company_id!),
+          eq(ingredients.trackStok, true),
+          inArray(ingredients.id, ids),
+        ),
+      );
+    if (valid.length !== ids.length) {
+      throw new HTTPException(400, {
+        message: "Ada bahan yang tidak valid atau stoknya tidak dilacak",
+      });
+    }
 
-      const [company] = await db
-        .select({ timezone: companies.timezone })
-        .from(companies)
-        .where(eq(companies.id, auth.company_id!));
-      const today = tanggalDi(company?.timezone ?? "Asia/Jakarta");
+    const [company] = await db
+      .select({ timezone: companies.timezone })
+      .from(companies)
+      .where(eq(companies.id, auth.company_id!));
+    const today = tanggalDi(company?.timezone ?? "Asia/Jakarta");
 
-      const rows = await db
-        .insert(stockOpnames)
-        .values(
-          [...qtyByIngredient].map(([ingredientId, qty]) => ({
-            companyId: auth.company_id!,
-            branchId,
-            ingredientId,
-            qty,
-            opnameDate: today,
-            catatan: body.catatan ?? null,
-            userId: auth.sub,
-          })),
-        )
-        .returning();
-      return c.json({ ok: true, jumlah: rows.length }, 201);
-    },
-  )
+    // Snapshot saldo sistem per bahan (sebelum opname mengubahnya)
+    const saldoRows = await hitungSaldoCabang(auth.company_id!, branchId);
+    const saldoById = new Map(saldoRows.map((r) => [r.ingredient_id, r.saldo]));
+
+    const sessionId = randomUUID();
+    const ringkasan: OpnameRingkasan = {
+      dihitung: qtyByIngredient.size,
+      cocok: 0,
+      lebih: 0,
+      kurang: 0,
+      total_selisih: 0,
+    };
+    const values = [...qtyByIngredient].map(([ingredientId, fisik]) => {
+      const sistem = saldoById.get(ingredientId) ?? 0;
+      const selisih = fisik - sistem;
+      if (Math.abs(selisih) < 1e-9) ringkasan.cocok++;
+      else if (selisih > 0) ringkasan.lebih++;
+      else ringkasan.kurang++;
+      ringkasan.total_selisih += selisih;
+      return {
+        companyId: auth.company_id!,
+        branchId,
+        ingredientId,
+        qty: fisik,
+        opnameDate: today,
+        catatan: body.catatan ?? null,
+        sessionId,
+        systemQty: sistem,
+        selisih,
+        userId: auth.sub,
+      };
+    });
+
+    const rows = await db.insert(stockOpnames).values(values).returning();
+    return c.json({ ok: true, jumlah: rows.length, session_id: sessionId, ringkasan }, 201);
+  })
+  /** Riwayat sesi opname (digroup per session_id). */
+  .get("/opname/riwayat", async (c) => {
+    const auth = c.get("auth");
+    const branchId = await resolveBranchId(c);
+    const rows = await db
+      .select({
+        session_id: stockOpnames.sessionId,
+        waktu: sql<string>`max(${stockOpnames.createdAt})`,
+        user_id: sql<string>`max(${stockOpnames.userId}::text)`,
+        catatan: sql<string>`max(${stockOpnames.catatan})`,
+        jumlah_item: sql<number>`count(*)::int`,
+        jumlah_selisih: sql<number>`count(*) FILTER (WHERE abs(coalesce(${stockOpnames.selisih}, 0)) > 1e-9)::int`,
+      })
+      .from(stockOpnames)
+      .where(
+        and(
+          eq(stockOpnames.companyId, auth.company_id!),
+          eq(stockOpnames.branchId, branchId),
+          isNotNull(stockOpnames.sessionId),
+        ),
+      )
+      .groupBy(stockOpnames.sessionId)
+      .orderBy(desc(sql`max(${stockOpnames.createdAt})`))
+      .limit(200);
+
+    // resolusi nama user (opsional)
+    const userIds = [...new Set(rows.map((r) => r.user_id).filter(Boolean))] as string[];
+    const namaById = new Map<string, string>();
+    if (userIds.length > 0) {
+      const us = await db
+        .select({ id: users.id, nama: users.nama })
+        .from(users)
+        .where(inArray(users.id, userIds));
+      for (const u of us) namaById.set(u.id, u.nama);
+    }
+
+    return c.json(
+      rows.map((r) => ({
+        session_id: r.session_id,
+        waktu: r.waktu,
+        oleh: r.user_id ? (namaById.get(r.user_id) ?? null) : null,
+        jumlah_item: r.jumlah_item,
+        jumlah_selisih: r.jumlah_selisih,
+        catatan: r.catatan,
+      })),
+    );
+  })
+  /** Detail satu sesi opname (fisik vs sistem vs selisih per bahan). */
+  .get("/opname/sesi/:sessionId", async (c) => {
+    const auth = c.get("auth");
+    const rows = await db
+      .select({
+        nama: ingredients.nama,
+        satuan: ingredients.satuan,
+        system_qty: stockOpnames.systemQty,
+        qty_fisik: stockOpnames.qty,
+        selisih: stockOpnames.selisih,
+        waktu: stockOpnames.createdAt,
+        catatan: stockOpnames.catatan,
+        user_id: stockOpnames.userId,
+      })
+      .from(stockOpnames)
+      .innerJoin(ingredients, eq(stockOpnames.ingredientId, ingredients.id))
+      .where(
+        and(
+          eq(stockOpnames.companyId, auth.company_id!),
+          eq(stockOpnames.sessionId, c.req.param("sessionId")),
+        ),
+      )
+      .orderBy(desc(sql`abs(coalesce(${stockOpnames.selisih}, 0))`), ingredients.nama);
+    if (rows.length === 0) throw new HTTPException(404, { message: "Sesi opname tidak ditemukan" });
+
+    let oleh: string | null = null;
+    if (rows[0].user_id) {
+      const [u] = await db
+        .select({ nama: users.nama })
+        .from(users)
+        .where(eq(users.id, rows[0].user_id));
+      oleh = u?.nama ?? null;
+    }
+
+    return c.json({
+      session_id: c.req.param("sessionId"),
+      waktu: rows[0].waktu,
+      oleh,
+      catatan: rows[0].catatan,
+      items: rows.map((r) => ({
+        nama: r.nama,
+        satuan: r.satuan,
+        system_qty: r.system_qty,
+        qty_fisik: r.qty_fisik,
+        selisih: r.selisih,
+      })),
+    });
+  })
   .get("/opname", async (c) => {
     const auth = c.get("auth");
     const branchId = await resolveBranchId(c);

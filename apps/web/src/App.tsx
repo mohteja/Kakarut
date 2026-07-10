@@ -18,6 +18,8 @@ import { PenyimpananPage } from "./pages/pengaturan/PenyimpananPage";
 import { PerusahaanPage } from "./pages/pengaturan/PerusahaanPage";
 import { SupplierPage } from "./pages/pengaturan/SupplierPage";
 import { KartuStokPage } from "./pages/stok/KartuStokPage";
+import { OpnamePage } from "./pages/stok/OpnamePage";
+import { OpnameRiwayatPage } from "./pages/stok/OpnameRiwayatPage";
 import { StokPage } from "./pages/stok/StokPage";
 import { SistemPage } from "./pages/superadmin/SistemPage";
 import { TenantsPage } from "./pages/superadmin/TenantsPage";
@@ -43,6 +45,13 @@ export default function App() {
       <PrinterProvider>
       <Routes>
         <Route path="/login" element={<Navigate to={beranda} replace />} />
+        {/* Opname = layar penuh tanpa sidebar (dipakai langsung di device) */}
+        {!isSuperAdmin && (
+          <>
+            <Route path="/stok/opname" element={<OpnamePage />} />
+            <Route path="/stok/opname/riwayat" element={<OpnameRiwayatPage />} />
+          </>
+        )}
         <Route element={<Layout />}>
           {isSuperAdmin && (
             <>

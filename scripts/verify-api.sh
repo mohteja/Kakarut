@@ -236,6 +236,28 @@ cek "baris opname me-reset saldo ke 500" "V == 500" \
   "$(echo "$KARTU2" | jq '[.mutasi[] | select(.jenis == "opname")] | last | .saldo')"
 cek "saldo akhir kartu == 500 (opname terbaru)" "V == 500" "$(echo "$KARTU2" | jq .saldo_akhir)"
 
+echo "== 14. Stock opname: kasir, snapshot sistem, selisih, riwayat =="
+# saldo sistem plastik saat ini
+PLASTIK_SISTEM=$(stok_of "$(api "$KASIR" GET /stok)" "plastik take away")
+FISIK=$(python3 -c "print($PLASTIK_SISTEM - 3)")   # sengaja kurang 3
+OP=$(api "$KASIR" POST /stok/opname "{\"catatan\":\"opname uji\",\"items\":[{\"ingredient_id\":\"$PLASTIK_ID\",\"qty\":$FISIK}]}")
+SESI=$(echo "$OP" | jq -r .session_id)
+[ "$SESI" != "null" ] && ok "kasir boleh opname, dapat session_id"
+cek "ringkasan: 1 kurang" "V == 1" "$(echo "$OP" | jq .ringkasan.kurang)"
+cek "ringkasan: total_selisih = -3" "abs(V - (-3)) < 0.001" "$(echo "$OP" | jq .ringkasan.total_selisih)"
+cek "saldo /stok jadi fisik" "abs(V - $FISIK) < 0.001" \
+  "$(stok_of "$(api "$KASIR" GET /stok)" "plastik take away")"
+cek "riwayat opname memuat sesi baru" "V >= 1" \
+  "$(api "$KASIR" GET /stok/opname/riwayat | jq --arg s "$SESI" '[.[] | select(.session_id == $s)] | length')"
+DETAIL=$(api "$KASIR" GET "/stok/opname/sesi/$SESI")
+cek "detail sesi: system_qty tersimpan" "abs(V - $PLASTIK_SISTEM) < 0.001" \
+  "$(echo "$DETAIL" | jq '.items[0].system_qty')"
+cek "detail sesi: selisih = -3" "abs(V - (-3)) < 0.001" "$(echo "$DETAIL" | jq '.items[0].selisih')"
+api "$OWNER" PUT "/bahan/$SUKRO_ID" '{"track_stok":false}' > /dev/null
+cek "opname bahan tak dilacak ditolak (400)" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/stok/opname" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"items\":[{\"ingredient_id\":\"$SUKRO_ID\",\"qty\":1}]}")"
+api "$OWNER" PUT "/bahan/$SUKRO_ID" '{"track_stok":true}' > /dev/null
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

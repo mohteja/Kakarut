@@ -76,6 +76,7 @@ export interface StokRowDto {
   nama: string;
   kategori: BahanKategori;
   isi: number;
+  satuan: string;
   /** tempat penyimpanan dari entri masuk terkonfirmasi terakhir */
   tempat: string | null;
   tempat_id: string | null;
@@ -101,6 +102,37 @@ export interface PenyimpananDto {
   nama: string;
   catatan: string | null;
   is_active: boolean;
+}
+
+export interface OpnameRingkasan {
+  dihitung: number;
+  cocok: number;
+  lebih: number;
+  kurang: number;
+  total_selisih: number;
+}
+
+export interface OpnameSesiRow {
+  session_id: string;
+  waktu: string;
+  oleh: string | null;
+  jumlah_item: number;
+  jumlah_selisih: number;
+  catatan: string | null;
+}
+
+export interface OpnameSesiDetail {
+  session_id: string;
+  waktu: string;
+  oleh: string | null;
+  catatan: string | null;
+  items: {
+    nama: string;
+    satuan: string;
+    system_qty: number | null;
+    qty_fisik: number;
+    selisih: number | null;
+  }[];
 }
 
 export type MutasiJenis = "opname" | "produksi" | "beli" | "penjualan";
