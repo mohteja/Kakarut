@@ -145,6 +145,9 @@ export const KLARIFIKASI_KATEGORI: {
   { key: "lainnya", label: "Lainnya", keterangan: "Jelaskan di catatan", is_waste: false },
 ];
 
+/** status persetujuan penyesuaian: menunggu owner/admin, lalu disetujui. */
+export type PenyesuaianStatus = "menunggu" | "disetujui";
+
 export interface PenyesuaianRow {
   id: string;
   waktu: string;
@@ -154,13 +157,19 @@ export interface PenyesuaianRow {
   qty_fisik: number;
   selisih: number;
   klarifikasi_status: "belum" | "sudah";
+  /** menunggu persetujuan owner/admin, atau sudah disetujui (stok disesuaikan) */
+  penyesuaian_status: PenyesuaianStatus;
   kategori: PenyesuaianKategori | null;
   catatan: string | null;
   foto_url: string | null;
+  /** alasan penolakan terakhir (bila dikembalikan untuk klarifikasi ulang) */
+  tolak_alasan: string | null;
   /** karyawan yang input opname */
   oleh: string | null;
   /** karyawan yang mengklarifikasi */
   diklarifikasi_oleh: string | null;
+  /** owner/admin yang menyetujui */
+  disetujui_oleh: string | null;
 }
 
 export interface OpnameRingkasan {

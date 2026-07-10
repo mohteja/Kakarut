@@ -28,13 +28,14 @@ export function StokPage() {
     queryKey: ["penyimpanan", branchQuery],
     queryFn: () => api<PenyimpananDto[]>(`/penyimpanan${branchQuery}`),
   });
-  const { data: belumKlarifikasi = [] } = useQuery({
-    queryKey: ["penyesuaian", branchQuery, "belum"],
-    queryFn: () =>
-      api<PenyesuaianRow[]>(
-        `/stok/penyesuaian${branchQuery ? `${branchQuery}&` : "?"}status=belum`,
-      ),
+  // semua penyesuaian yang belum tuntas (belum diklarifikasi + menunggu persetujuan)
+  const { data: penyesuaianRows = [] } = useQuery({
+    queryKey: ["penyesuaian", branchQuery, "semua"],
+    queryFn: () => api<PenyesuaianRow[]>(`/stok/penyesuaian${branchQuery || ""}`),
   });
+  const belumTuntas = penyesuaianRows.filter(
+    (r) => r.penyesuaian_status !== "disetujui",
+  ).length;
 
   const [cari, setCari] = useState("");
   const [filterTempat, setFilterTempat] = useState<string>("semua");
@@ -58,9 +59,9 @@ export function StokPage() {
           <div className="flex flex-wrap gap-2">
             <Link to="/stok/penyesuaian" className={`${btnSecondary} relative`}>
               ⚠️ Penyesuaian
-              {belumKlarifikasi.length > 0 && (
+              {belumTuntas > 0 && (
                 <span className="absolute -right-1.5 -top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-xs font-bold text-white">
-                  {belumKlarifikasi.length}
+                  {belumTuntas}
                 </span>
               )}
             </Link>

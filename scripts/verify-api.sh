@@ -224,20 +224,26 @@ cek "track_stok dikembalikan, sukro tampil lagi di /stok" "V == 1" \
   "$(api "$KASIR" GET /stok | jq '[.[] | select(.slug == "sukro cikur")] | length')"
 
 echo "== 13. Kartu stok =="
+FOTO="/uploads/companies/x/bukti/uji.jpg"
 KARTU=$(api "$KASIR" GET "/stok/kartu/$PLASTIK_ID")
 SALDO_STOK=$(stok_of "$(api "$KASIR" GET /stok)" "plastik take away")
 cek "saldo akhir kartu == saldo di /stok" "abs(V - $SALDO_STOK) < 0.001" "$(echo "$KARTU" | jq .saldo_akhir)"
 cek "kartu memuat mutasi pembelian" "V >= 1" "$(echo "$KARTU" | jq '[.mutasi[] | select(.jenis == "beli")] | length')"
 cek "kartu memuat mutasi penjualan" "V >= 1" "$(echo "$KARTU" | jq '[.mutasi[] | select(.jenis == "penjualan")] | length')"
-# opname me-reset saldo berjalan
+# opname hanya me-reset saldo SETELAH disetujui owner/admin
 api "$OWNER" POST /stok/opname "{\"items\":[{\"ingredient_id\":\"$PLASTIK_ID\",\"qty\":500}],\"catatan\":\"opname kartu\"}" > /dev/null
+cek "opname menunggu: kartu BELUM reset ke 500" "abs(V - $SALDO_STOK) < 0.001" \
+  "$(api "$KASIR" GET "/stok/kartu/$PLASTIK_ID" | jq .saldo_akhir)"
+PID13=$(api "$OWNER" GET "/stok/penyesuaian?status=belum" | jq -r '[.[] | select(.bahan == "plastik take away")] | first | .id')
+api "$OWNER" POST "/stok/penyesuaian/$PID13/klarifikasi" "{\"kategori\":\"koreksi_pencatatan\",\"foto_url\":\"$FOTO\"}" > /dev/null
+api "$OWNER" POST "/stok/penyesuaian/$PID13/setujui" > /dev/null
 KARTU2=$(api "$KASIR" GET "/stok/kartu/$PLASTIK_ID")
-cek "baris opname me-reset saldo ke 500" "V == 500" \
+cek "setelah disetujui: baris opname me-reset saldo ke 500" "V == 500" \
   "$(echo "$KARTU2" | jq '[.mutasi[] | select(.jenis == "opname")] | last | .saldo')"
-cek "saldo akhir kartu == 500 (opname terbaru)" "V == 500" "$(echo "$KARTU2" | jq .saldo_akhir)"
+cek "saldo akhir kartu == 500 (opname disetujui)" "V == 500" "$(echo "$KARTU2" | jq .saldo_akhir)"
 
 echo "== 14. Stock opname: kasir, snapshot sistem, selisih, riwayat =="
-# saldo sistem plastik saat ini
+# saldo sistem plastik saat ini (500 setelah §13)
 PLASTIK_SISTEM=$(stok_of "$(api "$KASIR" GET /stok)" "plastik take away")
 FISIK=$(python3 -c "print($PLASTIK_SISTEM - 3)")   # sengaja kurang 3
 OP=$(api "$KASIR" POST /stok/opname "{\"catatan\":\"opname uji\",\"items\":[{\"ingredient_id\":\"$PLASTIK_ID\",\"qty\":$FISIK}]}")
@@ -245,7 +251,8 @@ SESI=$(echo "$OP" | jq -r .session_id)
 [ "$SESI" != "null" ] && ok "kasir boleh opname, dapat session_id"
 cek "ringkasan: 1 kurang" "V == 1" "$(echo "$OP" | jq .ringkasan.kurang)"
 cek "ringkasan: total_selisih = -3" "abs(V - (-3)) < 0.001" "$(echo "$OP" | jq .ringkasan.total_selisih)"
-cek "saldo /stok jadi fisik" "abs(V - $FISIK) < 0.001" \
+# stok BELUM berubah — menunggu klarifikasi + persetujuan
+cek "saldo /stok TIDAK berubah (menunggu persetujuan)" "abs(V - $PLASTIK_SISTEM) < 0.001" \
   "$(stok_of "$(api "$KASIR" GET /stok)" "plastik take away")"
 cek "riwayat opname memuat sesi baru" "V >= 1" \
   "$(api "$KASIR" GET /stok/opname/riwayat | jq --arg s "$SESI" '[.[] | select(.session_id == $s)] | length')"
@@ -258,17 +265,19 @@ cek "opname bahan tak dilacak ditolak (400)" "V == 400" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/stok/opname" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"items\":[{\"ingredient_id\":\"$SUKRO_ID\",\"qty\":1}]}")"
 api "$OWNER" PUT "/bahan/$SUKRO_ID" '{"track_stok":true}' > /dev/null
 
-echo "== 15. Klarifikasi penyesuaian stok (waste vs koreksi) =="
-# opname §14 tadi membuat selisih -3 untuk plastik → harus muncul di penyesuaian
+echo "== 15. Penyesuaian: klarifikasi (foto wajib) + persetujuan owner/admin =="
+# opname §14 tadi membuat selisih -3 untuk plastik → menunggu klarifikasi
 PENY=$(api "$KASIR" GET "/stok/penyesuaian?status=belum")
-PENY_ID=$(echo "$PENY" | jq -r '[.[] | select(.bahan == "plastik take away")] | last | .id')
+PENY_ID=$(echo "$PENY" | jq -r '[.[] | select(.bahan == "plastik take away")] | first | .id')
 cek "selisih opname muncul di penyesuaian (belum)" "V == 1" \
   "$(echo "$PENY" | jq --arg id "$PENY_ID" '[.[] | select(.id == $id and .klarifikasi_status == "belum")] | length')"
 cek "penyesuaian punya selisih ≠ 0" "V == 1" \
   "$(echo "$PENY" | jq --arg id "$PENY_ID" '[.[] | select(.id == $id and (.selisih | fabs) > 0)] | length')"
+# setujui sebelum klarifikasi ditolak
+cek "setujui sebelum klarifikasi ditolak (400)" "V == 400" \
+  "$(status_code "$OWNER" POST "/stok/penyesuaian/$PENY_ID/setujui")"
 cek "klarifikasi tanpa foto ditolak (400)" "V == 400" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/stok/penyesuaian/$PENY_ID/klarifikasi" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d '{"kategori":"waste_bahan","catatan":"x"}')"
-FOTO="/uploads/companies/x/bukti/uji.jpg"
 api "$KASIR" POST "/stok/penyesuaian/$PENY_ID/klarifikasi" "{\"kategori\":\"waste_bahan\",\"catatan\":\"tumpah\",\"foto_url\":\"$FOTO\"}" > /dev/null
 DETAIL=$(api "$KASIR" GET "/stok/penyesuaian?status=semua")
 cek "setelah klarifikasi: status sudah" "V == 1" \
@@ -277,6 +286,41 @@ cek "bukti foto tersimpan" "V == 1" \
   "$(echo "$DETAIL" | jq --arg id "$PENY_ID" --arg f "$FOTO" '[.[] | select(.id == $id and .foto_url == $f)] | length')"
 cek "hilang dari daftar 'belum'" "V == 0" \
   "$(api "$KASIR" GET "/stok/penyesuaian?status=belum" | jq --arg id "$PENY_ID" '[.[] | select(.id == $id)] | length')"
+cek "muncul di 'menunggu_persetujuan'" "V == 1" \
+  "$(api "$KASIR" GET "/stok/penyesuaian?status=menunggu_persetujuan" | jq --arg id "$PENY_ID" '[.[] | select(.id == $id)] | length')"
+# stok masih belum berubah (menunggu persetujuan)
+cek "saldo /stok masih belum berubah (menunggu persetujuan)" "abs(V - $PLASTIK_SISTEM) < 0.001" \
+  "$(stok_of "$(api "$KASIR" GET /stok)" "plastik take away")"
+# kasir tidak boleh menyetujui
+cek "kasir setujui ditolak (403)" "V == 403" \
+  "$(status_code "$KASIR" POST "/stok/penyesuaian/$PENY_ID/setujui")"
+# owner menyetujui → stok disesuaikan ke fisik
+api "$OWNER" POST "/stok/penyesuaian/$PENY_ID/setujui" > /dev/null
+cek "setelah disetujui: saldo /stok jadi fisik" "abs(V - $FISIK) < 0.001" \
+  "$(stok_of "$(api "$KASIR" GET /stok)" "plastik take away")"
+cek "setujui ulang ditolak (404, idempoten)" "V == 404" \
+  "$(status_code "$OWNER" POST "/stok/penyesuaian/$PENY_ID/setujui")"
+cek "kartu stok me-reset ke fisik setelah disetujui" "abs(V - $FISIK) < 0.001" \
+  "$(api "$KASIR" GET "/stok/kartu/$PLASTIK_ID" | jq .saldo_akhir)"
+
+echo "== 15b. Penyesuaian: alur tolak → klarifikasi ulang =="
+FISIK2=$(python3 -c "print($FISIK - 2)")
+api "$KASIR" POST /stok/opname "{\"catatan\":\"opname tolak\",\"items\":[{\"ingredient_id\":\"$PLASTIK_ID\",\"qty\":$FISIK2}]}" > /dev/null
+PID2=$(api "$KASIR" GET "/stok/penyesuaian?status=belum" | jq -r '[.[] | select(.bahan == "plastik take away")] | first | .id')
+api "$KASIR" POST "/stok/penyesuaian/$PID2/klarifikasi" "{\"kategori\":\"waste_bahan\",\"foto_url\":\"$FOTO\"}" > /dev/null
+api "$OWNER" POST "/stok/penyesuaian/$PID2/tolak" "{\"alasan\":\"bukti kurang jelas\"}" > /dev/null
+DIT=$(api "$KASIR" GET "/stok/penyesuaian?status=belum")
+cek "ditolak: kembali ke 'belum'" "V == 1" \
+  "$(echo "$DIT" | jq --arg id "$PID2" '[.[] | select(.id == $id and .klarifikasi_status == "belum")] | length')"
+cek "ditolak: alasan tersimpan" "V == 1" \
+  "$(echo "$DIT" | jq --arg id "$PID2" '[.[] | select(.id == $id and .tolak_alasan == "bukti kurang jelas")] | length')"
+cek "ditolak: stok belum berubah (masih fisik lama)" "abs(V - $FISIK) < 0.001" \
+  "$(stok_of "$(api "$KASIR" GET /stok)" "plastik take away")"
+# klarifikasi ulang → setujui → stok jadi fisik2
+api "$KASIR" POST "/stok/penyesuaian/$PID2/klarifikasi" "{\"kategori\":\"koreksi_pencatatan\",\"foto_url\":\"$FOTO\"}" > /dev/null
+api "$OWNER" POST "/stok/penyesuaian/$PID2/setujui" > /dev/null
+cek "klarifikasi ulang lalu disetujui: saldo jadi fisik2" "abs(V - $FISIK2) < 0.001" \
+  "$(stok_of "$(api "$KASIR" GET /stok)" "plastik take away")"
 
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="

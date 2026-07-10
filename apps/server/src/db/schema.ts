@@ -32,6 +32,11 @@ export const penyesuaianKategoriEnum = pgEnum("penyesuaian_kategori", [
 ]);
 /** status klarifikasi penyesuaian stok */
 export const klarifikasiStatusEnum = pgEnum("klarifikasi_status", ["belum", "sudah"]);
+/**
+ * status persetujuan penyesuaian stok: opname baru jadi baseline saldo
+ * ('disetujui') hanya setelah owner/admin menyetujui selisih yang diklarifikasi.
+ */
+export const penyesuaianStatusEnum = pgEnum("penyesuaian_status", ["menunggu", "disetujui"]);
 
 // ===== Tenancy & identitas =====
 
@@ -376,6 +381,18 @@ export const stockOpnames = pgTable(
     klarifikasiFotoUrl: text("klarifikasi_foto_url"),
     klarifikasiBy: uuid("klarifikasi_by").references(() => users.id),
     klarifikasiAt: timestamp("klarifikasi_at", { withTimezone: true }),
+    /**
+     * persetujuan owner/admin: baris opname jadi baseline saldo hanya setelah
+     * 'disetujui'. Default 'disetujui' agar baris lama tetap efektif; opname
+     * baru dgn selisih≠0 di-set 'menunggu' sampai disetujui.
+     */
+    penyesuaianStatus: penyesuaianStatusEnum("penyesuaian_status")
+      .notNull()
+      .default("disetujui"),
+    disetujuiBy: uuid("disetujui_by").references(() => users.id),
+    disetujuiAt: timestamp("disetujui_at", { withTimezone: true }),
+    /** alasan penolakan (dikembalikan ke karyawan untuk klarifikasi ulang) */
+    tolakAlasan: text("tolak_alasan"),
     userId: uuid("user_id").references(() => users.id),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },

@@ -8,7 +8,7 @@ import { z } from "zod";
 import type { OpnameRingkasan } from "@kakarut/shared";
 import { db } from "../../db/client";
 import { companies, ingredients, stockOpnames, users } from "../../db/schema";
-import { pastikanCabang, resolveBranchId, type AppEnv } from "../../middleware/auth";
+import { pastikanCabang, requireRole, resolveBranchId, type AppEnv } from "../../middleware/auth";
 import { tanggalDi } from "../../lib/time";
 import { hitungSaldoCabang, kartuStok } from "./service";
 
@@ -150,6 +150,9 @@ export const stokRoutes = new Hono<AppEnv>()
         selisih,
         // selisih ≠ 0 → wajib diklarifikasi karyawan (waste vs koreksi)
         klarifikasiStatus: adaSelisih ? ("belum" as const) : null,
+        // selisih ≠ 0 → menunggu persetujuan owner/admin sebelum jadi baseline
+        // saldo (stok belum berubah); selisih = 0 langsung efektif (no-op).
+        penyesuaianStatus: adaSelisih ? ("menunggu" as const) : ("disetujui" as const),
         userId: auth.sub,
       };
     });
@@ -164,9 +167,10 @@ export const stokRoutes = new Hono<AppEnv>()
   .get("/penyesuaian", async (c) => {
     const auth = c.get("auth");
     const branchId = await resolveBranchId(c);
-    const status = c.req.query("status"); // 'belum' | undefined
+    const status = c.req.query("status"); // 'belum' | 'menunggu_persetujuan' | undefined
     const inputUser = alias(users, "input_user");
     const klarUser = alias(users, "klar_user");
+    const setujuUser = alias(users, "setuju_user");
 
     const conds = [
       eq(stockOpnames.companyId, auth.company_id!),
@@ -174,7 +178,14 @@ export const stokRoutes = new Hono<AppEnv>()
       isNotNull(stockOpnames.selisih),
       ne(stockOpnames.selisih, 0),
     ];
-    if (status === "belum") conds.push(eq(stockOpnames.klarifikasiStatus, "belum"));
+    if (status === "belum") {
+      // perlu klarifikasi karyawan
+      conds.push(eq(stockOpnames.klarifikasiStatus, "belum"));
+    } else if (status === "menunggu_persetujuan") {
+      // sudah diklarifikasi, menunggu owner/admin menyetujui
+      conds.push(eq(stockOpnames.klarifikasiStatus, "sudah"));
+      conds.push(eq(stockOpnames.penyesuaianStatus, "menunggu"));
+    }
 
     const rows = await db
       .select({
@@ -186,16 +197,20 @@ export const stokRoutes = new Hono<AppEnv>()
         qty_fisik: stockOpnames.qty,
         selisih: stockOpnames.selisih,
         klarifikasi_status: stockOpnames.klarifikasiStatus,
+        penyesuaian_status: stockOpnames.penyesuaianStatus,
         kategori: stockOpnames.penyesuaianKategori,
         catatan: stockOpnames.klarifikasiCatatan,
         foto_url: stockOpnames.klarifikasiFotoUrl,
+        tolak_alasan: stockOpnames.tolakAlasan,
         oleh: inputUser.nama,
         diklarifikasi_oleh: klarUser.nama,
+        disetujui_oleh: setujuUser.nama,
       })
       .from(stockOpnames)
       .innerJoin(ingredients, eq(stockOpnames.ingredientId, ingredients.id))
       .leftJoin(inputUser, eq(stockOpnames.userId, inputUser.id))
       .leftJoin(klarUser, eq(stockOpnames.klarifikasiBy, klarUser.id))
+      .leftJoin(setujuUser, eq(stockOpnames.disetujuiBy, setujuUser.id))
       .where(and(...conds))
       .orderBy(desc(stockOpnames.createdAt))
       .limit(300);
@@ -229,7 +244,11 @@ export const stokRoutes = new Hono<AppEnv>()
       const body = c.req.valid("json");
 
       const [row] = await db
-        .select({ branchId: stockOpnames.branchId, selisih: stockOpnames.selisih })
+        .select({
+          branchId: stockOpnames.branchId,
+          selisih: stockOpnames.selisih,
+          penyesuaianStatus: stockOpnames.penyesuaianStatus,
+        })
         .from(stockOpnames)
         .where(
           and(
@@ -244,6 +263,11 @@ export const stokRoutes = new Hono<AppEnv>()
       if (!row.selisih || Math.abs(row.selisih) < 1e-9) {
         throw new HTTPException(400, { message: "Baris ini tidak punya selisih" });
       }
+      if (row.penyesuaianStatus === "disetujui") {
+        throw new HTTPException(400, {
+          message: "Penyesuaian sudah disetujui — klarifikasi terkunci",
+        });
+      }
 
       await db
         .update(stockOpnames)
@@ -254,11 +278,101 @@ export const stokRoutes = new Hono<AppEnv>()
           klarifikasiFotoUrl: body.foto_url,
           klarifikasiBy: auth.sub,
           klarifikasiAt: new Date(),
+          // klarifikasi baru → bersihkan alasan penolakan sebelumnya
+          tolakAlasan: null,
         })
         .where(eq(stockOpnames.id, c.req.param("id")));
       return c.json({ ok: true });
     },
   )
+  /**
+   * Setujui penyesuaian: owner/admin memeriksa selisih yang sudah diklarifikasi
+   * lalu menyetujuinya — baru saat itu baris opname jadi baseline saldo (stok
+   * disesuaikan ke fisik). Idempoten via predikat status 'menunggu'.
+   */
+  .post("/penyesuaian/:id/setujui", requireRole("owner", "admin"), async (c) => {
+    const auth = c.get("auth");
+    const [row] = await db
+      .select({
+        klarifikasiStatus: stockOpnames.klarifikasiStatus,
+        selisih: stockOpnames.selisih,
+      })
+      .from(stockOpnames)
+      .where(
+        and(eq(stockOpnames.id, c.req.param("id")), eq(stockOpnames.companyId, auth.company_id!)),
+      );
+    if (!row) throw new HTTPException(404, { message: "Penyesuaian tidak ditemukan" });
+    if (!row.selisih || Math.abs(row.selisih) < 1e-9) {
+      throw new HTTPException(400, { message: "Baris ini tidak punya selisih" });
+    }
+    if (row.klarifikasiStatus !== "sudah") {
+      throw new HTTPException(400, { message: "Harus diklarifikasi dulu sebelum disetujui" });
+    }
+    const done = await db
+      .update(stockOpnames)
+      .set({ penyesuaianStatus: "disetujui", disetujuiBy: auth.sub, disetujuiAt: new Date() })
+      .where(
+        and(
+          eq(stockOpnames.id, c.req.param("id")),
+          eq(stockOpnames.companyId, auth.company_id!),
+          eq(stockOpnames.penyesuaianStatus, "menunggu"),
+        ),
+      )
+      .returning({ id: stockOpnames.id });
+    if (done.length === 0) {
+      throw new HTTPException(404, { message: "Penyesuaian sudah disetujui atau tidak ditemukan" });
+    }
+    return c.json({ ok: true });
+  })
+  /**
+   * Tolak penyesuaian: owner/admin mengembalikan ke karyawan untuk klarifikasi
+   * ulang (stok tidak berubah). Wajib menyertakan alasan.
+   */
+  .post(
+    "/penyesuaian/:id/tolak",
+    requireRole("owner", "admin"),
+    zValidator("json", z.object({ alasan: z.string().min(1, "Alasan penolakan wajib diisi") })),
+    async (c) => {
+      const auth = c.get("auth");
+      const body = c.req.valid("json");
+      const done = await db
+        .update(stockOpnames)
+        .set({ klarifikasiStatus: "belum", tolakAlasan: body.alasan })
+        .where(
+          and(
+            eq(stockOpnames.id, c.req.param("id")),
+            eq(stockOpnames.companyId, auth.company_id!),
+            eq(stockOpnames.klarifikasiStatus, "sudah"),
+            eq(stockOpnames.penyesuaianStatus, "menunggu"),
+          ),
+        )
+        .returning({ id: stockOpnames.id });
+      if (done.length === 0) {
+        throw new HTTPException(404, {
+          message: "Penyesuaian tidak menunggu persetujuan / tidak ditemukan",
+        });
+      }
+      return c.json({ ok: true });
+    },
+  )
+  /** Setujui semua penyesuaian yang sudah diklarifikasi pada satu cabang. */
+  .post("/penyesuaian/setujui-massal", requireRole("owner", "admin"), async (c) => {
+    const auth = c.get("auth");
+    const branchId = await resolveBranchId(c);
+    const done = await db
+      .update(stockOpnames)
+      .set({ penyesuaianStatus: "disetujui", disetujuiBy: auth.sub, disetujuiAt: new Date() })
+      .where(
+        and(
+          eq(stockOpnames.companyId, auth.company_id!),
+          eq(stockOpnames.branchId, branchId),
+          eq(stockOpnames.klarifikasiStatus, "sudah"),
+          eq(stockOpnames.penyesuaianStatus, "menunggu"),
+        ),
+      )
+      .returning({ id: stockOpnames.id });
+    return c.json({ ok: true, jumlah: done.length });
+  })
   /** Riwayat sesi opname (digroup per session_id). */
   .get("/opname/riwayat", async (c) => {
     const auth = c.get("auth");

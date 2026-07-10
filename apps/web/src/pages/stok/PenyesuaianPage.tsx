@@ -16,6 +16,7 @@ import {
   btnSecondary,
   inputClass,
 } from "../../components/ui";
+import { useAuth } from "../../context/AuthContext";
 import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatAngka, formatWaktu } from "../../lib/format";
@@ -65,6 +66,11 @@ function KlarifikasiModal({
             {formatAngka(row.selisih)} {row.satuan}
           </b>
         </div>
+        {row.tolak_alasan && (
+          <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+            Ditolak owner/admin: {row.tolak_alasan}
+          </div>
+        )}
         <div>
           <div className="mb-1 text-sm font-medium">Penyebab selisih</div>
           <div className="space-y-2">
@@ -144,64 +150,161 @@ function KlarifikasiModal({
   );
 }
 
+/** Modal alasan penolakan — owner/admin mengembalikan ke karyawan. */
+function TolakModal({ row, onClose }: { row: PenyesuaianRow; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const [alasan, setAlasan] = useState("");
+
+  const tolak = useMutation({
+    mutationFn: () => {
+      if (!alasan.trim()) return Promise.reject(new Error("Alasan penolakan wajib diisi."));
+      return api(`/stok/penyesuaian/${row.id}/tolak`, {
+        method: "POST",
+        body: { alasan: alasan.trim() },
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["penyesuaian"] });
+      onClose();
+    },
+  });
+
+  return (
+    <Modal open onClose={onClose} title={`Tolak penyesuaian — ${row.bahan}`}>
+      <div className="space-y-3">
+        <div className="rounded-lg bg-stone-50 px-3 py-2 text-sm text-stone-600">
+          Baris ini dikembalikan ke karyawan untuk diklarifikasi ulang. <b>Stok tidak berubah.</b>
+        </div>
+        <div>
+          <label className="mb-1 block text-sm font-medium">
+            Alasan penolakan <span className="text-red-500">*wajib</span>
+          </label>
+          <input
+            value={alasan}
+            onChange={(e) => setAlasan(e.target.value)}
+            className={inputClass}
+            placeholder="mis. bukti kurang jelas, kategori tidak sesuai"
+            autoFocus
+          />
+        </div>
+        <ErrorText error={tolak.error} />
+        <div className="flex justify-end gap-2 pt-1">
+          <button onClick={onClose} className={btnSecondary}>
+            Batal
+          </button>
+          <button
+            onClick={() => tolak.mutate()}
+            disabled={tolak.isPending || !alasan.trim()}
+            className={btnPrimary}
+          >
+            {tolak.isPending ? "Menolak…" : "Tolak & Kembalikan"}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+type FilterKey = "belum" | "menunggu" | "semua";
+const STATUS_QUERY: Record<FilterKey, string> = {
+  belum: "status=belum",
+  menunggu: "status=menunggu_persetujuan",
+  semua: "",
+};
+const FILTER_CHIPS: [FilterKey, string][] = [
+  ["belum", "Belum diklarifikasi"],
+  ["menunggu", "Menunggu persetujuan"],
+  ["semua", "Semua"],
+];
+
 /**
- * Daftar penyesuaian stok dari selisih opname — karyawan wajib mengklarifikasi
- * tiap selisih (waste atau koreksi pencatatan).
+ * Daftar penyesuaian stok dari selisih opname. Alur: karyawan mengklarifikasi
+ * (waste/koreksi + foto) → owner/admin menyetujui → stok baru disesuaikan.
  */
 export function PenyesuaianPage() {
+  const { auth } = useAuth();
+  const isManajemen = auth?.user.role === "owner" || auth?.user.role === "admin";
   const { branchQuery } = useBranch();
-  const [filter, setFilter] = useState<"belum" | "semua">("belum");
+  const queryClient = useQueryClient();
+  const [filter, setFilter] = useState<FilterKey>("belum");
   const [klarifikasi, setKlarifikasi] = useState<PenyesuaianRow | null>(null);
+  const [tolak, setTolak] = useState<PenyesuaianRow | null>(null);
 
   const { data: rows, isLoading } = useQuery({
     queryKey: ["penyesuaian", branchQuery, filter],
     queryFn: () =>
       api<PenyesuaianRow[]>(
-        `/stok/penyesuaian${branchQuery ? `${branchQuery}&` : "?"}${filter === "belum" ? "status=belum" : ""}`,
+        `/stok/penyesuaian${branchQuery ? `${branchQuery}&` : "?"}${STATUS_QUERY[filter]}`,
       ),
   });
 
-  const belumCount = (rows ?? []).filter((r) => r.klarifikasi_status === "belum").length;
+  const setuju = useMutation({
+    mutationFn: (id: string) => api(`/stok/penyesuaian/${id}/setujui`, { method: "POST" }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["penyesuaian"] }),
+  });
+  const setujuMassal = useMutation({
+    mutationFn: () =>
+      api(`/stok/penyesuaian/setujui-massal${branchQuery || ""}`, { method: "POST" }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["penyesuaian"] }),
+  });
+
+  const list = rows ?? [];
+  const menungguList = list.filter(
+    (r) => r.klarifikasi_status === "sudah" && r.penyesuaian_status === "menunggu",
+  );
 
   return (
     <div className="max-w-3xl">
       <PageTitle>Penyesuaian Stok</PageTitle>
       <div className="mb-3 rounded-lg bg-blue-50 px-4 py-2 text-sm text-blue-800">
-        Setiap selisih hasil stock opname (lebih/kurang) muncul di sini. Karyawan wajib
-        mengklarifikasi penyebabnya — apakah <b>waste</b> (bahan rusak, sudah dimasak tak
-        terjual, produk gagal) atau <b>koreksi pencatatan</b>.
+        Selisih hasil stock opname (lebih/kurang) muncul di sini. Karyawan{" "}
+        <b>mengklarifikasi</b> penyebabnya (waste atau koreksi) lalu <b>owner/admin menyetujui</b> —
+        stok baru disesuaikan <b>setelah disetujui</b>.
       </div>
 
-      <div className="mb-3 flex gap-2">
-        <button
-          onClick={() => setFilter("belum")}
-          className={`rounded-full px-3 py-1.5 text-sm font-medium ${filter === "belum" ? "bg-orange-600 text-white" : "bg-white text-stone-600"}`}
-        >
-          Belum diklarifikasi
-        </button>
-        <button
-          onClick={() => setFilter("semua")}
-          className={`rounded-full px-3 py-1.5 text-sm font-medium ${filter === "semua" ? "bg-orange-600 text-white" : "bg-white text-stone-600"}`}
-        >
-          Semua
-        </button>
+      <div className="mb-3 flex flex-wrap gap-2">
+        {FILTER_CHIPS.map(([key, label]) => (
+          <button
+            key={key}
+            onClick={() => setFilter(key)}
+            className={`rounded-full px-3 py-1.5 text-sm font-medium ${filter === key ? "bg-orange-600 text-white" : "bg-white text-stone-600"}`}
+          >
+            {label}
+          </button>
+        ))}
       </div>
+
+      {isManajemen && menungguList.length > 0 && (
+        <div className="mb-3">
+          <button
+            onClick={() => setujuMassal.mutate()}
+            disabled={setujuMassal.isPending}
+            className={btnPrimary}
+          >
+            {setujuMassal.isPending
+              ? "Menyetujui…"
+              : `✔ Setujui semua yang diklarifikasi (${menungguList.length})`}
+          </button>
+        </div>
+      )}
 
       {isLoading ? (
         <Spinner />
-      ) : (rows ?? []).length === 0 ? (
+      ) : list.length === 0 ? (
         <Card className="p-8 text-center text-sm text-stone-400">
           {filter === "belum"
             ? "Tidak ada penyesuaian yang perlu diklarifikasi. 🎉"
-            : "Belum ada penyesuaian stok."}
+            : filter === "menunggu"
+              ? "Tidak ada penyesuaian yang menunggu persetujuan. 🎉"
+              : "Belum ada penyesuaian stok."}
         </Card>
       ) : (
         <div className="space-y-2">
-          {filter === "belum" && belumCount > 0 && (
-            <div className="text-sm text-stone-500">{belumCount} menunggu klarifikasi</div>
-          )}
-          {(rows ?? []).map((r) => {
+          {list.map((r) => {
             const kat = r.kategori ? KATEGORI_LABEL[r.kategori] : null;
+            const sudahKlar = r.klarifikasi_status === "sudah";
+            const disetujui = r.penyesuaian_status === "disetujui";
+            const menungguPersetujuan = sudahKlar && !disetujui;
             return (
               <Card key={r.id} className="p-4">
                 <div className="flex flex-wrap items-start justify-between gap-2">
@@ -218,47 +321,96 @@ export function PenyesuaianPage() {
                       r.selisih > 0 ? "bg-yellow-100 text-yellow-800" : "bg-red-100 text-red-700"
                     }`}
                   >
-                    {r.selisih > 0 ? `Lebih ${formatAngka(r.selisih)}` : `Kurang ${formatAngka(-r.selisih)}`}{" "}
+                    {r.selisih > 0
+                      ? `Lebih ${formatAngka(r.selisih)}`
+                      : `Kurang ${formatAngka(-r.selisih)}`}{" "}
                     {r.satuan}
                   </span>
                 </div>
+
+                {!sudahKlar && r.tolak_alasan && (
+                  <div className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">
+                    Ditolak owner/admin: {r.tolak_alasan} — mohon klarifikasi ulang.
+                  </div>
+                )}
+
                 <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-                  {r.klarifikasi_status === "sudah" && kat ? (
-                    <div className="flex items-center gap-2 text-sm">
-                      {r.foto_url && (
-                        <a href={r.foto_url} target="_blank" rel="noopener" title="Lihat bukti foto">
-                          <img
-                            src={r.foto_url}
-                            alt="bukti"
-                            className="h-10 w-10 rounded-lg border border-stone-200 object-cover"
-                          />
-                        </a>
+                  <div className="flex items-center gap-2 text-sm">
+                    {kat && (disetujui || menungguPersetujuan) && r.foto_url && (
+                      <a
+                        href={r.foto_url}
+                        target="_blank"
+                        rel="noopener"
+                        title="Lihat bukti foto"
+                      >
+                        <img
+                          src={r.foto_url}
+                          alt="bukti"
+                          className="h-10 w-10 rounded-lg border border-stone-200 object-cover"
+                        />
+                      </a>
+                    )}
+                    <div>
+                      {disetujui ? (
+                        <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700">
+                          ✔ Disetujui · stok disesuaikan
+                        </span>
+                      ) : menungguPersetujuan ? (
+                        <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-700">
+                          Menunggu persetujuan
+                        </span>
+                      ) : (
+                        <span className="rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-semibold text-yellow-800">
+                          Belum diklarifikasi
+                        </span>
                       )}
-                      <div>
+                      {kat && (disetujui || menungguPersetujuan) && (
                         <span
-                          className={`rounded-full px-2 py-0.5 text-xs font-semibold ${kat.is_waste ? "bg-red-100 text-red-700" : "bg-stone-200 text-stone-600"}`}
+                          className={`ml-1 rounded-full px-2 py-0.5 text-xs font-semibold ${kat.is_waste ? "bg-red-100 text-red-700" : "bg-stone-200 text-stone-600"}`}
                         >
                           {kat.label}
                         </span>
-                        {r.catatan && <span className="ml-2 text-stone-500">{r.catatan}</span>}
-                        {r.diklarifikasi_oleh && (
-                          <span className="ml-2 text-xs text-stone-400">
-                            — {r.diklarifikasi_oleh}
-                          </span>
-                        )}
-                      </div>
+                      )}
+                      {disetujui && r.disetujui_oleh && (
+                        <span className="ml-2 text-xs text-stone-400">
+                          — disetujui {r.disetujui_oleh}
+                        </span>
+                      )}
+                      {menungguPersetujuan && r.diklarifikasi_oleh && (
+                        <span className="ml-2 text-xs text-stone-400">
+                          — oleh {r.diklarifikasi_oleh}
+                        </span>
+                      )}
                     </div>
-                  ) : (
-                    <span className="rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-semibold text-yellow-800">
-                      Belum diklarifikasi
-                    </span>
-                  )}
-                  <button
-                    onClick={() => setKlarifikasi(r)}
-                    className={r.klarifikasi_status === "sudah" ? btnSecondary : btnPrimary}
-                  >
-                    {r.klarifikasi_status === "sudah" ? "Ubah" : "Klarifikasi"}
-                  </button>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    {!disetujui && (
+                      <button
+                        onClick={() => setKlarifikasi(r)}
+                        className={sudahKlar ? btnSecondary : btnPrimary}
+                      >
+                        {sudahKlar ? "Ubah" : "Klarifikasi"}
+                      </button>
+                    )}
+                    {isManajemen && menungguPersetujuan && (
+                      <>
+                        <button
+                          onClick={() => setTolak(r)}
+                          className="rounded-lg px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
+                        >
+                          ✕ Tolak
+                        </button>
+                        <button
+                          onClick={() => setuju.mutate(r.id)}
+                          disabled={setuju.isPending}
+                          className={btnPrimary}
+                        >
+                          ✔ Setujui
+                        </button>
+                      </>
+                    )}
+                  </div>
                 </div>
               </Card>
             );
@@ -269,6 +421,7 @@ export function PenyesuaianPage() {
       {klarifikasi && (
         <KlarifikasiModal row={klarifikasi} onClose={() => setKlarifikasi(null)} />
       )}
+      {tolak && <TolakModal row={tolak} onClose={() => setTolak(null)} />}
     </div>
   );
 }
