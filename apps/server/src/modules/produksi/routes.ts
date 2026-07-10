@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { zValidator } from "@hono/zod-validator";
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, or } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { Hono, type Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
@@ -12,9 +13,39 @@ import {
   productions,
   storageLocations,
   suppliers,
+  users,
 } from "../../db/schema";
-import { pastikanCabang, resolveBranchId, type AppEnv } from "../../middleware/auth";
+import {
+  pastikanCabang,
+  resolveBranchId,
+  verifikasiPassword,
+  type AppEnv,
+} from "../../middleware/auth";
 import { tanggalDi } from "../../lib/time";
+
+const pembuat = alias(users, "pembuat_prod");
+const pengubah = alias(users, "pengubah_prod");
+
+const FakturEditBody = z.object({
+  password: z.string(),
+  supplier_id: z.string().uuid().nullish(),
+  no_faktur: z.string().trim().max(60).nullish(),
+  catatan: z.string().nullish(),
+  storage_location_id: z.string().uuid().nullish(),
+  prod_date: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+});
+const HapusBody = z.object({ password: z.string() });
+
+/** Cocokkan satu faktur: baris ber-fakturId, atau baris lama (fakturId null) via id. */
+function cocokFaktur(key: string) {
+  return or(
+    eq(productions.fakturId, key),
+    and(isNull(productions.fakturId), eq(productions.id, key)),
+  );
+}
 
 const TambahStokBody = z
   .object({
@@ -261,6 +292,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         eq(productions.tipe, tipe),
       ];
       if (tanggal) conds.push(eq(productions.prodDate, tanggal));
+      conds.push(isNull(productions.deletedAt)); // sembunyikan yang sudah dihapus
       const rows = await db
         .select({
           id: productions.id,
@@ -279,15 +311,122 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
           status: productions.status,
           supplier: suppliers.nama,
           tempat: storageLocations.nama,
+          storage_location_id: productions.storageLocationId,
+          supplier_id: productions.supplierId,
+          dibuat_oleh: pembuat.nama,
+          diubah_oleh: pengubah.nama,
+          updated_at: productions.updatedAt,
         })
         .from(productions)
         .innerJoin(ingredients, eq(productions.ingredientId, ingredients.id))
         .leftJoin(suppliers, eq(productions.supplierId, suppliers.id))
         .leftJoin(storageLocations, eq(productions.storageLocationId, storageLocations.id))
+        .leftJoin(pembuat, eq(productions.userId, pembuat.id))
+        .leftJoin(pengubah, eq(productions.updatedBy, pengubah.id))
         .where(and(...conds))
         .orderBy(desc(productions.waktu), asc(productions.id))
         .limit(300);
       return c.json(rows);
+    })
+    /** Ubah metadata faktur (butuh password). Tak mengubah qty/harga → stok tetap. */
+    .patch("/faktur/:key", zValidator("json", FakturEditBody), async (c) => {
+      const auth = c.get("auth");
+      const body = c.req.valid("json");
+      const key = c.req.param("key");
+      if (!/^[0-9a-f-]{36}$/i.test(key)) {
+        throw new HTTPException(404, { message: "Faktur tidak ditemukan" });
+      }
+      await verifikasiPassword(auth.sub, body.password);
+
+      // Muat faktur (milik perusahaan + jalur, belum dihapus) untuk cek + branch
+      const barisFaktur = await db
+        .select({ id: productions.id, branchId: productions.branchId })
+        .from(productions)
+        .where(
+          and(
+            eq(productions.companyId, auth.company_id!),
+            eq(productions.tipe, tipe),
+            isNull(productions.deletedAt),
+            cocokFaktur(key),
+          ),
+        );
+      if (barisFaktur.length === 0) {
+        throw new HTTPException(404, { message: "Faktur tidak ditemukan" });
+      }
+      const branchId = barisFaktur[0].branchId;
+
+      if (body.supplier_id) {
+        const [s] = await db
+          .select({ id: suppliers.id })
+          .from(suppliers)
+          .where(
+            and(eq(suppliers.id, body.supplier_id), eq(suppliers.companyId, auth.company_id!)),
+          );
+        if (!s) throw new HTTPException(400, { message: "Supplier tidak valid" });
+      }
+      if (body.storage_location_id) {
+        const [l] = await db
+          .select({ id: storageLocations.id })
+          .from(storageLocations)
+          .where(
+            and(
+              eq(storageLocations.id, body.storage_location_id),
+              eq(storageLocations.branchId, branchId),
+            ),
+          );
+        if (!l) throw new HTTPException(400, { message: "Tempat penyimpanan tidak valid" });
+      }
+
+      const set: Partial<typeof productions.$inferInsert> = {
+        updatedBy: auth.sub,
+        updatedAt: new Date(),
+      };
+      if (body.supplier_id !== undefined) set.supplierId = body.supplier_id ?? null;
+      if (body.no_faktur !== undefined) set.noFaktur = body.no_faktur ?? null;
+      if (body.catatan !== undefined) set.catatan = body.catatan ?? null;
+      if (body.storage_location_id !== undefined)
+        set.storageLocationId = body.storage_location_id ?? null;
+      if (body.prod_date !== undefined) set.prodDate = body.prod_date;
+
+      const rows = await db
+        .update(productions)
+        .set(set)
+        .where(
+          and(
+            eq(productions.companyId, auth.company_id!),
+            eq(productions.tipe, tipe),
+            isNull(productions.deletedAt),
+            cocokFaktur(key),
+          ),
+        )
+        .returning({ id: productions.id });
+      return c.json({ ok: true, jumlah_baris: rows.length });
+    })
+    /** Hapus faktur → Tempat Sampah (soft-delete, butuh password). Stok dikoreksi. */
+    .delete("/faktur/:key", zValidator("json", HapusBody), async (c) => {
+      const auth = c.get("auth");
+      const body = c.req.valid("json");
+      const key = c.req.param("key");
+      if (!/^[0-9a-f-]{36}$/i.test(key)) {
+        throw new HTTPException(404, { message: "Faktur tidak ditemukan" });
+      }
+      await verifikasiPassword(auth.sub, body.password);
+      const rows = await db
+        .update(productions)
+        .set({ deletedAt: new Date(), deletedBy: auth.sub })
+        .where(
+          and(
+            eq(productions.companyId, auth.company_id!),
+            eq(productions.tipe, tipe),
+            isNull(productions.deletedAt),
+            cocokFaktur(key),
+          ),
+        )
+        .returning({ id: productions.id });
+      if (rows.length === 0) {
+        throw new HTTPException(404, { message: "Faktur tidak ditemukan" });
+      }
+      return c.json({ ok: true, jumlah_baris: rows.length });
     });
 }
 

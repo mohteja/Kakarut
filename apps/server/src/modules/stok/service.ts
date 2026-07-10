@@ -44,7 +44,7 @@ export async function hitungSaldoCabang(
       SELECT SUM(pr.qty) AS qty
       FROM productions pr
       WHERE pr.branch_id = ${branchId} AND pr.ingredient_id = i.id
-        AND pr.status = 'dikonfirmasi'
+        AND pr.status = 'dikonfirmasi' AND pr.deleted_at IS NULL
         AND (b.created_at IS NULL OR pr.waktu > b.created_at)
     ) p ON TRUE
     LEFT JOIN LATERAL (
@@ -52,6 +52,7 @@ export async function hitungSaldoCabang(
       FROM sale_consumptions sc
       WHERE sc.branch_id = ${branchId} AND sc.ingredient_id = i.id
         AND (b.created_at IS NULL OR sc.waktu > b.created_at)
+        AND EXISTS (SELECT 1 FROM sales s WHERE s.id = sc.sale_id AND s.deleted_at IS NULL)
     ) u ON TRUE
     LEFT JOIN LATERAL (
       -- tempat penyimpanan dari entri masuk terkonfirmasi terakhir
@@ -59,7 +60,8 @@ export async function hitungSaldoCabang(
       FROM productions pr
       JOIN storage_locations sl ON sl.id = pr.storage_location_id
       WHERE pr.branch_id = ${branchId} AND pr.ingredient_id = i.id
-        AND pr.status = 'dikonfirmasi' AND pr.storage_location_id IS NOT NULL
+        AND pr.status = 'dikonfirmasi' AND pr.deleted_at IS NULL
+        AND pr.storage_location_id IS NOT NULL
       ORDER BY pr.waktu DESC
       LIMIT 1
     ) t ON TRUE
@@ -123,14 +125,14 @@ export async function kartuStok(params: {
       COALESCE((
         SELECT SUM(pr.qty) FROM productions pr
         WHERE pr.branch_id = ${branchId} AND pr.ingredient_id = ${ingredientId}
-          AND pr.status = 'dikonfirmasi' AND pr.prod_date < ${dari}
+          AND pr.status = 'dikonfirmasi' AND pr.deleted_at IS NULL AND pr.prod_date < ${dari}
           AND (NOT EXISTS (SELECT 1 FROM baseline) OR pr.waktu > (SELECT created_at FROM baseline))
       ), 0) AS masuk,
       COALESCE((
         SELECT SUM(sc.qty) FROM sale_consumptions sc
         JOIN sales s ON s.id = sc.sale_id
         WHERE sc.branch_id = ${branchId} AND sc.ingredient_id = ${ingredientId}
-          AND s.sale_date < ${dari}
+          AND s.sale_date < ${dari} AND s.deleted_at IS NULL
           AND (NOT EXISTS (SELECT 1 FROM baseline) OR sc.waktu > (SELECT created_at FROM baseline))
       ), 0) AS keluar
   `);
@@ -154,7 +156,7 @@ export async function kartuStok(params: {
       LEFT JOIN suppliers sp ON sp.id = pr.supplier_id
       LEFT JOIN storage_locations sl ON sl.id = pr.storage_location_id
       WHERE pr.branch_id = ${branchId} AND pr.ingredient_id = ${ingredientId}
-        AND pr.status = 'dikonfirmasi'
+        AND pr.status = 'dikonfirmasi' AND pr.deleted_at IS NULL
         AND pr.prod_date >= ${dari} AND pr.prod_date <= ${sampai}
       UNION ALL
       SELECT sc.waktu, 'penjualan' AS jenis, sc.qty, NULL AS catatan,
@@ -162,6 +164,7 @@ export async function kartuStok(params: {
       FROM sale_consumptions sc
       JOIN sales s ON s.id = sc.sale_id
       WHERE sc.branch_id = ${branchId} AND sc.ingredient_id = ${ingredientId}
+        AND s.deleted_at IS NULL
         AND s.sale_date >= ${dari} AND s.sale_date <= ${sampai}
     ) m
     ORDER BY m.waktu ASC

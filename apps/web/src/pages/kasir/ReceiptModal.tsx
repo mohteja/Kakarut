@@ -1,7 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import type { ReceiptData } from "@kakarut/shared";
-import { btnPrimary, btnSecondary } from "../../components/ui";
+import { ErrorText, btnPrimary, btnSecondary, inputClass } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { usePrinter } from "../../context/PrinterContext";
 import { api } from "../../lib/api";
@@ -45,11 +45,14 @@ export function ReceiptModal({
   data,
   onClose,
   autoPrintOnOpen = true,
+  onDeleted,
 }: {
   data: SaleResult;
   onClose: () => void;
   /** false saat cetak ulang dari riwayat (jangan auto-print, user cetak manual) */
   autoPrintOnOpen?: boolean;
+  /** bila diberi (owner/admin di Riwayat), tampilkan tombol Hapus → Tempat Sampah */
+  onDeleted?: () => void;
 }) {
   const { auth } = useAuth();
   const { settings, isThermal, canAutoPrint, printReceipt } = usePrinter();
@@ -59,7 +62,15 @@ export function ReceiptModal({
   });
   const [printError, setPrintError] = useState<string | null>(null);
   const [printing, setPrinting] = useState(false);
+  const [modeHapus, setModeHapus] = useState(false);
+  const [password, setPassword] = useState("");
   const autoPrintedFor = useRef<string | null>(null);
+
+  const hapus = useMutation({
+    mutationFn: () =>
+      api(`/penjualan/${data.sale.id}`, { method: "DELETE", body: { password } }),
+    onSuccess: () => onDeleted?.(),
+  });
 
   const waktuStr = new Intl.DateTimeFormat("id-ID", {
     day: "2-digit",
@@ -201,6 +212,54 @@ export function ReceiptModal({
             {autoPrintOnOpen ? "Transaksi Baru" : "Tutup"}
           </button>
         </div>
+
+        {onDeleted && !modeHapus && (
+          <button
+            onClick={() => setModeHapus(true)}
+            className="mt-2 w-full text-center text-xs font-medium text-red-600 hover:underline print:hidden"
+          >
+            🗑 Hapus transaksi (Tempat Sampah)
+          </button>
+        )}
+        {onDeleted && modeHapus && (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              hapus.mutate();
+            }}
+            className="mt-3 space-y-2 rounded-lg bg-red-50 p-3 print:hidden"
+          >
+            <div className="text-xs text-red-800">
+              Transaksi dipindah ke <b>Tempat Sampah</b> & stok dikoreksi. Tidak bisa dikembalikan.
+              Masukkan password akun.
+            </div>
+            <input
+              type="password"
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className={inputClass}
+              placeholder="••••••••"
+            />
+            <ErrorText error={hapus.error} />
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setModeHapus(false)}
+                className={`${btnSecondary} flex-1`}
+              >
+                Batal
+              </button>
+              <button
+                type="submit"
+                disabled={hapus.isPending}
+                className="flex-1 rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                {hapus.isPending ? "Menghapus…" : "Hapus"}
+              </button>
+            </div>
+          </form>
+        )}
       </div>
     </div>
   );

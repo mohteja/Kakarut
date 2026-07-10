@@ -128,7 +128,7 @@ VA=$(api "$KASIR" POST /penjualan "{\"is_dine_in\":false,\"items\":[{\"menu_id\"
 VA_ID=$(echo "$VA" | jq -r .sale.id)
 VB=$(api "$KASIR" POST /penjualan "{\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")
 VB_NOMOR=$(echo "$VB" | jq -r .sale.nomor)
-api "$OWNER" DELETE "/penjualan/$VA_ID" > /dev/null   # void transaksi pertama (bukan yang terakhir)
+api "$OWNER" DELETE "/penjualan/$VA_ID" "{\"password\":\"$OWNER_PASS\"}" > /dev/null   # void (soft-delete) transaksi pertama
 cek "stok complement pulih setelah void" "abs(V - ($COMP_A - 1)) < 0.001" \
   "$(stok_of "$(api "$KASIR" GET /stok)" "complement saos & sambal")"
 VC=$(api "$KASIR" POST /penjualan "{\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")
@@ -487,6 +487,57 @@ cek "item tanpa catatan → null" "V == 1" \
 S_WS=$(api "$KASIR" POST /penjualan "{\"meja_id\":\"$MEJA_D\",\"items\":[{\"menu_id\":\"$MENU_C\",\"qty\":1,\"catatan\":\"   \"}]}")
 cek "catatan spasi-saja → null (trim server)" "V == 1" \
   "$(echo "$S_WS" | jq '(.items[0].catatan == null) | if . then 1 else 0 end')"
+
+echo "== 21. Audit + Tempat Sampah (soft-delete + verifikasi password) =="
+HARI=$(TZ=Asia/Jakarta date +%F)
+saldo_bahan() { api "$OWNER" GET /stok | jq --arg id "$1" '([.[] | select(.ingredient_id==$id)][0].saldo) // 0'; }
+BELI_ING=$(api "$OWNER" GET /bahan | jq -r '[.[] | select(.pengadaan=="beli" and .track_stok==true)][0].id')
+S0=$(saldo_bahan "$BELI_ING")
+
+# buat faktur pembelian 10 pcs → konfirmasi → saldo +10
+FK=$(api "$OWNER" POST /pembelian/faktur "{\"items\":[{\"ingredient_id\":\"$BELI_ING\",\"mode\":\"pcs\",\"jumlah\":10,\"total_harga\":50000}]}")
+FKID=$(echo "$FK" | jq -r '.faktur_id')
+api "$OWNER" POST "/pembelian/konfirmasi/$FKID" > /dev/null
+S1=$(saldo_bahan "$BELI_ING")
+cek "pembelian dikonfirmasi → saldo +10" "abs(V - 10) < 0.001" "$(python3 -c "print($S1 - $S0)")"
+cek "pembelian: dibuat_oleh terisi" "V == 1" \
+  "$(api "$OWNER" GET /pembelian | jq --arg f "$FKID" '([.[] | select(.faktur_id==$f and (.dibuat_oleh|type)=="string")] | length>=1) | if . then 1 else 0 end')"
+
+# PATCH metadata: password salah → 401; benar → catatan & diubah_oleh terisi
+cek "PATCH faktur password salah → 401" "V == 401" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PATCH "$BASE/api/pembelian/faktur/$FKID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"password":"salah","catatan":"x"}')"
+api "$OWNER" PATCH "/pembelian/faktur/$FKID" "{\"password\":\"$OWNER_PASS\",\"catatan\":\"faktur uji edit\"}" > /dev/null
+cek "PATCH metadata → catatan berubah + diubah_oleh" "V == 1" \
+  "$(api "$OWNER" GET /pembelian | jq --arg f "$FKID" '([.[] | select(.faktur_id==$f and .catatan=="faktur uji edit" and (.diubah_oleh|type)=="string")] | length>=1) | if . then 1 else 0 end')"
+
+# DELETE (soft): password salah → 401; benar → saldo balik, hilang dari list, muncul di sampah
+cek "DELETE faktur password salah → 401" "V == 401" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X DELETE "$BASE/api/pembelian/faktur/$FKID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"password":"salah"}')"
+api "$OWNER" DELETE "/pembelian/faktur/$FKID" "{\"password\":\"$OWNER_PASS\"}" > /dev/null
+cek "hapus pembelian → saldo balik ke awal" "abs(V) < 0.001" "$(python3 -c "print($(saldo_bahan "$BELI_ING") - $S0)")"
+cek "faktur terhapus hilang dari /pembelian" "V == 0" \
+  "$(api "$OWNER" GET /pembelian | jq --arg f "$FKID" '[.[] | select(.faktur_id==$f)] | length')"
+cek "pembelian ada di Tempat Sampah + dihapus_oleh" "V == 1" \
+  "$(api "$OWNER" GET /sampah | jq --arg f "$FKID" '([.[] | select(.jenis=="pembelian" and .key==$f and (.dihapus_oleh|type)=="string")] | length==1) | if . then 1 else 0 end')"
+
+# Penjualan: soft-delete owner+password → omzet turun, hilang dari riwayat, masuk sampah
+MENU_S=$(api "$KASIR" GET /menu | jq -r '[.[] | select(.tipe=="regular")][0].id')
+MJ=$(api "$KASIR" GET /meja | jq -r '[.[] | select(.tipe=="dine_in" and .is_active)][0].id')
+SL=$(api "$KASIR" POST /penjualan "{\"meja_id\":\"$MJ\",\"items\":[{\"menu_id\":\"$MENU_S\",\"qty\":2}]}")
+SLID=$(echo "$SL" | jq -r '.sale.id')
+OMZ1=$(api "$OWNER" GET "/laporan?tanggal=$HARI" | jq '.omzet')
+cek "kasir hapus penjualan → 403" "V == 403" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X DELETE "$BASE/api/penjualan/$SLID" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d '{"password":"'"$KASIR_PASS"'"}')"
+cek "owner hapus penjualan password salah → 401" "V == 401" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X DELETE "$BASE/api/penjualan/$SLID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"password":"salah"}')"
+api "$OWNER" DELETE "/penjualan/$SLID" "{\"password\":\"$OWNER_PASS\"}" > /dev/null
+cek "penjualan terhapus hilang dari riwayat" "V == 0" \
+  "$(api "$KASIR" GET "/penjualan?tanggal=$HARI" | jq --arg id "$SLID" '[.[] | select(.id==$id)] | length')"
+cek "hapus penjualan → omzet laporan turun" "V == 1" \
+  "$(python3 -c "print(1 if $(api "$OWNER" GET "/laporan?tanggal=$HARI" | jq '.omzet') < $OMZ1 else 0)")"
+cek "penjualan ada di Tempat Sampah" "V == 1" \
+  "$(api "$OWNER" GET /sampah | jq --arg id "$SLID" '([.[] | select(.jenis=="penjualan" and .key==$id)] | length==1) | if . then 1 else 0 end')"
+cek "kasir GET /sampah ditolak (403)" "V == 403" "$(status_code "$KASIR" GET /sampah)"
 
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="

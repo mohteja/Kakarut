@@ -1,0 +1,295 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+import type { JenisPengadaan, PenyimpananDto, SupplierDto } from "@kakarut/shared";
+import { ErrorText, Modal, btnPrimary, btnSecondary, inputClass } from "../../components/ui";
+import { useBranch } from "../../context/BranchContext";
+import { api } from "../../lib/api";
+import { formatAngka, formatRupiah, formatWaktu } from "../../lib/format";
+import type { FakturGroup } from "./TambahStokPage";
+
+/**
+ * Detail satu faktur pembelian/produksi: lihat metadata + item, ubah metadata,
+ * atau hapus (Tempat Sampah). Ubah & hapus butuh password akun.
+ */
+export function FakturDetailModal({
+  grup,
+  tipe,
+  endpoint,
+  onClose,
+}: {
+  grup: FakturGroup;
+  tipe: JenisPengadaan;
+  endpoint: string;
+  onClose: () => void;
+}) {
+  const { branchQuery } = useBranch();
+  const queryClient = useQueryClient();
+  const [mode, setMode] = useState<"lihat" | "ubah" | "hapus">("lihat");
+
+  const [noFaktur, setNoFaktur] = useState(grup.noFaktur ?? "");
+  const [supplierId, setSupplierId] = useState(grup.supplierId ?? "");
+  const [tempatId, setTempatId] = useState("__keep");
+  const [prodDate, setProdDate] = useState(grup.prodDate);
+  const [catatan, setCatatan] = useState(grup.catatan ?? "");
+  const [password, setPassword] = useState("");
+
+  const { data: supplier = [] } = useQuery({
+    queryKey: ["supplier"],
+    queryFn: () => api<SupplierDto[]>("/supplier"),
+    enabled: mode === "ubah",
+  });
+  const { data: tempat = [] } = useQuery({
+    queryKey: ["penyimpanan", branchQuery],
+    queryFn: () => api<PenyimpananDto[]>(`/penyimpanan${branchQuery}`),
+    enabled: mode === "ubah",
+  });
+
+  function selesai() {
+    for (const key of [endpoint, "stok", "sampah", "laporan", "penjualan", "rekomendasi"]) {
+      queryClient.invalidateQueries({ queryKey: [key] });
+    }
+    onClose();
+  }
+
+  const simpanUbah = useMutation({
+    mutationFn: () =>
+      api(`${endpoint}/faktur/${grup.key}`, {
+        method: "PATCH",
+        body: {
+          password,
+          no_faktur: noFaktur.trim() || null,
+          supplier_id: tipe === "beli" ? supplierId || null : undefined,
+          catatan: catatan.trim() || null,
+          prod_date: prodDate,
+          ...(tempatId !== "__keep" ? { storage_location_id: tempatId || null } : {}),
+        },
+      }),
+    onSuccess: selesai,
+  });
+
+  const hapus = useMutation({
+    mutationFn: () =>
+      api(`${endpoint}/faktur/${grup.key}`, { method: "DELETE", body: { password } }),
+    onSuccess: selesai,
+  });
+
+  const judul =
+    mode === "ubah"
+      ? "Ubah Metadata Faktur"
+      : mode === "hapus"
+        ? "Hapus ke Tempat Sampah"
+        : `Detail ${tipe === "beli" ? "Pembelian" : "Produksi"}`;
+
+  return (
+    <Modal open onClose={onClose} title={judul}>
+      {mode === "lihat" && (
+        <div className="space-y-3">
+          <dl className="grid grid-cols-3 gap-y-1.5 text-sm">
+            <dt className="text-stone-400">Waktu</dt>
+            <dd className="col-span-2">{formatWaktu(grup.waktu)}</dd>
+            <dt className="text-stone-400">Dibuat oleh</dt>
+            <dd className="col-span-2">{grup.dibuatOleh ?? "—"}</dd>
+            {tipe === "beli" && (
+              <>
+                <dt className="text-stone-400">Supplier</dt>
+                <dd className="col-span-2">{grup.supplier ?? "Tanpa sumber"}</dd>
+                <dt className="text-stone-400">No. faktur</dt>
+                <dd className="col-span-2">{grup.noFaktur ?? "—"}</dd>
+              </>
+            )}
+            <dt className="text-stone-400">Status</dt>
+            <dd className="col-span-2">
+              {grup.status === "dikonfirmasi" ? "Dikonfirmasi ✓" : "Menunggu konfirmasi"}
+            </dd>
+            {grup.catatan && (
+              <>
+                <dt className="text-stone-400">Catatan</dt>
+                <dd className="col-span-2">{grup.catatan}</dd>
+              </>
+            )}
+            {grup.diubahOleh && (
+              <>
+                <dt className="text-stone-400">Diubah oleh</dt>
+                <dd className="col-span-2">
+                  {grup.diubahOleh}
+                  {grup.updatedAt ? ` · ${formatWaktu(grup.updatedAt)}` : ""}
+                </dd>
+              </>
+            )}
+          </dl>
+
+          <div className="rounded-lg border border-stone-200">
+            <table className="w-full text-sm">
+              <tbody className="divide-y divide-stone-100">
+                {grup.rows.map((r) => (
+                  <tr key={r.id}>
+                    <td className="px-3 py-1.5 font-medium">{r.bahan}</td>
+                    <td className="px-3 py-1.5 text-right text-stone-600">
+                      +{formatAngka(r.qty)} {r.satuan}
+                    </td>
+                    <td className="px-3 py-1.5 text-stone-500">{r.tempat ?? "—"}</td>
+                    {tipe === "beli" && (
+                      <td className="px-3 py-1.5 text-right text-stone-500">
+                        {r.total_harga != null ? formatRupiah(r.total_harga) : "—"}
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {tipe === "beli" && grup.totalHarga > 0 && (
+            <div className="text-right text-sm font-semibold text-stone-700">
+              Total: {formatRupiah(grup.totalHarga)}
+            </div>
+          )}
+
+          <div className="flex justify-end gap-2 pt-1">
+            <button onClick={() => setMode("ubah")} className={btnSecondary}>
+              ✏️ Ubah metadata
+            </button>
+            <button
+              onClick={() => setMode("hapus")}
+              className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700"
+            >
+              🗑 Hapus
+            </button>
+          </div>
+        </div>
+      )}
+
+      {mode === "ubah" && (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            simpanUbah.mutate();
+          }}
+          className="space-y-3"
+        >
+          <div className="rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-800">
+            Hanya metadata yang diubah — jumlah & harga tidak berubah (stok tetap).
+          </div>
+          {tipe === "beli" && (
+            <>
+              <div>
+                <label className="mb-1 block text-sm font-medium">Supplier</label>
+                <select
+                  value={supplierId}
+                  onChange={(e) => setSupplierId(e.target.value)}
+                  className={inputClass}
+                >
+                  <option value="">— tanpa supplier —</option>
+                  {supplier.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.nama}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium">No. faktur</label>
+                <input
+                  value={noFaktur}
+                  onChange={(e) => setNoFaktur(e.target.value)}
+                  className={inputClass}
+                />
+              </div>
+            </>
+          )}
+          <div>
+            <label className="mb-1 block text-sm font-medium">Tempat penyimpanan (semua item)</label>
+            <select
+              value={tempatId}
+              onChange={(e) => setTempatId(e.target.value)}
+              className={inputClass}
+            >
+              <option value="__keep">— jangan ubah —</option>
+              <option value="">(kosongkan)</option>
+              {tempat.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.nama}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium">Tanggal</label>
+            <input
+              type="date"
+              value={prodDate}
+              onChange={(e) => setProdDate(e.target.value)}
+              className={inputClass}
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium">Catatan</label>
+            <input
+              value={catatan}
+              onChange={(e) => setCatatan(e.target.value)}
+              className={inputClass}
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium">Password akun (konfirmasi)</label>
+            <input
+              type="password"
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className={inputClass}
+              placeholder="••••••••"
+            />
+          </div>
+          <ErrorText error={simpanUbah.error} />
+          <div className="flex justify-end gap-2 pt-1">
+            <button type="button" onClick={() => setMode("lihat")} className={btnSecondary}>
+              Batal
+            </button>
+            <button type="submit" disabled={simpanUbah.isPending} className={btnPrimary}>
+              {simpanUbah.isPending ? "Menyimpan…" : "Simpan"}
+            </button>
+          </div>
+        </form>
+      )}
+
+      {mode === "hapus" && (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            hapus.mutate();
+          }}
+          className="space-y-3"
+        >
+          <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">
+            Faktur akan dipindah ke <b>Tempat Sampah</b> dan stoknya dikoreksi. Tidak bisa
+            dikembalikan — hanya jadi catatan siapa yang menghapus.
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium">Password akun (konfirmasi hapus)</label>
+            <input
+              type="password"
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className={inputClass}
+              placeholder="••••••••"
+            />
+          </div>
+          <ErrorText error={hapus.error} />
+          <div className="flex justify-end gap-2 pt-1">
+            <button type="button" onClick={() => setMode("lihat")} className={btnSecondary}>
+              Batal
+            </button>
+            <button
+              type="submit"
+              disabled={hapus.isPending}
+              className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+            >
+              {hapus.isPending ? "Menghapus…" : "Hapus ke Tempat Sampah"}
+            </button>
+          </div>
+        </form>
+      )}
+    </Modal>
+  );
+}

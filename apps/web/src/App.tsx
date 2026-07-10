@@ -27,6 +27,7 @@ import { PenyesuaianPage } from "./pages/stok/PenyesuaianPage";
 import { StokPage } from "./pages/stok/StokPage";
 import { SistemPage } from "./pages/superadmin/SistemPage";
 import { TenantsPage } from "./pages/superadmin/TenantsPage";
+import { TempatSampahPage } from "./pages/TempatSampahPage";
 
 export default function App() {
   const { auth } = useAuth();
@@ -79,6 +80,7 @@ export default function App() {
                   <Route path="/pembelian" element={<PembelianPage />} />
                   <Route path="/pembelian/rekomendasi" element={<RekomendasiBeliPage />} />
                   <Route path="/laporan" element={<LaporanPage />} />
+                  <Route path="/sampah" element={<TempatSampahPage />} />
                   <Route path="/bahan" element={<BahanPage />} />
                   <Route path="/menu" element={<MenuListPage />} />
                   <Route path="/menu/baru" element={<MenuFormPage />} />

@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, lte, sum } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, lte, sum } from "drizzle-orm";
 import type {
   AcuanJenis,
   AcuanPeriode,
@@ -31,6 +31,7 @@ async function omzetPeriode(
         eq(sales.branchId, branchId),
         gte(sales.saleDate, dari),
         lte(sales.saleDate, sampai),
+        isNull(sales.deletedAt),
       ),
     );
   return Number(row?.omzet ?? 0);
@@ -52,6 +53,7 @@ async function konsumsiPeriode(
         eq(sales.branchId, branchId),
         gte(sales.saleDate, dari),
         lte(sales.saleDate, sampai),
+        isNull(sales.deletedAt),
       ),
     )
     .groupBy(saleConsumptions.ingredientId);
@@ -78,6 +80,7 @@ async function menuTerlarisPeriode(
         eq(sales.branchId, branchId),
         gte(sales.saleDate, dari),
         lte(sales.saleDate, sampai),
+        isNull(sales.deletedAt),
       ),
     )
     .groupBy(saleItems.menuNama)
