@@ -22,6 +22,102 @@ interface FormState {
   catatan: string;
 }
 
+interface KaryawanRow {
+  user_id: string;
+  nama: string;
+  email: string;
+  role: "owner" | "admin" | "cashier";
+  is_active: boolean;
+  branch_id: string | null;
+  cabang: string | null;
+}
+
+const roleLabel = (r: string) => (r === "owner" ? "Owner" : r === "admin" ? "Admin" : "Kasir");
+
+/** Pilih akun yang boleh opname di sebuah tempat penyimpanan. */
+function PetugasModal({ tempat, onClose }: { tempat: PenyimpananDto; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const { data: karyawan = [] } = useQuery({
+    queryKey: ["karyawan"],
+    queryFn: () => api<KaryawanRow[]>("/karyawan"),
+  });
+  const [selected, setSelected] = useState<Set<string>>(
+    () => new Set(tempat.petugas.map((p) => p.user_id)),
+  );
+
+  const simpan = useMutation({
+    mutationFn: () =>
+      api(`/penyimpanan/${tempat.id}/petugas`, {
+        method: "PUT",
+        body: { user_ids: [...selected] },
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["penyimpanan"] });
+      onClose();
+    },
+  });
+
+  function toggle(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  // owner/admin (bebas cabang) + kasir cabang tempat ini
+  const daftar = karyawan.filter(
+    (k) => k.is_active && (k.role !== "cashier" || k.branch_id === tempat.branch_id),
+  );
+
+  return (
+    <Modal open onClose={onClose} title={`Petugas Opname — ${tempat.nama}`}>
+      <div className="space-y-3">
+        <div className="rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-800">
+          Pilih akun yang boleh melakukan stock opname di tempat ini. <b>Kosong = semua boleh</b>{" "}
+          (yang boleh opname di cabang). Owner/admin selalu bisa.
+        </div>
+        <div className="max-h-72 space-y-1 overflow-y-auto">
+          {daftar.length === 0 && (
+            <div className="py-4 text-center text-sm text-stone-400">Belum ada karyawan.</div>
+          )}
+          {daftar.map((k) => (
+            <label
+              key={k.user_id}
+              className={`flex cursor-pointer items-center gap-2 rounded-lg border p-2.5 ${
+                selected.has(k.user_id) ? "border-orange-500 bg-orange-50" : "border-stone-200"
+              }`}
+            >
+              <input
+                type="checkbox"
+                checked={selected.has(k.user_id)}
+                onChange={() => toggle(k.user_id)}
+              />
+              <span className="min-w-0">
+                <span className="font-medium">{k.nama}</span>
+                <span className="ml-2 rounded-full bg-stone-100 px-1.5 py-0.5 text-xs text-stone-600">
+                  {roleLabel(k.role)}
+                </span>
+                {k.cabang && <span className="block text-xs text-stone-400">{k.cabang}</span>}
+              </span>
+            </label>
+          ))}
+        </div>
+        <ErrorText error={simpan.error} />
+        <div className="flex justify-end gap-2 pt-1">
+          <button onClick={onClose} className={btnSecondary}>
+            Batal
+          </button>
+          <button onClick={() => simpan.mutate()} disabled={simpan.isPending} className={btnPrimary}>
+            {simpan.isPending ? "Menyimpan…" : "Simpan Petugas"}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 /** Tempat penyimpanan per cabang (freezer, chiller, gudang, dst). */
 export function PenyimpananPage() {
   const { branchQuery, branchId } = useBranch();
@@ -31,6 +127,7 @@ export function PenyimpananPage() {
     queryFn: () => api<PenyimpananDto[]>(`/penyimpanan${branchQuery}`),
   });
   const [form, setForm] = useState<FormState | null>(null);
+  const [petugas, setPetugas] = useState<PenyimpananDto | null>(null);
 
   const simpan = useMutation({
     mutationFn: (f: FormState) => {
@@ -40,7 +137,10 @@ export function PenyimpananPage() {
         ...(branchId ? { branch_id: branchId } : {}),
       };
       return f.id
-        ? api(`/penyimpanan/${f.id}`, { method: "PATCH", body: { nama: f.nama, catatan: f.catatan || null } })
+        ? api(`/penyimpanan/${f.id}`, {
+            method: "PATCH",
+            body: { nama: f.nama, catatan: f.catatan || null },
+          })
         : api("/penyimpanan", { method: "POST", body });
     },
     onSuccess: () => {
@@ -63,7 +163,7 @@ export function PenyimpananPage() {
   if (isLoading) return <Spinner />;
 
   return (
-    <div className="max-w-3xl">
+    <div className="max-w-4xl">
       <PageTitle
         aksi={
           <button onClick={() => setForm({ nama: "", catatan: "" })} className={btnPrimary}>
@@ -75,7 +175,8 @@ export function PenyimpananPage() {
       </PageTitle>
       <div className="mb-3 text-sm text-stone-500">
         Per cabang — dipakai saat mengisi faktur produksi/pembelian agar setiap stok masuk
-        tercatat disimpan di mana (rujukan saat stock opname).
+        tercatat disimpan di mana. Atur <b>Petugas</b> untuk membatasi siapa yang boleh stock
+        opname di tiap tempat (kosong = semua boleh; owner/admin selalu bisa).
       </div>
       <ErrorText error={toggle.error} />
 
@@ -84,7 +185,7 @@ export function PenyimpananPage() {
           <thead className="border-b border-stone-200 bg-stone-50">
             <tr>
               <th className={thClass}>Nama</th>
-              <th className={thClass}>Catatan</th>
+              <th className={thClass}>Petugas Opname</th>
               <th className={thClass}>Status</th>
               <th className={thClass}></th>
             </tr>
@@ -92,8 +193,23 @@ export function PenyimpananPage() {
           <tbody className="divide-y divide-stone-100">
             {(tempat ?? []).map((t) => (
               <tr key={t.id}>
-                <td className={`${tdClass} font-medium`}>{t.nama}</td>
-                <td className={`${tdClass} text-stone-400`}>{t.catatan ?? "—"}</td>
+                <td className={`${tdClass} font-medium`}>
+                  {t.nama}
+                  {t.catatan && (
+                    <span className="block text-xs font-normal text-stone-400">{t.catatan}</span>
+                  )}
+                </td>
+                <td className={tdClass}>
+                  {t.petugas.length === 0 ? (
+                    <span className="rounded-full bg-stone-100 px-2 py-0.5 text-xs text-stone-500">
+                      Semua boleh
+                    </span>
+                  ) : (
+                    <span className="text-sm text-stone-700">
+                      {t.petugas.map((p) => p.nama).join(", ")}
+                    </span>
+                  )}
+                </td>
                 <td className={tdClass}>
                   <span
                     className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
@@ -105,8 +221,14 @@ export function PenyimpananPage() {
                 </td>
                 <td className={`${tdClass} whitespace-nowrap text-right`}>
                   <button
+                    onClick={() => setPetugas(t)}
+                    className="text-sm font-medium text-blue-600 hover:underline"
+                  >
+                    Petugas
+                  </button>
+                  <button
                     onClick={() => setForm({ id: t.id, nama: t.nama, catatan: t.catatan ?? "" })}
-                    className="text-sm font-medium text-orange-600 hover:underline"
+                    className="ml-3 text-sm font-medium text-orange-600 hover:underline"
                   >
                     Ubah
                   </button>
@@ -167,6 +289,8 @@ export function PenyimpananPage() {
           </form>
         )}
       </Modal>
+
+      {petugas && <PetugasModal tempat={petugas} onClose={() => setPetugas(null)} />}
     </div>
   );
 }

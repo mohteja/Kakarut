@@ -71,6 +71,13 @@
       "when": 1783662059691,
       "tag": "0009_approval_penyesuaian",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1783677658242,
+      "tag": "0010_petugas_opname",
+      "breakpoints": true
     }
   ]
 }

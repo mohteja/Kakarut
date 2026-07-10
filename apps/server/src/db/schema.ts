@@ -144,6 +144,30 @@ export const storageLocations = pgTable(
   (t) => [uniqueIndex("storage_locations_branch_nama_uq").on(t.branchId, t.nama)],
 );
 
+/**
+ * Petugas opname per tempat penyimpanan: akun yang ditugaskan melakukan stock
+ * opname untuk tempat itu. Tempat tanpa petugas = terbuka (siapa saja yang
+ * boleh opname di cabang). Begitu ada petugas, tempat itu terkunci hanya untuk
+ * mereka (owner/admin selalu boleh).
+ */
+export const storageLocationPetugas = pgTable(
+  "storage_location_petugas",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    storageLocationId: uuid("storage_location_id")
+      .notNull()
+      .references(() => storageLocations.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("storage_location_petugas_uq").on(t.storageLocationId, t.userId)],
+);
+
 // ===== Katalog (per company) =====
 
 export const ingredients = pgTable(

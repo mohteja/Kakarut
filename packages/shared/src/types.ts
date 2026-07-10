@@ -96,12 +96,24 @@ export interface SupplierDto {
   is_active: boolean;
 }
 
+/** Akun yang ditugaskan opname pada satu tempat penyimpanan. */
+export interface PetugasRingkas {
+  user_id: string;
+  nama: string;
+  role: UserRole;
+}
+
 export interface PenyimpananDto {
   id: string;
   branch_id: string;
   nama: string;
   catatan: string | null;
   is_active: boolean;
+  /**
+   * Petugas opname yang ditugaskan. Kosong = terbuka (siapa saja yang boleh
+   * opname di cabang). Terisi = terkunci hanya untuk mereka (owner/admin bebas).
+   */
+  petugas: PetugasRingkas[];
 }
 
 export type PenyesuaianKategori =
