@@ -409,6 +409,59 @@ cek "detail: branch_nama terisi (untuk struk)" "V == 1" \
 cek "detail: item lengkap (harga_satuan untuk struk)" "V == 1" \
   "$(echo "$DET" | jq '([.items[] | select(.hargaSatuan > 0)] | length >= 1) | if . then 1 else 0 end')"
 
+echo "== 19. Meja: master + tata letak + transaksi berbasis meja =="
+MEJA=$(api "$KASIR" GET /meja)
+cek "kasir GET /meja: >= 5 meja" "V >= 5" "$(echo "$MEJA" | jq 'length')"
+cek "kasir GET /meja: ada Ruang Tunggu (takeaway)" "V == 1" \
+  "$(echo "$MEJA" | jq '([.[] | select(.tipe == "takeaway")] | length >= 1) | if . then 1 else 0 end')"
+MEJA_DINEIN=$(echo "$MEJA" | jq -r '[.[] | select(.tipe == "dine_in")][0].id')
+MEJA_TA=$(echo "$MEJA" | jq -r '[.[] | select(.tipe == "takeaway")][0].id')
+
+# bersihkan sisa run sebelumnya lalu buat meja baru (harus tipe dine_in)
+OLD_UJI=$(echo "$MEJA" | jq -r '[.[] | select(.nama == "Meja Uji" or .nama == "Meja Uji B")][0].id // empty')
+[ -n "$OLD_UJI" ] && api "$KASIR" DELETE "/meja/$OLD_UJI" > /dev/null || true
+NEW=$(api "$KASIR" POST /meja '{"nama":"Meja Uji"}')
+NEW_ID=$(echo "$NEW" | jq -r '.id')
+{ [ -n "$NEW_ID" ] && [ "$NEW_ID" != "null" ]; } && ok "kasir POST /meja buat 'Meja Uji'" || gagal "kasir gagal buat meja"
+cek "meja baru tipe dine_in" "V == 1" "$(echo "$NEW" | jq '(.tipe == "dine_in") | if . then 1 else 0 end')"
+
+# simpan tata letak (persen) untuk meja baru
+api "$KASIR" PUT /meja/tata-letak "{\"items\":[{\"id\":\"$NEW_ID\",\"pos_x\":77,\"pos_y\":66}]}" > /dev/null
+cek "tata letak tersimpan (pos_x=77)" "V == 77" \
+  "$(api "$KASIR" GET /meja | jq --arg id "$NEW_ID" '[.[] | select(.id == $id)][0].pos_x')"
+
+# rename via PATCH
+api "$KASIR" PATCH "/meja/$NEW_ID" '{"nama":"Meja Uji B"}' > /dev/null
+cek "rename meja (PATCH nama)" "V == 1" \
+  "$(api "$KASIR" GET /meja | jq --arg id "$NEW_ID" '(([.[] | select(.id == $id)][0].nama) == "Meja Uji B") | if . then 1 else 0 end')"
+
+# DELETE meja Ruang Tunggu ditolak (400); meja biasa boleh (200)
+cek "DELETE Ruang Tunggu ditolak (400)" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X DELETE "$BASE/api/meja/$MEJA_TA" -H "Authorization: Bearer $KASIR")"
+cek "DELETE meja biasa ok (200)" "V == 200" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X DELETE "$BASE/api/meja/$NEW_ID" -H "Authorization: Bearer $KASIR")"
+
+# transaksi berbasis meja: tipe meja menurunkan is_dine_in + snapshot label
+MENU_M=$(api "$KASIR" GET /menu | jq -r '[.[] | select(.tipe == "regular")][0].id')
+S_DI=$(api "$KASIR" POST /penjualan "{\"meja_id\":\"$MEJA_DINEIN\",\"items\":[{\"menu_id\":\"$MENU_M\",\"qty\":1}]}")
+S_DI_ID=$(echo "$S_DI" | jq -r '.sale.id')
+cek "meja dine_in → sale.is_dine_in true" "V == 1" \
+  "$(echo "$S_DI" | jq '(.sale.isDineIn == true) | if . then 1 else 0 end')"
+cek "meja dine_in → mejaLabel terisi" "V == 1" \
+  "$(echo "$S_DI" | jq '((.sale.mejaLabel | type) == "string") | if . then 1 else 0 end')"
+cek "detail transaksi memuat mejaLabel" "V == 1" \
+  "$(api "$KASIR" GET "/penjualan/$S_DI_ID" | jq '((.sale.mejaLabel | type) == "string") | if . then 1 else 0 end')"
+cek "riwayat memuat label meja" "V == 1" \
+  "$(api "$KASIR" GET "/penjualan?tanggal=$(TZ=Asia/Jakarta date +%F)" | jq --arg id "$S_DI_ID" '[.[] | select(.id == $id and (.meja | type) == "string")] | length')"
+S_TA=$(api "$KASIR" POST /penjualan "{\"meja_id\":\"$MEJA_TA\",\"items\":[{\"menu_id\":\"$MENU_M\",\"qty\":1}]}")
+cek "meja takeaway → sale.is_dine_in false" "V == 1" \
+  "$(echo "$S_TA" | jq '(.sale.isDineIn == false) | if . then 1 else 0 end')"
+
+# owner kelola meja per cabang via ?branch_id
+BR=$(api "$OWNER" GET /cabang | jq -r '.[0].id')
+cek "owner GET /meja?branch_id ok (>=5)" "V >= 5" \
+  "$(api "$OWNER" GET "/meja?branch_id=$BR" | jq 'length')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

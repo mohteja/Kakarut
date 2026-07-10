@@ -16,6 +16,7 @@ import { ProduksiPage } from "./pages/produksi/ProduksiPage";
 import { RekomendasiBeliPage } from "./pages/produksi/RekomendasiBeliPage";
 import { CabangPage } from "./pages/pengaturan/CabangPage";
 import { KaryawanPage } from "./pages/pengaturan/KaryawanPage";
+import { MejaPage } from "./pages/pengaturan/MejaPage";
 import { PenyimpananPage } from "./pages/pengaturan/PenyimpananPage";
 import { PerusahaanPage } from "./pages/pengaturan/PerusahaanPage";
 import { SupplierPage } from "./pages/pengaturan/SupplierPage";
@@ -69,8 +70,9 @@ export default function App() {
               <Route path="/stok" element={<StokPage />} />
               <Route path="/stok/penyesuaian" element={<PenyesuaianPage />} />
               <Route path="/stok/kartu/:ingredientId" element={<KartuStokPage />} />
-              {/* printer = pengaturan per perangkat → semua peran, termasuk kasir */}
+              {/* printer & meja = pengaturan kasir → semua peran, termasuk kasir */}
               <Route path="/pengaturan/printer" element={<PrinterPage />} />
+              <Route path="/pengaturan/meja" element={<MejaPage />} />
               {isManajemen && (
                 <>
                   <Route path="/produksi" element={<ProduksiPage />} />

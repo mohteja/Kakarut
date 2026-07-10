@@ -81,6 +81,7 @@ export function RiwayatPage() {
                 <div className="font-semibold text-stone-800">{r.nomor}</div>
                 <div className="truncate text-sm text-stone-500">
                   {formatWaktu(r.waktu)} · {r.jumlah_item} item
+                  {r.meja && ` · ${r.meja}`}
                   {r.kasir && ` · ${r.kasir}`}
                 </div>
               </div>

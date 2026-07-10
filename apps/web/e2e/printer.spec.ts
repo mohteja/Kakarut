@@ -48,6 +48,8 @@ test("checkout dengan auto-print merekam byte ESC/POS (init + TOTAL)", async ({ 
   await expect(page).toHaveURL(/\/kasir/);
 
   await page.getByRole("button", { name: /Premium Basooopa A/ }).click();
+  // pilih meja (wajib sebelum bayar)
+  await page.getByRole("button", { name: "Meja 1", exact: true }).click();
   await page.getByRole("button", { name: /Bayar & Cetak Struk/ }).click();
   await expect(page.locator("#struk-print")).toBeVisible();
 

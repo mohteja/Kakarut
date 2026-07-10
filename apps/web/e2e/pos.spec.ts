@@ -29,8 +29,8 @@ test("kasir: POS → tambah menu → dine-in → checkout → struk", async ({ p
   await page.getByRole("button", { name: /Premium Basooopa A/ }).click();
   await expect(page.getByText("Keranjang")).toBeVisible();
 
-  // aktifkan dine-in level transaksi
-  await page.getByRole("button", { name: "Dine-in", exact: true }).click();
+  // pilih meja (wajib sebelum bayar) → meja bernomor = dine-in
+  await page.getByRole("button", { name: "Meja 1", exact: true }).click();
 
   // bayar
   await page.getByRole("button", { name: /Bayar & Cetak Struk/ }).click();
@@ -40,6 +40,7 @@ test("kasir: POS → tambah menu → dine-in → checkout → struk", async ({ p
   await expect(page.locator("#struk-print")).toContainText("TOTAL");
   await expect(page.locator("#struk-print")).toContainText(/PUSAT-\d{8}-\d{4}/);
   await expect(page.locator("#struk-print")).toContainText("Dine-in");
+  await expect(page.locator("#struk-print")).toContainText("Meja: Meja 1");
 
   await page.getByRole("button", { name: "Transaksi Baru" }).click();
   await expect(page.locator("#struk-print")).toHaveCount(0);

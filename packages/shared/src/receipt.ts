@@ -24,6 +24,8 @@ export interface ReceiptData {
   /** waktu yang SUDAH diformat (mis. "09/07 14.30") */
   waktu: string;
   isDineIn: boolean;
+  /** label meja terpilih (mis. "Meja 3" / "Ruang Tunggu"); null bila tak ada */
+  mejaLabel?: string | null;
   items: ReceiptItem[];
   subtotal: number;
   pb1Amount: number;
@@ -66,6 +68,7 @@ export function buildReceiptBytes(data: ReceiptData, opts: ReceiptOptions): Uint
   b.align("left").divider();
   b.line(data.nomor, data.waktu);
   b.text(data.isDineIn ? "Dine-in" : "Bawa pulang");
+  if (data.mejaLabel) b.text(`Meja: ${data.mejaLabel}`);
   b.divider();
 
   // Item

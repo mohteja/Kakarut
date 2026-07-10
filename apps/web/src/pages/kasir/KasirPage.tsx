@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import type { MenuDto } from "@kakarut/shared";
+import type { MejaDto, MenuDto } from "@kakarut/shared";
 import { Card, ErrorText, Spinner, btnPrimary } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { useBranch } from "../../context/BranchContext";
@@ -36,6 +36,10 @@ export function KasirPage() {
     queryKey: ["kategori"],
     queryFn: () => api<Kategori[]>("/kategori"),
   });
+  const { data: mejaList = [] } = useQuery({
+    queryKey: ["meja", branchQuery],
+    queryFn: () => api<MejaDto[]>(`/meja${branchQuery}`),
+  });
   // Setelan PB1 terbaru dari server (snapshot login bisa basi bila
   // pengaturan perusahaan diubah saat sesi kasir masih terbuka)
   const { data: me } = useQuery({
@@ -47,9 +51,17 @@ export function KasirPage() {
 
   const [aktifKategori, setAktifKategori] = useState<string | null>(null);
   const [cart, setCart] = useState<CartLine[]>([]);
-  const [dineIn, setDineIn] = useState(false);
+  const [mejaId, setMejaId] = useState<string | null>(null);
   const [catatan, setCatatan] = useState("");
   const [struk, setStruk] = useState<SaleResult | null>(null);
+
+  const mejaAktif = useMemo(() => mejaList.filter((m) => m.is_active), [mejaList]);
+  const mejaDineIn = mejaAktif.filter((m) => m.tipe === "dine_in");
+  const mejaTakeaway = mejaAktif.filter((m) => m.tipe === "takeaway");
+  const mejaTerpilih = mejaAktif.find((m) => m.id === mejaId) ?? null;
+  // Meja menentukan mode transaksi: meja bernomor = dine-in (default), meja
+  // Ruang Tunggu = bawa pulang. Sebelum meja dipilih, tampilan default dine-in.
+  const dineIn = mejaTerpilih ? mejaTerpilih.tipe === "dine_in" : true;
 
   const kategoriTampil = useMemo(() => {
     const adaMenu = new Set((menus ?? []).map((m) => m.category_id));
@@ -102,6 +114,7 @@ export function KasirPage() {
         body: {
           ...(!isKasir && branchId ? { branch_id: branchId } : {}),
           is_dine_in: dineIn,
+          meja_id: mejaId ?? undefined,
           catatan: catatan || undefined,
           items: cart.map((l) => ({
             menu_id: l.menu.id,
@@ -114,6 +127,7 @@ export function KasirPage() {
       setStruk(data);
       setCart([]);
       setCatatan("");
+      setMejaId(null);
       queryClient.invalidateQueries({ queryKey: ["stok"] });
       queryClient.invalidateQueries({ queryKey: ["laporan"] });
       queryClient.invalidateQueries({ queryKey: ["penjualan"] });
@@ -196,19 +210,58 @@ export function KasirPage() {
               🕘 Riwayat
             </Link>
           </div>
-          <div className="flex overflow-hidden rounded-lg border border-stone-300 text-sm">
-            <button
-              onClick={() => setDineIn(false)}
-              className={`px-3 py-1.5 font-medium ${!dineIn ? "bg-orange-600 text-white" : "bg-white text-stone-600"}`}
+          <Link
+            to="/pengaturan/meja"
+            className="text-xs font-medium text-stone-400 hover:text-orange-600 hover:underline"
+          >
+            ⚙ Atur meja
+          </Link>
+        </div>
+
+        {/* Pilih meja — wajib sebelum bayar. Meja Ruang Tunggu = bawa pulang. */}
+        <div className="mb-3 rounded-lg border border-stone-200 bg-stone-50 p-2">
+          <div className="mb-1.5 flex items-center justify-between px-0.5">
+            <span className="text-xs font-semibold text-stone-600">Pilih Meja</span>
+            <span
+              className={`text-xs font-medium ${
+                !mejaTerpilih ? "text-stone-400" : dineIn ? "text-blue-600" : "text-amber-600"
+              }`}
             >
-              Bawa Pulang
-            </button>
-            <button
-              onClick={() => setDineIn(true)}
-              className={`px-3 py-1.5 font-medium ${dineIn ? "bg-orange-600 text-white" : "bg-white text-stone-600"}`}
-            >
-              Dine-in
-            </button>
+              {mejaTerpilih ? (dineIn ? "Dine-in" : "Bawa pulang") : "Belum dipilih"}
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {mejaDineIn.map((m) => (
+              <button
+                key={m.id}
+                onClick={() => setMejaId(m.id)}
+                className={`rounded-lg px-2.5 py-1 text-sm font-medium ${
+                  mejaId === m.id
+                    ? "bg-blue-600 text-white"
+                    : "border border-stone-300 bg-white text-stone-700 hover:border-blue-400"
+                }`}
+              >
+                {m.nama}
+              </button>
+            ))}
+            {mejaTakeaway.map((m) => (
+              <button
+                key={m.id}
+                onClick={() => setMejaId(m.id)}
+                className={`rounded-lg px-2.5 py-1 text-sm font-medium ${
+                  mejaId === m.id
+                    ? "bg-amber-500 text-white"
+                    : "border border-amber-300 bg-amber-50 text-amber-700 hover:border-amber-400"
+                }`}
+              >
+                🥡 {m.nama}
+              </button>
+            ))}
+            {mejaAktif.length === 0 && (
+              <Link to="/pengaturan/meja" className="text-xs text-orange-600 hover:underline">
+                Belum ada meja — atur dulu →
+              </Link>
+            )}
           </div>
         </div>
 
@@ -291,9 +344,14 @@ export function KasirPage() {
             <span>{formatRupiah(subtotal + pb1)}</span>
           </div>
           <ErrorText error={bayar.error} />
+          {cart.length > 0 && !mejaId && (
+            <div className="text-center text-xs font-medium text-amber-600">
+              Pilih meja dulu sebelum bayar.
+            </div>
+          )}
           <button
             onClick={() => bayar.mutate()}
-            disabled={cart.length === 0 || bayar.isPending}
+            disabled={cart.length === 0 || !mejaId || bayar.isPending}
             className={`${btnPrimary} w-full py-3 text-base`}
           >
             {bayar.isPending ? "Memproses…" : "Bayar & Cetak Struk"}

@@ -21,6 +21,7 @@ import {
   branches,
   companies,
   ingredients,
+  meja,
   memberships,
   menuCategories,
   menuComponents,
@@ -295,6 +296,19 @@ async function main() {
     await tx
       .insert(storageLocations)
       .values({ companyId: company.id, branchId: branch.id, nama: "Gudang Utama" })
+      .onConflictDoNothing();
+
+    // 3c. Meja default cabang Pusat: Ruang Tunggu (take away) + 4 meja makan,
+    // ditata grid awal (persen 0..100) supaya denah tidak menumpuk di 1 titik.
+    await tx
+      .insert(meja)
+      .values([
+        { companyId: company.id, branchId: branch.id, nama: "Ruang Tunggu", tipe: "takeaway", posX: 15, posY: 15 },
+        { companyId: company.id, branchId: branch.id, nama: "Meja 1", tipe: "dine_in", posX: 40, posY: 30 },
+        { companyId: company.id, branchId: branch.id, nama: "Meja 2", tipe: "dine_in", posX: 65, posY: 30 },
+        { companyId: company.id, branchId: branch.id, nama: "Meja 3", tipe: "dine_in", posX: 40, posY: 60 },
+        { companyId: company.id, branchId: branch.id, nama: "Meja 4", tipe: "dine_in", posX: 65, posY: 60 },
+      ])
       .onConflictDoNothing();
 
     // 4. Kategori menu sesuai catOrder

@@ -168,6 +168,20 @@ export interface PenyimpananDto {
   petugas: PetugasRingkas[];
 }
 
+/** jenis meja: meja makan (dine-in) vs "Ruang Tunggu" untuk take away. */
+export type MejaTipe = "dine_in" | "takeaway";
+
+/** Master meja per cabang + posisi denah (persen 0..100). */
+export interface MejaDto {
+  id: string;
+  branch_id: string;
+  nama: string;
+  tipe: MejaTipe;
+  pos_x: number;
+  pos_y: number;
+  is_active: boolean;
+}
+
 export type PenyesuaianKategori =
   | "waste_bahan"
   | "waste_matang"
@@ -306,6 +320,8 @@ export interface RiwayatTransaksiRow {
   waktu: string;
   total: number;
   is_dine_in: boolean;
+  /** label meja terpilih (null bila transaksi lama tanpa meja) */
+  meja: string | null;
   /** jumlah baris menu pada transaksi */
   jumlah_item: number;
   kasir: string | null;

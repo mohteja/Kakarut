@@ -12,6 +12,7 @@ import { createSale } from "./service";
 const SaleBody = z.object({
   branch_id: z.string().uuid().optional(),
   is_dine_in: z.boolean().default(false),
+  meja_id: z.string().uuid().optional(),
   catatan: z.string().nullish(),
   items: z
     .array(
@@ -37,6 +38,7 @@ export const penjualanRoutes = new Hono<AppEnv>()
       branchId,
       cashierUserId: auth.sub,
       isDineIn: body.is_dine_in,
+      mejaId: body.meja_id,
       catatan: body.catatan,
       items: body.items,
     });
@@ -58,6 +60,7 @@ export const penjualanRoutes = new Hono<AppEnv>()
         waktu: sales.waktu,
         total: sales.total,
         is_dine_in: sales.isDineIn,
+        meja: sales.mejaLabel,
         kasir: users.nama,
         jumlah_item: sql<number>`(SELECT COUNT(*)::int FROM sale_items si WHERE si.sale_id = ${sales.id})`,
       })

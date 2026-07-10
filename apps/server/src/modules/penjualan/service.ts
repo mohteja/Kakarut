@@ -2,7 +2,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { HTTPException } from "hono/http-exception";
 import { hitungPb1, qtyEfektif, type SaleItemInput } from "@kakarut/shared";
 import { db } from "../../db/client";
-import { branches, companies, saleConsumptions, saleItems, sales } from "../../db/schema";
+import { branches, companies, meja, saleConsumptions, saleItems, sales } from "../../db/schema";
 import { kodeCabang, tanggalDi } from "../../lib/time";
 import { hitungHargaMenu, loadKatalog } from "../menu/service";
 
@@ -11,6 +11,8 @@ export interface CreateSaleParams {
   branchId: string;
   cashierUserId: string;
   isDineIn: boolean;
+  /** meja terpilih — bila ada, tipe meja jadi sumber kebenaran dine-in transaksi */
+  mejaId?: string | null;
   catatan?: string | null;
   items: SaleItemInput[];
 }
@@ -40,6 +42,30 @@ export async function createSale(params: CreateSaleParams) {
       .where(eq(companies.id, params.companyId));
     if (!company) throw new HTTPException(404, { message: "Perusahaan tidak ditemukan" });
 
+    // Meja terpilih menentukan mode transaksi: meja "takeaway" (Ruang Tunggu)
+    // → seluruh pesanan bawa pulang; meja biasa → dine-in (tiap item masih bisa
+    // di-override jadi bawa pulang). mejaLabel disnapshot agar struk/riwayat tetap
+    // benar meski meja kelak diganti nama/dihapus.
+    let isDineIn = params.isDineIn;
+    let mejaId: string | null = null;
+    let mejaLabel: string | null = null;
+    if (params.mejaId) {
+      const [m] = await tx
+        .select()
+        .from(meja)
+        .where(
+          and(
+            eq(meja.id, params.mejaId),
+            eq(meja.companyId, params.companyId),
+            eq(meja.branchId, branch.id),
+          ),
+        );
+      if (!m) throw new HTTPException(404, { message: "Meja tidak ditemukan" });
+      mejaId = m.id;
+      mejaLabel = m.nama;
+      isDineIn = m.tipe === "dine_in";
+    }
+
     const katalog = await loadKatalog(tx, params.companyId);
     const menuById = new Map(katalog.rows.map((r) => [r.id, r]));
 
@@ -56,7 +82,7 @@ export async function createSale(params: CreateSaleParams) {
       if (item.qty <= 0) {
         throw new HTTPException(400, { message: `Qty tidak valid untuk ${menu.nama}` });
       }
-      const dineIn = item.is_dine_in ?? params.isDineIn;
+      const dineIn = item.is_dine_in ?? isDineIn;
       const hppSatuan = hitungHargaMenu(menu, katalog, dineIn);
       const lineTotal = menu.hargaJual * item.qty;
 
@@ -114,7 +140,9 @@ export async function createSale(params: CreateSaleParams) {
         branchId: branch.id,
         cashierUserId: params.cashierUserId,
         nomor,
-        isDineIn: params.isDineIn,
+        isDineIn,
+        mejaId,
+        mejaLabel,
         subtotal,
         pb1Amount,
         total: subtotal + pb1Amount,
