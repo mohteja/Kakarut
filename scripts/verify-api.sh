@@ -266,10 +266,15 @@ cek "selisih opname muncul di penyesuaian (belum)" "V == 1" \
   "$(echo "$PENY" | jq --arg id "$PENY_ID" '[.[] | select(.id == $id and .klarifikasi_status == "belum")] | length')"
 cek "penyesuaian punya selisih ≠ 0" "V == 1" \
   "$(echo "$PENY" | jq --arg id "$PENY_ID" '[.[] | select(.id == $id and (.selisih | fabs) > 0)] | length')"
-api "$KASIR" POST "/stok/penyesuaian/$PENY_ID/klarifikasi" '{"kategori":"waste_bahan","catatan":"tumpah"}' > /dev/null
+cek "klarifikasi tanpa foto ditolak (400)" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/stok/penyesuaian/$PENY_ID/klarifikasi" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d '{"kategori":"waste_bahan","catatan":"x"}')"
+FOTO="/uploads/companies/x/bukti/uji.jpg"
+api "$KASIR" POST "/stok/penyesuaian/$PENY_ID/klarifikasi" "{\"kategori\":\"waste_bahan\",\"catatan\":\"tumpah\",\"foto_url\":\"$FOTO\"}" > /dev/null
 DETAIL=$(api "$KASIR" GET "/stok/penyesuaian?status=semua")
 cek "setelah klarifikasi: status sudah" "V == 1" \
   "$(echo "$DETAIL" | jq --arg id "$PENY_ID" '[.[] | select(.id == $id and .klarifikasi_status == "sudah" and .kategori == "waste_bahan")] | length')"
+cek "bukti foto tersimpan" "V == 1" \
+  "$(echo "$DETAIL" | jq --arg id "$PENY_ID" --arg f "$FOTO" '[.[] | select(.id == $id and .foto_url == $f)] | length')"
 cek "hilang dari daftar 'belum'" "V == 0" \
   "$(api "$KASIR" GET "/stok/penyesuaian?status=belum" | jq --arg id "$PENY_ID" '[.[] | select(.id == $id)] | length')"
 

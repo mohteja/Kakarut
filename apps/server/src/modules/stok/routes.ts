@@ -188,6 +188,7 @@ export const stokRoutes = new Hono<AppEnv>()
         klarifikasi_status: stockOpnames.klarifikasiStatus,
         kategori: stockOpnames.penyesuaianKategori,
         catatan: stockOpnames.klarifikasiCatatan,
+        foto_url: stockOpnames.klarifikasiFotoUrl,
         oleh: inputUser.nama,
         diklarifikasi_oleh: klarUser.nama,
       })
@@ -219,6 +220,8 @@ export const stokRoutes = new Hono<AppEnv>()
           "lainnya",
         ]),
         catatan: z.string().nullish(),
+        /** bukti foto WAJIB */
+        foto_url: z.string().min(1, "Bukti foto wajib dilampirkan"),
       }),
     ),
     async (c) => {
@@ -248,6 +251,7 @@ export const stokRoutes = new Hono<AppEnv>()
           klarifikasiStatus: "sudah",
           penyesuaianKategori: body.kategori,
           klarifikasiCatatan: body.catatan ?? null,
+          klarifikasiFotoUrl: body.foto_url,
           klarifikasiBy: auth.sub,
           klarifikasiAt: new Date(),
         })

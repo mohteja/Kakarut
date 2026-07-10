@@ -156,6 +156,7 @@ export interface PenyesuaianRow {
   klarifikasi_status: "belum" | "sudah";
   kategori: PenyesuaianKategori | null;
   catatan: string | null;
+  foto_url: string | null;
   /** karyawan yang input opname */
   oleh: string | null;
   /** karyawan yang mengklarifikasi */

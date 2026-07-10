@@ -372,6 +372,8 @@ export const stockOpnames = pgTable(
     klarifikasiStatus: klarifikasiStatusEnum("klarifikasi_status"),
     penyesuaianKategori: penyesuaianKategoriEnum("penyesuaian_kategori"),
     klarifikasiCatatan: text("klarifikasi_catatan"),
+    /** bukti foto wajib saat klarifikasi (URL R2 / lokal) */
+    klarifikasiFotoUrl: text("klarifikasi_foto_url"),
     klarifikasiBy: uuid("klarifikasi_by").references(() => users.id),
     klarifikasiAt: timestamp("klarifikasi_at", { withTimezone: true }),
     userId: uuid("user_id").references(() => users.id),

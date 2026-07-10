@@ -1,0 +1,1 @@
+ALTER TABLE "stock_opnames" ADD COLUMN "klarifikasi_foto_url" text;

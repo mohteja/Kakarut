@@ -5,6 +5,7 @@ import {
   type PenyesuaianKategori,
   type PenyesuaianRow,
 } from "@kakarut/shared";
+import { ImageUpload } from "../../components/ImageUpload";
 import {
   Card,
   ErrorText,
@@ -33,13 +34,21 @@ function KlarifikasiModal({
   const queryClient = useQueryClient();
   const [kategori, setKategori] = useState<PenyesuaianKategori>("waste_bahan");
   const [catatan, setCatatan] = useState("");
+  const [fotoUrl, setFotoUrl] = useState<string | null>(row.foto_url);
+  const [validasi, setValidasi] = useState<string | null>(null);
 
   const simpan = useMutation({
-    mutationFn: () =>
-      api(`/stok/penyesuaian/${row.id}/klarifikasi`, {
+    mutationFn: () => {
+      if (!fotoUrl) {
+        setValidasi("Bukti foto wajib dilampirkan.");
+        return Promise.reject(new Error("Bukti foto wajib dilampirkan."));
+      }
+      setValidasi(null);
+      return api(`/stok/penyesuaian/${row.id}/klarifikasi`, {
         method: "POST",
-        body: { kategori, catatan: catatan || null },
-      }),
+        body: { kategori, catatan: catatan || null, foto_url: fotoUrl },
+      });
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["penyesuaian"] });
       onClose();
@@ -97,12 +106,36 @@ function KlarifikasiModal({
             placeholder="mis. tumpah saat pindah wadah"
           />
         </div>
+        <div>
+          <label className="mb-1 block text-sm font-medium">
+            Bukti foto <span className="text-red-500">*wajib</span>
+          </label>
+          <ImageUpload
+            value={fotoUrl}
+            onChange={(u) => {
+              setFotoUrl(u);
+              if (u) setValidasi(null);
+            }}
+            tujuan="bukti"
+            placeholder="📷"
+          />
+          <div className="mt-1 text-xs text-stone-400">
+            Foto bahan/produk yang menjadi penyebab selisih (mis. bahan rusak, produk gagal).
+          </div>
+        </div>
+        {validasi && (
+          <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{validasi}</div>
+        )}
         <ErrorText error={simpan.error} />
         <div className="flex justify-end gap-2 pt-1">
           <button onClick={onClose} className={btnSecondary}>
             Batal
           </button>
-          <button onClick={() => simpan.mutate()} disabled={simpan.isPending} className={btnPrimary}>
+          <button
+            onClick={() => simpan.mutate()}
+            disabled={simpan.isPending || !fotoUrl}
+            className={btnPrimary}
+          >
             {simpan.isPending ? "Menyimpan…" : "Simpan Klarifikasi"}
           </button>
         </div>
@@ -191,18 +224,29 @@ export function PenyesuaianPage() {
                 </div>
                 <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
                   {r.klarifikasi_status === "sudah" && kat ? (
-                    <div className="text-sm">
-                      <span
-                        className={`rounded-full px-2 py-0.5 text-xs font-semibold ${kat.is_waste ? "bg-red-100 text-red-700" : "bg-stone-200 text-stone-600"}`}
-                      >
-                        {kat.label}
-                      </span>
-                      {r.catatan && <span className="ml-2 text-stone-500">{r.catatan}</span>}
-                      {r.diklarifikasi_oleh && (
-                        <span className="ml-2 text-xs text-stone-400">
-                          — {r.diklarifikasi_oleh}
-                        </span>
+                    <div className="flex items-center gap-2 text-sm">
+                      {r.foto_url && (
+                        <a href={r.foto_url} target="_blank" rel="noopener" title="Lihat bukti foto">
+                          <img
+                            src={r.foto_url}
+                            alt="bukti"
+                            className="h-10 w-10 rounded-lg border border-stone-200 object-cover"
+                          />
+                        </a>
                       )}
+                      <div>
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-xs font-semibold ${kat.is_waste ? "bg-red-100 text-red-700" : "bg-stone-200 text-stone-600"}`}
+                        >
+                          {kat.label}
+                        </span>
+                        {r.catatan && <span className="ml-2 text-stone-500">{r.catatan}</span>}
+                        {r.diklarifikasi_oleh && (
+                          <span className="ml-2 text-xs text-stone-400">
+                            — {r.diklarifikasi_oleh}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   ) : (
                     <span className="rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-semibold text-yellow-800">
