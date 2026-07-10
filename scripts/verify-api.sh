@@ -372,9 +372,18 @@ TODAY=$(TZ=Asia/Jakarta date +%F)
 REK=$(api "$OWNER" GET "/rekomendasi/beli?acuan=rentang&dari=$TODAY&sampai=$TODAY&target=20000000")
 cek "rekomendasi: omzet acuan > 0" "V > 0" "$(echo "$REK" | jq '.acuan.omzet')"
 cek "rekomendasi: ada bahan terpakai hari ini" "V >= 1" \
-  "$(echo "$REK" | jq '[.bahan[] | select(.terpakai_hari_ini > 0)] | length')"
+  "$(echo "$REK" | jq '[.bahan[] | select(.terpakai > 0)] | length')"
+cek "rekomendasi: pakai default = hari ini" "V == 1" \
+  "$(echo "$REK" | jq --arg t "$TODAY" '((.pakai.dari == $t) and (.pakai.sampai == $t)) | if . then 1 else 0 end')"
+# filter terpakai ke tanggal lampau tanpa penjualan → semua terpakai = 0
+PAST=$(TZ=Asia/Jakarta date -d '30 days ago' +%F 2>/dev/null || TZ=Asia/Jakarta date -v-30d +%F)
+REK_PAST=$(api "$OWNER" GET "/rekomendasi/beli?acuan=rentang&dari=$TODAY&sampai=$TODAY&target=20000000&pakai_dari=$PAST&pakai_sampai=$PAST")
+cek "filter terpakai tanggal lampau → 0 pemakaian" "V == 0" \
+  "$(echo "$REK_PAST" | jq '[.bahan[] | select(.terpakai > 0)] | length')"
+cek "filter terpakai: pakai.dari mengikuti query" "V == 1" \
+  "$(echo "$REK_PAST" | jq --arg p "$PAST" '(.pakai.dari == $p) | if . then 1 else 0 end')"
 OM=$(echo "$REK" | jq '.acuan.omzet')
-ROW=$(echo "$REK" | jq '[.bahan[] | select(.terpakai_hari_ini > 0 and .kebutuhan != null)][0]')
+ROW=$(echo "$REK" | jq '[.bahan[] | select(.terpakai > 0 and .kebutuhan != null)][0]')
 cek "rekomendasi: kebutuhan == acuan_qty*target/omzet" "abs(V) < 0.5" \
   "$(echo "$ROW" | jq --argjson om "$OM" '.kebutuhan - (.acuan_qty * 20000000 / $om)')"
 cek "rekomendasi: saran_beli == max(0, kebutuhan-sisa)" "abs(V) < 0.5" \

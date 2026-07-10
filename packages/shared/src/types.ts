@@ -123,8 +123,8 @@ export interface RekomendasiBahanRow {
   satuan: string;
   kategori: BahanKategori;
   pengadaan: JenisPengadaan;
-  /** pemakaian hari ini (dari penjualan) */
-  terpakai_hari_ini: number;
+  /** pemakaian pada periode "terpakai" terpilih (default hari ini) */
+  terpakai: number;
   /** stok tersisa saat ini */
   sisa: number;
   /** pemakaian pada periode acuan */
@@ -144,6 +144,8 @@ export interface RekomendasiBeli {
   /** tanggal hari ini (tz perusahaan) */
   hari_ini: string;
   acuan: AcuanPeriode;
+  /** periode kolom "terpakai" (default hari ini; dari===sampai bila satu tanggal) */
+  pakai: { dari: string; sampai: string };
   menu_terlaris: MenuTerlaris[];
   bahan: RekomendasiBahanRow[];
 }

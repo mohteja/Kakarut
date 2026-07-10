@@ -95,6 +95,9 @@ export interface OpsiRekomendasi {
   acuan: AcuanJenis;
   dari?: string;
   sampai?: string;
+  /** periode kolom "terpakai" (default hari ini) */
+  pakaiDari?: string;
+  pakaiSampai?: string;
 }
 
 /**
@@ -109,6 +112,9 @@ export async function rekomendasiBeli(
   opsi: OpsiRekomendasi,
 ): Promise<RekomendasiBeli> {
   const hariIni = tanggalDi(tz);
+  // periode kolom "terpakai": default hari ini; bisa satu tanggal atau rentang
+  const pakaiDari = opsi.pakaiDari || hariIni;
+  const pakaiSampai = opsi.pakaiSampai || pakaiDari;
 
   // tentukan periode acuan
   let dari: string;
@@ -138,9 +144,9 @@ export async function rekomendasiBeli(
     fallback = true;
   }
 
-  const [refCons, todayCons, saldoRows, extraRows, menuTerlaris] = await Promise.all([
+  const [refCons, pakaiCons, saldoRows, extraRows, menuTerlaris] = await Promise.all([
     konsumsiPeriode(companyId, branchId, dari, sampai),
-    konsumsiPeriode(companyId, branchId, hariIni, hariIni),
+    konsumsiPeriode(companyId, branchId, pakaiDari, pakaiSampai),
     hitungSaldoCabang(companyId, branchId),
     db
       .select({
@@ -169,7 +175,7 @@ export async function rekomendasiBeli(
       satuan: s.satuan,
       kategori: s.kategori,
       pengadaan: e?.pengadaan ?? "beli",
-      terpakai_hari_ini: todayCons.get(s.ingredient_id) ?? 0,
+      terpakai: pakaiCons.get(s.ingredient_id) ?? 0,
       sisa: s.saldo,
       acuan_qty,
       kebutuhan,
@@ -185,5 +191,12 @@ export async function rekomendasiBeli(
   );
 
   const acuan: AcuanPeriode = { jenis, dari, sampai, omzet, fallback };
-  return { target, hari_ini: hariIni, acuan, menu_terlaris: menuTerlaris, bahan };
+  return {
+    target,
+    hari_ini: hariIni,
+    acuan,
+    pakai: { dari: pakaiDari, sampai: pakaiSampai },
+    menu_terlaris: menuTerlaris,
+    bahan,
+  };
 }

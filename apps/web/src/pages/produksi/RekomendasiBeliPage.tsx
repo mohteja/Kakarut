@@ -22,6 +22,14 @@ const ACUAN_LABEL: Record<AcuanJenis, string> = {
   rentang: "rentang tanggal",
 };
 
+/** Judul kolom terpakai mengikuti periode yang dipilih. */
+function labelTerpakai(d: RekomendasiBeli): string {
+  const { dari, sampai } = d.pakai;
+  if (dari === d.hari_ini && sampai === d.hari_ini) return "Terpakai hari ini";
+  if (dari === sampai) return `Terpakai ${dari}`;
+  return `Terpakai ${dari}…${sampai}`;
+}
+
 function StatKecil({ label, nilai }: { label: string; nilai: string }) {
   return (
     <div className="rounded-lg border border-stone-200 bg-white p-3">
@@ -41,6 +49,9 @@ export function RekomendasiBeliPage() {
   const [acuan, setAcuan] = useState<AcuanJenis>("minggu_lalu");
   const [dari, setDari] = useState("");
   const [sampai, setSampai] = useState("");
+  const [pakaiMode, setPakaiMode] = useState<"hari_ini" | "tanggal" | "rentang">("hari_ini");
+  const [pakaiDari, setPakaiDari] = useState("");
+  const [pakaiSampai, setPakaiSampai] = useState("");
 
   function buildUrl() {
     const p = new URLSearchParams();
@@ -50,11 +61,28 @@ export function RekomendasiBeliPage() {
       p.set("dari", dari);
       p.set("sampai", sampai);
     }
+    if (pakaiMode === "tanggal" && pakaiDari) {
+      p.set("pakai_dari", pakaiDari);
+      p.set("pakai_sampai", pakaiDari);
+    } else if (pakaiMode === "rentang" && pakaiDari && pakaiSampai) {
+      p.set("pakai_dari", pakaiDari);
+      p.set("pakai_sampai", pakaiSampai);
+    }
     return `/rekomendasi/beli${branchQuery ? `${branchQuery}&` : "?"}${p.toString()}`;
   }
 
   const { data, isLoading, isFetching } = useQuery({
-    queryKey: ["rekomendasi", branchQuery, targetApplied, acuan, dari, sampai],
+    queryKey: [
+      "rekomendasi",
+      branchQuery,
+      targetApplied,
+      acuan,
+      dari,
+      sampai,
+      pakaiMode,
+      pakaiDari,
+      pakaiSampai,
+    ],
     queryFn: () => api<RekomendasiBeli>(buildUrl()),
   });
 
@@ -154,6 +182,55 @@ export function RekomendasiBeliPage() {
             </>
           )}
         </div>
+        <div className="flex flex-wrap items-end gap-3">
+          <div>
+            <label className="mb-1 block text-sm font-medium">Kolom terpakai (pemakaian)</label>
+            <select
+              value={pakaiMode}
+              onChange={(e) =>
+                setPakaiMode(e.target.value as "hari_ini" | "tanggal" | "rentang")
+              }
+              className={inputClass}
+            >
+              <option value="hari_ini">Hari ini</option>
+              <option value="tanggal">Tanggal tertentu</option>
+              <option value="rentang">Rentang tanggal</option>
+            </select>
+          </div>
+          {pakaiMode === "tanggal" && (
+            <div>
+              <label className="mb-1 block text-sm font-medium">Tanggal</label>
+              <input
+                type="date"
+                value={pakaiDari}
+                onChange={(e) => setPakaiDari(e.target.value)}
+                className={inputClass}
+              />
+            </div>
+          )}
+          {pakaiMode === "rentang" && (
+            <>
+              <div>
+                <label className="mb-1 block text-sm font-medium">Terpakai dari</label>
+                <input
+                  type="date"
+                  value={pakaiDari}
+                  onChange={(e) => setPakaiDari(e.target.value)}
+                  className={inputClass}
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium">Terpakai sampai</label>
+                <input
+                  type="date"
+                  value={pakaiSampai}
+                  onChange={(e) => setPakaiSampai(e.target.value)}
+                  className={inputClass}
+                />
+              </div>
+            </>
+          )}
+        </div>
       </Card>
 
       {isLoading ? (
@@ -199,7 +276,7 @@ export function RekomendasiBeliPage() {
               <thead className="border-b border-stone-200 bg-stone-50">
                 <tr>
                   <th className={thClass}>Bahan</th>
-                  <th className={`${thClass} text-right`}>Terpakai hari ini</th>
+                  <th className={`${thClass} text-right`}>{labelTerpakai(data)}</th>
                   <th className={`${thClass} text-right`}>Sisa</th>
                   <th className={`${thClass} text-right`}>Acuan</th>
                   <th className={`${thClass} text-right`}>Kebutuhan</th>
@@ -219,7 +296,7 @@ export function RekomendasiBeliPage() {
                         {b.pengadaan === "beli" ? "beli" : "produksi"}
                       </span>
                     </td>
-                    <td className={`${tdClass} text-right`}>{formatAngka(b.terpakai_hari_ini)}</td>
+                    <td className={`${tdClass} text-right`}>{formatAngka(b.terpakai)}</td>
                     <td className={`${tdClass} text-right`}>{formatAngka(b.sisa)}</td>
                     <td className={`${tdClass} text-right text-stone-500`}>
                       {formatAngka(b.acuan_qty)}
