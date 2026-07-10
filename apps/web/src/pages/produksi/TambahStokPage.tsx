@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import type { JenisPengadaan } from "@kakarut/shared";
 import {
@@ -9,12 +9,19 @@ import {
   Spinner,
   btnPrimary,
   btnSecondary,
+  inputClass,
   tdClass,
   thClass,
 } from "../../components/ui";
 import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
-import { formatAngka, formatRupiah, formatWaktu, hariIniWIB } from "../../lib/format";
+import { formatAngka, formatRupiah, formatWaktu } from "../../lib/format";
+
+interface StokMasukPage {
+  rows: StokMasukRow[];
+  total: number;
+  total_pengeluaran: number;
+}
 import { FakturDetailModal } from "./FakturDetailModal";
 import { FakturModal } from "./FakturModal";
 
@@ -75,14 +82,46 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
   const [modalBuka, setModalBuka] = useState(false);
   const [detail, setDetail] = useState<FakturGroup | null>(null);
 
-  const today = hariIniWIB();
-  const { data: log, isLoading } = useQuery({
-    queryKey: [t.endpoint, today, branchQuery],
-    queryFn: () =>
-      api<StokMasukRow[]>(
-        `${t.endpoint}${branchQuery ? `${branchQuery}&` : "?"}tanggal=${today}`,
-      ),
+  // Buku besar: filter tanggal + pagination per faktur (terlama di halaman awal,
+  // terbaru di halaman terakhir). Default membuka halaman TERAKHIR.
+  const [dari, setDari] = useState("");
+  const [sampai, setSampai] = useState("");
+  const [perPage, setPerPage] = useState(20);
+  const [page, setPage] = useState(1);
+  const [pinnedLast, setPinnedLast] = useState(true);
+
+  const { data, isLoading, isFetching } = useQuery({
+    queryKey: [t.endpoint, branchQuery, dari, sampai, perPage, page],
+    queryFn: () => {
+      const p = new URLSearchParams();
+      if (dari) p.set("dari", dari);
+      if (sampai) p.set("sampai", sampai);
+      p.set("per_page", String(perPage));
+      p.set("page", String(page));
+      return api<StokMasukPage>(
+        `${t.endpoint}${branchQuery ? `${branchQuery}&` : "?"}${p.toString()}`,
+      );
+    },
+    placeholderData: (prev) => prev,
   });
+  const log = data?.rows;
+  const total = data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / perPage));
+
+  // Setelah data termuat, kalau "pinned", lompat ke halaman terakhir (terbaru).
+  useEffect(() => {
+    if (pinnedLast && data && page !== totalPages) setPage(totalPages);
+  }, [pinnedLast, data, totalPages, page]);
+
+  function gantiFilter(fn: () => void) {
+    fn();
+    setPinnedLast(true);
+    setPage(1);
+  }
+  function keHalaman(n: number) {
+    setPinnedLast(false);
+    setPage(Math.min(totalPages, Math.max(1, n)));
+  }
 
   const konfirmasi = useMutation({
     mutationFn: (fakturId: string) =>
@@ -124,10 +163,9 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
     return [...byKey.values()];
   }, [log]);
 
-  const totalPengeluaran = grup
-    .filter((g) => g.status === "dikonfirmasi")
-    .reduce((a, g) => a + g.totalHarga, 0);
+  const totalPengeluaran = data?.total_pengeluaran ?? 0;
   const adaMenunggu = grup.some((g) => g.status === "menunggu");
+  const jenisKata = tipe === "produksi" ? "produksi" : "pembelian";
 
   return (
     <div>
@@ -154,11 +192,59 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
       </div>
       <ErrorText error={konfirmasi.error} />
 
-      <div className="mb-2 flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-stone-700">{t.logJudul}</h2>
+      {/* Filter tanggal + jumlah baris (buku besar) */}
+      <Card className="mb-3 flex flex-wrap items-end gap-3 p-3">
+        <div>
+          <label className="mb-1 block text-xs font-medium text-stone-500">Dari tanggal</label>
+          <input
+            type="date"
+            value={dari}
+            onChange={(e) => gantiFilter(() => setDari(e.target.value))}
+            className={inputClass}
+          />
+        </div>
+        <div>
+          <label className="mb-1 block text-xs font-medium text-stone-500">Sampai tanggal</label>
+          <input
+            type="date"
+            value={sampai}
+            onChange={(e) => gantiFilter(() => setSampai(e.target.value))}
+            className={inputClass}
+          />
+        </div>
+        {(dari || sampai) && (
+          <button
+            onClick={() => gantiFilter(() => { setDari(""); setSampai(""); })}
+            className={btnSecondary}
+          >
+            Semua tanggal
+          </button>
+        )}
+        <div className="ml-auto">
+          <label className="mb-1 block text-xs font-medium text-stone-500">Baris / halaman</label>
+          <select
+            value={perPage}
+            onChange={(e) => gantiFilter(() => setPerPage(Number(e.target.value)))}
+            className={inputClass}
+          >
+            {[10, 20, 50, 100].map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+          </select>
+        </div>
+      </Card>
+
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-lg font-semibold text-stone-700">
+          Riwayat {tipe === "produksi" ? "Produksi" : "Pembelian"}{" "}
+          <span className="text-sm font-normal text-stone-400">({total} faktur)</span>
+        </h2>
         {tipe === "beli" && totalPengeluaran > 0 && (
           <div className="text-sm text-stone-500">
-            Pengeluaran terkonfirmasi: <b>{formatRupiah(totalPengeluaran)}</b>
+            Pengeluaran terkonfirmasi{dari || sampai ? " (rentang)" : ""}:{" "}
+            <b>{formatRupiah(totalPengeluaran)}</b>
           </div>
         )}
       </div>
@@ -167,7 +253,9 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
         <Spinner />
       ) : grup.length === 0 ? (
         <Card className="p-8 text-center text-sm text-stone-400">
-          Belum ada {tipe === "produksi" ? "produksi" : "pembelian"} hari ini.
+          {dari || sampai
+            ? `Tidak ada ${jenisKata} pada rentang tanggal ini.`
+            : `Belum ada ${jenisKata}.`}
         </Card>
       ) : (
         <div className="space-y-3">
@@ -255,6 +343,45 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
               Faktur "Menunggu konfirmasi" belum menambah saldo stok.
             </div>
           )}
+        </div>
+      )}
+
+      {totalPages > 1 && (
+        <div className="mt-4 flex items-center justify-center gap-1.5 text-sm">
+          <button
+            onClick={() => keHalaman(1)}
+            disabled={page <= 1}
+            className={`${btnSecondary} px-2.5 py-1 disabled:opacity-40`}
+            title="Terlama"
+          >
+            «
+          </button>
+          <button
+            onClick={() => keHalaman(page - 1)}
+            disabled={page <= 1}
+            className={`${btnSecondary} px-2.5 py-1 disabled:opacity-40`}
+          >
+            ‹ Sebelumnya
+          </button>
+          <span className="px-2 text-stone-500">
+            Halaman <b>{page}</b> / {totalPages}
+          </span>
+          <button
+            onClick={() => keHalaman(page + 1)}
+            disabled={page >= totalPages}
+            className={`${btnSecondary} px-2.5 py-1 disabled:opacity-40`}
+          >
+            Berikutnya ›
+          </button>
+          <button
+            onClick={() => keHalaman(totalPages)}
+            disabled={page >= totalPages}
+            className={`${btnSecondary} px-2.5 py-1 disabled:opacity-40`}
+            title="Terbaru"
+          >
+            »
+          </button>
+          {isFetching && <span className="ml-2 text-xs text-stone-400">Memuat…</span>}
         </div>
       )}
 

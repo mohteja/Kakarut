@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { zValidator } from "@hono/zod-validator";
-import { and, asc, desc, eq, inArray, isNull, or } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Hono, type Context } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -38,6 +38,9 @@ const FakturEditBody = z.object({
     .optional(),
 });
 const HapusBody = z.object({ password: z.string() });
+
+/** Terima hanya tanggal format YYYY-MM-DD; selain itu undefined. */
+const tglValid = (s?: string) => (s && /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : undefined);
 
 /** Cocokkan satu faktur: baris ber-fakturId, atau baris lama (fakturId null) via id. */
 function cocokFaktur(key: string) {
@@ -282,51 +285,105 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         .returning();
       return c.json({ ...row, bahan: ing.nama }, 201);
     })
+    /**
+     * Daftar "buku besar": pagination per FAKTUR, urut terlama → terbaru
+     * (halaman awal = terlama, halaman terakhir = terbaru). Filter rentang
+     * tanggal opsional (dari/sampai). Balikan { rows, total, total_pengeluaran }.
+     */
     .get("/", async (c) => {
       const auth = c.get("auth");
       const branchId = await resolveBranchId(c);
-      const tanggal = c.req.query("tanggal");
+      const dari = tglValid(c.req.query("dari"));
+      const sampai = tglValid(c.req.query("sampai"));
+      // dukung juga ?tanggal= (satu hari) demi kompatibilitas
+      const satuHari = tglValid(c.req.query("tanggal"));
+      const page = Math.max(1, Number(c.req.query("page") ?? "1") || 1);
+      const perPage = Math.min(200, Math.max(1, Number(c.req.query("per_page") ?? "20") || 20));
+
       const conds = [
         eq(productions.companyId, auth.company_id!),
         eq(productions.branchId, branchId),
         eq(productions.tipe, tipe),
+        isNull(productions.deletedAt),
       ];
-      if (tanggal) conds.push(eq(productions.prodDate, tanggal));
-      conds.push(isNull(productions.deletedAt)); // sembunyikan yang sudah dihapus
-      const rows = await db
+      if (satuHari) conds.push(eq(productions.prodDate, satuHari));
+      if (dari) conds.push(gte(productions.prodDate, dari));
+      if (sampai) conds.push(lte(productions.prodDate, sampai));
+
+      const keyExpr = sql<string>`COALESCE(${productions.fakturId}::text, ${productions.id}::text)`;
+
+      const [ringkas] = await db
         .select({
-          id: productions.id,
-          ingredient_id: productions.ingredientId,
-          bahan: ingredients.nama,
-          isi: ingredients.isi,
-          satuan: ingredients.satuan,
-          qty: productions.qty,
-          total_harga: productions.totalHarga,
-          is_batch: productions.isBatch,
-          catatan: productions.catatan,
-          waktu: productions.waktu,
-          prod_date: productions.prodDate,
-          faktur_id: productions.fakturId,
-          no_faktur: productions.noFaktur,
-          status: productions.status,
-          supplier: suppliers.nama,
-          tempat: storageLocations.nama,
-          storage_location_id: productions.storageLocationId,
-          supplier_id: productions.supplierId,
-          dibuat_oleh: pembuat.nama,
-          diubah_oleh: pengubah.nama,
-          updated_at: productions.updatedAt,
+          total: sql<number>`COUNT(DISTINCT ${keyExpr})::int`,
+          total_pengeluaran: sql<number>`COALESCE(SUM(${productions.totalHarga}) FILTER (WHERE ${productions.status} = 'dikonfirmasi'), 0)`,
         })
         .from(productions)
-        .innerJoin(ingredients, eq(productions.ingredientId, ingredients.id))
-        .leftJoin(suppliers, eq(productions.supplierId, suppliers.id))
-        .leftJoin(storageLocations, eq(productions.storageLocationId, storageLocations.id))
-        .leftJoin(pembuat, eq(productions.userId, pembuat.id))
-        .leftJoin(pengubah, eq(productions.updatedBy, pengubah.id))
+        .where(and(...conds));
+      const total = ringkas?.total ?? 0;
+
+      // faktur untuk halaman ini (terlama dulu; halaman terakhir = terbaru)
+      const keyRows = await db
+        .select({ key: keyExpr })
+        .from(productions)
         .where(and(...conds))
-        .orderBy(desc(productions.waktu), asc(productions.id))
-        .limit(300);
-      return c.json(rows);
+        .groupBy(keyExpr)
+        .orderBy(sql`MIN(${productions.waktu}) ASC`)
+        .limit(perPage)
+        .offset((page - 1) * perPage);
+      const keys = keyRows.map((r) => r.key);
+
+      const select = {
+        id: productions.id,
+        ingredient_id: productions.ingredientId,
+        bahan: ingredients.nama,
+        isi: ingredients.isi,
+        satuan: ingredients.satuan,
+        qty: productions.qty,
+        total_harga: productions.totalHarga,
+        is_batch: productions.isBatch,
+        catatan: productions.catatan,
+        waktu: productions.waktu,
+        prod_date: productions.prodDate,
+        faktur_id: productions.fakturId,
+        no_faktur: productions.noFaktur,
+        status: productions.status,
+        supplier: suppliers.nama,
+        tempat: storageLocations.nama,
+        storage_location_id: productions.storageLocationId,
+        supplier_id: productions.supplierId,
+        dibuat_oleh: pembuat.nama,
+        diubah_oleh: pengubah.nama,
+        updated_at: productions.updatedAt,
+      };
+      const rows =
+        keys.length === 0
+          ? []
+          : await db
+              .select(select)
+              .from(productions)
+              .innerJoin(ingredients, eq(productions.ingredientId, ingredients.id))
+              .leftJoin(suppliers, eq(productions.supplierId, suppliers.id))
+              .leftJoin(storageLocations, eq(productions.storageLocationId, storageLocations.id))
+              .leftJoin(pembuat, eq(productions.userId, pembuat.id))
+              .leftJoin(pengubah, eq(productions.updatedBy, pengubah.id))
+              .where(
+                and(
+                  eq(productions.companyId, auth.company_id!),
+                  eq(productions.branchId, branchId),
+                  eq(productions.tipe, tipe),
+                  isNull(productions.deletedAt),
+                  inArray(keyExpr, keys),
+                ),
+              )
+              .orderBy(asc(productions.waktu), asc(productions.id));
+
+      return c.json({
+        rows,
+        total,
+        page,
+        per_page: perPage,
+        total_pengeluaran: Number(ringkas?.total_pengeluaran ?? 0),
+      });
     })
     /** Ubah metadata faktur (butuh password). Tak mengubah qty/harga → stok tetap. */
     .patch("/faktur/:key", zValidator("json", FakturEditBody), async (c) => {
