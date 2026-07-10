@@ -22,6 +22,16 @@ export const menuTipeEnum = pgEnum("menu_tipe", ["regular", "paket"]);
 export const pengadaanEnum = pgEnum("pengadaan", ["produksi", "beli"]);
 /** status penerimaan stok masuk: menunggu konfirmasi "ya, ada" vs terkonfirmasi */
 export const konfirmasiStatusEnum = pgEnum("konfirmasi_status", ["menunggu", "dikonfirmasi"]);
+/** kategori klarifikasi selisih opname (waste vs koreksi pencatatan) */
+export const penyesuaianKategoriEnum = pgEnum("penyesuaian_kategori", [
+  "waste_bahan",
+  "waste_matang",
+  "waste_gagal",
+  "koreksi_pencatatan",
+  "lainnya",
+]);
+/** status klarifikasi penyesuaian stok */
+export const klarifikasiStatusEnum = pgEnum("klarifikasi_status", ["belum", "sudah"]);
 
 // ===== Tenancy & identitas =====
 
@@ -358,6 +368,12 @@ export const stockOpnames = pgTable(
     systemQty: numeric("system_qty", { precision: 16, scale: 6, mode: "number" }),
     /** qty_fisik − system_qty */
     selisih: numeric("selisih", { precision: 16, scale: 6, mode: "number" }),
+    /** klarifikasi selisih: 'belum' saat opname bila selisih≠0, lalu 'sudah' */
+    klarifikasiStatus: klarifikasiStatusEnum("klarifikasi_status"),
+    penyesuaianKategori: penyesuaianKategoriEnum("penyesuaian_kategori"),
+    klarifikasiCatatan: text("klarifikasi_catatan"),
+    klarifikasiBy: uuid("klarifikasi_by").references(() => users.id),
+    klarifikasiAt: timestamp("klarifikasi_at", { withTimezone: true }),
     userId: uuid("user_id").references(() => users.id),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },

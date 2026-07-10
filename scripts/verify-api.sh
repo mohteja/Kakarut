@@ -258,6 +258,21 @@ cek "opname bahan tak dilacak ditolak (400)" "V == 400" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/stok/opname" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"items\":[{\"ingredient_id\":\"$SUKRO_ID\",\"qty\":1}]}")"
 api "$OWNER" PUT "/bahan/$SUKRO_ID" '{"track_stok":true}' > /dev/null
 
+echo "== 15. Klarifikasi penyesuaian stok (waste vs koreksi) =="
+# opname §14 tadi membuat selisih -3 untuk plastik → harus muncul di penyesuaian
+PENY=$(api "$KASIR" GET "/stok/penyesuaian?status=belum")
+PENY_ID=$(echo "$PENY" | jq -r '[.[] | select(.bahan == "plastik take away")] | last | .id')
+cek "selisih opname muncul di penyesuaian (belum)" "V == 1" \
+  "$(echo "$PENY" | jq --arg id "$PENY_ID" '[.[] | select(.id == $id and .klarifikasi_status == "belum")] | length')"
+cek "penyesuaian punya selisih ≠ 0" "V == 1" \
+  "$(echo "$PENY" | jq --arg id "$PENY_ID" '[.[] | select(.id == $id and (.selisih | fabs) > 0)] | length')"
+api "$KASIR" POST "/stok/penyesuaian/$PENY_ID/klarifikasi" '{"kategori":"waste_bahan","catatan":"tumpah"}' > /dev/null
+DETAIL=$(api "$KASIR" GET "/stok/penyesuaian?status=semua")
+cek "setelah klarifikasi: status sudah" "V == 1" \
+  "$(echo "$DETAIL" | jq --arg id "$PENY_ID" '[.[] | select(.id == $id and .klarifikasi_status == "sudah" and .kategori == "waste_bahan")] | length')"
+cek "hilang dari daftar 'belum'" "V == 0" \
+  "$(api "$KASIR" GET "/stok/penyesuaian?status=belum" | jq --arg id "$PENY_ID" '[.[] | select(.id == $id)] | length')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

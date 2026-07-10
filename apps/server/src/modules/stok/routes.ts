@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { zValidator } from "@hono/zod-validator";
-import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
+import { and, desc, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
@@ -132,7 +133,8 @@ export const stokRoutes = new Hono<AppEnv>()
     const values = [...qtyByIngredient].map(([ingredientId, fisik]) => {
       const sistem = saldoById.get(ingredientId) ?? 0;
       const selisih = fisik - sistem;
-      if (Math.abs(selisih) < 1e-9) ringkasan.cocok++;
+      const adaSelisih = Math.abs(selisih) > 1e-9;
+      if (!adaSelisih) ringkasan.cocok++;
       else if (selisih > 0) ringkasan.lebih++;
       else ringkasan.kurang++;
       ringkasan.total_selisih += selisih;
@@ -146,6 +148,8 @@ export const stokRoutes = new Hono<AppEnv>()
         sessionId,
         systemQty: sistem,
         selisih,
+        // selisih ≠ 0 → wajib diklarifikasi karyawan (waste vs koreksi)
+        klarifikasiStatus: adaSelisih ? ("belum" as const) : null,
         userId: auth.sub,
       };
     });
@@ -153,6 +157,104 @@ export const stokRoutes = new Hono<AppEnv>()
     const rows = await db.insert(stockOpnames).values(values).returning();
     return c.json({ ok: true, jumlah: rows.length, session_id: sessionId, ringkasan }, 201);
   })
+  /**
+   * Daftar penyesuaian stok: baris opname dengan selisih ≠ 0 yang perlu
+   * diklarifikasi karyawan (waste vs koreksi pencatatan).
+   */
+  .get("/penyesuaian", async (c) => {
+    const auth = c.get("auth");
+    const branchId = await resolveBranchId(c);
+    const status = c.req.query("status"); // 'belum' | undefined
+    const inputUser = alias(users, "input_user");
+    const klarUser = alias(users, "klar_user");
+
+    const conds = [
+      eq(stockOpnames.companyId, auth.company_id!),
+      eq(stockOpnames.branchId, branchId),
+      isNotNull(stockOpnames.selisih),
+      ne(stockOpnames.selisih, 0),
+    ];
+    if (status === "belum") conds.push(eq(stockOpnames.klarifikasiStatus, "belum"));
+
+    const rows = await db
+      .select({
+        id: stockOpnames.id,
+        waktu: stockOpnames.createdAt,
+        bahan: ingredients.nama,
+        satuan: ingredients.satuan,
+        system_qty: stockOpnames.systemQty,
+        qty_fisik: stockOpnames.qty,
+        selisih: stockOpnames.selisih,
+        klarifikasi_status: stockOpnames.klarifikasiStatus,
+        kategori: stockOpnames.penyesuaianKategori,
+        catatan: stockOpnames.klarifikasiCatatan,
+        oleh: inputUser.nama,
+        diklarifikasi_oleh: klarUser.nama,
+      })
+      .from(stockOpnames)
+      .innerJoin(ingredients, eq(stockOpnames.ingredientId, ingredients.id))
+      .leftJoin(inputUser, eq(stockOpnames.userId, inputUser.id))
+      .leftJoin(klarUser, eq(stockOpnames.klarifikasiBy, klarUser.id))
+      .where(and(...conds))
+      .orderBy(desc(stockOpnames.createdAt))
+      .limit(300);
+    return c.json(
+      rows.map((r) => ({
+        ...r,
+        klarifikasi_status: r.klarifikasi_status ?? "belum",
+      })),
+    );
+  })
+  /** Klarifikasi satu penyesuaian: pilih kategori (waste/koreksi) + catatan. */
+  .post(
+    "/penyesuaian/:id/klarifikasi",
+    zValidator(
+      "json",
+      z.object({
+        kategori: z.enum([
+          "waste_bahan",
+          "waste_matang",
+          "waste_gagal",
+          "koreksi_pencatatan",
+          "lainnya",
+        ]),
+        catatan: z.string().nullish(),
+      }),
+    ),
+    async (c) => {
+      const auth = c.get("auth");
+      const body = c.req.valid("json");
+
+      const [row] = await db
+        .select({ branchId: stockOpnames.branchId, selisih: stockOpnames.selisih })
+        .from(stockOpnames)
+        .where(
+          and(
+            eq(stockOpnames.id, c.req.param("id")),
+            eq(stockOpnames.companyId, auth.company_id!),
+          ),
+        );
+      if (!row) throw new HTTPException(404, { message: "Penyesuaian tidak ditemukan" });
+      if (auth.role === "cashier" && row.branchId !== auth.branch_id) {
+        throw new HTTPException(403, { message: "Kasir hanya boleh cabangnya" });
+      }
+      if (!row.selisih || Math.abs(row.selisih) < 1e-9) {
+        throw new HTTPException(400, { message: "Baris ini tidak punya selisih" });
+      }
+
+      await db
+        .update(stockOpnames)
+        .set({
+          klarifikasiStatus: "sudah",
+          penyesuaianKategori: body.kategori,
+          klarifikasiCatatan: body.catatan ?? null,
+          klarifikasiBy: auth.sub,
+          klarifikasiAt: new Date(),
+        })
+        .where(eq(stockOpnames.id, c.req.param("id")));
+      return c.json({ ok: true });
+    },
+  )
   /** Riwayat sesi opname (digroup per session_id). */
   .get("/opname/riwayat", async (c) => {
     const auth = c.get("auth");
