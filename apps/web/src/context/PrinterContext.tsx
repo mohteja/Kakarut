@@ -13,6 +13,7 @@ import {
   type ReceiptOptions,
 } from "@kakarut/shared";
 import { BluetoothTransport } from "../lib/print/bluetooth";
+import { LanTransport } from "../lib/print/lan";
 import { MockTransport } from "../lib/print/mock";
 import { RawbtTransport } from "../lib/print/rawbt";
 import {
@@ -47,6 +48,16 @@ function getTransport(s: PrinterDeviceSettings): PrinterTransport | null {
       return (singletons.usb ??= new UsbTransport());
     case "rawbt":
       return (singletons.rawbt ??= new RawbtTransport());
+    case "lan": {
+      let t = singletons.lan as LanTransport | undefined;
+      if (!t) {
+        t = new LanTransport(s.lanHost, s.lanPort);
+        singletons.lan = t;
+      } else {
+        t.setTarget(s.lanHost, s.lanPort);
+      }
+      return t;
+    }
     case "mock":
       return (singletons.mock ??= new MockTransport());
   }
