@@ -104,6 +104,74 @@ export interface PenyimpananDto {
   is_active: boolean;
 }
 
+export type PenyesuaianKategori =
+  | "waste_bahan"
+  | "waste_matang"
+  | "waste_gagal"
+  | "koreksi_pencatatan"
+  | "lainnya";
+
+/** Label + apakah dianggap waste, untuk UI klarifikasi penyesuaian stok. */
+export const KLARIFIKASI_KATEGORI: {
+  key: PenyesuaianKategori;
+  label: string;
+  keterangan: string;
+  is_waste: boolean;
+}[] = [
+  {
+    key: "waste_bahan",
+    label: "Waste bahan",
+    keterangan: "Bahan rusak/kadaluarsa, salah penyimpanan",
+    is_waste: true,
+  },
+  {
+    key: "waste_matang",
+    label: "Waste sudah dimasak",
+    keterangan: "Sudah dimasak tapi tidak terjual",
+    is_waste: true,
+  },
+  {
+    key: "waste_gagal",
+    label: "Waste produk gagal",
+    keterangan: "Gagal dibuat / kurang matang / diganti",
+    is_waste: true,
+  },
+  {
+    key: "koreksi_pencatatan",
+    label: "Koreksi pencatatan",
+    keterangan: "Bukan waste — salah hitung/input",
+    is_waste: false,
+  },
+  { key: "lainnya", label: "Lainnya", keterangan: "Jelaskan di catatan", is_waste: false },
+];
+
+/** status persetujuan penyesuaian: menunggu owner/admin, lalu disetujui. */
+export type PenyesuaianStatus = "menunggu" | "disetujui";
+
+export interface PenyesuaianRow {
+  id: string;
+  waktu: string;
+  bahan: string;
+  satuan: string;
+  system_qty: number | null;
+  qty_fisik: number;
+  selisih: number;
+  klarifikasi_status: "belum" | "sudah";
+  /** menunggu persetujuan owner/admin, atau sudah disetujui (stok disesuaikan) */
+  penyesuaian_status: PenyesuaianStatus;
+  kategori: PenyesuaianKategori | null;
+  catatan: string | null;
+  foto_url: string | null;
+  /** alasan penolakan terakhir (bila dikembalikan untuk klarifikasi ulang) */
+  tolak_alasan: string | null;
+  /** karyawan yang input opname */
+  oleh: string | null;
+  /** karyawan yang mengklarifikasi */
+  diklarifikasi_oleh: string | null;
+  /** owner/admin yang menyetujui */
+  disetujui_oleh: string | null;
+}
+
 export interface OpnameRingkasan {
   dihitung: number;
   cocok: number;

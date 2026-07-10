@@ -49,7 +49,7 @@ test("owner: stok menunjukkan pemakaian & laporan menampilkan omzet", async ({ p
   await login(page, OWNER_EMAIL, OWNER_PASS);
   await expect(page).toHaveURL(/\/kasir/);
 
-  await page.getByRole("link", { name: /Stok/ }).click();
+  await page.getByRole("link", { name: "📦 Stok" }).click();
   await expect(page).toHaveURL(/\/stok/);
   const barisUrat = page.locator("tr", { hasText: "Baso urat besar" }).first();
   await expect(barisUrat).toBeVisible();

@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import type { PenyimpananDto, StokRowDto } from "@kakarut/shared";
+import type { PenyesuaianRow, PenyimpananDto, StokRowDto } from "@kakarut/shared";
 import {
   Card,
   PageTitle,
@@ -28,6 +28,14 @@ export function StokPage() {
     queryKey: ["penyimpanan", branchQuery],
     queryFn: () => api<PenyimpananDto[]>(`/penyimpanan${branchQuery}`),
   });
+  // semua penyesuaian yang belum tuntas (belum diklarifikasi + menunggu persetujuan)
+  const { data: penyesuaianRows = [] } = useQuery({
+    queryKey: ["penyesuaian", branchQuery, "semua"],
+    queryFn: () => api<PenyesuaianRow[]>(`/stok/penyesuaian${branchQuery || ""}`),
+  });
+  const belumTuntas = penyesuaianRows.filter(
+    (r) => r.penyesuaian_status !== "disetujui",
+  ).length;
 
   const [cari, setCari] = useState("");
   const [filterTempat, setFilterTempat] = useState<string>("semua");
@@ -48,7 +56,15 @@ export function StokPage() {
     <div>
       <PageTitle
         aksi={
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
+            <Link to="/stok/penyesuaian" className={`${btnSecondary} relative`}>
+              ⚠️ Penyesuaian
+              {belumTuntas > 0 && (
+                <span className="absolute -right-1.5 -top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-xs font-bold text-white">
+                  {belumTuntas}
+                </span>
+              )}
+            </Link>
             <Link to="/stok/opname/riwayat" className={btnSecondary}>
               🕑 Riwayat
             </Link>

@@ -22,6 +22,21 @@ export const menuTipeEnum = pgEnum("menu_tipe", ["regular", "paket"]);
 export const pengadaanEnum = pgEnum("pengadaan", ["produksi", "beli"]);
 /** status penerimaan stok masuk: menunggu konfirmasi "ya, ada" vs terkonfirmasi */
 export const konfirmasiStatusEnum = pgEnum("konfirmasi_status", ["menunggu", "dikonfirmasi"]);
+/** kategori klarifikasi selisih opname (waste vs koreksi pencatatan) */
+export const penyesuaianKategoriEnum = pgEnum("penyesuaian_kategori", [
+  "waste_bahan",
+  "waste_matang",
+  "waste_gagal",
+  "koreksi_pencatatan",
+  "lainnya",
+]);
+/** status klarifikasi penyesuaian stok */
+export const klarifikasiStatusEnum = pgEnum("klarifikasi_status", ["belum", "sudah"]);
+/**
+ * status persetujuan penyesuaian stok: opname baru jadi baseline saldo
+ * ('disetujui') hanya setelah owner/admin menyetujui selisih yang diklarifikasi.
+ */
+export const penyesuaianStatusEnum = pgEnum("penyesuaian_status", ["menunggu", "disetujui"]);
 
 // ===== Tenancy & identitas =====
 
@@ -358,6 +373,26 @@ export const stockOpnames = pgTable(
     systemQty: numeric("system_qty", { precision: 16, scale: 6, mode: "number" }),
     /** qty_fisik − system_qty */
     selisih: numeric("selisih", { precision: 16, scale: 6, mode: "number" }),
+    /** klarifikasi selisih: 'belum' saat opname bila selisih≠0, lalu 'sudah' */
+    klarifikasiStatus: klarifikasiStatusEnum("klarifikasi_status"),
+    penyesuaianKategori: penyesuaianKategoriEnum("penyesuaian_kategori"),
+    klarifikasiCatatan: text("klarifikasi_catatan"),
+    /** bukti foto wajib saat klarifikasi (URL R2 / lokal) */
+    klarifikasiFotoUrl: text("klarifikasi_foto_url"),
+    klarifikasiBy: uuid("klarifikasi_by").references(() => users.id),
+    klarifikasiAt: timestamp("klarifikasi_at", { withTimezone: true }),
+    /**
+     * persetujuan owner/admin: baris opname jadi baseline saldo hanya setelah
+     * 'disetujui'. Default 'disetujui' agar baris lama tetap efektif; opname
+     * baru dgn selisih≠0 di-set 'menunggu' sampai disetujui.
+     */
+    penyesuaianStatus: penyesuaianStatusEnum("penyesuaian_status")
+      .notNull()
+      .default("disetujui"),
+    disetujuiBy: uuid("disetujui_by").references(() => users.id),
+    disetujuiAt: timestamp("disetujui_at", { withTimezone: true }),
+    /** alasan penolakan (dikembalikan ke karyawan untuk klarifikasi ulang) */
+    tolakAlasan: text("tolak_alasan"),
     userId: uuid("user_id").references(() => users.id),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },

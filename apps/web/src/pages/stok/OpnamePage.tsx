@@ -272,16 +272,31 @@ export function OpnamePage() {
                 <div className="text-stone-500">Kurang</div>
               </div>
             </div>
+            {hasil.lebih + hasil.kurang > 0 && (
+              <div className="mt-4 rounded-lg bg-blue-50 px-3 py-2 text-left text-sm text-blue-800">
+                Ada <b>{hasil.lebih + hasil.kurang} selisih</b>. <b>Stok belum berubah</b> — mohon
+                klarifikasi penyebabnya, lalu owner/admin menyetujui agar stok disesuaikan.
+              </div>
+            )}
             <div className="mt-4 flex gap-2">
               <button onClick={() => navigate("/stok")} className={`${btnSecondary} flex-1`}>
                 Ke Stok
               </button>
-              <button
-                onClick={() => navigate("/stok/opname/riwayat")}
-                className={`${btnPrimary} flex-1`}
-              >
-                Lihat Riwayat
-              </button>
+              {hasil.lebih + hasil.kurang > 0 ? (
+                <button
+                  onClick={() => navigate("/stok/penyesuaian")}
+                  className={`${btnPrimary} flex-1`}
+                >
+                  Klarifikasi Selisih
+                </button>
+              ) : (
+                <button
+                  onClick={() => navigate("/stok/opname/riwayat")}
+                  className={`${btnPrimary} flex-1`}
+                >
+                  Lihat Riwayat
+                </button>
+              )}
             </div>
           </div>
         </div>

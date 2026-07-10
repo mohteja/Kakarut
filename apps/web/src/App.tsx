@@ -20,6 +20,7 @@ import { SupplierPage } from "./pages/pengaturan/SupplierPage";
 import { KartuStokPage } from "./pages/stok/KartuStokPage";
 import { OpnamePage } from "./pages/stok/OpnamePage";
 import { OpnameRiwayatPage } from "./pages/stok/OpnameRiwayatPage";
+import { PenyesuaianPage } from "./pages/stok/PenyesuaianPage";
 import { StokPage } from "./pages/stok/StokPage";
 import { SistemPage } from "./pages/superadmin/SistemPage";
 import { TenantsPage } from "./pages/superadmin/TenantsPage";
@@ -63,6 +64,7 @@ export default function App() {
             <>
               <Route path="/kasir" element={<KasirPage />} />
               <Route path="/stok" element={<StokPage />} />
+              <Route path="/stok/penyesuaian" element={<PenyesuaianPage />} />
               <Route path="/stok/kartu/:ingredientId" element={<KartuStokPage />} />
               <Route path="/produksi" element={<ProduksiPage />} />
               <Route path="/pembelian" element={<PembelianPage />} />

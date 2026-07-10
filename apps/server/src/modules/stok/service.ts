@@ -36,6 +36,7 @@ export async function hitungSaldoCabang(
       SELECT so.qty, so.created_at
       FROM stock_opnames so
       WHERE so.branch_id = ${branchId} AND so.ingredient_id = i.id
+        AND so.penyesuaian_status = 'disetujui'
       ORDER BY so.created_at DESC
       LIMIT 1
     ) b ON TRUE
@@ -114,6 +115,7 @@ export async function kartuStok(params: {
       SELECT qty, created_at FROM stock_opnames
       WHERE branch_id = ${branchId} AND ingredient_id = ${ingredientId}
         AND opname_date < ${dari}
+        AND penyesuaian_status = 'disetujui'
       ORDER BY created_at DESC LIMIT 1
     )
     SELECT
@@ -143,6 +145,7 @@ export async function kartuStok(params: {
              NULL AS tempat, false AS is_batch
       FROM stock_opnames so
       WHERE so.branch_id = ${branchId} AND so.ingredient_id = ${ingredientId}
+        AND so.penyesuaian_status = 'disetujui'
         AND so.opname_date >= ${dari} AND so.opname_date <= ${sampai}
       UNION ALL
       SELECT pr.waktu, pr.tipe::text AS jenis, pr.qty, pr.catatan,

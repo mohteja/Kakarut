@@ -14,7 +14,7 @@ export function ImageUpload({
 }: {
   value: string | null;
   onChange: (url: string | null) => void;
-  tujuan: "menu" | "logo";
+  tujuan: "menu" | "logo" | "bukti";
   placeholder?: string;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
