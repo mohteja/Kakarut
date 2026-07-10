@@ -122,6 +122,20 @@ UJI=$(login "uji@example.com" "UjiCoba123!")
 cek "tenant baru punya 0 menu (isolasi)" "V == 0" "$(api "$UJI" GET /menu | jq 'length')"
 cek "tenant baru punya 0 bahan (isolasi)" "V == 0" "$(api "$UJI" GET /bahan | jq 'length')"
 
+# Meja bawaan: cabang tenant baru langsung punya Ruang Tunggu + Meja 1
+UJI_MEJA=$(api "$UJI" GET /meja)
+cek "tenant baru: 2 meja bawaan" "V == 2" "$(echo "$UJI_MEJA" | jq 'length')"
+cek "tenant baru: ada Ruang Tunggu (takeaway) bawaan" "V == 1" \
+  "$(echo "$UJI_MEJA" | jq '([.[] | select(.tipe=="takeaway" and .nama=="Ruang Tunggu")] | length == 1) | if . then 1 else 0 end')"
+cek "tenant baru: ada Meja 1 (dine_in) bawaan" "V == 1" \
+  "$(echo "$UJI_MEJA" | jq '([.[] | select(.tipe=="dine_in" and .nama=="Meja 1")] | length == 1) | if . then 1 else 0 end')"
+# Tambah cabang lewat POST /cabang juga menyeed meja bawaan (idempoten saat re-run)
+NEWCAB=$(api "$UJI" POST /cabang '{"nama":"Cabang Uji 2"}')
+NEWCAB_ID=$(echo "$NEWCAB" | jq -r '.id // empty')
+[ -z "$NEWCAB_ID" ] && NEWCAB_ID=$(api "$UJI" GET /cabang | jq -r '[.[] | select(.nama=="Cabang Uji 2")][0].id')
+cek "cabang baru (POST /cabang): 2 meja bawaan" "V == 2" \
+  "$(api "$UJI" GET "/meja?branch_id=$NEWCAB_ID" | jq 'length')"
+
 echo "== 9. Void transaksi: stok pulih & nomor struk tidak tabrakan =="
 COMP_A=$(stok_of "$(api "$KASIR" GET /stok)" "complement saos & sambal")
 VA=$(api "$KASIR" POST /penjualan "{\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")
