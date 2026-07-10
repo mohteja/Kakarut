@@ -25,9 +25,14 @@ type Pos = Record<string, { x: number; y: number }>;
 const clamp = (v: number) => Math.max(4, Math.min(96, Math.round(v)));
 
 /**
- * Pengaturan meja per cabang: tambah nomor meja, atur tata letak denah
- * (seret token), dan meja "Ruang Tunggu" untuk take away. Kasir boleh mengatur
- * meja cabangnya sendiri; owner/admin lewat pemilih cabang.
+ * Pengaturan meja per cabang. Dua mode terpisah:
+ *  - "view": hanya melihat denah + daftar meja (tak bisa edit/tambah/seret).
+ *  - "edit": masuk lewat "Tambah Meja"/"Atur Denah". Di sini boleh menambah,
+ *    ubah, hapus, dan menyeret tata letak. Menekan "Simpan" menyimpan tata
+ *    letak lalu kembali ke mode view.
+ * Tata letak di kiri, daftar meja di kanan (desktop); di mobile denah di atas,
+ * daftar di bawah. Kasir mengatur meja cabangnya sendiri; owner/admin lewat
+ * pemilih cabang.
  */
 export function MejaPage() {
   const { branchQuery, branchId } = useBranch();
@@ -37,18 +42,49 @@ export function MejaPage() {
     queryFn: () => api<MejaDto[]>(`/meja${branchQuery}`),
   });
 
+  const [mode, setMode] = useState<"view" | "edit">("view");
   const [form, setForm] = useState<FormState | null>(null);
   const [pos, setPos] = useState<Pos>({});
   const [dirty, setDirty] = useState(false);
+  const editingRef = useRef(false);
   const dragId = useRef<string | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
+  const editing = mode === "edit";
 
-  // Seed posisi lokal dari server setiap data berubah (mis. ganti cabang).
+  // Seed posisi lokal dari server. Saat mode edit, gabungkan agar seretan yang
+  // belum disimpan tidak terhapus ketika data di-refetch (mis. setelah tambah);
+  // saat view selalu ikuti kebenaran server.
   useEffect(() => {
     if (!meja) return;
-    setPos(Object.fromEntries(meja.map((m) => [m.id, { x: m.pos_x, y: m.pos_y }])));
-    setDirty(false);
+    if (editingRef.current) {
+      setPos((prev) => {
+        const next: Pos = {};
+        for (const m of meja) next[m.id] = prev[m.id] ?? { x: m.pos_x, y: m.pos_y };
+        return next;
+      });
+    } else {
+      setPos(Object.fromEntries(meja.map((m) => [m.id, { x: m.pos_x, y: m.pos_y }])));
+      setDirty(false);
+    }
   }, [meja]);
+
+  function masukEdit() {
+    editingRef.current = true;
+    setMode("edit");
+  }
+
+  function keluarKeView() {
+    editingRef.current = false;
+    setForm(null);
+    setMode("view");
+  }
+
+  function batal() {
+    // buang seretan yang belum disimpan, kembali ke kebenaran server
+    if (meja) setPos(Object.fromEntries(meja.map((m) => [m.id, { x: m.pos_x, y: m.pos_y }])));
+    setDirty(false);
+    keluarKeView();
+  }
 
   const simpan = useMutation({
     mutationFn: (f: FormState) =>
@@ -89,11 +125,18 @@ export function MejaPage() {
       }),
     onSuccess: () => {
       setDirty(false);
+      keluarKeView();
       queryClient.invalidateQueries({ queryKey: ["meja"] });
     },
   });
 
+  function simpanSelesai() {
+    if (dirty) simpanTataLetak.mutate();
+    else keluarKeView();
+  }
+
   function onPointerDown(e: PointerEvent<HTMLDivElement>, id: string) {
+    if (!editing) return;
     e.currentTarget.setPointerCapture(e.pointerId);
     dragId.current = id;
   }
@@ -122,130 +165,185 @@ export function MejaPage() {
   const list = meja ?? [];
 
   return (
-    <div className="max-w-3xl">
+    <div className="max-w-5xl">
       <PageTitle
         aksi={
-          <button
-            onClick={() => setForm({ nama: "", tipe: "dine_in" })}
-            className={btnPrimary}
-          >
-            + Tambah Meja
-          </button>
+          editing ? (
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={batal} className={btnSecondary}>
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={simpanSelesai}
+                disabled={simpanTataLetak.isPending}
+                className={btnPrimary}
+              >
+                {simpanTataLetak.isPending ? "Menyimpan…" : "Simpan"}
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={masukEdit} className={btnSecondary}>
+                ✏️ Atur Denah
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  masukEdit();
+                  setForm({ nama: "", tipe: "dine_in" });
+                }}
+                className={btnPrimary}
+              >
+                + Tambah Meja
+              </button>
+            </div>
+          )
         }
       >
         Pengaturan Meja ({list.length})
       </PageTitle>
-      <div className="mb-3 text-sm text-stone-500">
-        Tambah nomor meja lalu <b>seret</b> tiap meja untuk menata denah sesuai ruangan. Meja{" "}
-        <b>Ruang Tunggu</b> dipakai untuk pesanan bawa pulang (take away). Kasir memilih meja saat
-        memulai transaksi.
-      </div>
 
-      <ErrorText error={toggle.error || hapus.error} />
+      {editing ? (
+        <div className="mb-3 rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-sm text-orange-800">
+          <b>Mode edit.</b> Tambah / ubah / hapus meja dan <b>seret</b> tiap meja di denah untuk
+          menatanya. Tekan <b>Simpan</b> untuk menyimpan tata letak dan kembali ke tampilan.
+        </div>
+      ) : (
+        <div className="mb-3 text-sm text-stone-500">
+          Denah dan daftar meja cabang ini. Tekan <b>Atur Denah</b> atau <b>Tambah Meja</b> untuk
+          masuk mode edit. Meja <b>Ruang Tunggu</b> dipakai untuk pesanan bawa pulang (take away).
+        </div>
+      )}
 
-      {/* Denah — seret token untuk menata */}
-      <Card className="mb-3 p-3">
-        <div className="mb-2 flex items-center justify-between">
-          <span className="text-sm font-semibold text-stone-700">Denah Ruangan</span>
-          <button
-            onClick={() => simpanTataLetak.mutate()}
-            disabled={!dirty || simpanTataLetak.isPending}
-            className={`${btnPrimary} px-3 py-1.5 text-xs`}
+      <ErrorText error={toggle.error || hapus.error || simpanTataLetak.error} />
+
+      {/* Desktop: denah (kiri) + daftar (kanan). Mobile: denah atas, daftar bawah. */}
+      <div className="flex flex-col gap-3 md:flex-row md:items-start">
+        {/* Denah — kiri */}
+        <Card className="p-3 md:flex-1">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-sm font-semibold text-stone-700">Denah Ruangan</span>
+            {editing && dirty && (
+              <span className="text-xs font-medium text-orange-600">Perubahan belum disimpan</span>
+            )}
+          </div>
+          <div
+            ref={canvasRef}
+            className={`relative mt-1 aspect-[4/3] w-full touch-none overflow-hidden rounded-lg border border-dashed border-stone-300 bg-[linear-gradient(#f5f5f4_1px,transparent_1px),linear-gradient(90deg,#f5f5f4_1px,transparent_1px)] bg-[length:24px_24px] bg-stone-50`}
           >
-            {simpanTataLetak.isPending ? "Menyimpan…" : dirty ? "Simpan Tata Letak" : "Tersimpan"}
-          </button>
-        </div>
-        <ErrorText error={simpanTataLetak.error} />
-        <div
-          ref={canvasRef}
-          className="relative mt-2 aspect-[4/3] w-full touch-none overflow-hidden rounded-lg border border-dashed border-stone-300 bg-[linear-gradient(#f5f5f4_1px,transparent_1px),linear-gradient(90deg,#f5f5f4_1px,transparent_1px)] bg-[length:24px_24px] bg-stone-50"
-        >
-          {list.length === 0 && (
-            <div className="absolute inset-0 flex items-center justify-center text-center text-sm text-stone-400">
-              Belum ada meja. Ketuk "+ Tambah Meja".
-            </div>
-          )}
-          {list.map((m) => {
-            const p = pos[m.id] ?? { x: m.pos_x, y: m.pos_y };
-            const takeaway = m.tipe === "takeaway";
-            return (
-              <div
-                key={m.id}
-                onPointerDown={(e) => onPointerDown(e, m.id)}
-                onPointerMove={(e) => onPointerMove(e, m.id)}
-                onPointerUp={(e) => onPointerUp(e, m.id)}
-                style={{ left: `${p.x}%`, top: `${p.y}%` }}
-                className={`absolute flex -translate-x-1/2 -translate-y-1/2 cursor-grab touch-none select-none items-center justify-center rounded-lg px-3 py-2 text-center text-xs font-semibold shadow-sm active:cursor-grabbing ${
-                  takeaway
-                    ? "border border-amber-400 bg-amber-100 text-amber-800"
-                    : m.is_active
-                      ? "border border-blue-300 bg-blue-100 text-blue-800"
-                      : "border border-stone-300 bg-stone-100 text-stone-400"
-                }`}
-              >
-                {takeaway ? `🥡 ${m.nama}` : m.nama}
+            {list.length === 0 && (
+              <div className="absolute inset-0 flex items-center justify-center px-4 text-center text-sm text-stone-400">
+                {editing ? 'Belum ada meja. Tekan "+ Tambah Meja".' : "Belum ada meja di cabang ini."}
               </div>
-            );
-          })}
-        </div>
-        <div className="mt-2 text-xs text-stone-400">
-          Tip: seret meja untuk memindahkan, lalu tekan "Simpan Tata Letak".
-        </div>
-      </Card>
-
-      {/* Daftar meja + aksi */}
-      <Card className="divide-y divide-stone-100">
-        {list.length === 0 && (
-          <div className="p-6 text-center text-sm text-stone-400">Belum ada meja di cabang ini.</div>
-        )}
-        {list.map((m) => (
-          <div key={m.id} className="flex items-center justify-between gap-3 p-3">
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <span className="font-medium text-stone-800">{m.nama}</span>
-                <span
-                  className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                    m.tipe === "takeaway"
-                      ? "bg-amber-100 text-amber-700"
-                      : "bg-blue-100 text-blue-700"
+            )}
+            {list.map((m) => {
+              const p = pos[m.id] ?? { x: m.pos_x, y: m.pos_y };
+              const takeaway = m.tipe === "takeaway";
+              return (
+                <div
+                  key={m.id}
+                  onPointerDown={(e) => onPointerDown(e, m.id)}
+                  onPointerMove={(e) => onPointerMove(e, m.id)}
+                  onPointerUp={(e) => onPointerUp(e, m.id)}
+                  style={{ left: `${p.x}%`, top: `${p.y}%` }}
+                  className={`absolute flex -translate-x-1/2 -translate-y-1/2 touch-none select-none items-center justify-center rounded-lg px-3 py-2 text-center text-xs font-semibold shadow-sm ${
+                    editing ? "cursor-grab active:cursor-grabbing" : ""
+                  } ${
+                    takeaway
+                      ? "border border-amber-400 bg-amber-100 text-amber-800"
+                      : m.is_active
+                        ? "border border-blue-300 bg-blue-100 text-blue-800"
+                        : "border border-stone-300 bg-stone-100 text-stone-400"
                   }`}
                 >
-                  {m.tipe === "takeaway" ? "Ruang Tunggu · Take away" : "Dine-in"}
-                </span>
-                {!m.is_active && (
-                  <span className="rounded-full bg-stone-100 px-2 py-0.5 text-xs text-stone-500">
-                    Nonaktif
-                  </span>
+                  {takeaway ? `🥡 ${m.nama}` : m.nama}
+                </div>
+              );
+            })}
+          </div>
+          <div className="mt-2 text-xs text-stone-400">
+            {editing
+              ? 'Tip: seret meja untuk memindahkan, lalu tekan "Simpan".'
+              : "Meja biru = dine-in, kuning = ruang tunggu (take away)."}
+          </div>
+        </Card>
+
+        {/* Daftar meja — kanan */}
+        <Card className="md:w-80 md:shrink-0">
+          <div className="flex items-center justify-between border-b border-stone-100 px-3 py-2">
+            <span className="text-sm font-semibold text-stone-700">Daftar Meja</span>
+            {editing && (
+              <button
+                type="button"
+                onClick={() => setForm({ nama: "", tipe: "dine_in" })}
+                className="text-sm font-medium text-orange-600 hover:underline"
+              >
+                + Tambah
+              </button>
+            )}
+          </div>
+          <div className="divide-y divide-stone-100">
+            {list.length === 0 && (
+              <div className="p-6 text-center text-sm text-stone-400">
+                Belum ada meja di cabang ini.
+              </div>
+            )}
+            {list.map((m) => (
+              <div key={m.id} className="flex items-center justify-between gap-3 p-3">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="font-medium text-stone-800">{m.nama}</span>
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                        m.tipe === "takeaway"
+                          ? "bg-amber-100 text-amber-700"
+                          : "bg-blue-100 text-blue-700"
+                      }`}
+                    >
+                      {m.tipe === "takeaway" ? "Take away" : "Dine-in"}
+                    </span>
+                    {!m.is_active && (
+                      <span className="rounded-full bg-stone-100 px-2 py-0.5 text-xs text-stone-500">
+                        Nonaktif
+                      </span>
+                    )}
+                  </div>
+                </div>
+                {editing && (
+                  <div className="flex shrink-0 items-center gap-2 text-sm">
+                    <button
+                      type="button"
+                      onClick={() => setForm({ id: m.id, nama: m.nama, tipe: m.tipe })}
+                      className="font-medium text-orange-600 hover:underline"
+                    >
+                      Ubah
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => toggle.mutate(m)}
+                      className="font-medium text-stone-500 hover:underline"
+                    >
+                      {m.is_active ? "Nonaktifkan" : "Aktifkan"}
+                    </button>
+                    {m.tipe !== "takeaway" && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (confirm(`Hapus meja "${m.nama}"?`)) hapus.mutate(m);
+                        }}
+                        className="font-medium text-red-600 hover:underline"
+                      >
+                        Hapus
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
-            </div>
-            <div className="flex shrink-0 items-center gap-3 text-sm">
-              <button
-                onClick={() => setForm({ id: m.id, nama: m.nama, tipe: m.tipe })}
-                className="font-medium text-orange-600 hover:underline"
-              >
-                Ubah
-              </button>
-              <button
-                onClick={() => toggle.mutate(m)}
-                className="font-medium text-stone-500 hover:underline"
-              >
-                {m.is_active ? "Nonaktifkan" : "Aktifkan"}
-              </button>
-              {m.tipe !== "takeaway" && (
-                <button
-                  onClick={() => {
-                    if (confirm(`Hapus meja "${m.nama}"?`)) hapus.mutate(m);
-                  }}
-                  className="font-medium text-red-600 hover:underline"
-                >
-                  Hapus
-                </button>
-              )}
-            </div>
+            ))}
           </div>
-        ))}
-      </Card>
+        </Card>
+      </div>
 
       <Modal
         open={form !== null}
