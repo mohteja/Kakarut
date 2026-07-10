@@ -55,21 +55,31 @@ export function KasirPage() {
   // Modal pilih meja muncul lebih dulu tiap memulai transaksi (sebelum keranjang).
   // Otomatis untuk kasir; owner/admin membukanya lewat tombol "Pilih/Ganti".
   const [mejaModalOpen, setMejaModalOpen] = useState(isKasir);
+  const [mejaCari, setMejaCari] = useState("");
   const [catatan, setCatatan] = useState("");
   const [struk, setStruk] = useState<SaleResult | null>(null);
 
   const mejaAktif = useMemo(() => mejaList.filter((m) => m.is_active), [mejaList]);
-  const mejaDineIn = mejaAktif.filter((m) => m.tipe === "dine_in");
-  const mejaTakeaway = mejaAktif.filter((m) => m.tipe === "takeaway");
   const mejaTerpilih = mejaAktif.find((m) => m.id === mejaId) ?? null;
   // Meja menentukan mode transaksi: meja bernomor = dine-in (default), meja
   // Ruang Tunggu = bawa pulang. Sebelum meja dipilih, tampilan default dine-in.
   const dineIn = mejaTerpilih ? mejaTerpilih.tipe === "dine_in" : true;
+  // Pencarian meja: cocok sebagian (mis. ketik "8" → "Meja 8"), tak harus persis.
+  const mejaCocok = useMemo(() => {
+    const q = mejaCari.trim().toLowerCase();
+    if (!q) return mejaAktif;
+    return mejaAktif.filter((m) => m.nama.toLowerCase().includes(q));
+  }, [mejaAktif, mejaCari]);
 
   // Bila meja terpilih dinonaktifkan/dihapus dari master, lepaskan pilihan.
   useEffect(() => {
     if (mejaId && !mejaAktif.some((m) => m.id === mejaId)) setMejaId(null);
   }, [mejaId, mejaAktif]);
+
+  // Reset kotak pencarian tiap modal dibuka.
+  useEffect(() => {
+    if (mejaModalOpen) setMejaCari("");
+  }, [mejaModalOpen]);
 
   function pilihMeja(id: string) {
     setMejaId(id);
@@ -396,51 +406,55 @@ export function KasirPage() {
                 </Link>
               </div>
             ) : (
-              <div className="space-y-4">
-                {mejaDineIn.length > 0 && (
-                  <div>
-                    <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-stone-400">
-                      Meja makan (Dine-in)
+              <div className="space-y-3">
+                {/* Pencarian: ketik nomor/kata, cocok sebagian (mis. "8" → Meja 8) */}
+                <input
+                  autoFocus
+                  value={mejaCari}
+                  onChange={(e) => setMejaCari(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && mejaCocok.length === 1) pilihMeja(mejaCocok[0].id);
+                  }}
+                  placeholder="Cari meja… (mis. 8 atau ruang tunggu)"
+                  className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm focus:border-orange-500 focus:outline-none"
+                />
+                <div className="max-h-72 space-y-1.5 overflow-y-auto">
+                  {mejaCocok.length === 0 && (
+                    <div className="py-6 text-center text-sm text-stone-400">
+                      Tidak ada meja cocok "{mejaCari}".
                     </div>
-                    <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
-                      {mejaDineIn.map((m) => (
-                        <button
-                          key={m.id}
-                          onClick={() => pilihMeja(m.id)}
-                          className={`rounded-xl border px-2 py-3 text-sm font-semibold ${
-                            mejaId === m.id
-                              ? "border-blue-600 bg-blue-600 text-white"
-                              : "border-stone-300 bg-white text-stone-700 hover:border-blue-400"
-                          }`}
-                        >
-                          {m.nama}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                {mejaTakeaway.length > 0 && (
-                  <div>
-                    <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-stone-400">
-                      Bawa pulang
-                    </div>
-                    <div className="flex flex-col gap-2">
-                      {mejaTakeaway.map((m) => (
-                        <button
-                          key={m.id}
-                          onClick={() => pilihMeja(m.id)}
-                          className={`rounded-xl border px-3 py-3 text-left text-sm font-semibold ${
-                            mejaId === m.id
+                  )}
+                  {mejaCocok.map((m) => {
+                    const takeaway = m.tipe === "takeaway";
+                    const dipilih = mejaId === m.id;
+                    return (
+                      <button
+                        key={m.id}
+                        onClick={() => pilihMeja(m.id)}
+                        className={`flex w-full items-center justify-between rounded-lg border px-3 py-2.5 text-left text-sm font-semibold ${
+                          dipilih
+                            ? takeaway
                               ? "border-amber-500 bg-amber-500 text-white"
-                              : "border-amber-300 bg-amber-50 text-amber-700 hover:border-amber-400"
+                              : "border-blue-600 bg-blue-600 text-white"
+                            : takeaway
+                              ? "border-amber-300 bg-amber-50 text-amber-800 hover:border-amber-400"
+                              : "border-stone-200 bg-white text-stone-700 hover:border-blue-400"
+                        }`}
+                      >
+                        <span>
+                          {takeaway ? `🥡 ${m.nama}` : m.nama}
+                        </span>
+                        <span
+                          className={`text-xs font-medium ${
+                            dipilih ? "text-white/80" : takeaway ? "text-amber-600" : "text-blue-600"
                           }`}
                         >
-                          🥡 {m.nama} — Take away
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                          {takeaway ? "Take away" : "Dine-in"}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
                 <Link
                   to="/pengaturan/meja"
                   onClick={() => setMejaModalOpen(false)}
