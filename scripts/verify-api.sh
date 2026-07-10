@@ -483,6 +483,10 @@ cek "detail transaksi memuat catatan baris" "V == 1" \
 S_NOCAT=$(api "$KASIR" POST /penjualan "{\"meja_id\":\"$MEJA_D\",\"items\":[{\"menu_id\":\"$MENU_C\",\"qty\":1}]}")
 cek "item tanpa catatan → null" "V == 1" \
   "$(echo "$S_NOCAT" | jq '(.items[0].catatan == null) | if . then 1 else 0 end')"
+# catatan spasi-saja dinormalisasi jadi null (server trim)
+S_WS=$(api "$KASIR" POST /penjualan "{\"meja_id\":\"$MEJA_D\",\"items\":[{\"menu_id\":\"$MENU_C\",\"qty\":1,\"catatan\":\"   \"}]}")
+cek "catatan spasi-saja → null (trim server)" "V == 1" \
+  "$(echo "$S_WS" | jq '(.items[0].catatan == null) | if . then 1 else 0 end')"
 
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="

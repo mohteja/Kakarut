@@ -50,6 +50,12 @@ test("kasir: POS → tambah menu → dine-in → checkout → struk", async ({ p
 
   await page.getByRole("button", { name: "Transaksi Baru" }).click();
   await expect(page.locator("#struk-print")).toHaveCount(0);
+
+  // cetak ulang dari Riwayat harus tetap memuat catatan per baris
+  await page.goto("/kasir/riwayat");
+  await page.getByRole("button", { name: /PUSAT-\d{8}-\d{4}/ }).first().click();
+  await expect(page.locator("#struk-print")).toBeVisible();
+  await expect(page.locator("#struk-print")).toContainText("tanpa gula");
 });
 
 test("owner: stok menunjukkan pemakaian & laporan menampilkan omzet", async ({ page }) => {

@@ -178,6 +178,17 @@ describe("buildReceiptBytes", () => {
     expect(all).toContain("* tanpa gula");
   });
 
+  it("catatan kosong/spasi-saja tidak mencetak baris bullet", () => {
+    const b2 = buildReceiptBytes(
+      {
+        ...DATA,
+        items: [{ nama: "Kopi", qty: 1, hargaSatuan: 5000, lineTotal: 5000, catatan: "   " }],
+      },
+      OPTS,
+    );
+    expect(textLines(b2).some((l) => l.trim().startsWith("*"))).toBe(false);
+  });
+
   it("tanpa cut & drawer secara default", () => {
     expect(hasSubsequence(bytes, ESCPOS.CUT_PARTIAL)).toBe(false);
     expect(hasSubsequence(bytes, ESCPOS.DRAWER_KICK)).toBe(false);
