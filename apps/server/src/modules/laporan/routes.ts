@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, lte, sql, sum } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, lte, sql, sum } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import type { LaporanHarian } from "@kakarut/shared";
@@ -22,6 +22,7 @@ export const laporanRoutes = new Hono<AppEnv>()
       eq(sales.companyId, auth.company_id!),
       eq(sales.branchId, branchId),
       eq(sales.saleDate, tanggal),
+      isNull(sales.deletedAt),
     );
 
     const [agg] = await db
@@ -112,6 +113,7 @@ export const laporanRoutes = new Hono<AppEnv>()
           eq(sales.branchId, branchId),
           gte(sales.saleDate, dari),
           lte(sales.saleDate, sampai),
+          isNull(sales.deletedAt),
         ),
       );
 

@@ -1,8 +1,9 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import type { RiwayatTransaksiRow } from "@kakarut/shared";
 import { Card, PageTitle, Spinner, btnSecondary, inputClass } from "../../components/ui";
+import { useAuth } from "../../context/AuthContext";
 import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatRupiah, formatWaktu, hariIniWIB } from "../../lib/format";
@@ -12,7 +13,10 @@ import { ReceiptModal, type SaleResult } from "./ReceiptModal";
  * Riwayat transaksi kasir: cek pesanan bila ada kekeliruan + cetak ulang struk.
  */
 export function RiwayatPage() {
+  const { auth } = useAuth();
+  const isManajemen = auth?.user.role === "owner" || auth?.user.role === "admin";
   const { branchQuery } = useBranch();
+  const queryClient = useQueryClient();
   const [tanggal, setTanggal] = useState(hariIniWIB());
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
@@ -106,6 +110,16 @@ export function RiwayatPage() {
           data={detail}
           autoPrintOnOpen={false}
           onClose={() => setSelectedId(null)}
+          onDeleted={
+            isManajemen
+              ? () => {
+                  setSelectedId(null);
+                  for (const key of ["riwayat", "penjualan", "stok", "laporan", "rekomendasi"]) {
+                    queryClient.invalidateQueries({ queryKey: [key] });
+                  }
+                }
+              : undefined
+          }
         />
       )}
     </div>

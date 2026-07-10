@@ -1,11 +1,16 @@
 import { zValidator } from "@hono/zod-validator";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { db } from "../../db/client";
 import { branches, companies, saleItems, sales, users } from "../../db/schema";
-import { requireRole, resolveBranchId, type AppEnv } from "../../middleware/auth";
+import {
+  requireRole,
+  resolveBranchId,
+  verifikasiPassword,
+  type AppEnv,
+} from "../../middleware/auth";
 import { tanggalDi } from "../../lib/time";
 import { createSale } from "./service";
 
@@ -72,6 +77,7 @@ export const penjualanRoutes = new Hono<AppEnv>()
           eq(sales.companyId, auth.company_id!),
           eq(sales.branchId, branchId),
           eq(sales.saleDate, tanggal),
+          isNull(sales.deletedAt),
         ),
       )
       .orderBy(desc(sales.waktu));
@@ -83,7 +89,11 @@ export const penjualanRoutes = new Hono<AppEnv>()
       .select()
       .from(sales)
       .where(
-        and(eq(sales.id, c.req.param("id")), eq(sales.companyId, auth.company_id!)),
+        and(
+          eq(sales.id, c.req.param("id")),
+          eq(sales.companyId, auth.company_id!),
+          isNull(sales.deletedAt),
+        ),
       );
     if (!sale) throw new HTTPException(404, { message: "Transaksi tidak ditemukan" });
     // Kasir hanya boleh melihat transaksi di cabangnya.
@@ -97,15 +107,26 @@ export const penjualanRoutes = new Hono<AppEnv>()
       .where(eq(branches.id, sale.branchId));
     return c.json({ sale, items, branch_nama: branch?.nama ?? "" });
   })
-  .delete("/:id", requireRole("owner", "admin"), async (c) => {
-    const auth = c.get("auth");
-    // Void transaksi: cascade menghapus item + konsumsi → saldo stok pulih
-    const [row] = await db
-      .delete(sales)
-      .where(
-        and(eq(sales.id, c.req.param("id")), eq(sales.companyId, auth.company_id!)),
-      )
-      .returning();
-    if (!row) throw new HTTPException(404, { message: "Transaksi tidak ditemukan" });
-    return c.json({ ok: true, nomor: row.nomor });
+  .delete(
+    "/:id",
+    requireRole("owner", "admin"),
+    zValidator("json", z.object({ password: z.string() })),
+    async (c) => {
+      const auth = c.get("auth");
+      await verifikasiPassword(auth.sub, c.req.valid("json").password);
+      // Soft-delete → Tempat Sampah: baris & item/konsumsi tetap ada (audit),
+      // saldo stok pulih karena semua agregasi memfilter deleted_at IS NULL.
+      const [row] = await db
+        .update(sales)
+        .set({ deletedAt: new Date(), deletedBy: auth.sub })
+        .where(
+          and(
+            eq(sales.id, c.req.param("id")),
+            eq(sales.companyId, auth.company_id!),
+            isNull(sales.deletedAt),
+          ),
+        )
+        .returning();
+      if (!row) throw new HTTPException(404, { message: "Transaksi tidak ditemukan" });
+      return c.json({ ok: true, nomor: row.nomor });
   });

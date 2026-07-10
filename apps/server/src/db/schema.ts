@@ -319,6 +319,9 @@ export const sales = pgTable(
     catatan: text("catatan"),
     waktu: timestamp("waktu", { withTimezone: true }).notNull().defaultNow(),
     saleDate: date("sale_date").notNull(),
+    // soft-delete (Tempat Sampah): baris tetap disimpan sebagai catatan siapa yang menghapus
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    deletedBy: uuid("deleted_by").references(() => users.id),
   },
   (t) => [
     uniqueIndex("sales_branch_nomor_uq").on(t.branchId, t.nomor),
@@ -400,6 +403,12 @@ export const productions = pgTable(
     isBatch: boolean("is_batch").notNull().default(false),
     catatan: text("catatan"),
     userId: uuid("user_id").references(() => users.id),
+    // audit edit metadata
+    updatedAt: timestamp("updated_at", { withTimezone: true }),
+    updatedBy: uuid("updated_by").references(() => users.id),
+    // soft-delete (Tempat Sampah)
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    deletedBy: uuid("deleted_by").references(() => users.id),
     waktu: timestamp("waktu", { withTimezone: true }).notNull().defaultNow(),
     prodDate: date("prod_date").notNull(),
   },

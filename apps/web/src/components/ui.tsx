@@ -10,9 +10,20 @@ export function PageTitle({ children, aksi }: { children: ReactNode; aksi?: Reac
   );
 }
 
-export function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
+export function Card({
+  children,
+  className = "",
+  onClick,
+}: {
+  children: ReactNode;
+  className?: string;
+  onClick?: () => void;
+}) {
   return (
-    <div className={`rounded-xl border border-stone-200 bg-white shadow-sm ${className}`}>
+    <div
+      onClick={onClick}
+      className={`rounded-xl border border-stone-200 bg-white shadow-sm ${className}`}
+    >
       {children}
     </div>
   );

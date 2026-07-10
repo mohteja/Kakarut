@@ -1,3 +1,4 @@
+import bcrypt from "bcryptjs";
 import { and, eq } from "drizzle-orm";
 import type { Context, MiddlewareHandler } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -5,9 +6,21 @@ import jwt from "jsonwebtoken";
 import type { AuthUser, UserRole } from "@kakarut/shared";
 import { env } from "../config/env";
 import { db } from "../db/client";
-import { branches } from "../db/schema";
+import { branches, users } from "../db/schema";
 
 export type AppEnv = { Variables: { auth: AuthUser } };
+
+/**
+ * Verifikasi password login akun (dipakai konfirmasi aksi merusak: hapus/edit
+ * transaksi). Lempar 401 bila akun tak ada/nonaktif atau password salah.
+ */
+export async function verifikasiPassword(userId: string, password: string): Promise<void> {
+  if (!password) throw new HTTPException(401, { message: "Password wajib diisi" });
+  const [user] = await db.select().from(users).where(eq(users.id, userId));
+  if (!user || !user.isActive || !bcrypt.compareSync(password, user.passwordHash)) {
+    throw new HTTPException(401, { message: "Password salah" });
+  }
+}
 
 export const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
   const header = c.req.header("Authorization");

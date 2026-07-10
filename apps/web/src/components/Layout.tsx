@@ -137,6 +137,9 @@ export function Layout() {
                   <NavLink to="/laporan" className={linkClass}>
                     📊 Laporan
                   </NavLink>
+                  <NavLink to="/sampah" className={linkClass}>
+                    🗑 Tempat Sampah
+                  </NavLink>
                   <div className="mt-4 mb-1 px-3 text-xs font-semibold uppercase tracking-wide text-stone-500">
                     Manajemen
                   </div>

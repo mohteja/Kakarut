@@ -15,9 +15,10 @@ import {
 import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah, formatWaktu, hariIniWIB } from "../../lib/format";
+import { FakturDetailModal } from "./FakturDetailModal";
 import { FakturModal } from "./FakturModal";
 
-interface StokMasukRow {
+export interface StokMasukRow {
   id: string;
   bahan: string;
   isi: number;
@@ -27,21 +28,32 @@ interface StokMasukRow {
   is_batch: boolean;
   catatan: string | null;
   waktu: string;
+  prod_date: string;
   faktur_id: string | null;
   no_faktur: string | null;
   status: "menunggu" | "dikonfirmasi";
   supplier: string | null;
   tempat: string | null;
+  supplier_id: string | null;
+  storage_location_id: string | null;
+  dibuat_oleh: string | null;
+  diubah_oleh: string | null;
+  updated_at: string | null;
 }
 
-interface FakturGroup {
+export interface FakturGroup {
   key: string;
   fakturId: string | null;
   waktu: string;
+  prodDate: string;
   supplier: string | null;
+  supplierId: string | null;
   noFaktur: string | null;
   status: "menunggu" | "dikonfirmasi";
   catatan: string | null;
+  dibuatOleh: string | null;
+  diubahOleh: string | null;
+  updatedAt: string | null;
   rows: StokMasukRow[];
   totalHarga: number;
 }
@@ -61,6 +73,7 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
   const { branchQuery } = useBranch();
   const queryClient = useQueryClient();
   const [modalBuka, setModalBuka] = useState(false);
+  const [detail, setDetail] = useState<FakturGroup | null>(null);
 
   const today = hariIniWIB();
   const { data: log, isLoading } = useQuery({
@@ -91,10 +104,15 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
           key,
           fakturId: r.faktur_id,
           waktu: r.waktu,
+          prodDate: r.prod_date,
           supplier: r.supplier,
+          supplierId: r.supplier_id,
           noFaktur: r.no_faktur,
           status: r.status,
           catatan: r.catatan,
+          dibuatOleh: r.dibuat_oleh,
+          diubahOleh: r.diubah_oleh,
+          updatedAt: r.updated_at,
           rows: [],
           totalHarga: 0,
         };
@@ -154,7 +172,11 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
       ) : (
         <div className="space-y-3">
           {grup.map((g) => (
-            <Card key={g.key} className={g.status === "menunggu" ? "border-yellow-300" : ""}>
+            <Card
+              key={g.key}
+              onClick={() => setDetail(g)}
+              className={`cursor-pointer transition hover:border-orange-300 hover:shadow-sm ${g.status === "menunggu" ? "border-yellow-300" : ""}`}
+            >
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-100 px-4 py-2.5">
                 <div className="flex flex-wrap items-center gap-2 text-sm">
                   <span className="font-semibold text-stone-700">{formatWaktu(g.waktu)}</span>
@@ -166,7 +188,10 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                       {g.noFaktur}
                     </span>
                   )}
-                  {g.catatan && <span className="text-xs text-stone-400">{g.catatan}</span>}
+                  {g.dibuatOleh && (
+                    <span className="text-xs text-stone-400">oleh {g.dibuatOleh}</span>
+                  )}
+                  {g.catatan && <span className="text-xs text-stone-400">· {g.catatan}</span>}
                 </div>
                 <div className="flex items-center gap-2">
                   <span
@@ -180,7 +205,10 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                   </span>
                   {g.status === "menunggu" && g.fakturId && (
                     <button
-                      onClick={() => konfirmasi.mutate(g.fakturId!)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        konfirmasi.mutate(g.fakturId!);
+                      }}
                       disabled={konfirmasi.isPending}
                       className="rounded-lg bg-green-600 px-3 py-1 text-xs font-semibold text-white hover:bg-green-700 disabled:opacity-50"
                     >
@@ -232,6 +260,14 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
 
       {modalBuka && (
         <FakturModal tipe={tipe} endpoint={t.endpoint} onClose={() => setModalBuka(false)} />
+      )}
+      {detail && (
+        <FakturDetailModal
+          grup={detail}
+          tipe={tipe}
+          endpoint={t.endpoint}
+          onClose={() => setDetail(null)}
+        />
       )}
     </div>
   );

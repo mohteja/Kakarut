@@ -25,6 +25,7 @@ import { penyimpananRoutes } from "./modules/penyimpanan/routes";
 import { printRoutes } from "./modules/print/routes";
 import { pembelianRoutes, produksiRoutes } from "./modules/produksi/routes";
 import { rekomendasiRoutes } from "./modules/rekomendasi/routes";
+import { sampahRoutes } from "./modules/sampah/routes";
 import { supplierRoutes } from "./modules/supplier/routes";
 import { stokRoutes } from "./modules/stok/routes";
 import { uploadRoutes } from "./modules/upload/routes";
@@ -51,6 +52,7 @@ export function createApp() {
   tenant.use("/pembelian/*", requireRole("owner", "admin"));
   tenant.use("/laporan/*", requireRole("owner", "admin"));
   tenant.use("/rekomendasi/*", requireRole("owner", "admin"));
+  tenant.use("/sampah/*", requireRole("owner", "admin"));
   tenant.use("/karyawan/*", requireRole("owner", "admin"));
   tenant
     .route("/company", companyRoutes)
@@ -68,6 +70,7 @@ export function createApp() {
     .route("/laporan", laporanRoutes)
     .route("/print", printRoutes)
     .route("/rekomendasi", rekomendasiRoutes)
+    .route("/sampah", sampahRoutes)
     .route("/upload", uploadRoutes)
     .route("/karyawan", karyawanRoutes);
 

@@ -331,6 +331,20 @@ export interface RiwayatTransaksiRow {
   kasir: string | null;
 }
 
+/** Baris di Tempat Sampah: transaksi yang di-soft-delete (hanya catatan, tak bisa dikembalikan). */
+export interface SampahRow {
+  jenis: "penjualan" | "pembelian" | "produksi";
+  /** id penjualan, atau fakturId/id baris untuk pembelian/produksi */
+  key: string;
+  /** ringkasan: nomor struk / daftar bahan */
+  label: string;
+  waktu: string;
+  total: number;
+  dibuat_oleh: string | null;
+  dihapus_oleh: string | null;
+  dihapus_pada: string;
+}
+
 export interface LaporanHarian {
   tanggal: string;
   omzet: number;
