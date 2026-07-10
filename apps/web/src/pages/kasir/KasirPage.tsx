@@ -122,9 +122,9 @@ export function KasirPage() {
   if (isLoading) return <Spinner />;
 
   return (
-    <div className="flex h-[calc(100vh-3rem)] gap-4">
-      {/* Katalog */}
-      <div className="flex min-w-0 flex-1 flex-col">
+    <div className="flex flex-col gap-4 md:h-[calc(100vh-3rem)] md:flex-row">
+      {/* Katalog — di atas pada mobile, kiri pada desktop */}
+      <div className="flex min-w-0 flex-col md:flex-1">
         <div className="mb-3 flex flex-wrap gap-2">
           <button
             onClick={() => setAktifKategori(null)}
@@ -151,7 +151,7 @@ export function KasirPage() {
           ))}
         </div>
 
-        <div className="grid flex-1 auto-rows-min grid-cols-2 gap-3 overflow-y-auto pb-4 md:grid-cols-3 xl:grid-cols-4">
+        <div className="grid auto-rows-min grid-cols-2 gap-3 pb-4 md:flex-1 md:grid-cols-3 md:overflow-y-auto xl:grid-cols-4">
           {menuTampil.map((m) => (
             <button
               key={m.id}
@@ -183,8 +183,8 @@ export function KasirPage() {
         </div>
       </div>
 
-      {/* Keranjang */}
-      <Card className="flex w-96 shrink-0 flex-col p-4">
+      {/* Keranjang — di bawah pada mobile, kanan pada desktop */}
+      <Card className="flex w-full shrink-0 flex-col p-4 md:w-96">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-lg font-bold text-stone-800">Keranjang</h2>
           <div className="flex overflow-hidden rounded-lg border border-stone-300 text-sm">
@@ -203,7 +203,7 @@ export function KasirPage() {
           </div>
         </div>
 
-        <div className="flex-1 space-y-2 overflow-y-auto">
+        <div className="space-y-2 md:flex-1 md:overflow-y-auto">
           {cart.length === 0 && (
             <div className="py-10 text-center text-sm text-stone-400">
               Ketuk menu untuk menambahkan.

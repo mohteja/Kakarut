@@ -35,10 +35,31 @@ export function OpnamePage() {
   const [hasil, setHasil] = useState<OpnameRingkasan | null>(null);
 
   const namaCabang = auth?.branch?.nama ?? auth?.company?.nama ?? "Cabang";
+  const myId = auth?.user.sub;
+
+  const petugasByLoc = useMemo(() => {
+    const m = new Map<string, PenyimpananDto["petugas"]>();
+    for (const t of tempatList) m.set(t.id, t.petugas);
+    return m;
+  }, [tempatList]);
+
+  // tempat yang ditampilkan sebagai filter (kasir: hanya yang boleh diopname)
+  const tempatBoleh = useMemo(() => {
+    if (!isKasir) return tempatList;
+    return tempatList.filter((t) => {
+      const p = t.petugas;
+      return p.length === 0 || p.some((x) => x.user_id === myId);
+    });
+  }, [tempatList, isKasir, myId]);
 
   const tampil = useMemo(() => {
     return (stok ?? [])
       .filter((s) => s.nama.toLowerCase().includes(cari.toLowerCase()))
+      .filter((s) => {
+        if (!isKasir || !s.tempat_id) return true;
+        const p = petugasByLoc.get(s.tempat_id) ?? [];
+        return p.length === 0 || p.some((x) => x.user_id === myId);
+      })
       .filter((s) =>
         filterTempat === "semua"
           ? true
@@ -46,7 +67,12 @@ export function OpnamePage() {
             ? s.tempat_id === null
             : s.tempat_id === filterTempat,
       );
-  }, [stok, cari, filterTempat]);
+  }, [stok, cari, filterTempat, isKasir, petugasByLoc, myId]);
+
+  const petugasTerpilih =
+    filterTempat !== "semua" && filterTempat !== "tanpa"
+      ? (petugasByLoc.get(filterTempat) ?? [])
+      : null;
 
   const terisi = Object.entries(fisik).filter(([, v]) => v !== "").length;
 
@@ -113,7 +139,7 @@ export function OpnamePage() {
           >
             Semua
           </button>
-          {tempatList.map((t) => (
+          {tempatBoleh.map((t) => (
             <button
               key={t.id}
               onClick={() => setFilterTempat(t.id)}
@@ -129,6 +155,23 @@ export function OpnamePage() {
             Tanpa tempat
           </button>
         </div>
+        {petugasTerpilih !== null && (
+          <div className="text-xs text-stone-500">
+            👤 Petugas opname:{" "}
+            {petugasTerpilih.length === 0 ? (
+              <span className="text-stone-400">semua boleh (belum diatur)</span>
+            ) : (
+              <span className="font-medium text-stone-600">
+                {petugasTerpilih.map((p) => p.nama).join(", ")}
+              </span>
+            )}
+          </div>
+        )}
+        {isKasir && (
+          <div className="text-xs text-stone-400">
+            Anda hanya melihat bahan di tempat yang boleh Anda opname.
+          </div>
+        )}
       </div>
 
       {/* Kartu bahan */}

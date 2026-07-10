@@ -54,6 +54,8 @@ export const companies = pgTable("companies", {
     .default(10),
   receiptFooter: text("receipt_footer"),
   receiptShowAlamat: boolean("receipt_show_alamat").notNull().default(true),
+  /** target penjualan (Rp) default untuk rekomendasi kebutuhan bahan baku */
+  targetPenjualan: numeric("target_penjualan", { precision: 14, scale: 2, mode: "number" }),
   plan: text("plan").notNull().default("free"),
   planExpiresAt: timestamp("plan_expires_at", { withTimezone: true }),
   isActive: boolean("is_active").notNull().default(true),
@@ -142,6 +144,30 @@ export const storageLocations = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex("storage_locations_branch_nama_uq").on(t.branchId, t.nama)],
+);
+
+/**
+ * Petugas opname per tempat penyimpanan: akun yang ditugaskan melakukan stock
+ * opname untuk tempat itu. Tempat tanpa petugas = terbuka (siapa saja yang
+ * boleh opname di cabang). Begitu ada petugas, tempat itu terkunci hanya untuk
+ * mereka (owner/admin selalu boleh).
+ */
+export const storageLocationPetugas = pgTable(
+  "storage_location_petugas",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    storageLocationId: uuid("storage_location_id")
+      .notNull()
+      .references(() => storageLocations.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("storage_location_petugas_uq").on(t.storageLocationId, t.userId)],
 );
 
 // ===== Katalog (per company) =====

@@ -1,0 +1,1 @@
+ALTER TABLE "companies" ADD COLUMN "target_penjualan" numeric(14, 2);

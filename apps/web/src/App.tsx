@@ -12,6 +12,7 @@ import { MenuFormPage } from "./pages/menu/MenuFormPage";
 import { MenuListPage } from "./pages/menu/MenuListPage";
 import { PembelianPage } from "./pages/produksi/PembelianPage";
 import { ProduksiPage } from "./pages/produksi/ProduksiPage";
+import { RekomendasiBeliPage } from "./pages/produksi/RekomendasiBeliPage";
 import { CabangPage } from "./pages/pengaturan/CabangPage";
 import { KaryawanPage } from "./pages/pengaturan/KaryawanPage";
 import { PenyimpananPage } from "./pages/pengaturan/PenyimpananPage";
@@ -66,13 +67,14 @@ export default function App() {
               <Route path="/stok" element={<StokPage />} />
               <Route path="/stok/penyesuaian" element={<PenyesuaianPage />} />
               <Route path="/stok/kartu/:ingredientId" element={<KartuStokPage />} />
-              <Route path="/produksi" element={<ProduksiPage />} />
-              <Route path="/pembelian" element={<PembelianPage />} />
-              <Route path="/laporan" element={<LaporanPage />} />
               {/* printer = pengaturan per perangkat → semua peran, termasuk kasir */}
               <Route path="/pengaturan/printer" element={<PrinterPage />} />
               {isManajemen && (
                 <>
+                  <Route path="/produksi" element={<ProduksiPage />} />
+                  <Route path="/pembelian" element={<PembelianPage />} />
+                  <Route path="/pembelian/rekomendasi" element={<RekomendasiBeliPage />} />
+                  <Route path="/laporan" element={<LaporanPage />} />
                   <Route path="/bahan" element={<BahanPage />} />
                   <Route path="/menu" element={<MenuListPage />} />
                   <Route path="/menu/baru" element={<MenuFormPage />} />

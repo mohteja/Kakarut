@@ -21,7 +21,9 @@ import { laporanRoutes } from "./modules/laporan/routes";
 import { menuRoutes } from "./modules/menu/routes";
 import { penjualanRoutes } from "./modules/penjualan/routes";
 import { penyimpananRoutes } from "./modules/penyimpanan/routes";
+import { printRoutes } from "./modules/print/routes";
 import { pembelianRoutes, produksiRoutes } from "./modules/produksi/routes";
+import { rekomendasiRoutes } from "./modules/rekomendasi/routes";
 import { supplierRoutes } from "./modules/supplier/routes";
 import { stokRoutes } from "./modules/stok/routes";
 import { uploadRoutes } from "./modules/upload/routes";
@@ -41,8 +43,15 @@ export function createApp() {
     .route("/admin/sistem", adminSystemRoutes);
 
   // Rute internal perusahaan (butuh membership)
-  const tenant = new Hono<AppEnv>()
-    .use("*", requireAuth, requireCompany)
+  const tenant = new Hono<AppEnv>().use("*", requireAuth, requireCompany);
+  // Gerbang peran owner/admin — HARUS didaftarkan sebelum route agar middleware
+  // dijalankan lebih dulu. Kasir hanya butuh kasir/stok/opname/penyesuaian.
+  tenant.use("/produksi/*", requireRole("owner", "admin"));
+  tenant.use("/pembelian/*", requireRole("owner", "admin"));
+  tenant.use("/laporan/*", requireRole("owner", "admin"));
+  tenant.use("/rekomendasi/*", requireRole("owner", "admin"));
+  tenant.use("/karyawan/*", requireRole("owner", "admin"));
+  tenant
     .route("/company", companyRoutes)
     .route("/cabang", cabangRoutes)
     .route("/bahan", bahanRoutes)
@@ -55,9 +64,10 @@ export function createApp() {
     .route("/penyimpanan", penyimpananRoutes)
     .route("/stok", stokRoutes)
     .route("/laporan", laporanRoutes)
-    .route("/upload", uploadRoutes);
-  tenant.use("/karyawan/*", requireRole("owner", "admin"));
-  tenant.route("/karyawan", karyawanRoutes);
+    .route("/print", printRoutes)
+    .route("/rekomendasi", rekomendasiRoutes)
+    .route("/upload", uploadRoutes)
+    .route("/karyawan", karyawanRoutes);
 
   api.route("/", tenant);
 

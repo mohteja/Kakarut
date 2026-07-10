@@ -30,6 +30,12 @@ const METODE: { kind: TransportKind; label: string; keterangan: string }[] = [
     keterangan:
       "Untuk printer Bluetooth klasik (bukan BLE) di Android — struk dikirim ke aplikasi RawBT yang meneruskan ke printer. Pasang dari Play Store.",
   },
+  {
+    kind: "lan",
+    label: "LAN / Jaringan (IP)",
+    keterangan:
+      "Printer thermal jaringan (ESC/POS via TCP, umumnya port 9100). Struk dikirim lewat server — SERVER harus bisa menjangkau IP printer (server di jaringan yang sama, atau printer punya IP publik/VPN). Untuk printer lokal saja dengan aplikasi di cloud, gunakan RawBT.",
+  },
 ];
 
 function StatusBadge() {
@@ -126,6 +132,40 @@ export function PrinterPage() {
           )}
         </div>
 
+        {settings.transport === "lan" && (
+          <div className="space-y-3 border-t border-stone-100 pt-4">
+            <div className="grid grid-cols-3 gap-3">
+              <div className="col-span-2">
+                <label className="mb-1 block text-sm font-medium">IP / Host printer</label>
+                <input
+                  value={settings.lanHost}
+                  onChange={(e) => updateSettings({ lanHost: e.target.value.trim() })}
+                  className={inputClass}
+                  placeholder="mis. 192.168.1.50"
+                  inputMode="decimal"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium">Port</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={65535}
+                  value={settings.lanPort}
+                  onChange={(e) => updateSettings({ lanPort: Number(e.target.value) || 9100 })}
+                  className={inputClass}
+                />
+              </div>
+            </div>
+            <div className="rounded-lg bg-yellow-50 px-3 py-2 text-xs text-yellow-800">
+              Struk dikirim lewat <b>server</b> ke IP printer. Pastikan <b>server bisa menjangkau IP
+              ini</b> — cocok bila server di jaringan yang sama, atau printer punya IP publik/VPN.
+              Jika aplikasi diakses dari cloud sementara printer hanya di jaringan lokal toko,
+              gunakan <b>RawBT</b>.
+            </div>
+          </div>
+        )}
+
         {settings.transport !== "browser" && (
           <>
             <div className="grid grid-cols-2 gap-4 border-t border-stone-100 pt-4">
@@ -213,7 +253,11 @@ export function PrinterPage() {
               <button
                 onClick={() => void aksi(printTest)}
                 className={perluHubungkan ? btnSecondary : btnPrimary}
-                disabled={status.state === "printing" || (perluHubungkan && !terhubung)}
+                disabled={
+                  status.state === "printing" ||
+                  (perluHubungkan && !terhubung) ||
+                  (settings.transport === "lan" && !settings.lanHost)
+                }
               >
                 🖨 Cetak Tes
               </button>

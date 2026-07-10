@@ -7,7 +7,13 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import type { OpnameRingkasan } from "@kakarut/shared";
 import { db } from "../../db/client";
-import { companies, ingredients, stockOpnames, users } from "../../db/schema";
+import {
+  companies,
+  ingredients,
+  stockOpnames,
+  storageLocationPetugas,
+  users,
+} from "../../db/schema";
 import { pastikanCabang, requireRole, resolveBranchId, type AppEnv } from "../../middleware/auth";
 import { tanggalDi } from "../../lib/time";
 import { hitungSaldoCabang, kartuStok } from "./service";
@@ -121,6 +127,33 @@ export const stokRoutes = new Hono<AppEnv>()
     // Snapshot saldo sistem per bahan (sebelum opname mengubahnya)
     const saldoRows = await hitungSaldoCabang(auth.company_id!, branchId);
     const saldoById = new Map(saldoRows.map((r) => [r.ingredient_id, r.saldo]));
+    const infoById = new Map(saldoRows.map((r) => [r.ingredient_id, r]));
+
+    // Batasan petugas: kasir hanya boleh opname bahan di tempat yang terbuka
+    // (belum ada petugas) atau tempat yang ditugaskan padanya. Bahan tanpa
+    // tempat boleh siapa saja. Owner/admin selalu boleh.
+    if (auth.role === "cashier") {
+      const petugasRows = await db
+        .select({
+          locId: storageLocationPetugas.storageLocationId,
+          userId: storageLocationPetugas.userId,
+        })
+        .from(storageLocationPetugas)
+        .where(eq(storageLocationPetugas.companyId, auth.company_id!));
+      const lockedSet = new Set(petugasRows.map((r) => r.locId));
+      const mineSet = new Set(
+        petugasRows.filter((r) => r.userId === auth.sub).map((r) => r.locId),
+      );
+      for (const ingredientId of ids) {
+        const info = infoById.get(ingredientId);
+        const tempatId = info?.tempat_id ?? null;
+        if (tempatId && lockedSet.has(tempatId) && !mineSet.has(tempatId)) {
+          throw new HTTPException(403, {
+            message: `Anda bukan petugas opname tempat "${info?.tempat ?? "?"}" (bahan ${info?.nama ?? ""})`,
+          });
+        }
+      }
+    }
 
     const sessionId = randomUUID();
     const ringkasan: OpnameRingkasan = {
