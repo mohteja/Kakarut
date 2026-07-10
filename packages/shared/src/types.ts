@@ -299,6 +299,18 @@ export interface SaleItemInput {
   is_dine_in?: boolean;
 }
 
+/** Baris riwayat transaksi kasir (untuk cek pesanan / cetak ulang struk). */
+export interface RiwayatTransaksiRow {
+  id: string;
+  nomor: string;
+  waktu: string;
+  total: number;
+  is_dine_in: boolean;
+  /** jumlah baris menu pada transaksi */
+  jumlah_item: number;
+  kasir: string | null;
+}
+
 export interface LaporanHarian {
   tanggal: string;
   omzet: number;

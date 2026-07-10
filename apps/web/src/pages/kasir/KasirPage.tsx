@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import type { MenuDto } from "@kakarut/shared";
 import { Card, ErrorText, Spinner, btnPrimary } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
@@ -186,7 +187,15 @@ export function KasirPage() {
       {/* Keranjang — di bawah pada mobile, kanan pada desktop */}
       <Card className="flex w-full shrink-0 flex-col p-4 md:w-96">
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-lg font-bold text-stone-800">Keranjang</h2>
+          <div className="flex items-baseline gap-2">
+            <h2 className="text-lg font-bold text-stone-800">Keranjang</h2>
+            <Link
+              to="/kasir/riwayat"
+              className="text-xs font-medium text-orange-600 hover:underline"
+            >
+              🕘 Riwayat
+            </Link>
+          </div>
           <div className="flex overflow-hidden rounded-lg border border-stone-300 text-sm">
             <button
               onClick={() => setDineIn(false)}

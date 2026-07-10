@@ -39,7 +39,16 @@ interface CompanyStruk {
   receiptShowAlamat: boolean;
 }
 
-export function ReceiptModal({ data, onClose }: { data: SaleResult; onClose: () => void }) {
+export function ReceiptModal({
+  data,
+  onClose,
+  autoPrintOnOpen = true,
+}: {
+  data: SaleResult;
+  onClose: () => void;
+  /** false saat cetak ulang dari riwayat (jangan auto-print, user cetak manual) */
+  autoPrintOnOpen?: boolean;
+}) {
   const { auth } = useAuth();
   const { settings, isThermal, canAutoPrint, printReceipt } = usePrinter();
   const { data: company } = useQuery({
@@ -102,7 +111,7 @@ export function ReceiptModal({ data, onClose }: { data: SaleResult; onClose: () 
   // Cetak otomatis sekali per transaksi (BLE/USB yang sudah terhubung).
   // Tunggu data company termuat agar header/footer struk lengkap.
   useEffect(() => {
-    if (!settings.autoPrint || !canAutoPrint || !company) return;
+    if (!autoPrintOnOpen || !settings.autoPrint || !canAutoPrint || !company) return;
     if (autoPrintedFor.current === data.sale.id) return;
     autoPrintedFor.current = data.sale.id;
     void cetakThermal();
@@ -183,7 +192,7 @@ export function ReceiptModal({ data, onClose }: { data: SaleResult; onClose: () 
             onClick={onClose}
             className={`${isThermal ? btnSecondary : btnPrimary} flex-1`}
           >
-            Transaksi Baru
+            {autoPrintOnOpen ? "Transaksi Baru" : "Tutup"}
           </button>
         </div>
       </div>

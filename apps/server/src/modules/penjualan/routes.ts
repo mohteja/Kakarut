@@ -1,10 +1,10 @@
 import { zValidator } from "@hono/zod-validator";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { db } from "../../db/client";
-import { companies, saleItems, sales } from "../../db/schema";
+import { branches, companies, saleItems, sales, users } from "../../db/schema";
 import { requireRole, resolveBranchId, type AppEnv } from "../../middleware/auth";
 import { tanggalDi } from "../../lib/time";
 import { createSale } from "./service";
@@ -50,9 +50,19 @@ export const penjualanRoutes = new Hono<AppEnv>()
       .from(companies)
       .where(eq(companies.id, auth.company_id!));
     const tanggal = c.req.query("tanggal") ?? tanggalDi(company?.timezone ?? "Asia/Jakarta");
+    // Riwayat transaksi untuk kasir: cek pesanan / cetak ulang struk.
     const rows = await db
-      .select()
+      .select({
+        id: sales.id,
+        nomor: sales.nomor,
+        waktu: sales.waktu,
+        total: sales.total,
+        is_dine_in: sales.isDineIn,
+        kasir: users.nama,
+        jumlah_item: sql<number>`(SELECT COUNT(*)::int FROM sale_items si WHERE si.sale_id = ${sales.id})`,
+      })
       .from(sales)
+      .leftJoin(users, eq(sales.cashierUserId, users.id))
       .where(
         and(
           eq(sales.companyId, auth.company_id!),
@@ -72,8 +82,16 @@ export const penjualanRoutes = new Hono<AppEnv>()
         and(eq(sales.id, c.req.param("id")), eq(sales.companyId, auth.company_id!)),
       );
     if (!sale) throw new HTTPException(404, { message: "Transaksi tidak ditemukan" });
+    // Kasir hanya boleh melihat transaksi di cabangnya.
+    if (auth.role === "cashier" && sale.branchId !== auth.branch_id) {
+      throw new HTTPException(403, { message: "Kasir hanya boleh melihat transaksi cabangnya" });
+    }
     const items = await db.select().from(saleItems).where(eq(saleItems.saleId, sale.id));
-    return c.json({ sale, items });
+    const [branch] = await db
+      .select({ nama: branches.nama })
+      .from(branches)
+      .where(eq(branches.id, sale.branchId));
+    return c.json({ sale, items, branch_nama: branch?.nama ?? "" });
   })
   .delete("/:id", requireRole("owner", "admin"), async (c) => {
     const auth = c.get("auth");

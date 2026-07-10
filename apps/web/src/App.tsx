@@ -6,6 +6,7 @@ import { PrinterProvider } from "./context/PrinterContext";
 import { PrinterPage } from "./pages/pengaturan/PrinterPage";
 import { BahanPage } from "./pages/bahan/BahanPage";
 import { KasirPage } from "./pages/kasir/KasirPage";
+import { RiwayatPage } from "./pages/kasir/RiwayatPage";
 import { LaporanPage } from "./pages/laporan/LaporanPage";
 import { LoginPage } from "./pages/LoginPage";
 import { MenuFormPage } from "./pages/menu/MenuFormPage";
@@ -64,6 +65,7 @@ export default function App() {
           {!isSuperAdmin && (
             <>
               <Route path="/kasir" element={<KasirPage />} />
+              <Route path="/kasir/riwayat" element={<RiwayatPage />} />
               <Route path="/stok" element={<StokPage />} />
               <Route path="/stok/penyesuaian" element={<PenyesuaianPage />} />
               <Route path="/stok/kartu/:ingredientId" element={<KartuStokPage />} />

@@ -108,6 +108,9 @@ export function Layout() {
               <NavLink to="/kasir" className={linkClass}>
                 🧾 Kasir
               </NavLink>
+              <NavLink to="/kasir/riwayat" className={linkClass}>
+                🕘 Riwayat Transaksi
+              </NavLink>
               <NavLink to="/stok" className={linkClass}>
                 📦 Stok
               </NavLink>

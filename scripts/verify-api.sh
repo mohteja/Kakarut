@@ -387,6 +387,28 @@ cek "target default tersimpan (company GET)" "V == 15000000" \
 cek "rekomendasi tanpa ?target pakai default" "V == 15000000" \
   "$(api "$OWNER" GET "/rekomendasi/beli?acuan=rentang&dari=$TODAY&sampai=$TODAY" | jq '.target')"
 
+echo "== 18. Riwayat transaksi kasir (cek pesanan + cetak ulang struk) =="
+MENU_R=$(api "$KASIR" GET /menu | jq -r '[.[] | select(.tipe == "regular")][0].id')
+SALE=$(api "$KASIR" POST /penjualan "{\"is_dine_in\":true,\"items\":[{\"menu_id\":\"$MENU_R\",\"qty\":2}]}")
+SALE_ID=$(echo "$SALE" | jq -r '.sale.id')
+SALE_NO=$(echo "$SALE" | jq -r '.sale.nomor')
+{ [ -n "$SALE_ID" ] && [ "$SALE_ID" != "null" ]; } && ok "kasir buat transaksi" || gagal "kasir gagal transaksi"
+TODAY2=$(TZ=Asia/Jakarta date +%F)
+LIST=$(api "$KASIR" GET "/penjualan?tanggal=$TODAY2")
+cek "riwayat (kasir) memuat transaksi baru" "V == 1" \
+  "$(echo "$LIST" | jq --arg id "$SALE_ID" '[.[] | select(.id == $id)] | length')"
+cek "riwayat: jumlah_item terisi" "V == 1" \
+  "$(echo "$LIST" | jq --arg id "$SALE_ID" '[.[] | select(.id == $id and .jumlah_item >= 1)] | length')"
+cek "riwayat: nama kasir terisi" "V == 1" \
+  "$(echo "$LIST" | jq --arg id "$SALE_ID" '[.[] | select(.id == $id and (.kasir | type) == "string")] | length')"
+DET=$(api "$KASIR" GET "/penjualan/$SALE_ID")
+cek "detail transaksi: nomor cocok" "V == 1" \
+  "$(echo "$DET" | jq --arg n "$SALE_NO" '(.sale.nomor == $n) | if . then 1 else 0 end')"
+cek "detail: branch_nama terisi (untuk struk)" "V == 1" \
+  "$(echo "$DET" | jq '((.branch_nama | length) > 0) | if . then 1 else 0 end')"
+cek "detail: item lengkap (harga_satuan untuk struk)" "V == 1" \
+  "$(echo "$DET" | jq '([.items[] | select(.hargaSatuan > 0)] | length >= 1) | if . then 1 else 0 end')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]
