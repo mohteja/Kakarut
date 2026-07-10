@@ -96,6 +96,58 @@ export interface SupplierDto {
   is_active: boolean;
 }
 
+// ===== Rekomendasi pembelian dari target penjualan =====
+
+export type AcuanJenis = "minggu_lalu" | "7hari" | "rentang";
+
+/** Periode acuan yang dipakai memproyeksikan kebutuhan dari target penjualan. */
+export interface AcuanPeriode {
+  jenis: AcuanJenis;
+  dari: string;
+  sampai: string;
+  /** omzet (Rp) pada periode acuan — penyebut skala */
+  omzet: number;
+  /** true bila hari-sama-minggu-lalu kosong lalu fallback ke rata-rata 7 hari */
+  fallback: boolean;
+}
+
+export interface MenuTerlaris {
+  menu_nama: string;
+  qty: number;
+  omzet: number;
+}
+
+export interface RekomendasiBahanRow {
+  ingredient_id: string;
+  nama: string;
+  satuan: string;
+  kategori: BahanKategori;
+  pengadaan: JenisPengadaan;
+  /** pemakaian hari ini (dari penjualan) */
+  terpakai_hari_ini: number;
+  /** stok tersisa saat ini */
+  sisa: number;
+  /** pemakaian pada periode acuan */
+  acuan_qty: number;
+  /** kebutuhan untuk mencapai target (null bila omzet acuan 0) */
+  kebutuhan: number | null;
+  /** maks(0, kebutuhan − sisa); null bila tak bisa dihitung */
+  saran_beli: number | null;
+  harga_per_unit: number;
+  /** saran_beli × harga_per_unit */
+  estimasi_biaya: number | null;
+}
+
+export interface RekomendasiBeli {
+  /** target penjualan (Rp) yang dipakai */
+  target: number;
+  /** tanggal hari ini (tz perusahaan) */
+  hari_ini: string;
+  acuan: AcuanPeriode;
+  menu_terlaris: MenuTerlaris[];
+  bahan: RekomendasiBahanRow[];
+}
+
 /** Akun yang ditugaskan opname pada satu tempat penyimpanan. */
 export interface PetugasRingkas {
   user_id: string;

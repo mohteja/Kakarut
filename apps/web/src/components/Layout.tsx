@@ -114,20 +114,23 @@ export function Layout() {
               <NavLink to="/stok/penyesuaian" className={linkClass}>
                 ⚠️ Penyesuaian Stok
               </NavLink>
-              <NavLink to="/produksi" className={linkClass}>
-                🏭 Produksi Bahan Baku
-              </NavLink>
-              <NavLink to="/pembelian" className={linkClass}>
-                🛒 Beli Bahan Baku
-              </NavLink>
-              <NavLink to="/laporan" className={linkClass}>
-                📊 Laporan
-              </NavLink>
               <NavLink to="/pengaturan/printer" className={linkClass}>
                 🖨 Printer
               </NavLink>
               {isManajemen && (
                 <>
+                  <div className="mt-4 mb-1 px-3 text-xs font-semibold uppercase tracking-wide text-stone-500">
+                    Operasional
+                  </div>
+                  <NavLink to="/produksi" className={linkClass}>
+                    🏭 Produksi Bahan Baku
+                  </NavLink>
+                  <NavLink to="/pembelian" className={linkClass}>
+                    🛒 Beli Bahan Baku
+                  </NavLink>
+                  <NavLink to="/laporan" className={linkClass}>
+                    📊 Laporan
+                  </NavLink>
                   <div className="mt-4 mb-1 px-3 text-xs font-semibold uppercase tracking-wide text-stone-500">
                     Manajemen
                   </div>

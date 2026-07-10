@@ -78,6 +78,13 @@
       "when": 1783677658242,
       "tag": "0010_petugas_opname",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1783694192548,
+      "tag": "0011_target_penjualan",
+      "breakpoints": true
     }
   ]
 }

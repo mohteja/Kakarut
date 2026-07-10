@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import type { JenisPengadaan } from "@kakarut/shared";
 import {
   Card,
@@ -7,6 +8,7 @@ import {
   PageTitle,
   Spinner,
   btnPrimary,
+  btnSecondary,
   tdClass,
   thClass,
 } from "../../components/ui";
@@ -113,9 +115,16 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
     <div>
       <PageTitle
         aksi={
-          <button onClick={() => setModalBuka(true)} className={btnPrimary}>
-            + Tambah {tipe === "produksi" ? "Produksi" : "Pembelian"}
-          </button>
+          <div className="flex flex-wrap gap-2">
+            {tipe === "beli" && (
+              <Link to="/pembelian/rekomendasi" className={btnSecondary}>
+                📊 Rekomendasi Beli
+              </Link>
+            )}
+            <button onClick={() => setModalBuka(true)} className={btnPrimary}>
+              + Tambah {tipe === "produksi" ? "Produksi" : "Pembelian"}
+            </button>
+          </div>
         }
       >
         {t.judul}
