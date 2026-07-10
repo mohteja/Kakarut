@@ -46,6 +46,12 @@ export class ApiError extends Error {
   }
 }
 
+/** Event global status server (dipakai overlay "server sedang diperbarui"). */
+export const SERVER_STATUS_EVENT = "kakarut:server-status";
+function emitServerDown(down: boolean) {
+  window.dispatchEvent(new CustomEvent(SERVER_STATUS_EVENT, { detail: { down } }));
+}
+
 export async function api<T = unknown>(
   path: string,
   opts: { method?: string; body?: unknown; formData?: FormData } = {},
@@ -55,11 +61,18 @@ export async function api<T = unknown>(
   if (auth?.token) headers.Authorization = `Bearer ${auth.token}`;
   if (opts.body !== undefined) headers["Content-Type"] = "application/json";
 
-  const res = await fetch(`/api${path}`, {
-    method: opts.method ?? "GET",
-    headers,
-    body: opts.formData ?? (opts.body !== undefined ? JSON.stringify(opts.body) : undefined),
-  });
+  let res: Response;
+  try {
+    res = await fetch(`/api${path}`, {
+      method: opts.method ?? "GET",
+      headers,
+      body: opts.formData ?? (opts.body !== undefined ? JSON.stringify(opts.body) : undefined),
+    });
+  } catch {
+    // gagal jaringan → server tak terjangkau (mis. sedang re-deploy)
+    emitServerDown(true);
+    throw new ApiError(0, "Tidak dapat terhubung ke server. Mungkin sedang diperbarui.");
+  }
 
   // 401 pada endpoint selain login = sesi berakhir → paksa ke halaman login.
   // Login yang gagal harus tetap menampilkan pesan asli dari server.
@@ -70,13 +83,24 @@ export async function api<T = unknown>(
   }
   if (!res.ok) {
     let message = `Kesalahan (${res.status})`;
+    let isJsonError = false;
     try {
       const data = (await res.json()) as { error?: string };
-      if (data.error) message = data.error;
+      if (data.error) {
+        message = data.error;
+        isJsonError = true;
+      }
     } catch {
       /* bukan JSON */
     }
+    // 404/5xx yang BUKAN respons JSON aplikasi = kemungkinan dari proxy saat
+    // container down (re-deploy). Tandai server sedang bermasalah → overlay.
+    if (!isJsonError && (res.status === 404 || res.status >= 500)) {
+      emitServerDown(true);
+    }
     throw new ApiError(res.status, message);
   }
+  // request berhasil menyentuh server → pastikan overlay tertutup
+  emitServerDown(false);
   return (await res.json()) as T;
 }

@@ -41,7 +41,11 @@ if (existsSync(webDist)) {
     if (c.req.path.startsWith("/api") || c.req.path.startsWith("/uploads")) {
       return c.json({ error: "Tidak ditemukan" }, 404);
     }
-    return c.html(indexHtml); // history fallback untuk react-router
+    // history fallback untuk react-router. HTML shell TIDAK di-cache agar
+    // setelah re-deploy browser selalu ambil index.html terbaru (referensi
+    // aset ber-hash baru) — mencegah 404 chunk lama.
+    c.header("Cache-Control", "no-cache");
+    return c.html(indexHtml);
   });
 } else {
   app.notFound((c) => c.json({ error: "Tidak ditemukan" }, 404));
