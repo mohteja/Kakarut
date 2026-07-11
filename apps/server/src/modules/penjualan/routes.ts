@@ -25,6 +25,9 @@ const SaleBody = z.object({
   /** identitas konsumen/member (opsional) */
   customer_nama: z.string().nullish(),
   customer_wa: z.string().nullish(),
+  /** pembayaran */
+  metode_bayar: z.enum(["tunai", "qris", "transfer"]).optional(),
+  uang_diterima: z.number().nonnegative().optional(),
   items: z
     .array(
       z.object({
@@ -57,6 +60,8 @@ export const penjualanRoutes = new Hono<AppEnv>()
       bypassDiskonLimit: auth.role !== "cashier",
       customerNama: body.customer_nama,
       customerWa: body.customer_wa,
+      metodeBayar: body.metode_bayar,
+      uangDiterima: body.uang_diterima,
       items: body.items,
     });
     return c.json(result, 201);
@@ -80,6 +85,7 @@ export const penjualanRoutes = new Hono<AppEnv>()
         meja: sales.mejaLabel,
         kasir: users.nama,
         konsumen: sales.customerNama,
+        metode: sales.metodeBayar,
         jumlah_item: sql<number>`(SELECT COUNT(*)::int FROM sale_items si WHERE si.sale_id = ${sales.id})`,
       })
       .from(sales)

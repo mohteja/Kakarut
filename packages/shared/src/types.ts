@@ -367,6 +367,7 @@ export interface RiwayatTransaksiRow {
   kasir: string | null;
   /** nama konsumen/member (null bila transaksi tanpa member) */
   konsumen: string | null;
+  metode: MetodeBayar;
 }
 
 /** Member/pelanggan pada daftar member area (dengan agregat transaksi). */
@@ -410,11 +411,16 @@ export interface SampahRow {
   dihapus_pada: string;
 }
 
+/** Metode pembayaran transaksi. */
+export type MetodeBayar = "tunai" | "qris" | "transfer";
+
 export interface LaporanHarian {
   dari: string;
   sampai: string;
   omzet: number;
   jumlah_transaksi: number;
+  /** rekap penjualan per metode bayar (total = omzet bruto/subtotal per metode) */
+  per_metode: { metode: MetodeBayar; jumlah: number; total: number }[];
   /** total potongan/diskon yang diberikan pada rentang (Rp) */
   total_diskon: number;
   pb1_terkumpul: number;
@@ -422,6 +428,48 @@ export interface LaporanHarian {
   estimasi_profit: number;
   item_terjual: { menu_nama: string; qty: number; omzet: number }[];
   konsumsi_bahan: { nama: string; slug: string; qty: number }[];
+}
+
+/** Satu baris ranking menu terlaris. */
+export interface MenuLarisRow {
+  menu_id: string;
+  nama: string;
+  kode: string | null;
+  kategori: string;
+  /** jumlah porsi terjual pada rentang */
+  qty: number;
+  /** omzet (Rp) dari menu ini pada rentang */
+  omzet: number;
+}
+
+/** Laporan menu terlaris pada rentang tanggal (urut qty terbanyak). */
+export interface MenuLaris {
+  dari: string;
+  sampai: string;
+  total_qty: number;
+  total_omzet: number;
+  items: MenuLarisRow[];
+}
+
+/** Sesi kas (shift) per cabang. ditutup_* null → shift masih terbuka. */
+export interface Shift {
+  id: string;
+  branch_nama: string;
+  dibuka_oleh: string;
+  dibuka_pada: string;
+  ditutup_oleh: string | null;
+  ditutup_pada: string | null;
+  modal_awal: number;
+  /** uang tunai fisik saat tutup (null selagi terbuka) */
+  uang_fisik: number | null;
+  catatan: string | null;
+  penjualan_tunai: number;
+  penjualan_nontunai: number;
+  jumlah_transaksi: number;
+  /** kas seharusnya di laci = modal_awal + penjualan_tunai */
+  kas_sistem: number;
+  /** uang_fisik − kas_sistem (null selagi terbuka) */
+  selisih: number | null;
 }
 
 /** Laporan pengeluaran pembelian bahan baku (faktur beli terkonfirmasi) per rentang tanggal. */

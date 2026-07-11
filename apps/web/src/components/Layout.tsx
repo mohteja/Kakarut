@@ -143,6 +143,9 @@ export function Layout() {
               <NavLink to="/kasir/riwayat" className={linkClass}>
                 🕘 Riwayat Transaksi
               </NavLink>
+              <NavLink to="/kasir/tutup" className={linkClass}>
+                🧮 Tutup Kasir
+              </NavLink>
               <NavLink to="/menu/lihat" className={linkClass}>
                 🍜 Lihat Menu
               </NavLink>

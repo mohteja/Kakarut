@@ -898,6 +898,57 @@ api "$OWNER" DELETE "/customer/$CM_ID" > /dev/null
 # member area khusus owner/admin
 cek "kasir GET /customer ditolak (403)" "V == 403" "$(status_code "$KASIR" GET /customer)"
 
+echo "== 34. Menu terlaris (ranking qty & omzet) =="
+api "$KASIR" POST /penjualan "{\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$PYO_ID\",\"qty\":4}]}" > /dev/null
+ML=$(api "$OWNER" GET "/laporan/menu-laris?branch_id=all")
+cek "menu-laris: ada item" "V >= 1" "$(echo "$ML" | jq '.items | length')"
+cek "menu-laris: urut qty menurun" "V == 1" \
+  "$(echo "$ML" | jq 'if (.items|length) >= 2 then (if .items[0].qty >= .items[1].qty then 1 else 0 end) else 1 end')"
+cek "menu-laris: PYO qty >= 4" "V >= 4" \
+  "$(echo "$ML" | jq --arg id "$PYO_ID" '[.items[] | select(.menu_id == $id)][0].qty // 0')"
+cek "menu-laris: PBA ber-kategori" "V == 1" \
+  "$(echo "$ML" | jq --arg id "$PBA_ID" '(([.items[] | select(.menu_id == $id)][0].kategori // "") | length > 0) | if . then 1 else 0 end')"
+cek "menu-laris: total_qty = SUM(items.qty)" "V == 1" \
+  "$(echo "$ML" | jq '((((.items|map(.qty)|add) - .total_qty) | if . < 0 then -. else . end) < 0.001) | if . then 1 else 0 end')"
+
+echo "== 35. Metode bayar + kembalian =="
+MB=$(api "$KASIR" POST /penjualan "{\"is_dine_in\":false,\"metode_bayar\":\"tunai\",\"uang_diterima\":50000,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")
+cek "tunai: metode tersimpan" "V == 1" "$(echo "$MB" | jq '(.sale.metodeBayar == "tunai") | if . then 1 else 0 end')"
+cek "tunai: uang diterima 50000" "V == 50000" "$(echo "$MB" | jq '.sale.uangDiterima')"
+cek "tunai: uang >= total (kembalian >= 0)" "V == 1" \
+  "$(echo "$MB" | jq '((.sale.uangDiterima - .sale.total) >= 0) | if . then 1 else 0 end')"
+MBQ=$(api "$KASIR" POST /penjualan "{\"is_dine_in\":false,\"metode_bayar\":\"qris\",\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")
+cek "qris: metode tersimpan" "V == 1" "$(echo "$MBQ" | jq '(.sale.metodeBayar == "qris") | if . then 1 else 0 end')"
+cek "qris: uang diterima null" "V == 1" "$(echo "$MBQ" | jq '(.sale.uangDiterima == null) | if . then 1 else 0 end')"
+cek "tunai uang < total ditolak (400)" "V == 400" \
+  "$(jp "$KASIR" "{\"is_dine_in\":false,\"metode_bayar\":\"tunai\",\"uang_diterima\":1000,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")"
+MBD=$(api "$KASIR" POST /penjualan "{\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")
+cek "default metode = tunai" "V == 1" "$(echo "$MBD" | jq '(.sale.metodeBayar == "tunai") | if . then 1 else 0 end')"
+LAPM=$(api "$OWNER" GET "/laporan?branch_id=all")
+cek "laporan: per_metode memuat tunai & qris" "V == 1" \
+  "$(echo "$LAPM" | jq '([.per_metode[].metode] | (index("tunai") != null) and (index("qris") != null)) | if . then 1 else 0 end')"
+
+echo "== 36. Tutup kasir / shift =="
+SH=$(api "$KASIR" POST /shift/buka '{"modal_awal":200000}')
+cek "buka shift: modal awal 200000" "V == 200000" "$(echo "$SH" | jq '.modal_awal')"
+cek "buka shift: masih terbuka" "V == 1" "$(echo "$SH" | jq '(.ditutup_pada == null) | if . then 1 else 0 end')"
+cek "buka shift kedua ditolak (400)" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/shift/buka" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d '{"modal_awal":0}')"
+# transaksi dalam shift: tunai + qris
+api "$KASIR" POST /penjualan "{\"is_dine_in\":false,\"metode_bayar\":\"tunai\",\"uang_diterima\":50000,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}" > /dev/null
+api "$KASIR" POST /penjualan "{\"is_dine_in\":false,\"metode_bayar\":\"qris\",\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}" > /dev/null
+AK=$(api "$KASIR" GET /shift/aktif)
+cek "shift aktif: penjualan tunai >= 34000" "V >= 34000" "$(echo "$AK" | jq '.penjualan_tunai')"
+cek "shift aktif: non-tunai >= 34000" "V >= 34000" "$(echo "$AK" | jq '.penjualan_nontunai')"
+cek "shift aktif: kas sistem = modal + tunai" "V == 1" \
+  "$(echo "$AK" | jq '(.kas_sistem == (.modal_awal + .penjualan_tunai)) | if . then 1 else 0 end')"
+KAS=$(echo "$AK" | jq '.kas_sistem')
+TU=$(api "$KASIR" POST /shift/tutup "{\"uang_fisik\":$KAS}")
+cek "tutup shift: selisih 0 (uang fisik = kas)" "V == 1" "$(echo "$TU" | jq '(.selisih == 0) | if . then 1 else 0 end')"
+cek "tutup shift: ditutup terisi" "V == 1" "$(echo "$TU" | jq '(.ditutup_pada != null) | if . then 1 else 0 end')"
+cek "setelah tutup: tak ada shift aktif" "V == 1" "$(api "$KASIR" GET /shift/aktif | jq '(. == null) | if . then 1 else 0 end')"
+cek "riwayat shift: ada shift tertutup" "V >= 1" "$(api "$KASIR" GET /shift | jq 'length')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

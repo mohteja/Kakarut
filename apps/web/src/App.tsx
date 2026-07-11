@@ -7,7 +7,9 @@ import { PrinterPage } from "./pages/pengaturan/PrinterPage";
 import { BahanPage } from "./pages/bahan/BahanPage";
 import { KasirPage } from "./pages/kasir/KasirPage";
 import { RiwayatPage } from "./pages/kasir/RiwayatPage";
+import { ShiftPage } from "./pages/kasir/ShiftPage";
 import { LaporanPage } from "./pages/laporan/LaporanPage";
+import { LaporanMenuLarisPage } from "./pages/laporan/LaporanMenuLarisPage";
 import { LaporanPembelianPage } from "./pages/laporan/LaporanPembelianPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { LoginPage } from "./pages/LoginPage";
@@ -74,6 +76,7 @@ export default function App() {
             <>
               <Route path="/kasir" element={<KasirPage />} />
               <Route path="/kasir/riwayat" element={<RiwayatPage />} />
+              <Route path="/kasir/tutup" element={<ShiftPage />} />
               <Route path="/menu/lihat" element={<LihatMenuPage />} />
               <Route path="/stok" element={<StokPage />} />
               <Route path="/penerimaan" element={<PenerimaanPage />} />
@@ -92,6 +95,7 @@ export default function App() {
                   <Route path="/pembelian/rekomendasi" element={<RekomendasiBeliPage />} />
                   <Route path="/laporan" element={<LaporanPage />} />
                   <Route path="/laporan/pembelian" element={<LaporanPembelianPage />} />
+                  <Route path="/laporan/menu-laris" element={<LaporanMenuLarisPage />} />
                   <Route path="/sampah" element={<TempatSampahPage />} />
                   <Route path="/bahan" element={<BahanPage />} />
                   <Route path="/member" element={<MemberPage />} />

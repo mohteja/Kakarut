@@ -178,6 +178,24 @@ describe("buildReceiptBytes", () => {
     expect(all).toContain("* tanpa gula");
   });
 
+  it("identitas pesanan: antrian + nama konsumen, WA konsumen TIDAK dicetak", () => {
+    const all = textLines(
+      buildReceiptBytes(
+        { ...DATA, customerNama: "Andi Wijaya", customerWa: "081234567890", mejaLabel: "Meja 3" },
+        OPTS,
+      ),
+    ).join("\n");
+    expect(all).toContain("Antrian 1"); // dari sekuens nomor …-0001
+    expect(all).toContain("Andi Wijaya");
+    expect(all).toContain("Meja: Meja 3");
+    expect(all).not.toContain("081234567890"); // WA rahasia — tak boleh ada di nota
+  });
+
+  it("tanpa konsumen: meja menjadi identitas pesanan", () => {
+    const all = textLines(buildReceiptBytes({ ...DATA, mejaLabel: "Meja 5" }, OPTS)).join("\n");
+    expect(all).toContain("Meja 5");
+  });
+
   it("catatan kosong/spasi-saja tidak mencetak baris bullet", () => {
     const b2 = buildReceiptBytes(
       {

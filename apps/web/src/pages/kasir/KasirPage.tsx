@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import type { MejaDto, MenuDto } from "@kakarut/shared";
+import type { MejaDto, MenuDto, MetodeBayar } from "@kakarut/shared";
 import { Card, ErrorText, Spinner, btnPrimary } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { useBranch } from "../../context/BranchContext";
@@ -74,6 +74,8 @@ export function KasirPage() {
   const [konsumenWa, setKonsumenWa] = useState("");
   const [diskonTipe, setDiskonTipe] = useState<"persen" | "nominal">("nominal");
   const [diskonNilai, setDiskonNilai] = useState("");
+  const [metodeBayar, setMetodeBayar] = useState<MetodeBayar>("tunai");
+  const [uangDiterima, setUangDiterima] = useState("");
   const [struk, setStruk] = useState<SaleResult | null>(null);
 
   const mejaAktif = useMemo(() => mejaList.filter((m) => m.is_active), [mejaList]);
@@ -200,6 +202,10 @@ export function KasirPage() {
   const subtotalNet = subtotal - diskon;
   const pb1 = pb1Conf?.pb1_enabled ? Math.round(subtotalNet * (pb1Conf.pb1_rate / 100)) : 0;
   const total = subtotalNet + pb1;
+  // pembayaran tunai: uang diterima → kembalian; kurang = uang < total
+  const uangNum = Number(uangDiterima) || 0;
+  const uangKurang = metodeBayar === "tunai" && uangNum > 0 && uangNum < total;
+  const kembalian = metodeBayar === "tunai" && uangNum > total ? uangNum - total : 0;
 
   const bayar = useMutation({
     mutationFn: () =>
@@ -212,6 +218,8 @@ export function KasirPage() {
           catatan: catatan || undefined,
           ...(konsumenNama.trim() ? { customer_nama: konsumenNama.trim() } : {}),
           ...(konsumenWa.trim() ? { customer_wa: konsumenWa.trim() } : {}),
+          metode_bayar: metodeBayar,
+          ...(metodeBayar === "tunai" && uangNum > 0 ? { uang_diterima: uangNum } : {}),
           ...(diskon > 0 ? { diskon_tipe: diskonTipe, diskon_nilai: diskonNilaiNum } : {}),
           items: cart.map((l) => ({
             menu_id: l.menu.id,
@@ -228,6 +236,8 @@ export function KasirPage() {
       setKonsumenNama("");
       setKonsumenWa("");
       setDiskonNilai("");
+      setMetodeBayar("tunai");
+      setUangDiterima("");
       setMejaId(null);
       // modal pilih meja dibuka lagi saat struk ditutup (transaksi berikutnya)
       queryClient.invalidateQueries({ queryKey: ["stok"] });
@@ -439,6 +449,23 @@ export function KasirPage() {
           </span>
         </button>
 
+        {/* Konsumen/member (opsional) — di bawah meja; WA jadi kunci member area */}
+        <div className="mb-3 grid grid-cols-2 gap-2">
+          <input
+            value={konsumenNama}
+            onChange={(e) => setKonsumenNama(e.target.value)}
+            placeholder="👤 Nama konsumen"
+            className="w-full rounded-lg border border-stone-300 px-3 py-1.5 text-sm"
+          />
+          <input
+            value={konsumenWa}
+            onChange={(e) => setKonsumenWa(e.target.value)}
+            inputMode="tel"
+            placeholder="📱 No. WhatsApp"
+            className="w-full rounded-lg border border-stone-300 px-3 py-1.5 text-sm"
+          />
+        </div>
+
         <div className="space-y-2 md:flex-1 md:overflow-y-auto">
           {cart.length === 0 && (
             <div className="py-10 text-center text-sm text-stone-400">
@@ -503,22 +530,6 @@ export function KasirPage() {
         </div>
 
         <div className="mt-3 space-y-2 border-t border-stone-200 pt-3">
-          {/* Konsumen/member (opsional) — WA jadi kunci member area */}
-          <div className="grid grid-cols-2 gap-2">
-            <input
-              value={konsumenNama}
-              onChange={(e) => setKonsumenNama(e.target.value)}
-              placeholder="👤 Nama konsumen"
-              className="w-full rounded-lg border border-stone-300 px-3 py-1.5 text-sm"
-            />
-            <input
-              value={konsumenWa}
-              onChange={(e) => setKonsumenWa(e.target.value)}
-              inputMode="tel"
-              placeholder="📱 No. WhatsApp"
-              className="w-full rounded-lg border border-stone-300 px-3 py-1.5 text-sm"
-            />
-          </div>
           <input
             value={catatan}
             onChange={(e) => setCatatan(e.target.value)}
@@ -583,6 +594,67 @@ export function KasirPage() {
             <span>Total</span>
             <span>{formatRupiah(total)}</span>
           </div>
+
+          {/* Metode pembayaran */}
+          <div className="grid grid-cols-3 gap-1.5 pt-1">
+            {(["tunai", "qris", "transfer"] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setMetodeBayar(m)}
+                className={`rounded-lg border px-2 py-1.5 text-sm font-medium ${
+                  metodeBayar === m
+                    ? "border-orange-600 bg-orange-600 text-white"
+                    : "border-stone-300 bg-white text-stone-600 hover:bg-stone-50"
+                }`}
+              >
+                {m === "tunai" ? "💵 Tunai" : m === "qris" ? "📱 QRIS" : "🏦 Transfer"}
+              </button>
+            ))}
+          </div>
+          {metodeBayar === "tunai" && (
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min="0"
+                  value={uangDiterima}
+                  onChange={(e) => setUangDiterima(e.target.value)}
+                  placeholder="Uang diterima"
+                  className="w-full rounded-lg border border-stone-300 px-3 py-1.5 text-right text-sm focus:border-orange-500 focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => setUangDiterima(String(total))}
+                  className="shrink-0 rounded-lg border border-stone-300 px-2 py-1.5 text-xs font-medium text-stone-600 hover:bg-stone-50"
+                >
+                  Uang pas
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {[20000, 50000, 100000].map((n) => (
+                  <button
+                    key={n}
+                    type="button"
+                    onClick={() => setUangDiterima(String(n))}
+                    className="rounded-lg border border-stone-300 px-2 py-1 text-xs font-medium text-stone-600 hover:bg-stone-50"
+                  >
+                    {formatRupiah(n)}
+                  </button>
+                ))}
+              </div>
+              {uangNum > 0 && (
+                <div
+                  className={`flex justify-between text-sm font-semibold ${uangKurang ? "text-red-600" : "text-green-600"}`}
+                >
+                  <span>{uangKurang ? "Uang kurang" : "Kembalian"}</span>
+                  <span>{formatRupiah(uangKurang ? total - uangNum : kembalian)}</span>
+                </div>
+              )}
+            </div>
+          )}
+
           <ErrorText error={bayar.error} />
           {cart.length > 0 && !mejaId && (
             <div className="text-center text-xs font-medium text-amber-600">
@@ -591,7 +663,7 @@ export function KasirPage() {
           )}
           <button
             onClick={() => bayar.mutate()}
-            disabled={cart.length === 0 || !mejaId || bayar.isPending}
+            disabled={cart.length === 0 || !mejaId || uangKurang || bayar.isPending}
             className={`${btnPrimary} w-full py-3 text-base`}
           >
             {bayar.isPending ? "Memproses…" : "Bayar & Cetak Struk"}

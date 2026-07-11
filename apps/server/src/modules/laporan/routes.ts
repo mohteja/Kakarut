@@ -1,11 +1,13 @@
 import { and, desc, eq, gte, isNull, lte, sql, sum } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-import type { LaporanHarian, LaporanPembelian } from "@kakarut/shared";
+import type { LaporanHarian, LaporanPembelian, MenuLaris } from "@kakarut/shared";
 import { db } from "../../db/client";
 import {
   companies,
   ingredients,
+  menuCategories,
+  menus,
   productions,
   saleConsumptions,
   saleItems,
@@ -97,6 +99,18 @@ export const laporanRoutes = new Hono<AppEnv>()
       .groupBy(ingredients.nama, ingredients.slug)
       .orderBy(desc(sum(saleConsumptions.qty)));
 
+    // rekap uang masuk per metode bayar (total = nilai yang benar-benar dibayar)
+    const perMetode = await db
+      .select({
+        metode: sales.metodeBayar,
+        jumlah: sql<number>`count(*)::int`,
+        total: sum(sales.total),
+      })
+      .from(sales)
+      .where(saleFilter)
+      .groupBy(sales.metodeBayar)
+      .orderBy(desc(sum(sales.total)));
+
     const omzet = Number(agg?.omzet ?? 0);
     const totalDiskon = Number(agg?.diskon ?? 0);
     const totalHpp = Number(agg?.totalHpp ?? 0);
@@ -105,6 +119,11 @@ export const laporanRoutes = new Hono<AppEnv>()
       sampai,
       omzet,
       jumlah_transaksi: agg?.jumlah ?? 0,
+      per_metode: perMetode.map((r) => ({
+        metode: r.metode,
+        jumlah: r.jumlah,
+        total: Number(r.total ?? 0),
+      })),
       total_diskon: totalDiskon,
       pb1_terkumpul: Number(agg?.pb1 ?? 0),
       total_hpp: totalHpp,
@@ -206,6 +225,64 @@ export const laporanRoutes = new Hono<AppEnv>()
         satuan: r.satuan,
         total: Number(r.total ?? 0),
       })),
+    };
+    return c.json(laporan);
+  })
+  /**
+   * Menu terlaris pada rentang tanggal: agregasi porsi terjual (qty) & omzet
+   * per menu (dari snapshot sale_items), digabung info kategori/kode menu.
+   * Diurut porsi terbanyak. Owner/admin bisa pilih cabang (?branch_id=<id>|all).
+   */
+  .get("/menu-laris", async (c) => {
+    const auth = c.get("auth");
+    const branchCond = await branchCondLaporan(c);
+    const [company] = await db
+      .select({ timezone: companies.timezone })
+      .from(companies)
+      .where(eq(companies.id, auth.company_id!));
+    const today = tanggalDi(company?.timezone ?? "Asia/Jakarta");
+    const sampai = tglValid(c.req.query("sampai")) ?? today;
+    const dari = tglValid(c.req.query("dari")) ?? sampai;
+
+    const saleFilter = and(
+      eq(sales.companyId, auth.company_id!),
+      branchCond,
+      gte(sales.saleDate, dari),
+      lte(sales.saleDate, sampai),
+      isNull(sales.deletedAt),
+    );
+
+    const rows = await db
+      .select({
+        menu_id: saleItems.menuId,
+        nama: menus.nama,
+        kode: menus.kode,
+        kategori: sql<string>`COALESCE(${menuCategories.nama}, '')`,
+        qty: sum(saleItems.qty),
+        omzet: sum(saleItems.lineTotal),
+      })
+      .from(saleItems)
+      .innerJoin(sales, eq(saleItems.saleId, sales.id))
+      .innerJoin(menus, eq(saleItems.menuId, menus.id))
+      .leftJoin(menuCategories, eq(menus.categoryId, menuCategories.id))
+      .where(saleFilter)
+      .groupBy(saleItems.menuId, menus.nama, menus.kode, menuCategories.nama)
+      .orderBy(desc(sum(saleItems.qty)), desc(sum(saleItems.lineTotal)));
+
+    const items = rows.map((r) => ({
+      menu_id: r.menu_id,
+      nama: r.nama,
+      kode: r.kode,
+      kategori: r.kategori,
+      qty: Number(r.qty ?? 0),
+      omzet: Number(r.omzet ?? 0),
+    }));
+    const laporan: MenuLaris = {
+      dari,
+      sampai,
+      total_qty: items.reduce((a, r) => a + r.qty, 0),
+      total_omzet: items.reduce((a, r) => a + r.omzet, 0),
+      items,
     };
     return c.json(laporan);
   })

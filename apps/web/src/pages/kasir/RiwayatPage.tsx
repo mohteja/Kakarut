@@ -9,6 +9,12 @@ import { api } from "../../lib/api";
 import { formatRupiah, formatWaktu, hariIniWIB } from "../../lib/format";
 import { ReceiptModal, type SaleResult } from "./ReceiptModal";
 
+const METODE_LABEL: Record<string, string> = {
+  tunai: "💵 Tunai",
+  qris: "📱 QRIS",
+  transfer: "🏦 Transfer",
+};
+
 /**
  * Riwayat transaksi kasir: cek pesanan bila ada kekeliruan + cetak ulang struk.
  */
@@ -87,6 +93,7 @@ export function RiwayatPage() {
                   {formatWaktu(r.waktu)} · {r.jumlah_item} item
                   {r.meja && ` · ${r.meja}`}
                   {r.kasir && ` · ${r.kasir}`}
+                  {` · ${METODE_LABEL[r.metode] ?? r.metode}`}
                 </div>
                 {r.konsumen && (
                   <div className="truncate text-xs font-medium text-orange-600">👤 {r.konsumen}</div>

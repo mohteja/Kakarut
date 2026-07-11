@@ -3,6 +3,13 @@
  * auto-print setelah pembayaran, dan Cetak Tes di pengaturan printer.
  */
 import { EscPosBuilder } from "./escpos";
+import type { MetodeBayar } from "./types";
+
+const METODE_LABEL: Record<MetodeBayar, string> = {
+  tunai: "Tunai",
+  qris: "QRIS",
+  transfer: "Transfer",
+};
 
 export interface ReceiptItem {
   nama: string;
@@ -41,6 +48,10 @@ export interface ReceiptData {
   pb1Amount: number;
   pb1Rate?: number | null;
   total: number;
+  /** metode pembayaran (null/undefined → tak ditampilkan) */
+  metodeBayar?: MetodeBayar | null;
+  /** uang tunai diterima (untuk hitung kembalian di struk) */
+  uangDiterima?: number | null;
   catatan?: string | null;
   /** teks footer dari pengaturan perusahaan */
   footer?: string | null;
@@ -78,10 +89,18 @@ export function buildReceiptBytes(data: ReceiptData, opts: ReceiptOptions): Uint
   b.align("left").divider();
   b.line(data.nomor, data.waktu);
   b.text(data.isDineIn ? "Dine-in" : "Bawa pulang");
-  if (data.mejaLabel) b.text(`Meja: ${data.mejaLabel}`);
-  if (data.customerNama) {
-    b.text(`Konsumen: ${data.customerNama}${data.customerWa ? ` (${data.customerWa})` : ""}`);
+  // Nomor antrian (urutan hari ini, dari akhir nomor struk) — paling menonjol
+  const antrian = Number(data.nomor.slice(-4));
+  if (Number.isFinite(antrian) && antrian > 0) {
+    b.align("center").bold(true).size("tall").text(`Antrian ${antrian}`).size("normal").bold(false).align("left");
   }
+  // Identitas pesanan: nama konsumen bila ada, jika tidak → meja
+  const pesananUntuk = data.customerNama || data.mejaLabel;
+  if (pesananUntuk) {
+    b.align("center").bold(true).text(pesananUntuk).bold(false).align("left");
+  }
+  if (data.customerNama && data.mejaLabel) b.text(`Meja: ${data.mejaLabel}`);
+  // Catatan: nomor WhatsApp konsumen SENGAJA tidak dicetak (privasi).
   b.divider();
 
   // Item
@@ -106,6 +125,15 @@ export function buildReceiptBytes(data: ReceiptData, opts: ReceiptOptions): Uint
     b.line(`PB1${data.pb1Rate ? ` ${data.pb1Rate}%` : ""}`, formatRupiahAscii(data.pb1Amount));
   }
   b.bold(true).size("tall").line("TOTAL", formatRupiahAscii(data.total)).size("normal").bold(false);
+
+  // Metode bayar + kembalian (tunai)
+  if (data.metodeBayar) {
+    b.text(`Metode: ${METODE_LABEL[data.metodeBayar]}`);
+    if (data.metodeBayar === "tunai" && data.uangDiterima != null) {
+      b.line("Tunai", formatRupiahAscii(data.uangDiterima));
+      b.line("Kembali", formatRupiahAscii(Math.max(0, data.uangDiterima - data.total)));
+    }
+  }
 
   if (data.catatan) {
     b.divider().text(`Catatan: ${data.catatan}`);
