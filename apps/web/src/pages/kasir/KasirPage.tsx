@@ -55,6 +55,14 @@ export function KasirPage() {
 
   const [aktifKategori, setAktifKategori] = useState<string | null>(null);
   const [cariMenu, setCariMenu] = useState("");
+  // Mode tampilan katalog: "foto" (kartu thumbnail) / "kode" (ringkas per kategori)
+  const [tampilan, setTampilan] = useState<"foto" | "kode">(() => {
+    try {
+      return localStorage.getItem("kakarut.kasirTampilan") === "kode" ? "kode" : "foto";
+    } catch {
+      return "foto";
+    }
+  });
   const [cart, setCart] = useState<CartLine[]>([]);
   const [mejaId, setMejaId] = useState<string | null>(null);
   // Modal pilih meja muncul lebih dulu tiap memulai transaksi (sebelum keranjang).
@@ -88,6 +96,15 @@ export function KasirPage() {
     if (mejaModalOpen) setMejaCari("");
   }, [mejaModalOpen]);
 
+  // Simpan preferensi tampilan katalog (foto / kode) antar sesi.
+  useEffect(() => {
+    try {
+      localStorage.setItem("kakarut.kasirTampilan", tampilan);
+    } catch {
+      /* localStorage tak tersedia */
+    }
+  }, [tampilan]);
+
   function pilihMeja(id: string) {
     setMejaId(id);
     setMejaModalOpen(false);
@@ -109,6 +126,25 @@ export function KasirPage() {
     if (!aktifKategori) return list;
     return list.filter((m) => m.category_id === aktifKategori);
   }, [menus, aktifKategori, cariMenu]);
+
+  // Tampilan "kode": semua menu dikelompokkan per kategori (lintas kategori,
+  // mengabaikan kategori aktif) — semua kategori tampil sekaligus. Pencarian
+  // nama/kode tetap berlaku.
+  const menuKodeGroups = useMemo(() => {
+    const q = cariMenu.trim().toLowerCase();
+    const list = (menus ?? []).filter(
+      (m) => !q || m.nama.toLowerCase().includes(q) || (m.kode?.toLowerCase().includes(q) ?? false),
+    );
+    const byCat = new Map<string, MenuDto[]>();
+    for (const m of list) {
+      const arr = byCat.get(m.category_id) ?? [];
+      arr.push(m);
+      byCat.set(m.category_id, arr);
+    }
+    return kategoriTampil
+      .map((k) => ({ kategori: k, items: byCat.get(k.id) ?? [] }))
+      .filter((g) => g.items.length > 0);
+  }, [menus, cariMenu, kategoriTampil]);
 
   function tambah(menu: MenuDto) {
     setCart((prev) => {
@@ -210,75 +246,146 @@ export function KasirPage() {
           placeholder="🔍 Cari menu / kode…"
           className="mb-3 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm focus:border-orange-500 focus:outline-none"
         />
-        <div className="mb-3 flex flex-wrap gap-2">
-          <button
-            onClick={() => {
-              setAktifKategori(null);
-              setCariMenu("");
-            }}
-            className={`rounded-full px-3 py-1.5 text-sm font-medium ${
-              aktifKategori === null && !cariMenu
-                ? "bg-orange-600 text-white"
-                : "bg-white text-stone-600 hover:bg-stone-50"
-            }`}
-          >
-            Semua
-          </button>
-          {kategoriTampil.map((k) => (
+        {/* Toggle tampilan: foto (thumbnail) / kode (ringkas per kategori) */}
+        <div className="mb-3 flex items-center gap-2">
+          <div className="flex overflow-hidden rounded-lg border border-stone-300 text-sm">
             <button
-              key={k.id}
-              onClick={() => {
-                setAktifKategori(k.id);
-                setCariMenu("");
-              }}
-              className={`rounded-full px-3 py-1.5 text-sm font-medium ${
-                aktifKategori === k.id && !cariMenu
+              type="button"
+              onClick={() => setTampilan("foto")}
+              className={`px-3 py-1.5 font-medium ${
+                tampilan === "foto"
                   ? "bg-orange-600 text-white"
                   : "bg-white text-stone-600 hover:bg-stone-50"
               }`}
             >
-              {k.nama}
+              🖼 Foto
             </button>
-          ))}
+            <button
+              type="button"
+              onClick={() => setTampilan("kode")}
+              className={`px-3 py-1.5 font-medium ${
+                tampilan === "kode"
+                  ? "bg-orange-600 text-white"
+                  : "bg-white text-stone-600 hover:bg-stone-50"
+              }`}
+            >
+              🔤 Kode
+            </button>
+          </div>
         </div>
 
-        <div className="grid auto-rows-min grid-cols-2 gap-3 pb-4 md:flex-1 md:grid-cols-3 md:overflow-y-auto xl:grid-cols-4">
-          {menuTampil.map((m) => (
+        {/* Kategori — hanya pada tampilan foto; tampilan kode menampilkan semua kategori sekaligus */}
+        {tampilan === "foto" && (
+          <div className="mb-3 flex flex-wrap gap-2">
             <button
-              key={m.id}
-              onClick={() => tambah(m)}
-              className="flex flex-col rounded-xl border border-stone-200 bg-white p-3 text-left shadow-sm transition hover:border-orange-400 hover:shadow"
+              onClick={() => {
+                setAktifKategori(null);
+                setCariMenu("");
+              }}
+              className={`rounded-full px-3 py-1.5 text-sm font-medium ${
+                aktifKategori === null && !cariMenu
+                  ? "bg-orange-600 text-white"
+                  : "bg-white text-stone-600 hover:bg-stone-50"
+              }`}
             >
-              {m.image_url ? (
-                <img
-                  src={m.image_url}
-                  alt={m.nama}
-                  className="mb-2 h-20 w-full rounded-lg object-cover"
-                />
-              ) : (
-                <div className="mb-2 flex h-20 w-full items-center justify-center rounded-lg bg-orange-50 text-2xl">
-                  🍜
-                </div>
-              )}
-              <div className="flex items-start gap-1.5">
-                {m.kode && (
-                  <span className="shrink-0 rounded bg-orange-100 px-1.5 py-0.5 font-mono text-[11px] font-bold leading-tight text-orange-700">
-                    {m.kode}
-                  </span>
-                )}
-                <div className="line-clamp-2 text-sm font-semibold text-stone-800">{m.nama}</div>
-              </div>
-              <div className="mt-auto pt-1 text-sm font-bold text-orange-600">
-                {formatRupiah(m.harga_jual)}
-              </div>
+              Semua
             </button>
-          ))}
-          {menuTampil.length === 0 && (
-            <div className="col-span-full py-10 text-center text-stone-400">
-              {cariMenu ? `Menu "${cariMenu}" tidak ditemukan.` : "Tidak ada menu di kategori ini."}
-            </div>
-          )}
-        </div>
+            {kategoriTampil.map((k) => (
+              <button
+                key={k.id}
+                onClick={() => {
+                  setAktifKategori(k.id);
+                  setCariMenu("");
+                }}
+                className={`rounded-full px-3 py-1.5 text-sm font-medium ${
+                  aktifKategori === k.id && !cariMenu
+                    ? "bg-orange-600 text-white"
+                    : "bg-white text-stone-600 hover:bg-stone-50"
+                }`}
+              >
+                {k.nama}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {tampilan === "foto" ? (
+          <div className="grid auto-rows-min grid-cols-2 gap-3 pb-4 md:flex-1 md:grid-cols-3 md:overflow-y-auto xl:grid-cols-4">
+            {menuTampil.map((m) => (
+              <button
+                key={m.id}
+                onClick={() => tambah(m)}
+                className="flex flex-col rounded-xl border border-stone-200 bg-white p-3 text-left shadow-sm transition hover:border-orange-400 hover:shadow"
+              >
+                {m.image_url ? (
+                  <img
+                    src={m.image_url}
+                    alt={m.nama}
+                    className="mb-2 h-20 w-full rounded-lg object-cover"
+                  />
+                ) : (
+                  <div className="mb-2 flex h-20 w-full items-center justify-center rounded-lg bg-orange-50 text-2xl">
+                    🍜
+                  </div>
+                )}
+                <div className="flex items-start gap-1.5">
+                  {m.kode && (
+                    <span className="shrink-0 rounded bg-orange-100 px-1.5 py-0.5 font-mono text-[11px] font-bold leading-tight text-orange-700">
+                      {m.kode}
+                    </span>
+                  )}
+                  <div className="line-clamp-2 text-sm font-semibold text-stone-800">{m.nama}</div>
+                </div>
+                <div className="mt-auto pt-1 text-sm font-bold text-orange-600">
+                  {formatRupiah(m.harga_jual)}
+                </div>
+              </button>
+            ))}
+            {menuTampil.length === 0 && (
+              <div className="col-span-full py-10 text-center text-stone-400">
+                {cariMenu ? `Menu "${cariMenu}" tidak ditemukan.` : "Tidak ada menu di kategori ini."}
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="space-y-4 pb-4 md:flex-1 md:overflow-y-auto">
+            {menuKodeGroups.map((g) => (
+              <div key={g.kategori.id}>
+                <div className="mb-1.5 text-xs font-bold uppercase tracking-wide text-stone-400">
+                  {g.kategori.nama}
+                </div>
+                <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2 2xl:grid-cols-3">
+                  {g.items.map((m) => (
+                    <button
+                      key={m.id}
+                      onClick={() => tambah(m)}
+                      className="flex items-center justify-between gap-2 rounded-lg border border-stone-200 bg-white px-2.5 py-2 text-left transition hover:border-orange-400 hover:shadow-sm"
+                    >
+                      <span className="flex min-w-0 items-center gap-2">
+                        {m.kode && (
+                          <span className="shrink-0 rounded bg-orange-100 px-1.5 py-0.5 font-mono text-[11px] font-bold text-orange-700">
+                            {m.kode}
+                          </span>
+                        )}
+                        <span className="truncate text-sm font-semibold text-stone-800">
+                          {m.nama}
+                        </span>
+                      </span>
+                      <span className="shrink-0 text-sm font-bold text-orange-600">
+                        {formatRupiah(m.harga_jual)}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+            {menuKodeGroups.length === 0 && (
+              <div className="py-10 text-center text-stone-400">
+                {cariMenu ? `Menu "${cariMenu}" tidak ditemukan.` : "Belum ada menu."}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Keranjang — di ATAS pada mobile, kanan pada desktop */}
