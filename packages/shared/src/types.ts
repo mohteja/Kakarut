@@ -424,6 +424,27 @@ export interface LaporanHarian {
   konsumsi_bahan: { nama: string; slug: string; qty: number }[];
 }
 
+/** Satu baris ranking menu terlaris. */
+export interface MenuLarisRow {
+  menu_id: string;
+  nama: string;
+  kode: string | null;
+  kategori: string;
+  /** jumlah porsi terjual pada rentang */
+  qty: number;
+  /** omzet (Rp) dari menu ini pada rentang */
+  omzet: number;
+}
+
+/** Laporan menu terlaris pada rentang tanggal (urut qty terbanyak). */
+export interface MenuLaris {
+  dari: string;
+  sampai: string;
+  total_qty: number;
+  total_omzet: number;
+  items: MenuLarisRow[];
+}
+
 /** Laporan pengeluaran pembelian bahan baku (faktur beli terkonfirmasi) per rentang tanggal. */
 export interface LaporanPembelian {
   dari: string;

@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import type { LaporanHarian, LaporanPembelian, StokRowDto } from "@kakarut/shared";
+import type { LaporanHarian, LaporanPembelian, MenuLaris, StokRowDto } from "@kakarut/shared";
 import { Card, PageTitle, Spinner, StatusBadge, tdClass, thClass } from "../components/ui";
 import { useAuth } from "../context/AuthContext";
 import { useBranch } from "../context/BranchContext";
@@ -57,6 +57,10 @@ export function DashboardPage() {
     queryKey: ["stok", branchQuery],
     queryFn: () => api<StokRowDto[]>(`/stok${branchQuery}`),
   });
+  const { data: laris } = useQuery({
+    queryKey: ["menu-laris", hari, hari, branchId],
+    queryFn: () => api<MenuLaris>(`/laporan/menu-laris?dari=${hari}&sampai=${hari}${branchParam}`),
+  });
   const { data: pen } = useQuery({
     queryKey: ["penerimaan", branchQuery],
     queryFn: () => api<{ rows: { status: string }[] }>(`/penerimaan${branchQuery}`),
@@ -104,6 +108,32 @@ export function DashboardPage() {
               <StatCard label="HPP terpakai" value={formatRupiah(jual.total_hpp)} />
             </div>
           </div>
+
+          {/* Menu terlaris hari ini */}
+          {laris && laris.items.length > 0 && (
+            <div>
+              <div className="mb-2 flex items-center justify-between">
+                <h2 className="text-lg font-semibold text-stone-700">🔥 Menu terlaris hari ini</h2>
+                <Link to="/laporan/menu-laris" className="text-sm font-medium text-orange-600 hover:underline">
+                  Lihat semua →
+                </Link>
+              </div>
+              <Card className="divide-y divide-stone-100">
+                {laris.items.slice(0, 5).map((m, i) => (
+                  <div key={m.menu_id} className="flex items-center gap-3 px-4 py-2.5">
+                    <div className="w-6 shrink-0 text-center text-lg font-bold text-stone-400">
+                      {i < 3 ? ["🥇", "🥈", "🥉"][i] : i + 1}
+                    </div>
+                    <div className="min-w-0 flex-1 truncate font-medium text-stone-800">{m.nama}</div>
+                    <div className="shrink-0 text-right text-sm">
+                      <span className="font-bold text-stone-800">{formatAngka(m.qty)} porsi</span>
+                      <span className="ml-2 text-orange-600">{formatRupiah(m.omzet)}</span>
+                    </div>
+                  </div>
+                ))}
+              </Card>
+            </div>
+          )}
 
           {/* Perlu perhatian */}
           <div>

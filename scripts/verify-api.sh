@@ -898,6 +898,19 @@ api "$OWNER" DELETE "/customer/$CM_ID" > /dev/null
 # member area khusus owner/admin
 cek "kasir GET /customer ditolak (403)" "V == 403" "$(status_code "$KASIR" GET /customer)"
 
+echo "== 34. Menu terlaris (ranking qty & omzet) =="
+api "$KASIR" POST /penjualan "{\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$PYO_ID\",\"qty\":4}]}" > /dev/null
+ML=$(api "$OWNER" GET "/laporan/menu-laris?branch_id=all")
+cek "menu-laris: ada item" "V >= 1" "$(echo "$ML" | jq '.items | length')"
+cek "menu-laris: urut qty menurun" "V == 1" \
+  "$(echo "$ML" | jq 'if (.items|length) >= 2 then (if .items[0].qty >= .items[1].qty then 1 else 0 end) else 1 end')"
+cek "menu-laris: PYO qty >= 4" "V >= 4" \
+  "$(echo "$ML" | jq --arg id "$PYO_ID" '[.items[] | select(.menu_id == $id)][0].qty // 0')"
+cek "menu-laris: PBA ber-kategori" "V == 1" \
+  "$(echo "$ML" | jq --arg id "$PBA_ID" '(([.items[] | select(.menu_id == $id)][0].kategori // "") | length > 0) | if . then 1 else 0 end')"
+cek "menu-laris: total_qty = SUM(items.qty)" "V == 1" \
+  "$(echo "$ML" | jq '((((.items|map(.qty)|add) - .total_qty) | if . < 0 then -. else . end) < 0.001) | if . then 1 else 0 end')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

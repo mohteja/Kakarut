@@ -8,6 +8,7 @@ import { BahanPage } from "./pages/bahan/BahanPage";
 import { KasirPage } from "./pages/kasir/KasirPage";
 import { RiwayatPage } from "./pages/kasir/RiwayatPage";
 import { LaporanPage } from "./pages/laporan/LaporanPage";
+import { LaporanMenuLarisPage } from "./pages/laporan/LaporanMenuLarisPage";
 import { LaporanPembelianPage } from "./pages/laporan/LaporanPembelianPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { LoginPage } from "./pages/LoginPage";
@@ -92,6 +93,7 @@ export default function App() {
                   <Route path="/pembelian/rekomendasi" element={<RekomendasiBeliPage />} />
                   <Route path="/laporan" element={<LaporanPage />} />
                   <Route path="/laporan/pembelian" element={<LaporanPembelianPage />} />
+                  <Route path="/laporan/menu-laris" element={<LaporanMenuLarisPage />} />
                   <Route path="/sampah" element={<TempatSampahPage />} />
                   <Route path="/bahan" element={<BahanPage />} />
                   <Route path="/member" element={<MemberPage />} />
