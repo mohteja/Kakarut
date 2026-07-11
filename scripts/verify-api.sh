@@ -949,6 +949,26 @@ cek "tutup shift: ditutup terisi" "V == 1" "$(echo "$TU" | jq '(.ditutup_pada !=
 cek "setelah tutup: tak ada shift aktif" "V == 1" "$(api "$KASIR" GET /shift/aktif | jq '(. == null) | if . then 1 else 0 end')"
 cek "riwayat shift: ada shift tertutup" "V >= 1" "$(api "$KASIR" GET /shift | jq 'length')"
 
+echo "== 37. Open bill (simpan, buka, ubah, bayar, hapus) =="
+MEJA_OB=$(api "$KASIR" GET /meja | jq -r '[.[] | select(.is_active)][0].id')
+OB=$(api "$KASIR" POST /open-bill "{\"meja_id\":\"$MEJA_OB\",\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":2}]}")
+OB_ID=$(echo "$OB" | jq -r .id)
+cek "open bill dibuat: 1 baris item" "V == 1" "$(echo "$OB" | jq '.items | length')"
+cek "open bill: qty 2" "V == 2" "$(echo "$OB" | jq '.items[0].qty')"
+cek "GET /open-bill: bill muncul di list" "V == 1" \
+  "$(api "$KASIR" GET /open-bill | jq --arg id "$OB_ID" '[.[] | select(.id == $id)] | length')"
+cek "GET /open-bill: jumlah_item = 1" "V == 1" \
+  "$(api "$KASIR" GET /open-bill | jq --arg id "$OB_ID" '[.[] | select(.id == $id)][0].jumlah_item')"
+OBU=$(api "$KASIR" PUT "/open-bill/$OB_ID" "{\"meja_id\":\"$MEJA_OB\",\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":2},{\"menu_id\":\"$PYO_ID\",\"qty\":1}]}")
+cek "ubah bill: jadi 2 baris item" "V == 2" "$(echo "$OBU" | jq '.items | length')"
+# bayar bill: buat sale dari item bill lalu hapus bill (alur Lanjut → Simpan)
+SOB=$(api "$KASIR" POST /penjualan "{\"meja_id\":\"$MEJA_OB\",\"metode_bayar\":\"tunai\",\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":2},{\"menu_id\":\"$PYO_ID\",\"qty\":1}]}")
+cek "bayar bill: sale dibuat (ada nomor)" "V == 1" "$(echo "$SOB" | jq '(.sale.nomor | length > 0) | if . then 1 else 0 end')"
+api "$KASIR" DELETE "/open-bill/$OB_ID" > /dev/null
+cek "setelah bayar: bill hilang dari list" "V == 0" \
+  "$(api "$KASIR" GET /open-bill | jq --arg id "$OB_ID" '[.[] | select(.id == $id)] | length')"
+cek "GET bill terhapus → 404" "V == 404" "$(status_code "$KASIR" GET "/open-bill/$OB_ID")"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

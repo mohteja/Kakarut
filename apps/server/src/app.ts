@@ -21,6 +21,7 @@ import { kategoriRoutes } from "./modules/kategori/routes";
 import { laporanRoutes } from "./modules/laporan/routes";
 import { mejaRoutes } from "./modules/meja/routes";
 import { menuRoutes } from "./modules/menu/routes";
+import { openBillRoutes } from "./modules/open-bill/routes";
 import { penjualanRoutes } from "./modules/penjualan/routes";
 import { penyimpananRoutes } from "./modules/penyimpanan/routes";
 import { printRoutes } from "./modules/print/routes";
@@ -73,6 +74,7 @@ export function createApp() {
     .route("/supplier", supplierRoutes)
     .route("/penyimpanan", penyimpananRoutes)
     .route("/meja", mejaRoutes)
+    .route("/open-bill", openBillRoutes)
     .route("/shift", shiftRoutes)
     .route("/stok", stokRoutes)
     .route("/laporan", laporanRoutes)

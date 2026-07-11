@@ -459,6 +459,49 @@ export const saleConsumptions = pgTable(
   (t) => [index("sale_consumptions_branch_ing_idx").on(t.branchId, t.ingredientId, t.waktu)],
 );
 
+/** Bill terbuka (pesanan belum dibayar) — disimpan sampai dibayar (jadi sale) atau dibatalkan. */
+export const openBills = pgTable(
+  "open_bills",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    branchId: uuid("branch_id")
+      .notNull()
+      .references(() => branches.id),
+    mejaId: uuid("meja_id").references(() => meja.id, { onDelete: "set null" }),
+    mejaLabel: text("meja_label"),
+    customerNama: text("customer_nama"),
+    customerWa: text("customer_wa"),
+    catatan: text("catatan"),
+    createdBy: uuid("created_by")
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("open_bills_company_branch_idx").on(t.companyId, t.branchId, t.updatedAt)],
+);
+
+export const openBillItems = pgTable(
+  "open_bill_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    billId: uuid("bill_id")
+      .notNull()
+      .references(() => openBills.id, { onDelete: "cascade" }),
+    menuId: uuid("menu_id")
+      .notNull()
+      .references(() => menus.id),
+    qty: numeric("qty", { precision: 10, scale: 2, mode: "number" }).notNull(),
+    /** null = ikut mode transaksi; true/false = override dine-in per baris */
+    dineInOverride: boolean("dine_in_override"),
+    catatan: text("catatan"),
+  },
+  (t) => [index("open_bill_items_bill_idx").on(t.billId)],
+);
+
 export const productions = pgTable(
   "productions",
   {

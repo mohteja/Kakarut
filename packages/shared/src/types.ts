@@ -451,6 +451,36 @@ export interface MenuLaris {
   items: MenuLarisRow[];
 }
 
+/** Satu baris item pada open bill (pesanan belum dibayar). */
+export interface OpenBillItemDto {
+  menu_id: string;
+  qty: number;
+  /** null = ikut mode transaksi; true/false = override dine-in per baris */
+  dine_in_override: boolean | null;
+  catatan: string | null;
+}
+
+/** Ringkasan open bill untuk daftar/pemilih bill di kasir. */
+export interface OpenBillRow {
+  id: string;
+  meja_label: string | null;
+  customer_nama: string | null;
+  jumlah_item: number;
+  /** waktu terakhir diperbarui (ISO) */
+  waktu: string;
+}
+
+/** Detail open bill (dimuat kembali ke keranjang saat dibuka). */
+export interface OpenBillDetail {
+  id: string;
+  meja_id: string | null;
+  meja_label: string | null;
+  customer_nama: string | null;
+  customer_wa: string | null;
+  catatan: string | null;
+  items: OpenBillItemDto[];
+}
+
 /** Sesi kas (shift) per cabang. ditutup_* null → shift masih terbuka. */
 export interface Shift {
   id: string;

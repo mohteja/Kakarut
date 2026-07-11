@@ -169,6 +169,13 @@
       "when": 1783772113631,
       "tag": "0023_dazzling_unus",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1783776304059,
+      "tag": "0024_soft_senator_kelly",
+      "breakpoints": true
     }
   ]
 }
