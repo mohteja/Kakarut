@@ -6,7 +6,7 @@ import { Card, ErrorText, Spinner, btnPrimary } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
-import { formatRupiah } from "../../lib/format";
+import { formatAngka, formatRupiah } from "../../lib/format";
 import { ReceiptModal, type SaleResult } from "./ReceiptModal";
 
 interface CartLine {
@@ -54,6 +54,15 @@ export function KasirPage() {
   const pb1Conf = me?.company ?? auth?.company;
 
   const [aktifKategori, setAktifKategori] = useState<string | null>(null);
+  const [cariMenu, setCariMenu] = useState("");
+  // Mode tampilan katalog: "foto" (kartu thumbnail) / "kode" (ringkas per kategori)
+  const [tampilan, setTampilan] = useState<"foto" | "kode">(() => {
+    try {
+      return localStorage.getItem("kakarut.kasirTampilan") === "kode" ? "kode" : "foto";
+    } catch {
+      return "foto";
+    }
+  });
   const [cart, setCart] = useState<CartLine[]>([]);
   const [mejaId, setMejaId] = useState<string | null>(null);
   // Modal pilih meja muncul lebih dulu tiap memulai transaksi (sebelum keranjang).
@@ -61,6 +70,8 @@ export function KasirPage() {
   const [mejaModalOpen, setMejaModalOpen] = useState(isKasir);
   const [mejaCari, setMejaCari] = useState("");
   const [catatan, setCatatan] = useState("");
+  const [konsumenNama, setKonsumenNama] = useState("");
+  const [konsumenWa, setKonsumenWa] = useState("");
   const [diskonTipe, setDiskonTipe] = useState<"persen" | "nominal">("nominal");
   const [diskonNilai, setDiskonNilai] = useState("");
   const [struk, setStruk] = useState<SaleResult | null>(null);
@@ -87,6 +98,15 @@ export function KasirPage() {
     if (mejaModalOpen) setMejaCari("");
   }, [mejaModalOpen]);
 
+  // Simpan preferensi tampilan katalog (foto / kode) antar sesi.
+  useEffect(() => {
+    try {
+      localStorage.setItem("kakarut.kasirTampilan", tampilan);
+    } catch {
+      /* localStorage tak tersedia */
+    }
+  }, [tampilan]);
+
   function pilihMeja(id: string) {
     setMejaId(id);
     setMejaModalOpen(false);
@@ -98,10 +118,35 @@ export function KasirPage() {
   }, [kategori, menus]);
 
   const menuTampil = useMemo(() => {
+    const q = cariMenu.trim().toLowerCase();
     const list = menus ?? [];
+    // pencarian nama/kode menu berlaku lintas kategori; tanpa pencarian → filter kategori
+    if (q)
+      return list.filter(
+        (m) => m.nama.toLowerCase().includes(q) || (m.kode?.toLowerCase().includes(q) ?? false),
+      );
     if (!aktifKategori) return list;
     return list.filter((m) => m.category_id === aktifKategori);
-  }, [menus, aktifKategori]);
+  }, [menus, aktifKategori, cariMenu]);
+
+  // Tampilan "kode": semua menu dikelompokkan per kategori (lintas kategori,
+  // mengabaikan kategori aktif) — semua kategori tampil sekaligus. Pencarian
+  // nama/kode tetap berlaku.
+  const menuKodeGroups = useMemo(() => {
+    const q = cariMenu.trim().toLowerCase();
+    const list = (menus ?? []).filter(
+      (m) => !q || m.nama.toLowerCase().includes(q) || (m.kode?.toLowerCase().includes(q) ?? false),
+    );
+    const byCat = new Map<string, MenuDto[]>();
+    for (const m of list) {
+      const arr = byCat.get(m.category_id) ?? [];
+      arr.push(m);
+      byCat.set(m.category_id, arr);
+    }
+    return kategoriTampil
+      .map((k) => ({ kategori: k, items: byCat.get(k.id) ?? [] }))
+      .filter((g) => g.items.length > 0);
+  }, [menus, cariMenu, kategoriTampil]);
 
   function tambah(menu: MenuDto) {
     setCart((prev) => {
@@ -165,6 +210,8 @@ export function KasirPage() {
           is_dine_in: dineIn,
           meja_id: mejaId ?? undefined,
           catatan: catatan || undefined,
+          ...(konsumenNama.trim() ? { customer_nama: konsumenNama.trim() } : {}),
+          ...(konsumenWa.trim() ? { customer_wa: konsumenWa.trim() } : {}),
           ...(diskon > 0 ? { diskon_tipe: diskonTipe, diskon_nilai: diskonNilaiNum } : {}),
           items: cart.map((l) => ({
             menu_id: l.menu.id,
@@ -178,6 +225,8 @@ export function KasirPage() {
       setStruk(data);
       setCart([]);
       setCatatan("");
+      setKonsumenNama("");
+      setKonsumenWa("");
       setDiskonNilai("");
       setMejaId(null);
       // modal pilih meja dibuka lagi saat struk ditutup (transaksi berikutnya)
@@ -191,68 +240,156 @@ export function KasirPage() {
 
   return (
     <div className="flex flex-col gap-4 md:h-[calc(100vh-3rem)] md:flex-row">
-      {/* Katalog — di atas pada mobile, kiri pada desktop */}
-      <div className="flex min-w-0 flex-col md:flex-1">
-        <div className="mb-3 flex flex-wrap gap-2">
-          <button
-            onClick={() => setAktifKategori(null)}
-            className={`rounded-full px-3 py-1.5 text-sm font-medium ${
-              aktifKategori === null
-                ? "bg-orange-600 text-white"
-                : "bg-white text-stone-600 hover:bg-stone-50"
-            }`}
-          >
-            Semua
-          </button>
-          {kategoriTampil.map((k) => (
+      {/* Katalog — di BAWAH keranjang pada mobile, kiri pada desktop */}
+      <div className="order-2 flex min-w-0 flex-col md:order-1 md:flex-1">
+        {/* Pencarian menu — di atas kategori */}
+        <input
+          value={cariMenu}
+          onChange={(e) => {
+            setCariMenu(e.target.value);
+            if (e.target.value) setAktifKategori(null);
+          }}
+          placeholder="🔍 Cari menu / kode…"
+          className="mb-3 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm focus:border-orange-500 focus:outline-none"
+        />
+        {/* Toggle tampilan: foto (thumbnail) / kode (ringkas per kategori) */}
+        <div className="mb-3 flex items-center gap-2">
+          <div className="flex overflow-hidden rounded-lg border border-stone-300 text-sm">
             <button
-              key={k.id}
-              onClick={() => setAktifKategori(k.id)}
-              className={`rounded-full px-3 py-1.5 text-sm font-medium ${
-                aktifKategori === k.id
+              type="button"
+              onClick={() => setTampilan("foto")}
+              className={`px-3 py-1.5 font-medium ${
+                tampilan === "foto"
                   ? "bg-orange-600 text-white"
                   : "bg-white text-stone-600 hover:bg-stone-50"
               }`}
             >
-              {k.nama}
+              🖼 Foto
             </button>
-          ))}
+            <button
+              type="button"
+              onClick={() => setTampilan("kode")}
+              className={`px-3 py-1.5 font-medium ${
+                tampilan === "kode"
+                  ? "bg-orange-600 text-white"
+                  : "bg-white text-stone-600 hover:bg-stone-50"
+              }`}
+            >
+              🔤 Kode
+            </button>
+          </div>
         </div>
 
-        <div className="grid auto-rows-min grid-cols-2 gap-3 pb-4 md:flex-1 md:grid-cols-3 md:overflow-y-auto xl:grid-cols-4">
-          {menuTampil.map((m) => (
+        {/* Kategori — hanya pada tampilan foto; tampilan kode menampilkan semua kategori sekaligus */}
+        {tampilan === "foto" && (
+          <div className="mb-3 flex flex-wrap gap-2">
             <button
-              key={m.id}
-              onClick={() => tambah(m)}
-              className="flex flex-col rounded-xl border border-stone-200 bg-white p-3 text-left shadow-sm transition hover:border-orange-400 hover:shadow"
+              onClick={() => {
+                setAktifKategori(null);
+                setCariMenu("");
+              }}
+              className={`rounded-full px-3 py-1.5 text-sm font-medium ${
+                aktifKategori === null && !cariMenu
+                  ? "bg-orange-600 text-white"
+                  : "bg-white text-stone-600 hover:bg-stone-50"
+              }`}
             >
-              {m.image_url ? (
-                <img
-                  src={m.image_url}
-                  alt={m.nama}
-                  className="mb-2 h-20 w-full rounded-lg object-cover"
-                />
-              ) : (
-                <div className="mb-2 flex h-20 w-full items-center justify-center rounded-lg bg-orange-50 text-2xl">
-                  🍜
-                </div>
-              )}
-              <div className="line-clamp-2 text-sm font-semibold text-stone-800">{m.nama}</div>
-              <div className="mt-auto pt-1 text-sm font-bold text-orange-600">
-                {formatRupiah(m.harga_jual)}
-              </div>
+              Semua
             </button>
-          ))}
-          {menuTampil.length === 0 && (
-            <div className="col-span-full py-10 text-center text-stone-400">
-              Tidak ada menu di kategori ini.
-            </div>
-          )}
-        </div>
+            {kategoriTampil.map((k) => (
+              <button
+                key={k.id}
+                onClick={() => {
+                  setAktifKategori(k.id);
+                  setCariMenu("");
+                }}
+                className={`rounded-full px-3 py-1.5 text-sm font-medium ${
+                  aktifKategori === k.id && !cariMenu
+                    ? "bg-orange-600 text-white"
+                    : "bg-white text-stone-600 hover:bg-stone-50"
+                }`}
+              >
+                {k.nama}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {tampilan === "foto" ? (
+          <div className="grid auto-rows-min grid-cols-2 gap-3 pb-4 md:flex-1 md:grid-cols-3 md:overflow-y-auto xl:grid-cols-4">
+            {menuTampil.map((m) => (
+              <button
+                key={m.id}
+                onClick={() => tambah(m)}
+                className="flex flex-col rounded-xl border border-stone-200 bg-white p-3 text-left shadow-sm transition hover:border-orange-400 hover:shadow"
+              >
+                {m.image_url ? (
+                  <img
+                    src={m.image_url}
+                    alt={m.nama}
+                    className="mb-2 h-20 w-full rounded-lg object-cover"
+                  />
+                ) : (
+                  <div className="mb-2 flex h-20 w-full items-center justify-center rounded-lg bg-orange-50 text-2xl">
+                    🍜
+                  </div>
+                )}
+                <div className="flex items-start gap-1.5">
+                  {m.kode && (
+                    <span className="shrink-0 rounded bg-orange-100 px-1.5 py-0.5 font-mono text-[11px] font-bold leading-tight text-orange-700">
+                      {m.kode}
+                    </span>
+                  )}
+                  <div className="line-clamp-2 text-sm font-semibold text-stone-800">{m.nama}</div>
+                </div>
+                <div className="mt-auto pt-1 text-sm font-bold text-orange-600">
+                  {formatRupiah(m.harga_jual)}
+                </div>
+              </button>
+            ))}
+            {menuTampil.length === 0 && (
+              <div className="col-span-full py-10 text-center text-stone-400">
+                {cariMenu ? `Menu "${cariMenu}" tidak ditemukan.` : "Tidak ada menu di kategori ini."}
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="space-y-4 pb-4 md:flex-1 md:overflow-y-auto">
+            {menuKodeGroups.map((g) => (
+              <div key={g.kategori.id}>
+                <div className="mb-1.5 text-xs font-bold uppercase tracking-wide text-stone-400">
+                  {g.kategori.nama}
+                </div>
+                <div className="grid grid-cols-4 gap-1 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8">
+                  {g.items.map((m) => (
+                    <button
+                      key={m.id}
+                      onClick={() => tambah(m)}
+                      title={m.nama}
+                      className="flex flex-col items-center justify-center rounded-md border border-stone-200 bg-white px-1 py-1.5 text-center transition hover:border-orange-400 hover:shadow-sm"
+                    >
+                      <span className="max-w-full truncate font-mono text-xs font-bold leading-none text-stone-800">
+                        {m.kode ?? "—"}
+                      </span>
+                      <span className="mt-0.5 text-[10px] font-medium text-orange-600">
+                        {formatAngka(m.harga_jual, 0)}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+            {menuKodeGroups.length === 0 && (
+              <div className="py-10 text-center text-stone-400">
+                {cariMenu ? `Menu "${cariMenu}" tidak ditemukan.` : "Belum ada menu."}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* Keranjang — di bawah pada mobile, kanan pada desktop */}
-      <Card className="flex w-full shrink-0 flex-col p-4 md:w-96">
+      {/* Keranjang — di ATAS pada mobile, kanan pada desktop */}
+      <Card className="order-1 flex w-full shrink-0 flex-col p-4 md:order-2 md:w-96">
         <div className="mb-3 flex items-center justify-between">
           <div className="flex items-baseline gap-2">
             <h2 className="text-lg font-bold text-stone-800">Keranjang</h2>
@@ -366,6 +503,22 @@ export function KasirPage() {
         </div>
 
         <div className="mt-3 space-y-2 border-t border-stone-200 pt-3">
+          {/* Konsumen/member (opsional) — WA jadi kunci member area */}
+          <div className="grid grid-cols-2 gap-2">
+            <input
+              value={konsumenNama}
+              onChange={(e) => setKonsumenNama(e.target.value)}
+              placeholder="👤 Nama konsumen"
+              className="w-full rounded-lg border border-stone-300 px-3 py-1.5 text-sm"
+            />
+            <input
+              value={konsumenWa}
+              onChange={(e) => setKonsumenWa(e.target.value)}
+              inputMode="tel"
+              placeholder="📱 No. WhatsApp"
+              className="w-full rounded-lg border border-stone-300 px-3 py-1.5 text-sm"
+            />
+          </div>
           <input
             value={catatan}
             onChange={(e) => setCatatan(e.target.value)}

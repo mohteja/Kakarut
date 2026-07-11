@@ -61,6 +61,7 @@ export function MenuListPage() {
             <table className="w-full">
               <thead className="border-b border-stone-200 bg-stone-50">
                 <tr>
+                  <th className={thClass}>Kode</th>
                   <th className={thClass}>Menu</th>
                   <th className={`${thClass} text-right`}>HPP</th>
                   <th className={`${thClass} text-right`}>HPP Dine-in</th>
@@ -75,6 +76,15 @@ export function MenuListPage() {
               <tbody className="divide-y divide-stone-100">
                 {list.map((m) => (
                   <tr key={m.id} className="hover:bg-stone-50">
+                    <td className={tdClass}>
+                      {m.kode ? (
+                        <span className="inline-block rounded bg-stone-100 px-2 py-0.5 font-mono text-xs font-semibold text-stone-600">
+                          {m.kode}
+                        </span>
+                      ) : (
+                        <span className="text-stone-300">—</span>
+                      )}
+                    </td>
                     <td className={`${tdClass} font-medium`}>
                       {m.nama}
                       {m.tipe === "paket" && (

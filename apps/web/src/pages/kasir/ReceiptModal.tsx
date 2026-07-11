@@ -19,6 +19,8 @@ export interface SaleResult {
     waktu: string;
     isDineIn: boolean;
     mejaLabel: string | null;
+    customerNama: string | null;
+    customerWa: string | null;
     catatan: string | null;
   };
   items: {
@@ -96,6 +98,8 @@ export function ReceiptModal({
       waktu: waktuStr,
       isDineIn: data.sale.isDineIn,
       mejaLabel: data.sale.mejaLabel,
+      customerNama: data.sale.customerNama,
+      customerWa: data.sale.customerWa,
       items: data.items.map((it) => ({
         nama: it.menuNama,
         qty: it.qty,
@@ -157,6 +161,12 @@ export function ReceiptModal({
               {formatWaktu(data.sale.waktu)} · {data.sale.isDineIn ? "Dine-in" : "Bawa pulang"}
             </div>
             {data.sale.mejaLabel && <div>Meja: {data.sale.mejaLabel}</div>}
+            {data.sale.customerNama && (
+              <div>
+                Konsumen: {data.sale.customerNama}
+                {data.sale.customerWa ? ` (${data.sale.customerWa})` : ""}
+              </div>
+            )}
           </div>
           <hr className="my-2 border-dashed border-stone-400" />
           {data.items.map((it) => (

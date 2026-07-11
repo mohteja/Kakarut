@@ -852,6 +852,52 @@ cek "batas 0: kasir tanpa diskon tetap boleh (201)" "V == 201" \
   "$(jp "$KASIR" "{\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")"
 api "$OWNER" PATCH /company '{"diskon_maks_persen":100}' > /dev/null   # reset
 
+echo "== 32. Kode menu (manual dihormati + generate otomatis) =="
+CAT_ID=$(echo "$MENUS" | jq -r '.[0].category_id')
+MK=$(api "$OWNER" POST /menu "{\"nama\":\"Uji Kode Menu\",\"kode\":\"ZZ9\",\"category_id\":\"$CAT_ID\",\"tipe\":\"regular\",\"mult\":2,\"harga_jual\":12000,\"komponen\":[]}")
+MK_ID=$(echo "$MK" | jq -r .id)
+cek "buat menu: kode manual ZZ9 dihormati" "V == 1" "$(echo "$MK" | jq '(.kode == "ZZ9") | if . then 1 else 0 end')"
+cek "GET /menu: menu baru ber-kode ZZ9" "V == 1" \
+  "$(api "$OWNER" GET /menu | jq --arg id "$MK_ID" '[.[] | select(.id == $id and .kode == "ZZ9")] | length')"
+# tanpa kode → tergenerate otomatis (tidak kosong)
+MG=$(api "$OWNER" POST /menu "{\"nama\":\"Uji Auto Kode\",\"category_id\":\"$CAT_ID\",\"tipe\":\"regular\",\"mult\":2,\"harga_jual\":12000,\"komponen\":[]}")
+MG_ID=$(echo "$MG" | jq -r .id)
+cek "buat menu tanpa kode: tergenerate (tidak kosong)" "V >= 1" "$(echo "$MG" | jq '(.kode // "") | length')"
+# edit ubah kode manual
+MKE=$(api "$OWNER" PUT "/menu/$MK_ID" "{\"nama\":\"Uji Kode Menu\",\"kode\":\"A12\",\"category_id\":\"$CAT_ID\",\"tipe\":\"regular\",\"mult\":2,\"harga_jual\":12000,\"komponen\":[]}")
+cek "edit menu: kode manual A12" "V == 1" "$(echo "$MKE" | jq '(.kode == "A12") | if . then 1 else 0 end')"
+# kode dikosongkan (spasi) → tergenerate otomatis (tidak kosong)
+MKN=$(api "$OWNER" PUT "/menu/$MK_ID" "{\"nama\":\"Uji Kode Menu\",\"kode\":\"   \",\"category_id\":\"$CAT_ID\",\"tipe\":\"regular\",\"mult\":2,\"harga_jual\":12000,\"komponen\":[]}")
+cek "edit menu: kode dikosongkan → tergenerate otomatis" "V >= 1" "$(echo "$MKN" | jq '(.kode // "") | length')"
+# bersihkan: nonaktifkan menu uji
+api "$OWNER" DELETE "/menu/$MK_ID" > /dev/null
+api "$OWNER" DELETE "/menu/$MG_ID" > /dev/null
+
+echo "== 33. Member/konsumen (input keranjang + member area) =="
+MS1=$(api "$KASIR" POST /penjualan "{\"is_dine_in\":false,\"customer_nama\":\"Budi\",\"customer_wa\":\"0812-3456-7890\",\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")
+cek "sale simpan nama konsumen" "V == 1" "$(echo "$MS1" | jq '(.sale.customerNama == "Budi") | if . then 1 else 0 end')"
+cek "sale normalisasi WA (digit saja)" "V == 1" "$(echo "$MS1" | jq '(.sale.customerWa == "081234567890") | if . then 1 else 0 end')"
+cek "sale ter-link ke member" "V == 1" "$(echo "$MS1" | jq '(.sale.customerId != null) | if . then 1 else 0 end')"
+CUST_ID=$(echo "$MS1" | jq -r '.sale.customerId')
+cek "GET /customer: member Budi ada" "V == 1" \
+  "$(api "$OWNER" GET /customer | jq --arg id "$CUST_ID" '[.[] | select(.id == $id)] | length')"
+# transaksi kedua, WA sama (format beda) → member sama, nama diperbarui
+MS2=$(api "$KASIR" POST /penjualan "{\"is_dine_in\":false,\"customer_nama\":\"Budi Santoso\",\"customer_wa\":\"081234567890\",\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")
+cek "WA sama → member sama (id tetap)" "V == 1" "$(echo "$MS2" | jq --arg id "$CUST_ID" '(.sale.customerId == $id) | if . then 1 else 0 end')"
+DET=$(api "$OWNER" GET "/customer/$CUST_ID")
+cek "member detail: 2 transaksi" "V == 2" "$(echo "$DET" | jq '.jumlah_transaksi')"
+cek "member detail: nama diperbarui" "V == 1" "$(echo "$DET" | jq '(.nama == "Budi Santoso") | if . then 1 else 0 end')"
+cek "member detail: transaksi punya no invoice" "V == 1" "$(echo "$DET" | jq '(.transaksi[0].nomor | length > 0) | if . then 1 else 0 end')"
+# CRUD manual (owner) + dedup WA
+CM=$(api "$OWNER" POST /customer '{"nama":"Member Manual","wa":"0899-000-111"}')
+CM_ID=$(echo "$CM" | jq -r .id)
+cek "POST /customer: WA dinormalisasi" "V == 1" "$(echo "$CM" | jq '(.wa == "0899000111") | if . then 1 else 0 end')"
+cek "POST /customer WA duplikat → 409" "V == 409" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/customer" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"nama":"Dup","wa":"0899000111"}')"
+api "$OWNER" DELETE "/customer/$CM_ID" > /dev/null
+# member area khusus owner/admin
+cek "kasir GET /customer ditolak (403)" "V == 403" "$(status_code "$KASIR" GET /customer)"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

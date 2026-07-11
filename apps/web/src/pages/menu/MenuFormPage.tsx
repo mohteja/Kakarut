@@ -69,6 +69,7 @@ export function MenuFormPage() {
   });
 
   const [nama, setNama] = useState("");
+  const [kode, setKode] = useState("");
   const [categoryId, setCategoryId] = useState("");
   const [tipe, setTipe] = useState<"regular" | "paket">("regular");
   const [mult, setMult] = useState("2");
@@ -87,6 +88,7 @@ export function MenuFormPage() {
     const m = menuEdit;
     dimuat.current = true;
     setNama(m.nama);
+    setKode(m.kode ?? "");
     setCategoryId(m.category_id);
     setTipe(m.tipe);
     setMult(String(m.mult ?? 2));
@@ -194,6 +196,7 @@ export function MenuFormPage() {
 
       const body = {
         nama,
+        kode: kode.trim() || null,
         category_id: categoryId,
         tipe,
         mult: tipe === "regular" ? Number(mult) : null,
@@ -236,6 +239,21 @@ export function MenuFormPage() {
             <div>
               <label className="mb-1 block text-sm font-medium">Nama menu</label>
               <input required value={nama} onChange={(e) => setNama(e.target.value)} className={inputClass} />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium">
+                Kode menu <span className="font-normal text-stone-400">(opsional)</span>
+              </label>
+              <input
+                value={kode}
+                onChange={(e) => setKode(e.target.value)}
+                maxLength={20}
+                placeholder="Kosongkan untuk otomatis"
+                className={inputClass}
+              />
+              <p className="mt-1 text-xs text-stone-500">
+                Kosongkan untuk <b>generate otomatis</b> dari nama menu.
+              </p>
             </div>
             <div>
               <label className="mb-1 block text-sm font-medium">Kategori</label>

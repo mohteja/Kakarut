@@ -28,6 +28,10 @@ export interface ReceiptData {
   isDineIn: boolean;
   /** label meja terpilih (mis. "Meja 3" / "Ruang Tunggu"); null bila tak ada */
   mejaLabel?: string | null;
+  /** nama konsumen/member (null/undefined bila tanpa member) */
+  customerNama?: string | null;
+  /** nomor WhatsApp konsumen */
+  customerWa?: string | null;
   items: ReceiptItem[];
   subtotal: number;
   /** potongan harga per transaksi (Rp); 0/undefined = tanpa diskon */
@@ -75,6 +79,9 @@ export function buildReceiptBytes(data: ReceiptData, opts: ReceiptOptions): Uint
   b.line(data.nomor, data.waktu);
   b.text(data.isDineIn ? "Dine-in" : "Bawa pulang");
   if (data.mejaLabel) b.text(`Meja: ${data.mejaLabel}`);
+  if (data.customerNama) {
+    b.text(`Konsumen: ${data.customerNama}${data.customerWa ? ` (${data.customerWa})` : ""}`);
+  }
   b.divider();
 
   // Item

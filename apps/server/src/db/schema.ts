@@ -274,6 +274,8 @@ export const menus = pgTable(
       .notNull()
       .references(() => menuCategories.id),
     nama: text("nama").notNull(),
+    /** kode menu opsional (mis. "A1") untuk kasir & daftar menu */
+    kode: text("kode"),
     tipe: menuTipeEnum("tipe").notNull().default("regular"),
     mult: numeric("mult", { precision: 7, scale: 3, mode: "number" }),
     baseMenuId: uuid("base_menu_id").references((): AnyPgColumn => menus.id),
@@ -312,6 +314,24 @@ export const menuComponents = pgTable(
 
 // ===== Transaksi (per cabang) =====
 
+/** Member/pelanggan — identitas via nomor WhatsApp, dipakai kasir & member area. */
+export const customers = pgTable(
+  "customers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    nama: text("nama").notNull(),
+    /** nomor WhatsApp (digit ternormalisasi) — identitas member per perusahaan */
+    wa: text("wa").notNull(),
+    catatan: text("catatan"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("customers_company_wa_uq").on(t.companyId, t.wa)],
+);
+
 export const sales = pgTable(
   "sales",
   {
@@ -341,6 +361,11 @@ export const sales = pgTable(
     total: numeric("total", { precision: 14, scale: 2, mode: "number" }).notNull(),
     totalHpp: numeric("total_hpp", { precision: 16, scale: 4, mode: "number" }).notNull(),
     catatan: text("catatan"),
+    // member/pelanggan (opsional) — identitas via WA; snapshot nama/wa agar
+    // riwayat tetap benar meski data member kelak diubah/dihapus
+    customerId: uuid("customer_id").references(() => customers.id, { onDelete: "set null" }),
+    customerNama: text("customer_nama"),
+    customerWa: text("customer_wa"),
     waktu: timestamp("waktu", { withTimezone: true }).notNull().defaultNow(),
     saleDate: date("sale_date").notNull(),
     // soft-delete (Tempat Sampah): baris tetap disimpan sebagai catatan siapa yang menghapus

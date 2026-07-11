@@ -197,6 +197,9 @@ export function Layout() {
                   <NavLink to="/bahan" className={linkClass}>
                     🥩 Bahan Baku
                   </NavLink>
+                  <NavLink to="/member" className={linkClass}>
+                    👥 Member
+                  </NavLink>
                   <div className="mt-4 mb-1 px-3 text-xs font-semibold uppercase tracking-wide text-stone-500">
                     Pengaturan
                   </div>

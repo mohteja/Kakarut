@@ -4,6 +4,7 @@ import { hitungPb1, qtyEfektif, type SaleItemInput } from "@kakarut/shared";
 import { db } from "../../db/client";
 import { branches, companies, meja, saleConsumptions, saleItems, sales } from "../../db/schema";
 import { kodeCabang, tanggalDi } from "../../lib/time";
+import { upsertCustomer } from "../customer/service";
 import { hitungHargaMenu, loadKatalog } from "../menu/service";
 
 export interface CreateSaleParams {
@@ -19,6 +20,9 @@ export interface CreateSaleParams {
   diskonNilai?: number;
   /** owner/admin boleh melampaui batas diskon maksimal kasir */
   bypassDiskonLimit?: boolean;
+  /** identitas konsumen/member (opsional) — WA jadi kunci member */
+  customerNama?: string | null;
+  customerWa?: string | null;
   items: SaleItemInput[];
 }
 
@@ -161,6 +165,11 @@ export async function createSale(params: CreateSaleParams) {
     const seq = last ? parseInt(last.nomor.slice(-4), 10) + 1 : 1;
     const nomor = `${kodeCabang(branch.nama)}-${saleDate.replaceAll("-", "")}-${String(seq).padStart(4, "0")}`;
 
+    // Member/pelanggan: bila WA diisi → cari-atau-buat member (dedup per WA) &
+    // link ke sale. Nama disnapshot (juga saat tanpa WA) agar riwayat tetap benar.
+    const member = await upsertCustomer(tx, params.companyId, params.customerNama, params.customerWa);
+    const customerNama = member?.nama ?? params.customerNama?.trim() ?? null;
+
     const [sale] = await tx
       .insert(sales)
       .values({
@@ -178,6 +187,9 @@ export async function createSale(params: CreateSaleParams) {
         total: subtotalNet + pb1Amount,
         totalHpp,
         catatan: params.catatan ?? null,
+        customerId: member?.id ?? null,
+        customerNama: customerNama || null,
+        customerWa: member?.wa ?? null,
         saleDate,
       })
       .returning();
