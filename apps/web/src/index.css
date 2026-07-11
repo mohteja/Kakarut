@@ -10,8 +10,18 @@
   #struk-print,
   #struk-print *,
   #menu-print,
-  #menu-print * {
+  #menu-print *,
+  #qr-print,
+  #qr-print * {
     visibility: visible;
+  }
+  /* QR karyawan — cetak biasa (kartu/tempel) */
+  #qr-print {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    padding: 10mm;
   }
   #struk-print {
     position: absolute;

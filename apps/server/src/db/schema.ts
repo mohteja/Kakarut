@@ -52,6 +52,8 @@ export const penyesuaianStatusEnum = pgEnum("penyesuaian_status", ["menunggu", "
 /** jenis meja: meja makan biasa (dine-in) vs meja "Ruang Tunggu" untuk take away */
 export const mejaTipeEnum = pgEnum("meja_tipe", ["dine_in", "takeaway"]);
 export const metodeBayarEnum = pgEnum("metode_bayar", ["tunai", "qris", "transfer"]);
+/** jenis cap absensi karyawan: masuk (datang) vs keluar (pulang) */
+export const attendanceTipeEnum = pgEnum("attendance_tipe", ["masuk", "keluar"]);
 
 // ===== Tenancy & identitas =====
 
@@ -120,11 +122,17 @@ export const memberships = pgTable(
       .references(() => companies.id, { onDelete: "cascade" }),
     role: userRoleEnum("role").notNull(),
     branchId: uuid("branch_id").references(() => branches.id),
+    /** kode karyawan (untuk absensi via kode/QR) — unik per perusahaan, digenerate otomatis */
+    employeeCode: text("employee_code"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     uniqueIndex("memberships_user_company_uq").on(t.userId, t.companyId),
     check("memberships_cashier_branch_ck", sql`${t.role} <> 'cashier' OR ${t.branchId} IS NOT NULL`),
+    // kode karyawan unik per perusahaan (abaikan yang NULL)
+    uniqueIndex("memberships_company_kode_uq")
+      .on(t.companyId, t.employeeCode)
+      .where(sql`${t.employeeCode} IS NOT NULL`),
   ],
 );
 
@@ -366,6 +374,37 @@ export const shifts = pgTable(
   ],
 );
 
+/**
+ * Absensi karyawan: satu baris per cap (masuk/keluar). Pasangan masuk↔keluar
+ * ditentukan dari urutan waktu per (perusahaan, karyawan, tanggal) — cap
+ * berikutnya menjadi lawan cap terakhir hari itu.
+ */
+export const attendances = pgTable(
+  "attendances",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    branchId: uuid("branch_id")
+      .notNull()
+      .references(() => branches.id),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    tipe: attendanceTipeEnum("tipe").notNull(),
+    waktu: timestamp("waktu", { withTimezone: true }).notNull().defaultNow(),
+    /** tanggal (zona waktu perusahaan) untuk mengelompokkan cap per hari */
+    attendDate: date("attend_date").notNull(),
+    catatan: text("catatan"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("attendances_company_branch_date_idx").on(t.companyId, t.branchId, t.attendDate),
+    index("attendances_user_date_idx").on(t.userId, t.attendDate),
+  ],
+);
+
 export const sales = pgTable(
   "sales",
   {
@@ -457,6 +496,49 @@ export const saleConsumptions = pgTable(
     waktu: timestamp("waktu", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("sale_consumptions_branch_ing_idx").on(t.branchId, t.ingredientId, t.waktu)],
+);
+
+/** Bill terbuka (pesanan belum dibayar) — disimpan sampai dibayar (jadi sale) atau dibatalkan. */
+export const openBills = pgTable(
+  "open_bills",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    branchId: uuid("branch_id")
+      .notNull()
+      .references(() => branches.id),
+    mejaId: uuid("meja_id").references(() => meja.id, { onDelete: "set null" }),
+    mejaLabel: text("meja_label"),
+    customerNama: text("customer_nama"),
+    customerWa: text("customer_wa"),
+    catatan: text("catatan"),
+    createdBy: uuid("created_by")
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("open_bills_company_branch_idx").on(t.companyId, t.branchId, t.updatedAt)],
+);
+
+export const openBillItems = pgTable(
+  "open_bill_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    billId: uuid("bill_id")
+      .notNull()
+      .references(() => openBills.id, { onDelete: "cascade" }),
+    menuId: uuid("menu_id")
+      .notNull()
+      .references(() => menus.id),
+    qty: numeric("qty", { precision: 10, scale: 2, mode: "number" }).notNull(),
+    /** null = ikut mode transaksi; true/false = override dine-in per baris */
+    dineInOverride: boolean("dine_in_override"),
+    catatan: text("catatan"),
+  },
+  (t) => [index("open_bill_items_bill_idx").on(t.billId)],
 );
 
 export const productions = pgTable(

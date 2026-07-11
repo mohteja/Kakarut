@@ -76,6 +76,17 @@ export interface MenuDto {
 }
 
 /**
+ * Ketersediaan (sisa porsi) sebuah menu di satu cabang — diturunkan dari saldo
+ * stok bahan terlacak. `porsi` = berapa porsi lagi yang bisa dibuat
+ * (min saldo/qty per porsi atas semua bahan pembatas); `null` bila menu tak
+ * punya bahan terlacak yang membatasi (dianggap tak terbatas).
+ */
+export interface MenuStokDto {
+  menu_id: string;
+  porsi: number | null;
+}
+
+/**
  * Status pipeline stok masuk: rencana (RAB) → dikerjakan → menunggu →
  * dikonfirmasi (masuk stok). 'ditolak' khusus jalur beli (kiriman ditolak
  * penerima; bisa dibatalkan → dikonfirmasi). Stok terhitung saat 'dikonfirmasi'.
@@ -451,6 +462,36 @@ export interface MenuLaris {
   items: MenuLarisRow[];
 }
 
+/** Satu baris item pada open bill (pesanan belum dibayar). */
+export interface OpenBillItemDto {
+  menu_id: string;
+  qty: number;
+  /** null = ikut mode transaksi; true/false = override dine-in per baris */
+  dine_in_override: boolean | null;
+  catatan: string | null;
+}
+
+/** Ringkasan open bill untuk daftar/pemilih bill di kasir. */
+export interface OpenBillRow {
+  id: string;
+  meja_label: string | null;
+  customer_nama: string | null;
+  jumlah_item: number;
+  /** waktu terakhir diperbarui (ISO) */
+  waktu: string;
+}
+
+/** Detail open bill (dimuat kembali ke keranjang saat dibuka). */
+export interface OpenBillDetail {
+  id: string;
+  meja_id: string | null;
+  meja_label: string | null;
+  customer_nama: string | null;
+  customer_wa: string | null;
+  catatan: string | null;
+  items: OpenBillItemDto[];
+}
+
 /** Sesi kas (shift) per cabang. ditutup_* null → shift masih terbuka. */
 export interface Shift {
   id: string;
@@ -470,6 +511,31 @@ export interface Shift {
   kas_sistem: number;
   /** uang_fisik − kas_sistem (null selagi terbuka) */
   selisih: number | null;
+}
+
+/** Jenis cap absensi karyawan: masuk (datang) vs keluar (pulang). */
+export type AbsensiTipe = "masuk" | "keluar";
+
+/** Hasil satu cap absensi (dikembalikan POST /absensi). */
+export interface AbsenResult {
+  user_id: string;
+  nama: string;
+  employee_code: string;
+  tipe: AbsensiTipe;
+  /** waktu cap (ISO) */
+  waktu: string;
+  branch_nama: string;
+}
+
+/** Ringkasan absensi seorang karyawan pada satu hari (daftar di halaman Absen). */
+export interface AbsensiRow {
+  user_id: string;
+  nama: string;
+  employee_code: string | null;
+  /** jam masuk pertama hari itu (ISO); null bila belum absen masuk */
+  masuk: string | null;
+  /** jam keluar terakhir hari itu (ISO); null bila belum absen keluar */
+  keluar: string | null;
 }
 
 /** Laporan pengeluaran pembelian bahan baku (faktur beli terkonfirmasi) per rentang tanggal. */

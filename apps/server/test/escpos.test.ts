@@ -196,6 +196,11 @@ describe("buildReceiptBytes", () => {
     expect(all).toContain("Meja 5");
   });
 
+  it("mencetak nama kasir di bawah nota", () => {
+    const all = textLines(buildReceiptBytes({ ...DATA, kasir: "Teja" }, OPTS)).join("\n");
+    expect(all).toContain("Kasir: Teja");
+  });
+
   it("catatan kosong/spasi-saja tidak mencetak baris bullet", () => {
     const b2 = buildReceiptBytes(
       {

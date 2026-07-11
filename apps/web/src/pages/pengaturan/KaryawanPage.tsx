@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
+import QRCode from "qrcode";
 import {
   Card,
   ErrorText,
@@ -23,6 +24,7 @@ interface Karyawan {
   role: "owner" | "admin" | "cashier";
   branch_id: string | null;
   cabang: string | null;
+  employee_code: string | null;
 }
 
 interface FormState {
@@ -43,6 +45,28 @@ export function KaryawanPage() {
     queryFn: () => api<Karyawan[]>("/karyawan"),
   });
   const [form, setForm] = useState<FormState | null>(null);
+  // Modal QR karyawan (untuk absensi) + data URL QR yang digenerate
+  const [qrFor, setQrFor] = useState<Karyawan | null>(null);
+  const [qrUrl, setQrUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let batal = false;
+    if (qrFor?.employee_code) {
+      setQrUrl(null);
+      QRCode.toDataURL(qrFor.employee_code, { margin: 1, width: 320 })
+        .then((url) => {
+          if (!batal) setQrUrl(url);
+        })
+        .catch(() => {
+          if (!batal) setQrUrl(null);
+        });
+    } else {
+      setQrUrl(null);
+    }
+    return () => {
+      batal = true;
+    };
+  }, [qrFor]);
 
   const tambah = useMutation({
     mutationFn: (f: FormState) =>
@@ -98,6 +122,7 @@ export function KaryawanPage() {
           <thead className="border-b border-stone-200 bg-stone-50">
             <tr>
               <th className={thClass}>Nama</th>
+              <th className={thClass}>Kode</th>
               <th className={thClass}>Email</th>
               <th className={thClass}>Peran</th>
               <th className={thClass}>Cabang</th>
@@ -109,6 +134,11 @@ export function KaryawanPage() {
             {(karyawan ?? []).map((k) => (
               <tr key={k.user_id}>
                 <td className={`${tdClass} font-medium`}>{k.nama}</td>
+                <td className={tdClass}>
+                  <span className="font-mono font-semibold text-stone-700">
+                    {k.employee_code ?? "—"}
+                  </span>
+                </td>
                 <td className={tdClass}>{k.email}</td>
                 <td className={tdClass}>{labelRole[k.role]}</td>
                 <td className={tdClass}>{k.cabang ?? "Semua"}</td>
@@ -122,12 +152,20 @@ export function KaryawanPage() {
                   </span>
                 </td>
                 <td className={`${tdClass} whitespace-nowrap text-right`}>
+                  {k.employee_code && (
+                    <button
+                      onClick={() => setQrFor(k)}
+                      className="text-sm font-medium text-orange-600 hover:underline"
+                    >
+                      QR
+                    </button>
+                  )}
                   <button
                     onClick={() => {
                       const pw = prompt(`Password baru untuk ${k.nama} (min 8 karakter):`);
                       if (pw) ubah.mutate({ userId: k.user_id, body: { password: pw } });
                     }}
-                    className="text-sm font-medium text-orange-600 hover:underline"
+                    className="ml-3 text-sm font-medium text-orange-600 hover:underline"
                   >
                     Reset Password
                   </button>
@@ -223,6 +261,46 @@ export function KaryawanPage() {
           </form>
         )}
       </Modal>
+
+      {/* Modal QR karyawan (untuk absensi) */}
+      <Modal open={qrFor !== null} onClose={() => setQrFor(null)} title="QR Absensi Karyawan">
+        {qrFor && (
+          <div className="space-y-3 text-center">
+            <div className="text-lg font-bold text-stone-800">{qrFor.nama}</div>
+            {qrUrl ? (
+              <img src={qrUrl} alt={`QR ${qrFor.nama}`} className="mx-auto h-56 w-56" />
+            ) : (
+              <div className="py-16 text-sm text-stone-400">Membuat QR…</div>
+            )}
+            <div className="font-mono text-2xl font-bold tracking-widest text-stone-800">
+              {qrFor.employee_code}
+            </div>
+            <p className="text-xs text-stone-500">
+              Karyawan memindai QR ini (atau mengetik kodenya) di halaman <b>Absen</b> untuk mencatat
+              masuk/pulang.
+            </p>
+            <div className="flex justify-center gap-2 print:hidden">
+              <button onClick={() => setQrFor(null)} className={btnSecondary}>
+                Tutup
+              </button>
+              <button onClick={() => window.print()} disabled={!qrUrl} className={btnPrimary}>
+                🖨 Cetak QR
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Kontainer khusus cetak — hanya QR + identitas yang tampil saat window.print() */}
+      {qrFor && qrUrl && (
+        <div id="qr-print" className="hidden print:block">
+          <div className="text-center">
+            <img src={qrUrl} alt="" className="mx-auto" style={{ width: "60mm", height: "60mm" }} />
+            <div className="mt-2 text-xl font-bold">{qrFor.nama}</div>
+            <div className="font-mono text-2xl font-bold tracking-widest">{qrFor.employee_code}</div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

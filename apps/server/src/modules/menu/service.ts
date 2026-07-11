@@ -6,11 +6,15 @@ import {
   hargaSaran,
   hargaSaranPaket,
   hitungHpp,
+  porsiTersedia,
+  qtyBahanPerPorsi,
   type KomponenDto,
   type MenuDto,
+  type MenuStokDto,
 } from "@kakarut/shared";
-import type { Db, Tx } from "../../db/client";
+import { db, type Db, type Tx } from "../../db/client";
 import { ingredients, menuCategories, menuComponents, menus } from "../../db/schema";
+import { hitungSaldoCabang } from "../stok/service";
 
 type MenuRow = typeof menus.$inferSelect;
 
@@ -199,6 +203,46 @@ export async function backfillKodeMenu(dbx: Db | Tx): Promise<number> {
     }
   }
   return terisi;
+}
+
+/**
+ * Sisa porsi tiap menu di satu cabang — untuk info kasir ("sisa 2 lagi").
+ * porsi = ⌊min bahan pembatas (saldo ÷ qty per porsi)⌋, di mana qty per porsi
+ * mengagregasi komponen menu sendiri + (untuk paket) komponen menu dasar, sama
+ * seperti pengurangan stok saat penjualan. Bahan tak-terlacak diabaikan; menu
+ * tanpa bahan pembatas → null (tak terbatas).
+ *
+ * Memakai qty PENUH tiap komponen (setara bawa pulang), yaitu skenario yang
+ * mengonsumsi paling banyak: kemasan dipakai penuh dan complement tanpa
+ * potongan dine-in. Termasuk KEMASAN terlacak — bila stok kemasan (mis. box/
+ * plastik) menipis, itu pembatas nyata untuk penjualan bawa pulang. Dengan
+ * begitu sisa yang ditampilkan tak pernah melebihi kemampuan sebenarnya
+ * (aman dari over-janji), sekalipun untuk dine-in bisa sedikit konservatif.
+ */
+export async function ketersediaanMenu(
+  companyId: string,
+  branchId: string,
+): Promise<MenuStokDto[]> {
+  const [katalog, saldoRows] = await Promise.all([
+    loadKatalog(db, companyId),
+    hitungSaldoCabang(companyId, branchId),
+  ]);
+  const saldoByIngredient = new Map(saldoRows.map((r) => [r.ingredient_id, r.saldo]));
+
+  return katalog.rows.map((menu) => {
+    // qty bahan terlacak per porsi = komponen sendiri + (paket) komponen menu
+    // dasar, digabung per bahan (persis logika konsumsi bawa-pulang).
+    const komponen = [
+      ...(katalog.komponenByMenu.get(menu.id) ?? []),
+      ...(menu.tipe === "paket" && menu.baseMenuId
+        ? katalog.komponenByMenu.get(menu.baseMenuId) ?? []
+        : []),
+    ];
+    return {
+      menu_id: menu.id,
+      porsi: porsiTersedia(qtyBahanPerPorsi(komponen), saldoByIngredient),
+    };
+  });
 }
 
 export function toMenuDto(menu: MenuRow, katalog: KatalogMenu): MenuDto {

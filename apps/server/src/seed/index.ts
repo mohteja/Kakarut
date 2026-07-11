@@ -18,6 +18,7 @@ import {
 import { env } from "../config/env";
 import { db, pool } from "../db/client";
 import { backfillKodeMenu } from "../modules/menu/service";
+import { backfillEmployeeCode } from "../modules/users/service";
 import {
   branches,
   companies,
@@ -555,6 +556,10 @@ async function main() {
   // Kode menu otomatis untuk seluruh menu (kode = ID cepat di kasir).
   const terisiKode = await backfillKodeMenu(db);
   console.log(`Kode menu otomatis: ${terisiKode} menu.`);
+
+  // Kode karyawan otomatis (untuk absensi via ketik/scan QR).
+  const terisiKar = await backfillEmployeeCode(db);
+  console.log(`Kode karyawan otomatis: ${terisiKar} karyawan.`);
 
   console.log("\n=== Seed selesai — kredensial akun ===");
   for (const c of credentials) {

@@ -64,7 +64,7 @@ export const penjualanRoutes = new Hono<AppEnv>()
       uangDiterima: body.uang_diterima,
       items: body.items,
     });
-    return c.json(result, 201);
+    return c.json({ ...result, kasir: auth.nama }, 201);
   })
   .get("/", async (c) => {
     const auth = c.get("auth");
@@ -123,7 +123,11 @@ export const penjualanRoutes = new Hono<AppEnv>()
       .select({ nama: branches.nama })
       .from(branches)
       .where(eq(branches.id, sale.branchId));
-    return c.json({ sale, items, branch_nama: branch?.nama ?? "" });
+    const [kasirUser] = await db
+      .select({ nama: users.nama })
+      .from(users)
+      .where(eq(users.id, sale.cashierUserId));
+    return c.json({ sale, items, branch_nama: branch?.nama ?? "", kasir: kasirUser?.nama ?? null });
   })
   .delete(
     "/:id",

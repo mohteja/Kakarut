@@ -917,6 +917,9 @@ cek "tunai: metode tersimpan" "V == 1" "$(echo "$MB" | jq '(.sale.metodeBayar ==
 cek "tunai: uang diterima 50000" "V == 50000" "$(echo "$MB" | jq '.sale.uangDiterima')"
 cek "tunai: uang >= total (kembalian >= 0)" "V == 1" \
   "$(echo "$MB" | jq '((.sale.uangDiterima - .sale.total) >= 0) | if . then 1 else 0 end')"
+cek "sale response memuat nama kasir" "V == 1" "$(echo "$MB" | jq '(.kasir | length > 0) | if . then 1 else 0 end')"
+cek "GET sale detail: nama kasir ada" "V == 1" \
+  "$(api "$KASIR" GET "/penjualan/$(echo "$MB" | jq -r .sale.id)" | jq '(.kasir | length > 0) | if . then 1 else 0 end')"
 MBQ=$(api "$KASIR" POST /penjualan "{\"is_dine_in\":false,\"metode_bayar\":\"qris\",\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")
 cek "qris: metode tersimpan" "V == 1" "$(echo "$MBQ" | jq '(.sale.metodeBayar == "qris") | if . then 1 else 0 end')"
 cek "qris: uang diterima null" "V == 1" "$(echo "$MBQ" | jq '(.sale.uangDiterima == null) | if . then 1 else 0 end')"
@@ -948,6 +951,97 @@ cek "tutup shift: selisih 0 (uang fisik = kas)" "V == 1" "$(echo "$TU" | jq '(.s
 cek "tutup shift: ditutup terisi" "V == 1" "$(echo "$TU" | jq '(.ditutup_pada != null) | if . then 1 else 0 end')"
 cek "setelah tutup: tak ada shift aktif" "V == 1" "$(api "$KASIR" GET /shift/aktif | jq '(. == null) | if . then 1 else 0 end')"
 cek "riwayat shift: ada shift tertutup" "V >= 1" "$(api "$KASIR" GET /shift | jq 'length')"
+
+echo "== 37. Open bill (simpan, buka, ubah, bayar, hapus) =="
+MEJA_OB=$(api "$KASIR" GET /meja | jq -r '[.[] | select(.is_active)][0].id')
+OB=$(api "$KASIR" POST /open-bill "{\"meja_id\":\"$MEJA_OB\",\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":2}]}")
+OB_ID=$(echo "$OB" | jq -r .id)
+cek "open bill dibuat: 1 baris item" "V == 1" "$(echo "$OB" | jq '.items | length')"
+cek "open bill: qty 2" "V == 2" "$(echo "$OB" | jq '.items[0].qty')"
+cek "GET /open-bill: bill muncul di list" "V == 1" \
+  "$(api "$KASIR" GET /open-bill | jq --arg id "$OB_ID" '[.[] | select(.id == $id)] | length')"
+cek "GET /open-bill: jumlah_item = 1" "V == 1" \
+  "$(api "$KASIR" GET /open-bill | jq --arg id "$OB_ID" '[.[] | select(.id == $id)][0].jumlah_item')"
+OBU=$(api "$KASIR" PUT "/open-bill/$OB_ID" "{\"meja_id\":\"$MEJA_OB\",\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":2},{\"menu_id\":\"$PYO_ID\",\"qty\":1}]}")
+cek "ubah bill: jadi 2 baris item" "V == 2" "$(echo "$OBU" | jq '.items | length')"
+# bayar bill: buat sale dari item bill lalu hapus bill (alur Lanjut → Simpan)
+SOB=$(api "$KASIR" POST /penjualan "{\"meja_id\":\"$MEJA_OB\",\"metode_bayar\":\"tunai\",\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":2},{\"menu_id\":\"$PYO_ID\",\"qty\":1}]}")
+cek "bayar bill: sale dibuat (ada nomor)" "V == 1" "$(echo "$SOB" | jq '(.sale.nomor | length > 0) | if . then 1 else 0 end')"
+api "$KASIR" DELETE "/open-bill/$OB_ID" > /dev/null
+cek "setelah bayar: bill hilang dari list" "V == 0" \
+  "$(api "$KASIR" GET /open-bill | jq --arg id "$OB_ID" '[.[] | select(.id == $id)] | length')"
+cek "GET bill terhapus → 404" "V == 404" "$(status_code "$KASIR" GET "/open-bill/$OB_ID")"
+
+echo "== 38. Ketersediaan menu (sisa porsi per bahan terlacak) =="
+cek "ketersediaan: status 200 utk kasir" "V == 200" "$(status_code "$KASIR" GET /menu/ketersediaan)"
+KET=$(api "$KASIR" GET /menu/ketersediaan)
+MENU_ALL=$(api "$KASIR" GET "/menu?semua=true")
+STOK=$(api "$KASIR" GET /stok)
+cek "ketersediaan: jumlah baris = jumlah menu (aktif+nonaktif)" "V == 1" \
+  "$(jq -n --argjson k "$KET" --argjson m "$MENU_ALL" '(($k|length) == ($m|length)) | if . then 1 else 0 end')"
+cek "ketersediaan: semua porsi null / bilangan bulat >= 0" "V == 1" \
+  "$(echo "$KET" | jq '([.[] | select(.porsi != null) | select((.porsi != (.porsi|floor)) or (.porsi < 0))] | length == 0) | if . then 1 else 0 end')"
+
+# PBA (reguler) — bahan terlacak (baso) membatasi → porsi bukan null
+MENU_PBA=$(api "$KASIR" GET "/menu/$PBA_ID")
+PBA_PORSI=$(echo "$KET" | jq --arg id "$PBA_ID" '[.[] | select(.menu_id == $id)][0].porsi')
+cek "ketersediaan PBA: porsi terlacak (bukan null)" "V == 1" \
+  "$(echo "$PBA_PORSI" | jq '(. != null) | if . then 1 else 0 end')"
+# cross-check: porsi == min ⌊saldo/qty⌋ atas SEMUA bahan terlacak (termasuk kemasan)
+EXP_PBA=$(jq -n --argjson menu "$MENU_PBA" --argjson stok "$STOK" '
+  ($stok | map({(.ingredient_id): .saldo}) | add) as $s
+  | [ $menu.komponen[]
+      | select(.track_stok and (.qty > 0))
+      | ($s[.ingredient_id]) as $sal | select($sal != null)
+      | ($sal / .qty | floor) ]
+  | (if length == 0 then null else (min | if . < 0 then 0 else . end) end)')
+cek "ketersediaan PBA: porsi cocok min(saldo/qty) termasuk kemasan" "V == 1" \
+  "$(jq -n --argjson a "$PBA_PORSI" --argjson b "$EXP_PBA" '($a == $b) | if . then 1 else 0 end')"
+
+# PYO (paket) — agregasi qty komponen menu sendiri + menu dasar (persis konsumsi)
+MENU_PYO=$(api "$KASIR" GET "/menu/$PYO_ID")
+BASE_ID=$(echo "$MENU_PYO" | jq -r '.base_menu_id')
+MENU_BASE=$(api "$KASIR" GET "/menu/$BASE_ID")
+PYO_PORSI=$(echo "$KET" | jq --arg id "$PYO_ID" '[.[] | select(.menu_id == $id)][0].porsi')
+EXP_PYO=$(jq -n --argjson own "$MENU_PYO" --argjson base "$MENU_BASE" --argjson stok "$STOK" '
+  ($stok | map({(.ingredient_id): .saldo}) | add) as $s
+  | (($own.komponen + $base.komponen)
+      | map(select(.track_stok and (.qty > 0)))
+      | group_by(.ingredient_id)
+      | map({ingredient_id: .[0].ingredient_id, qty: (map(.qty) | add)})) as $agg
+  | [ $agg[] | ($s[.ingredient_id]) as $sal | select($sal != null) | ($sal / .qty | floor) ]
+  | (if length == 0 then null else (min | if . < 0 then 0 else . end) end)')
+cek "ketersediaan PYO (paket): cocok agregasi own+dasar" "V == 1" \
+  "$(jq -n --argjson a "$PYO_PORSI" --argjson b "$EXP_PYO" '($a == $b) | if . then 1 else 0 end')"
+
+echo "== 39. Absensi karyawan (kode/QR + masuk/keluar auto-detect) =="
+# tiap karyawan (membership) dapat kode karyawan otomatis (backfill saat seed)
+cek "karyawan punya employee_code" "V == 1" \
+  "$(api "$OWNER" GET /karyawan | jq '([.[] | select(.employee_code != null)] | length >= 1) | if . then 1 else 0 end')"
+KODE_KAR=$(api "$OWNER" GET /karyawan | jq -r '[.[] | select(.role == "cashier")][0].employee_code')
+# kasir (semua peran boleh) mengabsen via kode → cap pertama = masuk
+A1=$(api "$KASIR" POST /absensi "{\"kode\":\"$KODE_KAR\"}")
+cek "absen pertama = masuk" "V == 1" "$(echo "$A1" | jq '(.tipe == "masuk") | if . then 1 else 0 end')"
+cek "absen mengembalikan nama karyawan" "V == 1" "$(echo "$A1" | jq '(.nama | length > 0) | if . then 1 else 0 end')"
+cek "absen mengembalikan waktu (ISO)" "V == 1" "$(echo "$A1" | jq '(.waktu | length > 0) | if . then 1 else 0 end')"
+# cap berikutnya untuk karyawan yang sama = keluar (auto-detect dari cap terakhir)
+A2=$(api "$KASIR" POST /absensi "{\"kode\":\"$KODE_KAR\"}")
+cek "absen kedua = keluar (auto-detect)" "V == 1" "$(echo "$A2" | jq '(.tipe == "keluar") | if . then 1 else 0 end')"
+# kode case-insensitive (huruf kecil tetap dikenali)
+A3=$(api "$KASIR" POST /absensi "{\"kode\":\"$(echo "$KODE_KAR" | tr 'A-Z' 'a-z')\"}")
+cek "kode absensi case-insensitive → masuk lagi" "V == 1" "$(echo "$A3" | jq '(.tipe == "masuk") | if . then 1 else 0 end')"
+# daftar absensi hari ini memuat karyawan dengan jam masuk & keluar terisi
+LIST=$(api "$KASIR" GET /absensi)
+cek "daftar absensi: masuk terisi" "V == 1" \
+  "$(echo "$LIST" | jq --arg k "$KODE_KAR" '[.[] | select(.employee_code == $k) | select(.masuk != null)] | length')"
+cek "daftar absensi: keluar terisi" "V == 1" \
+  "$(echo "$LIST" | jq --arg k "$KODE_KAR" '[.[] | select(.employee_code == $k) | select(.keluar != null)] | length')"
+# kode karyawan tak dikenal → 404
+cek "kode karyawan tak dikenal → 404" "V == 404" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/absensi" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d '{"kode":"ZZZNOPE"}')"
+# tanggal ngawur pada daftar → 400 (bukan 500)
+cek "daftar absensi tanggal invalid → 400" "V == 400" "$(status_code "$KASIR" GET "/absensi?tanggal=abc")"
+cek "daftar absensi tanggal di luar rentang → 400" "V == 400" "$(status_code "$KASIR" GET "/absensi?tanggal=2026-13-40")"
 
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="

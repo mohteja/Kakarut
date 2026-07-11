@@ -1,8 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import type { MejaDto, MenuDto, MetodeBayar } from "@kakarut/shared";
-import { Card, ErrorText, Spinner, btnPrimary } from "../../components/ui";
+import type {
+  MejaDto,
+  MenuDto,
+  MenuStokDto,
+  MetodeBayar,
+  OpenBillDetail,
+  OpenBillRow,
+} from "@kakarut/shared";
+import { Card, ErrorText, Spinner, btnPrimary, btnSecondary } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
@@ -22,6 +29,22 @@ interface Kategori {
   id: string;
   nama: string;
   sort_order: number;
+}
+
+/**
+ * Badge sisa porsi untuk kasir. `porsi` null → menu tak terlacak stoknya →
+ * tak menampilkan apa pun. 0 → "Habis" (merah); sedikit (≤5) → oranye; sisanya
+ * hijau. `size` mengatur kepadatan untuk tile kode yang mungil.
+ */
+function StokBadge({ porsi, size = "md" }: { porsi: number | null | undefined; size?: "sm" | "md" }) {
+  if (porsi == null) return null;
+  const kecil = size === "sm";
+  const base = kecil ? "text-[9px] leading-none" : "text-[11px]";
+  if (porsi <= 0) {
+    return <span className={`font-semibold text-red-600 ${base}`}>Habis</span>;
+  }
+  const warna = porsi <= 5 ? "text-orange-600" : "text-emerald-600";
+  return <span className={`font-medium ${warna} ${base}`}>Sisa {porsi}</span>;
 }
 
 export function KasirPage() {
@@ -69,7 +92,6 @@ export function KasirPage() {
   // Otomatis untuk kasir; owner/admin membukanya lewat tombol "Pilih/Ganti".
   const [mejaModalOpen, setMejaModalOpen] = useState(isKasir);
   const [mejaCari, setMejaCari] = useState("");
-  const [catatan, setCatatan] = useState("");
   const [konsumenNama, setKonsumenNama] = useState("");
   const [konsumenWa, setKonsumenWa] = useState("");
   const [diskonTipe, setDiskonTipe] = useState<"persen" | "nominal">("nominal");
@@ -77,6 +99,25 @@ export function KasirPage() {
   const [metodeBayar, setMetodeBayar] = useState<MetodeBayar>("tunai");
   const [uangDiterima, setUangDiterima] = useState("");
   const [struk, setStruk] = useState<SaleResult | null>(null);
+  // Modal "Resume Order" (diskon + pembayaran) muncul saat tombol Lanjut ditekan
+  const [resumeOpen, setResumeOpen] = useState(false);
+  // id open bill yang sedang dibuka/diedit (null = pesanan baru)
+  const [editingBillId, setEditingBillId] = useState<string | null>(null);
+
+  const { data: openBills = [] } = useQuery({
+    queryKey: ["open-bill", branchQuery],
+    queryFn: () => api<OpenBillRow[]>(`/open-bill${branchQuery}`),
+  });
+
+  // Sisa porsi tiap menu di cabang aktif (info "sisa 2 lagi" untuk kasir).
+  const { data: ketersediaan = [] } = useQuery({
+    queryKey: ["menu-ketersediaan", branchQuery],
+    queryFn: () => api<MenuStokDto[]>(`/menu/ketersediaan${branchQuery}`),
+  });
+  const sisaByMenu = useMemo(
+    () => new Map(ketersediaan.map((k) => [k.menu_id, k.porsi])),
+    [ketersediaan],
+  );
 
   const mejaAktif = useMemo(() => mejaList.filter((m) => m.is_active), [mejaList]);
   const mejaTerpilih = mejaAktif.find((m) => m.id === mejaId) ?? null;
@@ -215,7 +256,6 @@ export function KasirPage() {
           ...(!isKasir && branchId ? { branch_id: branchId } : {}),
           is_dine_in: dineIn,
           meja_id: mejaId ?? undefined,
-          catatan: catatan || undefined,
           ...(konsumenNama.trim() ? { customer_nama: konsumenNama.trim() } : {}),
           ...(konsumenWa.trim() ? { customer_wa: konsumenWa.trim() } : {}),
           metode_bayar: metodeBayar,
@@ -231,20 +271,72 @@ export function KasirPage() {
       }),
     onSuccess: (data) => {
       setStruk(data);
-      setCart([]);
-      setCatatan("");
-      setKonsumenNama("");
-      setKonsumenWa("");
-      setDiskonNilai("");
-      setMetodeBayar("tunai");
-      setUangDiterima("");
-      setMejaId(null);
+      setResumeOpen(false);
+      // bila membayar open bill → hapus bill (sudah menjadi transaksi)
+      if (editingBillId) api(`/open-bill/${editingBillId}`, { method: "DELETE" }).catch(() => {});
+      resetTransaksi();
       // modal pilih meja dibuka lagi saat struk ditutup (transaksi berikutnya)
       queryClient.invalidateQueries({ queryKey: ["stok"] });
       queryClient.invalidateQueries({ queryKey: ["laporan"] });
       queryClient.invalidateQueries({ queryKey: ["penjualan"] });
+      queryClient.invalidateQueries({ queryKey: ["open-bill"] });
+      queryClient.invalidateQueries({ queryKey: ["menu-ketersediaan"] });
     },
   });
+
+  // Kosongkan seluruh state transaksi (dipakai setelah bayar / simpan bill).
+  function resetTransaksi() {
+    setCart([]);
+    setKonsumenNama("");
+    setKonsumenWa("");
+    setDiskonNilai("");
+    setMetodeBayar("tunai");
+    setUangDiterima("");
+    setMejaId(null);
+    setEditingBillId(null);
+  }
+
+  // Simpan keranjang sebagai open bill (belum dibayar) — buat baru / perbarui.
+  const simpanBill = useMutation({
+    mutationFn: () => {
+      const body = {
+        ...(!isKasir && branchId ? { branch_id: branchId } : {}),
+        meja_id: mejaId ?? undefined,
+        ...(konsumenNama.trim() ? { customer_nama: konsumenNama.trim() } : {}),
+        ...(konsumenWa.trim() ? { customer_wa: konsumenWa.trim() } : {}),
+        items: cart.map((l) => ({
+          menu_id: l.menu.id,
+          qty: l.qty,
+          ...(l.dineInOverride !== null ? { dine_in_override: l.dineInOverride } : {}),
+          ...(l.catatan.trim() ? { catatan: l.catatan.trim() } : {}),
+        })),
+      };
+      return editingBillId
+        ? api(`/open-bill/${editingBillId}`, { method: "PUT", body })
+        : api("/open-bill", { method: "POST", body });
+    },
+    onSuccess: () => {
+      resetTransaksi();
+      queryClient.invalidateQueries({ queryKey: ["open-bill"] });
+    },
+  });
+
+  // Buka open bill → muat kembali item & data ke keranjang untuk dilanjut/bayar.
+  async function bukaBill(id: string) {
+    const bill = await api<OpenBillDetail>(`/open-bill/${id}`);
+    const menuById = new Map((menus ?? []).map((m) => [m.id, m]));
+    const lines: CartLine[] = [];
+    for (const it of bill.items) {
+      const menu = menuById.get(it.menu_id);
+      if (menu) lines.push({ menu, qty: it.qty, dineInOverride: it.dine_in_override, catatan: it.catatan ?? "" });
+    }
+    setCart(lines);
+    setMejaId(bill.meja_id);
+    setKonsumenNama(bill.customer_nama ?? "");
+    setKonsumenWa(bill.customer_wa ?? "");
+    setEditingBillId(id);
+    setMejaModalOpen(false);
+  }
 
   if (isLoading) return <Spinner />;
 
@@ -352,6 +444,10 @@ export function KasirPage() {
                   )}
                   <div className="line-clamp-2 text-sm font-semibold text-stone-800">{m.nama}</div>
                 </div>
+                {/* Sisa porsi di bawah nama menu — kasir bisa infokan ke konsumen */}
+                <div className="pt-0.5">
+                  <StokBadge porsi={sisaByMenu.get(m.id)} />
+                </div>
                 <div className="mt-auto pt-1 text-sm font-bold text-orange-600">
                   {formatRupiah(m.harga_jual)}
                 </div>
@@ -384,6 +480,8 @@ export function KasirPage() {
                       <span className="mt-0.5 text-[10px] font-medium text-orange-600">
                         {formatAngka(m.harga_jual, 0)}
                       </span>
+                      {/* Sisa porsi di bawah kode + harga */}
+                      <StokBadge porsi={sisaByMenu.get(m.id)} size="sm" />
                     </button>
                   ))}
                 </div>
@@ -417,6 +515,31 @@ export function KasirPage() {
             ⚙ Atur meja
           </Link>
         </div>
+
+        {/* Pemilih Open Bill (di atas) — pesanan tersimpan yang belum dibayar */}
+        {openBills.length > 0 && (
+          <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-2">
+            <div className="mb-1 px-1 text-xs font-semibold text-amber-800">
+              📋 Open Bill ({openBills.length}) — ketuk untuk buka
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {openBills.map((b) => (
+                <button
+                  key={b.id}
+                  onClick={() => void bukaBill(b.id)}
+                  className={`rounded-lg border px-2 py-1 text-left text-xs ${
+                    editingBillId === b.id
+                      ? "border-amber-500 bg-amber-500 text-white"
+                      : "border-amber-300 bg-white text-amber-800 hover:bg-amber-100"
+                  }`}
+                >
+                  <span className="font-semibold">{b.meja_label || b.customer_nama || "Bill"}</span>
+                  <span className="ml-1 opacity-80">· {b.jumlah_item} item</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Meja terpilih (dipilih lewat modal di awal transaksi) + tombol ganti */}
         <button
@@ -524,152 +647,242 @@ export function KasirPage() {
                   placeholder="Catatan (mis. tanpa gula, tanpa mie)"
                   className="mt-2 w-full rounded-lg border border-stone-200 bg-stone-50 px-2 py-1 text-xs focus:border-orange-400 focus:bg-white focus:outline-none"
                 />
+                {/* Peringatan bila pesanan melebihi stok tersisa (mis. pesan 3, sisa 2) */}
+                {(() => {
+                  const sisa = sisaByMenu.get(l.menu.id);
+                  if (sisa == null || l.qty <= sisa) return null;
+                  return (
+                    <div className="mt-1 rounded bg-red-50 px-2 py-1 text-xs font-semibold text-red-600">
+                      ⚠ {sisa <= 0 ? "Stok habis" : `Stok hanya sisa ${sisa}`} — pesanan {l.qty}
+                    </div>
+                  );
+                })()}
               </div>
             );
           })}
         </div>
 
         <div className="mt-3 space-y-2 border-t border-stone-200 pt-3">
-          <input
-            value={catatan}
-            onChange={(e) => setCatatan(e.target.value)}
-            placeholder="Catatan (opsional)"
-            className="w-full rounded-lg border border-stone-300 px-3 py-1.5 text-sm"
-          />
-          <div className="flex justify-between text-sm text-stone-600">
+          <div className="flex justify-between text-base font-bold text-stone-800">
             <span>Subtotal</span>
             <span>{formatRupiah(subtotal)}</span>
           </div>
-          {/* Diskon per transaksi: toggle %/Rp + input (dibatasi utk kasir) */}
-          <div>
-            <div className="flex items-center justify-between gap-2 text-sm text-stone-600">
-              <div className="flex items-center gap-1.5">
-                <span>Diskon</span>
-                <div className="flex overflow-hidden rounded-md border border-stone-300 text-xs">
-                  <button
-                    type="button"
-                    disabled={!diskonBoleh}
-                    onClick={() => setDiskonTipe("nominal")}
-                    className={`px-2 py-1 font-medium disabled:opacity-40 ${diskonTipe === "nominal" ? "bg-orange-600 text-white" : "bg-white text-stone-600"}`}
-                  >
-                    Rp
-                  </button>
-                  <button
-                    type="button"
-                    disabled={!diskonBoleh}
-                    onClick={() => setDiskonTipe("persen")}
-                    className={`px-2 py-1 font-medium disabled:opacity-40 ${diskonTipe === "persen" ? "bg-orange-600 text-white" : "bg-white text-stone-600"}`}
-                  >
-                    %
-                  </button>
-                </div>
-                <input
-                  type="number"
-                  min="0"
-                  max={diskonTipe === "persen" ? (isKasir ? maksDiskonPersen : 100) : undefined}
-                  disabled={!diskonBoleh}
-                  value={diskonNilai}
-                  onChange={(e) => setDiskonNilai(e.target.value)}
-                  placeholder="0"
-                  className="w-20 rounded-md border border-stone-300 px-2 py-1 text-right text-sm disabled:bg-stone-100"
-                />
-              </div>
-              <span className="text-red-600">{diskon > 0 ? `−${formatRupiah(diskon)}` : "—"}</span>
-            </div>
-            {isKasir && maksDiskonPersen < 100 && (
-              <div className="mt-0.5 text-right text-xs text-stone-400">
-                {maksDiskonPersen === 0
-                  ? "Diskon hanya oleh owner/admin"
-                  : `Maks diskon kasir ${maksDiskonPersen}%${diskonDibatasi ? " · dibatasi" : ""}`}
-              </div>
-            )}
-          </div>
-          {pb1 > 0 && (
-            <div className="flex justify-between text-sm text-stone-600">
-              <span>PB1 ({pb1Conf?.pb1_rate}%)</span>
-              <span>{formatRupiah(pb1)}</span>
+          <ErrorText error={simpanBill.error} />
+          {cart.length > 0 && !mejaId && (
+            <div className="text-center text-xs font-medium text-amber-600">
+              Pilih meja dulu untuk melanjutkan.
             </div>
           )}
-          <div className="flex justify-between text-lg font-bold text-stone-800">
-            <span>Total</span>
-            <span>{formatRupiah(total)}</span>
+          {/* Setelah meja & menu: pilih simpan Open Bill atau Lanjut ke pembayaran */}
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={() => simpanBill.mutate()}
+              disabled={cart.length === 0 || !mejaId || simpanBill.isPending}
+              className={`${btnSecondary} py-3`}
+            >
+              {simpanBill.isPending ? "Menyimpan…" : editingBillId ? "💾 Perbarui Bill" : "📋 Open Bill"}
+            </button>
+            <button
+              onClick={() => setResumeOpen(true)}
+              disabled={cart.length === 0 || !mejaId}
+              className={`${btnPrimary} py-3`}
+            >
+              Lanjut →
+            </button>
           </div>
+        </div>
+      </Card>
 
-          {/* Metode pembayaran */}
-          <div className="grid grid-cols-3 gap-1.5 pt-1">
-            {(["tunai", "qris", "transfer"] as const).map((m) => (
+      {/* Modal Resume Order — kasir baca ulang pesanan, isi diskon, terima uang, lalu Simpan */}
+      {resumeOpen && !struk && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setResumeOpen(false)}
+        >
+          <div
+            className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-5 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-1 flex items-center justify-between">
+              <h2 className="text-lg font-bold text-stone-800">Resume Order</h2>
               <button
-                key={m}
-                type="button"
-                onClick={() => setMetodeBayar(m)}
-                className={`rounded-lg border px-2 py-1.5 text-sm font-medium ${
-                  metodeBayar === m
-                    ? "border-orange-600 bg-orange-600 text-white"
-                    : "border-stone-300 bg-white text-stone-600 hover:bg-stone-50"
-                }`}
+                onClick={() => setResumeOpen(false)}
+                className="text-stone-400 hover:text-stone-700"
+                aria-label="Tutup"
               >
-                {m === "tunai" ? "💵 Tunai" : m === "qris" ? "📱 QRIS" : "🏦 Transfer"}
+                ✕
               </button>
-            ))}
-          </div>
-          {metodeBayar === "tunai" && (
-            <div className="space-y-1.5">
-              <div className="flex items-center gap-1.5">
-                <input
-                  type="number"
-                  inputMode="numeric"
-                  min="0"
-                  value={uangDiterima}
-                  onChange={(e) => setUangDiterima(e.target.value)}
-                  placeholder="Uang diterima"
-                  className="w-full rounded-lg border border-stone-300 px-3 py-1.5 text-right text-sm focus:border-orange-500 focus:outline-none"
-                />
-                <button
-                  type="button"
-                  onClick={() => setUangDiterima(String(total))}
-                  className="shrink-0 rounded-lg border border-stone-300 px-2 py-1.5 text-xs font-medium text-stone-600 hover:bg-stone-50"
+            </div>
+            <div className="mb-3 text-sm text-stone-500">
+              {mejaTerpilih
+                ? mejaTerpilih.tipe === "takeaway"
+                  ? `🥡 ${mejaTerpilih.nama}`
+                  : mejaTerpilih.nama
+                : "Tanpa meja"}
+              {" · "}
+              {dineIn ? "Dine-in" : "Bawa pulang"}
+              {konsumenNama.trim() ? ` · 👤 ${konsumenNama.trim()}` : ""}
+            </div>
+
+            {/* Baca ulang pesanan */}
+            <div className="mb-3 divide-y divide-stone-100 rounded-lg border border-stone-200">
+              {cart.map((l) => (
+                <div
+                  key={l.menu.id}
+                  className="flex items-start justify-between gap-2 px-3 py-2 text-sm"
                 >
-                  Uang pas
-                </button>
+                  <span className="min-w-0">
+                    <span className="font-semibold text-stone-800">{l.qty}×</span> {l.menu.nama}
+                    {l.catatan.trim() && (
+                      <span className="block text-xs text-stone-400">* {l.catatan.trim()}</span>
+                    )}
+                  </span>
+                  <span className="shrink-0 font-medium text-stone-700">
+                    {formatRupiah(l.menu.harga_jual * l.qty)}
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex justify-between text-sm text-stone-600">
+                <span>Subtotal</span>
+                <span>{formatRupiah(subtotal)}</span>
               </div>
-              <div className="flex flex-wrap gap-1.5">
-                {[20000, 50000, 100000].map((n) => (
+              {/* Diskon per transaksi: toggle %/Rp + input (dibatasi utk kasir) */}
+              <div>
+                <div className="flex items-center justify-between gap-2 text-sm text-stone-600">
+                  <div className="flex items-center gap-1.5">
+                    <span>Diskon</span>
+                    <div className="flex overflow-hidden rounded-md border border-stone-300 text-xs">
+                      <button
+                        type="button"
+                        disabled={!diskonBoleh}
+                        onClick={() => setDiskonTipe("nominal")}
+                        className={`px-2 py-1 font-medium disabled:opacity-40 ${diskonTipe === "nominal" ? "bg-orange-600 text-white" : "bg-white text-stone-600"}`}
+                      >
+                        Rp
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!diskonBoleh}
+                        onClick={() => setDiskonTipe("persen")}
+                        className={`px-2 py-1 font-medium disabled:opacity-40 ${diskonTipe === "persen" ? "bg-orange-600 text-white" : "bg-white text-stone-600"}`}
+                      >
+                        %
+                      </button>
+                    </div>
+                    <input
+                      type="number"
+                      min="0"
+                      max={diskonTipe === "persen" ? (isKasir ? maksDiskonPersen : 100) : undefined}
+                      disabled={!diskonBoleh}
+                      value={diskonNilai}
+                      onChange={(e) => setDiskonNilai(e.target.value)}
+                      placeholder="0"
+                      className="w-20 rounded-md border border-stone-300 px-2 py-1 text-right text-sm disabled:bg-stone-100"
+                    />
+                  </div>
+                  <span className="text-red-600">
+                    {diskon > 0 ? `−${formatRupiah(diskon)}` : "—"}
+                  </span>
+                </div>
+                {isKasir && maksDiskonPersen < 100 && (
+                  <div className="mt-0.5 text-right text-xs text-stone-400">
+                    {maksDiskonPersen === 0
+                      ? "Diskon hanya oleh owner/admin"
+                      : `Maks diskon kasir ${maksDiskonPersen}%${diskonDibatasi ? " · dibatasi" : ""}`}
+                  </div>
+                )}
+              </div>
+              {pb1 > 0 && (
+                <div className="flex justify-between text-sm text-stone-600">
+                  <span>PB1 ({pb1Conf?.pb1_rate}%)</span>
+                  <span>{formatRupiah(pb1)}</span>
+                </div>
+              )}
+              <div className="flex justify-between text-xl font-bold text-stone-800">
+                <span>Total</span>
+                <span>{formatRupiah(total)}</span>
+              </div>
+
+              {/* Metode pembayaran */}
+              <div className="grid grid-cols-3 gap-1.5 pt-1">
+                {(["tunai", "qris", "transfer"] as const).map((m) => (
                   <button
-                    key={n}
+                    key={m}
                     type="button"
-                    onClick={() => setUangDiterima(String(n))}
-                    className="rounded-lg border border-stone-300 px-2 py-1 text-xs font-medium text-stone-600 hover:bg-stone-50"
+                    onClick={() => setMetodeBayar(m)}
+                    className={`rounded-lg border px-2 py-1.5 text-sm font-medium ${
+                      metodeBayar === m
+                        ? "border-orange-600 bg-orange-600 text-white"
+                        : "border-stone-300 bg-white text-stone-600 hover:bg-stone-50"
+                    }`}
                   >
-                    {formatRupiah(n)}
+                    {m === "tunai" ? "💵 Tunai" : m === "qris" ? "📱 QRIS" : "🏦 Transfer"}
                   </button>
                 ))}
               </div>
-              {uangNum > 0 && (
-                <div
-                  className={`flex justify-between text-sm font-semibold ${uangKurang ? "text-red-600" : "text-green-600"}`}
-                >
-                  <span>{uangKurang ? "Uang kurang" : "Kembalian"}</span>
-                  <span>{formatRupiah(uangKurang ? total - uangNum : kembalian)}</span>
+              {metodeBayar === "tunai" && (
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      min="0"
+                      value={uangDiterima}
+                      onChange={(e) => setUangDiterima(e.target.value)}
+                      placeholder="Uang diterima"
+                      className="w-full rounded-lg border border-stone-300 px-3 py-1.5 text-right text-sm focus:border-orange-500 focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setUangDiterima(String(total))}
+                      className="shrink-0 rounded-lg border border-stone-300 px-2 py-1.5 text-xs font-medium text-stone-600 hover:bg-stone-50"
+                    >
+                      Uang pas
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[20000, 50000, 100000].map((n) => (
+                      <button
+                        key={n}
+                        type="button"
+                        onClick={() => setUangDiterima(String(n))}
+                        className="rounded-lg border border-stone-300 px-2 py-1 text-xs font-medium text-stone-600 hover:bg-stone-50"
+                      >
+                        {formatRupiah(n)}
+                      </button>
+                    ))}
+                  </div>
+                  {uangNum > 0 && (
+                    <div
+                      className={`flex justify-between text-sm font-semibold ${uangKurang ? "text-red-600" : "text-green-600"}`}
+                    >
+                      <span>{uangKurang ? "Uang kurang" : "Kembalian"}</span>
+                      <span>{formatRupiah(uangKurang ? total - uangNum : kembalian)}</span>
+                    </div>
+                  )}
                 </div>
               )}
-            </div>
-          )}
 
-          <ErrorText error={bayar.error} />
-          {cart.length > 0 && !mejaId && (
-            <div className="text-center text-xs font-medium text-amber-600">
-              Pilih meja dulu sebelum bayar.
+              <ErrorText error={bayar.error} />
+              <div className="grid grid-cols-2 gap-2 pt-1">
+                <button onClick={() => setResumeOpen(false)} className={`${btnSecondary} py-3`}>
+                  ← Kembali
+                </button>
+                <button
+                  onClick={() => bayar.mutate()}
+                  disabled={uangKurang || bayar.isPending}
+                  className={`${btnPrimary} py-3`}
+                >
+                  {bayar.isPending ? "Menyimpan…" : "💾 Simpan & Cetak"}
+                </button>
+              </div>
             </div>
-          )}
-          <button
-            onClick={() => bayar.mutate()}
-            disabled={cart.length === 0 || !mejaId || uangKurang || bayar.isPending}
-            className={`${btnPrimary} w-full py-3 text-base`}
-          >
-            {bayar.isPending ? "Memproses…" : "Bayar & Cetak Struk"}
-          </button>
+          </div>
         </div>
-      </Card>
+      )}
 
       {/* Modal pilih meja — muncul lebih dulu tiap memulai transaksi */}
       {mejaModalOpen && !struk && (
