@@ -608,7 +608,7 @@ ISI24=$(echo "$B24" | jq -r .isi)
 HB24=$(echo "$B24" | jq -r .harga_beli)
 SALDO24=$(stok_of "$(api "$OWNER" GET /stok)" "baso urat besar")
 
-cek "faktur produksi tanpa worker_id ditolak (400)" "V == 400" \
+cek "faktur produksi tanpa pelaksana (worker/supplier) ditolak (400)" "V == 400" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/produksi/faktur" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"items\":[{\"ingredient_id\":\"$URATB_ID\",\"mode\":\"batch\",\"jumlah\":1}]}")"
 cek "worker_id bukan anggota ditolak (400)" "V == 400" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/produksi/faktur" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"worker_id\":\"00000000-0000-4000-8000-000000000000\",\"items\":[{\"ingredient_id\":\"$URATB_ID\",\"mode\":\"batch\",\"jumlah\":1}]}")"
@@ -662,6 +662,14 @@ cek "pembelian tetap berstatus menunggu" "V == 1" \
   "$(echo "$FKB24" | jq '(.status == "menunggu") | if . then 1 else 0 end')"
 cek "pembelian konfirmasi langsung ok (200)" "V == 200" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/pembelian/konfirmasi/$(echo "$FKB24" | jq -r .faktur_id)" -H "Authorization: Bearer $OWNER")"
+# pelaksana boleh SUPPLIER (bukan hanya karyawan): faktur produksi dengan supplier_id saja diterima
+SUP24=$(api "$OWNER" POST /supplier '{"nama":"Dapur Teja"}' | jq -r '.id // empty')
+[ -z "$SUP24" ] && SUP24=$(api "$OWNER" GET /supplier | jq -r '[.[] | select(.nama=="Dapur Teja")][0].id')
+FKS24=$(api "$OWNER" POST /produksi/faktur "{\"supplier_id\":\"$SUP24\",\"items\":[{\"ingredient_id\":\"$URATB_ID\",\"mode\":\"pcs\",\"jumlah\":1}]}")
+cek "faktur produksi dengan supplier (tanpa karyawan) → rencana" "V == 1" \
+  "$(echo "$FKS24" | jq '(.status == "rencana") | if . then 1 else 0 end')"
+cek "riwayat: pelaksana supplier terisi, dikerjakan_oleh null" "V == 1" \
+  "$(api "$OWNER" GET "/produksi?per_page=500" | jq --arg f "$(echo "$FKS24" | jq -r .faktur_id)" '[.rows[] | select(.faktur_id==$f)][0] | ((.supplier == "Dapur Teja") and (.dikerjakan_oleh == null)) | if . then 1 else 0 end')"
 
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="

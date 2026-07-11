@@ -106,8 +106,9 @@ export function FakturModal({
   // hanya bahan sesuai jalur DAN yang dilacak stoknya
   const bahanJalur = (bahan ?? []).filter((b) => b.pengadaan === tipe && b.track_stok);
 
-  const [supplierId, setSupplierId] = useState("");
-  const [workerId, setWorkerId] = useState("");
+  const [supplierId, setSupplierId] = useState(""); // jalur beli
+  // jalur produksi: satu dropdown pelaksana, value "k:<user_id>" / "s:<supplier_id>"
+  const [pelaksana, setPelaksana] = useState("");
   const [noFaktur, setNoFaktur] = useState("");
   const [catatan, setCatatan] = useState("");
   const [items, setItems] = useState<ItemForm[]>([{ ...itemKosong }]);
@@ -118,7 +119,8 @@ export function FakturModal({
     mutationFn: (nama: string) => api<SupplierDto>("/supplier", { method: "POST", body: { nama } }),
     onSuccess: (s) => {
       queryClient.invalidateQueries({ queryKey: ["supplier"] });
-      setSupplierId(s.id);
+      if (tipe === "produksi") setPelaksana(`s:${s.id}`);
+      else setSupplierId(s.id);
       setTambahSupplier(false);
     },
   });
@@ -138,14 +140,18 @@ export function FakturModal({
     setItems((prev) => prev.map((it, j) => (j === i ? { ...it, ...patch } : it)));
   }
 
+  // Pecah pilihan pelaksana produksi jadi worker_id / supplier_id
+  const [pelTipe, pelId] = pelaksana ? pelaksana.split(":") : ["", ""];
+
   const simpan = useMutation({
     mutationFn: () =>
       api(`${endpoint}/faktur`, {
         method: "POST",
         body: {
           ...(!isKasir && branchId ? { branch_id: branchId } : {}),
-          supplier_id: supplierId || null,
-          ...(tipe === "produksi" ? { worker_id: workerId } : {}),
+          supplier_id:
+            tipe === "produksi" ? (pelTipe === "s" ? pelId : null) : supplierId || null,
+          ...(tipe === "produksi" ? { worker_id: pelTipe === "k" ? pelId : null } : {}),
           no_faktur: noFaktur || null,
           catatan: catatan || null,
           items: items
@@ -187,29 +193,58 @@ export function FakturModal({
       <div className="space-y-4">
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="mb-1 block text-sm font-medium">
-              {tipe === "produksi" ? "Sumber (dapur/tim produksi)" : "Sumber (supplier/toko)"}
-            </label>
-            <select
-              value={supplierId}
-              onChange={(e) => setSupplierId(e.target.value)}
-              className={inputClass}
-            >
-              <option value="">— tanpa sumber —</option>
-              {supplier
-                .filter((s) => s.is_active)
-                .map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.nama}
-                  </option>
-                ))}
-            </select>
+            {tipe === "produksi" ? (
+              <>
+                <label className="mb-1 block text-sm font-medium">
+                  Dikerjakan oleh (pelaksana) <span className="text-red-600">*</span>
+                </label>
+                <select
+                  value={pelaksana}
+                  onChange={(e) => setPelaksana(e.target.value)}
+                  className={inputClass}
+                >
+                  <option value="">— pilih pelaksana —</option>
+                  {karyawan
+                    .filter((k) => k.is_active)
+                    .map((k) => (
+                      <option key={`k:${k.user_id}`} value={`k:${k.user_id}`}>
+                        {k.nama} (karyawan)
+                      </option>
+                    ))}
+                  {supplier
+                    .filter((s) => s.is_active)
+                    .map((s) => (
+                      <option key={`s:${s.id}`} value={`s:${s.id}`}>
+                        {s.nama} (supplier)
+                      </option>
+                    ))}
+                </select>
+              </>
+            ) : (
+              <>
+                <label className="mb-1 block text-sm font-medium">Sumber (supplier/toko)</label>
+                <select
+                  value={supplierId}
+                  onChange={(e) => setSupplierId(e.target.value)}
+                  className={inputClass}
+                >
+                  <option value="">— tanpa sumber —</option>
+                  {supplier
+                    .filter((s) => s.is_active)
+                    .map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.nama}
+                      </option>
+                    ))}
+                </select>
+              </>
+            )}
             <button
               type="button"
               onClick={() => setTambahSupplier(!tambahSupplier)}
               className="mt-1 text-xs font-medium text-orange-600 hover:underline"
             >
-              ➕ Tambah sumber baru
+              ➕ Tambah supplier baru
             </button>
             {tambahSupplier && (
               <QuickAdd
@@ -230,27 +265,6 @@ export function FakturModal({
                   className={inputClass}
                   placeholder="mis. INV-0123"
                 />
-              </>
-            )}
-            {tipe === "produksi" && (
-              <>
-                <label className="mb-1 block text-sm font-medium">
-                  Dikerjakan oleh (karyawan) <span className="text-red-600">*</span>
-                </label>
-                <select
-                  value={workerId}
-                  onChange={(e) => setWorkerId(e.target.value)}
-                  className={inputClass}
-                >
-                  <option value="">— pilih karyawan —</option>
-                  {karyawan
-                    .filter((k) => k.is_active)
-                    .map((k) => (
-                      <option key={k.user_id} value={k.user_id}>
-                        {k.nama}
-                      </option>
-                    ))}
-                </select>
               </>
             )}
             <label className="mb-1 mt-2 block text-sm font-medium">Catatan</label>
@@ -440,7 +454,7 @@ export function FakturModal({
               onClick={() => simpan.mutate()}
               disabled={
                 itemValid.length === 0 ||
-                (tipe === "produksi" && !workerId) ||
+                (tipe === "produksi" && !pelaksana) ||
                 simpan.isPending
               }
               className={btnPrimary}

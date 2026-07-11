@@ -309,7 +309,9 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                 <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-100 px-4 py-2.5">
                   <div className="flex flex-wrap items-center gap-2 text-sm">
                     <span className="font-medium text-stone-700">
-                      {g.supplier ?? (tipe === "produksi" ? "Produksi sendiri" : "Tanpa sumber")}
+                      {tipe === "produksi"
+                        ? `🔧 ${g.dikerjakanOleh ?? g.supplier ?? "Produksi sendiri"}`
+                        : (g.supplier ?? "Tanpa sumber")}
                     </span>
                     {g.noFaktur && (
                       <span className="rounded bg-stone-100 px-1.5 py-0.5 font-mono text-xs">
@@ -318,9 +320,6 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                     )}
                     {g.dibuatOleh && (
                       <span className="text-xs text-stone-400">oleh {g.dibuatOleh}</span>
-                    )}
-                    {tipe === "produksi" && g.dikerjakanOleh && (
-                      <span className="text-xs text-stone-500">🔧 dikerjakan {g.dikerjakanOleh}</span>
                     )}
                     {g.catatan && <span className="text-xs text-stone-400">· {g.catatan}</span>}
                   </div>

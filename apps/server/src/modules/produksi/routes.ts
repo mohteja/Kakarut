@@ -34,8 +34,8 @@ const FakturEditBody = z.object({
   no_faktur: z.string().trim().max(60).nullish(),
   catatan: z.string().nullish(),
   storage_location_id: z.string().uuid().nullish(),
-  /** ganti karyawan pelaksana (khusus jalur produksi) */
-  worker_id: z.string().uuid().optional(),
+  /** ganti pelaksana karyawan (khusus jalur produksi); null = kosongkan */
+  worker_id: z.string().uuid().nullish(),
   prod_date: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -186,16 +186,20 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
           );
         if (!s) throw new HTTPException(400, { message: "Supplier tidak valid" });
       }
-      // Jalur produksi: karyawan pelaksana wajib & harus anggota perusahaan
+      // Jalur produksi: pelaksana wajib — salah satu antara karyawan atau
+      // supplier (yang mengerjakan pasti salah satunya). Supplier sudah
+      // divalidasi milik perusahaan di atas.
       let workerId: string | null = null;
       if (tipe === "produksi") {
-        if (!body.worker_id) {
+        if (!body.worker_id && !body.supplier_id) {
           throw new HTTPException(400, {
-            message: "Karyawan wajib dipilih untuk faktur produksi",
+            message: "Pelaksana (karyawan/supplier) wajib dipilih untuk faktur produksi",
           });
         }
-        await pastikanKaryawan(body.worker_id, auth.company_id!);
-        workerId = body.worker_id;
+        if (body.worker_id) {
+          await pastikanKaryawan(body.worker_id, auth.company_id!);
+          workerId = body.worker_id;
+        }
       }
       const lokasiIds = [
         ...new Set(body.items.map((i) => i.storage_location_id).filter(Boolean) as string[]),
@@ -520,8 +524,8 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         updatedAt: new Date(),
       };
       if (body.worker_id !== undefined && tipe === "produksi") {
-        await pastikanKaryawan(body.worker_id, auth.company_id!);
-        set.workerId = body.worker_id;
+        if (body.worker_id) await pastikanKaryawan(body.worker_id, auth.company_id!);
+        set.workerId = body.worker_id ?? null;
       }
       if (body.supplier_id !== undefined) set.supplierId = body.supplier_id ?? null;
       if (body.no_faktur !== undefined) set.noFaktur = body.no_faktur ?? null;

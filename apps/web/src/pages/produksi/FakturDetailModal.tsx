@@ -33,8 +33,11 @@ export function FakturDetailModal({
   const [mode, setMode] = useState<"lihat" | "ubah" | "hapus">("lihat");
 
   const [noFaktur, setNoFaktur] = useState(grup.noFaktur ?? "");
-  const [supplierId, setSupplierId] = useState(grup.supplierId ?? "");
-  const [workerId, setWorkerId] = useState(grup.workerId ?? "");
+  const [supplierId, setSupplierId] = useState(grup.supplierId ?? ""); // jalur beli
+  // jalur produksi: pelaksana "k:<user_id>" / "s:<supplier_id>"
+  const [pelaksana, setPelaksana] = useState(
+    grup.workerId ? `k:${grup.workerId}` : grup.supplierId ? `s:${grup.supplierId}` : "",
+  );
   const [tempatId, setTempatId] = useState("__keep");
   const [prodDate, setProdDate] = useState(grup.prodDate);
   const [catatan, setCatatan] = useState(grup.catatan ?? "");
@@ -63,6 +66,8 @@ export function FakturDetailModal({
     onClose();
   }
 
+  const [pelTipe, pelId] = pelaksana ? pelaksana.split(":") : ["", ""];
+
   const simpanUbah = useMutation({
     mutationFn: () =>
       api(`${endpoint}/faktur/${grup.key}`, {
@@ -70,8 +75,10 @@ export function FakturDetailModal({
         body: {
           password,
           no_faktur: noFaktur.trim() || null,
-          supplier_id: tipe === "beli" ? supplierId || null : undefined,
-          ...(tipe === "produksi" && workerId ? { worker_id: workerId } : {}),
+          // beli: supplier langsung; produksi: pelaksana → worker_id/supplier_id
+          supplier_id:
+            tipe === "beli" ? supplierId || null : pelTipe === "s" ? pelId : null,
+          ...(tipe === "produksi" ? { worker_id: pelTipe === "k" ? pelId : null } : {}),
           catatan: catatan.trim() || null,
           prod_date: prodDate,
           ...(tempatId !== "__keep" ? { storage_location_id: tempatId || null } : {}),
@@ -105,7 +112,7 @@ export function FakturDetailModal({
             {tipe === "produksi" && (
               <>
                 <dt className="text-stone-400">Dikerjakan oleh</dt>
-                <dd className="col-span-2">{grup.dikerjakanOleh ?? "—"}</dd>
+                <dd className="col-span-2">{grup.dikerjakanOleh ?? grup.supplier ?? "—"}</dd>
               </>
             )}
             {tipe === "beli" && (
@@ -224,18 +231,25 @@ export function FakturDetailModal({
           )}
           {tipe === "produksi" && (
             <div>
-              <label className="mb-1 block text-sm font-medium">Dikerjakan oleh (karyawan)</label>
+              <label className="mb-1 block text-sm font-medium">Dikerjakan oleh (pelaksana)</label>
               <select
-                value={workerId}
-                onChange={(e) => setWorkerId(e.target.value)}
+                value={pelaksana}
+                onChange={(e) => setPelaksana(e.target.value)}
                 className={inputClass}
               >
-                <option value="">— jangan ubah —</option>
+                <option value="">— tanpa pelaksana —</option>
                 {karyawan
                   .filter((k) => k.is_active)
                   .map((k) => (
-                    <option key={k.user_id} value={k.user_id}>
-                      {k.nama}
+                    <option key={`k:${k.user_id}`} value={`k:${k.user_id}`}>
+                      {k.nama} (karyawan)
+                    </option>
+                  ))}
+                {supplier
+                  .filter((s) => s.is_active)
+                  .map((s) => (
+                    <option key={`s:${s.id}`} value={`s:${s.id}`}>
+                      {s.nama} (supplier)
                     </option>
                   ))}
               </select>
