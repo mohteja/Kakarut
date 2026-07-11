@@ -9,6 +9,7 @@ import { KasirPage } from "./pages/kasir/KasirPage";
 import { RiwayatPage } from "./pages/kasir/RiwayatPage";
 import { LaporanPage } from "./pages/laporan/LaporanPage";
 import { LoginPage } from "./pages/LoginPage";
+import { LihatMenuPage } from "./pages/menu/LihatMenuPage";
 import { MenuFormPage } from "./pages/menu/MenuFormPage";
 import { MenuListPage } from "./pages/menu/MenuListPage";
 import { PembelianPage } from "./pages/produksi/PembelianPage";
@@ -68,6 +69,7 @@ export default function App() {
             <>
               <Route path="/kasir" element={<KasirPage />} />
               <Route path="/kasir/riwayat" element={<RiwayatPage />} />
+              <Route path="/menu/lihat" element={<LihatMenuPage />} />
               <Route path="/stok" element={<StokPage />} />
               <Route path="/stok/penyesuaian" element={<PenyesuaianPage />} />
               <Route path="/stok/kartu/:ingredientId" element={<KartuStokPage />} />

@@ -30,3 +30,13 @@ export function formatWaktu(iso: string): string {
     timeZone: "Asia/Jakarta",
   }).format(new Date(iso));
 }
+
+/** Tanggal ringkas dari timestamp ISO, mis. "11 Jul 2026" (zona WIB). */
+export function formatTanggalRingkas(iso: string): string {
+  return new Intl.DateTimeFormat("id-ID", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "Asia/Jakarta",
+  }).format(new Date(iso));
+}

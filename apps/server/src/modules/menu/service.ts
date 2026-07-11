@@ -140,6 +140,7 @@ export function toMenuDto(menu: MenuRow, katalog: KatalogMenu): MenuDto {
     harga_jual: menu.hargaJual,
     image_url: menu.imageUrl,
     is_active: menu.isActive,
+    sort_order: menu.sortOrder,
     komponen: katalog.komponenByMenu.get(menu.id) ?? [],
     hpp,
     hpp_dine_in: hppDineIn,

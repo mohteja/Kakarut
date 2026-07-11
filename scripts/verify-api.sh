@@ -584,6 +584,19 @@ cek "filter tanggal hari ini memuat faktur baru" "V >= 1" \
 cek "filter tanggal lampau → 0 faktur" "V == 0" \
   "$(api "$OWNER" GET "/pembelian?dari=2000-01-01&sampai=2000-01-02" | jq '.total')"
 
+echo "== 23. Lihat Menu: sort_order di DTO + atur urutan (kasir) =="
+cek "GET /menu memuat sort_order" "V == 1" \
+  "$(api "$KASIR" GET /menu | jq '((.[0].sort_order|type)=="number") | if . then 1 else 0 end')"
+# kasir membalik urutan 2 menu pertama → sort_order tersimpan (0,1 ditukar)
+MID0=$(api "$KASIR" GET /menu | jq -r '.[0].id')
+MID1=$(api "$KASIR" GET /menu | jq -r '.[1].id')
+cek "kasir PUT /menu/urutan (200)" "V == 200" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/menu/urutan" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d "{\"items\":[{\"id\":\"$MID1\",\"sort_order\":0},{\"id\":\"$MID0\",\"sort_order\":1}]}")"
+cek "sort_order menu tersimpan (MID1=0)" "V == 0" \
+  "$(api "$KASIR" GET /menu | jq --arg id "$MID1" '[.[] | select(.id==$id)][0].sort_order')"
+cek "GET /menu urut sort_order (MID1 sebelum MID0)" "V == 1" \
+  "$(api "$KASIR" GET /menu | jq --arg a "$MID1" --arg b "$MID0" '((([.[] | .id] | index($a)) < ([.[] | .id] | index($b)))) | if . then 1 else 0 end')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]
