@@ -23,6 +23,9 @@ export interface CreateSaleParams {
   /** identitas konsumen/member (opsional) — WA jadi kunci member */
   customerNama?: string | null;
   customerWa?: string | null;
+  /** pembayaran: metode + uang tunai diterima (untuk kembalian) */
+  metodeBayar?: "tunai" | "qris" | "transfer";
+  uangDiterima?: number | null;
   items: SaleItemInput[];
 }
 
@@ -152,7 +155,19 @@ export async function createSale(params: CreateSaleParams) {
     }
     const subtotalNet = subtotal - diskon;
     const pb1Amount = company.pb1Enabled ? hitungPb1(subtotalNet, company.pb1Rate) : 0;
+    const total = subtotalNet + pb1Amount;
     const saleDate = tanggalDi(company.timezone);
+
+    // Pembayaran: metode + uang tunai diterima. Untuk tunai, uang (bila diisi)
+    // wajib ≥ total; non-tunai → tanpa uang diterima (kembalian 0).
+    const metodeBayar = params.metodeBayar ?? "tunai";
+    let uangDiterima: number | null = null;
+    if (metodeBayar === "tunai" && params.uangDiterima != null) {
+      uangDiterima = Math.round(params.uangDiterima);
+      if (uangDiterima < total) {
+        throw new HTTPException(400, { message: "Uang diterima kurang dari total belanja" });
+      }
+    }
 
     // Urutan diambil dari nomor TERBESAR hari itu (bukan count) supaya void
     // (hard delete) di tengah hari tidak membuat nomor bekas terpakai lagi.
@@ -184,12 +199,14 @@ export async function createSale(params: CreateSaleParams) {
         diskon,
         diskonPersen,
         pb1Amount,
-        total: subtotalNet + pb1Amount,
+        total,
         totalHpp,
         catatan: params.catatan ?? null,
         customerId: member?.id ?? null,
         customerNama: customerNama || null,
         customerWa: member?.wa ?? null,
+        metodeBayar,
+        uangDiterima,
         saleDate,
       })
       .returning();

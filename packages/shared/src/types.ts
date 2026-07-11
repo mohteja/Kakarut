@@ -367,6 +367,7 @@ export interface RiwayatTransaksiRow {
   kasir: string | null;
   /** nama konsumen/member (null bila transaksi tanpa member) */
   konsumen: string | null;
+  metode: MetodeBayar;
 }
 
 /** Member/pelanggan pada daftar member area (dengan agregat transaksi). */
@@ -410,11 +411,16 @@ export interface SampahRow {
   dihapus_pada: string;
 }
 
+/** Metode pembayaran transaksi. */
+export type MetodeBayar = "tunai" | "qris" | "transfer";
+
 export interface LaporanHarian {
   dari: string;
   sampai: string;
   omzet: number;
   jumlah_transaksi: number;
+  /** rekap penjualan per metode bayar (total = omzet bruto/subtotal per metode) */
+  per_metode: { metode: MetodeBayar; jumlah: number; total: number }[];
   /** total potongan/diskon yang diberikan pada rentang (Rp) */
   total_diskon: number;
   pb1_terkumpul: number;

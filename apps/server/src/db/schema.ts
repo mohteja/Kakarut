@@ -51,6 +51,7 @@ export const klarifikasiStatusEnum = pgEnum("klarifikasi_status", ["belum", "sud
 export const penyesuaianStatusEnum = pgEnum("penyesuaian_status", ["menunggu", "disetujui"]);
 /** jenis meja: meja makan biasa (dine-in) vs meja "Ruang Tunggu" untuk take away */
 export const mejaTipeEnum = pgEnum("meja_tipe", ["dine_in", "takeaway"]);
+export const metodeBayarEnum = pgEnum("metode_bayar", ["tunai", "qris", "transfer"]);
 
 // ===== Tenancy & identitas =====
 
@@ -366,6 +367,10 @@ export const sales = pgTable(
     customerId: uuid("customer_id").references(() => customers.id, { onDelete: "set null" }),
     customerNama: text("customer_nama"),
     customerWa: text("customer_wa"),
+    // pembayaran: metode + uang tunai diterima (null = pas/non-tunai). Kembalian
+    // dihitung dari uang_diterima − total saat perlu (struk/riwayat).
+    metodeBayar: metodeBayarEnum("metode_bayar").notNull().default("tunai"),
+    uangDiterima: numeric("uang_diterima", { precision: 14, scale: 2, mode: "number" }),
     waktu: timestamp("waktu", { withTimezone: true }).notNull().defaultNow(),
     saleDate: date("sale_date").notNull(),
     // soft-delete (Tempat Sampah): baris tetap disimpan sebagai catatan siapa yang menghapus

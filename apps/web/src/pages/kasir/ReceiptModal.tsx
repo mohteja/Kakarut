@@ -1,6 +1,12 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import type { ReceiptData } from "@kakarut/shared";
+import type { MetodeBayar, ReceiptData } from "@kakarut/shared";
+
+const METODE_LABEL: Record<MetodeBayar, string> = {
+  tunai: "Tunai",
+  qris: "QRIS",
+  transfer: "Transfer",
+};
 import { ErrorText, btnPrimary, btnSecondary, inputClass } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { usePrinter } from "../../context/PrinterContext";
@@ -21,6 +27,8 @@ export interface SaleResult {
     mejaLabel: string | null;
     customerNama: string | null;
     customerWa: string | null;
+    metodeBayar: MetodeBayar;
+    uangDiterima: number | null;
     catatan: string | null;
   };
   items: {
@@ -114,6 +122,8 @@ export function ReceiptModal({
       pb1Amount: data.sale.pb1Amount,
       pb1Rate: company?.pb1Rate ?? null,
       total: data.sale.total,
+      metodeBayar: data.sale.metodeBayar,
+      uangDiterima: data.sale.uangDiterima,
       catatan: data.sale.catatan,
       footer: company?.receiptFooter ?? null,
     };
@@ -203,6 +213,22 @@ export function ReceiptModal({
             <span>TOTAL</span>
             <span>{formatRupiah(data.sale.total)}</span>
           </div>
+          <div className="mt-1 flex justify-between">
+            <span>Metode</span>
+            <span>{METODE_LABEL[data.sale.metodeBayar]}</span>
+          </div>
+          {data.sale.metodeBayar === "tunai" && data.sale.uangDiterima != null && (
+            <>
+              <div className="flex justify-between">
+                <span>Tunai</span>
+                <span>{formatRupiah(data.sale.uangDiterima)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Kembali</span>
+                <span>{formatRupiah(Math.max(0, data.sale.uangDiterima - data.sale.total))}</span>
+              </div>
+            </>
+          )}
           {data.sale.catatan && <div className="mt-2">Catatan: {data.sale.catatan}</div>}
           <div className="mt-3 text-center">{footer}</div>
         </div>

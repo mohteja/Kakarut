@@ -3,6 +3,13 @@
  * auto-print setelah pembayaran, dan Cetak Tes di pengaturan printer.
  */
 import { EscPosBuilder } from "./escpos";
+import type { MetodeBayar } from "./types";
+
+const METODE_LABEL: Record<MetodeBayar, string> = {
+  tunai: "Tunai",
+  qris: "QRIS",
+  transfer: "Transfer",
+};
 
 export interface ReceiptItem {
   nama: string;
@@ -41,6 +48,10 @@ export interface ReceiptData {
   pb1Amount: number;
   pb1Rate?: number | null;
   total: number;
+  /** metode pembayaran (null/undefined → tak ditampilkan) */
+  metodeBayar?: MetodeBayar | null;
+  /** uang tunai diterima (untuk hitung kembalian di struk) */
+  uangDiterima?: number | null;
   catatan?: string | null;
   /** teks footer dari pengaturan perusahaan */
   footer?: string | null;
@@ -106,6 +117,15 @@ export function buildReceiptBytes(data: ReceiptData, opts: ReceiptOptions): Uint
     b.line(`PB1${data.pb1Rate ? ` ${data.pb1Rate}%` : ""}`, formatRupiahAscii(data.pb1Amount));
   }
   b.bold(true).size("tall").line("TOTAL", formatRupiahAscii(data.total)).size("normal").bold(false);
+
+  // Metode bayar + kembalian (tunai)
+  if (data.metodeBayar) {
+    b.text(`Metode: ${METODE_LABEL[data.metodeBayar]}`);
+    if (data.metodeBayar === "tunai" && data.uangDiterima != null) {
+      b.line("Tunai", formatRupiahAscii(data.uangDiterima));
+      b.line("Kembali", formatRupiahAscii(Math.max(0, data.uangDiterima - data.total)));
+    }
+  }
 
   if (data.catatan) {
     b.divider().text(`Catatan: ${data.catatan}`);

@@ -911,6 +911,23 @@ cek "menu-laris: PBA ber-kategori" "V == 1" \
 cek "menu-laris: total_qty = SUM(items.qty)" "V == 1" \
   "$(echo "$ML" | jq '((((.items|map(.qty)|add) - .total_qty) | if . < 0 then -. else . end) < 0.001) | if . then 1 else 0 end')"
 
+echo "== 35. Metode bayar + kembalian =="
+MB=$(api "$KASIR" POST /penjualan "{\"is_dine_in\":false,\"metode_bayar\":\"tunai\",\"uang_diterima\":50000,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")
+cek "tunai: metode tersimpan" "V == 1" "$(echo "$MB" | jq '(.sale.metodeBayar == "tunai") | if . then 1 else 0 end')"
+cek "tunai: uang diterima 50000" "V == 50000" "$(echo "$MB" | jq '.sale.uangDiterima')"
+cek "tunai: uang >= total (kembalian >= 0)" "V == 1" \
+  "$(echo "$MB" | jq '((.sale.uangDiterima - .sale.total) >= 0) | if . then 1 else 0 end')"
+MBQ=$(api "$KASIR" POST /penjualan "{\"is_dine_in\":false,\"metode_bayar\":\"qris\",\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")
+cek "qris: metode tersimpan" "V == 1" "$(echo "$MBQ" | jq '(.sale.metodeBayar == "qris") | if . then 1 else 0 end')"
+cek "qris: uang diterima null" "V == 1" "$(echo "$MBQ" | jq '(.sale.uangDiterima == null) | if . then 1 else 0 end')"
+cek "tunai uang < total ditolak (400)" "V == 400" \
+  "$(jp "$KASIR" "{\"is_dine_in\":false,\"metode_bayar\":\"tunai\",\"uang_diterima\":1000,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")"
+MBD=$(api "$KASIR" POST /penjualan "{\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")
+cek "default metode = tunai" "V == 1" "$(echo "$MBD" | jq '(.sale.metodeBayar == "tunai") | if . then 1 else 0 end')"
+LAPM=$(api "$OWNER" GET "/laporan?branch_id=all")
+cek "laporan: per_metode memuat tunai & qris" "V == 1" \
+  "$(echo "$LAPM" | jq '([.per_metode[].metode] | (index("tunai") != null) and (index("qris") != null)) | if . then 1 else 0 end')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

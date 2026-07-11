@@ -99,6 +99,18 @@ export const laporanRoutes = new Hono<AppEnv>()
       .groupBy(ingredients.nama, ingredients.slug)
       .orderBy(desc(sum(saleConsumptions.qty)));
 
+    // rekap uang masuk per metode bayar (total = nilai yang benar-benar dibayar)
+    const perMetode = await db
+      .select({
+        metode: sales.metodeBayar,
+        jumlah: sql<number>`count(*)::int`,
+        total: sum(sales.total),
+      })
+      .from(sales)
+      .where(saleFilter)
+      .groupBy(sales.metodeBayar)
+      .orderBy(desc(sum(sales.total)));
+
     const omzet = Number(agg?.omzet ?? 0);
     const totalDiskon = Number(agg?.diskon ?? 0);
     const totalHpp = Number(agg?.totalHpp ?? 0);
@@ -107,6 +119,11 @@ export const laporanRoutes = new Hono<AppEnv>()
       sampai,
       omzet,
       jumlah_transaksi: agg?.jumlah ?? 0,
+      per_metode: perMetode.map((r) => ({
+        metode: r.metode,
+        jumlah: r.jumlah,
+        total: Number(r.total ?? 0),
+      })),
       total_diskon: totalDiskon,
       pb1_terkumpul: Number(agg?.pb1 ?? 0),
       total_hpp: totalHpp,

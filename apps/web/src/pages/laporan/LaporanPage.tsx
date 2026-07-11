@@ -17,6 +17,12 @@ import { api } from "../../lib/api";
 import { formatAngka, formatRupiah, formatTanggal, hariIniWIB } from "../../lib/format";
 import { LaporanTabs } from "./LaporanTabs";
 
+const METODE_LABEL: Record<string, string> = {
+  tunai: "💵 Tunai",
+  qris: "📱 QRIS",
+  transfer: "🏦 Transfer",
+};
+
 interface BepResult {
   biaya_tetap: number;
   basis: "penjualan" | "katalog";
@@ -141,6 +147,25 @@ export function LaporanPage() {
             />
             <StatCard label="PB1 Terkumpul" value={formatRupiah(lap.pb1_terkumpul)} />
           </div>
+
+          {lap.per_metode.length > 0 && (
+            <div className="mb-6">
+              <h2 className="mb-2 text-lg font-semibold text-stone-700">Metode Pembayaran</h2>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                {lap.per_metode.map((m) => (
+                  <Card key={m.metode} className="p-4">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-stone-500">
+                      {METODE_LABEL[m.metode] ?? m.metode}
+                    </div>
+                    <div className="mt-1 text-xl font-bold text-stone-800">
+                      {formatRupiah(m.total)}
+                    </div>
+                    <div className="text-xs text-stone-400">{m.jumlah} transaksi</div>
+                  </Card>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="grid gap-5 lg:grid-cols-2">
             <div>
