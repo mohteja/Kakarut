@@ -89,10 +89,13 @@ export function buildReceiptBytes(data: ReceiptData, opts: ReceiptOptions): Uint
   b.align("left").divider();
   b.line(data.nomor, data.waktu);
   b.text(data.isDineIn ? "Dine-in" : "Bawa pulang");
-  if (data.mejaLabel) b.text(`Meja: ${data.mejaLabel}`);
-  if (data.customerNama) {
-    b.text(`Konsumen: ${data.customerNama}${data.customerWa ? ` (${data.customerWa})` : ""}`);
+  // Identitas pesanan (menonjol): nama konsumen bila ada, jika tidak → meja
+  const pesananUntuk = data.customerNama || data.mejaLabel;
+  if (pesananUntuk) {
+    b.align("center").bold(true).size("tall").text(pesananUntuk).size("normal").bold(false).align("left");
   }
+  if (data.customerNama && data.mejaLabel) b.text(`Meja: ${data.mejaLabel}`);
+  if (data.customerNama && data.customerWa) b.text(`WA: ${data.customerWa}`);
   b.divider();
 
   // Item

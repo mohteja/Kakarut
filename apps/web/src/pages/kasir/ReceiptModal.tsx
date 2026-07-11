@@ -170,13 +170,13 @@ export function ReceiptModal({
             <div>
               {formatWaktu(data.sale.waktu)} · {data.sale.isDineIn ? "Dine-in" : "Bawa pulang"}
             </div>
-            {data.sale.mejaLabel && <div>Meja: {data.sale.mejaLabel}</div>}
-            {data.sale.customerNama && (
-              <div>
-                Konsumen: {data.sale.customerNama}
-                {data.sale.customerWa ? ` (${data.sale.customerWa})` : ""}
+            {(data.sale.customerNama || data.sale.mejaLabel) && (
+              <div className="mt-1 text-base font-bold">
+                {data.sale.customerNama || data.sale.mejaLabel}
               </div>
             )}
+            {data.sale.customerNama && data.sale.mejaLabel && <div>Meja: {data.sale.mejaLabel}</div>}
+            {data.sale.customerNama && data.sale.customerWa && <div>WA: {data.sale.customerWa}</div>}
           </div>
           <hr className="my-2 border-dashed border-stone-400" />
           {data.items.map((it) => (
