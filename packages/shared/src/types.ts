@@ -513,6 +513,13 @@ export interface Shift {
   selisih: number | null;
 }
 
+/** Baris ringan hasil pencarian member (autocomplete keranjang kasir). */
+export interface MemberCariRow {
+  id: string;
+  nama: string;
+  wa: string;
+}
+
 /** Jenis cap absensi karyawan: masuk (datang) vs keluar (pulang). */
 export type AbsensiTipe = "masuk" | "keluar";
 

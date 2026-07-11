@@ -1,13 +1,36 @@
 import { zValidator } from "@hono/zod-validator";
-import { and, desc, eq, isNull, ne, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, isNull, ne, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import type { CustomerDetail, CustomerDto } from "@kakarut/shared";
+import type { CustomerDetail, CustomerDto, MemberCariRow } from "@kakarut/shared";
 import { db } from "../../db/client";
 import { branches, customers, sales } from "../../db/schema";
 import type { AppEnv } from "../../middleware/auth";
 import { normalizeWa } from "./service";
+
+/**
+ * Pencarian member ringan untuk autocomplete di keranjang kasir — SEMUA peran
+ * (tidak digerbang owner/admin seperti /customer). Hanya id/nama/wa (tanpa
+ * agregasi belanja). Cocokkan nama ATAU nomor WA; tanpa q → member terbaru.
+ */
+export const memberCariRoutes = new Hono<AppEnv>().get("/", async (c) => {
+  const auth = c.get("auth");
+  const q = (c.req.query("q") ?? "").trim();
+  const filter = q
+    ? and(
+        eq(customers.companyId, auth.company_id!),
+        or(ilike(customers.nama, `%${q}%`), ilike(customers.wa, `%${q}%`)),
+      )
+    : eq(customers.companyId, auth.company_id!);
+  const rows = await db
+    .select({ id: customers.id, nama: customers.nama, wa: customers.wa })
+    .from(customers)
+    .where(filter)
+    .orderBy(desc(customers.updatedAt))
+    .limit(8);
+  return c.json(rows satisfies MemberCariRow[]);
+});
 
 const CustomerBody = z.object({
   nama: z.string().trim().min(1),

@@ -897,6 +897,15 @@ cek "POST /customer WA duplikat → 409" "V == 409" \
 api "$OWNER" DELETE "/customer/$CM_ID" > /dev/null
 # member area khusus owner/admin
 cek "kasir GET /customer ditolak (403)" "V == 403" "$(status_code "$KASIR" GET /customer)"
+# autocomplete member: kasir BOLEH (semua peran), cari nama / WA
+cek "kasir GET /member-cari diizinkan (200)" "V == 200" "$(status_code "$KASIR" GET /member-cari)"
+cek "member-cari nama 'Budi' → ada hasil" "V >= 1" \
+  "$(api "$KASIR" GET "/member-cari?q=Budi" | jq '[.[] | select(.nama | test("Budi"))] | length')"
+cek "member-cari hasil punya nama & wa" "V == 1" \
+  "$(api "$KASIR" GET "/member-cari?q=Budi" | jq '(.[0] | (.nama|length>0) and (.wa|length>0)) | if . then 1 else 0 end')"
+cek "member-cari via WA '0812' → member Budi" "V == 1" \
+  "$(api "$KASIR" GET "/member-cari?q=0812" | jq --arg id "$CUST_ID" '[.[] | select(.id == $id)] | length')"
+cek "member-cari tanpa q → daftar member" "V >= 1" "$(api "$KASIR" GET /member-cari | jq 'length')"
 
 echo "== 34. Menu terlaris (ranking qty & omzet) =="
 api "$KASIR" POST /penjualan "{\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$PYO_ID\",\"qty\":4}]}" > /dev/null
