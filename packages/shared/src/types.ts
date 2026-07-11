@@ -346,7 +346,8 @@ export interface SampahRow {
 }
 
 export interface LaporanHarian {
-  tanggal: string;
+  dari: string;
+  sampai: string;
   omzet: number;
   jumlah_transaksi: number;
   pb1_terkumpul: number;

@@ -100,11 +100,24 @@ api "$OWNER" POST /produksi "{\"ingredient_id\":\"$URATB_ID\",\"batch\":true}" >
 S4=$(api "$KASIR" GET /stok)
 cek "saldo urat besar +90 (1 batch)" "abs(V - ($URATB_SALDO + 90)) < 0.001" "$(stok_of "$S4" "baso urat besar")"
 
-echo "== 7. Laporan harian =="
+echo "== 7. Laporan penjualan (rentang tanggal + filter cabang) =="
 LAP=$(api "$OWNER" GET /laporan)
 cek "omzet ≥ 79000 (2×PBA + paket)" "V >= 79000" "$(echo "$LAP" | jq .omzet)"
 cek "profit = omzet − hpp" "V == 1" "$(echo "$LAP" | jq '(.estimasi_profit == (.omzet - .total_hpp)) | if . then 1 else 0 end')"
 cek "ada item terjual" "V >= 2" "$(echo "$LAP" | jq '.item_terjual | length')"
+# rentang tanggal: respons memuat dari & sampai; satu hari = sama dengan default
+HARI7=$(TZ=Asia/Jakarta date +%F)
+LAP_RANGE=$(api "$OWNER" GET "/laporan?dari=$HARI7&sampai=$HARI7")
+cek "laporan memuat dari & sampai" "V == 1" \
+  "$(echo "$LAP_RANGE" | jq '(((.dari|type)=="string") and ((.sampai|type)=="string")) | if . then 1 else 0 end')"
+cek "rentang satu hari = omzet default" "V == 1" \
+  "$(echo "$LAP_RANGE" | jq --argjson d "$(echo "$LAP" | jq .omzet)" '(.omzet == $d) | if . then 1 else 0 end')"
+# back-compat ?tanggal= tetap jalan
+cek "back-compat ?tanggal= (omzet = default)" "V == 1" \
+  "$(api "$OWNER" GET "/laporan?tanggal=$HARI7" | jq --argjson d "$(echo "$LAP" | jq .omzet)" '(.omzet == $d) | if . then 1 else 0 end')"
+# filter cabang: "Semua cabang" (agregasi) ≥ satu cabang
+cek "branch_id=all: omzet ≥ satu cabang" "V == 1" \
+  "$(python3 -c "print(1 if $(api "$OWNER" GET "/laporan?branch_id=all&dari=$HARI7&sampai=$HARI7" | jq .omzet) >= $(echo "$LAP" | jq .omzet) else 0)")"
 
 echo "== 8. RBAC & isolasi tenant =="
 cek "kasir dilarang akses /karyawan (403)" "V == 403" "$(status_code "$KASIR" GET /karyawan)"
@@ -121,6 +134,20 @@ fi
 UJI=$(login "uji@example.com" "UjiCoba123!")
 cek "tenant baru punya 0 menu (isolasi)" "V == 0" "$(api "$UJI" GET /menu | jq 'length')"
 cek "tenant baru punya 0 bahan (isolasi)" "V == 0" "$(api "$UJI" GET /bahan | jq 'length')"
+
+# Meja bawaan: cabang tenant baru langsung punya Ruang Tunggu + Meja 1
+UJI_MEJA=$(api "$UJI" GET /meja)
+cek "tenant baru: 2 meja bawaan" "V == 2" "$(echo "$UJI_MEJA" | jq 'length')"
+cek "tenant baru: ada Ruang Tunggu (takeaway) bawaan" "V == 1" \
+  "$(echo "$UJI_MEJA" | jq '([.[] | select(.tipe=="takeaway" and .nama=="Ruang Tunggu")] | length == 1) | if . then 1 else 0 end')"
+cek "tenant baru: ada Meja 1 (dine_in) bawaan" "V == 1" \
+  "$(echo "$UJI_MEJA" | jq '([.[] | select(.tipe=="dine_in" and .nama=="Meja 1")] | length == 1) | if . then 1 else 0 end')"
+# Tambah cabang lewat POST /cabang juga menyeed meja bawaan (idempoten saat re-run)
+NEWCAB=$(api "$UJI" POST /cabang '{"nama":"Cabang Uji 2"}')
+NEWCAB_ID=$(echo "$NEWCAB" | jq -r '.id // empty')
+[ -z "$NEWCAB_ID" ] && NEWCAB_ID=$(api "$UJI" GET /cabang | jq -r '[.[] | select(.nama=="Cabang Uji 2")][0].id')
+cek "cabang baru (POST /cabang): 2 meja bawaan" "V == 2" \
+  "$(api "$UJI" GET "/meja?branch_id=$NEWCAB_ID" | jq 'length')"
 
 echo "== 9. Void transaksi: stok pulih & nomor struk tidak tabrakan =="
 COMP_A=$(stok_of "$(api "$KASIR" GET /stok)" "complement saos & sambal")
@@ -501,14 +528,14 @@ api "$OWNER" POST "/pembelian/konfirmasi/$FKID" > /dev/null
 S1=$(saldo_bahan "$BELI_ING")
 cek "pembelian dikonfirmasi → saldo +10" "abs(V - 10) < 0.001" "$(python3 -c "print($S1 - $S0)")"
 cek "pembelian: dibuat_oleh terisi" "V == 1" \
-  "$(api "$OWNER" GET /pembelian | jq --arg f "$FKID" '([.[] | select(.faktur_id==$f and (.dibuat_oleh|type)=="string")] | length>=1) | if . then 1 else 0 end')"
+  "$(api "$OWNER" GET "/pembelian?per_page=500" | jq --arg f "$FKID" '([.rows[] | select(.faktur_id==$f and (.dibuat_oleh|type)=="string")] | length>=1) | if . then 1 else 0 end')"
 
 # PATCH metadata: password salah → 401; benar → catatan & diubah_oleh terisi
 cek "PATCH faktur password salah → 401" "V == 401" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X PATCH "$BASE/api/pembelian/faktur/$FKID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"password":"salah","catatan":"x"}')"
 api "$OWNER" PATCH "/pembelian/faktur/$FKID" "{\"password\":\"$OWNER_PASS\",\"catatan\":\"faktur uji edit\"}" > /dev/null
 cek "PATCH metadata → catatan berubah + diubah_oleh" "V == 1" \
-  "$(api "$OWNER" GET /pembelian | jq --arg f "$FKID" '([.[] | select(.faktur_id==$f and .catatan=="faktur uji edit" and (.diubah_oleh|type)=="string")] | length>=1) | if . then 1 else 0 end')"
+  "$(api "$OWNER" GET "/pembelian?per_page=500" | jq --arg f "$FKID" '([.rows[] | select(.faktur_id==$f and .catatan=="faktur uji edit" and (.diubah_oleh|type)=="string")] | length>=1) | if . then 1 else 0 end')"
 
 # DELETE (soft): password salah → 401; benar → saldo balik, hilang dari list, muncul di sampah
 cek "DELETE faktur password salah → 401" "V == 401" \
@@ -516,7 +543,7 @@ cek "DELETE faktur password salah → 401" "V == 401" \
 api "$OWNER" DELETE "/pembelian/faktur/$FKID" "{\"password\":\"$OWNER_PASS\"}" > /dev/null
 cek "hapus pembelian → saldo balik ke awal" "abs(V) < 0.001" "$(python3 -c "print($(saldo_bahan "$BELI_ING") - $S0)")"
 cek "faktur terhapus hilang dari /pembelian" "V == 0" \
-  "$(api "$OWNER" GET /pembelian | jq --arg f "$FKID" '[.[] | select(.faktur_id==$f)] | length')"
+  "$(api "$OWNER" GET "/pembelian?per_page=500" | jq --arg f "$FKID" '[.rows[] | select(.faktur_id==$f)] | length')"
 cek "pembelian ada di Tempat Sampah + dihapus_oleh" "V == 1" \
   "$(api "$OWNER" GET /sampah | jq --arg f "$FKID" '([.[] | select(.jenis=="pembelian" and .key==$f and (.dihapus_oleh|type)=="string")] | length==1) | if . then 1 else 0 end')"
 
@@ -538,6 +565,24 @@ cek "hapus penjualan → omzet laporan turun" "V == 1" \
 cek "penjualan ada di Tempat Sampah" "V == 1" \
   "$(api "$OWNER" GET /sampah | jq --arg id "$SLID" '([.[] | select(.jenis=="penjualan" and .key==$id)] | length==1) | if . then 1 else 0 end')"
 cek "kasir GET /sampah ditolak (403)" "V == 403" "$(status_code "$KASIR" GET /sampah)"
+
+echo "== 22. Buku besar pembelian: objek {rows,total} + pagination + filter tanggal =="
+ING2=$(api "$OWNER" GET /bahan | jq -r '[.[] | select(.pengadaan=="beli" and .track_stok==true)][0].id')
+for i in 1 2 3; do
+  api "$OWNER" POST /pembelian/faktur "{\"no_faktur\":\"LG-$i\",\"items\":[{\"ingredient_id\":\"$ING2\",\"mode\":\"pcs\",\"jumlah\":$i}]}" > /dev/null
+done
+LGP=$(api "$OWNER" GET "/pembelian?per_page=2&page=1")
+cek "list = objek {rows[],total}" "V == 1" \
+  "$(echo "$LGP" | jq '(((.rows|type)=="array") and ((.total|type)=="number")) | if . then 1 else 0 end')"
+cek "total faktur >= 3" "V >= 3" "$(echo "$LGP" | jq '.total')"
+cek "per_page=2 → maks 2 faktur/halaman" "V <= 2" \
+  "$(echo "$LGP" | jq '[.rows[].faktur_id] | unique | length')"
+cek "rows urut waktu naik (terlama dulu)" "V == 1" \
+  "$(echo "$LGP" | jq '(((.rows|length)==0) or (.rows[0].waktu <= .rows[-1].waktu)) | if . then 1 else 0 end')"
+cek "filter tanggal hari ini memuat faktur baru" "V >= 1" \
+  "$(api "$OWNER" GET "/pembelian?dari=$HARI&sampai=$HARI&per_page=200" | jq '[.rows[] | select(.no_faktur=="LG-3")] | length')"
+cek "filter tanggal lampau → 0 faktur" "V == 0" \
+  "$(api "$OWNER" GET "/pembelian?dari=2000-01-01&sampai=2000-01-02" | jq '.total')"
 
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="

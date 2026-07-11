@@ -7,6 +7,7 @@ import { z } from "zod";
 import { db } from "../../db/client";
 import { branches, companies, memberships, users } from "../../db/schema";
 import type { AppEnv } from "../../middleware/auth";
+import { seedMejaDefault } from "../meja/defaults";
 
 const CreateTenantBody = z.object({
   nama: z.string().trim().min(1),
@@ -78,6 +79,8 @@ export const adminTenantsRoutes = new Hono<AppEnv>()
         .insert(branches)
         .values({ companyId: company.id, nama: body.cabang_nama })
         .returning();
+      // Meja bawaan (Ruang Tunggu + Meja 1) supaya usaha take away langsung bisa jualan.
+      await seedMejaDefault(tx, company.id, branch.id);
       const [owner] = await tx
         .insert(users)
         .values({

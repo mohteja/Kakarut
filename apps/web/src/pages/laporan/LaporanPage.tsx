@@ -11,6 +11,7 @@ import {
   tdClass,
   thClass,
 } from "../../components/ui";
+import { useAuth } from "../../context/AuthContext";
 import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah, formatTanggal, hariIniWIB } from "../../lib/format";
@@ -35,25 +36,32 @@ function StatCard({ label, value, warna = "text-stone-800" }: { label: string; v
 }
 
 export function LaporanPage() {
-  const { branchQuery } = useBranch();
-  const [tanggal, setTanggal] = useState(hariIniWIB());
+  const { auth } = useAuth();
+  const { cabang } = useBranch();
+  const isManajemen = auth?.user.role === "owner" || auth?.user.role === "admin";
+  const [dari, setDari] = useState(hariIniWIB());
+  const [sampai, setSampai] = useState(hariIniWIB());
+  // "all" = semua cabang (gabungan); atau id cabang tertentu. Hanya owner/admin.
+  const [cabangFilter, setCabangFilter] = useState("all");
   const [biayaTetap, setBiayaTetap] = useState("");
   const [bep, setBep] = useState<BepResult | null>(null);
   const [bepError, setBepError] = useState<unknown>(null);
 
+  // Owner/admin memilih cabang lewat filter halaman; kasir dikunci server ke cabangnya.
+  const branchParam = isManajemen ? `&branch_id=${cabangFilter}` : "";
+
   const { data: lap, isLoading } = useQuery({
-    queryKey: ["laporan", tanggal, branchQuery],
+    queryKey: ["laporan", dari, sampai, isManajemen ? cabangFilter : "self"],
     queryFn: () =>
-      api<LaporanHarian>(
-        `/laporan${branchQuery ? `${branchQuery}&` : "?"}tanggal=${tanggal}`,
-      ),
+      api<LaporanHarian>(`/laporan?dari=${dari}&sampai=${sampai}${branchParam}`),
   });
 
   async function hitungBep() {
     setBepError(null);
     try {
-      const q = branchQuery ? `${branchQuery}&` : "?";
-      setBep(await api<BepResult>(`/laporan/bep${q}biaya_tetap=${Number(biayaTetap)}`));
+      setBep(
+        await api<BepResult>(`/laporan/bep?biaya_tetap=${Number(biayaTetap)}${branchParam}`),
+      );
     } catch (e) {
       setBep(null);
       setBepError(e);
@@ -62,19 +70,54 @@ export function LaporanPage() {
 
   return (
     <div>
-      <PageTitle
-        aksi={
+      <PageTitle>Laporan Penjualan</PageTitle>
+      <div className="mb-3 text-sm text-stone-500">
+        {dari === sampai
+          ? formatTanggal(dari)
+          : `${formatTanggal(dari)} – ${formatTanggal(sampai)}`}
+      </div>
+
+      <Card className="mb-5 flex flex-wrap items-end gap-3 p-3">
+        <div>
+          <label className="mb-1 block text-xs font-medium text-stone-500">Dari tanggal</label>
           <input
             type="date"
-            value={tanggal}
-            onChange={(e) => setTanggal(e.target.value)}
+            value={dari}
+            max={sampai}
+            onChange={(e) => setDari(e.target.value)}
             className={inputClass}
           />
-        }
-      >
-        Laporan Harian
-      </PageTitle>
-      <div className="mb-4 text-sm text-stone-500">{formatTanggal(tanggal)}</div>
+        </div>
+        <div>
+          <label className="mb-1 block text-xs font-medium text-stone-500">Sampai tanggal</label>
+          <input
+            type="date"
+            value={sampai}
+            min={dari}
+            onChange={(e) => setSampai(e.target.value)}
+            className={inputClass}
+          />
+        </div>
+        {isManajemen && cabang.length > 0 && (
+          <div>
+            <label className="mb-1 block text-xs font-medium text-stone-500">Cabang</label>
+            <select
+              value={cabangFilter}
+              onChange={(e) => setCabangFilter(e.target.value)}
+              className={inputClass}
+            >
+              <option value="all">Semua cabang</option>
+              {cabang
+                .filter((b) => b.is_active)
+                .map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.nama}
+                  </option>
+                ))}
+            </select>
+          </div>
+        )}
+      </Card>
 
       {isLoading || !lap ? (
         <Spinner />

@@ -6,6 +6,7 @@ import { z } from "zod";
 import { db } from "../../db/client";
 import { branches } from "../../db/schema";
 import { requireRole, type AppEnv } from "../../middleware/auth";
+import { seedMejaDefault } from "../meja/defaults";
 
 const CabangBody = z.object({
   nama: z.string().trim().min(1),
@@ -35,17 +36,23 @@ export const cabangRoutes = new Hono<AppEnv>()
   .post("/", requireRole("owner", "admin"), zValidator("json", CabangBody), async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");
-    const [row] = await db
-      .insert(branches)
-      .values({
-        companyId: auth.company_id!,
-        nama: body.nama,
-        alamat: body.alamat ?? null,
-        telepon: body.telepon ?? null,
-      })
-      .onConflictDoNothing()
-      .returning();
-    if (!row) throw new HTTPException(409, { message: `Cabang "${body.nama}" sudah ada` });
+    // Cabang + meja bawaan dibuat atomik: bila seed gagal, pembuatan cabang ikut rollback.
+    const row = await db.transaction(async (tx) => {
+      const [b] = await tx
+        .insert(branches)
+        .values({
+          companyId: auth.company_id!,
+          nama: body.nama,
+          alamat: body.alamat ?? null,
+          telepon: body.telepon ?? null,
+        })
+        .onConflictDoNothing()
+        .returning();
+      if (!b) throw new HTTPException(409, { message: `Cabang "${body.nama}" sudah ada` });
+      // Meja bawaan (Ruang Tunggu + Meja 1) supaya usaha take away langsung bisa jualan.
+      await seedMejaDefault(tx, auth.company_id!, b.id);
+      return b;
+    });
     return c.json({ id: row.id, nama: row.nama }, 201);
   })
   .patch(
