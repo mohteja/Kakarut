@@ -120,6 +120,11 @@ export function Layout() {
             </>
           ) : (
             <>
+              {isManajemen && (
+                <NavLink to="/dashboard" className={linkClass}>
+                  🏠 Beranda
+                </NavLink>
+              )}
               <NavLink to="/kasir" className={linkClass}>
                 🧾 Kasir
               </NavLink>
