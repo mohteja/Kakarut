@@ -92,7 +92,6 @@ export function KasirPage() {
   // Otomatis untuk kasir; owner/admin membukanya lewat tombol "Pilih/Ganti".
   const [mejaModalOpen, setMejaModalOpen] = useState(isKasir);
   const [mejaCari, setMejaCari] = useState("");
-  const [catatan, setCatatan] = useState("");
   const [konsumenNama, setKonsumenNama] = useState("");
   const [konsumenWa, setKonsumenWa] = useState("");
   const [diskonTipe, setDiskonTipe] = useState<"persen" | "nominal">("nominal");
@@ -257,7 +256,6 @@ export function KasirPage() {
           ...(!isKasir && branchId ? { branch_id: branchId } : {}),
           is_dine_in: dineIn,
           meja_id: mejaId ?? undefined,
-          catatan: catatan || undefined,
           ...(konsumenNama.trim() ? { customer_nama: konsumenNama.trim() } : {}),
           ...(konsumenWa.trim() ? { customer_wa: konsumenWa.trim() } : {}),
           metode_bayar: metodeBayar,
@@ -289,7 +287,6 @@ export function KasirPage() {
   // Kosongkan seluruh state transaksi (dipakai setelah bayar / simpan bill).
   function resetTransaksi() {
     setCart([]);
-    setCatatan("");
     setKonsumenNama("");
     setKonsumenWa("");
     setDiskonNilai("");
@@ -307,7 +304,6 @@ export function KasirPage() {
         meja_id: mejaId ?? undefined,
         ...(konsumenNama.trim() ? { customer_nama: konsumenNama.trim() } : {}),
         ...(konsumenWa.trim() ? { customer_wa: konsumenWa.trim() } : {}),
-        catatan: catatan || undefined,
         items: cart.map((l) => ({
           menu_id: l.menu.id,
           qty: l.qty,
@@ -338,7 +334,6 @@ export function KasirPage() {
     setMejaId(bill.meja_id);
     setKonsumenNama(bill.customer_nama ?? "");
     setKonsumenWa(bill.customer_wa ?? "");
-    setCatatan(bill.catatan ?? "");
     setEditingBillId(id);
     setMejaModalOpen(false);
   }
@@ -668,12 +663,6 @@ export function KasirPage() {
         </div>
 
         <div className="mt-3 space-y-2 border-t border-stone-200 pt-3">
-          <input
-            value={catatan}
-            onChange={(e) => setCatatan(e.target.value)}
-            placeholder="Catatan (opsional)"
-            className="w-full rounded-lg border border-stone-300 px-3 py-1.5 text-sm"
-          />
           <div className="flex justify-between text-base font-bold text-stone-800">
             <span>Subtotal</span>
             <span>{formatRupiah(subtotal)}</span>
