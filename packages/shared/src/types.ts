@@ -384,6 +384,8 @@ export interface LaporanHarian {
   sampai: string;
   omzet: number;
   jumlah_transaksi: number;
+  /** total potongan/diskon yang diberikan pada rentang (Rp) */
+  total_diskon: number;
   pb1_terkumpul: number;
   total_hpp: number;
   estimasi_profit: number;

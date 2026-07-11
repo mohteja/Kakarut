@@ -127,6 +127,13 @@
       "when": 1783743708624,
       "tag": "0017_worthless_rictor",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1783745374463,
+      "tag": "0018_whole_mentallo",
+      "breakpoints": true
     }
   ]
 }

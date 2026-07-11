@@ -807,6 +807,32 @@ cek "bahan: stok_minimum tersimpan (=1)" "V == 1" \
   "$(api "$OWNER" GET /bahan | jq --arg id "$BELI26" '([.[]|select(.id==$id)][0].stok_minimum == 1) | if . then 1 else 0 end')"
 api "$OWNER" PUT "/bahan/$BELI26" '{"stok_minimum":0}' > /dev/null
 
+echo "== 30. Diskon per transaksi di kasir (persen/nominal, clamp, laporan) =="
+# diskon persen 10% atas 1 PBA (subtotal 34000)
+DP=$(api "$KASIR" POST /penjualan "{\"is_dine_in\":false,\"diskon_tipe\":\"persen\",\"diskon_nilai\":10,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")
+cek "diskon persen: subtotal 34000" "V == 34000" "$(echo "$DP" | jq '.sale.subtotal')"
+cek "diskon persen 10% = 3400" "V == 3400" "$(echo "$DP" | jq '.sale.diskon')"
+cek "diskon persen: diskon_persen tersimpan 10" "V == 10" "$(echo "$DP" | jq '.sale.diskonPersen')"
+cek "diskon persen: total = subtotal - diskon + pb1" "V == 1" \
+  "$(echo "$DP" | jq '(.sale.total == (.sale.subtotal - .sale.diskon + .sale.pb1Amount)) | if . then 1 else 0 end')"
+# diskon nominal 5000
+DN=$(api "$KASIR" POST /penjualan "{\"is_dine_in\":false,\"diskon_tipe\":\"nominal\",\"diskon_nilai\":5000,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")
+cek "diskon nominal = 5000" "V == 5000" "$(echo "$DN" | jq '.sale.diskon')"
+cek "diskon nominal: diskon_persen null" "V == 1" "$(echo "$DN" | jq '(.sale.diskonPersen == null) | if . then 1 else 0 end')"
+cek "diskon nominal: total = subtotal - 5000 + pb1" "V == 1" \
+  "$(echo "$DN" | jq '(.sale.total == (.sale.subtotal - 5000 + .sale.pb1Amount)) | if . then 1 else 0 end')"
+# clamp: nominal > subtotal → diskon == subtotal, total tak negatif (== pb1)
+DC=$(api "$KASIR" POST /penjualan "{\"is_dine_in\":false,\"diskon_tipe\":\"nominal\",\"diskon_nilai\":9999999,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")
+cek "diskon clamp: diskon tak melebihi subtotal" "V == 1" \
+  "$(echo "$DC" | jq '(.sale.diskon == .sale.subtotal) | if . then 1 else 0 end')"
+cek "diskon clamp: total tak negatif (== pb1)" "V == 1" \
+  "$(echo "$DC" | jq '(.sale.total == .sale.pb1Amount) | if . then 1 else 0 end')"
+# laporan mencerminkan total_diskon & profit mundur oleh diskon
+LAPD=$(api "$OWNER" GET "/laporan?branch_id=all")
+cek "laporan: total_diskon >= 3400+5000+34000" "V >= 42400" "$(echo "$LAPD" | jq '.total_diskon')"
+cek "laporan: profit = omzet - diskon - hpp" "V == 1" \
+  "$(echo "$LAPD" | jq '(.estimasi_profit == (.omzet - .total_diskon - .total_hpp)) | if . then 1 else 0 end')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

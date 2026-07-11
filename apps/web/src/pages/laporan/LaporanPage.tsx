@@ -125,9 +125,14 @@ export function LaporanPage() {
         <Spinner />
       ) : (
         <>
-          <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-5">
+          <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-3">
             <StatCard label="Omzet" value={formatRupiah(lap.omzet)} warna="text-orange-600" />
             <StatCard label="Transaksi" value={String(lap.jumlah_transaksi)} />
+            <StatCard
+              label="Diskon Diberikan"
+              value={formatRupiah(lap.total_diskon)}
+              warna={lap.total_diskon > 0 ? "text-red-600" : "text-stone-800"}
+            />
             <StatCard label="HPP Terpakai" value={formatRupiah(lap.total_hpp)} />
             <StatCard
               label="Estimasi Profit"

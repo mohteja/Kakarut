@@ -64,6 +64,7 @@ export const laporanRoutes = new Hono<AppEnv>()
     const [agg] = await db
       .select({
         omzet: sum(sales.subtotal),
+        diskon: sum(sales.diskon),
         pb1: sum(sales.pb1Amount),
         totalHpp: sum(sales.totalHpp),
         jumlah: sql<number>`count(*)::int`,
@@ -97,15 +98,18 @@ export const laporanRoutes = new Hono<AppEnv>()
       .orderBy(desc(sum(saleConsumptions.qty)));
 
     const omzet = Number(agg?.omzet ?? 0);
+    const totalDiskon = Number(agg?.diskon ?? 0);
     const totalHpp = Number(agg?.totalHpp ?? 0);
     const laporan: LaporanHarian = {
       dari,
       sampai,
       omzet,
       jumlah_transaksi: agg?.jumlah ?? 0,
+      total_diskon: totalDiskon,
       pb1_terkumpul: Number(agg?.pb1 ?? 0),
       total_hpp: totalHpp,
-      estimasi_profit: omzet - totalHpp,
+      // laba mundur oleh diskon yang diberikan: omzet(kotor) − diskon − HPP
+      estimasi_profit: omzet - totalDiskon - totalHpp,
       item_terjual: itemTerjual.map((r) => ({
         menu_nama: r.menu_nama,
         qty: Number(r.qty ?? 0),

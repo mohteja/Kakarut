@@ -205,6 +205,17 @@ describe("buildReceiptBytes", () => {
     expect(textLines(b2).join("\n")).not.toContain("PB1");
   });
 
+  it("diskon tidak dicetak saat 0/undefined", () => {
+    expect(textLines(bytes).join("\n")).not.toContain("Diskon");
+  });
+
+  it("mencetak baris Diskon (dgn persen & nilai negatif) saat diskon > 0", () => {
+    const b2 = buildReceiptBytes({ ...DATA, diskon: 4400, diskonPersen: 10 }, OPTS);
+    const all = textLines(b2).join("\n");
+    expect(all).toContain("Diskon 10%");
+    expect(all).toContain("-Rp4.400");
+  });
+
   it("footer default saat kosong", () => {
     const b2 = buildReceiptBytes({ ...DATA, footer: null }, OPTS);
     expect(textLines(b2).join("\n")).toContain("Terima kasih!");

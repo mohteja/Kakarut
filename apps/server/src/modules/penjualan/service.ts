@@ -14,6 +14,9 @@ export interface CreateSaleParams {
   /** meja terpilih — bila ada, tipe meja jadi sumber kebenaran dine-in transaksi */
   mejaId?: string | null;
   catatan?: string | null;
+  /** diskon per transaksi: "persen" (nilai 0–100) atau "nominal" (Rp) */
+  diskonTipe?: "persen" | "nominal";
+  diskonNilai?: number;
   items: SaleItemInput[];
 }
 
@@ -120,7 +123,20 @@ export async function createSale(params: CreateSaleParams) {
       }
     }
 
-    const pb1Amount = company.pb1Enabled ? hitungPb1(subtotal, company.pb1Rate) : 0;
+    // Diskon per transaksi: clamp agar diskon ∈ [0, subtotal] (total tak pernah negatif).
+    // PB1 dihitung atas nilai net (subtotal − diskon).
+    let diskon = 0;
+    let diskonPersen: number | null = null;
+    const nilai = params.diskonNilai ?? 0;
+    if (params.diskonTipe === "persen" && nilai > 0) {
+      const pct = Math.min(100, Math.max(0, nilai));
+      diskon = Math.min(subtotal, Math.round((subtotal * pct) / 100));
+      diskonPersen = pct;
+    } else if (params.diskonTipe === "nominal" && nilai > 0) {
+      diskon = Math.min(subtotal, Math.max(0, Math.round(nilai)));
+    }
+    const subtotalNet = subtotal - diskon;
+    const pb1Amount = company.pb1Enabled ? hitungPb1(subtotalNet, company.pb1Rate) : 0;
     const saleDate = tanggalDi(company.timezone);
 
     // Urutan diambil dari nomor TERBESAR hari itu (bukan count) supaya void
@@ -145,8 +161,10 @@ export async function createSale(params: CreateSaleParams) {
         mejaId,
         mejaLabel,
         subtotal,
+        diskon,
+        diskonPersen,
         pb1Amount,
-        total: subtotal + pb1Amount,
+        total: subtotalNet + pb1Amount,
         totalHpp,
         catatan: params.catatan ?? null,
         saleDate,

@@ -30,6 +30,10 @@ export interface ReceiptData {
   mejaLabel?: string | null;
   items: ReceiptItem[];
   subtotal: number;
+  /** potongan harga per transaksi (Rp); 0/undefined = tanpa diskon */
+  diskon?: number;
+  /** persen diskon bila mode persen (utk label "Diskon 10%"); null = nominal */
+  diskonPersen?: number | null;
   pb1Amount: number;
   pb1Rate?: number | null;
   total: number;
@@ -85,6 +89,12 @@ export function buildReceiptBytes(data: ReceiptData, opts: ReceiptOptions): Uint
 
   // Total
   b.line("Subtotal", formatRupiahAscii(data.subtotal));
+  if (data.diskon && data.diskon > 0) {
+    b.line(
+      `Diskon${data.diskonPersen ? ` ${data.diskonPersen}%` : ""}`,
+      formatRupiahAscii(-data.diskon),
+    );
+  }
   if (data.pb1Amount > 0) {
     b.line(`PB1${data.pb1Rate ? ` ${data.pb1Rate}%` : ""}`, formatRupiahAscii(data.pb1Amount));
   }
