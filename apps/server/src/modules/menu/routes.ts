@@ -27,6 +27,10 @@ const MenuBody = z.object({
   is_active: z.boolean().default(true),
 });
 
+const UrutanBody = z.object({
+  items: z.array(z.object({ id: z.string().uuid(), sort_order: z.number().int() })),
+});
+
 function validatePaket(body: z.infer<typeof MenuBody>) {
   if (body.tipe === "paket" && (!body.base_menu_id || body.base_mult == null)) {
     throw new HTTPException(400, {
@@ -107,6 +111,21 @@ export const menuRoutes = new Hono<AppEnv>()
     const row = katalog.rows.find((r) => r.id === c.req.param("id"));
     if (!row) throw new HTTPException(404, { message: "Menu tidak ditemukan" });
     return c.json(toMenuDto(row, katalog));
+  })
+  // Atur urutan/posisi menu (untuk tampilan kasir & cetak daftar menu).
+  // Boleh diakses semua peran (termasuk kasir); company-scoped di WHERE.
+  .put("/urutan", zValidator("json", UrutanBody), async (c) => {
+    const auth = c.get("auth");
+    const { items } = c.req.valid("json");
+    await db.transaction(async (tx) => {
+      for (const it of items) {
+        await tx
+          .update(menus)
+          .set({ sortOrder: it.sort_order })
+          .where(and(eq(menus.id, it.id), eq(menus.companyId, auth.company_id!)));
+      }
+    });
+    return c.json({ ok: true });
   })
   .post("/", requireRole("owner", "admin"), zValidator("json", MenuBody), async (c) => {
     const auth = c.get("auth");

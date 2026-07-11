@@ -8,7 +8,9 @@
     visibility: hidden;
   }
   #struk-print,
-  #struk-print * {
+  #struk-print *,
+  #menu-print,
+  #menu-print * {
     visibility: visible;
   }
   #struk-print {
@@ -17,6 +19,14 @@
     top: 0;
     width: 100%;
     padding: 2mm;
+  }
+  /* Daftar menu — cetak biasa (A4/PDF) */
+  #menu-print {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    padding: 8mm;
   }
   /* lebar kertas thermal saat mencetak lewat driver printer */
   #struk-print[data-paper="58"] {
