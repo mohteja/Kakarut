@@ -928,6 +928,27 @@ LAPM=$(api "$OWNER" GET "/laporan?branch_id=all")
 cek "laporan: per_metode memuat tunai & qris" "V == 1" \
   "$(echo "$LAPM" | jq '([.per_metode[].metode] | (index("tunai") != null) and (index("qris") != null)) | if . then 1 else 0 end')"
 
+echo "== 36. Tutup kasir / shift =="
+SH=$(api "$KASIR" POST /shift/buka '{"modal_awal":200000}')
+cek "buka shift: modal awal 200000" "V == 200000" "$(echo "$SH" | jq '.modal_awal')"
+cek "buka shift: masih terbuka" "V == 1" "$(echo "$SH" | jq '(.ditutup_pada == null) | if . then 1 else 0 end')"
+cek "buka shift kedua ditolak (400)" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/shift/buka" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d '{"modal_awal":0}')"
+# transaksi dalam shift: tunai + qris
+api "$KASIR" POST /penjualan "{\"is_dine_in\":false,\"metode_bayar\":\"tunai\",\"uang_diterima\":50000,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}" > /dev/null
+api "$KASIR" POST /penjualan "{\"is_dine_in\":false,\"metode_bayar\":\"qris\",\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}" > /dev/null
+AK=$(api "$KASIR" GET /shift/aktif)
+cek "shift aktif: penjualan tunai >= 34000" "V >= 34000" "$(echo "$AK" | jq '.penjualan_tunai')"
+cek "shift aktif: non-tunai >= 34000" "V >= 34000" "$(echo "$AK" | jq '.penjualan_nontunai')"
+cek "shift aktif: kas sistem = modal + tunai" "V == 1" \
+  "$(echo "$AK" | jq '(.kas_sistem == (.modal_awal + .penjualan_tunai)) | if . then 1 else 0 end')"
+KAS=$(echo "$AK" | jq '.kas_sistem')
+TU=$(api "$KASIR" POST /shift/tutup "{\"uang_fisik\":$KAS}")
+cek "tutup shift: selisih 0 (uang fisik = kas)" "V == 1" "$(echo "$TU" | jq '(.selisih == 0) | if . then 1 else 0 end')"
+cek "tutup shift: ditutup terisi" "V == 1" "$(echo "$TU" | jq '(.ditutup_pada != null) | if . then 1 else 0 end')"
+cek "setelah tutup: tak ada shift aktif" "V == 1" "$(api "$KASIR" GET /shift/aktif | jq '(. == null) | if . then 1 else 0 end')"
+cek "riwayat shift: ada shift tertutup" "V >= 1" "$(api "$KASIR" GET /shift | jq 'length')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

@@ -333,6 +333,39 @@ export const customers = pgTable(
   (t) => [uniqueIndex("customers_company_wa_uq").on(t.companyId, t.wa)],
 );
 
+/** Sesi kas (shift) per cabang: buka dengan modal awal, tutup dengan uang fisik. */
+export const shifts = pgTable(
+  "shifts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    branchId: uuid("branch_id")
+      .notNull()
+      .references(() => branches.id),
+    openedBy: uuid("opened_by")
+      .notNull()
+      .references(() => users.id),
+    openedAt: timestamp("opened_at", { withTimezone: true }).notNull().defaultNow(),
+    modalAwal: numeric("modal_awal", { precision: 14, scale: 2, mode: "number" })
+      .notNull()
+      .default(0),
+    closedBy: uuid("closed_by").references(() => users.id),
+    closedAt: timestamp("closed_at", { withTimezone: true }),
+    /** uang tunai fisik yang dihitung saat tutup (untuk selisih kas) */
+    uangFisik: numeric("uang_fisik", { precision: 14, scale: 2, mode: "number" }),
+    catatan: text("catatan"),
+  },
+  (t) => [
+    // hanya boleh ada satu shift terbuka per cabang pada satu waktu
+    uniqueIndex("shifts_open_per_branch_uq")
+      .on(t.branchId)
+      .where(sql`${t.closedAt} IS NULL`),
+    index("shifts_company_branch_idx").on(t.companyId, t.branchId, t.openedAt),
+  ],
+);
+
 export const sales = pgTable(
   "sales",
   {

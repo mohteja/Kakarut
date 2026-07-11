@@ -451,6 +451,27 @@ export interface MenuLaris {
   items: MenuLarisRow[];
 }
 
+/** Sesi kas (shift) per cabang. ditutup_* null → shift masih terbuka. */
+export interface Shift {
+  id: string;
+  branch_nama: string;
+  dibuka_oleh: string;
+  dibuka_pada: string;
+  ditutup_oleh: string | null;
+  ditutup_pada: string | null;
+  modal_awal: number;
+  /** uang tunai fisik saat tutup (null selagi terbuka) */
+  uang_fisik: number | null;
+  catatan: string | null;
+  penjualan_tunai: number;
+  penjualan_nontunai: number;
+  jumlah_transaksi: number;
+  /** kas seharusnya di laci = modal_awal + penjualan_tunai */
+  kas_sistem: number;
+  /** uang_fisik − kas_sistem (null selagi terbuka) */
+  selisih: number | null;
+}
+
 /** Laporan pengeluaran pembelian bahan baku (faktur beli terkonfirmasi) per rentang tanggal. */
 export interface LaporanPembelian {
   dari: string;
