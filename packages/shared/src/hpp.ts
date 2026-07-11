@@ -76,12 +76,23 @@ export function saldoStok(stokAwal: number, produksi: number, terpakai: number):
   return stokAwal + produksi - terpakai;
 }
 
+/**
+ * Status stok. Bila `minimum` > 0 (ambang batas per bahan diatur), pakai batas
+ * absolut: saldo ≤ 0 → habis, saldo ≤ minimum → menipis. Bila minimum = 0
+ * (belum diatur), pakai logika rasio default (kompatibel dgn perilaku lama).
+ */
 export function statusStok(
   stokAwal: number,
   produksi: number,
   terpakai: number,
+  minimum = 0,
 ): StokStatus {
   const saldo = saldoStok(stokAwal, produksi, terpakai);
+  if (minimum > 0) {
+    if (saldo <= 0) return "habis";
+    if (saldo <= minimum) return "menipis";
+    return "aman";
+  }
   if (saldo <= 0 && terpakai > 0) return "habis";
   const kapasitas = stokAwal + produksi;
   if (kapasitas > 0 && saldo / kapasitas < STOK_MENIPIS_THRESHOLD) return "menipis";

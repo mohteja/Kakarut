@@ -120,6 +120,13 @@
       "when": 1783737388531,
       "tag": "0016_quiet_power_man",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1783743708624,
+      "tag": "0017_worthless_rictor",
+      "breakpoints": true
     }
   ]
 }

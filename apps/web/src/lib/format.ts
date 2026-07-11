@@ -45,6 +45,20 @@ export function labelTahapProduksi(p: {
   return aktif.length === 1 ? `tahap ${aktif[0]}` : "beberapa tahap";
 }
 
+/** Label tahap dominan pembelian berjalan (RAB → diproses → dikirim). */
+export function labelTahapPembelian(p: {
+  rencana: number;
+  dikerjakan: number;
+  menunggu: number;
+}): string {
+  const aktif = [
+    p.rencana > 0 && "RAB (rencana beli)",
+    p.dikerjakan > 0 && "diproses",
+    p.menunggu > 0 && "dikirim",
+  ].filter(Boolean) as string[];
+  return aktif.length === 1 ? `tahap ${aktif[0]}` : "beberapa tahap";
+}
+
 /** Tanggal ringkas dari timestamp ISO, mis. "11 Jul 2026" (zona WIB). */
 export function formatTanggalRingkas(iso: string): string {
   return new Intl.DateTimeFormat("id-ID", {

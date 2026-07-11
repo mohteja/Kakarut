@@ -27,6 +27,8 @@ export interface BahanDto {
   satuan: string;
   /** lacak stok: dipotong saat menjual, ditambah saat membeli/produksi */
   track_stok: boolean;
+  /** ambang batas stok minimum (0 = pakai rasio default) */
+  stok_minimum: number;
   harga_per_unit: number;
   kategori: BahanKategori;
   pengadaan: JenisPengadaan;
@@ -107,8 +109,12 @@ export interface StokRowDto {
   terpakai: number;
   saldo: number;
   status: StokStatus;
-  /** null bila tidak ada produksi berjalan untuk bahan ini */
+  /** ambang batas stok minimum yang diatur untuk bahan ini (0 = pakai rasio default) */
+  stok_minimum: number;
+  /** produksi in-house yang belum masuk stok (rencana→dikerjakan→menunggu); null bila tak ada */
   produksi_berjalan: ProduksiBerjalan | null;
+  /** pembelian (beli jadi) yang belum masuk stok (RAB→diproses→dikirim); null bila tak ada */
+  pembelian_berjalan: ProduksiBerjalan | null;
 }
 
 export interface SupplierDto {
@@ -331,6 +337,8 @@ export interface KartuStokDto {
   terpotong: boolean;
   /** produksi in-house yang belum masuk saldo (independen dari periode) */
   produksi_berjalan: ProduksiBerjalan | null;
+  /** pembelian (beli jadi) yang belum masuk saldo (independen dari periode) */
+  pembelian_berjalan: ProduksiBerjalan | null;
   mutasi: MutasiStok[];
 }
 
@@ -381,4 +389,16 @@ export interface LaporanHarian {
   estimasi_profit: number;
   item_terjual: { menu_nama: string; qty: number; omzet: number }[];
   konsumsi_bahan: { nama: string; slug: string; qty: number }[];
+}
+
+/** Laporan pengeluaran pembelian bahan baku (faktur beli terkonfirmasi) per rentang tanggal. */
+export interface LaporanPembelian {
+  dari: string;
+  sampai: string;
+  total_pengeluaran: number;
+  jumlah_faktur: number;
+  jumlah_item: number;
+  /** supplier = null → "Tanpa supplier" */
+  per_supplier: { supplier: string | null; jumlah_faktur: number; total: number }[];
+  per_bahan: { nama: string; slug: string; qty: number; satuan: string; total: number }[];
 }

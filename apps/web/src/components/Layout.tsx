@@ -1,7 +1,9 @@
+import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useBranch } from "../context/BranchContext";
+import { api } from "../lib/api";
 
 const linkClass = ({ isActive }: { isActive: boolean }) =>
   `block rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
@@ -10,8 +12,33 @@ const linkClass = ({ isActive }: { isActive: boolean }) =>
 
 export function Layout() {
   const { auth, logout } = useAuth();
-  const { cabang, branchId, setBranchId } = useBranch();
+  const { cabang, branchId, setBranchId, branchQuery } = useBranch();
   const [menuOpen, setMenuOpen] = useState(false);
+
+  // Jumlah kiriman pembelian yang menunggu diterima → badge di nav "Penerimaan
+  // Barang". Pakai ulang GET /penerimaan (key sama dgn PenerimaanPage → cache
+  // dedup + auto-update saat kasir terima/tolak). Non-aktif utk super admin
+  // (tanpa company). Segarkan berkala karena barang bisa datang kapan saja.
+  const { data: pen } = useQuery({
+    queryKey: ["penerimaan", branchQuery],
+    queryFn: () => api<{ rows: { status: string }[] }>(`/penerimaan${branchQuery}`),
+    enabled: !!auth && !auth.user.is_super_admin,
+    refetchInterval: 60_000,
+  });
+  const kirimanMenunggu = pen?.rows.filter((r) => r.status === "menunggu").length ?? 0;
+
+  // Jumlah bahan menipis/habis → badge di nav "Stok". Pakai ulang GET /stok
+  // (key sama dgn StokPage → cache dedup). Merah bila ada yang habis, kuning
+  // bila hanya menipis.
+  const { data: stok } = useQuery({
+    queryKey: ["stok", branchQuery],
+    queryFn: () => api<{ status: string }[]>(`/stok${branchQuery}`),
+    enabled: !!auth && !auth.user.is_super_admin,
+    refetchInterval: 120_000,
+  });
+  const stokKritis = stok?.filter((r) => r.status !== "aman").length ?? 0;
+  const adaHabis = stok?.some((r) => r.status === "habis") ?? false;
+
   if (!auth) return null;
 
   const role = auth.user.role;
@@ -105,6 +132,11 @@ export function Layout() {
             </>
           ) : (
             <>
+              {isManajemen && (
+                <NavLink to="/dashboard" className={linkClass}>
+                  🏠 Beranda
+                </NavLink>
+              )}
               <NavLink to="/kasir" className={linkClass}>
                 🧾 Kasir
               </NavLink>
@@ -117,11 +149,24 @@ export function Layout() {
               <NavLink to="/pengaturan/meja" className={linkClass}>
                 🍽 Meja
               </NavLink>
-              <NavLink to="/stok" className={linkClass}>
-                📦 Stok
+              <NavLink to="/stok" className={(s) => `${linkClass(s)} flex items-center gap-2`}>
+                <span>📦 Stok</span>
+                {stokKritis > 0 && (
+                  <span
+                    className={`ml-auto flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full px-1 text-xs font-bold text-white ${adaHabis ? "bg-red-600" : "bg-amber-500"}`}
+                    title={adaHabis ? "Ada bahan habis" : "Ada bahan menipis"}
+                  >
+                    {stokKritis}
+                  </span>
+                )}
               </NavLink>
-              <NavLink to="/penerimaan" className={linkClass}>
-                📥 Penerimaan Barang
+              <NavLink to="/penerimaan" className={(s) => `${linkClass(s)} flex items-center gap-2`}>
+                <span>📥 Penerimaan Barang</span>
+                {kirimanMenunggu > 0 && (
+                  <span className="ml-auto flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-red-600 px-1 text-xs font-bold text-white">
+                    {kirimanMenunggu}
+                  </span>
+                )}
               </NavLink>
               <NavLink to="/pengaturan/printer" className={linkClass}>
                 🖨 Printer

@@ -15,7 +15,7 @@ import {
 } from "../../components/ui";
 import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
-import { formatAngka, labelTahapProduksi } from "../../lib/format";
+import { formatAngka, labelTahapPembelian, labelTahapProduksi } from "../../lib/format";
 
 export function StokPage() {
   const { branchQuery } = useBranch();
@@ -136,6 +136,15 @@ export function StokPage() {
                     >
                       🏭 +{formatAngka(s.produksi_berjalan.qty)} ·{" "}
                       {labelTahapProduksi(s.produksi_berjalan)}
+                    </span>
+                  )}
+                  {s.pembelian_berjalan && (
+                    <span
+                      className="ml-2 whitespace-nowrap rounded-full bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-800"
+                      title={`RAB ${formatAngka(s.pembelian_berjalan.rencana)} · Diproses ${formatAngka(s.pembelian_berjalan.dikerjakan)} · Dikirim ${formatAngka(s.pembelian_berjalan.menunggu)}`}
+                    >
+                      🛒 +{formatAngka(s.pembelian_berjalan.qty)} ·{" "}
+                      {labelTahapPembelian(s.pembelian_berjalan)}
                     </span>
                   )}
                 </td>

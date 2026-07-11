@@ -26,6 +26,7 @@ export async function hitungSaldoCabang(
       i.kategori    AS kategori,
       i.isi         AS isi,
       i.satuan      AS satuan,
+      i.stok_minimum AS stok_minimum,
       t.id          AS tempat_id,
       t.nama        AS tempat,
       COALESCE(b.qty, 0) AS stok_awal,
@@ -33,7 +34,10 @@ export async function hitungSaldoCabang(
       COALESCE(u.qty, 0) AS terpakai,
       COALESCE(w.rencana, 0)    AS prod_rencana,
       COALESCE(w.dikerjakan, 0) AS prod_dikerjakan,
-      COALESCE(w.menunggu, 0)   AS prod_menunggu
+      COALESCE(w.menunggu, 0)   AS prod_menunggu,
+      COALESCE(wb.rencana, 0)    AS beli_rencana,
+      COALESCE(wb.dikerjakan, 0) AS beli_dikerjakan,
+      COALESCE(wb.menunggu, 0)   AS beli_menunggu
     FROM ingredients i
     LEFT JOIN LATERAL (
       SELECT so.qty, so.created_at
@@ -82,6 +86,19 @@ export async function hitungSaldoCabang(
         AND pr.status IN ('rencana', 'dikerjakan', 'menunggu')
         AND pr.deleted_at IS NULL
     ) w ON TRUE
+    LEFT JOIN LATERAL (
+      -- pembelian (beli jadi) yang BELUM masuk stok: RAB → diproses → dikirim.
+      -- Sama seperti produksi: stok masa depan, tak dibatasi baseline opname.
+      SELECT
+        SUM(pr.qty) FILTER (WHERE pr.status = 'rencana')    AS rencana,
+        SUM(pr.qty) FILTER (WHERE pr.status = 'dikerjakan') AS dikerjakan,
+        SUM(pr.qty) FILTER (WHERE pr.status = 'menunggu')   AS menunggu
+      FROM productions pr
+      WHERE pr.branch_id = ${branchId} AND pr.ingredient_id = i.id
+        AND pr.tipe = 'beli'
+        AND pr.status IN ('rencana', 'dikerjakan', 'menunggu')
+        AND pr.deleted_at IS NULL
+    ) wb ON TRUE
     WHERE i.company_id = ${companyId} AND i.is_active AND i.track_stok
     ORDER BY i.nama
   `);
@@ -95,6 +112,11 @@ export async function hitungSaldoCabang(
     const dikerjakan = Number(row.prod_dikerjakan);
     const menunggu = Number(row.prod_menunggu);
     const qtyBerjalan = rencana + dikerjakan + menunggu;
+    const beliRencana = Number(row.beli_rencana);
+    const beliDikerjakan = Number(row.beli_dikerjakan);
+    const beliMenunggu = Number(row.beli_menunggu);
+    const qtyBeliBerjalan = beliRencana + beliDikerjakan + beliMenunggu;
+    const stokMinimum = Number(row.stok_minimum);
     return {
       ingredient_id: String(row.ingredient_id),
       slug: String(row.slug),
@@ -108,9 +130,19 @@ export async function hitungSaldoCabang(
       produksi,
       terpakai,
       saldo: saldoStok(stokAwal, produksi, terpakai),
-      status: statusStok(stokAwal, produksi, terpakai),
+      status: statusStok(stokAwal, produksi, terpakai, stokMinimum),
+      stok_minimum: stokMinimum,
       produksi_berjalan:
         qtyBerjalan > 0 ? { qty: qtyBerjalan, rencana, dikerjakan, menunggu } : null,
+      pembelian_berjalan:
+        qtyBeliBerjalan > 0
+          ? {
+              qty: qtyBeliBerjalan,
+              rencana: beliRencana,
+              dikerjakan: beliDikerjakan,
+              menunggu: beliMenunggu,
+            }
+          : null,
     };
   });
 }
@@ -198,19 +230,26 @@ export async function kartuStok(params: {
   // dari periode kartu, untuk banner "sedang diproduksi".
   const berjalanRes = await db.execute(sql`
     SELECT
-      COALESCE(SUM(qty) FILTER (WHERE status = 'rencana'), 0)    AS rencana,
-      COALESCE(SUM(qty) FILTER (WHERE status = 'dikerjakan'), 0) AS dikerjakan,
-      COALESCE(SUM(qty) FILTER (WHERE status = 'menunggu'), 0)   AS menunggu
+      COALESCE(SUM(qty) FILTER (WHERE tipe = 'produksi' AND status = 'rencana'), 0)    AS prod_rencana,
+      COALESCE(SUM(qty) FILTER (WHERE tipe = 'produksi' AND status = 'dikerjakan'), 0) AS prod_dikerjakan,
+      COALESCE(SUM(qty) FILTER (WHERE tipe = 'produksi' AND status = 'menunggu'), 0)   AS prod_menunggu,
+      COALESCE(SUM(qty) FILTER (WHERE tipe = 'beli' AND status = 'rencana'), 0)    AS beli_rencana,
+      COALESCE(SUM(qty) FILTER (WHERE tipe = 'beli' AND status = 'dikerjakan'), 0) AS beli_dikerjakan,
+      COALESCE(SUM(qty) FILTER (WHERE tipe = 'beli' AND status = 'menunggu'), 0)   AS beli_menunggu
     FROM productions
     WHERE branch_id = ${branchId} AND ingredient_id = ${ingredientId}
-      AND tipe = 'produksi' AND status IN ('rencana', 'dikerjakan', 'menunggu')
+      AND status IN ('rencana', 'dikerjakan', 'menunggu')
       AND deleted_at IS NULL
   `);
   const bj = berjalanRes.rows[0] as Record<string, unknown>;
-  const bjRencana = Number(bj.rencana);
-  const bjDikerjakan = Number(bj.dikerjakan);
-  const bjMenunggu = Number(bj.menunggu);
+  const bjRencana = Number(bj.prod_rencana);
+  const bjDikerjakan = Number(bj.prod_dikerjakan);
+  const bjMenunggu = Number(bj.prod_menunggu);
   const qtyBerjalan = bjRencana + bjDikerjakan + bjMenunggu;
+  const bbRencana = Number(bj.beli_rencana);
+  const bbDikerjakan = Number(bj.beli_dikerjakan);
+  const bbMenunggu = Number(bj.beli_menunggu);
+  const qtyBeliBerjalan = bbRencana + bbDikerjakan + bbMenunggu;
 
   const terpotong = mutasiRes.rows.length > BATAS_MUTASI;
   const rows = mutasiRes.rows.slice(0, BATAS_MUTASI) as Record<string, unknown>[];
@@ -268,6 +307,10 @@ export async function kartuStok(params: {
     produksi_berjalan:
       qtyBerjalan > 0
         ? { qty: qtyBerjalan, rencana: bjRencana, dikerjakan: bjDikerjakan, menunggu: bjMenunggu }
+        : null,
+    pembelian_berjalan:
+      qtyBeliBerjalan > 0
+        ? { qty: qtyBeliBerjalan, rencana: bbRencana, dikerjakan: bbDikerjakan, menunggu: bbMenunggu }
         : null,
     mutasi,
   };

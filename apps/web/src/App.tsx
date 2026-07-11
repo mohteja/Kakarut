@@ -8,6 +8,8 @@ import { BahanPage } from "./pages/bahan/BahanPage";
 import { KasirPage } from "./pages/kasir/KasirPage";
 import { RiwayatPage } from "./pages/kasir/RiwayatPage";
 import { LaporanPage } from "./pages/laporan/LaporanPage";
+import { LaporanPembelianPage } from "./pages/laporan/LaporanPembelianPage";
+import { DashboardPage } from "./pages/DashboardPage";
 import { LoginPage } from "./pages/LoginPage";
 import { LihatMenuPage } from "./pages/menu/LihatMenuPage";
 import { MenuFormPage } from "./pages/menu/MenuFormPage";
@@ -46,7 +48,7 @@ export default function App() {
 
   const isSuperAdmin = auth.user.is_super_admin;
   const isManajemen = auth.user.role === "owner" || auth.user.role === "admin";
-  const beranda = isSuperAdmin ? "/superadmin" : "/kasir";
+  const beranda = isSuperAdmin ? "/superadmin" : isManajemen ? "/dashboard" : "/kasir";
 
   return (
     <BranchProvider>
@@ -81,12 +83,14 @@ export default function App() {
               <Route path="/pengaturan/meja" element={<MejaPage />} />
               {isManajemen && (
                 <>
+                  <Route path="/dashboard" element={<DashboardPage />} />
                   <Route path="/produksi" element={<ProduksiPage />} />
                   <Route path="/produksi/baru" element={<FakturFormPage tipe="produksi" />} />
                   <Route path="/pembelian" element={<PembelianPage />} />
                   <Route path="/pembelian/baru" element={<FakturFormPage tipe="beli" />} />
                   <Route path="/pembelian/rekomendasi" element={<RekomendasiBeliPage />} />
                   <Route path="/laporan" element={<LaporanPage />} />
+                  <Route path="/laporan/pembelian" element={<LaporanPembelianPage />} />
                   <Route path="/sampah" element={<TempatSampahPage />} />
                   <Route path="/bahan" element={<BahanPage />} />
                   <Route path="/menu" element={<MenuListPage />} />
