@@ -4,7 +4,13 @@ import { useParams, useSearchParams } from "react-router-dom";
 import type { KartuStokDto, MutasiJenis } from "@kakarut/shared";
 import { Card, PageTitle, Spinner, inputClass, tdClass, thClass } from "../../components/ui";
 import { api } from "../../lib/api";
-import { formatAngka, formatTanggal, hariIniWIB, labelTahapProduksi } from "../../lib/format";
+import {
+  formatAngka,
+  formatTanggal,
+  hariIniWIB,
+  labelTahapPembelian,
+  labelTahapProduksi,
+} from "../../lib/format";
 
 const JENIS_BADGE: Record<MutasiJenis, { label: string; cls: string }> = {
   opname: { label: "Opname", cls: "bg-blue-100 text-blue-800" },
@@ -107,6 +113,22 @@ export function KartuStokPage() {
             Rincian: 📋 {formatAngka(kartu.produksi_berjalan.rencana)} · 🔨{" "}
             {formatAngka(kartu.produksi_berjalan.dikerjakan)} · ✅{" "}
             {formatAngka(kartu.produksi_berjalan.menunggu)}
+          </span>
+        </div>
+      )}
+
+      {kartu.pembelian_berjalan && (
+        <div className="mb-3 rounded-lg bg-blue-50 px-4 py-2 text-sm text-blue-800">
+          🛒 Sedang dibeli:{" "}
+          <b>
+            +{formatAngka(kartu.pembelian_berjalan.qty)} {kartu.bahan.satuan}
+          </b>{" "}
+          ({labelTahapPembelian(kartu.pembelian_berjalan)}) — belum masuk saldo; bertambah
+          setelah barang diterima.
+          <span className="ml-1 text-xs">
+            Rincian: 📋 {formatAngka(kartu.pembelian_berjalan.rencana)} · 🔄{" "}
+            {formatAngka(kartu.pembelian_berjalan.dikerjakan)} · 🚚{" "}
+            {formatAngka(kartu.pembelian_berjalan.menunggu)}
           </span>
         </div>
       )}

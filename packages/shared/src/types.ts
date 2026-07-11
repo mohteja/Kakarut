@@ -107,8 +107,10 @@ export interface StokRowDto {
   terpakai: number;
   saldo: number;
   status: StokStatus;
-  /** null bila tidak ada produksi berjalan untuk bahan ini */
+  /** produksi in-house yang belum masuk stok (rencana→dikerjakan→menunggu); null bila tak ada */
   produksi_berjalan: ProduksiBerjalan | null;
+  /** pembelian (beli jadi) yang belum masuk stok (RAB→diproses→dikirim); null bila tak ada */
+  pembelian_berjalan: ProduksiBerjalan | null;
 }
 
 export interface SupplierDto {
@@ -331,6 +333,8 @@ export interface KartuStokDto {
   terpotong: boolean;
   /** produksi in-house yang belum masuk saldo (independen dari periode) */
   produksi_berjalan: ProduksiBerjalan | null;
+  /** pembelian (beli jadi) yang belum masuk saldo (independen dari periode) */
+  pembelian_berjalan: ProduksiBerjalan | null;
   mutasi: MutasiStok[];
 }
 
