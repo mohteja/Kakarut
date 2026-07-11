@@ -10,6 +10,7 @@ import {
   requireSuperAdmin,
   type AppEnv,
 } from "./middleware/auth";
+import { absensiRoutes } from "./modules/absensi/routes";
 import { adminSystemRoutes } from "./modules/admin-system/routes";
 import { adminTenantsRoutes } from "./modules/admin-tenants/routes";
 import { authRoutes } from "./modules/auth/routes";
@@ -76,6 +77,8 @@ export function createApp() {
     .route("/meja", mejaRoutes)
     .route("/open-bill", openBillRoutes)
     .route("/shift", shiftRoutes)
+    // absensi karyawan (kiosk) — semua peran, tanpa gerbang requireRole
+    .route("/absensi", absensiRoutes)
     .route("/stok", stokRoutes)
     .route("/laporan", laporanRoutes)
     .route("/print", printRoutes)

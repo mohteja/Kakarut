@@ -137,6 +137,9 @@ export function Layout() {
                   🏠 Beranda
                 </NavLink>
               )}
+              <NavLink to="/absen" className={linkClass}>
+                🖐 Absen
+              </NavLink>
               <NavLink to="/kasir" className={linkClass}>
                 🧾 Kasir
               </NavLink>

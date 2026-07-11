@@ -513,6 +513,31 @@ export interface Shift {
   selisih: number | null;
 }
 
+/** Jenis cap absensi karyawan: masuk (datang) vs keluar (pulang). */
+export type AbsensiTipe = "masuk" | "keluar";
+
+/** Hasil satu cap absensi (dikembalikan POST /absensi). */
+export interface AbsenResult {
+  user_id: string;
+  nama: string;
+  employee_code: string;
+  tipe: AbsensiTipe;
+  /** waktu cap (ISO) */
+  waktu: string;
+  branch_nama: string;
+}
+
+/** Ringkasan absensi seorang karyawan pada satu hari (daftar di halaman Absen). */
+export interface AbsensiRow {
+  user_id: string;
+  nama: string;
+  employee_code: string | null;
+  /** jam masuk pertama hari itu (ISO); null bila belum absen masuk */
+  masuk: string | null;
+  /** jam keluar terakhir hari itu (ISO); null bila belum absen keluar */
+  keluar: string | null;
+}
+
 /** Laporan pengeluaran pembelian bahan baku (faktur beli terkonfirmasi) per rentang tanggal. */
 export interface LaporanPembelian {
   dari: string;

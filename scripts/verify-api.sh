@@ -1014,6 +1014,35 @@ EXP_PYO=$(jq -n --argjson own "$MENU_PYO" --argjson base "$MENU_BASE" --argjson 
 cek "ketersediaan PYO (paket): cocok agregasi own+dasar" "V == 1" \
   "$(jq -n --argjson a "$PYO_PORSI" --argjson b "$EXP_PYO" '($a == $b) | if . then 1 else 0 end')"
 
+echo "== 39. Absensi karyawan (kode/QR + masuk/keluar auto-detect) =="
+# tiap karyawan (membership) dapat kode karyawan otomatis (backfill saat seed)
+cek "karyawan punya employee_code" "V == 1" \
+  "$(api "$OWNER" GET /karyawan | jq '([.[] | select(.employee_code != null)] | length >= 1) | if . then 1 else 0 end')"
+KODE_KAR=$(api "$OWNER" GET /karyawan | jq -r '[.[] | select(.role == "cashier")][0].employee_code')
+# kasir (semua peran boleh) mengabsen via kode → cap pertama = masuk
+A1=$(api "$KASIR" POST /absensi "{\"kode\":\"$KODE_KAR\"}")
+cek "absen pertama = masuk" "V == 1" "$(echo "$A1" | jq '(.tipe == "masuk") | if . then 1 else 0 end')"
+cek "absen mengembalikan nama karyawan" "V == 1" "$(echo "$A1" | jq '(.nama | length > 0) | if . then 1 else 0 end')"
+cek "absen mengembalikan waktu (ISO)" "V == 1" "$(echo "$A1" | jq '(.waktu | length > 0) | if . then 1 else 0 end')"
+# cap berikutnya untuk karyawan yang sama = keluar (auto-detect dari cap terakhir)
+A2=$(api "$KASIR" POST /absensi "{\"kode\":\"$KODE_KAR\"}")
+cek "absen kedua = keluar (auto-detect)" "V == 1" "$(echo "$A2" | jq '(.tipe == "keluar") | if . then 1 else 0 end')"
+# kode case-insensitive (huruf kecil tetap dikenali)
+A3=$(api "$KASIR" POST /absensi "{\"kode\":\"$(echo "$KODE_KAR" | tr 'A-Z' 'a-z')\"}")
+cek "kode absensi case-insensitive → masuk lagi" "V == 1" "$(echo "$A3" | jq '(.tipe == "masuk") | if . then 1 else 0 end')"
+# daftar absensi hari ini memuat karyawan dengan jam masuk & keluar terisi
+LIST=$(api "$KASIR" GET /absensi)
+cek "daftar absensi: masuk terisi" "V == 1" \
+  "$(echo "$LIST" | jq --arg k "$KODE_KAR" '[.[] | select(.employee_code == $k) | select(.masuk != null)] | length')"
+cek "daftar absensi: keluar terisi" "V == 1" \
+  "$(echo "$LIST" | jq --arg k "$KODE_KAR" '[.[] | select(.employee_code == $k) | select(.keluar != null)] | length')"
+# kode karyawan tak dikenal → 404
+cek "kode karyawan tak dikenal → 404" "V == 404" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/absensi" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d '{"kode":"ZZZNOPE"}')"
+# tanggal ngawur pada daftar → 400 (bukan 500)
+cek "daftar absensi tanggal invalid → 400" "V == 400" "$(status_code "$KASIR" GET "/absensi?tanggal=abc")"
+cek "daftar absensi tanggal di luar rentang → 400" "V == 400" "$(status_code "$KASIR" GET "/absensi?tanggal=2026-13-40")"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

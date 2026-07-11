@@ -176,6 +176,13 @@
       "when": 1783776304059,
       "tag": "0024_soft_senator_kelly",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1783780617398,
+      "tag": "0025_smart_rhino",
+      "breakpoints": true
     }
   ]
 }

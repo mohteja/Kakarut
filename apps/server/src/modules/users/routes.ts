@@ -7,6 +7,7 @@ import { z } from "zod";
 import { db } from "../../db/client";
 import { branches, memberships, users } from "../../db/schema";
 import { type AppEnv } from "../../middleware/auth";
+import { isKodeKaryawanConflict, resolveKodeKaryawan } from "./service";
 
 const KaryawanBody = z.object({
   nama: z.string().trim().min(1),
@@ -44,6 +45,7 @@ export const karyawanRoutes = new Hono<AppEnv>()
         role: memberships.role,
         branch_id: memberships.branchId,
         cabang: branches.nama,
+        employee_code: memberships.employeeCode,
       })
       .from(memberships)
       .innerJoin(users, eq(memberships.userId, users.id))
@@ -70,24 +72,36 @@ export const karyawanRoutes = new Hono<AppEnv>()
     if (existing) {
       throw new HTTPException(409, { message: `Email ${body.email} sudah terdaftar` });
     }
-    const result = await db.transaction(async (tx) => {
-      const [user] = await tx
-        .insert(users)
-        .values({
-          email: body.email,
-          passwordHash: bcrypt.hashSync(body.password, 10),
-          nama: body.nama,
-        })
-        .returning();
-      await tx.insert(memberships).values({
-        userId: user.id,
-        companyId: auth.company_id!,
-        role: body.role,
-        branchId: body.role === "cashier" ? body.branch_id : (body.branch_id ?? null),
-      });
-      return { user_id: user.id, email: user.email, nama: user.nama, role: body.role };
-    });
-    return c.json(result, 201);
+    // Retry bila kode karyawan bentrok: generate kode membaca snapshot, jadi dua
+    // pembuatan bersamaan dgn inisial sama bisa memilih kode yang sama → coba
+    // ulang (resolveKodeKaryawan membaca ulang & menomori BS2, dst.).
+    const passwordHash = bcrypt.hashSync(body.password, 10);
+    let result: { user_id: string; email: string; nama: string; role: string; employee_code: string } | undefined;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        result = await db.transaction(async (tx) => {
+          const [user] = await tx
+            .insert(users)
+            .values({ email: body.email, passwordHash, nama: body.nama })
+            .returning();
+          // kode karyawan otomatis (ID cepat absensi via ketik/scan QR), unik per perusahaan
+          const employeeCode = await resolveKodeKaryawan(tx, auth.company_id!, body.nama);
+          await tx.insert(memberships).values({
+            userId: user.id,
+            companyId: auth.company_id!,
+            role: body.role,
+            branchId: body.role === "cashier" ? body.branch_id : (body.branch_id ?? null),
+            employeeCode,
+          });
+          return { user_id: user.id, email: user.email, nama: user.nama, role: body.role, employee_code: employeeCode };
+        });
+        break;
+      } catch (e) {
+        if (attempt < 2 && isKodeKaryawanConflict(e)) continue;
+        throw e;
+      }
+    }
+    return c.json(result!, 201);
   })
   .patch("/:userId", zValidator("json", PatchKaryawanBody), async (c) => {
     const auth = c.get("auth");
