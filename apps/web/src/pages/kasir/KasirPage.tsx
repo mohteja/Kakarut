@@ -47,7 +47,9 @@ export function KasirPage() {
   const { data: me } = useQuery({
     queryKey: ["me"],
     queryFn: () =>
-      api<{ company: { pb1_enabled: boolean; pb1_rate: number } | null }>("/auth/me"),
+      api<{
+        company: { pb1_enabled: boolean; pb1_rate: number; diskon_maks_persen: number } | null;
+      }>("/auth/me"),
   });
   const pb1Conf = me?.company ?? auth?.company;
 
@@ -138,12 +140,18 @@ export function KasirPage() {
   const subtotal = cart.reduce((a, l) => a + l.menu.harga_jual * l.qty, 0);
   // diskon per transaksi (cermin logika server: clamp ke [0, subtotal])
   const diskonNilaiNum = Number(diskonNilai) || 0;
-  const diskon =
+  const diskonRaw =
     diskonNilaiNum <= 0
       ? 0
       : diskonTipe === "persen"
         ? Math.min(subtotal, Math.round((subtotal * Math.min(100, diskonNilaiNum)) / 100))
         : Math.min(subtotal, Math.round(diskonNilaiNum));
+  // batas diskon utk KASIR (owner/admin bebas → 100%)
+  const maksDiskonPersen = isKasir ? (pb1Conf?.diskon_maks_persen ?? 100) : 100;
+  const diskonBoleh = !isKasir || maksDiskonPersen > 0;
+  const capNominal = Math.floor((subtotal * maksDiskonPersen) / 100);
+  const diskon = Math.min(diskonRaw, capNominal);
+  const diskonDibatasi = diskon < diskonRaw;
   const subtotalNet = subtotal - diskon;
   const pb1 = pb1Conf?.pb1_enabled ? Math.round(subtotalNet * (pb1Conf.pb1_rate / 100)) : 0;
   const total = subtotalNet + pb1;
@@ -368,37 +376,49 @@ export function KasirPage() {
             <span>Subtotal</span>
             <span>{formatRupiah(subtotal)}</span>
           </div>
-          {/* Diskon per transaksi: toggle %/Rp + input */}
-          <div className="flex items-center justify-between gap-2 text-sm text-stone-600">
-            <div className="flex items-center gap-1.5">
-              <span>Diskon</span>
-              <div className="flex overflow-hidden rounded-md border border-stone-300 text-xs">
-                <button
-                  type="button"
-                  onClick={() => setDiskonTipe("nominal")}
-                  className={`px-2 py-1 font-medium ${diskonTipe === "nominal" ? "bg-orange-600 text-white" : "bg-white text-stone-600"}`}
-                >
-                  Rp
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setDiskonTipe("persen")}
-                  className={`px-2 py-1 font-medium ${diskonTipe === "persen" ? "bg-orange-600 text-white" : "bg-white text-stone-600"}`}
-                >
-                  %
-                </button>
+          {/* Diskon per transaksi: toggle %/Rp + input (dibatasi utk kasir) */}
+          <div>
+            <div className="flex items-center justify-between gap-2 text-sm text-stone-600">
+              <div className="flex items-center gap-1.5">
+                <span>Diskon</span>
+                <div className="flex overflow-hidden rounded-md border border-stone-300 text-xs">
+                  <button
+                    type="button"
+                    disabled={!diskonBoleh}
+                    onClick={() => setDiskonTipe("nominal")}
+                    className={`px-2 py-1 font-medium disabled:opacity-40 ${diskonTipe === "nominal" ? "bg-orange-600 text-white" : "bg-white text-stone-600"}`}
+                  >
+                    Rp
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!diskonBoleh}
+                    onClick={() => setDiskonTipe("persen")}
+                    className={`px-2 py-1 font-medium disabled:opacity-40 ${diskonTipe === "persen" ? "bg-orange-600 text-white" : "bg-white text-stone-600"}`}
+                  >
+                    %
+                  </button>
+                </div>
+                <input
+                  type="number"
+                  min="0"
+                  max={diskonTipe === "persen" ? (isKasir ? maksDiskonPersen : 100) : undefined}
+                  disabled={!diskonBoleh}
+                  value={diskonNilai}
+                  onChange={(e) => setDiskonNilai(e.target.value)}
+                  placeholder="0"
+                  className="w-20 rounded-md border border-stone-300 px-2 py-1 text-right text-sm disabled:bg-stone-100"
+                />
               </div>
-              <input
-                type="number"
-                min="0"
-                max={diskonTipe === "persen" ? 100 : undefined}
-                value={diskonNilai}
-                onChange={(e) => setDiskonNilai(e.target.value)}
-                placeholder="0"
-                className="w-20 rounded-md border border-stone-300 px-2 py-1 text-right text-sm"
-              />
+              <span className="text-red-600">{diskon > 0 ? `−${formatRupiah(diskon)}` : "—"}</span>
             </div>
-            <span className="text-red-600">{diskon > 0 ? `−${formatRupiah(diskon)}` : "—"}</span>
+            {isKasir && maksDiskonPersen < 100 && (
+              <div className="mt-0.5 text-right text-xs text-stone-400">
+                {maksDiskonPersen === 0
+                  ? "Diskon hanya oleh owner/admin"
+                  : `Maks diskon kasir ${maksDiskonPersen}%${diskonDibatasi ? " · dibatasi" : ""}`}
+              </div>
+            )}
           </div>
           {pb1 > 0 && (
             <div className="flex justify-between text-sm text-stone-600">

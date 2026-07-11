@@ -51,6 +51,7 @@ export const penjualanRoutes = new Hono<AppEnv>()
       catatan: body.catatan,
       diskonTipe: body.diskon_tipe,
       diskonNilai: body.diskon_nilai,
+      bypassDiskonLimit: auth.role !== "cashier",
       items: body.items,
     });
     return c.json(result, 201);

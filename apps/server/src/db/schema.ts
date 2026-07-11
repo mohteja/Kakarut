@@ -68,6 +68,10 @@ export const companies = pgTable("companies", {
     .default(10),
   receiptFooter: text("receipt_footer"),
   receiptShowAlamat: boolean("receipt_show_alamat").notNull().default(true),
+  /** batas maksimal diskon (%) yang boleh diberikan KASIR; owner/admin bebas. 100 = tanpa batas */
+  diskonMaksPersen: numeric("diskon_maks_persen", { precision: 5, scale: 2, mode: "number" })
+    .notNull()
+    .default(100),
   /** target penjualan (Rp) default untuk rekomendasi kebutuhan bahan baku */
   targetPenjualan: numeric("target_penjualan", { precision: 14, scale: 2, mode: "number" }),
   plan: text("plan").notNull().default("free"),

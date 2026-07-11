@@ -16,6 +16,7 @@ export interface AuthState {
     logo_url: string | null;
     pb1_enabled: boolean;
     pb1_rate: number;
+    diskon_maks_persen: number;
     timezone: string;
   } | null;
   branch: { id: string; nama: string } | null;

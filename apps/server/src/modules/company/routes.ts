@@ -17,6 +17,8 @@ const PatchBody = z.object({
   receipt_footer: z.string().trim().max(200).nullish(),
   receipt_show_alamat: z.boolean().optional(),
   target_penjualan: z.number().min(0).nullish(),
+  /** batas maks diskon kasir (%) — 0..100 */
+  diskon_maks_persen: z.number().min(0).max(100).optional(),
 });
 
 export const companyRoutes = new Hono<AppEnv>()
@@ -47,6 +49,9 @@ export const companyRoutes = new Hono<AppEnv>()
         }),
         ...(body.target_penjualan !== undefined && {
           targetPenjualan: body.target_penjualan,
+        }),
+        ...(body.diskon_maks_persen !== undefined && {
+          diskonMaksPersen: body.diskon_maks_persen,
         }),
         updatedAt: new Date(),
       })

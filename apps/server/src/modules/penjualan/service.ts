@@ -17,6 +17,8 @@ export interface CreateSaleParams {
   /** diskon per transaksi: "persen" (nilai 0–100) atau "nominal" (Rp) */
   diskonTipe?: "persen" | "nominal";
   diskonNilai?: number;
+  /** owner/admin boleh melampaui batas diskon maksimal kasir */
+  bypassDiskonLimit?: boolean;
   items: SaleItemInput[];
 }
 
@@ -134,6 +136,15 @@ export async function createSale(params: CreateSaleParams) {
       diskonPersen = pct;
     } else if (params.diskonTipe === "nominal" && nilai > 0) {
       diskon = Math.min(subtotal, Math.max(0, Math.round(nilai)));
+    }
+    // Batas diskon kasir (owner/admin bypass). +0.5% toleransi pembulatan.
+    if (!params.bypassDiskonLimit && subtotal > 0 && diskon > 0) {
+      const pctEfektif = (diskon / subtotal) * 100;
+      if (pctEfektif > company.diskonMaksPersen + 0.5) {
+        throw new HTTPException(400, {
+          message: `Diskon melebihi batas maksimal kasir (${company.diskonMaksPersen}%)`,
+        });
+      }
     }
     const subtotalNet = subtotal - diskon;
     const pb1Amount = company.pb1Enabled ? hitungPb1(subtotalNet, company.pb1Rate) : 0;
