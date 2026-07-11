@@ -5,7 +5,7 @@ import { ErrorText, Modal, btnPrimary, btnSecondary, inputClass } from "../../co
 import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah, formatWaktu } from "../../lib/format";
-import { STATUS_PRODUKSI, type FakturGroup } from "./TambahStokPage";
+import { STATUS_BELI, STATUS_PRODUKSI, type FakturGroup } from "./TambahStokPage";
 
 interface Karyawan {
   user_id: string;
@@ -125,12 +125,16 @@ export function FakturDetailModal({
             )}
             <dt className="text-stone-400">Status</dt>
             <dd className="col-span-2">
-              {tipe === "produksi"
-                ? STATUS_PRODUKSI[grup.status].label
-                : grup.status === "dikonfirmasi"
-                  ? "Dikonfirmasi ✓"
-                  : "Menunggu konfirmasi"}
+              {(tipe === "produksi" ? STATUS_PRODUKSI : STATUS_BELI)[grup.status].label}
             </dd>
+            {grup.rows.some((r) => r.alasan_tolak) && (
+              <>
+                <dt className="text-stone-400">Alasan tolak</dt>
+                <dd className="col-span-2 text-red-700">
+                  {grup.rows.find((r) => r.alasan_tolak)?.alasan_tolak}
+                </dd>
+              </>
+            )}
             {grup.catatan && (
               <>
                 <dt className="text-stone-400">Catatan</dt>
@@ -156,6 +160,11 @@ export function FakturDetailModal({
                     <td className="px-3 py-1.5 font-medium">{r.bahan}</td>
                     <td className="px-3 py-1.5 text-right text-stone-600">
                       +{formatAngka(r.qty)} {r.satuan}
+                      {r.qty_dipesan != null && r.qty_dipesan !== r.qty && (
+                        <span className="ml-1 text-xs text-amber-600">
+                          (dipesan {formatAngka(r.qty_dipesan)})
+                        </span>
+                      )}
                     </td>
                     <td className="px-3 py-1.5 text-stone-500">{r.tempat ?? "—"}</td>
                     <td className="px-3 py-1.5 text-right text-stone-500">

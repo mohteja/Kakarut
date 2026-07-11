@@ -228,8 +228,10 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
       const prodDate = tanggalDi(company?.timezone ?? "Asia/Jakarta");
       const fakturId = randomUUID();
 
-      // Produksi mulai dari tahap "rencana" (RAB); beli tetap "menunggu".
-      const statusAwal = tipe === "produksi" ? ("rencana" as const) : ("menunggu" as const);
+      // Kedua jalur mulai dari tahap "rencana" (RAB):
+      // produksi → dikerjakan → selesai (menunggu konfirmasi) → masuk stok;
+      // beli → diproses → dikirim (menunggu penerimaan toko) → diterima.
+      const statusAwal = "rencana" as const;
       const rows = body.items.map((item) => {
         const ing = pastikanJalur(ingById.get(item.ingredient_id), tipe, item.ingredient_id);
         const qty = item.mode === "batch" ? item.jumlah * ing.isi : item.jumlah;
@@ -265,11 +267,12 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         201,
       );
     })
-    /** Majukan tahap produksi satu langkah (khusus jalur produksi). */
+    /**
+     * Majukan tahap satu langkah (kedua jalur):
+     * produksi: rencana → dikerjakan → menunggu (selesai);
+     * beli: rencana (RAB) → dikerjakan (diproses) → menunggu (dikirim ke toko).
+     */
     .post("/tahap/:fakturId", zValidator("json", TahapBody), async (c) => {
-      if (tipe !== "produksi") {
-        throw new HTTPException(404, { message: "Tahapan hanya untuk jalur produksi" });
-      }
       const auth = c.get("auth");
       const { ke } = c.req.valid("json");
       const dari = TAHAP_SEBELUM[ke];
@@ -438,6 +441,8 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         updated_at: productions.updatedAt,
         worker_id: productions.workerId,
         dikerjakan_oleh: pekerja.nama,
+        qty_dipesan: productions.qtyDipesan,
+        alasan_tolak: productions.alasanTolak,
       };
       const rows =
         keys.length === 0

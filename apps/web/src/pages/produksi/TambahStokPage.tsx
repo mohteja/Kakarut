@@ -48,6 +48,8 @@ export interface StokMasukRow {
   updated_at: string | null;
   worker_id: string | null;
   dikerjakan_oleh: string | null;
+  qty_dipesan: number | null;
+  alasan_tolak: string | null;
 }
 
 export interface FakturGroup {
@@ -69,12 +71,22 @@ export interface FakturGroup {
   totalHarga: number;
 }
 
-/** Badge tahap pipeline produksi (jalur beli tetap 2 label lama). */
+/** Badge tahap pipeline produksi. */
 export const STATUS_PRODUKSI: Record<KonfirmasiStatus, { label: string; cls: string }> = {
   rencana: { label: "📋 Rencana (RAB)", cls: "bg-stone-200 text-stone-700" },
   dikerjakan: { label: "🔨 Sedang dikerjakan", cls: "bg-blue-100 text-blue-800" },
   menunggu: { label: "✅ Selesai — menunggu konfirmasi", cls: "bg-yellow-100 text-yellow-800" },
   dikonfirmasi: { label: "📦 Dikonfirmasi ✓", cls: "bg-green-100 text-green-800" },
+  ditolak: { label: "❌ Ditolak", cls: "bg-red-100 text-red-700" },
+};
+
+/** Badge tahap pipeline pembelian: RAB → diproses → dikirim → diterima / ditolak. */
+export const STATUS_BELI: Record<KonfirmasiStatus, { label: string; cls: string }> = {
+  rencana: { label: "📋 RAB (Rencana beli)", cls: "bg-stone-200 text-stone-700" },
+  dikerjakan: { label: "🔄 Diproses", cls: "bg-blue-100 text-blue-800" },
+  menunggu: { label: "🚚 Dikirim — menunggu penerimaan", cls: "bg-yellow-100 text-yellow-800" },
+  dikonfirmasi: { label: "📦 Diterima ✓", cls: "bg-green-100 text-green-800" },
+  ditolak: { label: "❌ Ditolak penerima", cls: "bg-red-100 text-red-700" },
 };
 
 const TEKS: Record<JenisPengadaan, { judul: string; endpoint: string; logJudul: string }> = {
@@ -285,12 +297,7 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
       ) : (
         <div className="space-y-3">
           {grup.map((g) => {
-            const badge =
-              tipe === "produksi"
-                ? STATUS_PRODUKSI[g.status]
-                : g.status === "dikonfirmasi"
-                  ? { label: "Dikonfirmasi ✓", cls: "bg-green-100 text-green-800" }
-                  : { label: "Menunggu konfirmasi", cls: "bg-yellow-100 text-yellow-800" };
+            const badge = (tipe === "produksi" ? STATUS_PRODUKSI : STATUS_BELI)[g.status];
             return (
             <Card
               key={g.key}
@@ -329,7 +336,7 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                     >
                       {badge.label}
                     </span>
-                    {tipe === "produksi" && g.fakturId && g.status === "rencana" && (
+                    {g.fakturId && g.status === "rencana" && (
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
@@ -338,10 +345,10 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                         disabled={tahap.isPending}
                         className="rounded-lg bg-blue-600 px-3 py-1 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
                       >
-                        🔨 Mulai Kerjakan
+                        {tipe === "produksi" ? "🔨 Mulai Kerjakan" : "🔄 Proses"}
                       </button>
                     )}
-                    {tipe === "produksi" && g.fakturId && g.status === "dikerjakan" && (
+                    {g.fakturId && g.status === "dikerjakan" && (
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
@@ -350,7 +357,7 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                         disabled={tahap.isPending}
                         className="rounded-lg bg-amber-500 px-3 py-1 text-xs font-semibold text-white hover:bg-amber-600 disabled:opacity-50"
                       >
-                        ✅ Tandai Selesai
+                        {tipe === "produksi" ? "✅ Tandai Selesai" : "🚚 Kirim ke Toko"}
                       </button>
                     )}
                     {g.status === "menunggu" && g.fakturId && (
@@ -362,7 +369,7 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                         disabled={konfirmasi.isPending}
                         className="rounded-lg bg-green-600 px-3 py-1 text-xs font-semibold text-white hover:bg-green-700 disabled:opacity-50"
                       >
-                        ✔ Konfirmasi Ada
+                        {tipe === "produksi" ? "✔ Konfirmasi Ada" : "✔ Terima Semua"}
                       </button>
                     )}
                   </div>
@@ -385,6 +392,11 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                           {r.is_batch && (
                             <span className="ml-1 text-xs text-stone-400">
                               ({formatAngka(r.qty / r.isi)} batch × {formatAngka(r.isi)})
+                            </span>
+                          )}
+                          {r.qty_dipesan != null && r.qty_dipesan !== r.qty && (
+                            <span className="ml-1 text-xs text-amber-600">
+                              (dipesan {formatAngka(r.qty_dipesan)})
                             </span>
                           )}
                         </td>

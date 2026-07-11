@@ -120,6 +120,9 @@ export function Layout() {
               <NavLink to="/stok" className={linkClass}>
                 📦 Stok
               </NavLink>
+              <NavLink to="/penerimaan" className={linkClass}>
+                📥 Penerimaan Barang
+              </NavLink>
               <NavLink to="/pengaturan/printer" className={linkClass}>
                 🖨 Printer
               </NavLink>

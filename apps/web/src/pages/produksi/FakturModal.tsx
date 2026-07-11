@@ -433,8 +433,9 @@ export function FakturModal({
             </>
           ) : (
             <>
-              Setelah disimpan, faktur berstatus <b>Menunggu konfirmasi</b> — stok baru
-              bertambah setelah ditekan <b>"Konfirmasi Ada"</b> (barang benar-benar diterima).
+              Faktur tersimpan sebagai <b>📋 RAB (rencana beli)</b>, lalu maju bertahap:{" "}
+              <b>🔄 Proses</b> → <b>🚚 Kirim ke Toko</b> → <b>penerimaan di toko</b> (terima
+              semua / sebagian / tolak). Stok baru bertambah setelah barang diterima.
             </>
           )}
         </div>

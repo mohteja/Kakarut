@@ -21,16 +21,18 @@ export const menuTipeEnum = pgEnum("menu_tipe", ["regular", "paket"]);
 /** jalur pengadaan bahan: diproduksi sendiri vs dibeli jadi */
 export const pengadaanEnum = pgEnum("pengadaan", ["produksi", "beli"]);
 /**
- * Status pipeline stok masuk: rencana (RAB) → dikerjakan → menunggu (selesai,
- * menunggu konfirmasi) → dikonfirmasi. 'rencana'/'dikerjakan' hanya dipakai
- * jalur produksi; jalur beli tetap menunggu → dikonfirmasi. Stok baru
- * terhitung saat 'dikonfirmasi'.
+ * Status pipeline stok masuk: rencana (RAB) → dikerjakan (produksi: dikerjakan;
+ * beli: diproses) → menunggu (produksi: selesai—menunggu konfirmasi; beli:
+ * dikirim—menunggu penerimaan toko) → dikonfirmasi (masuk stok). 'ditolak'
+ * khusus jalur beli: kiriman ditolak penerima (bisa dibatalkan → dikonfirmasi).
+ * Stok baru terhitung saat 'dikonfirmasi'.
  */
 export const konfirmasiStatusEnum = pgEnum("konfirmasi_status", [
   "rencana",
   "dikerjakan",
   "menunggu",
   "dikonfirmasi",
+  "ditolak",
 ]);
 /** kategori klarifikasi selisih opname (waste vs koreksi pencatatan) */
 export const penyesuaianKategoriEnum = pgEnum("penyesuaian_kategori", [
@@ -415,6 +417,10 @@ export const productions = pgTable(
     userId: uuid("user_id").references(() => users.id),
     /** karyawan yang mengerjakan produksi (wajib utk faktur produksi baru) */
     workerId: uuid("worker_id").references(() => users.id),
+    /** qty pesanan awal saat penerimaan sebagian (qty = yang benar-benar diterima) */
+    qtyDipesan: numeric("qty_dipesan", { precision: 16, scale: 6, mode: "number" }),
+    /** alasan penolakan kiriman (jalur beli, status 'ditolak') */
+    alasanTolak: text("alasan_tolak"),
     // audit edit metadata
     updatedAt: timestamp("updated_at", { withTimezone: true }),
     updatedBy: uuid("updated_by").references(() => users.id),

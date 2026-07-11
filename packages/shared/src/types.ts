@@ -72,11 +72,16 @@ export interface MenuDto {
 }
 
 /**
- * Status pipeline stok masuk. 'rencana' (RAB) & 'dikerjakan' hanya dipakai
- * jalur produksi; jalur beli tetap menunggu → dikonfirmasi. Stok baru
- * terhitung saat 'dikonfirmasi'.
+ * Status pipeline stok masuk: rencana (RAB) → dikerjakan → menunggu →
+ * dikonfirmasi (masuk stok). 'ditolak' khusus jalur beli (kiriman ditolak
+ * penerima; bisa dibatalkan → dikonfirmasi). Stok terhitung saat 'dikonfirmasi'.
  */
-export type KonfirmasiStatus = "rencana" | "dikerjakan" | "menunggu" | "dikonfirmasi";
+export type KonfirmasiStatus =
+  | "rencana"
+  | "dikerjakan"
+  | "menunggu"
+  | "dikonfirmasi"
+  | "ditolak";
 
 /** Produksi in-house yang sedang berjalan (belum masuk saldo stok). */
 export interface ProduksiBerjalan {
