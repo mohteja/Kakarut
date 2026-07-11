@@ -41,6 +41,8 @@ export interface SaleResult {
     catatan: string | null;
   }[];
   branch_nama: string;
+  /** nama kasir yang melayani (untuk dicetak di nota) */
+  kasir?: string | null;
 }
 
 /** Baris companies dari GET /company (camelCase Drizzle) — field yg dipakai struk */
@@ -128,6 +130,7 @@ export function ReceiptModal({
       metodeBayar: data.sale.metodeBayar,
       uangDiterima: data.sale.uangDiterima,
       catatan: data.sale.catatan,
+      kasir: data.kasir ?? null,
       footer: company?.receiptFooter ?? null,
     };
   }
@@ -231,6 +234,7 @@ export function ReceiptModal({
             </>
           )}
           {data.sale.catatan && <div className="mt-2">Catatan: {data.sale.catatan}</div>}
+          {data.kasir && <div className="mt-2">Kasir: {data.kasir}</div>}
           <div className="mt-3 text-center">{footer}</div>
         </div>
 

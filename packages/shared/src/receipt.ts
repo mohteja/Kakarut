@@ -53,6 +53,8 @@ export interface ReceiptData {
   /** uang tunai diterima (untuk hitung kembalian di struk) */
   uangDiterima?: number | null;
   catatan?: string | null;
+  /** nama kasir yang melayani (dicetak di bawah nota) */
+  kasir?: string | null;
   /** teks footer dari pengaturan perusahaan */
   footer?: string | null;
 }
@@ -138,6 +140,9 @@ export function buildReceiptBytes(data: ReceiptData, opts: ReceiptOptions): Uint
   if (data.catatan) {
     b.divider().text(`Catatan: ${data.catatan}`);
   }
+
+  // Nama kasir yang melayani (di bawah nota)
+  if (data.kasir) b.align("left").text(`Kasir: ${data.kasir}`);
 
   // Footer
   b.align("center").text(data.footer?.trim() ? data.footer : "Terima kasih!");
