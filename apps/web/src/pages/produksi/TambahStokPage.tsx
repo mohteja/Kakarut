@@ -59,7 +59,7 @@ export interface FakturGroup {
   supplier: string | null;
   supplierId: string | null;
   noFaktur: string | null;
-  status: KonfirmasiStatus;
+  status: StatusFaktur;
   catatan: string | null;
   dibuatOleh: string | null;
   diubahOleh: string | null;
@@ -68,6 +68,34 @@ export interface FakturGroup {
   dikerjakanOleh: string | null;
   rows: StokMasukRow[];
   totalHarga: number;
+}
+
+/**
+ * Status satu FAKTUR (bukan baris). Setelah "terima sebagian", satu faktur
+ * bisa punya baris diterima + baris ditolak sekaligus → status "sebagian".
+ */
+export type StatusFaktur = KonfirmasiStatus | "sebagian";
+
+const BADGE_SEBAGIAN = { label: "📦 Diterima sebagian", cls: "bg-green-100 text-green-800" };
+
+/** Status faktur diturunkan dari status baris-barisnya. */
+export function statusFaktur(rows: { status: KonfirmasiStatus }[]): StatusFaktur {
+  const set = new Set(rows.map((r) => r.status));
+  if (set.size === 1) return rows[0].status;
+  // campuran hanya muncul setelah "terima sebagian": ada yg diterima & ditolak
+  if (set.has("dikonfirmasi") && set.has("ditolak")) return "sebagian";
+  return rows[0].status;
+}
+
+/** Badge faktur (peduli "sebagian"), pilih peta sesuai jalur. */
+export function badgeFaktur(tipe: JenisPengadaan, status: StatusFaktur) {
+  if (status === "sebagian") return BADGE_SEBAGIAN;
+  return (tipe === "produksi" ? STATUS_PRODUKSI : STATUS_BELI)[status];
+}
+
+/** Faktur yang belum selesai (masih dalam pipeline) belum menambah saldo stok. */
+export function belumSelesai(status: StatusFaktur) {
+  return status === "rencana" || status === "dikerjakan" || status === "menunggu";
 }
 
 /** Badge tahap pipeline produksi. */
@@ -192,13 +220,16 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
         byKey.set(key, g);
       }
       g.rows.push(r);
-      g.totalHarga += r.total_harga ?? 0;
+      // baris ditolak tak menambah biaya (barang tidak diterima)
+      if (r.status !== "ditolak") g.totalHarga += r.total_harga ?? 0;
     }
+    // status faktur = agregat status baris (campuran diterima+ditolak = "sebagian")
+    for (const g of byKey.values()) g.status = statusFaktur(g.rows);
     return [...byKey.values()];
   }, [log]);
 
   const totalPengeluaran = data?.total_pengeluaran ?? 0;
-  const adaBelumKonfirmasi = grup.some((g) => g.status !== "dikonfirmasi");
+  const adaBelumKonfirmasi = grup.some((g) => belumSelesai(g.status));
   const jenisKata = tipe === "produksi" ? "produksi" : "pembelian";
 
   return (
@@ -295,12 +326,12 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
       ) : (
         <div className="space-y-3">
           {grup.map((g) => {
-            const badge = (tipe === "produksi" ? STATUS_PRODUKSI : STATUS_BELI)[g.status];
+            const badge = badgeFaktur(tipe, g.status);
             return (
             <Card
               key={g.key}
               onClick={() => setDetail(g)}
-              className={`flex cursor-pointer overflow-hidden transition hover:border-orange-300 hover:shadow-sm ${g.status !== "dikonfirmasi" ? "border-yellow-300" : ""}`}
+              className={`flex cursor-pointer overflow-hidden transition hover:border-orange-300 hover:shadow-sm ${belumSelesai(g.status) ? "border-yellow-300" : ""}`}
             >
               {/* Kotak tanggal & waktu di kiri tiap transaksi */}
               <div className="flex w-24 shrink-0 flex-col items-center justify-center gap-0.5 border-r border-stone-100 bg-stone-50 px-2 py-3 text-center sm:w-28">

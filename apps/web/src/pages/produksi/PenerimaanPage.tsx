@@ -209,6 +209,7 @@ export function PenerimaanPage() {
                             <input
                               type="number"
                               min="0"
+                              max={r.qty}
                               step="any"
                               value={qtyDraft[r.id] ?? String(r.qty)}
                               onChange={(e) =>

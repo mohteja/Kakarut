@@ -84,9 +84,12 @@ export const penerimaanRoutes = new Hono<AppEnv>()
   /** Terima SEMUA barang kiriman → masuk stok. */
   .post("/:fakturId/terima", async (c) => {
     const auth = c.get("auth");
+    // waktu = saat diterima (bukan saat RAB dibuat) agar stok masuk terhitung
+    // relatif ke opname terakhir, bukan tanggal faktur dibuat.
+    const now = new Date();
     const rows = await db
       .update(productions)
-      .set({ status: "dikonfirmasi", confirmedBy: auth.sub, confirmedAt: new Date() })
+      .set({ status: "dikonfirmasi", confirmedBy: auth.sub, confirmedAt: now, waktu: now })
       .where(
         and(...kondisiFaktur(c, c.req.param("fakturId")), eq(productions.status, "menunggu")),
       )
@@ -120,34 +123,66 @@ export const penerimaanRoutes = new Hono<AppEnv>()
         message: "Semua baris kiriman harus diisi qty diterimanya (0 bila tidak diterima)",
       });
     }
+    // Qty diterima tak boleh melebihi qty yang dikirim — barang tidak mungkin
+    // datang lebih dari yang dikirim; tanpa batas ini stok & pengeluaran bisa
+    // digelembungkan sewenang-wenang.
+    const kelebihan = baris.find((b) => terimaById.get(b.id)! > b.qty);
+    if (kelebihan) {
+      throw new HTTPException(400, {
+        message: "Qty diterima tidak boleh melebihi qty yang dikirim",
+      });
+    }
 
+    // waktu = saat diterima (bukan saat RAB), lihat catatan di endpoint /terima.
+    const now = new Date();
     await db.transaction(async (tx) => {
       for (const b of baris) {
         const diterima = terimaById.get(b.id)!;
-        if (diterima > 0) {
-          await tx
-            .update(productions)
-            .set({
-              qtyDipesan: b.qty,
-              qty: diterima,
-              // prorata harga sesuai porsi yang diterima
-              totalHarga:
-                b.totalHarga != null ? Math.round((b.totalHarga * diterima) / b.qty) : null,
-              status: "dikonfirmasi",
-              confirmedBy: auth.sub,
-              confirmedAt: new Date(),
-            })
-            .where(eq(productions.id, b.id));
-        } else {
-          await tx
-            .update(productions)
-            .set({
-              status: "ditolak",
-              alasanTolak: body.alasan ?? "Barang tidak diterima",
-              updatedBy: auth.sub,
-              updatedAt: new Date(),
-            })
-            .where(eq(productions.id, b.id));
+        // WHERE tetap menuntut status 'menunggu' + belum dihapus: bila baris
+        // berubah oleh proses lain sejak dibaca, update 0 baris → rollback.
+        const res =
+          diterima > 0
+            ? await tx
+                .update(productions)
+                .set({
+                  qtyDipesan: b.qty,
+                  qty: diterima,
+                  // prorata harga sesuai porsi yang diterima
+                  totalHarga:
+                    b.totalHarga != null ? Math.round((b.totalHarga * diterima) / b.qty) : null,
+                  status: "dikonfirmasi",
+                  confirmedBy: auth.sub,
+                  confirmedAt: now,
+                  waktu: now,
+                })
+                .where(
+                  and(
+                    eq(productions.id, b.id),
+                    eq(productions.status, "menunggu"),
+                    isNull(productions.deletedAt),
+                  ),
+                )
+                .returning({ id: productions.id })
+            : await tx
+                .update(productions)
+                .set({
+                  status: "ditolak",
+                  alasanTolak: body.alasan ?? "Barang tidak diterima",
+                  updatedBy: auth.sub,
+                  updatedAt: now,
+                })
+                .where(
+                  and(
+                    eq(productions.id, b.id),
+                    eq(productions.status, "menunggu"),
+                    isNull(productions.deletedAt),
+                  ),
+                )
+                .returning({ id: productions.id });
+        if (res.length === 0) {
+          throw new HTTPException(409, {
+            message: "Status kiriman berubah — muat ulang halaman penerimaan lalu coba lagi",
+          });
         }
       }
     });
@@ -175,22 +210,38 @@ export const penerimaanRoutes = new Hono<AppEnv>()
     return c.json({ ok: true, jumlah_baris: rows.length });
   })
   /**
-   * Batalkan penolakan (kasir salah cek): baris yang ditolak dianggap
-   * diterima → faktur selesai (dikonfirmasi, stok masuk).
+   * Batalkan penolakan (kasir salah cek SATU faktur penuh): baris yang ditolak
+   * dianggap diterima → faktur selesai (dikonfirmasi, stok masuk).
    */
   .post("/:fakturId/batal-tolak", async (c) => {
     const auth = c.get("auth");
+    const fakturId = c.req.param("fakturId");
+    // Bila faktur sudah diterima SEBAGIAN (ada baris dikonfirmasi), baris yang
+    // ditolak tadi memang sengaja tak diterima (qty 0) — membatalkannya akan
+    // memasukkan qty & harga PENUH yang salah. Batal-tolak hanya untuk
+    // penolakan satu faktur penuh (semua baris ditolak).
+    const [adaDiterima] = await db
+      .select({ id: productions.id })
+      .from(productions)
+      .where(and(...kondisiFaktur(c, fakturId), eq(productions.status, "dikonfirmasi")))
+      .limit(1);
+    if (adaDiterima) {
+      throw new HTTPException(400, {
+        message:
+          "Faktur ini sudah diterima sebagian — baris yang ditolak tidak bisa dibatalkan (barang memang tidak diterima)",
+      });
+    }
+    const now = new Date();
     const rows = await db
       .update(productions)
       .set({
         status: "dikonfirmasi",
         alasanTolak: null,
         confirmedBy: auth.sub,
-        confirmedAt: new Date(),
+        confirmedAt: now,
+        waktu: now,
       })
-      .where(
-        and(...kondisiFaktur(c, c.req.param("fakturId")), eq(productions.status, "ditolak")),
-      )
+      .where(and(...kondisiFaktur(c, fakturId), eq(productions.status, "ditolak")))
       .returning({ id: productions.id });
     if (rows.length === 0) {
       throw new HTTPException(404, { message: "Tidak ada baris ditolak pada kiriman ini" });

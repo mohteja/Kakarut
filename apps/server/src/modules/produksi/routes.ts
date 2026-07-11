@@ -318,9 +318,14 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
       if (auth.role === "cashier" && auth.branch_id) {
         conds.push(eq(productions.branchId, auth.branch_id));
       }
+      // waktu = saat dikonfirmasi (bukan saat RAB dibuat) agar stok masuk
+      // terhitung relatif ke opname terakhir — kalau tetap pakai waktu insert,
+      // faktur yang dibuat sebelum opname lalu dikonfirmasi setelahnya tak
+      // pernah masuk saldo.
+      const now = new Date();
       const rows = await db
         .update(productions)
-        .set({ status: "dikonfirmasi", confirmedBy: auth.sub, confirmedAt: new Date() })
+        .set({ status: "dikonfirmasi", confirmedBy: auth.sub, confirmedAt: now, waktu: now })
         .where(and(...conds))
         .returning();
       if (rows.length === 0) {

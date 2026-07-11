@@ -711,6 +711,48 @@ cek "setelah batal-tolak: saldo +5 (selesai/masuk stok)" "abs(V - ($SALDO25B + 5
 cek "status faktur jadi dikonfirmasi (selesai)" "V == 1" \
   "$(api "$OWNER" GET "/pembelian?per_page=500" | jq --arg f "$FKB25_ID" '([.rows[] | select(.faktur_id==$f)][0].status == "dikonfirmasi") | if . then 1 else 0 end')"
 
+echo "== 26. Perbaikan review: batas qty, batal-tolak sebagian, waktu vs opname =="
+BELI26=$BELI25
+
+# (a) terima-sebagian tak boleh melebihi qty yang dikirim (cegah inflasi stok)
+FKC26=$(api "$OWNER" POST /pembelian/faktur "{\"items\":[{\"ingredient_id\":\"$BELI26\",\"mode\":\"pcs\",\"jumlah\":8,\"total_harga\":800}]}")
+FKC26_ID=$(echo "$FKC26" | jq -r .faktur_id)
+api "$OWNER" POST "/pembelian/tahap/$FKC26_ID" '{"ke":"dikerjakan"}' > /dev/null
+api "$OWNER" POST "/pembelian/tahap/$FKC26_ID" '{"ke":"menunggu"}' > /dev/null
+ROWC26=$(api "$KASIR" GET /penerimaan | jq -r --arg f "$FKC26_ID" '[.rows[] | select(.faktur_id==$f)][0].id')
+SALDO26A=$(saldo_bahan "$BELI26")
+cek "terima-sebagian qty>dikirim ditolak (400)" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/penerimaan/$FKC26_ID/terima-sebagian" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d "{\"items\":[{\"id\":\"$ROWC26\",\"qty_diterima\":999}]}")"
+cek "saldo tak berubah setelah tolakan batas qty" "abs(V - $SALDO26A) < 0.001" "$(saldo_bahan "$BELI26")"
+api "$KASIR" POST "/penerimaan/$FKC26_ID/terima" > /dev/null  # beres-kan agar tak polusi
+
+# (b) batal-tolak diblok bila faktur sudah diterima SEBAGIAN (baris ditolak memang tak diterima)
+FKD26=$(api "$OWNER" POST /pembelian/faktur "{\"items\":[{\"ingredient_id\":\"$BELI26\",\"mode\":\"pcs\",\"jumlah\":4,\"total_harga\":400},{\"ingredient_id\":\"$BELI26\",\"mode\":\"pcs\",\"jumlah\":6,\"total_harga\":600}]}")
+FKD26_ID=$(echo "$FKD26" | jq -r .faktur_id)
+api "$OWNER" POST "/pembelian/tahap/$FKD26_ID" '{"ke":"dikerjakan"}' > /dev/null
+api "$OWNER" POST "/pembelian/tahap/$FKD26_ID" '{"ke":"menunggu"}' > /dev/null
+R1_26=$(api "$KASIR" GET /penerimaan | jq -r --arg f "$FKD26_ID" '[.rows[] | select(.faktur_id==$f)][0].id')
+R2_26=$(api "$KASIR" GET /penerimaan | jq -r --arg f "$FKD26_ID" '[.rows[] | select(.faktur_id==$f)][1].id')
+cek "terima-sebagian campur (1 terima, 1 tolak) ok (200)" "V == 200" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/penerimaan/$FKD26_ID/terima-sebagian" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d "{\"items\":[{\"id\":\"$R1_26\",\"qty_diterima\":3},{\"id\":\"$R2_26\",\"qty_diterima\":0}],\"alasan\":\"sebagian kosong\"}")"
+cek "batal-tolak faktur diterima-sebagian diblok (400)" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/penerimaan/$FKD26_ID/batal-tolak" -H "Authorization: Bearer $KASIR")"
+cek "faktur campuran: 1 baris dikonfirmasi + 1 baris ditolak" "V == 1" \
+  "$(api "$OWNER" GET "/pembelian?per_page=500" | jq --arg f "$FKD26_ID" '[.rows[] | select(.faktur_id==$f)] | (([.[]|select(.status=="dikonfirmasi")]|length)==1 and ([.[]|select(.status=="ditolak")]|length)==1) | if . then 1 else 0 end')"
+
+# (c) barang diterima SETELAH opname tetap masuk saldo (waktu = saat terima, bukan RAB)
+FKE26=$(api "$OWNER" POST /pembelian/faktur "{\"items\":[{\"ingredient_id\":\"$BELI26\",\"mode\":\"pcs\",\"jumlah\":7,\"total_harga\":700}]}")
+FKE26_ID=$(echo "$FKE26" | jq -r .faktur_id)
+api "$OWNER" POST "/pembelian/tahap/$FKE26_ID" '{"ke":"dikerjakan"}' > /dev/null
+api "$OWNER" POST "/pembelian/tahap/$FKE26_ID" '{"ke":"menunggu"}' > /dev/null
+SBASE26=$(saldo_bahan "$BELI26")   # barang belum diterima → sistem = saldo saat ini
+# opname selisih 0 → langsung jadi baseline (disetujui), created_at = sekarang
+api "$OWNER" POST /stok/opname "{\"items\":[{\"ingredient_id\":\"$BELI26\",\"qty\":$SBASE26}],\"catatan\":\"opname sblm terima\"}" > /dev/null
+cek "opname baseline aktif (saldo == fisik)" "abs(V - $SBASE26) < 0.001" "$(saldo_bahan "$BELI26")"
+api "$KASIR" POST "/penerimaan/$FKE26_ID/terima" > /dev/null   # terima SETELAH opname
+cek "barang diterima setelah opname tetap masuk saldo (+7)" "abs(V - ($SBASE26 + 7)) < 0.001" \
+  "$(saldo_bahan "$BELI26")"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]
