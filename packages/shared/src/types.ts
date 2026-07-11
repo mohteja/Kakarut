@@ -382,3 +382,15 @@ export interface LaporanHarian {
   item_terjual: { menu_nama: string; qty: number; omzet: number }[];
   konsumsi_bahan: { nama: string; slug: string; qty: number }[];
 }
+
+/** Laporan pengeluaran pembelian bahan baku (faktur beli terkonfirmasi) per rentang tanggal. */
+export interface LaporanPembelian {
+  dari: string;
+  sampai: string;
+  total_pengeluaran: number;
+  jumlah_faktur: number;
+  jumlah_item: number;
+  /** supplier = null → "Tanpa supplier" */
+  per_supplier: { supplier: string | null; jumlah_faktur: number; total: number }[];
+  per_bahan: { nama: string; slug: string; qty: number; satuan: string; total: number }[];
+}

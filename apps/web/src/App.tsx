@@ -8,6 +8,7 @@ import { BahanPage } from "./pages/bahan/BahanPage";
 import { KasirPage } from "./pages/kasir/KasirPage";
 import { RiwayatPage } from "./pages/kasir/RiwayatPage";
 import { LaporanPage } from "./pages/laporan/LaporanPage";
+import { LaporanPembelianPage } from "./pages/laporan/LaporanPembelianPage";
 import { LoginPage } from "./pages/LoginPage";
 import { LihatMenuPage } from "./pages/menu/LihatMenuPage";
 import { MenuFormPage } from "./pages/menu/MenuFormPage";
@@ -87,6 +88,7 @@ export default function App() {
                   <Route path="/pembelian/baru" element={<FakturFormPage tipe="beli" />} />
                   <Route path="/pembelian/rekomendasi" element={<RekomendasiBeliPage />} />
                   <Route path="/laporan" element={<LaporanPage />} />
+                  <Route path="/laporan/pembelian" element={<LaporanPembelianPage />} />
                   <Route path="/sampah" element={<TempatSampahPage />} />
                   <Route path="/bahan" element={<BahanPage />} />
                   <Route path="/menu" element={<MenuListPage />} />

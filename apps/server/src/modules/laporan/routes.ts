@@ -1,9 +1,17 @@
 import { and, desc, eq, gte, isNull, lte, sql, sum } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-import type { LaporanHarian } from "@kakarut/shared";
+import type { LaporanHarian, LaporanPembelian } from "@kakarut/shared";
 import { db } from "../../db/client";
-import { companies, ingredients, saleConsumptions, saleItems, sales } from "../../db/schema";
+import {
+  companies,
+  ingredients,
+  productions,
+  saleConsumptions,
+  saleItems,
+  sales,
+  suppliers,
+} from "../../db/schema";
 import type { Context } from "hono";
 import { resolveBranchId, type AppEnv } from "../../middleware/auth";
 import { tanggalDi } from "../../lib/time";
@@ -22,6 +30,14 @@ async function branchCondLaporan(c: Context<AppEnv>) {
   if (auth.role !== "cashier" && c.req.query("branch_id") === "all") return undefined;
   const branchId = await resolveBranchId(c);
   return eq(sales.branchId, branchId);
+}
+
+/** Sama seperti branchCondLaporan tetapi untuk tabel productions (jalur pembelian). */
+async function branchCondPembelian(c: Context<AppEnv>) {
+  const auth = c.get("auth");
+  if (auth.role !== "cashier" && c.req.query("branch_id") === "all") return undefined;
+  const branchId = await resolveBranchId(c);
+  return eq(productions.branchId, branchId);
 }
 
 export const laporanRoutes = new Hono<AppEnv>()
@@ -99,6 +115,92 @@ export const laporanRoutes = new Hono<AppEnv>()
         nama: r.nama,
         slug: r.slug,
         qty: Number(r.qty ?? 0),
+      })),
+    };
+    return c.json(laporan);
+  })
+  /**
+   * Laporan pembelian bahan baku: pengeluaran dari faktur beli TERKONFIRMASI
+   * (barang benar-benar diterima) pada rentang tanggal, dipecah per supplier
+   * dan per bahan. Difilter tanggal via prod_date (konsisten dgn buku besar
+   * pembelian). Owner/admin bisa pilih cabang (?branch_id=<id>|all).
+   */
+  .get("/pembelian", async (c) => {
+    const auth = c.get("auth");
+    const branchCond = await branchCondPembelian(c);
+    const [company] = await db
+      .select({ timezone: companies.timezone })
+      .from(companies)
+      .where(eq(companies.id, auth.company_id!));
+    const today = tanggalDi(company?.timezone ?? "Asia/Jakarta");
+    const sampai = tglValid(c.req.query("sampai")) ?? today;
+    const dari = tglValid(c.req.query("dari")) ?? sampai;
+
+    const filter = and(
+      eq(productions.companyId, auth.company_id!),
+      eq(productions.tipe, "beli"),
+      eq(productions.status, "dikonfirmasi"),
+      isNull(productions.deletedAt),
+      branchCond,
+      gte(productions.prodDate, dari),
+      lte(productions.prodDate, sampai),
+    );
+    // 1 faktur = beberapa baris ber-faktur_id sama (baris lama tanpa faktur = id-nya sendiri)
+    const keyFaktur = sql<string>`COALESCE(${productions.fakturId}::text, ${productions.id}::text)`;
+    const totalExpr = sql<number>`COALESCE(SUM(${productions.totalHarga}), 0)`;
+
+    const [agg] = await db
+      .select({
+        total: totalExpr,
+        jumlah_faktur: sql<number>`COUNT(DISTINCT ${keyFaktur})::int`,
+        jumlah_item: sql<number>`count(*)::int`,
+      })
+      .from(productions)
+      .where(filter);
+
+    const perSupplier = await db
+      .select({
+        supplier: suppliers.nama,
+        jumlah_faktur: sql<number>`COUNT(DISTINCT ${keyFaktur})::int`,
+        total: totalExpr,
+      })
+      .from(productions)
+      .leftJoin(suppliers, eq(productions.supplierId, suppliers.id))
+      .where(filter)
+      .groupBy(suppliers.nama)
+      .orderBy(desc(totalExpr));
+
+    const perBahan = await db
+      .select({
+        nama: ingredients.nama,
+        slug: ingredients.slug,
+        satuan: ingredients.satuan,
+        qty: sql<number>`COALESCE(SUM(${productions.qty}), 0)`,
+        total: totalExpr,
+      })
+      .from(productions)
+      .innerJoin(ingredients, eq(productions.ingredientId, ingredients.id))
+      .where(filter)
+      .groupBy(ingredients.nama, ingredients.slug, ingredients.satuan)
+      .orderBy(desc(totalExpr));
+
+    const laporan: LaporanPembelian = {
+      dari,
+      sampai,
+      total_pengeluaran: Number(agg?.total ?? 0),
+      jumlah_faktur: agg?.jumlah_faktur ?? 0,
+      jumlah_item: agg?.jumlah_item ?? 0,
+      per_supplier: perSupplier.map((r) => ({
+        supplier: r.supplier,
+        jumlah_faktur: r.jumlah_faktur,
+        total: Number(r.total ?? 0),
+      })),
+      per_bahan: perBahan.map((r) => ({
+        nama: r.nama,
+        slug: r.slug,
+        qty: Number(r.qty ?? 0),
+        satuan: r.satuan,
+        total: Number(r.total ?? 0),
       })),
     };
     return c.json(laporan);

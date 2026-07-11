@@ -753,6 +753,30 @@ api "$KASIR" POST "/penerimaan/$FKE26_ID/terima" > /dev/null   # terima SETELAH 
 cek "barang diterima setelah opname tetap masuk saldo (+7)" "abs(V - ($SBASE26 + 7)) < 0.001" \
   "$(saldo_bahan "$BELI26")"
 
+echo "== 27. Laporan pembelian (pengeluaran bahan baku terkonfirmasi) =="
+SUPLAP=$(api "$OWNER" POST /supplier '{"nama":"Supplier Lapbeli"}' | jq -r '.id // empty')
+[ -z "$SUPLAP" ] && SUPLAP=$(api "$OWNER" GET /supplier | jq -r '[.[] | select(.nama=="Supplier Lapbeli")][0].id')
+FLAP=$(api "$OWNER" POST /pembelian/faktur "{\"supplier_id\":\"$SUPLAP\",\"items\":[{\"ingredient_id\":\"$BELI26\",\"mode\":\"pcs\",\"jumlah\":2,\"total_harga\":4321}]}" | jq -r .faktur_id)
+api "$OWNER" POST "/pembelian/tahap/$FLAP" '{"ke":"dikerjakan"}' > /dev/null
+api "$OWNER" POST "/pembelian/tahap/$FLAP" '{"ke":"menunggu"}' > /dev/null
+api "$OWNER" POST "/penerimaan/$FLAP/terima" > /dev/null
+LAP=$(api "$OWNER" GET "/laporan/pembelian?branch_id=all")
+cek "laporan: total_pengeluaran memuat faktur 4321" "V >= 4321" "$(echo "$LAP" | jq '.total_pengeluaran')"
+cek "laporan: per_supplier 'Supplier Lapbeli' = 4321 (1 faktur)" "V == 1" \
+  "$(echo "$LAP" | jq '[.per_supplier[] | select(.supplier=="Supplier Lapbeli" and .total==4321 and .jumlah_faktur==1)] | length')"
+cek "laporan: per_bahan memuat bahan dgn total>0" "V == 1" \
+  "$(echo "$LAP" | jq '(([.per_bahan[] | select(.total>0)] | length) >= 1) | if . then 1 else 0 end')"
+# faktur rencana (belum diterima) TIDAK menambah pengeluaran
+api "$OWNER" POST /pembelian/faktur "{\"supplier_id\":\"$SUPLAP\",\"items\":[{\"ingredient_id\":\"$BELI26\",\"mode\":\"pcs\",\"jumlah\":1,\"total_harga\":9999}]}" > /dev/null
+cek "laporan: faktur rencana tidak menambah pengeluaran" "V == 1" \
+  "$(api "$OWNER" GET "/laporan/pembelian?branch_id=all" | jq --argjson t "$(echo "$LAP" | jq .total_pengeluaran)" '(.total_pengeluaran == $t) | if . then 1 else 0 end')"
+# rentang tanggal lampau → kosong
+cek "laporan: rentang 2020 → total 0" "V == 0" \
+  "$(api "$OWNER" GET "/laporan/pembelian?dari=2020-01-01&sampai=2020-01-31&branch_id=all" | jq '.total_pengeluaran')"
+# kasir tak boleh akses laporan (gate owner/admin)
+cek "kasir akses /laporan/pembelian ditolak (403)" "V == 403" \
+  "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/laporan/pembelian" -H "Authorization: Bearer $KASIR")"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

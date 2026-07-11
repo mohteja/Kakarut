@@ -15,6 +15,7 @@ import { useAuth } from "../../context/AuthContext";
 import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah, formatTanggal, hariIniWIB } from "../../lib/format";
+import { LaporanTabs } from "./LaporanTabs";
 
 interface BepResult {
   biaya_tetap: number;
@@ -70,7 +71,8 @@ export function LaporanPage() {
 
   return (
     <div>
-      <PageTitle>Laporan Penjualan</PageTitle>
+      <PageTitle>Laporan</PageTitle>
+      <LaporanTabs />
       <div className="mb-3 text-sm text-stone-500">
         {dari === sampai
           ? formatTanggal(dari)
