@@ -110,6 +110,97 @@ export function hitungHargaMenu(
   return hitungHpp(own, dineIn);
 }
 
+/**
+ * Buat kode ringkas dari nama menu:
+ *  - Bila nama memuat singkatan dalam kurung (mis. "… (PBA)"), pakai singkatan
+ *    itu → "PBA".
+ *  - Selain itu, inisial tiap kata, mis. "Mie Kuah Rebus" → "MKR".
+ * Fallback "M" bila nama tak berhuruf.
+ */
+export function kodeDariNama(nama: string): string {
+  const kurung = nama.match(/\(([^)]+)\)/);
+  if (kurung) {
+    const kode = kurung[1].replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+    if (kode) return kode.slice(0, 6);
+  }
+  const inisial = nama
+    .replace(/\([^)]*\)/g, " ") // abaikan bagian dalam kurung
+    .replace(/[^a-zA-Z0-9\s]/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((w) => w[0])
+    .join("")
+    .toUpperCase();
+  return (inisial || "M").slice(0, 4);
+}
+
+/** Kode unik berikutnya dari basis + himpunan kode terpakai (mis. PBA, PBA2…). */
+function kodeUnik(base: string, dipakai: Set<string>): string {
+  let kode = base;
+  let n = 2;
+  while (dipakai.has(kode.toUpperCase())) {
+    kode = `${base}${n}`;
+    n += 1;
+  }
+  return kode;
+}
+
+/**
+ * Tentukan kode final sebuah menu: pakai kode manual bila diisi; bila kosong,
+ * generate dari nama. Dijamin unik dalam perusahaan (kode = ID cepat di kasir),
+ * menambah angka bila bentrok.
+ */
+export async function resolveKode(
+  dbx: Db | Tx,
+  companyId: string,
+  desired: string | null | undefined,
+  nama: string,
+  selfId?: string,
+): Promise<string> {
+  const rows = await dbx
+    .select({ id: menus.id, kode: menus.kode })
+    .from(menus)
+    .where(eq(menus.companyId, companyId));
+  const dipakai = new Set(
+    rows.filter((r) => r.kode && r.id !== selfId).map((r) => r.kode!.toUpperCase()),
+  );
+  const manual = desired?.trim();
+  const base = manual && manual.length > 0 ? manual : kodeDariNama(nama);
+  return kodeUnik(base, dipakai);
+}
+
+type BackfillRow = { id: string; companyId: string; nama: string; kode: string | null };
+
+/**
+ * Isi kode untuk menu lama yang belum punya (dipanggil saat boot & seed).
+ * Idempotent: hanya menyentuh baris kode NULL. Kode digenerate dari nama &
+ * dijamin unik per perusahaan.
+ */
+export async function backfillKodeMenu(dbx: Db | Tx): Promise<number> {
+  const rows: BackfillRow[] = await dbx
+    .select({ id: menus.id, companyId: menus.companyId, nama: menus.nama, kode: menus.kode })
+    .from(menus)
+    .orderBy(asc(menus.sortOrder), asc(menus.nama));
+  const perusahaan = new Map<string, { dipakai: Set<string>; kosong: BackfillRow[] }>();
+  for (const r of rows) {
+    const g = perusahaan.get(r.companyId) ?? { dipakai: new Set<string>(), kosong: [] };
+    if (r.kode) g.dipakai.add(r.kode.toUpperCase());
+    else g.kosong.push(r);
+    perusahaan.set(r.companyId, g);
+  }
+  let terisi = 0;
+  for (const [, g] of perusahaan) {
+    for (const r of g.kosong) {
+      const kode = kodeUnik(kodeDariNama(r.nama), g.dipakai);
+      g.dipakai.add(kode.toUpperCase());
+      await dbx.update(menus).set({ kode }).where(eq(menus.id, r.id));
+      terisi += 1;
+    }
+  }
+  return terisi;
+}
+
 export function toMenuDto(menu: MenuRow, katalog: KatalogMenu): MenuDto {
   const hpp = hitungHargaMenu(menu, katalog);
   const hppDineIn = hitungHargaMenu(menu, katalog, true);

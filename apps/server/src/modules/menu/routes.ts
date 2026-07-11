@@ -7,7 +7,7 @@ import { PANDUAN_MARKUP } from "@kakarut/shared";
 import { db, type Tx } from "../../db/client";
 import { ingredients, menuComponents, menus } from "../../db/schema";
 import { requireRole, type AppEnv } from "../../middleware/auth";
-import { loadKatalog, toMenuDto } from "./service";
+import { loadKatalog, resolveKode, toMenuDto } from "./service";
 
 const KomponenBody = z.object({
   ingredient_id: z.string().uuid(),
@@ -134,13 +134,15 @@ export const menuRoutes = new Hono<AppEnv>()
     validatePaket(body);
     await validateRefs(auth.company_id!, body);
     const row = await db.transaction(async (tx) => {
+      // kode: manual bila diisi; kosong → generate otomatis dari nama (unik)
+      const kode = await resolveKode(tx, auth.company_id!, body.kode, body.nama);
       const [menu] = await tx
         .insert(menus)
         .values({
           companyId: auth.company_id!,
           categoryId: body.category_id,
           nama: body.nama,
-          kode: body.kode?.trim() || null,
+          kode,
           tipe: body.tipe,
           mult: body.tipe === "regular" ? body.mult : null,
           baseMenuId: body.tipe === "paket" ? body.base_menu_id : null,
@@ -168,12 +170,20 @@ export const menuRoutes = new Hono<AppEnv>()
       validatePaket(body);
       await validateRefs(auth.company_id!, body, c.req.param("id"));
       const row = await db.transaction(async (tx) => {
+        // kode: manual bila diisi; kosong → generate otomatis dari nama (unik)
+        const kode = await resolveKode(
+          tx,
+          auth.company_id!,
+          body.kode,
+          body.nama,
+          c.req.param("id"),
+        );
         const [menu] = await tx
           .update(menus)
           .set({
             categoryId: body.category_id,
             nama: body.nama,
-            kode: body.kode?.trim() || null,
+            kode,
             tipe: body.tipe,
             mult: body.tipe === "regular" ? body.mult : null,
             baseMenuId: body.tipe === "paket" ? body.base_menu_id : null,

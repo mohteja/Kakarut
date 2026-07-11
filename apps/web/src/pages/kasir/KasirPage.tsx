@@ -6,7 +6,7 @@ import { Card, ErrorText, Spinner, btnPrimary } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
-import { formatRupiah } from "../../lib/format";
+import { formatAngka, formatRupiah } from "../../lib/format";
 import { ReceiptModal, type SaleResult } from "./ReceiptModal";
 
 interface CartLine {
@@ -354,25 +354,19 @@ export function KasirPage() {
                 <div className="mb-1.5 text-xs font-bold uppercase tracking-wide text-stone-400">
                   {g.kategori.nama}
                 </div>
-                <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2 2xl:grid-cols-3">
+                <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-4 lg:grid-cols-5 2xl:grid-cols-6">
                   {g.items.map((m) => (
                     <button
                       key={m.id}
                       onClick={() => tambah(m)}
-                      className="flex items-center justify-between gap-2 rounded-lg border border-stone-200 bg-white px-2.5 py-2 text-left transition hover:border-orange-400 hover:shadow-sm"
+                      title={m.nama}
+                      className="flex flex-col items-center justify-center rounded-lg border border-stone-200 bg-white px-2 py-3 text-center transition hover:border-orange-400 hover:shadow-sm"
                     >
-                      <span className="flex min-w-0 items-center gap-2">
-                        {m.kode && (
-                          <span className="shrink-0 rounded bg-orange-100 px-1.5 py-0.5 font-mono text-[11px] font-bold text-orange-700">
-                            {m.kode}
-                          </span>
-                        )}
-                        <span className="truncate text-sm font-semibold text-stone-800">
-                          {m.nama}
-                        </span>
+                      <span className="font-mono text-base font-bold leading-none text-stone-800">
+                        {m.kode ?? "—"}
                       </span>
-                      <span className="shrink-0 text-sm font-bold text-orange-600">
-                        {formatRupiah(m.harga_jual)}
+                      <span className="mt-1 text-[11px] font-semibold text-orange-600">
+                        {formatAngka(m.harga_jual, 0)}
                       </span>
                     </button>
                   ))}

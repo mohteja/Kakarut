@@ -5,7 +5,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createApp } from "./app";
 import { env } from "./config/env";
+import { db } from "./db/client";
 import { runMigrations } from "./db/migrate";
+import { backfillKodeMenu } from "./modules/menu/service";
 import { getStorage, localUploadDir } from "./modules/upload/storage";
 
 // Migrasi otomatis saat boot: deploy versi baru langsung menerapkan skema
@@ -15,6 +17,9 @@ if (env.AUTO_MIGRATE) {
   console.log("Menjalankan migrasi database (AUTO_MIGRATE)…");
   await runMigrations();
   console.log("Migrasi database selesai.");
+  // Menu lama tanpa kode → isi kode otomatis (idempotent, hanya baris NULL)
+  const terisi = await backfillKodeMenu(db);
+  if (terisi > 0) console.log(`Kode menu otomatis diisi untuk ${terisi} menu lama.`);
 }
 
 const app = createApp();

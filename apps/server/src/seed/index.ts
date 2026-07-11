@@ -17,6 +17,7 @@ import {
 } from "@kakarut/shared";
 import { env } from "../config/env";
 import { db, pool } from "../db/client";
+import { backfillKodeMenu } from "../modules/menu/service";
 import {
   branches,
   companies,
@@ -550,6 +551,10 @@ async function main() {
     }
     console.log(`Self-check HPP: ${checked} menu cocok dengan referensi (±Rp1).`);
   });
+
+  // Kode menu otomatis untuk seluruh menu (kode = ID cepat di kasir).
+  const terisiKode = await backfillKodeMenu(db);
+  console.log(`Kode menu otomatis: ${terisiKode} menu.`);
 
   console.log("\n=== Seed selesai — kredensial akun ===");
   for (const c of credentials) {

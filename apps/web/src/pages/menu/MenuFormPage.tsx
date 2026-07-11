@@ -248,9 +248,12 @@ export function MenuFormPage() {
                 value={kode}
                 onChange={(e) => setKode(e.target.value)}
                 maxLength={20}
-                placeholder="mis. A1"
+                placeholder="Kosongkan untuk otomatis"
                 className={inputClass}
               />
+              <p className="mt-1 text-xs text-stone-500">
+                Kosongkan untuk <b>generate otomatis</b> dari nama menu.
+              </p>
             </div>
             <div>
               <label className="mb-1 block text-sm font-medium">Kategori</label>
