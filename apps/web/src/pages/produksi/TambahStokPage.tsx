@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import type { JenisPengadaan } from "@kakarut/shared";
+import type { JenisPengadaan, KonfirmasiStatus } from "@kakarut/shared";
 import {
   Card,
   ErrorText,
@@ -38,7 +38,7 @@ export interface StokMasukRow {
   prod_date: string;
   faktur_id: string | null;
   no_faktur: string | null;
-  status: "menunggu" | "dikonfirmasi";
+  status: KonfirmasiStatus;
   supplier: string | null;
   tempat: string | null;
   supplier_id: string | null;
@@ -46,6 +46,8 @@ export interface StokMasukRow {
   dibuat_oleh: string | null;
   diubah_oleh: string | null;
   updated_at: string | null;
+  worker_id: string | null;
+  dikerjakan_oleh: string | null;
 }
 
 export interface FakturGroup {
@@ -56,14 +58,24 @@ export interface FakturGroup {
   supplier: string | null;
   supplierId: string | null;
   noFaktur: string | null;
-  status: "menunggu" | "dikonfirmasi";
+  status: KonfirmasiStatus;
   catatan: string | null;
   dibuatOleh: string | null;
   diubahOleh: string | null;
   updatedAt: string | null;
+  workerId: string | null;
+  dikerjakanOleh: string | null;
   rows: StokMasukRow[];
   totalHarga: number;
 }
+
+/** Badge tahap pipeline produksi (jalur beli tetap 2 label lama). */
+export const STATUS_PRODUKSI: Record<KonfirmasiStatus, { label: string; cls: string }> = {
+  rencana: { label: "📋 Rencana (RAB)", cls: "bg-stone-200 text-stone-700" },
+  dikerjakan: { label: "🔨 Sedang dikerjakan", cls: "bg-blue-100 text-blue-800" },
+  menunggu: { label: "✅ Selesai — menunggu konfirmasi", cls: "bg-yellow-100 text-yellow-800" },
+  dikonfirmasi: { label: "📦 Dikonfirmasi ✓", cls: "bg-green-100 text-green-800" },
+};
 
 const TEKS: Record<JenisPengadaan, { judul: string; endpoint: string; logJudul: string }> = {
   produksi: { judul: "Produksi Bahan Baku", endpoint: "/produksi", logJudul: "Produksi hari ini" },
@@ -132,6 +144,16 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
     },
   });
 
+  // Majukan tahap produksi (rencana → dikerjakan → menunggu)
+  const tahap = useMutation({
+    mutationFn: (v: { fakturId: string; ke: "dikerjakan" | "menunggu" }) =>
+      api(`${t.endpoint}/tahap/${v.fakturId}`, { method: "POST", body: { ke: v.ke } }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [t.endpoint] });
+      queryClient.invalidateQueries({ queryKey: ["stok"] });
+    },
+  });
+
   // Kelompokkan baris per faktur (baris lama tanpa faktur = grup sendiri)
   const grup = useMemo<FakturGroup[]>(() => {
     const byKey = new Map<string, FakturGroup>();
@@ -152,6 +174,8 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
           dibuatOleh: r.dibuat_oleh,
           diubahOleh: r.diubah_oleh,
           updatedAt: r.updated_at,
+          workerId: r.worker_id,
+          dikerjakanOleh: r.dikerjakan_oleh,
           rows: [],
           totalHarga: 0,
         };
@@ -164,7 +188,7 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
   }, [log]);
 
   const totalPengeluaran = data?.total_pengeluaran ?? 0;
-  const adaMenunggu = grup.some((g) => g.status === "menunggu");
+  const adaBelumKonfirmasi = grup.some((g) => g.status !== "dikonfirmasi");
   const jenisKata = tipe === "produksi" ? "produksi" : "pembelian";
 
   return (
@@ -191,6 +215,7 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
         benar-benar diterima & tersimpan) — memudahkan stock opname.
       </div>
       <ErrorText error={konfirmasi.error} />
+      <ErrorText error={tahap.error} />
 
       {/* Filter tanggal + jumlah baris (buku besar) */}
       <Card className="mb-3 flex flex-wrap items-end gap-3 p-3">
@@ -259,11 +284,18 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
         </Card>
       ) : (
         <div className="space-y-3">
-          {grup.map((g) => (
+          {grup.map((g) => {
+            const badge =
+              tipe === "produksi"
+                ? STATUS_PRODUKSI[g.status]
+                : g.status === "dikonfirmasi"
+                  ? { label: "Dikonfirmasi ✓", cls: "bg-green-100 text-green-800" }
+                  : { label: "Menunggu konfirmasi", cls: "bg-yellow-100 text-yellow-800" };
+            return (
             <Card
               key={g.key}
               onClick={() => setDetail(g)}
-              className={`flex cursor-pointer overflow-hidden transition hover:border-orange-300 hover:shadow-sm ${g.status === "menunggu" ? "border-yellow-300" : ""}`}
+              className={`flex cursor-pointer overflow-hidden transition hover:border-orange-300 hover:shadow-sm ${g.status !== "dikonfirmasi" ? "border-yellow-300" : ""}`}
             >
               {/* Kotak tanggal & waktu di kiri tiap transaksi */}
               <div className="flex w-24 shrink-0 flex-col items-center justify-center gap-0.5 border-r border-stone-100 bg-stone-50 px-2 py-3 text-center sm:w-28">
@@ -287,18 +319,41 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                     {g.dibuatOleh && (
                       <span className="text-xs text-stone-400">oleh {g.dibuatOleh}</span>
                     )}
+                    {tipe === "produksi" && g.dikerjakanOleh && (
+                      <span className="text-xs text-stone-500">🔧 dikerjakan {g.dikerjakanOleh}</span>
+                    )}
                     {g.catatan && <span className="text-xs text-stone-400">· {g.catatan}</span>}
                   </div>
                   <div className="flex items-center gap-2">
                     <span
-                      className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
-                        g.status === "dikonfirmasi"
-                          ? "bg-green-100 text-green-800"
-                          : "bg-yellow-100 text-yellow-800"
-                      }`}
+                      className={`rounded-full px-2 py-0.5 text-xs font-semibold ${badge.cls}`}
                     >
-                      {g.status === "dikonfirmasi" ? "Dikonfirmasi ✓" : "Menunggu konfirmasi"}
+                      {badge.label}
                     </span>
+                    {tipe === "produksi" && g.fakturId && g.status === "rencana" && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          tahap.mutate({ fakturId: g.fakturId!, ke: "dikerjakan" });
+                        }}
+                        disabled={tahap.isPending}
+                        className="rounded-lg bg-blue-600 px-3 py-1 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+                      >
+                        🔨 Mulai Kerjakan
+                      </button>
+                    )}
+                    {tipe === "produksi" && g.fakturId && g.status === "dikerjakan" && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          tahap.mutate({ fakturId: g.fakturId!, ke: "menunggu" });
+                        }}
+                        disabled={tahap.isPending}
+                        className="rounded-lg bg-amber-500 px-3 py-1 text-xs font-semibold text-white hover:bg-amber-600 disabled:opacity-50"
+                      >
+                        ✅ Tandai Selesai
+                      </button>
+                    )}
                     {g.status === "menunggu" && g.fakturId && (
                       <button
                         onClick={(e) => {
@@ -346,10 +401,11 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                 </table>
               </div>
             </Card>
-          ))}
-          {adaMenunggu && (
+            );
+          })}
+          {adaBelumKonfirmasi && (
             <div className="text-xs text-stone-400">
-              Faktur "Menunggu konfirmasi" belum menambah saldo stok.
+              Faktur yang belum dikonfirmasi belum menambah saldo stok.
             </div>
           )}
         </div>

@@ -21,6 +21,13 @@ interface ItemForm {
   total_harga: string;
 }
 
+interface Karyawan {
+  user_id: string;
+  nama: string;
+  is_active: boolean;
+  role: string;
+}
+
 const itemKosong: ItemForm = {
   ingredient_id: "",
   mode: "pcs",
@@ -89,11 +96,18 @@ export function FakturModal({
     queryKey: ["penyimpanan", branchQuery],
     queryFn: () => api<PenyimpananDto[]>(`/penyimpanan${branchQuery}`),
   });
+  // karyawan pelaksana — wajib untuk faktur produksi (halaman ini owner/admin)
+  const { data: karyawan = [] } = useQuery({
+    queryKey: ["karyawan"],
+    queryFn: () => api<Karyawan[]>("/karyawan"),
+    enabled: tipe === "produksi",
+  });
 
   // hanya bahan sesuai jalur DAN yang dilacak stoknya
   const bahanJalur = (bahan ?? []).filter((b) => b.pengadaan === tipe && b.track_stok);
 
   const [supplierId, setSupplierId] = useState("");
+  const [workerId, setWorkerId] = useState("");
   const [noFaktur, setNoFaktur] = useState("");
   const [catatan, setCatatan] = useState("");
   const [items, setItems] = useState<ItemForm[]>([{ ...itemKosong }]);
@@ -131,6 +145,7 @@ export function FakturModal({
         body: {
           ...(!isKasir && branchId ? { branch_id: branchId } : {}),
           supplier_id: supplierId || null,
+          ...(tipe === "produksi" ? { worker_id: workerId } : {}),
           no_faktur: noFaktur || null,
           catatan: catatan || null,
           items: items
@@ -215,6 +230,27 @@ export function FakturModal({
                   className={inputClass}
                   placeholder="mis. INV-0123"
                 />
+              </>
+            )}
+            {tipe === "produksi" && (
+              <>
+                <label className="mb-1 block text-sm font-medium">
+                  Dikerjakan oleh (karyawan) <span className="text-red-600">*</span>
+                </label>
+                <select
+                  value={workerId}
+                  onChange={(e) => setWorkerId(e.target.value)}
+                  className={inputClass}
+                >
+                  <option value="">— pilih karyawan —</option>
+                  {karyawan
+                    .filter((k) => k.is_active)
+                    .map((k) => (
+                      <option key={k.user_id} value={k.user_id}>
+                        {k.nama}
+                      </option>
+                    ))}
+                </select>
               </>
             )}
             <label className="mb-1 mt-2 block text-sm font-medium">Catatan</label>
@@ -348,6 +384,11 @@ export function FakturModal({
                       </b>
                     </div>
                   )}
+                  {tipe === "produksi" && estimasi != null && (
+                    <div className="mt-2 text-xs text-stone-500">
+                      Perkiraan biaya: <b>{formatRupiah(estimasi)}</b>
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -370,19 +411,26 @@ export function FakturModal({
         </div>
 
         <div className="rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-800">
-          Setelah disimpan, faktur berstatus <b>Menunggu konfirmasi</b> — stok baru
-          bertambah setelah ditekan <b>"Konfirmasi Ada"</b> (barang benar-benar diterima).
+          {tipe === "produksi" ? (
+            <>
+              Faktur tersimpan sebagai <b>📋 Rencana (RAB)</b>, lalu maju bertahap:{" "}
+              <b>🔨 Mulai Kerjakan</b> → <b>✅ Tandai Selesai</b> → <b>📦 Konfirmasi Ada</b>.
+              Stok baru bertambah setelah dikonfirmasi.
+            </>
+          ) : (
+            <>
+              Setelah disimpan, faktur berstatus <b>Menunggu konfirmasi</b> — stok baru
+              bertambah setelah ditekan <b>"Konfirmasi Ada"</b> (barang benar-benar diterima).
+            </>
+          )}
         </div>
 
         <ErrorText error={simpan.error} />
         <div className="flex items-center justify-between border-t border-stone-200 pt-3">
-          {tipe === "beli" ? (
-            <div className="text-sm text-stone-600">
-              Perkiraan total: <b>{formatRupiah(totalFaktur)}</b>
-            </div>
-          ) : (
-            <div />
-          )}
+          <div className="text-sm text-stone-600">
+            {tipe === "beli" ? "Perkiraan total: " : "Perkiraan biaya (RAB): "}
+            <b>{formatRupiah(totalFaktur)}</b>
+          </div>
           <div className="flex gap-2">
             <button type="button" onClick={onClose} className={btnSecondary}>
               Batal
@@ -390,7 +438,11 @@ export function FakturModal({
             <button
               type="button"
               onClick={() => simpan.mutate()}
-              disabled={itemValid.length === 0 || simpan.isPending}
+              disabled={
+                itemValid.length === 0 ||
+                (tipe === "produksi" && !workerId) ||
+                simpan.isPending
+              }
               className={btnPrimary}
             >
               {simpan.isPending ? "Menyimpan…" : "Simpan Faktur"}

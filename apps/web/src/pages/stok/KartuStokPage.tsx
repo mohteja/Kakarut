@@ -4,7 +4,7 @@ import { useParams, useSearchParams } from "react-router-dom";
 import type { KartuStokDto, MutasiJenis } from "@kakarut/shared";
 import { Card, PageTitle, Spinner, inputClass, tdClass, thClass } from "../../components/ui";
 import { api } from "../../lib/api";
-import { formatAngka, formatTanggal, hariIniWIB } from "../../lib/format";
+import { formatAngka, formatTanggal, hariIniWIB, labelTahapProduksi } from "../../lib/format";
 
 const JENIS_BADGE: Record<MutasiJenis, { label: string; cls: string }> = {
   opname: { label: "Opname", cls: "bg-blue-100 text-blue-800" },
@@ -94,6 +94,22 @@ export function KartuStokPage() {
         <StatCard label="Total Keluar" value={`−${fmt(kartu.total_keluar)}`} warna="text-red-600" />
         <StatCard label="Saldo Akhir" value={fmt(kartu.saldo_akhir)} warna="text-orange-600" />
       </div>
+
+      {kartu.produksi_berjalan && (
+        <div className="mb-3 rounded-lg bg-orange-50 px-4 py-2 text-sm text-orange-800">
+          🏭 Sedang diproduksi:{" "}
+          <b>
+            +{formatAngka(kartu.produksi_berjalan.qty)} {kartu.bahan.satuan}
+          </b>{" "}
+          ({labelTahapProduksi(kartu.produksi_berjalan)}) — belum masuk saldo; bertambah
+          setelah "Konfirmasi Ada".
+          <span className="ml-1 text-xs">
+            Rincian: 📋 {formatAngka(kartu.produksi_berjalan.rencana)} · 🔨{" "}
+            {formatAngka(kartu.produksi_berjalan.dikerjakan)} · ✅{" "}
+            {formatAngka(kartu.produksi_berjalan.menunggu)}
+          </span>
+        </div>
+      )}
 
       {kartu.terpotong && (
         <div className="mb-3 rounded-lg bg-yellow-50 px-4 py-2 text-sm text-yellow-800">

@@ -20,8 +20,18 @@ export const bahanKategoriEnum = pgEnum("bahan_kategori", ["baso", "minuman", "l
 export const menuTipeEnum = pgEnum("menu_tipe", ["regular", "paket"]);
 /** jalur pengadaan bahan: diproduksi sendiri vs dibeli jadi */
 export const pengadaanEnum = pgEnum("pengadaan", ["produksi", "beli"]);
-/** status penerimaan stok masuk: menunggu konfirmasi "ya, ada" vs terkonfirmasi */
-export const konfirmasiStatusEnum = pgEnum("konfirmasi_status", ["menunggu", "dikonfirmasi"]);
+/**
+ * Status pipeline stok masuk: rencana (RAB) → dikerjakan → menunggu (selesai,
+ * menunggu konfirmasi) → dikonfirmasi. 'rencana'/'dikerjakan' hanya dipakai
+ * jalur produksi; jalur beli tetap menunggu → dikonfirmasi. Stok baru
+ * terhitung saat 'dikonfirmasi'.
+ */
+export const konfirmasiStatusEnum = pgEnum("konfirmasi_status", [
+  "rencana",
+  "dikerjakan",
+  "menunggu",
+  "dikonfirmasi",
+]);
 /** kategori klarifikasi selisih opname (waste vs koreksi pencatatan) */
 export const penyesuaianKategoriEnum = pgEnum("penyesuaian_kategori", [
   "waste_bahan",
@@ -403,6 +413,8 @@ export const productions = pgTable(
     isBatch: boolean("is_batch").notNull().default(false),
     catatan: text("catatan"),
     userId: uuid("user_id").references(() => users.id),
+    /** karyawan yang mengerjakan produksi (wajib utk faktur produksi baru) */
+    workerId: uuid("worker_id").references(() => users.id),
     // audit edit metadata
     updatedAt: timestamp("updated_at", { withTimezone: true }),
     updatedBy: uuid("updated_by").references(() => users.id),

@@ -31,6 +31,20 @@ export function formatWaktu(iso: string): string {
   }).format(new Date(iso));
 }
 
+/** Label tahap untuk badge/banner "sedang diproduksi". */
+export function labelTahapProduksi(p: {
+  rencana: number;
+  dikerjakan: number;
+  menunggu: number;
+}): string {
+  const aktif = [
+    p.rencana > 0 && "direncanakan",
+    p.dikerjakan > 0 && "dikerjakan",
+    p.menunggu > 0 && "menunggu konfirmasi",
+  ].filter(Boolean) as string[];
+  return aktif.length === 1 ? `tahap ${aktif[0]}` : "beberapa tahap";
+}
+
 /** Tanggal ringkas dari timestamp ISO, mis. "11 Jul 2026" (zona WIB). */
 export function formatTanggalRingkas(iso: string): string {
   return new Intl.DateTimeFormat("id-ID", {
