@@ -84,6 +84,9 @@ export function ReceiptModal({
     onSuccess: () => onDeleted?.(),
   });
 
+  // Nomor antrian (urutan hari ini) — dari sekuens akhir nomor struk
+  const antrian = Number(data.sale.nomor.slice(-4)) || null;
+
   const waktuStr = new Intl.DateTimeFormat("id-ID", {
     day: "2-digit",
     month: "2-digit",
@@ -170,13 +173,11 @@ export function ReceiptModal({
             <div>
               {formatWaktu(data.sale.waktu)} · {data.sale.isDineIn ? "Dine-in" : "Bawa pulang"}
             </div>
+            {antrian != null && <div className="mt-1 text-xl font-bold">Antrian {antrian}</div>}
             {(data.sale.customerNama || data.sale.mejaLabel) && (
-              <div className="mt-1 text-base font-bold">
-                {data.sale.customerNama || data.sale.mejaLabel}
-              </div>
+              <div className="font-bold">{data.sale.customerNama || data.sale.mejaLabel}</div>
             )}
             {data.sale.customerNama && data.sale.mejaLabel && <div>Meja: {data.sale.mejaLabel}</div>}
-            {data.sale.customerNama && data.sale.customerWa && <div>WA: {data.sale.customerWa}</div>}
           </div>
           <hr className="my-2 border-dashed border-stone-400" />
           {data.items.map((it) => (

@@ -89,13 +89,18 @@ export function buildReceiptBytes(data: ReceiptData, opts: ReceiptOptions): Uint
   b.align("left").divider();
   b.line(data.nomor, data.waktu);
   b.text(data.isDineIn ? "Dine-in" : "Bawa pulang");
-  // Identitas pesanan (menonjol): nama konsumen bila ada, jika tidak → meja
+  // Nomor antrian (urutan hari ini, dari akhir nomor struk) — paling menonjol
+  const antrian = Number(data.nomor.slice(-4));
+  if (Number.isFinite(antrian) && antrian > 0) {
+    b.align("center").bold(true).size("tall").text(`Antrian ${antrian}`).size("normal").bold(false).align("left");
+  }
+  // Identitas pesanan: nama konsumen bila ada, jika tidak → meja
   const pesananUntuk = data.customerNama || data.mejaLabel;
   if (pesananUntuk) {
-    b.align("center").bold(true).size("tall").text(pesananUntuk).size("normal").bold(false).align("left");
+    b.align("center").bold(true).text(pesananUntuk).bold(false).align("left");
   }
   if (data.customerNama && data.mejaLabel) b.text(`Meja: ${data.mejaLabel}`);
-  if (data.customerNama && data.customerWa) b.text(`WA: ${data.customerWa}`);
+  // Catatan: nomor WhatsApp konsumen SENGAJA tidak dicetak (privasi).
   b.divider();
 
   // Item
