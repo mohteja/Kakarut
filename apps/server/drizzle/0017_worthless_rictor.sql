@@ -1,0 +1,1 @@
+ALTER TABLE "ingredients" ADD COLUMN "stok_minimum" numeric(16, 6) DEFAULT 0 NOT NULL;

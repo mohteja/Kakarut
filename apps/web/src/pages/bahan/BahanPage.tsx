@@ -25,6 +25,7 @@ interface FormState {
   kategori: "baso" | "minuman" | "lain";
   pengadaan: "produksi" | "beli";
   track_stok: boolean;
+  stok_minimum: string;
   catatan: string;
   is_packaging: boolean;
   is_complement: boolean;
@@ -38,6 +39,7 @@ const kosong: FormState = {
   kategori: "lain",
   pengadaan: "beli",
   track_stok: true,
+  stok_minimum: "0",
   catatan: "",
   is_packaging: false,
   is_complement: false,
@@ -66,6 +68,7 @@ export function BahanPage() {
         kategori: f.kategori,
         pengadaan: f.pengadaan,
         track_stok: f.track_stok,
+        stok_minimum: f.track_stok ? Number(f.stok_minimum) || 0 : 0,
         catatan: f.catatan || null,
         is_packaging: f.is_packaging,
         is_complement: f.is_complement,
@@ -234,6 +237,7 @@ export function BahanPage() {
                         kategori: b.kategori,
                         pengadaan: b.pengadaan,
                         track_stok: b.track_stok,
+                        stok_minimum: String(b.stok_minimum),
                         catatan: b.catatan ?? "",
                         is_packaging: b.is_packaging,
                         is_complement: b.is_complement,
@@ -389,6 +393,26 @@ export function BahanPage() {
                 </span>
               </span>
             </label>
+            {form.track_stok && (
+              <div>
+                <label className="mb-1 block text-sm font-medium">
+                  Ambang batas stok minimum ({form.satuan || "unit"})
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={form.stok_minimum}
+                  onChange={(e) => setForm({ ...form, stok_minimum: e.target.value })}
+                  className={inputClass}
+                  placeholder="0"
+                />
+                <p className="mt-1 text-xs text-stone-500">
+                  Bila saldo ≤ nilai ini → status <b>Menipis</b> (peringatan di Beranda &amp;
+                  Stok). Isi <b>0</b> untuk memakai perkiraan otomatis.
+                </p>
+              </div>
+            )}
             <div className="flex gap-4 text-sm">
               <label className="flex items-center gap-2">
                 <input

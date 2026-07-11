@@ -27,6 +27,18 @@ export function Layout() {
   });
   const kirimanMenunggu = pen?.rows.filter((r) => r.status === "menunggu").length ?? 0;
 
+  // Jumlah bahan menipis/habis → badge di nav "Stok". Pakai ulang GET /stok
+  // (key sama dgn StokPage → cache dedup). Merah bila ada yang habis, kuning
+  // bila hanya menipis.
+  const { data: stok } = useQuery({
+    queryKey: ["stok", branchQuery],
+    queryFn: () => api<{ status: string }[]>(`/stok${branchQuery}`),
+    enabled: !!auth && !auth.user.is_super_admin,
+    refetchInterval: 120_000,
+  });
+  const stokKritis = stok?.filter((r) => r.status !== "aman").length ?? 0;
+  const adaHabis = stok?.some((r) => r.status === "habis") ?? false;
+
   if (!auth) return null;
 
   const role = auth.user.role;
@@ -137,8 +149,16 @@ export function Layout() {
               <NavLink to="/pengaturan/meja" className={linkClass}>
                 🍽 Meja
               </NavLink>
-              <NavLink to="/stok" className={linkClass}>
-                📦 Stok
+              <NavLink to="/stok" className={(s) => `${linkClass(s)} flex items-center gap-2`}>
+                <span>📦 Stok</span>
+                {stokKritis > 0 && (
+                  <span
+                    className={`ml-auto flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full px-1 text-xs font-bold text-white ${adaHabis ? "bg-red-600" : "bg-amber-500"}`}
+                    title={adaHabis ? "Ada bahan habis" : "Ada bahan menipis"}
+                  >
+                    {stokKritis}
+                  </span>
+                )}
               </NavLink>
               <NavLink to="/penerimaan" className={(s) => `${linkClass(s)} flex items-center gap-2`}>
                 <span>📥 Penerimaan Barang</span>

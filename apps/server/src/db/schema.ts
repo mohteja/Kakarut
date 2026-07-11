@@ -226,6 +226,10 @@ export const ingredients = pgTable(
     satuan: text("satuan").notNull().default("pcs"),
     /** lacak stok: dipotong saat menjual, ditambah saat membeli/produksi */
     trackStok: boolean("track_stok").notNull().default(true),
+    /** ambang batas stok minimum: saldo ≤ nilai ini → "menipis" (0 = pakai rasio default) */
+    stokMinimum: numeric("stok_minimum", { precision: 16, scale: 6, mode: "number" })
+      .notNull()
+      .default(0),
     kategori: bahanKategoriEnum("kategori").notNull().default("lain"),
     pengadaan: pengadaanEnum("pengadaan").notNull().default("beli"),
     catatan: text("catatan"),

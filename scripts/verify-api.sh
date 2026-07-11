@@ -792,6 +792,21 @@ api "$OWNER" POST "/penerimaan/$FPB/terima" > /dev/null
 cek "stok: pembelian_berjalan turun −8 setelah diterima" "abs(V - $PB0) < 0.001" "$(pb_qty "$BELI26")"
 cek "stok: saldo +8 setelah diterima (masuk stok)" "abs(V - ($SBPB + 8)) < 0.001" "$(saldo_bahan "$BELI26")"
 
+echo "== 29. Ambang batas stok minimum per bahan → status menipis/aman =="
+st_of() { api "$OWNER" GET /stok | jq --arg id "$BELI26" "([.[]|select(.ingredient_id==\$id)][0].$1)"; }
+SALDO29=$(saldo_bahan "$BELI26")
+MIN_HI=$(python3 -c "print($SALDO29 + 50)")
+api "$OWNER" PUT "/bahan/$BELI26" "{\"stok_minimum\":$MIN_HI}" > /dev/null
+cek "stok: status 'menipis' saat saldo < ambang minimum" "V == 1" \
+  "$(api "$OWNER" GET /stok | jq --arg id "$BELI26" '([.[]|select(.ingredient_id==$id)][0].status == "menipis") | if . then 1 else 0 end')"
+cek "stok: field stok_minimum ikut terkirim" "abs(V - $MIN_HI) < 0.001" "$(st_of stok_minimum)"
+api "$OWNER" PUT "/bahan/$BELI26" '{"stok_minimum":1}' > /dev/null
+cek "stok: status 'aman' saat saldo > ambang minimum" "V == 1" \
+  "$(api "$OWNER" GET /stok | jq --arg id "$BELI26" '([.[]|select(.ingredient_id==$id)][0].status == "aman") | if . then 1 else 0 end')"
+cek "bahan: stok_minimum tersimpan (=1)" "V == 1" \
+  "$(api "$OWNER" GET /bahan | jq --arg id "$BELI26" '([.[]|select(.id==$id)][0].stok_minimum == 1) | if . then 1 else 0 end')"
+api "$OWNER" PUT "/bahan/$BELI26" '{"stok_minimum":0}' > /dev/null
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

@@ -26,6 +26,7 @@ export async function hitungSaldoCabang(
       i.kategori    AS kategori,
       i.isi         AS isi,
       i.satuan      AS satuan,
+      i.stok_minimum AS stok_minimum,
       t.id          AS tempat_id,
       t.nama        AS tempat,
       COALESCE(b.qty, 0) AS stok_awal,
@@ -115,6 +116,7 @@ export async function hitungSaldoCabang(
     const beliDikerjakan = Number(row.beli_dikerjakan);
     const beliMenunggu = Number(row.beli_menunggu);
     const qtyBeliBerjalan = beliRencana + beliDikerjakan + beliMenunggu;
+    const stokMinimum = Number(row.stok_minimum);
     return {
       ingredient_id: String(row.ingredient_id),
       slug: String(row.slug),
@@ -128,7 +130,8 @@ export async function hitungSaldoCabang(
       produksi,
       terpakai,
       saldo: saldoStok(stokAwal, produksi, terpakai),
-      status: statusStok(stokAwal, produksi, terpakai),
+      status: statusStok(stokAwal, produksi, terpakai, stokMinimum),
+      stok_minimum: stokMinimum,
       produksi_berjalan:
         qtyBerjalan > 0 ? { qty: qtyBerjalan, rencana, dikerjakan, menunggu } : null,
       pembelian_berjalan:

@@ -27,6 +27,8 @@ export interface BahanDto {
   satuan: string;
   /** lacak stok: dipotong saat menjual, ditambah saat membeli/produksi */
   track_stok: boolean;
+  /** ambang batas stok minimum (0 = pakai rasio default) */
+  stok_minimum: number;
   harga_per_unit: number;
   kategori: BahanKategori;
   pengadaan: JenisPengadaan;
@@ -107,6 +109,8 @@ export interface StokRowDto {
   terpakai: number;
   saldo: number;
   status: StokStatus;
+  /** ambang batas stok minimum yang diatur untuk bahan ini (0 = pakai rasio default) */
+  stok_minimum: number;
   /** produksi in-house yang belum masuk stok (rencana→dikerjakan→menunggu); null bila tak ada */
   produksi_berjalan: ProduksiBerjalan | null;
   /** pembelian (beli jadi) yang belum masuk stok (RAB→diproses→dikirim); null bila tak ada */
