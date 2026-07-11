@@ -23,7 +23,6 @@ interface StokMasukPage {
   total_pengeluaran: number;
 }
 import { FakturDetailModal } from "./FakturDetailModal";
-import { FakturModal } from "./FakturModal";
 
 export interface StokMasukRow {
   id: string;
@@ -103,7 +102,6 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
   const t = TEKS[tipe];
   const { branchQuery } = useBranch();
   const queryClient = useQueryClient();
-  const [modalBuka, setModalBuka] = useState(false);
   const [detail, setDetail] = useState<FakturGroup | null>(null);
 
   // Buku besar: filter tanggal + pagination per faktur (terlama di halaman awal,
@@ -213,9 +211,9 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                 📊 Rekomendasi Beli
               </Link>
             )}
-            <button onClick={() => setModalBuka(true)} className={btnPrimary}>
+            <Link to={`${t.endpoint}/baru`} className={btnPrimary}>
               + Tambah {tipe === "produksi" ? "Produksi" : "Pembelian"}
-            </button>
+            </Link>
           </div>
         }
       >
@@ -461,9 +459,6 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
         </div>
       )}
 
-      {modalBuka && (
-        <FakturModal tipe={tipe} endpoint={t.endpoint} onClose={() => setModalBuka(false)} />
-      )}
       {detail && (
         <FakturDetailModal
           grup={detail}
