@@ -54,6 +54,7 @@ export function KasirPage() {
   const pb1Conf = me?.company ?? auth?.company;
 
   const [aktifKategori, setAktifKategori] = useState<string | null>(null);
+  const [cariMenu, setCariMenu] = useState("");
   const [cart, setCart] = useState<CartLine[]>([]);
   const [mejaId, setMejaId] = useState<string | null>(null);
   // Modal pilih meja muncul lebih dulu tiap memulai transaksi (sebelum keranjang).
@@ -98,10 +99,13 @@ export function KasirPage() {
   }, [kategori, menus]);
 
   const menuTampil = useMemo(() => {
+    const q = cariMenu.trim().toLowerCase();
     const list = menus ?? [];
+    // pencarian nama menu berlaku lintas kategori; tanpa pencarian → filter kategori
+    if (q) return list.filter((m) => m.nama.toLowerCase().includes(q));
     if (!aktifKategori) return list;
     return list.filter((m) => m.category_id === aktifKategori);
-  }, [menus, aktifKategori]);
+  }, [menus, aktifKategori, cariMenu]);
 
   function tambah(menu: MenuDto) {
     setCart((prev) => {
@@ -191,13 +195,26 @@ export function KasirPage() {
 
   return (
     <div className="flex flex-col gap-4 md:h-[calc(100vh-3rem)] md:flex-row">
-      {/* Katalog — di atas pada mobile, kiri pada desktop */}
-      <div className="flex min-w-0 flex-col md:flex-1">
+      {/* Katalog — di BAWAH keranjang pada mobile, kiri pada desktop */}
+      <div className="order-2 flex min-w-0 flex-col md:order-1 md:flex-1">
+        {/* Pencarian menu — di atas kategori */}
+        <input
+          value={cariMenu}
+          onChange={(e) => {
+            setCariMenu(e.target.value);
+            if (e.target.value) setAktifKategori(null);
+          }}
+          placeholder="🔍 Cari menu…"
+          className="mb-3 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm focus:border-orange-500 focus:outline-none"
+        />
         <div className="mb-3 flex flex-wrap gap-2">
           <button
-            onClick={() => setAktifKategori(null)}
+            onClick={() => {
+              setAktifKategori(null);
+              setCariMenu("");
+            }}
             className={`rounded-full px-3 py-1.5 text-sm font-medium ${
-              aktifKategori === null
+              aktifKategori === null && !cariMenu
                 ? "bg-orange-600 text-white"
                 : "bg-white text-stone-600 hover:bg-stone-50"
             }`}
@@ -207,9 +224,12 @@ export function KasirPage() {
           {kategoriTampil.map((k) => (
             <button
               key={k.id}
-              onClick={() => setAktifKategori(k.id)}
+              onClick={() => {
+                setAktifKategori(k.id);
+                setCariMenu("");
+              }}
               className={`rounded-full px-3 py-1.5 text-sm font-medium ${
-                aktifKategori === k.id
+                aktifKategori === k.id && !cariMenu
                   ? "bg-orange-600 text-white"
                   : "bg-white text-stone-600 hover:bg-stone-50"
               }`}
@@ -245,14 +265,14 @@ export function KasirPage() {
           ))}
           {menuTampil.length === 0 && (
             <div className="col-span-full py-10 text-center text-stone-400">
-              Tidak ada menu di kategori ini.
+              {cariMenu ? `Menu "${cariMenu}" tidak ditemukan.` : "Tidak ada menu di kategori ini."}
             </div>
           )}
         </div>
       </div>
 
-      {/* Keranjang — di bawah pada mobile, kanan pada desktop */}
-      <Card className="flex w-full shrink-0 flex-col p-4 md:w-96">
+      {/* Keranjang — di ATAS pada mobile, kanan pada desktop */}
+      <Card className="order-1 flex w-full shrink-0 flex-col p-4 md:order-2 md:w-96">
         <div className="mb-3 flex items-center justify-between">
           <div className="flex items-baseline gap-2">
             <h2 className="text-lg font-bold text-stone-800">Keranjang</h2>
