@@ -439,6 +439,23 @@ export function KasirPage() {
           </span>
         </button>
 
+        {/* Konsumen/member (opsional) — di bawah meja; WA jadi kunci member area */}
+        <div className="mb-3 grid grid-cols-2 gap-2">
+          <input
+            value={konsumenNama}
+            onChange={(e) => setKonsumenNama(e.target.value)}
+            placeholder="👤 Nama konsumen"
+            className="w-full rounded-lg border border-stone-300 px-3 py-1.5 text-sm"
+          />
+          <input
+            value={konsumenWa}
+            onChange={(e) => setKonsumenWa(e.target.value)}
+            inputMode="tel"
+            placeholder="📱 No. WhatsApp"
+            className="w-full rounded-lg border border-stone-300 px-3 py-1.5 text-sm"
+          />
+        </div>
+
         <div className="space-y-2 md:flex-1 md:overflow-y-auto">
           {cart.length === 0 && (
             <div className="py-10 text-center text-sm text-stone-400">
@@ -503,22 +520,6 @@ export function KasirPage() {
         </div>
 
         <div className="mt-3 space-y-2 border-t border-stone-200 pt-3">
-          {/* Konsumen/member (opsional) — WA jadi kunci member area */}
-          <div className="grid grid-cols-2 gap-2">
-            <input
-              value={konsumenNama}
-              onChange={(e) => setKonsumenNama(e.target.value)}
-              placeholder="👤 Nama konsumen"
-              className="w-full rounded-lg border border-stone-300 px-3 py-1.5 text-sm"
-            />
-            <input
-              value={konsumenWa}
-              onChange={(e) => setKonsumenWa(e.target.value)}
-              inputMode="tel"
-              placeholder="📱 No. WhatsApp"
-              className="w-full rounded-lg border border-stone-300 px-3 py-1.5 text-sm"
-            />
-          </div>
           <input
             value={catatan}
             onChange={(e) => setCatatan(e.target.value)}
