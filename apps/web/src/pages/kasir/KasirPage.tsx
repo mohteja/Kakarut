@@ -70,6 +70,8 @@ export function KasirPage() {
   const [mejaModalOpen, setMejaModalOpen] = useState(isKasir);
   const [mejaCari, setMejaCari] = useState("");
   const [catatan, setCatatan] = useState("");
+  const [konsumenNama, setKonsumenNama] = useState("");
+  const [konsumenWa, setKonsumenWa] = useState("");
   const [diskonTipe, setDiskonTipe] = useState<"persen" | "nominal">("nominal");
   const [diskonNilai, setDiskonNilai] = useState("");
   const [struk, setStruk] = useState<SaleResult | null>(null);
@@ -208,6 +210,8 @@ export function KasirPage() {
           is_dine_in: dineIn,
           meja_id: mejaId ?? undefined,
           catatan: catatan || undefined,
+          ...(konsumenNama.trim() ? { customer_nama: konsumenNama.trim() } : {}),
+          ...(konsumenWa.trim() ? { customer_wa: konsumenWa.trim() } : {}),
           ...(diskon > 0 ? { diskon_tipe: diskonTipe, diskon_nilai: diskonNilaiNum } : {}),
           items: cart.map((l) => ({
             menu_id: l.menu.id,
@@ -221,6 +225,8 @@ export function KasirPage() {
       setStruk(data);
       setCart([]);
       setCatatan("");
+      setKonsumenNama("");
+      setKonsumenWa("");
       setDiskonNilai("");
       setMejaId(null);
       // modal pilih meja dibuka lagi saat struk ditutup (transaksi berikutnya)
@@ -497,6 +503,22 @@ export function KasirPage() {
         </div>
 
         <div className="mt-3 space-y-2 border-t border-stone-200 pt-3">
+          {/* Konsumen/member (opsional) — WA jadi kunci member area */}
+          <div className="grid grid-cols-2 gap-2">
+            <input
+              value={konsumenNama}
+              onChange={(e) => setKonsumenNama(e.target.value)}
+              placeholder="👤 Nama konsumen"
+              className="w-full rounded-lg border border-stone-300 px-3 py-1.5 text-sm"
+            />
+            <input
+              value={konsumenWa}
+              onChange={(e) => setKonsumenWa(e.target.value)}
+              inputMode="tel"
+              placeholder="📱 No. WhatsApp"
+              className="w-full rounded-lg border border-stone-300 px-3 py-1.5 text-sm"
+            />
+          </div>
           <input
             value={catatan}
             onChange={(e) => setCatatan(e.target.value)}

@@ -16,6 +16,7 @@ import { authRoutes } from "./modules/auth/routes";
 import { bahanRoutes } from "./modules/bahan/routes";
 import { cabangRoutes } from "./modules/branches/routes";
 import { companyRoutes } from "./modules/company/routes";
+import { customerRoutes } from "./modules/customer/routes";
 import { kategoriRoutes } from "./modules/kategori/routes";
 import { laporanRoutes } from "./modules/laporan/routes";
 import { mejaRoutes } from "./modules/meja/routes";
@@ -55,8 +56,10 @@ export function createApp() {
   tenant.use("/rekomendasi/*", requireRole("owner", "admin"));
   tenant.use("/sampah/*", requireRole("owner", "admin"));
   tenant.use("/karyawan/*", requireRole("owner", "admin"));
+  tenant.use("/customer/*", requireRole("owner", "admin"));
   tenant
     .route("/company", companyRoutes)
+    .route("/customer", customerRoutes)
     .route("/cabang", cabangRoutes)
     .route("/bahan", bahanRoutes)
     .route("/kategori", kategoriRoutes)

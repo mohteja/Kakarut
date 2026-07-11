@@ -88,6 +88,9 @@ export function RiwayatPage() {
                   {r.meja && ` · ${r.meja}`}
                   {r.kasir && ` · ${r.kasir}`}
                 </div>
+                {r.konsumen && (
+                  <div className="truncate text-xs font-medium text-orange-600">👤 {r.konsumen}</div>
+                )}
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 <span

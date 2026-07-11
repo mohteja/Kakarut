@@ -365,6 +365,35 @@ export interface RiwayatTransaksiRow {
   /** jumlah baris menu pada transaksi */
   jumlah_item: number;
   kasir: string | null;
+  /** nama konsumen/member (null bila transaksi tanpa member) */
+  konsumen: string | null;
+}
+
+/** Member/pelanggan pada daftar member area (dengan agregat transaksi). */
+export interface CustomerDto {
+  id: string;
+  nama: string;
+  wa: string;
+  catatan: string | null;
+  jumlah_transaksi: number;
+  total_belanja: number;
+  /** waktu transaksi terakhir (ISO) — null bila belum pernah transaksi */
+  terakhir: string | null;
+}
+
+/** Satu transaksi milik seorang member (untuk detail member area). */
+export interface CustomerTransaksi {
+  id: string;
+  /** nomor invoice/struk */
+  nomor: string;
+  waktu: string;
+  total: number;
+  cabang: string;
+}
+
+/** Detail member: profil + riwayat transaksinya. */
+export interface CustomerDetail extends CustomerDto {
+  transaksi: CustomerTransaksi[];
 }
 
 /** Baris di Tempat Sampah: transaksi yang di-soft-delete (hanya catatan, tak bisa dikembalikan). */

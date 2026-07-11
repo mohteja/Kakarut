@@ -11,6 +11,7 @@ import { LaporanPage } from "./pages/laporan/LaporanPage";
 import { LaporanPembelianPage } from "./pages/laporan/LaporanPembelianPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { LoginPage } from "./pages/LoginPage";
+import { MemberPage } from "./pages/member/MemberPage";
 import { LihatMenuPage } from "./pages/menu/LihatMenuPage";
 import { MenuFormPage } from "./pages/menu/MenuFormPage";
 import { MenuListPage } from "./pages/menu/MenuListPage";
@@ -93,6 +94,7 @@ export default function App() {
                   <Route path="/laporan/pembelian" element={<LaporanPembelianPage />} />
                   <Route path="/sampah" element={<TempatSampahPage />} />
                   <Route path="/bahan" element={<BahanPage />} />
+                  <Route path="/member" element={<MemberPage />} />
                   <Route path="/menu" element={<MenuListPage />} />
                   <Route path="/menu/baru" element={<MenuFormPage />} />
                   <Route path="/menu/:id/edit" element={<MenuFormPage />} />
