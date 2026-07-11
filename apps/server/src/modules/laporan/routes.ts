@@ -4,24 +4,44 @@ import { HTTPException } from "hono/http-exception";
 import type { LaporanHarian } from "@kakarut/shared";
 import { db } from "../../db/client";
 import { companies, ingredients, saleConsumptions, saleItems, sales } from "../../db/schema";
+import type { Context } from "hono";
 import { resolveBranchId, type AppEnv } from "../../middleware/auth";
 import { tanggalDi } from "../../lib/time";
 import { loadKatalog, toMenuDto } from "../menu/service";
 
+/** Terima hanya tanggal format YYYY-MM-DD; selain itu undefined. */
+const tglValid = (s?: string) => (s && /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : undefined);
+
+/**
+ * Kondisi cabang untuk laporan: kasir selalu terkunci ke cabangnya; owner/admin
+ * boleh memilih satu cabang via ?branch_id=<id>, atau "Semua cabang" via
+ * ?branch_id=all (tanpa filter cabang → gabungan seluruh cabang perusahaan).
+ */
+async function branchCondLaporan(c: Context<AppEnv>) {
+  const auth = c.get("auth");
+  if (auth.role !== "cashier" && c.req.query("branch_id") === "all") return undefined;
+  const branchId = await resolveBranchId(c);
+  return eq(sales.branchId, branchId);
+}
+
 export const laporanRoutes = new Hono<AppEnv>()
   .get("/", async (c) => {
     const auth = c.get("auth");
-    const branchId = await resolveBranchId(c);
+    const branchCond = await branchCondLaporan(c);
     const [company] = await db
       .select({ timezone: companies.timezone })
       .from(companies)
       .where(eq(companies.id, auth.company_id!));
-    const tanggal = c.req.query("tanggal") ?? tanggalDi(company?.timezone ?? "Asia/Jakarta");
+    const today = tanggalDi(company?.timezone ?? "Asia/Jakarta");
+    const satuHari = tglValid(c.req.query("tanggal")); // kompatibilitas ?tanggal=
+    const sampai = tglValid(c.req.query("sampai")) ?? satuHari ?? today;
+    const dari = tglValid(c.req.query("dari")) ?? satuHari ?? sampai;
 
     const saleFilter = and(
       eq(sales.companyId, auth.company_id!),
-      eq(sales.branchId, branchId),
-      eq(sales.saleDate, tanggal),
+      branchCond,
+      gte(sales.saleDate, dari),
+      lte(sales.saleDate, sampai),
       isNull(sales.deletedAt),
     );
 
@@ -63,7 +83,8 @@ export const laporanRoutes = new Hono<AppEnv>()
     const omzet = Number(agg?.omzet ?? 0);
     const totalHpp = Number(agg?.totalHpp ?? 0);
     const laporan: LaporanHarian = {
-      tanggal,
+      dari,
+      sampai,
       omzet,
       jumlah_transaksi: agg?.jumlah ?? 0,
       pb1_terkumpul: Number(agg?.pb1 ?? 0),
@@ -93,7 +114,7 @@ export const laporanRoutes = new Hono<AppEnv>()
     if (!Number.isFinite(biayaTetap) || biayaTetap <= 0) {
       throw new HTTPException(400, { message: "Parameter biaya_tetap wajib berupa angka > 0" });
     }
-    const branchId = await resolveBranchId(c);
+    const branchCond = await branchCondLaporan(c);
     const sampai = c.req.query("sampai") ?? tanggalDi("Asia/Jakarta");
     const dari =
       c.req.query("dari") ??
@@ -110,7 +131,7 @@ export const laporanRoutes = new Hono<AppEnv>()
       .where(
         and(
           eq(sales.companyId, auth.company_id!),
-          eq(sales.branchId, branchId),
+          branchCond,
           gte(sales.saleDate, dari),
           lte(sales.saleDate, sampai),
           isNull(sales.deletedAt),

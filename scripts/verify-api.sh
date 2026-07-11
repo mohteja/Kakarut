@@ -100,11 +100,24 @@ api "$OWNER" POST /produksi "{\"ingredient_id\":\"$URATB_ID\",\"batch\":true}" >
 S4=$(api "$KASIR" GET /stok)
 cek "saldo urat besar +90 (1 batch)" "abs(V - ($URATB_SALDO + 90)) < 0.001" "$(stok_of "$S4" "baso urat besar")"
 
-echo "== 7. Laporan harian =="
+echo "== 7. Laporan penjualan (rentang tanggal + filter cabang) =="
 LAP=$(api "$OWNER" GET /laporan)
 cek "omzet ≥ 79000 (2×PBA + paket)" "V >= 79000" "$(echo "$LAP" | jq .omzet)"
 cek "profit = omzet − hpp" "V == 1" "$(echo "$LAP" | jq '(.estimasi_profit == (.omzet - .total_hpp)) | if . then 1 else 0 end')"
 cek "ada item terjual" "V >= 2" "$(echo "$LAP" | jq '.item_terjual | length')"
+# rentang tanggal: respons memuat dari & sampai; satu hari = sama dengan default
+HARI7=$(TZ=Asia/Jakarta date +%F)
+LAP_RANGE=$(api "$OWNER" GET "/laporan?dari=$HARI7&sampai=$HARI7")
+cek "laporan memuat dari & sampai" "V == 1" \
+  "$(echo "$LAP_RANGE" | jq '(((.dari|type)=="string") and ((.sampai|type)=="string")) | if . then 1 else 0 end')"
+cek "rentang satu hari = omzet default" "V == 1" \
+  "$(echo "$LAP_RANGE" | jq --argjson d "$(echo "$LAP" | jq .omzet)" '(.omzet == $d) | if . then 1 else 0 end')"
+# back-compat ?tanggal= tetap jalan
+cek "back-compat ?tanggal= (omzet = default)" "V == 1" \
+  "$(api "$OWNER" GET "/laporan?tanggal=$HARI7" | jq --argjson d "$(echo "$LAP" | jq .omzet)" '(.omzet == $d) | if . then 1 else 0 end')"
+# filter cabang: "Semua cabang" (agregasi) ≥ satu cabang
+cek "branch_id=all: omzet ≥ satu cabang" "V == 1" \
+  "$(python3 -c "print(1 if $(api "$OWNER" GET "/laporan?branch_id=all&dari=$HARI7&sampai=$HARI7" | jq .omzet) >= $(echo "$LAP" | jq .omzet) else 0)")"
 
 echo "== 8. RBAC & isolasi tenant =="
 cek "kasir dilarang akses /karyawan (403)" "V == 403" "$(status_code "$KASIR" GET /karyawan)"
