@@ -12,6 +12,8 @@ export interface SaleResult {
     id: string;
     nomor: string;
     subtotal: number;
+    diskon: number;
+    diskonPersen: number | null;
     pb1Amount: number;
     total: number;
     waktu: string;
@@ -103,6 +105,8 @@ export function ReceiptModal({
         catatan: it.catatan,
       })),
       subtotal: data.sale.subtotal,
+      diskon: data.sale.diskon,
+      diskonPersen: data.sale.diskonPersen,
       pb1Amount: data.sale.pb1Amount,
       pb1Rate: company?.pb1Rate ?? null,
       total: data.sale.total,
@@ -173,6 +177,12 @@ export function ReceiptModal({
             <span>Subtotal</span>
             <span>{formatRupiah(data.sale.subtotal)}</span>
           </div>
+          {data.sale.diskon > 0 && (
+            <div className="flex justify-between">
+              <span>Diskon{data.sale.diskonPersen ? ` ${data.sale.diskonPersen}%` : ""}</span>
+              <span>−{formatRupiah(data.sale.diskon)}</span>
+            </div>
+          )}
           {data.sale.pb1Amount > 0 && (
             <div className="flex justify-between">
               <span>PB1</span>

@@ -327,6 +327,10 @@ export const sales = pgTable(
     mejaId: uuid("meja_id").references(() => meja.id, { onDelete: "set null" }),
     mejaLabel: text("meja_label"),
     subtotal: numeric("subtotal", { precision: 14, scale: 2, mode: "number" }).notNull(),
+    /** potongan harga per transaksi (Rp); 0 = tanpa diskon */
+    diskon: numeric("diskon", { precision: 14, scale: 2, mode: "number" }).notNull().default(0),
+    /** persen diskon bila mode persen (utk label struk "Diskon 10%"); null = nominal/tanpa */
+    diskonPersen: numeric("diskon_persen", { precision: 5, scale: 2, mode: "number" }),
     pb1Amount: numeric("pb1_amount", { precision: 14, scale: 2, mode: "number" })
       .notNull()
       .default(0),

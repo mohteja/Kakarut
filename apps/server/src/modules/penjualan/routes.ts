@@ -19,6 +19,9 @@ const SaleBody = z.object({
   is_dine_in: z.boolean().default(false),
   meja_id: z.string().uuid().optional(),
   catatan: z.string().nullish(),
+  /** diskon per transaksi (opsional) */
+  diskon_tipe: z.enum(["persen", "nominal"]).optional(),
+  diskon_nilai: z.number().nonnegative().optional(),
   items: z
     .array(
       z.object({
@@ -46,6 +49,8 @@ export const penjualanRoutes = new Hono<AppEnv>()
       isDineIn: body.is_dine_in,
       mejaId: body.meja_id,
       catatan: body.catatan,
+      diskonTipe: body.diskon_tipe,
+      diskonNilai: body.diskon_nilai,
       items: body.items,
     });
     return c.json(result, 201);

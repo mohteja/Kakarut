@@ -59,6 +59,8 @@ export function KasirPage() {
   const [mejaModalOpen, setMejaModalOpen] = useState(isKasir);
   const [mejaCari, setMejaCari] = useState("");
   const [catatan, setCatatan] = useState("");
+  const [diskonTipe, setDiskonTipe] = useState<"persen" | "nominal">("nominal");
+  const [diskonNilai, setDiskonNilai] = useState("");
   const [struk, setStruk] = useState<SaleResult | null>(null);
 
   const mejaAktif = useMemo(() => mejaList.filter((m) => m.is_active), [mejaList]);
@@ -134,7 +136,17 @@ export function KasirPage() {
   }
 
   const subtotal = cart.reduce((a, l) => a + l.menu.harga_jual * l.qty, 0);
-  const pb1 = pb1Conf?.pb1_enabled ? Math.round(subtotal * (pb1Conf.pb1_rate / 100)) : 0;
+  // diskon per transaksi (cermin logika server: clamp ke [0, subtotal])
+  const diskonNilaiNum = Number(diskonNilai) || 0;
+  const diskon =
+    diskonNilaiNum <= 0
+      ? 0
+      : diskonTipe === "persen"
+        ? Math.min(subtotal, Math.round((subtotal * Math.min(100, diskonNilaiNum)) / 100))
+        : Math.min(subtotal, Math.round(diskonNilaiNum));
+  const subtotalNet = subtotal - diskon;
+  const pb1 = pb1Conf?.pb1_enabled ? Math.round(subtotalNet * (pb1Conf.pb1_rate / 100)) : 0;
+  const total = subtotalNet + pb1;
 
   const bayar = useMutation({
     mutationFn: () =>
@@ -145,6 +157,7 @@ export function KasirPage() {
           is_dine_in: dineIn,
           meja_id: mejaId ?? undefined,
           catatan: catatan || undefined,
+          ...(diskon > 0 ? { diskon_tipe: diskonTipe, diskon_nilai: diskonNilaiNum } : {}),
           items: cart.map((l) => ({
             menu_id: l.menu.id,
             qty: l.qty,
@@ -157,6 +170,7 @@ export function KasirPage() {
       setStruk(data);
       setCart([]);
       setCatatan("");
+      setDiskonNilai("");
       setMejaId(null);
       // modal pilih meja dibuka lagi saat struk ditutup (transaksi berikutnya)
       queryClient.invalidateQueries({ queryKey: ["stok"] });
@@ -354,6 +368,38 @@ export function KasirPage() {
             <span>Subtotal</span>
             <span>{formatRupiah(subtotal)}</span>
           </div>
+          {/* Diskon per transaksi: toggle %/Rp + input */}
+          <div className="flex items-center justify-between gap-2 text-sm text-stone-600">
+            <div className="flex items-center gap-1.5">
+              <span>Diskon</span>
+              <div className="flex overflow-hidden rounded-md border border-stone-300 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setDiskonTipe("nominal")}
+                  className={`px-2 py-1 font-medium ${diskonTipe === "nominal" ? "bg-orange-600 text-white" : "bg-white text-stone-600"}`}
+                >
+                  Rp
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDiskonTipe("persen")}
+                  className={`px-2 py-1 font-medium ${diskonTipe === "persen" ? "bg-orange-600 text-white" : "bg-white text-stone-600"}`}
+                >
+                  %
+                </button>
+              </div>
+              <input
+                type="number"
+                min="0"
+                max={diskonTipe === "persen" ? 100 : undefined}
+                value={diskonNilai}
+                onChange={(e) => setDiskonNilai(e.target.value)}
+                placeholder="0"
+                className="w-20 rounded-md border border-stone-300 px-2 py-1 text-right text-sm"
+              />
+            </div>
+            <span className="text-red-600">{diskon > 0 ? `−${formatRupiah(diskon)}` : "—"}</span>
+          </div>
           {pb1 > 0 && (
             <div className="flex justify-between text-sm text-stone-600">
               <span>PB1 ({pb1Conf?.pb1_rate}%)</span>
@@ -362,7 +408,7 @@ export function KasirPage() {
           )}
           <div className="flex justify-between text-lg font-bold text-stone-800">
             <span>Total</span>
-            <span>{formatRupiah(subtotal + pb1)}</span>
+            <span>{formatRupiah(total)}</span>
           </div>
           <ErrorText error={bayar.error} />
           {cart.length > 0 && !mejaId && (
