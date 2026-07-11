@@ -130,6 +130,7 @@ export function toMenuDto(menu: MenuRow, katalog: KatalogMenu): MenuDto {
   return {
     id: menu.id,
     nama: menu.nama,
+    kode: menu.kode,
     tipe: menu.tipe,
     category_id: menu.categoryId,
     kategori: katalog.categoryNameById.get(menu.categoryId) ?? "",

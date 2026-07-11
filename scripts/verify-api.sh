@@ -852,6 +852,22 @@ cek "batas 0: kasir tanpa diskon tetap boleh (201)" "V == 201" \
   "$(jp "$KASIR" "{\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")"
 api "$OWNER" PATCH /company '{"diskon_maks_persen":100}' > /dev/null   # reset
 
+echo "== 32. Kode menu (buat/edit + tampil) =="
+CAT_ID=$(echo "$MENUS" | jq -r '.[0].category_id')
+MK=$(api "$OWNER" POST /menu "{\"nama\":\"Uji Kode Menu\",\"kode\":\"ZZ9\",\"category_id\":\"$CAT_ID\",\"tipe\":\"regular\",\"mult\":2,\"harga_jual\":12000,\"komponen\":[]}")
+MK_ID=$(echo "$MK" | jq -r .id)
+cek "buat menu: kode tersimpan ZZ9" "V == 1" "$(echo "$MK" | jq '(.kode == "ZZ9") | if . then 1 else 0 end')"
+cek "GET /menu: menu baru ber-kode ZZ9" "V == 1" \
+  "$(api "$OWNER" GET /menu | jq --arg id "$MK_ID" '[.[] | select(.id == $id and .kode == "ZZ9")] | length')"
+# edit ubah kode
+MKE=$(api "$OWNER" PUT "/menu/$MK_ID" "{\"nama\":\"Uji Kode Menu\",\"kode\":\"A12\",\"category_id\":\"$CAT_ID\",\"tipe\":\"regular\",\"mult\":2,\"harga_jual\":12000,\"komponen\":[]}")
+cek "edit menu: kode berubah A12" "V == 1" "$(echo "$MKE" | jq '(.kode == "A12") | if . then 1 else 0 end')"
+# kode kosong/spasi → null
+MKN=$(api "$OWNER" PUT "/menu/$MK_ID" "{\"nama\":\"Uji Kode Menu\",\"kode\":\"   \",\"category_id\":\"$CAT_ID\",\"tipe\":\"regular\",\"mult\":2,\"harga_jual\":12000,\"komponen\":[]}")
+cek "edit menu: kode spasi → null" "V == 1" "$(echo "$MKN" | jq '(.kode == null) | if . then 1 else 0 end')"
+# bersihkan: nonaktifkan menu uji
+api "$OWNER" DELETE "/menu/$MK_ID" > /dev/null
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

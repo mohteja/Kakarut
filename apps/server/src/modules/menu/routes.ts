@@ -16,6 +16,7 @@ const KomponenBody = z.object({
 
 const MenuBody = z.object({
   nama: z.string().trim().min(1),
+  kode: z.string().trim().max(20).nullish(),
   category_id: z.string().uuid(),
   tipe: z.enum(["regular", "paket"]).default("regular"),
   mult: z.number().nonnegative().nullish(),
@@ -139,6 +140,7 @@ export const menuRoutes = new Hono<AppEnv>()
           companyId: auth.company_id!,
           categoryId: body.category_id,
           nama: body.nama,
+          kode: body.kode?.trim() || null,
           tipe: body.tipe,
           mult: body.tipe === "regular" ? body.mult : null,
           baseMenuId: body.tipe === "paket" ? body.base_menu_id : null,
@@ -171,6 +173,7 @@ export const menuRoutes = new Hono<AppEnv>()
           .set({
             categoryId: body.category_id,
             nama: body.nama,
+            kode: body.kode?.trim() || null,
             tipe: body.tipe,
             mult: body.tipe === "regular" ? body.mult : null,
             baseMenuId: body.tipe === "paket" ? body.base_menu_id : null,

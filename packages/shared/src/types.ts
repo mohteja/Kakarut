@@ -53,6 +53,8 @@ export interface KomponenDto {
 export interface MenuDto {
   id: string;
   nama: string;
+  /** kode menu opsional (mis. "A1"), untuk kasir & daftar menu */
+  kode: string | null;
   tipe: MenuTipe;
   category_id: string;
   kategori: string;

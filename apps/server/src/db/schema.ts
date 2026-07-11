@@ -274,6 +274,8 @@ export const menus = pgTable(
       .notNull()
       .references(() => menuCategories.id),
     nama: text("nama").notNull(),
+    /** kode menu opsional (mis. "A1") untuk kasir & daftar menu */
+    kode: text("kode"),
     tipe: menuTipeEnum("tipe").notNull().default("regular"),
     mult: numeric("mult", { precision: 7, scale: 3, mode: "number" }),
     baseMenuId: uuid("base_menu_id").references((): AnyPgColumn => menus.id),

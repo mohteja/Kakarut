@@ -101,8 +101,11 @@ export function KasirPage() {
   const menuTampil = useMemo(() => {
     const q = cariMenu.trim().toLowerCase();
     const list = menus ?? [];
-    // pencarian nama menu berlaku lintas kategori; tanpa pencarian → filter kategori
-    if (q) return list.filter((m) => m.nama.toLowerCase().includes(q));
+    // pencarian nama/kode menu berlaku lintas kategori; tanpa pencarian → filter kategori
+    if (q)
+      return list.filter(
+        (m) => m.nama.toLowerCase().includes(q) || (m.kode?.toLowerCase().includes(q) ?? false),
+      );
     if (!aktifKategori) return list;
     return list.filter((m) => m.category_id === aktifKategori);
   }, [menus, aktifKategori, cariMenu]);
@@ -204,7 +207,7 @@ export function KasirPage() {
             setCariMenu(e.target.value);
             if (e.target.value) setAktifKategori(null);
           }}
-          placeholder="🔍 Cari menu…"
+          placeholder="🔍 Cari menu / kode…"
           className="mb-3 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm focus:border-orange-500 focus:outline-none"
         />
         <div className="mb-3 flex flex-wrap gap-2">
@@ -257,7 +260,14 @@ export function KasirPage() {
                   🍜
                 </div>
               )}
-              <div className="line-clamp-2 text-sm font-semibold text-stone-800">{m.nama}</div>
+              <div className="flex items-start gap-1.5">
+                {m.kode && (
+                  <span className="shrink-0 rounded bg-orange-100 px-1.5 py-0.5 font-mono text-[11px] font-bold leading-tight text-orange-700">
+                    {m.kode}
+                  </span>
+                )}
+                <div className="line-clamp-2 text-sm font-semibold text-stone-800">{m.nama}</div>
+              </div>
               <div className="mt-auto pt-1 text-sm font-bold text-orange-600">
                 {formatRupiah(m.harga_jual)}
               </div>
