@@ -78,6 +78,7 @@ export const authRoutes = new Hono<AppEnv>()
             logo_url: company.logoUrl,
             pb1_enabled: company.pb1Enabled,
             pb1_rate: company.pb1Rate,
+            diskon_maks_persen: company.diskonMaksPersen,
             timezone: company.timezone,
           }
         : null,
@@ -100,6 +101,7 @@ export const authRoutes = new Hono<AppEnv>()
           logo_url: co.logoUrl,
           pb1_enabled: co.pb1Enabled,
           pb1_rate: co.pb1Rate,
+          diskon_maks_persen: co.diskonMaksPersen,
           timezone: co.timezone,
         };
       }

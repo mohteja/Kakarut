@@ -1,0 +1,1 @@
+ALTER TABLE "companies" ADD COLUMN "diskon_maks_persen" numeric(5, 2) DEFAULT 100 NOT NULL;

@@ -19,6 +19,7 @@ interface Company {
   logoUrl: string | null;
   pb1Enabled: boolean;
   pb1Rate: number;
+  diskonMaksPersen: number;
   plan: string;
   receiptFooter: string | null;
   receiptShowAlamat: boolean;
@@ -37,6 +38,7 @@ export function PerusahaanPage() {
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [pb1Enabled, setPb1Enabled] = useState(false);
   const [pb1Rate, setPb1Rate] = useState("10");
+  const [diskonMaksPersen, setDiskonMaksPersen] = useState("100");
   const [receiptFooter, setReceiptFooter] = useState("");
   const [receiptShowAlamat, setReceiptShowAlamat] = useState(true);
 
@@ -48,6 +50,7 @@ export function PerusahaanPage() {
     setLogoUrl(company.logoUrl);
     setPb1Enabled(company.pb1Enabled);
     setPb1Rate(String(company.pb1Rate));
+    setDiskonMaksPersen(String(company.diskonMaksPersen));
     setReceiptFooter(company.receiptFooter ?? "");
     setReceiptShowAlamat(company.receiptShowAlamat);
   }, [company]);
@@ -63,6 +66,7 @@ export function PerusahaanPage() {
           logo_url: logoUrl,
           pb1_enabled: pb1Enabled,
           pb1_rate: Number(pb1Rate),
+          diskon_maks_persen: Math.min(100, Math.max(0, Number(diskonMaksPersen) || 0)),
           receipt_footer: receiptFooter || null,
           receipt_show_alamat: receiptShowAlamat,
         },
@@ -141,6 +145,26 @@ export function PerusahaanPage() {
               %
             </div>
           )}
+        </div>
+
+        <div className="rounded-lg border border-stone-200 p-3">
+          <label className="mb-1 block text-sm font-medium">Batas maksimal diskon kasir (%)</label>
+          <div className="flex items-center gap-2 text-sm">
+            <input
+              type="number"
+              min="0"
+              max="100"
+              step="any"
+              value={diskonMaksPersen}
+              onChange={(e) => setDiskonMaksPersen(e.target.value)}
+              className="w-24 rounded-lg border border-stone-300 px-2 py-1 text-right"
+            />
+            %
+          </div>
+          <p className="mt-1 text-xs text-stone-500">
+            Diskon terbesar yang boleh diberikan <b>kasir</b> per transaksi. <b>100</b> = bebas,
+            <b> 0</b> = kasir tak boleh memberi diskon. Owner &amp; admin selalu bebas.
+          </p>
         </div>
         <ErrorText error={simpan.error} />
         <button onClick={() => simpan.mutate()} disabled={simpan.isPending} className={btnPrimary}>

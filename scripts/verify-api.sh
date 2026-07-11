@@ -833,6 +833,25 @@ cek "laporan: total_diskon >= 3400+5000+34000" "V >= 42400" "$(echo "$LAPD" | jq
 cek "laporan: profit = omzet - diskon - hpp" "V == 1" \
   "$(echo "$LAPD" | jq '(.estimasi_profit == (.omzet - .total_diskon - .total_hpp)) | if . then 1 else 0 end')"
 
+echo "== 31. Batas maksimal diskon kasir (owner/admin bebas) =="
+jp() { curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/penjualan" -H "Authorization: Bearer $1" -H 'Content-Type: application/json' -d "$2"; }
+api "$OWNER" PATCH /company '{"diskon_maks_persen":20}' > /dev/null
+cek "company: diskon_maks_persen tersimpan 20" "V == 20" "$(api "$OWNER" GET /company | jq '.diskonMaksPersen')"
+cek "kasir diskon 50% (> batas 20%) ditolak (400)" "V == 400" \
+  "$(jp "$KASIR" "{\"is_dine_in\":false,\"diskon_tipe\":\"persen\",\"diskon_nilai\":50,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")"
+cek "kasir diskon nominal 17000 (=50% > batas) ditolak (400)" "V == 400" \
+  "$(jp "$KASIR" "{\"is_dine_in\":false,\"diskon_tipe\":\"nominal\",\"diskon_nilai\":17000,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")"
+cek "kasir diskon 20% (= batas) diterima (201)" "V == 201" \
+  "$(jp "$KASIR" "{\"is_dine_in\":false,\"diskon_tipe\":\"persen\",\"diskon_nilai\":20,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")"
+cek "owner diskon 50% (bypass batas) diterima (201)" "V == 201" \
+  "$(jp "$OWNER" "{\"is_dine_in\":false,\"diskon_tipe\":\"persen\",\"diskon_nilai\":50,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")"
+api "$OWNER" PATCH /company '{"diskon_maks_persen":0}' > /dev/null
+cek "batas 0: kasir diskon 5% ditolak (400)" "V == 400" \
+  "$(jp "$KASIR" "{\"is_dine_in\":false,\"diskon_tipe\":\"persen\",\"diskon_nilai\":5,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")"
+cek "batas 0: kasir tanpa diskon tetap boleh (201)" "V == 201" \
+  "$(jp "$KASIR" "{\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")"
+api "$OWNER" PATCH /company '{"diskon_maks_persen":100}' > /dev/null   # reset
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]
