@@ -15,7 +15,7 @@ import {
 } from "../../components/ui";
 import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
-import { formatAngka } from "../../lib/format";
+import { formatAngka, labelTahapProduksi } from "../../lib/format";
 
 export function StokPage() {
   const { branchQuery } = useBranch();
@@ -127,7 +127,18 @@ export function StokPage() {
           <tbody className="divide-y divide-stone-100">
             {tampil.map((s) => (
               <tr key={s.ingredient_id} className="hover:bg-stone-50">
-                <td className={`${tdClass} font-medium`}>{s.nama}</td>
+                <td className={`${tdClass} font-medium`}>
+                  {s.nama}
+                  {s.produksi_berjalan && (
+                    <span
+                      className="ml-2 whitespace-nowrap rounded-full bg-orange-100 px-2 py-0.5 text-xs font-semibold text-orange-800"
+                      title={`Direncanakan ${formatAngka(s.produksi_berjalan.rencana)} · Dikerjakan ${formatAngka(s.produksi_berjalan.dikerjakan)} · Menunggu konfirmasi ${formatAngka(s.produksi_berjalan.menunggu)}`}
+                    >
+                      🏭 +{formatAngka(s.produksi_berjalan.qty)} ·{" "}
+                      {labelTahapProduksi(s.produksi_berjalan)}
+                    </span>
+                  )}
+                </td>
                 <td className={`${tdClass} text-stone-500`}>{s.tempat ?? "—"}</td>
                 <td className={`${tdClass} text-right`}>{formatAngka(s.stok_awal)}</td>
                 <td className={`${tdClass} text-right text-green-700`}>

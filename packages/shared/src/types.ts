@@ -71,6 +71,22 @@ export interface MenuDto {
   food_cost_persen: number;
 }
 
+/**
+ * Status pipeline stok masuk. 'rencana' (RAB) & 'dikerjakan' hanya dipakai
+ * jalur produksi; jalur beli tetap menunggu → dikonfirmasi. Stok baru
+ * terhitung saat 'dikonfirmasi'.
+ */
+export type KonfirmasiStatus = "rencana" | "dikerjakan" | "menunggu" | "dikonfirmasi";
+
+/** Produksi in-house yang sedang berjalan (belum masuk saldo stok). */
+export interface ProduksiBerjalan {
+  /** total qty semua tahap berjalan (rencana + dikerjakan + menunggu) */
+  qty: number;
+  rencana: number;
+  dikerjakan: number;
+  menunggu: number;
+}
+
 export interface StokRowDto {
   ingredient_id: string;
   slug: string;
@@ -86,6 +102,8 @@ export interface StokRowDto {
   terpakai: number;
   saldo: number;
   status: StokStatus;
+  /** null bila tidak ada produksi berjalan untuk bahan ini */
+  produksi_berjalan: ProduksiBerjalan | null;
 }
 
 export interface SupplierDto {
@@ -306,6 +324,8 @@ export interface KartuStokDto {
   total_keluar: number;
   /** true bila mutasi melebihi batas 500 baris (persempit periode) */
   terpotong: boolean;
+  /** produksi in-house yang belum masuk saldo (independen dari periode) */
+  produksi_berjalan: ProduksiBerjalan | null;
   mutasi: MutasiStok[];
 }
 

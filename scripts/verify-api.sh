@@ -218,10 +218,14 @@ cek "setelah konfirmasi: sedotan +50 (pcs)" "abs(V - ($SEDOTAN_SEBELUM + 50)) < 
   "$(stok_of "$(api "$KASIR" GET /stok)" "sedotan")"
 cek "konfirmasi ulang ditolak (404)" "V == 404" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/pembelian/konfirmasi/$FKT_ID" -H "Authorization: Bearer $OWNER")"
-# faktur produksi: mode batch = n × isi
+# faktur produksi: wajib karyawan + jalan lewat 4 tahap; mode batch = n × isi
 URAT_SEBELUM=$(stok_of "$(api "$KASIR" GET /stok)" "baso urat besar")
-FKP=$(api "$OWNER" POST /produksi/faktur "{\"items\":[{\"ingredient_id\":\"$URATB_ID\",\"mode\":\"batch\",\"jumlah\":1,\"storage_location_id\":\"$TMP_ID\"}]}")
-api "$OWNER" POST "/produksi/konfirmasi/$(echo "$FKP" | jq -r .faktur_id)" > /dev/null
+WORKER_ID=$(api "$OWNER" GET /karyawan | jq -r '[.[] | select(.is_active)][0].user_id')
+FKP=$(api "$OWNER" POST /produksi/faktur "{\"worker_id\":\"$WORKER_ID\",\"items\":[{\"ingredient_id\":\"$URATB_ID\",\"mode\":\"batch\",\"jumlah\":1,\"storage_location_id\":\"$TMP_ID\"}]}")
+FKP_ID=$(echo "$FKP" | jq -r .faktur_id)
+api "$OWNER" POST "/produksi/tahap/$FKP_ID" '{"ke":"dikerjakan"}' > /dev/null
+api "$OWNER" POST "/produksi/tahap/$FKP_ID" '{"ke":"menunggu"}' > /dev/null
+api "$OWNER" POST "/produksi/konfirmasi/$FKP_ID" > /dev/null
 cek "faktur produksi 1 batch urat = +90" "abs(V - ($URAT_SEBELUM + 90)) < 0.001" \
   "$(stok_of "$(api "$KASIR" GET /stok)" "baso urat besar")"
 # item lintas jalur dalam faktur ditolak
@@ -596,6 +600,68 @@ cek "sort_order menu tersimpan (MID1=0)" "V == 0" \
   "$(api "$KASIR" GET /menu | jq --arg id "$MID1" '[.[] | select(.id==$id)][0].sort_order')"
 cek "GET /menu urut sort_order (MID1 sebelum MID0)" "V == 1" \
   "$(api "$KASIR" GET /menu | jq --arg a "$MID1" --arg b "$MID0" '((([.[] | .id] | index($a)) < ([.[] | .id] | index($b)))) | if . then 1 else 0 end')"
+
+echo "== 24. Pipeline produksi: karyawan wajib, RAB, 4 tahap, indikator stok =="
+W24=$(api "$OWNER" GET /karyawan | jq -r '[.[] | select(.is_active)][0].user_id')
+B24=$(api "$OWNER" GET /bahan | jq --arg id "$URATB_ID" '[.[] | select(.id == $id)][0]')
+ISI24=$(echo "$B24" | jq -r .isi)
+HB24=$(echo "$B24" | jq -r .harga_beli)
+SALDO24=$(stok_of "$(api "$OWNER" GET /stok)" "baso urat besar")
+
+cek "faktur produksi tanpa worker_id ditolak (400)" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/produksi/faktur" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"items\":[{\"ingredient_id\":\"$URATB_ID\",\"mode\":\"batch\",\"jumlah\":1}]}")"
+cek "worker_id bukan anggota ditolak (400)" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/produksi/faktur" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"worker_id\":\"00000000-0000-4000-8000-000000000000\",\"items\":[{\"ingredient_id\":\"$URATB_ID\",\"mode\":\"batch\",\"jumlah\":1}]}")"
+
+FK24=$(api "$OWNER" POST /produksi/faktur "{\"worker_id\":\"$W24\",\"items\":[{\"ingredient_id\":\"$URATB_ID\",\"mode\":\"batch\",\"jumlah\":1}]}")
+FK24_ID=$(echo "$FK24" | jq -r .faktur_id)
+cek "faktur produksi dibuat berstatus rencana" "V == 1" \
+  "$(echo "$FK24" | jq '(.status == "rencana") | if . then 1 else 0 end')"
+ROW24=$(api "$OWNER" GET "/produksi?per_page=500" | jq --arg f "$FK24_ID" '[.rows[] | select(.faktur_id == $f)][0]')
+cek "RAB otomatis terisi (= harga 1 batch)" "abs(V - $HB24) < 1" "$(echo "$ROW24" | jq '.total_harga // 0')"
+cek "dikerjakan_oleh terisi di riwayat" "V == 1" \
+  "$(echo "$ROW24" | jq '((.dikerjakan_oleh | type) == "string") | if . then 1 else 0 end')"
+
+STOK24=$(api "$OWNER" GET /stok | jq '[.[] | select(.slug == "baso urat besar")][0]')
+cek "stok: produksi_berjalan.qty = isi (rencana)" "abs(V - $ISI24) < 0.001" \
+  "$(echo "$STOK24" | jq '.produksi_berjalan.qty // 0')"
+cek "stok: tahap rencana terisi" "abs(V - $ISI24) < 0.001" \
+  "$(echo "$STOK24" | jq '.produksi_berjalan.rencana // 0')"
+cek "saldo BELUM berubah (rencana)" "abs(V - $SALDO24) < 0.001" \
+  "$(stok_of "$(api "$OWNER" GET /stok)" "baso urat besar")"
+
+cek "konfirmasi dari rencana ditolak (404)" "V == 404" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/produksi/konfirmasi/$FK24_ID" -H "Authorization: Bearer $OWNER")"
+cek "lompat tahap rencana→menunggu ditolak (400)" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/produksi/tahap/$FK24_ID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"ke":"menunggu"}')"
+cek "tahap rencana→dikerjakan ok" "V == 1" \
+  "$(api "$OWNER" POST "/produksi/tahap/$FK24_ID" '{"ke":"dikerjakan"}' | jq '(.status == "dikerjakan") | if . then 1 else 0 end')"
+cek "ulang tahap dikerjakan ditolak (400)" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/produksi/tahap/$FK24_ID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"ke":"dikerjakan"}')"
+cek "stok: tahap pindah ke dikerjakan" "abs(V - $ISI24) < 0.001" \
+  "$(api "$OWNER" GET /stok | jq '[.[] | select(.slug == "baso urat besar")][0].produksi_berjalan.dikerjakan // 0')"
+cek "kartu stok: produksi_berjalan.qty = isi" "abs(V - $ISI24) < 0.001" \
+  "$(api "$OWNER" GET "/stok/kartu/$URATB_ID" | jq '.produksi_berjalan.qty // 0')"
+
+cek "tahap dikerjakan→menunggu ok" "V == 1" \
+  "$(api "$OWNER" POST "/produksi/tahap/$FK24_ID" '{"ke":"menunggu"}' | jq '(.status == "menunggu") | if . then 1 else 0 end')"
+cek "saldo masih belum berubah (menunggu)" "abs(V - $SALDO24) < 0.001" \
+  "$(stok_of "$(api "$OWNER" GET /stok)" "baso urat besar")"
+api "$OWNER" POST "/produksi/konfirmasi/$FK24_ID" > /dev/null
+cek "setelah konfirmasi: saldo bertambah +isi" "abs(V - ($SALDO24 + $ISI24)) < 0.001" \
+  "$(stok_of "$(api "$OWNER" GET /stok)" "baso urat besar")"
+cek "setelah konfirmasi: produksi_berjalan hilang" "V == 1" \
+  "$(api "$OWNER" GET /stok | jq '[.[] | select(.slug == "baso urat besar")][0] | (.produksi_berjalan == null) | if . then 1 else 0 end')"
+
+cek "POST /pembelian/tahap ditolak (404)" "V == 404" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/pembelian/tahap/$FK24_ID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"ke":"dikerjakan"}')"
+# pembelian tetap 2 tahap: menunggu → konfirmasi langsung
+PLASTIK_ID24=$(api "$OWNER" GET /bahan | jq -r '[.[] | select(.pengadaan == "beli" and .track_stok == true)][0].id')
+FKB24=$(api "$OWNER" POST /pembelian/faktur "{\"items\":[{\"ingredient_id\":\"$PLASTIK_ID24\",\"mode\":\"pcs\",\"jumlah\":1}]}")
+cek "pembelian tetap berstatus menunggu" "V == 1" \
+  "$(echo "$FKB24" | jq '(.status == "menunggu") | if . then 1 else 0 end')"
+cek "pembelian konfirmasi langsung ok (200)" "V == 200" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/pembelian/konfirmasi/$(echo "$FKB24" | jq -r .faktur_id)" -H "Authorization: Bearer $OWNER")"
 
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="

@@ -5,7 +5,13 @@ import { ErrorText, Modal, btnPrimary, btnSecondary, inputClass } from "../../co
 import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah, formatWaktu } from "../../lib/format";
-import type { FakturGroup } from "./TambahStokPage";
+import { STATUS_PRODUKSI, type FakturGroup } from "./TambahStokPage";
+
+interface Karyawan {
+  user_id: string;
+  nama: string;
+  is_active: boolean;
+}
 
 /**
  * Detail satu faktur pembelian/produksi: lihat metadata + item, ubah metadata,
@@ -28,6 +34,7 @@ export function FakturDetailModal({
 
   const [noFaktur, setNoFaktur] = useState(grup.noFaktur ?? "");
   const [supplierId, setSupplierId] = useState(grup.supplierId ?? "");
+  const [workerId, setWorkerId] = useState(grup.workerId ?? "");
   const [tempatId, setTempatId] = useState("__keep");
   const [prodDate, setProdDate] = useState(grup.prodDate);
   const [catatan, setCatatan] = useState(grup.catatan ?? "");
@@ -42,6 +49,11 @@ export function FakturDetailModal({
     queryKey: ["penyimpanan", branchQuery],
     queryFn: () => api<PenyimpananDto[]>(`/penyimpanan${branchQuery}`),
     enabled: mode === "ubah",
+  });
+  const { data: karyawan = [] } = useQuery({
+    queryKey: ["karyawan"],
+    queryFn: () => api<Karyawan[]>("/karyawan"),
+    enabled: mode === "ubah" && tipe === "produksi",
   });
 
   function selesai() {
@@ -59,6 +71,7 @@ export function FakturDetailModal({
           password,
           no_faktur: noFaktur.trim() || null,
           supplier_id: tipe === "beli" ? supplierId || null : undefined,
+          ...(tipe === "produksi" && workerId ? { worker_id: workerId } : {}),
           catatan: catatan.trim() || null,
           prod_date: prodDate,
           ...(tempatId !== "__keep" ? { storage_location_id: tempatId || null } : {}),
@@ -89,6 +102,12 @@ export function FakturDetailModal({
             <dd className="col-span-2">{formatWaktu(grup.waktu)}</dd>
             <dt className="text-stone-400">Dibuat oleh</dt>
             <dd className="col-span-2">{grup.dibuatOleh ?? "—"}</dd>
+            {tipe === "produksi" && (
+              <>
+                <dt className="text-stone-400">Dikerjakan oleh</dt>
+                <dd className="col-span-2">{grup.dikerjakanOleh ?? "—"}</dd>
+              </>
+            )}
             {tipe === "beli" && (
               <>
                 <dt className="text-stone-400">Supplier</dt>
@@ -99,7 +118,11 @@ export function FakturDetailModal({
             )}
             <dt className="text-stone-400">Status</dt>
             <dd className="col-span-2">
-              {grup.status === "dikonfirmasi" ? "Dikonfirmasi ✓" : "Menunggu konfirmasi"}
+              {tipe === "produksi"
+                ? STATUS_PRODUKSI[grup.status].label
+                : grup.status === "dikonfirmasi"
+                  ? "Dikonfirmasi ✓"
+                  : "Menunggu konfirmasi"}
             </dd>
             {grup.catatan && (
               <>
@@ -128,11 +151,9 @@ export function FakturDetailModal({
                       +{formatAngka(r.qty)} {r.satuan}
                     </td>
                     <td className="px-3 py-1.5 text-stone-500">{r.tempat ?? "—"}</td>
-                    {tipe === "beli" && (
-                      <td className="px-3 py-1.5 text-right text-stone-500">
-                        {r.total_harga != null ? formatRupiah(r.total_harga) : "—"}
-                      </td>
-                    )}
+                    <td className="px-3 py-1.5 text-right text-stone-500">
+                      {r.total_harga != null ? formatRupiah(r.total_harga) : "—"}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -141,6 +162,11 @@ export function FakturDetailModal({
           {tipe === "beli" && grup.totalHarga > 0 && (
             <div className="text-right text-sm font-semibold text-stone-700">
               Total: {formatRupiah(grup.totalHarga)}
+            </div>
+          )}
+          {tipe === "produksi" && grup.totalHarga > 0 && (
+            <div className="text-right text-sm font-semibold text-stone-700">
+              Perkiraan biaya (RAB): {formatRupiah(grup.totalHarga)}
             </div>
           )}
 
@@ -195,6 +221,25 @@ export function FakturDetailModal({
                 />
               </div>
             </>
+          )}
+          {tipe === "produksi" && (
+            <div>
+              <label className="mb-1 block text-sm font-medium">Dikerjakan oleh (karyawan)</label>
+              <select
+                value={workerId}
+                onChange={(e) => setWorkerId(e.target.value)}
+                className={inputClass}
+              >
+                <option value="">— jangan ubah —</option>
+                {karyawan
+                  .filter((k) => k.is_active)
+                  .map((k) => (
+                    <option key={k.user_id} value={k.user_id}>
+                      {k.nama}
+                    </option>
+                  ))}
+              </select>
+            </div>
           )}
           <div>
             <label className="mb-1 block text-sm font-medium">Tempat penyimpanan (semua item)</label>
