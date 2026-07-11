@@ -354,18 +354,18 @@ export function KasirPage() {
                 <div className="mb-1.5 text-xs font-bold uppercase tracking-wide text-stone-400">
                   {g.kategori.nama}
                 </div>
-                <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-4 lg:grid-cols-5 2xl:grid-cols-6">
+                <div className="grid grid-cols-4 gap-1 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8">
                   {g.items.map((m) => (
                     <button
                       key={m.id}
                       onClick={() => tambah(m)}
                       title={m.nama}
-                      className="flex flex-col items-center justify-center rounded-lg border border-stone-200 bg-white px-2 py-3 text-center transition hover:border-orange-400 hover:shadow-sm"
+                      className="flex flex-col items-center justify-center rounded-md border border-stone-200 bg-white px-1 py-1.5 text-center transition hover:border-orange-400 hover:shadow-sm"
                     >
-                      <span className="font-mono text-base font-bold leading-none text-stone-800">
+                      <span className="max-w-full truncate font-mono text-xs font-bold leading-none text-stone-800">
                         {m.kode ?? "—"}
                       </span>
-                      <span className="mt-1 text-[11px] font-semibold text-orange-600">
+                      <span className="mt-0.5 text-[10px] font-medium text-orange-600">
                         {formatAngka(m.harga_jual, 0)}
                       </span>
                     </button>
