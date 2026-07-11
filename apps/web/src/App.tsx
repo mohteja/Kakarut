@@ -12,7 +12,9 @@ import { LoginPage } from "./pages/LoginPage";
 import { LihatMenuPage } from "./pages/menu/LihatMenuPage";
 import { MenuFormPage } from "./pages/menu/MenuFormPage";
 import { MenuListPage } from "./pages/menu/MenuListPage";
+import { FakturFormPage } from "./pages/produksi/FakturFormPage";
 import { PembelianPage } from "./pages/produksi/PembelianPage";
+import { PenerimaanPage } from "./pages/produksi/PenerimaanPage";
 import { ProduksiPage } from "./pages/produksi/ProduksiPage";
 import { RekomendasiBeliPage } from "./pages/produksi/RekomendasiBeliPage";
 import { CabangPage } from "./pages/pengaturan/CabangPage";
@@ -71,6 +73,7 @@ export default function App() {
               <Route path="/kasir/riwayat" element={<RiwayatPage />} />
               <Route path="/menu/lihat" element={<LihatMenuPage />} />
               <Route path="/stok" element={<StokPage />} />
+              <Route path="/penerimaan" element={<PenerimaanPage />} />
               <Route path="/stok/penyesuaian" element={<PenyesuaianPage />} />
               <Route path="/stok/kartu/:ingredientId" element={<KartuStokPage />} />
               {/* printer & meja = pengaturan kasir → semua peran, termasuk kasir */}
@@ -79,7 +82,9 @@ export default function App() {
               {isManajemen && (
                 <>
                   <Route path="/produksi" element={<ProduksiPage />} />
+                  <Route path="/produksi/baru" element={<FakturFormPage tipe="produksi" />} />
                   <Route path="/pembelian" element={<PembelianPage />} />
+                  <Route path="/pembelian/baru" element={<FakturFormPage tipe="beli" />} />
                   <Route path="/pembelian/rekomendasi" element={<RekomendasiBeliPage />} />
                   <Route path="/laporan" element={<LaporanPage />} />
                   <Route path="/sampah" element={<TempatSampahPage />} />

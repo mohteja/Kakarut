@@ -211,6 +211,8 @@ FKT_ID=$(echo "$FKT" | jq -r .faktur_id)
 cek "faktur 2 baris tersimpan (menunggu)" "V == 2" "$(echo "$FKT" | jq .jumlah_baris)"
 cek "stok plastik BELUM berubah (menunggu konfirmasi)" "abs(V - $PLASTIK_SEBELUM) < 0.001" \
   "$(stok_of "$(api "$KASIR" GET /stok)" "plastik take away")"
+api "$OWNER" POST "/pembelian/tahap/$FKT_ID" '{"ke":"dikerjakan"}' > /dev/null
+api "$OWNER" POST "/pembelian/tahap/$FKT_ID" '{"ke":"menunggu"}' > /dev/null
 api "$OWNER" POST "/pembelian/konfirmasi/$FKT_ID" > /dev/null
 cek "setelah konfirmasi: plastik +200 (2 batch)" "abs(V - ($PLASTIK_SEBELUM + 200)) < 0.001" \
   "$(stok_of "$(api "$KASIR" GET /stok)" "plastik take away")"
@@ -525,9 +527,11 @@ saldo_bahan() { api "$OWNER" GET /stok | jq --arg id "$1" '([.[] | select(.ingre
 BELI_ING=$(api "$OWNER" GET /bahan | jq -r '[.[] | select(.pengadaan=="beli" and .track_stok==true)][0].id')
 S0=$(saldo_bahan "$BELI_ING")
 
-# buat faktur pembelian 10 pcs → konfirmasi → saldo +10
+# buat faktur pembelian 10 pcs → tahap → konfirmasi → saldo +10
 FK=$(api "$OWNER" POST /pembelian/faktur "{\"items\":[{\"ingredient_id\":\"$BELI_ING\",\"mode\":\"pcs\",\"jumlah\":10,\"total_harga\":50000}]}")
 FKID=$(echo "$FK" | jq -r '.faktur_id')
+api "$OWNER" POST "/pembelian/tahap/$FKID" '{"ke":"dikerjakan"}' > /dev/null
+api "$OWNER" POST "/pembelian/tahap/$FKID" '{"ke":"menunggu"}' > /dev/null
 api "$OWNER" POST "/pembelian/konfirmasi/$FKID" > /dev/null
 S1=$(saldo_bahan "$BELI_ING")
 cek "pembelian dikonfirmasi → saldo +10" "abs(V - 10) < 0.001" "$(python3 -c "print($S1 - $S0)")"
@@ -608,7 +612,7 @@ ISI24=$(echo "$B24" | jq -r .isi)
 HB24=$(echo "$B24" | jq -r .harga_beli)
 SALDO24=$(stok_of "$(api "$OWNER" GET /stok)" "baso urat besar")
 
-cek "faktur produksi tanpa worker_id ditolak (400)" "V == 400" \
+cek "faktur produksi tanpa pelaksana (worker/supplier) ditolak (400)" "V == 400" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/produksi/faktur" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"items\":[{\"ingredient_id\":\"$URATB_ID\",\"mode\":\"batch\",\"jumlah\":1}]}")"
 cek "worker_id bukan anggota ditolak (400)" "V == 400" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/produksi/faktur" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"worker_id\":\"00000000-0000-4000-8000-000000000000\",\"items\":[{\"ingredient_id\":\"$URATB_ID\",\"mode\":\"batch\",\"jumlah\":1}]}")"
@@ -653,15 +657,101 @@ cek "setelah konfirmasi: saldo bertambah +isi" "abs(V - ($SALDO24 + $ISI24)) < 0
 cek "setelah konfirmasi: produksi_berjalan hilang" "V == 1" \
   "$(api "$OWNER" GET /stok | jq '[.[] | select(.slug == "baso urat besar")][0] | (.produksi_berjalan == null) | if . then 1 else 0 end')"
 
-cek "POST /pembelian/tahap ditolak (404)" "V == 404" \
+cek "faktur produksi via /pembelian/tahap → 404 (isolasi jalur)" "V == 404" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/pembelian/tahap/$FK24_ID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"ke":"dikerjakan"}')"
-# pembelian tetap 2 tahap: menunggu → konfirmasi langsung
-PLASTIK_ID24=$(api "$OWNER" GET /bahan | jq -r '[.[] | select(.pengadaan == "beli" and .track_stok == true)][0].id')
-FKB24=$(api "$OWNER" POST /pembelian/faktur "{\"items\":[{\"ingredient_id\":\"$PLASTIK_ID24\",\"mode\":\"pcs\",\"jumlah\":1}]}")
-cek "pembelian tetap berstatus menunggu" "V == 1" \
-  "$(echo "$FKB24" | jq '(.status == "menunggu") | if . then 1 else 0 end')"
-cek "pembelian konfirmasi langsung ok (200)" "V == 200" \
-  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/pembelian/konfirmasi/$(echo "$FKB24" | jq -r .faktur_id)" -H "Authorization: Bearer $OWNER")"
+# pelaksana boleh SUPPLIER (bukan hanya karyawan): faktur produksi dengan supplier_id saja diterima
+SUP24=$(api "$OWNER" POST /supplier '{"nama":"Dapur Teja"}' | jq -r '.id // empty')
+[ -z "$SUP24" ] && SUP24=$(api "$OWNER" GET /supplier | jq -r '[.[] | select(.nama=="Dapur Teja")][0].id')
+FKS24=$(api "$OWNER" POST /produksi/faktur "{\"supplier_id\":\"$SUP24\",\"items\":[{\"ingredient_id\":\"$URATB_ID\",\"mode\":\"pcs\",\"jumlah\":1}]}")
+cek "faktur produksi dengan supplier (tanpa karyawan) → rencana" "V == 1" \
+  "$(echo "$FKS24" | jq '(.status == "rencana") | if . then 1 else 0 end')"
+cek "riwayat: pelaksana supplier terisi, dikerjakan_oleh null" "V == 1" \
+  "$(api "$OWNER" GET "/produksi?per_page=500" | jq --arg f "$(echo "$FKS24" | jq -r .faktur_id)" '[.rows[] | select(.faktur_id==$f)][0] | ((.supplier == "Dapur Teja") and (.dikerjakan_oleh == null)) | if . then 1 else 0 end')"
+
+echo "== 25. Pembelian 4 tahap + penerimaan toko (terima/sebagian/tolak/batal) =="
+BELI25=$(api "$OWNER" GET /bahan | jq -r '[.[] | select(.pengadaan == "beli" and .track_stok == true)][0].id')
+SALDO25=$(saldo_bahan "$BELI25")
+
+# Faktur A: RAB → diproses → dikirim → kasir terima SEBAGIAN (pesan 10, terima 6)
+FKA25=$(api "$OWNER" POST /pembelian/faktur "{\"items\":[{\"ingredient_id\":\"$BELI25\",\"mode\":\"pcs\",\"jumlah\":10,\"total_harga\":1000}]}")
+FKA25_ID=$(echo "$FKA25" | jq -r .faktur_id)
+cek "faktur pembelian dibuat berstatus rencana (RAB)" "V == 1" \
+  "$(echo "$FKA25" | jq '(.status == "rencana") | if . then 1 else 0 end')"
+cek "konfirmasi pembelian dari rencana ditolak (404)" "V == 404" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/pembelian/konfirmasi/$FKA25_ID" -H "Authorization: Bearer $OWNER")"
+cek "kasir: kiriman rencana belum tampil di /penerimaan" "V == 0" \
+  "$(api "$KASIR" GET /penerimaan | jq --arg f "$FKA25_ID" '[.rows[] | select(.faktur_id==$f)] | length')"
+api "$OWNER" POST "/pembelian/tahap/$FKA25_ID" '{"ke":"dikerjakan"}' > /dev/null
+api "$OWNER" POST "/pembelian/tahap/$FKA25_ID" '{"ke":"menunggu"}' > /dev/null
+cek "kasir: kiriman dikirim tampil di /penerimaan" "V == 1" \
+  "$(api "$KASIR" GET /penerimaan | jq --arg f "$FKA25_ID" '[.rows[] | select(.faktur_id==$f)] | length')"
+cek "saldo belum berubah saat dikirim" "abs(V - $SALDO25) < 0.001" "$(saldo_bahan "$BELI25")"
+ROW25=$(api "$KASIR" GET /penerimaan | jq -r --arg f "$FKA25_ID" '[.rows[] | select(.faktur_id==$f)][0].id')
+cek "kasir terima-sebagian ok (200)" "V == 200" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/penerimaan/$FKA25_ID/terima-sebagian" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d "{\"items\":[{\"id\":\"$ROW25\",\"qty_diterima\":6}]}")"
+cek "saldo +6 (bukan +10) setelah terima sebagian" "abs(V - ($SALDO25 + 6)) < 0.001" "$(saldo_bahan "$BELI25")"
+ROWA25=$(api "$OWNER" GET "/pembelian?per_page=500" | jq --arg f "$FKA25_ID" '[.rows[] | select(.faktur_id==$f)][0]')
+cek "baris: qty=6, dipesan=10, harga prorata 600" "V == 1" \
+  "$(echo "$ROWA25" | jq '((.qty == 6) and (.qty_dipesan == 10) and (.total_harga == 600) and (.status == "dikonfirmasi")) | if . then 1 else 0 end')"
+
+# Faktur B: dikirim → kasir TOLAK (alasan) → batal-tolak (salah cek) → selesai + stok masuk
+FKB25=$(api "$OWNER" POST /pembelian/faktur "{\"items\":[{\"ingredient_id\":\"$BELI25\",\"mode\":\"pcs\",\"jumlah\":5,\"total_harga\":500}]}")
+FKB25_ID=$(echo "$FKB25" | jq -r .faktur_id)
+api "$OWNER" POST "/pembelian/tahap/$FKB25_ID" '{"ke":"dikerjakan"}' > /dev/null
+api "$OWNER" POST "/pembelian/tahap/$FKB25_ID" '{"ke":"menunggu"}' > /dev/null
+SALDO25B=$(saldo_bahan "$BELI25")
+cek "kasir tolak kiriman ok (200)" "V == 200" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/penerimaan/$FKB25_ID/tolak" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d '{"alasan":"barang kurang"}')"
+cek "kiriman ditolak tampil dgn alasan di /penerimaan" "V == 1" \
+  "$(api "$KASIR" GET /penerimaan | jq --arg f "$FKB25_ID" '[.rows[] | select(.faktur_id==$f and .status=="ditolak" and .alasan_tolak=="barang kurang")] | length')"
+cek "saldo tidak berubah setelah tolak" "abs(V - $SALDO25B) < 0.001" "$(saldo_bahan "$BELI25")"
+cek "kasir batal-tolak ok (salah cek → selesai)" "V == 200" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/penerimaan/$FKB25_ID/batal-tolak" -H "Authorization: Bearer $KASIR")"
+cek "setelah batal-tolak: saldo +5 (selesai/masuk stok)" "abs(V - ($SALDO25B + 5)) < 0.001" "$(saldo_bahan "$BELI25")"
+cek "status faktur jadi dikonfirmasi (selesai)" "V == 1" \
+  "$(api "$OWNER" GET "/pembelian?per_page=500" | jq --arg f "$FKB25_ID" '([.rows[] | select(.faktur_id==$f)][0].status == "dikonfirmasi") | if . then 1 else 0 end')"
+
+echo "== 26. Perbaikan review: batas qty, batal-tolak sebagian, waktu vs opname =="
+BELI26=$BELI25
+
+# (a) terima-sebagian tak boleh melebihi qty yang dikirim (cegah inflasi stok)
+FKC26=$(api "$OWNER" POST /pembelian/faktur "{\"items\":[{\"ingredient_id\":\"$BELI26\",\"mode\":\"pcs\",\"jumlah\":8,\"total_harga\":800}]}")
+FKC26_ID=$(echo "$FKC26" | jq -r .faktur_id)
+api "$OWNER" POST "/pembelian/tahap/$FKC26_ID" '{"ke":"dikerjakan"}' > /dev/null
+api "$OWNER" POST "/pembelian/tahap/$FKC26_ID" '{"ke":"menunggu"}' > /dev/null
+ROWC26=$(api "$KASIR" GET /penerimaan | jq -r --arg f "$FKC26_ID" '[.rows[] | select(.faktur_id==$f)][0].id')
+SALDO26A=$(saldo_bahan "$BELI26")
+cek "terima-sebagian qty>dikirim ditolak (400)" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/penerimaan/$FKC26_ID/terima-sebagian" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d "{\"items\":[{\"id\":\"$ROWC26\",\"qty_diterima\":999}]}")"
+cek "saldo tak berubah setelah tolakan batas qty" "abs(V - $SALDO26A) < 0.001" "$(saldo_bahan "$BELI26")"
+api "$KASIR" POST "/penerimaan/$FKC26_ID/terima" > /dev/null  # beres-kan agar tak polusi
+
+# (b) batal-tolak diblok bila faktur sudah diterima SEBAGIAN (baris ditolak memang tak diterima)
+FKD26=$(api "$OWNER" POST /pembelian/faktur "{\"items\":[{\"ingredient_id\":\"$BELI26\",\"mode\":\"pcs\",\"jumlah\":4,\"total_harga\":400},{\"ingredient_id\":\"$BELI26\",\"mode\":\"pcs\",\"jumlah\":6,\"total_harga\":600}]}")
+FKD26_ID=$(echo "$FKD26" | jq -r .faktur_id)
+api "$OWNER" POST "/pembelian/tahap/$FKD26_ID" '{"ke":"dikerjakan"}' > /dev/null
+api "$OWNER" POST "/pembelian/tahap/$FKD26_ID" '{"ke":"menunggu"}' > /dev/null
+R1_26=$(api "$KASIR" GET /penerimaan | jq -r --arg f "$FKD26_ID" '[.rows[] | select(.faktur_id==$f)][0].id')
+R2_26=$(api "$KASIR" GET /penerimaan | jq -r --arg f "$FKD26_ID" '[.rows[] | select(.faktur_id==$f)][1].id')
+cek "terima-sebagian campur (1 terima, 1 tolak) ok (200)" "V == 200" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/penerimaan/$FKD26_ID/terima-sebagian" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d "{\"items\":[{\"id\":\"$R1_26\",\"qty_diterima\":3},{\"id\":\"$R2_26\",\"qty_diterima\":0}],\"alasan\":\"sebagian kosong\"}")"
+cek "batal-tolak faktur diterima-sebagian diblok (400)" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/penerimaan/$FKD26_ID/batal-tolak" -H "Authorization: Bearer $KASIR")"
+cek "faktur campuran: 1 baris dikonfirmasi + 1 baris ditolak" "V == 1" \
+  "$(api "$OWNER" GET "/pembelian?per_page=500" | jq --arg f "$FKD26_ID" '[.rows[] | select(.faktur_id==$f)] | (([.[]|select(.status=="dikonfirmasi")]|length)==1 and ([.[]|select(.status=="ditolak")]|length)==1) | if . then 1 else 0 end')"
+
+# (c) barang diterima SETELAH opname tetap masuk saldo (waktu = saat terima, bukan RAB)
+FKE26=$(api "$OWNER" POST /pembelian/faktur "{\"items\":[{\"ingredient_id\":\"$BELI26\",\"mode\":\"pcs\",\"jumlah\":7,\"total_harga\":700}]}")
+FKE26_ID=$(echo "$FKE26" | jq -r .faktur_id)
+api "$OWNER" POST "/pembelian/tahap/$FKE26_ID" '{"ke":"dikerjakan"}' > /dev/null
+api "$OWNER" POST "/pembelian/tahap/$FKE26_ID" '{"ke":"menunggu"}' > /dev/null
+SBASE26=$(saldo_bahan "$BELI26")   # barang belum diterima → sistem = saldo saat ini
+# opname selisih 0 → langsung jadi baseline (disetujui), created_at = sekarang
+api "$OWNER" POST /stok/opname "{\"items\":[{\"ingredient_id\":\"$BELI26\",\"qty\":$SBASE26}],\"catatan\":\"opname sblm terima\"}" > /dev/null
+cek "opname baseline aktif (saldo == fisik)" "abs(V - $SBASE26) < 0.001" "$(saldo_bahan "$BELI26")"
+api "$KASIR" POST "/penerimaan/$FKE26_ID/terima" > /dev/null   # terima SETELAH opname
+cek "barang diterima setelah opname tetap masuk saldo (+7)" "abs(V - ($SBASE26 + 7)) < 0.001" \
+  "$(saldo_bahan "$BELI26")"
 
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="

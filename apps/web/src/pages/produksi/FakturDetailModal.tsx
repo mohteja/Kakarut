@@ -5,7 +5,7 @@ import { ErrorText, Modal, btnPrimary, btnSecondary, inputClass } from "../../co
 import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah, formatWaktu } from "../../lib/format";
-import { STATUS_PRODUKSI, type FakturGroup } from "./TambahStokPage";
+import { badgeFaktur, type FakturGroup } from "./TambahStokPage";
 
 interface Karyawan {
   user_id: string;
@@ -33,8 +33,11 @@ export function FakturDetailModal({
   const [mode, setMode] = useState<"lihat" | "ubah" | "hapus">("lihat");
 
   const [noFaktur, setNoFaktur] = useState(grup.noFaktur ?? "");
-  const [supplierId, setSupplierId] = useState(grup.supplierId ?? "");
-  const [workerId, setWorkerId] = useState(grup.workerId ?? "");
+  const [supplierId, setSupplierId] = useState(grup.supplierId ?? ""); // jalur beli
+  // jalur produksi: pelaksana "k:<user_id>" / "s:<supplier_id>"
+  const [pelaksana, setPelaksana] = useState(
+    grup.workerId ? `k:${grup.workerId}` : grup.supplierId ? `s:${grup.supplierId}` : "",
+  );
   const [tempatId, setTempatId] = useState("__keep");
   const [prodDate, setProdDate] = useState(grup.prodDate);
   const [catatan, setCatatan] = useState(grup.catatan ?? "");
@@ -63,6 +66,8 @@ export function FakturDetailModal({
     onClose();
   }
 
+  const [pelTipe, pelId] = pelaksana ? pelaksana.split(":") : ["", ""];
+
   const simpanUbah = useMutation({
     mutationFn: () =>
       api(`${endpoint}/faktur/${grup.key}`, {
@@ -70,8 +75,10 @@ export function FakturDetailModal({
         body: {
           password,
           no_faktur: noFaktur.trim() || null,
-          supplier_id: tipe === "beli" ? supplierId || null : undefined,
-          ...(tipe === "produksi" && workerId ? { worker_id: workerId } : {}),
+          // beli: supplier langsung; produksi: pelaksana → worker_id/supplier_id
+          supplier_id:
+            tipe === "beli" ? supplierId || null : pelTipe === "s" ? pelId : null,
+          ...(tipe === "produksi" ? { worker_id: pelTipe === "k" ? pelId : null } : {}),
           catatan: catatan.trim() || null,
           prod_date: prodDate,
           ...(tempatId !== "__keep" ? { storage_location_id: tempatId || null } : {}),
@@ -105,7 +112,7 @@ export function FakturDetailModal({
             {tipe === "produksi" && (
               <>
                 <dt className="text-stone-400">Dikerjakan oleh</dt>
-                <dd className="col-span-2">{grup.dikerjakanOleh ?? "—"}</dd>
+                <dd className="col-span-2">{grup.dikerjakanOleh ?? grup.supplier ?? "—"}</dd>
               </>
             )}
             {tipe === "beli" && (
@@ -117,13 +124,15 @@ export function FakturDetailModal({
               </>
             )}
             <dt className="text-stone-400">Status</dt>
-            <dd className="col-span-2">
-              {tipe === "produksi"
-                ? STATUS_PRODUKSI[grup.status].label
-                : grup.status === "dikonfirmasi"
-                  ? "Dikonfirmasi ✓"
-                  : "Menunggu konfirmasi"}
-            </dd>
+            <dd className="col-span-2">{badgeFaktur(tipe, grup.status).label}</dd>
+            {grup.rows.some((r) => r.alasan_tolak) && (
+              <>
+                <dt className="text-stone-400">Alasan tolak</dt>
+                <dd className="col-span-2 text-red-700">
+                  {grup.rows.find((r) => r.alasan_tolak)?.alasan_tolak}
+                </dd>
+              </>
+            )}
             {grup.catatan && (
               <>
                 <dt className="text-stone-400">Catatan</dt>
@@ -144,18 +153,49 @@ export function FakturDetailModal({
           <div className="rounded-lg border border-stone-200">
             <table className="w-full text-sm">
               <tbody className="divide-y divide-stone-100">
-                {grup.rows.map((r) => (
-                  <tr key={r.id}>
-                    <td className="px-3 py-1.5 font-medium">{r.bahan}</td>
+                {grup.rows.map((r) => {
+                  const ditolak = r.status === "ditolak";
+                  return (
+                  <tr key={r.id} className={ditolak ? "bg-red-50/60" : ""}>
+                    <td className="px-3 py-1.5 font-medium">
+                      {r.bahan}
+                      {ditolak && (
+                        <span className="ml-1.5 rounded bg-red-100 px-1.5 py-0.5 text-xs font-semibold text-red-700">
+                          ❌ ditolak
+                        </span>
+                      )}
+                    </td>
                     <td className="px-3 py-1.5 text-right text-stone-600">
-                      +{formatAngka(r.qty)} {r.satuan}
+                      {ditolak ? (
+                        <span className="text-stone-400">
+                          0 dari {formatAngka(r.qty)} {r.satuan}
+                        </span>
+                      ) : (
+                        <>
+                          +{formatAngka(r.qty)} {r.satuan}
+                          {r.qty_dipesan != null && r.qty_dipesan !== r.qty && (
+                            <span className="ml-1 text-xs text-amber-600">
+                              (dipesan {formatAngka(r.qty_dipesan)})
+                            </span>
+                          )}
+                        </>
+                      )}
                     </td>
                     <td className="px-3 py-1.5 text-stone-500">{r.tempat ?? "—"}</td>
                     <td className="px-3 py-1.5 text-right text-stone-500">
-                      {r.total_harga != null ? formatRupiah(r.total_harga) : "—"}
+                      {r.total_harga == null ? (
+                        "—"
+                      ) : ditolak ? (
+                        <span className="text-stone-400 line-through">
+                          {formatRupiah(r.total_harga)}
+                        </span>
+                      ) : (
+                        formatRupiah(r.total_harga)
+                      )}
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -224,18 +264,25 @@ export function FakturDetailModal({
           )}
           {tipe === "produksi" && (
             <div>
-              <label className="mb-1 block text-sm font-medium">Dikerjakan oleh (karyawan)</label>
+              <label className="mb-1 block text-sm font-medium">Dikerjakan oleh (pelaksana)</label>
               <select
-                value={workerId}
-                onChange={(e) => setWorkerId(e.target.value)}
+                value={pelaksana}
+                onChange={(e) => setPelaksana(e.target.value)}
                 className={inputClass}
               >
-                <option value="">— jangan ubah —</option>
+                <option value="">— tanpa pelaksana —</option>
                 {karyawan
                   .filter((k) => k.is_active)
                   .map((k) => (
-                    <option key={k.user_id} value={k.user_id}>
-                      {k.nama}
+                    <option key={`k:${k.user_id}`} value={`k:${k.user_id}`}>
+                      {k.nama} (karyawan)
+                    </option>
+                  ))}
+                {supplier
+                  .filter((s) => s.is_active)
+                  .map((s) => (
+                    <option key={`s:${s.id}`} value={`s:${s.id}`}>
+                      {s.nama} (supplier)
                     </option>
                   ))}
               </select>

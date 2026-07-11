@@ -23,7 +23,6 @@ interface StokMasukPage {
   total_pengeluaran: number;
 }
 import { FakturDetailModal } from "./FakturDetailModal";
-import { FakturModal } from "./FakturModal";
 
 export interface StokMasukRow {
   id: string;
@@ -48,6 +47,8 @@ export interface StokMasukRow {
   updated_at: string | null;
   worker_id: string | null;
   dikerjakan_oleh: string | null;
+  qty_dipesan: number | null;
+  alasan_tolak: string | null;
 }
 
 export interface FakturGroup {
@@ -58,7 +59,7 @@ export interface FakturGroup {
   supplier: string | null;
   supplierId: string | null;
   noFaktur: string | null;
-  status: KonfirmasiStatus;
+  status: StatusFaktur;
   catatan: string | null;
   dibuatOleh: string | null;
   diubahOleh: string | null;
@@ -69,12 +70,50 @@ export interface FakturGroup {
   totalHarga: number;
 }
 
-/** Badge tahap pipeline produksi (jalur beli tetap 2 label lama). */
+/**
+ * Status satu FAKTUR (bukan baris). Setelah "terima sebagian", satu faktur
+ * bisa punya baris diterima + baris ditolak sekaligus → status "sebagian".
+ */
+export type StatusFaktur = KonfirmasiStatus | "sebagian";
+
+const BADGE_SEBAGIAN = { label: "📦 Diterima sebagian", cls: "bg-green-100 text-green-800" };
+
+/** Status faktur diturunkan dari status baris-barisnya. */
+export function statusFaktur(rows: { status: KonfirmasiStatus }[]): StatusFaktur {
+  const set = new Set(rows.map((r) => r.status));
+  if (set.size === 1) return rows[0].status;
+  // campuran hanya muncul setelah "terima sebagian": ada yg diterima & ditolak
+  if (set.has("dikonfirmasi") && set.has("ditolak")) return "sebagian";
+  return rows[0].status;
+}
+
+/** Badge faktur (peduli "sebagian"), pilih peta sesuai jalur. */
+export function badgeFaktur(tipe: JenisPengadaan, status: StatusFaktur) {
+  if (status === "sebagian") return BADGE_SEBAGIAN;
+  return (tipe === "produksi" ? STATUS_PRODUKSI : STATUS_BELI)[status];
+}
+
+/** Faktur yang belum selesai (masih dalam pipeline) belum menambah saldo stok. */
+export function belumSelesai(status: StatusFaktur) {
+  return status === "rencana" || status === "dikerjakan" || status === "menunggu";
+}
+
+/** Badge tahap pipeline produksi. */
 export const STATUS_PRODUKSI: Record<KonfirmasiStatus, { label: string; cls: string }> = {
   rencana: { label: "📋 Rencana (RAB)", cls: "bg-stone-200 text-stone-700" },
   dikerjakan: { label: "🔨 Sedang dikerjakan", cls: "bg-blue-100 text-blue-800" },
   menunggu: { label: "✅ Selesai — menunggu konfirmasi", cls: "bg-yellow-100 text-yellow-800" },
   dikonfirmasi: { label: "📦 Dikonfirmasi ✓", cls: "bg-green-100 text-green-800" },
+  ditolak: { label: "❌ Ditolak", cls: "bg-red-100 text-red-700" },
+};
+
+/** Badge tahap pipeline pembelian: RAB → diproses → dikirim → diterima / ditolak. */
+export const STATUS_BELI: Record<KonfirmasiStatus, { label: string; cls: string }> = {
+  rencana: { label: "📋 RAB (Rencana beli)", cls: "bg-stone-200 text-stone-700" },
+  dikerjakan: { label: "🔄 Diproses", cls: "bg-blue-100 text-blue-800" },
+  menunggu: { label: "🚚 Dikirim — menunggu penerimaan", cls: "bg-yellow-100 text-yellow-800" },
+  dikonfirmasi: { label: "📦 Diterima ✓", cls: "bg-green-100 text-green-800" },
+  ditolak: { label: "❌ Ditolak penerima", cls: "bg-red-100 text-red-700" },
 };
 
 const TEKS: Record<JenisPengadaan, { judul: string; endpoint: string; logJudul: string }> = {
@@ -91,7 +130,6 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
   const t = TEKS[tipe];
   const { branchQuery } = useBranch();
   const queryClient = useQueryClient();
-  const [modalBuka, setModalBuka] = useState(false);
   const [detail, setDetail] = useState<FakturGroup | null>(null);
 
   // Buku besar: filter tanggal + pagination per faktur (terlama di halaman awal,
@@ -182,13 +220,16 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
         byKey.set(key, g);
       }
       g.rows.push(r);
-      g.totalHarga += r.total_harga ?? 0;
+      // baris ditolak tak menambah biaya (barang tidak diterima)
+      if (r.status !== "ditolak") g.totalHarga += r.total_harga ?? 0;
     }
+    // status faktur = agregat status baris (campuran diterima+ditolak = "sebagian")
+    for (const g of byKey.values()) g.status = statusFaktur(g.rows);
     return [...byKey.values()];
   }, [log]);
 
   const totalPengeluaran = data?.total_pengeluaran ?? 0;
-  const adaBelumKonfirmasi = grup.some((g) => g.status !== "dikonfirmasi");
+  const adaBelumKonfirmasi = grup.some((g) => belumSelesai(g.status));
   const jenisKata = tipe === "produksi" ? "produksi" : "pembelian";
 
   return (
@@ -201,9 +242,9 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                 📊 Rekomendasi Beli
               </Link>
             )}
-            <button onClick={() => setModalBuka(true)} className={btnPrimary}>
+            <Link to={`${t.endpoint}/baru`} className={btnPrimary}>
               + Tambah {tipe === "produksi" ? "Produksi" : "Pembelian"}
-            </button>
+            </Link>
           </div>
         }
       >
@@ -285,17 +326,12 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
       ) : (
         <div className="space-y-3">
           {grup.map((g) => {
-            const badge =
-              tipe === "produksi"
-                ? STATUS_PRODUKSI[g.status]
-                : g.status === "dikonfirmasi"
-                  ? { label: "Dikonfirmasi ✓", cls: "bg-green-100 text-green-800" }
-                  : { label: "Menunggu konfirmasi", cls: "bg-yellow-100 text-yellow-800" };
+            const badge = badgeFaktur(tipe, g.status);
             return (
             <Card
               key={g.key}
               onClick={() => setDetail(g)}
-              className={`flex cursor-pointer overflow-hidden transition hover:border-orange-300 hover:shadow-sm ${g.status !== "dikonfirmasi" ? "border-yellow-300" : ""}`}
+              className={`flex cursor-pointer overflow-hidden transition hover:border-orange-300 hover:shadow-sm ${belumSelesai(g.status) ? "border-yellow-300" : ""}`}
             >
               {/* Kotak tanggal & waktu di kiri tiap transaksi */}
               <div className="flex w-24 shrink-0 flex-col items-center justify-center gap-0.5 border-r border-stone-100 bg-stone-50 px-2 py-3 text-center sm:w-28">
@@ -309,7 +345,9 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                 <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-100 px-4 py-2.5">
                   <div className="flex flex-wrap items-center gap-2 text-sm">
                     <span className="font-medium text-stone-700">
-                      {g.supplier ?? (tipe === "produksi" ? "Produksi sendiri" : "Tanpa sumber")}
+                      {tipe === "produksi"
+                        ? `🔧 ${g.dikerjakanOleh ?? g.supplier ?? "Produksi sendiri"}`
+                        : (g.supplier ?? "Tanpa sumber")}
                     </span>
                     {g.noFaktur && (
                       <span className="rounded bg-stone-100 px-1.5 py-0.5 font-mono text-xs">
@@ -319,9 +357,6 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                     {g.dibuatOleh && (
                       <span className="text-xs text-stone-400">oleh {g.dibuatOleh}</span>
                     )}
-                    {tipe === "produksi" && g.dikerjakanOleh && (
-                      <span className="text-xs text-stone-500">🔧 dikerjakan {g.dikerjakanOleh}</span>
-                    )}
                     {g.catatan && <span className="text-xs text-stone-400">· {g.catatan}</span>}
                   </div>
                   <div className="flex items-center gap-2">
@@ -330,7 +365,7 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                     >
                       {badge.label}
                     </span>
-                    {tipe === "produksi" && g.fakturId && g.status === "rencana" && (
+                    {g.fakturId && g.status === "rencana" && (
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
@@ -339,10 +374,10 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                         disabled={tahap.isPending}
                         className="rounded-lg bg-blue-600 px-3 py-1 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
                       >
-                        🔨 Mulai Kerjakan
+                        {tipe === "produksi" ? "🔨 Mulai Kerjakan" : "🔄 Proses"}
                       </button>
                     )}
-                    {tipe === "produksi" && g.fakturId && g.status === "dikerjakan" && (
+                    {g.fakturId && g.status === "dikerjakan" && (
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
@@ -351,7 +386,7 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                         disabled={tahap.isPending}
                         className="rounded-lg bg-amber-500 px-3 py-1 text-xs font-semibold text-white hover:bg-amber-600 disabled:opacity-50"
                       >
-                        ✅ Tandai Selesai
+                        {tipe === "produksi" ? "✅ Tandai Selesai" : "🚚 Kirim ke Toko"}
                       </button>
                     )}
                     {g.status === "menunggu" && g.fakturId && (
@@ -363,7 +398,7 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                         disabled={konfirmasi.isPending}
                         className="rounded-lg bg-green-600 px-3 py-1 text-xs font-semibold text-white hover:bg-green-700 disabled:opacity-50"
                       >
-                        ✔ Konfirmasi Ada
+                        {tipe === "produksi" ? "✔ Konfirmasi Ada" : "✔ Terima Semua"}
                       </button>
                     )}
                   </div>
@@ -386,6 +421,11 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                           {r.is_batch && (
                             <span className="ml-1 text-xs text-stone-400">
                               ({formatAngka(r.qty / r.isi)} batch × {formatAngka(r.isi)})
+                            </span>
+                          )}
+                          {r.qty_dipesan != null && r.qty_dipesan !== r.qty && (
+                            <span className="ml-1 text-xs text-amber-600">
+                              (dipesan {formatAngka(r.qty_dipesan)})
                             </span>
                           )}
                         </td>
@@ -450,9 +490,6 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
         </div>
       )}
 
-      {modalBuka && (
-        <FakturModal tipe={tipe} endpoint={t.endpoint} onClose={() => setModalBuka(false)} />
-      )}
       {detail && (
         <FakturDetailModal
           grup={detail}

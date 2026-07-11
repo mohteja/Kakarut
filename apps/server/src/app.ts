@@ -24,6 +24,7 @@ import { penjualanRoutes } from "./modules/penjualan/routes";
 import { penyimpananRoutes } from "./modules/penyimpanan/routes";
 import { printRoutes } from "./modules/print/routes";
 import { pembelianRoutes, produksiRoutes } from "./modules/produksi/routes";
+import { penerimaanRoutes } from "./modules/penerimaan/routes";
 import { rekomendasiRoutes } from "./modules/rekomendasi/routes";
 import { sampahRoutes } from "./modules/sampah/routes";
 import { supplierRoutes } from "./modules/supplier/routes";
@@ -63,6 +64,8 @@ export function createApp() {
     .route("/penjualan", penjualanRoutes)
     .route("/produksi", produksiRoutes)
     .route("/pembelian", pembelianRoutes)
+    // penerimaan kiriman di toko — boleh kasir (terkunci cabangnya)
+    .route("/penerimaan", penerimaanRoutes)
     .route("/supplier", supplierRoutes)
     .route("/penyimpanan", penyimpananRoutes)
     .route("/meja", mejaRoutes)

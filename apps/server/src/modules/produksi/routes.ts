@@ -34,8 +34,8 @@ const FakturEditBody = z.object({
   no_faktur: z.string().trim().max(60).nullish(),
   catatan: z.string().nullish(),
   storage_location_id: z.string().uuid().nullish(),
-  /** ganti karyawan pelaksana (khusus jalur produksi) */
-  worker_id: z.string().uuid().optional(),
+  /** ganti pelaksana karyawan (khusus jalur produksi); null = kosongkan */
+  worker_id: z.string().uuid().nullish(),
   prod_date: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -186,16 +186,20 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
           );
         if (!s) throw new HTTPException(400, { message: "Supplier tidak valid" });
       }
-      // Jalur produksi: karyawan pelaksana wajib & harus anggota perusahaan
+      // Jalur produksi: pelaksana wajib — salah satu antara karyawan atau
+      // supplier (yang mengerjakan pasti salah satunya). Supplier sudah
+      // divalidasi milik perusahaan di atas.
       let workerId: string | null = null;
       if (tipe === "produksi") {
-        if (!body.worker_id) {
+        if (!body.worker_id && !body.supplier_id) {
           throw new HTTPException(400, {
-            message: "Karyawan wajib dipilih untuk faktur produksi",
+            message: "Pelaksana (karyawan/supplier) wajib dipilih untuk faktur produksi",
           });
         }
-        await pastikanKaryawan(body.worker_id, auth.company_id!);
-        workerId = body.worker_id;
+        if (body.worker_id) {
+          await pastikanKaryawan(body.worker_id, auth.company_id!);
+          workerId = body.worker_id;
+        }
       }
       const lokasiIds = [
         ...new Set(body.items.map((i) => i.storage_location_id).filter(Boolean) as string[]),
@@ -224,8 +228,10 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
       const prodDate = tanggalDi(company?.timezone ?? "Asia/Jakarta");
       const fakturId = randomUUID();
 
-      // Produksi mulai dari tahap "rencana" (RAB); beli tetap "menunggu".
-      const statusAwal = tipe === "produksi" ? ("rencana" as const) : ("menunggu" as const);
+      // Kedua jalur mulai dari tahap "rencana" (RAB):
+      // produksi → dikerjakan → selesai (menunggu konfirmasi) → masuk stok;
+      // beli → diproses → dikirim (menunggu penerimaan toko) → diterima.
+      const statusAwal = "rencana" as const;
       const rows = body.items.map((item) => {
         const ing = pastikanJalur(ingById.get(item.ingredient_id), tipe, item.ingredient_id);
         const qty = item.mode === "batch" ? item.jumlah * ing.isi : item.jumlah;
@@ -261,11 +267,12 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         201,
       );
     })
-    /** Majukan tahap produksi satu langkah (khusus jalur produksi). */
+    /**
+     * Majukan tahap satu langkah (kedua jalur):
+     * produksi: rencana → dikerjakan → menunggu (selesai);
+     * beli: rencana (RAB) → dikerjakan (diproses) → menunggu (dikirim ke toko).
+     */
     .post("/tahap/:fakturId", zValidator("json", TahapBody), async (c) => {
-      if (tipe !== "produksi") {
-        throw new HTTPException(404, { message: "Tahapan hanya untuk jalur produksi" });
-      }
       const auth = c.get("auth");
       const { ke } = c.req.valid("json");
       const dari = TAHAP_SEBELUM[ke];
@@ -311,9 +318,14 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
       if (auth.role === "cashier" && auth.branch_id) {
         conds.push(eq(productions.branchId, auth.branch_id));
       }
+      // waktu = saat dikonfirmasi (bukan saat RAB dibuat) agar stok masuk
+      // terhitung relatif ke opname terakhir — kalau tetap pakai waktu insert,
+      // faktur yang dibuat sebelum opname lalu dikonfirmasi setelahnya tak
+      // pernah masuk saldo.
+      const now = new Date();
       const rows = await db
         .update(productions)
-        .set({ status: "dikonfirmasi", confirmedBy: auth.sub, confirmedAt: new Date() })
+        .set({ status: "dikonfirmasi", confirmedBy: auth.sub, confirmedAt: now, waktu: now })
         .where(and(...conds))
         .returning();
       if (rows.length === 0) {
@@ -434,6 +446,8 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         updated_at: productions.updatedAt,
         worker_id: productions.workerId,
         dikerjakan_oleh: pekerja.nama,
+        qty_dipesan: productions.qtyDipesan,
+        alasan_tolak: productions.alasanTolak,
       };
       const rows =
         keys.length === 0
@@ -520,8 +534,8 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         updatedAt: new Date(),
       };
       if (body.worker_id !== undefined && tipe === "produksi") {
-        await pastikanKaryawan(body.worker_id, auth.company_id!);
-        set.workerId = body.worker_id;
+        if (body.worker_id) await pastikanKaryawan(body.worker_id, auth.company_id!);
+        set.workerId = body.worker_id ?? null;
       }
       if (body.supplier_id !== undefined) set.supplierId = body.supplier_id ?? null;
       if (body.no_faktur !== undefined) set.noFaktur = body.no_faktur ?? null;
