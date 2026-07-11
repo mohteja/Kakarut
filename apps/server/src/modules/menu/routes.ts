@@ -6,8 +6,8 @@ import { z } from "zod";
 import { PANDUAN_MARKUP } from "@kakarut/shared";
 import { db, type Tx } from "../../db/client";
 import { ingredients, menuComponents, menus } from "../../db/schema";
-import { requireRole, type AppEnv } from "../../middleware/auth";
-import { loadKatalog, resolveKode, toMenuDto } from "./service";
+import { requireRole, resolveBranchId, type AppEnv } from "../../middleware/auth";
+import { ketersediaanMenu, loadKatalog, resolveKode, toMenuDto } from "./service";
 
 const KomponenBody = z.object({
   ingredient_id: z.string().uuid(),
@@ -105,6 +105,15 @@ export const menuRoutes = new Hono<AppEnv>()
       .filter((r) => (kategoriFilter ? r.categoryId === kategoriFilter : true))
       .map((r) => toMenuDto(r, katalog));
     return c.json(dtos);
+  })
+  // Sisa porsi tiap menu di cabang aktif (untuk info kasir "sisa 2 lagi").
+  // Branch-scoped: kasir → cabangnya; owner/admin bisa pilih via ?branch_id.
+  // Didaftarkan sebelum "/:id" agar tak tertangkap sebagai id.
+  .get("/ketersediaan", async (c) => {
+    const auth = c.get("auth");
+    const branchId = await resolveBranchId(c);
+    const rows = await ketersediaanMenu(auth.company_id!, branchId);
+    return c.json(rows);
   })
   .get("/:id", async (c) => {
     const auth = c.get("auth");

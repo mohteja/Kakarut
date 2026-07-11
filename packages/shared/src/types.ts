@@ -76,6 +76,17 @@ export interface MenuDto {
 }
 
 /**
+ * Ketersediaan (sisa porsi) sebuah menu di satu cabang — diturunkan dari saldo
+ * stok bahan terlacak. `porsi` = berapa porsi lagi yang bisa dibuat
+ * (min saldo/qty per porsi atas semua bahan pembatas); `null` bila menu tak
+ * punya bahan terlacak yang membatasi (dianggap tak terbatas).
+ */
+export interface MenuStokDto {
+  menu_id: string;
+  porsi: number | null;
+}
+
+/**
  * Status pipeline stok masuk: rencana (RAB) → dikerjakan → menunggu →
  * dikonfirmasi (masuk stok). 'ditolak' khusus jalur beli (kiriman ditolak
  * penerima; bisa dibatalkan → dikonfirmasi). Stok terhitung saat 'dikonfirmasi'.

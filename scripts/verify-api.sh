@@ -972,6 +972,48 @@ cek "setelah bayar: bill hilang dari list" "V == 0" \
   "$(api "$KASIR" GET /open-bill | jq --arg id "$OB_ID" '[.[] | select(.id == $id)] | length')"
 cek "GET bill terhapus → 404" "V == 404" "$(status_code "$KASIR" GET "/open-bill/$OB_ID")"
 
+echo "== 38. Ketersediaan menu (sisa porsi per bahan terlacak) =="
+cek "ketersediaan: status 200 utk kasir" "V == 200" "$(status_code "$KASIR" GET /menu/ketersediaan)"
+KET=$(api "$KASIR" GET /menu/ketersediaan)
+MENU_ALL=$(api "$KASIR" GET "/menu?semua=true")
+STOK=$(api "$KASIR" GET /stok)
+cek "ketersediaan: jumlah baris = jumlah menu (aktif+nonaktif)" "V == 1" \
+  "$(jq -n --argjson k "$KET" --argjson m "$MENU_ALL" '(($k|length) == ($m|length)) | if . then 1 else 0 end')"
+cek "ketersediaan: semua porsi null / bilangan bulat >= 0" "V == 1" \
+  "$(echo "$KET" | jq '([.[] | select(.porsi != null) | select((.porsi != (.porsi|floor)) or (.porsi < 0))] | length == 0) | if . then 1 else 0 end')"
+
+# PBA (reguler) — bahan terlacak (baso) membatasi → porsi bukan null
+MENU_PBA=$(api "$KASIR" GET "/menu/$PBA_ID")
+PBA_PORSI=$(echo "$KET" | jq --arg id "$PBA_ID" '[.[] | select(.menu_id == $id)][0].porsi')
+cek "ketersediaan PBA: porsi terlacak (bukan null)" "V == 1" \
+  "$(echo "$PBA_PORSI" | jq '(. != null) | if . then 1 else 0 end')"
+# cross-check: porsi == min ⌊saldo/qty⌋ atas SEMUA bahan terlacak (termasuk kemasan)
+EXP_PBA=$(jq -n --argjson menu "$MENU_PBA" --argjson stok "$STOK" '
+  ($stok | map({(.ingredient_id): .saldo}) | add) as $s
+  | [ $menu.komponen[]
+      | select(.track_stok and (.qty > 0))
+      | ($s[.ingredient_id]) as $sal | select($sal != null)
+      | ($sal / .qty | floor) ]
+  | (if length == 0 then null else (min | if . < 0 then 0 else . end) end)')
+cek "ketersediaan PBA: porsi cocok min(saldo/qty) termasuk kemasan" "V == 1" \
+  "$(jq -n --argjson a "$PBA_PORSI" --argjson b "$EXP_PBA" '($a == $b) | if . then 1 else 0 end')"
+
+# PYO (paket) — agregasi qty komponen menu sendiri + menu dasar (persis konsumsi)
+MENU_PYO=$(api "$KASIR" GET "/menu/$PYO_ID")
+BASE_ID=$(echo "$MENU_PYO" | jq -r '.base_menu_id')
+MENU_BASE=$(api "$KASIR" GET "/menu/$BASE_ID")
+PYO_PORSI=$(echo "$KET" | jq --arg id "$PYO_ID" '[.[] | select(.menu_id == $id)][0].porsi')
+EXP_PYO=$(jq -n --argjson own "$MENU_PYO" --argjson base "$MENU_BASE" --argjson stok "$STOK" '
+  ($stok | map({(.ingredient_id): .saldo}) | add) as $s
+  | (($own.komponen + $base.komponen)
+      | map(select(.track_stok and (.qty > 0)))
+      | group_by(.ingredient_id)
+      | map({ingredient_id: .[0].ingredient_id, qty: (map(.qty) | add)})) as $agg
+  | [ $agg[] | ($s[.ingredient_id]) as $sal | select($sal != null) | ($sal / .qty | floor) ]
+  | (if length == 0 then null else (min | if . < 0 then 0 else . end) end)')
+cek "ketersediaan PYO (paket): cocok agregasi own+dasar" "V == 1" \
+  "$(jq -n --argjson a "$PYO_PORSI" --argjson b "$EXP_PYO" '($a == $b) | if . then 1 else 0 end')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

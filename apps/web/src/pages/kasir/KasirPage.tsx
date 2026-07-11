@@ -1,7 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import type { MejaDto, MenuDto, MetodeBayar, OpenBillDetail, OpenBillRow } from "@kakarut/shared";
+import type {
+  MejaDto,
+  MenuDto,
+  MenuStokDto,
+  MetodeBayar,
+  OpenBillDetail,
+  OpenBillRow,
+} from "@kakarut/shared";
 import { Card, ErrorText, Spinner, btnPrimary, btnSecondary } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { useBranch } from "../../context/BranchContext";
@@ -22,6 +29,22 @@ interface Kategori {
   id: string;
   nama: string;
   sort_order: number;
+}
+
+/**
+ * Badge sisa porsi untuk kasir. `porsi` null → menu tak terlacak stoknya →
+ * tak menampilkan apa pun. 0 → "Habis" (merah); sedikit (≤5) → oranye; sisanya
+ * hijau. `size` mengatur kepadatan untuk tile kode yang mungil.
+ */
+function StokBadge({ porsi, size = "md" }: { porsi: number | null | undefined; size?: "sm" | "md" }) {
+  if (porsi == null) return null;
+  const kecil = size === "sm";
+  const base = kecil ? "text-[9px] leading-none" : "text-[11px]";
+  if (porsi <= 0) {
+    return <span className={`font-semibold text-red-600 ${base}`}>Habis</span>;
+  }
+  const warna = porsi <= 5 ? "text-orange-600" : "text-emerald-600";
+  return <span className={`font-medium ${warna} ${base}`}>Sisa {porsi}</span>;
 }
 
 export function KasirPage() {
@@ -86,6 +109,16 @@ export function KasirPage() {
     queryKey: ["open-bill", branchQuery],
     queryFn: () => api<OpenBillRow[]>(`/open-bill${branchQuery}`),
   });
+
+  // Sisa porsi tiap menu di cabang aktif (info "sisa 2 lagi" untuk kasir).
+  const { data: ketersediaan = [] } = useQuery({
+    queryKey: ["menu-ketersediaan", branchQuery],
+    queryFn: () => api<MenuStokDto[]>(`/menu/ketersediaan${branchQuery}`),
+  });
+  const sisaByMenu = useMemo(
+    () => new Map(ketersediaan.map((k) => [k.menu_id, k.porsi])),
+    [ketersediaan],
+  );
 
   const mejaAktif = useMemo(() => mejaList.filter((m) => m.is_active), [mejaList]);
   const mejaTerpilih = mejaAktif.find((m) => m.id === mejaId) ?? null;
@@ -249,6 +282,7 @@ export function KasirPage() {
       queryClient.invalidateQueries({ queryKey: ["laporan"] });
       queryClient.invalidateQueries({ queryKey: ["penjualan"] });
       queryClient.invalidateQueries({ queryKey: ["open-bill"] });
+      queryClient.invalidateQueries({ queryKey: ["menu-ketersediaan"] });
     },
   });
 
@@ -415,6 +449,10 @@ export function KasirPage() {
                   )}
                   <div className="line-clamp-2 text-sm font-semibold text-stone-800">{m.nama}</div>
                 </div>
+                {/* Sisa porsi di bawah nama menu — kasir bisa infokan ke konsumen */}
+                <div className="pt-0.5">
+                  <StokBadge porsi={sisaByMenu.get(m.id)} />
+                </div>
                 <div className="mt-auto pt-1 text-sm font-bold text-orange-600">
                   {formatRupiah(m.harga_jual)}
                 </div>
@@ -447,6 +485,8 @@ export function KasirPage() {
                       <span className="mt-0.5 text-[10px] font-medium text-orange-600">
                         {formatAngka(m.harga_jual, 0)}
                       </span>
+                      {/* Sisa porsi di bawah kode + harga */}
+                      <StokBadge porsi={sisaByMenu.get(m.id)} size="sm" />
                     </button>
                   ))}
                 </div>
@@ -612,6 +652,16 @@ export function KasirPage() {
                   placeholder="Catatan (mis. tanpa gula, tanpa mie)"
                   className="mt-2 w-full rounded-lg border border-stone-200 bg-stone-50 px-2 py-1 text-xs focus:border-orange-400 focus:bg-white focus:outline-none"
                 />
+                {/* Peringatan bila pesanan melebihi stok tersisa (mis. pesan 3, sisa 2) */}
+                {(() => {
+                  const sisa = sisaByMenu.get(l.menu.id);
+                  if (sisa == null || l.qty <= sisa) return null;
+                  return (
+                    <div className="mt-1 rounded bg-red-50 px-2 py-1 text-xs font-semibold text-red-600">
+                      ⚠ {sisa <= 0 ? "Stok habis" : `Stok hanya sisa ${sisa}`} — pesanan {l.qty}
+                    </div>
+                  );
+                })()}
               </div>
             );
           })}
