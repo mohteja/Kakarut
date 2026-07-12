@@ -7,14 +7,20 @@ export interface Cabang {
   id: string;
   nama: string;
   alamat: string | null;
-  /** store = outlet penjualan; central_kitchen = dapur produksi pengirim */
-  tipe: "store" | "central_kitchen";
+  /**
+   * store = outlet penjualan; central_kitchen = dapur produksi pengirim;
+   * kantor = lokasi kerja admin/finance (bukan tujuan kirim barang)
+   */
+  tipe: "store" | "central_kitchen" | "kantor";
+  /** CK pemasok cabang store — store hanya menerima kiriman dari CK ini */
+  central_kitchen_id: string | null;
   is_active: boolean;
 }
 
 /** Label cabang dengan ikon jenisnya — dipakai di pemilih cabang. */
 export function labelCabang(b: Pick<Cabang, "nama" | "tipe">) {
-  return `${b.tipe === "central_kitchen" ? "🏭" : "🏪"} ${b.nama}`;
+  const ikon = b.tipe === "central_kitchen" ? "🏭" : b.tipe === "kantor" ? "🏢" : "🏪";
+  return `${ikon} ${b.nama}`;
 }
 
 interface BranchContextValue {

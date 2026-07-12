@@ -433,12 +433,43 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         let tujuanNama: string | null = null;
         if (tujuan_branch_id) {
           const [cb] = await db
-            .select({ id: branches.id, nama: branches.nama })
+            .select({
+              id: branches.id,
+              nama: branches.nama,
+              tipe: branches.tipe,
+              centralKitchenId: branches.centralKitchenId,
+            })
             .from(branches)
             .where(
               and(eq(branches.id, tujuan_branch_id), eq(branches.companyId, auth.company_id!)),
             );
           if (!cb) throw new HTTPException(400, { message: "Cabang tujuan tidak valid" });
+          if (cb.tipe === "kantor") {
+            throw new HTTPException(400, {
+              message: "Kantor bukan tujuan kirim barang — pilih cabang store",
+            });
+          }
+          // Store terhubung ke SATU CK pemasok: CK lain tidak boleh mengirim
+          // ke store itu. Baris yang maju bisa lintas cabang → cek per pengirim.
+          if (cb.tipe === "store" && cb.centralKitchenId) {
+            const pengirimIds = [
+              ...new Set(items.map((it) => byId.get(it.id)!.branchId)),
+            ].filter((idCabang) => idCabang !== cb.id);
+            if (pengirimIds.length > 0) {
+              const pengirim = await db
+                .select({ id: branches.id, tipe: branches.tipe })
+                .from(branches)
+                .where(inArray(branches.id, pengirimIds));
+              const ckLain = pengirim.find(
+                (p) => p.tipe === "central_kitchen" && p.id !== cb.centralKitchenId,
+              );
+              if (ckLain) {
+                throw new HTTPException(400, {
+                  message: `Cabang "${cb.nama}" terhubung ke Central Kitchen lain — kirim hanya dari CK pemasoknya`,
+                });
+              }
+            }
+          }
           tujuanBranch = cb.id;
           tujuanNama = cb.nama;
           if (auth.role === "cashier" && auth.branch_id && tujuanBranch !== auth.branch_id) {

@@ -20,7 +20,7 @@ const CreateTenantBody = z.object({
   owner_nama: z.string().trim().min(1),
   owner_email: z.string().trim().toLowerCase(),
   owner_password: z.string().min(8, "password minimal 8 karakter"),
-  plan: z.string().default("free"),
+  plan: z.string().default("lite"),
 });
 
 const PatchTenantBody = z.object({

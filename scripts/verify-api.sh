@@ -142,6 +142,18 @@ cek "tenant baru: ada Ruang Tunggu (takeaway) bawaan" "V == 1" \
   "$(echo "$UJI_MEJA" | jq '([.[] | select(.tipe=="takeaway" and .nama=="Ruang Tunggu")] | length == 1) | if . then 1 else 0 end')"
 cek "tenant baru: ada Meja 1 (dine_in) bawaan" "V == 1" \
   "$(echo "$UJI_MEJA" | jq '([.[] | select(.tipe=="dine_in" and .nama=="Meja 1")] | length == 1) | if . then 1 else 0 end')"
+# Mode Lite (bawaan tenant baru) membatasi 1 cabang → cabang kedua ditolak.
+# Super admin menaikkan plan ke pro (murni set plan, tanpa provisioning) agar
+# pengujian meja bawaan pada cabang kedua tetap berjalan.
+cek "tenant baru: mode bawaan lite" "V == 1" \
+  "$(api "$UJI" GET /company | jq '(.mode == "lite") | if . then 1 else 0 end')"
+cek "mode Lite: cabang kedua → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/cabang" -H "Authorization: Bearer $UJI" -H 'Content-Type: application/json' -d '{"nama":"Cabang Uji 2"}')"
+T2_ID=$(api "$SA" GET /admin/tenants | jq -r '[.[] | select(.nama=="Warung Uji")][0].id')
+api "$SA" PATCH "/admin/tenants/$T2_ID" '{"plan":"pro"}' > /dev/null
+cek "super admin set plan pro → mode pro" "V == 1" \
+  "$(api "$UJI" GET /company | jq '(.mode == "pro") | if . then 1 else 0 end')"
+
 # Tambah cabang lewat POST /cabang juga menyeed meja bawaan (idempoten saat re-run)
 NEWCAB=$(api "$UJI" POST /cabang '{"nama":"Cabang Uji 2"}')
 NEWCAB_ID=$(echo "$NEWCAB" | jq -r '.id // empty')
@@ -1297,6 +1309,17 @@ cek "harga riil negatif → 400" "V == 400" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/pembelian/tahap/$FK45B_ID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"ke\":\"dikonfirmasi\",\"items\":[{\"id\":\"$ID45B\",\"qty\":1,\"harga\":-5}]}")"
 
 echo "== 46. Dikirim ke mana: cabang & tempat penyimpanan tujuan =="
+# Seed = 1 cabang → mode lite; §46+ butuh multi-lokasi → upgrade Pro oleh owner
+# (memprovisikan Central Kitchen + Cabang 2 + Kantor otomatis).
+cek "perusahaan seed: mode awal lite" "V == 1" \
+  "$(api "$OWNER" GET /company | jq '(.mode == "lite") | if . then 1 else 0 end')"
+cek "mode Lite: tambah cabang → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/cabang" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"nama":"Cabang Uji 46"}')"
+UP46=$(api "$OWNER" POST /company/mode '{"mode":"pro"}')
+cek "upgrade Pro: 3 lokasi baru diprovisikan" "V == 3" "$(echo "$UP46" | jq '.lokasi_baru | length')"
+cek "provisioning: ada central_kitchen & tepat 1 kantor" "V == 1" \
+  "$(api "$OWNER" GET /cabang | jq '((([.[] | select(.tipe=="central_kitchen")] | length) >= 1) and (([.[] | select(.tipe=="kantor")] | length) == 1)) | if . then 1 else 0 end')"
+
 CB46_ID=$(api "$OWNER" POST /cabang '{"nama":"Cabang Uji 46"}' | jq -r .id)
 GD46_ID=$(api "$OWNER" POST /penyimpanan "{\"nama\":\"Gudang 46\",\"branch_id\":\"$CB46_ID\"}" | jq -r .id)
 PUSAT46_ID=$(api "$OWNER" GET /cabang | jq -r --arg x "$CB46_ID" '[.[] | select(.id != $x)][0].id')
@@ -1382,6 +1405,118 @@ cek "kasir akses aktivitas karyawan lain → 403" "V == 403" \
   "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/karyawan/$OWN49_ID/aktivitas" -H "Authorization: Bearer $KASIR")"
 cek "log faktur tak dikenal → 404" "V == 404" \
   "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/pembelian/log/00000000-0000-4000-8000-000000000000" -H "Authorization: Bearer $OWNER")"
+
+echo "== 50. Mode Lite vs Pro: tenant baru, provisioning, downgrade, guard kantor =="
+api "$SA" POST /admin/tenants '{"nama":"Toko Mode 50","owner_nama":"Owner 50","owner_email":"mode50@example.com","owner_password":"Mode50Pass!"}' > /dev/null
+OWN50=$(login "mode50@example.com" "Mode50Pass!")
+cek "tenant baru: mode lite bawaan" "V == 1" \
+  "$(api "$OWN50" GET /company | jq '(.mode == "lite") | if . then 1 else 0 end')"
+cek "mode Lite: cabang kedua → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/cabang" -H "Authorization: Bearer $OWN50" -H 'Content-Type: application/json' -d '{"nama":"Cabang 50B"}')"
+
+CAB50_ID=$(api "$OWN50" GET /cabang | jq -r '.[0].id')
+api "$OWN50" POST /karyawan "{\"nama\":\"Kasir 50\",\"email\":\"kasir50@example.com\",\"password\":\"Kasir50Pass!\",\"role\":\"cashier\",\"branch_id\":\"$CAB50_ID\"}" > /dev/null
+K50=$(login "kasir50@example.com" "Kasir50Pass!")
+cek "kasir ubah mode → 403" "V == 403" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/company/mode" -H "Authorization: Bearer $K50" -H 'Content-Type: application/json' -d '{"mode":"pro"}')"
+
+UP50=$(api "$OWN50" POST /company/mode '{"mode":"pro"}')
+cek "upgrade owner: 3 lokasi baru (CK + Cabang 2 + Kantor)" "V == 3" "$(echo "$UP50" | jq '.lokasi_baru | length')"
+cek "total 4 lokasi: 1 CK + 2 store + 1 kantor" "V == 1" \
+  "$(api "$OWN50" GET /cabang | jq '((length == 4) and (([.[] | select(.tipe=="central_kitchen")] | length) == 1) and (([.[] | select(.tipe=="store")] | length) == 2) and (([.[] | select(.tipe=="kantor")] | length) == 1)) | if . then 1 else 0 end')"
+CAB50B_ID=$(api "$OWN50" GET /cabang | jq -r '[.[] | select(.nama=="Cabang 2")][0].id')
+cek "Cabang 2 (store baru): 2 meja bawaan" "V == 2" \
+  "$(api "$OWN50" GET "/meja?branch_id=$CAB50B_ID" | jq 'length')"
+KANTOR50_ID=$(api "$OWN50" GET /cabang | jq -r '[.[] | select(.tipe=="kantor")][0].id')
+cek "kantor: tanpa meja (bukan lokasi jualan)" "V == 0" \
+  "$(api "$OWN50" GET "/meja?branch_id=$KANTOR50_ID" | jq 'length')"
+api "$OWN50" POST /company/mode '{"mode":"pro"}' > /dev/null
+cek "upgrade ulang idempoten (tetap 4 lokasi)" "V == 4" "$(api "$OWN50" GET /cabang | jq 'length')"
+
+cek "downgrade dgn >1 cabang aktif → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/company/mode" -H "Authorization: Bearer $OWN50" -H 'Content-Type: application/json' -d '{"mode":"lite"}')"
+for CID in $(api "$OWN50" GET /cabang | jq -r --arg x "$CAB50_ID" '.[] | select(.id != $x) | .id'); do
+  api "$OWN50" PATCH "/cabang/$CID" '{"is_active":false}' > /dev/null
+done
+api "$OWN50" POST /company/mode '{"mode":"lite"}' > /dev/null
+cek "downgrade sukses setelah sisakan 1 cabang aktif" "V == 1" \
+  "$(api "$OWN50" GET /company | jq '(.mode == "lite") | if . then 1 else 0 end')"
+
+# Kantor bukan tujuan kirim barang — pakai perusahaan seed (Pro sejak §46)
+KANTOR_ID=$(api "$OWNER" GET /cabang | jq -r '[.[] | select(.tipe=="kantor")][0].id')
+FK50=$(api "$OWNER" POST /pembelian/faktur "{\"items\":[{\"ingredient_id\":\"$ING42A\",\"mode\":\"pcs\",\"jumlah\":4,\"total_harga\":20000}]}")
+FK50_ID=$(echo "$FK50" | jq -r .faktur_id)
+api "$OWNER" POST "/pembelian/tahap/$FK50_ID" '{"ke":"dikerjakan","dana_cair":20000}' > /dev/null
+ID50=$(api "$OWNER" GET "/pembelian?per_page=500" | jq -r --arg f "$FK50_ID" '[.rows[] | select(.faktur_id==$f)][0].id')
+cek "tujuan kirim ke kantor → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/pembelian/tahap/$FK50_ID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"ke\":\"menunggu\",\"items\":[{\"id\":\"$ID50\",\"qty\":4}],\"tujuan_branch_id\":\"$KANTOR_ID\"}")"
+cek "menu dgn lokasi kantor → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/menu" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"nama\":\"Menu Kantor 50\",\"category_id\":\"$(api "$OWNER" GET /kategori | jq -r '.[0].id')\",\"tipe\":\"regular\",\"mult\":2,\"harga_jual\":10000,\"branch_ids\":[\"$KANTOR_ID\"]}")"
+
+echo "== 51. Menu per lokasi (Pro): batasi menu ke cabang tertentu =="
+PUSAT51_ID=$(api "$OWNER" GET /cabang | jq -r '.[0].id')
+M51=$(api "$OWNER" GET "/menu/$PBA_ID")
+PUT51=$(echo "$M51" | jq --arg b "$PUSAT51_ID" '{nama, kode, category_id, tipe, mult, base_menu_id, base_mult, harga_jual, image_url, is_active, komponen: [.komponen[] | {ingredient_id, qty}], branch_ids: [$b]}')
+api "$OWNER" PUT "/menu/$PBA_ID" "$PUT51" > /dev/null
+cek "menu dibatasi: branch_ids tersimpan" "V == 1" \
+  "$(api "$OWNER" GET "/menu/$PBA_ID" | jq --arg b "$PUSAT51_ID" '(.branch_ids == [$b]) | if . then 1 else 0 end')"
+cek "katalog manajemen (tanpa filter) tetap memuat menu" "V == 1" \
+  "$(api "$OWNER" GET /menu | jq --arg id "$PBA_ID" '([.[] | select(.id==$id)] | length == 1) | if . then 1 else 0 end')"
+cek "daftar menu cabang lain (?branch_id=) TIDAK memuat" "V == 0" \
+  "$(api "$OWNER" GET "/menu?branch_id=$CB46_ID" | jq --arg id "$PBA_ID" '[.[] | select(.id==$id)] | length')"
+cek "kasir (cabang Pusat) tetap melihat menu" "V == 1" \
+  "$(api "$KASIR" GET /menu | jq --arg id "$PBA_ID" '([.[] | select(.id==$id)] | length == 1) | if . then 1 else 0 end')"
+cek "ketersediaan cabang lain tak memuat menu" "V == 0" \
+  "$(api "$OWNER" GET "/menu/ketersediaan?branch_id=$CB46_ID" | jq --arg id "$PBA_ID" '[.[] | select(.menu_id==$id)] | length')"
+cek "jual menu terbatas di cabang lain → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/penjualan" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"branch_id\":\"$CB46_ID\",\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")"
+cek "open bill menu terbatas di cabang lain → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/open-bill" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"branch_id\":\"$CB46_ID\",\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")"
+cek "rencana menu di cabang lain → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/rekomendasi/menu?branch_id=$CB46_ID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"items\":[{\"menu_id\":\"$PBA_ID\",\"porsi\":5}]}")"
+cek "jual di cabang sendiri (Pusat) tetap OK" "V == 1" \
+  "$(api "$KASIR" POST /penjualan "{\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}" | jq '(.sale.id != null) | if . then 1 else 0 end')"
+
+# pulihkan: branch_ids null → menu kembali tampil di semua lokasi
+PUT51B=$(echo "$M51" | jq '{nama, kode, category_id, tipe, mult, base_menu_id, base_mult, harga_jual, image_url, is_active, komponen: [.komponen[] | {ingredient_id, qty}], branch_ids: null}')
+api "$OWNER" PUT "/menu/$PBA_ID" "$PUT51B" > /dev/null
+cek "branch_ids null → menu kembali tampil di semua cabang" "V == 1" \
+  "$(api "$OWNER" GET "/menu?branch_id=$CB46_ID" | jq --arg id "$PBA_ID" '([.[] | select(.id==$id)] | length == 1) | if . then 1 else 0 end')"
+
+echo "== 52. Cabang store terhubung ke SATU central kitchen =="
+CK52_UTAMA=$(api "$OWNER" GET /cabang | jq -r '[.[] | select(.nama=="Central Kitchen")][0].id')
+cek "provisioning: store lama (Pusat) tertaut ke CK" "V == 1" \
+  "$(api "$OWNER" GET /cabang | jq --arg ck "$CK52_UTAMA" '([.[] | select(.nama=="Pusat")][0].central_kitchen_id == $ck) | if . then 1 else 0 end')"
+cek "store baru auto-tertaut saat CK hanya satu (Cabang Uji 46)" "V == 1" \
+  "$(api "$OWNER" GET /cabang | jq --arg ck "$CK52_UTAMA" --arg id "$CB46_ID" '([.[] | select(.id==$id)][0].central_kitchen_id == $ck) | if . then 1 else 0 end')"
+
+# kini ada 2 CK (Central Kitchen + Central Kitchen 47) → wajib memilih pemasok
+cek "dua CK: store baru tanpa pilih pemasok → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/cabang" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"nama":"Store 52"}')"
+ST52_ID=$(api "$OWNER" POST /cabang "{\"nama\":\"Store 52\",\"central_kitchen_id\":\"$CK47_ID\"}" | jq -r .id)
+cek "store baru tertaut ke CK pilihan (CK47)" "V == 1" \
+  "$(api "$OWNER" GET /cabang | jq --arg ck "$CK47_ID" --arg id "$ST52_ID" '([.[] | select(.id==$id)][0].central_kitchen_id == $ck) | if . then 1 else 0 end')"
+cek "pemasok bukan CK (store) → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/cabang" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"nama\":\"Store 52X\",\"central_kitchen_id\":\"$CB46_ID\"}")"
+cek "kantor dgn pemasok CK → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/cabang" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"nama\":\"Kantor 52\",\"tipe\":\"kantor\",\"central_kitchen_id\":\"$CK47_ID\"}")"
+
+# pindah pemasok via PATCH lalu kembalikan
+api "$OWNER" PATCH "/cabang/$CB46_ID" "{\"central_kitchen_id\":\"$CK47_ID\"}" > /dev/null
+cek "pindah pemasok via PATCH tersimpan" "V == 1" \
+  "$(api "$OWNER" GET /cabang | jq --arg ck "$CK47_ID" --arg id "$CB46_ID" '([.[] | select(.id==$id)][0].central_kitchen_id == $ck) | if . then 1 else 0 end')"
+api "$OWNER" PATCH "/cabang/$CB46_ID" "{\"central_kitchen_id\":\"$CK52_UTAMA\"}" > /dev/null
+
+# arah kirim: CK hanya boleh mengirim ke store yang tertaut dengannya
+FK52=$(api "$OWNER" POST /pembelian/faktur "{\"branch_id\":\"$CK47_ID\",\"items\":[{\"ingredient_id\":\"$ING42A\",\"mode\":\"pcs\",\"jumlah\":6,\"total_harga\":30000}]}")
+FK52_ID=$(echo "$FK52" | jq -r .faktur_id)
+api "$OWNER" POST "/pembelian/tahap/$FK52_ID" '{"ke":"dikerjakan","dana_cair":30000}' > /dev/null
+ID52=$(api "$OWNER" GET "/pembelian?branch_id=$CK47_ID&per_page=500" | jq -r --arg f "$FK52_ID" '[.rows[] | select(.faktur_id==$f)][0].id')
+cek "CK47 kirim ke store milik CK lain → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/pembelian/tahap/$FK52_ID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"ke\":\"menunggu\",\"items\":[{\"id\":\"$ID52\",\"qty\":6}],\"tujuan_branch_id\":\"$CB46_ID\"}")"
+api "$OWNER" POST "/pembelian/tahap/$FK52_ID" "{\"ke\":\"menunggu\",\"items\":[{\"id\":\"$ID52\",\"qty\":6}],\"tujuan_branch_id\":\"$ST52_ID\"}" > /dev/null
+cek "CK47 kirim ke store miliknya → baris pindah ke tujuan" "V == 1" \
+  "$(api "$OWNER" GET "/pembelian?branch_id=$ST52_ID&per_page=500" | jq --arg f "$FK52_ID" '([.rows[] | select(.faktur_id==$f)] | (length == 1) and (.[0].status == "menunggu")) | if . then 1 else 0 end')"
 
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="

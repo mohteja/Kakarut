@@ -95,9 +95,10 @@ export function TambahStokDariMenuPage() {
   const { branchQuery } = useBranch();
   const queryClient = useQueryClient();
 
+  // Menu per lokasi: rencana hanya untuk menu yang tersedia di cabang aktif.
   const { data: menus = [] } = useQuery({
-    queryKey: ["menu"],
-    queryFn: () => api<MenuDto[]>("/menu"),
+    queryKey: ["menu", branchQuery],
+    queryFn: () => api<MenuDto[]>(`/menu${branchQuery}`),
   });
   const { data: ketersediaan = [] } = useQuery({
     queryKey: ["menu-ketersediaan", branchQuery],

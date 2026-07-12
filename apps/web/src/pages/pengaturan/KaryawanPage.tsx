@@ -14,9 +14,10 @@ import {
   thClass,
 } from "../../components/ui";
 import type { AktivitasRow } from "@kakarut/shared";
-import { useBranch } from "../../context/BranchContext";
+import { labelCabang, useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatTanggalRingkas, formatWaktu } from "../../lib/format";
+import { useCompanyMode } from "../../lib/useCompanyMode";
 
 interface Karyawan {
   user_id: string;
@@ -41,6 +42,7 @@ const labelRole = { owner: "Owner", admin: "Admin", cashier: "Kasir" } as const;
 
 export function KaryawanPage() {
   const { cabang } = useBranch();
+  const { isPro } = useCompanyMode();
   const queryClient = useQueryClient();
   const { data: karyawan, isLoading } = useQuery({
     queryKey: ["karyawan"],
@@ -135,7 +137,7 @@ export function KaryawanPage() {
               <th className={thClass}>Kode</th>
               <th className={thClass}>Email</th>
               <th className={thClass}>Peran</th>
-              <th className={thClass}>Cabang</th>
+              <th className={thClass}>Lokasi kerja</th>
               <th className={thClass}>Status</th>
               <th className={thClass}></th>
             </tr>
@@ -246,24 +248,29 @@ export function KaryawanPage() {
                   <option value="owner">Owner</option>
                 </select>
               </div>
-              <div>
-                <label className="mb-1 block text-sm font-medium">
-                  Cabang {form.role === "cashier" ? "(wajib)" : "(opsional)"}
-                </label>
-                <select
-                  value={form.branch_id}
-                  onChange={(e) => setForm({ ...form, branch_id: e.target.value })}
-                  className={inputClass}
-                  required={form.role === "cashier"}
-                >
-                  {form.role !== "cashier" && <option value="">Semua cabang</option>}
-                  {cabang.map((b) => (
-                    <option key={b.id} value={b.id}>
-                      {b.nama}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {/* Mode Lite: 1 cabang — kasir otomatis ke cabang satu-satunya. */}
+              {isPro && (
+                <div>
+                  <label className="mb-1 block text-sm font-medium">
+                    Lokasi kerja {form.role === "cashier" ? "(wajib)" : "(opsional)"}
+                  </label>
+                  <select
+                    value={form.branch_id}
+                    onChange={(e) => setForm({ ...form, branch_id: e.target.value })}
+                    className={inputClass}
+                    required={form.role === "cashier"}
+                  >
+                    {form.role !== "cashier" && <option value="">Semua lokasi</option>}
+                    {cabang
+                      .filter((b) => b.is_active)
+                      .map((b) => (
+                        <option key={b.id} value={b.id}>
+                          {labelCabang(b)}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+              )}
             </div>
             <ErrorText error={tambah.error} />
             <div className="flex justify-end gap-2 pt-2">

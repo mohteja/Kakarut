@@ -5,9 +5,15 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { PANDUAN_MARKUP } from "@kakarut/shared";
 import { db, type Tx } from "../../db/client";
-import { ingredients, menuComponents, menus } from "../../db/schema";
+import { branches, ingredients, menuBranches, menuComponents, menus } from "../../db/schema";
 import { requireRole, resolveBranchId, type AppEnv } from "../../middleware/auth";
-import { ketersediaanMenu, loadKatalog, resolveKode, toMenuDto } from "./service";
+import {
+  ketersediaanMenu,
+  loadKatalog,
+  resolveKode,
+  tampilDiCabang,
+  toMenuDto,
+} from "./service";
 
 const KomponenBody = z.object({
   ingredient_id: z.string().uuid(),
@@ -26,6 +32,8 @@ const MenuBody = z.object({
   image_url: z.string().nullish(),
   komponen: z.array(KomponenBody).default([]),
   is_active: z.boolean().default(true),
+  /** pembatasan lokasi (mode Pro) — null/[] = tampil di semua cabang */
+  branch_ids: z.array(z.string().uuid()).nullish(),
 });
 
 const UrutanBody = z.object({
@@ -57,6 +65,21 @@ async function validateRefs(
       .where(and(eq(ingredients.companyId, companyId), inArray(ingredients.id, ids)));
     if (rows.length !== ids.length) {
       throw new HTTPException(400, { message: "Ada bahan yang tidak valid" });
+    }
+  }
+  const branchIds = [...new Set(body.branch_ids ?? [])];
+  if (branchIds.length > 0) {
+    const rows = await db
+      .select({ id: branches.id, tipe: branches.tipe })
+      .from(branches)
+      .where(and(eq(branches.companyId, companyId), inArray(branches.id, branchIds)));
+    if (rows.length !== branchIds.length) {
+      throw new HTTPException(400, { message: "Ada cabang yang tidak valid" });
+    }
+    if (rows.some((r) => r.tipe === "kantor")) {
+      throw new HTTPException(400, {
+        message: "Kantor bukan lokasi penjualan — pilih cabang store atau central kitchen",
+      });
     }
   }
   if (body.tipe === "paket" && body.base_menu_id) {
@@ -93,6 +116,15 @@ async function replaceKomponen(
   }
 }
 
+/** Ganti-set pembatasan lokasi menu (null/[] = hapus semua = tampil di semua). */
+async function replaceBranches(tx: Tx, menuId: string, branchIds: string[] | null | undefined) {
+  await tx.delete(menuBranches).where(eq(menuBranches.menuId, menuId));
+  const ids = [...new Set(branchIds ?? [])];
+  if (ids.length > 0) {
+    await tx.insert(menuBranches).values(ids.map((branchId) => ({ menuId, branchId })));
+  }
+}
+
 export const menuRoutes = new Hono<AppEnv>()
   .get("/panduan-markup", (c) => c.json(PANDUAN_MARKUP))
   .get("/", async (c) => {
@@ -100,9 +132,14 @@ export const menuRoutes = new Hono<AppEnv>()
     const katalog = await loadKatalog(db, auth.company_id!);
     const kategoriFilter = c.req.query("kategori_id");
     const includeInactive = c.req.query("semua") === "true";
+    // Kasir SELALU dibatasi menu cabangnya; owner/admin bisa memfilter via
+    // ?branch_id= (tanpa param = katalog penuh untuk halaman manajemen).
+    const branchFilter =
+      c.get("auth").role === "cashier" ? auth.branch_id : c.req.query("branch_id") || null;
     const dtos = katalog.rows
       .filter((r) => (includeInactive ? true : r.isActive))
       .filter((r) => (kategoriFilter ? r.categoryId === kategoriFilter : true))
+      .filter((r) => (branchFilter ? tampilDiCabang(katalog, r.id, branchFilter) : true))
       .map((r) => toMenuDto(r, katalog));
     return c.json(dtos);
   })
@@ -164,6 +201,7 @@ export const menuRoutes = new Hono<AppEnv>()
         .returning();
       if (!menu) throw new HTTPException(409, { message: `Menu "${body.nama}" sudah ada` });
       await replaceKomponen(tx, menu.id, body.komponen);
+      await replaceBranches(tx, menu.id, body.branch_ids);
       return menu;
     });
     const katalog = await loadKatalog(db, auth.company_id!);
@@ -208,6 +246,10 @@ export const menuRoutes = new Hono<AppEnv>()
           .returning();
         if (!menu) throw new HTTPException(404, { message: "Menu tidak ditemukan" });
         await replaceKomponen(tx, menu.id, body.komponen);
+        // undefined = tidak dikirim → pertahankan pembatasan lama; null/[] = buka semua
+        if (body.branch_ids !== undefined) {
+          await replaceBranches(tx, menu.id, body.branch_ids);
+        }
         return menu;
       });
       const katalog = await loadKatalog(db, auth.company_id!);

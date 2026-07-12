@@ -5,6 +5,7 @@ import { ErrorText, Modal, btnPrimary, btnSecondary, inputClass, tdClass, thClas
 import { labelCabang, useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah } from "../../lib/format";
+import { useCompanyMode } from "../../lib/useCompanyMode";
 import {
   AKSI_TAHAP,
   URUTAN_TAHAP,
@@ -45,6 +46,9 @@ export function TahapModal({
 }) {
   const queryClient = useQueryClient();
   const { cabang, branchId } = useBranch();
+  const { isPro } = useCompanyMode();
+  // CK hanya mengirim ke store yang terhubung dengannya (satu CK per store)
+  const cabangIniCk = cabang.find((b) => b.id === branchId)?.tipe === "central_kitchen";
   const target = URUTAN_TAHAP[ke];
   // hanya baris yang tahapnya masih di belakang tujuan yang bisa maju
   const bisaMaju = grup.rows.filter(
@@ -339,28 +343,40 @@ export function TahapModal({
               🚚 Dikirim / disimpan ke mana?
             </div>
             <div className="grid gap-2 sm:grid-cols-2">
-              <div>
-                <label className="mb-1 block text-xs font-medium text-stone-500">
-                  Cabang tujuan
-                </label>
-                <select
-                  value={tujuanCabang}
-                  onChange={(e) => {
-                    setTujuanCabang(e.target.value);
-                    setTujuanTempat("");
-                  }}
-                  aria-label="Cabang tujuan"
-                  className={inputClass}
-                >
-                  {cabang
-                    .filter((b) => b.is_active)
-                    .map((b) => (
-                      <option key={b.id} value={b.id}>
-                        {labelCabang(b)}
-                      </option>
-                    ))}
-                </select>
-              </div>
+              {/* Pilihan cabang tujuan hanya di mode Pro (multi-lokasi);
+                  Lite otomatis ke cabang sendiri. Kantor bukan tujuan kirim. */}
+              {isPro && (
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-stone-500">
+                    Cabang tujuan
+                  </label>
+                  <select
+                    value={tujuanCabang}
+                    onChange={(e) => {
+                      setTujuanCabang(e.target.value);
+                      setTujuanTempat("");
+                    }}
+                    aria-label="Cabang tujuan"
+                    className={inputClass}
+                  >
+                    {cabang
+                      .filter((b) => b.is_active && b.tipe !== "kantor")
+                      // Store terhubung ke SATU CK: dari CK hanya tampil store
+                      // yang dipasoknya (plus CK itu sendiri)
+                      .filter((b) =>
+                        cabangIniCk
+                          ? b.id === branchId ||
+                            (b.tipe === "store" && b.central_kitchen_id === branchId)
+                          : true,
+                      )
+                      .map((b) => (
+                        <option key={b.id} value={b.id}>
+                          {labelCabang(b)}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+              )}
               <div>
                 <label className="mb-1 block text-xs font-medium text-stone-500">
                   Tempat penyimpanan (opsional)
@@ -386,13 +402,12 @@ export function TahapModal({
                 sana saat diterima); sisa tugas tetap di cabang ini.
               </div>
             )}
-            {tujuanCabang === branchId &&
-              cabang.find((b) => b.id === branchId)?.tipe === "central_kitchen" && (
-                <div className="text-xs text-stone-500">
-                  🏭 Ini Central Kitchen — bila barang untuk outlet, pilih cabang 🏪 store
-                  sebagai tujuan.
-                </div>
-              )}
+            {tujuanCabang === branchId && cabangIniCk && (
+              <div className="text-xs text-stone-500">
+                🏭 Ini Central Kitchen — bila barang untuk outlet, pilih cabang 🏪 store
+                sebagai tujuan (hanya store yang terhubung ke CK ini yang bisa dipilih).
+              </div>
+            )}
           </div>
         )}
 

@@ -48,8 +48,8 @@ export function StokPage() {
     enabled: tab === "menu",
   });
   const { data: menus = [] } = useQuery({
-    queryKey: ["menu"],
-    queryFn: () => api<MenuDto[]>("/menu"),
+    queryKey: ["menu", branchQuery],
+    queryFn: () => api<MenuDto[]>(`/menu${branchQuery}`),
     enabled: tab === "menu",
   });
   const { data: tempatList = [] } = useQuery({

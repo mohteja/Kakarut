@@ -5,7 +5,7 @@ import { db } from "../../db/client";
 import { branches, companies, meja, saleConsumptions, saleItems, sales } from "../../db/schema";
 import { kodeCabang, tanggalDi } from "../../lib/time";
 import { upsertCustomer } from "../customer/service";
-import { hitungHargaMenu, loadKatalog } from "../menu/service";
+import { hitungHargaMenu, loadKatalog, tampilDiCabang } from "../menu/service";
 
 export interface CreateSaleParams {
   companyId: string;
@@ -90,6 +90,13 @@ export async function createSale(params: CreateSaleParams) {
       const menu = menuById.get(item.menu_id);
       if (!menu || !menu.isActive) {
         throw new HTTPException(400, { message: `Menu tidak ditemukan/nonaktif: ${item.menu_id}` });
+      }
+      // Pembatasan lokasi (mode Pro): menu yang dibatasi hanya boleh terjual
+      // di cabang whitelist-nya — titik penegakan utama.
+      if (!tampilDiCabang(katalog, menu.id, branch.id)) {
+        throw new HTTPException(400, {
+          message: `Menu "${menu.nama}" tidak tersedia di cabang ini`,
+        });
       }
       if (item.qty <= 0) {
         throw new HTTPException(400, { message: `Qty tidak valid untuk ${menu.nama}` });
