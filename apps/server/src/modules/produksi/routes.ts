@@ -79,6 +79,13 @@ const TahapBody = z.object({
   realisasi: z.number().nonnegative().max(1_000_000_000_000).nullish(),
   /** keterangan selisih realisasi: sumber dana tambahan / pemegang sisa dana */
   selisih_catatan: z.string().trim().max(300).nullish(),
+  /**
+   * Tujuan kirim baris yang maju (dipakai saat "dikirim"): cabang tujuan —
+   * baris berpindah cabang & stoknya terhitung di sana saat dikonfirmasi —
+   * dan/atau tempat penyimpanan tujuan. Sisa split tetap di tempat asal.
+   */
+  tujuan_branch_id: z.string().uuid().nullish(),
+  tujuan_storage_id: z.string().uuid().nullish(),
 });
 
 /** Total dana efektif satu faktur: cair + tambahan − kembali. */
@@ -360,7 +367,8 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
      */
     .post("/tahap/:fakturId", zValidator("json", TahapBody), async (c) => {
       const auth = c.get("auth");
-      const { ke, items, dana_cair, realisasi, selisih_catatan } = c.req.valid("json");
+      const { ke, items, dana_cair, realisasi, selisih_catatan, tujuan_branch_id, tujuan_storage_id } =
+        c.req.valid("json");
 
       const conds = [
         eq(productions.companyId, auth.company_id!),
@@ -405,6 +413,41 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
           }
         }
 
+        // Tujuan kirim (opsional): baris yang maju pindah cabang dan/atau
+        // tempat penyimpanan — stok terhitung di cabang tujuan saat konfirmasi.
+        let tujuanBranch: string | null = null;
+        if (tujuan_branch_id) {
+          tujuanBranch = await pastikanCabang(tujuan_branch_id, auth.company_id!);
+          if (auth.role === "cashier" && auth.branch_id && tujuanBranch !== auth.branch_id) {
+            throw new HTTPException(403, {
+              message: "Kasir tidak boleh mengirim ke cabang lain",
+            });
+          }
+        }
+        let tujuanStorage: string | null = null;
+        if (tujuan_storage_id) {
+          const [lok] = await db
+            .select({ id: storageLocations.id })
+            .from(storageLocations)
+            .where(
+              and(
+                eq(storageLocations.id, tujuan_storage_id),
+                eq(storageLocations.companyId, auth.company_id!),
+                eq(storageLocations.branchId, tujuanBranch ?? baris[0].branchId),
+              ),
+            );
+          if (!lok) {
+            throw new HTTPException(400, {
+              message: "Tempat penyimpanan tidak valid untuk cabang tujuan",
+            });
+          }
+          tujuanStorage = tujuan_storage_id;
+        }
+        const pindah = {
+          ...(tujuanBranch ? { branchId: tujuanBranch } : {}),
+          ...(tujuanStorage ? { storageLocationId: tujuanStorage } : {}),
+        };
+
         const now = new Date();
         // waktu di-set saat dikonfirmasi (bukan saat RAB) — lihat /konfirmasi.
         const naik =
@@ -436,6 +479,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
                 .update(productions)
                 .set({
                   ...naik,
+                  ...pindah,
                   // harga riil menggantikan estimasi RAB (harga pasar berubah)
                   ...(item.harga != null ? { totalHarga: item.harga } : {}),
                 })
@@ -474,7 +518,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
               }
               await tx.insert(productions).values({
                 companyId: b.companyId,
-                branchId: b.branchId,
+                branchId: tujuanBranch ?? b.branchId,
                 ingredientId: b.ingredientId,
                 qty: item.qty,
                 tipe: b.tipe,
@@ -482,7 +526,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
                 fakturId: b.fakturId,
                 noFaktur: b.noFaktur,
                 supplierId: b.supplierId,
-                storageLocationId: b.storageLocationId,
+                storageLocationId: tujuanStorage ?? b.storageLocationId,
                 isBatch: b.isBatch,
                 catatan: b.catatan,
                 userId: b.userId,

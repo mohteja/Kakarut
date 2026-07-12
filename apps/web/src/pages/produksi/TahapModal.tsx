@@ -1,7 +1,8 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import type { JenisPengadaan } from "@kakarut/shared";
-import { ErrorText, Modal, btnPrimary, btnSecondary, tdClass, thClass } from "../../components/ui";
+import type { JenisPengadaan, PenyimpananDto } from "@kakarut/shared";
+import { ErrorText, Modal, btnPrimary, btnSecondary, inputClass, tdClass, thClass } from "../../components/ui";
+import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah } from "../../lib/format";
 import {
@@ -43,6 +44,7 @@ export function TahapModal({
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
+  const { cabang, branchId } = useBranch();
   const target = URUTAN_TAHAP[ke];
   // hanya baris yang tahapnya masih di belakang tujuan yang bisa maju
   const bisaMaju = grup.rows.filter(
@@ -81,6 +83,16 @@ export function TahapModal({
   const [sesuaiRencana, setSesuaiRencana] = useState(true);
   const [selisihCatatan, setSelisihCatatan] = useState("");
   const pakaiHarga = keSelesai && !sesuaiRencana;
+
+  // Tujuan kirim saat "dikirim/selesai": cabang tujuan (default cabang faktur
+  // ini) + tempat penyimpanan di cabang itu (opsional).
+  const [tujuanCabang, setTujuanCabang] = useState(branchId ?? "");
+  const [tujuanTempat, setTujuanTempat] = useState("");
+  const { data: tempatTujuan = [] } = useQuery({
+    queryKey: ["penyimpanan", tujuanCabang],
+    queryFn: () => api<PenyimpananDto[]>(`/penyimpanan?branch_id=${tujuanCabang}`),
+    enabled: keSelesai && tujuanCabang !== "",
+  });
 
   // Tahap "diproses": semua baris ikut penuh (read-only). Tahap lain: sesuai
   // centang + qty maju yang diisi; harga riil ikut dikirim bila disesuaikan.
@@ -151,6 +163,8 @@ export function TahapModal({
           ...(realisasi != null && !adaInvalid
             ? { realisasi, selisih_catatan: selisihCatatan.trim() || null }
             : {}),
+          ...(keSelesai && tujuanCabang ? { tujuan_branch_id: tujuanCabang } : {}),
+          ...(keSelesai && tujuanTempat ? { tujuan_storage_id: tujuanTempat } : {}),
         },
       }),
     onSuccess: () => {
@@ -306,6 +320,62 @@ export function TahapModal({
                 })}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {keSelesai && (
+          <div className="space-y-2 rounded-lg border border-stone-200 p-3">
+            <div className="text-sm font-semibold text-stone-700">
+              🚚 Dikirim / disimpan ke mana?
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <div>
+                <label className="mb-1 block text-xs font-medium text-stone-500">
+                  Cabang tujuan
+                </label>
+                <select
+                  value={tujuanCabang}
+                  onChange={(e) => {
+                    setTujuanCabang(e.target.value);
+                    setTujuanTempat("");
+                  }}
+                  aria-label="Cabang tujuan"
+                  className={inputClass}
+                >
+                  {cabang
+                    .filter((b) => b.is_active)
+                    .map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.nama}
+                      </option>
+                    ))}
+                </select>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-stone-500">
+                  Tempat penyimpanan (opsional)
+                </label>
+                <select
+                  value={tujuanTempat}
+                  onChange={(e) => setTujuanTempat(e.target.value)}
+                  aria-label="Tempat penyimpanan tujuan"
+                  className={inputClass}
+                >
+                  <option value="">— pilih tempat —</option>
+                  {tempatTujuan.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.nama}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            {tujuanCabang && branchId && tujuanCabang !== branchId && (
+              <div className="text-xs text-amber-700">
+                Baris yang maju akan <b>berpindah ke cabang tujuan</b> (stok terhitung di
+                sana saat diterima); sisa tugas tetap di cabang ini.
+              </div>
+            )}
           </div>
         )}
 
