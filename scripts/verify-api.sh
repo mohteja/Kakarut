@@ -1108,6 +1108,95 @@ cek "saldo bahan kurang tak berubah (masih rencana)" "abs(V - $KURANG_SALDO) < 0
   "$(echo "$S40" | jq --arg id "$KURANG_ID" '[.[] | select(.ingredient_id == $id)][0].saldo')"
 cek "bahan kurang tampil sbg stok berjalan (produksi/beli)" "V == 1" \
   "$(echo "$S40" | jq --arg id "$KURANG_ID" '([.[] | select(.ingredient_id == $id)][0] | ((.produksi_berjalan.qty // 0) + (.pembelian_berjalan.qty // 0)) > 0) | if . then 1 else 0 end')"
+echo "== 41. Pembulatan pembelian per kemasan (boleh_eceran) =="
+# default: bahan beli TIDAK boleh eceran → dibulatkan per kemasan
+BHN41=$(api "$OWNER" GET /bahan)
+PLASTIK41_ID=$(echo "$BHN41" | jq -r '[.[] | select(.slug == "plastik take away")][0].id')
+cek "bahan beli default boleh_eceran=false" "V == 1" \
+  "$(echo "$BHN41" | jq '([.[] | select(.pengadaan == "beli")] | length > 0 and ([.[] | select(.pengadaan == "beli") | select(.boleh_eceran == true)] | length == 0)) | if . then 1 else 0 end')"
+# preview rencana: semua baris beli isi>1 yang kurang → mode batch (kemasan), qty = jumlah×isi
+PRV41=$(api "$OWNER" POST /rekomendasi/menu "{\"items\":[{\"menu_id\":\"$PBA_ID\",\"porsi\":500}]}")
+cek "preview: beli isi>1 kurang → mode kemasan (batch)" "V == 1" \
+  "$(echo "$PRV41" | jq 'def ab: if . < 0 then -. else . end;
+    ([.bahan[] | select(.kurang > 0 and .pengadaan == "beli" and .isi > 1)] | length > 0) and
+    ([.bahan[] | select(.kurang > 0 and .pengadaan == "beli" and .isi > 1)
+       | select(.mode_faktur != "batch" or (((.qty_faktur // 0) - (.jumlah_faktur // 0) * .isi)|ab) > 0.001)] | length == 0)
+    | if . then 1 else 0 end')"
+# rekomendasi beli: baris ikut terbulatkan + estimasi dari qty terbulatkan
+RK41=$(api "$OWNER" GET "/rekomendasi/beli?acuan=7hari&target=50000000")
+cek "rekomendasi: jumlah_faktur = ⌈saran/isi⌉ utk beli isi>1" "V == 1" \
+  "$(echo "$RK41" | jq 'def ab: if . < 0 then -. else . end;
+    ([.bahan[] | select(.pengadaan == "beli" and .isi > 1 and (.saran_beli // 0) > 0.001)]) as $rows
+    | (($rows | length) == 0) or
+      ([$rows[] | select(.mode_faktur != "batch" or ((.jumlah_faktur // 0) - ((.saran_beli / .isi) | ceil) | ab) > 0.001
+         or (((.estimasi_biaya // 0) - ((.qty_faktur // 0) * .harga_per_unit | round))|ab) > 1)] | length == 0)
+    | if . then 1 else 0 end')"
+# flip eceran: plastik boleh eceran → preview kembali per pcs
+api "$OWNER" PUT "/bahan/$PLASTIK41_ID" '{"boleh_eceran":true}' > /dev/null
+cek "PUT bahan boleh_eceran=true tersimpan" "V == 1" \
+  "$(api "$OWNER" GET /bahan | jq --arg id "$PLASTIK41_ID" '([.[] | select(.id == $id)][0].boleh_eceran == true) | if . then 1 else 0 end')"
+PRV41B=$(api "$OWNER" POST /rekomendasi/menu "{\"items\":[{\"menu_id\":\"$PBA_ID\",\"porsi\":500}]}")
+cek "eceran: baris plastik kembali mode pcs (⌈kurang⌉)" "V == 1" \
+  "$(echo "$PRV41B" | jq --arg id "$PLASTIK41_ID" 'def ab: if . < 0 then -. else . end;
+    ([.bahan[] | select(.ingredient_id == $id and .kurang > 0)]) as $r
+    | (($r | length) == 0) or ($r[0].mode_faktur == "pcs" and ((($r[0].qty_faktur // 0) - ($r[0].kurang | ceil))|ab) < 0.001)
+    | if . then 1 else 0 end')"
+# kembalikan ke default agar skrip idempotent
+api "$OWNER" PUT "/bahan/$PLASTIK41_ID" '{"boleh_eceran":false}' > /dev/null
+
+echo "== 42. Ubah tahap sebagian (dropdown): split baris + sisa tugas =="
+# faktur beli 2 baris: A 10 pcs @50rb, B 8 pcs @40rb
+BHN42=$(api "$OWNER" GET /bahan)
+ING42A=$(echo "$BHN42" | jq -r '[.[] | select(.pengadaan=="beli" and .track_stok==true)][0].id')
+ING42B=$(echo "$BHN42" | jq -r '[.[] | select(.pengadaan=="beli" and .track_stok==true)][1].id')
+SA42_0=$(saldo_bahan "$ING42A"); SB42_0=$(saldo_bahan "$ING42B")
+FK42=$(api "$OWNER" POST /pembelian/faktur "{\"items\":[{\"ingredient_id\":\"$ING42A\",\"mode\":\"pcs\",\"jumlah\":10,\"total_harga\":50000},{\"ingredient_id\":\"$ING42B\",\"mode\":\"pcs\",\"jumlah\":8,\"total_harga\":40000}]}")
+FK42_ID=$(echo "$FK42" | jq -r .faktur_id)
+baris42() { api "$OWNER" GET "/pembelian?per_page=500" | jq --arg f "$FK42_ID" '[.rows[] | select(.faktur_id==$f)]'; }
+ID42A=$(baris42 | jq -r --arg i "$ING42A" '[.[] | select(.ingredient_id==$i)][0].id')
+ID42B=$(baris42 | jq -r --arg i "$ING42B" '[.[] | select(.ingredient_id==$i)][0].id')
+
+# 1) maju sebagian: hanya baris A (penuh) → dikerjakan; B tetap RAB (sisa tugas)
+api "$OWNER" POST "/pembelian/tahap/$FK42_ID" "{\"ke\":\"dikerjakan\",\"items\":[{\"id\":\"$ID42A\",\"qty\":10}]}" > /dev/null
+cek "sebagian: baris A maju, baris B tetap rencana" "V == 1" \
+  "$(baris42 | jq --arg a "$ID42A" --arg b "$ID42B" '(([.[] | select(.id==$a)][0].status == "dikerjakan") and ([.[] | select(.id==$b)][0].status == "rencana")) | if . then 1 else 0 end')"
+
+# 2) split qty: B maju 3 dari 8 → dua baris (3 dikerjakan + 5 rencana), Σqty & Σharga tetap
+api "$OWNER" POST "/pembelian/tahap/$FK42_ID" "{\"ke\":\"dikerjakan\",\"items\":[{\"id\":\"$ID42B\",\"qty\":3}]}" > /dev/null
+B42=$(baris42 | jq --arg i "$ING42B" '[.[] | select(.ingredient_id==$i)]')
+cek "split: baris B jadi 2" "V == 2" "$(echo "$B42" | jq 'length')"
+cek "split: Σqty B tetap 8" "abs(V - 8) < 0.001" "$(echo "$B42" | jq '[.[].qty] | add')"
+cek "split: Σharga B tetap 40000" "abs(V - 40000) < 0.5" "$(echo "$B42" | jq '[.[].total_harga] | add')"
+cek "split: 3 dikerjakan + 5 rencana" "V == 1" \
+  "$(echo "$B42" | jq '((([.[] | select(.status=="dikerjakan")][0].qty // 0) == 3) and (([.[] | select(.status=="rencana")][0].qty // 0) == 5)) | if . then 1 else 0 end')"
+
+# 3) dgn items boleh lompat maju: sisa B (rencana) langsung → menunggu (dikirim)
+ID42B2=$(echo "$B42" | jq -r '[.[] | select(.status=="rencana")][0].id')
+api "$OWNER" POST "/pembelian/tahap/$FK42_ID" "{\"ke\":\"menunggu\",\"items\":[{\"id\":\"$ID42B2\",\"qty\":5}]}" > /dev/null
+cek "items: lompat maju rencana→menunggu diizinkan" "V == 1" \
+  "$(baris42 | jq --arg b "$ID42B2" '([.[] | select(.id==$b)][0].status == "menunggu") | if . then 1 else 0 end')"
+
+# 4) penjaga: mundur ditolak, qty melebihi ditolak, baris asing ditolak, dikonfirmasi tanpa items ditolak
+cek "tahap mundur (menunggu→dikerjakan) → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/pembelian/tahap/$FK42_ID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"ke\":\"dikerjakan\",\"items\":[{\"id\":\"$ID42B2\",\"qty\":5}]}")"
+cek "qty maju melebihi qty baris → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/pembelian/tahap/$FK42_ID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"ke\":\"menunggu\",\"items\":[{\"id\":\"$ID42A\",\"qty\":999}]}")"
+cek "baris bukan milik faktur → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/pembelian/tahap/$FK42_ID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"ke":"menunggu","items":[{"id":"00000000-0000-4000-8000-000000000000","qty":1}]}')"
+cek "ke=dikonfirmasi tanpa items → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/pembelian/tahap/$FK42_ID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"ke":"dikonfirmasi"}')"
+
+# 5) konfirmasi SEBAGIAN baris A (4 dari 10) → split + hanya 4 yang masuk saldo
+api "$OWNER" POST "/pembelian/tahap/$FK42_ID" "{\"ke\":\"dikonfirmasi\",\"items\":[{\"id\":\"$ID42A\",\"qty\":4}]}" > /dev/null
+SA42_1=$(saldo_bahan "$ING42A"); SB42_1=$(saldo_bahan "$ING42B")
+cek "konfirmasi sebagian: saldo A +4 saja" "abs(V - 4) < 0.001" "$(python3 -c "print($SA42_1 - $SA42_0)")"
+cek "saldo B belum berubah (belum dikonfirmasi)" "abs(V) < 0.001" "$(python3 -c "print($SB42_1 - $SB42_0)")"
+A42=$(baris42 | jq --arg i "$ING42A" '[.[] | select(.ingredient_id==$i)]')
+cek "A: 4 dikonfirmasi (harga prorata 20000)" "V == 1" \
+  "$(echo "$A42" | jq '([.[] | select(.status=="dikonfirmasi")][0] | (.qty == 4 and .total_harga == 20000)) | if . then 1 else 0 end')"
+cek "A: sisa tugas 6 dikerjakan (harga 30000)" "V == 1" \
+  "$(echo "$A42" | jq '([.[] | select(.status=="dikerjakan")][0] | (.qty == 6 and .total_harga == 30000)) | if . then 1 else 0 end')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

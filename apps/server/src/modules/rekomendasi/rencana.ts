@@ -51,7 +51,12 @@ export async function rencanaDariMenu(
     loadKatalog(db, companyId),
     hitungSaldoCabang(companyId, branchId),
     db
-      .select({ id: ingredients.id, pengadaan: ingredients.pengadaan, hargaBeli: ingredients.hargaBeli })
+      .select({
+        id: ingredients.id,
+        pengadaan: ingredients.pengadaan,
+        hargaBeli: ingredients.hargaBeli,
+        bolehEceran: ingredients.bolehEceran,
+      })
       .from(ingredients)
       .where(eq(ingredients.companyId, companyId)),
   ]);
@@ -96,7 +101,8 @@ export async function rencanaDariMenu(
     const hargaPerUnit = e && s.isi > 0 ? e.hargaBeli / s.isi : 0;
     // toleransi presisi float: noise (mis. 5e-17) tidak memicu faktur hantu
     const kurang = kekuranganBahan(butuh, s.saldo);
-    const faktur = kurang > 0 ? jumlahFaktur(kurang, pengadaan, s.isi) : null;
+    const faktur =
+      kurang > 0 ? jumlahFaktur(kurang, pengadaan, s.isi, e?.bolehEceran ?? false) : null;
     bahan.push({
       ingredient_id: ingredientId,
       nama: s.nama,

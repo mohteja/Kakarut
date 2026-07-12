@@ -96,6 +96,28 @@ Aman dijalankan berulang dan multi-instance (advisory lock PostgreSQL).
 - Nonaktifkan dengan `AUTO_MIGRATE=false` bila migrasi dikelola terpisah
   (mis. entrypoint Docker/CI menjalankan `npm run db:migrate`).
 
+### Re-deploy tanpa "404 page not found" (Dokploy/Traefik)
+
+Halaman **"404 page not found"** polos saat deploy berasal dari **Traefik**
+(bukan aplikasi): Traefik hanya mengarahkan trafik ke container **sehat**, dan
+saat re-deploy compose container lama dihentikan dulu sebelum yang baru
+dinyatakan sehat. Yang memperkecil jendela itu:
+
+- **Healthcheck cepat** — Docker menjalankan cek pertama setelah `interval`
+  berlalu; `interval: 5s` (di `docker-compose.yml` & `Dockerfile`) membuat
+  container baru sehat dalam ±5–10 detik, bukan ±40–60 detik.
+- **Boot tahan banting** — server me-retry koneksi DB saat boot (10× per 3 dtk),
+  jadi Neon yang bangun dari idle tidak membuat container crash-loop.
+- **Overlay klien** — pengguna yang aplikasinya SUDAH terbuka melihat overlay
+  "server sedang diperbarui" + auto-reconnect, bukan halaman error.
+
+Untuk **zero-downtime sejati** (tanpa jendela sama sekali), jalankan aplikasi
+sebagai **Application** (bukan Compose) di Dokploy, lalu di
+*Advanced → Swarm Settings → Update Config* isi `Order: start-first`
+(+ `FailureAction: rollback`). Dengan begitu container baru dinaikkan &
+ditunggu sehat dulu, baru yang lama dihentikan — healthcheck dari image sudah
+mendukung ini.
+
 ## Ringkasan API
 
 Semua di bawah `/api`, autentikasi `Bearer <JWT>` kecuali `POST /auth/login` dan `GET /health`.

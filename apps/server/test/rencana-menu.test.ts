@@ -93,19 +93,35 @@ describe("kekuranganBahan", () => {
 describe("jumlahFaktur", () => {
   it("produksi dgn isi > 1 → batch dibulatkan ke atas", () => {
     // kurang 100, isi/batch 90 → 2 batch = 180
-    expect(jumlahFaktur(100, "produksi", 90)).toEqual({ mode: "batch", jumlah: 2, qty: 180 });
+    expect(jumlahFaktur(100, "produksi", 90, false)).toEqual({ mode: "batch", jumlah: 2, qty: 180 });
     // pas 1 batch
-    expect(jumlahFaktur(90, "produksi", 90)).toEqual({ mode: "batch", jumlah: 1, qty: 90 });
+    expect(jumlahFaktur(90, "produksi", 90, false)).toEqual({ mode: "batch", jumlah: 1, qty: 90 });
   });
   it("produksi dgn isi 1 → pcs", () => {
-    expect(jumlahFaktur(7.2, "produksi", 1)).toEqual({ mode: "pcs", jumlah: 8, qty: 8 });
+    expect(jumlahFaktur(7.2, "produksi", 1, false)).toEqual({ mode: "pcs", jumlah: 8, qty: 8 });
   });
-  it("beli → pcs dibulatkan ke atas (tak beli pecahan)", () => {
-    expect(jumlahFaktur(3.2, "beli", 48)).toEqual({ mode: "pcs", jumlah: 4, qty: 4 });
-    expect(jumlahFaktur(10, "beli", 48)).toEqual({ mode: "pcs", jumlah: 10, qty: 10 });
+  it("produksi mengabaikan flag eceran (selalu per batch)", () => {
+    expect(jumlahFaktur(100, "produksi", 90, true)).toEqual({ mode: "batch", jumlah: 2, qty: 180 });
   });
-  it("kurang sangat kecil → minimal 1", () => {
-    expect(jumlahFaktur(0.01, "beli", 1).jumlah).toBe(1);
-    expect(jumlahFaktur(0.01, "produksi", 90).jumlah).toBe(1);
+  it("beli TANPA eceran → dibulatkan per KEMASAN penuh (isi per kemasan)", () => {
+    // kurang 3.2, kemasan isi 48 → 1 kemasan = 48
+    expect(jumlahFaktur(3.2, "beli", 48, false)).toEqual({ mode: "batch", jumlah: 1, qty: 48 });
+    expect(jumlahFaktur(10, "beli", 48, false)).toEqual({ mode: "batch", jumlah: 1, qty: 48 });
+    // kurang 100 → 3 kemasan = 144
+    expect(jumlahFaktur(100, "beli", 48, false)).toEqual({ mode: "batch", jumlah: 3, qty: 144 });
+    // kelipatan pas → tak over-buy
+    expect(jumlahFaktur(96, "beli", 48, false)).toEqual({ mode: "batch", jumlah: 2, qty: 96 });
+  });
+  it("beli BOLEH eceran → pcs dibulatkan ke atas (perilaku lama)", () => {
+    expect(jumlahFaktur(3.2, "beli", 48, true)).toEqual({ mode: "pcs", jumlah: 4, qty: 4 });
+    expect(jumlahFaktur(10, "beli", 48, true)).toEqual({ mode: "pcs", jumlah: 10, qty: 10 });
+  });
+  it("beli isi 1 → pcs (flag tak relevan)", () => {
+    expect(jumlahFaktur(3.2, "beli", 1, false)).toEqual({ mode: "pcs", jumlah: 4, qty: 4 });
+  });
+  it("kurang sangat kecil → minimal 1 pcs/kemasan", () => {
+    expect(jumlahFaktur(0.01, "beli", 1, false).jumlah).toBe(1);
+    expect(jumlahFaktur(0.01, "beli", 100, false)).toEqual({ mode: "batch", jumlah: 1, qty: 100 });
+    expect(jumlahFaktur(0.01, "produksi", 90, false).jumlah).toBe(1);
   });
 });

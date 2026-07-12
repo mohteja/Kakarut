@@ -43,9 +43,22 @@ const FakturEditBody = z.object({
 });
 const HapusBody = z.object({ password: z.string() });
 
-const TahapBody = z.object({ ke: z.enum(["dikerjakan", "menunggu"]) });
+const TahapBody = z.object({
+  ke: z.enum(["dikerjakan", "menunggu", "dikonfirmasi"]),
+  /**
+   * Maju SEBAGIAN: hanya baris terpilih yang naik tahap; qty < qty baris →
+   * baris di-split (sisa tetap di tahap lama sebagai tugas). Tanpa items =
+   * perilaku lama (seluruh faktur, wajib berurutan satu langkah).
+   */
+  items: z
+    .array(z.object({ id: z.string().uuid(), qty: z.number().positive() }))
+    .min(1)
+    .optional(),
+});
 /** transisi tahap produksi wajib berurutan: rencana → dikerjakan → menunggu (lalu /konfirmasi) */
 const TAHAP_SEBELUM = { dikerjakan: "rencana", menunggu: "dikerjakan" } as const;
+/** urutan pipeline untuk aturan "hanya boleh maju" pada tahap sebagian */
+const URUTAN_TAHAP = { rencana: 0, dikerjakan: 1, menunggu: 2, dikonfirmasi: 3 } as const;
 
 /** Terima hanya tanggal format YYYY-MM-DD; selain itu undefined. */
 const tglValid = (s?: string) => (s && /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : undefined);
@@ -268,14 +281,19 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
       );
     })
     /**
-     * Majukan tahap satu langkah (kedua jalur):
-     * produksi: rencana → dikerjakan → menunggu (selesai);
-     * beli: rencana (RAB) → dikerjakan (diproses) → menunggu (dikirim ke toko).
+     * Ubah tahap (kedua jalur):
+     * produksi: rencana → dikerjakan → menunggu (selesai) → dikonfirmasi;
+     * beli: rencana (RAB) → dikerjakan (diproses) → menunggu (dikirim) → diterima.
+     *
+     * Tanpa `items`: seluruh faktur naik SATU langkah (wajib berurutan) —
+     * perilaku lama. Dengan `items`: hanya baris terpilih yang maju (boleh
+     * lompat tahap ke depan, tak pernah mundur); qty < qty baris → baris
+     * di-SPLIT: bagian yang maju jadi baris baru, sisanya tetap di tahap
+     * lama sebagai tugas yang masih harus dikerjakan.
      */
     .post("/tahap/:fakturId", zValidator("json", TahapBody), async (c) => {
       const auth = c.get("auth");
-      const { ke } = c.req.valid("json");
-      const dari = TAHAP_SEBELUM[ke];
+      const { ke, items } = c.req.valid("json");
 
       const conds = [
         eq(productions.companyId, auth.company_id!),
@@ -286,6 +304,122 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
       if (auth.role === "cashier" && auth.branch_id) {
         conds.push(eq(productions.branchId, auth.branch_id));
       }
+
+      // ===== Maju sebagian (dropdown + penyesuaian per baris) =====
+      if (items) {
+        const target = URUTAN_TAHAP[ke];
+        const baris = await db
+          .select()
+          .from(productions)
+          .where(and(...conds));
+        if (baris.length === 0) {
+          throw new HTTPException(404, { message: "Faktur tidak ditemukan" });
+        }
+        const byId = new Map(baris.map((b) => [b.id, b]));
+
+        // Validasi seluruh permintaan dulu — semua-atau-tidak-sama-sekali.
+        const terpakai = new Set<string>();
+        for (const item of items) {
+          if (terpakai.has(item.id)) {
+            throw new HTTPException(400, { message: "Baris yang sama dikirim dua kali" });
+          }
+          terpakai.add(item.id);
+          const b = byId.get(item.id);
+          if (!b) {
+            throw new HTTPException(400, { message: "Ada baris yang bukan milik faktur ini" });
+          }
+          if (b.status === "ditolak" || URUTAN_TAHAP[b.status] >= target) {
+            throw new HTTPException(400, {
+              message: `Baris berstatus "${b.status}" tidak bisa dipindah ke "${ke}" — tahap hanya bisa maju`,
+            });
+          }
+          if (item.qty > b.qty + 1e-9) {
+            throw new HTTPException(400, { message: "Qty maju melebihi qty baris" });
+          }
+        }
+
+        const now = new Date();
+        // waktu di-set saat dikonfirmasi (bukan saat RAB) — lihat /konfirmasi.
+        const naik =
+          ke === "dikonfirmasi"
+            ? ({ status: ke, confirmedBy: auth.sub, confirmedAt: now, waktu: now } as const)
+            : ({ status: ke, updatedBy: auth.sub, updatedAt: now } as const);
+
+        await db.transaction(async (tx) => {
+          for (const item of items) {
+            const b = byId.get(item.id)!;
+            // WHERE menuntut status persis seperti saat dibaca: bila berubah
+            // oleh proses lain, update 0 baris → seluruh transaksi batal.
+            const kunci = and(
+              eq(productions.id, b.id),
+              eq(productions.status, b.status),
+              isNull(productions.deletedAt),
+            );
+            if (Math.abs(b.qty - item.qty) < 1e-9) {
+              const res = await tx
+                .update(productions)
+                .set(naik)
+                .where(kunci)
+                .returning({ id: productions.id });
+              if (res.length === 0) {
+                throw new HTTPException(409, {
+                  message: "Status faktur berubah — muat ulang halaman lalu coba lagi",
+                });
+              }
+            } else {
+              // Split: bagian yang maju jadi baris BARU; baris asli menyimpan
+              // sisa qty di tahap lama. Harga diprorata dan jumlah keduanya
+              // tetap = harga awal (tidak ada rupiah yang hilang/berlipat).
+              const hargaMaju =
+                b.totalHarga != null ? Math.round((b.totalHarga * item.qty) / b.qty) : null;
+              const res = await tx
+                .update(productions)
+                .set({
+                  qty: b.qty - item.qty,
+                  ...(b.totalHarga != null
+                    ? { totalHarga: b.totalHarga - (hargaMaju ?? 0) }
+                    : {}),
+                  updatedBy: auth.sub,
+                  updatedAt: now,
+                })
+                .where(kunci)
+                .returning({ id: productions.id });
+              if (res.length === 0) {
+                throw new HTTPException(409, {
+                  message: "Status faktur berubah — muat ulang halaman lalu coba lagi",
+                });
+              }
+              await tx.insert(productions).values({
+                companyId: b.companyId,
+                branchId: b.branchId,
+                ingredientId: b.ingredientId,
+                qty: item.qty,
+                tipe: b.tipe,
+                totalHarga: hargaMaju,
+                fakturId: b.fakturId,
+                noFaktur: b.noFaktur,
+                supplierId: b.supplierId,
+                storageLocationId: b.storageLocationId,
+                isBatch: b.isBatch,
+                catatan: b.catatan,
+                userId: b.userId,
+                workerId: b.workerId,
+                prodDate: b.prodDate,
+                ...naik,
+              });
+            }
+          }
+        });
+        return c.json({ ok: true, status: ke, jumlah_baris: items.length });
+      }
+
+      // ===== Perilaku lama: seluruh faktur, wajib berurutan satu langkah =====
+      if (ke === "dikonfirmasi") {
+        throw new HTTPException(400, {
+          message: 'Sertakan "items" (baris terpilih) atau pakai endpoint /konfirmasi',
+        });
+      }
+      const dari = TAHAP_SEBELUM[ke];
 
       const rows = await db
         .update(productions)

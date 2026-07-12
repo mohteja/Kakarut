@@ -29,6 +29,7 @@ interface FormState {
   catatan: string;
   is_packaging: boolean;
   is_complement: boolean;
+  boleh_eceran: boolean;
 }
 
 const kosong: FormState = {
@@ -43,6 +44,7 @@ const kosong: FormState = {
   catatan: "",
   is_packaging: false,
   is_complement: false,
+  boleh_eceran: false,
 };
 
 export function BahanPage() {
@@ -72,6 +74,8 @@ export function BahanPage() {
         catatan: f.catatan || null,
         is_packaging: f.is_packaging,
         is_complement: f.is_complement,
+        // eceran hanya relevan utk jalur beli; produksi selalu per batch
+        boleh_eceran: f.pengadaan === "beli" ? f.boleh_eceran : false,
       };
       return f.id
         ? api(`/bahan/${f.id}`, { method: "PUT", body })
@@ -197,6 +201,14 @@ export function BahanPage() {
                       Complement
                     </span>
                   )}
+                  {b.pengadaan === "beli" && b.boleh_eceran && (
+                    <span
+                      className="ml-2 rounded-full bg-green-100 px-2 py-0.5 text-xs text-green-700"
+                      title="Bisa dibeli eceran — saran beli tidak dibulatkan per kemasan"
+                    >
+                      Eceran
+                    </span>
+                  )}
                   {!b.track_stok && (
                     <span className="ml-2 rounded-full bg-stone-200 px-2 py-0.5 text-xs text-stone-500">
                       Stok tidak dilacak
@@ -241,6 +253,7 @@ export function BahanPage() {
                         catatan: b.catatan ?? "",
                         is_packaging: b.is_packaging,
                         is_complement: b.is_complement,
+                        boleh_eceran: b.boleh_eceran,
                       })
                     }
                     className="text-sm font-medium text-orange-600 hover:underline"
@@ -371,6 +384,23 @@ export function BahanPage() {
                 </select>
               </div>
             </div>
+            {form.pengadaan === "beli" && (
+              <label className="flex items-center gap-2 rounded-lg border border-stone-200 p-3 text-sm font-medium">
+                <input
+                  type="checkbox"
+                  checked={form.boleh_eceran}
+                  onChange={(e) => setForm({ ...form, boleh_eceran: e.target.checked })}
+                />
+                <span>
+                  Bisa dibeli eceran (tanpa pembulatan per kemasan)
+                  <span className="block text-xs font-normal text-stone-500">
+                    Tanpa centang: saran beli &amp; faktur otomatis dibulatkan ke atas per
+                    kemasan penuh (1 kemasan = {form.isi || "…"} {form.satuan || "unit"}) —
+                    mengikuti cara toko menjual.
+                  </span>
+                </span>
+              </label>
+            )}
             <div>
               <label className="mb-1 block text-sm font-medium">Catatan</label>
               <input

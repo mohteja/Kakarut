@@ -37,11 +37,15 @@ services:
       - "3000"
     # ports:
     #   - "3000:3000"
+    # Traefik (Dokploy) hanya mengarahkan trafik ke container SEHAT, dan Docker
+    # baru menjalankan cek pertama setelah `interval` berlalu. Interval pendek
+    # membuat container baru dinyatakan sehat dalam hitungan detik — jendela
+    # "404 page not found" saat re-deploy menyusut dari ±40-60 dtk ke ±5-10 dtk.
     healthcheck:
       test:
         - CMD-SHELL
         - node -e "require('http').get('http://127.0.0.1:3000/api/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
-      interval: 30s
+      interval: 5s
       timeout: 5s
-      retries: 3
-      start_period: 40s
+      retries: 5
+      start_period: 30s

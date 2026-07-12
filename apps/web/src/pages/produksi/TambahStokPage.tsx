@@ -1,10 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import type { JenisPengadaan, KonfirmasiStatus } from "@kakarut/shared";
 import {
   Card,
-  ErrorText,
   PageTitle,
   Spinner,
   btnPrimary,
@@ -23,6 +22,7 @@ interface StokMasukPage {
   total_pengeluaran: number;
 }
 import { FakturDetailModal } from "./FakturDetailModal";
+import { TahapModal } from "./TahapModal";
 
 export interface StokMasukRow {
   id: string;
@@ -78,13 +78,28 @@ export type StatusFaktur = KonfirmasiStatus | "sebagian";
 
 const BADGE_SEBAGIAN = { label: "📦 Diterima sebagian", cls: "bg-green-100 text-green-800" };
 
-/** Status faktur diturunkan dari status baris-barisnya. */
+/** Urutan pipeline — dipakai aturan "tahap hanya bisa maju" & pilihan dropdown. */
+export const URUTAN_TAHAP: Record<KonfirmasiStatus, number> = {
+  rencana: 0,
+  dikerjakan: 1,
+  menunggu: 2,
+  dikonfirmasi: 3,
+  ditolak: 3,
+};
+
+/**
+ * Status faktur diturunkan dari status baris-barisnya. Setelah "maju sebagian"
+ * baris-baris bisa berbeda tahap → tampilkan tahap PALING AWAL yang belum
+ * selesai (di situlah sisa tugas berada).
+ */
 export function statusFaktur(rows: { status: KonfirmasiStatus }[]): StatusFaktur {
   const set = new Set(rows.map((r) => r.status));
   if (set.size === 1) return rows[0].status;
-  // campuran hanya muncul setelah "terima sebagian": ada yg diterima & ditolak
-  if (set.has("dikonfirmasi") && set.has("ditolak")) return "sebagian";
-  return rows[0].status;
+  for (const s of ["rencana", "dikerjakan", "menunggu"] as const) {
+    if (set.has(s)) return s;
+  }
+  // campuran baris selesai: ada yang diterima & ditolak
+  return "sebagian";
 }
 
 /** Badge faktur (peduli "sebagian"), pilih peta sesuai jalur. */
@@ -116,6 +131,39 @@ export const STATUS_BELI: Record<KonfirmasiStatus, { label: string; cls: string 
   ditolak: { label: "❌ Ditolak penerima", cls: "bg-red-100 text-red-700" },
 };
 
+/** Label ringkas tahap satu BARIS (dipakai saat faktur berisi campuran tahap). */
+export function labelTahapRingkas(tipe: JenisPengadaan, s: KonfirmasiStatus) {
+  const beli = tipe === "beli";
+  switch (s) {
+    case "rencana":
+      return beli ? "📋 RAB" : "📋 rencana";
+    case "dikerjakan":
+      return beli ? "🔄 diproses" : "🔨 dikerjakan";
+    case "menunggu":
+      return beli ? "🚚 dikirim" : "✅ selesai";
+    case "dikonfirmasi":
+      return beli ? "📦 diterima" : "📦 masuk stok";
+    case "ditolak":
+      return "❌ ditolak";
+  }
+}
+
+export type TahapTujuan = "dikerjakan" | "menunggu" | "dikonfirmasi";
+
+/** Pilihan tujuan tahap pada dropdown "Ubah tahap…", per jalur. */
+export const AKSI_TAHAP: Record<JenisPengadaan, Array<{ ke: TahapTujuan; label: string }>> = {
+  produksi: [
+    { ke: "dikerjakan", label: "🔨 Mulai dikerjakan" },
+    { ke: "menunggu", label: "✅ Selesai — menunggu konfirmasi" },
+    { ke: "dikonfirmasi", label: "📦 Konfirmasi Ada (masuk stok)" },
+  ],
+  beli: [
+    { ke: "dikerjakan", label: "🔄 Diproses" },
+    { ke: "menunggu", label: "🚚 Dikirim ke toko" },
+    { ke: "dikonfirmasi", label: "📦 Diterima (masuk stok)" },
+  ],
+};
+
 const TEKS: Record<JenisPengadaan, { judul: string; endpoint: string; logJudul: string }> = {
   produksi: { judul: "Produksi Bahan Baku", endpoint: "/produksi", logJudul: "Produksi hari ini" },
   beli: { judul: "Beli Bahan Baku", endpoint: "/pembelian", logJudul: "Pembelian hari ini" },
@@ -129,7 +177,6 @@ const TEKS: Record<JenisPengadaan, { judul: string; endpoint: string; logJudul: 
 export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
   const t = TEKS[tipe];
   const { branchQuery } = useBranch();
-  const queryClient = useQueryClient();
   const [detail, setDetail] = useState<FakturGroup | null>(null);
 
   // Buku besar: filter tanggal + pagination per faktur (terlama di halaman awal,
@@ -173,24 +220,11 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
     setPage(Math.min(totalPages, Math.max(1, n)));
   }
 
-  const konfirmasi = useMutation({
-    mutationFn: (fakturId: string) =>
-      api(`${t.endpoint}/konfirmasi/${fakturId}`, { method: "POST" }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [t.endpoint] });
-      queryClient.invalidateQueries({ queryKey: ["stok"] });
-    },
-  });
-
-  // Majukan tahap produksi (rencana → dikerjakan → menunggu)
-  const tahap = useMutation({
-    mutationFn: (v: { fakturId: string; ke: "dikerjakan" | "menunggu" }) =>
-      api(`${t.endpoint}/tahap/${v.fakturId}`, { method: "POST", body: { ke: v.ke } }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [t.endpoint] });
-      queryClient.invalidateQueries({ queryKey: ["stok"] });
-    },
-  });
+  // Ubah tahap lewat dropdown → modal penyesuaian per baris (tak ada lagi
+  // aksi satu-klik yang bisa kepencet tak sengaja).
+  const [ubahTahap, setUbahTahap] = useState<{ grup: FakturGroup; ke: TahapTujuan } | null>(
+    null,
+  );
 
   // Kelompokkan baris per faktur (baris lama tanpa faktur = grup sendiri)
   const grup = useMemo<FakturGroup[]>(() => {
@@ -253,10 +287,10 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
 
       <div className="mb-4 rounded-lg bg-blue-50 px-4 py-2 text-sm text-blue-800">
         Stok bertambah <b>setelah faktur dikonfirmasi</b> ("Konfirmasi Ada" = barang
-        benar-benar diterima & tersimpan) — memudahkan stock opname.
+        benar-benar diterima & tersimpan) — memudahkan stock opname. Ubah tahap lewat
+        dropdown <b>➡ Ubah tahap…</b> pada tiap faktur; bisa sebagian dulu bila barang
+        belum lengkap.
       </div>
-      <ErrorText error={konfirmasi.error} />
-      <ErrorText error={tahap.error} />
 
       {/* Filter tanggal + jumlah baris (buku besar) */}
       <Card className="mb-3 flex flex-wrap items-end gap-3 p-3">
@@ -327,6 +361,12 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
         <div className="space-y-3">
           {grup.map((g) => {
             const badge = badgeFaktur(tipe, g.status);
+            // faktur campuran tahap (hasil "maju sebagian") → tampilkan pill
+            // tahap per baris + jumlah sisa tugas
+            const campuran = new Set(g.rows.map((r) => r.status)).size > 1;
+            const sisaTugas = g.rows.filter((r) => belumSelesai(r.status)).length;
+            const tahapTerawal = Math.min(...g.rows.map((r) => URUTAN_TAHAP[r.status]));
+            const opsiTahap = AKSI_TAHAP[tipe].filter((a) => URUTAN_TAHAP[a.ke] > tahapTerawal);
             return (
             <Card
               key={g.key}
@@ -360,46 +400,35 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                     {g.catatan && <span className="text-xs text-stone-400">· {g.catatan}</span>}
                   </div>
                   <div className="flex items-center gap-2">
+                    {campuran && sisaTugas > 0 && (
+                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">
+                        📌 sisa tugas: {sisaTugas} baris
+                      </span>
+                    )}
                     <span
                       className={`rounded-full px-2 py-0.5 text-xs font-semibold ${badge.cls}`}
                     >
                       {badge.label}
                     </span>
-                    {g.fakturId && g.status === "rencana" && (
-                      <button
-                        onClick={(e) => {
+                    {g.fakturId && belumSelesai(g.status) && opsiTahap.length > 0 && (
+                      <select
+                        value=""
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => {
                           e.stopPropagation();
-                          tahap.mutate({ fakturId: g.fakturId!, ke: "dikerjakan" });
+                          const ke = e.target.value as TahapTujuan | "";
+                          if (ke) setUbahTahap({ grup: g, ke });
                         }}
-                        disabled={tahap.isPending}
-                        className="rounded-lg bg-blue-600 px-3 py-1 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+                        aria-label="Ubah tahap faktur"
+                        className="cursor-pointer rounded-lg border border-orange-300 bg-orange-50 px-2 py-1 text-xs font-semibold text-orange-800"
                       >
-                        {tipe === "produksi" ? "🔨 Mulai Kerjakan" : "🔄 Proses"}
-                      </button>
-                    )}
-                    {g.fakturId && g.status === "dikerjakan" && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          tahap.mutate({ fakturId: g.fakturId!, ke: "menunggu" });
-                        }}
-                        disabled={tahap.isPending}
-                        className="rounded-lg bg-amber-500 px-3 py-1 text-xs font-semibold text-white hover:bg-amber-600 disabled:opacity-50"
-                      >
-                        {tipe === "produksi" ? "✅ Tandai Selesai" : "🚚 Kirim ke Toko"}
-                      </button>
-                    )}
-                    {g.status === "menunggu" && g.fakturId && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          konfirmasi.mutate(g.fakturId!);
-                        }}
-                        disabled={konfirmasi.isPending}
-                        className="rounded-lg bg-green-600 px-3 py-1 text-xs font-semibold text-white hover:bg-green-700 disabled:opacity-50"
-                      >
-                        {tipe === "produksi" ? "✔ Konfirmasi Ada" : "✔ Terima Semua"}
-                      </button>
+                        <option value="">➡ Ubah tahap…</option>
+                        {opsiTahap.map((a) => (
+                          <option key={a.ke} value={a.ke}>
+                            {a.label}
+                          </option>
+                        ))}
+                      </select>
                     )}
                   </div>
                 </div>
@@ -415,7 +444,16 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                   <tbody className="divide-y divide-stone-100">
                     {g.rows.map((r) => (
                       <tr key={r.id}>
-                        <td className={`${tdClass} font-medium`}>{r.bahan}</td>
+                        <td className={`${tdClass} font-medium`}>
+                          {r.bahan}
+                          {campuran && (
+                            <span
+                              className={`ml-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${badgeFaktur(tipe, r.status).cls}`}
+                            >
+                              {labelTahapRingkas(tipe, r.status)}
+                            </span>
+                          )}
+                        </td>
                         <td className={`${tdClass} text-right`}>
                           +{formatAngka(r.qty)} {r.satuan}
                           {r.is_batch && (
@@ -496,6 +534,15 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
           tipe={tipe}
           endpoint={t.endpoint}
           onClose={() => setDetail(null)}
+        />
+      )}
+      {ubahTahap && (
+        <TahapModal
+          grup={ubahTahap.grup}
+          tipe={tipe}
+          endpoint={t.endpoint}
+          ke={ubahTahap.ke}
+          onClose={() => setUbahTahap(null)}
         />
       )}
     </div>

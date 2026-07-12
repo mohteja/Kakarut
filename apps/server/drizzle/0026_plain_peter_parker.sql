@@ -1,0 +1,1 @@
+ALTER TABLE "ingredients" ADD COLUMN "boleh_eceran" boolean DEFAULT false NOT NULL;

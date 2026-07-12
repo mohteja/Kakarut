@@ -331,7 +331,8 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
                       <option value="">— pilih bahan —</option>
                       {bahanJalur.map((x) => (
                         <option key={x.id} value={x.id}>
-                          {x.nama} (1 batch = {formatAngka(x.isi)} {x.satuan})
+                          {x.nama} (1 {tipe === "beli" ? "kemasan" : "batch"} ={" "}
+                          {formatAngka(x.isi)} {x.satuan})
                         </option>
                       ))}
                     </select>
@@ -353,7 +354,7 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
                         onClick={() => ubahItem(i, { mode: "batch" })}
                         className={`flex-1 px-2 py-2 font-medium ${it.mode === "batch" ? "bg-orange-600 text-white" : "bg-white text-stone-600"}`}
                       >
-                        Batch
+                        {tipe === "beli" ? "Kemasan" : "Batch"}
                       </button>
                     </div>
                   </div>
@@ -424,7 +425,8 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
                 <div className="mt-1 flex items-center justify-between">
                   {b && it.mode === "batch" && Number(it.jumlah) > 0 ? (
                     <div className="text-xs text-orange-700">
-                      {formatAngka(Number(it.jumlah))} batch × {formatAngka(b.isi)} ={" "}
+                      {formatAngka(Number(it.jumlah))} {tipe === "beli" ? "kemasan" : "batch"} ×{" "}
+                      {formatAngka(b.isi)} ={" "}
                       <b>
                         {formatAngka(qtyPcs)} {b.satuan}
                       </b>

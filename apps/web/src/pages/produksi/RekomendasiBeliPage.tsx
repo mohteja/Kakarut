@@ -124,7 +124,9 @@ export function RekomendasiBeliPage() {
       <div className="mb-3 rounded-lg bg-blue-50 px-4 py-2 text-sm text-blue-800">
         Masukkan <b>target penjualan (Rp)</b>. Sistem memproyeksikan kebutuhan bahan dari pemakaian
         nyata periode acuan: <i>bila periode itu omzet Rp X memakai bahan Y, untuk target Rp T butuh
-        Y×(T/X)</i> — otomatis ikut menu terlaris. <b>Saran beli = kebutuhan − sisa.</b>
+        Y×(T/X)</i> — otomatis ikut menu terlaris. <b>Saran beli = kebutuhan − sisa</b>, dibulatkan
+        ke atas per <b>kemasan</b> toko / <b>batch</b> produksi (bahan bertanda "Eceran" tetap per
+        satuan).
       </div>
 
       <Card className="mb-3 space-y-3 p-4">
@@ -310,9 +312,26 @@ export function RekomendasiBeliPage() {
                       {b.kebutuhan != null ? formatAngka(b.kebutuhan) : "—"}
                     </td>
                     <td
-                      className={`${tdClass} text-right font-bold ${b.saran_beli ? "text-orange-700" : "text-stone-400"}`}
+                      className={`${tdClass} text-right font-bold ${b.jumlah_faktur ? "text-orange-700" : "text-stone-400"}`}
                     >
-                      {b.saran_beli != null ? formatAngka(b.saran_beli) : "—"}
+                      {b.jumlah_faktur != null ? (
+                        b.mode_faktur === "batch" ? (
+                          <>
+                            {formatAngka(b.jumlah_faktur)}{" "}
+                            {b.pengadaan === "beli" ? "kemasan" : "batch"}
+                            <span className="block text-xs font-normal text-stone-400">
+                              = {formatAngka(b.qty_faktur ?? 0)} {b.satuan} · butuh{" "}
+                              {formatAngka(b.saran_beli ?? 0)}
+                            </span>
+                          </>
+                        ) : (
+                          `${formatAngka(b.jumlah_faktur)} ${b.satuan}`
+                        )
+                      ) : b.saran_beli != null ? (
+                        formatAngka(b.saran_beli)
+                      ) : (
+                        "—"
+                      )}
                     </td>
                     <td className={`${tdClass} text-right text-stone-500`}>
                       {b.estimasi_biaya != null ? formatRupiah(b.estimasi_biaya) : "—"}

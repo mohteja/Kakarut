@@ -14,9 +14,25 @@ import { getStorage, localUploadDir } from "./modules/upload/storage";
 // Migrasi otomatis saat boot: deploy versi baru langsung menerapkan skema
 // terbaru. Idempotent + advisory lock (aman multi-instance).
 // Nonaktifkan dengan AUTO_MIGRATE=false bila migrasi dikelola terpisah.
+//
+// DB bisa belum siap tepat saat boot (Neon/serverless bangun dari idle, atau
+// container DB ikut restart saat deploy). Tanpa retry, proses crash → restart
+// loop → container lama-lama sehat, memperpanjang jendela 404 di proxy.
+// Coba ulang beberapa kali sebelum menyerah.
 if (env.AUTO_MIGRATE) {
   console.log("Menjalankan migrasi database (AUTO_MIGRATE)…");
-  await runMigrations();
+  const MAKS_COBA = 10;
+  for (let coba = 1; ; coba++) {
+    try {
+      await runMigrations();
+      break;
+    } catch (e) {
+      if (coba >= MAKS_COBA) throw e;
+      const pesan = e instanceof Error ? e.message : String(e);
+      console.log(`Database belum siap (${pesan}) — coba lagi ${coba}/${MAKS_COBA} dalam 3 dtk…`);
+      await new Promise((r) => setTimeout(r, 3000));
+    }
+  }
   console.log("Migrasi database selesai.");
   // Menu lama tanpa kode → isi kode otomatis (idempotent, hanya baris NULL)
   const terisi = await backfillKodeMenu(db);
