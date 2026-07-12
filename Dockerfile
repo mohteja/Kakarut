@@ -39,9 +39,10 @@ USER node
 EXPOSE 3000
 
 # Healthcheck: proxy/orchestrator (Dokploy/Traefik) hanya mengarahkan trafik ke
-# container yang SEHAT. Dengan zero-downtime/rolling di Dokploy, container baru
-# harus sehat dulu sebelum yang lama dihentikan → memperkecil jendela 404.
-HEALTHCHECK --interval=15s --timeout=5s --start-period=45s --retries=3 \
+# container yang SEHAT — dan cek PERTAMA baru berjalan setelah `interval`
+# berlalu, jadi interval pendek = container baru cepat dinyatakan sehat =
+# jendela 404 saat re-deploy tinggal beberapa detik.
+HEALTHCHECK --interval=5s --timeout=5s --start-period=30s --retries=5 \
   CMD node -e "require('http').get('http://127.0.0.1:3000/api/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
 
 # Entrypoint menjalankan seed opsional (deploy pertama) sebelum start.
