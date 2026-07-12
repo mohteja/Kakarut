@@ -1197,6 +1197,36 @@ cek "A: 4 dikonfirmasi (harga prorata 20000)" "V == 1" \
 cek "A: sisa tugas 6 dikerjakan (harga 30000)" "V == 1" \
   "$(echo "$A42" | jq '([.[] | select(.status=="dikerjakan")][0] | (.qty == 6 and .total_harga == 30000)) | if . then 1 else 0 end')"
 
+echo "== 43. Dana cair saat RAB → proses (penuh / sebagian, akumulatif) =="
+FK43=$(api "$OWNER" POST /pembelian/faktur "{\"items\":[{\"ingredient_id\":\"$ING42A\",\"mode\":\"pcs\",\"jumlah\":10,\"total_harga\":50000},{\"ingredient_id\":\"$ING42B\",\"mode\":\"pcs\",\"jumlah\":8,\"total_harga\":40000}]}")
+FK43_ID=$(echo "$FK43" | jq -r .faktur_id)
+baris43() { api "$OWNER" GET "/pembelian?per_page=500" | jq --arg f "$FK43_ID" '[.rows[] | select(.faktur_id==$f)]'; }
+ID43A=$(baris43 | jq -r --arg i "$ING42A" '[.[] | select(.ingredient_id==$i)][0].id')
+ID43B=$(baris43 | jq -r --arg i "$ING42B" '[.[] | select(.ingredient_id==$i)][0].id')
+# maju A dgn dana cair SEBAGIAN 30000 (dari RAB 50000)
+api "$OWNER" POST "/pembelian/tahap/$FK43_ID" "{\"ke\":\"dikerjakan\",\"items\":[{\"id\":\"$ID43A\",\"qty\":10}],\"dana_cair\":30000}" > /dev/null
+cek "dana cair 30000 tercatat di faktur" "abs(V - 30000) < 0.5" "$(baris43 | jq '.[0].dana_cair')"
+# maju B (split 3) dgn dana 15000 → pencairan DIJUMLAHKAN
+api "$OWNER" POST "/pembelian/tahap/$FK43_ID" "{\"ke\":\"dikerjakan\",\"items\":[{\"id\":\"$ID43B\",\"qty\":3}],\"dana_cair\":15000}" > /dev/null
+cek "pencairan kedua terakumulasi (45000)" "abs(V - 45000) < 0.5" "$(baris43 | jq '.[0].dana_cair')"
+cek "semua baris faktur memuat total dana yang sama" "V == 1" \
+  "$(baris43 | jq 'def ab: if . < 0 then -. else . end; ([.[] | select(((.dana_cair - 45000)|ab) > 0.5)] | length == 0) | if . then 1 else 0 end')"
+# saldo TIDAK berubah karena dana cair (belum dikonfirmasi)
+cek "dana cair tidak menyentuh saldo stok" "abs(V) < 0.001" \
+  "$(python3 -c "print($(saldo_bahan "$ING42A") - $SA42_1)")"
+# jalur lama (tanpa items) juga bisa mencatat dana
+FK43C=$(api "$OWNER" POST /pembelian/faktur "{\"items\":[{\"ingredient_id\":\"$ING42A\",\"mode\":\"pcs\",\"jumlah\":5,\"total_harga\":25000}]}")
+FK43C_ID=$(echo "$FK43C" | jq -r .faktur_id)
+api "$OWNER" POST "/pembelian/tahap/$FK43C_ID" '{"ke":"dikerjakan","dana_cair":12345}' > /dev/null
+cek "jalur lama: dana cair 12345 tercatat" "abs(V - 12345) < 0.5" \
+  "$(api "$OWNER" GET "/pembelian?per_page=500" | jq --arg f "$FK43C_ID" '[.rows[] | select(.faktur_id==$f)][0].dana_cair')"
+# dana negatif ditolak validasi
+cek "dana cair negatif → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/pembelian/tahap/$FK43C_ID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"ke":"menunggu","dana_cair":-1}')"
+# faktur tanpa pencairan → 0
+cek "faktur tanpa pencairan → dana_cair 0" "abs(V) < 0.001" \
+  "$(api "$OWNER" GET "/pembelian?per_page=500" | jq --arg f "$FK42_ID" '[.rows[] | select(.faktur_id==$f)][0].dana_cair')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

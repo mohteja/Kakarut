@@ -3,7 +3,7 @@ import { useState } from "react";
 import type { JenisPengadaan } from "@kakarut/shared";
 import { ErrorText, Modal, btnPrimary, btnSecondary, tdClass, thClass } from "../../components/ui";
 import { api } from "../../lib/api";
-import { formatAngka } from "../../lib/format";
+import { formatAngka, formatRupiah } from "../../lib/format";
 import {
   AKSI_TAHAP,
   URUTAN_TAHAP,
@@ -51,6 +51,11 @@ export function TahapModal({
   const label = AKSI_TAHAP[tipe].find((a) => a.ke === ke)?.label ?? ke;
   const keStok = ke === "dikonfirmasi";
 
+  // Dana cair: ditanyakan saat ada baris terpilih yang MENINGGALKAN tahap RAB
+  // — cair penuh sesuai RAB bagian yang maju, atau sebagian (input nominal).
+  const [danaMode, setDanaMode] = useState<"penuh" | "sebagian">("penuh");
+  const [danaNominal, setDanaNominal] = useState("");
+
   const items = bisaMaju
     .filter((r) => pilih[r.id]?.aktif)
     .map((r) => ({ id: r.id, qty: Number(pilih[r.id]?.qty) }));
@@ -66,9 +71,29 @@ export function TahapModal({
     return !p?.aktif || Number(p.qty) < r.qty - 1e-9;
   }).length;
 
+  // RAB bagian yang maju dari baris tahap "rencana" (prorata sesuai qty maju,
+  // sama dengan hitungan split di server) — dasar default "cair penuh".
+  const barisRab = bisaMaju.filter((r) => r.status === "rencana" && pilih[r.id]?.aktif);
+  const rabMaju = barisRab.reduce((t, r) => {
+    const q = Number(pilih[r.id]?.qty);
+    if (!Number.isFinite(q) || q <= 0 || r.total_harga == null) return t;
+    return t + Math.round((r.total_harga * Math.min(q, r.qty)) / r.qty);
+  }, 0);
+  const tanyaDana = barisRab.length > 0;
+  const danaCair = !tanyaDana
+    ? null
+    : danaMode === "penuh"
+      ? rabMaju
+      : Number(danaNominal);
+  const danaInvalid =
+    tanyaDana && danaMode === "sebagian" && (!Number.isFinite(danaCair) || danaCair! < 0);
+
   const simpan = useMutation({
     mutationFn: () =>
-      api(`${endpoint}/tahap/${grup.fakturId}`, { method: "POST", body: { ke, items } }),
+      api(`${endpoint}/tahap/${grup.fakturId}`, {
+        method: "POST",
+        body: { ke, items, ...(danaCair != null ? { dana_cair: danaCair } : {}) },
+      }),
     onSuccess: () => {
       for (const key of [endpoint, "stok", "laporan", "rekomendasi"]) {
         queryClient.invalidateQueries({ queryKey: [key] });
@@ -173,6 +198,59 @@ export function TahapModal({
           </div>
         )}
 
+        {tanyaDana && (
+          <div className="space-y-2 rounded-lg border border-emerald-200 bg-emerald-50/50 p-3">
+            <div className="text-sm font-semibold text-stone-700">
+              💸 Dana cair untuk baris dari tahap RAB
+            </div>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="radio"
+                name="dana-cair"
+                checked={danaMode === "penuh"}
+                onChange={() => setDanaMode("penuh")}
+              />
+              <span>
+                Cair <b>penuh sesuai RAB</b> — {formatRupiah(rabMaju)}
+              </span>
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="radio"
+                name="dana-cair"
+                checked={danaMode === "sebagian"}
+                onChange={() => setDanaMode("sebagian")}
+              />
+              <span>Cair sebagian — nominal:</span>
+              <input
+                type="number"
+                min="0"
+                step="any"
+                value={danaNominal}
+                onFocus={() => setDanaMode("sebagian")}
+                onChange={(e) => setDanaNominal(e.target.value)}
+                placeholder="Rp"
+                aria-label="Nominal dana cair"
+                className={`w-36 rounded-lg border px-2 py-1 text-right text-sm ${danaInvalid ? "border-red-400" : "border-stone-300"}`}
+              />
+            </label>
+            {danaMode === "sebagian" &&
+              !danaInvalid &&
+              danaCair != null &&
+              danaCair < rabMaju && (
+                <div className="text-xs text-amber-700">
+                  Kurang {formatRupiah(rabMaju - danaCair)} dari RAB — sisa kebutuhan dana
+                  tercatat di faktur.
+                </div>
+              )}
+            {grup.danaCair > 0 && (
+              <div className="text-xs text-stone-500">
+                Sudah cair sebelumnya: {formatRupiah(grup.danaCair)} (pencairan dijumlahkan)
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="rounded-lg bg-stone-50 px-3 py-2 text-sm text-stone-600">
           <b>{items.length}</b> baris maju → {label}
           {sisaTugas > 0 && (
@@ -180,6 +258,9 @@ export function TahapModal({
               {" "}
               · 📌 {sisaTugas} baris/bagian tetap di tahap sekarang (sisa tugas)
             </span>
+          )}
+          {danaCair != null && !danaInvalid && (
+            <span className="text-emerald-700"> · 💸 dana cair {formatRupiah(danaCair)}</span>
           )}
         </div>
 
@@ -191,7 +272,7 @@ export function TahapModal({
           </button>
           <button
             onClick={() => simpan.mutate()}
-            disabled={simpan.isPending || items.length === 0 || adaInvalid}
+            disabled={simpan.isPending || items.length === 0 || adaInvalid || danaInvalid}
             className={btnPrimary}
           >
             {simpan.isPending ? "Menyimpan…" : `Terapkan (${items.length} baris)`}

@@ -9,6 +9,7 @@ import type { JenisPengadaan } from "@kakarut/shared";
 import { db } from "../../db/client";
 import {
   companies,
+  fakturDana,
   ingredients,
   memberships,
   productions,
@@ -54,6 +55,11 @@ const TahapBody = z.object({
     .array(z.object({ id: z.string().uuid(), qty: z.number().positive() }))
     .min(1)
     .optional(),
+  /**
+   * Dana yang benar-benar cair saat faktur meninggalkan tahap RAB — penuh
+   * sesuai RAB atau sebagian. Dicatat sebagai entri faktur_dana (akumulatif).
+   */
+  dana_cair: z.number().nonnegative().max(1_000_000_000_000).nullish(),
 });
 /** transisi tahap produksi wajib berurutan: rencana → dikerjakan → menunggu (lalu /konfirmasi) */
 const TAHAP_SEBELUM = { dikerjakan: "rencana", menunggu: "dikerjakan" } as const;
@@ -293,7 +299,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
      */
     .post("/tahap/:fakturId", zValidator("json", TahapBody), async (c) => {
       const auth = c.get("auth");
-      const { ke, items } = c.req.valid("json");
+      const { ke, items, dana_cair } = c.req.valid("json");
 
       const conds = [
         eq(productions.companyId, auth.company_id!),
@@ -346,6 +352,15 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
             : ({ status: ke, updatedBy: auth.sub, updatedAt: now } as const);
 
         await db.transaction(async (tx) => {
+          if (dana_cair != null) {
+            await tx.insert(fakturDana).values({
+              companyId: auth.company_id!,
+              branchId: baris[0].branchId,
+              fakturId: c.req.param("fakturId"),
+              nominal: dana_cair,
+              userId: auth.sub,
+            });
+          }
           for (const item of items) {
             const b = byId.get(item.id)!;
             // WHERE menuntut status persis seperti saat dibaca: bila berubah
@@ -425,7 +440,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         .update(productions)
         .set({ status: ke, updatedBy: auth.sub, updatedAt: new Date() })
         .where(and(...conds, eq(productions.status, dari)))
-        .returning({ id: productions.id });
+        .returning({ id: productions.id, branchId: productions.branchId });
 
       if (rows.length === 0) {
         const [ada] = await db
@@ -436,6 +451,15 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         if (!ada) throw new HTTPException(404, { message: "Faktur tidak ditemukan" });
         throw new HTTPException(400, {
           message: `Tahap tidak berurutan: faktur berstatus "${ada.status}" — hanya bisa "${dari}" → "${ke}"`,
+        });
+      }
+      if (dana_cair != null) {
+        await db.insert(fakturDana).values({
+          companyId: auth.company_id!,
+          branchId: rows[0].branchId,
+          fakturId: c.req.param("fakturId"),
+          nominal: dana_cair,
+          userId: auth.sub,
         });
       }
       return c.json({ ok: true, status: ke, jumlah_baris: rows.length });
@@ -582,6 +606,8 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         dikerjakan_oleh: pekerja.nama,
         qty_dipesan: productions.qtyDipesan,
         alasan_tolak: productions.alasanTolak,
+        // total dana cair faktur ini (nilai sama di tiap baris; 0 bila belum ada)
+        dana_cair: sql<number>`COALESCE((SELECT SUM(fd.nominal)::float8 FROM faktur_dana fd WHERE fd.faktur_id = ${productions.fakturId}), 0)`,
       };
       const rows =
         keys.length === 0

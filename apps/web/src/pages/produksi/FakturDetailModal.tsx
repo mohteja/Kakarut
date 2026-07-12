@@ -125,6 +125,19 @@ export function FakturDetailModal({
             )}
             <dt className="text-stone-400">Status</dt>
             <dd className="col-span-2">{badgeFaktur(tipe, grup.status).label}</dd>
+            {grup.danaCair > 0 && (
+              <>
+                <dt className="text-stone-400">Dana cair</dt>
+                <dd className="col-span-2 font-semibold text-emerald-700">
+                  💸 {formatRupiah(grup.danaCair)}
+                  {grup.totalHarga > 0 && (
+                    <span className="ml-1 font-normal text-stone-400">
+                      dari RAB {formatRupiah(grup.totalHarga)}
+                    </span>
+                  )}
+                </dd>
+              </>
+            )}
             {grup.rows.some((r) => r.alasan_tolak) && (
               <>
                 <dt className="text-stone-400">Alasan tolak</dt>

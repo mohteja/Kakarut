@@ -49,6 +49,8 @@ export interface StokMasukRow {
   dikerjakan_oleh: string | null;
   qty_dipesan: number | null;
   alasan_tolak: string | null;
+  /** total dana cair faktur ini (nilai sama di tiap baris; 0 bila belum ada) */
+  dana_cair: number;
 }
 
 export interface FakturGroup {
@@ -68,6 +70,8 @@ export interface FakturGroup {
   dikerjakanOleh: string | null;
   rows: StokMasukRow[];
   totalHarga: number;
+  /** total dana yang sudah cair untuk faktur ini */
+  danaCair: number;
 }
 
 /**
@@ -250,6 +254,7 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
           dikerjakanOleh: r.dikerjakan_oleh,
           rows: [],
           totalHarga: 0,
+          danaCair: r.dana_cair ?? 0,
         };
         byKey.set(key, g);
       }
@@ -392,6 +397,14 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                     {g.noFaktur && (
                       <span className="rounded bg-stone-100 px-1.5 py-0.5 font-mono text-xs">
                         {g.noFaktur}
+                      </span>
+                    )}
+                    {g.danaCair > 0 && (
+                      <span
+                        className="rounded bg-emerald-50 px-1.5 py-0.5 text-xs font-semibold text-emerald-700"
+                        title="Total dana yang sudah cair untuk faktur ini"
+                      >
+                        💸 cair {formatRupiah(g.danaCair)}
                       </span>
                     )}
                     {g.dibuatOleh && (
