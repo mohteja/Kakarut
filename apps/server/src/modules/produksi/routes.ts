@@ -473,7 +473,9 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
           }
           tujuanBranch = cb.id;
           tujuanNama = cb.nama;
-          if (terikatCabang(auth.role) && auth.branch_id && tujuanBranch !== auth.branch_id) {
+          // Khusus kasir: tak boleh lintas cabang. Karyawan CK (tim) justru
+          // tugasnya MENGIRIM ke store — validasi keterhubungan CK↔store di atas.
+          if (auth.role === "cashier" && auth.branch_id && tujuanBranch !== auth.branch_id) {
             throw new HTTPException(403, {
               message: "Kasir tidak boleh mengirim ke cabang lain",
             });

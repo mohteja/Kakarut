@@ -1649,6 +1649,40 @@ api "$OWNER" PATCH "/cabang/$PUSAT51_ID" '{"latitude":null,"longitude":null}' > 
 cek "titik dikosongkan: absen tanpa GPS diterima lagi" "V == 201" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/absensi" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"kode\":\"$KODE56\"}")"
 
+echo "== 58. Karyawan Central Kitchen: satu peran, menu produksi/beli/bahan =="
+cek "kasir ditempatkan di CK → 400 (CK hanya peran Karyawan)" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/karyawan" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"nama\":\"Kasir CK 58\",\"email\":\"kasirck58@basooopa.id\",\"password\":\"KasirCk58!\",\"role\":\"cashier\",\"branch_id\":\"$CK52_UTAMA\"}")"
+api "$OWNER" POST /karyawan "{\"nama\":\"Karyawan CK 58\",\"email\":\"ck58@basooopa.id\",\"password\":\"KaryCk58!\",\"role\":\"tim\",\"branch_id\":\"$CK52_UTAMA\"}" > /dev/null
+TCK58=$(login "ck58@basooopa.id" "KaryCk58!")
+U58_ID=$(api "$OWNER" GET /karyawan | jq -r '[.[] | select(.email=="ck58@basooopa.id")][0].user_id')
+
+cek "karyawan CK: produksi bahan baku → 200" "V == 200" "$(status_code "$TCK58" GET /produksi)"
+cek "karyawan CK: beli bahan baku → 200" "V == 200" "$(status_code "$TCK58" GET /pembelian)"
+cek "karyawan CK: bahan baku (lihat) → 200" "V == 200" "$(status_code "$TCK58" GET /bahan)"
+cek "karyawan CK: ubah master bahan → 403" "V == 403" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/bahan/$URATB_ID" -H "Authorization: Bearer $TCK58" -H 'Content-Type: application/json' -d '{"harga_beli":1}')"
+cek "tim cabang store: produksi → 403" "V == 403" "$(status_code "$T56" GET /produksi)"
+
+# faktur pembelian oleh karyawan CK → jatuh di CK-nya sendiri
+FK58=$(api "$TCK58" POST /pembelian/faktur "{\"items\":[{\"ingredient_id\":\"$ING42A\",\"mode\":\"pcs\",\"jumlah\":5,\"total_harga\":25000}]}")
+FK58_ID=$(echo "$FK58" | jq -r .faktur_id)
+cek "karyawan CK membuat faktur pembelian di CK-nya" "V == 1" \
+  "$(api "$OWNER" GET "/pembelian?branch_id=$CK52_UTAMA&per_page=500" | jq --arg f "$FK58_ID" '([.rows[] | select(.faktur_id==$f)] | length == 1) | if . then 1 else 0 end')"
+cek "karyawan CK membuat faktur di cabang lain → 403" "V == 403" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/pembelian/faktur" -H "Authorization: Bearer $TCK58" -H 'Content-Type: application/json' -d "{\"branch_id\":\"$PUSAT51_ID\",\"items\":[{\"ingredient_id\":\"$ING42A\",\"mode\":\"pcs\",\"jumlah\":2,\"total_harga\":10000}]}")"
+
+# karyawan CK memproses & MENGIRIM ke store yang terhubung ke CK-nya
+api "$TCK58" POST "/pembelian/tahap/$FK58_ID" '{"ke":"dikerjakan","dana_cair":25000}' > /dev/null
+ID58=$(api "$TCK58" GET "/pembelian?per_page=500" | jq -r --arg f "$FK58_ID" '[.rows[] | select(.faktur_id==$f)][0].id')
+api "$TCK58" POST "/pembelian/tahap/$FK58_ID" "{\"ke\":\"menunggu\",\"items\":[{\"id\":\"$ID58\",\"qty\":5}],\"tujuan_branch_id\":\"$CB46_ID\"}" > /dev/null
+cek "karyawan CK mengirim ke store terhubung → baris pindah" "V == 1" \
+  "$(api "$OWNER" GET "/pembelian?branch_id=$CB46_ID&per_page=500" | jq --arg f "$FK58_ID" '([.rows[] | select(.faktur_id==$f)] | (length == 1) and (.[0].status == "menunggu")) | if . then 1 else 0 end')"
+
+# faktur produksi dgn pelaksana dirinya sendiri
+FP58=$(api "$TCK58" POST /produksi/faktur "{\"worker_id\":\"$U58_ID\",\"items\":[{\"ingredient_id\":\"$URATB_ID\",\"mode\":\"pcs\",\"jumlah\":10}]}")
+cek "karyawan CK membuat faktur produksi (pelaksana dirinya)" "V == 1" \
+  "$(echo "$FP58" | jq '(.faktur_id != null) | if . then 1 else 0 end')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

@@ -61,7 +61,7 @@ export default function App() {
     : isManajemen
       ? "/dashboard"
       : isTim
-        ? "/stok"
+        ? "/profil"
         : "/kasir";
 
   return (
@@ -102,20 +102,26 @@ export default function App() {
                   <Route path="/pengaturan/meja" element={<MejaPage />} />
                 </>
               )}
-              {isManajemen && (
+              {/* Produksi/beli/bahan: manajemen + karyawan Central Kitchen
+                  (server menolak tim non-CK; menu hanya tampil utk tim CK) */}
+              {(isManajemen || isTim) && (
                 <>
-                  <Route path="/dashboard" element={<DashboardPage />} />
                   <Route path="/produksi" element={<ProduksiPage />} />
                   <Route path="/produksi/baru" element={<FakturFormPage tipe="produksi" />} />
                   <Route path="/pembelian" element={<PembelianPage />} />
                   <Route path="/pembelian/baru" element={<FakturFormPage tipe="beli" />} />
+                  <Route path="/bahan" element={<BahanPage />} />
+                </>
+              )}
+              {isManajemen && (
+                <>
+                  <Route path="/dashboard" element={<DashboardPage />} />
                   <Route path="/pembelian/rekomendasi" element={<RekomendasiBeliPage />} />
                   <Route path="/stok/tambah-dari-menu" element={<TambahStokDariMenuPage />} />
                   <Route path="/laporan" element={<LaporanPage />} />
                   <Route path="/laporan/pembelian" element={<LaporanPembelianPage />} />
                   <Route path="/laporan/menu-laris" element={<LaporanMenuLarisPage />} />
                   <Route path="/sampah" element={<TempatSampahPage />} />
-                  <Route path="/bahan" element={<BahanPage />} />
                   <Route path="/member" element={<MemberPage />} />
                   <Route path="/menu" element={<MenuListPage />} />
                   <Route path="/menu/baru" element={<MenuFormPage />} />

@@ -84,6 +84,9 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
   const { branchQuery, branchId } = useBranch();
   const queryClient = useQueryClient();
   const isKasir = auth?.user.role === "cashier";
+  // karyawan CK (tim): faktur dibuat di cabangnya sendiri, pelaksana dirinya
+  const isTim = auth?.user.role === "tim";
+  const isManajemen = auth?.user.role === "owner" || auth?.user.role === "admin";
 
   const { data: bahan } = useQuery({ queryKey: ["bahan"], queryFn: () => api<BahanDto[]>("/bahan") });
   const { data: supplier = [] } = useQuery({
@@ -94,16 +97,18 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
     queryKey: ["penyimpanan", branchQuery],
     queryFn: () => api<PenyimpananDto[]>(`/penyimpanan${branchQuery}`),
   });
+  // daftar karyawan khusus manajemen — tim memakai dirinya sebagai pelaksana
   const { data: karyawan = [] } = useQuery({
     queryKey: ["karyawan"],
     queryFn: () => api<Karyawan[]>("/karyawan"),
-    enabled: tipe === "produksi",
+    enabled: tipe === "produksi" && isManajemen,
   });
 
   const bahanJalur = (bahan ?? []).filter((b) => b.pengadaan === tipe && b.track_stok);
 
   const [supplierId, setSupplierId] = useState(""); // jalur beli
-  const [pelaksana, setPelaksana] = useState(""); // produksi: "k:<id>" / "s:<id>"
+  // produksi: "k:<id>" / "s:<id>" — tim otomatis dirinya sendiri
+  const [pelaksana, setPelaksana] = useState(isTim && auth ? `k:${auth.user.sub}` : "");
   const [noFaktur, setNoFaktur] = useState("");
   const [catatan, setCatatan] = useState("");
   const [items, setItems] = useState<ItemForm[]>([{ ...itemKosong }]);
@@ -142,7 +147,7 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
       api(`${endpoint}/faktur`, {
         method: "POST",
         body: {
-          ...(!isKasir && branchId ? { branch_id: branchId } : {}),
+          ...(isManajemen && branchId ? { branch_id: branchId } : {}),
           supplier_id: tipe === "produksi" ? (pelTipe === "s" ? pelId : null) : supplierId || null,
           ...(tipe === "produksi" ? { worker_id: pelTipe === "k" ? pelId : null } : {}),
           no_faktur: noFaktur || null,
@@ -212,6 +217,9 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
                   className={inputClass}
                 >
                   <option value="">— pilih pelaksana —</option>
+                  {isTim && auth && (
+                    <option value={`k:${auth.user.sub}`}>{auth.user.nama} (saya)</option>
+                  )}
                   {karyawan
                     .filter((k) => k.is_active)
                     .map((k) => (

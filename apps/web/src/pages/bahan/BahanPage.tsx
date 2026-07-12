@@ -13,6 +13,7 @@ import {
   tdClass,
   thClass,
 } from "../../components/ui";
+import { useAuth } from "../../context/AuthContext";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah } from "../../lib/format";
 
@@ -49,6 +50,9 @@ const kosong: FormState = {
 
 export function BahanPage() {
   const queryClient = useQueryClient();
+  const { auth } = useAuth();
+  // karyawan CK (tim) hanya MELIHAT master bahan — ubah/tambah tetap manajemen
+  const bolehUbah = auth?.user.role === "owner" || auth?.user.role === "admin";
   const { data: bahan, isLoading } = useQuery({
     queryKey: ["bahan"],
     queryFn: () => api<BahanDto[]>("/bahan"),
@@ -122,9 +126,11 @@ export function BahanPage() {
     <div>
       <PageTitle
         aksi={
-          <button onClick={() => setForm(kosong)} className={btnPrimary}>
-            + Tambah Bahan
-          </button>
+          bolehUbah ? (
+            <button onClick={() => setForm(kosong)} className={btnPrimary}>
+              + Tambah Bahan
+            </button>
+          ) : undefined
         }
       >
         Bahan Baku ({adaFilter ? `${tampil.length} dari ${semua.length}` : semua.length})
@@ -238,36 +244,40 @@ export function BahanPage() {
                   {b.catatan}
                 </td>
                 <td className={`${tdClass} whitespace-nowrap text-right`}>
-                  <button
-                    onClick={() =>
-                      setForm({
-                        id: b.id,
-                        nama: b.nama,
-                        harga_beli: String(b.harga_beli),
-                        isi: String(b.isi),
-                        satuan: b.satuan,
-                        kategori: b.kategori,
-                        pengadaan: b.pengadaan,
-                        track_stok: b.track_stok,
-                        stok_minimum: String(b.stok_minimum),
-                        catatan: b.catatan ?? "",
-                        is_packaging: b.is_packaging,
-                        is_complement: b.is_complement,
-                        boleh_eceran: b.boleh_eceran,
-                      })
-                    }
-                    className="text-sm font-medium text-orange-600 hover:underline"
-                  >
-                    Ubah
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (confirm(`Nonaktifkan bahan "${b.nama}"?`)) hapus.mutate(b.id);
-                    }}
-                    className="ml-3 text-sm font-medium text-red-500 hover:underline"
-                  >
-                    Hapus
-                  </button>
+                  {bolehUbah && (
+                    <>
+                      <button
+                        onClick={() =>
+                          setForm({
+                            id: b.id,
+                            nama: b.nama,
+                            harga_beli: String(b.harga_beli),
+                            isi: String(b.isi),
+                            satuan: b.satuan,
+                            kategori: b.kategori,
+                            pengadaan: b.pengadaan,
+                            track_stok: b.track_stok,
+                            stok_minimum: String(b.stok_minimum),
+                            catatan: b.catatan ?? "",
+                            is_packaging: b.is_packaging,
+                            is_complement: b.is_complement,
+                            boleh_eceran: b.boleh_eceran,
+                          })
+                        }
+                        className="text-sm font-medium text-orange-600 hover:underline"
+                      >
+                        Ubah
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (confirm(`Nonaktifkan bahan "${b.nama}"?`)) hapus.mutate(b.id);
+                        }}
+                        className="ml-3 text-sm font-medium text-red-500 hover:underline"
+                      >
+                        Hapus
+                      </button>
+                    </>
+                  )}
                 </td>
               </tr>
             ))}

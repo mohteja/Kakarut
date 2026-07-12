@@ -1,8 +1,9 @@
-import { sql } from "drizzle-orm";
-import { Hono } from "hono";
+import { eq, sql } from "drizzle-orm";
+import { Hono, type MiddlewareHandler } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { logger } from "hono/logger";
 import { db } from "./db/client";
+import { branches } from "./db/schema";
 import {
   requireAuth,
   requireCompany,
@@ -54,8 +55,24 @@ export function createApp() {
   const tenant = new Hono<AppEnv>().use("*", requireAuth, requireCompany);
   // Gerbang peran owner/admin — HARUS didaftarkan sebelum route agar middleware
   // dijalankan lebih dulu. Kasir hanya butuh kasir/stok/opname/penyesuaian.
-  tenant.use("/produksi/*", requireRole("owner", "admin"));
-  tenant.use("/pembelian/*", requireRole("owner", "admin"));
+  // Produksi & pembelian: manajemen ATAU karyawan (tim) yang lokasi kerjanya
+  // Central Kitchen — CK memang tempatnya memproduksi & membeli bahan.
+  const izinkanManajemenAtauKaryawanCk: MiddlewareHandler<AppEnv> = async (c, next) => {
+    const auth = c.get("auth");
+    if (auth.role === "owner" || auth.role === "admin") return next();
+    if (auth.role === "tim" && auth.branch_id) {
+      const [b] = await db
+        .select({ tipe: branches.tipe })
+        .from(branches)
+        .where(eq(branches.id, auth.branch_id));
+      if (b?.tipe === "central_kitchen") return next();
+    }
+    throw new HTTPException(403, {
+      message: "Khusus manajemen atau karyawan Central Kitchen",
+    });
+  };
+  tenant.use("/produksi/*", izinkanManajemenAtauKaryawanCk);
+  tenant.use("/pembelian/*", izinkanManajemenAtauKaryawanCk);
   tenant.use("/laporan/*", requireRole("owner", "admin"));
   tenant.use("/rekomendasi/*", requireRole("owner", "admin"));
   tenant.use("/sampah/*", requireRole("owner", "admin"));

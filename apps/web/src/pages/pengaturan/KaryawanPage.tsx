@@ -390,16 +390,37 @@ export function KaryawanPage() {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="mb-1 block text-sm font-medium">Peran</label>
-                <select
-                  value={form.role}
-                  onChange={(e) => setForm({ ...form, role: e.target.value as FormState["role"] })}
-                  className={inputClass}
-                >
-                  <option value="cashier">Kasir</option>
-                  <option value="tim">Tim — cek stok, penerimaan, riwayat</option>
-                  <option value="admin">Admin</option>
-                  <option value="owner">Owner</option>
-                </select>
+                {/* Central Kitchen hanya punya SATU peran lapangan: Karyawan (tim) */}
+                {cabang.find((b) => b.id === form.branch_id)?.tipe === "central_kitchen" &&
+                form.role !== "owner" &&
+                form.role !== "admin" ? (
+                  <>
+                    <select
+                      value="tim"
+                      onChange={() => setForm({ ...form, role: "tim" })}
+                      className={inputClass}
+                    >
+                      <option value="tim">Karyawan (Central Kitchen)</option>
+                    </select>
+                    <p className="mt-1 text-xs text-stone-400">
+                      Menu karyawan CK: profil, produksi bahan baku, beli bahan baku, bahan
+                      baku.
+                    </p>
+                  </>
+                ) : (
+                  <select
+                    value={form.role}
+                    onChange={(e) =>
+                      setForm({ ...form, role: e.target.value as FormState["role"] })
+                    }
+                    className={inputClass}
+                  >
+                    <option value="cashier">Kasir</option>
+                    <option value="tim">Tim / Karyawan</option>
+                    <option value="admin">Admin</option>
+                    <option value="owner">Owner</option>
+                  </select>
+                )}
               </div>
               {/* Mode Lite: 1 cabang — kasir otomatis ke cabang satu-satunya. */}
               {isPro && (
@@ -409,7 +430,17 @@ export function KaryawanPage() {
                   </label>
                   <select
                     value={form.branch_id}
-                    onChange={(e) => setForm({ ...form, branch_id: e.target.value })}
+                    onChange={(e) => {
+                      const b = cabang.find((x) => x.id === e.target.value);
+                      // pilih Central Kitchen → peran lapangan otomatis Karyawan (tim)
+                      setForm({
+                        ...form,
+                        branch_id: e.target.value,
+                        ...(b?.tipe === "central_kitchen" && form.role === "cashier"
+                          ? { role: "tim" as const }
+                          : {}),
+                      });
+                    }}
                     className={inputClass}
                     required={WAJIB_CABANG.has(form.role)}
                   >

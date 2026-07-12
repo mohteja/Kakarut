@@ -33,10 +33,23 @@ const PatchKaryawanBody = z.object({
 
 async function pastikanCabangMilikPerusahaan(branchId: string, companyId: string) {
   const [b] = await db
-    .select({ id: branches.id })
+    .select({ id: branches.id, tipe: branches.tipe })
     .from(branches)
     .where(and(eq(branches.id, branchId), eq(branches.companyId, companyId)));
   if (!b) throw new HTTPException(400, { message: "Cabang tidak valid" });
+  return b;
+}
+
+/**
+ * Central Kitchen hanya punya SATU peran lapangan: karyawan (tim) — kasir
+ * tidak berjualan di dapur produksi.
+ */
+function pastikanPeranCocokCabang(role: string, tipe: string) {
+  if (role === "cashier" && tipe === "central_kitchen") {
+    throw new HTTPException(400, {
+      message: "Central Kitchen hanya menerima peran Karyawan — bukan kasir",
+    });
+  }
 }
 
 export const karyawanRoutes = new Hono<AppEnv>()
@@ -77,7 +90,8 @@ export const karyawanRoutes = new Hono<AppEnv>()
       if (!body.branch_id) {
         throw new HTTPException(400, { message: "Kasir/Tim wajib punya cabang" });
       }
-      await pastikanCabangMilikPerusahaan(body.branch_id, auth.company_id!);
+      const cb = await pastikanCabangMilikPerusahaan(body.branch_id, auth.company_id!);
+      pastikanPeranCocokCabang(body.role, cb.tipe);
     }
     const [existing] = await db
       .select({ id: users.id })
@@ -197,7 +211,10 @@ export const karyawanRoutes = new Hono<AppEnv>()
     if (WAJIB_CABANG.has(targetRole) && !targetBranch) {
       throw new HTTPException(400, { message: "Kasir/Tim wajib punya cabang" });
     }
-    if (targetBranch) await pastikanCabangMilikPerusahaan(targetBranch, auth.company_id!);
+    if (targetBranch) {
+      const cb = await pastikanCabangMilikPerusahaan(targetBranch, auth.company_id!);
+      pastikanPeranCocokCabang(targetRole, cb.tipe);
+    }
 
     // Email = identitas login lintas perusahaan → wajib unik global.
     if (body.email !== undefined) {

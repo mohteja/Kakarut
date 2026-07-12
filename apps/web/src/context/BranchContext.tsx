@@ -45,14 +45,16 @@ export function BranchProvider({ children }: { children: ReactNode }) {
   const { auth } = useAuth();
   // kasir & tim terkunci ke cabangnya sendiri — server yang menentukan
   const isKasir = auth?.user.role === "cashier" || auth?.user.role === "tim";
-  const [branchId, setBranchId] = useState<string | null>(
-    () => (isKasir ? null : localStorage.getItem("kakarut.branch") || null),
+  const [branchId, setBranchId] = useState<string | null>(() =>
+    isKasir ? (auth?.user.branch_id ?? null) : localStorage.getItem("kakarut.branch") || null,
   );
 
+  // Daftar cabang dimuat untuk semua peran (label, tipe cabang sendiri, struk);
+  // kasir/tim tetap tak memilih cabang — hanya membaca.
   const { data: cabang = [] } = useQuery({
     queryKey: ["cabang"],
     queryFn: () => api<Cabang[]>("/cabang"),
-    enabled: Boolean(auth?.user.company_id) && !isKasir,
+    enabled: Boolean(auth?.user.company_id),
   });
 
   // Validasi pilihan tersimpan: bila bukan cabang aktif milik perusahaan ini
