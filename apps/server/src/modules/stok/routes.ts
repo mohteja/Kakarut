@@ -254,9 +254,14 @@ export const stokRoutes = new Hono<AppEnv>()
       })),
     );
   })
-  /** Klarifikasi satu penyesuaian: pilih kategori (waste/koreksi) + catatan. */
+  /**
+   * Klarifikasi satu penyesuaian: pilih kategori (waste/koreksi) + catatan.
+   * HANYA owner/admin — kasir cukup melakukan opname; penilaian selisih
+   * (waste vs koreksi) diputuskan manajemen.
+   */
   .post(
     "/penyesuaian/:id/klarifikasi",
+    requireRole("owner", "admin"),
     zValidator(
       "json",
       z.object({
@@ -290,9 +295,6 @@ export const stokRoutes = new Hono<AppEnv>()
           ),
         );
       if (!row) throw new HTTPException(404, { message: "Penyesuaian tidak ditemukan" });
-      if (auth.role === "cashier" && row.branchId !== auth.branch_id) {
-        throw new HTTPException(403, { message: "Kasir hanya boleh cabangnya" });
-      }
       if (!row.selisih || Math.abs(row.selisih) < 1e-9) {
         throw new HTTPException(400, { message: "Baris ini tidak punya selisih" });
       }

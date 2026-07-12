@@ -257,9 +257,14 @@ export function PenyesuaianPage() {
     <div className="max-w-3xl">
       <PageTitle>Penyesuaian Stok</PageTitle>
       <div className="mb-3 rounded-lg bg-blue-50 px-4 py-2 text-sm text-blue-800">
-        Selisih hasil stock opname (lebih/kurang) muncul di sini. Karyawan{" "}
-        <b>mengklarifikasi</b> penyebabnya (waste atau koreksi) lalu <b>owner/admin menyetujui</b> —
-        stok baru disesuaikan <b>setelah disetujui</b>.
+        Selisih hasil stock opname (lebih/kurang) muncul di sini. <b>Owner/admin</b>{" "}
+        <b>mengklarifikasi</b> penyebabnya (waste atau koreksi) lalu <b>menyetujui</b> — stok
+        baru disesuaikan <b>setelah disetujui</b>.
+        {!isManajemen && (
+          <span className="mt-1 block text-xs text-blue-700">
+            Anda kasir: cukup lakukan opname — klarifikasi & persetujuan dilakukan owner/admin.
+          </span>
+        )}
       </div>
 
       <div className="mb-3 flex flex-wrap gap-2">
@@ -385,7 +390,8 @@ export function PenyesuaianPage() {
                   </div>
 
                   <div className="flex flex-wrap gap-2">
-                    {!disetujui && (
+                    {/* klarifikasi hanya owner/admin — kasir cukup opname */}
+                    {isManajemen && !disetujui && (
                       <button
                         onClick={() => setKlarifikasi(r)}
                         className={sudahKlar ? btnSecondary : btnPrimary}
