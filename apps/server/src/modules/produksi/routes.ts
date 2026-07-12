@@ -53,7 +53,17 @@ const TahapBody = z.object({
    * perilaku lama (seluruh faktur, wajib berurutan satu langkah).
    */
   items: z
-    .array(z.object({ id: z.string().uuid(), qty: z.number().positive() }))
+    .array(
+      z.object({
+        id: z.string().uuid(),
+        qty: z.number().positive(),
+        /**
+         * Harga riil baris saat maju (harga pasar naik/turun) — menggantikan
+         * estimasi RAB pada bagian yang maju; sisa split tetap prorata RAB.
+         */
+        harga: z.number().nonnegative().max(1_000_000_000_000).nullish(),
+      }),
+    )
     .min(1)
     .optional(),
   /**
@@ -424,7 +434,11 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
             if (Math.abs(b.qty - item.qty) < 1e-9) {
               const res = await tx
                 .update(productions)
-                .set(naik)
+                .set({
+                  ...naik,
+                  // harga riil menggantikan estimasi RAB (harga pasar berubah)
+                  ...(item.harga != null ? { totalHarga: item.harga } : {}),
+                })
                 .where(kunci)
                 .returning({ id: productions.id });
               if (res.length === 0) {
@@ -434,10 +448,13 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
               }
             } else {
               // Split: bagian yang maju jadi baris BARU; baris asli menyimpan
-              // sisa qty di tahap lama. Harga diprorata dan jumlah keduanya
-              // tetap = harga awal (tidak ada rupiah yang hilang/berlipat).
+              // sisa qty di tahap lama dengan prorata RAB-nya. Bagian yang maju
+              // memakai harga RIIL bila dikirim (harga pasar berubah), selain
+              // itu prorata — sehingga tanpa harga riil jumlah keduanya tetap
+              // = harga awal (tidak ada rupiah yang hilang/berlipat).
               const hargaMaju =
                 b.totalHarga != null ? Math.round((b.totalHarga * item.qty) / b.qty) : null;
+              const hargaBaris = item.harga ?? hargaMaju;
               const res = await tx
                 .update(productions)
                 .set({
@@ -461,7 +478,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
                 ingredientId: b.ingredientId,
                 qty: item.qty,
                 tipe: b.tipe,
-                totalHarga: hargaMaju,
+                totalHarga: hargaBaris,
                 fakturId: b.fakturId,
                 noFaktur: b.noFaktur,
                 supplierId: b.supplierId,

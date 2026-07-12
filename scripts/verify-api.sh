@@ -1265,6 +1265,35 @@ cek "sesuai rencana → hanya 1 entri (cair), tanpa selisih" "V == 1" \
 cek "GET dana faktur tak dikenal → 404" "V == 404" \
   "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/pembelian/dana/00000000-0000-4000-8000-000000000000" -H "Authorization: Bearer $OWNER")"
 
+echo "== 45. Harga riil per bahan saat proses → selesai (pasar naik/turun) =="
+# A) harga naik: baris maju penuh dgn harga riil 55000 (RAB 50000)
+FK45=$(api "$OWNER" POST /pembelian/faktur "{\"items\":[{\"ingredient_id\":\"$ING42A\",\"mode\":\"pcs\",\"jumlah\":10,\"total_harga\":50000}]}")
+FK45_ID=$(echo "$FK45" | jq -r .faktur_id)
+api "$OWNER" POST "/pembelian/tahap/$FK45_ID" '{"ke":"dikerjakan","dana_cair":50000}' > /dev/null
+ID45=$(api "$OWNER" GET "/pembelian?per_page=500" | jq -r --arg f "$FK45_ID" '[.rows[] | select(.faktur_id==$f)][0].id')
+api "$OWNER" POST "/pembelian/tahap/$FK45_ID" "{\"ke\":\"menunggu\",\"items\":[{\"id\":\"$ID45\",\"qty\":10,\"harga\":55000}],\"realisasi\":55000,\"selisih_catatan\":\"harga pasar naik — talangan kas\"}" > /dev/null
+B45=$(api "$OWNER" GET "/pembelian?per_page=500" | jq --arg f "$FK45_ID" '[.rows[] | select(.faktur_id==$f)][0]')
+cek "harga baris ter-update ke riil (55000) & dikirim" "V == 1" \
+  "$(echo "$B45" | jq '((.total_harga == 55000) and (.status == "menunggu")) | if . then 1 else 0 end')"
+cek "selisih harga naik → dana tambahan 5000" "V == 1" \
+  "$(api "$OWNER" GET "/pembelian/dana/$FK45_ID" | jq '(([.rows[] | select(.tipe=="tambahan" and .nominal==5000)] | length == 1) and .total == 55000) | if . then 1 else 0 end')"
+
+# B) split dgn harga riil: 3 dari 8 maju seharga 18000; sisa tetap prorata RAB
+FK45B=$(api "$OWNER" POST /pembelian/faktur "{\"items\":[{\"ingredient_id\":\"$ING42B\",\"mode\":\"pcs\",\"jumlah\":8,\"total_harga\":40000}]}")
+FK45B_ID=$(echo "$FK45B" | jq -r .faktur_id)
+api "$OWNER" POST "/pembelian/tahap/$FK45B_ID" '{"ke":"dikerjakan","dana_cair":40000}' > /dev/null
+ID45B=$(api "$OWNER" GET "/pembelian?per_page=500" | jq -r --arg f "$FK45B_ID" '[.rows[] | select(.faktur_id==$f)][0].id')
+api "$OWNER" POST "/pembelian/tahap/$FK45B_ID" "{\"ke\":\"menunggu\",\"items\":[{\"id\":\"$ID45B\",\"qty\":3,\"harga\":18000}]}" > /dev/null
+B45B=$(api "$OWNER" GET "/pembelian?per_page=500" | jq --arg f "$FK45B_ID" '[.rows[] | select(.faktur_id==$f)]')
+cek "split: bagian maju pakai harga riil (3 pcs / 18000)" "V == 1" \
+  "$(echo "$B45B" | jq '([.[] | select(.status=="menunggu")][0] | (.qty == 3 and .total_harga == 18000)) | if . then 1 else 0 end')"
+cek "split: sisa tugas tetap prorata RAB (5 pcs / 25000)" "V == 1" \
+  "$(echo "$B45B" | jq '([.[] | select(.status=="dikerjakan")][0] | (.qty == 5 and .total_harga == 25000)) | if . then 1 else 0 end')"
+
+# C) harga negatif ditolak validasi
+cek "harga riil negatif → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/pembelian/tahap/$FK45B_ID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"ke\":\"dikonfirmasi\",\"items\":[{\"id\":\"$ID45B\",\"qty\":1,\"harga\":-5}]}")"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]
