@@ -1323,6 +1323,19 @@ cek "diterima → saldo bertambah di cabang tujuan (+10)" "abs(V - 10) < 0.001" 
 cek "tempat bukan milik cabang tujuan → 400" "V == 400" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/pembelian/tahap/$FK46_ID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"ke\":\"menunggu\",\"items\":[{\"id\":\"$ID46B\",\"qty\":8}],\"tujuan_branch_id\":\"$CB46_ID\",\"tujuan_storage_id\":\"$GD46P_ID\"}")"
 
+echo "== 47. Jenis cabang: store vs central kitchen =="
+CK47_ID=$(api "$OWNER" POST /cabang '{"nama":"Central Kitchen 47","tipe":"central_kitchen"}' | jq -r .id)
+cek "cabang central kitchen tercipta dgn tipe benar" "V == 1" \
+  "$(api "$OWNER" GET /cabang | jq --arg id "$CK47_ID" '([.[] | select(.id == $id)][0].tipe == "central_kitchen") | if . then 1 else 0 end')"
+cek "cabang tanpa tipe → default store" "V == 1" \
+  "$(api "$OWNER" GET /cabang | jq --arg id "$CB46_ID" '([.[] | select(.id == $id)][0].tipe == "store") | if . then 1 else 0 end')"
+api "$OWNER" PATCH "/cabang/$CK47_ID" '{"tipe":"store"}' > /dev/null
+cek "PATCH tipe cabang tersimpan" "V == 1" \
+  "$(api "$OWNER" GET /cabang | jq --arg id "$CK47_ID" '([.[] | select(.id == $id)][0].tipe == "store") | if . then 1 else 0 end')"
+api "$OWNER" PATCH "/cabang/$CK47_ID" '{"tipe":"central_kitchen"}' > /dev/null
+cek "tipe cabang tak dikenal → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/cabang" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"nama":"X47","tipe":"gudang"}')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

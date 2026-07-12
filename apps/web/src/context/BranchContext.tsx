@@ -7,7 +7,14 @@ export interface Cabang {
   id: string;
   nama: string;
   alamat: string | null;
+  /** store = outlet penjualan; central_kitchen = dapur produksi pengirim */
+  tipe: "store" | "central_kitchen";
   is_active: boolean;
+}
+
+/** Label cabang dengan ikon jenisnya — dipakai di pemilih cabang. */
+export function labelCabang(b: Pick<Cabang, "nama" | "tipe">) {
+  return `${b.tipe === "central_kitchen" ? "🏭" : "🏪"} ${b.nama}`;
 }
 
 interface BranchContextValue {

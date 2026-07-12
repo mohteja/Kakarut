@@ -12,6 +12,8 @@ const CabangBody = z.object({
   nama: z.string().trim().min(1),
   alamat: z.string().nullish(),
   telepon: z.string().nullish(),
+  /** store = outlet penjualan; central_kitchen = dapur produksi yang mengirim ke store */
+  tipe: z.enum(["store", "central_kitchen"]).optional(),
   is_active: z.boolean().optional(),
 });
 
@@ -29,6 +31,7 @@ export const cabangRoutes = new Hono<AppEnv>()
         nama: r.nama,
         alamat: r.alamat,
         telepon: r.telepon,
+        tipe: r.tipe,
         is_active: r.isActive,
       })),
     );
@@ -45,6 +48,7 @@ export const cabangRoutes = new Hono<AppEnv>()
           nama: body.nama,
           alamat: body.alamat ?? null,
           telepon: body.telepon ?? null,
+          tipe: body.tipe ?? "store",
         })
         .onConflictDoNothing()
         .returning();
@@ -68,6 +72,7 @@ export const cabangRoutes = new Hono<AppEnv>()
           ...(body.nama !== undefined && { nama: body.nama }),
           ...(body.alamat !== undefined && { alamat: body.alamat }),
           ...(body.telepon !== undefined && { telepon: body.telepon }),
+          ...(body.tipe !== undefined && { tipe: body.tipe }),
           ...(body.is_active !== undefined && { isActive: body.is_active }),
         })
         .where(

@@ -18,6 +18,7 @@ interface FormState {
   id?: string;
   nama: string;
   alamat: string;
+  tipe: "store" | "central_kitchen";
 }
 
 export function CabangPage() {
@@ -30,9 +31,12 @@ export function CabangPage() {
       f.id
         ? api(`/cabang/${f.id}`, {
             method: "PATCH",
-            body: { nama: f.nama, alamat: f.alamat || null },
+            body: { nama: f.nama, alamat: f.alamat || null, tipe: f.tipe },
           })
-        : api("/cabang", { method: "POST", body: { nama: f.nama, alamat: f.alamat || null } }),
+        : api("/cabang", {
+            method: "POST",
+            body: { nama: f.nama, alamat: f.alamat || null, tipe: f.tipe },
+          }),
     onSuccess: () => {
       setForm(null);
       queryClient.invalidateQueries({ queryKey: ["cabang"] });
@@ -54,7 +58,10 @@ export function CabangPage() {
     <div className="max-w-3xl">
       <PageTitle
         aksi={
-          <button onClick={() => setForm({ nama: "", alamat: "" })} className={btnPrimary}>
+          <button
+            onClick={() => setForm({ nama: "", alamat: "", tipe: "store" })}
+            className={btnPrimary}
+          >
             + Tambah Cabang
           </button>
         }
@@ -76,7 +83,18 @@ export function CabangPage() {
           <tbody className="divide-y divide-stone-100">
             {cabang.map((b) => (
               <tr key={b.id}>
-                <td className={`${tdClass} font-medium`}>{b.nama}</td>
+                <td className={`${tdClass} font-medium`}>
+                  {b.nama}
+                  <span
+                    className={`ml-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
+                      b.tipe === "central_kitchen"
+                        ? "bg-purple-100 text-purple-700"
+                        : "bg-blue-100 text-blue-700"
+                    }`}
+                  >
+                    {b.tipe === "central_kitchen" ? "🏭 Central Kitchen" : "🏪 Store"}
+                  </span>
+                </td>
                 <td className={tdClass}>{b.alamat ?? "—"}</td>
                 <td className={tdClass}>
                   <span
@@ -89,7 +107,9 @@ export function CabangPage() {
                 </td>
                 <td className={`${tdClass} whitespace-nowrap text-right`}>
                   <button
-                    onClick={() => setForm({ id: b.id, nama: b.nama, alamat: b.alamat ?? "" })}
+                    onClick={() =>
+                      setForm({ id: b.id, nama: b.nama, alamat: b.alamat ?? "", tipe: b.tipe })
+                    }
                     className="text-sm font-medium text-orange-600 hover:underline"
                   >
                     Ubah
@@ -126,6 +146,25 @@ export function CabangPage() {
                 onChange={(e) => setForm({ ...form, alamat: e.target.value })}
                 className={inputClass}
               />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium">Jenis cabang</label>
+              <select
+                value={form.tipe}
+                onChange={(e) =>
+                  setForm({ ...form, tipe: e.target.value as FormState["tipe"] })
+                }
+                className={inputClass}
+              >
+                <option value="store">🏪 Store — outlet penjualan</option>
+                <option value="central_kitchen">
+                  🏭 Central Kitchen — memproses/produksi lalu mengirim ke store
+                </option>
+              </select>
+              <p className="mt-1 text-xs text-stone-400">
+                Central Kitchen membuat faktur produksi/beli, lalu saat <b>dikirim</b> pilih
+                cabang store sebagai tujuan — stok masuk di store saat diterima.
+              </p>
             </div>
             <ErrorText error={simpan.error} />
             <div className="flex justify-end gap-2 pt-2">
