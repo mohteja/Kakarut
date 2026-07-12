@@ -9,6 +9,7 @@ import type { JenisPengadaan } from "@kakarut/shared";
 import { db } from "../../db/client";
 import {
   companies,
+  fakturDana,
   ingredients,
   memberships,
   productions,
@@ -27,6 +28,7 @@ import { tanggalDi } from "../../lib/time";
 const pembuat = alias(users, "pembuat_prod");
 const pengubah = alias(users, "pengubah_prod");
 const pekerja = alias(users, "pekerja_prod");
+const danaOleh = alias(users, "dana_oleh");
 
 const FakturEditBody = z.object({
   password: z.string(),
@@ -51,10 +53,82 @@ const TahapBody = z.object({
    * perilaku lama (seluruh faktur, wajib berurutan satu langkah).
    */
   items: z
-    .array(z.object({ id: z.string().uuid(), qty: z.number().positive() }))
+    .array(
+      z.object({
+        id: z.string().uuid(),
+        qty: z.number().positive(),
+        /**
+         * Harga riil baris saat maju (harga pasar naik/turun) — menggantikan
+         * estimasi RAB pada bagian yang maju; sisa split tetap prorata RAB.
+         */
+        harga: z.number().nonnegative().max(1_000_000_000_000).nullish(),
+      }),
+    )
     .min(1)
     .optional(),
+  /**
+   * Dana yang benar-benar cair saat faktur meninggalkan tahap RAB — penuh
+   * sesuai RAB atau sebagian. Dicatat sebagai entri faktur_dana (akumulatif).
+   */
+  dana_cair: z.number().nonnegative().max(1_000_000_000_000).nullish(),
+  /**
+   * Realisasi biaya saat proses → selesai. Dibandingkan dengan total dana
+   * faktur: kurang → entri 'tambahan' (catatan: dari mana uangnya); lebih →
+   * entri 'kembali' (catatan: di siapa sisa uangnya); pas → tanpa entri.
+   */
+  realisasi: z.number().nonnegative().max(1_000_000_000_000).nullish(),
+  /** keterangan selisih realisasi: sumber dana tambahan / pemegang sisa dana */
+  selisih_catatan: z.string().trim().max(300).nullish(),
+  /**
+   * Tujuan kirim baris yang maju (dipakai saat "dikirim"): cabang tujuan —
+   * baris berpindah cabang & stoknya terhitung di sana saat dikonfirmasi —
+   * dan/atau tempat penyimpanan tujuan. Sisa split tetap di tempat asal.
+   */
+  tujuan_branch_id: z.string().uuid().nullish(),
+  tujuan_storage_id: z.string().uuid().nullish(),
 });
+
+/** Total dana efektif satu faktur: cair + tambahan − kembali. */
+const DANA_EFEKTIF = sql<number>`COALESCE(SUM(CASE WHEN ${fakturDana.tipe} = 'kembali' THEN -${fakturDana.nominal} ELSE ${fakturDana.nominal} END)::float8, 0)`;
+
+type DbAtauTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * Rekonsiliasi dana saat realisasi dilaporkan: selisih terhadap total dana
+ * faktur dicatat sebagai entri 'tambahan' (dana kurang — dari mana uangnya)
+ * atau 'kembali' (dana lebih — di siapa sisa uangnya).
+ */
+async function catatRealisasiDana(
+  tx: DbAtauTx,
+  arg: {
+    companyId: string;
+    branchId: string;
+    fakturId: string;
+    userId: string;
+    realisasi: number;
+    catatan: string | null | undefined;
+  },
+) {
+  const [d] = await tx
+    .select({ total: DANA_EFEKTIF })
+    .from(fakturDana)
+    .where(
+      and(eq(fakturDana.companyId, arg.companyId), eq(fakturDana.fakturId, arg.fakturId)),
+    );
+  const selisih = arg.realisasi - (d?.total ?? 0);
+  if (Math.abs(selisih) < 0.005) return; // pas — sesuai rencana
+  await tx.insert(fakturDana).values({
+    companyId: arg.companyId,
+    branchId: arg.branchId,
+    fakturId: arg.fakturId,
+    tipe: selisih > 0 ? "tambahan" : "kembali",
+    nominal: Math.abs(Math.round(selisih * 100) / 100),
+    catatan:
+      arg.catatan ??
+      (selisih > 0 ? "Kekurangan dana saat realisasi" : "Sisa dana realisasi"),
+    userId: arg.userId,
+  });
+}
 /** transisi tahap produksi wajib berurutan: rencana → dikerjakan → menunggu (lalu /konfirmasi) */
 const TAHAP_SEBELUM = { dikerjakan: "rencana", menunggu: "dikerjakan" } as const;
 /** urutan pipeline untuk aturan "hanya boleh maju" pada tahap sebagian */
@@ -293,7 +367,8 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
      */
     .post("/tahap/:fakturId", zValidator("json", TahapBody), async (c) => {
       const auth = c.get("auth");
-      const { ke, items } = c.req.valid("json");
+      const { ke, items, dana_cair, realisasi, selisih_catatan, tujuan_branch_id, tujuan_storage_id } =
+        c.req.valid("json");
 
       const conds = [
         eq(productions.companyId, auth.company_id!),
@@ -338,6 +413,41 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
           }
         }
 
+        // Tujuan kirim (opsional): baris yang maju pindah cabang dan/atau
+        // tempat penyimpanan — stok terhitung di cabang tujuan saat konfirmasi.
+        let tujuanBranch: string | null = null;
+        if (tujuan_branch_id) {
+          tujuanBranch = await pastikanCabang(tujuan_branch_id, auth.company_id!);
+          if (auth.role === "cashier" && auth.branch_id && tujuanBranch !== auth.branch_id) {
+            throw new HTTPException(403, {
+              message: "Kasir tidak boleh mengirim ke cabang lain",
+            });
+          }
+        }
+        let tujuanStorage: string | null = null;
+        if (tujuan_storage_id) {
+          const [lok] = await db
+            .select({ id: storageLocations.id })
+            .from(storageLocations)
+            .where(
+              and(
+                eq(storageLocations.id, tujuan_storage_id),
+                eq(storageLocations.companyId, auth.company_id!),
+                eq(storageLocations.branchId, tujuanBranch ?? baris[0].branchId),
+              ),
+            );
+          if (!lok) {
+            throw new HTTPException(400, {
+              message: "Tempat penyimpanan tidak valid untuk cabang tujuan",
+            });
+          }
+          tujuanStorage = tujuan_storage_id;
+        }
+        const pindah = {
+          ...(tujuanBranch ? { branchId: tujuanBranch } : {}),
+          ...(tujuanStorage ? { storageLocationId: tujuanStorage } : {}),
+        };
+
         const now = new Date();
         // waktu di-set saat dikonfirmasi (bukan saat RAB) — lihat /konfirmasi.
         const naik =
@@ -346,6 +456,15 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
             : ({ status: ke, updatedBy: auth.sub, updatedAt: now } as const);
 
         await db.transaction(async (tx) => {
+          if (dana_cair != null) {
+            await tx.insert(fakturDana).values({
+              companyId: auth.company_id!,
+              branchId: baris[0].branchId,
+              fakturId: c.req.param("fakturId"),
+              nominal: dana_cair,
+              userId: auth.sub,
+            });
+          }
           for (const item of items) {
             const b = byId.get(item.id)!;
             // WHERE menuntut status persis seperti saat dibaca: bila berubah
@@ -358,7 +477,12 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
             if (Math.abs(b.qty - item.qty) < 1e-9) {
               const res = await tx
                 .update(productions)
-                .set(naik)
+                .set({
+                  ...naik,
+                  ...pindah,
+                  // harga riil menggantikan estimasi RAB (harga pasar berubah)
+                  ...(item.harga != null ? { totalHarga: item.harga } : {}),
+                })
                 .where(kunci)
                 .returning({ id: productions.id });
               if (res.length === 0) {
@@ -368,10 +492,13 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
               }
             } else {
               // Split: bagian yang maju jadi baris BARU; baris asli menyimpan
-              // sisa qty di tahap lama. Harga diprorata dan jumlah keduanya
-              // tetap = harga awal (tidak ada rupiah yang hilang/berlipat).
+              // sisa qty di tahap lama dengan prorata RAB-nya. Bagian yang maju
+              // memakai harga RIIL bila dikirim (harga pasar berubah), selain
+              // itu prorata — sehingga tanpa harga riil jumlah keduanya tetap
+              // = harga awal (tidak ada rupiah yang hilang/berlipat).
               const hargaMaju =
                 b.totalHarga != null ? Math.round((b.totalHarga * item.qty) / b.qty) : null;
+              const hargaBaris = item.harga ?? hargaMaju;
               const res = await tx
                 .update(productions)
                 .set({
@@ -391,15 +518,15 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
               }
               await tx.insert(productions).values({
                 companyId: b.companyId,
-                branchId: b.branchId,
+                branchId: tujuanBranch ?? b.branchId,
                 ingredientId: b.ingredientId,
                 qty: item.qty,
                 tipe: b.tipe,
-                totalHarga: hargaMaju,
+                totalHarga: hargaBaris,
                 fakturId: b.fakturId,
                 noFaktur: b.noFaktur,
                 supplierId: b.supplierId,
-                storageLocationId: b.storageLocationId,
+                storageLocationId: tujuanStorage ?? b.storageLocationId,
                 isBatch: b.isBatch,
                 catatan: b.catatan,
                 userId: b.userId,
@@ -408,6 +535,16 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
                 ...naik,
               });
             }
+          }
+          if (realisasi != null) {
+            await catatRealisasiDana(tx, {
+              companyId: auth.company_id!,
+              branchId: baris[0].branchId,
+              fakturId: c.req.param("fakturId"),
+              userId: auth.sub,
+              realisasi,
+              catatan: selisih_catatan,
+            });
           }
         });
         return c.json({ ok: true, status: ke, jumlah_baris: items.length });
@@ -425,7 +562,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         .update(productions)
         .set({ status: ke, updatedBy: auth.sub, updatedAt: new Date() })
         .where(and(...conds, eq(productions.status, dari)))
-        .returning({ id: productions.id });
+        .returning({ id: productions.id, branchId: productions.branchId });
 
       if (rows.length === 0) {
         const [ada] = await db
@@ -438,7 +575,70 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
           message: `Tahap tidak berurutan: faktur berstatus "${ada.status}" — hanya bisa "${dari}" → "${ke}"`,
         });
       }
+      if (dana_cair != null) {
+        await db.insert(fakturDana).values({
+          companyId: auth.company_id!,
+          branchId: rows[0].branchId,
+          fakturId: c.req.param("fakturId"),
+          nominal: dana_cair,
+          userId: auth.sub,
+        });
+      }
+      if (realisasi != null) {
+        await catatRealisasiDana(db, {
+          companyId: auth.company_id!,
+          branchId: rows[0].branchId,
+          fakturId: c.req.param("fakturId"),
+          userId: auth.sub,
+          realisasi,
+          catatan: selisih_catatan,
+        });
+      }
       return c.json({ ok: true, status: ke, jumlah_baris: rows.length });
+    })
+    /** Buku dana satu faktur: entri pencairan/tambahan/kembali + total efektif. */
+    .get("/dana/:fakturId", async (c) => {
+      const auth = c.get("auth");
+      const fakturId = c.req.param("fakturId");
+      if (!/^[0-9a-f-]{36}$/i.test(fakturId)) {
+        throw new HTTPException(404, { message: "Faktur tidak ditemukan" });
+      }
+      const conds = [
+        eq(productions.companyId, auth.company_id!),
+        eq(productions.fakturId, fakturId),
+        eq(productions.tipe, tipe),
+        isNull(productions.deletedAt),
+      ];
+      if (auth.role === "cashier" && auth.branch_id) {
+        conds.push(eq(productions.branchId, auth.branch_id));
+      }
+      const [ada] = await db
+        .select({ id: productions.id })
+        .from(productions)
+        .where(and(...conds))
+        .limit(1);
+      if (!ada) throw new HTTPException(404, { message: "Faktur tidak ditemukan" });
+
+      const rows = await db
+        .select({
+          id: fakturDana.id,
+          tipe: fakturDana.tipe,
+          nominal: fakturDana.nominal,
+          catatan: fakturDana.catatan,
+          oleh: danaOleh.nama,
+          waktu: fakturDana.waktu,
+        })
+        .from(fakturDana)
+        .leftJoin(danaOleh, eq(fakturDana.userId, danaOleh.id))
+        .where(
+          and(eq(fakturDana.companyId, auth.company_id!), eq(fakturDana.fakturId, fakturId)),
+        )
+        .orderBy(asc(fakturDana.waktu), asc(fakturDana.id));
+      const total = rows.reduce(
+        (t, r) => t + (r.tipe === "kembali" ? -r.nominal : r.nominal),
+        0,
+      );
+      return c.json({ rows, total });
     })
     /** Konfirmasi "ya, ada": barang benar-benar diterima → stok terhitung. */
     .post("/konfirmasi/:fakturId", async (c) => {
@@ -582,6 +782,8 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         dikerjakan_oleh: pekerja.nama,
         qty_dipesan: productions.qtyDipesan,
         alasan_tolak: productions.alasanTolak,
+        // total dana EFEKTIF faktur ini: cair + tambahan − kembali (sama di tiap baris)
+        dana_cair: sql<number>`COALESCE((SELECT SUM(CASE WHEN fd.tipe = 'kembali' THEN -fd.nominal ELSE fd.nominal END)::float8 FROM faktur_dana fd WHERE fd.faktur_id = ${productions.fakturId}), 0)`,
       };
       const rows =
         keys.length === 0

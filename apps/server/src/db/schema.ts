@@ -55,6 +55,13 @@ export const metodeBayarEnum = pgEnum("metode_bayar", ["tunai", "qris", "transfe
 /** jenis cap absensi karyawan: masuk (datang) vs keluar (pulang) */
 export const attendanceTipeEnum = pgEnum("attendance_tipe", ["masuk", "keluar"]);
 
+/**
+ * Jenis entri buku dana faktur: 'cair' = pencairan RAB; 'tambahan' = dana
+ * ekstra saat realisasi lebih besar (catatan: dari mana uangnya); 'kembali' =
+ * sisa dana saat realisasi lebih kecil (catatan: di siapa uangnya).
+ */
+export const danaTipeEnum = pgEnum("dana_tipe", ["cair", "tambahan", "kembali"]);
+
 // ===== Tenancy & identitas =====
 
 export const companies = pgTable("companies", {
@@ -597,6 +604,36 @@ export const productions = pgTable(
   (t) => [
     index("productions_branch_ing_idx").on(t.branchId, t.ingredientId, t.waktu),
     check("productions_qty_ck", sql`${t.qty} > 0`),
+  ],
+);
+
+/**
+ * Catatan DANA CAIR per faktur produksi/beli: saat faktur naik dari RAB ke
+ * tahap berikutnya, owner mencatat dana yang benar-benar diserahkan (penuh
+ * sesuai RAB atau sebagian). Bisa lebih dari satu entri per faktur —
+ * pencairan bertahap dijumlahkan.
+ */
+export const fakturDana = pgTable(
+  "faktur_dana",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    branchId: uuid("branch_id")
+      .notNull()
+      .references(() => branches.id),
+    /** faktur virtual: productions.faktur_id (tanpa FK — faktur bukan tabel) */
+    fakturId: uuid("faktur_id").notNull(),
+    tipe: danaTipeEnum("tipe").notNull().default("cair"),
+    nominal: numeric("nominal", { precision: 14, scale: 2, mode: "number" }).notNull(),
+    catatan: text("catatan"),
+    userId: uuid("user_id").references(() => users.id),
+    waktu: timestamp("waktu", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("faktur_dana_faktur_idx").on(t.fakturId),
+    check("faktur_dana_nominal_ck", sql`${t.nominal} >= 0`),
   ],
 );
 

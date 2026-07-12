@@ -49,6 +49,8 @@ export interface StokMasukRow {
   dikerjakan_oleh: string | null;
   qty_dipesan: number | null;
   alasan_tolak: string | null;
+  /** total dana cair faktur ini (nilai sama di tiap baris; 0 bila belum ada) */
+  dana_cair: number;
 }
 
 export interface FakturGroup {
@@ -68,15 +70,23 @@ export interface FakturGroup {
   dikerjakanOleh: string | null;
   rows: StokMasukRow[];
   totalHarga: number;
+  /** total dana yang sudah cair untuk faktur ini */
+  danaCair: number;
 }
 
 /**
  * Status satu FAKTUR (bukan baris). Setelah "terima sebagian", satu faktur
  * bisa punya baris diterima + baris ditolak sekaligus → status "sebagian".
+ * Setelah "maju sebagian": ada baris selesai + baris yang masih dikerjakan
+ * → status "selesai_sebagian" (masih ada item yang belum).
  */
-export type StatusFaktur = KonfirmasiStatus | "sebagian";
+export type StatusFaktur = KonfirmasiStatus | "sebagian" | "selesai_sebagian";
 
 const BADGE_SEBAGIAN = { label: "📦 Diterima sebagian", cls: "bg-green-100 text-green-800" };
+const BADGE_SELESAI_SEBAGIAN = {
+  label: "✅ Selesai sebagian",
+  cls: "bg-lime-100 text-lime-800",
+};
 
 /** Urutan pipeline — dipakai aturan "tahap hanya bisa maju" & pilihan dropdown. */
 export const URUTAN_TAHAP: Record<KonfirmasiStatus, number> = {
@@ -95,6 +105,11 @@ export const URUTAN_TAHAP: Record<KonfirmasiStatus, number> = {
 export function statusFaktur(rows: { status: KonfirmasiStatus }[]): StatusFaktur {
   const set = new Set(rows.map((r) => r.status));
   if (set.size === 1) return rows[0].status;
+  // ada item yang sudah selesai (dikirim/diterima) TAPI masih ada yang belum
+  // → "selesai sebagian"
+  const adaBelum = set.has("rencana") || set.has("dikerjakan");
+  const adaSelesai = set.has("menunggu") || set.has("dikonfirmasi");
+  if (adaBelum && adaSelesai) return "selesai_sebagian";
   for (const s of ["rencana", "dikerjakan", "menunggu"] as const) {
     if (set.has(s)) return s;
   }
@@ -105,12 +120,18 @@ export function statusFaktur(rows: { status: KonfirmasiStatus }[]): StatusFaktur
 /** Badge faktur (peduli "sebagian"), pilih peta sesuai jalur. */
 export function badgeFaktur(tipe: JenisPengadaan, status: StatusFaktur) {
   if (status === "sebagian") return BADGE_SEBAGIAN;
+  if (status === "selesai_sebagian") return BADGE_SELESAI_SEBAGIAN;
   return (tipe === "produksi" ? STATUS_PRODUKSI : STATUS_BELI)[status];
 }
 
 /** Faktur yang belum selesai (masih dalam pipeline) belum menambah saldo stok. */
 export function belumSelesai(status: StatusFaktur) {
-  return status === "rencana" || status === "dikerjakan" || status === "menunggu";
+  return (
+    status === "rencana" ||
+    status === "dikerjakan" ||
+    status === "menunggu" ||
+    status === "selesai_sebagian"
+  );
 }
 
 /** Badge tahap pipeline produksi. */
@@ -250,6 +271,7 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
           dikerjakanOleh: r.dikerjakan_oleh,
           rows: [],
           totalHarga: 0,
+          danaCair: r.dana_cair ?? 0,
         };
         byKey.set(key, g);
       }
@@ -394,6 +416,14 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                         {g.noFaktur}
                       </span>
                     )}
+                    {g.danaCair > 0 && (
+                      <span
+                        className="rounded bg-emerald-50 px-1.5 py-0.5 text-xs font-semibold text-emerald-700"
+                        title="Total dana yang sudah cair untuk faktur ini"
+                      >
+                        💸 cair {formatRupiah(g.danaCair)}
+                      </span>
+                    )}
                     {g.dibuatOleh && (
                       <span className="text-xs text-stone-400">oleh {g.dibuatOleh}</span>
                     )}
@@ -530,6 +560,8 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
 
       {detail && (
         <FakturDetailModal
+          // remount tiap ganti faktur — form ubah tidak membawa nilai lama
+          key={detail.key}
           grup={detail}
           tipe={tipe}
           endpoint={t.endpoint}
@@ -538,6 +570,8 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
       )}
       {ubahTahap && (
         <TahapModal
+          // remount tiap ganti faktur/tujuan — state centang & qty di-reset
+          key={`${ubahTahap.grup.key}:${ubahTahap.ke}`}
           grup={ubahTahap.grup}
           tipe={tipe}
           endpoint={t.endpoint}
