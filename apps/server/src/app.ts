@@ -26,6 +26,7 @@ import { openBillRoutes } from "./modules/open-bill/routes";
 import { penjualanRoutes } from "./modules/penjualan/routes";
 import { penyimpananRoutes } from "./modules/penyimpanan/routes";
 import { printRoutes } from "./modules/print/routes";
+import { profilRoutes } from "./modules/profil/routes";
 import { pembelianRoutes, produksiRoutes } from "./modules/produksi/routes";
 import { penerimaanRoutes } from "./modules/penerimaan/routes";
 import { rekomendasiRoutes } from "./modules/rekomendasi/routes";
@@ -79,6 +80,8 @@ export function createApp() {
     .route("/shift", shiftRoutes)
     // absensi karyawan (kiosk) — semua peran, tanpa gerbang requireRole
     .route("/absensi", absensiRoutes)
+    // profil akun sendiri (identitas + QR absen + ganti password) — semua peran
+    .route("/profil", profilRoutes)
     // pencarian member ringan untuk autocomplete kasir — semua peran
     .route("/member-cari", memberCariRoutes)
     .route("/stok", stokRoutes)

@@ -1336,6 +1336,29 @@ api "$OWNER" PATCH "/cabang/$CK47_ID" '{"tipe":"central_kitchen"}' > /dev/null
 cek "tipe cabang tak dikenal → 400" "V == 400" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/cabang" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"nama":"X47","tipe":"gudang"}')"
 
+echo "== 48. Profil: identitas + kode absen sendiri + ganti password =="
+PRF48=$(api "$OWNER" GET /profil)
+cek "profil owner: email & role benar" "V == 1" \
+  "$(echo "$PRF48" | jq --arg e "$OWNER_EMAIL" '((.email == $e) and (.role == "owner") and ((.nama | length) > 0)) | if . then 1 else 0 end')"
+cek "profil owner: kode karyawan (QR absen) tersedia" "V == 1" \
+  "$(echo "$PRF48" | jq '((.employee_code != null) and ((.employee_code | length) >= 2)) | if . then 1 else 0 end')"
+cek "ganti password: password lama salah → 401" "V == 401" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/profil/password" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"password_lama":"salah-total","password_baru":"PasswordBaru1"}')"
+cek "ganti password: baru < 8 karakter → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/profil/password" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"password_lama\":\"$OWNER_PASS\",\"password_baru\":\"abc\"}")"
+
+# alur penuh dgn karyawan uji: buat → login → lihat profil → ganti → login ulang
+api "$OWNER" POST /karyawan "{\"nama\":\"Karyawan Profil 48\",\"email\":\"profil48@basooopa.id\",\"password\":\"PwLama48!\",\"role\":\"cashier\",\"branch_id\":\"$PUSAT46_ID\"}" > /dev/null
+TK48=$(login "profil48@basooopa.id" "PwLama48!")
+cek "karyawan uji bisa login" "V == 1" "$([ -n "$TK48" ] && echo 1 || echo 0)"
+cek "profil kasir: kode absen otomatis ada" "V == 1" \
+  "$(api "$TK48" GET /profil | jq '((.role == "cashier") and (.employee_code != null) and (.cabang != null)) | if . then 1 else 0 end')"
+api "$TK48" POST /profil/password '{"password_lama":"PwLama48!","password_baru":"PwBaru48!"}' > /dev/null
+TK48B=$(login "profil48@basooopa.id" "PwBaru48!")
+cek "login dgn password BARU berhasil" "V == 1" "$([ -n "$TK48B" ] && echo 1 || echo 0)"
+cek "login dgn password LAMA → 401" "V == 401" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/auth/login" -H 'Content-Type: application/json' -d '{"email":"profil48@basooopa.id","password":"PwLama48!"}')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

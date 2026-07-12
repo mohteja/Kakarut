@@ -17,6 +17,15 @@ export interface AuthUser {
   branch_id: string | null;
 }
 
+/** Profil akun sendiri (semua peran): identitas + kode/QR absen. */
+export interface ProfilDto {
+  nama: string;
+  email: string;
+  role: UserRole | null;
+  cabang: string | null;
+  employee_code: string | null;
+}
+
 export interface BahanDto {
   id: string;
   slug: string;

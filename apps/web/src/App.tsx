@@ -5,6 +5,7 @@ import { BranchProvider } from "./context/BranchContext";
 import { PrinterProvider } from "./context/PrinterContext";
 import { PrinterPage } from "./pages/pengaturan/PrinterPage";
 import { AbsenPage } from "./pages/absen/AbsenPage";
+import { ProfilPage } from "./pages/profil/ProfilPage";
 import { BahanPage } from "./pages/bahan/BahanPage";
 import { KasirPage } from "./pages/kasir/KasirPage";
 import { RiwayatPage } from "./pages/kasir/RiwayatPage";
@@ -77,6 +78,7 @@ export default function App() {
           {!isSuperAdmin && (
             <>
               <Route path="/absen" element={<AbsenPage />} />
+              <Route path="/profil" element={<ProfilPage />} />
               <Route path="/kasir" element={<KasirPage />} />
               <Route path="/kasir/riwayat" element={<RiwayatPage />} />
               <Route path="/kasir/tutup" element={<ShiftPage />} />

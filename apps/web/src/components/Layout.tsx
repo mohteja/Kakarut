@@ -140,6 +140,9 @@ export function Layout() {
               <NavLink to="/absen" className={linkClass}>
                 🖐 Absen
               </NavLink>
+              <NavLink to="/profil" className={linkClass}>
+                👤 Profil Saya
+              </NavLink>
               <NavLink to="/kasir" className={linkClass}>
                 🧾 Kasir
               </NavLink>
