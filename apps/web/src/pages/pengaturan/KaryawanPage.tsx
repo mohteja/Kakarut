@@ -31,11 +31,15 @@ interface Karyawan {
 }
 
 interface FormState {
+  /** terisi = mode ubah (PATCH); kosong = tambah karyawan baru */
+  id?: string;
   nama: string;
   email: string;
+  /** saat ubah: kosongkan bila password tidak diganti */
   password: string;
   role: "owner" | "admin" | "cashier";
   branch_id: string;
+  is_active: boolean;
 }
 
 const labelRole = { owner: "Owner", admin: "Admin", cashier: "Kasir" } as const;
@@ -101,12 +105,30 @@ export function KaryawanPage() {
   const ubah = useMutation({
     mutationFn: (p: { userId: string; body: Record<string, unknown> }) =>
       api(`/karyawan/${p.userId}`, { method: "PATCH", body: p.body }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["karyawan"] }),
+    onSuccess: () => {
+      setForm(null);
+      queryClient.invalidateQueries({ queryKey: ["karyawan"] });
+    },
   });
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();
-    if (form) tambah.mutate(form);
+    if (!form) return;
+    if (form.id) {
+      ubah.mutate({
+        userId: form.id,
+        body: {
+          nama: form.nama,
+          email: form.email,
+          role: form.role,
+          branch_id: form.role === "cashier" ? form.branch_id : form.branch_id || null,
+          is_active: form.is_active,
+          ...(form.password ? { password: form.password } : {}),
+        },
+      });
+    } else {
+      tambah.mutate(form);
+    }
   }
 
   if (isLoading) return <Spinner />;
@@ -117,7 +139,14 @@ export function KaryawanPage() {
         aksi={
           <button
             onClick={() =>
-              setForm({ nama: "", email: "", password: "", role: "cashier", branch_id: cabang[0]?.id ?? "" })
+              setForm({
+                nama: "",
+                email: "",
+                password: "",
+                role: "cashier",
+                branch_id: cabang[0]?.id ?? "",
+                is_active: true,
+              })
             }
             className={btnPrimary}
           >
@@ -127,7 +156,6 @@ export function KaryawanPage() {
       >
         Karyawan
       </PageTitle>
-      <ErrorText error={ubah.error} />
 
       <Card className="overflow-x-auto">
         <table className="w-full">
@@ -178,22 +206,22 @@ export function KaryawanPage() {
                   >
                     Aktivitas
                   </button>
-                  <button
-                    onClick={() => {
-                      const pw = prompt(`Password baru untuk ${k.nama} (min 8 karakter):`);
-                      if (pw) ubah.mutate({ userId: k.user_id, body: { password: pw } });
-                    }}
-                    className="ml-3 text-sm font-medium text-orange-600 hover:underline"
-                  >
-                    Reset Password
-                  </button>
+                  {/* Ganti password & status aktif ada di dalam form Ubah */}
                   <button
                     onClick={() =>
-                      ubah.mutate({ userId: k.user_id, body: { is_active: !k.is_active } })
+                      setForm({
+                        id: k.user_id,
+                        nama: k.nama,
+                        email: k.email,
+                        password: "",
+                        role: k.role,
+                        branch_id: k.branch_id ?? "",
+                        is_active: k.is_active,
+                      })
                     }
-                    className="ml-3 text-sm font-medium text-stone-500 hover:underline"
+                    className="ml-3 text-sm font-medium text-orange-600 hover:underline"
                   >
-                    {k.is_active ? "Nonaktifkan" : "Aktifkan"}
+                    Ubah
                   </button>
                 </td>
               </tr>
@@ -202,7 +230,11 @@ export function KaryawanPage() {
         </table>
       </Card>
 
-      <Modal open={form !== null} onClose={() => setForm(null)} title="Tambah Karyawan">
+      <Modal
+        open={form !== null}
+        onClose={() => setForm(null)}
+        title={form?.id ? "Ubah Karyawan" : "Tambah Karyawan"}
+      >
         {form && (
           <form onSubmit={onSubmit} className="space-y-3">
             <div>
@@ -225,13 +257,24 @@ export function KaryawanPage() {
               />
             </div>
             <div>
-              <label className="mb-1 block text-sm font-medium">Password (min 8 karakter)</label>
+              <label className="mb-1 block text-sm font-medium">
+                Password (min 8 karakter)
+                {form.id && (
+                  <span className="font-normal text-stone-400">
+                    {" "}
+                    — kosongkan bila tidak diganti
+                  </span>
+                )}
+              </label>
+              {/* minLength diabaikan browser saat kosong & tak required — pas
+                  untuk mode ubah (kosong = password tidak diganti) */}
               <input
-                required
+                required={!form.id}
                 minLength={8}
                 type="password"
                 value={form.password}
                 onChange={(e) => setForm({ ...form, password: e.target.value })}
+                placeholder={form.id ? "••••••••" : undefined}
                 className={inputClass}
               />
             </div>
@@ -272,12 +315,29 @@ export function KaryawanPage() {
                 </div>
               )}
             </div>
-            <ErrorText error={tambah.error} />
+            {form.id && (
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={form.is_active}
+                  onChange={(e) => setForm({ ...form, is_active: e.target.checked })}
+                />
+                Akun aktif
+                <span className="text-xs text-stone-400">
+                  (nonaktif = tidak bisa login &amp; absen)
+                </span>
+              </label>
+            )}
+            <ErrorText error={form.id ? ubah.error : tambah.error} />
             <div className="flex justify-end gap-2 pt-2">
               <button type="button" onClick={() => setForm(null)} className={btnSecondary}>
                 Batal
               </button>
-              <button type="submit" disabled={tambah.isPending} className={btnPrimary}>
+              <button
+                type="submit"
+                disabled={tambah.isPending || ubah.isPending}
+                className={btnPrimary}
+              >
                 Simpan
               </button>
             </div>

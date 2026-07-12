@@ -1518,6 +1518,39 @@ api "$OWNER" POST "/pembelian/tahap/$FK52_ID" "{\"ke\":\"menunggu\",\"items\":[{
 cek "CK47 kirim ke store miliknya → baris pindah ke tujuan" "V == 1" \
   "$(api "$OWNER" GET "/pembelian?branch_id=$ST52_ID&per_page=500" | jq --arg f "$FK52_ID" '([.rows[] | select(.faktur_id==$f)] | (length == 1) and (.[0].status == "menunggu")) | if . then 1 else 0 end')"
 
+echo "== 53. Edit karyawan: nama/email/peran/lokasi + password + status =="
+api "$OWNER" POST /karyawan "{\"nama\":\"Karyawan Edit 53\",\"email\":\"edit53@basooopa.id\",\"password\":\"PwEdit53!\",\"role\":\"cashier\",\"branch_id\":\"$PUSAT51_ID\"}" > /dev/null
+U53_ID=$(api "$OWNER" GET /karyawan | jq -r '[.[] | select(.email=="edit53@basooopa.id")][0].user_id')
+
+# ubah nama + email + peran (kasir → admin, lokasi jadi "Semua")
+api "$OWNER" PATCH "/karyawan/$U53_ID" '{"nama":"Karyawan Edit 53B","email":"edit53b@basooopa.id","role":"admin","branch_id":null}' > /dev/null
+cek "PATCH nama/email/peran/lokasi tersimpan" "V == 1" \
+  "$(api "$OWNER" GET /karyawan | jq --arg id "$U53_ID" '([.[] | select(.user_id==$id)][0] | (.nama=="Karyawan Edit 53B" and .email=="edit53b@basooopa.id" and .role=="admin" and .branch_id==null)) | if . then 1 else 0 end')"
+T53=$(login "edit53b@basooopa.id" "PwEdit53!")
+cek "login dgn email BARU (password lama) berhasil" "V == 1" "$([ -n "$T53" ] && echo 1 || echo 0)"
+
+cek "email bentrok dgn user lain → 409" "V == 409" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PATCH "$BASE/api/karyawan/$U53_ID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"email\":\"$KASIR_EMAIL\"}")"
+cek "peran kasir tanpa lokasi kerja → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PATCH "$BASE/api/karyawan/$U53_ID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"role":"cashier","branch_id":null}')"
+
+# guard hierarki: admin tidak boleh menyentuh akun owner / memberi peran owner
+OWN53_ID=$(api "$OWNER" GET /karyawan | jq -r '[.[] | select(.role=="owner")][0].user_id')
+cek "admin ubah akun owner → 403" "V == 403" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PATCH "$BASE/api/karyawan/$OWN53_ID" -H "Authorization: Bearer $T53" -H 'Content-Type: application/json' -d '{"nama":"Diretas"}')"
+cek "admin memberi peran owner → 403" "V == 403" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PATCH "$BASE/api/karyawan/$U53_ID" -H "Authorization: Bearer $T53" -H 'Content-Type: application/json' -d '{"role":"owner"}')"
+
+# ganti password via edit + nonaktifkan akun
+api "$OWNER" PATCH "/karyawan/$U53_ID" '{"password":"PwEdit53Baru!"}' > /dev/null
+cek "password baru dari form edit berlaku" "V == 1" \
+  "$([ -n "$(login "edit53b@basooopa.id" "PwEdit53Baru!")" ] && echo 1 || echo 0)"
+cek "password < 8 karakter → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PATCH "$BASE/api/karyawan/$U53_ID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"password":"abc"}')"
+api "$OWNER" PATCH "/karyawan/$U53_ID" '{"is_active":false}' > /dev/null
+cek "akun nonaktif tidak bisa login (401)" "V == 401" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/auth/login" -H 'Content-Type: application/json' -d '{"email":"edit53b@basooopa.id","password":"PwEdit53Baru!"}')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

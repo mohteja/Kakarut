@@ -19,6 +19,7 @@ const KaryawanBody = z.object({
 
 const PatchKaryawanBody = z.object({
   nama: z.string().trim().min(1).optional(),
+  email: z.string().trim().toLowerCase().email().optional(),
   role: z.enum(["owner", "admin", "cashier"]).optional(),
   branch_id: z.string().uuid().nullish().optional(),
   is_active: z.boolean().optional(),
@@ -159,6 +160,17 @@ export const karyawanRoutes = new Hono<AppEnv>()
     }
     if (targetBranch) await pastikanCabangMilikPerusahaan(targetBranch, auth.company_id!);
 
+    // Email = identitas login lintas perusahaan → wajib unik global.
+    if (body.email !== undefined) {
+      const [bentrok] = await db
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.email, body.email));
+      if (bentrok && bentrok.id !== userId) {
+        throw new HTTPException(409, { message: `Email ${body.email} sudah terdaftar` });
+      }
+    }
+
     await db.transaction(async (tx) => {
       if (body.role !== undefined || body.branch_id !== undefined) {
         await tx
@@ -166,11 +178,17 @@ export const karyawanRoutes = new Hono<AppEnv>()
           .set({ role: targetRole, branchId: targetBranch ?? null })
           .where(eq(memberships.id, member.id));
       }
-      if (body.nama !== undefined || body.is_active !== undefined || body.password) {
+      if (
+        body.nama !== undefined ||
+        body.email !== undefined ||
+        body.is_active !== undefined ||
+        body.password
+      ) {
         await tx
           .update(users)
           .set({
             ...(body.nama !== undefined && { nama: body.nama }),
+            ...(body.email !== undefined && { email: body.email }),
             ...(body.is_active !== undefined && { isActive: body.is_active }),
             ...(body.password && { passwordHash: bcrypt.hashSync(body.password, 10) }),
           })
