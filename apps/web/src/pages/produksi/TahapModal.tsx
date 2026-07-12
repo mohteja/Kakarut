@@ -70,9 +70,10 @@ export function TahapModal({
   const keSelesai = ke === "menunggu";
 
   // Dana cair: ditanyakan saat ada baris terpilih yang MENINGGALKAN tahap RAB
-  // — cair penuh sesuai RAB bagian yang maju, atau sebagian (input nominal).
-  const [danaMode, setDanaMode] = useState<"penuh" | "sebagian">("penuh");
+  // — satu input nominal, terisi otomatis senilai RAB bagian yang maju sampai
+  // diketik manual (cair sebagian tinggal ubah angkanya).
   const [danaNominal, setDanaNominal] = useState("");
+  const [danaManual, setDanaManual] = useState(false);
 
   // Realisasi biaya saat proses → selesai: sesuai rencana, atau tidak —
   // harga riil per bahan disesuaikan (pasar naik/turun) dan selisih dananya
@@ -122,13 +123,9 @@ export function TahapModal({
     return t + Math.round((r.total_harga * Math.min(q, r.qty)) / r.qty);
   }, 0);
   const tanyaDana = barisRab.length > 0;
-  const danaCair = !tanyaDana
-    ? null
-    : danaMode === "penuh"
-      ? rabMaju
-      : Number(danaNominal);
+  const danaCair = !tanyaDana ? null : danaManual ? Number(danaNominal) : rabMaju;
   const danaInvalid =
-    tanyaDana && danaMode === "sebagian" && (!Number.isFinite(danaCair) || danaCair! < 0);
+    tanyaDana && danaManual && (!Number.isFinite(danaCair) || danaCair! < 0);
 
   // Realisasi vs dana faktur (termasuk pencairan yang dikirim bersamaan):
   // kurang → wajib jelaskan dari mana uangnya; lebih → di siapa sisa uangnya.
@@ -317,46 +314,28 @@ export function TahapModal({
             <div className="text-sm font-semibold text-stone-700">
               💸 Dana cair untuk baris dari tahap RAB
             </div>
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="radio"
-                name="dana-cair"
-                checked={danaMode === "penuh"}
-                onChange={() => setDanaMode("penuh")}
-              />
-              <span>
-                Cair <b>penuh sesuai RAB</b> — {formatRupiah(rabMaju)}
-              </span>
-            </label>
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="radio"
-                name="dana-cair"
-                checked={danaMode === "sebagian"}
-                onChange={() => setDanaMode("sebagian")}
-              />
-              <span>Cair sebagian — nominal:</span>
+            <label className="flex flex-wrap items-center gap-2 text-sm">
+              <span>Nominal yang cair:</span>
               <input
                 type="number"
                 min="0"
                 step="any"
-                value={danaNominal}
-                onFocus={() => setDanaMode("sebagian")}
-                onChange={(e) => setDanaNominal(e.target.value)}
+                value={danaManual ? danaNominal : String(rabMaju)}
+                onChange={(e) => {
+                  setDanaManual(true);
+                  setDanaNominal(e.target.value);
+                }}
                 placeholder="Rp"
                 aria-label="Nominal dana cair"
                 className={`w-36 rounded-lg border px-2 py-1 text-right text-sm ${danaInvalid ? "border-red-400" : "border-stone-300"}`}
               />
+              <span className="text-xs text-stone-400">RAB: {formatRupiah(rabMaju)}</span>
             </label>
-            {danaMode === "sebagian" &&
-              !danaInvalid &&
-              danaCair != null &&
-              danaCair < rabMaju && (
-                <div className="text-xs text-amber-700">
-                  Kurang {formatRupiah(rabMaju - danaCair)} dari RAB — sisa kebutuhan dana
-                  tercatat di faktur.
-                </div>
-              )}
+            {!danaInvalid && danaCair != null && danaCair < rabMaju - 0.49 && (
+              <div className="text-xs text-amber-700">
+                Cair sebagian — kurang {formatRupiah(rabMaju - danaCair)} dari RAB.
+              </div>
+            )}
             {grup.danaCair > 0 && (
               <div className="text-xs text-stone-500">
                 Sudah cair sebelumnya: {formatRupiah(grup.danaCair)} (pencairan dijumlahkan)
