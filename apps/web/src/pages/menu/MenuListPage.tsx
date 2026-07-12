@@ -10,6 +10,7 @@ import {
   tdClass,
   thClass,
 } from "../../components/ui";
+import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatRupiah } from "../../lib/format";
 
@@ -21,6 +22,8 @@ function FoodCost({ persen }: { persen: number }) {
 
 export function MenuListPage() {
   const queryClient = useQueryClient();
+  const { cabang } = useBranch();
+  const namaCabang = new Map(cabang.map((b) => [b.id, b.nama]));
   const { data: menus, isLoading } = useQuery({
     queryKey: ["menu"],
     queryFn: () => api<MenuDto[]>("/menu"),
@@ -90,6 +93,16 @@ export function MenuListPage() {
                       {m.tipe === "paket" && (
                         <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-700">
                           Paket · dasar: {m.base_menu_nama}
+                        </span>
+                      )}
+                      {m.branch_ids.length > 0 && (
+                        <span
+                          className="ml-2 rounded-full bg-sky-100 px-2 py-0.5 text-xs text-sky-700"
+                          title={m.branch_ids
+                            .map((bid) => namaCabang.get(bid) ?? "?")
+                            .join(", ")}
+                        >
+                          📍 {m.branch_ids.map((bid) => namaCabang.get(bid) ?? "?").join(", ")}
                         </span>
                       )}
                     </td>

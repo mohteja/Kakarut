@@ -8,6 +8,7 @@ import {
   numeric,
   pgEnum,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -94,9 +95,10 @@ export const companies = pgTable("companies", {
 /**
  * Jenis cabang: 'store' = outlet penjualan; 'central_kitchen' = dapur pusat
  * yang memproses/produksi bahan lalu MENGIRIM ke cabang store (lewat tujuan
- * kirim pada tahap faktur).
+ * kirim pada tahap faktur); 'kantor' = lokasi kerja admin/finance —
+ * hanya untuk penempatan karyawan & absensi, bukan tujuan kirim barang.
  */
-export const branchTipeEnum = pgEnum("branch_tipe", ["store", "central_kitchen"]);
+export const branchTipeEnum = pgEnum("branch_tipe", ["store", "central_kitchen", "kantor"]);
 
 export const branches = pgTable(
   "branches",
@@ -326,6 +328,23 @@ export const menus = pgTable(
       sql`${t.tipe} <> 'paket' OR (${t.baseMenuId} IS NOT NULL AND ${t.baseMult} IS NOT NULL)`,
     ),
   ],
+);
+
+/**
+ * Pembatasan menu per lokasi (mode Pro): TANPA baris = menu tampil di SEMUA
+ * cabang (default, data lama aman); ada baris = whitelist cabang.
+ */
+export const menuBranches = pgTable(
+  "menu_branches",
+  {
+    menuId: uuid("menu_id")
+      .notNull()
+      .references(() => menus.id, { onDelete: "cascade" }),
+    branchId: uuid("branch_id")
+      .notNull()
+      .references(() => branches.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.menuId, t.branchId] })],
 );
 
 export const menuComponents = pgTable(

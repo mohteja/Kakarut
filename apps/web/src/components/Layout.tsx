@@ -4,6 +4,7 @@ import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { labelCabang, useBranch } from "../context/BranchContext";
 import { api } from "../lib/api";
+import { useCompanyMode } from "../lib/useCompanyMode";
 
 const linkClass = ({ isActive }: { isActive: boolean }) =>
   `block rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
@@ -13,6 +14,7 @@ const linkClass = ({ isActive }: { isActive: boolean }) =>
 export function Layout() {
   const { auth, logout } = useAuth();
   const { cabang, branchId, setBranchId, branchQuery } = useBranch();
+  const { isPro } = useCompanyMode();
   const [menuOpen, setMenuOpen] = useState(false);
 
   // Jumlah kiriman pembelian yang menunggu diterima → badge di nav "Penerimaan
@@ -98,7 +100,8 @@ export function Layout() {
           </button>
         </div>
 
-        {!isSuperAdmin && isManajemen && cabang.length > 0 && (
+        {/* Pemilih cabang hanya relevan di mode Pro (multi-lokasi) */}
+        {!isSuperAdmin && isManajemen && isPro && cabang.length > 0 && (
           <select
             value={branchId ?? ""}
             onChange={(e) => setBranchId(e.target.value)}
@@ -215,9 +218,12 @@ export function Layout() {
                   <NavLink to="/pengaturan/perusahaan" className={linkClass}>
                     🏪 Perusahaan
                   </NavLink>
-                  <NavLink to="/pengaturan/cabang" className={linkClass}>
-                    📍 Cabang
-                  </NavLink>
+                  {/* Multi-lokasi khusus mode Pro — Lite cukup 1 cabang */}
+                  {isPro && (
+                    <NavLink to="/pengaturan/cabang" className={linkClass}>
+                      📍 Cabang
+                    </NavLink>
+                  )}
                   <NavLink to="/pengaturan/karyawan" className={linkClass}>
                     👥 Karyawan
                   </NavLink>

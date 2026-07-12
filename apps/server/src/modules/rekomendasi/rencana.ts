@@ -27,7 +27,7 @@ import {
   suppliers,
 } from "../../db/schema";
 import { tanggalDi } from "../../lib/time";
-import { loadKatalog } from "../menu/service";
+import { loadKatalog, tampilDiCabang } from "../menu/service";
 import { hitungSaldoCabang } from "../stok/service";
 
 /**
@@ -71,6 +71,11 @@ export async function rencanaDariMenu(
     if (!menu) throw new HTTPException(400, { message: `Menu tidak ditemukan (${menuId})` });
     if (!menu.isActive) {
       throw new HTTPException(400, { message: `Menu "${menu.nama}" nonaktif` });
+    }
+    if (!tampilDiCabang(katalog, menu.id, branchId)) {
+      throw new HTTPException(400, {
+        message: `Menu "${menu.nama}" tidak tersedia di cabang ini`,
+      });
     }
     const komponen = [
       ...(katalog.komponenByMenu.get(menu.id) ?? []),

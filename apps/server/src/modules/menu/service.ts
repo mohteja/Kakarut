@@ -13,7 +13,7 @@ import {
   type MenuStokDto,
 } from "@kakarut/shared";
 import { db, type Db, type Tx } from "../../db/client";
-import { ingredients, menuCategories, menuComponents, menus } from "../../db/schema";
+import { ingredients, menuBranches, menuCategories, menuComponents, menus } from "../../db/schema";
 import { hitungSaldoCabang } from "../stok/service";
 
 type MenuRow = typeof menus.$inferSelect;
@@ -23,6 +23,18 @@ export interface KatalogMenu {
   categoryNameById: Map<string, string>;
   /** komponen per menu, lengkap dengan info bahan */
   komponenByMenu: Map<string, KomponenDto[]>;
+  /** pembatasan lokasi per menu — TANPA entri/kosong = tampil di semua cabang */
+  branchIdsByMenu: Map<string, string[]>;
+}
+
+/** Apakah menu tampil di cabang ini? (tanpa pembatasan = semua cabang) */
+export function tampilDiCabang(
+  katalog: KatalogMenu,
+  menuId: string,
+  branchId: string,
+): boolean {
+  const ids = katalog.branchIdsByMenu.get(menuId);
+  return !ids || ids.length === 0 || ids.includes(branchId);
 }
 
 /**
@@ -42,7 +54,24 @@ export async function loadKatalog(dbx: Db | Tx, companyId: string): Promise<Kata
     .where(eq(menuCategories.companyId, companyId));
   const categoryNameById = new Map(cats.map((c) => [c.id, c.nama]));
 
+  const branchIdsByMenu = new Map<string, string[]>();
   const komponenByMenu = new Map<string, KomponenDto[]>();
+  if (rows.length > 0) {
+    const batasan = await dbx
+      .select({ menuId: menuBranches.menuId, branchId: menuBranches.branchId })
+      .from(menuBranches)
+      .where(
+        inArray(
+          menuBranches.menuId,
+          rows.map((r) => r.id),
+        ),
+      );
+    for (const b of batasan) {
+      const list = branchIdsByMenu.get(b.menuId) ?? [];
+      list.push(b.branchId);
+      branchIdsByMenu.set(b.menuId, list);
+    }
+  }
   if (rows.length > 0) {
     const comps = await dbx
       .select({
@@ -83,7 +112,7 @@ export async function loadKatalog(dbx: Db | Tx, companyId: string): Promise<Kata
     }
   }
 
-  return { rows, categoryNameById, komponenByMenu };
+  return { rows, categoryNameById, komponenByMenu, branchIdsByMenu };
 }
 
 function toKomponenHpp(list: KomponenDto[]) {
@@ -230,7 +259,9 @@ export async function ketersediaanMenu(
   const saldoByIngredient = new Map(saldoRows.map((r) => [r.ingredient_id, r.saldo]));
   const bahanById = new Map(saldoRows.map((r) => [r.ingredient_id, r]));
 
-  return katalog.rows.map((menu) => {
+  return katalog.rows
+    .filter((menu) => tampilDiCabang(katalog, menu.id, branchId))
+    .map((menu) => {
     // qty bahan terlacak per porsi = komponen sendiri + (paket) komponen menu
     // dasar, digabung per bahan (persis logika konsumsi bawa-pulang).
     const komponen = [
@@ -291,6 +322,7 @@ export function toMenuDto(menu: MenuRow, katalog: KatalogMenu): MenuDto {
     image_url: menu.imageUrl,
     is_active: menu.isActive,
     sort_order: menu.sortOrder,
+    branch_ids: katalog.branchIdsByMenu.get(menu.id) ?? [],
     komponen: katalog.komponenByMenu.get(menu.id) ?? [],
     hpp,
     hpp_dine_in: hppDineIn,

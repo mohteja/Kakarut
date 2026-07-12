@@ -13,16 +13,19 @@ import {
 } from "../../components/ui";
 import { useBranch, type Cabang } from "../../context/BranchContext";
 import { api } from "../../lib/api";
+import { useCompanyMode } from "../../lib/useCompanyMode";
+import { Link } from "react-router-dom";
 
 interface FormState {
   id?: string;
   nama: string;
   alamat: string;
-  tipe: "store" | "central_kitchen";
+  tipe: "store" | "central_kitchen" | "kantor";
 }
 
 export function CabangPage() {
   const { cabang } = useBranch();
+  const { isPro } = useCompanyMode();
   const queryClient = useQueryClient();
   const [form, setForm] = useState<FormState | null>(null);
 
@@ -52,6 +55,30 @@ export function CabangPage() {
   function onSubmit(e: FormEvent) {
     e.preventDefault();
     if (form) simpan.mutate(form);
+  }
+
+  // Mode Lite = 1 cabang — halaman ini jadi ajakan upgrade bila diakses langsung.
+  if (!isPro) {
+    return (
+      <div className="max-w-3xl">
+        <PageTitle>Cabang</PageTitle>
+        <Card className="space-y-3 p-6 text-center">
+          <div className="text-4xl">📍</div>
+          <h2 className="text-lg font-bold text-stone-800">Multi-lokasi butuh mode Pro</h2>
+          <p className="mx-auto max-w-md text-sm text-stone-600">
+            Mode Lite dibatasi 1 cabang. Upgrade ke <b>Pro</b> untuk menambah 🏭 Central
+            Kitchen, 🏪 cabang store lain, dan 🏢 Kantor — lengkap dengan kiriman antar
+            lokasi dan menu per lokasi.
+          </p>
+          <Link
+            to="/pengaturan/perusahaan"
+            className="inline-block rounded-lg bg-orange-600 px-4 py-2 text-sm font-semibold text-white hover:bg-orange-700"
+          >
+            ⬆ Upgrade di Pengaturan Perusahaan
+          </Link>
+        </Card>
+      </div>
+    );
   }
 
   return (
@@ -89,10 +116,16 @@ export function CabangPage() {
                     className={`ml-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
                       b.tipe === "central_kitchen"
                         ? "bg-purple-100 text-purple-700"
-                        : "bg-blue-100 text-blue-700"
+                        : b.tipe === "kantor"
+                          ? "bg-stone-200 text-stone-600"
+                          : "bg-blue-100 text-blue-700"
                     }`}
                   >
-                    {b.tipe === "central_kitchen" ? "🏭 Central Kitchen" : "🏪 Store"}
+                    {b.tipe === "central_kitchen"
+                      ? "🏭 Central Kitchen"
+                      : b.tipe === "kantor"
+                        ? "🏢 Kantor"
+                        : "🏪 Store"}
                   </span>
                 </td>
                 <td className={tdClass}>{b.alamat ?? "—"}</td>
@@ -160,10 +193,14 @@ export function CabangPage() {
                 <option value="central_kitchen">
                   🏭 Central Kitchen — memproses/produksi lalu mengirim ke store
                 </option>
+                <option value="kantor">
+                  🏢 Kantor — lokasi kerja admin/finance (bukan tujuan kirim)
+                </option>
               </select>
               <p className="mt-1 text-xs text-stone-400">
                 Central Kitchen membuat faktur produksi/beli, lalu saat <b>dikirim</b> pilih
-                cabang store sebagai tujuan — stok masuk di store saat diterima.
+                cabang store sebagai tujuan — stok masuk di store saat diterima. Kantor hanya
+                untuk penempatan karyawan &amp; absensi.
               </p>
             </div>
             <ErrorText error={simpan.error} />

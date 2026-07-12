@@ -433,12 +433,17 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         let tujuanNama: string | null = null;
         if (tujuan_branch_id) {
           const [cb] = await db
-            .select({ id: branches.id, nama: branches.nama })
+            .select({ id: branches.id, nama: branches.nama, tipe: branches.tipe })
             .from(branches)
             .where(
               and(eq(branches.id, tujuan_branch_id), eq(branches.companyId, auth.company_id!)),
             );
           if (!cb) throw new HTTPException(400, { message: "Cabang tujuan tidak valid" });
+          if (cb.tipe === "kantor") {
+            throw new HTTPException(400, {
+              message: "Kantor bukan tujuan kirim barang — pilih cabang store",
+            });
+          }
           tujuanBranch = cb.id;
           tujuanNama = cb.nama;
           if (auth.role === "cashier" && auth.branch_id && tujuanBranch !== auth.branch_id) {

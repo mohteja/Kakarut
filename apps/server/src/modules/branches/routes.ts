@@ -4,7 +4,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { db } from "../../db/client";
-import { branches } from "../../db/schema";
+import { branches, companies } from "../../db/schema";
 import { requireRole, type AppEnv } from "../../middleware/auth";
 import { seedMejaDefault } from "../meja/defaults";
 
@@ -12,8 +12,11 @@ const CabangBody = z.object({
   nama: z.string().trim().min(1),
   alamat: z.string().nullish(),
   telepon: z.string().nullish(),
-  /** store = outlet penjualan; central_kitchen = dapur produksi yang mengirim ke store */
-  tipe: z.enum(["store", "central_kitchen"]).optional(),
+  /**
+   * store = outlet penjualan; central_kitchen = dapur produksi yang mengirim
+   * ke store; kantor = lokasi kerja admin/finance (bukan tujuan kirim barang)
+   */
+  tipe: z.enum(["store", "central_kitchen", "kantor"]).optional(),
   is_active: z.boolean().optional(),
 });
 
@@ -39,6 +42,23 @@ export const cabangRoutes = new Hono<AppEnv>()
   .post("/", requireRole("owner", "admin"), zValidator("json", CabangBody), async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");
+    // Mode Lite dibatasi 1 cabang — multi-lokasi butuh upgrade ke Pro.
+    const [comp] = await db
+      .select({ plan: companies.plan })
+      .from(companies)
+      .where(eq(companies.id, auth.company_id!));
+    if (comp?.plan !== "pro") {
+      const ada = await db
+        .select({ id: branches.id })
+        .from(branches)
+        .where(eq(branches.companyId, auth.company_id!))
+        .limit(1);
+      if (ada.length > 0) {
+        throw new HTTPException(400, {
+          message: "Mode Lite hanya 1 cabang — upgrade ke Pro untuk multi-lokasi",
+        });
+      }
+    }
     // Cabang + meja bawaan dibuat atomik: bila seed gagal, pembuatan cabang ikut rollback.
     const row = await db.transaction(async (tx) => {
       const [b] = await tx

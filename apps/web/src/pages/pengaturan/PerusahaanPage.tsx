@@ -9,6 +9,8 @@ import {
   btnPrimary,
   inputClass,
 } from "../../components/ui";
+import { useAuth } from "../../context/AuthContext";
+import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 
 interface Company {
@@ -21,8 +23,120 @@ interface Company {
   pb1Rate: number;
   diskonMaksPersen: number;
   plan: string;
+  mode: "lite" | "pro";
   receiptFooter: string | null;
   receiptShowAlamat: boolean;
+}
+
+/** Kartu Mode Lite/Pro: penjelasan + tombol upgrade (modal) / turun ke Lite. */
+function KartuMode({ company }: { company: Company }) {
+  const queryClient = useQueryClient();
+  const { auth } = useAuth();
+  const { cabang } = useBranch();
+  const [konfirmasiPro, setKonfirmasiPro] = useState(false);
+  const isOwner = auth?.user.role === "owner";
+  const isPro = company.mode === "pro";
+  const cabangAktif = cabang.filter((b) => b.is_active).length;
+
+  const ubahMode = useMutation({
+    mutationFn: (mode: "lite" | "pro") =>
+      api("/company/mode", { method: "POST", body: { mode } }),
+    onSuccess: () => {
+      setKonfirmasiPro(false);
+      queryClient.invalidateQueries({ queryKey: ["company"] });
+      queryClient.invalidateQueries({ queryKey: ["cabang"] });
+    },
+  });
+
+  return (
+    <Card className="mb-4 space-y-3 p-5">
+      <div className="flex items-center gap-3">
+        <span
+          className={`rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wide ${
+            isPro ? "bg-purple-600 text-white" : "bg-stone-200 text-stone-700"
+          }`}
+        >
+          {isPro ? "PRO" : "LITE"}
+        </span>
+        <div className="text-sm font-semibold text-stone-800">Mode aplikasi</div>
+      </div>
+      <p className="text-sm text-stone-600">
+        {isPro ? (
+          <>
+            Mode <b>Pro</b> untuk usaha multi-lokasi: 🏭 Central Kitchen memproduksi &amp;
+            mengirim ke 🏪 cabang store, plus 🏢 Kantor sebagai lokasi kerja admin/finance.
+            Karyawan ditempatkan sesuai lokasi kerjanya dan menu bisa dibatasi per lokasi.
+          </>
+        ) : (
+          <>
+            Mode <b>Lite</b> untuk usaha 1 cabang — semua fitur kasir, stok, produksi, dan
+            laporan aktif tanpa pengaturan multi-lokasi.
+          </>
+        )}
+      </p>
+      {isOwner ? (
+        isPro ? (
+          <div>
+            <button
+              onClick={() => ubahMode.mutate("lite")}
+              disabled={cabangAktif > 1 || ubahMode.isPending}
+              className="rounded-lg border border-stone-300 px-3 py-1.5 text-sm font-medium text-stone-700 hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {ubahMode.isPending ? "Memproses…" : "⬇ Turun ke Lite"}
+            </button>
+            {cabangAktif > 1 && (
+              <p className="mt-1 text-xs text-stone-500">
+                Nonaktifkan cabang lain dulu (tersisa 1 cabang aktif) untuk turun ke Lite.
+              </p>
+            )}
+          </div>
+        ) : (
+          <button onClick={() => setKonfirmasiPro(true)} className={btnPrimary}>
+            ⬆ Upgrade ke Pro (multi-lokasi)
+          </button>
+        )
+      ) : (
+        <p className="text-xs text-stone-500">Hanya owner yang dapat mengubah mode.</p>
+      )}
+      <ErrorText error={ubahMode.error} />
+
+      {konfirmasiPro && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl">
+            <h3 className="mb-2 text-lg font-bold text-stone-800">Upgrade ke Pro?</h3>
+            <p className="mb-3 text-sm text-stone-600">
+              Lokasi default akan dibuat otomatis (cabang Anda sekarang tetap menjadi store
+              pertama):
+            </p>
+            <ul className="mb-4 space-y-1 text-sm text-stone-700">
+              <li>🏭 <b>Central Kitchen</b> — memproses/produksi lalu mengirim ke store</li>
+              <li>🏪 <b>Cabang 2</b> — outlet penjualan kedua (dengan meja bawaan)</li>
+              <li>🏢 <b>Kantor</b> — lokasi kerja admin/finance (bukan tujuan kirim)</li>
+            </ul>
+            <p className="mb-4 text-xs text-stone-500">
+              Nama, alamat, dan status tiap lokasi bisa diubah kapan saja di menu Cabang.
+            </p>
+            <ErrorText error={ubahMode.error} />
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setKonfirmasiPro(false)}
+                className="rounded-lg border border-stone-300 px-4 py-2 text-sm font-medium text-stone-700 hover:bg-stone-100"
+              >
+                Batal
+              </button>
+              <button
+                onClick={() => ubahMode.mutate("pro")}
+                disabled={ubahMode.isPending}
+                className={btnPrimary}
+              >
+                {ubahMode.isPending ? "Memproses…" : "Ya, upgrade ke Pro"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </Card>
+  );
 }
 
 export function PerusahaanPage() {
@@ -82,6 +196,7 @@ export function PerusahaanPage() {
   return (
     <div className="max-w-2xl">
       <PageTitle>Pengaturan Perusahaan</PageTitle>
+      <KartuMode company={company} />
       <Card className="space-y-4 p-5">
         <div className="text-sm text-stone-500">
           Paket langganan: <span className="font-semibold uppercase">{company.plan}</span>

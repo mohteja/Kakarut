@@ -97,6 +97,8 @@ export interface MenuDto {
   image_url: string | null;
   is_active: boolean;
   sort_order: number;
+  /** pembatasan lokasi (mode Pro) — [] = tampil di semua cabang */
+  branch_ids: string[];
   komponen: KomponenDto[];
   /** dihitung live */
   hpp: number;

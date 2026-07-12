@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { MenuDto } from "@kakarut/shared";
 import { Card, PageTitle, Spinner, btnPrimary, btnSecondary } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
+import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatRupiah, formatTanggal, hariIniWIB } from "../../lib/format";
 
@@ -37,12 +38,14 @@ function bangunUrutan(menus: MenuDto[], kategori: Kategori[]): Record<string, st
  */
 export function LihatMenuPage() {
   const { auth } = useAuth();
+  const { branchQuery } = useBranch();
   const queryClient = useQueryClient();
   const namaPerusahaan = auth?.company?.nama ?? "Kakarut POS";
 
+  // Menu per lokasi: tampilkan hanya menu yang tersedia di cabang aktif.
   const { data: menus, isLoading } = useQuery({
-    queryKey: ["menu"],
-    queryFn: () => api<MenuDto[]>("/menu"),
+    queryKey: ["menu", branchQuery],
+    queryFn: () => api<MenuDto[]>(`/menu${branchQuery}`),
   });
   const { data: kategori = [] } = useQuery({
     queryKey: ["kategori"],

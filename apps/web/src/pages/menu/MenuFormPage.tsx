@@ -21,8 +21,10 @@ import {
   btnSecondary,
   inputClass,
 } from "../../components/ui";
+import { labelCabang, useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatRupiah } from "../../lib/format";
+import { useCompanyMode } from "../../lib/useCompanyMode";
 
 interface Kategori {
   id: string;
@@ -48,6 +50,8 @@ export function MenuFormPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { isPro } = useCompanyMode();
+  const { cabang } = useBranch();
 
   const { data: bahan } = useQuery({
     queryKey: ["bahan"],
@@ -80,6 +84,8 @@ export function MenuFormPage() {
   const [isActive, setIsActive] = useState(true);
   const [komponen, setKomponen] = useState<KomponenForm[]>([]);
   const [override, setOverride] = useState<Record<string, BahanOverride>>({});
+  /** pembatasan lokasi (mode Pro) — [] = tampil di semua lokasi */
+  const [branchIds, setBranchIds] = useState<string[]>([]);
   const dimuat = useRef(false);
 
   // muat data saat edit
@@ -100,6 +106,7 @@ export function MenuFormPage() {
     setKomponen(
       m.komponen.map((k) => ({ ingredient_id: k.ingredient_id, qty: String(k.qty) })),
     );
+    setBranchIds(m.branch_ids ?? []);
   }, [id, menuEdit]);
 
   const bahanById = useMemo(() => new Map((bahan ?? []).map((b) => [b.id, b])), [bahan]);
@@ -208,6 +215,7 @@ export function MenuFormPage() {
         komponen: komponen
           .filter((k) => k.ingredient_id && Number(k.qty) > 0)
           .map((k) => ({ ingredient_id: k.ingredient_id, qty: Number(k.qty) })),
+        branch_ids: branchIds,
       };
       return id
         ? api(`/menu/${id}`, { method: "PUT", body })
@@ -356,6 +364,55 @@ export function MenuFormPage() {
             </div>
           </div>
         </Card>
+
+        {/* Pembatasan lokasi hanya relevan di mode Pro (multi-lokasi).
+            Kantor bukan lokasi penjualan → tidak ditawarkan. */}
+        {isPro && cabang.length > 0 && (
+          <Card className="space-y-3 p-4">
+            <div className="text-sm font-semibold text-stone-700">📍 Tampil di lokasi</div>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={branchIds.length === 0}
+                onChange={(e) => {
+                  if (e.target.checked) setBranchIds([]);
+                  else
+                    setBranchIds(
+                      cabang.filter((b) => b.is_active && b.tipe !== "kantor").map((b) => b.id),
+                    );
+                }}
+              />
+              <span className="font-medium">Semua lokasi</span>
+              <span className="text-xs text-stone-400">(default)</span>
+            </label>
+            {branchIds.length > 0 && (
+              <div className="flex flex-wrap gap-x-4 gap-y-1 pl-6">
+                {cabang
+                  .filter((b) => b.is_active && b.tipe !== "kantor")
+                  .map((b) => (
+                    <label key={b.id} className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={branchIds.includes(b.id)}
+                        onChange={(e) =>
+                          setBranchIds(
+                            e.target.checked
+                              ? [...branchIds, b.id]
+                              : branchIds.filter((x) => x !== b.id),
+                          )
+                        }
+                      />
+                      {labelCabang(b)}
+                    </label>
+                  ))}
+              </div>
+            )}
+            <p className="text-xs text-stone-500">
+              Menu yang dibatasi hanya muncul &amp; bisa terjual di lokasi terpilih — kasir
+              lokasi lain tidak melihatnya.
+            </p>
+          </Card>
+        )}
 
         <Card className="p-4">
           <div className="mb-3 flex items-center justify-between">

@@ -57,6 +57,13 @@ export function TenantsPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["tenants"] }),
   });
 
+  // Super admin murni set plan (tanpa provisioning lokasi — itu jalur owner).
+  const ubahPlan = useMutation({
+    mutationFn: ({ id, plan }: { id: string; plan: string }) =>
+      api(`/admin/tenants/${id}`, { method: "PATCH", body: { plan } }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["tenants"] }),
+  });
+
   function onSubmit(e: FormEvent) {
     e.preventDefault();
     if (form) buat.mutate(form);
@@ -94,6 +101,7 @@ export function TenantsPage() {
         </div>
       )}
       <ErrorText error={toggle.error} />
+      <ErrorText error={ubahPlan.error} />
 
       <Card className="overflow-x-auto">
         <table className="w-full">
@@ -114,9 +122,15 @@ export function TenantsPage() {
                 <td className={`${tdClass} font-medium`}>{t.nama}</td>
                 <td className={tdClass}>{t.slug}</td>
                 <td className={tdClass}>
-                  <span className="rounded-full bg-stone-100 px-2 py-0.5 text-xs font-semibold uppercase">
-                    {t.plan}
-                  </span>
+                  <select
+                    value={t.plan === "pro" ? "pro" : "lite"}
+                    onChange={(e) => ubahPlan.mutate({ id: t.id, plan: e.target.value })}
+                    aria-label={`Plan ${t.nama}`}
+                    className="rounded-lg border border-stone-200 bg-stone-50 px-2 py-1 text-xs font-semibold uppercase"
+                  >
+                    <option value="lite">Lite</option>
+                    <option value="pro">Pro</option>
+                  </select>
                 </td>
                 <td className={`${tdClass} text-right`}>{t.jumlah_cabang}</td>
                 <td className={`${tdClass} text-right`}>{t.jumlah_user}</td>

@@ -5,6 +5,7 @@ import { ErrorText, Modal, btnPrimary, btnSecondary, inputClass, tdClass, thClas
 import { labelCabang, useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah } from "../../lib/format";
+import { useCompanyMode } from "../../lib/useCompanyMode";
 import {
   AKSI_TAHAP,
   URUTAN_TAHAP,
@@ -45,6 +46,7 @@ export function TahapModal({
 }) {
   const queryClient = useQueryClient();
   const { cabang, branchId } = useBranch();
+  const { isPro } = useCompanyMode();
   const target = URUTAN_TAHAP[ke];
   // hanya baris yang tahapnya masih di belakang tujuan yang bisa maju
   const bisaMaju = grup.rows.filter(
@@ -339,28 +341,32 @@ export function TahapModal({
               🚚 Dikirim / disimpan ke mana?
             </div>
             <div className="grid gap-2 sm:grid-cols-2">
-              <div>
-                <label className="mb-1 block text-xs font-medium text-stone-500">
-                  Cabang tujuan
-                </label>
-                <select
-                  value={tujuanCabang}
-                  onChange={(e) => {
-                    setTujuanCabang(e.target.value);
-                    setTujuanTempat("");
-                  }}
-                  aria-label="Cabang tujuan"
-                  className={inputClass}
-                >
-                  {cabang
-                    .filter((b) => b.is_active)
-                    .map((b) => (
-                      <option key={b.id} value={b.id}>
-                        {labelCabang(b)}
-                      </option>
-                    ))}
-                </select>
-              </div>
+              {/* Pilihan cabang tujuan hanya di mode Pro (multi-lokasi);
+                  Lite otomatis ke cabang sendiri. Kantor bukan tujuan kirim. */}
+              {isPro && (
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-stone-500">
+                    Cabang tujuan
+                  </label>
+                  <select
+                    value={tujuanCabang}
+                    onChange={(e) => {
+                      setTujuanCabang(e.target.value);
+                      setTujuanTempat("");
+                    }}
+                    aria-label="Cabang tujuan"
+                    className={inputClass}
+                  >
+                    {cabang
+                      .filter((b) => b.is_active && b.tipe !== "kantor")
+                      .map((b) => (
+                        <option key={b.id} value={b.id}>
+                          {labelCabang(b)}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+              )}
               <div>
                 <label className="mb-1 block text-xs font-medium text-stone-500">
                   Tempat penyimpanan (opsional)

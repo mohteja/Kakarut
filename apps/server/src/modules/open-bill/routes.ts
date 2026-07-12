@@ -5,7 +5,7 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import type { OpenBillDetail, OpenBillRow } from "@kakarut/shared";
 import { db, type Tx } from "../../db/client";
-import { meja, menus, openBillItems, openBills } from "../../db/schema";
+import { meja, menuBranches, menus, openBillItems, openBills } from "../../db/schema";
 import { resolveBranchId, type AppEnv } from "../../middleware/auth";
 
 const BillBody = z.object({
@@ -26,15 +26,32 @@ const BillBody = z.object({
     .min(1),
 });
 
-/** Pastikan semua menu milik perusahaan pemanggil. */
-async function validateMenus(companyId: string, items: { menu_id: string }[]) {
+/** Pastikan semua menu milik perusahaan pemanggil & tersedia di cabang bill. */
+async function validateMenus(companyId: string, branchId: string, items: { menu_id: string }[]) {
   const ids = [...new Set(items.map((i) => i.menu_id))];
   const rows = await db
-    .select({ id: menus.id })
+    .select({ id: menus.id, nama: menus.nama })
     .from(menus)
     .where(and(eq(menus.companyId, companyId), inArray(menus.id, ids)));
   if (rows.length !== ids.length) {
     throw new HTTPException(400, { message: "Ada menu yang tidak valid" });
+  }
+  // Pembatasan lokasi: tanpa baris = semua cabang; ada baris = whitelist.
+  const batasan = await db
+    .select({ menuId: menuBranches.menuId, branchId: menuBranches.branchId })
+    .from(menuBranches)
+    .where(inArray(menuBranches.menuId, ids));
+  const cabangByMenu = new Map<string, string[]>();
+  for (const b of batasan) {
+    const list = cabangByMenu.get(b.menuId) ?? [];
+    list.push(b.branchId);
+    cabangByMenu.set(b.menuId, list);
+  }
+  for (const r of rows) {
+    const cabang = cabangByMenu.get(r.id);
+    if (cabang && !cabang.includes(branchId)) {
+      throw new HTTPException(400, { message: `Menu "${r.nama}" tidak tersedia di cabang ini` });
+    }
   }
 }
 
@@ -120,7 +137,7 @@ export const openBillRoutes = new Hono<AppEnv>()
     if (auth.role === "cashier" && branchId !== auth.branch_id) {
       throw new HTTPException(403, { message: "Kasir hanya boleh bill di cabangnya" });
     }
-    await validateMenus(auth.company_id!, body.items);
+    await validateMenus(auth.company_id!, branchId, body.items);
     const { mejaId, mejaLabel } = await resolveMeja(auth.company_id!, branchId, body.meja_id);
     const id = await db.transaction(async (tx) => {
       const [bill] = await tx
@@ -149,7 +166,7 @@ export const openBillRoutes = new Hono<AppEnv>()
     if (!existing || existing.companyId !== auth.company_id!) {
       throw new HTTPException(404, { message: "Bill tidak ditemukan" });
     }
-    await validateMenus(auth.company_id!, body.items);
+    await validateMenus(auth.company_id!, existing.branchId, body.items);
     const { mejaId, mejaLabel } = await resolveMeja(
       auth.company_id!,
       existing.branchId,

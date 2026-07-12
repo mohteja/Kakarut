@@ -54,9 +54,11 @@ export function KasirPage() {
   const queryClient = useQueryClient();
   const isKasir = auth?.user.role === "cashier";
 
+  // Menu per lokasi: kasir difilter otomatis oleh server; owner/admin
+  // mengirim cabang aktif via branchQuery agar tampilan sesuai lokasi.
   const { data: menus, isLoading } = useQuery({
-    queryKey: ["menu"],
-    queryFn: () => api<MenuDto[]>("/menu"),
+    queryKey: ["menu", branchQuery],
+    queryFn: () => api<MenuDto[]>(`/menu${branchQuery}`),
   });
   const { data: kategori = [] } = useQuery({
     queryKey: ["kategori"],
