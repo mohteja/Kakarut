@@ -8,8 +8,10 @@ import { z } from "zod";
 import type { JenisPengadaan } from "@kakarut/shared";
 import { db } from "../../db/client";
 import {
+  branches,
   companies,
   fakturDana,
+  fakturLogs,
   ingredients,
   memberships,
   productions,
@@ -17,6 +19,7 @@ import {
   suppliers,
   users,
 } from "../../db/schema";
+import { AKSI_TAHAP_LOG, catatLogFaktur, rpLog } from "./log";
 import {
   pastikanCabang,
   resolveBranchId,
@@ -29,6 +32,7 @@ const pembuat = alias(users, "pembuat_prod");
 const pengubah = alias(users, "pengubah_prod");
 const pekerja = alias(users, "pekerja_prod");
 const danaOleh = alias(users, "dana_oleh");
+const logOleh = alias(users, "log_oleh");
 
 const FakturEditBody = z.object({
   password: z.string(),
@@ -346,9 +350,19 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         };
       });
 
-      const inserted = await db.transaction(async (tx) =>
-        tx.insert(productions).values(rows).returning(),
-      );
+      const inserted = await db.transaction(async (tx) => {
+        const hasil = await tx.insert(productions).values(rows).returning();
+        await catatLogFaktur(tx, {
+          companyId: auth.company_id!,
+          branchId,
+          fakturId,
+          jalur: tipe,
+          aksi: "Faktur dibuat (RAB)",
+          detail: `${hasil.length} baris`,
+          userId: auth.sub,
+        });
+        return hasil;
+      });
       return c.json(
         { faktur_id: fakturId, status: statusAwal, jumlah_baris: inserted.length },
         201,
@@ -416,8 +430,17 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         // Tujuan kirim (opsional): baris yang maju pindah cabang dan/atau
         // tempat penyimpanan — stok terhitung di cabang tujuan saat konfirmasi.
         let tujuanBranch: string | null = null;
+        let tujuanNama: string | null = null;
         if (tujuan_branch_id) {
-          tujuanBranch = await pastikanCabang(tujuan_branch_id, auth.company_id!);
+          const [cb] = await db
+            .select({ id: branches.id, nama: branches.nama })
+            .from(branches)
+            .where(
+              and(eq(branches.id, tujuan_branch_id), eq(branches.companyId, auth.company_id!)),
+            );
+          if (!cb) throw new HTTPException(400, { message: "Cabang tujuan tidak valid" });
+          tujuanBranch = cb.id;
+          tujuanNama = cb.nama;
           if (auth.role === "cashier" && auth.branch_id && tujuanBranch !== auth.branch_id) {
             throw new HTTPException(403, {
               message: "Kasir tidak boleh mengirim ke cabang lain",
@@ -546,6 +569,20 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
               catatan: selisih_catatan,
             });
           }
+          // jejak kegiatan: siapa mengubah tahap ini + uang/tujuan yang menyertai
+          const potongan = [`${items.length} baris`];
+          if (dana_cair != null) potongan.push(`dana cair ${rpLog(dana_cair)}`);
+          if (realisasi != null) potongan.push(`realisasi ${rpLog(realisasi)}`);
+          if (tujuanNama) potongan.push(`tujuan: ${tujuanNama}`);
+          await catatLogFaktur(tx, {
+            companyId: auth.company_id!,
+            branchId: baris[0].branchId,
+            fakturId: c.req.param("fakturId"),
+            jalur: tipe,
+            aksi: AKSI_TAHAP_LOG[tipe][ke],
+            detail: potongan.join(" · "),
+            userId: auth.sub,
+          });
         });
         return c.json({ ok: true, status: ke, jumlah_baris: items.length });
       }
@@ -592,6 +629,20 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
           userId: auth.sub,
           realisasi,
           catatan: selisih_catatan,
+        });
+      }
+      {
+        const potongan = [`${rows.length} baris`];
+        if (dana_cair != null) potongan.push(`dana cair ${rpLog(dana_cair)}`);
+        if (realisasi != null) potongan.push(`realisasi ${rpLog(realisasi)}`);
+        await catatLogFaktur(db, {
+          companyId: auth.company_id!,
+          branchId: rows[0].branchId,
+          fakturId: c.req.param("fakturId"),
+          jalur: tipe,
+          aksi: AKSI_TAHAP_LOG[tipe][ke],
+          detail: potongan.join(" · "),
+          userId: auth.sub,
         });
       }
       return c.json({ ok: true, status: ke, jumlah_baris: rows.length });
@@ -667,7 +718,55 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
           message: "Faktur tidak ditemukan atau sudah dikonfirmasi",
         });
       }
+      await catatLogFaktur(db, {
+        companyId: auth.company_id!,
+        branchId: rows[0].branchId,
+        fakturId: c.req.param("fakturId"),
+        jalur: tipe,
+        aksi: AKSI_TAHAP_LOG[tipe].dikonfirmasi,
+        detail: `${rows.length} baris`,
+        userId: auth.sub,
+      });
       return c.json({ ok: true, jumlah_baris: rows.length });
+    })
+    /** Riwayat kegiatan satu faktur: dibuat → tahap → konfirmasi/penerimaan. */
+    .get("/log/:fakturId", async (c) => {
+      const auth = c.get("auth");
+      const fakturId = c.req.param("fakturId");
+      if (!/^[0-9a-f-]{36}$/i.test(fakturId)) {
+        throw new HTTPException(404, { message: "Faktur tidak ditemukan" });
+      }
+      const conds = [
+        eq(productions.companyId, auth.company_id!),
+        eq(productions.fakturId, fakturId),
+        eq(productions.tipe, tipe),
+        isNull(productions.deletedAt),
+      ];
+      if (auth.role === "cashier" && auth.branch_id) {
+        conds.push(eq(productions.branchId, auth.branch_id));
+      }
+      const [ada] = await db
+        .select({ id: productions.id })
+        .from(productions)
+        .where(and(...conds))
+        .limit(1);
+      if (!ada) throw new HTTPException(404, { message: "Faktur tidak ditemukan" });
+
+      const rows = await db
+        .select({
+          id: fakturLogs.id,
+          aksi: fakturLogs.aksi,
+          detail: fakturLogs.detail,
+          oleh: logOleh.nama,
+          waktu: fakturLogs.waktu,
+        })
+        .from(fakturLogs)
+        .leftJoin(logOleh, eq(fakturLogs.userId, logOleh.id))
+        .where(
+          and(eq(fakturLogs.companyId, auth.company_id!), eq(fakturLogs.fakturId, fakturId)),
+        )
+        .orderBy(asc(fakturLogs.waktu), asc(fakturLogs.id));
+      return c.json({ rows });
     })
     .post("/", zValidator("json", TambahStokBody), async (c) => {
       const auth = c.get("auth");

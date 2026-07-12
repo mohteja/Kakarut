@@ -1,10 +1,10 @@
 import bcrypt from "bcryptjs";
 import { zValidator } from "@hono/zod-validator";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
 import { db } from "../../db/client";
-import { branches, memberships, users } from "../../db/schema";
+import { branches, fakturLogs, memberships, users } from "../../db/schema";
 import { verifikasiPassword, type AppEnv } from "../../middleware/auth";
 
 const GantiPasswordBody = z.object({
@@ -52,6 +52,27 @@ export const profilRoutes = new Hono<AppEnv>()
       cabang,
       employee_code: m?.employeeCode ?? null,
     });
+  })
+  /** Riwayat kegiatan SENDIRI (log faktur yang dilakukan akun ini). */
+  .get("/aktivitas", async (c) => {
+    const auth = c.get("auth");
+    if (!auth.company_id) return c.json({ rows: [] });
+    const rows = await db
+      .select({
+        id: fakturLogs.id,
+        jalur: fakturLogs.jalur,
+        aksi: fakturLogs.aksi,
+        detail: fakturLogs.detail,
+        cabang: branches.nama,
+        faktur_id: fakturLogs.fakturId,
+        waktu: fakturLogs.waktu,
+      })
+      .from(fakturLogs)
+      .leftJoin(branches, eq(fakturLogs.branchId, branches.id))
+      .where(and(eq(fakturLogs.companyId, auth.company_id), eq(fakturLogs.userId, auth.sub)))
+      .orderBy(desc(fakturLogs.waktu), desc(fakturLogs.id))
+      .limit(50);
+    return c.json({ rows });
   })
   /** Ganti password sendiri: verifikasi password lama dulu. */
   .post("/password", zValidator("json", GantiPasswordBody), async (c) => {

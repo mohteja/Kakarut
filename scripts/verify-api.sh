@@ -1359,6 +1359,28 @@ cek "login dgn password BARU berhasil" "V == 1" "$([ -n "$TK48B" ] && echo 1 || 
 cek "login dgn password LAMA → 401" "V == 401" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/auth/login" -H 'Content-Type: application/json' -d '{"email":"profil48@basooopa.id","password":"PwLama48!"}')"
 
+echo "== 49. Jejak ubah tahap (log faktur) + aktivitas per karyawan =="
+FK49=$(api "$OWNER" POST /pembelian/faktur "{\"items\":[{\"ingredient_id\":\"$ING42A\",\"mode\":\"pcs\",\"jumlah\":5,\"total_harga\":25000}]}")
+FK49_ID=$(echo "$FK49" | jq -r .faktur_id)
+api "$OWNER" POST "/pembelian/tahap/$FK49_ID" '{"ke":"dikerjakan","dana_cair":20000}' > /dev/null
+api "$OWNER" POST "/pembelian/tahap/$FK49_ID" '{"ke":"menunggu","realisasi":25000,"selisih_catatan":"kas toko"}' > /dev/null
+api "$OWNER" POST "/pembelian/konfirmasi/$FK49_ID" > /dev/null
+LOG49=$(api "$OWNER" GET "/pembelian/log/$FK49_ID")
+cek "log faktur: 4 kegiatan (dibuat→diproses→dikirim→diterima)" "V == 4" "$(echo "$LOG49" | jq '.rows | length')"
+cek "log: entri pertama 'Faktur dibuat' + ada pelakunya" "V == 1" \
+  "$(echo "$LOG49" | jq '((.rows[0].aksi | test("dibuat")) and (.rows[0].oleh != null)) | if . then 1 else 0 end')"
+cek "log: dana cair & realisasi tercatat di detail" "V == 1" \
+  "$(echo "$LOG49" | jq '(([.rows[] | select((.detail // "") | test("dana cair"))] | length >= 1) and ([.rows[] | select((.detail // "") | test("realisasi"))] | length >= 1)) | if . then 1 else 0 end')"
+OWN49_ID=$(api "$OWNER" GET /karyawan | jq -r '[.[] | select(.role=="owner")][0].user_id')
+cek "aktivitas per karyawan memuat kegiatan faktur ini" "V == 1" \
+  "$(api "$OWNER" GET "/karyawan/$OWN49_ID/aktivitas" | jq --arg f "$FK49_ID" '([.rows[] | select(.faktur_id == $f)] | length >= 4) | if . then 1 else 0 end')"
+cek "aktivitas saya (/profil/aktivitas) ikut memuat" "V == 1" \
+  "$(api "$OWNER" GET /profil/aktivitas | jq --arg f "$FK49_ID" '([.rows[] | select(.faktur_id == $f)] | length >= 1) | if . then 1 else 0 end')"
+cek "kasir akses aktivitas karyawan lain → 403" "V == 403" \
+  "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/karyawan/$OWN49_ID/aktivitas" -H "Authorization: Bearer $KASIR")"
+cek "log faktur tak dikenal → 404" "V == 404" \
+  "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/pembelian/log/00000000-0000-4000-8000-000000000000" -H "Authorization: Bearer $OWNER")"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

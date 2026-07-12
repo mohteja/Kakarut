@@ -1,7 +1,7 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent } from "react";
 import QRCode from "qrcode";
-import type { ProfilDto } from "@kakarut/shared";
+import type { AktivitasRow, ProfilDto } from "@kakarut/shared";
 import {
   Card,
   ErrorText,
@@ -11,6 +11,7 @@ import {
   inputClass,
 } from "../../components/ui";
 import { api } from "../../lib/api";
+import { formatTanggalRingkas, formatWaktu } from "../../lib/format";
 
 const LABEL_ROLE: Record<string, string> = {
   owner: "Owner",
@@ -26,6 +27,11 @@ export function ProfilPage() {
   const { data: profil, isLoading } = useQuery({
     queryKey: ["profil"],
     queryFn: () => api<ProfilDto>("/profil"),
+  });
+  // kegiatan terakhir akun ini (jejak log faktur: buat/ubah tahap/terima)
+  const { data: aktivitas } = useQuery({
+    queryKey: ["profil-aktivitas"],
+    queryFn: () => api<{ rows: AktivitasRow[] }>("/profil/aktivitas"),
   });
 
   // QR kode karyawan (payload sama dengan QR di halaman Kelola Karyawan)
@@ -108,6 +114,32 @@ export function ProfilPage() {
           <div className="mt-3 inline-block rounded-lg bg-stone-100 px-4 py-1.5 font-mono text-xl font-bold tracking-widest text-stone-800">
             {profil.employee_code}
           </div>
+        </Card>
+      )}
+
+      {/* Aktivitas terakhir (jejak kegiatan faktur) */}
+      {aktivitas && aktivitas.rows.length > 0 && (
+        <Card className="mb-4 p-4">
+          <h2 className="mb-2 font-bold text-stone-800">🗒 Aktivitas Saya</h2>
+          <ol className="max-h-72 space-y-1.5 overflow-y-auto text-sm">
+            {aktivitas.rows.map((a) => (
+              <li key={a.id} className="rounded-lg border border-stone-100 px-2.5 py-1.5">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span>{a.jalur === "beli" ? "🛒" : "🏭"}</span>
+                  <span className="font-medium text-stone-700">{a.aksi}</span>
+                  <span className="ml-auto shrink-0 font-mono text-[11px] text-stone-400">
+                    {formatTanggalRingkas(a.waktu)} {formatWaktu(a.waktu)}
+                  </span>
+                </div>
+                {(a.detail || a.cabang) && (
+                  <div className="text-xs text-stone-500">
+                    {a.detail}
+                    {a.cabang && <span className="text-stone-400"> · {a.cabang}</span>}
+                  </div>
+                )}
+              </li>
+            ))}
+          </ol>
         </Card>
       )}
 

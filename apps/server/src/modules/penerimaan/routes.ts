@@ -6,6 +6,7 @@ import { z } from "zod";
 import { db } from "../../db/client";
 import { ingredients, productions, storageLocations, suppliers } from "../../db/schema";
 import { resolveBranchId, type AppEnv } from "../../middleware/auth";
+import { catatLogFaktur } from "../produksi/log";
 
 const TolakBody = z.object({ alasan: z.string().trim().max(300).nullish() });
 
@@ -93,10 +94,19 @@ export const penerimaanRoutes = new Hono<AppEnv>()
       .where(
         and(...kondisiFaktur(c, c.req.param("fakturId")), eq(productions.status, "menunggu")),
       )
-      .returning({ id: productions.id });
+      .returning({ id: productions.id, branchId: productions.branchId });
     if (rows.length === 0) {
       throw new HTTPException(404, { message: "Kiriman tidak ditemukan atau bukan status dikirim" });
     }
+    await catatLogFaktur(db, {
+      companyId: auth.company_id!,
+      branchId: rows[0].branchId,
+      fakturId: c.req.param("fakturId"),
+      jalur: "beli",
+      aksi: "Diterima semua (toko) — stok masuk",
+      detail: `${rows.length} baris`,
+      userId: auth.sub,
+    });
     return c.json({ ok: true, jumlah_baris: rows.length });
   })
   /**
@@ -110,7 +120,12 @@ export const penerimaanRoutes = new Hono<AppEnv>()
     const fakturId = c.req.param("fakturId");
 
     const baris = await db
-      .select({ id: productions.id, qty: productions.qty, totalHarga: productions.totalHarga })
+      .select({
+        id: productions.id,
+        qty: productions.qty,
+        totalHarga: productions.totalHarga,
+        branchId: productions.branchId,
+      })
       .from(productions)
       .where(and(...kondisiFaktur(c, fakturId), eq(productions.status, "menunggu")));
     if (baris.length === 0) {
@@ -185,6 +200,18 @@ export const penerimaanRoutes = new Hono<AppEnv>()
           });
         }
       }
+      const diterima = baris.filter((b) => terimaById.get(b.id)! > 0).length;
+      await catatLogFaktur(tx, {
+        companyId: auth.company_id!,
+        branchId: baris[0].branchId,
+        fakturId,
+        jalur: "beli",
+        aksi: "Diterima sebagian (toko)",
+        detail:
+          `${diterima} baris diterima, ${baris.length - diterima} ditolak` +
+          (body.alasan ? ` · ${body.alasan}` : ""),
+        userId: auth.sub,
+      });
     });
     return c.json({ ok: true, jumlah_baris: baris.length });
   })
@@ -203,10 +230,19 @@ export const penerimaanRoutes = new Hono<AppEnv>()
       .where(
         and(...kondisiFaktur(c, c.req.param("fakturId")), eq(productions.status, "menunggu")),
       )
-      .returning({ id: productions.id });
+      .returning({ id: productions.id, branchId: productions.branchId });
     if (rows.length === 0) {
       throw new HTTPException(404, { message: "Kiriman tidak ditemukan atau bukan status dikirim" });
     }
+    await catatLogFaktur(db, {
+      companyId: auth.company_id!,
+      branchId: rows[0].branchId,
+      fakturId: c.req.param("fakturId"),
+      jalur: "beli",
+      aksi: "Kiriman ditolak",
+      detail: body.alasan ?? null,
+      userId: auth.sub,
+    });
     return c.json({ ok: true, jumlah_baris: rows.length });
   })
   /**
@@ -242,9 +278,18 @@ export const penerimaanRoutes = new Hono<AppEnv>()
         waktu: now,
       })
       .where(and(...kondisiFaktur(c, fakturId), eq(productions.status, "ditolak")))
-      .returning({ id: productions.id });
+      .returning({ id: productions.id, branchId: productions.branchId });
     if (rows.length === 0) {
       throw new HTTPException(404, { message: "Tidak ada baris ditolak pada kiriman ini" });
     }
+    await catatLogFaktur(db, {
+      companyId: auth.company_id!,
+      branchId: rows[0].branchId,
+      fakturId,
+      jalur: "beli",
+      aksi: "Penolakan dibatalkan — stok masuk",
+      detail: `${rows.length} baris`,
+      userId: auth.sub,
+    });
     return c.json({ ok: true, jumlah_baris: rows.length });
   });

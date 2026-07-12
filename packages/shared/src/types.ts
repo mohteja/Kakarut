@@ -26,6 +26,26 @@ export interface ProfilDto {
   employee_code: string | null;
 }
 
+/** Satu entri riwayat kegiatan pada faktur (jejak ubah tahap). */
+export interface FakturLogRow {
+  id: string;
+  aksi: string;
+  detail: string | null;
+  oleh: string | null;
+  waktu: string;
+}
+
+/** Kegiatan seorang karyawan pada faktur — pelacakan per orang. */
+export interface AktivitasRow {
+  id: string;
+  jalur: JenisPengadaan;
+  aksi: string;
+  detail: string | null;
+  cabang: string | null;
+  faktur_id: string;
+  waktu: string;
+}
+
 export interface BahanDto {
   id: string;
   slug: string;
