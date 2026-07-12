@@ -75,6 +75,15 @@ export interface MenuDto {
   food_cost_persen: number;
 }
 
+/** Bahan yang MEMBATASI sisa porsi sebuah menu (saldo ÷ qty paling kecil). */
+export interface MenuStokPembatas {
+  ingredient_id: string;
+  nama: string;
+  saldo: number;
+  satuan: string;
+  qty_per_porsi: number;
+}
+
 /**
  * Ketersediaan (sisa porsi) sebuah menu di satu cabang — diturunkan dari saldo
  * stok bahan terlacak. `porsi` = berapa porsi lagi yang bisa dibuat
@@ -84,6 +93,64 @@ export interface MenuDto {
 export interface MenuStokDto {
   menu_id: string;
   porsi: number | null;
+  /** bahan pembatas porsi; null bila porsi null (tak terbatas) */
+  pembatas: MenuStokPembatas | null;
+}
+
+/** Satu baris rencana penambahan stok dari menu: target porsi per menu. */
+export interface RencanaMenuItem {
+  menu_id: string;
+  porsi: number;
+}
+
+/** Ringkasan menu pada preview rencana (untuk baca ulang & perkiraan omzet). */
+export interface RencanaMenuRingkas {
+  menu_id: string;
+  nama: string;
+  kode: string | null;
+  porsi: number;
+  harga_jual: number;
+  /** porsi × harga_jual */
+  omzet: number;
+}
+
+/** Kebutuhan satu bahan pada preview rencana-dari-menu. */
+export interface RencanaBahanRow {
+  ingredient_id: string;
+  nama: string;
+  satuan: string;
+  pengadaan: JenisPengadaan;
+  /** total kebutuhan = Σ porsi × qty per porsi */
+  kebutuhan: number;
+  saldo: number;
+  /** kekurangan = max(0, kebutuhan − saldo); 0 = stok cukup */
+  kurang: number;
+  isi: number;
+  /** baris faktur yang akan dibuat (null bila kurang = 0) */
+  mode_faktur: "pcs" | "batch" | null;
+  jumlah_faktur: number | null;
+  /** kuantitas riil yang masuk stok dari faktur (jumlah × isi utk batch) */
+  qty_faktur: number | null;
+  harga_per_unit: number;
+  estimasi_biaya: number | null;
+}
+
+/** Preview rencana penambahan stok dari target porsi menu. */
+export interface RencanaMenuPreview {
+  menus: RencanaMenuRingkas[];
+  /** Σ porsi × harga_jual — untuk menyamakan rencana dengan target omzet */
+  perkiraan_omzet: number;
+  bahan: RencanaBahanRow[];
+  total_estimasi_biaya: number;
+  /** jumlah bahan kurang per jalur (baris faktur yang akan dibuat) */
+  jumlah_produksi: number;
+  jumlah_beli: number;
+}
+
+/** Hasil pembuatan faktur otomatis dari rencana menu (null = jalur tak perlu). */
+export interface RencanaFakturResult {
+  produksi: { faktur_id: string; jumlah_baris: number } | null;
+  beli: { faktur_id: string; jumlah_baris: number } | null;
 }
 
 /**
@@ -511,6 +578,13 @@ export interface Shift {
   kas_sistem: number;
   /** uang_fisik − kas_sistem (null selagi terbuka) */
   selisih: number | null;
+}
+
+/** Baris ringan hasil pencarian member (autocomplete keranjang kasir). */
+export interface MemberCariRow {
+  id: string;
+  nama: string;
+  wa: string;
 }
 
 /** Jenis cap absensi karyawan: masuk (datang) vs keluar (pulang). */

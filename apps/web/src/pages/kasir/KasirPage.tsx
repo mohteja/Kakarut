@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import type {
   MejaDto,
+  MemberCariRow,
   MenuDto,
   MenuStokDto,
   MetodeBayar,
@@ -94,6 +95,9 @@ export function KasirPage() {
   const [mejaCari, setMejaCari] = useState("");
   const [konsumenNama, setKonsumenNama] = useState("");
   const [konsumenWa, setKonsumenWa] = useState("");
+  // Autocomplete member: q pencarian + apakah dropdown terbuka
+  const [cariMember, setCariMember] = useState("");
+  const [memberOpen, setMemberOpen] = useState(false);
   const [diskonTipe, setDiskonTipe] = useState<"persen" | "nominal">("nominal");
   const [diskonNilai, setDiskonNilai] = useState("");
   const [metodeBayar, setMetodeBayar] = useState<MetodeBayar>("tunai");
@@ -118,6 +122,22 @@ export function KasirPage() {
     () => new Map(ketersediaan.map((k) => [k.menu_id, k.porsi])),
     [ketersediaan],
   );
+
+  // Autocomplete member: cari nama/WA yang cocok saat mengetik salah satu field.
+  const { data: memberSaran = [] } = useQuery({
+    queryKey: ["member-cari", cariMember.trim()],
+    queryFn: () =>
+      api<MemberCariRow[]>(`/member-cari?q=${encodeURIComponent(cariMember.trim())}`),
+    enabled: memberOpen && cariMember.trim().length >= 1,
+  });
+
+  // Pilih member dari dropdown → isi nama & WA sekaligus, tutup dropdown.
+  function pilihMember(m: MemberCariRow) {
+    setKonsumenNama(m.nama);
+    setKonsumenWa(m.wa);
+    setMemberOpen(false);
+    setCariMember("");
+  }
 
   const mejaAktif = useMemo(() => mejaList.filter((m) => m.is_active), [mejaList]);
   const mejaTerpilih = mejaAktif.find((m) => m.id === mejaId) ?? null;
@@ -289,6 +309,8 @@ export function KasirPage() {
     setCart([]);
     setKonsumenNama("");
     setKonsumenWa("");
+    setCariMember("");
+    setMemberOpen(false);
     setDiskonNilai("");
     setMetodeBayar("tunai");
     setUangDiterima("");
@@ -572,21 +594,62 @@ export function KasirPage() {
           </span>
         </button>
 
-        {/* Konsumen/member (opsional) — di bawah meja; WA jadi kunci member area */}
-        <div className="mb-3 grid grid-cols-2 gap-2">
-          <input
-            value={konsumenNama}
-            onChange={(e) => setKonsumenNama(e.target.value)}
-            placeholder="👤 Nama konsumen"
-            className="w-full rounded-lg border border-stone-300 px-3 py-1.5 text-sm"
-          />
-          <input
-            value={konsumenWa}
-            onChange={(e) => setKonsumenWa(e.target.value)}
-            inputMode="tel"
-            placeholder="📱 No. WhatsApp"
-            className="w-full rounded-lg border border-stone-300 px-3 py-1.5 text-sm"
-          />
+        {/* Konsumen/member (opsional) — di bawah meja; ketik nama ATAU WA →
+            dropdown member muncul, pilih untuk isi keduanya sekaligus. */}
+        <div className="relative mb-3">
+          <div className="grid grid-cols-2 gap-2">
+            <input
+              value={konsumenNama}
+              onChange={(e) => {
+                setKonsumenNama(e.target.value);
+                setCariMember(e.target.value);
+                setMemberOpen(true);
+              }}
+              onFocus={() => {
+                setCariMember(konsumenNama);
+                setMemberOpen(true);
+              }}
+              onBlur={() => setTimeout(() => setMemberOpen(false), 150)}
+              placeholder="👤 Nama konsumen"
+              autoComplete="off"
+              className="w-full rounded-lg border border-stone-300 px-3 py-1.5 text-sm"
+            />
+            <input
+              value={konsumenWa}
+              onChange={(e) => {
+                setKonsumenWa(e.target.value);
+                setCariMember(e.target.value);
+                setMemberOpen(true);
+              }}
+              onFocus={() => {
+                setCariMember(konsumenWa);
+                setMemberOpen(true);
+              }}
+              onBlur={() => setTimeout(() => setMemberOpen(false), 150)}
+              inputMode="tel"
+              placeholder="📱 No. WhatsApp"
+              autoComplete="off"
+              className="w-full rounded-lg border border-stone-300 px-3 py-1.5 text-sm"
+            />
+          </div>
+          {memberOpen && memberSaran.length > 0 && (
+            <ul className="absolute z-30 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-stone-200 bg-white py-1 shadow-lg">
+              {memberSaran.map((m) => (
+                <li key={m.id}>
+                  <button
+                    type="button"
+                    // mouseDown mendahului blur → cegah dropdown tertutup sebelum klik
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => pilihMember(m)}
+                    className="flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left text-sm hover:bg-orange-50"
+                  >
+                    <span className="truncate font-medium text-stone-800">{m.nama}</span>
+                    <span className="shrink-0 font-mono text-xs text-stone-500">{m.wa}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
 
         <div className="space-y-2 md:flex-1 md:overflow-y-auto">

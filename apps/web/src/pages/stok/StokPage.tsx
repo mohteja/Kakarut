@@ -1,7 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import type { PenyesuaianRow, PenyimpananDto, StokRowDto } from "@kakarut/shared";
+import type {
+  MenuDto,
+  MenuStokDto,
+  PenyesuaianRow,
+  PenyimpananDto,
+  StokRowDto,
+} from "@kakarut/shared";
 import {
   Card,
   PageTitle,
@@ -13,16 +19,38 @@ import {
   tdClass,
   thClass,
 } from "../../components/ui";
+import { useAuth } from "../../context/AuthContext";
 import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
-import { formatAngka, labelTahapPembelian, labelTahapProduksi } from "../../lib/format";
+import {
+  formatAngka,
+  formatRupiah,
+  labelTahapPembelian,
+  labelTahapProduksi,
+} from "../../lib/format";
 
 export function StokPage() {
+  const { auth } = useAuth();
   const { branchQuery } = useBranch();
+  const isManajemen = auth?.user.role === "owner" || auth?.user.role === "admin";
+  // Dua tampilan: stok BAHAN (baris per bahan baku) & stok MENU (sisa porsi
+  // per menu, diturunkan dari saldo bahan — selalu berkorelasi otomatis).
+  const [tab, setTab] = useState<"bahan" | "menu">("bahan");
 
   const { data: stok, isLoading } = useQuery({
     queryKey: ["stok", branchQuery],
     queryFn: () => api<StokRowDto[]>(`/stok${branchQuery}`),
+  });
+  // Sisa porsi per menu — query key sama dengan kasir agar cache berbagi.
+  const { data: ketersediaan = [] } = useQuery({
+    queryKey: ["menu-ketersediaan", branchQuery],
+    queryFn: () => api<MenuStokDto[]>(`/menu/ketersediaan${branchQuery}`),
+    enabled: tab === "menu",
+  });
+  const { data: menus = [] } = useQuery({
+    queryKey: ["menu"],
+    queryFn: () => api<MenuDto[]>("/menu"),
+    enabled: tab === "menu",
   });
   const { data: tempatList = [] } = useQuery({
     queryKey: ["penyimpanan", branchQuery],
@@ -40,8 +68,6 @@ export function StokPage() {
   const [cari, setCari] = useState("");
   const [filterTempat, setFilterTempat] = useState<string>("semua");
 
-  if (isLoading) return <Spinner />;
-
   const tampil = (stok ?? [])
     .filter((s) => s.nama.toLowerCase().includes(cari.toLowerCase()))
     .filter((s) =>
@@ -52,31 +78,161 @@ export function StokPage() {
           : s.tempat_id === filterTempat,
     );
 
+  // Stok Menu: gabungkan katalog menu aktif dengan sisa porsi + bahan pembatas
+  const porsiByMenu = new Map(ketersediaan.map((k) => [k.menu_id, k]));
+  const menuTampil = menus
+    .filter(
+      (m) =>
+        m.nama.toLowerCase().includes(cari.toLowerCase()) ||
+        (m.kode?.toLowerCase().includes(cari.toLowerCase()) ?? false),
+    )
+    .map((m) => ({ menu: m, stok: porsiByMenu.get(m.id) }))
+    .sort((a, b) => {
+      const pa = a.stok?.porsi ?? Number.POSITIVE_INFINITY;
+      const pb = b.stok?.porsi ?? Number.POSITIVE_INFINITY;
+      return pa - pb; // porsi paling sedikit di atas (paling butuh perhatian)
+    });
+
   return (
     <div>
       <PageTitle
         aksi={
-          <div className="flex flex-wrap gap-2">
-            <Link to="/stok/penyesuaian" className={`${btnSecondary} relative`}>
-              ⚠️ Penyesuaian
-              {belumTuntas > 0 && (
-                <span className="absolute -right-1.5 -top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-xs font-bold text-white">
-                  {belumTuntas}
-                </span>
-              )}
+          tab === "bahan" ? (
+            <div className="flex flex-wrap gap-2">
+              <Link to="/stok/penyesuaian" className={`${btnSecondary} relative`}>
+                ⚠️ Penyesuaian
+                {belumTuntas > 0 && (
+                  <span className="absolute -right-1.5 -top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-xs font-bold text-white">
+                    {belumTuntas}
+                  </span>
+                )}
+              </Link>
+              <Link to="/stok/opname/riwayat" className={btnSecondary}>
+                🕑 Riwayat
+              </Link>
+              <Link to="/stok/opname" className={btnPrimary}>
+                📋 Stok Opname
+              </Link>
+            </div>
+          ) : isManajemen ? (
+            <Link to="/stok/tambah-dari-menu" className={btnPrimary}>
+              ➕ Tambah Stok dari Menu
             </Link>
-            <Link to="/stok/opname/riwayat" className={btnSecondary}>
-              🕑 Riwayat
-            </Link>
-            <Link to="/stok/opname" className={btnPrimary}>
-              📋 Stok Opname
-            </Link>
-          </div>
+          ) : undefined
         }
       >
-        Stok Bahan
+        {tab === "bahan" ? "Stok Bahan" : "Stok Menu"}
       </PageTitle>
 
+      {/* Tab: stok per bahan baku vs sisa porsi per menu */}
+      <div className="mb-3 flex overflow-hidden rounded-lg border border-stone-300 text-sm w-fit">
+        <button
+          type="button"
+          onClick={() => setTab("bahan")}
+          className={`px-3 py-1.5 font-medium ${
+            tab === "bahan" ? "bg-orange-600 text-white" : "bg-white text-stone-600 hover:bg-stone-50"
+          }`}
+        >
+          🥩 Stok Bahan
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab("menu")}
+          className={`px-3 py-1.5 font-medium ${
+            tab === "menu" ? "bg-orange-600 text-white" : "bg-white text-stone-600 hover:bg-stone-50"
+          }`}
+        >
+          🍜 Stok Menu
+        </button>
+      </div>
+
+      {tab === "menu" ? (
+        <>
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <input
+              value={cari}
+              onChange={(e) => setCari(e.target.value)}
+              placeholder="Cari menu / kode…"
+              className={`${inputClass} max-w-56`}
+            />
+            <span className="text-xs text-stone-400">
+              Sisa porsi dihitung otomatis dari saldo stok bahan (resep per porsi).
+            </span>
+          </div>
+          <Card className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="border-b border-stone-200 bg-stone-50">
+                <tr>
+                  <th className={thClass}>Kode</th>
+                  <th className={thClass}>Menu</th>
+                  <th className={thClass}>Kategori</th>
+                  <th className={`${thClass} text-right`}>Harga</th>
+                  <th className={`${thClass} text-right`}>Sisa Porsi</th>
+                  <th className={thClass}>Bahan Pembatas</th>
+                  <th className={thClass}>Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-stone-100">
+                {menuTampil.map(({ menu: m, stok: st }) => {
+                  const porsi = st?.porsi ?? null;
+                  const status =
+                    porsi == null ? null : porsi <= 0 ? "habis" : porsi <= 5 ? "menipis" : "aman";
+                  return (
+                    <tr key={m.id} className="hover:bg-stone-50">
+                      <td className={tdClass}>
+                        {m.kode ? (
+                          <span className="rounded bg-orange-100 px-1.5 py-0.5 font-mono text-xs font-bold text-orange-700">
+                            {m.kode}
+                          </span>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                      <td className={`${tdClass} font-medium`}>{m.nama}</td>
+                      <td className={`${tdClass} text-stone-500`}>{m.kategori}</td>
+                      <td className={`${tdClass} text-right`}>{formatRupiah(m.harga_jual)}</td>
+                      <td className={`${tdClass} text-right text-lg font-bold`}>
+                        {porsi == null ? "∞" : formatAngka(porsi)}
+                      </td>
+                      <td className={`${tdClass} text-stone-600`}>
+                        {st?.pembatas ? (
+                          <span title={`${formatAngka(st.pembatas.qty_per_porsi)} ${st.pembatas.satuan}/porsi`}>
+                            {st.pembatas.nama}
+                            <span className="ml-1 text-xs text-stone-400">
+                              (sisa {formatAngka(st.pembatas.saldo)} {st.pembatas.satuan})
+                            </span>
+                          </span>
+                        ) : (
+                          <span className="text-stone-400">tidak dibatasi bahan</span>
+                        )}
+                      </td>
+                      <td className={tdClass}>
+                        {status ? (
+                          <StatusBadge status={status} />
+                        ) : (
+                          <span className="rounded-full bg-stone-100 px-2 py-0.5 text-xs font-semibold text-stone-500">
+                            tak terbatas
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+                {menuTampil.length === 0 && (
+                  <tr>
+                    <td colSpan={7} className={`${tdClass} py-8 text-center text-stone-400`}>
+                      {cari ? `Menu "${cari}" tidak ditemukan.` : "Belum ada menu aktif."}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </Card>
+        </>
+      ) : isLoading ? (
+        <Spinner />
+      ) : (
+        <>
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <input
           value={cari}
@@ -176,6 +332,8 @@ export function StokPage() {
           </tbody>
         </table>
       </Card>
+        </>
+      )}
     </div>
   );
 }

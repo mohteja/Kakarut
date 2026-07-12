@@ -1,12 +1,12 @@
 import { asc, eq, inArray } from "drizzle-orm";
 import {
+  bahanPembatas,
   foodCostPersen,
   hargaJualBulat,
   hargaPerUnit,
   hargaSaran,
   hargaSaranPaket,
   hitungHpp,
-  porsiTersedia,
   qtyBahanPerPorsi,
   type KomponenDto,
   type MenuDto,
@@ -228,6 +228,7 @@ export async function ketersediaanMenu(
     hitungSaldoCabang(companyId, branchId),
   ]);
   const saldoByIngredient = new Map(saldoRows.map((r) => [r.ingredient_id, r.saldo]));
+  const bahanById = new Map(saldoRows.map((r) => [r.ingredient_id, r]));
 
   return katalog.rows.map((menu) => {
     // qty bahan terlacak per porsi = komponen sendiri + (paket) komponen menu
@@ -238,9 +239,22 @@ export async function ketersediaanMenu(
         ? katalog.komponenByMenu.get(menu.baseMenuId) ?? []
         : []),
     ];
+    const qtyPerPorsi = qtyBahanPerPorsi(komponen);
+    const ketat = bahanPembatas(qtyPerPorsi, saldoByIngredient);
+    const bahan = ketat ? bahanById.get(ketat.ingredient_id) : undefined;
     return {
       menu_id: menu.id,
-      porsi: porsiTersedia(qtyBahanPerPorsi(komponen), saldoByIngredient),
+      porsi: ketat?.porsi ?? null,
+      pembatas:
+        ketat && bahan
+          ? {
+              ingredient_id: ketat.ingredient_id,
+              nama: bahan.nama,
+              saldo: bahan.saldo,
+              satuan: bahan.satuan,
+              qty_per_porsi: qtyPerPorsi.get(ketat.ingredient_id) ?? 0,
+            }
+          : null,
     };
   });
 }

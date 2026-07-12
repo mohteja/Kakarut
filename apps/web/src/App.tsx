@@ -30,6 +30,7 @@ import { PenyimpananPage } from "./pages/pengaturan/PenyimpananPage";
 import { PerusahaanPage } from "./pages/pengaturan/PerusahaanPage";
 import { SupplierPage } from "./pages/pengaturan/SupplierPage";
 import { KartuStokPage } from "./pages/stok/KartuStokPage";
+import { TambahStokDariMenuPage } from "./pages/stok/TambahStokDariMenuPage";
 import { OpnamePage } from "./pages/stok/OpnamePage";
 import { OpnameRiwayatPage } from "./pages/stok/OpnameRiwayatPage";
 import { PenyesuaianPage } from "./pages/stok/PenyesuaianPage";
@@ -95,6 +96,7 @@ export default function App() {
                   <Route path="/pembelian" element={<PembelianPage />} />
                   <Route path="/pembelian/baru" element={<FakturFormPage tipe="beli" />} />
                   <Route path="/pembelian/rekomendasi" element={<RekomendasiBeliPage />} />
+                  <Route path="/stok/tambah-dari-menu" element={<TambahStokDariMenuPage />} />
                   <Route path="/laporan" element={<LaporanPage />} />
                   <Route path="/laporan/pembelian" element={<LaporanPembelianPage />} />
                   <Route path="/laporan/menu-laris" element={<LaporanMenuLarisPage />} />

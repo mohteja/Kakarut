@@ -897,6 +897,15 @@ cek "POST /customer WA duplikat → 409" "V == 409" \
 api "$OWNER" DELETE "/customer/$CM_ID" > /dev/null
 # member area khusus owner/admin
 cek "kasir GET /customer ditolak (403)" "V == 403" "$(status_code "$KASIR" GET /customer)"
+# autocomplete member: kasir BOLEH (semua peran), cari nama / WA
+cek "kasir GET /member-cari diizinkan (200)" "V == 200" "$(status_code "$KASIR" GET /member-cari)"
+cek "member-cari nama 'Budi' → ada hasil" "V >= 1" \
+  "$(api "$KASIR" GET "/member-cari?q=Budi" | jq '[.[] | select(.nama | test("Budi"))] | length')"
+cek "member-cari hasil punya nama & wa" "V == 1" \
+  "$(api "$KASIR" GET "/member-cari?q=Budi" | jq '(.[0] | (.nama|length>0) and (.wa|length>0)) | if . then 1 else 0 end')"
+cek "member-cari via WA '0812' → member Budi" "V == 1" \
+  "$(api "$KASIR" GET "/member-cari?q=0812" | jq --arg id "$CUST_ID" '[.[] | select(.id == $id)] | length')"
+cek "member-cari tanpa q → daftar member" "V >= 1" "$(api "$KASIR" GET /member-cari | jq 'length')"
 
 echo "== 34. Menu terlaris (ranking qty & omzet) =="
 api "$KASIR" POST /penjualan "{\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$PYO_ID\",\"qty\":4}]}" > /dev/null
@@ -1043,6 +1052,62 @@ cek "kode karyawan tak dikenal → 404" "V == 404" \
 cek "daftar absensi tanggal invalid → 400" "V == 400" "$(status_code "$KASIR" GET "/absensi?tanggal=abc")"
 cek "daftar absensi tanggal di luar rentang → 400" "V == 400" "$(status_code "$KASIR" GET "/absensi?tanggal=2026-13-40")"
 
+echo "== 40. Rencana stok dari menu (preview + faktur otomatis) =="
+# ketersediaan kini memuat bahan pembatas (nama+saldo) saat porsi terbatas
+KET40=$(api "$KASIR" GET /menu/ketersediaan)
+cek "ketersediaan: baris porsi terbatas punya pembatas" "V == 1" \
+  "$(echo "$KET40" | jq '(([.[] | select(.porsi != null)] | length > 0) and ([.[] | select(.porsi != null) | select(.pembatas == null or ((.pembatas.nama // "")|length) == 0)] | length == 0)) | if . then 1 else 0 end')"
+# preview rencana 500 porsi PBA (pasti melebihi saldo → ada kekurangan)
+MENU_PBA40=$(api "$OWNER" GET "/menu/$PBA_ID")
+PRV=$(api "$OWNER" POST /rekomendasi/menu "{\"items\":[{\"menu_id\":\"$PBA_ID\",\"porsi\":500}]}")
+cek "preview: perkiraan omzet = 500 × harga jual" "V == 1" \
+  "$(jq -n --argjson p "$PRV" --argjson m "$MENU_PBA40" '($p.perkiraan_omzet == 500 * $m.harga_jual) | if . then 1 else 0 end')"
+cek "preview: ada bahan yang dihitung" "V >= 1" "$(echo "$PRV" | jq '.bahan | length')"
+# kebutuhan tiap bahan = 500 × Σ qty komponen terlacak menu
+cek "preview: kebutuhan = 500 × qty resep (semua baris)" "V == 1" \
+  "$(jq -n --argjson p "$PRV" --argjson m "$MENU_PBA40" '
+    def ab: if . < 0 then -. else . end;
+    ($m.komponen | map(select(.track_stok and .qty > 0)) | group_by(.ingredient_id)
+      | map({(.[0].ingredient_id): (map(.qty)|add * 500)}) | add // {}) as $exp
+    | ([$p.bahan[] | . as $r | ($exp[$r.ingredient_id]) as $e
+        | select($e != null) | select((($r.kebutuhan - $e)|ab) > 0.01)] | length == 0)
+    | if . then 1 else 0 end')"
+cek "preview: kurang = max(0, kebutuhan − saldo) (semua baris)" "V == 1" \
+  "$(echo "$PRV" | jq 'def ab: if . < 0 then -. else . end;
+    ([.bahan[] | select(((.kurang - ([0, (.kebutuhan - .saldo)] | max))|ab) > 0.01)] | length == 0) | if . then 1 else 0 end')"
+cek "preview: ada kekurangan (produksi/beli)" "V >= 1" \
+  "$(echo "$PRV" | jq '.jumlah_produksi + .jumlah_beli')"
+cek "preview: baris kurang punya jumlah faktur ≥ kurang" "V == 1" \
+  "$(echo "$PRV" | jq '([.bahan[] | select(.kurang > 0) | select(.qty_faktur == null or .qty_faktur < .kurang)] | length == 0) | if . then 1 else 0 end')"
+# kasir tidak boleh (rekomendasi = owner/admin)
+cek "kasir POST /rekomendasi/menu ditolak (403)" "V == 403" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/rekomendasi/menu" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d "{\"items\":[{\"menu_id\":\"$PBA_ID\",\"porsi\":1}]}")"
+# menu tak dikenal → 400
+cek "preview menu tak dikenal → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/rekomendasi/menu" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"items":[{"menu_id":"00000000-0000-0000-0000-000000000000","porsi":5}]}')"
+# porsi absurd (> batas atas) → 400, bukan 500 numeric overflow
+cek "preview porsi melebihi batas → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/rekomendasi/menu" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"items\":[{\"menu_id\":\"$PBA_ID\",\"porsi\":5000000000}]}")"
+# faktur produksi tanpa pelaksana → 400 (bila ada baris produksi)
+if [ "$(echo "$PRV" | jq '.jumlah_produksi')" -gt 0 ]; then
+  cek "faktur otomatis tanpa pelaksana → 400" "V == 400" \
+    "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/rekomendasi/menu/faktur" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"items\":[{\"menu_id\":\"$PBA_ID\",\"porsi\":500}]}")"
+fi
+# buat faktur otomatis dengan pelaksana karyawan
+WORKER40=$(api "$OWNER" GET /karyawan | jq -r '.[0].user_id')
+FKT40=$(api "$OWNER" POST /rekomendasi/menu/faktur "{\"items\":[{\"menu_id\":\"$PBA_ID\",\"porsi\":500}],\"worker_id\":\"$WORKER40\"}")
+cek "faktur otomatis: jalur sesuai preview (produksi)" "V == 1" \
+  "$(jq -n --argjson f "$FKT40" --argjson p "$PRV" '((($p.jumlah_produksi > 0) == ($f.produksi != null)) and (($f.produksi == null) or ($f.produksi.jumlah_baris == $p.jumlah_produksi))) | if . then 1 else 0 end')"
+cek "faktur otomatis: jalur sesuai preview (beli)" "V == 1" \
+  "$(jq -n --argjson f "$FKT40" --argjson p "$PRV" '((($p.jumlah_beli > 0) == ($f.beli != null)) and (($f.beli == null) or ($f.beli.jumlah_baris == $p.jumlah_beli))) | if . then 1 else 0 end')"
+# faktur tahap rencana → saldo TIDAK berubah, tapi muncul sbg stok berjalan
+KURANG_ID=$(echo "$PRV" | jq -r '[.bahan[] | select(.kurang > 0)][0].ingredient_id')
+KURANG_SALDO=$(echo "$PRV" | jq '[.bahan[] | select(.kurang > 0)][0].saldo')
+S40=$(api "$OWNER" GET /stok)
+cek "saldo bahan kurang tak berubah (masih rencana)" "abs(V - $KURANG_SALDO) < 0.001" \
+  "$(echo "$S40" | jq --arg id "$KURANG_ID" '[.[] | select(.ingredient_id == $id)][0].saldo')"
+cek "bahan kurang tampil sbg stok berjalan (produksi/beli)" "V == 1" \
+  "$(echo "$S40" | jq --arg id "$KURANG_ID" '([.[] | select(.ingredient_id == $id)][0] | ((.produksi_berjalan.qty // 0) + (.pembelian_berjalan.qty // 0)) > 0) | if . then 1 else 0 end')"
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

@@ -17,7 +17,7 @@ import { authRoutes } from "./modules/auth/routes";
 import { bahanRoutes } from "./modules/bahan/routes";
 import { cabangRoutes } from "./modules/branches/routes";
 import { companyRoutes } from "./modules/company/routes";
-import { customerRoutes } from "./modules/customer/routes";
+import { customerRoutes, memberCariRoutes } from "./modules/customer/routes";
 import { kategoriRoutes } from "./modules/kategori/routes";
 import { laporanRoutes } from "./modules/laporan/routes";
 import { mejaRoutes } from "./modules/meja/routes";
@@ -79,6 +79,8 @@ export function createApp() {
     .route("/shift", shiftRoutes)
     // absensi karyawan (kiosk) — semua peran, tanpa gerbang requireRole
     .route("/absensi", absensiRoutes)
+    // pencarian member ringan untuk autocomplete kasir — semua peran
+    .route("/member-cari", memberCariRoutes)
     .route("/stok", stokRoutes)
     .route("/laporan", laporanRoutes)
     .route("/print", printRoutes)
