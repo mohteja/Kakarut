@@ -1518,6 +1518,171 @@ api "$OWNER" POST "/pembelian/tahap/$FK52_ID" "{\"ke\":\"menunggu\",\"items\":[{
 cek "CK47 kirim ke store miliknya → baris pindah ke tujuan" "V == 1" \
   "$(api "$OWNER" GET "/pembelian?branch_id=$ST52_ID&per_page=500" | jq --arg f "$FK52_ID" '([.rows[] | select(.faktur_id==$f)] | (length == 1) and (.[0].status == "menunggu")) | if . then 1 else 0 end')"
 
+echo "== 53. Edit karyawan: nama/email/peran/lokasi + password + status =="
+api "$OWNER" POST /karyawan "{\"nama\":\"Karyawan Edit 53\",\"email\":\"edit53@basooopa.id\",\"password\":\"PwEdit53!\",\"role\":\"cashier\",\"branch_id\":\"$PUSAT51_ID\"}" > /dev/null
+U53_ID=$(api "$OWNER" GET /karyawan | jq -r '[.[] | select(.email=="edit53@basooopa.id")][0].user_id')
+
+# ubah nama + email + peran (kasir → admin, lokasi jadi "Semua")
+api "$OWNER" PATCH "/karyawan/$U53_ID" '{"nama":"Karyawan Edit 53B","email":"edit53b@basooopa.id","role":"admin","branch_id":null}' > /dev/null
+cek "PATCH nama/email/peran/lokasi tersimpan" "V == 1" \
+  "$(api "$OWNER" GET /karyawan | jq --arg id "$U53_ID" '([.[] | select(.user_id==$id)][0] | (.nama=="Karyawan Edit 53B" and .email=="edit53b@basooopa.id" and .role=="admin" and .branch_id==null)) | if . then 1 else 0 end')"
+T53=$(login "edit53b@basooopa.id" "PwEdit53!")
+cek "login dgn email BARU (password lama) berhasil" "V == 1" "$([ -n "$T53" ] && echo 1 || echo 0)"
+
+cek "email bentrok dgn user lain → 409" "V == 409" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PATCH "$BASE/api/karyawan/$U53_ID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"email\":\"$KASIR_EMAIL\"}")"
+cek "peran kasir tanpa lokasi kerja → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PATCH "$BASE/api/karyawan/$U53_ID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"role":"cashier","branch_id":null}')"
+
+# guard hierarki: admin tidak boleh menyentuh akun owner / memberi peran owner
+OWN53_ID=$(api "$OWNER" GET /karyawan | jq -r '[.[] | select(.role=="owner")][0].user_id')
+cek "admin ubah akun owner → 403" "V == 403" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PATCH "$BASE/api/karyawan/$OWN53_ID" -H "Authorization: Bearer $T53" -H 'Content-Type: application/json' -d '{"nama":"Diretas"}')"
+cek "admin memberi peran owner → 403" "V == 403" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PATCH "$BASE/api/karyawan/$U53_ID" -H "Authorization: Bearer $T53" -H 'Content-Type: application/json' -d '{"role":"owner"}')"
+
+# ganti password via edit + nonaktifkan akun
+api "$OWNER" PATCH "/karyawan/$U53_ID" '{"password":"PwEdit53Baru!"}' > /dev/null
+cek "password baru dari form edit berlaku" "V == 1" \
+  "$([ -n "$(login "edit53b@basooopa.id" "PwEdit53Baru!")" ] && echo 1 || echo 0)"
+cek "password < 8 karakter → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PATCH "$BASE/api/karyawan/$U53_ID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"password":"abc"}')"
+api "$OWNER" PATCH "/karyawan/$U53_ID" '{"is_active":false}' > /dev/null
+cek "akun nonaktif tidak bisa login (401)" "V == 401" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/auth/login" -H 'Content-Type: application/json' -d '{"email":"edit53b@basooopa.id","password":"PwEdit53Baru!"}')"
+
+echo "== 54. Nonaktifkan & arsip karyawan (keluar; riwayat tetap; bisa dipulihkan) =="
+api "$OWNER" POST /karyawan "{\"nama\":\"Karyawan Arsip 54\",\"email\":\"arsip54@basooopa.id\",\"password\":\"PwArsip54!\",\"role\":\"cashier\",\"branch_id\":\"$PUSAT51_ID\"}" > /dev/null
+U54_ID=$(api "$OWNER" GET /karyawan | jq -r '[.[] | select(.email=="arsip54@basooopa.id")][0].user_id')
+KODE54=$(api "$OWNER" GET /karyawan | jq -r '[.[] | select(.email=="arsip54@basooopa.id")][0].employee_code')
+cek "karyawan uji bisa login sebelum diarsipkan" "V == 1" \
+  "$([ -n "$(login "arsip54@basooopa.id" "PwArsip54!")" ] && echo 1 || echo 0)"
+
+api "$OWNER" PATCH "/karyawan/$U54_ID" '{"arsip":true}' > /dev/null
+cek "terarsip: hilang dari daftar karyawan" "V == 0" \
+  "$(api "$OWNER" GET /karyawan | jq --arg id "$U54_ID" '[.[] | select(.user_id==$id)] | length')"
+cek "terarsip: muncul di daftar arsip + tanggal arsip" "V == 1" \
+  "$(api "$OWNER" GET "/karyawan?arsip=true" | jq --arg id "$U54_ID" '([.[] | select(.user_id==$id)][0] | (.archived_at != null)) | if . then 1 else 0 end')"
+cek "terarsip: tidak bisa login (403)" "V == 403" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/auth/login" -H 'Content-Type: application/json' -d '{"email":"arsip54@basooopa.id","password":"PwArsip54!"}')"
+cek "terarsip: kode absen tidak dikenali (404)" "V == 404" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/absensi" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"kode\":\"$KODE54\"}")"
+
+# pulihkan → kembali ke daftar dgn kode sama, login & absen normal lagi
+api "$OWNER" PATCH "/karyawan/$U54_ID" '{"arsip":false}' > /dev/null
+cek "dipulihkan: kembali ke daftar dgn kode sama" "V == 1" \
+  "$(api "$OWNER" GET /karyawan | jq --arg id "$U54_ID" --arg kode "$KODE54" '([.[] | select(.user_id==$id)][0] | (.employee_code == $kode and .archived_at == null)) | if . then 1 else 0 end')"
+cek "dipulihkan: login kembali normal" "V == 1" \
+  "$([ -n "$(login "arsip54@basooopa.id" "PwArsip54!")" ] && echo 1 || echo 0)"
+cek "dipulihkan: absen dgn kode diterima" "V == 201" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/absensi" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"kode\":\"$KODE54\"}")"
+
+# guard: tidak bisa mengunci diri sendiri; admin tak boleh mengarsipkan owner
+OWN54_ID=$(api "$OWNER" GET /karyawan | jq -r '[.[] | select(.role=="owner")][0].user_id')
+cek "arsipkan akun sendiri → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PATCH "$BASE/api/karyawan/$OWN54_ID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"arsip":true}')"
+cek "nonaktifkan akun sendiri → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PATCH "$BASE/api/karyawan/$OWN54_ID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"is_active":false}')"
+api "$OWNER" PATCH "/karyawan/$U53_ID" '{"is_active":true}' > /dev/null
+cek "admin mengarsipkan akun owner → 403" "V == 403" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PATCH "$BASE/api/karyawan/$OWN54_ID" -H "Authorization: Bearer $T53" -H 'Content-Type: application/json' -d '{"arsip":true}')"
+
+echo "== 55. Struk per cabang: footer & alamat cabang (bukan perusahaan) =="
+api "$OWNER" PATCH "/cabang/$PUSAT51_ID" '{"alamat":"Jl. Pusat No. 1","telepon":"0811111111","receipt_footer":"Terima kasih dari Pusat!","receipt_show_alamat":true}' > /dev/null
+cek "PATCH struk cabang tersimpan (footer + alamat + telepon)" "V == 1" \
+  "$(api "$OWNER" GET /cabang | jq --arg id "$PUSAT51_ID" '([.[] | select(.id==$id)][0] | (.receipt_footer=="Terima kasih dari Pusat!" and .receipt_show_alamat==true and .alamat=="Jl. Pusat No. 1" and .telepon=="0811111111")) | if . then 1 else 0 end')"
+api "$OWNER" PATCH "/cabang/$PUSAT51_ID" '{"receipt_show_alamat":false}' > /dev/null
+cek "sembunyikan alamat di struk per cabang" "V == 1" \
+  "$(api "$OWNER" GET /cabang | jq --arg id "$PUSAT51_ID" '([.[] | select(.id==$id)][0].receipt_show_alamat == false) | if . then 1 else 0 end')"
+api "$OWNER" PATCH "/cabang/$PUSAT51_ID" '{"receipt_show_alamat":true}' > /dev/null
+
+ST55_ID=$(api "$OWNER" POST /cabang "{\"nama\":\"Store 55\",\"central_kitchen_id\":\"$CK47_ID\",\"receipt_footer\":\"Sampai jumpa di Store 55\"}" | jq -r .id)
+cek "cabang baru langsung membawa footer struknya" "V == 1" \
+  "$(api "$OWNER" GET /cabang | jq --arg id "$ST55_ID" '([.[] | select(.id==$id)][0] | (.receipt_footer=="Sampai jumpa di Store 55" and .receipt_show_alamat==true)) | if . then 1 else 0 end')"
+
+# struk web mengambil cabang via sale.branchId — pastikan respons penjualan memuatnya
+JUAL55=$(api "$KASIR" POST /penjualan "{\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")
+cek "respons penjualan memuat sale.branchId = cabang kasir" "V == 1" \
+  "$(echo "$JUAL55" | jq --arg b "$PUSAT51_ID" '(.sale.branchId == $b) | if . then 1 else 0 end')"
+cek "GET /penjualan/:id juga memuat sale.branchId" "V == 1" \
+  "$(api "$KASIR" GET "/penjualan/$(echo "$JUAL55" | jq -r .sale.id)" | jq --arg b "$PUSAT51_ID" '(.sale.branchId == $b) | if . then 1 else 0 end')"
+
+echo "== 56. Peran TIM: cek stok, lihat menu, penerimaan, riwayat — tanpa kasir =="
+cek "tim tanpa cabang → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/karyawan" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"nama":"Tim X","email":"timx56@basooopa.id","password":"TimPass56!","role":"tim"}')"
+api "$OWNER" POST /karyawan "{\"nama\":\"Tim Gudang 56\",\"email\":\"tim56@basooopa.id\",\"password\":\"TimPass56!\",\"role\":\"tim\",\"branch_id\":\"$PUSAT51_ID\"}" > /dev/null
+T56=$(login "tim56@basooopa.id" "TimPass56!")
+cek "tim bisa login & terikat cabang" "V == 1" \
+  "$(api "$T56" GET /auth/me | jq --arg b "$PUSAT51_ID" '((.user.role == "tim") and (.user.branch_id == $b)) | if . then 1 else 0 end')"
+cek "tim: cek stok → 200" "V == 200" "$(status_code "$T56" GET /stok)"
+cek "tim: lihat menu → 200" "V == 200" "$(status_code "$T56" GET /menu)"
+cek "tim: riwayat transaksi → 200" "V == 200" "$(status_code "$T56" GET /penjualan)"
+cek "tim: penerimaan barang → 200" "V == 200" "$(status_code "$T56" GET /penerimaan)"
+cek "tim: profil → 200" "V == 200" "$(status_code "$T56" GET /profil)"
+cek "tim: membuat transaksi kasir → 403" "V == 403" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/penjualan" -H "Authorization: Bearer $T56" -H 'Content-Type: application/json' -d "{\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")"
+cek "tim: shift kasir → 403" "V == 403" "$(status_code "$T56" GET /shift/aktif)"
+cek "tim: open bill → 403" "V == 403" "$(status_code "$T56" GET /open-bill)"
+cek "tim: stock opname → 403" "V == 403" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/stok/opname" -H "Authorization: Bearer $T56" -H 'Content-Type: application/json' -d '{}')"
+cek "tim: produksi → 403" "V == 403" "$(status_code "$T56" GET /produksi)"
+cek "tim: kelola karyawan → 403" "V == 403" "$(status_code "$T56" GET /karyawan)"
+
+echo "== 57. Absen hanya dalam radius titik lokasi cabang =="
+KODE56=$(api "$OWNER" GET /karyawan | jq -r '[.[] | select(.email=="tim56@basooopa.id")][0].employee_code')
+cek "cabang tanpa titik lokasi: absen tanpa GPS tetap diterima" "V == 201" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/absensi" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"kode\":\"$KODE56\"}")"
+
+# titik lokasi Pusat = Monas, radius 100 m
+api "$OWNER" PATCH "/cabang/$PUSAT51_ID" '{"latitude":-6.175392,"longitude":106.827153,"radius_absen_m":100}' > /dev/null
+cek "titik lokasi & radius cabang tersimpan" "V == 1" \
+  "$(api "$OWNER" GET /cabang | jq --arg id "$PUSAT51_ID" '([.[] | select(.id==$id)][0] | (.latitude == -6.175392 and .longitude == 106.827153 and .radius_absen_m == 100)) | if . then 1 else 0 end')"
+cek "absen tanpa koordinat → 400 (wajib GPS)" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/absensi" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"kode\":\"$KODE56\"}")"
+cek "absen di luar radius (±4,6 km) → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/absensi" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"kode\":\"$KODE56\",\"lat\":-6.137654,\"lng\":106.817125}")"
+ABS57=$(api "$OWNER" POST /absensi "{\"kode\":\"$KODE56\",\"lat\":-6.175392,\"lng\":106.827553}")
+cek "absen dalam radius (~44 m) diterima + jarak terlapor" "V == 1" \
+  "$(echo "$ABS57" | jq '((.jarak_m != null) and (.jarak_m <= 100) and (.tipe != null)) | if . then 1 else 0 end')"
+# kosongkan titik → aturan radius kembali nonaktif
+api "$OWNER" PATCH "/cabang/$PUSAT51_ID" '{"latitude":null,"longitude":null}' > /dev/null
+cek "titik dikosongkan: absen tanpa GPS diterima lagi" "V == 201" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/absensi" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"kode\":\"$KODE56\"}")"
+
+echo "== 58. Karyawan Central Kitchen: satu peran, menu produksi/beli/bahan =="
+cek "kasir ditempatkan di CK → 400 (CK hanya peran Karyawan)" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/karyawan" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"nama\":\"Kasir CK 58\",\"email\":\"kasirck58@basooopa.id\",\"password\":\"KasirCk58!\",\"role\":\"cashier\",\"branch_id\":\"$CK52_UTAMA\"}")"
+api "$OWNER" POST /karyawan "{\"nama\":\"Karyawan CK 58\",\"email\":\"ck58@basooopa.id\",\"password\":\"KaryCk58!\",\"role\":\"tim\",\"branch_id\":\"$CK52_UTAMA\"}" > /dev/null
+TCK58=$(login "ck58@basooopa.id" "KaryCk58!")
+U58_ID=$(api "$OWNER" GET /karyawan | jq -r '[.[] | select(.email=="ck58@basooopa.id")][0].user_id')
+
+cek "karyawan CK: produksi bahan baku → 200" "V == 200" "$(status_code "$TCK58" GET /produksi)"
+cek "karyawan CK: beli bahan baku → 200" "V == 200" "$(status_code "$TCK58" GET /pembelian)"
+cek "karyawan CK: bahan baku (lihat) → 200" "V == 200" "$(status_code "$TCK58" GET /bahan)"
+cek "karyawan CK: ubah master bahan → 403" "V == 403" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/bahan/$URATB_ID" -H "Authorization: Bearer $TCK58" -H 'Content-Type: application/json' -d '{"harga_beli":1}')"
+cek "tim cabang store: produksi → 403" "V == 403" "$(status_code "$T56" GET /produksi)"
+
+# faktur pembelian oleh karyawan CK → jatuh di CK-nya sendiri
+FK58=$(api "$TCK58" POST /pembelian/faktur "{\"items\":[{\"ingredient_id\":\"$ING42A\",\"mode\":\"pcs\",\"jumlah\":5,\"total_harga\":25000}]}")
+FK58_ID=$(echo "$FK58" | jq -r .faktur_id)
+cek "karyawan CK membuat faktur pembelian di CK-nya" "V == 1" \
+  "$(api "$OWNER" GET "/pembelian?branch_id=$CK52_UTAMA&per_page=500" | jq --arg f "$FK58_ID" '([.rows[] | select(.faktur_id==$f)] | length == 1) | if . then 1 else 0 end')"
+cek "karyawan CK membuat faktur di cabang lain → 403" "V == 403" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/pembelian/faktur" -H "Authorization: Bearer $TCK58" -H 'Content-Type: application/json' -d "{\"branch_id\":\"$PUSAT51_ID\",\"items\":[{\"ingredient_id\":\"$ING42A\",\"mode\":\"pcs\",\"jumlah\":2,\"total_harga\":10000}]}")"
+
+# karyawan CK memproses & MENGIRIM ke store yang terhubung ke CK-nya
+api "$TCK58" POST "/pembelian/tahap/$FK58_ID" '{"ke":"dikerjakan","dana_cair":25000}' > /dev/null
+ID58=$(api "$TCK58" GET "/pembelian?per_page=500" | jq -r --arg f "$FK58_ID" '[.rows[] | select(.faktur_id==$f)][0].id')
+api "$TCK58" POST "/pembelian/tahap/$FK58_ID" "{\"ke\":\"menunggu\",\"items\":[{\"id\":\"$ID58\",\"qty\":5}],\"tujuan_branch_id\":\"$CB46_ID\"}" > /dev/null
+cek "karyawan CK mengirim ke store terhubung → baris pindah" "V == 1" \
+  "$(api "$OWNER" GET "/pembelian?branch_id=$CB46_ID&per_page=500" | jq --arg f "$FK58_ID" '([.rows[] | select(.faktur_id==$f)] | (length == 1) and (.[0].status == "menunggu")) | if . then 1 else 0 end')"
+
+# faktur produksi dgn pelaksana dirinya sendiri
+FP58=$(api "$TCK58" POST /produksi/faktur "{\"worker_id\":\"$U58_ID\",\"items\":[{\"ingredient_id\":\"$URATB_ID\",\"mode\":\"pcs\",\"jumlah\":10}]}")
+cek "karyawan CK membuat faktur produksi (pelaksana dirinya)" "V == 1" \
+  "$(echo "$FP58" | jq '(.faktur_id != null) | if . then 1 else 0 end')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

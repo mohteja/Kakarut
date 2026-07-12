@@ -6,7 +6,7 @@ import { z } from "zod";
 import { PANDUAN_MARKUP } from "@kakarut/shared";
 import { db, type Tx } from "../../db/client";
 import { branches, ingredients, menuBranches, menuComponents, menus } from "../../db/schema";
-import { requireRole, resolveBranchId, type AppEnv } from "../../middleware/auth";
+import { requireRole, resolveBranchId, terikatCabang, type AppEnv } from "../../middleware/auth";
 import {
   ketersediaanMenu,
   loadKatalog,
@@ -135,7 +135,7 @@ export const menuRoutes = new Hono<AppEnv>()
     // Kasir SELALU dibatasi menu cabangnya; owner/admin bisa memfilter via
     // ?branch_id= (tanpa param = katalog penuh untuk halaman manajemen).
     const branchFilter =
-      c.get("auth").role === "cashier" ? auth.branch_id : c.req.query("branch_id") || null;
+      terikatCabang(c.get("auth").role) ? auth.branch_id : c.req.query("branch_id") || null;
     const dtos = katalog.rows
       .filter((r) => (includeInactive ? true : r.isActive))
       .filter((r) => (kategoriFilter ? r.categoryId === kategoriFilter : true))

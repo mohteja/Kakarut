@@ -7,6 +7,7 @@ export interface Cabang {
   id: string;
   nama: string;
   alamat: string | null;
+  telepon: string | null;
   /**
    * store = outlet penjualan; central_kitchen = dapur produksi pengirim;
    * kantor = lokasi kerja admin/finance (bukan tujuan kirim barang)
@@ -14,6 +15,13 @@ export interface Cabang {
   tipe: "store" | "central_kitchen" | "kantor";
   /** CK pemasok cabang store — store hanya menerima kiriman dari CK ini */
   central_kitchen_id: string | null;
+  /** struk per cabang: footer + tampil/tidaknya alamat & telepon cabang */
+  receipt_footer: string | null;
+  receipt_show_alamat: boolean;
+  /** titik maps + radius absen — absen hanya diterima dalam radius ini */
+  latitude: number | null;
+  longitude: number | null;
+  radius_absen_m: number;
   is_active: boolean;
 }
 
@@ -35,15 +43,18 @@ const BranchContext = createContext<BranchContextValue | null>(null);
 
 export function BranchProvider({ children }: { children: ReactNode }) {
   const { auth } = useAuth();
-  const isKasir = auth?.user.role === "cashier";
-  const [branchId, setBranchId] = useState<string | null>(
-    () => (isKasir ? null : localStorage.getItem("kakarut.branch") || null),
+  // kasir & tim terkunci ke cabangnya sendiri — server yang menentukan
+  const isKasir = auth?.user.role === "cashier" || auth?.user.role === "tim";
+  const [branchId, setBranchId] = useState<string | null>(() =>
+    isKasir ? (auth?.user.branch_id ?? null) : localStorage.getItem("kakarut.branch") || null,
   );
 
+  // Daftar cabang dimuat untuk semua peran (label, tipe cabang sendiri, struk);
+  // kasir/tim tetap tak memilih cabang — hanya membaca.
   const { data: cabang = [] } = useQuery({
     queryKey: ["cabang"],
     queryFn: () => api<Cabang[]>("/cabang"),
-    enabled: Boolean(auth?.user.company_id) && !isKasir,
+    enabled: Boolean(auth?.user.company_id),
   });
 
   // Validasi pilihan tersimpan: bila bukan cabang aktif milik perusahaan ini

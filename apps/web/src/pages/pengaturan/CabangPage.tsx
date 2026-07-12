@@ -20,9 +20,17 @@ interface FormState {
   id?: string;
   nama: string;
   alamat: string;
+  telepon: string;
   tipe: "store" | "central_kitchen" | "kantor";
   /** CK pemasok (khusus store) — "" = otomatis bila CK cuma satu */
   central_kitchen_id: string;
+  /** struk per cabang — alamat/telepon CABANG inilah yang tercetak */
+  receipt_footer: string;
+  receipt_show_alamat: boolean;
+  /** titik maps + radius absen (m) — absen hanya diterima dalam radius */
+  latitude: string;
+  longitude: string;
+  radius_absen_m: string;
 }
 
 export function CabangPage() {
@@ -36,8 +44,14 @@ export function CabangPage() {
       const body = {
         nama: f.nama,
         alamat: f.alamat || null,
+        telepon: f.telepon || null,
         tipe: f.tipe,
         central_kitchen_id: f.tipe === "store" && f.central_kitchen_id ? f.central_kitchen_id : null,
+        receipt_footer: f.receipt_footer || null,
+        receipt_show_alamat: f.receipt_show_alamat,
+        latitude: f.latitude ? Number(f.latitude) : null,
+        longitude: f.longitude ? Number(f.longitude) : null,
+        radius_absen_m: Math.max(10, Number(f.radius_absen_m) || 100),
       };
       return f.id
         ? api(`/cabang/${f.id}`, { method: "PATCH", body })
@@ -63,51 +77,50 @@ export function CabangPage() {
   const daftarCk = cabang.filter((b) => b.tipe === "central_kitchen" && b.is_active);
   const namaCk = new Map(cabang.map((b) => [b.id, b.nama]));
 
-  // Mode Lite = 1 cabang — halaman ini jadi ajakan upgrade bila diakses langsung.
-  if (!isPro) {
-    return (
-      <div className="max-w-3xl">
-        <PageTitle>Cabang</PageTitle>
-        <Card className="space-y-3 p-6 text-center">
-          <div className="text-4xl">📍</div>
-          <h2 className="text-lg font-bold text-stone-800">Multi-lokasi butuh mode Pro</h2>
-          <p className="mx-auto max-w-md text-sm text-stone-600">
-            Mode Lite dibatasi 1 cabang. Upgrade ke <b>Pro</b> untuk menambah 🏭 Central
-            Kitchen, 🏪 cabang store lain, dan 🏢 Kantor — lengkap dengan kiriman antar
-            lokasi dan menu per lokasi.
-          </p>
-          <Link
-            to="/pengaturan/perusahaan"
-            className="inline-block rounded-lg bg-orange-600 px-4 py-2 text-sm font-semibold text-white hover:bg-orange-700"
-          >
-            ⬆ Upgrade di Pengaturan Perusahaan
-          </Link>
-        </Card>
-      </div>
-    );
-  }
-
   return (
     <div className="max-w-3xl">
       <PageTitle
         aksi={
-          <button
-            onClick={() =>
-              setForm({
-                nama: "",
-                alamat: "",
-                tipe: "store",
-                central_kitchen_id: daftarCk.length === 1 ? daftarCk[0].id : "",
-              })
-            }
-            className={btnPrimary}
-          >
-            + Tambah Cabang
-          </button>
+          // Lite = 1 cabang; tambah cabang butuh Pro
+          isPro ? (
+            <button
+              onClick={() =>
+                setForm({
+                  nama: "",
+                  alamat: "",
+                  telepon: "",
+                  tipe: "store",
+                  central_kitchen_id: daftarCk.length === 1 ? daftarCk[0].id : "",
+                  receipt_footer: "",
+                  receipt_show_alamat: true,
+                  latitude: "",
+                  longitude: "",
+                  radius_absen_m: "100",
+                })
+              }
+              className={btnPrimary}
+            >
+              + Tambah Cabang
+            </button>
+          ) : undefined
         }
       >
         Cabang
       </PageTitle>
+      {!isPro && (
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-stone-50 px-4 py-3 text-sm text-stone-600">
+          <span>
+            Mode <b>Lite</b> dibatasi 1 cabang — atur alamat &amp; struk cabang di sini.
+            Butuh 🏭 Central Kitchen, cabang lain, atau 🏢 Kantor?
+          </span>
+          <Link
+            to="/pengaturan/perusahaan"
+            className="rounded-lg bg-orange-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-orange-700"
+          >
+            ⬆ Upgrade ke Pro
+          </Link>
+        </div>
+      )}
       <ErrorText error={toggleAktif.error} />
 
       <Card className="overflow-x-auto">
@@ -172,8 +185,14 @@ export function CabangPage() {
                         id: b.id,
                         nama: b.nama,
                         alamat: b.alamat ?? "",
+                        telepon: b.telepon ?? "",
                         tipe: b.tipe,
                         central_kitchen_id: b.central_kitchen_id ?? "",
+                        receipt_footer: b.receipt_footer ?? "",
+                        receipt_show_alamat: b.receipt_show_alamat,
+                        latitude: b.latitude != null ? String(b.latitude) : "",
+                        longitude: b.longitude != null ? String(b.longitude) : "",
+                        radius_absen_m: String(b.radius_absen_m ?? 100),
                       })
                     }
                     className="text-sm font-medium text-orange-600 hover:underline"
@@ -205,13 +224,23 @@ export function CabangPage() {
                 className={inputClass}
               />
             </div>
-            <div>
-              <label className="mb-1 block text-sm font-medium">Alamat</label>
-              <input
-                value={form.alamat}
-                onChange={(e) => setForm({ ...form, alamat: e.target.value })}
-                className={inputClass}
-              />
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="mb-1 block text-sm font-medium">Alamat</label>
+                <input
+                  value={form.alamat}
+                  onChange={(e) => setForm({ ...form, alamat: e.target.value })}
+                  className={inputClass}
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium">Telepon</label>
+                <input
+                  value={form.telepon}
+                  onChange={(e) => setForm({ ...form, telepon: e.target.value })}
+                  className={inputClass}
+                />
+              </div>
             </div>
             <div>
               <label className="mb-1 block text-sm font-medium">Jenis cabang</label>
@@ -263,6 +292,110 @@ export function CabangPage() {
                 </p>
               </div>
             )}
+            {/* Struk per cabang — kantor tidak berjualan, tak butuh struk */}
+            {form.tipe !== "kantor" && (
+              <div className="rounded-lg border border-stone-200 p-3">
+                <div className="mb-2 text-sm font-semibold text-stone-700">🧾 Struk</div>
+                <label className="mb-1 block text-sm font-medium">Teks footer struk</label>
+                <input
+                  value={form.receipt_footer}
+                  onChange={(e) => setForm({ ...form, receipt_footer: e.target.value })}
+                  maxLength={200}
+                  placeholder="mis. Terima kasih! Ikuti IG @basooopa"
+                  className={inputClass}
+                />
+                <label className="mt-2 flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={form.receipt_show_alamat}
+                    onChange={(e) =>
+                      setForm({ ...form, receipt_show_alamat: e.target.checked })
+                    }
+                  />
+                  Tampilkan alamat &amp; telepon di struk
+                </label>
+                <p className="mt-1 text-xs text-stone-400">
+                  Alamat &amp; telepon <b>cabang ini</b> yang tercetak di struk — bukan
+                  alamat perusahaan.
+                </p>
+              </div>
+            )}
+            {/* Titik maps + radius absen — berlaku semua tipe (kantor pun absen) */}
+            <div className="rounded-lg border border-stone-200 p-3">
+              <div className="mb-2 flex items-center justify-between">
+                <div className="text-sm font-semibold text-stone-700">📍 Lokasi &amp; radius absen</div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.geolocation?.getCurrentPosition(
+                      (pos) =>
+                        setForm((f) =>
+                          f
+                            ? {
+                                ...f,
+                                latitude: pos.coords.latitude.toFixed(6),
+                                longitude: pos.coords.longitude.toFixed(6),
+                              }
+                            : f,
+                        ),
+                      () => alert("Gagal membaca lokasi — izinkan akses GPS di browser."),
+                      { enableHighAccuracy: true, timeout: 10000 },
+                    );
+                  }}
+                  className="rounded-lg border border-stone-300 px-2 py-1 text-xs font-medium text-stone-600 hover:bg-stone-100"
+                >
+                  🎯 Pakai lokasi saya
+                </button>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-stone-500">Latitude</label>
+                  <input
+                    value={form.latitude}
+                    onChange={(e) => setForm({ ...form, latitude: e.target.value })}
+                    placeholder="-6.200000"
+                    inputMode="decimal"
+                    className={inputClass}
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-stone-500">Longitude</label>
+                  <input
+                    value={form.longitude}
+                    onChange={(e) => setForm({ ...form, longitude: e.target.value })}
+                    placeholder="106.816666"
+                    inputMode="decimal"
+                    className={inputClass}
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-stone-500">Radius (m)</label>
+                  <input
+                    value={form.radius_absen_m}
+                    onChange={(e) => setForm({ ...form, radius_absen_m: e.target.value })}
+                    type="number"
+                    min={10}
+                    max={10000}
+                    className={inputClass}
+                  />
+                </div>
+              </div>
+              {form.latitude && form.longitude && (
+                <a
+                  href={`https://maps.google.com/?q=${form.latitude},${form.longitude}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-1 inline-block text-xs font-medium text-orange-600 hover:underline"
+                >
+                  🗺 Cek titik di Google Maps
+                </a>
+              )}
+              <p className="mt-1 text-xs text-stone-400">
+                Bila titik diisi, karyawan hanya bisa <b>absen dalam radius</b> ini dari
+                cabang (perangkat wajib mengizinkan GPS). Kosongkan untuk absen tanpa
+                pembatasan lokasi.
+              </p>
+            </div>
             <ErrorText error={simpan.error} />
             <div className="flex justify-end gap-2 pt-2">
               <button type="button" onClick={() => setForm(null)} className={btnSecondary}>

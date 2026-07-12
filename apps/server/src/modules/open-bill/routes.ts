@@ -6,7 +6,7 @@ import { z } from "zod";
 import type { OpenBillDetail, OpenBillRow } from "@kakarut/shared";
 import { db, type Tx } from "../../db/client";
 import { meja, menuBranches, menus, openBillItems, openBills } from "../../db/schema";
-import { resolveBranchId, type AppEnv } from "../../middleware/auth";
+import { resolveBranchId, terikatCabang, type AppEnv } from "../../middleware/auth";
 
 const BillBody = z.object({
   branch_id: z.string().uuid().optional(),
@@ -134,7 +134,7 @@ export const openBillRoutes = new Hono<AppEnv>()
     const auth = c.get("auth");
     const body = c.req.valid("json");
     const branchId = body.branch_id ?? (await resolveBranchId(c));
-    if (auth.role === "cashier" && branchId !== auth.branch_id) {
+    if (terikatCabang(auth.role) && branchId !== auth.branch_id) {
       throw new HTTPException(403, { message: "Kasir hanya boleh bill di cabangnya" });
     }
     await validateMenus(auth.company_id!, branchId, body.items);

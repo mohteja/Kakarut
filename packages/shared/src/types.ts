@@ -639,6 +639,8 @@ export interface AbsenResult {
   /** waktu cap (ISO) */
   waktu: string;
   branch_nama: string;
+  /** jarak perangkat ke titik cabang (m) — null bila lokasi cabang belum diatur */
+  jarak_m?: number | null;
 }
 
 /** Ringkasan absensi seorang karyawan pada satu hari (daftar di halaman Absen). */

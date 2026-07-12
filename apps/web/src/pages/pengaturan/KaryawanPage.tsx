@@ -24,21 +24,29 @@ interface Karyawan {
   nama: string;
   email: string;
   is_active: boolean;
-  role: "owner" | "admin" | "cashier";
+  role: "owner" | "admin" | "cashier" | "tim";
   branch_id: string | null;
   cabang: string | null;
   employee_code: string | null;
+  /** terisi = karyawan sudah diarsipkan (keluar; riwayat tetap tersimpan) */
+  archived_at: string | null;
 }
 
 interface FormState {
+  /** terisi = mode ubah (PATCH); kosong = tambah karyawan baru */
+  id?: string;
   nama: string;
   email: string;
+  /** saat ubah: kosongkan bila password tidak diganti */
   password: string;
-  role: "owner" | "admin" | "cashier";
+  role: "owner" | "admin" | "cashier" | "tim";
   branch_id: string;
+  is_active: boolean;
 }
 
-const labelRole = { owner: "Owner", admin: "Admin", cashier: "Kasir" } as const;
+const labelRole = { owner: "Owner", admin: "Admin", cashier: "Kasir", tim: "Tim" } as const;
+/** kasir & tim terikat ke satu cabang — lokasi kerja wajib */
+const WAJIB_CABANG = new Set(["cashier", "tim"]);
 
 export function KaryawanPage() {
   const { cabang } = useBranch();
@@ -48,6 +56,12 @@ export function KaryawanPage() {
     queryKey: ["karyawan"],
     queryFn: () => api<Karyawan[]>("/karyawan"),
   });
+  // arsip = karyawan yang sudah keluar; riwayatnya tetap bisa dilihat
+  const { data: arsip = [] } = useQuery({
+    queryKey: ["karyawan", "arsip"],
+    queryFn: () => api<Karyawan[]>("/karyawan?arsip=true"),
+  });
+  const [tab, setTab] = useState<"aktif" | "arsip">("aktif");
   const [form, setForm] = useState<FormState | null>(null);
   // Modal QR karyawan (untuk absensi) + data URL QR yang digenerate
   const [qrFor, setQrFor] = useState<Karyawan | null>(null);
@@ -89,7 +103,7 @@ export function KaryawanPage() {
           email: f.email,
           password: f.password,
           role: f.role,
-          branch_id: f.role === "cashier" ? f.branch_id : f.branch_id || null,
+          branch_id: WAJIB_CABANG.has(f.role) ? f.branch_id : f.branch_id || null,
         },
       }),
     onSuccess: () => {
@@ -101,12 +115,30 @@ export function KaryawanPage() {
   const ubah = useMutation({
     mutationFn: (p: { userId: string; body: Record<string, unknown> }) =>
       api(`/karyawan/${p.userId}`, { method: "PATCH", body: p.body }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["karyawan"] }),
+    onSuccess: () => {
+      setForm(null);
+      queryClient.invalidateQueries({ queryKey: ["karyawan"] });
+    },
   });
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();
-    if (form) tambah.mutate(form);
+    if (!form) return;
+    if (form.id) {
+      ubah.mutate({
+        userId: form.id,
+        body: {
+          nama: form.nama,
+          email: form.email,
+          role: form.role,
+          branch_id: WAJIB_CABANG.has(form.role) ? form.branch_id : form.branch_id || null,
+          is_active: form.is_active,
+          ...(form.password ? { password: form.password } : {}),
+        },
+      });
+    } else {
+      tambah.mutate(form);
+    }
   }
 
   if (isLoading) return <Spinner />;
@@ -117,7 +149,14 @@ export function KaryawanPage() {
         aksi={
           <button
             onClick={() =>
-              setForm({ nama: "", email: "", password: "", role: "cashier", branch_id: cabang[0]?.id ?? "" })
+              setForm({
+                nama: "",
+                email: "",
+                password: "",
+                role: "cashier",
+                branch_id: cabang[0]?.id ?? "",
+                is_active: true,
+              })
             }
             className={btnPrimary}
           >
@@ -127,8 +166,82 @@ export function KaryawanPage() {
       >
         Karyawan
       </PageTitle>
-      <ErrorText error={ubah.error} />
 
+      {/* Karyawan berjalan vs arsip (sudah keluar — riwayat tetap tersimpan) */}
+      <div className="mb-3 flex gap-2">
+        <button
+          onClick={() => setTab("aktif")}
+          className={`rounded-full px-4 py-1.5 text-sm font-medium ${
+            tab === "aktif" ? "bg-orange-600 text-white" : "bg-white text-stone-600 hover:bg-stone-100"
+          }`}
+        >
+          Karyawan ({karyawan?.length ?? 0})
+        </button>
+        <button
+          onClick={() => setTab("arsip")}
+          className={`rounded-full px-4 py-1.5 text-sm font-medium ${
+            tab === "arsip" ? "bg-orange-600 text-white" : "bg-white text-stone-600 hover:bg-stone-100"
+          }`}
+        >
+          🗄 Arsip ({arsip.length})
+        </button>
+      </div>
+
+      {tab === "arsip" ? (
+        <Card className="overflow-x-auto">
+          {arsip.length === 0 ? (
+            <p className="p-6 text-center text-sm text-stone-400">
+              Belum ada karyawan yang diarsipkan.
+            </p>
+          ) : (
+            <table className="w-full">
+              <thead className="border-b border-stone-200 bg-stone-50">
+                <tr>
+                  <th className={thClass}>Nama</th>
+                  <th className={thClass}>Kode</th>
+                  <th className={thClass}>Email</th>
+                  <th className={thClass}>Peran</th>
+                  <th className={thClass}>Diarsipkan</th>
+                  <th className={thClass}></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-stone-100">
+                {arsip.map((k) => (
+                  <tr key={k.user_id} className="text-stone-500">
+                    <td className={`${tdClass} font-medium`}>{k.nama}</td>
+                    <td className={tdClass}>
+                      <span className="font-mono">{k.employee_code ?? "—"}</span>
+                    </td>
+                    <td className={tdClass}>{k.email}</td>
+                    <td className={tdClass}>{labelRole[k.role]}</td>
+                    <td className={tdClass}>
+                      {k.archived_at ? formatTanggalRingkas(k.archived_at) : "—"}
+                    </td>
+                    <td className={`${tdClass} text-right`}>
+                      <div className="flex flex-wrap justify-end gap-x-3 gap-y-1">
+                        <button
+                          onClick={() => setAktivitasFor(k)}
+                          className="text-sm font-medium text-orange-600 hover:underline"
+                        >
+                          Aktivitas
+                        </button>
+                        <button
+                          onClick={() =>
+                            ubah.mutate({ userId: k.user_id, body: { arsip: false } })
+                          }
+                          className="text-sm font-medium text-green-600 hover:underline"
+                        >
+                          ↩ Pulihkan
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </Card>
+      ) : (
       <Card className="overflow-x-auto">
         <table className="w-full">
           <thead className="border-b border-stone-200 bg-stone-50">
@@ -163,46 +276,74 @@ export function KaryawanPage() {
                     {k.is_active ? "Aktif" : "Nonaktif"}
                   </span>
                 </td>
-                <td className={`${tdClass} whitespace-nowrap text-right`}>
-                  {k.employee_code && (
+                <td className={`${tdClass} text-right`}>
+                  <div className="flex flex-wrap justify-end gap-x-3 gap-y-1">
+                    {k.employee_code && (
+                      <button
+                        onClick={() => setQrFor(k)}
+                        className="text-sm font-medium text-orange-600 hover:underline"
+                      >
+                        QR
+                      </button>
+                    )}
                     <button
-                      onClick={() => setQrFor(k)}
+                      onClick={() => setAktivitasFor(k)}
                       className="text-sm font-medium text-orange-600 hover:underline"
                     >
-                      QR
+                      Aktivitas
                     </button>
-                  )}
-                  <button
-                    onClick={() => setAktivitasFor(k)}
-                    className="ml-3 text-sm font-medium text-orange-600 hover:underline"
-                  >
-                    Aktivitas
-                  </button>
-                  <button
-                    onClick={() => {
-                      const pw = prompt(`Password baru untuk ${k.nama} (min 8 karakter):`);
-                      if (pw) ubah.mutate({ userId: k.user_id, body: { password: pw } });
-                    }}
-                    className="ml-3 text-sm font-medium text-orange-600 hover:underline"
-                  >
-                    Reset Password
-                  </button>
-                  <button
-                    onClick={() =>
-                      ubah.mutate({ userId: k.user_id, body: { is_active: !k.is_active } })
-                    }
-                    className="ml-3 text-sm font-medium text-stone-500 hover:underline"
-                  >
-                    {k.is_active ? "Nonaktifkan" : "Aktifkan"}
-                  </button>
+                    {/* Ganti password & status aktif juga ada di dalam form Ubah */}
+                    <button
+                      onClick={() =>
+                        setForm({
+                          id: k.user_id,
+                          nama: k.nama,
+                          email: k.email,
+                          password: "",
+                          role: k.role,
+                          branch_id: k.branch_id ?? "",
+                          is_active: k.is_active,
+                        })
+                      }
+                      className="text-sm font-medium text-orange-600 hover:underline"
+                    >
+                      Ubah
+                    </button>
+                    <button
+                      onClick={() =>
+                        ubah.mutate({ userId: k.user_id, body: { is_active: !k.is_active } })
+                      }
+                      className="text-sm font-medium text-stone-500 hover:underline"
+                    >
+                      {k.is_active ? "Nonaktifkan" : "Aktifkan"}
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (
+                          confirm(
+                            `Arsipkan ${k.nama}? Karyawan keluar dari daftar & tidak bisa login/absen — riwayatnya tetap tersimpan dan bisa dipulihkan dari tab Arsip.`,
+                          )
+                        )
+                          ubah.mutate({ userId: k.user_id, body: { arsip: true } });
+                      }}
+                      className="text-sm font-medium text-red-500 hover:underline"
+                    >
+                      Arsipkan
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </Card>
+      )}
 
-      <Modal open={form !== null} onClose={() => setForm(null)} title="Tambah Karyawan">
+      <Modal
+        open={form !== null}
+        onClose={() => setForm(null)}
+        title={form?.id ? "Ubah Karyawan" : "Tambah Karyawan"}
+      >
         {form && (
           <form onSubmit={onSubmit} className="space-y-3">
             <div>
@@ -225,42 +366,85 @@ export function KaryawanPage() {
               />
             </div>
             <div>
-              <label className="mb-1 block text-sm font-medium">Password (min 8 karakter)</label>
+              <label className="mb-1 block text-sm font-medium">
+                Password (min 8 karakter)
+                {form.id && (
+                  <span className="font-normal text-stone-400">
+                    {" "}
+                    — kosongkan bila tidak diganti
+                  </span>
+                )}
+              </label>
+              {/* minLength diabaikan browser saat kosong & tak required — pas
+                  untuk mode ubah (kosong = password tidak diganti) */}
               <input
-                required
+                required={!form.id}
                 minLength={8}
                 type="password"
                 value={form.password}
                 onChange={(e) => setForm({ ...form, password: e.target.value })}
+                placeholder={form.id ? "••••••••" : undefined}
                 className={inputClass}
               />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="mb-1 block text-sm font-medium">Peran</label>
-                <select
-                  value={form.role}
-                  onChange={(e) => setForm({ ...form, role: e.target.value as FormState["role"] })}
-                  className={inputClass}
-                >
-                  <option value="cashier">Kasir</option>
-                  <option value="admin">Admin</option>
-                  <option value="owner">Owner</option>
-                </select>
+                {/* Central Kitchen hanya punya SATU peran lapangan: Karyawan (tim) */}
+                {cabang.find((b) => b.id === form.branch_id)?.tipe === "central_kitchen" &&
+                form.role !== "owner" &&
+                form.role !== "admin" ? (
+                  <>
+                    <select
+                      value="tim"
+                      onChange={() => setForm({ ...form, role: "tim" })}
+                      className={inputClass}
+                    >
+                      <option value="tim">Karyawan (Central Kitchen)</option>
+                    </select>
+                    <p className="mt-1 text-xs text-stone-400">
+                      Menu karyawan CK: profil, produksi bahan baku, beli bahan baku, bahan
+                      baku.
+                    </p>
+                  </>
+                ) : (
+                  <select
+                    value={form.role}
+                    onChange={(e) =>
+                      setForm({ ...form, role: e.target.value as FormState["role"] })
+                    }
+                    className={inputClass}
+                  >
+                    <option value="cashier">Kasir</option>
+                    <option value="tim">Tim / Karyawan</option>
+                    <option value="admin">Admin</option>
+                    <option value="owner">Owner</option>
+                  </select>
+                )}
               </div>
               {/* Mode Lite: 1 cabang — kasir otomatis ke cabang satu-satunya. */}
               {isPro && (
                 <div>
                   <label className="mb-1 block text-sm font-medium">
-                    Lokasi kerja {form.role === "cashier" ? "(wajib)" : "(opsional)"}
+                    Lokasi kerja {WAJIB_CABANG.has(form.role) ? "(wajib)" : "(opsional)"}
                   </label>
                   <select
                     value={form.branch_id}
-                    onChange={(e) => setForm({ ...form, branch_id: e.target.value })}
+                    onChange={(e) => {
+                      const b = cabang.find((x) => x.id === e.target.value);
+                      // pilih Central Kitchen → peran lapangan otomatis Karyawan (tim)
+                      setForm({
+                        ...form,
+                        branch_id: e.target.value,
+                        ...(b?.tipe === "central_kitchen" && form.role === "cashier"
+                          ? { role: "tim" as const }
+                          : {}),
+                      });
+                    }}
                     className={inputClass}
-                    required={form.role === "cashier"}
+                    required={WAJIB_CABANG.has(form.role)}
                   >
-                    {form.role !== "cashier" && <option value="">Semua lokasi</option>}
+                    {!WAJIB_CABANG.has(form.role) && <option value="">Semua lokasi</option>}
                     {cabang
                       .filter((b) => b.is_active)
                       .map((b) => (
@@ -272,12 +456,29 @@ export function KaryawanPage() {
                 </div>
               )}
             </div>
-            <ErrorText error={tambah.error} />
+            {form.id && (
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={form.is_active}
+                  onChange={(e) => setForm({ ...form, is_active: e.target.checked })}
+                />
+                Akun aktif
+                <span className="text-xs text-stone-400">
+                  (nonaktif = tidak bisa login &amp; absen)
+                </span>
+              </label>
+            )}
+            <ErrorText error={form.id ? ubah.error : tambah.error} />
             <div className="flex justify-end gap-2 pt-2">
               <button type="button" onClick={() => setForm(null)} className={btnSecondary}>
                 Batal
               </button>
-              <button type="submit" disabled={tambah.isPending} className={btnPrimary}>
+              <button
+                type="submit"
+                disabled={tambah.isPending || ubah.isPending}
+                className={btnPrimary}
+              >
                 Simpan
               </button>
             </div>

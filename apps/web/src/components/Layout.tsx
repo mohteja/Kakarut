@@ -46,10 +46,19 @@ export function Layout() {
   const role = auth.user.role;
   const isSuperAdmin = auth.user.is_super_admin;
   const isManajemen = role === "owner" || role === "admin";
+  // Tim: cek stok, lihat menu, profil, penerimaan barang, riwayat transaksi.
+  // Karyawan (tim) di CENTRAL KITCHEN menunya beda: profil, produksi bahan
+  // baku, beli bahan baku, dan bahan baku.
+  const isTim = role === "tim";
+  const timDiCk =
+    isTim &&
+    cabang.find((b) => b.id === auth.user.branch_id)?.tipe === "central_kitchen";
   const namaPerusahaan = auth.company?.nama ?? "Kakarut POS";
   const subJudul = isSuperAdmin
     ? "Platform Super Admin"
-    : `${auth.user.nama} · ${role === "owner" ? "Owner" : role === "admin" ? "Admin" : "Kasir"}`;
+    : `${auth.user.nama} · ${
+        role === "owner" ? "Owner" : role === "admin" ? "Admin" : role === "tim" ? "Tim" : "Kasir"
+      }`;
   // tutup drawer setelah navigasi/aksi di layar mobile
   const tutup = () => setMenuOpen(false);
 
@@ -117,7 +126,7 @@ export function Layout() {
               ))}
           </select>
         )}
-        {!isSuperAdmin && role === "cashier" && auth.branch && (
+        {!isSuperAdmin && (role === "cashier" || isTim) && auth.branch && (
           <div className="mb-4 rounded-lg bg-stone-800 px-3 py-2 text-xs text-stone-300">
             Cabang: <span className="font-semibold text-white">{auth.branch.nama}</span>
           </div>
@@ -146,43 +155,73 @@ export function Layout() {
               <NavLink to="/profil" className={linkClass}>
                 👤 Profil Saya
               </NavLink>
-              <NavLink to="/kasir" className={linkClass}>
-                🧾 Kasir
-              </NavLink>
-              <NavLink to="/kasir/riwayat" className={linkClass}>
-                🕘 Riwayat Transaksi
-              </NavLink>
-              <NavLink to="/kasir/tutup" className={linkClass}>
-                🧮 Tutup Kasir
-              </NavLink>
-              <NavLink to="/menu/lihat" className={linkClass}>
-                🍜 Lihat Menu
-              </NavLink>
-              <NavLink to="/pengaturan/meja" className={linkClass}>
-                🍽 Meja
-              </NavLink>
-              <NavLink to="/stok" className={(s) => `${linkClass(s)} flex items-center gap-2`}>
-                <span>📦 Stok</span>
-                {stokKritis > 0 && (
-                  <span
-                    className={`ml-auto flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full px-1 text-xs font-bold text-white ${adaHabis ? "bg-red-600" : "bg-amber-500"}`}
-                    title={adaHabis ? "Ada bahan habis" : "Ada bahan menipis"}
-                  >
-                    {stokKritis}
-                  </span>
-                )}
-              </NavLink>
-              <NavLink to="/penerimaan" className={(s) => `${linkClass(s)} flex items-center gap-2`}>
-                <span>📥 Penerimaan Barang</span>
-                {kirimanMenunggu > 0 && (
-                  <span className="ml-auto flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-red-600 px-1 text-xs font-bold text-white">
-                    {kirimanMenunggu}
-                  </span>
-                )}
-              </NavLink>
-              <NavLink to="/pengaturan/printer" className={linkClass}>
-                🖨 Printer
-              </NavLink>
+              {/* Karyawan CENTRAL KITCHEN: profil + produksi + beli + bahan baku */}
+              {timDiCk && (
+                <>
+                  <NavLink to="/produksi" className={linkClass}>
+                    🏭 Produksi Bahan Baku
+                  </NavLink>
+                  <NavLink to="/pembelian" className={linkClass}>
+                    🛒 Beli Bahan Baku
+                  </NavLink>
+                  <NavLink to="/bahan" className={linkClass}>
+                    🥩 Bahan Baku
+                  </NavLink>
+                </>
+              )}
+              {!isTim && (
+                <NavLink to="/kasir" className={linkClass}>
+                  🧾 Kasir
+                </NavLink>
+              )}
+              {!timDiCk && (
+                <NavLink to="/kasir/riwayat" className={linkClass}>
+                  🕘 Riwayat Transaksi
+                </NavLink>
+              )}
+              {!isTim && (
+                <NavLink to="/kasir/tutup" className={linkClass}>
+                  🧮 Tutup Kasir
+                </NavLink>
+              )}
+              {!timDiCk && (
+                <NavLink to="/menu/lihat" className={linkClass}>
+                  🍜 Lihat Menu
+                </NavLink>
+              )}
+              {!isTim && (
+                <NavLink to="/pengaturan/meja" className={linkClass}>
+                  🍽 Meja
+                </NavLink>
+              )}
+              {!timDiCk && (
+                <NavLink to="/stok" className={(s) => `${linkClass(s)} flex items-center gap-2`}>
+                  <span>📦 Stok</span>
+                  {stokKritis > 0 && (
+                    <span
+                      className={`ml-auto flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full px-1 text-xs font-bold text-white ${adaHabis ? "bg-red-600" : "bg-amber-500"}`}
+                      title={adaHabis ? "Ada bahan habis" : "Ada bahan menipis"}
+                    >
+                      {stokKritis}
+                    </span>
+                  )}
+                </NavLink>
+              )}
+              {!timDiCk && (
+                <NavLink to="/penerimaan" className={(s) => `${linkClass(s)} flex items-center gap-2`}>
+                  <span>📥 Penerimaan Barang</span>
+                  {kirimanMenunggu > 0 && (
+                    <span className="ml-auto flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-red-600 px-1 text-xs font-bold text-white">
+                      {kirimanMenunggu}
+                    </span>
+                  )}
+                </NavLink>
+              )}
+              {!isTim && (
+                <NavLink to="/pengaturan/printer" className={linkClass}>
+                  🖨 Printer
+                </NavLink>
+              )}
               {isManajemen && (
                 <>
                   <div className="mt-4 mb-1 px-3 text-xs font-semibold uppercase tracking-wide text-stone-500">
@@ -218,12 +257,11 @@ export function Layout() {
                   <NavLink to="/pengaturan/perusahaan" className={linkClass}>
                     🏪 Perusahaan
                   </NavLink>
-                  {/* Multi-lokasi khusus mode Pro — Lite cukup 1 cabang */}
-                  {isPro && (
-                    <NavLink to="/pengaturan/cabang" className={linkClass}>
-                      📍 Cabang
-                    </NavLink>
-                  )}
+                  {/* Lite tetap butuh halaman ini: alamat & struk per cabang
+                      (tambah cabang tetap khusus Pro) */}
+                  <NavLink to="/pengaturan/cabang" className={linkClass}>
+                    📍 Cabang
+                  </NavLink>
                   <NavLink to="/pengaturan/karyawan" className={linkClass}>
                     👥 Karyawan
                   </NavLink>

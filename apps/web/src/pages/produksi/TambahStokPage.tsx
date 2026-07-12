@@ -12,6 +12,7 @@ import {
   tdClass,
   thClass,
 } from "../../components/ui";
+import { useAuth } from "../../context/AuthContext";
 import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah, formatTanggalRingkas, formatWaktu } from "../../lib/format";
@@ -197,6 +198,9 @@ const TEKS: Record<JenisPengadaan, { judul: string; endpoint: string; logJudul: 
  */
 export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
   const t = TEKS[tipe];
+  const { auth } = useAuth();
+  // rekomendasi beli = analitik manajemen; karyawan CK cukup buat faktur
+  const isManajemen = auth?.user.role === "owner" || auth?.user.role === "admin";
   const { branchQuery } = useBranch();
   const [detail, setDetail] = useState<FakturGroup | null>(null);
 
@@ -293,7 +297,7 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
       <PageTitle
         aksi={
           <div className="flex flex-wrap gap-2">
-            {tipe === "beli" && (
+            {tipe === "beli" && isManajemen && (
               <Link to="/pembelian/rekomendasi" className={btnSecondary}>
                 📊 Rekomendasi Beli
               </Link>

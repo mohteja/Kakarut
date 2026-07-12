@@ -54,7 +54,15 @@ export default function App() {
 
   const isSuperAdmin = auth.user.is_super_admin;
   const isManajemen = auth.user.role === "owner" || auth.user.role === "admin";
-  const beranda = isSuperAdmin ? "/superadmin" : isManajemen ? "/dashboard" : "/kasir";
+  // Tim: cek stok, lihat menu, profil, penerimaan barang, riwayat transaksi
+  const isTim = auth.user.role === "tim";
+  const beranda = isSuperAdmin
+    ? "/superadmin"
+    : isManajemen
+      ? "/dashboard"
+      : isTim
+        ? "/profil"
+        : "/kasir";
 
   return (
     <BranchProvider>
@@ -79,31 +87,41 @@ export default function App() {
             <>
               <Route path="/absen" element={<AbsenPage />} />
               <Route path="/profil" element={<ProfilPage />} />
-              <Route path="/kasir" element={<KasirPage />} />
               <Route path="/kasir/riwayat" element={<RiwayatPage />} />
-              <Route path="/kasir/tutup" element={<ShiftPage />} />
               <Route path="/menu/lihat" element={<LihatMenuPage />} />
               <Route path="/stok" element={<StokPage />} />
               <Route path="/penerimaan" element={<PenerimaanPage />} />
               <Route path="/stok/penyesuaian" element={<PenyesuaianPage />} />
               <Route path="/stok/kartu/:ingredientId" element={<KartuStokPage />} />
-              {/* printer & meja = pengaturan kasir → semua peran, termasuk kasir */}
-              <Route path="/pengaturan/printer" element={<PrinterPage />} />
-              <Route path="/pengaturan/meja" element={<MejaPage />} />
-              {isManajemen && (
+              {/* halaman berjualan — bukan untuk peran tim */}
+              {!isTim && (
                 <>
-                  <Route path="/dashboard" element={<DashboardPage />} />
+                  <Route path="/kasir" element={<KasirPage />} />
+                  <Route path="/kasir/tutup" element={<ShiftPage />} />
+                  <Route path="/pengaturan/printer" element={<PrinterPage />} />
+                  <Route path="/pengaturan/meja" element={<MejaPage />} />
+                </>
+              )}
+              {/* Produksi/beli/bahan: manajemen + karyawan Central Kitchen
+                  (server menolak tim non-CK; menu hanya tampil utk tim CK) */}
+              {(isManajemen || isTim) && (
+                <>
                   <Route path="/produksi" element={<ProduksiPage />} />
                   <Route path="/produksi/baru" element={<FakturFormPage tipe="produksi" />} />
                   <Route path="/pembelian" element={<PembelianPage />} />
                   <Route path="/pembelian/baru" element={<FakturFormPage tipe="beli" />} />
+                  <Route path="/bahan" element={<BahanPage />} />
+                </>
+              )}
+              {isManajemen && (
+                <>
+                  <Route path="/dashboard" element={<DashboardPage />} />
                   <Route path="/pembelian/rekomendasi" element={<RekomendasiBeliPage />} />
                   <Route path="/stok/tambah-dari-menu" element={<TambahStokDariMenuPage />} />
                   <Route path="/laporan" element={<LaporanPage />} />
                   <Route path="/laporan/pembelian" element={<LaporanPembelianPage />} />
                   <Route path="/laporan/menu-laris" element={<LaporanMenuLarisPage />} />
                   <Route path="/sampah" element={<TempatSampahPage />} />
-                  <Route path="/bahan" element={<BahanPage />} />
                   <Route path="/member" element={<MemberPage />} />
                   <Route path="/menu" element={<MenuListPage />} />
                   <Route path="/menu/baru" element={<MenuFormPage />} />

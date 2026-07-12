@@ -232,6 +232,27 @@
       "when": 1783857889708,
       "tag": "0032_smart_sphinx",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1783860308817,
+      "tag": "0033_cuddly_may_parker",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1783863829477,
+      "tag": "0034_tan_thunderbird",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1783866553565,
+      "tag": "0035_overjoyed_goliath",
+      "breakpoints": true
     }
   ]
 }

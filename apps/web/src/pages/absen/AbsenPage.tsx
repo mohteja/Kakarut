@@ -7,6 +7,21 @@ import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatWaktu } from "../../lib/format";
 
+/**
+ * Koordinat perangkat (GPS) — untuk validasi radius absen di server. null bila
+ * GPS ditolak/timeout; server yang memutuskan wajib-tidaknya lokasi.
+ */
+function ambilLokasi(): Promise<{ lat: number; lng: number } | null> {
+  return new Promise((resolve) => {
+    if (!navigator.geolocation) return resolve(null);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+      () => resolve(null),
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 },
+    );
+  });
+}
+
 export function AbsenPage() {
   const { branchQuery } = useBranch();
   const queryClient = useQueryClient();
@@ -29,8 +44,13 @@ export function AbsenPage() {
   });
 
   const absen = useMutation({
-    mutationFn: (k: string) =>
-      api<AbsenResult>(`/absensi${branchQuery}`, { method: "POST", body: { kode: k } }),
+    mutationFn: async (k: string) => {
+      const lokasi = await ambilLokasi();
+      return api<AbsenResult>(`/absensi${branchQuery}`, {
+        method: "POST",
+        body: { kode: k, lat: lokasi?.lat ?? null, lng: lokasi?.lng ?? null },
+      });
+    },
     onSuccess: (data) => {
       setHasil(data);
       setKode("");

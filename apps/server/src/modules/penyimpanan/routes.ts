@@ -15,6 +15,7 @@ import {
   pastikanCabang,
   requireRole,
   resolveBranchId,
+  terikatCabang,
   type AppEnv,
 } from "../../middleware/auth";
 
@@ -100,7 +101,7 @@ export const penyimpananRoutes = new Hono<AppEnv>()
     const branchId = body.branch_id
       ? await pastikanCabang(body.branch_id, auth.company_id!)
       : await resolveBranchId(c);
-    if (auth.role === "cashier" && branchId !== auth.branch_id) {
+    if (terikatCabang(auth.role) && branchId !== auth.branch_id) {
       throw new HTTPException(403, { message: "Kasir hanya boleh menambah di cabangnya" });
     }
     const [row] = await db

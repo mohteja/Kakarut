@@ -16,7 +16,12 @@ import {
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 
-export const userRoleEnum = pgEnum("user_role", ["owner", "admin", "cashier"]);
+/**
+ * Peran: owner/admin = manajemen (lintas cabang); cashier = kasir cabang;
+ * tim = anggota tim cabang (cek stok, lihat menu, penerimaan barang, riwayat
+ * transaksi — tanpa kasir). cashier & tim terikat ke satu cabang.
+ */
+export const userRoleEnum = pgEnum("user_role", ["owner", "admin", "cashier", "tim"]);
 export const bahanKategoriEnum = pgEnum("bahan_kategori", ["baso", "minuman", "lain"]);
 export const menuTipeEnum = pgEnum("menu_tipe", ["regular", "paket"]);
 /** jalur pengadaan bahan: diproduksi sendiri vs dibeli jadi */
@@ -119,6 +124,19 @@ export const branches = pgTable(
     centralKitchenId: uuid("central_kitchen_id").references((): AnyPgColumn => branches.id, {
       onDelete: "set null",
     }),
+    /**
+     * Pengaturan struk PER CABANG — alamat/telepon cabang inilah yang tercetak
+     * di struk (perusahaan hanya menyimpan identitas holding/global).
+     */
+    receiptFooter: text("receipt_footer"),
+    receiptShowAlamat: boolean("receipt_show_alamat").notNull().default(true),
+    /**
+     * Titik lokasi cabang (maps) + radius absen: bila lat/lng terisi, absen
+     * karyawan hanya diterima dalam radius ini dari titik cabang.
+     */
+    latitude: numeric("latitude", { precision: 9, scale: 6, mode: "number" }),
+    longitude: numeric("longitude", { precision: 9, scale: 6, mode: "number" }),
+    radiusAbsenM: integer("radius_absen_m").notNull().default(100),
     isActive: boolean("is_active").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -149,11 +167,20 @@ export const memberships = pgTable(
     branchId: uuid("branch_id").references(() => branches.id),
     /** kode karyawan (untuk absensi via kode/QR) — unik per perusahaan, digenerate otomatis */
     employeeCode: text("employee_code"),
+    /**
+     * Arsip karyawan: terisi = keluar dari daftar & tidak bisa login/absen di
+     * perusahaan ini, tapi riwayat (log, faktur, absensi) tetap tersimpan.
+     * Bisa dipulihkan dengan mengosongkan kembali.
+     */
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     uniqueIndex("memberships_user_company_uq").on(t.userId, t.companyId),
-    check("memberships_cashier_branch_ck", sql`${t.role} <> 'cashier' OR ${t.branchId} IS NOT NULL`),
+    // owner/admin boleh lintas cabang; peran lain (kasir, tim) wajib punya
+    // cabang. Ditulis tanpa literal 'tim' agar migrasi aman dijalankan satu
+    // transaksi dengan ALTER TYPE ADD VALUE (nilai enum baru belum bisa dipakai).
+    check("memberships_cashier_branch_ck", sql`${t.role} IN ('owner','admin') OR ${t.branchId} IS NOT NULL`),
     // kode karyawan unik per perusahaan (abaikan yang NULL)
     uniqueIndex("memberships_company_kode_uq")
       .on(t.companyId, t.employeeCode)
