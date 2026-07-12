@@ -41,12 +41,72 @@ interface FormState {
   password: string;
   role: "owner" | "admin" | "cashier" | "tim";
   branch_id: string;
-  is_active: boolean;
 }
 
 const labelRole = { owner: "Owner", admin: "Admin", cashier: "Kasir", tim: "Tim" } as const;
 /** kasir & tim terikat ke satu cabang — lokasi kerja wajib */
 const WAJIB_CABANG = new Set(["cashier", "tim"]);
+
+/**
+ * Dropdown aksi per baris — semua aksi selain QR dikumpulkan di sini agar
+ * tidak terpencet sembarangan (terutama di layar HP).
+ */
+function AksiMenu({
+  items,
+}: {
+  items: { label: string; warna?: string; onClick: () => void }[];
+}) {
+  // Posisi fixed dihitung dari tombol: menu tidak terpotong scroll container
+  // tabel (Card overflow-x-auto memotong dropdown absolute biasa).
+  const [pos, setPos] = useState<{ top?: number; bottom?: number; right: number } | null>(
+    null,
+  );
+  return (
+    <div className="inline-block text-left">
+      <button
+        onClick={(e) => {
+          if (pos) return setPos(null);
+          const r = e.currentTarget.getBoundingClientRect();
+          const right = window.innerWidth - r.right;
+          // dekat dasar layar → menu membuka ke atas agar tetap terlihat
+          setPos(
+            r.bottom + 170 > window.innerHeight
+              ? { bottom: window.innerHeight - r.top + 4, right }
+              : { top: r.bottom + 4, right },
+          );
+        }}
+        aria-label="Aksi"
+        className="rounded-lg border border-stone-300 px-2.5 py-1 text-sm font-medium text-stone-600 hover:bg-stone-100"
+      >
+        ⋯ Aksi
+      </button>
+      {pos && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setPos(null)} aria-hidden />
+          <div
+            className="fixed z-20 w-44 rounded-lg border border-stone-200 bg-white py-1 shadow-lg"
+            style={pos}
+          >
+            {items.map((it) => (
+              <button
+                key={it.label}
+                onClick={() => {
+                  setPos(null);
+                  it.onClick();
+                }}
+                className={`block w-full px-3 py-2 text-left text-sm hover:bg-stone-50 ${
+                  it.warna ?? "text-stone-700"
+                }`}
+              >
+                {it.label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 
 export function KaryawanPage() {
   const { cabang } = useBranch();
@@ -132,7 +192,6 @@ export function KaryawanPage() {
           email: form.email,
           role: form.role,
           branch_id: WAJIB_CABANG.has(form.role) ? form.branch_id : form.branch_id || null,
-          is_active: form.is_active,
           ...(form.password ? { password: form.password } : {}),
         },
       });
@@ -155,7 +214,6 @@ export function KaryawanPage() {
                 password: "",
                 role: "cashier",
                 branch_id: cabang[0]?.id ?? "",
-                is_active: true,
               })
             }
             className={btnPrimary}
@@ -218,22 +276,17 @@ export function KaryawanPage() {
                       {k.archived_at ? formatTanggalRingkas(k.archived_at) : "—"}
                     </td>
                     <td className={`${tdClass} text-right`}>
-                      <div className="flex flex-wrap justify-end gap-x-3 gap-y-1">
-                        <button
-                          onClick={() => setAktivitasFor(k)}
-                          className="text-sm font-medium text-orange-600 hover:underline"
-                        >
-                          Aktivitas
-                        </button>
-                        <button
-                          onClick={() =>
-                            ubah.mutate({ userId: k.user_id, body: { arsip: false } })
-                          }
-                          className="text-sm font-medium text-green-600 hover:underline"
-                        >
-                          ↩ Pulihkan
-                        </button>
-                      </div>
+                      <AksiMenu
+                        items={[
+                          { label: "🗒 Aktivitas", onClick: () => setAktivitasFor(k) },
+                          {
+                            label: "↩ Pulihkan (aktifkan)",
+                            warna: "text-green-600",
+                            onClick: () =>
+                              ubah.mutate({ userId: k.user_id, body: { arsip: false } }),
+                          },
+                        ]}
+                      />
                     </td>
                   </tr>
                 ))}
@@ -251,7 +304,6 @@ export function KaryawanPage() {
               <th className={thClass}>Email</th>
               <th className={thClass}>Peran</th>
               <th className={thClass}>Lokasi kerja</th>
-              <th className={thClass}>Status</th>
               <th className={thClass}></th>
             </tr>
           </thead>
@@ -267,69 +319,47 @@ export function KaryawanPage() {
                 <td className={tdClass}>{k.email}</td>
                 <td className={tdClass}>{labelRole[k.role]}</td>
                 <td className={tdClass}>{k.cabang ?? "Semua"}</td>
-                <td className={tdClass}>
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
-                      k.is_active ? "bg-green-100 text-green-800" : "bg-stone-100 text-stone-500"
-                    }`}
-                  >
-                    {k.is_active ? "Aktif" : "Nonaktif"}
-                  </span>
-                </td>
                 <td className={`${tdClass} text-right`}>
-                  <div className="flex flex-wrap justify-end gap-x-3 gap-y-1">
+                  {/* QR sering dipakai → tetap terlihat; aksi lain masuk dropdown
+                      agar tidak terpencet sembarangan */}
+                  <div className="flex items-center justify-end gap-2">
                     {k.employee_code && (
                       <button
                         onClick={() => setQrFor(k)}
-                        className="text-sm font-medium text-orange-600 hover:underline"
+                        className="rounded-lg border border-orange-200 px-2.5 py-1 text-sm font-medium text-orange-600 hover:bg-orange-50"
                       >
                         QR
                       </button>
                     )}
-                    <button
-                      onClick={() => setAktivitasFor(k)}
-                      className="text-sm font-medium text-orange-600 hover:underline"
-                    >
-                      Aktivitas
-                    </button>
-                    {/* Ganti password & status aktif juga ada di dalam form Ubah */}
-                    <button
-                      onClick={() =>
-                        setForm({
-                          id: k.user_id,
-                          nama: k.nama,
-                          email: k.email,
-                          password: "",
-                          role: k.role,
-                          branch_id: k.branch_id ?? "",
-                          is_active: k.is_active,
-                        })
-                      }
-                      className="text-sm font-medium text-orange-600 hover:underline"
-                    >
-                      Ubah
-                    </button>
-                    <button
-                      onClick={() =>
-                        ubah.mutate({ userId: k.user_id, body: { is_active: !k.is_active } })
-                      }
-                      className="text-sm font-medium text-stone-500 hover:underline"
-                    >
-                      {k.is_active ? "Nonaktifkan" : "Aktifkan"}
-                    </button>
-                    <button
-                      onClick={() => {
-                        if (
-                          confirm(
-                            `Arsipkan ${k.nama}? Karyawan keluar dari daftar & tidak bisa login/absen — riwayatnya tetap tersimpan dan bisa dipulihkan dari tab Arsip.`,
-                          )
-                        )
-                          ubah.mutate({ userId: k.user_id, body: { arsip: true } });
-                      }}
-                      className="text-sm font-medium text-red-500 hover:underline"
-                    >
-                      Arsipkan
-                    </button>
+                    <AksiMenu
+                      items={[
+                        { label: "🗒 Aktivitas", onClick: () => setAktivitasFor(k) },
+                        {
+                          label: "✏️ Ubah",
+                          onClick: () =>
+                            setForm({
+                              id: k.user_id,
+                              nama: k.nama,
+                              email: k.email,
+                              password: "",
+                              role: k.role,
+                              branch_id: k.branch_id ?? "",
+                            }),
+                        },
+                        {
+                          label: "🗄 Arsipkan (nonaktif)",
+                          warna: "text-red-600",
+                          onClick: () => {
+                            if (
+                              confirm(
+                                `Arsipkan ${k.nama}? Karyawan nonaktif — keluar dari daftar & tidak bisa login/absen. Riwayatnya tetap tersimpan dan bisa dipulihkan dari tab Arsip.`,
+                              )
+                            )
+                              ubah.mutate({ userId: k.user_id, body: { arsip: true } });
+                          },
+                        },
+                      ]}
+                    />
                   </div>
                 </td>
               </tr>
@@ -456,19 +486,6 @@ export function KaryawanPage() {
                 </div>
               )}
             </div>
-            {form.id && (
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={form.is_active}
-                  onChange={(e) => setForm({ ...form, is_active: e.target.checked })}
-                />
-                Akun aktif
-                <span className="text-xs text-stone-400">
-                  (nonaktif = tidak bisa login &amp; absen)
-                </span>
-              </label>
-            )}
             <ErrorText error={form.id ? ubah.error : tambah.error} />
             <div className="flex justify-end gap-2 pt-2">
               <button type="button" onClick={() => setForm(null)} className={btnSecondary}>
