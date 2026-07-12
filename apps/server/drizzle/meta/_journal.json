@@ -204,6 +204,13 @@
       "when": 1783832804068,
       "tag": "0028_sweet_sway",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1783837884382,
+      "tag": "0029_bored_zodiak",
+      "breakpoints": true
     }
   ]
 }

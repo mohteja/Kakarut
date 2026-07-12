@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import type { JenisPengadaan, PenyimpananDto } from "@kakarut/shared";
 import { ErrorText, Modal, btnPrimary, btnSecondary, inputClass, tdClass, thClass } from "../../components/ui";
-import { useBranch } from "../../context/BranchContext";
+import { labelCabang, useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah } from "../../lib/format";
 import {
@@ -346,7 +346,7 @@ export function TahapModal({
                     .filter((b) => b.is_active)
                     .map((b) => (
                       <option key={b.id} value={b.id}>
-                        {b.nama}
+                        {labelCabang(b)}
                       </option>
                     ))}
                 </select>
@@ -376,6 +376,13 @@ export function TahapModal({
                 sana saat diterima); sisa tugas tetap di cabang ini.
               </div>
             )}
+            {tujuanCabang === branchId &&
+              cabang.find((b) => b.id === branchId)?.tipe === "central_kitchen" && (
+                <div className="text-xs text-stone-500">
+                  🏭 Ini Central Kitchen — bila barang untuk outlet, pilih cabang 🏪 store
+                  sebagai tujuan.
+                </div>
+              )}
           </div>
         )}
 

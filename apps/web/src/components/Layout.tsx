@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { useBranch } from "../context/BranchContext";
+import { labelCabang, useBranch } from "../context/BranchContext";
 import { api } from "../lib/api";
 
 const linkClass = ({ isActive }: { isActive: boolean }) =>
@@ -109,7 +109,7 @@ export function Layout() {
               .filter((b) => b.is_active)
               .map((b) => (
                 <option key={b.id} value={b.id}>
-                  Cabang: {b.nama}
+                  {labelCabang(b)}
                 </option>
               ))}
           </select>

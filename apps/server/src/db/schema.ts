@@ -91,6 +91,13 @@ export const companies = pgTable("companies", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+/**
+ * Jenis cabang: 'store' = outlet penjualan; 'central_kitchen' = dapur pusat
+ * yang memproses/produksi bahan lalu MENGIRIM ke cabang store (lewat tujuan
+ * kirim pada tahap faktur).
+ */
+export const branchTipeEnum = pgEnum("branch_tipe", ["store", "central_kitchen"]);
+
 export const branches = pgTable(
   "branches",
   {
@@ -101,6 +108,7 @@ export const branches = pgTable(
     nama: text("nama").notNull(),
     alamat: text("alamat"),
     telepon: text("telepon"),
+    tipe: branchTipeEnum("tipe").notNull().default("store"),
     isActive: boolean("is_active").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
