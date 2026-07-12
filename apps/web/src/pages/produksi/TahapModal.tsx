@@ -50,26 +50,44 @@ export function TahapModal({
 
   const label = AKSI_TAHAP[tipe].find((a) => a.ke === ke)?.label ?? ke;
   const keStok = ke === "dikonfirmasi";
+  // RAB → diproses hanya INFO (dan pencatatan dana cair) — jumlah barang belum
+  // berubah; penyesuaian barang dilakukan saat proses → selesai.
+  const keProses = ke === "dikerjakan";
+  const keSelesai = ke === "menunggu";
 
   // Dana cair: ditanyakan saat ada baris terpilih yang MENINGGALKAN tahap RAB
   // — cair penuh sesuai RAB bagian yang maju, atau sebagian (input nominal).
   const [danaMode, setDanaMode] = useState<"penuh" | "sebagian">("penuh");
   const [danaNominal, setDanaNominal] = useState("");
 
-  const items = bisaMaju
-    .filter((r) => pilih[r.id]?.aktif)
-    .map((r) => ({ id: r.id, qty: Number(pilih[r.id]?.qty) }));
-  const adaInvalid = bisaMaju.some((r) => {
-    const p = pilih[r.id];
-    if (!p?.aktif) return false;
-    const q = Number(p.qty);
-    return !Number.isFinite(q) || q <= 0 || q > r.qty + 1e-9;
-  });
+  // Realisasi biaya saat proses → selesai: sesuai rencana, atau tidak —
+  // selisihnya wajib dijelaskan (kurang: dari mana; lebih: di siapa).
+  const [sesuaiRencana, setSesuaiRencana] = useState(true);
+  const [realisasiTeks, setRealisasiTeks] = useState("");
+  const [selisihCatatan, setSelisihCatatan] = useState("");
+
+  // Tahap "diproses": semua baris ikut penuh (read-only). Tahap lain: sesuai
+  // centang + qty maju yang diisi.
+  const items = keProses
+    ? bisaMaju.map((r) => ({ id: r.id, qty: r.qty }))
+    : bisaMaju
+        .filter((r) => pilih[r.id]?.aktif)
+        .map((r) => ({ id: r.id, qty: Number(pilih[r.id]?.qty) }));
+  const adaInvalid =
+    !keProses &&
+    bisaMaju.some((r) => {
+      const p = pilih[r.id];
+      if (!p?.aktif) return false;
+      const q = Number(p.qty);
+      return !Number.isFinite(q) || q <= 0 || q > r.qty + 1e-9;
+    });
   // baris tak dicentang atau qty parsial → jadi sisa tugas di tahap lama
-  const sisaTugas = bisaMaju.filter((r) => {
-    const p = pilih[r.id];
-    return !p?.aktif || Number(p.qty) < r.qty - 1e-9;
-  }).length;
+  const sisaTugas = keProses
+    ? 0
+    : bisaMaju.filter((r) => {
+        const p = pilih[r.id];
+        return !p?.aktif || Number(p.qty) < r.qty - 1e-9;
+      }).length;
 
   // RAB bagian yang maju dari baris tahap "rencana" (prorata sesuai qty maju,
   // sama dengan hitungan split di server) — dasar default "cair penuh".
@@ -88,11 +106,29 @@ export function TahapModal({
   const danaInvalid =
     tanyaDana && danaMode === "sebagian" && (!Number.isFinite(danaCair) || danaCair! < 0);
 
+  // Realisasi vs dana faktur (termasuk pencairan yang dikirim bersamaan):
+  // kurang → wajib jelaskan dari mana uangnya; lebih → di siapa sisa uangnya.
+  const danaFaktur = grup.danaCair + (danaCair != null && !danaInvalid ? danaCair : 0);
+  const realisasi = keSelesai && !sesuaiRencana ? Number(realisasiTeks) : null;
+  const realisasiInvalid =
+    realisasi != null && (!Number.isFinite(realisasi) || realisasi < 0);
+  const selisih = realisasi != null && !realisasiInvalid ? realisasi - danaFaktur : 0;
+  const butuhCatatanSelisih =
+    realisasi != null && !realisasiInvalid && Math.abs(selisih) >= 0.5;
+  const catatanSelisihKosong = butuhCatatanSelisih && selisihCatatan.trim().length === 0;
+
   const simpan = useMutation({
     mutationFn: () =>
       api(`${endpoint}/tahap/${grup.fakturId}`, {
         method: "POST",
-        body: { ke, items, ...(danaCair != null ? { dana_cair: danaCair } : {}) },
+        body: {
+          ke,
+          items,
+          ...(danaCair != null ? { dana_cair: danaCair } : {}),
+          ...(realisasi != null && !realisasiInvalid
+            ? { realisasi, selisih_catatan: selisihCatatan.trim() || null }
+            : {}),
+        },
       }),
     onSuccess: () => {
       for (const key of [endpoint, "stok", "laporan", "rekomendasi"]) {
@@ -109,11 +145,19 @@ export function TahapModal({
   return (
     <Modal open onClose={onClose} title={`Ubah tahap → ${label}`}>
       <div className="space-y-3">
-        <p className="text-sm text-stone-500">
-          Centang baris yang benar-benar ikut maju. Bila barang baru sebagian, kecilkan{" "}
-          <b>qty maju</b> — sisanya tetap di tahap sekarang sebagai <b>tugas</b> yang masih
-          harus dikerjakan.
-        </p>
+        {keProses ? (
+          <p className="text-sm text-stone-500">
+            Faktur ditandai <b>sedang diproses</b> — jumlah barang <b>belum berubah</b>,
+            hanya info proses + pencatatan dana yang cair. Penyesuaian barang dilakukan
+            nanti saat proses → selesai.
+          </p>
+        ) : (
+          <p className="text-sm text-stone-500">
+            Centang baris yang benar-benar ikut maju. Bila barang baru sebagian, kecilkan{" "}
+            <b>qty maju</b> — sisanya tetap di tahap sekarang sebagai <b>tugas</b> yang
+            masih harus dikerjakan.
+          </p>
+        )}
 
         {keStok && (
           <div className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
@@ -131,10 +175,10 @@ export function TahapModal({
             <table className="w-full text-sm">
               <thead className="border-b border-stone-200 bg-stone-50">
                 <tr>
-                  <th className={thClass}></th>
+                  {!keProses && <th className={thClass}></th>}
                   <th className={thClass}>Bahan</th>
                   <th className={thClass}>Tahap sekarang</th>
-                  <th className={`${thClass} text-right`}>Qty maju</th>
+                  <th className={`${thClass} text-right`}>{keProses ? "Qty" : "Qty maju"}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-stone-100">
@@ -142,18 +186,22 @@ export function TahapModal({
                   const p = pilih[r.id];
                   const q = Number(p?.qty);
                   const salah =
-                    p?.aktif && (!Number.isFinite(q) || q <= 0 || q > r.qty + 1e-9);
+                    !keProses &&
+                    p?.aktif &&
+                    (!Number.isFinite(q) || q <= 0 || q > r.qty + 1e-9);
                   const sisa = p?.aktif && Number.isFinite(q) ? r.qty - q : r.qty;
                   return (
-                    <tr key={r.id} className={p?.aktif ? "" : "opacity-50"}>
-                      <td className={tdClass}>
-                        <input
-                          type="checkbox"
-                          checked={p?.aktif ?? false}
-                          onChange={(e) => ubah(r.id, { aktif: e.target.checked })}
-                          aria-label={`Ikutkan ${r.bahan}`}
-                        />
-                      </td>
+                    <tr key={r.id} className={p?.aktif || keProses ? "" : "opacity-50"}>
+                      {!keProses && (
+                        <td className={tdClass}>
+                          <input
+                            type="checkbox"
+                            checked={p?.aktif ?? false}
+                            onChange={(e) => ubah(r.id, { aktif: e.target.checked })}
+                            aria-label={`Ikutkan ${r.bahan}`}
+                          />
+                        </td>
+                      )}
                       <td className={`${tdClass} font-medium`}>{r.bahan}</td>
                       <td className={tdClass}>
                         <span
@@ -163,31 +211,39 @@ export function TahapModal({
                         </span>
                       </td>
                       <td className={`${tdClass} text-right`}>
-                        <div className="flex items-center justify-end gap-1.5">
-                          <input
-                            type="number"
-                            min="0"
-                            max={r.qty}
-                            step="any"
-                            value={p?.qty ?? ""}
-                            disabled={!p?.aktif}
-                            onChange={(e) => ubah(r.id, { qty: e.target.value })}
-                            aria-label={`Qty maju ${r.bahan}`}
-                            className={`w-24 rounded-lg border px-2 py-1 text-right ${salah ? "border-red-400" : "border-stone-300"}`}
-                          />
-                          <span className="text-xs text-stone-400">
-                            / {formatAngka(r.qty)} {r.satuan}
+                        {keProses ? (
+                          <span>
+                            {formatAngka(r.qty)} {r.satuan}
                           </span>
-                        </div>
-                        {p?.aktif && sisa > 1e-9 && !salah && (
-                          <div className="text-right text-[11px] text-amber-600">
-                            sisa {formatAngka(sisa)} {r.satuan} tetap jadi tugas
-                          </div>
-                        )}
-                        {salah && (
-                          <div className="text-right text-[11px] text-red-600">
-                            qty harus 0&lt;qty≤{formatAngka(r.qty)}
-                          </div>
+                        ) : (
+                          <>
+                            <div className="flex items-center justify-end gap-1.5">
+                              <input
+                                type="number"
+                                min="0"
+                                max={r.qty}
+                                step="any"
+                                value={p?.qty ?? ""}
+                                disabled={!p?.aktif}
+                                onChange={(e) => ubah(r.id, { qty: e.target.value })}
+                                aria-label={`Qty maju ${r.bahan}`}
+                                className={`w-24 rounded-lg border px-2 py-1 text-right ${salah ? "border-red-400" : "border-stone-300"}`}
+                              />
+                              <span className="text-xs text-stone-400">
+                                / {formatAngka(r.qty)} {r.satuan}
+                              </span>
+                            </div>
+                            {p?.aktif && sisa > 1e-9 && !salah && (
+                              <div className="text-right text-[11px] text-amber-600">
+                                sisa {formatAngka(sisa)} {r.satuan} tetap jadi tugas
+                              </div>
+                            )}
+                            {salah && (
+                              <div className="text-right text-[11px] text-red-600">
+                                qty harus 0&lt;qty≤{formatAngka(r.qty)}
+                              </div>
+                            )}
+                          </>
                         )}
                       </td>
                     </tr>
@@ -251,6 +307,77 @@ export function TahapModal({
           </div>
         )}
 
+        {keSelesai && (
+          <div className="space-y-2 rounded-lg border border-stone-200 p-3">
+            <div className="text-sm font-semibold text-stone-700">
+              🧾 Realisasi biaya — selesai sesuai rencana?
+            </div>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="radio"
+                name="realisasi"
+                checked={sesuaiRencana}
+                onChange={() => setSesuaiRencana(true)}
+              />
+              <span>
+                Ya, <b>sesuai rencana</b> — biaya pas dengan dana faktur (
+                {formatRupiah(danaFaktur)})
+              </span>
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="radio"
+                name="realisasi"
+                checked={!sesuaiRencana}
+                onChange={() => setSesuaiRencana(false)}
+              />
+              <span>Tidak — biaya riil:</span>
+              <input
+                type="number"
+                min="0"
+                step="any"
+                value={realisasiTeks}
+                onFocus={() => setSesuaiRencana(false)}
+                onChange={(e) => setRealisasiTeks(e.target.value)}
+                placeholder="Rp"
+                aria-label="Biaya riil realisasi"
+                className={`w-36 rounded-lg border px-2 py-1 text-right text-sm ${realisasiInvalid ? "border-red-400" : "border-stone-300"}`}
+              />
+            </label>
+            {realisasi != null && !realisasiInvalid && selisih > 0.49 && (
+              <div className="space-y-1">
+                <label className="block text-sm font-medium text-red-700">
+                  Kurang {formatRupiah(selisih)} — dari mana uangnya?
+                </label>
+                <input
+                  value={selisihCatatan}
+                  onChange={(e) => setSelisihCatatan(e.target.value)}
+                  placeholder="mis. talangan kasir Budi / kas toko"
+                  aria-label="Sumber dana tambahan"
+                  className={`w-full rounded-lg border px-2 py-1 text-sm ${catatanSelisihKosong ? "border-red-400" : "border-stone-300"}`}
+                />
+              </div>
+            )}
+            {realisasi != null && !realisasiInvalid && selisih < -0.49 && (
+              <div className="space-y-1">
+                <label className="block text-sm font-medium text-emerald-700">
+                  Lebih {formatRupiah(-selisih)} — di siapa sisa uangnya?
+                </label>
+                <input
+                  value={selisihCatatan}
+                  onChange={(e) => setSelisihCatatan(e.target.value)}
+                  placeholder="mis. dipegang Budi / dikembalikan ke kas"
+                  aria-label="Pemegang sisa dana"
+                  className={`w-full rounded-lg border px-2 py-1 text-sm ${catatanSelisihKosong ? "border-red-400" : "border-stone-300"}`}
+                />
+              </div>
+            )}
+            {realisasi != null && !realisasiInvalid && Math.abs(selisih) <= 0.49 && (
+              <div className="text-xs text-stone-500">Pas dengan dana faktur — tidak ada selisih.</div>
+            )}
+          </div>
+        )}
+
         <div className="rounded-lg bg-stone-50 px-3 py-2 text-sm text-stone-600">
           <b>{items.length}</b> baris maju → {label}
           {sisaTugas > 0 && (
@@ -272,7 +399,15 @@ export function TahapModal({
           </button>
           <button
             onClick={() => simpan.mutate()}
-            disabled={simpan.isPending || items.length === 0 || adaInvalid || danaInvalid}
+            disabled={
+              simpan.isPending ||
+              items.length === 0 ||
+              adaInvalid ||
+              danaInvalid ||
+              realisasiInvalid ||
+              catatanSelisihKosong ||
+              (keSelesai && !sesuaiRencana && realisasiTeks.trim() === "")
+            }
             className={btnPrimary}
           >
             {simpan.isPending ? "Menyimpan…" : `Terapkan (${items.length} baris)`}

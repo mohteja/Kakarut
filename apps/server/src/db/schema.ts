@@ -55,6 +55,13 @@ export const metodeBayarEnum = pgEnum("metode_bayar", ["tunai", "qris", "transfe
 /** jenis cap absensi karyawan: masuk (datang) vs keluar (pulang) */
 export const attendanceTipeEnum = pgEnum("attendance_tipe", ["masuk", "keluar"]);
 
+/**
+ * Jenis entri buku dana faktur: 'cair' = pencairan RAB; 'tambahan' = dana
+ * ekstra saat realisasi lebih besar (catatan: dari mana uangnya); 'kembali' =
+ * sisa dana saat realisasi lebih kecil (catatan: di siapa uangnya).
+ */
+export const danaTipeEnum = pgEnum("dana_tipe", ["cair", "tambahan", "kembali"]);
+
 // ===== Tenancy & identitas =====
 
 export const companies = pgTable("companies", {
@@ -618,6 +625,7 @@ export const fakturDana = pgTable(
       .references(() => branches.id),
     /** faktur virtual: productions.faktur_id (tanpa FK — faktur bukan tabel) */
     fakturId: uuid("faktur_id").notNull(),
+    tipe: danaTipeEnum("tipe").notNull().default("cair"),
     nominal: numeric("nominal", { precision: 14, scale: 2, mode: "number" }).notNull(),
     catatan: text("catatan"),
     userId: uuid("user_id").references(() => users.id),

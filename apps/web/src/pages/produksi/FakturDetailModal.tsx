@@ -13,6 +13,16 @@ interface Karyawan {
   is_active: boolean;
 }
 
+/** Entri buku dana faktur: pencairan RAB, dana tambahan, atau sisa kembali. */
+interface DanaEntri {
+  id: string;
+  tipe: "cair" | "tambahan" | "kembali";
+  nominal: number;
+  catatan: string | null;
+  oleh: string | null;
+  waktu: string;
+}
+
 /**
  * Detail satu faktur pembelian/produksi: lihat metadata + item, ubah metadata,
  * atau hapus (Tempat Sampah). Ubah & hapus butuh password akun.
@@ -57,6 +67,12 @@ export function FakturDetailModal({
     queryKey: ["karyawan"],
     queryFn: () => api<Karyawan[]>("/karyawan"),
     enabled: mode === "ubah" && tipe === "produksi",
+  });
+  const { data: dana } = useQuery({
+    queryKey: [endpoint, "dana", grup.fakturId],
+    queryFn: () =>
+      api<{ rows: DanaEntri[]; total: number }>(`${endpoint}/dana/${grup.fakturId}`),
+    enabled: mode === "lihat" && !!grup.fakturId && grup.danaCair !== 0,
   });
 
   function selesai() {
@@ -162,6 +178,36 @@ export function FakturDetailModal({
               </>
             )}
           </dl>
+
+          {dana && dana.rows.length > 0 && (
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50/40 p-2 text-sm">
+              <div className="mb-1 font-semibold text-stone-700">💸 Buku dana faktur</div>
+              <ul className="space-y-0.5">
+                {dana.rows.map((d) => (
+                  <li key={d.id} className="flex justify-between gap-2">
+                    <span className="min-w-0">
+                      {d.tipe === "cair"
+                        ? "💸 Cair"
+                        : d.tipe === "tambahan"
+                          ? "➕ Tambahan"
+                          : "↩ Kembali"}
+                      {d.catatan && <span className="text-stone-500"> — {d.catatan}</span>}
+                      {d.oleh && <span className="text-xs text-stone-400"> · {d.oleh}</span>}
+                    </span>
+                    <span
+                      className={`shrink-0 font-medium ${d.tipe === "kembali" ? "text-amber-700" : "text-emerald-700"}`}
+                    >
+                      {d.tipe === "kembali" ? "−" : "+"}
+                      {formatRupiah(d.nominal)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <div className="mt-1 border-t border-emerald-200 pt-1 text-right text-xs font-semibold text-emerald-800">
+                Dana efektif: {formatRupiah(dana.total)}
+              </div>
+            </div>
+          )}
 
           <div className="rounded-lg border border-stone-200">
             <table className="w-full text-sm">

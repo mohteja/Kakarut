@@ -1227,6 +1227,44 @@ cek "dana cair negatif → 400" "V == 400" \
 cek "faktur tanpa pencairan → dana_cair 0" "abs(V) < 0.001" \
   "$(api "$OWNER" GET "/pembelian?per_page=500" | jq --arg f "$FK42_ID" '[.rows[] | select(.faktur_id==$f)][0].dana_cair')"
 
+echo "== 44. Realisasi selesai: sesuai rencana / kurang (tambahan) / lebih (kembali) =="
+# A) realisasi LEBIH BESAR dari dana → entri 'tambahan' (dari mana uangnya)
+FK44=$(api "$OWNER" POST /pembelian/faktur "{\"items\":[{\"ingredient_id\":\"$ING42A\",\"mode\":\"pcs\",\"jumlah\":10,\"total_harga\":50000},{\"ingredient_id\":\"$ING42B\",\"mode\":\"pcs\",\"jumlah\":8,\"total_harga\":40000}]}")
+FK44_ID=$(echo "$FK44" | jq -r .faktur_id)
+api "$OWNER" POST "/pembelian/tahap/$FK44_ID" '{"ke":"dikerjakan","dana_cair":90000}' > /dev/null
+ID44A=$(api "$OWNER" GET "/pembelian?per_page=500" | jq -r --arg f "$FK44_ID" --arg i "$ING42A" '[.rows[] | select(.faktur_id==$f and .ingredient_id==$i)][0].id')
+api "$OWNER" POST "/pembelian/tahap/$FK44_ID" "{\"ke\":\"menunggu\",\"items\":[{\"id\":\"$ID44A\",\"qty\":10}],\"realisasi\":100000,\"selisih_catatan\":\"talangan kasir Budi\"}" > /dev/null
+DANA44=$(api "$OWNER" GET "/pembelian/dana/$FK44_ID")
+cek "kurang uang → entri 'tambahan' 10000 dgn catatan sumber" "V == 1" \
+  "$(echo "$DANA44" | jq '([.rows[] | select(.tipe=="tambahan" and .nominal==10000 and .catatan=="talangan kasir Budi")] | length == 1) | if . then 1 else 0 end')"
+cek "dana efektif = realisasi (100000)" "abs(V - 100000) < 0.5" "$(echo "$DANA44" | jq .total)"
+cek "item belum semua → A dikirim, B masih diproses (selesai sebagian)" "V == 1" \
+  "$(api "$OWNER" GET "/pembelian?per_page=500" | jq --arg f "$FK44_ID" '([.rows[] | select(.faktur_id==$f)] | ([.[] | select(.status=="menunggu")] | length == 1) and ([.[] | select(.status=="dikerjakan")] | length == 1)) | if . then 1 else 0 end')"
+
+# B) realisasi LEBIH KECIL → entri 'kembali' (di siapa sisa uangnya)
+FK44B=$(api "$OWNER" POST /pembelian/faktur "{\"items\":[{\"ingredient_id\":\"$ING42A\",\"mode\":\"pcs\",\"jumlah\":10,\"total_harga\":50000}]}")
+FK44B_ID=$(echo "$FK44B" | jq -r .faktur_id)
+api "$OWNER" POST "/pembelian/tahap/$FK44B_ID" '{"ke":"dikerjakan","dana_cair":50000}' > /dev/null
+api "$OWNER" POST "/pembelian/tahap/$FK44B_ID" '{"ke":"menunggu","realisasi":42000,"selisih_catatan":"sisa dipegang Budi"}' > /dev/null
+DANA44B=$(api "$OWNER" GET "/pembelian/dana/$FK44B_ID")
+cek "lebih uang → entri 'kembali' 8000 dgn catatan pemegang" "V == 1" \
+  "$(echo "$DANA44B" | jq '([.rows[] | select(.tipe=="kembali" and .nominal==8000 and .catatan=="sisa dipegang Budi")] | length == 1) | if . then 1 else 0 end')"
+cek "dana efektif turun ke realisasi (42000)" "abs(V - 42000) < 0.5" "$(echo "$DANA44B" | jq .total)"
+cek "list: dana_cair efektif ikut turun (42000)" "abs(V - 42000) < 0.5" \
+  "$(api "$OWNER" GET "/pembelian?per_page=500" | jq --arg f "$FK44B_ID" '[.rows[] | select(.faktur_id==$f)][0].dana_cair')"
+
+# C) realisasi PAS → tidak ada entri selisih (sesuai rencana)
+FK44C=$(api "$OWNER" POST /pembelian/faktur "{\"items\":[{\"ingredient_id\":\"$ING42A\",\"mode\":\"pcs\",\"jumlah\":5,\"total_harga\":25000}]}")
+FK44C_ID=$(echo "$FK44C" | jq -r .faktur_id)
+api "$OWNER" POST "/pembelian/tahap/$FK44C_ID" '{"ke":"dikerjakan","dana_cair":25000}' > /dev/null
+api "$OWNER" POST "/pembelian/tahap/$FK44C_ID" '{"ke":"menunggu","realisasi":25000}' > /dev/null
+cek "sesuai rencana → hanya 1 entri (cair), tanpa selisih" "V == 1" \
+  "$(api "$OWNER" GET "/pembelian/dana/$FK44C_ID" | jq '((.rows | length) == 1 and .rows[0].tipe == "cair" and (.total == 25000)) | if . then 1 else 0 end')"
+
+# D) penjaga: buku dana faktur tak dikenal → 404
+cek "GET dana faktur tak dikenal → 404" "V == 404" \
+  "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/pembelian/dana/00000000-0000-4000-8000-000000000000" -H "Authorization: Bearer $OWNER")"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]
