@@ -5,7 +5,7 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { db } from "../../db/client";
 import { ingredients, productions, storageLocations, suppliers } from "../../db/schema";
-import { resolveBranchId, type AppEnv } from "../../middleware/auth";
+import { resolveBranchId, terikatCabang, type AppEnv } from "../../middleware/auth";
 import { catatLogFaktur } from "../produksi/log";
 
 const TolakBody = z.object({ alasan: z.string().trim().max(300).nullish() });
@@ -27,7 +27,7 @@ function kondisiFaktur(c: Context<AppEnv>, fakturId: string) {
     eq(productions.tipe, "beli" as const),
     isNull(productions.deletedAt),
   ];
-  if (auth.role === "cashier" && auth.branch_id) {
+  if (terikatCabang(auth.role) && auth.branch_id) {
     conds.push(eq(productions.branchId, auth.branch_id));
   }
   return conds;

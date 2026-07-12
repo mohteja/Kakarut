@@ -27,6 +27,10 @@ interface FormState {
   /** struk per cabang — alamat/telepon CABANG inilah yang tercetak */
   receipt_footer: string;
   receipt_show_alamat: boolean;
+  /** titik maps + radius absen (m) — absen hanya diterima dalam radius */
+  latitude: string;
+  longitude: string;
+  radius_absen_m: string;
 }
 
 export function CabangPage() {
@@ -45,6 +49,9 @@ export function CabangPage() {
         central_kitchen_id: f.tipe === "store" && f.central_kitchen_id ? f.central_kitchen_id : null,
         receipt_footer: f.receipt_footer || null,
         receipt_show_alamat: f.receipt_show_alamat,
+        latitude: f.latitude ? Number(f.latitude) : null,
+        longitude: f.longitude ? Number(f.longitude) : null,
+        radius_absen_m: Math.max(10, Number(f.radius_absen_m) || 100),
       };
       return f.id
         ? api(`/cabang/${f.id}`, { method: "PATCH", body })
@@ -86,6 +93,9 @@ export function CabangPage() {
                   central_kitchen_id: daftarCk.length === 1 ? daftarCk[0].id : "",
                   receipt_footer: "",
                   receipt_show_alamat: true,
+                  latitude: "",
+                  longitude: "",
+                  radius_absen_m: "100",
                 })
               }
               className={btnPrimary}
@@ -180,6 +190,9 @@ export function CabangPage() {
                         central_kitchen_id: b.central_kitchen_id ?? "",
                         receipt_footer: b.receipt_footer ?? "",
                         receipt_show_alamat: b.receipt_show_alamat,
+                        latitude: b.latitude != null ? String(b.latitude) : "",
+                        longitude: b.longitude != null ? String(b.longitude) : "",
+                        radius_absen_m: String(b.radius_absen_m ?? 100),
                       })
                     }
                     className="text-sm font-medium text-orange-600 hover:underline"
@@ -307,6 +320,82 @@ export function CabangPage() {
                 </p>
               </div>
             )}
+            {/* Titik maps + radius absen — berlaku semua tipe (kantor pun absen) */}
+            <div className="rounded-lg border border-stone-200 p-3">
+              <div className="mb-2 flex items-center justify-between">
+                <div className="text-sm font-semibold text-stone-700">📍 Lokasi &amp; radius absen</div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.geolocation?.getCurrentPosition(
+                      (pos) =>
+                        setForm((f) =>
+                          f
+                            ? {
+                                ...f,
+                                latitude: pos.coords.latitude.toFixed(6),
+                                longitude: pos.coords.longitude.toFixed(6),
+                              }
+                            : f,
+                        ),
+                      () => alert("Gagal membaca lokasi — izinkan akses GPS di browser."),
+                      { enableHighAccuracy: true, timeout: 10000 },
+                    );
+                  }}
+                  className="rounded-lg border border-stone-300 px-2 py-1 text-xs font-medium text-stone-600 hover:bg-stone-100"
+                >
+                  🎯 Pakai lokasi saya
+                </button>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-stone-500">Latitude</label>
+                  <input
+                    value={form.latitude}
+                    onChange={(e) => setForm({ ...form, latitude: e.target.value })}
+                    placeholder="-6.200000"
+                    inputMode="decimal"
+                    className={inputClass}
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-stone-500">Longitude</label>
+                  <input
+                    value={form.longitude}
+                    onChange={(e) => setForm({ ...form, longitude: e.target.value })}
+                    placeholder="106.816666"
+                    inputMode="decimal"
+                    className={inputClass}
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-stone-500">Radius (m)</label>
+                  <input
+                    value={form.radius_absen_m}
+                    onChange={(e) => setForm({ ...form, radius_absen_m: e.target.value })}
+                    type="number"
+                    min={10}
+                    max={10000}
+                    className={inputClass}
+                  />
+                </div>
+              </div>
+              {form.latitude && form.longitude && (
+                <a
+                  href={`https://maps.google.com/?q=${form.latitude},${form.longitude}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-1 inline-block text-xs font-medium text-orange-600 hover:underline"
+                >
+                  🗺 Cek titik di Google Maps
+                </a>
+              )}
+              <p className="mt-1 text-xs text-stone-400">
+                Bila titik diisi, karyawan hanya bisa <b>absen dalam radius</b> ini dari
+                cabang (perangkat wajib mengizinkan GPS). Kosongkan untuk absen tanpa
+                pembatasan lokasi.
+              </p>
+            </div>
             <ErrorText error={simpan.error} />
             <div className="flex justify-end gap-2 pt-2">
               <button type="button" onClick={() => setForm(null)} className={btnSecondary}>

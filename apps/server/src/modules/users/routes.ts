@@ -13,14 +13,17 @@ const KaryawanBody = z.object({
   nama: z.string().trim().min(1),
   email: z.string().trim().toLowerCase(),
   password: z.string().min(8, "password minimal 8 karakter"),
-  role: z.enum(["owner", "admin", "cashier"]),
+  role: z.enum(["owner", "admin", "cashier", "tim"]),
   branch_id: z.string().uuid().nullish(),
 });
+
+/** kasir & tim terikat ke satu cabang — wajib punya lokasi kerja */
+const WAJIB_CABANG = new Set(["cashier", "tim"]);
 
 const PatchKaryawanBody = z.object({
   nama: z.string().trim().min(1).optional(),
   email: z.string().trim().toLowerCase().email().optional(),
-  role: z.enum(["owner", "admin", "cashier"]).optional(),
+  role: z.enum(["owner", "admin", "cashier", "tim"]).optional(),
   branch_id: z.string().uuid().nullish().optional(),
   is_active: z.boolean().optional(),
   password: z.string().min(8).optional(),
@@ -70,9 +73,9 @@ export const karyawanRoutes = new Hono<AppEnv>()
     if (body.role === "owner" && auth.role !== "owner") {
       throw new HTTPException(403, { message: "Hanya owner yang boleh menambah owner" });
     }
-    if (body.role === "cashier") {
+    if (WAJIB_CABANG.has(body.role)) {
       if (!body.branch_id) {
-        throw new HTTPException(400, { message: "Kasir wajib punya cabang" });
+        throw new HTTPException(400, { message: "Kasir/Tim wajib punya cabang" });
       }
       await pastikanCabangMilikPerusahaan(body.branch_id, auth.company_id!);
     }
@@ -101,7 +104,7 @@ export const karyawanRoutes = new Hono<AppEnv>()
             userId: user.id,
             companyId: auth.company_id!,
             role: body.role,
-            branchId: body.role === "cashier" ? body.branch_id : (body.branch_id ?? null),
+            branchId: WAJIB_CABANG.has(body.role) ? body.branch_id : (body.branch_id ?? null),
             employeeCode,
           });
           return { user_id: user.id, email: user.email, nama: user.nama, role: body.role, employee_code: employeeCode };
@@ -191,8 +194,8 @@ export const karyawanRoutes = new Hono<AppEnv>()
     const targetRole = body.role ?? member.role;
     const targetBranch =
       body.branch_id !== undefined ? body.branch_id : member.branchId;
-    if (targetRole === "cashier" && !targetBranch) {
-      throw new HTTPException(400, { message: "Kasir wajib punya cabang" });
+    if (WAJIB_CABANG.has(targetRole) && !targetBranch) {
+      throw new HTTPException(400, { message: "Kasir/Tim wajib punya cabang" });
     }
     if (targetBranch) await pastikanCabangMilikPerusahaan(targetBranch, auth.company_id!);
 

@@ -6,7 +6,7 @@ import { z } from "zod";
 import type { MejaDto } from "@kakarut/shared";
 import { db } from "../../db/client";
 import { meja } from "../../db/schema";
-import { pastikanCabang, resolveBranchId, type AppEnv } from "../../middleware/auth";
+import { pastikanCabang, resolveBranchId, terikatCabang, type AppEnv } from "../../middleware/auth";
 
 const MejaBody = z.object({
   branch_id: z.string().uuid().optional(),
@@ -61,7 +61,7 @@ export const mejaRoutes = new Hono<AppEnv>()
     const branchId = body.branch_id
       ? await pastikanCabang(body.branch_id, auth.company_id!)
       : await resolveBranchId(c);
-    if (auth.role === "cashier" && branchId !== auth.branch_id) {
+    if (terikatCabang(auth.role) && branchId !== auth.branch_id) {
       throw new HTTPException(403, { message: "Kasir hanya boleh menambah meja di cabangnya" });
     }
     const [row] = await db
@@ -113,7 +113,7 @@ export const mejaRoutes = new Hono<AppEnv>()
       .from(meja)
       .where(and(eq(meja.id, c.req.param("id")), eq(meja.companyId, auth.company_id!)));
     if (!existing) throw new HTTPException(404, { message: "Meja tidak ditemukan" });
-    if (auth.role === "cashier" && existing.branchId !== auth.branch_id) {
+    if (terikatCabang(auth.role) && existing.branchId !== auth.branch_id) {
       throw new HTTPException(403, { message: "Kasir hanya boleh mengubah meja di cabangnya" });
     }
     const [row] = await db
@@ -133,7 +133,7 @@ export const mejaRoutes = new Hono<AppEnv>()
       .from(meja)
       .where(and(eq(meja.id, c.req.param("id")), eq(meja.companyId, auth.company_id!)));
     if (!existing) throw new HTTPException(404, { message: "Meja tidak ditemukan" });
-    if (auth.role === "cashier" && existing.branchId !== auth.branch_id) {
+    if (terikatCabang(auth.role) && existing.branchId !== auth.branch_id) {
       throw new HTTPException(403, { message: "Kasir hanya boleh menghapus meja di cabangnya" });
     }
     if (existing.tipe === "takeaway") {

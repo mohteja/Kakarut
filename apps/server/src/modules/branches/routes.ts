@@ -22,6 +22,10 @@ const CabangBody = z.object({
   /** struk per cabang: footer + tampil/tidaknya alamat & telepon CABANG ini */
   receipt_footer: z.string().trim().max(200).nullish(),
   receipt_show_alamat: z.boolean().optional(),
+  /** titik maps cabang + radius absen (m) — absen hanya diterima dalam radius */
+  latitude: z.number().min(-90).max(90).nullish(),
+  longitude: z.number().min(-180).max(180).nullish(),
+  radius_absen_m: z.number().int().min(10).max(10000).optional(),
   is_active: z.boolean().optional(),
 });
 
@@ -94,6 +98,9 @@ export const cabangRoutes = new Hono<AppEnv>()
         central_kitchen_id: r.centralKitchenId,
         receipt_footer: r.receiptFooter,
         receipt_show_alamat: r.receiptShowAlamat,
+        latitude: r.latitude,
+        longitude: r.longitude,
+        radius_absen_m: r.radiusAbsenM,
         is_active: r.isActive,
       })),
     );
@@ -135,6 +142,9 @@ export const cabangRoutes = new Hono<AppEnv>()
           ...(body.receipt_show_alamat !== undefined && {
             receiptShowAlamat: body.receipt_show_alamat,
           }),
+          latitude: body.latitude ?? null,
+          longitude: body.longitude ?? null,
+          ...(body.radius_absen_m !== undefined && { radiusAbsenM: body.radius_absen_m }),
         })
         .onConflictDoNothing()
         .returning();
@@ -191,6 +201,9 @@ export const cabangRoutes = new Hono<AppEnv>()
           ...(body.receipt_show_alamat !== undefined && {
             receiptShowAlamat: body.receipt_show_alamat,
           }),
+          ...(body.latitude !== undefined && { latitude: body.latitude }),
+          ...(body.longitude !== undefined && { longitude: body.longitude }),
+          ...(body.radius_absen_m !== undefined && { radiusAbsenM: body.radius_absen_m }),
           ...(body.is_active !== undefined && { isActive: body.is_active }),
           ...ckPatch,
         })

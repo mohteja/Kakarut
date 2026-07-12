@@ -36,3 +36,21 @@ describe("absenTipeBerikutnya", () => {
     expect(absenTipeBerikutnya("keluar")).toBe("masuk");
   });
 });
+
+import { jarakMeter } from "@kakarut/shared";
+
+describe("jarakMeter (radius absen)", () => {
+  it("titik sama = 0 m", () => {
+    expect(jarakMeter(-6.2, 106.816666, -6.2, 106.816666)).toBeCloseTo(0, 5);
+  });
+  it("±111 m per 0.001° lintang", () => {
+    const d = jarakMeter(-6.2, 106.816666, -6.201, 106.816666);
+    expect(d).toBeGreaterThan(105);
+    expect(d).toBeLessThan(118);
+  });
+  it("Monas → Kota Tua ≈ 4.5-5.5 km", () => {
+    const d = jarakMeter(-6.175392, 106.827153, -6.137654, 106.817125);
+    expect(d).toBeGreaterThan(4000);
+    expect(d).toBeLessThan(5500);
+  });
+});

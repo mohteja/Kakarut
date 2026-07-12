@@ -7,7 +7,7 @@ import { z } from "zod";
 import type { Shift } from "@kakarut/shared";
 import { db } from "../../db/client";
 import { branches, sales, shifts, users } from "../../db/schema";
-import { resolveBranchId, type AppEnv } from "../../middleware/auth";
+import { resolveBranchId, terikatCabang, type AppEnv } from "../../middleware/auth";
 
 const opener = alias(users, "shift_opener");
 const closer = alias(users, "shift_closer");
@@ -136,7 +136,7 @@ export const shiftRoutes = new Hono<AppEnv>()
   .post("/buka", zValidator("json", z.object({ modal_awal: z.number().nonnegative().default(0) })), async (c) => {
     const auth = c.get("auth");
     const branchId = await resolveBranchId(c);
-    if (auth.role === "cashier" && branchId !== auth.branch_id) {
+    if (terikatCabang(auth.role) && branchId !== auth.branch_id) {
       throw new HTTPException(403, { message: "Kasir hanya boleh membuka shift di cabangnya" });
     }
     const [open] = await db

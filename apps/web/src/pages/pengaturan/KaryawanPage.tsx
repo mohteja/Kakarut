@@ -24,7 +24,7 @@ interface Karyawan {
   nama: string;
   email: string;
   is_active: boolean;
-  role: "owner" | "admin" | "cashier";
+  role: "owner" | "admin" | "cashier" | "tim";
   branch_id: string | null;
   cabang: string | null;
   employee_code: string | null;
@@ -39,12 +39,14 @@ interface FormState {
   email: string;
   /** saat ubah: kosongkan bila password tidak diganti */
   password: string;
-  role: "owner" | "admin" | "cashier";
+  role: "owner" | "admin" | "cashier" | "tim";
   branch_id: string;
   is_active: boolean;
 }
 
-const labelRole = { owner: "Owner", admin: "Admin", cashier: "Kasir" } as const;
+const labelRole = { owner: "Owner", admin: "Admin", cashier: "Kasir", tim: "Tim" } as const;
+/** kasir & tim terikat ke satu cabang — lokasi kerja wajib */
+const WAJIB_CABANG = new Set(["cashier", "tim"]);
 
 export function KaryawanPage() {
   const { cabang } = useBranch();
@@ -101,7 +103,7 @@ export function KaryawanPage() {
           email: f.email,
           password: f.password,
           role: f.role,
-          branch_id: f.role === "cashier" ? f.branch_id : f.branch_id || null,
+          branch_id: WAJIB_CABANG.has(f.role) ? f.branch_id : f.branch_id || null,
         },
       }),
     onSuccess: () => {
@@ -129,7 +131,7 @@ export function KaryawanPage() {
           nama: form.nama,
           email: form.email,
           role: form.role,
-          branch_id: form.role === "cashier" ? form.branch_id : form.branch_id || null,
+          branch_id: WAJIB_CABANG.has(form.role) ? form.branch_id : form.branch_id || null,
           is_active: form.is_active,
           ...(form.password ? { password: form.password } : {}),
         },
@@ -394,6 +396,7 @@ export function KaryawanPage() {
                   className={inputClass}
                 >
                   <option value="cashier">Kasir</option>
+                  <option value="tim">Tim — cek stok, penerimaan, riwayat</option>
                   <option value="admin">Admin</option>
                   <option value="owner">Owner</option>
                 </select>
@@ -402,15 +405,15 @@ export function KaryawanPage() {
               {isPro && (
                 <div>
                   <label className="mb-1 block text-sm font-medium">
-                    Lokasi kerja {form.role === "cashier" ? "(wajib)" : "(opsional)"}
+                    Lokasi kerja {WAJIB_CABANG.has(form.role) ? "(wajib)" : "(opsional)"}
                   </label>
                   <select
                     value={form.branch_id}
                     onChange={(e) => setForm({ ...form, branch_id: e.target.value })}
                     className={inputClass}
-                    required={form.role === "cashier"}
+                    required={WAJIB_CABANG.has(form.role)}
                   >
-                    {form.role !== "cashier" && <option value="">Semua lokasi</option>}
+                    {!WAJIB_CABANG.has(form.role) && <option value="">Semua lokasi</option>}
                     {cabang
                       .filter((b) => b.is_active)
                       .map((b) => (

@@ -14,7 +14,7 @@ import {
   storageLocationPetugas,
   users,
 } from "../../db/schema";
-import { pastikanCabang, requireRole, resolveBranchId, type AppEnv } from "../../middleware/auth";
+import { pastikanCabang, requireRole, resolveBranchId, terikatCabang, type AppEnv } from "../../middleware/auth";
 import { tanggalDi } from "../../lib/time";
 import { hitungSaldoCabang, kartuStok } from "./service";
 
@@ -87,13 +87,13 @@ export const stokRoutes = new Hono<AppEnv>()
    * cabangnya). Menyimpan snapshot saldo sistem + selisih per sesi, dan
    * qty fisik jadi baseline saldo baru.
    */
-  .post("/opname", zValidator("json", OpnameBody), async (c) => {
+  .post("/opname", requireRole("owner", "admin", "cashier"), zValidator("json", OpnameBody), async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");
     const branchId = body.branch_id
       ? await pastikanCabang(body.branch_id, auth.company_id!)
       : await resolveBranchId(c);
-    if (auth.role === "cashier" && branchId !== auth.branch_id) {
+    if (terikatCabang(auth.role) && branchId !== auth.branch_id) {
       throw new HTTPException(403, { message: "Kasir hanya boleh opname di cabangnya" });
     }
 
@@ -132,7 +132,7 @@ export const stokRoutes = new Hono<AppEnv>()
     // Batasan petugas: kasir hanya boleh opname bahan di tempat yang terbuka
     // (belum ada petugas) atau tempat yang ditugaskan padanya. Bahan tanpa
     // tempat boleh siapa saja. Owner/admin selalu boleh.
-    if (auth.role === "cashier") {
+    if (terikatCabang(auth.role)) {
       const petugasRows = await db
         .select({
           locId: storageLocationPetugas.storageLocationId,

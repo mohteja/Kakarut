@@ -23,6 +23,7 @@ import { AKSI_TAHAP_LOG, catatLogFaktur, rpLog } from "./log";
 import {
   pastikanCabang,
   resolveBranchId,
+  terikatCabang,
   verifikasiPassword,
   type AppEnv,
 } from "../../middleware/auth";
@@ -198,7 +199,7 @@ async function resolveBranchUntukTulis(
   const branchId = bodyBranchId
     ? await pastikanCabang(bodyBranchId, auth.company_id!)
     : await resolveBranchId(c);
-  if (auth.role === "cashier" && branchId !== auth.branch_id) {
+  if (terikatCabang(auth.role) && branchId !== auth.branch_id) {
     throw new HTTPException(403, { message: "Kasir hanya boleh input di cabangnya" });
   }
   return branchId;
@@ -390,7 +391,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         eq(productions.tipe, tipe),
         isNull(productions.deletedAt),
       ];
-      if (auth.role === "cashier" && auth.branch_id) {
+      if (terikatCabang(auth.role) && auth.branch_id) {
         conds.push(eq(productions.branchId, auth.branch_id));
       }
 
@@ -472,7 +473,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
           }
           tujuanBranch = cb.id;
           tujuanNama = cb.nama;
-          if (auth.role === "cashier" && auth.branch_id && tujuanBranch !== auth.branch_id) {
+          if (terikatCabang(auth.role) && auth.branch_id && tujuanBranch !== auth.branch_id) {
             throw new HTTPException(403, {
               message: "Kasir tidak boleh mengirim ke cabang lain",
             });
@@ -691,7 +692,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         eq(productions.tipe, tipe),
         isNull(productions.deletedAt),
       ];
-      if (auth.role === "cashier" && auth.branch_id) {
+      if (terikatCabang(auth.role) && auth.branch_id) {
         conds.push(eq(productions.branchId, auth.branch_id));
       }
       const [ada] = await db
@@ -731,7 +732,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         eq(productions.tipe, tipe),
         eq(productions.status, "menunggu"),
       ];
-      if (auth.role === "cashier" && auth.branch_id) {
+      if (terikatCabang(auth.role) && auth.branch_id) {
         conds.push(eq(productions.branchId, auth.branch_id));
       }
       // waktu = saat dikonfirmasi (bukan saat RAB dibuat) agar stok masuk
@@ -773,7 +774,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         eq(productions.tipe, tipe),
         isNull(productions.deletedAt),
       ];
-      if (auth.role === "cashier" && auth.branch_id) {
+      if (terikatCabang(auth.role) && auth.branch_id) {
         conds.push(eq(productions.branchId, auth.branch_id));
       }
       const [ada] = await db

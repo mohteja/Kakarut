@@ -16,7 +16,12 @@ import {
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 
-export const userRoleEnum = pgEnum("user_role", ["owner", "admin", "cashier"]);
+/**
+ * Peran: owner/admin = manajemen (lintas cabang); cashier = kasir cabang;
+ * tim = anggota tim cabang (cek stok, lihat menu, penerimaan barang, riwayat
+ * transaksi — tanpa kasir). cashier & tim terikat ke satu cabang.
+ */
+export const userRoleEnum = pgEnum("user_role", ["owner", "admin", "cashier", "tim"]);
 export const bahanKategoriEnum = pgEnum("bahan_kategori", ["baso", "minuman", "lain"]);
 export const menuTipeEnum = pgEnum("menu_tipe", ["regular", "paket"]);
 /** jalur pengadaan bahan: diproduksi sendiri vs dibeli jadi */
@@ -125,6 +130,13 @@ export const branches = pgTable(
      */
     receiptFooter: text("receipt_footer"),
     receiptShowAlamat: boolean("receipt_show_alamat").notNull().default(true),
+    /**
+     * Titik lokasi cabang (maps) + radius absen: bila lat/lng terisi, absen
+     * karyawan hanya diterima dalam radius ini dari titik cabang.
+     */
+    latitude: numeric("latitude", { precision: 9, scale: 6, mode: "number" }),
+    longitude: numeric("longitude", { precision: 9, scale: 6, mode: "number" }),
+    radiusAbsenM: integer("radius_absen_m").notNull().default(100),
     isActive: boolean("is_active").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -165,7 +177,10 @@ export const memberships = pgTable(
   },
   (t) => [
     uniqueIndex("memberships_user_company_uq").on(t.userId, t.companyId),
-    check("memberships_cashier_branch_ck", sql`${t.role} <> 'cashier' OR ${t.branchId} IS NOT NULL`),
+    // owner/admin boleh lintas cabang; peran lain (kasir, tim) wajib punya
+    // cabang. Ditulis tanpa literal 'tim' agar migrasi aman dijalankan satu
+    // transaksi dengan ALTER TYPE ADD VALUE (nilai enum baru belum bisa dipakai).
+    check("memberships_cashier_branch_ck", sql`${t.role} IN ('owner','admin') OR ${t.branchId} IS NOT NULL`),
     // kode karyawan unik per perusahaan (abaikan yang NULL)
     uniqueIndex("memberships_company_kode_uq")
       .on(t.companyId, t.employeeCode)

@@ -3,13 +3,18 @@ import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import { absenTipeBerikutnya, type AbsenResult, type AbsensiRow } from "@kakarut/shared";
+import { absenTipeBerikutnya, jarakMeter, type AbsenResult, type AbsensiRow } from "@kakarut/shared";
 import { db } from "../../db/client";
 import { attendances, branches, companies, memberships, users } from "../../db/schema";
 import { tanggalDi } from "../../lib/time";
 import { resolveBranchId, type AppEnv } from "../../middleware/auth";
 
-const ClockBody = z.object({ kode: z.string().trim().min(1) });
+const ClockBody = z.object({
+  kode: z.string().trim().min(1),
+  /** koordinat perangkat saat absen — divalidasi terhadap radius titik cabang */
+  lat: z.number().min(-90).max(90).nullish(),
+  lng: z.number().min(-180).max(180).nullish(),
+});
 
 /** Validasi tanggal YYYY-MM-DD yang benar (menolak bulan/hari di luar rentang). */
 function tanggalValid(s: string): boolean {
@@ -38,7 +43,34 @@ export const absensiRoutes = new Hono<AppEnv>()
   .post("/", zValidator("json", ClockBody), async (c) => {
     const auth = c.get("auth");
     const branchId = await resolveBranchId(c);
+    const { lat, lng } = c.req.valid("json");
     const kode = c.req.valid("json").kode.trim();
+
+    // Radius absen: bila titik lokasi cabang diatur, absen HANYA diterima
+    // dalam radius itu — perangkat wajib mengirim koordinat GPS.
+    const [lok] = await db
+      .select({
+        nama: branches.nama,
+        latitude: branches.latitude,
+        longitude: branches.longitude,
+        radius: branches.radiusAbsenM,
+      })
+      .from(branches)
+      .where(eq(branches.id, branchId));
+    let jarakM: number | null = null;
+    if (lok?.latitude != null && lok.longitude != null) {
+      if (lat == null || lng == null) {
+        throw new HTTPException(400, {
+          message: `Absen di ${lok.nama} butuh lokasi — izinkan akses GPS lalu coba lagi`,
+        });
+      }
+      jarakM = Math.round(jarakMeter(lat, lng, lok.latitude, lok.longitude));
+      if (jarakM > lok.radius) {
+        throw new HTTPException(400, {
+          message: `Di luar radius absen ${lok.nama}: jarak ${jarakM} m (maks ${lok.radius} m)`,
+        });
+      }
+    }
 
     // Resolusi karyawan lewat kode (case-insensitive) dalam perusahaan pemanggil.
     // Karyawan terarsip diperlakukan seperti tidak ditemukan (sudah keluar).
@@ -103,6 +135,7 @@ export const absensiRoutes = new Hono<AppEnv>()
       tipe,
       waktu: ins.waktu.toISOString(),
       branch_nama: branch?.nama ?? "",
+      jarak_m: jarakM,
     };
     return c.json(result, 201);
   })

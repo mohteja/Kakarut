@@ -21,7 +21,7 @@ export const PANDUAN_MARKUP: { kategori: string; persen: string; keterangan: str
 ];
 
 export type StokStatus = "habis" | "menipis" | "aman";
-export type UserRole = "owner" | "admin" | "cashier";
+export type UserRole = "owner" | "admin" | "cashier" | "tim";
 export type MenuTipe = "regular" | "paket";
 export type BahanKategori = "baso" | "minuman" | "lain";
 /** jalur pengadaan bahan baku: diproduksi sendiri vs dibeli jadi */

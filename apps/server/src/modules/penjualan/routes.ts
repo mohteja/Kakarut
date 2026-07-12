@@ -8,6 +8,7 @@ import { branches, companies, saleItems, sales, users } from "../../db/schema";
 import {
   requireRole,
   resolveBranchId,
+  terikatCabang,
   verifikasiPassword,
   type AppEnv,
 } from "../../middleware/auth";
@@ -41,11 +42,12 @@ const SaleBody = z.object({
 });
 
 export const penjualanRoutes = new Hono<AppEnv>()
-  .post("/", zValidator("json", SaleBody), async (c) => {
+  // Tim boleh melihat riwayat, tapi tidak boleh membuat transaksi
+  .post("/", requireRole("owner", "admin", "cashier"), zValidator("json", SaleBody), async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");
     const branchId = body.branch_id ?? (await resolveBranchId(c));
-    if (auth.role === "cashier" && branchId !== auth.branch_id) {
+    if (terikatCabang(auth.role) && branchId !== auth.branch_id) {
       throw new HTTPException(403, { message: "Kasir hanya boleh transaksi di cabangnya" });
     }
     const result = await createSale({
@@ -115,7 +117,7 @@ export const penjualanRoutes = new Hono<AppEnv>()
       );
     if (!sale) throw new HTTPException(404, { message: "Transaksi tidak ditemukan" });
     // Kasir hanya boleh melihat transaksi di cabangnya.
-    if (auth.role === "cashier" && sale.branchId !== auth.branch_id) {
+    if (terikatCabang(auth.role) && sale.branchId !== auth.branch_id) {
       throw new HTTPException(403, { message: "Kasir hanya boleh melihat transaksi cabangnya" });
     }
     const items = await db.select().from(saleItems).where(eq(saleItems.saleId, sale.id));

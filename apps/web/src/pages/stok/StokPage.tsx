@@ -33,6 +33,8 @@ export function StokPage() {
   const { auth } = useAuth();
   const { branchQuery } = useBranch();
   const isManajemen = auth?.user.role === "owner" || auth?.user.role === "admin";
+  // tim hanya CEK stok — opname/penyesuaian bukan tugasnya
+  const isTim = auth?.user.role === "tim";
   // Dua tampilan: stok BAHAN (baris per bahan baku) & stok MENU (sisa porsi
   // per menu, diturunkan dari saldo bahan — selalu berkorelasi otomatis).
   const [tab, setTab] = useState<"bahan" | "menu">("bahan");
@@ -97,7 +99,7 @@ export function StokPage() {
     <div>
       <PageTitle
         aksi={
-          tab === "bahan" ? (
+          tab === "bahan" && !isTim ? (
             <div className="flex flex-wrap gap-2">
               <Link to="/stok/penyesuaian" className={`${btnSecondary} relative`}>
                 ⚠️ Penyesuaian

@@ -61,6 +61,10 @@ export function createApp() {
   tenant.use("/sampah/*", requireRole("owner", "admin"));
   tenant.use("/karyawan/*", requireRole("owner", "admin"));
   tenant.use("/customer/*", requireRole("owner", "admin"));
+  // Peran TIM = cek stok, lihat menu, profil, penerimaan barang, riwayat
+  // transaksi — TANPA kasir: shift & open bill khusus peran berjualan.
+  tenant.use("/shift/*", requireRole("owner", "admin", "cashier"));
+  tenant.use("/open-bill/*", requireRole("owner", "admin", "cashier"));
   tenant
     .route("/company", companyRoutes)
     .route("/customer", customerRoutes)

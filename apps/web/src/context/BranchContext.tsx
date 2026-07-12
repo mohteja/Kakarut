@@ -18,6 +18,10 @@ export interface Cabang {
   /** struk per cabang: footer + tampil/tidaknya alamat & telepon cabang */
   receipt_footer: string | null;
   receipt_show_alamat: boolean;
+  /** titik maps + radius absen — absen hanya diterima dalam radius ini */
+  latitude: number | null;
+  longitude: number | null;
+  radius_absen_m: number;
   is_active: boolean;
 }
 
@@ -39,7 +43,8 @@ const BranchContext = createContext<BranchContextValue | null>(null);
 
 export function BranchProvider({ children }: { children: ReactNode }) {
   const { auth } = useAuth();
-  const isKasir = auth?.user.role === "cashier";
+  // kasir & tim terkunci ke cabangnya sendiri — server yang menentukan
+  const isKasir = auth?.user.role === "cashier" || auth?.user.role === "tim";
   const [branchId, setBranchId] = useState<string | null>(
     () => (isKasir ? null : localStorage.getItem("kakarut.branch") || null),
   );

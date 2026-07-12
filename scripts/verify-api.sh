@@ -1607,6 +1607,48 @@ cek "respons penjualan memuat sale.branchId = cabang kasir" "V == 1" \
 cek "GET /penjualan/:id juga memuat sale.branchId" "V == 1" \
   "$(api "$KASIR" GET "/penjualan/$(echo "$JUAL55" | jq -r .sale.id)" | jq --arg b "$PUSAT51_ID" '(.sale.branchId == $b) | if . then 1 else 0 end')"
 
+echo "== 56. Peran TIM: cek stok, lihat menu, penerimaan, riwayat — tanpa kasir =="
+cek "tim tanpa cabang → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/karyawan" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"nama":"Tim X","email":"timx56@basooopa.id","password":"TimPass56!","role":"tim"}')"
+api "$OWNER" POST /karyawan "{\"nama\":\"Tim Gudang 56\",\"email\":\"tim56@basooopa.id\",\"password\":\"TimPass56!\",\"role\":\"tim\",\"branch_id\":\"$PUSAT51_ID\"}" > /dev/null
+T56=$(login "tim56@basooopa.id" "TimPass56!")
+cek "tim bisa login & terikat cabang" "V == 1" \
+  "$(api "$T56" GET /auth/me | jq --arg b "$PUSAT51_ID" '((.user.role == "tim") and (.user.branch_id == $b)) | if . then 1 else 0 end')"
+cek "tim: cek stok → 200" "V == 200" "$(status_code "$T56" GET /stok)"
+cek "tim: lihat menu → 200" "V == 200" "$(status_code "$T56" GET /menu)"
+cek "tim: riwayat transaksi → 200" "V == 200" "$(status_code "$T56" GET /penjualan)"
+cek "tim: penerimaan barang → 200" "V == 200" "$(status_code "$T56" GET /penerimaan)"
+cek "tim: profil → 200" "V == 200" "$(status_code "$T56" GET /profil)"
+cek "tim: membuat transaksi kasir → 403" "V == 403" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/penjualan" -H "Authorization: Bearer $T56" -H 'Content-Type: application/json' -d "{\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")"
+cek "tim: shift kasir → 403" "V == 403" "$(status_code "$T56" GET /shift/aktif)"
+cek "tim: open bill → 403" "V == 403" "$(status_code "$T56" GET /open-bill)"
+cek "tim: stock opname → 403" "V == 403" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/stok/opname" -H "Authorization: Bearer $T56" -H 'Content-Type: application/json' -d '{}')"
+cek "tim: produksi → 403" "V == 403" "$(status_code "$T56" GET /produksi)"
+cek "tim: kelola karyawan → 403" "V == 403" "$(status_code "$T56" GET /karyawan)"
+
+echo "== 57. Absen hanya dalam radius titik lokasi cabang =="
+KODE56=$(api "$OWNER" GET /karyawan | jq -r '[.[] | select(.email=="tim56@basooopa.id")][0].employee_code')
+cek "cabang tanpa titik lokasi: absen tanpa GPS tetap diterima" "V == 201" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/absensi" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"kode\":\"$KODE56\"}")"
+
+# titik lokasi Pusat = Monas, radius 100 m
+api "$OWNER" PATCH "/cabang/$PUSAT51_ID" '{"latitude":-6.175392,"longitude":106.827153,"radius_absen_m":100}' > /dev/null
+cek "titik lokasi & radius cabang tersimpan" "V == 1" \
+  "$(api "$OWNER" GET /cabang | jq --arg id "$PUSAT51_ID" '([.[] | select(.id==$id)][0] | (.latitude == -6.175392 and .longitude == 106.827153 and .radius_absen_m == 100)) | if . then 1 else 0 end')"
+cek "absen tanpa koordinat → 400 (wajib GPS)" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/absensi" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"kode\":\"$KODE56\"}")"
+cek "absen di luar radius (±4,6 km) → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/absensi" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"kode\":\"$KODE56\",\"lat\":-6.137654,\"lng\":106.817125}")"
+ABS57=$(api "$OWNER" POST /absensi "{\"kode\":\"$KODE56\",\"lat\":-6.175392,\"lng\":106.827553}")
+cek "absen dalam radius (~44 m) diterima + jarak terlapor" "V == 1" \
+  "$(echo "$ABS57" | jq '((.jarak_m != null) and (.jarak_m <= 100) and (.tipe != null)) | if . then 1 else 0 end')"
+# kosongkan titik → aturan radius kembali nonaktif
+api "$OWNER" PATCH "/cabang/$PUSAT51_ID" '{"latitude":null,"longitude":null}' > /dev/null
+cek "titik dikosongkan: absen tanpa GPS diterima lagi" "V == 201" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/absensi" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"kode\":\"$KODE56\"}")"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

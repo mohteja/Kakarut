@@ -73,14 +73,22 @@ export async function pastikanCabang(branchId: string, companyId: string): Promi
 }
 
 /**
- * Cabang aktif untuk request ini: kasir selalu terkunci ke cabangnya;
+ * Peran yang TERIKAT ke satu cabang (kasir & tim) — selalu terkunci ke
+ * cabangnya sendiri; owner/admin bebas lintas cabang.
+ */
+export function terikatCabang(role: string | null): boolean {
+  return role === "cashier" || role === "tim";
+}
+
+/**
+ * Cabang aktif untuk request ini: kasir/tim selalu terkunci ke cabangnya;
  * owner/admin boleh memilih via ?branch_id= (divalidasi milik perusahaan),
  * default cabang pertama.
  */
 export async function resolveBranchId(c: Context<AppEnv>): Promise<string> {
   const auth = c.get("auth");
-  if (auth.role === "cashier") {
-    if (!auth.branch_id) throw new HTTPException(403, { message: "Kasir tanpa cabang" });
+  if (terikatCabang(auth.role)) {
+    if (!auth.branch_id) throw new HTTPException(403, { message: "Akun tanpa cabang" });
     return auth.branch_id;
   }
   const q = c.req.query("branch_id");
