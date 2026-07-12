@@ -486,6 +486,8 @@ export interface RiwayatTransaksiRow {
   /** nama konsumen/member (null bila transaksi tanpa member) */
   konsumen: string | null;
   metode: MetodeBayar;
+  /** nama cabang transaksi — terisi utk tampilan lintas cabang (?branch_id=all) */
+  cabang: string | null;
 }
 
 /** Member/pelanggan pada daftar member area (dengan agregat transaksi). */

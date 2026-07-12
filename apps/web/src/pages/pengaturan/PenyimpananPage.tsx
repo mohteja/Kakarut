@@ -13,7 +13,8 @@ import {
   tdClass,
   thClass,
 } from "../../components/ui";
-import { useBranch } from "../../context/BranchContext";
+import { useCabangData } from "../../context/BranchContext";
+import { CabangDataBar } from "../../components/CabangDataBar";
 import { api } from "../../lib/api";
 
 interface FormState {
@@ -120,7 +121,8 @@ function PetugasModal({ tempat, onClose }: { tempat: PenyimpananDto; onClose: ()
 
 /** Tempat penyimpanan per cabang (freezer, chiller, gudang, dst). */
 export function PenyimpananPage() {
-  const { branchQuery, branchId } = useBranch();
+  // Tempat penyimpanan fisik per cabang — dari Kantor pilih cabangnya.
+  const { query: branchQuery, id: branchId } = useCabangData();
   const queryClient = useQueryClient();
   const { data: tempat, isLoading } = useQuery({
     queryKey: ["penyimpanan", branchQuery],
@@ -164,6 +166,7 @@ export function PenyimpananPage() {
 
   return (
     <div className="max-w-4xl">
+      <CabangDataBar />
       <PageTitle
         aksi={
           <button onClick={() => setForm({ nama: "", catatan: "" })} className={btnPrimary}>

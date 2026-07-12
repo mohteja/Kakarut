@@ -12,7 +12,8 @@ import {
   tdClass,
   thClass,
 } from "../../components/ui";
-import { useBranch } from "../../context/BranchContext";
+import { useCabangData } from "../../context/BranchContext";
+import { CabangDataBar } from "../../components/CabangDataBar";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah } from "../../lib/format";
 
@@ -41,7 +42,8 @@ function StatKecil({ label, nilai }: { label: string; nilai: string }) {
 
 /** Rekomendasi jumlah beli tiap bahan agar mencapai target penjualan. */
 export function RekomendasiBeliPage() {
-  const { branchQuery } = useBranch();
+  // Rekomendasi dihitung dari stok cabang — dari Kantor pilih cabangnya.
+  const { query: branchQuery } = useCabangData();
   const queryClient = useQueryClient();
   const [targetInput, setTargetInput] = useState("");
   const [targetInited, setTargetInited] = useState(false);
@@ -107,6 +109,7 @@ export function RekomendasiBeliPage() {
 
   return (
     <div className="max-w-5xl">
+      <CabangDataBar />
       <PageTitle
         aksi={
           <div className="flex flex-wrap gap-2">

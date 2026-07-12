@@ -13,7 +13,8 @@ import {
   thClass,
 } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
-import { useBranch } from "../../context/BranchContext";
+import { useCabangData } from "../../context/BranchContext";
+import { CabangDataBar } from "../../components/CabangDataBar";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah, formatTanggalRingkas, formatWaktu } from "../../lib/format";
 
@@ -201,7 +202,8 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
   const { auth } = useAuth();
   // rekomendasi beli = analitik manajemen; karyawan CK cukup buat faktur
   const isManajemen = auth?.user.role === "owner" || auth?.user.role === "admin";
-  const { branchQuery } = useBranch();
+  // Faktur produksi/pembelian berjalan per cabang — dari Kantor pilih cabangnya.
+  const { query: branchQuery } = useCabangData();
   const [detail, setDetail] = useState<FakturGroup | null>(null);
 
   // Buku besar: filter tanggal + pagination per faktur (terlama di halaman awal,
@@ -294,6 +296,7 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
 
   return (
     <div>
+      <CabangDataBar />
       <PageTitle
         aksi={
           <div className="flex flex-wrap gap-2">

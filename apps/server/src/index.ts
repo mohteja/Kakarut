@@ -8,7 +8,7 @@ import { env } from "./config/env";
 import { db } from "./db/client";
 import { runMigrations } from "./db/migrate";
 import { backfillKodeMenu } from "./modules/menu/service";
-import { backfillEmployeeCode } from "./modules/users/service";
+import { arsipkanMembershipNonaktif, backfillEmployeeCode } from "./modules/users/service";
 import { getStorage, localUploadDir } from "./modules/upload/storage";
 
 // Migrasi otomatis saat boot: deploy versi baru langsung menerapkan skema
@@ -40,6 +40,9 @@ if (env.AUTO_MIGRATE) {
   // Karyawan lama tanpa kode → isi kode karyawan otomatis (untuk absensi)
   const terisiKar = await backfillEmployeeCode(db);
   if (terisiKar > 0) console.log(`Kode karyawan otomatis diisi untuk ${terisiKar} karyawan.`);
+  // Nonaktif = arsip: karyawan nonaktif lama dipindah ke arsip (idempoten)
+  const terarsip = await arsipkanMembershipNonaktif(db);
+  if (terarsip > 0) console.log(`${terarsip} karyawan nonaktif lama dipindah ke arsip.`);
 }
 
 const app = createApp();

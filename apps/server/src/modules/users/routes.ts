@@ -179,14 +179,21 @@ export const karyawanRoutes = new Hono<AppEnv>()
       }
     }
 
+    // NONAKTIF = ARSIP (satu status): menonaktifkan berarti masuk arsip,
+    // memulihkan dari arsip berarti aktif kembali.
+    const arsipEfektif =
+      body.arsip ?? (body.is_active !== undefined ? !body.is_active : undefined);
+    const aktifEfektif =
+      body.is_active ?? (body.arsip !== undefined ? !body.arsip : undefined);
+
     // Jangan mengunci diri sendiri: nonaktif/arsip akun sendiri ditolak.
-    if (userId === auth.sub && (body.is_active === false || body.arsip === true)) {
+    if (userId === auth.sub && arsipEfektif === true) {
       throw new HTTPException(400, {
         message: "Tidak bisa menonaktifkan/mengarsipkan akun sendiri",
       });
     }
     // Perusahaan tidak boleh kehilangan owner terakhir yang masih berjalan.
-    if (body.arsip === true && member.role === "owner") {
+    if (arsipEfektif === true && member.role === "owner") {
       const ownerLain = await db
         .select({ id: memberships.id })
         .from(memberships)
@@ -228,14 +235,14 @@ export const karyawanRoutes = new Hono<AppEnv>()
     }
 
     await db.transaction(async (tx) => {
-      if (body.role !== undefined || body.branch_id !== undefined || body.arsip !== undefined) {
+      if (body.role !== undefined || body.branch_id !== undefined || arsipEfektif !== undefined) {
         await tx
           .update(memberships)
           .set({
             role: targetRole,
             branchId: targetBranch ?? null,
-            ...(body.arsip !== undefined && {
-              archivedAt: body.arsip ? new Date() : null,
+            ...(arsipEfektif !== undefined && {
+              archivedAt: arsipEfektif ? new Date() : null,
             }),
           })
           .where(eq(memberships.id, member.id));
@@ -243,7 +250,7 @@ export const karyawanRoutes = new Hono<AppEnv>()
       if (
         body.nama !== undefined ||
         body.email !== undefined ||
-        body.is_active !== undefined ||
+        aktifEfektif !== undefined ||
         body.password
       ) {
         await tx
@@ -251,7 +258,7 @@ export const karyawanRoutes = new Hono<AppEnv>()
           .set({
             ...(body.nama !== undefined && { nama: body.nama }),
             ...(body.email !== undefined && { email: body.email }),
-            ...(body.is_active !== undefined && { isActive: body.is_active }),
+            ...(aktifEfektif !== undefined && { isActive: aktifEfektif }),
             ...(body.password && { passwordHash: bcrypt.hashSync(body.password, 10) }),
           })
           .where(eq(users.id, userId));

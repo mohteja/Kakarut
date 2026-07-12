@@ -17,7 +17,8 @@ import {
   inputClass,
 } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
-import { useBranch } from "../../context/BranchContext";
+import { useCabangData } from "../../context/BranchContext";
+import { CabangDataBar } from "../../components/CabangDataBar";
 import { api } from "../../lib/api";
 import { formatAngka, formatWaktu } from "../../lib/format";
 
@@ -224,7 +225,8 @@ const FILTER_CHIPS: [FilterKey, string][] = [
 export function PenyesuaianPage() {
   const { auth } = useAuth();
   const isManajemen = auth?.user.role === "owner" || auth?.user.role === "admin";
-  const { branchQuery } = useBranch();
+  // Penyesuaian stok terjadi per cabang — dari Kantor pilih cabang datanya.
+  const { query: branchQuery } = useCabangData();
   const queryClient = useQueryClient();
   const [filter, setFilter] = useState<FilterKey>("belum");
   const [klarifikasi, setKlarifikasi] = useState<PenyesuaianRow | null>(null);
@@ -255,6 +257,7 @@ export function PenyesuaianPage() {
 
   return (
     <div className="max-w-3xl">
+      <CabangDataBar />
       <PageTitle>Penyesuaian Stok</PageTitle>
       <div className="mb-3 rounded-lg bg-blue-50 px-4 py-2 text-sm text-blue-800">
         Selisih hasil stock opname (lebih/kurang) muncul di sini. <b>Owner/admin</b>{" "}

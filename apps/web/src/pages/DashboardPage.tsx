@@ -1,9 +1,10 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import type { LaporanHarian, LaporanPembelian, MenuLaris, StokRowDto } from "@kakarut/shared";
 import { Card, PageTitle, Spinner, StatusBadge, tdClass, thClass } from "../components/ui";
 import { useAuth } from "../context/AuthContext";
-import { useBranch } from "../context/BranchContext";
+import { labelCabang, useBranch } from "../context/BranchContext";
 import { api } from "../lib/api";
 import { formatAngka, formatRupiah, formatTanggal, hariIniWIB } from "../lib/format";
 
@@ -17,15 +18,16 @@ function StatCard({ label, value, sub, warna = "text-stone-800" }: { label: stri
   );
 }
 
-/** Kartu "perlu perhatian": jumlah + tautan ke halaman terkait; menyala bila > 0. */
-function AttnCard({ to, ikon, label, jumlah, satuan, aktif }: { to: string; ikon: string; label: string; jumlah: number; satuan: string; aktif: boolean }) {
-  return (
-    <Link
-      to={to}
-      className={`flex items-center gap-3 rounded-xl border p-4 shadow-sm transition hover:shadow ${
-        aktif ? "border-orange-300 bg-orange-50" : "border-stone-200 bg-white"
-      }`}
-    >
+/**
+ * Kartu "perlu perhatian": jumlah + tautan ke halaman terkait; menyala bila
+ * > 0. to=null → kartu info saja (halamannya di luar divisi lokasi saat ini).
+ */
+function AttnCard({ to, ikon, label, jumlah, satuan, aktif }: { to: string | null; ikon: string; label: string; jumlah: number; satuan: string; aktif: boolean }) {
+  const kelas = `flex items-center gap-3 rounded-xl border p-4 shadow-sm transition ${
+    aktif ? "border-orange-300 bg-orange-50" : "border-stone-200 bg-white"
+  }`;
+  const isi = (
+    <>
       <span className="text-2xl">{ikon}</span>
       <div className="min-w-0">
         <div className={`text-2xl font-bold ${aktif ? "text-orange-600" : "text-stone-700"}`}>
@@ -33,6 +35,12 @@ function AttnCard({ to, ikon, label, jumlah, satuan, aktif }: { to: string; ikon
         </div>
         <div className="truncate text-sm text-stone-500">{label}</div>
       </div>
+    </>
+  );
+  if (!to) return <div className={kelas}>{isi}</div>;
+  return (
+    <Link to={to} className={`${kelas} hover:shadow`}>
+      {isi}
     </Link>
   );
 }
@@ -40,49 +48,126 @@ function AttnCard({ to, ikon, label, jumlah, satuan, aktif }: { to: string; ikon
 /** Beranda ringkas owner/admin: kondisi toko hari ini dalam satu layar. */
 export function DashboardPage() {
   const { auth } = useAuth();
-  const { branchId, branchQuery, cabang } = useBranch();
+  const { branchId, cabang, divisi } = useBranch();
   const hari = hariIniWIB();
-  const branchParam = branchId ? `&branch_id=${branchId}` : "";
-  const namaCabang = cabang.find((b) => b.id === branchId)?.nama;
+
+  // Kantor = pusat data: pilih mau melihat cabang mana (atau semua lokasi
+  // sekaligus). Di divisi store/CK beranda terkunci ke lokasi terpilih.
+  const dariKantor = divisi === "kantor";
+  const [lihatPilihan, setLihat] = useState<string>("all");
+  const lokasiData = cabang.filter((b) => b.is_active && b.tipe !== "kantor");
+  // Chip yang menunjuk cabang yang keburu dinonaktifkan → kembali ke "Semua"
+  const lihat =
+    lihatPilihan === "all" || lokasiData.some((b) => b.id === lihatPilihan)
+      ? lihatPilihan
+      : "all";
+  const branchParam = dariKantor
+    ? `&branch_id=${lihat}` // "all" = gabungan seluruh cabang (didukung /laporan)
+    : branchId
+      ? `&branch_id=${branchId}`
+      : "";
+  const kunciLihat = dariKantor ? lihat : branchId;
+  const namaCabang = dariKantor
+    ? lihat === "all"
+      ? "Semua lokasi"
+      : (cabang.find((b) => b.id === lihat)?.nama ?? "")
+    : cabang.find((b) => b.id === branchId)?.nama;
 
   const { data: jual } = useQuery({
-    queryKey: ["laporan", hari, hari, branchId],
+    queryKey: ["laporan", hari, hari, kunciLihat],
     queryFn: () => api<LaporanHarian>(`/laporan?dari=${hari}&sampai=${hari}${branchParam}`),
   });
   const { data: beli } = useQuery({
-    queryKey: ["laporan-pembelian", hari, hari, branchId],
+    queryKey: ["laporan-pembelian", hari, hari, kunciLihat],
     queryFn: () => api<LaporanPembelian>(`/laporan/pembelian?dari=${hari}&sampai=${hari}${branchParam}`),
   });
-  const { data: stok } = useQuery({
-    queryKey: ["stok", branchQuery],
-    queryFn: () => api<StokRowDto[]>(`/stok${branchQuery}`),
-  });
   const { data: laris } = useQuery({
-    queryKey: ["menu-laris", hari, hari, branchId],
+    queryKey: ["menu-laris", hari, hari, kunciLihat],
     queryFn: () => api<MenuLaris>(`/laporan/menu-laris?dari=${hari}&sampai=${hari}${branchParam}`),
   });
-  const { data: pen } = useQuery({
-    queryKey: ["penerimaan", branchQuery],
-    queryFn: () => api<{ rows: { status: string }[] }>(`/penerimaan${branchQuery}`),
-    refetchInterval: 60_000,
+
+  // Stok & kiriman bersifat fisik per cabang (server tidak menggabungkan) —
+  // dari Kantor "Semua lokasi" diagregasi dengan satu query per cabang.
+  // "Semua lokasi" ikut menghitung kantor: kiriman/faktur lama yang terlanjur
+  // tercatat di kantor tetap terlihat (laporan branch_id=all juga gabungan).
+  const target = dariKantor
+    ? lihat === "all"
+      ? cabang.filter((b) => b.is_active)
+      : lokasiData.filter((b) => b.id === lihat)
+    : cabang.filter((b) => b.id === branchId);
+  const stokQs = useQueries({
+    queries: target.map((t) => ({
+      queryKey: ["stok", `?branch_id=${t.id}`],
+      queryFn: () => api<StokRowDto[]>(`/stok?branch_id=${t.id}`),
+    })),
+  });
+  const penQs = useQueries({
+    queries: target.map((t) => ({
+      queryKey: ["penerimaan", `?branch_id=${t.id}`],
+      queryFn: () => api<{ rows: { status: string }[] }>(`/penerimaan?branch_id=${t.id}`),
+      refetchInterval: 60_000,
+    })),
   });
 
-  const kritis = (stok ?? [])
-    .filter((r) => r.status !== "aman")
-    .sort((a, b) => (a.status === "habis" ? -1 : 1) - (b.status === "habis" ? -1 : 1) || a.saldo - b.saldo);
+  const lintasLokasi = target.length > 1;
+  const kritis = target
+    .flatMap((t, i) =>
+      (stokQs[i]?.data ?? [])
+        .filter((r) => r.status !== "aman")
+        .map((r) => ({ ...r, lokasi: t.nama })),
+    )
+    .sort(
+      (a, b) =>
+        (a.status === "habis" ? -1 : 1) - (b.status === "habis" ? -1 : 1) || a.saldo - b.saldo,
+    );
   const jumlahKritis = kritis.length;
-  const jumlahBerjalan = (stok ?? []).filter((r) => r.produksi_berjalan != null).length;
-  const jumlahMenunggu = (pen?.rows ?? []).filter((r) => r.status === "menunggu").length;
+  const jumlahBerjalan = stokQs.reduce(
+    (n, q) => n + (q.data ?? []).filter((r) => r.produksi_berjalan != null).length,
+    0,
+  );
+  const jumlahMenunggu = penQs.reduce(
+    (n, q) => n + (q.data?.rows ?? []).filter((r) => r.status === "menunggu").length,
+    0,
+  );
 
-  const loading = !jual || !beli || !stok || !pen;
+  const loading = !jual || !beli || stokQs.some((q) => !q.data) || penQs.some((q) => !q.data);
 
   return (
     <div>
       <PageTitle>Beranda</PageTitle>
       <div className="mb-4 text-sm text-stone-500">
         {formatTanggal(hari)}
-        {namaCabang ? ` · Cabang ${namaCabang}` : ""} · Halo, {auth?.user.nama} 👋
+        {namaCabang ? ` · ${namaCabang}` : ""} · Halo, {auth?.user.nama} 👋
       </div>
+
+      {/* Dari Kantor: pilih cabang yang dilihat (penjualan, stok, kiriman) */}
+      {dariKantor && (
+        <div className="mb-4 flex flex-wrap gap-2">
+          <button
+            onClick={() => setLihat("all")}
+            className={`rounded-full px-4 py-1.5 text-sm font-medium ${
+              lihat === "all"
+                ? "bg-orange-600 text-white"
+                : "bg-white text-stone-600 hover:bg-stone-100"
+            }`}
+          >
+            🏢 Semua lokasi
+          </button>
+          {lokasiData.map((b) => (
+            <button
+              key={b.id}
+              onClick={() => setLihat(b.id)}
+              className={`rounded-full px-4 py-1.5 text-sm font-medium ${
+                lihat === b.id
+                  ? "bg-orange-600 text-white"
+                  : "bg-white text-stone-600 hover:bg-stone-100"
+              }`}
+            >
+              {labelCabang(b)}
+            </button>
+          ))}
+        </div>
+      )}
 
       {loading ? (
         <Spinner />
@@ -114,9 +199,12 @@ export function DashboardPage() {
             <div>
               <div className="mb-2 flex items-center justify-between">
                 <h2 className="text-lg font-semibold text-stone-700">🔥 Menu terlaris hari ini</h2>
-                <Link to="/laporan/menu-laris" className="text-sm font-medium text-orange-600 hover:underline">
-                  Lihat semua →
-                </Link>
+                {/* Laporan hanya dibuka dari Kantor — divisi store tak punya nav-nya */}
+                {divisi !== "store" && (
+                  <Link to="/laporan/menu-laris" className="text-sm font-medium text-orange-600 hover:underline">
+                    Lihat semua →
+                  </Link>
+                )}
               </div>
               <Card className="divide-y divide-stone-100">
                 {laris.items.slice(0, 5).map((m, i) => (
@@ -156,7 +244,7 @@ export function DashboardPage() {
                 aktif={jumlahKritis > 0}
               />
               <AttnCard
-                to="/produksi"
+                to={divisi === "store" ? null : "/produksi"}
                 ikon="🏭"
                 label="Produksi sedang berjalan"
                 jumlah={jumlahBerjalan}
@@ -175,14 +263,16 @@ export function DashboardPage() {
                   <thead className="border-b border-stone-200 bg-stone-50">
                     <tr>
                       <th className={thClass}>Bahan</th>
+                      {lintasLokasi && <th className={thClass}>Lokasi</th>}
                       <th className={`${thClass} text-right`}>Saldo</th>
                       <th className={`${thClass} text-right`}>Status</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-stone-100">
                     {kritis.slice(0, 8).map((r) => (
-                      <tr key={r.ingredient_id}>
+                      <tr key={`${r.ingredient_id}-${r.lokasi}`}>
                         <td className={`${tdClass} font-medium`}>{r.nama}</td>
+                        {lintasLokasi && <td className={tdClass}>{r.lokasi}</td>}
                         <td className={`${tdClass} text-right`}>
                           {formatAngka(r.saldo)} {r.satuan}
                         </td>

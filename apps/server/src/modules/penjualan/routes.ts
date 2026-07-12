@@ -70,12 +70,19 @@ export const penjualanRoutes = new Hono<AppEnv>()
   })
   .get("/", async (c) => {
     const auth = c.get("auth");
-    const branchId = await resolveBranchId(c);
+    // Kantor = pusat data penjualan: owner/admin boleh "?branch_id=all" untuk
+    // melihat transaksi SEMUA cabang sekaligus (kasir/tim tetap terkunci).
+    const semuaCabang = !terikatCabang(auth.role) && c.req.query("branch_id") === "all";
+    const branchId = semuaCabang ? null : await resolveBranchId(c);
     const [company] = await db
       .select({ timezone: companies.timezone })
       .from(companies)
       .where(eq(companies.id, auth.company_id!));
-    const tanggal = c.req.query("tanggal") ?? tanggalDi(company?.timezone ?? "Asia/Jakarta");
+    const tanggalQ = c.req.query("tanggal");
+    if (tanggalQ && !/^\d{4}-\d{2}-\d{2}$/.test(tanggalQ)) {
+      throw new HTTPException(400, { message: "Format tanggal tidak valid (YYYY-MM-DD)" });
+    }
+    const tanggal = tanggalQ ?? tanggalDi(company?.timezone ?? "Asia/Jakarta");
     // Riwayat transaksi untuk kasir: cek pesanan / cetak ulang struk.
     const rows = await db
       .select({
@@ -88,14 +95,16 @@ export const penjualanRoutes = new Hono<AppEnv>()
         kasir: users.nama,
         konsumen: sales.customerNama,
         metode: sales.metodeBayar,
+        cabang: branches.nama,
         jumlah_item: sql<number>`(SELECT COUNT(*)::int FROM sale_items si WHERE si.sale_id = ${sales.id})`,
       })
       .from(sales)
       .leftJoin(users, eq(sales.cashierUserId, users.id))
+      .leftJoin(branches, eq(sales.branchId, branches.id))
       .where(
         and(
           eq(sales.companyId, auth.company_id!),
-          eq(sales.branchId, branchId),
+          ...(branchId ? [eq(sales.branchId, branchId)] : []),
           eq(sales.saleDate, tanggal),
           isNull(sales.deletedAt),
         ),

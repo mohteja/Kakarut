@@ -4,7 +4,7 @@ import { Link, useNavigate } from "react-router-dom";
 import type { OpnameRingkasan, PenyimpananDto, StokRowDto } from "@kakarut/shared";
 import { ErrorText, btnPrimary, btnSecondary } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
-import { useBranch } from "../../context/BranchContext";
+import { useBranch, useCabangData } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatAngka, formatTanggal, hariIniWIB } from "../../lib/format";
 
@@ -14,7 +14,7 @@ import { formatAngka, formatTanggal, hariIniWIB } from "../../lib/format";
  */
 export function OpnamePage() {
   const { auth } = useAuth();
-  const { branchQuery, branchId } = useBranch();
+  const { query: branchQuery, id: branchId } = useCabangData();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const isKasir = auth?.user.role === "cashier";
@@ -34,7 +34,14 @@ export function OpnamePage() {
   const [konfirmasi, setKonfirmasi] = useState(false);
   const [hasil, setHasil] = useState<OpnameRingkasan | null>(null);
 
-  const namaCabang = auth?.branch?.nama ?? auth?.company?.nama ?? "Cabang";
+  // Nama CABANG TARGET opname harus tampak: owner dari Kantor menulis ke
+  // cabang data terpilih — salah cabang tidak boleh terjadi diam-diam.
+  const { cabang } = useBranch();
+  const namaCabang =
+    cabang.find((b) => b.id === branchId)?.nama ??
+    auth?.branch?.nama ??
+    auth?.company?.nama ??
+    "Cabang";
   const myId = auth?.user.sub;
 
   const petugasByLoc = useMemo(() => {

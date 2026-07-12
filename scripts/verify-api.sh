@@ -1563,7 +1563,8 @@ cek "terarsip: hilang dari daftar karyawan" "V == 0" \
   "$(api "$OWNER" GET /karyawan | jq --arg id "$U54_ID" '[.[] | select(.user_id==$id)] | length')"
 cek "terarsip: muncul di daftar arsip + tanggal arsip" "V == 1" \
   "$(api "$OWNER" GET "/karyawan?arsip=true" | jq --arg id "$U54_ID" '([.[] | select(.user_id==$id)][0] | (.archived_at != null)) | if . then 1 else 0 end')"
-cek "terarsip: tidak bisa login (403)" "V == 403" \
+# nonaktif = arsip: arsip ikut menonaktifkan akun → login ditolak 401
+cek "terarsip: tidak bisa login (401)" "V == 401" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/auth/login" -H 'Content-Type: application/json' -d '{"email":"arsip54@basooopa.id","password":"PwArsip54!"}')"
 cek "terarsip: kode absen tidak dikenali (404)" "V == 404" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/absensi" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"kode\":\"$KODE54\"}")"
@@ -1682,6 +1683,54 @@ cek "karyawan CK mengirim ke store terhubung → baris pindah" "V == 1" \
 FP58=$(api "$TCK58" POST /produksi/faktur "{\"worker_id\":\"$U58_ID\",\"items\":[{\"ingredient_id\":\"$URATB_ID\",\"mode\":\"pcs\",\"jumlah\":10}]}")
 cek "karyawan CK membuat faktur produksi (pelaksana dirinya)" "V == 1" \
   "$(echo "$FP58" | jq '(.faktur_id != null) | if . then 1 else 0 end')"
+
+echo "== 59. Nonaktif = arsip (satu status): kedua arah saling terikat =="
+api "$OWNER" POST /karyawan "{\"nama\":\"Karyawan Satu Status 59\",\"email\":\"status59@basooopa.id\",\"password\":\"PwStatus59!\",\"role\":\"cashier\",\"branch_id\":\"$PUSAT51_ID\"}" > /dev/null
+U59_ID=$(api "$OWNER" GET /karyawan | jq -r '[.[] | select(.email=="status59@basooopa.id")][0].user_id')
+
+# arah 1: NONAKTIFKAN (is_active:false) → otomatis masuk arsip
+api "$OWNER" PATCH "/karyawan/$U59_ID" '{"is_active":false}' > /dev/null
+cek "nonaktifkan → hilang dari daftar karyawan" "V == 0" \
+  "$(api "$OWNER" GET /karyawan | jq --arg id "$U59_ID" '[.[] | select(.user_id==$id)] | length')"
+cek "nonaktifkan → otomatis masuk arsip (archived_at terisi + nonaktif)" "V == 1" \
+  "$(api "$OWNER" GET "/karyawan?arsip=true" | jq --arg id "$U59_ID" '([.[] | select(.user_id==$id)][0] | (.archived_at != null and .is_active == false)) | if . then 1 else 0 end')"
+cek "nonaktif: login ditolak (401)" "V == 401" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/auth/login" -H 'Content-Type: application/json' -d '{"email":"status59@basooopa.id","password":"PwStatus59!"}')"
+
+# pulihkan via arsip:false → sekaligus aktif kembali
+api "$OWNER" PATCH "/karyawan/$U59_ID" '{"arsip":false}' > /dev/null
+cek "pulihkan (arsip:false) → kembali aktif di daftar" "V == 1" \
+  "$(api "$OWNER" GET /karyawan | jq --arg id "$U59_ID" '([.[] | select(.user_id==$id)][0] | (.is_active == true and .archived_at == null)) | if . then 1 else 0 end')"
+cek "pulihkan: login kembali normal" "V == 1" \
+  "$([ -n "$(login "status59@basooopa.id" "PwStatus59!")" ] && echo 1 || echo 0)"
+
+# arah 2: ARSIPKAN (arsip:true) → otomatis nonaktif; aktifkan (is_active:true) → keluar arsip
+api "$OWNER" PATCH "/karyawan/$U59_ID" '{"arsip":true}' > /dev/null
+cek "arsipkan → otomatis nonaktif (is_active false di arsip)" "V == 1" \
+  "$(api "$OWNER" GET "/karyawan?arsip=true" | jq --arg id "$U59_ID" '([.[] | select(.user_id==$id)][0] | (.is_active == false)) | if . then 1 else 0 end')"
+api "$OWNER" PATCH "/karyawan/$U59_ID" '{"is_active":true}' > /dev/null
+cek "aktifkan (is_active:true) → keluar dari arsip + aktif" "V == 1" \
+  "$(api "$OWNER" GET /karyawan | jq --arg id "$U59_ID" '([.[] | select(.user_id==$id)][0] | (.is_active == true and .archived_at == null)) | if . then 1 else 0 end')"
+cek "aktifkan: login kembali normal" "V == 1" \
+  "$([ -n "$(login "status59@basooopa.id" "PwStatus59!")" ] && echo 1 || echo 0)"
+
+echo "== 60. Kantor pusat data penjualan: GET /penjualan?branch_id=all =="
+# dua transaksi di dua cabang berbeda → kantor melihat keduanya sekaligus
+J60A=$(api "$OWNER" POST /penjualan "{\"branch_id\":\"$PUSAT51_ID\",\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")
+J60B=$(api "$OWNER" POST /penjualan "{\"branch_id\":\"$CB46_ID\",\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")
+N60A=$(echo "$J60A" | jq -r .sale.nomor)
+N60B=$(echo "$J60B" | jq -r .sale.nomor)
+cek "riwayat semua cabang memuat transaksi dua cabang" "V == 2" \
+  "$(api "$OWNER" GET "/penjualan?branch_id=all" | jq --arg a "$N60A" --arg b "$N60B" '[.[] | select(.nomor==$a or .nomor==$b)] | length')"
+cek "riwayat semua cabang menyertakan nama cabang tiap baris" "V == 1" \
+  "$(api "$OWNER" GET "/penjualan?branch_id=all" | jq --arg b "$N60B" '([.[] | select(.nomor==$b)][0].cabang != null) | if . then 1 else 0 end')"
+cek "filter satu cabang tetap bekerja (transaksi cabang lain tak ikut)" "V == 0" \
+  "$(api "$OWNER" GET "/penjualan?branch_id=$PUSAT51_ID" | jq --arg b "$N60B" '[.[] | select(.nomor==$b)] | length')"
+# kasir tetap terkunci: ?branch_id=all diabaikan, hanya cabangnya sendiri
+cek "kasir dgn branch_id=all tetap hanya cabangnya" "V == 0" \
+  "$(api "$KASIR" GET "/penjualan?branch_id=all" | jq --arg b "$N60B" '[.[] | select(.nomor==$b)] | length')"
+cek "kasir dgn branch_id=all masih melihat transaksi cabangnya" "V == 1" \
+  "$(api "$KASIR" GET "/penjualan?branch_id=all" | jq --arg a "$N60A" '[.[] | select(.nomor==$a)] | length')"
 
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="

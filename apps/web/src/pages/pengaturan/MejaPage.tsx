@@ -11,7 +11,8 @@ import {
   btnSecondary,
   inputClass,
 } from "../../components/ui";
-import { useBranch } from "../../context/BranchContext";
+import { CabangDataBar } from "../../components/CabangDataBar";
+import { useCabangData } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 
 interface FormState {
@@ -35,7 +36,8 @@ const clamp = (v: number) => Math.max(4, Math.min(96, Math.round(v)));
  * pemilih cabang.
  */
 export function MejaPage() {
-  const { branchQuery, branchId } = useBranch();
+  // Meja fisik per cabang — dari Kantor pilih cabang yang mejanya diatur.
+  const { query: branchQuery, id: branchId } = useCabangData();
   const queryClient = useQueryClient();
   const { data: meja, isLoading } = useQuery({
     queryKey: ["meja", branchQuery],
@@ -166,6 +168,7 @@ export function MejaPage() {
 
   return (
     <div className="max-w-5xl">
+      <CabangDataBar />
       <PageTitle
         aksi={
           editing ? (

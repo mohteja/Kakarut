@@ -1,10 +1,31 @@
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
-import { NavLink, Outlet } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { labelCabang, useBranch } from "../context/BranchContext";
+import { labelCabang, useBranch, useCabangData } from "../context/BranchContext";
 import { api } from "../lib/api";
 import { useCompanyMode } from "../lib/useCompanyMode";
+
+/** Urutan pemilih lokasi: Kantor (pusat) dulu, lalu Central Kitchen, lalu store. */
+const URUTAN_TIPE = { kantor: 0, central_kitchen: 1, store: 2 } as const;
+
+/**
+ * Halaman yang boleh dibuka per divisi (manajemen mode Pro). Satu perusahaan,
+ * beda divisi: cabang store = menu kasir; Central Kitchen = menu produksi;
+ * Kantor = pusat, semua menu.
+ */
+const BOLEH_STORE = [
+  "/dashboard",
+  "/absen",
+  "/profil",
+  "/kasir",
+  "/menu/lihat",
+  "/pengaturan/meja",
+  "/stok",
+  "/penerimaan",
+  "/pengaturan/printer",
+];
+const BOLEH_CK = ["/absen", "/profil", "/stok", "/penerimaan", "/produksi", "/pembelian", "/bahan"];
 
 const linkClass = ({ isActive }: { isActive: boolean }) =>
   `block rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
@@ -13,17 +34,37 @@ const linkClass = ({ isActive }: { isActive: boolean }) =>
 
 export function Layout() {
   const { auth, logout } = useAuth();
-  const { cabang, branchId, setBranchId, branchQuery } = useBranch();
+  const { cabang, branchId, setBranchId, divisi } = useBranch();
+  // Badge stok/penerimaan mengikuti "cabang data" (dari Kantor = cabang yang
+  // sedang dikelola, sama dengan isi halaman Stok/Penerimaan).
+  const { query: dataQuery } = useCabangData();
   const { isPro } = useCompanyMode();
   const [menuOpen, setMenuOpen] = useState(false);
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  const roleGuard = auth?.user.role;
+  const manajemenGuard = roleGuard === "owner" || roleGuard === "admin";
+  // Divisi store/CK membatasi halaman: tautan lama/bookmark di luar divisi
+  // dialihkan ke beranda divisinya (store → Beranda, CK → Produksi).
+  useEffect(() => {
+    if (!manajemenGuard || !divisi || divisi === "kantor") return;
+    const daftar = divisi === "store" ? BOLEH_STORE : BOLEH_CK;
+    const ok =
+      daftar.some((p) => location.pathname === p || location.pathname.startsWith(`${p}/`)) &&
+      // perencanaan pengadaan (buat faktur produksi/beli) = urusan Kantor/CK,
+      // meski path-nya berawalan /stok
+      !(divisi === "store" && location.pathname === "/stok/tambah-dari-menu");
+    if (!ok) navigate(divisi === "store" ? "/dashboard" : "/produksi", { replace: true });
+  }, [divisi, manajemenGuard, location.pathname, navigate]);
 
   // Jumlah kiriman pembelian yang menunggu diterima → badge di nav "Penerimaan
   // Barang". Pakai ulang GET /penerimaan (key sama dgn PenerimaanPage → cache
   // dedup + auto-update saat kasir terima/tolak). Non-aktif utk super admin
   // (tanpa company). Segarkan berkala karena barang bisa datang kapan saja.
   const { data: pen } = useQuery({
-    queryKey: ["penerimaan", branchQuery],
-    queryFn: () => api<{ rows: { status: string }[] }>(`/penerimaan${branchQuery}`),
+    queryKey: ["penerimaan", dataQuery],
+    queryFn: () => api<{ rows: { status: string }[] }>(`/penerimaan${dataQuery}`),
     enabled: !!auth && !auth.user.is_super_admin,
     refetchInterval: 60_000,
   });
@@ -33,8 +74,8 @@ export function Layout() {
   // (key sama dgn StokPage → cache dedup). Merah bila ada yang habis, kuning
   // bila hanya menipis.
   const { data: stok } = useQuery({
-    queryKey: ["stok", branchQuery],
-    queryFn: () => api<{ status: string }[]>(`/stok${branchQuery}`),
+    queryKey: ["stok", dataQuery],
+    queryFn: () => api<{ status: string }[]>(`/stok${dataQuery}`),
     enabled: !!auth && !auth.user.is_super_admin,
     refetchInterval: 120_000,
   });
@@ -46,6 +87,10 @@ export function Layout() {
   const role = auth.user.role;
   const isSuperAdmin = auth.user.is_super_admin;
   const isManajemen = role === "owner" || role === "admin";
+  // Satu perusahaan, beda divisi: menu sidebar mengikuti jenis lokasi terpilih.
+  const dStore = divisi === "store";
+  const dCk = divisi === "central_kitchen";
+  const penuh = !divisi || divisi === "kantor";
   // Tim: cek stok, lihat menu, profil, penerimaan barang, riwayat transaksi.
   // Karyawan (tim) di CENTRAL KITCHEN menunya beda: profil, produksi bahan
   // baku, beli bahan baku, dan bahan baku.
@@ -119,6 +164,7 @@ export function Layout() {
           >
             {cabang
               .filter((b) => b.is_active)
+              .sort((a, b) => URUTAN_TIPE[a.tipe] - URUTAN_TIPE[b.tipe])
               .map((b) => (
                 <option key={b.id} value={b.id}>
                   {labelCabang(b)}
@@ -144,7 +190,7 @@ export function Layout() {
             </>
           ) : (
             <>
-              {isManajemen && (
+              {isManajemen && !dCk && (
                 <NavLink to="/dashboard" className={linkClass}>
                   🏠 Beranda
                 </NavLink>
@@ -169,27 +215,27 @@ export function Layout() {
                   </NavLink>
                 </>
               )}
-              {!isTim && (
+              {!isTim && !dCk && (
                 <NavLink to="/kasir" className={linkClass}>
                   🧾 Kasir
                 </NavLink>
               )}
-              {!timDiCk && (
+              {!timDiCk && !dCk && (
                 <NavLink to="/kasir/riwayat" className={linkClass}>
                   🕘 Riwayat Transaksi
                 </NavLink>
               )}
-              {!isTim && (
+              {!isTim && !dCk && (
                 <NavLink to="/kasir/tutup" className={linkClass}>
                   🧮 Tutup Kasir
                 </NavLink>
               )}
-              {!timDiCk && (
+              {!timDiCk && !dCk && (
                 <NavLink to="/menu/lihat" className={linkClass}>
                   🍜 Lihat Menu
                 </NavLink>
               )}
-              {!isTim && (
+              {!isTim && !dCk && (
                 <NavLink to="/pengaturan/meja" className={linkClass}>
                   🍽 Meja
                 </NavLink>
@@ -217,12 +263,15 @@ export function Layout() {
                   )}
                 </NavLink>
               )}
-              {!isTim && (
+              {!isTim && !dCk && (
                 <NavLink to="/pengaturan/printer" className={linkClass}>
                   🖨 Printer
                 </NavLink>
               )}
-              {isManajemen && (
+              {/* Divisi store = menu kasir saja; Operasional/Manajemen/
+                  Pengaturan hanya di Kantor (pusat) — Central Kitchen dapat
+                  blok produksinya sendiri. */}
+              {isManajemen && (penuh || dCk) && (
                 <>
                   <div className="mt-4 mb-1 px-3 text-xs font-semibold uppercase tracking-wide text-stone-500">
                     Operasional
@@ -233,12 +282,25 @@ export function Layout() {
                   <NavLink to="/pembelian" className={linkClass}>
                     🛒 Beli Bahan Baku
                   </NavLink>
-                  <NavLink to="/laporan" className={linkClass}>
-                    📊 Laporan
-                  </NavLink>
-                  <NavLink to="/sampah" className={linkClass}>
-                    🗑 Tempat Sampah
-                  </NavLink>
+                  {dCk && (
+                    <NavLink to="/bahan" className={linkClass}>
+                      🥩 Bahan Baku
+                    </NavLink>
+                  )}
+                  {penuh && (
+                    <>
+                      <NavLink to="/laporan" className={linkClass}>
+                        📊 Laporan
+                      </NavLink>
+                      <NavLink to="/sampah" className={linkClass}>
+                        🗑 Tempat Sampah
+                      </NavLink>
+                    </>
+                  )}
+                </>
+              )}
+              {isManajemen && penuh && (
+                <>
                   <div className="mt-4 mb-1 px-3 text-xs font-semibold uppercase tracking-wide text-stone-500">
                     Manajemen
                   </div>

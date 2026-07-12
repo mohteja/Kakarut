@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { BahanDto, JenisPengadaan, PenyimpananDto, SupplierDto } from "@kakarut/shared";
 import {
@@ -11,7 +11,8 @@ import {
   inputClass,
 } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
-import { useBranch } from "../../context/BranchContext";
+import { useCabangData } from "../../context/BranchContext";
+import { CabangDataBar } from "../../components/CabangDataBar";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah } from "../../lib/format";
 
@@ -81,7 +82,8 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
   const endpoint = tipe === "produksi" ? "/produksi" : "/pembelian";
   const navigate = useNavigate();
   const { auth } = useAuth();
-  const { branchQuery, branchId } = useBranch();
+  // Faktur dibuat ATAS satu cabang — dari Kantor pilih cabang kerjanya.
+  const { query: branchQuery, id: branchId } = useCabangData();
   const queryClient = useQueryClient();
   const isKasir = auth?.user.role === "cashier";
   // karyawan CK (tim): faktur dibuat di cabangnya sendiri, pelaksana dirinya
@@ -113,6 +115,16 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
   const [catatan, setCatatan] = useState("");
   const [items, setItems] = useState<ItemForm[]>([{ ...itemKosong }]);
   const [tambahSupplier, setTambahSupplier] = useState(false);
+
+  // Ganti cabang data (dari Kantor) → tempat penyimpanan milik cabang lama
+  // tidak valid lagi di cabang baru; kosongkan agar tidak terkirim diam-diam
+  // (server menolak 400 padahal select tampak belum terisi).
+  const cabangSebelum = useRef(branchId);
+  useEffect(() => {
+    if (cabangSebelum.current === branchId) return;
+    cabangSebelum.current = branchId;
+    setItems((prev) => prev.map((it) => ({ ...it, storage_location_id: "" })));
+  }, [branchId]);
   const [tambahTempat, setTambahTempat] = useState(false);
 
   const supplierBaru = useMutation({
@@ -192,6 +204,7 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
 
   return (
     <div className="max-w-5xl">
+      <CabangDataBar />
       <PageTitle
         aksi={
           <button type="button" onClick={() => navigate(endpoint)} className={btnSecondary}>

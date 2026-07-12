@@ -1,4 +1,4 @@
-import { asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { kodeKaryawanDariNama } from "@kakarut/shared";
 import type { Db, Tx } from "../../db/client";
 import { memberships, users } from "../../db/schema";
@@ -74,6 +74,21 @@ export async function backfillEmployeeCode(dbx: Db | Tx): Promise<number> {
     }
     return terisi;
   });
+}
+
+/**
+ * Nonaktif = arsip: karyawan yang dinonaktifkan sebelum penyatuan status ikut
+ * dipindah ke arsip (dipanggil saat boot; idempoten — hanya baris belum
+ * terarsip milik user nonaktif).
+ */
+export async function arsipkanMembershipNonaktif(dbx: Db | Tx): Promise<number> {
+  const nonaktif = dbx.select({ id: users.id }).from(users).where(eq(users.isActive, false));
+  const rows = await dbx
+    .update(memberships)
+    .set({ archivedAt: new Date() })
+    .where(and(isNull(memberships.archivedAt), inArray(memberships.userId, nonaktif)))
+    .returning({ id: memberships.id });
+  return rows.length;
 }
 
 /** Deteksi bentrok unik kode karyawan (untuk retry pembuatan karyawan). */
