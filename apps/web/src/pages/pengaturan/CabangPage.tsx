@@ -20,9 +20,13 @@ interface FormState {
   id?: string;
   nama: string;
   alamat: string;
+  telepon: string;
   tipe: "store" | "central_kitchen" | "kantor";
   /** CK pemasok (khusus store) — "" = otomatis bila CK cuma satu */
   central_kitchen_id: string;
+  /** struk per cabang — alamat/telepon CABANG inilah yang tercetak */
+  receipt_footer: string;
+  receipt_show_alamat: boolean;
 }
 
 export function CabangPage() {
@@ -36,8 +40,11 @@ export function CabangPage() {
       const body = {
         nama: f.nama,
         alamat: f.alamat || null,
+        telepon: f.telepon || null,
         tipe: f.tipe,
         central_kitchen_id: f.tipe === "store" && f.central_kitchen_id ? f.central_kitchen_id : null,
+        receipt_footer: f.receipt_footer || null,
+        receipt_show_alamat: f.receipt_show_alamat,
       };
       return f.id
         ? api(`/cabang/${f.id}`, { method: "PATCH", body })
@@ -63,51 +70,47 @@ export function CabangPage() {
   const daftarCk = cabang.filter((b) => b.tipe === "central_kitchen" && b.is_active);
   const namaCk = new Map(cabang.map((b) => [b.id, b.nama]));
 
-  // Mode Lite = 1 cabang — halaman ini jadi ajakan upgrade bila diakses langsung.
-  if (!isPro) {
-    return (
-      <div className="max-w-3xl">
-        <PageTitle>Cabang</PageTitle>
-        <Card className="space-y-3 p-6 text-center">
-          <div className="text-4xl">📍</div>
-          <h2 className="text-lg font-bold text-stone-800">Multi-lokasi butuh mode Pro</h2>
-          <p className="mx-auto max-w-md text-sm text-stone-600">
-            Mode Lite dibatasi 1 cabang. Upgrade ke <b>Pro</b> untuk menambah 🏭 Central
-            Kitchen, 🏪 cabang store lain, dan 🏢 Kantor — lengkap dengan kiriman antar
-            lokasi dan menu per lokasi.
-          </p>
-          <Link
-            to="/pengaturan/perusahaan"
-            className="inline-block rounded-lg bg-orange-600 px-4 py-2 text-sm font-semibold text-white hover:bg-orange-700"
-          >
-            ⬆ Upgrade di Pengaturan Perusahaan
-          </Link>
-        </Card>
-      </div>
-    );
-  }
-
   return (
     <div className="max-w-3xl">
       <PageTitle
         aksi={
-          <button
-            onClick={() =>
-              setForm({
-                nama: "",
-                alamat: "",
-                tipe: "store",
-                central_kitchen_id: daftarCk.length === 1 ? daftarCk[0].id : "",
-              })
-            }
-            className={btnPrimary}
-          >
-            + Tambah Cabang
-          </button>
+          // Lite = 1 cabang; tambah cabang butuh Pro
+          isPro ? (
+            <button
+              onClick={() =>
+                setForm({
+                  nama: "",
+                  alamat: "",
+                  telepon: "",
+                  tipe: "store",
+                  central_kitchen_id: daftarCk.length === 1 ? daftarCk[0].id : "",
+                  receipt_footer: "",
+                  receipt_show_alamat: true,
+                })
+              }
+              className={btnPrimary}
+            >
+              + Tambah Cabang
+            </button>
+          ) : undefined
         }
       >
         Cabang
       </PageTitle>
+      {!isPro && (
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-stone-50 px-4 py-3 text-sm text-stone-600">
+          <span>
+            Mode <b>Lite</b> dibatasi 1 cabang — atur alamat &amp; struk cabang di sini.
+            Butuh 🏭 Central Kitchen, cabang lain, atau 🏢 Kantor?
+          </span>
+          <Link
+            to="/pengaturan/perusahaan"
+            className="rounded-lg bg-orange-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-orange-700"
+          >
+            ⬆ Upgrade ke Pro
+          </Link>
+        </div>
+      )}
       <ErrorText error={toggleAktif.error} />
 
       <Card className="overflow-x-auto">
@@ -172,8 +175,11 @@ export function CabangPage() {
                         id: b.id,
                         nama: b.nama,
                         alamat: b.alamat ?? "",
+                        telepon: b.telepon ?? "",
                         tipe: b.tipe,
                         central_kitchen_id: b.central_kitchen_id ?? "",
+                        receipt_footer: b.receipt_footer ?? "",
+                        receipt_show_alamat: b.receipt_show_alamat,
                       })
                     }
                     className="text-sm font-medium text-orange-600 hover:underline"
@@ -205,13 +211,23 @@ export function CabangPage() {
                 className={inputClass}
               />
             </div>
-            <div>
-              <label className="mb-1 block text-sm font-medium">Alamat</label>
-              <input
-                value={form.alamat}
-                onChange={(e) => setForm({ ...form, alamat: e.target.value })}
-                className={inputClass}
-              />
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="mb-1 block text-sm font-medium">Alamat</label>
+                <input
+                  value={form.alamat}
+                  onChange={(e) => setForm({ ...form, alamat: e.target.value })}
+                  className={inputClass}
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium">Telepon</label>
+                <input
+                  value={form.telepon}
+                  onChange={(e) => setForm({ ...form, telepon: e.target.value })}
+                  className={inputClass}
+                />
+              </div>
             </div>
             <div>
               <label className="mb-1 block text-sm font-medium">Jenis cabang</label>
@@ -260,6 +276,34 @@ export function CabangPage() {
                 <p className="mt-1 text-xs text-stone-400">
                   Store terhubung ke <b>satu</b> CK pemasok — hanya CK itu yang mengirim
                   barang ke cabang ini.
+                </p>
+              </div>
+            )}
+            {/* Struk per cabang — kantor tidak berjualan, tak butuh struk */}
+            {form.tipe !== "kantor" && (
+              <div className="rounded-lg border border-stone-200 p-3">
+                <div className="mb-2 text-sm font-semibold text-stone-700">🧾 Struk</div>
+                <label className="mb-1 block text-sm font-medium">Teks footer struk</label>
+                <input
+                  value={form.receipt_footer}
+                  onChange={(e) => setForm({ ...form, receipt_footer: e.target.value })}
+                  maxLength={200}
+                  placeholder="mis. Terima kasih! Ikuti IG @basooopa"
+                  className={inputClass}
+                />
+                <label className="mt-2 flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={form.receipt_show_alamat}
+                    onChange={(e) =>
+                      setForm({ ...form, receipt_show_alamat: e.target.checked })
+                    }
+                  />
+                  Tampilkan alamat &amp; telepon di struk
+                </label>
+                <p className="mt-1 text-xs text-stone-400">
+                  Alamat &amp; telepon <b>cabang ini</b> yang tercetak di struk — bukan
+                  alamat perusahaan.
                 </p>
               </div>
             )}

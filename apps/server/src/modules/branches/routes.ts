@@ -19,6 +19,9 @@ const CabangBody = z.object({
   tipe: z.enum(["store", "central_kitchen", "kantor"]).optional(),
   /** CK pemasok cabang store — wajib satu bila perusahaan punya beberapa CK */
   central_kitchen_id: z.string().uuid().nullish(),
+  /** struk per cabang: footer + tampil/tidaknya alamat & telepon CABANG ini */
+  receipt_footer: z.string().trim().max(200).nullish(),
+  receipt_show_alamat: z.boolean().optional(),
   is_active: z.boolean().optional(),
 });
 
@@ -89,6 +92,8 @@ export const cabangRoutes = new Hono<AppEnv>()
         telepon: r.telepon,
         tipe: r.tipe,
         central_kitchen_id: r.centralKitchenId,
+        receipt_footer: r.receiptFooter,
+        receipt_show_alamat: r.receiptShowAlamat,
         is_active: r.isActive,
       })),
     );
@@ -126,6 +131,10 @@ export const cabangRoutes = new Hono<AppEnv>()
           telepon: body.telepon ?? null,
           tipe,
           centralKitchenId: ckId,
+          receiptFooter: body.receipt_footer ?? null,
+          ...(body.receipt_show_alamat !== undefined && {
+            receiptShowAlamat: body.receipt_show_alamat,
+          }),
         })
         .onConflictDoNothing()
         .returning();
@@ -178,6 +187,10 @@ export const cabangRoutes = new Hono<AppEnv>()
           ...(body.alamat !== undefined && { alamat: body.alamat }),
           ...(body.telepon !== undefined && { telepon: body.telepon }),
           ...(body.tipe !== undefined && { tipe: body.tipe }),
+          ...(body.receipt_footer !== undefined && { receiptFooter: body.receipt_footer }),
+          ...(body.receipt_show_alamat !== undefined && {
+            receiptShowAlamat: body.receipt_show_alamat,
+          }),
           ...(body.is_active !== undefined && { isActive: body.is_active }),
           ...ckPatch,
         })

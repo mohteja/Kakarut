@@ -16,6 +16,7 @@ import { formatRupiah, formatWaktu } from "../../lib/format";
 export interface SaleResult {
   sale: {
     id: string;
+    branchId: string;
     nomor: string;
     subtotal: number;
     diskon: number;
@@ -55,6 +56,15 @@ interface CompanyStruk {
   receiptShowAlamat: boolean;
 }
 
+/** Cabang dari GET /cabang — struk memakai alamat/telepon & footer PER CABANG */
+interface CabangStruk {
+  id: string;
+  alamat: string | null;
+  telepon: string | null;
+  receipt_footer: string | null;
+  receipt_show_alamat: boolean;
+}
+
 export function ReceiptModal({
   data,
   onClose,
@@ -74,6 +84,13 @@ export function ReceiptModal({
     queryKey: ["company"],
     queryFn: () => api<CompanyStruk>("/company"),
   });
+  // Struk per cabang: alamat/telepon & footer dari CABANG transaksi
+  // (fallback ke data perusahaan bila kosong — data lama tetap tercetak benar).
+  const { data: daftarCabang } = useQuery({
+    queryKey: ["cabang"],
+    queryFn: () => api<CabangStruk[]>("/cabang"),
+  });
+  const cabangStruk = daftarCabang?.find((b) => b.id === data.sale.branchId);
   const [printError, setPrintError] = useState<string | null>(null);
   const [printing, setPrinting] = useState(false);
   const [modeHapus, setModeHapus] = useState(false);
@@ -97,14 +114,17 @@ export function ReceiptModal({
     timeZone: "Asia/Jakarta",
   }).format(new Date(data.sale.waktu));
 
-  const showAlamat = company?.receiptShowAlamat ?? true;
-  const footer = company?.receiptFooter?.trim() || "Terima kasih! 🙏";
+  const showAlamat = cabangStruk?.receipt_show_alamat ?? company?.receiptShowAlamat ?? true;
+  const footerRaw = cabangStruk?.receipt_footer ?? company?.receiptFooter ?? null;
+  const footer = footerRaw?.trim() || "Terima kasih! 🙏";
+  const alamatStruk = cabangStruk?.alamat ?? company?.alamat ?? null;
+  const teleponStruk = cabangStruk?.telepon ?? company?.telepon ?? null;
 
   function toReceiptData(): ReceiptData {
     return {
       companyNama: company?.nama ?? auth?.company?.nama ?? "Kakarut POS",
-      alamat: company?.alamat ?? null,
-      telepon: company?.telepon ?? null,
+      alamat: alamatStruk,
+      telepon: teleponStruk,
       showAlamat,
       branchNama: data.branch_nama,
       nomor: data.sale.nomor,
@@ -131,7 +151,7 @@ export function ReceiptModal({
       uangDiterima: data.sale.uangDiterima,
       catatan: data.sale.catatan,
       kasir: data.kasir ?? null,
-      footer: company?.receiptFooter ?? null,
+      footer: footerRaw,
     };
   }
 
@@ -169,8 +189,8 @@ export function ReceiptModal({
             <div className="text-base font-bold">
               {company?.nama ?? auth?.company?.nama ?? "Kakarut POS"}
             </div>
-            {showAlamat && company?.alamat && <div>{company.alamat}</div>}
-            {showAlamat && company?.telepon && <div>Telp: {company.telepon}</div>}
+            {showAlamat && alamatStruk && <div>{alamatStruk}</div>}
+            {showAlamat && teleponStruk && <div>Telp: {teleponStruk}</div>}
             <div>Cabang {data.branch_nama}</div>
             <div className="mt-1">{data.sale.nomor}</div>
             <div>

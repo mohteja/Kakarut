@@ -1587,6 +1587,26 @@ api "$OWNER" PATCH "/karyawan/$U53_ID" '{"is_active":true}' > /dev/null
 cek "admin mengarsipkan akun owner → 403" "V == 403" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X PATCH "$BASE/api/karyawan/$OWN54_ID" -H "Authorization: Bearer $T53" -H 'Content-Type: application/json' -d '{"arsip":true}')"
 
+echo "== 55. Struk per cabang: footer & alamat cabang (bukan perusahaan) =="
+api "$OWNER" PATCH "/cabang/$PUSAT51_ID" '{"alamat":"Jl. Pusat No. 1","telepon":"0811111111","receipt_footer":"Terima kasih dari Pusat!","receipt_show_alamat":true}' > /dev/null
+cek "PATCH struk cabang tersimpan (footer + alamat + telepon)" "V == 1" \
+  "$(api "$OWNER" GET /cabang | jq --arg id "$PUSAT51_ID" '([.[] | select(.id==$id)][0] | (.receipt_footer=="Terima kasih dari Pusat!" and .receipt_show_alamat==true and .alamat=="Jl. Pusat No. 1" and .telepon=="0811111111")) | if . then 1 else 0 end')"
+api "$OWNER" PATCH "/cabang/$PUSAT51_ID" '{"receipt_show_alamat":false}' > /dev/null
+cek "sembunyikan alamat di struk per cabang" "V == 1" \
+  "$(api "$OWNER" GET /cabang | jq --arg id "$PUSAT51_ID" '([.[] | select(.id==$id)][0].receipt_show_alamat == false) | if . then 1 else 0 end')"
+api "$OWNER" PATCH "/cabang/$PUSAT51_ID" '{"receipt_show_alamat":true}' > /dev/null
+
+ST55_ID=$(api "$OWNER" POST /cabang "{\"nama\":\"Store 55\",\"central_kitchen_id\":\"$CK47_ID\",\"receipt_footer\":\"Sampai jumpa di Store 55\"}" | jq -r .id)
+cek "cabang baru langsung membawa footer struknya" "V == 1" \
+  "$(api "$OWNER" GET /cabang | jq --arg id "$ST55_ID" '([.[] | select(.id==$id)][0] | (.receipt_footer=="Sampai jumpa di Store 55" and .receipt_show_alamat==true)) | if . then 1 else 0 end')"
+
+# struk web mengambil cabang via sale.branchId — pastikan respons penjualan memuatnya
+JUAL55=$(api "$KASIR" POST /penjualan "{\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")
+cek "respons penjualan memuat sale.branchId = cabang kasir" "V == 1" \
+  "$(echo "$JUAL55" | jq --arg b "$PUSAT51_ID" '(.sale.branchId == $b) | if . then 1 else 0 end')"
+cek "GET /penjualan/:id juga memuat sale.branchId" "V == 1" \
+  "$(api "$KASIR" GET "/penjualan/$(echo "$JUAL55" | jq -r .sale.id)" | jq --arg b "$PUSAT51_ID" '(.sale.branchId == $b) | if . then 1 else 0 end')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

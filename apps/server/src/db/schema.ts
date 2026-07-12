@@ -119,6 +119,12 @@ export const branches = pgTable(
     centralKitchenId: uuid("central_kitchen_id").references((): AnyPgColumn => branches.id, {
       onDelete: "set null",
     }),
+    /**
+     * Pengaturan struk PER CABANG — alamat/telepon cabang inilah yang tercetak
+     * di struk (perusahaan hanya menyimpan identitas holding/global).
+     */
+    receiptFooter: text("receipt_footer"),
+    receiptShowAlamat: boolean("receipt_show_alamat").notNull().default(true),
     isActive: boolean("is_active").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },

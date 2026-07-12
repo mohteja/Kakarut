@@ -7,6 +7,7 @@ export interface Cabang {
   id: string;
   nama: string;
   alamat: string | null;
+  telepon: string | null;
   /**
    * store = outlet penjualan; central_kitchen = dapur produksi pengirim;
    * kantor = lokasi kerja admin/finance (bukan tujuan kirim barang)
@@ -14,6 +15,9 @@ export interface Cabang {
   tipe: "store" | "central_kitchen" | "kantor";
   /** CK pemasok cabang store — store hanya menerima kiriman dari CK ini */
   central_kitchen_id: string | null;
+  /** struk per cabang: footer + tampil/tidaknya alamat & telepon cabang */
+  receipt_footer: string | null;
+  receipt_show_alamat: boolean;
   is_active: boolean;
 }
 

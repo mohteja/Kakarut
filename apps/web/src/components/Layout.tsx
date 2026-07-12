@@ -218,12 +218,11 @@ export function Layout() {
                   <NavLink to="/pengaturan/perusahaan" className={linkClass}>
                     🏪 Perusahaan
                   </NavLink>
-                  {/* Multi-lokasi khusus mode Pro — Lite cukup 1 cabang */}
-                  {isPro && (
-                    <NavLink to="/pengaturan/cabang" className={linkClass}>
-                      📍 Cabang
-                    </NavLink>
-                  )}
+                  {/* Lite tetap butuh halaman ini: alamat & struk per cabang
+                      (tambah cabang tetap khusus Pro) */}
+                  <NavLink to="/pengaturan/cabang" className={linkClass}>
+                    📍 Cabang
+                  </NavLink>
                   <NavLink to="/pengaturan/karyawan" className={linkClass}>
                     👥 Karyawan
                   </NavLink>
