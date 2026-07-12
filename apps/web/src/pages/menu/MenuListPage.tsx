@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import type { MenuDto } from "@kakarut/shared";
 import {
@@ -10,7 +11,7 @@ import {
   tdClass,
   thClass,
 } from "../../components/ui";
-import { useBranch } from "../../context/BranchContext";
+import { labelCabang, useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatRupiah } from "../../lib/format";
 
@@ -34,11 +35,20 @@ export function MenuListPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["menu"] }),
   });
 
+  // Lihat menu yang diatur untuk cabang tertentu — tanpa baris pembatasan
+  // (branch_ids kosong) berarti tampil di semua lokasi.
+  const [lokasi, setLokasi] = useState<string>("all");
+  const lokasiOpsi = cabang.filter((b) => b.is_active && b.tipe !== "kantor");
+
   if (isLoading) return <Spinner />;
+
+  const tampil = (menus ?? []).filter((m) =>
+    lokasi === "all" ? true : m.branch_ids.length === 0 || m.branch_ids.includes(lokasi),
+  );
 
   // kelompokkan per kategori mengikuti urutan katalog
   const grup = new Map<string, MenuDto[]>();
-  for (const m of menus ?? []) {
+  for (const m of tampil) {
     const list = grup.get(m.kategori) ?? [];
     list.push(m);
     grup.set(m.kategori, list);
@@ -53,8 +63,25 @@ export function MenuListPage() {
           </Link>
         }
       >
-        Menu &amp; HPP ({menus?.length ?? 0})
+        Menu &amp; HPP ({tampil.length})
       </PageTitle>
+      {lokasiOpsi.length > 1 && (
+        <div className="mb-4 flex items-center gap-2 text-sm text-stone-600">
+          <span>Tampil di lokasi:</span>
+          <select
+            value={lokasi}
+            onChange={(e) => setLokasi(e.target.value)}
+            className="rounded-lg border border-stone-300 bg-white px-2 py-1 text-sm"
+          >
+            <option value="all">Semua lokasi</option>
+            {lokasiOpsi.map((b) => (
+              <option key={b.id} value={b.id}>
+                {labelCabang(b)}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
       <ErrorText error={hapus.error} />
 
       {[...grup.entries()].map(([kategori, list]) => (

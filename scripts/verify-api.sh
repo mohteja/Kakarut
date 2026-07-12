@@ -1714,6 +1714,24 @@ cek "aktifkan (is_active:true) → keluar dari arsip + aktif" "V == 1" \
 cek "aktifkan: login kembali normal" "V == 1" \
   "$([ -n "$(login "status59@basooopa.id" "PwStatus59!")" ] && echo 1 || echo 0)"
 
+echo "== 60. Kantor pusat data penjualan: GET /penjualan?branch_id=all =="
+# dua transaksi di dua cabang berbeda → kantor melihat keduanya sekaligus
+J60A=$(api "$OWNER" POST /penjualan "{\"branch_id\":\"$PUSAT51_ID\",\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")
+J60B=$(api "$OWNER" POST /penjualan "{\"branch_id\":\"$CB46_ID\",\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")
+N60A=$(echo "$J60A" | jq -r .sale.nomor)
+N60B=$(echo "$J60B" | jq -r .sale.nomor)
+cek "riwayat semua cabang memuat transaksi dua cabang" "V == 2" \
+  "$(api "$OWNER" GET "/penjualan?branch_id=all" | jq --arg a "$N60A" --arg b "$N60B" '[.[] | select(.nomor==$a or .nomor==$b)] | length')"
+cek "riwayat semua cabang menyertakan nama cabang tiap baris" "V == 1" \
+  "$(api "$OWNER" GET "/penjualan?branch_id=all" | jq --arg b "$N60B" '([.[] | select(.nomor==$b)][0].cabang != null) | if . then 1 else 0 end')"
+cek "filter satu cabang tetap bekerja (transaksi cabang lain tak ikut)" "V == 0" \
+  "$(api "$OWNER" GET "/penjualan?branch_id=$PUSAT51_ID" | jq --arg b "$N60B" '[.[] | select(.nomor==$b)] | length')"
+# kasir tetap terkunci: ?branch_id=all diabaikan, hanya cabangnya sendiri
+cek "kasir dgn branch_id=all tetap hanya cabangnya" "V == 0" \
+  "$(api "$KASIR" GET "/penjualan?branch_id=all" | jq --arg b "$N60B" '[.[] | select(.nomor==$b)] | length')"
+cek "kasir dgn branch_id=all masih melihat transaksi cabangnya" "V == 1" \
+  "$(api "$KASIR" GET "/penjualan?branch_id=all" | jq --arg a "$N60A" '[.[] | select(.nomor==$a)] | length')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

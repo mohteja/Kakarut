@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import type { JenisPengadaan, PenyimpananDto } from "@kakarut/shared";
 import { ErrorText, Modal, btnPrimary, btnSecondary, inputClass, tdClass, thClass } from "../../components/ui";
-import { labelCabang, useBranch } from "../../context/BranchContext";
+import { labelCabang, useBranch, useCabangData } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah } from "../../lib/format";
 import { useCompanyMode } from "../../lib/useCompanyMode";
@@ -45,7 +45,9 @@ export function TahapModal({
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
-  const { cabang, branchId } = useBranch();
+  const { cabang } = useBranch();
+  // Cabang pengirim faktur — dari Kantor mengikuti pilihan cabang data
+  const { id: branchId } = useCabangData();
   const { isPro } = useCompanyMode();
   // CK hanya mengirim ke store yang terhubung dengannya (satu CK per store)
   const cabangIniCk = cabang.find((b) => b.id === branchId)?.tipe === "central_kitchen";

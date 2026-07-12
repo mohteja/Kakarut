@@ -38,14 +38,16 @@ function bangunUrutan(menus: MenuDto[], kategori: Kategori[]): Record<string, st
  */
 export function LihatMenuPage() {
   const { auth } = useAuth();
-  const { branchQuery } = useBranch();
+  const { branchQuery, divisi } = useBranch();
   const queryClient = useQueryClient();
   const namaPerusahaan = auth?.company?.nama ?? "Kakarut POS";
 
   // Menu per lokasi: tampilkan hanya menu yang tersedia di cabang aktif.
+  // Kantor = pusat: katalog PENUH (menu terbatas lokasi tidak boleh hilang).
+  const q = divisi === "kantor" ? "" : branchQuery;
   const { data: menus, isLoading } = useQuery({
-    queryKey: ["menu", branchQuery],
-    queryFn: () => api<MenuDto[]>(`/menu${branchQuery}`),
+    queryKey: ["menu", q],
+    queryFn: () => api<MenuDto[]>(`/menu${q}`),
   });
   const { data: kategori = [] } = useQuery({
     queryKey: ["kategori"],

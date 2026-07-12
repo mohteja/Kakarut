@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type {
   MejaDto,
@@ -12,7 +12,8 @@ import type {
 } from "@kakarut/shared";
 import { Card, ErrorText, Spinner, btnPrimary, btnSecondary } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
-import { useBranch } from "../../context/BranchContext";
+import { useCabangData } from "../../context/BranchContext";
+import { CabangDataBar } from "../../components/CabangDataBar";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah } from "../../lib/format";
 import { ReceiptModal, type SaleResult } from "./ReceiptModal";
@@ -50,7 +51,9 @@ function StokBadge({ porsi, size = "md" }: { porsi: number | null | undefined; s
 
 export function KasirPage() {
   const { auth } = useAuth();
-  const { branchQuery, branchId } = useBranch();
+  // Kasir butuh satu cabang konkret (menu, meja, shift, open bill) — dari
+  // Kantor berjualan atas nama cabang yang dipilih di CabangDataBar.
+  const { query: branchQuery, id: branchId } = useCabangData();
   const queryClient = useQueryClient();
   const isKasir = auth?.user.role === "cashier";
 
@@ -157,6 +160,16 @@ export function KasirPage() {
   useEffect(() => {
     if (mejaId && !mejaAktif.some((m) => m.id === mejaId)) setMejaId(null);
   }, [mejaId, mejaAktif]);
+
+  // Ganti cabang data di tengah sesi (dari Kantor) → keranjang, open bill,
+  // dan data konsumen milik cabang sebelumnya tidak boleh terbawa: transaksi
+  // akan terkirim dengan branch_id BARU sementara isinya dari katalog lama.
+  const cabangSebelum = useRef(branchId);
+  useEffect(() => {
+    if (cabangSebelum.current === branchId) return;
+    cabangSebelum.current = branchId;
+    resetTransaksi();
+  }, [branchId]);
 
   // Reset kotak pencarian tiap modal dibuka.
   useEffect(() => {
@@ -365,7 +378,9 @@ export function KasirPage() {
   if (isLoading) return <Spinner />;
 
   return (
-    <div className="flex flex-col gap-4 md:h-[calc(100vh-3rem)] md:flex-row">
+    <div className="flex flex-col gap-4 md:h-[calc(100vh-3rem)]">
+      <CabangDataBar />
+      <div className="flex min-h-0 flex-1 flex-col gap-4 md:flex-row">
       {/* Katalog — di BAWAH keranjang pada mobile, kiri pada desktop */}
       <div className="order-2 flex min-w-0 flex-col md:order-1 md:flex-1">
         {/* Pencarian menu — di atas kategori */}
@@ -1059,6 +1074,7 @@ export function KasirPage() {
           }}
         />
       )}
+      </div>
     </div>
   );
 }

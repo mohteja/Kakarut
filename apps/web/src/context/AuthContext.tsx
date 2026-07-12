@@ -24,6 +24,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // query key tidak memuat company_id, jadi cache lama = data tenant lama.
       queryClient.clear();
       localStorage.removeItem("kakarut.branch");
+      localStorage.removeItem("kakarut.cabang-data");
       saveAuth(data);
       setAuth(data);
       return data;
@@ -34,6 +35,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(() => {
     saveAuth(null);
     localStorage.removeItem("kakarut.branch");
+    localStorage.removeItem("kakarut.cabang-data");
     queryClient.clear();
     setAuth(null);
   }, [queryClient]);

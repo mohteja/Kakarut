@@ -11,7 +11,8 @@ import type {
   SupplierDto,
 } from "@kakarut/shared";
 import { Card, ErrorText, PageTitle, btnPrimary, btnSecondary, inputClass, tdClass, thClass } from "../../components/ui";
-import { useBranch } from "../../context/BranchContext";
+import { useCabangData } from "../../context/BranchContext";
+import { CabangDataBar } from "../../components/CabangDataBar";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah } from "../../lib/format";
 
@@ -92,7 +93,8 @@ function BagianKurang({ tipe, rows }: { tipe: "produksi" | "beli"; rows: Rencana
  * saldo, lalu menerbitkan faktur produksi & beli otomatis untuk kekurangannya.
  */
 export function TambahStokDariMenuPage() {
-  const { branchQuery } = useBranch();
+  // Rencana dihitung dari stok cabang — dari Kantor pilih cabangnya.
+  const { query: branchQuery } = useCabangData();
   const queryClient = useQueryClient();
 
   // Menu per lokasi: rencana hanya untuk menu yang tersedia di cabang aktif.
@@ -207,6 +209,7 @@ export function TambahStokDariMenuPage() {
 
   return (
     <div>
+      <CabangDataBar />
       <PageTitle
         aksi={
           <Link to="/stok" className={btnSecondary}>

@@ -11,7 +11,8 @@ import {
   btnSecondary,
   inputClass,
 } from "../../components/ui";
-import { useBranch } from "../../context/BranchContext";
+import { useCabangData } from "../../context/BranchContext";
+import { CabangDataBar } from "../../components/CabangDataBar";
 import { api } from "../../lib/api";
 import { formatRupiah, formatTanggalRingkas, formatWaktu } from "../../lib/format";
 
@@ -34,7 +35,8 @@ function Stat({ label, value, warna = "text-stone-800" }: { label: string; value
 
 export function ShiftPage() {
   const qc = useQueryClient();
-  const { branchQuery } = useBranch();
+  // Shift kas berjalan per cabang — dari Kantor pilih cabang kasnya.
+  const { query: branchQuery } = useCabangData();
 
   const { data: aktif, isLoading } = useQuery({
     queryKey: ["shift-aktif", branchQuery],
@@ -84,6 +86,7 @@ export function ShiftPage() {
 
   return (
     <div className="max-w-2xl">
+      <CabangDataBar />
       <PageTitle
         aksi={
           <Link to="/kasir" className={btnSecondary}>

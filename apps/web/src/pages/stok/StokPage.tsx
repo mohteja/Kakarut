@@ -19,8 +19,9 @@ import {
   tdClass,
   thClass,
 } from "../../components/ui";
+import { CabangDataBar } from "../../components/CabangDataBar";
 import { useAuth } from "../../context/AuthContext";
-import { useBranch } from "../../context/BranchContext";
+import { useBranch, useCabangData } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import {
   formatAngka,
@@ -31,7 +32,9 @@ import {
 
 export function StokPage() {
   const { auth } = useAuth();
-  const { branchQuery } = useBranch();
+  const { divisi } = useBranch();
+  // Stok bersifat fisik per cabang — dari Kantor pilih cabang datanya.
+  const { query: branchQuery } = useCabangData();
   const isManajemen = auth?.user.role === "owner" || auth?.user.role === "admin";
   // tim hanya CEK stok — opname/penyesuaian bukan tugasnya
   const isTim = auth?.user.role === "tim";
@@ -97,6 +100,7 @@ export function StokPage() {
 
   return (
     <div>
+      <CabangDataBar />
       <PageTitle
         aksi={
           tab === "bahan" && !isTim ? (
@@ -116,7 +120,8 @@ export function StokPage() {
                 📋 Stok Opname
               </Link>
             </div>
-          ) : isManajemen ? (
+          ) : isManajemen && divisi !== "store" ? (
+            // perencanaan pengadaan = urusan Kantor/CK, bukan divisi store
             <Link to="/stok/tambah-dari-menu" className={btnPrimary}>
               ➕ Tambah Stok dari Menu
             </Link>

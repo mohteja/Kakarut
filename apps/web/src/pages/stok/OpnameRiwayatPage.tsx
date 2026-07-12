@@ -3,7 +3,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import type { OpnameSesiDetail, OpnameSesiRow } from "@kakarut/shared";
 import { Spinner, btnSecondary } from "../../components/ui";
-import { useBranch } from "../../context/BranchContext";
+import { useCabangData } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatAngka, formatWaktu } from "../../lib/format";
 
@@ -76,7 +76,7 @@ function DetailSheet({ sessionId, onClose }: { sessionId: string; onClose: () =>
 
 /** Riwayat sesi opname (mobile-friendly, layar penuh). */
 export function OpnameRiwayatPage() {
-  const { branchQuery } = useBranch();
+  const { query: branchQuery } = useCabangData();
   const [detail, setDetail] = useState<string | null>(null);
 
   const { data: sesi, isLoading } = useQuery({

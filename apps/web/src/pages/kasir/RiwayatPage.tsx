@@ -21,17 +21,19 @@ const METODE_LABEL: Record<string, string> = {
 export function RiwayatPage() {
   const { auth } = useAuth();
   const isManajemen = auth?.user.role === "owner" || auth?.user.role === "admin";
-  const { branchQuery } = useBranch();
+  const { branchQuery, divisi } = useBranch();
   const queryClient = useQueryClient();
   const [tanggal, setTanggal] = useState(hariIniWIB());
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
+  // Kantor = pusat data penjualan: semua transaksi seluruh cabang sekaligus
+  // (cabang menyetor data penjualan ke kantor); divisi lain terkunci lokasinya.
+  const dariKantor = divisi === "kantor";
+  const q = dariKantor ? "?branch_id=all" : branchQuery;
   const { data: rows, isLoading } = useQuery({
-    queryKey: ["riwayat", branchQuery, tanggal],
+    queryKey: ["riwayat", q, tanggal],
     queryFn: () =>
-      api<RiwayatTransaksiRow[]>(
-        `/penjualan${branchQuery ? `${branchQuery}&` : "?"}tanggal=${tanggal}`,
-      ),
+      api<RiwayatTransaksiRow[]>(`/penjualan${q ? `${q}&` : "?"}tanggal=${tanggal}`),
   });
 
   const { data: detail } = useQuery({
@@ -91,6 +93,7 @@ export function RiwayatPage() {
                 <div className="font-semibold text-stone-800">{r.nomor}</div>
                 <div className="truncate text-sm text-stone-500">
                   {formatWaktu(r.waktu)} · {r.jumlah_item} item
+                  {dariKantor && r.cabang && ` · 🏪 ${r.cabang}`}
                   {r.meja && ` · ${r.meja}`}
                   {r.kasir && ` · ${r.kasir}`}
                   {` · ${METODE_LABEL[r.metode] ?? r.metode}`}

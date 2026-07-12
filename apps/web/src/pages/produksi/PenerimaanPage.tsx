@@ -12,7 +12,8 @@ import {
   tdClass,
   thClass,
 } from "../../components/ui";
-import { useBranch } from "../../context/BranchContext";
+import { useCabangData } from "../../context/BranchContext";
+import { CabangDataBar } from "../../components/CabangDataBar";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah, formatTanggalRingkas, formatWaktu } from "../../lib/format";
 
@@ -56,7 +57,8 @@ interface KirimanGroup {
  * Dapat diakses semua peran; kasir terkunci ke cabangnya.
  */
 export function PenerimaanPage() {
-  const { branchQuery } = useBranch();
+  // Kiriman diterima di cabang tujuan — dari Kantor pilih cabang datanya.
+  const { query: branchQuery } = useCabangData();
   const queryClient = useQueryClient();
 
   const { data, isLoading } = useQuery({
@@ -145,6 +147,7 @@ export function PenerimaanPage() {
 
   return (
     <div className="max-w-4xl">
+      <CabangDataBar />
       <PageTitle>Penerimaan Barang</PageTitle>
       <div className="mb-4 text-sm text-stone-500">
         Kiriman pembelian yang sudah <b>dikirim ke toko</b> diterima di sini. Bila barang
