@@ -1108,6 +1108,42 @@ cek "saldo bahan kurang tak berubah (masih rencana)" "abs(V - $KURANG_SALDO) < 0
   "$(echo "$S40" | jq --arg id "$KURANG_ID" '[.[] | select(.ingredient_id == $id)][0].saldo')"
 cek "bahan kurang tampil sbg stok berjalan (produksi/beli)" "V == 1" \
   "$(echo "$S40" | jq --arg id "$KURANG_ID" '([.[] | select(.ingredient_id == $id)][0] | ((.produksi_berjalan.qty // 0) + (.pembelian_berjalan.qty // 0)) > 0) | if . then 1 else 0 end')"
+echo "== 41. Pembulatan pembelian per kemasan (boleh_eceran) =="
+# default: bahan beli TIDAK boleh eceran → dibulatkan per kemasan
+BHN41=$(api "$OWNER" GET /bahan)
+PLASTIK41_ID=$(echo "$BHN41" | jq -r '[.[] | select(.slug == "plastik take away")][0].id')
+cek "bahan beli default boleh_eceran=false" "V == 1" \
+  "$(echo "$BHN41" | jq '([.[] | select(.pengadaan == "beli")] | length > 0 and ([.[] | select(.pengadaan == "beli") | select(.boleh_eceran == true)] | length == 0)) | if . then 1 else 0 end')"
+# preview rencana: semua baris beli isi>1 yang kurang → mode batch (kemasan), qty = jumlah×isi
+PRV41=$(api "$OWNER" POST /rekomendasi/menu "{\"items\":[{\"menu_id\":\"$PBA_ID\",\"porsi\":500}]}")
+cek "preview: beli isi>1 kurang → mode kemasan (batch)" "V == 1" \
+  "$(echo "$PRV41" | jq 'def ab: if . < 0 then -. else . end;
+    ([.bahan[] | select(.kurang > 0 and .pengadaan == "beli" and .isi > 1)] | length > 0) and
+    ([.bahan[] | select(.kurang > 0 and .pengadaan == "beli" and .isi > 1)
+       | select(.mode_faktur != "batch" or (((.qty_faktur // 0) - (.jumlah_faktur // 0) * .isi)|ab) > 0.001)] | length == 0)
+    | if . then 1 else 0 end')"
+# rekomendasi beli: baris ikut terbulatkan + estimasi dari qty terbulatkan
+RK41=$(api "$OWNER" GET "/rekomendasi/beli?acuan=7hari&target=50000000")
+cek "rekomendasi: jumlah_faktur = ⌈saran/isi⌉ utk beli isi>1" "V == 1" \
+  "$(echo "$RK41" | jq 'def ab: if . < 0 then -. else . end;
+    ([.bahan[] | select(.pengadaan == "beli" and .isi > 1 and (.saran_beli // 0) > 0.001)]) as $rows
+    | (($rows | length) == 0) or
+      ([$rows[] | select(.mode_faktur != "batch" or ((.jumlah_faktur // 0) - ((.saran_beli / .isi) | ceil) | ab) > 0.001
+         or (((.estimasi_biaya // 0) - ((.qty_faktur // 0) * .harga_per_unit | round))|ab) > 1)] | length == 0)
+    | if . then 1 else 0 end')"
+# flip eceran: plastik boleh eceran → preview kembali per pcs
+api "$OWNER" PUT "/bahan/$PLASTIK41_ID" '{"boleh_eceran":true}' > /dev/null
+cek "PUT bahan boleh_eceran=true tersimpan" "V == 1" \
+  "$(api "$OWNER" GET /bahan | jq --arg id "$PLASTIK41_ID" '([.[] | select(.id == $id)][0].boleh_eceran == true) | if . then 1 else 0 end')"
+PRV41B=$(api "$OWNER" POST /rekomendasi/menu "{\"items\":[{\"menu_id\":\"$PBA_ID\",\"porsi\":500}]}")
+cek "eceran: baris plastik kembali mode pcs (⌈kurang⌉)" "V == 1" \
+  "$(echo "$PRV41B" | jq --arg id "$PLASTIK41_ID" 'def ab: if . < 0 then -. else . end;
+    ([.bahan[] | select(.ingredient_id == $id and .kurang > 0)]) as $r
+    | (($r | length) == 0) or ($r[0].mode_faktur == "pcs" and ((($r[0].qty_faktur // 0) - ($r[0].kurang | ceil))|ab) < 0.001)
+    | if . then 1 else 0 end')"
+# kembalikan ke default agar skrip idempotent
+api "$OWNER" PUT "/bahan/$PLASTIK41_ID" '{"boleh_eceran":false}' > /dev/null
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

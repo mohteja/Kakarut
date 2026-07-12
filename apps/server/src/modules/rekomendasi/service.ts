@@ -1,10 +1,12 @@
 import { and, desc, eq, gte, isNull, lte, sum } from "drizzle-orm";
-import type {
-  AcuanJenis,
-  AcuanPeriode,
-  MenuTerlaris,
-  RekomendasiBahanRow,
-  RekomendasiBeli,
+import {
+  jumlahFaktur,
+  kekuranganBahan,
+  type AcuanJenis,
+  type AcuanPeriode,
+  type MenuTerlaris,
+  type RekomendasiBahanRow,
+  type RekomendasiBeli,
 } from "@kakarut/shared";
 import { db } from "../../db/client";
 import { ingredients, saleConsumptions, saleItems, sales } from "../../db/schema";
@@ -157,6 +159,7 @@ export async function rekomendasiBeli(
         pengadaan: ingredients.pengadaan,
         hargaBeli: ingredients.hargaBeli,
         isi: ingredients.isi,
+        bolehEceran: ingredients.bolehEceran,
       })
       .from(ingredients)
       .where(eq(ingredients.companyId, companyId)),
@@ -172,6 +175,14 @@ export async function rekomendasiBeli(
     const acuan_qty = refCons.get(s.ingredient_id) ?? 0;
     const kebutuhan = omzet > 0 ? acuan_qty * (target / omzet) : null;
     const saran_beli = kebutuhan != null ? Math.max(0, kebutuhan - s.saldo) : null;
+    // Saran TERBULATKAN mengikuti kemasan/batch — aturan yang sama dengan
+    // faktur otomatis rencana-dari-menu: toko menjual per kemasan `isi`;
+    // bahan boleh_eceran tetap per pcs. Epsilon float via kekuranganBahan.
+    const kurang = kebutuhan != null ? kekuranganBahan(kebutuhan, s.saldo) : 0;
+    const faktur =
+      kurang > 0
+        ? jumlahFaktur(kurang, e?.pengadaan ?? "beli", s.isi, e?.bolehEceran ?? false)
+        : null;
     return {
       ingredient_id: s.ingredient_id,
       nama: s.nama,
@@ -183,8 +194,16 @@ export async function rekomendasiBeli(
       acuan_qty,
       kebutuhan,
       saran_beli,
+      isi: s.isi,
+      mode_faktur: faktur?.mode ?? null,
+      jumlah_faktur: faktur?.jumlah ?? null,
+      qty_faktur: faktur?.qty ?? null,
       harga_per_unit,
-      estimasi_biaya: saran_beli != null ? saran_beli * harga_per_unit : null,
+      estimasi_biaya: faktur
+        ? Math.round(faktur.qty * harga_per_unit)
+        : saran_beli != null
+          ? 0
+          : null,
     };
   });
 

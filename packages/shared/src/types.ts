@@ -35,6 +35,8 @@ export interface BahanDto {
   catatan: string | null;
   is_packaging: boolean;
   is_complement: boolean;
+  /** boleh dibeli eceran per pcs; false = pembulatan per kemasan `isi` (jalur beli) */
+  boleh_eceran: boolean;
   is_active: boolean;
 }
 
@@ -241,10 +243,17 @@ export interface RekomendasiBahanRow {
   acuan_qty: number;
   /** kebutuhan untuk mencapai target (null bila omzet acuan 0) */
   kebutuhan: number | null;
-  /** maks(0, kebutuhan − sisa); null bila tak bisa dihitung */
+  /** maks(0, kebutuhan − sisa) MENTAH (belum dibulatkan); null bila tak bisa dihitung */
   saran_beli: number | null;
+  /** isi per kemasan (beli) / hasil per batch (produksi) */
+  isi: number;
+  /** saran terbulatkan mengikuti faktur otomatis: "batch" = kemasan/batch penuh */
+  mode_faktur: "pcs" | "batch" | null;
+  jumlah_faktur: number | null;
+  /** kuantitas riil bila saran dibeli (jumlah × isi utk kemasan/batch) */
+  qty_faktur: number | null;
   harga_per_unit: number;
-  /** saran_beli × harga_per_unit */
+  /** round(qty_faktur × harga_per_unit) — dari kuantitas terbulatkan */
   estimasi_biaya: number | null;
 }
 

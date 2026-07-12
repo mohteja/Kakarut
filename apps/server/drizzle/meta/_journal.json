@@ -183,6 +183,13 @@
       "when": 1783780617398,
       "tag": "0025_smart_rhino",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1783828234998,
+      "tag": "0026_plain_peter_parker",
+      "breakpoints": true
     }
   ]
 }

@@ -248,6 +248,13 @@ export const ingredients = pgTable(
     catatan: text("catatan"),
     isPackaging: boolean("is_packaging").notNull().default(false),
     isComplement: boolean("is_complement").notNull().default(false),
+    /**
+     * boleh dibeli ECERAN (per pcs/gr). false (default) = pembelian mengikuti
+     * kemasan toko: saran beli & faktur otomatis dibulatkan ke atas per
+     * kemasan `isi`. Hanya relevan untuk jalur pengadaan "beli" (produksi
+     * selalu per batch).
+     */
+    bolehEceran: boolean("boleh_eceran").notNull().default(false),
     isActive: boolean("is_active").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

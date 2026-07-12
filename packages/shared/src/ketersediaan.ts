@@ -90,15 +90,22 @@ export function kekuranganBahan(butuh: number, saldo: number): number {
  * Terjemahkan KEKURANGAN bahan menjadi baris faktur:
  * - jalur produksi & isi > 1 → mode "batch", jumlah = ⌈kurang ÷ isi⌉
  *   (produksi nyata terjadi per batch penuh);
- * - selainnya → mode "pcs", jumlah = ⌈kurang⌉ (bulat ke atas, tak beli pecahan).
- * `qty` = kuantitas riil yang masuk stok (jumlah × isi untuk batch).
+ * - jalur beli & isi > 1 & TIDAK boleh eceran → mode "batch" juga, karena toko
+ *   menjual per kemasan (`isi` = isi per kemasan) — jumlah = ⌈kurang ÷ isi⌉
+ *   kemasan (label UI: "kemasan");
+ * - selainnya (isi = 1, atau beli yang boleh eceran) → mode "pcs",
+ *   jumlah = ⌈kurang⌉ (bulat ke atas, tak beli pecahan).
+ * `qty` = kuantitas riil yang masuk stok (jumlah × isi untuk batch/kemasan).
  */
 export function jumlahFaktur(
   kurang: number,
   pengadaan: "produksi" | "beli",
   isi: number,
+  /** hanya berlaku untuk jalur beli; produksi selalu per batch bila isi > 1 */
+  bolehEceran: boolean,
 ): { mode: "pcs" | "batch"; jumlah: number; qty: number } {
-  if (pengadaan === "produksi" && isi > 1) {
+  const perKemasan = isi > 1 && (pengadaan === "produksi" || !bolehEceran);
+  if (perKemasan) {
     const jumlah = Math.max(1, Math.ceil(kurang / isi));
     return { mode: "batch", jumlah, qty: jumlah * isi };
   }

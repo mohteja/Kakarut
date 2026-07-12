@@ -324,7 +324,7 @@ export function TambahStokDariMenuPage() {
                           </td>
                           <td className={`${tdClass} whitespace-nowrap`}>
                             {b.jumlah_faktur != null
-                              ? `${formatAngka(b.jumlah_faktur)} ${b.mode_faktur === "batch" ? `batch (=${formatAngka(b.qty_faktur ?? 0)} ${b.satuan})` : b.satuan}`
+                              ? `${formatAngka(b.jumlah_faktur)} ${b.mode_faktur === "batch" ? `${b.pengadaan === "beli" ? "kemasan" : "batch"} (=${formatAngka(b.qty_faktur ?? 0)} ${b.satuan})` : b.satuan}`
                               : "—"}
                           </td>
                           <td className={`${tdClass} text-right`}>

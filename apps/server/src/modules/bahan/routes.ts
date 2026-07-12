@@ -24,6 +24,8 @@ const BahanBody = z.object({
   catatan: z.string().nullish(),
   is_packaging: z.boolean().default(false),
   is_complement: z.boolean().default(false),
+  /** boleh dibeli eceran per pcs; false = pembulatan per kemasan `isi` (jalur beli) */
+  boleh_eceran: z.boolean().default(false),
 });
 
 function toDto(row: typeof ingredients.$inferSelect): BahanDto {
@@ -42,6 +44,7 @@ function toDto(row: typeof ingredients.$inferSelect): BahanDto {
     catatan: row.catatan,
     is_packaging: row.isPackaging,
     is_complement: row.isComplement,
+    boleh_eceran: row.bolehEceran,
     is_active: row.isActive,
   };
 }
@@ -86,6 +89,7 @@ export const bahanRoutes = new Hono<AppEnv>()
         catatan: body.catatan ?? null,
         isPackaging: body.is_packaging,
         isComplement: body.is_complement,
+        bolehEceran: body.boleh_eceran,
       })
       .returning();
     return c.json(toDto(row), 201);
@@ -111,6 +115,7 @@ export const bahanRoutes = new Hono<AppEnv>()
           ...(body.catatan !== undefined && { catatan: body.catatan }),
           ...(body.is_packaging !== undefined && { isPackaging: body.is_packaging }),
           ...(body.is_complement !== undefined && { isComplement: body.is_complement }),
+          ...(body.boleh_eceran !== undefined && { bolehEceran: body.boleh_eceran }),
           updatedAt: new Date(),
         })
         .where(
