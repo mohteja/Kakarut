@@ -1144,6 +1144,59 @@ cek "eceran: baris plastik kembali mode pcs (⌈kurang⌉)" "V == 1" \
 # kembalikan ke default agar skrip idempotent
 api "$OWNER" PUT "/bahan/$PLASTIK41_ID" '{"boleh_eceran":false}' > /dev/null
 
+echo "== 42. Ubah tahap sebagian (dropdown): split baris + sisa tugas =="
+# faktur beli 2 baris: A 10 pcs @50rb, B 8 pcs @40rb
+BHN42=$(api "$OWNER" GET /bahan)
+ING42A=$(echo "$BHN42" | jq -r '[.[] | select(.pengadaan=="beli" and .track_stok==true)][0].id')
+ING42B=$(echo "$BHN42" | jq -r '[.[] | select(.pengadaan=="beli" and .track_stok==true)][1].id')
+SA42_0=$(saldo_bahan "$ING42A"); SB42_0=$(saldo_bahan "$ING42B")
+FK42=$(api "$OWNER" POST /pembelian/faktur "{\"items\":[{\"ingredient_id\":\"$ING42A\",\"mode\":\"pcs\",\"jumlah\":10,\"total_harga\":50000},{\"ingredient_id\":\"$ING42B\",\"mode\":\"pcs\",\"jumlah\":8,\"total_harga\":40000}]}")
+FK42_ID=$(echo "$FK42" | jq -r .faktur_id)
+baris42() { api "$OWNER" GET "/pembelian?per_page=500" | jq --arg f "$FK42_ID" '[.rows[] | select(.faktur_id==$f)]'; }
+ID42A=$(baris42 | jq -r --arg i "$ING42A" '[.[] | select(.ingredient_id==$i)][0].id')
+ID42B=$(baris42 | jq -r --arg i "$ING42B" '[.[] | select(.ingredient_id==$i)][0].id')
+
+# 1) maju sebagian: hanya baris A (penuh) → dikerjakan; B tetap RAB (sisa tugas)
+api "$OWNER" POST "/pembelian/tahap/$FK42_ID" "{\"ke\":\"dikerjakan\",\"items\":[{\"id\":\"$ID42A\",\"qty\":10}]}" > /dev/null
+cek "sebagian: baris A maju, baris B tetap rencana" "V == 1" \
+  "$(baris42 | jq --arg a "$ID42A" --arg b "$ID42B" '(([.[] | select(.id==$a)][0].status == "dikerjakan") and ([.[] | select(.id==$b)][0].status == "rencana")) | if . then 1 else 0 end')"
+
+# 2) split qty: B maju 3 dari 8 → dua baris (3 dikerjakan + 5 rencana), Σqty & Σharga tetap
+api "$OWNER" POST "/pembelian/tahap/$FK42_ID" "{\"ke\":\"dikerjakan\",\"items\":[{\"id\":\"$ID42B\",\"qty\":3}]}" > /dev/null
+B42=$(baris42 | jq --arg i "$ING42B" '[.[] | select(.ingredient_id==$i)]')
+cek "split: baris B jadi 2" "V == 2" "$(echo "$B42" | jq 'length')"
+cek "split: Σqty B tetap 8" "abs(V - 8) < 0.001" "$(echo "$B42" | jq '[.[].qty] | add')"
+cek "split: Σharga B tetap 40000" "abs(V - 40000) < 0.5" "$(echo "$B42" | jq '[.[].total_harga] | add')"
+cek "split: 3 dikerjakan + 5 rencana" "V == 1" \
+  "$(echo "$B42" | jq '((([.[] | select(.status=="dikerjakan")][0].qty // 0) == 3) and (([.[] | select(.status=="rencana")][0].qty // 0) == 5)) | if . then 1 else 0 end')"
+
+# 3) dgn items boleh lompat maju: sisa B (rencana) langsung → menunggu (dikirim)
+ID42B2=$(echo "$B42" | jq -r '[.[] | select(.status=="rencana")][0].id')
+api "$OWNER" POST "/pembelian/tahap/$FK42_ID" "{\"ke\":\"menunggu\",\"items\":[{\"id\":\"$ID42B2\",\"qty\":5}]}" > /dev/null
+cek "items: lompat maju rencana→menunggu diizinkan" "V == 1" \
+  "$(baris42 | jq --arg b "$ID42B2" '([.[] | select(.id==$b)][0].status == "menunggu") | if . then 1 else 0 end')"
+
+# 4) penjaga: mundur ditolak, qty melebihi ditolak, baris asing ditolak, dikonfirmasi tanpa items ditolak
+cek "tahap mundur (menunggu→dikerjakan) → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/pembelian/tahap/$FK42_ID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"ke\":\"dikerjakan\",\"items\":[{\"id\":\"$ID42B2\",\"qty\":5}]}")"
+cek "qty maju melebihi qty baris → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/pembelian/tahap/$FK42_ID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"ke\":\"menunggu\",\"items\":[{\"id\":\"$ID42A\",\"qty\":999}]}")"
+cek "baris bukan milik faktur → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/pembelian/tahap/$FK42_ID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"ke":"menunggu","items":[{"id":"00000000-0000-4000-8000-000000000000","qty":1}]}')"
+cek "ke=dikonfirmasi tanpa items → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/pembelian/tahap/$FK42_ID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"ke":"dikonfirmasi"}')"
+
+# 5) konfirmasi SEBAGIAN baris A (4 dari 10) → split + hanya 4 yang masuk saldo
+api "$OWNER" POST "/pembelian/tahap/$FK42_ID" "{\"ke\":\"dikonfirmasi\",\"items\":[{\"id\":\"$ID42A\",\"qty\":4}]}" > /dev/null
+SA42_1=$(saldo_bahan "$ING42A"); SB42_1=$(saldo_bahan "$ING42B")
+cek "konfirmasi sebagian: saldo A +4 saja" "abs(V - 4) < 0.001" "$(python3 -c "print($SA42_1 - $SA42_0)")"
+cek "saldo B belum berubah (belum dikonfirmasi)" "abs(V) < 0.001" "$(python3 -c "print($SB42_1 - $SB42_0)")"
+A42=$(baris42 | jq --arg i "$ING42A" '[.[] | select(.ingredient_id==$i)]')
+cek "A: 4 dikonfirmasi (harga prorata 20000)" "V == 1" \
+  "$(echo "$A42" | jq '([.[] | select(.status=="dikonfirmasi")][0] | (.qty == 4 and .total_harga == 20000)) | if . then 1 else 0 end')"
+cek "A: sisa tugas 6 dikerjakan (harga 30000)" "V == 1" \
+  "$(echo "$A42" | jq '([.[] | select(.status=="dikerjakan")][0] | (.qty == 6 and .total_harga == 30000)) | if . then 1 else 0 end')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]
