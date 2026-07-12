@@ -149,6 +149,12 @@ export const memberships = pgTable(
     branchId: uuid("branch_id").references(() => branches.id),
     /** kode karyawan (untuk absensi via kode/QR) — unik per perusahaan, digenerate otomatis */
     employeeCode: text("employee_code"),
+    /**
+     * Arsip karyawan: terisi = keluar dari daftar & tidak bisa login/absen di
+     * perusahaan ini, tapi riwayat (log, faktur, absensi) tetap tersimpan.
+     * Bisa dipulihkan dengan mengosongkan kembali.
+     */
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

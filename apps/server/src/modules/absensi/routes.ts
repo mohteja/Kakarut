@@ -1,5 +1,5 @@
 import { zValidator } from "@hono/zod-validator";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
@@ -41,6 +41,7 @@ export const absensiRoutes = new Hono<AppEnv>()
     const kode = c.req.valid("json").kode.trim();
 
     // Resolusi karyawan lewat kode (case-insensitive) dalam perusahaan pemanggil.
+    // Karyawan terarsip diperlakukan seperti tidak ditemukan (sudah keluar).
     const [m] = await db
       .select({
         userId: memberships.userId,
@@ -54,6 +55,7 @@ export const absensiRoutes = new Hono<AppEnv>()
         and(
           eq(memberships.companyId, auth.company_id!),
           sql`upper(${memberships.employeeCode}) = upper(${kode})`,
+          isNull(memberships.archivedAt),
         ),
       );
     if (!m) throw new HTTPException(404, { message: `Kode karyawan "${kode}" tidak ditemukan` });

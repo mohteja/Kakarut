@@ -1,6 +1,6 @@
 import { zValidator } from "@hono/zod-validator";
 import bcrypt from "bcryptjs";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import jwt from "jsonwebtoken";
@@ -37,11 +37,18 @@ export const authRoutes = new Hono<AppEnv>()
     let branch: { id: string; nama: string } | null = null;
 
     if (!user.isSuperAdmin) {
+      // membership terarsip = karyawan sudah dikeluarkan → tidak bisa masuk
       const [m] = await db
         .select()
         .from(memberships)
         .innerJoin(companies, eq(memberships.companyId, companies.id))
-        .where(and(eq(memberships.userId, user.id), eq(companies.isActive, true)));
+        .where(
+          and(
+            eq(memberships.userId, user.id),
+            eq(companies.isActive, true),
+            isNull(memberships.archivedAt),
+          ),
+        );
       if (!m) {
         throw new HTTPException(403, {
           message: "Akun tidak terhubung ke perusahaan aktif mana pun",

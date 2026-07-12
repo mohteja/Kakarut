@@ -1,6 +1,6 @@
 import { zValidator } from "@hono/zod-validator";
 import bcrypt from "bcryptjs";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNotNull, isNull, ne } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
@@ -24,6 +24,8 @@ const PatchKaryawanBody = z.object({
   branch_id: z.string().uuid().nullish().optional(),
   is_active: z.boolean().optional(),
   password: z.string().min(8).optional(),
+  /** true = arsipkan (keluar dari daftar, riwayat tetap); false = pulihkan */
+  arsip: z.boolean().optional(),
 });
 
 async function pastikanCabangMilikPerusahaan(branchId: string, companyId: string) {
@@ -37,6 +39,8 @@ async function pastikanCabangMilikPerusahaan(branchId: string, companyId: string
 export const karyawanRoutes = new Hono<AppEnv>()
   .get("/", async (c) => {
     const auth = c.get("auth");
+    // default = karyawan berjalan; ?arsip=true = yang sudah diarsipkan (keluar)
+    const lihatArsip = c.req.query("arsip") === "true";
     const rows = await db
       .select({
         user_id: users.id,
@@ -47,11 +51,17 @@ export const karyawanRoutes = new Hono<AppEnv>()
         branch_id: memberships.branchId,
         cabang: branches.nama,
         employee_code: memberships.employeeCode,
+        archived_at: memberships.archivedAt,
       })
       .from(memberships)
       .innerJoin(users, eq(memberships.userId, users.id))
       .leftJoin(branches, eq(memberships.branchId, branches.id))
-      .where(eq(memberships.companyId, auth.company_id!));
+      .where(
+        and(
+          eq(memberships.companyId, auth.company_id!),
+          lihatArsip ? isNotNull(memberships.archivedAt) : isNull(memberships.archivedAt),
+        ),
+      );
     return c.json(rows);
   })
   .post("/", zValidator("json", KaryawanBody), async (c) => {
@@ -152,6 +162,32 @@ export const karyawanRoutes = new Hono<AppEnv>()
       }
     }
 
+    // Jangan mengunci diri sendiri: nonaktif/arsip akun sendiri ditolak.
+    if (userId === auth.sub && (body.is_active === false || body.arsip === true)) {
+      throw new HTTPException(400, {
+        message: "Tidak bisa menonaktifkan/mengarsipkan akun sendiri",
+      });
+    }
+    // Perusahaan tidak boleh kehilangan owner terakhir yang masih berjalan.
+    if (body.arsip === true && member.role === "owner") {
+      const ownerLain = await db
+        .select({ id: memberships.id })
+        .from(memberships)
+        .where(
+          and(
+            eq(memberships.companyId, auth.company_id!),
+            eq(memberships.role, "owner"),
+            isNull(memberships.archivedAt),
+            ne(memberships.userId, userId),
+          ),
+        );
+      if (ownerLain.length === 0) {
+        throw new HTTPException(400, {
+          message: "Tidak bisa mengarsipkan owner terakhir perusahaan",
+        });
+      }
+    }
+
     const targetRole = body.role ?? member.role;
     const targetBranch =
       body.branch_id !== undefined ? body.branch_id : member.branchId;
@@ -172,10 +208,16 @@ export const karyawanRoutes = new Hono<AppEnv>()
     }
 
     await db.transaction(async (tx) => {
-      if (body.role !== undefined || body.branch_id !== undefined) {
+      if (body.role !== undefined || body.branch_id !== undefined || body.arsip !== undefined) {
         await tx
           .update(memberships)
-          .set({ role: targetRole, branchId: targetBranch ?? null })
+          .set({
+            role: targetRole,
+            branchId: targetBranch ?? null,
+            ...(body.arsip !== undefined && {
+              archivedAt: body.arsip ? new Date() : null,
+            }),
+          })
           .where(eq(memberships.id, member.id));
       }
       if (

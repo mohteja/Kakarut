@@ -1551,6 +1551,42 @@ api "$OWNER" PATCH "/karyawan/$U53_ID" '{"is_active":false}' > /dev/null
 cek "akun nonaktif tidak bisa login (401)" "V == 401" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/auth/login" -H 'Content-Type: application/json' -d '{"email":"edit53b@basooopa.id","password":"PwEdit53Baru!"}')"
 
+echo "== 54. Nonaktifkan & arsip karyawan (keluar; riwayat tetap; bisa dipulihkan) =="
+api "$OWNER" POST /karyawan "{\"nama\":\"Karyawan Arsip 54\",\"email\":\"arsip54@basooopa.id\",\"password\":\"PwArsip54!\",\"role\":\"cashier\",\"branch_id\":\"$PUSAT51_ID\"}" > /dev/null
+U54_ID=$(api "$OWNER" GET /karyawan | jq -r '[.[] | select(.email=="arsip54@basooopa.id")][0].user_id')
+KODE54=$(api "$OWNER" GET /karyawan | jq -r '[.[] | select(.email=="arsip54@basooopa.id")][0].employee_code')
+cek "karyawan uji bisa login sebelum diarsipkan" "V == 1" \
+  "$([ -n "$(login "arsip54@basooopa.id" "PwArsip54!")" ] && echo 1 || echo 0)"
+
+api "$OWNER" PATCH "/karyawan/$U54_ID" '{"arsip":true}' > /dev/null
+cek "terarsip: hilang dari daftar karyawan" "V == 0" \
+  "$(api "$OWNER" GET /karyawan | jq --arg id "$U54_ID" '[.[] | select(.user_id==$id)] | length')"
+cek "terarsip: muncul di daftar arsip + tanggal arsip" "V == 1" \
+  "$(api "$OWNER" GET "/karyawan?arsip=true" | jq --arg id "$U54_ID" '([.[] | select(.user_id==$id)][0] | (.archived_at != null)) | if . then 1 else 0 end')"
+cek "terarsip: tidak bisa login (403)" "V == 403" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/auth/login" -H 'Content-Type: application/json' -d '{"email":"arsip54@basooopa.id","password":"PwArsip54!"}')"
+cek "terarsip: kode absen tidak dikenali (404)" "V == 404" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/absensi" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"kode\":\"$KODE54\"}")"
+
+# pulihkan → kembali ke daftar dgn kode sama, login & absen normal lagi
+api "$OWNER" PATCH "/karyawan/$U54_ID" '{"arsip":false}' > /dev/null
+cek "dipulihkan: kembali ke daftar dgn kode sama" "V == 1" \
+  "$(api "$OWNER" GET /karyawan | jq --arg id "$U54_ID" --arg kode "$KODE54" '([.[] | select(.user_id==$id)][0] | (.employee_code == $kode and .archived_at == null)) | if . then 1 else 0 end')"
+cek "dipulihkan: login kembali normal" "V == 1" \
+  "$([ -n "$(login "arsip54@basooopa.id" "PwArsip54!")" ] && echo 1 || echo 0)"
+cek "dipulihkan: absen dgn kode diterima" "V == 201" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/absensi" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"kode\":\"$KODE54\"}")"
+
+# guard: tidak bisa mengunci diri sendiri; admin tak boleh mengarsipkan owner
+OWN54_ID=$(api "$OWNER" GET /karyawan | jq -r '[.[] | select(.role=="owner")][0].user_id')
+cek "arsipkan akun sendiri → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PATCH "$BASE/api/karyawan/$OWN54_ID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"arsip":true}')"
+cek "nonaktifkan akun sendiri → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PATCH "$BASE/api/karyawan/$OWN54_ID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"is_active":false}')"
+api "$OWNER" PATCH "/karyawan/$U53_ID" '{"is_active":true}' > /dev/null
+cek "admin mengarsipkan akun owner → 403" "V == 403" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PATCH "$BASE/api/karyawan/$OWN54_ID" -H "Authorization: Bearer $T53" -H 'Content-Type: application/json' -d '{"arsip":true}')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

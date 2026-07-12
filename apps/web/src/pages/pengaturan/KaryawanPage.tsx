@@ -28,6 +28,8 @@ interface Karyawan {
   branch_id: string | null;
   cabang: string | null;
   employee_code: string | null;
+  /** terisi = karyawan sudah diarsipkan (keluar; riwayat tetap tersimpan) */
+  archived_at: string | null;
 }
 
 interface FormState {
@@ -52,6 +54,12 @@ export function KaryawanPage() {
     queryKey: ["karyawan"],
     queryFn: () => api<Karyawan[]>("/karyawan"),
   });
+  // arsip = karyawan yang sudah keluar; riwayatnya tetap bisa dilihat
+  const { data: arsip = [] } = useQuery({
+    queryKey: ["karyawan", "arsip"],
+    queryFn: () => api<Karyawan[]>("/karyawan?arsip=true"),
+  });
+  const [tab, setTab] = useState<"aktif" | "arsip">("aktif");
   const [form, setForm] = useState<FormState | null>(null);
   // Modal QR karyawan (untuk absensi) + data URL QR yang digenerate
   const [qrFor, setQrFor] = useState<Karyawan | null>(null);
@@ -157,6 +165,81 @@ export function KaryawanPage() {
         Karyawan
       </PageTitle>
 
+      {/* Karyawan berjalan vs arsip (sudah keluar — riwayat tetap tersimpan) */}
+      <div className="mb-3 flex gap-2">
+        <button
+          onClick={() => setTab("aktif")}
+          className={`rounded-full px-4 py-1.5 text-sm font-medium ${
+            tab === "aktif" ? "bg-orange-600 text-white" : "bg-white text-stone-600 hover:bg-stone-100"
+          }`}
+        >
+          Karyawan ({karyawan?.length ?? 0})
+        </button>
+        <button
+          onClick={() => setTab("arsip")}
+          className={`rounded-full px-4 py-1.5 text-sm font-medium ${
+            tab === "arsip" ? "bg-orange-600 text-white" : "bg-white text-stone-600 hover:bg-stone-100"
+          }`}
+        >
+          🗄 Arsip ({arsip.length})
+        </button>
+      </div>
+
+      {tab === "arsip" ? (
+        <Card className="overflow-x-auto">
+          {arsip.length === 0 ? (
+            <p className="p-6 text-center text-sm text-stone-400">
+              Belum ada karyawan yang diarsipkan.
+            </p>
+          ) : (
+            <table className="w-full">
+              <thead className="border-b border-stone-200 bg-stone-50">
+                <tr>
+                  <th className={thClass}>Nama</th>
+                  <th className={thClass}>Kode</th>
+                  <th className={thClass}>Email</th>
+                  <th className={thClass}>Peran</th>
+                  <th className={thClass}>Diarsipkan</th>
+                  <th className={thClass}></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-stone-100">
+                {arsip.map((k) => (
+                  <tr key={k.user_id} className="text-stone-500">
+                    <td className={`${tdClass} font-medium`}>{k.nama}</td>
+                    <td className={tdClass}>
+                      <span className="font-mono">{k.employee_code ?? "—"}</span>
+                    </td>
+                    <td className={tdClass}>{k.email}</td>
+                    <td className={tdClass}>{labelRole[k.role]}</td>
+                    <td className={tdClass}>
+                      {k.archived_at ? formatTanggalRingkas(k.archived_at) : "—"}
+                    </td>
+                    <td className={`${tdClass} text-right`}>
+                      <div className="flex flex-wrap justify-end gap-x-3 gap-y-1">
+                        <button
+                          onClick={() => setAktivitasFor(k)}
+                          className="text-sm font-medium text-orange-600 hover:underline"
+                        >
+                          Aktivitas
+                        </button>
+                        <button
+                          onClick={() =>
+                            ubah.mutate({ userId: k.user_id, body: { arsip: false } })
+                          }
+                          className="text-sm font-medium text-green-600 hover:underline"
+                        >
+                          ↩ Pulihkan
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </Card>
+      ) : (
       <Card className="overflow-x-auto">
         <table className="w-full">
           <thead className="border-b border-stone-200 bg-stone-50">
@@ -191,44 +274,68 @@ export function KaryawanPage() {
                     {k.is_active ? "Aktif" : "Nonaktif"}
                   </span>
                 </td>
-                <td className={`${tdClass} whitespace-nowrap text-right`}>
-                  {k.employee_code && (
+                <td className={`${tdClass} text-right`}>
+                  <div className="flex flex-wrap justify-end gap-x-3 gap-y-1">
+                    {k.employee_code && (
+                      <button
+                        onClick={() => setQrFor(k)}
+                        className="text-sm font-medium text-orange-600 hover:underline"
+                      >
+                        QR
+                      </button>
+                    )}
                     <button
-                      onClick={() => setQrFor(k)}
+                      onClick={() => setAktivitasFor(k)}
                       className="text-sm font-medium text-orange-600 hover:underline"
                     >
-                      QR
+                      Aktivitas
                     </button>
-                  )}
-                  <button
-                    onClick={() => setAktivitasFor(k)}
-                    className="ml-3 text-sm font-medium text-orange-600 hover:underline"
-                  >
-                    Aktivitas
-                  </button>
-                  {/* Ganti password & status aktif ada di dalam form Ubah */}
-                  <button
-                    onClick={() =>
-                      setForm({
-                        id: k.user_id,
-                        nama: k.nama,
-                        email: k.email,
-                        password: "",
-                        role: k.role,
-                        branch_id: k.branch_id ?? "",
-                        is_active: k.is_active,
-                      })
-                    }
-                    className="ml-3 text-sm font-medium text-orange-600 hover:underline"
-                  >
-                    Ubah
-                  </button>
+                    {/* Ganti password & status aktif juga ada di dalam form Ubah */}
+                    <button
+                      onClick={() =>
+                        setForm({
+                          id: k.user_id,
+                          nama: k.nama,
+                          email: k.email,
+                          password: "",
+                          role: k.role,
+                          branch_id: k.branch_id ?? "",
+                          is_active: k.is_active,
+                        })
+                      }
+                      className="text-sm font-medium text-orange-600 hover:underline"
+                    >
+                      Ubah
+                    </button>
+                    <button
+                      onClick={() =>
+                        ubah.mutate({ userId: k.user_id, body: { is_active: !k.is_active } })
+                      }
+                      className="text-sm font-medium text-stone-500 hover:underline"
+                    >
+                      {k.is_active ? "Nonaktifkan" : "Aktifkan"}
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (
+                          confirm(
+                            `Arsipkan ${k.nama}? Karyawan keluar dari daftar & tidak bisa login/absen — riwayatnya tetap tersimpan dan bisa dipulihkan dari tab Arsip.`,
+                          )
+                        )
+                          ubah.mutate({ userId: k.user_id, body: { arsip: true } });
+                      }}
+                      className="text-sm font-medium text-red-500 hover:underline"
+                    >
+                      Arsipkan
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </Card>
+      )}
 
       <Modal
         open={form !== null}
