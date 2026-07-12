@@ -34,12 +34,74 @@ export function porsiTersedia(
   qtyPerPorsi: Map<string, number>,
   saldoByIngredient: Map<string, number>,
 ): number | null {
-  let porsi: number | null = null;
+  return bahanPembatas(qtyPerPorsi, saldoByIngredient)?.porsi ?? null;
+}
+
+/**
+ * Bahan PEMBATAS ketersediaan: bahan dengan ⌊saldo ÷ qty⌋ paling kecil (yang
+ * menentukan sisa porsi). Aturan sama dengan porsiTersedia; null bila menu tak
+ * punya bahan pembatas. Bila seri, bahan pertama pada urutan komponen menang.
+ */
+export function bahanPembatas(
+  qtyPerPorsi: Map<string, number>,
+  saldoByIngredient: Map<string, number>,
+): { ingredient_id: string; porsi: number } | null {
+  let terketat: { ingredient_id: string; porsi: number } | null = null;
   for (const [ingredientId, qty] of qtyPerPorsi) {
     const saldo = saldoByIngredient.get(ingredientId);
     if (saldo == null) continue;
     const bisa = Math.max(0, Math.floor(saldo / qty));
-    porsi = porsi == null ? bisa : Math.min(porsi, bisa);
+    if (terketat == null || bisa < terketat.porsi) {
+      terketat = { ingredient_id: ingredientId, porsi: bisa };
+    }
   }
-  return porsi;
+  return terketat;
+}
+
+/**
+ * Total kebutuhan bahan untuk sebuah RENCANA porsi menu:
+ * Σ (porsi menu × qty bahan per porsi), dijumlah per bahan lintas menu.
+ * Rencana dengan porsi ≤ 0 diabaikan.
+ */
+export function kebutuhanBahanRencana(
+  rencana: { qtyPerPorsi: Map<string, number>; porsi: number }[],
+): Map<string, number> {
+  const total = new Map<string, number>();
+  for (const r of rencana) {
+    if (r.porsi <= 0) continue;
+    for (const [ingredientId, qty] of r.qtyPerPorsi) {
+      total.set(ingredientId, (total.get(ingredientId) ?? 0) + qty * r.porsi);
+    }
+  }
+  return total;
+}
+
+/**
+ * Kekurangan bahan = butuh − saldo, dengan toleransi presisi float: selisih
+ * di bawah epsilon dianggap 0 (mis. 0.1 × 3 vs saldo 0.3 menghasilkan noise
+ * 5.55e-17 yang TIDAK boleh memicu faktur satu batch penuh).
+ */
+export function kekuranganBahan(butuh: number, saldo: number): number {
+  const selisih = butuh - saldo;
+  return selisih > 1e-9 ? selisih : 0;
+}
+
+/**
+ * Terjemahkan KEKURANGAN bahan menjadi baris faktur:
+ * - jalur produksi & isi > 1 → mode "batch", jumlah = ⌈kurang ÷ isi⌉
+ *   (produksi nyata terjadi per batch penuh);
+ * - selainnya → mode "pcs", jumlah = ⌈kurang⌉ (bulat ke atas, tak beli pecahan).
+ * `qty` = kuantitas riil yang masuk stok (jumlah × isi untuk batch).
+ */
+export function jumlahFaktur(
+  kurang: number,
+  pengadaan: "produksi" | "beli",
+  isi: number,
+): { mode: "pcs" | "batch"; jumlah: number; qty: number } {
+  if (pengadaan === "produksi" && isi > 1) {
+    const jumlah = Math.max(1, Math.ceil(kurang / isi));
+    return { mode: "batch", jumlah, qty: jumlah * isi };
+  }
+  const jumlah = Math.max(1, Math.ceil(kurang));
+  return { mode: "pcs", jumlah, qty: jumlah };
 }

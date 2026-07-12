@@ -109,9 +109,14 @@ export function RekomendasiBeliPage() {
     <div className="max-w-5xl">
       <PageTitle
         aksi={
-          <Link to="/pembelian" className={btnSecondary}>
-            ← Beli Bahan Baku
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <Link to="/stok/tambah-dari-menu" className={btnSecondary}>
+              🍜 Rencana dari Menu
+            </Link>
+            <Link to="/pembelian" className={btnSecondary}>
+              ← Beli Bahan Baku
+            </Link>
+          </div>
         }
       >
         Rekomendasi Beli

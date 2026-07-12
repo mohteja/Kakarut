@@ -1,0 +1,425 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
+import type {
+  MenuDto,
+  MenuStokDto,
+  RencanaFakturResult,
+  RencanaMenuItem,
+  RencanaMenuPreview,
+  SupplierDto,
+} from "@kakarut/shared";
+import { Card, ErrorText, PageTitle, btnPrimary, btnSecondary, inputClass, tdClass, thClass } from "../../components/ui";
+import { useBranch } from "../../context/BranchContext";
+import { api } from "../../lib/api";
+import { formatAngka, formatRupiah } from "../../lib/format";
+
+interface Karyawan {
+  user_id: string;
+  nama: string;
+  role: "owner" | "admin" | "cashier";
+  is_active: boolean;
+}
+
+/**
+ * Tambah Stok dari MENU: owner memasang target porsi per menu → sistem
+ * menghitung kebutuhan bahan (resep + menu dasar paket), membandingkan dengan
+ * saldo, lalu menerbitkan faktur produksi & beli otomatis untuk kekurangannya.
+ */
+export function TambahStokDariMenuPage() {
+  const { branchQuery } = useBranch();
+  const queryClient = useQueryClient();
+
+  const { data: menus = [] } = useQuery({
+    queryKey: ["menu"],
+    queryFn: () => api<MenuDto[]>("/menu"),
+  });
+  const { data: ketersediaan = [] } = useQuery({
+    queryKey: ["menu-ketersediaan", branchQuery],
+    queryFn: () => api<MenuStokDto[]>(`/menu/ketersediaan${branchQuery}`),
+  });
+  const { data: karyawan = [] } = useQuery({
+    queryKey: ["karyawan"],
+    queryFn: () => api<Karyawan[]>("/karyawan"),
+  });
+  const { data: suppliers = [] } = useQuery({
+    queryKey: ["supplier"],
+    queryFn: () => api<SupplierDto[]>("/supplier"),
+  });
+  const sisaByMenu = useMemo(
+    () => new Map(ketersediaan.map((k) => [k.menu_id, k.porsi])),
+    [ketersediaan],
+  );
+
+  const [cari, setCari] = useState("");
+  /** target porsi per menu (0/absen = tidak direncanakan) */
+  const [rencana, setRencana] = useState<Record<string, number>>({});
+  /** pelaksana faktur produksi: "k:<user_id>" | "s:<supplier_id>" | "" */
+  const [pelaksana, setPelaksana] = useState("");
+  /** supplier faktur beli (opsional) */
+  const [supplierBeli, setSupplierBeli] = useState("");
+  const [hasil, setHasil] = useState<RencanaFakturResult | null>(null);
+
+  const items: RencanaMenuItem[] = useMemo(
+    () =>
+      Object.entries(rencana)
+        .filter(([, porsi]) => porsi > 0)
+        .map(([menu_id, porsi]) => ({ menu_id, porsi })),
+    [rencana],
+  );
+
+  // Debounce agar preview tidak menembak server tiap ketukan stepper.
+  const [itemsTunda, setItemsTunda] = useState<RencanaMenuItem[]>([]);
+  useEffect(() => {
+    const t = setTimeout(() => setItemsTunda(items), 400);
+    return () => clearTimeout(t);
+  }, [items]);
+
+  const preview = useQuery({
+    queryKey: ["rencana-menu", branchQuery, JSON.stringify(itemsTunda)],
+    queryFn: () =>
+      api<RencanaMenuPreview>(`/rekomendasi/menu${branchQuery}`, {
+        method: "POST",
+        body: { items: itemsTunda },
+      }),
+    enabled: itemsTunda.length > 0,
+  });
+  const p = itemsTunda.length > 0 ? preview.data : undefined;
+  const adaKurang = (p?.jumlah_produksi ?? 0) + (p?.jumlah_beli ?? 0) > 0;
+  const butuhPelaksana = (p?.jumlah_produksi ?? 0) > 0 && !pelaksana;
+  // Preview basi bila target baru diketik dan debounce/fetch belum selesai —
+  // tombol Buat ditahan agar faktur selalu sama dengan angka yang terlihat.
+  const previewBasi =
+    preview.isFetching || JSON.stringify(items) !== JSON.stringify(itemsTunda);
+
+  const buat = useMutation({
+    mutationFn: () => {
+      const [pelTipe, pelId] = pelaksana.split(":");
+      return api<RencanaFakturResult>(`/rekomendasi/menu/faktur${branchQuery}`, {
+        method: "POST",
+        body: {
+          // pakai items LIVE (bukan snapshot debounce) — server menghitung ulang
+          items,
+          worker_id: pelTipe === "k" ? pelId : null,
+          supplier_id: pelTipe === "s" ? pelId : null,
+          supplier_beli_id: supplierBeli || null,
+        },
+      });
+    },
+    onSuccess: (data) => {
+      setHasil(data);
+      setRencana({});
+      queryClient.invalidateQueries({ queryKey: ["stok"] });
+      queryClient.invalidateQueries({ queryKey: ["menu-ketersediaan"] });
+      queryClient.invalidateQueries({ queryKey: ["/produksi"] });
+      queryClient.invalidateQueries({ queryKey: ["/pembelian"] });
+      queryClient.invalidateQueries({ queryKey: ["rekomendasi"] });
+    },
+  });
+
+  function ubahPorsi(menuId: string, val: number) {
+    setRencana((prev) => {
+      const next = { ...prev };
+      // batas atas selaras dgn validasi server (hindari overflow kolom numeric)
+      const porsi = Math.min(100_000, Math.floor(val));
+      if (porsi > 0) next[menuId] = porsi;
+      else delete next[menuId];
+      return next;
+    });
+    setHasil(null);
+  }
+
+  const menuTampil = menus.filter(
+    (m) =>
+      m.nama.toLowerCase().includes(cari.toLowerCase()) ||
+      (m.kode?.toLowerCase().includes(cari.toLowerCase()) ?? false),
+  );
+
+  return (
+    <div>
+      <PageTitle
+        aksi={
+          <Link to="/stok" className={btnSecondary}>
+            ← Stok
+          </Link>
+        }
+      >
+        ➕ Tambah Stok dari Menu
+      </PageTitle>
+      <p className="mb-4 max-w-3xl text-sm text-stone-500">
+        Pasang <b>target porsi</b> untuk tiap menu yang ingin disiapkan. Sistem menghitung total
+        kebutuhan bahan dari resep (termasuk menu dasar paket), membandingkan dengan saldo stok,
+        lalu membuat <b>faktur produksi</b> dan <b>faktur beli</b> otomatis untuk kekurangannya —
+        tanpa hitung manual. Faktur mulai dari tahap <b>rencana (RAB)</b>, jadi tetap Anda tinjau
+        sebelum stok terhitung.
+      </p>
+
+      {/* Hasil pembuatan faktur */}
+      {hasil && (
+        <Card className="mb-4 border-green-200 bg-green-50 p-4">
+          <div className="font-semibold text-green-800">✅ Faktur otomatis berhasil dibuat</div>
+          <ul className="mt-1 space-y-0.5 text-sm text-green-900">
+            {hasil.produksi && (
+              <li>
+                🏭 Faktur produksi — {hasil.produksi.jumlah_baris} bahan ·{" "}
+                <Link to="/produksi" className="font-medium underline">
+                  lihat di Produksi Bahan Baku →
+                </Link>
+              </li>
+            )}
+            {hasil.beli && (
+              <li>
+                🛒 Faktur beli (RAB) — {hasil.beli.jumlah_baris} bahan ·{" "}
+                <Link to="/pembelian" className="font-medium underline">
+                  lihat di Beli Bahan Baku →
+                </Link>
+              </li>
+            )}
+          </ul>
+        </Card>
+      )}
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        {/* Kiri: pilih target porsi per menu */}
+        <Card className="p-4">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <h2 className="font-bold text-stone-800">1. Target porsi per menu</h2>
+            {items.length > 0 && (
+              <button
+                onClick={() => setRencana({})}
+                className="text-xs font-medium text-stone-400 hover:text-red-600 hover:underline"
+              >
+                Kosongkan
+              </button>
+            )}
+          </div>
+          <input
+            value={cari}
+            onChange={(e) => setCari(e.target.value)}
+            placeholder="🔍 Cari menu / kode…"
+            className={`${inputClass} mb-2`}
+          />
+          <div className="max-h-[28rem] divide-y divide-stone-100 overflow-y-auto">
+            {menuTampil.map((m) => {
+              const porsi = rencana[m.id] ?? 0;
+              const sisa = sisaByMenu.get(m.id);
+              return (
+                <div key={m.id} className="flex items-center gap-2 py-1.5">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      {m.kode && (
+                        <span className="shrink-0 rounded bg-orange-100 px-1.5 py-0.5 font-mono text-[11px] font-bold text-orange-700">
+                          {m.kode}
+                        </span>
+                      )}
+                      <span className="truncate text-sm font-medium text-stone-800">{m.nama}</span>
+                    </div>
+                    <div className="text-xs text-stone-400">
+                      {formatRupiah(m.harga_jual)}
+                      {sisa != null && <> · sisa {formatAngka(sisa)} porsi</>}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => ubahPorsi(m.id, porsi - 10)}
+                    className="h-7 rounded-lg border border-stone-300 px-1.5 text-xs text-stone-600 hover:bg-stone-50"
+                    title="Kurangi 10"
+                  >
+                    −10
+                  </button>
+                  <input
+                    type="number"
+                    min="0"
+                    value={porsi === 0 ? "" : porsi}
+                    onChange={(e) => ubahPorsi(m.id, Number(e.target.value) || 0)}
+                    placeholder="0"
+                    aria-label={`Porsi ${m.nama}`}
+                    className="w-16 rounded-lg border border-stone-300 px-2 py-1 text-right text-sm"
+                  />
+                  <button
+                    onClick={() => ubahPorsi(m.id, porsi + 10)}
+                    className="h-7 rounded-lg border border-stone-300 px-1.5 text-xs text-stone-600 hover:bg-stone-50"
+                    title="Tambah 10"
+                  >
+                    +10
+                  </button>
+                </div>
+              );
+            })}
+            {menuTampil.length === 0 && (
+              <div className="py-8 text-center text-sm text-stone-400">Menu tidak ditemukan.</div>
+            )}
+          </div>
+        </Card>
+
+        {/* Kanan: kebutuhan bahan + aksi buat faktur */}
+        <div className="space-y-4">
+          <Card className="p-4">
+            <h2 className="mb-2 font-bold text-stone-800">2. Kebutuhan bahan</h2>
+            {items.length === 0 ? (
+              <div className="py-8 text-center text-sm text-stone-400">
+                Isi target porsi menu dulu di sebelah kiri.
+              </div>
+            ) : preview.isLoading || itemsTunda.length === 0 ? (
+              <div className="py-8 text-center text-sm text-stone-400">Menghitung…</div>
+            ) : preview.isError ? (
+              <ErrorText error={preview.error} />
+            ) : p ? (
+              <>
+                {/* Ringkasan rencana + perkiraan omzet (menyamakan dgn target omzet) */}
+                <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  <div className="rounded-lg border border-stone-200 bg-white p-2">
+                    <div className="text-xs text-stone-500">Perkiraan omzet rencana</div>
+                    <div className="text-sm font-bold text-stone-800">
+                      {formatRupiah(p.perkiraan_omzet)}
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-stone-200 bg-white p-2">
+                    <div className="text-xs text-stone-500">Est. biaya faktur</div>
+                    <div className="text-sm font-bold text-stone-800">
+                      {formatRupiah(p.total_estimasi_biaya)}
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-stone-200 bg-white p-2">
+                    <div className="text-xs text-stone-500">Bahan kurang</div>
+                    <div className="text-sm font-bold text-stone-800">
+                      🏭 {p.jumlah_produksi} · 🛒 {p.jumlah_beli}
+                    </div>
+                  </div>
+                </div>
+                <div className="max-h-80 overflow-y-auto overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="border-b border-stone-200 bg-stone-50">
+                      <tr>
+                        <th className={thClass}>Bahan</th>
+                        <th className={`${thClass} text-right`}>Butuh</th>
+                        <th className={`${thClass} text-right`}>Saldo</th>
+                        <th className={`${thClass} text-right`}>Kurang</th>
+                        <th className={thClass}>Faktur</th>
+                        <th className={`${thClass} text-right`}>Est. biaya</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-stone-100">
+                      {p.bahan.map((b) => (
+                        <tr key={b.ingredient_id} className={b.kurang > 0 ? "bg-orange-50/40" : ""}>
+                          <td className={tdClass}>
+                            <span className="font-medium">{b.nama}</span>
+                            <span
+                              className={`ml-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
+                                b.pengadaan === "beli"
+                                  ? "bg-blue-100 text-blue-700"
+                                  : "bg-purple-100 text-purple-700"
+                              }`}
+                            >
+                              {b.pengadaan}
+                            </span>
+                          </td>
+                          <td className={`${tdClass} text-right`}>
+                            {formatAngka(b.kebutuhan)} {b.satuan}
+                          </td>
+                          <td className={`${tdClass} text-right`}>{formatAngka(b.saldo)}</td>
+                          <td
+                            className={`${tdClass} text-right font-bold ${b.kurang > 0 ? "text-orange-700" : "text-green-600"}`}
+                          >
+                            {b.kurang > 0 ? formatAngka(b.kurang) : "cukup"}
+                          </td>
+                          <td className={`${tdClass} whitespace-nowrap`}>
+                            {b.jumlah_faktur != null
+                              ? `${formatAngka(b.jumlah_faktur)} ${b.mode_faktur === "batch" ? `batch (=${formatAngka(b.qty_faktur ?? 0)} ${b.satuan})` : b.satuan}`
+                              : "—"}
+                          </td>
+                          <td className={`${tdClass} text-right`}>
+                            {b.estimasi_biaya != null ? formatRupiah(b.estimasi_biaya) : "—"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            ) : null}
+          </Card>
+
+          {p && items.length > 0 && (
+            <Card className="p-4">
+              <h2 className="mb-2 font-bold text-stone-800">3. Buat faktur otomatis</h2>
+              {!adaKurang ? (
+                <div className="rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
+                  ✅ Stok semua bahan masih cukup untuk rencana ini — tidak perlu faktur.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {p.jumlah_produksi > 0 && (
+                    <div>
+                      <label className="mb-1 block text-sm font-medium">
+                        Pelaksana produksi (wajib)
+                      </label>
+                      <select
+                        value={pelaksana}
+                        onChange={(e) => setPelaksana(e.target.value)}
+                        className={inputClass}
+                      >
+                        <option value="">— pilih karyawan / supplier —</option>
+                        <optgroup label="Karyawan">
+                          {karyawan
+                            .filter((k) => k.is_active)
+                            .map((k) => (
+                              <option key={k.user_id} value={`k:${k.user_id}`}>
+                                {k.nama}
+                              </option>
+                            ))}
+                        </optgroup>
+                        <optgroup label="Supplier">
+                          {suppliers.map((s) => (
+                            <option key={s.id} value={`s:${s.id}`}>
+                              {s.nama}
+                            </option>
+                          ))}
+                        </optgroup>
+                      </select>
+                    </div>
+                  )}
+                  {p.jumlah_beli > 0 && (
+                    <div>
+                      <label className="mb-1 block text-sm font-medium">
+                        Supplier faktur beli (opsional)
+                      </label>
+                      <select
+                        value={supplierBeli}
+                        onChange={(e) => setSupplierBeli(e.target.value)}
+                        className={inputClass}
+                      >
+                        <option value="">— tanpa supplier —</option>
+                        {suppliers.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.nama}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                  <ErrorText error={buat.error} />
+                  <button
+                    onClick={() => buat.mutate()}
+                    disabled={buat.isPending || butuhPelaksana || previewBasi}
+                    className={`${btnPrimary} w-full py-3`}
+                  >
+                    {buat.isPending
+                      ? "Membuat faktur…"
+                      : previewBasi
+                        ? "Menghitung ulang…"
+                        : `🧾 Buat Faktur Otomatis (${p.jumlah_produksi > 0 ? `${p.jumlah_produksi} produksi` : ""}${p.jumlah_produksi > 0 && p.jumlah_beli > 0 ? " + " : ""}${p.jumlah_beli > 0 ? `${p.jumlah_beli} beli` : ""})`}
+                  </button>
+                  {butuhPelaksana && (
+                    <div className="text-center text-xs text-amber-600">
+                      Pilih pelaksana produksi dulu.
+                    </div>
+                  )}
+                </div>
+              )}
+            </Card>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
