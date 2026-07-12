@@ -1,5 +1,5 @@
 import { zValidator } from "@hono/zod-validator";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
@@ -77,22 +77,46 @@ export const companyRoutes = new Hono<AppEnv>()
           ),
         );
       if (adaCk.length > 0) return [] as string[];
-      // Tata lokasi baku Pro: cabang lama tetap jadi store pertama.
+      // Tata lokasi baku Pro: cabang lama tetap jadi store pertama. CK dibuat
+      // lebih dulu supaya setiap store terhubung ke SATU CK pemasoknya.
+      const dibuat: string[] = [];
+      const [ck] = await tx
+        .insert(branches)
+        .values({ companyId: auth.company_id!, nama: "Central Kitchen", tipe: "central_kitchen" })
+        .onConflictDoNothing()
+        .returning();
+      if (ck) dibuat.push(ck.nama);
       const lokasi = [
-        { nama: "Central Kitchen", tipe: "central_kitchen" as const, meja: false },
         { nama: "Cabang 2", tipe: "store" as const, meja: true },
         { nama: "Kantor", tipe: "kantor" as const, meja: false },
       ];
-      const dibuat: string[] = [];
       for (const l of lokasi) {
         const [b] = await tx
           .insert(branches)
-          .values({ companyId: auth.company_id!, nama: l.nama, tipe: l.tipe })
+          .values({
+            companyId: auth.company_id!,
+            nama: l.nama,
+            tipe: l.tipe,
+            centralKitchenId: l.tipe === "store" ? ck?.id ?? null : null,
+          })
           .onConflictDoNothing()
           .returning();
         if (!b) continue; // nama sudah dipakai cabang lama — jangan duplikasi
         if (l.meja) await seedMejaDefault(tx, auth.company_id!, b.id);
         dibuat.push(b.nama);
+      }
+      // Store lama yang belum punya pemasok ikut terhubung ke CK baru.
+      if (ck) {
+        await tx
+          .update(branches)
+          .set({ centralKitchenId: ck.id })
+          .where(
+            and(
+              eq(branches.companyId, auth.company_id!),
+              eq(branches.tipe, "store"),
+              isNull(branches.centralKitchenId),
+            ),
+          );
       }
       return dibuat;
     });

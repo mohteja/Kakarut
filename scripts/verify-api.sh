@@ -1483,6 +1483,41 @@ api "$OWNER" PUT "/menu/$PBA_ID" "$PUT51B" > /dev/null
 cek "branch_ids null → menu kembali tampil di semua cabang" "V == 1" \
   "$(api "$OWNER" GET "/menu?branch_id=$CB46_ID" | jq --arg id "$PBA_ID" '([.[] | select(.id==$id)] | length == 1) | if . then 1 else 0 end')"
 
+echo "== 52. Cabang store terhubung ke SATU central kitchen =="
+CK52_UTAMA=$(api "$OWNER" GET /cabang | jq -r '[.[] | select(.nama=="Central Kitchen")][0].id')
+cek "provisioning: store lama (Pusat) tertaut ke CK" "V == 1" \
+  "$(api "$OWNER" GET /cabang | jq --arg ck "$CK52_UTAMA" '([.[] | select(.nama=="Pusat")][0].central_kitchen_id == $ck) | if . then 1 else 0 end')"
+cek "store baru auto-tertaut saat CK hanya satu (Cabang Uji 46)" "V == 1" \
+  "$(api "$OWNER" GET /cabang | jq --arg ck "$CK52_UTAMA" --arg id "$CB46_ID" '([.[] | select(.id==$id)][0].central_kitchen_id == $ck) | if . then 1 else 0 end')"
+
+# kini ada 2 CK (Central Kitchen + Central Kitchen 47) → wajib memilih pemasok
+cek "dua CK: store baru tanpa pilih pemasok → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/cabang" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"nama":"Store 52"}')"
+ST52_ID=$(api "$OWNER" POST /cabang "{\"nama\":\"Store 52\",\"central_kitchen_id\":\"$CK47_ID\"}" | jq -r .id)
+cek "store baru tertaut ke CK pilihan (CK47)" "V == 1" \
+  "$(api "$OWNER" GET /cabang | jq --arg ck "$CK47_ID" --arg id "$ST52_ID" '([.[] | select(.id==$id)][0].central_kitchen_id == $ck) | if . then 1 else 0 end')"
+cek "pemasok bukan CK (store) → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/cabang" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"nama\":\"Store 52X\",\"central_kitchen_id\":\"$CB46_ID\"}")"
+cek "kantor dgn pemasok CK → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/cabang" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"nama\":\"Kantor 52\",\"tipe\":\"kantor\",\"central_kitchen_id\":\"$CK47_ID\"}")"
+
+# pindah pemasok via PATCH lalu kembalikan
+api "$OWNER" PATCH "/cabang/$CB46_ID" "{\"central_kitchen_id\":\"$CK47_ID\"}" > /dev/null
+cek "pindah pemasok via PATCH tersimpan" "V == 1" \
+  "$(api "$OWNER" GET /cabang | jq --arg ck "$CK47_ID" --arg id "$CB46_ID" '([.[] | select(.id==$id)][0].central_kitchen_id == $ck) | if . then 1 else 0 end')"
+api "$OWNER" PATCH "/cabang/$CB46_ID" "{\"central_kitchen_id\":\"$CK52_UTAMA\"}" > /dev/null
+
+# arah kirim: CK hanya boleh mengirim ke store yang tertaut dengannya
+FK52=$(api "$OWNER" POST /pembelian/faktur "{\"branch_id\":\"$CK47_ID\",\"items\":[{\"ingredient_id\":\"$ING42A\",\"mode\":\"pcs\",\"jumlah\":6,\"total_harga\":30000}]}")
+FK52_ID=$(echo "$FK52" | jq -r .faktur_id)
+api "$OWNER" POST "/pembelian/tahap/$FK52_ID" '{"ke":"dikerjakan","dana_cair":30000}' > /dev/null
+ID52=$(api "$OWNER" GET "/pembelian?branch_id=$CK47_ID&per_page=500" | jq -r --arg f "$FK52_ID" '[.rows[] | select(.faktur_id==$f)][0].id')
+cek "CK47 kirim ke store milik CK lain → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/pembelian/tahap/$FK52_ID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"ke\":\"menunggu\",\"items\":[{\"id\":\"$ID52\",\"qty\":6}],\"tujuan_branch_id\":\"$CB46_ID\"}")"
+api "$OWNER" POST "/pembelian/tahap/$FK52_ID" "{\"ke\":\"menunggu\",\"items\":[{\"id\":\"$ID52\",\"qty\":6}],\"tujuan_branch_id\":\"$ST52_ID\"}" > /dev/null
+cek "CK47 kirim ke store miliknya → baris pindah ke tujuan" "V == 1" \
+  "$(api "$OWNER" GET "/pembelian?branch_id=$ST52_ID&per_page=500" | jq --arg f "$FK52_ID" '([.rows[] | select(.faktur_id==$f)] | (length == 1) and (.[0].status == "menunggu")) | if . then 1 else 0 end')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

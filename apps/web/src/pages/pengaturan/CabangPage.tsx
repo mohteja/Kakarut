@@ -21,6 +21,8 @@ interface FormState {
   nama: string;
   alamat: string;
   tipe: "store" | "central_kitchen" | "kantor";
+  /** CK pemasok (khusus store) — "" = otomatis bila CK cuma satu */
+  central_kitchen_id: string;
 }
 
 export function CabangPage() {
@@ -30,16 +32,17 @@ export function CabangPage() {
   const [form, setForm] = useState<FormState | null>(null);
 
   const simpan = useMutation({
-    mutationFn: (f: FormState) =>
-      f.id
-        ? api(`/cabang/${f.id}`, {
-            method: "PATCH",
-            body: { nama: f.nama, alamat: f.alamat || null, tipe: f.tipe },
-          })
-        : api("/cabang", {
-            method: "POST",
-            body: { nama: f.nama, alamat: f.alamat || null, tipe: f.tipe },
-          }),
+    mutationFn: (f: FormState) => {
+      const body = {
+        nama: f.nama,
+        alamat: f.alamat || null,
+        tipe: f.tipe,
+        central_kitchen_id: f.tipe === "store" && f.central_kitchen_id ? f.central_kitchen_id : null,
+      };
+      return f.id
+        ? api(`/cabang/${f.id}`, { method: "PATCH", body })
+        : api("/cabang", { method: "POST", body });
+    },
     onSuccess: () => {
       setForm(null);
       queryClient.invalidateQueries({ queryKey: ["cabang"] });
@@ -56,6 +59,9 @@ export function CabangPage() {
     e.preventDefault();
     if (form) simpan.mutate(form);
   }
+
+  const daftarCk = cabang.filter((b) => b.tipe === "central_kitchen" && b.is_active);
+  const namaCk = new Map(cabang.map((b) => [b.id, b.nama]));
 
   // Mode Lite = 1 cabang — halaman ini jadi ajakan upgrade bila diakses langsung.
   if (!isPro) {
@@ -86,7 +92,14 @@ export function CabangPage() {
       <PageTitle
         aksi={
           <button
-            onClick={() => setForm({ nama: "", alamat: "", tipe: "store" })}
+            onClick={() =>
+              setForm({
+                nama: "",
+                alamat: "",
+                tipe: "store",
+                central_kitchen_id: daftarCk.length === 1 ? daftarCk[0].id : "",
+              })
+            }
             className={btnPrimary}
           >
             + Tambah Cabang
@@ -103,6 +116,7 @@ export function CabangPage() {
             <tr>
               <th className={thClass}>Nama</th>
               <th className={thClass}>Alamat</th>
+              <th className={thClass}>Pemasok (CK)</th>
               <th className={thClass}>Status</th>
               <th className={thClass}></th>
             </tr>
@@ -130,6 +144,19 @@ export function CabangPage() {
                 </td>
                 <td className={tdClass}>{b.alamat ?? "—"}</td>
                 <td className={tdClass}>
+                  {b.tipe === "store" ? (
+                    b.central_kitchen_id ? (
+                      <span className="whitespace-nowrap text-sm text-stone-600">
+                        🏭 {namaCk.get(b.central_kitchen_id) ?? "?"}
+                      </span>
+                    ) : (
+                      <span className="text-stone-300">—</span>
+                    )
+                  ) : (
+                    <span className="text-stone-300">—</span>
+                  )}
+                </td>
+                <td className={tdClass}>
                   <span
                     className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
                       b.is_active ? "bg-green-100 text-green-800" : "bg-stone-100 text-stone-500"
@@ -141,7 +168,13 @@ export function CabangPage() {
                 <td className={`${tdClass} whitespace-nowrap text-right`}>
                   <button
                     onClick={() =>
-                      setForm({ id: b.id, nama: b.nama, alamat: b.alamat ?? "", tipe: b.tipe })
+                      setForm({
+                        id: b.id,
+                        nama: b.nama,
+                        alamat: b.alamat ?? "",
+                        tipe: b.tipe,
+                        central_kitchen_id: b.central_kitchen_id ?? "",
+                      })
                     }
                     className="text-sm font-medium text-orange-600 hover:underline"
                   >
@@ -203,6 +236,33 @@ export function CabangPage() {
                 untuk penempatan karyawan &amp; absensi.
               </p>
             </div>
+            {form.tipe === "store" && daftarCk.length > 0 && (
+              <div>
+                <label className="mb-1 block text-sm font-medium">
+                  Terhubung ke Central Kitchen
+                </label>
+                <select
+                  value={
+                    form.central_kitchen_id ||
+                    (daftarCk.length === 1 ? daftarCk[0].id : "")
+                  }
+                  onChange={(e) => setForm({ ...form, central_kitchen_id: e.target.value })}
+                  className={inputClass}
+                  required={daftarCk.length > 1}
+                >
+                  {daftarCk.length > 1 && <option value="">— pilih CK pemasok —</option>}
+                  {daftarCk.map((ck) => (
+                    <option key={ck.id} value={ck.id}>
+                      🏭 {ck.nama}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-1 text-xs text-stone-400">
+                  Store terhubung ke <b>satu</b> CK pemasok — hanya CK itu yang mengirim
+                  barang ke cabang ini.
+                </p>
+              </div>
+            )}
             <ErrorText error={simpan.error} />
             <div className="flex justify-end gap-2 pt-2">
               <button type="button" onClick={() => setForm(null)} className={btnSecondary}>

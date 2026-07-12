@@ -47,6 +47,8 @@ export function TahapModal({
   const queryClient = useQueryClient();
   const { cabang, branchId } = useBranch();
   const { isPro } = useCompanyMode();
+  // CK hanya mengirim ke store yang terhubung dengannya (satu CK per store)
+  const cabangIniCk = cabang.find((b) => b.id === branchId)?.tipe === "central_kitchen";
   const target = URUTAN_TAHAP[ke];
   // hanya baris yang tahapnya masih di belakang tujuan yang bisa maju
   const bisaMaju = grup.rows.filter(
@@ -359,6 +361,14 @@ export function TahapModal({
                   >
                     {cabang
                       .filter((b) => b.is_active && b.tipe !== "kantor")
+                      // Store terhubung ke SATU CK: dari CK hanya tampil store
+                      // yang dipasoknya (plus CK itu sendiri)
+                      .filter((b) =>
+                        cabangIniCk
+                          ? b.id === branchId ||
+                            (b.tipe === "store" && b.central_kitchen_id === branchId)
+                          : true,
+                      )
                       .map((b) => (
                         <option key={b.id} value={b.id}>
                           {labelCabang(b)}
@@ -392,13 +402,12 @@ export function TahapModal({
                 sana saat diterima); sisa tugas tetap di cabang ini.
               </div>
             )}
-            {tujuanCabang === branchId &&
-              cabang.find((b) => b.id === branchId)?.tipe === "central_kitchen" && (
-                <div className="text-xs text-stone-500">
-                  🏭 Ini Central Kitchen — bila barang untuk outlet, pilih cabang 🏪 store
-                  sebagai tujuan.
-                </div>
-              )}
+            {tujuanCabang === branchId && cabangIniCk && (
+              <div className="text-xs text-stone-500">
+                🏭 Ini Central Kitchen — bila barang untuk outlet, pilih cabang 🏪 store
+                sebagai tujuan (hanya store yang terhubung ke CK ini yang bisa dipilih).
+              </div>
+            )}
           </div>
         )}
 

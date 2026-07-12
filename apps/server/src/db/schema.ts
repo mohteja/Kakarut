@@ -111,6 +111,14 @@ export const branches = pgTable(
     alamat: text("alamat"),
     telepon: text("telepon"),
     tipe: branchTipeEnum("tipe").notNull().default("store"),
+    /**
+     * Cabang store terhubung ke SATU central kitchen (pemasoknya) — CK hanya
+     * boleh mengirim ke store yang terhubung dengannya. NULL untuk CK/kantor
+     * atau perusahaan tanpa CK.
+     */
+    centralKitchenId: uuid("central_kitchen_id").references((): AnyPgColumn => branches.id, {
+      onDelete: "set null",
+    }),
     isActive: boolean("is_active").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },

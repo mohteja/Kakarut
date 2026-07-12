@@ -12,6 +12,8 @@ export interface Cabang {
    * kantor = lokasi kerja admin/finance (bukan tujuan kirim barang)
    */
   tipe: "store" | "central_kitchen" | "kantor";
+  /** CK pemasok cabang store — store hanya menerima kiriman dari CK ini */
+  central_kitchen_id: string | null;
   is_active: boolean;
 }
 
