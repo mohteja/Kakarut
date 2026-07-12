@@ -316,7 +316,7 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
 
       {/* Filter tanggal + jumlah baris (buku besar) */}
       <Card className="mb-3 flex flex-wrap items-end gap-3 p-3">
-        <div>
+        <div className="min-w-[9.5rem] flex-1 sm:flex-none">
           <label className="mb-1 block text-xs font-medium text-stone-500">Dari tanggal</label>
           <input
             type="date"
@@ -325,7 +325,7 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
             className={inputClass}
           />
         </div>
-        <div>
+        <div className="min-w-[9.5rem] flex-1 sm:flex-none">
           <label className="mb-1 block text-xs font-medium text-stone-500">Sampai tanggal</label>
           <input
             type="date"
@@ -395,16 +395,18 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
               onClick={() => setDetail(g)}
               className={`flex cursor-pointer overflow-hidden transition hover:border-orange-300 hover:shadow-sm ${belumSelesai(g.status) ? "border-yellow-300" : ""}`}
             >
-              {/* Kotak tanggal & waktu di kiri tiap transaksi */}
-              <div className="flex w-24 shrink-0 flex-col items-center justify-center gap-0.5 border-r border-stone-100 bg-stone-50 px-2 py-3 text-center sm:w-28">
-                <div className="text-xs font-semibold leading-tight text-stone-600">
+              {/* Kotak tanggal & waktu di kiri tiap transaksi (ramping di HP) */}
+              <div className="flex w-16 shrink-0 flex-col items-center justify-center gap-0.5 border-r border-stone-100 bg-stone-50 px-1 py-3 text-center sm:w-28 sm:px-2">
+                <div className="text-[10px] font-semibold leading-tight text-stone-600 sm:text-xs">
                   {formatTanggalRingkas(g.waktu)}
                 </div>
-                <div className="text-base font-bold text-stone-800">{formatWaktu(g.waktu)}</div>
+                <div className="text-sm font-bold text-stone-800 sm:text-base">
+                  {formatWaktu(g.waktu)}
+                </div>
               </div>
 
               <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-100 px-4 py-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-100 px-3 py-2.5 sm:px-4">
                   <div className="flex flex-wrap items-center gap-2 text-sm">
                     <span className="font-medium text-stone-700">
                       {tipe === "produksi"
@@ -418,7 +420,7 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                     )}
                     {g.danaCair > 0 && (
                       <span
-                        className="rounded bg-emerald-50 px-1.5 py-0.5 text-xs font-semibold text-emerald-700"
+                        className="whitespace-nowrap rounded bg-emerald-50 px-1.5 py-0.5 text-xs font-semibold text-emerald-700"
                         title="Total dana yang sudah cair untuk faktur ini"
                       >
                         💸 cair {formatRupiah(g.danaCair)}
@@ -429,14 +431,14 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                     )}
                     {g.catatan && <span className="text-xs text-stone-400">· {g.catatan}</span>}
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex max-w-full flex-wrap items-center gap-1.5">
                     {campuran && sisaTugas > 0 && (
-                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">
+                      <span className="whitespace-nowrap rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">
                         📌 sisa tugas: {sisaTugas} baris
                       </span>
                     )}
                     <span
-                      className={`rounded-full px-2 py-0.5 text-xs font-semibold ${badge.cls}`}
+                      className={`whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold ${badge.cls}`}
                     >
                       {badge.label}
                     </span>
@@ -462,51 +464,59 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                     )}
                   </div>
                 </div>
-                <table className="w-full">
-                  <thead>
-                    <tr>
-                      <th className={thClass}>Bahan</th>
-                      <th className={`${thClass} text-right`}>Qty</th>
-                      <th className={thClass}>Disimpan di</th>
-                      {tipe === "beli" && <th className={`${thClass} text-right`}>Harga</th>}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-stone-100">
-                    {g.rows.map((r) => (
-                      <tr key={r.id}>
-                        <td className={`${tdClass} font-medium`}>
-                          {r.bahan}
-                          {campuran && (
-                            <span
-                              className={`ml-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${badgeFaktur(tipe, r.status).cls}`}
-                            >
-                              {labelTahapRingkas(tipe, r.status)}
-                            </span>
-                          )}
-                        </td>
-                        <td className={`${tdClass} text-right`}>
-                          +{formatAngka(r.qty)} {r.satuan}
-                          {r.is_batch && (
-                            <span className="ml-1 text-xs text-stone-400">
-                              ({formatAngka(r.qty / r.isi)} batch × {formatAngka(r.isi)})
-                            </span>
-                          )}
-                          {r.qty_dipesan != null && r.qty_dipesan !== r.qty && (
-                            <span className="ml-1 text-xs text-amber-600">
-                              (dipesan {formatAngka(r.qty_dipesan)})
-                            </span>
-                          )}
-                        </td>
-                        <td className={tdClass}>{r.tempat ?? "—"}</td>
-                        {tipe === "beli" && (
-                          <td className={`${tdClass} text-right`}>
-                            {r.total_harga != null ? formatRupiah(r.total_harga) : "—"}
-                          </td>
-                        )}
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr>
+                        <th className={thClass}>Bahan</th>
+                        <th className={`${thClass} text-right`}>Qty</th>
+                        {/* di HP kolom tempat disembunyikan agar Harga tidak terpotong */}
+                        <th className={`${thClass} hidden sm:table-cell`}>Disimpan di</th>
+                        {tipe === "beli" && <th className={`${thClass} text-right`}>Harga</th>}
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody className="divide-y divide-stone-100">
+                      {g.rows.map((r) => (
+                        <tr key={r.id}>
+                          <td className={`${tdClass} font-medium`}>
+                            {r.bahan}
+                            {campuran && (
+                              <span
+                                className={`ml-1.5 whitespace-nowrap rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${badgeFaktur(tipe, r.status).cls}`}
+                              >
+                                {labelTahapRingkas(tipe, r.status)}
+                              </span>
+                            )}
+                            {r.tempat && (
+                              <div className="text-xs font-normal text-stone-400 sm:hidden">
+                                📍 {r.tempat}
+                              </div>
+                            )}
+                          </td>
+                          <td className={`${tdClass} whitespace-nowrap text-right`}>
+                            +{formatAngka(r.qty)} {r.satuan}
+                            {r.is_batch && (
+                              <span className="ml-1 hidden text-xs text-stone-400 sm:inline">
+                                ({formatAngka(r.qty / r.isi)} batch × {formatAngka(r.isi)})
+                              </span>
+                            )}
+                            {r.qty_dipesan != null && r.qty_dipesan !== r.qty && (
+                              <span className="ml-1 text-xs text-amber-600">
+                                (dipesan {formatAngka(r.qty_dipesan)})
+                              </span>
+                            )}
+                          </td>
+                          <td className={`${tdClass} hidden sm:table-cell`}>{r.tempat ?? "—"}</td>
+                          {tipe === "beli" && (
+                            <td className={`${tdClass} whitespace-nowrap text-right`}>
+                              {r.total_harga != null ? formatRupiah(r.total_harga) : "—"}
+                            </td>
+                          )}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </Card>
             );
