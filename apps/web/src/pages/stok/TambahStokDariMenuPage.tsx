@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import type {
   MenuDto,
   MenuStokDto,
+  RencanaBahanRow,
   RencanaFakturResult,
   RencanaMenuItem,
   RencanaMenuPreview,
@@ -19,6 +20,70 @@ interface Karyawan {
   nama: string;
   role: "owner" | "admin" | "cashier";
   is_active: boolean;
+}
+
+/**
+ * Satu bagian kekurangan bahan — produksi ATAU beli — dengan tabel dan
+ * subtotalnya sendiri, karena keduanya menjadi faktur yang berbeda.
+ */
+function BagianKurang({ tipe, rows }: { tipe: "produksi" | "beli"; rows: RencanaBahanRow[] }) {
+  if (rows.length === 0) return null;
+  const beli = tipe === "beli";
+  const subtotal = rows.reduce((t, b) => t + (b.estimasi_biaya ?? 0), 0);
+  return (
+    <div
+      className={`overflow-hidden rounded-lg border ${beli ? "border-blue-200" : "border-purple-200"}`}
+    >
+      <div
+        className={`flex items-center justify-between px-3 py-1.5 ${beli ? "bg-blue-50 text-blue-800" : "bg-purple-50 text-purple-800"}`}
+      >
+        <span className="text-sm font-bold">
+          {beli ? "🛒 Harus dibeli → faktur beli" : "🏭 Harus diproduksi → faktur produksi"}
+        </span>
+        <span className="text-xs font-semibold">
+          {rows.length} bahan · {formatRupiah(subtotal)}
+        </span>
+      </div>
+      <div className="max-h-56 overflow-y-auto overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="border-b border-stone-200 bg-stone-50">
+            <tr>
+              <th className={thClass}>Bahan</th>
+              <th className={`${thClass} text-right`}>Butuh</th>
+              <th className={`${thClass} text-right`}>Saldo</th>
+              <th className={`${thClass} text-right`}>Kurang</th>
+              <th className={thClass}>{beli ? "Beli" : "Produksi"}</th>
+              <th className={`${thClass} text-right`}>{beli ? "Est. biaya" : "Est. RAB"}</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-stone-100">
+            {rows.map((b) => (
+              <tr key={b.ingredient_id}>
+                <td className={`${tdClass} font-medium`}>{b.nama}</td>
+                <td className={`${tdClass} text-right`}>
+                  {formatAngka(b.kebutuhan)} {b.satuan}
+                </td>
+                <td className={`${tdClass} text-right`}>{formatAngka(b.saldo)}</td>
+                <td className={`${tdClass} text-right font-bold text-orange-700`}>
+                  {formatAngka(b.kurang)}
+                </td>
+                <td className={`${tdClass} whitespace-nowrap font-medium`}>
+                  {b.jumlah_faktur != null
+                    ? b.mode_faktur === "batch"
+                      ? `${formatAngka(b.jumlah_faktur)} ${beli ? "kemasan" : "batch"} (=${formatAngka(b.qty_faktur ?? 0)} ${b.satuan})`
+                      : `${formatAngka(b.jumlah_faktur)} ${b.satuan}`
+                    : "—"}
+                </td>
+                <td className={`${tdClass} text-right`}>
+                  {b.estimasi_biaya != null ? formatRupiah(b.estimasi_biaya) : "—"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
 }
 
 /**
@@ -86,6 +151,10 @@ export function TambahStokDariMenuPage() {
   });
   const p = itemsTunda.length > 0 ? preview.data : undefined;
   const adaKurang = (p?.jumlah_produksi ?? 0) + (p?.jumlah_beli ?? 0) > 0;
+  // Produksi dan beli menjadi faktur BERBEDA → tampilkan sebagai 2 daftar terpisah.
+  const kurangProduksi = p?.bahan.filter((b) => b.pengadaan === "produksi" && b.kurang > 0) ?? [];
+  const kurangBeli = p?.bahan.filter((b) => b.pengadaan === "beli" && b.kurang > 0) ?? [];
+  const bahanCukup = p?.bahan.filter((b) => b.kurang <= 0) ?? [];
   const butuhPelaksana = (p?.jumlah_produksi ?? 0) > 0 && !pelaksana;
   // Preview basi bila target baru diketik dan debounce/fetch belum selesai —
   // tombol Buat ditahan agar faktur selalu sama dengan angka yang terlihat.
@@ -286,54 +355,35 @@ export function TambahStokDariMenuPage() {
                     </div>
                   </div>
                 </div>
-                <div className="max-h-80 overflow-y-auto overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead className="border-b border-stone-200 bg-stone-50">
-                      <tr>
-                        <th className={thClass}>Bahan</th>
-                        <th className={`${thClass} text-right`}>Butuh</th>
-                        <th className={`${thClass} text-right`}>Saldo</th>
-                        <th className={`${thClass} text-right`}>Kurang</th>
-                        <th className={thClass}>Faktur</th>
-                        <th className={`${thClass} text-right`}>Est. biaya</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-stone-100">
-                      {p.bahan.map((b) => (
-                        <tr key={b.ingredient_id} className={b.kurang > 0 ? "bg-orange-50/40" : ""}>
-                          <td className={tdClass}>
-                            <span className="font-medium">{b.nama}</span>
-                            <span
-                              className={`ml-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
-                                b.pengadaan === "beli"
-                                  ? "bg-blue-100 text-blue-700"
-                                  : "bg-purple-100 text-purple-700"
-                              }`}
-                            >
-                              {b.pengadaan}
-                            </span>
-                          </td>
-                          <td className={`${tdClass} text-right`}>
-                            {formatAngka(b.kebutuhan)} {b.satuan}
-                          </td>
-                          <td className={`${tdClass} text-right`}>{formatAngka(b.saldo)}</td>
-                          <td
-                            className={`${tdClass} text-right font-bold ${b.kurang > 0 ? "text-orange-700" : "text-green-600"}`}
+                <div className="space-y-3">
+                  <BagianKurang tipe="produksi" rows={kurangProduksi} />
+                  <BagianKurang tipe="beli" rows={kurangBeli} />
+                  {!adaKurang && (
+                    <div className="rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
+                      ✅ Stok semua bahan masih cukup untuk rencana ini.
+                    </div>
+                  )}
+                  {bahanCukup.length > 0 && (
+                    <details className="rounded-lg border border-stone-200">
+                      <summary className="cursor-pointer select-none px-3 py-1.5 text-sm font-medium text-stone-500">
+                        ✅ Stok masih cukup ({bahanCukup.length} bahan)
+                      </summary>
+                      <ul className="max-h-40 divide-y divide-stone-100 overflow-y-auto border-t border-stone-100 text-xs text-stone-500">
+                        {bahanCukup.map((b) => (
+                          <li
+                            key={b.ingredient_id}
+                            className="flex items-center justify-between gap-2 px-3 py-1"
                           >
-                            {b.kurang > 0 ? formatAngka(b.kurang) : "cukup"}
-                          </td>
-                          <td className={`${tdClass} whitespace-nowrap`}>
-                            {b.jumlah_faktur != null
-                              ? `${formatAngka(b.jumlah_faktur)} ${b.mode_faktur === "batch" ? `${b.pengadaan === "beli" ? "kemasan" : "batch"} (=${formatAngka(b.qty_faktur ?? 0)} ${b.satuan})` : b.satuan}`
-                              : "—"}
-                          </td>
-                          <td className={`${tdClass} text-right`}>
-                            {b.estimasi_biaya != null ? formatRupiah(b.estimasi_biaya) : "—"}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                            <span className="truncate">{b.nama}</span>
+                            <span className="shrink-0">
+                              butuh {formatAngka(b.kebutuhan)} / saldo {formatAngka(b.saldo)}{" "}
+                              {b.satuan}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  )}
                 </div>
               </>
             ) : null}
