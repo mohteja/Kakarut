@@ -13,8 +13,10 @@ import {
   tdClass,
   thClass,
 } from "../../components/ui";
+import type { AktivitasRow } from "@kakarut/shared";
 import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
+import { formatTanggalRingkas, formatWaktu } from "../../lib/format";
 
 interface Karyawan {
   user_id: string;
@@ -48,6 +50,14 @@ export function KaryawanPage() {
   // Modal QR karyawan (untuk absensi) + data URL QR yang digenerate
   const [qrFor, setQrFor] = useState<Karyawan | null>(null);
   const [qrUrl, setQrUrl] = useState<string | null>(null);
+  // Modal riwayat kegiatan seorang karyawan (log faktur yang ia lakukan)
+  const [aktivitasFor, setAktivitasFor] = useState<Karyawan | null>(null);
+  const { data: aktivitas } = useQuery({
+    queryKey: ["karyawan-aktivitas", aktivitasFor?.user_id],
+    queryFn: () =>
+      api<{ rows: AktivitasRow[] }>(`/karyawan/${aktivitasFor!.user_id}/aktivitas`),
+    enabled: aktivitasFor !== null,
+  });
 
   useEffect(() => {
     let batal = false;
@@ -160,6 +170,12 @@ export function KaryawanPage() {
                       QR
                     </button>
                   )}
+                  <button
+                    onClick={() => setAktivitasFor(k)}
+                    className="ml-3 text-sm font-medium text-orange-600 hover:underline"
+                  >
+                    Aktivitas
+                  </button>
                   <button
                     onClick={() => {
                       const pw = prompt(`Password baru untuk ${k.nama} (min 8 karakter):`);
@@ -287,6 +303,39 @@ export function KaryawanPage() {
                 🖨 Cetak QR
               </button>
             </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Modal riwayat kegiatan seorang karyawan (jejak log faktur) */}
+      <Modal
+        open={aktivitasFor !== null}
+        onClose={() => setAktivitasFor(null)}
+        title={`🗒 Aktivitas — ${aktivitasFor?.nama ?? ""}`}
+      >
+        {aktivitas && aktivitas.rows.length > 0 ? (
+          <ol className="max-h-96 space-y-1.5 overflow-y-auto text-sm">
+            {aktivitas.rows.map((a) => (
+              <li key={a.id} className="rounded-lg border border-stone-100 px-2.5 py-1.5">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span>{a.jalur === "beli" ? "🛒" : "🏭"}</span>
+                  <span className="font-medium text-stone-700">{a.aksi}</span>
+                  <span className="ml-auto shrink-0 font-mono text-[11px] text-stone-400">
+                    {formatTanggalRingkas(a.waktu)} {formatWaktu(a.waktu)}
+                  </span>
+                </div>
+                {(a.detail || a.cabang) && (
+                  <div className="text-xs text-stone-500">
+                    {a.detail}
+                    {a.cabang && <span className="text-stone-400"> · {a.cabang}</span>}
+                  </div>
+                )}
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <div className="py-8 text-center text-sm text-stone-400">
+            Belum ada kegiatan tercatat untuk karyawan ini.
           </div>
         )}
       </Modal>

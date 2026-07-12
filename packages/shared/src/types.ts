@@ -17,6 +17,35 @@ export interface AuthUser {
   branch_id: string | null;
 }
 
+/** Profil akun sendiri (semua peran): identitas + kode/QR absen. */
+export interface ProfilDto {
+  nama: string;
+  email: string;
+  role: UserRole | null;
+  cabang: string | null;
+  employee_code: string | null;
+}
+
+/** Satu entri riwayat kegiatan pada faktur (jejak ubah tahap). */
+export interface FakturLogRow {
+  id: string;
+  aksi: string;
+  detail: string | null;
+  oleh: string | null;
+  waktu: string;
+}
+
+/** Kegiatan seorang karyawan pada faktur — pelacakan per orang. */
+export interface AktivitasRow {
+  id: string;
+  jalur: JenisPengadaan;
+  aksi: string;
+  detail: string | null;
+  cabang: string | null;
+  faktur_id: string;
+  waktu: string;
+}
+
 export interface BahanDto {
   id: string;
   slug: string;

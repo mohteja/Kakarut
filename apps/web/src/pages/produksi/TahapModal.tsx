@@ -224,7 +224,8 @@ export function TahapModal({
                 <tr>
                   {!keProses && <th className={thClass}></th>}
                   <th className={thClass}>Bahan</th>
-                  <th className={thClass}>Tahap sekarang</th>
+                  {/* di HP pill tahap pindah ke bawah nama bahan agar muat */}
+                  <th className={`${thClass} hidden sm:table-cell`}>Tahap sekarang</th>
                   <th className={`${thClass} text-right`}>{keProses ? "Qty" : "Qty maju"}</th>
                   {pakaiHarga && <th className={`${thClass} text-right`}>Harga riil (Rp)</th>}
                 </tr>
@@ -250,10 +251,19 @@ export function TahapModal({
                           />
                         </td>
                       )}
-                      <td className={`${tdClass} font-medium`}>{r.bahan}</td>
-                      <td className={tdClass}>
+                      <td className={`${tdClass} font-medium`}>
+                        {r.bahan}
+                        <div className="mt-0.5 sm:hidden">
+                          <span
+                            className={`whitespace-nowrap rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${badgeFaktur(tipe, r.status).cls}`}
+                          >
+                            {labelTahapRingkas(tipe, r.status)}
+                          </span>
+                        </div>
+                      </td>
+                      <td className={`${tdClass} hidden sm:table-cell`}>
                         <span
-                          className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${badgeFaktur(tipe, r.status).cls}`}
+                          className={`whitespace-nowrap rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${badgeFaktur(tipe, r.status).cls}`}
                         >
                           {labelTahapRingkas(tipe, r.status)}
                         </span>
@@ -275,7 +285,7 @@ export function TahapModal({
                                 disabled={!p?.aktif}
                                 onChange={(e) => ubah(r, { qty: e.target.value })}
                                 aria-label={`Qty maju ${r.bahan}`}
-                                className={`w-24 rounded-lg border px-2 py-1 text-right ${salah ? "border-red-400" : "border-stone-300"}`}
+                                className={`w-16 rounded-lg border px-2 py-1 text-right sm:w-24 ${salah ? "border-red-400" : "border-stone-300"}`}
                               />
                               <span className="text-xs text-stone-400">
                                 / {formatAngka(r.qty)} {r.satuan}
@@ -306,7 +316,7 @@ export function TahapModal({
                               ubah(r, { harga: e.target.value, hargaManual: true })
                             }
                             aria-label={`Harga riil ${r.bahan}`}
-                            className={`w-28 rounded-lg border px-2 py-1 text-right ${p?.aktif && !(Number.isFinite(Number(p?.harga)) && Number(p?.harga) >= 0) ? "border-red-400" : "border-stone-300"}`}
+                            className={`w-20 rounded-lg border px-2 py-1 text-right sm:w-28 ${p?.aktif && !(Number.isFinite(Number(p?.harga)) && Number(p?.harga) >= 0) ? "border-red-400" : "border-stone-300"}`}
                           />
                           {r.total_harga != null && (
                             <div className="text-right text-[11px] text-stone-400">

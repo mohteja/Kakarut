@@ -1,11 +1,11 @@
 import { zValidator } from "@hono/zod-validator";
 import bcrypt from "bcryptjs";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { db } from "../../db/client";
-import { branches, memberships, users } from "../../db/schema";
+import { branches, fakturLogs, memberships, users } from "../../db/schema";
 import { type AppEnv } from "../../middleware/auth";
 import { isKodeKaryawanConflict, resolveKodeKaryawan } from "./service";
 
@@ -102,6 +102,30 @@ export const karyawanRoutes = new Hono<AppEnv>()
       }
     }
     return c.json(result!, 201);
+  })
+  /**
+   * Riwayat KEGIATAN satu karyawan: semua log faktur yang ia lakukan (buat
+   * faktur, ubah tahap, konfirmasi, penerimaan) — pelacakan per orang.
+   */
+  .get("/:userId/aktivitas", async (c) => {
+    const auth = c.get("auth");
+    const userId = c.req.param("userId");
+    const rows = await db
+      .select({
+        id: fakturLogs.id,
+        jalur: fakturLogs.jalur,
+        aksi: fakturLogs.aksi,
+        detail: fakturLogs.detail,
+        cabang: branches.nama,
+        faktur_id: fakturLogs.fakturId,
+        waktu: fakturLogs.waktu,
+      })
+      .from(fakturLogs)
+      .leftJoin(branches, eq(fakturLogs.branchId, branches.id))
+      .where(and(eq(fakturLogs.companyId, auth.company_id!), eq(fakturLogs.userId, userId)))
+      .orderBy(desc(fakturLogs.waktu), desc(fakturLogs.id))
+      .limit(100);
+    return c.json({ rows });
   })
   .patch("/:userId", zValidator("json", PatchKaryawanBody), async (c) => {
     const auth = c.get("auth");

@@ -645,6 +645,37 @@ export const fakturDana = pgTable(
   ],
 );
 
+/**
+ * Jejak KEGIATAN faktur produksi/beli: dibuat, ubah tahap (dgn dana/realisasi/
+ * tujuan), konfirmasi, dan penerimaan — siapa melakukannya dan kapan. Dipakai
+ * untuk riwayat per faktur DAN riwayat kegiatan per karyawan.
+ */
+export const fakturLogs = pgTable(
+  "faktur_logs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    branchId: uuid("branch_id")
+      .notNull()
+      .references(() => branches.id),
+    /** faktur virtual: productions.faktur_id (tanpa FK — faktur bukan tabel) */
+    fakturId: uuid("faktur_id").notNull(),
+    jalur: pengadaanEnum("jalur").notNull(),
+    /** label aksi, mis. "Faktur dibuat (RAB)", "Diproses", "Dikirim" */
+    aksi: text("aksi").notNull(),
+    /** rincian ringkas: jumlah baris, dana cair, realisasi, tujuan kirim, dll. */
+    detail: text("detail"),
+    userId: uuid("user_id").references(() => users.id),
+    waktu: timestamp("waktu", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("faktur_logs_faktur_idx").on(t.fakturId, t.waktu),
+    index("faktur_logs_user_idx").on(t.companyId, t.userId, t.waktu),
+  ],
+);
+
 export const stockOpnames = pgTable(
   "stock_opnames",
   {

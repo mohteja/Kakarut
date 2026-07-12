@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import type { JenisPengadaan, PenyimpananDto, SupplierDto } from "@kakarut/shared";
+import type { FakturLogRow, JenisPengadaan, PenyimpananDto, SupplierDto } from "@kakarut/shared";
 import { ErrorText, Modal, btnPrimary, btnSecondary, inputClass } from "../../components/ui";
 import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
@@ -73,6 +73,12 @@ export function FakturDetailModal({
     queryFn: () =>
       api<{ rows: DanaEntri[]; total: number }>(`${endpoint}/dana/${grup.fakturId}`),
     enabled: mode === "lihat" && !!grup.fakturId && grup.danaCair !== 0,
+  });
+  // jejak kegiatan faktur: dibuat → ubah tahap → konfirmasi/penerimaan
+  const { data: log } = useQuery({
+    queryKey: [endpoint, "log", grup.fakturId],
+    queryFn: () => api<{ rows: FakturLogRow[] }>(`${endpoint}/log/${grup.fakturId}`),
+    enabled: mode === "lihat" && !!grup.fakturId,
   });
 
   function selesai() {
@@ -206,6 +212,26 @@ export function FakturDetailModal({
               <div className="mt-1 border-t border-emerald-200 pt-1 text-right text-xs font-semibold text-emerald-800">
                 Dana efektif: {formatRupiah(dana.total)}
               </div>
+            </div>
+          )}
+
+          {log && log.rows.length > 0 && (
+            <div className="rounded-lg border border-stone-200 p-2 text-sm">
+              <div className="mb-1 font-semibold text-stone-700">📜 Riwayat tahap</div>
+              <ol className="space-y-1">
+                {log.rows.map((l) => (
+                  <li key={l.id} className="flex gap-2">
+                    <span className="shrink-0 font-mono text-xs text-stone-400">
+                      {formatWaktu(l.waktu)}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="font-medium text-stone-700">{l.aksi}</span>
+                      {l.detail && <span className="text-stone-500"> — {l.detail}</span>}
+                      {l.oleh && <span className="text-xs text-stone-400"> · {l.oleh}</span>}
+                    </span>
+                  </li>
+                ))}
+              </ol>
             </div>
           )}
 
