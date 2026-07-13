@@ -27,10 +27,13 @@ import { RekomendasiBeliPage } from "./pages/produksi/RekomendasiBeliPage";
 import { CabangPage } from "./pages/pengaturan/CabangPage";
 import { KaryawanPage } from "./pages/pengaturan/KaryawanPage";
 import { MejaPage } from "./pages/pengaturan/MejaPage";
+import { KategoriPage } from "./pages/pengaturan/KategoriPage";
 import { PenyimpananPage } from "./pages/pengaturan/PenyimpananPage";
 import { PerusahaanPage } from "./pages/pengaturan/PerusahaanPage";
 import { SupplierPage } from "./pages/pengaturan/SupplierPage";
 import { KartuStokPage } from "./pages/stok/KartuStokPage";
+import { PermintaanStokPage } from "./pages/stok/PermintaanStokPage";
+import { StokAwalPage } from "./pages/stok/StokAwalPage";
 import { TambahStokDariMenuPage } from "./pages/stok/TambahStokDariMenuPage";
 import { OpnamePage } from "./pages/stok/OpnamePage";
 import { OpnameRiwayatPage } from "./pages/stok/OpnameRiwayatPage";
@@ -118,6 +121,8 @@ export default function App() {
                   <Route path="/dashboard" element={<DashboardPage />} />
                   <Route path="/pembelian/rekomendasi" element={<RekomendasiBeliPage />} />
                   <Route path="/stok/tambah-dari-menu" element={<TambahStokDariMenuPage />} />
+                  <Route path="/stok/awal" element={<StokAwalPage />} />
+                  <Route path="/permintaan-stok" element={<PermintaanStokPage />} />
                   <Route path="/laporan" element={<LaporanPage />} />
                   <Route path="/laporan/pembelian" element={<LaporanPembelianPage />} />
                   <Route path="/laporan/menu-laris" element={<LaporanMenuLarisPage />} />
@@ -131,6 +136,7 @@ export default function App() {
                   <Route path="/pengaturan/karyawan" element={<KaryawanPage />} />
                   <Route path="/pengaturan/supplier" element={<SupplierPage />} />
                   <Route path="/pengaturan/penyimpanan" element={<PenyimpananPage />} />
+                  <Route path="/pengaturan/kategori" element={<KategoriPage />} />
                 </>
               )}
             </>

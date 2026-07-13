@@ -1,10 +1,11 @@
 import { zValidator } from "@hono/zod-validator";
-import { eq } from "drizzle-orm";
+import { and, desc, eq, isNotNull, isNull } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { Hono } from "hono";
 import { z } from "zod";
-import type { AcuanJenis } from "@kakarut/shared";
+import type { AcuanJenis, KonfirmasiStatus, PermintaanStokRow } from "@kakarut/shared";
 import { db } from "../../db/client";
-import { companies } from "../../db/schema";
+import { branches, companies, productions, users } from "../../db/schema";
 import { resolveBranchId, type AppEnv } from "../../middleware/auth";
 import { buatFakturDariRencana, rencanaDariMenu } from "./rencana";
 import { rekomendasiBeli } from "./service";
@@ -95,4 +96,102 @@ export const rekomendasiRoutes = new Hono<AppEnv>().get("/beli", async (c) => {
       catatan: body.catatan,
     });
     return c.json(hasil, 201);
+  })
+  // Data Permintaan Stok: daftar permintaan "Tambah Stok dari Menu" — faktur
+  // produksi + beli satu submit digabung lewat rencana_id. Company-scoped
+  // (owner/admin dari Kantor).
+  .get("/permintaan", async (c) => {
+    const auth = c.get("auth");
+    const tujuanB = alias(branches, "tujuan_permintaan");
+    const pembuatU = alias(users, "pembuat_permintaan");
+    const rows = await db
+      .select({
+        rencanaId: productions.rencanaId,
+        fakturId: productions.fakturId,
+        ingredientId: productions.ingredientId,
+        tipe: productions.tipe,
+        status: productions.status,
+        totalHarga: productions.totalHarga,
+        catatan: productions.catatan,
+        waktu: productions.waktu,
+        tujuanNama: tujuanB.nama,
+        pembuat: pembuatU.nama,
+      })
+      .from(productions)
+      .leftJoin(tujuanB, eq(productions.tujuanBranchId, tujuanB.id))
+      .leftJoin(pembuatU, eq(productions.userId, pembuatU.id))
+      .where(
+        and(
+          eq(productions.companyId, auth.company_id!),
+          isNotNull(productions.rencanaId),
+          isNull(productions.deletedAt),
+        ),
+      )
+      .orderBy(desc(productions.waktu));
+
+    // status representatif faktur = tahap PALING AWAL di antara barisnya (bila
+    // sebagian sudah maju & sebagian belum, tampilkan yang paling tertinggal).
+    const RANK: Record<string, number> = {
+      rencana: 0,
+      dikerjakan: 1,
+      menunggu: 2,
+      ditolak: 3,
+      dikonfirmasi: 4,
+    };
+    // jumlah_baris = bahan UNIK (bukan jumlah baris) — satu bahan bisa terpecah
+    // jadi beberapa baris saat tahap sebagian.
+    type Akum = PermintaanStokRow & {
+      _rankProd: number;
+      _rankBeli: number;
+      _ingProd: Set<string>;
+      _ingBeli: Set<string>;
+    };
+    const map = new Map<string, Akum>();
+    for (const r of rows) {
+      const id = r.rencanaId!;
+      let g = map.get(id);
+      if (!g) {
+        g = {
+          rencana_id: id,
+          waktu: (r.waktu as Date).toISOString(),
+          catatan: r.catatan,
+          tujuan_cabang: null,
+          pembuat: r.pembuat,
+          produksi: null,
+          beli: null,
+          _rankProd: Infinity,
+          _rankBeli: Infinity,
+          _ingProd: new Set(),
+          _ingBeli: new Set(),
+        };
+        map.set(id, g);
+      }
+      if (r.tujuanNama && !g.tujuan_cabang) g.tujuan_cabang = r.tujuanNama;
+      const rank = RANK[r.status] ?? 99;
+      const st = r.status as KonfirmasiStatus;
+      if (r.tipe === "produksi") {
+        if (!g.produksi)
+          g.produksi = { faktur_id: r.fakturId!, jumlah_baris: 0, status: st, total: 0 };
+        g._ingProd.add(r.ingredientId);
+        g.produksi.jumlah_baris = g._ingProd.size;
+        g.produksi.total += Number(r.totalHarga ?? 0);
+        if (rank < g._rankProd) {
+          g._rankProd = rank;
+          g.produksi.status = st;
+        }
+      } else {
+        if (!g.beli) g.beli = { faktur_id: r.fakturId!, jumlah_baris: 0, status: st, total: 0 };
+        g._ingBeli.add(r.ingredientId);
+        g.beli.jumlah_baris = g._ingBeli.size;
+        g.beli.total += Number(r.totalHarga ?? 0);
+        if (rank < g._rankBeli) {
+          g._rankBeli = rank;
+          g.beli.status = st;
+        }
+      }
+    }
+    const hasil: PermintaanStokRow[] = [...map.values()].map(
+      ({ _rankProd, _rankBeli, _ingProd, _ingBeli, ...rest }) => rest,
+    );
+    return c.json(hasil);
   });

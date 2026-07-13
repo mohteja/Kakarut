@@ -301,6 +301,12 @@ export function Layout() {
                   )}
                   {penuh && (
                     <>
+                      <NavLink to="/stok/tambah-dari-menu" className={linkClass}>
+                        ➕ Tambah Stok dari Menu
+                      </NavLink>
+                      <NavLink to="/permintaan-stok" className={linkClass}>
+                        📋 Data Permintaan Stok
+                      </NavLink>
                       <NavLink to="/laporan" className={linkClass}>
                         📊 Laporan
                       </NavLink>
@@ -318,6 +324,9 @@ export function Layout() {
                   </div>
                   <NavLink to="/menu" className={linkClass}>
                     🍜 Menu &amp; HPP
+                  </NavLink>
+                  <NavLink to="/pengaturan/kategori" className={linkClass}>
+                    🏷 Master Kategori
                   </NavLink>
                   <NavLink to="/bahan" className={linkClass}>
                     🥩 Bahan Baku

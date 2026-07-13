@@ -1,10 +1,10 @@
 import { zValidator } from "@hono/zod-validator";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, count, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { db } from "../../db/client";
-import { menuCategories } from "../../db/schema";
+import { menuCategories, menus } from "../../db/schema";
 import { requireRole, type AppEnv } from "../../middleware/auth";
 
 const KategoriBody = z.object({
@@ -62,4 +62,23 @@ export const kategoriRoutes = new Hono<AppEnv>()
       if (!row) throw new HTTPException(404, { message: "Kategori tidak ditemukan" });
       return c.json({ id: row.id, nama: row.nama, sort_order: row.sortOrder });
     },
-  );
+  )
+  .delete("/:id", requireRole("owner", "admin"), async (c) => {
+    const auth = c.get("auth");
+    const id = c.req.param("id");
+    // Kategori yang masih dipakai menu tak boleh dihapus (FK NOT NULL) — cegah
+    // lebih dulu dengan pesan jelas.
+    const [{ n }] = await db
+      .select({ n: count() })
+      .from(menus)
+      .where(and(eq(menus.categoryId, id), eq(menus.companyId, auth.company_id!)));
+    if (n > 0) {
+      throw new HTTPException(409, { message: `Kategori masih dipakai ${n} menu` });
+    }
+    const [row] = await db
+      .delete(menuCategories)
+      .where(and(eq(menuCategories.id, id), eq(menuCategories.companyId, auth.company_id!)))
+      .returning({ id: menuCategories.id });
+    if (!row) throw new HTTPException(404, { message: "Kategori tidak ditemukan" });
+    return c.json({ ok: true });
+  });

@@ -21,7 +21,7 @@ import {
 } from "../../components/ui";
 import { CabangDataBar } from "../../components/CabangDataBar";
 import { useAuth } from "../../context/AuthContext";
-import { useBranch, useCabangData } from "../../context/BranchContext";
+import { useCabangData } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import {
   formatAngka,
@@ -32,12 +32,11 @@ import {
 
 export function StokPage() {
   const { auth } = useAuth();
-  const { divisi } = useBranch();
   // Stok bersifat fisik per cabang — dari Kantor pilih cabang datanya.
   const { query: branchQuery } = useCabangData();
-  const isManajemen = auth?.user.role === "owner" || auth?.user.role === "admin";
   // tim hanya CEK stok — opname/penyesuaian bukan tugasnya
   const isTim = auth?.user.role === "tim";
+  const isManajemen = auth?.user.role === "owner" || auth?.user.role === "admin";
   // Dua tampilan: stok BAHAN (baris per bahan baku) & stok MENU (sisa porsi
   // per menu, diturunkan dari saldo bahan — selalu berkorelasi otomatis).
   const [tab, setTab] = useState<"bahan" | "menu">("bahan");
@@ -120,15 +119,16 @@ export function StokPage() {
               <Link to="/stok/opname/riwayat" className={btnSecondary}>
                 🕑 Riwayat
               </Link>
+              {/* Stok Awal = saldo pembuka stok yang sudah ada (onboarding) */}
+              {isManajemen && (
+                <Link to="/stok/awal" className={btnSecondary}>
+                  📦 Stok Awal
+                </Link>
+              )}
               <Link to="/stok/opname" className={btnPrimary}>
                 📋 Stok Opname
               </Link>
             </div>
-          ) : isManajemen && divisi !== "store" ? (
-            // perencanaan pengadaan = urusan Kantor/CK, bukan divisi store
-            <Link to="/stok/tambah-dari-menu" className={btnPrimary}>
-              ➕ Tambah Stok dari Menu
-            </Link>
           ) : undefined
         }
       >

@@ -602,6 +602,9 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
                 tipe: b.tipe,
                 totalHarga: hargaBaris,
                 fakturId: b.fakturId,
+                // pertahankan penanda permintaan agar baris hasil tahap (split)
+                // tetap tergabung di "Data Permintaan Stok"
+                rencanaId: b.rencanaId,
                 noFaktur: b.noFaktur,
                 supplierId: b.supplierId,
                 storageLocationId: tujuanStorage ?? b.storageLocationId,

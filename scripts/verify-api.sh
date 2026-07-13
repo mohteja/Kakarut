@@ -1816,6 +1816,12 @@ cek "faktur beli TIDAK di store (dibukukan di CK)" "V == 0" \
 cek "riwayat: log faktur beli 'Permintaan tambah stok' (di CK)" "V == 1" \
   "$(api "$OWNER" GET "/pembelian/log/$WO_BELI" | jq '([.rows[] | select(.aksi=="Permintaan tambah stok")] | length > 0) | if . then 1 else 0 end')"
 
+# Data Permintaan Stok: produksi + beli SATU submit tergabung sbg 1 entri (rencana_id)
+cek "permintaan: 1 entri menggabung produksi+beli (WO)" "V == 1" \
+  "$(api "$OWNER" GET /rekomendasi/permintaan | jq --arg p "$WO_FID" --arg b "$WO_BELI" '[.[] | select(.produksi.faktur_id==$p and .beli.faktur_id==$b)] | length | if . == 1 then 1 else 0 end')"
+cek "permintaan: bagian rencana + tujuan store terisi" "V == 1" \
+  "$(api "$OWNER" GET /rekomendasi/permintaan | jq --arg p "$WO_FID" '[.[] | select(.produksi.faktur_id==$p)][0] | (.produksi.status=="rencana" and .beli.status=="rencana" and .tujuan_cabang!=null) | if . then 1 else 0 end')"
+
 # tim@CK mulai dikerjakan (seluruh faktur) → self-assign pelaksana
 api "$TCK58" POST "/produksi/tahap/$WO_FID" '{"ke":"dikerjakan"}' > /dev/null
 cek "tim CK mulai dikerjakan → pelaksana = dirinya" "V == 1" \
@@ -1872,6 +1878,40 @@ cek "produksi?branch_id=all menyertakan nama cabang" "V == 1" \
 cek "produksi?branch_id=<CK47> hanya faktur cabang itu (bukan WO@store)" "V == 0" \
   "$(api "$OWNER" GET "/produksi?branch_id=$CK47_ID&per_page=500" | jq --arg a "$WO_FID" '[.rows[] | select(.faktur_id==$a)] | length')"
 cek "penerimaan?branch_id=all lintas cabang" "V == 200" "$(status_code "$OWNER" GET "/penerimaan?branch_id=all")"
+
+echo "== 64. Stok Awal (saldo pembuka) =="
+SA_ING=$(api "$OWNER" GET /stok | jq -r '.[0].ingredient_id')
+api "$OWNER" POST /stok/awal "{\"items\":[{\"ingredient_id\":\"$SA_ING\",\"qty\":777}]}" > /dev/null
+cek "stok awal menetapkan saldo bahan == 777" "abs(V - 777) < 0.001" \
+  "$(api "$OWNER" GET /stok | jq --arg i "$SA_ING" '[.[] | select(.ingredient_id==$i)][0].saldo')"
+# stok awal TIDAK membuat penyesuaian menunggu (bukan opname selisih)
+cek "stok awal tak menambah antrean penyesuaian bahan itu" "V == 0" \
+  "$(api "$OWNER" GET "/stok/penyesuaian?status=belum" | jq --arg i "$SA_ING" '[.[] | select(.ingredient_id==$i)] | length')"
+# stok awal MENETAPKAN (bukan menambah): set ulang ke 300 → saldo jadi 300
+api "$OWNER" POST /stok/awal "{\"items\":[{\"ingredient_id\":\"$SA_ING\",\"qty\":300}]}" > /dev/null
+cek "stok awal ulang menetapkan saldo == 300 (bukan 1077)" "abs(V - 300) < 0.001" \
+  "$(api "$OWNER" GET /stok | jq --arg i "$SA_ING" '[.[] | select(.ingredient_id==$i)][0].saldo')"
+cek "stok awal oleh KASIR ditolak (403)" "V == 403" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/stok/awal" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d "{\"items\":[{\"ingredient_id\":\"$SA_ING\",\"qty\":1}]}")"
+
+echo "== 65. Master Kategori (CRUD + hapus aman) =="
+KAT_ID=$(api "$OWNER" POST /kategori '{"nama":"Kategori Uji ZZ","sort_order":9}' | jq -r .id)
+cek "kategori baru muncul di daftar" "V == 1" \
+  "$(api "$OWNER" GET /kategori | jq --arg id "$KAT_ID" '[.[] | select(.id==$id)] | length')"
+cek "PATCH kategori mengubah nama" "V == 1" \
+  "$(api "$OWNER" PATCH "/kategori/$KAT_ID" '{"nama":"Kategori Uji ZZ2"}' | jq '.nama=="Kategori Uji ZZ2" | if . then 1 else 0 end')"
+cek "kategori duplikat ditolak (409)" "V == 409" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/kategori" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"nama":"Kategori Uji ZZ2"}')"
+cek "POST kategori oleh KASIR ditolak (403)" "V == 403" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/kategori" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d '{"nama":"x"}')"
+cek "DELETE kategori tak terpakai berhasil" "V == 200" \
+  "$(status_code "$OWNER" DELETE "/kategori/$KAT_ID")"
+cek "kategori terhapus hilang dari daftar" "V == 0" \
+  "$(api "$OWNER" GET /kategori | jq --arg id "$KAT_ID" '[.[] | select(.id==$id)] | length')"
+# kategori yang dipakai menu tak boleh dihapus
+PBA_KAT=$(api "$OWNER" GET /menu | jq -r --arg id "$PBA_ID" '[.[] | select(.id==$id)][0].category_id')
+cek "DELETE kategori yang dipakai menu ditolak (409)" "V == 409" \
+  "$(status_code "$OWNER" DELETE "/kategori/$PBA_KAT")"
 
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="

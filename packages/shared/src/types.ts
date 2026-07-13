@@ -81,6 +81,13 @@ export interface KomponenDto {
   is_complement: boolean;
 }
 
+/** Kategori menu (master data). */
+export interface KategoriDto {
+  id: string;
+  nama: string;
+  sort_order: number;
+}
+
 export interface MenuDto {
   id: string;
   nama: string;
@@ -184,6 +191,33 @@ export interface RencanaMenuPreview {
 export interface RencanaFakturResult {
   produksi: { faktur_id: string; jumlah_baris: number } | null;
   beli: { faktur_id: string; jumlah_baris: number } | null;
+}
+
+/** Satu bagian (Produksi / Beli) dari sebuah permintaan tambah stok. */
+export interface PermintaanStokBagian {
+  faktur_id: string;
+  jumlah_baris: number;
+  /** status "paling awal" di antara baris faktur (tahap terkini) */
+  status: KonfirmasiStatus;
+  total: number;
+}
+
+/**
+ * Satu permintaan "Tambah Stok dari Menu": gabungan faktur Produksi + Beli
+ * yang lahir dari satu submit (dikelompokkan lewat productions.rencana_id).
+ */
+export interface PermintaanStokRow {
+  rencana_id: string;
+  /** ISO timestamp pembuatan permintaan */
+  waktu: string;
+  /** ringkasan menu/porsi ("50× BASOAC, 30× PYO") dari catatan faktur */
+  catatan: string | null;
+  /** cabang tujuan (store yang butuh stok); null bila hanya beli */
+  tujuan_cabang: string | null;
+  /** nama pembuat permintaan */
+  pembuat: string | null;
+  produksi: PermintaanStokBagian | null;
+  beli: PermintaanStokBagian | null;
 }
 
 /**
