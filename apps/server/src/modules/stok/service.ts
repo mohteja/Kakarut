@@ -85,6 +85,9 @@ export async function hitungSaldoCabang(
         AND pr.tipe = 'produksi'
         AND pr.status IN ('rencana', 'dikerjakan', 'menunggu')
         AND pr.deleted_at IS NULL
+        -- work-order CK yang belum dikirim (tujuan ≠ cabang ini) tak menambah
+        -- proyeksi stok CK — barang akan mendarat di cabang tujuan
+        AND (pr.tujuan_branch_id IS NULL OR pr.tujuan_branch_id = pr.branch_id)
     ) w ON TRUE
     LEFT JOIN LATERAL (
       -- pembelian (beli jadi) yang BELUM masuk stok: RAB → diproses → dikirim.

@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import App from "./App";
 import { ServerStatusOverlay } from "./components/ServerStatusOverlay";
+import { UpdatePrompt } from "./components/UpdatePrompt";
 import { AuthProvider } from "./context/AuthContext";
 import "./index.css";
 
@@ -19,6 +20,7 @@ createRoot(document.getElementById("root")!).render(
           <App />
         </BrowserRouter>
         <ServerStatusOverlay />
+        <UpdatePrompt />
       </AuthProvider>
     </QueryClientProvider>
   </StrictMode>,

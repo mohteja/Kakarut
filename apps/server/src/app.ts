@@ -4,6 +4,7 @@ import { HTTPException } from "hono/http-exception";
 import { logger } from "hono/logger";
 import { db } from "./db/client";
 import { branches } from "./db/schema";
+import { getBuildId } from "./lib/build";
 import {
   requireAuth,
   requireCompany,
@@ -41,9 +42,16 @@ import { getStorage } from "./modules/upload/storage";
 
 export function createApp() {
   const api = new Hono<AppEnv>()
+    // Tandai tiap respons API dengan build id frontend saat ini → klien tahu
+    // ada versi baru (build server ≠ build tab yang dimuat) tanpa polling khusus.
+    .use("*", async (c, next) => {
+      await next();
+      const build = getBuildId();
+      if (build) c.header("X-Kakarut-Build", build);
+    })
     .get("/health", async (c) => {
       await db.execute(sql`SELECT 1`);
-      return c.json({ ok: true, storage: getStorage().mode });
+      return c.json({ ok: true, storage: getStorage().mode, build: getBuildId() });
     })
     .route("/auth", authRoutes)
     // Platform super-admin

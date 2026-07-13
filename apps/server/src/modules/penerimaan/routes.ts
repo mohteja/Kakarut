@@ -1,12 +1,27 @@
 import { zValidator } from "@hono/zod-validator";
-import { and, asc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, or } from "drizzle-orm";
 import { Hono, type Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
+import type { JenisPengadaan } from "@kakarut/shared";
 import { db } from "../../db/client";
-import { ingredients, productions, storageLocations, suppliers } from "../../db/schema";
+import { branches, ingredients, productions, storageLocations, suppliers } from "../../db/schema";
 import { resolveBranchId, terikatCabang, type AppEnv } from "../../middleware/auth";
 import { catatLogFaktur } from "../produksi/log";
+
+/**
+ * Kiriman yang TIBA di sebuah cabang untuk diterima: faktur BELI (pemasok →
+ * toko) atau work-order PRODUKSI Central Kitchen yang sudah dikirim (baris
+ * pindah ke cabang tujuan → `branch_id == tujuan_branch_id`). Produksi biasa
+ * (tanpa tujuan) dikonfirmasi di tempat lewat /konfirmasi, bukan di sini.
+ */
+const KIRIMAN_MASUK = or(
+  eq(productions.tipe, "beli"),
+  and(
+    eq(productions.tipe, "produksi"),
+    eq(productions.tujuanBranchId, productions.branchId),
+  ),
+)!;
 
 const TolakBody = z.object({ alasan: z.string().trim().max(300).nullish() });
 
@@ -18,13 +33,13 @@ const TerimaSebagianBody = z.object({
   alasan: z.string().trim().max(300).nullish(),
 });
 
-/** Kondisi dasar satu faktur kiriman (jalur beli) milik perusahaan; kasir terkunci cabangnya. */
+/** Kondisi dasar satu faktur kiriman milik perusahaan; kasir terkunci cabangnya. */
 function kondisiFaktur(c: Context<AppEnv>, fakturId: string) {
   const auth = c.get("auth");
   const conds = [
     eq(productions.companyId, auth.company_id!),
     eq(productions.fakturId, fakturId),
-    eq(productions.tipe, "beli" as const),
+    KIRIMAN_MASUK,
     isNull(productions.deletedAt),
   ];
   if (terikatCabang(auth.role) && auth.branch_id) {
@@ -44,7 +59,9 @@ export const penerimaanRoutes = new Hono<AppEnv>()
   /** Daftar kiriman yang menunggu penerimaan + yang ditolak, per cabang. */
   .get("/", async (c) => {
     const auth = c.get("auth");
-    const branchId = await resolveBranchId(c);
+    // Kantor: owner/admin boleh "?branch_id=all" → semua cabang; kasir/tim terkunci.
+    const semuaCabang = !terikatCabang(auth.role) && c.req.query("branch_id") === "all";
+    const branchId = semuaCabang ? null : await resolveBranchId(c);
     const rows = await db
       .select({
         id: productions.id,
@@ -61,6 +78,9 @@ export const penerimaanRoutes = new Hono<AppEnv>()
         faktur_id: productions.fakturId,
         no_faktur: productions.noFaktur,
         status: productions.status,
+        // jalur kiriman (🛒 beli / 🏭 produksi CK) + cabang penerima (utk Kantor)
+        jalur: productions.tipe,
+        cabang: branches.nama,
         supplier: suppliers.nama,
         tempat: storageLocations.nama,
         qty_dipesan: productions.qtyDipesan,
@@ -70,11 +90,12 @@ export const penerimaanRoutes = new Hono<AppEnv>()
       .innerJoin(ingredients, eq(productions.ingredientId, ingredients.id))
       .leftJoin(suppliers, eq(productions.supplierId, suppliers.id))
       .leftJoin(storageLocations, eq(productions.storageLocationId, storageLocations.id))
+      .leftJoin(branches, eq(productions.branchId, branches.id))
       .where(
         and(
           eq(productions.companyId, auth.company_id!),
-          eq(productions.branchId, branchId),
-          eq(productions.tipe, "beli"),
+          ...(branchId ? [eq(productions.branchId, branchId)] : []),
+          KIRIMAN_MASUK,
           inArray(productions.status, ["menunggu", "ditolak"]),
           isNull(productions.deletedAt),
         ),
@@ -94,7 +115,11 @@ export const penerimaanRoutes = new Hono<AppEnv>()
       .where(
         and(...kondisiFaktur(c, c.req.param("fakturId")), eq(productions.status, "menunggu")),
       )
-      .returning({ id: productions.id, branchId: productions.branchId });
+      .returning({
+        id: productions.id,
+        branchId: productions.branchId,
+        tipe: productions.tipe,
+      });
     if (rows.length === 0) {
       throw new HTTPException(404, { message: "Kiriman tidak ditemukan atau bukan status dikirim" });
     }
@@ -102,7 +127,7 @@ export const penerimaanRoutes = new Hono<AppEnv>()
       companyId: auth.company_id!,
       branchId: rows[0].branchId,
       fakturId: c.req.param("fakturId"),
-      jalur: "beli",
+      jalur: rows[0].tipe as JenisPengadaan,
       aksi: "Diterima semua (toko) — stok masuk",
       detail: `${rows.length} baris`,
       userId: auth.sub,
@@ -125,6 +150,7 @@ export const penerimaanRoutes = new Hono<AppEnv>()
         qty: productions.qty,
         totalHarga: productions.totalHarga,
         branchId: productions.branchId,
+        tipe: productions.tipe,
       })
       .from(productions)
       .where(and(...kondisiFaktur(c, fakturId), eq(productions.status, "menunggu")));
@@ -205,7 +231,7 @@ export const penerimaanRoutes = new Hono<AppEnv>()
         companyId: auth.company_id!,
         branchId: baris[0].branchId,
         fakturId,
-        jalur: "beli",
+        jalur: baris[0].tipe as JenisPengadaan,
         aksi: "Diterima sebagian (toko)",
         detail:
           `${diterima} baris diterima, ${baris.length - diterima} ditolak` +
@@ -230,7 +256,11 @@ export const penerimaanRoutes = new Hono<AppEnv>()
       .where(
         and(...kondisiFaktur(c, c.req.param("fakturId")), eq(productions.status, "menunggu")),
       )
-      .returning({ id: productions.id, branchId: productions.branchId });
+      .returning({
+        id: productions.id,
+        branchId: productions.branchId,
+        tipe: productions.tipe,
+      });
     if (rows.length === 0) {
       throw new HTTPException(404, { message: "Kiriman tidak ditemukan atau bukan status dikirim" });
     }
@@ -238,7 +268,7 @@ export const penerimaanRoutes = new Hono<AppEnv>()
       companyId: auth.company_id!,
       branchId: rows[0].branchId,
       fakturId: c.req.param("fakturId"),
-      jalur: "beli",
+      jalur: rows[0].tipe as JenisPengadaan,
       aksi: "Kiriman ditolak",
       detail: body.alasan ?? null,
       userId: auth.sub,
@@ -278,7 +308,11 @@ export const penerimaanRoutes = new Hono<AppEnv>()
         waktu: now,
       })
       .where(and(...kondisiFaktur(c, fakturId), eq(productions.status, "ditolak")))
-      .returning({ id: productions.id, branchId: productions.branchId });
+      .returning({
+        id: productions.id,
+        branchId: productions.branchId,
+        tipe: productions.tipe,
+      });
     if (rows.length === 0) {
       throw new HTTPException(404, { message: "Tidak ada baris ditolak pada kiriman ini" });
     }
@@ -286,7 +320,7 @@ export const penerimaanRoutes = new Hono<AppEnv>()
       companyId: auth.company_id!,
       branchId: rows[0].branchId,
       fakturId,
-      jalur: "beli",
+      jalur: rows[0].tipe as JenisPengadaan,
       aksi: "Penolakan dibatalkan — stok masuk",
       detail: `${rows.length} baris`,
       userId: auth.sub,

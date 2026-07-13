@@ -27,6 +27,10 @@ const RencanaFakturBody = RencanaBody.extend({
   supplier_id: z.string().uuid().nullish(),
   /** pemasok barang faktur beli (terpisah dari pelaksana produksi) */
   supplier_beli_id: z.string().uuid().nullish(),
+  /** work-order: cabang tujuan (store) yang butuh stok */
+  tujuan_branch_id: z.string().uuid().nullish(),
+  /** work-order: Central Kitchen pelaksana (auto dari pemasok store bila kosong) */
+  ck_branch_id: z.string().uuid().nullish(),
   catatan: z.string().nullish(),
 });
 
@@ -72,14 +76,17 @@ export const rekomendasiRoutes = new Hono<AppEnv>().get("/beli", async (c) => {
     const preview = await rencanaDariMenu(auth.company_id!, branchId, c.req.valid("json").items);
     return c.json(preview);
   })
-  // Terbitkan faktur produksi + beli otomatis untuk kekurangan rencana
+  // Permintaan tambah stok: terbitkan faktur produksi (work-order CK) + beli
+  // otomatis untuk kekurangan rencana di cabang tujuan (store).
   .post("/menu/faktur", zValidator("json", RencanaFakturBody), async (c) => {
     const auth = c.get("auth");
-    const branchId = await resolveBranchId(c);
     const body = c.req.valid("json");
+    // cabang tujuan = store yang butuh stok (default cabang aktif)
+    const branchId = body.tujuan_branch_id ?? (await resolveBranchId(c));
     const hasil = await buatFakturDariRencana({
       companyId: auth.company_id!,
       branchId,
+      ckBranchId: body.ck_branch_id,
       userId: auth.sub,
       items: body.items,
       workerId: body.worker_id,

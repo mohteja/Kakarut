@@ -11,15 +11,14 @@ import type {
   SupplierDto,
 } from "@kakarut/shared";
 import { Card, ErrorText, PageTitle, btnPrimary, btnSecondary, inputClass, tdClass, thClass } from "../../components/ui";
-import { useCabangData } from "../../context/BranchContext";
-import { CabangDataBar } from "../../components/CabangDataBar";
+import { labelCabang, useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah } from "../../lib/format";
 
 interface Karyawan {
   user_id: string;
   nama: string;
-  role: "owner" | "admin" | "cashier";
+  role: "owner" | "admin" | "cashier" | "tim";
   is_active: boolean;
 }
 
@@ -93,9 +92,28 @@ function BagianKurang({ tipe, rows }: { tipe: "produksi" | "beli"; rows: Rencana
  * saldo, lalu menerbitkan faktur produksi & beli otomatis untuk kekurangannya.
  */
 export function TambahStokDariMenuPage() {
-  // Rencana dihitung dari stok cabang — dari Kantor pilih cabangnya.
-  const { query: branchQuery } = useCabangData();
+  const { cabang, branchId } = useBranch();
   const queryClient = useQueryClient();
+
+  // Cabang TUJUAN (store yang butuh stok). Dari Kantor bebas pilih; dari store
+  // = cabang itu sendiri. Kebutuhan dihitung untuk cabang tujuan ini.
+  const stores = useMemo(
+    () => cabang.filter((b) => b.is_active && b.tipe === "store"),
+    [cabang],
+  );
+  const [tujuanId, setTujuanId] = useState("");
+  useEffect(() => {
+    if (tujuanId && stores.some((s) => s.id === tujuanId)) return;
+    // default: cabang aktif bila store, selain itu store pertama
+    const aktif = stores.find((s) => s.id === branchId);
+    setTujuanId(aktif?.id ?? stores[0]?.id ?? "");
+  }, [stores, branchId, tujuanId]);
+  const store = cabang.find((b) => b.id === tujuanId);
+  // Central Kitchen pemasok store → produksi = work-order CK (karyawan CK yang
+  // memproses & mengirim). Bila store tak punya CK → produksi di tempat (legacy).
+  const ck = cabang.find((b) => b.id === store?.central_kitchen_id);
+  const workOrder = !!ck;
+  const branchQuery = tujuanId ? `?branch_id=${tujuanId}` : "";
 
   // Menu per lokasi: rencana hanya untuk menu yang tersedia di cabang aktif.
   const { data: menus = [] } = useQuery({
@@ -158,7 +176,8 @@ export function TambahStokDariMenuPage() {
   const kurangProduksi = p?.bahan.filter((b) => b.pengadaan === "produksi" && b.kurang > 0) ?? [];
   const kurangBeli = p?.bahan.filter((b) => b.pengadaan === "beli" && b.kurang > 0) ?? [];
   const bahanCukup = p?.bahan.filter((b) => b.kurang <= 0) ?? [];
-  const butuhPelaksana = (p?.jumlah_produksi ?? 0) > 0 && !pelaksana;
+  // Pelaksana hanya wajib untuk produksi DI TEMPAT (bukan work-order CK).
+  const butuhPelaksana = !workOrder && (p?.jumlah_produksi ?? 0) > 0 && !pelaksana;
   // Preview basi bila target baru diketik dan debounce/fetch belum selesai —
   // tombol Buat ditahan agar faktur selalu sama dengan angka yang terlihat.
   const previewBasi =
@@ -167,13 +186,16 @@ export function TambahStokDariMenuPage() {
   const buat = useMutation({
     mutationFn: () => {
       const [pelTipe, pelId] = pelaksana.split(":");
-      return api<RencanaFakturResult>(`/rekomendasi/menu/faktur${branchQuery}`, {
+      return api<RencanaFakturResult>(`/rekomendasi/menu/faktur`, {
         method: "POST",
         body: {
           // pakai items LIVE (bukan snapshot debounce) — server menghitung ulang
           items,
-          worker_id: pelTipe === "k" ? pelId : null,
-          supplier_id: pelTipe === "s" ? pelId : null,
+          tujuan_branch_id: tujuanId || null,
+          // work-order: produksi dikerjakan CK; pelaksana ditugaskan karyawan CK
+          ck_branch_id: workOrder ? ck!.id : null,
+          worker_id: !workOrder && pelTipe === "k" ? pelId : null,
+          supplier_id: !workOrder && pelTipe === "s" ? pelId : null,
           supplier_beli_id: supplierBeli || null,
         },
       });
@@ -209,7 +231,6 @@ export function TambahStokDariMenuPage() {
 
   return (
     <div>
-      <CabangDataBar />
       <PageTitle
         aksi={
           <Link to="/stok" className={btnSecondary}>
@@ -217,24 +238,62 @@ export function TambahStokDariMenuPage() {
           </Link>
         }
       >
-        ➕ Tambah Stok dari Menu
+        ➕ Permintaan Tambah Stok
       </PageTitle>
       <p className="mb-4 max-w-3xl text-sm text-stone-500">
-        Pasang <b>target porsi</b> untuk tiap menu yang ingin disiapkan. Sistem menghitung total
-        kebutuhan bahan dari resep (termasuk menu dasar paket), membandingkan dengan saldo stok,
-        lalu membuat <b>faktur produksi</b> dan <b>faktur beli</b> otomatis untuk kekurangannya —
-        tanpa hitung manual. Faktur mulai dari tahap <b>rencana (RAB)</b>, jadi tetap Anda tinjau
-        sebelum stok terhitung.
+        Tentukan <b>cabang tujuan</b> + <b>target porsi</b> tiap menu. Sistem menghitung kebutuhan
+        bahan lalu membuat <b>permintaan</b>: bahan <b>produksi</b> menjadi work-order Central
+        Kitchen (CK memproses → simpan di CK → kirim ke cabang → cabang terima), bahan <b>beli</b>{" "}
+        jadi faktur beli cabang. Semua tercatat di riwayat.
       </p>
 
-      {/* Hasil pembuatan faktur */}
+      {/* Cabang tujuan + Central Kitchen pelaksana */}
+      <Card className="mb-4 p-4">
+        <h2 className="mb-2 font-bold text-stone-800">1. Tujuan permintaan</h2>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div>
+            <label className="mb-1 block text-sm font-medium">Cabang tujuan (butuh stok)</label>
+            {stores.length > 1 ? (
+              <select
+                value={tujuanId}
+                onChange={(e) => {
+                  setTujuanId(e.target.value);
+                  setHasil(null);
+                }}
+                className={inputClass}
+              >
+                {stores.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {labelCabang(s)}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <div className="rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-sm text-stone-700">
+                {store ? labelCabang(store) : "—"}
+              </div>
+            )}
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium">Diproduksi oleh</label>
+            <div
+              className={`rounded-lg border px-3 py-2 text-sm ${workOrder ? "border-purple-200 bg-purple-50 text-purple-800" : "border-stone-200 bg-stone-50 text-stone-500"}`}
+            >
+              {workOrder ? `🏭 ${ck!.nama}` : "Produksi di cabang ini (tak ada Central Kitchen pemasok)"}
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      {/* Hasil pembuatan permintaan */}
       {hasil && (
         <Card className="mb-4 border-green-200 bg-green-50 p-4">
-          <div className="font-semibold text-green-800">✅ Faktur otomatis berhasil dibuat</div>
+          <div className="font-semibold text-green-800">✅ Permintaan berhasil dibuat</div>
           <ul className="mt-1 space-y-0.5 text-sm text-green-900">
             {hasil.produksi && (
               <li>
-                🏭 Faktur produksi — {hasil.produksi.jumlah_baris} bahan ·{" "}
+                🏭 Work-order produksi — {hasil.produksi.jumlah_baris} bahan
+                {workOrder && store ? ` → dikirim ke ${store.nama}` : ""} ·{" "}
                 <Link to="/produksi" className="font-medium underline">
                   lihat di Produksi Bahan Baku →
                 </Link>
@@ -256,7 +315,7 @@ export function TambahStokDariMenuPage() {
         {/* Kiri: pilih target porsi per menu */}
         <Card className="p-4">
           <div className="mb-2 flex items-center justify-between gap-2">
-            <h2 className="font-bold text-stone-800">1. Target porsi per menu</h2>
+            <h2 className="font-bold text-stone-800">2. Target porsi per menu</h2>
             {items.length > 0 && (
               <button
                 onClick={() => setRencana({})}
@@ -327,7 +386,7 @@ export function TambahStokDariMenuPage() {
         {/* Kanan: kebutuhan bahan + aksi buat faktur */}
         <div className="space-y-4">
           <Card className="p-4">
-            <h2 className="mb-2 font-bold text-stone-800">2. Kebutuhan bahan</h2>
+            <h2 className="mb-2 font-bold text-stone-800">3. Kebutuhan bahan</h2>
             {items.length === 0 ? (
               <div className="py-8 text-center text-sm text-stone-400">
                 Isi target porsi menu dulu di sebelah kiri.
@@ -395,14 +454,22 @@ export function TambahStokDariMenuPage() {
 
           {p && items.length > 0 && (
             <Card className="p-4">
-              <h2 className="mb-2 font-bold text-stone-800">3. Buat faktur otomatis</h2>
+              <h2 className="mb-2 font-bold text-stone-800">4. Buat permintaan</h2>
               {!adaKurang ? (
                 <div className="rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
                   ✅ Stok semua bahan masih cukup untuk rencana ini — tidak perlu faktur.
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {p.jumlah_produksi > 0 && (
+                  {/* Work-order CK: pelaksana ditugaskan karyawan CK saat mulai.
+                      Produksi di tempat (tanpa CK): pilih pelaksana di sini. */}
+                  {workOrder && p.jumlah_produksi > 0 && (
+                    <div className="rounded-lg border border-purple-200 bg-purple-50 px-3 py-2 text-sm text-purple-800">
+                      🏭 Produksi dikerjakan <b>{ck!.nama}</b> — pelaksana ditugaskan karyawan CK
+                      saat mulai memproses.
+                    </div>
+                  )}
+                  {!workOrder && p.jumlah_produksi > 0 && (
                     <div>
                       <label className="mb-1 block text-sm font-medium">
                         Pelaksana produksi (wajib)
@@ -458,10 +525,10 @@ export function TambahStokDariMenuPage() {
                     className={`${btnPrimary} w-full py-3`}
                   >
                     {buat.isPending
-                      ? "Membuat faktur…"
+                      ? "Membuat permintaan…"
                       : previewBasi
                         ? "Menghitung ulang…"
-                        : `🧾 Buat Faktur Otomatis (${p.jumlah_produksi > 0 ? `${p.jumlah_produksi} produksi` : ""}${p.jumlah_produksi > 0 && p.jumlah_beli > 0 ? " + " : ""}${p.jumlah_beli > 0 ? `${p.jumlah_beli} beli` : ""})`}
+                        : `🧾 Buat Permintaan (${p.jumlah_produksi > 0 ? `${p.jumlah_produksi} produksi` : ""}${p.jumlah_produksi > 0 && p.jumlah_beli > 0 ? " + " : ""}${p.jumlah_beli > 0 ? `${p.jumlah_beli} beli` : ""})`}
                   </button>
                   {butuhPelaksana && (
                     <div className="text-center text-xs text-amber-600">

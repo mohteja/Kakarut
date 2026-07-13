@@ -12,6 +12,7 @@ import {
   tdClass,
   thClass,
 } from "../../components/ui";
+import type { JenisPengadaan } from "@kakarut/shared";
 import { useCabangData } from "../../context/BranchContext";
 import { CabangDataBar } from "../../components/CabangDataBar";
 import { api } from "../../lib/api";
@@ -36,6 +37,10 @@ interface PenerimaanRow {
   tempat: string | null;
   qty_dipesan: number | null;
   alasan_tolak: string | null;
+  /** jalur kiriman: 🛒 beli (pemasok) / 🏭 produksi (Central Kitchen) */
+  jalur?: JenisPengadaan;
+  /** cabang penerima (utk tampilan Kantor "semua cabang") */
+  cabang?: string | null;
 }
 
 interface KirimanGroup {
@@ -47,6 +52,8 @@ interface KirimanGroup {
   catatan: string | null;
   status: KonfirmasiStatus;
   alasanTolak: string | null;
+  jalur: JenisPengadaan;
+  cabang: string | null;
   rows: PenerimaanRow[];
 }
 
@@ -57,8 +64,9 @@ interface KirimanGroup {
  * Dapat diakses semua peran; kasir terkunci ke cabangnya.
  */
 export function PenerimaanPage() {
-  // Kiriman diterima di cabang tujuan — dari Kantor pilih cabang datanya.
-  const { query: branchQuery } = useCabangData();
+  // Kiriman diterima di cabang tujuan. Dari KANTOR tampil SEMUA cabang.
+  const { query: dataQuery, dariKantor } = useCabangData();
+  const branchQuery = dariKantor ? "?branch_id=all" : dataQuery;
   const queryClient = useQueryClient();
 
   const { data, isLoading } = useQuery({
@@ -88,6 +96,8 @@ export function PenerimaanPage() {
           catatan: r.catatan,
           status: r.status,
           alasanTolak: r.alasan_tolak,
+          jalur: r.jalur ?? "beli",
+          cabang: r.cabang ?? null,
           rows: [],
         };
         byKey.set(key, g);
@@ -147,7 +157,7 @@ export function PenerimaanPage() {
 
   return (
     <div className="max-w-4xl">
-      <CabangDataBar />
+      {!dariKantor && <CabangDataBar />}
       <PageTitle>Penerimaan Barang</PageTitle>
       <div className="mb-4 text-sm text-stone-500">
         Kiriman pembelian yang sudah <b>dikirim ke toko</b> diterima di sini. Bila barang
@@ -178,7 +188,16 @@ export function PenerimaanPage() {
                     <span className="font-semibold text-stone-700">
                       {formatTanggalRingkas(g.waktu)} {formatWaktu(g.waktu)}
                     </span>
-                    <span className="text-stone-500">{g.supplier ?? "Tanpa supplier"}</span>
+                    <span className="text-stone-500">
+                      {g.jalur === "produksi"
+                        ? "🏭 Dari Central Kitchen"
+                        : (g.supplier ?? "🛒 Tanpa supplier")}
+                    </span>
+                    {dariKantor && g.cabang && (
+                      <span className="rounded bg-stone-100 px-1.5 py-0.5 text-xs font-medium text-stone-600">
+                        🏪 {g.cabang}
+                      </span>
+                    )}
                     {g.noFaktur && (
                       <span className="rounded bg-stone-100 px-1.5 py-0.5 font-mono text-xs">
                         {g.noFaktur}
