@@ -63,8 +63,18 @@ export function BranchProvider({ children }: { children: ReactNode }) {
   // kasir & tim terkunci ke cabangnya sendiri — server yang menentukan
   const isKasir = auth?.user.role === "cashier" || auth?.user.role === "tim";
   const isManajemen = auth?.user.role === "owner" || auth?.user.role === "admin";
+  // admin selalu berada di Kantor (pusat) — hanya owner yang boleh ganti lokasi
+  // ke cabang/CK. Admin tetap bisa lihat data cabang lewat "cabang data" (drill).
+  const isAdmin = auth?.user.role === "admin";
   const [branchId, setBranchId] = useState<string | null>(() =>
-    isKasir ? (auth?.user.branch_id ?? null) : localStorage.getItem("kakarut.branch") || null,
+    isKasir
+      ? (auth?.user.branch_id ?? null)
+      : // admin dikunci ke Kantor lewat efek di bawah; jangan seed dari
+        // localStorage (bisa berisi cabang basi) agar tak sekejap masuk divisi
+        // store/CK sebelum ter-pin ke Kantor.
+        isAdmin
+        ? null
+        : localStorage.getItem("kakarut.branch") || null,
   );
   // Cabang yang datanya sedang dikelola DARI kantor (stok/meja/kasir/dll.)
   const [dataBranchId, setDataBranchIdState] = useState<string | null>(
@@ -89,16 +99,29 @@ export function BranchProvider({ children }: { children: ReactNode }) {
   // manajemen mendarat di Kantor (pusat, semua menu) bila ada.
   useEffect(() => {
     if (isKasir || cabang.length === 0) return;
+    const kantor = cabang.find((b) => b.is_active && b.tipe === "kantor");
+    // Admin dikunci ke Kantor bila ada (pusat, divisi kantor). Tanpa kantor
+    // (Lite/Pro belum ada kantor) admin ikut jalur default di bawah.
+    if (isAdmin && kantor) {
+      if (branchId !== kantor.id) {
+        localStorage.setItem("kakarut.branch", kantor.id);
+        setBranchId(kantor.id);
+      }
+      return;
+    }
     const valid = branchId && cabang.some((b) => b.id === branchId && b.is_active);
     if (!valid) {
-      const kantor = cabang.find((b) => b.is_active && b.tipe === "kantor");
       const pertama = kantor ?? cabang.find((b) => b.is_active) ?? cabang[0];
       localStorage.setItem("kakarut.branch", pertama.id);
       setBranchId(pertama.id);
     }
-  }, [cabang, branchId, isKasir]);
+  }, [cabang, branchId, isKasir, isAdmin]);
 
   const set = (id: string) => {
+    // Admin tak boleh mengganti lokasi utama (terkunci di Kantor); pemilih
+    // lokasi memang disembunyikan, ini penjaga tambahan. Drill "cabang data"
+    // (setDataBranchId/setDataCkBranchId) tidak terpengaruh.
+    if (isAdmin) return;
     localStorage.setItem("kakarut.branch", id);
     setBranchId(id);
   };
