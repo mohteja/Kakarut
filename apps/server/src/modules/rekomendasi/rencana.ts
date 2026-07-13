@@ -200,7 +200,9 @@ export async function buatFakturDariRencana(
   }
 
   let ck: { id: string; nama: string } | null = null;
-  if (prodRows.length > 0) {
+  // Produksi & beli bahan baku = aktivitas Central Kitchen: keduanya dibukukan
+  // di CK (produksi dikirim ke store; beli disimpan di CK).
+  if (prodRows.length > 0 || beliRows.length > 0) {
     const ckId = params.ckBranchId ?? store.ckId ?? null;
     if (ckId && ckId !== store.id) {
       const [row] = await db
@@ -257,8 +259,10 @@ export async function buatFakturDariRencana(
   const ringkas = preview.menus.map((m) => `${m.porsi}× ${m.kode ?? m.nama}`).join(", ");
   const catatan = params.catatan?.trim() || `Rencana dari menu: ${ringkas}`.slice(0, 300);
 
-  // Produksi work-order hidup di CK dgn tujuan = store; beli tetap di store.
-  const prodBranchId = workOrder ? ck!.id : params.branchId;
+  // Work-order Central Kitchen: produksi & beli sama-sama dibukukan di CK.
+  // Produksi punya tujuan = store (dikirim); beli dibukukan di CK tanpa tujuan
+  // (disimpan di CK — CK membeli & menyimpan stok bahan).
+  const srcBranchId = workOrder ? ck!.id : params.branchId;
   const barisFaktur = (
     rows: RencanaBahanRow[],
     tipe: "produksi" | "beli",
@@ -266,7 +270,7 @@ export async function buatFakturDariRencana(
   ) =>
     rows.map((b) => ({
       companyId: params.companyId,
-      branchId: tipe === "produksi" ? prodBranchId : params.branchId,
+      branchId: srcBranchId,
       tujuanBranchId: tipe === "produksi" && workOrder ? params.branchId : null,
       ingredientId: b.ingredient_id,
       qty: b.qty_faktur!,
@@ -305,7 +309,7 @@ export async function buatFakturDariRencana(
       // Riwayat: owner/admin membuat permintaan tambah stok (jejak audit)
       await catatLogFaktur(tx, {
         companyId: params.companyId,
-        branchId: prodBranchId,
+        branchId: srcBranchId,
         fakturId: prodFakturId,
         jalur: "produksi",
         aksi: "Permintaan tambah stok",
@@ -317,11 +321,11 @@ export async function buatFakturDariRencana(
       await tx.insert(productions).values(barisFaktur(beliRows, "beli", beliFakturId));
       await catatLogFaktur(tx, {
         companyId: params.companyId,
-        branchId: params.branchId,
+        branchId: srcBranchId,
         fakturId: beliFakturId,
         jalur: "beli",
         aksi: "Permintaan tambah stok",
-        detail: ringkas,
+        detail: workOrder ? `Rencana ${store.nama} · ${ringkas}` : ringkas,
         userId: params.userId,
       });
     }
