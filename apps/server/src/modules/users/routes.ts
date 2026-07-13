@@ -223,7 +223,9 @@ export const karyawanRoutes = new Hono<AppEnv>()
           message: "Karyawan tanpa cabang tak bisa ditugaskan tempat SO",
         });
       }
-      // Lingkup penugasan yang boleh diganti = semua tempat di cabang karyawan
+      // Lingkup penugasan yang boleh diganti = tempat AKTIF di cabang karyawan.
+      // Sama persis dengan yang ditampilkan GET (tersedia aktif) agar simetris:
+      // penugasan pada tempat nonaktif (tak tampak di modal) tak ikut terhapus.
       const lokasiCabang = await db
         .select({ id: storageLocations.id })
         .from(storageLocations)
@@ -231,6 +233,7 @@ export const karyawanRoutes = new Hono<AppEnv>()
           and(
             eq(storageLocations.companyId, auth.company_id!),
             eq(storageLocations.branchId, member.branchId),
+            eq(storageLocations.isActive, true),
           ),
         );
       const idCabang = new Set(lokasiCabang.map((l) => l.id));

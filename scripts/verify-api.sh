@@ -1641,6 +1641,14 @@ cek "PUT tempat karyawan: assigned tersimpan" "V == 1" \
   "$(api "$OWNER" GET "/karyawan/$U56/tempat" | jq --arg t "$RAK56" '[.assigned[] | select(. == $t)] | length')"
 cek "penugasan konsisten dua arah (muncul di petugas tempat)" "V == 1" \
   "$(api "$OWNER" GET /penyimpanan | jq --arg id "$RAK56" --arg u "$U56" '[.[] | select(.id==$id)][0].petugas | [.[] | select(.user_id==$u)] | length')"
+# Simetri aktif/nonaktif: PUT tempat karyawan hanya menyentuh tempat AKTIF —
+# penugasan pada tempat nonaktif (tak tampak di modal) TIDAK ikut terhapus.
+TMPB56=$(api "$OWNER" POST /penyimpanan "{\"branch_id\":\"$PUSAT51_ID\",\"nama\":\"Gudang Nonaktif SO\"}" | jq -r .id)
+api "$OWNER" PUT "/karyawan/$U56/tempat" "{\"tempat_ids\":[\"$RAK56\",\"$TMPB56\"]}" > /dev/null
+api "$OWNER" PATCH "/penyimpanan/$TMPB56" '{"is_active":false}' > /dev/null
+api "$OWNER" PUT "/karyawan/$U56/tempat" "{\"tempat_ids\":[\"$RAK56\"]}" > /dev/null
+cek "PUT tempat: penugasan di tempat nonaktif tak ikut terhapus" "V == 1" \
+  "$(api "$OWNER" GET /penyimpanan | jq --arg id "$TMPB56" --arg u "$U56" '[.[] | select(.id==$id)][0].petugas | [.[] | select(.user_id==$u)] | length')"
 GUDCK56=$(api "$OWNER" POST /penyimpanan "{\"branch_id\":\"$CK47_ID\",\"nama\":\"Gudang CK47 SO\"}" | jq -r .id)
 cek "PUT tempat karyawan: tempat cabang lain → 400" "V == 400" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/karyawan/$U56/tempat" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"tempat_ids\":[\"$GUDCK56\"]}")"
