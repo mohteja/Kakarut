@@ -2,7 +2,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import type { FakturLogRow, JenisPengadaan, PenyimpananDto, SupplierDto } from "@kakarut/shared";
 import { ErrorText, Modal, btnPrimary, btnSecondary, inputClass } from "../../components/ui";
-import { useCabangData } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah, formatWaktu } from "../../lib/format";
 import { badgeFaktur, type FakturGroup } from "./TambahStokPage";
@@ -38,7 +37,11 @@ export function FakturDetailModal({
   endpoint: string;
   onClose: () => void;
 }) {
-  const { query: branchQuery } = useCabangData("produksi");
+  // Tempat penyimpanan diambil dari cabang FAKTUR ini (bukan pilihan Kantor),
+  // agar daftar tempat cocok dengan cabang faktur — termasuk faktur store lama
+  // yang dibuka dari Kantor.
+  const fakturBranchId = grup.rows[0]?.branch_id ?? null;
+  const branchQuery = fakturBranchId ? `?branch_id=${fakturBranchId}` : "";
   const queryClient = useQueryClient();
   const [mode, setMode] = useState<"lihat" | "ubah" | "hapus">("lihat");
 

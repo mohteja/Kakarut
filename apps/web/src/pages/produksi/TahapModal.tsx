@@ -46,11 +46,19 @@ export function TahapModal({
 }) {
   const queryClient = useQueryClient();
   const { cabang } = useBranch();
-  // Cabang pengirim faktur — dari Kantor mengikuti pilihan cabang data
+  // branchId (cabang-data) hanya fallback; konteks tahap MENGIKUTI cabang
+  // FAKTUR itu sendiri (grup.rows[0].branch_id), bukan pilihan Kantor — agar
+  // faktur store lama tak keliru dianggap milik CK saat dibuka dari Kantor.
   const { id: branchId } = useCabangData("produksi");
   const { isPro } = useCompanyMode();
+  // Work-order CK: faktur produksi hidup di CK & punya cabang tujuan. Tahap
+  // "selesai" hanya menyimpan di CK; pengiriman ke cabang lewat tombol
+  // "Kirim ke cabang" TERPISAH.
+  const isWorkOrder = grup.rows.some((r) => r.tujuan_branch_id != null);
+  const fakturBranchId = grup.rows[0]?.branch_id ?? branchId ?? "";
   // CK hanya mengirim ke store yang terhubung dengannya (satu CK per store)
-  const cabangIniCk = cabang.find((b) => b.id === branchId)?.tipe === "central_kitchen";
+  const cabangIniCk =
+    cabang.find((b) => b.id === fakturBranchId)?.tipe === "central_kitchen";
   const target = URUTAN_TAHAP[ke];
   // hanya baris yang tahapnya masih di belakang tujuan yang bisa maju
   const bisaMaju = grup.rows.filter(
@@ -90,14 +98,9 @@ export function TahapModal({
   const [selisihCatatan, setSelisihCatatan] = useState("");
   const pakaiHarga = keSelesai && !sesuaiRencana;
 
-  // Work-order CK: faktur produksi hidup di CK & punya cabang tujuan. Tahap
-  // "selesai" hanya menyimpan di CK (pilih tempat penyimpanan CK); pengiriman
-  // ke cabang dilakukan lewat tombol "Kirim ke cabang" TERPISAH.
-  const isWorkOrder = grup.rows.some((r) => r.tujuan_branch_id != null);
-  const fakturBranchId = grup.rows[0]?.branch_id ?? branchId ?? "";
-  // Tujuan kirim saat "dikirim/selesai": cabang tujuan (default cabang faktur
-  // ini) + tempat penyimpanan di cabang itu (opsional).
-  const [tujuanCabang, setTujuanCabang] = useState(branchId ?? "");
+  // Tujuan kirim saat "dikirim/selesai": cabang tujuan (default = cabang
+  // faktur ini) + tempat penyimpanan di cabang itu (opsional).
+  const [tujuanCabang, setTujuanCabang] = useState(fakturBranchId || "");
   const [tujuanTempat, setTujuanTempat] = useState("");
   // work-order: tempat penyimpanan diambil dari CK (cabang faktur), bukan tujuan
   const storageBranch = isWorkOrder ? fakturBranchId : tujuanCabang;
@@ -382,8 +385,8 @@ export function TahapModal({
                       // yang dipasoknya (plus CK itu sendiri)
                       .filter((b) =>
                         cabangIniCk
-                          ? b.id === branchId ||
-                            (b.tipe === "store" && b.central_kitchen_id === branchId)
+                          ? b.id === fakturBranchId ||
+                            (b.tipe === "store" && b.central_kitchen_id === fakturBranchId)
                           : true,
                       )
                       .map((b) => (
@@ -413,13 +416,13 @@ export function TahapModal({
                 </select>
               </div>
             </div>
-            {!isWorkOrder && tujuanCabang && branchId && tujuanCabang !== branchId && (
+            {!isWorkOrder && tujuanCabang && fakturBranchId && tujuanCabang !== fakturBranchId && (
               <div className="text-xs text-amber-700">
                 Baris yang maju akan <b>berpindah ke cabang tujuan</b> (stok terhitung di
                 sana saat diterima); sisa tugas tetap di cabang ini.
               </div>
             )}
-            {!isWorkOrder && tujuanCabang === branchId && cabangIniCk && (
+            {!isWorkOrder && tujuanCabang === fakturBranchId && cabangIniCk && (
               <div className="text-xs text-stone-500">
                 🏭 Ini Central Kitchen — bila barang untuk outlet, pilih cabang 🏪 store
                 sebagai tujuan (hanya store yang terhubung ke CK ini yang bisa dipilih).
