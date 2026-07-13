@@ -1,11 +1,13 @@
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
+import type { Context } from "hono";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createApp } from "./app";
 import { env } from "./config/env";
 import { db } from "./db/client";
+import { computeBuildId, setBuildId } from "./lib/build";
 import { runMigrations } from "./db/migrate";
 import { backfillKodeMenu } from "./modules/menu/service";
 import { arsipkanMembershipNonaktif, backfillEmployeeCode } from "./modules/users/service";
@@ -63,17 +65,35 @@ if (storage.mode === "local") {
 // SPA hasil build (apps/web/dist) — satu proses untuk API + frontend
 const webDist = path.resolve(here, "../../web/dist");
 if (existsSync(webDist)) {
+  const indexHtmlRaw = readFileSync(path.join(webDist, "index.html"), "utf8");
+  // Build id (hash index.html) → dipakai klien mendeteksi versi baru. Disuntik
+  // ke <meta> agar tab tahu build yang SEDANG dimuatnya, lalu dibandingkan
+  // dgn header/health build server pada request berikutnya.
+  const buildId = computeBuildId(indexHtmlRaw);
+  setBuildId(buildId);
+  console.log(`Build frontend: ${buildId}`);
+  const indexHtml = indexHtmlRaw.replace(
+    "</head>",
+    `    <meta name="kakarut-build" content="${buildId}" />\n  </head>`,
+  );
+  // HTML shell TIDAK di-cache agar setelah re-deploy browser selalu ambil versi
+  // terbaru (referensi aset ber-hash baru) — mencegah 404 chunk lama.
+  const kirimShell = (c: Context) => {
+    c.header("Cache-Control", "no-cache");
+    return c.html(indexHtml);
+  };
+  // Root & index.html HARUS memakai HTML ber-<meta build> (bukan file mentah
+  // dari serveStatic) supaya tab yang dibuka via "/" ikut punya build id.
+  app.get("/", kirimShell);
+  app.get("/index.html", kirimShell);
+  // Aset ber-hash (js/css/img) dilayani statis dari disk.
   app.use("/*", serveStatic({ root: path.relative(process.cwd(), webDist) }));
-  const indexHtml = readFileSync(path.join(webDist, "index.html"), "utf8");
+  // history fallback react-router untuk deep-link (mis. /dashboard).
   app.notFound((c) => {
     if (c.req.path.startsWith("/api") || c.req.path.startsWith("/uploads")) {
       return c.json({ error: "Tidak ditemukan" }, 404);
     }
-    // history fallback untuk react-router. HTML shell TIDAK di-cache agar
-    // setelah re-deploy browser selalu ambil index.html terbaru (referensi
-    // aset ber-hash baru) — mencegah 404 chunk lama.
-    c.header("Cache-Control", "no-cache");
-    return c.html(indexHtml);
+    return kirimShell(c);
   });
 } else {
   app.notFound((c) => c.json({ error: "Tidak ditemukan" }, 404));

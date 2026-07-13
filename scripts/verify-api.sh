@@ -1732,6 +1732,20 @@ cek "kasir dgn branch_id=all tetap hanya cabangnya" "V == 0" \
 cek "kasir dgn branch_id=all masih melihat transaksi cabangnya" "V == 1" \
   "$(api "$KASIR" GET "/penjualan?branch_id=all" | jq --arg a "$N60A" '[.[] | select(.nomor==$a)] | length')"
 
+echo "== 61. Deteksi pembaruan: build id di /api/health + header X-Kakarut-Build =="
+HEALTH61=$(curl -s "$BASE/api/health")
+cek "health ok:true" "V == 1" "$(echo "$HEALTH61" | jq '.ok == true | if . then 1 else 0 end')"
+BUILD61=$(echo "$HEALTH61" | jq -r '.build // empty')
+cek "health menyertakan build id (dist tersedia)" "V == 1" \
+  "$([ -n "$BUILD61" ] && echo 1 || echo 0)"
+HDR61=$(curl -s -D - -o /dev/null "$BASE/api/health" | tr -d '\r' | awk 'tolower($1)=="x-kakarut-build:"{print $2}')
+cek "header X-Kakarut-Build sama dengan build health" "V == 1" \
+  "$([ -n "$BUILD61" ] && [ "$HDR61" = "$BUILD61" ] && echo 1 || echo 0)"
+# respons API berautentikasi juga membawa header build
+HDRME=$(curl -s -D - -o /dev/null "$BASE/api/auth/me" -H "Authorization: Bearer $OWNER" | tr -d '\r' | awk 'tolower($1)=="x-kakarut-build:"{print $2}')
+cek "respons API lain membawa header build yang sama" "V == 1" \
+  "$([ "$HDRME" = "$BUILD61" ] && echo 1 || echo 0)"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

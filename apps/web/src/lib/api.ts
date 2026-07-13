@@ -53,6 +53,26 @@ function emitServerDown(down: boolean) {
   window.dispatchEvent(new CustomEvent(SERVER_STATUS_EVENT, { detail: { down } }));
 }
 
+/** Event: versi frontend baru sudah ter-deploy (build server ≠ build tab ini). */
+export const UPDATE_AVAILABLE_EVENT = "kakarut:update-available";
+/** Build id yang dimuat tab ini (disuntik server ke <meta>); null di dev tanpa dist. */
+export const LOADED_BUILD =
+  typeof document !== "undefined"
+    ? (document.querySelector('meta[name="kakarut-build"]')?.getAttribute("content") ?? null)
+    : null;
+let updateSudahDiberitahu = false;
+/**
+ * Bandingkan build server (dari header X-Kakarut-Build atau /api/health) dengan
+ * build yang dimuat tab ini. Berbeda → picu event pembaruan (sekali saja).
+ */
+export function periksaBuildServer(buildServer: string | null | undefined): void {
+  if (!buildServer || !LOADED_BUILD || updateSudahDiberitahu) return;
+  if (buildServer !== LOADED_BUILD) {
+    updateSudahDiberitahu = true;
+    window.dispatchEvent(new CustomEvent(UPDATE_AVAILABLE_EVENT));
+  }
+}
+
 export async function api<T = unknown>(
   path: string,
   opts: { method?: string; body?: unknown; formData?: FormData } = {},
@@ -74,6 +94,9 @@ export async function api<T = unknown>(
     emitServerDown(true);
     throw new ApiError(0, "Tidak dapat terhubung ke server. Mungkin sedang diperbarui.");
   }
+
+  // Deteksi versi frontend baru pada tiap respons (header build id server).
+  periksaBuildServer(res.headers.get("X-Kakarut-Build"));
 
   // 401 pada endpoint selain login = sesi berakhir → paksa ke halaman login.
   // Login yang gagal harus tetap menampilkan pesan asli dari server.
