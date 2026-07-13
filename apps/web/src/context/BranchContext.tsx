@@ -50,6 +50,9 @@ interface BranchContextValue {
   /** pilihan "cabang data" saat berada di Kantor (dipakai useCabangData) */
   dataBranchId: string | null;
   setDataBranchId: (id: string) => void;
+  /** pilihan "cabang data" khusus halaman produksi/beli (Central Kitchen) */
+  dataCkBranchId: string | null;
+  setDataCkBranchId: (id: string) => void;
 }
 
 const BranchContext = createContext<BranchContextValue | null>(null);
@@ -66,6 +69,11 @@ export function BranchProvider({ children }: { children: ReactNode }) {
   // Cabang yang datanya sedang dikelola DARI kantor (stok/meja/kasir/dll.)
   const [dataBranchId, setDataBranchIdState] = useState<string | null>(
     () => localStorage.getItem("kakarut.cabang-data") || null,
+  );
+  // Pilihan terpisah untuk halaman produksi/beli (Central Kitchen) agar tak
+  // saling menimpa dengan pilihan cabang-data store (stok/kasir/dll.).
+  const [dataCkBranchId, setDataCkBranchIdState] = useState<string | null>(
+    () => localStorage.getItem("kakarut.cabang-data-ck") || null,
   );
 
   // Daftar cabang dimuat untuk semua peran (label, tipe cabang sendiri, struk);
@@ -98,6 +106,10 @@ export function BranchProvider({ children }: { children: ReactNode }) {
     localStorage.setItem("kakarut.cabang-data", id);
     setDataBranchIdState(id);
   };
+  const setDataCkBranchId = (id: string) => {
+    localStorage.setItem("kakarut.cabang-data-ck", id);
+    setDataCkBranchIdState(id);
+  };
 
   // Divisi hanya berlaku untuk manajemen mode Pro DAN perusahaan yang sudah
   // punya Kantor aktif — tanpa kantor, semua menu selalu tampil (tidak ada
@@ -114,7 +126,17 @@ export function BranchProvider({ children }: { children: ReactNode }) {
 
   return (
     <BranchContext.Provider
-      value={{ cabang, branchId, setBranchId: set, branchQuery, divisi, dataBranchId, setDataBranchId }}
+      value={{
+        cabang,
+        branchId,
+        setBranchId: set,
+        branchQuery,
+        divisi,
+        dataBranchId,
+        setDataBranchId,
+        dataCkBranchId,
+        setDataCkBranchId,
+      }}
     >
       {children}
     </BranchContext.Provider>
@@ -133,29 +155,52 @@ export function useBranch(): BranchContextValue {
  * pemilih sidebar; DARI Kantor memakai pilihan "cabang data" tersendiri
  * (default cabang store pertama) — kantor sendiri tidak menyimpan stok/meja.
  */
-export function useCabangData(): {
+export function useCabangData(fokus?: "produksi"): {
   id: string | null;
   query: string;
   dariKantor: boolean;
   opsi: Cabang[];
   pilih: (id: string) => void;
 } {
-  const { cabang, branchId, branchQuery, divisi, dataBranchId, setDataBranchId } = useBranch();
+  const {
+    cabang,
+    branchId,
+    branchQuery,
+    divisi,
+    dataBranchId,
+    setDataBranchId,
+    dataCkBranchId,
+    setDataCkBranchId,
+  } = useBranch();
   if (divisi !== "kantor") {
     return { id: branchId, query: branchQuery, dariKantor: false, opsi: [], pilih: () => {} };
   }
   // Kantor ikut di akhir daftar: data lama yang terlanjur tercatat di kantor
   // (faktur/shift sebelum pembagian divisi) tetap bisa dibuka & diselesaikan.
   const aktif = cabang.filter((b) => b.is_active);
-  const opsi = [...aktif.filter((b) => b.tipe !== "kantor"), ...aktif.filter((b) => b.tipe === "kantor")];
-  const utama = opsi.find((b) => b.tipe === "store") ?? opsi[0];
+  const adaCk = aktif.some((b) => b.tipe === "central_kitchen");
+  // Produksi/beli bahan baku = urusan Central Kitchen; halaman lain (stok,
+  // kasir, meja, penerimaan) tetap berbasis store. Tanpa CK, produksi jatuh
+  // ke daftar store agar tetap bisa dibuat.
+  const fokusCk = fokus === "produksi" && adaCk;
+  const utamaTipe = fokusCk ? "central_kitchen" : "store";
+  const opsi = fokusCk
+    ? [
+        ...aktif.filter((b) => b.tipe === "central_kitchen"),
+        ...aktif.filter((b) => b.tipe === "kantor"),
+      ]
+    : [...aktif.filter((b) => b.tipe !== "kantor"), ...aktif.filter((b) => b.tipe === "kantor")];
+  const utama = opsi.find((b) => b.tipe === utamaTipe) ?? opsi[0];
+  // Simpan pilihan di slot terpisah agar produksi (CK) & store tak saling timpa.
+  const tersimpan = fokus === "produksi" ? dataCkBranchId : dataBranchId;
+  const setTersimpan = fokus === "produksi" ? setDataCkBranchId : setDataBranchId;
   const id =
-    dataBranchId && opsi.some((b) => b.id === dataBranchId) ? dataBranchId : (utama?.id ?? null);
+    tersimpan && opsi.some((b) => b.id === tersimpan) ? tersimpan : (utama?.id ?? null);
   return {
     id,
     query: id ? `?branch_id=${id}` : "",
     dariKantor: true,
     opsi,
-    pilih: setDataBranchId,
+    pilih: setTersimpan,
   };
 }

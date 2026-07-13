@@ -27,13 +27,14 @@ interface KaryawanRow {
   user_id: string;
   nama: string;
   email: string;
-  role: "owner" | "admin" | "cashier";
+  role: "owner" | "admin" | "cashier" | "tim";
   is_active: boolean;
   branch_id: string | null;
   cabang: string | null;
 }
 
-const roleLabel = (r: string) => (r === "owner" ? "Owner" : r === "admin" ? "Admin" : "Kasir");
+const roleLabel = (r: string) =>
+  r === "owner" ? "Owner" : r === "admin" ? "Admin" : r === "tim" ? "Tim" : "Kasir";
 
 /** Pilih akun yang boleh opname di sebuah tempat penyimpanan. */
 function PetugasModal({ tempat, onClose }: { tempat: PenyimpananDto; onClose: () => void }) {
@@ -67,9 +68,11 @@ function PetugasModal({ tempat, onClose }: { tempat: PenyimpananDto; onClose: ()
     });
   }
 
-  // owner/admin (bebas cabang) + kasir cabang tempat ini
+  // owner/admin (bebas cabang) + kasir/tim yang cabangnya = cabang tempat ini
   const daftar = karyawan.filter(
-    (k) => k.is_active && (k.role !== "cashier" || k.branch_id === tempat.branch_id),
+    (k) =>
+      k.is_active &&
+      (k.role === "owner" || k.role === "admin" || k.branch_id === tempat.branch_id),
   );
 
   return (

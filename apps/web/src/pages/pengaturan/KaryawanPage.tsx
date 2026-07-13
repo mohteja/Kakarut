@@ -13,7 +13,7 @@ import {
   tdClass,
   thClass,
 } from "../../components/ui";
-import type { AktivitasRow } from "@kakarut/shared";
+import type { AktivitasRow, KaryawanTempatDto } from "@kakarut/shared";
 import { labelCabang, useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatTanggalRingkas, formatWaktu } from "../../lib/format";
@@ -108,6 +108,96 @@ function AksiMenu({
   );
 }
 
+/**
+ * Tugaskan tempat penyimpanan yang jadi tanggung jawab stock opname seorang
+ * karyawan (kasir/tim). Menulis ke tabel petugas yang sama dengan halaman
+ * Tempat Penyimpanan → konsisten dua arah.
+ */
+function TempatSOModal({ karyawan, onClose }: { karyawan: Karyawan; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const { data, isLoading } = useQuery({
+    queryKey: ["karyawan-tempat", karyawan.user_id],
+    queryFn: () => api<KaryawanTempatDto>(`/karyawan/${karyawan.user_id}/tempat`),
+  });
+  const [selected, setSelected] = useState<Set<string> | null>(null);
+  useEffect(() => {
+    if (data) setSelected(new Set(data.assigned));
+  }, [data]);
+
+  const simpan = useMutation({
+    mutationFn: () =>
+      api(`/karyawan/${karyawan.user_id}/tempat`, {
+        method: "PUT",
+        body: { tempat_ids: [...(selected ?? [])] },
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["penyimpanan"] });
+      queryClient.invalidateQueries({ queryKey: ["karyawan-tempat", karyawan.user_id] });
+      onClose();
+    },
+  });
+
+  function toggle(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev ?? []);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  return (
+    <Modal open onClose={onClose} title={`🗃 Tempat SO — ${karyawan.nama}`}>
+      <div className="space-y-3">
+        <div className="rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-800">
+          Pilih tempat penyimpanan di <b>{karyawan.cabang ?? "cabang"}</b> yang jadi tugas stock
+          opname karyawan ini. <b>Kosong = ia boleh opname tempat yang belum ada petugasnya.</b>
+        </div>
+        {isLoading || selected === null ? (
+          <div className="py-8 text-center">
+            <Spinner />
+          </div>
+        ) : (data?.tersedia.length ?? 0) === 0 ? (
+          <div className="py-6 text-center text-sm text-stone-400">
+            Belum ada tempat penyimpanan di cabang ini.
+          </div>
+        ) : (
+          <div className="max-h-72 space-y-1 overflow-y-auto">
+            {data!.tersedia.map((t) => (
+              <label
+                key={t.id}
+                className={`flex cursor-pointer items-center gap-2 rounded-lg border p-2.5 ${
+                  selected.has(t.id) ? "border-orange-500 bg-orange-50" : "border-stone-200"
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={selected.has(t.id)}
+                  onChange={() => toggle(t.id)}
+                />
+                <span className="font-medium">{t.nama}</span>
+              </label>
+            ))}
+          </div>
+        )}
+        <ErrorText error={simpan.error} />
+        <div className="flex justify-end gap-2 pt-1">
+          <button onClick={onClose} className={btnSecondary}>
+            Batal
+          </button>
+          <button
+            onClick={() => simpan.mutate()}
+            disabled={simpan.isPending || selected === null}
+            className={btnPrimary}
+          >
+            {simpan.isPending ? "Menyimpan…" : "Simpan Tugas SO"}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 export function KaryawanPage() {
   const { cabang } = useBranch();
   const { isPro } = useCompanyMode();
@@ -128,6 +218,8 @@ export function KaryawanPage() {
   const [qrUrl, setQrUrl] = useState<string | null>(null);
   // Modal riwayat kegiatan seorang karyawan (log faktur yang ia lakukan)
   const [aktivitasFor, setAktivitasFor] = useState<Karyawan | null>(null);
+  // Modal penugasan tempat SO (petugas opname) seorang karyawan kasir/tim
+  const [tempatFor, setTempatFor] = useState<Karyawan | null>(null);
   const { data: aktivitas } = useQuery({
     queryKey: ["karyawan-aktivitas", aktivitasFor?.user_id],
     queryFn: () =>
@@ -334,6 +426,10 @@ export function KaryawanPage() {
                     <AksiMenu
                       items={[
                         { label: "🗒 Aktivitas", onClick: () => setAktivitasFor(k) },
+                        // Tempat SO hanya untuk peran terikat cabang (kasir/tim)
+                        ...(WAJIB_CABANG.has(k.role)
+                          ? [{ label: "🗃 Tempat SO", onClick: () => setTempatFor(k) }]
+                          : []),
                         {
                           label: "✏️ Ubah",
                           onClick: () =>
@@ -531,6 +627,11 @@ export function KaryawanPage() {
           </div>
         )}
       </Modal>
+
+      {/* Modal penugasan tempat SO (petugas opname) karyawan kasir/tim */}
+      {tempatFor && (
+        <TempatSOModal karyawan={tempatFor} onClose={() => setTempatFor(null)} />
+      )}
 
       {/* Modal riwayat kegiatan seorang karyawan (jejak log faktur) */}
       <Modal

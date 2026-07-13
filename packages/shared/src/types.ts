@@ -320,6 +320,16 @@ export interface PenyimpananDto {
   petugas: PetugasRingkas[];
 }
 
+/**
+ * Penugasan tempat SO (stock opname) untuk satu karyawan: `tersedia` = semua
+ * tempat penyimpanan di cabang karyawan; `assigned` = id tempat yang jadi
+ * tugasnya. Dipakai halaman Karyawan (GET/PUT /karyawan/:id/tempat).
+ */
+export interface KaryawanTempatDto {
+  assigned: string[];
+  tersedia: { id: string; nama: string }[];
+}
+
 /** jenis meja: meja makan (dine-in) vs "Ruang Tunggu" untuk take away. */
 export type MejaTipe = "dine_in" | "takeaway";
 

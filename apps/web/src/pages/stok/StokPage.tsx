@@ -103,16 +103,20 @@ export function StokPage() {
       <CabangDataBar />
       <PageTitle
         aksi={
-          tab === "bahan" && !isTim ? (
+          tab === "bahan" ? (
             <div className="flex flex-wrap gap-2">
-              <Link to="/stok/penyesuaian" className={`${btnSecondary} relative`}>
-                ⚠️ Penyesuaian
-                {belumTuntas > 0 && (
-                  <span className="absolute -right-1.5 -top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-xs font-bold text-white">
-                    {belumTuntas}
-                  </span>
-                )}
-              </Link>
+              {/* Penyesuaian = klarifikasi/persetujuan selisih (manajemen/kasir);
+                  tim hanya melakukan opname + lihat riwayat. */}
+              {!isTim && (
+                <Link to="/stok/penyesuaian" className={`${btnSecondary} relative`}>
+                  ⚠️ Penyesuaian
+                  {belumTuntas > 0 && (
+                    <span className="absolute -right-1.5 -top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-xs font-bold text-white">
+                      {belumTuntas}
+                    </span>
+                  )}
+                </Link>
+              )}
               <Link to="/stok/opname/riwayat" className={btnSecondary}>
                 🕑 Riwayat
               </Link>

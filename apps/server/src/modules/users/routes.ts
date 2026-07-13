@@ -1,11 +1,18 @@
 import { zValidator } from "@hono/zod-validator";
 import bcrypt from "bcryptjs";
-import { and, desc, eq, isNotNull, isNull, ne } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, ne } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { db } from "../../db/client";
-import { branches, fakturLogs, memberships, users } from "../../db/schema";
+import {
+  branches,
+  fakturLogs,
+  memberships,
+  storageLocationPetugas,
+  storageLocations,
+  users,
+} from "../../db/schema";
 import { type AppEnv } from "../../middleware/auth";
 import { isKodeKaryawanConflict, resolveKodeKaryawan } from "./service";
 
@@ -155,6 +162,112 @@ export const karyawanRoutes = new Hono<AppEnv>()
       .limit(100);
     return c.json({ rows });
   })
+  /**
+   * Tempat penyimpanan yang jadi tugas SO karyawan ini (petugas opname).
+   * Dipakai halaman Karyawan untuk menugaskan tempat SO per karyawan.
+   * `tersedia` = semua tempat aktif di CABANG karyawan; `assigned` = yang
+   * sedang ditugaskan. Karyawan tanpa cabang (owner/admin) tak punya tempat.
+   */
+  .get("/:userId/tempat", async (c) => {
+    const auth = c.get("auth");
+    const userId = c.req.param("userId");
+    const [member] = await db
+      .select({ branchId: memberships.branchId })
+      .from(memberships)
+      .where(and(eq(memberships.userId, userId), eq(memberships.companyId, auth.company_id!)));
+    if (!member) throw new HTTPException(404, { message: "Karyawan tidak ditemukan" });
+    if (!member.branchId) return c.json({ assigned: [], tersedia: [] });
+    const tersedia = await db
+      .select({ id: storageLocations.id, nama: storageLocations.nama })
+      .from(storageLocations)
+      .where(
+        and(
+          eq(storageLocations.companyId, auth.company_id!),
+          eq(storageLocations.branchId, member.branchId),
+          eq(storageLocations.isActive, true),
+        ),
+      )
+      .orderBy(asc(storageLocations.nama));
+    const tersediaIds = new Set(tersedia.map((t) => t.id));
+    const rows = await db
+      .select({ locId: storageLocationPetugas.storageLocationId })
+      .from(storageLocationPetugas)
+      .where(
+        and(
+          eq(storageLocationPetugas.companyId, auth.company_id!),
+          eq(storageLocationPetugas.userId, userId),
+        ),
+      );
+    const assigned = rows.map((r) => r.locId).filter((id) => tersediaIds.has(id));
+    return c.json({ assigned, tersedia });
+  })
+  /**
+   * Ganti seluruh penugasan tempat SO karyawan (dalam cabangnya). Menulis ke
+   * tabel yang sama dengan PUT /penyimpanan/:id/petugas → konsisten dua arah.
+   * Hanya menyentuh tempat di cabang karyawan (tak mengganggu cabang lain).
+   */
+  .put(
+    "/:userId/tempat",
+    zValidator("json", z.object({ tempat_ids: z.array(z.string().uuid()) })),
+    async (c) => {
+      const auth = c.get("auth");
+      const userId = c.req.param("userId");
+      const body = c.req.valid("json");
+      const [member] = await db
+        .select({ branchId: memberships.branchId })
+        .from(memberships)
+        .where(and(eq(memberships.userId, userId), eq(memberships.companyId, auth.company_id!)));
+      if (!member) throw new HTTPException(404, { message: "Karyawan tidak ditemukan" });
+      if (!member.branchId) {
+        throw new HTTPException(400, {
+          message: "Karyawan tanpa cabang tak bisa ditugaskan tempat SO",
+        });
+      }
+      // Lingkup penugasan yang boleh diganti = tempat AKTIF di cabang karyawan.
+      // Sama persis dengan yang ditampilkan GET (tersedia aktif) agar simetris:
+      // penugasan pada tempat nonaktif (tak tampak di modal) tak ikut terhapus.
+      const lokasiCabang = await db
+        .select({ id: storageLocations.id })
+        .from(storageLocations)
+        .where(
+          and(
+            eq(storageLocations.companyId, auth.company_id!),
+            eq(storageLocations.branchId, member.branchId),
+            eq(storageLocations.isActive, true),
+          ),
+        );
+      const idCabang = new Set(lokasiCabang.map((l) => l.id));
+      const uniqueIds = [...new Set(body.tempat_ids)];
+      for (const id of uniqueIds) {
+        if (!idCabang.has(id)) {
+          throw new HTTPException(400, { message: "Ada tempat di luar cabang karyawan" });
+        }
+      }
+      await db.transaction(async (tx) => {
+        if (idCabang.size > 0) {
+          await tx
+            .delete(storageLocationPetugas)
+            .where(
+              and(
+                eq(storageLocationPetugas.companyId, auth.company_id!),
+                eq(storageLocationPetugas.userId, userId),
+                inArray(storageLocationPetugas.storageLocationId, [...idCabang]),
+              ),
+            );
+        }
+        if (uniqueIds.length > 0) {
+          await tx.insert(storageLocationPetugas).values(
+            uniqueIds.map((tid) => ({
+              companyId: auth.company_id!,
+              storageLocationId: tid,
+              userId,
+            })),
+          );
+        }
+      });
+      return c.json({ ok: true, assigned: uniqueIds });
+    },
+  )
   .patch("/:userId", zValidator("json", PatchKaryawanBody), async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");

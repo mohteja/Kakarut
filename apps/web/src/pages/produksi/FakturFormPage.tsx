@@ -82,8 +82,9 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
   const endpoint = tipe === "produksi" ? "/produksi" : "/pembelian";
   const navigate = useNavigate();
   const { auth } = useAuth();
-  // Faktur dibuat ATAS satu cabang — dari Kantor pilih cabang kerjanya.
-  const { query: branchQuery, id: branchId } = useCabangData();
+  // Produksi & beli bahan baku = urusan Central Kitchen. Dari Kantor, pilih
+  // CK-nya (default CK pertama) — bukan store.
+  const { query: branchQuery, id: branchId } = useCabangData("produksi");
   const queryClient = useQueryClient();
   const isKasir = auth?.user.role === "cashier";
   // karyawan CK (tim): faktur dibuat di cabangnya sendiri, pelaksana dirinya
@@ -204,7 +205,7 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
 
   return (
     <div className="max-w-5xl">
-      <CabangDataBar />
+      <CabangDataBar fokus="produksi" />
       <PageTitle
         aksi={
           <button type="button" onClick={() => navigate(endpoint)} className={btnSecondary}>

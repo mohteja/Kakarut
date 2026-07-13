@@ -90,6 +90,9 @@ export function createApp() {
   // transaksi — TANPA kasir: shift & open bill khusus peran berjualan.
   tenant.use("/shift/*", requireRole("owner", "admin", "cashier"));
   tenant.use("/open-bill/*", requireRole("owner", "admin", "cashier"));
+  // Absensi = stasiun pindai QR yang dioperasikan admin/kasir untuk mencatat
+  // karyawan; peran TIM tidak memindai — cukup tunjukkan QR dari Profil.
+  tenant.use("/absensi/*", requireRole("owner", "admin", "cashier"));
   tenant
     .route("/company", companyRoutes)
     .route("/customer", customerRoutes)
@@ -107,7 +110,7 @@ export function createApp() {
     .route("/meja", mejaRoutes)
     .route("/open-bill", openBillRoutes)
     .route("/shift", shiftRoutes)
-    // absensi karyawan (kiosk) — semua peran, tanpa gerbang requireRole
+    // absensi karyawan (stasiun pindai) — hanya admin/kasir (digerbang di atas)
     .route("/absensi", absensiRoutes)
     // profil akun sendiri (identitas + QR absen + ganti password) — semua peran
     .route("/profil", profilRoutes)

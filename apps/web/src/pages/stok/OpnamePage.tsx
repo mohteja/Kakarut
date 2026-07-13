@@ -17,7 +17,9 @@ export function OpnamePage() {
   const { query: branchQuery, id: branchId } = useCabangData();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const isKasir = auth?.user.role === "cashier";
+  // Peran terikat cabang (kasir & tim) hanya melihat/opname tempat yang
+  // ditugaskan padanya (atau terbuka) — owner/admin bebas.
+  const terikat = auth?.user.role === "cashier" || auth?.user.role === "tim";
 
   const { data: stok } = useQuery({
     queryKey: ["stok", branchQuery],
@@ -52,18 +54,18 @@ export function OpnamePage() {
 
   // tempat yang ditampilkan sebagai filter (kasir: hanya yang boleh diopname)
   const tempatBoleh = useMemo(() => {
-    if (!isKasir) return tempatList;
+    if (!terikat) return tempatList;
     return tempatList.filter((t) => {
       const p = t.petugas;
       return p.length === 0 || p.some((x) => x.user_id === myId);
     });
-  }, [tempatList, isKasir, myId]);
+  }, [tempatList, terikat, myId]);
 
   const tampil = useMemo(() => {
     return (stok ?? [])
       .filter((s) => s.nama.toLowerCase().includes(cari.toLowerCase()))
       .filter((s) => {
-        if (!isKasir || !s.tempat_id) return true;
+        if (!terikat || !s.tempat_id) return true;
         const p = petugasByLoc.get(s.tempat_id) ?? [];
         return p.length === 0 || p.some((x) => x.user_id === myId);
       })
@@ -74,7 +76,7 @@ export function OpnamePage() {
             ? s.tempat_id === null
             : s.tempat_id === filterTempat,
       );
-  }, [stok, cari, filterTempat, isKasir, petugasByLoc, myId]);
+  }, [stok, cari, filterTempat, terikat, petugasByLoc, myId]);
 
   const petugasTerpilih =
     filterTempat !== "semua" && filterTempat !== "tanpa"
@@ -91,7 +93,7 @@ export function OpnamePage() {
       return api<{ ringkasan: OpnameRingkasan; session_id: string }>("/stok/opname", {
         method: "POST",
         body: {
-          ...(!isKasir && branchId ? { branch_id: branchId } : {}),
+          ...(!terikat && branchId ? { branch_id: branchId } : {}),
           items,
           catatan: "Opname mobile",
         },
@@ -174,7 +176,7 @@ export function OpnamePage() {
             )}
           </div>
         )}
-        {isKasir && (
+        {terikat && (
           <div className="text-xs text-stone-400">
             Anda hanya melihat bahan di tempat yang boleh Anda opname.
           </div>
@@ -333,7 +335,9 @@ export function OpnamePage() {
               <button onClick={() => navigate("/stok")} className={`${btnSecondary} flex-1`}>
                 Ke Stok
               </button>
-              {hasil.lebih + hasil.kurang > 0 ? (
+              {/* Klarifikasi selisih = tugas manajemen (server owner/admin).
+                  Peran terikat (kasir/tim) diarahkan ke riwayat saja. */}
+              {hasil.lebih + hasil.kurang > 0 && !terikat ? (
                 <button
                   onClick={() => navigate("/stok/penyesuaian")}
                   className={`${btnPrimary} flex-1`}

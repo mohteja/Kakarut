@@ -83,18 +83,19 @@ export const stokRoutes = new Hono<AppEnv>()
     );
   })
   /**
-   * Stock opname: bandingkan fisik vs sistem. Semua peran (kasir terkunci
-   * cabangnya). Menyimpan snapshot saldo sistem + selisih per sesi, dan
-   * qty fisik jadi baseline saldo baru.
+   * Stock opname: bandingkan fisik vs sistem. owner/admin + peran terikat
+   * cabang (kasir & tim, terkunci cabangnya + hanya tempat yang ditugaskan).
+   * Menyimpan snapshot saldo sistem + selisih per sesi, qty fisik jadi
+   * baseline saldo baru. Persetujuan selisih tetap owner/admin.
    */
-  .post("/opname", requireRole("owner", "admin", "cashier"), zValidator("json", OpnameBody), async (c) => {
+  .post("/opname", requireRole("owner", "admin", "cashier", "tim"), zValidator("json", OpnameBody), async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");
     const branchId = body.branch_id
       ? await pastikanCabang(body.branch_id, auth.company_id!)
       : await resolveBranchId(c);
     if (terikatCabang(auth.role) && branchId !== auth.branch_id) {
-      throw new HTTPException(403, { message: "Kasir hanya boleh opname di cabangnya" });
+      throw new HTTPException(403, { message: "Anda hanya boleh opname di cabang Anda" });
     }
 
     // Gabungkan duplikat (entri terakhir menang)
@@ -129,9 +130,10 @@ export const stokRoutes = new Hono<AppEnv>()
     const saldoById = new Map(saldoRows.map((r) => [r.ingredient_id, r.saldo]));
     const infoById = new Map(saldoRows.map((r) => [r.ingredient_id, r]));
 
-    // Batasan petugas: kasir hanya boleh opname bahan di tempat yang terbuka
-    // (belum ada petugas) atau tempat yang ditugaskan padanya. Bahan tanpa
-    // tempat boleh siapa saja. Owner/admin selalu boleh.
+    // Batasan petugas: peran terikat cabang (kasir/tim) hanya boleh opname
+    // bahan di tempat yang terbuka (belum ada petugas) atau tempat yang
+    // ditugaskan padanya. Bahan tanpa tempat boleh siapa saja. Owner/admin
+    // selalu boleh.
     if (terikatCabang(auth.role)) {
       const petugasRows = await db
         .select({
