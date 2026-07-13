@@ -1628,6 +1628,12 @@ cek "tim: stock opname → 403" "V == 403" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/stok/opname" -H "Authorization: Bearer $T56" -H 'Content-Type: application/json' -d '{}')"
 cek "tim: produksi → 403" "V == 403" "$(status_code "$T56" GET /produksi)"
 cek "tim: kelola karyawan → 403" "V == 403" "$(status_code "$T56" GET /karyawan)"
+# Stasiun absen (pindai QR) hanya admin/kasir — tim tak boleh mencatat absen
+KODE_T56=$(api "$OWNER" GET /karyawan | jq -r '[.[] | select(.email=="tim56@basooopa.id")][0].employee_code')
+cek "tim: pindai absensi (POST) → 403" "V == 403" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/absensi" -H "Authorization: Bearer $T56" -H 'Content-Type: application/json' -d "{\"kode\":\"$KODE_T56\"}")"
+cek "tim: daftar absensi (GET) → 403" "V == 403" "$(status_code "$T56" GET /absensi)"
+cek "kasir: pindai absensi tetap boleh → 200" "V == 200" "$(status_code "$KASIR" GET /absensi)"
 
 echo "== 57. Absen hanya dalam radius titik lokasi cabang =="
 KODE56=$(api "$OWNER" GET /karyawan | jq -r '[.[] | select(.email=="tim56@basooopa.id")][0].employee_code')

@@ -85,7 +85,6 @@ export default function App() {
           )}
           {!isSuperAdmin && (
             <>
-              <Route path="/absen" element={<AbsenPage />} />
               <Route path="/profil" element={<ProfilPage />} />
               <Route path="/kasir/riwayat" element={<RiwayatPage />} />
               <Route path="/menu/lihat" element={<LihatMenuPage />} />
@@ -93,9 +92,10 @@ export default function App() {
               <Route path="/penerimaan" element={<PenerimaanPage />} />
               <Route path="/stok/penyesuaian" element={<PenyesuaianPage />} />
               <Route path="/stok/kartu/:ingredientId" element={<KartuStokPage />} />
-              {/* halaman berjualan — bukan untuk peran tim */}
+              {/* stasiun absen (pindai QR) & halaman berjualan — bukan peran tim */}
               {!isTim && (
                 <>
+                  <Route path="/absen" element={<AbsenPage />} />
                   <Route path="/kasir" element={<KasirPage />} />
                   <Route path="/kasir/tutup" element={<ShiftPage />} />
                   <Route path="/pengaturan/printer" element={<PrinterPage />} />

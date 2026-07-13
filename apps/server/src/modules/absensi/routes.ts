@@ -32,12 +32,12 @@ async function timezoneOf(companyId: string): Promise<string> {
 }
 
 /**
- * Absensi karyawan mode kiosk: perangkat kasir dipakai bergantian oleh semua
- * karyawan. Karyawan mengetik kode atau memindai QR (yang memuat kodenya) →
- * server tentukan cap masuk/keluar otomatis dari cap terakhir hari ini.
- * Semua peran boleh (tak digerbang di app.ts); operator hanya untuk auth +
- * konteks perusahaan/cabang — baris absensi dicatat atas nama karyawan pemilik
- * kode, bukan operator perangkat.
+ * Absensi karyawan: stasiun pindai QR dioperasikan admin/kasir (digerbang
+ * requireRole di app.ts). Operator memindai QR karyawan (memuat kodenya) atau
+ * mengetik kodenya → server tentukan cap masuk/keluar otomatis dari cap
+ * terakhir hari ini. Operator hanya untuk auth + konteks perusahaan/cabang —
+ * baris absensi dicatat atas nama karyawan pemilik kode, bukan operator.
+ * Peran TIM tidak boleh memindai; cukup tunjukkan QR dari Profil.
  */
 export const absensiRoutes = new Hono<AppEnv>()
   .post("/", zValidator("json", ClockBody), async (c) => {

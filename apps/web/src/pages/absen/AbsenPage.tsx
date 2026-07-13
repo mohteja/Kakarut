@@ -144,8 +144,9 @@ export function AbsenPage() {
     <div className="mx-auto max-w-2xl">
       <PageTitle>🖐 Absen Karyawan</PageTitle>
       <p className="mb-4 text-sm text-stone-500">
-        Masukkan <b>kode karyawan</b> atau <b>scan QR</b> Anda untuk absen. Sistem otomatis
-        mencatat <b>masuk</b> atau <b>pulang</b> sesuai urutan hari ini.
+        <b>Scan QR</b> karyawan (dari halaman Profil mereka) atau ketik <b>kode karyawan</b> untuk
+        mencatat absen. Sistem otomatis mencatat <b>masuk</b> atau <b>pulang</b> sesuai urutan hari
+        ini. Stasiun ini dioperasikan admin/kasir.
       </p>
 
       {/* Kartu hasil absen — besar & jelas untuk konfirmasi cepat */}

@@ -21,7 +21,7 @@ const LABEL_ROLE: Record<string, string> = {
 
 /**
  * Profil akun sendiri — semua peran: identitas, kode karyawan + QR untuk
- * absen (tunjukkan/scan di halaman Absen), dan ganti password.
+ * absen (ditunjukkan ke admin/kasir untuk dipindai), dan ganti password.
  */
 export function ProfilPage() {
   const { data: profil, isLoading } = useQuery({
@@ -99,8 +99,8 @@ export function ProfilPage() {
         <Card className="mb-4 p-4 text-center">
           <h2 className="mb-1 font-bold text-stone-800">QR Absen Saya</h2>
           <p className="mb-3 text-sm text-stone-500">
-            Scan QR ini di halaman <b>🖐 Absen</b> pada perangkat kasir, atau ketik kode
-            karyawan di bawah.
+            Tunjukkan QR ini ke <b>admin</b> atau <b>kasir</b> untuk dipindai saat absen
+            masuk/pulang. Kode karyawan di bawah juga bisa mereka ketik manual.
           </p>
           {qrUrl ? (
             <img

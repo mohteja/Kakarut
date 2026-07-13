@@ -195,9 +195,13 @@ export function Layout() {
                   🏠 Beranda
                 </NavLink>
               )}
-              <NavLink to="/absen" className={linkClass}>
-                🖐 Absen
-              </NavLink>
+              {/* Stasiun absen (pindai QR) — hanya admin/kasir; peran tim
+                  cukup tunjukkan QR dari Profil untuk dipindai. */}
+              {!isTim && (
+                <NavLink to="/absen" className={linkClass}>
+                  🖐 Absen
+                </NavLink>
+              )}
               <NavLink to="/profil" className={linkClass}>
                 👤 Profil Saya
               </NavLink>
