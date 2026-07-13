@@ -43,7 +43,7 @@ function StatKecil({ label, nilai }: { label: string; nilai: string }) {
 /** Rekomendasi jumlah beli tiap bahan agar mencapai target penjualan. */
 export function RekomendasiBeliPage() {
   // Rekomendasi dihitung dari stok cabang — dari Kantor pilih cabangnya.
-  const { query: branchQuery } = useCabangData();
+  const { query: branchQuery } = useCabangData("produksi");
   const queryClient = useQueryClient();
   const [targetInput, setTargetInput] = useState("");
   const [targetInited, setTargetInited] = useState(false);
@@ -109,7 +109,7 @@ export function RekomendasiBeliPage() {
 
   return (
     <div className="max-w-5xl">
-      <CabangDataBar />
+      <CabangDataBar fokus="produksi" />
       <PageTitle
         aksi={
           <div className="flex flex-wrap gap-2">

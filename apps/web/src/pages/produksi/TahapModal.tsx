@@ -47,7 +47,7 @@ export function TahapModal({
   const queryClient = useQueryClient();
   const { cabang } = useBranch();
   // Cabang pengirim faktur — dari Kantor mengikuti pilihan cabang data
-  const { id: branchId } = useCabangData();
+  const { id: branchId } = useCabangData("produksi");
   const { isPro } = useCompanyMode();
   // CK hanya mengirim ke store yang terhubung dengannya (satu CK per store)
   const cabangIniCk = cabang.find((b) => b.id === branchId)?.tipe === "central_kitchen";

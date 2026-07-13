@@ -38,7 +38,7 @@ export function FakturDetailModal({
   endpoint: string;
   onClose: () => void;
 }) {
-  const { query: branchQuery } = useCabangData();
+  const { query: branchQuery } = useCabangData("produksi");
   const queryClient = useQueryClient();
   const [mode, setMode] = useState<"lihat" | "ubah" | "hapus">("lihat");
 

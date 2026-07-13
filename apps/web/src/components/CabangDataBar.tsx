@@ -5,12 +5,14 @@ import { labelCabang, useCabangData } from "../context/BranchContext";
  * Kantor pada halaman yang datanya per cabang (stok, meja, kasir, dst.).
  * Kantor = pusat: bisa membuka data cabang mana pun tanpa pindah divisi.
  */
-export function CabangDataBar() {
-  const { id, dariKantor, opsi, pilih } = useCabangData();
+export function CabangDataBar({ fokus }: { fokus?: "produksi" } = {}) {
+  const { id, dariKantor, opsi, pilih } = useCabangData(fokus);
   if (!dariKantor) return null;
   return (
     <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-orange-200 bg-orange-50 px-3 py-2 text-sm text-stone-700">
-      <span className="font-medium">🏢 Dari Kantor — data cabang:</span>
+      <span className="font-medium">
+        🏢 Dari Kantor — {fokus === "produksi" ? "Central Kitchen" : "data cabang"}:
+      </span>
       <select
         value={id ?? ""}
         onChange={(e) => pilih(e.target.value)}
