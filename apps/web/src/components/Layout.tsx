@@ -87,6 +87,7 @@ export function Layout() {
   const role = auth.user.role;
   const isSuperAdmin = auth.user.is_super_admin;
   const isManajemen = role === "owner" || role === "admin";
+  const adaKantor = cabang.some((b) => b.is_active && b.tipe === "kantor");
   // Satu perusahaan, beda divisi: menu sidebar mengikuti jenis lokasi terpilih.
   const dStore = divisi === "store";
   const dCk = divisi === "central_kitchen";
@@ -154,8 +155,9 @@ export function Layout() {
           </button>
         </div>
 
-        {/* Pemilih cabang hanya relevan di mode Pro (multi-lokasi) */}
-        {!isSuperAdmin && isManajemen && isPro && cabang.length > 0 && (
+        {/* Pemilih lokasi = HANYA owner (bebas roaming). Admin terkunci di
+            Kantor: hanya owner yang boleh mengganti lokasi ke cabang/CK. */}
+        {!isSuperAdmin && role === "owner" && isPro && cabang.length > 0 && (
           <select
             value={branchId ?? ""}
             onChange={(e) => setBranchId(e.target.value)}
@@ -171,6 +173,12 @@ export function Layout() {
                 </option>
               ))}
           </select>
+        )}
+        {/* Admin di-pin ke Kantor (pusat) — tampilkan sebagai label statis. */}
+        {!isSuperAdmin && role === "admin" && isPro && adaKantor && (
+          <div className="mb-4 rounded-lg bg-stone-800 px-3 py-2 text-xs text-stone-300">
+            Lokasi: <span className="font-semibold text-white">🏢 Kantor</span>
+          </div>
         )}
         {!isSuperAdmin && (role === "cashier" || isTim) && auth.branch && (
           <div className="mb-4 rounded-lg bg-stone-800 px-3 py-2 text-xs text-stone-300">

@@ -201,6 +201,11 @@ function TempatSOModal({ karyawan, onClose }: { karyawan: Karyawan; onClose: () 
 export function KaryawanPage() {
   const { cabang } = useBranch();
   const { isPro } = useCompanyMode();
+  // Admin selalu berlokasi di Kantor (pusat) — lokasi kerjanya dikunci ke sini.
+  const kantorId = cabang.find((b) => b.is_active && b.tipe === "kantor")?.id ?? "";
+  // Default lokasi non-admin (store pertama) — dipakai saat peran beralih dari
+  // admin agar tak menyisakan Kantor terpilih untuk kasir/tim.
+  const storeDefault = cabang.find((b) => b.is_active && b.tipe === "store")?.id ?? "";
   const queryClient = useQueryClient();
   const { data: karyawan, isLoading } = useQuery({
     queryKey: ["karyawan"],
@@ -439,7 +444,9 @@ export function KaryawanPage() {
                               email: k.email,
                               password: "",
                               role: k.role,
-                              branch_id: k.branch_id ?? "",
+                              // Admin selalu dikunci ke Kantor (pusat) bila ada.
+                              branch_id:
+                                k.role === "admin" && kantorId ? kantorId : (k.branch_id ?? ""),
                             }),
                         },
                         {
@@ -536,9 +543,19 @@ export function KaryawanPage() {
                 ) : (
                   <select
                     value={form.role}
-                    onChange={(e) =>
-                      setForm({ ...form, role: e.target.value as FormState["role"] })
-                    }
+                    onChange={(e) => {
+                      const r = e.target.value as FormState["role"];
+                      // Admin dikunci ke Kantor (pusat) bila tersedia; saat pindah
+                      // dari admin, lepas kunci Kantor agar peran lain memilih
+                      // lokasi sendiri (bukan Kantor yang tak punya POS/stok).
+                      const branchPatch =
+                        r === "admin" && kantorId
+                          ? { branch_id: kantorId }
+                          : kantorId && form.branch_id === kantorId
+                            ? { branch_id: storeDefault }
+                            : {};
+                      setForm({ ...form, role: r, ...branchPatch });
+                    }}
                     className={inputClass}
                   >
                     <option value="cashier">Kasir</option>
@@ -552,33 +569,45 @@ export function KaryawanPage() {
               {isPro && (
                 <div>
                   <label className="mb-1 block text-sm font-medium">
-                    Lokasi kerja {WAJIB_CABANG.has(form.role) ? "(wajib)" : "(opsional)"}
+                    Lokasi kerja{" "}
+                    {form.role === "admin" && kantorId
+                      ? "(Kantor)"
+                      : WAJIB_CABANG.has(form.role)
+                        ? "(wajib)"
+                        : "(opsional)"}
                   </label>
-                  <select
-                    value={form.branch_id}
-                    onChange={(e) => {
-                      const b = cabang.find((x) => x.id === e.target.value);
-                      // pilih Central Kitchen → peran lapangan otomatis Karyawan (tim)
-                      setForm({
-                        ...form,
-                        branch_id: e.target.value,
-                        ...(b?.tipe === "central_kitchen" && form.role === "cashier"
-                          ? { role: "tim" as const }
-                          : {}),
-                      });
-                    }}
-                    className={inputClass}
-                    required={WAJIB_CABANG.has(form.role)}
-                  >
-                    {!WAJIB_CABANG.has(form.role) && <option value="">Semua lokasi</option>}
-                    {cabang
-                      .filter((b) => b.is_active)
-                      .map((b) => (
-                        <option key={b.id} value={b.id}>
-                          {labelCabang(b)}
-                        </option>
-                      ))}
-                  </select>
+                  {form.role === "admin" && kantorId ? (
+                    // Admin selalu di Kantor — lokasi terkunci, bukan dropdown.
+                    <div className="rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-sm text-stone-700">
+                      🏢 Kantor
+                    </div>
+                  ) : (
+                    <select
+                      value={form.branch_id}
+                      onChange={(e) => {
+                        const b = cabang.find((x) => x.id === e.target.value);
+                        // pilih Central Kitchen → peran lapangan otomatis Karyawan (tim)
+                        setForm({
+                          ...form,
+                          branch_id: e.target.value,
+                          ...(b?.tipe === "central_kitchen" && form.role === "cashier"
+                            ? { role: "tim" as const }
+                            : {}),
+                        });
+                      }}
+                      className={inputClass}
+                      required={WAJIB_CABANG.has(form.role)}
+                    >
+                      {!WAJIB_CABANG.has(form.role) && <option value="">Semua lokasi</option>}
+                      {cabang
+                        .filter((b) => b.is_active)
+                        .map((b) => (
+                          <option key={b.id} value={b.id}>
+                            {labelCabang(b)}
+                          </option>
+                        ))}
+                    </select>
+                  )}
                 </div>
               )}
             </div>
