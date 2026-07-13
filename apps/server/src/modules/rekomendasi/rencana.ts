@@ -210,15 +210,22 @@ export async function buatFakturDariRencana(
         .from(branches)
         .where(and(eq(branches.id, ckId), eq(branches.companyId, params.companyId)));
       if (!row || row.tipe !== "central_kitchen") {
-        throw new HTTPException(400, { message: "Central Kitchen tidak valid" });
+        // CK dipilih eksplisit oleh user tapi tak valid → tolak. Bila hanya link
+        // tersimpan (store.central_kitchen_id) yang usang — CK-nya dihapus atau
+        // di-demote jadi non-CK — jangan gagalkan permintaan: bukukan di store
+        // (fallback aman legacy, sama seperti store tanpa CK).
+        if (params.ckBranchId != null) {
+          throw new HTTPException(400, { message: "Central Kitchen tidak valid" });
+        }
+      } else {
+        // store hanya boleh diproduksi oleh CK pemasoknya (bila terhubung)
+        if (store.tipe === "store" && store.ckId && store.ckId !== ckId) {
+          throw new HTTPException(400, {
+            message: `Cabang "${store.nama}" terhubung ke Central Kitchen lain`,
+          });
+        }
+        ck = { id: row.id, nama: row.nama };
       }
-      // store hanya boleh diproduksi oleh CK pemasoknya (bila terhubung)
-      if (store.tipe === "store" && store.ckId && store.ckId !== ckId) {
-        throw new HTTPException(400, {
-          message: `Cabang "${store.nama}" terhubung ke Central Kitchen lain`,
-        });
-      }
-      ck = { id: row.id, nama: row.nama };
     }
   }
   const workOrder = ck !== null;
