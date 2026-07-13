@@ -1805,6 +1805,17 @@ OWNER_UID=$(api "$OWNER" GET /karyawan | jq -r '[.[] | select(.role=="owner")][0
 cek "riwayat: aktivitas owner memuat permintaan" "V == 1" \
   "$(api "$OWNER" GET "/karyawan/$OWNER_UID/aktivitas" | jq --arg f "$WO_FID" '([.rows[] | select(.faktur_id==$f and .aksi=="Permintaan tambah stok")] | length > 0) | if . then 1 else 0 end')"
 
+# Bahan BELI (mis. plastik) dibukukan di CENTRAL KITCHEN (disimpan di CK), bukan store
+WO_BELI=$(echo "$WO" | jq -r '.beli.faktur_id')
+cek "permintaan menghasilkan faktur beli" "V == 1" \
+  "$([ -n "$WO_BELI" ] && [ "$WO_BELI" != "null" ] && echo 1 || echo 0)"
+cek "faktur beli lahir di CK (branch=CK, tujuan null, rencana)" "V == 1" \
+  "$(api "$OWNER" GET "/pembelian?branch_id=$CK52_UTAMA&per_page=500" | jq --arg f "$WO_BELI" '([.rows[] | select(.faktur_id==$f)] | (length>0) and all(.[]; .tujuan_branch_id==null and .status=="rencana")) | if . then 1 else 0 end')"
+cek "faktur beli TIDAK di store (dibukukan di CK)" "V == 0" \
+  "$(api "$OWNER" GET "/pembelian?branch_id=$CB46_ID&per_page=500" | jq --arg f "$WO_BELI" '[.rows[] | select(.faktur_id==$f)] | length')"
+cek "riwayat: log faktur beli 'Permintaan tambah stok' (di CK)" "V == 1" \
+  "$(api "$OWNER" GET "/pembelian/log/$WO_BELI" | jq '([.rows[] | select(.aksi=="Permintaan tambah stok")] | length > 0) | if . then 1 else 0 end')"
+
 # tim@CK mulai dikerjakan (seluruh faktur) → self-assign pelaksana
 api "$TCK58" POST "/produksi/tahap/$WO_FID" '{"ke":"dikerjakan"}' > /dev/null
 cek "tim CK mulai dikerjakan → pelaksana = dirinya" "V == 1" \

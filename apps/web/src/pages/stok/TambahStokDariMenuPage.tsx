@@ -111,7 +111,9 @@ export function TambahStokDariMenuPage() {
   const store = cabang.find((b) => b.id === tujuanId);
   // Central Kitchen pemasok store → produksi = work-order CK (karyawan CK yang
   // memproses & mengirim). Bila store tak punya CK → produksi di tempat (legacy).
-  const ck = cabang.find((b) => b.id === store?.central_kitchen_id);
+  const ck = cabang.find(
+    (b) => b.id === store?.central_kitchen_id && b.tipe === "central_kitchen",
+  );
   const workOrder = !!ck;
   const branchQuery = tujuanId ? `?branch_id=${tujuanId}` : "";
 
@@ -244,7 +246,7 @@ export function TambahStokDariMenuPage() {
         Tentukan <b>cabang tujuan</b> + <b>target porsi</b> tiap menu. Sistem menghitung kebutuhan
         bahan lalu membuat <b>permintaan</b>: bahan <b>produksi</b> menjadi work-order Central
         Kitchen (CK memproses → simpan di CK → kirim ke cabang → cabang terima), bahan <b>beli</b>{" "}
-        jadi faktur beli cabang. Semua tercatat di riwayat.
+        menjadi faktur beli yang dibukukan & disimpan di Central Kitchen. Semua tercatat di riwayat.
       </p>
 
       {/* Cabang tujuan + Central Kitchen pelaksana */}
@@ -301,7 +303,8 @@ export function TambahStokDariMenuPage() {
             )}
             {hasil.beli && (
               <li>
-                🛒 Faktur beli (RAB) — {hasil.beli.jumlah_baris} bahan ·{" "}
+                🛒 Faktur beli (RAB) — {hasil.beli.jumlah_baris} bahan
+                {workOrder && ck ? ` · dibukukan & disimpan di ${ck.nama}` : ""} ·{" "}
                 <Link to="/pembelian" className="font-medium underline">
                   lihat di Beli Bahan Baku →
                 </Link>
