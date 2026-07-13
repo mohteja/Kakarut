@@ -244,19 +244,19 @@ export function Layout() {
                   🍽 Meja
                 </NavLink>
               )}
-              {!timDiCk && (
-                <NavLink to="/stok" className={(s) => `${linkClass(s)} flex items-center gap-2`}>
-                  <span>📦 Stok</span>
-                  {stokKritis > 0 && (
-                    <span
-                      className={`ml-auto flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full px-1 text-xs font-bold text-white ${adaHabis ? "bg-red-600" : "bg-amber-500"}`}
-                      title={adaHabis ? "Ada bahan habis" : "Ada bahan menipis"}
-                    >
-                      {stokKritis}
-                    </span>
-                  )}
-                </NavLink>
-              )}
+              {/* Stok + Stok Opname: semua peran termasuk karyawan CK (SO
+                  bahan baku di Central Kitchen). */}
+              <NavLink to="/stok" className={(s) => `${linkClass(s)} flex items-center gap-2`}>
+                <span>📦 Stok</span>
+                {stokKritis > 0 && (
+                  <span
+                    className={`ml-auto flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full px-1 text-xs font-bold text-white ${adaHabis ? "bg-red-600" : "bg-amber-500"}`}
+                    title={adaHabis ? "Ada bahan habis" : "Ada bahan menipis"}
+                  >
+                    {stokKritis}
+                  </span>
+                )}
+              </NavLink>
               {!timDiCk && (
                 <NavLink to="/penerimaan" className={(s) => `${linkClass(s)} flex items-center gap-2`}>
                   <span>📥 Penerimaan Barang</span>

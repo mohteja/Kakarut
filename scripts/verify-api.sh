@@ -1624,8 +1624,36 @@ cek "tim: membuat transaksi kasir → 403" "V == 403" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/penjualan" -H "Authorization: Bearer $T56" -H 'Content-Type: application/json' -d "{\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")"
 cek "tim: shift kasir → 403" "V == 403" "$(status_code "$T56" GET /shift/aktif)"
 cek "tim: open bill → 403" "V == 403" "$(status_code "$T56" GET /open-bill)"
-cek "tim: stock opname → 403" "V == 403" \
-  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/stok/opname" -H "Authorization: Bearer $T56" -H 'Content-Type: application/json' -d '{}')"
+# Tim KINI boleh stock opname (dulu 403) — terikat petugas & cabang seperti kasir
+U56=$(api "$OWNER" GET /karyawan | jq -r '[.[] | select(.email=="tim56@basooopa.id")][0].user_id')
+TSID56=$(api "$T56" POST /stok/opname "{\"items\":[{\"ingredient_id\":\"$PLASTIK_ID\",\"qty\":123}]}" | jq -r .session_id)
+{ [ "$TSID56" != "null" ] && [ -n "$TSID56" ]; } && ok "tim boleh stock opname (tak lagi 403)" \
+  || gagal "tim seharusnya boleh opname sekarang"
+cek "tim: opname tanpa item → 400 (validasi, bukan 403)" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/stok/opname" -H "Authorization: Bearer $T56" -H 'Content-Type: application/json' -d '{"items":[]}')"
+# Penugasan tempat SO per-karyawan (GET/PUT /karyawan/:id/tempat)
+TMP56=$(api "$OWNER" GET "/karyawan/$U56/tempat")
+cek "GET tempat karyawan: tersedia = tempat di cabangnya" "V >= 1" "$(echo "$TMP56" | jq '.tersedia | length')"
+cek "GET tempat karyawan: assigned awalnya kosong" "V == 0" "$(echo "$TMP56" | jq '.assigned | length')"
+RAK56=$(echo "$TMP56" | jq -r '.tersedia[0].id')
+api "$OWNER" PUT "/karyawan/$U56/tempat" "{\"tempat_ids\":[\"$RAK56\"]}" > /dev/null
+cek "PUT tempat karyawan: assigned tersimpan" "V == 1" \
+  "$(api "$OWNER" GET "/karyawan/$U56/tempat" | jq --arg t "$RAK56" '[.assigned[] | select(. == $t)] | length')"
+cek "penugasan konsisten dua arah (muncul di petugas tempat)" "V == 1" \
+  "$(api "$OWNER" GET /penyimpanan | jq --arg id "$RAK56" --arg u "$U56" '[.[] | select(.id==$id)][0].petugas | [.[] | select(.user_id==$u)] | length')"
+GUDCK56=$(api "$OWNER" POST /penyimpanan "{\"branch_id\":\"$CK47_ID\",\"nama\":\"Gudang CK47 SO\"}" | jq -r .id)
+cek "PUT tempat karyawan: tempat cabang lain → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/karyawan/$U56/tempat" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"tempat_ids\":[\"$GUDCK56\"]}")"
+# Tim bukan petugas tempat yang terkunci ke orang lain → opname bahan di situ 403
+PLAS_TMP=$(api "$T56" GET /stok | jq -r '[.[] | select(.nama=="plastik take away")][0].tempat_id // ""')
+cek "tim: plastik punya tempat di cabangnya (prasyarat scope)" "V == 1" "$([ -n "$PLAS_TMP" ] && echo 1 || echo 0)"
+OWNER_UID56=$(api "$OWNER" GET /karyawan | jq -r '[.[] | select(.role=="owner")][0].user_id')
+api "$OWNER" PUT "/penyimpanan/$PLAS_TMP/petugas" "{\"user_ids\":[\"$OWNER_UID56\"]}" > /dev/null
+cek "tim bukan petugas tempat plastik → opname 403" "V == 403" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/stok/opname" -H "Authorization: Bearer $T56" -H 'Content-Type: application/json' -d "{\"items\":[{\"ingredient_id\":\"$PLASTIK_ID\",\"qty\":100}]}")"
+# reset: buka tempat plastik lagi & lepas penugasan T56
+api "$OWNER" PUT "/penyimpanan/$PLAS_TMP/petugas" "{\"user_ids\":[]}" > /dev/null
+api "$OWNER" PUT "/karyawan/$U56/tempat" "{\"tempat_ids\":[]}" > /dev/null
 cek "tim: produksi → 403" "V == 403" "$(status_code "$T56" GET /produksi)"
 cek "tim: kelola karyawan → 403" "V == 403" "$(status_code "$T56" GET /karyawan)"
 # Stasiun absen (pindai QR) hanya admin/kasir — tim tak boleh mencatat absen
