@@ -432,6 +432,14 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
               message: `Baris berstatus "${b.status}" tidak bisa dipindah ke "${ke}" — tahap hanya bisa maju`,
             });
           }
+          // Work-order CK diterima di cabang tujuan (lewat Penerimaan), bukan
+          // dikonfirmasi di CK — cegah stok mendarat di cabang yang salah.
+          if (ke === "dikonfirmasi" && b.tujuanBranchId) {
+            throw new HTTPException(400, {
+              message:
+                "Barang work-order Central Kitchen — pakai '🚚 Kirim ke cabang' lalu terima di Penerimaan cabang",
+            });
+          }
           if (item.qty > b.qty + 1e-9) {
             throw new HTTPException(400, { message: "Qty maju melebihi qty baris" });
           }
@@ -783,7 +791,9 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
           .update(productions)
           .set({
             branchId: tujuanId,
-            ...(tujuanStorage ? { storageLocationId: tujuanStorage } : {}),
+            // tempat penyimpanan CK tidak berlaku di cabang tujuan → set ke
+            // pilihan di cabang (bila ada) atau kosongkan (hindari bocor gudang CK)
+            storageLocationId: tujuanStorage,
             updatedBy: auth.sub,
             updatedAt: new Date(),
           })
@@ -861,6 +871,10 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         eq(productions.fakturId, c.req.param("fakturId")),
         eq(productions.tipe, tipe),
         eq(productions.status, "menunggu"),
+        // Work-order CK (punya cabang tujuan) TIDAK dikonfirmasi di sini —
+        // dikirim ke cabang lalu diterima lewat Penerimaan cabang. Cegah stok
+        // mendarat di CK, bukan di store tujuan.
+        isNull(productions.tujuanBranchId),
       ];
       if (terikatCabang(auth.role) && auth.branch_id) {
         conds.push(eq(productions.branchId, auth.branch_id));

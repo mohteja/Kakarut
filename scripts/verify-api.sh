@@ -1776,6 +1776,16 @@ cek "selesai: menunggu, masih di CK, tujuan store" "V == 1" \
 cek "belum dikirim: tidak di penerimaan store" "V == 0" \
   "$(api "$OWNER" GET "/penerimaan?branch_id=$CB46_ID" | jq --arg f "$WO_FID" '[.rows[] | select(.faktur_id==$f)] | length')"
 
+# GUARD: work-order TIDAK boleh dikonfirmasi di CK (harus lewat kirim→penerimaan)
+WO_RID_CK=$(api "$OWNER" GET "/produksi?branch_id=$CK52_UTAMA&per_page=500" | jq -r --arg f "$WO_FID" '[.rows[] | select(.faktur_id==$f)][0].id')
+WO_QTY_CK=$(api "$OWNER" GET "/produksi?branch_id=$CK52_UTAMA&per_page=500" | jq -r --arg f "$WO_FID" '[.rows[] | select(.faktur_id==$f)][0].qty')
+cek "work-order: /tahap dikonfirmasi di CK → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/produksi/tahap/$WO_FID" -H "Authorization: Bearer $TCK58" -H 'Content-Type: application/json' -d "{\"ke\":\"dikonfirmasi\",\"items\":[{\"id\":\"$WO_RID_CK\",\"qty\":$WO_QTY_CK}]}")"
+cek "work-order: /konfirmasi di CK → 404 (tak ada baris non-work-order)" "V == 404" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/produksi/konfirmasi/$WO_FID" -H "Authorization: Bearer $TCK58")"
+cek "guard: baris tetap menunggu di CK (tak jadi stok CK)" "V == 1" \
+  "$(api "$OWNER" GET "/produksi?branch_id=$CK52_UTAMA&per_page=500" | jq --arg f "$WO_FID" '([.rows[] | select(.faktur_id==$f)] | all(.[]; .status=="menunggu")) | if . then 1 else 0 end')"
+
 # kirim ke cabang → baris pindah ke store, tetap menunggu
 ING_WO=$(api "$OWNER" GET "/produksi?branch_id=$CK52_UTAMA&per_page=500" | jq -r --arg f "$WO_FID" '[.rows[] | select(.faktur_id==$f)][0].ingredient_id')
 SALDO_SEB=$(api "$OWNER" GET "/stok?branch_id=$CB46_ID" | jq -r --arg i "$ING_WO" '[.[] | select(.ingredient_id==$i)][0].saldo // 0')

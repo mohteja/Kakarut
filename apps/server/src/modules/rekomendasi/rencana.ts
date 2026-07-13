@@ -194,6 +194,10 @@ export async function buatFakturDariRencana(
     .from(branches)
     .where(and(eq(branches.id, params.branchId), eq(branches.companyId, params.companyId)));
   if (!store) throw new HTTPException(400, { message: "Cabang tujuan tidak valid" });
+  // Kantor bukan cabang penyimpanan stok / tujuan permintaan (tak bisa dikirim).
+  if (store.tipe === "kantor") {
+    throw new HTTPException(400, { message: "Kantor bukan cabang tujuan permintaan stok" });
+  }
 
   let ck: { id: string; nama: string } | null = null;
   if (prodRows.length > 0) {

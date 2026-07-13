@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import type { JenisPengadaan, KonfirmasiStatus } from "@kakarut/shared";
 import {
   Card,
+  ErrorText,
   PageTitle,
   Spinner,
   btnPrimary,
@@ -346,6 +347,8 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
         belum lengkap.
       </div>
 
+      <ErrorText error={kirim.error} />
+
       {/* Filter tanggal + jumlah baris (buku besar) */}
       <Card className="mb-3 flex flex-wrap items-end gap-3 p-3">
         <div className="min-w-[9.5rem] flex-1 sm:flex-none">
@@ -420,7 +423,15 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
             const campuran = new Set(g.rows.map((r) => r.status)).size > 1;
             const sisaTugas = g.rows.filter((r) => belumSelesai(r.status)).length;
             const tahapTerawal = Math.min(...g.rows.map((r) => URUTAN_TAHAP[r.status]));
-            const opsiTahap = AKSI_TAHAP[tipe].filter((a) => URUTAN_TAHAP[a.ke] > tahapTerawal);
+            // Work-order CK: konfirmasi lewat Penerimaan cabang (bukan di CK) →
+            // buang opsi "Konfirmasi Ada" dari dropdown; pakai tombol Kirim.
+            const isWorkOrderFaktur =
+              tipe === "produksi" && g.rows.some((r) => r.tujuan_branch_id != null);
+            const opsiTahap = AKSI_TAHAP[tipe].filter(
+              (a) =>
+                URUTAN_TAHAP[a.ke] > tahapTerawal &&
+                !(isWorkOrderFaktur && a.ke === "dikonfirmasi"),
+            );
             // Work-order CK selesai & masih di CK (belum terkirim) → tombol Kirim.
             const siapKirim =
               tipe === "produksi" &&
