@@ -20,6 +20,7 @@ import {
 } from "@kakarut/shared";
 import { db } from "../../db/client";
 import {
+  branches,
   companies,
   ingredients,
   memberships,
@@ -28,6 +29,7 @@ import {
 } from "../../db/schema";
 import { tanggalDi } from "../../lib/time";
 import { loadKatalog, tampilDiCabang } from "../menu/service";
+import { catatLogFaktur } from "../produksi/log";
 import { hitungSaldoCabang } from "../stok/service";
 
 /**
@@ -140,10 +142,17 @@ export async function rencanaDariMenu(
 
 export interface BuatFakturRencanaParams {
   companyId: string;
+  /** cabang tujuan (store) — kebutuhan bahan dihitung di sini */
   branchId: string;
+  /**
+   * Central Kitchen pelaksana (work-order): bila terisi & ≠ store, faktur
+   * PRODUKSI hidup di CK dgn tujuan = store, dan pelaksana ditugaskan karyawan
+   * CK saat mulai (bukan dipaksa owner). Null / = store → produksi di tempat.
+   */
+  ckBranchId?: string | null;
   userId: string;
   items: RencanaMenuItem[];
-  /** pelaksana produksi (wajib salah satu worker/supplier bila ada baris produksi) */
+  /** pelaksana produksi (wajib bila produksi di tempat / bukan work-order) */
   workerId?: string | null;
   supplierId?: string | null;
   /** pemasok barang faktur BELI (terpisah dari pelaksana produksi; opsional) */
@@ -173,8 +182,44 @@ export async function buatFakturDariRencana(
   const prodRows = kurangRows.filter((b) => b.pengadaan === "produksi");
   const beliRows = kurangRows.filter((b) => b.pengadaan === "beli");
 
-  // Validasi pelaksana/relasi milik perusahaan (aturan sama dgn faktur manual)
-  if (prodRows.length > 0 && !params.workerId && !params.supplierId) {
+  // Tentukan mode work-order: produksi dikerjakan Central Kitchen lalu dikirim
+  // ke store tujuan. CK = eksplisit (ck_branch_id) atau CK pemasok store.
+  const [store] = await db
+    .select({
+      id: branches.id,
+      nama: branches.nama,
+      tipe: branches.tipe,
+      ckId: branches.centralKitchenId,
+    })
+    .from(branches)
+    .where(and(eq(branches.id, params.branchId), eq(branches.companyId, params.companyId)));
+  if (!store) throw new HTTPException(400, { message: "Cabang tujuan tidak valid" });
+
+  let ck: { id: string; nama: string } | null = null;
+  if (prodRows.length > 0) {
+    const ckId = params.ckBranchId ?? store.ckId ?? null;
+    if (ckId && ckId !== store.id) {
+      const [row] = await db
+        .select({ id: branches.id, nama: branches.nama, tipe: branches.tipe })
+        .from(branches)
+        .where(and(eq(branches.id, ckId), eq(branches.companyId, params.companyId)));
+      if (!row || row.tipe !== "central_kitchen") {
+        throw new HTTPException(400, { message: "Central Kitchen tidak valid" });
+      }
+      // store hanya boleh diproduksi oleh CK pemasoknya (bila terhubung)
+      if (store.tipe === "store" && store.ckId && store.ckId !== ckId) {
+        throw new HTTPException(400, {
+          message: `Cabang "${store.nama}" terhubung ke Central Kitchen lain`,
+        });
+      }
+      ck = { id: row.id, nama: row.nama };
+    }
+  }
+  const workOrder = ck !== null;
+
+  // Pelaksana wajib HANYA untuk produksi di tempat (bukan work-order). Pada
+  // work-order, karyawan CK menugaskan dirinya saat "Mulai dikerjakan".
+  if (prodRows.length > 0 && !workOrder && !params.workerId && !params.supplierId) {
     throw new HTTPException(400, {
       message: "Pelaksana (karyawan/supplier) wajib dipilih untuk faktur produksi",
     });
@@ -208,6 +253,8 @@ export async function buatFakturDariRencana(
   const ringkas = preview.menus.map((m) => `${m.porsi}× ${m.kode ?? m.nama}`).join(", ");
   const catatan = params.catatan?.trim() || `Rencana dari menu: ${ringkas}`.slice(0, 300);
 
+  // Produksi work-order hidup di CK dgn tujuan = store; beli tetap di store.
+  const prodBranchId = workOrder ? ck!.id : params.branchId;
   const barisFaktur = (
     rows: RencanaBahanRow[],
     tipe: "produksi" | "beli",
@@ -215,7 +262,8 @@ export async function buatFakturDariRencana(
   ) =>
     rows.map((b) => ({
       companyId: params.companyId,
-      branchId: params.branchId,
+      branchId: tipe === "produksi" ? prodBranchId : params.branchId,
+      tujuanBranchId: tipe === "produksi" && workOrder ? params.branchId : null,
       ingredientId: b.ingredient_id,
       qty: b.qty_faktur!,
       tipe,
@@ -227,27 +275,51 @@ export async function buatFakturDariRencana(
       // tidak boleh ikut tercatat sebagai pemasok pembelian
       supplierId:
         tipe === "produksi"
-          ? params.workerId
+          ? workOrder
             ? null
-            : (params.supplierId ?? null)
+            : params.workerId
+              ? null
+              : (params.supplierId ?? null)
           : (params.supplierBeliId ?? null),
       storageLocationId: null,
       status: "rencana" as const,
       isBatch: b.mode_faktur === "batch",
       catatan,
       userId: params.userId,
-      workerId: tipe === "produksi" ? (params.workerId ?? null) : null,
+      // work-order: pelaksana diisi karyawan CK saat mulai (self-assign)
+      workerId: tipe === "produksi" && !workOrder ? (params.workerId ?? null) : null,
       prodDate,
     }));
 
   const prodFakturId = prodRows.length > 0 ? randomUUID() : null;
   const beliFakturId = beliRows.length > 0 ? randomUUID() : null;
+  // Detail riwayat permintaan: tujuan (bila work-order) + ringkasan menu.
+  const detailProd = workOrder ? `Tujuan: ${store.nama} · ${ringkas}` : ringkas;
   await db.transaction(async (tx) => {
     if (prodFakturId) {
       await tx.insert(productions).values(barisFaktur(prodRows, "produksi", prodFakturId));
+      // Riwayat: owner/admin membuat permintaan tambah stok (jejak audit)
+      await catatLogFaktur(tx, {
+        companyId: params.companyId,
+        branchId: prodBranchId,
+        fakturId: prodFakturId,
+        jalur: "produksi",
+        aksi: "Permintaan tambah stok",
+        detail: detailProd,
+        userId: params.userId,
+      });
     }
     if (beliFakturId) {
       await tx.insert(productions).values(barisFaktur(beliRows, "beli", beliFakturId));
+      await catatLogFaktur(tx, {
+        companyId: params.companyId,
+        branchId: params.branchId,
+        fakturId: beliFakturId,
+        jalur: "beli",
+        aksi: "Permintaan tambah stok",
+        detail: ringkas,
+        userId: params.userId,
+      });
     }
   });
 

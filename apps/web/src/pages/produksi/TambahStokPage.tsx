@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import type { JenisPengadaan, KonfirmasiStatus } from "@kakarut/shared";
@@ -51,6 +51,12 @@ export interface StokMasukRow {
   dikerjakan_oleh: string | null;
   qty_dipesan: number | null;
   alasan_tolak: string | null;
+  /** cabang baris (utk tampilan Kantor "semua cabang") */
+  branch_id?: string | null;
+  cabang?: string | null;
+  /** work-order CK: cabang tujuan pengiriman (null = bukan work-order) */
+  tujuan_branch_id?: string | null;
+  tujuan_cabang?: string | null;
   /** total dana cair faktur ini (nilai sama di tiap baris; 0 bila belum ada) */
   dana_cair: number;
 }
@@ -70,6 +76,9 @@ export interface FakturGroup {
   updatedAt: string | null;
   workerId: string | null;
   dikerjakanOleh: string | null;
+  /** cabang baris + tujuan work-order (utk tampilan Kantor & aksi Kirim) */
+  cabang: string | null;
+  tujuanCabang: string | null;
   rows: StokMasukRow[];
   totalHarga: number;
   /** total dana yang sudah cair untuk faktur ini */
@@ -200,11 +209,24 @@ const TEKS: Record<JenisPengadaan, { judul: string; endpoint: string; logJudul: 
 export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
   const t = TEKS[tipe];
   const { auth } = useAuth();
+  const queryClient = useQueryClient();
   // rekomendasi beli = analitik manajemen; karyawan CK cukup buat faktur
   const isManajemen = auth?.user.role === "owner" || auth?.user.role === "admin";
-  // Faktur produksi/pembelian berjalan per cabang — dari Kantor pilih cabangnya.
-  const { query: branchQuery } = useCabangData();
+  // Faktur per cabang — DARI KANTOR tampil SEMUA cabang (kantor memantau
+  // semuanya); di divisi/store lain terkunci ke cabang datanya.
+  const { query: dataQuery, dariKantor } = useCabangData();
+  const branchQuery = dariKantor ? "?branch_id=all" : dataQuery;
   const [detail, setDetail] = useState<FakturGroup | null>(null);
+
+  // Kirim work-order produksi CK → cabang tujuan (langkah terpisah).
+  const kirim = useMutation({
+    mutationFn: (fakturId: string) =>
+      api(`${t.endpoint}/kirim/${fakturId}`, { method: "POST", body: {} }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [t.endpoint] });
+      queryClient.invalidateQueries({ queryKey: ["penerimaan"] });
+    },
+  });
 
   // Buku besar: filter tanggal + pagination per faktur (terlama di halaman awal,
   // terbaru di halaman terakhir). Default membuka halaman TERAKHIR.
@@ -275,6 +297,8 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
           updatedAt: r.updated_at,
           workerId: r.worker_id,
           dikerjakanOleh: r.dikerjakan_oleh,
+          cabang: r.cabang ?? null,
+          tujuanCabang: r.tujuan_cabang ?? null,
           rows: [],
           totalHarga: 0,
           danaCair: r.dana_cair ?? 0,
@@ -296,7 +320,8 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
 
   return (
     <div>
-      <CabangDataBar />
+      {/* Dari Kantor daftar tampil semua cabang (tanpa pemilih cabang). */}
+      {!dariKantor && <CabangDataBar />}
       <PageTitle
         aksi={
           <div className="flex flex-wrap gap-2">
@@ -396,6 +421,17 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
             const sisaTugas = g.rows.filter((r) => belumSelesai(r.status)).length;
             const tahapTerawal = Math.min(...g.rows.map((r) => URUTAN_TAHAP[r.status]));
             const opsiTahap = AKSI_TAHAP[tipe].filter((a) => URUTAN_TAHAP[a.ke] > tahapTerawal);
+            // Work-order CK selesai & masih di CK (belum terkirim) → tombol Kirim.
+            const siapKirim =
+              tipe === "produksi" &&
+              g.fakturId != null &&
+              g.rows.length > 0 &&
+              g.rows.every(
+                (r) =>
+                  r.status === "menunggu" &&
+                  r.tujuan_branch_id != null &&
+                  r.branch_id !== r.tujuan_branch_id,
+              );
             return (
             <Card
               key={g.key}
@@ -436,9 +472,34 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                     {g.dibuatOleh && (
                       <span className="text-xs text-stone-400">oleh {g.dibuatOleh}</span>
                     )}
+                    {/* cabang faktur (tampilan Kantor "semua cabang") */}
+                    {dariKantor && g.cabang && (
+                      <span className="whitespace-nowrap rounded bg-stone-100 px-1.5 py-0.5 text-xs font-medium text-stone-600">
+                        🏪 {g.cabang}
+                      </span>
+                    )}
+                    {/* work-order CK: cabang tujuan pengiriman */}
+                    {g.tujuanCabang && (
+                      <span className="whitespace-nowrap rounded bg-purple-50 px-1.5 py-0.5 text-xs font-semibold text-purple-700">
+                        → {g.tujuanCabang}
+                      </span>
+                    )}
                     {g.catatan && <span className="text-xs text-stone-400">· {g.catatan}</span>}
                   </div>
                   <div className="flex max-w-full flex-wrap items-center gap-1.5">
+                    {siapKirim && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (confirm(`Kirim ke ${g.tujuanCabang ?? "cabang tujuan"}? Barang akan menunggu diterima cabang.`))
+                            kirim.mutate(g.fakturId!);
+                        }}
+                        disabled={kirim.isPending}
+                        className="whitespace-nowrap rounded-lg bg-purple-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-purple-500 disabled:opacity-60"
+                      >
+                        🚚 Kirim ke cabang
+                      </button>
+                    )}
                     {campuran && sisaTugas > 0 && (
                       <span className="whitespace-nowrap rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">
                         📌 sisa tugas: {sisaTugas} baris

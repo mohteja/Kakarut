@@ -90,14 +90,21 @@ export function TahapModal({
   const [selisihCatatan, setSelisihCatatan] = useState("");
   const pakaiHarga = keSelesai && !sesuaiRencana;
 
+  // Work-order CK: faktur produksi hidup di CK & punya cabang tujuan. Tahap
+  // "selesai" hanya menyimpan di CK (pilih tempat penyimpanan CK); pengiriman
+  // ke cabang dilakukan lewat tombol "Kirim ke cabang" TERPISAH.
+  const isWorkOrder = grup.rows.some((r) => r.tujuan_branch_id != null);
+  const fakturBranchId = grup.rows[0]?.branch_id ?? branchId ?? "";
   // Tujuan kirim saat "dikirim/selesai": cabang tujuan (default cabang faktur
   // ini) + tempat penyimpanan di cabang itu (opsional).
   const [tujuanCabang, setTujuanCabang] = useState(branchId ?? "");
   const [tujuanTempat, setTujuanTempat] = useState("");
+  // work-order: tempat penyimpanan diambil dari CK (cabang faktur), bukan tujuan
+  const storageBranch = isWorkOrder ? fakturBranchId : tujuanCabang;
   const { data: tempatTujuan = [] } = useQuery({
-    queryKey: ["penyimpanan", tujuanCabang],
-    queryFn: () => api<PenyimpananDto[]>(`/penyimpanan?branch_id=${tujuanCabang}`),
-    enabled: keSelesai && tujuanCabang !== "",
+    queryKey: ["penyimpanan", storageBranch],
+    queryFn: () => api<PenyimpananDto[]>(`/penyimpanan?branch_id=${storageBranch}`),
+    enabled: keSelesai && storageBranch !== "",
   });
 
   // Tahap "diproses": semua baris ikut penuh (read-only). Tahap lain: sesuai
@@ -169,7 +176,8 @@ export function TahapModal({
           ...(realisasi != null && !adaInvalid
             ? { realisasi, selisih_catatan: selisihCatatan.trim() || null }
             : {}),
-          ...(keSelesai && tujuanCabang ? { tujuan_branch_id: tujuanCabang } : {}),
+          // work-order: JANGAN kirim di tahap selesai (kirim langkah terpisah)
+          ...(keSelesai && !isWorkOrder && tujuanCabang ? { tujuan_branch_id: tujuanCabang } : {}),
           ...(keSelesai && tujuanTempat ? { tujuan_storage_id: tujuanTempat } : {}),
         },
       }),
@@ -342,12 +350,19 @@ export function TahapModal({
         {keSelesai && (
           <div className="space-y-2 rounded-lg border border-stone-200 p-3">
             <div className="text-sm font-semibold text-stone-700">
-              🚚 Dikirim / disimpan ke mana?
+              {isWorkOrder ? "📦 Selesai — disimpan di Central Kitchen" : "🚚 Dikirim / disimpan ke mana?"}
             </div>
+            {isWorkOrder && (
+              <div className="rounded bg-purple-50 px-2 py-1.5 text-xs text-purple-800">
+                Barang jadi disimpan dulu di CK. Kirim ke cabang tujuan lewat tombol{" "}
+                <b>🚚 Kirim ke cabang</b> setelah selesai.
+              </div>
+            )}
             <div className="grid gap-2 sm:grid-cols-2">
               {/* Pilihan cabang tujuan hanya di mode Pro (multi-lokasi);
-                  Lite otomatis ke cabang sendiri. Kantor bukan tujuan kirim. */}
-              {isPro && (
+                  Lite otomatis ke cabang sendiri. Kantor bukan tujuan kirim.
+                  Work-order: kirim di langkah terpisah, jadi disembunyikan. */}
+              {isPro && !isWorkOrder && (
                 <div>
                   <label className="mb-1 block text-xs font-medium text-stone-500">
                     Cabang tujuan
@@ -381,7 +396,7 @@ export function TahapModal({
               )}
               <div>
                 <label className="mb-1 block text-xs font-medium text-stone-500">
-                  Tempat penyimpanan (opsional)
+                  {isWorkOrder ? "Tempat penyimpanan di CK (opsional)" : "Tempat penyimpanan (opsional)"}
                 </label>
                 <select
                   value={tujuanTempat}
@@ -398,13 +413,13 @@ export function TahapModal({
                 </select>
               </div>
             </div>
-            {tujuanCabang && branchId && tujuanCabang !== branchId && (
+            {!isWorkOrder && tujuanCabang && branchId && tujuanCabang !== branchId && (
               <div className="text-xs text-amber-700">
                 Baris yang maju akan <b>berpindah ke cabang tujuan</b> (stok terhitung di
                 sana saat diterima); sisa tugas tetap di cabang ini.
               </div>
             )}
-            {tujuanCabang === branchId && cabangIniCk && (
+            {!isWorkOrder && tujuanCabang === branchId && cabangIniCk && (
               <div className="text-xs text-stone-500">
                 🏭 Ini Central Kitchen — bila barang untuk outlet, pilih cabang 🏪 store
                 sebagai tujuan (hanya store yang terhubung ke CK ini yang bisa dipilih).

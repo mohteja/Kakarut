@@ -34,6 +34,9 @@ const pengubah = alias(users, "pengubah_prod");
 const pekerja = alias(users, "pekerja_prod");
 const danaOleh = alias(users, "dana_oleh");
 const logOleh = alias(users, "log_oleh");
+// cabang baris + cabang tujuan (dipakai tampilan lintas-cabang di Kantor)
+const cabangProd = alias(branches, "cabang_prod");
+const tujuanProd = alias(branches, "tujuan_prod");
 
 const FakturEditBody = z.object({
   password: z.string(),
@@ -49,6 +52,9 @@ const FakturEditBody = z.object({
     .optional(),
 });
 const HapusBody = z.object({ password: z.string() });
+
+/** Kirim work-order produksi CK → cabang tujuan (opsional pilih tempat di cabang). */
+const KirimBody = z.object({ tujuan_storage_id: z.string().uuid().nullish() });
 
 const TahapBody = z.object({
   ke: z.enum(["dikerjakan", "menunggu", "dikonfirmasi"]),
@@ -398,6 +404,9 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
       // ===== Maju sebagian (dropdown + penyesuaian per baris) =====
       if (items) {
         const target = URUTAN_TAHAP[ke];
+        // Work-order CK: karyawan yang MULAI mengerjakan menugaskan dirinya
+        // (isi worker_id yang masih kosong) — bukan dipaksa owner saat request.
+        const selfAssign = tipe === "produksi" && ke === "dikerjakan";
         const baris = await db
           .select()
           .from(productions)
@@ -537,6 +546,10 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
                 .set({
                   ...naik,
                   ...pindah,
+                  // self-assign pelaksana (isi hanya bila masih kosong)
+                  ...(selfAssign
+                    ? { workerId: sql`COALESCE(${productions.workerId}, ${auth.sub}::uuid)` }
+                    : {}),
                   // harga riil menggantikan estimasi RAB (harga pasar berubah)
                   ...(item.harga != null ? { totalHarga: item.harga } : {}),
                 })
@@ -587,7 +600,8 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
                 isBatch: b.isBatch,
                 catatan: b.catatan,
                 userId: b.userId,
-                workerId: b.workerId,
+                tujuanBranchId: b.tujuanBranchId,
+                workerId: b.workerId ?? (selfAssign ? auth.sub : null),
                 prodDate: b.prodDate,
                 ...naik,
               });
@@ -605,6 +619,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
           }
           // jejak kegiatan: siapa mengubah tahap ini + uang/tujuan yang menyertai
           const potongan = [`${items.length} baris`];
+          if (selfAssign) potongan.push(`oleh ${auth.nama}`);
           if (dana_cair != null) potongan.push(`dana cair ${rpLog(dana_cair)}`);
           if (realisasi != null) potongan.push(`realisasi ${rpLog(realisasi)}`);
           if (tujuanNama) potongan.push(`tujuan: ${tujuanNama}`);
@@ -631,7 +646,15 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
 
       const rows = await db
         .update(productions)
-        .set({ status: ke, updatedBy: auth.sub, updatedAt: new Date() })
+        .set({
+          status: ke,
+          updatedBy: auth.sub,
+          updatedAt: new Date(),
+          // work-order CK: pelaksana yang mulai mengerjakan menugaskan dirinya
+          ...(tipe === "produksi" && ke === "dikerjakan"
+            ? { workerId: sql`COALESCE(${productions.workerId}, ${auth.sub}::uuid)` }
+            : {}),
+        })
         .where(and(...conds, eq(productions.status, dari)))
         .returning({ id: productions.id, branchId: productions.branchId });
 
@@ -680,6 +703,111 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         });
       }
       return c.json({ ok: true, status: ke, jumlah_baris: rows.length });
+    })
+    /**
+     * Kirim work-order produksi dari Central Kitchen ke cabang tujuan (langkah
+     * terpisah setelah "selesai — disimpan di CK"). Memindah baris yang masih
+     * `menunggu` di CK → cabang `tujuan_branch_id` (tetap `menunggu`), lalu
+     * muncul di Penerimaan cabang untuk diterima. Hanya jalur produksi.
+     */
+    .post("/kirim/:fakturId", zValidator("json", KirimBody), async (c) => {
+      const auth = c.get("auth");
+      if (tipe !== "produksi") {
+        throw new HTTPException(400, { message: "Kirim khusus faktur produksi" });
+      }
+      const { tujuan_storage_id } = c.req.valid("json");
+      const fakturId = c.req.param("fakturId");
+      const conds = [
+        eq(productions.companyId, auth.company_id!),
+        eq(productions.fakturId, fakturId),
+        eq(productions.tipe, "produksi" as const),
+        eq(productions.status, "menunggu" as const),
+        isNull(productions.deletedAt),
+      ];
+      if (terikatCabang(auth.role) && auth.branch_id) {
+        conds.push(eq(productions.branchId, auth.branch_id));
+      }
+      const baris = await db.select().from(productions).where(and(...conds));
+      // hanya baris yang MASIH di CK (belum terkirim) & punya tujuan
+      const siap = baris.filter((b) => b.tujuanBranchId && b.branchId !== b.tujuanBranchId);
+      if (siap.length === 0) {
+        throw new HTTPException(400, {
+          message: "Tidak ada barang siap dikirim (selesaikan dulu produksi di CK)",
+        });
+      }
+      const ckId = siap[0].branchId;
+      const tujuanId = siap[0].tujuanBranchId!;
+      const [store] = await db
+        .select({
+          id: branches.id,
+          nama: branches.nama,
+          tipe: branches.tipe,
+          centralKitchenId: branches.centralKitchenId,
+        })
+        .from(branches)
+        .where(and(eq(branches.id, tujuanId), eq(branches.companyId, auth.company_id!)));
+      if (!store || store.tipe === "kantor") {
+        throw new HTTPException(400, { message: "Cabang tujuan tidak valid" });
+      }
+      // store hanya menerima dari CK pemasoknya
+      if (store.tipe === "store" && store.centralKitchenId && store.centralKitchenId !== ckId) {
+        throw new HTTPException(400, {
+          message: `Cabang "${store.nama}" terhubung ke Central Kitchen lain`,
+        });
+      }
+      // hanya manajemen atau karyawan (tim) di CK pengirim
+      if (terikatCabang(auth.role) && auth.branch_id !== ckId) {
+        throw new HTTPException(403, { message: "Hanya karyawan Central Kitchen ini yang boleh mengirim" });
+      }
+      let tujuanStorage: string | null = null;
+      if (tujuan_storage_id) {
+        const [lok] = await db
+          .select({ id: storageLocations.id })
+          .from(storageLocations)
+          .where(
+            and(
+              eq(storageLocations.id, tujuan_storage_id),
+              eq(storageLocations.companyId, auth.company_id!),
+              eq(storageLocations.branchId, tujuanId),
+            ),
+          );
+        if (!lok) {
+          throw new HTTPException(400, {
+            message: "Tempat penyimpanan tidak valid untuk cabang tujuan",
+          });
+        }
+        tujuanStorage = tujuan_storage_id;
+      }
+      await db.transaction(async (tx) => {
+        await tx
+          .update(productions)
+          .set({
+            branchId: tujuanId,
+            ...(tujuanStorage ? { storageLocationId: tujuanStorage } : {}),
+            updatedBy: auth.sub,
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              inArray(
+                productions.id,
+                siap.map((b) => b.id),
+              ),
+              eq(productions.status, "menunggu" as const),
+              isNull(productions.deletedAt),
+            ),
+          );
+        await catatLogFaktur(tx, {
+          companyId: auth.company_id!,
+          branchId: ckId,
+          fakturId,
+          jalur: "produksi",
+          aksi: `Dikirim ke ${store.nama}`,
+          detail: `${siap.length} baris`,
+          userId: auth.sub,
+        });
+      });
+      return c.json({ ok: true, tujuan: store.nama, jumlah_baris: siap.length });
     })
     /** Buku dana satu faktur: entri pencairan/tambahan/kembali + total efektif. */
     .get("/dana/:fakturId", async (c) => {
@@ -849,7 +977,10 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
      */
     .get("/", async (c) => {
       const auth = c.get("auth");
-      const branchId = await resolveBranchId(c);
+      // Kantor = pusat pemantauan: owner/admin boleh "?branch_id=all" untuk
+      // melihat faktur SEMUA cabang (kasir/tim tetap terkunci cabangnya).
+      const semuaCabang = !terikatCabang(auth.role) && c.req.query("branch_id") === "all";
+      const branchId = semuaCabang ? null : await resolveBranchId(c);
       const dari = tglValid(c.req.query("dari"));
       const sampai = tglValid(c.req.query("sampai"));
       // dukung juga ?tanggal= (satu hari) demi kompatibilitas
@@ -859,7 +990,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
 
       const conds = [
         eq(productions.companyId, auth.company_id!),
-        eq(productions.branchId, branchId),
+        ...(branchId ? [eq(productions.branchId, branchId)] : []),
         eq(productions.tipe, tipe),
         isNull(productions.deletedAt),
       ];
@@ -915,6 +1046,11 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         dikerjakan_oleh: pekerja.nama,
         qty_dipesan: productions.qtyDipesan,
         alasan_tolak: productions.alasanTolak,
+        // cabang baris + cabang tujuan work-order (utk tampilan Kantor & kirim)
+        branch_id: productions.branchId,
+        cabang: cabangProd.nama,
+        tujuan_branch_id: productions.tujuanBranchId,
+        tujuan_cabang: tujuanProd.nama,
         // total dana EFEKTIF faktur ini: cair + tambahan − kembali (sama di tiap baris)
         dana_cair: sql<number>`COALESCE((SELECT SUM(CASE WHEN fd.tipe = 'kembali' THEN -fd.nominal ELSE fd.nominal END)::float8 FROM faktur_dana fd WHERE fd.faktur_id = ${productions.fakturId}), 0)`,
       };
@@ -930,10 +1066,12 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
               .leftJoin(pembuat, eq(productions.userId, pembuat.id))
               .leftJoin(pengubah, eq(productions.updatedBy, pengubah.id))
               .leftJoin(pekerja, eq(productions.workerId, pekerja.id))
+              .leftJoin(cabangProd, eq(productions.branchId, cabangProd.id))
+              .leftJoin(tujuanProd, eq(productions.tujuanBranchId, tujuanProd.id))
               .where(
                 and(
                   eq(productions.companyId, auth.company_id!),
-                  eq(productions.branchId, branchId),
+                  ...(branchId ? [eq(productions.branchId, branchId)] : []),
                   eq(productions.tipe, tipe),
                   isNull(productions.deletedAt),
                   inArray(keyExpr, keys),

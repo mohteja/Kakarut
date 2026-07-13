@@ -627,6 +627,11 @@ export const productions = pgTable(
     branchId: uuid("branch_id")
       .notNull()
       .references(() => branches.id),
+    /**
+     * Cabang tujuan work-order Central Kitchen (store): faktur produksi hidup di
+     * CK lalu dikirim ke sini. null = bukan work-order (produksi/beli biasa).
+     */
+    tujuanBranchId: uuid("tujuan_branch_id").references(() => branches.id),
     ingredientId: uuid("ingredient_id")
       .notNull()
       .references(() => ingredients.id),
