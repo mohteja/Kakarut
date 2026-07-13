@@ -196,6 +196,62 @@ export const stokRoutes = new Hono<AppEnv>()
     return c.json({ ok: true, jumlah: rows.length, session_id: sessionId, ringkasan }, 201);
   })
   /**
+   * Stok Awal (saldo pembuka): mencatat stok yang SUDAH ADA sebelum memakai
+   * aplikasi. Ditulis sebagai baris opname langsung DISETUJUI (tanpa selisih /
+   * tanpa persetujuan) sehingga menjadi baseline saldo seketika via
+   * hitungSaldoCabang — menetapkan (bukan menambah) saldo bahan. Owner/admin.
+   */
+  .post("/awal", requireRole("owner", "admin"), zValidator("json", OpnameBody), async (c) => {
+    const auth = c.get("auth");
+    const body = c.req.valid("json");
+    const branchId = body.branch_id
+      ? await pastikanCabang(body.branch_id, auth.company_id!)
+      : await resolveBranchId(c);
+
+    // Gabungkan duplikat (entri terakhir menang)
+    const qtyByIngredient = new Map<string, number>();
+    for (const item of body.items) qtyByIngredient.set(item.ingredient_id, item.qty);
+
+    const ids = [...qtyByIngredient.keys()];
+    const valid = await db
+      .select({ id: ingredients.id })
+      .from(ingredients)
+      .where(
+        and(
+          eq(ingredients.companyId, auth.company_id!),
+          eq(ingredients.trackStok, true),
+          inArray(ingredients.id, ids),
+        ),
+      );
+    if (valid.length !== ids.length) {
+      throw new HTTPException(400, {
+        message: "Ada bahan yang tidak valid atau stoknya tidak dilacak",
+      });
+    }
+
+    const [company] = await db
+      .select({ timezone: companies.timezone })
+      .from(companies)
+      .where(eq(companies.id, auth.company_id!));
+    const today = tanggalDi(company?.timezone ?? "Asia/Jakarta");
+    // Baris baseline: systemQty/selisih/klarifikasi DIBIARKAN null → bukan
+    // penyesuaian; penyesuaian_status 'disetujui' → langsung efektif. sessionId
+    // sengaja null agar TIDAK muncul di Riwayat Opname (bukan sesi hitung fisik;
+    // tetap terekam di kartu stok bahan).
+    const values = [...qtyByIngredient].map(([ingredientId, qty]) => ({
+      companyId: auth.company_id!,
+      branchId,
+      ingredientId,
+      qty,
+      opnameDate: today,
+      catatan: body.catatan?.trim() || "Stok awal",
+      penyesuaianStatus: "disetujui" as const,
+      userId: auth.sub,
+    }));
+    const rows = await db.insert(stockOpnames).values(values).returning();
+    return c.json({ ok: true, jumlah: rows.length }, 201);
+  })
+  /**
    * Daftar penyesuaian stok: baris opname dengan selisih ≠ 0 yang perlu
    * diklarifikasi karyawan (waste vs koreksi pencatatan).
    */

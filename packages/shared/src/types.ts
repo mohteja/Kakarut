@@ -81,6 +81,13 @@ export interface KomponenDto {
   is_complement: boolean;
 }
 
+/** Kategori menu (master data). */
+export interface KategoriDto {
+  id: string;
+  nama: string;
+  sort_order: number;
+}
+
 export interface MenuDto {
   id: string;
   nama: string;
