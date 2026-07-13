@@ -1816,6 +1816,12 @@ cek "faktur beli TIDAK di store (dibukukan di CK)" "V == 0" \
 cek "riwayat: log faktur beli 'Permintaan tambah stok' (di CK)" "V == 1" \
   "$(api "$OWNER" GET "/pembelian/log/$WO_BELI" | jq '([.rows[] | select(.aksi=="Permintaan tambah stok")] | length > 0) | if . then 1 else 0 end')"
 
+# Data Permintaan Stok: produksi + beli SATU submit tergabung sbg 1 entri (rencana_id)
+cek "permintaan: 1 entri menggabung produksi+beli (WO)" "V == 1" \
+  "$(api "$OWNER" GET /rekomendasi/permintaan | jq --arg p "$WO_FID" --arg b "$WO_BELI" '[.[] | select(.produksi.faktur_id==$p and .beli.faktur_id==$b)] | length | if . == 1 then 1 else 0 end')"
+cek "permintaan: bagian rencana + tujuan store terisi" "V == 1" \
+  "$(api "$OWNER" GET /rekomendasi/permintaan | jq --arg p "$WO_FID" '[.[] | select(.produksi.faktur_id==$p)][0] | (.produksi.status=="rencana" and .beli.status=="rencana" and .tujuan_cabang!=null) | if . then 1 else 0 end')"
+
 # tim@CK mulai dikerjakan (seluruh faktur) → self-assign pelaksana
 api "$TCK58" POST "/produksi/tahap/$WO_FID" '{"ke":"dikerjakan"}' > /dev/null
 cek "tim CK mulai dikerjakan → pelaksana = dirinya" "V == 1" \

@@ -642,6 +642,13 @@ export const productions = pgTable(
     totalHarga: numeric("total_harga", { precision: 14, scale: 2, mode: "number" }),
     /** pengelompokan baris satu faktur penerimaan */
     fakturId: uuid("faktur_id"),
+    /**
+     * Penanda satu "Permintaan Tambah Stok" (Tambah Stok dari Menu): faktur
+     * produksi + beli yang lahir dari SATU submit berbagi rencana_id yang sama,
+     * agar bisa dikelompokkan sebagai satu permintaan di "Data Permintaan Stok".
+     * null = bukan dari rencana menu.
+     */
+    rencanaId: uuid("rencana_id"),
     /** nomor faktur/nota dari supplier (opsional) */
     noFaktur: text("no_faktur"),
     supplierId: uuid("supplier_id").references(() => suppliers.id),

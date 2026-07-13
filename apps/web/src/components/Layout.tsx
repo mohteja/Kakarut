@@ -301,6 +301,12 @@ export function Layout() {
                   )}
                   {penuh && (
                     <>
+                      <NavLink to="/stok/tambah-dari-menu" className={linkClass}>
+                        ➕ Tambah Stok dari Menu
+                      </NavLink>
+                      <NavLink to="/permintaan-stok" className={linkClass}>
+                        📋 Data Permintaan Stok
+                      </NavLink>
                       <NavLink to="/laporan" className={linkClass}>
                         📊 Laporan
                       </NavLink>

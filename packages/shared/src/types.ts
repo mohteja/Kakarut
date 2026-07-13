@@ -186,6 +186,33 @@ export interface RencanaFakturResult {
   beli: { faktur_id: string; jumlah_baris: number } | null;
 }
 
+/** Satu bagian (Produksi / Beli) dari sebuah permintaan tambah stok. */
+export interface PermintaanStokBagian {
+  faktur_id: string;
+  jumlah_baris: number;
+  /** status "paling awal" di antara baris faktur (tahap terkini) */
+  status: KonfirmasiStatus;
+  total: number;
+}
+
+/**
+ * Satu permintaan "Tambah Stok dari Menu": gabungan faktur Produksi + Beli
+ * yang lahir dari satu submit (dikelompokkan lewat productions.rencana_id).
+ */
+export interface PermintaanStokRow {
+  rencana_id: string;
+  /** ISO timestamp pembuatan permintaan */
+  waktu: string;
+  /** ringkasan menu/porsi ("50× BASOAC, 30× PYO") dari catatan faktur */
+  catatan: string | null;
+  /** cabang tujuan (store yang butuh stok); null bila hanya beli */
+  tujuan_cabang: string | null;
+  /** nama pembuat permintaan */
+  pembuat: string | null;
+  produksi: PermintaanStokBagian | null;
+  beli: PermintaanStokBagian | null;
+}
+
 /**
  * Status pipeline stok masuk: rencana (RAB) → dikerjakan → menunggu →
  * dikonfirmasi (masuk stok). 'ditolak' khusus jalur beli (kiriman ditolak

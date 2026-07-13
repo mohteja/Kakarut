@@ -270,6 +270,9 @@ export async function buatFakturDariRencana(
   // Produksi punya tujuan = store (dikirim); beli dibukukan di CK tanpa tujuan
   // (disimpan di CK — CK membeli & menyimpan stok bahan).
   const srcBranchId = workOrder ? ck!.id : params.branchId;
+  // Satu permintaan (submit) = satu rencana_id, dibagi faktur produksi & beli
+  // agar tergabung sebagai satu entri di "Data Permintaan Stok".
+  const rencanaId = randomUUID();
   const barisFaktur = (
     rows: RencanaBahanRow[],
     tipe: "produksi" | "beli",
@@ -284,6 +287,7 @@ export async function buatFakturDariRencana(
       tipe,
       totalHarga: b.estimasi_biaya ?? 0,
       fakturId,
+      rencanaId,
       noFaktur: null,
       // produksi: supplier hanya sebagai pelaksana alternatif (tanpa karyawan);
       // beli: pemasok barang dari field TERPISAH — supplier pelaksana produksi

@@ -21,7 +21,7 @@ import {
 } from "../../components/ui";
 import { CabangDataBar } from "../../components/CabangDataBar";
 import { useAuth } from "../../context/AuthContext";
-import { useBranch, useCabangData } from "../../context/BranchContext";
+import { useCabangData } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import {
   formatAngka,
@@ -32,10 +32,8 @@ import {
 
 export function StokPage() {
   const { auth } = useAuth();
-  const { divisi } = useBranch();
   // Stok bersifat fisik per cabang — dari Kantor pilih cabang datanya.
   const { query: branchQuery } = useCabangData();
-  const isManajemen = auth?.user.role === "owner" || auth?.user.role === "admin";
   // tim hanya CEK stok — opname/penyesuaian bukan tugasnya
   const isTim = auth?.user.role === "tim";
   // Dua tampilan: stok BAHAN (baris per bahan baku) & stok MENU (sisa porsi
@@ -124,11 +122,6 @@ export function StokPage() {
                 📋 Stok Opname
               </Link>
             </div>
-          ) : isManajemen && divisi !== "store" ? (
-            // perencanaan pengadaan = urusan Kantor/CK, bukan divisi store
-            <Link to="/stok/tambah-dari-menu" className={btnPrimary}>
-              ➕ Tambah Stok dari Menu
-            </Link>
           ) : undefined
         }
       >
