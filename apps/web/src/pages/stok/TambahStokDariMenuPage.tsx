@@ -232,6 +232,7 @@ export function TambahStokDariMenuPage() {
       queryClient.invalidateQueries({ queryKey: ["/produksi"] });
       queryClient.invalidateQueries({ queryKey: ["/pembelian"] });
       queryClient.invalidateQueries({ queryKey: ["rekomendasi"] });
+      queryClient.invalidateQueries({ queryKey: ["permintaan-stok"] });
     },
   });
 
