@@ -19,6 +19,7 @@ import {
   suppliers,
   users,
 } from "../../db/schema";
+import { catatKonsumsiProduksi, type BarisProduksiSelesai } from "./konsumsi";
 import { AKSI_TAHAP_LOG, catatLogFaktur, rpLog } from "./log";
 import {
   pastikanCabang,
@@ -539,6 +540,16 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
               userId: auth.sub,
             });
           }
+          // Baris PRODUKSI yang baru SELESAI dikerjakan pada transisi ini
+          // (melewati 'menunggu') → bahan mentah resep dikonsumsi dari stok
+          // cabang PELAKSANA (branch snapshot, sebelum pindah/kirim). Pada
+          // split, id = baris BARU yang maju (baris sisa mengonsumsi sendiri
+          // saat gilirannya maju nanti).
+          const selesaiProduksi: BarisProduksiSelesai[] = [];
+          const selesaiTahapIni = (b: (typeof baris)[number]) =>
+            b.tipe === "produksi" &&
+            URUTAN_TAHAP[b.status as keyof typeof URUTAN_TAHAP] < URUTAN_TAHAP.menunggu &&
+            target >= URUTAN_TAHAP.menunggu;
           for (const item of items) {
             const b = byId.get(item.id)!;
             // WHERE menuntut status persis seperti saat dibaca: bila berubah
@@ -568,6 +579,14 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
                   message: "Status faktur berubah — muat ulang halaman lalu coba lagi",
                 });
               }
+              if (selesaiTahapIni(b)) {
+                selesaiProduksi.push({
+                  id: b.id,
+                  branchId: b.branchId,
+                  ingredientId: b.ingredientId,
+                  qty: item.qty,
+                });
+              }
             } else {
               // Split: bagian yang maju jadi baris BARU; baris asli menyimpan
               // sisa qty di tahap lama dengan prorata RAB-nya. Bagian yang maju
@@ -594,7 +613,9 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
                   message: "Status faktur berubah — muat ulang halaman lalu coba lagi",
                 });
               }
-              await tx.insert(productions).values({
+              const [barisMaju] = await tx
+                .insert(productions)
+                .values({
                 companyId: b.companyId,
                 branchId: tujuanBranch ?? b.branchId,
                 ingredientId: b.ingredientId,
@@ -615,9 +636,19 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
                 workerId: b.workerId ?? (selfAssign ? auth.sub : null),
                 prodDate: b.prodDate,
                 ...naik,
-              });
+              })
+                .returning({ id: productions.id });
+              if (selesaiTahapIni(b)) {
+                selesaiProduksi.push({
+                  id: barisMaju.id,
+                  branchId: b.branchId,
+                  ingredientId: b.ingredientId,
+                  qty: item.qty,
+                });
+              }
             }
           }
+          await catatKonsumsiProduksi(tx, auth.company_id!, selesaiProduksi);
           if (realisasi != null) {
             await catatRealisasiDana(tx, {
               companyId: auth.company_id!,
@@ -655,19 +686,31 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
       }
       const dari = TAHAP_SEBELUM[ke];
 
-      const rows = await db
-        .update(productions)
-        .set({
-          status: ke,
-          updatedBy: auth.sub,
-          updatedAt: new Date(),
-          // work-order CK: pelaksana yang mulai mengerjakan menugaskan dirinya
-          ...(tipe === "produksi" && ke === "dikerjakan"
-            ? { workerId: sql`COALESCE(${productions.workerId}, ${auth.sub}::uuid)` }
-            : {}),
-        })
-        .where(and(...conds, eq(productions.status, dari)))
-        .returning({ id: productions.id, branchId: productions.branchId });
+      const rows = await db.transaction(async (tx) => {
+        const diperbarui = await tx
+          .update(productions)
+          .set({
+            status: ke,
+            updatedBy: auth.sub,
+            updatedAt: new Date(),
+            // work-order CK: pelaksana yang mulai mengerjakan menugaskan dirinya
+            ...(tipe === "produksi" && ke === "dikerjakan"
+              ? { workerId: sql`COALESCE(${productions.workerId}, ${auth.sub}::uuid)` }
+              : {}),
+          })
+          .where(and(...conds, eq(productions.status, dari)))
+          .returning({
+            id: productions.id,
+            branchId: productions.branchId,
+            ingredientId: productions.ingredientId,
+            qty: productions.qty,
+          });
+        // dikerjakan → menunggu = produksi SELESAI → konsumsi bahan mentah resep
+        if (tipe === "produksi" && ke === "menunggu") {
+          await catatKonsumsiProduksi(tx, auth.company_id!, diperbarui);
+        }
+        return diperbarui;
+      });
 
       if (rows.length === 0) {
         const [ada] = await db
@@ -969,22 +1012,32 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         .where(eq(companies.id, auth.company_id!));
 
       const qty = body.batch ? ing.isi : body.qty!;
-      const [row] = await db
-        .insert(productions)
-        .values({
-          companyId: auth.company_id!,
-          branchId,
-          ingredientId: ing.id,
-          qty,
-          tipe,
-          totalHarga:
-            tipe === "beli" ? (body.total_harga ?? hargaDefault(qty, ing)) : null,
-          isBatch: body.batch,
-          catatan: body.catatan ?? null,
-          userId: auth.sub,
-          prodDate: tanggalDi(company?.timezone ?? "Asia/Jakarta"),
-        })
-        .returning();
+      const row = await db.transaction(async (tx) => {
+        const [baru] = await tx
+          .insert(productions)
+          .values({
+            companyId: auth.company_id!,
+            branchId,
+            ingredientId: ing.id,
+            qty,
+            tipe,
+            totalHarga:
+              tipe === "beli" ? (body.total_harga ?? hargaDefault(qty, ing)) : null,
+            isBatch: body.batch,
+            catatan: body.catatan ?? null,
+            userId: auth.sub,
+            prodDate: tanggalDi(company?.timezone ?? "Asia/Jakarta"),
+          })
+          .returning();
+        // baris lahir langsung 'dikonfirmasi' (tanpa tahap) → produksi selesai
+        // seketika → konsumsi bahan mentah resep di cabang ini
+        if (tipe === "produksi") {
+          await catatKonsumsiProduksi(tx, auth.company_id!, [
+            { id: baru.id, branchId, ingredientId: ing.id, qty },
+          ]);
+        }
+        return baru;
+      });
       return c.json({ ...row, bahan: ing.nama }, 201);
     })
     /**

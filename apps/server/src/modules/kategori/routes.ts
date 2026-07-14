@@ -12,6 +12,12 @@ const KategoriBody = z.object({
   sort_order: z.number().int().default(0),
 });
 
+// PATCH parsial tanpa .default() — lihat catatan BahanPatchBody (zod v4).
+const KategoriPatchBody = z.object({
+  nama: z.string().trim().min(1).optional(),
+  sort_order: z.number().int().optional(),
+});
+
 export const kategoriRoutes = new Hono<AppEnv>()
   .get("/", async (c) => {
     const auth = c.get("auth");
@@ -42,7 +48,7 @@ export const kategoriRoutes = new Hono<AppEnv>()
   .patch(
     "/:id",
     requireRole("owner", "admin"),
-    zValidator("json", KategoriBody.partial()),
+    zValidator("json", KategoriPatchBody),
     async (c) => {
       const auth = c.get("auth");
       const body = c.req.valid("json");

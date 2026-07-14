@@ -1,11 +1,12 @@
 import { zValidator } from "@hono/zod-validator";
 import { and, asc, eq, inArray } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import { hargaPerUnit, type BahanDto } from "@kakarut/shared";
+import { hargaPerUnit, type BahanDto, type BahanResepRow } from "@kakarut/shared";
 import { db } from "../../db/client";
-import { ingredients, menuComponents, menus } from "../../db/schema";
+import { ingredientComponents, ingredients, menuComponents, menus } from "../../db/schema";
 import { requireRole, type AppEnv } from "../../middleware/auth";
 
 const BahanBody = z.object({
@@ -26,6 +27,36 @@ const BahanBody = z.object({
   is_complement: z.boolean().default(false),
   /** boleh dibeli eceran per pcs; false = pembulatan per kemasan `isi` (jalur beli) */
   boleh_eceran: z.boolean().default(false),
+  /** minimal belanja (MOQ) saat belanja otomatis; 0 = tanpa minimum */
+  min_beli: z.number().nonnegative().default(0),
+});
+
+/**
+ * Body PUT parsial TANPA .default(): di zod v4, .partial() atas field
+ * ber-default MENGISI default untuk key yang absen — PUT parsial diam-diam
+ * me-reset kolom (mis. satuan kembali "pcs"). Semua field opsional murni.
+ */
+const BahanPatchBody = z.object({
+  slug: z.string().trim().min(1).optional(),
+  nama: z.string().trim().min(1).optional(),
+  harga_beli: z.number().nonnegative().optional(),
+  isi: z.number().positive().optional(),
+  satuan: z.string().trim().min(1).max(20).optional(),
+  track_stok: z.boolean().optional(),
+  stok_minimum: z.number().nonnegative().optional(),
+  kategori: z.enum(["baso", "minuman", "lain"]).optional(),
+  pengadaan: z.enum(["produksi", "beli"]).optional(),
+  catatan: z.string().nullish(),
+  is_packaging: z.boolean().optional(),
+  is_complement: z.boolean().optional(),
+  boleh_eceran: z.boolean().optional(),
+  min_beli: z.number().nonnegative().optional(),
+});
+
+const ResepBody = z.object({
+  komponen: z
+    .array(z.object({ ingredient_id: z.string().uuid(), qty: z.number().positive() }))
+    .default([]),
 });
 
 function toDto(row: typeof ingredients.$inferSelect): BahanDto {
@@ -45,6 +76,7 @@ function toDto(row: typeof ingredients.$inferSelect): BahanDto {
     is_packaging: row.isPackaging,
     is_complement: row.isComplement,
     boleh_eceran: row.bolehEceran,
+    min_beli: row.minBeli,
     is_active: row.isActive,
   };
 }
@@ -90,6 +122,7 @@ export const bahanRoutes = new Hono<AppEnv>()
         isPackaging: body.is_packaging,
         isComplement: body.is_complement,
         bolehEceran: body.boleh_eceran,
+        minBeli: body.min_beli,
       })
       .returning();
     return c.json(toDto(row), 201);
@@ -97,7 +130,7 @@ export const bahanRoutes = new Hono<AppEnv>()
   .put(
     "/:id",
     requireRole("owner", "admin"),
-    zValidator("json", BahanBody.partial()),
+    zValidator("json", BahanPatchBody),
     async (c) => {
       const auth = c.get("auth");
       const body = c.req.valid("json");
@@ -116,6 +149,7 @@ export const bahanRoutes = new Hono<AppEnv>()
           ...(body.is_packaging !== undefined && { isPackaging: body.is_packaging }),
           ...(body.is_complement !== undefined && { isComplement: body.is_complement }),
           ...(body.boleh_eceran !== undefined && { bolehEceran: body.boleh_eceran }),
+          ...(body.min_beli !== undefined && { minBeli: body.min_beli }),
           updatedAt: new Date(),
         })
         .where(
@@ -126,7 +160,116 @@ export const bahanRoutes = new Hono<AppEnv>()
         )
         .returning();
       if (!row) throw new HTTPException(404, { message: "Bahan tidak ditemukan" });
+      // pindah jalur ke "beli" → resep produksinya tak relevan lagi, bersihkan
+      if (body.pengadaan === "beli") {
+        await db
+          .delete(ingredientComponents)
+          .where(eq(ingredientComponents.ingredientId, row.id));
+      }
       return c.json(toDto(row));
+    },
+  )
+  /**
+   * RESEP PRODUKSI (BOM) bahan jadi: kebutuhan bahan mentah per 1 batch (isi).
+   * GET terbuka utk semua peran (dipakai tampilan); PUT owner/admin.
+   */
+  .get("/:id/resep", async (c) => {
+    const auth = c.get("auth");
+    const id = c.req.param("id");
+    const [induk] = await db
+      .select({ id: ingredients.id })
+      .from(ingredients)
+      .where(and(eq(ingredients.id, id), eq(ingredients.companyId, auth.company_id!)));
+    if (!induk) throw new HTTPException(404, { message: "Bahan tidak ditemukan" });
+    const input = alias(ingredients, "input_bahan");
+    const rows = await db
+      .select({
+        ingredientId: ingredientComponents.inputIngredientId,
+        nama: input.nama,
+        satuan: input.satuan,
+        qty: ingredientComponents.qty,
+        hargaBeli: input.hargaBeli,
+        isi: input.isi,
+        trackStok: input.trackStok,
+      })
+      .from(ingredientComponents)
+      .innerJoin(input, eq(input.id, ingredientComponents.inputIngredientId))
+      .where(eq(ingredientComponents.ingredientId, id))
+      .orderBy(asc(input.nama));
+    const resep: BahanResepRow[] = rows.map((r) => ({
+      ingredient_id: r.ingredientId,
+      nama: r.nama,
+      satuan: r.satuan,
+      qty: r.qty,
+      harga_per_unit: hargaPerUnit(r.hargaBeli, r.isi),
+      track_stok: r.trackStok,
+    }));
+    return c.json(resep);
+  })
+  .put(
+    "/:id/resep",
+    requireRole("owner", "admin"),
+    zValidator("json", ResepBody),
+    async (c) => {
+      const auth = c.get("auth");
+      const id = c.req.param("id");
+      const body = c.req.valid("json");
+      const [induk] = await db
+        .select({ id: ingredients.id, pengadaan: ingredients.pengadaan })
+        .from(ingredients)
+        .where(and(eq(ingredients.id, id), eq(ingredients.companyId, auth.company_id!)));
+      if (!induk) throw new HTTPException(404, { message: "Bahan tidak ditemukan" });
+      if (induk.pengadaan !== "produksi") {
+        throw new HTTPException(400, {
+          message: "Resep hanya untuk bahan berjenis produksi",
+        });
+      }
+      // gabungkan duplikat (qty dijumlah), tolak referensi diri sendiri
+      const qtyByInput = new Map<string, number>();
+      for (const k of body.komponen) {
+        if (k.ingredient_id === id) {
+          throw new HTTPException(400, { message: "Bahan tidak boleh memakai dirinya sendiri" });
+        }
+        qtyByInput.set(k.ingredient_id, (qtyByInput.get(k.ingredient_id) ?? 0) + k.qty);
+      }
+      const inputIds = [...qtyByInput.keys()];
+      if (inputIds.length > 0) {
+        // bahan mentah harus milik perusahaan, aktif, dan berjenis BELI —
+        // resep berlapis (produksi dari produksi) belum didukung agar
+        // ekspansi belanja & konsumsi tetap satu tingkat.
+        const valid = await db
+          .select({ id: ingredients.id, pengadaan: ingredients.pengadaan, nama: ingredients.nama })
+          .from(ingredients)
+          .where(
+            and(
+              eq(ingredients.companyId, auth.company_id!),
+              eq(ingredients.isActive, true),
+              inArray(ingredients.id, inputIds),
+            ),
+          );
+        if (valid.length !== inputIds.length) {
+          throw new HTTPException(400, { message: "Ada bahan mentah yang tidak valid" });
+        }
+        const bukanBeli = valid.filter((v) => v.pengadaan !== "beli");
+        if (bukanBeli.length > 0) {
+          throw new HTTPException(400, {
+            message: `Bahan mentah resep harus berjenis beli: ${bukanBeli.map((v) => v.nama).join(", ")}`,
+          });
+        }
+      }
+      await db.transaction(async (tx) => {
+        await tx.delete(ingredientComponents).where(eq(ingredientComponents.ingredientId, id));
+        if (inputIds.length > 0) {
+          await tx.insert(ingredientComponents).values(
+            [...qtyByInput].map(([inputIngredientId, qty]) => ({
+              ingredientId: id,
+              inputIngredientId,
+              qty,
+            })),
+          );
+        }
+      });
+      return c.json({ ok: true, jumlah: inputIds.length });
     },
   )
   .delete("/:id", requireRole("owner", "admin"), async (c) => {
@@ -142,6 +285,20 @@ export const bahanRoutes = new Hono<AppEnv>()
     if (used.length > 0) {
       throw new HTTPException(409, {
         message: `Bahan masih dipakai menu aktif: ${used.map((u) => u.nama).join(", ")}`,
+      });
+    }
+    // Blokir bila masih dipakai resep produksi bahan lain yang aktif
+    const dipakaiResep = await db
+      .select({ nama: ingredients.nama })
+      .from(ingredientComponents)
+      .innerJoin(ingredients, eq(ingredientComponents.ingredientId, ingredients.id))
+      .where(
+        and(eq(ingredientComponents.inputIngredientId, id), eq(ingredients.isActive, true)),
+      )
+      .limit(5);
+    if (dipakaiResep.length > 0) {
+      throw new HTTPException(409, {
+        message: `Bahan masih dipakai resep produksi: ${dipakaiResep.map((u) => u.nama).join(", ")}`,
       });
     }
     const [row] = await db

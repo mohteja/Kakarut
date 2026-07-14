@@ -1900,6 +1900,8 @@ cek "kategori baru muncul di daftar" "V == 1" \
   "$(api "$OWNER" GET /kategori | jq --arg id "$KAT_ID" '[.[] | select(.id==$id)] | length')"
 cek "PATCH kategori mengubah nama" "V == 1" \
   "$(api "$OWNER" PATCH "/kategori/$KAT_ID" '{"nama":"Kategori Uji ZZ2"}' | jq '.nama=="Kategori Uji ZZ2" | if . then 1 else 0 end')"
+cek "PATCH parsial tak me-reset sort_order (tetap 9)" "V == 9" \
+  "$(api "$OWNER" GET /kategori | jq --arg id "$KAT_ID" '[.[] | select(.id==$id)][0].sort_order')"
 cek "kategori duplikat ditolak (409)" "V == 409" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/kategori" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"nama":"Kategori Uji ZZ2"}')"
 cek "POST kategori oleh KASIR ditolak (403)" "V == 403" \
@@ -1912,6 +1914,82 @@ cek "kategori terhapus hilang dari daftar" "V == 0" \
 PBA_KAT=$(api "$OWNER" GET /menu | jq -r --arg id "$PBA_ID" '[.[] | select(.id==$id)][0].category_id')
 cek "DELETE kategori yang dipakai menu ditolak (409)" "V == 409" \
   "$(status_code "$OWNER" DELETE "/kategori/$PBA_KAT")"
+
+echo "== 66. Resep produksi (BOM): belanja bahan produksi + konsumsi otomatis =="
+# bahan mentah (beli, dilacak) + bahan jadi (produksi) dengan resep per 1 batch
+DAG66=$(api "$OWNER" POST /bahan '{"nama":"daging uji66","harga_beli":90000,"isi":1000,"satuan":"gr","pengadaan":"beli","kategori":"lain"}' | jq -r .id)
+TEP66=$(api "$OWNER" POST /bahan '{"nama":"tepung uji66","harga_beli":10000,"isi":500,"satuan":"gr","pengadaan":"beli","kategori":"lain"}' | jq -r .id)
+BASO66=$(api "$OWNER" POST /bahan '{"nama":"baso uji66","harga_beli":50000,"isi":100,"satuan":"butir","pengadaan":"produksi","kategori":"baso"}' | jq -r .id)
+cek "resep utk bahan beli ditolak (400)" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/bahan/$DAG66/resep" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"komponen\":[{\"ingredient_id\":\"$TEP66\",\"qty\":1}]}")"
+cek "resep dgn bahan mentah jenis produksi ditolak (400)" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/bahan/$BASO66/resep" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"komponen\":[{\"ingredient_id\":\"$BASO66\",\"qty\":1}]}")"
+api "$OWNER" PUT "/bahan/$BASO66/resep" "{\"komponen\":[{\"ingredient_id\":\"$DAG66\",\"qty\":2000},{\"ingredient_id\":\"$TEP66\",\"qty\":300}]}" > /dev/null
+cek "GET resep memuat 2 bahan mentah" "V == 2" "$(api "$OWNER" GET "/bahan/$BASO66/resep" | jq 'length')"
+cek "hapus bahan yang dipakai resep ditolak (409)" "V == 409" \
+  "$(status_code "$OWNER" DELETE "/bahan/$DAG66")"
+# menu uji: 1 porsi memakai 5 butir baso66
+CAT66=$(api "$OWNER" GET /kategori | jq -r '.[0].id')
+MENU66=$(api "$OWNER" POST /menu "{\"nama\":\"Menu Uji66\",\"category_id\":\"$CAT66\",\"tipe\":\"regular\",\"mult\":2,\"harga_jual\":15000,\"komponen\":[{\"ingredient_id\":\"$BASO66\",\"qty\":5}]}" | jq -r .id)
+# preview 100 porsi utk CB46 (CK52 pelaksana): baso66 kurang 500 (5 batch),
+# bahan produksi = daging 10000 gr + tepung 1500 gr (dihitung thd stok CK)
+PV66=$(api "$OWNER" POST "/rekomendasi/menu?branch_id=$CB46_ID" "{\"items\":[{\"menu_id\":\"$MENU66\",\"porsi\":100}],\"ck_branch_id\":\"$CK52_UTAMA\"}")
+cek "preview: bahan_produksi memuat 2 bahan mentah" "V == 2" "$(echo "$PV66" | jq '.bahan_produksi | length')"
+cek "preview: kebutuhan daging 10000 gr (resep 2000 × 5 batch)" "abs(V - 10000) < 0.001" \
+  "$(echo "$PV66" | jq --arg id "$DAG66" '[.bahan_produksi[] | select(.ingredient_id==$id)][0].kebutuhan')"
+cek "preview: qty_faktur tepung 1500 (3 kemasan × 500)" "abs(V - 1500) < 0.001" \
+  "$(echo "$PV66" | jq --arg id "$TEP66" '[.bahan_produksi[] | select(.ingredient_id==$id)][0].qty_faktur')"
+# MOQ (min_beli): daging minimal belanja 12000 → qty_faktur naik ke 12000
+api "$OWNER" PUT "/bahan/$DAG66" '{"min_beli":12000}' > /dev/null
+# reorder point (stok_minimum): tepung 700 → kurang 1500+700 = 2200 → 5 kemasan (2500)
+api "$OWNER" PUT "/bahan/$TEP66" '{"stok_minimum":700}' > /dev/null
+cek "PUT parsial tak me-reset satuan bahan (tetap gr)" "V == 1" \
+  "$(api "$OWNER" GET /bahan | jq --arg id "$DAG66" '[.[] | select(.id==$id)][0].satuan == "gr" | if . then 1 else 0 end')"
+PV66B=$(api "$OWNER" POST "/rekomendasi/menu?branch_id=$CB46_ID" "{\"items\":[{\"menu_id\":\"$MENU66\",\"porsi\":100}],\"ck_branch_id\":\"$CK52_UTAMA\"}")
+cek "MOQ: qty_faktur daging dibulatkan naik ke 12000" "abs(V - 12000) < 0.001" \
+  "$(echo "$PV66B" | jq --arg id "$DAG66" '[.bahan_produksi[] | select(.ingredient_id==$id)][0].qty_faktur')"
+cek "reorder point: qty_faktur tepung 2500 (kurang 2200 → 5 kemasan)" "abs(V - 2500) < 0.001" \
+  "$(echo "$PV66B" | jq --arg id "$TEP66" '[.bahan_produksi[] | select(.ingredient_id==$id)][0].qty_faktur')"
+# permintaan → 2 faktur: produksi (work-order CK) + belanja bahan produksi (terpisah)
+WO66=$(api "$OWNER" POST /rekomendasi/menu/faktur "{\"items\":[{\"menu_id\":\"$MENU66\",\"porsi\":100}],\"tujuan_branch_id\":\"$CB46_ID\",\"ck_branch_id\":\"$CK52_UTAMA\"}")
+PF66=$(echo "$WO66" | jq -r '.produksi.faktur_id')
+BP66=$(echo "$WO66" | jq -r '.beli_produksi.faktur_id')
+cek "permintaan menghasilkan faktur belanja bahan produksi terpisah" "V == 1" \
+  "$([ -n "$BP66" ] && [ "$BP66" != "null" ] && echo 1 || echo 0)"
+cek "faktur bahan produksi: 2 bahan mentah" "V == 2" "$(echo "$WO66" | jq '.beli_produksi.jumlah_baris')"
+cek "faktur bahan produksi lahir di CK (tujuan null, rencana)" "V == 1" \
+  "$(api "$OWNER" GET "/pembelian?branch_id=$CK52_UTAMA&per_page=500" | jq --arg f "$BP66" '([.rows[] | select(.faktur_id==$f)] | (length==2) and all(.[]; .tujuan_branch_id==null and .status=="rencana")) | if . then 1 else 0 end')"
+cek "Data Permintaan Stok: bagian beli_produksi tampil (2 bahan)" "V == 2" \
+  "$(api "$OWNER" GET /rekomendasi/permintaan | jq --arg p "$PF66" '[.[] | select(.produksi.faktur_id==$p)][0].beli_produksi.jumlah_baris')"
+# stok awal bahan mentah di CK → produksi selesai → KONSUMSI OTOMATIS
+api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CK52_UTAMA\",\"items\":[{\"ingredient_id\":\"$DAG66\",\"qty\":20000},{\"ingredient_id\":\"$TEP66\",\"qty\":5000}]}" > /dev/null
+api "$OWNER" POST "/produksi/tahap/$PF66" '{"ke":"dikerjakan"}' > /dev/null
+api "$OWNER" POST "/produksi/tahap/$PF66" '{"ke":"menunggu"}' > /dev/null
+cek "konsumsi: saldo daging CK 20000 − 10000 = 10000" "abs(V - 10000) < 0.001" \
+  "$(api "$OWNER" GET "/stok?branch_id=$CK52_UTAMA" | jq --arg id "$DAG66" '[.[] | select(.ingredient_id==$id)][0].saldo')"
+cek "konsumsi: saldo tepung CK 5000 − 1500 = 3500" "abs(V - 3500) < 0.001" \
+  "$(api "$OWNER" GET "/stok?branch_id=$CK52_UTAMA" | jq --arg id "$TEP66" '[.[] | select(.ingredient_id==$id)][0].saldo')"
+cek "kartu stok daging: mutasi 'pemakaian' tercatat" "V >= 1" \
+  "$(api "$OWNER" GET "/stok/kartu/$DAG66?branch_id=$CK52_UTAMA" | jq '[.mutasi[] | select(.jenis=="pemakaian")] | length')"
+# jalur single-row (langsung dikonfirmasi): 100 butir = 1 batch → daging −2000
+api "$OWNER" POST /produksi "{\"branch_id\":\"$CK52_UTAMA\",\"ingredient_id\":\"$BASO66\",\"qty\":100}" > /dev/null
+cek "single-row produksi ikut konsumsi (saldo daging 8000)" "abs(V - 8000) < 0.001" \
+  "$(api "$OWNER" GET "/stok?branch_id=$CK52_UTAMA" | jq --arg id "$DAG66" '[.[] | select(.ingredient_id==$id)][0].saldo')"
+# permintaan kedua: stok bahan mentah CK masih cukup → TANPA faktur bahan produksi
+WO66B=$(api "$OWNER" POST /rekomendasi/menu/faktur "{\"items\":[{\"menu_id\":\"$MENU66\",\"porsi\":40}],\"tujuan_branch_id\":\"$CB46_ID\",\"ck_branch_id\":\"$CK52_UTAMA\"}")
+PF66B=$(echo "$WO66B" | jq -r '.produksi.faktur_id')
+cek "stok bahan mentah CK cukup → beli_produksi null" "V == 1" \
+  "$(echo "$WO66B" | jq '(.beli_produksi == null) | if . then 1 else 0 end')"
+# tahap sebagian (split): konsumsi hanya bagian yang selesai
+BID66=$(api "$OWNER" GET "/produksi?branch_id=$CK52_UTAMA&per_page=500" | jq -r --arg f "$PF66B" '[.rows[] | select(.faktur_id==$f)][0].id')
+api "$OWNER" POST "/produksi/tahap/$PF66B" "{\"ke\":\"dikerjakan\",\"items\":[{\"id\":\"$BID66\",\"qty\":200}]}" > /dev/null
+api "$OWNER" POST "/produksi/tahap/$PF66B" "{\"ke\":\"menunggu\",\"items\":[{\"id\":\"$BID66\",\"qty\":100}]}" > /dev/null
+cek "split: konsumsi separuh (100 butir → daging 8000−2000=6000)" "abs(V - 6000) < 0.001" \
+  "$(api "$OWNER" GET "/stok?branch_id=$CK52_UTAMA" | jq --arg id "$DAG66" '[.[] | select(.ingredient_id==$id)][0].saldo')"
+SISA66=$(api "$OWNER" GET "/produksi?branch_id=$CK52_UTAMA&per_page=500" | jq -r --arg f "$PF66B" '[.rows[] | select(.faktur_id==$f and .status=="dikerjakan")][0].id')
+api "$OWNER" POST "/produksi/tahap/$PF66B" "{\"ke\":\"menunggu\",\"items\":[{\"id\":\"$SISA66\",\"qty\":100}]}" > /dev/null
+cek "sisa split maju → konsumsi sisanya (daging 4000)" "abs(V - 4000) < 0.001" \
+  "$(api "$OWNER" GET "/stok?branch_id=$CK52_UTAMA" | jq --arg id "$DAG66" '[.[] | select(.ingredient_id==$id)][0].saldo')"
 
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="

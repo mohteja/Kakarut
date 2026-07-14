@@ -33,12 +33,13 @@ function Bagian({
   data,
   to,
 }: {
-  jalur: "produksi" | "beli";
+  jalur: "produksi" | "beli" | "beli_produksi";
   data: PermintaanStokBagian;
   to: string;
 }) {
-  const ikon = jalur === "produksi" ? "🏭" : "🛒";
-  const judul = jalur === "produksi" ? "Produksi" : "Beli";
+  const ikon = jalur === "produksi" ? "🏭" : jalur === "beli" ? "🛒" : "🧺";
+  const judul =
+    jalur === "produksi" ? "Produksi" : jalur === "beli" ? "Beli produk jadi" : "Bahan produksi";
   const label = (jalur === "produksi" ? LABEL_PRODUKSI : LABEL_BELI)[data.status];
   return (
     <Link
@@ -112,6 +113,9 @@ export function PermintaanStokPage() {
               <div className="space-y-2">
                 {r.produksi && <Bagian jalur="produksi" data={r.produksi} to="/produksi" />}
                 {r.beli && <Bagian jalur="beli" data={r.beli} to="/pembelian" />}
+                {r.beli_produksi && (
+                  <Bagian jalur="beli_produksi" data={r.beli_produksi} to="/pembelian" />
+                )}
               </div>
             </Card>
           ))}
