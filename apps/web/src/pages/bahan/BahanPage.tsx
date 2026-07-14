@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRef, useState, type FormEvent } from "react";
-import type { BahanDto, BahanResepRow } from "@kakarut/shared";
+import { useState, type FormEvent } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import type { BahanDto, SatuanDto } from "@kakarut/shared";
 import {
   Card,
   ErrorText,
@@ -19,6 +20,7 @@ import { formatAngka, formatRupiah } from "../../lib/format";
 
 interface FormState {
   id?: string;
+  kode: string;
   nama: string;
   harga_beli: string;
   isi: string;
@@ -34,30 +36,9 @@ interface FormState {
   min_beli: string;
 }
 
-/** Baris editor resep produksi (bahan mentah per 1 batch bahan jadi). */
-interface ResepDraft {
-  ingredient_id: string;
-  qty: string;
-}
-
-const kosong: FormState = {
-  nama: "",
-  harga_beli: "",
-  isi: "1",
-  satuan: "pcs",
-  kategori: "lain",
-  pengadaan: "beli",
-  track_stok: true,
-  stok_minimum: "0",
-  catatan: "",
-  is_packaging: false,
-  is_complement: false,
-  boleh_eceran: false,
-  min_beli: "0",
-};
-
 export function BahanPage() {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const { auth } = useAuth();
   // karyawan CK (tim) hanya MELIHAT master bahan — ubah/tambah tetap manajemen
   const bolehUbah = auth?.user.role === "owner" || auth?.user.role === "admin";
@@ -65,15 +46,12 @@ export function BahanPage() {
     queryKey: ["bahan"],
     queryFn: () => api<BahanDto[]>("/bahan"),
   });
+  // Master satuan → pilihan dropdown di form Ubah
+  const { data: satuanList } = useQuery({
+    queryKey: ["satuan"],
+    queryFn: () => api<SatuanDto[]>("/satuan"),
+  });
   const [form, setForm] = useState<FormState | null>(null);
-  // Resep produksi (BOM) bahan jadi yang sedang diedit — bahan mentah per 1 batch
-  const [resep, setResep] = useState<ResepDraft[]>([]);
-  // Gagal memuat resep tersimpan → jangan tampilkan editor & JANGAN PUT resep
-  // saat simpan (menimpa resep server dengan daftar kosong).
-  const [resepGagal, setResepGagal] = useState(false);
-  // id bahan yang resep-nya sedang/terakhir diminta — respons yang datang utk
-  // id lain (ganti-ganti form cepat) dibuang, bukan menimpa form aktif.
-  const resepReqRef = useRef<string | null>(null);
   const [cari, setCari] = useState("");
   const [filterJenis, setFilterJenis] = useState<"semua" | "produksi" | "beli">("semua");
   const [filterKategori, setFilterKategori] = useState<"semua" | "baso" | "minuman" | "lain">(
@@ -81,14 +59,15 @@ export function BahanPage() {
   );
 
   const simpan = useMutation({
-    mutationFn: async (f: FormState) => {
+    mutationFn: (f: FormState) => {
       const body = {
+        kode: f.kode.trim() || null,
         nama: f.nama,
         harga_beli: Number(f.harga_beli),
         isi: Number(f.isi),
         satuan: f.satuan.trim() || "pcs",
         kategori: f.kategori,
-        pengadaan: f.pengadaan,
+        // jenis pengadaan tak bisa diubah dari sini (badge read-only)
         track_stok: f.track_stok,
         stok_minimum: f.track_stok ? Number(f.stok_minimum) || 0 : 0,
         catatan: f.catatan || null,
@@ -98,48 +77,23 @@ export function BahanPage() {
         boleh_eceran: f.pengadaan === "beli" ? f.boleh_eceran : false,
         min_beli: f.pengadaan === "beli" ? Number(f.min_beli) || 0 : 0,
       };
-      const saved = f.id
-        ? await api<BahanDto>(`/bahan/${f.id}`, { method: "PUT", body })
-        : await api<BahanDto>("/bahan", { method: "POST", body });
-      // Bahan baru: sematkan id hasil POST ke form SEBELUM PUT resep — bila
-      // PUT resep gagal, "Simpan" ulang menjadi PUT (bukan POST kedua → 409).
-      if (!f.id) {
-        setForm((prev) => (prev ? { ...prev, id: saved.id } : prev));
-      }
-      // resep produksi disimpan bersama bahan (per 1 batch = isi bahan jadi);
-      // bila resep tersimpan GAGAL dimuat, lewati — jangan menimpa resep
-      // server dengan daftar kosong.
-      if (f.pengadaan === "produksi" && !resepGagal) {
-        await api(`/bahan/${saved.id}/resep`, {
-          method: "PUT",
-          body: {
-            komponen: resep
-              .filter((r) => r.ingredient_id && Number(r.qty) > 0)
-              .map((r) => ({ ingredient_id: r.ingredient_id, qty: Number(r.qty) })),
-          },
-        });
-      }
-      return saved;
+      return f.id
+        ? api<BahanDto>(`/bahan/${f.id}`, { method: "PUT", body })
+        : api<BahanDto>("/bahan", { method: "POST", body });
     },
     onSuccess: () => {
       setForm(null);
-      setResep([]);
-      setResepGagal(false);
       queryClient.invalidateQueries({ queryKey: ["bahan"] });
-      queryClient.invalidateQueries({ queryKey: ["bahan-resep"] });
       queryClient.invalidateQueries({ queryKey: ["menu"] }); // HPP berubah
       queryClient.invalidateQueries({ queryKey: ["stok"] });
     },
-    // bahan bisa saja SUDAH tersimpan meski resep gagal — segarkan daftar
-    onError: () => {
-      queryClient.invalidateQueries({ queryKey: ["bahan"] });
-    },
   });
 
-  // buka form Ubah: muat resep tersimpan (khusus bahan produksi)
-  async function bukaUbah(b: BahanDto) {
+  // buka form Ubah (resep produksi diatur di menu Resep tersendiri)
+  function bukaUbah(b: BahanDto) {
     setForm({
       id: b.id,
+      kode: b.kode ?? "",
       nama: b.nama,
       harga_beli: String(b.harga_beli),
       isi: String(b.isi),
@@ -154,29 +108,6 @@ export function BahanPage() {
       boleh_eceran: b.boleh_eceran,
       min_beli: String(b.min_beli ?? 0),
     });
-    if (b.pengadaan === "produksi") {
-      setResep([]);
-      await muatResep(b.id);
-    } else {
-      resepReqRef.current = null;
-      setResep([]);
-      setResepGagal(false);
-    }
-  }
-
-  /** Muat resep tersimpan; respons basi (form lain sudah dibuka) dibuang. */
-  async function muatResep(id: string) {
-    resepReqRef.current = id;
-    setResepGagal(false);
-    try {
-      const rows = await api<BahanResepRow[]>(`/bahan/${id}/resep`);
-      if (resepReqRef.current !== id) return;
-      setResep(rows.map((r) => ({ ingredient_id: r.ingredient_id, qty: String(r.qty) })));
-    } catch {
-      if (resepReqRef.current !== id) return;
-      setResep([]);
-      setResepGagal(true);
-    }
   }
 
   const hapus = useMutation({
@@ -213,16 +144,8 @@ export function BahanPage() {
       <PageTitle
         aksi={
           bolehUbah ? (
-            <button
-              onClick={() => {
-                resepReqRef.current = null;
-                setForm(kosong);
-                setResep([]);
-                setResepGagal(false);
-              }}
-              className={btnPrimary}
-            >
-              + Tambah Bahan
+            <button onClick={() => navigate("/bahan/baru")} className={btnPrimary}>
+              + Tambah Bahan Baku
             </button>
           ) : undefined
         }
@@ -276,6 +199,7 @@ export function BahanPage() {
         <table className="w-full">
           <thead className="border-b border-stone-200 bg-stone-50">
             <tr>
+              <th className={thClass}>Kode</th>
               <th className={thClass}>Nama</th>
               <th className={thClass}>Kategori</th>
               <th className={thClass}>Jenis</th>
@@ -289,6 +213,9 @@ export function BahanPage() {
           <tbody className="divide-y divide-stone-100">
             {tampil.map((b) => (
               <tr key={b.id} className="hover:bg-stone-50">
+                <td className={`${tdClass} whitespace-nowrap font-mono text-xs text-stone-500`}>
+                  {b.kode ?? "—"}
+                </td>
                 <td className={`${tdClass} font-medium`}>
                   {b.nama}
                   {b.is_packaging && (
@@ -341,7 +268,7 @@ export function BahanPage() {
                   {bolehUbah && (
                     <>
                       <button
-                        onClick={() => void bukaUbah(b)}
+                        onClick={() => bukaUbah(b)}
                         className="text-sm font-medium text-orange-600 hover:underline"
                       >
                         Ubah
@@ -361,7 +288,7 @@ export function BahanPage() {
             ))}
             {tampil.length === 0 && (
               <tr>
-                <td colSpan={8} className="py-8 text-center text-sm text-stone-400">
+                <td colSpan={9} className="py-8 text-center text-sm text-stone-400">
                   Tidak ada bahan yang cocok dengan filter.{" "}
                   <button
                     onClick={resetFilter}
@@ -383,14 +310,25 @@ export function BahanPage() {
       >
         {form && (
           <form onSubmit={onSubmit} className="space-y-3">
-            <div>
-              <label className="mb-1 block text-sm font-medium">Nama</label>
-              <input
-                required
-                value={form.nama}
-                onChange={(e) => setForm({ ...form, nama: e.target.value })}
-                className={inputClass}
-              />
+            <div className="grid grid-cols-[8rem_1fr] gap-3">
+              <div>
+                <label className="mb-1 block text-sm font-medium">Kode</label>
+                <input
+                  value={form.kode}
+                  onChange={(e) => setForm({ ...form, kode: e.target.value })}
+                  className={inputClass}
+                  placeholder="otomatis"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium">Nama</label>
+                <input
+                  required
+                  value={form.nama}
+                  onChange={(e) => setForm({ ...form, nama: e.target.value })}
+                  className={inputClass}
+                />
+              </div>
             </div>
             <div className="grid grid-cols-3 gap-3">
               <div>
@@ -421,18 +359,21 @@ export function BahanPage() {
               </div>
               <div>
                 <label className="mb-1 block text-sm font-medium">Satuan</label>
-                <input
+                <select
                   required
-                  list="satuan-list-bahan"
                   value={form.satuan}
                   onChange={(e) => setForm({ ...form, satuan: e.target.value })}
                   className={inputClass}
-                />
-                <datalist id="satuan-list-bahan">
-                  {["pcs", "gr", "ml", "butir", "porsi", "lembar", "ikat"].map((s) => (
-                    <option key={s} value={s} />
+                >
+                  {!satuanList?.some((s) => s.nama === form.satuan) && form.satuan && (
+                    <option value={form.satuan}>{form.satuan}</option>
+                  )}
+                  {(satuanList ?? []).map((s) => (
+                    <option key={s.id} value={s.nama}>
+                      {s.nama}
+                    </option>
                   ))}
-                </datalist>
+                </select>
               </div>
             </div>
             {Number(form.harga_beli) > 0 && Number(form.isi) > 0 && (
@@ -458,18 +399,22 @@ export function BahanPage() {
               </div>
               <div>
                 <label className="mb-1 block text-sm font-medium">Jenis pengadaan</label>
-                <select
-                  value={form.pengadaan}
-                  onChange={(e) =>
-                    setForm({ ...form, pengadaan: e.target.value as FormState["pengadaan"] })
-                  }
-                  className={inputClass}
-                >
-                  <option value="beli">Beli jadi (jalur: Beli Bahan Baku)</option>
-                  <option value="produksi">
-                    Produksi sendiri (jalur: Produksi Bahan Baku)
-                  </option>
-                </select>
+                <div className="flex items-center gap-2 rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-sm">
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                      form.pengadaan === "produksi"
+                        ? "bg-orange-100 text-orange-700"
+                        : "bg-teal-100 text-teal-700"
+                    }`}
+                  >
+                    {form.pengadaan === "produksi" ? "Produksi sendiri" : "Beli jadi"}
+                  </span>
+                  {form.pengadaan === "produksi" && (
+                    <Link to="/resep" className="text-xs text-orange-600 hover:underline">
+                      atur resep
+                    </Link>
+                  )}
+                </div>
               </div>
             </div>
             {form.pengadaan === "beli" && (
@@ -510,118 +455,19 @@ export function BahanPage() {
               </div>
             )}
             {form.pengadaan === "produksi" && (
-              <div className="rounded-lg border border-orange-200 bg-orange-50/50 p-3">
-                <div className="mb-1 text-sm font-semibold text-stone-800">
-                  🧾 Resep produksi (per 1 batch = {form.isi || "…"} {form.satuan || "unit"})
-                </div>
-                <p className="mb-2 text-xs text-stone-500">
-                  Bahan mentah yang dibutuhkan untuk memproduksi 1 batch bahan ini. Dipakai
-                  untuk <b>rencana belanja bahan produksi</b> dan <b>pemotongan stok bahan
-                  mentah otomatis</b> saat produksi selesai.
-                </p>
-                {resepGagal && (
-                  <div className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
-                    Resep tersimpan gagal dimuat — perubahan resep <b>tidak akan disimpan</b>{" "}
-                    agar resep di server tidak tertimpa.{" "}
-                    {form.id && (
-                      <button
-                        type="button"
-                        onClick={() => void muatResep(form.id!)}
-                        className="font-semibold underline"
-                      >
-                        Muat ulang
-                      </button>
-                    )}
-                  </div>
-                )}
-                <div className="space-y-2">
-                  {resep.map((r, i) => {
-                    // nilai TERPILIH selalu punya option (walau bahan berubah
-                    // jenis/nonaktif) — tanpa ini select tampak kosong padahal
-                    // state menyimpan id, dan simpan mengunci nilai tersembunyi
-                    const pilihan = semua.filter(
-                      (x) =>
-                        x.id === r.ingredient_id ||
-                        (x.pengadaan === "beli" &&
-                          x.is_active &&
-                          x.id !== form.id &&
-                          !resep.some((lain, j) => j !== i && lain.ingredient_id === x.id)),
-                    );
-                    const terpilih = semua.find((x) => x.id === r.ingredient_id);
-                    return (
-                      <div key={i} className="flex items-center gap-2">
-                        <select
-                          value={r.ingredient_id}
-                          onChange={(e) => {
-                            const salinan = [...resep];
-                            salinan[i] = { ...salinan[i], ingredient_id: e.target.value };
-                            setResep(salinan);
-                          }}
-                          className={`${inputClass} flex-1`}
-                          required
-                        >
-                          <option value="">— pilih bahan mentah —</option>
-                          {r.ingredient_id && !semua.some((x) => x.id === r.ingredient_id) && (
-                            <option value={r.ingredient_id}>(bahan nonaktif)</option>
-                          )}
-                          {pilihan.map((x) => (
-                            <option key={x.id} value={x.id}>
-                              {x.nama}
-                            </option>
-                          ))}
-                        </select>
-                        <input
-                          type="number"
-                          min="0.0001"
-                          step="any"
-                          value={r.qty}
-                          onChange={(e) => {
-                            const salinan = [...resep];
-                            salinan[i] = { ...salinan[i], qty: e.target.value };
-                            setResep(salinan);
-                          }}
-                          placeholder="qty"
-                          className="w-24 shrink-0 rounded-lg border border-stone-300 px-2 py-2 text-sm focus:border-orange-500 focus:outline-none"
-                          required
-                        />
-                        <span className="w-12 shrink-0 text-xs text-stone-500">
-                          {terpilih?.satuan ?? ""}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => setResep(resep.filter((_, j) => j !== i))}
-                          className="shrink-0 text-sm font-medium text-red-500 hover:underline"
-                          aria-label="Hapus baris resep"
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-                {!resepGagal && (
-                  <button
-                    type="button"
-                    onClick={() => setResep([...resep, { ingredient_id: "", qty: "" }])}
-                    className="mt-2 text-sm font-medium text-orange-600 hover:underline"
+              <div className="rounded-lg border border-orange-200 bg-orange-50/50 px-3 py-2 text-sm text-stone-700">
+                🧾 Resep produksi (bahan mentah per batch) kini diatur di menu{" "}
+                {form.id ? (
+                  <Link
+                    to="/resep"
+                    className="font-semibold text-orange-600 hover:underline"
                   >
-                    + Tambah bahan mentah
-                  </button>
+                    Resep
+                  </Link>
+                ) : (
+                  <b>Resep</b>
                 )}
-                {resep.some((r) => r.ingredient_id && Number(r.qty) > 0) && (
-                  <div className="mt-2 rounded bg-white px-3 py-2 text-xs text-stone-600">
-                    Estimasi biaya bahan per batch:{" "}
-                    <b>
-                      {formatRupiah(
-                        resep.reduce((a, r) => {
-                          const x = semua.find((b) => b.id === r.ingredient_id);
-                          return a + (x ? (Number(r.qty) || 0) * x.harga_per_unit : 0);
-                        }, 0),
-                      )}
-                    </b>{" "}
-                    — bandingkan dengan harga beli batch di atas.
-                  </div>
-                )}
+                {form.id ? "." : " — simpan bahan ini dulu, lalu buka menu Resep."}
               </div>
             )}
             <div>

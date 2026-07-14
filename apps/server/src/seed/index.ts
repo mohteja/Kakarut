@@ -18,6 +18,8 @@ import {
 import { env } from "../config/env";
 import { db, pool } from "../db/client";
 import { backfillKodeMenu } from "../modules/menu/service";
+import { backfillKodeBahan } from "../modules/bahan/kode";
+import { backfillUnits } from "../modules/satuan/service";
 import { backfillEmployeeCode } from "../modules/users/service";
 import {
   branches,
@@ -556,6 +558,12 @@ async function main() {
   // Kode menu otomatis untuk seluruh menu (kode = ID cepat di kasir).
   const terisiKode = await backfillKodeMenu(db);
   console.log(`Kode menu otomatis: ${terisiKode} menu.`);
+
+  // Kode bahan otomatis + master satuan bawaan (+ dari satuan bahan yang ada).
+  const terisiKodeBahan = await backfillKodeBahan(db);
+  console.log(`Kode bahan otomatis: ${terisiKodeBahan} bahan.`);
+  const unitDibuat = await backfillUnits(db);
+  console.log(`Master satuan diisi: ${unitDibuat} satuan.`);
 
   // Kode karyawan otomatis (untuk absensi via ketik/scan QR).
   const terisiKar = await backfillEmployeeCode(db);

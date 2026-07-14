@@ -169,7 +169,7 @@ export function kodeDariNama(nama: string): string {
 }
 
 /** Kode unik berikutnya dari basis + himpunan kode terpakai (mis. PBA, PBA2…). */
-function kodeUnik(base: string, dipakai: Set<string>): string {
+export function kodeUnik(base: string, dipakai: Set<string>): string {
   let kode = base;
   let n = 2;
   while (dipakai.has(kode.toUpperCase())) {
