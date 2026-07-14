@@ -1991,6 +1991,36 @@ api "$OWNER" POST "/produksi/tahap/$PF66B" "{\"ke\":\"menunggu\",\"items\":[{\"i
 cek "sisa split maju → konsumsi sisanya (daging 4000)" "abs(V - 4000) < 0.001" \
   "$(api "$OWNER" GET "/stok?branch_id=$CK52_UTAMA" | jq --arg id "$DAG66" '[.[] | select(.ingredient_id==$id)][0].saldo')"
 
+# --- Perbaikan review: guard konsistensi resep & isolasi tenant ---
+# flip pengadaan bahan yang masih jadi INPUT resep → 409 (rencana akan
+# melewatkan kebutuhannya diam-diam); bahan bebas → boleh
+cek "flip pengadaan input resep ke produksi ditolak (409)" "V == 409" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/bahan/$DAG66" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"pengadaan":"produksi"}')"
+BEBAS66=$(api "$OWNER" POST /bahan '{"nama":"bahan bebas uji66","harga_beli":1000,"isi":10,"satuan":"pcs","pengadaan":"beli","kategori":"lain"}' | jq -r .id)
+cek "flip pengadaan bahan bebas (tanpa resep) → 200" "V == 200" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/bahan/$BEBAS66" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"pengadaan":"produksi"}')"
+# guard "masih dipakai" tak boleh jadi oracle lintas-tenant: DELETE bahan
+# milik tenant lain → 404 polos (bukan 409 yang membocorkan nama pemakainya)
+cek "DELETE bahan tenant lain → 404 (tanpa bocor nama resep)" "V == 404" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X DELETE "$BASE/api/bahan/$DAG66" -H "Authorization: Bearer $UJI")"
+# pindah dini: tujuan kirim di ke='dikerjakan' DIABAIKAN — baris tetap di
+# cabang asal (pindah dini merusak atribusi cabang konsumsi bahan resep)
+FR66=$(api "$OWNER" POST /produksi/faktur "{\"branch_id\":\"$CK52_UTAMA\",\"worker_id\":\"$U58_ID\",\"items\":[{\"ingredient_id\":\"$BASO66\",\"mode\":\"pcs\",\"jumlah\":5}]}" | jq -r .faktur_id)
+FR66_RID=$(api "$OWNER" GET "/produksi?branch_id=$CK52_UTAMA&per_page=500" | jq -r --arg f "$FR66" '[.rows[] | select(.faktur_id==$f)][0].id')
+api "$OWNER" POST "/produksi/tahap/$FR66" "{\"ke\":\"dikerjakan\",\"items\":[{\"id\":\"$FR66_RID\",\"qty\":5}],\"tujuan_branch_id\":\"$CB46_ID\"}" > /dev/null
+cek "pindah dini diabaikan: baris tetap di CK & dikerjakan" "V == 1" \
+  "$(api "$OWNER" GET "/produksi?branch_id=$CK52_UTAMA&per_page=500" | jq --arg f "$FR66" '([.rows[] | select(.faktur_id==$f)] | (length==1) and all(.[]; .status=="dikerjakan")) | if . then 1 else 0 end')"
+# ubah `isi` bahan jadi saat produksi masih berjalan → 409 (konsumsi memakai
+# isi live — drift dari RAB); setelah selesai → boleh
+cek "ubah isi bahan jadi saat produksi berjalan ditolak (409)" "V == 409" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/bahan/$BASO66" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"isi":120}')"
+api "$OWNER" POST "/produksi/tahap/$FR66" '{"ke":"menunggu"}' > /dev/null
+cek "konsumsi tetap di cabang asal walau tujuan dikirim dini (daging 3900)" "abs(V - 3900) < 0.001" \
+  "$(api "$OWNER" GET "/stok?branch_id=$CK52_UTAMA" | jq --arg id "$DAG66" '[.[] | select(.ingredient_id==$id)][0].saldo')"
+cek "ubah isi setelah produksi selesai → 200" "V == 200" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/bahan/$BASO66" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"isi":120}')"
+api "$OWNER" PUT "/bahan/$BASO66" '{"isi":100}' > /dev/null
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

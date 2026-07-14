@@ -1,12 +1,18 @@
 import { zValidator } from "@hono/zod-validator";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { hargaPerUnit, type BahanDto, type BahanResepRow } from "@kakarut/shared";
 import { db } from "../../db/client";
-import { ingredientComponents, ingredients, menuComponents, menus } from "../../db/schema";
+import {
+  ingredientComponents,
+  ingredients,
+  menuComponents,
+  menus,
+  productions,
+} from "../../db/schema";
 import { requireRole, type AppEnv } from "../../middleware/auth";
 
 const BahanBody = z.object({
@@ -134,6 +140,64 @@ export const bahanRoutes = new Hono<AppEnv>()
     async (c) => {
       const auth = c.get("auth");
       const body = c.req.valid("json");
+      const id = c.req.param("id");
+      // Kepemilikan dicek DULU (404) agar guard di bawah tak jadi oracle
+      // lintas-tenant; sekalian ambil nilai lama utk deteksi perubahan.
+      const [lama] = await db
+        .select({ isi: ingredients.isi, pengadaan: ingredients.pengadaan })
+        .from(ingredients)
+        .where(and(eq(ingredients.id, id), eq(ingredients.companyId, auth.company_id!)));
+      if (!lama) throw new HTTPException(404, { message: "Bahan tidak ditemukan" });
+      // Bahan yang masih jadi INPUT resep aktif tak boleh berubah jenis ke
+      // "produksi": input resep tervalidasi 'beli' — flip membuat rencana
+      // melewatkan kebutuhannya diam-diam padahal konsumsi tetap berjalan.
+      if (body.pengadaan === "produksi" && lama.pengadaan !== "produksi") {
+        const dipakai = await db
+          .select({ nama: ingredients.nama })
+          .from(ingredientComponents)
+          .innerJoin(ingredients, eq(ingredientComponents.ingredientId, ingredients.id))
+          .where(
+            and(
+              eq(ingredientComponents.inputIngredientId, id),
+              eq(ingredients.isActive, true),
+            ),
+          )
+          .limit(5);
+        if (dipakai.length > 0) {
+          throw new HTTPException(409, {
+            message: `Bahan masih dipakai resep produksi: ${dipakai
+              .map((d) => d.nama)
+              .join(", ")} — keluarkan dari resep dulu`,
+          });
+        }
+      }
+      // Konsumsi bahan resep memakai `isi` LIVE saat produksi selesai —
+      // mengubahnya di tengah produksi berjalan membuat konsumsi melenceng
+      // dari RAB yang sudah dihitung. Selesaikan produksinya dulu.
+      if (
+        body.isi !== undefined &&
+        Math.abs(body.isi - lama.isi) > 1e-9 &&
+        (body.pengadaan ?? lama.pengadaan) === "produksi"
+      ) {
+        const [berjalan] = await db
+          .select({ id: productions.id })
+          .from(productions)
+          .where(
+            and(
+              eq(productions.ingredientId, id),
+              eq(productions.tipe, "produksi"),
+              inArray(productions.status, ["rencana", "dikerjakan"]),
+              isNull(productions.deletedAt),
+            ),
+          )
+          .limit(1);
+        if (berjalan) {
+          throw new HTTPException(409, {
+            message:
+              "Isi per batch tidak bisa diubah saat masih ada produksi berjalan — selesaikan produksinya dulu",
+          });
+        }
+      }
       const [row] = await db
         .update(ingredients)
         .set({
@@ -258,6 +322,20 @@ export const bahanRoutes = new Hono<AppEnv>()
         }
       }
       await db.transaction(async (tx) => {
+        // Re-cek DI DALAM transaksi (kunci baris): PUT /bahan bisa flip
+        // pengadaan ke "beli" di sela validasi di atas (TOCTOU) — tanpa ini
+        // resep yatim tertulis utk bahan non-produksi. FOR UPDATE menahan
+        // flip paralel sampai transaksi ini selesai.
+        const [indukTx] = await tx
+          .select({ pengadaan: ingredients.pengadaan })
+          .from(ingredients)
+          .where(and(eq(ingredients.id, id), eq(ingredients.companyId, auth.company_id!)))
+          .for("update");
+        if (indukTx?.pengadaan !== "produksi") {
+          throw new HTTPException(409, {
+            message: "Jenis pengadaan bahan berubah — muat ulang lalu coba lagi",
+          });
+        }
         await tx.delete(ingredientComponents).where(eq(ingredientComponents.ingredientId, id));
         if (inputIds.length > 0) {
           await tx.insert(ingredientComponents).values(
@@ -275,6 +353,13 @@ export const bahanRoutes = new Hono<AppEnv>()
   .delete("/:id", requireRole("owner", "admin"), async (c) => {
     const auth = c.get("auth");
     const id = c.req.param("id");
+    // Kepemilikan dicek DULU (404): guard "masih dipakai" di bawah tanpa cek
+    // ini menjadi oracle lintas-tenant (bocor nama menu/bahan tenant lain).
+    const [milik] = await db
+      .select({ id: ingredients.id })
+      .from(ingredients)
+      .where(and(eq(ingredients.id, id), eq(ingredients.companyId, auth.company_id!)));
+    if (!milik) throw new HTTPException(404, { message: "Bahan tidak ditemukan" });
     // Blokir bila masih dipakai menu aktif
     const used = await db
       .select({ nama: menus.nama })

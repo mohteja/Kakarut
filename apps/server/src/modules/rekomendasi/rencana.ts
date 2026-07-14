@@ -216,7 +216,16 @@ export async function rencanaDariMenu(
         const e = extraById.get(inputId);
         if (e?.pengadaan !== "beli") continue; // resep tervalidasi 'beli' — defensif
         const hargaPerUnitInput = si.isi > 0 ? e.hargaBeli / si.isi : 0;
-        const kurang = kekuranganBahan(butuh + (e.stokMinimum ?? 0), si.saldo);
+        // Saldo efektif: bila produksi dilakukan di cabang tujuan sendiri,
+        // bahan yang juga dipakai LANGSUNG oleh menu sudah dialokasikan di
+        // perhitungan menu-level — saldo yang sama tak boleh dihitung dua
+        // kali (double-count → under-buy). Bisa sedikit over-buy
+        // (≤ stok_minimum) pada kasus ganda — arah yang aman.
+        const saldoEfektif =
+          pelaksanaId === branchId
+            ? Math.max(0, si.saldo - (kebutuhan.get(inputId) ?? 0))
+            : si.saldo;
+        const kurang = kekuranganBahan(butuh + (e.stokMinimum ?? 0), saldoEfektif);
         const dasarFaktur = kurang > 0 ? Math.max(kurang, e.minBeli ?? 0) : 0;
         const faktur =
           kurang > 0 ? jumlahFaktur(dasarFaktur, "beli", si.isi, e.bolehEceran ?? false) : null;

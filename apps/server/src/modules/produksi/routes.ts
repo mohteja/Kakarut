@@ -518,10 +518,16 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
           }
           tujuanStorage = tujuan_storage_id;
         }
-        const pindah = {
-          ...(tujuanBranch ? { branchId: tujuanBranch } : {}),
-          ...(tujuanStorage ? { storageLocationId: tujuanStorage } : {}),
-        };
+        // Pindah cabang hanya berlaku saat barang benar-benar dikirim
+        // (>= menunggu). Pindah dini (mis. ke 'dikerjakan') membuat konsumsi
+        // bahan resep tercatat di cabang yang salah — abaikan tujuannya.
+        const bolehPindah = target >= URUTAN_TAHAP.menunggu;
+        const pindah = bolehPindah
+          ? {
+              ...(tujuanBranch ? { branchId: tujuanBranch } : {}),
+              ...(tujuanStorage ? { storageLocationId: tujuanStorage } : {}),
+            }
+          : {};
 
         const now = new Date();
         // waktu di-set saat dikonfirmasi (bukan saat RAB) — lihat /konfirmasi.
@@ -552,11 +558,15 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
             target >= URUTAN_TAHAP.menunggu;
           for (const item of items) {
             const b = byId.get(item.id)!;
-            // WHERE menuntut status persis seperti saat dibaca: bila berubah
-            // oleh proses lain, update 0 baris → seluruh transaksi batal.
+            // WHERE menuntut status DAN qty persis seperti saat dibaca: bila
+            // berubah oleh proses lain, update 0 baris → transaksi batal.
+            // qty ikut dikunci karena split TIDAK mengubah status baris asli —
+            // tanpa ini dua request paralel sama-sama lolos (qty menggelembung
+            // + konsumsi bahan dobel).
             const kunci = and(
               eq(productions.id, b.id),
               eq(productions.status, b.status),
+              eq(productions.qty, b.qty),
               isNull(productions.deletedAt),
             );
             if (Math.abs(b.qty - item.qty) < 1e-9) {
