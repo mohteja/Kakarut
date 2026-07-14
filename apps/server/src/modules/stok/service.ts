@@ -31,7 +31,7 @@ export async function hitungSaldoCabang(
       t.nama        AS tempat,
       COALESCE(b.qty, 0) AS stok_awal,
       COALESCE(p.qty, 0) AS produksi,
-      COALESCE(u.qty, 0) AS terpakai,
+      COALESCE(u.qty, 0) + COALESCE(pc.qty, 0) AS terpakai,
       COALESCE(w.rencana, 0)    AS prod_rencana,
       COALESCE(w.dikerjakan, 0) AS prod_dikerjakan,
       COALESCE(w.menunggu, 0)   AS prod_menunggu,
@@ -61,6 +61,16 @@ export async function hitungSaldoCabang(
         AND (b.created_at IS NULL OR sc.waktu > b.created_at)
         AND EXISTS (SELECT 1 FROM sales s WHERE s.id = sc.sale_id AND s.deleted_at IS NULL)
     ) u ON TRUE
+    LEFT JOIN LATERAL (
+      -- KONSUMSI PRODUKSI: bahan mentah terpakai resep saat produksi selesai
+      SELECT SUM(pc.qty) AS qty
+      FROM production_consumptions pc
+      WHERE pc.branch_id = ${branchId} AND pc.ingredient_id = i.id
+        AND (b.created_at IS NULL OR pc.waktu > b.created_at)
+        AND EXISTS (
+          SELECT 1 FROM productions pr WHERE pr.id = pc.production_id AND pr.deleted_at IS NULL
+        )
+    ) pc ON TRUE
     LEFT JOIN LATERAL (
       -- tempat penyimpanan dari entri masuk terkonfirmasi terakhir
       SELECT sl.id, sl.nama
@@ -192,6 +202,13 @@ export async function kartuStok(params: {
         WHERE sc.branch_id = ${branchId} AND sc.ingredient_id = ${ingredientId}
           AND s.sale_date < ${dari} AND s.deleted_at IS NULL
           AND (NOT EXISTS (SELECT 1 FROM baseline) OR sc.waktu > (SELECT created_at FROM baseline))
+      ), 0)
+      + COALESCE((
+        SELECT SUM(pc.qty) FROM production_consumptions pc
+        JOIN productions pr ON pr.id = pc.production_id
+        WHERE pc.branch_id = ${branchId} AND pc.ingredient_id = ${ingredientId}
+          AND pc.tanggal < ${dari} AND pr.deleted_at IS NULL
+          AND (NOT EXISTS (SELECT 1 FROM baseline) OR pc.waktu > (SELECT created_at FROM baseline))
       ), 0) AS keluar
   `);
   const awal = awalRes.rows[0] as Record<string, unknown>;
@@ -224,6 +241,16 @@ export async function kartuStok(params: {
       WHERE sc.branch_id = ${branchId} AND sc.ingredient_id = ${ingredientId}
         AND s.deleted_at IS NULL
         AND s.sale_date >= ${dari} AND s.sale_date <= ${sampai}
+      UNION ALL
+      SELECT pc.waktu, 'pemakaian' AS jenis, pc.qty,
+             ('Untuk produksi ' || ij.nama) AS catatan,
+             NULL AS nomor, NULL AS supplier, NULL AS tempat, false AS is_batch
+      FROM production_consumptions pc
+      JOIN productions pr ON pr.id = pc.production_id
+      JOIN ingredients ij ON ij.id = pr.ingredient_id
+      WHERE pc.branch_id = ${branchId} AND pc.ingredient_id = ${ingredientId}
+        AND pr.deleted_at IS NULL
+        AND pc.tanggal >= ${dari} AND pc.tanggal <= ${sampai}
     ) m
     ORDER BY m.waktu ASC
     LIMIT ${BATAS_MUTASI + 1}
@@ -275,6 +302,12 @@ export async function kartuStok(params: {
       totalKeluar += qty;
       saldo -= qty;
       keterangan = r.nomor ? `Struk ${r.nomor}` : null;
+    } else if (jenis === "pemakaian") {
+      // bahan mentah terpakai resep produksi — mutasi KELUAR
+      keluar = qty;
+      totalKeluar += qty;
+      saldo -= qty;
+      keterangan = r.catatan ? String(r.catatan) : "Pemakaian produksi";
     } else {
       masuk = qty;
       totalMasuk += qty;

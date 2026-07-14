@@ -307,6 +307,14 @@ export const ingredients = pgTable(
      * selalu per batch).
      */
     bolehEceran: boolean("boleh_eceran").notNull().default(false),
+    /**
+     * MINIMAL BELANJA (MOQ): saat sistem membuat daftar belanja, jumlah beli
+     * dibulatkan naik minimal ke nilai ini (satuan bahan). 0 = tanpa minimum.
+     * Berbeda dengan stok_minimum (batas stok / reorder point).
+     */
+    minBeli: numeric("min_beli", { precision: 16, scale: 6, mode: "number" })
+      .notNull()
+      .default(0),
     isActive: boolean("is_active").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -315,6 +323,35 @@ export const ingredients = pgTable(
     uniqueIndex("ingredients_company_slug_uq").on(t.companyId, t.slug),
     index("ingredients_company_idx").on(t.companyId),
     check("ingredients_isi_ck", sql`${t.isi} > 0`),
+  ],
+);
+
+/**
+ * RESEP PRODUKSI (BOM) bahan jadi: bahan dengan pengadaan "produksi" dibuat
+ * dari bahan mentah (pengadaan "beli"). qty = kebutuhan bahan mentah per
+ * SATU BATCH (isi) bahan jadi. Dipakai untuk: (1) rencana belanja bahan
+ * produksi, (2) konsumsi otomatis bahan mentah saat produksi selesai.
+ * Tenancy lewat bahan induk (ingredients.company_id) — pola menu_components.
+ */
+export const ingredientComponents = pgTable(
+  "ingredient_components",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** bahan jadi (pengadaan "produksi") pemilik resep */
+    ingredientId: uuid("ingredient_id")
+      .notNull()
+      .references(() => ingredients.id, { onDelete: "cascade" }),
+    /** bahan mentah (pengadaan "beli") yang dibutuhkan */
+    inputIngredientId: uuid("input_ingredient_id")
+      .notNull()
+      .references(() => ingredients.id),
+    /** kebutuhan per 1 batch (= isi bahan jadi) */
+    qty: numeric("qty", { precision: 12, scale: 4, mode: "number" }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("ingredient_components_pair_uq").on(t.ingredientId, t.inputIngredientId),
+    check("ingredient_components_qty_ck", sql`${t.qty} > 0`),
+    check("ingredient_components_self_ck", sql`${t.ingredientId} <> ${t.inputIngredientId}`),
   ],
 );
 
@@ -649,6 +686,12 @@ export const productions = pgTable(
      * null = bukan dari rencana menu.
      */
     rencanaId: uuid("rencana_id"),
+    /**
+     * Penanda BELANJA BAHAN PRODUKSI (jalur beli): baris pembelian bahan
+     * mentah yang dibutuhkan resep produksi — dibedakan dari belanja produk
+     * langsung jadi. false = pembelian produk jadi / bukan dari resep.
+     */
+    bahanProduksi: boolean("bahan_produksi").notNull().default(false),
     /** nomor faktur/nota dari supplier (opsional) */
     noFaktur: text("no_faktur"),
     supplierId: uuid("supplier_id").references(() => suppliers.id),
@@ -678,6 +721,43 @@ export const productions = pgTable(
   (t) => [
     index("productions_branch_ing_idx").on(t.branchId, t.ingredientId, t.waktu),
     check("productions_qty_ck", sql`${t.qty} > 0`),
+  ],
+);
+
+/**
+ * KONSUMSI BAHAN MENTAH oleh produksi: saat baris produksi SELESAI dikerjakan
+ * (melewati tahap 'menunggu' / lahir 'dikonfirmasi'), bahan mentah sesuai
+ * resep bahan jadi dikurangi dari stok cabang pelaksana. Analog
+ * sale_consumptions untuk penjualan; ikut dihitung sebagai "terpakai" di
+ * hitungSaldoCabang & kartu stok.
+ */
+export const productionConsumptions = pgTable(
+  "production_consumptions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** baris productions (bahan jadi) yang memakai bahan mentah ini */
+    productionId: uuid("production_id")
+      .notNull()
+      .references(() => productions.id, { onDelete: "cascade" }),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    /** cabang pelaksana produksi (CK utk work-order) — stoknya yang berkurang */
+    branchId: uuid("branch_id")
+      .notNull()
+      .references(() => branches.id),
+    /** bahan mentah yang terpakai */
+    ingredientId: uuid("ingredient_id")
+      .notNull()
+      .references(() => ingredients.id),
+    qty: numeric("qty", { precision: 16, scale: 6, mode: "number" }).notNull(),
+    /** tanggal bisnis (timezone perusahaan) saat produksi selesai */
+    tanggal: date("tanggal").notNull(),
+    waktu: timestamp("waktu", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("production_consumptions_branch_ing_idx").on(t.branchId, t.ingredientId, t.waktu),
+    uniqueIndex("production_consumptions_row_uq").on(t.productionId, t.ingredientId),
   ],
 );
 

@@ -20,6 +20,8 @@ const RencanaBody = z.object({
       }),
     )
     .min(1),
+  /** CK pelaksana (opsional) — kekurangan bahan mentah resep dihitung di sini */
+  ck_branch_id: z.string().uuid().nullish(),
 });
 
 const RencanaFakturBody = RencanaBody.extend({
@@ -73,8 +75,14 @@ export const rekomendasiRoutes = new Hono<AppEnv>().get("/beli", async (c) => {
   // Preview rencana dari menu: target porsi per menu → kebutuhan/kurang bahan
   .post("/menu", zValidator("json", RencanaBody), async (c) => {
     const auth = c.get("auth");
+    const body = c.req.valid("json");
     const branchId = await resolveBranchId(c);
-    const preview = await rencanaDariMenu(auth.company_id!, branchId, c.req.valid("json").items);
+    const preview = await rencanaDariMenu(
+      auth.company_id!,
+      branchId,
+      body.items,
+      body.ck_branch_id,
+    );
     return c.json(preview);
   })
   // Permintaan tambah stok: terbitkan faktur produksi (work-order CK) + beli
@@ -110,6 +118,7 @@ export const rekomendasiRoutes = new Hono<AppEnv>().get("/beli", async (c) => {
         fakturId: productions.fakturId,
         ingredientId: productions.ingredientId,
         tipe: productions.tipe,
+        bahanProduksi: productions.bahanProduksi,
         status: productions.status,
         totalHarga: productions.totalHarga,
         catatan: productions.catatan,
@@ -143,8 +152,10 @@ export const rekomendasiRoutes = new Hono<AppEnv>().get("/beli", async (c) => {
     type Akum = PermintaanStokRow & {
       _rankProd: number;
       _rankBeli: number;
+      _rankBeliProd: number;
       _ingProd: Set<string>;
       _ingBeli: Set<string>;
+      _ingBeliProd: Set<string>;
     };
     const map = new Map<string, Akum>();
     for (const r of rows) {
@@ -159,10 +170,13 @@ export const rekomendasiRoutes = new Hono<AppEnv>().get("/beli", async (c) => {
           pembuat: r.pembuat,
           produksi: null,
           beli: null,
+          beli_produksi: null,
           _rankProd: Infinity,
           _rankBeli: Infinity,
+          _rankBeliProd: Infinity,
           _ingProd: new Set(),
           _ingBeli: new Set(),
+          _ingBeliProd: new Set(),
         };
         map.set(id, g);
       }
@@ -179,6 +193,17 @@ export const rekomendasiRoutes = new Hono<AppEnv>().get("/beli", async (c) => {
           g._rankProd = rank;
           g.produksi.status = st;
         }
+      } else if (r.bahanProduksi) {
+        // belanja bahan mentah utk produksi (dari resep) — bagian terpisah
+        if (!g.beli_produksi)
+          g.beli_produksi = { faktur_id: r.fakturId!, jumlah_baris: 0, status: st, total: 0 };
+        g._ingBeliProd.add(r.ingredientId);
+        g.beli_produksi.jumlah_baris = g._ingBeliProd.size;
+        g.beli_produksi.total += Number(r.totalHarga ?? 0);
+        if (rank < g._rankBeliProd) {
+          g._rankBeliProd = rank;
+          g.beli_produksi.status = st;
+        }
       } else {
         if (!g.beli) g.beli = { faktur_id: r.fakturId!, jumlah_baris: 0, status: st, total: 0 };
         g._ingBeli.add(r.ingredientId);
@@ -191,7 +216,8 @@ export const rekomendasiRoutes = new Hono<AppEnv>().get("/beli", async (c) => {
       }
     }
     const hasil: PermintaanStokRow[] = [...map.values()].map(
-      ({ _rankProd, _rankBeli, _ingProd, _ingBeli, ...rest }) => rest,
+      ({ _rankProd, _rankBeli, _rankBeliProd, _ingProd, _ingBeli, _ingBeliProd, ...rest }) =>
+        rest,
     );
     return c.json(hasil);
   });

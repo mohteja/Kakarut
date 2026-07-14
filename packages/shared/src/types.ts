@@ -66,7 +66,23 @@ export interface BahanDto {
   is_complement: boolean;
   /** boleh dibeli eceran per pcs; false = pembulatan per kemasan `isi` (jalur beli) */
   boleh_eceran: boolean;
+  /** MINIMAL BELANJA (MOQ): jumlah beli minimum saat belanja otomatis (0 = tanpa minimum) */
+  min_beli: number;
   is_active: boolean;
+}
+
+/**
+ * Satu baris resep produksi (BOM) bahan jadi: kebutuhan bahan mentah per
+ * SATU BATCH (isi) bahan jadi.
+ */
+export interface BahanResepRow {
+  ingredient_id: string;
+  nama: string;
+  satuan: string;
+  /** kebutuhan per 1 batch (isi) bahan jadi */
+  qty: number;
+  harga_per_unit: number;
+  track_stok: boolean;
 }
 
 export interface KomponenDto {
@@ -173,6 +189,8 @@ export interface RencanaBahanRow {
   qty_faktur: number | null;
   harga_per_unit: number;
   estimasi_biaya: number | null;
+  /** khusus baris BAHAN PRODUKSI: nama bahan jadi yang membutuhkannya */
+  untuk?: string | null;
 }
 
 /** Preview rencana penambahan stok dari target porsi menu. */
@@ -181,16 +199,25 @@ export interface RencanaMenuPreview {
   /** Σ porsi × harga_jual — untuk menyamakan rencana dengan target omzet */
   perkiraan_omzet: number;
   bahan: RencanaBahanRow[];
+  /**
+   * BELANJA BAHAN PRODUKSI: bahan mentah (resep) yang dibutuhkan bahan jadi
+   * yang akan diproduksi — kekurangan dihitung terhadap stok cabang PELAKSANA
+   * (Central Kitchen bila ada). Terpisah dari belanja produk langsung jadi.
+   */
+  bahan_produksi: RencanaBahanRow[];
   total_estimasi_biaya: number;
   /** jumlah bahan kurang per jalur (baris faktur yang akan dibuat) */
   jumlah_produksi: number;
   jumlah_beli: number;
+  jumlah_beli_produksi: number;
 }
 
 /** Hasil pembuatan faktur otomatis dari rencana menu (null = jalur tak perlu). */
 export interface RencanaFakturResult {
   produksi: { faktur_id: string; jumlah_baris: number } | null;
   beli: { faktur_id: string; jumlah_baris: number } | null;
+  /** faktur beli BAHAN PRODUKSI (bahan mentah resep) — terpisah dari beli produk jadi */
+  beli_produksi: { faktur_id: string; jumlah_baris: number } | null;
 }
 
 /** Satu bagian (Produksi / Beli) dari sebuah permintaan tambah stok. */
@@ -218,6 +245,8 @@ export interface PermintaanStokRow {
   pembuat: string | null;
   produksi: PermintaanStokBagian | null;
   beli: PermintaanStokBagian | null;
+  /** belanja bahan mentah untuk produksi (dari resep) */
+  beli_produksi: PermintaanStokBagian | null;
 }
 
 /**
@@ -477,7 +506,7 @@ export interface OpnameSesiDetail {
   }[];
 }
 
-export type MutasiJenis = "opname" | "produksi" | "beli" | "penjualan";
+export type MutasiJenis = "opname" | "produksi" | "beli" | "penjualan" | "pemakaian";
 
 /** Satu baris kartu stok (buku besar mutasi per bahan). */
 export interface MutasiStok {
