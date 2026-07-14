@@ -288,8 +288,13 @@ export const ingredients = pgTable(
     nama: text("nama").notNull(),
     hargaBeli: numeric("harga_beli", { precision: 14, scale: 2, mode: "number" }).notNull(),
     isi: numeric("isi", { precision: 12, scale: 4, mode: "number" }).notNull(),
-    /** satuan isi/gramasi: pcs, gr, ml, butir, porsi, dst */
+    /** satuan KERJA/RESEP (stok, resep, konsumsi, HPP): pcs, gr, ml, butir, dst */
     satuan: text("satuan").notNull().default("pcs"),
+    /**
+     * satuan BELI/pembelian (mis. "dus") — label untuk belanja/minimum beli.
+     * 1 satuan_beli = `isi` satuan (resep). Null = beli langsung dalam satuan.
+     */
+    satuanBeli: text("satuan_beli"),
     /** lacak stok: dipotong saat menjual, ditambah saat membeli/produksi */
     trackStok: boolean("track_stok").notNull().default(true),
     /** ambang batas stok minimum: saldo ≤ nilai ini → "menipis" (0 = pakai rasio default) */

@@ -2090,6 +2090,28 @@ cek "DELETE kategori bahan tak terpakai berhasil (200)" "V == 200" "$(status_cod
 # Kategori MENU (/kategori) tetap berfungsi
 cek "kategori menu (/kategori) tetap berfungsi" "V == 200" "$(status_code "$OWNER" GET /kategori)"
 
+echo "== 69. Satuan beli vs satuan resep + harga per satuan resep =="
+# garam: beli 1 dus = 24000; 1 dus = 14400 ml (satuan resep) → harga per ml = 1.6667
+GARAM69=$(api "$OWNER" POST /bahan '{"nama":"garam uji69","harga_beli":24000,"isi":14400,"satuan":"ml","satuan_beli":"dus","kategori":"lain"}')
+cek "satuan_beli tersimpan (dus)" "V == 1" \
+  "$(echo "$GARAM69" | jq '(.satuan_beli=="dus") | if . then 1 else 0 end')"
+cek "satuan resep tersimpan (ml)" "V == 1" \
+  "$(echo "$GARAM69" | jq '(.satuan=="ml") | if . then 1 else 0 end')"
+cek "harga per satuan resep = harga_beli/isi ≈ 1.6667" "abs(V - 1.66667) < 0.001" \
+  "$(echo "$GARAM69" | jq '.harga_per_unit')"
+# bulk: satuan_beli per baris tersimpan
+BULK69=$(api "$OWNER" POST /bahan/bulk '{"items":[{"nama":"kaldu uji69","harga_beli":12000,"isi":600,"satuan":"ml","satuan_beli":"botol"},{"nama":"tepung tanpa satuanbeli69","harga_beli":10000,"isi":1000,"satuan":"gr"}]}')
+cek "bulk: satuan_beli baris pertama = botol" "V == 1" \
+  "$(echo "$BULK69" | jq '([.bahan[] | select(.nama=="kaldu uji69")][0].satuan_beli=="botol") | if . then 1 else 0 end')"
+cek "bulk: baris tanpa satuan_beli → null (regresi)" "V == 1" \
+  "$(echo "$BULK69" | jq '([.bahan[] | select(.nama=="tepung tanpa satuanbeli69")][0].satuan_beli==null) | if . then 1 else 0 end')"
+# PUT: set & clear satuan_beli
+G69ID=$(echo "$GARAM69" | jq -r .id)
+cek "PUT set satuan_beli → tersimpan (karung)" "V == 1" \
+  "$(api "$OWNER" PUT "/bahan/$G69ID" '{"satuan_beli":"karung"}' | jq '(.satuan_beli=="karung") | if . then 1 else 0 end')"
+cek "PUT clear satuan_beli (null) → null" "V == 1" \
+  "$(api "$OWNER" PUT "/bahan/$G69ID" '{"satuan_beli":null}' | jq '(.satuan_beli==null) | if . then 1 else 0 end')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

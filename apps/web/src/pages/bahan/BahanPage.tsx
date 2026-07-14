@@ -26,6 +26,7 @@ interface FormState {
   harga_beli: string;
   isi: string;
   satuan: string;
+  satuan_beli: string;
   kategori: string;
   pengadaan: "produksi" | "beli";
   track_stok: boolean;
@@ -70,6 +71,7 @@ export function BahanPage() {
         harga_beli: Number(f.harga_beli),
         isi: Number(f.isi),
         satuan: f.satuan.trim() || "pcs",
+        satuan_beli: f.satuan_beli.trim() || null,
         kategori: f.kategori,
         // jenis pengadaan tak bisa diubah dari sini (badge read-only)
         track_stok: f.track_stok,
@@ -102,6 +104,7 @@ export function BahanPage() {
       harga_beli: String(b.harga_beli),
       isi: String(b.isi),
       satuan: b.satuan,
+      satuan_beli: b.satuan_beli ?? "",
       kategori: b.kategori,
       pengadaan: b.pengadaan,
       track_stok: b.track_stok,
@@ -349,9 +352,29 @@ export function BahanPage() {
                 />
               </div>
             </div>
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="mb-1 block text-sm font-medium">Harga beli (Rp)</label>
+                <label className="mb-1 block text-sm font-medium">Satuan beli</label>
+                <select
+                  value={form.satuan_beli}
+                  onChange={(e) => setForm({ ...form, satuan_beli: e.target.value })}
+                  className={inputClass}
+                >
+                  <option value="">— (beli langsung per satuan resep)</option>
+                  {!satuanList?.some((s) => s.nama === form.satuan_beli) && form.satuan_beli && (
+                    <option value={form.satuan_beli}>{form.satuan_beli}</option>
+                  )}
+                  {(satuanList ?? []).map((s) => (
+                    <option key={s.id} value={s.nama}>
+                      {s.nama}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium">
+                  Harga beli (Rp{form.satuan_beli ? ` / ${form.satuan_beli}` : ""})
+                </label>
                 <input
                   required
                   type="number"
@@ -362,22 +385,10 @@ export function BahanPage() {
                   className={inputClass}
                 />
               </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="mb-1 block text-sm font-medium">
-                  Isi/gramasi per pembelian
-                </label>
-                <input
-                  required
-                  type="number"
-                  min="0.0001"
-                  step="any"
-                  value={form.isi}
-                  onChange={(e) => setForm({ ...form, isi: e.target.value })}
-                  className={inputClass}
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-sm font-medium">Satuan</label>
+                <label className="mb-1 block text-sm font-medium">Satuan resep</label>
                 <select
                   required
                   value={form.satuan}
@@ -394,11 +405,26 @@ export function BahanPage() {
                   ))}
                 </select>
               </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium">
+                  Isi ({form.satuan || "satuan resep"}
+                  {form.satuan_beli ? ` per 1 ${form.satuan_beli}` : " per pembelian"})
+                </label>
+                <input
+                  required
+                  type="number"
+                  min="0.0001"
+                  step="any"
+                  value={form.isi}
+                  onChange={(e) => setForm({ ...form, isi: e.target.value })}
+                  className={inputClass}
+                />
+              </div>
             </div>
             {Number(form.harga_beli) > 0 && Number(form.isi) > 0 && (
               <div className="rounded-lg bg-orange-50 px-3 py-2 text-sm text-orange-800">
-                Harga per {form.satuan || "unit"}:{" "}
-                {formatRupiah(Number(form.harga_beli) / Number(form.isi))}
+                Harga per {form.satuan || "satuan resep"}:{" "}
+                <b>Rp {formatAngka(Number(form.harga_beli) / Number(form.isi), 2)}</b>
               </div>
             )}
             <div className="grid grid-cols-2 gap-3">
