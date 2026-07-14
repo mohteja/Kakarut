@@ -225,6 +225,9 @@ export function Layout() {
                   <NavLink to="/bahan" className={linkClass}>
                     🥩 Bahan Baku
                   </NavLink>
+                  <NavLink to="/resep" className={linkClass}>
+                    🧾 Resep
+                  </NavLink>
                 </>
               )}
               {!isTim && !dCk && (
@@ -295,9 +298,14 @@ export function Layout() {
                     🛒 Beli Bahan Baku
                   </NavLink>
                   {dCk && (
-                    <NavLink to="/bahan" className={linkClass}>
-                      🥩 Bahan Baku
-                    </NavLink>
+                    <>
+                      <NavLink to="/bahan" className={linkClass}>
+                        🥩 Bahan Baku
+                      </NavLink>
+                      <NavLink to="/resep" className={linkClass}>
+                        🧾 Resep
+                      </NavLink>
+                    </>
                   )}
                   {penuh && (
                     <>
@@ -330,6 +338,9 @@ export function Layout() {
                   </NavLink>
                   <NavLink to="/bahan" className={linkClass}>
                     🥩 Bahan Baku
+                  </NavLink>
+                  <NavLink to="/resep" className={linkClass}>
+                    🧾 Resep
                   </NavLink>
                   <NavLink to="/member" className={linkClass}>
                     👥 Member
