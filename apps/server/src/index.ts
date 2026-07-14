@@ -10,6 +10,8 @@ import { db } from "./db/client";
 import { computeBuildId, setBuildId } from "./lib/build";
 import { runMigrations } from "./db/migrate";
 import { backfillKodeMenu } from "./modules/menu/service";
+import { backfillKodeBahan } from "./modules/bahan/kode";
+import { backfillUnits } from "./modules/satuan/service";
 import { arsipkanMembershipNonaktif, backfillEmployeeCode } from "./modules/users/service";
 import { getStorage, localUploadDir } from "./modules/upload/storage";
 
@@ -39,6 +41,11 @@ if (env.AUTO_MIGRATE) {
   // Menu lama tanpa kode → isi kode otomatis (idempotent, hanya baris NULL)
   const terisi = await backfillKodeMenu(db);
   if (terisi > 0) console.log(`Kode menu otomatis diisi untuk ${terisi} menu lama.`);
+  // Bahan lama tanpa kode → isi kode; perusahaan tanpa master satuan → seed bawaan.
+  const terisiKodeBahan = await backfillKodeBahan(db);
+  if (terisiKodeBahan > 0) console.log(`Kode bahan otomatis diisi untuk ${terisiKodeBahan} bahan.`);
+  const unitDibuat = await backfillUnits(db);
+  if (unitDibuat > 0) console.log(`Master satuan bawaan diisi (${unitDibuat} satuan).`);
   // Karyawan lama tanpa kode → isi kode karyawan otomatis (untuk absensi)
   const terisiKar = await backfillEmployeeCode(db);
   if (terisiKar > 0) console.log(`Kode karyawan otomatis diisi untuk ${terisiKar} karyawan.`);

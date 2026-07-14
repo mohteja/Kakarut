@@ -284,6 +284,8 @@ export const ingredients = pgTable(
       .notNull()
       .references(() => companies.id, { onDelete: "cascade" }),
     slug: text("slug").notNull(),
+    /** kode produk ringkas (otomatis dari nama atau input manual); unik per company via generator */
+    kode: text("kode"),
     nama: text("nama").notNull(),
     hargaBeli: numeric("harga_beli", { precision: 14, scale: 2, mode: "number" }).notNull(),
     isi: numeric("isi", { precision: 12, scale: 4, mode: "number" }).notNull(),
@@ -353,6 +355,24 @@ export const ingredientComponents = pgTable(
     check("ingredient_components_qty_ck", sql`${t.qty} > 0`),
     check("ingredient_components_self_ck", sql`${t.ingredientId} <> ${t.inputIngredientId}`),
   ],
+);
+
+/**
+ * Master SATUAN (unit) per company: daftar satuan yang boleh dipakai bahan
+ * (pcs, gr, kg, ml, …). `ingredients.satuan` tetap teks; tabel ini hanya
+ * menyediakan pilihan dropdown + pengelolaannya. Pola sama dgn menu_categories.
+ */
+export const units = pgTable(
+  "units",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    nama: text("nama").notNull(),
+    sortOrder: integer("sort_order").notNull().default(0),
+  },
+  (t) => [uniqueIndex("units_company_nama_uq").on(t.companyId, t.nama)],
 );
 
 export const menuCategories = pgTable(

@@ -2021,6 +2021,50 @@ cek "ubah isi setelah produksi selesai → 200" "V == 200" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/bahan/$BASO66" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"isi":120}')"
 api "$OWNER" PUT "/bahan/$BASO66" '{"isi":100}' > /dev/null
 
+echo "== 67. Master Satuan + Tambah Bahan Baku (bulk) + kode produk =="
+# Master satuan: bawaan terisi (pcs, gr, …)
+cek "master satuan bawaan terisi (>= 10)" "V >= 10" "$(api "$OWNER" GET /satuan | jq 'length')"
+cek "master satuan memuat 'pcs'" "V == 1" \
+  "$(api "$OWNER" GET /satuan | jq '([.[] | select(.nama=="pcs")] | length == 1) | if . then 1 else 0 end')"
+SAT_ID=$(api "$OWNER" POST /satuan '{"nama":"karung67","sort_order":50}' | jq -r .id)
+cek "tambah satuan baru muncul di daftar" "V == 1" \
+  "$(api "$OWNER" GET /satuan | jq --arg id "$SAT_ID" '[.[] | select(.id==$id)] | length')"
+cek "satuan duplikat ditolak (409)" "V == 409" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/satuan" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"nama":"karung67"}')"
+cek "POST satuan oleh KASIR ditolak (403)" "V == 403" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/satuan" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d '{"nama":"x67"}')"
+cek "DELETE satuan tak terpakai berhasil (200)" "V == 200" "$(status_code "$OWNER" DELETE "/satuan/$SAT_ID")"
+# satuan yang dipakai bahan tak boleh dihapus → 409 (pcs pasti dipakai)
+PCS_ID=$(api "$OWNER" GET /satuan | jq -r '[.[] | select(.nama=="pcs")][0].id')
+cek "DELETE satuan yang dipakai bahan ditolak (409)" "V == 409" "$(status_code "$OWNER" DELETE "/satuan/$PCS_ID")"
+
+# Tambah Bahan Baku (bulk) — 2 baris, selalu jalur beli
+BULK=$(api "$OWNER" POST /bahan/bulk '{"items":[{"nama":"bahan bulk A67","harga_beli":5000,"isi":100,"satuan":"gr","kategori":"lain","track_stok":true,"stok_minimum":10,"boleh_eceran":true},{"nama":"bahan bulk B67","harga_beli":2000,"isi":10,"satuan":"pcs","kategori":"minuman","track_stok":false,"stok_minimum":0,"boleh_eceran":false}]}')
+cek "bulk membuat 2 bahan" "V == 2" "$(echo "$BULK" | jq '.jumlah')"
+cek "bulk: semua bahan jalur beli" "V == 1" \
+  "$(echo "$BULK" | jq '([.bahan[] | .pengadaan] | all(. == "beli")) | if . then 1 else 0 end')"
+cek "bulk: kode terisi otomatis (tak null)" "V == 1" \
+  "$(echo "$BULK" | jq '([.bahan[] | .kode] | all(. != null and . != "")) | if . then 1 else 0 end')"
+cek "bulk: track_stok mengikuti baris (A true, B false)" "V == 1" \
+  "$(echo "$BULK" | jq '([.bahan[] | select(.nama=="bahan bulk A67")][0].track_stok == true and [.bahan[] | select(.nama=="bahan bulk B67")][0].track_stok == false) | if . then 1 else 0 end')"
+cek "bulk: boleh_eceran mengikuti baris" "V == 1" \
+  "$(echo "$BULK" | jq '([.bahan[] | select(.nama=="bahan bulk A67")][0].boleh_eceran == true) | if . then 1 else 0 end')"
+cek "bulk: bahan muncul di daftar /bahan" "V == 2" \
+  "$(api "$OWNER" GET /bahan | jq '[.[] | select(.nama | startswith("bahan bulk "))] | length')"
+
+# Kode unik: dua baris nama sama → kode berbeda (suffix)
+KEMBAR=$(api "$OWNER" POST /bahan/bulk '{"items":[{"nama":"kembar67","harga_beli":1,"isi":1,"satuan":"pcs"},{"nama":"kembar67","harga_beli":1,"isi":1,"satuan":"pcs"}]}')
+cek "kode dua nama sama → berbeda (suffix)" "V == 1" \
+  "$(echo "$KEMBAR" | jq '(.bahan[0].kode != .bahan[1].kode) | if . then 1 else 0 end')"
+# Kode manual dihormati
+MAN=$(api "$OWNER" POST /bahan '{"nama":"bahan kode manual67","kode":"MANUAL67","harga_beli":1,"isi":1,"satuan":"pcs"}')
+cek "kode manual dihormati" "V == 1" "$(echo "$MAN" | jq '(.kode=="MANUAL67") | if . then 1 else 0 end')"
+
+# Bahan produksi (jalur Resep) tetap bisa dibuat & dapat kode
+PROD67=$(api "$OWNER" POST /bahan '{"nama":"baso produksi67","harga_beli":50000,"isi":100,"satuan":"butir","pengadaan":"produksi","kategori":"baso"}')
+cek "bahan produksi tetap bisa dibuat (jalur Resep)" "V == 1" \
+  "$(echo "$PROD67" | jq '(.pengadaan=="produksi" and .kode != null) | if . then 1 else 0 end')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

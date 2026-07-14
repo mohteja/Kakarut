@@ -7,6 +7,7 @@ import { PrinterPage } from "./pages/pengaturan/PrinterPage";
 import { AbsenPage } from "./pages/absen/AbsenPage";
 import { ProfilPage } from "./pages/profil/ProfilPage";
 import { BahanPage } from "./pages/bahan/BahanPage";
+import { TambahBahanBakuPage } from "./pages/bahan/TambahBahanBakuPage";
 import { KasirPage } from "./pages/kasir/KasirPage";
 import { RiwayatPage } from "./pages/kasir/RiwayatPage";
 import { ShiftPage } from "./pages/kasir/ShiftPage";
@@ -29,6 +30,7 @@ import { CabangPage } from "./pages/pengaturan/CabangPage";
 import { KaryawanPage } from "./pages/pengaturan/KaryawanPage";
 import { MejaPage } from "./pages/pengaturan/MejaPage";
 import { KategoriPage } from "./pages/pengaturan/KategoriPage";
+import { SatuanPage } from "./pages/pengaturan/SatuanPage";
 import { PenyimpananPage } from "./pages/pengaturan/PenyimpananPage";
 import { PerusahaanPage } from "./pages/pengaturan/PerusahaanPage";
 import { SupplierPage } from "./pages/pengaturan/SupplierPage";
@@ -139,6 +141,8 @@ export default function App() {
                   <Route path="/pengaturan/supplier" element={<SupplierPage />} />
                   <Route path="/pengaturan/penyimpanan" element={<PenyimpananPage />} />
                   <Route path="/pengaturan/kategori" element={<KategoriPage />} />
+                  <Route path="/pengaturan/satuan" element={<SatuanPage />} />
+                  <Route path="/bahan/baru" element={<TambahBahanBakuPage />} />
                 </>
               )}
             </>

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
-import { Link } from "react-router-dom";
-import type { BahanDto } from "@kakarut/shared";
+import { Link, useNavigate } from "react-router-dom";
+import type { BahanDto, SatuanDto } from "@kakarut/shared";
 import {
   Card,
   ErrorText,
@@ -20,6 +20,7 @@ import { formatAngka, formatRupiah } from "../../lib/format";
 
 interface FormState {
   id?: string;
+  kode: string;
   nama: string;
   harga_beli: string;
   isi: string;
@@ -35,30 +36,20 @@ interface FormState {
   min_beli: string;
 }
 
-const kosong: FormState = {
-  nama: "",
-  harga_beli: "",
-  isi: "1",
-  satuan: "pcs",
-  kategori: "lain",
-  pengadaan: "beli",
-  track_stok: true,
-  stok_minimum: "0",
-  catatan: "",
-  is_packaging: false,
-  is_complement: false,
-  boleh_eceran: false,
-  min_beli: "0",
-};
-
 export function BahanPage() {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const { auth } = useAuth();
   // karyawan CK (tim) hanya MELIHAT master bahan — ubah/tambah tetap manajemen
   const bolehUbah = auth?.user.role === "owner" || auth?.user.role === "admin";
   const { data: bahan, isLoading } = useQuery({
     queryKey: ["bahan"],
     queryFn: () => api<BahanDto[]>("/bahan"),
+  });
+  // Master satuan → pilihan dropdown di form Ubah
+  const { data: satuanList } = useQuery({
+    queryKey: ["satuan"],
+    queryFn: () => api<SatuanDto[]>("/satuan"),
   });
   const [form, setForm] = useState<FormState | null>(null);
   const [cari, setCari] = useState("");
@@ -70,12 +61,13 @@ export function BahanPage() {
   const simpan = useMutation({
     mutationFn: (f: FormState) => {
       const body = {
+        kode: f.kode.trim() || null,
         nama: f.nama,
         harga_beli: Number(f.harga_beli),
         isi: Number(f.isi),
         satuan: f.satuan.trim() || "pcs",
         kategori: f.kategori,
-        pengadaan: f.pengadaan,
+        // jenis pengadaan tak bisa diubah dari sini (badge read-only)
         track_stok: f.track_stok,
         stok_minimum: f.track_stok ? Number(f.stok_minimum) || 0 : 0,
         catatan: f.catatan || null,
@@ -101,6 +93,7 @@ export function BahanPage() {
   function bukaUbah(b: BahanDto) {
     setForm({
       id: b.id,
+      kode: b.kode ?? "",
       nama: b.nama,
       harga_beli: String(b.harga_beli),
       isi: String(b.isi),
@@ -151,11 +144,8 @@ export function BahanPage() {
       <PageTitle
         aksi={
           bolehUbah ? (
-            <button
-              onClick={() => setForm(kosong)}
-              className={btnPrimary}
-            >
-              + Tambah Bahan
+            <button onClick={() => navigate("/bahan/baru")} className={btnPrimary}>
+              + Tambah Bahan Baku
             </button>
           ) : undefined
         }
@@ -209,6 +199,7 @@ export function BahanPage() {
         <table className="w-full">
           <thead className="border-b border-stone-200 bg-stone-50">
             <tr>
+              <th className={thClass}>Kode</th>
               <th className={thClass}>Nama</th>
               <th className={thClass}>Kategori</th>
               <th className={thClass}>Jenis</th>
@@ -222,6 +213,9 @@ export function BahanPage() {
           <tbody className="divide-y divide-stone-100">
             {tampil.map((b) => (
               <tr key={b.id} className="hover:bg-stone-50">
+                <td className={`${tdClass} whitespace-nowrap font-mono text-xs text-stone-500`}>
+                  {b.kode ?? "—"}
+                </td>
                 <td className={`${tdClass} font-medium`}>
                   {b.nama}
                   {b.is_packaging && (
@@ -294,7 +288,7 @@ export function BahanPage() {
             ))}
             {tampil.length === 0 && (
               <tr>
-                <td colSpan={8} className="py-8 text-center text-sm text-stone-400">
+                <td colSpan={9} className="py-8 text-center text-sm text-stone-400">
                   Tidak ada bahan yang cocok dengan filter.{" "}
                   <button
                     onClick={resetFilter}
@@ -316,14 +310,25 @@ export function BahanPage() {
       >
         {form && (
           <form onSubmit={onSubmit} className="space-y-3">
-            <div>
-              <label className="mb-1 block text-sm font-medium">Nama</label>
-              <input
-                required
-                value={form.nama}
-                onChange={(e) => setForm({ ...form, nama: e.target.value })}
-                className={inputClass}
-              />
+            <div className="grid grid-cols-[8rem_1fr] gap-3">
+              <div>
+                <label className="mb-1 block text-sm font-medium">Kode</label>
+                <input
+                  value={form.kode}
+                  onChange={(e) => setForm({ ...form, kode: e.target.value })}
+                  className={inputClass}
+                  placeholder="otomatis"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium">Nama</label>
+                <input
+                  required
+                  value={form.nama}
+                  onChange={(e) => setForm({ ...form, nama: e.target.value })}
+                  className={inputClass}
+                />
+              </div>
             </div>
             <div className="grid grid-cols-3 gap-3">
               <div>
@@ -354,18 +359,21 @@ export function BahanPage() {
               </div>
               <div>
                 <label className="mb-1 block text-sm font-medium">Satuan</label>
-                <input
+                <select
                   required
-                  list="satuan-list-bahan"
                   value={form.satuan}
                   onChange={(e) => setForm({ ...form, satuan: e.target.value })}
                   className={inputClass}
-                />
-                <datalist id="satuan-list-bahan">
-                  {["pcs", "gr", "ml", "butir", "porsi", "lembar", "ikat"].map((s) => (
-                    <option key={s} value={s} />
+                >
+                  {!satuanList?.some((s) => s.nama === form.satuan) && form.satuan && (
+                    <option value={form.satuan}>{form.satuan}</option>
+                  )}
+                  {(satuanList ?? []).map((s) => (
+                    <option key={s.id} value={s.nama}>
+                      {s.nama}
+                    </option>
                   ))}
-                </datalist>
+                </select>
               </div>
             </div>
             {Number(form.harga_beli) > 0 && Number(form.isi) > 0 && (
@@ -391,18 +399,22 @@ export function BahanPage() {
               </div>
               <div>
                 <label className="mb-1 block text-sm font-medium">Jenis pengadaan</label>
-                <select
-                  value={form.pengadaan}
-                  onChange={(e) =>
-                    setForm({ ...form, pengadaan: e.target.value as FormState["pengadaan"] })
-                  }
-                  className={inputClass}
-                >
-                  <option value="beli">Beli jadi (jalur: Beli Bahan Baku)</option>
-                  <option value="produksi">
-                    Produksi sendiri (jalur: Produksi Bahan Baku)
-                  </option>
-                </select>
+                <div className="flex items-center gap-2 rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-sm">
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                      form.pengadaan === "produksi"
+                        ? "bg-orange-100 text-orange-700"
+                        : "bg-teal-100 text-teal-700"
+                    }`}
+                  >
+                    {form.pengadaan === "produksi" ? "Produksi sendiri" : "Beli jadi"}
+                  </span>
+                  {form.pengadaan === "produksi" && (
+                    <Link to="/resep" className="text-xs text-orange-600 hover:underline">
+                      atur resep
+                    </Link>
+                  )}
+                </div>
               </div>
             </div>
             {form.pengadaan === "beli" && (

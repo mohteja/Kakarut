@@ -336,6 +336,9 @@ export function Layout() {
                   <NavLink to="/pengaturan/kategori" className={linkClass}>
                     🏷 Master Kategori
                   </NavLink>
+                  <NavLink to="/pengaturan/satuan" className={linkClass}>
+                    📏 Master Satuan
+                  </NavLink>
                   <NavLink to="/bahan" className={linkClass}>
                     🥩 Bahan Baku
                   </NavLink>

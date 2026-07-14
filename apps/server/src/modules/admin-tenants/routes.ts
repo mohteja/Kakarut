@@ -8,6 +8,7 @@ import { db } from "../../db/client";
 import { branches, companies, memberships, users } from "../../db/schema";
 import type { AppEnv } from "../../middleware/auth";
 import { seedMejaDefault } from "../meja/defaults";
+import { seedUnitsPerusahaan } from "../satuan/service";
 
 const CreateTenantBody = z.object({
   nama: z.string().trim().min(1),
@@ -81,6 +82,8 @@ export const adminTenantsRoutes = new Hono<AppEnv>()
         .returning();
       // Meja bawaan (Ruang Tunggu + Meja 1) supaya usaha take away langsung bisa jualan.
       await seedMejaDefault(tx, company.id, branch.id);
+      // Master satuan bawaan (pcs, gr, kg, …) untuk dropdown Bahan Baku.
+      await seedUnitsPerusahaan(tx, company.id);
       const [owner] = await tx
         .insert(users)
         .values({

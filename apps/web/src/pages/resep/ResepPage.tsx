@@ -1,13 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
-import type { BahanDto, BahanResepRow } from "@kakarut/shared";
+import type { BahanDto, BahanKategori, BahanResepRow, SatuanDto } from "@kakarut/shared";
 import {
   Card,
   ErrorText,
+  Modal,
   PageTitle,
   Spinner,
   btnPrimary,
+  btnSecondary,
   inputClass,
 } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
@@ -18,6 +20,17 @@ import { formatAngka, formatRupiah } from "../../lib/format";
 interface ResepDraft {
   ingredient_id: string;
   qty: string;
+}
+
+/** Form buat bahan jadi (produksi) baru dari halaman Resep. */
+interface BahanBaruForm {
+  kode: string;
+  nama: string;
+  harga_beli: string;
+  isi: string;
+  satuan: string;
+  kategori: BahanKategori;
+  stok_minimum: string;
 }
 
 /**
@@ -106,6 +119,38 @@ export function ResepPage() {
     },
   });
 
+  // Master satuan (dropdown form buat bahan produksi)
+  const { data: satuanList } = useQuery({
+    queryKey: ["satuan"],
+    queryFn: () => api<SatuanDto[]>("/satuan"),
+  });
+  // Buat bahan produksi baru langsung dari halaman Resep (produksi terpisah
+  // dari Bahan Baku beli). Setelah dibuat → langsung terpilih untuk atur resep.
+  const [formBaru, setFormBaru] = useState<BahanBaruForm | null>(null);
+  const buatBahan = useMutation({
+    mutationFn: (f: BahanBaruForm) =>
+      api<BahanDto>("/bahan", {
+        method: "POST",
+        body: {
+          kode: f.kode.trim() || null,
+          nama: f.nama.trim(),
+          harga_beli: Number(f.harga_beli) || 0,
+          isi: Number(f.isi),
+          satuan: f.satuan.trim() || "pcs",
+          kategori: f.kategori,
+          pengadaan: "produksi",
+          track_stok: true,
+          stok_minimum: Number(f.stok_minimum) || 0,
+        },
+      }),
+    onSuccess: (b) => {
+      setFormBaru(null);
+      queryClient.invalidateQueries({ queryKey: ["bahan"] });
+      queryClient.invalidateQueries({ queryKey: ["resep-ringkas"] });
+      setSelectedId(b.id);
+    },
+  });
+
   if (isLoading) return <Spinner />;
 
   const daftar = produksi
@@ -117,9 +162,33 @@ export function ResepPage() {
     return a + (x ? (Number(r.qty) || 0) * x.harga_per_unit : 0);
   }, 0);
 
+  const satuanDefault = satuanList?.some((s) => s.nama === "pcs")
+    ? "pcs"
+    : satuanList?.[0]?.nama ?? "pcs";
+  const bukaFormBaru = () =>
+    setFormBaru({
+      kode: "",
+      nama: "",
+      harga_beli: "",
+      isi: "1",
+      satuan: satuanDefault,
+      kategori: "baso",
+      stok_minimum: "0",
+    });
+
   return (
     <div>
-      <PageTitle>🧾 Resep Produksi</PageTitle>
+      <PageTitle
+        aksi={
+          bolehUbah ? (
+            <button onClick={bukaFormBaru} className={btnPrimary}>
+              + Bahan produksi
+            </button>
+          ) : undefined
+        }
+      >
+        🧾 Resep Produksi
+      </PageTitle>
       <div className="mb-4 rounded-lg bg-blue-50 px-4 py-2 text-sm text-blue-800">
         Atur bahan mentah yang dibutuhkan untuk memproduksi <b>1 batch</b> tiap bahan jenis
         produksi. Dipakai untuk <b>rencana belanja bahan produksi</b> dan <b>pemotongan stok
@@ -128,11 +197,17 @@ export function ResepPage() {
 
       {produksi.length === 0 ? (
         <Card className="p-8 text-center text-sm text-stone-400">
-          Belum ada bahan berjenis produksi. Buat dulu di{" "}
-          <Link to="/bahan" className="font-medium text-orange-600 hover:underline">
-            Bahan Baku
-          </Link>{" "}
-          (jenis pengadaan “Produksi sendiri”).
+          Belum ada bahan produksi.{" "}
+          {bolehUbah ? (
+            <button onClick={bukaFormBaru} className="font-medium text-orange-600 hover:underline">
+              + Buat bahan produksi
+            </button>
+          ) : (
+            <Link to="/bahan" className="font-medium text-orange-600 hover:underline">
+              Bahan Baku
+            </Link>
+          )}{" "}
+          untuk membuat bahan yang diproduksi sendiri lalu mengatur resepnya.
         </Card>
       ) : (
         <div className="grid gap-4 md:grid-cols-[18rem_1fr]">
@@ -316,6 +391,128 @@ export function ResepPage() {
           </Card>
         </div>
       )}
+
+      <Modal
+        open={formBaru !== null}
+        onClose={() => setFormBaru(null)}
+        title="Bahan produksi baru"
+      >
+        {formBaru && (
+          <form
+            onSubmit={(e: FormEvent) => {
+              e.preventDefault();
+              buatBahan.mutate(formBaru);
+            }}
+            className="space-y-3"
+          >
+            <p className="rounded-lg bg-orange-50 px-3 py-2 text-xs text-stone-600">
+              Bahan yang <b>diproduksi sendiri</b> (mis. baso). Setelah dibuat, atur resep bahan
+              mentahnya di panel kanan.
+            </p>
+            <div className="grid grid-cols-[8rem_1fr] gap-3">
+              <div>
+                <label className="mb-1 block text-sm font-medium">Kode</label>
+                <input
+                  value={formBaru.kode}
+                  onChange={(e) => setFormBaru({ ...formBaru, kode: e.target.value })}
+                  className={inputClass}
+                  placeholder="otomatis"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium">Nama</label>
+                <input
+                  required
+                  autoFocus
+                  value={formBaru.nama}
+                  onChange={(e) => setFormBaru({ ...formBaru, nama: e.target.value })}
+                  className={inputClass}
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className="mb-1 block text-sm font-medium">Harga/batch (Rp)</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={formBaru.harga_beli}
+                  onChange={(e) => setFormBaru({ ...formBaru, harga_beli: e.target.value })}
+                  className={inputClass}
+                  placeholder="0"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium">Isi/batch</label>
+                <input
+                  required
+                  type="number"
+                  min="0.0001"
+                  step="any"
+                  value={formBaru.isi}
+                  onChange={(e) => setFormBaru({ ...formBaru, isi: e.target.value })}
+                  className={inputClass}
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium">Satuan</label>
+                <select
+                  value={formBaru.satuan}
+                  onChange={(e) => setFormBaru({ ...formBaru, satuan: e.target.value })}
+                  className={inputClass}
+                >
+                  {!satuanList?.some((s) => s.nama === formBaru.satuan) && formBaru.satuan && (
+                    <option value={formBaru.satuan}>{formBaru.satuan}</option>
+                  )}
+                  {(satuanList ?? []).map((s) => (
+                    <option key={s.id} value={s.nama}>
+                      {s.nama}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="mb-1 block text-sm font-medium">Kategori</label>
+                <select
+                  value={formBaru.kategori}
+                  onChange={(e) =>
+                    setFormBaru({ ...formBaru, kategori: e.target.value as BahanKategori })
+                  }
+                  className={inputClass}
+                >
+                  <option value="baso">baso</option>
+                  <option value="minuman">minuman</option>
+                  <option value="lain">lain</option>
+                </select>
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium">Stok minimum</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={formBaru.stok_minimum}
+                  onChange={(e) => setFormBaru({ ...formBaru, stok_minimum: e.target.value })}
+                  className={inputClass}
+                  placeholder="0"
+                />
+              </div>
+            </div>
+            <ErrorText error={buatBahan.error} />
+            <div className="flex justify-end gap-2 pt-2">
+              <button type="button" onClick={() => setFormBaru(null)} className={btnSecondary}>
+                Batal
+              </button>
+              <button type="submit" disabled={buatBahan.isPending} className={btnPrimary}>
+                Simpan &amp; atur resep
+              </button>
+            </div>
+          </form>
+        )}
+      </Modal>
     </div>
   );
 }

@@ -14,9 +14,12 @@ import {
   productions,
 } from "../../db/schema";
 import { requireRole, type AppEnv } from "../../middleware/auth";
+import { resolveKodeBahan, resolveKodeBahanBatch } from "./kode";
 
 const BahanBody = z.object({
   slug: z.string().trim().min(1).optional(),
+  /** kode produk (kosong → generate otomatis dari nama) */
+  kode: z.string().trim().max(20).nullish(),
   nama: z.string().trim().min(1),
   harga_beli: z.number().nonnegative(),
   isi: z.number().positive(),
@@ -44,6 +47,7 @@ const BahanBody = z.object({
  */
 const BahanPatchBody = z.object({
   slug: z.string().trim().min(1).optional(),
+  kode: z.string().trim().max(20).nullish(),
   nama: z.string().trim().min(1).optional(),
   harga_beli: z.number().nonnegative().optional(),
   isi: z.number().positive().optional(),
@@ -65,10 +69,25 @@ const ResepBody = z.object({
     .default([]),
 });
 
+/** Satu baris "tambah bahan baku" (bulk) — selalu jalur beli, tanpa kemasan/complement. */
+const BahanBulkRow = z.object({
+  kode: z.string().trim().max(20).nullish(),
+  nama: z.string().trim().min(1),
+  harga_beli: z.number().nonnegative(),
+  isi: z.number().positive(),
+  satuan: z.string().trim().min(1).max(20).default("pcs"),
+  kategori: z.enum(["baso", "minuman", "lain"]).default("lain"),
+  track_stok: z.boolean().default(true),
+  stok_minimum: z.number().nonnegative().default(0),
+  boleh_eceran: z.boolean().default(false),
+});
+const BahanBulkBody = z.object({ items: z.array(BahanBulkRow).min(1).max(200) });
+
 function toDto(row: typeof ingredients.$inferSelect): BahanDto {
   return {
     id: row.id,
     slug: row.slug,
+    kode: row.kode,
     nama: row.nama,
     harga_beli: row.hargaBeli,
     isi: row.isi,
@@ -111,11 +130,13 @@ export const bahanRoutes = new Hono<AppEnv>()
     if (existing) {
       throw new HTTPException(409, { message: `Bahan dengan slug "${slug}" sudah ada` });
     }
+    const kode = await resolveKodeBahan(db, auth.company_id!, body.kode, body.nama);
     const [row] = await db
       .insert(ingredients)
       .values({
         companyId: auth.company_id!,
         slug,
+        kode,
         nama: body.nama,
         hargaBeli: body.harga_beli,
         isi: body.isi,
@@ -132,6 +153,49 @@ export const bahanRoutes = new Hono<AppEnv>()
       })
       .returning();
     return c.json(toDto(row), 201);
+  })
+  /**
+   * Tambah banyak bahan baku sekaligus (halaman "Tambah Bahan Baku" multi-baris).
+   * Selalu jalur BELI. Kode & slug dibuat unik lintas-baris + existing (suffix
+   * bila bentrok) agar satu baris bermasalah tak menggagalkan seluruh batch.
+   */
+  .post("/bulk", requireRole("owner", "admin"), zValidator("json", BahanBulkBody), async (c) => {
+    const auth = c.get("auth");
+    const { items } = c.req.valid("json");
+    const existing = await db
+      .select({ slug: ingredients.slug })
+      .from(ingredients)
+      .where(eq(ingredients.companyId, auth.company_id!));
+    const slugDipakai = new Set(existing.map((r) => r.slug.toLowerCase()));
+    const slugUnik = (nama: string): string => {
+      const base = nama.toLowerCase().trim().replace(/\s+/g, " ") || "bahan";
+      let s = base;
+      let n = 2;
+      while (slugDipakai.has(s.toLowerCase())) s = `${base} ${n++}`;
+      slugDipakai.add(s.toLowerCase());
+      return s;
+    };
+    const kodes = await resolveKodeBahanBatch(db, auth.company_id!, items);
+    const rows = await db
+      .insert(ingredients)
+      .values(
+        items.map((b, i) => ({
+          companyId: auth.company_id!,
+          slug: slugUnik(b.nama),
+          kode: kodes[i],
+          nama: b.nama,
+          hargaBeli: b.harga_beli,
+          isi: b.isi,
+          satuan: b.satuan,
+          trackStok: b.track_stok,
+          stokMinimum: b.stok_minimum,
+          kategori: b.kategori,
+          pengadaan: "beli" as const,
+          bolehEceran: b.boleh_eceran,
+        })),
+      )
+      .returning();
+    return c.json({ jumlah: rows.length, bahan: rows.map(toDto) }, 201);
   })
   .put(
     "/:id",
@@ -198,9 +262,15 @@ export const bahanRoutes = new Hono<AppEnv>()
           });
         }
       }
+      // Kode: bila diisi (manual), pastikan unik per company (suffix bila bentrok).
+      const kodeBaru =
+        body.kode != null && body.kode.trim().length > 0
+          ? await resolveKodeBahan(db, auth.company_id!, body.kode, body.nama ?? "", id)
+          : undefined;
       const [row] = await db
         .update(ingredients)
         .set({
+          ...(kodeBaru !== undefined && { kode: kodeBaru }),
           ...(body.nama !== undefined && { nama: body.nama }),
           ...(body.harga_beli !== undefined && { hargaBeli: body.harga_beli }),
           ...(body.isi !== undefined && { isi: body.isi }),

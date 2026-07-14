@@ -49,6 +49,8 @@ export interface AktivitasRow {
 export interface BahanDto {
   id: string;
   slug: string;
+  /** kode produk ringkas (otomatis/manual); null utk bahan lama sebelum backfill */
+  kode: string | null;
   nama: string;
   harga_beli: number;
   isi: number;
@@ -102,6 +104,26 @@ export interface KategoriDto {
   id: string;
   nama: string;
   sort_order: number;
+}
+
+/** Satuan bahan (master data) — sumber pilihan dropdown satuan. */
+export interface SatuanDto {
+  id: string;
+  nama: string;
+  sort_order: number;
+}
+
+/** Satu baris "Tambah Bahan Baku" (bulk) — selalu jalur beli. */
+export interface BahanBulkRow {
+  kode?: string | null;
+  nama: string;
+  harga_beli: number;
+  isi: number;
+  satuan: string;
+  kategori: BahanKategori;
+  track_stok: boolean;
+  stok_minimum: number;
+  boleh_eceran: boolean;
 }
 
 export interface MenuDto {
