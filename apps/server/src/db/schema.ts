@@ -22,7 +22,6 @@ import {
  * transaksi — tanpa kasir). cashier & tim terikat ke satu cabang.
  */
 export const userRoleEnum = pgEnum("user_role", ["owner", "admin", "cashier", "tim"]);
-export const bahanKategoriEnum = pgEnum("bahan_kategori", ["baso", "minuman", "lain"]);
 export const menuTipeEnum = pgEnum("menu_tipe", ["regular", "paket"]);
 /** jalur pengadaan bahan: diproduksi sendiri vs dibeli jadi */
 export const pengadaanEnum = pgEnum("pengadaan", ["produksi", "beli"]);
@@ -297,7 +296,9 @@ export const ingredients = pgTable(
     stokMinimum: numeric("stok_minimum", { precision: 16, scale: 6, mode: "number" })
       .notNull()
       .default(0),
-    kategori: bahanKategoriEnum("kategori").notNull().default("lain"),
+    // kategori pengelompokan bahan (master dinamis `ingredient_categories`);
+    // tetap teks — master hanya menyediakan pilihan (pola satuan).
+    kategori: text("kategori").notNull().default("lain"),
     pengadaan: pengadaanEnum("pengadaan").notNull().default("beli"),
     catatan: text("catatan"),
     isPackaging: boolean("is_packaging").notNull().default(false),
@@ -386,6 +387,24 @@ export const menuCategories = pgTable(
     sortOrder: integer("sort_order").notNull().default(0),
   },
   (t) => [uniqueIndex("menu_categories_company_nama_uq").on(t.companyId, t.nama)],
+);
+
+/**
+ * Master KATEGORI BAHAN per company: pilihan pengelompokan bahan baku (baso,
+ * minuman, lain, dst — bisa ditambah). `ingredients.kategori` tetap teks;
+ * tabel ini hanya sumber pilihan dropdown. Pola sama dgn menu_categories/units.
+ */
+export const ingredientCategories = pgTable(
+  "ingredient_categories",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    nama: text("nama").notNull(),
+    sortOrder: integer("sort_order").notNull().default(0),
+  },
+  (t) => [uniqueIndex("ingredient_categories_company_nama_uq").on(t.companyId, t.nama)],
 );
 
 export const menus = pgTable(

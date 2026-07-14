@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import type { BahanDto, SatuanDto } from "@kakarut/shared";
+import type { BahanDto, KategoriDto, SatuanDto } from "@kakarut/shared";
 import {
   Card,
   ErrorText,
@@ -14,6 +14,7 @@ import {
   tdClass,
   thClass,
 } from "../../components/ui";
+import { KategoriManagerModal } from "../../components/KategoriManagerModal";
 import { useAuth } from "../../context/AuthContext";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah } from "../../lib/format";
@@ -25,7 +26,7 @@ interface FormState {
   harga_beli: string;
   isi: string;
   satuan: string;
-  kategori: "baso" | "minuman" | "lain";
+  kategori: string;
   pengadaan: "produksi" | "beli";
   track_stok: boolean;
   stok_minimum: string;
@@ -46,17 +47,20 @@ export function BahanPage() {
     queryKey: ["bahan"],
     queryFn: () => api<BahanDto[]>("/bahan"),
   });
-  // Master satuan → pilihan dropdown di form Ubah
+  // Master satuan & kategori bahan → pilihan dropdown di form Ubah + filter
   const { data: satuanList } = useQuery({
     queryKey: ["satuan"],
     queryFn: () => api<SatuanDto[]>("/satuan"),
   });
+  const { data: kategoriList } = useQuery({
+    queryKey: ["kategori-bahan"],
+    queryFn: () => api<KategoriDto[]>("/kategori-bahan"),
+  });
   const [form, setForm] = useState<FormState | null>(null);
+  const [kelolaKategori, setKelolaKategori] = useState(false);
   const [cari, setCari] = useState("");
   const [filterJenis, setFilterJenis] = useState<"semua" | "produksi" | "beli">("semua");
-  const [filterKategori, setFilterKategori] = useState<"semua" | "baso" | "minuman" | "lain">(
-    "semua",
-  );
+  const [filterKategori, setFilterKategori] = useState<string>("semua");
 
   const simpan = useMutation({
     mutationFn: (f: FormState) => {
@@ -144,14 +148,27 @@ export function BahanPage() {
       <PageTitle
         aksi={
           bolehUbah ? (
-            <button onClick={() => navigate("/bahan/baru")} className={btnPrimary}>
-              + Tambah Bahan Baku
-            </button>
+            <div className="flex items-center gap-2">
+              <button onClick={() => setKelolaKategori(true)} className={btnSecondary}>
+                🏷 Kategori
+              </button>
+              <button onClick={() => navigate("/bahan/baru")} className={btnPrimary}>
+                + Tambah Bahan Baku
+              </button>
+            </div>
           ) : undefined
         }
       >
         Bahan Baku ({adaFilter ? `${tampil.length} dari ${semua.length}` : semua.length})
       </PageTitle>
+      <KategoriManagerModal
+        open={kelolaKategori}
+        onClose={() => setKelolaKategori(false)}
+        endpoint="/kategori-bahan"
+        queryKey="kategori-bahan"
+        judul="Kategori Bahan Baku"
+        deskripsi="Kategori untuk mengelompokkan bahan baku. Kategori yang masih dipakai bahan tidak bisa dihapus."
+      />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <input
@@ -174,14 +191,16 @@ export function BahanPage() {
         </select>
         <select
           value={filterKategori}
-          onChange={(e) => setFilterKategori(e.target.value as typeof filterKategori)}
+          onChange={(e) => setFilterKategori(e.target.value)}
           className={`${inputClass} max-w-48`}
           aria-label="Filter kategori"
         >
           <option value="semua">Semua kategori</option>
-          <option value="baso">baso ({jumlah((b) => b.kategori === "baso")})</option>
-          <option value="minuman">minuman ({jumlah((b) => b.kategori === "minuman")})</option>
-          <option value="lain">lain ({jumlah((b) => b.kategori === "lain")})</option>
+          {(kategoriList ?? []).map((k) => (
+            <option key={k.id} value={k.nama}>
+              {k.nama} ({jumlah((b) => b.kategori === k.nama)})
+            </option>
+          ))}
         </select>
         {adaFilter && (
           <button
@@ -387,14 +406,17 @@ export function BahanPage() {
                 <label className="mb-1 block text-sm font-medium">Kategori</label>
                 <select
                   value={form.kategori}
-                  onChange={(e) =>
-                    setForm({ ...form, kategori: e.target.value as FormState["kategori"] })
-                  }
+                  onChange={(e) => setForm({ ...form, kategori: e.target.value })}
                   className={inputClass}
                 >
-                  <option value="baso">baso</option>
-                  <option value="minuman">minuman</option>
-                  <option value="lain">lain</option>
+                  {!kategoriList?.some((k) => k.nama === form.kategori) && form.kategori && (
+                    <option value={form.kategori}>{form.kategori}</option>
+                  )}
+                  {(kategoriList ?? []).map((k) => (
+                    <option key={k.id} value={k.nama}>
+                      {k.nama}
+                    </option>
+                  ))}
                 </select>
               </div>
               <div>

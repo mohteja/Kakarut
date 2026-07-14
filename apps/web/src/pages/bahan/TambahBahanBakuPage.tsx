@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import type { BahanKategori, SatuanDto } from "@kakarut/shared";
+import type { BahanKategori, KategoriDto, SatuanDto } from "@kakarut/shared";
 import { Card, ErrorText, PageTitle, btnPrimary, btnSecondary } from "../../components/ui";
 import { api } from "../../lib/api";
 
@@ -45,6 +45,10 @@ export function TambahBahanBakuPage() {
   const { data: satuanList } = useQuery({
     queryKey: ["satuan"],
     queryFn: () => api<SatuanDto[]>("/satuan"),
+  });
+  const { data: kategoriList } = useQuery({
+    queryKey: ["kategori-bahan"],
+    queryFn: () => api<KategoriDto[]>("/kategori-bahan"),
   });
   const satuanDefault = satuanList?.some((s) => s.nama === "pcs")
     ? "pcs"
@@ -183,9 +187,14 @@ export function TambahBahanBakuPage() {
                     onChange={(e) => ubah(i, { kategori: e.target.value as BahanKategori })}
                     className={`${cell} w-28`}
                   >
-                    <option value="baso">baso</option>
-                    <option value="minuman">minuman</option>
-                    <option value="lain">lain</option>
+                    {!kategoriList?.some((k) => k.nama === b.kategori) && b.kategori && (
+                      <option value={b.kategori}>{b.kategori}</option>
+                    )}
+                    {(kategoriList ?? []).map((k) => (
+                      <option key={k.id} value={k.nama}>
+                        {k.nama}
+                      </option>
+                    ))}
                   </select>
                 </td>
                 <td className="px-2 py-1.5 text-center">

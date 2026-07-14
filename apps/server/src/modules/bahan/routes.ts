@@ -28,7 +28,7 @@ const BahanBody = z.object({
   track_stok: z.boolean().default(true),
   /** ambang batas stok minimum: saldo ≤ nilai ini → "menipis" (0 = rasio default) */
   stok_minimum: z.number().nonnegative().default(0),
-  kategori: z.enum(["baso", "minuman", "lain"]).default("lain"),
+  kategori: z.string().trim().min(1).max(30).default("lain"),
   /** jalur pengadaan: produksi sendiri atau beli jadi */
   pengadaan: z.enum(["produksi", "beli"]).default("beli"),
   catatan: z.string().nullish(),
@@ -54,7 +54,7 @@ const BahanPatchBody = z.object({
   satuan: z.string().trim().min(1).max(20).optional(),
   track_stok: z.boolean().optional(),
   stok_minimum: z.number().nonnegative().optional(),
-  kategori: z.enum(["baso", "minuman", "lain"]).optional(),
+  kategori: z.string().trim().min(1).max(30).optional(),
   pengadaan: z.enum(["produksi", "beli"]).optional(),
   catatan: z.string().nullish(),
   is_packaging: z.boolean().optional(),
@@ -76,7 +76,7 @@ const BahanBulkRow = z.object({
   harga_beli: z.number().nonnegative(),
   isi: z.number().positive(),
   satuan: z.string().trim().min(1).max(20).default("pcs"),
-  kategori: z.enum(["baso", "minuman", "lain"]).default("lain"),
+  kategori: z.string().trim().min(1).max(30).default("lain"),
   track_stok: z.boolean().default(true),
   stok_minimum: z.number().nonnegative().default(0),
   boleh_eceran: z.boolean().default(false),

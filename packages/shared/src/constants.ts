@@ -23,6 +23,10 @@ export const PANDUAN_MARKUP: { kategori: string; persen: string; keterangan: str
 export type StokStatus = "habis" | "menipis" | "aman";
 export type UserRole = "owner" | "admin" | "cashier" | "tim";
 export type MenuTipe = "regular" | "paket";
-export type BahanKategori = "baso" | "minuman" | "lain";
+/**
+ * Kategori bahan = teks bebas dari master `ingredient_categories` (bisa
+ * ditambah owner). "baso"/"minuman"/"lain" hanya nilai bawaan.
+ */
+export type BahanKategori = string;
 /** jalur pengadaan bahan baku: diproduksi sendiri vs dibeli jadi */
 export type JenisPengadaan = "produksi" | "beli";
