@@ -297,10 +297,26 @@ export const ingredients = pgTable(
     satuanBeli: text("satuan_beli"),
     /** lacak stok: dipotong saat menjual, ditambah saat membeli/produksi */
     trackStok: boolean("track_stok").notNull().default(true),
-    /** ambang batas stok minimum: saldo ≤ nilai ini → "menipis" (0 = pakai rasio default) */
+    /**
+     * ambang batas stok minimum: saldo ≤ nilai ini → "menipis" (0 = pakai
+     * rasio default). Berlaku di cabang Central Kitchen/kantor; cabang TOKO
+     * memakai stok_minimum_toko.
+     */
     stokMinimum: numeric("stok_minimum", { precision: 16, scale: 6, mode: "number" })
       .notNull()
       .default(0),
+    /** ambang stok minimum khusus cabang TOKO (store); 0 = ikut stok_minimum */
+    stokMinimumToko: numeric("stok_minimum_toko", { precision: 16, scale: 6, mode: "number" })
+      .notNull()
+      .default(0),
+    /**
+     * OVERHEAD bahan produksi: pengali biaya resep → harga per batch
+     * (harga_beli = biaya bahan resep × overhead_x). 1 = harga mengikuti
+     * biaya resep. Hanya bermakna untuk pengadaan "produksi".
+     */
+    overheadX: numeric("overhead_x", { precision: 8, scale: 4, mode: "number" })
+      .notNull()
+      .default(1),
     // kategori pengelompokan bahan (master dinamis `ingredient_categories`);
     // tetap teks — master hanya menyediakan pilihan (pola satuan).
     kategori: text("kategori").notNull().default("lain"),

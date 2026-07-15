@@ -30,6 +30,10 @@ const BahanBody = z.object({
   track_stok: z.boolean().default(true),
   /** ambang batas stok minimum: saldo ≤ nilai ini → "menipis" (0 = rasio default) */
   stok_minimum: z.number().nonnegative().default(0),
+  /** ambang stok minimum khusus cabang toko (0 = rasio default) */
+  stok_minimum_toko: z.number().nonnegative().default(0),
+  /** pengali biaya resep → harga per batch bahan produksi (1 = mengikuti resep) */
+  overhead_x: z.number().positive().max(1000).default(1),
   kategori: z.string().trim().min(1).max(30).default("lain"),
   /** jalur pengadaan: produksi sendiri atau beli jadi */
   pengadaan: z.enum(["produksi", "beli"]).default("beli"),
@@ -57,6 +61,8 @@ const BahanPatchBody = z.object({
   satuan_beli: z.string().trim().max(20).nullish(),
   track_stok: z.boolean().optional(),
   stok_minimum: z.number().nonnegative().optional(),
+  stok_minimum_toko: z.number().nonnegative().optional(),
+  overhead_x: z.number().positive().max(1000).optional(),
   kategori: z.string().trim().min(1).max(30).optional(),
   pengadaan: z.enum(["produksi", "beli"]).optional(),
   catatan: z.string().nullish(),
@@ -99,6 +105,8 @@ function toDto(row: typeof ingredients.$inferSelect): BahanDto {
     satuan_beli: row.satuanBeli,
     track_stok: row.trackStok,
     stok_minimum: row.stokMinimum,
+    stok_minimum_toko: row.stokMinimumToko,
+    overhead_x: row.overheadX,
     harga_per_unit: hargaPerUnit(row.hargaBeli, row.isi),
     kategori: row.kategori,
     pengadaan: row.pengadaan,
@@ -149,6 +157,8 @@ export const bahanRoutes = new Hono<AppEnv>()
         satuanBeli: body.satuan_beli ?? null,
         trackStok: body.track_stok,
         stokMinimum: body.stok_minimum,
+        stokMinimumToko: body.stok_minimum_toko,
+        overheadX: body.overhead_x,
         kategori: body.kategori,
         pengadaan: body.pengadaan,
         catatan: body.catatan ?? null,
@@ -285,6 +295,10 @@ export const bahanRoutes = new Hono<AppEnv>()
           ...(body.satuan_beli !== undefined && { satuanBeli: body.satuan_beli ?? null }),
           ...(body.track_stok !== undefined && { trackStok: body.track_stok }),
           ...(body.stok_minimum !== undefined && { stokMinimum: body.stok_minimum }),
+          ...(body.stok_minimum_toko !== undefined && {
+            stokMinimumToko: body.stok_minimum_toko,
+          }),
+          ...(body.overhead_x !== undefined && { overheadX: body.overhead_x }),
           ...(body.kategori !== undefined && { kategori: body.kategori }),
           ...(body.pengadaan !== undefined && { pengadaan: body.pengadaan }),
           ...(body.catatan !== undefined && { catatan: body.catatan }),
