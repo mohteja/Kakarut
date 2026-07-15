@@ -405,9 +405,10 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
       // ===== Maju sebagian (dropdown + penyesuaian per baris) =====
       if (items) {
         const target = URUTAN_TAHAP[ke];
-        // Work-order CK: karyawan yang MULAI mengerjakan menugaskan dirinya
-        // (isi worker_id yang masih kosong) — bukan dipaksa owner saat request.
-        const selfAssign = tipe === "produksi" && ke === "dikerjakan";
+        // Siapa yang MULAI mengerjakan/memproses menugaskan dirinya (isi
+        // worker_id yang masih kosong) — berlaku kedua jalur: produksi
+        // (pelaksana work-order CK) maupun beli (pemroses belanja tercatat).
+        const selfAssign = ke === "dikerjakan";
         const baris = await db
           .select()
           .from(productions)
@@ -433,12 +434,13 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
               message: `Baris berstatus "${b.status}" tidak bisa dipindah ke "${ke}" — tahap hanya bisa maju`,
             });
           }
-          // Work-order CK diterima di cabang tujuan (lewat Penerimaan), bukan
-          // dikonfirmasi di CK — cegah stok mendarat di cabang yang salah.
+          // Barang bertujuan cabang lain diterima di cabang tujuan (lewat
+          // Penerimaan), bukan dikonfirmasi di sini — cegah stok mendarat di
+          // cabang yang salah.
           if (ke === "dikonfirmasi" && b.tujuanBranchId) {
             throw new HTTPException(400, {
               message:
-                "Barang work-order Central Kitchen — pakai '🚚 Kirim ke cabang' lalu terima di Penerimaan cabang",
+                "Barang bertujuan cabang lain — kirim dulu lalu terima di Penerimaan cabang tujuan",
             });
           }
           if (item.qty > b.qty + 1e-9) {
@@ -558,6 +560,16 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
             target >= URUTAN_TAHAP.menunggu;
           for (const item of items) {
             const b = byId.get(item.id)!;
+            // BELI bertujuan cabang: saat barang DIKIRIM (≥ menunggu), baris
+            // otomatis pindah ke cabang tujuannya (tanpa langkah kirim
+            // terpisah — "dikirim" memang artinya barang berangkat ke cabang).
+            // Gudang CK tidak berlaku di cabang tujuan → kosongkan.
+            const autoKirimBeli =
+              b.tipe === "beli" &&
+              target >= URUTAN_TAHAP.menunggu &&
+              b.tujuanBranchId != null &&
+              b.tujuanBranchId !== b.branchId &&
+              !tujuanBranch;
             // WHERE menuntut status DAN qty persis seperti saat dibaca: bila
             // berubah oleh proses lain, update 0 baris → transaksi batal.
             // qty ikut dikunci karena split TIDAK mengubah status baris asli —
@@ -575,6 +587,9 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
                 .set({
                   ...naik,
                   ...pindah,
+                  ...(autoKirimBeli
+                    ? { branchId: b.tujuanBranchId!, storageLocationId: null }
+                    : {}),
                   // self-assign pelaksana (isi hanya bila masih kosong)
                   ...(selfAssign
                     ? { workerId: sql`COALESCE(${productions.workerId}, ${auth.sub}::uuid)` }
@@ -627,7 +642,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
                 .insert(productions)
                 .values({
                 companyId: b.companyId,
-                branchId: tujuanBranch ?? b.branchId,
+                branchId: tujuanBranch ?? (autoKirimBeli ? b.tujuanBranchId! : b.branchId),
                 ingredientId: b.ingredientId,
                 qty: item.qty,
                 tipe: b.tipe,
@@ -638,7 +653,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
                 rencanaId: b.rencanaId,
                 noFaktur: b.noFaktur,
                 supplierId: b.supplierId,
-                storageLocationId: tujuanStorage ?? b.storageLocationId,
+                storageLocationId: tujuanStorage ?? (autoKirimBeli ? null : b.storageLocationId),
                 isBatch: b.isBatch,
                 catatan: b.catatan,
                 userId: b.userId,
@@ -703,9 +718,19 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
             status: ke,
             updatedBy: auth.sub,
             updatedAt: new Date(),
-            // work-order CK: pelaksana yang mulai mengerjakan menugaskan dirinya
-            ...(tipe === "produksi" && ke === "dikerjakan"
+            // yang MULAI mengerjakan/memproses menugaskan dirinya — produksi
+            // (pelaksana) maupun beli (pemroses belanja tercatat)
+            ...(ke === "dikerjakan"
               ? { workerId: sql`COALESCE(${productions.workerId}, ${auth.sub}::uuid)` }
+              : {}),
+            // BELI bertujuan cabang: saat DIKIRIM (menunggu), baris otomatis
+            // pindah ke cabang tujuan → muncul di Penerimaan cabang itu.
+            // Gudang asal (CK) tidak berlaku di cabang tujuan → kosongkan.
+            ...(tipe === "beli" && ke === "menunggu"
+              ? {
+                  branchId: sql`COALESCE(${productions.tujuanBranchId}, ${productions.branchId})`,
+                  storageLocationId: sql`CASE WHEN ${productions.tujuanBranchId} IS NOT NULL AND ${productions.tujuanBranchId} <> ${productions.branchId} THEN NULL ELSE ${productions.storageLocationId} END`,
+                }
               : {}),
           })
           .where(and(...conds, eq(productions.status, dari)))

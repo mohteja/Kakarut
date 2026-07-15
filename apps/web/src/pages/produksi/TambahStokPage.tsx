@@ -465,7 +465,9 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                     <span className="font-medium text-stone-700">
                       {tipe === "produksi"
                         ? `🔧 ${g.dikerjakanOleh ?? g.supplier ?? "Produksi sendiri"}`
-                        : (g.supplier ?? "Tanpa sumber")}
+                        : g.dikerjakanOleh
+                          ? `🔧 ${g.dikerjakanOleh}` // pemroses belanja (tercatat saat Diproses)
+                          : (g.supplier ?? "Belum diproses")}
                     </span>
                     {g.noFaktur && (
                       <span className="rounded bg-stone-100 px-1.5 py-0.5 font-mono text-xs">

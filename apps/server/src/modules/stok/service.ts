@@ -123,6 +123,9 @@ export async function hitungSaldoCabang(
         AND pr.tipe = 'beli'
         AND pr.status IN ('rencana', 'dikerjakan', 'menunggu')
         AND pr.deleted_at IS NULL
+        -- belanja bertujuan cabang lain tak menambah proyeksi stok CK —
+        -- barang akan berpindah ke cabang tujuan saat dikirim
+        AND (pr.tujuan_branch_id IS NULL OR pr.tujuan_branch_id = pr.branch_id)
     ) wb ON TRUE
     WHERE i.company_id = ${companyId} AND i.is_active AND i.track_stok
     ORDER BY i.nama
