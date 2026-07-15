@@ -14,6 +14,9 @@ interface SatuanSelectProps {
   "aria-label"?: string;
 }
 
+// Nilai sentinel opsi "tambah satuan" di dalam dropdown — bukan satuan sungguhan.
+const OPSI_TAMBAH = "__tambah_satuan__";
+
 /**
  * Dropdown satuan dari Master Satuan + tombol "＋" untuk menambah satuan baru
  * tanpa meninggalkan form: tersimpan ke master (POST /satuan) dan langsung
@@ -61,7 +64,13 @@ export function SatuanSelect({
     <div className="flex items-center gap-1">
       <select
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(e) => {
+          if (e.target.value === OPSI_TAMBAH) {
+            setOpen(true); // buka modal, jangan ubah nilai satuan
+            return;
+          }
+          onChange(e.target.value);
+        }}
         className={selectClassName ?? inputClass}
         disabled={disabled}
         aria-label={ariaLabel}
@@ -75,6 +84,7 @@ export function SatuanSelect({
             {s.nama}
           </option>
         ))}
+        {!disabled && <option value={OPSI_TAMBAH}>➕ Tambah satuan…</option>}
       </select>
       {!disabled && (
         <button

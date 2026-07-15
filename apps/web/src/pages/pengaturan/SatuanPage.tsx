@@ -81,37 +81,59 @@ export function SatuanPage() {
             <tr>
               <th className={thClass}>Nama</th>
               <th className={thClass}>Urutan</th>
+              <th className={thClass}>Dipakai</th>
               <th className={thClass}></th>
             </tr>
           </thead>
           <tbody className="divide-y divide-stone-100">
-            {(satuan ?? []).map((s) => (
-              <tr key={s.id}>
-                <td className={`${tdClass} font-medium`}>{s.nama}</td>
-                <td className={tdClass}>{s.sort_order}</td>
-                <td className={`${tdClass} whitespace-nowrap text-right`}>
-                  <button
-                    onClick={() =>
-                      setForm({ id: s.id, nama: s.nama, sort_order: String(s.sort_order) })
-                    }
-                    className="text-sm font-medium text-orange-600 hover:underline"
-                  >
-                    Ubah
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (confirm(`Hapus satuan "${s.nama}"?`)) hapus.mutate(s);
-                    }}
-                    className="ml-3 text-sm font-medium text-red-600 hover:underline"
-                  >
-                    Hapus
-                  </button>
-                </td>
-              </tr>
-            ))}
+            {(satuan ?? []).map((s) => {
+              const terpakai = s.dipakai > 0;
+              return (
+                <tr key={s.id}>
+                  <td className={`${tdClass} font-medium`}>{s.nama}</td>
+                  <td className={tdClass}>{s.sort_order}</td>
+                  <td className={tdClass}>
+                    {terpakai ? (
+                      <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                        {s.dipakai} bahan
+                      </span>
+                    ) : (
+                      <span className="text-xs text-stone-400">—</span>
+                    )}
+                  </td>
+                  <td className={`${tdClass} whitespace-nowrap text-right`}>
+                    <button
+                      onClick={() =>
+                        setForm({ id: s.id, nama: s.nama, sort_order: String(s.sort_order) })
+                      }
+                      className="text-sm font-medium text-orange-600 hover:underline"
+                    >
+                      Ubah
+                    </button>
+                    {terpakai ? (
+                      <span
+                        className="ml-3 cursor-not-allowed text-sm font-medium text-stone-300"
+                        title={`Tidak bisa dihapus — masih dipakai ${s.dipakai} bahan`}
+                      >
+                        Hapus
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => {
+                          if (confirm(`Hapus satuan "${s.nama}"?`)) hapus.mutate(s);
+                        }}
+                        className="ml-3 text-sm font-medium text-red-600 hover:underline"
+                      >
+                        Hapus
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
             {(satuan ?? []).length === 0 && (
               <tr>
-                <td colSpan={3} className="py-8 text-center text-sm text-stone-400">
+                <td colSpan={4} className="py-8 text-center text-sm text-stone-400">
                   Belum ada satuan — tambahkan untuk dipakai di form Bahan Baku.
                 </td>
               </tr>
