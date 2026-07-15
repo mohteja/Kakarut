@@ -2332,6 +2332,37 @@ cek "produk jadi masuk stok cabang (kecap 12 botol)" "abs(V - 12) < 0.001" \
 cek "stok kecap di CK tetap 0" "abs(V) < 0.001" \
   "$(api "$OWNER" GET "/stok?branch_id=$CK52_UTAMA" | jq --arg i "$J74" '[.[] | select(.ingredient_id==$i)][0].saldo // 0')"
 
+echo "== 75. Hapus permintaan → semua fakturnya soft-delete + dapat dipulihkan =="
+# permintaan campuran baru (produksi + belanja bahan produksi)
+MENU75=$(api "$OWNER" POST /menu "{\"nama\":\"Menu Uji75\",\"category_id\":\"$CAT66\",\"tipe\":\"regular\",\"mult\":2,\"harga_jual\":15000,\"komponen\":[{\"ingredient_id\":\"$BASO66\",\"qty\":5}]}" | jq -r .id)
+WO75=$(api "$OWNER" POST /rekomendasi/menu/faktur "{\"items\":[{\"menu_id\":\"$MENU75\",\"porsi\":30}],\"tujuan_branch_id\":\"$CB46_ID\",\"ck_branch_id\":\"$CK52_UTAMA\"}")
+PF75=$(echo "$WO75" | jq -r '.produksi.faktur_id')
+BP75=$(echo "$WO75" | jq -r '.beli_produksi.faktur_id')
+RID75=$(api "$OWNER" GET /rekomendasi/permintaan | jq -r --arg p "$PF75" '[.[] | select(.produksi.faktur_id==$p)][0].rencana_id')
+cek "permintaan baru tampil di Data Permintaan Stok" "V == 1" \
+  "$([ -n "$RID75" ] && [ "$RID75" != "null" ] && echo 1 || echo 0)"
+cek "faktur produksi permintaan ada di /produksi" "V >= 1" \
+  "$(api "$OWNER" GET "/produksi?branch_id=$CK52_UTAMA&per_page=500" | jq --arg f "$PF75" '[.rows[] | select(.faktur_id==$f)] | length')"
+# HAPUS permintaan (tanpa password) → semua fakturnya soft-delete
+api "$OWNER" DELETE "/rekomendasi/permintaan/$RID75" > /dev/null
+cek "hapus permintaan → hilang dari Data Permintaan Stok" "V == 0" \
+  "$(api "$OWNER" GET /rekomendasi/permintaan | jq --arg r "$RID75" '[.[] | select(.rencana_id==$r)] | length')"
+cek "hapus permintaan → faktur produksi hilang dari /produksi" "V == 0" \
+  "$(api "$OWNER" GET "/produksi?branch_id=$CK52_UTAMA&per_page=500" | jq --arg f "$PF75" '[.rows[] | select(.faktur_id==$f)] | length')"
+cek "hapus permintaan → faktur bahan produksi hilang dari /pembelian" "V == 0" \
+  "$(api "$OWNER" GET "/pembelian?branch_id=$CK52_UTAMA&per_page=500" | jq --arg f "$BP75" '[.rows[] | select(.faktur_id==$f)] | length')"
+cek "hapus permintaan → faktur produksi masuk Tempat Sampah" "V == 1" \
+  "$(api "$OWNER" GET /sampah | jq --arg f "$PF75" '([.[] | select(.jenis=="produksi" and .key==$f)] | length==1) | if . then 1 else 0 end')"
+cek "hapus permintaan → faktur bahan produksi masuk Tempat Sampah" "V == 1" \
+  "$(api "$OWNER" GET /sampah | jq --arg f "$BP75" '([.[] | select(.jenis=="pembelian" and .key==$f)] | length==1) | if . then 1 else 0 end')"
+# pulihkan faktur produksi → permintaan muncul lagi (bagian produksi kembali)
+api "$OWNER" POST /sampah/pulihkan "{\"jenis\":\"produksi\",\"key\":\"$PF75\"}" > /dev/null
+cek "pulihkan faktur produksi → permintaan muncul lagi" "V == 1" \
+  "$(api "$OWNER" GET /rekomendasi/permintaan | jq --arg r "$RID75" '[.[] | select(.rencana_id==$r)] | length')"
+# rencana_id tak dikenal → 404
+cek "hapus permintaan rencana_id asing → 404" "V == 404" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X DELETE "$BASE/api/rekomendasi/permintaan/00000000-0000-4000-8000-000000000000" -H "Authorization: Bearer $OWNER")"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]
