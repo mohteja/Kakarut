@@ -83,6 +83,37 @@ export interface BahanDto {
   jumlah_supplier: number;
 }
 
+/** Mode impor CSV bahan baku. */
+export type BahanImportMode = "perbarui" | "tambah";
+
+/**
+ * Satu baris impor CSV bahan baku (hasil parse di web → dikirim ke server).
+ * Cocok dengan bahan lewat `kode` (bila ada) lalu slug (nama). `jenis`
+ * (pengadaan) hanya diterapkan pada bahan BARU.
+ */
+export interface BahanImportRow {
+  kode: string | null;
+  nama: string;
+  kategori: string;
+  jenis: JenisPengadaan;
+  harga_beli: number;
+  isi: number;
+  satuan: string;
+  satuan_beli: string | null;
+  stok_minimum: number;
+  boleh_eceran: boolean;
+  lacak_stok: boolean;
+  catatan: string | null;
+}
+
+/** Ringkasan hasil impor CSV bahan baku. */
+export interface BahanImportResult {
+  ditambah: number;
+  diperbarui: number;
+  dilewati: number;
+  gagal: { nama: string; alasan: string }[];
+}
+
 /**
  * Satu supplier yang terdaftar untuk sebuah bahan (info "beli di mana").
  * is_utama = supplier utama/langganan (maksimal satu per bahan).
