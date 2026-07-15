@@ -352,11 +352,19 @@ export function FakturDetailModal({
                 );
                 const isWorkOrderFaktur =
                   tipe === "produksi" && grup.rows.some((r) => r.tujuan_branch_id != null);
-                const opsiTahap = AKSI_TAHAP[tipe].filter(
-                  (a) =>
-                    URUTAN_TAHAP[a.ke] > tahapTerawal &&
-                    !(isWorkOrderFaktur && a.ke === "dikonfirmasi"),
-                );
+                const adaTujuan = grup.rows.some((r) => r.tujuan_branch_id != null);
+                const opsiTahap = AKSI_TAHAP[tipe]
+                  .filter(
+                    (a) =>
+                      URUTAN_TAHAP[a.ke] > tahapTerawal &&
+                      !(isWorkOrderFaktur && a.ke === "dikonfirmasi"),
+                  )
+                  // belanja bertujuan cabang: "menunggu" = barang tiba di CK
+                  .map((a) =>
+                    tipe === "beli" && adaTujuan && a.ke === "menunggu"
+                      ? { ...a, label: "📦 Tiba di CK (semua barang di CK)" }
+                      : a,
+                  );
                 if (opsiTahap.length === 0) return null;
                 return (
                   <select

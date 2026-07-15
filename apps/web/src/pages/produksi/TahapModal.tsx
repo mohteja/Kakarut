@@ -101,7 +101,10 @@ export function TahapModal({
     ),
   );
 
-  const label = AKSI_TAHAP[tipe].find((a) => a.ke === ke)?.label ?? ke;
+  const label =
+    tipe === "beli" && isWorkOrder && ke === "menunggu"
+      ? "📦 Tiba di CK (semua barang di CK)"
+      : (AKSI_TAHAP[tipe].find((a) => a.ke === ke)?.label ?? ke);
   const keStok = ke === "dikonfirmasi";
   // RAB → diproses hanya INFO (dan pencatatan dana cair) — jumlah barang belum
   // berubah; penyesuaian barang dilakukan saat proses → selesai.
@@ -418,12 +421,16 @@ export function TahapModal({
         {keSelesai && (
           <div className="space-y-2 rounded-lg border border-stone-200 p-3">
             <div className="text-sm font-semibold text-stone-700">
-              {isWorkOrder ? "📦 Selesai — disimpan di Central Kitchen" : "🚚 Dikirim / disimpan ke mana?"}
+              {isWorkOrder
+                ? tipe === "beli"
+                  ? "📦 Tiba di CK — semua barang disimpan di CK dulu"
+                  : "📦 Selesai — disimpan di Central Kitchen"
+                : "🚚 Dikirim / disimpan ke mana?"}
             </div>
             {isWorkOrder && (
               <div className="rounded bg-purple-50 px-2 py-1.5 text-xs text-purple-800">
-                Barang jadi disimpan dulu di CK. Kirim ke cabang tujuan lewat tombol{" "}
-                <b>🚚 Kirim ke cabang</b> setelah selesai.
+                Barang disimpan dulu di CK. Kirim ke cabang tujuan lewat tombol{" "}
+                <b>🚚 Kirim ke cabang</b> — dokumen kirim (surat jalan) dibuat otomatis.
               </div>
             )}
             <div className="grid gap-2 sm:grid-cols-2">

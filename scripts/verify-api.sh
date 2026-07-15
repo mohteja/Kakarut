@@ -2167,14 +2167,24 @@ cek "beli produk jadi: lahir di CK, tujuan=store, tanpa supplier" "V == 1" \
 api "$TCK58" POST "/pembelian/tahap/$BF71" '{"ke":"dikerjakan"}' > /dev/null
 cek "pemroses tercatat otomatis = tim CK yang memproses" "V == 1" \
   "$(api "$OWNER" GET "/pembelian?branch_id=$CK52_UTAMA&per_page=500" | jq --arg f "$BF71" --arg u "$U58_ID" '([.rows[] | select(.faktur_id==$f)] | (length>0) and all(.[]; .worker_id==$u and .status=="dikerjakan")) | if . then 1 else 0 end')"
-# DIKIRIM (menunggu) → baris otomatis pindah ke cabang tujuan
+# TIBA DI CK (menunggu): semua barang KUMPUL DI CK dulu — belum pindah
 api "$TCK58" POST "/pembelian/tahap/$BF71" '{"ke":"menunggu"}' > /dev/null
-cek "dikirim: baris pindah ke store (menunggu)" "V == 1" \
+cek "tiba di CK: semua barang masih di CK (menunggu)" "V == 1" \
+  "$(api "$OWNER" GET "/pembelian?branch_id=$CK52_UTAMA&per_page=500" | jq --arg f "$BF71" '([.rows[] | select(.faktur_id==$f)] | (length>0) and all(.[]; .status=="menunggu")) | if . then 1 else 0 end')"
+cek "belum muncul di Penerimaan store (belum dikirim)" "V == 0" \
+  "$(api "$OWNER" GET "/penerimaan?branch_id=$CB46_ID" | jq --arg f "$BF71" '[.rows[] | select(.faktur_id==$f)] | length')"
+cek "transit di CK tidak masuk Penerimaan CK (bukan barang CK)" "V == 0" \
+  "$(api "$OWNER" GET "/penerimaan?branch_id=$CK52_UTAMA" | jq --arg f "$BF71" '[.rows[] | select(.faktur_id==$f)] | length')"
+# KIRIM KE CABANG (dokumen kirim) → baris pindah ke store, tetap menunggu
+api "$TCK58" POST "/pembelian/kirim/$BF71" '{}' > /dev/null
+cek "kirim: baris pindah ke store (menunggu)" "V == 1" \
   "$(api "$OWNER" GET "/pembelian?branch_id=$CB46_ID&per_page=500" | jq --arg f "$BF71" '([.rows[] | select(.faktur_id==$f)] | (length>0) and all(.[]; .status=="menunggu")) | if . then 1 else 0 end')"
-cek "dikirim: tidak lagi tercatat di CK" "V == 0" \
+cek "kirim: tidak lagi tercatat di CK" "V == 0" \
   "$(api "$OWNER" GET "/pembelian?branch_id=$CK52_UTAMA&per_page=500" | jq --arg f "$BF71" '[.rows[] | select(.faktur_id==$f)] | length')"
 cek "kiriman beli muncul di Penerimaan store" "V == 1" \
   "$(api "$OWNER" GET "/penerimaan?branch_id=$CB46_ID" | jq --arg f "$BF71" '([.rows[] | select(.faktur_id==$f and .jalur=="beli")] | length > 0) | if . then 1 else 0 end')"
+cek "log faktur: aksi 'Dikirim ke' tercatat" "V >= 1" \
+  "$(api "$OWNER" GET "/pembelian/log/$BF71" | jq '[.rows[] | select(.aksi | startswith("Dikirim ke"))] | length')"
 # store terima → stok masuk STORE, bukan CK (10 butuh → 1 kemasan = 24 botol)
 api "$OWNER" POST "/penerimaan/$BF71/terima" > /dev/null
 cek "terima: saldo sirup di store = 24" "abs(V - 24) < 0.001" \
@@ -2294,12 +2304,15 @@ cek "baris bahan produksi tetap di CK (tujuan null)" "V == 1" \
   "$(echo "$B74" | jq --arg i "$CB74" '([.[] | select(.ingredient_id==$i)][0].tujuan_branch_id == null) | if . then 1 else 0 end')"
 cek "permintaan: bagian beli & bahan produksi merujuk faktur sama" "V == 1" \
   "$(api "$OWNER" GET /rekomendasi/permintaan | jq --arg f "$BF74" '[.[] | select(.beli.faktur_id==$f)][0] | (.beli.faktur_id == .beli_produksi.faktur_id) | if . then 1 else 0 end')"
-# proses → KIRIM hanya baris produk jadi: pindah ke cabang; bahan produksi tinggal di CK
+# proses → TIBA DI CK (baris produk jadi) → KIRIM ke cabang; bahan produksi tinggal
 api "$OWNER" POST "/pembelian/tahap/$BF74" '{"ke":"dikerjakan"}' > /dev/null
 IDJ74=$(echo "$B74" | jq -r --arg i "$J74" '[.[] | select(.ingredient_id==$i)][0].id')
 QJ74=$(echo "$B74" | jq -r --arg i "$J74" '[.[] | select(.ingredient_id==$i)][0].qty')
 api "$OWNER" POST "/pembelian/tahap/$BF74" "{\"ke\":\"menunggu\",\"items\":[{\"id\":\"$IDJ74\",\"qty\":$QJ74}]}" > /dev/null
-cek "dikirim: baris produk jadi pindah ke cabang (menunggu)" "V == 1" \
+cek "tiba di CK: kedua baris masih di CK (jadi=menunggu, produksi=dikerjakan)" "V == 1" \
+  "$(api "$OWNER" GET "/pembelian?branch_id=$CK52_UTAMA&per_page=500" | jq --arg f "$BF74" '([.rows[] | select(.faktur_id==$f)] | (length==2) and (([.[] | select(.status=="menunggu")] | length)==1) and (([.[] | select(.status=="dikerjakan")] | length)==1)) | if . then 1 else 0 end')"
+api "$OWNER" POST "/pembelian/kirim/$BF74" '{}' > /dev/null
+cek "kirim: baris produk jadi pindah ke cabang (menunggu)" "V == 1" \
   "$(api "$OWNER" GET "/pembelian?branch_id=$CB46_ID&per_page=500" | jq --arg f "$BF74" '([.rows[] | select(.faktur_id==$f)] | (length==1) and (.[0].status=="menunggu")) | if . then 1 else 0 end')"
 cek "bahan produksi masih di CK (dikerjakan)" "V == 1" \
   "$(api "$OWNER" GET "/pembelian?branch_id=$CK52_UTAMA&per_page=500" | jq --arg f "$BF74" --arg i "$CB74" '([.rows[] | select(.faktur_id==$f)] | (length==1) and (.[0].ingredient_id==$i) and (.[0].status=="dikerjakan")) | if . then 1 else 0 end')"
