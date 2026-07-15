@@ -479,13 +479,12 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                         💸 cair {formatRupiah(g.danaCair)}
                       </span>
                     )}
-                    {g.dibuatOleh && <span>oleh {g.dibuatOleh}</span>}
                     {/* cabang faktur (tampilan Kantor "semua cabang") */}
                     {dariKantor && g.cabang && <span>🏪 {g.cabang}</span>}
-                    {/* work-order CK: cabang tujuan pengiriman */}
+                    {/* TUJUAN pengiriman — dibuat mencolok agar tak salah lihat */}
                     {g.tujuanCabang && (
-                      <span className="whitespace-nowrap rounded bg-purple-50 px-1.5 py-0.5 font-semibold text-purple-700">
-                        → {g.tujuanCabang}
+                      <span className="whitespace-nowrap rounded-md bg-purple-100 px-2 py-0.5 text-sm font-bold text-purple-800">
+                        📦 → {g.tujuanCabang}
                       </span>
                     )}
                     {g.catatan && <span>· {g.catatan}</span>}
@@ -528,6 +527,10 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                   <div className="text-lg font-bold text-stone-800">
                     {formatRupiah(g.totalHarga)}
                   </div>
+                  {/* pembuat faktur cukup di footer — header tetap ringkas */}
+                  {g.dibuatOleh && (
+                    <div className="text-xs text-stone-400">dibuat oleh {g.dibuatOleh}</div>
+                  )}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   {/* dokumen belanja: pegangan pembelanja saat faktur diproses */}
@@ -654,6 +657,11 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
           tipe={tipe}
           endpoint={t.endpoint}
           onClose={() => setDetail(null)}
+          // pilih tahap dari detail → langsung tukar ke modal Ubah Tahap
+          onUbahTahap={(ke) => {
+            setUbahTahap({ grup: detail, ke });
+            setDetail(null);
+          }}
         />
       )}
       {ubahTahap && (

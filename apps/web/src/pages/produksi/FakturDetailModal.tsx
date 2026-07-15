@@ -4,7 +4,14 @@ import type { FakturLogRow, JenisPengadaan, PenyimpananDto, SupplierDto } from "
 import { ErrorText, Modal, btnPrimary, btnSecondary, inputClass } from "../../components/ui";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah, formatWaktu } from "../../lib/format";
-import { badgeFaktur, type FakturGroup } from "./TambahStokPage";
+import {
+  AKSI_TAHAP,
+  URUTAN_TAHAP,
+  badgeFaktur,
+  belumSelesai,
+  type FakturGroup,
+  type TahapTujuan,
+} from "./TambahStokPage";
 
 interface Karyawan {
   user_id: string;
@@ -31,11 +38,14 @@ export function FakturDetailModal({
   tipe,
   endpoint,
   onClose,
+  onUbahTahap,
 }: {
   grup: FakturGroup;
   tipe: JenisPengadaan;
   endpoint: string;
   onClose: () => void;
+  /** ganti tahap langsung dari detail (parent menukar ke TahapModal) */
+  onUbahTahap?: (ke: TahapTujuan) => void;
 }) {
   // Tempat penyimpanan diambil dari cabang FAKTUR ini (bukan pilihan Kantor),
   // agar daftar tempat cocok dengan cabang faktur — termasuk faktur store lama
@@ -112,9 +122,10 @@ export function FakturDetailModal({
     onSuccess: selesai,
   });
 
+  // Hapus = SOFT-DELETE ke Tempat Sampah (cukup konfirmasi, tanpa password —
+  // bisa dipulihkan dari Tempat Sampah).
   const hapus = useMutation({
-    mutationFn: () =>
-      api(`${endpoint}/faktur/${grup.key}`, { method: "DELETE", body: { password } }),
+    mutationFn: () => api(`${endpoint}/faktur/${grup.key}`, { method: "DELETE" }),
     onSuccess: selesai,
   });
 
@@ -312,7 +323,42 @@ export function FakturDetailModal({
             </div>
           )}
 
-          <div className="flex justify-end gap-2 pt-1">
+          <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
+            {/* ganti tahap langsung dari detail — tanpa harus menutup modal dulu */}
+            {onUbahTahap &&
+              grup.fakturId &&
+              belumSelesai(grup.status) &&
+              (() => {
+                const tahapTerawal = Math.min(
+                  ...grup.rows.map((r) => URUTAN_TAHAP[r.status]),
+                );
+                const isWorkOrderFaktur =
+                  tipe === "produksi" && grup.rows.some((r) => r.tujuan_branch_id != null);
+                const opsiTahap = AKSI_TAHAP[tipe].filter(
+                  (a) =>
+                    URUTAN_TAHAP[a.ke] > tahapTerawal &&
+                    !(isWorkOrderFaktur && a.ke === "dikonfirmasi"),
+                );
+                if (opsiTahap.length === 0) return null;
+                return (
+                  <select
+                    value=""
+                    onChange={(e) => {
+                      const ke = e.target.value as TahapTujuan | "";
+                      if (ke) onUbahTahap(ke);
+                    }}
+                    aria-label="Ubah tahap faktur dari detail"
+                    className="cursor-pointer rounded-lg bg-orange-600 px-4 py-2 text-sm font-bold text-white hover:bg-orange-500"
+                  >
+                    <option value="">➡ Ubah Tahap</option>
+                    {opsiTahap.map((a) => (
+                      <option key={a.ke} value={a.ke}>
+                        {a.label}
+                      </option>
+                    ))}
+                  </select>
+                );
+              })()}
             <button onClick={() => setMode("ubah")} className={btnSecondary}>
               ✏️ Ubah metadata
             </button>
@@ -447,27 +493,10 @@ export function FakturDetailModal({
       )}
 
       {mode === "hapus" && (
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            hapus.mutate();
-          }}
-          className="space-y-3"
-        >
+        <div className="space-y-3">
           <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">
-            Faktur akan dipindah ke <b>Tempat Sampah</b> dan stoknya dikoreksi. Tidak bisa
-            dikembalikan — hanya jadi catatan siapa yang menghapus.
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium">Password akun (konfirmasi hapus)</label>
-            <input
-              type="password"
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className={inputClass}
-              placeholder="••••••••"
-            />
+            Faktur akan dipindah ke <b>Tempat Sampah</b> dan stoknya dikoreksi. Masih bisa{" "}
+            <b>dipulihkan</b> dari Tempat Sampah bila terhapus tak sengaja.
           </div>
           <ErrorText error={hapus.error} />
           <div className="flex justify-end gap-2 pt-1">
@@ -475,14 +504,14 @@ export function FakturDetailModal({
               Batal
             </button>
             <button
-              type="submit"
+              onClick={() => hapus.mutate()}
               disabled={hapus.isPending}
               className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
             >
-              {hapus.isPending ? "Menghapus…" : "Hapus ke Tempat Sampah"}
+              {hapus.isPending ? "Menghapus…" : "Ya, pindahkan ke Tempat Sampah"}
             </button>
           </div>
-        </form>
+        </div>
       )}
     </Modal>
   );

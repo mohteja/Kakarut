@@ -9,7 +9,6 @@ import {
   requireRole,
   resolveBranchId,
   terikatCabang,
-  verifikasiPassword,
   type AppEnv,
 } from "../../middleware/auth";
 import { tanggalDi } from "../../lib/time";
@@ -143,11 +142,10 @@ export const penjualanRoutes = new Hono<AppEnv>()
   .delete(
     "/:id",
     requireRole("owner", "admin"),
-    zValidator("json", z.object({ password: z.string() })),
     async (c) => {
       const auth = c.get("auth");
-      await verifikasiPassword(auth.sub, c.req.valid("json").password);
-      // Soft-delete → Tempat Sampah: baris & item/konsumsi tetap ada (audit),
+      // Cukup konfirmasi (tanpa password): SOFT-DELETE → Tempat Sampah,
+      // bisa dipulihkan. Baris & item/konsumsi tetap ada (audit),
       // saldo stok pulih karena semua agregasi memfilter deleted_at IS NULL.
       const [row] = await db
         .update(sales)

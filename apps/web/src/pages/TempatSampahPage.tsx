@@ -1,6 +1,6 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { SampahRow } from "@kakarut/shared";
-import { Card, PageTitle, Spinner, tdClass, thClass } from "../components/ui";
+import { Card, ErrorText, PageTitle, Spinner, tdClass, thClass } from "../components/ui";
 import { api } from "../lib/api";
 import { formatRupiah, formatWaktu } from "../lib/format";
 
@@ -10,21 +10,34 @@ const JENIS: Record<SampahRow["jenis"], { label: string; cls: string }> = {
   produksi: { label: "Produksi", cls: "bg-purple-100 text-purple-700" },
 };
 
-/** Tempat Sampah: transaksi yang dihapus (hanya catatan, tidak bisa dikembalikan). */
+/** Tempat Sampah: transaksi yang di-soft-delete — bisa DIPULIHKAN kembali. */
 export function TempatSampahPage() {
+  const queryClient = useQueryClient();
   const { data, isLoading } = useQuery({
     queryKey: ["sampah"],
     queryFn: () => api<SampahRow[]>("/sampah"),
   });
   const list = data ?? [];
 
+  const pulihkan = useMutation({
+    mutationFn: (r: SampahRow) =>
+      api("/sampah/pulihkan", { method: "POST", body: { jenis: r.jenis, key: r.key } }),
+    onSuccess: () => {
+      // stok/laporan/daftar transaksi langsung terhitung lagi
+      for (const key of ["sampah", "stok", "laporan", "penjualan", "/pembelian", "/produksi", "rekomendasi"]) {
+        queryClient.invalidateQueries({ queryKey: [key] });
+      }
+    },
+  });
+
   return (
     <div className="max-w-5xl">
       <PageTitle>Tempat Sampah</PageTitle>
       <div className="mb-3 rounded-lg bg-yellow-50 px-4 py-2 text-sm text-yellow-800">
-        Transaksi yang dihapus disimpan di sini sebagai <b>catatan siapa yang menghapus</b>. Stok
-        sudah dikoreksi saat dihapus. <b>Tidak bisa dikembalikan.</b>
+        Transaksi yang dihapus disimpan di sini (soft delete) — stok & laporan sudah
+        dikoreksi. Salah hapus? Tekan <b>♻ Pulihkan</b> untuk mengembalikannya.
       </div>
+      <ErrorText error={pulihkan.error} />
 
       {isLoading ? (
         <Spinner />
@@ -42,6 +55,7 @@ export function TempatSampahPage() {
                 <th className={thClass}>Dihapus oleh</th>
                 <th className={thClass}>Dihapus pada</th>
                 <th className={`${thClass} text-right`}>Total</th>
+                <th className={thClass}></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-stone-100">
@@ -61,6 +75,22 @@ export function TempatSampahPage() {
                   <td className={tdClass}>{formatWaktu(r.dihapus_pada)}</td>
                   <td className={`${tdClass} text-right`}>
                     {r.total > 0 ? formatRupiah(r.total) : "—"}
+                  </td>
+                  <td className={`${tdClass} text-right`}>
+                    <button
+                      onClick={() => {
+                        if (
+                          confirm(
+                            `Pulihkan ${JENIS[r.jenis].label.toLowerCase()} "${r.label}"? Stok & laporan akan terhitung kembali.`,
+                          )
+                        )
+                          pulihkan.mutate(r);
+                      }}
+                      disabled={pulihkan.isPending}
+                      className="text-sm font-medium text-emerald-700 hover:underline disabled:opacity-50"
+                    >
+                      ♻ Pulihkan
+                    </button>
                   </td>
                 </tr>
               ))}

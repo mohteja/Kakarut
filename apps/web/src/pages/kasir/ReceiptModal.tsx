@@ -7,7 +7,7 @@ const METODE_LABEL: Record<MetodeBayar, string> = {
   qris: "QRIS",
   transfer: "Transfer",
 };
-import { ErrorText, btnPrimary, btnSecondary, inputClass } from "../../components/ui";
+import { ErrorText, btnPrimary, btnSecondary } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { usePrinter } from "../../context/PrinterContext";
 import { api } from "../../lib/api";
@@ -94,12 +94,11 @@ export function ReceiptModal({
   const [printError, setPrintError] = useState<string | null>(null);
   const [printing, setPrinting] = useState(false);
   const [modeHapus, setModeHapus] = useState(false);
-  const [password, setPassword] = useState("");
   const autoPrintedFor = useRef<string | null>(null);
 
+  // SOFT-DELETE ke Tempat Sampah (cukup konfirmasi — bisa dipulihkan)
   const hapus = useMutation({
-    mutationFn: () =>
-      api(`/penjualan/${data.sale.id}`, { method: "DELETE", body: { password } }),
+    mutationFn: () => api(`/penjualan/${data.sale.id}`, { method: "DELETE" }),
     onSuccess: () => onDeleted?.(),
   });
 
@@ -293,25 +292,11 @@ export function ReceiptModal({
           </button>
         )}
         {onDeleted && modeHapus && (
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              hapus.mutate();
-            }}
-            className="mt-3 space-y-2 rounded-lg bg-red-50 p-3 print:hidden"
-          >
+          <div className="mt-3 space-y-2 rounded-lg bg-red-50 p-3 print:hidden">
             <div className="text-xs text-red-800">
-              Transaksi dipindah ke <b>Tempat Sampah</b> & stok dikoreksi. Tidak bisa dikembalikan.
-              Masukkan password akun.
+              Transaksi dipindah ke <b>Tempat Sampah</b> & stok dikoreksi. Masih bisa{" "}
+              <b>dipulihkan</b> dari Tempat Sampah bila terhapus tak sengaja.
             </div>
-            <input
-              type="password"
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className={inputClass}
-              placeholder="••••••••"
-            />
             <ErrorText error={hapus.error} />
             <div className="flex gap-2">
               <button
@@ -322,14 +307,14 @@ export function ReceiptModal({
                 Batal
               </button>
               <button
-                type="submit"
+                onClick={() => hapus.mutate()}
                 disabled={hapus.isPending}
                 className="flex-1 rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
               >
-                {hapus.isPending ? "Menghapus…" : "Hapus"}
+                {hapus.isPending ? "Menghapus…" : "Ya, hapus"}
               </button>
             </div>
-          </form>
+          </div>
         )}
       </div>
     </div>

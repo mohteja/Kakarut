@@ -78,10 +78,19 @@ export function DokumenBelanjaModal({
         </div>
         <div className={`mt-1 text-xs ${cetak ? "" : "text-stone-500"}`}>
           {grup.cabang && <>🏪 {grup.cabang}</>}
-          {grup.tujuanCabang && <> · tujuan: {grup.tujuanCabang}</>}
           {grup.dikerjakanOleh && <> · 🔧 pembelanja: {grup.dikerjakanOleh}</>}
           {grup.catatan && <> · 📝 {grup.catatan}</>}
         </div>
+        {/* TUJUAN BARANG dibuat besar & mencolok agar tak salah kirim */}
+        {grup.tujuanCabang && (
+          <div
+            className={`mt-2 rounded-lg px-3 py-2 text-base font-bold ${
+              cetak ? "border-2 border-black" : "bg-purple-100 text-purple-900"
+            }`}
+          >
+            📦 Barang untuk: → {grup.tujuanCabang}
+          </div>
+        )}
       </div>
 
       {/* Daftar belanja per supplier */}

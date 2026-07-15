@@ -156,13 +156,15 @@ export function PermintaanStokPage() {
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                       <span className="font-bold text-stone-800">📋 Permintaan</span>
+                      {/* TUJUAN barang dibuat mencolok agar tak salah lihat */}
                       {r.tujuan_cabang && (
-                        <span className="text-sm text-stone-600">🏪 {r.tujuan_cabang}</span>
+                        <span className="whitespace-nowrap rounded-md bg-purple-100 px-2 py-0.5 text-sm font-bold text-purple-800">
+                          📦 → {r.tujuan_cabang}
+                        </span>
                       )}
                     </div>
                     <div className="mt-0.5 text-xs text-stone-500">
                       {formatWaktu(r.waktu)}
-                      {r.pembuat && ` · oleh ${r.pembuat}`}
                       {r.catatan && ` · ${r.catatan}`}
                     </div>
                   </div>
@@ -179,10 +181,14 @@ export function PermintaanStokPage() {
                     <Bagian jalur="beli_produksi" data={r.beli_produksi} to="/pembelian" />
                   )}
                 </div>
-                {/* Footer: total transaksi permintaan */}
+                {/* Footer: total transaksi permintaan + pembuat */}
                 <div className="px-4 py-2.5">
                   <div className="text-xs text-stone-500">Total transaksi:</div>
                   <div className="text-lg font-bold text-stone-800">{formatRupiah(total)}</div>
+                  {/* pembuat cukup di footer — header tetap ringkas */}
+                  {r.pembuat && (
+                    <div className="text-xs text-stone-400">dibuat oleh {r.pembuat}</div>
+                  )}
                 </div>
               </Card>
             );
