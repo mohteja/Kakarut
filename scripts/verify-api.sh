@@ -599,8 +599,12 @@ cek "list = objek {rows[],total}" "V == 1" \
 cek "total faktur >= 3" "V >= 3" "$(echo "$LGP" | jq '.total')"
 cek "per_page=2 → maks 2 faktur/halaman" "V <= 2" \
   "$(echo "$LGP" | jq '[.rows[].faktur_id] | unique | length')"
-cek "rows urut waktu naik (terlama dulu)" "V == 1" \
+cek "rows dalam halaman urut waktu naik" "V == 1" \
   "$(echo "$LGP" | jq '(((.rows|length)==0) or (.rows[0].waktu <= .rows[-1].waktu)) | if . then 1 else 0 end')"
+# urutan faktur: belum selesai dulu, lalu terbaru → LG-3 (baru dibuat, belum
+# dikonfirmasi) harus muncul di halaman 1
+cek "halaman 1 memuat faktur terbaru yg belum selesai (LG-3)" "V >= 1" \
+  "$(echo "$LGP" | jq '[.rows[] | select(.no_faktur=="LG-3")] | length')"
 cek "filter tanggal hari ini memuat faktur baru" "V >= 1" \
   "$(api "$OWNER" GET "/pembelian?dari=$HARI&sampai=$HARI&per_page=200" | jq '[.rows[] | select(.no_faktur=="LG-3")] | length')"
 cek "filter tanggal lampau → 0 faktur" "V == 0" \

@@ -1076,9 +1076,10 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
       return c.json({ ...row, bahan: ing.nama }, 201);
     })
     /**
-     * Daftar "buku besar": pagination per FAKTUR, urut terlama → terbaru
-     * (halaman awal = terlama, halaman terakhir = terbaru). Filter rentang
-     * tanggal opsional (dari/sampai). Balikan { rows, total, total_pengeluaran }.
+     * Daftar "buku besar": pagination per FAKTUR. Urutan: faktur yang BELUM
+     * selesai (masih di pipeline) dulu, lalu terbaru → terlama (halaman awal
+     * = yang perlu ditindak + terbaru). Filter rentang tanggal opsional
+     * (dari/sampai). Balikan { rows, total, total_pengeluaran }.
      */
     .get("/", async (c) => {
       const auth = c.get("auth");
@@ -1114,13 +1115,17 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         .where(and(...conds));
       const total = ringkas?.total ?? 0;
 
-      // faktur untuk halaman ini (terlama dulu; halaman terakhir = terbaru)
+      // faktur untuk halaman ini: yang belum selesai (ada baris yang masih di
+      // pipeline) dulu, lalu terbaru → terlama
       const keyRows = await db
         .select({ key: keyExpr })
         .from(productions)
         .where(and(...conds))
         .groupBy(keyExpr)
-        .orderBy(sql`MIN(${productions.waktu}) ASC`)
+        .orderBy(
+          sql`MAX(CASE WHEN ${productions.status} NOT IN ('dikonfirmasi', 'ditolak') THEN 1 ELSE 0 END) DESC`,
+          sql`MIN(${productions.waktu}) DESC`,
+        )
         .limit(perPage)
         .offset((page - 1) * perPage);
       const keys = keyRows.map((r) => r.key);
