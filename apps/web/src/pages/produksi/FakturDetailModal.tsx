@@ -254,10 +254,28 @@ export function FakturDetailModal({
               <tbody className="divide-y divide-stone-100">
                 {grup.rows.map((r) => {
                   const ditolak = r.status === "ditolak";
+                  // faktur campuran: tujuan tiap baris ditulis eksplisit
+                  const campuranTujuan =
+                    tipe === "beli" &&
+                    grup.rows.some((x) => x.tujuan_branch_id != null) &&
+                    grup.rows.some((x) => x.tujuan_branch_id == null);
                   return (
                   <tr key={r.id} className={ditolak ? "bg-red-50/60" : ""}>
                     <td className="px-3 py-1.5 font-medium">
                       {r.bahan}
+                      {campuranTujuan && (
+                        <span
+                          className={`ml-1.5 whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-bold ${
+                            r.tujuan_branch_id != null
+                              ? "bg-purple-100 text-purple-800"
+                              : "bg-stone-200 text-stone-700"
+                          }`}
+                        >
+                          {r.tujuan_branch_id != null
+                            ? `📦 → ${r.tujuan_cabang ?? "cabang"}`
+                            : "🏭 di sini"}
+                        </span>
+                      )}
                       {ditolak && (
                         <span className="ml-1.5 rounded bg-red-100 px-1.5 py-0.5 text-xs font-semibold text-red-700">
                           ❌ ditolak

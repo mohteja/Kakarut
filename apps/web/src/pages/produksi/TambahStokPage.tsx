@@ -309,6 +309,9 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
         byKey.set(key, g);
       }
       g.rows.push(r);
+      // faktur campuran (produk jadi + bahan produksi): tujuan diambil dari
+      // baris mana pun yang punya — baris bahan produksi tujuannya null
+      if (!g.tujuanCabang && r.tujuan_cabang) g.tujuanCabang = r.tujuan_cabang;
       // baris ditolak tak menambah biaya (barang tidak diterima)
       if (r.status !== "ditolak") g.totalHarga += r.total_harga ?? 0;
     }

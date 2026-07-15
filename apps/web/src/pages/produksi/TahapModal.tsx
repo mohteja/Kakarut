@@ -63,10 +63,30 @@ export function TahapModal({
   const cabangIniCk =
     cabang.find((b) => b.id === fakturBranchId)?.tipe === "central_kitchen";
   const target = URUTAN_TAHAP[ke];
-  // hanya baris yang tahapnya masih di belakang tujuan yang bisa maju
+  // hanya baris yang tahapnya masih di belakang tujuan yang bisa maju;
+  // baris BERTUJUAN CABANG diterima lewat Penerimaan cabang — bukan
+  // dikonfirmasi di sini (faktur campuran: bahan produksi tetap bisa)
   const bisaMaju = grup.rows.filter(
-    (r) => r.status !== "ditolak" && URUTAN_TAHAP[r.status] < target,
+    (r) =>
+      r.status !== "ditolak" &&
+      URUTAN_TAHAP[r.status] < target &&
+      !(ke === "dikonfirmasi" && r.tujuan_branch_id != null),
   );
+  const dikecualikanTujuan =
+    ke === "dikonfirmasi"
+      ? grup.rows.filter(
+          (r) =>
+            r.status !== "ditolak" &&
+            URUTAN_TAHAP[r.status] < target &&
+            r.tujuan_branch_id != null,
+        ).length
+      : 0;
+  // faktur campuran (produk jadi → cabang + bahan produksi di tempat):
+  // tujuan tiap baris ditampilkan agar tak salah pilih saat maju sebagian
+  const campuranTujuan =
+    tipe === "beli" &&
+    grup.rows.some((r) => r.tujuan_branch_id != null) &&
+    grup.rows.some((r) => r.tujuan_branch_id == null);
   const [pilih, setPilih] = useState<Record<string, PilihanBaris>>(() =>
     Object.fromEntries(
       bisaMaju.map((r) => [
@@ -239,6 +259,12 @@ export function TahapModal({
             terhitung{tipe === "beli" ? " dan tercatat sebagai pengeluaran" : ""}.
           </div>
         )}
+        {dikecualikanTujuan > 0 && (
+          <div className="rounded-lg bg-purple-50 px-3 py-2 text-sm text-purple-800">
+            📦 {dikecualikanTujuan} baris bertujuan cabang tidak ikut di sini — barang itu
+            diterima lewat <b>Penerimaan</b> di cabang tujuannya setelah dikirim.
+          </div>
+        )}
 
         {bisaMaju.length === 0 ? (
           <div className="py-6 text-center text-sm text-stone-400">
@@ -295,6 +321,20 @@ export function TahapModal({
                       )}
                       <td className={`${tdClass} font-medium`}>
                         {r.bahan}
+                        {/* faktur campuran: tujuan tiap baris ditulis eksplisit */}
+                        {campuranTujuan && (
+                          <span
+                            className={`ml-1.5 whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-bold ${
+                              r.tujuan_branch_id != null
+                                ? "bg-purple-100 text-purple-800"
+                                : "bg-stone-200 text-stone-700"
+                            }`}
+                          >
+                            {r.tujuan_branch_id != null
+                              ? `📦 → ${r.tujuan_cabang ?? "cabang"}`
+                              : "🏭 di sini"}
+                          </span>
+                        )}
                         <div className="mt-0.5 sm:hidden">
                           <span
                             className={`whitespace-nowrap rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${badgeFaktur(tipe, r.status).cls}`}
