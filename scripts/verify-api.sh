@@ -2207,6 +2207,17 @@ cek "kasir GET supplier bahan → boleh (1 baris)" "V == 1" \
 api "$OWNER" PUT "/bahan/$BH72_ID/supplier" '{"items":[]}' > /dev/null
 cek "PUT items kosong → daftar kosong" "V == 0" \
   "$(api "$OWNER" GET "/bahan/$BH72_ID/supplier" | jq 'length')"
+# bahan PRODUKSI SENDIRI dibuat di dapur — tidak memakai supplier
+BP72=$(api "$OWNER" POST /bahan '{"nama":"baso uji72","harga_beli":0,"isi":1,"satuan":"pcs","kategori":"baso","pengadaan":"produksi"}' | jq -r .id)
+cek "bahan produksi sendiri: PUT supplier → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/bahan/$BP72/supplier" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"items\":[{\"supplier_id\":\"$SUPA72\"}]}")"
+# bahan beli ber-supplier lalu diubah jadi produksi → tautan supplier otomatis terhapus
+api "$OWNER" PUT "/bahan/$BH72_ID/supplier" "{\"items\":[{\"supplier_id\":\"$SUPA72\",\"is_utama\":true}]}" > /dev/null
+FLIP72=$(api "$OWNER" PUT "/bahan/$BH72_ID" '{"pengadaan":"produksi"}')
+cek "flip ke produksi → supplier_utama null + jumlah_supplier 0" "V == 1" \
+  "$(echo "$FLIP72" | jq '((.supplier_utama==null) and (.jumlah_supplier==0)) | if . then 1 else 0 end')"
+cek "flip ke produksi → daftar supplier kosong" "V == 0" \
+  "$(api "$OWNER" GET "/bahan/$BH72_ID/supplier" | jq 'length')"
 
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="

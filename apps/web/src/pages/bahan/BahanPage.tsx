@@ -328,7 +328,15 @@ export function BahanPage() {
                   {formatRupiah(b.harga_per_unit)}
                 </td>
                 <td className={`${tdClass} whitespace-nowrap`}>
-                  {bolehUbah ? (
+                  {b.pengadaan === "produksi" ? (
+                    // dibuat di dapur sendiri — tidak memakai supplier
+                    <span
+                      className="text-xs text-stone-300"
+                      title="Produksi sendiri — tidak memakai supplier"
+                    >
+                      —
+                    </span>
+                  ) : bolehUbah ? (
                     <button
                       onClick={() => setAturSupplier(b)}
                       title={`Atur supplier "${b.nama}" — beli di mana & supplier utama`}
