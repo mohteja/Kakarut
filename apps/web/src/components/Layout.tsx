@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { labelCabang, useBranch, useCabangData } from "../context/BranchContext";
@@ -108,8 +108,16 @@ export function Layout() {
   // tutup drawer setelah navigasi/aksi di layar mobile
   const tutup = () => setMenuOpen(false);
 
+  // Konten adalah AREA SCROLL TERSENDIRI (terpisah dari sidebar) — tiap
+  // pindah halaman, mulai lagi dari paling atas (klik menu bawah sidebar
+  // tidak mewarisi posisi scroll halaman sebelumnya).
+  const mainRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    mainRef.current?.scrollTo(0, 0);
+  }, [location.pathname]);
+
   return (
-    <div className="flex min-h-screen flex-col bg-stone-100 md:flex-row">
+    <div className="flex h-screen flex-col overflow-hidden bg-stone-100 md:flex-row print:h-auto print:overflow-visible">
       {/* Bilah atas — hanya mobile */}
       <header className="sticky top-0 z-30 flex items-center gap-3 border-b border-stone-200 bg-white px-4 py-3 md:hidden print:hidden">
         <button
@@ -134,9 +142,10 @@ export function Layout() {
         />
       )}
 
-      {/* Sidebar: drawer di mobile (fixed + geser), statis di desktop */}
+      {/* Sidebar: drawer di mobile (fixed + geser), statis di desktop.
+          overflow-y-auto = scroll sidebar TERPISAH dari scroll konten. */}
       <aside
-        className={`fixed inset-y-0 left-0 z-50 flex w-64 max-w-[82%] transform flex-col overflow-y-auto bg-stone-900 p-4 transition-transform duration-200 ease-out md:static md:z-auto md:w-56 md:max-w-none md:translate-x-0 md:transition-none print:hidden ${
+        className={`fixed inset-y-0 left-0 z-50 flex w-64 max-w-[82%] transform flex-col overflow-y-auto bg-stone-900 p-4 transition-transform duration-200 ease-out md:static md:z-auto md:h-full md:w-56 md:max-w-none md:shrink-0 md:translate-x-0 md:transition-none print:hidden ${
           menuOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
@@ -379,7 +388,10 @@ export function Layout() {
         </button>
       </aside>
 
-      <main className="min-w-0 flex-1 p-4 md:p-6">
+      <main
+        ref={mainRef}
+        className="min-w-0 flex-1 overflow-y-auto p-4 md:p-6 print:overflow-visible"
+      >
         <Outlet />
       </main>
     </div>
