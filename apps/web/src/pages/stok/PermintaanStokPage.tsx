@@ -51,7 +51,12 @@ function Bagian({
           {ikon} {judul} · {data.jumlah_baris} bahan
         </div>
         {data.total > 0 && (
-          <div className="text-xs text-stone-500">≈ {formatRupiah(data.total)}</div>
+          <div className="text-xs text-stone-500">
+            ≈ {formatRupiah(data.total)}
+            {/* belanja bahan mentah = input produksi — nilainya sudah ada di
+                total produksi, jadi tak dijumlah lagi di total transaksi */}
+            {jalur === "beli_produksi" && " · sudah termasuk biaya produksi"}
+          </div>
         )}
       </div>
       <span
@@ -114,8 +119,10 @@ export function PermintaanStokPage() {
         <div className="space-y-3">
           {list.map((r) => {
             const status = statusPermintaan(r);
-            const total =
-              (r.produksi?.total ?? 0) + (r.beli?.total ?? 0) + (r.beli_produksi?.total ?? 0);
+            // Belanja BAHAN PRODUKSI tidak dijumlahkan: itu input dari faktur
+            // produksi yang nilainya sudah termasuk di total produksi —
+            // menjumlahkannya lagi = dobel hitung.
+            const total = (r.produksi?.total ?? 0) + (r.beli?.total ?? 0);
             return (
               <Card key={r.rencana_id} className="overflow-hidden">
                 {/* Header: tujuan + waktu di kiri, STATUS di pojok kanan atas */}
