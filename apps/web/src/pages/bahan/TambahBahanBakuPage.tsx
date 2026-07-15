@@ -160,7 +160,7 @@ export function TambahBahanBakuPage() {
       </div>
 
       <Card className="overflow-x-auto p-0">
-        <table className="w-full min-w-[1220px]">
+        <table className="w-full min-w-[1260px]">
           <thead className="border-b border-stone-200 bg-stone-50">
             <tr>
               <th className={thCell} rowSpan={2}>Kode</th>
@@ -244,7 +244,7 @@ export function TambahBahanBakuPage() {
                         step="any"
                         value={b.isi}
                         onChange={(e) => ubah(i, { isi: e.target.value })}
-                        className={`${cell} w-16`}
+                        className={`${cell} w-24`}
                         aria-label="Konversi (satuan resep per 1 satuan beli)"
                       />
                       <span>{b.satuan}</span>
