@@ -1,5 +1,5 @@
 import { zValidator } from "@hono/zod-validator";
-import { and, asc, count, eq } from "drizzle-orm";
+import { and, asc, count, eq, or } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
@@ -30,7 +30,28 @@ export const satuanRoutes = new Hono<AppEnv>()
       .from(units)
       .where(eq(units.companyId, auth.company_id!))
       .orderBy(asc(units.sortOrder), asc(units.nama));
-    return c.json(rows.map((r) => ({ id: r.id, nama: r.nama, sort_order: r.sortOrder })));
+    // Hitung pemakaian tiap satuan (sebagai satuan resep ATAU satuan beli) agar
+    // web bisa mencegah hapus satuan yang masih terpakai. Satu bahan dihitung
+    // sekali per nama satuan yang dirujuknya.
+    const pakai = await db
+      .select({ satuan: ingredients.satuan, satuanBeli: ingredients.satuanBeli })
+      .from(ingredients)
+      .where(eq(ingredients.companyId, auth.company_id!));
+    const dipakai = new Map<string, number>();
+    for (const p of pakai) {
+      const nama = new Set<string>();
+      if (p.satuan) nama.add(p.satuan);
+      if (p.satuanBeli) nama.add(p.satuanBeli);
+      for (const n of nama) dipakai.set(n, (dipakai.get(n) ?? 0) + 1);
+    }
+    return c.json(
+      rows.map((r) => ({
+        id: r.id,
+        nama: r.nama,
+        sort_order: r.sortOrder,
+        dipakai: dipakai.get(r.nama) ?? 0,
+      })),
+    );
   })
   .post("/", requireRole("owner", "admin"), zValidator("json", SatuanBody), async (c) => {
     const auth = c.get("auth");
@@ -71,11 +92,17 @@ export const satuanRoutes = new Hono<AppEnv>()
       .from(units)
       .where(and(eq(units.id, id), eq(units.companyId, auth.company_id!)));
     if (!milik) throw new HTTPException(404, { message: "Satuan tidak ditemukan" });
-    // Satuan yang masih dipakai bahan tak boleh dihapus (satuan = teks di bahan).
+    // Satuan yang masih dipakai bahan tak boleh dihapus — baik sebagai satuan
+    // resep (ingredients.satuan) maupun satuan beli (ingredients.satuan_beli).
     const [{ n }] = await db
       .select({ n: count() })
       .from(ingredients)
-      .where(and(eq(ingredients.companyId, auth.company_id!), eq(ingredients.satuan, milik.nama)));
+      .where(
+        and(
+          eq(ingredients.companyId, auth.company_id!),
+          or(eq(ingredients.satuan, milik.nama), eq(ingredients.satuanBeli, milik.nama)),
+        ),
+      );
     if (n > 0) {
       throw new HTTPException(409, { message: `Satuan masih dipakai ${n} bahan` });
     }

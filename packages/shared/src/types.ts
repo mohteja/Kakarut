@@ -165,6 +165,8 @@ export interface SatuanDto {
   id: string;
   nama: string;
   sort_order: number;
+  /** Jumlah bahan yang memakai satuan ini (sebagai satuan resep atau satuan beli). */
+  dipakai: number;
 }
 
 /** Satu baris "Tambah Bahan Baku" (bulk) — selalu jalur beli. */

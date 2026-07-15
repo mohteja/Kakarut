@@ -2128,6 +2128,16 @@ cek "PUT set satuan_beli → tersimpan (karung)" "V == 1" \
   "$(api "$OWNER" PUT "/bahan/$G69ID" '{"satuan_beli":"karung"}' | jq '(.satuan_beli=="karung") | if . then 1 else 0 end')"
 cek "PUT clear satuan_beli (null) → null" "V == 1" \
   "$(api "$OWNER" PUT "/bahan/$G69ID" '{"satuan_beli":null}' | jq '(.satuan_beli==null) | if . then 1 else 0 end')"
+# Master Satuan: hitung pemakaian + tak bisa dihapus bila dipakai sebagai SATUAN BELI
+api "$OWNER" POST /satuan '{"nama":"dus69del","sort_order":60}' > /dev/null
+DUSDEL_ID=$(api "$OWNER" GET /satuan | jq -r '[.[] | select(.nama=="dus69del")][0].id')
+cek "GET /satuan: dipakai=0 sebelum satuan terpakai" "V == 0" \
+  "$(api "$OWNER" GET /satuan | jq '[.[] | select(.nama=="dus69del")][0].dipakai')"
+api "$OWNER" POST /bahan '{"nama":"bahan pakai dus69","harga_beli":24000,"isi":14400,"satuan":"gr","satuan_beli":"dus69del","kategori":"lain"}' > /dev/null
+cek "GET /satuan: dipakai=1 setelah jadi satuan beli" "V == 1" \
+  "$(api "$OWNER" GET /satuan | jq '[.[] | select(.nama=="dus69del")][0].dipakai')"
+cek "DELETE satuan yg dipakai sebagai satuan BELI ditolak (409)" "V == 409" \
+  "$(status_code "$OWNER" DELETE "/satuan/$DUSDEL_ID")"
 
 echo "== 70. Resep produksi: overhead, harga ikut resep, stok minimum CK/toko =="
 # bahan produksi minimal (batch/harga/stok diatur lewat panel resep setelahnya)
