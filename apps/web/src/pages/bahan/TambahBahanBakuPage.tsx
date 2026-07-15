@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { hargaPerUnit, type BahanKategori, type KategoriDto, type SatuanDto } from "@kakarut/shared";
 import { Card, ErrorText, PageTitle, btnPrimary, btnSecondary } from "../../components/ui";
 import { KategoriManagerModal } from "../../components/KategoriManagerModal";
+import { SatuanSelect } from "../../components/SatuanSelect";
 import { api } from "../../lib/api";
 import { formatAngka } from "../../lib/format";
 
@@ -107,17 +108,6 @@ export function TambahBahanBakuPage() {
     },
   });
 
-  const satuanOptions = (nilai: string) => (
-    <>
-      {!satuanList?.some((s) => s.nama === nilai) && nilai && <option value={nilai}>{nilai}</option>}
-      {(satuanList ?? []).map((s) => (
-        <option key={s.id} value={s.nama}>
-          {s.nama}
-        </option>
-      ))}
-    </>
-  );
-
   return (
     <div>
       <PageTitle
@@ -206,14 +196,13 @@ export function TambahBahanBakuPage() {
                     />
                   </td>
                   <td className={`px-2 py-1.5 ${sepKiri}`}>
-                    <select
+                    <SatuanSelect
                       value={b.satuan_beli}
-                      onChange={(e) => ubah(i, { satuan_beli: e.target.value })}
-                      className={`${cell} w-24`}
-                    >
-                      <option value="">—</option>
-                      {satuanOptions(b.satuan_beli)}
-                    </select>
+                      onChange={(v) => ubah(i, { satuan_beli: v })}
+                      bolehKosong
+                      selectClassName={`${cell} w-24`}
+                      aria-label="Satuan beli"
+                    />
                   </td>
                   <td className="px-2 py-1.5">
                     <input
@@ -227,13 +216,12 @@ export function TambahBahanBakuPage() {
                     />
                   </td>
                   <td className={`px-2 py-1.5 ${sepKiri}`}>
-                    <select
+                    <SatuanSelect
                       value={b.satuan}
-                      onChange={(e) => ubah(i, { satuan: e.target.value })}
-                      className={`${cell} w-24`}
-                    >
-                      {satuanOptions(b.satuan)}
-                    </select>
+                      onChange={(v) => ubah(i, { satuan: v })}
+                      selectClassName={`${cell} w-24`}
+                      aria-label="Satuan resep"
+                    />
                   </td>
                   <td className="px-2 py-1.5">
                     <div className="flex items-center gap-1 text-sm whitespace-nowrap text-stone-600">

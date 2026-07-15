@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { hargaPerUnit, type BahanDto, type KategoriDto, type SatuanDto } from "@kakarut/shared";
+import { hargaPerUnit, type BahanDto, type KategoriDto } from "@kakarut/shared";
 import { Card, ErrorText, PageTitle, Spinner, btnPrimary, btnSecondary } from "../../components/ui";
 import { KategoriManagerModal } from "../../components/KategoriManagerModal";
+import { SatuanSelect } from "../../components/SatuanSelect";
 import { api } from "../../lib/api";
 import { formatAngka } from "../../lib/format";
 
@@ -72,10 +73,6 @@ export function UbahBahanBakuPage() {
   const { data: bahan, isLoading } = useQuery({
     queryKey: ["bahan"],
     queryFn: () => api<BahanDto[]>("/bahan"),
-  });
-  const { data: satuanList } = useQuery({
-    queryKey: ["satuan"],
-    queryFn: () => api<SatuanDto[]>("/satuan"),
   });
   const { data: kategoriList } = useQuery({
     queryKey: ["kategori-bahan"],
@@ -147,17 +144,6 @@ export function UbahBahanBakuPage() {
       queryClient.invalidateQueries({ queryKey: ["stok"] });
     },
   });
-
-  const satuanOptions = (nilai: string) => (
-    <>
-      {!satuanList?.some((s) => s.nama === nilai) && nilai && <option value={nilai}>{nilai}</option>}
-      {(satuanList ?? []).map((s) => (
-        <option key={s.id} value={s.nama}>
-          {s.nama}
-        </option>
-      ))}
-    </>
-  );
 
   if (isLoading || rows === null) return <Spinner />;
 
@@ -283,14 +269,13 @@ export function UbahBahanBakuPage() {
                         </span>
                       </td>
                       <td className={`px-2 py-1.5 ${sepKiri}`}>
-                        <select
+                        <SatuanSelect
                           value={b.satuan_beli}
-                          onChange={(e) => ubah(i, { satuan_beli: e.target.value })}
-                          className={`${cell} w-24`}
-                        >
-                          <option value="">—</option>
-                          {satuanOptions(b.satuan_beli)}
-                        </select>
+                          onChange={(v) => ubah(i, { satuan_beli: v })}
+                          bolehKosong
+                          selectClassName={`${cell} w-24`}
+                          aria-label="Satuan beli"
+                        />
                       </td>
                       <td className="px-2 py-1.5">
                         <input
@@ -304,13 +289,12 @@ export function UbahBahanBakuPage() {
                         />
                       </td>
                       <td className={`px-2 py-1.5 ${sepKiri}`}>
-                        <select
+                        <SatuanSelect
                           value={b.satuan}
-                          onChange={(e) => ubah(i, { satuan: e.target.value })}
-                          className={`${cell} w-24`}
-                        >
-                          {satuanOptions(b.satuan)}
-                        </select>
+                          onChange={(v) => ubah(i, { satuan: v })}
+                          selectClassName={`${cell} w-24`}
+                          aria-label="Satuan resep"
+                        />
                       </td>
                       <td className="px-2 py-1.5">
                         <div className="flex items-center gap-1 text-sm whitespace-nowrap text-stone-600">

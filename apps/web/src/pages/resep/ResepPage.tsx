@@ -12,6 +12,7 @@ import {
   btnSecondary,
   inputClass,
 } from "../../components/ui";
+import { SatuanSelect } from "../../components/SatuanSelect";
 import { useAuth } from "../../context/AuthContext";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah } from "../../lib/format";
@@ -442,23 +443,13 @@ export function ResepPage() {
                                 disabled={!bolehUbah}
                                 aria-label="Isi per batch"
                               />
-                              <select
+                              <SatuanSelect
                                 value={atur.satuan}
-                                onChange={(e) => setAtur({ ...atur, satuan: e.target.value })}
-                                className={`${inputClass} max-w-28`}
+                                onChange={(v) => setAtur({ ...atur, satuan: v })}
+                                selectClassName={`${inputClass} max-w-28`}
                                 disabled={!bolehUbah}
                                 aria-label="Satuan batch"
-                              >
-                                {!satuanList?.some((s) => s.nama === atur.satuan) &&
-                                  atur.satuan && (
-                                    <option value={atur.satuan}>{atur.satuan}</option>
-                                  )}
-                                {(satuanList ?? []).map((s) => (
-                                  <option key={s.id} value={s.nama}>
-                                    {s.nama}
-                                  </option>
-                                ))}
-                              </select>
+                              />
                             </div>
                           </div>
                           <div>
