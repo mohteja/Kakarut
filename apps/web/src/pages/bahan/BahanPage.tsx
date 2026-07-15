@@ -17,6 +17,7 @@ import { KategoriManagerModal } from "../../components/KategoriManagerModal";
 import { useAuth } from "../../context/AuthContext";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah } from "../../lib/format";
+import { ImporBahanModal } from "./ImporBahanModal";
 import { SupplierBahanModal } from "./SupplierBahanModal";
 
 export function BahanPage() {
@@ -35,6 +36,7 @@ export function BahanPage() {
     queryFn: () => api<KategoriDto[]>("/kategori-bahan"),
   });
   const [kelolaKategori, setKelolaKategori] = useState(false);
+  const [imporCsv, setImporCsv] = useState(false);
   const [cari, setCari] = useState("");
   const [filterJenis, setFilterJenis] = useState<"semua" | "produksi" | "beli">("semua");
   const [filterKategori, setFilterKategori] = useState<string>("semua");
@@ -135,6 +137,9 @@ export function BahanPage() {
             <div className="flex items-center gap-2">
               <button onClick={() => setKelolaKategori(true)} className={btnSecondary}>
                 🏷 Kategori
+              </button>
+              <button onClick={() => setImporCsv(true)} className={btnSecondary}>
+                📥 Impor CSV
               </button>
               <button onClick={() => navigate("/bahan/baru")} className={btnPrimary}>
                 + Tambah Bahan Baku
@@ -415,6 +420,7 @@ export function BahanPage() {
           onClose={() => setAturSupplier(null)}
         />
       )}
+      {imporCsv && <ImporBahanModal bahan={semua} onClose={() => setImporCsv(false)} />}
     </div>
   );
 }

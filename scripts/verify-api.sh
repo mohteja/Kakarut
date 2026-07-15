@@ -2363,6 +2363,37 @@ cek "pulihkan faktur produksi → permintaan muncul lagi" "V == 1" \
 cek "hapus permintaan rencana_id asing → 404" "V == 404" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X DELETE "$BASE/api/rekomendasi/permintaan/00000000-0000-4000-8000-000000000000" -H "Authorization: Bearer $OWNER")"
 
+echo "== 76. Impor CSV bahan baku: mode tambah & perbarui =="
+# mode "tambah": 2 bahan baru masuk
+IMP1=$(api "$OWNER" POST /bahan/import '{"mode":"tambah","items":[{"kode":"GRM76","nama":"garam uji76","kategori":"lain","jenis":"beli","harga_beli":4000,"isi":1,"satuan":"pcs"},{"nama":"lada uji76","jenis":"beli","harga_beli":8000,"isi":100,"satuan":"gr","satuan_beli":"bungkus","stok_minimum":20}]}')
+cek "impor tambah: 2 ditambah, 0 diperbarui" "V == 1" \
+  "$(echo "$IMP1" | jq '((.ditambah==2) and (.diperbarui==0) and ((.gagal|length)==0)) | if . then 1 else 0 end')"
+cek "impor tambah: garam uji76 tersimpan (harga 4000)" "V == 1" \
+  "$(api "$OWNER" GET /bahan | jq '([.[] | select(.nama=="garam uji76")][0].harga_beli==4000) | if . then 1 else 0 end')"
+cek "impor tambah: lada satuan_beli & harga/unit (8000/100=80)" "V == 1" \
+  "$(api "$OWNER" GET /bahan | jq '([.[] | select(.nama=="lada uji76")][0] | (.satuan_beli=="bungkus") and (.harga_per_unit==80)) | if . then 1 else 0 end')"
+# mode "tambah" lagi dgn kode sama → dilewati (tak ditimpa)
+IMP2=$(api "$OWNER" POST /bahan/import '{"mode":"tambah","items":[{"kode":"GRM76","nama":"garam uji76","jenis":"beli","harga_beli":9999,"isi":1,"satuan":"pcs"}]}')
+cek "impor tambah: bahan sudah ada → dilewati (bukan ditimpa)" "V == 1" \
+  "$(echo "$IMP2" | jq '((.ditambah==0) and (.dilewati==1)) | if . then 1 else 0 end')"
+cek "impor tambah: harga garam TETAP 4000 (tak ditimpa)" "V == 1" \
+  "$(api "$OWNER" GET /bahan | jq '([.[] | select(.nama=="garam uji76")][0].harga_beli==4000) | if . then 1 else 0 end')"
+# mode "perbarui": garam ditimpa jadi 5000; bahan baru ikut ditambah
+IMP3=$(api "$OWNER" POST /bahan/import '{"mode":"perbarui","items":[{"kode":"GRM76","nama":"garam uji76","jenis":"beli","harga_beli":5000,"isi":1,"satuan":"pcs","kategori":"baso"},{"nama":"cuka uji76","jenis":"beli","harga_beli":6000,"isi":100,"satuan":"ml"}]}')
+cek "impor perbarui: 1 ditambah + 1 diperbarui" "V == 1" \
+  "$(echo "$IMP3" | jq '((.ditambah==1) and (.diperbarui==1)) | if . then 1 else 0 end')"
+cek "impor perbarui: garam ditimpa jadi 5000 + kategori baso" "V == 1" \
+  "$(api "$OWNER" GET /bahan | jq '([.[] | select(.nama=="garam uji76")][0] | (.harga_beli==5000) and (.kategori=="baso")) | if . then 1 else 0 end')"
+# cocok via NAMA (tanpa kode) juga memperbarui bahan yang sama
+IMP4=$(api "$OWNER" POST /bahan/import '{"mode":"perbarui","items":[{"nama":"garam uji76","jenis":"beli","harga_beli":5500,"isi":1,"satuan":"pcs"}]}')
+cek "impor perbarui: cocok via nama (tanpa kode) → diperbarui" "V == 1" \
+  "$(echo "$IMP4" | jq '((.diperbarui==1) and (.ditambah==0)) | if . then 1 else 0 end')"
+cek "impor perbarui via nama: harga garam jadi 5500" "V == 1" \
+  "$(api "$OWNER" GET /bahan | jq '([.[] | select(.nama=="garam uji76")][0].harga_beli==5500) | if . then 1 else 0 end')"
+# kasir tak boleh impor → 403
+cek "kasir impor CSV → 403" "V == 403" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/bahan/import" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d '{"mode":"tambah","items":[{"nama":"x","jenis":"beli","harga_beli":1,"isi":1,"satuan":"pcs"}]}')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

@@ -100,6 +100,26 @@ const BahanBulkRow = z.object({
 });
 const BahanBulkBody = z.object({ items: z.array(BahanBulkRow).min(1).max(200) });
 
+/** Satu baris impor CSV (nilai sudah dikoersi di web; default aman bila kosong). */
+const BahanImportRowBody = z.object({
+  kode: z.string().trim().max(20).nullish(),
+  nama: z.string().trim().min(1),
+  kategori: z.string().trim().min(1).max(30).default("lain"),
+  jenis: z.enum(["produksi", "beli"]).default("beli"),
+  harga_beli: z.number().nonnegative().default(0),
+  isi: z.number().positive().default(1),
+  satuan: z.string().trim().min(1).max(20).default("pcs"),
+  satuan_beli: z.string().trim().max(20).nullish(),
+  stok_minimum: z.number().nonnegative().default(0),
+  boleh_eceran: z.boolean().default(false),
+  lacak_stok: z.boolean().default(true),
+  catatan: z.string().nullish(),
+});
+const BahanImportBody = z.object({
+  mode: z.enum(["perbarui", "tambah"]),
+  items: z.array(BahanImportRowBody).min(1).max(1000),
+});
+
 const BahanSupplierBody = z.object({
   items: z
     .array(
@@ -294,6 +314,114 @@ export const bahanRoutes = new Hono<AppEnv>()
       )
       .returning();
     return c.json({ jumlah: rows.length, bahan: rows.map((r) => toDto(r)) }, 201);
+  })
+  /**
+   * IMPOR CSV bahan baku (owner/admin). Web mem-parse CSV → JSON, lalu:
+   * - "perbarui": bahan yang cocok (kode → slug/nama) DIPERBARUI, sisanya
+   *   ditambah — jadikan data terbaru.
+   * - "tambah": hanya bahan yang BELUM ADA yang ditambah; yang sudah ada
+   *   dilewati (tak disentuh).
+   * `jenis` (pengadaan) hanya diterapkan pada bahan BARU — mengubah jenis
+   * bahan lama lewat impor tak diizinkan agar resep/konsumsi tak yatim.
+   * Gagal per baris dilaporkan tanpa menggagalkan seluruh impor.
+   */
+  .post("/import", requireRole("owner", "admin"), zValidator("json", BahanImportBody), async (c) => {
+    const auth = c.get("auth");
+    const { mode, items } = c.req.valid("json");
+    const companyId = auth.company_id!;
+
+    const existing = await db
+      .select({ id: ingredients.id, kode: ingredients.kode, slug: ingredients.slug })
+      .from(ingredients)
+      .where(eq(ingredients.companyId, companyId));
+    const byKode = new Map<string, string>();
+    const bySlug = new Map<string, string>();
+    for (const e of existing) {
+      if (e.kode) byKode.set(e.kode.toLowerCase(), e.id);
+      bySlug.set(e.slug.toLowerCase(), e.id);
+    }
+    const slugDipakai = new Set(existing.map((e) => e.slug.toLowerCase()));
+
+    let ditambah = 0;
+    let diperbarui = 0;
+    let dilewati = 0;
+    const gagal: { nama: string; alasan: string }[] = [];
+
+    // klasifikasi: existing → perbarui/lewati; sisanya insert (slug unik lintas-baris)
+    const updateBaris: { item: (typeof items)[number]; id: string }[] = [];
+    const insertBaris: { item: (typeof items)[number]; slug: string }[] = [];
+    for (const b of items) {
+      const slug = b.nama.toLowerCase().trim().replace(/\s+/g, " ");
+      const id = (b.kode && byKode.get(b.kode.toLowerCase())) || bySlug.get(slug);
+      if (id) {
+        if (mode === "tambah") {
+          dilewati++;
+          continue;
+        }
+        updateBaris.push({ item: b, id });
+      } else {
+        let s = slug || "bahan";
+        let n = 2;
+        while (slugDipakai.has(s.toLowerCase())) s = `${slug} ${n++}`;
+        slugDipakai.add(s.toLowerCase());
+        insertBaris.push({ item: b, slug: s });
+      }
+    }
+    // kode untuk semua baris baru: unik terhadap existing + antar-baris
+    const kodes = await resolveKodeBahanBatch(
+      db,
+      companyId,
+      insertBaris.map((x) => ({ nama: x.item.nama, kode: x.item.kode })),
+    );
+
+    for (const u of updateBaris) {
+      try {
+        await db
+          .update(ingredients)
+          .set({
+            nama: u.item.nama,
+            kategori: u.item.kategori,
+            hargaBeli: u.item.harga_beli,
+            isi: u.item.isi,
+            satuan: u.item.satuan,
+            satuanBeli: u.item.satuan_beli ?? null,
+            stokMinimum: u.item.stok_minimum,
+            bolehEceran: u.item.boleh_eceran,
+            trackStok: u.item.lacak_stok,
+            catatan: u.item.catatan ?? null,
+            updatedAt: new Date(),
+          })
+          .where(and(eq(ingredients.id, u.id), eq(ingredients.companyId, companyId)));
+        diperbarui++;
+      } catch (e) {
+        gagal.push({ nama: u.item.nama, alasan: (e as Error)?.message ?? "gagal diperbarui" });
+      }
+    }
+    for (let i = 0; i < insertBaris.length; i++) {
+      const { item: b, slug } = insertBaris[i];
+      try {
+        await db.insert(ingredients).values({
+          companyId,
+          slug,
+          kode: kodes[i],
+          nama: b.nama,
+          hargaBeli: b.harga_beli,
+          isi: b.isi,
+          satuan: b.satuan,
+          satuanBeli: b.satuan_beli ?? null,
+          trackStok: b.lacak_stok,
+          stokMinimum: b.stok_minimum,
+          kategori: b.kategori,
+          pengadaan: b.jenis,
+          bolehEceran: b.boleh_eceran,
+          catatan: b.catatan ?? null,
+        });
+        ditambah++;
+      } catch (e) {
+        gagal.push({ nama: b.nama, alasan: (e as Error)?.message ?? "gagal ditambah" });
+      }
+    }
+    return c.json({ ditambah, diperbarui, dilewati, gagal });
   })
   .put(
     "/:id",
