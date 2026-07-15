@@ -17,6 +17,7 @@ import { KategoriManagerModal } from "../../components/KategoriManagerModal";
 import { useAuth } from "../../context/AuthContext";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah } from "../../lib/format";
+import { SupplierBahanModal } from "./SupplierBahanModal";
 
 export function BahanPage() {
   const queryClient = useQueryClient();
@@ -40,6 +41,8 @@ export function BahanPage() {
   /** id bahan tercentang (untuk ubah/hapus banyak sekaligus) */
   const [pilih, setPilih] = useState<Set<string>>(new Set());
   const [pesanHapus, setPesanHapus] = useState<string | null>(null);
+  /** bahan yang sedang diatur suppliernya (modal) */
+  const [aturSupplier, setAturSupplier] = useState<BahanDto | null>(null);
 
   const hapus = useMutation({
     mutationFn: (id: string) => api(`/bahan/${id}`, { method: "DELETE" }),
@@ -122,7 +125,7 @@ export function BahanPage() {
     setFilterKategori("semua");
   }
 
-  const kolom = bolehUbah ? 10 : 9;
+  const kolom = bolehUbah ? 11 : 10;
 
   return (
     <div>
@@ -258,6 +261,7 @@ export function BahanPage() {
               <th className={`${thClass} text-right`}>Harga Beli</th>
               <th className={`${thClass} text-right`}>Isi</th>
               <th className={`${thClass} text-right`}>Harga / Unit</th>
+              <th className={thClass}>Supplier</th>
               <th className={thClass}>Catatan</th>
               <th className={thClass}></th>
             </tr>
@@ -323,6 +327,36 @@ export function BahanPage() {
                 <td className={`${tdClass} text-right font-semibold`}>
                   {formatRupiah(b.harga_per_unit)}
                 </td>
+                <td className={`${tdClass} whitespace-nowrap`}>
+                  {bolehUbah ? (
+                    <button
+                      onClick={() => setAturSupplier(b)}
+                      title={`Atur supplier "${b.nama}" — beli di mana & supplier utama`}
+                      aria-label={`Atur supplier ${b.nama}`}
+                      className={`rounded-full border px-2 py-0.5 text-xs font-medium transition ${
+                        b.supplier_utama
+                          ? "border-amber-200 bg-amber-50 text-amber-800 hover:border-orange-400"
+                          : "border-dashed border-stone-300 text-stone-500 hover:border-orange-400 hover:text-orange-600"
+                      }`}
+                    >
+                      {b.supplier_utama ? (
+                        <>
+                          ★ {b.supplier_utama}
+                          {b.jumlah_supplier > 1 && ` +${b.jumlah_supplier - 1}`}
+                        </>
+                      ) : (
+                        "+ Atur supplier"
+                      )}
+                    </button>
+                  ) : b.supplier_utama ? (
+                    <span className="text-xs text-stone-600">
+                      ★ {b.supplier_utama}
+                      {b.jumlah_supplier > 1 && ` +${b.jumlah_supplier - 1}`}
+                    </span>
+                  ) : (
+                    <span className="text-xs text-stone-300">—</span>
+                  )}
+                </td>
                 <td className={`${tdClass} max-w-48 truncate text-stone-400`} title={b.catatan ?? ""}>
                   {b.catatan}
                 </td>
@@ -364,6 +398,15 @@ export function BahanPage() {
           </tbody>
         </table>
       </Card>
+
+      {aturSupplier && (
+        <SupplierBahanModal
+          // remount tiap ganti bahan — state centang/utama dimuat ulang
+          key={aturSupplier.id}
+          bahan={aturSupplier}
+          onClose={() => setAturSupplier(null)}
+        />
+      )}
     </div>
   );
 }

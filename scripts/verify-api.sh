@@ -2169,6 +2169,45 @@ cek "terima: saldo sirup di store = 24" "abs(V - 24) < 0.001" \
 cek "stok sirup di CK tetap 0" "abs(V) < 0.001" \
   "$(api "$OWNER" GET "/stok?branch_id=$CK52_UTAMA" | jq --arg i "$SIR71" '[.[] | select(.ingredient_id==$i)][0].saldo // 0')"
 
+echo "== 72. Supplier per bahan: multi-supplier + supplier utama =="
+BH72=$(api "$OWNER" POST /bahan '{"nama":"gula uji72","harga_beli":15000,"isi":1000,"satuan":"gr","kategori":"lain"}')
+BH72_ID=$(echo "$BH72" | jq -r .id)
+cek "bahan baru: supplier_utama null + jumlah_supplier 0" "V == 1" \
+  "$(echo "$BH72" | jq '((.supplier_utama==null) and (.jumlah_supplier==0)) | if . then 1 else 0 end')"
+SUPA72=$(api "$OWNER" POST /supplier '{"nama":"Toko Manis 72"}' | jq -r .id)
+SUPB72=$(api "$OWNER" POST /supplier '{"nama":"Grosir Pasar 72","telepon":"0811"}' | jq -r .id)
+# pasang 2 supplier, A utama
+LS72=$(api "$OWNER" PUT "/bahan/$BH72_ID/supplier" "{\"items\":[{\"supplier_id\":\"$SUPA72\",\"is_utama\":true},{\"supplier_id\":\"$SUPB72\"}]}")
+cek "PUT 2 supplier → daftar berisi 2" "V == 2" "$(echo "$LS72" | jq 'length')"
+cek "supplier utama = Toko Manis 72 (urut pertama)" "V == 1" \
+  "$(echo "$LS72" | jq '((.[0].nama=="Toko Manis 72") and (.[0].is_utama==true)) | if . then 1 else 0 end')"
+cek "hanya SATU utama" "V == 1" "$(echo "$LS72" | jq '[.[] | select(.is_utama)] | length')"
+cek "GET /bahan: supplier_utama + jumlah_supplier terisi" "V == 1" \
+  "$(api "$OWNER" GET /bahan | jq --arg id "$BH72_ID" '[.[] | select(.id==$id)][0] | ((.supplier_utama=="Toko Manis 72") and (.jumlah_supplier==2)) | if . then 1 else 0 end')"
+# pindah utama ke B
+api "$OWNER" PUT "/bahan/$BH72_ID/supplier" "{\"items\":[{\"supplier_id\":\"$SUPA72\"},{\"supplier_id\":\"$SUPB72\",\"is_utama\":true}]}" > /dev/null
+cek "pindah utama → Grosir Pasar 72" "V == 1" \
+  "$(api "$OWNER" GET "/bahan/$BH72_ID/supplier" | jq '([.[] | select(.is_utama)] | (length==1) and (.[0].nama=="Grosir Pasar 72")) | if . then 1 else 0 end')"
+# dua utama sekaligus → 400
+cek "dua utama sekaligus → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/bahan/$BH72_ID/supplier" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"items\":[{\"supplier_id\":\"$SUPA72\",\"is_utama\":true},{\"supplier_id\":\"$SUPB72\",\"is_utama\":true}]}")"
+# tanpa penanda utama → item pertama otomatis utama
+api "$OWNER" PUT "/bahan/$BH72_ID/supplier" "{\"items\":[{\"supplier_id\":\"$SUPB72\"}]}" > /dev/null
+cek "tanpa penanda utama → item pertama jadi utama" "V == 1" \
+  "$(api "$OWNER" GET "/bahan/$BH72_ID/supplier" | jq '((length==1) and .[0].is_utama) | if . then 1 else 0 end')"
+# supplier tak dikenal → 400
+cek "supplier tak dikenal → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/bahan/$BH72_ID/supplier" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"items":[{"supplier_id":"00000000-0000-4000-8000-000000000000"}]}')"
+# kasir tak boleh mengubah, tapi boleh melihat
+cek "kasir PUT supplier bahan → 403" "V == 403" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/bahan/$BH72_ID/supplier" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d '{"items":[]}')"
+cek "kasir GET supplier bahan → boleh (1 baris)" "V == 1" \
+  "$(api "$KASIR" GET "/bahan/$BH72_ID/supplier" | jq 'length')"
+# kosongkan daftar
+api "$OWNER" PUT "/bahan/$BH72_ID/supplier" '{"items":[]}' > /dev/null
+cek "PUT items kosong → daftar kosong" "V == 0" \
+  "$(api "$OWNER" GET "/bahan/$BH72_ID/supplier" | jq 'length')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]
