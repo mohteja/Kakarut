@@ -318,11 +318,10 @@ export function Layout() {
                   )}
                   {penuh && (
                     <>
-                      <NavLink to="/stok/tambah-dari-menu" className={linkClass}>
-                        ➕ Tambah Stok dari Menu
-                      </NavLink>
+                      {/* halaman "Tambah Stok dari Menu" diakses lewat tombol
+                          ➕ di halaman Permintaan Stok (tidak lagi di sidebar) */}
                       <NavLink to="/permintaan-stok" className={linkClass}>
-                        📋 Data Permintaan Stok
+                        📋 Permintaan Stok
                       </NavLink>
                       <NavLink to="/laporan" className={linkClass}>
                         📊 Laporan
