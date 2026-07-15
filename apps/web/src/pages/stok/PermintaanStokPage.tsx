@@ -1,8 +1,8 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import type { KonfirmasiStatus, PermintaanStokBagian, PermintaanStokRow } from "@kakarut/shared";
-import { Card, PageTitle, Spinner, btnSecondary, inputClass } from "../../components/ui";
+import { Card, ErrorText, PageTitle, Spinner, btnSecondary, inputClass } from "../../components/ui";
 import { api } from "../../lib/api";
 import { formatRupiah, formatWaktu } from "../../lib/format";
 
@@ -96,12 +96,25 @@ function statusPermintaan(r: PermintaanStokRow): { label: string; cls: string } 
  * dari Kantor). Tiap submit = satu kartu, menggabungkan faktur Produksi + Beli.
  */
 export function PermintaanStokPage() {
+  const queryClient = useQueryClient();
   const { data: rows, isLoading } = useQuery({
     queryKey: ["permintaan-stok"],
     queryFn: () => api<PermintaanStokRow[]>("/rekomendasi/permintaan"),
   });
   const [perPage, setPerPage] = useState(20);
   const [page, setPage] = useState(1);
+
+  // Hapus permintaan → Tempat Sampah: SOFT-DELETE semua fakturnya sekaligus
+  // (produksi + beli + bahan produksi). Stok yang belum masuk otomatis batal.
+  const hapus = useMutation({
+    mutationFn: (rencanaId: string) =>
+      api(`/rekomendasi/permintaan/${rencanaId}`, { method: "DELETE" }),
+    onSuccess: () => {
+      for (const key of ["permintaan-stok", "stok", "laporan", "/pembelian", "/produksi", "rekomendasi", "sampah"]) {
+        queryClient.invalidateQueries({ queryKey: [key] });
+      }
+    },
+  });
 
   // urutan: yang masih Berjalan dulu, lalu terbaru → terlama
   const list = useMemo(
@@ -134,6 +147,7 @@ export function PermintaanStokPage() {
         Riwayat permintaan <b>Tambah Stok dari Menu</b>. Tiap permintaan diterbitkan sebagai faktur{" "}
         <b>Produksi</b> (work-order Central Kitchen) dan/atau <b>Beli</b> — ketuk untuk membukanya.
       </div>
+      <ErrorText error={hapus.error} />
 
       {isLoading ? (
         <Spinner />
@@ -181,14 +195,30 @@ export function PermintaanStokPage() {
                     <Bagian jalur="beli_produksi" data={r.beli_produksi} to="/pembelian" />
                   )}
                 </div>
-                {/* Footer: total transaksi permintaan + pembuat */}
-                <div className="px-4 py-2.5">
-                  <div className="text-xs text-stone-500">Total transaksi:</div>
-                  <div className="text-lg font-bold text-stone-800">{formatRupiah(total)}</div>
-                  {/* pembuat cukup di footer — header tetap ringkas */}
-                  {r.pembuat && (
-                    <div className="text-xs text-stone-400">dibuat oleh {r.pembuat}</div>
-                  )}
+                {/* Footer: total transaksi permintaan + pembuat + hapus */}
+                <div className="flex items-end justify-between gap-2 px-4 py-2.5">
+                  <div>
+                    <div className="text-xs text-stone-500">Total transaksi:</div>
+                    <div className="text-lg font-bold text-stone-800">{formatRupiah(total)}</div>
+                    {/* pembuat cukup di footer — header tetap ringkas */}
+                    {r.pembuat && (
+                      <div className="text-xs text-stone-400">dibuat oleh {r.pembuat}</div>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => {
+                      if (
+                        confirm(
+                          `Hapus permintaan ini? Semua fakturnya (produksi & belanja) ikut dipindah ke Tempat Sampah dan stok yang belum masuk dibatalkan. Masih bisa dipulihkan dari Tempat Sampah.`,
+                        )
+                      )
+                        hapus.mutate(r.rencana_id);
+                    }}
+                    disabled={hapus.isPending}
+                    className="shrink-0 rounded-lg border border-red-300 bg-white px-3 py-1.5 text-sm font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50"
+                  >
+                    🗑 Hapus
+                  </button>
                 </div>
               </Card>
             );

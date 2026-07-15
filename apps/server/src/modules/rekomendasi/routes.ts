@@ -2,6 +2,7 @@ import { zValidator } from "@hono/zod-validator";
 import { and, desc, eq, isNotNull, isNull } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Hono } from "hono";
+import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import type { AcuanJenis, KonfirmasiStatus, PermintaanStokRow } from "@kakarut/shared";
 import { db } from "../../db/client";
@@ -220,4 +221,33 @@ export const rekomendasiRoutes = new Hono<AppEnv>().get("/beli", async (c) => {
         rest,
     );
     return c.json(hasil);
+  })
+  /**
+   * Hapus satu permintaan → Tempat Sampah: SOFT-DELETE semua faktur (produksi +
+   * beli + bahan produksi) yang berbagi rencana_id. Stok yang belum
+   * dikonfirmasi otomatis batal (semua agregasi memfilter deleted_at IS NULL);
+   * yang sudah masuk stok ikut dikoreksi. Cukup konfirmasi (tanpa password) —
+   * tiap faktur bisa dipulihkan dari Tempat Sampah.
+   */
+  .delete("/permintaan/:rencanaId", async (c) => {
+    const auth = c.get("auth");
+    const rencanaId = c.req.param("rencanaId");
+    if (!/^[0-9a-f-]{36}$/i.test(rencanaId)) {
+      throw new HTTPException(404, { message: "Permintaan tidak ditemukan" });
+    }
+    const rows = await db
+      .update(productions)
+      .set({ deletedAt: new Date(), deletedBy: auth.sub })
+      .where(
+        and(
+          eq(productions.companyId, auth.company_id!),
+          eq(productions.rencanaId, rencanaId),
+          isNull(productions.deletedAt),
+        ),
+      )
+      .returning({ id: productions.id });
+    if (rows.length === 0) {
+      throw new HTTPException(404, { message: "Permintaan tidak ditemukan" });
+    }
+    return c.json({ ok: true, jumlah_baris: rows.length });
   });
