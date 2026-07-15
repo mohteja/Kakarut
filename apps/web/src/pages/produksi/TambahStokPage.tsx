@@ -343,8 +343,8 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
       <div className="mb-4 rounded-lg bg-blue-50 px-4 py-2 text-sm text-blue-800">
         Stok bertambah <b>setelah faktur dikonfirmasi</b> ("Konfirmasi Ada" = barang
         benar-benar diterima & tersimpan) — memudahkan stock opname. Ubah tahap lewat
-        dropdown <b>➡ Ubah tahap…</b> pada tiap faktur; bisa sebagian dulu bila barang
-        belum lengkap.
+        tombol <b>➡ Ubah Tahap</b> pada tiap kartu; bisa sebagian dulu bila barang
+        belum lengkap. Ketuk kartu untuk melihat rincian semua bahan.
       </div>
 
       <ErrorText error={kirim.error} />
@@ -443,160 +443,132 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                   r.tujuan_branch_id != null &&
                   r.branch_id !== r.tujuan_branch_id,
               );
+            // kartu ringkas ala transaksi marketplace: tampilkan 1 barang
+            // pertama + jumlah bahan lainnya; rincian lengkap via klik kartu
+            const utama = g.rows[0];
             return (
             <Card
               key={g.key}
               onClick={() => setDetail(g)}
-              className={`flex cursor-pointer overflow-hidden transition hover:border-orange-300 hover:shadow-sm ${belumSelesai(g.status) ? "border-yellow-300" : ""}`}
+              className={`cursor-pointer overflow-hidden transition hover:border-orange-300 hover:shadow-sm ${belumSelesai(g.status) ? "border-yellow-300" : ""}`}
             >
-              {/* Kotak tanggal & waktu di kiri tiap transaksi (ramping di HP) */}
-              <div className="flex w-16 shrink-0 flex-col items-center justify-center gap-0.5 border-r border-stone-100 bg-stone-50 px-1 py-3 text-center sm:w-28 sm:px-2">
-                <div className="text-[10px] font-semibold leading-tight text-stone-600 sm:text-xs">
-                  {formatTanggalRingkas(g.waktu)}
-                </div>
-                <div className="text-sm font-bold text-stone-800 sm:text-base">
-                  {formatWaktu(g.waktu)}
-                </div>
-              </div>
-
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-100 px-3 py-2.5 sm:px-4">
-                  <div className="flex flex-wrap items-center gap-2 text-sm">
-                    <span className="font-medium text-stone-700">
-                      {tipe === "produksi"
-                        ? `🔧 ${g.dikerjakanOleh ?? g.supplier ?? "Produksi sendiri"}`
-                        : g.dikerjakanOleh
-                          ? `🔧 ${g.dikerjakanOleh}` // pemroses belanja (tercatat saat Diproses)
-                          : (g.supplier ?? "Belum diproses")}
+              {/* Header ala transaksi marketplace: jenis + tanggal di kiri,
+                  STATUS di pojok kanan atas kotak. */}
+              <div className="flex items-start justify-between gap-2 border-b border-stone-100 px-3 py-2.5 sm:px-4">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                    <span className="font-bold text-stone-800">
+                      {tipe === "produksi" ? "🏭 Produksi" : "🛒 Pembelian"}
+                    </span>
+                    <span className="text-sm text-stone-500">
+                      {formatTanggalRingkas(g.waktu)} · {formatWaktu(g.waktu)}
                     </span>
                     {g.noFaktur && (
                       <span className="rounded bg-stone-100 px-1.5 py-0.5 font-mono text-xs">
                         {g.noFaktur}
                       </span>
                     )}
+                  </div>
+                  <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-stone-500">
+                    <span className="font-medium text-stone-600">
+                      {tipe === "produksi"
+                        ? `🔧 ${g.dikerjakanOleh ?? g.supplier ?? "Produksi sendiri"}`
+                        : g.dikerjakanOleh
+                          ? `🔧 ${g.dikerjakanOleh}` // pemroses belanja (tercatat saat Diproses)
+                          : (g.supplier ?? "Belum diproses")}
+                    </span>
                     {g.danaCair > 0 && (
                       <span
-                        className="whitespace-nowrap rounded bg-emerald-50 px-1.5 py-0.5 text-xs font-semibold text-emerald-700"
+                        className="whitespace-nowrap font-semibold text-emerald-700"
                         title="Total dana yang sudah cair untuk faktur ini"
                       >
                         💸 cair {formatRupiah(g.danaCair)}
                       </span>
                     )}
-                    {g.dibuatOleh && (
-                      <span className="text-xs text-stone-400">oleh {g.dibuatOleh}</span>
-                    )}
+                    {g.dibuatOleh && <span>oleh {g.dibuatOleh}</span>}
                     {/* cabang faktur (tampilan Kantor "semua cabang") */}
-                    {dariKantor && g.cabang && (
-                      <span className="whitespace-nowrap rounded bg-stone-100 px-1.5 py-0.5 text-xs font-medium text-stone-600">
-                        🏪 {g.cabang}
-                      </span>
-                    )}
+                    {dariKantor && g.cabang && <span>🏪 {g.cabang}</span>}
                     {/* work-order CK: cabang tujuan pengiriman */}
                     {g.tujuanCabang && (
-                      <span className="whitespace-nowrap rounded bg-purple-50 px-1.5 py-0.5 text-xs font-semibold text-purple-700">
+                      <span className="whitespace-nowrap rounded bg-purple-50 px-1.5 py-0.5 font-semibold text-purple-700">
                         → {g.tujuanCabang}
                       </span>
                     )}
-                    {g.catatan && <span className="text-xs text-stone-400">· {g.catatan}</span>}
+                    {g.catatan && <span>· {g.catatan}</span>}
                   </div>
-                  <div className="flex max-w-full flex-wrap items-center gap-1.5">
-                    {siapKirim && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (confirm(`Kirim ke ${g.tujuanCabang ?? "cabang tujuan"}? Barang akan menunggu diterima cabang.`))
-                            kirim.mutate(g.fakturId!);
-                        }}
-                        disabled={kirim.isPending}
-                        className="whitespace-nowrap rounded-lg bg-purple-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-purple-500 disabled:opacity-60"
-                      >
-                        🚚 Kirim ke cabang
-                      </button>
-                    )}
+                </div>
+                {/* status di pojok kanan atas kotak */}
+                <span
+                  className={`shrink-0 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold ${badge.cls}`}
+                >
+                  {badge.label}
+                </span>
+              </div>
+
+              {/* Isi ringkas: cukup 1 barang + jumlah bahan lainnya — rincian
+                  lengkap tetap tersedia dgn mengetuk kartu */}
+              <div className="flex items-center justify-between gap-3 border-b border-stone-100 px-3 py-2.5 sm:px-4">
+                <div className="min-w-0">
+                  <div className="truncate font-semibold text-stone-800">{utama.bahan}</div>
+                  <div className="text-xs text-stone-500">
+                    {formatAngka(utama.qty)} {utama.satuan}
+                    {g.rows.length > 1 && <> · +{g.rows.length - 1} bahan lainnya</>}
                     {campuran && sisaTugas > 0 && (
-                      <span className="whitespace-nowrap rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">
-                        📌 sisa tugas: {sisaTugas} baris
+                      <span className="ml-1.5 whitespace-nowrap rounded-full bg-amber-100 px-1.5 py-0.5 font-semibold text-amber-700">
+                        📌 sisa tugas: {sisaTugas}
                       </span>
-                    )}
-                    <span
-                      className={`whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold ${badge.cls}`}
-                    >
-                      {badge.label}
-                    </span>
-                    {g.fakturId && belumSelesai(g.status) && opsiTahap.length > 0 && (
-                      <select
-                        value=""
-                        onClick={(e) => e.stopPropagation()}
-                        onChange={(e) => {
-                          e.stopPropagation();
-                          const ke = e.target.value as TahapTujuan | "";
-                          if (ke) setUbahTahap({ grup: g, ke });
-                        }}
-                        aria-label="Ubah tahap faktur"
-                        className="cursor-pointer rounded-lg border border-orange-300 bg-orange-50 px-2 py-1 text-xs font-semibold text-orange-800"
-                      >
-                        <option value="">➡ Ubah tahap…</option>
-                        {opsiTahap.map((a) => (
-                          <option key={a.ke} value={a.ke}>
-                            {a.label}
-                          </option>
-                        ))}
-                      </select>
                     )}
                   </div>
                 </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead>
-                      <tr>
-                        <th className={thClass}>Bahan</th>
-                        <th className={`${thClass} text-right`}>Qty</th>
-                        {/* di HP kolom tempat disembunyikan agar Harga tidak terpotong */}
-                        <th className={`${thClass} hidden sm:table-cell`}>Disimpan di</th>
-                        {tipe === "beli" && <th className={`${thClass} text-right`}>Harga</th>}
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-stone-100">
-                      {g.rows.map((r) => (
-                        <tr key={r.id}>
-                          <td className={`${tdClass} font-medium`}>
-                            {r.bahan}
-                            {campuran && (
-                              <span
-                                className={`ml-1.5 whitespace-nowrap rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${badgeFaktur(tipe, r.status).cls}`}
-                              >
-                                {labelTahapRingkas(tipe, r.status)}
-                              </span>
-                            )}
-                            {r.tempat && (
-                              <div className="text-xs font-normal text-stone-400 sm:hidden">
-                                📍 {r.tempat}
-                              </div>
-                            )}
-                          </td>
-                          <td className={`${tdClass} whitespace-nowrap text-right`}>
-                            +{formatAngka(r.qty)} {r.satuan}
-                            {r.is_batch && (
-                              <span className="ml-1 hidden text-xs text-stone-400 sm:inline">
-                                ({formatAngka(r.qty / r.isi)} batch × {formatAngka(r.isi)})
-                              </span>
-                            )}
-                            {r.qty_dipesan != null && r.qty_dipesan !== r.qty && (
-                              <span className="ml-1 text-xs text-amber-600">
-                                (dipesan {formatAngka(r.qty_dipesan)})
-                              </span>
-                            )}
-                          </td>
-                          <td className={`${tdClass} hidden sm:table-cell`}>{r.tempat ?? "—"}</td>
-                          {tipe === "beli" && (
-                            <td className={`${tdClass} whitespace-nowrap text-right`}>
-                              {r.total_harga != null ? formatRupiah(r.total_harga) : "—"}
-                            </td>
-                          )}
-                        </tr>
+                <span className="shrink-0 text-xs text-stone-400">detail ›</span>
+              </div>
+
+              {/* Footer: total transaksi di kiri, tombol aksi BESAR di kanan
+                  (di bawah status) */}
+              <div className="flex flex-wrap items-end justify-between gap-3 px-3 py-2.5 sm:px-4">
+                <div>
+                  <div className="text-xs text-stone-500">
+                    {tipe === "beli" ? "Total transaksi" : "Total est. RAB"}
+                    {g.rows.length > 1 ? ` (${g.rows.length} bahan)` : ""}:
+                  </div>
+                  <div className="text-lg font-bold text-stone-800">
+                    {formatRupiah(g.totalHarga)}
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {siapKirim && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (confirm(`Kirim ke ${g.tujuanCabang ?? "cabang tujuan"}? Barang akan menunggu diterima cabang.`))
+                          kirim.mutate(g.fakturId!);
+                      }}
+                      disabled={kirim.isPending}
+                      className="whitespace-nowrap rounded-lg bg-purple-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-purple-500 disabled:opacity-60"
+                    >
+                      🚚 Kirim ke cabang
+                    </button>
+                  )}
+                  {g.fakturId && belumSelesai(g.status) && opsiTahap.length > 0 && (
+                    <select
+                      value=""
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={(e) => {
+                        e.stopPropagation();
+                        const ke = e.target.value as TahapTujuan | "";
+                        if (ke) setUbahTahap({ grup: g, ke });
+                      }}
+                      aria-label="Ubah tahap faktur"
+                      className="cursor-pointer rounded-lg bg-orange-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-orange-500"
+                    >
+                      <option value="">➡ Ubah Tahap</option>
+                      {opsiTahap.map((a) => (
+                        <option key={a.ke} value={a.ke}>
+                          {a.label}
+                        </option>
                       ))}
-                    </tbody>
-                  </table>
+                    </select>
+                  )}
                 </div>
               </div>
             </Card>
