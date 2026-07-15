@@ -403,6 +403,18 @@ export const bahanRoutes = new Hono<AppEnv>()
           .delete(ingredientComponents)
           .where(eq(ingredientComponents.ingredientId, row.id));
       }
+      // pindah jalur ke "produksi" → dibuat sendiri, tak memakai supplier:
+      // bersihkan tautan supplier agar tak ada info belanja yang menyesatkan
+      if (body.pengadaan === "produksi") {
+        await db
+          .delete(ingredientSuppliers)
+          .where(
+            and(
+              eq(ingredientSuppliers.companyId, auth.company_id!),
+              eq(ingredientSuppliers.ingredientId, row.id),
+            ),
+          );
+      }
       const sup = await infoSupplier(auth.company_id!, [row.id]);
       return c.json(toDto(row, sup.get(row.id)));
     },
@@ -431,10 +443,16 @@ export const bahanRoutes = new Hono<AppEnv>()
       const id = c.req.param("id");
       const { items } = c.req.valid("json");
       const [milik] = await db
-        .select({ id: ingredients.id })
+        .select({ id: ingredients.id, pengadaan: ingredients.pengadaan })
         .from(ingredients)
         .where(and(eq(ingredients.id, id), eq(ingredients.companyId, auth.company_id!)));
       if (!milik) throw new HTTPException(404, { message: "Bahan tidak ditemukan" });
+      // bahan PRODUKSI SENDIRI dibuat di dapur — tidak memakai supplier
+      if (milik.pengadaan === "produksi") {
+        throw new HTTPException(400, {
+          message: "Bahan produksi sendiri tidak memakai supplier",
+        });
+      }
       // gabungkan duplikat (utama di-OR-kan) agar unique index tak meledak
       const byId = new Map<string, boolean>();
       for (const it of items) {

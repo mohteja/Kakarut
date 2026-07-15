@@ -24,6 +24,7 @@ interface StokMasukPage {
   total: number;
   total_pengeluaran: number;
 }
+import { DokumenBelanjaModal } from "./DokumenBelanjaModal";
 import { FakturDetailModal } from "./FakturDetailModal";
 import { TahapModal } from "./TahapModal";
 
@@ -32,6 +33,8 @@ export interface StokMasukRow {
   bahan: string;
   isi: number;
   satuan: string;
+  /** satuan beli/kemasan (mis. "dus"); 1 satuan_beli = isi satuan */
+  satuan_beli?: string | null;
   qty: number;
   total_harga: number | null;
   is_batch: boolean;
@@ -60,6 +63,10 @@ export interface StokMasukRow {
   tujuan_cabang?: string | null;
   /** total dana cair faktur ini (nilai sama di tiap baris; 0 bila belum ada) */
   dana_cair: number;
+  /** supplier UTAMA bahan baris ini (info "beli di mana" saat diproses) */
+  supplier_bahan?: string | null;
+  supplier_bahan_alamat?: string | null;
+  supplier_bahan_telepon?: string | null;
 }
 
 export interface FakturGroup {
@@ -267,6 +274,9 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
   const [ubahTahap, setUbahTahap] = useState<{ grup: FakturGroup; ke: TahapTujuan } | null>(
     null,
   );
+  // Dokumen belanja (pegangan pembelanja) — simpan KEY faktur agar isi modal
+  // ikut segar setelah data list ter-refresh (bukan snapshot lama).
+  const [dokumen, setDokumen] = useState<string | null>(null);
 
   // Kelompokkan baris per faktur (baris lama tanpa faktur = grup sendiri)
   const grup = useMemo<FakturGroup[]>(() => {
@@ -520,6 +530,18 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                   </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
+                  {/* dokumen belanja: pegangan pembelanja saat faktur diproses */}
+                  {tipe === "beli" && g.rows.some((r) => r.status === "dikerjakan") && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDokumen(g.key);
+                      }}
+                      className="whitespace-nowrap rounded-lg border border-stone-300 bg-white px-3 py-2.5 text-sm font-semibold text-stone-700 hover:border-orange-400 hover:text-orange-700"
+                    >
+                      📄 Dokumen belanja
+                    </button>
+                  )}
                   {siapKirim && (
                     <button
                       onClick={(e) => {
@@ -643,8 +665,20 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
           endpoint={t.endpoint}
           ke={ubahTahap.ke}
           onClose={() => setUbahTahap(null)}
+          // belanja mulai DIPROSES → dokumen belanja terbuka otomatis
+          // sebagai pegangan pembelanja
+          onSelesai={(ke) => {
+            if (tipe === "beli" && ke === "dikerjakan") setDokumen(ubahTahap.grup.key);
+          }}
         />
       )}
+      {dokumen &&
+        (() => {
+          const g = grup.find((x) => x.key === dokumen);
+          return g ? (
+            <DokumenBelanjaModal key={g.key} grup={g} onClose={() => setDokumen(null)} />
+          ) : null;
+        })()}
     </div>
   );
 }

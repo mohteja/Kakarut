@@ -2207,6 +2207,60 @@ cek "kasir GET supplier bahan → boleh (1 baris)" "V == 1" \
 api "$OWNER" PUT "/bahan/$BH72_ID/supplier" '{"items":[]}' > /dev/null
 cek "PUT items kosong → daftar kosong" "V == 0" \
   "$(api "$OWNER" GET "/bahan/$BH72_ID/supplier" | jq 'length')"
+# bahan PRODUKSI SENDIRI dibuat di dapur — tidak memakai supplier
+BP72=$(api "$OWNER" POST /bahan '{"nama":"baso uji72","harga_beli":0,"isi":1,"satuan":"pcs","kategori":"baso","pengadaan":"produksi"}' | jq -r .id)
+cek "bahan produksi sendiri: PUT supplier → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/bahan/$BP72/supplier" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"items\":[{\"supplier_id\":\"$SUPA72\"}]}")"
+# bahan beli ber-supplier lalu diubah jadi produksi → tautan supplier otomatis terhapus
+api "$OWNER" PUT "/bahan/$BH72_ID/supplier" "{\"items\":[{\"supplier_id\":\"$SUPA72\",\"is_utama\":true}]}" > /dev/null
+FLIP72=$(api "$OWNER" PUT "/bahan/$BH72_ID" '{"pengadaan":"produksi"}')
+cek "flip ke produksi → supplier_utama null + jumlah_supplier 0" "V == 1" \
+  "$(echo "$FLIP72" | jq '((.supplier_utama==null) and (.jumlah_supplier==0)) | if . then 1 else 0 end')"
+cek "flip ke produksi → daftar supplier kosong" "V == 0" \
+  "$(api "$OWNER" GET "/bahan/$BH72_ID/supplier" | jq 'length')"
+
+echo "== 73. Supplier tampil saat diproses + transaksi tercatat + kartu supplier =="
+SUPC73=$(api "$OWNER" POST /supplier '{"nama":"Pasar Induk 73","telepon":"0812","alamat":"Jl. Pasar Induk No. 73, Blok C"}' | jq -r .id)
+BH73=$(api "$OWNER" POST /bahan '{"nama":"cabai uji73","harga_beli":40000,"isi":1000,"satuan":"gr","satuan_beli":"karung","kategori":"lain"}' | jq -r .id)
+api "$OWNER" PUT "/bahan/$BH73/supplier" "{\"items\":[{\"supplier_id\":\"$SUPC73\",\"is_utama\":true}]}" > /dev/null
+# faktur beli TANPA supplier → baris memuat info supplier utama bahan + alamat
+FK73=$(api "$OWNER" POST /pembelian/faktur "{\"no_faktur\":\"SUP-73\",\"items\":[{\"ingredient_id\":\"$BH73\",\"mode\":\"pcs\",\"jumlah\":2}]}" | jq -r .faktur_id)
+B73=$(api "$OWNER" GET "/pembelian?per_page=500" | jq --arg f "$FK73" '[.rows[] | select(.faktur_id==$f)][0]')
+cek "baris memuat supplier utama bahan (info beli di mana)" "V == 1" \
+  "$(echo "$B73" | jq '(.supplier_bahan=="Pasar Induk 73") | if . then 1 else 0 end')"
+cek "baris memuat alamat supplier bahan" "V == 1" \
+  "$(echo "$B73" | jq '(.supplier_bahan_alamat=="Jl. Pasar Induk No. 73, Blok C") | if . then 1 else 0 end')"
+cek "baris memuat satuan_beli (konversi kemasan dokumen belanja)" "V == 1" \
+  "$(echo "$B73" | jq '(.satuan_beli=="karung") | if . then 1 else 0 end')"
+cek "faktur belum menyebut supplier (rencana)" "V == 1" \
+  "$(echo "$B73" | jq '(.supplier==null) | if . then 1 else 0 end')"
+# mulai DIPROSES → transaksi otomatis tercatat ke supplier utama bahan
+api "$OWNER" POST "/pembelian/tahap/$FK73" '{"ke":"dikerjakan"}' > /dev/null
+cek "diproses: transaksi tercatat ke supplier utama" "V == 1" \
+  "$(api "$OWNER" GET "/pembelian?per_page=500" | jq --arg f "$FK73" '([.rows[] | select(.faktur_id==$f)] | (length>0) and all(.[]; .supplier=="Pasar Induk 73")) | if . then 1 else 0 end')"
+# kartu supplier: transaksi + bahan tertaut + ringkasan
+KARTU73=$(api "$OWNER" GET "/supplier/$SUPC73/kartu")
+cek "kartu: profil supplier benar" "V == 1" \
+  "$(echo "$KARTU73" | jq '(.supplier.nama=="Pasar Induk 73" and .supplier.alamat=="Jl. Pasar Induk No. 73, Blok C") | if . then 1 else 0 end')"
+cek "kartu: transaksi faktur SUP-73 tercatat" "V >= 1" \
+  "$(echo "$KARTU73" | jq '[.rows[] | select(.no_faktur=="SUP-73")] | length')"
+cek "kartu: jumlah_transaksi >= 1" "V >= 1" "$(echo "$KARTU73" | jq '.jumlah_transaksi')"
+cek "kartu: bahan tertaut memuat cabai uji73 (★ utama)" "V == 1" \
+  "$(echo "$KARTU73" | jq '([.bahan[] | select(.nama=="cabai uji73" and .is_utama)] | length == 1) | if . then 1 else 0 end')"
+cek "kartu: belum ada belanja terkonfirmasi (0)" "V == 0" "$(echo "$KARTU73" | jq '.total_belanja')"
+# selesaikan sampai diterima → total_belanja terisi
+api "$OWNER" POST "/pembelian/tahap/$FK73" '{"ke":"menunggu"}' > /dev/null
+ID73=$(api "$OWNER" GET "/pembelian?per_page=500" | jq -r --arg f "$FK73" '[.rows[] | select(.faktur_id==$f)][0].id')
+Q73=$(api "$OWNER" GET "/pembelian?per_page=500" | jq -r --arg f "$FK73" '[.rows[] | select(.faktur_id==$f)][0].qty')
+api "$OWNER" POST "/pembelian/tahap/$FK73" "{\"ke\":\"dikonfirmasi\",\"items\":[{\"id\":\"$ID73\",\"qty\":$Q73}]}" > /dev/null
+cek "kartu: total belanja terkonfirmasi = Rp80 (2 gr × Rp40/gr)" "V == 80" \
+  "$(api "$OWNER" GET "/supplier/$SUPC73/kartu" | jq '.total_belanja')"
+# faktur yang SUDAH menyebut supplier tidak ditimpa supplier utama bahan
+SUPD73=$(api "$OWNER" POST /supplier '{"nama":"Toko Pilihan 73"}' | jq -r .id)
+FK73B=$(api "$OWNER" POST /pembelian/faktur "{\"no_faktur\":\"SUP-73B\",\"supplier_id\":\"$SUPD73\",\"items\":[{\"ingredient_id\":\"$BH73\",\"mode\":\"pcs\",\"jumlah\":1}]}" | jq -r .faktur_id)
+api "$OWNER" POST "/pembelian/tahap/$FK73B" '{"ke":"dikerjakan"}' > /dev/null
+cek "supplier pilihan manual tidak ditimpa saat diproses" "V == 1" \
+  "$(api "$OWNER" GET "/pembelian?per_page=500" | jq --arg f "$FK73B" '([.rows[] | select(.faktur_id==$f)] | (length>0) and all(.[]; .supplier=="Toko Pilihan 73")) | if . then 1 else 0 end')"
 
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="

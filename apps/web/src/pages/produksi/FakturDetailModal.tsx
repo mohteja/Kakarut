@@ -252,6 +252,20 @@ export function FakturDetailModal({
                           ❌ ditolak
                         </span>
                       )}
+                      {/* info belanja: supplier utama bahan + alamatnya */}
+                      {tipe === "beli" && r.supplier_bahan && (
+                        <div className="mt-0.5 text-xs font-normal text-stone-600">
+                          🏪 {r.supplier_bahan}
+                          {r.supplier_bahan_telepon && (
+                            <span className="text-stone-400"> · {r.supplier_bahan_telepon}</span>
+                          )}
+                          {r.supplier_bahan_alamat && (
+                            <div className="text-[11px] font-normal text-stone-400">
+                              📍 {r.supplier_bahan_alamat}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </td>
                     <td className="px-3 py-1.5 text-right text-stone-600">
                       {ditolak ? (

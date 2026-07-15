@@ -348,6 +348,35 @@ export interface SupplierDto {
   is_active: boolean;
 }
 
+/** Satu baris transaksi pembelian pada kartu supplier. */
+export interface SupplierKartuRow {
+  id: string;
+  waktu: string;
+  prod_date: string;
+  no_faktur: string | null;
+  faktur_id: string | null;
+  bahan: string;
+  satuan: string;
+  qty: number;
+  total_harga: number | null;
+  status: KonfirmasiStatus;
+  cabang: string | null;
+}
+
+/**
+ * KARTU SUPPLIER: riwayat transaksi pembelian yang tercatat ke supplier ini +
+ * ringkasan belanja + bahan yang menautkannya (★ = supplier utama bahan itu).
+ */
+export interface SupplierKartu {
+  supplier: SupplierDto;
+  /** total belanja TERKONFIRMASI (barang benar-benar diterima) */
+  total_belanja: number;
+  /** jumlah faktur pembelian yang menyebut supplier ini */
+  jumlah_transaksi: number;
+  rows: SupplierKartuRow[];
+  bahan: { ingredient_id: string; nama: string; is_utama: boolean }[];
+}
+
 // ===== Rekomendasi pembelian dari target penjualan =====
 
 export type AcuanJenis = "minggu_lalu" | "7hari" | "rentang";

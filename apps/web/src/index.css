@@ -12,8 +12,18 @@
   #menu-print,
   #menu-print *,
   #qr-print,
-  #qr-print * {
+  #qr-print *,
+  #dokumen-print,
+  #dokumen-print * {
     visibility: visible;
+  }
+  /* Dokumen belanja — cetak biasa (A4/PDF), pegangan pembelanja */
+  #dokumen-print {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    padding: 8mm;
   }
   /* QR karyawan — cetak biasa (kartu/tempel) */
   #qr-print {
