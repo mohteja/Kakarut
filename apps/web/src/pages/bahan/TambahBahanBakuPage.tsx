@@ -23,6 +23,12 @@ interface Baris {
 
 const cell = "rounded-lg border border-stone-300 px-2 py-1.5 text-sm focus:border-orange-500 focus:outline-none";
 const thCell = "px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide text-stone-500";
+// Judul grup dua panel: belanja (RAB) vs aturan resep — biar form seperti sketsa.
+const thGrupBelanja =
+  "border-l border-emerald-200 bg-emerald-50 px-2 py-1.5 text-center text-xs font-bold uppercase tracking-wide text-emerald-700";
+const thGrupResep =
+  "border-l border-sky-200 bg-sky-50 px-2 py-1.5 text-center text-xs font-bold uppercase tracking-wide text-sky-700";
+const sepKiri = "border-l border-stone-200"; // pemisah vertikal antar-zona di badan tabel
 
 function barisKosong(satuan: string): Baris {
   return {
@@ -136,28 +142,43 @@ export function TambahBahanBakuPage() {
         judul="Kategori Bahan Baku"
         deskripsi="Tambah/ubah kategori bahan baku. Kategori baru langsung muncul di dropdown."
       />
-      <div className="mb-3 rounded-lg bg-blue-50 px-4 py-2 text-sm text-blue-800">
-        <b>Satuan beli</b> = cara belanja (mis. 1 <i>dus</i> = Rp24.000). <b>Satuan resep</b> =
-        satuan kerja/perhitungan (mis. <i>ml</i>). <b>Isi</b> = berapa satuan resep dalam 1 satuan
-        beli. Harga per satuan resep dihitung otomatis. Bahan <b>produksi</b> dibuat di menu Resep.
+      <div className="mb-3 rounded-lg border border-stone-200 bg-white px-4 py-3 text-sm">
+        <div className="flex flex-wrap gap-x-6 gap-y-2">
+          <span className="text-emerald-800">
+            <b>🛒 Belanja (RAB)</b> — satuan &amp; harga saat belanja di pasar (mis. garam{" "}
+            <i>1 pack = Rp10.000</i>).
+          </span>
+          <span className="text-sky-800">
+            <b>🧪 Aturan resep</b> — satuan kerja untuk resep + konversinya (<i>1 pack = 200 gram</i>{" "}
+            → harga otomatis <i>Rp50/gram</i>).
+          </span>
+        </div>
+        <p className="mt-1 text-xs text-stone-500">
+          Harga per satuan resep dihitung otomatis dari konversi. Bahan <b>produksi</b> dibuat di
+          menu Resep.
+        </p>
       </div>
 
       <Card className="overflow-x-auto p-0">
-        <table className="w-full min-w-[1150px]">
+        <table className="w-full min-w-[1220px]">
           <thead className="border-b border-stone-200 bg-stone-50">
             <tr>
-              <th className={thCell}>Kode</th>
-              <th className={thCell}>Nama *</th>
-              <th className={thCell}>Satuan beli</th>
+              <th className={thCell} rowSpan={2}>Kode</th>
+              <th className={thCell} rowSpan={2}>Nama *</th>
+              <th className={thGrupBelanja} colSpan={2}>🛒 Belanja (RAB)</th>
+              <th className={thGrupResep} colSpan={3}>🧪 Aturan resep</th>
+              <th className={`${thCell} ${sepKiri}`} rowSpan={2}>Kategori</th>
+              <th className={`${thCell} text-center`} rowSpan={2}>Ecer</th>
+              <th className={`${thCell} text-center`} rowSpan={2}>Lacak</th>
+              <th className={thCell} rowSpan={2}>Stok min</th>
+              <th className="px-2 py-2" rowSpan={2}></th>
+            </tr>
+            <tr>
+              <th className={`${thCell} border-l border-emerald-200`}>Satuan beli</th>
               <th className={thCell}>Harga beli</th>
-              <th className={thCell}>Satuan resep</th>
-              <th className={thCell}>Isi *</th>
+              <th className={`${thCell} border-l border-sky-200`}>Satuan resep</th>
+              <th className={thCell}>Konversi</th>
               <th className={`${thCell} text-right`}>Harga/satuan resep</th>
-              <th className={thCell}>Kategori</th>
-              <th className={`${thCell} text-center`}>Ecer</th>
-              <th className={`${thCell} text-center`}>Lacak</th>
-              <th className={thCell}>Stok min</th>
-              <th className="px-2 py-2"></th>
             </tr>
           </thead>
           <tbody className="divide-y divide-stone-100">
@@ -184,7 +205,7 @@ export function TambahBahanBakuPage() {
                       className={`${cell} w-40`}
                     />
                   </td>
-                  <td className="px-2 py-1.5">
+                  <td className={`px-2 py-1.5 ${sepKiri}`}>
                     <select
                       value={b.satuan_beli}
                       onChange={(e) => ubah(i, { satuan_beli: e.target.value })}
@@ -205,7 +226,7 @@ export function TambahBahanBakuPage() {
                       className={`${cell} w-24`}
                     />
                   </td>
-                  <td className="px-2 py-1.5">
+                  <td className={`px-2 py-1.5 ${sepKiri}`}>
                     <select
                       value={b.satuan}
                       onChange={(e) => ubah(i, { satuan: e.target.value })}
@@ -215,19 +236,24 @@ export function TambahBahanBakuPage() {
                     </select>
                   </td>
                   <td className="px-2 py-1.5">
-                    <input
-                      type="number"
-                      min="0.0001"
-                      step="any"
-                      value={b.isi}
-                      onChange={(e) => ubah(i, { isi: e.target.value })}
-                      className={`${cell} w-20`}
-                    />
+                    <div className="flex items-center gap-1 text-sm whitespace-nowrap text-stone-600">
+                      <span>1 {b.satuan_beli || "beli"} =</span>
+                      <input
+                        type="number"
+                        min="0.0001"
+                        step="any"
+                        value={b.isi}
+                        onChange={(e) => ubah(i, { isi: e.target.value })}
+                        className={`${cell} w-16`}
+                        aria-label="Konversi (satuan resep per 1 satuan beli)"
+                      />
+                      <span>{b.satuan}</span>
+                    </div>
                   </td>
                   <td className="px-2 py-1.5 text-right text-sm text-stone-600 whitespace-nowrap">
                     {hpsr != null ? `Rp ${formatAngka(hpsr, 2)}/${b.satuan}` : "—"}
                   </td>
-                  <td className="px-2 py-1.5">
+                  <td className={`px-2 py-1.5 ${sepKiri}`}>
                     <select
                       value={b.kategori}
                       onChange={(e) => ubah(i, { kategori: e.target.value as BahanKategori })}

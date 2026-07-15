@@ -352,81 +352,94 @@ export function BahanPage() {
                 />
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="mb-1 block text-sm font-medium">Satuan beli</label>
-                <select
-                  value={form.satuan_beli}
-                  onChange={(e) => setForm({ ...form, satuan_beli: e.target.value })}
-                  className={inputClass}
-                >
-                  <option value="">— (beli langsung per satuan resep)</option>
-                  {!satuanList?.some((s) => s.nama === form.satuan_beli) && form.satuan_beli && (
-                    <option value={form.satuan_beli}>{form.satuan_beli}</option>
-                  )}
-                  {(satuanList ?? []).map((s) => (
-                    <option key={s.id} value={s.nama}>
-                      {s.nama}
-                    </option>
-                  ))}
-                </select>
+            {/* 🛒 Belanja (RAB): cara & harga saat belanja di pasar */}
+            <fieldset className="rounded-lg border border-emerald-200 bg-emerald-50/40 p-3">
+              <legend className="px-1 text-xs font-bold tracking-wide text-emerald-700 uppercase">
+                🛒 Belanja (RAB)
+              </legend>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="mb-1 block text-sm font-medium">Satuan beli</label>
+                  <select
+                    value={form.satuan_beli}
+                    onChange={(e) => setForm({ ...form, satuan_beli: e.target.value })}
+                    className={inputClass}
+                  >
+                    <option value="">— (beli langsung per satuan resep)</option>
+                    {!satuanList?.some((s) => s.nama === form.satuan_beli) && form.satuan_beli && (
+                      <option value={form.satuan_beli}>{form.satuan_beli}</option>
+                    )}
+                    {(satuanList ?? []).map((s) => (
+                      <option key={s.id} value={s.nama}>
+                        {s.nama}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium">
+                    Harga beli (Rp{form.satuan_beli ? ` / ${form.satuan_beli}` : ""})
+                  </label>
+                  <input
+                    required
+                    type="number"
+                    min="0"
+                    step="any"
+                    value={form.harga_beli}
+                    onChange={(e) => setForm({ ...form, harga_beli: e.target.value })}
+                    className={inputClass}
+                  />
+                </div>
               </div>
-              <div>
-                <label className="mb-1 block text-sm font-medium">
-                  Harga beli (Rp{form.satuan_beli ? ` / ${form.satuan_beli}` : ""})
-                </label>
-                <input
-                  required
-                  type="number"
-                  min="0"
-                  step="any"
-                  value={form.harga_beli}
-                  onChange={(e) => setForm({ ...form, harga_beli: e.target.value })}
-                  className={inputClass}
-                />
+            </fieldset>
+
+            {/* 🧪 Aturan resep: satuan kerja + konversi → harga per satuan resep otomatis */}
+            <fieldset className="rounded-lg border border-sky-200 bg-sky-50/40 p-3">
+              <legend className="px-1 text-xs font-bold tracking-wide text-sky-700 uppercase">
+                🧪 Aturan resep
+              </legend>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="mb-1 block text-sm font-medium">Satuan resep</label>
+                  <select
+                    required
+                    value={form.satuan}
+                    onChange={(e) => setForm({ ...form, satuan: e.target.value })}
+                    className={inputClass}
+                  >
+                    {!satuanList?.some((s) => s.nama === form.satuan) && form.satuan && (
+                      <option value={form.satuan}>{form.satuan}</option>
+                    )}
+                    {(satuanList ?? []).map((s) => (
+                      <option key={s.id} value={s.nama}>
+                        {s.nama}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium">
+                    Konversi (1 {form.satuan_beli || "satuan beli"} = …{" "}
+                    {form.satuan || "satuan resep"})
+                  </label>
+                  <input
+                    required
+                    type="number"
+                    min="0.0001"
+                    step="any"
+                    value={form.isi}
+                    onChange={(e) => setForm({ ...form, isi: e.target.value })}
+                    className={inputClass}
+                  />
+                </div>
               </div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="mb-1 block text-sm font-medium">Satuan resep</label>
-                <select
-                  required
-                  value={form.satuan}
-                  onChange={(e) => setForm({ ...form, satuan: e.target.value })}
-                  className={inputClass}
-                >
-                  {!satuanList?.some((s) => s.nama === form.satuan) && form.satuan && (
-                    <option value={form.satuan}>{form.satuan}</option>
-                  )}
-                  {(satuanList ?? []).map((s) => (
-                    <option key={s.id} value={s.nama}>
-                      {s.nama}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="mb-1 block text-sm font-medium">
-                  Isi ({form.satuan || "satuan resep"}
-                  {form.satuan_beli ? ` per 1 ${form.satuan_beli}` : " per pembelian"})
-                </label>
-                <input
-                  required
-                  type="number"
-                  min="0.0001"
-                  step="any"
-                  value={form.isi}
-                  onChange={(e) => setForm({ ...form, isi: e.target.value })}
-                  className={inputClass}
-                />
-              </div>
-            </div>
-            {Number(form.harga_beli) > 0 && Number(form.isi) > 0 && (
-              <div className="rounded-lg bg-orange-50 px-3 py-2 text-sm text-orange-800">
-                Harga per {form.satuan || "satuan resep"}:{" "}
-                <b>Rp {formatAngka(Number(form.harga_beli) / Number(form.isi), 2)}</b>
-              </div>
-            )}
+              {Number(form.harga_beli) > 0 && Number(form.isi) > 0 && (
+                <div className="mt-3 rounded-lg bg-white px-3 py-2 text-sm text-sky-900 ring-1 ring-sky-200">
+                  Harga per {form.satuan || "satuan resep"}:{" "}
+                  <b>Rp {formatAngka(Number(form.harga_beli) / Number(form.isi), 2)}</b>
+                </div>
+              )}
+            </fieldset>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="mb-1 block text-sm font-medium">Kategori</label>

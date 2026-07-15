@@ -23,7 +23,7 @@ import {
 } from "../../components/ui";
 import { labelCabang, useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
-import { formatRupiah } from "../../lib/format";
+import { formatAngka, formatRupiah } from "../../lib/format";
 import { useCompanyMode } from "../../lib/useCompanyMode";
 
 interface Kategori {
@@ -36,15 +36,6 @@ interface KomponenForm {
   ingredient_id: string;
   qty: string;
 }
-
-/** Edit inline data master bahan dari form resep (gramasi/satuan/harga). */
-interface BahanOverride {
-  isi: string;
-  satuan: string;
-  harga_beli: string;
-}
-
-const SATUAN_UMUM = ["pcs", "gr", "ml", "butir", "porsi", "lembar", "ikat"];
 
 export function MenuFormPage() {
   const { id } = useParams();
@@ -83,7 +74,6 @@ export function MenuFormPage() {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [isActive, setIsActive] = useState(true);
   const [komponen, setKomponen] = useState<KomponenForm[]>([]);
-  const [override, setOverride] = useState<Record<string, BahanOverride>>({});
   /** pembatasan lokasi (mode Pro) — [] = tampil di semua lokasi */
   const [branchIds, setBranchIds] = useState<string[]>([]);
   const dimuat = useRef(false);
@@ -111,42 +101,14 @@ export function MenuFormPage() {
 
   const bahanById = useMemo(() => new Map((bahan ?? []).map((b) => [b.id, b])), [bahan]);
 
-  /** Data bahan dengan edit inline (gramasi/satuan/harga) diterapkan. */
-  function bahanView(id: string) {
-    const b = bahanById.get(id);
-    if (!b) return undefined;
-    const o = override[id];
-    const isi = o ? Number(o.isi) : b.isi;
-    const hargaBeli = o ? Number(o.harga_beli) : b.harga_beli;
-    return {
-      ...b,
-      isi,
-      satuan: o?.satuan ?? b.satuan,
-      harga_beli: hargaBeli,
-      harga_per_unit: isi > 0 ? hargaBeli / isi : 0,
-    };
-  }
-
-  function ubahOverride(id: string, patch: Partial<BahanOverride>) {
-    const b = bahanById.get(id);
-    if (!b) return;
-    setOverride((prev) => ({
-      ...prev,
-      [id]: {
-        isi: prev[id]?.isi ?? String(b.isi),
-        satuan: prev[id]?.satuan ?? b.satuan,
-        harga_beli: prev[id]?.harga_beli ?? String(b.harga_beli),
-        ...patch,
-      },
-    }));
-  }
-
-  // Preview HPP live (rumus sama dengan server, dari @kakarut/shared)
+  // Preview HPP live (rumus sama dengan server, dari @kakarut/shared).
+  // Harga per satuan resep (harga_per_unit) diambil apa adanya dari master
+  // bahan — aturan resep diubah di halaman Bahan Baku, bukan dari sini.
   const preview = useMemo(() => {
     const komponenHpp = komponen
       .filter((k) => k.ingredient_id && Number(k.qty) > 0)
       .map((k) => {
-        const b = bahanView(k.ingredient_id);
+        const b = bahanById.get(k.ingredient_id);
         return {
           qty: Number(k.qty),
           hargaPerUnit: b?.harga_per_unit ?? 0,
@@ -170,37 +132,10 @@ export function MenuFormPage() {
     }
     const saran = hargaSaran(ownHpp, Number(mult) || 0);
     return { hpp: ownHpp, hppDineIn: ownHppDineIn, saran, bulat: hargaJualBulat(saran) };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [komponen, bahanById, override, tipe, mult, baseMenuId, baseMult, menus]);
+  }, [komponen, bahanById, tipe, mult, baseMenuId, baseMult, menus]);
 
   const simpan = useMutation({
     mutationFn: async () => {
-      // Terapkan dulu edit inline data bahan (gramasi/satuan/harga) —
-      // berlaku global ke semua resep, seperti tabel bahan di Excel
-      const bahanBerubah = Object.entries(override).filter(([bid, o]) => {
-        const b = bahanById.get(bid);
-        return (
-          b &&
-          Number(o.isi) > 0 &&
-          Number(o.harga_beli) >= 0 &&
-          (Number(o.isi) !== b.isi ||
-            Number(o.harga_beli) !== b.harga_beli ||
-            o.satuan.trim() !== b.satuan)
-        );
-      });
-      await Promise.all(
-        bahanBerubah.map(([bid, o]) =>
-          api(`/bahan/${bid}`, {
-            method: "PUT",
-            body: {
-              isi: Number(o.isi),
-              harga_beli: Number(o.harga_beli),
-              satuan: o.satuan.trim() || "pcs",
-            },
-          }),
-        ),
-      );
-
       const body = {
         nama,
         kode: kode.trim() || null,
@@ -223,7 +158,6 @@ export function MenuFormPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["menu"] });
-      queryClient.invalidateQueries({ queryKey: ["bahan"] }); // edit inline master
       queryClient.invalidateQueries({ queryKey: ["stok"] });
       navigate("/menu");
     },
@@ -429,7 +363,7 @@ export function MenuFormPage() {
           </div>
           <div className="space-y-3">
             {komponen.map((k, i) => {
-              const b = k.ingredient_id ? bahanView(k.ingredient_id) : undefined;
+              const b = k.ingredient_id ? bahanById.get(k.ingredient_id) : undefined;
               const hargaKomponen = b ? b.harga_per_unit * Number(k.qty || 0) : 0;
               return (
                 <div key={i} className="rounded-lg border border-stone-200 p-3">
@@ -446,7 +380,7 @@ export function MenuFormPage() {
                       <option value="">— pilih bahan —</option>
                       {bahan.map((x) => (
                         <option key={x.id} value={x.id}>
-                          {x.nama} — {formatRupiah(x.harga_beli)} / {x.isi} {x.satuan}
+                          {x.nama} — Rp {formatAngka(x.harga_per_unit, 2)}/{x.satuan}
                         </option>
                       ))}
                     </select>
@@ -464,7 +398,7 @@ export function MenuFormPage() {
                       <div className="mt-2 grid grid-cols-2 gap-2 md:grid-cols-4">
                         <div>
                           <label className="mb-1 block text-xs font-medium text-stone-500">
-                            Takaran ({b.satuan})
+                            Takaran resep ({b.satuan})
                           </label>
                           <input
                             type="number"
@@ -481,52 +415,46 @@ export function MenuFormPage() {
                         </div>
                         <div>
                           <label className="mb-1 block text-xs font-medium text-stone-500">
-                            Gramasi/isi kemasan
+                            Satuan resep
                           </label>
                           <input
-                            type="number"
-                            min="0.0001"
-                            step="any"
-                            value={override[b.id]?.isi ?? String(b.isi)}
-                            onChange={(e) => ubahOverride(b.id, { isi: e.target.value })}
-                            className={inputClass}
+                            value={b.satuan}
+                            readOnly
+                            tabIndex={-1}
+                            className={`${inputClass} bg-stone-50 text-stone-500`}
                           />
                         </div>
                         <div>
                           <label className="mb-1 block text-xs font-medium text-stone-500">
-                            Satuan
+                            Harga per {b.satuan}
                           </label>
                           <input
-                            list="satuan-list"
-                            value={override[b.id]?.satuan ?? b.satuan}
-                            onChange={(e) => ubahOverride(b.id, { satuan: e.target.value })}
-                            className={inputClass}
+                            value={`Rp ${formatAngka(b.harga_per_unit, 2)}`}
+                            readOnly
+                            tabIndex={-1}
+                            className={`${inputClass} bg-stone-50 text-stone-500`}
                           />
                         </div>
                         <div>
                           <label className="mb-1 block text-xs font-medium text-stone-500">
-                            Harga bahan (Rp)
+                            Harga komponen
                           </label>
                           <input
-                            type="number"
-                            min="0"
-                            step="any"
-                            value={override[b.id]?.harga_beli ?? String(b.harga_beli)}
-                            onChange={(e) => ubahOverride(b.id, { harga_beli: e.target.value })}
-                            className={inputClass}
+                            value={formatRupiah(hargaKomponen)}
+                            readOnly
+                            tabIndex={-1}
+                            className={`${inputClass} bg-orange-50 font-semibold text-orange-700`}
                           />
                         </div>
                       </div>
-                      <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-sm">
-                        <span className="text-stone-500">
-                          Harga per {b.satuan}:{" "}
-                          <b className="text-stone-700">{formatRupiah(b.harga_per_unit)}</b>
-                        </span>
-                        <span className="text-stone-500">
-                          Harga komponen:{" "}
-                          <b className="text-orange-600">{formatRupiah(hargaKomponen)}</b>
-                        </span>
-                      </div>
+                      <p className="mt-2 text-xs text-stone-500">
+                        Satuan &amp; harga mengikuti <b>aturan resep</b> bahan — ubah dari
+                        halaman{" "}
+                        <Link to="/bahan" className="font-medium text-orange-600 hover:underline">
+                          Bahan Baku
+                        </Link>
+                        .
+                      </p>
                     </>
                   )}
                 </div>
@@ -535,17 +463,6 @@ export function MenuFormPage() {
             {komponen.length === 0 && (
               <div className="py-4 text-center text-sm text-stone-400">
                 Belum ada komponen. HPP = 0.
-              </div>
-            )}
-            <datalist id="satuan-list">
-              {SATUAN_UMUM.map((s) => (
-                <option key={s} value={s} />
-              ))}
-            </datalist>
-            {Object.keys(override).length > 0 && (
-              <div className="rounded-lg bg-yellow-50 px-3 py-2 text-xs text-yellow-800">
-                Perubahan gramasi/satuan/harga ikut memperbarui data <b>Bahan Baku</b>{" "}
-                (berlaku ke semua resep yang memakai bahan tsb) — diterapkan saat Simpan Menu.
               </div>
             )}
           </div>
