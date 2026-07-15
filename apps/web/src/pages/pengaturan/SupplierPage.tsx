@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
+import { Link } from "react-router-dom";
 import type { SupplierDto } from "@kakarut/shared";
 import {
   Card,
@@ -92,7 +93,15 @@ export function SupplierPage() {
           <tbody className="divide-y divide-stone-100">
             {(supplier ?? []).map((s) => (
               <tr key={s.id}>
-                <td className={`${tdClass} font-medium`}>{s.nama}</td>
+                <td className={`${tdClass} font-medium`}>
+                  <Link
+                    to={`/pengaturan/supplier/${s.id}`}
+                    className="hover:text-orange-600 hover:underline"
+                    title="Buka kartu supplier (riwayat transaksi)"
+                  >
+                    {s.nama}
+                  </Link>
+                </td>
                 <td className={tdClass}>{s.telepon ?? "—"}</td>
                 <td className={`${tdClass} max-w-48 truncate`}>{s.alamat ?? "—"}</td>
                 <td className={tdClass}>
@@ -105,6 +114,12 @@ export function SupplierPage() {
                   </span>
                 </td>
                 <td className={`${tdClass} whitespace-nowrap text-right`}>
+                  <Link
+                    to={`/pengaturan/supplier/${s.id}`}
+                    className="text-sm font-medium text-stone-600 hover:underline"
+                  >
+                    📒 Kartu
+                  </Link>
                   <button
                     onClick={() =>
                       setForm({
@@ -115,7 +130,7 @@ export function SupplierPage() {
                         catatan: s.catatan ?? "",
                       })
                     }
-                    className="text-sm font-medium text-orange-600 hover:underline"
+                    className="ml-3 text-sm font-medium text-orange-600 hover:underline"
                   >
                     Ubah
                   </button>
@@ -155,23 +170,24 @@ export function SupplierPage() {
                 className={inputClass}
               />
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="mb-1 block text-sm font-medium">Telepon</label>
-                <input
-                  value={form.telepon}
-                  onChange={(e) => setForm({ ...form, telepon: e.target.value })}
-                  className={inputClass}
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-sm font-medium">Alamat</label>
-                <input
-                  value={form.alamat}
-                  onChange={(e) => setForm({ ...form, alamat: e.target.value })}
-                  className={inputClass}
-                />
-              </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium">Telepon</label>
+              <input
+                value={form.telepon}
+                onChange={(e) => setForm({ ...form, telepon: e.target.value })}
+                className={inputClass}
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium">Alamat</label>
+              <textarea
+                rows={2}
+                value={form.alamat}
+                onChange={(e) => setForm({ ...form, alamat: e.target.value })}
+                placeholder="alamat lengkap / patokan lokasi (tampil saat belanja diproses)"
+                aria-label="Alamat supplier"
+                className={inputClass}
+              />
             </div>
             <div>
               <label className="mb-1 block text-sm font-medium">Catatan</label>

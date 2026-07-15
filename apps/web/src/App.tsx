@@ -34,6 +34,7 @@ import { SatuanPage } from "./pages/pengaturan/SatuanPage";
 import { PenyimpananPage } from "./pages/pengaturan/PenyimpananPage";
 import { PerusahaanPage } from "./pages/pengaturan/PerusahaanPage";
 import { SupplierPage } from "./pages/pengaturan/SupplierPage";
+import { KartuSupplierPage } from "./pages/pengaturan/KartuSupplierPage";
 import { KartuStokPage } from "./pages/stok/KartuStokPage";
 import { PermintaanStokPage } from "./pages/stok/PermintaanStokPage";
 import { StokAwalPage } from "./pages/stok/StokAwalPage";
@@ -139,6 +140,7 @@ export default function App() {
                   <Route path="/pengaturan/cabang" element={<CabangPage />} />
                   <Route path="/pengaturan/karyawan" element={<KaryawanPage />} />
                   <Route path="/pengaturan/supplier" element={<SupplierPage />} />
+                  <Route path="/pengaturan/supplier/:id" element={<KartuSupplierPage />} />
                   <Route path="/pengaturan/penyimpanan" element={<PenyimpananPage />} />
                   <Route path="/pengaturan/satuan" element={<SatuanPage />} />
                   <Route path="/bahan/baru" element={<TambahBahanBakuPage />} />

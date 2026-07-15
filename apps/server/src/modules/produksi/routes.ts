@@ -12,6 +12,7 @@ import {
   companies,
   fakturDana,
   fakturLogs,
+  ingredientSuppliers,
   ingredients,
   memberships,
   productions,
@@ -38,6 +39,9 @@ const logOleh = alias(users, "log_oleh");
 // cabang baris + cabang tujuan (dipakai tampilan lintas-cabang di Kantor)
 const cabangProd = alias(branches, "cabang_prod");
 const tujuanProd = alias(branches, "tujuan_prod");
+// supplier UTAMA bahan tiap baris (info "beli di mana" saat belanja diproses)
+const isupUtama = alias(ingredientSuppliers, "isup_utama");
+const supBahan = alias(suppliers, "sup_bahan");
 
 const FakturEditBody = z.object({
   password: z.string(),
@@ -418,6 +422,30 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         }
         const byId = new Map(baris.map((b) => [b.id, b]));
 
+        // BELI mulai DIPROSES: transaksi tercatat ke supplier UTAMA bahan
+        // (baris tanpa supplier diisi otomatis) — dasar kartu supplier.
+        const utamaByIng = new Map<string, string>();
+        if (tipe === "beli" && selfAssign) {
+          const utamaRows = await db
+            .select({
+              ingredientId: ingredientSuppliers.ingredientId,
+              supplierId: ingredientSuppliers.supplierId,
+            })
+            .from(ingredientSuppliers)
+            .where(
+              and(
+                eq(ingredientSuppliers.companyId, auth.company_id!),
+                eq(ingredientSuppliers.isUtama, true),
+                inArray(ingredientSuppliers.ingredientId, [
+                  ...new Set(baris.map((b) => b.ingredientId)),
+                ]),
+              ),
+            );
+          for (const r of utamaRows) utamaByIng.set(r.ingredientId, r.supplierId);
+        }
+        const supplierBaris = (b: (typeof baris)[number]) =>
+          b.supplierId ?? (b.tipe === "beli" ? (utamaByIng.get(b.ingredientId) ?? null) : null);
+
         // Validasi seluruh permintaan dulu — semua-atau-tidak-sama-sekali.
         const terpakai = new Set<string>();
         for (const item of items) {
@@ -594,6 +622,10 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
                   ...(selfAssign
                     ? { workerId: sql`COALESCE(${productions.workerId}, ${auth.sub}::uuid)` }
                     : {}),
+                  // beli diproses: catat transaksi ke supplier utama bahan
+                  ...(selfAssign && b.supplierId == null && supplierBaris(b) != null
+                    ? { supplierId: supplierBaris(b) }
+                    : {}),
                   // harga riil menggantikan estimasi RAB (harga pasar berubah)
                   ...(item.harga != null ? { totalHarga: item.harga } : {}),
                 })
@@ -652,7 +684,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
                 // tetap tergabung di "Data Permintaan Stok"
                 rencanaId: b.rencanaId,
                 noFaktur: b.noFaktur,
-                supplierId: b.supplierId,
+                supplierId: selfAssign ? supplierBaris(b) : b.supplierId,
                 storageLocationId: tujuanStorage ?? (autoKirimBeli ? null : b.storageLocationId),
                 isBatch: b.isBatch,
                 catatan: b.catatan,
@@ -722,6 +754,13 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
             // (pelaksana) maupun beli (pemroses belanja tercatat)
             ...(ke === "dikerjakan"
               ? { workerId: sql`COALESCE(${productions.workerId}, ${auth.sub}::uuid)` }
+              : {}),
+            // beli mulai DIPROSES: transaksi tercatat ke supplier UTAMA bahan
+            // (hanya baris yang belum menyebut supplier) — dasar kartu supplier
+            ...(tipe === "beli" && ke === "dikerjakan"
+              ? {
+                  supplierId: sql`COALESCE(${productions.supplierId}, (SELECT isup.supplier_id FROM ingredient_suppliers isup WHERE isup.ingredient_id = ${productions.ingredientId} AND isup.is_utama LIMIT 1))`,
+                }
               : {}),
             // BELI bertujuan cabang: saat DIKIRIM (menunggu), baris otomatis
             // pindah ke cabang tujuan → muncul di Penerimaan cabang itu.
@@ -1161,6 +1200,10 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         cabang: cabangProd.nama,
         tujuan_branch_id: productions.tujuanBranchId,
         tujuan_cabang: tujuanProd.nama,
+        // supplier UTAMA bahan baris ini (info "beli di mana" saat diproses)
+        supplier_bahan: supBahan.nama,
+        supplier_bahan_alamat: supBahan.alamat,
+        supplier_bahan_telepon: supBahan.telepon,
         // total dana EFEKTIF faktur ini: cair + tambahan − kembali (sama di tiap baris)
         dana_cair: sql<number>`COALESCE((SELECT SUM(CASE WHEN fd.tipe = 'kembali' THEN -fd.nominal ELSE fd.nominal END)::float8 FROM faktur_dana fd WHERE fd.faktur_id = ${productions.fakturId}), 0)`,
       };
@@ -1178,6 +1221,15 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
               .leftJoin(pekerja, eq(productions.workerId, pekerja.id))
               .leftJoin(cabangProd, eq(productions.branchId, cabangProd.id))
               .leftJoin(tujuanProd, eq(productions.tujuanBranchId, tujuanProd.id))
+              // maks SATU baris utama per bahan (partial unique index) → join 1:≤1
+              .leftJoin(
+                isupUtama,
+                and(
+                  eq(isupUtama.ingredientId, productions.ingredientId),
+                  eq(isupUtama.isUtama, true),
+                ),
+              )
+              .leftJoin(supBahan, eq(isupUtama.supplierId, supBahan.id))
               .where(
                 and(
                   eq(productions.companyId, auth.company_id!),

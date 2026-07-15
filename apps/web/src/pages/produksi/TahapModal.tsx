@@ -270,6 +270,20 @@ export function TahapModal({
                       )}
                       <td className={`${tdClass} font-medium`}>
                         {r.bahan}
+                        {/* info belanja: supplier utama bahan + alamatnya */}
+                        {tipe === "beli" && r.supplier_bahan && (
+                          <div className="mt-0.5 text-xs font-normal text-stone-600">
+                            🏪 {r.supplier_bahan}
+                            {r.supplier_bahan_telepon && (
+                              <span className="text-stone-400"> · {r.supplier_bahan_telepon}</span>
+                            )}
+                            {r.supplier_bahan_alamat && (
+                              <div className="text-[11px] font-normal text-stone-400">
+                                📍 {r.supplier_bahan_alamat}
+                              </div>
+                            )}
+                          </div>
+                        )}
                         <div className="mt-0.5 sm:hidden">
                           <span
                             className={`whitespace-nowrap rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${badgeFaktur(tipe, r.status).cls}`}

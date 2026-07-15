@@ -1,11 +1,17 @@
 import { zValidator } from "@hono/zod-validator";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import type { SupplierDto } from "@kakarut/shared";
+import type { SupplierDto, SupplierKartu } from "@kakarut/shared";
 import { db } from "../../db/client";
-import { suppliers } from "../../db/schema";
+import {
+  branches,
+  ingredientSuppliers,
+  ingredients,
+  productions,
+  suppliers,
+} from "../../db/schema";
 import { requireRole, type AppEnv } from "../../middleware/auth";
 
 const SupplierBody = z.object({
@@ -56,6 +62,80 @@ export const supplierRoutes = new Hono<AppEnv>()
       throw new HTTPException(409, { message: `Supplier "${body.nama}" sudah ada` });
     }
     return c.json(toDto(row), 201);
+  })
+  /**
+   * KARTU SUPPLIER: riwayat transaksi pembelian yang tercatat ke supplier ini
+   * (baris faktur beli ber-supplier_id — diisi manual di faktur atau otomatis
+   * dari supplier utama bahan saat belanja Diproses) + ringkasan belanja +
+   * bahan yang terhubung. Terbuka semua peran (info belanja).
+   */
+  .get("/:id/kartu", async (c) => {
+    const auth = c.get("auth");
+    const id = c.req.param("id");
+    const [sup] = await db
+      .select()
+      .from(suppliers)
+      .where(and(eq(suppliers.id, id), eq(suppliers.companyId, auth.company_id!)));
+    if (!sup) throw new HTTPException(404, { message: "Supplier tidak ditemukan" });
+
+    const condsTransaksi = and(
+      eq(productions.companyId, auth.company_id!),
+      eq(productions.supplierId, id),
+      eq(productions.tipe, "beli"),
+      isNull(productions.deletedAt),
+    );
+    const rows = await db
+      .select({
+        id: productions.id,
+        waktu: productions.waktu,
+        prod_date: productions.prodDate,
+        no_faktur: productions.noFaktur,
+        faktur_id: productions.fakturId,
+        bahan: ingredients.nama,
+        satuan: ingredients.satuan,
+        qty: productions.qty,
+        total_harga: productions.totalHarga,
+        status: productions.status,
+        cabang: branches.nama,
+      })
+      .from(productions)
+      .innerJoin(ingredients, eq(productions.ingredientId, ingredients.id))
+      .leftJoin(branches, eq(productions.branchId, branches.id))
+      .where(condsTransaksi)
+      .orderBy(desc(productions.waktu), desc(productions.id))
+      .limit(500);
+    const [ringkas] = await db
+      .select({
+        total_belanja: sql<number>`COALESCE(SUM(${productions.totalHarga}) FILTER (WHERE ${productions.status} = 'dikonfirmasi'), 0)::float8`,
+        jumlah_transaksi: sql<number>`COUNT(DISTINCT COALESCE(${productions.fakturId}::text, ${productions.id}::text))::int`,
+      })
+      .from(productions)
+      .where(condsTransaksi);
+    // bahan yang menautkan supplier ini (info "dipakai untuk beli apa")
+    const bahan = await db
+      .select({
+        ingredient_id: ingredients.id,
+        nama: ingredients.nama,
+        is_utama: ingredientSuppliers.isUtama,
+      })
+      .from(ingredientSuppliers)
+      .innerJoin(ingredients, eq(ingredientSuppliers.ingredientId, ingredients.id))
+      .where(
+        and(
+          eq(ingredientSuppliers.companyId, auth.company_id!),
+          eq(ingredientSuppliers.supplierId, id),
+          eq(ingredients.isActive, true),
+        ),
+      )
+      .orderBy(desc(ingredientSuppliers.isUtama), asc(ingredients.nama));
+    const kartu: SupplierKartu = {
+      supplier: toDto(sup),
+      total_belanja: Number(ringkas?.total_belanja ?? 0),
+      jumlah_transaksi: ringkas?.jumlah_transaksi ?? 0,
+      rows: rows.map((r) => ({ ...r, waktu: r.waktu.toISOString() })),
+      bahan,
+    };
+    return c.json(kartu);
   })
   .patch(
     "/:id",

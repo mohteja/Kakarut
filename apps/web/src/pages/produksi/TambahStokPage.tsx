@@ -60,6 +60,10 @@ export interface StokMasukRow {
   tujuan_cabang?: string | null;
   /** total dana cair faktur ini (nilai sama di tiap baris; 0 bila belum ada) */
   dana_cair: number;
+  /** supplier UTAMA bahan baris ini (info "beli di mana" saat diproses) */
+  supplier_bahan?: string | null;
+  supplier_bahan_alamat?: string | null;
+  supplier_bahan_telepon?: string | null;
 }
 
 export interface FakturGroup {
