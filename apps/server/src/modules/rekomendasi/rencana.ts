@@ -397,10 +397,10 @@ export async function buatFakturDariRencana(
   const catatan = params.catatan?.trim() || `Rencana dari menu: ${ringkas}`.slice(0, 300);
 
   // Work-order Central Kitchen: produksi & beli sama-sama dibukukan di CK.
-  // Faktur DIPISAH menurut tujuannya: produksi & beli PRODUK JADI bertujuan
-  // cabang peminta (CK memproses → dikirim → cabang menerima), sedangkan
-  // BELANJA BAHAN PRODUKSI (bahan mentah resep) disimpan di CK (default) —
-  // bahan itu memang dipakai CK untuk memproduksi.
+  // Tujuan dibedakan per BARIS: produksi & beli PRODUK JADI bertujuan cabang
+  // peminta (CK memproses → dikirim → cabang menerima), sedangkan BELANJA
+  // BAHAN PRODUKSI (bahan mentah resep) tetap di CK — bahan itu memang
+  // dipakai CK untuk memproduksi.
   const srcBranchId = workOrder ? ck!.id : params.branchId;
   // Satu permintaan (submit) = satu rencana_id, dibagi faktur produksi & beli
   // agar tergabung sebagai satu entri di "Data Permintaan Stok".
@@ -450,8 +450,12 @@ export async function buatFakturDariRencana(
     }));
 
   const prodFakturId = prodRows.length > 0 ? randomUUID() : null;
-  const beliFakturId = beliRows.length > 0 ? randomUUID() : null;
-  const beliProduksiFakturId = beliProduksiRows.length > 0 ? randomUUID() : null;
+  // SATU faktur belanja per permintaan: produk jadi (bertujuan cabang) DAN
+  // bahan produksi (tetap di CK) digabung dalam faktur beli yang sama —
+  // pemisahan tujuannya per BARIS (tujuan_branch_id + flag bahan_produksi),
+  // terlihat di Dokumen Belanja: mana yang ke cabang, mana yang tetap di CK.
+  const beliFakturId =
+    beliRows.length > 0 || beliProduksiRows.length > 0 ? randomUUID() : null;
   // Detail riwayat permintaan: tujuan (bila work-order) + ringkasan menu.
   const detailProd = workOrder ? `Tujuan: ${store.nama} · ${ringkas}` : ringkas;
   await db.transaction(async (tx) => {
@@ -469,30 +473,24 @@ export async function buatFakturDariRencana(
       });
     }
     if (beliFakturId) {
-      await tx.insert(productions).values(barisFaktur(beliRows, "beli", beliFakturId));
+      await tx.insert(productions).values([
+        ...barisFaktur(beliRows, "beli", beliFakturId),
+        ...barisFaktur(beliProduksiRows, "beli", beliFakturId, true),
+      ]);
+      const potongan: string[] = [];
+      if (beliRows.length > 0 && workOrder) potongan.push(`Tujuan: ${store.nama}`);
+      if (beliProduksiRows.length > 0) {
+        potongan.push(
+          `${beliProduksiRows.length} bahan produksi tetap di ${workOrder ? ck!.nama : store.nama}`,
+        );
+      }
       await catatLogFaktur(tx, {
         companyId: params.companyId,
         branchId: srcBranchId,
         fakturId: beliFakturId,
         jalur: "beli",
         aksi: "Permintaan tambah stok",
-        detail: workOrder ? `Tujuan: ${store.nama} · ${ringkas}` : ringkas,
-        userId: params.userId,
-      });
-    }
-    if (beliProduksiFakturId) {
-      // BELANJA BAHAN PRODUKSI: bahan mentah resep utk produksi di cabang
-      // pelaksana — faktur beli TERPISAH dari belanja produk jadi
-      await tx
-        .insert(productions)
-        .values(barisFaktur(beliProduksiRows, "beli", beliProduksiFakturId, true));
-      await catatLogFaktur(tx, {
-        companyId: params.companyId,
-        branchId: srcBranchId,
-        fakturId: beliProduksiFakturId,
-        jalur: "beli",
-        aksi: "Permintaan tambah stok",
-        detail: `Bahan produksi · ${ringkas}`,
+        detail: [...potongan, ringkas].join(" · "),
         userId: params.userId,
       });
     }
@@ -500,10 +498,15 @@ export async function buatFakturDariRencana(
 
   return {
     produksi: prodFakturId ? { faktur_id: prodFakturId, jumlah_baris: prodRows.length } : null,
-    beli: beliFakturId ? { faktur_id: beliFakturId, jumlah_baris: beliRows.length } : null,
-    beli_produksi: beliProduksiFakturId
-      ? { faktur_id: beliProduksiFakturId, jumlah_baris: beliProduksiRows.length }
-      : null,
+    beli:
+      beliRows.length > 0
+        ? { faktur_id: beliFakturId!, jumlah_baris: beliRows.length }
+        : null,
+    // faktur SAMA dengan `beli` — bagian bahan produksi dibedakan per baris
+    beli_produksi:
+      beliProduksiRows.length > 0
+        ? { faktur_id: beliFakturId!, jumlah_baris: beliProduksiRows.length }
+        : null,
     preview,
   };
 }

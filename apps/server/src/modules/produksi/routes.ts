@@ -587,16 +587,9 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
             target >= URUTAN_TAHAP.menunggu;
           for (const item of items) {
             const b = byId.get(item.id)!;
-            // BELI bertujuan cabang: saat barang DIKIRIM (≥ menunggu), baris
-            // otomatis pindah ke cabang tujuannya (tanpa langkah kirim
-            // terpisah — "dikirim" memang artinya barang berangkat ke cabang).
-            // Gudang CK tidak berlaku di cabang tujuan → kosongkan.
-            const autoKirimBeli =
-              b.tipe === "beli" &&
-              target >= URUTAN_TAHAP.menunggu &&
-              b.tujuanBranchId != null &&
-              b.tujuanBranchId !== b.branchId &&
-              !tujuanBranch;
+            // BELI bertujuan cabang: "menunggu" = barang TIBA DI CK (semua
+            // belanjaan kumpul di CK dulu) — pengiriman ke cabang lewat
+            // tombol Kirim (POST /kirim) TERPISAH, dengan dokumen kirim.
             // WHERE menuntut status DAN qty persis seperti saat dibaca: bila
             // berubah oleh proses lain, update 0 baris → transaksi batal.
             // qty ikut dikunci karena split TIDAK mengubah status baris asli —
@@ -614,9 +607,6 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
                 .set({
                   ...naik,
                   ...pindah,
-                  ...(autoKirimBeli
-                    ? { branchId: b.tujuanBranchId!, storageLocationId: null }
-                    : {}),
                   // self-assign pelaksana (isi hanya bila masih kosong)
                   ...(selfAssign
                     ? { workerId: sql`COALESCE(${productions.workerId}, ${auth.sub}::uuid)` }
@@ -673,7 +663,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
                 .insert(productions)
                 .values({
                 companyId: b.companyId,
-                branchId: tujuanBranch ?? (autoKirimBeli ? b.tujuanBranchId! : b.branchId),
+                branchId: tujuanBranch ?? b.branchId,
                 ingredientId: b.ingredientId,
                 qty: item.qty,
                 tipe: b.tipe,
@@ -684,7 +674,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
                 rencanaId: b.rencanaId,
                 noFaktur: b.noFaktur,
                 supplierId: selfAssign ? supplierBaris(b) : b.supplierId,
-                storageLocationId: tujuanStorage ?? (autoKirimBeli ? null : b.storageLocationId),
+                storageLocationId: tujuanStorage ?? b.storageLocationId,
                 isBatch: b.isBatch,
                 catatan: b.catatan,
                 userId: b.userId,
@@ -761,15 +751,9 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
                   supplierId: sql`COALESCE(${productions.supplierId}, (SELECT isup.supplier_id FROM ingredient_suppliers isup WHERE isup.ingredient_id = ${productions.ingredientId} AND isup.is_utama LIMIT 1))`,
                 }
               : {}),
-            // BELI bertujuan cabang: saat DIKIRIM (menunggu), baris otomatis
-            // pindah ke cabang tujuan → muncul di Penerimaan cabang itu.
-            // Gudang asal (CK) tidak berlaku di cabang tujuan → kosongkan.
-            ...(tipe === "beli" && ke === "menunggu"
-              ? {
-                  branchId: sql`COALESCE(${productions.tujuanBranchId}, ${productions.branchId})`,
-                  storageLocationId: sql`CASE WHEN ${productions.tujuanBranchId} IS NOT NULL AND ${productions.tujuanBranchId} <> ${productions.branchId} THEN NULL ELSE ${productions.storageLocationId} END`,
-                }
-              : {}),
+            // BELI bertujuan cabang: "menunggu" = barang TIBA DI CK — baris
+            // TETAP di CK; pengiriman ke cabang lewat POST /kirim terpisah
+            // (dengan dokumen kirim), baru muncul di Penerimaan cabang.
           })
           .where(and(...conds, eq(productions.status, dari)))
           .returning({
@@ -832,22 +816,20 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
       return c.json({ ok: true, status: ke, jumlah_baris: rows.length });
     })
     /**
-     * Kirim work-order produksi dari Central Kitchen ke cabang tujuan (langkah
-     * terpisah setelah "selesai — disimpan di CK"). Memindah baris yang masih
+     * Kirim barang bertujuan cabang dari Central Kitchen (langkah terpisah):
+     * produksi setelah "selesai — disimpan di CK", beli setelah "tiba di CK"
+     * (semua belanjaan kumpul di CK dulu). Memindah baris yang masih
      * `menunggu` di CK → cabang `tujuan_branch_id` (tetap `menunggu`), lalu
-     * muncul di Penerimaan cabang untuk diterima. Hanya jalur produksi.
+     * muncul di Penerimaan cabang untuk diterima.
      */
     .post("/kirim/:fakturId", zValidator("json", KirimBody), async (c) => {
       const auth = c.get("auth");
-      if (tipe !== "produksi") {
-        throw new HTTPException(400, { message: "Kirim khusus faktur produksi" });
-      }
       const { tujuan_storage_id } = c.req.valid("json");
       const fakturId = c.req.param("fakturId");
       const conds = [
         eq(productions.companyId, auth.company_id!),
         eq(productions.fakturId, fakturId),
-        eq(productions.tipe, "produksi" as const),
+        eq(productions.tipe, tipe),
         eq(productions.status, "menunggu" as const),
         isNull(productions.deletedAt),
       ];
@@ -930,7 +912,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
           companyId: auth.company_id!,
           branchId: ckId,
           fakturId,
-          jalur: "produksi",
+          jalur: tipe,
           aksi: `Dikirim ke ${store.nama}`,
           detail: `${siap.length} baris`,
           userId: auth.sub,

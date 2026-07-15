@@ -25,6 +25,7 @@ interface StokMasukPage {
   total_pengeluaran: number;
 }
 import { DokumenBelanjaModal } from "./DokumenBelanjaModal";
+import { DokumenKirimModal } from "./DokumenKirimModal";
 import { FakturDetailModal } from "./FakturDetailModal";
 import { TahapModal } from "./TahapModal";
 
@@ -226,13 +227,16 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
   const branchQuery = dariKantor ? "?branch_id=all" : dataQuery;
   const [detail, setDetail] = useState<FakturGroup | null>(null);
 
-  // Kirim work-order produksi CK → cabang tujuan (langkah terpisah).
+  // Kirim barang bertujuan cabang dari CK (produksi selesai / belanja yang
+  // sudah tiba di CK) — langkah terpisah + dokumen kirim (surat jalan).
   const kirim = useMutation({
     mutationFn: (fakturId: string) =>
       api(`${t.endpoint}/kirim/${fakturId}`, { method: "POST", body: {} }),
-    onSuccess: () => {
+    onSuccess: (_data, fakturId) => {
       queryClient.invalidateQueries({ queryKey: [t.endpoint] });
       queryClient.invalidateQueries({ queryKey: ["penerimaan"] });
+      // dokumen kirim terbuka otomatis — pegangan pengantar barang
+      setDokumenKirim(fakturId);
     },
   });
 
@@ -277,6 +281,8 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
   // Dokumen belanja (pegangan pembelanja) — simpan KEY faktur agar isi modal
   // ikut segar setelah data list ter-refresh (bukan snapshot lama).
   const [dokumen, setDokumen] = useState<string | null>(null);
+  // Dokumen kirim (surat jalan CK → cabang) — pola yang sama.
+  const [dokumenKirim, setDokumenKirim] = useState<string | null>(null);
 
   // Kelompokkan baris per faktur (baris lama tanpa faktur = grup sendiri)
   const grup = useMemo<FakturGroup[]>(() => {
@@ -309,6 +315,9 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
         byKey.set(key, g);
       }
       g.rows.push(r);
+      // faktur campuran (produk jadi + bahan produksi): tujuan diambil dari
+      // baris mana pun yang punya — baris bahan produksi tujuannya null
+      if (!g.tujuanCabang && r.tujuan_cabang) g.tujuanCabang = r.tujuan_cabang;
       // baris ditolak tak menambah biaya (barang tidak diterima)
       if (r.status !== "ditolak") g.totalHarga += r.total_harga ?? 0;
     }
@@ -411,32 +420,49 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
       ) : (
         <div className="space-y-3">
           {grup.map((g) => {
-            const badge = badgeFaktur(tipe, g.status);
             // faktur campuran tahap (hasil "maju sebagian") → tampilkan pill
             // tahap per baris + jumlah sisa tugas
             const campuran = new Set(g.rows.map((r) => r.status)).size > 1;
             const sisaTugas = g.rows.filter((r) => belumSelesai(r.status)).length;
             const tahapTerawal = Math.min(...g.rows.map((r) => URUTAN_TAHAP[r.status]));
+            const adaTujuan = g.rows.some((r) => r.tujuan_branch_id != null);
             // Work-order CK: konfirmasi lewat Penerimaan cabang (bukan di CK) →
             // buang opsi "Konfirmasi Ada" dari dropdown; pakai tombol Kirim.
-            const isWorkOrderFaktur =
-              tipe === "produksi" && g.rows.some((r) => r.tujuan_branch_id != null);
-            const opsiTahap = AKSI_TAHAP[tipe].filter(
-              (a) =>
-                URUTAN_TAHAP[a.ke] > tahapTerawal &&
-                !(isWorkOrderFaktur && a.ke === "dikonfirmasi"),
-            );
-            // Work-order CK selesai & masih di CK (belum terkirim) → tombol Kirim.
+            const isWorkOrderFaktur = tipe === "produksi" && adaTujuan;
+            const opsiTahap = AKSI_TAHAP[tipe]
+              .filter(
+                (a) =>
+                  URUTAN_TAHAP[a.ke] > tahapTerawal &&
+                  !(isWorkOrderFaktur && a.ke === "dikonfirmasi"),
+              )
+              // belanja bertujuan cabang: "menunggu" = barang tiba/kumpul di CK
+              .map((a) =>
+                tipe === "beli" && adaTujuan && a.ke === "menunggu"
+                  ? { ...a, label: "📦 Tiba di CK (semua barang di CK)" }
+                  : a,
+              );
+            // Barang bertujuan cabang yang SIAP DIKIRIM dari CK: produksi
+            // selesai / belanja tiba di CK — tombol Kirim + dokumen kirim.
             const siapKirim =
-              tipe === "produksi" &&
               g.fakturId != null &&
-              g.rows.length > 0 &&
-              g.rows.every(
+              g.rows.some(
                 (r) =>
                   r.status === "menunggu" &&
                   r.tujuan_branch_id != null &&
                   r.branch_id !== r.tujuan_branch_id,
               );
+            // barang DALAM PERJALANAN (sudah dikirim, menunggu diterima cabang)
+            const adaTerkirim = g.rows.some(
+              (r) =>
+                r.status === "menunggu" &&
+                r.tujuan_branch_id != null &&
+                r.branch_id === r.tujuan_branch_id,
+            );
+            // badge lebih jujur utk belanja yang barangnya kumpul di CK
+            const badge =
+              tipe === "beli" && g.status === "menunggu" && siapKirim
+                ? { label: "📦 Di CK — siap kirim ke cabang", cls: "bg-purple-100 text-purple-800" }
+                : badgeFaktur(tipe, g.status);
             // kartu ringkas ala transaksi marketplace: tampilkan 1 barang
             // pertama + jumlah bahan lainnya; rincian lengkap via klik kartu
             const utama = g.rows[0];
@@ -543,6 +569,18 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                       className="whitespace-nowrap rounded-lg border border-stone-300 bg-white px-3 py-2.5 text-sm font-semibold text-stone-700 hover:border-orange-400 hover:text-orange-700"
                     >
                       📄 Dokumen belanja
+                    </button>
+                  )}
+                  {/* dokumen kirim (surat jalan) barang dalam perjalanan */}
+                  {adaTerkirim && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDokumenKirim(g.key);
+                      }}
+                      className="whitespace-nowrap rounded-lg border border-purple-300 bg-white px-3 py-2.5 text-sm font-semibold text-purple-700 hover:border-purple-500"
+                    >
+                      📄 Dokumen kirim
                     </button>
                   )}
                   {siapKirim && (
@@ -685,6 +723,18 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
           const g = grup.find((x) => x.key === dokumen);
           return g ? (
             <DokumenBelanjaModal key={g.key} grup={g} onClose={() => setDokumen(null)} />
+          ) : null;
+        })()}
+      {dokumenKirim &&
+        (() => {
+          const g = grup.find((x) => x.key === dokumenKirim);
+          return g ? (
+            <DokumenKirimModal
+              key={g.key}
+              grup={g}
+              tipe={tipe}
+              onClose={() => setDokumenKirim(null)}
+            />
           ) : null;
         })()}
     </div>

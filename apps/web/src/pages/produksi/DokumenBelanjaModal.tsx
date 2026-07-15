@@ -55,6 +55,15 @@ export function DokumenBelanjaModal({
   const grupSupplier = perSupplier(rows);
   const totalRab = rows.reduce((t, r) => t + (r.total_harga ?? 0), 0);
   const sisa = totalRab - grup.danaCair;
+  // satu faktur bisa CAMPURAN: produk jadi → dikirim ke cabang, bahan
+  // produksi → tetap di CK. Pemisahannya ditampilkan per bahan.
+  const nKeCabang = rows.filter((r) => r.tujuan_branch_id != null).length;
+  const nDiSini = rows.length - nKeCabang;
+  const campuran = nKeCabang > 0 && nDiSini > 0;
+  const lokalNama = grup.cabang ?? "CK";
+  /** label tujuan satu baris (dipakai saat faktur campuran) */
+  const tujuanBaris = (r: StokMasukRow) =>
+    r.tujuan_branch_id != null ? `→ ${r.tujuan_cabang ?? "cabang"}` : `di ${lokalNama}`;
 
   const isi = (cetak: boolean) => (
     <div className={cetak ? "text-black" : ""}>
@@ -89,6 +98,12 @@ export function DokumenBelanjaModal({
             }`}
           >
             📦 Barang untuk: → {grup.tujuanCabang}
+            {campuran && (
+              <div className={`text-xs font-semibold ${cetak ? "" : "text-purple-700"}`}>
+                {nKeCabang} bahan dikirim ke cabang · {nDiSini} bahan produksi tetap di{" "}
+                {lokalNama} — lihat label tiap bahan
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -117,6 +132,21 @@ export function DokumenBelanjaModal({
                     <td className="w-6 py-1 align-top">☐</td>
                     <td className="py-1 pr-2 font-medium">
                       {r.bahan}
+                      {/* faktur campuran: tujuan tiap bahan ditulis eksplisit */}
+                      {campuran && (
+                        <span
+                          className={`ml-1.5 whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-bold ${
+                            cetak
+                              ? "border border-black"
+                              : r.tujuan_branch_id != null
+                                ? "bg-purple-100 text-purple-800"
+                                : "bg-stone-200 text-stone-700"
+                          }`}
+                        >
+                          {r.tujuan_branch_id != null ? "📦 " : "🏭 "}
+                          {tujuanBaris(r)}
+                        </span>
+                      )}
                       {!cetak && r.status !== "rencana" && (
                         <span
                           className={`ml-1.5 whitespace-nowrap rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${badgeFaktur("beli", r.status).cls}`}

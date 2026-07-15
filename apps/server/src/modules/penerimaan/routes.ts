@@ -11,12 +11,20 @@ import { catatLogFaktur } from "../produksi/log";
 
 /**
  * Kiriman yang TIBA di sebuah cabang untuk diterima: faktur BELI (pemasok →
- * toko) atau work-order PRODUKSI Central Kitchen yang sudah dikirim (baris
- * pindah ke cabang tujuan → `branch_id == tujuan_branch_id`). Produksi biasa
- * (tanpa tujuan) dikonfirmasi di tempat lewat /konfirmasi, bukan di sini.
+ * cabang; baris bertujuan cabang lain yang MASIH transit di CK belum masuk —
+ * baru muncul setelah dikirim lewat POST /kirim) atau work-order PRODUKSI
+ * Central Kitchen yang sudah dikirim (baris pindah ke cabang tujuan →
+ * `branch_id == tujuan_branch_id`). Produksi biasa (tanpa tujuan)
+ * dikonfirmasi di tempat lewat /konfirmasi, bukan di sini.
  */
 const KIRIMAN_MASUK = or(
-  eq(productions.tipe, "beli"),
+  and(
+    eq(productions.tipe, "beli"),
+    or(
+      isNull(productions.tujuanBranchId),
+      eq(productions.tujuanBranchId, productions.branchId),
+    ),
+  ),
   and(
     eq(productions.tipe, "produksi"),
     eq(productions.tujuanBranchId, productions.branchId),
