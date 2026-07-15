@@ -2221,7 +2221,7 @@ cek "flip ke produksi → daftar supplier kosong" "V == 0" \
 
 echo "== 73. Supplier tampil saat diproses + transaksi tercatat + kartu supplier =="
 SUPC73=$(api "$OWNER" POST /supplier '{"nama":"Pasar Induk 73","telepon":"0812","alamat":"Jl. Pasar Induk No. 73, Blok C"}' | jq -r .id)
-BH73=$(api "$OWNER" POST /bahan '{"nama":"cabai uji73","harga_beli":40000,"isi":1000,"satuan":"gr","kategori":"lain"}' | jq -r .id)
+BH73=$(api "$OWNER" POST /bahan '{"nama":"cabai uji73","harga_beli":40000,"isi":1000,"satuan":"gr","satuan_beli":"karung","kategori":"lain"}' | jq -r .id)
 api "$OWNER" PUT "/bahan/$BH73/supplier" "{\"items\":[{\"supplier_id\":\"$SUPC73\",\"is_utama\":true}]}" > /dev/null
 # faktur beli TANPA supplier → baris memuat info supplier utama bahan + alamat
 FK73=$(api "$OWNER" POST /pembelian/faktur "{\"no_faktur\":\"SUP-73\",\"items\":[{\"ingredient_id\":\"$BH73\",\"mode\":\"pcs\",\"jumlah\":2}]}" | jq -r .faktur_id)
@@ -2230,6 +2230,8 @@ cek "baris memuat supplier utama bahan (info beli di mana)" "V == 1" \
   "$(echo "$B73" | jq '(.supplier_bahan=="Pasar Induk 73") | if . then 1 else 0 end')"
 cek "baris memuat alamat supplier bahan" "V == 1" \
   "$(echo "$B73" | jq '(.supplier_bahan_alamat=="Jl. Pasar Induk No. 73, Blok C") | if . then 1 else 0 end')"
+cek "baris memuat satuan_beli (konversi kemasan dokumen belanja)" "V == 1" \
+  "$(echo "$B73" | jq '(.satuan_beli=="karung") | if . then 1 else 0 end')"
 cek "faktur belum menyebut supplier (rencana)" "V == 1" \
   "$(echo "$B73" | jq '(.supplier==null) | if . then 1 else 0 end')"
 # mulai DIPROSES → transaksi otomatis tercatat ke supplier utama bahan

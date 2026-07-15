@@ -37,12 +37,15 @@ export function TahapModal({
   endpoint,
   ke,
   onClose,
+  onSelesai,
 }: {
   grup: FakturGroup;
   tipe: JenisPengadaan;
   endpoint: string;
   ke: TahapTujuan;
   onClose: () => void;
+  /** dipanggil setelah tahap sukses diterapkan (mis. buka dokumen belanja) */
+  onSelesai?: (ke: TahapTujuan) => void;
 }) {
   const queryClient = useQueryClient();
   const { cabang } = useBranch();
@@ -189,6 +192,7 @@ export function TahapModal({
         queryClient.invalidateQueries({ queryKey: [key] });
       }
       onClose();
+      onSelesai?.(ke);
     },
   });
 
@@ -211,9 +215,15 @@ export function TahapModal({
       <div className="space-y-3">
         {keProses ? (
           <p className="text-sm text-stone-500">
-            Faktur ditandai <b>sedang diproses</b> — jumlah barang <b>belum berubah</b>,
-            hanya info proses + pencatatan dana yang cair. Penyesuaian barang dilakukan
-            nanti saat proses → selesai.
+            Faktur ditandai <b>sedang diproses</b> — cukup pastikan RAB & catat dana yang
+            cair.
+            {tipe === "beli" && (
+              <>
+                {" "}
+                Rincian bahan + supplier ada di <b>📄 dokumen belanja</b> yang terbuka
+                setelah ini.
+              </>
+            )}
           </p>
         ) : (
           <p className="text-sm text-stone-500">
@@ -233,6 +243,21 @@ export function TahapModal({
         {bisaMaju.length === 0 ? (
           <div className="py-6 text-center text-sm text-stone-400">
             Tidak ada baris yang bisa dipindah ke tahap ini.
+          </div>
+        ) : keProses ? (
+          /* Tahap DIPROSES dibuat sesimpel mungkin: hanya RAB + dana cair —
+             rincian per bahan ada di dokumen belanja. */
+          <div className="space-y-1 rounded-lg border border-stone-200 bg-stone-50 p-3 text-sm">
+            <div className="flex items-center justify-between">
+              <span className="text-stone-500">Jumlah bahan</span>
+              <b>{bisaMaju.length} baris</b>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-stone-500">Total est. RAB</span>
+              <b className="text-base">
+                {formatRupiah(bisaMaju.reduce((t, r) => t + (r.total_harga ?? 0), 0))}
+              </b>
+            </div>
           </div>
         ) : (
           <div className="max-h-72 overflow-y-auto overflow-x-auto">
@@ -270,20 +295,6 @@ export function TahapModal({
                       )}
                       <td className={`${tdClass} font-medium`}>
                         {r.bahan}
-                        {/* info belanja: supplier utama bahan + alamatnya */}
-                        {tipe === "beli" && r.supplier_bahan && (
-                          <div className="mt-0.5 text-xs font-normal text-stone-600">
-                            🏪 {r.supplier_bahan}
-                            {r.supplier_bahan_telepon && (
-                              <span className="text-stone-400"> · {r.supplier_bahan_telepon}</span>
-                            )}
-                            {r.supplier_bahan_alamat && (
-                              <div className="text-[11px] font-normal text-stone-400">
-                                📍 {r.supplier_bahan_alamat}
-                              </div>
-                            )}
-                          </div>
-                        )}
                         <div className="mt-0.5 sm:hidden">
                           <span
                             className={`whitespace-nowrap rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${badgeFaktur(tipe, r.status).cls}`}
