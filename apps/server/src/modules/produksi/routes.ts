@@ -56,7 +56,6 @@ const FakturEditBody = z.object({
     .regex(/^\d{4}-\d{2}-\d{2}$/)
     .optional(),
 });
-const HapusBody = z.object({ password: z.string() });
 
 /** Kirim work-order produksi CK → cabang tujuan (opsional pilih tempat di cabang). */
 const KirimBody = z.object({ tujuan_storage_id: z.string().uuid().nullish() });
@@ -1328,15 +1327,16 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         .returning({ id: productions.id });
       return c.json({ ok: true, jumlah_baris: rows.length });
     })
-    /** Hapus faktur → Tempat Sampah (soft-delete, butuh password). Stok dikoreksi. */
-    .delete("/faktur/:key", zValidator("json", HapusBody), async (c) => {
+    /**
+     * Hapus faktur → Tempat Sampah (SOFT-DELETE, cukup konfirmasi — tanpa
+     * password; bisa dipulihkan dari Tempat Sampah). Stok dikoreksi.
+     */
+    .delete("/faktur/:key", async (c) => {
       const auth = c.get("auth");
-      const body = c.req.valid("json");
       const key = c.req.param("key");
       if (!/^[0-9a-f-]{36}$/i.test(key)) {
         throw new HTTPException(404, { message: "Faktur tidak ditemukan" });
       }
-      await verifikasiPassword(auth.sub, body.password);
       const rows = await db
         .update(productions)
         .set({ deletedAt: new Date(), deletedBy: auth.sub })
