@@ -657,6 +657,11 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
           tipe={tipe}
           endpoint={t.endpoint}
           onClose={() => setDetail(null)}
+          // pilih tahap dari detail → langsung tukar ke modal Ubah Tahap
+          onUbahTahap={(ke) => {
+            setUbahTahap({ grup: detail, ke });
+            setDetail(null);
+          }}
         />
       )}
       {ubahTahap && (

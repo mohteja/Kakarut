@@ -4,7 +4,14 @@ import type { FakturLogRow, JenisPengadaan, PenyimpananDto, SupplierDto } from "
 import { ErrorText, Modal, btnPrimary, btnSecondary, inputClass } from "../../components/ui";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah, formatWaktu } from "../../lib/format";
-import { badgeFaktur, type FakturGroup } from "./TambahStokPage";
+import {
+  AKSI_TAHAP,
+  URUTAN_TAHAP,
+  badgeFaktur,
+  belumSelesai,
+  type FakturGroup,
+  type TahapTujuan,
+} from "./TambahStokPage";
 
 interface Karyawan {
   user_id: string;
@@ -31,11 +38,14 @@ export function FakturDetailModal({
   tipe,
   endpoint,
   onClose,
+  onUbahTahap,
 }: {
   grup: FakturGroup;
   tipe: JenisPengadaan;
   endpoint: string;
   onClose: () => void;
+  /** ganti tahap langsung dari detail (parent menukar ke TahapModal) */
+  onUbahTahap?: (ke: TahapTujuan) => void;
 }) {
   // Tempat penyimpanan diambil dari cabang FAKTUR ini (bukan pilihan Kantor),
   // agar daftar tempat cocok dengan cabang faktur — termasuk faktur store lama
@@ -313,7 +323,42 @@ export function FakturDetailModal({
             </div>
           )}
 
-          <div className="flex justify-end gap-2 pt-1">
+          <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
+            {/* ganti tahap langsung dari detail — tanpa harus menutup modal dulu */}
+            {onUbahTahap &&
+              grup.fakturId &&
+              belumSelesai(grup.status) &&
+              (() => {
+                const tahapTerawal = Math.min(
+                  ...grup.rows.map((r) => URUTAN_TAHAP[r.status]),
+                );
+                const isWorkOrderFaktur =
+                  tipe === "produksi" && grup.rows.some((r) => r.tujuan_branch_id != null);
+                const opsiTahap = AKSI_TAHAP[tipe].filter(
+                  (a) =>
+                    URUTAN_TAHAP[a.ke] > tahapTerawal &&
+                    !(isWorkOrderFaktur && a.ke === "dikonfirmasi"),
+                );
+                if (opsiTahap.length === 0) return null;
+                return (
+                  <select
+                    value=""
+                    onChange={(e) => {
+                      const ke = e.target.value as TahapTujuan | "";
+                      if (ke) onUbahTahap(ke);
+                    }}
+                    aria-label="Ubah tahap faktur dari detail"
+                    className="cursor-pointer rounded-lg bg-orange-600 px-4 py-2 text-sm font-bold text-white hover:bg-orange-500"
+                  >
+                    <option value="">➡ Ubah Tahap</option>
+                    {opsiTahap.map((a) => (
+                      <option key={a.ke} value={a.ke}>
+                        {a.label}
+                      </option>
+                    ))}
+                  </select>
+                );
+              })()}
             <button onClick={() => setMode("ubah")} className={btnSecondary}>
               ✏️ Ubah metadata
             </button>
