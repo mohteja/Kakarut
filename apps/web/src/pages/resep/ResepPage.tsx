@@ -22,15 +22,23 @@ interface ResepDraft {
   qty: string;
 }
 
-/** Form buat bahan jadi (produksi) baru dari halaman Resep. */
+/**
+ * Form buat bahan jadi (produksi) baru — cukup kode/nama/kategori.
+ * Batch, harga (overhead), dan stok minimum diatur di bawah resep.
+ */
 interface BahanBaruForm {
   kode: string;
   nama: string;
-  harga_beli: string;
-  isi: string;
-  satuan: string;
   kategori: BahanKategori;
-  stok_minimum: string;
+}
+
+/** Pengaturan batch & harga bahan produksi terpilih (diedit di bawah resep). */
+interface PengaturanBatch {
+  isi: string; // hasil per 1 batch
+  satuan: string;
+  overhead: string; // pengali biaya resep → harga per batch (1 = mengikuti resep)
+  stokMin: string; // ambang menipis di Central Kitchen
+  stokMinToko: string; // ambang menipis di toko
 }
 
 /**
@@ -100,22 +108,73 @@ export function ResepPage() {
     }
   }, [resepServer, selectedId]);
 
+  // Pengaturan batch & harga, di-seed dari bahan terpilih (ikut ter-reset
+  // saat master di-refresh — pola yang sama dengan draft resep di atas).
+  const [atur, setAtur] = useState<PengaturanBatch | null>(null);
+  useEffect(() => {
+    setAtur(
+      dipilih
+        ? {
+            isi: String(dipilih.isi),
+            satuan: dipilih.satuan,
+            overhead: String(dipilih.overhead_x ?? 1),
+            stokMin: String(dipilih.stok_minimum),
+            stokMinToko: String(dipilih.stok_minimum_toko ?? 0),
+          }
+        : null,
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dipilih]);
+
+  // Estimasi biaya bahan per batch (takaran × harga per satuan resep) —
+  // dasar harga batch: harga = biaya × overhead.
+  const semuaById = new Map(semua.map((b) => [b.id, b]));
+  const biayaResep = resep.reduce((a, r) => {
+    const x = semuaById.get(r.ingredient_id);
+    return a + (x ? (Number(r.qty) || 0) * x.harga_per_unit : 0);
+  }, 0);
+  const overhead = Number(atur?.overhead) > 0 ? Number(atur?.overhead) : 1;
+  const hargaBatch = Math.round(biayaResep * overhead * 100) / 100;
+  const isiBatch = Number(atur?.isi) > 0 ? Number(atur?.isi) : 0;
+
+  // Simpan resep + pengaturan batch sekaligus: komponen dulu, lalu master
+  // bahan (isi/satuan/overhead/stok minimum + harga_beli = biaya × overhead)
+  // supaya baris bahan langsung menampilkan harga hasil resep.
   const simpan = useMutation({
-    mutationFn: () =>
-      api(`/bahan/${selectedId}/resep`, {
+    mutationFn: async () => {
+      await api(`/bahan/${selectedId}/resep`, {
         method: "PUT",
         body: {
           komponen: resep
             .filter((r) => r.ingredient_id && Number(r.qty) > 0)
             .map((r) => ({ ingredient_id: r.ingredient_id, qty: Number(r.qty) })),
         },
-      }),
+      });
+      if (atur) {
+        await api(`/bahan/${selectedId}`, {
+          method: "PUT",
+          body: {
+            isi: Number(atur.isi) > 0 ? Number(atur.isi) : 1,
+            satuan: atur.satuan.trim() || "pcs",
+            overhead_x: overhead,
+            stok_minimum: Number(atur.stokMin) || 0,
+            stok_minimum_toko: Number(atur.stokMinToko) || 0,
+            harga_beli: hargaBatch,
+          },
+        });
+      }
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["bahan-resep", selectedId] });
       queryClient.invalidateQueries({ queryKey: ["resep-ringkas"] });
       queryClient.invalidateQueries({ queryKey: ["bahan"] });
       queryClient.invalidateQueries({ queryKey: ["menu"] }); // HPP bisa berubah
       queryClient.invalidateQueries({ queryKey: ["stok"] });
+    },
+    onError: () => {
+      // resep bisa saja sudah tersimpan sebelum pengaturan gagal — refresh
+      queryClient.invalidateQueries({ queryKey: ["bahan-resep", selectedId] });
+      queryClient.invalidateQueries({ queryKey: ["bahan"] });
     },
   });
 
@@ -128,8 +187,11 @@ export function ResepPage() {
     queryKey: ["kategori-bahan"],
     queryFn: () => api<KategoriDto[]>("/kategori-bahan"),
   });
-  // Buat bahan produksi baru langsung dari halaman Resep (produksi terpisah
-  // dari Bahan Baku beli). Setelah dibuat → langsung terpilih untuk atur resep.
+  const satuanDefault = satuanList?.some((s) => s.nama === "pcs")
+    ? "pcs"
+    : satuanList?.[0]?.nama ?? "pcs";
+  // Buat bahan produksi baru langsung dari halaman Resep — cukup kode/nama/
+  // kategori; batch, harga (overhead), dan stok minimum diatur di bawah resep.
   const [formBaru, setFormBaru] = useState<BahanBaruForm | null>(null);
   const buatBahan = useMutation({
     mutationFn: (f: BahanBaruForm) =>
@@ -138,13 +200,13 @@ export function ResepPage() {
         body: {
           kode: f.kode.trim() || null,
           nama: f.nama.trim(),
-          harga_beli: Number(f.harga_beli) || 0,
-          isi: Number(f.isi),
-          satuan: f.satuan.trim() || "pcs",
+          harga_beli: 0,
+          isi: 1,
+          satuan: satuanDefault,
           kategori: f.kategori,
           pengadaan: "produksi",
           track_stok: true,
-          stok_minimum: Number(f.stok_minimum) || 0,
+          stok_minimum: 0,
         },
       }),
     onSuccess: (b) => {
@@ -161,24 +223,7 @@ export function ResepPage() {
     .filter((b) => b.nama.toLowerCase().includes(cari.toLowerCase()))
     .sort((a, b) => a.nama.localeCompare(b.nama));
 
-  const estimasi = resep.reduce((a, r) => {
-    const x = semua.find((b) => b.id === r.ingredient_id);
-    return a + (x ? (Number(r.qty) || 0) * x.harga_per_unit : 0);
-  }, 0);
-
-  const satuanDefault = satuanList?.some((s) => s.nama === "pcs")
-    ? "pcs"
-    : satuanList?.[0]?.nama ?? "pcs";
-  const bukaFormBaru = () =>
-    setFormBaru({
-      kode: "",
-      nama: "",
-      harga_beli: "",
-      isi: "1",
-      satuan: satuanDefault,
-      kategori: "baso",
-      stok_minimum: "0",
-    });
+  const bukaFormBaru = () => setFormBaru({ kode: "", nama: "", kategori: "baso" });
 
   return (
     <div>
@@ -237,7 +282,7 @@ export function ResepPage() {
                   >
                     <div className="text-sm font-semibold">{b.nama}</div>
                     <div className={`text-xs ${aktif ? "text-orange-100" : "text-stone-500"}`}>
-                      batch {formatAngka(b.isi)} {b.satuan} ·{" "}
+                      batch {formatAngka(b.isi)} {b.satuan} · {formatRupiah(b.harga_beli)} ·{" "}
                       {n == null ? "—" : n > 0 ? `${n} bahan mentah` : "belum ada resep"}
                     </div>
                   </button>
@@ -373,11 +418,118 @@ export function ResepPage() {
                       </button>
                     )}
 
-                    {resep.some((r) => r.ingredient_id && Number(r.qty) > 0) && (
-                      <div className="mt-3 rounded-lg bg-orange-50 px-3 py-2 text-sm text-orange-800">
-                        Estimasi biaya bahan per batch (takaran × harga per satuan resep):{" "}
-                        <b>{formatRupiah(estimasi)}</b> — bandingkan dengan harga beli batch{" "}
-                        <b>{formatRupiah(dipilih.harga_beli)}</b>.
+                    {/* ⚙ Batch, harga & stok minimum — diatur DI BAWAH resep
+                        (bukan di modal buat bahan). Harga per batch = biaya
+                        bahan resep × overhead; tersimpan saat Simpan Resep. */}
+                    {atur && (
+                      <div className="mt-4 rounded-lg border border-stone-200 p-3">
+                        <div className="mb-2 text-sm font-semibold text-stone-700">
+                          ⚙️ Batch, harga &amp; stok minimum
+                        </div>
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <div>
+                            <label className="mb-1 block text-xs font-medium text-stone-500">
+                              1 batch menghasilkan
+                            </label>
+                            <div className="flex gap-2">
+                              <input
+                                type="number"
+                                min="0.0001"
+                                step="any"
+                                value={atur.isi}
+                                onChange={(e) => setAtur({ ...atur, isi: e.target.value })}
+                                className={inputClass}
+                                disabled={!bolehUbah}
+                                aria-label="Isi per batch"
+                              />
+                              <select
+                                value={atur.satuan}
+                                onChange={(e) => setAtur({ ...atur, satuan: e.target.value })}
+                                className={`${inputClass} max-w-28`}
+                                disabled={!bolehUbah}
+                                aria-label="Satuan batch"
+                              >
+                                {!satuanList?.some((s) => s.nama === atur.satuan) &&
+                                  atur.satuan && (
+                                    <option value={atur.satuan}>{atur.satuan}</option>
+                                  )}
+                                {(satuanList ?? []).map((s) => (
+                                  <option key={s.id} value={s.nama}>
+                                    {s.nama}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+                          <div>
+                            <label className="mb-1 block text-xs font-medium text-stone-500">
+                              Overhead biaya (×)
+                            </label>
+                            <input
+                              type="number"
+                              min="0.01"
+                              step="any"
+                              value={atur.overhead}
+                              onChange={(e) => setAtur({ ...atur, overhead: e.target.value })}
+                              className={inputClass}
+                              disabled={!bolehUbah}
+                              aria-label="Overhead biaya"
+                            />
+                            <p className="mt-1 text-xs text-stone-500">
+                              <b>1</b> = harga mengikuti biaya resep; mis. <b>1,2</b> = biaya +
+                              20% (gas, listrik, tenaga).
+                            </p>
+                          </div>
+                          <div>
+                            <label className="mb-1 block text-xs font-medium text-stone-500">
+                              Stok minimum di Central Kitchen ({atur.satuan})
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              step="any"
+                              value={atur.stokMin}
+                              onChange={(e) => setAtur({ ...atur, stokMin: e.target.value })}
+                              className={inputClass}
+                              disabled={!bolehUbah}
+                              aria-label="Stok minimum Central Kitchen"
+                            />
+                          </div>
+                          <div>
+                            <label className="mb-1 block text-xs font-medium text-stone-500">
+                              Stok minimum di toko ({atur.satuan})
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              step="any"
+                              value={atur.stokMinToko}
+                              onChange={(e) =>
+                                setAtur({ ...atur, stokMinToko: e.target.value })
+                              }
+                              className={inputClass}
+                              disabled={!bolehUbah}
+                              aria-label="Stok minimum toko"
+                            />
+                            <p className="mt-1 text-xs text-stone-500">
+                              <b>0</b> = ikut nilai Central Kitchen.
+                            </p>
+                          </div>
+                        </div>
+                        <div className="mt-3 rounded-lg bg-orange-50 px-3 py-2 text-sm text-orange-800">
+                          Biaya bahan per batch <b>{formatRupiah(biayaResep)}</b> × overhead{" "}
+                          <b>{formatAngka(overhead, 2)}</b> → harga per batch{" "}
+                          <b>{formatRupiah(hargaBatch)}</b>
+                          {isiBatch > 0 && (
+                            <>
+                              {" "}
+                              · ≈ <b>Rp {formatAngka(hargaBatch / isiBatch, 2)}</b>/{atur.satuan}
+                            </>
+                          )}
+                          <span className="block text-xs text-orange-700">
+                            Harga bahan diperbarui otomatis saat “Simpan Resep”.
+                          </span>
+                        </div>
                       </div>
                     )}
 
@@ -418,8 +570,9 @@ export function ResepPage() {
             className="space-y-3"
           >
             <p className="rounded-lg bg-orange-50 px-3 py-2 text-xs text-stone-600">
-              Bahan yang <b>diproduksi sendiri</b> (mis. baso). Setelah dibuat, atur resep bahan
-              mentahnya di panel kanan.
+              Bahan yang <b>diproduksi sendiri</b> (mis. baso). Cukup kode, nama, dan kategori —{" "}
+              <b>batch, harga (overhead), dan stok minimum</b> diatur di bawah resep pada panel
+              kanan setelah bahan dibuat.
             </p>
             <div className="grid grid-cols-[8rem_1fr] gap-3">
               <div>
@@ -442,82 +595,25 @@ export function ResepPage() {
                 />
               </div>
             </div>
-            <div className="grid grid-cols-3 gap-3">
-              <div>
-                <label className="mb-1 block text-sm font-medium">Harga/batch (Rp)</label>
-                <input
-                  type="number"
-                  min="0"
-                  step="any"
-                  value={formBaru.harga_beli}
-                  onChange={(e) => setFormBaru({ ...formBaru, harga_beli: e.target.value })}
-                  className={inputClass}
-                  placeholder="0"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-sm font-medium">Isi/batch</label>
-                <input
-                  required
-                  type="number"
-                  min="0.0001"
-                  step="any"
-                  value={formBaru.isi}
-                  onChange={(e) => setFormBaru({ ...formBaru, isi: e.target.value })}
-                  className={inputClass}
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-sm font-medium">Satuan</label>
-                <select
-                  value={formBaru.satuan}
-                  onChange={(e) => setFormBaru({ ...formBaru, satuan: e.target.value })}
-                  className={inputClass}
-                >
-                  {!satuanList?.some((s) => s.nama === formBaru.satuan) && formBaru.satuan && (
-                    <option value={formBaru.satuan}>{formBaru.satuan}</option>
+            <div>
+              <label className="mb-1 block text-sm font-medium">Kategori</label>
+              <select
+                value={formBaru.kategori}
+                onChange={(e) =>
+                  setFormBaru({ ...formBaru, kategori: e.target.value as BahanKategori })
+                }
+                className={inputClass}
+              >
+                {!kategoriList?.some((k) => k.nama === formBaru.kategori) &&
+                  formBaru.kategori && (
+                    <option value={formBaru.kategori}>{formBaru.kategori}</option>
                   )}
-                  {(satuanList ?? []).map((s) => (
-                    <option key={s.id} value={s.nama}>
-                      {s.nama}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="mb-1 block text-sm font-medium">Kategori</label>
-                <select
-                  value={formBaru.kategori}
-                  onChange={(e) =>
-                    setFormBaru({ ...formBaru, kategori: e.target.value as BahanKategori })
-                  }
-                  className={inputClass}
-                >
-                  {!kategoriList?.some((k) => k.nama === formBaru.kategori) &&
-                    formBaru.kategori && (
-                      <option value={formBaru.kategori}>{formBaru.kategori}</option>
-                    )}
-                  {(kategoriList ?? []).map((k) => (
-                    <option key={k.id} value={k.nama}>
-                      {k.nama}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="mb-1 block text-sm font-medium">Stok minimum</label>
-                <input
-                  type="number"
-                  min="0"
-                  step="any"
-                  value={formBaru.stok_minimum}
-                  onChange={(e) => setFormBaru({ ...formBaru, stok_minimum: e.target.value })}
-                  className={inputClass}
-                  placeholder="0"
-                />
-              </div>
+                {(kategoriList ?? []).map((k) => (
+                  <option key={k.id} value={k.nama}>
+                    {k.nama}
+                  </option>
+                ))}
+              </select>
             </div>
             <ErrorText error={buatBahan.error} />
             <div className="flex justify-end gap-2 pt-2">

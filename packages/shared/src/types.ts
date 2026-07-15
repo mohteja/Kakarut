@@ -60,8 +60,12 @@ export interface BahanDto {
   satuan_beli: string | null;
   /** lacak stok: dipotong saat menjual, ditambah saat membeli/produksi */
   track_stok: boolean;
-  /** ambang batas stok minimum (0 = pakai rasio default) */
+  /** ambang batas stok minimum di CK/kantor (0 = pakai rasio default) */
   stok_minimum: number;
+  /** ambang stok minimum khusus cabang toko (0 = ikut stok_minimum) */
+  stok_minimum_toko: number;
+  /** pengali biaya resep → harga per batch bahan produksi (1 = mengikuti biaya resep) */
+  overhead_x: number;
   harga_per_unit: number;
   kategori: BahanKategori;
   pengadaan: JenisPengadaan;

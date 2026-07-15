@@ -2112,6 +2112,29 @@ cek "PUT set satuan_beli → tersimpan (karung)" "V == 1" \
 cek "PUT clear satuan_beli (null) → null" "V == 1" \
   "$(api "$OWNER" PUT "/bahan/$G69ID" '{"satuan_beli":null}' | jq '(.satuan_beli==null) | if . then 1 else 0 end')"
 
+echo "== 70. Resep produksi: overhead, harga ikut resep, stok minimum CK/toko =="
+# bahan produksi minimal (batch/harga/stok diatur lewat panel resep setelahnya)
+BP70=$(api "$OWNER" POST /bahan '{"nama":"baso uji70","harga_beli":0,"isi":1,"satuan":"pcs","kategori":"baso","pengadaan":"produksi"}')
+BP70_ID=$(echo "$BP70" | jq -r .id)
+cek "default overhead_x = 1" "V == 1" "$(echo "$BP70" | jq '.overhead_x')"
+cek "default stok_minimum_toko = 0" "V == 0" "$(echo "$BP70" | jq '.stok_minimum_toko')"
+# bahan mentah Rp20/gr → resep 500 gr = biaya batch Rp10.000
+BM70_ID=$(api "$OWNER" POST /bahan '{"nama":"tepung uji70","harga_beli":20000,"isi":1000,"satuan":"gr","kategori":"lain"}' | jq -r .id)
+api "$OWNER" PUT "/bahan/$BP70_ID/resep" "{\"komponen\":[{\"ingredient_id\":\"$BM70_ID\",\"qty\":500}]}" > /dev/null
+# pengaturan batch dari web: 45 butir, overhead 1.2 → harga batch = 10000×1.2 = 12000
+B70=$(api "$OWNER" PUT "/bahan/$BP70_ID" '{"isi":45,"satuan":"butir","overhead_x":1.2,"stok_minimum":5,"stok_minimum_toko":2,"harga_beli":12000}')
+cek "overhead_x tersimpan (1.2)" "abs(V - 1.2) < 0.0001" "$(echo "$B70" | jq '.overhead_x')"
+cek "stok_minimum CK tersimpan (5)" "V == 5" "$(echo "$B70" | jq '.stok_minimum')"
+cek "stok_minimum_toko tersimpan (2)" "V == 2" "$(echo "$B70" | jq '.stok_minimum_toko')"
+cek "harga per satuan resep = 12000/45 ≈ 266.67" "abs(V - 266.667) < 0.01" \
+  "$(echo "$B70" | jq '.harga_per_unit')"
+# ambang "menipis" per tipe cabang: CK pakai stok_minimum, TOKO pakai stok_minimum_toko
+api "$OWNER" PUT "/bahan/$BM70_ID" '{"stok_minimum":10,"stok_minimum_toko":3}' > /dev/null
+cek "stok di CK: ambang = stok_minimum (10)" "V == 10" \
+  "$(api "$OWNER" GET "/stok?branch_id=$CK47_ID" | jq --arg id "$BM70_ID" '[.[] | select(.ingredient_id==$id)][0].stok_minimum')"
+cek "stok di toko: ambang = stok_minimum_toko (3)" "V == 3" \
+  "$(api "$OWNER" GET "/stok?branch_id=$ST55_ID" | jq --arg id "$BM70_ID" '[.[] | select(.ingredient_id==$id)][0].stok_minimum')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

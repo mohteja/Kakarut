@@ -1,4 +1,4 @@
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import {
   saldoStok,
   statusStok,
@@ -8,6 +8,7 @@ import {
   type StokRowDto,
 } from "@kakarut/shared";
 import { db } from "../../db/client";
+import { branches } from "../../db/schema";
 
 /**
  * Saldo stok per bahan untuk satu cabang, diturunkan (bukan disimpan):
@@ -18,6 +19,16 @@ export async function hitungSaldoCabang(
   companyId: string,
   branchId: string,
 ): Promise<StokRowDto[]> {
+  // Ambang "menipis" per tipe cabang: TOKO memakai stok_minimum_toko bila
+  // diisi (>0); bila 0, jatuh kembali ke stok_minimum sehingga bahan lama
+  // tanpa ambang toko berperilaku persis seperti sebelumnya. CK/kantor
+  // selalu memakai stok_minimum.
+  const [cabang] = await db
+    .select({ tipe: branches.tipe })
+    .from(branches)
+    .where(eq(branches.id, branchId));
+  const pakaiAmbangToko = cabang?.tipe === "store";
+
   const result = await db.execute(sql`
     SELECT
       i.id          AS ingredient_id,
@@ -27,6 +38,7 @@ export async function hitungSaldoCabang(
       i.isi         AS isi,
       i.satuan      AS satuan,
       i.stok_minimum AS stok_minimum,
+      i.stok_minimum_toko AS stok_minimum_toko,
       t.id          AS tempat_id,
       t.nama        AS tempat,
       COALESCE(b.qty, 0) AS stok_awal,
@@ -129,7 +141,9 @@ export async function hitungSaldoCabang(
     const beliDikerjakan = Number(row.beli_dikerjakan);
     const beliMenunggu = Number(row.beli_menunggu);
     const qtyBeliBerjalan = beliRencana + beliDikerjakan + beliMenunggu;
-    const stokMinimum = Number(row.stok_minimum);
+    const ambangToko = Number(row.stok_minimum_toko);
+    const stokMinimum =
+      pakaiAmbangToko && ambangToko > 0 ? ambangToko : Number(row.stok_minimum);
     return {
       ingredient_id: String(row.ingredient_id),
       slug: String(row.slug),
