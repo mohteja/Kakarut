@@ -397,8 +397,10 @@ export async function buatFakturDariRencana(
   const catatan = params.catatan?.trim() || `Rencana dari menu: ${ringkas}`.slice(0, 300);
 
   // Work-order Central Kitchen: produksi & beli sama-sama dibukukan di CK.
-  // Produksi punya tujuan = store (dikirim); beli dibukukan di CK tanpa tujuan
-  // (disimpan di CK — CK membeli & menyimpan stok bahan).
+  // Faktur DIPISAH menurut tujuannya: produksi & beli PRODUK JADI bertujuan
+  // cabang peminta (CK memproses → dikirim → cabang menerima), sedangkan
+  // BELANJA BAHAN PRODUKSI (bahan mentah resep) disimpan di CK (default) —
+  // bahan itu memang dipakai CK untuk memproduksi.
   const srcBranchId = workOrder ? ck!.id : params.branchId;
   // Satu permintaan (submit) = satu rencana_id, dibagi faktur produksi & beli
   // agar tergabung sebagai satu entri di "Data Permintaan Stok".
@@ -412,7 +414,9 @@ export async function buatFakturDariRencana(
     rows.map((b) => ({
       companyId: params.companyId,
       branchId: srcBranchId,
-      tujuanBranchId: tipe === "produksi" && workOrder ? params.branchId : null,
+      // produksi & beli produk jadi → dikirim ke cabang peminta; belanja
+      // bahan produksi tetap di CK (tanpa tujuan)
+      tujuanBranchId: workOrder && !bahanProduksi ? params.branchId : null,
       bahanProduksi,
       ingredientId: b.ingredient_id,
       qty: b.qty_faktur!,
@@ -424,6 +428,9 @@ export async function buatFakturDariRencana(
       // produksi: supplier hanya sebagai pelaksana alternatif (tanpa karyawan);
       // beli: pemasok barang dari field TERPISAH — supplier pelaksana produksi
       // tidak boleh ikut tercatat sebagai pemasok pembelian
+      // beli TANPA supplier saat permintaan dibuat — pemroses tercatat
+      // sendiri (workerId) saat mengubah status ke "diproses"; supplier_beli
+      // tetap diterima utk kompatibilitas API lama.
       supplierId:
         tipe === "produksi"
           ? workOrder
@@ -469,7 +476,7 @@ export async function buatFakturDariRencana(
         fakturId: beliFakturId,
         jalur: "beli",
         aksi: "Permintaan tambah stok",
-        detail: workOrder ? `Rencana ${store.nama} · ${ringkas}` : ringkas,
+        detail: workOrder ? `Tujuan: ${store.nama} · ${ringkas}` : ringkas,
         userId: params.userId,
       });
     }

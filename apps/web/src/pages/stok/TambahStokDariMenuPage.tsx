@@ -163,8 +163,6 @@ export function TambahStokDariMenuPage() {
   const [rencana, setRencana] = useState<Record<string, number>>({});
   /** pelaksana faktur produksi: "k:<user_id>" | "s:<supplier_id>" | "" */
   const [pelaksana, setPelaksana] = useState("");
-  /** supplier faktur beli (opsional) */
-  const [supplierBeli, setSupplierBeli] = useState("");
   const [hasil, setHasil] = useState<RencanaFakturResult | null>(null);
 
   const items: RencanaMenuItem[] = useMemo(
@@ -220,7 +218,8 @@ export function TambahStokDariMenuPage() {
           ck_branch_id: workOrder ? ck!.id : null,
           worker_id: !workOrder && pelTipe === "k" ? pelId : null,
           supplier_id: !workOrder && pelTipe === "s" ? pelId : null,
-          supplier_beli_id: supplierBeli || null,
+          // faktur beli TANPA supplier — pemroses tercatat sendiri saat
+          // mengubah status ke "diproses"
         },
       });
     },
@@ -267,9 +266,10 @@ export function TambahStokDariMenuPage() {
       </PageTitle>
       <p className="mb-4 max-w-3xl text-sm text-stone-500">
         Tentukan <b>cabang tujuan</b> + <b>target porsi</b> tiap menu. Sistem menghitung kebutuhan
-        bahan lalu membuat <b>permintaan</b>: bahan <b>produksi</b> menjadi work-order Central
-        Kitchen (CK memproses → simpan di CK → kirim ke cabang → cabang terima), bahan <b>beli</b>{" "}
-        menjadi faktur beli yang dibukukan & disimpan di Central Kitchen. Semua tercatat di riwayat.
+        bahan lalu membuat <b>permintaan</b> dengan faktur terpisah: bahan <b>produksi</b> menjadi
+        work-order Central Kitchen (CK memproses → kirim → cabang terima), <b>beli produk jadi</b>{" "}
+        dikirim ke cabang tujuan setelah diproses CK, dan <b>belanja bahan produksi</b> disimpan di
+        CK. Pemroses tercatat otomatis saat faktur mulai diproses. Semua tercatat di riwayat.
       </p>
 
       {/* Cabang tujuan + Central Kitchen pelaksana */}
@@ -327,7 +327,10 @@ export function TambahStokDariMenuPage() {
             {hasil.beli && (
               <li>
                 🛒 Faktur beli produk jadi (RAB) — {hasil.beli.jumlah_baris} bahan
-                {workOrder && ck ? ` · dibukukan & disimpan di ${ck.nama}` : ""} ·{" "}
+                {workOrder && ck && store
+                  ? ` · diproses ${ck.nama} → dikirim ke ${store.nama}`
+                  : ""}{" "}
+                ·{" "}
                 <Link to="/pembelian" className="font-medium underline">
                   lihat di Beli Bahan Baku →
                 </Link>
@@ -536,22 +539,25 @@ export function TambahStokDariMenuPage() {
                     </div>
                   )}
                   {p.jumlah_beli + p.jumlah_beli_produksi > 0 && (
-                    <div>
-                      <label className="mb-1 block text-sm font-medium">
-                        Supplier faktur beli (opsional — dipakai kedua faktur beli)
-                      </label>
-                      <select
-                        value={supplierBeli}
-                        onChange={(e) => setSupplierBeli(e.target.value)}
-                        className={inputClass}
-                      >
-                        <option value="">— tanpa supplier —</option>
-                        {suppliers.map((s) => (
-                          <option key={s.id} value={s.id}>
-                            {s.nama}
-                          </option>
-                        ))}
-                      </select>
+                    <div className="space-y-1 rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-sm text-stone-600">
+                      {p.jumlah_beli > 0 && (
+                        <div>
+                          🛒 Beli produk jadi —{" "}
+                          {workOrder && store
+                            ? `diproses CK → dikirim ke ${store.nama}, terima di Penerimaan cabang.`
+                            : "diproses & diterima di cabang ini."}
+                        </div>
+                      )}
+                      {p.jumlah_beli_produksi > 0 && (
+                        <div>
+                          🧺 Belanja bahan produksi — disimpan di{" "}
+                          <b>{workOrder ? ck!.nama : "cabang ini"}</b> (dipakai untuk produksi).
+                        </div>
+                      )}
+                      <div className="text-xs text-stone-500">
+                        Tanpa pilih supplier — <b>pemroses tercatat otomatis</b> saat faktur
+                        diubah ke status <b>Diproses</b>.
+                      </div>
                     </div>
                   )}
                   <ErrorText error={buat.error} />
