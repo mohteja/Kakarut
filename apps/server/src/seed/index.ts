@@ -20,6 +20,7 @@ import { db, pool } from "../db/client";
 import { backfillKodeMenu } from "../modules/menu/service";
 import { backfillKodeBahan } from "../modules/bahan/kode";
 import { backfillUnits } from "../modules/satuan/service";
+import { backfillKategoriBahan } from "../modules/kategori-bahan/service";
 import { backfillEmployeeCode } from "../modules/users/service";
 import {
   branches,
@@ -564,6 +565,8 @@ async function main() {
   console.log(`Kode bahan otomatis: ${terisiKodeBahan} bahan.`);
   const unitDibuat = await backfillUnits(db);
   console.log(`Master satuan diisi: ${unitDibuat} satuan.`);
+  const katBahanDibuat = await backfillKategoriBahan(db);
+  console.log(`Master kategori bahan diisi: ${katBahanDibuat} kategori.`);
 
   // Kode karyawan otomatis (untuk absensi via ketik/scan QR).
   const terisiKar = await backfillEmployeeCode(db);

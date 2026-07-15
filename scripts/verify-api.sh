@@ -2065,6 +2065,53 @@ PROD67=$(api "$OWNER" POST /bahan '{"nama":"baso produksi67","harga_beli":50000,
 cek "bahan produksi tetap bisa dibuat (jalur Resep)" "V == 1" \
   "$(echo "$PROD67" | jq '(.pengadaan=="produksi" and .kode != null) | if . then 1 else 0 end')"
 
+echo "== 68. Master Kategori Bahan (dinamis) + kategori kustom =="
+# Master kategori bahan bawaan (baso/minuman/lain) terisi
+cek "kategori bahan bawaan terisi (>= 3)" "V >= 3" "$(api "$OWNER" GET /kategori-bahan | jq 'length')"
+cek "kategori bahan memuat 'baso'" "V == 1" \
+  "$(api "$OWNER" GET /kategori-bahan | jq '([.[] | select(.nama=="baso")] | length == 1) | if . then 1 else 0 end')"
+KB_ID=$(api "$OWNER" POST /kategori-bahan '{"nama":"frozen68","sort_order":20}' | jq -r .id)
+cek "tambah kategori bahan muncul di daftar" "V == 1" \
+  "$(api "$OWNER" GET /kategori-bahan | jq --arg id "$KB_ID" '[.[] | select(.id==$id)] | length')"
+cek "PATCH kategori bahan mengubah nama" "V == 1" \
+  "$(api "$OWNER" PATCH "/kategori-bahan/$KB_ID" '{"nama":"frozen68b"}' | jq '.nama=="frozen68b" | if . then 1 else 0 end')"
+cek "kategori bahan duplikat ditolak (409)" "V == 409" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/kategori-bahan" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"nama":"frozen68b"}')"
+cek "POST kategori bahan oleh KASIR ditolak (403)" "V == 403" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/kategori-bahan" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d '{"nama":"x68"}')"
+# Bahan dgn kategori KUSTOM baru (frozen68b) → diterima & tersimpan
+KB_BAHAN=$(api "$OWNER" POST /bahan '{"nama":"es batu uji68","harga_beli":1000,"isi":10,"satuan":"pcs","kategori":"frozen68b"}')
+cek "bahan dgn kategori kustom tersimpan" "V == 1" \
+  "$(echo "$KB_BAHAN" | jq '(.kategori=="frozen68b") | if . then 1 else 0 end')"
+# Kategori yang dipakai bahan tak boleh dihapus (409); yang tak terpakai → 200
+cek "DELETE kategori bahan yang dipakai ditolak (409)" "V == 409" "$(status_code "$OWNER" DELETE "/kategori-bahan/$KB_ID")"
+KB_KOSONG=$(api "$OWNER" POST /kategori-bahan '{"nama":"kosong68"}' | jq -r .id)
+cek "DELETE kategori bahan tak terpakai berhasil (200)" "V == 200" "$(status_code "$OWNER" DELETE "/kategori-bahan/$KB_KOSONG")"
+# Kategori MENU (/kategori) tetap berfungsi
+cek "kategori menu (/kategori) tetap berfungsi" "V == 200" "$(status_code "$OWNER" GET /kategori)"
+
+echo "== 69. Satuan beli vs satuan resep + harga per satuan resep =="
+# garam: beli 1 dus = 24000; 1 dus = 14400 ml (satuan resep) → harga per ml = 1.6667
+GARAM69=$(api "$OWNER" POST /bahan '{"nama":"garam uji69","harga_beli":24000,"isi":14400,"satuan":"ml","satuan_beli":"dus","kategori":"lain"}')
+cek "satuan_beli tersimpan (dus)" "V == 1" \
+  "$(echo "$GARAM69" | jq '(.satuan_beli=="dus") | if . then 1 else 0 end')"
+cek "satuan resep tersimpan (ml)" "V == 1" \
+  "$(echo "$GARAM69" | jq '(.satuan=="ml") | if . then 1 else 0 end')"
+cek "harga per satuan resep = harga_beli/isi ≈ 1.6667" "abs(V - 1.66667) < 0.001" \
+  "$(echo "$GARAM69" | jq '.harga_per_unit')"
+# bulk: satuan_beli per baris tersimpan
+BULK69=$(api "$OWNER" POST /bahan/bulk '{"items":[{"nama":"kaldu uji69","harga_beli":12000,"isi":600,"satuan":"ml","satuan_beli":"botol"},{"nama":"tepung tanpa satuanbeli69","harga_beli":10000,"isi":1000,"satuan":"gr"}]}')
+cek "bulk: satuan_beli baris pertama = botol" "V == 1" \
+  "$(echo "$BULK69" | jq '([.bahan[] | select(.nama=="kaldu uji69")][0].satuan_beli=="botol") | if . then 1 else 0 end')"
+cek "bulk: baris tanpa satuan_beli → null (regresi)" "V == 1" \
+  "$(echo "$BULK69" | jq '([.bahan[] | select(.nama=="tepung tanpa satuanbeli69")][0].satuan_beli==null) | if . then 1 else 0 end')"
+# PUT: set & clear satuan_beli
+G69ID=$(echo "$GARAM69" | jq -r .id)
+cek "PUT set satuan_beli → tersimpan (karung)" "V == 1" \
+  "$(api "$OWNER" PUT "/bahan/$G69ID" '{"satuan_beli":"karung"}' | jq '(.satuan_beli=="karung") | if . then 1 else 0 end')"
+cek "PUT clear satuan_beli (null) → null" "V == 1" \
+  "$(api "$OWNER" PUT "/bahan/$G69ID" '{"satuan_beli":null}' | jq '(.satuan_beli==null) | if . then 1 else 0 end')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

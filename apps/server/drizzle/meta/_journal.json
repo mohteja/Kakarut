@@ -281,6 +281,20 @@
       "when": 1784038503551,
       "tag": "0039_chubby_korath",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1784041717237,
+      "tag": "0040_broad_mandroid",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1784071385540,
+      "tag": "0041_dry_hitman",
+      "breakpoints": true
     }
   ]
 }

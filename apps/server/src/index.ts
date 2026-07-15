@@ -12,6 +12,7 @@ import { runMigrations } from "./db/migrate";
 import { backfillKodeMenu } from "./modules/menu/service";
 import { backfillKodeBahan } from "./modules/bahan/kode";
 import { backfillUnits } from "./modules/satuan/service";
+import { backfillKategoriBahan } from "./modules/kategori-bahan/service";
 import { arsipkanMembershipNonaktif, backfillEmployeeCode } from "./modules/users/service";
 import { getStorage, localUploadDir } from "./modules/upload/storage";
 
@@ -46,6 +47,8 @@ if (env.AUTO_MIGRATE) {
   if (terisiKodeBahan > 0) console.log(`Kode bahan otomatis diisi untuk ${terisiKodeBahan} bahan.`);
   const unitDibuat = await backfillUnits(db);
   if (unitDibuat > 0) console.log(`Master satuan bawaan diisi (${unitDibuat} satuan).`);
+  const katBahan = await backfillKategoriBahan(db);
+  if (katBahan > 0) console.log(`Master kategori bahan bawaan diisi (${katBahan} kategori).`);
   // Karyawan lama tanpa kode → isi kode karyawan otomatis (untuk absensi)
   const terisiKar = await backfillEmployeeCode(db);
   if (terisiKar > 0) console.log(`Kode karyawan otomatis diisi untuk ${terisiKar} karyawan.`);

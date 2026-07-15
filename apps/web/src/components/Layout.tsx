@@ -333,9 +333,6 @@ export function Layout() {
                   <NavLink to="/menu" className={linkClass}>
                     🍜 Menu &amp; HPP
                   </NavLink>
-                  <NavLink to="/pengaturan/kategori" className={linkClass}>
-                    🏷 Master Kategori
-                  </NavLink>
                   <NavLink to="/pengaturan/satuan" className={linkClass}>
                     📏 Master Satuan
                   </NavLink>

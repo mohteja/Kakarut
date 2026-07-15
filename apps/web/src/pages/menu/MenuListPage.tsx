@@ -8,9 +8,11 @@ import {
   PageTitle,
   Spinner,
   btnPrimary,
+  btnSecondary,
   tdClass,
   thClass,
 } from "../../components/ui";
+import { KategoriManagerModal } from "../../components/KategoriManagerModal";
 import { labelCabang, useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatRupiah } from "../../lib/format";
@@ -35,6 +37,7 @@ export function MenuListPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["menu"] }),
   });
 
+  const [kelolaKategori, setKelolaKategori] = useState(false);
   // Lihat menu yang diatur untuk cabang tertentu — tanpa baris pembatasan
   // (branch_ids kosong) berarti tampil di semua lokasi.
   const [lokasi, setLokasi] = useState<string>("all");
@@ -58,13 +61,26 @@ export function MenuListPage() {
     <div>
       <PageTitle
         aksi={
-          <Link to="/menu/baru" className={btnPrimary}>
-            + Tambah Menu
-          </Link>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setKelolaKategori(true)} className={btnSecondary}>
+              🏷 Kategori
+            </button>
+            <Link to="/menu/baru" className={btnPrimary}>
+              + Tambah Menu
+            </Link>
+          </div>
         }
       >
         Menu &amp; HPP ({tampil.length})
       </PageTitle>
+      <KategoriManagerModal
+        open={kelolaKategori}
+        onClose={() => setKelolaKategori(false)}
+        endpoint="/kategori"
+        queryKey="kategori"
+        judul="Kategori Menu"
+        deskripsi="Kategori untuk mengelompokkan menu. Kategori yang masih dipakai menu tidak bisa dihapus."
+      />
       {lokasiOpsi.length > 1 && (
         <div className="mb-4 flex items-center gap-2 text-sm text-stone-600">
           <span>Tampil di lokasi:</span>

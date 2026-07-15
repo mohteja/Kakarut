@@ -54,8 +54,10 @@ export interface BahanDto {
   nama: string;
   harga_beli: number;
   isi: number;
-  /** satuan isi/gramasi: pcs, gr, ml, butir, porsi, dst */
+  /** satuan kerja/resep (stok, resep, konsumsi, HPP): pcs, gr, ml, butir, dst */
   satuan: string;
+  /** satuan beli/pembelian (mis. "dus"); null = beli langsung dalam satuan */
+  satuan_beli: string | null;
   /** lacak stok: dipotong saat menjual, ditambah saat membeli/produksi */
   track_stok: boolean;
   /** ambang batas stok minimum (0 = pakai rasio default) */
@@ -120,6 +122,7 @@ export interface BahanBulkRow {
   harga_beli: number;
   isi: number;
   satuan: string;
+  satuan_beli?: string | null;
   kategori: BahanKategori;
   track_stok: boolean;
   stok_minimum: number;

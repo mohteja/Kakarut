@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
-import type { BahanDto, BahanKategori, BahanResepRow, SatuanDto } from "@kakarut/shared";
+import type { BahanDto, BahanKategori, BahanResepRow, KategoriDto, SatuanDto } from "@kakarut/shared";
 import {
   Card,
   ErrorText,
@@ -119,10 +119,14 @@ export function ResepPage() {
     },
   });
 
-  // Master satuan (dropdown form buat bahan produksi)
+  // Master satuan & kategori bahan (dropdown form buat bahan produksi)
   const { data: satuanList } = useQuery({
     queryKey: ["satuan"],
     queryFn: () => api<SatuanDto[]>("/satuan"),
+  });
+  const { data: kategoriList } = useQuery({
+    queryKey: ["kategori-bahan"],
+    queryFn: () => api<KategoriDto[]>("/kategori-bahan"),
   });
   // Buat bahan produksi baru langsung dari halaman Resep (produksi terpisah
   // dari Bahan Baku beli). Setelah dibuat → langsung terpilih untuk atur resep.
@@ -483,9 +487,15 @@ export function ResepPage() {
                   }
                   className={inputClass}
                 >
-                  <option value="baso">baso</option>
-                  <option value="minuman">minuman</option>
-                  <option value="lain">lain</option>
+                  {!kategoriList?.some((k) => k.nama === formBaru.kategori) &&
+                    formBaru.kategori && (
+                      <option value={formBaru.kategori}>{formBaru.kategori}</option>
+                    )}
+                  {(kategoriList ?? []).map((k) => (
+                    <option key={k.id} value={k.nama}>
+                      {k.nama}
+                    </option>
+                  ))}
                 </select>
               </div>
               <div>

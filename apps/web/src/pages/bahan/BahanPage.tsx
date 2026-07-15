@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import type { BahanDto, SatuanDto } from "@kakarut/shared";
+import type { BahanDto, KategoriDto, SatuanDto } from "@kakarut/shared";
 import {
   Card,
   ErrorText,
@@ -14,6 +14,7 @@ import {
   tdClass,
   thClass,
 } from "../../components/ui";
+import { KategoriManagerModal } from "../../components/KategoriManagerModal";
 import { useAuth } from "../../context/AuthContext";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah } from "../../lib/format";
@@ -25,7 +26,8 @@ interface FormState {
   harga_beli: string;
   isi: string;
   satuan: string;
-  kategori: "baso" | "minuman" | "lain";
+  satuan_beli: string;
+  kategori: string;
   pengadaan: "produksi" | "beli";
   track_stok: boolean;
   stok_minimum: string;
@@ -46,17 +48,20 @@ export function BahanPage() {
     queryKey: ["bahan"],
     queryFn: () => api<BahanDto[]>("/bahan"),
   });
-  // Master satuan → pilihan dropdown di form Ubah
+  // Master satuan & kategori bahan → pilihan dropdown di form Ubah + filter
   const { data: satuanList } = useQuery({
     queryKey: ["satuan"],
     queryFn: () => api<SatuanDto[]>("/satuan"),
   });
+  const { data: kategoriList } = useQuery({
+    queryKey: ["kategori-bahan"],
+    queryFn: () => api<KategoriDto[]>("/kategori-bahan"),
+  });
   const [form, setForm] = useState<FormState | null>(null);
+  const [kelolaKategori, setKelolaKategori] = useState(false);
   const [cari, setCari] = useState("");
   const [filterJenis, setFilterJenis] = useState<"semua" | "produksi" | "beli">("semua");
-  const [filterKategori, setFilterKategori] = useState<"semua" | "baso" | "minuman" | "lain">(
-    "semua",
-  );
+  const [filterKategori, setFilterKategori] = useState<string>("semua");
 
   const simpan = useMutation({
     mutationFn: (f: FormState) => {
@@ -66,6 +71,7 @@ export function BahanPage() {
         harga_beli: Number(f.harga_beli),
         isi: Number(f.isi),
         satuan: f.satuan.trim() || "pcs",
+        satuan_beli: f.satuan_beli.trim() || null,
         kategori: f.kategori,
         // jenis pengadaan tak bisa diubah dari sini (badge read-only)
         track_stok: f.track_stok,
@@ -98,6 +104,7 @@ export function BahanPage() {
       harga_beli: String(b.harga_beli),
       isi: String(b.isi),
       satuan: b.satuan,
+      satuan_beli: b.satuan_beli ?? "",
       kategori: b.kategori,
       pengadaan: b.pengadaan,
       track_stok: b.track_stok,
@@ -144,14 +151,27 @@ export function BahanPage() {
       <PageTitle
         aksi={
           bolehUbah ? (
-            <button onClick={() => navigate("/bahan/baru")} className={btnPrimary}>
-              + Tambah Bahan Baku
-            </button>
+            <div className="flex items-center gap-2">
+              <button onClick={() => setKelolaKategori(true)} className={btnSecondary}>
+                🏷 Kategori
+              </button>
+              <button onClick={() => navigate("/bahan/baru")} className={btnPrimary}>
+                + Tambah Bahan Baku
+              </button>
+            </div>
           ) : undefined
         }
       >
         Bahan Baku ({adaFilter ? `${tampil.length} dari ${semua.length}` : semua.length})
       </PageTitle>
+      <KategoriManagerModal
+        open={kelolaKategori}
+        onClose={() => setKelolaKategori(false)}
+        endpoint="/kategori-bahan"
+        queryKey="kategori-bahan"
+        judul="Kategori Bahan Baku"
+        deskripsi="Kategori untuk mengelompokkan bahan baku. Kategori yang masih dipakai bahan tidak bisa dihapus."
+      />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <input
@@ -174,14 +194,16 @@ export function BahanPage() {
         </select>
         <select
           value={filterKategori}
-          onChange={(e) => setFilterKategori(e.target.value as typeof filterKategori)}
+          onChange={(e) => setFilterKategori(e.target.value)}
           className={`${inputClass} max-w-48`}
           aria-label="Filter kategori"
         >
           <option value="semua">Semua kategori</option>
-          <option value="baso">baso ({jumlah((b) => b.kategori === "baso")})</option>
-          <option value="minuman">minuman ({jumlah((b) => b.kategori === "minuman")})</option>
-          <option value="lain">lain ({jumlah((b) => b.kategori === "lain")})</option>
+          {(kategoriList ?? []).map((k) => (
+            <option key={k.id} value={k.nama}>
+              {k.nama} ({jumlah((b) => b.kategori === k.nama)})
+            </option>
+          ))}
         </select>
         {adaFilter && (
           <button
@@ -330,9 +352,29 @@ export function BahanPage() {
                 />
               </div>
             </div>
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="mb-1 block text-sm font-medium">Harga beli (Rp)</label>
+                <label className="mb-1 block text-sm font-medium">Satuan beli</label>
+                <select
+                  value={form.satuan_beli}
+                  onChange={(e) => setForm({ ...form, satuan_beli: e.target.value })}
+                  className={inputClass}
+                >
+                  <option value="">— (beli langsung per satuan resep)</option>
+                  {!satuanList?.some((s) => s.nama === form.satuan_beli) && form.satuan_beli && (
+                    <option value={form.satuan_beli}>{form.satuan_beli}</option>
+                  )}
+                  {(satuanList ?? []).map((s) => (
+                    <option key={s.id} value={s.nama}>
+                      {s.nama}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium">
+                  Harga beli (Rp{form.satuan_beli ? ` / ${form.satuan_beli}` : ""})
+                </label>
                 <input
                   required
                   type="number"
@@ -343,22 +385,10 @@ export function BahanPage() {
                   className={inputClass}
                 />
               </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="mb-1 block text-sm font-medium">
-                  Isi/gramasi per pembelian
-                </label>
-                <input
-                  required
-                  type="number"
-                  min="0.0001"
-                  step="any"
-                  value={form.isi}
-                  onChange={(e) => setForm({ ...form, isi: e.target.value })}
-                  className={inputClass}
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-sm font-medium">Satuan</label>
+                <label className="mb-1 block text-sm font-medium">Satuan resep</label>
                 <select
                   required
                   value={form.satuan}
@@ -375,11 +405,26 @@ export function BahanPage() {
                   ))}
                 </select>
               </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium">
+                  Isi ({form.satuan || "satuan resep"}
+                  {form.satuan_beli ? ` per 1 ${form.satuan_beli}` : " per pembelian"})
+                </label>
+                <input
+                  required
+                  type="number"
+                  min="0.0001"
+                  step="any"
+                  value={form.isi}
+                  onChange={(e) => setForm({ ...form, isi: e.target.value })}
+                  className={inputClass}
+                />
+              </div>
             </div>
             {Number(form.harga_beli) > 0 && Number(form.isi) > 0 && (
               <div className="rounded-lg bg-orange-50 px-3 py-2 text-sm text-orange-800">
-                Harga per {form.satuan || "unit"}:{" "}
-                {formatRupiah(Number(form.harga_beli) / Number(form.isi))}
+                Harga per {form.satuan || "satuan resep"}:{" "}
+                <b>Rp {formatAngka(Number(form.harga_beli) / Number(form.isi), 2)}</b>
               </div>
             )}
             <div className="grid grid-cols-2 gap-3">
@@ -387,14 +432,17 @@ export function BahanPage() {
                 <label className="mb-1 block text-sm font-medium">Kategori</label>
                 <select
                   value={form.kategori}
-                  onChange={(e) =>
-                    setForm({ ...form, kategori: e.target.value as FormState["kategori"] })
-                  }
+                  onChange={(e) => setForm({ ...form, kategori: e.target.value })}
                   className={inputClass}
                 >
-                  <option value="baso">baso</option>
-                  <option value="minuman">minuman</option>
-                  <option value="lain">lain</option>
+                  {!kategoriList?.some((k) => k.nama === form.kategori) && form.kategori && (
+                    <option value={form.kategori}>{form.kategori}</option>
+                  )}
+                  {(kategoriList ?? []).map((k) => (
+                    <option key={k.id} value={k.nama}>
+                      {k.nama}
+                    </option>
+                  ))}
                 </select>
               </div>
               <div>
