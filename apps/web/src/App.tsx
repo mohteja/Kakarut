@@ -8,6 +8,7 @@ import { AbsenPage } from "./pages/absen/AbsenPage";
 import { ProfilPage } from "./pages/profil/ProfilPage";
 import { BahanPage } from "./pages/bahan/BahanPage";
 import { TambahBahanBakuPage } from "./pages/bahan/TambahBahanBakuPage";
+import { UbahBahanBakuPage } from "./pages/bahan/UbahBahanBakuPage";
 import { KasirPage } from "./pages/kasir/KasirPage";
 import { RiwayatPage } from "./pages/kasir/RiwayatPage";
 import { ShiftPage } from "./pages/kasir/ShiftPage";
@@ -141,6 +142,7 @@ export default function App() {
                   <Route path="/pengaturan/penyimpanan" element={<PenyimpananPage />} />
                   <Route path="/pengaturan/satuan" element={<SatuanPage />} />
                   <Route path="/bahan/baru" element={<TambahBahanBakuPage />} />
+                  <Route path="/bahan/ubah" element={<UbahBahanBakuPage />} />
                 </>
               )}
             </>

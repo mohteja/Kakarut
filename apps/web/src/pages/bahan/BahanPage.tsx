@@ -1,11 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import type { BahanDto, KategoriDto, SatuanDto } from "@kakarut/shared";
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import type { BahanDto, KategoriDto } from "@kakarut/shared";
 import {
   Card,
   ErrorText,
-  Modal,
   PageTitle,
   Spinner,
   btnPrimary,
@@ -19,25 +18,6 @@ import { useAuth } from "../../context/AuthContext";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah } from "../../lib/format";
 
-interface FormState {
-  id?: string;
-  kode: string;
-  nama: string;
-  harga_beli: string;
-  isi: string;
-  satuan: string;
-  satuan_beli: string;
-  kategori: string;
-  pengadaan: "produksi" | "beli";
-  track_stok: boolean;
-  stok_minimum: string;
-  catatan: string;
-  is_packaging: boolean;
-  is_complement: boolean;
-  boleh_eceran: boolean;
-  min_beli: string;
-}
-
 export function BahanPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -48,87 +28,63 @@ export function BahanPage() {
     queryKey: ["bahan"],
     queryFn: () => api<BahanDto[]>("/bahan"),
   });
-  // Master satuan & kategori bahan → pilihan dropdown di form Ubah + filter
-  const { data: satuanList } = useQuery({
-    queryKey: ["satuan"],
-    queryFn: () => api<SatuanDto[]>("/satuan"),
-  });
+  // Master kategori bahan → pilihan dropdown filter
   const { data: kategoriList } = useQuery({
     queryKey: ["kategori-bahan"],
     queryFn: () => api<KategoriDto[]>("/kategori-bahan"),
   });
-  const [form, setForm] = useState<FormState | null>(null);
   const [kelolaKategori, setKelolaKategori] = useState(false);
   const [cari, setCari] = useState("");
   const [filterJenis, setFilterJenis] = useState<"semua" | "produksi" | "beli">("semua");
   const [filterKategori, setFilterKategori] = useState<string>("semua");
-
-  const simpan = useMutation({
-    mutationFn: (f: FormState) => {
-      const body = {
-        kode: f.kode.trim() || null,
-        nama: f.nama,
-        harga_beli: Number(f.harga_beli),
-        isi: Number(f.isi),
-        satuan: f.satuan.trim() || "pcs",
-        satuan_beli: f.satuan_beli.trim() || null,
-        kategori: f.kategori,
-        // jenis pengadaan tak bisa diubah dari sini (badge read-only)
-        track_stok: f.track_stok,
-        stok_minimum: f.track_stok ? Number(f.stok_minimum) || 0 : 0,
-        catatan: f.catatan || null,
-        is_packaging: f.is_packaging,
-        is_complement: f.is_complement,
-        // eceran & minimal belanja hanya relevan utk jalur beli
-        boleh_eceran: f.pengadaan === "beli" ? f.boleh_eceran : false,
-        min_beli: f.pengadaan === "beli" ? Number(f.min_beli) || 0 : 0,
-      };
-      return f.id
-        ? api<BahanDto>(`/bahan/${f.id}`, { method: "PUT", body })
-        : api<BahanDto>("/bahan", { method: "POST", body });
-    },
-    onSuccess: () => {
-      setForm(null);
-      queryClient.invalidateQueries({ queryKey: ["bahan"] });
-      queryClient.invalidateQueries({ queryKey: ["menu"] }); // HPP berubah
-      queryClient.invalidateQueries({ queryKey: ["stok"] });
-    },
-  });
-
-  // buka form Ubah (resep produksi diatur di menu Resep tersendiri)
-  function bukaUbah(b: BahanDto) {
-    setForm({
-      id: b.id,
-      kode: b.kode ?? "",
-      nama: b.nama,
-      harga_beli: String(b.harga_beli),
-      isi: String(b.isi),
-      satuan: b.satuan,
-      satuan_beli: b.satuan_beli ?? "",
-      kategori: b.kategori,
-      pengadaan: b.pengadaan,
-      track_stok: b.track_stok,
-      stok_minimum: String(b.stok_minimum),
-      catatan: b.catatan ?? "",
-      is_packaging: b.is_packaging,
-      is_complement: b.is_complement,
-      boleh_eceran: b.boleh_eceran,
-      min_beli: String(b.min_beli ?? 0),
-    });
-  }
+  /** id bahan tercentang (untuk ubah/hapus banyak sekaligus) */
+  const [pilih, setPilih] = useState<Set<string>>(new Set());
+  const [pesanHapus, setPesanHapus] = useState<string | null>(null);
 
   const hapus = useMutation({
     mutationFn: (id: string) => api(`/bahan/${id}`, { method: "DELETE" }),
-    onSuccess: () => {
+    onSuccess: (_data, id) => {
+      setPilih((prev) => {
+        const s = new Set(prev);
+        s.delete(id);
+        return s;
+      });
       queryClient.invalidateQueries({ queryKey: ["bahan"] });
       queryClient.invalidateQueries({ queryKey: ["stok"] });
     },
   });
 
-  function onSubmit(e: FormEvent) {
-    e.preventDefault();
-    if (form) simpan.mutate(form);
-  }
+  // Hapus banyak: per-id (guard server per bahan tetap berlaku — mis. masih
+  // dipakai menu/resep → 409). Yang gagal tetap tercentang + pesan alasannya.
+  const hapusBanyak = useMutation({
+    mutationFn: async (ids: string[]) => {
+      const hasil = await Promise.allSettled(
+        ids.map((id) => api(`/bahan/${id}`, { method: "DELETE" })),
+      );
+      return ids
+        .map((id, i) => ({ id, h: hasil[i] }))
+        .filter((x) => x.h.status === "rejected")
+        .map((x) => ({
+          id: x.id,
+          pesan: ((x.h as PromiseRejectedResult).reason as Error)?.message ?? "gagal",
+        }));
+    },
+    onSuccess: (gagal, ids) => {
+      queryClient.invalidateQueries({ queryKey: ["bahan"] });
+      queryClient.invalidateQueries({ queryKey: ["stok"] });
+      setPilih(new Set(gagal.map((g) => g.id)));
+      if (gagal.length === 0) {
+        setPesanHapus(null);
+      } else {
+        const namaById = new Map((bahan ?? []).map((b) => [b.id, b.nama]));
+        setPesanHapus(
+          `${gagal.length} dari ${ids.length} bahan gagal dihapus — ${gagal
+            .map((g) => `${namaById.get(g.id) ?? g.id}: ${g.pesan}`)
+            .join("; ")}`,
+        );
+      }
+    },
+  });
 
   if (isLoading) return <Spinner />;
 
@@ -140,11 +96,33 @@ export function BahanPage() {
     .filter((b) => (filterKategori === "semua" ? true : b.kategori === filterKategori));
   const adaFilter = cari !== "" || filterJenis !== "semua" || filterKategori !== "semua";
 
+  const semuaTampilTerpilih = tampil.length > 0 && tampil.every((b) => pilih.has(b.id));
+  const togglePilih = (id: string) =>
+    setPilih((prev) => {
+      const s = new Set(prev);
+      if (s.has(id)) s.delete(id);
+      else s.add(id);
+      return s;
+    });
+  const togglePilihSemua = () =>
+    setPilih((prev) => {
+      if (semuaTampilTerpilih) {
+        const s = new Set(prev);
+        for (const b of tampil) s.delete(b.id);
+        return s;
+      }
+      return new Set([...prev, ...tampil.map((b) => b.id)]);
+    });
+  // urutan ids mengikuti urutan daftar (nama) agar halaman ubah konsisten
+  const idsTerpilih = semua.filter((b) => pilih.has(b.id)).map((b) => b.id);
+
   function resetFilter() {
     setCari("");
     setFilterJenis("semua");
     setFilterKategori("semua");
   }
+
+  const kolom = bolehUbah ? 10 : 9;
 
   return (
     <div>
@@ -215,12 +193,64 @@ export function BahanPage() {
         )}
       </div>
 
+      {/* Bar aksi massal — tampil saat ada bahan tercentang */}
+      {bolehUbah && pilih.size > 0 && (
+        <div className="mb-3 flex flex-wrap items-center gap-3 rounded-lg border border-orange-200 bg-orange-50 px-4 py-2">
+          <span className="text-sm font-semibold text-orange-800">
+            {pilih.size} bahan dipilih
+          </span>
+          <button
+            onClick={() => navigate(`/bahan/ubah?ids=${idsTerpilih.join(",")}`)}
+            className={btnPrimary}
+          >
+            ✏ Ubah terpilih ({pilih.size})
+          </button>
+          <button
+            onClick={() => {
+              if (confirm(`Nonaktifkan ${pilih.size} bahan terpilih?`)) {
+                setPesanHapus(null);
+                hapusBanyak.mutate(idsTerpilih);
+              }
+            }}
+            disabled={hapusBanyak.isPending}
+            className="rounded-lg border border-red-300 bg-white px-4 py-2 text-sm font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50"
+          >
+            {hapusBanyak.isPending ? "Menghapus…" : `🗑 Hapus terpilih (${pilih.size})`}
+          </button>
+          <button
+            onClick={() => {
+              setPilih(new Set());
+              setPesanHapus(null);
+            }}
+            className="text-sm font-medium text-stone-500 hover:underline"
+          >
+            Batal pilih
+          </button>
+        </div>
+      )}
+      {pesanHapus && (
+        <div className="mb-3 rounded-lg bg-red-50 px-4 py-2 text-sm text-red-700">
+          {pesanHapus}
+        </div>
+      )}
+
       <ErrorText error={hapus.error} />
 
       <Card className="overflow-x-auto">
         <table className="w-full">
           <thead className="border-b border-stone-200 bg-stone-50">
             <tr>
+              {bolehUbah && (
+                <th className={`${thClass} w-8`}>
+                  <input
+                    type="checkbox"
+                    checked={semuaTampilTerpilih}
+                    onChange={togglePilihSemua}
+                    aria-label="Pilih semua bahan yang tampil"
+                    title="Pilih semua yang tampil"
+                  />
+                </th>
+              )}
               <th className={thClass}>Kode</th>
               <th className={thClass}>Nama</th>
               <th className={thClass}>Kategori</th>
@@ -234,7 +264,17 @@ export function BahanPage() {
           </thead>
           <tbody className="divide-y divide-stone-100">
             {tampil.map((b) => (
-              <tr key={b.id} className="hover:bg-stone-50">
+              <tr key={b.id} className={pilih.has(b.id) ? "bg-orange-50/60" : "hover:bg-stone-50"}>
+                {bolehUbah && (
+                  <td className={tdClass}>
+                    <input
+                      type="checkbox"
+                      checked={pilih.has(b.id)}
+                      onChange={() => togglePilih(b.id)}
+                      aria-label={`Pilih ${b.nama}`}
+                    />
+                  </td>
+                )}
                 <td className={`${tdClass} whitespace-nowrap font-mono text-xs text-stone-500`}>
                   {b.kode ?? "—"}
                 </td>
@@ -290,7 +330,7 @@ export function BahanPage() {
                   {bolehUbah && (
                     <>
                       <button
-                        onClick={() => bukaUbah(b)}
+                        onClick={() => navigate(`/bahan/ubah?ids=${b.id}`)}
                         className="text-sm font-medium text-orange-600 hover:underline"
                       >
                         Ubah
@@ -310,7 +350,7 @@ export function BahanPage() {
             ))}
             {tampil.length === 0 && (
               <tr>
-                <td colSpan={9} className="py-8 text-center text-sm text-stone-400">
+                <td colSpan={kolom} className="py-8 text-center text-sm text-stone-400">
                   Tidak ada bahan yang cocok dengan filter.{" "}
                   <button
                     onClick={resetFilter}
@@ -324,285 +364,6 @@ export function BahanPage() {
           </tbody>
         </table>
       </Card>
-
-      <Modal
-        open={form !== null}
-        onClose={() => setForm(null)}
-        title={form?.id ? "Ubah Bahan" : "Tambah Bahan"}
-      >
-        {form && (
-          <form onSubmit={onSubmit} className="space-y-3">
-            <div className="grid grid-cols-[8rem_1fr] gap-3">
-              <div>
-                <label className="mb-1 block text-sm font-medium">Kode</label>
-                <input
-                  value={form.kode}
-                  onChange={(e) => setForm({ ...form, kode: e.target.value })}
-                  className={inputClass}
-                  placeholder="otomatis"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-sm font-medium">Nama</label>
-                <input
-                  required
-                  value={form.nama}
-                  onChange={(e) => setForm({ ...form, nama: e.target.value })}
-                  className={inputClass}
-                />
-              </div>
-            </div>
-            {/* 🛒 Belanja (RAB): cara & harga saat belanja di pasar */}
-            <fieldset className="rounded-lg border border-emerald-200 bg-emerald-50/40 p-3">
-              <legend className="px-1 text-xs font-bold tracking-wide text-emerald-700 uppercase">
-                🛒 Belanja (RAB)
-              </legend>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="mb-1 block text-sm font-medium">Satuan beli</label>
-                  <select
-                    value={form.satuan_beli}
-                    onChange={(e) => setForm({ ...form, satuan_beli: e.target.value })}
-                    className={inputClass}
-                  >
-                    <option value="">— (beli langsung per satuan resep)</option>
-                    {!satuanList?.some((s) => s.nama === form.satuan_beli) && form.satuan_beli && (
-                      <option value={form.satuan_beli}>{form.satuan_beli}</option>
-                    )}
-                    {(satuanList ?? []).map((s) => (
-                      <option key={s.id} value={s.nama}>
-                        {s.nama}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="mb-1 block text-sm font-medium">
-                    Harga beli (Rp{form.satuan_beli ? ` / ${form.satuan_beli}` : ""})
-                  </label>
-                  <input
-                    required
-                    type="number"
-                    min="0"
-                    step="any"
-                    value={form.harga_beli}
-                    onChange={(e) => setForm({ ...form, harga_beli: e.target.value })}
-                    className={inputClass}
-                  />
-                </div>
-              </div>
-            </fieldset>
-
-            {/* 🧪 Aturan resep: satuan kerja + konversi → harga per satuan resep otomatis */}
-            <fieldset className="rounded-lg border border-sky-200 bg-sky-50/40 p-3">
-              <legend className="px-1 text-xs font-bold tracking-wide text-sky-700 uppercase">
-                🧪 Aturan resep
-              </legend>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="mb-1 block text-sm font-medium">Satuan resep</label>
-                  <select
-                    required
-                    value={form.satuan}
-                    onChange={(e) => setForm({ ...form, satuan: e.target.value })}
-                    className={inputClass}
-                  >
-                    {!satuanList?.some((s) => s.nama === form.satuan) && form.satuan && (
-                      <option value={form.satuan}>{form.satuan}</option>
-                    )}
-                    {(satuanList ?? []).map((s) => (
-                      <option key={s.id} value={s.nama}>
-                        {s.nama}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="mb-1 block text-sm font-medium">
-                    Konversi (1 {form.satuan_beli || "satuan beli"} = …{" "}
-                    {form.satuan || "satuan resep"})
-                  </label>
-                  <input
-                    required
-                    type="number"
-                    min="0.0001"
-                    step="any"
-                    value={form.isi}
-                    onChange={(e) => setForm({ ...form, isi: e.target.value })}
-                    className={inputClass}
-                  />
-                </div>
-              </div>
-              {Number(form.harga_beli) > 0 && Number(form.isi) > 0 && (
-                <div className="mt-3 rounded-lg bg-white px-3 py-2 text-sm text-sky-900 ring-1 ring-sky-200">
-                  Harga per {form.satuan || "satuan resep"}:{" "}
-                  <b>Rp {formatAngka(Number(form.harga_beli) / Number(form.isi), 2)}</b>
-                </div>
-              )}
-            </fieldset>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="mb-1 block text-sm font-medium">Kategori</label>
-                <select
-                  value={form.kategori}
-                  onChange={(e) => setForm({ ...form, kategori: e.target.value })}
-                  className={inputClass}
-                >
-                  {!kategoriList?.some((k) => k.nama === form.kategori) && form.kategori && (
-                    <option value={form.kategori}>{form.kategori}</option>
-                  )}
-                  {(kategoriList ?? []).map((k) => (
-                    <option key={k.id} value={k.nama}>
-                      {k.nama}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="mb-1 block text-sm font-medium">Jenis pengadaan</label>
-                <div className="flex items-center gap-2 rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-sm">
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
-                      form.pengadaan === "produksi"
-                        ? "bg-orange-100 text-orange-700"
-                        : "bg-teal-100 text-teal-700"
-                    }`}
-                  >
-                    {form.pengadaan === "produksi" ? "Produksi sendiri" : "Beli jadi"}
-                  </span>
-                  {form.pengadaan === "produksi" && (
-                    <Link to="/resep" className="text-xs text-orange-600 hover:underline">
-                      atur resep
-                    </Link>
-                  )}
-                </div>
-              </div>
-            </div>
-            {form.pengadaan === "beli" && (
-              <label className="flex items-center gap-2 rounded-lg border border-stone-200 p-3 text-sm font-medium">
-                <input
-                  type="checkbox"
-                  checked={form.boleh_eceran}
-                  onChange={(e) => setForm({ ...form, boleh_eceran: e.target.checked })}
-                />
-                <span>
-                  Bisa dibeli eceran (tanpa pembulatan per kemasan)
-                  <span className="block text-xs font-normal text-stone-500">
-                    Tanpa centang: saran beli &amp; faktur otomatis dibulatkan ke atas per
-                    kemasan penuh (1 kemasan = {form.isi || "…"} {form.satuan || "unit"}) —
-                    mengikuti cara toko menjual.
-                  </span>
-                </span>
-              </label>
-            )}
-            {form.pengadaan === "beli" && (
-              <div>
-                <label className="mb-1 block text-sm font-medium">
-                  Minimal belanja ({form.satuan || "unit"})
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  step="any"
-                  value={form.min_beli}
-                  onChange={(e) => setForm({ ...form, min_beli: e.target.value })}
-                  className={inputClass}
-                  placeholder="0"
-                />
-                <p className="mt-1 text-xs text-stone-500">
-                  Saat sistem membuat daftar belanja, jumlah beli dibulatkan naik minimal ke
-                  nilai ini. Isi <b>0</b> untuk tanpa minimum.
-                </p>
-              </div>
-            )}
-            {form.pengadaan === "produksi" && (
-              <div className="rounded-lg border border-orange-200 bg-orange-50/50 px-3 py-2 text-sm text-stone-700">
-                🧾 Resep produksi (bahan mentah per batch) kini diatur di menu{" "}
-                {form.id ? (
-                  <Link
-                    to="/resep"
-                    className="font-semibold text-orange-600 hover:underline"
-                  >
-                    Resep
-                  </Link>
-                ) : (
-                  <b>Resep</b>
-                )}
-                {form.id ? "." : " — simpan bahan ini dulu, lalu buka menu Resep."}
-              </div>
-            )}
-            <div>
-              <label className="mb-1 block text-sm font-medium">Catatan</label>
-              <input
-                value={form.catatan}
-                onChange={(e) => setForm({ ...form, catatan: e.target.value })}
-                className={inputClass}
-              />
-            </div>
-            <label className="flex items-center gap-2 rounded-lg border border-stone-200 p-3 text-sm font-medium">
-              <input
-                type="checkbox"
-                checked={form.track_stok}
-                onChange={(e) => setForm({ ...form, track_stok: e.target.checked })}
-              />
-              <span>
-                Lacak stok bahan ini
-                <span className="block text-xs font-normal text-stone-500">
-                  Dipotong otomatis saat menjual, ditambah saat membeli/produksi, dan tampil
-                  di halaman Stok. Tanpa centang: hanya dipakai untuk hitung HPP.
-                </span>
-              </span>
-            </label>
-            {form.track_stok && (
-              <div>
-                <label className="mb-1 block text-sm font-medium">
-                  Ambang batas stok minimum ({form.satuan || "unit"})
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  step="any"
-                  value={form.stok_minimum}
-                  onChange={(e) => setForm({ ...form, stok_minimum: e.target.value })}
-                  className={inputClass}
-                  placeholder="0"
-                />
-                <p className="mt-1 text-xs text-stone-500">
-                  Bila saldo ≤ nilai ini → status <b>Menipis</b> (peringatan di Beranda &amp;
-                  Stok). Isi <b>0</b> untuk memakai perkiraan otomatis.
-                </p>
-              </div>
-            )}
-            <div className="flex gap-4 text-sm">
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={form.is_packaging}
-                  onChange={(e) => setForm({ ...form, is_packaging: e.target.checked })}
-                />
-                Kemasan take-away
-              </label>
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={form.is_complement}
-                  onChange={(e) => setForm({ ...form, is_complement: e.target.checked })}
-                />
-                Complement (×0.5 dine-in)
-              </label>
-            </div>
-            <ErrorText error={simpan.error} />
-            <div className="flex justify-end gap-2 pt-2">
-              <button type="button" onClick={() => setForm(null)} className={btnSecondary}>
-                Batal
-              </button>
-              <button type="submit" disabled={simpan.isPending} className={btnPrimary}>
-                Simpan
-              </button>
-            </div>
-          </form>
-        )}
-      </Modal>
     </div>
   );
 }
