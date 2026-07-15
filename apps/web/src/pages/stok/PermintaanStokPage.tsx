@@ -63,8 +63,22 @@ function Bagian({
   );
 }
 
+/** Status keseluruhan satu permintaan = agregat status semua bagiannya. */
+function statusPermintaan(r: PermintaanStokRow): { label: string; cls: string } {
+  const st = [r.produksi, r.beli, r.beli_produksi]
+    .filter((b): b is PermintaanStokBagian => b != null)
+    .map((b) => b.status);
+  if (st.length > 0 && st.every((s) => s === "dikonfirmasi")) {
+    return { label: "📦 Selesai ✓", cls: "bg-green-100 text-green-700" };
+  }
+  if (st.length > 0 && st.every((s) => s === "dikonfirmasi" || s === "ditolak")) {
+    return { label: "⚠ Selesai — ada ditolak", cls: "bg-amber-100 text-amber-700" };
+  }
+  return { label: "🔄 Berjalan", cls: "bg-blue-100 text-blue-700" };
+}
+
 /**
- * Data Permintaan Stok: daftar permintaan "Tambah Stok dari Menu" (owner/admin
+ * Permintaan Stok: daftar permintaan "Tambah Stok dari Menu" (owner/admin
  * dari Kantor). Tiap submit = satu kartu, menggabungkan faktur Produksi + Beli.
  */
 export function PermintaanStokPage() {
@@ -98,27 +112,48 @@ export function PermintaanStokPage() {
         </Card>
       ) : (
         <div className="space-y-3">
-          {list.map((r) => (
-            <Card key={r.rencana_id} className="p-4">
-              <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-                <div className="font-semibold text-stone-800">
-                  {r.tujuan_cabang ? `🏪 ${r.tujuan_cabang}` : "Bahan baku"}
+          {list.map((r) => {
+            const status = statusPermintaan(r);
+            const total =
+              (r.produksi?.total ?? 0) + (r.beli?.total ?? 0) + (r.beli_produksi?.total ?? 0);
+            return (
+              <Card key={r.rencana_id} className="overflow-hidden">
+                {/* Header: tujuan + waktu di kiri, STATUS di pojok kanan atas */}
+                <div className="flex items-start justify-between gap-2 border-b border-stone-100 px-4 py-2.5">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                      <span className="font-bold text-stone-800">📋 Permintaan</span>
+                      {r.tujuan_cabang && (
+                        <span className="text-sm text-stone-600">🏪 {r.tujuan_cabang}</span>
+                      )}
+                    </div>
+                    <div className="mt-0.5 text-xs text-stone-500">
+                      {formatWaktu(r.waktu)}
+                      {r.pembuat && ` · oleh ${r.pembuat}`}
+                      {r.catatan && ` · ${r.catatan}`}
+                    </div>
+                  </div>
+                  <span
+                    className={`shrink-0 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold ${status.cls}`}
+                  >
+                    {status.label}
+                  </span>
                 </div>
-                <div className="text-xs text-stone-500">
-                  {formatWaktu(r.waktu)}
-                  {r.pembuat && ` · oleh ${r.pembuat}`}
+                <div className="space-y-2 border-b border-stone-100 px-4 py-2.5">
+                  {r.produksi && <Bagian jalur="produksi" data={r.produksi} to="/produksi" />}
+                  {r.beli && <Bagian jalur="beli" data={r.beli} to="/pembelian" />}
+                  {r.beli_produksi && (
+                    <Bagian jalur="beli_produksi" data={r.beli_produksi} to="/pembelian" />
+                  )}
                 </div>
-              </div>
-              {r.catatan && <div className="mb-2 text-sm text-stone-600">{r.catatan}</div>}
-              <div className="space-y-2">
-                {r.produksi && <Bagian jalur="produksi" data={r.produksi} to="/produksi" />}
-                {r.beli && <Bagian jalur="beli" data={r.beli} to="/pembelian" />}
-                {r.beli_produksi && (
-                  <Bagian jalur="beli_produksi" data={r.beli_produksi} to="/pembelian" />
-                )}
-              </div>
-            </Card>
-          ))}
+                {/* Footer: total transaksi permintaan */}
+                <div className="px-4 py-2.5">
+                  <div className="text-xs text-stone-500">Total transaksi:</div>
+                  <div className="text-lg font-bold text-stone-800">{formatRupiah(total)}</div>
+                </div>
+              </Card>
+            );
+          })}
         </div>
       )}
     </div>
