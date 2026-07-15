@@ -313,7 +313,7 @@ export function ResepPage() {
                                 )}
                               {pilihan.map((x) => (
                                 <option key={x.id} value={x.id}>
-                                  {x.nama}
+                                  {x.nama} — Rp {formatAngka(x.harga_per_unit, 2)}/{x.satuan}
                                 </option>
                               ))}
                             </select>
@@ -334,6 +334,14 @@ export function ResepPage() {
                             />
                             <span className="w-12 shrink-0 text-xs text-stone-500">
                               {terpilih?.satuan ?? ""}
+                            </span>
+                            {/* harga mengikuti aturan resep bahan — read-only */}
+                            <span className="w-44 shrink-0 text-right text-xs whitespace-nowrap text-stone-500">
+                              {terpilih
+                                ? Number(r.qty) > 0
+                                  ? `× Rp ${formatAngka(terpilih.harga_per_unit, 2)} = ${formatRupiah(Number(r.qty) * terpilih.harga_per_unit)}`
+                                  : `Rp ${formatAngka(terpilih.harga_per_unit, 2)}/${terpilih.satuan}`
+                                : ""}
                             </span>
                             {bolehUbah && (
                               <button
@@ -367,8 +375,8 @@ export function ResepPage() {
 
                     {resep.some((r) => r.ingredient_id && Number(r.qty) > 0) && (
                       <div className="mt-3 rounded-lg bg-orange-50 px-3 py-2 text-sm text-orange-800">
-                        Estimasi biaya bahan per batch: <b>{formatRupiah(estimasi)}</b> —
-                        bandingkan dengan harga beli batch{" "}
+                        Estimasi biaya bahan per batch (takaran × harga per satuan resep):{" "}
+                        <b>{formatRupiah(estimasi)}</b> — bandingkan dengan harga beli batch{" "}
                         <b>{formatRupiah(dipilih.harga_beli)}</b>.
                       </div>
                     )}
