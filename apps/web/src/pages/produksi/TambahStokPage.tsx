@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import type { JenisPengadaan, KonfirmasiStatus } from "@kakarut/shared";
 import {
@@ -229,13 +229,12 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
     },
   });
 
-  // Buku besar: filter tanggal + pagination per faktur (terlama di halaman awal,
-  // terbaru di halaman terakhir). Default membuka halaman TERAKHIR.
+  // Buku besar: filter tanggal + pagination per faktur. Halaman 1 = faktur
+  // yang BELUM selesai dulu, lalu terbaru (urutan dari server).
   const [dari, setDari] = useState("");
   const [sampai, setSampai] = useState("");
   const [perPage, setPerPage] = useState(20);
   const [page, setPage] = useState(1);
-  const [pinnedLast, setPinnedLast] = useState(true);
 
   const { data, isLoading, isFetching } = useQuery({
     queryKey: [t.endpoint, branchQuery, dari, sampai, perPage, page],
@@ -255,18 +254,11 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
   const total = data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / perPage));
 
-  // Setelah data termuat, kalau "pinned", lompat ke halaman terakhir (terbaru).
-  useEffect(() => {
-    if (pinnedLast && data && page !== totalPages) setPage(totalPages);
-  }, [pinnedLast, data, totalPages, page]);
-
   function gantiFilter(fn: () => void) {
     fn();
-    setPinnedLast(true);
     setPage(1);
   }
   function keHalaman(n: number) {
-    setPinnedLast(false);
     setPage(Math.min(totalPages, Math.max(1, n)));
   }
 
@@ -312,7 +304,13 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
     }
     // status faktur = agregat status baris (campuran diterima+ditolak = "sebagian")
     for (const g of byKey.values()) g.status = statusFaktur(g.rows);
-    return [...byKey.values()];
+    // urutan kartu = urutan server: yang belum selesai dulu, lalu terbaru
+    return [...byKey.values()].sort((a, b) => {
+      const beresA = belumSelesai(a.status) ? 0 : 1;
+      const beresB = belumSelesai(b.status) ? 0 : 1;
+      if (beresA !== beresB) return beresA - beresB;
+      return b.waktu.localeCompare(a.waktu);
+    });
   }, [log]);
 
   const totalPengeluaran = data?.total_pengeluaran ?? 0;
@@ -377,20 +375,6 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
             Semua tanggal
           </button>
         )}
-        <div className="ml-auto">
-          <label className="mb-1 block text-xs font-medium text-stone-500">Baris / halaman</label>
-          <select
-            value={perPage}
-            onChange={(e) => gantiFilter(() => setPerPage(Number(e.target.value)))}
-            className={inputClass}
-          >
-            {[10, 20, 50, 100].map((n) => (
-              <option key={n} value={n}>
-                {n}
-              </option>
-            ))}
-          </select>
-        </div>
       </Card>
 
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -582,42 +566,61 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
         </div>
       )}
 
-      {totalPages > 1 && (
-        <div className="mt-4 flex items-center justify-center gap-1.5 text-sm">
-          <button
-            onClick={() => keHalaman(1)}
-            disabled={page <= 1}
-            className={`${btnSecondary} px-2.5 py-1 disabled:opacity-40`}
-            title="Terlama"
-          >
-            «
-          </button>
-          <button
-            onClick={() => keHalaman(page - 1)}
-            disabled={page <= 1}
-            className={`${btnSecondary} px-2.5 py-1 disabled:opacity-40`}
-          >
-            ‹ Sebelumnya
-          </button>
-          <span className="px-2 text-stone-500">
-            Halaman <b>{page}</b> / {totalPages}
-          </span>
-          <button
-            onClick={() => keHalaman(page + 1)}
-            disabled={page >= totalPages}
-            className={`${btnSecondary} px-2.5 py-1 disabled:opacity-40`}
-          >
-            Berikutnya ›
-          </button>
-          <button
-            onClick={() => keHalaman(totalPages)}
-            disabled={page >= totalPages}
-            className={`${btnSecondary} px-2.5 py-1 disabled:opacity-40`}
-            title="Terbaru"
-          >
-            »
-          </button>
-          {isFetching && <span className="ml-2 text-xs text-stone-400">Memuat…</span>}
+      {/* Pagination + aturan baris di BAWAH daftar */}
+      {total > 0 && (
+        <div className="mt-4 flex flex-wrap items-center justify-center gap-x-3 gap-y-2 text-sm">
+          {totalPages > 1 && (
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => keHalaman(1)}
+                disabled={page <= 1}
+                className={`${btnSecondary} px-2.5 py-1 disabled:opacity-40`}
+                title="Terbaru & belum selesai"
+              >
+                «
+              </button>
+              <button
+                onClick={() => keHalaman(page - 1)}
+                disabled={page <= 1}
+                className={`${btnSecondary} px-2.5 py-1 disabled:opacity-40`}
+              >
+                ‹ Sebelumnya
+              </button>
+              <span className="px-2 text-stone-500">
+                Halaman <b>{page}</b> / {totalPages}
+              </span>
+              <button
+                onClick={() => keHalaman(page + 1)}
+                disabled={page >= totalPages}
+                className={`${btnSecondary} px-2.5 py-1 disabled:opacity-40`}
+              >
+                Berikutnya ›
+              </button>
+              <button
+                onClick={() => keHalaman(totalPages)}
+                disabled={page >= totalPages}
+                className={`${btnSecondary} px-2.5 py-1 disabled:opacity-40`}
+                title="Terlama"
+              >
+                »
+              </button>
+            </div>
+          )}
+          <label className="flex items-center gap-1.5 text-xs text-stone-500">
+            Baris / halaman
+            <select
+              value={perPage}
+              onChange={(e) => gantiFilter(() => setPerPage(Number(e.target.value)))}
+              className={`${inputClass} w-auto`}
+            >
+              {[10, 20, 50, 100].map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+          </label>
+          {isFetching && <span className="text-xs text-stone-400">Memuat…</span>}
         </div>
       )}
 

@@ -302,6 +302,13 @@
       "when": 1784085238369,
       "tag": "0042_hard_archangel",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1784112603580,
+      "tag": "0043_abnormal_talisman",
+      "breakpoints": true
     }
   ]
 }

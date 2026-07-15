@@ -1,17 +1,24 @@
 import { zValidator } from "@hono/zod-validator";
-import { and, asc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import { hargaPerUnit, type BahanDto, type BahanResepRow } from "@kakarut/shared";
+import {
+  hargaPerUnit,
+  type BahanDto,
+  type BahanResepRow,
+  type BahanSupplierDto,
+} from "@kakarut/shared";
 import { db } from "../../db/client";
 import {
   ingredientComponents,
+  ingredientSuppliers,
   ingredients,
   menuComponents,
   menus,
   productions,
+  suppliers,
 } from "../../db/schema";
 import { requireRole, type AppEnv } from "../../middleware/auth";
 import { resolveKodeBahan, resolveKodeBahanBatch } from "./kode";
@@ -93,7 +100,78 @@ const BahanBulkRow = z.object({
 });
 const BahanBulkBody = z.object({ items: z.array(BahanBulkRow).min(1).max(200) });
 
-function toDto(row: typeof ingredients.$inferSelect): BahanDto {
+const BahanSupplierBody = z.object({
+  items: z
+    .array(
+      z.object({
+        supplier_id: z.string().uuid(),
+        is_utama: z.boolean().default(false),
+      }),
+    )
+    .max(50)
+    .default([]),
+});
+
+/** Ringkasan supplier per bahan: nama supplier utama + jumlah terdaftar. */
+async function infoSupplier(
+  companyId: string,
+  ingredientIds?: string[],
+): Promise<Map<string, { utama: string | null; jumlah: number }>> {
+  if (ingredientIds && ingredientIds.length === 0) return new Map();
+  const rows = await db
+    .select({
+      ingredientId: ingredientSuppliers.ingredientId,
+      utama: sql<string | null>`MAX(${suppliers.nama}) FILTER (WHERE ${ingredientSuppliers.isUtama})`,
+      jumlah: sql<number>`COUNT(*)::int`,
+    })
+    .from(ingredientSuppliers)
+    .innerJoin(suppliers, eq(ingredientSuppliers.supplierId, suppliers.id))
+    .where(
+      and(
+        eq(ingredientSuppliers.companyId, companyId),
+        ...(ingredientIds ? [inArray(ingredientSuppliers.ingredientId, ingredientIds)] : []),
+      ),
+    )
+    .groupBy(ingredientSuppliers.ingredientId);
+  return new Map(rows.map((r) => [r.ingredientId, { utama: r.utama, jumlah: r.jumlah }]));
+}
+
+async function listSupplierBahan(
+  companyId: string,
+  ingredientId: string,
+): Promise<BahanSupplierDto[]> {
+  const rows = await db
+    .select({
+      id: ingredientSuppliers.id,
+      supplierId: ingredientSuppliers.supplierId,
+      nama: suppliers.nama,
+      telepon: suppliers.telepon,
+      alamat: suppliers.alamat,
+      isUtama: ingredientSuppliers.isUtama,
+    })
+    .from(ingredientSuppliers)
+    .innerJoin(suppliers, eq(ingredientSuppliers.supplierId, suppliers.id))
+    .where(
+      and(
+        eq(ingredientSuppliers.companyId, companyId),
+        eq(ingredientSuppliers.ingredientId, ingredientId),
+      ),
+    )
+    .orderBy(desc(ingredientSuppliers.isUtama), asc(suppliers.nama));
+  return rows.map((r) => ({
+    id: r.id,
+    supplier_id: r.supplierId,
+    nama: r.nama,
+    telepon: r.telepon,
+    alamat: r.alamat,
+    is_utama: r.isUtama,
+  }));
+}
+
+function toDto(
+  row: typeof ingredients.$inferSelect,
+  sup?: { utama: string | null; jumlah: number },
+): BahanDto {
   return {
     id: row.id,
     slug: row.slug,
@@ -116,6 +194,8 @@ function toDto(row: typeof ingredients.$inferSelect): BahanDto {
     boleh_eceran: row.bolehEceran,
     min_beli: row.minBeli,
     is_active: row.isActive,
+    supplier_utama: sup?.utama ?? null,
+    jumlah_supplier: sup?.jumlah ?? 0,
   };
 }
 
@@ -127,7 +207,8 @@ export const bahanRoutes = new Hono<AppEnv>()
       .from(ingredients)
       .where(and(eq(ingredients.companyId, auth.company_id!), eq(ingredients.isActive, true)))
       .orderBy(asc(ingredients.nama));
-    return c.json(rows.map(toDto));
+    const sup = await infoSupplier(auth.company_id!);
+    return c.json(rows.map((r) => toDto(r, sup.get(r.id))));
   })
   .post("/", requireRole("owner", "admin"), zValidator("json", BahanBody), async (c) => {
     const auth = c.get("auth");
@@ -212,7 +293,7 @@ export const bahanRoutes = new Hono<AppEnv>()
         })),
       )
       .returning();
-    return c.json({ jumlah: rows.length, bahan: rows.map(toDto) }, 201);
+    return c.json({ jumlah: rows.length, bahan: rows.map((r) => toDto(r)) }, 201);
   })
   .put(
     "/:id",
@@ -322,7 +403,82 @@ export const bahanRoutes = new Hono<AppEnv>()
           .delete(ingredientComponents)
           .where(eq(ingredientComponents.ingredientId, row.id));
       }
-      return c.json(toDto(row));
+      const sup = await infoSupplier(auth.company_id!, [row.id]);
+      return c.json(toDto(row, sup.get(row.id)));
+    },
+  )
+  /**
+   * SUPPLIER per bahan: daftar tempat membeli bahan ini + supplier utama.
+   * GET terbuka semua peran (info belanja); PUT owner/admin mengganti seluruh
+   * daftar sekaligus (maksimal satu utama; tanpa penanda → item pertama).
+   */
+  .get("/:id/supplier", async (c) => {
+    const auth = c.get("auth");
+    const id = c.req.param("id");
+    const [milik] = await db
+      .select({ id: ingredients.id })
+      .from(ingredients)
+      .where(and(eq(ingredients.id, id), eq(ingredients.companyId, auth.company_id!)));
+    if (!milik) throw new HTTPException(404, { message: "Bahan tidak ditemukan" });
+    return c.json(await listSupplierBahan(auth.company_id!, id));
+  })
+  .put(
+    "/:id/supplier",
+    requireRole("owner", "admin"),
+    zValidator("json", BahanSupplierBody),
+    async (c) => {
+      const auth = c.get("auth");
+      const id = c.req.param("id");
+      const { items } = c.req.valid("json");
+      const [milik] = await db
+        .select({ id: ingredients.id })
+        .from(ingredients)
+        .where(and(eq(ingredients.id, id), eq(ingredients.companyId, auth.company_id!)));
+      if (!milik) throw new HTTPException(404, { message: "Bahan tidak ditemukan" });
+      // gabungkan duplikat (utama di-OR-kan) agar unique index tak meledak
+      const byId = new Map<string, boolean>();
+      for (const it of items) {
+        byId.set(it.supplier_id, (byId.get(it.supplier_id) ?? false) || it.is_utama);
+      }
+      const utama = [...byId.values()].filter(Boolean).length;
+      if (utama > 1) {
+        throw new HTTPException(400, { message: "Hanya boleh satu supplier utama" });
+      }
+      const supplierIds = [...byId.keys()];
+      if (supplierIds.length > 0) {
+        const valid = await db
+          .select({ id: suppliers.id })
+          .from(suppliers)
+          .where(
+            and(eq(suppliers.companyId, auth.company_id!), inArray(suppliers.id, supplierIds)),
+          );
+        if (valid.length !== supplierIds.length) {
+          throw new HTTPException(400, { message: "Ada supplier yang tidak valid" });
+        }
+        // tanpa penanda utama → item pertama jadi utama (selalu ada langganan)
+        if (utama === 0) byId.set(supplierIds[0], true);
+      }
+      await db.transaction(async (tx) => {
+        await tx
+          .delete(ingredientSuppliers)
+          .where(
+            and(
+              eq(ingredientSuppliers.companyId, auth.company_id!),
+              eq(ingredientSuppliers.ingredientId, id),
+            ),
+          );
+        if (supplierIds.length > 0) {
+          await tx.insert(ingredientSuppliers).values(
+            [...byId].map(([supplierId, isUtama]) => ({
+              companyId: auth.company_id!,
+              ingredientId: id,
+              supplierId,
+              isUtama,
+            })),
+          );
+        }
+      });
+      return c.json(await listSupplierBahan(auth.company_id!, id));
     },
   )
   /**

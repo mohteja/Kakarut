@@ -1,7 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import type { KonfirmasiStatus, PermintaanStokBagian, PermintaanStokRow } from "@kakarut/shared";
-import { Card, PageTitle, Spinner, btnSecondary } from "../../components/ui";
+import { Card, PageTitle, Spinner, btnSecondary, inputClass } from "../../components/ui";
 import { api } from "../../lib/api";
 import { formatRupiah, formatWaktu } from "../../lib/format";
 
@@ -51,7 +52,12 @@ function Bagian({
           {ikon} {judul} · {data.jumlah_baris} bahan
         </div>
         {data.total > 0 && (
-          <div className="text-xs text-stone-500">≈ {formatRupiah(data.total)}</div>
+          <div className="text-xs text-stone-500">
+            ≈ {formatRupiah(data.total)}
+            {/* belanja bahan mentah = input produksi — nilainya sudah ada di
+                total produksi, jadi tak dijumlah lagi di total transaksi */}
+            {jalur === "beli_produksi" && " · sudah termasuk biaya produksi"}
+          </div>
         )}
       </div>
       <span
@@ -63,6 +69,14 @@ function Bagian({
   );
 }
 
+/** Permintaan dianggap selesai bila SEMUA bagiannya sudah dikonfirmasi/ditolak. */
+function selesaiPermintaan(r: PermintaanStokRow): boolean {
+  const st = [r.produksi, r.beli, r.beli_produksi]
+    .filter((b): b is PermintaanStokBagian => b != null)
+    .map((b) => b.status);
+  return st.length > 0 && st.every((s) => s === "dikonfirmasi" || s === "ditolak");
+}
+
 /** Status keseluruhan satu permintaan = agregat status semua bagiannya. */
 function statusPermintaan(r: PermintaanStokRow): { label: string; cls: string } {
   const st = [r.produksi, r.beli, r.beli_produksi]
@@ -71,7 +85,7 @@ function statusPermintaan(r: PermintaanStokRow): { label: string; cls: string } 
   if (st.length > 0 && st.every((s) => s === "dikonfirmasi")) {
     return { label: "📦 Selesai ✓", cls: "bg-green-100 text-green-700" };
   }
-  if (st.length > 0 && st.every((s) => s === "dikonfirmasi" || s === "ditolak")) {
+  if (selesaiPermintaan(r)) {
     return { label: "⚠ Selesai — ada ditolak", cls: "bg-amber-100 text-amber-700" };
   }
   return { label: "🔄 Berjalan", cls: "bg-blue-100 text-blue-700" };
@@ -86,7 +100,24 @@ export function PermintaanStokPage() {
     queryKey: ["permintaan-stok"],
     queryFn: () => api<PermintaanStokRow[]>("/rekomendasi/permintaan"),
   });
-  const list = rows ?? [];
+  const [perPage, setPerPage] = useState(20);
+  const [page, setPage] = useState(1);
+
+  // urutan: yang masih Berjalan dulu, lalu terbaru → terlama
+  const list = useMemo(
+    () =>
+      [...(rows ?? [])].sort((a, b) => {
+        const beresA = selesaiPermintaan(a) ? 1 : 0;
+        const beresB = selesaiPermintaan(b) ? 1 : 0;
+        if (beresA !== beresB) return beresA - beresB;
+        return b.waktu.localeCompare(a.waktu);
+      }),
+    [rows],
+  );
+  const totalPages = Math.max(1, Math.ceil(list.length / perPage));
+  const pageAman = Math.min(page, totalPages);
+  const tampil = list.slice((pageAman - 1) * perPage, pageAman * perPage);
+  const keHalaman = (n: number) => setPage(Math.min(totalPages, Math.max(1, n)));
 
   return (
     <div className="max-w-2xl">
@@ -112,10 +143,12 @@ export function PermintaanStokPage() {
         </Card>
       ) : (
         <div className="space-y-3">
-          {list.map((r) => {
+          {tampil.map((r) => {
             const status = statusPermintaan(r);
-            const total =
-              (r.produksi?.total ?? 0) + (r.beli?.total ?? 0) + (r.beli_produksi?.total ?? 0);
+            // Belanja BAHAN PRODUKSI tidak dijumlahkan: itu input dari faktur
+            // produksi yang nilainya sudah termasuk di total produksi —
+            // menjumlahkannya lagi = dobel hitung.
+            const total = (r.produksi?.total ?? 0) + (r.beli?.total ?? 0);
             return (
               <Card key={r.rencana_id} className="overflow-hidden">
                 {/* Header: tujuan + waktu di kiri, STATUS di pojok kanan atas */}
@@ -154,6 +187,66 @@ export function PermintaanStokPage() {
               </Card>
             );
           })}
+        </div>
+      )}
+
+      {/* Pagination + aturan baris di BAWAH daftar */}
+      {!isLoading && list.length > 0 && (
+        <div className="mt-4 flex flex-wrap items-center justify-center gap-x-3 gap-y-2 text-sm">
+          {totalPages > 1 && (
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => keHalaman(1)}
+                disabled={pageAman <= 1}
+                className={`${btnSecondary} px-2.5 py-1 disabled:opacity-40`}
+                title="Terbaru & masih berjalan"
+              >
+                «
+              </button>
+              <button
+                onClick={() => keHalaman(pageAman - 1)}
+                disabled={pageAman <= 1}
+                className={`${btnSecondary} px-2.5 py-1 disabled:opacity-40`}
+              >
+                ‹ Sebelumnya
+              </button>
+              <span className="px-2 text-stone-500">
+                Halaman <b>{pageAman}</b> / {totalPages}
+              </span>
+              <button
+                onClick={() => keHalaman(pageAman + 1)}
+                disabled={pageAman >= totalPages}
+                className={`${btnSecondary} px-2.5 py-1 disabled:opacity-40`}
+              >
+                Berikutnya ›
+              </button>
+              <button
+                onClick={() => keHalaman(totalPages)}
+                disabled={pageAman >= totalPages}
+                className={`${btnSecondary} px-2.5 py-1 disabled:opacity-40`}
+                title="Terlama"
+              >
+                »
+              </button>
+            </div>
+          )}
+          <label className="flex items-center gap-1.5 text-xs text-stone-500">
+            Baris / halaman
+            <select
+              value={perPage}
+              onChange={(e) => {
+                setPerPage(Number(e.target.value));
+                setPage(1);
+              }}
+              className={`${inputClass} w-auto`}
+            >
+              {[10, 20, 50, 100].map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
       )}
     </div>

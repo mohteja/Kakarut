@@ -351,6 +351,36 @@ export const ingredients = pgTable(
 );
 
 /**
+ * SUPPLIER per BAHAN (many-to-many): info "beli di mana" untuk tiap bahan.
+ * Satu bahan bisa punya beberapa supplier; is_utama menandai supplier
+ * utama/langganan (maksimal SATU per bahan — dijaga partial unique index).
+ */
+export const ingredientSuppliers = pgTable(
+  "ingredient_suppliers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    ingredientId: uuid("ingredient_id")
+      .notNull()
+      .references(() => ingredients.id, { onDelete: "cascade" }),
+    supplierId: uuid("supplier_id")
+      .notNull()
+      .references(() => suppliers.id, { onDelete: "cascade" }),
+    isUtama: boolean("is_utama").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("ingredient_suppliers_pair_uq").on(t.ingredientId, t.supplierId),
+    uniqueIndex("ingredient_suppliers_utama_uq")
+      .on(t.ingredientId)
+      .where(sql`${t.isUtama}`),
+    index("ingredient_suppliers_company_idx").on(t.companyId),
+  ],
+);
+
+/**
  * RESEP PRODUKSI (BOM) bahan jadi: bahan dengan pengadaan "produksi" dibuat
  * dari bahan mentah (pengadaan "beli"). qty = kebutuhan bahan mentah per
  * SATU BATCH (isi) bahan jadi. Dipakai untuk: (1) rencana belanja bahan

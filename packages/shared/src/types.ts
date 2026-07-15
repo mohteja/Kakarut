@@ -77,6 +77,23 @@ export interface BahanDto {
   /** MINIMAL BELANJA (MOQ): jumlah beli minimum saat belanja otomatis (0 = tanpa minimum) */
   min_beli: number;
   is_active: boolean;
+  /** nama supplier UTAMA bahan ini (null = belum diatur) */
+  supplier_utama: string | null;
+  /** jumlah supplier yang terdaftar untuk bahan ini */
+  jumlah_supplier: number;
+}
+
+/**
+ * Satu supplier yang terdaftar untuk sebuah bahan (info "beli di mana").
+ * is_utama = supplier utama/langganan (maksimal satu per bahan).
+ */
+export interface BahanSupplierDto {
+  id: string;
+  supplier_id: string;
+  nama: string;
+  telepon: string | null;
+  alamat: string | null;
+  is_utama: boolean;
 }
 
 /**
