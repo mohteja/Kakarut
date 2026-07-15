@@ -342,14 +342,11 @@ export function Layout() {
                   <NavLink to="/menu" className={linkClass}>
                     🍜 Menu &amp; HPP
                   </NavLink>
-                  <NavLink to="/pengaturan/satuan" className={linkClass}>
-                    📏 Master Satuan
+                  <NavLink to="/resep" className={linkClass}>
+                    🧾 Resep
                   </NavLink>
                   <NavLink to="/bahan" className={linkClass}>
                     🥩 Bahan Baku
-                  </NavLink>
-                  <NavLink to="/resep" className={linkClass}>
-                    🧾 Resep
                   </NavLink>
                   <NavLink to="/member" className={linkClass}>
                     👥 Member
@@ -373,6 +370,9 @@ export function Layout() {
                   </NavLink>
                   <NavLink to="/pengaturan/penyimpanan" className={linkClass}>
                     🗃 Tempat Penyimpanan
+                  </NavLink>
+                  <NavLink to="/pengaturan/satuan" className={linkClass}>
+                    📏 Master Satuan
                   </NavLink>
                 </>
               )}
