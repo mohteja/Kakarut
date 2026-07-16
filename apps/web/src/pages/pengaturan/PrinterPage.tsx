@@ -2,8 +2,18 @@ import { useState } from "react";
 import { Card, ErrorText, PageTitle, btnPrimary, btnSecondary, inputClass } from "../../components/ui";
 import { usePrinter } from "../../context/PrinterContext";
 import { bluetoothSupported } from "../../lib/print/bluetooth";
+import { NativeBtTransport, isNativeApp, type PerangkatBt } from "../../lib/print/native";
 import { usbSupported } from "../../lib/print/usb";
 import type { TransportKind } from "../../lib/print/settings";
+
+// Printer lewat plugin aplikasi Android — hanya ditawarkan saat web dibuka di
+// dalam aplikasi (window.Capacitor ada). Di browser biasa opsi ini disembunyikan.
+const METODE_NATIVE = {
+  kind: "native" as TransportKind,
+  label: "📱 Printer Aplikasi (Bluetooth)",
+  keterangan:
+    "Printer thermal Bluetooth klasik langsung dari aplikasi Android — tanpa RawBT. Pair dulu printernya di Pengaturan Bluetooth HP, lalu pilih di sini.",
+};
 
 const METODE: { kind: TransportKind; label: string; keterangan: string }[] = [
   {
@@ -61,6 +71,8 @@ export function PrinterPage() {
     usePrinter();
   const [error, setError] = useState<unknown>(null);
   const [lanjutan, setLanjutan] = useState(false);
+  /** daftar printer ter-pair dari plugin aplikasi; null = belum dimuat */
+  const [perangkat, setPerangkat] = useState<PerangkatBt[] | null>(null);
 
   async function aksi(fn: () => Promise<void>) {
     setError(null);
@@ -69,6 +81,14 @@ export function PrinterPage() {
     } catch (e) {
       setError(e);
     }
+  }
+
+  const diAplikasi = isNativeApp();
+  // opsi native paling atas (direkomendasikan) saat berjalan di dalam aplikasi
+  const metodeTampil = diAplikasi ? [METODE_NATIVE, ...METODE] : METODE;
+
+  async function muatPerangkat() {
+    setPerangkat(await NativeBtTransport.listPaired());
   }
 
   const perluHubungkan = transport?.requiresConnect ?? false;
@@ -86,7 +106,7 @@ export function PrinterPage() {
         <div>
           <div className="mb-2 text-sm font-semibold text-stone-700">Metode cetak</div>
           <div className="space-y-2">
-            {METODE.map((m) => (
+            {metodeTampil.map((m) => (
               <label
                 key={m.kind}
                 className={`block cursor-pointer rounded-lg border p-3 ${
@@ -103,6 +123,11 @@ export function PrinterPage() {
                     onChange={() => updateSettings({ transport: m.kind })}
                   />
                   <span className="font-medium">{m.label}</span>
+                  {m.kind === "native" && (
+                    <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700">
+                      Direkomendasikan
+                    </span>
+                  )}
                   {m.kind === "bluetooth" && !bluetoothSupported() && (
                     <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-700">
                       tidak didukung browser ini
@@ -162,6 +187,54 @@ export function PrinterPage() {
               ini</b> — cocok bila server di jaringan yang sama, atau printer punya IP publik/VPN.
               Jika aplikasi diakses dari cloud sementara printer hanya di jaringan lokal toko,
               gunakan <b>RawBT</b>.
+            </div>
+          </div>
+        )}
+
+        {settings.transport === "native" && (
+          <div className="space-y-3 border-t border-stone-100 pt-4">
+            <div className="flex flex-wrap items-center gap-3">
+              <button onClick={() => void aksi(muatPerangkat)} className={btnSecondary}>
+                🔄 Muat perangkat ter-pair
+              </button>
+              {settings.btAddress && (
+                <span className="text-sm text-stone-600">
+                  Terpilih: <b>{settings.btDeviceName ?? settings.btAddress}</b>
+                </span>
+              )}
+            </div>
+            {perangkat !== null &&
+              (perangkat.length > 0 ? (
+                <div>
+                  <label className="mb-1 block text-sm font-medium">Pilih printer</label>
+                  <select
+                    value={settings.btAddress ?? ""}
+                    onChange={(e) => {
+                      const d = perangkat.find((p) => p.address === e.target.value);
+                      if (d) {
+                        updateSettings({ btAddress: d.address, btDeviceName: d.name ?? d.address });
+                      }
+                    }}
+                    className={inputClass}
+                    aria-label="Pilih printer Bluetooth ter-pair"
+                  >
+                    <option value="">— pilih printer —</option>
+                    {perangkat.map((p) => (
+                      <option key={p.address} value={p.address}>
+                        {p.name ?? "Tanpa nama"} ({p.address})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                <div className="rounded-lg bg-yellow-50 px-3 py-2 text-xs text-yellow-800">
+                  Tidak ada perangkat ter-pair. Pair printernya dulu di{" "}
+                  <b>Pengaturan Bluetooth Android</b>, lalu muat ulang daftar ini.
+                </div>
+              ))}
+            <div className="rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-800">
+              Tanpa tombol Hubungkan — aplikasi menyambung sendiri setiap mencetak, dan
+              menyambung ulang otomatis bila printer sempat mati. Cetak otomatis langsung aktif.
             </div>
           </div>
         )}
@@ -256,7 +329,8 @@ export function PrinterPage() {
                 disabled={
                   status.state === "printing" ||
                   (perluHubungkan && !terhubung) ||
-                  (settings.transport === "lan" && !settings.lanHost)
+                  (settings.transport === "lan" && !settings.lanHost) ||
+                  (settings.transport === "native" && !settings.btAddress)
                 }
               >
                 🖨 Cetak Tes

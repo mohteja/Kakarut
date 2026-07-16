@@ -48,13 +48,16 @@ otomatis ketika web dibuka dari dalam aplikasi.
 
 ## Apa yang akan dibangun (2 bagian)
 
-1. **Bagian A — repo ini (web):** transport baru `apps/web/src/lib/print/native.ts`
-   + opsi “📱 Printer Aplikasi (Bluetooth)” di Pengaturan Printer (hanya tampil
-   di dalam aplikasi) + field `btAddress` di setelan printer. Karena WebView
-   memuat URL produksi, bagian ini ikut terdeploy lewat alur deploy web biasa.
-2. **Bagian B — folder baru `mobile/` (di luar npm workspaces):** proyek
-   Capacitor Android + plugin Kotlin `KakarutPrinter` (list perangkat ter-pair,
-   connect SPP, tulis byte base64, auto-reconnect saat write).
+1. **Bagian A — repo ini (web): ✅ sudah dikerjakan.** Transport
+   `apps/web/src/lib/print/native.ts` + opsi “📱 Printer Aplikasi (Bluetooth)”
+   di Pengaturan Printer (hanya tampil di dalam aplikasi) + field `btAddress`
+   di setelan printer. Karena WebView memuat URL produksi, bagian ini ikut
+   terdeploy lewat alur deploy web biasa.
+2. **Bagian B — folder baru `mobile/` (di luar npm workspaces): dikerjakan di
+   komputer lokal lewat `PROMPT.md`.** Proyek Capacitor Android + plugin Kotlin
+   `KakarutPrinter` (list perangkat ter-pair, connect SPP, tulis byte base64,
+   auto-reconnect saat write) — kontrak method-nya mengikuti interface di
+   `apps/web/src/lib/print/native.ts`.
 
 ## Prasyarat di komputer Anda
 

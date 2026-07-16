@@ -1,6 +1,13 @@
 import { kolomDefault } from "@kakarut/shared";
 
-export type TransportKind = "browser" | "bluetooth" | "usb" | "rawbt" | "lan" | "mock";
+export type TransportKind =
+  | "browser"
+  | "bluetooth"
+  | "usb"
+  | "rawbt"
+  | "lan"
+  | "mock"
+  | "native";
 
 /** Setelan printer per PERANGKAT (localStorage) — bukan per perusahaan. */
 export interface PrinterDeviceSettings {
@@ -22,6 +29,8 @@ export interface PrinterDeviceSettings {
   /** printer LAN/jaringan: IP/host + port (ESC/POS TCP, umumnya 9100) */
   lanHost: string;
   lanPort: number;
+  /** printer aplikasi Android: alamat MAC printer Bluetooth klasik ter-pair */
+  btAddress: string | null;
 }
 
 const STORAGE_KEY = "kakarut.printer";
@@ -40,6 +49,7 @@ export const DEFAULT_PRINTER_SETTINGS: PrinterDeviceSettings = {
   chunkDelayMs: 20,
   lanHost: "",
   lanPort: 9100,
+  btAddress: null,
 };
 
 export function loadPrinterSettings(): PrinterDeviceSettings {

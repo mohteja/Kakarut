@@ -90,7 +90,22 @@ aset ikon aplikasi harus dibuat baru.
   **yang sudah di-pair** di Pengaturan Bluetooth Android (tanpa scanning →
   tidak perlu izin lokasi).
 
-## 2. Bagian A — perubahan di web (`apps/web`)
+## 2. Bagian A — perubahan di web (`apps/web`) — ✅ SUDAH DIKERJAKAN
+
+> **Bagian ini SUDAH diimplementasikan dan ter-merge di repo** — JANGAN
+> dikerjakan ulang. Baca file-file berikut sebagai kontrak yang harus dipenuhi
+> plugin native di Bagian B:
+> - `apps/web/src/lib/print/native.ts` — `NativeBtTransport` + interface
+>   `KakarutPrinterPlugin` (kontrak method `list`/`connect`/`disconnect`/
+>   `isConnected`/`write` PERSIS seperti di file ini).
+> - `apps/web/src/lib/print/settings.ts` — `TransportKind` sudah berisi
+>   `"native"`, setelan sudah punya `btAddress`.
+> - `apps/web/src/context/PrinterContext.tsx` — case `"native"`.
+> - `apps/web/src/pages/pengaturan/PrinterPage.tsx` — opsi
+>   `📱 Printer Aplikasi (Bluetooth)` (hanya tampil bila
+>   `window.Capacitor.isNativePlatform()` true) + pemilih perangkat ter-pair.
+>
+> Spesifikasi asli di bawah dipertahankan sebagai REFERENSI perilaku.
 
 Transport baru `"native"` yang hanya muncul saat web dibuka di dalam aplikasi.
 Ikuti gaya kode sekitar (komentar bahasa Indonesia, pola yang sudah ada).
