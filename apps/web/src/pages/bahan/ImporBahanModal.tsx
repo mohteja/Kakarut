@@ -236,6 +236,11 @@ export function ImporBahanModal({ bahan, onClose }: { bahan: BahanDto[]; onClose
           <div className="rounded-lg bg-green-50 px-4 py-3 text-sm text-green-800">
             ✅ Impor selesai — <b>{hasil.ditambah}</b> ditambah, <b>{hasil.diperbarui}</b>{" "}
             diperbarui
+            {hasil.dipulihkan > 0 && (
+              <>
+                , <b>{hasil.dipulihkan}</b> dipulihkan dari Tempat Sampah
+              </>
+            )}
             {hasil.dilewati > 0 && (
               <>
                 , <b>{hasil.dilewati}</b> dilewati (sudah ada)

@@ -330,42 +330,65 @@ export const bahanRoutes = new Hono<AppEnv>()
     const { mode, items } = c.req.valid("json");
     const companyId = auth.company_id!;
 
+    // Muat SEMUA bahan (aktif + nonaktif). Bahan nonaktif = sudah di Tempat
+    // Sampah: jangan dianggap "sudah ada" yang dilewati — cocokkan terpisah agar
+    // impor MEMULIHKAN-nya, bukan menolak insert (slug tetap unik utk nonaktif).
     const existing = await db
-      .select({ id: ingredients.id, kode: ingredients.kode, slug: ingredients.slug })
+      .select({
+        id: ingredients.id,
+        kode: ingredients.kode,
+        slug: ingredients.slug,
+        isActive: ingredients.isActive,
+      })
       .from(ingredients)
       .where(eq(ingredients.companyId, companyId));
     const byKode = new Map<string, string>();
     const bySlug = new Map<string, string>();
+    const byKodeMati = new Map<string, string>();
+    const bySlugMati = new Map<string, string>();
+    const slugDipakai = new Set<string>();
     for (const e of existing) {
-      if (e.kode) byKode.set(e.kode.toLowerCase(), e.id);
-      bySlug.set(e.slug.toLowerCase(), e.id);
+      slugDipakai.add(e.slug.toLowerCase());
+      if (e.isActive) {
+        if (e.kode) byKode.set(e.kode.toLowerCase(), e.id);
+        bySlug.set(e.slug.toLowerCase(), e.id);
+      } else {
+        if (e.kode) byKodeMati.set(e.kode.toLowerCase(), e.id);
+        bySlugMati.set(e.slug.toLowerCase(), e.id);
+      }
     }
-    const slugDipakai = new Set(existing.map((e) => e.slug.toLowerCase()));
 
     let ditambah = 0;
     let diperbarui = 0;
+    let dipulihkan = 0;
     let dilewati = 0;
     const gagal: { nama: string; alasan: string }[] = [];
 
-    // klasifikasi: existing → perbarui/lewati; sisanya insert (slug unik lintas-baris)
-    const updateBaris: { item: (typeof items)[number]; id: string }[] = [];
+    // klasifikasi: aktif → perbarui/lewati; nonaktif → pulihkan; sisanya insert.
+    const updateBaris: { item: (typeof items)[number]; id: string; pulih: boolean }[] = [];
     const insertBaris: { item: (typeof items)[number]; slug: string }[] = [];
     for (const b of items) {
       const slug = b.nama.toLowerCase().trim().replace(/\s+/g, " ");
-      const id = (b.kode && byKode.get(b.kode.toLowerCase())) || bySlug.get(slug);
-      if (id) {
+      const idAktif = (b.kode && byKode.get(b.kode.toLowerCase())) || bySlug.get(slug);
+      if (idAktif) {
         if (mode === "tambah") {
           dilewati++;
           continue;
         }
-        updateBaris.push({ item: b, id });
-      } else {
-        let s = slug || "bahan";
-        let n = 2;
-        while (slugDipakai.has(s.toLowerCase())) s = `${slug} ${n++}`;
-        slugDipakai.add(s.toLowerCase());
-        insertBaris.push({ item: b, slug: s });
+        updateBaris.push({ item: b, id: idAktif, pulih: false });
+        continue;
       }
+      // cocok dengan bahan di Tempat Sampah → pulihkan (di kedua mode)
+      const idMati = (b.kode && byKodeMati.get(b.kode.toLowerCase())) || bySlugMati.get(slug);
+      if (idMati) {
+        updateBaris.push({ item: b, id: idMati, pulih: true });
+        continue;
+      }
+      let s = slug || "bahan";
+      let n = 2;
+      while (slugDipakai.has(s.toLowerCase())) s = `${slug} ${n++}`;
+      slugDipakai.add(s.toLowerCase());
+      insertBaris.push({ item: b, slug: s });
     }
     // kode untuk semua baris baru: unik terhadap existing + antar-baris
     const kodes = await resolveKodeBahanBatch(
@@ -389,10 +412,13 @@ export const bahanRoutes = new Hono<AppEnv>()
             bolehEceran: u.item.boleh_eceran,
             trackStok: u.item.lacak_stok,
             catatan: u.item.catatan ?? null,
+            // baris pulih: aktifkan kembali dari Tempat Sampah
+            ...(u.pulih && { isActive: true }),
             updatedAt: new Date(),
           })
           .where(and(eq(ingredients.id, u.id), eq(ingredients.companyId, companyId)));
-        diperbarui++;
+        if (u.pulih) dipulihkan++;
+        else diperbarui++;
       } catch (e) {
         gagal.push({ nama: u.item.nama, alasan: (e as Error)?.message ?? "gagal diperbarui" });
       }
@@ -421,7 +447,7 @@ export const bahanRoutes = new Hono<AppEnv>()
         gagal.push({ nama: b.nama, alasan: (e as Error)?.message ?? "gagal ditambah" });
       }
     }
-    return c.json({ ditambah, diperbarui, dilewati, gagal });
+    return c.json({ ditambah, diperbarui, dipulihkan, dilewati, gagal });
   })
   .put(
     "/:id",
