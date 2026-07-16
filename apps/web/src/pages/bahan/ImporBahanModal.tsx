@@ -87,11 +87,30 @@ function parseCsv(teks: string): string[][] {
   return rows.filter((r) => r.some((sel) => sel.trim() !== ""));
 }
 
-/** Koersi angka: dukung format Indonesia ("1.234,5") maupun biasa ("1234.5"). */
+/**
+ * Koersi angka dari sel CSV — toleran terhadap input pengguna/Excel:
+ * - buang simbol mata uang ("Rp"), spasi, dan karakter lain ("Rp 10.000,-").
+ * - titik/koma ribuan dibedakan dari desimal: bila keduanya ada, pemisah desimal
+ *   adalah yang muncul TERAKHIR ("1.234,5" → 1234,5 · "1,234.5" → 1234.5). Bila
+ *   hanya satu jenis, grup 3-digit dianggap ribuan ("10.000" → 10000), selain itu
+ *   desimal ("1,5" → 1.5). Jadi harga ber-"Rp" tak lagi terbaca 0.
+ */
 function keAngka(v: string, fallback: number): number {
-  const s = v.trim();
+  let s = v.trim().replace(/rp/gi, "").replace(/[^0-9.,]/g, "");
   if (!s) return fallback;
-  const n = s.includes(",") ? Number(s.replace(/\./g, "").replace(",", ".")) : Number(s);
+  const adaTitik = s.includes(".");
+  const adaKoma = s.includes(",");
+  if (adaTitik && adaKoma) {
+    s =
+      s.lastIndexOf(",") > s.lastIndexOf(".")
+        ? s.replace(/\./g, "").replace(",", ".") // desimal koma (ID)
+        : s.replace(/,/g, ""); // desimal titik (EN)
+  } else if (adaKoma) {
+    s = /^\d{1,3}(,\d{3})+$/.test(s) ? s.replace(/,/g, "") : s.replace(",", ".");
+  } else if (adaTitik && /^\d{1,3}(\.\d{3})+$/.test(s)) {
+    s = s.replace(/\./g, ""); // titik ribuan (mis. 10.000)
+  }
+  const n = Number(s);
   return Number.isFinite(n) ? n : fallback;
 }
 function keBool(v: string, fallback: boolean): boolean {
@@ -255,6 +274,12 @@ export function ImporBahanModal({ bahan, onClose }: { bahan: BahanDto[]; onClose
                 : "Template berisi contoh 1 baris — hapus baris contoh, lalu isi bahan Anda."}{" "}
               Kolom <b>jenis</b>: beli / produksi. <b>boleh_eceran</b> & <b>lacak_stok</b>: ya /
               tidak.
+            </p>
+            <p className="mb-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              💡 Tulis <b>harga_beli</b> sebagai angka saja <b>tanpa "Rp"</b> — contoh{" "}
+              <code className="rounded bg-white px-1">10000</code>, bukan{" "}
+              <code className="rounded bg-white px-1">Rp 10.000</code>. (Titik/koma ribuan tetap
+              terbaca, tapi lebih aman ditulis polos.)
             </p>
             <button
               onClick={() => unduh("template-bahan-baku.csv", buatCsv(bahan))}
