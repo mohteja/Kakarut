@@ -120,6 +120,12 @@ export function BahanPage() {
     });
   // urutan ids mengikuti urutan daftar (nama) agar halaman ubah konsisten
   const idsTerpilih = semua.filter((b) => pilih.has(b.id)).map((b) => b.id);
+  // Grid "Ubah Bahan Baku" hanya untuk bahan BELI. Bahan produksi diedit lewat
+  // halaman Resep (biaya/HPP-nya dari resep + overhead, bukan harga beli).
+  const idsBeliTerpilih = semua
+    .filter((b) => pilih.has(b.id) && b.pengadaan === "beli")
+    .map((b) => b.id);
+  const adaProduksiTerpilih = semua.some((b) => pilih.has(b.id) && b.pengadaan === "produksi");
 
   function resetFilter() {
     setCari("");
@@ -207,12 +213,19 @@ export function BahanPage() {
           <span className="text-sm font-semibold text-orange-800">
             {pilih.size} bahan dipilih
           </span>
-          <button
-            onClick={() => navigate(`/bahan/ubah?ids=${idsTerpilih.join(",")}`)}
-            className={btnPrimary}
-          >
-            ✏ Ubah terpilih ({pilih.size})
-          </button>
+          {idsBeliTerpilih.length > 0 && (
+            <button
+              onClick={() => navigate(`/bahan/ubah?ids=${idsBeliTerpilih.join(",")}`)}
+              className={btnPrimary}
+            >
+              ✏ Ubah terpilih ({idsBeliTerpilih.length})
+            </button>
+          )}
+          {adaProduksiTerpilih && (
+            <span className="text-xs text-stone-500">
+              Bahan produksi diubah di halaman <b>Resep</b> (satu per satu).
+            </span>
+          )}
           <button
             onClick={() => {
               if (confirm(`Nonaktifkan ${pilih.size} bahan terpilih?`)) {
@@ -377,10 +390,21 @@ export function BahanPage() {
                   {bolehUbah && (
                     <>
                       <button
-                        onClick={() => navigate(`/bahan/ubah?ids=${b.id}`)}
+                        onClick={() =>
+                          navigate(
+                            b.pengadaan === "produksi"
+                              ? `/resep?bahan=${b.id}`
+                              : `/bahan/ubah?ids=${b.id}`,
+                          )
+                        }
+                        title={
+                          b.pengadaan === "produksi"
+                            ? "Bahan produksi diubah lewat halaman Resep"
+                            : "Ubah bahan"
+                        }
                         className="text-sm font-medium text-orange-600 hover:underline"
                       >
-                        Ubah
+                        {b.pengadaan === "produksi" ? "Ubah resep" : "Ubah"}
                       </button>
                       <button
                         onClick={() => {
