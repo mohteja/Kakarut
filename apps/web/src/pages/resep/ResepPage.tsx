@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import type { BahanDto, BahanKategori, BahanResepRow, KategoriDto, SatuanDto } from "@kakarut/shared";
 import {
   Card,
@@ -63,6 +63,20 @@ export function ResepPage() {
   const [cari, setCari] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const dipilih = produksi.find((b) => b.id === selectedId) ?? null;
+
+  // Deep-link dari halaman Bahan Baku: ?bahan=<id> memilih bahan produksi itu
+  // langsung. Konsumsi param sekali (replace) agar refetch tak memaksa pilih ulang.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const bahanParam = searchParams.get("bahan");
+  useEffect(() => {
+    if (!bahanParam) return;
+    const ada = semua.some((b) => b.id === bahanParam && b.pengadaan === "produksi");
+    if (ada) {
+      setSelectedId(bahanParam);
+      setSearchParams({}, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bahanParam, bahan]);
 
   // Ringkasan jumlah bahan mentah per bahan produksi (utk badge di daftar).
   // Satu query batch (Promise.all) — jumlah bahan produksi biasanya sedikit.

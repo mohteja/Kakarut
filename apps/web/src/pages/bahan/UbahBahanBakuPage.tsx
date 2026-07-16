@@ -81,10 +81,16 @@ export function UbahBahanBakuPage() {
 
   // Seed draft sekali dari master begitu termuat (urut sesuai ids).
   const [rows, setRows] = useState<BarisUbah[] | null>(null);
+  // Bahan produksi yang dilewati (diedit lewat halaman Resep, bukan grid ini).
+  const [dilewatiProduksi, setDilewatiProduksi] = useState(0);
   useEffect(() => {
     if (rows === null && bahan) {
       const byId = new Map(bahan.map((b) => [b.id, b]));
-      setRows(ids.map((id) => byId.get(id)).filter((b): b is BahanDto => !!b).map(keBaris));
+      const dipilih = ids.map((id) => byId.get(id)).filter((b): b is BahanDto => !!b);
+      // Grid ini hanya untuk bahan BELI. Bahan produksi biaya/HPP-nya dari resep
+      // + overhead, jadi diedit di halaman Resep — dilewati di sini.
+      setRows(dipilih.filter((b) => b.pengadaan === "beli").map(keBaris));
+      setDilewatiProduksi(dipilih.filter((b) => b.pengadaan === "produksi").length);
     }
   }, [bahan, ids, rows]);
 
@@ -172,6 +178,19 @@ export function UbahBahanBakuPage() {
         deskripsi="Tambah/ubah kategori bahan baku. Kategori baru langsung muncul di dropdown."
       />
 
+      {dilewatiProduksi > 0 && (
+        <div className="mb-3 rounded-lg border border-orange-200 bg-orange-50 px-4 py-2 text-sm text-orange-800">
+          {dilewatiProduksi} bahan produksi dilewati — biaya/HPP-nya dihitung dari resep, jadi
+          diubah di{" "}
+          <button
+            onClick={() => navigate("/resep")}
+            className="font-semibold underline hover:text-orange-900"
+          >
+            halaman Resep
+          </button>
+          .
+        </div>
+      )}
       {rows.length === 0 ? (
         <Card className="p-8 text-center text-sm text-stone-400">
           Tidak ada bahan yang dipilih.{" "}
