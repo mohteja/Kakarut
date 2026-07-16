@@ -15,6 +15,7 @@ import {
 import { BluetoothTransport } from "../lib/print/bluetooth";
 import { LanTransport } from "../lib/print/lan";
 import { MockTransport } from "../lib/print/mock";
+import { NativeBtTransport } from "../lib/print/native";
 import { RawbtTransport } from "../lib/print/rawbt";
 import {
   effectiveCharsPerLine,
@@ -60,6 +61,16 @@ function getTransport(s: PrinterDeviceSettings): PrinterTransport | null {
     }
     case "mock":
       return (singletons.mock ??= new MockTransport());
+    case "native": {
+      let t = singletons.native as NativeBtTransport | undefined;
+      if (!t) {
+        t = new NativeBtTransport(s.btAddress);
+        singletons.native = t;
+      } else {
+        t.setAddress(s.btAddress);
+      }
+      return t;
+    }
   }
 }
 
