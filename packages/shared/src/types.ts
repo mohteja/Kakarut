@@ -110,6 +110,8 @@ export interface BahanImportRow {
 export interface BahanImportResult {
   ditambah: number;
   diperbarui: number;
+  /** bahan yang tadinya di Tempat Sampah (nonaktif) lalu dipulihkan oleh impor */
+  dipulihkan: number;
   dilewati: number;
   gagal: { nama: string; alasan: string }[];
 }

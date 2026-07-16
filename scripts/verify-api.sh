@@ -2400,6 +2400,22 @@ cek "impor perbarui: cocok via nama (tanpa kode) → diperbarui" "V == 1" \
   "$(echo "$IMP4" | jq '((.diperbarui==1) and (.ditambah==0)) | if . then 1 else 0 end')"
 cek "impor perbarui via nama: harga garam jadi 5500" "V == 1" \
   "$(api "$OWNER" GET /bahan | jq '([.[] | select(.nama=="garam uji76")][0].harga_beli==5500) | if . then 1 else 0 end')"
+# Bahan di Tempat Sampah (nonaktif) TAK dianggap "sudah ada" → dipulihkan saat impor
+api "$OWNER" POST /bahan/import '{"mode":"tambah","items":[{"kode":"SMP76","nama":"sampah uji76","jenis":"beli","harga_beli":3000,"isi":1,"satuan":"pcs"}]}' > /dev/null
+SMP76_ID=$(api "$OWNER" GET /bahan | jq -r '[.[] | select(.nama=="sampah uji76")][0].id')
+api "$OWNER" DELETE "/bahan/$SMP76_ID" > /dev/null
+cek "hapus bahan → hilang dari daftar aktif" "V == 0" \
+  "$(api "$OWNER" GET /bahan | jq '[.[] | select(.nama=="sampah uji76")] | length')"
+IMP5=$(api "$OWNER" POST /bahan/import '{"mode":"tambah","items":[{"kode":"SMP76","nama":"sampah uji76","jenis":"beli","harga_beli":7000,"isi":1,"satuan":"pcs"}]}')
+cek "impor: bahan di Tempat Sampah dipulihkan (bukan dilewati)" "V == 1" \
+  "$(echo "$IMP5" | jq '((.dipulihkan==1) and (.dilewati==0) and (.ditambah==0)) | if . then 1 else 0 end')"
+cek "impor: bahan dipulihkan muncul lagi di daftar aktif (harga 7000)" "V == 1" \
+  "$(api "$OWNER" GET /bahan | jq '([.[] | select(.nama=="sampah uji76")][0].harga_beli==7000) | if . then 1 else 0 end')"
+# match via NAMA saja (tanpa kode) juga memulihkan bahan di Tempat Sampah
+api "$OWNER" DELETE "/bahan/$(api "$OWNER" GET /bahan | jq -r '[.[] | select(.nama=="sampah uji76")][0].id')" > /dev/null
+IMP6=$(api "$OWNER" POST /bahan/import '{"mode":"perbarui","items":[{"nama":"sampah uji76","jenis":"beli","harga_beli":7500,"isi":1,"satuan":"pcs"}]}')
+cek "impor perbarui via nama: bahan di Tempat Sampah dipulihkan" "V == 1" \
+  "$(echo "$IMP6" | jq '((.dipulihkan==1) and (.dilewati==0)) | if . then 1 else 0 end')"
 # kasir tak boleh impor → 403
 cek "kasir impor CSV → 403" "V == 403" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/bahan/import" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d '{"mode":"tambah","items":[{"nama":"x","jenis":"beli","harga_beli":1,"isi":1,"satuan":"pcs"}]}')"
