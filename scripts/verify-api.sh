@@ -1937,8 +1937,30 @@ cek "stok awal tak menambah antrean penyesuaian bahan itu" "V == 0" \
 api "$OWNER" POST /stok/awal "{\"items\":[{\"ingredient_id\":\"$SA_ING\",\"qty\":300}]}" > /dev/null
 cek "stok awal ulang menetapkan saldo == 300 (bukan 1077)" "abs(V - 300) < 0.001" \
   "$(api "$OWNER" GET /stok | jq --arg i "$SA_ING" '[.[] | select(.ingredient_id==$i)][0].saldo')"
+# GET stok awal: nilai tersimpan utk isi ulang form (bukan saldo live)
+cek "GET stok awal: nilai SA_ING tersimpan == 300" "abs(V - 300) < 0.001" \
+  "$(api "$OWNER" GET /stok/awal | jq --arg i "$SA_ING" '[.items[] | select(.ingredient_id==$i)][0].qty')"
+cek "GET stok awal: SA_ING hanya 1 entri (upsert, tak menumpuk)" "V == 1" \
+  "$(api "$OWNER" GET /stok/awal | jq --arg i "$SA_ING" '[.items[] | select(.ingredient_id==$i)] | length')"
+# UPSERT nyata: kartu stok cuma 1 baris "Stok awal" (777 diganti 300, bukan 2)
+cek "kartu stok: hanya 1 mutasi 'Stok awal' (upsert, bukan tumpuk)" "V == 1" \
+  "$(api "$OWNER" GET "/stok/kartu/$SA_ING" | jq '[.mutasi[] | select(.jenis=="opname" and .keterangan=="Stok awal")] | length')"
+# tanggal saldo pembuka bisa dipindah (lampau). Pakai bahan BARU tanpa riwayat
+# agar saldo == nilai (SA_ING sudah terpakai transaksi lain; backdate akan
+# menghitung pemakaian sesudah tanggal itu — perilaku benar, tapi bukan fokus).
+SA_ING2=$(api "$OWNER" POST /bahan '{"nama":"stok awal uji64","harga_beli":1000,"isi":1,"satuan":"pcs","pengadaan":"beli","kategori":"lain","track_stok":true}' | jq -r .id)
+api "$OWNER" POST /stok/awal "{\"items\":[{\"ingredient_id\":\"$SA_ING2\",\"qty\":500}],\"tanggal\":\"2020-01-01\"}" > /dev/null
+cek "stok awal tanggal lampau: saldo jadi 500 (bahan baru tanpa riwayat)" "abs(V - 500) < 0.001" \
+  "$(api "$OWNER" GET /stok | jq --arg i "$SA_ING2" '[.[] | select(.ingredient_id==$i)][0].saldo')"
+cek "GET stok awal: tanggal terkunci == 2020-01-01" "V == 1" \
+  "$(api "$OWNER" GET /stok/awal | jq --arg i "$SA_ING2" '([.items[] | select(.ingredient_id==$i)][0].tanggal == "2020-01-01") | if . then 1 else 0 end')"
+# tanggal masa depan ditolak? tidak — hanya format divalidasi; format salah → 400
+cek "stok awal format tanggal salah → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/stok/awal" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"items\":[{\"ingredient_id\":\"$SA_ING\",\"qty\":1}],\"tanggal\":\"01-01-2020\"}")"
 cek "stok awal oleh KASIR ditolak (403)" "V == 403" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/stok/awal" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d "{\"items\":[{\"ingredient_id\":\"$SA_ING\",\"qty\":1}]}")"
+cek "GET stok awal oleh KASIR ditolak (403)" "V == 403" \
+  "$(status_code "$KASIR" GET /stok/awal)"
 
 echo "== 65. Master Kategori (CRUD + hapus aman) =="
 KAT_ID=$(api "$OWNER" POST /kategori '{"nama":"Kategori Uji ZZ","sort_order":9}' | jq -r .id)
