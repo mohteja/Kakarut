@@ -2011,17 +2011,30 @@ cek "CK: kebutuhan daging turun 10000 → 6000 (300 baso = 3 batch)" "abs(V - 60
   "$(echo "$PV66CK" | jq --arg id "$DAG66" '[.bahan_produksi[] | select(.ingredient_id==$id)][0].kebutuhan')"
 cek "CK: kebutuhan tepung turun 1500 → 900 (3 batch × 300)" "abs(V - 900) < 0.001" \
   "$(echo "$PV66CK" | jq --arg id "$TEP66" '[.bahan_produksi[] | select(.ingredient_id==$id)][0].kebutuhan')"
+# STOK CK CUKUP menutup seluruh kebutuhan (600 ≥ 500) → tak perlu produksi,
+# cabang tinggal DIKIRIM dari CK: baso66 kurang 0, tak ada belanja bahan
+# produksi, jumlah_produksi 0.
+api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CK52_UTAMA\",\"items\":[{\"ingredient_id\":\"$BASO66\",\"qty\":600}]}" > /dev/null
+PV66FULL=$(api "$OWNER" POST "/rekomendasi/menu?branch_id=$CB46_ID" "{\"items\":[{\"menu_id\":\"$MENU66\",\"porsi\":100}],\"ck_branch_id\":\"$CK52_UTAMA\"}")
+cek "CK cukup: baso66 kurang 0 (600 CK ≥ 500 butuh)" "abs(V) < 0.001" \
+  "$(echo "$PV66FULL" | jq --arg id "$BASO66" '[.bahan[] | select(.ingredient_id==$id)][0].kurang')"
+cek "CK cukup: jumlah_produksi 0 (tinggal kirim, tak produksi)" "V == 0" \
+  "$(echo "$PV66FULL" | jq '.jumlah_produksi')"
+cek "CK cukup: tak ada belanja bahan produksi (bahan_produksi kosong)" "V == 0" \
+  "$(echo "$PV66FULL" | jq '.bahan_produksi | length')"
 api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CK52_UTAMA\",\"items\":[{\"ingredient_id\":\"$BASO66\",\"qty\":0}]}" > /dev/null
 # MOQ (min_beli): daging minimal belanja 12000 → qty_faktur naik ke 12000
 api "$OWNER" PUT "/bahan/$DAG66" '{"min_beli":12000}' > /dev/null
-# reorder point (stok_minimum): tepung 700 → kurang 1500+700 = 2200 → 5 kemasan (2500)
+# stok_minimum (reorder point) TIDAK menambah kebutuhan di rencana menu:
+# rencana murni "kebutuhan menu − saldo". Tepung tetap 1500 (3 kemasan × 500)
+# meski stok_minimum 700 diset. Cadangan diurus terpisah (status "menipis").
 api "$OWNER" PUT "/bahan/$TEP66" '{"stok_minimum":700}' > /dev/null
 cek "PUT parsial tak me-reset satuan bahan (tetap gr)" "V == 1" \
   "$(api "$OWNER" GET /bahan | jq --arg id "$DAG66" '[.[] | select(.id==$id)][0].satuan == "gr" | if . then 1 else 0 end')"
 PV66B=$(api "$OWNER" POST "/rekomendasi/menu?branch_id=$CB46_ID" "{\"items\":[{\"menu_id\":\"$MENU66\",\"porsi\":100}],\"ck_branch_id\":\"$CK52_UTAMA\"}")
 cek "MOQ: qty_faktur daging dibulatkan naik ke 12000" "abs(V - 12000) < 0.001" \
   "$(echo "$PV66B" | jq --arg id "$DAG66" '[.bahan_produksi[] | select(.ingredient_id==$id)][0].qty_faktur')"
-cek "reorder point: qty_faktur tepung 2500 (kurang 2200 → 5 kemasan)" "abs(V - 2500) < 0.001" \
+cek "reorder point tak menambah kebutuhan rencana: tepung tetap 1500" "abs(V - 1500) < 0.001" \
   "$(echo "$PV66B" | jq --arg id "$TEP66" '[.bahan_produksi[] | select(.ingredient_id==$id)][0].qty_faktur')"
 # permintaan → faktur produksi (work-order CK) + faktur belanja (bahan produksi)
 WO66=$(api "$OWNER" POST /rekomendasi/menu/faktur "{\"items\":[{\"menu_id\":\"$MENU66\",\"porsi\":100}],\"tujuan_branch_id\":\"$CB46_ID\",\"ck_branch_id\":\"$CK52_UTAMA\"}")

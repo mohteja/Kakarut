@@ -61,7 +61,6 @@ export async function rencanaDariMenu(
         pengadaan: ingredients.pengadaan,
         hargaBeli: ingredients.hargaBeli,
         bolehEceran: ingredients.bolehEceran,
-        stokMinimum: ingredients.stokMinimum,
         minBeli: ingredients.minBeli,
       })
       .from(ingredients)
@@ -144,14 +143,15 @@ export async function rencanaDariMenu(
     const hargaPerUnit = e && s.isi > 0 ? e.hargaBeli / s.isi : 0;
     // Saldo yang menutup kebutuhan = stok store + stok CK (barang di CK bisa
     // dikirim ke store). Stok store dipakai dulu, sisanya baru dari CK.
-    const butuhTotal = butuh + (e?.stokMinimum ?? 0);
+    // Rencana ini MURNI "kebutuhan menu vs saldo" — stok minimum (reorder
+    // point) TIDAK ditambahkan: bila stok (termasuk CK) sudah menutupi
+    // kebutuhan, cabang tinggal DIKIRIM dari CK — tak perlu produksi/beli baru.
+    // Cadangan/reorder diurus terpisah (status stok "menipis" & Rekomendasi).
     const saldoCk = ckStok(ingredientId);
     const saldoGabung = s.saldo + saldoCk;
-    ckDipakaiMenu.set(ingredientId, Math.max(0, Math.min(saldoCk, butuhTotal - s.saldo)));
+    ckDipakaiMenu.set(ingredientId, Math.max(0, Math.min(saldoCk, butuh - s.saldo)));
     // toleransi presisi float: noise (mis. 5e-17) tidak memicu faktur hantu.
-    // Batas stok minimum (reorder point) ikut dipenuhi: belanja/produksi
-    // mengembalikan saldo minimal ke stok_minimum setelah kebutuhan terpakai.
-    const kurang = kekuranganBahan(butuhTotal, saldoGabung);
+    const kurang = kekuranganBahan(butuh, saldoGabung);
     // MOQ (minimal belanja) hanya berlaku utk jalur beli — bukan produksi
     const dasarFaktur =
       pengadaan === "beli" ? Math.max(kurang, kurang > 0 ? (e?.minBeli ?? 0) : 0) : kurang;
@@ -245,7 +245,9 @@ export async function rencanaDariMenu(
           pelaksanaId === branchId
             ? Math.max(0, si.saldo - (kebutuhan.get(inputId) ?? 0))
             : Math.max(0, si.saldo - (ckDipakaiMenu.get(inputId) ?? 0));
-        const kurang = kekuranganBahan(butuh + (e.stokMinimum ?? 0), saldoEfektif);
+        // sama seperti menu-level: kebutuhan bahan mentah apa adanya, tanpa
+        // menambah stok minimum (reorder point) — cadangan diurus terpisah.
+        const kurang = kekuranganBahan(butuh, saldoEfektif);
         const dasarFaktur = kurang > 0 ? Math.max(kurang, e.minBeli ?? 0) : 0;
         const faktur =
           kurang > 0 ? jumlahFaktur(dasarFaktur, "beli", si.isi, e.bolehEceran ?? false) : null;
