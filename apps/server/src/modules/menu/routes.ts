@@ -76,9 +76,12 @@ async function validateRefs(
     if (rows.length !== branchIds.length) {
       throw new HTTPException(400, { message: "Ada cabang yang tidak valid" });
     }
-    if (rows.some((r) => r.tipe === "kantor")) {
+    // Hanya cabang STORE yang punya kasir/POS. Central kitchen (dapur produksi)
+    // & kantor bukan tempat menjual menu → tak boleh jadi lokasi tampil menu.
+    const bukanStore = rows.filter((r) => r.tipe !== "store");
+    if (bukanStore.length > 0) {
       throw new HTTPException(400, {
-        message: "Kantor bukan lokasi penjualan — pilih cabang store atau central kitchen",
+        message: "Hanya cabang store (kasir/POS) yang bisa jadi lokasi menu",
       });
     }
   }

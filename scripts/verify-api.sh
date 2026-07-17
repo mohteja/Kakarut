@@ -1506,6 +1506,9 @@ cek "provisioning: store lama (Pusat) tertaut ke CK" "V == 1" \
   "$(api "$OWNER" GET /cabang | jq --arg ck "$CK52_UTAMA" '([.[] | select(.nama=="Pusat")][0].central_kitchen_id == $ck) | if . then 1 else 0 end')"
 cek "store baru auto-tertaut saat CK hanya satu (Cabang Uji 46)" "V == 1" \
   "$(api "$OWNER" GET /cabang | jq --arg ck "$CK52_UTAMA" --arg id "$CB46_ID" '([.[] | select(.id==$id)][0].central_kitchen_id == $ck) | if . then 1 else 0 end')"
+# Central kitchen bukan POS/kasir → tak boleh jadi lokasi tampil menu
+cek "menu dgn lokasi central kitchen → 400 (CK bukan POS)" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/menu" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"nama\":\"Menu CK 52\",\"category_id\":\"$(api "$OWNER" GET /kategori | jq -r '.[0].id')\",\"tipe\":\"regular\",\"mult\":2,\"harga_jual\":10000,\"branch_ids\":[\"$CK52_UTAMA\"]}")"
 
 # kini ada 2 CK (Central Kitchen + Central Kitchen 47) → wajib memilih pemasok
 cek "dua CK: store baru tanpa pilih pemasok → 400" "V == 400" \

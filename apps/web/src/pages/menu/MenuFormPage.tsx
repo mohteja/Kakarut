@@ -151,7 +151,11 @@ export function MenuFormPage() {
         komponen: komponen
           .filter((k) => k.ingredient_id && Number(k.qty) > 0)
           .map((k) => ({ ingredient_id: k.ingredient_id, qty: Number(k.qty) })),
-        branch_ids: branchIds,
+        // hanya cabang store (POS) yang jadi lokasi menu — buang id non-store
+        // (mis. central kitchen dari data lama) agar simpan tak ditolak server
+        branch_ids: branchIds.filter((bid) =>
+          cabang.some((b) => b.id === bid && b.tipe === "store"),
+        ),
       };
       return id
         ? api(`/menu/${id}`, { method: "PUT", body })
@@ -302,7 +306,7 @@ export function MenuFormPage() {
 
         {/* Pembatasan lokasi hanya relevan di mode Pro (multi-lokasi).
             Kantor bukan lokasi penjualan → tidak ditawarkan. */}
-        {isPro && cabang.length > 0 && (
+        {isPro && cabang.some((b) => b.is_active && b.tipe === "store") && (
           <Card className="space-y-3 p-4">
             <div className="text-sm font-semibold text-stone-700">📍 Tampil di lokasi</div>
             <label className="flex items-center gap-2 text-sm">
@@ -313,7 +317,7 @@ export function MenuFormPage() {
                   if (e.target.checked) setBranchIds([]);
                   else
                     setBranchIds(
-                      cabang.filter((b) => b.is_active && b.tipe !== "kantor").map((b) => b.id),
+                      cabang.filter((b) => b.is_active && b.tipe === "store").map((b) => b.id),
                     );
                 }}
               />
@@ -323,7 +327,7 @@ export function MenuFormPage() {
             {branchIds.length > 0 && (
               <div className="flex flex-wrap gap-x-4 gap-y-1 pl-6">
                 {cabang
-                  .filter((b) => b.is_active && b.tipe !== "kantor")
+                  .filter((b) => b.is_active && b.tipe === "store")
                   .map((b) => (
                     <label key={b.id} className="flex items-center gap-2 text-sm">
                       <input
