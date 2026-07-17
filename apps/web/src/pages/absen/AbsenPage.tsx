@@ -193,7 +193,8 @@ export function AbsenPage() {
               autoFocus
               value={kode}
               onChange={(e) => setKode(e.target.value.toUpperCase())}
-              placeholder="Kode karyawan (mis. BS)"
+              placeholder="Kode karyawan (8 digit)"
+              inputMode="numeric"
               className={`${inputClass} text-center text-2xl font-bold tracking-widest`}
               autoCapitalize="characters"
               autoComplete="off"

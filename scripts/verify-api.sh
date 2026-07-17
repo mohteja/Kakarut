@@ -1058,6 +1058,14 @@ echo "== 39. Absensi karyawan (kode/QR + masuk/keluar auto-detect) =="
 # tiap karyawan (membership) dapat kode karyawan otomatis (backfill saat seed)
 cek "karyawan punya employee_code" "V == 1" \
   "$(api "$OWNER" GET /karyawan | jq '([.[] | select(.employee_code != null)] | length >= 1) | if . then 1 else 0 end')"
+# kode karyawan = 8 digit angka acak (backfill boot meng-upgrade kode lama pendek)
+cek "employee_code semua 8 digit angka" "V == 1" \
+  "$(api "$OWNER" GET /karyawan | jq '([.[] | select(.employee_code != null)] | all(.employee_code | test("^[0-9]{8}$"))) | if . then 1 else 0 end')"
+# karyawan BARU juga dapat kode 8 digit acak (jalur resolveKodeKaryawan, bukan backfill)
+SBR39=$(api "$OWNER" GET /cabang | jq -r '[.[] | select(.tipe=="store")][0].id')
+NK39=$(api "$OWNER" POST /karyawan "{\"nama\":\"Kode Baru 39\",\"email\":\"kodebaru39@basooopa.id\",\"password\":\"KodeBaru39!\",\"role\":\"cashier\",\"branch_id\":\"$SBR39\"}")
+cek "karyawan baru: employee_code 8 digit angka" "V == 1" \
+  "$(echo "$NK39" | jq '(.employee_code | test("^[0-9]{8}$")) | if . then 1 else 0 end')"
 KODE_KAR=$(api "$OWNER" GET /karyawan | jq -r '[.[] | select(.role == "cashier")][0].employee_code')
 # kasir (semua peran boleh) mengabsen via kode → cap pertama = masuk
 A1=$(api "$KASIR" POST /absensi "{\"kode\":\"$KODE_KAR\"}")
@@ -1382,8 +1390,8 @@ echo "== 48. Profil: identitas + kode absen sendiri + ganti password =="
 PRF48=$(api "$OWNER" GET /profil)
 cek "profil owner: email & role benar" "V == 1" \
   "$(echo "$PRF48" | jq --arg e "$OWNER_EMAIL" '((.email == $e) and (.role == "owner") and ((.nama | length) > 0)) | if . then 1 else 0 end')"
-cek "profil owner: kode karyawan (QR absen) tersedia" "V == 1" \
-  "$(echo "$PRF48" | jq '((.employee_code != null) and ((.employee_code | length) >= 2)) | if . then 1 else 0 end')"
+cek "profil owner: kode karyawan (QR absen) = 8 digit angka" "V == 1" \
+  "$(echo "$PRF48" | jq '((.employee_code != null) and (.employee_code | test("^[0-9]{8}$"))) | if . then 1 else 0 end')"
 cek "ganti password: password lama salah → 401" "V == 401" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/profil/password" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"password_lama":"salah-total","password_baru":"PasswordBaru1"}')"
 cek "ganti password: baru < 8 karakter → 400" "V == 400" \

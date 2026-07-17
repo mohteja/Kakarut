@@ -119,8 +119,8 @@ export const karyawanRoutes = new Hono<AppEnv>()
             .insert(users)
             .values({ email: body.email, passwordHash, nama: body.nama })
             .returning();
-          // kode karyawan otomatis (ID cepat absensi via ketik/scan QR), unik per perusahaan
-          const employeeCode = await resolveKodeKaryawan(tx, auth.company_id!, body.nama);
+          // kode karyawan otomatis (ID cepat absensi via ketik/scan QR): 8 digit acak, unik per perusahaan
+          const employeeCode = await resolveKodeKaryawan(tx, auth.company_id!);
           await tx.insert(memberships).values({
             userId: user.id,
             companyId: auth.company_id!,
