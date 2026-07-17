@@ -2482,6 +2482,24 @@ BSID=$(api "$OWNER" GET /kategori-bahan | jq -r '[.[]|select(.nama=="Buah segar"
 cek "hapus kategori yg dipakai (case-insensitive) ditolak (409)" "V == 409" \
   "$(status_code "$OWNER" DELETE "/kategori-bahan/$BSID")"
 
+echo "== 78. Buat bahan: slug bahan NONAKTIF dipulihkan (bukan ditolak) =="
+# bahan produksi baru → hapus (arsip, is_active=false) → tak tampil di daftar,
+# tapi slug tetap terpakai. Buat ulang nama sama harus MEMULIHKAN, bukan 409.
+REV78=$(api "$OWNER" POST /bahan '{"nama":"revive uji78","harga_beli":0,"isi":1,"satuan":"pcs","pengadaan":"produksi","kategori":"baso"}' | jq -r .id)
+cek "bahan baru tampil di daftar aktif" "V == 1" \
+  "$(api "$OWNER" GET /bahan | jq --arg id "$REV78" '[.[]|select(.id==$id)]|length')"
+api "$OWNER" DELETE "/bahan/$REV78" > /dev/null
+cek "setelah hapus: hilang dari daftar aktif" "V == 0" \
+  "$(api "$OWNER" GET /bahan | jq --arg id "$REV78" '[.[]|select(.id==$id)]|length')"
+cek "buat ulang nama sama (slug nonaktif) → 200 dipulihkan (bukan 409)" "V == 200" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/bahan" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"nama":"revive uji78","harga_beli":0,"isi":1,"satuan":"pcs","pengadaan":"produksi","kategori":"baso"}')"
+cek "pulih: id sama (baris lama diaktifkan, bukan baris baru)" "V == 1" \
+  "$(api "$OWNER" GET /bahan | jq --arg id "$REV78" '([.[]|select(.nama=="revive uji78")][0].id==$id) | if . then 1 else 0 end')"
+cek "pulih: bahan aktif kembali & tetap produksi" "V == 1" \
+  "$(api "$OWNER" GET /bahan | jq --arg id "$REV78" '[.[]|select(.id==$id and .pengadaan=="produksi")]|length')"
+cek "duplikat AKTIF sungguhan → tetap 409" "V == 409" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/bahan" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"nama":"revive uji78","harga_beli":0,"isi":1,"satuan":"pcs","pengadaan":"produksi","kategori":"baso"}')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

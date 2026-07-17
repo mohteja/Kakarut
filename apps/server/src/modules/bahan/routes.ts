@@ -237,17 +237,63 @@ export const bahanRoutes = new Hono<AppEnv>()
     const slug =
       body.slug ?? body.nama.toLowerCase().trim().replace(/\s+/g, " ");
     const [existing] = await db
-      .select({ id: ingredients.id })
+      .select({
+        id: ingredients.id,
+        isActive: ingredients.isActive,
+        pengadaan: ingredients.pengadaan,
+      })
       .from(ingredients)
       .where(
         and(eq(ingredients.companyId, auth.company_id!), eq(ingredients.slug, slug)),
       );
-    if (existing) {
-      throw new HTTPException(409, { message: `Bahan dengan slug "${slug}" sudah ada` });
-    }
-    const kode = await resolveKodeBahan(db, auth.company_id!, body.kode, body.nama);
     // samakan huruf kategori dengan master (mis. "buah segar" → "Buah segar")
     const kmap = await kategoriKanonikMap(db, auth.company_id!);
+    if (existing?.isActive) {
+      // Duplikat sungguhan (masih aktif). Beri petunjuk lokasi — bahan BELI tak
+      // muncul di daftar Resep Produksi, jadi owner bisa mengira "tak ada".
+      const dimana = existing.pengadaan === "beli" ? " (ada di daftar Bahan Baku)" : "";
+      throw new HTTPException(409, {
+        message: `Bahan "${body.nama}" sudah ada${dimana}`,
+      });
+    }
+    if (existing) {
+      // Slug cocok bahan NONAKTIF: pernah dihapus/diarsip — TIDAK tampil di
+      // daftar mana pun (bukan pula di Tempat Sampah), tapi slug tetap terpakai.
+      // Menolak = memblokir pembuatan selamanya tanpa jalan keluar di UI. Jadi
+      // PULIHKAN + perbarui nilainya (konsisten dgn impor CSV mode "perbarui").
+      if (body.pengadaan === "beli") {
+        // beli tak punya resep — bersihkan resep lama bila dulunya produksi
+        await db
+          .delete(ingredientComponents)
+          .where(eq(ingredientComponents.ingredientId, existing.id));
+      }
+      const [row] = await db
+        .update(ingredients)
+        .set({
+          isActive: true,
+          nama: body.nama,
+          hargaBeli: body.harga_beli,
+          isi: body.isi,
+          satuan: body.satuan,
+          satuanBeli: body.satuan_beli ?? null,
+          trackStok: body.track_stok,
+          stokMinimum: body.stok_minimum,
+          stokMinimumToko: body.stok_minimum_toko,
+          overheadX: body.overhead_x,
+          kategori: kanonikKategori(kmap, body.kategori),
+          pengadaan: body.pengadaan,
+          catatan: body.catatan ?? null,
+          isPackaging: body.is_packaging,
+          isComplement: body.is_complement,
+          bolehEceran: body.boleh_eceran,
+          minBeli: body.min_beli,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(ingredients.id, existing.id), eq(ingredients.companyId, auth.company_id!)))
+        .returning();
+      return c.json(toDto(row), 200);
+    }
+    const kode = await resolveKodeBahan(db, auth.company_id!, body.kode, body.nama);
     const [row] = await db
       .insert(ingredients)
       .values({
