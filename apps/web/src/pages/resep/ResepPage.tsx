@@ -247,7 +247,7 @@ export function ResepPage() {
         aksi={
           bolehUbah ? (
             <button onClick={bukaFormBaru} className={btnPrimary}>
-              + Bahan produksi
+              + Resep produksi
             </button>
           ) : undefined
         }
@@ -255,9 +255,9 @@ export function ResepPage() {
         🧾 Resep Produksi
       </PageTitle>
       <div className="mb-4 rounded-lg bg-blue-50 px-4 py-2 text-sm text-blue-800">
-        Atur bahan mentah yang dibutuhkan untuk memproduksi <b>1 batch</b> tiap bahan jenis
+        Atur bahan baku yang dibutuhkan untuk memproduksi <b>1 batch</b> tiap bahan jenis
         produksi. Dipakai untuk <b>rencana belanja bahan produksi</b> dan <b>pemotongan stok
-        bahan mentah otomatis</b> saat produksi selesai.
+        bahan baku otomatis</b> saat produksi selesai.
       </div>
 
       {produksi.length === 0 ? (
@@ -265,7 +265,7 @@ export function ResepPage() {
           Belum ada bahan produksi.{" "}
           {bolehUbah ? (
             <button onClick={bukaFormBaru} className="font-medium text-orange-600 hover:underline">
-              + Buat bahan produksi
+              + Buat resep produksi
             </button>
           ) : (
             <Link to="/bahan" className="font-medium text-orange-600 hover:underline">
@@ -304,7 +304,7 @@ export function ResepPage() {
                     </div>
                     <div className={`text-xs ${aktif ? "text-orange-100" : "text-stone-500"}`}>
                       batch {formatAngka(b.isi)} {b.satuan} ·{" "}
-                      {n == null ? "—" : n > 0 ? `${n} bahan mentah` : "belum ada resep"}
+                      {n == null ? "—" : n > 0 ? `${n} bahan baku` : "belum ada resep"}
                     </div>
                   </button>
                 );
@@ -349,12 +349,14 @@ export function ResepPage() {
                     <div className="space-y-2">
                       {resep.map((r, i) => {
                         // nilai terpilih selalu punya option (walau bahan
-                        // berubah jenis/nonaktif), sisanya beli+aktif+belum dipakai
+                        // nonaktif); sisanya bahan AKTIF apa pun jenisnya —
+                        // bahan baku (beli) maupun bahan produksi (resep
+                        // bertingkat) — kecuali bahan ini sendiri & yang sudah
+                        // dipakai di baris lain. BahanPicker memisah 2 grup.
                         const pilihan = semua.filter(
                           (x) =>
                             x.id === r.ingredient_id ||
-                            (x.pengadaan === "beli" &&
-                              x.is_active &&
+                            (x.is_active &&
                               x.id !== dipilih.id &&
                               !resep.some((lain, j) => j !== i && lain.ingredient_id === x.id)),
                         );
@@ -369,7 +371,7 @@ export function ResepPage() {
                                 salinan[i] = { ...salinan[i], ingredient_id: id };
                                 setResep(salinan);
                               }}
-                              placeholder="— pilih bahan mentah —"
+                              placeholder="— pilih bahan —"
                               className="flex-1"
                               disabled={!bolehUbah}
                             />
@@ -418,7 +420,7 @@ export function ResepPage() {
                       })}
                       {resep.length === 0 && (
                         <div className="rounded-lg bg-stone-50 py-6 text-center text-sm text-stone-400">
-                          Belum ada bahan mentah pada resep ini.
+                          Belum ada bahan baku pada resep ini.
                         </div>
                       )}
                     </div>
@@ -426,7 +428,7 @@ export function ResepPage() {
                     {resep.length > 0 && (
                       <div className="mt-2 flex items-center gap-2 border-t border-stone-200 pt-2">
                         <span className="flex-1 text-right text-sm font-semibold text-stone-600">
-                          Total bahan mentah <span className="font-normal text-stone-400">(sebelum overhead)</span>
+                          Total bahan baku <span className="font-normal text-stone-400">(sebelum overhead)</span>
                         </span>
                         {/* sejajar dengan kolom subtotal tiap baris */}
                         <span className="w-28 shrink-0 text-right text-sm font-bold text-stone-800 tabular-nums">
@@ -442,7 +444,7 @@ export function ResepPage() {
                         onClick={() => setResep([...resep, { ingredient_id: "", qty: "" }])}
                         className="mt-2 text-sm font-medium text-orange-600 hover:underline"
                       >
-                        + Tambah bahan mentah
+                        + Tambah bahan baku
                       </button>
                     )}
 
@@ -577,7 +579,7 @@ export function ResepPage() {
       <Modal
         open={formBaru !== null}
         onClose={() => setFormBaru(null)}
-        title="Bahan produksi baru"
+        title="Resep produksi baru"
       >
         {formBaru && (
           <form

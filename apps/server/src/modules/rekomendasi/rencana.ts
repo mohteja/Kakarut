@@ -214,7 +214,11 @@ export async function rencanaDariMenu(
         const si = saldoPelaksana.get(inputId);
         if (!si) continue;
         const e = extraById.get(inputId);
-        if (e?.pengadaan !== "beli") continue; // resep tervalidasi 'beli' — defensif
+        // Belanja otomatis hanya untuk input BELI (bahan baku). Input produksi
+        // di dalam resep bertingkat tidak "dibeli" — bahan itu diproduksi
+        // sendiri (dari stok / lewat faktur produksinya sendiri), jadi
+        // dilewati di rencana BELI ini. (Belum diurai/di-work-order otomatis.)
+        if (e?.pengadaan !== "beli") continue;
         const hargaPerUnitInput = si.isi > 0 ? e.hargaBeli / si.isi : 0;
         // Saldo efektif: bila produksi dilakukan di cabang tujuan sendiri,
         // bahan yang juga dipakai LANGSUNG oleh menu sudah dialokasikan di

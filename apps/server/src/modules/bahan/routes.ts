@@ -470,9 +470,11 @@ export const bahanRoutes = new Hono<AppEnv>()
         .from(ingredients)
         .where(and(eq(ingredients.id, id), eq(ingredients.companyId, auth.company_id!)));
       if (!lama) throw new HTTPException(404, { message: "Bahan tidak ditemukan" });
-      // Bahan yang masih jadi INPUT resep aktif tak boleh berubah jenis ke
-      // "produksi": input resep tervalidasi 'beli' — flip membuat rencana
-      // melewatkan kebutuhannya diam-diam padahal konsumsi tetap berjalan.
+      // Konservatif: bahan yang masih jadi INPUT resep aktif tak diizinkan
+      // di-flip jenisnya ke "produksi" lewat jalur edit-bahan ini — ubah dulu
+      // resep yang memakainya. (Memakai bahan produksi DI DALAM resep memang
+      // kini didukung, tapi itu diatur dari halaman Resep, bukan dengan
+      // mem-flip jenis bahan input yang sudah dipakai.)
       if (body.pengadaan === "produksi" && lama.pengadaan !== "produksi") {
         const dipakai = await db
           .select({ nama: ingredients.nama })
@@ -729,11 +731,13 @@ export const bahanRoutes = new Hono<AppEnv>()
       }
       const inputIds = [...qtyByInput.keys()];
       if (inputIds.length > 0) {
-        // bahan mentah harus milik perusahaan, aktif, dan berjenis BELI —
-        // resep berlapis (produksi dari produksi) belum didukung agar
-        // ekspansi belanja & konsumsi tetap satu tingkat.
+        // Bahan input resep harus milik perusahaan & aktif. Boleh berjenis
+        // "beli" (bahan baku) MAUPUN "produksi" (bahan jadi/semi-jadi yang
+        // dibuat sendiri) — resep bertingkat didukung; input produksi dipotong
+        // dari STOK-nya saat produksi induk selesai (bukan diurai ulang ke
+        // bahan mentahnya), jadi konsumsi tetap satu tingkat per produksi.
         const valid = await db
-          .select({ id: ingredients.id, pengadaan: ingredients.pengadaan, nama: ingredients.nama })
+          .select({ id: ingredients.id, nama: ingredients.nama })
           .from(ingredients)
           .where(
             and(
@@ -743,12 +747,46 @@ export const bahanRoutes = new Hono<AppEnv>()
             ),
           );
         if (valid.length !== inputIds.length) {
-          throw new HTTPException(400, { message: "Ada bahan mentah yang tidak valid" });
+          throw new HTTPException(400, { message: "Ada bahan input yang tidak valid" });
         }
-        const bukanBeli = valid.filter((v) => v.pengadaan !== "beli");
-        if (bukanBeli.length > 0) {
+        // Cegah resep MELINGKAR (A→B→…→A): input produksi yang resepnya —
+        // langsung atau tak langsung — kembali memakai bahan induk `id`
+        // ditolak, agar perhitungan biaya & konsumsi tak jadi rekursi tanpa
+        // akhir. Graf resep per-company kecil → DFS in-memory sudah cukup.
+        const namaById = new Map(valid.map((v) => [v.id, v.nama]));
+        const edges = await db
+          .select({
+            dari: ingredientComponents.ingredientId,
+            ke: ingredientComponents.inputIngredientId,
+          })
+          .from(ingredientComponents)
+          .innerJoin(ingredients, eq(ingredients.id, ingredientComponents.ingredientId))
+          .where(eq(ingredients.companyId, auth.company_id!));
+        const adj = new Map<string, string[]>();
+        for (const e of edges) {
+          if (e.dari === id) continue; // resep lama `id` akan diganti — abaikan
+          const list = adj.get(e.dari) ?? [];
+          list.push(e.ke);
+          adj.set(e.dari, list);
+        }
+        const mencapaiInduk = (mulai: string): boolean => {
+          const tumpuk = [mulai];
+          const dilihat = new Set<string>();
+          while (tumpuk.length > 0) {
+            const n = tumpuk.pop()!;
+            if (n === id) return true;
+            if (dilihat.has(n)) continue;
+            dilihat.add(n);
+            for (const m of adj.get(n) ?? []) tumpuk.push(m);
+          }
+          return false;
+        };
+        const melingkar = inputIds.filter((iid) => mencapaiInduk(iid));
+        if (melingkar.length > 0) {
           throw new HTTPException(400, {
-            message: `Bahan mentah resep harus berjenis beli: ${bukanBeli.map((v) => v.nama).join(", ")}`,
+            message: `Resep melingkar: ${melingkar
+              .map((iid) => namaById.get(iid) ?? iid)
+              .join(", ")} — bahan itu (langsung/tak langsung) sudah memakai bahan ini`,
           });
         }
       }

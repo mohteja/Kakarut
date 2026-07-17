@@ -1939,10 +1939,20 @@ TEP66=$(api "$OWNER" POST /bahan '{"nama":"tepung uji66","harga_beli":10000,"isi
 BASO66=$(api "$OWNER" POST /bahan '{"nama":"baso uji66","harga_beli":50000,"isi":100,"satuan":"butir","pengadaan":"produksi","kategori":"baso"}' | jq -r .id)
 cek "resep utk bahan beli ditolak (400)" "V == 400" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/bahan/$DAG66/resep" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"komponen\":[{\"ingredient_id\":\"$TEP66\",\"qty\":1}]}")"
-cek "resep dgn bahan mentah jenis produksi ditolak (400)" "V == 400" \
+cek "resep memakai diri sendiri ditolak (400)" "V == 400" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/bahan/$BASO66/resep" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"komponen\":[{\"ingredient_id\":\"$BASO66\",\"qty\":1}]}")"
 api "$OWNER" PUT "/bahan/$BASO66/resep" "{\"komponen\":[{\"ingredient_id\":\"$DAG66\",\"qty\":2000},{\"ingredient_id\":\"$TEP66\",\"qty\":300}]}" > /dev/null
 cek "GET resep memuat 2 bahan mentah" "V == 2" "$(api "$OWNER" GET "/bahan/$BASO66/resep" | jq 'length')"
+# Resep BERTINGKAT: bahan PRODUKSI boleh jadi input resep (dipotong dari
+# stoknya sendiri saat produksi induk selesai), + cegah resep melingkar.
+JANDO66=$(api "$OWNER" POST /bahan '{"nama":"jando uji66","harga_beli":0,"isi":50,"satuan":"porsi","pengadaan":"produksi","kategori":"baso"}' | jq -r .id)
+cek "resep boleh memakai bahan produksi lain (200)" "V == 200" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/bahan/$JANDO66/resep" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"komponen\":[{\"ingredient_id\":\"$BASO66\",\"qty\":2},{\"ingredient_id\":\"$TEP66\",\"qty\":100}]}")"
+cek "GET resep jando memuat 2 input (produksi+beli)" "V == 2" "$(api "$OWNER" GET "/bahan/$JANDO66/resep" | jq 'length')"
+cek "resep MELINGKAR ditolak (400)" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/bahan/$BASO66/resep" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"komponen\":[{\"ingredient_id\":\"$JANDO66\",\"qty\":1}]}")"
+cek "resep BASO66 tetap 2 (PUT melingkar ditolak, tak mengubah)" "V == 2" \
+  "$(api "$OWNER" GET "/bahan/$BASO66/resep" | jq 'length')"
 cek "hapus bahan yang dipakai resep ditolak (409)" "V == 409" \
   "$(status_code "$OWNER" DELETE "/bahan/$DAG66")"
 # menu uji: 1 porsi memakai 5 butir baso66
