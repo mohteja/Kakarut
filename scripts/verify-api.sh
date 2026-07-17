@@ -1841,9 +1841,10 @@ WO=$(api "$OWNER" POST /rekomendasi/menu/faktur "{\"items\":[{\"menu_id\":\"$PBA
 WO_FID=$(echo "$WO" | jq -r '.produksi.faktur_id')
 cek "permintaan menghasilkan faktur produksi" "V == 1" \
   "$([ -n "$WO_FID" ] && [ "$WO_FID" != "null" ] && echo 1 || echo 0)"
-# faktur produksi lahir di CK dgn tujuan = store, tanpa pelaksana, status rencana
-cek "faktur produksi: tujuan=store, worker null, rencana" "V == 1" \
-  "$(api "$OWNER" GET "/produksi?branch_id=$CK52_UTAMA&per_page=500" | jq --arg f "$WO_FID" --arg s "$CB46_ID" '([.rows[] | select(.faktur_id==$f)] | (length>0) and all(.[]; .tujuan_branch_id==$s and .worker_id==null and .status=="rencana")) | if . then 1 else 0 end')"
+# faktur produksi lahir di CK utk DISIMPAN sbg stok CK (tujuan=null = produksi
+# ke CK, bukan langsung kirim ke store), tanpa pelaksana, status rencana
+cek "faktur produksi: tujuan=null (produksi ke CK), worker null, rencana" "V == 1" \
+  "$(api "$OWNER" GET "/produksi?branch_id=$CK52_UTAMA&per_page=500" | jq --arg f "$WO_FID" '([.rows[] | select(.faktur_id==$f)] | (length>0) and all(.[]; .tujuan_branch_id==null and .worker_id==null and .status=="rencana")) | if . then 1 else 0 end')"
 # riwayat "Permintaan tambah stok" (owner) di log faktur + aktivitas owner
 cek "riwayat: log faktur memuat 'Permintaan tambah stok'" "V == 1" \
   "$(api "$OWNER" GET "/produksi/log/$WO_FID" | jq '([.rows[] | select(.aksi=="Permintaan tambah stok")] | length > 0) | if . then 1 else 0 end')"
@@ -1873,41 +1874,29 @@ api "$TCK58" POST "/produksi/tahap/$WO_FID" '{"ke":"dikerjakan"}' > /dev/null
 cek "tim CK mulai dikerjakan → pelaksana = dirinya" "V == 1" \
   "$(api "$OWNER" GET "/produksi?branch_id=$CK52_UTAMA&per_page=500" | jq --arg f "$WO_FID" --arg u "$U58_ID" '([.rows[] | select(.faktur_id==$f)] | (length>0) and all(.[]; .worker_id==$u and .status=="dikerjakan")) | if . then 1 else 0 end')"
 
-# selesai → tersimpan di CK (menunggu, masih di CK, tujuan tetap)
+# selesai produksi → DISIMPAN dulu di CK (menunggu, masih di CK, tujuan null)
 api "$TCK58" POST "/produksi/tahap/$WO_FID" '{"ke":"menunggu"}' > /dev/null
-cek "selesai: menunggu, masih di CK, tujuan store" "V == 1" \
-  "$(api "$OWNER" GET "/produksi?branch_id=$CK52_UTAMA&per_page=500" | jq --arg f "$WO_FID" --arg s "$CB46_ID" '([.rows[] | select(.faktur_id==$f)] | (length>0) and all(.[]; .status=="menunggu" and .tujuan_branch_id==$s)) | if . then 1 else 0 end')"
-# belum tampil di penerimaan store (belum dikirim)
-cek "belum dikirim: tidak di penerimaan store" "V == 0" \
+cek "selesai: menunggu di CK (tujuan null = produksi ke CK)" "V == 1" \
+  "$(api "$OWNER" GET "/produksi?branch_id=$CK52_UTAMA&per_page=500" | jq --arg f "$WO_FID" '([.rows[] | select(.faktur_id==$f)] | (length>0) and all(.[]; .status=="menunggu" and .tujuan_branch_id==null)) | if . then 1 else 0 end')"
+# belum tampil di penerimaan store (produksi tersimpan di CK, bukan dikirim)
+cek "produksi ke CK: tidak muncul di penerimaan store" "V == 0" \
   "$(api "$OWNER" GET "/penerimaan?branch_id=$CB46_ID" | jq --arg f "$WO_FID" '[.rows[] | select(.faktur_id==$f)] | length')"
 
-# GUARD: work-order TIDAK boleh dikonfirmasi di CK (harus lewat kirim→penerimaan)
-WO_RID_CK=$(api "$OWNER" GET "/produksi?branch_id=$CK52_UTAMA&per_page=500" | jq -r --arg f "$WO_FID" '[.rows[] | select(.faktur_id==$f)][0].id')
-WO_QTY_CK=$(api "$OWNER" GET "/produksi?branch_id=$CK52_UTAMA&per_page=500" | jq -r --arg f "$WO_FID" '[.rows[] | select(.faktur_id==$f)][0].qty')
-cek "work-order: /tahap dikonfirmasi di CK → 400" "V == 400" \
-  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/produksi/tahap/$WO_FID" -H "Authorization: Bearer $TCK58" -H 'Content-Type: application/json' -d "{\"ke\":\"dikonfirmasi\",\"items\":[{\"id\":\"$WO_RID_CK\",\"qty\":$WO_QTY_CK}]}")"
-cek "work-order: /konfirmasi di CK → 404 (tak ada baris non-work-order)" "V == 404" \
-  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/produksi/konfirmasi/$WO_FID" -H "Authorization: Bearer $TCK58")"
-cek "guard: baris tetap menunggu di CK (tak jadi stok CK)" "V == 1" \
-  "$(api "$OWNER" GET "/produksi?branch_id=$CK52_UTAMA&per_page=500" | jq --arg f "$WO_FID" '([.rows[] | select(.faktur_id==$f)] | all(.[]; .status=="menunggu")) | if . then 1 else 0 end')"
-
-# kirim ke cabang → baris pindah ke store, tetap menunggu
+# selesai produksi DIKONFIRMASI di CK → hasil MASUK STOK CK (CK ngestock),
+# sebelum dikirim ke cabang lewat "kirim dari stok CK" (transfer, diuji §66).
 ING_WO=$(api "$OWNER" GET "/produksi?branch_id=$CK52_UTAMA&per_page=500" | jq -r --arg f "$WO_FID" '[.rows[] | select(.faktur_id==$f)][0].ingredient_id')
-SALDO_SEB=$(api "$OWNER" GET "/stok?branch_id=$CB46_ID" | jq -r --arg i "$ING_WO" '[.[] | select(.ingredient_id==$i)][0].saldo // 0')
-api "$TCK58" POST "/produksi/kirim/$WO_FID" '{}' > /dev/null
-cek "kirim: baris ada di store, status menunggu" "V == 1" \
-  "$(api "$OWNER" GET "/produksi?branch_id=$CB46_ID&per_page=500" | jq --arg f "$WO_FID" '([.rows[] | select(.faktur_id==$f)] | (length>0) and all(.[]; .status=="menunggu")) | if . then 1 else 0 end')"
-# kiriman produksi kini muncul di penerimaan store (jalur produksi)
-cek "kiriman produksi muncul di penerimaan store (jalur produksi)" "V == 1" \
-  "$(api "$OWNER" GET "/penerimaan?branch_id=$CB46_ID" | jq --arg f "$WO_FID" '([.rows[] | select(.faktur_id==$f and .jalur=="produksi")] | length > 0) | if . then 1 else 0 end')"
-
-# store terima → dikonfirmasi + saldo store naik
-api "$OWNER" POST "/penerimaan/$WO_FID/terima" > /dev/null
-cek "diterima: baris dikonfirmasi di store" "V == 1" \
-  "$(api "$OWNER" GET "/produksi?branch_id=$CB46_ID&per_page=500" | jq --arg f "$WO_FID" '([.rows[] | select(.faktur_id==$f)] | (length>0) and all(.[]; .status=="dikonfirmasi")) | if . then 1 else 0 end')"
-SALDO_SES=$(api "$OWNER" GET "/stok?branch_id=$CB46_ID" | jq -r --arg i "$ING_WO" '[.[] | select(.ingredient_id==$i)][0].saldo // 0')
-cek "diterima: saldo bahan di store bertambah" "V == 1" \
-  "$(jq -n --argjson a "$SALDO_SEB" --argjson b "$SALDO_SES" '($b > $a) | if . then 1 else 0 end')"
+CKSALDO_SEB=$(api "$OWNER" GET "/stok?branch_id=$CK52_UTAMA" | jq -r --arg i "$ING_WO" '[.[] | select(.ingredient_id==$i)][0].saldo // 0')
+STSALDO_SEB=$(api "$OWNER" GET "/stok?branch_id=$CB46_ID" | jq -r --arg i "$ING_WO" '[.[] | select(.ingredient_id==$i)][0].saldo // 0')
+api "$OWNER" POST "/produksi/konfirmasi/$WO_FID" > /dev/null
+cek "konfirmasi produksi di CK: baris dikonfirmasi" "V == 1" \
+  "$(api "$OWNER" GET "/produksi?branch_id=$CK52_UTAMA&per_page=500" | jq --arg f "$WO_FID" '([.rows[] | select(.faktur_id==$f)] | (length>0) and all(.[]; .status=="dikonfirmasi")) | if . then 1 else 0 end')"
+CKSALDO_SES=$(api "$OWNER" GET "/stok?branch_id=$CK52_UTAMA" | jq -r --arg i "$ING_WO" '[.[] | select(.ingredient_id==$i)][0].saldo // 0')
+cek "hasil produksi MASUK stok CK (saldo CK naik)" "V == 1" \
+  "$(jq -n --argjson a "$CKSALDO_SEB" --argjson b "$CKSALDO_SES" '($b > $a) | if . then 1 else 0 end')"
+# tak mendarat di store (belum dikirim) — store butuh transfer "kirim dari stok"
+STSALDO_SES=$(api "$OWNER" GET "/stok?branch_id=$CB46_ID" | jq -r --arg i "$ING_WO" '[.[] | select(.ingredient_id==$i)][0].saldo // 0')
+cek "produksi ke CK: saldo store tak berubah (belum dikirim)" "V == 1" \
+  "$(jq -n --argjson a "$STSALDO_SEB" --argjson b "$STSALDO_SES" '($b == $a) | if . then 1 else 0 end')"
 
 # guard: minta produksi utk store milik CK LAIN via CK52 → 400
 cek "permintaan produksi utk store CK-lain → 400" "V == 400" \
@@ -2025,21 +2014,21 @@ api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CK52_UTAMA\",\"items\":[{\"ingre
 PV66CK=$(api "$OWNER" POST "/rekomendasi/menu?branch_id=$CB46_ID" "{\"items\":[{\"menu_id\":\"$MENU66\",\"porsi\":100}],\"ck_branch_id\":\"$CK52_UTAMA\"}")
 cek "CK: baso66 saldo_ck == 200 (stok CK ikut dihitung)" "abs(V - 200) < 0.001" \
   "$(echo "$PV66CK" | jq --arg id "$BASO66" '[.bahan[] | select(.ingredient_id==$id)][0].saldo_ck')"
-cek "CK: baso66 saldo gabungan == 200 (store 0 + CK 200)" "abs(V - 200) < 0.001" \
+cek "CK: baso66 saldo = stok CABANG saja == 0 (bukan +CK)" "abs(V) < 0.001" \
   "$(echo "$PV66CK" | jq --arg id "$BASO66" '[.bahan[] | select(.ingredient_id==$id)][0].saldo')"
-cek "CK: baso66 kurang turun 500 → 300 (500 − 200 stok CK)" "abs(V - 300) < 0.001" \
-  "$(echo "$PV66CK" | jq --arg id "$BASO66" '[.bahan[] | select(.ingredient_id==$id)][0].kurang')"
+cek "CK: baso66 kirim_ck 200 (CK menutup 200 lewat kirim; sisa 300 diproduksi)" "abs(V - 200) < 0.001" \
+  "$(echo "$PV66CK" | jq --arg id "$BASO66" '[.bahan[] | select(.ingredient_id==$id)][0].kirim_ck')"
 cek "CK: kebutuhan daging turun 10000 → 6000 (300 baso = 3 batch)" "abs(V - 6000) < 0.001" \
   "$(echo "$PV66CK" | jq --arg id "$DAG66" '[.bahan_produksi[] | select(.ingredient_id==$id)][0].kebutuhan')"
 cek "CK: kebutuhan tepung turun 1500 → 900 (3 batch × 300)" "abs(V - 900) < 0.001" \
   "$(echo "$PV66CK" | jq --arg id "$TEP66" '[.bahan_produksi[] | select(.ingredient_id==$id)][0].kebutuhan')"
 # STOK CK CUKUP menutup seluruh kebutuhan (600 ≥ 500) → tak perlu produksi,
-# cabang tinggal DIKIRIM dari CK: baso66 kurang 0, tak ada belanja bahan
+# semua dikirim dari stok CK: baso66 kirim_ck 500, tak ada belanja bahan
 # produksi, jumlah_produksi 0.
 api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CK52_UTAMA\",\"items\":[{\"ingredient_id\":\"$BASO66\",\"qty\":600}]}" > /dev/null
 PV66FULL=$(api "$OWNER" POST "/rekomendasi/menu?branch_id=$CB46_ID" "{\"items\":[{\"menu_id\":\"$MENU66\",\"porsi\":100}],\"ck_branch_id\":\"$CK52_UTAMA\"}")
-cek "CK cukup: baso66 kurang 0 (600 CK ≥ 500 butuh)" "abs(V) < 0.001" \
-  "$(echo "$PV66FULL" | jq --arg id "$BASO66" '[.bahan[] | select(.ingredient_id==$id)][0].kurang')"
+cek "CK cukup: baso66 kirim_ck 500 (semua dari stok CK, tanpa produksi)" "abs(V - 500) < 0.001" \
+  "$(echo "$PV66FULL" | jq --arg id "$BASO66" '[.bahan[] | select(.ingredient_id==$id)][0].kirim_ck')"
 cek "CK cukup: jumlah_produksi 0 (tinggal kirim, tak produksi)" "V == 0" \
   "$(echo "$PV66FULL" | jq '.jumlah_produksi')"
 cek "CK cukup: tak ada belanja bahan produksi (bahan_produksi kosong)" "V == 0" \
@@ -2103,6 +2092,35 @@ api "$OWNER" POST "/produksi/tahap/$PF66B" "{\"ke\":\"menunggu\",\"items\":[{\"i
 cek "sisa split maju → konsumsi sisanya (daging 4000)" "abs(V - 4000) < 0.001" \
   "$(api "$OWNER" GET "/stok?branch_id=$CK52_UTAMA" | jq --arg id "$DAG66" '[.[] | select(.ingredient_id==$id)][0].saldo')"
 
+# --- KIRIM DARI STOK CK: stok jadi yang sudah ada di CK dipindah ke cabang
+#     (transfer, BUKAN produksi baru). CK 600, cabang 0. Permintaan 100 porsi
+#     (butuh 500 baso66) → kirim 500 dari CK; kirim + terima → cabang +500,
+#     CK −500. Rencana pakai saldo CABANG saja (jujur, cocok Kartu Stok). ---
+api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CB46_ID\",\"items\":[{\"ingredient_id\":\"$BASO66\",\"qty\":0}]}" > /dev/null
+api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CK52_UTAMA\",\"items\":[{\"ingredient_id\":\"$BASO66\",\"qty\":600}]}" > /dev/null
+KRM=$(api "$OWNER" POST /rekomendasi/menu/faktur "{\"items\":[{\"menu_id\":\"$MENU66\",\"porsi\":100}],\"tujuan_branch_id\":\"$CB46_ID\",\"ck_branch_id\":\"$CK52_UTAMA\"}")
+KRMF=$(echo "$KRM" | jq -r '.kirim.faktur_id // empty')
+cek "CK stok cukup → faktur KIRIM (transfer), tanpa produksi" "V == 1" \
+  "$(echo "$KRM" | jq '((.kirim != null) and (.produksi == null)) | if . then 1 else 0 end')"
+cek "faktur kirim: 1 bahan (baso66)" "V == 1" "$(echo "$KRM" | jq '.kirim.jumlah_baris')"
+cek "sebelum diterima: cabang baso66 masih 0" "abs(V) < 0.001" \
+  "$(api "$OWNER" GET "/stok?branch_id=$CB46_ID" | jq --arg i "$BASO66" '[.[]|select(.ingredient_id==$i)][0].saldo')"
+cek "sebelum diterima: CK baso66 masih 600" "abs(V - 600) < 0.001" \
+  "$(api "$OWNER" GET "/stok?branch_id=$CK52_UTAMA" | jq --arg i "$BASO66" '[.[]|select(.ingredient_id==$i)][0].saldo')"
+api "$OWNER" POST "/produksi/kirim/$KRMF" '{}' > /dev/null
+api "$OWNER" POST "/penerimaan/$KRMF/terima" '{}' > /dev/null
+cek "kirim dari stok: cabang baso66 naik jadi 500" "abs(V - 500) < 0.001" \
+  "$(api "$OWNER" GET "/stok?branch_id=$CB46_ID" | jq --arg i "$BASO66" '[.[]|select(.ingredient_id==$i)][0].saldo')"
+cek "kirim dari stok: CK baso66 turun jadi 100 (600−500)" "abs(V - 100) < 0.001" \
+  "$(api "$OWNER" GET "/stok?branch_id=$CK52_UTAMA" | jq --arg i "$BASO66" '[.[]|select(.ingredient_id==$i)][0].saldo')"
+api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CB46_ID\",\"items\":[{\"ingredient_id\":\"$BASO66\",\"qty\":0}]}" > /dev/null
+PVK=$(api "$OWNER" POST "/rekomendasi/menu?branch_id=$CB46_ID" "{\"items\":[{\"menu_id\":\"$MENU66\",\"porsi\":100}],\"ck_branch_id\":\"$CK52_UTAMA\"}")
+cek "rencana: saldo baso66 = stok CABANG saja (0, bukan +CK)" "abs(V) < 0.001" \
+  "$(echo "$PVK" | jq --arg i "$BASO66" '[.bahan[]|select(.ingredient_id==$i)][0].saldo')"
+cek "rencana: kirim_ck baso66 = 100 (sisa stok CK bisa dikirim)" "abs(V - 100) < 0.001" \
+  "$(echo "$PVK" | jq --arg i "$BASO66" '[.bahan[]|select(.ingredient_id==$i)][0].kirim_ck')"
+api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CK52_UTAMA\",\"items\":[{\"ingredient_id\":\"$BASO66\",\"qty\":0}]}" > /dev/null
+
 # --- Perbaikan review: guard konsistensi resep & isolasi tenant ---
 # flip pengadaan bahan yang masih jadi INPUT resep → 409 (rencana akan
 # melewatkan kebutuhannya diam-diam); bahan bebas → boleh
@@ -2132,6 +2150,32 @@ cek "konsumsi tetap di cabang asal walau tujuan dikirim dini (daging 3900)" "abs
 cek "ubah isi setelah produksi selesai → 200" "V == 200" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/bahan/$BASO66" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"isi":120}')"
 api "$OWNER" PUT "/bahan/$BASO66" '{"isi":100}' > /dev/null
+
+# --- Req 1: PENGAMAN BAHAN BAKU sebelum "mulai dikerjakan" ---
+# Bahan jadi baru dgn resep butuh bahan mentah yg stoknya 0 di CK → produksi
+# TIDAK boleh dimulai (400) sampai bahan diterima/di-stok. Cek availability
+# saja (bukan reservasi): dilakukan saat baris rencana → dikerjakan.
+GBHN66=$(api "$OWNER" POST /bahan '{"nama":"garam guard66","harga_beli":8000,"isi":1000,"satuan":"gr","pengadaan":"beli","kategori":"lain"}' | jq -r .id)
+GJADI66=$(api "$OWNER" POST /bahan '{"nama":"baso guard66","harga_beli":40000,"isi":100,"satuan":"butir","pengadaan":"produksi","kategori":"baso"}' | jq -r .id)
+api "$OWNER" PUT "/bahan/$GJADI66/resep" "{\"komponen\":[{\"ingredient_id\":\"$GBHN66\",\"qty\":500}]}" > /dev/null
+api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CK52_UTAMA\",\"items\":[{\"ingredient_id\":\"$GBHN66\",\"qty\":0}]}" > /dev/null
+# work-order: 100 butir baso guard66 (1 batch → butuh garam 500 gr)
+GFK66=$(api "$OWNER" POST /produksi/faktur "{\"branch_id\":\"$CK52_UTAMA\",\"worker_id\":\"$U58_ID\",\"items\":[{\"ingredient_id\":\"$GJADI66\",\"mode\":\"batch\",\"jumlah\":1}]}" | jq -r .faktur_id)
+GFK66_RID=$(api "$OWNER" GET "/produksi?branch_id=$CK52_UTAMA&per_page=500" | jq -r --arg f "$GFK66" '[.rows[] | select(.faktur_id==$f)][0].id')
+cek "mulai dikerjakan tanpa bahan baku ditolak (400)" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/produksi/tahap/$GFK66" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"ke":"dikerjakan"}')"
+cek "mulai dikerjakan SEBAGIAN tanpa bahan baku ditolak (400)" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/produksi/tahap/$GFK66" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"ke\":\"dikerjakan\",\"items\":[{\"id\":\"$GFK66_RID\",\"qty\":100}]}")"
+cek "baris tetap rencana (produksi tak dimulai)" "V == 1" \
+  "$(api "$OWNER" GET "/produksi?branch_id=$CK52_UTAMA&per_page=500" | jq --arg f "$GFK66" '([.rows[] | select(.faktur_id==$f)] | all(.[]; .status=="rencana")) | if . then 1 else 0 end')"
+# bahan di-stok cukup → mulai dikerjakan berhasil
+api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CK52_UTAMA\",\"items\":[{\"ingredient_id\":\"$GBHN66\",\"qty\":600}]}" > /dev/null
+cek "setelah bahan di-stok: mulai dikerjakan berhasil" "V == 1" \
+  "$(api "$OWNER" POST "/produksi/tahap/$GFK66" '{"ke":"dikerjakan"}' | jq '(.status=="dikerjakan") | if . then 1 else 0 end')"
+# qty penuh butuh lebih dari stok (2 batch → garam 1000 > 600) → tolak
+GFK66B=$(api "$OWNER" POST /produksi/faktur "{\"branch_id\":\"$CK52_UTAMA\",\"worker_id\":\"$U58_ID\",\"items\":[{\"ingredient_id\":\"$GJADI66\",\"mode\":\"batch\",\"jumlah\":2}]}" | jq -r .faktur_id)
+cek "bahan kurang utk qty penuh → mulai dikerjakan ditolak (400)" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/produksi/tahap/$GFK66B" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"ke":"dikerjakan"}')"
 
 echo "== 67. Master Satuan + Tambah Bahan Baku (bulk) + kode produk =="
 # Master satuan: bawaan terisi (pcs, gr, …)

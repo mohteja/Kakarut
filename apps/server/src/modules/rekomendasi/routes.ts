@@ -120,6 +120,7 @@ export const rekomendasiRoutes = new Hono<AppEnv>().get("/beli", async (c) => {
         ingredientId: productions.ingredientId,
         tipe: productions.tipe,
         bahanProduksi: productions.bahanProduksi,
+        asalBranchId: productions.asalBranchId,
         status: productions.status,
         totalHarga: productions.totalHarga,
         catatan: productions.catatan,
@@ -154,9 +155,11 @@ export const rekomendasiRoutes = new Hono<AppEnv>().get("/beli", async (c) => {
       _rankProd: number;
       _rankBeli: number;
       _rankBeliProd: number;
+      _rankKirim: number;
       _ingProd: Set<string>;
       _ingBeli: Set<string>;
       _ingBeliProd: Set<string>;
+      _ingKirim: Set<string>;
     };
     const map = new Map<string, Akum>();
     for (const r of rows) {
@@ -172,19 +175,32 @@ export const rekomendasiRoutes = new Hono<AppEnv>().get("/beli", async (c) => {
           produksi: null,
           beli: null,
           beli_produksi: null,
+          kirim: null,
           _rankProd: Infinity,
           _rankBeli: Infinity,
           _rankBeliProd: Infinity,
+          _rankKirim: Infinity,
           _ingProd: new Set(),
           _ingBeli: new Set(),
           _ingBeliProd: new Set(),
+          _ingKirim: new Set(),
         };
         map.set(id, g);
       }
       if (r.tujuanNama && !g.tujuan_cabang) g.tujuan_cabang = r.tujuanNama;
       const rank = RANK[r.status] ?? 99;
       const st = r.status as KonfirmasiStatus;
-      if (r.tipe === "produksi") {
+      if (r.asalBranchId) {
+        // KIRIM DARI STOK CK (transfer) — bagian tersendiri (bukan produksi baru)
+        if (!g.kirim) g.kirim = { faktur_id: r.fakturId!, jumlah_baris: 0, status: st, total: 0 };
+        g._ingKirim.add(r.ingredientId);
+        g.kirim.jumlah_baris = g._ingKirim.size;
+        g.kirim.total += Number(r.totalHarga ?? 0);
+        if (rank < g._rankKirim) {
+          g._rankKirim = rank;
+          g.kirim.status = st;
+        }
+      } else if (r.tipe === "produksi") {
         if (!g.produksi)
           g.produksi = { faktur_id: r.fakturId!, jumlah_baris: 0, status: st, total: 0 };
         g._ingProd.add(r.ingredientId);
@@ -217,8 +233,17 @@ export const rekomendasiRoutes = new Hono<AppEnv>().get("/beli", async (c) => {
       }
     }
     const hasil: PermintaanStokRow[] = [...map.values()].map(
-      ({ _rankProd, _rankBeli, _rankBeliProd, _ingProd, _ingBeli, _ingBeliProd, ...rest }) =>
-        rest,
+      ({
+        _rankProd,
+        _rankBeli,
+        _rankBeliProd,
+        _rankKirim,
+        _ingProd,
+        _ingBeli,
+        _ingBeliProd,
+        _ingKirim,
+        ...rest
+      }) => rest,
     );
     return c.json(hasil);
   })

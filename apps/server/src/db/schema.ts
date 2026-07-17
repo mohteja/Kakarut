@@ -761,6 +761,15 @@ export const productions = pgTable(
      * CK lalu dikirim ke sini. null = bukan work-order (produksi/beli biasa).
      */
     tujuanBranchId: uuid("tujuan_branch_id").references(() => branches.id),
+    /**
+     * "Kirim dari stok" (transfer stok jadi CK → cabang): non-null = baris ini
+     * MEMINDAH stok jadi yang SUDAH ADA di CK (asal_branch_id) ke cabang tujuan,
+     * BUKAN produksi baru — lahir langsung 'menunggu' (siap dikirim), tak
+     * mengonsumsi bahan mentah. Saat DITERIMA di cabang: stok cabang bertambah
+     * (baris produksi biasa) & stok CK asal berkurang (dihitung di
+     * hitungSaldoCabang). null = produksi/beli biasa.
+     */
+    asalBranchId: uuid("asal_branch_id").references(() => branches.id),
     ingredientId: uuid("ingredient_id")
       .notNull()
       .references(() => ingredients.id),
