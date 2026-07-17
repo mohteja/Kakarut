@@ -41,8 +41,9 @@ const SaleBody = z.object({
 });
 
 export const penjualanRoutes = new Hono<AppEnv>()
-  // Tim boleh melihat riwayat, tapi tidak boleh membuat transaksi
-  .post("/", requireRole("owner", "admin", "cashier"), zValidator("json", SaleBody), async (c) => {
+  // Transaksi POS HANYA peran kasir (owner/admin/tim tak boleh menjual —
+  // manajemen memantau lewat Riwayat/Laporan, tak meng-input transaksi).
+  .post("/", requireRole("cashier"), zValidator("json", SaleBody), async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");
     const branchId = body.branch_id ?? (await resolveBranchId(c));

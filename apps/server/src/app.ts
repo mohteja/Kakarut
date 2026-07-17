@@ -88,10 +88,10 @@ export function createApp() {
   tenant.use("/sampah/*", requireRole("owner", "admin"));
   tenant.use("/karyawan/*", requireRole("owner", "admin"));
   tenant.use("/customer/*", requireRole("owner", "admin"));
-  // Peran TIM = cek stok, lihat menu, profil, penerimaan barang, riwayat
-  // transaksi — TANPA kasir: shift & open bill khusus peran berjualan.
-  tenant.use("/shift/*", requireRole("owner", "admin", "cashier"));
-  tenant.use("/open-bill/*", requireRole("owner", "admin", "cashier"));
+  // Transaksi POS (jual, tutup kasir/shift, open bill) HANYA peran kasir.
+  // Owner/admin memantau lewat Riwayat/Laporan, tak meng-input transaksi.
+  tenant.use("/shift/*", requireRole("cashier"));
+  tenant.use("/open-bill/*", requireRole("cashier"));
   // Absensi = stasiun pindai QR yang dioperasikan admin/kasir untuk mencatat
   // karyawan; peran TIM tidak memindai — cukup tunjukkan QR dari Profil.
   tenant.use("/absensi/*", requireRole("owner", "admin", "cashier"));

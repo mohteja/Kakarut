@@ -87,6 +87,8 @@ export function Layout() {
   const role = auth.user.role;
   const isSuperAdmin = auth.user.is_super_admin;
   const isManajemen = role === "owner" || role === "admin";
+  // Transaksi POS (Kasir + Tutup Kasir) HANYA peran kasir.
+  const isKasir = role === "cashier";
   const adaKantor = cabang.some((b) => b.is_active && b.tipe === "kantor");
   // Satu perusahaan, beda divisi: menu sidebar mengikuti jenis lokasi terpilih.
   const dStore = divisi === "store";
@@ -239,17 +241,19 @@ export function Layout() {
                   </NavLink>
                 </>
               )}
-              {!isTim && !dCk && (
+              {/* Kasir (jual) & Tutup Kasir: HANYA peran kasir */}
+              {isKasir && !dCk && (
                 <NavLink to="/kasir" className={linkClass}>
                   🧾 Kasir
                 </NavLink>
               )}
+              {/* Riwayat Transaksi tetap bisa dipantau owner/admin (bukan tim CK) */}
               {!timDiCk && !dCk && (
                 <NavLink to="/kasir/riwayat" className={linkClass}>
                   🕘 Riwayat Transaksi
                 </NavLink>
               )}
-              {!isTim && !dCk && (
+              {isKasir && !dCk && (
                 <NavLink to="/kasir/tutup" className={linkClass}>
                   🧮 Tutup Kasir
                 </NavLink>

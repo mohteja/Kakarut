@@ -412,9 +412,9 @@ cek "kasir POST /produksi/faktur ditolak (403)" "V == 403" \
 cek "owner GET /pembelian ok (200)" "V == 200" "$(status_code "$OWNER" GET /pembelian)"
 cek "owner GET /rekomendasi/beli ok (200)" "V == 200" "$(status_code "$OWNER" GET /rekomendasi/beli)"
 
-# 17b. Penjualan hari ini → rekomendasi (acuan = hari ini)
+# 17b. Penjualan hari ini → rekomendasi (acuan = hari ini). Transaksi = kasir-saja.
 MENU_ID=$(api "$OWNER" GET /menu | jq -r '[.[] | select(.tipe == "regular")][0].id')
-api "$OWNER" POST /penjualan "{\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$MENU_ID\",\"qty\":3}]}" > /dev/null
+api "$KASIR" POST /penjualan "{\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$MENU_ID\",\"qty\":3}]}" > /dev/null
 TODAY=$(TZ=Asia/Jakarta date +%F)
 REK=$(api "$OWNER" GET "/rekomendasi/beli?acuan=rentang&dari=$TODAY&sampai=$TODAY&target=20000000")
 cek "rekomendasi: omzet acuan > 0" "V > 0" "$(echo "$REK" | jq '.acuan.omzet')"
@@ -864,8 +864,15 @@ cek "laporan: total_diskon >= 3400+5000+34000" "V >= 42400" "$(echo "$LAPD" | jq
 cek "laporan: profit = omzet - diskon - hpp" "V == 1" \
   "$(echo "$LAPD" | jq '(.estimasi_profit == (.omzet - .total_diskon - .total_hpp)) | if . then 1 else 0 end')"
 
-echo "== 31. Batas maksimal diskon kasir (owner/admin bebas) =="
+echo "== 31. Batas maksimal diskon kasir + transaksi HANYA kasir =="
 jp() { curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/penjualan" -H "Authorization: Bearer $1" -H 'Content-Type: application/json' -d "$2"; }
+# Transaksi POS = peran kasir SAJA: owner/admin/tim tak boleh menjual.
+cek "owner tak boleh transaksi (kasir-saja) → 403" "V == 403" \
+  "$(jp "$OWNER" "{\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")"
+cek "owner tak boleh buka shift (kasir-saja) → 403" "V == 403" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/shift/buka" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"modal_awal":0}')"
+cek "owner tak boleh open-bill (kasir-saja) → 403" "V == 403" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/open-bill" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")"
 api "$OWNER" PATCH /company '{"diskon_maks_persen":20}' > /dev/null
 cek "company: diskon_maks_persen tersimpan 20" "V == 20" "$(api "$OWNER" GET /company | jq '.diskonMaksPersen')"
 cek "kasir diskon 50% (> batas 20%) ditolak (400)" "V == 400" \
@@ -874,8 +881,6 @@ cek "kasir diskon nominal 17000 (=50% > batas) ditolak (400)" "V == 400" \
   "$(jp "$KASIR" "{\"is_dine_in\":false,\"diskon_tipe\":\"nominal\",\"diskon_nilai\":17000,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")"
 cek "kasir diskon 20% (= batas) diterima (201)" "V == 201" \
   "$(jp "$KASIR" "{\"is_dine_in\":false,\"diskon_tipe\":\"persen\",\"diskon_nilai\":20,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")"
-cek "owner diskon 50% (bypass batas) diterima (201)" "V == 201" \
-  "$(jp "$OWNER" "{\"is_dine_in\":false,\"diskon_tipe\":\"persen\",\"diskon_nilai\":50,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")"
 api "$OWNER" PATCH /company '{"diskon_maks_persen":0}' > /dev/null
 cek "batas 0: kasir diskon 5% ditolak (400)" "V == 400" \
   "$(jp "$KASIR" "{\"is_dine_in\":false,\"diskon_tipe\":\"persen\",\"diskon_nilai\":5,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")"
@@ -1353,6 +1358,10 @@ cek "provisioning: ada central_kitchen & tepat 1 kantor" "V == 1" \
   "$(api "$OWNER" GET /cabang | jq '((([.[] | select(.tipe=="central_kitchen")] | length) >= 1) and (([.[] | select(.tipe=="kantor")] | length) == 1)) | if . then 1 else 0 end')"
 
 CB46_ID=$(api "$OWNER" POST /cabang '{"nama":"Cabang Uji 46"}' | jq -r .id)
+# kasir cabang CB46 (transaksi POS = kasir-saja, terkunci di cabangnya) — dipakai
+# untuk uji jual/menu-terbatas lintas cabang & data penjualan kantor (§51/§60).
+api "$OWNER" POST /karyawan "{\"nama\":\"Kasir 46\",\"email\":\"kasir46@basooopa.id\",\"password\":\"Kasir46Pass!\",\"role\":\"cashier\",\"branch_id\":\"$CB46_ID\"}" > /dev/null
+KASIR46=$(login "kasir46@basooopa.id" "Kasir46Pass!")
 GD46_ID=$(api "$OWNER" POST /penyimpanan "{\"nama\":\"Gudang 46\",\"branch_id\":\"$CB46_ID\"}" | jq -r .id)
 PUSAT46_ID=$(api "$OWNER" GET /cabang | jq -r --arg x "$CB46_ID" '[.[] | select(.id != $x)][0].id')
 GD46P_ID=$(api "$OWNER" POST /penyimpanan "{\"nama\":\"Gudang 46P\",\"branch_id\":\"$PUSAT46_ID\"}" | jq -r .id)
@@ -1500,10 +1509,11 @@ cek "kasir (cabang Pusat) tetap melihat menu" "V == 1" \
   "$(api "$KASIR" GET /menu | jq --arg id "$PBA_ID" '([.[] | select(.id==$id)] | length == 1) | if . then 1 else 0 end')"
 cek "ketersediaan cabang lain tak memuat menu" "V == 0" \
   "$(api "$OWNER" GET "/menu/ketersediaan?branch_id=$CB46_ID" | jq --arg id "$PBA_ID" '[.[] | select(.menu_id==$id)] | length')"
-cek "jual menu terbatas di cabang lain → 400" "V == 400" \
-  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/penjualan" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"branch_id\":\"$CB46_ID\",\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")"
-cek "open bill menu terbatas di cabang lain → 400" "V == 400" \
-  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/open-bill" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"branch_id\":\"$CB46_ID\",\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")"
+# kasir CB46 jual menu yang dibatasi ke Pusat → 400 (menu tak tersedia di cabangnya)
+cek "kasir CB46 jual menu terbatas → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/penjualan" -H "Authorization: Bearer $KASIR46" -H 'Content-Type: application/json' -d "{\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")"
+cek "kasir CB46 open bill menu terbatas → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/open-bill" -H "Authorization: Bearer $KASIR46" -H 'Content-Type: application/json' -d "{\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")"
 cek "rencana menu di cabang lain → 400" "V == 400" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/rekomendasi/menu?branch_id=$CB46_ID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"items\":[{\"menu_id\":\"$PBA_ID\",\"porsi\":5}]}")"
 cek "jual di cabang sendiri (Pusat) tetap OK" "V == 1" \
@@ -1792,9 +1802,10 @@ cek "aktifkan: login kembali normal" "V == 1" \
   "$([ -n "$(login "status59@basooopa.id" "PwStatus59!")" ] && echo 1 || echo 0)"
 
 echo "== 60. Kantor pusat data penjualan: GET /penjualan?branch_id=all =="
-# dua transaksi di dua cabang berbeda → kantor melihat keduanya sekaligus
-J60A=$(api "$OWNER" POST /penjualan "{\"branch_id\":\"$PUSAT51_ID\",\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")
-J60B=$(api "$OWNER" POST /penjualan "{\"branch_id\":\"$CB46_ID\",\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")
+# dua transaksi di dua cabang berbeda (oleh kasir masing-masing cabang) →
+# kantor melihat keduanya sekaligus. PUSAT51 = Pusat (cabang KASIR).
+J60A=$(api "$KASIR" POST /penjualan "{\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")
+J60B=$(api "$KASIR46" POST /penjualan "{\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")
 N60A=$(echo "$J60A" | jq -r .sale.nomor)
 N60B=$(echo "$J60B" | jq -r .sale.nomor)
 cek "riwayat semua cabang memuat transaksi dua cabang" "V == 2" \
