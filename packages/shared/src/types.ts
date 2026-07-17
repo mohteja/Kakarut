@@ -259,7 +259,10 @@ export interface RencanaBahanRow {
   pengadaan: JenisPengadaan;
   /** total kebutuhan = Σ porsi × qty per porsi */
   kebutuhan: number;
+  /** saldo yang menutup kebutuhan = stok cabang tujuan + stok CK (bila ada) */
   saldo: number;
+  /** bagian saldo yang berasal dari Central Kitchen (0 bila tak ada CK) */
+  saldo_ck: number;
   /** kekurangan = max(0, kebutuhan − saldo); 0 = stok cukup */
   kurang: number;
   isi: number;

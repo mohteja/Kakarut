@@ -1969,6 +1969,23 @@ cek "preview: kebutuhan daging 10000 gr (resep 2000 × 5 batch)" "abs(V - 10000)
   "$(echo "$PV66" | jq --arg id "$DAG66" '[.bahan_produksi[] | select(.ingredient_id==$id)][0].kebutuhan')"
 cek "preview: qty_faktur tepung 1500 (3 kemasan × 500)" "abs(V - 1500) < 0.001" \
   "$(echo "$PV66" | jq --arg id "$TEP66" '[.bahan_produksi[] | select(.ingredient_id==$id)][0].qty_faktur')"
+# STOK CK ikut menutup kebutuhan store: seed 200 butir baso66 di CK → saat
+# preview utk store CB46 (CK52 pelaksana), saldo store + stok CK dijumlahkan →
+# kekurangan turun (500 → 300) & kebutuhan bahan mentah ikut turun (3 batch).
+# Reset baso66 CK ke 0 sesudahnya agar tes MOQ/konsumsi lanjutan tak terpengaruh.
+api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CK52_UTAMA\",\"items\":[{\"ingredient_id\":\"$BASO66\",\"qty\":200}]}" > /dev/null
+PV66CK=$(api "$OWNER" POST "/rekomendasi/menu?branch_id=$CB46_ID" "{\"items\":[{\"menu_id\":\"$MENU66\",\"porsi\":100}],\"ck_branch_id\":\"$CK52_UTAMA\"}")
+cek "CK: baso66 saldo_ck == 200 (stok CK ikut dihitung)" "abs(V - 200) < 0.001" \
+  "$(echo "$PV66CK" | jq --arg id "$BASO66" '[.bahan[] | select(.ingredient_id==$id)][0].saldo_ck')"
+cek "CK: baso66 saldo gabungan == 200 (store 0 + CK 200)" "abs(V - 200) < 0.001" \
+  "$(echo "$PV66CK" | jq --arg id "$BASO66" '[.bahan[] | select(.ingredient_id==$id)][0].saldo')"
+cek "CK: baso66 kurang turun 500 → 300 (500 − 200 stok CK)" "abs(V - 300) < 0.001" \
+  "$(echo "$PV66CK" | jq --arg id "$BASO66" '[.bahan[] | select(.ingredient_id==$id)][0].kurang')"
+cek "CK: kebutuhan daging turun 10000 → 6000 (300 baso = 3 batch)" "abs(V - 6000) < 0.001" \
+  "$(echo "$PV66CK" | jq --arg id "$DAG66" '[.bahan_produksi[] | select(.ingredient_id==$id)][0].kebutuhan')"
+cek "CK: kebutuhan tepung turun 1500 → 900 (3 batch × 300)" "abs(V - 900) < 0.001" \
+  "$(echo "$PV66CK" | jq --arg id "$TEP66" '[.bahan_produksi[] | select(.ingredient_id==$id)][0].kebutuhan')"
+api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CK52_UTAMA\",\"items\":[{\"ingredient_id\":\"$BASO66\",\"qty\":0}]}" > /dev/null
 # MOQ (min_beli): daging minimal belanja 12000 → qty_faktur naik ke 12000
 api "$OWNER" PUT "/bahan/$DAG66" '{"min_beli":12000}' > /dev/null
 # reorder point (stok_minimum): tepung 700 → kurang 1500+700 = 2200 → 5 kemasan (2500)
@@ -2005,7 +2022,11 @@ cek "kartu stok daging: mutasi 'pemakaian' tercatat" "V >= 1" \
 api "$OWNER" POST /produksi "{\"branch_id\":\"$CK52_UTAMA\",\"ingredient_id\":\"$BASO66\",\"qty\":100}" > /dev/null
 cek "single-row produksi ikut konsumsi (saldo daging 8000)" "abs(V - 8000) < 0.001" \
   "$(api "$OWNER" GET "/stok?branch_id=$CK52_UTAMA" | jq --arg id "$DAG66" '[.[] | select(.ingredient_id==$id)][0].saldo')"
-# permintaan kedua: stok bahan mentah CK masih cukup → TANPA faktur bahan produksi
+# permintaan kedua: stok bahan mentah CK masih cukup → TANPA faktur bahan produksi.
+# Reset stok JADI baso66 di CK ke 0 dulu: stok jadi CK yang ikut menutup
+# kebutuhan store sudah diuji terpisah di atas — fokus tes ini: split tahap
+# sebagian, jadi work-order memproduksi jumlah penuh (bukan dikurangi stok CK).
+api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CK52_UTAMA\",\"items\":[{\"ingredient_id\":\"$BASO66\",\"qty\":0}]}" > /dev/null
 WO66B=$(api "$OWNER" POST /rekomendasi/menu/faktur "{\"items\":[{\"menu_id\":\"$MENU66\",\"porsi\":40}],\"tujuan_branch_id\":\"$CB46_ID\",\"ck_branch_id\":\"$CK52_UTAMA\"}")
 PF66B=$(echo "$WO66B" | jq -r '.produksi.faktur_id')
 cek "stok bahan mentah CK cukup → beli_produksi null" "V == 1" \
@@ -2357,7 +2378,10 @@ cek "stok kecap di CK tetap 0" "abs(V) < 0.001" \
   "$(api "$OWNER" GET "/stok?branch_id=$CK52_UTAMA" | jq --arg i "$J74" '[.[] | select(.ingredient_id==$i)][0].saldo // 0')"
 
 echo "== 75. Hapus permintaan → semua fakturnya soft-delete + dapat dipulihkan =="
-# permintaan campuran baru (produksi + belanja bahan produksi)
+# permintaan campuran baru (produksi + belanja bahan produksi).
+# Reset stok JADI baso66 di CK ke 0 → work-order memproduksi penuh (bukan
+# ditutup stok jadi CK) sehingga faktur produksi & bahan produksi benar terbit.
+api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CK52_UTAMA\",\"items\":[{\"ingredient_id\":\"$BASO66\",\"qty\":0}]}" > /dev/null
 MENU75=$(api "$OWNER" POST /menu "{\"nama\":\"Menu Uji75\",\"category_id\":\"$CAT66\",\"tipe\":\"regular\",\"mult\":2,\"harga_jual\":15000,\"komponen\":[{\"ingredient_id\":\"$BASO66\",\"qty\":5}]}" | jq -r .id)
 WO75=$(api "$OWNER" POST /rekomendasi/menu/faktur "{\"items\":[{\"menu_id\":\"$MENU75\",\"porsi\":30}],\"tujuan_branch_id\":\"$CB46_ID\",\"ck_branch_id\":\"$CK52_UTAMA\"}")
 PF75=$(echo "$WO75" | jq -r '.produksi.faktur_id')

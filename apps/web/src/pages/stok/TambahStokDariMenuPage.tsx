@@ -82,7 +82,14 @@ function BagianKurang({
                 <td className={`${tdClass} text-right`}>
                   {formatAngka(b.kebutuhan)} {b.satuan}
                 </td>
-                <td className={`${tdClass} text-right`}>{formatAngka(b.saldo)}</td>
+                <td className={`${tdClass} text-right`}>
+                  {formatAngka(b.saldo)}
+                  {b.saldo_ck > 0 && (
+                    <div className="text-[11px] font-normal text-stone-400">
+                      termasuk CK {formatAngka(b.saldo_ck)}
+                    </div>
+                  )}
+                </td>
                 <td className={`${tdClass} text-right font-bold text-orange-700`}>
                   {formatAngka(b.kurang)}
                 </td>
