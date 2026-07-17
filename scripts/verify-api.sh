@@ -2162,6 +2162,32 @@ cek "ubah isi setelah produksi selesai → 200" "V == 200" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/bahan/$BASO66" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"isi":120}')"
 api "$OWNER" PUT "/bahan/$BASO66" '{"isi":100}' > /dev/null
 
+# --- Req 1: PENGAMAN BAHAN BAKU sebelum "mulai dikerjakan" ---
+# Bahan jadi baru dgn resep butuh bahan mentah yg stoknya 0 di CK → produksi
+# TIDAK boleh dimulai (400) sampai bahan diterima/di-stok. Cek availability
+# saja (bukan reservasi): dilakukan saat baris rencana → dikerjakan.
+GBHN66=$(api "$OWNER" POST /bahan '{"nama":"garam guard66","harga_beli":8000,"isi":1000,"satuan":"gr","pengadaan":"beli","kategori":"lain"}' | jq -r .id)
+GJADI66=$(api "$OWNER" POST /bahan '{"nama":"baso guard66","harga_beli":40000,"isi":100,"satuan":"butir","pengadaan":"produksi","kategori":"baso"}' | jq -r .id)
+api "$OWNER" PUT "/bahan/$GJADI66/resep" "{\"komponen\":[{\"ingredient_id\":\"$GBHN66\",\"qty\":500}]}" > /dev/null
+api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CK52_UTAMA\",\"items\":[{\"ingredient_id\":\"$GBHN66\",\"qty\":0}]}" > /dev/null
+# work-order: 100 butir baso guard66 (1 batch → butuh garam 500 gr)
+GFK66=$(api "$OWNER" POST /produksi/faktur "{\"branch_id\":\"$CK52_UTAMA\",\"worker_id\":\"$U58_ID\",\"items\":[{\"ingredient_id\":\"$GJADI66\",\"mode\":\"batch\",\"jumlah\":1}]}" | jq -r .faktur_id)
+GFK66_RID=$(api "$OWNER" GET "/produksi?branch_id=$CK52_UTAMA&per_page=500" | jq -r --arg f "$GFK66" '[.rows[] | select(.faktur_id==$f)][0].id')
+cek "mulai dikerjakan tanpa bahan baku ditolak (400)" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/produksi/tahap/$GFK66" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"ke":"dikerjakan"}')"
+cek "mulai dikerjakan SEBAGIAN tanpa bahan baku ditolak (400)" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/produksi/tahap/$GFK66" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"ke\":\"dikerjakan\",\"items\":[{\"id\":\"$GFK66_RID\",\"qty\":100}]}")"
+cek "baris tetap rencana (produksi tak dimulai)" "V == 1" \
+  "$(api "$OWNER" GET "/produksi?branch_id=$CK52_UTAMA&per_page=500" | jq --arg f "$GFK66" '([.rows[] | select(.faktur_id==$f)] | all(.[]; .status=="rencana")) | if . then 1 else 0 end')"
+# bahan di-stok cukup → mulai dikerjakan berhasil
+api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CK52_UTAMA\",\"items\":[{\"ingredient_id\":\"$GBHN66\",\"qty\":600}]}" > /dev/null
+cek "setelah bahan di-stok: mulai dikerjakan berhasil" "V == 1" \
+  "$(api "$OWNER" POST "/produksi/tahap/$GFK66" '{"ke":"dikerjakan"}' | jq '(.status=="dikerjakan") | if . then 1 else 0 end')"
+# qty penuh butuh lebih dari stok (2 batch → garam 1000 > 600) → tolak
+GFK66B=$(api "$OWNER" POST /produksi/faktur "{\"branch_id\":\"$CK52_UTAMA\",\"worker_id\":\"$U58_ID\",\"items\":[{\"ingredient_id\":\"$GJADI66\",\"mode\":\"batch\",\"jumlah\":2}]}" | jq -r .faktur_id)
+cek "bahan kurang utk qty penuh → mulai dikerjakan ditolak (400)" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/produksi/tahap/$GFK66B" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"ke":"dikerjakan"}')"
+
 echo "== 67. Master Satuan + Tambah Bahan Baku (bulk) + kode produk =="
 # Master satuan: bawaan terisi (pcs, gr, …)
 cek "master satuan bawaan terisi (>= 10)" "V >= 10" "$(api "$OWNER" GET /satuan | jq 'length')"

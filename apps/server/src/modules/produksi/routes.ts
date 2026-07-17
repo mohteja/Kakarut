@@ -20,7 +20,12 @@ import {
   suppliers,
   users,
 } from "../../db/schema";
-import { catatKonsumsiProduksi, type BarisProduksiSelesai } from "./konsumsi";
+import {
+  bahanKurangUntukProduksi,
+  catatKonsumsiProduksi,
+  type BahanKurangProduksi,
+  type BarisProduksiSelesai,
+} from "./konsumsi";
 import { AKSI_TAHAP_LOG, catatLogFaktur, rpLog } from "./log";
 import {
   pastikanCabang,
@@ -241,6 +246,19 @@ function pastikanJalur(
  */
 function hargaDefault(qty: number, ing: { isi: number; hargaBeli: number }) {
   return Math.round((qty / ing.isi) * ing.hargaBeli);
+}
+
+/** Angka ringkas untuk pesan (buang desimal nol berlebih). */
+function fmtQty(n: number) {
+  return Number(n.toFixed(2)).toLocaleString("id-ID");
+}
+
+/** Pesan blokir "bahan baku belum cukup" untuk pengaman mulai produksi. */
+function pesanBahanKurang(kurang: BahanKurangProduksi[]) {
+  const detail = kurang
+    .map((k) => `${k.nama} (butuh ${fmtQty(k.butuh)} ${k.satuan}, tersedia ${fmtQty(k.tersedia)})`)
+    .join("; ");
+  return `Bahan baku belum cukup untuk mulai produksi: ${detail}. Penuhi/terima stok bahan di cabang dulu.`;
 }
 
 /** Pastikan user adalah anggota (karyawan) perusahaan — untuk penugasan produksi. */
@@ -472,6 +490,28 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
           }
           if (item.qty > b.qty + 1e-9) {
             throw new HTTPException(400, { message: "Qty maju melebihi qty baris" });
+          }
+        }
+
+        // PENGAMAN BAHAN BAKU (produksi): sebelum baris rencana MULAI dikerjakan
+        // (target ≥ dikerjakan), pastikan bahan mentah resepnya cukup di cabang
+        // pelaksana — jangan mulai produksi bila bahannya belum ada/diterima.
+        if (tipe === "produksi" && target >= URUTAN_TAHAP.dikerjakan) {
+          const cekRows = items
+            .map((it) => ({ b: byId.get(it.id)!, qty: it.qty }))
+            .filter(
+              ({ b }) =>
+                URUTAN_TAHAP[b.status as keyof typeof URUTAN_TAHAP] < URUTAN_TAHAP.dikerjakan,
+            )
+            .map(({ b, qty }) => ({
+              id: b.id,
+              branchId: b.branchId,
+              ingredientId: b.ingredientId,
+              qty,
+            }));
+          const kurang = await bahanKurangUntukProduksi(auth.company_id!, cekRows);
+          if (kurang.length > 0) {
+            throw new HTTPException(400, { message: pesanBahanKurang(kurang) });
           }
         }
 
@@ -731,6 +771,25 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         });
       }
       const dari = TAHAP_SEBELUM[ke];
+
+      // PENGAMAN BAHAN BAKU (produksi): seluruh faktur MULAI dikerjakan →
+      // pastikan bahan mentah resep tiap baris rencana cukup di cabang
+      // pelaksana sebelum produksi dimulai.
+      if (tipe === "produksi" && ke === "dikerjakan") {
+        const barisRencana = await db
+          .select({
+            id: productions.id,
+            branchId: productions.branchId,
+            ingredientId: productions.ingredientId,
+            qty: productions.qty,
+          })
+          .from(productions)
+          .where(and(...conds, eq(productions.status, dari)));
+        const kurang = await bahanKurangUntukProduksi(auth.company_id!, barisRencana);
+        if (kurang.length > 0) {
+          throw new HTTPException(400, { message: pesanBahanKurang(kurang) });
+        }
+      }
 
       const rows = await db.transaction(async (tx) => {
         const diperbarui = await tx
