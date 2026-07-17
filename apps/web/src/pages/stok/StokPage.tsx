@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import type {
   MenuDto,
@@ -21,7 +21,7 @@ import {
 } from "../../components/ui";
 import { CabangDataBar } from "../../components/CabangDataBar";
 import { useAuth } from "../../context/AuthContext";
-import { useCabangData } from "../../context/BranchContext";
+import { useBranch, useCabangData } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import {
   formatAngka,
@@ -33,13 +33,26 @@ import {
 export function StokPage() {
   const { auth } = useAuth();
   // Stok bersifat fisik per cabang — dari Kantor pilih cabang datanya.
-  const { query: branchQuery } = useCabangData();
+  const { id: dataId, query: branchQuery } = useCabangData();
+  const { cabang } = useBranch();
+  // Jenis lokasi data terpilih menentukan stok apa yang relevan:
+  //  - store          → simpan bahan + jual menu (Stok Bahan + Stok Menu)
+  //  - central_kitchen → produksi bahan, TIDAK jual menu (Stok Bahan saja)
+  //  - kantor          → kantor tak menyimpan stok fisik (tak ada keduanya)
+  const selTipe = cabang.find((b) => b.id === dataId)?.tipe;
+  const isKantorData = selTipe === "kantor";
+  const bolehStokMenu = selTipe !== "central_kitchen" && selTipe !== "kantor";
   // tim hanya CEK stok — opname/penyesuaian bukan tugasnya
   const isTim = auth?.user.role === "tim";
   const isManajemen = auth?.user.role === "owner" || auth?.user.role === "admin";
   // Dua tampilan: stok BAHAN (baris per bahan baku) & stok MENU (sisa porsi
   // per menu, diturunkan dari saldo bahan — selalu berkorelasi otomatis).
   const [tab, setTab] = useState<"bahan" | "menu">("bahan");
+  // Pindah ke tab bahan bila Stok Menu tak relevan (CK/kantor) supaya tak
+  // menampilkan tab kosong saat lokasi data berganti.
+  useEffect(() => {
+    if (tab === "menu" && !bolehStokMenu) setTab("bahan");
+  }, [tab, bolehStokMenu]);
 
   const { data: stok, isLoading } = useQuery({
     queryKey: ["stok", branchQuery],
@@ -102,7 +115,7 @@ export function StokPage() {
       <CabangDataBar />
       <PageTitle
         aksi={
-          tab === "bahan" ? (
+          !isKantorData && tab === "bahan" ? (
             <div className="flex flex-wrap gap-2">
               {/* Penyesuaian = klarifikasi/persetujuan selisih (manajemen/kasir);
                   tim hanya melakukan opname + lihat riwayat. */}
@@ -132,32 +145,46 @@ export function StokPage() {
           ) : undefined
         }
       >
-        {tab === "bahan" ? "Stok Bahan" : "Stok Menu"}
+        {isKantorData ? "Stok" : tab === "bahan" ? "Stok Bahan" : "Stok Menu"}
       </PageTitle>
 
-      {/* Tab: stok per bahan baku vs sisa porsi per menu */}
-      <div className="mb-3 flex overflow-hidden rounded-lg border border-stone-300 text-sm w-fit">
-        <button
-          type="button"
-          onClick={() => setTab("bahan")}
-          className={`px-3 py-1.5 font-medium ${
-            tab === "bahan" ? "bg-orange-600 text-white" : "bg-white text-stone-600 hover:bg-stone-50"
-          }`}
-        >
-          🥩 Stok Bahan
-        </button>
-        <button
-          type="button"
-          onClick={() => setTab("menu")}
-          className={`px-3 py-1.5 font-medium ${
-            tab === "menu" ? "bg-orange-600 text-white" : "bg-white text-stone-600 hover:bg-stone-50"
-          }`}
-        >
-          🍜 Stok Menu
-        </button>
-      </div>
+      {/* Kantor tak menyimpan stok fisik — arahkan ke lokasi yang menyimpan */}
+      {isKantorData && (
+        <Card className="p-6 text-center text-sm text-stone-500">
+          🏢 <b>Kantor</b> tidak menyimpan stok. Pilih cabang <b>store</b> (menyimpan bahan &
+          menjual menu) atau <b>Central Kitchen</b> (menyimpan bahan produksi) di pemilih
+          <b> "Dari Kantor — data cabang"</b> di atas.
+        </Card>
+      )}
 
-      {tab === "menu" ? (
+      {/* Tab: stok per bahan baku vs sisa porsi per menu. Stok Menu hanya untuk
+          store (menu dijual di store; CK memproduksi bahan, tak menjual menu). */}
+      {!isKantorData && (
+        <div className="mb-3 flex overflow-hidden rounded-lg border border-stone-300 text-sm w-fit">
+          <button
+            type="button"
+            onClick={() => setTab("bahan")}
+            className={`px-3 py-1.5 font-medium ${
+              tab === "bahan" ? "bg-orange-600 text-white" : "bg-white text-stone-600 hover:bg-stone-50"
+            }`}
+          >
+            🥩 Stok Bahan
+          </button>
+          {bolehStokMenu && (
+            <button
+              type="button"
+              onClick={() => setTab("menu")}
+              className={`px-3 py-1.5 font-medium ${
+                tab === "menu" ? "bg-orange-600 text-white" : "bg-white text-stone-600 hover:bg-stone-50"
+              }`}
+            >
+              🍜 Stok Menu
+            </button>
+          )}
+        </div>
+      )}
+
+      {isKantorData ? null : tab === "menu" ? (
         <>
           <div className="mb-3 flex flex-wrap items-center gap-2">
             <input
