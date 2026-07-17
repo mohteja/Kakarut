@@ -50,6 +50,10 @@ export function DokumenBelanjaModal({
   onClose: () => void;
 }) {
   const badge = badgeFaktur("beli", grup.status);
+  // RAB murni (belum ada yang diproses) → dokumen untuk peninjauan finance,
+  // bukan lagi pegangan pembelanja. Judul & kop menyesuaikan.
+  const isRab = grup.rows.every((r) => r.status === "rencana" || r.status === "ditolak");
+  const judul = isRab ? "Dokumen RAB" : "Dokumen Belanja";
   // baris ditolak tak ikut daftar belanja
   const rows = grup.rows.filter((r) => r.status !== "ditolak");
   const grupSupplier = perSupplier(rows);
@@ -71,7 +75,7 @@ export function DokumenBelanjaModal({
       <div className={`border-b pb-2 ${cetak ? "border-black" : "border-stone-200"}`}>
         <div className="flex items-start justify-between gap-2">
           <div>
-            <div className="text-base font-bold">🧾 Dokumen Belanja</div>
+            <div className="text-base font-bold">🧾 {judul}</div>
             <div className={`text-xs ${cetak ? "" : "text-stone-500"}`}>
               {grup.noFaktur && <span className="font-mono">{grup.noFaktur} · </span>}
               {formatTanggalRingkas(grup.waktu)} · {formatWaktu(grup.waktu)}
@@ -198,7 +202,7 @@ export function DokumenBelanjaModal({
 
   return (
     <>
-      <Modal open onClose={onClose} title="📄 Dokumen Belanja" lebar="max-w-xl">
+      <Modal open onClose={onClose} title={`📄 ${judul}`} lebar="max-w-xl">
         {isi(false)}
         <div className="mt-4 flex justify-end gap-2">
           <button onClick={onClose} className={btnSecondary}>

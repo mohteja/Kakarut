@@ -559,18 +559,24 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                   )}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  {/* dokumen belanja: pegangan pembelanja saat faktur diproses */}
-                  {tipe === "beli" && g.rows.some((r) => r.status === "dikerjakan") && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setDokumen(g.key);
-                      }}
-                      className="whitespace-nowrap rounded-lg border border-stone-300 bg-white px-3 py-2.5 text-sm font-semibold text-stone-700 hover:border-orange-400 hover:text-orange-700"
-                    >
-                      📄 Dokumen belanja
-                    </button>
-                  )}
+                  {/* Dokumen belanja/RAB: sejak RAB agar finance bisa meninjau
+                      apa yang dibeli & anggarannya (tim CK kirim ke finance),
+                      lalu jadi pegangan pembelanja saat diproses. */}
+                  {tipe === "beli" &&
+                    g.rows.some((r) => r.status === "rencana" || r.status === "dikerjakan") && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setDokumen(g.key);
+                        }}
+                        className="whitespace-nowrap rounded-lg border border-stone-300 bg-white px-3 py-2.5 text-sm font-semibold text-stone-700 hover:border-orange-400 hover:text-orange-700"
+                      >
+                        📄{" "}
+                        {g.rows.some((r) => r.status === "dikerjakan")
+                          ? "Dokumen belanja"
+                          : "Dokumen RAB"}
+                      </button>
+                    )}
                   {/* dokumen kirim (surat jalan) barang dalam perjalanan */}
                   {adaTerkirim && (
                     <button
