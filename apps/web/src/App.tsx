@@ -26,6 +26,7 @@ import { PembelianPage } from "./pages/produksi/PembelianPage";
 import { PenerimaanPage } from "./pages/produksi/PenerimaanPage";
 import { ProduksiPage } from "./pages/produksi/ProduksiPage";
 import { RekomendasiBeliPage } from "./pages/produksi/RekomendasiBeliPage";
+import { TahapPage } from "./pages/produksi/TahapPage";
 import { ResepPage } from "./pages/resep/ResepPage";
 import { CabangPage } from "./pages/pengaturan/CabangPage";
 import { KaryawanPage } from "./pages/pengaturan/KaryawanPage";
@@ -115,8 +116,10 @@ export default function App() {
                 <>
                   <Route path="/produksi" element={<ProduksiPage />} />
                   <Route path="/produksi/baru" element={<FakturFormPage tipe="produksi" />} />
+                  <Route path="/produksi/tahap" element={<TahapPage />} />
                   <Route path="/pembelian" element={<PembelianPage />} />
                   <Route path="/pembelian/baru" element={<FakturFormPage tipe="beli" />} />
+                  <Route path="/pembelian/tahap" element={<TahapPage />} />
                   <Route path="/bahan" element={<BahanPage />} />
                   <Route path="/resep" element={<ResepPage />} />
                 </>

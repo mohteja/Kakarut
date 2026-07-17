@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import type { JenisPengadaan, KonfirmasiStatus } from "@kakarut/shared";
 import {
   Card,
@@ -27,7 +27,7 @@ interface StokMasukPage {
 import { DokumenBelanjaModal } from "./DokumenBelanjaModal";
 import { DokumenKirimModal } from "./DokumenKirimModal";
 import { FakturDetailModal } from "./FakturDetailModal";
-import { TahapModal } from "./TahapModal";
+import type { TahapNavState } from "./TahapPage";
 
 export interface StokMasukRow {
   id: string;
@@ -273,14 +273,36 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
     setPage(Math.min(totalPages, Math.max(1, n)));
   }
 
-  // Ubah tahap lewat dropdown → modal penyesuaian per baris (tak ada lagi
-  // aksi satu-klik yang bisa kepencet tak sengaja).
-  const [ubahTahap, setUbahTahap] = useState<{ grup: FakturGroup; ke: TahapTujuan } | null>(
-    null,
-  );
+  // Ubah tahap lewat dropdown → HALAMAN penyesuaian (bukan modal, agar gestur
+  // back touchpad tak menutup form tak sengaja). Grup dikirim lewat router
+  // state; simpan → redirect balik ke daftar ini.
+  const navigate = useNavigate();
+  const bukaUbahTahap = (g: FakturGroup, ke: TahapTujuan) => {
+    const st: TahapNavState = {
+      grup: g,
+      tipe,
+      endpoint: t.endpoint,
+      ke,
+      kembali: t.endpoint,
+    };
+    navigate(`${t.endpoint}/tahap`, { state: st });
+  };
   // Dokumen belanja (pegangan pembelanja) — simpan KEY faktur agar isi modal
   // ikut segar setelah data list ter-refresh (bukan snapshot lama).
   const [dokumen, setDokumen] = useState<string | null>(null);
+  // Setelah halaman Ubah Tahap "beli → diproses" redirect ke sini dengan
+  // ?dok=<key>, buka dokumen belanja otomatis lalu bersihkan query-nya.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const dok = searchParams.get("dok");
+    if (dok) {
+      setDokumen(dok);
+      const next = new URLSearchParams(searchParams);
+      next.delete("dok");
+      setSearchParams(next, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // Dokumen kirim (surat jalan CK → cabang) — pola yang sama.
   const [dokumenKirim, setDokumenKirim] = useState<string | null>(null);
 
@@ -609,7 +631,7 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                       onChange={(e) => {
                         e.stopPropagation();
                         const ke = e.target.value as TahapTujuan | "";
-                        if (ke) setUbahTahap({ grup: g, ke });
+                        if (ke) bukaUbahTahap(g, ke);
                       }}
                       aria-label="Ubah tahap faktur"
                       className="cursor-pointer rounded-lg bg-orange-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-orange-500"
@@ -701,26 +723,11 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
           tipe={tipe}
           endpoint={t.endpoint}
           onClose={() => setDetail(null)}
-          // pilih tahap dari detail → langsung tukar ke modal Ubah Tahap
+          // pilih tahap dari detail → buka HALAMAN Ubah Tahap
           onUbahTahap={(ke) => {
-            setUbahTahap({ grup: detail, ke });
+            const g = detail;
             setDetail(null);
-          }}
-        />
-      )}
-      {ubahTahap && (
-        <TahapModal
-          // remount tiap ganti faktur/tujuan — state centang & qty di-reset
-          key={`${ubahTahap.grup.key}:${ubahTahap.ke}`}
-          grup={ubahTahap.grup}
-          tipe={tipe}
-          endpoint={t.endpoint}
-          ke={ubahTahap.ke}
-          onClose={() => setUbahTahap(null)}
-          // belanja mulai DIPROSES → dokumen belanja terbuka otomatis
-          // sebagai pegangan pembelanja
-          onSelesai={(ke) => {
-            if (tipe === "beli" && ke === "dikerjakan") setDokumen(ubahTahap.grup.key);
+            bukaUbahTahap(g, ke);
           }}
         />
       )}
