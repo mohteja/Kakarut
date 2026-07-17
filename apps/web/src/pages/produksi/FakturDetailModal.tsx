@@ -44,7 +44,7 @@ export function FakturDetailModal({
   tipe: JenisPengadaan;
   endpoint: string;
   onClose: () => void;
-  /** ganti tahap langsung dari detail (parent menukar ke TahapModal) */
+  /** ganti tahap langsung dari detail (parent membuka halaman Ubah Tahap) */
   onUbahTahap?: (ke: TahapTujuan) => void;
 }) {
   // Tempat penyimpanan diambil dari cabang FAKTUR ini (bukan pilihan Kantor),

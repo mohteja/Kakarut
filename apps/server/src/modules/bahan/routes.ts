@@ -237,17 +237,63 @@ export const bahanRoutes = new Hono<AppEnv>()
     const slug =
       body.slug ?? body.nama.toLowerCase().trim().replace(/\s+/g, " ");
     const [existing] = await db
-      .select({ id: ingredients.id })
+      .select({
+        id: ingredients.id,
+        isActive: ingredients.isActive,
+        pengadaan: ingredients.pengadaan,
+      })
       .from(ingredients)
       .where(
         and(eq(ingredients.companyId, auth.company_id!), eq(ingredients.slug, slug)),
       );
-    if (existing) {
-      throw new HTTPException(409, { message: `Bahan dengan slug "${slug}" sudah ada` });
-    }
-    const kode = await resolveKodeBahan(db, auth.company_id!, body.kode, body.nama);
     // samakan huruf kategori dengan master (mis. "buah segar" → "Buah segar")
     const kmap = await kategoriKanonikMap(db, auth.company_id!);
+    if (existing?.isActive) {
+      // Duplikat sungguhan (masih aktif). Beri petunjuk lokasi — bahan BELI tak
+      // muncul di daftar Resep Produksi, jadi owner bisa mengira "tak ada".
+      const dimana = existing.pengadaan === "beli" ? " (ada di daftar Bahan Baku)" : "";
+      throw new HTTPException(409, {
+        message: `Bahan "${body.nama}" sudah ada${dimana}`,
+      });
+    }
+    if (existing) {
+      // Slug cocok bahan NONAKTIF: pernah dihapus/diarsip — TIDAK tampil di
+      // daftar mana pun (bukan pula di Tempat Sampah), tapi slug tetap terpakai.
+      // Menolak = memblokir pembuatan selamanya tanpa jalan keluar di UI. Jadi
+      // PULIHKAN + perbarui nilainya (konsisten dgn impor CSV mode "perbarui").
+      if (body.pengadaan === "beli") {
+        // beli tak punya resep — bersihkan resep lama bila dulunya produksi
+        await db
+          .delete(ingredientComponents)
+          .where(eq(ingredientComponents.ingredientId, existing.id));
+      }
+      const [row] = await db
+        .update(ingredients)
+        .set({
+          isActive: true,
+          nama: body.nama,
+          hargaBeli: body.harga_beli,
+          isi: body.isi,
+          satuan: body.satuan,
+          satuanBeli: body.satuan_beli ?? null,
+          trackStok: body.track_stok,
+          stokMinimum: body.stok_minimum,
+          stokMinimumToko: body.stok_minimum_toko,
+          overheadX: body.overhead_x,
+          kategori: kanonikKategori(kmap, body.kategori),
+          pengadaan: body.pengadaan,
+          catatan: body.catatan ?? null,
+          isPackaging: body.is_packaging,
+          isComplement: body.is_complement,
+          bolehEceran: body.boleh_eceran,
+          minBeli: body.min_beli,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(ingredients.id, existing.id), eq(ingredients.companyId, auth.company_id!)))
+        .returning();
+      return c.json(toDto(row), 200);
+    }
+    const kode = await resolveKodeBahan(db, auth.company_id!, body.kode, body.nama);
     const [row] = await db
       .insert(ingredients)
       .values({
@@ -470,9 +516,11 @@ export const bahanRoutes = new Hono<AppEnv>()
         .from(ingredients)
         .where(and(eq(ingredients.id, id), eq(ingredients.companyId, auth.company_id!)));
       if (!lama) throw new HTTPException(404, { message: "Bahan tidak ditemukan" });
-      // Bahan yang masih jadi INPUT resep aktif tak boleh berubah jenis ke
-      // "produksi": input resep tervalidasi 'beli' — flip membuat rencana
-      // melewatkan kebutuhannya diam-diam padahal konsumsi tetap berjalan.
+      // Konservatif: bahan yang masih jadi INPUT resep aktif tak diizinkan
+      // di-flip jenisnya ke "produksi" lewat jalur edit-bahan ini — ubah dulu
+      // resep yang memakainya. (Memakai bahan produksi DI DALAM resep memang
+      // kini didukung, tapi itu diatur dari halaman Resep, bukan dengan
+      // mem-flip jenis bahan input yang sudah dipakai.)
       if (body.pengadaan === "produksi" && lama.pengadaan !== "produksi") {
         const dipakai = await db
           .select({ nama: ingredients.nama })
@@ -729,11 +777,13 @@ export const bahanRoutes = new Hono<AppEnv>()
       }
       const inputIds = [...qtyByInput.keys()];
       if (inputIds.length > 0) {
-        // bahan mentah harus milik perusahaan, aktif, dan berjenis BELI —
-        // resep berlapis (produksi dari produksi) belum didukung agar
-        // ekspansi belanja & konsumsi tetap satu tingkat.
+        // Bahan input resep harus milik perusahaan & aktif. Boleh berjenis
+        // "beli" (bahan baku) MAUPUN "produksi" (bahan jadi/semi-jadi yang
+        // dibuat sendiri) — resep bertingkat didukung; input produksi dipotong
+        // dari STOK-nya saat produksi induk selesai (bukan diurai ulang ke
+        // bahan mentahnya), jadi konsumsi tetap satu tingkat per produksi.
         const valid = await db
-          .select({ id: ingredients.id, pengadaan: ingredients.pengadaan, nama: ingredients.nama })
+          .select({ id: ingredients.id, nama: ingredients.nama })
           .from(ingredients)
           .where(
             and(
@@ -743,12 +793,46 @@ export const bahanRoutes = new Hono<AppEnv>()
             ),
           );
         if (valid.length !== inputIds.length) {
-          throw new HTTPException(400, { message: "Ada bahan mentah yang tidak valid" });
+          throw new HTTPException(400, { message: "Ada bahan input yang tidak valid" });
         }
-        const bukanBeli = valid.filter((v) => v.pengadaan !== "beli");
-        if (bukanBeli.length > 0) {
+        // Cegah resep MELINGKAR (A→B→…→A): input produksi yang resepnya —
+        // langsung atau tak langsung — kembali memakai bahan induk `id`
+        // ditolak, agar perhitungan biaya & konsumsi tak jadi rekursi tanpa
+        // akhir. Graf resep per-company kecil → DFS in-memory sudah cukup.
+        const namaById = new Map(valid.map((v) => [v.id, v.nama]));
+        const edges = await db
+          .select({
+            dari: ingredientComponents.ingredientId,
+            ke: ingredientComponents.inputIngredientId,
+          })
+          .from(ingredientComponents)
+          .innerJoin(ingredients, eq(ingredients.id, ingredientComponents.ingredientId))
+          .where(eq(ingredients.companyId, auth.company_id!));
+        const adj = new Map<string, string[]>();
+        for (const e of edges) {
+          if (e.dari === id) continue; // resep lama `id` akan diganti — abaikan
+          const list = adj.get(e.dari) ?? [];
+          list.push(e.ke);
+          adj.set(e.dari, list);
+        }
+        const mencapaiInduk = (mulai: string): boolean => {
+          const tumpuk = [mulai];
+          const dilihat = new Set<string>();
+          while (tumpuk.length > 0) {
+            const n = tumpuk.pop()!;
+            if (n === id) return true;
+            if (dilihat.has(n)) continue;
+            dilihat.add(n);
+            for (const m of adj.get(n) ?? []) tumpuk.push(m);
+          }
+          return false;
+        };
+        const melingkar = inputIds.filter((iid) => mencapaiInduk(iid));
+        if (melingkar.length > 0) {
           throw new HTTPException(400, {
-            message: `Bahan mentah resep harus berjenis beli: ${bukanBeli.map((v) => v.nama).join(", ")}`,
+            message: `Resep melingkar: ${melingkar
+              .map((iid) => namaById.get(iid) ?? iid)
+              .join(", ")} — bahan itu (langsung/tak langsung) sudah memakai bahan ini`,
           });
         }
       }

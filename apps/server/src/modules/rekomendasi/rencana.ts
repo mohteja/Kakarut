@@ -71,6 +71,37 @@ export async function rencanaDariMenu(
   const bahanById = new Map(saldoRows.map((r) => [r.ingredient_id, r]));
   const extraById = new Map(extraRows.map((r) => [r.id, r]));
 
+  // Central Kitchen pelaksana (bila ada): STOK CK ikut menutup kebutuhan store —
+  // barang yang sudah ada di CK tinggal dikirim ke store, jadi tak perlu
+  // diproduksi/dibeli lagi. Resolusi longgar (validasi keras di
+  // buatFakturDariRencana): CK eksplisit / CK pemasok store yang valid.
+  let pelaksanaId = branchId;
+  {
+    const [storeRow] = await db
+      .select({ ckId: branches.centralKitchenId })
+      .from(branches)
+      .where(and(eq(branches.id, branchId), eq(branches.companyId, companyId)));
+    const kandidat = ckBranchId ?? storeRow?.ckId ?? null;
+    if (kandidat && kandidat !== branchId) {
+      const [ckRow] = await db
+        .select({ id: branches.id, tipe: branches.tipe })
+        .from(branches)
+        .where(and(eq(branches.id, kandidat), eq(branches.companyId, companyId)));
+      if (ckRow?.tipe === "central_kitchen") pelaksanaId = ckRow.id;
+    }
+  }
+  const ckSaldoMap =
+    pelaksanaId !== branchId
+      ? new Map(
+          (await hitungSaldoCabang(companyId, pelaksanaId)).map((r) => [r.ingredient_id, r]),
+        )
+      : new Map<string, (typeof saldoRows)[number]>();
+  const ckStok = (id: string) => ckSaldoMap.get(id)?.saldo ?? 0;
+  // Porsi stok CK yang "terpakai" menutup kebutuhan menu-level tiap bahan —
+  // dipakai agar bahan yang SAMA (dipakai langsung menu & jadi input produksi)
+  // tak menghitung stok CK dua kali (double-count → under-buy).
+  const ckDipakaiMenu = new Map<string, number>();
+
   const menus: RencanaMenuRingkas[] = [];
   const rencana: { qtyPerPorsi: Map<string, number>; porsi: number }[] = [];
   for (const [menuId, porsi] of porsiByMenu) {
@@ -111,10 +142,16 @@ export async function rencanaDariMenu(
     const e = extraById.get(ingredientId);
     const pengadaan = e?.pengadaan ?? "beli";
     const hargaPerUnit = e && s.isi > 0 ? e.hargaBeli / s.isi : 0;
+    // Saldo yang menutup kebutuhan = stok store + stok CK (barang di CK bisa
+    // dikirim ke store). Stok store dipakai dulu, sisanya baru dari CK.
+    const butuhTotal = butuh + (e?.stokMinimum ?? 0);
+    const saldoCk = ckStok(ingredientId);
+    const saldoGabung = s.saldo + saldoCk;
+    ckDipakaiMenu.set(ingredientId, Math.max(0, Math.min(saldoCk, butuhTotal - s.saldo)));
     // toleransi presisi float: noise (mis. 5e-17) tidak memicu faktur hantu.
     // Batas stok minimum (reorder point) ikut dipenuhi: belanja/produksi
     // mengembalikan saldo minimal ke stok_minimum setelah kebutuhan terpakai.
-    const kurang = kekuranganBahan(butuh + (e?.stokMinimum ?? 0), s.saldo);
+    const kurang = kekuranganBahan(butuhTotal, saldoGabung);
     // MOQ (minimal belanja) hanya berlaku utk jalur beli — bukan produksi
     const dasarFaktur =
       pengadaan === "beli" ? Math.max(kurang, kurang > 0 ? (e?.minBeli ?? 0) : 0) : kurang;
@@ -126,7 +163,8 @@ export async function rencanaDariMenu(
       satuan: s.satuan,
       pengadaan,
       kebutuhan: butuh,
-      saldo: s.saldo,
+      saldo: saldoGabung,
+      saldo_ck: saldoCk,
       kurang,
       isi: s.isi,
       mode_faktur: faktur?.mode ?? null,
@@ -168,31 +206,9 @@ export async function rencanaDariMenu(
         ),
       );
     if (resepRows.length > 0) {
-      // cabang pelaksana (longgar, tanpa lempar error — validasi keras ada di
-      // buatFakturDariRencana): CK eksplisit / CK pemasok store yang valid,
-      // selain itu cabang tujuan sendiri
-      let pelaksanaId = branchId;
-      const [storeRow] = await db
-        .select({ ckId: branches.centralKitchenId })
-        .from(branches)
-        .where(and(eq(branches.id, branchId), eq(branches.companyId, companyId)));
-      const kandidat = ckBranchId ?? storeRow?.ckId ?? null;
-      if (kandidat && kandidat !== branchId) {
-        const [ckRow] = await db
-          .select({ id: branches.id, tipe: branches.tipe })
-          .from(branches)
-          .where(and(eq(branches.id, kandidat), eq(branches.companyId, companyId)));
-        if (ckRow?.tipe === "central_kitchen") pelaksanaId = ckRow.id;
-      }
-      const saldoPelaksana =
-        pelaksanaId === branchId
-          ? bahanById
-          : new Map(
-              (await hitungSaldoCabang(companyId, pelaksanaId)).map((r) => [
-                r.ingredient_id,
-                r,
-              ]),
-            );
+      // cabang pelaksana & stok CK sudah diresolusi di atas (dipakai juga utk
+      // menutup kebutuhan menu-level). Bahan mentah dibeli terhadap stok CK.
+      const saldoPelaksana = pelaksanaId === branchId ? bahanById : ckSaldoMap;
 
       // total kebutuhan bahan mentah = Σ resep × (qty produksi ÷ isi batch)
       const qtyFakturByProduced = new Map(prodShort.map((b) => [b.ingredient_id, b]));
@@ -214,17 +230,21 @@ export async function rencanaDariMenu(
         const si = saldoPelaksana.get(inputId);
         if (!si) continue;
         const e = extraById.get(inputId);
-        if (e?.pengadaan !== "beli") continue; // resep tervalidasi 'beli' — defensif
+        // Belanja otomatis hanya untuk input BELI (bahan baku). Input produksi
+        // di dalam resep bertingkat tidak "dibeli" — bahan itu diproduksi
+        // sendiri (dari stok / lewat faktur produksinya sendiri), jadi
+        // dilewati di rencana BELI ini. (Belum diurai/di-work-order otomatis.)
+        if (e?.pengadaan !== "beli") continue;
         const hargaPerUnitInput = si.isi > 0 ? e.hargaBeli / si.isi : 0;
-        // Saldo efektif: bila produksi dilakukan di cabang tujuan sendiri,
-        // bahan yang juga dipakai LANGSUNG oleh menu sudah dialokasikan di
-        // perhitungan menu-level — saldo yang sama tak boleh dihitung dua
-        // kali (double-count → under-buy). Bisa sedikit over-buy
-        // (≤ stok_minimum) pada kasus ganda — arah yang aman.
+        // Saldo efektif: bahan yang juga dipakai LANGSUNG oleh menu sudah
+        // dialokasikan di perhitungan menu-level — saldo yang sama tak boleh
+        // dihitung dua kali (double-count → under-buy). Produksi di store:
+        // kurangi kebutuhan menu dari saldo store; produksi di CK: kurangi
+        // porsi stok CK yang sudah "dikirim" menutup menu-level.
         const saldoEfektif =
           pelaksanaId === branchId
             ? Math.max(0, si.saldo - (kebutuhan.get(inputId) ?? 0))
-            : si.saldo;
+            : Math.max(0, si.saldo - (ckDipakaiMenu.get(inputId) ?? 0));
         const kurang = kekuranganBahan(butuh + (e.stokMinimum ?? 0), saldoEfektif);
         const dasarFaktur = kurang > 0 ? Math.max(kurang, e.minBeli ?? 0) : 0;
         const faktur =
@@ -236,6 +256,8 @@ export async function rencanaDariMenu(
           pengadaan: "beli",
           kebutuhan: butuh,
           saldo: si.saldo,
+          // bahan mentah dihitung terhadap stok PELAKSANA (CK bila ada)
+          saldo_ck: pelaksanaId === branchId ? 0 : si.saldo,
           kurang,
           isi: si.isi,
           mode_faktur: faktur?.mode ?? null,

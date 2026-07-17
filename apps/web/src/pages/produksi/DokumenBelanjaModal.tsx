@@ -50,6 +50,10 @@ export function DokumenBelanjaModal({
   onClose: () => void;
 }) {
   const badge = badgeFaktur("beli", grup.status);
+  // RAB murni (belum ada yang diproses) → dokumen untuk peninjauan finance,
+  // bukan lagi pegangan pembelanja. Judul & kop menyesuaikan.
+  const isRab = grup.rows.every((r) => r.status === "rencana" || r.status === "ditolak");
+  const judul = isRab ? "Dokumen RAB" : "Dokumen Belanja";
   // baris ditolak tak ikut daftar belanja
   const rows = grup.rows.filter((r) => r.status !== "ditolak");
   const grupSupplier = perSupplier(rows);
@@ -71,7 +75,7 @@ export function DokumenBelanjaModal({
       <div className={`border-b pb-2 ${cetak ? "border-black" : "border-stone-200"}`}>
         <div className="flex items-start justify-between gap-2">
           <div>
-            <div className="text-base font-bold">🧾 Dokumen Belanja</div>
+            <div className="text-base font-bold">🧾 {judul}</div>
             <div className={`text-xs ${cetak ? "" : "text-stone-500"}`}>
               {grup.noFaktur && <span className="font-mono">{grup.noFaktur} · </span>}
               {formatTanggalRingkas(grup.waktu)} · {formatWaktu(grup.waktu)}
@@ -196,16 +200,76 @@ export function DokumenBelanjaModal({
     </div>
   );
 
+  // ===== UNDUH: berkas HTML mandiri (inline style) — bisa dibuka finance di
+  // browser mana pun & disimpan/di-print jadi PDF, tanpa perlu akses aplikasi.
+  const esc = (s: unknown) =>
+    String(s ?? "").replace(
+      /[&<>"]/g,
+      (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c] ?? c,
+    );
+  const buildHtml = () => {
+    const tujuanBlok = grup.tujuanCabang
+      ? `<div class="tujuan">📦 Barang untuk: → ${esc(grup.tujuanCabang)}${
+          campuran
+            ? `<div style="font-size:11px;font-weight:600">${nKeCabang} bahan dikirim ke cabang · ${nDiSini} bahan produksi tetap di ${esc(lokalNama)}</div>`
+            : ""
+        }</div>`
+      : "";
+    const tabel = grupSupplier
+      .map((s) => {
+        const kepala = s.nama
+          ? `🏪 ${esc(s.nama)}${s.telepon ? ` · 📞 ${esc(s.telepon)}` : ""}`
+          : "🛒 Tanpa supplier (bebas beli di mana)";
+        const alamat = s.alamat ? `<div class="muted">📍 ${esc(s.alamat)}</div>` : "";
+        const baris = s.rows
+          .map((r) => {
+            const km = kemasan(r);
+            const tag = campuran
+              ? ` <span class="tag">${r.tujuan_branch_id != null ? "📦 " : "🏭 "}${esc(tujuanBaris(r))}</span>`
+              : "";
+            return `<tr><td style="width:16px">☐</td><td>${esc(r.bahan)}${tag}</td><td class="r">${esc(formatAngka(r.qty))} ${esc(r.satuan)}${km ? `<div class="muted">${esc(km)}</div>` : ""}</td><td class="r">${r.total_harga == null ? "—" : esc(formatRupiah(r.total_harga))}</td></tr>`;
+          })
+          .join("");
+        return `<div class="supplier">${kepala}</div>${alamat}<table>${baris}</table>`;
+      })
+      .join("");
+    const sisaBlok =
+      Math.abs(sisa) >= 0.5
+        ? `<div class="muted" style="display:flex;justify-content:space-between"><span>${sisa > 0 ? "Kekurangan dari RAB" : "Kelebihan dana"}</span><span>${esc(formatRupiah(Math.abs(sisa)))}</span></div>`
+        : "";
+    return `<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(judul)}${grup.noFaktur ? " " + esc(grup.noFaktur) : ""}</title><style>body{font-family:system-ui,-apple-system,Arial,sans-serif;color:#111;max-width:640px;margin:24px auto;padding:0 16px;font-size:13px;line-height:1.45}h1{font-size:18px;margin:0 0 2px}.muted{color:#555;font-size:12px}table{width:100%;border-collapse:collapse;margin:2px 0 4px}td{padding:4px 6px;border-bottom:1px solid #e5e5e5;vertical-align:top}td.r{text-align:right;white-space:nowrap}.supplier{font-weight:700;margin-top:12px}.head{border-bottom:1px solid #111;padding-bottom:6px;margin-bottom:6px}.tag{border:1px solid #111;border-radius:3px;padding:0 4px;font-size:10px;font-weight:700;white-space:nowrap}.tot{border-top:2px solid #111;margin-top:10px;padding-top:6px}.tot>div{display:flex;justify-content:space-between}.tujuan{border:2px solid #111;border-radius:6px;padding:6px 10px;font-weight:700;margin-top:8px}.sign{display:flex;justify-content:space-between;margin-top:48px;font-size:12px;text-align:center;gap:24px}.sign .ln{margin-top:44px;border-top:1px solid #111;padding-top:2px}@media print{body{margin:0}}</style></head><body><div class="head"><h1>🧾 ${esc(judul)}</h1><div class="muted">${grup.noFaktur ? esc(grup.noFaktur) + " · " : ""}${esc(formatTanggalRingkas(grup.waktu))} · ${esc(formatWaktu(grup.waktu))} · ${esc(badge.label)}</div><div class="muted">${grup.cabang ? "🏪 " + esc(grup.cabang) : ""}${grup.dikerjakanOleh ? " · 🔧 pembelanja: " + esc(grup.dikerjakanOleh) : ""}${grup.catatan ? " · 📝 " + esc(grup.catatan) : ""}</div>${tujuanBlok}</div>${tabel}<div class="tot"><div><span>Total est. RAB</span><b>${esc(formatRupiah(totalRab))}</b></div><div><span>💸 Dana cair</span><b>${esc(formatRupiah(grup.danaCair))}</b></div>${sisaBlok}</div><div class="sign"><div>Pembelanja<div class="ln">( ${esc(grup.dikerjakanOleh ?? "…………")} )</div></div><div>Penerima<div class="ln">( ………… )</div></div></div></body></html>`;
+  };
+  const unduh = () => {
+    const dasar = `${judul} ${grup.noFaktur ?? formatTanggalRingkas(grup.waktu)}`.trim();
+    const nama =
+      dasar
+        .replace(/[^\w\d.-]+/g, "-")
+        .replace(/-+/g, "-")
+        .replace(/^-|-$/g, "") + ".html";
+    const blob = new Blob([buildHtml()], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = nama;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <>
-      <Modal open onClose={onClose} title="📄 Dokumen Belanja" lebar="max-w-xl">
+      <Modal open onClose={onClose} title={`📄 ${judul}`} lebar="max-w-xl">
         {isi(false)}
-        <div className="mt-4 flex justify-end gap-2">
+        <div className="mt-4 flex flex-wrap justify-end gap-2">
           <button onClick={onClose} className={btnSecondary}>
             Tutup
           </button>
+          <button onClick={unduh} className={btnSecondary}>
+            ⬇ Unduh (HTML)
+          </button>
           <button onClick={() => window.print()} className={btnPrimary}>
-            🖨 Cetak dokumen
+            🖨 Cetak / Simpan PDF
           </button>
         </div>
       </Modal>

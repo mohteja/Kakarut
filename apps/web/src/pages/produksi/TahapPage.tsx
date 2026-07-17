@@ -1,7 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import type { JenisPengadaan, PenyimpananDto } from "@kakarut/shared";
-import { ErrorText, Modal, btnPrimary, btnSecondary, inputClass, tdClass, thClass } from "../../components/ui";
+import {
+  Card,
+  ErrorText,
+  PageTitle,
+  btnPrimary,
+  btnSecondary,
+  inputClass,
+  tdClass,
+  thClass,
+} from "../../components/ui";
 import { labelCabang, useBranch, useCabangData } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah } from "../../lib/format";
@@ -19,53 +29,53 @@ interface PilihanBaris {
   aktif: boolean;
   /** qty yang maju — disimpan sebagai teks agar desimal enak diketik */
   qty: string;
-  /** harga riil bagian yang maju (harga pasar naik/turun); default prorata RAB */
-  harga: string;
-  /** true bila harga sudah diketik manual — berhenti mengikuti prorata qty */
-  hargaManual: boolean;
 }
 
-/**
- * Penyesuaian sebelum tahap faktur berubah: pilih baris (dan qty) yang
- * benar-benar maju — mis. barang yang baru dibeli/dikirim sebagian. Baris
- * atau sisa qty yang tidak ikut tetap di tahap lama sebagai tugas yang
- * masih harus dikerjakan. Perubahan baru terjadi setelah tombol Terapkan.
- */
-export function TahapModal({
-  grup,
-  tipe,
-  endpoint,
-  ke,
-  onClose,
-  onSelesai,
-}: {
+/** Data yang dikirim TambahStokPage lewat navigate(..., { state }). */
+export interface TahapNavState {
   grup: FakturGroup;
   tipe: JenisPengadaan;
   endpoint: string;
   ke: TahapTujuan;
-  onClose: () => void;
-  /** dipanggil setelah tahap sukses diterapkan (mis. buka dokumen belanja) */
-  onSelesai?: (ke: TahapTujuan) => void;
-}) {
+  /** rute daftar untuk kembali/redirect setelah simpan (mis. /pembelian) */
+  kembali: string;
+}
+
+/**
+ * Halaman (bukan modal) untuk mengubah tahap satu faktur stok masuk. Dibuat
+ * halaman penuh agar gestur "geser 2 jari = back" di touchpad tak menutup
+ * form dengan tak sengaja — back kembali ke daftar, simpan pun redirect ke
+ * daftar. Data grup dikirim lewat router state (tanpa fetch ulang); bila
+ * dibuka langsung tanpa state (mis. reload) → balik ke daftar.
+ */
+export function TahapPage() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const state = location.state as TahapNavState | null;
+  if (!state || !state.grup) {
+    return <Navigate to={state?.kembali ?? "/pembelian"} replace />;
+  }
+  return <TahapForm {...state} navigate={navigate} />;
+}
+
+function TahapForm({
+  grup,
+  tipe,
+  endpoint,
+  ke,
+  kembali,
+  navigate,
+}: TahapNavState & { navigate: ReturnType<typeof useNavigate> }) {
   const queryClient = useQueryClient();
   const { cabang } = useBranch();
-  // branchId (cabang-data) hanya fallback; konteks tahap MENGIKUTI cabang
-  // FAKTUR itu sendiri (grup.rows[0].branch_id), bukan pilihan Kantor — agar
-  // faktur store lama tak keliru dianggap milik CK saat dibuka dari Kantor.
   const { id: branchId } = useCabangData("produksi");
   const { isPro } = useCompanyMode();
-  // Work-order CK: faktur produksi hidup di CK & punya cabang tujuan. Tahap
-  // "selesai" hanya menyimpan di CK; pengiriman ke cabang lewat tombol
-  // "Kirim ke cabang" TERPISAH.
+
   const isWorkOrder = grup.rows.some((r) => r.tujuan_branch_id != null);
   const fakturBranchId = grup.rows[0]?.branch_id ?? branchId ?? "";
-  // CK hanya mengirim ke store yang terhubung dengannya (satu CK per store)
   const cabangIniCk =
     cabang.find((b) => b.id === fakturBranchId)?.tipe === "central_kitchen";
   const target = URUTAN_TAHAP[ke];
-  // hanya baris yang tahapnya masih di belakang tujuan yang bisa maju;
-  // baris BERTUJUAN CABANG diterima lewat Penerimaan cabang — bukan
-  // dikonfirmasi di sini (faktur campuran: bahan produksi tetap bisa)
   const bisaMaju = grup.rows.filter(
     (r) =>
       r.status !== "ditolak" &&
@@ -81,24 +91,12 @@ export function TahapModal({
             r.tujuan_branch_id != null,
         ).length
       : 0;
-  // faktur campuran (produk jadi → cabang + bahan produksi di tempat):
-  // tujuan tiap baris ditampilkan agar tak salah pilih saat maju sebagian
   const campuranTujuan =
     tipe === "beli" &&
     grup.rows.some((r) => r.tujuan_branch_id != null) &&
     grup.rows.some((r) => r.tujuan_branch_id == null);
   const [pilih, setPilih] = useState<Record<string, PilihanBaris>>(() =>
-    Object.fromEntries(
-      bisaMaju.map((r) => [
-        r.id,
-        {
-          aktif: true,
-          qty: String(r.qty),
-          harga: String(r.total_harga ?? 0),
-          hargaManual: false,
-        },
-      ]),
-    ),
+    Object.fromEntries(bisaMaju.map((r) => [r.id, { aktif: true, qty: String(r.qty) }])),
   );
 
   const label =
@@ -106,29 +104,21 @@ export function TahapModal({
       ? "📦 Tiba di CK (semua barang di CK)"
       : (AKSI_TAHAP[tipe].find((a) => a.ke === ke)?.label ?? ke);
   const keStok = ke === "dikonfirmasi";
-  // RAB → diproses hanya INFO (dan pencatatan dana cair) — jumlah barang belum
-  // berubah; penyesuaian barang dilakukan saat proses → selesai.
   const keProses = ke === "dikerjakan";
   const keSelesai = ke === "menunggu";
 
-  // Dana cair: ditanyakan saat ada baris terpilih yang MENINGGALKAN tahap RAB
-  // — satu input nominal, terisi otomatis senilai RAB bagian yang maju sampai
-  // diketik manual (cair sebagian tinggal ubah angkanya).
   const [danaNominal, setDanaNominal] = useState("");
   const [danaManual, setDanaManual] = useState(false);
 
-  // Realisasi biaya saat proses → selesai: sesuai rencana, atau tidak —
-  // harga riil per bahan disesuaikan (pasar naik/turun) dan selisih dananya
-  // wajib dijelaskan (kurang: dari mana; lebih: di siapa).
-  const [sesuaiRencana, setSesuaiRencana] = useState(true);
+  // Realisasi biaya saat proses → selesai/Tiba di CK: LANGSUNG input berapa
+  // yang benar-benar dibelanjakan (bisa kurang/lebih dari dana faktur). Tak
+  // ada lagi konfirmasi "sesuai/tidak"; default mengikuti dana faktur.
+  const [belanjaRiil, setBelanjaRiil] = useState("");
+  const [belanjaManual, setBelanjaManual] = useState(false);
   const [selisihCatatan, setSelisihCatatan] = useState("");
-  const pakaiHarga = keSelesai && !sesuaiRencana;
 
-  // Tujuan kirim saat "dikirim/selesai": cabang tujuan (default = cabang
-  // faktur ini) + tempat penyimpanan di cabang itu (opsional).
   const [tujuanCabang, setTujuanCabang] = useState(fakturBranchId || "");
   const [tujuanTempat, setTujuanTempat] = useState("");
-  // work-order: tempat penyimpanan diambil dari CK (cabang faktur), bukan tujuan
   const storageBranch = isWorkOrder ? fakturBranchId : tujuanCabang;
   const { data: tempatTujuan = [] } = useQuery({
     queryKey: ["penyimpanan", storageBranch],
@@ -136,31 +126,19 @@ export function TahapModal({
     enabled: keSelesai && storageBranch !== "",
   });
 
-  // Tahap "diproses": semua baris ikut penuh (read-only). Tahap lain: sesuai
-  // centang + qty maju yang diisi; harga riil ikut dikirim bila disesuaikan.
   const items = keProses
     ? bisaMaju.map((r) => ({ id: r.id, qty: r.qty }))
     : bisaMaju
         .filter((r) => pilih[r.id]?.aktif)
-        .map((r) => ({
-          id: r.id,
-          qty: Number(pilih[r.id]?.qty),
-          ...(pakaiHarga ? { harga: Number(pilih[r.id]?.harga) } : {}),
-        }));
+        .map((r) => ({ id: r.id, qty: Number(pilih[r.id]?.qty) }));
   const adaInvalid =
     !keProses &&
     bisaMaju.some((r) => {
       const p = pilih[r.id];
       if (!p?.aktif) return false;
       const q = Number(p.qty);
-      if (!Number.isFinite(q) || q <= 0 || q > r.qty + 1e-9) return true;
-      if (pakaiHarga) {
-        const h = Number(p.harga);
-        if (!Number.isFinite(h) || h < 0) return true;
-      }
-      return false;
+      return !Number.isFinite(q) || q <= 0 || q > r.qty + 1e-9;
     });
-  // baris tak dicentang atau qty parsial → jadi sisa tugas di tahap lama
   const sisaTugas = keProses
     ? 0
     : bisaMaju.filter((r) => {
@@ -168,30 +146,29 @@ export function TahapModal({
         return !p?.aktif || Number(p.qty) < r.qty - 1e-9;
       }).length;
 
-  // RAB bagian yang maju dari baris tahap "rencana" (prorata sesuai qty maju,
-  // sama dengan hitungan split di server) — dasar default "cair penuh".
+  // Dana cair untuk baris yang meninggalkan tahap RAB (prorata qty maju).
   const barisRab = bisaMaju.filter((r) => r.status === "rencana" && pilih[r.id]?.aktif);
   const rabMaju = barisRab.reduce((t, r) => {
     const q = Number(pilih[r.id]?.qty);
     if (!Number.isFinite(q) || q <= 0 || r.total_harga == null) return t;
     return t + Math.round((r.total_harga * Math.min(q, r.qty)) / r.qty);
   }, 0);
-  const tanyaDana = barisRab.length > 0;
+  // Dana cair hanya untuk BELI — produksi tak belanja apa pun, jadi tak ada
+  // uang yang dicairkan.
+  const tanyaDana = tipe === "beli" && barisRab.length > 0;
   const danaCair = !tanyaDana ? null : danaManual ? Number(danaNominal) : rabMaju;
   const danaInvalid =
     tanyaDana && danaManual && (!Number.isFinite(danaCair) || danaCair! < 0);
 
-  // Realisasi vs dana faktur (termasuk pencairan yang dikirim bersamaan):
-  // kurang → wajib jelaskan dari mana uangnya; lebih → di siapa sisa uangnya.
+  // Dana faktur = yang sudah cair + yang cair bersamaan langkah ini.
   const danaFaktur = grup.danaCair + (danaCair != null && !danaInvalid ? danaCair : 0);
-  // total biaya riil = Σ harga riil baris yang maju (dari kolom harga)
-  const realisasi = pakaiHarga
-    ? bisaMaju
-        .filter((r) => pilih[r.id]?.aktif)
-        .reduce((t, r) => t + (Number(pilih[r.id]?.harga) || 0), 0)
-    : null;
-  const selisih = realisasi != null ? realisasi - danaFaktur : 0;
-  const butuhCatatanSelisih = realisasi != null && !adaInvalid && Math.abs(selisih) >= 0.5;
+  // Realisasi = total belanja riil (default mengikuti dana faktur).
+  const realisasi = keSelesai ? (belanjaManual ? Number(belanjaRiil) : danaFaktur) : null;
+  const belanjaInvalid =
+    keSelesai && belanjaManual && (!Number.isFinite(realisasi) || (realisasi ?? 0) < 0);
+  const selisih = realisasi != null && !belanjaInvalid ? realisasi - danaFaktur : 0;
+  const butuhCatatanSelisih =
+    realisasi != null && !belanjaInvalid && !adaInvalid && Math.abs(selisih) >= 0.5;
   const catatanSelisihKosong = butuhCatatanSelisih && selisihCatatan.trim().length === 0;
 
   const simpan = useMutation({
@@ -202,10 +179,9 @@ export function TahapModal({
           ke,
           items,
           ...(danaCair != null ? { dana_cair: danaCair } : {}),
-          ...(realisasi != null && !adaInvalid
+          ...(realisasi != null && !belanjaInvalid
             ? { realisasi, selisih_catatan: selisihCatatan.trim() || null }
             : {}),
-          // work-order: JANGAN kirim di tahap selesai (kirim langkah terpisah)
           ...(keSelesai && !isWorkOrder && tujuanCabang ? { tujuan_branch_id: tujuanCabang } : {}),
           ...(keSelesai && tujuanTempat ? { tujuan_storage_id: tujuanTempat } : {}),
         },
@@ -214,45 +190,43 @@ export function TahapModal({
       for (const key of [endpoint, "stok", "laporan", "rekomendasi"]) {
         queryClient.invalidateQueries({ queryKey: [key] });
       }
-      onClose();
-      onSelesai?.(ke);
+      // beli mulai DIPROSES → buka dokumen belanja otomatis di daftar
+      const dok = tipe === "beli" && ke === "dikerjakan" ? `?dok=${grup.key}` : "";
+      navigate(`${kembali}${dok}`);
     },
   });
 
-  function ubah(r: { id: string; qty: number; total_harga: number | null }, patch: Partial<PilihanBaris>) {
-    setPilih((prev) => {
-      const baru = { ...prev[r.id], ...patch };
-      // harga default mengikuti prorata qty maju selama belum diketik manual
-      if (patch.qty !== undefined && !baru.hargaManual && r.total_harga != null) {
-        const q = Number(patch.qty);
-        if (Number.isFinite(q) && q > 0) {
-          baru.harga = String(Math.round((r.total_harga * Math.min(q, r.qty)) / r.qty));
-        }
-      }
-      return { ...prev, [r.id]: baru };
-    });
+  function ubah(r: { id: string }, patch: Partial<PilihanBaris>) {
+    setPilih((prev) => ({ ...prev, [r.id]: { ...prev[r.id], ...patch } }));
   }
 
+  const rabTotalMaju = bisaMaju.reduce((t, r) => t + (r.total_harga ?? 0), 0);
+
   return (
-    <Modal open onClose={onClose} title={`Ubah tahap → ${label}`}>
-      <div className="space-y-3">
+    <div className="mx-auto max-w-2xl pb-24">
+      <PageTitle
+        aksi={
+          <button onClick={() => navigate(kembali)} className={btnSecondary}>
+            ← Kembali
+          </button>
+        }
+      >
+        Ubah tahap → {label}
+      </PageTitle>
+
+      <Card className="space-y-3 p-4">
         {keProses ? (
           <p className="text-sm text-stone-500">
-            Faktur ditandai <b>sedang diproses</b> — cukup pastikan RAB & catat dana yang
-            cair.
+            Faktur ditandai <b>sedang diproses</b> — cukup pastikan RAB & catat dana yang cair.
             {tipe === "beli" && (
-              <>
-                {" "}
-                Rincian bahan + supplier ada di <b>📄 dokumen belanja</b> yang terbuka
-                setelah ini.
-              </>
+              <> Rincian bahan + supplier ada di <b>📄 dokumen belanja</b> yang terbuka setelah ini.</>
             )}
           </p>
         ) : (
           <p className="text-sm text-stone-500">
             Centang baris yang benar-benar ikut maju. Bila barang baru sebagian, kecilkan{" "}
-            <b>qty maju</b> — sisanya tetap di tahap sekarang sebagai <b>tugas</b> yang
-            masih harus dikerjakan.
+            <b>qty maju</b> — sisanya tetap di tahap sekarang sebagai <b>tugas</b> yang masih
+            harus dikerjakan.
           </p>
         )}
 
@@ -274,8 +248,6 @@ export function TahapModal({
             Tidak ada baris yang bisa dipindah ke tahap ini.
           </div>
         ) : keProses ? (
-          /* Tahap DIPROSES dibuat sesimpel mungkin: hanya RAB + dana cair —
-             rincian per bahan ada di dokumen belanja. */
           <div className="space-y-1 rounded-lg border border-stone-200 bg-stone-50 p-3 text-sm">
             <div className="flex items-center justify-between">
               <span className="text-stone-500">Jumlah bahan</span>
@@ -283,48 +255,38 @@ export function TahapModal({
             </div>
             <div className="flex items-center justify-between">
               <span className="text-stone-500">Total est. RAB</span>
-              <b className="text-base">
-                {formatRupiah(bisaMaju.reduce((t, r) => t + (r.total_harga ?? 0), 0))}
-              </b>
+              <b className="text-base">{formatRupiah(rabTotalMaju)}</b>
             </div>
           </div>
         ) : (
-          <div className="max-h-72 overflow-y-auto overflow-x-auto">
+          <div className="max-h-96 overflow-y-auto overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="border-b border-stone-200 bg-stone-50">
                 <tr>
-                  {!keProses && <th className={thClass}></th>}
+                  <th className={thClass}></th>
                   <th className={thClass}>Bahan</th>
-                  {/* di HP pill tahap pindah ke bawah nama bahan agar muat */}
                   <th className={`${thClass} hidden sm:table-cell`}>Tahap sekarang</th>
-                  <th className={`${thClass} text-right`}>{keProses ? "Qty" : "Qty maju"}</th>
-                  {pakaiHarga && <th className={`${thClass} text-right`}>Harga riil (Rp)</th>}
+                  <th className={`${thClass} text-right`}>Qty maju</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-stone-100">
                 {bisaMaju.map((r) => {
                   const p = pilih[r.id];
                   const q = Number(p?.qty);
-                  const salah =
-                    !keProses &&
-                    p?.aktif &&
-                    (!Number.isFinite(q) || q <= 0 || q > r.qty + 1e-9);
+                  const salah = p?.aktif && (!Number.isFinite(q) || q <= 0 || q > r.qty + 1e-9);
                   const sisa = p?.aktif && Number.isFinite(q) ? r.qty - q : r.qty;
                   return (
-                    <tr key={r.id} className={p?.aktif || keProses ? "" : "opacity-50"}>
-                      {!keProses && (
-                        <td className={tdClass}>
-                          <input
-                            type="checkbox"
-                            checked={p?.aktif ?? false}
-                            onChange={(e) => ubah(r, { aktif: e.target.checked })}
-                            aria-label={`Ikutkan ${r.bahan}`}
-                          />
-                        </td>
-                      )}
+                    <tr key={r.id} className={p?.aktif ? "" : "opacity-50"}>
+                      <td className={tdClass}>
+                        <input
+                          type="checkbox"
+                          checked={p?.aktif ?? false}
+                          onChange={(e) => ubah(r, { aktif: e.target.checked })}
+                          aria-label={`Ikutkan ${r.bahan}`}
+                        />
+                      </td>
                       <td className={`${tdClass} font-medium`}>
                         {r.bahan}
-                        {/* faktur campuran: tujuan tiap baris ditulis eksplisit */}
                         {campuranTujuan && (
                           <span
                             className={`ml-1.5 whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-bold ${
@@ -354,62 +316,33 @@ export function TahapModal({
                         </span>
                       </td>
                       <td className={`${tdClass} text-right`}>
-                        {keProses ? (
-                          <span>
-                            {formatAngka(r.qty)} {r.satuan}
-                          </span>
-                        ) : (
-                          <>
-                            <div className="flex items-center justify-end gap-1.5">
-                              <input
-                                type="number"
-                                min="0"
-                                max={r.qty}
-                                step="any"
-                                value={p?.qty ?? ""}
-                                disabled={!p?.aktif}
-                                onChange={(e) => ubah(r, { qty: e.target.value })}
-                                aria-label={`Qty maju ${r.bahan}`}
-                                className={`w-16 rounded-lg border px-2 py-1 text-right sm:w-24 ${salah ? "border-red-400" : "border-stone-300"}`}
-                              />
-                              <span className="text-xs text-stone-400">
-                                / {formatAngka(r.qty)} {r.satuan}
-                              </span>
-                            </div>
-                            {p?.aktif && sisa > 1e-9 && !salah && (
-                              <div className="text-right text-[11px] text-amber-600">
-                                sisa {formatAngka(sisa)} {r.satuan} tetap jadi tugas
-                              </div>
-                            )}
-                            {salah && (
-                              <div className="text-right text-[11px] text-red-600">
-                                qty harus 0&lt;qty≤{formatAngka(r.qty)}
-                              </div>
-                            )}
-                          </>
-                        )}
-                      </td>
-                      {pakaiHarga && (
-                        <td className={`${tdClass} text-right`}>
+                        <div className="flex items-center justify-end gap-1.5">
                           <input
                             type="number"
                             min="0"
+                            max={r.qty}
                             step="any"
-                            value={p?.harga ?? ""}
+                            value={p?.qty ?? ""}
                             disabled={!p?.aktif}
-                            onChange={(e) =>
-                              ubah(r, { harga: e.target.value, hargaManual: true })
-                            }
-                            aria-label={`Harga riil ${r.bahan}`}
-                            className={`w-20 rounded-lg border px-2 py-1 text-right sm:w-28 ${p?.aktif && !(Number.isFinite(Number(p?.harga)) && Number(p?.harga) >= 0) ? "border-red-400" : "border-stone-300"}`}
+                            onChange={(e) => ubah(r, { qty: e.target.value })}
+                            aria-label={`Qty maju ${r.bahan}`}
+                            className={`w-16 rounded-lg border px-2 py-1 text-right sm:w-24 ${salah ? "border-red-400" : "border-stone-300"}`}
                           />
-                          {r.total_harga != null && (
-                            <div className="text-right text-[11px] text-stone-400">
-                              RAB {formatRupiah(r.total_harga)}
-                            </div>
-                          )}
-                        </td>
-                      )}
+                          <span className="text-xs text-stone-400">
+                            / {formatAngka(r.qty)} {r.satuan}
+                          </span>
+                        </div>
+                        {p?.aktif && sisa > 1e-9 && !salah && (
+                          <div className="text-right text-[11px] text-amber-600">
+                            sisa {formatAngka(sisa)} {r.satuan} tetap jadi tugas
+                          </div>
+                        )}
+                        {salah && (
+                          <div className="text-right text-[11px] text-red-600">
+                            qty harus 0&lt;qty≤{formatAngka(r.qty)}
+                          </div>
+                        )}
+                      </td>
                     </tr>
                   );
                 })}
@@ -434,9 +367,6 @@ export function TahapModal({
               </div>
             )}
             <div className="grid gap-2 sm:grid-cols-2">
-              {/* Pilihan cabang tujuan hanya di mode Pro (multi-lokasi);
-                  Lite otomatis ke cabang sendiri. Kantor bukan tujuan kirim.
-                  Work-order: kirim di langkah terpisah, jadi disembunyikan. */}
               {isPro && !isWorkOrder && (
                 <div>
                   <label className="mb-1 block text-xs font-medium text-stone-500">
@@ -453,8 +383,6 @@ export function TahapModal({
                   >
                     {cabang
                       .filter((b) => b.is_active && b.tipe !== "kantor")
-                      // Store terhubung ke SATU CK: dari CK hanya tampil store
-                      // yang dipasoknya (plus CK itu sendiri)
                       .filter((b) =>
                         cabangIniCk
                           ? b.id === fakturBranchId ||
@@ -480,9 +408,9 @@ export function TahapModal({
                   className={inputClass}
                 >
                   <option value="">— pilih tempat —</option>
-                  {tempatTujuan.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.nama}
+                  {tempatTujuan.map((tmp) => (
+                    <option key={tmp.id} value={tmp.id}>
+                      {tmp.nama}
                     </option>
                   ))}
                 </select>
@@ -490,14 +418,14 @@ export function TahapModal({
             </div>
             {!isWorkOrder && tujuanCabang && fakturBranchId && tujuanCabang !== fakturBranchId && (
               <div className="text-xs text-amber-700">
-                Baris yang maju akan <b>berpindah ke cabang tujuan</b> (stok terhitung di
-                sana saat diterima); sisa tugas tetap di cabang ini.
+                Baris yang maju akan <b>berpindah ke cabang tujuan</b> (stok terhitung di sana
+                saat diterima); sisa tugas tetap di cabang ini.
               </div>
             )}
             {!isWorkOrder && tujuanCabang === fakturBranchId && cabangIniCk && (
               <div className="text-xs text-stone-500">
-                🏭 Ini Central Kitchen — bila barang untuk outlet, pilih cabang 🏪 store
-                sebagai tujuan (hanya store yang terhubung ke CK ini yang bisa dipilih).
+                🏭 Ini Central Kitchen — bila barang untuk outlet, pilih cabang 🏪 store sebagai
+                tujuan (hanya store yang terhubung ke CK ini yang bisa dipilih).
               </div>
             )}
           </div>
@@ -541,39 +469,26 @@ export function TahapModal({
         {keSelesai && (
           <div className="space-y-2 rounded-lg border border-stone-200 p-3">
             <div className="text-sm font-semibold text-stone-700">
-              🧾 Realisasi biaya — selesai sesuai rencana?
+              🧾 Realisasi — berapa yang benar-benar {tipe === "beli" ? "dibelanjakan" : "dikeluarkan"}?
             </div>
-            <label className="flex items-center gap-2 text-sm">
+            <label className="flex flex-wrap items-center gap-2 text-sm">
+              <span>Total {tipe === "beli" ? "belanja" : "biaya"} riil:</span>
               <input
-                type="radio"
-                name="realisasi"
-                checked={sesuaiRencana}
-                onChange={() => setSesuaiRencana(true)}
+                type="number"
+                min="0"
+                step="any"
+                value={belanjaManual ? belanjaRiil : String(danaFaktur)}
+                onChange={(e) => {
+                  setBelanjaManual(true);
+                  setBelanjaRiil(e.target.value);
+                }}
+                placeholder="Rp"
+                aria-label="Total belanja riil"
+                className={`w-40 rounded-lg border px-2 py-1 text-right text-sm ${belanjaInvalid ? "border-red-400" : "border-stone-300"}`}
               />
-              <span>
-                Ya, <b>sesuai rencana</b> — biaya pas dengan dana faktur (
-                {formatRupiah(danaFaktur)})
-              </span>
+              <span className="text-xs text-stone-400">dana faktur {formatRupiah(danaFaktur)}</span>
             </label>
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="radio"
-                name="realisasi"
-                checked={!sesuaiRencana}
-                onChange={() => setSesuaiRencana(false)}
-              />
-              <span>
-                Tidak — <b>harga pasar berubah</b>: isi <b>harga riil per bahan</b> pada
-                kolom di tabel atas
-              </span>
-            </label>
-            {realisasi != null && !adaInvalid && (
-              <div className="rounded bg-stone-50 px-2 py-1 text-sm text-stone-700">
-                Total biaya riil: <b>{formatRupiah(realisasi)}</b>
-                <span className="text-stone-400"> · dana faktur {formatRupiah(danaFaktur)}</span>
-              </div>
-            )}
-            {realisasi != null && !adaInvalid && selisih > 0.49 && (
+            {realisasi != null && !belanjaInvalid && selisih > 0.49 && (
               <div className="space-y-1">
                 <label className="block text-sm font-medium text-red-700">
                   Kurang {formatRupiah(selisih)} — dari mana uangnya?
@@ -587,7 +502,7 @@ export function TahapModal({
                 />
               </div>
             )}
-            {realisasi != null && !adaInvalid && selisih < -0.49 && (
+            {realisasi != null && !belanjaInvalid && selisih < -0.49 && (
               <div className="space-y-1">
                 <label className="block text-sm font-medium text-emerald-700">
                   Lebih {formatRupiah(-selisih)} — di siapa sisa uangnya?
@@ -601,7 +516,7 @@ export function TahapModal({
                 />
               </div>
             )}
-            {realisasi != null && !adaInvalid && Math.abs(selisih) <= 0.49 && (
+            {realisasi != null && !belanjaInvalid && Math.abs(selisih) <= 0.49 && (
               <div className="text-xs text-stone-500">Pas dengan dana faktur — tidak ada selisih.</div>
             )}
           </div>
@@ -621,26 +536,28 @@ export function TahapModal({
         </div>
 
         <ErrorText error={simpan.error} />
+      </Card>
 
-        <div className="flex justify-end gap-2">
-          <button onClick={onClose} className={btnSecondary}>
-            Batal
-          </button>
-          <button
-            onClick={() => simpan.mutate()}
-            disabled={
-              simpan.isPending ||
-              items.length === 0 ||
-              adaInvalid ||
-              danaInvalid ||
-              catatanSelisihKosong
-            }
-            className={btnPrimary}
-          >
-            {simpan.isPending ? "Menyimpan…" : `Terapkan (${items.length} baris)`}
-          </button>
-        </div>
+      {/* Aksi menempel di bawah agar mudah dijangkau di HP */}
+      <div className="sticky bottom-0 mt-3 flex justify-end gap-2 border-t border-stone-200 bg-white/95 py-3 backdrop-blur">
+        <button onClick={() => navigate(kembali)} className={btnSecondary}>
+          Batal
+        </button>
+        <button
+          onClick={() => simpan.mutate()}
+          disabled={
+            simpan.isPending ||
+            items.length === 0 ||
+            adaInvalid ||
+            danaInvalid ||
+            belanjaInvalid ||
+            catatanSelisihKosong
+          }
+          className={btnPrimary}
+        >
+          {simpan.isPending ? "Menyimpan…" : `Terapkan (${items.length} baris)`}
+        </button>
       </div>
-    </Modal>
+    </div>
   );
 }
