@@ -89,3 +89,28 @@ otomatis ketika web dibuka dari dalam aplikasi.
   butuh koneksi ke server. (Mode offline = proyek terpisah, di luar lingkup ini.)
 - **Printer LAN & RawBT masih bisa?** Bisa — semua transport lama tetap ada.
   Opsi native hanya menambah jalur yang paling nyaman untuk Bluetooth klasik.
+
+## Catatan integrasi — Kode karyawan absensi (untuk tim mobile)
+
+**Perubahan (Juli 2026): kode karyawan kini `8 digit angka acak`** (mis.
+`04821390`), menggantikan format lama berbasis inisial nama (mis. `BS`, `TEJ`).
+
+Dampak untuk aplikasi mobile:
+
+- **Tidak perlu ubah kode aplikasi.** Layar Absen memakai web app yang dimuat
+  di WebView (URL produksi) — begitu web ter-deploy, format baru langsung ikut.
+- **Payload QR absen tetap sama bentuknya**: isi QR = **string kode mentah**
+  (sekarang 8 digit angka), teks polos tanpa prefix/JSON. Endpoint absen
+  (`POST /api/absensi` body `{ "kode": "<8 digit>" }`) tidak berubah; pencocokan
+  kode tetap case-insensitive.
+- **Bila nanti membuat input kode manual native** (di luar WebView): terima
+  hingga 8 karakter dan gunakan **keypad numerik** (`inputType=number`). Di web,
+  input sudah `inputMode="numeric"`.
+- **Kode lama (2–4 huruf) tak berlaku lagi**: semua karyawan di-upgrade ke
+  8 digit saat server boot. QR/kode yang sudah dicetak harus dicetak ulang dari
+  menu **Profil** atau **Kelola Karyawan**.
+- **Absen WAJIB foto** (anti-titip): scan QR mengambil foto otomatis; ketik kode
+  wajib swafoto dulu. Foto diunggah ke `POST /api/upload?tujuan=bukti` → URL-nya
+  dikirim di body `POST /api/absensi` (`foto_url`, wajib). Semua lewat web di
+  WebView — **tak perlu kode native**, tapi pastikan **izin KAMERA** aktif untuk
+  WebView (sudah dibutuhkan untuk scan QR; kini juga dipakai swafoto kode manual).

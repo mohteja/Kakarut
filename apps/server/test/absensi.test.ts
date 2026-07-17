@@ -2,27 +2,10 @@
  * Uji logika murni absensi: generator kode karyawan & penentuan cap berikutnya.
  */
 import { describe, expect, it } from "vitest";
-import { absenTipeBerikutnya, kodeKaryawanDariNama } from "@kakarut/shared";
+import { absenTipeBerikutnya } from "@kakarut/shared";
 
-describe("kodeKaryawanDariNama", () => {
-  it("≥2 kata → inisial (maks 4)", () => {
-    expect(kodeKaryawanDariNama("Budi Santoso")).toBe("BS");
-    expect(kodeKaryawanDariNama("teja hoki indonesia")).toBe("THI");
-    expect(kodeKaryawanDariNama("Satu Dua Tiga Empat Lima")).toBe("SDTE"); // dipotong 4
-  });
-  it("1 kata → 3 huruf pertama, huruf besar", () => {
-    expect(kodeKaryawanDariNama("Teja")).toBe("TEJ");
-    expect(kodeKaryawanDariNama("Al")).toBe("AL");
-  });
-  it("abaikan tanda baca saat memecah kata", () => {
-    expect(kodeKaryawanDariNama("Budi, Santoso")).toBe("BS");
-    expect(kodeKaryawanDariNama("Ana-Maria")).toBe("AM");
-  });
-  it("fallback 'K' bila nama tak berhuruf", () => {
-    expect(kodeKaryawanDariNama("   ")).toBe("K");
-    expect(kodeKaryawanDariNama("!!!")).toBe("K");
-  });
-});
+// Kode karyawan kini 8 digit acak yang di-generate di server (butuh DB untuk uji
+// keunikan) → diverifikasi di scripts/verify-api.sh, bukan unit test murni ini.
 
 describe("absenTipeBerikutnya", () => {
   it("belum ada cap hari ini → masuk", () => {

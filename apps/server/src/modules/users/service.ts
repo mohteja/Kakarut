@@ -1,47 +1,49 @@
+import { randomInt } from "node:crypto";
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
-import { kodeKaryawanDariNama } from "@kakarut/shared";
 import type { Db, Tx } from "../../db/client";
 import { memberships, users } from "../../db/schema";
 
-/** Kode unik berikutnya dari basis + himpunan kode terpakai (mis. BS, BS2…). */
-function kodeUnik(base: string, dipakai: Set<string>): string {
-  let kode = base;
-  let n = 2;
-  while (dipakai.has(kode.toUpperCase())) {
-    kode = `${base}${n}`;
-    n += 1;
+/** Kode karyawan = 8 digit acak (numerik). Mudah diketik di numpad saat absen & unik per perusahaan. */
+const FORMAT_KODE_KARYAWAN = /^\d{8}$/;
+
+/** Kode karyawan 8 digit acak yang belum ada di himpunan `dipakai`. */
+function kodeKaryawanAcak(dipakai: Set<string>): string {
+  // ruang 100 juta ≫ jumlah karyawan mana pun → praktis tak pernah kehabisan
+  for (let i = 0; i < 100; i += 1) {
+    const kode = String(randomInt(0, 100_000_000)).padStart(8, "0");
+    if (!dipakai.has(kode)) return kode;
   }
-  return kode;
+  throw new Error("Gagal membuat kode karyawan unik");
 }
 
 /**
- * Tentukan kode karyawan unik dalam perusahaan dari nama (untuk membership
- * baru). Kode = ID cepat absensi (ketik/scan QR). Menambah angka bila bentrok.
+ * Tentukan kode karyawan unik dalam perusahaan (untuk membership baru).
+ * Kode = ID cepat absensi (ketik/scan QR): 8 digit acak, unik per perusahaan.
  */
 export async function resolveKodeKaryawan(
   dbx: Db | Tx,
   companyId: string,
-  nama: string,
 ): Promise<string> {
   const rows = await dbx
     .select({ kode: memberships.employeeCode })
     .from(memberships)
     .where(eq(memberships.companyId, companyId));
   const dipakai = new Set(rows.filter((r) => r.kode).map((r) => r.kode!.toUpperCase()));
-  return kodeUnik(kodeKaryawanDariNama(nama), dipakai);
+  return kodeKaryawanAcak(dipakai);
 }
 
-type BackfillRow = { id: string; companyId: string; nama: string; kode: string | null };
+type BackfillRow = { id: string; companyId: string; kode: string | null };
 
 /** advisory lock unik: dua instance server yang boot bersamaan tak mengisi kode ganda */
 const BACKFILL_KODE_LOCK_KEY = 727272025;
 
 /**
- * Isi kode karyawan untuk membership lama yang belum punya (dipanggil saat boot
- * & seed). Idempotent: hanya menyentuh baris kode NULL, unik per perusahaan.
- * Dijalankan dalam transaksi + advisory lock agar aman multi-instance (replika
- * kedua menunggu, lalu melihat kode sudah terisi → no-op). Urutan deterministik
- * (companyId, createdAt, id) supaya penetapan kode konsisten.
+ * Pastikan tiap membership punya kode karyawan 8 digit acak (dipanggil saat boot
+ * & seed). Idempotent: menyentuh baris yang kodenya NULL ATAU belum berformat 8
+ * digit (kode lama gaya inisial "BS" di-upgrade sekali → 8 digit), kode yang
+ * sudah 8 digit dibiarkan stabil. Dijalankan dalam transaksi + advisory lock
+ * agar aman multi-instance (replika kedua menunggu, lalu melihat kode sudah
+ * benar → no-op). Urutan deterministik (companyId, createdAt, id).
  */
 export async function backfillEmployeeCode(dbx: Db | Tx): Promise<number> {
   return dbx.transaction(async (tx) => {
@@ -50,24 +52,23 @@ export async function backfillEmployeeCode(dbx: Db | Tx): Promise<number> {
       .select({
         id: memberships.id,
         companyId: memberships.companyId,
-        nama: users.nama,
         kode: memberships.employeeCode,
       })
       .from(memberships)
-      .innerJoin(users, eq(memberships.userId, users.id))
       .orderBy(asc(memberships.companyId), asc(memberships.createdAt), asc(memberships.id));
-    const perusahaan = new Map<string, { dipakai: Set<string>; kosong: BackfillRow[] }>();
+    const perusahaan = new Map<string, { dipakai: Set<string>; perluKode: BackfillRow[] }>();
     for (const r of rows) {
-      const g = perusahaan.get(r.companyId) ?? { dipakai: new Set<string>(), kosong: [] };
-      if (r.kode) g.dipakai.add(r.kode.toUpperCase());
-      else g.kosong.push(r);
+      const g = perusahaan.get(r.companyId) ?? { dipakai: new Set<string>(), perluKode: [] };
+      // kode valid (8 digit) dipertahankan; NULL / format lama → dibuat ulang
+      if (r.kode && FORMAT_KODE_KARYAWAN.test(r.kode)) g.dipakai.add(r.kode.toUpperCase());
+      else g.perluKode.push(r);
       perusahaan.set(r.companyId, g);
     }
     let terisi = 0;
     for (const [, g] of perusahaan) {
-      for (const r of g.kosong) {
-        const kode = kodeUnik(kodeKaryawanDariNama(r.nama), g.dipakai);
-        g.dipakai.add(kode.toUpperCase());
+      for (const r of g.perluKode) {
+        const kode = kodeKaryawanAcak(g.dipakai);
+        g.dipakai.add(kode);
         await tx.update(memberships).set({ employeeCode: kode }).where(eq(memberships.id, r.id));
         terisi += 1;
       }

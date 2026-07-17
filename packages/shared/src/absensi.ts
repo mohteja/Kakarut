@@ -4,30 +4,8 @@
  */
 import type { AbsensiTipe } from "./types";
 
-/**
- * Kode karyawan ringkas dari nama, untuk absensi cepat (ketik/scan QR):
- *  - ≥2 kata → inisial tiap kata (maks 4), mis. "Budi Santoso" → "BS".
- *  - 1 kata  → 3 huruf pertama, mis. "Teja" → "TEJ".
- * Selalu huruf besar; fallback "K" bila nama tak berhuruf. Keunikan per
- * perusahaan ditangani terpisah (menambah angka bila bentrok).
- */
-export function kodeKaryawanDariNama(nama: string): string {
-  const kata = nama
-    .replace(/[^a-zA-Z0-9\s]/g, " ")
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean);
-  if (kata.length === 0) return "K";
-  if (kata.length >= 2) {
-    const inisial = kata
-      .map((w) => w[0])
-      .join("")
-      .toUpperCase()
-      .slice(0, 4);
-    return inisial.length >= 2 ? inisial : kata[0].slice(0, 3).toUpperCase();
-  }
-  return kata[0].slice(0, 3).toUpperCase() || "K";
-}
+// Catatan: kode karyawan kini 8 digit acak (numerik) yang di-generate di server
+// (lihat apps/server/src/modules/users/service.ts) — bukan lagi inisial nama.
 
 /**
  * Cap absensi berikutnya berdasarkan cap TERAKHIR hari ini:
