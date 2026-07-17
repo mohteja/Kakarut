@@ -5,6 +5,7 @@ import type { JenisPengadaan, KonfirmasiStatus } from "@kakarut/shared";
 import {
   Card,
   ErrorText,
+  Modal,
   PageTitle,
   Spinner,
   btnPrimary,
@@ -277,7 +278,32 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
   // back touchpad tak menutup form tak sengaja). Grup dikirim lewat router
   // state; simpan → redirect balik ke daftar ini.
   const navigate = useNavigate();
+  // Produksi mulai dikerjakan tak punya input apa pun (tak belanja → tak ada
+  // uang cair) → cukup konfirmasi modal, tak perlu halaman penuh.
+  const [konfirmProses, setKonfirmProses] = useState<FakturGroup | null>(null);
+  const mulaiProduksi = useMutation({
+    mutationFn: (g: FakturGroup) =>
+      api(`${t.endpoint}/tahap/${g.fakturId}`, {
+        method: "POST",
+        body: {
+          ke: "dikerjakan",
+          items: g.rows
+            .filter((r) => r.status === "rencana")
+            .map((r) => ({ id: r.id, qty: r.qty })),
+        },
+      }),
+    onSuccess: () => {
+      for (const key of [t.endpoint, "stok", "laporan", "rekomendasi"]) {
+        queryClient.invalidateQueries({ queryKey: [key] });
+      }
+      setKonfirmProses(null);
+    },
+  });
   const bukaUbahTahap = (g: FakturGroup, ke: TahapTujuan) => {
+    if (tipe === "produksi" && ke === "dikerjakan") {
+      setKonfirmProses(g);
+      return;
+    }
     const st: TahapNavState = {
       grup: g,
       tipe,
@@ -750,6 +776,41 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
             />
           ) : null;
         })()}
+      {konfirmProses && (
+        <Modal open onClose={() => setKonfirmProses(null)} title="Mulai produksi?">
+          <div className="space-y-3">
+            <p className="text-sm text-stone-600">
+              Tandai faktur ini <b>sedang Diproses</b>. Produksi tidak membeli apa pun, jadi
+              tak ada uang cair yang perlu diisi.
+            </p>
+            <div className="space-y-1 rounded-lg border border-stone-200 bg-stone-50 p-3 text-sm">
+              <div className="flex justify-between">
+                <span className="text-stone-500">Jumlah bahan jadi</span>
+                <b>
+                  {konfirmProses.rows.filter((r) => r.status === "rencana").length} baris
+                </b>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-stone-500">Total est. RAB</span>
+                <b>{formatRupiah(konfirmProses.totalHarga)}</b>
+              </div>
+            </div>
+            <ErrorText error={mulaiProduksi.error} />
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setKonfirmProses(null)} className={btnSecondary}>
+                Batal
+              </button>
+              <button
+                onClick={() => mulaiProduksi.mutate(konfirmProses)}
+                disabled={mulaiProduksi.isPending}
+                className={btnPrimary}
+              >
+                {mulaiProduksi.isPending ? "Menyimpan…" : "Ya, Diproses"}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

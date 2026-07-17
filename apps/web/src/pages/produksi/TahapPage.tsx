@@ -153,7 +153,9 @@ function TahapForm({
     if (!Number.isFinite(q) || q <= 0 || r.total_harga == null) return t;
     return t + Math.round((r.total_harga * Math.min(q, r.qty)) / r.qty);
   }, 0);
-  const tanyaDana = barisRab.length > 0;
+  // Dana cair hanya untuk BELI — produksi tak belanja apa pun, jadi tak ada
+  // uang yang dicairkan.
+  const tanyaDana = tipe === "beli" && barisRab.length > 0;
   const danaCair = !tanyaDana ? null : danaManual ? Number(danaNominal) : rabMaju;
   const danaInvalid =
     tanyaDana && danaManual && (!Number.isFinite(danaCair) || danaCair! < 0);
