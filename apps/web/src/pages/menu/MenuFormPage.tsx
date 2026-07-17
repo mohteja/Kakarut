@@ -11,6 +11,7 @@ import {
   type BahanDto,
   type MenuDto,
 } from "@kakarut/shared";
+import { BahanPicker } from "../../components/BahanPicker";
 import { ImageUpload } from "../../components/ImageUpload";
 import {
   Card,
@@ -368,22 +369,17 @@ export function MenuFormPage() {
               return (
                 <div key={i} className="rounded-lg border border-stone-200 p-3">
                   <div className="flex items-center gap-2">
-                    <select
+                    <BahanPicker
+                      bahan={bahan}
                       value={k.ingredient_id}
-                      onChange={(e) => {
+                      onChange={(id) => {
                         const copy = [...komponen];
-                        copy[i] = { ...copy[i], ingredient_id: e.target.value };
+                        copy[i] = { ...copy[i], ingredient_id: id };
                         setKomponen(copy);
                       }}
-                      className={`${inputClass} flex-1`}
-                    >
-                      <option value="">— pilih bahan —</option>
-                      {bahan.map((x) => (
-                        <option key={x.id} value={x.id}>
-                          {x.nama} — Rp {formatAngka(x.harga_per_unit, 2)}/{x.satuan}
-                        </option>
-                      ))}
-                    </select>
+                      placeholder="— pilih bahan —"
+                      className="flex-1"
+                    />
                     <button
                       type="button"
                       onClick={() => setKomponen(komponen.filter((_, j) => j !== i))}
