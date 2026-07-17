@@ -259,12 +259,14 @@ export interface RencanaBahanRow {
   pengadaan: JenisPengadaan;
   /** total kebutuhan = Σ porsi × qty per porsi */
   kebutuhan: number;
-  /** saldo yang menutup kebutuhan = stok cabang tujuan + stok CK (bila ada) */
+  /** saldo stok cabang TUJUAN saja (bukan + CK) — cocok dgn Kartu Stok cabang */
   saldo: number;
-  /** bagian saldo yang berasal dari Central Kitchen (0 bila tak ada CK) */
+  /** stok jadi yang ADA di Central Kitchen (bisa dikirim ke cabang; 0 bila tak ada CK) */
   saldo_ck: number;
-  /** kekurangan = max(0, kebutuhan − saldo); 0 = stok cukup */
+  /** kekurangan cabang = max(0, kebutuhan − saldo cabang); 0 = stok cabang cukup */
   kurang: number;
+  /** bagian kekurangan yang dipenuhi dgn KIRIM DARI STOK CK (transfer, bukan produksi baru) */
+  kirim_ck: number;
   isi: number;
   /** baris faktur yang akan dibuat (null bila kurang = 0) */
   mode_faktur: "pcs" | "batch" | null;
@@ -294,6 +296,8 @@ export interface RencanaMenuPreview {
   jumlah_produksi: number;
   jumlah_beli: number;
   jumlah_beli_produksi: number;
+  /** jumlah bahan yang akan DIKIRIM dari stok CK (transfer, tanpa produksi baru) */
+  jumlah_kirim: number;
 }
 
 /** Hasil pembuatan faktur otomatis dari rencana menu (null = jalur tak perlu). */
@@ -302,6 +306,8 @@ export interface RencanaFakturResult {
   beli: { faktur_id: string; jumlah_baris: number } | null;
   /** faktur beli BAHAN PRODUKSI (bahan mentah resep) — terpisah dari beli produk jadi */
   beli_produksi: { faktur_id: string; jumlah_baris: number } | null;
+  /** faktur KIRIM DARI STOK CK (transfer stok jadi CK → cabang, tanpa produksi baru) */
+  kirim: { faktur_id: string; jumlah_baris: number } | null;
 }
 
 /** Satu bagian (Produksi / Beli) dari sebuah permintaan tambah stok. */
@@ -331,6 +337,8 @@ export interface PermintaanStokRow {
   beli: PermintaanStokBagian | null;
   /** belanja bahan mentah untuk produksi (dari resep) */
   beli_produksi: PermintaanStokBagian | null;
+  /** KIRIM DARI STOK CK: stok jadi yang sudah ada di CK, dipindah ke cabang */
+  kirim: PermintaanStokBagian | null;
 }
 
 /**

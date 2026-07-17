@@ -2025,21 +2025,21 @@ api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CK52_UTAMA\",\"items\":[{\"ingre
 PV66CK=$(api "$OWNER" POST "/rekomendasi/menu?branch_id=$CB46_ID" "{\"items\":[{\"menu_id\":\"$MENU66\",\"porsi\":100}],\"ck_branch_id\":\"$CK52_UTAMA\"}")
 cek "CK: baso66 saldo_ck == 200 (stok CK ikut dihitung)" "abs(V - 200) < 0.001" \
   "$(echo "$PV66CK" | jq --arg id "$BASO66" '[.bahan[] | select(.ingredient_id==$id)][0].saldo_ck')"
-cek "CK: baso66 saldo gabungan == 200 (store 0 + CK 200)" "abs(V - 200) < 0.001" \
+cek "CK: baso66 saldo = stok CABANG saja == 0 (bukan +CK)" "abs(V) < 0.001" \
   "$(echo "$PV66CK" | jq --arg id "$BASO66" '[.bahan[] | select(.ingredient_id==$id)][0].saldo')"
-cek "CK: baso66 kurang turun 500 → 300 (500 − 200 stok CK)" "abs(V - 300) < 0.001" \
-  "$(echo "$PV66CK" | jq --arg id "$BASO66" '[.bahan[] | select(.ingredient_id==$id)][0].kurang')"
+cek "CK: baso66 kirim_ck 200 (CK menutup 200 lewat kirim; sisa 300 diproduksi)" "abs(V - 200) < 0.001" \
+  "$(echo "$PV66CK" | jq --arg id "$BASO66" '[.bahan[] | select(.ingredient_id==$id)][0].kirim_ck')"
 cek "CK: kebutuhan daging turun 10000 → 6000 (300 baso = 3 batch)" "abs(V - 6000) < 0.001" \
   "$(echo "$PV66CK" | jq --arg id "$DAG66" '[.bahan_produksi[] | select(.ingredient_id==$id)][0].kebutuhan')"
 cek "CK: kebutuhan tepung turun 1500 → 900 (3 batch × 300)" "abs(V - 900) < 0.001" \
   "$(echo "$PV66CK" | jq --arg id "$TEP66" '[.bahan_produksi[] | select(.ingredient_id==$id)][0].kebutuhan')"
 # STOK CK CUKUP menutup seluruh kebutuhan (600 ≥ 500) → tak perlu produksi,
-# cabang tinggal DIKIRIM dari CK: baso66 kurang 0, tak ada belanja bahan
+# semua dikirim dari stok CK: baso66 kirim_ck 500, tak ada belanja bahan
 # produksi, jumlah_produksi 0.
 api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CK52_UTAMA\",\"items\":[{\"ingredient_id\":\"$BASO66\",\"qty\":600}]}" > /dev/null
 PV66FULL=$(api "$OWNER" POST "/rekomendasi/menu?branch_id=$CB46_ID" "{\"items\":[{\"menu_id\":\"$MENU66\",\"porsi\":100}],\"ck_branch_id\":\"$CK52_UTAMA\"}")
-cek "CK cukup: baso66 kurang 0 (600 CK ≥ 500 butuh)" "abs(V) < 0.001" \
-  "$(echo "$PV66FULL" | jq --arg id "$BASO66" '[.bahan[] | select(.ingredient_id==$id)][0].kurang')"
+cek "CK cukup: baso66 kirim_ck 500 (semua dari stok CK, tanpa produksi)" "abs(V - 500) < 0.001" \
+  "$(echo "$PV66FULL" | jq --arg id "$BASO66" '[.bahan[] | select(.ingredient_id==$id)][0].kirim_ck')"
 cek "CK cukup: jumlah_produksi 0 (tinggal kirim, tak produksi)" "V == 0" \
   "$(echo "$PV66FULL" | jq '.jumlah_produksi')"
 cek "CK cukup: tak ada belanja bahan produksi (bahan_produksi kosong)" "V == 0" \
@@ -2102,6 +2102,35 @@ SISA66=$(api "$OWNER" GET "/produksi?branch_id=$CK52_UTAMA&per_page=500" | jq -r
 api "$OWNER" POST "/produksi/tahap/$PF66B" "{\"ke\":\"menunggu\",\"items\":[{\"id\":\"$SISA66\",\"qty\":100}]}" > /dev/null
 cek "sisa split maju → konsumsi sisanya (daging 4000)" "abs(V - 4000) < 0.001" \
   "$(api "$OWNER" GET "/stok?branch_id=$CK52_UTAMA" | jq --arg id "$DAG66" '[.[] | select(.ingredient_id==$id)][0].saldo')"
+
+# --- KIRIM DARI STOK CK: stok jadi yang sudah ada di CK dipindah ke cabang
+#     (transfer, BUKAN produksi baru). CK 600, cabang 0. Permintaan 100 porsi
+#     (butuh 500 baso66) → kirim 500 dari CK; kirim + terima → cabang +500,
+#     CK −500. Rencana pakai saldo CABANG saja (jujur, cocok Kartu Stok). ---
+api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CB46_ID\",\"items\":[{\"ingredient_id\":\"$BASO66\",\"qty\":0}]}" > /dev/null
+api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CK52_UTAMA\",\"items\":[{\"ingredient_id\":\"$BASO66\",\"qty\":600}]}" > /dev/null
+KRM=$(api "$OWNER" POST /rekomendasi/menu/faktur "{\"items\":[{\"menu_id\":\"$MENU66\",\"porsi\":100}],\"tujuan_branch_id\":\"$CB46_ID\",\"ck_branch_id\":\"$CK52_UTAMA\"}")
+KRMF=$(echo "$KRM" | jq -r '.kirim.faktur_id // empty')
+cek "CK stok cukup → faktur KIRIM (transfer), tanpa produksi" "V == 1" \
+  "$(echo "$KRM" | jq '((.kirim != null) and (.produksi == null)) | if . then 1 else 0 end')"
+cek "faktur kirim: 1 bahan (baso66)" "V == 1" "$(echo "$KRM" | jq '.kirim.jumlah_baris')"
+cek "sebelum diterima: cabang baso66 masih 0" "abs(V) < 0.001" \
+  "$(api "$OWNER" GET "/stok?branch_id=$CB46_ID" | jq --arg i "$BASO66" '[.[]|select(.ingredient_id==$i)][0].saldo')"
+cek "sebelum diterima: CK baso66 masih 600" "abs(V - 600) < 0.001" \
+  "$(api "$OWNER" GET "/stok?branch_id=$CK52_UTAMA" | jq --arg i "$BASO66" '[.[]|select(.ingredient_id==$i)][0].saldo')"
+api "$OWNER" POST "/produksi/kirim/$KRMF" '{}' > /dev/null
+api "$OWNER" POST "/penerimaan/$KRMF/terima" '{}' > /dev/null
+cek "kirim dari stok: cabang baso66 naik jadi 500" "abs(V - 500) < 0.001" \
+  "$(api "$OWNER" GET "/stok?branch_id=$CB46_ID" | jq --arg i "$BASO66" '[.[]|select(.ingredient_id==$i)][0].saldo')"
+cek "kirim dari stok: CK baso66 turun jadi 100 (600−500)" "abs(V - 100) < 0.001" \
+  "$(api "$OWNER" GET "/stok?branch_id=$CK52_UTAMA" | jq --arg i "$BASO66" '[.[]|select(.ingredient_id==$i)][0].saldo')"
+api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CB46_ID\",\"items\":[{\"ingredient_id\":\"$BASO66\",\"qty\":0}]}" > /dev/null
+PVK=$(api "$OWNER" POST "/rekomendasi/menu?branch_id=$CB46_ID" "{\"items\":[{\"menu_id\":\"$MENU66\",\"porsi\":100}],\"ck_branch_id\":\"$CK52_UTAMA\"}")
+cek "rencana: saldo baso66 = stok CABANG saja (0, bukan +CK)" "abs(V) < 0.001" \
+  "$(echo "$PVK" | jq --arg i "$BASO66" '[.bahan[]|select(.ingredient_id==$i)][0].saldo')"
+cek "rencana: kirim_ck baso66 = 100 (sisa stok CK bisa dikirim)" "abs(V - 100) < 0.001" \
+  "$(echo "$PVK" | jq --arg i "$BASO66" '[.bahan[]|select(.ingredient_id==$i)][0].kirim_ck')"
+api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CK52_UTAMA\",\"items\":[{\"ingredient_id\":\"$BASO66\",\"qty\":0}]}" > /dev/null
 
 # --- Perbaikan review: guard konsistensi resep & isolasi tenant ---
 # flip pengadaan bahan yang masih jadi INPUT resep → 409 (rencana akan

@@ -44,6 +44,7 @@ export async function hitungSaldoCabang(
       COALESCE(b.qty, 0) AS stok_awal,
       COALESCE(p.qty, 0) AS produksi,
       COALESCE(u.qty, 0) + COALESCE(pc.qty, 0) AS terpakai,
+      COALESCE(k.qty, 0) AS kirim_keluar,
       COALESCE(w.rencana, 0)    AS prod_rencana,
       COALESCE(w.dikerjakan, 0) AS prod_dikerjakan,
       COALESCE(w.menunggu, 0)   AS prod_menunggu,
@@ -83,6 +84,17 @@ export async function hitungSaldoCabang(
           SELECT 1 FROM productions pr WHERE pr.id = pc.production_id AND pr.deleted_at IS NULL
         )
     ) pc ON TRUE
+    LEFT JOIN LATERAL (
+      -- KIRIM DARI STOK (transfer keluar): stok jadi yang dipindah dari CK ini
+      -- ke cabang lain (asal_branch_id = cabang ini) & sudah DITERIMA
+      -- (dikonfirmasi) → mengurangi saldo CK. Produksi work-order (asal null)
+      -- tak termasuk — itu produksi baru, bukan pemindahan stok yang ada.
+      SELECT SUM(pr.qty) AS qty
+      FROM productions pr
+      WHERE pr.asal_branch_id = ${branchId} AND pr.ingredient_id = i.id
+        AND pr.status = 'dikonfirmasi' AND pr.deleted_at IS NULL
+        AND (b.created_at IS NULL OR pr.waktu > b.created_at)
+    ) k ON TRUE
     LEFT JOIN LATERAL (
       -- tempat penyimpanan dari entri masuk terkonfirmasi terakhir
       SELECT sl.id, sl.nama
@@ -135,7 +147,9 @@ export async function hitungSaldoCabang(
     const row = r as Record<string, unknown>;
     const stokAwal = Number(row.stok_awal);
     const produksi = Number(row.produksi);
-    const terpakai = Number(row.terpakai);
+    // "terpakai" gabungan: konsumsi penjualan/produksi + kirim keluar (transfer
+    // stok jadi ke cabang lain) — semuanya mengurangi saldo cabang ini.
+    const terpakai = Number(row.terpakai) + Number(row.kirim_keluar);
     const rencana = Number(row.prod_rencana);
     const dikerjakan = Number(row.prod_dikerjakan);
     const menunggu = Number(row.prod_menunggu);

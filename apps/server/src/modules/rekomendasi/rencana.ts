@@ -141,31 +141,32 @@ export async function rencanaDariMenu(
     const e = extraById.get(ingredientId);
     const pengadaan = e?.pengadaan ?? "beli";
     const hargaPerUnit = e && s.isi > 0 ? e.hargaBeli / s.isi : 0;
-    // Saldo yang menutup kebutuhan = stok store + stok CK (barang di CK bisa
-    // dikirim ke store). Stok store dipakai dulu, sisanya baru dari CK.
-    // Rencana ini MURNI "kebutuhan menu vs saldo" — stok minimum (reorder
-    // point) TIDAK ditambahkan: bila stok (termasuk CK) sudah menutupi
-    // kebutuhan, cabang tinggal DIKIRIM dari CK — tak perlu produksi/beli baru.
-    // Cadangan/reorder diurus terpisah (status stok "menipis" & Rekomendasi).
+    // Kekurangan dihitung terhadap saldo CABANG saja (jujur — cocok dengan
+    // Kartu Stok cabang). Bagian yang STOK JADInya sudah ADA di CK dipenuhi
+    // lewat "kirim dari stok" (transfer CK → cabang, TANPA produksi baru);
+    // sisanya baru diproduksi/dibeli. Stok minimum (reorder) tak ditambahkan.
     const saldoCk = ckStok(ingredientId);
-    const saldoGabung = s.saldo + saldoCk;
-    ckDipakaiMenu.set(ingredientId, Math.max(0, Math.min(saldoCk, butuh - s.saldo)));
-    // toleransi presisi float: noise (mis. 5e-17) tidak memicu faktur hantu.
-    const kurang = kekuranganBahan(butuh, saldoGabung);
+    const kurang = kekuranganBahan(butuh, s.saldo);
+    // hanya bila ada CK pelaksana: stok jadi CK bisa dikirim menutup kekurangan
+    const kirimCk = pelaksanaId !== branchId ? Math.min(kurang, saldoCk) : 0;
+    ckDipakaiMenu.set(ingredientId, kirimCk);
+    // sisa yang benar-benar perlu diproduksi/dibeli baru (setelah kirim CK)
+    const perlu = kekuranganBahan(kurang, kirimCk);
     // MOQ (minimal belanja) hanya berlaku utk jalur beli — bukan produksi
     const dasarFaktur =
-      pengadaan === "beli" ? Math.max(kurang, kurang > 0 ? (e?.minBeli ?? 0) : 0) : kurang;
+      pengadaan === "beli" ? Math.max(perlu, perlu > 0 ? (e?.minBeli ?? 0) : 0) : perlu;
     const faktur =
-      kurang > 0 ? jumlahFaktur(dasarFaktur, pengadaan, s.isi, e?.bolehEceran ?? false) : null;
+      perlu > 0 ? jumlahFaktur(dasarFaktur, pengadaan, s.isi, e?.bolehEceran ?? false) : null;
     bahan.push({
       ingredient_id: ingredientId,
       nama: s.nama,
       satuan: s.satuan,
       pengadaan,
       kebutuhan: butuh,
-      saldo: saldoGabung,
+      saldo: s.saldo,
       saldo_ck: saldoCk,
       kurang,
+      kirim_ck: kirimCk,
       isi: s.isi,
       mode_faktur: faktur?.mode ?? null,
       jumlah_faktur: faktur?.jumlah ?? null,
@@ -184,8 +185,10 @@ export async function rencanaDariMenu(
   // cabang PELAKSANA (Central Kitchen bila store terhubung), lalu menjadi
   // faktur beli tersendiri — terpisah dari belanja produk langsung jadi.
   const bahanProduksi: RencanaBahanRow[] = [];
+  // yang PERLU diproduksi baru = punya baris faktur (qty_faktur != null); bagian
+  // yang dikirim dari stok CK (kirim_ck) TIDAK perlu bahan mentah baru.
   const prodShort = bahan.filter(
-    (b) => b.pengadaan === "produksi" && b.kurang > 0 && b.qty_faktur != null,
+    (b) => b.pengadaan === "produksi" && b.qty_faktur != null,
   );
   if (prodShort.length > 0) {
     const resepRows = await db
@@ -261,6 +264,8 @@ export async function rencanaDariMenu(
           // bahan mentah dihitung terhadap stok PELAKSANA (CK bila ada)
           saldo_ck: pelaksanaId === branchId ? 0 : si.saldo,
           kurang,
+          // bahan mentah dibeli & disimpan di CK — tak ada "kirim dari stok"
+          kirim_ck: 0,
           isi: si.isi,
           mode_faktur: faktur?.mode ?? null,
           jumlah_faktur: faktur?.jumlah ?? null,
@@ -282,9 +287,11 @@ export async function rencanaDariMenu(
     total_estimasi_biaya:
       bahan.reduce((a, b) => a + (b.estimasi_biaya ?? 0), 0) +
       bahanProduksi.reduce((a, b) => a + (b.estimasi_biaya ?? 0), 0),
-    jumlah_produksi: bahan.filter((b) => b.kurang > 0 && b.pengadaan === "produksi").length,
-    jumlah_beli: bahan.filter((b) => b.kurang > 0 && b.pengadaan === "beli").length,
+    // jumlah bahan per JALUR aksi (yang benar-benar menghasilkan baris faktur)
+    jumlah_produksi: bahan.filter((b) => b.pengadaan === "produksi" && b.qty_faktur != null).length,
+    jumlah_beli: bahan.filter((b) => b.pengadaan === "beli" && b.qty_faktur != null).length,
     jumlah_beli_produksi: bahanProduksi.filter((b) => b.kurang > 0).length,
+    jumlah_kirim: bahan.filter((b) => b.kirim_ck > 1e-9).length,
   };
 }
 
@@ -325,10 +332,14 @@ export async function buatFakturDariRencana(
     params.ckBranchId,
   );
   const adaFaktur = (b: RencanaBahanRow) =>
-    b.kurang > 0 && b.mode_faktur && b.jumlah_faktur != null && b.qty_faktur != null;
+    b.mode_faktur != null && b.jumlah_faktur != null && b.qty_faktur != null;
   const kurangRows = preview.bahan.filter(adaFaktur);
   const beliProduksiRows = preview.bahan_produksi.filter(adaFaktur);
-  if (kurangRows.length === 0) {
+  // KIRIM DARI STOK CK: bahan yang kekurangannya bisa ditutup dari stok jadi CK
+  // (transfer, tanpa produksi baru). Dibuat sebagai faktur produksi khusus
+  // (asal_branch_id = CK, status 'menunggu' siap kirim).
+  const kirimRows = preview.bahan.filter((b) => b.kirim_ck > 1e-9);
+  if (kurangRows.length === 0 && beliProduksiRows.length === 0 && kirimRows.length === 0) {
     throw new HTTPException(400, {
       message: "Stok semua bahan masih cukup untuk rencana ini — tidak ada faktur yang perlu dibuat",
     });
@@ -355,8 +366,9 @@ export async function buatFakturDariRencana(
 
   let ck: { id: string; nama: string } | null = null;
   // Produksi & beli bahan baku = aktivitas Central Kitchen: keduanya dibukukan
-  // di CK (produksi dikirim ke store; beli disimpan di CK).
-  if (prodRows.length > 0 || beliRows.length > 0) {
+  // di CK (produksi dikirim ke store; beli disimpan di CK). Kirim-dari-stok juga
+  // butuh CK sebagai asal pengiriman.
+  if (prodRows.length > 0 || beliRows.length > 0 || kirimRows.length > 0) {
     const ckId = params.ckBranchId ?? store.ckId ?? null;
     if (ckId && ckId !== store.id) {
       const [row] = await db
@@ -480,6 +492,10 @@ export async function buatFakturDariRencana(
   // terlihat di Dokumen Belanja: mana yang ke cabang, mana yang tetap di CK.
   const beliFakturId =
     beliRows.length > 0 || beliProduksiRows.length > 0 ? randomUUID() : null;
+  // KIRIM DARI STOK CK: transfer stok jadi yang SUDAH ADA di CK → cabang (hanya
+  // bila terhubung CK). Faktur produksi khusus: asal_branch_id = CK, langsung
+  // 'menunggu' (siap dikirim), tanpa produksi/konsumsi bahan mentah.
+  const kirimFakturId = workOrder && kirimRows.length > 0 ? randomUUID() : null;
   // Detail riwayat permintaan: tujuan (bila work-order) + ringkasan menu.
   const detailProd = workOrder ? `Tujuan: ${store.nama} · ${ringkas}` : ringkas;
   await db.transaction(async (tx) => {
@@ -518,6 +534,43 @@ export async function buatFakturDariRencana(
         userId: params.userId,
       });
     }
+    if (kirimFakturId) {
+      await tx.insert(productions).values(
+        kirimRows.map((b) => ({
+          companyId: params.companyId,
+          branchId: ck!.id, // stok berangkat dari CK
+          asalBranchId: ck!.id, // asal transfer → saldo CK berkurang saat diterima
+          tujuanBranchId: params.branchId,
+          bahanProduksi: false,
+          ingredientId: b.ingredient_id,
+          qty: b.kirim_ck,
+          tipe: "produksi" as const,
+          totalHarga: 0, // pemindahan stok yang sudah ada — tanpa biaya baru
+          fakturId: kirimFakturId,
+          rencanaId,
+          noFaktur: null,
+          supplierId: null,
+          storageLocationId: null,
+          // langsung SIAP KIRIM (stok sudah ada di CK) — lewati rencana/dikerjakan,
+          // tak mengonsumsi bahan mentah (bukan produksi baru)
+          status: "menunggu" as const,
+          isBatch: false,
+          catatan,
+          userId: params.userId,
+          workerId: null,
+          prodDate,
+        })),
+      );
+      await catatLogFaktur(tx, {
+        companyId: params.companyId,
+        branchId: ck!.id,
+        fakturId: kirimFakturId,
+        jalur: "produksi",
+        aksi: "Permintaan tambah stok",
+        detail: `Kirim dari stok ${ck!.nama} → ${store.nama} · ${ringkas}`,
+        userId: params.userId,
+      });
+    }
   });
 
   return {
@@ -531,6 +584,7 @@ export async function buatFakturDariRencana(
       beliProduksiRows.length > 0
         ? { faktur_id: beliFakturId!, jumlah_baris: beliProduksiRows.length }
         : null,
+    kirim: kirimFakturId ? { faktur_id: kirimFakturId, jumlah_baris: kirimRows.length } : null,
     preview,
   };
 }
