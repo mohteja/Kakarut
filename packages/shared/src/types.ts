@@ -829,6 +829,8 @@ export interface AbsenResult {
   branch_nama: string;
   /** jarak perangkat ke titik cabang (m) — null bila lokasi cabang belum diatur */
   jarak_m?: number | null;
+  /** foto swafoto bukti absen (URL) */
+  foto_url: string | null;
 }
 
 /** Ringkasan absensi seorang karyawan pada satu hari (daftar di halaman Absen). */
@@ -840,6 +842,10 @@ export interface AbsensiRow {
   masuk: string | null;
   /** jam keluar terakhir hari itu (ISO); null bila belum absen keluar */
   keluar: string | null;
+  /** foto bukti saat cap masuk pertama (URL) */
+  foto_masuk: string | null;
+  /** foto bukti saat cap keluar terakhir (URL) */
+  foto_keluar: string | null;
 }
 
 /** Laporan pengeluaran pembelian bahan baku (faktur beli terkonfirmasi) per rentang tanggal. */

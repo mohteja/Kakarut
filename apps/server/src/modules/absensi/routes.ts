@@ -11,6 +11,8 @@ import { resolveBranchId, type AppEnv } from "../../middleware/auth";
 
 const ClockBody = z.object({
   kode: z.string().trim().min(1),
+  /** foto swafoto bukti absen (URL upload) — WAJIB (anti-titip absen) */
+  foto_url: z.string().trim().min(1, "Foto absen wajib dilampirkan"),
   /** koordinat perangkat saat absen — divalidasi terhadap radius titik cabang */
   lat: z.number().min(-90).max(90).nullish(),
   lng: z.number().min(-180).max(180).nullish(),
@@ -43,7 +45,7 @@ export const absensiRoutes = new Hono<AppEnv>()
   .post("/", zValidator("json", ClockBody), async (c) => {
     const auth = c.get("auth");
     const branchId = await resolveBranchId(c);
-    const { lat, lng } = c.req.valid("json");
+    const { lat, lng, foto_url } = c.req.valid("json");
     const kode = c.req.valid("json").kode.trim();
 
     // Radius absen: bila titik lokasi cabang diatur, absen HANYA diterima
@@ -121,6 +123,7 @@ export const absensiRoutes = new Hono<AppEnv>()
         userId: m.userId,
         tipe,
         attendDate: tanggal,
+        fotoUrl: foto_url,
       })
       .returning({ waktu: attendances.waktu });
     const [branch] = await db
@@ -136,6 +139,7 @@ export const absensiRoutes = new Hono<AppEnv>()
       waktu: ins.waktu.toISOString(),
       branch_nama: branch?.nama ?? "",
       jarak_m: jarakM,
+      foto_url,
     };
     return c.json(result, 201);
   })
@@ -156,6 +160,13 @@ export const absensiRoutes = new Hono<AppEnv>()
         employee_code: memberships.employeeCode,
         masuk: sql<string | null>`min(${attendances.waktu}) filter (where ${attendances.tipe} = 'masuk')`,
         keluar: sql<string | null>`max(${attendances.waktu}) filter (where ${attendances.tipe} = 'keluar')`,
+        // foto pada cap masuk PERTAMA & keluar TERAKHIR (urut waktu)
+        foto_masuk: sql<
+          string | null
+        >`(array_agg(${attendances.fotoUrl} order by ${attendances.waktu}) filter (where ${attendances.tipe} = 'masuk'))[1]`,
+        foto_keluar: sql<
+          string | null
+        >`(array_agg(${attendances.fotoUrl} order by ${attendances.waktu} desc) filter (where ${attendances.tipe} = 'keluar'))[1]`,
       })
       .from(attendances)
       .innerJoin(users, eq(attendances.userId, users.id))
@@ -181,6 +192,8 @@ export const absensiRoutes = new Hono<AppEnv>()
       employee_code: r.employee_code ?? null,
       masuk: r.masuk ? new Date(r.masuk).toISOString() : null,
       keluar: r.keluar ? new Date(r.keluar).toISOString() : null,
+      foto_masuk: r.foto_masuk ?? null,
+      foto_keluar: r.foto_keluar ?? null,
     }));
     return c.json(dto);
   });

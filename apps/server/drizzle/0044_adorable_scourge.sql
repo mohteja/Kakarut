@@ -1,0 +1,1 @@
+ALTER TABLE "attendances" ADD COLUMN "foto_url" text;

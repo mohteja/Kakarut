@@ -109,3 +109,8 @@ Dampak untuk aplikasi mobile:
 - **Kode lama (2–4 huruf) tak berlaku lagi**: semua karyawan di-upgrade ke
   8 digit saat server boot. QR/kode yang sudah dicetak harus dicetak ulang dari
   menu **Profil** atau **Kelola Karyawan**.
+- **Absen WAJIB foto** (anti-titip): scan QR mengambil foto otomatis; ketik kode
+  wajib swafoto dulu. Foto diunggah ke `POST /api/upload?tujuan=bukti` → URL-nya
+  dikirim di body `POST /api/absensi` (`foto_url`, wajib). Semua lewat web di
+  WebView — **tak perlu kode native**, tapi pastikan **izin KAMERA** aktif untuk
+  WebView (sudah dibutuhkan untuk scan QR; kini juga dipakai swafoto kode manual).

@@ -599,6 +599,8 @@ export const attendances = pgTable(
     waktu: timestamp("waktu", { withTimezone: true }).notNull().defaultNow(),
     /** tanggal (zona waktu perusahaan) untuk mengelompokkan cap per hari */
     attendDate: date("attend_date").notNull(),
+    /** foto bukti swafoto saat absen (URL upload) — bukti kehadiran anti-titip */
+    fotoUrl: text("foto_url"),
     catatan: text("catatan"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },

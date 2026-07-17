@@ -22,19 +22,22 @@ function ambilLokasi(): Promise<{ lat: number; lng: number } | null> {
   });
 }
 
+/** Kamera mati / memindai QR / mengambil swafoto (untuk kode manual). */
+type Mode = "idle" | "scan" | "capture";
+
 export function AbsenPage() {
   const { branchQuery } = useBranch();
   const queryClient = useQueryClient();
   const [kode, setKode] = useState("");
   const [hasil, setHasil] = useState<AbsenResult | null>(null);
-  const [scanning, setScanning] = useState(false);
+  const [mode, setMode] = useState<Mode>("idle");
   const [kameraError, setKameraError] = useState<string | null>(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const rafRef = useRef<number | null>(null);
-  const scanningRef = useRef(false);
+  const modeRef = useRef<Mode>("idle");
   const hasilTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { data: daftar = [] } = useQuery({
@@ -43,64 +46,85 @@ export function AbsenPage() {
     refetchInterval: 60_000,
   });
 
+  // Absen = unggah foto bukti dulu → dapat URL → catat absen dgn foto_url.
   const absen = useMutation({
-    mutationFn: async (k: string) => {
+    mutationFn: async ({ kode, blob }: { kode: string; blob: Blob }) => {
+      const fd = new FormData();
+      fd.append("file", blob, "absen.jpg");
+      const { url } = await api<{ url: string }>(`/upload?tujuan=bukti`, {
+        method: "POST",
+        formData: fd,
+      });
       const lokasi = await ambilLokasi();
       return api<AbsenResult>(`/absensi${branchQuery}`, {
         method: "POST",
-        body: { kode: k, lat: lokasi?.lat ?? null, lng: lokasi?.lng ?? null },
+        body: { kode, foto_url: url, lat: lokasi?.lat ?? null, lng: lokasi?.lng ?? null },
       });
     },
     onSuccess: (data) => {
       setHasil(data);
       setKode("");
       queryClient.invalidateQueries({ queryKey: ["absensi"] });
-      // bersihkan kartu hasil setelah beberapa detik agar siap untuk karyawan berikutnya
       if (hasilTimer.current) clearTimeout(hasilTimer.current);
       hasilTimer.current = setTimeout(() => setHasil(null), 6000);
     },
   });
 
-  function stopScan() {
-    scanningRef.current = false;
+  function stopCamera() {
+    modeRef.current = "idle";
     if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
     rafRef.current = null;
     if (streamRef.current) {
       for (const t of streamRef.current.getTracks()) t.stop();
       streamRef.current = null;
     }
-    setScanning(false);
+    setMode("idle");
   }
 
-  async function startScan() {
+  async function startCamera(next: "scan" | "capture") {
     setKameraError(null);
     if (!navigator.mediaDevices?.getUserMedia) {
-      setKameraError("Kamera tidak didukung di perangkat/browser ini. Ketik kode saja.");
+      setKameraError("Kamera tidak didukung di perangkat/browser ini.");
       return;
     }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment" },
+        // scan QR pakai kamera belakang; swafoto manual pakai kamera depan
+        video: { facingMode: next === "scan" ? "environment" : "user" },
         audio: false,
       });
       streamRef.current = stream;
-      setScanning(true);
-      scanningRef.current = true;
+      setMode(next);
+      modeRef.current = next;
       const video = videoRef.current!;
       video.srcObject = stream;
       video.setAttribute("playsinline", "true");
       await video.play();
-      rafRef.current = requestAnimationFrame(tick);
+      if (next === "scan") rafRef.current = requestAnimationFrame(tick);
     } catch {
-      setKameraError("Tidak bisa mengakses kamera (izin ditolak?). Ketik kode karyawan saja.");
-      stopScan();
+      setKameraError("Tidak bisa mengakses kamera (izin ditolak?).");
+      stopCamera();
     }
+  }
+
+  /** Ambil frame kamera saat ini sebagai JPEG blob. */
+  function grabFrame(): Promise<Blob | null> {
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    if (!video || !canvas) return Promise.resolve(null);
+    const w = video.videoWidth;
+    const h = video.videoHeight;
+    if (!w || !h) return Promise.resolve(null);
+    canvas.width = w;
+    canvas.height = h;
+    canvas.getContext("2d")?.drawImage(video, 0, 0, w, h);
+    return new Promise((resolve) => canvas.toBlob((b) => resolve(b), "image/jpeg", 0.7));
   }
 
   function tick() {
     const video = videoRef.current;
     const canvas = canvasRef.current;
-    if (!scanningRef.current || !video || !canvas) return;
+    if (modeRef.current !== "scan" || !video || !canvas) return;
     if (video.readyState === video.HAVE_ENOUGH_DATA) {
       const w = video.videoWidth;
       const h = video.videoHeight;
@@ -113,9 +137,17 @@ export function AbsenPage() {
         const found = jsQR(img.data, w, h, { inversionAttempts: "dontInvert" });
         const teks = found?.data?.trim();
         if (teks) {
-          stopScan();
-          setKode(teks);
-          absen.mutate(teks);
+          // frame QR ini SEKALIGUS jadi foto bukti (capture saat scan)
+          canvas.toBlob(
+            (blob) => {
+              stopCamera();
+              setKode(teks);
+              if (blob) absen.mutate({ kode: teks, blob });
+              else setKameraError("Gagal mengambil foto, coba lagi.");
+            },
+            "image/jpeg",
+            0.7,
+          );
           return;
         }
       }
@@ -123,19 +155,32 @@ export function AbsenPage() {
     rafRef.current = requestAnimationFrame(tick);
   }
 
+  // Kode manual: WAJIB ambil foto dulu sebelum absen tersimpan.
+  async function ambilFotoManual() {
+    const k = kode.trim();
+    if (!k) return;
+    const blob = await grabFrame();
+    if (!blob) {
+      setKameraError("Gagal mengambil foto, coba lagi.");
+      return;
+    }
+    stopCamera();
+    absen.mutate({ kode: k, blob });
+  }
+
   // hentikan kamera & timer saat komponen dilepas
   useEffect(() => {
     return () => {
-      stopScan();
+      stopCamera();
       if (hasilTimer.current) clearTimeout(hasilTimer.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Enter / submit pada input kode → buka kamera swafoto (foto wajib dulu).
   function onSubmit(e: FormEvent) {
     e.preventDefault();
-    const k = kode.trim();
-    if (k) absen.mutate(k);
+    if (kode.trim()) void startCamera("capture");
   }
 
   const masuk = hasil?.tipe === "masuk";
@@ -145,8 +190,9 @@ export function AbsenPage() {
       <PageTitle>🖐 Absen Karyawan</PageTitle>
       <p className="mb-4 text-sm text-stone-500">
         <b>Scan QR</b> karyawan (dari halaman Profil mereka) atau ketik <b>kode karyawan</b> untuk
-        mencatat absen. Sistem otomatis mencatat <b>masuk</b> atau <b>pulang</b> sesuai urutan hari
-        ini. Stasiun ini dioperasikan admin/kasir.
+        mencatat absen. Setiap absen <b>wajib disertai foto</b>: scan QR mengambil foto otomatis;
+        ketik kode harus ambil swafoto dulu. Sistem otomatis mencatat <b>masuk</b> atau <b>pulang</b>{" "}
+        sesuai urutan hari ini.
       </p>
 
       {/* Kartu hasil absen — besar & jelas untuk konfirmasi cepat */}
@@ -166,13 +212,20 @@ export function AbsenPage() {
           <div className="mt-0.5 text-xs text-stone-500">
             {hasil.employee_code} · {hasil.branch_nama}
           </div>
+          {hasil.foto_url && (
+            <img
+              src={hasil.foto_url}
+              alt="Foto absen"
+              className="mx-auto mt-3 h-28 w-28 rounded-xl object-cover shadow ring-2 ring-white"
+            />
+          )}
         </div>
       )}
 
       <Card className="p-5">
         {/* Preview kamera — <video> SELALU ter-mount agar videoRef sudah ada saat
-            startScan menetapkan srcObject (elemen kondisional belum ada saat itu). */}
-        <div className={scanning ? "space-y-3" : "hidden"}>
+            startCamera menetapkan srcObject. */}
+        <div className={mode !== "idle" ? "space-y-3" : "hidden"}>
           <div className="relative overflow-hidden rounded-xl bg-black">
             <video
               ref={videoRef}
@@ -180,14 +233,37 @@ export function AbsenPage() {
               muted
               playsInline
             />
-            <div className="pointer-events-none absolute inset-6 rounded-lg border-2 border-white/70" />
+            {mode === "scan" && (
+              <div className="pointer-events-none absolute inset-6 rounded-lg border-2 border-white/70" />
+            )}
           </div>
-          <p className="text-center text-sm text-stone-500">Arahkan QR karyawan ke kamera…</p>
-          <button onClick={stopScan} className={`${btnSecondary} w-full`}>
-            Batal Scan
-          </button>
+          <p className="text-center text-sm text-stone-500">
+            {mode === "scan"
+              ? "Arahkan QR karyawan ke kamera…"
+              : "Posisikan wajah karyawan, lalu ambil foto untuk menyimpan absen."}
+          </p>
+          {mode === "capture" ? (
+            <div className="grid grid-cols-2 gap-2">
+              <button type="button" onClick={stopCamera} className={btnSecondary}>
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={() => void ambilFotoManual()}
+                disabled={absen.isPending}
+                className={btnPrimary}
+              >
+                {absen.isPending ? "Memproses…" : "📸 Ambil Foto & Absen"}
+              </button>
+            </div>
+          ) : (
+            <button type="button" onClick={stopCamera} className={`${btnSecondary} w-full`}>
+              Batal Scan
+            </button>
+          )}
         </div>
-        {!scanning && (
+
+        {mode === "idle" && (
           <form onSubmit={onSubmit} className="space-y-3">
             <input
               autoFocus
@@ -205,12 +281,19 @@ export function AbsenPage() {
                 {kameraError}
               </div>
             )}
+            <p className="text-center text-xs text-stone-400">
+              📸 Absen wajib disertai foto sebagai bukti kehadiran.
+            </p>
             <div className="grid grid-cols-2 gap-2">
-              <button type="button" onClick={() => void startScan()} className={btnSecondary}>
+              <button type="button" onClick={() => void startCamera("scan")} className={btnSecondary}>
                 📷 Scan QR
               </button>
-              <button type="submit" disabled={!kode.trim() || absen.isPending} className={btnPrimary}>
-                {absen.isPending ? "Memproses…" : "Absen"}
+              <button
+                type="submit"
+                disabled={!kode.trim() || absen.isPending}
+                className={btnPrimary}
+              >
+                📸 Foto & Absen
               </button>
             </div>
           </form>
@@ -234,6 +317,7 @@ export function AbsenPage() {
                   <th className="px-3 py-2 font-semibold text-stone-600">Karyawan</th>
                   <th className="px-3 py-2 font-semibold text-stone-600">Masuk</th>
                   <th className="px-3 py-2 font-semibold text-stone-600">Pulang</th>
+                  <th className="px-3 py-2 font-semibold text-stone-600">Foto</th>
                   <th className="px-3 py-2 font-semibold text-stone-600">Status</th>
                 </tr>
               </thead>
@@ -250,6 +334,29 @@ export function AbsenPage() {
                     </td>
                     <td className="px-3 py-2 text-stone-700">{r.masuk ? formatWaktu(r.masuk) : "—"}</td>
                     <td className="px-3 py-2 text-stone-700">{r.keluar ? formatWaktu(r.keluar) : "—"}</td>
+                    <td className="px-3 py-2">
+                      <div className="flex gap-1">
+                        {r.foto_masuk && (
+                          <a href={r.foto_masuk} target="_blank" rel="noreferrer" title="Foto masuk">
+                            <img
+                              src={r.foto_masuk}
+                              alt="masuk"
+                              className="h-8 w-8 rounded object-cover ring-1 ring-green-200"
+                            />
+                          </a>
+                        )}
+                        {r.foto_keluar && (
+                          <a href={r.foto_keluar} target="_blank" rel="noreferrer" title="Foto pulang">
+                            <img
+                              src={r.foto_keluar}
+                              alt="pulang"
+                              className="h-8 w-8 rounded object-cover ring-1 ring-blue-200"
+                            />
+                          </a>
+                        )}
+                        {!r.foto_masuk && !r.foto_keluar && <span className="text-stone-300">—</span>}
+                      </div>
+                    </td>
                     <td className="px-3 py-2">
                       {r.keluar ? (
                         <span className="rounded-full bg-stone-100 px-2 py-0.5 text-xs font-semibold text-stone-600">

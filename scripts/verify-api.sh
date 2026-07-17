@@ -1067,16 +1067,21 @@ NK39=$(api "$OWNER" POST /karyawan "{\"nama\":\"Kode Baru 39\",\"email\":\"kodeb
 cek "karyawan baru: employee_code 8 digit angka" "V == 1" \
   "$(echo "$NK39" | jq '(.employee_code | test("^[0-9]{8}$")) | if . then 1 else 0 end')"
 KODE_KAR=$(api "$OWNER" GET /karyawan | jq -r '[.[] | select(.role == "cashier")][0].employee_code')
+# Absen WAJIB foto (anti-titip). URL bukti dummy (server menyimpan teksnya apa adanya).
+FOTO="https://example.com/absen.jpg"
+cek "absen tanpa foto ditolak (400)" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/absensi" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d "{\"kode\":\"$KODE_KAR\"}")"
 # kasir (semua peran boleh) mengabsen via kode → cap pertama = masuk
-A1=$(api "$KASIR" POST /absensi "{\"kode\":\"$KODE_KAR\"}")
+A1=$(api "$KASIR" POST /absensi "{\"kode\":\"$KODE_KAR\",\"foto_url\":\"$FOTO\"}")
 cek "absen pertama = masuk" "V == 1" "$(echo "$A1" | jq '(.tipe == "masuk") | if . then 1 else 0 end')"
 cek "absen mengembalikan nama karyawan" "V == 1" "$(echo "$A1" | jq '(.nama | length > 0) | if . then 1 else 0 end')"
 cek "absen mengembalikan waktu (ISO)" "V == 1" "$(echo "$A1" | jq '(.waktu | length > 0) | if . then 1 else 0 end')"
+cek "absen mengembalikan foto_url tersimpan" "V == 1" "$(echo "$A1" | jq --arg f "$FOTO" '(.foto_url == $f) | if . then 1 else 0 end')"
 # cap berikutnya untuk karyawan yang sama = keluar (auto-detect dari cap terakhir)
-A2=$(api "$KASIR" POST /absensi "{\"kode\":\"$KODE_KAR\"}")
+A2=$(api "$KASIR" POST /absensi "{\"kode\":\"$KODE_KAR\",\"foto_url\":\"$FOTO\"}")
 cek "absen kedua = keluar (auto-detect)" "V == 1" "$(echo "$A2" | jq '(.tipe == "keluar") | if . then 1 else 0 end')"
 # kode case-insensitive (huruf kecil tetap dikenali)
-A3=$(api "$KASIR" POST /absensi "{\"kode\":\"$(echo "$KODE_KAR" | tr 'A-Z' 'a-z')\"}")
+A3=$(api "$KASIR" POST /absensi "{\"kode\":\"$(echo "$KODE_KAR" | tr 'A-Z' 'a-z')\",\"foto_url\":\"$FOTO\"}")
 cek "kode absensi case-insensitive → masuk lagi" "V == 1" "$(echo "$A3" | jq '(.tipe == "masuk") | if . then 1 else 0 end')"
 # daftar absensi hari ini memuat karyawan dengan jam masuk & keluar terisi
 LIST=$(api "$KASIR" GET /absensi)
@@ -1084,9 +1089,11 @@ cek "daftar absensi: masuk terisi" "V == 1" \
   "$(echo "$LIST" | jq --arg k "$KODE_KAR" '[.[] | select(.employee_code == $k) | select(.masuk != null)] | length')"
 cek "daftar absensi: keluar terisi" "V == 1" \
   "$(echo "$LIST" | jq --arg k "$KODE_KAR" '[.[] | select(.employee_code == $k) | select(.keluar != null)] | length')"
-# kode karyawan tak dikenal → 404
+cek "daftar absensi: foto_masuk & foto_keluar tersimpan" "V == 1" \
+  "$(echo "$LIST" | jq --arg k "$KODE_KAR" --arg f "$FOTO" '([.[] | select(.employee_code == $k)][0] | (.foto_masuk == $f) and (.foto_keluar == $f)) | if . then 1 else 0 end')"
+# kode karyawan tak dikenal → 404 (foto valid agar lolos validasi dulu)
 cek "kode karyawan tak dikenal → 404" "V == 404" \
-  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/absensi" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d '{"kode":"ZZZNOPE"}')"
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/absensi" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d "{\"kode\":\"ZZZNOPE\",\"foto_url\":\"$FOTO\"}")"
 # tanggal ngawur pada daftar → 400 (bukan 500)
 cek "daftar absensi tanggal invalid → 400" "V == 400" "$(status_code "$KASIR" GET "/absensi?tanggal=abc")"
 cek "daftar absensi tanggal di luar rentang → 400" "V == 400" "$(status_code "$KASIR" GET "/absensi?tanggal=2026-13-40")"
@@ -1595,7 +1602,7 @@ cek "terarsip: muncul di daftar arsip + tanggal arsip" "V == 1" \
 cek "terarsip: tidak bisa login (401)" "V == 401" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/auth/login" -H 'Content-Type: application/json' -d '{"email":"arsip54@basooopa.id","password":"PwArsip54!"}')"
 cek "terarsip: kode absen tidak dikenali (404)" "V == 404" \
-  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/absensi" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"kode\":\"$KODE54\"}")"
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/absensi" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"kode\":\"$KODE54\",\"foto_url\":\"$FOTO\"}")"
 
 # pulihkan → kembali ke daftar dgn kode sama, login & absen normal lagi
 api "$OWNER" PATCH "/karyawan/$U54_ID" '{"arsip":false}' > /dev/null
@@ -1604,7 +1611,7 @@ cek "dipulihkan: kembali ke daftar dgn kode sama" "V == 1" \
 cek "dipulihkan: login kembali normal" "V == 1" \
   "$([ -n "$(login "arsip54@basooopa.id" "PwArsip54!")" ] && echo 1 || echo 0)"
 cek "dipulihkan: absen dgn kode diterima" "V == 201" \
-  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/absensi" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"kode\":\"$KODE54\"}")"
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/absensi" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"kode\":\"$KODE54\",\"foto_url\":\"$FOTO\"}")"
 
 # guard: tidak bisa mengunci diri sendiri; admin tak boleh mengarsipkan owner
 OWN54_ID=$(api "$OWNER" GET /karyawan | jq -r '[.[] | select(.role=="owner")][0].user_id')
@@ -1695,30 +1702,30 @@ cek "tim: kelola karyawan → 403" "V == 403" "$(status_code "$T56" GET /karyawa
 # Stasiun absen (pindai QR) hanya admin/kasir — tim tak boleh mencatat absen
 KODE_T56=$(api "$OWNER" GET /karyawan | jq -r '[.[] | select(.email=="tim56@basooopa.id")][0].employee_code')
 cek "tim: pindai absensi (POST) → 403" "V == 403" \
-  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/absensi" -H "Authorization: Bearer $T56" -H 'Content-Type: application/json' -d "{\"kode\":\"$KODE_T56\"}")"
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/absensi" -H "Authorization: Bearer $T56" -H 'Content-Type: application/json' -d "{\"kode\":\"$KODE_T56\",\"foto_url\":\"$FOTO\"}")"
 cek "tim: daftar absensi (GET) → 403" "V == 403" "$(status_code "$T56" GET /absensi)"
 cek "kasir: pindai absensi tetap boleh → 200" "V == 200" "$(status_code "$KASIR" GET /absensi)"
 
 echo "== 57. Absen hanya dalam radius titik lokasi cabang =="
 KODE56=$(api "$OWNER" GET /karyawan | jq -r '[.[] | select(.email=="tim56@basooopa.id")][0].employee_code')
 cek "cabang tanpa titik lokasi: absen tanpa GPS tetap diterima" "V == 201" \
-  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/absensi" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"kode\":\"$KODE56\"}")"
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/absensi" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"kode\":\"$KODE56\",\"foto_url\":\"$FOTO\"}")"
 
 # titik lokasi Pusat = Monas, radius 100 m
 api "$OWNER" PATCH "/cabang/$PUSAT51_ID" '{"latitude":-6.175392,"longitude":106.827153,"radius_absen_m":100}' > /dev/null
 cek "titik lokasi & radius cabang tersimpan" "V == 1" \
   "$(api "$OWNER" GET /cabang | jq --arg id "$PUSAT51_ID" '([.[] | select(.id==$id)][0] | (.latitude == -6.175392 and .longitude == 106.827153 and .radius_absen_m == 100)) | if . then 1 else 0 end')"
 cek "absen tanpa koordinat → 400 (wajib GPS)" "V == 400" \
-  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/absensi" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"kode\":\"$KODE56\"}")"
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/absensi" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"kode\":\"$KODE56\",\"foto_url\":\"$FOTO\"}")"
 cek "absen di luar radius (±4,6 km) → 400" "V == 400" \
-  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/absensi" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"kode\":\"$KODE56\",\"lat\":-6.137654,\"lng\":106.817125}")"
-ABS57=$(api "$OWNER" POST /absensi "{\"kode\":\"$KODE56\",\"lat\":-6.175392,\"lng\":106.827553}")
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/absensi" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"kode\":\"$KODE56\",\"lat\":-6.137654,\"lng\":106.817125,\"foto_url\":\"$FOTO\"}")"
+ABS57=$(api "$OWNER" POST /absensi "{\"kode\":\"$KODE56\",\"lat\":-6.175392,\"lng\":106.827553,\"foto_url\":\"$FOTO\"}")
 cek "absen dalam radius (~44 m) diterima + jarak terlapor" "V == 1" \
   "$(echo "$ABS57" | jq '((.jarak_m != null) and (.jarak_m <= 100) and (.tipe != null)) | if . then 1 else 0 end')"
 # kosongkan titik → aturan radius kembali nonaktif
 api "$OWNER" PATCH "/cabang/$PUSAT51_ID" '{"latitude":null,"longitude":null}' > /dev/null
 cek "titik dikosongkan: absen tanpa GPS diterima lagi" "V == 201" \
-  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/absensi" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"kode\":\"$KODE56\"}")"
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/absensi" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"kode\":\"$KODE56\",\"foto_url\":\"$FOTO\"}")"
 
 echo "== 58. Karyawan Central Kitchen: satu peran, menu produksi/beli/bahan =="
 cek "kasir ditempatkan di CK → 400 (CK hanya peran Karyawan)" "V == 400" \
