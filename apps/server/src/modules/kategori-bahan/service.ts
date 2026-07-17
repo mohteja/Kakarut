@@ -40,6 +40,30 @@ export async function seedKategoriBahanPerusahaan(
 }
 
 /**
+ * Peta kanonik kategori: lowercase(nama) → nama master asli. Dipakai untuk
+ * menormalkan kategori bahan agar konsisten huruf besar/kecil (mis. user
+ * mengetik "buah segar" padahal master "Buah segar" → disimpan "Buah segar").
+ */
+export async function kategoriKanonikMap(
+  dbx: Db | Tx,
+  companyId: string,
+): Promise<Map<string, string>> {
+  const rows = await dbx
+    .select({ nama: ingredientCategories.nama })
+    .from(ingredientCategories)
+    .where(eq(ingredientCategories.companyId, companyId));
+  const m = new Map<string, string>();
+  for (const r of rows) m.set(r.nama.trim().toLowerCase(), r.nama);
+  return m;
+}
+
+/** Kembalikan ejaan kategori master yang cocok (case-insensitive), atau teks apa adanya. */
+export function kanonikKategori(map: Map<string, string>, raw: string): string {
+  const t = raw.trim();
+  return map.get(t.toLowerCase()) ?? t;
+}
+
+/**
  * Backfill boot: seed master kategori bahan untuk perusahaan yang belum punya
  * satu pun (perusahaan yang sudah punya tak disentuh).
  */

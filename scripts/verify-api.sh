@@ -2092,8 +2092,9 @@ cek "tambah kategori bahan muncul di daftar" "V == 1" \
   "$(api "$OWNER" GET /kategori-bahan | jq --arg id "$KB_ID" '[.[] | select(.id==$id)] | length')"
 cek "PATCH kategori bahan mengubah nama" "V == 1" \
   "$(api "$OWNER" PATCH "/kategori-bahan/$KB_ID" '{"nama":"frozen68b"}' | jq '.nama=="frozen68b" | if . then 1 else 0 end')"
-cek "kategori bahan duplikat ditolak (409)" "V == 409" \
-  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/kategori-bahan" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"nama":"frozen68b"}')"
+# kategori duplikat (huruf sama/beda) tak buat baru → kembalikan yang ada (idempoten)
+cek "kategori bahan duplikat → balik yg ada (bukan duplikat)" "V == 1" \
+  "$(api "$OWNER" POST /kategori-bahan '{"nama":"FROZEN68B"}' | jq --arg id "$KB_ID" '(.id==$id) | if . then 1 else 0 end')"
 cek "POST kategori bahan oleh KASIR ditolak (403)" "V == 403" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/kategori-bahan" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d '{"nama":"x68"}')"
 # Bahan dgn kategori KUSTOM baru (frozen68b) → diterima & tersimpan
@@ -2419,6 +2420,30 @@ cek "impor perbarui via nama: bahan di Tempat Sampah dipulihkan" "V == 1" \
 # kasir tak boleh impor → 403
 cek "kasir impor CSV → 403" "V == 403" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/bahan/import" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d '{"mode":"tambah","items":[{"nama":"x","jenis":"beli","harga_beli":1,"isi":1,"satuan":"pcs"}]}')"
+
+echo "== 77. Kategori bahan case-insensitive (Buah segar == buah segar) =="
+# master kategori "Buah segar"
+api "$OWNER" POST /kategori-bahan '{"nama":"Buah segar"}' > /dev/null
+cek "POST kategori beda huruf ('BUAH SEGAR') tak buat duplikat → balik yg ada" "V == 1" \
+  "$(api "$OWNER" POST /kategori-bahan '{"nama":"BUAH SEGAR"}' | jq '(.nama=="Buah segar") | if . then 1 else 0 end')"
+cek "master kategori 'buah segar' hanya 1 (case-insensitive)" "V == 1" \
+  "$(api "$OWNER" GET /kategori-bahan | jq '[.[]|select(.nama|ascii_downcase=="buah segar")]|length')"
+# POST bahan dgn kategori huruf kecil → disimpan mengikuti master "Buah segar"
+BUAHK=$(api "$OWNER" POST /bahan '{"nama":"apel fuji77","harga_beli":30000,"isi":1,"satuan":"kg","kategori":"buah segar","pengadaan":"beli"}')
+cek "POST bahan: kategori 'buah segar' dinormalkan jadi 'Buah segar'" "V == 1" \
+  "$(echo "$BUAHK" | jq '(.kategori=="Buah segar") | if . then 1 else 0 end')"
+# impor CSV dgn kategori huruf beda → juga dinormalkan
+api "$OWNER" POST /bahan/import '{"mode":"tambah","items":[{"nama":"jeruk medan77","jenis":"beli","harga_beli":20000,"isi":1,"satuan":"kg","kategori":"BUAH SEGAR"}]}' > /dev/null
+cek "impor: kategori 'BUAH SEGAR' dinormalkan jadi 'Buah segar'" "V == 1" \
+  "$(api "$OWNER" GET /bahan | jq '([.[]|select(.nama=="jeruk medan77")][0].kategori=="Buah segar") | if . then 1 else 0 end')"
+# bulk dgn kategori huruf beda → dinormalkan
+api "$OWNER" POST /bahan/bulk '{"items":[{"nama":"mangga77","harga_beli":15000,"isi":1,"satuan":"kg","kategori":"buah SEGAR"}]}' > /dev/null
+cek "bulk: kategori 'buah SEGAR' dinormalkan jadi 'Buah segar'" "V == 1" \
+  "$(api "$OWNER" GET /bahan | jq '([.[]|select(.nama=="mangga77")][0].kategori=="Buah segar") | if . then 1 else 0 end')"
+# kategori terpakai (beda huruf pun) tak boleh dihapus
+BSID=$(api "$OWNER" GET /kategori-bahan | jq -r '[.[]|select(.nama=="Buah segar")][0].id')
+cek "hapus kategori yg dipakai (case-insensitive) ditolak (409)" "V == 409" \
+  "$(status_code "$OWNER" DELETE "/kategori-bahan/$BSID")"
 
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="

@@ -21,6 +21,7 @@ import {
   suppliers,
 } from "../../db/schema";
 import { requireRole, type AppEnv } from "../../middleware/auth";
+import { kanonikKategori, kategoriKanonikMap } from "../kategori-bahan/service";
 import { resolveKodeBahan, resolveKodeBahanBatch } from "./kode";
 
 const BahanBody = z.object({
@@ -245,6 +246,8 @@ export const bahanRoutes = new Hono<AppEnv>()
       throw new HTTPException(409, { message: `Bahan dengan slug "${slug}" sudah ada` });
     }
     const kode = await resolveKodeBahan(db, auth.company_id!, body.kode, body.nama);
+    // samakan huruf kategori dengan master (mis. "buah segar" → "Buah segar")
+    const kmap = await kategoriKanonikMap(db, auth.company_id!);
     const [row] = await db
       .insert(ingredients)
       .values({
@@ -260,7 +263,7 @@ export const bahanRoutes = new Hono<AppEnv>()
         stokMinimum: body.stok_minimum,
         stokMinimumToko: body.stok_minimum_toko,
         overheadX: body.overhead_x,
-        kategori: body.kategori,
+        kategori: kanonikKategori(kmap, body.kategori),
         pengadaan: body.pengadaan,
         catatan: body.catatan ?? null,
         isPackaging: body.is_packaging,
@@ -293,6 +296,7 @@ export const bahanRoutes = new Hono<AppEnv>()
       return s;
     };
     const kodes = await resolveKodeBahanBatch(db, auth.company_id!, items);
+    const kmap = await kategoriKanonikMap(db, auth.company_id!);
     const rows = await db
       .insert(ingredients)
       .values(
@@ -307,7 +311,7 @@ export const bahanRoutes = new Hono<AppEnv>()
           satuanBeli: b.satuan_beli ?? null,
           trackStok: b.track_stok,
           stokMinimum: b.stok_minimum,
-          kategori: b.kategori,
+          kategori: kanonikKategori(kmap, b.kategori),
           pengadaan: "beli" as const,
           bolehEceran: b.boleh_eceran,
         })),
@@ -329,6 +333,8 @@ export const bahanRoutes = new Hono<AppEnv>()
     const auth = c.get("auth");
     const { mode, items } = c.req.valid("json");
     const companyId = auth.company_id!;
+    // samakan huruf kategori tiap baris dengan master (mis. "buah segar" → "Buah segar")
+    const kmap = await kategoriKanonikMap(db, companyId);
 
     // Muat SEMUA bahan (aktif + nonaktif). Bahan nonaktif = sudah di Tempat
     // Sampah: jangan dianggap "sudah ada" yang dilewati — cocokkan terpisah agar
@@ -403,7 +409,7 @@ export const bahanRoutes = new Hono<AppEnv>()
           .update(ingredients)
           .set({
             nama: u.item.nama,
-            kategori: u.item.kategori,
+            kategori: kanonikKategori(kmap, u.item.kategori),
             hargaBeli: u.item.harga_beli,
             isi: u.item.isi,
             satuan: u.item.satuan,
@@ -437,7 +443,7 @@ export const bahanRoutes = new Hono<AppEnv>()
           satuanBeli: b.satuan_beli ?? null,
           trackStok: b.lacak_stok,
           stokMinimum: b.stok_minimum,
-          kategori: b.kategori,
+          kategori: kanonikKategori(kmap, b.kategori),
           pengadaan: b.jenis,
           bolehEceran: b.boleh_eceran,
           catatan: b.catatan ?? null,
@@ -519,6 +525,11 @@ export const bahanRoutes = new Hono<AppEnv>()
         body.kode != null && body.kode.trim().length > 0
           ? await resolveKodeBahan(db, auth.company_id!, body.kode, body.nama ?? "", id)
           : undefined;
+      // samakan huruf kategori dengan master (hanya bila kategori diubah)
+      const kategoriBaru =
+        body.kategori !== undefined
+          ? kanonikKategori(await kategoriKanonikMap(db, auth.company_id!), body.kategori)
+          : undefined;
       const [row] = await db
         .update(ingredients)
         .set({
@@ -534,7 +545,7 @@ export const bahanRoutes = new Hono<AppEnv>()
             stokMinimumToko: body.stok_minimum_toko,
           }),
           ...(body.overhead_x !== undefined && { overheadX: body.overhead_x }),
-          ...(body.kategori !== undefined && { kategori: body.kategori }),
+          ...(kategoriBaru !== undefined && { kategori: kategoriBaru }),
           ...(body.pengadaan !== undefined && { pengadaan: body.pengadaan }),
           ...(body.catatan !== undefined && { catatan: body.catatan }),
           ...(body.is_packaging !== undefined && { isPackaging: body.is_packaging }),
