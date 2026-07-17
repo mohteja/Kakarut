@@ -412,9 +412,9 @@ cek "kasir POST /produksi/faktur ditolak (403)" "V == 403" \
 cek "owner GET /pembelian ok (200)" "V == 200" "$(status_code "$OWNER" GET /pembelian)"
 cek "owner GET /rekomendasi/beli ok (200)" "V == 200" "$(status_code "$OWNER" GET /rekomendasi/beli)"
 
-# 17b. Penjualan hari ini → rekomendasi (acuan = hari ini)
+# 17b. Penjualan hari ini → rekomendasi (acuan = hari ini). Transaksi = kasir-saja.
 MENU_ID=$(api "$OWNER" GET /menu | jq -r '[.[] | select(.tipe == "regular")][0].id')
-api "$OWNER" POST /penjualan "{\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$MENU_ID\",\"qty\":3}]}" > /dev/null
+api "$KASIR" POST /penjualan "{\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$MENU_ID\",\"qty\":3}]}" > /dev/null
 TODAY=$(TZ=Asia/Jakarta date +%F)
 REK=$(api "$OWNER" GET "/rekomendasi/beli?acuan=rentang&dari=$TODAY&sampai=$TODAY&target=20000000")
 cek "rekomendasi: omzet acuan > 0" "V > 0" "$(echo "$REK" | jq '.acuan.omzet')"
@@ -864,8 +864,15 @@ cek "laporan: total_diskon >= 3400+5000+34000" "V >= 42400" "$(echo "$LAPD" | jq
 cek "laporan: profit = omzet - diskon - hpp" "V == 1" \
   "$(echo "$LAPD" | jq '(.estimasi_profit == (.omzet - .total_diskon - .total_hpp)) | if . then 1 else 0 end')"
 
-echo "== 31. Batas maksimal diskon kasir (owner/admin bebas) =="
+echo "== 31. Batas maksimal diskon kasir + transaksi HANYA kasir =="
 jp() { curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/penjualan" -H "Authorization: Bearer $1" -H 'Content-Type: application/json' -d "$2"; }
+# Transaksi POS = peran kasir SAJA: owner/admin/tim tak boleh menjual.
+cek "owner tak boleh transaksi (kasir-saja) → 403" "V == 403" \
+  "$(jp "$OWNER" "{\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")"
+cek "owner tak boleh buka shift (kasir-saja) → 403" "V == 403" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/shift/buka" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"modal_awal":0}')"
+cek "owner tak boleh open-bill (kasir-saja) → 403" "V == 403" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/open-bill" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")"
 api "$OWNER" PATCH /company '{"diskon_maks_persen":20}' > /dev/null
 cek "company: diskon_maks_persen tersimpan 20" "V == 20" "$(api "$OWNER" GET /company | jq '.diskonMaksPersen')"
 cek "kasir diskon 50% (> batas 20%) ditolak (400)" "V == 400" \
@@ -874,8 +881,6 @@ cek "kasir diskon nominal 17000 (=50% > batas) ditolak (400)" "V == 400" \
   "$(jp "$KASIR" "{\"is_dine_in\":false,\"diskon_tipe\":\"nominal\",\"diskon_nilai\":17000,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")"
 cek "kasir diskon 20% (= batas) diterima (201)" "V == 201" \
   "$(jp "$KASIR" "{\"is_dine_in\":false,\"diskon_tipe\":\"persen\",\"diskon_nilai\":20,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")"
-cek "owner diskon 50% (bypass batas) diterima (201)" "V == 201" \
-  "$(jp "$OWNER" "{\"is_dine_in\":false,\"diskon_tipe\":\"persen\",\"diskon_nilai\":50,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")"
 api "$OWNER" PATCH /company '{"diskon_maks_persen":0}' > /dev/null
 cek "batas 0: kasir diskon 5% ditolak (400)" "V == 400" \
   "$(jp "$KASIR" "{\"is_dine_in\":false,\"diskon_tipe\":\"persen\",\"diskon_nilai\":5,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")"
@@ -1353,6 +1358,10 @@ cek "provisioning: ada central_kitchen & tepat 1 kantor" "V == 1" \
   "$(api "$OWNER" GET /cabang | jq '((([.[] | select(.tipe=="central_kitchen")] | length) >= 1) and (([.[] | select(.tipe=="kantor")] | length) == 1)) | if . then 1 else 0 end')"
 
 CB46_ID=$(api "$OWNER" POST /cabang '{"nama":"Cabang Uji 46"}' | jq -r .id)
+# kasir cabang CB46 (transaksi POS = kasir-saja, terkunci di cabangnya) — dipakai
+# untuk uji jual/menu-terbatas lintas cabang & data penjualan kantor (§51/§60).
+api "$OWNER" POST /karyawan "{\"nama\":\"Kasir 46\",\"email\":\"kasir46@basooopa.id\",\"password\":\"Kasir46Pass!\",\"role\":\"cashier\",\"branch_id\":\"$CB46_ID\"}" > /dev/null
+KASIR46=$(login "kasir46@basooopa.id" "Kasir46Pass!")
 GD46_ID=$(api "$OWNER" POST /penyimpanan "{\"nama\":\"Gudang 46\",\"branch_id\":\"$CB46_ID\"}" | jq -r .id)
 PUSAT46_ID=$(api "$OWNER" GET /cabang | jq -r --arg x "$CB46_ID" '[.[] | select(.id != $x)][0].id')
 GD46P_ID=$(api "$OWNER" POST /penyimpanan "{\"nama\":\"Gudang 46P\",\"branch_id\":\"$PUSAT46_ID\"}" | jq -r .id)
@@ -1500,10 +1509,11 @@ cek "kasir (cabang Pusat) tetap melihat menu" "V == 1" \
   "$(api "$KASIR" GET /menu | jq --arg id "$PBA_ID" '([.[] | select(.id==$id)] | length == 1) | if . then 1 else 0 end')"
 cek "ketersediaan cabang lain tak memuat menu" "V == 0" \
   "$(api "$OWNER" GET "/menu/ketersediaan?branch_id=$CB46_ID" | jq --arg id "$PBA_ID" '[.[] | select(.menu_id==$id)] | length')"
-cek "jual menu terbatas di cabang lain → 400" "V == 400" \
-  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/penjualan" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"branch_id\":\"$CB46_ID\",\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")"
-cek "open bill menu terbatas di cabang lain → 400" "V == 400" \
-  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/open-bill" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"branch_id\":\"$CB46_ID\",\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")"
+# kasir CB46 jual menu yang dibatasi ke Pusat → 400 (menu tak tersedia di cabangnya)
+cek "kasir CB46 jual menu terbatas → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/penjualan" -H "Authorization: Bearer $KASIR46" -H 'Content-Type: application/json' -d "{\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")"
+cek "kasir CB46 open bill menu terbatas → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/open-bill" -H "Authorization: Bearer $KASIR46" -H 'Content-Type: application/json' -d "{\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")"
 cek "rencana menu di cabang lain → 400" "V == 400" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/rekomendasi/menu?branch_id=$CB46_ID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"items\":[{\"menu_id\":\"$PBA_ID\",\"porsi\":5}]}")"
 cek "jual di cabang sendiri (Pusat) tetap OK" "V == 1" \
@@ -1792,9 +1802,10 @@ cek "aktifkan: login kembali normal" "V == 1" \
   "$([ -n "$(login "status59@basooopa.id" "PwStatus59!")" ] && echo 1 || echo 0)"
 
 echo "== 60. Kantor pusat data penjualan: GET /penjualan?branch_id=all =="
-# dua transaksi di dua cabang berbeda → kantor melihat keduanya sekaligus
-J60A=$(api "$OWNER" POST /penjualan "{\"branch_id\":\"$PUSAT51_ID\",\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")
-J60B=$(api "$OWNER" POST /penjualan "{\"branch_id\":\"$CB46_ID\",\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")
+# dua transaksi di dua cabang berbeda (oleh kasir masing-masing cabang) →
+# kantor melihat keduanya sekaligus. PUSAT51 = Pusat (cabang KASIR).
+J60A=$(api "$KASIR" POST /penjualan "{\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")
+J60B=$(api "$KASIR46" POST /penjualan "{\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")
 N60A=$(echo "$J60A" | jq -r .sale.nomor)
 N60B=$(echo "$J60B" | jq -r .sale.nomor)
 cek "riwayat semua cabang memuat transaksi dua cabang" "V == 2" \
@@ -1926,8 +1937,30 @@ cek "stok awal tak menambah antrean penyesuaian bahan itu" "V == 0" \
 api "$OWNER" POST /stok/awal "{\"items\":[{\"ingredient_id\":\"$SA_ING\",\"qty\":300}]}" > /dev/null
 cek "stok awal ulang menetapkan saldo == 300 (bukan 1077)" "abs(V - 300) < 0.001" \
   "$(api "$OWNER" GET /stok | jq --arg i "$SA_ING" '[.[] | select(.ingredient_id==$i)][0].saldo')"
+# GET stok awal: nilai tersimpan utk isi ulang form (bukan saldo live)
+cek "GET stok awal: nilai SA_ING tersimpan == 300" "abs(V - 300) < 0.001" \
+  "$(api "$OWNER" GET /stok/awal | jq --arg i "$SA_ING" '[.items[] | select(.ingredient_id==$i)][0].qty')"
+cek "GET stok awal: SA_ING hanya 1 entri (upsert, tak menumpuk)" "V == 1" \
+  "$(api "$OWNER" GET /stok/awal | jq --arg i "$SA_ING" '[.items[] | select(.ingredient_id==$i)] | length')"
+# UPSERT nyata: kartu stok cuma 1 baris "Stok awal" (777 diganti 300, bukan 2)
+cek "kartu stok: hanya 1 mutasi 'Stok awal' (upsert, bukan tumpuk)" "V == 1" \
+  "$(api "$OWNER" GET "/stok/kartu/$SA_ING" | jq '[.mutasi[] | select(.jenis=="opname" and .keterangan=="Stok awal")] | length')"
+# tanggal saldo pembuka bisa dipindah (lampau). Pakai bahan BARU tanpa riwayat
+# agar saldo == nilai (SA_ING sudah terpakai transaksi lain; backdate akan
+# menghitung pemakaian sesudah tanggal itu — perilaku benar, tapi bukan fokus).
+SA_ING2=$(api "$OWNER" POST /bahan '{"nama":"stok awal uji64","harga_beli":1000,"isi":1,"satuan":"pcs","pengadaan":"beli","kategori":"lain","track_stok":true}' | jq -r .id)
+api "$OWNER" POST /stok/awal "{\"items\":[{\"ingredient_id\":\"$SA_ING2\",\"qty\":500}],\"tanggal\":\"2020-01-01\"}" > /dev/null
+cek "stok awal tanggal lampau: saldo jadi 500 (bahan baru tanpa riwayat)" "abs(V - 500) < 0.001" \
+  "$(api "$OWNER" GET /stok | jq --arg i "$SA_ING2" '[.[] | select(.ingredient_id==$i)][0].saldo')"
+cek "GET stok awal: tanggal terkunci == 2020-01-01" "V == 1" \
+  "$(api "$OWNER" GET /stok/awal | jq --arg i "$SA_ING2" '([.items[] | select(.ingredient_id==$i)][0].tanggal == "2020-01-01") | if . then 1 else 0 end')"
+# tanggal masa depan ditolak? tidak — hanya format divalidasi; format salah → 400
+cek "stok awal format tanggal salah → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/stok/awal" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"items\":[{\"ingredient_id\":\"$SA_ING\",\"qty\":1}],\"tanggal\":\"01-01-2020\"}")"
 cek "stok awal oleh KASIR ditolak (403)" "V == 403" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/stok/awal" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d "{\"items\":[{\"ingredient_id\":\"$SA_ING\",\"qty\":1}]}")"
+cek "GET stok awal oleh KASIR ditolak (403)" "V == 403" \
+  "$(status_code "$KASIR" GET /stok/awal)"
 
 echo "== 65. Master Kategori (CRUD + hapus aman) =="
 KAT_ID=$(api "$OWNER" POST /kategori '{"nama":"Kategori Uji ZZ","sort_order":9}' | jq -r .id)
@@ -2000,17 +2033,30 @@ cek "CK: kebutuhan daging turun 10000 → 6000 (300 baso = 3 batch)" "abs(V - 60
   "$(echo "$PV66CK" | jq --arg id "$DAG66" '[.bahan_produksi[] | select(.ingredient_id==$id)][0].kebutuhan')"
 cek "CK: kebutuhan tepung turun 1500 → 900 (3 batch × 300)" "abs(V - 900) < 0.001" \
   "$(echo "$PV66CK" | jq --arg id "$TEP66" '[.bahan_produksi[] | select(.ingredient_id==$id)][0].kebutuhan')"
+# STOK CK CUKUP menutup seluruh kebutuhan (600 ≥ 500) → tak perlu produksi,
+# cabang tinggal DIKIRIM dari CK: baso66 kurang 0, tak ada belanja bahan
+# produksi, jumlah_produksi 0.
+api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CK52_UTAMA\",\"items\":[{\"ingredient_id\":\"$BASO66\",\"qty\":600}]}" > /dev/null
+PV66FULL=$(api "$OWNER" POST "/rekomendasi/menu?branch_id=$CB46_ID" "{\"items\":[{\"menu_id\":\"$MENU66\",\"porsi\":100}],\"ck_branch_id\":\"$CK52_UTAMA\"}")
+cek "CK cukup: baso66 kurang 0 (600 CK ≥ 500 butuh)" "abs(V) < 0.001" \
+  "$(echo "$PV66FULL" | jq --arg id "$BASO66" '[.bahan[] | select(.ingredient_id==$id)][0].kurang')"
+cek "CK cukup: jumlah_produksi 0 (tinggal kirim, tak produksi)" "V == 0" \
+  "$(echo "$PV66FULL" | jq '.jumlah_produksi')"
+cek "CK cukup: tak ada belanja bahan produksi (bahan_produksi kosong)" "V == 0" \
+  "$(echo "$PV66FULL" | jq '.bahan_produksi | length')"
 api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CK52_UTAMA\",\"items\":[{\"ingredient_id\":\"$BASO66\",\"qty\":0}]}" > /dev/null
 # MOQ (min_beli): daging minimal belanja 12000 → qty_faktur naik ke 12000
 api "$OWNER" PUT "/bahan/$DAG66" '{"min_beli":12000}' > /dev/null
-# reorder point (stok_minimum): tepung 700 → kurang 1500+700 = 2200 → 5 kemasan (2500)
+# stok_minimum (reorder point) TIDAK menambah kebutuhan di rencana menu:
+# rencana murni "kebutuhan menu − saldo". Tepung tetap 1500 (3 kemasan × 500)
+# meski stok_minimum 700 diset. Cadangan diurus terpisah (status "menipis").
 api "$OWNER" PUT "/bahan/$TEP66" '{"stok_minimum":700}' > /dev/null
 cek "PUT parsial tak me-reset satuan bahan (tetap gr)" "V == 1" \
   "$(api "$OWNER" GET /bahan | jq --arg id "$DAG66" '[.[] | select(.id==$id)][0].satuan == "gr" | if . then 1 else 0 end')"
 PV66B=$(api "$OWNER" POST "/rekomendasi/menu?branch_id=$CB46_ID" "{\"items\":[{\"menu_id\":\"$MENU66\",\"porsi\":100}],\"ck_branch_id\":\"$CK52_UTAMA\"}")
 cek "MOQ: qty_faktur daging dibulatkan naik ke 12000" "abs(V - 12000) < 0.001" \
   "$(echo "$PV66B" | jq --arg id "$DAG66" '[.bahan_produksi[] | select(.ingredient_id==$id)][0].qty_faktur')"
-cek "reorder point: qty_faktur tepung 2500 (kurang 2200 → 5 kemasan)" "abs(V - 2500) < 0.001" \
+cek "reorder point tak menambah kebutuhan rencana: tepung tetap 1500" "abs(V - 1500) < 0.001" \
   "$(echo "$PV66B" | jq --arg id "$TEP66" '[.bahan_produksi[] | select(.ingredient_id==$id)][0].qty_faktur')"
 # permintaan → faktur produksi (work-order CK) + faktur belanja (bahan produksi)
 WO66=$(api "$OWNER" POST /rekomendasi/menu/faktur "{\"items\":[{\"menu_id\":\"$MENU66\",\"porsi\":100}],\"tujuan_branch_id\":\"$CB46_ID\",\"ck_branch_id\":\"$CK52_UTAMA\"}")

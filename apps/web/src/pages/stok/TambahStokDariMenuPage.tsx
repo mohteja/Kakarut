@@ -271,12 +271,18 @@ export function TambahStokDariMenuPage() {
       >
         ➕ Permintaan Tambah Stok
       </PageTitle>
-      <p className="mb-4 max-w-3xl text-sm text-stone-500">
+      <p className="mb-2 max-w-3xl text-sm text-stone-500">
         Tentukan <b>cabang tujuan</b> + <b>target porsi</b> tiap menu. Sistem menghitung kebutuhan
         bahan lalu membuat <b>permintaan</b> dengan faktur terpisah: bahan <b>produksi</b> menjadi
         work-order Central Kitchen (CK memproses → kirim → cabang terima), <b>beli produk jadi</b>{" "}
         dikirim ke cabang tujuan setelah diproses CK, dan <b>belanja bahan produksi</b> disimpan di
         CK. Pemroses tercatat otomatis saat faktur mulai diproses. Semua tercatat di riwayat.
+      </p>
+      <p className="mb-4 max-w-3xl rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+        💡 <b>Stok yang sudah ada di Central Kitchen ikut dihitung sebagai saldo.</b> Bila stok
+        (termasuk CK) sudah cukup untuk target, cabang <b>tinggal dikirim dari CK</b> — tak perlu
+        produksi/beli baru (kekurangan 0). Angka <b>Kurang</b> = kebutuhan menu − saldo, tanpa
+        cadangan tersembunyi.
       </p>
 
       {/* Cabang tujuan + Central Kitchen pelaksana */}

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { zValidator } from "@hono/zod-validator";
 import { alias } from "drizzle-orm/pg-core";
-import { and, desc, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
@@ -29,6 +29,18 @@ const OpnameBody = z.object({
       }),
     )
     .min(1),
+});
+
+// Stok Awal (saldo pembuka) = OpnameBody + tanggal berlaku. Berbeda dari opname
+// fisik: stok awal itu SATU saldo pembuka per bahan yang terkunci pada tanggal
+// tertentu (bukan tumpukan reset di banyak tanggal) — diganti (upsert), bukan
+// ditambah. Ubah nilai / tanggal = simpan ulang di tanggal itu.
+const StokAwalBody = OpnameBody.extend({
+  /** tanggal berlaku saldo pembuka (YYYY-MM-DD, zona perusahaan). Default hari ini. */
+  tanggal: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Format tanggal harus YYYY-MM-DD")
+    .optional(),
 });
 
 export const stokRoutes = new Hono<AppEnv>()
@@ -196,12 +208,47 @@ export const stokRoutes = new Hono<AppEnv>()
     return c.json({ ok: true, jumlah: rows.length, session_id: sessionId, ringkasan }, 201);
   })
   /**
-   * Stok Awal (saldo pembuka): mencatat stok yang SUDAH ADA sebelum memakai
-   * aplikasi. Ditulis sebagai baris opname langsung DISETUJUI (tanpa selisih /
-   * tanpa persetujuan) sehingga menjadi baseline saldo seketika via
-   * hitungSaldoCabang — menetapkan (bukan menambah) saldo bahan. Owner/admin.
+   * Nilai Stok Awal (saldo pembuka) yang tersimpan per bahan + tanggalnya —
+   * untuk mengisi ulang form (edit), bukan saldo live. Satu entri per bahan
+   * (session_id NULL = baris stok awal, bukan sesi opname fisik). Owner/admin.
    */
-  .post("/awal", requireRole("owner", "admin"), zValidator("json", OpnameBody), async (c) => {
+  .get("/awal", requireRole("owner", "admin"), async (c) => {
+    const auth = c.get("auth");
+    const branchId = await resolveBranchId(c);
+    const [company] = await db
+      .select({ timezone: companies.timezone })
+      .from(companies)
+      .where(eq(companies.id, auth.company_id!));
+    const today = tanggalDi(company?.timezone ?? "Asia/Jakarta");
+    const res = await db.execute(sql`
+      SELECT DISTINCT ON (so.ingredient_id)
+        so.ingredient_id, so.qty, so.opname_date
+      FROM stock_opnames so
+      WHERE so.company_id = ${auth.company_id!} AND so.branch_id = ${branchId}
+        AND so.session_id IS NULL AND so.penyesuaian_status = 'disetujui'
+      ORDER BY so.ingredient_id, so.created_at DESC
+    `);
+    const items = res.rows.map((r) => {
+      const row = r as Record<string, unknown>;
+      return {
+        ingredient_id: String(row.ingredient_id),
+        qty: Number(row.qty),
+        tanggal: String(row.opname_date),
+      };
+    });
+    // Tanggal default form = tanggal saldo pembuka terkini (terkunci), atau hari ini
+    const tanggal = items.length ? items.map((i) => i.tanggal).sort().at(-1)! : today;
+    return c.json({ tanggal, items });
+  })
+  /**
+   * Stok Awal (saldo pembuka): SATU saldo pembuka per bahan, terkunci pada
+   * tanggal tertentu. Ditulis sebagai baris opname langsung DISETUJUI (tanpa
+   * selisih / persetujuan) → baseline saldo seketika via hitungSaldoCabang
+   * (menetapkan, bukan menambah). Bersifat UPSERT: entri stok awal (session_id
+   * NULL) lama bahan yang sama diganti, jadi tak menumpuk di banyak tanggal —
+   * ubah nilai/tanggal = simpan ulang. Owner/admin.
+   */
+  .post("/awal", requireRole("owner", "admin"), zValidator("json", StokAwalBody), async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");
     const branchId = body.branch_id
@@ -234,22 +281,44 @@ export const stokRoutes = new Hono<AppEnv>()
       .from(companies)
       .where(eq(companies.id, auth.company_id!));
     const today = tanggalDi(company?.timezone ?? "Asia/Jakarta");
+    const tanggal = body.tanggal ?? today;
+    // Waktu baris: saldo pembuka bertanggal LAMPAU dicatat pada tanggalnya
+    // (00:00 UTC) agar tampil di kartu stok pada tanggal itu & aktivitas
+    // sesudahnya dihitung di atasnya. Tanggal = hari ini (reset) → pakai waktu
+    // kini agar mutasi yang sudah terjadi hari ini tetap dianggap SETELAH
+    // baseline (perilaku reset saldo tak berubah).
+    const createdAt = tanggal < today ? new Date(`${tanggal}T00:00:00Z`) : new Date();
+
     // Baris baseline: systemQty/selisih/klarifikasi DIBIARKAN null → bukan
     // penyesuaian; penyesuaian_status 'disetujui' → langsung efektif. sessionId
     // sengaja null agar TIDAK muncul di Riwayat Opname (bukan sesi hitung fisik;
     // tetap terekam di kartu stok bahan).
-    const values = [...qtyByIngredient].map(([ingredientId, qty]) => ({
-      companyId: auth.company_id!,
-      branchId,
-      ingredientId,
-      qty,
-      opnameDate: today,
-      catatan: body.catatan?.trim() || "Stok awal",
-      penyesuaianStatus: "disetujui" as const,
-      userId: auth.sub,
-    }));
-    const rows = await db.insert(stockOpnames).values(values).returning();
-    return c.json({ ok: true, jumlah: rows.length }, 201);
+    const rows = await db.transaction(async (tx) => {
+      // UPSERT: ganti entri stok awal (session_id NULL) lama bahan-bahan ini →
+      // hanya ada SATU saldo pembuka per bahan (opname fisik/session_id NOT NULL
+      // tak tersentuh).
+      await tx.delete(stockOpnames).where(
+        and(
+          eq(stockOpnames.companyId, auth.company_id!),
+          eq(stockOpnames.branchId, branchId),
+          isNull(stockOpnames.sessionId),
+          inArray(stockOpnames.ingredientId, ids),
+        ),
+      );
+      const values = [...qtyByIngredient].map(([ingredientId, qty]) => ({
+        companyId: auth.company_id!,
+        branchId,
+        ingredientId,
+        qty,
+        opnameDate: tanggal,
+        catatan: body.catatan?.trim() || "Stok awal",
+        penyesuaianStatus: "disetujui" as const,
+        userId: auth.sub,
+        createdAt,
+      }));
+      return tx.insert(stockOpnames).values(values).returning();
+    });
+    return c.json({ ok: true, jumlah: rows.length, tanggal }, 201);
   })
   /**
    * Daftar penyesuaian stok: baris opname dengan selisih ≠ 0 yang perlu

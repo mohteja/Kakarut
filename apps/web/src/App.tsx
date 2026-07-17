@@ -64,6 +64,8 @@ export default function App() {
   const isManajemen = auth.user.role === "owner" || auth.user.role === "admin";
   // Tim: cek stok, lihat menu, profil, penerimaan barang, riwayat transaksi
   const isTim = auth.user.role === "tim";
+  // Transaksi POS (Kasir + Tutup Kasir) HANYA peran kasir.
+  const isKasir = auth.user.role === "cashier";
   const beranda = isSuperAdmin
     ? "/superadmin"
     : isManajemen
@@ -100,14 +102,19 @@ export default function App() {
               <Route path="/penerimaan" element={<PenerimaanPage />} />
               <Route path="/stok/penyesuaian" element={<PenyesuaianPage />} />
               <Route path="/stok/kartu/:ingredientId" element={<KartuStokPage />} />
-              {/* stasiun absen (pindai QR) & halaman berjualan — bukan peran tim */}
+              {/* stasiun absen (pindai QR), printer & meja — bukan peran tim */}
               {!isTim && (
                 <>
                   <Route path="/absen" element={<AbsenPage />} />
-                  <Route path="/kasir" element={<KasirPage />} />
-                  <Route path="/kasir/tutup" element={<ShiftPage />} />
                   <Route path="/pengaturan/printer" element={<PrinterPage />} />
                   <Route path="/pengaturan/meja" element={<MejaPage />} />
+                </>
+              )}
+              {/* Transaksi POS (jual + tutup kasir) — HANYA peran kasir */}
+              {isKasir && (
+                <>
+                  <Route path="/kasir" element={<KasirPage />} />
+                  <Route path="/kasir/tutup" element={<ShiftPage />} />
                 </>
               )}
               {/* Produksi/beli/bahan: manajemen + karyawan Central Kitchen

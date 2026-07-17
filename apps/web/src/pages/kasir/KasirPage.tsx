@@ -35,15 +35,27 @@ interface Kategori {
 
 /**
  * Badge sisa porsi untuk kasir. `porsi` null → menu tak terlacak stoknya →
- * tak menampilkan apa pun. 0 → "Habis" (merah); sedikit (≤5) → oranye; sisanya
- * hijau. `size` mengatur kepadatan untuk tile kode yang mungil.
+ * tak menampilkan apa pun. 0 → "Habis" (merah) + bahan PEMBATAS yang kosong
+ * (biar jelas KENAPA habis & apa yang perlu ditambah/dikirim ke cabang);
+ * sedikit (≤5) → oranye; sisanya hijau. `size` mengatur kepadatan untuk tile
+ * kode yang mungil.
  */
-function StokBadge({ porsi, size = "md" }: { porsi: number | null | undefined; size?: "sm" | "md" }) {
+function StokBadge({ stok, size = "md" }: { stok: MenuStokDto | undefined; size?: "sm" | "md" }) {
+  const porsi = stok?.porsi;
   if (porsi == null) return null;
   const kecil = size === "sm";
   const base = kecil ? "text-[9px] leading-none" : "text-[11px]";
   if (porsi <= 0) {
-    return <span className={`font-semibold text-red-600 ${base}`}>Habis</span>;
+    // bahan pembatas = bahan resep yang saldonya 0 di cabang ini → sumber "Habis".
+    const kurang = stok?.pembatas?.nama;
+    return (
+      <span
+        className={`font-semibold text-red-600 ${base}`}
+        title={kurang ? `Habis — bahan "${kurang}" kosong di cabang ini` : "Habis"}
+      >
+        Habis{kurang && !kecil ? ` · ${kurang}` : ""}
+      </span>
+    );
   }
   const warna = porsi <= 5 ? "text-orange-600" : "text-emerald-600";
   return <span className={`font-medium ${warna} ${base}`}>Sisa {porsi}</span>;
@@ -124,7 +136,7 @@ export function KasirPage() {
     queryFn: () => api<MenuStokDto[]>(`/menu/ketersediaan${branchQuery}`),
   });
   const sisaByMenu = useMemo(
-    () => new Map(ketersediaan.map((k) => [k.menu_id, k.porsi])),
+    () => new Map(ketersediaan.map((k) => [k.menu_id, k])),
     [ketersediaan],
   );
 
@@ -485,7 +497,7 @@ export function KasirPage() {
                 </div>
                 {/* Sisa porsi di bawah nama menu — kasir bisa infokan ke konsumen */}
                 <div className="pt-0.5">
-                  <StokBadge porsi={sisaByMenu.get(m.id)} />
+                  <StokBadge stok={sisaByMenu.get(m.id)} />
                 </div>
                 <div className="mt-auto pt-1 text-sm font-bold text-orange-600">
                   {formatRupiah(m.harga_jual)}
@@ -520,7 +532,7 @@ export function KasirPage() {
                         {formatAngka(m.harga_jual, 0)}
                       </span>
                       {/* Sisa porsi di bawah kode + harga */}
-                      <StokBadge porsi={sisaByMenu.get(m.id)} size="sm" />
+                      <StokBadge stok={sisaByMenu.get(m.id)} size="sm" />
                     </button>
                   ))}
                 </div>
@@ -729,7 +741,7 @@ export function KasirPage() {
                 />
                 {/* Peringatan bila pesanan melebihi stok tersisa (mis. pesan 3, sisa 2) */}
                 {(() => {
-                  const sisa = sisaByMenu.get(l.menu.id);
+                  const sisa = sisaByMenu.get(l.menu.id)?.porsi;
                   if (sisa == null || l.qty <= sisa) return null;
                   return (
                     <div className="mt-1 rounded bg-red-50 px-2 py-1 text-xs font-semibold text-red-600">
