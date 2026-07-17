@@ -98,7 +98,12 @@ export function BahanPage() {
   const tampil = semua
     .filter((b) => b.nama.toLowerCase().includes(cari.toLowerCase()))
     .filter((b) => (filterJenis === "semua" ? true : b.pengadaan === filterJenis))
-    .filter((b) => (filterKategori === "semua" ? true : b.kategori === filterKategori));
+    .filter((b) =>
+      // kategori dicocokkan case-insensitive ("Buah segar" == "buah segar")
+      filterKategori === "semua"
+        ? true
+        : b.kategori.toLowerCase() === filterKategori.toLowerCase(),
+    );
   const adaFilter = cari !== "" || filterJenis !== "semua" || filterKategori !== "semua";
 
   const semuaTampilTerpilih = tampil.length > 0 && tampil.every((b) => pilih.has(b.id));
@@ -191,11 +196,17 @@ export function BahanPage() {
           aria-label="Filter kategori"
         >
           <option value="semua">Semua kategori</option>
-          {(kategoriList ?? []).map((k) => (
-            <option key={k.id} value={k.nama}>
-              {k.nama} ({jumlah((b) => b.kategori === k.nama)})
-            </option>
-          ))}
+          {/* dedupe case-insensitive: "Buah segar" & "buah segar" jadi satu opsi */}
+          {(kategoriList ?? [])
+            .filter(
+              (k, i, arr) =>
+                arr.findIndex((x) => x.nama.toLowerCase() === k.nama.toLowerCase()) === i,
+            )
+            .map((k) => (
+              <option key={k.id} value={k.nama}>
+                {k.nama} ({jumlah((b) => b.kategori.toLowerCase() === k.nama.toLowerCase())})
+              </option>
+            ))}
         </select>
         {adaFilter && (
           <button

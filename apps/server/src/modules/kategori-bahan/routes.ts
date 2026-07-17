@@ -1,5 +1,5 @@
 import { zValidator } from "@hono/zod-validator";
-import { and, asc, count, eq } from "drizzle-orm";
+import { and, asc, count, eq, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
@@ -36,6 +36,18 @@ export const kategoriBahanRoutes = new Hono<AppEnv>()
   .post("/", requireRole("owner", "admin"), zValidator("json", KategoriBody), async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");
+    // Case-insensitive: "Buah segar" & "buah segar" dianggap kategori yang sama.
+    // Bila sudah ada (beda huruf pun), kembalikan yang ada — hindari duplikat.
+    const [ada] = await db
+      .select()
+      .from(ingredientCategories)
+      .where(
+        and(
+          eq(ingredientCategories.companyId, auth.company_id!),
+          sql`lower(${ingredientCategories.nama}) = lower(${body.nama})`,
+        ),
+      );
+    if (ada) return c.json({ id: ada.id, nama: ada.nama, sort_order: ada.sortOrder });
     const [row] = await db
       .insert(ingredientCategories)
       .values({ companyId: auth.company_id!, nama: body.nama, sortOrder: body.sort_order })
@@ -81,12 +93,16 @@ export const kategoriBahanRoutes = new Hono<AppEnv>()
         ),
       );
     if (!milik) throw new HTTPException(404, { message: "Kategori tidak ditemukan" });
-    // Kategori yang masih dipakai bahan tak boleh dihapus (kategori = teks di bahan).
+    // Kategori yang masih dipakai bahan tak boleh dihapus (kategori = teks di bahan;
+    // dicek case-insensitive agar beda huruf tetap terhitung).
     const [{ n }] = await db
       .select({ n: count() })
       .from(ingredients)
       .where(
-        and(eq(ingredients.companyId, auth.company_id!), eq(ingredients.kategori, milik.nama)),
+        and(
+          eq(ingredients.companyId, auth.company_id!),
+          sql`lower(${ingredients.kategori}) = lower(${milik.nama})`,
+        ),
       );
     if (n > 0) {
       throw new HTTPException(409, { message: `Kategori masih dipakai ${n} bahan` });

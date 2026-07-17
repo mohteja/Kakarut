@@ -12,6 +12,7 @@ import {
   btnSecondary,
   inputClass,
 } from "../../components/ui";
+import { BahanPicker } from "../../components/BahanPicker";
 import { SatuanSelect } from "../../components/SatuanSelect";
 import { useAuth } from "../../context/AuthContext";
 import { api } from "../../lib/api";
@@ -355,28 +356,18 @@ export function ResepPage() {
                         const terpilih = semua.find((x) => x.id === r.ingredient_id);
                         return (
                           <div key={i} className="flex items-center gap-2">
-                            <select
+                            <BahanPicker
+                              bahan={pilihan}
                               value={r.ingredient_id}
-                              onChange={(e) => {
+                              onChange={(id) => {
                                 const salinan = [...resep];
-                                salinan[i] = { ...salinan[i], ingredient_id: e.target.value };
+                                salinan[i] = { ...salinan[i], ingredient_id: id };
                                 setResep(salinan);
                               }}
-                              className={`${inputClass} flex-1`}
+                              placeholder="— pilih bahan mentah —"
+                              className="flex-1"
                               disabled={!bolehUbah}
-                              required
-                            >
-                              <option value="">— pilih bahan mentah —</option>
-                              {r.ingredient_id &&
-                                !semua.some((x) => x.id === r.ingredient_id) && (
-                                  <option value={r.ingredient_id}>(bahan nonaktif)</option>
-                                )}
-                              {pilihan.map((x) => (
-                                <option key={x.id} value={x.id}>
-                                  {x.nama} — Rp {formatAngka(x.harga_per_unit, 2)}/{x.satuan}
-                                </option>
-                              ))}
-                            </select>
+                            />
                             <input
                               type="number"
                               min="0.0001"
