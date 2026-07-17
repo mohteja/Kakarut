@@ -296,9 +296,14 @@ export function ResepPage() {
                       aktif ? "bg-orange-600 text-white" : "hover:bg-stone-100"
                     }`}
                   >
-                    <div className="text-sm font-semibold">{b.nama}</div>
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="text-sm font-semibold">{b.nama}</span>
+                      <span className="shrink-0 text-sm font-semibold tabular-nums">
+                        {formatRupiah(b.harga_beli)}
+                      </span>
+                    </div>
                     <div className={`text-xs ${aktif ? "text-orange-100" : "text-stone-500"}`}>
-                      batch {formatAngka(b.isi)} {b.satuan} · {formatRupiah(b.harga_beli)} ·{" "}
+                      batch {formatAngka(b.isi)} {b.satuan} ·{" "}
                       {n == null ? "—" : n > 0 ? `${n} bahan mentah` : "belum ada resep"}
                     </div>
                   </button>
@@ -386,24 +391,28 @@ export function ResepPage() {
                             <span className="w-12 shrink-0 text-xs text-stone-500">
                               {terpilih?.satuan ?? ""}
                             </span>
-                            {/* harga mengikuti aturan resep bahan — read-only */}
-                            <span className="w-44 shrink-0 text-right text-xs whitespace-nowrap text-stone-500">
-                              {terpilih
-                                ? Number(r.qty) > 0
-                                  ? `× Rp ${formatAngka(terpilih.harga_per_unit, 2)} = ${formatRupiah(Number(r.qty) * terpilih.harga_per_unit)}`
-                                  : `Rp ${formatAngka(terpilih.harga_per_unit, 2)}/${terpilih.satuan}`
-                                : ""}
+                            {/* harga per satuan (mengikuti aturan resep) — kolom sejajar, read-only */}
+                            <span className="w-28 shrink-0 text-right text-xs whitespace-nowrap text-stone-400 tabular-nums">
+                              {terpilih ? `× Rp ${formatAngka(terpilih.harga_per_unit, 2)}` : ""}
                             </span>
-                            {bolehUbah && (
-                              <button
-                                type="button"
-                                onClick={() => setResep(resep.filter((_, j) => j !== i))}
-                                className="shrink-0 text-sm font-medium text-red-500 hover:underline"
-                                aria-label="Hapus baris resep"
-                              >
-                                ✕
-                              </button>
-                            )}
+                            {/* subtotal baris (qty × harga) — kolom sejajar */}
+                            <span className="w-28 shrink-0 text-right text-sm whitespace-nowrap font-medium text-stone-700 tabular-nums">
+                              {terpilih && Number(r.qty) > 0
+                                ? formatRupiah(Number(r.qty) * terpilih.harga_per_unit)
+                                : "—"}
+                            </span>
+                            <span className="w-6 shrink-0 text-center">
+                              {bolehUbah && (
+                                <button
+                                  type="button"
+                                  onClick={() => setResep(resep.filter((_, j) => j !== i))}
+                                  className="text-sm font-medium text-red-500 hover:underline"
+                                  aria-label="Hapus baris resep"
+                                >
+                                  ✕
+                                </button>
+                              )}
+                            </span>
                           </div>
                         );
                       })}
@@ -413,6 +422,19 @@ export function ResepPage() {
                         </div>
                       )}
                     </div>
+
+                    {resep.length > 0 && (
+                      <div className="mt-2 flex items-center gap-2 border-t border-stone-200 pt-2">
+                        <span className="flex-1 text-right text-sm font-semibold text-stone-600">
+                          Total bahan mentah <span className="font-normal text-stone-400">(sebelum overhead)</span>
+                        </span>
+                        {/* sejajar dengan kolom subtotal tiap baris */}
+                        <span className="w-28 shrink-0 text-right text-sm font-bold text-stone-800 tabular-nums">
+                          {formatRupiah(biayaResep)}
+                        </span>
+                        <span className="w-6 shrink-0" aria-hidden="true" />
+                      </div>
+                    )}
 
                     {bolehUbah && (
                       <button
