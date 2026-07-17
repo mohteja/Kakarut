@@ -450,9 +450,12 @@ export async function buatFakturDariRencana(
     rows.map((b) => ({
       companyId: params.companyId,
       branchId: srcBranchId,
-      // produksi & beli produk jadi → dikirim ke cabang peminta; belanja
-      // bahan produksi tetap di CK (tanpa tujuan)
-      tujuanBranchId: workOrder && !bahanProduksi ? params.branchId : null,
+      // PRODUKSI → diproduksi & DISIMPAN dulu sebagai stok CK (dikonfirmasi di
+      // CK saat selesai), lalu dikirim ke cabang lewat "kirim dari stok CK"
+      // (transfer) — sesuai alur "hasil produksi masuk CK dulu, CK bisa
+      // ngestock". BELI produk jadi → tetap dikirim langsung ke cabang peminta.
+      // Belanja bahan produksi (bahan mentah resep) → tetap di CK.
+      tujuanBranchId: workOrder && tipe === "beli" && !bahanProduksi ? params.branchId : null,
       bahanProduksi,
       ingredientId: b.ingredient_id,
       qty: b.qty_faktur!,
@@ -496,8 +499,10 @@ export async function buatFakturDariRencana(
   // bila terhubung CK). Faktur produksi khusus: asal_branch_id = CK, langsung
   // 'menunggu' (siap dikirim), tanpa produksi/konsumsi bahan mentah.
   const kirimFakturId = workOrder && kirimRows.length > 0 ? randomUUID() : null;
-  // Detail riwayat permintaan: tujuan (bila work-order) + ringkasan menu.
-  const detailProd = workOrder ? `Tujuan: ${store.nama} · ${ringkas}` : ringkas;
+  // Detail riwayat permintaan: produksi disimpan di CK (untuk cabang peminta).
+  const detailProd = workOrder
+    ? `Produksi di ${ck!.nama} → stok CK (untuk ${store.nama}) · ${ringkas}`
+    : ringkas;
   await db.transaction(async (tx) => {
     if (prodFakturId) {
       await tx.insert(productions).values(barisFaktur(prodRows, "produksi", prodFakturId));

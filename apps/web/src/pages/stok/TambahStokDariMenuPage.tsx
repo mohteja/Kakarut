@@ -46,7 +46,7 @@ function BagianKurang({
   const judul = kirim
     ? "🚚 Kirim dari stok CK → cabang (stok sudah ada, tinggal dikirim)"
     : tipe === "produksi"
-      ? "🏭 Harus diproduksi → faktur produksi"
+      ? "🏭 Harus diproduksi → masuk stok CK (lalu kirim ke cabang)"
       : tipe === "beli"
         ? "🛒 Beli produk jadi → faktur beli"
         : "🧺 Belanja bahan produksi → faktur beli (bahan mentah resep)";
@@ -291,15 +291,17 @@ export function TambahStokDariMenuPage() {
       <p className="mb-2 max-w-3xl text-sm text-stone-500">
         Tentukan <b>cabang tujuan</b> + <b>target porsi</b> tiap menu. Sistem menghitung kebutuhan
         bahan lalu membuat <b>permintaan</b> dengan faktur terpisah: bahan <b>produksi</b> menjadi
-        work-order Central Kitchen (CK memproses → kirim → cabang terima), <b>beli produk jadi</b>{" "}
-        dikirim ke cabang tujuan setelah diproses CK, dan <b>belanja bahan produksi</b> disimpan di
-        CK. Pemroses tercatat otomatis saat faktur mulai diproses. Semua tercatat di riwayat.
+        work-order Central Kitchen (CK memproses → <b>hasilnya masuk stok CK</b>), <b>beli produk
+        jadi</b> dikirim ke cabang tujuan setelah diproses CK, dan <b>belanja bahan produksi</b>{" "}
+        disimpan di CK. Pemroses tercatat otomatis saat faktur mulai diproses. Semua tercatat di
+        riwayat.
       </p>
       <p className="mb-4 max-w-3xl rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
         💡 Angka <b>Saldo</b> = stok CABANG saja (cocok dengan Kartu Stok). Bila stok jadi sudah
         <b> ada di Central Kitchen</b>, kekurangan cabang dipenuhi lewat <b>🚚 Kirim dari stok CK</b>
         {" "}(transfer, tanpa produksi baru) — stok CK berkurang, stok cabang bertambah setelah{" "}
-        <b>diterima</b>. Sisanya yang belum ada di CK baru <b>diproduksi/dibeli</b>.
+        <b>diterima</b>. Sisa yang belum ada di CK <b>diproduksi dulu ke stok CK</b> — setelah jadi,
+        kirim ke cabang lewat 🚚 <b>Kirim dari stok CK</b> (CK bisa menyimpan stok).
       </p>
 
       {/* Cabang tujuan + Central Kitchen pelaksana */}
@@ -357,7 +359,10 @@ export function TambahStokDariMenuPage() {
             {hasil.produksi && (
               <li>
                 🏭 Work-order produksi — {hasil.produksi.jumlah_baris} bahan
-                {workOrder && store ? ` → dikirim ke ${store.nama}` : ""} ·{" "}
+                {workOrder && ck
+                  ? ` → hasilnya masuk stok ${ck.nama}${store ? ` (untuk ${store.nama}, kirim lewat 🚚 Kirim dari stok CK)` : ""}`
+                  : ""}{" "}
+                ·{" "}
                 <Link to="/produksi" className="font-medium underline">
                   lihat di Produksi Bahan Baku →
                 </Link>
@@ -546,7 +551,8 @@ export function TambahStokDariMenuPage() {
                   {workOrder && p.jumlah_produksi > 0 && (
                     <div className="rounded-lg border border-purple-200 bg-purple-50 px-3 py-2 text-sm text-purple-800">
                       🏭 Produksi dikerjakan <b>{ck!.nama}</b> — pelaksana ditugaskan karyawan CK
-                      saat mulai memproses.
+                      saat mulai memproses. Hasilnya <b>masuk stok CK</b> dulu; kirim ke cabang lewat
+                      🚚 <b>Kirim dari stok CK</b> setelah jadi.
                     </div>
                   )}
                   {!workOrder && p.jumlah_produksi > 0 && (
