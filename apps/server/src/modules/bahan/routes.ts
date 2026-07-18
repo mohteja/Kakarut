@@ -12,12 +12,14 @@ import {
 } from "@kakarut/shared";
 import { db } from "../../db/client";
 import {
+  branches,
   ingredientComponents,
   ingredientSuppliers,
   ingredients,
   menuComponents,
   menus,
   productions,
+  storageLocations,
   suppliers,
 } from "../../db/schema";
 import { requireRole, type AppEnv } from "../../middleware/auth";
@@ -52,6 +54,8 @@ const BahanBody = z.object({
   boleh_eceran: z.boolean().default(false),
   /** minimal belanja (MOQ) saat belanja otomatis; 0 = tanpa minimum */
   min_beli: z.number().nonnegative().default(0),
+  /** rak simpan default (home) di CK; null = di CK tanpa tempat */
+  storage_location_id: z.string().uuid().nullish(),
 });
 
 /**
@@ -78,6 +82,8 @@ const BahanPatchBody = z.object({
   is_complement: z.boolean().optional(),
   boleh_eceran: z.boolean().optional(),
   min_beli: z.number().nonnegative().optional(),
+  /** rak simpan default (home) di CK; null = di CK tanpa tempat */
+  storage_location_id: z.string().uuid().nullish(),
 });
 
 const ResepBody = z.object({
@@ -217,7 +223,20 @@ function toDto(
     is_active: row.isActive,
     supplier_utama: sup?.utama ?? null,
     jumlah_supplier: sup?.jumlah ?? 0,
+    storage_location_id: row.storageLocationId,
   };
+}
+
+/** Rak simpan (home) harus milik salah satu cabang perusahaan. */
+async function pastikanRakMilik(companyId: string, storageLocationId: string) {
+  const [row] = await db
+    .select({ id: storageLocations.id })
+    .from(storageLocations)
+    .innerJoin(branches, eq(branches.id, storageLocations.branchId))
+    .where(
+      and(eq(storageLocations.id, storageLocationId), eq(branches.companyId, companyId)),
+    );
+  if (!row) throw new HTTPException(400, { message: "Rak simpan tidak valid" });
 }
 
 export const bahanRoutes = new Hono<AppEnv>()
@@ -234,6 +253,7 @@ export const bahanRoutes = new Hono<AppEnv>()
   .post("/", requireRole("owner", "admin"), zValidator("json", BahanBody), async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");
+    if (body.storage_location_id) await pastikanRakMilik(auth.company_id!, body.storage_location_id);
     const slug =
       body.slug ?? body.nama.toLowerCase().trim().replace(/\s+/g, " ");
     const [existing] = await db
@@ -287,6 +307,7 @@ export const bahanRoutes = new Hono<AppEnv>()
           isComplement: body.is_complement,
           bolehEceran: body.boleh_eceran,
           minBeli: body.min_beli,
+          storageLocationId: body.storage_location_id ?? null,
           updatedAt: new Date(),
         })
         .where(and(eq(ingredients.id, existing.id), eq(ingredients.companyId, auth.company_id!)))
@@ -316,6 +337,7 @@ export const bahanRoutes = new Hono<AppEnv>()
         isComplement: body.is_complement,
         bolehEceran: body.boleh_eceran,
         minBeli: body.min_beli,
+        storageLocationId: body.storage_location_id ?? null,
       })
       .returning();
     return c.json(toDto(row), 201);
@@ -516,6 +538,8 @@ export const bahanRoutes = new Hono<AppEnv>()
         .from(ingredients)
         .where(and(eq(ingredients.id, id), eq(ingredients.companyId, auth.company_id!)));
       if (!lama) throw new HTTPException(404, { message: "Bahan tidak ditemukan" });
+      if (body.storage_location_id)
+        await pastikanRakMilik(auth.company_id!, body.storage_location_id);
       // Konservatif: bahan yang masih jadi INPUT resep aktif tak diizinkan
       // di-flip jenisnya ke "produksi" lewat jalur edit-bahan ini — ubah dulu
       // resep yang memakainya. (Memakai bahan produksi DI DALAM resep memang
@@ -600,6 +624,9 @@ export const bahanRoutes = new Hono<AppEnv>()
           ...(body.is_complement !== undefined && { isComplement: body.is_complement }),
           ...(body.boleh_eceran !== undefined && { bolehEceran: body.boleh_eceran }),
           ...(body.min_beli !== undefined && { minBeli: body.min_beli }),
+          ...(body.storage_location_id !== undefined && {
+            storageLocationId: body.storage_location_id ?? null,
+          }),
           updatedAt: new Date(),
         })
         .where(

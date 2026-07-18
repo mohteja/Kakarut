@@ -50,6 +50,9 @@ export interface StokMasukRow {
   tempat: string | null;
   supplier_id: string | null;
   storage_location_id: string | null;
+  /** RAK SIMPAN default (home) bahan di CK — untuk auto-file & pratinjau per rak */
+  default_storage_location_id?: string | null;
+  default_tempat?: string | null;
   dibuat_oleh: string | null;
   diubah_oleh: string | null;
   updated_at: string | null;

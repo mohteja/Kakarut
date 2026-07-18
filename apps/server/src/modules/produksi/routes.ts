@@ -44,6 +44,8 @@ const logOleh = alias(users, "log_oleh");
 // cabang baris + cabang tujuan (dipakai tampilan lintas-cabang di Kantor)
 const cabangProd = alias(branches, "cabang_prod");
 const tujuanProd = alias(branches, "tujuan_prod");
+// RAK SIMPAN default (home) bahan — dari ingredients.storage_location_id
+const rakDefault = alias(storageLocations, "rak_default");
 // supplier UTAMA bahan tiap baris (info "beli di mana" saat belanja diproses)
 const isupUtama = alias(ingredientSuppliers, "isup_utama");
 const supBahan = alias(suppliers, "sup_bahan");
@@ -591,12 +593,39 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         // (>= menunggu). Pindah dini (mis. ke 'dikerjakan') membuat konsumsi
         // bahan resep tercatat di cabang yang salah — abaikan tujuannya.
         const bolehPindah = target >= URUTAN_TAHAP.menunggu;
-        const pindah = bolehPindah
-          ? {
-              ...(tujuanBranch ? { branchId: tujuanBranch } : {}),
-              ...(tujuanStorage ? { storageLocationId: tujuanStorage } : {}),
-            }
-          : {};
+        const pindah = bolehPindah && tujuanBranch ? { branchId: tujuanBranch } : {};
+
+        // RAK SIMPAN default (home) per bahan: saat barang TIBA/DISIMPAN
+        // (>= menunggu) di cabang tujuan, otomatis diletakkan di rak home-nya
+        // (bila raknya di cabang tujuan). Belanja pilih rak manual (tujuan_storage)
+        // jadi cadangan; tanpa keduanya → tanpa tempat (null). "di-setting di
+        // awal" per bahan agar penyimpanan terkelompok per rak otomatis.
+        const homeRak = new Map<string, { rakId: string; branchId: string }>();
+        {
+          const ingIds = [...new Set(baris.map((b) => b.ingredientId))];
+          const homeRows = await db
+            .select({
+              ingredientId: ingredients.id,
+              rakId: ingredients.storageLocationId,
+              rakBranch: storageLocations.branchId,
+            })
+            .from(ingredients)
+            .innerJoin(storageLocations, eq(storageLocations.id, ingredients.storageLocationId))
+            .where(inArray(ingredients.id, ingIds));
+          for (const r of homeRows)
+            if (r.rakId) homeRak.set(r.ingredientId, { rakId: r.rakId, branchId: r.rakBranch });
+        }
+        /** rak simpan untuk baris yang maju (>= menunggu): rak manual (bila
+         * dipilih) menang, lalu rak home bila raknya di cabang tujuan, lalu
+         * pertahankan yang sudah ada (faktur lahir tanpa tempat → tetap tanpa
+         * tempat). */
+        const rakBaris = (b: (typeof baris)[number]) => {
+          if (tujuanStorage) return tujuanStorage;
+          const destBranch = tujuanBranch ?? b.branchId;
+          const home = homeRak.get(b.ingredientId);
+          if (home && home.branchId === destBranch) return home.rakId;
+          return b.storageLocationId;
+        };
 
         const now = new Date();
         // waktu di-set saat dikonfirmasi (bukan saat RAB) — lihat /konfirmasi.
@@ -647,6 +676,8 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
                 .set({
                   ...naik,
                   ...pindah,
+                  // rak simpan otomatis (home rak per bahan) saat barang tiba/disimpan
+                  ...(bolehPindah ? { storageLocationId: rakBaris(b) } : {}),
                   // self-assign pelaksana (isi hanya bila masih kosong)
                   ...(selfAssign
                     ? { workerId: sql`COALESCE(${productions.workerId}, ${auth.sub}::uuid)` }
@@ -714,7 +745,8 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
                 rencanaId: b.rencanaId,
                 noFaktur: b.noFaktur,
                 supplierId: selfAssign ? supplierBaris(b) : b.supplierId,
-                storageLocationId: tujuanStorage ?? b.storageLocationId,
+                // rak simpan otomatis (home rak) saat maju ke tiba/disimpan; selain itu tetap
+                storageLocationId: bolehPindah ? rakBaris(b) : b.storageLocationId,
                 isBatch: b.isBatch,
                 catatan: b.catatan,
                 userId: b.userId,
@@ -1228,6 +1260,9 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         supplier: suppliers.nama,
         tempat: storageLocations.nama,
         storage_location_id: productions.storageLocationId,
+        // RAK SIMPAN default (home) bahan di CK — utk auto-file & pratinjau per rak
+        default_storage_location_id: ingredients.storageLocationId,
+        default_tempat: rakDefault.nama,
         supplier_id: productions.supplierId,
         dibuat_oleh: pembuat.nama,
         diubah_oleh: pengubah.nama,
@@ -1257,6 +1292,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
               .innerJoin(ingredients, eq(productions.ingredientId, ingredients.id))
               .leftJoin(suppliers, eq(productions.supplierId, suppliers.id))
               .leftJoin(storageLocations, eq(productions.storageLocationId, storageLocations.id))
+              .leftJoin(rakDefault, eq(ingredients.storageLocationId, rakDefault.id))
               .leftJoin(pembuat, eq(productions.userId, pembuat.id))
               .leftJoin(pengubah, eq(productions.updatedBy, pengubah.id))
               .leftJoin(pekerja, eq(productions.workerId, pekerja.id))

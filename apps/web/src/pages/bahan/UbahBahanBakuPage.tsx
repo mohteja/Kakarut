@@ -1,10 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { hargaPerUnit, type BahanDto, type KategoriDto } from "@kakarut/shared";
+import { hargaPerUnit, type BahanDto, type KategoriDto, type PenyimpananDto } from "@kakarut/shared";
 import { Card, ErrorText, PageTitle, Spinner, btnPrimary, btnSecondary } from "../../components/ui";
 import { KategoriManagerModal } from "../../components/KategoriManagerModal";
 import { SatuanSelect } from "../../components/SatuanSelect";
+import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatAngka } from "../../lib/format";
 
@@ -26,6 +27,8 @@ interface BarisUbah {
   is_packaging: boolean;
   is_complement: boolean;
   catatan: string;
+  /** rak simpan default (home) di CK; "" = di CK tanpa tempat */
+  storage_location_id: string;
 }
 
 const cell = "rounded-lg border border-stone-300 px-2 py-1.5 text-sm focus:border-orange-500 focus:outline-none";
@@ -55,6 +58,7 @@ function keBaris(b: BahanDto): BarisUbah {
     is_packaging: b.is_packaging,
     is_complement: b.is_complement,
     catatan: b.catatan ?? "",
+    storage_location_id: b.storage_location_id ?? "",
   };
 }
 
@@ -77,6 +81,25 @@ export function UbahBahanBakuPage() {
   const { data: kategoriList } = useQuery({
     queryKey: ["kategori-bahan"],
     queryFn: () => api<KategoriDto[]>("/kategori-bahan"),
+  });
+  // Rak (tempat penyimpanan) di Central Kitchen — untuk memilih rak default tiap
+  // bahan. Barang tiba di CK otomatis "diletakkan" di rak ini.
+  const { cabang } = useBranch();
+  const ckList = cabang.filter((b) => b.tipe === "central_kitchen" && b.is_active);
+  const banyakCk = ckList.length > 1;
+  const { data: rakCk = [] } = useQuery({
+    queryKey: ["penyimpanan-ck", ckList.map((c) => c.id).join(",")],
+    enabled: ckList.length > 0,
+    queryFn: async () => {
+      const per = await Promise.all(
+        ckList.map((ck) =>
+          api<PenyimpananDto[]>(`/penyimpanan?branch_id=${ck.id}`).then((rows) =>
+            rows.map((r) => ({ id: r.id, nama: banyakCk ? `${ck.nama} · ${r.nama}` : r.nama })),
+          ),
+        ),
+      );
+      return per.flat();
+    },
   });
 
   // Seed draft sekali dari master begitu termuat (urut sesuai ids).
@@ -121,6 +144,7 @@ export function UbahBahanBakuPage() {
               // eceran & minimal belanja hanya relevan utk jalur beli
               boleh_eceran: b.pengadaan === "beli" ? b.boleh_eceran : false,
               min_beli: b.pengadaan === "beli" ? Number(b.min_beli) || 0 : 0,
+              storage_location_id: b.storage_location_id || null,
             },
           }),
         ),
@@ -233,6 +257,9 @@ export function UbahBahanBakuPage() {
                   <th className={`${thCell} text-center`} rowSpan={2}>Lacak</th>
                   <th className={thCell} rowSpan={2}>Stok min</th>
                   <th className={thCell} rowSpan={2}>Min beli</th>
+                  <th className={thCell} rowSpan={2} title="Rak simpan default di Central Kitchen">
+                    Rak (CK)
+                  </th>
                   <th className={`${thCell} text-center`} rowSpan={2} title="Kemasan take-away">
                     TA
                   </th>
@@ -396,6 +423,30 @@ export function UbahBahanBakuPage() {
                               : "Hanya untuk bahan jalur beli"
                           }
                         />
+                      </td>
+                      <td className="px-2 py-1.5">
+                        <select
+                          value={b.storage_location_id}
+                          onChange={(e) => ubah(i, { storage_location_id: e.target.value })}
+                          className={`${cell} w-32`}
+                          disabled={rakCk.length === 0}
+                          title={
+                            rakCk.length === 0
+                              ? "Belum ada rak di Central Kitchen (atur di Pengaturan → Penyimpanan)"
+                              : "Rak simpan default di CK — barang tiba otomatis diletakkan di sini"
+                          }
+                        >
+                          <option value="">Tanpa tempat</option>
+                          {b.storage_location_id &&
+                            !rakCk.some((r) => r.id === b.storage_location_id) && (
+                              <option value={b.storage_location_id}>(rak tersimpan)</option>
+                            )}
+                          {rakCk.map((r) => (
+                            <option key={r.id} value={r.id}>
+                              {r.nama}
+                            </option>
+                          ))}
+                        </select>
                       </td>
                       <td className="px-2 py-1.5 text-center">
                         <input
