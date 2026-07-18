@@ -25,7 +25,7 @@ const BOLEH_STORE = [
   "/penerimaan",
   "/pengaturan/printer",
 ];
-const BOLEH_CK = ["/absen", "/profil", "/stok", "/penerimaan", "/produksi", "/pembelian", "/bahan"];
+const BOLEH_CK = ["/absen", "/profil", "/stok", "/penerimaan", "/produksi", "/pembelian", "/bahan", "/resep"];
 
 const linkClass = ({ isActive }: { isActive: boolean }) =>
   `block rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
