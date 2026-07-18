@@ -106,20 +106,17 @@ function TahapForm({
   const keStok = ke === "dikonfirmasi";
   const keProses = ke === "dikerjakan";
   const keSelesai = ke === "menunggu";
+  // Realisasi biaya DIHAPUS di kedua jalur: beli hanya mencatat BARANG saat tiba
+  // di CK (bukan uang), produksi tak ber-biaya (bahan sudah dibeli di Beli Bahan
+  // Baku). Yang tersisa saat "menunggu": tujuan/tempat simpan barang.
 
   const [danaNominal, setDanaNominal] = useState("");
   const [danaManual, setDanaManual] = useState(false);
 
-  // Realisasi biaya saat proses → selesai/Tiba di CK: LANGSUNG input berapa
-  // yang benar-benar dibelanjakan (bisa kurang/lebih dari dana faktur). Tak
-  // ada lagi konfirmasi "sesuai/tidak"; default mengikuti dana faktur.
-  const [belanjaRiil, setBelanjaRiil] = useState("");
-  const [belanjaManual, setBelanjaManual] = useState(false);
-  const [selisihCatatan, setSelisihCatatan] = useState("");
-
   const [tujuanCabang, setTujuanCabang] = useState(fakturBranchId || "");
   const [tujuanTempat, setTujuanTempat] = useState("");
-  const storageBranch = isWorkOrder ? fakturBranchId : tujuanCabang;
+  // Produksi menyimpan hasil di CK (fakturBranchId); beli manual pakai cabang tujuan.
+  const storageBranch = isWorkOrder || tipe !== "beli" ? fakturBranchId : tujuanCabang;
   const { data: tempatTujuan = [] } = useQuery({
     queryKey: ["penyimpanan", storageBranch],
     queryFn: () => api<PenyimpananDto[]>(`/penyimpanan?branch_id=${storageBranch}`),
@@ -160,17 +157,6 @@ function TahapForm({
   const danaInvalid =
     tanyaDana && danaManual && (!Number.isFinite(danaCair) || danaCair! < 0);
 
-  // Dana faktur = yang sudah cair + yang cair bersamaan langkah ini.
-  const danaFaktur = grup.danaCair + (danaCair != null && !danaInvalid ? danaCair : 0);
-  // Realisasi = total belanja riil (default mengikuti dana faktur).
-  const realisasi = keSelesai ? (belanjaManual ? Number(belanjaRiil) : danaFaktur) : null;
-  const belanjaInvalid =
-    keSelesai && belanjaManual && (!Number.isFinite(realisasi) || (realisasi ?? 0) < 0);
-  const selisih = realisasi != null && !belanjaInvalid ? realisasi - danaFaktur : 0;
-  const butuhCatatanSelisih =
-    realisasi != null && !belanjaInvalid && !adaInvalid && Math.abs(selisih) >= 0.5;
-  const catatanSelisihKosong = butuhCatatanSelisih && selisihCatatan.trim().length === 0;
-
   const simpan = useMutation({
     mutationFn: () =>
       api(`${endpoint}/tahap/${grup.fakturId}`, {
@@ -179,10 +165,11 @@ function TahapForm({
           ke,
           items,
           ...(danaCair != null ? { dana_cair: danaCair } : {}),
-          ...(realisasi != null && !belanjaInvalid
-            ? { realisasi, selisih_catatan: selisihCatatan.trim() || null }
+          // Produksi selesai TIDAK dikirim ke cabang — hasil disimpan dulu di CK
+          // (tujuan_branch_id tak dikirim); cukup pilih tempat simpan (opsional).
+          ...(keSelesai && !isWorkOrder && tipe === "beli" && tujuanCabang
+            ? { tujuan_branch_id: tujuanCabang }
             : {}),
-          ...(keSelesai && !isWorkOrder && tujuanCabang ? { tujuan_branch_id: tujuanCabang } : {}),
           ...(keSelesai && tujuanTempat ? { tujuan_storage_id: tujuanTempat } : {}),
         },
       }),
@@ -202,6 +189,23 @@ function TahapForm({
 
   const rabTotalMaju = bisaMaju.reduce((t, r) => t + (r.total_harga ?? 0), 0);
 
+  // Pratinjau penyimpanan per RAK saat barang tiba/disimpan di CK: tiap bahan
+  // otomatis masuk rak default (home)-nya; belum diatur → "Tanpa tempat".
+  const barisMajuAktif = bisaMaju.filter((r) => pilih[r.id]?.aktif);
+  const rakGroups = (() => {
+    const m = new Map<string, { nama: string; rows: typeof barisMajuAktif }>();
+    for (const r of barisMajuAktif) {
+      const key = r.default_storage_location_id ?? "__none";
+      const nama = r.default_tempat ?? "Tanpa tempat";
+      const g = m.get(key) ?? { nama, rows: [] };
+      g.rows.push(r);
+      m.set(key, g);
+    }
+    return [...m.values()].sort((a, b) =>
+      a.nama === "Tanpa tempat" ? 1 : b.nama === "Tanpa tempat" ? -1 : a.nama.localeCompare(b.nama),
+    );
+  })();
+
   return (
     <div className="mx-auto max-w-2xl pb-24">
       <PageTitle
@@ -217,9 +221,16 @@ function TahapForm({
       <Card className="space-y-3 p-4">
         {keProses ? (
           <p className="text-sm text-stone-500">
-            Faktur ditandai <b>sedang diproses</b> — cukup pastikan RAB & catat dana yang cair.
-            {tipe === "beli" && (
-              <> Rincian bahan + supplier ada di <b>📄 dokumen belanja</b> yang terbuka setelah ini.</>
+            {tipe === "beli" ? (
+              <>
+                Faktur ditandai <b>sedang diproses</b> — cukup pastikan RAB & catat dana yang cair.
+                Rincian bahan + supplier ada di <b>📄 dokumen belanja</b> yang terbuka setelah ini.
+              </>
+            ) : (
+              <>
+                Faktur ditandai <b>mulai dikerjakan</b> — bahan mentah resep dipakai saat produksi
+                selesai. (Produksi tak ber-RAB; bahan sudah dibeli di Beli Bahan Baku.)
+              </>
             )}
           </p>
         ) : (
@@ -253,10 +264,13 @@ function TahapForm({
               <span className="text-stone-500">Jumlah bahan</span>
               <b>{bisaMaju.length} baris</b>
             </div>
-            <div className="flex items-center justify-between">
-              <span className="text-stone-500">Total est. RAB</span>
-              <b className="text-base">{formatRupiah(rabTotalMaju)}</b>
-            </div>
+            {/* RAB hanya untuk beli — produksi tak menampilkan biaya. */}
+            {tipe === "beli" && (
+              <div className="flex items-center justify-between">
+                <span className="text-stone-500">Total est. RAB</span>
+                <b className="text-base">{formatRupiah(rabTotalMaju)}</b>
+              </div>
+            )}
           </div>
         ) : (
           <div className="max-h-96 overflow-y-auto overflow-x-auto">
@@ -354,75 +368,151 @@ function TahapForm({
         {keSelesai && (
           <div className="space-y-2 rounded-lg border border-stone-200 p-3">
             <div className="text-sm font-semibold text-stone-700">
-              {isWorkOrder
-                ? tipe === "beli"
+              {tipe !== "beli"
+                ? "📦 Disimpan di Central Kitchen — pilih tempat"
+                : isWorkOrder
                   ? "📦 Tiba di CK — semua barang disimpan di CK dulu"
-                  : "📦 Selesai — disimpan di Central Kitchen"
-                : "🚚 Dikirim / disimpan ke mana?"}
+                  : "🚚 Dikirim / disimpan ke mana?"}
             </div>
-            {isWorkOrder && (
-              <div className="rounded bg-purple-50 px-2 py-1.5 text-xs text-purple-800">
-                Barang disimpan dulu di CK. Kirim ke cabang tujuan lewat tombol{" "}
-                <b>🚚 Kirim ke cabang</b> — dokumen kirim (surat jalan) dibuat otomatis.
-              </div>
-            )}
-            <div className="grid gap-2 sm:grid-cols-2">
-              {isPro && !isWorkOrder && (
+            {tipe !== "beli" ? (
+              /* PRODUKSI SELESAI: belum ada pengiriman — hasil disimpan dulu di CK
+                 (bisa jadi stok CK). Tak ada realisasi biaya (bahan sudah dibeli di
+                 Beli Bahan Baku). User cukup PILIH tempat simpan di CK. */
+              <>
+                <div className="rounded bg-purple-50 px-2 py-1.5 text-xs text-purple-800">
+                  Hasil produksi <b>langsung masuk stok CK</b> — tanpa konfirmasi lagi (orang CK
+                  yang produksi). Kirim ke cabang lewat <b>🚚 Kirim ke cabang</b> / Permintaan Stok
+                  setelah ini; di cabang barang <b>wajib diterima</b>.
+                </div>
                 <div>
                   <label className="mb-1 block text-xs font-medium text-stone-500">
-                    Cabang tujuan
+                    Tempat penyimpanan di CK (opsional)
                   </label>
                   <select
-                    value={tujuanCabang}
-                    onChange={(e) => {
-                      setTujuanCabang(e.target.value);
-                      setTujuanTempat("");
-                    }}
-                    aria-label="Cabang tujuan"
+                    value={tujuanTempat}
+                    onChange={(e) => setTujuanTempat(e.target.value)}
+                    aria-label="Tempat penyimpanan hasil produksi"
                     className={inputClass}
                   >
-                    {cabang
-                      .filter((b) => b.is_active && b.tipe !== "kantor")
-                      .filter((b) =>
-                        cabangIniCk
-                          ? b.id === fakturBranchId ||
-                            (b.tipe === "store" && b.central_kitchen_id === fakturBranchId)
-                          : true,
-                      )
-                      .map((b) => (
-                        <option key={b.id} value={b.id}>
-                          {labelCabang(b)}
-                        </option>
-                      ))}
+                    <option value="">— tanpa tempat / rak default tiap hasil —</option>
+                    {tempatTujuan.map((tmp) => (
+                      <option key={tmp.id} value={tmp.id}>
+                        {tmp.nama}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="mt-1 text-[11px] text-stone-400">
+                    Pilih satu rak untuk semua hasil, atau kosongkan → tiap hasil masuk rak
+                    default-nya (atur di <b>Bahan Baku → Ubah</b>); belum diatur → tanpa tempat.
+                  </div>
+                </div>
+              </>
+            ) : isWorkOrder ? (
+              /* BELI tiba di CK — penyimpanan OTOMATIS per rak (rak default tiap bahan).
+                 "Selesai belanja" langsung terlihat isi tiap rak & berapa. */
+              <>
+                <div className="rounded bg-purple-50 px-2 py-1.5 text-xs text-purple-800">
+                  Barang disimpan dulu di CK. Kirim ke cabang tujuan lewat tombol{" "}
+                  <b>🚚 Kirim ke cabang</b> — dokumen kirim (surat jalan) dibuat otomatis.
+                </div>
+                <div className="space-y-1.5">
+                  <div className="text-xs font-medium text-stone-500">
+                    Disimpan otomatis per rak (dari rak default tiap bahan):
+                  </div>
+                  {rakGroups.length === 0 ? (
+                    <div className="text-xs text-stone-400">Centang baris dulu.</div>
+                  ) : (
+                    rakGroups.map((g, i) => (
+                      <div
+                        key={i}
+                        className="rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-1.5"
+                      >
+                        <div className="text-sm font-semibold text-stone-700">
+                          {g.nama === "Tanpa tempat" ? "📦 Di CK tanpa tempat" : `🗄 ${g.nama}`}
+                          <span className="ml-1 text-xs font-normal text-stone-400">
+                            ({g.rows.length} bahan)
+                          </span>
+                        </div>
+                        <div className="text-xs text-stone-500">
+                          {g.rows
+                            .map(
+                              (r) =>
+                                `${r.bahan} (${formatAngka(Number(pilih[r.id]?.qty) || r.qty)} ${r.satuan})`,
+                            )
+                            .join(" · ")}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                  <div className="text-[11px] text-stone-400">
+                    Atur rak default tiap bahan di <b>Bahan Baku → Ubah</b> (kolom Rak). Belum diatur
+                    → di CK tanpa tempat.
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="grid gap-2 sm:grid-cols-2">
+                {isPro && (
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-stone-500">
+                      Cabang tujuan
+                    </label>
+                    <select
+                      value={tujuanCabang}
+                      onChange={(e) => {
+                        setTujuanCabang(e.target.value);
+                        setTujuanTempat("");
+                      }}
+                      aria-label="Cabang tujuan"
+                      className={inputClass}
+                    >
+                      {cabang
+                        .filter((b) => b.is_active && b.tipe !== "kantor")
+                        .filter((b) =>
+                          cabangIniCk
+                            ? b.id === fakturBranchId ||
+                              (b.tipe === "store" && b.central_kitchen_id === fakturBranchId)
+                            : true,
+                        )
+                        .map((b) => (
+                          <option key={b.id} value={b.id}>
+                            {labelCabang(b)}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                )}
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-stone-500">
+                    Tempat penyimpanan (opsional)
+                  </label>
+                  <select
+                    value={tujuanTempat}
+                    onChange={(e) => setTujuanTempat(e.target.value)}
+                    aria-label="Tempat penyimpanan tujuan"
+                    className={inputClass}
+                  >
+                    <option value="">— pilih tempat —</option>
+                    {tempatTujuan.map((tmp) => (
+                      <option key={tmp.id} value={tmp.id}>
+                        {tmp.nama}
+                      </option>
+                    ))}
                   </select>
                 </div>
-              )}
-              <div>
-                <label className="mb-1 block text-xs font-medium text-stone-500">
-                  {isWorkOrder ? "Tempat penyimpanan di CK (opsional)" : "Tempat penyimpanan (opsional)"}
-                </label>
-                <select
-                  value={tujuanTempat}
-                  onChange={(e) => setTujuanTempat(e.target.value)}
-                  aria-label="Tempat penyimpanan tujuan"
-                  className={inputClass}
-                >
-                  <option value="">— pilih tempat —</option>
-                  {tempatTujuan.map((tmp) => (
-                    <option key={tmp.id} value={tmp.id}>
-                      {tmp.nama}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-            {!isWorkOrder && tujuanCabang && fakturBranchId && tujuanCabang !== fakturBranchId && (
-              <div className="text-xs text-amber-700">
-                Baris yang maju akan <b>berpindah ke cabang tujuan</b> (stok terhitung di sana
-                saat diterima); sisa tugas tetap di cabang ini.
               </div>
             )}
-            {!isWorkOrder && tujuanCabang === fakturBranchId && cabangIniCk && (
+            {tipe === "beli" &&
+              !isWorkOrder &&
+              tujuanCabang &&
+              fakturBranchId &&
+              tujuanCabang !== fakturBranchId && (
+                <div className="text-xs text-amber-700">
+                  Baris yang maju akan <b>berpindah ke cabang tujuan</b> (stok terhitung di sana
+                  saat diterima); sisa tugas tetap di cabang ini.
+                </div>
+              )}
+            {tipe === "beli" && !isWorkOrder && tujuanCabang === fakturBranchId && cabangIniCk && (
               <div className="text-xs text-stone-500">
                 🏭 Ini Central Kitchen — bila barang untuk outlet, pilih cabang 🏪 store sebagai
                 tujuan (hanya store yang terhubung ke CK ini yang bisa dipilih).
@@ -466,62 +556,6 @@ function TahapForm({
           </div>
         )}
 
-        {keSelesai && (
-          <div className="space-y-2 rounded-lg border border-stone-200 p-3">
-            <div className="text-sm font-semibold text-stone-700">
-              🧾 Realisasi — berapa yang benar-benar {tipe === "beli" ? "dibelanjakan" : "dikeluarkan"}?
-            </div>
-            <label className="flex flex-wrap items-center gap-2 text-sm">
-              <span>Total {tipe === "beli" ? "belanja" : "biaya"} riil:</span>
-              <input
-                type="number"
-                min="0"
-                step="any"
-                value={belanjaManual ? belanjaRiil : String(danaFaktur)}
-                onChange={(e) => {
-                  setBelanjaManual(true);
-                  setBelanjaRiil(e.target.value);
-                }}
-                placeholder="Rp"
-                aria-label="Total belanja riil"
-                className={`w-40 rounded-lg border px-2 py-1 text-right text-sm ${belanjaInvalid ? "border-red-400" : "border-stone-300"}`}
-              />
-              <span className="text-xs text-stone-400">dana faktur {formatRupiah(danaFaktur)}</span>
-            </label>
-            {realisasi != null && !belanjaInvalid && selisih > 0.49 && (
-              <div className="space-y-1">
-                <label className="block text-sm font-medium text-red-700">
-                  Kurang {formatRupiah(selisih)} — dari mana uangnya?
-                </label>
-                <input
-                  value={selisihCatatan}
-                  onChange={(e) => setSelisihCatatan(e.target.value)}
-                  placeholder="mis. talangan kasir Budi / kas toko"
-                  aria-label="Sumber dana tambahan"
-                  className={`w-full rounded-lg border px-2 py-1 text-sm ${catatanSelisihKosong ? "border-red-400" : "border-stone-300"}`}
-                />
-              </div>
-            )}
-            {realisasi != null && !belanjaInvalid && selisih < -0.49 && (
-              <div className="space-y-1">
-                <label className="block text-sm font-medium text-emerald-700">
-                  Lebih {formatRupiah(-selisih)} — di siapa sisa uangnya?
-                </label>
-                <input
-                  value={selisihCatatan}
-                  onChange={(e) => setSelisihCatatan(e.target.value)}
-                  placeholder="mis. dipegang Budi / dikembalikan ke kas"
-                  aria-label="Pemegang sisa dana"
-                  className={`w-full rounded-lg border px-2 py-1 text-sm ${catatanSelisihKosong ? "border-red-400" : "border-stone-300"}`}
-                />
-              </div>
-            )}
-            {realisasi != null && !belanjaInvalid && Math.abs(selisih) <= 0.49 && (
-              <div className="text-xs text-stone-500">Pas dengan dana faktur — tidak ada selisih.</div>
-            )}
-          </div>
-        )}
-
         <div className="rounded-lg bg-stone-50 px-3 py-2 text-sm text-stone-600">
           <b>{items.length}</b> baris maju → {label}
           {sisaTugas > 0 && (
@@ -545,14 +579,7 @@ function TahapForm({
         </button>
         <button
           onClick={() => simpan.mutate()}
-          disabled={
-            simpan.isPending ||
-            items.length === 0 ||
-            adaInvalid ||
-            danaInvalid ||
-            belanjaInvalid ||
-            catatanSelisihKosong
-          }
+          disabled={simpan.isPending || items.length === 0 || adaInvalid || danaInvalid}
           className={btnPrimary}
         >
           {simpan.isPending ? "Menyimpan…" : `Terapkan (${items.length} baris)`}

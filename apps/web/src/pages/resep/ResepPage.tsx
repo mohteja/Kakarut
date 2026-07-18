@@ -255,9 +255,18 @@ export function ResepPage() {
         🧾 Resep Produksi
       </PageTitle>
       <div className="mb-4 rounded-lg bg-blue-50 px-4 py-2 text-sm text-blue-800">
-        Atur bahan baku yang dibutuhkan untuk memproduksi <b>1 batch</b> tiap bahan jenis
-        produksi. Dipakai untuk <b>rencana belanja bahan produksi</b> dan <b>pemotongan stok
-        bahan baku otomatis</b> saat produksi selesai.
+        {bolehUbah ? (
+          <>
+            Atur bahan baku yang dibutuhkan untuk memproduksi <b>1 batch</b> tiap bahan jenis
+            produksi. Dipakai untuk <b>rencana belanja bahan produksi</b> dan <b>pemotongan stok
+            bahan baku otomatis</b> saat produksi selesai.
+          </>
+        ) : (
+          <>
+            Resep tiap bahan produksi: <b>bahan baku apa saja</b> &amp; <b>takaran</b>-nya untuk
+            memproduksi <b>1 batch</b> (lihat hasil per batch di judul). Harga tak ditampilkan.
+          </>
+        )}
       </div>
 
       {produksi.length === 0 ? (
@@ -298,9 +307,12 @@ export function ResepPage() {
                   >
                     <div className="flex items-baseline justify-between gap-2">
                       <span className="text-sm font-semibold">{b.nama}</span>
-                      <span className="shrink-0 text-sm font-semibold tabular-nums">
-                        {formatRupiah(b.harga_beli)}
-                      </span>
+                      {/* harga hanya untuk owner/admin — tim cukup lihat resep & takaran */}
+                      {bolehUbah && (
+                        <span className="shrink-0 text-sm font-semibold tabular-nums">
+                          {formatRupiah(b.harga_beli)}
+                        </span>
+                      )}
                     </div>
                     <div className={`text-xs ${aktif ? "text-orange-100" : "text-stone-500"}`}>
                       batch {formatAngka(b.isi)} {b.satuan} ·{" "}
@@ -393,16 +405,20 @@ export function ResepPage() {
                             <span className="w-12 shrink-0 text-xs text-stone-500">
                               {terpilih?.satuan ?? ""}
                             </span>
-                            {/* harga per satuan (mengikuti aturan resep) — kolom sejajar, read-only */}
-                            <span className="w-28 shrink-0 text-right text-xs whitespace-nowrap text-stone-400 tabular-nums">
-                              {terpilih ? `× Rp ${formatAngka(terpilih.harga_per_unit, 2)}` : ""}
-                            </span>
-                            {/* subtotal baris (qty × harga) — kolom sejajar */}
-                            <span className="w-28 shrink-0 text-right text-sm whitespace-nowrap font-medium text-stone-700 tabular-nums">
-                              {terpilih && Number(r.qty) > 0
-                                ? formatRupiah(Number(r.qty) * terpilih.harga_per_unit)
-                                : "—"}
-                            </span>
+                            {/* kolom harga (per satuan & subtotal) hanya untuk owner/admin —
+                                tim cukup lihat bahan + takaran + satuan, tanpa harga */}
+                            {bolehUbah && (
+                              <>
+                                <span className="w-28 shrink-0 text-right text-xs whitespace-nowrap text-stone-400 tabular-nums">
+                                  {terpilih ? `× Rp ${formatAngka(terpilih.harga_per_unit, 2)}` : ""}
+                                </span>
+                                <span className="w-28 shrink-0 text-right text-sm whitespace-nowrap font-medium text-stone-700 tabular-nums">
+                                  {terpilih && Number(r.qty) > 0
+                                    ? formatRupiah(Number(r.qty) * terpilih.harga_per_unit)
+                                    : "—"}
+                                </span>
+                              </>
+                            )}
                             <span className="w-6 shrink-0 text-center">
                               {bolehUbah && (
                                 <button
@@ -425,7 +441,8 @@ export function ResepPage() {
                       )}
                     </div>
 
-                    {resep.length > 0 && (
+                    {/* total biaya bahan baku hanya untuk owner/admin — tim tanpa harga */}
+                    {bolehUbah && resep.length > 0 && (
                       <div className="mt-2 flex items-center gap-2 border-t border-stone-200 pt-2">
                         <span className="flex-1 text-right text-sm font-semibold text-stone-600">
                           Total bahan baku <span className="font-normal text-stone-400">(sebelum overhead)</span>
@@ -450,8 +467,10 @@ export function ResepPage() {
 
                     {/* ⚙ Batch, harga & stok minimum — diatur DI BAWAH resep
                         (bukan di modal buat bahan). Harga per batch = biaya
-                        bahan resep × overhead; tersimpan saat Simpan Resep. */}
-                    {atur && (
+                        bahan resep × overhead; tersimpan saat Simpan Resep.
+                        Hanya owner/admin — tim cukup lihat resep (bahan+takaran),
+                        hasil per batch sudah tampil di judul di atas. */}
+                    {atur && bolehUbah && (
                       <div className="mt-4 rounded-lg border border-stone-200 p-3">
                         <div className="mb-2 text-sm font-semibold text-stone-700">
                           ⚙️ Batch, harga &amp; stok minimum

@@ -323,6 +323,13 @@
       "when": 1784304195268,
       "tag": "0045_tricky_killmonger",
       "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1784338720338,
+      "tag": "0046_volatile_susan_delgado",
+      "breakpoints": true
     }
   ]
 }

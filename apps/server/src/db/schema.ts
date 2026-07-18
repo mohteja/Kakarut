@@ -339,6 +339,15 @@ export const ingredients = pgTable(
     minBeli: numeric("min_beli", { precision: 16, scale: 6, mode: "number" })
       .notNull()
       .default(0),
+    /**
+     * RAK SIMPAN default (home) di CK: saat barang tiba di CK, otomatis
+     * "diletakkan" di rak ini (baris beli/produksi diberi storage_location_id
+     * ini bila raknya di cabang yang menerima). Null = di CK tanpa tempat.
+     * Diset di awal per bahan agar penyimpanan otomatis terkelompok per rak.
+     */
+    storageLocationId: uuid("storage_location_id").references(() => storageLocations.id, {
+      onDelete: "set null",
+    }),
     isActive: boolean("is_active").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

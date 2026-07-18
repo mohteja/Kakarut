@@ -1,0 +1,2 @@
+ALTER TABLE "ingredients" ADD COLUMN "storage_location_id" uuid;--> statement-breakpoint
+ALTER TABLE "ingredients" ADD CONSTRAINT "ingredients_storage_location_id_storage_locations_id_fk" FOREIGN KEY ("storage_location_id") REFERENCES "public"."storage_locations"("id") ON DELETE set null ON UPDATE no action;
