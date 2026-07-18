@@ -646,7 +646,9 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         // ke opname terakhir.
         const langsungMasuk = (b: (typeof baris)[number]) =>
           ke === "menunggu" &&
-          b.tujuanBranchId == null &&
+          // CK-lokal = tujuan kosong ATAU = cabang sendiri (invariant sama dengan
+          // saldo & penerimaan) — keduanya "tetap di cabang sendiri", tak dikirim.
+          (b.tujuanBranchId == null || b.tujuanBranchId === b.branchId) &&
           (tujuanBranch == null || tujuanBranch === b.branchId);
         const naikBaris = (b: (typeof baris)[number]) =>
           ke === "dikonfirmasi" || langsungMasuk(b)
@@ -878,11 +880,14 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         if (tipe === "produksi" && ke === "menunggu") {
           await catatKonsumsiProduksi(tx, auth.company_id!, diperbarui);
         }
-        // CK-lokal (tujuan kosong) yang baru "menunggu" → LANGSUNG dikonfirmasi
-        // (stok masuk di CK), tanpa penerimaan/konfirmasi terpisah. Baris
-        // bertujuan cabang tetap "menunggu" → dikirim lalu diterima di cabang.
+        // CK-lokal (tujuan kosong ATAU = cabang sendiri) yang baru "menunggu" →
+        // LANGSUNG dikonfirmasi (stok masuk di CK), tanpa penerimaan/konfirmasi
+        // terpisah. Baris bertujuan cabang LAIN tetap "menunggu" → dikirim lalu
+        // diterima di cabang. (Invariant sama dengan saldo & penerimaan.)
         if (ke === "menunggu") {
-          const lokal = diperbarui.filter((r) => r.tujuanBranchId == null).map((r) => r.id);
+          const lokal = diperbarui
+            .filter((r) => r.tujuanBranchId == null || r.tujuanBranchId === r.branchId)
+            .map((r) => r.id);
           if (lokal.length > 0) {
             const kini = new Date();
             await tx
