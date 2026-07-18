@@ -5,7 +5,14 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import type { JenisPengadaan } from "@kakarut/shared";
 import { db } from "../../db/client";
-import { branches, ingredients, productions, storageLocations, suppliers } from "../../db/schema";
+import {
+  branches,
+  dokumenNomor,
+  ingredients,
+  productions,
+  storageLocations,
+  suppliers,
+} from "../../db/schema";
 import { resolveBranchId, terikatCabang, type AppEnv } from "../../middleware/auth";
 import { catatLogFaktur } from "../produksi/log";
 
@@ -85,6 +92,8 @@ export const penerimaanRoutes = new Hono<AppEnv>()
         prod_date: productions.prodDate,
         faktur_id: productions.fakturId,
         no_faktur: productions.noFaktur,
+        // nomor faktur asal (PB-/PR-) — "penerimaan dari faktur nomor berapa"
+        nomor: dokumenNomor.nomorTeks,
         status: productions.status,
         // jalur kiriman (🛒 beli / 🏭 produksi CK) + cabang penerima (utk Kantor)
         jalur: productions.tipe,
@@ -99,6 +108,13 @@ export const penerimaanRoutes = new Hono<AppEnv>()
       .leftJoin(suppliers, eq(productions.supplierId, suppliers.id))
       .leftJoin(storageLocations, eq(productions.storageLocationId, storageLocations.id))
       .leftJoin(branches, eq(productions.branchId, branches.id))
+      .leftJoin(
+        dokumenNomor,
+        and(
+          eq(dokumenNomor.companyId, productions.companyId),
+          eq(dokumenNomor.refId, productions.fakturId),
+        ),
+      )
       .where(
         and(
           eq(productions.companyId, auth.company_id!),

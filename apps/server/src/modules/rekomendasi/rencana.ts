@@ -29,6 +29,7 @@ import {
   suppliers,
 } from "../../db/schema";
 import { tanggalDi } from "../../lib/time";
+import { terbitkanNomor } from "../dokumen/nomor";
 import { loadKatalog, tampilDiCabang } from "../menu/service";
 import { catatLogFaktur } from "../produksi/log";
 import { hitungSaldoCabang } from "../stok/service";
@@ -456,6 +457,10 @@ export async function buatFakturDariRencana(
       // ngestock". BELI produk jadi → tetap dikirim langsung ke cabang peminta.
       // Belanja bahan produksi (bahan mentah resep) → tetap di CK.
       tujuanBranchId: workOrder && tipe === "beli" && !bahanProduksi ? params.branchId : null,
+      // PRODUKSI work-order: hasil masuk stok CK dulu (tujuan kosong), tapi
+      // catat "diproduksi UNTUK cabang peminta" — pengingat kirim setelah
+      // selesai + badge asal permintaan. Dikosongkan saat hasil dikirim.
+      untukBranchId: workOrder && tipe === "produksi" ? params.branchId : null,
       bahanProduksi,
       ingredientId: b.ingredient_id,
       qty: b.qty_faktur!,
@@ -506,6 +511,7 @@ export async function buatFakturDariRencana(
   await db.transaction(async (tx) => {
     if (prodFakturId) {
       await tx.insert(productions).values(barisFaktur(prodRows, "produksi", prodFakturId));
+      await terbitkanNomor(tx, params.companyId, "produksi", prodFakturId);
       // Riwayat: owner/admin membuat permintaan tambah stok (jejak audit)
       await catatLogFaktur(tx, {
         companyId: params.companyId,
@@ -522,6 +528,7 @@ export async function buatFakturDariRencana(
         ...barisFaktur(beliRows, "beli", beliFakturId),
         ...barisFaktur(beliProduksiRows, "beli", beliFakturId, true),
       ]);
+      await terbitkanNomor(tx, params.companyId, "beli", beliFakturId);
       const potongan: string[] = [];
       if (beliRows.length > 0 && workOrder) potongan.push(`Tujuan: ${store.nama}`);
       if (beliProduksiRows.length > 0) {
@@ -566,6 +573,7 @@ export async function buatFakturDariRencana(
           prodDate,
         })),
       );
+      await terbitkanNomor(tx, params.companyId, "produksi", kirimFakturId);
       await catatLogFaktur(tx, {
         companyId: params.companyId,
         branchId: ck!.id,

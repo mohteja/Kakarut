@@ -249,18 +249,24 @@ export async function kartuStok(params: {
   const mutasiRes = await db.execute(sql`
     SELECT * FROM (
       SELECT so.created_at AS waktu, 'opname' AS jenis, so.qty AS qty,
-             so.catatan AS catatan, NULL AS nomor, NULL AS supplier,
+             so.catatan AS catatan, dn.nomor_teks AS nomor, NULL AS supplier,
              NULL AS tempat, false AS is_batch
       FROM stock_opnames so
+      LEFT JOIN dokumen_nomor dn
+        ON dn.company_id = so.company_id AND dn.ref_id = so.session_id
       WHERE so.branch_id = ${branchId} AND so.ingredient_id = ${ingredientId}
         AND so.penyesuaian_status = 'disetujui'
         AND so.opname_date >= ${dari} AND so.opname_date <= ${sampai}
       UNION ALL
       SELECT pr.waktu, pr.tipe::text AS jenis, pr.qty, pr.catatan,
-             pr.no_faktur AS nomor, sp.nama AS supplier, sl.nama AS tempat, pr.is_batch
+             -- nomor dokumen otomatis (PB-/PR-); nota supplier sebagai cadangan
+             COALESCE(dn.nomor_teks, pr.no_faktur) AS nomor,
+             sp.nama AS supplier, sl.nama AS tempat, pr.is_batch
       FROM productions pr
       LEFT JOIN suppliers sp ON sp.id = pr.supplier_id
       LEFT JOIN storage_locations sl ON sl.id = pr.storage_location_id
+      LEFT JOIN dokumen_nomor dn
+        ON dn.company_id = pr.company_id AND dn.ref_id = pr.faktur_id
       WHERE pr.branch_id = ${branchId} AND pr.ingredient_id = ${ingredientId}
         AND pr.status = 'dikonfirmasi' AND pr.deleted_at IS NULL
         AND pr.prod_date >= ${dari} AND pr.prod_date <= ${sampai}
@@ -327,7 +333,12 @@ export async function kartuStok(params: {
 
     if (jenis === "opname") {
       saldo = qty; // opname me-reset saldo
-      keterangan = r.catatan ? String(r.catatan) : "Penyesuaian stok fisik";
+      keterangan = [
+        r.nomor ? String(r.nomor) : null,
+        r.catatan ? String(r.catatan) : "Penyesuaian stok fisik",
+      ]
+        .filter(Boolean)
+        .join(" · ");
     } else if (jenis === "penjualan") {
       keluar = qty;
       totalKeluar += qty;

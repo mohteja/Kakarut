@@ -15,6 +15,7 @@ import { backfillUnits } from "./modules/satuan/service";
 import { backfillKategoriBahan } from "./modules/kategori-bahan/service";
 import { arsipkanMembershipNonaktif, backfillEmployeeCode } from "./modules/users/service";
 import { konfirmasiProduksiCkLokalTertahan } from "./modules/produksi/backfill";
+import { backfillNomorDokumen } from "./modules/dokumen/nomor";
 import { getStorage, localUploadDir } from "./modules/upload/storage";
 
 // Migrasi otomatis saat boot: deploy versi baru langsung menerapkan skema
@@ -61,6 +62,9 @@ if (env.AUTO_MIGRATE) {
   const terkonfirmasi = await konfirmasiProduksiCkLokalTertahan(db);
   if (terkonfirmasi > 0)
     console.log(`${terkonfirmasi} baris produksi/beli CK-lokal lama dikonfirmasi (masuk stok).`);
+  // Dokumen lama tanpa nomor (faktur PB/PR & sesi opname SO) → beri nomor urut
+  const bernomor = await backfillNomorDokumen(db);
+  if (bernomor > 0) console.log(`Nomor dokumen diisi untuk ${bernomor} dokumen lama.`);
 }
 
 const app = createApp();

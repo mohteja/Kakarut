@@ -32,6 +32,8 @@ interface PenerimaanRow {
   prod_date: string;
   faktur_id: string | null;
   no_faktur: string | null;
+  /** nomor faktur asal (PB-/PR-) — "dari faktur nomor berapa" */
+  nomor?: string | null;
   status: KonfirmasiStatus;
   supplier: string | null;
   tempat: string | null;
@@ -49,6 +51,8 @@ interface KirimanGroup {
   waktu: string;
   supplier: string | null;
   noFaktur: string | null;
+  /** nomor faktur asal (PB-/PR-) */
+  nomor: string | null;
   catatan: string | null;
   status: KonfirmasiStatus;
   alasanTolak: string | null;
@@ -93,6 +97,7 @@ export function PenerimaanPage() {
           waktu: r.waktu,
           supplier: r.supplier,
           noFaktur: r.no_faktur,
+          nomor: r.nomor ?? null,
           catatan: r.catatan,
           status: r.status,
           alasanTolak: r.alasan_tolak,
@@ -188,6 +193,12 @@ export function PenerimaanPage() {
                     <span className="font-semibold text-stone-700">
                       {formatTanggalRingkas(g.waktu)} {formatWaktu(g.waktu)}
                     </span>
+                    {/* nomor faktur asal — "penerimaan dari faktur nomor berapa" */}
+                    {g.nomor && (
+                      <span className="rounded-md bg-orange-100 px-1.5 py-0.5 font-mono text-xs font-bold text-orange-800">
+                        {g.nomor}
+                      </span>
+                    )}
                     <span className="text-stone-500">
                       {g.jalur === "produksi"
                         ? "🏭 Dari Central Kitchen"
@@ -339,6 +350,11 @@ export function PenerimaanPage() {
                   <span className="font-semibold text-stone-700">
                     {formatTanggalRingkas(g.waktu)} {formatWaktu(g.waktu)}
                   </span>
+                  {g.nomor && (
+                    <span className="rounded-md bg-orange-100 px-1.5 py-0.5 font-mono text-xs font-bold text-orange-800">
+                      {g.nomor}
+                    </span>
+                  )}
                   <span className="text-stone-500">{g.supplier ?? "Tanpa supplier"}</span>
                   {g.alasanTolak && (
                     <span className="text-xs text-red-600">· {g.alasanTolak}</span>

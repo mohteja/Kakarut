@@ -141,6 +141,12 @@ export function FakturDetailModal({
       {mode === "lihat" && (
         <div className="space-y-3">
           <dl className="grid grid-cols-3 gap-y-1.5 text-sm">
+            {grup.nomor && (
+              <>
+                <dt className="text-stone-400">Nomor</dt>
+                <dd className="col-span-2 font-mono font-bold text-orange-700">{grup.nomor}</dd>
+              </>
+            )}
             <dt className="text-stone-400">Waktu</dt>
             <dd className="col-span-2">{formatWaktu(grup.waktu)}</dd>
             <dt className="text-stone-400">Dibuat oleh</dt>

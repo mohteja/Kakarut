@@ -84,9 +84,16 @@ function DetailSheet({ sessionId, onClose }: { sessionId: string; onClose: () =>
         ) : (
           <>
             <div className="mb-2 flex items-center justify-between gap-2">
-              <div className="text-sm text-stone-500">
-                {formatWaktu(data.waktu)} · {data.oleh ?? "—"}
-                {data.catatan && ` · ${data.catatan}`}
+              <div className="flex flex-wrap items-center gap-2 text-sm text-stone-500">
+                {data.nomor && (
+                  <span className="rounded-md bg-orange-100 px-1.5 py-0.5 font-mono text-xs font-bold text-orange-800">
+                    {data.nomor}
+                  </span>
+                )}
+                <span>
+                  {formatWaktu(data.waktu)} · {data.oleh ?? "—"}
+                  {data.catatan && ` · ${data.catatan}`}
+                </span>
               </div>
               <StatusBadge
                 status={data.status}
@@ -233,7 +240,14 @@ export function OpnameRiwayatPage() {
               className="flex w-full items-center justify-between gap-3 rounded-xl border border-stone-200 bg-white p-4 text-left"
             >
               <div className="min-w-0">
-                <div className="font-semibold text-stone-800">{formatWaktu(s.waktu)}</div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {s.nomor && (
+                    <span className="rounded-md bg-orange-100 px-1.5 py-0.5 font-mono text-xs font-bold text-orange-800">
+                      {s.nomor}
+                    </span>
+                  )}
+                  <span className="font-semibold text-stone-800">{formatWaktu(s.waktu)}</span>
+                </div>
                 <div className="truncate text-sm text-stone-500">
                   {s.oleh ?? "—"} · {s.jumlah_item} bahan
                   {s.catatan ? ` · ${s.catatan}` : ""}

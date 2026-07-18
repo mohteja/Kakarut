@@ -10,6 +10,7 @@ import { db } from "../../db/client";
 import {
   branches,
   companies,
+  dokumenNomor,
   fakturDana,
   fakturLogs,
   ingredientSuppliers,
@@ -27,6 +28,7 @@ import {
   type BarisProduksiSelesai,
 } from "./konsumsi";
 import { AKSI_TAHAP_LOG, catatLogFaktur, rpLog } from "./log";
+import { nomorUntukRefs, terbitkanNomor } from "../dokumen/nomor";
 import {
   pastikanCabang,
   resolveBranchId,
@@ -44,6 +46,7 @@ const logOleh = alias(users, "log_oleh");
 // cabang baris + cabang tujuan (dipakai tampilan lintas-cabang di Kantor)
 const cabangProd = alias(branches, "cabang_prod");
 const tujuanProd = alias(branches, "tujuan_prod");
+const untukProd = alias(branches, "untuk_prod");
 // RAK SIMPAN default (home) bahan — dari ingredients.storage_location_id
 const rakDefault = alias(storageLocations, "rak_default");
 // supplier UTAMA bahan tiap baris (info "beli di mana" saat belanja diproses)
@@ -387,21 +390,22 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         };
       });
 
-      const inserted = await db.transaction(async (tx) => {
+      const { inserted, nomor } = await db.transaction(async (tx) => {
         const hasil = await tx.insert(productions).values(rows).returning();
+        const nomorTeks = await terbitkanNomor(tx, auth.company_id!, tipe, fakturId);
         await catatLogFaktur(tx, {
           companyId: auth.company_id!,
           branchId,
           fakturId,
           jalur: tipe,
           aksi: "Faktur dibuat (RAB)",
-          detail: `${hasil.length} baris`,
+          detail: `${nomorTeks} · ${hasil.length} baris`,
           userId: auth.sub,
         });
-        return hasil;
+        return { inserted: hasil, nomor: nomorTeks };
       });
       return c.json(
-        { faktur_id: fakturId, status: statusAwal, jumlah_baris: inserted.length },
+        { faktur_id: fakturId, nomor, status: statusAwal, jumlah_baris: inserted.length },
         201,
       );
     })
@@ -602,7 +606,15 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         // (>= menunggu). Pindah dini (mis. ke 'dikerjakan') membuat konsumsi
         // bahan resep tercatat di cabang yang salah — abaikan tujuannya.
         const bolehPindah = target >= URUTAN_TAHAP.menunggu;
-        const pindah = bolehPindah && tujuanBranch ? { branchId: tujuanBranch } : {};
+        // dari_branch_id = jejak cabang PENGIRIM (visibilitas: CK tetap melihat
+        // faktur terkirim di daftarnya) — pertahankan asal pertama bila sudah ada
+        const pindah =
+          bolehPindah && tujuanBranch
+            ? {
+                branchId: tujuanBranch,
+                dariBranchId: sql`COALESCE(${productions.dariBranchId}, ${productions.branchId})`,
+              }
+            : {};
 
         // RAK SIMPAN default (home) per bahan: saat barang TIBA/DISIMPAN
         // (>= menunggu) di cabang tujuan, otomatis diletakkan di rak home-nya
@@ -1028,6 +1040,8 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
           .update(productions)
           .set({
             branchId: tujuanId,
+            // jejak cabang pengirim — CK tetap melihat faktur terkirim di daftar
+            dariBranchId: sql`COALESCE(${productions.dariBranchId}, ${productions.branchId})`,
             // tempat penyimpanan CK tidak berlaku di cabang tujuan → set ke
             // pilihan di cabang (bila ada) atau kosongkan (hindari bocor gudang CK)
             storageLocationId: tujuanStorage,
@@ -1055,6 +1069,157 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         });
       });
       return c.json({ ok: true, tujuan: store.nama, jumlah_baris: siap.length });
+    })
+    /**
+     * KIRIM HASIL PRODUKSI ke cabang peminta (jalur produksi): hasil work-order
+     * dari Permintaan sudah masuk STOK CK saat selesai (untuk_branch_id =
+     * cabang peminta). Endpoint ini membuat FAKTUR KIRIMAN baru (transfer stok
+     * CK → cabang, asal_branch_id = CK) yang wajib DITERIMA di Penerimaan
+     * cabang — stok CK berkurang & stok cabang bertambah saat diterima. Baris
+     * sumber ditandai selesai-dikirim (untuk_branch_id dikosongkan).
+     */
+    .post("/kirim-hasil/:fakturId", zValidator("json", KirimBody), async (c) => {
+      if (tipe !== "produksi") {
+        throw new HTTPException(404, { message: "Hanya untuk faktur produksi" });
+      }
+      const auth = c.get("auth");
+      const { tujuan_storage_id } = c.req.valid("json");
+      const fakturId = c.req.param("fakturId");
+      const conds = [
+        eq(productions.companyId, auth.company_id!),
+        eq(productions.fakturId, fakturId),
+        eq(productions.tipe, "produksi" as const),
+        eq(productions.status, "dikonfirmasi" as const),
+        isNull(productions.deletedAt),
+      ];
+      if (terikatCabang(auth.role) && auth.branch_id) {
+        conds.push(eq(productions.branchId, auth.branch_id));
+      }
+      const baris = await db.select().from(productions).where(and(...conds));
+      const siap = baris.filter((b) => b.untukBranchId && b.untukBranchId !== b.branchId);
+      if (siap.length === 0) {
+        throw new HTTPException(400, {
+          message:
+            "Tidak ada hasil produksi yang menunggu dikirim (selesaikan produksi dulu, atau sudah terkirim)",
+        });
+      }
+      const ckId = siap[0].branchId;
+      const tujuanId = siap[0].untukBranchId!;
+      const rows = siap.filter((b) => b.branchId === ckId && b.untukBranchId === tujuanId);
+      const [store] = await db
+        .select({
+          id: branches.id,
+          nama: branches.nama,
+          tipe: branches.tipe,
+          centralKitchenId: branches.centralKitchenId,
+        })
+        .from(branches)
+        .where(and(eq(branches.id, tujuanId), eq(branches.companyId, auth.company_id!)));
+      if (!store || store.tipe === "kantor") {
+        throw new HTTPException(400, { message: "Cabang tujuan tidak valid" });
+      }
+      if (store.tipe === "store" && store.centralKitchenId && store.centralKitchenId !== ckId) {
+        throw new HTTPException(400, {
+          message: `Cabang "${store.nama}" terhubung ke Central Kitchen lain`,
+        });
+      }
+      if (terikatCabang(auth.role) && auth.branch_id !== ckId) {
+        throw new HTTPException(403, {
+          message: "Hanya karyawan Central Kitchen ini yang boleh mengirim",
+        });
+      }
+      let tujuanStorage: string | null = null;
+      if (tujuan_storage_id) {
+        const [lok] = await db
+          .select({ id: storageLocations.id })
+          .from(storageLocations)
+          .where(
+            and(
+              eq(storageLocations.id, tujuan_storage_id),
+              eq(storageLocations.companyId, auth.company_id!),
+              eq(storageLocations.branchId, tujuanId),
+            ),
+          );
+        if (!lok) {
+          throw new HTTPException(400, {
+            message: "Tempat penyimpanan tidak valid untuk cabang tujuan",
+          });
+        }
+        tujuanStorage = tujuan_storage_id;
+      }
+      const [company] = await db
+        .select({ timezone: companies.timezone })
+        .from(companies)
+        .where(eq(companies.id, auth.company_id!));
+      const prodDate = tanggalDi(company?.timezone ?? "Asia/Jakarta");
+
+      const kirimFakturId = randomUUID();
+      const hasil = await db.transaction(async (tx) => {
+        const asalNomor = (await nomorUntukRefs(tx, auth.company_id!, [fakturId])).get(fakturId);
+        // Faktur KIRIMAN (transfer stok CK): lahir langsung 'menunggu' di cabang
+        // tujuan — muncul di Penerimaan; saat diterima stok CK asal berkurang.
+        await tx.insert(productions).values(
+          rows.map((b) => ({
+            companyId: auth.company_id!,
+            branchId: tujuanId,
+            asalBranchId: ckId,
+            dariBranchId: ckId,
+            tujuanBranchId: tujuanId,
+            ingredientId: b.ingredientId,
+            qty: b.qty,
+            tipe: "produksi" as const,
+            totalHarga: 0, // pemindahan stok yang sudah ada — tanpa biaya baru
+            fakturId: kirimFakturId,
+            rencanaId: b.rencanaId,
+            noFaktur: null,
+            supplierId: null,
+            storageLocationId: tujuanStorage,
+            status: "menunggu" as const,
+            isBatch: false,
+            catatan: asalNomor ? `Kiriman hasil produksi ${asalNomor}` : "Kiriman hasil produksi",
+            userId: auth.sub,
+            workerId: null,
+            prodDate,
+          })),
+        );
+        const nomorBaru = await terbitkanNomor(tx, auth.company_id!, "produksi", kirimFakturId);
+        // sumber ditandai selesai-dikirim → pengingat & tombol Kirim hilang
+        await tx
+          .update(productions)
+          .set({ untukBranchId: null, updatedBy: auth.sub, updatedAt: new Date() })
+          .where(
+            inArray(
+              productions.id,
+              rows.map((b) => b.id),
+            ),
+          );
+        await catatLogFaktur(tx, {
+          companyId: auth.company_id!,
+          branchId: ckId,
+          fakturId,
+          jalur: "produksi",
+          aksi: `Hasil dikirim ke ${store.nama}`,
+          detail: `${nomorBaru} · ${rows.length} baris`,
+          userId: auth.sub,
+        });
+        await catatLogFaktur(tx, {
+          companyId: auth.company_id!,
+          branchId: ckId,
+          fakturId: kirimFakturId,
+          jalur: "produksi",
+          aksi: "Kiriman hasil produksi dibuat",
+          detail: `${asalNomor ? `dari ${asalNomor} · ` : ""}tujuan ${store.nama} · ${rows.length} baris`,
+          userId: auth.sub,
+        });
+        return { nomor: nomorBaru };
+      });
+      return c.json({
+        ok: true,
+        faktur_id: kirimFakturId,
+        nomor: hasil.nomor,
+        tujuan: store.nama,
+        jumlah_baris: rows.length,
+      });
     })
     /** Buku dana satu faktur: entri pencairan/tambahan/kembali + total efektif. */
     .get("/dana/:fakturId", async (c) => {
@@ -1250,9 +1415,21 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
       const page = Math.max(1, Number(c.req.query("page") ?? "1") || 1);
       const perPage = Math.min(200, Math.max(1, Number(c.req.query("per_page") ?? "20") || 20));
 
+      // Cabang PENGIRIM tetap melihat faktur yang sudah terkirim: baris yang
+      // pindah ke cabang tujuan menyimpan jejak dari/asal — tanpa ini tim CK
+      // kehilangan faktur begitu semua barisnya dikirim.
+      const condCabang = branchId
+        ? [
+            or(
+              eq(productions.branchId, branchId),
+              eq(productions.dariBranchId, branchId),
+              eq(productions.asalBranchId, branchId),
+            )!,
+          ]
+        : [];
       const conds = [
         eq(productions.companyId, auth.company_id!),
-        ...(branchId ? [eq(productions.branchId, branchId)] : []),
+        ...condCabang,
         eq(productions.tipe, tipe),
         isNull(productions.deletedAt),
       ];
@@ -1301,6 +1478,8 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         prod_date: productions.prodDate,
         faktur_id: productions.fakturId,
         no_faktur: productions.noFaktur,
+        // nomor dokumen otomatis (PB-/PR-) — sama untuk semua baris satu faktur
+        nomor: dokumenNomor.nomorTeks,
         status: productions.status,
         supplier: suppliers.nama,
         tempat: storageLocations.nama,
@@ -1321,6 +1500,11 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         cabang: cabangProd.nama,
         tujuan_branch_id: productions.tujuanBranchId,
         tujuan_cabang: tujuanProd.nama,
+        // asal permintaan (badge "Permintaan" vs "Langsung")
+        rencana_id: productions.rencanaId,
+        // "diproduksi UNTUK cabang" — pengingat kirim hasil setelah selesai
+        untuk_branch_id: productions.untukBranchId,
+        untuk_cabang: untukProd.nama,
         // supplier UTAMA bahan baris ini (info "beli di mana" saat diproses)
         supplier_bahan: supBahan.nama,
         supplier_bahan_alamat: supBahan.alamat,
@@ -1343,6 +1527,14 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
               .leftJoin(pekerja, eq(productions.workerId, pekerja.id))
               .leftJoin(cabangProd, eq(productions.branchId, cabangProd.id))
               .leftJoin(tujuanProd, eq(productions.tujuanBranchId, tujuanProd.id))
+              .leftJoin(untukProd, eq(productions.untukBranchId, untukProd.id))
+              .leftJoin(
+                dokumenNomor,
+                and(
+                  eq(dokumenNomor.companyId, productions.companyId),
+                  eq(dokumenNomor.refId, productions.fakturId),
+                ),
+              )
               // maks SATU baris utama per bahan (partial unique index) → join 1:≤1
               .leftJoin(
                 isupUtama,
@@ -1355,7 +1547,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
               .where(
                 and(
                   eq(productions.companyId, auth.company_id!),
-                  ...(branchId ? [eq(productions.branchId, branchId)] : []),
+                  ...condCabang,
                   eq(productions.tipe, tipe),
                   isNull(productions.deletedAt),
                   inArray(keyExpr, keys),

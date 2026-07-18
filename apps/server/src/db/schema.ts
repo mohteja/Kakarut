@@ -784,6 +784,20 @@ export const productions = pgTable(
      * hitungSaldoCabang). null = produksi/beli biasa.
      */
     asalBranchId: uuid("asal_branch_id").references(() => branches.id),
+    /**
+     * "Diproduksi UNTUK cabang" (permintaan tambah stok): hasil produksi masuk
+     * stok CK dulu saat selesai, lalu PERLU DIKIRIM ke cabang ini — pengingat
+     * + target tombol "Kirim hasil". Dikosongkan begitu hasil dikirim.
+     * Murni metadata tampilan/link — TIDAK dipakai perhitungan saldo.
+     */
+    untukBranchId: uuid("untuk_branch_id").references(() => branches.id),
+    /**
+     * Cabang ASAL PENGIRIM: diisi saat baris pindah cabang (dikirim) supaya
+     * cabang pengirim (CK) tetap melihat faktur yang sudah terkirim penuh di
+     * daftarnya. Murni metadata tampilan/visibilitas — TIDAK dipakai saldo
+     * (beda dgn asal_branch_id yang mengurangi stok CK saat transfer diterima).
+     */
+    dariBranchId: uuid("dari_branch_id").references(() => branches.id),
     ingredientId: uuid("ingredient_id")
       .notNull()
       .references(() => ingredients.id),
@@ -983,4 +997,50 @@ export const stockOpnames = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("stock_opnames_branch_ing_idx").on(t.branchId, t.ingredientId, t.createdAt)],
+);
+
+/** jenis dokumen bernomor: faktur pembelian, faktur produksi, sesi stock opname */
+export const dokumenJenisEnum = pgEnum("dokumen_jenis", ["beli", "produksi", "opname"]);
+
+/**
+ * Penghitung nomor dokumen per perusahaan per jenis (PB/PR/SO). Increment
+ * atomik via upsert — aman dipanggil bersamaan dari beberapa request.
+ */
+export const dokumenCounters = pgTable(
+  "dokumen_counters",
+  {
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    jenis: dokumenJenisEnum("jenis").notNull(),
+    lastNomor: integer("last_nomor").notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.companyId, t.jenis] })],
+);
+
+/**
+ * Nomor dokumen manusiawi (PB-0001 / PR-0001 / SO-0001) untuk faktur
+ * pembelian/produksi (ref = productions.faktur_id) dan sesi stock opname
+ * (ref = stock_opnames.session_id). Diterbitkan saat dokumen dibuat;
+ * dokumen lama diisi lewat backfill boot. Nomor tidak pernah dipakai ulang
+ * meski dokumennya dihapus (jejak audit).
+ */
+export const dokumenNomor = pgTable(
+  "dokumen_nomor",
+  {
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    /** productions.faktur_id atau stock_opnames.session_id (tanpa FK — virtual) */
+    refId: uuid("ref_id").notNull(),
+    jenis: dokumenJenisEnum("jenis").notNull(),
+    nomor: integer("nomor").notNull(),
+    /** bentuk tampil, mis. "PB-0012" */
+    nomorTeks: text("nomor_teks").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.companyId, t.refId] }),
+    uniqueIndex("dokumen_nomor_urut_idx").on(t.companyId, t.jenis, t.nomor),
+  ],
 );
