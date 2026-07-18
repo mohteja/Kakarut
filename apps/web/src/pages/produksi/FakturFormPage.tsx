@@ -500,15 +500,15 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
       <div className="rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-800">
         {tipe === "produksi" ? (
           <>
-            Faktur tersimpan sebagai <b>📋 Rencana (RAB)</b>, lalu maju bertahap:{" "}
-            <b>🔨 Mulai Kerjakan</b> → <b>✅ Tandai Selesai</b> → <b>📦 Konfirmasi Ada</b>. Stok
-            baru bertambah setelah dikonfirmasi.
+            Faktur tersimpan sebagai <b>📋 Belum dikerjakan</b>, lalu maju bertahap:{" "}
+            <b>🔨 Mulai Kerjakan</b> → <b>✅ Selesai</b>. Selesai = <b>langsung masuk stok CK</b>{" "}
+            (tanpa konfirmasi). Untuk cabang: kirim dulu, lalu diterima di cabang.
           </>
         ) : (
           <>
             Faktur tersimpan sebagai <b>📋 RAB (rencana beli)</b>, lalu maju bertahap:{" "}
-            <b>🔄 Proses</b> → <b>🚚 Kirim ke Toko</b> → <b>penerimaan di toko</b> (terima semua /
-            sebagian / tolak). Stok baru bertambah setelah barang diterima.
+            <b>🔄 Proses</b> → <b>📦 Tiba di CK</b>. Tiba di CK = <b>langsung masuk stok CK</b>{" "}
+            (tanpa penerimaan). Barang untuk cabang: <b>kirim</b> → <b>diterima di cabang</b>.
           </>
         )}
       </div>

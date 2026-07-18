@@ -628,10 +628,20 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         };
 
         const now = new Date();
-        // waktu di-set saat dikonfirmasi (bukan saat RAB) — lihat /konfirmasi.
-        const naik =
-          ke === "dikonfirmasi"
-            ? ({ status: ke, confirmedBy: auth.sub, confirmedAt: now, waktu: now } as const)
+        // Baris yang TIBA/SELESAI di cabang sendiri (tujuan kosong & tak dikirim
+        // ke cabang lain) LANGSUNG dikonfirmasi begitu mencapai "menunggu" → stok
+        // masuk di CK tanpa perlu penerimaan/konfirmasi terpisah (orang CK yang
+        // beli & produksi, jadi tak perlu konfirmasi lagi). Baris bertujuan cabang
+        // tetap "menunggu" → dikirim lalu diterima lewat Penerimaan cabang.
+        // "waktu" di-set saat konfirmasi (bukan saat RAB) agar stok masuk relatif
+        // ke opname terakhir.
+        const langsungMasuk = (b: (typeof baris)[number]) =>
+          ke === "menunggu" &&
+          b.tujuanBranchId == null &&
+          (tujuanBranch == null || tujuanBranch === b.branchId);
+        const naikBaris = (b: (typeof baris)[number]) =>
+          ke === "dikonfirmasi" || langsungMasuk(b)
+            ? ({ status: "dikonfirmasi", confirmedBy: auth.sub, confirmedAt: now, waktu: now } as const)
             : ({ status: ke, updatedBy: auth.sub, updatedAt: now } as const);
 
         await db.transaction(async (tx) => {
@@ -674,7 +684,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
               const res = await tx
                 .update(productions)
                 .set({
-                  ...naik,
+                  ...naikBaris(b),
                   ...pindah,
                   // rak simpan otomatis (home rak per bahan) saat barang tiba/disimpan
                   ...(bolehPindah ? { storageLocationId: rakBaris(b) } : {}),
@@ -753,7 +763,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
                 tujuanBranchId: b.tujuanBranchId,
                 workerId: b.workerId ?? (selfAssign ? auth.sub : null),
                 prodDate: b.prodDate,
-                ...naik,
+                ...naikBaris(b),
               })
                 .returning({ id: productions.id });
               if (selesaiTahapIni(b)) {
@@ -852,10 +862,30 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
             branchId: productions.branchId,
             ingredientId: productions.ingredientId,
             qty: productions.qty,
+            tujuanBranchId: productions.tujuanBranchId,
           });
         // dikerjakan → menunggu = produksi SELESAI → konsumsi bahan mentah resep
         if (tipe === "produksi" && ke === "menunggu") {
           await catatKonsumsiProduksi(tx, auth.company_id!, diperbarui);
+        }
+        // CK-lokal (tujuan kosong) yang baru "menunggu" → LANGSUNG dikonfirmasi
+        // (stok masuk di CK), tanpa penerimaan/konfirmasi terpisah. Baris
+        // bertujuan cabang tetap "menunggu" → dikirim lalu diterima di cabang.
+        if (ke === "menunggu") {
+          const lokal = diperbarui.filter((r) => r.tujuanBranchId == null).map((r) => r.id);
+          if (lokal.length > 0) {
+            const kini = new Date();
+            await tx
+              .update(productions)
+              .set({ status: "dikonfirmasi", confirmedBy: auth.sub, confirmedAt: kini, waktu: kini })
+              .where(
+                and(
+                  inArray(productions.id, lokal),
+                  eq(productions.status, "menunggu"),
+                  isNull(productions.deletedAt),
+                ),
+              );
+          }
         }
         return diperbarui;
       });

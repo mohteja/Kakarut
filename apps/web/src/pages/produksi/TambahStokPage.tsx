@@ -163,8 +163,8 @@ export function belumSelesai(status: StatusFaktur) {
 export const STATUS_PRODUKSI: Record<KonfirmasiStatus, { label: string; cls: string }> = {
   rencana: { label: "📋 Belum dikerjakan", cls: "bg-stone-200 text-stone-700" },
   dikerjakan: { label: "🔨 Sedang dikerjakan", cls: "bg-blue-100 text-blue-800" },
-  menunggu: { label: "✅ Selesai — menunggu konfirmasi", cls: "bg-yellow-100 text-yellow-800" },
-  dikonfirmasi: { label: "📦 Dikonfirmasi ✓", cls: "bg-green-100 text-green-800" },
+  menunggu: { label: "✅ Selesai — masuk stok CK", cls: "bg-yellow-100 text-yellow-800" },
+  dikonfirmasi: { label: "📦 Masuk stok CK ✓", cls: "bg-green-100 text-green-800" },
   ditolak: { label: "❌ Ditolak", cls: "bg-red-100 text-red-700" },
 };
 
@@ -196,17 +196,20 @@ export function labelTahapRingkas(tipe: JenisPengadaan, s: KonfirmasiStatus) {
 
 export type TahapTujuan = "dikerjakan" | "menunggu" | "dikonfirmasi";
 
-/** Pilihan tujuan tahap pada dropdown "Ubah tahap…", per jalur. */
+/**
+ * Pilihan tujuan tahap pada dropdown "Ubah tahap…", per jalur. Barang yang
+ * tiba/selesai di CK LANGSUNG masuk stok (tak ada langkah "konfirmasi" — orang
+ * CK sendiri yang beli & produksi). Barang bertujuan cabang tetap "menunggu" →
+ * dikirim lewat tombol Kirim, lalu DITERIMA di Penerimaan cabang.
+ */
 export const AKSI_TAHAP: Record<JenisPengadaan, Array<{ ke: TahapTujuan; label: string }>> = {
   produksi: [
     { ke: "dikerjakan", label: "🔨 Mulai dikerjakan" },
-    { ke: "menunggu", label: "✅ Selesai — menunggu konfirmasi" },
-    { ke: "dikonfirmasi", label: "📦 Konfirmasi Ada (masuk stok)" },
+    { ke: "menunggu", label: "✅ Selesai — masuk stok CK" },
   ],
   beli: [
     { ke: "dikerjakan", label: "🔄 Diproses" },
-    { ke: "menunggu", label: "🚚 Dikirim ke toko" },
-    { ke: "dikonfirmasi", label: "📦 Diterima (masuk stok)" },
+    { ke: "menunggu", label: "📦 Tiba di CK (masuk stok)" },
   ],
 };
 
@@ -410,10 +413,19 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
       </PageTitle>
 
       <div className="mb-4 rounded-lg bg-blue-50 px-4 py-2 text-sm text-blue-800">
-        Stok bertambah <b>setelah faktur dikonfirmasi</b> ("Konfirmasi Ada" = barang
-        benar-benar diterima & tersimpan) — memudahkan stock opname. Ubah tahap lewat
-        tombol <b>➡ Ubah Tahap</b> pada tiap kartu; bisa sebagian dulu bila barang
-        belum lengkap. Ketuk kartu untuk melihat rincian semua bahan.
+        {tipe === "produksi" ? (
+          <>
+            Hasil produksi <b>langsung masuk stok CK</b> saat ditandai <b>✅ Selesai</b> — tak ada
+            konfirmasi lagi (orang CK yang produksi).
+          </>
+        ) : (
+          <>
+            Belanja <b>langsung masuk stok CK</b> saat ditandai <b>📦 Tiba di CK</b> — tak perlu
+            penerimaan (orang CK yang beli).
+          </>
+        )}{" "}
+        Barang untuk cabang <b>dikirim dulu</b>, lalu <b>wajib diterima di cabang</b>. Ubah tahap
+        lewat tombol <b>➡ Ubah Tahap</b> tiap kartu; bisa sebagian dulu bila barang belum lengkap.
       </div>
 
       <ErrorText error={kirim.error} />
@@ -690,7 +702,7 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
           })}
           {adaBelumKonfirmasi && (
             <div className="text-xs text-stone-400">
-              Faktur yang belum dikonfirmasi belum menambah saldo stok.
+              Faktur yang belum selesai belum menambah saldo stok.
             </div>
           )}
         </div>

@@ -380,8 +380,9 @@ function TahapForm({
                  Beli Bahan Baku). User cukup PILIH tempat simpan di CK. */
               <>
                 <div className="rounded bg-purple-50 px-2 py-1.5 text-xs text-purple-800">
-                  Belum dikirim — hasil produksi <b>disimpan dulu di CK</b> (bisa jadi stok CK).
-                  Kirim ke cabang lewat <b>🚚 Kirim ke cabang</b> / Permintaan Stok setelah ini.
+                  Hasil produksi <b>langsung masuk stok CK</b> — tanpa konfirmasi lagi (orang CK
+                  yang produksi). Kirim ke cabang lewat <b>🚚 Kirim ke cabang</b> / Permintaan Stok
+                  setelah ini; di cabang barang <b>wajib diterima</b>.
                 </div>
                 <div>
                   <label className="mb-1 block text-xs font-medium text-stone-500">
