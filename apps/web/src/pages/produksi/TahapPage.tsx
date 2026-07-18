@@ -13,7 +13,7 @@ import {
   thClass,
 } from "../../components/ui";
 import { labelCabang, useBranch, useCabangData } from "../../context/BranchContext";
-import { api } from "../../lib/api";
+import { ApiError, api } from "../../lib/api";
 import { formatAngka, formatRupiah } from "../../lib/format";
 import { useCompanyMode } from "../../lib/useCompanyMode";
 import {
@@ -158,12 +158,13 @@ function TahapForm({
     tanyaDana && danaManual && (!Number.isFinite(danaCair) || danaCair! < 0);
 
   const simpan = useMutation({
-    mutationFn: () =>
+    mutationFn: (opts?: { paksa?: boolean }) =>
       api(`${endpoint}/tahap/${grup.fakturId}`, {
         method: "POST",
         body: {
           ke,
           items,
+          ...(opts?.paksa ? { paksa: true } : {}),
           ...(danaCair != null ? { dana_cair: danaCair } : {}),
           // Produksi selesai TIDAK dikirim ke cabang — hasil disimpan dulu di CK
           // (tujuan_branch_id tak dikirim); cukup pilih tempat simpan (opsional).
@@ -182,6 +183,12 @@ function TahapForm({
       navigate(`${kembali}${dok}`);
     },
   });
+
+  // Bahan baku kurang = PERINGATAN (server 409), boleh tetap proses.
+  const bahanKurang =
+    simpan.error instanceof ApiError && simpan.error.status === 409
+      ? simpan.error.message
+      : null;
 
   function ubah(r: { id: string }, patch: Partial<PilihanBaris>) {
     setPilih((prev) => ({ ...prev, [r.id]: { ...prev[r.id], ...patch } }));
@@ -569,7 +576,16 @@ function TahapForm({
           )}
         </div>
 
-        <ErrorText error={simpan.error} />
+        {bahanKurang ? (
+          <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            <b>⚠️ {bahanKurang}</b>
+            <div className="mt-1 text-xs text-amber-700">
+              Anda tetap bisa memproses — pastikan bahan baku menyusul / dikoreksi.
+            </div>
+          </div>
+        ) : (
+          <ErrorText error={simpan.error} />
+        )}
       </Card>
 
       {/* Aksi menempel di bawah agar mudah dijangkau di HP */}
@@ -578,11 +594,15 @@ function TahapForm({
           Batal
         </button>
         <button
-          onClick={() => simpan.mutate()}
+          onClick={() => simpan.mutate({ paksa: !!bahanKurang })}
           disabled={simpan.isPending || items.length === 0 || adaInvalid || danaInvalid}
-          className={btnPrimary}
+          className={bahanKurang ? btnPrimary + " !bg-amber-600 hover:!bg-amber-700" : btnPrimary}
         >
-          {simpan.isPending ? "Menyimpan…" : `Terapkan (${items.length} baris)`}
+          {simpan.isPending
+            ? "Menyimpan…"
+            : bahanKurang
+              ? "Tetap Proses"
+              : `Terapkan (${items.length} baris)`}
         </button>
       </div>
     </div>

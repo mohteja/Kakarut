@@ -2236,19 +2236,25 @@ api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CK52_UTAMA\",\"items\":[{\"ingre
 # work-order: 100 butir baso guard66 (1 batch → butuh garam 500 gr)
 GFK66=$(api "$OWNER" POST /produksi/faktur "{\"branch_id\":\"$CK52_UTAMA\",\"worker_id\":\"$U58_ID\",\"items\":[{\"ingredient_id\":\"$GJADI66\",\"mode\":\"batch\",\"jumlah\":1}]}" | jq -r .faktur_id)
 GFK66_RID=$(api "$OWNER" GET "/produksi?branch_id=$CK52_UTAMA&per_page=500" | jq -r --arg f "$GFK66" '[.rows[] | select(.faktur_id==$f)][0].id')
-cek "mulai dikerjakan tanpa bahan baku ditolak (400)" "V == 400" \
+# Bahan baku kurang = PERINGATAN (409), BUKAN blokir keras — user boleh tetap
+# proses dengan paksa=true.
+cek "mulai dikerjakan tanpa bahan baku → PERINGATAN (409)" "V == 409" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/produksi/tahap/$GFK66" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"ke":"dikerjakan"}')"
-cek "mulai dikerjakan SEBAGIAN tanpa bahan baku ditolak (400)" "V == 400" \
+cek "mulai dikerjakan SEBAGIAN tanpa bahan baku → PERINGATAN (409)" "V == 409" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/produksi/tahap/$GFK66" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"ke\":\"dikerjakan\",\"items\":[{\"id\":\"$GFK66_RID\",\"qty\":100}]}")"
-cek "baris tetap rencana (produksi tak dimulai)" "V == 1" \
+cek "peringatan: baris tetap rencana (belum diproses)" "V == 1" \
   "$(api "$OWNER" GET "/produksi?branch_id=$CK52_UTAMA&per_page=500" | jq --arg f "$GFK66" '([.rows[] | select(.faktur_id==$f)] | all(.[]; .status=="rencana")) | if . then 1 else 0 end')"
-# bahan di-stok cukup → mulai dikerjakan berhasil
+# paksa=true → tetap proses meski bahan kurang (stok garam masih 0)
+cek "paksa=true: tetap mulai dikerjakan meski bahan kurang" "V == 1" \
+  "$(api "$OWNER" POST "/produksi/tahap/$GFK66" '{"ke":"dikerjakan","paksa":true}' | jq '(.status=="dikerjakan") | if . then 1 else 0 end')"
+# faktur baru: bahan di-stok cukup → mulai dikerjakan berhasil tanpa paksa
+GFK66C=$(api "$OWNER" POST /produksi/faktur "{\"branch_id\":\"$CK52_UTAMA\",\"worker_id\":\"$U58_ID\",\"items\":[{\"ingredient_id\":\"$GJADI66\",\"mode\":\"batch\",\"jumlah\":1}]}" | jq -r .faktur_id)
 api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CK52_UTAMA\",\"items\":[{\"ingredient_id\":\"$GBHN66\",\"qty\":600}]}" > /dev/null
-cek "setelah bahan di-stok: mulai dikerjakan berhasil" "V == 1" \
-  "$(api "$OWNER" POST "/produksi/tahap/$GFK66" '{"ke":"dikerjakan"}' | jq '(.status=="dikerjakan") | if . then 1 else 0 end')"
-# qty penuh butuh lebih dari stok (2 batch → garam 1000 > 600) → tolak
+cek "setelah bahan di-stok: mulai dikerjakan berhasil (tanpa paksa)" "V == 1" \
+  "$(api "$OWNER" POST "/produksi/tahap/$GFK66C" '{"ke":"dikerjakan"}' | jq '(.status=="dikerjakan") | if . then 1 else 0 end')"
+# qty penuh butuh lebih dari stok (2 batch → garam 1000 > 600) → peringatan 409
 GFK66B=$(api "$OWNER" POST /produksi/faktur "{\"branch_id\":\"$CK52_UTAMA\",\"worker_id\":\"$U58_ID\",\"items\":[{\"ingredient_id\":\"$GJADI66\",\"mode\":\"batch\",\"jumlah\":2}]}" | jq -r .faktur_id)
-cek "bahan kurang utk qty penuh → mulai dikerjakan ditolak (400)" "V == 400" \
+cek "bahan kurang utk qty penuh → PERINGATAN (409)" "V == 409" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/produksi/tahap/$GFK66B" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"ke":"dikerjakan"}')"
 
 echo "== 67. Master Satuan + Tambah Bahan Baku (bulk) + kode produk =="

@@ -17,7 +17,7 @@ import {
 import { useAuth } from "../../context/AuthContext";
 import { useCabangData } from "../../context/BranchContext";
 import { CabangDataBar } from "../../components/CabangDataBar";
-import { api } from "../../lib/api";
+import { ApiError, api } from "../../lib/api";
 import { formatAngka, formatRupiah, formatTanggalRingkas, formatWaktu } from "../../lib/format";
 
 interface StokMasukPage {
@@ -289,7 +289,7 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
   // uang cair) → cukup konfirmasi modal, tak perlu halaman penuh.
   const [konfirmProses, setKonfirmProses] = useState<FakturGroup | null>(null);
   const mulaiProduksi = useMutation({
-    mutationFn: (g: FakturGroup) =>
+    mutationFn: ({ g, paksa }: { g: FakturGroup; paksa?: boolean }) =>
       api(`${t.endpoint}/tahap/${g.fakturId}`, {
         method: "POST",
         body: {
@@ -297,6 +297,7 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
           items: g.rows
             .filter((r) => r.status === "rencana")
             .map((r) => ({ id: r.id, qty: r.qty })),
+          paksa,
         },
       }),
     onSuccess: () => {
@@ -306,6 +307,12 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
       setKonfirmProses(null);
     },
   });
+  // Bahan baku kurang = PERINGATAN (server balas 409), bukan error keras: boleh
+  // tetap proses. Pesan detail bahan kurang ada di message-nya.
+  const bahanKurang =
+    mulaiProduksi.error instanceof ApiError && mulaiProduksi.error.status === 409
+      ? mulaiProduksi.error.message
+      : null;
   const bukaUbahTahap = (g: FakturGroup, ke: TahapTujuan) => {
     if (tipe === "produksi" && ke === "dikerjakan") {
       setKonfirmProses(g);
@@ -820,17 +827,32 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                 <b>{formatRupiah(konfirmProses.totalHarga)}</b>
               </div>
             </div>
-            <ErrorText error={mulaiProduksi.error} />
+            {/* Bahan baku kurang = PERINGATAN (kuning), boleh tetap proses.
+                Error lain tetap tampil merah lewat ErrorText. */}
+            {bahanKurang ? (
+              <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                <b>⚠️ {bahanKurang}</b>
+                <div className="mt-1 text-xs text-amber-700">
+                  Anda tetap bisa memproses — pastikan bahan baku menyusul / dikoreksi.
+                </div>
+              </div>
+            ) : (
+              <ErrorText error={mulaiProduksi.error} />
+            )}
             <div className="flex justify-end gap-2">
               <button onClick={() => setKonfirmProses(null)} className={btnSecondary}>
                 Batal
               </button>
               <button
-                onClick={() => mulaiProduksi.mutate(konfirmProses)}
+                onClick={() => mulaiProduksi.mutate({ g: konfirmProses, paksa: !!bahanKurang })}
                 disabled={mulaiProduksi.isPending}
-                className={btnPrimary}
+                className={bahanKurang ? btnPrimary + " !bg-amber-600 hover:!bg-amber-700" : btnPrimary}
               >
-                {mulaiProduksi.isPending ? "Menyimpan…" : "Ya, Diproses"}
+                {mulaiProduksi.isPending
+                  ? "Menyimpan…"
+                  : bahanKurang
+                    ? "Tetap Proses"
+                    : "Ya, Diproses"}
               </button>
             </div>
           </div>

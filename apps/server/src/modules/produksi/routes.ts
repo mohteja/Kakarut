@@ -108,6 +108,12 @@ const TahapBody = z.object({
    */
   tujuan_branch_id: z.string().uuid().nullish(),
   tujuan_storage_id: z.string().uuid().nullish(),
+  /**
+   * Tetap mulai produksi meski bahan baku (resep) belum cukup — pengaman jadi
+   * PERINGATAN, bukan blokir. User (owner/admin/tim) mengonfirmasi "tetap
+   * proses" di UI setelah melihat daftar bahan yang kurang.
+   */
+  paksa: z.boolean().optional(),
 });
 
 /** Total dana efektif satu faktur: cair + tambahan − kembali. */
@@ -412,7 +418,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
      */
     .post("/tahap/:fakturId", zValidator("json", TahapBody), async (c) => {
       const auth = c.get("auth");
-      const { ke, items, dana_cair, realisasi, selisih_catatan, tujuan_branch_id, tujuan_storage_id } =
+      const { ke, items, dana_cair, realisasi, selisih_catatan, tujuan_branch_id, tujuan_storage_id, paksa } =
         c.req.valid("json");
 
       const conds = [
@@ -512,8 +518,11 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
               qty,
             }));
           const kurang = await bahanKurangUntukProduksi(auth.company_id!, cekRows);
-          if (kurang.length > 0) {
-            throw new HTTPException(400, { message: pesanBahanKurang(kurang) });
+          // Peringatan (bukan blokir): bila bahan kurang & user belum menekan
+          // "tetap proses" (paksa), balikan 409 dgn daftar bahan kurang — UI
+          // menampilkannya lalu memberi opsi lanjut. paksa=true → lewati.
+          if (kurang.length > 0 && !paksa) {
+            throw new HTTPException(409, { message: pesanBahanKurang(kurang) });
           }
         }
 
@@ -828,8 +837,9 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
           .from(productions)
           .where(and(...conds, eq(productions.status, dari)));
         const kurang = await bahanKurangUntukProduksi(auth.company_id!, barisRencana);
-        if (kurang.length > 0) {
-          throw new HTTPException(400, { message: pesanBahanKurang(kurang) });
+        // Peringatan (bukan blokir) — lihat jalur items di atas. paksa=true lewati.
+        if (kurang.length > 0 && !paksa) {
+          throw new HTTPException(409, { message: pesanBahanKurang(kurang) });
         }
       }
 
