@@ -5,7 +5,7 @@ import { and, desc, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm"
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import type { OpnameRingkasan } from "@kakarut/shared";
+import type { OpnameRingkasan, OpnameSesiStatus } from "@kakarut/shared";
 import { db } from "../../db/client";
 import {
   companies,
@@ -42,6 +42,22 @@ const StokAwalBody = OpnameBody.extend({
     .regex(/^\d{4}-\d{2}-\d{2}$/, "Format tanggal harus YYYY-MM-DD")
     .optional(),
 });
+
+/**
+ * Status ACC sesi opname dari agregat baris: sesi menunggu ACC bila ada baris
+ * berselisih yang masih 'menunggu'; disetujui bila selisih sudah diterapkan;
+ * ditolak bila selisih dibuang; cocok bila tak ada selisih sama sekali.
+ */
+function statusSesi(r: {
+  n_menunggu: number;
+  n_disetujui: number;
+  n_ditolak: number;
+}): OpnameSesiStatus {
+  if (r.n_menunggu > 0) return "menunggu";
+  if (r.n_disetujui > 0) return "disetujui";
+  if (r.n_ditolak > 0) return "ditolak";
+  return "cocok";
+}
 
 export const stokRoutes = new Hono<AppEnv>()
   .get("/", async (c) => {
@@ -547,6 +563,10 @@ export const stokRoutes = new Hono<AppEnv>()
         catatan: sql<string>`max(${stockOpnames.catatan})`,
         jumlah_item: sql<number>`count(*)::int`,
         jumlah_selisih: sql<number>`count(*) FILTER (WHERE abs(coalesce(${stockOpnames.selisih}, 0)) > 1e-9)::int`,
+        // agregat status ACC per sesi (hanya baris berselisih yang butuh ACC)
+        n_menunggu: sql<number>`count(*) FILTER (WHERE ${stockOpnames.penyesuaianStatus} = 'menunggu' AND abs(coalesce(${stockOpnames.selisih}, 0)) > 1e-9)::int`,
+        n_disetujui: sql<number>`count(*) FILTER (WHERE ${stockOpnames.penyesuaianStatus} = 'disetujui' AND abs(coalesce(${stockOpnames.selisih}, 0)) > 1e-9)::int`,
+        n_ditolak: sql<number>`count(*) FILTER (WHERE ${stockOpnames.penyesuaianStatus} = 'ditolak')::int`,
       })
       .from(stockOpnames)
       .where(
@@ -579,6 +599,7 @@ export const stokRoutes = new Hono<AppEnv>()
         jumlah_item: r.jumlah_item,
         jumlah_selisih: r.jumlah_selisih,
         catatan: r.catatan,
+        status: statusSesi(r),
       })),
     );
   })
@@ -595,6 +616,8 @@ export const stokRoutes = new Hono<AppEnv>()
         waktu: stockOpnames.createdAt,
         catatan: stockOpnames.catatan,
         user_id: stockOpnames.userId,
+        penyesuaian_status: stockOpnames.penyesuaianStatus,
+        disetujui_by: stockOpnames.disetujuiBy,
       })
       .from(stockOpnames)
       .innerJoin(ingredients, eq(stockOpnames.ingredientId, ingredients.id))
@@ -607,20 +630,32 @@ export const stokRoutes = new Hono<AppEnv>()
       .orderBy(desc(sql`abs(coalesce(${stockOpnames.selisih}, 0))`), ingredients.nama);
     if (rows.length === 0) throw new HTTPException(404, { message: "Sesi opname tidak ditemukan" });
 
-    let oleh: string | null = null;
-    if (rows[0].user_id) {
-      const [u] = await db
-        .select({ nama: users.nama })
-        .from(users)
-        .where(eq(users.id, rows[0].user_id));
-      oleh = u?.nama ?? null;
+    // agregat status dari baris (hanya baris berselisih yang butuh ACC)
+    const agg = { n_menunggu: 0, n_disetujui: 0, n_ditolak: 0 };
+    for (const r of rows) {
+      const adaSelisih = Math.abs(r.selisih ?? 0) > 1e-9;
+      if (r.penyesuaian_status === "menunggu" && adaSelisih) agg.n_menunggu++;
+      else if (r.penyesuaian_status === "disetujui" && adaSelisih) agg.n_disetujui++;
+      else if (r.penyesuaian_status === "ditolak") agg.n_ditolak++;
     }
+
+    const reviewerId = rows.find((r) => r.disetujui_by)?.disetujui_by ?? null;
+    const [oleh, ditinjau] = await Promise.all([
+      rows[0].user_id
+        ? db.select({ nama: users.nama }).from(users).where(eq(users.id, rows[0].user_id))
+        : Promise.resolve([]),
+      reviewerId
+        ? db.select({ nama: users.nama }).from(users).where(eq(users.id, reviewerId))
+        : Promise.resolve([]),
+    ]);
 
     return c.json({
       session_id: c.req.param("sessionId"),
       waktu: rows[0].waktu,
-      oleh,
+      oleh: oleh[0]?.nama ?? null,
       catatan: rows[0].catatan,
+      status: statusSesi(agg),
+      ditinjau_oleh: ditinjau[0]?.nama ?? null,
       items: rows.map((r) => ({
         nama: r.nama,
         satuan: r.satuan,
@@ -629,6 +664,104 @@ export const stokRoutes = new Hono<AppEnv>()
         selisih: r.selisih,
       })),
     });
+  })
+  /**
+   * ACC (setujui) SATU sesi opname — HANYA owner/admin. Semua baris berselisih
+   * yang masih 'menunggu' jadi 'disetujui' → selisih diterapkan ke stok
+   * (baseline saldo). Tanpa langkah klarifikasi. Idempoten.
+   */
+  .post("/opname/sesi/:sessionId/acc", requireRole("owner", "admin"), async (c) => {
+    const auth = c.get("auth");
+    const sessionId = c.req.param("sessionId");
+    const [ada] = await db
+      .select({ id: stockOpnames.id })
+      .from(stockOpnames)
+      .where(
+        and(eq(stockOpnames.companyId, auth.company_id!), eq(stockOpnames.sessionId, sessionId)),
+      )
+      .limit(1);
+    if (!ada) throw new HTTPException(404, { message: "Sesi opname tidak ditemukan" });
+    const updated = await db
+      .update(stockOpnames)
+      .set({
+        penyesuaianStatus: "disetujui",
+        klarifikasiStatus: "sudah",
+        disetujuiBy: auth.sub,
+        disetujuiAt: new Date(),
+        tolakAlasan: null,
+      })
+      .where(
+        and(
+          eq(stockOpnames.companyId, auth.company_id!),
+          eq(stockOpnames.sessionId, sessionId),
+          eq(stockOpnames.penyesuaianStatus, "menunggu"),
+        ),
+      )
+      .returning({ id: stockOpnames.id });
+    return c.json({ ok: true, jumlah: updated.length });
+  })
+  /**
+   * Tolak SATU sesi opname — HANYA owner/admin. Baris berselisih yang 'menunggu'
+   * jadi 'ditolak' — stok TIDAK berubah (hitungan fisik dibuang). Idempoten.
+   */
+  .post(
+    "/opname/sesi/:sessionId/tolak",
+    requireRole("owner", "admin"),
+    zValidator("json", z.object({ alasan: z.string().nullish() })),
+    async (c) => {
+      const auth = c.get("auth");
+      const sessionId = c.req.param("sessionId");
+      const body = c.req.valid("json");
+      const [ada] = await db
+        .select({ id: stockOpnames.id })
+        .from(stockOpnames)
+        .where(
+          and(eq(stockOpnames.companyId, auth.company_id!), eq(stockOpnames.sessionId, sessionId)),
+        )
+        .limit(1);
+      if (!ada) throw new HTTPException(404, { message: "Sesi opname tidak ditemukan" });
+      const updated = await db
+        .update(stockOpnames)
+        .set({
+          penyesuaianStatus: "ditolak",
+          klarifikasiStatus: "sudah",
+          tolakAlasan: body.alasan ?? null,
+          disetujuiBy: auth.sub,
+          disetujuiAt: new Date(),
+        })
+        .where(
+          and(
+            eq(stockOpnames.companyId, auth.company_id!),
+            eq(stockOpnames.sessionId, sessionId),
+            eq(stockOpnames.penyesuaianStatus, "menunggu"),
+          ),
+        )
+        .returning({ id: stockOpnames.id });
+      return c.json({ ok: true, jumlah: updated.length });
+    },
+  )
+  /**
+   * Hapus SATU sesi opname dari riwayat — HANYA owner/admin. Menghapus semua
+   * baris sesi. Bila sesi sudah disetujui (jadi baseline saldo), menghapusnya
+   * mengembalikan saldo seolah opname itu tak pernah ada (recompute otomatis).
+   */
+  .delete("/opname/sesi/:sessionId", requireRole("owner", "admin"), async (c) => {
+    const auth = c.get("auth");
+    const sessionId = c.req.param("sessionId");
+    const deleted = await db
+      .delete(stockOpnames)
+      .where(
+        and(
+          eq(stockOpnames.companyId, auth.company_id!),
+          eq(stockOpnames.sessionId, sessionId),
+          isNotNull(stockOpnames.sessionId),
+        ),
+      )
+      .returning({ id: stockOpnames.id });
+    if (deleted.length === 0) {
+      throw new HTTPException(404, { message: "Sesi opname tidak ditemukan" });
+    }
+    return c.json({ ok: true, jumlah: deleted.length });
   })
   .get("/opname", async (c) => {
     const auth = c.get("auth");
