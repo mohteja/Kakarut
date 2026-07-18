@@ -313,17 +313,21 @@ export function FakturDetailModal({
                       )}
                     </td>
                     <td className="px-3 py-1.5 text-stone-500">{r.tempat ?? "—"}</td>
-                    <td className="px-3 py-1.5 text-right text-stone-500">
-                      {r.total_harga == null ? (
-                        "—"
-                      ) : ditolak ? (
-                        <span className="text-stone-400 line-through">
-                          {formatRupiah(r.total_harga)}
-                        </span>
-                      ) : (
-                        formatRupiah(r.total_harga)
-                      )}
-                    </td>
+                    {/* Produksi tak menampilkan biaya (bahan sudah dibeli di Beli
+                        Bahan Baku) — cukup jumlah yang diproduksi. */}
+                    {tipe === "beli" && (
+                      <td className="px-3 py-1.5 text-right text-stone-500">
+                        {r.total_harga == null ? (
+                          "—"
+                        ) : ditolak ? (
+                          <span className="text-stone-400 line-through">
+                            {formatRupiah(r.total_harga)}
+                          </span>
+                        ) : (
+                          formatRupiah(r.total_harga)
+                        )}
+                      </td>
+                    )}
                   </tr>
                   );
                 })}
@@ -333,11 +337,6 @@ export function FakturDetailModal({
           {tipe === "beli" && grup.totalHarga > 0 && (
             <div className="text-right text-sm font-semibold text-stone-700">
               Total: {formatRupiah(grup.totalHarga)}
-            </div>
-          )}
-          {tipe === "produksi" && grup.totalHarga > 0 && (
-            <div className="text-right text-sm font-semibold text-stone-700">
-              Perkiraan biaya (RAB): {formatRupiah(grup.totalHarga)}
             </div>
           )}
 

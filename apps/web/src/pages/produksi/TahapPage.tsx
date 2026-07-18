@@ -238,9 +238,16 @@ function TahapForm({
       <Card className="space-y-3 p-4">
         {keProses ? (
           <p className="text-sm text-stone-500">
-            Faktur ditandai <b>sedang diproses</b> — cukup pastikan RAB & catat dana yang cair.
-            {tipe === "beli" && (
-              <> Rincian bahan + supplier ada di <b>📄 dokumen belanja</b> yang terbuka setelah ini.</>
+            {tipe === "beli" ? (
+              <>
+                Faktur ditandai <b>sedang diproses</b> — cukup pastikan RAB & catat dana yang cair.
+                Rincian bahan + supplier ada di <b>📄 dokumen belanja</b> yang terbuka setelah ini.
+              </>
+            ) : (
+              <>
+                Faktur ditandai <b>mulai dikerjakan</b> — bahan mentah resep dipakai saat produksi
+                selesai. (Produksi tak ber-RAB; bahan sudah dibeli di Beli Bahan Baku.)
+              </>
             )}
           </p>
         ) : (
@@ -274,10 +281,13 @@ function TahapForm({
               <span className="text-stone-500">Jumlah bahan</span>
               <b>{bisaMaju.length} baris</b>
             </div>
-            <div className="flex items-center justify-between">
-              <span className="text-stone-500">Total est. RAB</span>
-              <b className="text-base">{formatRupiah(rabTotalMaju)}</b>
-            </div>
+            {/* RAB hanya untuk beli — produksi tak menampilkan biaya. */}
+            {tipe === "beli" && (
+              <div className="flex items-center justify-between">
+                <span className="text-stone-500">Total est. RAB</span>
+                <b className="text-base">{formatRupiah(rabTotalMaju)}</b>
+              </div>
+            )}
           </div>
         ) : (
           <div className="max-h-96 overflow-y-auto overflow-x-auto">

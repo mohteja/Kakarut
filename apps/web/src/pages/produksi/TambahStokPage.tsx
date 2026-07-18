@@ -158,9 +158,10 @@ export function belumSelesai(status: StatusFaktur) {
   );
 }
 
-/** Badge tahap pipeline produksi. */
+/** Badge tahap pipeline produksi. Produksi tak ber-RAB (bahan sudah dibeli di
+ * Beli Bahan Baku) — tahap awal cukup "belum dikerjakan". */
 export const STATUS_PRODUKSI: Record<KonfirmasiStatus, { label: string; cls: string }> = {
-  rencana: { label: "📋 Rencana (RAB)", cls: "bg-stone-200 text-stone-700" },
+  rencana: { label: "📋 Belum dikerjakan", cls: "bg-stone-200 text-stone-700" },
   dikerjakan: { label: "🔨 Sedang dikerjakan", cls: "bg-blue-100 text-blue-800" },
   menunggu: { label: "✅ Selesai — menunggu konfirmasi", cls: "bg-yellow-100 text-yellow-800" },
   dikonfirmasi: { label: "📦 Dikonfirmasi ✓", cls: "bg-green-100 text-green-800" },
@@ -181,7 +182,7 @@ export function labelTahapRingkas(tipe: JenisPengadaan, s: KonfirmasiStatus) {
   const beli = tipe === "beli";
   switch (s) {
     case "rencana":
-      return beli ? "📋 RAB" : "📋 rencana";
+      return beli ? "📋 RAB" : "📋 belum dikerjakan";
     case "dikerjakan":
       return beli ? "🔄 diproses" : "🔨 dikerjakan";
     case "menunggu":
@@ -597,13 +598,22 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                   (di bawah status) */}
               <div className="flex flex-wrap items-end justify-between gap-3 px-3 py-2.5 sm:px-4">
                 <div>
-                  <div className="text-xs text-stone-500">
-                    {tipe === "beli" ? "Total transaksi" : "Total est. RAB"}
-                    {g.rows.length > 1 ? ` (${g.rows.length} bahan)` : ""}:
-                  </div>
-                  <div className="text-lg font-bold text-stone-800">
-                    {formatRupiah(g.totalHarga)}
-                  </div>
+                  {/* Produksi tak menampilkan biaya/RAB (bahan sudah dibeli di
+                      Beli Bahan Baku) — cukup jumlah bahan yang diproduksi. */}
+                  {tipe === "beli" ? (
+                    <>
+                      <div className="text-xs text-stone-500">
+                        Total transaksi{g.rows.length > 1 ? ` (${g.rows.length} bahan)` : ""}:
+                      </div>
+                      <div className="text-lg font-bold text-stone-800">
+                        {formatRupiah(g.totalHarga)}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="text-lg font-bold text-stone-800">
+                      {g.rows.length} bahan diproduksi
+                    </div>
+                  )}
                   {/* pembuat faktur cukup di footer — header tetap ringkas */}
                   {g.dibuatOleh && (
                     <div className="text-xs text-stone-400">dibuat oleh {g.dibuatOleh}</div>
