@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import type {
   MenuDto,
   MenuStokDto,
@@ -129,6 +129,7 @@ function BagianKurang({
 export function TambahStokDariMenuPage() {
   const { cabang, branchId } = useBranch();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
 
   // Cabang TUJUAN (store yang butuh stok). Dari Kantor bebas pilih; dari store
   // = cabang itu sendiri. Kebutuhan dihitung untuk cabang tujuan ini.
@@ -179,7 +180,6 @@ export function TambahStokDariMenuPage() {
   const [rencana, setRencana] = useState<Record<string, number>>({});
   /** pelaksana faktur produksi: "k:<user_id>" | "s:<supplier_id>" | "" */
   const [pelaksana, setPelaksana] = useState("");
-  const [hasil, setHasil] = useState<RencanaFakturResult | null>(null);
 
   const items: RencanaMenuItem[] = useMemo(
     () =>
@@ -247,8 +247,7 @@ export function TambahStokDariMenuPage() {
         },
       });
     },
-    onSuccess: (data) => {
-      setHasil(data);
+    onSuccess: () => {
       setRencana({});
       queryClient.invalidateQueries({ queryKey: ["stok"] });
       queryClient.invalidateQueries({ queryKey: ["menu-ketersediaan"] });
@@ -256,6 +255,9 @@ export function TambahStokDariMenuPage() {
       queryClient.invalidateQueries({ queryKey: ["/pembelian"] });
       queryClient.invalidateQueries({ queryKey: ["rekomendasi"] });
       queryClient.invalidateQueries({ queryKey: ["permintaan-stok"] });
+      // langsung ke daftar Permintaan Stok — permintaan yang baru dibuat tampil
+      // di sana (produksi/beli/kirim tergabung sebagai satu entri).
+      navigate("/permintaan-stok");
     },
   });
 
@@ -268,7 +270,6 @@ export function TambahStokDariMenuPage() {
       else delete next[menuId];
       return next;
     });
-    setHasil(null);
   }
 
   const menuTampil = menus.filter(
@@ -313,10 +314,7 @@ export function TambahStokDariMenuPage() {
             {stores.length > 1 ? (
               <select
                 value={tujuanId}
-                onChange={(e) => {
-                  setTujuanId(e.target.value);
-                  setHasil(null);
-                }}
+                onChange={(e) => setTujuanId(e.target.value)}
                 className={inputClass}
               >
                 {stores.map((s) => (
@@ -341,57 +339,6 @@ export function TambahStokDariMenuPage() {
           </div>
         </div>
       </Card>
-
-      {/* Hasil pembuatan permintaan */}
-      {hasil && (
-        <Card className="mb-4 border-green-200 bg-green-50 p-4">
-          <div className="font-semibold text-green-800">✅ Permintaan berhasil dibuat</div>
-          <ul className="mt-1 space-y-0.5 text-sm text-green-900">
-            {hasil.kirim && (
-              <li>
-                🚚 Kirim dari stok CK — {hasil.kirim.jumlah_baris} bahan
-                {workOrder && ck && store ? ` · ${ck.nama} → ${store.nama}` : ""} ·{" "}
-                <Link to="/produksi" className="font-medium underline">
-                  kirim di Produksi Bahan Baku →
-                </Link>
-              </li>
-            )}
-            {hasil.produksi && (
-              <li>
-                🏭 Work-order produksi — {hasil.produksi.jumlah_baris} bahan
-                {workOrder && ck
-                  ? ` → hasilnya masuk stok ${ck.nama}${store ? ` (untuk ${store.nama}, kirim lewat 🚚 Kirim dari stok CK)` : ""}`
-                  : ""}{" "}
-                ·{" "}
-                <Link to="/produksi" className="font-medium underline">
-                  lihat di Produksi Bahan Baku →
-                </Link>
-              </li>
-            )}
-            {hasil.beli && (
-              <li>
-                🛒 Faktur beli produk jadi (RAB) — {hasil.beli.jumlah_baris} bahan
-                {workOrder && ck && store
-                  ? ` · diproses ${ck.nama} → dikirim ke ${store.nama}`
-                  : ""}{" "}
-                ·{" "}
-                <Link to="/pembelian" className="font-medium underline">
-                  lihat di Beli Bahan Baku →
-                </Link>
-              </li>
-            )}
-            {hasil.beli_produksi && (
-              <li>
-                🧺 Faktur belanja bahan produksi (RAB) — {hasil.beli_produksi.jumlah_baris} bahan
-                mentah{workOrder && ck ? ` · dibukukan & disimpan di ${ck.nama}` : ""} ·{" "}
-                <Link to="/pembelian" className="font-medium underline">
-                  lihat di Beli Bahan Baku →
-                </Link>
-              </li>
-            )}
-          </ul>
-        </Card>
-      )}
 
       <div className="grid gap-4 lg:grid-cols-2">
         {/* Kiri: pilih target porsi per menu */}

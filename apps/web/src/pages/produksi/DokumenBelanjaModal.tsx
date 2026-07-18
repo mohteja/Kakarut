@@ -257,6 +257,23 @@ export function DokumenBelanjaModal({
     URL.revokeObjectURL(url);
   };
 
+  // ===== SIMPAN PDF: buka dokumen mandiri di jendela baru lalu picu dialog
+  // cetak — pilih tujuan "Simpan sebagai PDF". Terpisah dari 🖨 Cetak (ke
+  // printer). Bila popup diblokir, jatuh ke cetak halaman biasa (dialog cetak
+  // juga punya opsi Simpan PDF).
+  const simpanPdf = () => {
+    const w = window.open("", "_blank");
+    if (!w) {
+      window.print();
+      return;
+    }
+    w.document.open();
+    w.document.write(buildHtml());
+    w.document.close();
+    w.focus();
+    setTimeout(() => w.print(), 350);
+  };
+
   return (
     <>
       <Modal open onClose={onClose} title={`📄 ${judul}`} lebar="max-w-xl">
@@ -268,8 +285,11 @@ export function DokumenBelanjaModal({
           <button onClick={unduh} className={btnSecondary}>
             ⬇ Unduh (HTML)
           </button>
-          <button onClick={() => window.print()} className={btnPrimary}>
-            🖨 Cetak / Simpan PDF
+          <button onClick={() => window.print()} className={btnSecondary}>
+            🖨 Cetak ke printer
+          </button>
+          <button onClick={simpanPdf} className={btnPrimary}>
+            📄 Download PDF
           </button>
         </div>
       </Modal>
