@@ -14,6 +14,7 @@ import { backfillKodeBahan } from "./modules/bahan/kode";
 import { backfillUnits } from "./modules/satuan/service";
 import { backfillKategoriBahan } from "./modules/kategori-bahan/service";
 import { arsipkanMembershipNonaktif, backfillEmployeeCode } from "./modules/users/service";
+import { konfirmasiProduksiCkLokalTertahan } from "./modules/produksi/backfill";
 import { getStorage, localUploadDir } from "./modules/upload/storage";
 
 // Migrasi otomatis saat boot: deploy versi baru langsung menerapkan skema
@@ -55,6 +56,11 @@ if (env.AUTO_MIGRATE) {
   // Nonaktif = arsip: karyawan nonaktif lama dipindah ke arsip (idempoten)
   const terarsip = await arsipkanMembershipNonaktif(db);
   if (terarsip > 0) console.log(`${terarsip} karyawan nonaktif lama dipindah ke arsip.`);
+  // Produksi/beli CK-lokal lama yang macet di 'menunggu' → 'dikonfirmasi'
+  // (data sebelum fitur auto-confirm: "Selesai" tapi masih "menunggu konfirmasi").
+  const terkonfirmasi = await konfirmasiProduksiCkLokalTertahan(db);
+  if (terkonfirmasi > 0)
+    console.log(`${terkonfirmasi} baris produksi/beli CK-lokal lama dikonfirmasi (masuk stok).`);
 }
 
 const app = createApp();
