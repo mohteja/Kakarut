@@ -984,3 +984,49 @@ export const stockOpnames = pgTable(
   },
   (t) => [index("stock_opnames_branch_ing_idx").on(t.branchId, t.ingredientId, t.createdAt)],
 );
+
+/** jenis dokumen bernomor: faktur pembelian, faktur produksi, sesi stock opname */
+export const dokumenJenisEnum = pgEnum("dokumen_jenis", ["beli", "produksi", "opname"]);
+
+/**
+ * Penghitung nomor dokumen per perusahaan per jenis (PB/PR/SO). Increment
+ * atomik via upsert — aman dipanggil bersamaan dari beberapa request.
+ */
+export const dokumenCounters = pgTable(
+  "dokumen_counters",
+  {
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    jenis: dokumenJenisEnum("jenis").notNull(),
+    lastNomor: integer("last_nomor").notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.companyId, t.jenis] })],
+);
+
+/**
+ * Nomor dokumen manusiawi (PB-0001 / PR-0001 / SO-0001) untuk faktur
+ * pembelian/produksi (ref = productions.faktur_id) dan sesi stock opname
+ * (ref = stock_opnames.session_id). Diterbitkan saat dokumen dibuat;
+ * dokumen lama diisi lewat backfill boot. Nomor tidak pernah dipakai ulang
+ * meski dokumennya dihapus (jejak audit).
+ */
+export const dokumenNomor = pgTable(
+  "dokumen_nomor",
+  {
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    /** productions.faktur_id atau stock_opnames.session_id (tanpa FK — virtual) */
+    refId: uuid("ref_id").notNull(),
+    jenis: dokumenJenisEnum("jenis").notNull(),
+    nomor: integer("nomor").notNull(),
+    /** bentuk tampil, mis. "PB-0012" */
+    nomorTeks: text("nomor_teks").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.companyId, t.refId] }),
+    uniqueIndex("dokumen_nomor_urut_idx").on(t.companyId, t.jenis, t.nomor),
+  ],
+);

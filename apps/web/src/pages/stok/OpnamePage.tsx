@@ -35,6 +35,8 @@ export function OpnamePage() {
   const [filterTempat, setFilterTempat] = useState("semua");
   const [konfirmasi, setKonfirmasi] = useState(false);
   const [hasil, setHasil] = useState<OpnameRingkasan | null>(null);
+  // nomor sesi (SO-0001) dari respons simpan — tampil di layar sukses
+  const [nomorSesi, setNomorSesi] = useState<string | null>(null);
 
   // Nama CABANG TARGET opname harus tampak: owner dari Kantor menulis ke
   // cabang data terpilih — salah cabang tidak boleh terjadi diam-diam.
@@ -90,7 +92,7 @@ export function OpnamePage() {
       const items = Object.entries(fisik)
         .filter(([, v]) => v !== "")
         .map(([ingredient_id, v]) => ({ ingredient_id, qty: Number(v) }));
-      return api<{ ringkasan: OpnameRingkasan; session_id: string }>("/stok/opname", {
+      return api<{ ringkasan: OpnameRingkasan; session_id: string; nomor: string | null }>("/stok/opname", {
         method: "POST",
         body: {
           ...(!terikat && branchId ? { branch_id: branchId } : {}),
@@ -102,6 +104,7 @@ export function OpnamePage() {
     onSuccess: (data) => {
       setKonfirmasi(false);
       setHasil(data.ringkasan);
+      setNomorSesi(data.nomor ?? null);
       setFisik({});
       queryClient.invalidateQueries({ queryKey: ["stok"] });
     },
@@ -310,6 +313,11 @@ export function OpnamePage() {
           <div className="w-full max-w-sm rounded-2xl bg-white p-6 text-center">
             <div className="text-4xl">✅</div>
             <h2 className="mt-2 text-lg font-bold text-stone-800">Opname Tersimpan</h2>
+            {nomorSesi && (
+              <div className="mt-1 inline-block rounded-md bg-orange-100 px-2 py-0.5 font-mono text-sm font-bold text-orange-800">
+                {nomorSesi}
+              </div>
+            )}
             <div className="mt-3 grid grid-cols-3 gap-2 text-sm">
               <div>
                 <div className="text-2xl font-bold text-green-600">{hasil.cocok}</div>

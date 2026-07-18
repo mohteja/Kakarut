@@ -10,6 +10,7 @@ import { db } from "../../db/client";
 import {
   branches,
   companies,
+  dokumenNomor,
   fakturDana,
   fakturLogs,
   ingredientSuppliers,
@@ -27,6 +28,7 @@ import {
   type BarisProduksiSelesai,
 } from "./konsumsi";
 import { AKSI_TAHAP_LOG, catatLogFaktur, rpLog } from "./log";
+import { terbitkanNomor } from "../dokumen/nomor";
 import {
   pastikanCabang,
   resolveBranchId,
@@ -387,21 +389,22 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         };
       });
 
-      const inserted = await db.transaction(async (tx) => {
+      const { inserted, nomor } = await db.transaction(async (tx) => {
         const hasil = await tx.insert(productions).values(rows).returning();
+        const nomorTeks = await terbitkanNomor(tx, auth.company_id!, tipe, fakturId);
         await catatLogFaktur(tx, {
           companyId: auth.company_id!,
           branchId,
           fakturId,
           jalur: tipe,
           aksi: "Faktur dibuat (RAB)",
-          detail: `${hasil.length} baris`,
+          detail: `${nomorTeks} · ${hasil.length} baris`,
           userId: auth.sub,
         });
-        return hasil;
+        return { inserted: hasil, nomor: nomorTeks };
       });
       return c.json(
-        { faktur_id: fakturId, status: statusAwal, jumlah_baris: inserted.length },
+        { faktur_id: fakturId, nomor, status: statusAwal, jumlah_baris: inserted.length },
         201,
       );
     })
@@ -1301,6 +1304,8 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         prod_date: productions.prodDate,
         faktur_id: productions.fakturId,
         no_faktur: productions.noFaktur,
+        // nomor dokumen otomatis (PB-/PR-) — sama untuk semua baris satu faktur
+        nomor: dokumenNomor.nomorTeks,
         status: productions.status,
         supplier: suppliers.nama,
         tempat: storageLocations.nama,
@@ -1343,6 +1348,13 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
               .leftJoin(pekerja, eq(productions.workerId, pekerja.id))
               .leftJoin(cabangProd, eq(productions.branchId, cabangProd.id))
               .leftJoin(tujuanProd, eq(productions.tujuanBranchId, tujuanProd.id))
+              .leftJoin(
+                dokumenNomor,
+                and(
+                  eq(dokumenNomor.companyId, productions.companyId),
+                  eq(dokumenNomor.refId, productions.fakturId),
+                ),
+              )
               // maks SATU baris utama per bahan (partial unique index) → join 1:≤1
               .leftJoin(
                 isupUtama,

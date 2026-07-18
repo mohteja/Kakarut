@@ -614,6 +614,8 @@ export interface OpnameRingkasan {
 
 export interface OpnameSesiRow {
   session_id: string;
+  /** nomor sesi otomatis (SO-0001) */
+  nomor: string | null;
   waktu: string;
   oleh: string | null;
   jumlah_item: number;
@@ -625,6 +627,8 @@ export interface OpnameSesiRow {
 
 export interface OpnameSesiDetail {
   session_id: string;
+  /** nomor sesi otomatis (SO-0001) */
+  nomor: string | null;
   waktu: string;
   oleh: string | null;
   catatan: string | null;

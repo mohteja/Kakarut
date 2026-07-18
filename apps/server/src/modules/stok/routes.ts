@@ -16,6 +16,7 @@ import {
 } from "../../db/schema";
 import { pastikanCabang, requireRole, resolveBranchId, terikatCabang, type AppEnv } from "../../middleware/auth";
 import { tanggalDi } from "../../lib/time";
+import { nomorUntukRefs, terbitkanNomor } from "../dokumen/nomor";
 import { hitungSaldoCabang, kartuStok } from "./service";
 
 const OpnameBody = z.object({
@@ -220,8 +221,12 @@ export const stokRoutes = new Hono<AppEnv>()
       };
     });
 
-    const rows = await db.insert(stockOpnames).values(values).returning();
-    return c.json({ ok: true, jumlah: rows.length, session_id: sessionId, ringkasan }, 201);
+    const { rows, nomor } = await db.transaction(async (tx) => {
+      const inserted = await tx.insert(stockOpnames).values(values).returning();
+      const nomorTeks = await terbitkanNomor(tx, auth.company_id!, "opname", sessionId);
+      return { rows: inserted, nomor: nomorTeks };
+    });
+    return c.json({ ok: true, jumlah: rows.length, session_id: sessionId, nomor, ringkasan }, 201);
   })
   /**
    * Nilai Stok Awal (saldo pembuka) yang tersimpan per bahan + tanggalnya —
@@ -561,6 +566,7 @@ export const stokRoutes = new Hono<AppEnv>()
         waktu: sql<string>`max(${stockOpnames.createdAt})`,
         user_id: sql<string>`max(${stockOpnames.userId}::text)`,
         catatan: sql<string>`max(${stockOpnames.catatan})`,
+        // nomor sesi (SO-0001) — lookup terpisah di bawah (grup per sesi)
         jumlah_item: sql<number>`count(*)::int`,
         jumlah_selisih: sql<number>`count(*) FILTER (WHERE abs(coalesce(${stockOpnames.selisih}, 0)) > 1e-9)::int`,
         // agregat status ACC per sesi (hanya baris berselisih yang butuh ACC)
@@ -591,9 +597,16 @@ export const stokRoutes = new Hono<AppEnv>()
       for (const u of us) namaById.set(u.id, u.nama);
     }
 
+    const nomorBySesi = await nomorUntukRefs(
+      db,
+      auth.company_id!,
+      rows.map((r) => r.session_id!).filter(Boolean),
+    );
+
     return c.json(
       rows.map((r) => ({
         session_id: r.session_id,
+        nomor: r.session_id ? (nomorBySesi.get(r.session_id) ?? null) : null,
         waktu: r.waktu,
         oleh: r.user_id ? (namaById.get(r.user_id) ?? null) : null,
         jumlah_item: r.jumlah_item,
@@ -649,8 +662,10 @@ export const stokRoutes = new Hono<AppEnv>()
         : Promise.resolve([]),
     ]);
 
+    const nomorSesi = await nomorUntukRefs(db, auth.company_id!, [c.req.param("sessionId")]);
     return c.json({
       session_id: c.req.param("sessionId"),
+      nomor: nomorSesi.get(c.req.param("sessionId")) ?? null,
       waktu: rows[0].waktu,
       oleh: oleh[0]?.nama ?? null,
       catatan: rows[0].catatan,

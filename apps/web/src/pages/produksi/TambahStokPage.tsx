@@ -45,6 +45,8 @@ export interface StokMasukRow {
   prod_date: string;
   faktur_id: string | null;
   no_faktur: string | null;
+  /** nomor dokumen otomatis (PB-/PR-), sama untuk semua baris satu faktur */
+  nomor?: string | null;
   status: KonfirmasiStatus;
   supplier: string | null;
   tempat: string | null;
@@ -82,6 +84,8 @@ export interface FakturGroup {
   supplier: string | null;
   supplierId: string | null;
   noFaktur: string | null;
+  /** nomor dokumen otomatis (PB-/PR-) */
+  nomor: string | null;
   status: StatusFaktur;
   catatan: string | null;
   dibuatOleh: string | null;
@@ -361,6 +365,7 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
           supplier: r.supplier,
           supplierId: r.supplier_id,
           noFaktur: r.no_faktur,
+          nomor: r.nomor ?? null,
           status: r.status,
           catatan: r.catatan,
           dibuatOleh: r.dibuat_oleh,
@@ -551,6 +556,12 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                     <span className="font-bold text-stone-800">
                       {tipe === "produksi" ? "🏭 Produksi" : "🛒 Pembelian"}
                     </span>
+                    {/* nomor dokumen otomatis — identitas utama faktur */}
+                    {g.nomor && (
+                      <span className="rounded-md bg-orange-100 px-1.5 py-0.5 font-mono text-xs font-bold text-orange-800">
+                        {g.nomor}
+                      </span>
+                    )}
                     <span className="text-sm text-stone-500">
                       {formatTanggalRingkas(g.waktu)} · {formatWaktu(g.waktu)}
                     </span>

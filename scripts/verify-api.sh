@@ -2715,6 +2715,50 @@ api "$OWNER" POST "/pembelian/tahap/$FB79N" "{\"ke\":\"menunggu\",\"items\":[{\"
 cek "Tiba di CK tanpa rak home → tanpa tempat (storage_location_id null)" "V == 1" \
   "$(api "$OWNER" GET "/pembelian?branch_id=$CK52_UTAMA&per_page=500" | jq --arg f "$FB79N" '([.rows[]|select(.faktur_id==$f)][0].storage_location_id==null) | if . then 1 else 0 end')"
 
+echo "== 80. Nomor dokumen otomatis: PB-/PR-/SO- + tampil di daftar, penerimaan, kartu stok =="
+# faktur beli baru → respons memuat nomor PB-####; nomor juga tampil di daftar
+BH80=$(api "$OWNER" POST /bahan '{"nama":"bahan nomor80","harga_beli":1000,"isi":1,"satuan":"pcs","pengadaan":"beli","kategori":"lain","track_stok":true}' | jq -r .id)
+RESP80=$(api "$OWNER" POST /pembelian/faktur "{\"branch_id\":\"$CK52_UTAMA\",\"items\":[{\"ingredient_id\":\"$BH80\",\"mode\":\"pcs\",\"jumlah\":4}]}")
+FB80=$(echo "$RESP80" | jq -r .faktur_id)
+NOM80=$(echo "$RESP80" | jq -r .nomor)
+echo "$NOM80" | grep -Eq '^PB-[0-9]{4,}$' && ok "faktur beli dapat nomor PB-#### ($NOM80)" || gagal "nomor beli = $NOM80"
+cek "daftar /pembelian memuat nomor yang sama" "V == 1" \
+  "$(api "$OWNER" GET "/pembelian?branch_id=$CK52_UTAMA&per_page=500" | jq --arg f "$FB80" --arg n "$NOM80" '([.rows[]|select(.faktur_id==$f)][0].nomor==$n) | if . then 1 else 0 end')"
+# faktur produksi → PR-#### & nomor bertambah antar faktur beli
+PJ80=$(api "$OWNER" POST /bahan '{"nama":"baso nomor80","harga_beli":10000,"isi":10,"satuan":"pcs","pengadaan":"produksi","kategori":"baso"}' | jq -r .id)
+NOMP80=$(api "$OWNER" POST /produksi/faktur "{\"branch_id\":\"$CK52_UTAMA\",\"worker_id\":\"$U58_ID\",\"items\":[{\"ingredient_id\":\"$PJ80\",\"mode\":\"batch\",\"jumlah\":1}]}" | jq -r .nomor)
+echo "$NOMP80" | grep -Eq '^PR-[0-9]{4,}$' && ok "faktur produksi dapat nomor PR-#### ($NOMP80)" || gagal "nomor produksi = $NOMP80"
+NOM80B=$(api "$OWNER" POST /pembelian/faktur "{\"branch_id\":\"$CK52_UTAMA\",\"items\":[{\"ingredient_id\":\"$BH80\",\"mode\":\"pcs\",\"jumlah\":2}]}" | jq -r .nomor)
+U80A=$(echo "$NOM80" | tr -dc '0-9'); U80B=$(echo "$NOM80B" | tr -dc '0-9')
+cek "nomor PB bertambah urut ($NOM80 → $NOM80B)" "V == 1" "$(( 10#$U80B > 10#$U80A ? 1 : 0 ))"
+# penerimaan: kiriman CK→cabang memuat nomor faktur asal
+RID80=$(api "$OWNER" GET "/pembelian?branch_id=$CK52_UTAMA&per_page=500" | jq -r --arg f "$FB80" '[.rows[]|select(.faktur_id==$f)][0].id')
+api "$OWNER" POST "/pembelian/tahap/$FB80" "{\"ke\":\"dikerjakan\",\"items\":[{\"id\":\"$RID80\",\"qty\":4}]}" > /dev/null
+api "$OWNER" POST "/pembelian/tahap/$FB80" "{\"ke\":\"menunggu\",\"items\":[{\"id\":\"$RID80\",\"qty\":4}],\"tujuan_branch_id\":\"$PUSAT52B\"}" > /dev/null
+cek "penerimaan: baris kiriman memuat nomor faktur asal ($NOM80)" "V == 1" \
+  "$(api "$KASIR" GET /penerimaan | jq --arg f "$FB80" --arg n "$NOM80" '([.rows[]|select(.faktur_id==$f)][0].nomor==$n) | if . then 1 else 0 end')"
+# stock opname → SO-#### di respons, riwayat, dan detail sesi
+OP80=$(api "$OWNER" POST /stok/opname "{\"branch_id\":\"$CK52_UTAMA\",\"items\":[{\"ingredient_id\":\"$BH80\",\"qty\":1}],\"catatan\":\"opname nomor80\"}")
+SES80=$(echo "$OP80" | jq -r .session_id); NOMS80=$(echo "$OP80" | jq -r .nomor)
+echo "$NOMS80" | grep -Eq '^SO-[0-9]{4,}$' && ok "opname dapat nomor SO-#### ($NOMS80)" || gagal "nomor opname = $NOMS80"
+cek "riwayat opname memuat nomor sesi" "V == 1" \
+  "$(api "$OWNER" GET "/stok/opname/riwayat?branch_id=$CK52_UTAMA" | jq --arg s "$SES80" --arg n "$NOMS80" '([.[]|select(.session_id==$s)][0].nomor==$n) | if . then 1 else 0 end')"
+cek "detail sesi opname memuat nomor" "V == 1" \
+  "$(api "$OWNER" GET "/stok/opname/sesi/$SES80" | jq --arg n "$NOMS80" '(.nomor==$n) | if . then 1 else 0 end')"
+# kartu stok: mutasi masuk beli menampilkan nomor PB (keterangan "No. PB-..")
+NOM80C=$(api "$OWNER" POST /pembelian/faktur "{\"branch_id\":\"$CK52_UTAMA\",\"items\":[{\"ingredient_id\":\"$BH80\",\"mode\":\"pcs\",\"jumlah\":3}]}" | jq -r .nomor)
+FB80C=$(api "$OWNER" GET "/pembelian?branch_id=$CK52_UTAMA&per_page=500" | jq -r --arg n "$NOM80C" '[.rows[]|select(.nomor==$n)][0].faktur_id')
+RID80C=$(api "$OWNER" GET "/pembelian?branch_id=$CK52_UTAMA&per_page=500" | jq -r --arg f "$FB80C" '[.rows[]|select(.faktur_id==$f)][0].id')
+api "$OWNER" POST "/pembelian/tahap/$FB80C" "{\"ke\":\"dikerjakan\",\"items\":[{\"id\":\"$RID80C\",\"qty\":3}]}" > /dev/null
+api "$OWNER" POST "/pembelian/tahap/$FB80C" "{\"ke\":\"menunggu\",\"items\":[{\"id\":\"$RID80C\",\"qty\":3}]}" > /dev/null
+DARI80=$(date -d yesterday +%F); SAMPAI80=$(date -d tomorrow +%F)
+cek "kartu stok: mutasi beli memuat nomor PB di keterangan" "V >= 1" \
+  "$(api "$OWNER" GET "/stok/kartu/$BH80?branch_id=$CK52_UTAMA&dari=$DARI80&sampai=$SAMPAI80" | jq --arg n "$NOM80C" '[.mutasi[]|select(.jenis=="beli" and (.keterangan//""|contains($n)))]|length')"
+# ACC opname → mutasi opname di kartu memuat nomor SO
+api "$OWNER" POST "/stok/opname/sesi/$SES80/acc" > /dev/null
+cek "kartu stok: mutasi opname memuat nomor SO di keterangan" "V >= 1" \
+  "$(api "$OWNER" GET "/stok/kartu/$BH80?branch_id=$CK52_UTAMA&dari=$DARI80&sampai=$SAMPAI80" | jq --arg n "$NOMS80" '[.mutasi[]|select(.jenis=="opname" and (.keterangan//""|contains($n)))]|length')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]
