@@ -784,6 +784,20 @@ export const productions = pgTable(
      * hitungSaldoCabang). null = produksi/beli biasa.
      */
     asalBranchId: uuid("asal_branch_id").references(() => branches.id),
+    /**
+     * "Diproduksi UNTUK cabang" (permintaan tambah stok): hasil produksi masuk
+     * stok CK dulu saat selesai, lalu PERLU DIKIRIM ke cabang ini — pengingat
+     * + target tombol "Kirim hasil". Dikosongkan begitu hasil dikirim.
+     * Murni metadata tampilan/link — TIDAK dipakai perhitungan saldo.
+     */
+    untukBranchId: uuid("untuk_branch_id").references(() => branches.id),
+    /**
+     * Cabang ASAL PENGIRIM: diisi saat baris pindah cabang (dikirim) supaya
+     * cabang pengirim (CK) tetap melihat faktur yang sudah terkirim penuh di
+     * daftarnya. Murni metadata tampilan/visibilitas — TIDAK dipakai saldo
+     * (beda dgn asal_branch_id yang mengurangi stok CK saat transfer diterima).
+     */
+    dariBranchId: uuid("dari_branch_id").references(() => branches.id),
     ingredientId: uuid("ingredient_id")
       .notNull()
       .references(() => ingredients.id),

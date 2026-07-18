@@ -457,6 +457,10 @@ export async function buatFakturDariRencana(
       // ngestock". BELI produk jadi → tetap dikirim langsung ke cabang peminta.
       // Belanja bahan produksi (bahan mentah resep) → tetap di CK.
       tujuanBranchId: workOrder && tipe === "beli" && !bahanProduksi ? params.branchId : null,
+      // PRODUKSI work-order: hasil masuk stok CK dulu (tujuan kosong), tapi
+      // catat "diproduksi UNTUK cabang peminta" — pengingat kirim setelah
+      // selesai + badge asal permintaan. Dikosongkan saat hasil dikirim.
+      untukBranchId: workOrder && tipe === "produksi" ? params.branchId : null,
       bahanProduksi,
       ingredientId: b.ingredient_id,
       qty: b.qty_faktur!,

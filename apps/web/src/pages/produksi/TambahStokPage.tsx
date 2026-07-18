@@ -68,6 +68,11 @@ export interface StokMasukRow {
   /** work-order CK: cabang tujuan pengiriman (null = bukan work-order) */
   tujuan_branch_id?: string | null;
   tujuan_cabang?: string | null;
+  /** dari Permintaan Tambah Stok (rencana menu); null = input langsung */
+  rencana_id?: string | null;
+  /** produksi dari permintaan: hasil masuk stok CK lalu PERLU DIKIRIM ke cabang ini */
+  untuk_branch_id?: string | null;
+  untuk_cabang?: string | null;
   /** total dana cair faktur ini (nilai sama di tiap baris; 0 bila belum ada) */
   dana_cair: number;
   /** supplier UTAMA bahan baris ini (info "beli di mana" saat diproses) */
@@ -96,6 +101,10 @@ export interface FakturGroup {
   /** cabang baris + tujuan work-order (utk tampilan Kantor & aksi Kirim) */
   cabang: string | null;
   tujuanCabang: string | null;
+  /** faktur lahir dari Permintaan Tambah Stok (badge asal faktur) */
+  dariPermintaan: boolean;
+  /** produksi dari permintaan: hasil perlu dikirim ke cabang ini */
+  untukCabang: string | null;
   rows: StokMasukRow[];
   totalHarga: number;
   /** total dana yang sudah cair untuk faktur ini */
@@ -252,6 +261,21 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
     },
   });
 
+  // KIRIM HASIL produksi dari permintaan: hasil sudah di stok CK — buat faktur
+  // kiriman (transfer stok CK -> cabang peminta) yang diterima di Penerimaan.
+  const kirimHasil = useMutation({
+    mutationFn: (fakturId: string) =>
+      api<{ nomor: string; tujuan: string }>(`${t.endpoint}/kirim-hasil/${fakturId}`, {
+        method: "POST",
+        body: {},
+      }),
+    onSuccess: () => {
+      for (const key of [t.endpoint, "stok", "penerimaan"]) {
+        queryClient.invalidateQueries({ queryKey: [key] });
+      }
+    },
+  });
+
   // Buku besar: filter tanggal + pagination per faktur. Halaman 1 = faktur
   // yang BELUM selesai dulu, lalu terbaru (urutan dari server).
   const [dari, setDari] = useState("");
@@ -375,6 +399,8 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
           dikerjakanOleh: r.dikerjakan_oleh,
           cabang: r.cabang ?? null,
           tujuanCabang: r.tujuan_cabang ?? null,
+          dariPermintaan: false,
+          untukCabang: null,
           rows: [],
           totalHarga: 0,
           danaCair: r.dana_cair ?? 0,
@@ -382,6 +408,8 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
         byKey.set(key, g);
       }
       g.rows.push(r);
+      if (r.rencana_id) g.dariPermintaan = true;
+      if (!g.untukCabang && r.untuk_cabang) g.untukCabang = r.untuk_cabang;
       // faktur campuran (produk jadi + bahan produksi): tujuan diambil dari
       // baris mana pun yang punya — baris bahan produksi tujuannya null
       if (!g.tujuanCabang && r.tujuan_cabang) g.tujuanCabang = r.tujuan_cabang;
@@ -527,6 +555,12 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                   r.tujuan_branch_id != null &&
                   r.branch_id !== r.tujuan_branch_id,
               );
+            // HASIL PRODUKSI dari permintaan yang sudah masuk stok CK & belum
+            // dikirim ke cabang peminta -> pengingat + tombol Kirim hasil
+            const siapKirimHasil =
+              tipe === "produksi" &&
+              g.fakturId != null &&
+              g.rows.some((r) => r.status === "dikonfirmasi" && r.untuk_cabang);
             // barang DALAM PERJALANAN (sudah dikirim, menunggu diterima cabang)
             const adaTerkirim = g.rows.some(
               (r) =>
@@ -562,6 +596,16 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                         {g.nomor}
                       </span>
                     )}
+                    {/* asal faktur: dari Permintaan Tambah Stok vs input langsung */}
+                    <span
+                      className={`rounded-md px-1.5 py-0.5 text-xs font-semibold ${
+                        g.dariPermintaan
+                          ? "bg-indigo-100 text-indigo-800"
+                          : "bg-stone-100 text-stone-600"
+                      }`}
+                    >
+                      {g.dariPermintaan ? "\ud83d\udccb Permintaan" : "\u270d\ufe0f Langsung"}
+                    </span>
                     <span className="text-sm text-stone-500">
                       {formatTanggalRingkas(g.waktu)} · {formatWaktu(g.waktu)}
                     </span>
@@ -593,6 +637,13 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                     {g.tujuanCabang && (
                       <span className="whitespace-nowrap rounded-md bg-purple-100 px-2 py-0.5 text-sm font-bold text-purple-800">
                         📦 → {g.tujuanCabang}
+                      </span>
+                    )}
+                    {/* produksi dari permintaan: hasil UNTUK cabang peminta —
+                        pengingat "harus dikirim" tetap tampil setelah selesai */}
+                    {g.untukCabang && !g.tujuanCabang && (
+                      <span className="whitespace-nowrap rounded-md bg-purple-100 px-2 py-0.5 text-sm font-bold text-purple-800">
+                        🎯 untuk {g.untukCabang}
                       </span>
                     )}
                     {g.catatan && <span>· {g.catatan}</span>}
@@ -691,6 +742,25 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                       className="whitespace-nowrap rounded-lg bg-purple-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-purple-500 disabled:opacity-60"
                     >
                       🚚 Kirim ke cabang
+                    </button>
+                  )}
+                  {/* hasil produksi dari permintaan: sudah di stok CK — kirim
+                      ke cabang peminta (buat faktur kiriman transfer) */}
+                  {siapKirimHasil && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (
+                          confirm(
+                            `Kirim hasil produksi ke ${g.untukCabang}? Dibuat faktur kiriman dari stok CK — barang menunggu diterima di cabang.`,
+                          )
+                        )
+                          kirimHasil.mutate(g.fakturId!);
+                      }}
+                      disabled={kirimHasil.isPending}
+                      className="whitespace-nowrap rounded-lg bg-purple-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-purple-500 disabled:opacity-60"
+                    >
+                      🚚 Kirim hasil ke {g.untukCabang}
                     </button>
                   )}
                   {g.fakturId && belumSelesai(g.status) && opsiTahap.length > 0 && (
