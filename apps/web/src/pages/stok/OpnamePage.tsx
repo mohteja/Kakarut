@@ -327,31 +327,20 @@ export function OpnamePage() {
             {hasil.lebih + hasil.kurang > 0 && (
               <div className="mt-4 rounded-lg bg-blue-50 px-3 py-2 text-left text-sm text-blue-800">
                 Ada <b>{hasil.lebih + hasil.kurang} selisih</b>. <b>Stok belum berubah</b> —
-                owner/admin akan mengklarifikasi penyebabnya dan menyetujui agar stok
-                disesuaikan.
+                menunggu <b>ACC owner/admin</b> di Riwayat Opname. Setelah di-ACC, stok baru
+                disesuaikan ke hitungan fisik.
               </div>
             )}
             <div className="mt-4 flex gap-2">
               <button onClick={() => navigate("/stok")} className={`${btnSecondary} flex-1`}>
                 Ke Stok
               </button>
-              {/* Klarifikasi selisih = tugas manajemen (server owner/admin).
-                  Peran terikat (kasir/tim) diarahkan ke riwayat saja. */}
-              {hasil.lebih + hasil.kurang > 0 && !terikat ? (
-                <button
-                  onClick={() => navigate("/stok/penyesuaian")}
-                  className={`${btnPrimary} flex-1`}
-                >
-                  Klarifikasi Selisih
-                </button>
-              ) : (
-                <button
-                  onClick={() => navigate("/stok/opname/riwayat")}
-                  className={`${btnPrimary} flex-1`}
-                >
-                  Lihat Riwayat
-                </button>
-              )}
+              <button
+                onClick={() => navigate("/stok/opname/riwayat")}
+                className={`${btnPrimary} flex-1`}
+              >
+                Lihat Riwayat
+              </button>
             </div>
           </div>
         </div>

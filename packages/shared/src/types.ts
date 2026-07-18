@@ -572,7 +572,13 @@ export const KLARIFIKASI_KATEGORI: {
 ];
 
 /** status persetujuan penyesuaian: menunggu owner/admin, lalu disetujui. */
-export type PenyesuaianStatus = "menunggu" | "disetujui";
+export type PenyesuaianStatus = "menunggu" | "disetujui" | "ditolak";
+
+/**
+ * Status sesi opname (agregat baris): cocok (tak ada selisih), menunggu ACC
+ * owner/admin, disetujui (selisih diterapkan ke stok), atau ditolak (dibuang).
+ */
+export type OpnameSesiStatus = "cocok" | "menunggu" | "disetujui" | "ditolak";
 
 export interface PenyesuaianRow {
   id: string;
@@ -613,6 +619,8 @@ export interface OpnameSesiRow {
   jumlah_item: number;
   jumlah_selisih: number;
   catatan: string | null;
+  /** status ACC sesi: cocok / menunggu / disetujui / ditolak */
+  status: OpnameSesiStatus;
 }
 
 export interface OpnameSesiDetail {
@@ -620,6 +628,9 @@ export interface OpnameSesiDetail {
   waktu: string;
   oleh: string | null;
   catatan: string | null;
+  status: OpnameSesiStatus;
+  /** owner/admin yang meng-ACC / menolak (bila ada) */
+  ditinjau_oleh: string | null;
   items: {
     nama: string;
     satuan: string;

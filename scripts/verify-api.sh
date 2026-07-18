@@ -369,6 +369,51 @@ api "$OWNER" POST "/stok/penyesuaian/$PID2/setujui" > /dev/null
 cek "klarifikasi ulang lalu disetujui: saldo jadi fisik2" "abs(V - $FISIK2) < 0.001" \
   "$(stok_of "$(api "$KASIR" GET /stok)" "plastik take away")"
 
+echo "== 15c. Opname: ACC / Tolak / Hapus per sesi (owner/admin) =="
+# stok plastik saat ini = FISIK2 (dari §15b)
+SC_FISIK=$(python3 -c "print($FISIK2 + 7)")
+SESI_ACC=$(api "$OWNER" POST /stok/opname "{\"catatan\":\"acc sesi\",\"items\":[{\"ingredient_id\":\"$PLASTIK_ID\",\"qty\":$SC_FISIK}]}" | jq -r .session_id)
+ST=$(api "$OWNER" GET /stok/opname/riwayat | jq -r --arg s "$SESI_ACC" '[.[]|select(.session_id==$s)][0].status')
+[ "$ST" = "menunggu" ] && ok "sesi berselisih → status 'menunggu'" || gagal "status sesi = $ST (harus menunggu)"
+cek "menunggu ACC: stok BELUM berubah (masih fisik2)" "abs(V - $FISIK2) < 0.001" \
+  "$(stok_of "$(api "$OWNER" GET /stok)" "plastik take away")"
+ST=$(api "$OWNER" GET "/stok/opname/sesi/$SESI_ACC" | jq -r '.status')
+[ "$ST" = "menunggu" ] && ok "detail sesi memuat status 'menunggu'" || gagal "detail status = $ST"
+cek "kasir ACC ditolak (403 — hanya owner/admin)" "V == 403" \
+  "$(status_code "$KASIR" POST "/stok/opname/sesi/$SESI_ACC/acc")"
+cek "owner ACC → jumlah baris di-ACC >= 1" "V >= 1" \
+  "$(api "$OWNER" POST "/stok/opname/sesi/$SESI_ACC/acc" | jq '.jumlah')"
+ST=$(api "$OWNER" GET /stok/opname/riwayat | jq -r --arg s "$SESI_ACC" '[.[]|select(.session_id==$s)][0].status')
+[ "$ST" = "disetujui" ] && ok "setelah ACC: status 'disetujui'" || gagal "status sesi = $ST (harus disetujui)"
+cek "setelah ACC: stok jadi fisik baru ($SC_FISIK)" "abs(V - $SC_FISIK) < 0.001" \
+  "$(stok_of "$(api "$OWNER" GET /stok)" "plastik take away")"
+cek "ACC ulang idempoten: jumlah 0" "V == 0" \
+  "$(api "$OWNER" POST "/stok/opname/sesi/$SESI_ACC/acc" | jq '.jumlah')"
+# --- Tolak ---
+SC_FISIK2=$(python3 -c "print($SC_FISIK - 4)")
+SESI_TOLAK=$(api "$OWNER" POST /stok/opname "{\"catatan\":\"tolak sesi\",\"items\":[{\"ingredient_id\":\"$PLASTIK_ID\",\"qty\":$SC_FISIK2}]}" | jq -r .session_id)
+cek "kasir tolak ditolak (403)" "V == 403" \
+  "$(status_code "$KASIR" POST "/stok/opname/sesi/$SESI_TOLAK/tolak")"
+cek "owner tolak → jumlah baris ditolak >= 1" "V >= 1" \
+  "$(api "$OWNER" POST "/stok/opname/sesi/$SESI_TOLAK/tolak" "{\"alasan\":\"salah hitung\"}" | jq '.jumlah')"
+ST=$(api "$OWNER" GET /stok/opname/riwayat | jq -r --arg s "$SESI_TOLAK" '[.[]|select(.session_id==$s)][0].status')
+[ "$ST" = "ditolak" ] && ok "setelah tolak: status 'ditolak'" || gagal "status sesi = $ST (harus ditolak)"
+cek "ditolak: stok tetap fisik ACC (tak berubah)" "abs(V - $SC_FISIK) < 0.001" \
+  "$(stok_of "$(api "$OWNER" GET /stok)" "plastik take away")"
+# --- Hapus ---
+cek "kasir hapus sesi ditolak (403)" "V == 403" \
+  "$(status_code "$KASIR" DELETE "/stok/opname/sesi/$SESI_TOLAK")"
+cek "owner hapus sesi → jumlah baris terhapus >= 1" "V >= 1" \
+  "$(api "$OWNER" DELETE "/stok/opname/sesi/$SESI_TOLAK" | jq '.jumlah')"
+cek "sesi hilang dari riwayat setelah dihapus" "V == 0" \
+  "$(api "$OWNER" GET /stok/opname/riwayat | jq --arg s "$SESI_TOLAK" '[.[]|select(.session_id==$s)]|length')"
+cek "hapus sesi tak ada → 404" "V == 404" \
+  "$(status_code "$OWNER" DELETE "/stok/opname/sesi/$SESI_TOLAK")"
+# --- Hapus sesi yang SUDAH disetujui → saldo balik ke sebelum opname ---
+api "$OWNER" DELETE "/stok/opname/sesi/$SESI_ACC" > /dev/null
+cek "hapus sesi disetujui: saldo balik ke fisik2 (sebelum ACC)" "abs(V - $FISIK2) < 0.001" \
+  "$(stok_of "$(api "$OWNER" GET /stok)" "plastik take away")"
+
 echo "== 16. Petugas opname per tempat penyimpanan =="
 RAK_ID=$(api "$OWNER" GET "/penyimpanan" | jq -r '[.[] | select(.nama == "Rak Uji")][0].id')
 KASIR_UID=$(api "$OWNER" GET /karyawan | jq -r '[.[] | select(.role == "cashier")][0].user_id')

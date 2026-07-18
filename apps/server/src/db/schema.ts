@@ -51,9 +51,14 @@ export const penyesuaianKategoriEnum = pgEnum("penyesuaian_kategori", [
 export const klarifikasiStatusEnum = pgEnum("klarifikasi_status", ["belum", "sudah"]);
 /**
  * status persetujuan penyesuaian stok: opname baru jadi baseline saldo
- * ('disetujui') hanya setelah owner/admin menyetujui selisih yang diklarifikasi.
+ * ('disetujui') hanya setelah owner/admin ACC sesi opname. 'ditolak' = sesi
+ * ditolak owner/admin (selisih dibuang, stok tak berubah).
  */
-export const penyesuaianStatusEnum = pgEnum("penyesuaian_status", ["menunggu", "disetujui"]);
+export const penyesuaianStatusEnum = pgEnum("penyesuaian_status", [
+  "menunggu",
+  "disetujui",
+  "ditolak",
+]);
 /** jenis meja: meja makan biasa (dine-in) vs meja "Ruang Tunggu" untuk take away */
 export const mejaTipeEnum = pgEnum("meja_tipe", ["dine_in", "takeaway"]);
 export const metodeBayarEnum = pgEnum("metode_bayar", ["tunai", "qris", "transfer"]);
