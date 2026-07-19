@@ -5,17 +5,26 @@ import { dokumenCounters, dokumenNomor } from "../../db/schema";
 type DbAtauTx = typeof DB | Parameters<Parameters<typeof DB.transaction>[0]>[0];
 
 /** Jenis dokumen bernomor (selaras enum dokumen_jenis di schema). */
-export type DokumenJenis = "beli" | "produksi" | "opname" | "perlengkapan";
+export type DokumenJenis =
+  | "beli"
+  | "produksi"
+  | "opname"
+  | "perlengkapan"
+  | "kiriman_perlengkapan"
+  | "opname_perlengkapan";
 
 /**
  * Prefiks nomor per jenis dokumen: PB (pembelian), PR (produksi), SO (stock
- * opname), PL (stok masuk perlengkapan).
+ * opname bahan), PL (stok masuk perlengkapan), KP (kiriman perlengkapan
+ * CK→cabang), OP (sesi opname perlengkapan).
  */
 const PREFIKS: Record<DokumenJenis, string> = {
   beli: "PB",
   produksi: "PR",
   opname: "SO",
   perlengkapan: "PL",
+  kiriman_perlengkapan: "KP",
+  opname_perlengkapan: "OP",
 };
 
 export function formatNomor(jenis: DokumenJenis, nomor: number): string {

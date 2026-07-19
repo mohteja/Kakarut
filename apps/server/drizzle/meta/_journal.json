@@ -365,6 +365,13 @@
       "when": 1784468406377,
       "tag": "0051_luxuriant_wild_pack",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1784469575171,
+      "tag": "0052_early_nemesis",
+      "breakpoints": true
     }
   ]
 }
