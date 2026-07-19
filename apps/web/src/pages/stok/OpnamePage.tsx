@@ -2,16 +2,23 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import type { OpnameRingkasan, PenyimpananDto, StokRowDto } from "@kakarut/shared";
-import { ErrorText, btnPrimary, btnSecondary } from "../../components/ui";
+import { ErrorText, Spinner, btnPrimary, btnSecondary } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { useBranch, useCabangData } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatAngka, formatTanggal, hariIniWIB } from "../../lib/format";
 
 /**
- * Stock opname mobile-first (layar penuh, tanpa sidebar): hitung stok fisik
- * langsung di device, bandingkan dengan sistem, lihat selisih, simpan.
+ * Stock opname bahan baku — alur bertahap:
+ *   1. pilih LOKASI (tempat penyimpanan) yang akan diopname,
+ *   2. pilih PRODUK mana saja yang dihitung,
+ *   3. baru mulai PENGECEKAN (hitung fisik vs sistem, simpan).
+ * Tampilan padat multi-kolom di layar lebar agar satu halaman muat banyak.
  */
+type Langkah = "lokasi" | "produk" | "hitung";
+const BUCKET_SEMUA = "__semua__";
+const BUCKET_TANPA = "__tanpa__";
+
 export function OpnamePage() {
   const { auth } = useAuth();
   const { query: branchQuery, id: branchId } = useCabangData();
@@ -21,18 +28,21 @@ export function OpnamePage() {
   // ditugaskan padanya (atau terbuka) — owner/admin bebas.
   const terikat = auth?.user.role === "cashier" || auth?.user.role === "tim";
 
-  const { data: stok } = useQuery({
+  const { data: stok, isLoading: stokLoading } = useQuery({
     queryKey: ["stok", branchQuery],
     queryFn: () => api<StokRowDto[]>(`/stok${branchQuery}`),
   });
-  const { data: tempatList = [] } = useQuery({
+  const { data: tempatList = [], isLoading: tempatLoading } = useQuery({
     queryKey: ["penyimpanan", branchQuery],
     queryFn: () => api<PenyimpananDto[]>(`/penyimpanan${branchQuery}`),
   });
+  const memuat = stokLoading || tempatLoading;
 
+  const [langkah, setLangkah] = useState<Langkah>("lokasi");
+  const [bucket, setBucket] = useState<string | null>(null);
+  const [dipilih, setDipilih] = useState<Record<string, boolean>>({});
   const [fisik, setFisik] = useState<Record<string, string>>({});
   const [cari, setCari] = useState("");
-  const [filterTempat, setFilterTempat] = useState("semua");
   const [konfirmasi, setKonfirmasi] = useState(false);
   const [hasil, setHasil] = useState<OpnameRingkasan | null>(null);
   // nomor sesi (SO-0001) dari respons simpan — tampil di layar sukses
@@ -54,7 +64,7 @@ export function OpnamePage() {
     return m;
   }, [tempatList]);
 
-  // tempat yang ditampilkan sebagai filter (kasir: hanya yang boleh diopname)
+  // tempat yang boleh diopname oleh user ini (kasir/tim dibatasi petugas)
   const tempatBoleh = useMemo(() => {
     if (!terikat) return tempatList;
     return tempatList.filter((t) => {
@@ -63,41 +73,75 @@ export function OpnamePage() {
     });
   }, [tempatList, terikat, myId]);
 
-  const tampil = useMemo(() => {
-    return (stok ?? [])
-      .filter((s) => s.nama.toLowerCase().includes(cari.toLowerCase()))
-      .filter((s) => {
-        if (!terikat || !s.tempat_id) return true;
-        const p = petugasByLoc.get(s.tempat_id) ?? [];
-        return p.length === 0 || p.some((x) => x.user_id === myId);
-      })
-      .filter((s) =>
-        filterTempat === "semua"
-          ? true
-          : filterTempat === "tanpa"
-            ? s.tempat_id === null
-            : s.tempat_id === filterTempat,
-      );
-  }, [stok, cari, filterTempat, terikat, petugasByLoc, myId]);
+  // seluruh bahan yang boleh dilihat user (petugas terpasang membatasi kasir/tim)
+  const stokBoleh = useMemo(() => {
+    return (stok ?? []).filter((s) => {
+      if (!terikat || !s.tempat_id) return true;
+      const p = petugasByLoc.get(s.tempat_id) ?? [];
+      return p.length === 0 || p.some((x) => x.user_id === myId);
+    });
+  }, [stok, terikat, petugasByLoc, myId]);
 
-  const petugasTerpilih =
-    filterTempat !== "semua" && filterTempat !== "tanpa"
-      ? (petugasByLoc.get(filterTempat) ?? [])
+  function itemsDiBucket(b: string): StokRowDto[] {
+    return stokBoleh.filter((s) =>
+      b === BUCKET_SEMUA
+        ? true
+        : b === BUCKET_TANPA
+          ? s.tempat_id === null
+          : s.tempat_id === b,
+    );
+  }
+
+  const adaTanpaTempat = stokBoleh.some((s) => s.tempat_id === null);
+
+  // daftar bahan pada bucket terpilih (untuk langkah produk & hitung)
+  const bucketItems = useMemo(
+    () => (bucket ? itemsDiBucket(bucket) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [bucket, stokBoleh],
+  );
+  const bucketNama =
+    bucket === BUCKET_SEMUA
+      ? "Semua tempat"
+      : bucket === BUCKET_TANPA
+        ? "Tanpa tempat"
+        : (tempatList.find((t) => t.id === bucket)?.nama ?? "Lokasi");
+  const petugasBucket =
+    bucket && bucket !== BUCKET_SEMUA && bucket !== BUCKET_TANPA
+      ? (petugasByLoc.get(bucket) ?? [])
       : null;
 
-  const terisi = Object.entries(fisik).filter(([, v]) => v !== "").length;
+  function bukaBucket(b: string) {
+    setBucket(b);
+    // default: semua produk di lokasi ini tercentang (deselect yang tak perlu)
+    const sel: Record<string, boolean> = {};
+    for (const s of itemsDiBucket(b)) sel[s.ingredient_id] = true;
+    setDipilih(sel);
+    setFisik({});
+    setCari("");
+    setLangkah("produk");
+  }
+
+  // produk terpilih (untuk langkah hitung)
+  const produkTerpilih = bucketItems.filter((s) => dipilih[s.ingredient_id]);
+  const jumlahPilih = produkTerpilih.length;
+  const tampilProduk = bucketItems.filter((s) =>
+    s.nama.toLowerCase().includes(cari.toLowerCase()),
+  );
+  const semuaTercentang = tampilProduk.length > 0 && tampilProduk.every((s) => dipilih[s.ingredient_id]);
+  const terisi = produkTerpilih.filter((s) => fisik[s.ingredient_id] !== undefined && fisik[s.ingredient_id] !== "").length;
 
   const simpan = useMutation({
     mutationFn: () => {
-      const items = Object.entries(fisik)
-        .filter(([, v]) => v !== "")
-        .map(([ingredient_id, v]) => ({ ingredient_id, qty: Number(v) }));
+      const items = produkTerpilih
+        .filter((s) => fisik[s.ingredient_id] !== undefined && fisik[s.ingredient_id] !== "")
+        .map((s) => ({ ingredient_id: s.ingredient_id, qty: Number(fisik[s.ingredient_id]) }));
       return api<{ ringkasan: OpnameRingkasan; session_id: string; nomor: string | null }>("/stok/opname", {
         method: "POST",
         body: {
           ...(!terikat && branchId ? { branch_id: branchId } : {}),
           items,
-          catatan: "Opname mobile",
+          catatan: `Opname ${bucketNama}`,
         },
       });
     },
@@ -106,6 +150,9 @@ export function OpnamePage() {
       setHasil(data.ringkasan);
       setNomorSesi(data.nomor ?? null);
       setFisik({});
+      setDipilih({});
+      setBucket(null);
+      setLangkah("lokasi");
       queryClient.invalidateQueries({ queryKey: ["stok"] });
     },
   });
@@ -116,19 +163,32 @@ export function OpnamePage() {
     return Number(v) - s.saldo;
   }
 
+  function kembali() {
+    if (langkah === "hitung") setLangkah("produk");
+    else if (langkah === "produk") setLangkah("lokasi");
+    else navigate("/");
+  }
+
+  const subJudul =
+    langkah === "lokasi"
+      ? "Pilih tempat penyimpanan"
+      : langkah === "produk"
+        ? `${bucketNama} · ${jumlahPilih} produk dipilih`
+        : `${bucketNama} · ${terisi} dari ${jumlahPilih} dihitung`;
+
   return (
     <div className="flex min-h-screen flex-col bg-stone-100">
       {/* Top bar */}
       <header className="sticky top-0 z-10 flex items-center gap-3 border-b border-stone-200 bg-white px-4 py-3 shadow-sm">
-        <Link to="/" className="text-2xl text-stone-500" aria-label="Kembali">
+        <button onClick={kembali} className="text-2xl text-stone-500" aria-label="Kembali">
           ←
-        </Link>
+        </button>
         <div className="min-w-0 flex-1">
           <div className="truncate text-base font-bold text-stone-800">
             Stok Opname — {auth?.branch?.nama ?? namaCabang}
           </div>
-          <div className="text-xs text-stone-500">
-            {formatTanggal(hariIniWIB())} · {terisi} dari {tampil.length} dihitung
+          <div className="truncate text-xs text-stone-500">
+            {formatTanggal(hariIniWIB())} · {subJudul}
           </div>
         </div>
         <Link to="/stok/opname/riwayat" className={`${btnSecondary} shrink-0`}>
@@ -136,126 +196,222 @@ export function OpnamePage() {
         </Link>
       </header>
 
-      {/* Filter */}
-      <div className="sticky top-[57px] z-10 space-y-2 border-b border-stone-200 bg-white px-4 py-2">
-        <input
-          value={cari}
-          onChange={(e) => setCari(e.target.value)}
-          placeholder="Cari bahan…"
-          className="w-full rounded-lg border border-stone-300 px-3 py-2 text-base"
-        />
-        <div className="flex gap-2 overflow-x-auto pb-1">
-          <button
-            onClick={() => setFilterTempat("semua")}
-            className={`shrink-0 rounded-full px-3 py-1 text-sm font-medium ${filterTempat === "semua" ? "bg-orange-600 text-white" : "bg-stone-100 text-stone-600"}`}
-          >
-            Semua
-          </button>
-          {tempatBoleh.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => setFilterTempat(t.id)}
-              className={`shrink-0 rounded-full px-3 py-1 text-sm font-medium ${filterTempat === t.id ? "bg-orange-600 text-white" : "bg-stone-100 text-stone-600"}`}
-            >
-              {t.nama}
-            </button>
-          ))}
-          <button
-            onClick={() => setFilterTempat("tanpa")}
-            className={`shrink-0 rounded-full px-3 py-1 text-sm font-medium ${filterTempat === "tanpa" ? "bg-orange-600 text-white" : "bg-stone-100 text-stone-600"}`}
-          >
-            Tanpa tempat
-          </button>
+      {/* Langkah indikator */}
+      <div className="flex items-center gap-1 border-b border-stone-200 bg-white px-4 py-2 text-xs font-medium">
+        <StepChip n={1} label="Lokasi" aktif={langkah === "lokasi"} selesai={langkah !== "lokasi"} />
+        <span className="text-stone-300">→</span>
+        <StepChip n={2} label="Produk" aktif={langkah === "produk"} selesai={langkah === "hitung"} />
+        <span className="text-stone-300">→</span>
+        <StepChip n={3} label="Pengecekan" aktif={langkah === "hitung"} selesai={false} />
+      </div>
+
+      {/* ---------- LANGKAH 1: pilih lokasi ---------- */}
+      {langkah === "lokasi" && memuat && (
+        <div className="flex flex-1 items-center justify-center py-20">
+          <Spinner />
         </div>
-        {petugasTerpilih !== null && (
-          <div className="text-xs text-stone-500">
-            👤 Petugas opname:{" "}
-            {petugasTerpilih.length === 0 ? (
-              <span className="text-stone-400">semua boleh (belum diatur)</span>
-            ) : (
-              <span className="font-medium text-stone-600">
-                {petugasTerpilih.map((p) => p.nama).join(", ")}
-              </span>
+      )}
+      {langkah === "lokasi" && !memuat && (
+        <main className="flex-1 p-3 pb-8">
+          <p className="mb-3 text-sm text-stone-500">
+            Pilih dulu tempat penyimpanan yang akan diopname. Anda lalu memilih produk mana
+            saja yang dihitung.
+          </p>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
+            {tempatBoleh.map((t) => {
+              const n = itemsDiBucket(t.id).length;
+              return (
+                <LokasiCard
+                  key={t.id}
+                  nama={t.nama}
+                  jumlah={n}
+                  petugas={t.petugas.map((p) => p.nama)}
+                  onClick={() => bukaBucket(t.id)}
+                />
+              );
+            })}
+            {adaTanpaTempat && (
+              <LokasiCard
+                nama="Tanpa tempat"
+                jumlah={itemsDiBucket(BUCKET_TANPA).length}
+                petugas={[]}
+                onClick={() => bukaBucket(BUCKET_TANPA)}
+              />
+            )}
+            {!terikat && (
+              <LokasiCard
+                nama="Semua tempat"
+                jumlah={stokBoleh.length}
+                petugas={[]}
+                catatan="Opname seluruh bahan sekaligus"
+                onClick={() => bukaBucket(BUCKET_SEMUA)}
+              />
             )}
           </div>
-        )}
-        {terikat && (
-          <div className="text-xs text-stone-400">
-            Anda hanya melihat bahan di tempat yang boleh Anda opname.
-          </div>
-        )}
-      </div>
-
-      {/* Kartu bahan */}
-      <main className="flex-1 space-y-2 p-3 pb-28">
-        {tampil.map((s) => {
-          const selisih = selisihDari(s);
-          return (
-            <div key={s.ingredient_id} className="rounded-xl border border-stone-200 bg-white p-3">
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <div className="font-semibold text-stone-800">{s.nama}</div>
-                  <div className="text-sm text-stone-500">
-                    Sistem: <b className="text-stone-700">{formatAngka(s.saldo)} {s.satuan}</b>
-                    {s.tempat && <span className="ml-1 text-stone-400">· {s.tempat}</span>}
-                  </div>
-                </div>
-                {selisih !== null &&
-                  (Math.abs(selisih) < 1e-9 ? (
-                    <span className="shrink-0 rounded-full bg-green-100 px-2 py-1 text-xs font-semibold text-green-800">
-                      Cocok
-                    </span>
-                  ) : selisih > 0 ? (
-                    <span className="shrink-0 rounded-full bg-yellow-100 px-2 py-1 text-xs font-semibold text-yellow-800">
-                      Lebih {formatAngka(selisih)}
-                    </span>
-                  ) : (
-                    <span className="shrink-0 rounded-full bg-red-100 px-2 py-1 text-xs font-semibold text-red-700">
-                      Kurang {formatAngka(-selisih)}
-                    </span>
-                  ))}
-              </div>
-              <div className="mt-2 flex items-center gap-2">
-                <input
-                  type="number"
-                  inputMode="decimal"
-                  min="0"
-                  step="any"
-                  value={fisik[s.ingredient_id] ?? ""}
-                  onChange={(e) =>
-                    setFisik({ ...fisik, [s.ingredient_id]: e.target.value })
-                  }
-                  placeholder="Stok fisik…"
-                  className="h-12 flex-1 rounded-lg border border-stone-300 px-3 text-lg font-semibold focus:border-orange-500 focus:outline-none"
-                />
-                <button
-                  onClick={() =>
-                    setFisik({ ...fisik, [s.ingredient_id]: String(s.saldo) })
-                  }
-                  className="h-12 shrink-0 rounded-lg border border-stone-300 px-3 text-sm font-medium text-stone-600"
-                  title="Isi sama dengan sistem"
-                >
-                  = sistem
-                </button>
-              </div>
+          {tempatBoleh.length === 0 && !adaTanpaTempat && (
+            <div className="py-10 text-center text-sm text-stone-400">
+              Belum ada tempat penyimpanan yang bisa Anda opname.
             </div>
-          );
-        })}
-        {tampil.length === 0 && (
-          <div className="py-10 text-center text-sm text-stone-400">Tidak ada bahan.</div>
-        )}
-      </main>
+          )}
+        </main>
+      )}
 
-      {/* Action bar */}
-      <div className="fixed inset-x-0 bottom-0 border-t border-stone-200 bg-white p-3">
-        <button
-          onClick={() => setKonfirmasi(true)}
-          disabled={terisi === 0}
-          className={`${btnPrimary} w-full py-3 text-base`}
-        >
-          Simpan Opname ({terisi} dihitung)
-        </button>
-      </div>
+      {/* ---------- LANGKAH 2: pilih produk ---------- */}
+      {langkah === "produk" && (
+        <>
+          <div className="sticky top-[97px] z-10 space-y-2 border-b border-stone-200 bg-white px-4 py-2">
+            <input
+              value={cari}
+              onChange={(e) => setCari(e.target.value)}
+              placeholder="Cari bahan…"
+              className="w-full rounded-lg border border-stone-300 px-3 py-2 text-base"
+            />
+            <div className="flex items-center justify-between text-sm">
+              <label className="flex items-center gap-2 font-medium text-stone-600">
+                <input
+                  type="checkbox"
+                  checked={semuaTercentang}
+                  onChange={(e) => {
+                    const next = { ...dipilih };
+                    for (const s of tampilProduk) next[s.ingredient_id] = e.target.checked;
+                    setDipilih(next);
+                  }}
+                  className="h-4 w-4"
+                />
+                Pilih semua
+              </label>
+              <span className="text-stone-500">{jumlahPilih} dipilih</span>
+            </div>
+            {petugasBucket !== null && (
+              <div className="text-xs text-stone-500">
+                👤 Petugas opname:{" "}
+                {petugasBucket.length === 0 ? (
+                  <span className="text-stone-400">semua boleh (belum diatur)</span>
+                ) : (
+                  <span className="font-medium text-stone-600">
+                    {petugasBucket.map((p) => p.nama).join(", ")}
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+          <main className="flex-1 p-3 pb-28">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {tampilProduk.map((s) => {
+                const on = !!dipilih[s.ingredient_id];
+                return (
+                  <button
+                    key={s.ingredient_id}
+                    onClick={() => setDipilih({ ...dipilih, [s.ingredient_id]: !on })}
+                    className={`flex items-center gap-3 rounded-xl border p-3 text-left ${
+                      on ? "border-orange-500 bg-orange-50" : "border-stone-200 bg-white"
+                    }`}
+                  >
+                    <input type="checkbox" checked={on} readOnly className="h-5 w-5 shrink-0" />
+                    <div className="min-w-0">
+                      <div className="truncate font-semibold text-stone-800">{s.nama}</div>
+                      <div className="text-sm text-stone-500">
+                        Sistem: {formatAngka(s.saldo)} {s.satuan}
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+            {tampilProduk.length === 0 && (
+              <div className="py-10 text-center text-sm text-stone-400">
+                {cari ? `Bahan "${cari}" tidak ditemukan.` : "Tidak ada bahan di lokasi ini."}
+              </div>
+            )}
+          </main>
+          <div className="fixed inset-x-0 bottom-0 flex gap-2 border-t border-stone-200 bg-white p-3">
+            <button onClick={() => setLangkah("lokasi")} className={`${btnSecondary} shrink-0`}>
+              ← Lokasi
+            </button>
+            <button
+              onClick={() => setLangkah("hitung")}
+              disabled={jumlahPilih === 0}
+              className={`${btnPrimary} flex-1 py-3 text-base`}
+            >
+              Mulai Pengecekan ({jumlahPilih} produk)
+            </button>
+          </div>
+        </>
+      )}
+
+      {/* ---------- LANGKAH 3: pengecekan (hitung fisik) ---------- */}
+      {langkah === "hitung" && (
+        <>
+          <div className="sticky top-[97px] z-10 border-b border-stone-200 bg-white px-4 py-2 text-xs text-stone-500">
+            Isi stok fisik tiap produk. Produk yang dikosongkan tidak dihitung — selisih
+            menunggu ACC owner/admin.
+          </div>
+          <main className="flex-1 p-3 pb-28">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
+              {produkTerpilih.map((s) => {
+                const selisih = selisihDari(s);
+                return (
+                  <div key={s.ingredient_id} className="rounded-xl border border-stone-200 bg-white p-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="truncate font-semibold text-stone-800">{s.nama}</div>
+                        <div className="text-sm text-stone-500">
+                          Sistem: <b className="text-stone-700">{formatAngka(s.saldo)} {s.satuan}</b>
+                        </div>
+                      </div>
+                      {selisih !== null &&
+                        (Math.abs(selisih) < 1e-9 ? (
+                          <span className="shrink-0 rounded-full bg-green-100 px-2 py-1 text-xs font-semibold text-green-800">
+                            Cocok
+                          </span>
+                        ) : selisih > 0 ? (
+                          <span className="shrink-0 rounded-full bg-yellow-100 px-2 py-1 text-xs font-semibold text-yellow-800">
+                            Lebih {formatAngka(selisih)}
+                          </span>
+                        ) : (
+                          <span className="shrink-0 rounded-full bg-red-100 px-2 py-1 text-xs font-semibold text-red-700">
+                            Kurang {formatAngka(-selisih)}
+                          </span>
+                        ))}
+                    </div>
+                    <div className="mt-2 flex items-center gap-2">
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        min="0"
+                        step="any"
+                        value={fisik[s.ingredient_id] ?? ""}
+                        onChange={(e) => setFisik({ ...fisik, [s.ingredient_id]: e.target.value })}
+                        placeholder="Stok fisik…"
+                        className="h-12 flex-1 rounded-lg border border-stone-300 px-3 text-lg font-semibold focus:border-orange-500 focus:outline-none"
+                      />
+                      <button
+                        onClick={() => setFisik({ ...fisik, [s.ingredient_id]: String(s.saldo) })}
+                        className="h-12 shrink-0 rounded-lg border border-stone-300 px-3 text-sm font-medium text-stone-600"
+                        title="Isi sama dengan sistem"
+                      >
+                        = sistem
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </main>
+          <div className="fixed inset-x-0 bottom-0 flex gap-2 border-t border-stone-200 bg-white p-3">
+            <button onClick={() => setLangkah("produk")} className={`${btnSecondary} shrink-0`}>
+              ← Produk
+            </button>
+            <button
+              onClick={() => setKonfirmasi(true)}
+              disabled={terisi === 0}
+              className={`${btnPrimary} flex-1 py-3 text-base`}
+            >
+              Simpan Opname ({terisi} dihitung)
+            </button>
+          </div>
+        </>
+      )}
 
       {/* Sheet konfirmasi */}
       {konfirmasi && (
@@ -267,7 +423,7 @@ export function OpnamePage() {
               berubah. Selisih akan tercatat di riwayat.
             </p>
             <div className="mb-4 max-h-64 space-y-1 overflow-y-auto">
-              {(stok ?? [])
+              {produkTerpilih
                 .filter((s) => fisik[s.ingredient_id] !== undefined && fisik[s.ingredient_id] !== "")
                 .map((s) => {
                   const sel = selisihDari(s)!;
@@ -340,8 +496,8 @@ export function OpnamePage() {
               </div>
             )}
             <div className="mt-4 flex gap-2">
-              <button onClick={() => navigate("/stok")} className={`${btnSecondary} flex-1`}>
-                Ke Stok
+              <button onClick={() => setHasil(null)} className={`${btnSecondary} flex-1`}>
+                Opname Lagi
               </button>
               <button
                 onClick={() => navigate("/stok/opname/riwayat")}
@@ -354,5 +510,55 @@ export function OpnamePage() {
         </div>
       )}
     </div>
+  );
+}
+
+function StepChip({ n, label, aktif, selesai }: { n: number; label: string; aktif: boolean; selesai: boolean }) {
+  return (
+    <span
+      className={`flex items-center gap-1 rounded-full px-2 py-0.5 ${
+        aktif
+          ? "bg-orange-600 text-white"
+          : selesai
+            ? "bg-green-100 text-green-700"
+            : "bg-stone-100 text-stone-500"
+      }`}
+    >
+      <span className="flex h-4 w-4 items-center justify-center rounded-full bg-white/30 text-[10px] font-bold">
+        {selesai ? "✓" : n}
+      </span>
+      {label}
+    </span>
+  );
+}
+
+function LokasiCard({
+  nama,
+  jumlah,
+  petugas,
+  catatan,
+  onClick,
+}: {
+  nama: string;
+  jumlah: number;
+  petugas: string[];
+  catatan?: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="flex items-center justify-between gap-3 rounded-xl border border-stone-200 bg-white p-4 text-left transition hover:border-orange-400 hover:bg-orange-50"
+    >
+      <div className="min-w-0">
+        <div className="truncate text-base font-bold text-stone-800">📦 {nama}</div>
+        <div className="text-sm text-stone-500">{jumlah} bahan</div>
+        {catatan && <div className="text-xs text-stone-400">{catatan}</div>}
+        {petugas.length > 0 && (
+          <div className="mt-0.5 truncate text-xs text-stone-400">👤 {petugas.join(", ")}</div>
+        )}
+      </div>
+      <span className="shrink-0 text-2xl text-stone-300">›</span>
+    </button>
   );
 }

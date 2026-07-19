@@ -212,6 +212,12 @@ export async function saldoPerlengkapan(
     .from(branches)
     .where(and(eq(branches.id, branchId), eq(branches.companyId, companyId)));
   const ckId = cab && cab.tipe !== "central_kitchen" ? (cab.ckId ?? null) : null;
+  // rak simpan default (nama tempat penyimpanan) per item — utk memilih lokasi opname
+  const rakRows = await db
+    .select({ id: storageLocations.id, nama: storageLocations.nama })
+    .from(storageLocations)
+    .where(eq(storageLocations.companyId, companyId));
+  const rakById = new Map(rakRows.map((r) => [r.id, r.nama]));
   const rows = await db
     .select({
       id: supplies.id,
@@ -220,6 +226,7 @@ export async function saldoPerlengkapan(
       hargaBeli: supplies.hargaBeli,
       stokMinimum: supplies.stokMinimum,
       catatan: supplies.catatan,
+      storageLocationId: supplies.storageLocationId,
       saldo: sql<number>`COALESCE((SELECT SUM(${supplyMutations.qty}) FROM ${supplyMutations} WHERE ${supplyMutations.supplyId} = ${supplies.id} AND ${supplyMutations.branchId} = ${branchId} AND ${supplyMutations.status} = 'disetujui'), 0)::float8`,
       saldoCk: ckId
         ? sql<number>`COALESCE((SELECT SUM(${supplyMutations.qty}) FROM ${supplyMutations} WHERE ${supplyMutations.supplyId} = ${supplies.id} AND ${supplyMutations.branchId} = ${ckId} AND ${supplyMutations.status} = 'disetujui'), 0)::float8`
@@ -246,6 +253,10 @@ export async function saldoPerlengkapan(
     catatan: r.catatan,
     saldo: r.saldo,
     status: statusPerlengkapan(r.saldo, r.stokMinimum),
+    rak:
+      r.storageLocationId && rakById.has(r.storageLocationId)
+        ? { id: r.storageLocationId, nama: rakById.get(r.storageLocationId)! }
+        : null,
     aturan:
       r.aturanQty != null
         ? {
