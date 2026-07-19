@@ -7,7 +7,12 @@
 import { randomUUID } from "node:crypto";
 import { and, asc, desc, eq, gte, inArray, lt, lte, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
-import type { KartuPerlengkapanDto, PerlengkapanRowDto, StokStatus } from "@kakarut/shared";
+import type {
+  KartuPerlengkapanDto,
+  PerlengkapanMasterRow,
+  PerlengkapanRowDto,
+  StokStatus,
+} from "@kakarut/shared";
 import { db } from "../../db/client";
 import {
   branches,
@@ -245,6 +250,86 @@ export async function saldoPerlengkapan(
         : null,
     saldo_ck: r.saldoCk,
   }));
+}
+
+/**
+ * MASTER + sebaran: seluruh item aktif se-perusahaan, tiap item membawa
+ * daftar cabang tempat ia "ada" (saldo ≠ 0 atau aturan konsumsi terpasang) —
+ * untuk halaman master Manajemen yang tanpa pemilih cabang.
+ */
+export async function sebaranPerlengkapan(companyId: string): Promise<PerlengkapanMasterRow[]> {
+  const items = await db
+    .select()
+    .from(supplies)
+    .where(and(eq(supplies.companyId, companyId), eq(supplies.isActive, true)))
+    .orderBy(asc(supplies.nama));
+  const cabang = await db
+    .select({ id: branches.id, nama: branches.nama })
+    .from(branches)
+    .where(and(eq(branches.companyId, companyId), eq(branches.isActive, true)))
+    .orderBy(asc(branches.createdAt));
+  const namaCabang = new Map(cabang.map((b) => [b.id, b.nama]));
+  const urutan = new Map(cabang.map((b, i) => [b.id, i]));
+  const saldoRows = await db
+    .select({
+      supplyId: supplyMutations.supplyId,
+      branchId: supplyMutations.branchId,
+      saldo: sql<number>`COALESCE(SUM(${supplyMutations.qty}), 0)::float8`,
+    })
+    .from(supplyMutations)
+    .where(
+      and(eq(supplyMutations.companyId, companyId), eq(supplyMutations.status, "disetujui")),
+    )
+    .groupBy(supplyMutations.supplyId, supplyMutations.branchId);
+  const ruleRows = await db
+    .select({
+      supplyId: supplyRules.supplyId,
+      branchId: supplyRules.branchId,
+      qty: supplyRules.qty,
+      perHari: supplyRules.perHari,
+      aktif: supplyRules.aktif,
+      mulai: supplyRules.mulai,
+    })
+    .from(supplyRules)
+    .where(eq(supplyRules.companyId, companyId));
+
+  const saldoPer = new Map<string, number>(); // `${supplyId}|${branchId}` → saldo
+  for (const r of saldoRows) saldoPer.set(`${r.supplyId}|${r.branchId}`, r.saldo);
+  const rulePer = new Map<string, (typeof ruleRows)[number]>();
+  for (const r of ruleRows) rulePer.set(`${r.supplyId}|${r.branchId}`, r);
+
+  return items.map((it) => {
+    const branchIds = new Set<string>();
+    for (const r of saldoRows) {
+      if (r.supplyId === it.id && Math.abs(r.saldo) > 1e-9) branchIds.add(r.branchId);
+    }
+    for (const r of ruleRows) if (r.supplyId === it.id) branchIds.add(r.branchId);
+    const lokasi = [...branchIds]
+      .filter((bid) => namaCabang.has(bid)) // cabang nonaktif tak ditampilkan
+      .sort((a, b) => (urutan.get(a) ?? 0) - (urutan.get(b) ?? 0))
+      .map((bid) => {
+        const saldo = saldoPer.get(`${it.id}|${bid}`) ?? 0;
+        const rule = rulePer.get(`${it.id}|${bid}`);
+        return {
+          branch_id: bid,
+          branch_nama: namaCabang.get(bid)!,
+          saldo,
+          status: statusPerlengkapan(saldo, it.stokMinimum),
+          aturan: rule
+            ? { qty: rule.qty, per_hari: rule.perHari, aktif: rule.aktif, mulai: rule.mulai }
+            : null,
+        };
+      });
+    return {
+      id: it.id,
+      nama: it.nama,
+      satuan: it.satuan,
+      harga_beli: it.hargaBeli,
+      stok_minimum: it.stokMinimum,
+      catatan: it.catatan,
+      lokasi,
+    };
+  });
 }
 
 /** Saldo satu item di satu cabang (untuk validasi pakai/koreksi & respons). */

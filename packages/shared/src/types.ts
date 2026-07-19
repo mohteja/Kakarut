@@ -927,6 +927,30 @@ export interface PerlengkapanRowDto {
   saldo_ck: number | null;
 }
 
+/** Satu lokasi (cabang) tempat perlengkapan berada + aturan konsumsinya. */
+export interface PerlengkapanLokasiDto {
+  branch_id: string;
+  branch_nama: string;
+  saldo: number;
+  status: StokStatus;
+  aturan: PerlengkapanAturanDto | null;
+}
+
+/**
+ * Baris MASTER perlengkapan (halaman Manajemen, tanpa pilih cabang):
+ * data item se-perusahaan + sebaran "ada di cabang mana saja".
+ */
+export interface PerlengkapanMasterRow {
+  id: string;
+  nama: string;
+  satuan: string;
+  harga_beli: number;
+  stok_minimum: number;
+  catatan: string | null;
+  /** cabang dengan saldo ≠ 0 ATAU aturan konsumsi terpasang */
+  lokasi: PerlengkapanLokasiDto[];
+}
+
 /** Kiriman perlengkapan CK → cabang (stok pindah saat cabang menerima). */
 export interface KirimanPerlengkapanDto {
   id: string;

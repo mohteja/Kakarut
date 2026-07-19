@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import type { PerlengkapanRowDto } from "@kakarut/shared";
+import type { PerlengkapanAturanDto, PerlengkapanMasterRow } from "@kakarut/shared";
 import {
   Card,
   ErrorText,
@@ -13,43 +13,41 @@ import {
   tdClass,
   thClass,
 } from "../../components/ui";
-import { CabangDataBar } from "../../components/CabangDataBar";
-import { useCabangData } from "../../context/BranchContext";
+import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah } from "../../lib/format";
 
-/** Label aturan konsumsi: "1 sachet / hari", "2 pcs / 3 hari", "nonaktif". */
-function labelAturan(r: PerlengkapanRowDto): string | null {
-  if (!r.aturan) return null;
-  const per = r.aturan.per_hari === 1 ? "hari" : `${r.aturan.per_hari} hari`;
-  const teks = `${formatAngka(r.aturan.qty)} ${r.satuan} / ${per}`;
-  return r.aturan.aktif ? teks : `${teks} (nonaktif)`;
+/** Label aturan konsumsi: "1 / hari", "2 / 3 hari", "(nonaktif)". */
+function labelAturan(a: PerlengkapanAturanDto, satuan: string): string {
+  const per = a.per_hari === 1 ? "hari" : `${a.per_hari} hari`;
+  const teks = `${formatAngka(a.qty)} ${satuan} / ${per}`;
+  return a.aktif ? teks : `${teks} (nonaktif)`;
 }
 
 type ModalState =
-  | { jenis: "item"; item: PerlengkapanRowDto | null }
-  | { jenis: "aturan"; item: PerlengkapanRowDto }
+  | { jenis: "item"; item: PerlengkapanMasterRow | null }
+  | { jenis: "aturan"; item: PerlengkapanMasterRow }
   | null;
 
 /**
  * MASTER perlengkapan non bahan baku (sendok, spons, sabun) — seperti halaman
  * Bahan Baku: hanya pengaturan nama, satuan, harga, stok minimum, dan aturan
- * konsumsi. Stok fisiknya (saldo, stok awal, stok masuk, opname, kiriman)
- * dikelola di halaman Stok → tab Perlengkapan.
+ * konsumsi. TANPA pemilih cabang: semua item tampil, tiap produk menunjukkan
+ * "ada di cabang mana saja". Stok fisiknya dikelola di Stok → tab Perlengkapan.
  */
 export function PerlengkapanPage() {
   const queryClient = useQueryClient();
-  const { query: branchQuery } = useCabangData();
 
   const { data: rows, isLoading } = useQuery({
-    queryKey: ["perlengkapan", branchQuery],
-    queryFn: () => api<PerlengkapanRowDto[]>(`/perlengkapan${branchQuery}`),
+    queryKey: ["perlengkapan-master"],
+    queryFn: () => api<PerlengkapanMasterRow[]>("/perlengkapan/master"),
   });
 
   const [modal, setModal] = useState<ModalState>(null);
   const [cari, setCari] = useState("");
 
   const segarkan = () => {
+    queryClient.invalidateQueries({ queryKey: ["perlengkapan-master"] });
     queryClient.invalidateQueries({ queryKey: ["perlengkapan"] });
   };
 
@@ -63,7 +61,7 @@ export function PerlengkapanPage() {
   );
 
   return (
-    <div className="max-w-3xl">
+    <div className="max-w-4xl">
       <PageTitle
         aksi={
           <button onClick={() => setModal({ jenis: "item", item: null })} className={btnPrimary}>
@@ -74,12 +72,11 @@ export function PerlengkapanPage() {
         🧰 Perlengkapan
       </PageTitle>
       <div className="mb-3 rounded-lg bg-blue-50 px-4 py-2 text-sm text-blue-800">
-        Master barang <b>non bahan baku</b> (sendok, spons, sabun…) — seperti Bahan Baku:
-        hanya pengaturan <b>nama, harga, dan aturan konsumsi</b>. Stok fisiknya (stok awal,
-        stok masuk, opname, kiriman) dikelola di halaman <b>Stok → tab Perlengkapan</b>.
+        Master barang <b>non bahan baku</b> (sendok, spons, sabun…) berlaku se-perusahaan —
+        hanya pengaturan <b>nama, harga, dan aturan konsumsi</b>. Kolom <b>Ada di</b>{" "}
+        menunjukkan cabang yang memegang stoknya. Stok fisik (stok awal, stok masuk, opname,
+        kiriman) dikelola di halaman <b>Stok → tab Perlengkapan</b>.
       </div>
-      {/* Aturan konsumsi berlaku PER CABANG — pilih cabang datanya dari Kantor */}
-      <CabangDataBar />
       <ErrorText error={hapus.error} />
 
       <div className="mb-3">
@@ -105,10 +102,9 @@ export function PerlengkapanPage() {
             <thead className="border-b border-stone-200 bg-stone-50">
               <tr>
                 <th className={thClass}>Perlengkapan</th>
-                <th className={thClass}>Satuan</th>
                 <th className={`${thClass} text-right`}>Harga Beli</th>
                 <th className={`${thClass} text-right`}>Stok Minimum</th>
-                <th className={thClass}>Aturan Konsumsi</th>
+                <th className={thClass}>Ada di (saldo · aturan konsumsi)</th>
                 <th className={thClass}></th>
               </tr>
             </thead>
@@ -116,20 +112,40 @@ export function PerlengkapanPage() {
               {tampil.map((r) => (
                 <tr key={r.id} className="hover:bg-stone-50">
                   <td className={`${tdClass} font-medium`}>
-                    {r.nama}
+                    {r.nama} <span className="text-xs font-normal text-stone-400">({r.satuan})</span>
                     {r.catatan && (
-                      <span className="ml-2 text-xs font-normal text-stone-400">{r.catatan}</span>
+                      <div className="text-xs font-normal text-stone-400">{r.catatan}</div>
                     )}
                   </td>
-                  <td className={`${tdClass} text-stone-500`}>{r.satuan}</td>
                   <td className={`${tdClass} text-right`}>
                     {r.harga_beli > 0 ? formatRupiah(r.harga_beli) : "—"}
                   </td>
                   <td className={`${tdClass} text-right text-stone-500`}>
                     {r.stok_minimum > 0 ? formatAngka(r.stok_minimum) : "—"}
                   </td>
-                  <td className={`${tdClass} text-stone-600`}>
-                    {labelAturan(r) ?? <span className="text-stone-400">manual</span>}
+                  <td className={tdClass}>
+                    {r.lokasi.length === 0 ? (
+                      <span className="text-xs text-stone-400">belum ada di cabang mana pun</span>
+                    ) : (
+                      <div className="flex flex-wrap gap-1.5">
+                        {r.lokasi.map((l) => (
+                          <span
+                            key={l.branch_id}
+                            className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                              l.status === "habis"
+                                ? "bg-red-50 text-red-700"
+                                : l.status === "menipis"
+                                  ? "bg-amber-50 text-amber-800"
+                                  : "bg-stone-100 text-stone-700"
+                            }`}
+                            title={`${l.branch_nama}: saldo ${formatAngka(l.saldo)} ${r.satuan}${l.aturan ? ` · aturan ${labelAturan(l.aturan, r.satuan)}` : ""}`}
+                          >
+                            🏪 {l.branch_nama} · <b>{formatAngka(l.saldo)}</b> {r.satuan}
+                            {l.aturan && <> · ⏱ {labelAturan(l.aturan, r.satuan)}</>}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </td>
                   <td className={`${tdClass} whitespace-nowrap text-right`}>
                     <span className="flex justify-end gap-1.5">
@@ -167,12 +183,7 @@ export function PerlengkapanPage() {
         <ItemModal item={modal.item} onClose={() => setModal(null)} onSukses={segarkan} />
       )}
       {modal?.jenis === "aturan" && (
-        <AturanModal
-          item={modal.item}
-          branchQuery={branchQuery}
-          onClose={() => setModal(null)}
-          onSukses={segarkan}
-        />
+        <AturanModal item={modal.item} onClose={() => setModal(null)} onSukses={segarkan} />
       )}
     </div>
   );
@@ -183,7 +194,7 @@ function ItemModal({
   onClose,
   onSukses,
 }: {
-  item: PerlengkapanRowDto | null;
+  item: PerlengkapanMasterRow | null;
   onClose: () => void;
   onSukses: () => void;
 }) {
@@ -250,24 +261,81 @@ function ItemModal({
   );
 }
 
+/**
+ * Aturan konsumsi berlaku PER CABANG — cabangnya dipilih di dalam modal
+ * (halaman master tidak lagi punya pemilih cabang).
+ */
 function AturanModal({
   item,
-  branchQuery,
   onClose,
   onSukses,
 }: {
-  item: PerlengkapanRowDto;
-  branchQuery: string;
+  item: PerlengkapanMasterRow;
   onClose: () => void;
   onSukses: () => void;
 }) {
-  const [qty, setQty] = useState(item.aturan ? String(item.aturan.qty) : "1");
-  const [perHari, setPerHari] = useState(item.aturan ? String(item.aturan.per_hari) : "1");
-  const [aktif, setAktif] = useState(item.aturan?.aktif ?? true);
-  const [mulai, setMulai] = useState(item.aturan?.mulai ?? "");
+  const { cabang } = useBranch();
+  // kantor tidak menyimpan stok — aturan hanya untuk store / central kitchen
+  const opsi = cabang.filter((b) => b.tipe !== "kantor");
+  const [branchId, setBranchId] = useState(
+    item.lokasi[0]?.branch_id ?? opsi[0]?.id ?? "",
+  );
+  const aturan = item.lokasi.find((l) => l.branch_id === branchId)?.aturan ?? null;
+  return (
+    <Modal open onClose={onClose} title={`Aturan Konsumsi — ${item.nama}`}>
+      <div className="space-y-3">
+        <div className="rounded-lg bg-indigo-50 px-3 py-2 text-sm text-indigo-800">
+          Stok berkurang <b>otomatis</b> sesuai aturan — mis. sabun <b>1 sachet / hari</b> atau
+          spons <b>1 pcs / 7 hari</b>. Aturan berlaku <b>per cabang</b>.
+        </div>
+        <label className="block text-sm">
+          Cabang
+          <select
+            value={branchId}
+            onChange={(e) => setBranchId(e.target.value)}
+            className={inputClass}
+          >
+            {opsi.map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.nama}
+              </option>
+            ))}
+          </select>
+        </label>
+        {/* key = cabang → form ter-reset ke aturan cabang terpilih */}
+        <AturanForm
+          key={branchId}
+          item={item}
+          branchId={branchId}
+          aturan={aturan}
+          onClose={onClose}
+          onSukses={onSukses}
+        />
+      </div>
+    </Modal>
+  );
+}
+
+function AturanForm({
+  item,
+  branchId,
+  aturan,
+  onClose,
+  onSukses,
+}: {
+  item: PerlengkapanMasterRow;
+  branchId: string;
+  aturan: PerlengkapanAturanDto | null;
+  onClose: () => void;
+  onSukses: () => void;
+}) {
+  const [qty, setQty] = useState(aturan ? String(aturan.qty) : "1");
+  const [perHari, setPerHari] = useState(aturan ? String(aturan.per_hari) : "1");
+  const [aktif, setAktif] = useState(aturan?.aktif ?? true);
+  const [mulai, setMulai] = useState(aturan?.mulai ?? "");
   const kirim = useMutation({
     mutationFn: () =>
-      api(`/perlengkapan/${item.id}/aturan${branchQuery}`, {
+      api(`/perlengkapan/${item.id}/aturan?branch_id=${branchId}`, {
         method: "PUT",
         body: {
           qty: Number(qty),
@@ -282,42 +350,43 @@ function AturanModal({
     },
   });
   return (
-    <Modal open onClose={onClose} title={`Aturan Konsumsi — ${item.nama}`}>
-      <div className="space-y-3">
-        <div className="rounded-lg bg-indigo-50 px-3 py-2 text-sm text-indigo-800">
-          Stok berkurang <b>otomatis</b> sesuai aturan — mis. sabun <b>1 sachet / hari</b> atau
-          spons <b>1 pcs / 7 hari</b>. Berlaku untuk cabang yang sedang dipilih.
+    <>
+      {aturan && (
+        <div className="text-xs text-stone-500">
+          Aturan saat ini: <b>{formatAngka(aturan.qty)} {item.satuan}</b> /{" "}
+          {aturan.per_hari === 1 ? "hari" : `${aturan.per_hari} hari`}
+          {aturan.aktif ? "" : " (nonaktif)"}
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <label className="block text-sm">
-            Jumlah terpakai ({item.satuan})
-            <input type="number" min={0} step="any" value={qty} onChange={(e) => setQty(e.target.value)} className={inputClass} />
-          </label>
-          <label className="block text-sm">
-            Setiap … hari
-            <input type="number" min={1} max={365} value={perHari} onChange={(e) => setPerHari(e.target.value)} className={inputClass} />
-          </label>
-        </div>
+      )}
+      <div className="grid grid-cols-2 gap-3">
         <label className="block text-sm">
-          Mulai berlaku (kosong = hari ini)
-          <input type="date" value={mulai} onChange={(e) => setMulai(e.target.value)} className={inputClass} />
+          Jumlah terpakai ({item.satuan})
+          <input type="number" min={0} step="any" value={qty} onChange={(e) => setQty(e.target.value)} className={inputClass} />
         </label>
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={aktif} onChange={(e) => setAktif(e.target.checked)} />
-          Aturan aktif
+        <label className="block text-sm">
+          Setiap … hari
+          <input type="number" min={1} max={365} value={perHari} onChange={(e) => setPerHari(e.target.value)} className={inputClass} />
         </label>
-        <ErrorText error={kirim.error} />
-        <div className="flex justify-end gap-2">
-          <button onClick={onClose} className={btnSecondary}>Batal</button>
-          <button
-            onClick={() => kirim.mutate()}
-            disabled={!(Number(qty) > 0) || kirim.isPending}
-            className={btnPrimary}
-          >
-            ⏱ Simpan Aturan
-          </button>
-        </div>
       </div>
-    </Modal>
+      <label className="block text-sm">
+        Mulai berlaku (kosong = hari ini)
+        <input type="date" value={mulai} onChange={(e) => setMulai(e.target.value)} className={inputClass} />
+      </label>
+      <label className="flex items-center gap-2 text-sm">
+        <input type="checkbox" checked={aktif} onChange={(e) => setAktif(e.target.checked)} />
+        Aturan aktif
+      </label>
+      <ErrorText error={kirim.error} />
+      <div className="flex justify-end gap-2">
+        <button onClick={onClose} className={btnSecondary}>Batal</button>
+        <button
+          onClick={() => kirim.mutate()}
+          disabled={!branchId || !(Number(qty) > 0) || kirim.isPending}
+          className={btnPrimary}
+        >
+          ⏱ Simpan Aturan
+        </button>
+      </div>
+    </>
   );
 }

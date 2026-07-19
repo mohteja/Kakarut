@@ -25,6 +25,7 @@ import {
   riwayatOpnamePerlengkapan,
   saldoPerlengkapan,
   saldoSatuPerlengkapan,
+  sebaranPerlengkapan,
   setStatusOpnamePerlengkapan,
   tanggalPerusahaan,
   terapkanKonsumsiOtomatis,
@@ -117,6 +118,14 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
     return c.json(
       await belanjaPerlengkapan({ companyId: auth.company_id!, branchId, dari, sampai }),
     );
+  })
+  // MASTER se-perusahaan (halaman Manajemen tanpa pemilih cabang): semua item
+  // + sebaran "ada di cabang mana saja" (saldo & aturan konsumsi per cabang).
+  .get("/master", requireRole("owner", "admin"), async (c) => {
+    const auth = c.get("auth");
+    // jatah otomatis SEMUA cabang dipotong dulu supaya saldo sebaran jujur
+    await terapkanKonsumsiOtomatis(auth.company_id!);
+    return c.json(await sebaranPerlengkapan(auth.company_id!));
   })
   // Stok awal perlengkapan (dipakai dari halaman Stok, seperti /stok/awal
   // bahan baku): set saldo pembuka per item — selisih terhadap saldo berjalan

@@ -2987,6 +2987,16 @@ cek "kartu memuat 2 baris koreksi 'Stok awal'" "V == 2" \
   "$(api "$OWNER" GET "/perlengkapan/$LAP86/kartu" | jq '[.mutasi[]|select(.tipe=="koreksi" and .catatan=="Stok awal")] | length')"
 cek "guard: kasir set stok awal → 403" "V == 403" "$(status_code "$KASIR" POST /perlengkapan/stok-awal)"
 
+echo "== 87. Perlengkapan: master se-perusahaan + sebaran 'ada di cabang mana saja' =="
+M87=$(api "$OWNER" GET /perlengkapan/master)
+cek "master memuat 4 item uji (tanpa pilih cabang)" "V == 1" \
+  "$(echo "$M87" | jq '([.[]|select(.nama=="Sabun Cuci Uji" or .nama=="Spons Uji" or .nama=="Tissue Uji" or .nama=="Lap Uji")] | length == 4) | if . then 1 else 0 end')"
+cek "Tissue Uji: ada di 2 lokasi — CK saldo 4 & cabang saldo 4" "V == 1" \
+  "$(echo "$M87" | jq --arg ck "$CK52_UTAMA" --arg cb "$CB46_ID" '([.[]|select(.nama=="Tissue Uji")][0].lokasi | (length==2) and ([.[]|select(.branch_id==$ck)][0].saldo == 4) and ([.[]|select(.branch_id==$cb)][0].saldo == 4)) | if . then 1 else 0 end')"
+cek "Sabun Cuci Uji: 1 lokasi, saldo 5 + aturan 1/hari ikut tampil" "V == 1" \
+  "$(echo "$M87" | jq '([.[]|select(.nama=="Sabun Cuci Uji")][0].lokasi | (length==1) and (.[0].saldo==5) and (.[0].aturan.qty==1) and (.[0].aturan.per_hari==1)) | if . then 1 else 0 end')"
+cek "guard: kasir buka master → 403" "V == 403" "$(status_code "$KASIR" GET /perlengkapan/master)"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]
