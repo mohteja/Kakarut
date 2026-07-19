@@ -20,6 +20,7 @@ import {
   thClass,
 } from "../../components/ui";
 import { CabangDataBar } from "../../components/CabangDataBar";
+import { StokPerlengkapanTab } from "./StokPerlengkapanTab";
 import { useAuth } from "../../context/AuthContext";
 import { useBranch, useCabangData } from "../../context/BranchContext";
 import { api } from "../../lib/api";
@@ -47,7 +48,7 @@ export function StokPage() {
   const isManajemen = auth?.user.role === "owner" || auth?.user.role === "admin";
   // Dua tampilan: stok BAHAN (baris per bahan baku) & stok MENU (sisa porsi
   // per menu, diturunkan dari saldo bahan — selalu berkorelasi otomatis).
-  const [tab, setTab] = useState<"bahan" | "menu">("bahan");
+  const [tab, setTab] = useState<"bahan" | "menu" | "perlengkapan">("bahan");
   // Pindah ke tab bahan bila Stok Menu tak relevan (CK/kantor) supaya tak
   // menampilkan tab kosong saat lokasi data berganti.
   useEffect(() => {
@@ -115,11 +116,11 @@ export function StokPage() {
       <CabangDataBar />
       <PageTitle
         aksi={
-          !isKantorData && tab === "bahan" ? (
+          !isKantorData && tab !== "menu" ? (
             <div className="flex flex-wrap gap-2">
               {/* Penyesuaian = klarifikasi/persetujuan selisih (manajemen/kasir);
                   tim hanya melakukan opname + lihat riwayat. */}
-              {!isTim && (
+              {tab === "bahan" && !isTim && (
                 <Link to="/stok/penyesuaian" className={`${btnSecondary} relative`}>
                   ⚠️ Penyesuaian
                   {belumTuntas > 0 && (
@@ -129,23 +130,42 @@ export function StokPage() {
                   )}
                 </Link>
               )}
-              <Link to="/stok/opname/riwayat" className={btnSecondary}>
-                🕑 Riwayat
-              </Link>
+              {tab === "bahan" && (
+                <Link to="/stok/opname/riwayat" className={btnSecondary}>
+                  🕑 Riwayat
+                </Link>
+              )}
               {/* Stok Awal = saldo pembuka stok yang sudah ada (onboarding) */}
-              {isManajemen && (
+              {tab === "bahan" && isManajemen && (
                 <Link to="/stok/awal" className={btnSecondary}>
                   📦 Stok Awal
                 </Link>
               )}
-              <Link to="/stok/opname" className={btnPrimary}>
-                📋 Stok Opname
+              {/* DUA jalur opname terpisah — bahan baku vs perlengkapan; keduanya
+                  dilakukan staf cabang & CK dari halaman Stok ini */}
+              <Link
+                to="/stok/opname"
+                className={tab === "bahan" ? btnPrimary : btnSecondary}
+              >
+                📋 Opname Bahan Baku
+              </Link>
+              <Link
+                to="/stok/opname-perlengkapan"
+                className={tab === "perlengkapan" ? btnPrimary : btnSecondary}
+              >
+                🧰 Opname Perlengkapan
               </Link>
             </div>
           ) : undefined
         }
       >
-        {isKantorData ? "Stok" : tab === "bahan" ? "Stok Bahan" : "Stok Menu"}
+        {isKantorData
+          ? "Stok"
+          : tab === "bahan"
+            ? "Stok Bahan"
+            : tab === "perlengkapan"
+              ? "Stok Perlengkapan"
+              : "Stok Menu"}
       </PageTitle>
 
       {/* Kantor tak menyimpan stok fisik — arahkan ke lokasi yang menyimpan */}
@@ -181,6 +201,15 @@ export function StokPage() {
               🍜 Stok Menu
             </button>
           )}
+          <button
+            type="button"
+            onClick={() => setTab("perlengkapan")}
+            className={`px-3 py-1.5 font-medium ${
+              tab === "perlengkapan" ? "bg-orange-600 text-white" : "bg-white text-stone-600 hover:bg-stone-50"
+            }`}
+          >
+            🧰 Perlengkapan
+          </button>
         </div>
       )}
 
@@ -267,6 +296,14 @@ export function StokPage() {
             </table>
           </Card>
         </>
+      ) : tab === "perlengkapan" ? (
+        <StokPerlengkapanTab
+          branchQuery={branchQuery}
+          dataId={dataId}
+          isManajemen={isManajemen}
+          cari={cari}
+          setCari={setCari}
+        />
       ) : isLoading ? (
         <Spinner />
       ) : (

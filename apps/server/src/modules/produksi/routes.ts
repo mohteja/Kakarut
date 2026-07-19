@@ -37,6 +37,7 @@ import {
   type AppEnv,
 } from "../../middleware/auth";
 import { tanggalDi } from "../../lib/time";
+import { hitungSaldoCabang } from "../stok/service";
 
 const pembuat = alias(users, "pembuat_prod");
 const pengubah = alias(users, "pengubah_prod");
@@ -69,6 +70,18 @@ const FakturEditBody = z.object({
 
 /** Kirim work-order produksi CK → cabang tujuan (opsional pilih tempat di cabang). */
 const KirimBody = z.object({ tujuan_storage_id: z.string().uuid().nullish() });
+
+/**
+ * Kirim hasil produksi: qty per bahan BISA DIATUR — boleh lebih sedikit dari
+ * hasil produksi (mis. butuh 400, 1 batch = 500 → kirim 400 saja) atau lebih
+ * banyak selama stok CK cukup. Tanpa `items` → kirim persis sejumlah hasil.
+ */
+const KirimHasilBody = KirimBody.extend({
+  items: z
+    .array(z.object({ ingredient_id: z.string().uuid(), qty: z.number().positive() }))
+    .min(1)
+    .optional(),
+});
 
 const TahapBody = z.object({
   ke: z.enum(["dikerjakan", "menunggu", "dikonfirmasi"]),
@@ -1078,12 +1091,12 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
      * cabang — stok CK berkurang & stok cabang bertambah saat diterima. Baris
      * sumber ditandai selesai-dikirim (untuk_branch_id dikosongkan).
      */
-    .post("/kirim-hasil/:fakturId", zValidator("json", KirimBody), async (c) => {
+    .post("/kirim-hasil/:fakturId", zValidator("json", KirimHasilBody), async (c) => {
       if (tipe !== "produksi") {
         throw new HTTPException(404, { message: "Hanya untuk faktur produksi" });
       }
       const auth = c.get("auth");
-      const { tujuan_storage_id } = c.req.valid("json");
+      const { tujuan_storage_id, items } = c.req.valid("json");
       const fakturId = c.req.param("fakturId");
       const conds = [
         eq(productions.companyId, auth.company_id!),
@@ -1153,24 +1166,65 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         .where(eq(companies.id, auth.company_id!));
       const prodDate = tanggalDi(company?.timezone ?? "Asia/Jakarta");
 
+      // Qty kiriman per BAHAN: default = jumlah hasil produksi faktur ini;
+      // `items` menimpanya (boleh kurang/lebih — dibatasi stok CK, karena
+      // kiriman adalah transfer stok nyata).
+      const perBahan = new Map<string, { qty: number; rencanaId: string | null }>();
+      for (const b of rows) {
+        const p = perBahan.get(b.ingredientId);
+        perBahan.set(b.ingredientId, {
+          qty: (p?.qty ?? 0) + b.qty,
+          rencanaId: p?.rencanaId ?? b.rencanaId,
+        });
+      }
+      const kirimMap = new Map(
+        [...perBahan.entries()].map(([id, v]) => [id, { qty: v.qty, rencanaId: v.rencanaId }]),
+      );
+      if (items) {
+        kirimMap.clear();
+        for (const it of items) {
+          const asal = perBahan.get(it.ingredient_id);
+          if (!asal) {
+            throw new HTTPException(400, {
+              message: "Ada bahan yang bukan bagian dari hasil produksi faktur ini",
+            });
+          }
+          kirimMap.set(it.ingredient_id, { qty: it.qty, rencanaId: asal.rencanaId });
+        }
+      }
+      const saldoCk = new Map(
+        (await hitungSaldoCabang(auth.company_id!, ckId)).map((r) => [r.ingredient_id, r]),
+      );
+      for (const [ingId, v] of kirimMap) {
+        const s = saldoCk.get(ingId);
+        if (!s || v.qty > s.saldo + 1e-9) {
+          throw new HTTPException(400, {
+            message: `Stok CK tidak cukup untuk ${s?.nama ?? "bahan"} (saldo ${s?.saldo ?? 0} ${s?.satuan ?? ""}) — kurangi jumlah kiriman`,
+          });
+        }
+      }
+      // baris sumber yang bahannya ikut terkirim (pengingatnya dihapus);
+      // bahan yang tidak disertakan tetap berpengingat "perlu dikirim"
+      const sumberTerkirim = rows.filter((b) => kirimMap.has(b.ingredientId));
+
       const kirimFakturId = randomUUID();
       const hasil = await db.transaction(async (tx) => {
         const asalNomor = (await nomorUntukRefs(tx, auth.company_id!, [fakturId])).get(fakturId);
         // Faktur KIRIMAN (transfer stok CK): lahir langsung 'menunggu' di cabang
         // tujuan — muncul di Penerimaan; saat diterima stok CK asal berkurang.
         await tx.insert(productions).values(
-          rows.map((b) => ({
+          [...kirimMap.entries()].map(([ingredientId, v]) => ({
             companyId: auth.company_id!,
             branchId: tujuanId,
             asalBranchId: ckId,
             dariBranchId: ckId,
             tujuanBranchId: tujuanId,
-            ingredientId: b.ingredientId,
-            qty: b.qty,
+            ingredientId,
+            qty: v.qty,
             tipe: "produksi" as const,
             totalHarga: 0, // pemindahan stok yang sudah ada — tanpa biaya baru
             fakturId: kirimFakturId,
-            rencanaId: b.rencanaId,
+            rencanaId: v.rencanaId,
             noFaktur: null,
             supplierId: null,
             storageLocationId: tujuanStorage,
@@ -1190,7 +1244,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
           .where(
             inArray(
               productions.id,
-              rows.map((b) => b.id),
+              sumberTerkirim.map((b) => b.id),
             ),
           );
         await catatLogFaktur(tx, {
@@ -1199,7 +1253,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
           fakturId,
           jalur: "produksi",
           aksi: `Hasil dikirim ke ${store.nama}`,
-          detail: `${nomorBaru} · ${rows.length} baris`,
+          detail: `${nomorBaru} · ${kirimMap.size} bahan`,
           userId: auth.sub,
         });
         await catatLogFaktur(tx, {
@@ -1208,7 +1262,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
           fakturId: kirimFakturId,
           jalur: "produksi",
           aksi: "Kiriman hasil produksi dibuat",
-          detail: `${asalNomor ? `dari ${asalNomor} · ` : ""}tujuan ${store.nama} · ${rows.length} baris`,
+          detail: `${asalNomor ? `dari ${asalNomor} · ` : ""}tujuan ${store.nama} · ${kirimMap.size} bahan`,
           userId: auth.sub,
         });
         return { nomor: nomorBaru };
@@ -1218,7 +1272,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         faktur_id: kirimFakturId,
         nomor: hasil.nomor,
         tujuan: store.nama,
-        jumlah_baris: rows.length,
+        jumlah_baris: kirimMap.size,
       });
     })
     /** Buku dana satu faktur: entri pencairan/tambahan/kembali + total efektif. */

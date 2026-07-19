@@ -2937,6 +2937,55 @@ cek "minta melebihi stok CK → 400" "V == 400" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/perlengkapan/$TU84/minta?branch_id=$CB46_ID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"qty":100}')"
 cek "kartu CK memuat baris kirim (catatan nomor KP)" "V == 1" \
   "$(api "$OWNER" GET "/perlengkapan/$TU84/kartu?branch_id=$CK52_UTAMA" | jq --arg n "$NKP84" '([.mutasi[]|select(.tipe=="kirim" and (.catatan // "" | contains($n)))] | length >= 1) | if . then 1 else 0 end')"
+# --- STAF CABANG opname dari halaman Stok: KASIR boleh buat sesi (terkunci
+#     cabangnya sendiri), selisih tetap menunggu ACC owner/admin ---
+OPK84=$(api "$KASIR" POST /perlengkapan/opname "{\"items\":[{\"supply_id\":\"$SB83\",\"qty_fisik\":4}],\"catatan\":\"opname kasir dari halaman Stok\"}")
+SESIK84=$(echo "$OPK84" | jq -r .session_id)
+cek "KASIR buat opname (fisik 4, sistem 5) → 1 selisih menunggu" "V == 1" "$(echo "$OPK84" | jq .jumlah_selisih)"
+cek "selisih kasir menunggu ACC → saldo cabang kasir tetap 5" "abs(V - 5) < 0.001" \
+  "$(api "$KASIR" GET /perlengkapan | jq --arg id "$SB83" '[.[]|select(.id==$id)][0].saldo')"
+api "$OWNER" POST "/perlengkapan/opname/sesi/$SESIK84/tolak" > /dev/null
+cek "sesi kasir ditolak owner → saldo tetap 5" "abs(V - 5) < 0.001" \
+  "$(api "$KASIR" GET /perlengkapan | jq --arg id "$SB83" '[.[]|select(.id==$id)][0].saldo')"
+
+echo "== 85. Kirim hasil produksi dgn qty diatur (butuh 400, 1 batch 500 → kirim sebagian) =="
+# reset stok jadi & bahan mentah → work-order porsi 20 (kebutuhan 100, 1 batch = 100)
+api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CK52_UTAMA\",\"items\":[{\"ingredient_id\":\"$BASO66\",\"qty\":0},{\"ingredient_id\":\"$DAG66\",\"qty\":20000},{\"ingredient_id\":\"$TEP66\",\"qty\":5000}]}" > /dev/null
+api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CB46_ID\",\"items\":[{\"ingredient_id\":\"$BASO66\",\"qty\":0}]}" > /dev/null
+WO85=$(api "$OWNER" POST /rekomendasi/menu/faktur "{\"items\":[{\"menu_id\":\"$MENU66\",\"porsi\":20}],\"tujuan_branch_id\":\"$CB46_ID\",\"ck_branch_id\":\"$CK52_UTAMA\"}")
+PF85=$(echo "$WO85" | jq -r '.produksi.faktur_id')
+api "$OWNER" POST "/produksi/tahap/$PF85" '{"ke":"dikerjakan"}' > /dev/null
+api "$OWNER" POST "/produksi/tahap/$PF85" '{"ke":"menunggu"}' > /dev/null
+# hasil 100 di stok CK; kirim melebihi stok CK → 400
+cek "kirim melebihi stok CK → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/produksi/kirim-hasil/$PF85" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"items\":[{\"ingredient_id\":\"$BASO66\",\"qty\":150}]}")"
+cek "bahan di luar faktur → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/produksi/kirim-hasil/$PF85" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"items\":[{\"ingredient_id\":\"$DAG66\",\"qty\":1}]}")"
+# kirim SEBAGIAN: butuh 40 saja dari hasil 100
+KH85=$(api "$OWNER" POST "/produksi/kirim-hasil/$PF85" "{\"items\":[{\"ingredient_id\":\"$BASO66\",\"qty\":40}]}")
+KHF85=$(echo "$KH85" | jq -r .faktur_id)
+cek "kiriman terbit dgn qty diatur (40)" "abs(V - 40) < 0.001" \
+  "$(api "$OWNER" GET "/produksi?branch_id=$CB46_ID&per_page=500" | jq --arg f "$KHF85" '[.rows[]|select(.faktur_id==$f)][0].qty')"
+api "$OWNER" POST "/penerimaan/$KHF85/terima" > /dev/null
+cek "diterima: cabang +40, CK sisa 60 (100 − 40)" "V == 1" \
+  "$(python3 -c "
+cb = $(api "$OWNER" GET "/stok?branch_id=$CB46_ID" | jq --arg id "$BASO66" '[.[]|select(.ingredient_id==$id)][0].saldo // 0')
+ck = $(api "$OWNER" GET "/stok?branch_id=$CK52_UTAMA" | jq --arg id "$BASO66" '[.[]|select(.ingredient_id==$id)][0].saldo // 0')
+print(1 if abs(cb-40) < 0.001 and abs(ck-60) < 0.001 else 0)")"
+cek "pengingat 'untuk cabang' hilang setelah dikirim (walau sebagian)" "V == 1" \
+  "$(api "$OWNER" GET "/produksi?branch_id=$CK52_UTAMA&per_page=500" | jq --arg f "$PF85" '([.rows[]|select(.faktur_id==$f)] | all(.[]; .untuk_branch_id == null)) | if . then 1 else 0 end')"
+
+echo "== 86. Perlengkapan: stok awal batch dari halaman Stok (koreksi 'Stok awal') =="
+LAP86=$(api "$OWNER" POST /perlengkapan '{"nama":"Lap Uji","satuan":"pcs"}' | jq -r .id)
+api "$OWNER" POST /perlengkapan/stok-awal "{\"items\":[{\"supply_id\":\"$LAP86\",\"qty\":12}]}" > /dev/null
+cek "stok awal 12 → saldo 12" "abs(V - 12) < 0.001" \
+  "$(api "$OWNER" GET /perlengkapan | jq --arg id "$LAP86" '[.[]|select(.id==$id)][0].saldo')"
+api "$OWNER" POST /perlengkapan/stok-awal "{\"items\":[{\"supply_id\":\"$LAP86\",\"qty\":10}]}" > /dev/null
+cek "stok awal ulang 10 → saldo 10 (dibukukan koreksi -2)" "abs(V - 10) < 0.001" \
+  "$(api "$OWNER" GET /perlengkapan | jq --arg id "$LAP86" '[.[]|select(.id==$id)][0].saldo')"
+cek "kartu memuat 2 baris koreksi 'Stok awal'" "V == 2" \
+  "$(api "$OWNER" GET "/perlengkapan/$LAP86/kartu" | jq '[.mutasi[]|select(.tipe=="koreksi" and .catatan=="Stok awal")] | length')"
+cek "guard: kasir set stok awal → 403" "V == 403" "$(status_code "$KASIR" POST /perlengkapan/stok-awal)"
 
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="

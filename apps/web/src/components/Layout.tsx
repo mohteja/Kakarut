@@ -236,9 +236,6 @@ export function Layout() {
                   <NavLink to="/bahan" className={linkClass}>
                     🥩 Bahan Baku
                   </NavLink>
-                  <NavLink to="/perlengkapan" className={linkClass}>
-                    🧰 Perlengkapan
-                  </NavLink>
                   <NavLink to="/resep" className={linkClass}>
                     🧾 Resep
                   </NavLink>
