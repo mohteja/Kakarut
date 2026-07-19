@@ -9,7 +9,7 @@ import type {
   OpnameSesiStatus,
   PenyesuaianStatus,
 } from "@kakarut/shared";
-import { Spinner, btnSecondary } from "../../components/ui";
+import { Spinner } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { useCabangData } from "../../context/BranchContext";
 import { api } from "../../lib/api";
@@ -394,17 +394,10 @@ export function OpnameRiwayatPage() {
   return (
     <div className="flex min-h-screen flex-col bg-stone-100">
       <header className="sticky top-0 z-10 flex items-center gap-3 border-b border-stone-200 bg-white px-4 py-3 shadow-sm">
-        <Link
-          to={tab === "perlengkapan" ? "/stok/opname-perlengkapan" : "/stok/opname"}
-          className="text-2xl text-stone-500"
-          aria-label="Kembali"
-        >
+        <Link to="/" className="text-2xl text-stone-500" aria-label="Kembali">
           ←
         </Link>
         <div className="flex-1 text-base font-bold text-stone-800">Riwayat Stock Opname</div>
-        <Link to="/stok" className={btnSecondary}>
-          Stok
-        </Link>
       </header>
 
       {/* Tab: opname bahan baku vs perlengkapan — riwayat digabung di sini */}

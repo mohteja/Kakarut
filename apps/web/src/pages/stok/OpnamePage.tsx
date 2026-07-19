@@ -120,7 +120,7 @@ export function OpnamePage() {
     <div className="flex min-h-screen flex-col bg-stone-100">
       {/* Top bar */}
       <header className="sticky top-0 z-10 flex items-center gap-3 border-b border-stone-200 bg-white px-4 py-3 shadow-sm">
-        <Link to="/stok" className="text-2xl text-stone-500" aria-label="Kembali">
+        <Link to="/" className="text-2xl text-stone-500" aria-label="Kembali">
           ←
         </Link>
         <div className="min-w-0 flex-1">

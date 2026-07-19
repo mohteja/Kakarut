@@ -286,13 +286,13 @@ export function Layout() {
               ) : (
                 <>
                   <NavLink to="/stok/opname" className={linkClass}>
-                    📋 Stock Opname
+                    📋 SO Bahan Baku
                   </NavLink>
                   <NavLink to="/stok/opname-perlengkapan" className={linkClass}>
-                    🧰 Opname Perlengkapan
+                    🧰 SO Perlengkapan
                   </NavLink>
                   <NavLink to="/stok/opname/riwayat" className={linkClass}>
-                    🕑 Riwayat Stock Opname
+                    🕑 Riwayat SO
                   </NavLink>
                 </>
               )}
