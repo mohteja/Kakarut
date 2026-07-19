@@ -947,6 +947,17 @@ export interface PerlengkapanMasterRow {
   harga_beli: number;
   stok_minimum: number;
   catatan: string | null;
+  /** kategori — memakai master kategori yang sama dengan bahan baku */
+  kategori: string | null;
+  /** boleh dibeli eceran (per pcs) vs harus utuh per kemasan */
+  boleh_eceran: boolean;
+  /** dilacak: konsumsinya dipantau — WAJIB punya aturan konsumsi */
+  dilacak: boolean;
+  /** rak simpan default (tempat penyimpanan) */
+  rak: { id: string; nama: string } | null;
+  /** nama supplier utama/langganan (null = belum diatur) */
+  supplier_utama: string | null;
+  jumlah_supplier: number;
   /** cabang dengan saldo ≠ 0 ATAU aturan konsumsi terpasang */
   lokasi: PerlengkapanLokasiDto[];
 }

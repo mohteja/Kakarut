@@ -18,9 +18,12 @@ import {
   branches,
   companies,
   dokumenNomor,
+  storageLocations,
+  suppliers,
   supplies,
   supplyMutations,
   supplyRules,
+  supplySuppliers,
   supplyTransfers,
   users,
 } from "../../db/schema";
@@ -263,6 +266,24 @@ export async function sebaranPerlengkapan(companyId: string): Promise<Perlengkap
     .from(supplies)
     .where(and(eq(supplies.companyId, companyId), eq(supplies.isActive, true)))
     .orderBy(asc(supplies.nama));
+  // rak simpan default (nama tempat penyimpanan) per item
+  const rakRows = await db
+    .select({ id: storageLocations.id, nama: storageLocations.nama })
+    .from(storageLocations)
+    .where(eq(storageLocations.companyId, companyId));
+  const rakById = new Map(rakRows.map((r) => [r.id, r.nama]));
+  // ringkasan supplier per item: nama utama + jumlah terdaftar
+  const supRows = await db
+    .select({
+      supplyId: supplySuppliers.supplyId,
+      utama: sql<string | null>`MAX(${suppliers.nama}) FILTER (WHERE ${supplySuppliers.isUtama})`,
+      jumlah: sql<number>`COUNT(*)::int`,
+    })
+    .from(supplySuppliers)
+    .innerJoin(suppliers, eq(supplySuppliers.supplierId, suppliers.id))
+    .where(eq(supplySuppliers.companyId, companyId))
+    .groupBy(supplySuppliers.supplyId);
+  const supPer = new Map(supRows.map((r) => [r.supplyId, r]));
   const cabang = await db
     .select({ id: branches.id, nama: branches.nama })
     .from(branches)
@@ -320,6 +341,7 @@ export async function sebaranPerlengkapan(companyId: string): Promise<Perlengkap
             : null,
         };
       });
+    const sup = supPer.get(it.id);
     return {
       id: it.id,
       nama: it.nama,
@@ -327,6 +349,15 @@ export async function sebaranPerlengkapan(companyId: string): Promise<Perlengkap
       harga_beli: it.hargaBeli,
       stok_minimum: it.stokMinimum,
       catatan: it.catatan,
+      kategori: it.kategori,
+      boleh_eceran: it.bolehEceran,
+      dilacak: it.dilacak,
+      rak:
+        it.storageLocationId && rakById.has(it.storageLocationId)
+          ? { id: it.storageLocationId, nama: rakById.get(it.storageLocationId)! }
+          : null,
+      supplier_utama: sup?.utama ?? null,
+      jumlah_supplier: sup?.jumlah ?? 0,
       lokasi,
     };
   });

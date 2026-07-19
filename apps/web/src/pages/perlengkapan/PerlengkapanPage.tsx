@@ -1,6 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import type { PerlengkapanAturanDto, PerlengkapanMasterRow } from "@kakarut/shared";
+import type {
+  KategoriDto,
+  PenyimpananDto,
+  PerlengkapanAturanDto,
+  PerlengkapanMasterRow,
+} from "@kakarut/shared";
 import {
   Card,
   ErrorText,
@@ -16,6 +21,7 @@ import {
 import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah } from "../../lib/format";
+import { SupplierBahanModal } from "../bahan/SupplierBahanModal";
 
 /** Label aturan konsumsi: "1 / hari", "2 / 3 hari", "(nonaktif)". */
 function labelAturan(a: PerlengkapanAturanDto, satuan: string): string {
@@ -24,16 +30,20 @@ function labelAturan(a: PerlengkapanAturanDto, satuan: string): string {
   return a.aktif ? teks : `${teks} (nonaktif)`;
 }
 
+type RakOpsi = { id: string; nama: string };
+
 type ModalState =
   | { jenis: "item"; item: PerlengkapanMasterRow | null }
   | { jenis: "aturan"; item: PerlengkapanMasterRow }
+  | { jenis: "supplier"; item: PerlengkapanMasterRow }
   | null;
 
 /**
  * MASTER perlengkapan non bahan baku (sendok, spons, sabun) — seperti halaman
- * Bahan Baku: hanya pengaturan nama, satuan, harga, stok minimum, dan aturan
- * konsumsi. TANPA pemilih cabang: semua item tampil, tiap produk menunjukkan
- * "ada di cabang mana saja". Stok fisiknya dikelola di Stok → tab Perlengkapan.
+ * Bahan Baku: pengaturan nama, kategori (master kategori yang sama dgn bahan),
+ * supplier, harga, ecer/utuh, dilacak (wajib aturan konsumsi), dan rak simpan.
+ * TANPA pemilih cabang: semua item tampil; tiap produk menunjukkan "ada di
+ * cabang mana saja". Stok fisiknya dikelola di Stok → tab Perlengkapan.
  */
 export function PerlengkapanPage() {
   const queryClient = useQueryClient();
@@ -41,6 +51,32 @@ export function PerlengkapanPage() {
   const { data: rows, isLoading } = useQuery({
     queryKey: ["perlengkapan-master"],
     queryFn: () => api<PerlengkapanMasterRow[]>("/perlengkapan/master"),
+  });
+  // kategori memakai MASTER yang sama dengan bahan baku
+  const { data: kategoriList = [] } = useQuery({
+    queryKey: ["kategori-bahan"],
+    queryFn: () => api<KategoriDto[]>("/kategori-bahan"),
+  });
+  // Rak simpan: gabungan tempat penyimpanan semua cabang non-kantor
+  const { cabang } = useBranch();
+  const lokasiCabang = cabang.filter((b) => b.tipe !== "kantor" && b.is_active);
+  const banyakCabang = lokasiCabang.length > 1;
+  const { data: rakList = [] } = useQuery({
+    queryKey: ["penyimpanan-semua", lokasiCabang.map((c) => c.id).join(",")],
+    enabled: lokasiCabang.length > 0,
+    queryFn: async () => {
+      const per = await Promise.all(
+        lokasiCabang.map((cb) =>
+          api<PenyimpananDto[]>(`/penyimpanan?branch_id=${cb.id}`).then((rws) =>
+            rws.map((r) => ({
+              id: r.id,
+              nama: banyakCabang ? `${cb.nama} · ${r.nama}` : r.nama,
+            })),
+          ),
+        ),
+      );
+      return per.flat() as RakOpsi[];
+    },
   });
 
   const [modal, setModal] = useState<ModalState>(null);
@@ -61,7 +97,7 @@ export function PerlengkapanPage() {
   );
 
   return (
-    <div className="max-w-4xl">
+    <div className="max-w-6xl">
       <PageTitle
         aksi={
           <button onClick={() => setModal({ jenis: "item", item: null })} className={btnPrimary}>
@@ -73,8 +109,8 @@ export function PerlengkapanPage() {
       </PageTitle>
       <div className="mb-3 rounded-lg bg-blue-50 px-4 py-2 text-sm text-blue-800">
         Master barang <b>non bahan baku</b> (sendok, spons, sabun…) berlaku se-perusahaan —
-        hanya pengaturan <b>nama, harga, dan aturan konsumsi</b>. Kolom <b>Ada di</b>{" "}
-        menunjukkan cabang mana saja yang memakai item ini; saldonya dilihat di halaman{" "}
+        pengaturan <b>nama, kategori, supplier, harga, ecer/utuh, dilacak, dan rak simpan</b>.
+        Item <b>dilacak</b> wajib punya <b>aturan konsumsi</b>. Saldo stok dilihat di halaman{" "}
         <b>Stok → tab Perlengkapan</b>.
       </div>
       <ErrorText error={hapus.error} />
@@ -102,8 +138,10 @@ export function PerlengkapanPage() {
             <thead className="border-b border-stone-200 bg-stone-50">
               <tr>
                 <th className={thClass}>Perlengkapan</th>
+                <th className={thClass}>Kategori</th>
+                <th className={thClass}>Supplier</th>
                 <th className={`${thClass} text-right`}>Harga Beli</th>
-                <th className={`${thClass} text-right`}>Stok Minimum</th>
+                <th className={`${thClass} text-right`}>Stok Min</th>
                 <th className={thClass}>Ada di</th>
                 <th className={thClass}>Aturan Konsumsi</th>
                 <th className={thClass}></th>
@@ -114,9 +152,55 @@ export function PerlengkapanPage() {
                 <tr key={r.id} className="hover:bg-stone-50">
                   <td className={`${tdClass} font-medium`}>
                     {r.nama} <span className="text-xs font-normal text-stone-400">({r.satuan})</span>
-                    {r.catatan && (
-                      <div className="text-xs font-normal text-stone-400">{r.catatan}</div>
-                    )}
+                    <div className="mt-0.5 flex flex-wrap gap-1 text-xs font-normal">
+                      <span
+                        className="rounded bg-stone-100 px-1.5 py-0.5 text-stone-600"
+                        title={
+                          r.boleh_eceran
+                            ? "Boleh dibeli/dikirim eceran (per satuan)"
+                            : "Harus utuh per kemasan — tidak dijual eceran"
+                        }
+                      >
+                        {r.boleh_eceran ? "🧩 boleh ecer" : "📦 utuh kemasan"}
+                      </span>
+                      {r.dilacak && (
+                        <span
+                          className="rounded bg-orange-100 px-1.5 py-0.5 font-semibold text-orange-800"
+                          title="Konsumsi item ini dipantau — wajib punya aturan konsumsi"
+                        >
+                          🎯 dilacak
+                        </span>
+                      )}
+                      {r.rak && (
+                        <span className="rounded bg-stone-100 px-1.5 py-0.5 text-stone-600" title="Rak simpan default">
+                          🗄 {r.rak.nama}
+                        </span>
+                      )}
+                      {r.catatan && <span className="text-stone-400">{r.catatan}</span>}
+                    </div>
+                  </td>
+                  <td className={`${tdClass} text-stone-600`}>
+                    {r.kategori ?? <span className="text-stone-400">—</span>}
+                  </td>
+                  <td className={tdClass}>
+                    <button
+                      onClick={() => setModal({ jenis: "supplier", item: r })}
+                      title={`Atur supplier "${r.nama}" — beli di mana & supplier utama`}
+                      className={`rounded-lg px-2 py-1 text-xs font-medium ${
+                        r.supplier_utama
+                          ? "text-stone-700 hover:bg-stone-100"
+                          : "border border-dashed border-stone-300 text-stone-400 hover:bg-stone-50"
+                      }`}
+                    >
+                      {r.supplier_utama ? (
+                        <>
+                          ★ {r.supplier_utama}
+                          {r.jumlah_supplier > 1 && ` +${r.jumlah_supplier - 1}`}
+                        </>
+                      ) : (
+                        "+ Atur supplier"
+                      )}
+                    </button>
                   </td>
                   <td className={`${tdClass} text-right`}>
                     {r.harga_beli > 0 ? formatRupiah(r.harga_beli) : "—"}
@@ -152,6 +236,14 @@ export function PerlengkapanPage() {
                             </div>
                           ))}
                       </div>
+                    ) : r.dilacak ? (
+                      <button
+                        onClick={() => setModal({ jenis: "aturan", item: r })}
+                        className="rounded-lg bg-red-50 px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-100"
+                        title="Item dilacak wajib punya aturan konsumsi — klik untuk mengatur"
+                      >
+                        ⚠ wajib aturan — belum diatur
+                      </button>
                     ) : (
                       <span className="text-xs text-stone-400">manual</span>
                     )}
@@ -189,10 +281,31 @@ export function PerlengkapanPage() {
       )}
 
       {modal?.jenis === "item" && (
-        <ItemModal item={modal.item} onClose={() => setModal(null)} onSukses={segarkan} />
+        <ItemModal
+          item={modal.item}
+          kategoriList={kategoriList}
+          rakList={rakList}
+          onClose={() => setModal(null)}
+          onSukses={(baru) => {
+            segarkan();
+            // item BARU yang dilacak wajib beraturan → langsung buka modal Aturan
+            if (baru) setModal({ jenis: "aturan", item: baru });
+            else setModal(null);
+          }}
+        />
       )}
       {modal?.jenis === "aturan" && (
         <AturanModal item={modal.item} onClose={() => setModal(null)} onSukses={segarkan} />
+      )}
+      {modal?.jenis === "supplier" && (
+        <SupplierBahanModal
+          key={modal.item.id}
+          bahan={modal.item}
+          endpoint={`/perlengkapan/${modal.item.id}/supplier`}
+          cacheKey="perlengkapan-supplier"
+          invalidateKeys={[["perlengkapan-master"]]}
+          onClose={() => setModal(null)}
+        />
       )}
     </div>
   );
@@ -200,21 +313,30 @@ export function PerlengkapanPage() {
 
 function ItemModal({
   item,
+  kategoriList,
+  rakList,
   onClose,
   onSukses,
 }: {
   item: PerlengkapanMasterRow | null;
+  kategoriList: KategoriDto[];
+  rakList: RakOpsi[];
   onClose: () => void;
-  onSukses: () => void;
+  /** baru ≠ null → item baru dgn dilacak=true (lanjut atur aturan konsumsi) */
+  onSukses: (baru: PerlengkapanMasterRow | null) => void;
 }) {
   const [nama, setNama] = useState(item?.nama ?? "");
   const [satuan, setSatuan] = useState(item?.satuan ?? "pcs");
   const [hargaBeli, setHargaBeli] = useState(item ? String(item.harga_beli) : "");
   const [stokMin, setStokMin] = useState(item ? String(item.stok_minimum) : "");
   const [catatan, setCatatan] = useState(item?.catatan ?? "");
+  const [kategori, setKategori] = useState(item?.kategori ?? "");
+  const [bolehEceran, setBolehEceran] = useState(item?.boleh_eceran ?? true);
+  const [dilacak, setDilacak] = useState(item?.dilacak ?? false);
+  const [rakId, setRakId] = useState(item?.rak?.id ?? "");
   const simpan = useMutation({
     mutationFn: () =>
-      api(item ? `/perlengkapan/${item.id}` : "/perlengkapan", {
+      api<{ id: string; nama: string }>(item ? `/perlengkapan/${item.id}` : "/perlengkapan", {
         method: item ? "PATCH" : "POST",
         body: {
           nama: nama.trim(),
@@ -222,11 +344,33 @@ function ItemModal({
           harga_beli: Number(hargaBeli) || 0,
           stok_minimum: Number(stokMin) || 0,
           catatan: catatan.trim() || null,
+          kategori: kategori || null,
+          boleh_eceran: bolehEceran,
+          dilacak,
+          storage_location_id: rakId || null,
         },
       }),
-    onSuccess: () => {
-      onSukses();
-      onClose();
+    onSuccess: (d) => {
+      // item BARU + dilacak → parent lanjut membuka modal Aturan Konsumsi
+      onSukses(
+        !item && dilacak
+          ? {
+              id: d.id,
+              nama: nama.trim(),
+              satuan: satuan.trim() || "pcs",
+              harga_beli: Number(hargaBeli) || 0,
+              stok_minimum: Number(stokMin) || 0,
+              catatan: catatan.trim() || null,
+              kategori: kategori || null,
+              boleh_eceran: bolehEceran,
+              dilacak,
+              rak: null,
+              supplier_utama: null,
+              jumlah_supplier: 0,
+              lokasi: [],
+            }
+          : null,
+      );
     },
   });
   return (
@@ -242,17 +386,59 @@ function ItemModal({
             <input value={satuan} onChange={(e) => setSatuan(e.target.value)} className={inputClass} placeholder="pcs / sachet / botol" />
           </label>
           <label className="block text-sm">
+            Kategori
+            <select value={kategori} onChange={(e) => setKategori(e.target.value)} className={inputClass}>
+              <option value="">— tanpa kategori —</option>
+              {/* kategori tersimpan yang sudah tak ada di master tetap tampil */}
+              {kategori && !kategoriList.some((k) => k.nama === kategori) && (
+                <option value={kategori}>{kategori}</option>
+              )}
+              {kategoriList.map((k) => (
+                <option key={k.id} value={k.nama}>
+                  {k.nama}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <label className="block text-sm">
             Harga beli / satuan (Rp)
             <input type="number" min={0} value={hargaBeli} onChange={(e) => setHargaBeli(e.target.value)} className={inputClass} />
           </label>
+          <label className="block text-sm">
+            Stok minimum (peringatan menipis)
+            <input type="number" min={0} value={stokMin} onChange={(e) => setStokMin(e.target.value)} className={inputClass} />
+          </label>
         </div>
         <label className="block text-sm">
-          Stok minimum (peringatan menipis)
-          <input type="number" min={0} value={stokMin} onChange={(e) => setStokMin(e.target.value)} className={inputClass} />
+          Simpan di rak
+          <select value={rakId} onChange={(e) => setRakId(e.target.value)} className={inputClass}>
+            <option value="">— tanpa rak —</option>
+            {/* rak tersimpan yang tak termuat daftar (nonaktif) tetap tampil */}
+            {rakId && !rakList.some((r) => r.id === rakId) && (
+              <option value={rakId}>{item?.rak?.nama ?? "(rak tersimpan)"}</option>
+            )}
+            {rakList.map((r) => (
+              <option key={r.id} value={r.id}>
+                {r.nama}
+              </option>
+            ))}
+          </select>
         </label>
-        <label className="block text-sm">
-          Catatan
-          <input value={catatan} onChange={(e) => setCatatan(e.target.value)} className={inputClass} />
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={bolehEceran} onChange={(e) => setBolehEceran(e.target.checked)} />
+          Boleh dibeli/dikirim <b>eceran</b> (per {satuan.trim() || "pcs"}) — hilangkan centang bila harus utuh per kemasan
+        </label>
+        <label className="flex items-start gap-2 text-sm">
+          <input type="checkbox" checked={dilacak} onChange={(e) => setDilacak(e.target.checked)} className="mt-0.5" />
+          <span>
+            <b>Dilacak</b> — konsumsinya dipantau sistem.{" "}
+            <span className="text-stone-500">
+              Item dilacak <b>wajib punya aturan konsumsi</b>
+              {!item && " (form aturan terbuka setelah simpan)"}.
+            </span>
+          </span>
         </label>
         <ErrorText error={simpan.error} />
         <div className="flex justify-end gap-2">
@@ -296,6 +482,12 @@ function AturanModal({
         <div className="rounded-lg bg-indigo-50 px-3 py-2 text-sm text-indigo-800">
           Stok berkurang <b>otomatis</b> sesuai aturan — mis. sabun <b>1 sachet / hari</b> atau
           spons <b>1 pcs / 7 hari</b>. Aturan berlaku <b>per cabang</b>.
+          {item.dilacak && (
+            <>
+              {" "}
+              Item ini <b>dilacak</b> — aturan konsumsi <b>wajib</b> diatur.
+            </>
+          )}
         </div>
         <label className="block text-sm">
           Cabang

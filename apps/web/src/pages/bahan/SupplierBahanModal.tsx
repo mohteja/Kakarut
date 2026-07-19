@@ -19,18 +19,28 @@ import { api } from "../../lib/api";
 export function SupplierBahanModal({
   bahan,
   onClose,
+  endpoint,
+  cacheKey = "bahan-supplier",
+  invalidateKeys = [["bahan"]],
 }: {
   bahan: { id: string; nama: string };
   onClose: () => void;
+  /** endpoint GET/PUT daftar supplier — default jalur bahan baku */
+  endpoint?: string;
+  /** prefix query key cache daftar terpasang */
+  cacheKey?: string;
+  /** query key lain yang di-invalidate setelah simpan */
+  invalidateKeys?: string[][];
 }) {
+  const jalur = endpoint ?? `/bahan/${bahan.id}/supplier`;
   const queryClient = useQueryClient();
   const { data: master } = useQuery({
     queryKey: ["supplier"],
     queryFn: () => api<SupplierDto[]>("/supplier"),
   });
   const { data: terpasang, isLoading } = useQuery({
-    queryKey: ["bahan-supplier", bahan.id],
-    queryFn: () => api<BahanSupplierDto[]>(`/bahan/${bahan.id}/supplier`),
+    queryKey: [cacheKey, bahan.id],
+    queryFn: () => api<BahanSupplierDto[]>(jalur),
   });
 
   const [pilih, setPilih] = useState<Set<string>>(new Set());
@@ -60,7 +70,7 @@ export function SupplierBahanModal({
 
   const simpan = useMutation({
     mutationFn: () =>
-      api<BahanSupplierDto[]>(`/bahan/${bahan.id}/supplier`, {
+      api<BahanSupplierDto[]>(jalur, {
         method: "PUT",
         body: {
           items: [...pilih].map((supplier_id) => ({
@@ -70,8 +80,8 @@ export function SupplierBahanModal({
         },
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["bahan"] });
-      queryClient.invalidateQueries({ queryKey: ["bahan-supplier", bahan.id] });
+      for (const k of invalidateKeys) queryClient.invalidateQueries({ queryKey: k });
+      queryClient.invalidateQueries({ queryKey: [cacheKey, bahan.id] });
       onClose();
     },
   });

@@ -2997,6 +2997,28 @@ cek "Sabun Cuci Uji: 1 lokasi, saldo 5 + aturan 1/hari ikut tampil" "V == 1" \
   "$(echo "$M87" | jq '([.[]|select(.nama=="Sabun Cuci Uji")][0].lokasi | (length==1) and (.[0].saldo==5) and (.[0].aturan.qty==1) and (.[0].aturan.per_hari==1)) | if . then 1 else 0 end')"
 cek "guard: kasir buka master → 403" "V == 403" "$(status_code "$KASIR" GET /perlengkapan/master)"
 
+echo "== 88. Master perlengkapan: kategori, supplier, ecer/utuh, dilacak, rak simpan =="
+# kategori memakai MASTER kategori bahan baku; rak = tempat penyimpanan cabang
+api "$OWNER" POST /kategori-bahan '{"nama":"Kebersihan Uji"}' > /dev/null
+RAK88=$(api "$OWNER" POST /penyimpanan '{"nama":"Rak Perlengkapan Uji"}' | jq -r .id)
+SPL88=$(api "$OWNER" POST /supplier '{"nama":"Toko Perlengkapan Uji"}' | jq -r .id)
+SPL88B=$(api "$OWNER" POST /supplier '{"nama":"Grosir Perlengkapan Uji"}' | jq -r .id)
+KB88=$(api "$OWNER" POST /perlengkapan "{\"nama\":\"Karbol Uji\",\"satuan\":\"botol\",\"kategori\":\"Kebersihan Uji\",\"boleh_eceran\":false,\"dilacak\":true,\"storage_location_id\":\"$RAK88\"}" | jq -r .id)
+[ -n "$KB88" ] && [ "$KB88" != "null" ] && ok "buat item lengkap (Karbol Uji)" || gagal "buat item: $KB88"
+api "$OWNER" PUT "/perlengkapan/$KB88/supplier" "{\"items\":[{\"supplier_id\":\"$SPL88\",\"is_utama\":true},{\"supplier_id\":\"$SPL88B\"}]}" > /dev/null
+M88=$(api "$OWNER" GET /perlengkapan/master | jq --arg id "$KB88" '[.[]|select(.id==$id)][0]')
+cek "master memuat kategori/utuh-kemasan/dilacak/rak/supplier utama (+1)" "V == 1" \
+  "$(echo "$M88" | jq --arg r "$RAK88" '((.kategori=="Kebersihan Uji") and (.boleh_eceran==false) and (.dilacak==true) and (.rak.id==$r) and (.rak.nama=="Rak Perlengkapan Uji") and (.supplier_utama=="Toko Perlengkapan Uji") and (.jumlah_supplier==2)) | if . then 1 else 0 end')"
+cek "daftar supplier item: 2 baris, utama di atas" "V == 1" \
+  "$(api "$OWNER" GET "/perlengkapan/$KB88/supplier" | jq '((length==2) and (.[0].is_utama==true) and (.[0].nama=="Toko Perlengkapan Uji")) | if . then 1 else 0 end')"
+cek "rak asing/tak valid → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/perlengkapan" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"nama":"Salah Rak Uji","storage_location_id":"00000000-0000-0000-0000-000000000000"}')"
+cek "dua supplier utama → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/perlengkapan/$KB88/supplier" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"items\":[{\"supplier_id\":\"$SPL88\",\"is_utama\":true},{\"supplier_id\":\"$SPL88B\",\"is_utama\":true}]}")"
+cek "guard: kasir atur supplier → 403" "V == 403" "$(status_code "$KASIR" PUT "/perlengkapan/$KB88/supplier")"
+cek "PATCH lepas pelacakan + ganti kategori → master ikut berubah" "V == 1" \
+  "$(api "$OWNER" PATCH "/perlengkapan/$KB88" '{"dilacak":false,"kategori":null}' > /dev/null; api "$OWNER" GET /perlengkapan/master | jq --arg id "$KB88" '([.[]|select(.id==$id)][0] | (.dilacak==false) and (.kategori==null)) | if . then 1 else 0 end')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]
