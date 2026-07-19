@@ -3011,6 +3011,11 @@ cek "master memuat kategori/utuh-kemasan/dilacak/rak/supplier utama (+1)" "V == 
   "$(echo "$M88" | jq --arg r "$RAK88" '((.kategori=="Kebersihan Uji") and (.boleh_eceran==false) and (.dilacak==true) and (.rak.id==$r) and (.rak.nama=="Rak Perlengkapan Uji") and (.supplier_utama=="Toko Perlengkapan Uji") and (.jumlah_supplier==2)) | if . then 1 else 0 end')"
 cek "daftar supplier item: 2 baris, utama di atas" "V == 1" \
   "$(api "$OWNER" GET "/perlengkapan/$KB88/supplier" | jq '((length==2) and (.[0].is_utama==true) and (.[0].nama=="Toko Perlengkapan Uji")) | if . then 1 else 0 end')"
+# GET /perlengkapan per-cabang membawa rak (utk pilih lokasi saat opname)
+cek "daftar per-cabang membawa rak item (rak.id == RAK88)" "V == 1" \
+  "$(api "$OWNER" GET /perlengkapan | jq --arg id "$KB88" --arg r "$RAK88" '([.[]|select(.id==$id)][0].rak.id==$r) | if . then 1 else 0 end')"
+cek "item tanpa rak → rak null" "V == 1" \
+  "$(api "$OWNER" GET /perlengkapan | jq --arg id "$SB83" '([.[]|select(.id==$id)][0].rak == null) | if . then 1 else 0 end')"
 cek "rak asing/tak valid → 400" "V == 400" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/perlengkapan" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"nama":"Salah Rak Uji","storage_location_id":"00000000-0000-0000-0000-000000000000"}')"
 cek "dua supplier utama → 400" "V == 400" \

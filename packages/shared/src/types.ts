@@ -927,6 +927,8 @@ export interface PerlengkapanRowDto {
   saldo: number;
   status: StokStatus;
   aturan: PerlengkapanAturanDto | null;
+  /** rak simpan default (tempat penyimpanan) — utk memilih lokasi saat opname */
+  rak: { id: string; nama: string } | null;
   /**
    * saldo item ini di Central Kitchen pemasok cabang (utk tombol "Minta ke
    * CK" saat stok ≤ minimum); null bila cabang tak terhubung CK / cabang
