@@ -1094,10 +1094,53 @@ export const supplies = pgTable(
       .default(0),
     isActive: boolean("is_active").notNull().default(true),
     catatan: text("catatan"),
+    /** kategori — memakai MASTER KATEGORI yang sama dgn bahan baku (teks) */
+    kategori: text("kategori"),
+    /** boleh dibeli ECERAN (per pcs) vs harus utuh per kemasan */
+    bolehEceran: boolean("boleh_eceran").notNull().default(true),
+    /**
+     * DILACAK: konsumsinya dipantau sistem — item dilacak WAJIB punya aturan
+     * konsumsi (per cabang); yang tidak dilacak cukup dihitung saat opname.
+     */
+    dilacak: boolean("dilacak").notNull().default(false),
+    /** rak simpan default (tempat penyimpanan) — null = tanpa rak */
+    storageLocationId: uuid("storage_location_id").references(() => storageLocations.id, {
+      onDelete: "set null",
+    }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex("supplies_company_nama_uq").on(t.companyId, t.nama)],
+);
+
+/**
+ * SUPPLIER per PERLENGKAPAN (many-to-many) — pola persis ingredient_suppliers:
+ * satu item bisa beberapa supplier; is_utama menandai langganan (maks SATU,
+ * dijaga partial unique index).
+ */
+export const supplySuppliers = pgTable(
+  "supply_suppliers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    supplyId: uuid("supply_id")
+      .notNull()
+      .references(() => supplies.id, { onDelete: "cascade" }),
+    supplierId: uuid("supplier_id")
+      .notNull()
+      .references(() => suppliers.id, { onDelete: "cascade" }),
+    isUtama: boolean("is_utama").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("supply_suppliers_pair_uq").on(t.supplyId, t.supplierId),
+    uniqueIndex("supply_suppliers_utama_uq")
+      .on(t.supplyId)
+      .where(sql`${t.isUtama}`),
+    index("supply_suppliers_company_idx").on(t.companyId),
+  ],
 );
 
 /**

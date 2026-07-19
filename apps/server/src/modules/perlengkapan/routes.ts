@@ -6,12 +6,19 @@
  * owner/admin mengelola item, stok masuk, koreksi, aturan, dan belanja.
  */
 import { zValidator } from "@hono/zod-validator";
-import { and, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { db } from "../../db/client";
-import { supplies, supplyMutations, supplyRules } from "../../db/schema";
+import {
+  storageLocations,
+  suppliers,
+  supplies,
+  supplyMutations,
+  supplyRules,
+  supplySuppliers,
+} from "../../db/schema";
 import { requireRole, resolveBranchId, type AppEnv } from "../../middleware/auth";
 import { terbitkanNomor } from "../dokumen/nomor";
 import {
@@ -25,6 +32,7 @@ import {
   riwayatOpnamePerlengkapan,
   saldoPerlengkapan,
   saldoSatuPerlengkapan,
+  sebaranPerlengkapan,
   setStatusOpnamePerlengkapan,
   tanggalPerusahaan,
   terapkanKonsumsiOtomatis,
@@ -39,6 +47,10 @@ const ItemBody = z.object({
   harga_beli: z.number().min(0).default(0),
   stok_minimum: z.number().min(0).default(0),
   catatan: z.string().max(300).nullish(),
+  kategori: z.string().trim().min(1).max(60).nullish(),
+  boleh_eceran: z.boolean().default(true),
+  dilacak: z.boolean().default(false),
+  storage_location_id: z.string().uuid().nullish(),
 });
 
 // PATCH parsial tanpa .default() — lihat catatan BahanPatchBody (zod v4).
@@ -48,8 +60,41 @@ const ItemPatchBody = z.object({
   harga_beli: z.number().min(0).optional(),
   stok_minimum: z.number().min(0).optional(),
   catatan: z.string().max(300).nullish(),
+  kategori: z.string().trim().min(1).max(60).nullish(),
+  boleh_eceran: z.boolean().optional(),
+  dilacak: z.boolean().optional(),
+  storage_location_id: z.string().uuid().nullish(),
   is_active: z.boolean().optional(),
 });
+
+const SupplierBody = z.object({
+  items: z
+    .array(
+      z.object({
+        supplier_id: z.string().uuid(),
+        is_utama: z.boolean().default(false),
+      }),
+    )
+    .max(50)
+    .default([]),
+});
+
+/** Pastikan rak (tempat penyimpanan) milik company & aktif; return id / 400. */
+async function pastikanRak(companyId: string, rakId: string | null | undefined) {
+  if (!rakId) return null;
+  const [rak] = await db
+    .select({ id: storageLocations.id })
+    .from(storageLocations)
+    .where(
+      and(
+        eq(storageLocations.id, rakId),
+        eq(storageLocations.companyId, companyId),
+        eq(storageLocations.isActive, true),
+      ),
+    );
+  if (!rak) throw new HTTPException(400, { message: "Rak penyimpanan tidak valid" });
+  return rak.id;
+}
 
 const MasukBody = z.object({
   qty: z.number().positive(),
@@ -117,6 +162,14 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
     return c.json(
       await belanjaPerlengkapan({ companyId: auth.company_id!, branchId, dari, sampai }),
     );
+  })
+  // MASTER se-perusahaan (halaman Manajemen tanpa pemilih cabang): semua item
+  // + sebaran "ada di cabang mana saja" (saldo & aturan konsumsi per cabang).
+  .get("/master", requireRole("owner", "admin"), async (c) => {
+    const auth = c.get("auth");
+    // jatah otomatis SEMUA cabang dipotong dulu supaya saldo sebaran jujur
+    await terapkanKonsumsiOtomatis(auth.company_id!);
+    return c.json(await sebaranPerlengkapan(auth.company_id!));
   })
   // Stok awal perlengkapan (dipakai dari halaman Stok, seperti /stok/awal
   // bahan baku): set saldo pembuka per item — selisih terhadap saldo berjalan
@@ -250,6 +303,7 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
   .post("/", requireRole("owner", "admin"), zValidator("json", ItemBody), async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");
+    const rakId = await pastikanRak(auth.company_id!, body.storage_location_id);
     // Nama sama (case-insensitive): item nonaktif → reaktivasi; aktif → 409.
     const [ada] = await db
       .select()
@@ -272,6 +326,10 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
           hargaBeli: body.harga_beli,
           stokMinimum: body.stok_minimum,
           catatan: body.catatan ?? null,
+          kategori: body.kategori ?? null,
+          bolehEceran: body.boleh_eceran,
+          dilacak: body.dilacak,
+          storageLocationId: rakId,
           isActive: true,
           updatedAt: new Date(),
         })
@@ -288,6 +346,10 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
         hargaBeli: body.harga_beli,
         stokMinimum: body.stok_minimum,
         catatan: body.catatan ?? null,
+        kategori: body.kategori ?? null,
+        bolehEceran: body.boleh_eceran,
+        dilacak: body.dilacak,
+        storageLocationId: rakId,
       })
       .returning();
     return c.json({ id: row.id, nama: row.nama, dipulihkan: false }, 201);
@@ -295,6 +357,10 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
   .patch("/:id", requireRole("owner", "admin"), zValidator("json", ItemPatchBody), async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");
+    const rakId =
+      body.storage_location_id !== undefined
+        ? await pastikanRak(auth.company_id!, body.storage_location_id)
+        : undefined;
     const [row] = await db
       .update(supplies)
       .set({
@@ -303,6 +369,10 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
         ...(body.harga_beli !== undefined && { hargaBeli: body.harga_beli }),
         ...(body.stok_minimum !== undefined && { stokMinimum: body.stok_minimum }),
         ...(body.catatan !== undefined && { catatan: body.catatan }),
+        ...(body.kategori !== undefined && { kategori: body.kategori }),
+        ...(body.boleh_eceran !== undefined && { bolehEceran: body.boleh_eceran }),
+        ...(body.dilacak !== undefined && { dilacak: body.dilacak }),
+        ...(rakId !== undefined && { storageLocationId: rakId }),
         ...(body.is_active !== undefined && { isActive: body.is_active }),
         updatedAt: new Date(),
       })
@@ -311,6 +381,95 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
     if (!row) throw new HTTPException(404, { message: "Perlengkapan tidak ditemukan" });
     return c.json({ ok: true });
   })
+  /* ===== SUPPLIER per perlengkapan (pola persis /bahan/:id/supplier) ===== */
+  .get("/:id/supplier", async (c) => {
+    const auth = c.get("auth");
+    const item = await muatSupplyAktif(auth.company_id!, c.req.param("id"));
+    if (!item) throw new HTTPException(404, { message: "Perlengkapan tidak ditemukan" });
+    const rows = await db
+      .select({
+        id: supplySuppliers.id,
+        supplierId: supplySuppliers.supplierId,
+        nama: suppliers.nama,
+        telepon: suppliers.telepon,
+        alamat: suppliers.alamat,
+        isUtama: supplySuppliers.isUtama,
+      })
+      .from(supplySuppliers)
+      .innerJoin(suppliers, eq(supplySuppliers.supplierId, suppliers.id))
+      .where(
+        and(
+          eq(supplySuppliers.companyId, auth.company_id!),
+          eq(supplySuppliers.supplyId, item.id),
+        ),
+      )
+      .orderBy(desc(supplySuppliers.isUtama), asc(suppliers.nama));
+    return c.json(
+      rows.map((r) => ({
+        id: r.id,
+        supplier_id: r.supplierId,
+        nama: r.nama,
+        telepon: r.telepon,
+        alamat: r.alamat,
+        is_utama: r.isUtama,
+      })),
+    );
+  })
+  .put(
+    "/:id/supplier",
+    requireRole("owner", "admin"),
+    zValidator("json", SupplierBody),
+    async (c) => {
+      const auth = c.get("auth");
+      const { items } = c.req.valid("json");
+      const item = await muatSupplyAktif(auth.company_id!, c.req.param("id"));
+      if (!item) throw new HTTPException(404, { message: "Perlengkapan tidak ditemukan" });
+      // gabungkan duplikat (utama di-OR-kan) agar unique index tak meledak
+      const byId = new Map<string, boolean>();
+      for (const it of items) {
+        byId.set(it.supplier_id, (byId.get(it.supplier_id) ?? false) || it.is_utama);
+      }
+      const utama = [...byId.values()].filter(Boolean).length;
+      if (utama > 1) {
+        throw new HTTPException(400, { message: "Hanya boleh satu supplier utama" });
+      }
+      const supplierIds = [...byId.keys()];
+      if (supplierIds.length > 0) {
+        const valid = await db
+          .select({ id: suppliers.id })
+          .from(suppliers)
+          .where(
+            and(eq(suppliers.companyId, auth.company_id!), inArray(suppliers.id, supplierIds)),
+          );
+        if (valid.length !== supplierIds.length) {
+          throw new HTTPException(400, { message: "Ada supplier yang tidak valid" });
+        }
+        // tanpa penanda utama → item pertama jadi utama (selalu ada langganan)
+        if (utama === 0) byId.set(supplierIds[0], true);
+      }
+      await db.transaction(async (tx) => {
+        await tx
+          .delete(supplySuppliers)
+          .where(
+            and(
+              eq(supplySuppliers.companyId, auth.company_id!),
+              eq(supplySuppliers.supplyId, item.id),
+            ),
+          );
+        if (supplierIds.length > 0) {
+          await tx.insert(supplySuppliers).values(
+            [...byId].map(([supplierId, isUtama]) => ({
+              companyId: auth.company_id!,
+              supplyId: item.id,
+              supplierId,
+              isUtama,
+            })),
+          );
+        }
+      });
+      return c.json({ ok: true, jumlah: supplierIds.length });
+    },
+  )
   // Soft delete: ledger & riwayat tetap utuh; nama yang sama bisa dibuat ulang
   // (reaktivasi). Aturan konsumsinya otomatis berhenti (join is_active).
   .delete("/:id", requireRole("owner", "admin"), async (c) => {
