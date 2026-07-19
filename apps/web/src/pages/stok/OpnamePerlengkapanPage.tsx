@@ -7,7 +7,6 @@ import { useAuth } from "../../context/AuthContext";
 import { useBranch, useCabangData } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatAngka, formatTanggal, hariIniWIB } from "../../lib/format";
-import { RiwayatOpnameModal } from "./StokPerlengkapanTab";
 
 /**
  * Opname perlengkapan mobile-first (layar penuh, tanpa sidebar) — dilakukan
@@ -18,8 +17,6 @@ export function OpnamePerlengkapanPage() {
   const { auth } = useAuth();
   const { query: branchQuery, id: branchId } = useCabangData();
   const queryClient = useQueryClient();
-  const isManajemen = auth?.user.role === "owner" || auth?.user.role === "admin";
-  const [riwayat, setRiwayat] = useState(false);
 
   const { data: rows = [] } = useQuery({
     queryKey: ["perlengkapan", branchQuery],
@@ -86,13 +83,13 @@ export function OpnamePerlengkapanPage() {
             {formatTanggal(hariIniWIB())} · {terisi} dari {tampil.length} dihitung
           </div>
         </div>
-        <button
-          onClick={() => setRiwayat(true)}
+        <Link
+          to="/stok/opname/riwayat?tab=perlengkapan"
           className={`${btnSecondary} shrink-0`}
           title="Riwayat opname perlengkapan (status ACC)"
         >
           🕑
-        </button>
+        </Link>
       </header>
 
       {/* Filter */}
@@ -267,30 +264,18 @@ export function OpnamePerlengkapanPage() {
               </div>
             )}
             <div className="mt-4 flex gap-2">
-              <button
-                onClick={() => {
-                  setHasil(null);
-                  setRiwayat(true);
-                }}
-                className={`${btnSecondary} flex-1`}
+              <Link
+                to="/stok/opname/riwayat?tab=perlengkapan"
+                className={`${btnSecondary} flex-1 text-center`}
               >
                 🕑 Lihat Riwayat
-              </button>
+              </Link>
               <button onClick={() => setHasil(null)} className={`${btnPrimary} flex-1`}>
                 Opname Lagi
               </button>
             </div>
           </div>
         </div>
-      )}
-
-      {riwayat && (
-        <RiwayatOpnameModal
-          branchQuery={branchQuery}
-          isManajemen={isManajemen}
-          onClose={() => setRiwayat(false)}
-          onSukses={() => queryClient.invalidateQueries({ queryKey: ["perlengkapan"] })}
-        />
       )}
     </div>
   );

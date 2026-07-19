@@ -1,12 +1,21 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { Link } from "react-router-dom";
-import type { OpnameSesiDetail, OpnameSesiRow, OpnameSesiStatus } from "@kakarut/shared";
+import { Link, useSearchParams } from "react-router-dom";
+import type {
+  OpnamePerlengkapanDetail,
+  OpnamePerlengkapanSesiRow,
+  OpnameSesiDetail,
+  OpnameSesiRow,
+  OpnameSesiStatus,
+  PenyesuaianStatus,
+} from "@kakarut/shared";
 import { Spinner, btnSecondary } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { useCabangData } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatAngka, formatWaktu } from "../../lib/format";
+
+type JenisOpname = "bahan" | "perlengkapan";
 
 /** Badge status ACC sesi opname. */
 function StatusBadge({ status, jumlahSelisih }: { status: OpnameSesiStatus; jumlahSelisih: number }) {
@@ -205,38 +214,263 @@ function DetailSheet({ sessionId, onClose }: { sessionId: string; onClose: () =>
   );
 }
 
-/** Riwayat sesi opname (mobile-friendly, layar penuh). */
+/** Badge status ACC sesi opname perlengkapan (menunggu/disetujui/ditolak). */
+function StatusBadgePerl({ status, jumlah }: { status: PenyesuaianStatus; jumlah: number }) {
+  const map: Record<PenyesuaianStatus, { teks: string; kelas: string }> = {
+    menunggu: {
+      teks: `Menunggu ACC${jumlah ? ` · ${jumlah} selisih` : ""}`,
+      kelas: "bg-yellow-100 text-yellow-800",
+    },
+    disetujui: { teks: "Disetujui ✓", kelas: "bg-blue-100 text-blue-800" },
+    ditolak: { teks: "Ditolak", kelas: "bg-red-100 text-red-700" },
+  };
+  const b = map[status];
+  return (
+    <span className={`rounded-full px-2.5 py-1 text-xs font-semibold whitespace-nowrap ${b.kelas}`}>
+      {b.teks}
+    </span>
+  );
+}
+
+/** Lembar detail sesi opname PERLENGKAPAN + ACC/Tolak/Hapus (owner/admin). */
+function DetailSheetPerl({ sessionId, onClose }: { sessionId: string; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const { auth } = useAuth();
+  const bolehUbah = auth?.user.role === "owner" || auth?.user.role === "admin";
+  const { data, isLoading } = useQuery({
+    queryKey: ["perlengkapan-opname", "sesi", sessionId],
+    queryFn: () => api<OpnamePerlengkapanDetail>(`/perlengkapan/opname/sesi/${sessionId}`),
+  });
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: ["perlengkapan-opname"] });
+    queryClient.invalidateQueries({ queryKey: ["perlengkapan"] });
+    queryClient.invalidateQueries({ queryKey: ["kartu-perlengkapan"] });
+  };
+  const aksi = useMutation({
+    mutationFn: (jenis: "acc" | "tolak" | "hapus") =>
+      jenis === "hapus"
+        ? api(`/perlengkapan/opname/sesi/${sessionId}`, { method: "DELETE" })
+        : api(`/perlengkapan/opname/sesi/${sessionId}/${jenis}`, { method: "POST" }),
+    onSuccess: () => {
+      invalidate();
+      onClose();
+    },
+  });
+  const sibuk = aksi.isPending;
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40" onClick={onClose}>
+      <div
+        className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-white p-5"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-lg font-bold text-stone-800">Detail Opname Perlengkapan</h2>
+          <button onClick={onClose} className="text-stone-400">✕</button>
+        </div>
+        {isLoading || !data ? (
+          <Spinner />
+        ) : (
+          <>
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center gap-2 text-sm text-stone-500">
+                {data.nomor && (
+                  <span className="rounded-md bg-orange-100 px-1.5 py-0.5 font-mono text-xs font-bold text-orange-800">
+                    {data.nomor}
+                  </span>
+                )}
+              </div>
+              <StatusBadgePerl status={data.status} jumlah={data.rows.length} />
+            </div>
+            {data.status === "menunggu" && (
+              <div className="mb-3 rounded-lg bg-yellow-50 px-3 py-2 text-sm text-yellow-800">
+                Stok <b>belum berubah</b>. Owner/admin meng-<b>ACC</b> agar selisih diterapkan, atau{" "}
+                <b>Tolak</b> untuk membuang hitungan ini.
+              </div>
+            )}
+            <table className="w-full text-sm">
+              <thead className="border-b border-stone-200 text-left text-xs uppercase text-stone-500">
+                <tr>
+                  <th className="py-1">Perlengkapan</th>
+                  <th className="py-1 text-right">Sistem</th>
+                  <th className="py-1 text-right">Fisik</th>
+                  <th className="py-1 text-right">Selisih</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-stone-100">
+                {data.rows.map((it) => (
+                  <tr key={it.supply_id}>
+                    <td className="py-1.5 pr-2">
+                      {it.nama} <span className="text-stone-400">{it.satuan}</span>
+                    </td>
+                    <td className="py-1.5 text-right text-stone-500">
+                      {it.system_qty != null ? formatAngka(it.system_qty) : "—"}
+                    </td>
+                    <td className="py-1.5 text-right font-medium">
+                      {it.qty_fisik != null ? formatAngka(it.qty_fisik) : "—"}
+                    </td>
+                    <td
+                      className={`py-1.5 text-right font-semibold ${
+                        it.selisih < 0 ? "text-red-600" : "text-emerald-700"
+                      }`}
+                    >
+                      {it.selisih > 0 ? "+" : ""}
+                      {formatAngka(it.selisih)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {bolehUbah && (
+              <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-stone-200 pt-4">
+                {data.status === "menunggu" && (
+                  <>
+                    <button
+                      onClick={() => {
+                        if (window.confirm("Setujui opname ini? Stok perlengkapan disesuaikan ke hitungan fisik."))
+                          aksi.mutate("acc");
+                      }}
+                      disabled={sibuk}
+                      className="flex-1 rounded-lg bg-green-600 px-3 py-2 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-50"
+                    >
+                      ✅ ACC — terapkan ke stok
+                    </button>
+                    <button
+                      onClick={() => aksi.mutate("tolak")}
+                      disabled={sibuk}
+                      className="rounded-lg border border-red-300 px-3 py-2 text-sm font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50"
+                    >
+                      ❌ Tolak
+                    </button>
+                  </>
+                )}
+                <button
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        "Hapus sesi opname ini? Bila sudah disetujui, selisihnya ikut dibatalkan.",
+                      )
+                    )
+                      aksi.mutate("hapus");
+                  }}
+                  disabled={sibuk}
+                  className="ml-auto text-sm font-medium text-stone-400 hover:text-red-600 disabled:opacity-50"
+                >
+                  🗑 Hapus
+                </button>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Riwayat sesi opname (mobile-friendly, layar penuh) — bahan baku & perlengkapan. */
 export function OpnameRiwayatPage() {
   const { query: branchQuery } = useCabangData();
+  const [params, setParams] = useSearchParams();
+  const tab: JenisOpname = params.get("tab") === "perlengkapan" ? "perlengkapan" : "bahan";
   const [detail, setDetail] = useState<string | null>(null);
+  const [detailPerl, setDetailPerl] = useState<string | null>(null);
 
   const { data: sesi, isLoading } = useQuery({
     queryKey: ["opname-riwayat", branchQuery],
     queryFn: () => api<OpnameSesiRow[]>(`/stok/opname/riwayat${branchQuery}`),
+    enabled: tab === "bahan",
   });
+  const { data: sesiPerl, isLoading: loadingPerl } = useQuery({
+    queryKey: ["perlengkapan-opname", branchQuery],
+    queryFn: () => api<OpnamePerlengkapanSesiRow[]>(`/perlengkapan/opname/riwayat${branchQuery}`),
+    enabled: tab === "perlengkapan",
+  });
+
+  const gantiTab = (t: JenisOpname) => {
+    setDetail(null);
+    setDetailPerl(null);
+    setParams(t === "perlengkapan" ? { tab: "perlengkapan" } : {}, { replace: true });
+  };
 
   return (
     <div className="flex min-h-screen flex-col bg-stone-100">
       <header className="sticky top-0 z-10 flex items-center gap-3 border-b border-stone-200 bg-white px-4 py-3 shadow-sm">
-        <Link to="/stok/opname" className="text-2xl text-stone-500" aria-label="Kembali">
+        <Link
+          to={tab === "perlengkapan" ? "/stok/opname-perlengkapan" : "/stok/opname"}
+          className="text-2xl text-stone-500"
+          aria-label="Kembali"
+        >
           ←
         </Link>
-        <div className="flex-1 text-base font-bold text-stone-800">Riwayat Opname</div>
+        <div className="flex-1 text-base font-bold text-stone-800">Riwayat Stock Opname</div>
         <Link to="/stok" className={btnSecondary}>
           Stok
         </Link>
       </header>
 
+      {/* Tab: opname bahan baku vs perlengkapan — riwayat digabung di sini */}
+      <div className="sticky top-[57px] z-10 flex gap-1 border-b border-stone-200 bg-white px-3 py-2">
+        <button
+          onClick={() => gantiTab("bahan")}
+          className={`flex-1 rounded-lg px-3 py-1.5 text-sm font-semibold ${
+            tab === "bahan" ? "bg-orange-600 text-white" : "bg-stone-100 text-stone-600"
+          }`}
+        >
+          🥩 Bahan Baku
+        </button>
+        <button
+          onClick={() => gantiTab("perlengkapan")}
+          className={`flex-1 rounded-lg px-3 py-1.5 text-sm font-semibold ${
+            tab === "perlengkapan" ? "bg-orange-600 text-white" : "bg-stone-100 text-stone-600"
+          }`}
+        >
+          🧰 Perlengkapan
+        </button>
+      </div>
+
       <main className="flex-1 space-y-2 p-3">
-        {isLoading ? (
+        {tab === "bahan" ? (
+          isLoading ? (
+            <Spinner />
+          ) : (sesi ?? []).length === 0 ? (
+            <div className="py-10 text-center text-sm text-stone-400">
+              Belum ada riwayat opname bahan baku.
+            </div>
+          ) : (
+            (sesi ?? []).map((s) => (
+              <button
+                key={s.session_id}
+                onClick={() => setDetail(s.session_id)}
+                className="flex w-full items-center justify-between gap-3 rounded-xl border border-stone-200 bg-white p-4 text-left"
+              >
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {s.nomor && (
+                      <span className="rounded-md bg-orange-100 px-1.5 py-0.5 font-mono text-xs font-bold text-orange-800">
+                        {s.nomor}
+                      </span>
+                    )}
+                    <span className="font-semibold text-stone-800">{formatWaktu(s.waktu)}</span>
+                  </div>
+                  <div className="truncate text-sm text-stone-500">
+                    {s.oleh ?? "—"} · {s.jumlah_item} bahan
+                    {s.catatan ? ` · ${s.catatan}` : ""}
+                  </div>
+                </div>
+                <StatusBadge status={s.status} jumlahSelisih={s.jumlah_selisih} />
+              </button>
+            ))
+          )
+        ) : loadingPerl ? (
           <Spinner />
-        ) : (sesi ?? []).length === 0 ? (
-          <div className="py-10 text-center text-sm text-stone-400">Belum ada riwayat opname.</div>
+        ) : (sesiPerl ?? []).length === 0 ? (
+          <div className="py-10 text-center text-sm text-stone-400">
+            Belum ada riwayat opname perlengkapan.
+          </div>
         ) : (
-          (sesi ?? []).map((s) => (
+          (sesiPerl ?? []).map((s) => (
             <button
               key={s.session_id}
-              onClick={() => setDetail(s.session_id)}
+              onClick={() => setDetailPerl(s.session_id)}
               className="flex w-full items-center justify-between gap-3 rounded-xl border border-stone-200 bg-white p-4 text-left"
             >
               <div className="min-w-0">
@@ -249,17 +483,17 @@ export function OpnameRiwayatPage() {
                   <span className="font-semibold text-stone-800">{formatWaktu(s.waktu)}</span>
                 </div>
                 <div className="truncate text-sm text-stone-500">
-                  {s.oleh ?? "—"} · {s.jumlah_item} bahan
-                  {s.catatan ? ` · ${s.catatan}` : ""}
+                  {s.oleh ?? "—"} · {s.jumlah_item} selisih
                 </div>
               </div>
-              <StatusBadge status={s.status} jumlahSelisih={s.jumlah_selisih} />
+              <StatusBadgePerl status={s.status} jumlah={s.jumlah_item} />
             </button>
           ))
         )}
       </main>
 
       {detail && <DetailSheet sessionId={detail} onClose={() => setDetail(null)} />}
+      {detailPerl && <DetailSheetPerl sessionId={detailPerl} onClose={() => setDetailPerl(null)} />}
     </div>
   );
 }
