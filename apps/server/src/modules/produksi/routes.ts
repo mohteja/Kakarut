@@ -1500,6 +1500,9 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         cabang: cabangProd.nama,
         tujuan_branch_id: productions.tujuanBranchId,
         tujuan_cabang: tujuanProd.nama,
+        // transfer stok antar-cabang (kirim dari stok CK / kirim hasil):
+        // kartu tampil sebagai "Kiriman", bukan produksi baru
+        asal_branch_id: productions.asalBranchId,
         // asal permintaan (badge "Permintaan" vs "Langsung")
         rencana_id: productions.rencanaId,
         // "diproduksi UNTUK cabang" — pengingat kirim hasil setelah selesai

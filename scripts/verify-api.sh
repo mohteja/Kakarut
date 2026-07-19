@@ -2806,6 +2806,40 @@ cek "tim CK melihat faktur kiriman terkirim (dari_branch_id)" "V >= 1" \
 cek "tim CK melihat faktur beli yang sudah dikirim ke cabang (§80)" "V >= 1" \
   "$(api "$TCK58" GET "/pembelian?per_page=500" | jq --arg f "$FB80" '[.rows[]|select(.faktur_id==$f)] | length')"
 
+echo "== 82. Permintaan dgn stok ready CK: faktur KIRIM langsung + faktur PRODUKSI sisa =="
+# reset: CK punya 30 butir READY, cabang 0 → butuh 100 (porsi 20)
+#        = kirim 30 dari stok CK + produksi 1 batch (100) utk sisanya
+api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CK52_UTAMA\",\"items\":[{\"ingredient_id\":\"$BASO66\",\"qty\":30},{\"ingredient_id\":\"$DAG66\",\"qty\":20000},{\"ingredient_id\":\"$TEP66\",\"qty\":5000}]}" > /dev/null
+api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CB46_ID\",\"items\":[{\"ingredient_id\":\"$BASO66\",\"qty\":0}]}" > /dev/null
+P82=$(api "$OWNER" POST "/rekomendasi/menu?branch_id=$CB46_ID" "{\"items\":[{\"menu_id\":\"$MENU66\",\"porsi\":20}],\"ck_branch_id\":\"$CK52_UTAMA\"}")
+cek "preview: stok ready CK dihitung utk KIRIM (kirim_ck = 30)" "abs(V - 30) < 0.001" \
+  "$(echo "$P82" | jq --arg i "$BASO66" '[.bahan[]|select(.ingredient_id==$i)][0].kirim_ck')"
+cek "preview: sisa tetap DIPRODUKSI (1 batch = 100)" "abs(V - 100) < 0.001" \
+  "$(echo "$P82" | jq --arg i "$BASO66" '[.bahan[]|select(.ingredient_id==$i)][0].qty_faktur')"
+H82=$(api "$OWNER" POST /rekomendasi/menu/faktur "{\"items\":[{\"menu_id\":\"$MENU66\",\"porsi\":20}],\"tujuan_branch_id\":\"$CB46_ID\",\"ck_branch_id\":\"$CK52_UTAMA\"}")
+KF82=$(echo "$H82" | jq -r '.kirim.faktur_id // empty')
+PF82=$(echo "$H82" | jq -r '.produksi.faktur_id // empty')
+cek "satu permintaan menerbitkan faktur KIRIM dan PRODUKSI sekaligus" "V == 1" \
+  "$([ -n "$KF82" ] && [ -n "$PF82" ] && echo 1 || echo 0)"
+R82=$(api "$OWNER" GET "/produksi?branch_id=$CK52_UTAMA&per_page=500")
+cek "faktur kirim: 30 butir siap kirim, asal = CK (kartu 'Kiriman'), tujuan cabang" "V == 1" \
+  "$(echo "$R82" | jq --arg f "$KF82" --arg ck "$CK52_UTAMA" --arg cb "$CB46_ID" '([.rows[]|select(.faktur_id==$f)] | (length==1) and (.[0].qty==30) and (.[0].status=="menunggu") and (.[0].asal_branch_id==$ck) and (.[0].tujuan_branch_id==$cb)) | if . then 1 else 0 end')"
+cek "faktur produksi: 1 batch (100) status rencana, untuk cabang peminta" "V == 1" \
+  "$(echo "$R82" | jq --arg f "$PF82" --arg cb "$CB46_ID" '([.rows[]|select(.faktur_id==$f)] | (length==1) and (.[0].qty==100) and (.[0].status=="rencana") and (.[0].untuk_branch_id==$cb)) | if . then 1 else 0 end')"
+cek "Data Permintaan Stok: bagian KIRIM tampil (status menunggu) + bagian produksi" "V == 1" \
+  "$(api "$OWNER" GET /rekomendasi/permintaan | jq --arg f "$KF82" '([.[]|select(.kirim != null and .kirim.faktur_id==$f)] | (length==1) and (.[0].kirim.status=="menunggu") and (.[0].produksi != null)) | if . then 1 else 0 end')"
+# CK kirim → cabang terima: saldo pindah CK → cabang (transfer, tanpa produksi)
+api "$OWNER" POST "/produksi/kirim/$KF82" '{}' > /dev/null
+cek "dikirim: kiriman muncul di Penerimaan cabang" "V == 1" \
+  "$(api "$OWNER" GET "/penerimaan?branch_id=$CB46_ID" | jq --arg f "$KF82" '([.rows[]|select(.faktur_id==$f)] | (length==1) and (.[0].status=="menunggu")) | if . then 1 else 0 end')"
+api "$OWNER" POST "/penerimaan/$KF82/terima" > /dev/null
+cek "diterima: saldo cabang +30 (dari stok ready CK)" "abs(V - 30) < 0.001" \
+  "$(api "$OWNER" GET "/stok?branch_id=$CB46_ID" | jq --arg id "$BASO66" '[.[]|select(.ingredient_id==$id)][0].saldo')"
+cek "diterima: stok ready CK berpindah (30 → 0)" "abs(V) < 0.001" \
+  "$(api "$OWNER" GET "/stok?branch_id=$CK52_UTAMA" | jq --arg id "$BASO66" '[.[]|select(.ingredient_id==$id)][0].saldo // 0')"
+cek "permintaan: bagian kirim jadi 'Diterima cabang' (dikonfirmasi)" "V == 1" \
+  "$(api "$OWNER" GET /rekomendasi/permintaan | jq --arg f "$KF82" '([.[]|select(.kirim != null and .kirim.faktur_id==$f)] | (length==1) and (.[0].kirim.status=="dikonfirmasi")) | if . then 1 else 0 end')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]
