@@ -74,8 +74,8 @@ export function PerlengkapanPage() {
       <div className="mb-3 rounded-lg bg-blue-50 px-4 py-2 text-sm text-blue-800">
         Master barang <b>non bahan baku</b> (sendok, spons, sabun…) berlaku se-perusahaan —
         hanya pengaturan <b>nama, harga, dan aturan konsumsi</b>. Kolom <b>Ada di</b>{" "}
-        menunjukkan cabang yang memegang stoknya. Stok fisik (stok awal, stok masuk, opname,
-        kiriman) dikelola di halaman <b>Stok → tab Perlengkapan</b>.
+        menunjukkan cabang mana saja yang memakai item ini; saldonya dilihat di halaman{" "}
+        <b>Stok → tab Perlengkapan</b>.
       </div>
       <ErrorText error={hapus.error} />
 
@@ -104,7 +104,8 @@ export function PerlengkapanPage() {
                 <th className={thClass}>Perlengkapan</th>
                 <th className={`${thClass} text-right`}>Harga Beli</th>
                 <th className={`${thClass} text-right`}>Stok Minimum</th>
-                <th className={thClass}>Ada di (saldo · aturan konsumsi)</th>
+                <th className={thClass}>Ada di</th>
+                <th className={thClass}>Aturan Konsumsi</th>
                 <th className={thClass}></th>
               </tr>
             </thead>
@@ -131,20 +132,28 @@ export function PerlengkapanPage() {
                         {r.lokasi.map((l) => (
                           <span
                             key={l.branch_id}
-                            className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                              l.status === "habis"
-                                ? "bg-red-50 text-red-700"
-                                : l.status === "menipis"
-                                  ? "bg-amber-50 text-amber-800"
-                                  : "bg-stone-100 text-stone-700"
-                            }`}
-                            title={`${l.branch_nama}: saldo ${formatAngka(l.saldo)} ${r.satuan}${l.aturan ? ` · aturan ${labelAturan(l.aturan, r.satuan)}` : ""}`}
+                            className="rounded-full bg-stone-100 px-2 py-0.5 text-xs font-medium text-stone-700"
                           >
-                            🏪 {l.branch_nama} · <b>{formatAngka(l.saldo)}</b> {r.satuan}
-                            {l.aturan && <> · ⏱ {labelAturan(l.aturan, r.satuan)}</>}
+                            🏪 {l.branch_nama}
                           </span>
                         ))}
                       </div>
+                    )}
+                  </td>
+                  <td className={tdClass}>
+                    {r.lokasi.some((l) => l.aturan) ? (
+                      <div className="space-y-0.5 text-xs text-stone-600">
+                        {r.lokasi
+                          .filter((l) => l.aturan)
+                          .map((l) => (
+                            <div key={l.branch_id} className="whitespace-nowrap">
+                              <span className="text-stone-400">{l.branch_nama}:</span> ⏱{" "}
+                              {labelAturan(l.aturan!, r.satuan)}
+                            </div>
+                          ))}
+                      </div>
+                    ) : (
+                      <span className="text-xs text-stone-400">manual</span>
                     )}
                   </td>
                   <td className={`${tdClass} whitespace-nowrap text-right`}>
