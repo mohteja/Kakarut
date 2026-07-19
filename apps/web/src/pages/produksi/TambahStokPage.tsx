@@ -68,6 +68,8 @@ export interface StokMasukRow {
   /** work-order CK: cabang tujuan pengiriman (null = bukan work-order) */
   tujuan_branch_id?: string | null;
   tujuan_cabang?: string | null;
+  /** transfer stok antar-cabang (kirim dari stok CK / kirim hasil) — bukan produksi baru */
+  asal_branch_id?: string | null;
   /** dari Permintaan Tambah Stok (rencana menu); null = input langsung */
   rencana_id?: string | null;
   /** produksi dari permintaan: hasil masuk stok CK lalu PERLU DIKIRIM ke cabang ini */
@@ -103,6 +105,8 @@ export interface FakturGroup {
   tujuanCabang: string | null;
   /** faktur lahir dari Permintaan Tambah Stok (badge asal faktur) */
   dariPermintaan: boolean;
+  /** transfer stok yang sudah ada (asal_branch_id terisi) — kartu "Kiriman" */
+  kiriman: boolean;
   /** produksi dari permintaan: hasil perlu dikirim ke cabang ini */
   untukCabang: string | null;
   rows: StokMasukRow[];
@@ -400,6 +404,7 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
           cabang: r.cabang ?? null,
           tujuanCabang: r.tujuan_cabang ?? null,
           dariPermintaan: false,
+          kiriman: false,
           untukCabang: null,
           rows: [],
           totalHarga: 0,
@@ -409,6 +414,7 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
       }
       g.rows.push(r);
       if (r.rencana_id) g.dariPermintaan = true;
+      if (r.asal_branch_id) g.kiriman = true;
       if (!g.untukCabang && r.untuk_cabang) g.untukCabang = r.untuk_cabang;
       // faktur campuran (produk jadi + bahan produksi): tujuan diambil dari
       // baris mana pun yang punya — baris bahan produksi tujuannya null
@@ -568,9 +574,17 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                 r.tujuan_branch_id != null &&
                 r.branch_id === r.tujuan_branch_id,
             );
-            // badge lebih jujur utk belanja yang barangnya kumpul di CK
-            const badge =
-              tipe === "beli" && g.status === "menunggu" && siapKirim
+            // badge lebih jujur utk belanja yang barangnya kumpul di CK, dan utk
+            // KIRIMAN (transfer stok) yang tahapnya soal pengiriman, bukan produksi
+            const badge = g.kiriman
+              ? g.status === "dikonfirmasi"
+                ? { label: "✅ Diterima cabang", cls: "bg-green-100 text-green-800" }
+                : g.status === "menunggu" && siapKirim
+                  ? { label: "📦 Di CK — siap kirim ke cabang", cls: "bg-purple-100 text-purple-800" }
+                  : g.status === "menunggu"
+                    ? { label: "🚚 Dalam pengiriman", cls: "bg-blue-100 text-blue-800" }
+                    : badgeFaktur(tipe, g.status)
+              : tipe === "beli" && g.status === "menunggu" && siapKirim
                 ? { label: "📦 Di CK — siap kirim ke cabang", cls: "bg-purple-100 text-purple-800" }
                 : badgeFaktur(tipe, g.status);
             // kartu ringkas ala transaksi marketplace: tampilkan 1 barang
@@ -588,7 +602,7 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                     <span className="font-bold text-stone-800">
-                      {tipe === "produksi" ? "🏭 Produksi" : "🛒 Pembelian"}
+                      {g.kiriman ? "🚚 Kiriman" : tipe === "produksi" ? "🏭 Produksi" : "🛒 Pembelian"}
                     </span>
                     {/* nomor dokumen otomatis — identitas utama faktur */}
                     {g.nomor && (
@@ -617,11 +631,13 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                   </div>
                   <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-stone-500">
                     <span className="font-medium text-stone-600">
-                      {tipe === "produksi"
-                        ? `🔧 ${g.dikerjakanOleh ?? g.supplier ?? "Produksi sendiri"}`
-                        : g.dikerjakanOleh
-                          ? `🔧 ${g.dikerjakanOleh}` // pemroses belanja (tercatat saat Diproses)
-                          : (g.supplier ?? "Belum diproses")}
+                      {g.kiriman
+                        ? `🚚 Dari stok ${g.cabang ?? "CK"}` // transfer stok yang sudah ada
+                        : tipe === "produksi"
+                          ? `🔧 ${g.dikerjakanOleh ?? g.supplier ?? "Produksi sendiri"}`
+                          : g.dikerjakanOleh
+                            ? `🔧 ${g.dikerjakanOleh}` // pemroses belanja (tercatat saat Diproses)
+                            : (g.supplier ?? "Belum diproses")}
                     </span>
                     {g.danaCair > 0 && (
                       <span
