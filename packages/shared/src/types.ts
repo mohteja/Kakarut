@@ -899,8 +899,16 @@ export type PerlengkapanMutasiTipe =
   | "kirim"
   | "terima";
 
-/** Aturan konsumsi otomatis per cabang: terpakai `qty` setiap `per_hari` hari. */
+/** Metode konsumsi perlengkapan: otomatis (jadwal harian) vs manual (stock opname). */
+export type PerlengkapanAturanMetode = "otomatis" | "manual";
+
+/**
+ * Aturan konsumsi per cabang. metode "otomatis": terpakai `qty` setiap
+ * `per_hari` hari; metode "manual": pemakaian dicatat lewat STOCK OPNAME
+ * saja (qty/per_hari/mulai diabaikan).
+ */
 export interface PerlengkapanAturanDto {
+  metode: PerlengkapanAturanMetode;
   qty: number;
   per_hari: number;
   aktif: boolean;
@@ -960,6 +968,26 @@ export interface PerlengkapanMasterRow {
   jumlah_supplier: number;
   /** cabang dengan saldo ≠ 0 ATAU aturan konsumsi terpasang */
   lokasi: PerlengkapanLokasiDto[];
+}
+
+/**
+ * Hasil "permintaan perlengkapan otomatis" untuk satu cabang: untuk item yang
+ * saldo ≤ stok minimum, kiriman KP- dibuat sebanyak stok yang ADA di CK;
+ * kekurangan yang belum tertutup CK dilaporkan sebagai "perlu beli di CK".
+ */
+export interface PermintaanPerlengkapanOtomatisHasil {
+  /** kiriman KP- yang berhasil diterbitkan (dari stok CK) */
+  dibuat: {
+    supply_id: string;
+    nama: string;
+    satuan: string;
+    qty: number;
+    nomor: string | null;
+  }[];
+  /** item yang masih kurang setelah kiriman — CK harus beli lagi */
+  perlu_beli_ck: { supply_id: string; nama: string; satuan: string; qty: number }[];
+  /** item ≤ minimum tapi cabang ini bukan store / tak terhubung CK */
+  tak_bisa_kirim: { supply_id: string; nama: string; satuan: string; qty: number }[];
 }
 
 /** Kiriman perlengkapan CK → cabang (stok pindah saat cabang menerima). */

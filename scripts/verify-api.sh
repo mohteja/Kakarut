@@ -3019,6 +3019,43 @@ cek "guard: kasir atur supplier → 403" "V == 403" "$(status_code "$KASIR" PUT 
 cek "PATCH lepas pelacakan + ganti kategori → master ikut berubah" "V == 1" \
   "$(api "$OWNER" PATCH "/perlengkapan/$KB88" '{"dilacak":false,"kategori":null}' > /dev/null; api "$OWNER" GET /perlengkapan/master | jq --arg id "$KB88" '([.[]|select(.id==$id)][0] | (.dilacak==false) and (.kategori==null)) | if . then 1 else 0 end')"
 
+echo "== 89. Aturan konsumsi metode MANUAL (dari stock opname) vs OTOMATIS =="
+SB89=$(api "$OWNER" POST /perlengkapan '{"nama":"Serbet Uji","satuan":"lembar"}' | jq -r .id)
+api "$OWNER" POST "/perlengkapan/$SB89/masuk" '{"qty":5}' > /dev/null
+# metode manual: pemakaian via stock opname — TANPA potongan terjadwal
+api "$OWNER" PUT "/perlengkapan/$SB89/aturan" '{"metode":"manual"}' > /dev/null
+cek "aturan manual tersimpan (metode di daftar)" "V == 1" \
+  "$(api "$OWNER" GET /perlengkapan | jq --arg id "$SB89" '([.[]|select(.id==$id)][0].aturan.metode == "manual") | if . then 1 else 0 end')"
+cek "manual: saldo TETAP 5 (tanpa potongan otomatis)" "abs(V - 5) < 0.001" \
+  "$(api "$OWNER" GET /perlengkapan | jq --arg id "$SB89" '[.[]|select(.id==$id)][0].saldo')"
+cek "aturan otomatis tanpa takaran (qty 0) → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/perlengkapan/$SB89/aturan" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"metode":"otomatis","qty":0}')"
+# ganti ke OTOMATIS 1/hari mulai kemarin → auto 2 hari (kemarin+hari ini)
+api "$OWNER" PUT "/perlengkapan/$SB89/aturan" "{\"metode\":\"otomatis\",\"qty\":1,\"per_hari\":1,\"mulai\":\"$KEMARIN83\"}" > /dev/null
+cek "ganti manual → otomatis 1/hari mulai kemarin → saldo 3" "abs(V - 3) < 0.001" \
+  "$(api "$OWNER" GET /perlengkapan | jq --arg id "$SB89" '[.[]|select(.id==$id)][0].saldo')"
+cek "kembali ke manual → saldo berhenti terpotong (tetap 3)" "abs(V - 3) < 0.001" \
+  "$(api "$OWNER" PUT "/perlengkapan/$SB89/aturan" '{"metode":"manual"}' > /dev/null; api "$OWNER" GET /perlengkapan | jq --arg id "$SB89" '[.[]|select(.id==$id)][0].saldo')"
+
+echo "== 90. Permintaan perlengkapan OTOMATIS (kiriman dari CK + laporan perlu beli) =="
+# item baru: min 10; CK punya 6; cabang CB46 (terhubung CK52) punya 0
+PO90=$(api "$OWNER" POST /perlengkapan '{"nama":"Pembersih Kaca Uji","satuan":"botol","stok_minimum":10}' | jq -r .id)
+api "$OWNER" POST "/perlengkapan/$PO90/masuk?branch_id=$CK52_UTAMA" '{"qty":6}' > /dev/null
+HP90=$(api "$OWNER" POST "/perlengkapan/permintaan-otomatis?branch_id=$CB46_ID" '{}')
+cek "kiriman dibuat utk item ≤ minimum, qty = stok CK (6)" "V == 1" \
+  "$(echo "$HP90" | jq --arg id "$PO90" '([.dibuat[]|select(.supply_id==$id)] | (length==1) and (.[0].qty==6) and (.[0].nomor|test("^KP-"))) | if . then 1 else 0 end')"
+cek "sisa kekurangan (10−6=4) dilaporkan perlu beli di CK" "V == 1" \
+  "$(echo "$HP90" | jq --arg id "$PO90" '([.perlu_beli_ck[]|select(.supply_id==$id)] | (length==1) and (.[0].qty==4)) | if . then 1 else 0 end')"
+# kiriman KP- muncul di daftar kiriman cabang (menunggu diterima)
+cek "kiriman otomatis tampil di cabang (status dikirim)" "V == 1" \
+  "$(api "$OWNER" GET "/perlengkapan/kiriman?branch_id=$CB46_ID" | jq --arg id "$PO90" '([.[]|select(.item.id==$id and .status=="dikirim")] | length >= 1) | if . then 1 else 0 end')"
+cek "belum diterima: saldo cabang masih 0" "abs(V) < 0.001" \
+  "$(api "$OWNER" GET "/perlengkapan?branch_id=$CB46_ID" | jq --arg id "$PO90" '[.[]|select(.id==$id)][0].saldo // 0')"
+cek "guard: kasir jalankan permintaan otomatis → 403" "V == 403" \
+  "$(status_code "$KASIR" POST /perlengkapan/permintaan-otomatis)"
+cek "guard: target Central Kitchen → 400 (CK belanja langsung)" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/perlengkapan/permintaan-otomatis?branch_id=$CK52_UTAMA" -H "Authorization: Bearer $OWNER")"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]
