@@ -22,10 +22,11 @@ const BOLEH_STORE = [
   "/menu/lihat",
   "/pengaturan/meja",
   "/stok",
+  "/perlengkapan",
   "/penerimaan",
   "/pengaturan/printer",
 ];
-const BOLEH_CK = ["/absen", "/profil", "/stok", "/penerimaan", "/produksi", "/pembelian", "/bahan", "/resep"];
+const BOLEH_CK = ["/absen", "/profil", "/stok", "/perlengkapan", "/penerimaan", "/produksi", "/pembelian", "/bahan", "/resep"];
 
 const linkClass = ({ isActive }: { isActive: boolean }) =>
   `block rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
@@ -280,6 +281,9 @@ export function Layout() {
                     {stokKritis}
                   </span>
                 )}
+              </NavLink>
+              <NavLink to="/perlengkapan" className={linkClass}>
+                🧰 Perlengkapan
               </NavLink>
               {!timDiCk && (
                 <NavLink to="/penerimaan" className={(s) => `${linkClass(s)} flex items-center gap-2`}>

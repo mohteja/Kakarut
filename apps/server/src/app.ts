@@ -22,6 +22,7 @@ import { companyRoutes } from "./modules/company/routes";
 import { customerRoutes, memberCariRoutes } from "./modules/customer/routes";
 import { kategoriRoutes } from "./modules/kategori/routes";
 import { kategoriBahanRoutes } from "./modules/kategori-bahan/routes";
+import { perlengkapanRoutes } from "./modules/perlengkapan/routes";
 import { satuanRoutes } from "./modules/satuan/routes";
 import { laporanRoutes } from "./modules/laporan/routes";
 import { mejaRoutes } from "./modules/meja/routes";
@@ -121,6 +122,8 @@ export function createApp() {
     // pencarian member ringan untuk autocomplete kasir — semua peran
     .route("/member-cari", memberCariRoutes)
     .route("/stok", stokRoutes)
+    // perlengkapan non bahan baku (sendok, spons, sabun) — modul mandiri
+    .route("/perlengkapan", perlengkapanRoutes)
     .route("/laporan", laporanRoutes)
     .route("/print", printRoutes)
     .route("/rekomendasi", rekomendasiRoutes)

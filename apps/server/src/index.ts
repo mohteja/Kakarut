@@ -16,6 +16,7 @@ import { backfillKategoriBahan } from "./modules/kategori-bahan/service";
 import { arsipkanMembershipNonaktif, backfillEmployeeCode } from "./modules/users/service";
 import { konfirmasiProduksiCkLokalTertahan } from "./modules/produksi/backfill";
 import { backfillNomorDokumen } from "./modules/dokumen/nomor";
+import { terapkanSemuaKonsumsiOtomatis } from "./modules/perlengkapan/service";
 import { getStorage, localUploadDir } from "./modules/upload/storage";
 
 // Migrasi otomatis saat boot: deploy versi baru langsung menerapkan skema
@@ -65,6 +66,11 @@ if (env.AUTO_MIGRATE) {
   // Dokumen lama tanpa nomor (faktur PB/PR & sesi opname SO) → beri nomor urut
   const bernomor = await backfillNomorDokumen(db);
   if (bernomor > 0) console.log(`Nomor dokumen diisi untuk ${bernomor} dokumen lama.`);
+  // Konsumsi otomatis perlengkapan: catat hari-hari yang terlewat sejak
+  // server terakhir hidup (idempoten — kursor + unique per hari)
+  const autoPerlengkapan = await terapkanSemuaKonsumsiOtomatis();
+  if (autoPerlengkapan > 0)
+    console.log(`Pemakaian otomatis perlengkapan dicatat: ${autoPerlengkapan} baris.`);
 }
 
 const app = createApp();

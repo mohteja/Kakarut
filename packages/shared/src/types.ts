@@ -884,3 +884,69 @@ export interface LaporanPembelian {
   per_supplier: { supplier: string | null; jumlah_faktur: number; total: number }[];
   per_bahan: { nama: string; slug: string; qty: number; satuan: string; total: number }[];
 }
+
+/* ===== Perlengkapan (non bahan baku): sendok, spons, sabun, dll. ===== */
+
+/** Jenis mutasi ledger perlengkapan: masuk (+), pakai/auto (−), koreksi (±). */
+export type PerlengkapanMutasiTipe = "masuk" | "pakai" | "auto" | "koreksi";
+
+/** Aturan konsumsi otomatis per cabang: terpakai `qty` setiap `per_hari` hari. */
+export interface PerlengkapanAturanDto {
+  qty: number;
+  per_hari: number;
+  aktif: boolean;
+  /** tanggal mulai berlaku (YYYY-MM-DD) */
+  mulai: string;
+}
+
+/** Satu item perlengkapan + saldo cabang aktif + aturan konsumsinya (bila ada). */
+export interface PerlengkapanRowDto {
+  id: string;
+  nama: string;
+  satuan: string;
+  harga_beli: number;
+  stok_minimum: number;
+  catatan: string | null;
+  saldo: number;
+  status: StokStatus;
+  aturan: PerlengkapanAturanDto | null;
+}
+
+/** Satu baris kartu (ledger) perlengkapan dengan saldo berjalan. */
+export interface PerlengkapanMutasiDto {
+  id: string;
+  waktu: string;
+  tanggal: string;
+  tipe: PerlengkapanMutasiTipe;
+  masuk: number | null;
+  keluar: number | null;
+  saldo: number;
+  total_harga: number | null;
+  catatan: string | null;
+  user_nama: string | null;
+  /** nomor dokumen PL- (hanya mutasi 'masuk' yang bernomor) */
+  nomor: string | null;
+}
+
+/** Kartu perlengkapan per item per cabang per rentang tanggal. */
+export interface KartuPerlengkapanDto {
+  item: { id: string; nama: string; satuan: string };
+  periode: { dari: string; sampai: string };
+  saldo_awal: number;
+  saldo_akhir: number;
+  total_masuk: number;
+  total_keluar: number;
+  /** nilai belanja (SUM total_harga mutasi masuk) dalam rentang */
+  total_belanja: number;
+  /** true bila mutasi melebihi batas tampilan dan dipotong */
+  terpotong: boolean;
+  mutasi: PerlengkapanMutasiDto[];
+}
+
+/** Ringkasan belanja perlengkapan per rentang tanggal. */
+export interface BelanjaPerlengkapanDto {
+  dari: string;
+  sampai: string;
+  total: number;
+  per_item: { supply_id: string; nama: string; total: number }[];
+}

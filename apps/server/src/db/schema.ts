@@ -999,8 +999,16 @@ export const stockOpnames = pgTable(
   (t) => [index("stock_opnames_branch_ing_idx").on(t.branchId, t.ingredientId, t.createdAt)],
 );
 
-/** jenis dokumen bernomor: faktur pembelian, faktur produksi, sesi stock opname */
-export const dokumenJenisEnum = pgEnum("dokumen_jenis", ["beli", "produksi", "opname"]);
+/**
+ * jenis dokumen bernomor: faktur pembelian, faktur produksi, sesi stock
+ * opname, stok masuk perlengkapan (ref = supply_mutations.id tipe 'masuk')
+ */
+export const dokumenJenisEnum = pgEnum("dokumen_jenis", [
+  "beli",
+  "produksi",
+  "opname",
+  "perlengkapan",
+]);
 
 /**
  * Penghitung nomor dokumen per perusahaan per jenis (PB/PR/SO). Increment
@@ -1042,5 +1050,109 @@ export const dokumenNomor = pgTable(
   (t) => [
     primaryKey({ columns: [t.companyId, t.refId] }),
     uniqueIndex("dokumen_nomor_urut_idx").on(t.companyId, t.jenis, t.nomor),
+  ],
+);
+
+/**
+ * ===== PERLENGKAPAN (non bahan baku): sendok, spons, sabun, dll. =====
+ * Modul mandiri di luar `ingredients` — tidak pernah masuk resep/HPP/rencana.
+ * Stok = ledger mutasi bertanda (masuk +, pakai/auto −, koreksi ±) per cabang.
+ */
+export const supplyMutasiTipeEnum = pgEnum("supply_mutasi_tipe", [
+  "masuk",
+  "pakai",
+  "auto",
+  "koreksi",
+]);
+
+/** Master item perlengkapan per perusahaan (stok dicatat per cabang di ledger). */
+export const supplies = pgTable(
+  "supplies",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    nama: text("nama").notNull(),
+    satuan: text("satuan").notNull().default("pcs"),
+    /** harga beli per satuan — untuk nilai belanja (opsional, boleh 0) */
+    hargaBeli: numeric("harga_beli", { precision: 14, scale: 2, mode: "number" })
+      .notNull()
+      .default(0),
+    stokMinimum: numeric("stok_minimum", { precision: 16, scale: 3, mode: "number" })
+      .notNull()
+      .default(0),
+    isActive: boolean("is_active").notNull().default(true),
+    catatan: text("catatan"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("supplies_company_nama_uq").on(t.companyId, t.nama)],
+);
+
+/**
+ * Aturan konsumsi otomatis per cabang: terpakai `qty` setiap `per_hari` hari
+ * sejak `mulai` (mis. sabun 1 sachet/hari; spons 1 pcs / 7 hari).
+ * `terakhir_diterapkan` = kursor hari lokal terakhir yang sudah dihitung —
+ * hari yang DILEWATI karena saldo habis tidak boleh diulang setelah restock.
+ */
+export const supplyRules = pgTable(
+  "supply_rules",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    branchId: uuid("branch_id")
+      .notNull()
+      .references(() => branches.id),
+    supplyId: uuid("supply_id")
+      .notNull()
+      .references(() => supplies.id, { onDelete: "cascade" }),
+    qty: numeric("qty", { precision: 16, scale: 3, mode: "number" }).notNull(),
+    perHari: integer("per_hari").notNull().default(1),
+    mulai: date("mulai").notNull(),
+    aktif: boolean("aktif").notNull().default(true),
+    terakhirDiterapkan: date("terakhir_diterapkan"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("supply_rules_branch_supply_uq").on(t.branchId, t.supplyId)],
+);
+
+/**
+ * Ledger mutasi perlengkapan per cabang. `qty` BERTANDA: masuk = +, pakai/auto
+ * = −, koreksi = ± selisih fisik. Saldo cabang = SUM(qty).
+ */
+export const supplyMutations = pgTable(
+  "supply_mutations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    branchId: uuid("branch_id")
+      .notNull()
+      .references(() => branches.id),
+    supplyId: uuid("supply_id")
+      .notNull()
+      .references(() => supplies.id, { onDelete: "cascade" }),
+    tipe: supplyMutasiTipeEnum("tipe").notNull(),
+    qty: numeric("qty", { precision: 16, scale: 3, mode: "number" }).notNull(),
+    /** nilai belanja — hanya tipe 'masuk' */
+    totalHarga: numeric("total_harga", { precision: 14, scale: 2, mode: "number" }),
+    /** tanggal lokal (zona waktu perusahaan) mutasi terjadi */
+    tanggal: date("tanggal").notNull(),
+    catatan: text("catatan"),
+    /** null untuk mutasi 'auto' (dicatat sistem) */
+    userId: uuid("user_id").references(() => users.id),
+    waktu: timestamp("waktu", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("supply_mutations_branch_supply_idx").on(t.branchId, t.supplyId, t.tanggal),
+    // maksimal SATU baris auto per item per cabang per hari (idempoten)
+    uniqueIndex("supply_mutations_auto_uq")
+      .on(t.supplyId, t.branchId, t.tanggal)
+      .where(sql`${t.tipe} = 'auto'`),
   ],
 );
