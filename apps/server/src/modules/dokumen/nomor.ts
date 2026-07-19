@@ -4,14 +4,21 @@ import { dokumenCounters, dokumenNomor } from "../../db/schema";
 
 type DbAtauTx = typeof DB | Parameters<Parameters<typeof DB.transaction>[0]>[0];
 
-/** Prefiks nomor per jenis dokumen: PB (pembelian), PR (produksi), SO (stock opname). */
-const PREFIKS: Record<"beli" | "produksi" | "opname", string> = {
+/** Jenis dokumen bernomor (selaras enum dokumen_jenis di schema). */
+export type DokumenJenis = "beli" | "produksi" | "opname" | "perlengkapan";
+
+/**
+ * Prefiks nomor per jenis dokumen: PB (pembelian), PR (produksi), SO (stock
+ * opname), PL (stok masuk perlengkapan).
+ */
+const PREFIKS: Record<DokumenJenis, string> = {
   beli: "PB",
   produksi: "PR",
   opname: "SO",
+  perlengkapan: "PL",
 };
 
-export function formatNomor(jenis: "beli" | "produksi" | "opname", nomor: number): string {
+export function formatNomor(jenis: DokumenJenis, nomor: number): string {
   return `${PREFIKS[jenis]}-${String(nomor).padStart(4, "0")}`;
 }
 
@@ -24,7 +31,7 @@ export function formatNomor(jenis: "beli" | "produksi" | "opname", nomor: number
 export async function terbitkanNomor(
   dbTx: DbAtauTx,
   companyId: string,
-  jenis: "beli" | "produksi" | "opname",
+  jenis: DokumenJenis,
   refId: string,
 ): Promise<string> {
   const [ctr] = await dbTx

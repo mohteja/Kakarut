@@ -999,8 +999,16 @@ export const stockOpnames = pgTable(
   (t) => [index("stock_opnames_branch_ing_idx").on(t.branchId, t.ingredientId, t.createdAt)],
 );
 
-/** jenis dokumen bernomor: faktur pembelian, faktur produksi, sesi stock opname */
-export const dokumenJenisEnum = pgEnum("dokumen_jenis", ["beli", "produksi", "opname"]);
+/**
+ * jenis dokumen bernomor: faktur pembelian, faktur produksi, sesi stock
+ * opname, stok masuk perlengkapan (ref = supply_mutations.id tipe 'masuk')
+ */
+export const dokumenJenisEnum = pgEnum("dokumen_jenis", [
+  "beli",
+  "produksi",
+  "opname",
+  "perlengkapan",
+]);
 
 /**
  * Penghitung nomor dokumen per perusahaan per jenis (PB/PR/SO). Increment

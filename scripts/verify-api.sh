@@ -2848,8 +2848,10 @@ KEMARIN83=$(TZ=Asia/Jakarta date -d yesterday +%F)
 P83=$(api "$OWNER" POST /perlengkapan '{"nama":"Sabun Cuci Uji","satuan":"sachet","harga_beli":2000,"stok_minimum":3}')
 SB83=$(echo "$P83" | jq -r .id)
 [ -n "$SB83" ] && [ "$SB83" != "null" ] && ok "buat item perlengkapan (Sabun Cuci Uji)" || gagal "buat item: $P83"
-cek "stok masuk 10 sachet (Rp20.000) → saldo 10" "abs(V - 10) < 0.001" \
-  "$(api "$OWNER" POST "/perlengkapan/$SB83/masuk" '{"qty":10,"total_harga":20000}' | jq .saldo)"
+M83=$(api "$OWNER" POST "/perlengkapan/$SB83/masuk" '{"qty":10,"total_harga":20000}')
+cek "stok masuk 10 sachet (Rp20.000) → saldo 10" "abs(V - 10) < 0.001" "$(echo "$M83" | jq .saldo)"
+NPL83=$(echo "$M83" | jq -r .nomor)
+echo "$NPL83" | grep -Eq '^PL-[0-9]{4,}$' && ok "stok masuk bernomor dokumen ($NPL83)" || gagal "nomor PL = $NPL83"
 cek "KASIR catat pemakaian 2 (terkunci cabangnya) → saldo 8" "abs(V - 8) < 0.001" \
   "$(api "$KASIR" POST "/perlengkapan/$SB83/pakai" '{"qty":2,"catatan":"cuci alat"}' | jq .saldo)"
 cek "guard: kasir tambah item → 403" "V == 403" "$(status_code "$KASIR" POST /perlengkapan)"
@@ -2867,6 +2869,8 @@ cek "daftar memuat aturan (1 / hari, aktif)" "V == 1" \
   "$(api "$OWNER" GET /perlengkapan | jq --arg id "$SB83" '([.[]|select(.id==$id)][0].aturan | (.qty==1) and (.per_hari==1) and .aktif) | if . then 1 else 0 end')"
 KARTU83=$(api "$OWNER" GET "/perlengkapan/$SB83/kartu")
 cek "kartu: 5 mutasi (masuk+pakai+koreksi+2 auto)" "V == 5" "$(echo "$KARTU83" | jq '.mutasi | length')"
+cek "kartu: baris masuk memuat nomor PL yang sama" "V == 1" \
+  "$(echo "$KARTU83" | jq --arg n "$NPL83" '([.mutasi[]|select(.tipe=="masuk")][0].nomor == $n) | if . then 1 else 0 end')"
 cek "kartu: total belanja Rp20.000" "abs(V - 20000) < 0.001" "$(echo "$KARTU83" | jq .total_belanja)"
 cek "kartu: saldo akhir 5" "abs(V - 5) < 0.001" "$(echo "$KARTU83" | jq .saldo_akhir)"
 cek "belanja perlengkapan bulan berjalan memuat Rp20.000" "abs(V - 20000) < 0.001" \
@@ -2874,7 +2878,9 @@ cek "belanja perlengkapan bulan berjalan memuat Rp20.000" "abs(V - 20000) < 0.00
 # CAP HABIS: item ke-2 saldo 1, aturan 2/hari mulai kemarin → auto kemarin
 # hanya min(2,1)=1, hari ini DILEWATI (saldo 0) → saldo 0, 1 baris auto
 SP83=$(api "$OWNER" POST /perlengkapan '{"nama":"Spons Uji","satuan":"pcs"}' | jq -r .id)
-api "$OWNER" POST "/perlengkapan/$SP83/masuk" '{"qty":1}' > /dev/null
+NPL83B=$(api "$OWNER" POST "/perlengkapan/$SP83/masuk" '{"qty":1}' | jq -r .nomor)
+cek "nomor PL bertambah urut ($NPL83 → $NPL83B)" "V == 1" \
+  "$(( 10#${NPL83B#PL-} > 10#${NPL83#PL-} ? 1 : 0 ))"
 api "$OWNER" PUT "/perlengkapan/$SP83/aturan" "{\"qty\":2,\"per_hari\":1,\"aktif\":true,\"mulai\":\"$KEMARIN83\"}" > /dev/null
 cek "cap habis: auto berhenti di 0 (tidak minus)" "abs(V) < 0.001" \
   "$(api "$OWNER" GET /perlengkapan | jq --arg id "$SP83" '[.[]|select(.id==$id)][0].saldo')"

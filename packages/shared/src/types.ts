@@ -924,6 +924,8 @@ export interface PerlengkapanMutasiDto {
   total_harga: number | null;
   catatan: string | null;
   user_nama: string | null;
+  /** nomor dokumen PL- (hanya mutasi 'masuk' yang bernomor) */
+  nomor: string | null;
 }
 
 /** Kartu perlengkapan per item per cabang per rentang tanggal. */

@@ -7,7 +7,15 @@
 import { and, asc, desc, eq, gte, lt, lte, sql } from "drizzle-orm";
 import type { KartuPerlengkapanDto, PerlengkapanRowDto, StokStatus } from "@kakarut/shared";
 import { db } from "../../db/client";
-import { branches, companies, supplies, supplyMutations, supplyRules, users } from "../../db/schema";
+import {
+  branches,
+  companies,
+  dokumenNomor,
+  supplies,
+  supplyMutations,
+  supplyRules,
+  users,
+} from "../../db/schema";
 import { tanggalDi } from "../../lib/time";
 
 /** Tanggal lokal hari ini pada zona waktu perusahaan. */
@@ -267,9 +275,18 @@ export async function kartuPerlengkapan(params: {
       totalHarga: supplyMutations.totalHarga,
       catatan: supplyMutations.catatan,
       userNama: users.nama,
+      // nomor dokumen PL- (hanya mutasi 'masuk' yang bernomor)
+      nomor: dokumenNomor.nomorTeks,
     })
     .from(supplyMutations)
     .leftJoin(users, eq(supplyMutations.userId, users.id))
+    .leftJoin(
+      dokumenNomor,
+      and(
+        eq(dokumenNomor.companyId, supplyMutations.companyId),
+        eq(dokumenNomor.refId, supplyMutations.id),
+      ),
+    )
     .where(
       and(
         eq(supplyMutations.supplyId, params.supplyId),
@@ -303,6 +320,7 @@ export async function kartuPerlengkapan(params: {
       total_harga: m.totalHarga,
       catatan: m.catatan,
       user_nama: m.userNama,
+      nomor: m.nomor,
     };
   });
   return {

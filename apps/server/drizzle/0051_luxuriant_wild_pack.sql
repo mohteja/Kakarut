@@ -1,0 +1,1 @@
+ALTER TYPE "public"."dokumen_jenis" ADD VALUE 'perlengkapan';

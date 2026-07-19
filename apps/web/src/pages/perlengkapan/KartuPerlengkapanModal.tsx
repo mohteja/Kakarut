@@ -98,7 +98,14 @@ export function KartuPerlengkapanModal({
                   {data.mutasi.map((m) => (
                     <tr key={m.id} className="border-b border-stone-100">
                       <td className={`${tdClass} whitespace-nowrap`}>{formatTanggal(m.tanggal)}</td>
-                      <td className={`${tdClass} whitespace-nowrap`}>{LABEL_TIPE[m.tipe] ?? m.tipe}</td>
+                      <td className={`${tdClass} whitespace-nowrap`}>
+                        {LABEL_TIPE[m.tipe] ?? m.tipe}
+                        {m.nomor && (
+                          <span className="ml-1.5 rounded bg-orange-100 px-1.5 py-0.5 font-mono text-xs font-bold text-orange-800">
+                            {m.nomor}
+                          </span>
+                        )}
+                      </td>
                       <td className={`${tdClass} text-right text-emerald-700`}>
                         {m.masuk != null ? `+${formatAngka(m.masuk)}` : ""}
                       </td>

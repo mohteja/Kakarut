@@ -13,6 +13,7 @@ import { z } from "zod";
 import { db } from "../../db/client";
 import { supplies, supplyMutations, supplyRules } from "../../db/schema";
 import { requireRole, resolveBranchId, type AppEnv } from "../../middleware/auth";
+import { terbitkanNomor } from "../dokumen/nomor";
 import {
   belanjaPerlengkapan,
   kartuPerlengkapan,
@@ -174,18 +175,25 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
     const branchId = await resolveBranchId(c);
     const item = await muatSupplyAktif(auth.company_id!, c.req.param("id"));
     if (!item) throw new HTTPException(404, { message: "Perlengkapan tidak ditemukan" });
-    await db.insert(supplyMutations).values({
-      companyId: auth.company_id!,
-      branchId,
-      supplyId: item.id,
-      tipe: "masuk",
-      qty: body.qty,
-      totalHarga: body.total_harga ?? null,
-      tanggal: body.tanggal ?? (await tanggalPerusahaan(auth.company_id!)),
-      catatan: body.catatan ?? null,
-      userId: auth.sub,
+    // tiap stok masuk = dokumen belanja kecil → bernomor PL- (ref = id mutasi)
+    const nomor = await db.transaction(async (tx) => {
+      const [mut] = await tx
+        .insert(supplyMutations)
+        .values({
+          companyId: auth.company_id!,
+          branchId,
+          supplyId: item.id,
+          tipe: "masuk",
+          qty: body.qty,
+          totalHarga: body.total_harga ?? null,
+          tanggal: body.tanggal ?? (await tanggalPerusahaan(auth.company_id!)),
+          catatan: body.catatan ?? null,
+          userId: auth.sub,
+        })
+        .returning({ id: supplyMutations.id });
+      return terbitkanNomor(tx, auth.company_id!, "perlengkapan", mut.id);
     });
-    return c.json({ ok: true, saldo: await saldoSatuPerlengkapan(item.id, branchId) });
+    return c.json({ ok: true, nomor, saldo: await saldoSatuPerlengkapan(item.id, branchId) });
   })
   .post("/:id/pakai", zValidator("json", PakaiBody), async (c) => {
     const auth = c.get("auth");
