@@ -4,13 +4,25 @@ import { Link, useNavigate } from "react-router-dom";
 import type {
   MenuDto,
   MenuStokDto,
+  PerlengkapanRowDto,
+  PermintaanPerlengkapanOtomatisHasil,
   RencanaBahanRow,
   RencanaFakturResult,
   RencanaMenuItem,
   RencanaMenuPreview,
   SupplierDto,
 } from "@kakarut/shared";
-import { Card, ErrorText, PageTitle, btnPrimary, btnSecondary, inputClass, tdClass, thClass } from "../../components/ui";
+import {
+  Card,
+  ErrorText,
+  Modal,
+  PageTitle,
+  btnPrimary,
+  btnSecondary,
+  inputClass,
+  tdClass,
+  thClass,
+} from "../../components/ui";
 import { labelCabang, useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah } from "../../lib/format";
@@ -170,6 +182,20 @@ export function TambahStokDariMenuPage() {
     queryKey: ["supplier"],
     queryFn: () => api<SupplierDto[]>("/supplier"),
   });
+  // Perlengkapan cabang tujuan → yang saldo ≤ stok minimum ikut diminta otomatis
+  // (kiriman dari CK) dalam SATU klik bersama permintaan bahan baku.
+  const { data: perlList = [] } = useQuery({
+    queryKey: ["perlengkapan", branchQuery],
+    queryFn: () => api<PerlengkapanRowDto[]>(`/perlengkapan${branchQuery}`),
+    enabled: !!tujuanId,
+  });
+  const perlengkapanKurang = useMemo(
+    () => perlList.filter((r) => r.stok_minimum > 0 && r.saldo < r.stok_minimum),
+    [perlList],
+  );
+  const [sertakanPerlengkapan, setSertakanPerlengkapan] = useState(true);
+  const [hasilPerlengkapan, setHasilPerlengkapan] =
+    useState<PermintaanPerlengkapanOtomatisHasil | null>(null);
   const sisaByMenu = useMemo(
     () => new Map(ketersediaan.map((k) => [k.menu_id, k.porsi])),
     [ketersediaan],
@@ -229,37 +255,82 @@ export function TambahStokDariMenuPage() {
   const previewBasi =
     preview.isFetching || JSON.stringify(items) !== JSON.stringify(itemsTunda);
 
+  const mintaPerlengkapan = sertakanPerlengkapan && perlengkapanKurang.length > 0;
+
   const buat = useMutation({
-    mutationFn: () => {
-      const [pelTipe, pelId] = pelaksana.split(":");
-      return api<RencanaFakturResult>(`/rekomendasi/menu/faktur`, {
-        method: "POST",
-        body: {
-          // pakai items LIVE (bukan snapshot debounce) — server menghitung ulang
-          items,
-          tujuan_branch_id: tujuanId || null,
-          // work-order: produksi dikerjakan CK; pelaksana ditugaskan karyawan CK
-          ck_branch_id: workOrder ? ck!.id : null,
-          worker_id: !workOrder && pelTipe === "k" ? pelId : null,
-          supplier_id: !workOrder && pelTipe === "s" ? pelId : null,
-          // faktur beli TANPA supplier — pemroses tercatat sendiri saat
-          // mengubah status ke "diproses"
-        },
-      });
+    mutationFn: async (): Promise<{
+      menu: RencanaFakturResult | null;
+      perlengkapan: PermintaanPerlengkapanOtomatisHasil | null;
+    }> => {
+      // 1) permintaan bahan baku dari menu (hanya bila ada kekurangan)
+      let menu: RencanaFakturResult | null = null;
+      if (adaKurang && items.length > 0) {
+        const [pelTipe, pelId] = pelaksana.split(":");
+        menu = await api<RencanaFakturResult>(`/rekomendasi/menu/faktur`, {
+          method: "POST",
+          body: {
+            // pakai items LIVE (bukan snapshot debounce) — server menghitung ulang
+            items,
+            tujuan_branch_id: tujuanId || null,
+            // work-order: produksi dikerjakan CK; pelaksana ditugaskan karyawan CK
+            ck_branch_id: workOrder ? ck!.id : null,
+            worker_id: !workOrder && pelTipe === "k" ? pelId : null,
+            supplier_id: !workOrder && pelTipe === "s" ? pelId : null,
+            // faktur beli TANPA supplier — pemroses tercatat sendiri saat
+            // mengubah status ke "diproses"
+          },
+        });
+      }
+      // 2) SEKALIAN permintaan perlengkapan ≤ minimum → kiriman KP- dari CK
+      let perlengkapan: PermintaanPerlengkapanOtomatisHasil | null = null;
+      if (mintaPerlengkapan && tujuanId) {
+        perlengkapan = await api<PermintaanPerlengkapanOtomatisHasil>(
+          `/perlengkapan/permintaan-otomatis?branch_id=${tujuanId}`,
+          { method: "POST" },
+        );
+      }
+      return { menu, perlengkapan };
     },
-    onSuccess: () => {
+    onSuccess: ({ perlengkapan }) => {
       setRencana({});
-      queryClient.invalidateQueries({ queryKey: ["stok"] });
-      queryClient.invalidateQueries({ queryKey: ["menu-ketersediaan"] });
-      queryClient.invalidateQueries({ queryKey: ["/produksi"] });
-      queryClient.invalidateQueries({ queryKey: ["/pembelian"] });
-      queryClient.invalidateQueries({ queryKey: ["rekomendasi"] });
-      queryClient.invalidateQueries({ queryKey: ["permintaan-stok"] });
-      // langsung ke daftar Permintaan Stok — permintaan yang baru dibuat tampil
-      // di sana (produksi/beli/kirim tergabung sebagai satu entri).
-      navigate("/permintaan-stok");
+      for (const key of [
+        "stok",
+        "menu-ketersediaan",
+        "/produksi",
+        "/pembelian",
+        "rekomendasi",
+        "permintaan-stok",
+        "perlengkapan",
+        "perlengkapan-kiriman",
+        "penerimaan",
+      ]) {
+        queryClient.invalidateQueries({ queryKey: [key] });
+      }
+      // bila ada perlengkapan yang diminta, tampilkan ringkasannya dulu
+      // (kiriman KP- muncul di Penerimaan cabang); tutup → ke Permintaan Stok
+      if (perlengkapan && (perlengkapan.dibuat.length > 0 || perlengkapan.perlu_beli_ck.length > 0)) {
+        setHasilPerlengkapan(perlengkapan);
+      } else {
+        navigate("/permintaan-stok");
+      }
     },
   });
+
+  // Bagian "4. Buat permintaan" tampil bila ADA kekurangan bahan baku ATAU
+  // ada perlengkapan ≤ minimum — satu tombol menangani keduanya.
+  const tampilAksi = (!!p && items.length > 0 && adaKurang) || perlengkapanKurang.length > 0;
+  const bisaBuat =
+    (adaKurang && items.length > 0 && !butuhPelaksana) ||
+    (sertakanPerlengkapan && perlengkapanKurang.length > 0);
+  const labelBagian = [
+    p && adaKurang && p.jumlah_kirim > 0 ? `${p.jumlah_kirim} kirim` : null,
+    p && adaKurang && p.jumlah_produksi > 0 ? `${p.jumlah_produksi} produksi` : null,
+    p && adaKurang && p.jumlah_beli > 0 ? `${p.jumlah_beli} beli` : null,
+    p && adaKurang && p.jumlah_beli_produksi > 0 ? `${p.jumlah_beli_produksi} bahan produksi` : null,
+    mintaPerlengkapan ? `${perlengkapanKurang.length} perlengkapan` : null,
+  ]
+    .filter(Boolean)
+    .join(" + ");
 
   function ubahPorsi(menuId: string, val: number) {
     setRencana((prev) => {
@@ -484,108 +555,188 @@ export function TambahStokDariMenuPage() {
             ) : null}
           </Card>
 
-          {p && items.length > 0 && (
+          {tampilAksi && (
             <Card className="p-4">
               <h2 className="mb-2 font-bold text-stone-800">4. Buat permintaan</h2>
-              {!adaKurang ? (
-                <div className="rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
-                  ✅ Stok semua bahan masih cukup untuk rencana ini — tidak perlu faktur.
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {/* Work-order CK: pelaksana ditugaskan karyawan CK saat mulai.
-                      Produksi di tempat (tanpa CK): pilih pelaksana di sini. */}
-                  {workOrder && p.jumlah_produksi > 0 && (
-                    <div className="rounded-lg border border-purple-200 bg-purple-50 px-3 py-2 text-sm text-purple-800">
-                      🏭 Produksi dikerjakan <b>{ck!.nama}</b> — pelaksana ditugaskan karyawan CK
-                      saat mulai memproses. Hasilnya <b>masuk stok CK</b> dulu; kirim ke cabang lewat
-                      🚚 <b>Kirim dari stok CK</b> setelah jadi.
-                    </div>
-                  )}
-                  {!workOrder && p.jumlah_produksi > 0 && (
-                    <div>
-                      <label className="mb-1 block text-sm font-medium">
-                        Pelaksana produksi (wajib)
-                      </label>
-                      <select
-                        value={pelaksana}
-                        onChange={(e) => setPelaksana(e.target.value)}
-                        className={inputClass}
-                      >
-                        <option value="">— pilih karyawan / supplier —</option>
-                        <optgroup label="Karyawan">
-                          {karyawan
-                            .filter((k) => k.is_active)
-                            .map((k) => (
-                              <option key={k.user_id} value={`k:${k.user_id}`}>
-                                {k.nama}
+              <div className="space-y-3">
+                {/* stok bahan cukup tapi ada perlengkapan yang diminta */}
+                {items.length > 0 && !adaKurang && (
+                  <div className="rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
+                    ✅ Stok bahan baku masih cukup — hanya perlengkapan yang diminta.
+                  </div>
+                )}
+                {/* ---- Bagian bahan baku (bila ada kekurangan) ---- */}
+                {p && adaKurang && (
+                  <>
+                    {/* Work-order CK: pelaksana ditugaskan karyawan CK saat mulai.
+                        Produksi di tempat (tanpa CK): pilih pelaksana di sini. */}
+                    {workOrder && p.jumlah_produksi > 0 && (
+                      <div className="rounded-lg border border-purple-200 bg-purple-50 px-3 py-2 text-sm text-purple-800">
+                        🏭 Produksi dikerjakan <b>{ck!.nama}</b> — pelaksana ditugaskan karyawan CK
+                        saat mulai memproses. Hasilnya <b>masuk stok CK</b> dulu; kirim ke cabang
+                        lewat 🚚 <b>Kirim dari stok CK</b> setelah jadi.
+                      </div>
+                    )}
+                    {!workOrder && p.jumlah_produksi > 0 && (
+                      <div>
+                        <label className="mb-1 block text-sm font-medium">
+                          Pelaksana produksi (wajib)
+                        </label>
+                        <select
+                          value={pelaksana}
+                          onChange={(e) => setPelaksana(e.target.value)}
+                          className={inputClass}
+                        >
+                          <option value="">— pilih karyawan / supplier —</option>
+                          <optgroup label="Karyawan">
+                            {karyawan
+                              .filter((k) => k.is_active)
+                              .map((k) => (
+                                <option key={k.user_id} value={`k:${k.user_id}`}>
+                                  {k.nama}
+                                </option>
+                              ))}
+                          </optgroup>
+                          <optgroup label="Supplier">
+                            {suppliers.map((s) => (
+                              <option key={s.id} value={`s:${s.id}`}>
+                                {s.nama}
                               </option>
                             ))}
-                        </optgroup>
-                        <optgroup label="Supplier">
-                          {suppliers.map((s) => (
-                            <option key={s.id} value={`s:${s.id}`}>
-                              {s.nama}
-                            </option>
-                          ))}
-                        </optgroup>
-                      </select>
-                    </div>
-                  )}
-                  {p.jumlah_beli + p.jumlah_beli_produksi > 0 && (
-                    <div className="space-y-1 rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-sm text-stone-600">
-                      {p.jumlah_beli > 0 && (
-                        <div>
-                          🛒 Beli produk jadi —{" "}
-                          {workOrder && store
-                            ? `diproses CK → dikirim ke ${store.nama}, terima di Penerimaan cabang.`
-                            : "diproses & diterima di cabang ini."}
-                        </div>
-                      )}
-                      {p.jumlah_beli_produksi > 0 && (
-                        <div>
-                          🧺 Belanja bahan produksi — disimpan di{" "}
-                          <b>{workOrder ? ck!.nama : "cabang ini"}</b> (dipakai untuk produksi).
-                        </div>
-                      )}
-                      <div className="text-xs text-stone-500">
-                        Tanpa pilih supplier — <b>pemroses tercatat otomatis</b> saat faktur
-                        diubah ke status <b>Diproses</b>.
+                          </optgroup>
+                        </select>
                       </div>
-                    </div>
-                  )}
-                  <ErrorText error={buat.error} />
-                  <button
-                    onClick={() => buat.mutate()}
-                    disabled={buat.isPending || butuhPelaksana || previewBasi}
-                    className={`${btnPrimary} w-full py-3`}
-                  >
-                    {buat.isPending
-                      ? "Membuat permintaan…"
-                      : previewBasi
-                        ? "Menghitung ulang…"
-                        : `🧾 Buat Permintaan (${[
-                            p.jumlah_kirim > 0 ? `${p.jumlah_kirim} kirim` : null,
-                            p.jumlah_produksi > 0 ? `${p.jumlah_produksi} produksi` : null,
-                            p.jumlah_beli > 0 ? `${p.jumlah_beli} beli` : null,
-                            p.jumlah_beli_produksi > 0
-                              ? `${p.jumlah_beli_produksi} bahan produksi`
-                              : null,
-                          ]
-                            .filter(Boolean)
-                            .join(" + ")})`}
-                  </button>
-                  {butuhPelaksana && (
-                    <div className="text-center text-xs text-amber-600">
-                      Pilih pelaksana produksi dulu.
-                    </div>
-                  )}
-                </div>
-              )}
+                    )}
+                    {p.jumlah_beli + p.jumlah_beli_produksi > 0 && (
+                      <div className="space-y-1 rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-sm text-stone-600">
+                        {p.jumlah_beli > 0 && (
+                          <div>
+                            🛒 Beli produk jadi —{" "}
+                            {workOrder && store
+                              ? `diproses CK → dikirim ke ${store.nama}, terima di Penerimaan cabang.`
+                              : "diproses & diterima di cabang ini."}
+                          </div>
+                        )}
+                        {p.jumlah_beli_produksi > 0 && (
+                          <div>
+                            🧺 Belanja bahan produksi — disimpan di{" "}
+                            <b>{workOrder ? ck!.nama : "cabang ini"}</b> (dipakai untuk produksi).
+                          </div>
+                        )}
+                        <div className="text-xs text-stone-500">
+                          Tanpa pilih supplier — <b>pemroses tercatat otomatis</b> saat faktur
+                          diubah ke status <b>Diproses</b>.
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+                {/* ---- Sekalian perlengkapan ≤ stok minimum ---- */}
+                {perlengkapanKurang.length > 0 && (
+                  <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-sm text-orange-900">
+                    <input
+                      type="checkbox"
+                      checked={sertakanPerlengkapan}
+                      onChange={(e) => setSertakanPerlengkapan(e.target.checked)}
+                      className="mt-0.5"
+                    />
+                    <span>
+                      🧰 <b>Sekalian minta {perlengkapanKurang.length} perlengkapan</b> yang saldo ≤
+                      stok minimum di {store?.nama ?? "cabang"} — kiriman <b>KP-</b> otomatis dari
+                      stok CK, sisanya dilaporkan perlu dibeli di CK.
+                    </span>
+                  </label>
+                )}
+                <ErrorText error={buat.error} />
+                <button
+                  onClick={() => buat.mutate()}
+                  disabled={buat.isPending || !bisaBuat || (adaKurang && (butuhPelaksana || previewBasi))}
+                  className={`${btnPrimary} w-full py-3`}
+                >
+                  {buat.isPending
+                    ? "Membuat permintaan…"
+                    : adaKurang && previewBasi
+                      ? "Menghitung ulang…"
+                      : `🧾 Buat Permintaan (${labelBagian})`}
+                </button>
+                {adaKurang && butuhPelaksana && (
+                  <div className="text-center text-xs text-amber-600">
+                    Pilih pelaksana produksi dulu.
+                  </div>
+                )}
+              </div>
             </Card>
           )}
         </div>
       </div>
+
+      {/* Ringkasan hasil permintaan perlengkapan (kiriman KP- + perlu beli) */}
+      {hasilPerlengkapan && (
+        <Modal
+          open
+          onClose={() => navigate("/permintaan-stok")}
+          title="🧰 Perlengkapan diminta"
+          lebar="max-w-lg"
+        >
+          <div className="space-y-3">
+            <div className="rounded-lg bg-green-50 px-3 py-2 text-sm text-green-800">
+              {hasilPerlengkapan.dibuat.length > 0
+                ? `${hasilPerlengkapan.dibuat.length} kiriman KP- diterbitkan — cabang tinggal menerima di Penerimaan Barang.`
+                : "Tidak ada kiriman (stok CK kosong / sudah cukup)."}
+            </div>
+            {hasilPerlengkapan.dibuat.length > 0 && (
+              <div>
+                <div className="mb-1 text-xs font-semibold uppercase text-stone-500">
+                  🚚 Dikirim dari CK
+                </div>
+                <div className="divide-y divide-stone-100 rounded-lg border border-stone-200">
+                  {hasilPerlengkapan.dibuat.map((d) => (
+                    <div
+                      key={d.supply_id}
+                      className="flex items-center justify-between px-3 py-1.5 text-sm"
+                    >
+                      <span className="text-stone-700">{d.nama}</span>
+                      <span className="flex items-center gap-2">
+                        {d.nomor && (
+                          <span className="rounded bg-orange-100 px-1.5 py-0.5 font-mono text-xs font-bold text-orange-800">
+                            {d.nomor}
+                          </span>
+                        )}
+                        <b>{formatAngka(d.qty)}</b> {d.satuan}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {hasilPerlengkapan.perlu_beli_ck.length > 0 && (
+              <div>
+                <div className="mb-1 text-xs font-semibold uppercase text-amber-700">
+                  🛒 Perlu dibeli di CK (stok CK tak cukup)
+                </div>
+                <div className="divide-y divide-amber-100 rounded-lg border border-amber-200 bg-amber-50/50">
+                  {hasilPerlengkapan.perlu_beli_ck.map((d) => (
+                    <div
+                      key={d.supply_id}
+                      className="flex items-center justify-between px-3 py-1.5 text-sm"
+                    >
+                      <span className="text-stone-700">{d.nama}</span>
+                      <span>
+                        <b>{formatAngka(d.qty)}</b> {d.satuan}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="flex justify-end">
+              <button onClick={() => navigate("/permintaan-stok")} className={btnPrimary}>
+                Ke Permintaan Stok
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

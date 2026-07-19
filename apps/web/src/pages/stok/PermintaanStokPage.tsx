@@ -1,25 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import type {
-  KonfirmasiStatus,
-  PermintaanPerlengkapanOtomatisHasil,
-  PermintaanStokBagian,
-  PermintaanStokRow,
-} from "@kakarut/shared";
-import {
-  Card,
-  ErrorText,
-  Modal,
-  PageTitle,
-  Spinner,
-  btnPrimary,
-  btnSecondary,
-  inputClass,
-} from "../../components/ui";
-import { useBranch } from "../../context/BranchContext";
+import type { KonfirmasiStatus, PermintaanStokBagian, PermintaanStokRow } from "@kakarut/shared";
+import { Card, ErrorText, PageTitle, Spinner, btnSecondary, inputClass } from "../../components/ui";
 import { api } from "../../lib/api";
-import { formatAngka, formatRupiah, formatWaktu } from "../../lib/format";
+import { formatRupiah, formatWaktu } from "../../lib/format";
 
 const STATUS_STYLE: Record<KonfirmasiStatus, string> = {
   rencana: "bg-stone-100 text-stone-600",
@@ -136,7 +121,6 @@ export function PermintaanStokPage() {
   });
   const [perPage, setPerPage] = useState(20);
   const [page, setPage] = useState(1);
-  const [perlengkapanModal, setPerlengkapanModal] = useState(false);
 
   // Hapus permintaan → Tempat Sampah: SOFT-DELETE semua fakturnya sekaligus
   // (produksi + beli + bahan produksi). Stok yang belum masuk otomatis batal.
@@ -170,14 +154,9 @@ export function PermintaanStokPage() {
     <div className="max-w-2xl">
       <PageTitle
         aksi={
-          <div className="flex flex-wrap gap-2">
-            <button onClick={() => setPerlengkapanModal(true)} className={btnSecondary}>
-              🧰 Permintaan Perlengkapan
-            </button>
-            <Link to="/stok/tambah-dari-menu" className={btnSecondary}>
-              ➕ Permintaan baru
-            </Link>
-          </div>
+          <Link to="/stok/tambah-dari-menu" className={btnSecondary}>
+            ➕ Permintaan baru
+          </Link>
         }
       >
         📋 Data Permintaan Stok
@@ -327,151 +306,6 @@ export function PermintaanStokPage() {
           </label>
         </div>
       )}
-
-      {perlengkapanModal && (
-        <PermintaanPerlengkapanModal
-          onClose={() => setPerlengkapanModal(false)}
-          onSukses={() => {
-            queryClient.invalidateQueries({ queryKey: ["perlengkapan"] });
-            queryClient.invalidateQueries({ queryKey: ["perlengkapan-kiriman"] });
-          }}
-        />
-      )}
     </div>
-  );
-}
-
-/**
- * Permintaan perlengkapan OTOMATIS: pilih cabang → sistem memindai perlengkapan
- * yang saldo ≤ stok minimum, membuat kiriman KP- dari stok CK, dan melaporkan
- * item yang masih perlu dibeli di CK.
- */
-function PermintaanPerlengkapanModal({
-  onClose,
-  onSukses,
-}: {
-  onClose: () => void;
-  onSukses: () => void;
-}) {
-  const { cabang } = useBranch();
-  // hanya cabang store (tujuan kiriman) — CK belanja langsung, kantor tak berstok
-  const opsi = cabang.filter((b) => b.is_active && b.tipe === "store");
-  const [branchId, setBranchId] = useState(opsi[0]?.id ?? "");
-  const [hasil, setHasil] = useState<PermintaanPerlengkapanOtomatisHasil | null>(null);
-  const jalan = useMutation({
-    mutationFn: () =>
-      api<PermintaanPerlengkapanOtomatisHasil>(
-        `/perlengkapan/permintaan-otomatis?branch_id=${branchId}`,
-        { method: "POST" },
-      ),
-    onSuccess: (d) => {
-      setHasil(d);
-      onSukses();
-    },
-  });
-  const cabangNama = cabang.find((b) => b.id === branchId)?.nama ?? "cabang";
-  return (
-    <Modal open onClose={onClose} title="🧰 Permintaan Perlengkapan Otomatis" lebar="max-w-lg">
-      {hasil ? (
-        <div className="space-y-3">
-          <div className="rounded-lg bg-green-50 px-3 py-2 text-sm text-green-800">
-            {hasil.dibuat.length > 0
-              ? `${hasil.dibuat.length} kiriman KP- diterbitkan ke ${cabangNama} — cabang tinggal menerima di Penerimaan.`
-              : "Tidak ada kiriman yang dibuat (stok CK kosong atau semua sudah cukup)."}
-          </div>
-          {hasil.dibuat.length > 0 && (
-            <div>
-              <div className="mb-1 text-xs font-semibold uppercase text-stone-500">
-                🚚 Dikirim dari CK
-              </div>
-              <div className="divide-y divide-stone-100 rounded-lg border border-stone-200">
-                {hasil.dibuat.map((d) => (
-                  <div key={d.supply_id} className="flex items-center justify-between px-3 py-1.5 text-sm">
-                    <span className="text-stone-700">{d.nama}</span>
-                    <span className="flex items-center gap-2">
-                      {d.nomor && (
-                        <span className="rounded bg-orange-100 px-1.5 py-0.5 font-mono text-xs font-bold text-orange-800">
-                          {d.nomor}
-                        </span>
-                      )}
-                      <b>{formatAngka(d.qty)}</b> {d.satuan}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-          {hasil.perlu_beli_ck.length > 0 && (
-            <div>
-              <div className="mb-1 text-xs font-semibold uppercase text-amber-700">
-                🛒 Perlu dibeli di CK (stok CK tak cukup)
-              </div>
-              <div className="divide-y divide-amber-100 rounded-lg border border-amber-200 bg-amber-50/50">
-                {hasil.perlu_beli_ck.map((d) => (
-                  <div key={d.supply_id} className="flex items-center justify-between px-3 py-1.5 text-sm">
-                    <span className="text-stone-700">{d.nama}</span>
-                    <span>
-                      <b>{formatAngka(d.qty)}</b> {d.satuan}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-          {hasil.tak_bisa_kirim.length > 0 && (
-            <div className="rounded-lg bg-stone-50 px-3 py-2 text-xs text-stone-500">
-              {hasil.tak_bisa_kirim.length} item ≤ minimum tapi cabang belum terhubung ke CK —
-              hubungkan cabang ke Central Kitchen dulu.
-            </div>
-          )}
-          {hasil.dibuat.length === 0 &&
-            hasil.perlu_beli_ck.length === 0 &&
-            hasil.tak_bisa_kirim.length === 0 && (
-              <div className="rounded-lg bg-stone-50 px-3 py-2 text-sm text-stone-500">
-                Semua perlengkapan di {cabangNama} masih di atas stok minimum. 👍
-              </div>
-            )}
-          <div className="flex justify-end">
-            <button onClick={onClose} className={btnPrimary}>
-              Tutup
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          <div className="rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-800">
-            Sistem memindai perlengkapan cabang yang <b>saldo ≤ stok minimum</b>, lalu membuat{" "}
-            <b>kiriman dari stok CK</b> otomatis. Yang belum tertutup stok CK dilaporkan sebagai{" "}
-            <b>perlu dibeli di CK</b>.
-          </div>
-          <label className="block text-sm">
-            Cabang tujuan
-            <select value={branchId} onChange={(e) => setBranchId(e.target.value)} className={inputClass}>
-              {opsi.map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.nama}
-                </option>
-              ))}
-            </select>
-          </label>
-          {opsi.length === 0 && (
-            <div className="text-xs text-stone-500">Belum ada cabang store.</div>
-          )}
-          <ErrorText error={jalan.error} />
-          <div className="flex justify-end gap-2">
-            <button onClick={onClose} className={btnSecondary}>
-              Batal
-            </button>
-            <button
-              onClick={() => jalan.mutate()}
-              disabled={!branchId || jalan.isPending}
-              className={btnPrimary}
-            >
-              {jalan.isPending ? "Memproses…" : "🧰 Buat Permintaan"}
-            </button>
-          </div>
-        </div>
-      )}
-    </Modal>
   );
 }
