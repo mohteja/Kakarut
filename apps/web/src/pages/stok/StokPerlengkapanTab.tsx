@@ -515,8 +515,11 @@ const STATUS_SESI: Record<string, { label: string; cls: string }> = {
   ditolak: { label: "✖ Ditolak", cls: "bg-red-100 text-red-700" },
 };
 
-/** Riwayat sesi opname perlengkapan + ACC/Tolak/Hapus (owner/admin). */
-function RiwayatOpnameModal({
+/**
+ * Riwayat sesi opname perlengkapan + ACC/Tolak/Hapus (owner/admin).
+ * Diekspor: dipakai juga dari halaman Opname Perlengkapan (staf cabang/CK).
+ */
+export function RiwayatOpnameModal({
   branchQuery,
   isManajemen,
   onClose,
