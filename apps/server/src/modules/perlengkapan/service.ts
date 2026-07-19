@@ -11,6 +11,7 @@ import type {
   KartuPerlengkapanDto,
   PerlengkapanMasterRow,
   PerlengkapanRowDto,
+  PermintaanPerlengkapanOtomatisHasil,
   StokStatus,
 } from "@kakarut/shared";
 import { db } from "../../db/client";
@@ -742,6 +743,72 @@ export async function buatKirimanPerlengkapan(params: {
     const nomor = await terbitkanNomor(tx, params.companyId, "kiriman_perlengkapan", row.id);
     return { id: row.id, nomor };
   });
+}
+
+/**
+ * Permintaan perlengkapan OTOMATIS untuk satu cabang: pindai item yang saldo ≤
+ * stok minimum, lalu untuk tiap item terbitkan kiriman KP- sebanyak stok yang
+ * ADA di CK; kekurangan yang belum tertutup dilaporkan "perlu beli di CK".
+ */
+export async function permintaanOtomatisPerlengkapan(params: {
+  companyId: string;
+  cabangId: string;
+  userId: string;
+}): Promise<PermintaanPerlengkapanOtomatisHasil | { error: string; code?: number }> {
+  const [cab] = await db
+    .select({ ckId: branches.centralKitchenId, tipe: branches.tipe })
+    .from(branches)
+    .where(and(eq(branches.id, params.cabangId), eq(branches.companyId, params.companyId)));
+  if (!cab) return { error: "Cabang tidak valid", code: 400 };
+  if (cab.tipe === "central_kitchen") {
+    return { error: "Central Kitchen belanja langsung lewat Stok Masuk", code: 400 };
+  }
+  if (cab.tipe === "kantor") return { error: "Kantor tidak menyimpan stok", code: 400 };
+  // saldo dijujurkan dulu (jatah otomatis) sebelum dibandingkan minimum
+  await terapkanKonsumsiOtomatis(params.companyId, params.cabangId);
+  const rows = await saldoPerlengkapan(params.companyId, params.cabangId);
+  const dibuat: import("@kakarut/shared").PermintaanPerlengkapanOtomatisHasil["dibuat"] = [];
+  const perluBeli: import("@kakarut/shared").PermintaanPerlengkapanOtomatisHasil["perlu_beli_ck"] =
+    [];
+  const takBisa: import("@kakarut/shared").PermintaanPerlengkapanOtomatisHasil["tak_bisa_kirim"] =
+    [];
+  for (const r of rows) {
+    if (!(r.stok_minimum > 0) || r.saldo >= r.stok_minimum) continue;
+    // butuh dibulatkan ke atas agar tak minta pecahan yang mustahil dikirim
+    const kekurangan = Math.ceil(r.stok_minimum - r.saldo - 1e-9);
+    if (kekurangan <= 0) continue;
+    // cabang tak terhubung CK → tak bisa minta; catat sebagai info
+    if (!cab.ckId) {
+      takBisa.push({ supply_id: r.id, nama: r.nama, satuan: r.satuan, qty: kekurangan });
+      continue;
+    }
+    const ckSaldo = Math.max(0, Math.floor((r.saldo_ck ?? 0) + 1e-9));
+    const kirim = Math.min(kekurangan, ckSaldo);
+    if (kirim > 0) {
+      const hasil = await buatKirimanPerlengkapan({
+        companyId: params.companyId,
+        cabangId: params.cabangId,
+        supplyId: r.id,
+        qty: kirim,
+        userId: params.userId,
+        catatan: "Permintaan otomatis (stok ≤ minimum)",
+      });
+      if (!("error" in hasil)) {
+        dibuat.push({
+          supply_id: r.id,
+          nama: r.nama,
+          satuan: r.satuan,
+          qty: kirim,
+          nomor: hasil.nomor,
+        });
+      }
+    }
+    const sisa = kekurangan - kirim;
+    if (sisa > 0) {
+      perluBeli.push({ supply_id: r.id, nama: r.nama, satuan: r.satuan, qty: sisa });
+    }
+  }
+  return { dibuat, perlu_beli_ck: perluBeli, tak_bisa_kirim: takBisa };
 }
 
 /** Kiriman yang melibatkan cabang ini (masuk & keluar), terbaru dulu. */

@@ -29,6 +29,7 @@ import {
   detailOpnamePerlengkapan,
   kartuPerlengkapan,
   muatSupplyAktif,
+  permintaanOtomatisPerlengkapan,
   riwayatOpnamePerlengkapan,
   saldoPerlengkapan,
   saldoSatuPerlengkapan,
@@ -284,6 +285,21 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
     return c.json({ ok: true, jumlah: rows.length });
   })
   /* ===== KIRIMAN CK → CABANG (permintaan stok ≤ minimum) ===== */
+  // Permintaan OTOMATIS: pindai perlengkapan cabang yang saldo ≤ minimum,
+  // terbitkan kiriman KP- sebanyak stok yang ada di CK (owner/admin).
+  .post("/permintaan-otomatis", requireRole("owner", "admin"), async (c) => {
+    const auth = c.get("auth");
+    const branchId = await resolveBranchId(c);
+    const hasil = await permintaanOtomatisPerlengkapan({
+      companyId: auth.company_id!,
+      cabangId: branchId,
+      userId: auth.sub,
+    });
+    if ("error" in hasil) {
+      throw new HTTPException((hasil.code ?? 400) as 400 | 404, { message: hasil.error });
+    }
+    return c.json(hasil);
+  })
   .get("/kiriman", async (c) => {
     const auth = c.get("auth");
     const branchId = await resolveBranchId(c);
