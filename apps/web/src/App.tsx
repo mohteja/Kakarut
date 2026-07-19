@@ -44,6 +44,7 @@ import { OpnamePage } from "./pages/stok/OpnamePage";
 import { OpnameRiwayatPage } from "./pages/stok/OpnameRiwayatPage";
 import { PenyesuaianPage } from "./pages/stok/PenyesuaianPage";
 import { StokPage } from "./pages/stok/StokPage";
+import { PerlengkapanPage } from "./pages/perlengkapan/PerlengkapanPage";
 import { SistemPage } from "./pages/superadmin/SistemPage";
 import { TenantsPage } from "./pages/superadmin/TenantsPage";
 import { TempatSampahPage } from "./pages/TempatSampahPage";
@@ -99,6 +100,7 @@ export default function App() {
               <Route path="/kasir/riwayat" element={<RiwayatPage />} />
               <Route path="/menu/lihat" element={<LihatMenuPage />} />
               <Route path="/stok" element={<StokPage />} />
+              <Route path="/perlengkapan" element={<PerlengkapanPage />} />
               <Route path="/penerimaan" element={<PenerimaanPage />} />
               <Route path="/stok/penyesuaian" element={<PenyesuaianPage />} />
               <Route path="/stok/kartu/:ingredientId" element={<KartuStokPage />} />
