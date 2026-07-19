@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import type { JenisPengadaan, KonfirmasiStatus } from "@kakarut/shared";
+import type { JenisPengadaan, KonfirmasiStatus, StokRowDto } from "@kakarut/shared";
 import {
   Card,
   ErrorText,
@@ -32,6 +32,7 @@ import type { TahapNavState } from "./TahapPage";
 
 export interface StokMasukRow {
   id: string;
+  ingredient_id?: string;
   bahan: string;
   isi: number;
   satuan: string;
@@ -267,16 +268,25 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
 
   // KIRIM HASIL produksi dari permintaan: hasil sudah di stok CK — buat faktur
   // kiriman (transfer stok CK -> cabang peminta) yang diterima di Penerimaan.
+  // Qty per bahan diatur lewat modal (boleh kurang/lebih dari hasil produksi).
+  const [modalKirimHasil, setModalKirimHasil] = useState<FakturGroup | null>(null);
   const kirimHasil = useMutation({
-    mutationFn: (fakturId: string) =>
+    mutationFn: ({
+      fakturId,
+      items,
+    }: {
+      fakturId: string;
+      items: { ingredient_id: string; qty: number }[];
+    }) =>
       api<{ nomor: string; tujuan: string }>(`${t.endpoint}/kirim-hasil/${fakturId}`, {
         method: "POST",
-        body: {},
+        body: { items },
       }),
     onSuccess: () => {
       for (const key of [t.endpoint, "stok", "penerimaan"]) {
         queryClient.invalidateQueries({ queryKey: [key] });
       }
+      setModalKirimHasil(null);
     },
   });
 
@@ -766,12 +776,7 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        if (
-                          confirm(
-                            `Kirim hasil produksi ke ${g.untukCabang}? Dibuat faktur kiriman dari stok CK — barang menunggu diterima di cabang.`,
-                          )
-                        )
-                          kirimHasil.mutate(g.fakturId!);
+                        setModalKirimHasil(g);
                       }}
                       disabled={kirimHasil.isPending}
                       className="whitespace-nowrap rounded-lg bg-purple-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-purple-500 disabled:opacity-60"
@@ -893,6 +898,17 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
             <DokumenBelanjaModal key={g.key} grup={g} onClose={() => setDokumen(null)} />
           ) : null;
         })()}
+      {modalKirimHasil && (
+        <KirimHasilModal
+          grup={modalKirimHasil}
+          isPending={kirimHasil.isPending}
+          error={kirimHasil.error}
+          onKirim={(items) =>
+            kirimHasil.mutate({ fakturId: modalKirimHasil.fakturId!, items })
+          }
+          onClose={() => setModalKirimHasil(null)}
+        />
+      )}
       {dokumenKirim &&
         (() => {
           const g = grup.find((x) => x.key === dokumenKirim);
@@ -956,5 +972,106 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
         </Modal>
       )}
     </div>
+  );
+}
+
+/**
+ * Kirim hasil produksi ke cabang peminta dengan JUMLAH yang bisa diatur —
+ * hasil produksi bisa lebih besar dari kebutuhan (mis. butuh 400, 1 batch =
+ * 500), jadi qty kiriman diisi dulu; boleh kurang/lebih selama stok CK cukup.
+ */
+function KirimHasilModal({
+  grup,
+  isPending,
+  error,
+  onKirim,
+  onClose,
+}: {
+  grup: FakturGroup;
+  isPending: boolean;
+  error: unknown;
+  onKirim: (items: { ingredient_id: string; qty: number }[]) => void;
+  onClose: () => void;
+}) {
+  // bahan yang siap dikirim: baris selesai (masuk stok CK) dgn tujuan cabang
+  const siap = grup.rows.filter(
+    (r) => r.status === "dikonfirmasi" && r.untuk_cabang && r.ingredient_id,
+  );
+  const perBahan = new Map<string, { nama: string; satuan: string; qty: number }>();
+  for (const r of siap) {
+    const p = perBahan.get(r.ingredient_id!);
+    perBahan.set(r.ingredient_id!, {
+      nama: r.bahan,
+      satuan: r.satuan,
+      qty: (p?.qty ?? 0) + r.qty,
+    });
+  }
+  const daftar = [...perBahan.entries()];
+  const [qty, setQty] = useState<Record<string, string>>(
+    () => Object.fromEntries(daftar.map(([id, b]) => [id, String(b.qty)])),
+  );
+  // saldo stok CK per bahan — batas atas kiriman (transfer stok nyata)
+  const ckBranchId = siap[0]?.branch_id ?? null;
+  const { data: stokCk } = useQuery({
+    queryKey: ["stok", `?branch_id=${ckBranchId}`],
+    queryFn: () => api<StokRowDto[]>(`/stok?branch_id=${ckBranchId}`),
+    enabled: ckBranchId != null,
+  });
+  const saldoCk = new Map((stokCk ?? []).map((s) => [s.ingredient_id, s.saldo]));
+  const items = daftar
+    .filter(([id]) => Number(qty[id]) > 0)
+    .map(([id]) => ({ ingredient_id: id, qty: Number(qty[id]) }));
+  const adaLebihDariSaldo = items.some(
+    (it) => saldoCk.has(it.ingredient_id) && it.qty > (saldoCk.get(it.ingredient_id) ?? 0),
+  );
+  return (
+    <Modal open onClose={onClose} title={`🚚 Kirim hasil ke ${grup.untukCabang}`}>
+      <div className="space-y-3">
+        <div className="rounded-lg bg-purple-50 px-3 py-2 text-sm text-purple-800">
+          Atur jumlah yang dikirim — boleh <b>lebih sedikit</b> dari hasil produksi (sisanya
+          tetap jadi stok CK) atau <b>lebih banyak</b> selama stok CK cukup.
+        </div>
+        {daftar.map(([id, b]) => (
+          <div key={id} className="flex items-center gap-3">
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-sm font-semibold text-stone-800">{b.nama}</div>
+              <div className="text-xs text-stone-500">
+                Hasil produksi: {formatAngka(b.qty)} {b.satuan}
+                {saldoCk.has(id) && <> · stok CK: {formatAngka(saldoCk.get(id)!)} {b.satuan}</>}
+              </div>
+            </div>
+            <div className="w-28 shrink-0">
+              <input
+                type="number"
+                min={0}
+                step="any"
+                value={qty[id] ?? ""}
+                onChange={(e) => setQty((p) => ({ ...p, [id]: e.target.value }))}
+                className={`${inputClass} text-right`}
+              />
+            </div>
+            <span className="w-12 shrink-0 text-sm text-stone-500">{b.satuan}</span>
+          </div>
+        ))}
+        {adaLebihDariSaldo && (
+          <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+            Ada jumlah yang melebihi stok CK — kurangi dulu.
+          </div>
+        )}
+        <ErrorText error={error} />
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className={btnSecondary}>
+            Batal
+          </button>
+          <button
+            onClick={() => onKirim(items)}
+            disabled={items.length === 0 || adaLebihDariSaldo || isPending}
+            className="rounded-lg bg-purple-600 px-4 py-2 text-sm font-bold text-white hover:bg-purple-500 disabled:opacity-60"
+          >
+            🚚 Kirim ({items.length} bahan)
+          </button>
+        </div>
+      </div>
+    </Modal>
   );
 }

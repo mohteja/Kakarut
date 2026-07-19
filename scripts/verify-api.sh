@@ -2938,6 +2938,33 @@ cek "minta melebihi stok CK → 400" "V == 400" \
 cek "kartu CK memuat baris kirim (catatan nomor KP)" "V == 1" \
   "$(api "$OWNER" GET "/perlengkapan/$TU84/kartu?branch_id=$CK52_UTAMA" | jq --arg n "$NKP84" '([.mutasi[]|select(.tipe=="kirim" and (.catatan // "" | contains($n)))] | length >= 1) | if . then 1 else 0 end')"
 
+echo "== 85. Kirim hasil produksi dgn qty diatur (butuh 400, 1 batch 500 → kirim sebagian) =="
+# reset stok jadi & bahan mentah → work-order porsi 20 (kebutuhan 100, 1 batch = 100)
+api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CK52_UTAMA\",\"items\":[{\"ingredient_id\":\"$BASO66\",\"qty\":0},{\"ingredient_id\":\"$DAG66\",\"qty\":20000},{\"ingredient_id\":\"$TEP66\",\"qty\":5000}]}" > /dev/null
+api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CB46_ID\",\"items\":[{\"ingredient_id\":\"$BASO66\",\"qty\":0}]}" > /dev/null
+WO85=$(api "$OWNER" POST /rekomendasi/menu/faktur "{\"items\":[{\"menu_id\":\"$MENU66\",\"porsi\":20}],\"tujuan_branch_id\":\"$CB46_ID\",\"ck_branch_id\":\"$CK52_UTAMA\"}")
+PF85=$(echo "$WO85" | jq -r '.produksi.faktur_id')
+api "$OWNER" POST "/produksi/tahap/$PF85" '{"ke":"dikerjakan"}' > /dev/null
+api "$OWNER" POST "/produksi/tahap/$PF85" '{"ke":"menunggu"}' > /dev/null
+# hasil 100 di stok CK; kirim melebihi stok CK → 400
+cek "kirim melebihi stok CK → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/produksi/kirim-hasil/$PF85" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"items\":[{\"ingredient_id\":\"$BASO66\",\"qty\":150}]}")"
+cek "bahan di luar faktur → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/produksi/kirim-hasil/$PF85" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"items\":[{\"ingredient_id\":\"$DAG66\",\"qty\":1}]}")"
+# kirim SEBAGIAN: butuh 40 saja dari hasil 100
+KH85=$(api "$OWNER" POST "/produksi/kirim-hasil/$PF85" "{\"items\":[{\"ingredient_id\":\"$BASO66\",\"qty\":40}]}")
+KHF85=$(echo "$KH85" | jq -r .faktur_id)
+cek "kiriman terbit dgn qty diatur (40)" "abs(V - 40) < 0.001" \
+  "$(api "$OWNER" GET "/produksi?branch_id=$CB46_ID&per_page=500" | jq --arg f "$KHF85" '[.rows[]|select(.faktur_id==$f)][0].qty')"
+api "$OWNER" POST "/penerimaan/$KHF85/terima" > /dev/null
+cek "diterima: cabang +40, CK sisa 60 (100 − 40)" "V == 1" \
+  "$(python3 -c "
+cb = $(api "$OWNER" GET "/stok?branch_id=$CB46_ID" | jq --arg id "$BASO66" '[.[]|select(.ingredient_id==$id)][0].saldo // 0')
+ck = $(api "$OWNER" GET "/stok?branch_id=$CK52_UTAMA" | jq --arg id "$BASO66" '[.[]|select(.ingredient_id==$id)][0].saldo // 0')
+print(1 if abs(cb-40) < 0.001 and abs(ck-60) < 0.001 else 0)")"
+cek "pengingat 'untuk cabang' hilang setelah dikirim (walau sebagian)" "V == 1" \
+  "$(api "$OWNER" GET "/produksi?branch_id=$CK52_UTAMA&per_page=500" | jq --arg f "$PF85" '([.rows[]|select(.faktur_id==$f)] | all(.[]; .untuk_branch_id == null)) | if . then 1 else 0 end')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]
