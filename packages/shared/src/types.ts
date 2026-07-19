@@ -899,8 +899,16 @@ export type PerlengkapanMutasiTipe =
   | "kirim"
   | "terima";
 
-/** Aturan konsumsi otomatis per cabang: terpakai `qty` setiap `per_hari` hari. */
+/** Metode konsumsi perlengkapan: otomatis (jadwal harian) vs manual (stock opname). */
+export type PerlengkapanAturanMetode = "otomatis" | "manual";
+
+/**
+ * Aturan konsumsi per cabang. metode "otomatis": terpakai `qty` setiap
+ * `per_hari` hari; metode "manual": pemakaian dicatat lewat STOCK OPNAME
+ * saja (qty/per_hari/mulai diabaikan).
+ */
 export interface PerlengkapanAturanDto {
+  metode: PerlengkapanAturanMetode;
   qty: number;
   per_hari: number;
   aktif: boolean;

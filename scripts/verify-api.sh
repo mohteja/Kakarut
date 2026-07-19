@@ -3019,6 +3019,24 @@ cek "guard: kasir atur supplier → 403" "V == 403" "$(status_code "$KASIR" PUT 
 cek "PATCH lepas pelacakan + ganti kategori → master ikut berubah" "V == 1" \
   "$(api "$OWNER" PATCH "/perlengkapan/$KB88" '{"dilacak":false,"kategori":null}' > /dev/null; api "$OWNER" GET /perlengkapan/master | jq --arg id "$KB88" '([.[]|select(.id==$id)][0] | (.dilacak==false) and (.kategori==null)) | if . then 1 else 0 end')"
 
+echo "== 89. Aturan konsumsi metode MANUAL (dari stock opname) vs OTOMATIS =="
+SB89=$(api "$OWNER" POST /perlengkapan '{"nama":"Serbet Uji","satuan":"lembar"}' | jq -r .id)
+api "$OWNER" POST "/perlengkapan/$SB89/masuk" '{"qty":5}' > /dev/null
+# metode manual: pemakaian via stock opname — TANPA potongan terjadwal
+api "$OWNER" PUT "/perlengkapan/$SB89/aturan" '{"metode":"manual"}' > /dev/null
+cek "aturan manual tersimpan (metode di daftar)" "V == 1" \
+  "$(api "$OWNER" GET /perlengkapan | jq --arg id "$SB89" '([.[]|select(.id==$id)][0].aturan.metode == "manual") | if . then 1 else 0 end')"
+cek "manual: saldo TETAP 5 (tanpa potongan otomatis)" "abs(V - 5) < 0.001" \
+  "$(api "$OWNER" GET /perlengkapan | jq --arg id "$SB89" '[.[]|select(.id==$id)][0].saldo')"
+cek "aturan otomatis tanpa takaran (qty 0) → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/perlengkapan/$SB89/aturan" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"metode":"otomatis","qty":0}')"
+# ganti ke OTOMATIS 1/hari mulai kemarin → auto 2 hari (kemarin+hari ini)
+api "$OWNER" PUT "/perlengkapan/$SB89/aturan" "{\"metode\":\"otomatis\",\"qty\":1,\"per_hari\":1,\"mulai\":\"$KEMARIN83\"}" > /dev/null
+cek "ganti manual → otomatis 1/hari mulai kemarin → saldo 3" "abs(V - 3) < 0.001" \
+  "$(api "$OWNER" GET /perlengkapan | jq --arg id "$SB89" '[.[]|select(.id==$id)][0].saldo')"
+cek "kembali ke manual → saldo berhenti terpotong (tetap 3)" "abs(V - 3) < 0.001" \
+  "$(api "$OWNER" PUT "/perlengkapan/$SB89/aturan" '{"metode":"manual"}' > /dev/null; api "$OWNER" GET /perlengkapan | jq --arg id "$SB89" '[.[]|select(.id==$id)][0].saldo')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

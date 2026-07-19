@@ -4,6 +4,7 @@ import type {
   KategoriDto,
   PenyimpananDto,
   PerlengkapanAturanDto,
+  PerlengkapanAturanMetode,
   PerlengkapanMasterRow,
 } from "@kakarut/shared";
 import {
@@ -23,10 +24,11 @@ import { api } from "../../lib/api";
 import { formatAngka, formatRupiah } from "../../lib/format";
 import { SupplierBahanModal } from "../bahan/SupplierBahanModal";
 
-/** Label aturan konsumsi: "1 / hari", "2 / 3 hari", "(nonaktif)". */
+/** Label aturan konsumsi: "⏱ 1 / hari", "✋ manual (stock opname)", "(nonaktif)". */
 function labelAturan(a: PerlengkapanAturanDto, satuan: string): string {
+  if (a.metode === "manual") return "✋ manual (stock opname)";
   const per = a.per_hari === 1 ? "hari" : `${a.per_hari} hari`;
-  const teks = `${formatAngka(a.qty)} ${satuan} / ${per}`;
+  const teks = `⏱ ${formatAngka(a.qty)} ${satuan} / ${per}`;
   return a.aktif ? teks : `${teks} (nonaktif)`;
 }
 
@@ -231,7 +233,7 @@ export function PerlengkapanPage() {
                           .filter((l) => l.aturan)
                           .map((l) => (
                             <div key={l.branch_id} className="whitespace-nowrap">
-                              <span className="text-stone-400">{l.branch_nama}:</span> ⏱{" "}
+                              <span className="text-stone-400">{l.branch_nama}:</span>{" "}
                               {labelAturan(l.aturan!, r.satuan)}
                             </div>
                           ))}
@@ -245,7 +247,7 @@ export function PerlengkapanPage() {
                         ⚠ wajib aturan — belum diatur
                       </button>
                     ) : (
-                      <span className="text-xs text-stone-400">manual</span>
+                      <span className="text-xs text-stone-400">belum diatur</span>
                     )}
                   </td>
                   <td className={`${tdClass} whitespace-nowrap text-right`}>
@@ -530,7 +532,8 @@ function AturanForm({
   onClose: () => void;
   onSukses: () => void;
 }) {
-  const [qty, setQty] = useState(aturan ? String(aturan.qty) : "1");
+  const [metode, setMetode] = useState<PerlengkapanAturanMetode>(aturan?.metode ?? "otomatis");
+  const [qty, setQty] = useState(aturan && aturan.qty > 0 ? String(aturan.qty) : "1");
   const [perHari, setPerHari] = useState(aturan ? String(aturan.per_hari) : "1");
   const [aktif, setAktif] = useState(aturan?.aktif ?? true);
   const [mulai, setMulai] = useState(aturan?.mulai ?? "");
@@ -539,10 +542,11 @@ function AturanForm({
       api(`/perlengkapan/${item.id}/aturan?branch_id=${branchId}`, {
         method: "PUT",
         body: {
-          qty: Number(qty),
+          metode,
+          qty: metode === "manual" ? 0 : Number(qty),
           per_hari: Number(perHari) || 1,
-          aktif,
-          mulai: mulai || undefined,
+          aktif: metode === "manual" ? true : aktif,
+          mulai: metode === "manual" ? undefined : mulai || undefined,
         },
       }),
     onSuccess: () => {
@@ -554,38 +558,93 @@ function AturanForm({
     <>
       {aturan && (
         <div className="text-xs text-stone-500">
-          Aturan saat ini: <b>{formatAngka(aturan.qty)} {item.satuan}</b> /{" "}
-          {aturan.per_hari === 1 ? "hari" : `${aturan.per_hari} hari`}
-          {aturan.aktif ? "" : " (nonaktif)"}
+          Aturan saat ini:{" "}
+          {aturan.metode === "manual" ? (
+            <b>manual (stock opname)</b>
+          ) : (
+            <>
+              <b>
+                {formatAngka(aturan.qty)} {item.satuan}
+              </b>{" "}
+              / {aturan.per_hari === 1 ? "hari" : `${aturan.per_hari} hari`}
+              {aturan.aktif ? "" : " (nonaktif)"}
+            </>
+          )}
         </div>
       )}
-      <div className="grid grid-cols-2 gap-3">
-        <label className="block text-sm">
-          Jumlah terpakai ({item.satuan})
-          <input type="number" min={0} step="any" value={qty} onChange={(e) => setQty(e.target.value)} className={inputClass} />
+      {/* metode konsumsi: manual (opname) vs otomatis (jadwal) */}
+      <div className="space-y-1.5">
+        <label
+          className={`flex cursor-pointer items-start gap-2 rounded-lg border px-3 py-2 text-sm ${
+            metode === "manual" ? "border-orange-400 bg-orange-50" : "border-stone-200 hover:bg-stone-50"
+          }`}
+        >
+          <input
+            type="radio"
+            name="metode-aturan"
+            checked={metode === "manual"}
+            onChange={() => setMetode("manual")}
+            className="mt-0.5"
+          />
+          <span>
+            <b>✋ Manual — dari stock opname</b>
+            <span className="block text-xs text-stone-500">
+              Pemakaian dihitung saat <b>🧰 Opname Perlengkapan</b> (halaman Stok) — tanpa
+              potongan harian otomatis.
+            </span>
+          </span>
         </label>
-        <label className="block text-sm">
-          Setiap … hari
-          <input type="number" min={1} max={365} value={perHari} onChange={(e) => setPerHari(e.target.value)} className={inputClass} />
+        <label
+          className={`flex cursor-pointer items-start gap-2 rounded-lg border px-3 py-2 text-sm ${
+            metode === "otomatis" ? "border-orange-400 bg-orange-50" : "border-stone-200 hover:bg-stone-50"
+          }`}
+        >
+          <input
+            type="radio"
+            name="metode-aturan"
+            checked={metode === "otomatis"}
+            onChange={() => setMetode("otomatis")}
+            className="mt-0.5"
+          />
+          <span>
+            <b>⏱ Otomatis — terjadwal</b>
+            <span className="block text-xs text-stone-500">
+              Stok berkurang otomatis: terpakai sejumlah tertentu setiap beberapa hari.
+            </span>
+          </span>
         </label>
       </div>
-      <label className="block text-sm">
-        Mulai berlaku (kosong = hari ini)
-        <input type="date" value={mulai} onChange={(e) => setMulai(e.target.value)} className={inputClass} />
-      </label>
-      <label className="flex items-center gap-2 text-sm">
-        <input type="checkbox" checked={aktif} onChange={(e) => setAktif(e.target.checked)} />
-        Aturan aktif
-      </label>
+      {metode === "otomatis" && (
+        <>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="block text-sm">
+              Jumlah terpakai ({item.satuan})
+              <input type="number" min={0} step="any" value={qty} onChange={(e) => setQty(e.target.value)} className={inputClass} />
+            </label>
+            <label className="block text-sm">
+              Setiap … hari
+              <input type="number" min={1} max={365} value={perHari} onChange={(e) => setPerHari(e.target.value)} className={inputClass} />
+            </label>
+          </div>
+          <label className="block text-sm">
+            Mulai berlaku (kosong = hari ini)
+            <input type="date" value={mulai} onChange={(e) => setMulai(e.target.value)} className={inputClass} />
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={aktif} onChange={(e) => setAktif(e.target.checked)} />
+            Aturan aktif
+          </label>
+        </>
+      )}
       <ErrorText error={kirim.error} />
       <div className="flex justify-end gap-2">
         <button onClick={onClose} className={btnSecondary}>Batal</button>
         <button
           onClick={() => kirim.mutate()}
-          disabled={!branchId || !(Number(qty) > 0) || kirim.isPending}
+          disabled={!branchId || (metode === "otomatis" && !(Number(qty) > 0)) || kirim.isPending}
           className={btnPrimary}
         >
-          ⏱ Simpan Aturan
+          Simpan Aturan
         </button>
       </div>
     </>

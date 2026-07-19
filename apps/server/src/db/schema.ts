@@ -1143,9 +1143,13 @@ export const supplySuppliers = pgTable(
   ],
 );
 
+/** Metode konsumsi perlengkapan per cabang: otomatis (jadwal) vs manual (opname). */
+export const supplyRuleMetodeEnum = pgEnum("supply_rule_metode", ["otomatis", "manual"]);
+
 /**
- * Aturan konsumsi otomatis per cabang: terpakai `qty` setiap `per_hari` hari
- * sejak `mulai` (mis. sabun 1 sachet/hari; spons 1 pcs / 7 hari).
+ * Aturan konsumsi per cabang. metode "otomatis": terpakai `qty` setiap
+ * `per_hari` hari sejak `mulai` (mis. sabun 1 sachet/hari); metode "manual":
+ * pemakaian dicatat lewat STOCK OPNAME saja (tanpa potongan terjadwal).
  * `terakhir_diterapkan` = kursor hari lokal terakhir yang sudah dihitung —
  * hari yang DILEWATI karena saldo habis tidak boleh diulang setelah restock.
  */
@@ -1162,6 +1166,7 @@ export const supplyRules = pgTable(
     supplyId: uuid("supply_id")
       .notNull()
       .references(() => supplies.id, { onDelete: "cascade" }),
+    metode: supplyRuleMetodeEnum("metode").notNull().default("otomatis"),
     qty: numeric("qty", { precision: 16, scale: 3, mode: "number" }).notNull(),
     perHari: integer("per_hari").notNull().default(1),
     mulai: date("mulai").notNull(),

@@ -23,11 +23,12 @@ import { api } from "../../lib/api";
 import { formatAngka, formatRupiah, formatWaktu } from "../../lib/format";
 import { KartuPerlengkapanModal } from "../perlengkapan/KartuPerlengkapanModal";
 
-/** Label aturan konsumsi: "1 sachet / hari", "2 pcs / 3 hari", "nonaktif". */
+/** Label aturan konsumsi: "⏱ 1 sachet / hari", "✋ manual (stock opname)". */
 function labelAturan(r: PerlengkapanRowDto): string | null {
   if (!r.aturan) return null;
+  if (r.aturan.metode === "manual") return "✋ manual (stock opname)";
   const per = r.aturan.per_hari === 1 ? "hari" : `${r.aturan.per_hari} hari`;
-  const teks = `${formatAngka(r.aturan.qty)} ${r.satuan} / ${per}`;
+  const teks = `⏱ ${formatAngka(r.aturan.qty)} ${r.satuan} / ${per}`;
   return r.aturan.aktif ? teks : `${teks} (nonaktif)`;
 }
 
@@ -191,7 +192,7 @@ export function StokPerlengkapanTab({
                     {r.stok_minimum > 0 ? formatAngka(r.stok_minimum) : "—"}
                   </td>
                   <td className={`${tdClass} text-stone-600`}>
-                    {labelAturan(r) ?? <span className="text-stone-400">manual</span>}
+                    {labelAturan(r) ?? <span className="text-stone-400">—</span>}
                   </td>
                   <td className={tdClass}>
                     <StatusBadge status={r.status} />

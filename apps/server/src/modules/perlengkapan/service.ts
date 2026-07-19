@@ -126,6 +126,8 @@ export async function terapkanKonsumsiOtomatis(
       and(
         eq(supplyRules.companyId, companyId),
         eq(supplyRules.aktif, true),
+        // metode "manual" = pemakaian via stock opname — tanpa potongan jadwal
+        eq(supplyRules.metode, "otomatis"),
         eq(supplies.isActive, true),
         eq(branches.isActive, true),
         ...(branchId ? [eq(supplyRules.branchId, branchId)] : []),
@@ -221,6 +223,7 @@ export async function saldoPerlengkapan(
       saldoCk: ckId
         ? sql<number>`COALESCE((SELECT SUM(${supplyMutations.qty}) FROM ${supplyMutations} WHERE ${supplyMutations.supplyId} = ${supplies.id} AND ${supplyMutations.branchId} = ${ckId} AND ${supplyMutations.status} = 'disetujui'), 0)::float8`
         : sql<number | null>`NULL`,
+      aturanMetode: supplyRules.metode,
       aturanQty: supplyRules.qty,
       aturanPerHari: supplyRules.perHari,
       aturanAktif: supplyRules.aktif,
@@ -245,6 +248,7 @@ export async function saldoPerlengkapan(
     aturan:
       r.aturanQty != null
         ? {
+            metode: r.aturanMetode!,
             qty: r.aturanQty,
             per_hari: r.aturanPerHari!,
             aktif: r.aturanAktif!,
@@ -306,6 +310,7 @@ export async function sebaranPerlengkapan(companyId: string): Promise<Perlengkap
     .select({
       supplyId: supplyRules.supplyId,
       branchId: supplyRules.branchId,
+      metode: supplyRules.metode,
       qty: supplyRules.qty,
       perHari: supplyRules.perHari,
       aktif: supplyRules.aktif,
@@ -337,7 +342,13 @@ export async function sebaranPerlengkapan(companyId: string): Promise<Perlengkap
           saldo,
           status: statusPerlengkapan(saldo, it.stokMinimum),
           aturan: rule
-            ? { qty: rule.qty, per_hari: rule.perHari, aktif: rule.aktif, mulai: rule.mulai }
+            ? {
+                metode: rule.metode,
+                qty: rule.qty,
+                per_hari: rule.perHari,
+                aktif: rule.aktif,
+                mulai: rule.mulai,
+              }
             : null,
         };
       });

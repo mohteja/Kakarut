@@ -114,7 +114,10 @@ const KoreksiBody = z.object({
 });
 
 const AturanBody = z.object({
-  qty: z.number().positive(),
+  /** "otomatis" = potongan terjadwal; "manual" = pemakaian via stock opname */
+  metode: z.enum(["otomatis", "manual"]).default("otomatis"),
+  // qty wajib > 0 hanya untuk metode otomatis (divalidasi di handler)
+  qty: z.number().min(0).default(0),
   per_hari: z.number().int().min(1).max(365).default(1),
   aktif: z.boolean().default(true),
   mulai: z.string().regex(TANGGAL_RE).optional(),
@@ -569,6 +572,12 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
     async (c) => {
       const auth = c.get("auth");
       const body = c.req.valid("json");
+      // metode OTOMATIS butuh takaran; MANUAL cukup dicatat lewat stock opname
+      if (body.metode === "otomatis" && !(body.qty > 0)) {
+        throw new HTTPException(400, {
+          message: "Jumlah terpakai wajib > 0 untuk aturan otomatis",
+        });
+      }
       const branchId = await resolveBranchId(c);
       const item = await muatSupplyAktif(auth.company_id!, c.req.param("id"));
       if (!item) throw new HTTPException(404, { message: "Perlengkapan tidak ditemukan" });
@@ -581,7 +590,8 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
           companyId: auth.company_id!,
           branchId,
           supplyId: item.id,
-          qty: body.qty,
+          metode: body.metode,
+          qty: body.metode === "manual" ? 0 : body.qty,
           perHari: body.per_hari,
           mulai,
           aktif: body.aktif,
@@ -590,7 +600,8 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
         .onConflictDoUpdate({
           target: [supplyRules.branchId, supplyRules.supplyId],
           set: {
-            qty: body.qty,
+            metode: body.metode,
+            qty: body.metode === "manual" ? 0 : body.qty,
             perHari: body.per_hari,
             mulai,
             aktif: body.aktif,
