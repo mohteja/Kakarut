@@ -887,8 +887,17 @@ export interface LaporanPembelian {
 
 /* ===== Perlengkapan (non bahan baku): sendok, spons, sabun, dll. ===== */
 
-/** Jenis mutasi ledger perlengkapan: masuk (+), pakai/auto (−), koreksi (±). */
-export type PerlengkapanMutasiTipe = "masuk" | "pakai" | "auto" | "koreksi";
+/**
+ * Jenis mutasi ledger perlengkapan: masuk (+), pakai/auto (−), koreksi (±),
+ * kirim (− transfer keluar) / terima (+ transfer masuk) antar cabang.
+ */
+export type PerlengkapanMutasiTipe =
+  | "masuk"
+  | "pakai"
+  | "auto"
+  | "koreksi"
+  | "kirim"
+  | "terima";
 
 /** Aturan konsumsi otomatis per cabang: terpakai `qty` setiap `per_hari` hari. */
 export interface PerlengkapanAturanDto {
@@ -910,6 +919,53 @@ export interface PerlengkapanRowDto {
   saldo: number;
   status: StokStatus;
   aturan: PerlengkapanAturanDto | null;
+  /**
+   * saldo item ini di Central Kitchen pemasok cabang (utk tombol "Minta ke
+   * CK" saat stok ≤ minimum); null bila cabang tak terhubung CK / cabang
+   * INI Central Kitchen-nya
+   */
+  saldo_ck: number | null;
+}
+
+/** Kiriman perlengkapan CK → cabang (stok pindah saat cabang menerima). */
+export interface KirimanPerlengkapanDto {
+  id: string;
+  nomor: string | null;
+  dari_cabang: string;
+  ke_cabang: string;
+  /** cabang tujuan — tombol Terima hanya tampil saat melihat cabang ini */
+  ke_branch_id: string;
+  item: { id: string; nama: string; satuan: string };
+  qty: number;
+  status: "dikirim" | "diterima";
+  waktu: string;
+  oleh: string | null;
+  catatan: string | null;
+}
+
+/** Ringkasan satu sesi opname perlengkapan (riwayat). */
+export interface OpnamePerlengkapanSesiRow {
+  session_id: string;
+  nomor: string | null;
+  waktu: string;
+  oleh: string | null;
+  jumlah_item: number;
+  status: PenyesuaianStatus;
+}
+
+/** Detail sesi opname perlengkapan: baris selisih per item. */
+export interface OpnamePerlengkapanDetail {
+  session_id: string;
+  nomor: string | null;
+  status: PenyesuaianStatus;
+  rows: {
+    supply_id: string;
+    nama: string;
+    satuan: string;
+    system_qty: number | null;
+    qty_fisik: number | null;
+    selisih: number;
+  }[];
 }
 
 /** Satu baris kartu (ledger) perlengkapan dengan saldo berjalan. */

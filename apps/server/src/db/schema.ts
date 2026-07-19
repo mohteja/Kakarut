@@ -1000,14 +1000,18 @@ export const stockOpnames = pgTable(
 );
 
 /**
- * jenis dokumen bernomor: faktur pembelian, faktur produksi, sesi stock
- * opname, stok masuk perlengkapan (ref = supply_mutations.id tipe 'masuk')
+ * jenis dokumen bernomor: faktur pembelian (PB), faktur produksi (PR), sesi
+ * stock opname bahan (SO), stok masuk perlengkapan (PL, ref =
+ * supply_mutations.id tipe 'masuk'), kiriman perlengkapan CK→cabang (KP,
+ * ref = supply_transfers.id), sesi opname perlengkapan (OP, ref = session_id)
  */
 export const dokumenJenisEnum = pgEnum("dokumen_jenis", [
   "beli",
   "produksi",
   "opname",
   "perlengkapan",
+  "kiriman_perlengkapan",
+  "opname_perlengkapan",
 ]);
 
 /**
@@ -1063,7 +1067,13 @@ export const supplyMutasiTipeEnum = pgEnum("supply_mutasi_tipe", [
   "pakai",
   "auto",
   "koreksi",
+  // transfer antar cabang (kiriman CK→cabang diterima): kirim = −, terima = +
+  "kirim",
+  "terima",
 ]);
+
+/** Status kiriman perlengkapan CK→cabang: stok pindah saat DITERIMA cabang. */
+export const supplyKirimStatusEnum = pgEnum("supply_kirim_status", ["dikirim", "diterima"]);
 
 /** Master item perlengkapan per perusahaan (stok dicatat per cabang di ledger). */
 export const supplies = pgTable(
@@ -1147,6 +1157,17 @@ export const supplyMutations = pgTable(
     /** null untuk mutasi 'auto' (dicatat sistem) */
     userId: uuid("user_id").references(() => users.id),
     waktu: timestamp("waktu", { withTimezone: true }).notNull().defaultNow(),
+    /**
+     * OPNAME PERLENGKAPAN: selisih hitung fisik lahir 'menunggu' (belum
+     * memengaruhi saldo) sampai di-ACC owner/admin — persis alur opname bahan.
+     * Mutasi biasa (masuk/pakai/auto/koreksi/kirim/terima) langsung 'disetujui'.
+     */
+    status: penyesuaianStatusEnum("status").notNull().default("disetujui"),
+    /** pengelompok sesi opname perlengkapan (null utk mutasi biasa) */
+    sessionId: uuid("session_id"),
+    /** info opname: saldo sistem & hasil hitung fisik saat sesi dibuat */
+    systemQty: numeric("system_qty", { precision: 16, scale: 3, mode: "number" }),
+    qtyFisik: numeric("qty_fisik", { precision: 16, scale: 3, mode: "number" }),
   },
   (t) => [
     index("supply_mutations_branch_supply_idx").on(t.branchId, t.supplyId, t.tanggal),
@@ -1155,4 +1176,37 @@ export const supplyMutations = pgTable(
       .on(t.supplyId, t.branchId, t.tanggal)
       .where(sql`${t.tipe} = 'auto'`),
   ],
+);
+
+/**
+ * Kiriman perlengkapan CK → cabang (permintaan cabang saat stok ≤ minimum,
+ * dipenuhi dari stok ready CK). Faktur bernomor KP-; saldo baru pindah
+ * (CK − / cabang +) saat cabang menekan TERIMA — seperti kiriman produksi.
+ */
+export const supplyTransfers = pgTable(
+  "supply_transfers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    dariBranchId: uuid("dari_branch_id")
+      .notNull()
+      .references(() => branches.id),
+    keBranchId: uuid("ke_branch_id")
+      .notNull()
+      .references(() => branches.id),
+    supplyId: uuid("supply_id")
+      .notNull()
+      .references(() => supplies.id, { onDelete: "cascade" }),
+    qty: numeric("qty", { precision: 16, scale: 3, mode: "number" }).notNull(),
+    status: supplyKirimStatusEnum("status").notNull().default("dikirim"),
+    catatan: text("catatan"),
+    /** peminta/pembuat kiriman */
+    userId: uuid("user_id").references(() => users.id),
+    waktu: timestamp("waktu", { withTimezone: true }).notNull().defaultNow(),
+    diterimaBy: uuid("diterima_by").references(() => users.id),
+    diterimaAt: timestamp("diterima_at", { withTimezone: true }),
+  },
+  (t) => [index("supply_transfers_ke_status_idx").on(t.keBranchId, t.status)],
 );

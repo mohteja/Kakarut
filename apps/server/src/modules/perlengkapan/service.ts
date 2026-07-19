@@ -4,7 +4,9 @@
  * dimaterialisasi malas (tanpa cron): dipanggil saat daftar/kartu dibuka,
  * sebelum pakai/koreksi, dan sekali saat boot.
  */
-import { and, asc, desc, eq, gte, lt, lte, sql } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
+import { and, asc, desc, eq, gte, inArray, lt, lte, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import type { KartuPerlengkapanDto, PerlengkapanRowDto, StokStatus } from "@kakarut/shared";
 import { db } from "../../db/client";
 import {
@@ -14,9 +16,11 @@ import {
   supplies,
   supplyMutations,
   supplyRules,
+  supplyTransfers,
   users,
 } from "../../db/schema";
 import { tanggalDi } from "../../lib/time";
+import { nomorUntukRefs, terbitkanNomor } from "../dokumen/nomor";
 
 /** Tanggal lokal hari ini pada zona waktu perusahaan. */
 export async function tanggalPerusahaan(companyId: string): Promise<string> {
@@ -135,6 +139,7 @@ export async function terapkanKonsumsiOtomatis(
             and(
               eq(supplyMutations.supplyId, r.supplyId),
               eq(supplyMutations.branchId, r.branchId),
+              eq(supplyMutations.status, "disetujui"),
             ),
           );
         let sisa = saldo;
@@ -182,11 +187,20 @@ export async function terapkanSemuaKonsumsiOtomatis(): Promise<number> {
   return total;
 }
 
-/** Daftar item aktif + saldo cabang + aturan cabang (untuk halaman utama). */
+/**
+ * Daftar item aktif + saldo cabang + aturan cabang (untuk halaman utama).
+ * Bila cabang terhubung Central Kitchen, sertakan `saldo_ck` — dasar tombol
+ * "Minta ke CK" saat stok ≤ minimum.
+ */
 export async function saldoPerlengkapan(
   companyId: string,
   branchId: string,
 ): Promise<PerlengkapanRowDto[]> {
+  const [cab] = await db
+    .select({ ckId: branches.centralKitchenId, tipe: branches.tipe })
+    .from(branches)
+    .where(and(eq(branches.id, branchId), eq(branches.companyId, companyId)));
+  const ckId = cab && cab.tipe !== "central_kitchen" ? (cab.ckId ?? null) : null;
   const rows = await db
     .select({
       id: supplies.id,
@@ -195,7 +209,10 @@ export async function saldoPerlengkapan(
       hargaBeli: supplies.hargaBeli,
       stokMinimum: supplies.stokMinimum,
       catatan: supplies.catatan,
-      saldo: sql<number>`COALESCE((SELECT SUM(${supplyMutations.qty}) FROM ${supplyMutations} WHERE ${supplyMutations.supplyId} = ${supplies.id} AND ${supplyMutations.branchId} = ${branchId}), 0)::float8`,
+      saldo: sql<number>`COALESCE((SELECT SUM(${supplyMutations.qty}) FROM ${supplyMutations} WHERE ${supplyMutations.supplyId} = ${supplies.id} AND ${supplyMutations.branchId} = ${branchId} AND ${supplyMutations.status} = 'disetujui'), 0)::float8`,
+      saldoCk: ckId
+        ? sql<number>`COALESCE((SELECT SUM(${supplyMutations.qty}) FROM ${supplyMutations} WHERE ${supplyMutations.supplyId} = ${supplies.id} AND ${supplyMutations.branchId} = ${ckId} AND ${supplyMutations.status} = 'disetujui'), 0)::float8`
+        : sql<number | null>`NULL`,
       aturanQty: supplyRules.qty,
       aturanPerHari: supplyRules.perHari,
       aturanAktif: supplyRules.aktif,
@@ -226,6 +243,7 @@ export async function saldoPerlengkapan(
             mulai: r.aturanMulai!,
           }
         : null,
+    saldo_ck: r.saldoCk,
   }));
 }
 
@@ -234,7 +252,13 @@ export async function saldoSatuPerlengkapan(supplyId: string, branchId: string):
   const [{ saldo }] = await db
     .select({ saldo: sql<number>`COALESCE(SUM(${supplyMutations.qty}), 0)::float8` })
     .from(supplyMutations)
-    .where(and(eq(supplyMutations.supplyId, supplyId), eq(supplyMutations.branchId, branchId)));
+    .where(
+      and(
+        eq(supplyMutations.supplyId, supplyId),
+        eq(supplyMutations.branchId, branchId),
+        eq(supplyMutations.status, "disetujui"),
+      ),
+    );
   return saldo;
 }
 
@@ -261,6 +285,7 @@ export async function kartuPerlengkapan(params: {
       and(
         eq(supplyMutations.supplyId, params.supplyId),
         eq(supplyMutations.branchId, params.branchId),
+        eq(supplyMutations.status, "disetujui"),
         lt(supplyMutations.tanggal, params.dari),
       ),
     );
@@ -291,6 +316,8 @@ export async function kartuPerlengkapan(params: {
       and(
         eq(supplyMutations.supplyId, params.supplyId),
         eq(supplyMutations.branchId, params.branchId),
+        // kartu = mutasi EFEKTIF; selisih opname 'menunggu'/'ditolak' tidak tampil
+        eq(supplyMutations.status, "disetujui"),
         gte(supplyMutations.tanggal, params.dari),
         lte(supplyMutations.tanggal, params.sampai),
       ),
@@ -383,4 +410,319 @@ export async function muatSupplyAktif(companyId: string, supplyId: string) {
       ),
     );
   return row ?? null;
+}
+
+/* ===== STOCK OPNAME PERLENGKAPAN (sesi + ACC owner/admin, spt bahan) ===== */
+
+/**
+ * Simpan hasil hitung fisik satu sesi: item dengan selisih ≠ 0 menjadi baris
+ * 'koreksi' berstatus MENUNGGU (belum menyentuh saldo) sampai di-ACC.
+ * Return null bila semua item sesuai sistem (tanpa selisih — tak ada sesi).
+ */
+export async function buatOpnamePerlengkapan(params: {
+  companyId: string;
+  branchId: string;
+  userId: string;
+  items: { supply_id: string; qty_fisik: number }[];
+  catatan?: string | null;
+}): Promise<{ session_id: string; nomor: string; jumlah_selisih: number } | null> {
+  const ids = [...new Set(params.items.map((i) => i.supply_id))];
+  const milik = await db
+    .select({ id: supplies.id })
+    .from(supplies)
+    .where(
+      and(
+        eq(supplies.companyId, params.companyId),
+        eq(supplies.isActive, true),
+        inArray(supplies.id, ids.length > 0 ? ids : ["00000000-0000-0000-0000-000000000000"]),
+      ),
+    );
+  const adaId = new Set(milik.map((r) => r.id));
+  const tanggal = await tanggalPerusahaan(params.companyId);
+  const sessionId = randomUUID();
+  let jumlahSelisih = 0;
+  let nomor: string | null = null;
+  await db.transaction(async (tx) => {
+    for (const it of params.items) {
+      if (!adaId.has(it.supply_id)) continue;
+      const [{ saldo }] = await tx
+        .select({ saldo: sql<number>`COALESCE(SUM(${supplyMutations.qty}), 0)::float8` })
+        .from(supplyMutations)
+        .where(
+          and(
+            eq(supplyMutations.supplyId, it.supply_id),
+            eq(supplyMutations.branchId, params.branchId),
+            eq(supplyMutations.status, "disetujui"),
+          ),
+        );
+      const selisih = it.qty_fisik - saldo;
+      if (Math.abs(selisih) < 1e-9) continue;
+      await tx.insert(supplyMutations).values({
+        companyId: params.companyId,
+        branchId: params.branchId,
+        supplyId: it.supply_id,
+        tipe: "koreksi",
+        qty: selisih,
+        tanggal,
+        catatan: params.catatan ?? "Stock opname perlengkapan",
+        userId: params.userId,
+        status: "menunggu",
+        sessionId,
+        systemQty: saldo,
+        qtyFisik: it.qty_fisik,
+      });
+      jumlahSelisih++;
+    }
+    if (jumlahSelisih > 0) {
+      nomor = await terbitkanNomor(tx, params.companyId, "opname_perlengkapan", sessionId);
+    }
+  });
+  return jumlahSelisih > 0 ? { session_id: sessionId, nomor: nomor!, jumlah_selisih: jumlahSelisih } : null;
+}
+
+/** Riwayat sesi opname perlengkapan satu cabang (terbaru dulu). */
+export async function riwayatOpnamePerlengkapan(companyId: string, branchId: string) {
+  const rows = await db
+    .select({
+      sessionId: supplyMutations.sessionId,
+      waktu: sql<string>`MIN(${supplyMutations.waktu})::text`,
+      jumlahItem: sql<number>`COUNT(*)::int`,
+      status: sql<string>`MIN(${supplyMutations.status})`,
+      oleh: sql<string | null>`MIN(${users.nama})`,
+    })
+    .from(supplyMutations)
+    .leftJoin(users, eq(supplyMutations.userId, users.id))
+    .where(
+      and(
+        eq(supplyMutations.companyId, companyId),
+        eq(supplyMutations.branchId, branchId),
+        sql`${supplyMutations.sessionId} IS NOT NULL`,
+      ),
+    )
+    .groupBy(supplyMutations.sessionId)
+    .orderBy(desc(sql`MIN(${supplyMutations.waktu})`))
+    .limit(100);
+  const nomorMap = await nomorUntukRefs(
+    db,
+    companyId,
+    rows.map((r) => r.sessionId!),
+  );
+  return rows.map((r) => ({
+    session_id: r.sessionId!,
+    nomor: nomorMap.get(r.sessionId!) ?? null,
+    waktu: new Date(r.waktu).toISOString(),
+    oleh: r.oleh,
+    jumlah_item: r.jumlahItem,
+    status: r.status as "menunggu" | "disetujui" | "ditolak",
+  }));
+}
+
+/** Detail baris satu sesi opname perlengkapan. */
+export async function detailOpnamePerlengkapan(companyId: string, sessionId: string) {
+  const rows = await db
+    .select({
+      supplyId: supplyMutations.supplyId,
+      nama: supplies.nama,
+      satuan: supplies.satuan,
+      systemQty: supplyMutations.systemQty,
+      qtyFisik: supplyMutations.qtyFisik,
+      selisih: supplyMutations.qty,
+      status: supplyMutations.status,
+    })
+    .from(supplyMutations)
+    .innerJoin(supplies, eq(supplyMutations.supplyId, supplies.id))
+    .where(
+      and(eq(supplyMutations.companyId, companyId), eq(supplyMutations.sessionId, sessionId)),
+    )
+    .orderBy(asc(supplies.nama));
+  if (rows.length === 0) return null;
+  const nomorMap = await nomorUntukRefs(db, companyId, [sessionId]);
+  return {
+    session_id: sessionId,
+    nomor: nomorMap.get(sessionId) ?? null,
+    status: rows[0].status as "menunggu" | "disetujui" | "ditolak",
+    rows: rows.map((r) => ({
+      supply_id: r.supplyId,
+      nama: r.nama,
+      satuan: r.satuan,
+      system_qty: r.systemQty,
+      qty_fisik: r.qtyFisik,
+      selisih: r.selisih,
+    })),
+  };
+}
+
+/** ACC / tolak semua baris satu sesi (owner/admin). Return jumlah baris. */
+export async function setStatusOpnamePerlengkapan(
+  companyId: string,
+  sessionId: string,
+  status: "disetujui" | "ditolak",
+): Promise<number> {
+  const rows = await db
+    .update(supplyMutations)
+    .set({ status })
+    .where(
+      and(
+        eq(supplyMutations.companyId, companyId),
+        eq(supplyMutations.sessionId, sessionId),
+        eq(supplyMutations.status, "menunggu"),
+      ),
+    )
+    .returning({ id: supplyMutations.id });
+  return rows.length;
+}
+
+/* ===== KIRIMAN PERLENGKAPAN CK → CABANG (permintaan stok minimum) ===== */
+
+/**
+ * Cabang minta ke CK: buat faktur kiriman (KP-) bila CK punya stok cukup.
+ * Saldo BELUM pindah — menunggu cabang menekan Terima.
+ */
+export async function buatKirimanPerlengkapan(params: {
+  companyId: string;
+  cabangId: string;
+  supplyId: string;
+  qty: number;
+  userId: string;
+  catatan?: string | null;
+}): Promise<{ id: string; nomor: string } | { error: string }> {
+  const [cab] = await db
+    .select({ ckId: branches.centralKitchenId, tipe: branches.tipe, nama: branches.nama })
+    .from(branches)
+    .where(and(eq(branches.id, params.cabangId), eq(branches.companyId, params.companyId)));
+  if (!cab) return { error: "Cabang tidak valid" };
+  if (cab.tipe === "central_kitchen") {
+    return { error: "Cabang ini Central Kitchen — belanja langsung lewat Stok Masuk" };
+  }
+  if (!cab.ckId) return { error: "Cabang belum terhubung ke Central Kitchen" };
+  const saldoCk = await saldoSatuPerlengkapan(params.supplyId, cab.ckId);
+  if (params.qty > saldoCk) {
+    return { error: `Stok CK tidak cukup (saldo CK ${saldoCk}) — beli dulu di CK` };
+  }
+  return db.transaction(async (tx) => {
+    const [row] = await tx
+      .insert(supplyTransfers)
+      .values({
+        companyId: params.companyId,
+        dariBranchId: cab.ckId!,
+        keBranchId: params.cabangId,
+        supplyId: params.supplyId,
+        qty: params.qty,
+        catatan: params.catatan ?? null,
+        userId: params.userId,
+      })
+      .returning({ id: supplyTransfers.id });
+    const nomor = await terbitkanNomor(tx, params.companyId, "kiriman_perlengkapan", row.id);
+    return { id: row.id, nomor };
+  });
+}
+
+/** Kiriman yang melibatkan cabang ini (masuk & keluar), terbaru dulu. */
+export async function daftarKirimanPerlengkapan(companyId: string, branchId: string) {
+  const dariB = alias(branches, "dari_kiriman");
+  const keB = alias(branches, "ke_kiriman");
+  const rows = await db
+    .select({
+      id: supplyTransfers.id,
+      qty: supplyTransfers.qty,
+      status: supplyTransfers.status,
+      waktu: supplyTransfers.waktu,
+      catatan: supplyTransfers.catatan,
+      keBranchId: supplyTransfers.keBranchId,
+      dariNama: dariB.nama,
+      keNama: keB.nama,
+      itemId: supplies.id,
+      itemNama: supplies.nama,
+      itemSatuan: supplies.satuan,
+      oleh: users.nama,
+    })
+    .from(supplyTransfers)
+    .innerJoin(supplies, eq(supplyTransfers.supplyId, supplies.id))
+    .innerJoin(dariB, eq(supplyTransfers.dariBranchId, dariB.id))
+    .innerJoin(keB, eq(supplyTransfers.keBranchId, keB.id))
+    .leftJoin(users, eq(supplyTransfers.userId, users.id))
+    .where(
+      and(
+        eq(supplyTransfers.companyId, companyId),
+        sql`(${supplyTransfers.dariBranchId} = ${branchId} OR ${supplyTransfers.keBranchId} = ${branchId})`,
+      ),
+    )
+    .orderBy(desc(supplyTransfers.waktu))
+    .limit(50);
+  const nomorMap = await nomorUntukRefs(
+    db,
+    companyId,
+    rows.map((r) => r.id),
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    nomor: nomorMap.get(r.id) ?? null,
+    dari_cabang: r.dariNama,
+    ke_cabang: r.keNama,
+    ke_branch_id: r.keBranchId,
+    item: { id: r.itemId, nama: r.itemNama, satuan: r.itemSatuan },
+    qty: r.qty,
+    status: r.status,
+    waktu: (r.waktu as Date).toISOString(),
+    oleh: r.oleh,
+    catatan: r.catatan,
+  }));
+}
+
+/**
+ * Cabang menerima kiriman: saldo pindah SEKARANG (CK − / cabang +) lewat
+ * sepasang mutasi kirim/terima; kiriman ditandai diterima.
+ */
+export async function terimaKirimanPerlengkapan(params: {
+  companyId: string;
+  transferId: string;
+  branchId: string;
+  userId: string;
+}): Promise<{ ok: true; saldo: number } | { error: string; code?: number }> {
+  const [t] = await db
+    .select()
+    .from(supplyTransfers)
+    .where(
+      and(
+        eq(supplyTransfers.id, params.transferId),
+        eq(supplyTransfers.companyId, params.companyId),
+      ),
+    );
+  if (!t) return { error: "Kiriman tidak ditemukan", code: 404 };
+  if (t.keBranchId !== params.branchId) {
+    return { error: "Kiriman ini bukan untuk cabang yang dipilih", code: 400 };
+  }
+  if (t.status !== "dikirim") return { error: "Kiriman sudah diterima", code: 400 };
+  const tanggal = await tanggalPerusahaan(params.companyId);
+  const nomorMap = await nomorUntukRefs(db, params.companyId, [t.id]);
+  const nomor = nomorMap.get(t.id) ?? "";
+  await db.transaction(async (tx) => {
+    await tx
+      .update(supplyTransfers)
+      .set({ status: "diterima", diterimaBy: params.userId, diterimaAt: new Date() })
+      .where(eq(supplyTransfers.id, t.id));
+    await tx.insert(supplyMutations).values([
+      {
+        companyId: params.companyId,
+        branchId: t.dariBranchId,
+        supplyId: t.supplyId,
+        tipe: "kirim",
+        qty: -t.qty,
+        tanggal,
+        catatan: `Kiriman ${nomor}`.trim(),
+        userId: params.userId,
+      },
+      {
+        companyId: params.companyId,
+        branchId: t.keBranchId,
+        supplyId: t.supplyId,
+        tipe: "terima",
+        qty: t.qty,
+        tanggal,
+        catatan: `Kiriman ${nomor}`.trim(),
+        userId: params.userId,
+      },
+    ]);
+  });
+  return { ok: true, saldo: await saldoSatuPerlengkapan(t.supplyId, params.branchId) };
 }

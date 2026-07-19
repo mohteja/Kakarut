@@ -2891,6 +2891,53 @@ cek "cap habis: status item 'habis'" "V == 1" \
 cek "pakai saat saldo 0 → 400 (stok tidak cukup)" "V == 400" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/perlengkapan/$SP83/pakai" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"qty":1}')"
 
+echo "== 84. Perlengkapan: opname sesi + ACC, dan minta ke CK (kiriman KP- + terima) =="
+# item baru di CK (CB46 sudah terhubung CK52_UTAMA sejak §52)
+TU84=$(api "$OWNER" POST /perlengkapan '{"nama":"Tissue Uji","satuan":"pak","stok_minimum":5}' | jq -r .id)
+api "$OWNER" POST "/perlengkapan/$TU84/masuk?branch_id=$CK52_UTAMA" '{"qty":10,"total_harga":50000}' > /dev/null
+# --- OPNAME: fisik 8 → selisih -2 MENUNGGU (saldo belum berubah) ---
+OP84=$(api "$OWNER" POST "/perlengkapan/opname?branch_id=$CK52_UTAMA" "{\"items\":[{\"supply_id\":\"$TU84\",\"qty_fisik\":8}]}")
+SESI84=$(echo "$OP84" | jq -r .session_id)
+NOP84=$(echo "$OP84" | jq -r .nomor)
+echo "$NOP84" | grep -Eq '^OP-[0-9]{4,}$' && ok "sesi opname perlengkapan bernomor ($NOP84)" || gagal "nomor OP = $NOP84"
+cek "selisih menunggu ACC → saldo CK MASIH 10" "abs(V - 10) < 0.001" \
+  "$(api "$OWNER" GET "/perlengkapan?branch_id=$CK52_UTAMA" | jq --arg id "$TU84" '[.[]|select(.id==$id)][0].saldo')"
+cek "riwayat opname memuat sesi (status menunggu)" "V == 1" \
+  "$(api "$OWNER" GET "/perlengkapan/opname/riwayat?branch_id=$CK52_UTAMA" | jq --arg s "$SESI84" '([.[]|select(.session_id==$s)] | (length==1) and (.[0].status=="menunggu") and (.[0].jumlah_item==1)) | if . then 1 else 0 end')"
+cek "guard: kasir ACC sesi → 403" "V == 403" \
+  "$(status_code "$KASIR" POST "/perlengkapan/opname/sesi/$SESI84/acc")"
+api "$OWNER" POST "/perlengkapan/opname/sesi/$SESI84/acc" > /dev/null
+cek "ACC → saldo CK jadi 8 (selisih -2 efektif)" "abs(V - 8) < 0.001" \
+  "$(api "$OWNER" GET "/perlengkapan?branch_id=$CK52_UTAMA" | jq --arg id "$TU84" '[.[]|select(.id==$id)][0].saldo')"
+# opname kedua: fisik 7 → TOLAK → saldo tetap 8
+SESI84B=$(api "$OWNER" POST "/perlengkapan/opname?branch_id=$CK52_UTAMA" "{\"items\":[{\"supply_id\":\"$TU84\",\"qty_fisik\":7}]}" | jq -r .session_id)
+api "$OWNER" POST "/perlengkapan/opname/sesi/$SESI84B/tolak" > /dev/null
+cek "sesi ditolak → saldo tetap 8" "abs(V - 8) < 0.001" \
+  "$(api "$OWNER" GET "/perlengkapan?branch_id=$CK52_UTAMA" | jq --arg id "$TU84" '[.[]|select(.id==$id)][0].saldo')"
+cek "opname tanpa selisih → tanpa sesi (jumlah_selisih 0)" "V == 0" \
+  "$(api "$OWNER" POST "/perlengkapan/opname?branch_id=$CK52_UTAMA" "{\"items\":[{\"supply_id\":\"$TU84\",\"qty_fisik\":8}]}" | jq .jumlah_selisih)"
+# --- MINTA KE CK: cabang di bawah minimum (0 < 5), stok CK terlihat ---
+cek "cabang melihat saldo_ck (8) sebagai dasar minta" "abs(V - 8) < 0.001" \
+  "$(api "$OWNER" GET "/perlengkapan?branch_id=$CB46_ID" | jq --arg id "$TU84" '[.[]|select(.id==$id)][0].saldo_ck')"
+MK84=$(api "$OWNER" POST "/perlengkapan/$TU84/minta?branch_id=$CB46_ID" '{"qty":4}')
+KIR84=$(echo "$MK84" | jq -r .kiriman_id)
+NKP84=$(echo "$MK84" | jq -r .nomor)
+echo "$NKP84" | grep -Eq '^KP-[0-9]{4,}$' && ok "kiriman perlengkapan bernomor ($NKP84)" || gagal "nomor KP = $NKP84"
+cek "belum diterima: saldo CK masih 8, cabang masih 0" "V == 1" \
+  "$(api "$OWNER" GET "/perlengkapan?branch_id=$CB46_ID" | jq --arg id "$TU84" '([.[]|select(.id==$id)][0] | (.saldo == 0) and (.saldo_ck == 8)) | if . then 1 else 0 end')"
+cek "kiriman tampil (status dikirim, tujuan cabang)" "V == 1" \
+  "$(api "$OWNER" GET "/perlengkapan/kiriman?branch_id=$CB46_ID" | jq --arg k "$KIR84" --arg b "$CB46_ID" '([.[]|select(.id==$k)] | (length==1) and (.[0].status=="dikirim") and (.[0].ke_branch_id==$b)) | if . then 1 else 0 end')"
+cek "terima di cabang → saldo cabang 4" "abs(V - 4) < 0.001" \
+  "$(api "$OWNER" POST "/perlengkapan/kiriman/$KIR84/terima?branch_id=$CB46_ID" | jq .saldo)"
+cek "saldo CK berkurang jadi 4 (transfer keluar)" "abs(V - 4) < 0.001" \
+  "$(api "$OWNER" GET "/perlengkapan?branch_id=$CK52_UTAMA" | jq --arg id "$TU84" '[.[]|select(.id==$id)][0].saldo')"
+cek "terima ulang → 400 (sudah diterima)" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/perlengkapan/kiriman/$KIR84/terima?branch_id=$CB46_ID" -H "Authorization: Bearer $OWNER")"
+cek "minta melebihi stok CK → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/perlengkapan/$TU84/minta?branch_id=$CB46_ID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"qty":100}')"
+cek "kartu CK memuat baris kirim (catatan nomor KP)" "V == 1" \
+  "$(api "$OWNER" GET "/perlengkapan/$TU84/kartu?branch_id=$CK52_UTAMA" | jq --arg n "$NKP84" '([.mutasi[]|select(.tipe=="kirim" and (.catatan // "" | contains($n)))] | length >= 1) | if . then 1 else 0 end')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

@@ -10,6 +10,8 @@ const LABEL_TIPE: Record<string, string> = {
   pakai: "✂️ Pakai",
   auto: "⏱ Otomatis",
   koreksi: "🧮 Koreksi",
+  kirim: "🚚 Kirim",
+  terima: "📥 Terima",
 };
 
 /** Kartu (riwayat mutasi) satu perlengkapan per cabang per rentang tanggal. */

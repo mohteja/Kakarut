@@ -39,6 +39,96 @@ const itemKosong: ItemForm = {
   total_harga: "",
 };
 
+/**
+ * Pemilih bahan dengan pencarian (nama / kode) — pengganti dropdown biasa
+ * yang kewalahan saat daftar bahan panjang.
+ */
+function BahanPicker({
+  value,
+  opsi,
+  label,
+  onChange,
+}: {
+  value: string;
+  opsi: BahanDto[];
+  /** teks tampil per opsi (nama + isi kemasan/batch) */
+  label: (b: BahanDto) => string;
+  onChange: (id: string) => void;
+}) {
+  const [buka, setBuka] = useState(false);
+  const [cari, setCari] = useState("");
+  const dipilih = opsi.find((b) => b.id === value) ?? null;
+  const q = cari.toLowerCase();
+  const cocok = q
+    ? opsi.filter(
+        (b) =>
+          b.nama.toLowerCase().includes(q) || (b.kode?.toLowerCase().includes(q) ?? false),
+      )
+    : opsi;
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => {
+          setBuka((v) => !v);
+          setCari("");
+        }}
+        className={`${inputClass} flex items-center justify-between gap-2 text-left`}
+      >
+        <span className={`truncate ${dipilih ? "" : "text-stone-400"}`}>
+          {dipilih ? label(dipilih) : "— pilih bahan —"}
+        </span>
+        <span className="shrink-0 text-stone-400">▾</span>
+      </button>
+      {buka && (
+        <>
+          {/* penutup klik-di-luar */}
+          <div className="fixed inset-0 z-20" onClick={() => setBuka(false)} />
+          <div className="absolute left-0 right-0 z-30 mt-1 overflow-hidden rounded-lg border border-stone-200 bg-white shadow-lg">
+            <div className="border-b border-stone-100 p-2">
+              <input
+                autoFocus
+                value={cari}
+                onChange={(e) => setCari(e.target.value)}
+                placeholder="Cari nama / kode bahan…"
+                className={inputClass}
+              />
+            </div>
+            <div className="max-h-56 overflow-y-auto">
+              {cocok.length === 0 ? (
+                <div className="px-3 py-4 text-center text-sm text-stone-400">
+                  Tidak ada bahan yang cocok.
+                </div>
+              ) : (
+                cocok.map((b) => (
+                  <button
+                    key={b.id}
+                    type="button"
+                    onClick={() => {
+                      onChange(b.id);
+                      setBuka(false);
+                    }}
+                    className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-orange-50 ${
+                      b.id === value ? "bg-orange-50 font-semibold" : ""
+                    }`}
+                  >
+                    {b.kode && (
+                      <span className="shrink-0 rounded bg-stone-100 px-1.5 py-0.5 font-mono text-xs text-stone-600">
+                        {b.kode}
+                      </span>
+                    )}
+                    <span className="truncate">{label(b)}</span>
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 /** Quick-add inline: input nama + simpan, untuk supplier / tempat penyimpanan. */
 function QuickAdd({
   placeholder,
@@ -345,19 +435,14 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
                     <label className="mb-1 block text-xs font-medium text-stone-500 md:hidden">
                       Bahan
                     </label>
-                    <select
+                    <BahanPicker
                       value={it.ingredient_id}
-                      onChange={(e) => ubahItem(i, { ingredient_id: e.target.value })}
-                      className={inputClass}
-                    >
-                      <option value="">— pilih bahan —</option>
-                      {bahanJalur.map((x) => (
-                        <option key={x.id} value={x.id}>
-                          {x.nama} (1 {tipe === "beli" ? "kemasan" : "batch"} ={" "}
-                          {formatAngka(x.isi)} {x.satuan})
-                        </option>
-                      ))}
-                    </select>
+                      opsi={bahanJalur}
+                      label={(x) =>
+                        `${x.nama} (1 ${tipe === "beli" ? "kemasan" : "batch"} = ${formatAngka(x.isi)} ${x.satuan})`
+                      }
+                      onChange={(id) => ubahItem(i, { ingredient_id: id })}
+                    />
                   </div>
                   <div className="w-28 shrink-0">
                     <label className="mb-1 block text-xs font-medium text-stone-500 md:hidden">

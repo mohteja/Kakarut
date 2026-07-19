@@ -22,7 +22,6 @@ const BOLEH_STORE = [
   "/menu/lihat",
   "/pengaturan/meja",
   "/stok",
-  "/perlengkapan",
   "/penerimaan",
   "/pengaturan/printer",
 ];
@@ -237,6 +236,9 @@ export function Layout() {
                   <NavLink to="/bahan" className={linkClass}>
                     🥩 Bahan Baku
                   </NavLink>
+                  <NavLink to="/perlengkapan" className={linkClass}>
+                    🧰 Perlengkapan
+                  </NavLink>
                   <NavLink to="/resep" className={linkClass}>
                     🧾 Resep
                   </NavLink>
@@ -282,9 +284,6 @@ export function Layout() {
                   </span>
                 )}
               </NavLink>
-              <NavLink to="/perlengkapan" className={linkClass}>
-                🧰 Perlengkapan
-              </NavLink>
               {!timDiCk && (
                 <NavLink to="/penerimaan" className={(s) => `${linkClass(s)} flex items-center gap-2`}>
                   <span>📥 Penerimaan Barang</span>
@@ -318,6 +317,9 @@ export function Layout() {
                     <>
                       <NavLink to="/bahan" className={linkClass}>
                         🥩 Bahan Baku
+                      </NavLink>
+                      <NavLink to="/perlengkapan" className={linkClass}>
+                        🧰 Perlengkapan
                       </NavLink>
                       <NavLink to="/resep" className={linkClass}>
                         🧾 Resep
@@ -354,6 +356,9 @@ export function Layout() {
                   </NavLink>
                   <NavLink to="/bahan" className={linkClass}>
                     🥩 Bahan Baku
+                  </NavLink>
+                  <NavLink to="/perlengkapan" className={linkClass}>
+                    🧰 Perlengkapan
                   </NavLink>
                   <NavLink to="/member" className={linkClass}>
                     👥 Member

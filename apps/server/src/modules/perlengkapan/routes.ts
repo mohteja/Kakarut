@@ -16,12 +16,19 @@ import { requireRole, resolveBranchId, type AppEnv } from "../../middleware/auth
 import { terbitkanNomor } from "../dokumen/nomor";
 import {
   belanjaPerlengkapan,
+  buatKirimanPerlengkapan,
+  buatOpnamePerlengkapan,
+  daftarKirimanPerlengkapan,
+  detailOpnamePerlengkapan,
   kartuPerlengkapan,
   muatSupplyAktif,
+  riwayatOpnamePerlengkapan,
   saldoPerlengkapan,
   saldoSatuPerlengkapan,
+  setStatusOpnamePerlengkapan,
   tanggalPerusahaan,
   terapkanKonsumsiOtomatis,
+  terimaKirimanPerlengkapan,
 } from "./service";
 
 const TANGGAL_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -68,6 +75,18 @@ const AturanBody = z.object({
   mulai: z.string().regex(TANGGAL_RE).optional(),
 });
 
+const OpnameBody = z.object({
+  items: z
+    .array(z.object({ supply_id: z.string().uuid(), qty_fisik: z.number().min(0) }))
+    .min(1),
+  catatan: z.string().max(300).nullish(),
+});
+
+const MintaBody = z.object({
+  qty: z.number().positive(),
+  catatan: z.string().max(300).nullish(),
+});
+
 export const perlengkapanRoutes = new Hono<AppEnv>()
   .get("/", async (c) => {
     const auth = c.get("auth");
@@ -92,6 +111,93 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
     return c.json(
       await belanjaPerlengkapan({ companyId: auth.company_id!, branchId, dari, sampai }),
     );
+  })
+  /* ===== STOCK OPNAME PERLENGKAPAN: sesi hitung fisik + ACC owner/admin ===== */
+  .post("/opname", zValidator("json", OpnameBody), async (c) => {
+    const auth = c.get("auth");
+    const body = c.req.valid("json");
+    const branchId = await resolveBranchId(c);
+    // jatah otomatis dipotong dulu agar saldo sistem yang dibandingkan jujur
+    await terapkanKonsumsiOtomatis(auth.company_id!, branchId);
+    const hasil = await buatOpnamePerlengkapan({
+      companyId: auth.company_id!,
+      branchId,
+      userId: auth.sub,
+      items: body.items,
+      catatan: body.catatan ?? null,
+    });
+    // semua sesuai sistem → tanpa sesi (tak ada yang perlu di-ACC)
+    if (!hasil) return c.json({ session_id: null, nomor: null, jumlah_selisih: 0 });
+    return c.json(hasil, 201);
+  })
+  .get("/opname/riwayat", async (c) => {
+    const auth = c.get("auth");
+    const branchId = await resolveBranchId(c);
+    return c.json(await riwayatOpnamePerlengkapan(auth.company_id!, branchId));
+  })
+  .get("/opname/sesi/:sessionId", async (c) => {
+    const auth = c.get("auth");
+    const detail = await detailOpnamePerlengkapan(auth.company_id!, c.req.param("sessionId"));
+    if (!detail) throw new HTTPException(404, { message: "Sesi opname tidak ditemukan" });
+    return c.json(detail);
+  })
+  .post("/opname/sesi/:sessionId/acc", requireRole("owner", "admin"), async (c) => {
+    const auth = c.get("auth");
+    const n = await setStatusOpnamePerlengkapan(
+      auth.company_id!,
+      c.req.param("sessionId"),
+      "disetujui",
+    );
+    if (n === 0) {
+      throw new HTTPException(404, { message: "Sesi tidak ditemukan / sudah ditinjau" });
+    }
+    return c.json({ ok: true, jumlah: n });
+  })
+  .post("/opname/sesi/:sessionId/tolak", requireRole("owner", "admin"), async (c) => {
+    const auth = c.get("auth");
+    const n = await setStatusOpnamePerlengkapan(
+      auth.company_id!,
+      c.req.param("sessionId"),
+      "ditolak",
+    );
+    if (n === 0) {
+      throw new HTTPException(404, { message: "Sesi tidak ditemukan / sudah ditinjau" });
+    }
+    return c.json({ ok: true, jumlah: n });
+  })
+  .delete("/opname/sesi/:sessionId", requireRole("owner", "admin"), async (c) => {
+    const auth = c.get("auth");
+    const rows = await db
+      .delete(supplyMutations)
+      .where(
+        and(
+          eq(supplyMutations.companyId, auth.company_id!),
+          eq(supplyMutations.sessionId, c.req.param("sessionId")),
+        ),
+      )
+      .returning({ id: supplyMutations.id });
+    if (rows.length === 0) throw new HTTPException(404, { message: "Sesi tidak ditemukan" });
+    return c.json({ ok: true, jumlah: rows.length });
+  })
+  /* ===== KIRIMAN CK → CABANG (permintaan stok ≤ minimum) ===== */
+  .get("/kiriman", async (c) => {
+    const auth = c.get("auth");
+    const branchId = await resolveBranchId(c);
+    return c.json(await daftarKirimanPerlengkapan(auth.company_id!, branchId));
+  })
+  .post("/kiriman/:id/terima", async (c) => {
+    const auth = c.get("auth");
+    const branchId = await resolveBranchId(c);
+    const hasil = await terimaKirimanPerlengkapan({
+      companyId: auth.company_id!,
+      transferId: c.req.param("id"),
+      branchId,
+      userId: auth.sub,
+    });
+    if ("error" in hasil) {
+      throw new HTTPException((hasil.code ?? 400) as 400 | 404, { message: hasil.error });
+    }
+    return c.json(hasil);
   })
   .post("/", requireRole("owner", "admin"), zValidator("json", ItemBody), async (c) => {
     const auth = c.get("auth");
@@ -289,6 +395,25 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
       return c.json({ ok: true, saldo: await saldoSatuPerlengkapan(item.id, branchId) });
     },
   )
+  // Cabang minta ke CK (stok ≤ minimum): faktur kiriman KP- terbit bila stok
+  // CK cukup; saldo pindah saat cabang menekan Terima.
+  .post("/:id/minta", zValidator("json", MintaBody), async (c) => {
+    const auth = c.get("auth");
+    const body = c.req.valid("json");
+    const branchId = await resolveBranchId(c);
+    const item = await muatSupplyAktif(auth.company_id!, c.req.param("id"));
+    if (!item) throw new HTTPException(404, { message: "Perlengkapan tidak ditemukan" });
+    const hasil = await buatKirimanPerlengkapan({
+      companyId: auth.company_id!,
+      cabangId: branchId,
+      supplyId: item.id,
+      qty: body.qty,
+      userId: auth.sub,
+      catatan: body.catatan ?? null,
+    });
+    if ("error" in hasil) throw new HTTPException(400, { message: hasil.error });
+    return c.json({ ok: true, kiriman_id: hasil.id, nomor: hasil.nomor }, 201);
+  })
   .get("/:id/kartu", async (c) => {
     const auth = c.get("auth");
     const branchId = await resolveBranchId(c);

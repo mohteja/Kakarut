@@ -100,7 +100,6 @@ export default function App() {
               <Route path="/kasir/riwayat" element={<RiwayatPage />} />
               <Route path="/menu/lihat" element={<LihatMenuPage />} />
               <Route path="/stok" element={<StokPage />} />
-              <Route path="/perlengkapan" element={<PerlengkapanPage />} />
               <Route path="/penerimaan" element={<PenerimaanPage />} />
               <Route path="/stok/penyesuaian" element={<PenyesuaianPage />} />
               <Route path="/stok/kartu/:ingredientId" element={<KartuStokPage />} />
@@ -130,6 +129,7 @@ export default function App() {
                   <Route path="/pembelian/baru" element={<FakturFormPage tipe="beli" />} />
                   <Route path="/pembelian/tahap" element={<TahapPage />} />
                   <Route path="/bahan" element={<BahanPage />} />
+                  <Route path="/perlengkapan" element={<PerlengkapanPage />} />
                   <Route path="/resep" element={<ResepPage />} />
                 </>
               )}
