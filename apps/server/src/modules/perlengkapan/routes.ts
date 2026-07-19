@@ -82,6 +82,12 @@ const OpnameBody = z.object({
   catatan: z.string().max(300).nullish(),
 });
 
+const StokAwalBody = z.object({
+  items: z
+    .array(z.object({ supply_id: z.string().uuid(), qty: z.number().min(0) }))
+    .min(1),
+});
+
 const MintaBody = z.object({
   qty: z.number().positive(),
   catatan: z.string().max(300).nullish(),
@@ -112,6 +118,48 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
       await belanjaPerlengkapan({ companyId: auth.company_id!, branchId, dari, sampai }),
     );
   })
+  // Stok awal perlengkapan (dipakai dari halaman Stok, seperti /stok/awal
+  // bahan baku): set saldo pembuka per item — selisih terhadap saldo berjalan
+  // dibukukan sebagai mutasi koreksi "Stok awal" dan langsung efektif.
+  .post(
+    "/stok-awal",
+    requireRole("owner", "admin"),
+    zValidator("json", StokAwalBody),
+    async (c) => {
+      const auth = c.get("auth");
+      const body = c.req.valid("json");
+      const branchId = await resolveBranchId(c);
+      await terapkanKonsumsiOtomatis(auth.company_id!, branchId);
+      // dedupe: item yang sama dua kali → input terakhir yang berlaku
+      const target = new Map(body.items.map((it) => [it.supply_id, it.qty]));
+      // validasi seluruh item dulu supaya kegagalan tidak menyisakan tulisan sebagian
+      for (const supplyId of target.keys()) {
+        const item = await muatSupplyAktif(auth.company_id!, supplyId);
+        if (!item) throw new HTTPException(404, { message: "Perlengkapan tidak ditemukan" });
+      }
+      const tanggal = await tanggalPerusahaan(auth.company_id!);
+      let diubah = 0;
+      await db.transaction(async (tx) => {
+        for (const [supplyId, qty] of target) {
+          const saldo = await saldoSatuPerlengkapan(supplyId, branchId);
+          const selisih = qty - saldo;
+          if (selisih === 0) continue;
+          await tx.insert(supplyMutations).values({
+            companyId: auth.company_id!,
+            branchId,
+            supplyId,
+            tipe: "koreksi",
+            qty: selisih,
+            tanggal,
+            catatan: "Stok awal",
+            userId: auth.sub,
+          });
+          diubah++;
+        }
+      });
+      return c.json({ ok: true, jumlah: target.size, diubah });
+    },
+  )
   /* ===== STOCK OPNAME PERLENGKAPAN: sesi hitung fisik + ACC owner/admin ===== */
   .post("/opname", zValidator("json", OpnameBody), async (c) => {
     const auth = c.get("auth");

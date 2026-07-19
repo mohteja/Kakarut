@@ -18,7 +18,6 @@ export function OpnamePerlengkapanPage() {
   const { query: branchQuery, id: branchId } = useCabangData();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const isManajemen = auth?.user.role === "owner" || auth?.user.role === "admin";
 
   const { data: rows = [] } = useQuery({
     queryKey: ["perlengkapan", branchQuery],
@@ -254,19 +253,8 @@ export function OpnamePerlengkapanPage() {
             ) : (
               <div className="mt-4 rounded-lg bg-blue-50 px-3 py-2 text-left text-sm text-blue-800">
                 Ada <b>{hasil.jumlah_selisih} selisih</b>. <b>Stok belum berubah</b> —
-                menunggu <b>ACC owner/admin</b>
-                {isManajemen ? (
-                  <>
-                    {" "}
-                    di{" "}
-                    <Link to="/perlengkapan" className="font-semibold underline">
-                      Manajemen → Perlengkapan → Riwayat Opname
-                    </Link>
-                  </>
-                ) : (
-                  " (Riwayat Opname Perlengkapan)"
-                )}
-                . Setelah di-ACC, stok disesuaikan ke hitungan fisik.
+                menunggu <b>ACC owner/admin</b> di <b>🗂 Riwayat Opname</b> (halaman Stok →
+                tab Perlengkapan). Setelah di-ACC, stok disesuaikan ke hitungan fisik.
               </div>
             )}
             <div className="mt-4 flex gap-2">

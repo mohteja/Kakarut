@@ -6,7 +6,6 @@ import type {
   MenuStokDto,
   PenyesuaianRow,
   PenyimpananDto,
-  PerlengkapanRowDto,
   StokRowDto,
 } from "@kakarut/shared";
 import {
@@ -21,6 +20,7 @@ import {
   thClass,
 } from "../../components/ui";
 import { CabangDataBar } from "../../components/CabangDataBar";
+import { StokPerlengkapanTab } from "./StokPerlengkapanTab";
 import { useAuth } from "../../context/AuthContext";
 import { useBranch, useCabangData } from "../../context/BranchContext";
 import { api } from "../../lib/api";
@@ -30,14 +30,6 @@ import {
   labelTahapPembelian,
   labelTahapProduksi,
 } from "../../lib/format";
-
-/** Label aturan konsumsi otomatis: "1 sachet / hari", "2 pcs / 3 hari". */
-function labelAturanPerlengkapan(r: PerlengkapanRowDto): string | null {
-  if (!r.aturan) return null;
-  const per = r.aturan.per_hari === 1 ? "hari" : `${r.aturan.per_hari} hari`;
-  const teks = `${formatAngka(r.aturan.qty)} ${r.satuan} / ${per}`;
-  return r.aturan.aktif ? teks : `${teks} (nonaktif)`;
-}
 
 export function StokPage() {
   const { auth } = useAuth();
@@ -82,12 +74,6 @@ export function StokPage() {
     queryKey: ["penyimpanan", branchQuery],
     queryFn: () => api<PenyimpananDto[]>(`/penyimpanan${branchQuery}`),
   });
-  // Stok perlengkapan (non bahan baku): saldo per cabang dari ledger perlengkapan
-  const { data: perlengkapan = [], isLoading: perlengkapanLoading } = useQuery({
-    queryKey: ["perlengkapan", branchQuery],
-    queryFn: () => api<PerlengkapanRowDto[]>(`/perlengkapan${branchQuery}`),
-    enabled: tab === "perlengkapan" && !isKantorData,
-  });
   // semua penyesuaian yang belum tuntas (belum diklarifikasi + menunggu persetujuan)
   const { data: penyesuaianRows = [] } = useQuery({
     queryKey: ["penyesuaian", branchQuery, "semua"],
@@ -124,10 +110,6 @@ export function StokPage() {
       const pb = b.stok?.porsi ?? Number.POSITIVE_INFINITY;
       return pa - pb; // porsi paling sedikit di atas (paling butuh perhatian)
     });
-
-  const perlengkapanTampil = perlengkapan.filter((p) =>
-    p.nama.toLowerCase().includes(cari.toLowerCase()),
-  );
 
   return (
     <div>
@@ -315,81 +297,13 @@ export function StokPage() {
           </Card>
         </>
       ) : tab === "perlengkapan" ? (
-        perlengkapanLoading ? (
-          <Spinner />
-        ) : (
-          <>
-            <div className="mb-3 flex flex-wrap items-center gap-2">
-              <input
-                value={cari}
-                onChange={(e) => setCari(e.target.value)}
-                placeholder="Cari perlengkapan…"
-                className={`${inputClass} max-w-56`}
-              />
-              <span className="text-xs text-stone-400">
-                Pemakaian dicatat lewat <b>Opname Perlengkapan</b>
-                {isManajemen && (
-                  <>
-                    {" "}
-                    · kelola item di{" "}
-                    <Link to="/perlengkapan" className="font-medium text-orange-600 hover:underline">
-                      Manajemen → Perlengkapan
-                    </Link>
-                  </>
-                )}
-              </span>
-            </div>
-            <Card className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="border-b border-stone-200 bg-stone-50">
-                  <tr>
-                    <th className={thClass}>Perlengkapan</th>
-                    <th className={`${thClass} text-right`}>Saldo</th>
-                    <th className={`${thClass} text-right`}>Stok Minimum</th>
-                    <th className={thClass}>Aturan Konsumsi</th>
-                    <th className={thClass}>Status</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-stone-100">
-                  {perlengkapanTampil.map((p) => (
-                    <tr key={p.id} className="hover:bg-stone-50">
-                      <td className={`${tdClass} font-medium`}>
-                        {p.nama}
-                        {p.catatan && (
-                          <span className="ml-2 text-xs font-normal text-stone-400">{p.catatan}</span>
-                        )}
-                      </td>
-                      <td className={`${tdClass} text-right font-bold`}>
-                        {formatAngka(p.saldo)}{" "}
-                        <span className="font-normal text-stone-500">{p.satuan}</span>
-                      </td>
-                      <td className={`${tdClass} text-right text-stone-500`}>
-                        {p.stok_minimum > 0 ? formatAngka(p.stok_minimum) : "—"}
-                      </td>
-                      <td className={`${tdClass} text-stone-600`}>
-                        {labelAturanPerlengkapan(p) ?? (
-                          <span className="text-stone-400">manual</span>
-                        )}
-                      </td>
-                      <td className={tdClass}>
-                        <StatusBadge status={p.status} />
-                      </td>
-                    </tr>
-                  ))}
-                  {perlengkapanTampil.length === 0 && (
-                    <tr>
-                      <td colSpan={5} className={`${tdClass} py-8 text-center text-stone-400`}>
-                        {cari
-                          ? `Perlengkapan "${cari}" tidak ditemukan.`
-                          : "Belum ada perlengkapan terdaftar."}
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </Card>
-          </>
-        )
+        <StokPerlengkapanTab
+          branchQuery={branchQuery}
+          dataId={dataId}
+          isManajemen={isManajemen}
+          cari={cari}
+          setCari={setCari}
+        />
       ) : isLoading ? (
         <Spinner />
       ) : (

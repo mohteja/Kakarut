@@ -2975,6 +2975,18 @@ print(1 if abs(cb-40) < 0.001 and abs(ck-60) < 0.001 else 0)")"
 cek "pengingat 'untuk cabang' hilang setelah dikirim (walau sebagian)" "V == 1" \
   "$(api "$OWNER" GET "/produksi?branch_id=$CK52_UTAMA&per_page=500" | jq --arg f "$PF85" '([.rows[]|select(.faktur_id==$f)] | all(.[]; .untuk_branch_id == null)) | if . then 1 else 0 end')"
 
+echo "== 86. Perlengkapan: stok awal batch dari halaman Stok (koreksi 'Stok awal') =="
+LAP86=$(api "$OWNER" POST /perlengkapan '{"nama":"Lap Uji","satuan":"pcs"}' | jq -r .id)
+api "$OWNER" POST /perlengkapan/stok-awal "{\"items\":[{\"supply_id\":\"$LAP86\",\"qty\":12}]}" > /dev/null
+cek "stok awal 12 → saldo 12" "abs(V - 12) < 0.001" \
+  "$(api "$OWNER" GET /perlengkapan | jq --arg id "$LAP86" '[.[]|select(.id==$id)][0].saldo')"
+api "$OWNER" POST /perlengkapan/stok-awal "{\"items\":[{\"supply_id\":\"$LAP86\",\"qty\":10}]}" > /dev/null
+cek "stok awal ulang 10 → saldo 10 (dibukukan koreksi -2)" "abs(V - 10) < 0.001" \
+  "$(api "$OWNER" GET /perlengkapan | jq --arg id "$LAP86" '[.[]|select(.id==$id)][0].saldo')"
+cek "kartu memuat 2 baris koreksi 'Stok awal'" "V == 2" \
+  "$(api "$OWNER" GET "/perlengkapan/$LAP86/kartu" | jq '[.mutasi[]|select(.tipe=="koreksi" and .catatan=="Stok awal")] | length')"
+cek "guard: kasir set stok awal → 403" "V == 403" "$(status_code "$KASIR" POST /perlengkapan/stok-awal)"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

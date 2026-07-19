@@ -131,13 +131,15 @@ export default function App() {
                   <Route path="/pembelian/baru" element={<FakturFormPage tipe="beli" />} />
                   <Route path="/pembelian/tahap" element={<TahapPage />} />
                   <Route path="/bahan" element={<BahanPage />} />
-                  <Route path="/perlengkapan" element={<PerlengkapanPage />} />
                   <Route path="/resep" element={<ResepPage />} />
                 </>
               )}
               {isManajemen && (
                 <>
                   <Route path="/dashboard" element={<DashboardPage />} />
+                  {/* master perlengkapan (nama/harga/aturan) — operasi stoknya
+                      utk semua peran ada di halaman Stok → tab Perlengkapan */}
+                  <Route path="/perlengkapan" element={<PerlengkapanPage />} />
                   <Route path="/pembelian/rekomendasi" element={<RekomendasiBeliPage />} />
                   <Route path="/stok/tambah-dari-menu" element={<TambahStokDariMenuPage />} />
                   <Route path="/stok/awal" element={<StokAwalPage />} />
