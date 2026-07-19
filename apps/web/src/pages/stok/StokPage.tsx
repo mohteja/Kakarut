@@ -6,6 +6,7 @@ import type {
   MenuStokDto,
   PenyesuaianRow,
   PenyimpananDto,
+  PerlengkapanRowDto,
   StokRowDto,
 } from "@kakarut/shared";
 import {
@@ -30,6 +31,14 @@ import {
   labelTahapProduksi,
 } from "../../lib/format";
 
+/** Label aturan konsumsi otomatis: "1 sachet / hari", "2 pcs / 3 hari". */
+function labelAturanPerlengkapan(r: PerlengkapanRowDto): string | null {
+  if (!r.aturan) return null;
+  const per = r.aturan.per_hari === 1 ? "hari" : `${r.aturan.per_hari} hari`;
+  const teks = `${formatAngka(r.aturan.qty)} ${r.satuan} / ${per}`;
+  return r.aturan.aktif ? teks : `${teks} (nonaktif)`;
+}
+
 export function StokPage() {
   const { auth } = useAuth();
   // Stok bersifat fisik per cabang — dari Kantor pilih cabang datanya.
@@ -47,7 +56,7 @@ export function StokPage() {
   const isManajemen = auth?.user.role === "owner" || auth?.user.role === "admin";
   // Dua tampilan: stok BAHAN (baris per bahan baku) & stok MENU (sisa porsi
   // per menu, diturunkan dari saldo bahan — selalu berkorelasi otomatis).
-  const [tab, setTab] = useState<"bahan" | "menu">("bahan");
+  const [tab, setTab] = useState<"bahan" | "menu" | "perlengkapan">("bahan");
   // Pindah ke tab bahan bila Stok Menu tak relevan (CK/kantor) supaya tak
   // menampilkan tab kosong saat lokasi data berganti.
   useEffect(() => {
@@ -72,6 +81,12 @@ export function StokPage() {
   const { data: tempatList = [] } = useQuery({
     queryKey: ["penyimpanan", branchQuery],
     queryFn: () => api<PenyimpananDto[]>(`/penyimpanan${branchQuery}`),
+  });
+  // Stok perlengkapan (non bahan baku): saldo per cabang dari ledger perlengkapan
+  const { data: perlengkapan = [], isLoading: perlengkapanLoading } = useQuery({
+    queryKey: ["perlengkapan", branchQuery],
+    queryFn: () => api<PerlengkapanRowDto[]>(`/perlengkapan${branchQuery}`),
+    enabled: tab === "perlengkapan" && !isKantorData,
   });
   // semua penyesuaian yang belum tuntas (belum diklarifikasi + menunggu persetujuan)
   const { data: penyesuaianRows = [] } = useQuery({
@@ -110,16 +125,20 @@ export function StokPage() {
       return pa - pb; // porsi paling sedikit di atas (paling butuh perhatian)
     });
 
+  const perlengkapanTampil = perlengkapan.filter((p) =>
+    p.nama.toLowerCase().includes(cari.toLowerCase()),
+  );
+
   return (
     <div>
       <CabangDataBar />
       <PageTitle
         aksi={
-          !isKantorData && tab === "bahan" ? (
+          !isKantorData && tab !== "menu" ? (
             <div className="flex flex-wrap gap-2">
               {/* Penyesuaian = klarifikasi/persetujuan selisih (manajemen/kasir);
                   tim hanya melakukan opname + lihat riwayat. */}
-              {!isTim && (
+              {tab === "bahan" && !isTim && (
                 <Link to="/stok/penyesuaian" className={`${btnSecondary} relative`}>
                   ⚠️ Penyesuaian
                   {belumTuntas > 0 && (
@@ -129,23 +148,42 @@ export function StokPage() {
                   )}
                 </Link>
               )}
-              <Link to="/stok/opname/riwayat" className={btnSecondary}>
-                🕑 Riwayat
-              </Link>
+              {tab === "bahan" && (
+                <Link to="/stok/opname/riwayat" className={btnSecondary}>
+                  🕑 Riwayat
+                </Link>
+              )}
               {/* Stok Awal = saldo pembuka stok yang sudah ada (onboarding) */}
-              {isManajemen && (
+              {tab === "bahan" && isManajemen && (
                 <Link to="/stok/awal" className={btnSecondary}>
                   📦 Stok Awal
                 </Link>
               )}
-              <Link to="/stok/opname" className={btnPrimary}>
-                📋 Stok Opname
+              {/* DUA jalur opname terpisah — bahan baku vs perlengkapan; keduanya
+                  dilakukan staf cabang & CK dari halaman Stok ini */}
+              <Link
+                to="/stok/opname"
+                className={tab === "bahan" ? btnPrimary : btnSecondary}
+              >
+                📋 Opname Bahan Baku
+              </Link>
+              <Link
+                to="/stok/opname-perlengkapan"
+                className={tab === "perlengkapan" ? btnPrimary : btnSecondary}
+              >
+                🧰 Opname Perlengkapan
               </Link>
             </div>
           ) : undefined
         }
       >
-        {isKantorData ? "Stok" : tab === "bahan" ? "Stok Bahan" : "Stok Menu"}
+        {isKantorData
+          ? "Stok"
+          : tab === "bahan"
+            ? "Stok Bahan"
+            : tab === "perlengkapan"
+              ? "Stok Perlengkapan"
+              : "Stok Menu"}
       </PageTitle>
 
       {/* Kantor tak menyimpan stok fisik — arahkan ke lokasi yang menyimpan */}
@@ -181,6 +219,15 @@ export function StokPage() {
               🍜 Stok Menu
             </button>
           )}
+          <button
+            type="button"
+            onClick={() => setTab("perlengkapan")}
+            className={`px-3 py-1.5 font-medium ${
+              tab === "perlengkapan" ? "bg-orange-600 text-white" : "bg-white text-stone-600 hover:bg-stone-50"
+            }`}
+          >
+            🧰 Perlengkapan
+          </button>
         </div>
       )}
 
@@ -267,6 +314,82 @@ export function StokPage() {
             </table>
           </Card>
         </>
+      ) : tab === "perlengkapan" ? (
+        perlengkapanLoading ? (
+          <Spinner />
+        ) : (
+          <>
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <input
+                value={cari}
+                onChange={(e) => setCari(e.target.value)}
+                placeholder="Cari perlengkapan…"
+                className={`${inputClass} max-w-56`}
+              />
+              <span className="text-xs text-stone-400">
+                Pemakaian dicatat lewat <b>Opname Perlengkapan</b>
+                {isManajemen && (
+                  <>
+                    {" "}
+                    · kelola item di{" "}
+                    <Link to="/perlengkapan" className="font-medium text-orange-600 hover:underline">
+                      Manajemen → Perlengkapan
+                    </Link>
+                  </>
+                )}
+              </span>
+            </div>
+            <Card className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="border-b border-stone-200 bg-stone-50">
+                  <tr>
+                    <th className={thClass}>Perlengkapan</th>
+                    <th className={`${thClass} text-right`}>Saldo</th>
+                    <th className={`${thClass} text-right`}>Stok Minimum</th>
+                    <th className={thClass}>Aturan Konsumsi</th>
+                    <th className={thClass}>Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-stone-100">
+                  {perlengkapanTampil.map((p) => (
+                    <tr key={p.id} className="hover:bg-stone-50">
+                      <td className={`${tdClass} font-medium`}>
+                        {p.nama}
+                        {p.catatan && (
+                          <span className="ml-2 text-xs font-normal text-stone-400">{p.catatan}</span>
+                        )}
+                      </td>
+                      <td className={`${tdClass} text-right font-bold`}>
+                        {formatAngka(p.saldo)}{" "}
+                        <span className="font-normal text-stone-500">{p.satuan}</span>
+                      </td>
+                      <td className={`${tdClass} text-right text-stone-500`}>
+                        {p.stok_minimum > 0 ? formatAngka(p.stok_minimum) : "—"}
+                      </td>
+                      <td className={`${tdClass} text-stone-600`}>
+                        {labelAturanPerlengkapan(p) ?? (
+                          <span className="text-stone-400">manual</span>
+                        )}
+                      </td>
+                      <td className={tdClass}>
+                        <StatusBadge status={p.status} />
+                      </td>
+                    </tr>
+                  ))}
+                  {perlengkapanTampil.length === 0 && (
+                    <tr>
+                      <td colSpan={5} className={`${tdClass} py-8 text-center text-stone-400`}>
+                        {cari
+                          ? `Perlengkapan "${cari}" tidak ditemukan.`
+                          : "Belum ada perlengkapan terdaftar."}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </Card>
+          </>
+        )
       ) : isLoading ? (
         <Spinner />
       ) : (

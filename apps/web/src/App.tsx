@@ -41,6 +41,7 @@ import { PermintaanStokPage } from "./pages/stok/PermintaanStokPage";
 import { StokAwalPage } from "./pages/stok/StokAwalPage";
 import { TambahStokDariMenuPage } from "./pages/stok/TambahStokDariMenuPage";
 import { OpnamePage } from "./pages/stok/OpnamePage";
+import { OpnamePerlengkapanPage } from "./pages/stok/OpnamePerlengkapanPage";
 import { OpnameRiwayatPage } from "./pages/stok/OpnameRiwayatPage";
 import { PenyesuaianPage } from "./pages/stok/PenyesuaianPage";
 import { StokPage } from "./pages/stok/StokPage";
@@ -84,6 +85,7 @@ export default function App() {
         {!isSuperAdmin && (
           <>
             <Route path="/stok/opname" element={<OpnamePage />} />
+            <Route path="/stok/opname-perlengkapan" element={<OpnamePerlengkapanPage />} />
             <Route path="/stok/opname/riwayat" element={<OpnameRiwayatPage />} />
           </>
         )}

@@ -2937,6 +2937,16 @@ cek "minta melebihi stok CK → 400" "V == 400" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/perlengkapan/$TU84/minta?branch_id=$CB46_ID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"qty":100}')"
 cek "kartu CK memuat baris kirim (catatan nomor KP)" "V == 1" \
   "$(api "$OWNER" GET "/perlengkapan/$TU84/kartu?branch_id=$CK52_UTAMA" | jq --arg n "$NKP84" '([.mutasi[]|select(.tipe=="kirim" and (.catatan // "" | contains($n)))] | length >= 1) | if . then 1 else 0 end')"
+# --- STAF CABANG opname dari halaman Stok: KASIR boleh buat sesi (terkunci
+#     cabangnya sendiri), selisih tetap menunggu ACC owner/admin ---
+OPK84=$(api "$KASIR" POST /perlengkapan/opname "{\"items\":[{\"supply_id\":\"$SB83\",\"qty_fisik\":4}],\"catatan\":\"opname kasir dari halaman Stok\"}")
+SESIK84=$(echo "$OPK84" | jq -r .session_id)
+cek "KASIR buat opname (fisik 4, sistem 5) → 1 selisih menunggu" "V == 1" "$(echo "$OPK84" | jq .jumlah_selisih)"
+cek "selisih kasir menunggu ACC → saldo cabang kasir tetap 5" "abs(V - 5) < 0.001" \
+  "$(api "$KASIR" GET /perlengkapan | jq --arg id "$SB83" '[.[]|select(.id==$id)][0].saldo')"
+api "$OWNER" POST "/perlengkapan/opname/sesi/$SESIK84/tolak" > /dev/null
+cek "sesi kasir ditolak owner → saldo tetap 5" "abs(V - 5) < 0.001" \
+  "$(api "$KASIR" GET /perlengkapan | jq --arg id "$SB83" '[.[]|select(.id==$id)][0].saldo')"
 
 echo "== 85. Kirim hasil produksi dgn qty diatur (butuh 400, 1 batch 500 → kirim sebagian) =="
 # reset stok jadi & bahan mentah → work-order porsi 20 (kebutuhan 100, 1 batch = 100)
