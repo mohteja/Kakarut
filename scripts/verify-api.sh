@@ -3061,6 +3061,19 @@ cek "guard: kasir jalankan permintaan otomatis → 403" "V == 403" \
 cek "guard: target Central Kitchen → 400 (CK belanja langsung)" "V == 400" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/perlengkapan/permintaan-otomatis?branch_id=$CK52_UTAMA" -H "Authorization: Bearer $OWNER")"
 
+# NB: §91 mengosongkan SELURUH Tempat Sampah perusahaan (hapus permanen) —
+# maka HARUS jadi seksi TERAKHIR agar tak mengganggu cek soft-delete di atas.
+echo "== 91. Kosongkan Tempat Sampah (hapus permanen semua soft-delete) =="
+cek "sebelum kosongkan: Tempat Sampah tidak kosong" "V >= 1" "$(api "$OWNER" GET /sampah | jq 'length')"
+cek "guard: kasir kosongkan → 403" "V == 403" "$(status_code "$KASIR" POST /sampah/kosongkan)"
+KOS91=$(api "$OWNER" POST /sampah/kosongkan)
+cek "kosongkan → ok:true" "V == 1" "$(echo "$KOS91" | jq '(.ok==true) | if . then 1 else 0 end')"
+cek "kosongkan melaporkan jumlah dihapus (penjualan+faktur ≥ 1)" "V >= 1" \
+  "$(echo "$KOS91" | jq '(.penjualan + .faktur)')"
+cek "setelah kosongkan: Tempat Sampah KOSONG" "V == 0" "$(api "$OWNER" GET /sampah | jq 'length')"
+cek "kosongkan lagi (idempoten) → 0 dihapus" "V == 0" \
+  "$(api "$OWNER" POST /sampah/kosongkan | jq '(.penjualan + .faktur)')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

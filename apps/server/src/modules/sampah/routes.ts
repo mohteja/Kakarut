@@ -130,4 +130,52 @@ export const sampahRoutes = new Hono<AppEnv>()
       throw new HTTPException(404, { message: "Data tidak ditemukan" });
     }
     return c.json({ ok: true, jumlah_baris: rows.length });
+  })
+  /**
+   * KOSONGKAN Tempat Sampah: hapus PERMANEN semua transaksi yang sudah
+   * di-soft-delete (penjualan + faktur produksi/beli). Tidak bisa dipulihkan.
+   * Aman terhadap stok/laporan — baris ini memang sudah difilter keluar dari
+   * semua agregasi (deleted_at IS NOT NULL). Anak baris ikut terhapus:
+   * sale_items/sale_consumptions & production_consumptions lewat FK cascade;
+   * faktur_dana & faktur_logs (tanpa FK) dibersihkan manual utk faktur yang
+   * SELURUH barisnya ada di sampah.
+   */
+  .post("/kosongkan", async (c) => {
+    const companyId = c.get("auth").company_id!;
+    const hasil = await db.transaction(async (tx) => {
+      const [hitung] = (
+        await tx.execute(sql`
+          SELECT
+            (SELECT COUNT(*) FROM sales
+              WHERE company_id = ${companyId} AND deleted_at IS NOT NULL) AS penjualan,
+            (SELECT COUNT(DISTINCT COALESCE(faktur_id::text, id::text)) FROM productions
+              WHERE company_id = ${companyId} AND deleted_at IS NOT NULL) AS faktur
+        `)
+      ).rows as { penjualan: number; faktur: number }[];
+      // faktur yang SEMUA barisnya sudah di sampah → dana/log ikut dibersihkan
+      const fakturTerhapus = sql`(
+        SELECT faktur_id FROM productions
+        WHERE company_id = ${companyId} AND faktur_id IS NOT NULL
+        GROUP BY faktur_id
+        HAVING COUNT(*) FILTER (WHERE deleted_at IS NULL) = 0
+           AND COUNT(*) FILTER (WHERE deleted_at IS NOT NULL) > 0
+      )`;
+      await tx.execute(
+        sql`DELETE FROM faktur_logs WHERE company_id = ${companyId} AND faktur_id IN ${fakturTerhapus}`,
+      );
+      await tx.execute(
+        sql`DELETE FROM faktur_dana WHERE company_id = ${companyId} AND faktur_id IN ${fakturTerhapus}`,
+      );
+      await tx.execute(
+        sql`DELETE FROM productions WHERE company_id = ${companyId} AND deleted_at IS NOT NULL`,
+      );
+      await tx.execute(
+        sql`DELETE FROM sales WHERE company_id = ${companyId} AND deleted_at IS NOT NULL`,
+      );
+      return {
+        penjualan: Number(hitung?.penjualan ?? 0),
+        faktur: Number(hitung?.faktur ?? 0),
+      };
+    });
+    return c.json({ ok: true, ...hasil });
   });
