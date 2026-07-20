@@ -2742,6 +2742,9 @@ cek "set rak home bahan (PUT storage_location_id) → 200" "V == 200" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/bahan/$BH79" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"storage_location_id\":\"$RAK79\"}")"
 cek "GET bahan: storage_location_id tersimpan == RAK79" "V == 1" \
   "$(api "$OWNER" GET /bahan | jq --arg i "$BH79" --arg r "$RAK79" '([.[]|select(.id==$i)][0].storage_location_id==$r) | if . then 1 else 0 end')"
+# nama rak ikut di DTO daftar (agar tampil di kolom "Rak simpan" tanpa fetch lagi)
+cek "GET bahan: storage_location_nama = nama rak (Rak A uji79)" "V == 1" \
+  "$(api "$OWNER" GET /bahan | jq --arg i "$BH79" '([.[]|select(.id==$i)][0].storage_location_nama=="Rak A uji79") | if . then 1 else 0 end')"
 cek "rak home invalid (uuid asing) ditolak (400)" "V == 400" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/bahan/$BH79" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"storage_location_id":"00000000-0000-4000-8000-000000000000"}')"
 # beli faktur di CK utk BH79 → Tiba di CK (menunggu, items) → baris auto-file ke RAK79
@@ -3274,6 +3277,43 @@ cek "catat harga perlengkapan: harga_terkini jadi 2500" "V == 1" \
   "$(api "$OWNER" GET "/perlengkapan/$PL93_ID/pembelian" | jq '((.harga_terkini|round)==2500)|if . then 1 else 0 end')"
 cek "guard: kasir catat harga perlengkapan → 403" "V == 403" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/perlengkapan/$PL93_ID/harga" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d '{"harga_per_unit":1}')"
+
+echo "== 94. Rak default cabang: pilih bahan per rak + auto-file saat kiriman diterima =="
+# rak di cabang store CB46 (dibuat di §46)
+RC94=$(api "$OWNER" POST /penyimpanan "{\"branch_id\":\"$CB46_ID\",\"nama\":\"Rak Cabang Uji94\"}" | jq -r .id)
+RC94B=$(api "$OWNER" POST /penyimpanan "{\"branch_id\":\"$CB46_ID\",\"nama\":\"Rak Cabang Uji94 B\"}" | jq -r .id)
+BH94=$(api "$OWNER" POST /bahan '{"nama":"bahan rak cabang uji94","harga_beli":1000,"isi":1,"satuan":"pcs","pengadaan":"beli","kategori":"lain","track_stok":true}' | jq -r .id)
+cek "assign bahan ke rak cabang → ok" "V == 1" \
+  "$(api "$OWNER" PUT "/penyimpanan/$RC94/bahan" "{\"ingredient_ids\":[\"$BH94\"]}" | jq '(.ok==true)|if . then 1 else 0 end')"
+cek "GET rak/bahan: berisi BH94" "V == 1" \
+  "$(api "$OWNER" GET "/penyimpanan/$RC94/bahan" | jq --arg i "$BH94" '[.ingredient_ids[]|select(.==$i)]|length')"
+cek "daftar penyimpanan: jumlah_bahan RC94 = 1" "V == 1" \
+  "$(api "$OWNER" GET "/penyimpanan?branch_id=$CB46_ID" | jq --arg r "$RC94" '[.[]|select(.id==$r)][0].jumlah_bahan')"
+cek "guard: kasir assign bahan rak → 403" "V == 403" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/penyimpanan/$RC94/bahan" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d "{\"ingredient_ids\":[\"$BH94\"]}")"
+cek "guard: bahan asing (uuid acak) → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/penyimpanan/$RC94/bahan" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"ingredient_ids":["00000000-0000-0000-0000-000000000000"]}')"
+# 1 bahan = 1 rak per cabang: pindah ke RC94B → lepas dari RC94
+api "$OWNER" PUT "/penyimpanan/$RC94B/bahan" "{\"ingredient_ids\":[\"$BH94\"]}" > /dev/null
+cek "pindah rak: RC94 tak lagi berisi BH94" "V == 0" \
+  "$(api "$OWNER" GET "/penyimpanan/$RC94/bahan" | jq --arg i "$BH94" '[.ingredient_ids[]|select(.==$i)]|length')"
+cek "pindah rak: RC94B berisi BH94" "V == 1" \
+  "$(api "$OWNER" GET "/penyimpanan/$RC94B/bahan" | jq --arg i "$BH94" '[.ingredient_ids[]|select(.==$i)]|length')"
+# kembalikan ke RC94 utk uji auto-file
+api "$OWNER" PUT "/penyimpanan/$RC94/bahan" "{\"ingredient_ids\":[\"$BH94\"]}" > /dev/null
+# --- Auto-file: kirim BH94 ke CB46 TANPA gudang tujuan → diterima → rak default ---
+FKR94=$(api "$OWNER" POST /pembelian/faktur "{\"branch_id\":\"$PUSAT46_ID\",\"items\":[{\"ingredient_id\":\"$BH94\",\"mode\":\"pcs\",\"jumlah\":7,\"total_harga\":7000}]}")
+FKR94_ID=$(echo "$FKR94" | jq -r .faktur_id)
+api "$OWNER" POST "/pembelian/tahap/$FKR94_ID" '{"ke":"dikerjakan"}' > /dev/null
+RID94=$(api "$OWNER" GET "/pembelian?branch_id=$PUSAT46_ID&per_page=500" | jq -r --arg f "$FKR94_ID" '[.rows[]|select(.faktur_id==$f)][0].id')
+api "$OWNER" POST "/pembelian/tahap/$FKR94_ID" "{\"ke\":\"menunggu\",\"items\":[{\"id\":\"$RID94\",\"qty\":7}],\"tujuan_branch_id\":\"$CB46_ID\"}" > /dev/null
+cek "sebelum diterima: baris di CB46 tanpa tempat" "V == 1" \
+  "$(api "$OWNER" GET "/pembelian?branch_id=$CB46_ID&per_page=500" | jq --arg f "$FKR94_ID" '([.rows[]|select(.faktur_id==$f)][0].storage_location_id==null)|if . then 1 else 0 end')"
+api "$OWNER" POST "/penerimaan/$FKR94_ID/terima" > /dev/null
+cek "diterima di cabang → auto-file ke rak default RC94" "V == 1" \
+  "$(api "$OWNER" GET "/pembelian?branch_id=$CB46_ID&per_page=500" | jq --arg f "$FKR94_ID" --arg r "$RC94" '([.rows[]|select(.faktur_id==$f)][0].storage_location_id==$r)|if . then 1 else 0 end')"
+cek "auto-file: tempat baris = nama rak (Rak Cabang Uji94)" "V == 1" \
+  "$(api "$OWNER" GET "/pembelian?branch_id=$CB46_ID&per_page=500" | jq --arg f "$FKR94_ID" '([.rows[]|select(.faktur_id==$f)][0].tempat=="Rak Cabang Uji94")|if . then 1 else 0 end')"
 
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="

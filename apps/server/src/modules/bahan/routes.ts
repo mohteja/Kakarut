@@ -207,9 +207,19 @@ async function listSupplierBahan(
   }));
 }
 
+/** Peta id rak → nama (untuk menampilkan tempat penyimpanan di daftar bahan). */
+async function infoRak(companyId: string): Promise<Map<string, string>> {
+  const rows = await db
+    .select({ id: storageLocations.id, nama: storageLocations.nama })
+    .from(storageLocations)
+    .where(eq(storageLocations.companyId, companyId));
+  return new Map(rows.map((r) => [r.id, r.nama]));
+}
+
 function toDto(
   row: typeof ingredients.$inferSelect,
   sup?: { utama: string | null; jumlah: number },
+  rakNama?: string | null,
 ): BahanDto {
   return {
     id: row.id,
@@ -236,6 +246,7 @@ function toDto(
     supplier_utama: sup?.utama ?? null,
     jumlah_supplier: sup?.jumlah ?? 0,
     storage_location_id: row.storageLocationId,
+    storage_location_nama: rakNama ?? null,
   };
 }
 
@@ -327,8 +338,15 @@ export const bahanRoutes = new Hono<AppEnv>()
       .from(ingredients)
       .where(and(eq(ingredients.companyId, auth.company_id!), eq(ingredients.isActive, true)))
       .orderBy(asc(ingredients.nama));
-    const sup = await infoSupplier(auth.company_id!);
-    return c.json(rows.map((r) => toDto(r, sup.get(r.id))));
+    const [sup, rak] = await Promise.all([
+      infoSupplier(auth.company_id!),
+      infoRak(auth.company_id!),
+    ]);
+    return c.json(
+      rows.map((r) =>
+        toDto(r, sup.get(r.id), r.storageLocationId ? rak.get(r.storageLocationId) : null),
+      ),
+    );
   })
   .post("/", requireRole("owner", "admin"), zValidator("json", BahanBody), async (c) => {
     const auth = c.get("auth");

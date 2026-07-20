@@ -83,6 +83,8 @@ export interface BahanDto {
   jumlah_supplier: number;
   /** RAK SIMPAN default (home) di CK: barang tiba di CK otomatis diletakkan di sini */
   storage_location_id: string | null;
+  /** nama rak simpan default (null = tanpa tempat) — untuk ditampilkan di daftar */
+  storage_location_nama: string | null;
 }
 
 /** Mode impor CSV bahan baku. */
@@ -519,6 +521,8 @@ export interface PenyimpananDto {
    * opname di cabang). Terisi = terkunci hanya untuk mereka (owner/admin bebas).
    */
   petugas: PetugasRingkas[];
+  /** jumlah bahan baku yang ditugaskan disimpan di rak ini (rak default cabang) */
+  jumlah_bahan: number;
 }
 
 /**

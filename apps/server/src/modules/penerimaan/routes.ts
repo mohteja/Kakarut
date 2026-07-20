@@ -15,6 +15,7 @@ import {
 } from "../../db/schema";
 import { resolveBranchId, terikatCabang, type AppEnv } from "../../middleware/auth";
 import { catatLogFaktur } from "../produksi/log";
+import { autoFileRakCabang } from "../penyimpanan/autoFile";
 
 /**
  * Kiriman yang TIBA di sebuah cabang untuk diterima: faktur BELI (pemasok →
@@ -147,6 +148,8 @@ export const penerimaanRoutes = new Hono<AppEnv>()
     if (rows.length === 0) {
       throw new HTTPException(404, { message: "Kiriman tidak ditemukan atau bukan status dikirim" });
     }
+    // barang tiba di cabang → otomatis diletakkan di rak default bahannya
+    await autoFileRakCabang(auth.company_id!, rows.map((r) => r.id));
     await catatLogFaktur(db, {
       companyId: auth.company_id!,
       branchId: rows[0].branchId,
@@ -263,6 +266,11 @@ export const penerimaanRoutes = new Hono<AppEnv>()
         userId: auth.sub,
       });
     });
+    // baris yang diterima → auto-file ke rak default bahannya di cabang
+    await autoFileRakCabang(
+      auth.company_id!,
+      baris.filter((b) => terimaById.get(b.id)! > 0).map((b) => b.id),
+    );
     return c.json({ ok: true, jumlah_baris: baris.length });
   })
   /** Tolak seluruh kiriman (barang kurang/salah). */

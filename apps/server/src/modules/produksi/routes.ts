@@ -39,6 +39,7 @@ import {
 } from "../../middleware/auth";
 import { tanggalDi } from "../../lib/time";
 import { hitungSaldoCabang } from "../stok/service";
+import { autoFileRakCabang } from "../penyimpanan/autoFile";
 
 const pembuat = alias(users, "pembuat_prod");
 const pengubah = alias(users, "pengubah_prod");
@@ -1351,6 +1352,8 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
           message: "Faktur tidak ditemukan atau sudah dikonfirmasi",
         });
       }
+      // masuk stok cabang → otomatis diletakkan di rak default bahannya
+      await autoFileRakCabang(auth.company_id!, rows.map((r) => r.id));
       await catatLogFaktur(db, {
         companyId: auth.company_id!,
         branchId: rows[0].branchId,

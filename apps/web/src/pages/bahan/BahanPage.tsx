@@ -142,7 +142,7 @@ export function BahanPage() {
     setFilterKategori("semua");
   }
 
-  const kolom = bolehUbah ? 11 : 10;
+  const kolom = bolehUbah ? 15 : 14;
 
   return (
     <div>
@@ -308,9 +308,13 @@ export function BahanPage() {
               <th className={thClass}>Nama</th>
               <th className={thClass}>Kategori</th>
               <th className={thClass}>Jenis</th>
+              <th className={thClass}>Satuan beli</th>
               <th className={`${thClass} text-right`}>Harga Beli</th>
               <th className={`${thClass} text-right`}>Isi</th>
               <th className={`${thClass} text-right`}>Harga / Unit</th>
+              <th className={`${thClass} text-right`}>Stok min</th>
+              <th className={`${thClass} text-right`}>Min beli</th>
+              <th className={thClass}>Rak simpan</th>
               <th className={thClass}>Supplier</th>
               <th className={thClass}>Catatan</th>
               <th className={thClass}></th>
@@ -376,12 +380,44 @@ export function BahanPage() {
                     {b.pengadaan === "produksi" ? "Produksi sendiri" : "Beli jadi"}
                   </span>
                 </td>
+                <td className={`${tdClass} whitespace-nowrap text-stone-600`}>
+                  {b.satuan_beli ?? <span className="text-stone-300">—</span>}
+                </td>
                 <td className={`${tdClass} text-right`}>{formatRupiah(b.harga_beli)}</td>
                 <td className={`${tdClass} text-right`}>
                   {formatAngka(b.isi)} <span className="text-stone-400">{b.satuan}</span>
                 </td>
                 <td className={`${tdClass} text-right font-semibold`}>
                   {formatRupiah(b.harga_per_unit)}
+                </td>
+                <td className={`${tdClass} text-right text-stone-600`}>
+                  {!b.track_stok ? (
+                    <span className="text-stone-300" title="Stok tidak dilacak">
+                      —
+                    </span>
+                  ) : b.stok_minimum > 0 ? (
+                    <>
+                      {formatAngka(b.stok_minimum)} <span className="text-stone-400">{b.satuan}</span>
+                    </>
+                  ) : (
+                    <span className="text-stone-300">0</span>
+                  )}
+                </td>
+                <td className={`${tdClass} text-right text-stone-600`}>
+                  {b.pengadaan === "beli" && b.min_beli > 0 ? (
+                    <>
+                      {formatAngka(b.min_beli)} <span className="text-stone-400">{b.satuan}</span>
+                    </>
+                  ) : (
+                    <span className="text-stone-300">—</span>
+                  )}
+                </td>
+                <td className={`${tdClass} whitespace-nowrap text-stone-600`}>
+                  {b.storage_location_nama ? (
+                    <span title="Rak simpan default">🗄 {b.storage_location_nama}</span>
+                  ) : (
+                    <span className="text-stone-300">—</span>
+                  )}
                 </td>
                 <td className={`${tdClass} whitespace-nowrap`}>
                   {b.pengadaan === "produksi" ? (

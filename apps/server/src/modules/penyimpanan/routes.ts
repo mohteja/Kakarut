@@ -1,12 +1,14 @@
 import { zValidator } from "@hono/zod-validator";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import type { PenyimpananDto, PetugasRingkas } from "@kakarut/shared";
 import { db } from "../../db/client";
 import {
+  ingredients,
   memberships,
+  storageLocationIngredients,
   storageLocationPetugas,
   storageLocations,
   users,
@@ -29,6 +31,7 @@ const PenyimpananBody = z.object({
 function toDto(
   row: typeof storageLocations.$inferSelect,
   petugas: PetugasRingkas[] = [],
+  jumlahBahan = 0,
 ): PenyimpananDto {
   return {
     id: row.id,
@@ -37,7 +40,32 @@ function toDto(
     catatan: row.catatan,
     is_active: row.isActive,
     petugas,
+    jumlah_bahan: jumlahBahan,
   };
+}
+
+/** Jumlah bahan baku yang ditugaskan per tempat penyimpanan. */
+async function jumlahBahanByLokasi(
+  companyId: string,
+  locationIds: string[],
+): Promise<Map<string, number>> {
+  const map = new Map<string, number>();
+  if (locationIds.length === 0) return map;
+  const rows = await db
+    .select({
+      locId: storageLocationIngredients.storageLocationId,
+      n: sql<number>`COUNT(*)::int`,
+    })
+    .from(storageLocationIngredients)
+    .where(
+      and(
+        eq(storageLocationIngredients.companyId, companyId),
+        inArray(storageLocationIngredients.storageLocationId, locationIds),
+      ),
+    )
+    .groupBy(storageLocationIngredients.storageLocationId);
+  for (const r of rows) map.set(r.locId, r.n);
+  return map;
 }
 
 /** Petugas opname per tempat (untuk sekumpulan lokasi), digroup per lokasi. */
@@ -88,11 +116,14 @@ export const penyimpananRoutes = new Hono<AppEnv>()
         ),
       )
       .orderBy(asc(storageLocations.nama));
-    const byLoc = await petugasByLokasi(
-      auth.company_id!,
-      rows.map((r) => r.id),
+    const ids = rows.map((r) => r.id);
+    const [byLoc, byBahan] = await Promise.all([
+      petugasByLokasi(auth.company_id!, ids),
+      jumlahBahanByLokasi(auth.company_id!, ids),
+    ]);
+    return c.json(
+      rows.map((r) => toDto(r, byLoc.get(r.id) ?? [], byBahan.get(r.id) ?? 0)),
     );
-    return c.json(rows.map((r) => toDto(r, byLoc.get(r.id) ?? [])));
   })
   // POST boleh semua peran — dipakai quick-add saat mengisi faktur
   .post("/", zValidator("json", PenyimpananBody), async (c) => {
@@ -206,5 +237,115 @@ export const penyimpananRoutes = new Hono<AppEnv>()
       });
       const byLoc = await petugasByLokasi(auth.company_id!, [locId]);
       return c.json({ ok: true, petugas: byLoc.get(locId) ?? [] });
+    },
+  )
+  /**
+   * BAHAN BAKU yang ditugaskan disimpan di tempat (rak) ini — dipakai sebagai
+   * RAK DEFAULT saat kiriman dari CK diterima di cabang. Terbuka semua peran
+   * (dipakai tampilan/opname).
+   */
+  .get("/:id/bahan", async (c) => {
+    const auth = c.get("auth");
+    const locId = c.req.param("id");
+    const [loc] = await db
+      .select({ id: storageLocations.id })
+      .from(storageLocations)
+      .where(and(eq(storageLocations.id, locId), eq(storageLocations.companyId, auth.company_id!)));
+    if (!loc) throw new HTTPException(404, { message: "Tempat penyimpanan tidak ditemukan" });
+    const rows = await db
+      .select({ ingredientId: storageLocationIngredients.ingredientId })
+      .from(storageLocationIngredients)
+      .where(
+        and(
+          eq(storageLocationIngredients.companyId, auth.company_id!),
+          eq(storageLocationIngredients.storageLocationId, locId),
+        ),
+      );
+    return c.json({ ingredient_ids: rows.map((r) => r.ingredientId) });
+  })
+  /**
+   * Ganti seluruh daftar bahan baku yang disimpan di rak ini (owner/admin).
+   * Satu bahan maksimal di SATU rak per cabang: bahan yang ditugaskan ke sini
+   * otomatis dilepas dari rak lain di cabang yang sama.
+   */
+  .put(
+    "/:id/bahan",
+    requireRole("owner", "admin"),
+    zValidator("json", z.object({ ingredient_ids: z.array(z.string().uuid()).max(2000) })),
+    async (c) => {
+      const auth = c.get("auth");
+      const locId = c.req.param("id");
+      const { ingredient_ids } = c.req.valid("json");
+      const uniqueIds = [...new Set(ingredient_ids)];
+
+      const [loc] = await db
+        .select({ id: storageLocations.id, branchId: storageLocations.branchId })
+        .from(storageLocations)
+        .where(
+          and(eq(storageLocations.id, locId), eq(storageLocations.companyId, auth.company_id!)),
+        );
+      if (!loc) throw new HTTPException(404, { message: "Tempat penyimpanan tidak ditemukan" });
+
+      if (uniqueIds.length > 0) {
+        const valid = await db
+          .select({ id: ingredients.id })
+          .from(ingredients)
+          .where(
+            and(
+              eq(ingredients.companyId, auth.company_id!),
+              eq(ingredients.isActive, true),
+              inArray(ingredients.id, uniqueIds),
+            ),
+          );
+        if (valid.length !== uniqueIds.length) {
+          throw new HTTPException(400, { message: "Ada bahan yang tidak valid" });
+        }
+      }
+
+      // rak lain di cabang yang sama (untuk menjaga 1 bahan = 1 rak per cabang)
+      const rakCabang = await db
+        .select({ id: storageLocations.id })
+        .from(storageLocations)
+        .where(
+          and(
+            eq(storageLocations.companyId, auth.company_id!),
+            eq(storageLocations.branchId, loc.branchId),
+          ),
+        );
+      const rakLainIds = rakCabang.map((r) => r.id).filter((id) => id !== locId);
+
+      await db.transaction(async (tx) => {
+        // ganti isi rak ini
+        await tx
+          .delete(storageLocationIngredients)
+          .where(
+            and(
+              eq(storageLocationIngredients.companyId, auth.company_id!),
+              eq(storageLocationIngredients.storageLocationId, locId),
+            ),
+          );
+        // lepas bahan yang dipindah ke sini dari rak lain di cabang yang sama
+        if (uniqueIds.length > 0 && rakLainIds.length > 0) {
+          await tx
+            .delete(storageLocationIngredients)
+            .where(
+              and(
+                eq(storageLocationIngredients.companyId, auth.company_id!),
+                inArray(storageLocationIngredients.storageLocationId, rakLainIds),
+                inArray(storageLocationIngredients.ingredientId, uniqueIds),
+              ),
+            );
+        }
+        if (uniqueIds.length > 0) {
+          await tx.insert(storageLocationIngredients).values(
+            uniqueIds.map((ingredientId) => ({
+              companyId: auth.company_id!,
+              storageLocationId: locId,
+              ingredientId,
+            })),
+          );
+        }
+      });
+      return c.json({ ok: true, jumlah: uniqueIds.length });
     },
   );
