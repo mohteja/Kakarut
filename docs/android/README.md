@@ -1,5 +1,15 @@
 # 📱 Kakarut POS — Aplikasi Android
 
+> ⚠️ **USANG / TIDAK DIPAKAI LAGI (deprecated).** Dokumen di folder `docs/android/`
+> ini menjelaskan rencana **Capacitor (WebView)**. Arah aplikasi mobile sekarang
+> **Flutter (native)** — dikerjakan di repo terpisah `kakarut-mobile` dan bicara
+> **langsung ke API server**, bukan membungkus web di WebView. Isi folder ini
+> disimpan sebagai arsip saja. **Acuan untuk tim mobile: `docs/API-CONTRACT.md`**
+> (kontrak API: auth, endpoint, DTO).
+
+---
+
+
 Dokumen ini menjelaskan rencana & cara membuat **aplikasi Android** Kakarut POS,
 supaya **printer thermal Bluetooth lebih mudah** (langsung tersambung, tanpa
 aplikasi RawBT pihak ketiga) dan **kasir lebih nyaman** (ikon di layar utama,

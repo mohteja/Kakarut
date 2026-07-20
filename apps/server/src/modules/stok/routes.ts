@@ -646,6 +646,7 @@ export const stokRoutes = new Hono<AppEnv>()
     const auth = c.get("auth");
     const rows = await db
       .select({
+        id: stockOpnames.id,
         nama: ingredients.nama,
         satuan: ingredients.satuan,
         system_qty: stockOpnames.systemQty,
@@ -658,6 +659,7 @@ export const stokRoutes = new Hono<AppEnv>()
         disetujui_by: stockOpnames.disetujuiBy,
         foto_url: stockOpnames.klarifikasiFotoUrl,
         alasan: stockOpnames.klarifikasiCatatan,
+        tolak_alasan: stockOpnames.tolakAlasan,
       })
       .from(stockOpnames)
       .innerJoin(ingredients, eq(stockOpnames.ingredientId, ingredients.id))
@@ -699,13 +701,16 @@ export const stokRoutes = new Hono<AppEnv>()
       status: statusSesi(agg),
       ditinjau_oleh: ditinjau[0]?.nama ?? null,
       items: rows.map((r) => ({
+        id: r.id,
         nama: r.nama,
         satuan: r.satuan,
         system_qty: r.system_qty,
         qty_fisik: r.qty_fisik,
         selisih: r.selisih,
+        penyesuaian_status: r.penyesuaian_status,
         foto_url: r.foto_url,
         alasan: r.alasan,
+        tolak_alasan: r.tolak_alasan,
       })),
     });
   })
@@ -717,6 +722,12 @@ export const stokRoutes = new Hono<AppEnv>()
   .post("/opname/sesi/:sessionId/acc", requireRole("owner", "admin"), async (c) => {
     const auth = c.get("auth");
     const sessionId = c.req.param("sessionId");
+    // Body opsional { ids?: string[] }. Parse toleran: banyak pemanggil (verify,
+    // tombol "ACC semua") POST tanpa body.
+    const body = (await c.req.json().catch(() => ({}))) as { ids?: unknown };
+    const ids = Array.isArray(body?.ids)
+      ? body.ids.filter((x): x is string => typeof x === "string")
+      : [];
     const [ada] = await db
       .select({ id: stockOpnames.id })
       .from(stockOpnames)
@@ -725,6 +736,22 @@ export const stokRoutes = new Hono<AppEnv>()
       )
       .limit(1);
     if (!ada) throw new HTTPException(404, { message: "Sesi opname tidak ditemukan" });
+    // Per produk (ids diberikan): ACC baris itu saja, tanpa syarat status (boleh
+    // membalik baris yang tadinya ditolak), dibatasi ke baris berselisih. Tanpa
+    // ids: ACC semua baris berselisih yang masih 'menunggu' (perilaku lama).
+    const filter =
+      ids.length > 0
+        ? and(
+            eq(stockOpnames.companyId, auth.company_id!),
+            eq(stockOpnames.sessionId, sessionId),
+            inArray(stockOpnames.id, ids),
+            sql`abs(coalesce(${stockOpnames.selisih}, 0)) > 1e-9`,
+          )
+        : and(
+            eq(stockOpnames.companyId, auth.company_id!),
+            eq(stockOpnames.sessionId, sessionId),
+            eq(stockOpnames.penyesuaianStatus, "menunggu"),
+          );
     const updated = await db
       .update(stockOpnames)
       .set({
@@ -734,13 +761,7 @@ export const stokRoutes = new Hono<AppEnv>()
         disetujuiAt: new Date(),
         tolakAlasan: null,
       })
-      .where(
-        and(
-          eq(stockOpnames.companyId, auth.company_id!),
-          eq(stockOpnames.sessionId, sessionId),
-          eq(stockOpnames.penyesuaianStatus, "menunggu"),
-        ),
-      )
+      .where(filter)
       .returning({ id: stockOpnames.id });
     return c.json({ ok: true, jumlah: updated.length });
   })
@@ -751,11 +772,18 @@ export const stokRoutes = new Hono<AppEnv>()
   .post(
     "/opname/sesi/:sessionId/tolak",
     requireRole("owner", "admin"),
-    zValidator("json", z.object({ alasan: z.string().nullish() })),
+    zValidator(
+      "json",
+      z.object({
+        alasan: z.string().nullish(),
+        ids: z.array(z.string().uuid()).optional(),
+      }),
+    ),
     async (c) => {
       const auth = c.get("auth");
       const sessionId = c.req.param("sessionId");
       const body = c.req.valid("json");
+      const ids = body.ids ?? [];
       const [ada] = await db
         .select({ id: stockOpnames.id })
         .from(stockOpnames)
@@ -764,6 +792,22 @@ export const stokRoutes = new Hono<AppEnv>()
         )
         .limit(1);
       if (!ada) throw new HTTPException(404, { message: "Sesi opname tidak ditemukan" });
+      // Per produk (ids diberikan): Tolak baris itu saja, tanpa syarat status
+      // (boleh membalik baris yang tadinya disetujui), dibatasi ke baris
+      // berselisih. Tanpa ids: Tolak semua baris berselisih yang masih 'menunggu'.
+      const filter =
+        ids.length > 0
+          ? and(
+              eq(stockOpnames.companyId, auth.company_id!),
+              eq(stockOpnames.sessionId, sessionId),
+              inArray(stockOpnames.id, ids),
+              sql`abs(coalesce(${stockOpnames.selisih}, 0)) > 1e-9`,
+            )
+          : and(
+              eq(stockOpnames.companyId, auth.company_id!),
+              eq(stockOpnames.sessionId, sessionId),
+              eq(stockOpnames.penyesuaianStatus, "menunggu"),
+            );
       const updated = await db
         .update(stockOpnames)
         .set({
@@ -773,13 +817,7 @@ export const stokRoutes = new Hono<AppEnv>()
           disetujuiBy: auth.sub,
           disetujuiAt: new Date(),
         })
-        .where(
-          and(
-            eq(stockOpnames.companyId, auth.company_id!),
-            eq(stockOpnames.sessionId, sessionId),
-            eq(stockOpnames.penyesuaianStatus, "menunggu"),
-          ),
-        )
+        .where(filter)
         .returning({ id: stockOpnames.id });
       return c.json({ ok: true, jumlah: updated.length });
     },

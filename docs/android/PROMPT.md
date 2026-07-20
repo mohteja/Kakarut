@@ -1,3 +1,10 @@
+> ⚠️ **USANG / TIDAK DIPAKAI LAGI (deprecated).** Rencana ini memakai
+> **Capacitor (WebView)**. Arah aplikasi mobile sekarang **Flutter (native)** di
+> repo terpisah `kakarut-mobile`, yang bicara langsung ke API server — **bukan**
+> membungkus web di WebView. Dokumen ini disimpan hanya sebagai arsip; jangan
+> dijadikan acuan. Untuk tim mobile Flutter, pakai **kontrak API** di
+> `docs/API-CONTRACT.md`.
+
 # Prompt: Bangun Aplikasi Android Kakarut POS (Capacitor + Printer Bluetooth Native)
 
 > Salin SELURUH isi di bawah garis ini, lalu tempel ke sesi Claude Code di

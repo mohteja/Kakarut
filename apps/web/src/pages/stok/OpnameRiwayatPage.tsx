@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import type {
   OpnamePerlengkapanDetail,
@@ -36,6 +36,19 @@ function StatusBadge({ status, jumlahSelisih }: { status: OpnameSesiStatus; juml
   );
 }
 
+/** Badge status ACC per BARIS opname (per produk). */
+function BarisStatusBadge({ status }: { status: PenyesuaianStatus }) {
+  const map: Record<PenyesuaianStatus, { teks: string; kelas: string }> = {
+    menunggu: { teks: "Menunggu ACC", kelas: "bg-yellow-100 text-yellow-800" },
+    disetujui: { teks: "Disetujui ✓", kelas: "bg-green-100 text-green-800" },
+    ditolak: { teks: "Ditolak ✕", kelas: "bg-red-100 text-red-700" },
+  };
+  const b = map[status];
+  return (
+    <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${b.kelas}`}>{b.teks}</span>
+  );
+}
+
 function DetailSheet({ sessionId, onClose }: { sessionId: string; onClose: () => void }) {
   const queryClient = useQueryClient();
   const { auth } = useAuth();
@@ -45,29 +58,31 @@ function DetailSheet({ sessionId, onClose }: { sessionId: string; onClose: () =>
     queryFn: () => api<OpnameSesiDetail>(`/stok/opname/sesi/${sessionId}`),
   });
 
-  // Setelah ACC/tolak/hapus: segarkan riwayat + stok + kartu + penyesuaian.
+  // Setelah ACC/tolak/hapus: segarkan riwayat + stok + kartu + detail sesi ini.
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["opname-riwayat"] });
     queryClient.invalidateQueries({ queryKey: ["opname-sesi", sessionId] });
     queryClient.invalidateQueries({ queryKey: ["stok"] });
     queryClient.invalidateQueries({ queryKey: ["kartu-stok"] });
-    queryClient.invalidateQueries({ queryKey: ["penyesuaian"] });
   };
 
+  // ACC/Tolak menerima daftar id baris. Kosong = semua sisa (bulk). Modal TETAP
+  // terbuka agar owner/admin bisa ACC sebagian & Tolak sebagian dalam satu sesi.
   const acc = useMutation({
-    mutationFn: () => api(`/stok/opname/sesi/${sessionId}/acc`, { method: "POST", body: {} }),
-    onSuccess: () => {
-      invalidate();
-      onClose();
-    },
+    mutationFn: (ids?: string[]) =>
+      api(`/stok/opname/sesi/${sessionId}/acc`, {
+        method: "POST",
+        body: ids && ids.length ? { ids } : {},
+      }),
+    onSuccess: invalidate,
   });
   const tolak = useMutation({
-    mutationFn: (alasan: string | null) =>
-      api(`/stok/opname/sesi/${sessionId}/tolak`, { method: "POST", body: { alasan } }),
-    onSuccess: () => {
-      invalidate();
-      onClose();
-    },
+    mutationFn: (arg: { ids?: string[]; alasan: string | null }) =>
+      api(`/stok/opname/sesi/${sessionId}/tolak`, {
+        method: "POST",
+        body: { ...(arg.ids && arg.ids.length ? { ids: arg.ids } : {}), alasan: arg.alasan },
+      }),
+    onSuccess: invalidate,
   });
   const hapus = useMutation({
     mutationFn: () => api(`/stok/opname/sesi/${sessionId}`, { method: "DELETE" }),
@@ -77,6 +92,10 @@ function DetailSheet({ sessionId, onClose }: { sessionId: string; onClose: () =>
     },
   });
   const sibuk = acc.isPending || tolak.isPending || hapus.isPending;
+
+  const sisaMenunggu =
+    data?.items.filter((i) => Math.abs(i.selisih ?? 0) > 1e-9 && i.penyesuaian_status === "menunggu")
+      .length ?? 0;
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40" onClick={onClose}>
@@ -109,21 +128,10 @@ function DetailSheet({ sessionId, onClose }: { sessionId: string; onClose: () =>
                 jumlahSelisih={data.items.filter((i) => Math.abs(i.selisih ?? 0) > 1e-9).length}
               />
             </div>
-            {data.status === "menunggu" && (
+            {bolehUbah && sisaMenunggu > 0 && (
               <div className="mb-3 rounded-lg bg-yellow-50 px-3 py-2 text-sm text-yellow-800">
-                Stok <b>belum berubah</b>. Owner/admin meng-<b>ACC</b> agar selisih diterapkan ke
-                stok, atau <b>Tolak</b> untuk membuang hitungan ini.
-              </div>
-            )}
-            {data.status === "disetujui" && data.ditinjau_oleh && (
-              <div className="mb-3 rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-800">
-                Disetujui oleh <b>{data.ditinjau_oleh}</b> — stok sudah disesuaikan.
-              </div>
-            )}
-            {data.status === "ditolak" && (
-              <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
-                Ditolak{data.ditinjau_oleh ? ` oleh ${data.ditinjau_oleh}` : ""} — stok tidak
-                berubah.
+                <b>ACC per produk</b>: setujui yang benar, tolak yang meragukan. Hanya baris yang
+                di-<b>ACC</b> yang diterapkan ke stok.
               </div>
             )}
             <table className="w-full text-sm">
@@ -137,75 +145,115 @@ function DetailSheet({ sessionId, onClose }: { sessionId: string; onClose: () =>
                 </tr>
               </thead>
               <tbody className="divide-y divide-stone-100">
-                {data.items.map((it, i) => {
+                {data.items.map((it) => {
                   const sel = it.selisih ?? 0;
                   const adaSelisih = Math.abs(sel) >= 1e-9;
                   return (
-                    <tr key={i}>
-                      <td className="py-1.5 pr-2">
-                        {it.nama} <span className="text-stone-400">{it.satuan}</span>
-                        {it.alasan && (
-                          <div className="text-xs italic text-stone-500">“{it.alasan}”</div>
-                        )}
-                      </td>
-                      <td className="py-1.5 text-right text-stone-500">
-                        {it.system_qty != null ? formatAngka(it.system_qty) : "—"}
-                      </td>
-                      <td className="py-1.5 text-right font-medium">{formatAngka(it.qty_fisik)}</td>
-                      <td
-                        className={`py-1.5 text-right font-semibold ${
-                          !adaSelisih
-                            ? "text-green-600"
-                            : sel > 0
-                              ? "text-yellow-700"
-                              : "text-red-600"
-                        }`}
-                      >
-                        {!adaSelisih ? "0" : `${sel > 0 ? "+" : ""}${formatAngka(sel)}`}
-                      </td>
-                      <td className="py-1.5 text-center">
-                        {it.foto_url ? (
-                          <a href={it.foto_url} target="_blank" rel="noreferrer" title="Lihat bukti foto">
-                            <img
-                              src={it.foto_url}
-                              alt="bukti"
-                              className="mx-auto h-8 w-8 rounded object-cover ring-1 ring-stone-200"
-                            />
-                          </a>
-                        ) : adaSelisih ? (
-                          <span className="text-xs text-stone-300">—</span>
-                        ) : null}
-                      </td>
-                    </tr>
+                    <Fragment key={it.id}>
+                      <tr>
+                        <td className="py-1.5 pr-2">
+                          {it.nama} <span className="text-stone-400">{it.satuan}</span>
+                          {it.alasan && (
+                            <div className="text-xs italic text-stone-500">“{it.alasan}”</div>
+                          )}
+                        </td>
+                        <td className="py-1.5 text-right text-stone-500">
+                          {it.system_qty != null ? formatAngka(it.system_qty) : "—"}
+                        </td>
+                        <td className="py-1.5 text-right font-medium">{formatAngka(it.qty_fisik)}</td>
+                        <td
+                          className={`py-1.5 text-right font-semibold ${
+                            !adaSelisih
+                              ? "text-green-600"
+                              : sel > 0
+                                ? "text-yellow-700"
+                                : "text-red-600"
+                          }`}
+                        >
+                          {!adaSelisih ? "0" : `${sel > 0 ? "+" : ""}${formatAngka(sel)}`}
+                        </td>
+                        <td className="py-1.5 text-center">
+                          {it.foto_url ? (
+                            <a href={it.foto_url} target="_blank" rel="noreferrer" title="Lihat bukti foto">
+                              <img
+                                src={it.foto_url}
+                                alt="bukti"
+                                className="mx-auto h-8 w-8 rounded object-cover ring-1 ring-stone-200"
+                              />
+                            </a>
+                          ) : adaSelisih ? (
+                            <span className="text-xs text-stone-300">—</span>
+                          ) : null}
+                        </td>
+                      </tr>
+                      {/* Baris aksi per produk — hanya bila ada selisih */}
+                      {adaSelisih && (
+                        <tr>
+                          <td colSpan={5} className="pb-2.5">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <BarisStatusBadge status={it.penyesuaian_status} />
+                              {it.penyesuaian_status === "ditolak" && it.tolak_alasan && (
+                                <span className="text-xs italic text-red-500">
+                                  “{it.tolak_alasan}”
+                                </span>
+                              )}
+                              {bolehUbah && (
+                                <div className="ml-auto flex gap-1.5">
+                                  <button
+                                    onClick={() => acc.mutate([it.id])}
+                                    disabled={sibuk || it.penyesuaian_status === "disetujui"}
+                                    className={`rounded-md px-2.5 py-1 text-xs font-semibold disabled:opacity-50 ${
+                                      it.penyesuaian_status === "disetujui"
+                                        ? "bg-green-600 text-white"
+                                        : "border border-green-300 text-green-700 hover:bg-green-50"
+                                    }`}
+                                  >
+                                    ✅ ACC
+                                  </button>
+                                  <button
+                                    onClick={() => tolak.mutate({ ids: [it.id], alasan: null })}
+                                    disabled={sibuk || it.penyesuaian_status === "ditolak"}
+                                    className={`rounded-md px-2.5 py-1 text-xs font-semibold disabled:opacity-50 ${
+                                      it.penyesuaian_status === "ditolak"
+                                        ? "bg-red-600 text-white"
+                                        : "border border-red-300 text-red-600 hover:bg-red-50"
+                                    }`}
+                                  >
+                                    ❌ Tolak
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   );
                 })}
               </tbody>
             </table>
 
-            {/* Aksi ACC/Tolak/Hapus — HANYA owner/admin */}
+            {/* Aksi massal + Hapus — HANYA owner/admin */}
             {bolehUbah && (
               <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-stone-200 pt-4">
-                {data.status === "menunggu" && (
+                {sisaMenunggu > 0 && (
                   <>
                     <button
-                      onClick={() => {
-                        if (window.confirm("Setujui opname ini? Stok akan disesuaikan ke hitungan fisik."))
-                          acc.mutate();
-                      }}
+                      onClick={() => acc.mutate(undefined)}
                       disabled={sibuk}
                       className="flex-1 rounded-lg bg-green-600 px-3 py-2 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-50"
                     >
-                      ✅ ACC — terapkan ke stok
+                      ✅ ACC semua sisa ({sisaMenunggu})
                     </button>
                     <button
                       onClick={() => {
-                        const alasan = window.prompt("Tolak opname ini? (alasan opsional)", "");
-                        if (alasan !== null) tolak.mutate(alasan.trim() || null);
+                        const alasan = window.prompt("Tolak semua sisa? (alasan opsional)", "");
+                        if (alasan !== null) tolak.mutate({ ids: undefined, alasan: alasan.trim() || null });
                       }}
                       disabled={sibuk}
                       className="rounded-lg border border-red-300 px-3 py-2 text-sm font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50"
                     >
-                      ❌ Tolak
+                      ❌ Tolak sisa
                     </button>
                   </>
                 )}

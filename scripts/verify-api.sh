@@ -414,6 +414,60 @@ api "$OWNER" DELETE "/stok/opname/sesi/$SESI_ACC" > /dev/null
 cek "hapus sesi disetujui: saldo balik ke fisik2 (sebelum ACC)" "abs(V - $FISIK2) < 0.001" \
   "$(stok_of "$(api "$OWNER" GET /stok)" "plastik take away")"
 
+echo "== 15d. Opname: ACC / Tolak PER PRODUK dalam satu sesi (owner) =="
+# dua bahan tracked dalam satu sesi: plastik (selisih +5) & sukro (selisih +3)
+PP0=$(stok_of "$(api "$OWNER" GET /stok)" "plastik take away")
+SS0=$(stok_of "$(api "$OWNER" GET /stok)" "sukro cikur")
+PP_FISIK=$(python3 -c "print($PP0 + 5)")
+SS_FISIK=$(python3 -c "print($SS0 + 3)")
+SESI_PP=$(api "$OWNER" POST /stok/opname "{\"catatan\":\"per-produk\",\"items\":[{\"ingredient_id\":\"$PLASTIK_ID\",\"qty\":$PP_FISIK},{\"ingredient_id\":\"$SUKRO_ID\",\"qty\":$SS_FISIK}]}" | jq -r .session_id)
+DPP=$(api "$OWNER" GET "/stok/opname/sesi/$SESI_PP")
+# id baris dikenali dari nilai selisihnya (5 vs 3)
+PP_ROW=$(echo "$DPP" | jq -r '[.items[]|select(.selisih == 5)][0].id')
+SS_ROW=$(echo "$DPP" | jq -r '[.items[]|select(.selisih == 3)][0].id')
+cek "detail per-produk: tiap baris punya id" "V == 2" \
+  "$(echo "$DPP" | jq '[.items[]|select(.id != null)]|length')"
+cek "detail per-produk: plastik & sukro sama-sama 'menunggu'" "V == 2" \
+  "$(echo "$DPP" | jq '[.items[]|select(.penyesuaian_status=="menunggu")]|length')"
+# kasir tak boleh ACC per-produk
+cek "kasir ACC per-produk ditolak (403)" "V == 403" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/stok/opname/sesi/$SESI_PP/acc" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d "{\"ids\":[\"$PP_ROW\"]}")"
+# ACC hanya baris plastik
+cek "owner ACC plastik saja → jumlah 1" "V == 1" \
+  "$(api "$OWNER" POST "/stok/opname/sesi/$SESI_PP/acc" "{\"ids\":[\"$PP_ROW\"]}" | jq '.jumlah')"
+cek "ACC per-produk: saldo plastik jadi fisik (+5)" "abs(V - $PP_FISIK) < 0.001" \
+  "$(stok_of "$(api "$OWNER" GET /stok)" "plastik take away")"
+cek "ACC per-produk: saldo sukro BELUM berubah" "abs(V - $SS0) < 0.001" \
+  "$(stok_of "$(api "$OWNER" GET /stok)" "sukro cikur")"
+DPP=$(api "$OWNER" GET "/stok/opname/sesi/$SESI_PP")
+cek "detail: baris plastik jadi 'disetujui'" "V == 1" \
+  "$(echo "$DPP" | jq --arg p "$PP_ROW" '[.items[]|select(.id==$p and .penyesuaian_status=="disetujui")]|length')"
+cek "detail: baris sukro masih 'menunggu'" "V == 1" \
+  "$(echo "$DPP" | jq --arg s "$SS_ROW" '[.items[]|select(.id==$s and .penyesuaian_status=="menunggu")]|length')"
+ST=$(api "$OWNER" GET /stok/opname/riwayat | jq -r --arg s "$SESI_PP" '[.[]|select(.session_id==$s)][0].status')
+[ "$ST" = "menunggu" ] && ok "status sesi tetap 'menunggu' (sukro belum diputus)" || gagal "status sesi = $ST (harus menunggu)"
+# Tolak hanya baris sukro
+cek "owner Tolak sukro saja → jumlah 1" "V == 1" \
+  "$(api "$OWNER" POST "/stok/opname/sesi/$SESI_PP/tolak" "{\"ids\":[\"$SS_ROW\"],\"alasan\":\"stok fisik salah\"}" | jq '.jumlah')"
+cek "Tolak per-produk: saldo sukro tetap (dibuang)" "abs(V - $SS0) < 0.001" \
+  "$(stok_of "$(api "$OWNER" GET /stok)" "sukro cikur")"
+DPP=$(api "$OWNER" GET "/stok/opname/sesi/$SESI_PP")
+cek "detail: baris sukro 'ditolak' + alasan tersimpan" "V == 1" \
+  "$(echo "$DPP" | jq --arg s "$SS_ROW" '[.items[]|select(.id==$s and .penyesuaian_status=="ditolak" and .tolak_alasan=="stok fisik salah")]|length')"
+ST=$(api "$OWNER" GET /stok/opname/riwayat | jq -r --arg s "$SESI_PP" '[.[]|select(.session_id==$s)][0].status')
+[ "$ST" = "disetujui" ] && ok "status sesi jadi 'disetujui' (sebagian di-ACC, sisa ditolak)" || gagal "status sesi = $ST (harus disetujui)"
+# Flip: ACC ulang baris sukro yang tadi ditolak (status-agnostic)
+cek "owner ACC ulang sukro (balik dari ditolak) → jumlah 1" "V == 1" \
+  "$(api "$OWNER" POST "/stok/opname/sesi/$SESI_PP/acc" "{\"ids\":[\"$SS_ROW\"]}" | jq '.jumlah')"
+cek "flip: saldo sukro jadi fisik (+3)" "abs(V - $SS_FISIK) < 0.001" \
+  "$(stok_of "$(api "$OWNER" GET /stok)" "sukro cikur")"
+# Bersihkan: hapus sesi → saldo kembali seperti semula
+api "$OWNER" DELETE "/stok/opname/sesi/$SESI_PP" > /dev/null
+cek "hapus sesi per-produk: saldo plastik balik" "abs(V - $PP0) < 0.001" \
+  "$(stok_of "$(api "$OWNER" GET /stok)" "plastik take away")"
+cek "hapus sesi per-produk: saldo sukro balik" "abs(V - $SS0) < 0.001" \
+  "$(stok_of "$(api "$OWNER" GET /stok)" "sukro cikur")"
+
 echo "== 16. Petugas opname per tempat penyimpanan =="
 RAK_ID=$(api "$OWNER" GET "/penyimpanan" | jq -r '[.[] | select(.nama == "Rak Uji")][0].id')
 KASIR_UID=$(api "$OWNER" GET /karyawan | jq -r '[.[] | select(.role == "cashier")][0].user_id')
