@@ -1,6 +1,22 @@
+import { useState } from "react";
 import { Modal, btnPrimary, btnSecondary } from "../../components/ui";
 import { formatAngka, formatRupiah, formatTanggalRingkas, formatWaktu } from "../../lib/format";
+import { unduhPdf } from "../../lib/pdf";
 import { badgeFaktur, labelTahapRingkas, type FakturGroup, type StokMasukRow } from "./TambahStokPage";
+
+/** Stylesheet dokumen — DI-SCOPE ke `.dok` agar aman dipakai saat buat PDF. */
+const DOK_CSS = `.dok{font-family:system-ui,-apple-system,Arial,sans-serif;color:#111;max-width:640px;margin:0 auto;padding:0 4px;font-size:13px;line-height:1.45;background:#fff}
+.dok h1{font-size:18px;margin:0 0 2px}
+.dok .muted{color:#555;font-size:12px}
+.dok table{width:100%;border-collapse:collapse;margin:2px 0 4px}
+.dok td{padding:4px 6px;border-bottom:1px solid #e5e5e5;vertical-align:top}
+.dok td.r{text-align:right;white-space:nowrap}
+.dok .supplier{font-weight:700;margin-top:12px}
+.dok .head{border-bottom:1px solid #111;padding-bottom:6px;margin-bottom:6px}
+.dok .tag{border:1px solid #111;border-radius:3px;padding:0 4px;font-size:10px;font-weight:700;white-space:nowrap}
+.dok .tot{border-top:2px solid #111;margin-top:10px;padding-top:6px}.dok .tot>div{display:flex;justify-content:space-between}
+.dok .tujuan{border:2px solid #111;border-radius:6px;padding:6px 10px;font-weight:700;margin-top:8px}
+.dok .sign{display:flex;justify-content:space-between;margin-top:48px;font-size:12px;text-align:center;gap:24px}.dok .sign .ln{margin-top:44px;border-top:1px solid #111;padding-top:2px}`;
 
 /** Kelompokkan baris belanja per SUPPLIER (rute belanja: satu toko satu daftar). */
 function perSupplier(rows: StokMasukRow[]) {
@@ -207,7 +223,7 @@ export function DokumenBelanjaModal({
       /[&<>"]/g,
       (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c] ?? c,
     );
-  const buildHtml = () => {
+  const buildBody = () => {
     const tujuanBlok = grup.tujuanCabang
       ? `<div class="tujuan">📦 Barang untuk: → ${esc(grup.tujuanCabang)}${
           campuran
@@ -237,8 +253,10 @@ export function DokumenBelanjaModal({
       Math.abs(sisa) >= 0.5
         ? `<div class="muted" style="display:flex;justify-content:space-between"><span>${sisa > 0 ? "Kekurangan dari RAB" : "Kelebihan dana"}</span><span>${esc(formatRupiah(Math.abs(sisa)))}</span></div>`
         : "";
-    return `<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(judul)}${grup.noFaktur ? " " + esc(grup.noFaktur) : ""}</title><style>body{font-family:system-ui,-apple-system,Arial,sans-serif;color:#111;max-width:640px;margin:24px auto;padding:0 16px;font-size:13px;line-height:1.45}h1{font-size:18px;margin:0 0 2px}.muted{color:#555;font-size:12px}table{width:100%;border-collapse:collapse;margin:2px 0 4px}td{padding:4px 6px;border-bottom:1px solid #e5e5e5;vertical-align:top}td.r{text-align:right;white-space:nowrap}.supplier{font-weight:700;margin-top:12px}.head{border-bottom:1px solid #111;padding-bottom:6px;margin-bottom:6px}.tag{border:1px solid #111;border-radius:3px;padding:0 4px;font-size:10px;font-weight:700;white-space:nowrap}.tot{border-top:2px solid #111;margin-top:10px;padding-top:6px}.tot>div{display:flex;justify-content:space-between}.tujuan{border:2px solid #111;border-radius:6px;padding:6px 10px;font-weight:700;margin-top:8px}.sign{display:flex;justify-content:space-between;margin-top:48px;font-size:12px;text-align:center;gap:24px}.sign .ln{margin-top:44px;border-top:1px solid #111;padding-top:2px}@media print{body{margin:0}}</style></head><body><div class="head"><h1>🧾 ${esc(judul)}</h1><div class="muted">${grup.noFaktur ? esc(grup.noFaktur) + " · " : ""}${esc(formatTanggalRingkas(grup.waktu))} · ${esc(formatWaktu(grup.waktu))} · ${esc(badge.label)}</div><div class="muted">${grup.cabang ? "🏪 " + esc(grup.cabang) : ""}${grup.dikerjakanOleh ? " · 🔧 pembelanja: " + esc(grup.dikerjakanOleh) : ""}${grup.catatan ? " · 📝 " + esc(grup.catatan) : ""}</div>${tujuanBlok}</div>${tabel}<div class="tot"><div><span>Total est. RAB</span><b>${esc(formatRupiah(totalRab))}</b></div><div><span>💸 Dana cair</span><b>${esc(formatRupiah(grup.danaCair))}</b></div>${sisaBlok}</div><div class="sign"><div>Pembelanja<div class="ln">( ${esc(grup.dikerjakanOleh ?? "…………")} )</div></div><div>Penerima<div class="ln">( ………… )</div></div></div></body></html>`;
+    return `<div class="dok"><div class="head"><h1>🧾 ${esc(judul)}</h1><div class="muted">${grup.noFaktur ? esc(grup.noFaktur) + " · " : ""}${esc(formatTanggalRingkas(grup.waktu))} · ${esc(formatWaktu(grup.waktu))} · ${esc(badge.label)}</div><div class="muted">${grup.cabang ? "🏪 " + esc(grup.cabang) : ""}${grup.dikerjakanOleh ? " · 🔧 pembelanja: " + esc(grup.dikerjakanOleh) : ""}${grup.catatan ? " · 📝 " + esc(grup.catatan) : ""}</div>${tujuanBlok}</div>${tabel}<div class="tot"><div><span>Total est. RAB</span><b>${esc(formatRupiah(totalRab))}</b></div><div><span>💸 Dana cair</span><b>${esc(formatRupiah(grup.danaCair))}</b></div>${sisaBlok}</div><div class="sign"><div>Pembelanja<div class="ln">( ${esc(grup.dikerjakanOleh ?? "…………")} )</div></div><div>Penerima<div class="ln">( ………… )</div></div></div>`;
   };
+  const buildHtml = () =>
+    `<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(judul)}${grup.noFaktur ? " " + esc(grup.noFaktur) : ""}</title><style>${DOK_CSS}</style></head><body>${buildBody()}</body></html>`;
   const unduh = () => {
     const dasar = `${judul} ${grup.noFaktur ?? formatTanggalRingkas(grup.waktu)}`.trim();
     const nama =
@@ -257,21 +275,33 @@ export function DokumenBelanjaModal({
     URL.revokeObjectURL(url);
   };
 
-  // ===== SIMPAN PDF: buka dokumen mandiri di jendela baru lalu picu dialog
-  // cetak — pilih tujuan "Simpan sebagai PDF". Terpisah dari 🖨 Cetak (ke
-  // printer). Bila popup diblokir, jatuh ke cetak halaman biasa (dialog cetak
-  // juga punya opsi Simpan PDF).
-  const simpanPdf = () => {
-    const w = window.open("", "_blank");
-    if (!w) {
-      window.print();
-      return;
+  // ===== DOWNLOAD PDF: LANGSUNG unduh berkas .pdf (tanpa dialog cetak/preview)
+  // — enak di HP: satu ketuk, file turun. Bila gagal (mis. lib tak termuat),
+  // jatuh ke jendela cetak (dialog cetak punya opsi Simpan PDF).
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const simpanPdf = async () => {
+    if (pdfBusy) return;
+    setPdfBusy(true);
+    try {
+      await unduhPdf({
+        bodyHtml: buildBody(),
+        css: DOK_CSS,
+        namaBerkas: `${judul} ${grup.noFaktur ?? formatTanggalRingkas(grup.waktu)}`,
+      });
+    } catch {
+      const w = window.open("", "_blank");
+      if (w) {
+        w.document.open();
+        w.document.write(buildHtml());
+        w.document.close();
+        w.focus();
+        setTimeout(() => w.print(), 350);
+      } else {
+        window.print();
+      }
+    } finally {
+      setPdfBusy(false);
     }
-    w.document.open();
-    w.document.write(buildHtml());
-    w.document.close();
-    w.focus();
-    setTimeout(() => w.print(), 350);
   };
 
   return (
@@ -288,8 +318,8 @@ export function DokumenBelanjaModal({
           <button onClick={() => window.print()} className={btnSecondary}>
             🖨 Cetak ke printer
           </button>
-          <button onClick={simpanPdf} className={btnPrimary}>
-            📄 Download PDF
+          <button onClick={simpanPdf} disabled={pdfBusy} className={btnPrimary}>
+            {pdfBusy ? "Membuat PDF…" : "📄 Download PDF"}
           </button>
         </div>
       </Modal>
