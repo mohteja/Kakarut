@@ -1,12 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import type { KategoriDto, PenyimpananDto, SatuanDto } from "@kakarut/shared";
+import type { KategoriDto, SatuanDto } from "@kakarut/shared";
 import { Card, ErrorText, PageTitle, btnPrimary, btnSecondary } from "../../components/ui";
 import { KategoriManagerModal } from "../../components/KategoriManagerModal";
-import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { BahanEditorGrid, type BahanEditorRow } from "./BahanEditorGrid";
+import { useRakSimpan } from "./useRakSimpan";
 
 function barisKosong(satuan: string): BahanEditorRow {
   return {
@@ -48,24 +48,8 @@ export function TambahBahanBakuPage() {
     queryKey: ["kategori-bahan"],
     queryFn: () => api<KategoriDto[]>("/kategori-bahan"),
   });
-  // Rak (tempat penyimpanan) di Central Kitchen — sama dengan halaman Ubah.
-  const { cabang } = useBranch();
-  const ckList = cabang.filter((b) => b.tipe === "central_kitchen" && b.is_active);
-  const banyakCk = ckList.length > 1;
-  const { data: rakCk = [] } = useQuery({
-    queryKey: ["penyimpanan-ck", ckList.map((c) => c.id).join(",")],
-    enabled: ckList.length > 0,
-    queryFn: async () => {
-      const per = await Promise.all(
-        ckList.map((ck) =>
-          api<PenyimpananDto[]>(`/penyimpanan?branch_id=${ck.id}`).then((rows) =>
-            rows.map((r) => ({ id: r.id, nama: banyakCk ? `${ck.nama} · ${r.nama}` : r.nama })),
-          ),
-        ),
-      );
-      return per.flat();
-    },
-  });
+  // Rak simpan (home) bahan — sama persis dengan halaman Ubah (hook bersama).
+  const rakCk = useRakSimpan();
   const satuanDefault = satuanList?.some((s) => s.nama === "pcs")
     ? "pcs"
     : satuanList?.[0]?.nama ?? "pcs";

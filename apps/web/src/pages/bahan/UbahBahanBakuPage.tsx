@@ -1,12 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import type { BahanDto, KategoriDto, PenyimpananDto } from "@kakarut/shared";
+import type { BahanDto, KategoriDto } from "@kakarut/shared";
 import { Card, ErrorText, PageTitle, Spinner, btnPrimary, btnSecondary } from "../../components/ui";
 import { KategoriManagerModal } from "../../components/KategoriManagerModal";
-import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { BahanEditorGrid, type BahanEditorRow } from "./BahanEditorGrid";
+import { useRakSimpan } from "./useRakSimpan";
 
 function keBaris(b: BahanDto): BahanEditorRow {
   return {
@@ -50,25 +50,10 @@ export function UbahBahanBakuPage() {
     queryKey: ["kategori-bahan"],
     queryFn: () => api<KategoriDto[]>("/kategori-bahan"),
   });
-  // Rak (tempat penyimpanan) di Central Kitchen — untuk memilih rak default tiap
-  // bahan. Barang tiba di CK otomatis "diletakkan" di rak ini.
-  const { cabang } = useBranch();
-  const ckList = cabang.filter((b) => b.tipe === "central_kitchen" && b.is_active);
-  const banyakCk = ckList.length > 1;
-  const { data: rakCk = [] } = useQuery({
-    queryKey: ["penyimpanan-ck", ckList.map((c) => c.id).join(",")],
-    enabled: ckList.length > 0,
-    queryFn: async () => {
-      const per = await Promise.all(
-        ckList.map((ck) =>
-          api<PenyimpananDto[]>(`/penyimpanan?branch_id=${ck.id}`).then((rows) =>
-            rows.map((r) => ({ id: r.id, nama: banyakCk ? `${ck.nama} · ${r.nama}` : r.nama })),
-          ),
-        ),
-      );
-      return per.flat();
-    },
-  });
+  // Rak simpan (home) bahan — hook bersama dgn halaman Tambah (rak CK, atau rak
+  // cabang store bila usaha 1 cabang tanpa CK). Barang tiba otomatis diletakkan
+  // di rak ini.
+  const rakCk = useRakSimpan();
 
   // Seed draft sekali dari master begitu termuat (urut sesuai ids).
   const [rows, setRows] = useState<BahanEditorRow[] | null>(null);

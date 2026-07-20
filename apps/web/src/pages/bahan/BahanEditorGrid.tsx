@@ -78,8 +78,8 @@ export function BahanEditorGrid({
             <th className={`${thCell} text-center`} rowSpan={2}>Lacak</th>
             <th className={thCell} rowSpan={2}>Stok min</th>
             <th className={thCell} rowSpan={2}>Min beli</th>
-            <th className={thCell} rowSpan={2} title="Rak simpan default di Central Kitchen">
-              Rak (CK)
+            <th className={thCell} rowSpan={2} title="Rak simpan default (tempat penyimpanan)">
+              Rak simpan
             </th>
             <th className={`${thCell} text-center`} rowSpan={2} title="Kemasan take-away">
               TA
@@ -252,8 +252,8 @@ export function BahanEditorGrid({
                     disabled={rakCk.length === 0}
                     title={
                       rakCk.length === 0
-                        ? "Belum ada rak di Central Kitchen (atur di Pengaturan → Penyimpanan)"
-                        : "Rak simpan default di CK — barang tiba otomatis diletakkan di sini"
+                        ? "Belum ada rak/tempat penyimpanan (atur di Stok → Tempat Penyimpanan)"
+                        : "Rak simpan default — barang tiba otomatis diletakkan di sini"
                     }
                   >
                     <option value="">Tanpa tempat</option>
