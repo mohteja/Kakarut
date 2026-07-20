@@ -521,6 +521,8 @@ export interface PenyimpananDto {
    * opname di cabang). Terisi = terkunci hanya untuk mereka (owner/admin bebas).
    */
   petugas: PetugasRingkas[];
+  /** jumlah bahan baku yang ditugaskan disimpan di rak ini (rak default cabang) */
+  jumlah_bahan: number;
 }
 
 /**

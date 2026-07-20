@@ -263,6 +263,35 @@ export const storageLocationPetugas = pgTable(
 );
 
 /**
+ * Penugasan BAHAN BAKU ke tempat penyimpanan (rak) cabang: "bahan ini disimpan
+ * di rak ini". Dipakai untuk RAK DEFAULT saat kiriman dari CK diterima di
+ * cabang — barang otomatis diletakkan di rak yang ditugaskan (stok & opname per
+ * rak jadi benar tanpa pilih manual). Rak CK per-bahan tetap diatur di form
+ * Bahan Baku (ingredients.storage_location_id); ini terpisah & bisa berdampingan.
+ * Satu bahan maksimal di SATU rak per cabang (dijaga di handler PUT).
+ */
+export const storageLocationIngredients = pgTable(
+  "storage_location_ingredients",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    storageLocationId: uuid("storage_location_id")
+      .notNull()
+      .references(() => storageLocations.id, { onDelete: "cascade" }),
+    ingredientId: uuid("ingredient_id")
+      .notNull()
+      .references(() => ingredients.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("storage_location_ingredients_uq").on(t.storageLocationId, t.ingredientId),
+    index("storage_location_ingredients_ing_idx").on(t.ingredientId),
+  ],
+);
+
+/**
  * Master meja (per cabang) — dipilih kasir saat memulai transaksi. Posisi
  * posX/posY disimpan dalam persen (0..100) agar tata letak denah bebas resolusi.
  * Selalu ada minimal satu meja bertipe "takeaway" (Ruang Tunggu) per cabang.
