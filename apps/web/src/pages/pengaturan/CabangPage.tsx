@@ -11,6 +11,7 @@ import {
   tdClass,
   thClass,
 } from "../../components/ui";
+import { MapPicker } from "../../components/MapPicker";
 import { useBranch, type Cabang } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { useCompanyMode } from "../../lib/useCompanyMode";
@@ -24,9 +25,6 @@ interface FormState {
   tipe: "store" | "central_kitchen" | "kantor";
   /** CK pemasok (khusus store) — "" = otomatis bila CK cuma satu */
   central_kitchen_id: string;
-  /** struk per cabang — alamat/telepon CABANG inilah yang tercetak */
-  receipt_footer: string;
-  receipt_show_alamat: boolean;
   /** titik maps + radius absen (m) — absen hanya diterima dalam radius */
   latitude: string;
   longitude: string;
@@ -47,8 +45,6 @@ export function CabangPage() {
         telepon: f.telepon || null,
         tipe: f.tipe,
         central_kitchen_id: f.tipe === "store" && f.central_kitchen_id ? f.central_kitchen_id : null,
-        receipt_footer: f.receipt_footer || null,
-        receipt_show_alamat: f.receipt_show_alamat,
         latitude: f.latitude ? Number(f.latitude) : null,
         longitude: f.longitude ? Number(f.longitude) : null,
         radius_absen_m: Math.max(10, Number(f.radius_absen_m) || 100),
@@ -91,8 +87,6 @@ export function CabangPage() {
                   telepon: "",
                   tipe: "store",
                   central_kitchen_id: daftarCk.length === 1 ? daftarCk[0].id : "",
-                  receipt_footer: "",
-                  receipt_show_alamat: true,
                   latitude: "",
                   longitude: "",
                   radius_absen_m: "100",
@@ -110,8 +104,8 @@ export function CabangPage() {
       {!isPro && (
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-stone-50 px-4 py-3 text-sm text-stone-600">
           <span>
-            Mode <b>Lite</b> dibatasi 1 cabang — atur alamat &amp; struk cabang di sini.
-            Butuh 🏭 Central Kitchen, cabang lain, atau 🏢 Kantor?
+            Mode <b>Lite</b> dibatasi 1 cabang — atur alamat &amp; titik absen di sini
+            (struk ada di Pengaturan Printer). Butuh 🏭 Central Kitchen, cabang lain, atau 🏢 Kantor?
           </span>
           <Link
             to="/pengaturan/perusahaan"
@@ -188,8 +182,6 @@ export function CabangPage() {
                         telepon: b.telepon ?? "",
                         tipe: b.tipe,
                         central_kitchen_id: b.central_kitchen_id ?? "",
-                        receipt_footer: b.receipt_footer ?? "",
-                        receipt_show_alamat: b.receipt_show_alamat,
                         latitude: b.latitude != null ? String(b.latitude) : "",
                         longitude: b.longitude != null ? String(b.longitude) : "",
                         radius_absen_m: String(b.radius_absen_m ?? 100),
@@ -292,32 +284,14 @@ export function CabangPage() {
                 </p>
               </div>
             )}
-            {/* Struk per cabang — kantor tidak berjualan, tak butuh struk */}
+            {/* Struk pindah ke Pengaturan Printer (di cabang masing-masing) */}
             {form.tipe !== "kantor" && (
-              <div className="rounded-lg border border-stone-200 p-3">
-                <div className="mb-2 text-sm font-semibold text-stone-700">🧾 Struk</div>
-                <label className="mb-1 block text-sm font-medium">Teks footer struk</label>
-                <input
-                  value={form.receipt_footer}
-                  onChange={(e) => setForm({ ...form, receipt_footer: e.target.value })}
-                  maxLength={200}
-                  placeholder="mis. Terima kasih! Ikuti IG @basooopa"
-                  className={inputClass}
-                />
-                <label className="mt-2 flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={form.receipt_show_alamat}
-                    onChange={(e) =>
-                      setForm({ ...form, receipt_show_alamat: e.target.checked })
-                    }
-                  />
-                  Tampilkan alamat &amp; telepon di struk
-                </label>
-                <p className="mt-1 text-xs text-stone-400">
-                  Alamat &amp; telepon <b>cabang ini</b> yang tercetak di struk — bukan
-                  alamat perusahaan.
-                </p>
+              <div className="rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-xs text-stone-500">
+                🧾 Pengaturan <b>struk</b> (footer &amp; tampil alamat) kini diatur di{" "}
+                <Link to="/pengaturan/printer" className="font-medium text-orange-600 hover:underline">
+                  Pengaturan Printer
+                </Link>{" "}
+                — per cabang, di perangkat kasirnya.
               </div>
             )}
             {/* Titik maps + radius absen — berlaku semua tipe (kantor pun absen) */}
@@ -347,7 +321,20 @@ export function CabangPage() {
                   🎯 Pakai lokasi saya
                 </button>
               </div>
-              <div className="grid grid-cols-3 gap-2">
+              <p className="mb-2 text-xs text-stone-500">
+                Klik di peta atau geser 📍 untuk menaruh titik cabang. Lingkaran = radius absen.
+              </p>
+              <MapPicker
+                lat={form.latitude ? Number(form.latitude) : null}
+                lng={form.longitude ? Number(form.longitude) : null}
+                radius={Math.max(10, Number(form.radius_absen_m) || 100)}
+                onChange={(la, ln) =>
+                  setForm((f) =>
+                    f ? { ...f, latitude: la.toFixed(6), longitude: ln.toFixed(6) } : f,
+                  )
+                }
+              />
+              <div className="mt-2 grid grid-cols-3 gap-2">
                 <div>
                   <label className="mb-1 block text-xs font-medium text-stone-500">Latitude</label>
                   <input

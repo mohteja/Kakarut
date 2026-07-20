@@ -1,10 +1,98 @@
-import { useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { CabangDataBar } from "../../components/CabangDataBar";
 import { Card, ErrorText, PageTitle, btnPrimary, btnSecondary, inputClass } from "../../components/ui";
+import { useBranch, useCabangData } from "../../context/BranchContext";
 import { usePrinter } from "../../context/PrinterContext";
+import { api } from "../../lib/api";
 import { bluetoothSupported } from "../../lib/print/bluetooth";
 import { NativeBtTransport, isNativeApp, type PerangkatBt } from "../../lib/print/native";
 import { usbSupported } from "../../lib/print/usb";
 import type { TransportKind } from "../../lib/print/settings";
+
+/**
+ * Struk per CABANG (footer + tampil alamat) — dipindah ke sini "di cabang
+ * masing-masing". Kasir mengatur cabangnya sendiri; owner/admin memilih cabang
+ * lewat bilah "Dari Kantor". Tersimpan di server (bukan per-perangkat).
+ */
+function StrukCabangSection() {
+  const { cabang } = useBranch();
+  const { id: branchId, query: branchQuery, dariKantor } = useCabangData();
+  const queryClient = useQueryClient();
+  const branch = cabang.find((b) => b.id === branchId);
+  const [footer, setFooter] = useState("");
+  const [showAlamat, setShowAlamat] = useState(true);
+
+  useEffect(() => {
+    if (branch) {
+      setFooter(branch.receipt_footer ?? "");
+      setShowAlamat(branch.receipt_show_alamat);
+    }
+  }, [branch?.id, branch?.receipt_footer, branch?.receipt_show_alamat]);
+
+  const simpan = useMutation({
+    mutationFn: () =>
+      api(`/cabang/struk${branchQuery}`, {
+        method: "PUT",
+        body: { receipt_footer: footer.trim() || null, receipt_show_alamat: showAlamat },
+      }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["cabang"] }),
+  });
+
+  // Kantor tidak berjualan → tak butuh struk.
+  if (!branch || branch.tipe === "kantor") {
+    return dariKantor ? <CabangDataBar /> : null;
+  }
+  const berubah =
+    footer.trim() !== (branch.receipt_footer ?? "").trim() ||
+    showAlamat !== branch.receipt_show_alamat;
+
+  return (
+    <>
+      <CabangDataBar />
+      <Card className="mb-4 space-y-3 p-5">
+        <div className="flex items-center justify-between">
+          <div className="text-sm font-semibold text-stone-700">🧾 Struk — {branch.nama}</div>
+          {simpan.isSuccess && !berubah && (
+            <span className="text-xs font-medium text-green-600">✓ Tersimpan</span>
+          )}
+        </div>
+        <div>
+          <label className="mb-1 block text-sm font-medium">Teks footer struk</label>
+          <input
+            value={footer}
+            onChange={(e) => setFooter(e.target.value)}
+            maxLength={200}
+            placeholder="mis. Terima kasih! Ikuti IG @basooopa"
+            className={inputClass}
+          />
+        </div>
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={showAlamat}
+            onChange={(e) => setShowAlamat(e.target.checked)}
+          />
+          Tampilkan alamat &amp; telepon cabang di struk
+        </label>
+        <p className="text-xs text-stone-400">
+          Alamat &amp; telepon <b>{branch.nama}</b> yang tercetak di struk — bukan alamat
+          perusahaan.
+        </p>
+        <ErrorText error={simpan.error} />
+        <div>
+          <button
+            onClick={() => simpan.mutate()}
+            disabled={simpan.isPending || !berubah}
+            className={btnPrimary}
+          >
+            {simpan.isPending ? "Menyimpan…" : "Simpan Struk"}
+          </button>
+        </div>
+      </Card>
+    </>
+  );
+}
 
 // Printer lewat plugin aplikasi Android — hanya ditawarkan saat web dibuka di
 // dalam aplikasi (window.Capacitor ada). Di browser biasa opsi ini disembunyikan.
@@ -97,9 +185,13 @@ export function PrinterPage() {
   return (
     <div className="max-w-2xl">
       <PageTitle>Pengaturan Printer</PageTitle>
+
+      {/* Struk per cabang (server) — di atas, karena berlaku untuk semua kasir cabang */}
+      <StrukCabangSection />
+
       <div className="mb-4 rounded-lg bg-blue-50 px-4 py-2 text-sm text-blue-800">
-        Pengaturan ini tersimpan di <b>perangkat ini saja</b> — atur di setiap kasir/tablet
-        yang dipakai untuk mencetak.
+        Pengaturan printer di bawah tersimpan di <b>perangkat ini saja</b> — atur di setiap
+        kasir/tablet yang dipakai untuk mencetak.
       </div>
 
       <Card className="space-y-4 p-5">

@@ -105,10 +105,11 @@ export default function App() {
               <Route path="/penerimaan" element={<PenerimaanPage />} />
               <Route path="/stok/penyesuaian" element={<PenyesuaianPage />} />
               <Route path="/stok/kartu/:ingredientId" element={<KartuStokPage />} />
-              {/* stasiun absen (pindai QR), printer & meja — bukan peran tim */}
+              {/* Absen: semua peran (tim absen sendiri; admin/kasir + stasiun pindai) */}
+              <Route path="/absen" element={<AbsenPage />} />
+              {/* printer & meja — bukan peran tim */}
               {!isTim && (
                 <>
-                  <Route path="/absen" element={<AbsenPage />} />
                   <Route path="/pengaturan/printer" element={<PrinterPage />} />
                   <Route path="/pengaturan/meja" element={<MejaPage />} />
                 </>

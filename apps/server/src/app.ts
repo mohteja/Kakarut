@@ -93,9 +93,10 @@ export function createApp() {
   // Owner/admin memantau lewat Riwayat/Laporan, tak meng-input transaksi.
   tenant.use("/shift/*", requireRole("cashier"));
   tenant.use("/open-bill/*", requireRole("cashier"));
-  // Absensi = stasiun pindai QR yang dioperasikan admin/kasir untuk mencatat
-  // karyawan; peran TIM tidak memindai — cukup tunjukkan QR dari Profil.
-  tenant.use("/absensi/*", requireRole("owner", "admin", "cashier"));
+  // Absensi: semua peran boleh ABSEN SENDIRI (POST /absensi/saya) + lihat
+  // ringkasan; hanya admin/kasir yang boleh STASIUN pindai (POST /absensi,
+  // digerbang per-rute di modulnya). Tim ikut agar bisa absen sendiri.
+  tenant.use("/absensi/*", requireRole("owner", "admin", "cashier", "tim"));
   tenant
     .route("/company", companyRoutes)
     .route("/customer", customerRoutes)

@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import jsQR from "jsqr";
-import type { AbsenResult, AbsensiRow } from "@kakarut/shared";
+import { jarakMeter, type AbsenResult, type AbsensiRow } from "@kakarut/shared";
 import { Card, ErrorText, PageTitle, btnPrimary, btnSecondary, inputClass } from "../../components/ui";
-import { useBranch } from "../../context/BranchContext";
+import { useAuth } from "../../context/AuthContext";
+import { useBranch, type Cabang } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatWaktu } from "../../lib/format";
 
@@ -22,20 +23,117 @@ function ambilLokasi(): Promise<{ lat: number; lng: number } | null> {
   });
 }
 
-/** Kamera mati / memindai QR / mengambil swafoto (untuk kode manual). */
+/**
+ * Deteksi radius cabang secara langsung: pantau GPS perangkat, hitung jarak ke
+ * titik cabang. Dipakai layar absen (tim & kasir) agar tahu apakah sudah dalam
+ * radius sebelum menekan tombol absen.
+ */
+type RadiusStatus =
+  | { mode: "off" }
+  | { mode: "denied"; radius: number }
+  | { mode: "pending"; radius: number }
+  | { mode: "in" | "out"; jarak: number; radius: number };
+
+function useRadiusStatus(branch?: Cabang): RadiusStatus {
+  const [pos, setPos] = useState<{ lat: number; lng: number } | null>(null);
+  const [denied, setDenied] = useState(false);
+  const lat = branch?.latitude ?? null;
+  const lng = branch?.longitude ?? null;
+  useEffect(() => {
+    setPos(null);
+    setDenied(false);
+    if (lat == null || lng == null || !navigator.geolocation) {
+      if (lat != null && lng != null) setDenied(!navigator.geolocation);
+      return;
+    }
+    const id = navigator.geolocation.watchPosition(
+      (p) => {
+        setPos({ lat: p.coords.latitude, lng: p.coords.longitude });
+        setDenied(false);
+      },
+      // Hanya IZIN DITOLAK (code 1) = denied. Error transien (timeout/unavailable)
+      // tak boleh menimpa posisi valid terakhir — biarkan status in/out bertahan.
+      (err) => {
+        if (err.code === 1) setDenied(true);
+      },
+      { enableHighAccuracy: true, maximumAge: 15000, timeout: 15000 },
+    );
+    return () => navigator.geolocation.clearWatch(id);
+  }, [lat, lng]);
+
+  if (lat == null || lng == null) return { mode: "off" };
+  const radius = branch!.radius_absen_m;
+  // Posisi valid selalu menang: sekali dapat fix, tampilkan in/out walau ada
+  // error GPS transien setelahnya.
+  if (pos) {
+    const jarak = Math.round(jarakMeter(pos.lat, pos.lng, lat, lng));
+    return { mode: jarak <= radius ? "in" : "out", jarak, radius };
+  }
+  if (denied) return { mode: "denied", radius };
+  return { mode: "pending", radius };
+}
+
+function RadiusPanel({ branch }: { branch?: Cabang }) {
+  const s = useRadiusStatus(branch);
+  const nama = branch?.nama ?? "cabang";
+  const box = (cls: string, isi: ReactNode) => (
+    <div className={`mb-4 rounded-xl px-4 py-3 text-sm ${cls}`}>{isi}</div>
+  );
+  if (s.mode === "off")
+    return box(
+      "bg-stone-50 text-stone-500",
+      <>📍 {nama}: titik lokasi belum diatur — absen diterima tanpa batas lokasi.</>,
+    );
+  if (s.mode === "denied")
+    return box(
+      "bg-amber-50 text-amber-800",
+      <>
+        📍 <b>GPS belum aktif/diizinkan.</b> Izinkan akses lokasi di perangkat — absen di{" "}
+        {nama} dibatasi radius <b>{s.radius} m</b>.
+      </>,
+    );
+  if (s.mode === "pending")
+    return box("bg-blue-50 text-blue-800", <>📍 Membaca lokasi… (radius {s.radius} m di {nama})</>);
+  if (s.mode === "in")
+    return box(
+      "bg-green-50 font-medium text-green-800 ring-1 ring-green-200",
+      <>
+        ✅ Dalam radius {nama} — jarak <b>{s.jarak} m</b> (maks {s.radius} m). Siap absen.
+      </>,
+    );
+  return box(
+    "bg-red-50 font-medium text-red-700 ring-1 ring-red-200",
+    <>
+      🚫 Di luar radius {nama} — jarak <b>{s.jarak} m</b> (maks {s.radius} m). Dekati lokasi
+      cabang dulu.
+    </>,
+  );
+}
+
+/** Kamera mati / memindai QR / mengambil swafoto. */
 type Mode = "idle" | "scan" | "capture";
 
 export function AbsenPage() {
-  const { branchQuery } = useBranch();
+  const { auth } = useAuth();
+  const role = auth?.user.role;
+  const isTim = role === "tim";
+  // Stasiun pindai (memindai/ketik kode karyawan lain) hanya admin/kasir.
+  const bisaStasiun = role === "owner" || role === "admin" || role === "cashier";
+  const { branchQuery, branchId, cabang } = useBranch();
+  const branch = cabang.find((b) => b.id === branchId);
+
   const queryClient = useQueryClient();
   const [kode, setKode] = useState("");
   const [hasil, setHasil] = useState<AbsenResult | null>(null);
   const [mode, setMode] = useState<Mode>("idle");
   const [kameraError, setKameraError] = useState<string | null>(null);
+  // Kamera swafoto sedang untuk absen SENDIRI atau untuk kode manual (operator)?
+  const captureForRef = useRef<"self" | "manual">("self");
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const startingRef = useRef(false);
   const rafRef = useRef<number | null>(null);
   const modeRef = useRef<Mode>("idle");
   const hasilTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -46,9 +144,10 @@ export function AbsenPage() {
     refetchInterval: 60_000,
   });
 
-  // Absen = unggah foto bukti dulu → dapat URL → catat absen dgn foto_url.
+  // Absen: unggah foto bukti → dapat URL → catat absen. kode=null → absen
+  // SENDIRI (POST /absensi/saya); kode terisi → stasiun (POST /absensi).
   const absen = useMutation({
-    mutationFn: async ({ kode, blob }: { kode: string; blob: Blob }) => {
+    mutationFn: async ({ blob, kode }: { blob: Blob; kode: string | null }) => {
       const fd = new FormData();
       fd.append("file", blob, "absen.jpg");
       const { url } = await api<{ url: string }>(`/upload?tujuan=bukti`, {
@@ -56,10 +155,10 @@ export function AbsenPage() {
         formData: fd,
       });
       const lokasi = await ambilLokasi();
-      return api<AbsenResult>(`/absensi${branchQuery}`, {
-        method: "POST",
-        body: { kode, foto_url: url, lat: lokasi?.lat ?? null, lng: lokasi?.lng ?? null },
-      });
+      const body = { foto_url: url, lat: lokasi?.lat ?? null, lng: lokasi?.lng ?? null };
+      return kode
+        ? api<AbsenResult>(`/absensi${branchQuery}`, { method: "POST", body: { ...body, kode } })
+        : api<AbsenResult>(`/absensi/saya${branchQuery}`, { method: "POST", body });
     },
     onSuccess: (data) => {
       setHasil(data);
@@ -82,14 +181,19 @@ export function AbsenPage() {
   }
 
   async function startCamera(next: "scan" | "capture") {
+    // Cegah re-entry (double-tap): getUserMedia async → tanpa guard, panggilan
+    // kedua menimpa streamRef & membiarkan stream pertama menyala (kamera macet).
+    if (startingRef.current || streamRef.current) return;
+    startingRef.current = true;
     setKameraError(null);
     if (!navigator.mediaDevices?.getUserMedia) {
       setKameraError("Kamera tidak didukung di perangkat/browser ini.");
+      startingRef.current = false;
       return;
     }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        // scan QR pakai kamera belakang; swafoto manual pakai kamera depan
+        // scan QR pakai kamera belakang; swafoto pakai kamera depan
         video: { facingMode: next === "scan" ? "environment" : "user" },
         audio: false,
       });
@@ -104,10 +208,11 @@ export function AbsenPage() {
     } catch {
       setKameraError("Tidak bisa mengakses kamera (izin ditolak?).");
       stopCamera();
+    } finally {
+      startingRef.current = false;
     }
   }
 
-  /** Ambil frame kamera saat ini sebagai JPEG blob. */
   function grabFrame(): Promise<Blob | null> {
     const video = videoRef.current;
     const canvas = canvasRef.current;
@@ -142,7 +247,7 @@ export function AbsenPage() {
             (blob) => {
               stopCamera();
               setKode(teks);
-              if (blob) absen.mutate({ kode: teks, blob });
+              if (blob) absen.mutate({ blob, kode: teks });
               else setKameraError("Gagal mengambil foto, coba lagi.");
             },
             "image/jpeg",
@@ -155,20 +260,22 @@ export function AbsenPage() {
     rafRef.current = requestAnimationFrame(tick);
   }
 
-  // Kode manual: WAJIB ambil foto dulu sebelum absen tersimpan.
-  async function ambilFotoManual() {
-    const k = kode.trim();
-    if (!k) return;
+  // Konfirmasi ambil foto swafoto → kirim absen (self atau kode manual).
+  async function konfirmFoto() {
     const blob = await grabFrame();
     if (!blob) {
       setKameraError("Gagal mengambil foto, coba lagi.");
       return;
     }
+    const target = captureForRef.current;
+    if (target === "manual" && !kode.trim()) {
+      setKameraError("Kode karyawan kosong.");
+      return;
+    }
     stopCamera();
-    absen.mutate({ kode: k, blob });
+    absen.mutate({ blob, kode: target === "manual" ? kode.trim() : null });
   }
 
-  // hentikan kamera & timer saat komponen dilepas
   useEffect(() => {
     return () => {
       stopCamera();
@@ -177,10 +284,18 @@ export function AbsenPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Enter / submit pada input kode → buka kamera swafoto (foto wajib dulu).
-  function onSubmit(e: FormEvent) {
+  // Enter pada input kode (operator) → buka kamera swafoto (foto wajib dulu).
+  function onSubmitKode(e: FormEvent) {
     e.preventDefault();
-    if (kode.trim()) void startCamera("capture");
+    if (kode.trim()) {
+      captureForRef.current = "manual";
+      void startCamera("capture");
+    }
+  }
+
+  function mulaiAbsenSaya() {
+    captureForRef.current = "self";
+    void startCamera("capture");
   }
 
   const masuk = hasil?.tipe === "masuk";
@@ -188,14 +303,11 @@ export function AbsenPage() {
   return (
     <div className="mx-auto max-w-2xl">
       <PageTitle>🖐 Absen Karyawan</PageTitle>
-      <p className="mb-4 text-sm text-stone-500">
-        <b>Scan QR</b> karyawan (dari halaman Profil mereka) atau ketik <b>kode karyawan</b> untuk
-        mencatat absen. Setiap absen <b>wajib disertai foto</b>: scan QR mengambil foto otomatis;
-        ketik kode harus ambil swafoto dulu. Sistem otomatis mencatat <b>masuk</b> atau <b>pulang</b>{" "}
-        sesuai urutan hari ini.
-      </p>
 
-      {/* Kartu hasil absen — besar & jelas untuk konfirmasi cepat */}
+      {/* Deteksi radius cabang — untuk tim maupun kasir */}
+      <RadiusPanel branch={branch} />
+
+      {/* Kartu hasil absen */}
       {hasil && (
         <div
           className={`mb-4 rounded-2xl p-5 text-center shadow-sm ${
@@ -211,6 +323,7 @@ export function AbsenPage() {
           </div>
           <div className="mt-0.5 text-xs text-stone-500">
             {hasil.employee_code} · {hasil.branch_nama}
+            {hasil.jarak_m != null && <> · {hasil.jarak_m} m dari cabang</>}
           </div>
           {hasil.foto_url && (
             <img
@@ -222,51 +335,71 @@ export function AbsenPage() {
         </div>
       )}
 
-      <Card className="p-5">
-        {/* Preview kamera — <video> SELALU ter-mount agar videoRef sudah ada saat
-            startCamera menetapkan srcObject. */}
-        <div className={mode !== "idle" ? "space-y-3" : "hidden"}>
-          <div className="relative overflow-hidden rounded-xl bg-black">
-            <video
-              ref={videoRef}
-              className="mx-auto max-h-72 w-full object-contain"
-              muted
-              playsInline
-            />
-            {mode === "scan" && (
-              <div className="pointer-events-none absolute inset-6 rounded-lg border-2 border-white/70" />
-            )}
-          </div>
-          <p className="text-center text-sm text-stone-500">
-            {mode === "scan"
-              ? "Arahkan QR karyawan ke kamera…"
-              : "Posisikan wajah karyawan, lalu ambil foto untuk menyimpan absen."}
-          </p>
-          {mode === "capture" ? (
-            <div className="grid grid-cols-2 gap-2">
-              <button type="button" onClick={stopCamera} className={btnSecondary}>
-                Batal
-              </button>
-              <button
-                type="button"
-                onClick={() => void ambilFotoManual()}
-                disabled={absen.isPending}
-                className={btnPrimary}
-              >
-                {absen.isPending ? "Memproses…" : "📸 Ambil Foto & Absen"}
-              </button>
-            </div>
-          ) : (
-            <button type="button" onClick={stopCamera} className={`${btnSecondary} w-full`}>
-              Batal Scan
-            </button>
+      {/* Preview kamera (self/scan/manual) — <video> selalu ter-mount */}
+      <Card className={mode !== "idle" ? "space-y-3 p-5" : "hidden"}>
+        <div className="relative overflow-hidden rounded-xl bg-black">
+          <video ref={videoRef} className="mx-auto max-h-72 w-full object-contain" muted playsInline />
+          {mode === "scan" && (
+            <div className="pointer-events-none absolute inset-6 rounded-lg border-2 border-white/70" />
           )}
         </div>
+        <p className="text-center text-sm text-stone-500">
+          {mode === "scan"
+            ? "Arahkan QR karyawan ke kamera…"
+            : "Posisikan wajah, lalu ambil foto untuk menyimpan absen."}
+        </p>
+        {mode === "capture" ? (
+          <div className="grid grid-cols-2 gap-2">
+            <button type="button" onClick={stopCamera} className={btnSecondary}>
+              Batal
+            </button>
+            <button
+              type="button"
+              onClick={() => void konfirmFoto()}
+              disabled={absen.isPending}
+              className={btnPrimary}
+            >
+              {absen.isPending ? "Memproses…" : "📸 Ambil Foto & Absen"}
+            </button>
+          </div>
+        ) : (
+          <button type="button" onClick={stopCamera} className={`${btnSecondary} w-full`}>
+            Batal Scan
+          </button>
+        )}
+      </Card>
 
-        {mode === "idle" && (
-          <form onSubmit={onSubmit} className="space-y-3">
+      {/* ---- ABSEN SENDIRI (semua peran) ---- */}
+      {mode === "idle" && (
+        <Card className="mb-4 p-5 text-center">
+          <div className="text-sm text-stone-500">
+            Tekan untuk mencatat kehadiran Anda sendiri — ambil <b>swafoto</b> + lokasi otomatis
+            terkirim. Sistem menentukan <b>masuk</b>/<b>pulang</b> sesuai urutan hari ini.
+          </div>
+          <ErrorText error={absen.error} />
+          {kameraError && (
+            <div className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
+              {kameraError}
+            </div>
+          )}
+          <button
+            onClick={mulaiAbsenSaya}
+            disabled={absen.isPending}
+            className={`${btnPrimary} mt-3 w-full py-3 text-base`}
+          >
+            📸 Absen Sekarang (swafoto)
+          </button>
+        </Card>
+      )}
+
+      {/* ---- STASIUN PINDAI (admin/kasir): scan/ketik kode karyawan lain ---- */}
+      {mode === "idle" && bisaStasiun && (
+        <Card className="p-5">
+          <div className="mb-3 text-sm font-semibold text-stone-700">
+            🧑‍💼 Stasiun pindai karyawan
+          </div>
+          <form onSubmit={onSubmitKode} className="space-y-3">
             <input
-              autoFocus
               value={kode}
               onChange={(e) => setKode(e.target.value.toUpperCase())}
               placeholder="Kode karyawan (8 digit)"
@@ -275,12 +408,6 @@ export function AbsenPage() {
               autoCapitalize="characters"
               autoComplete="off"
             />
-            <ErrorText error={absen.error} />
-            {kameraError && (
-              <div className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
-                {kameraError}
-              </div>
-            )}
             <p className="text-center text-xs text-stone-400">
               📸 Absen wajib disertai foto sebagai bukti kehadiran.
             </p>
@@ -288,17 +415,20 @@ export function AbsenPage() {
               <button type="button" onClick={() => void startCamera("scan")} className={btnSecondary}>
                 📷 Scan QR
               </button>
-              <button
-                type="submit"
-                disabled={!kode.trim() || absen.isPending}
-                className={btnPrimary}
-              >
+              <button type="submit" disabled={!kode.trim() || absen.isPending} className={btnPrimary}>
                 📸 Foto & Absen
               </button>
             </div>
           </form>
-        )}
-      </Card>
+        </Card>
+      )}
+
+      {isTim && mode === "idle" && (
+        <p className="mt-3 text-center text-xs text-stone-400">
+          Kode QR Anda ada di halaman <b>Profil Saya</b> — bisa juga dipindai kasir.
+        </p>
+      )}
+
       {/* canvas tersembunyi untuk sampling frame kamera */}
       <canvas ref={canvasRef} className="hidden" />
 

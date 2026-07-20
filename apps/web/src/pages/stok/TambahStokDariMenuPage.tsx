@@ -196,6 +196,8 @@ export function TambahStokDariMenuPage() {
   const [sertakanPerlengkapan, setSertakanPerlengkapan] = useState(true);
   const [hasilPerlengkapan, setHasilPerlengkapan] =
     useState<PermintaanPerlengkapanOtomatisHasil | null>(null);
+  // Resume/konfirmasi sebelum benar-benar menerbitkan permintaan.
+  const [konfirmasi, setKonfirmasi] = useState(false);
   const sisaByMenu = useMemo(
     () => new Map(ketersediaan.map((k) => [k.menu_id, k.porsi])),
     [ketersediaan],
@@ -292,6 +294,7 @@ export function TambahStokDariMenuPage() {
       return { menu, perlengkapan };
     },
     onSuccess: ({ perlengkapan }) => {
+      setKonfirmasi(false);
       setRencana({});
       for (const key of [
         "stok",
@@ -647,17 +650,14 @@ export function TambahStokDariMenuPage() {
                     </span>
                   </label>
                 )}
-                <ErrorText error={buat.error} />
                 <button
-                  onClick={() => buat.mutate()}
+                  onClick={() => setKonfirmasi(true)}
                   disabled={buat.isPending || !bisaBuat || (adaKurang && (butuhPelaksana || previewBasi))}
                   className={`${btnPrimary} w-full py-3`}
                 >
-                  {buat.isPending
-                    ? "Membuat permintaan…"
-                    : adaKurang && previewBasi
-                      ? "Menghitung ulang…"
-                      : `🧾 Buat Permintaan (${labelBagian})`}
+                  {adaKurang && previewBasi
+                    ? "Menghitung ulang…"
+                    : `🧾 Tinjau Permintaan (${labelBagian})`}
                 </button>
                 {adaKurang && butuhPelaksana && (
                   <div className="text-center text-xs text-amber-600">
@@ -669,6 +669,124 @@ export function TambahStokDariMenuPage() {
           )}
         </div>
       </div>
+
+      {/* Resume/konfirmasi sebelum menerbitkan permintaan (tidak langsung tersimpan) */}
+      {konfirmasi && (
+        <Modal
+          open
+          onClose={() => setKonfirmasi(false)}
+          title="🧾 Tinjau Permintaan"
+          lebar="max-w-2xl"
+        >
+          <div className="space-y-3">
+            <p className="text-sm text-stone-500">
+              Periksa dulu. Permintaan <b>belum tersimpan</b> — akan diterbitkan setelah Anda
+              menekan <b>Buat Permintaan</b>.
+            </p>
+            {/* tujuan */}
+            <div className="grid gap-2 sm:grid-cols-2">
+              <div className="rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-sm">
+                <div className="text-xs text-stone-500">Cabang tujuan</div>
+                <div className="font-semibold text-stone-800">🏪 {store?.nama ?? "—"}</div>
+              </div>
+              <div className="rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-sm">
+                <div className="text-xs text-stone-500">Diproduksi oleh</div>
+                <div className="font-semibold text-stone-800">
+                  {workOrder ? `🏭 ${ck!.nama}` : "Produksi di cabang ini"}
+                </div>
+              </div>
+            </div>
+
+            {/* bahan baku */}
+            {p && adaKurang ? (
+              <>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  <div className="rounded-lg border border-stone-200 bg-white p-2">
+                    <div className="text-xs text-stone-500">Est. biaya faktur</div>
+                    <div className="text-sm font-bold text-stone-800">
+                      {formatRupiah(p.total_estimasi_biaya)}
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-stone-200 bg-white p-2">
+                    <div className="text-xs text-stone-500">Perkiraan omzet</div>
+                    <div className="text-sm font-bold text-stone-800">
+                      {formatRupiah(p.perkiraan_omzet)}
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-stone-200 bg-white p-2">
+                    <div className="text-xs text-stone-500">Rincian aksi</div>
+                    <div className="text-sm font-bold text-stone-800">
+                      🚚 {p.jumlah_kirim} · 🏭 {p.jumlah_produksi} · 🛒 {p.jumlah_beli} · 🧺{" "}
+                      {p.jumlah_beli_produksi}
+                    </div>
+                  </div>
+                </div>
+                {!workOrder && p.jumlah_produksi > 0 && (
+                  <div className="rounded-lg border border-purple-200 bg-purple-50 px-3 py-2 text-sm text-purple-800">
+                    Pelaksana produksi:{" "}
+                    <b>
+                      {(() => {
+                        const [t, id] = pelaksana.split(":");
+                        if (t === "k") return karyawan.find((k) => k.user_id === id)?.nama ?? "—";
+                        if (t === "s") return suppliers.find((s) => s.id === id)?.nama ?? "—";
+                        return "—";
+                      })()}
+                    </b>
+                  </div>
+                )}
+                <div className="max-h-[45vh] space-y-3 overflow-y-auto">
+                  <BagianKurang tipe="kirim" rows={kurangKirim} />
+                  <BagianKurang tipe="produksi" rows={kurangProduksi} />
+                  <BagianKurang tipe="beli" rows={kurangBeli} />
+                  <BagianKurang tipe="beli_produksi" rows={kurangBeliProduksi} />
+                </div>
+              </>
+            ) : (
+              items.length > 0 && (
+                <div className="rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
+                  ✅ Stok bahan baku masih cukup — tidak ada faktur bahan yang dibuat.
+                </div>
+              )
+            )}
+
+            {/* perlengkapan */}
+            {mintaPerlengkapan && (
+              <div className="rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-sm text-orange-900">
+                🧰 <b>{perlengkapanKurang.length} perlengkapan</b> (saldo ≤ minimum) akan diminta —
+                kiriman <b>KP-</b> otomatis dari stok CK, sisanya dilaporkan perlu dibeli di CK:
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {perlengkapanKurang.map((r) => (
+                    <span
+                      key={r.id}
+                      className="rounded bg-white/70 px-1.5 py-0.5 text-xs font-medium text-orange-800"
+                    >
+                      {r.nama}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <ErrorText error={buat.error} />
+            <div className="flex justify-end gap-2 border-t border-stone-100 pt-3">
+              <button
+                onClick={() => setKonfirmasi(false)}
+                disabled={buat.isPending}
+                className={btnSecondary}
+              >
+                Batal
+              </button>
+              <button
+                onClick={() => buat.mutate()}
+                disabled={buat.isPending}
+                className={btnPrimary}
+              >
+                {buat.isPending ? "Membuat permintaan…" : "✅ Buat Permintaan"}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
 
       {/* Ringkasan hasil permintaan perlengkapan (kiriman KP- + perlu beli) */}
       {hasilPerlengkapan && (
