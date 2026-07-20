@@ -878,6 +878,12 @@ export const productions = pgTable(
     qtyDipesan: numeric("qty_dipesan", { precision: 16, scale: 6, mode: "number" }),
     /** alasan penolakan kiriman (jalur beli, status 'ditolak') */
     alasanTolak: text("alasan_tolak"),
+    /**
+     * LAPORAN HARGA (jalur beli): waktu harga riil yang dibayar dilaporkan untuk
+     * baris ini. Null = belum dilaporkan. Faktur beli yang sudah diterima & semua
+     * barisnya berharga final → status "Selesai".
+     */
+    laporanHargaAt: timestamp("laporan_harga_at", { withTimezone: true }),
     // audit edit metadata
     updatedAt: timestamp("updated_at", { withTimezone: true }),
     updatedBy: uuid("updated_by").references(() => users.id),

@@ -28,6 +28,7 @@ interface StokMasukPage {
 import { DokumenBelanjaModal } from "./DokumenBelanjaModal";
 import { DokumenKirimModal } from "./DokumenKirimModal";
 import { FakturDetailModal } from "./FakturDetailModal";
+import { LaporanHargaModal } from "./LaporanHargaModal";
 import type { TahapNavState } from "./TahapPage";
 
 export interface StokMasukRow {
@@ -63,6 +64,8 @@ export interface StokMasukRow {
   dikerjakan_oleh: string | null;
   qty_dipesan: number | null;
   alasan_tolak: string | null;
+  /** waktu Laporan Harga riil dibuat utk baris ini (jalur beli); null = belum */
+  laporan_harga_at?: string | null;
   /** cabang baris (utk tampilan Kantor "semua cabang") */
   branch_id?: string | null;
   cabang?: string | null;
@@ -387,6 +390,8 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
   }, []);
   // Dokumen kirim (surat jalan CK → cabang) — pola yang sama.
   const [dokumenKirim, setDokumenKirim] = useState<string | null>(null);
+  // Laporan Harga (jalur beli) — catat harga riil setelah barang diterima.
+  const [laporHarga, setLaporHarga] = useState<string | null>(null);
 
   // Kelompokkan baris per faktur (baris lama tanpa faktur = grup sendiri)
   const grup = useMemo<FakturGroup[]>(() => {
@@ -584,6 +589,19 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                 r.tujuan_branch_id != null &&
                 r.branch_id === r.tujuan_branch_id,
             );
+            // LAPORAN HARGA (jalur beli): tersedia begitu ada baris yang
+            // tiba/diterima. Faktur SELESAI = sudah diterima penuh & semua
+            // barisnya berharga final (Laporan Harga dibuat).
+            const bisaLapor =
+              tipe === "beli" &&
+              g.fakturId != null &&
+              g.rows.some((r) => r.status === "menunggu" || r.status === "dikonfirmasi");
+            const barisAktif = g.rows.filter((r) => r.status !== "ditolak");
+            const laporanSelesai =
+              tipe === "beli" &&
+              g.status === "dikonfirmasi" &&
+              barisAktif.length > 0 &&
+              barisAktif.every((r) => r.laporan_harga_at);
             // badge lebih jujur utk belanja yang barangnya kumpul di CK, dan utk
             // KIRIMAN (transfer stok) yang tahapnya soal pengiriman, bukan produksi
             const badge = g.kiriman
@@ -597,6 +615,10 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
               : tipe === "beli" && g.status === "menunggu" && siapKirim
                 ? { label: "📦 Di CK — siap kirim ke cabang", cls: "bg-purple-100 text-purple-800" }
                 : badgeFaktur(tipe, g.status);
+            // faktur beli yang laporan harganya sudah lengkap → "Selesai"
+            const badgeTampil = laporanSelesai
+              ? { label: "✅ Selesai", cls: "bg-emerald-100 text-emerald-800" }
+              : badge;
             // kartu ringkas ala transaksi marketplace: tampilkan 1 barang
             // pertama + jumlah bahan lainnya; rincian lengkap via klik kartu
             const utama = g.rows[0];
@@ -677,9 +699,9 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                 </div>
                 {/* status di pojok kanan atas kotak */}
                 <span
-                  className={`shrink-0 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold ${badge.cls}`}
+                  className={`shrink-0 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold ${badgeTampil.cls}`}
                 >
-                  {badge.label}
+                  {badgeTampil.label}
                 </span>
               </div>
 
@@ -743,6 +765,24 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                       {g.rows.every((r) => r.status === "rencana" || r.status === "ditolak")
                         ? "Dokumen RAB"
                         : "Dokumen belanja"}
+                    </button>
+                  )}
+                  {/* LAPORAN HARGA: catat harga riil setelah barang diterima →
+                      faktur jadi "Selesai". Tombol utama pd faktur beli yang
+                      sudah tiba/diterima. */}
+                  {bisaLapor && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setLaporHarga(g.key);
+                      }}
+                      className={`whitespace-nowrap rounded-lg border px-3 py-2.5 text-sm font-semibold ${
+                        laporanSelesai
+                          ? "border-stone-300 bg-white text-stone-600 hover:border-emerald-400 hover:text-emerald-700"
+                          : "border-emerald-500 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                      }`}
+                    >
+                      💰 {laporanSelesai ? "Ubah Laporan Harga" : "Laporan Harga"}
                     </button>
                   )}
                   {/* dokumen kirim (surat jalan) barang dalam perjalanan */}
@@ -896,6 +936,13 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
           const g = grup.find((x) => x.key === dokumen);
           return g ? (
             <DokumenBelanjaModal key={g.key} grup={g} onClose={() => setDokumen(null)} />
+          ) : null;
+        })()}
+      {laporHarga &&
+        (() => {
+          const g = grup.find((x) => x.key === laporHarga);
+          return g ? (
+            <LaporanHargaModal key={g.key} grup={g} onClose={() => setLaporHarga(null)} />
           ) : null;
         })()}
       {modalKirimHasil && (

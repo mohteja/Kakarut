@@ -1475,7 +1475,12 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
             const b = byId.get(id)!;
             await tx
               .update(productions)
-              .set({ totalHarga, updatedAt: new Date(), updatedBy: auth.sub })
+              .set({
+                totalHarga,
+                laporanHargaAt: new Date(),
+                updatedAt: new Date(),
+                updatedBy: auth.sub,
+              })
               .where(
                 and(eq(productions.id, id), eq(productions.companyId, auth.company_id!)),
               );
@@ -1635,6 +1640,8 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         supplier: suppliers.nama,
         tempat: storageLocations.nama,
         storage_location_id: productions.storageLocationId,
+        // laporan harga riil (jalur beli) sudah dibuat utk baris ini? → status "Selesai"
+        laporan_harga_at: productions.laporanHargaAt,
         supplier_id: productions.supplierId,
         dibuat_oleh: pembuat.nama,
         diubah_oleh: pengubah.nama,

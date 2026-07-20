@@ -407,6 +407,13 @@
       "when": 1784527767685,
       "tag": "0057_left_goliath",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1784534921035,
+      "tag": "0058_skinny_magus",
+      "breakpoints": true
     }
   ]
 }
