@@ -7,16 +7,19 @@ import { absenTipeBerikutnya, jarakMeter, type AbsenResult, type AbsensiRow } fr
 import { db } from "../../db/client";
 import { attendances, branches, companies, memberships, users } from "../../db/schema";
 import { tanggalDi } from "../../lib/time";
-import { resolveBranchId, type AppEnv } from "../../middleware/auth";
+import { requireRole, resolveBranchId, type AppEnv } from "../../middleware/auth";
 
-const ClockBody = z.object({
-  kode: z.string().trim().min(1),
+/** Koordinat perangkat — divalidasi terhadap radius titik cabang bila diatur. */
+const KoordinatBody = {
   /** foto swafoto bukti absen (URL upload) — WAJIB (anti-titip absen) */
   foto_url: z.string().trim().min(1, "Foto absen wajib dilampirkan"),
-  /** koordinat perangkat saat absen — divalidasi terhadap radius titik cabang */
   lat: z.number().min(-90).max(90).nullish(),
   lng: z.number().min(-180).max(180).nullish(),
-});
+};
+/** Absen operator (pindai QR / ketik kode karyawan). */
+const ClockBody = z.object({ kode: z.string().trim().min(1), ...KoordinatBody });
+/** Absen SENDIRI (tombol absen di aplikasi) — tanpa kode, atas nama pemanggil. */
+const SelfBody = z.object(KoordinatBody);
 
 /** Validasi tanggal YYYY-MM-DD yang benar (menolak bulan/hari di luar rentang). */
 function tanggalValid(s: string): boolean {
@@ -34,45 +37,110 @@ async function timezoneOf(companyId: string): Promise<string> {
 }
 
 /**
- * Absensi karyawan: stasiun pindai QR dioperasikan admin/kasir (digerbang
- * requireRole di app.ts). Operator memindai QR karyawan (memuat kodenya) atau
- * mengetik kodenya → server tentukan cap masuk/keluar otomatis dari cap
- * terakhir hari ini. Operator hanya untuk auth + konteks perusahaan/cabang —
- * baris absensi dicatat atas nama karyawan pemilik kode, bukan operator.
- * Peran TIM tidak boleh memindai; cukup tunjukkan QR dari Profil.
+ * Radius absen: bila titik lokasi cabang diatur, absen HANYA diterima dalam
+ * radius itu — perangkat wajib mengirim koordinat GPS. Mengembalikan nama
+ * cabang + jarak (m) atau null bila cabang tanpa titik lokasi.
+ */
+async function cekRadius(
+  branchId: string,
+  lat: number | null | undefined,
+  lng: number | null | undefined,
+): Promise<{ jarakM: number | null; namaCabang: string }> {
+  const [lok] = await db
+    .select({
+      nama: branches.nama,
+      latitude: branches.latitude,
+      longitude: branches.longitude,
+      radius: branches.radiusAbsenM,
+    })
+    .from(branches)
+    .where(eq(branches.id, branchId));
+  const namaCabang = lok?.nama ?? "";
+  if (lok?.latitude != null && lok.longitude != null) {
+    if (lat == null || lng == null) {
+      throw new HTTPException(400, {
+        message: `Absen di ${namaCabang} butuh lokasi — izinkan akses GPS lalu coba lagi`,
+      });
+    }
+    const jarakM = Math.round(jarakMeter(lat, lng, lok.latitude, lok.longitude));
+    if (jarakM > lok.radius) {
+      throw new HTTPException(400, {
+        message: `Di luar radius absen ${namaCabang}: jarak ${jarakM} m (maks ${lok.radius} m)`,
+      });
+    }
+    return { jarakM, namaCabang };
+  }
+  return { jarakM: null, namaCabang };
+}
+
+/**
+ * Catat cap masuk/keluar untuk seorang karyawan di cabang: tentukan tipe dari
+ * cap terakhir HARI INI di cabang itu (branch-scoped, konsisten dgn ringkasan
+ * GET), lalu sisipkan baris absensi. Mengembalikan AbsenResult.
+ */
+async function catatAbsen(opts: {
+  companyId: string;
+  branchId: string;
+  userId: string;
+  employeeCode: string;
+  nama: string;
+  namaCabang: string;
+  fotoUrl: string;
+  jarakM: number | null;
+}): Promise<AbsenResult> {
+  const tanggal = tanggalDi(await timezoneOf(opts.companyId));
+  const [last] = await db
+    .select({ tipe: attendances.tipe })
+    .from(attendances)
+    .where(
+      and(
+        eq(attendances.companyId, opts.companyId),
+        eq(attendances.branchId, opts.branchId),
+        eq(attendances.userId, opts.userId),
+        eq(attendances.attendDate, tanggal),
+      ),
+    )
+    .orderBy(desc(attendances.waktu))
+    .limit(1);
+  const tipe = absenTipeBerikutnya(last?.tipe ?? null);
+  const [ins] = await db
+    .insert(attendances)
+    .values({
+      companyId: opts.companyId,
+      branchId: opts.branchId,
+      userId: opts.userId,
+      tipe,
+      attendDate: tanggal,
+      fotoUrl: opts.fotoUrl,
+    })
+    .returning({ waktu: attendances.waktu });
+  return {
+    user_id: opts.userId,
+    nama: opts.nama,
+    employee_code: opts.employeeCode,
+    tipe,
+    waktu: ins.waktu.toISOString(),
+    branch_nama: opts.namaCabang,
+    jarak_m: opts.jarakM,
+    foto_url: opts.fotoUrl,
+  };
+}
+
+/**
+ * Absensi karyawan. Dua jalur:
+ *  - POST /       : STASIUN pindai — admin/kasir memindai QR / ketik kode
+ *    karyawan; baris dicatat atas nama pemilik kode, bukan operator.
+ *  - POST /saya   : ABSEN SENDIRI — semua peran (termasuk TIM) menekan tombol
+ *    absen di aplikasi; dicatat atas nama pemanggil sendiri (tak bisa titip).
+ * Keduanya tunduk pada radius titik cabang + wajib foto swafoto.
  */
 export const absensiRoutes = new Hono<AppEnv>()
-  .post("/", zValidator("json", ClockBody), async (c) => {
+  .post("/", requireRole("owner", "admin", "cashier"), zValidator("json", ClockBody), async (c) => {
     const auth = c.get("auth");
     const branchId = await resolveBranchId(c);
     const { lat, lng, foto_url } = c.req.valid("json");
     const kode = c.req.valid("json").kode.trim();
-
-    // Radius absen: bila titik lokasi cabang diatur, absen HANYA diterima
-    // dalam radius itu — perangkat wajib mengirim koordinat GPS.
-    const [lok] = await db
-      .select({
-        nama: branches.nama,
-        latitude: branches.latitude,
-        longitude: branches.longitude,
-        radius: branches.radiusAbsenM,
-      })
-      .from(branches)
-      .where(eq(branches.id, branchId));
-    let jarakM: number | null = null;
-    if (lok?.latitude != null && lok.longitude != null) {
-      if (lat == null || lng == null) {
-        throw new HTTPException(400, {
-          message: `Absen di ${lok.nama} butuh lokasi — izinkan akses GPS lalu coba lagi`,
-        });
-      }
-      jarakM = Math.round(jarakMeter(lat, lng, lok.latitude, lok.longitude));
-      if (jarakM > lok.radius) {
-        throw new HTTPException(400, {
-          message: `Di luar radius absen ${lok.nama}: jarak ${jarakM} m (maks ${lok.radius} m)`,
-        });
-      }
-    }
+    const { jarakM, namaCabang } = await cekRadius(branchId, lat, lng);
 
     // Resolusi karyawan lewat kode (case-insensitive) dalam perusahaan pemanggil.
     // Karyawan terarsip diperlakukan seperti tidak ditemukan (sudah keluar).
@@ -95,52 +163,57 @@ export const absensiRoutes = new Hono<AppEnv>()
     if (!m) throw new HTTPException(404, { message: `Kode karyawan "${kode}" tidak ditemukan` });
     if (!m.isActive) throw new HTTPException(400, { message: `${m.nama} berstatus nonaktif` });
 
-    const tanggal = tanggalDi(await timezoneOf(auth.company_id!));
+    const result = await catatAbsen({
+      companyId: auth.company_id!,
+      branchId,
+      userId: m.userId,
+      employeeCode: m.kode ?? kode,
+      nama: m.nama,
+      namaCabang,
+      fotoUrl: foto_url,
+      jarakM,
+    });
+    return c.json(result, 201);
+  })
+  // Absen SENDIRI — atas nama pemanggil (auth.sub). Aman untuk peran tim: tak
+  // ada kode yang bisa dititipkan; server memakai keanggotaan pemanggil.
+  .post("/saya", zValidator("json", SelfBody), async (c) => {
+    const auth = c.get("auth");
+    const branchId = await resolveBranchId(c);
+    const { lat, lng, foto_url } = c.req.valid("json");
+    const { jarakM, namaCabang } = await cekRadius(branchId, lat, lng);
 
-    // cap terakhir hari ini untuk karyawan ini DI CABANG INI → tentukan
-    // masuk/keluar. Branch-scoped agar konsisten dengan ringkasan GET yang juga
-    // per-cabang (tiap kiosk cabang berpasangan masuk↔keluar sendiri).
-    const [last] = await db
-      .select({ tipe: attendances.tipe })
-      .from(attendances)
+    const [m] = await db
+      .select({
+        kode: memberships.employeeCode,
+        nama: users.nama,
+        isActive: users.isActive,
+      })
+      .from(memberships)
+      .innerJoin(users, eq(memberships.userId, users.id))
       .where(
         and(
-          eq(attendances.companyId, auth.company_id!),
-          eq(attendances.branchId, branchId),
-          eq(attendances.userId, m.userId),
-          eq(attendances.attendDate, tanggal),
+          eq(memberships.companyId, auth.company_id!),
+          eq(memberships.userId, auth.sub),
+          isNull(memberships.archivedAt),
         ),
-      )
-      .orderBy(desc(attendances.waktu))
-      .limit(1);
-    const tipe = absenTipeBerikutnya(last?.tipe ?? null);
+      );
+    if (!m) throw new HTTPException(403, { message: "Akun Anda bukan karyawan aktif cabang ini" });
+    if (!m.kode) {
+      throw new HTTPException(400, { message: "Kode karyawan Anda belum diatur — hubungi admin" });
+    }
+    if (!m.isActive) throw new HTTPException(400, { message: "Akun Anda berstatus nonaktif" });
 
-    const [ins] = await db
-      .insert(attendances)
-      .values({
-        companyId: auth.company_id!,
-        branchId,
-        userId: m.userId,
-        tipe,
-        attendDate: tanggal,
-        fotoUrl: foto_url,
-      })
-      .returning({ waktu: attendances.waktu });
-    const [branch] = await db
-      .select({ nama: branches.nama })
-      .from(branches)
-      .where(eq(branches.id, branchId));
-
-    const result: AbsenResult = {
-      user_id: m.userId,
+    const result = await catatAbsen({
+      companyId: auth.company_id!,
+      branchId,
+      userId: auth.sub,
+      employeeCode: m.kode,
       nama: m.nama,
-      employee_code: m.kode ?? kode,
-      tipe,
-      waktu: ins.waktu.toISOString(),
-      branch_nama: branch?.nama ?? "",
-      jarak_m: jarakM,
-      foto_url,
-    };
+      namaCabang,
+      fotoUrl: foto_url,
+      jarakM,
+    });
     return c.json(result, 201);
   })
   // Ringkasan absensi hari ini (atau ?tanggal=YYYY-MM-DD) di cabang: jam masuk

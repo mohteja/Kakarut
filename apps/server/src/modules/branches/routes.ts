@@ -5,8 +5,14 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { db } from "../../db/client";
 import { branches, companies } from "../../db/schema";
-import { requireRole, type AppEnv } from "../../middleware/auth";
+import { requireRole, resolveBranchId, type AppEnv } from "../../middleware/auth";
 import { seedMejaDefault } from "../meja/defaults";
+
+/** Pengaturan struk milik SATU cabang (dipakai dari halaman Printer). */
+const StrukBody = z.object({
+  receipt_footer: z.string().trim().max(200).nullish(),
+  receipt_show_alamat: z.boolean().optional(),
+});
 
 const CabangBody = z.object({
   nama: z.string().trim().min(1),
@@ -104,6 +110,28 @@ export const cabangRoutes = new Hono<AppEnv>()
         is_active: r.isActive,
       })),
     );
+  })
+  /**
+   * Pengaturan STRUK cabang (footer + tampil alamat) — diatur dari halaman
+   * Printer "di cabang masing-masing". Kasir terkunci ke cabangnya; owner/admin
+   * memilih cabang lewat ?branch_id. Hanya field struk yang bisa diubah di sini.
+   */
+  .put("/struk", requireRole("owner", "admin", "cashier"), zValidator("json", StrukBody), async (c) => {
+    const auth = c.get("auth");
+    const branchId = await resolveBranchId(c);
+    const body = c.req.valid("json");
+    const [row] = await db
+      .update(branches)
+      .set({
+        ...(body.receipt_footer !== undefined && { receiptFooter: body.receipt_footer }),
+        ...(body.receipt_show_alamat !== undefined && {
+          receiptShowAlamat: body.receipt_show_alamat,
+        }),
+      })
+      .where(and(eq(branches.id, branchId), eq(branches.companyId, auth.company_id!)))
+      .returning({ id: branches.id });
+    if (!row) throw new HTTPException(404, { message: "Cabang tidak ditemukan" });
+    return c.json({ ok: true });
   })
   .post("/", requireRole("owner", "admin"), zValidator("json", CabangBody), async (c) => {
     const auth = c.get("auth");

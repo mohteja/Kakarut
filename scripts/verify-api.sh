@@ -1784,12 +1784,26 @@ api "$OWNER" PUT "/penyimpanan/$PLAS_TMP/petugas" "{\"user_ids\":[]}" > /dev/nul
 api "$OWNER" PUT "/karyawan/$U56/tempat" "{\"tempat_ids\":[]}" > /dev/null
 cek "tim: produksi → 403" "V == 403" "$(status_code "$T56" GET /produksi)"
 cek "tim: kelola karyawan → 403" "V == 403" "$(status_code "$T56" GET /karyawan)"
-# Stasiun absen (pindai QR) hanya admin/kasir — tim tak boleh mencatat absen
+# Absen peran TIM: STASIUN pindai (POST kode) tetap DILARANG, tapi tim boleh
+# ABSEN SENDIRI (POST /absensi/saya) + lihat daftar cabang.
 KODE_T56=$(api "$OWNER" GET /karyawan | jq -r '[.[] | select(.email=="tim56@basooopa.id")][0].employee_code')
-cek "tim: pindai absensi (POST) → 403" "V == 403" \
+cek "tim: stasiun pindai (POST kode) → 403" "V == 403" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/absensi" -H "Authorization: Bearer $T56" -H 'Content-Type: application/json' -d "{\"kode\":\"$KODE_T56\",\"foto_url\":\"$FOTO\"}")"
-cek "tim: daftar absensi (GET) → 403" "V == 403" "$(status_code "$T56" GET /absensi)"
+cek "tim: absen SENDIRI (POST /absensi/saya) → 201" "V == 201" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/absensi/saya" -H "Authorization: Bearer $T56" -H 'Content-Type: application/json' -d "{\"foto_url\":\"$FOTO\"}")"
+cek "tim: absen sendiri wajib foto → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/absensi/saya" -H "Authorization: Bearer $T56" -H 'Content-Type: application/json' -d '{}')"
+cek "tim: daftar absensi (GET) → 200 (lihat kehadiran cabang)" "V == 200" "$(status_code "$T56" GET /absensi)"
 cek "kasir: pindai absensi tetap boleh → 200" "V == 200" "$(status_code "$KASIR" GET /absensi)"
+# Struk per cabang lewat endpoint khusus (dipindah ke halaman Printer):
+# kasir mengatur cabangNYA sendiri; tim tak boleh; owner via ?branch_id.
+api "$KASIR" PUT /cabang/struk '{"receipt_footer":"Dari kasir Pusat","receipt_show_alamat":false}' > /dev/null
+cek "kasir set struk cabang sendiri (PUT /cabang/struk) tersimpan" "V == 1" \
+  "$(api "$OWNER" GET /cabang | jq --arg id "$PUSAT51_ID" '([.[]|select(.id==$id)][0] | (.receipt_footer=="Dari kasir Pusat") and (.receipt_show_alamat==false)) | if . then 1 else 0 end')"
+cek "tim set struk (PUT /cabang/struk) → 403" "V == 403" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/cabang/struk" -H "Authorization: Bearer $T56" -H 'Content-Type: application/json' -d '{"receipt_footer":"x"}')"
+cek "owner set struk cabang lain via ?branch_id → tersimpan" "V == 1" \
+  "$(api "$OWNER" PUT "/cabang/struk?branch_id=$CK47_ID" '{"receipt_footer":"Struk CK47"}' > /dev/null; api "$OWNER" GET /cabang | jq --arg id "$CK47_ID" '([.[]|select(.id==$id)][0].receipt_footer=="Struk CK47") | if . then 1 else 0 end')"
 
 echo "== 57. Absen hanya dalam radius titik lokasi cabang =="
 KODE56=$(api "$OWNER" GET /karyawan | jq -r '[.[] | select(.email=="tim56@basooopa.id")][0].employee_code')
@@ -1807,6 +1821,14 @@ cek "absen di luar radius (±4,6 km) → 400" "V == 400" \
 ABS57=$(api "$OWNER" POST /absensi "{\"kode\":\"$KODE56\",\"lat\":-6.175392,\"lng\":106.827553,\"foto_url\":\"$FOTO\"}")
 cek "absen dalam radius (~44 m) diterima + jarak terlapor" "V == 1" \
   "$(echo "$ABS57" | jq '((.jarak_m != null) and (.jarak_m <= 100) and (.tipe != null)) | if . then 1 else 0 end')"
+# ABSEN SENDIRI (tim, POST /absensi/saya) tunduk radius yang sama
+cek "tim absen sendiri tanpa GPS (radius aktif) → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/absensi/saya" -H "Authorization: Bearer $T56" -H 'Content-Type: application/json' -d "{\"foto_url\":\"$FOTO\"}")"
+cek "tim absen sendiri di luar radius → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/absensi/saya" -H "Authorization: Bearer $T56" -H 'Content-Type: application/json' -d "{\"lat\":-6.137654,\"lng\":106.817125,\"foto_url\":\"$FOTO\"}")"
+SELF57=$(api "$T56" POST /absensi/saya "{\"lat\":-6.175392,\"lng\":106.827553,\"foto_url\":\"$FOTO\"}")
+cek "tim absen sendiri dalam radius → diterima atas nama sendiri" "V == 1" \
+  "$(echo "$SELF57" | jq '((.jarak_m != null) and (.nama == "Tim Gudang 56")) | if . then 1 else 0 end')"
 # kosongkan titik → aturan radius kembali nonaktif
 api "$OWNER" PATCH "/cabang/$PUSAT51_ID" '{"latitude":null,"longitude":null}' > /dev/null
 cek "titik dikosongkan: absen tanpa GPS diterima lagi" "V == 201" \
