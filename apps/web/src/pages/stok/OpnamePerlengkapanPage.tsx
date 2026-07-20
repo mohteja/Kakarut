@@ -254,9 +254,9 @@ export function OpnamePerlengkapanPage() {
                     <input type="checkbox" checked={on} readOnly className="h-5 w-5 shrink-0" />
                     <div className="min-w-0">
                       <div className="truncate font-semibold text-stone-800">{r.nama}</div>
-                      <div className="text-sm text-stone-500">
-                        Sistem: {formatAngka(r.saldo)} {r.satuan}
-                      </div>
+                      {/* saldo sistem SENGAJA tidak ditampilkan saat pilih produk —
+                          baru muncul di langkah pengecekan agar hitung fisik jujur */}
+                      <div className="text-sm text-stone-400">{r.satuan}</div>
                     </div>
                   </button>
                 );
