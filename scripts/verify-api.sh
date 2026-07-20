@@ -1804,6 +1804,8 @@ cek "tim set struk (PUT /cabang/struk) → 403" "V == 403" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/cabang/struk" -H "Authorization: Bearer $T56" -H 'Content-Type: application/json' -d '{"receipt_footer":"x"}')"
 cek "owner set struk cabang lain via ?branch_id → tersimpan" "V == 1" \
   "$(api "$OWNER" PUT "/cabang/struk?branch_id=$CK47_ID" '{"receipt_footer":"Struk CK47"}' > /dev/null; api "$OWNER" GET /cabang | jq --arg id "$CK47_ID" '([.[]|select(.id==$id)][0].receipt_footer=="Struk CK47") | if . then 1 else 0 end')"
+cek "struk endpoint body kosong → no-op 200 (bukan 500)" "V == 200" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/cabang/struk" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d '{}')"
 
 echo "== 57. Absen hanya dalam radius titik lokasi cabang =="
 KODE56=$(api "$OWNER" GET /karyawan | jq -r '[.[] | select(.email=="tim56@basooopa.id")][0].employee_code')

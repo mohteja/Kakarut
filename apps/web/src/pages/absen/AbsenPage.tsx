@@ -51,7 +51,11 @@ function useRadiusStatus(branch?: Cabang): RadiusStatus {
         setPos({ lat: p.coords.latitude, lng: p.coords.longitude });
         setDenied(false);
       },
-      () => setDenied(true),
+      // Hanya IZIN DITOLAK (code 1) = denied. Error transien (timeout/unavailable)
+      // tak boleh menimpa posisi valid terakhir — biarkan status in/out bertahan.
+      (err) => {
+        if (err.code === 1) setDenied(true);
+      },
       { enableHighAccuracy: true, maximumAge: 15000, timeout: 15000 },
     );
     return () => navigator.geolocation.clearWatch(id);
@@ -59,10 +63,14 @@ function useRadiusStatus(branch?: Cabang): RadiusStatus {
 
   if (lat == null || lng == null) return { mode: "off" };
   const radius = branch!.radius_absen_m;
+  // Posisi valid selalu menang: sekali dapat fix, tampilkan in/out walau ada
+  // error GPS transien setelahnya.
+  if (pos) {
+    const jarak = Math.round(jarakMeter(pos.lat, pos.lng, lat, lng));
+    return { mode: jarak <= radius ? "in" : "out", jarak, radius };
+  }
   if (denied) return { mode: "denied", radius };
-  if (!pos) return { mode: "pending", radius };
-  const jarak = Math.round(jarakMeter(pos.lat, pos.lng, lat, lng));
-  return { mode: jarak <= radius ? "in" : "out", jarak, radius };
+  return { mode: "pending", radius };
 }
 
 function RadiusPanel({ branch }: { branch?: Cabang }) {
@@ -125,6 +133,7 @@ export function AbsenPage() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const startingRef = useRef(false);
   const rafRef = useRef<number | null>(null);
   const modeRef = useRef<Mode>("idle");
   const hasilTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -172,9 +181,14 @@ export function AbsenPage() {
   }
 
   async function startCamera(next: "scan" | "capture") {
+    // Cegah re-entry (double-tap): getUserMedia async → tanpa guard, panggilan
+    // kedua menimpa streamRef & membiarkan stream pertama menyala (kamera macet).
+    if (startingRef.current || streamRef.current) return;
+    startingRef.current = true;
     setKameraError(null);
     if (!navigator.mediaDevices?.getUserMedia) {
       setKameraError("Kamera tidak didukung di perangkat/browser ini.");
+      startingRef.current = false;
       return;
     }
     try {
@@ -194,6 +208,8 @@ export function AbsenPage() {
     } catch {
       setKameraError("Tidak bisa mengakses kamera (izin ditolak?).");
       stopCamera();
+    } finally {
+      startingRef.current = false;
     }
   }
 

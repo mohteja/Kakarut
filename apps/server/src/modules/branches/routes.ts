@@ -120,6 +120,10 @@ export const cabangRoutes = new Hono<AppEnv>()
     const auth = c.get("auth");
     const branchId = await resolveBranchId(c);
     const body = c.req.valid("json");
+    // Tanpa field struk apa pun → no-op (hindari UPDATE SET kosong yang error).
+    if (body.receipt_footer === undefined && body.receipt_show_alamat === undefined) {
+      return c.json({ ok: true });
+    }
     const [row] = await db
       .update(branches)
       .set({
