@@ -17,6 +17,7 @@ import {
   ingredients,
   memberships,
   productions,
+  storageLocationIngredients,
   storageLocations,
   suppliers,
   users,
@@ -50,8 +51,6 @@ const logOleh = alias(users, "log_oleh");
 const cabangProd = alias(branches, "cabang_prod");
 const tujuanProd = alias(branches, "tujuan_prod");
 const untukProd = alias(branches, "untuk_prod");
-// RAK SIMPAN default (home) bahan — dari ingredients.storage_location_id
-const rakDefault = alias(storageLocations, "rak_default");
 // supplier UTAMA bahan tiap baris (info "beli di mana" saat belanja diproses)
 const isupUtama = alias(ingredientSuppliers, "isup_utama");
 const supBahan = alias(suppliers, "sup_bahan");
@@ -631,36 +630,44 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
               }
             : {};
 
-        // RAK SIMPAN default (home) per bahan: saat barang TIBA/DISIMPAN
-        // (>= menunggu) di cabang tujuan, otomatis diletakkan di rak home-nya
-        // (bila raknya di cabang tujuan). Belanja pilih rak manual (tujuan_storage)
-        // jadi cadangan; tanpa keduanya → tanpa tempat (null). "di-setting di
-        // awal" per bahan agar penyimpanan terkelompok per rak otomatis.
-        const homeRak = new Map<string, { rakId: string; branchId: string }>();
+        // RAK DEFAULT per bahan PER CABANG: saat barang TIBA/DISIMPAN
+        // (>= menunggu) di cabang tujuan, otomatis diletakkan di rak yang
+        // ditugaskan untuk bahan itu DI CABANG TUJUAN (diatur di Tempat
+        // Penyimpanan). Belanja pilih rak manual (tujuan_storage) jadi cadangan;
+        // tanpa keduanya → tanpa tempat (null). Penyimpanan terkelompok per rak
+        // otomatis, konsisten dgn penerimaan kiriman di cabang store.
+        const rakDefault = new Map<string, string>(); // `${ingredientId}|${branchId}` → rakId
         {
           const ingIds = [...new Set(baris.map((b) => b.ingredientId))];
-          const homeRows = await db
+          const asg = await db
             .select({
-              ingredientId: ingredients.id,
-              rakId: ingredients.storageLocationId,
+              ingredientId: storageLocationIngredients.ingredientId,
+              rakId: storageLocationIngredients.storageLocationId,
               rakBranch: storageLocations.branchId,
             })
-            .from(ingredients)
-            .innerJoin(storageLocations, eq(storageLocations.id, ingredients.storageLocationId))
-            .where(inArray(ingredients.id, ingIds));
-          for (const r of homeRows)
-            if (r.rakId) homeRak.set(r.ingredientId, { rakId: r.rakId, branchId: r.rakBranch });
+            .from(storageLocationIngredients)
+            .innerJoin(
+              storageLocations,
+              eq(storageLocations.id, storageLocationIngredients.storageLocationId),
+            )
+            .where(
+              and(
+                eq(storageLocationIngredients.companyId, auth.company_id!),
+                inArray(storageLocationIngredients.ingredientId, ingIds),
+              ),
+            );
+          for (const r of asg) rakDefault.set(`${r.ingredientId}|${r.rakBranch}`, r.rakId);
         }
         /** rak simpan untuk baris yang maju (>= menunggu): rak manual (bila
-         * dipilih) menang, lalu rak home bila raknya di cabang tujuan, lalu
-         * pertahankan yang sudah ada (faktur lahir tanpa tempat → tetap tanpa
-         * tempat). */
+         * dipilih) menang, lalu rak default bahan DI CABANG SENDIRI (barang
+         * tiba/disimpan lokal, mis. CK-local). Kiriman LINTAS-CABANG tidak
+         * di-auto-file di sini — rak default cabang tujuan diterapkan saat
+         * DITERIMA di cabang (autoFileRakCabang), bukan saat dikirim; sampai
+         * itu tetap tanpa tempat (barang masih transit). */
         const rakBaris = (b: (typeof baris)[number]) => {
           if (tujuanStorage) return tujuanStorage;
-          const destBranch = tujuanBranch ?? b.branchId;
-          const home = homeRak.get(b.ingredientId);
-          if (home && home.branchId === destBranch) return home.rakId;
-          return b.storageLocationId;
+          if (tujuanBranch && tujuanBranch !== b.branchId) return b.storageLocationId;
+          return rakDefault.get(`${b.ingredientId}|${b.branchId}`) ?? b.storageLocationId;
         };
 
         const now = new Date();
@@ -1628,9 +1635,6 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         supplier: suppliers.nama,
         tempat: storageLocations.nama,
         storage_location_id: productions.storageLocationId,
-        // RAK SIMPAN default (home) bahan di CK — utk auto-file & pratinjau per rak
-        default_storage_location_id: ingredients.storageLocationId,
-        default_tempat: rakDefault.nama,
         supplier_id: productions.supplierId,
         dibuat_oleh: pembuat.nama,
         diubah_oleh: pengubah.nama,
@@ -1668,7 +1672,6 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
               .innerJoin(ingredients, eq(productions.ingredientId, ingredients.id))
               .leftJoin(suppliers, eq(productions.supplierId, suppliers.id))
               .leftJoin(storageLocations, eq(productions.storageLocationId, storageLocations.id))
-              .leftJoin(rakDefault, eq(ingredients.storageLocationId, rakDefault.id))
               .leftJoin(pembuat, eq(productions.userId, pembuat.id))
               .leftJoin(pengubah, eq(productions.updatedBy, pengubah.id))
               .leftJoin(pekerja, eq(productions.workerId, pekerja.id))
@@ -1702,8 +1705,45 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
               )
               .orderBy(asc(productions.waktu), asc(productions.id));
 
+      // RAK DEFAULT bahan di cabang penyimpanan (tujuan ?? cabang baris) untuk
+      // pratinjau "akan disimpan di rak X" saat barang tiba/disimpan. Diambil
+      // dari Tempat Penyimpanan (storage_location_ingredients) per cabang.
+      const ingUnik = [...new Set(rows.map((r) => r.ingredient_id))];
+      const rakByKey = new Map<string, { id: string; nama: string }>();
+      if (ingUnik.length > 0) {
+        const asg = await db
+          .select({
+            ingredientId: storageLocationIngredients.ingredientId,
+            branchId: storageLocations.branchId,
+            rakId: storageLocations.id,
+            rakNama: storageLocations.nama,
+          })
+          .from(storageLocationIngredients)
+          .innerJoin(
+            storageLocations,
+            eq(storageLocations.id, storageLocationIngredients.storageLocationId),
+          )
+          .where(
+            and(
+              eq(storageLocationIngredients.companyId, auth.company_id!),
+              inArray(storageLocationIngredients.ingredientId, ingUnik),
+            ),
+          );
+        for (const a of asg)
+          rakByKey.set(`${a.ingredientId}|${a.branchId}`, { id: a.rakId, nama: a.rakNama });
+      }
+      const rowsRak = rows.map((r) => {
+        const destBranch = r.tujuan_branch_id ?? r.branch_id;
+        const rak = destBranch ? rakByKey.get(`${r.ingredient_id}|${destBranch}`) : undefined;
+        return {
+          ...r,
+          default_storage_location_id: rak?.id ?? null,
+          default_tempat: rak?.nama ?? null,
+        };
+      });
+
       return c.json({
-        rows,
+        rows: rowsRak,
         total,
         page,
         per_page: perPage,

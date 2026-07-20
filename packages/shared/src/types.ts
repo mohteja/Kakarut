@@ -81,10 +81,21 @@ export interface BahanDto {
   supplier_utama: string | null;
   /** jumlah supplier yang terdaftar untuk bahan ini */
   jumlah_supplier: number;
-  /** RAK SIMPAN default (home) di CK: barang tiba di CK otomatis diletakkan di sini */
-  storage_location_id: string | null;
-  /** nama rak simpan default (null = tanpa tempat) — untuk ditampilkan di daftar */
-  storage_location_nama: string | null;
+  /**
+   * DI SIMPAN DI MANA: rak per cabang (CK & cabang store) tempat bahan ini
+   * disimpan. READ-ONLY di daftar — diatur di Stok → Tempat Penyimpanan
+   * (bukan di form Bahan Baku). Kosong = belum diatur di rak mana pun.
+   */
+  rak_lokasi: RakLokasi[];
+}
+
+/** Satu penempatan bahan di rak sebuah cabang (untuk kolom "Rak simpan" daftar Bahan Baku). */
+export interface RakLokasi {
+  branch_id: string;
+  branch_nama: string;
+  branch_tipe: "store" | "central_kitchen" | "kantor";
+  rak_id: string;
+  rak_nama: string;
 }
 
 /** Mode impor CSV bahan baku. */
@@ -200,8 +211,6 @@ export interface BahanBulkRow {
   /** complement (×0.5 dine-in) */
   is_complement?: boolean;
   catatan?: string | null;
-  /** rak simpan default (home) di CK */
-  storage_location_id?: string | null;
 }
 
 export interface MenuDto {
