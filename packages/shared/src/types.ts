@@ -641,6 +641,10 @@ export interface OpnameSesiDetail {
     system_qty: number | null;
     qty_fisik: number;
     selisih: number | null;
+    /** bukti foto selisih (URL) — dilampirkan saat pengecekan, untuk ACC admin */
+    foto_url: string | null;
+    /** alasan selisih (opsional) — dilampirkan saat pengecekan */
+    alasan: string | null;
   }[];
 }
 

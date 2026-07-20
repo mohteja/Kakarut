@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import type { OpnameRingkasan, PenyimpananDto, StokRowDto } from "@kakarut/shared";
+import { ImageUpload } from "../../components/ImageUpload";
 import { ErrorText, Spinner, btnPrimary, btnSecondary } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { useBranch, useCabangData } from "../../context/BranchContext";
@@ -42,6 +43,9 @@ export function OpnamePage() {
   const [bucket, setBucket] = useState<string | null>(null);
   const [dipilih, setDipilih] = useState<Record<string, boolean>>({});
   const [fisik, setFisik] = useState<Record<string, string>>({});
+  // Bukti foto + alasan per bahan berselisih (dilampirkan saat pengecekan).
+  const [fotoSelisih, setFotoSelisih] = useState<Record<string, string>>({});
+  const [alasanSelisih, setAlasanSelisih] = useState<Record<string, string>>({});
   const [cari, setCari] = useState("");
   const [konfirmasi, setKonfirmasi] = useState(false);
   const [hasil, setHasil] = useState<OpnameRingkasan | null>(null);
@@ -118,6 +122,8 @@ export function OpnamePage() {
     for (const s of itemsDiBucket(b)) sel[s.ingredient_id] = true;
     setDipilih(sel);
     setFisik({});
+    setFotoSelisih({});
+    setAlasanSelisih({});
     setCari("");
     setLangkah("produk");
   }
@@ -135,7 +141,17 @@ export function OpnamePage() {
     mutationFn: () => {
       const items = produkTerpilih
         .filter((s) => fisik[s.ingredient_id] !== undefined && fisik[s.ingredient_id] !== "")
-        .map((s) => ({ ingredient_id: s.ingredient_id, qty: Number(fisik[s.ingredient_id]) }));
+        .map((s) => {
+          const sel = Number(fisik[s.ingredient_id]) - s.saldo;
+          const ada = Math.abs(sel) > 1e-9;
+          return {
+            ingredient_id: s.ingredient_id,
+            qty: Number(fisik[s.ingredient_id]),
+            // bukti + alasan hanya untuk baris berselisih
+            foto_url: ada ? (fotoSelisih[s.ingredient_id] ?? null) : null,
+            alasan: ada ? (alasanSelisih[s.ingredient_id]?.trim() || null) : null,
+          };
+        });
       return api<{ ringkasan: OpnameRingkasan; session_id: string; nomor: string | null }>("/stok/opname", {
         method: "POST",
         body: {
@@ -150,6 +166,8 @@ export function OpnamePage() {
       setHasil(data.ringkasan);
       setNomorSesi(data.nomor ?? null);
       setFisik({});
+      setFotoSelisih({});
+      setAlasanSelisih({});
       setDipilih({});
       setBucket(null);
       setLangkah("lokasi");
@@ -162,6 +180,12 @@ export function OpnamePage() {
     if (v === undefined || v === "") return null;
     return Number(v) - s.saldo;
   }
+
+  // Baris berselisih yang belum dilampiri bukti foto — memblokir Simpan.
+  const selisihTanpaFoto = produkTerpilih.filter((s) => {
+    const sel = selisihDari(s);
+    return sel !== null && Math.abs(sel) > 1e-9 && !fotoSelisih[s.ingredient_id];
+  });
 
   function kembali() {
     if (langkah === "hitung") setLangkah("produk");
@@ -343,8 +367,9 @@ export function OpnamePage() {
       {langkah === "hitung" && (
         <>
           <div className="sticky top-[97px] z-10 border-b border-stone-200 bg-white px-4 py-2 text-xs text-stone-500">
-            Isi stok fisik tiap produk. Produk yang dikosongkan tidak dihitung — selisih
-            menunggu ACC owner/admin.
+            Isi stok fisik tiap produk. Produk yang dikosongkan tidak dihitung. Bila ada
+            selisih, lampirkan <b>bukti foto</b> (+ alasan opsional) — selisih menunggu ACC
+            owner/admin.
           </div>
           <main className="flex-1 p-3 pb-28">
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
@@ -393,22 +418,64 @@ export function OpnamePage() {
                         = sistem
                       </button>
                     </div>
+                    {/* Ada selisih → wajib lampirkan bukti foto (untuk ACC admin)
+                        + alasan opsional. Baris cocok tidak butuh apa-apa. */}
+                    {selisih !== null && Math.abs(selisih) >= 1e-9 && (
+                      <div className="mt-3 space-y-2 rounded-lg bg-amber-50 p-3">
+                        <div className="text-xs font-semibold text-amber-800">
+                          Selisih perlu bukti — dilampirkan untuk ACC owner/admin
+                        </div>
+                        <div>
+                          <div className="mb-1 text-xs font-medium text-stone-600">
+                            Bukti foto <span className="text-red-500">*wajib</span>
+                          </div>
+                          <ImageUpload
+                            value={fotoSelisih[s.ingredient_id] ?? null}
+                            onChange={(u) =>
+                              setFotoSelisih((prev) => {
+                                const next = { ...prev };
+                                if (u) next[s.ingredient_id] = u;
+                                else delete next[s.ingredient_id];
+                                return next;
+                              })
+                            }
+                            tujuan="bukti"
+                            placeholder="📷"
+                          />
+                        </div>
+                        <input
+                          value={alasanSelisih[s.ingredient_id] ?? ""}
+                          onChange={(e) =>
+                            setAlasanSelisih({ ...alasanSelisih, [s.ingredient_id]: e.target.value })
+                          }
+                          placeholder="Alasan selisih (opsional) — mis. tumpah, rusak"
+                          className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm focus:border-orange-500 focus:outline-none"
+                        />
+                      </div>
+                    )}
                   </div>
                 );
               })}
             </div>
           </main>
-          <div className="fixed inset-x-0 bottom-0 flex gap-2 border-t border-stone-200 bg-white p-3">
-            <button onClick={() => setLangkah("produk")} className={`${btnSecondary} shrink-0`}>
-              ← Produk
-            </button>
-            <button
-              onClick={() => setKonfirmasi(true)}
-              disabled={terisi === 0}
-              className={`${btnPrimary} flex-1 py-3 text-base`}
-            >
-              Simpan Opname ({terisi} dihitung)
-            </button>
+          <div className="fixed inset-x-0 bottom-0 border-t border-stone-200 bg-white p-3">
+            {selisihTanpaFoto.length > 0 && (
+              <div className="mb-2 rounded-lg bg-amber-50 px-3 py-1.5 text-center text-xs font-medium text-amber-800">
+                Lampirkan bukti foto untuk {selisihTanpaFoto.length} selisih sebelum menyimpan.
+              </div>
+            )}
+            <div className="flex gap-2">
+              <button onClick={() => setLangkah("produk")} className={`${btnSecondary} shrink-0`}>
+                ← Produk
+              </button>
+              <button
+                onClick={() => setKonfirmasi(true)}
+                disabled={terisi === 0 || selisihTanpaFoto.length > 0}
+                className={`${btnPrimary} flex-1 py-3 text-base`}
+              >
+                Simpan Opname ({terisi} dihitung)
+              </button>
+            </div>
           </div>
         </>
       )}

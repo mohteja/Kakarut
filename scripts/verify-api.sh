@@ -3098,6 +3098,38 @@ cek "setelah kosongkan: Tempat Sampah KOSONG" "V == 0" "$(api "$OWNER" GET /samp
 cek "kosongkan lagi (idempoten) → 0 dihapus" "V == 0" \
   "$(api "$OWNER" POST /sampah/kosongkan | jq '(.penjualan + .faktur)')"
 
+echo "== 92. Opname: bukti foto + alasan selisih inline (siap ACC admin) =="
+FOTO92="/uploads/companies/x/bukti/opname92.jpg"
+SALDO92=$(stok_of "$(api "$OWNER" GET /stok)" "plastik take away")
+FISIK92=$(python3 -c "print($SALDO92 + 5)")   # sengaja lebih 5 → selisih
+OP92=$(api "$OWNER" POST /stok/opname \
+  "{\"catatan\":\"opname bukti\",\"items\":[{\"ingredient_id\":\"$PLASTIK_ID\",\"qty\":$FISIK92,\"foto_url\":\"$FOTO92\",\"alasan\":\"barang lebih dari kiriman\"}]}")
+SESI92=$(echo "$OP92" | jq -r .session_id)
+cek "opname bukti: dapat session_id" "V == 1" \
+  "$(echo "$OP92" | jq '((.session_id|type)=="string")|if . then 1 else 0 end')"
+# bukti inline → baris langsung 'sudah' (siap ACC), muncul di menunggu_persetujuan
+PENY92=$(api "$OWNER" GET "/stok/penyesuaian?status=menunggu_persetujuan")
+cek "opname bukti: selisih 'sudah' + foto tersimpan" "V == 1" \
+  "$(echo "$PENY92" | jq --arg f "$FOTO92" '([.[]|select(.foto_url==$f and .klarifikasi_status=="sudah")]|length>=1)|if . then 1 else 0 end')"
+cek "opname bukti: alasan tersimpan di klarifikasi" "V == 1" \
+  "$(echo "$PENY92" | jq --arg f "$FOTO92" '([.[]|select(.foto_url==$f and .catatan=="barang lebih dari kiriman")]|length>=1)|if . then 1 else 0 end')"
+# sesi detail memuat foto + alasan (untuk direview owner/admin sebelum ACC)
+DET92=$(api "$OWNER" GET "/stok/opname/sesi/$SESI92")
+cek "sesi detail: item punya foto_url" "V == 1" \
+  "$(echo "$DET92" | jq --arg f "$FOTO92" '[.items[]|select(.foto_url==$f)]|length')"
+cek "sesi detail: item punya alasan" "V == 1" \
+  "$(echo "$DET92" | jq '[.items[]|select(.alasan=="barang lebih dari kiriman")]|length')"
+# ACC sesi → selisih diterapkan, saldo jadi fisik (tanpa langkah klarifikasi terpisah)
+api "$OWNER" POST "/stok/opname/sesi/$SESI92/acc" > /dev/null
+cek "opname bukti: ACC → saldo plastik jadi fisik" "abs(V - $FISIK92) < 0.001" \
+  "$(stok_of "$(api "$OWNER" GET /stok)" "plastik take away")"
+# kompatibilitas: opname selisih TANPA foto tetap diterima → klarifikasi 'belum'
+FISIK92B=$(python3 -c "print($FISIK92 - 2)")
+api "$OWNER" POST /stok/opname \
+  "{\"catatan\":\"opname tanpa bukti\",\"items\":[{\"ingredient_id\":\"$PLASTIK_ID\",\"qty\":$FISIK92B}]}" > /dev/null
+cek "opname tanpa foto: selisih tetap masuk antrean 'belum'" "V >= 1" \
+  "$(api "$OWNER" GET "/stok/penyesuaian?status=belum" | jq '[.[]|select(.bahan=="plastik take away")]|length')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

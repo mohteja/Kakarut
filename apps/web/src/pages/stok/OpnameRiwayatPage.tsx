@@ -133,15 +133,20 @@ function DetailSheet({ sessionId, onClose }: { sessionId: string; onClose: () =>
                   <th className="py-1 text-right">Sistem</th>
                   <th className="py-1 text-right">Fisik</th>
                   <th className="py-1 text-right">Selisih</th>
+                  <th className="py-1 text-center">Bukti</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-stone-100">
                 {data.items.map((it, i) => {
                   const sel = it.selisih ?? 0;
+                  const adaSelisih = Math.abs(sel) >= 1e-9;
                   return (
                     <tr key={i}>
                       <td className="py-1.5 pr-2">
                         {it.nama} <span className="text-stone-400">{it.satuan}</span>
+                        {it.alasan && (
+                          <div className="text-xs italic text-stone-500">“{it.alasan}”</div>
+                        )}
                       </td>
                       <td className="py-1.5 text-right text-stone-500">
                         {it.system_qty != null ? formatAngka(it.system_qty) : "—"}
@@ -149,14 +154,27 @@ function DetailSheet({ sessionId, onClose }: { sessionId: string; onClose: () =>
                       <td className="py-1.5 text-right font-medium">{formatAngka(it.qty_fisik)}</td>
                       <td
                         className={`py-1.5 text-right font-semibold ${
-                          Math.abs(sel) < 1e-9
+                          !adaSelisih
                             ? "text-green-600"
                             : sel > 0
                               ? "text-yellow-700"
                               : "text-red-600"
                         }`}
                       >
-                        {Math.abs(sel) < 1e-9 ? "0" : `${sel > 0 ? "+" : ""}${formatAngka(sel)}`}
+                        {!adaSelisih ? "0" : `${sel > 0 ? "+" : ""}${formatAngka(sel)}`}
+                      </td>
+                      <td className="py-1.5 text-center">
+                        {it.foto_url ? (
+                          <a href={it.foto_url} target="_blank" rel="noreferrer" title="Lihat bukti foto">
+                            <img
+                              src={it.foto_url}
+                              alt="bukti"
+                              className="mx-auto h-8 w-8 rounded object-cover ring-1 ring-stone-200"
+                            />
+                          </a>
+                        ) : adaSelisih ? (
+                          <span className="text-xs text-stone-300">—</span>
+                        ) : null}
                       </td>
                     </tr>
                   );
