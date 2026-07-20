@@ -43,7 +43,6 @@ import { TambahStokDariMenuPage } from "./pages/stok/TambahStokDariMenuPage";
 import { OpnamePage } from "./pages/stok/OpnamePage";
 import { OpnamePerlengkapanPage } from "./pages/stok/OpnamePerlengkapanPage";
 import { OpnameRiwayatPage } from "./pages/stok/OpnameRiwayatPage";
-import { PenyesuaianPage } from "./pages/stok/PenyesuaianPage";
 import { StokPage } from "./pages/stok/StokPage";
 import { BeliPerlengkapanPage } from "./pages/perlengkapan/BeliPerlengkapanPage";
 import { PerlengkapanPage } from "./pages/perlengkapan/PerlengkapanPage";
@@ -104,7 +103,6 @@ export default function App() {
               <Route path="/menu/lihat" element={<LihatMenuPage />} />
               <Route path="/stok" element={<StokPage />} />
               <Route path="/penerimaan" element={<PenerimaanPage />} />
-              <Route path="/stok/penyesuaian" element={<PenyesuaianPage />} />
               <Route path="/stok/kartu/:ingredientId" element={<KartuStokPage />} />
               {/* Absen: semua peran (tim absen sendiri; admin/kasir + stasiun pindai) */}
               <Route path="/absen" element={<AbsenPage />} />

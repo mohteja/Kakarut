@@ -664,15 +664,21 @@ export interface OpnameSesiDetail {
   /** owner/admin yang meng-ACC / menolak (bila ada) */
   ditinjau_oleh: string | null;
   items: {
+    /** id baris opname — dipakai untuk ACC/Tolak per produk */
+    id: string;
     nama: string;
     satuan: string;
     system_qty: number | null;
     qty_fisik: number;
     selisih: number | null;
+    /** status ACC baris ini (per produk): menunggu / disetujui / ditolak */
+    penyesuaian_status: PenyesuaianStatus;
     /** bukti foto selisih (URL) — dilampirkan saat pengecekan, untuk ACC admin */
     foto_url: string | null;
     /** alasan selisih (opsional) — dilampirkan saat pengecekan */
     alasan: string | null;
+    /** alasan penolakan baris (bila baris ini ditolak) */
+    tolak_alasan: string | null;
   }[];
 }
 

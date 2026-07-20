@@ -1,13 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import type {
-  MenuDto,
-  MenuStokDto,
-  PenyesuaianRow,
-  PenyimpananDto,
-  StokRowDto,
-} from "@kakarut/shared";
+import type { MenuDto, MenuStokDto, PenyimpananDto, StokRowDto } from "@kakarut/shared";
 import {
   Card,
   PageTitle,
@@ -43,8 +37,6 @@ export function StokPage() {
   const selTipe = cabang.find((b) => b.id === dataId)?.tipe;
   const isKantorData = selTipe === "kantor";
   const bolehStokMenu = selTipe !== "central_kitchen" && selTipe !== "kantor";
-  // tim hanya CEK stok — opname/penyesuaian bukan tugasnya
-  const isTim = auth?.user.role === "tim";
   const isManajemen = auth?.user.role === "owner" || auth?.user.role === "admin";
   // Dua tampilan: stok BAHAN (baris per bahan baku) & stok MENU (sisa porsi
   // per menu, diturunkan dari saldo bahan — selalu berkorelasi otomatis).
@@ -74,14 +66,6 @@ export function StokPage() {
     queryKey: ["penyimpanan", branchQuery],
     queryFn: () => api<PenyimpananDto[]>(`/penyimpanan${branchQuery}`),
   });
-  // semua penyesuaian yang belum tuntas (belum diklarifikasi + menunggu persetujuan)
-  const { data: penyesuaianRows = [] } = useQuery({
-    queryKey: ["penyesuaian", branchQuery, "semua"],
-    queryFn: () => api<PenyesuaianRow[]>(`/stok/penyesuaian${branchQuery || ""}`),
-  });
-  const belumTuntas = penyesuaianRows.filter(
-    (r) => r.penyesuaian_status !== "disetujui",
-  ).length;
 
   const [cari, setCari] = useState("");
   const [filterTempat, setFilterTempat] = useState<string>("semua");
@@ -118,18 +102,7 @@ export function StokPage() {
         aksi={
           !isKantorData && tab !== "menu" ? (
             <div className="flex flex-wrap gap-2">
-              {/* Penyesuaian = klarifikasi/persetujuan selisih (manajemen/kasir);
-                  tim hanya melakukan opname + lihat riwayat. */}
-              {tab === "bahan" && !isTim && (
-                <Link to="/stok/penyesuaian" className={`${btnSecondary} relative`}>
-                  ⚠️ Penyesuaian
-                  {belumTuntas > 0 && (
-                    <span className="absolute -right-1.5 -top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-xs font-bold text-white">
-                      {belumTuntas}
-                    </span>
-                  )}
-                </Link>
-              )}
+              {/* ACC/Tolak selisih kini per produk di dalam Riwayat Stock Opname. */}
               {tab === "bahan" && (
                 <Link to="/stok/opname/riwayat" className={btnSecondary}>
                   🕑 Riwayat
