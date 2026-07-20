@@ -793,6 +793,90 @@ export async function buatBeliPerlengkapan(params: {
 }
 
 /**
+ * Buat faktur beli perlengkapan MANUAL (dari halaman Beli Perlengkapan). CK
+ * ditentukan eksplisit atau otomatis bila perusahaan hanya punya satu; cabang
+ * tujuan (opsional) harus store — dikirim otomatis setelah tiba.
+ */
+export async function buatBeliPerlengkapanManual(params: {
+  companyId: string;
+  userId: string;
+  supplyId: string;
+  ckBranchId?: string | null;
+  qty: number;
+  tujuanBranchId?: string | null;
+  totalHarga?: number | null;
+  catatan?: string | null;
+}): Promise<{ id: string; nomor: string } | { error: string; code?: number }> {
+  const [sup] = await db
+    .select({ id: supplies.id })
+    .from(supplies)
+    .where(
+      and(
+        eq(supplies.id, params.supplyId),
+        eq(supplies.companyId, params.companyId),
+        eq(supplies.isActive, true),
+      ),
+    );
+  if (!sup) return { error: "Perlengkapan tidak ditemukan", code: 404 };
+
+  // tentukan CK tujuan beli
+  let ckId = params.ckBranchId ?? null;
+  if (ckId) {
+    const [ck] = await db
+      .select({ id: branches.id })
+      .from(branches)
+      .where(
+        and(
+          eq(branches.id, ckId),
+          eq(branches.companyId, params.companyId),
+          eq(branches.tipe, "central_kitchen"),
+        ),
+      );
+    if (!ck) return { error: "Central Kitchen tidak valid", code: 400 };
+  } else {
+    const cks = await db
+      .select({ id: branches.id })
+      .from(branches)
+      .where(
+        and(
+          eq(branches.companyId, params.companyId),
+          eq(branches.tipe, "central_kitchen"),
+          eq(branches.isActive, true),
+        ),
+      );
+    if (cks.length === 0) return { error: "Belum ada Central Kitchen", code: 400 };
+    if (cks.length > 1) return { error: "Pilih Central Kitchen tujuan beli", code: 400 };
+    ckId = cks[0].id;
+  }
+
+  // cabang tujuan (opsional) wajib store
+  if (params.tujuanBranchId) {
+    const [st] = await db
+      .select({ id: branches.id })
+      .from(branches)
+      .where(
+        and(
+          eq(branches.id, params.tujuanBranchId),
+          eq(branches.companyId, params.companyId),
+          eq(branches.tipe, "store"),
+        ),
+      );
+    if (!st) return { error: "Cabang tujuan tidak valid (harus store)", code: 400 };
+  }
+
+  return buatBeliPerlengkapan({
+    companyId: params.companyId,
+    ckBranchId: ckId,
+    supplyId: params.supplyId,
+    qty: params.qty,
+    userId: params.userId,
+    tujuanBranchId: params.tujuanBranchId ?? null,
+    totalHarga: params.totalHarga ?? null,
+    catatan: params.catatan ?? null,
+  });
+}
+
+/**
  * Permintaan perlengkapan OTOMATIS untuk satu cabang: pindai item yang saldo ≤
  * stok minimum, lalu untuk tiap item terbitkan kiriman KP- sebanyak stok yang
  * ADA di CK; kekurangan yang belum tertutup diterbitkan sebagai FAKTUR BELI ke

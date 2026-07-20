@@ -24,6 +24,7 @@ import { terbitkanNomor } from "../dokumen/nomor";
 import {
   batalBeliPerlengkapan,
   belanjaPerlengkapan,
+  buatBeliPerlengkapanManual,
   buatKirimanPerlengkapan,
   buatOpnamePerlengkapan,
   daftarBeliPerlengkapan,
@@ -333,6 +334,40 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
     else ckFilter = c.req.query("branch_id") || undefined;
     return c.json(await daftarBeliPerlengkapan(auth.company_id!, ckFilter));
   })
+  /** Buat faktur beli perlengkapan MANUAL ke CK. owner/admin. */
+  .post(
+    "/beli",
+    requireRole("owner", "admin"),
+    zValidator(
+      "json",
+      z.object({
+        supply_id: z.string().uuid(),
+        ck_branch_id: z.string().uuid().nullish(),
+        qty: z.number().positive(),
+        tujuan_branch_id: z.string().uuid().nullish(),
+        total_harga: z.number().min(0).nullish(),
+        catatan: z.string().nullish(),
+      }),
+    ),
+    async (c) => {
+      const auth = c.get("auth");
+      const b = c.req.valid("json");
+      const hasil = await buatBeliPerlengkapanManual({
+        companyId: auth.company_id!,
+        userId: auth.sub,
+        supplyId: b.supply_id,
+        ckBranchId: b.ck_branch_id ?? null,
+        qty: b.qty,
+        tujuanBranchId: b.tujuan_branch_id ?? null,
+        totalHarga: b.total_harga ?? null,
+        catatan: b.catatan ?? null,
+      });
+      if ("error" in hasil) {
+        throw new HTTPException((hasil.code ?? 400) as 400 | 404, { message: hasil.error });
+      }
+      return c.json(hasil, 201);
+    },
+  )
   /**
    * Barang faktur beli TIBA di CK → masuk stok CK (PL-) + otomatis kirim (KP-)
    * ke cabang tujuan. owner/admin (manajemen memproses kedatangan di CK).

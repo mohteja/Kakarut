@@ -3122,6 +3122,15 @@ cek "batal faktur beli menunggu → ok" "V == 1" \
   "$(api "$OWNER" POST "/perlengkapan/beli/$BB_ID/batal" '{}' | jq '(.ok==true)|if . then 1 else 0 end')"
 cek "batal lagi (sudah batal) → 404" "V == 404" \
   "$(status_code "$OWNER" POST "/perlengkapan/beli/$BB_ID/batal")"
+# MANUAL: buat faktur beli perlengkapan langsung (halaman Beli Perlengkapan)
+SBMAN=$(api "$OWNER" POST /perlengkapan '{"nama":"Tisu Manual Uji","satuan":"pak"}' | jq -r .id)
+MAN92=$(api "$OWNER" POST /perlengkapan/beli "{\"supply_id\":\"$SBMAN\",\"ck_branch_id\":\"$CK52_UTAMA\",\"qty\":3,\"tujuan_branch_id\":\"$CB46_ID\",\"total_harga\":15000}")
+cek "manual: faktur beli BP- terbit" "V == 1" \
+  "$(echo "$MAN92" | jq '((.nomor // "")|test("^BP-"))|if . then 1 else 0 end')"
+cek "manual: muncul di daftar (menunggu, tujuan CB46)" "V == 1" \
+  "$(api "$OWNER" GET /perlengkapan/beli | jq --arg id "$SBMAN" '([.[]|select(.supply_id==$id and .status=="menunggu" and .tujuan_nama=="Cabang Uji 46")]|length>=1)|if . then 1 else 0 end')"
+cek "guard: kasir buat beli perlengkapan → 403" "V == 403" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/perlengkapan/beli" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d "{\"supply_id\":\"$SBMAN\",\"qty\":1}")"
 
 # NB: §91 mengosongkan SELURUH Tempat Sampah perusahaan (hapus permanen) —
 # maka HARUS jadi seksi TERAKHIR agar tak mengganggu cek soft-delete di atas.

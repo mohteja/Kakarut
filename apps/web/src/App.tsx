@@ -45,6 +45,7 @@ import { OpnamePerlengkapanPage } from "./pages/stok/OpnamePerlengkapanPage";
 import { OpnameRiwayatPage } from "./pages/stok/OpnameRiwayatPage";
 import { PenyesuaianPage } from "./pages/stok/PenyesuaianPage";
 import { StokPage } from "./pages/stok/StokPage";
+import { BeliPerlengkapanPage } from "./pages/perlengkapan/BeliPerlengkapanPage";
 import { PerlengkapanPage } from "./pages/perlengkapan/PerlengkapanPage";
 import { SistemPage } from "./pages/superadmin/SistemPage";
 import { TenantsPage } from "./pages/superadmin/TenantsPage";
@@ -141,6 +142,7 @@ export default function App() {
                   {/* master perlengkapan (nama/harga/aturan) — operasi stoknya
                       utk semua peran ada di halaman Stok → tab Perlengkapan */}
                   <Route path="/perlengkapan" element={<PerlengkapanPage />} />
+                  <Route path="/perlengkapan/beli" element={<BeliPerlengkapanPage />} />
                   <Route path="/pembelian/rekomendasi" element={<RekomendasiBeliPage />} />
                   <Route path="/stok/tambah-dari-menu" element={<TambahStokDariMenuPage />} />
                   <Route path="/stok/awal" element={<StokAwalPage />} />
