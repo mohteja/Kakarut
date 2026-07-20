@@ -135,12 +135,20 @@ function BahanRakModal({ tempat, onClose }: { tempat: PenyimpananDto; onClose: (
   });
   const { data: terpasang, isLoading: loadAsg } = useQuery({
     queryKey: ["penyimpanan-bahan", tempat.id],
-    queryFn: () => api<{ ingredient_ids: string[] }>(`/penyimpanan/${tempat.id}/bahan`),
+    queryFn: () =>
+      api<{ ingredient_ids: string[]; terpakai_lain: string[] }>(
+        `/penyimpanan/${tempat.id}/bahan`,
+      ),
   });
   const [selected, setSelected] = useState<Set<string> | null>(null);
   const [cari, setCari] = useState("");
   // seed pilihan sekali dari data server
   const sel = selected ?? new Set(terpasang?.ingredient_ids ?? []);
+  // bahan yang sudah di rak LAIN pada cabang ini — disembunyikan (1 bahan = 1 rak per cabang)
+  const terpakaiLain = useMemo(
+    () => new Set(terpasang?.terpakai_lain ?? []),
+    [terpasang],
+  );
 
   const simpan = useMutation({
     mutationFn: () =>
@@ -166,10 +174,11 @@ function BahanRakModal({ tempat, onClose }: { tempat: PenyimpananDto; onClose: (
     () =>
       bahan.filter(
         (b) =>
-          b.nama.toLowerCase().includes(cari.toLowerCase()) ||
-          (b.kode ?? "").toLowerCase().includes(cari.toLowerCase()),
+          !terpakaiLain.has(b.id) &&
+          (b.nama.toLowerCase().includes(cari.toLowerCase()) ||
+            (b.kode ?? "").toLowerCase().includes(cari.toLowerCase())),
       ),
-    [bahan, cari],
+    [bahan, cari, terpakaiLain],
   );
 
   return (
@@ -186,7 +195,14 @@ function BahanRakModal({ tempat, onClose }: { tempat: PenyimpananDto; onClose: (
           placeholder="Cari bahan (nama / kode)…"
           className={inputClass}
         />
-        <div className="text-xs text-stone-500">{sel.size} bahan dipilih</div>
+        <div className="text-xs text-stone-500">
+          {sel.size} bahan dipilih
+          {terpakaiLain.size > 0 && (
+            <span className="ml-2 text-stone-400">
+              · {terpakaiLain.size} bahan sudah di rak lain (disembunyikan)
+            </span>
+          )}
+        </div>
         {loadBahan || loadAsg ? (
           <Spinner />
         ) : (

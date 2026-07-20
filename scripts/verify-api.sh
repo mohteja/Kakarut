@@ -3282,6 +3282,11 @@ cek "GET rak/bahan: berisi BH94" "V == 1" \
   "$(api "$OWNER" GET "/penyimpanan/$RC94/bahan" | jq --arg i "$BH94" '[.ingredient_ids[]|select(.==$i)]|length')"
 cek "daftar penyimpanan: jumlah_bahan RC94 = 1" "V == 1" \
   "$(api "$OWNER" GET "/penyimpanan?branch_id=$CB46_ID" | jq --arg r "$RC94" '[.[]|select(.id==$r)][0].jumlah_bahan')"
+# picker rak lain di cabang yang sama: BH94 tampil sebagai terpakai_lain (disembunyikan)
+cek "GET RC94B/bahan: BH94 di terpakai_lain (sudah di RC94)" "V == 1" \
+  "$(api "$OWNER" GET "/penyimpanan/$RC94B/bahan" | jq --arg i "$BH94" '[.terpakai_lain[]|select(.==$i)]|length')"
+cek "GET RC94/bahan: BH94 TIDAK di terpakai_lain (rak ini sendiri)" "V == 0" \
+  "$(api "$OWNER" GET "/penyimpanan/$RC94/bahan" | jq --arg i "$BH94" '[.terpakai_lain[]|select(.==$i)]|length')"
 cek "guard: kasir assign bahan rak → 403" "V == 403" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/penyimpanan/$RC94/bahan" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d "{\"ingredient_ids\":[\"$BH94\"]}")"
 cek "guard: bahan asing (uuid acak) → 400" "V == 400" \
