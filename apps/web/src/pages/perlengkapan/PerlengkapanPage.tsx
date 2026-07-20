@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import type {
+  BeliPerlengkapanRow,
   KategoriDto,
   PenyimpananDto,
   PerlengkapanAturanDto,
@@ -19,6 +20,7 @@ import {
   tdClass,
   thClass,
 } from "../../components/ui";
+import { useAuth } from "../../context/AuthContext";
 import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah } from "../../lib/format";
@@ -116,6 +118,8 @@ export function PerlengkapanPage() {
         <b>Stok → tab Perlengkapan</b>.
       </div>
       <ErrorText error={hapus.error} />
+
+      <FakturBeliSection />
 
       <div className="mb-3">
         <input
@@ -648,5 +652,181 @@ function AturanForm({
         </button>
       </div>
     </>
+  );
+}
+
+/**
+ * Faktur beli perlengkapan KE CK (BP-) — dibuat saat stok CK kurang dari
+ * permintaan cabang. Manajemen menandai "Tiba di CK" → barang masuk stok CK &
+ * otomatis dikirim (KP-) ke cabang tujuan. Mengikuti alur beli bahan baku.
+ */
+function FakturBeliSection() {
+  const { auth } = useAuth();
+  const queryClient = useQueryClient();
+  const isManajemen = auth?.user.role === "owner" || auth?.user.role === "admin";
+  const [tiba, setTiba] = useState<BeliPerlengkapanRow | null>(null);
+
+  const { data: rows = [] } = useQuery({
+    queryKey: ["perlengkapan-beli"],
+    queryFn: () => api<BeliPerlengkapanRow[]>("/perlengkapan/beli"),
+  });
+  const batal = useMutation({
+    mutationFn: (id: string) => api(`/perlengkapan/beli/${id}/batal`, { method: "POST", body: {} }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["perlengkapan-beli"] }),
+  });
+
+  // sembunyikan seksi bila tak ada faktur sama sekali
+  if (rows.length === 0) return null;
+  const menunggu = rows.filter((r) => r.status === "menunggu");
+
+  return (
+    <Card className="mb-4 overflow-hidden">
+      <div className="flex items-center justify-between bg-amber-50 px-4 py-2">
+        <div className="text-sm font-semibold text-amber-900">
+          🛒 Faktur Beli ke CK{" "}
+          {menunggu.length > 0 && (
+            <span className="ml-1 rounded-full bg-amber-500 px-2 py-0.5 text-xs font-bold text-white">
+              {menunggu.length} menunggu
+            </span>
+          )}
+        </div>
+        <div className="text-xs text-amber-700">Beli → tiba di CK → otomatis dikirim ke cabang</div>
+      </div>
+      <div className="divide-y divide-stone-100">
+        {rows.slice(0, 30).map((r) => (
+          <div key={r.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2 text-sm">
+            {r.nomor && (
+              <span className="rounded bg-stone-100 px-1.5 py-0.5 font-mono text-xs font-bold text-stone-600">
+                {r.nomor}
+              </span>
+            )}
+            <span className="font-medium text-stone-800">{r.nama}</span>
+            <span className="text-stone-500">
+              {formatAngka(r.qty)} {r.satuan}
+            </span>
+            {r.tujuan_nama && (
+              <span className="text-xs text-stone-500">
+                🎯 {r.ck_nama} → {r.tujuan_nama}
+              </span>
+            )}
+            <BeliStatusBadge status={r.status} />
+            {r.total_harga != null && r.total_harga > 0 && (
+              <span className="text-xs text-stone-500">{formatRupiah(r.total_harga)}</span>
+            )}
+            {isManajemen && r.status === "menunggu" && (
+              <div className="ml-auto flex gap-2">
+                <button
+                  onClick={() => setTiba(r)}
+                  className="rounded-lg bg-green-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-green-700"
+                >
+                  ✅ Tiba di CK
+                </button>
+                <button
+                  onClick={() => {
+                    if (window.confirm(`Batalkan faktur beli "${r.nama}"?`)) batal.mutate(r.id);
+                  }}
+                  className="rounded-lg px-2.5 py-1 text-xs font-medium text-red-500 hover:bg-red-50"
+                >
+                  Batal
+                </button>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      {tiba && <TibaBeliModal beli={tiba} onClose={() => setTiba(null)} />}
+    </Card>
+  );
+}
+
+function BeliStatusBadge({ status }: { status: BeliPerlengkapanRow["status"] }) {
+  const map = {
+    menunggu: { teks: "Menunggu dibeli", cls: "bg-amber-100 text-amber-800" },
+    tiba: { teks: "Tiba di CK ✓", cls: "bg-blue-100 text-blue-800" },
+    batal: { teks: "Dibatalkan", cls: "bg-stone-100 text-stone-500" },
+  }[status];
+  return (
+    <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${map.cls}`}>{map.teks}</span>
+  );
+}
+
+/** Konfirmasi barang tiba di CK: qty final + nilai belanja (opsional). */
+function TibaBeliModal({ beli, onClose }: { beli: BeliPerlengkapanRow; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const [qty, setQty] = useState(String(beli.qty));
+  const [totalHarga, setTotalHarga] = useState(beli.total_harga ? String(beli.total_harga) : "");
+
+  const simpan = useMutation({
+    mutationFn: () =>
+      api(`/perlengkapan/beli/${beli.id}/tiba`, {
+        method: "POST",
+        body: {
+          qty: Number(qty) || beli.qty,
+          total_harga: totalHarga === "" ? null : Number(totalHarga),
+        },
+      }),
+    onSuccess: () => {
+      for (const key of ["perlengkapan-beli", "perlengkapan", "perlengkapan-kiriman", "penerimaan"]) {
+        queryClient.invalidateQueries({ queryKey: [key] });
+      }
+      onClose();
+    },
+  });
+
+  return (
+    <Modal open onClose={onClose} title={`Tiba di CK — ${beli.nama}`}>
+      <div className="space-y-3">
+        <div className="rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-800">
+          Barang masuk stok <b>{beli.ck_nama}</b>
+          {beli.tujuan_nama ? (
+            <>
+              {" "}
+              lalu <b>otomatis dikirim</b> ke <b>{beli.tujuan_nama}</b> (cabang tinggal menerima).
+            </>
+          ) : (
+            <> (disimpan sebagai stok CK).</>
+          )}
+        </div>
+        <div>
+          <label className="mb-1 block text-sm font-medium">
+            Jumlah yang tiba ({beli.satuan})
+          </label>
+          <input
+            type="number"
+            inputMode="decimal"
+            min="0"
+            step="any"
+            value={qty}
+            onChange={(e) => setQty(e.target.value)}
+            className={inputClass}
+          />
+        </div>
+        <div>
+          <label className="mb-1 block text-sm font-medium">Nilai belanja (opsional)</label>
+          <input
+            type="number"
+            inputMode="numeric"
+            min="0"
+            value={totalHarga}
+            onChange={(e) => setTotalHarga(e.target.value)}
+            placeholder="mis. 50000"
+            className={inputClass}
+          />
+        </div>
+        <ErrorText error={simpan.error} />
+        <div className="flex justify-end gap-2 pt-1">
+          <button onClick={onClose} className={btnSecondary}>
+            Batal
+          </button>
+          <button
+            onClick={() => simpan.mutate()}
+            disabled={simpan.isPending || !(Number(qty) > 0)}
+            className={btnPrimary}
+          >
+            {simpan.isPending ? "Menyimpan…" : "✅ Tiba & Kirim"}
+          </button>
+        </div>
+      </div>
+    </Modal>
   );
 }

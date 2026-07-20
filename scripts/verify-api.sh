@@ -3073,8 +3073,8 @@ api "$OWNER" POST "/perlengkapan/$PO90/masuk?branch_id=$CK52_UTAMA" '{"qty":6}' 
 HP90=$(api "$OWNER" POST "/perlengkapan/permintaan-otomatis?branch_id=$CB46_ID" '{}')
 cek "kiriman dibuat utk item ≤ minimum, qty = stok CK (6)" "V == 1" \
   "$(echo "$HP90" | jq --arg id "$PO90" '([.dibuat[]|select(.supply_id==$id)] | (length==1) and (.[0].qty==6) and (.[0].nomor|test("^KP-"))) | if . then 1 else 0 end')"
-cek "sisa kekurangan (10−6=4) dilaporkan perlu beli di CK" "V == 1" \
-  "$(echo "$HP90" | jq --arg id "$PO90" '([.perlu_beli_ck[]|select(.supply_id==$id)] | (length==1) and (.[0].qty==4)) | if . then 1 else 0 end')"
+cek "sisa kekurangan (10−6=4) jadi FAKTUR BELI ke CK (BP-)" "V == 1" \
+  "$(echo "$HP90" | jq --arg id "$PO90" '([.beli_dibuat[]|select(.supply_id==$id)] | (length==1) and (.[0].qty==4) and (.[0].nomor|test("^BP-"))) | if . then 1 else 0 end')"
 # kiriman KP- muncul di daftar kiriman cabang (menunggu diterima)
 cek "kiriman otomatis tampil di cabang (status dikirim)" "V == 1" \
   "$(api "$OWNER" GET "/perlengkapan/kiriman?branch_id=$CB46_ID" | jq --arg id "$PO90" '([.[]|select(.item.id==$id and .status=="dikirim")] | length >= 1) | if . then 1 else 0 end')"
@@ -3084,6 +3084,44 @@ cek "guard: kasir jalankan permintaan otomatis → 403" "V == 403" \
   "$(status_code "$KASIR" POST /perlengkapan/permintaan-otomatis)"
 cek "guard: target Central Kitchen → 400 (CK belanja langsung)" "V == 400" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/perlengkapan/permintaan-otomatis?branch_id=$CK52_UTAMA" -H "Authorization: Bearer $OWNER")"
+
+echo "== 92b. Faktur beli perlengkapan ke CK: tiba → masuk stok CK + otomatis kirim =="
+# faktur beli BP- (qty 4, tujuan CB46) dari §90 muncul di daftar 'menunggu'
+BELI90=$(api "$OWNER" GET /perlengkapan/beli | jq -r --arg id "$PO90" '[.[]|select(.supply_id==$id and .status=="menunggu")][0].id')
+[ "$BELI90" != "null" ] && [ -n "$BELI90" ] && ok "faktur beli BP- tampil (menunggu)"
+cek "guard: kasir tandai tiba → 403" "V == 403" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/perlengkapan/beli/$BELI90/tiba" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d '{"qty":4}')"
+# CK saldo sebelum tiba = 6 (masuk awal; kiriman KP-6 belum diterima → belum kurang)
+CKSALDO_A=$(api "$OWNER" GET "/perlengkapan?branch_id=$CK52_UTAMA" | jq --arg id "$PO90" '[.[]|select(.id==$id)][0].saldo // 0')
+cek "CK saldo sebelum tiba = 6" "abs(V - 6) < 0.001" "$CKSALDO_A"
+# tandai TIBA (qty 4, nilai 20.000) → masuk stok CK (PL-) + auto-kirim (KP-) ke CB46
+TIBA90=$(api "$OWNER" POST "/perlengkapan/beli/$BELI90/tiba" '{"qty":4,"total_harga":20000}')
+cek "tiba: dapat nomor masuk PL-" "V == 1" \
+  "$(echo "$TIBA90" | jq '((.nomor_masuk // "")|test("^PL-")) | if . then 1 else 0 end')"
+cek "tiba: kiriman otomatis KP- diterbitkan ke cabang" "V == 1" \
+  "$(echo "$TIBA90" | jq '((.kiriman.nomor // "")|test("^KP-")) | if . then 1 else 0 end')"
+cek "CK saldo setelah tiba = 10 (6 + beli 4)" "abs(V - 10) < 0.001" \
+  "$(api "$OWNER" GET "/perlengkapan?branch_id=$CK52_UTAMA" | jq --arg id "$PO90" '[.[]|select(.id==$id)][0].saldo // 0')"
+cek "faktur beli kini berstatus 'tiba'" "V == 1" \
+  "$(api "$OWNER" GET /perlengkapan/beli | jq -r --arg b "$BELI90" '([.[]|select(.id==$b and .status=="tiba")]|length) | if . >= 1 then 1 else 0 end')"
+# dua kiriman KP- (6 + 4) menunggu diterima di CB46 → terima semuanya
+for KID in $(api "$OWNER" GET "/perlengkapan/kiriman?branch_id=$CB46_ID" | jq -r --arg id "$PO90" '.[]|select(.item.id==$id and .status=="dikirim")|.id'); do
+  api "$OWNER" POST "/perlengkapan/kiriman/$KID/terima?branch_id=$CB46_ID" '{}' > /dev/null
+done
+cek "setelah terima semua: saldo cabang CB46 = 10" "abs(V - 10) < 0.001" \
+  "$(api "$OWNER" GET "/perlengkapan?branch_id=$CB46_ID" | jq --arg id "$PO90" '[.[]|select(.id==$id)][0].saldo // 0')"
+cek "CK saldo kembali 0 (semua terkirim)" "abs(V) < 0.001" \
+  "$(api "$OWNER" GET "/perlengkapan?branch_id=$CK52_UTAMA" | jq --arg id "$PO90" '[.[]|select(.id==$id)][0].saldo // 0')"
+cek "tiba lagi (idempoten) → 400 (sudah tiba)" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/perlengkapan/beli/$BELI90/tiba" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{}')"
+# batal: buat faktur beli baru lalu batalkan
+BELIBATAL=$(api "$OWNER" POST /perlengkapan '{"nama":"Sabun Colek Uji","satuan":"pcs","stok_minimum":5}' | jq -r .id)
+api "$OWNER" POST "/perlengkapan/permintaan-otomatis?branch_id=$CB46_ID" '{}' > /dev/null
+BB_ID=$(api "$OWNER" GET /perlengkapan/beli | jq -r --arg id "$BELIBATAL" '[.[]|select(.supply_id==$id and .status=="menunggu")][0].id')
+cek "batal faktur beli menunggu → ok" "V == 1" \
+  "$(api "$OWNER" POST "/perlengkapan/beli/$BB_ID/batal" '{}' | jq '(.ok==true)|if . then 1 else 0 end')"
+cek "batal lagi (sudah batal) → 404" "V == 404" \
+  "$(status_code "$OWNER" POST "/perlengkapan/beli/$BB_ID/batal")"
 
 # NB: §91 mengosongkan SELURUH Tempat Sampah perusahaan (hapus permanen) —
 # maka HARUS jadi seksi TERAKHIR agar tak mengganggu cek soft-delete di atas.

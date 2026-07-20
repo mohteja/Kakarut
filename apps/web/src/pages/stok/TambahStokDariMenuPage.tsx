@@ -311,7 +311,7 @@ export function TambahStokDariMenuPage() {
       }
       // bila ada perlengkapan yang diminta, tampilkan ringkasannya dulu
       // (kiriman KP- muncul di Penerimaan cabang); tutup → ke Permintaan Stok
-      if (perlengkapan && (perlengkapan.dibuat.length > 0 || perlengkapan.perlu_beli_ck.length > 0)) {
+      if (perlengkapan && (perlengkapan.dibuat.length > 0 || perlengkapan.beli_dibuat.length > 0)) {
         setHasilPerlengkapan(perlengkapan);
       } else {
         navigate("/permintaan-stok");
@@ -827,23 +827,32 @@ export function TambahStokDariMenuPage() {
                 </div>
               </div>
             )}
-            {hasilPerlengkapan.perlu_beli_ck.length > 0 && (
+            {hasilPerlengkapan.beli_dibuat.length > 0 && (
               <div>
                 <div className="mb-1 text-xs font-semibold uppercase text-amber-700">
-                  🛒 Perlu dibeli di CK (stok CK tak cukup)
+                  🛒 Faktur beli ke CK (stok CK kurang → dibeli lalu dikirim)
                 </div>
                 <div className="divide-y divide-amber-100 rounded-lg border border-amber-200 bg-amber-50/50">
-                  {hasilPerlengkapan.perlu_beli_ck.map((d) => (
+                  {hasilPerlengkapan.beli_dibuat.map((d) => (
                     <div
                       key={d.supply_id}
                       className="flex items-center justify-between px-3 py-1.5 text-sm"
                     >
                       <span className="text-stone-700">{d.nama}</span>
-                      <span>
+                      <span className="flex items-center gap-2">
+                        {d.nomor && (
+                          <span className="rounded bg-amber-200 px-1.5 py-0.5 font-mono text-xs font-bold text-amber-900">
+                            {d.nomor}
+                          </span>
+                        )}
                         <b>{formatAngka(d.qty)}</b> {d.satuan}
                       </span>
                     </div>
                   ))}
+                </div>
+                <div className="mt-1 text-xs text-stone-400">
+                  Proses di <b>Perlengkapan → Faktur Beli ke CK</b>: tandai “Tiba di CK” →
+                  masuk stok CK &amp; otomatis dikirim ke cabang.
                 </div>
               </div>
             )}

@@ -1012,6 +1012,8 @@ export const dokumenJenisEnum = pgEnum("dokumen_jenis", [
   "perlengkapan",
   "kiriman_perlengkapan",
   "opname_perlengkapan",
+  // faktur beli perlengkapan ke CK (BP-, ref = supply_purchases.id)
+  "beli_perlengkapan",
 ]);
 
 /**
@@ -1257,4 +1259,53 @@ export const supplyTransfers = pgTable(
     diterimaAt: timestamp("diterima_at", { withTimezone: true }),
   },
   (t) => [index("supply_transfers_ke_status_idx").on(t.keBranchId, t.status)],
+);
+
+/**
+ * Status faktur beli perlengkapan ke CK: 'menunggu' (faktur terbit, barang
+ * belum dibeli/tiba), 'tiba' (barang masuk stok CK + otomatis dikirim ke
+ * cabang tujuan bila ada), 'batal'.
+ */
+export const supplyBeliStatusEnum = pgEnum("supply_beli_status", [
+  "menunggu",
+  "tiba",
+  "batal",
+]);
+
+/**
+ * Faktur beli perlengkapan KE CENTRAL KITCHEN — dibuat saat stok CK kurang
+ * (dari permintaan cabang) atau manual. Alur meniru bahan baku: beli → tiba di
+ * CK (masuk stok CK, bernomor PL-) → otomatis dikirim (KP-) ke cabang tujuan.
+ * Faktur sendiri bernomor BP-.
+ */
+export const supplyPurchases = pgTable(
+  "supply_purchases",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    /** CK tempat barang dibeli & masuk stok */
+    ckBranchId: uuid("ck_branch_id")
+      .notNull()
+      .references(() => branches.id),
+    supplyId: uuid("supply_id")
+      .notNull()
+      .references(() => supplies.id, { onDelete: "cascade" }),
+    qty: numeric("qty", { precision: 16, scale: 3, mode: "number" }).notNull(),
+    /** nilai belanja — diisi saat barang tiba (opsional) */
+    totalHarga: numeric("total_harga", { precision: 14, scale: 2, mode: "number" }),
+    /** cabang store yang butuh — dikirim otomatis setelah tiba (null = stok CK saja) */
+    tujuanBranchId: uuid("tujuan_branch_id").references(() => branches.id),
+    status: supplyBeliStatusEnum("status").notNull().default("menunggu"),
+    catatan: text("catatan"),
+    userId: uuid("user_id").references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    /** kiriman KP- yang otomatis dibuat saat tiba (bila cabang tujuan diisi) */
+    kirimTransferId: uuid("kirim_transfer_id").references(() => supplyTransfers.id),
+    tibaBy: uuid("tiba_by").references(() => users.id),
+    tibaAt: timestamp("tiba_at", { withTimezone: true }),
+  },
+  (t) => [index("supply_purchases_ck_status_idx").on(t.ckBranchId, t.status)],
 );

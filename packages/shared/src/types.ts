@@ -990,10 +990,42 @@ export interface PermintaanPerlengkapanOtomatisHasil {
     qty: number;
     nomor: string | null;
   }[];
-  /** item yang masih kurang setelah kiriman — CK harus beli lagi */
-  perlu_beli_ck: { supply_id: string; nama: string; satuan: string; qty: number }[];
+  /**
+   * kekurangan yang stok CK tak cukup → faktur BELI (BP-) ke CK diterbitkan;
+   * dibeli → tiba di CK → otomatis dikirim ke cabang tujuan (seperti bahan baku)
+   */
+  beli_dibuat: {
+    supply_id: string;
+    nama: string;
+    satuan: string;
+    qty: number;
+    nomor: string | null;
+    tujuan_nama: string | null;
+  }[];
   /** item ≤ minimum tapi cabang ini bukan store / tak terhubung CK */
   tak_bisa_kirim: { supply_id: string; nama: string; satuan: string; qty: number }[];
+}
+
+/** Status faktur beli perlengkapan ke CK. */
+export type BeliPerlengkapanStatus = "menunggu" | "tiba" | "batal";
+
+/** Satu faktur beli perlengkapan ke Central Kitchen (BP-). */
+export interface BeliPerlengkapanRow {
+  id: string;
+  supply_id: string;
+  nama: string;
+  satuan: string;
+  qty: number;
+  total_harga: number | null;
+  status: BeliPerlengkapanStatus;
+  /** CK tujuan beli (tempat barang masuk stok) */
+  ck_nama: string;
+  /** cabang store yang butuh — dikirim otomatis setelah tiba (null = stok CK saja) */
+  tujuan_nama: string | null;
+  catatan: string | null;
+  waktu: string;
+  oleh: string | null;
+  nomor: string | null;
 }
 
 /** Kiriman perlengkapan CK → cabang (stok pindah saat cabang menerima). */

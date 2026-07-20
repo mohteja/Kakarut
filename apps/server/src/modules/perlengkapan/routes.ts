@@ -19,12 +19,14 @@ import {
   supplyRules,
   supplySuppliers,
 } from "../../db/schema";
-import { requireRole, resolveBranchId, type AppEnv } from "../../middleware/auth";
+import { requireRole, resolveBranchId, terikatCabang, type AppEnv } from "../../middleware/auth";
 import { terbitkanNomor } from "../dokumen/nomor";
 import {
+  batalBeliPerlengkapan,
   belanjaPerlengkapan,
   buatKirimanPerlengkapan,
   buatOpnamePerlengkapan,
+  daftarBeliPerlengkapan,
   daftarKirimanPerlengkapan,
   detailOpnamePerlengkapan,
   kartuPerlengkapan,
@@ -38,6 +40,7 @@ import {
   tanggalPerusahaan,
   terapkanKonsumsiOtomatis,
   terimaKirimanPerlengkapan,
+  tibaBeliPerlengkapan,
 } from "./service";
 
 const TANGGAL_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -314,6 +317,56 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
       branchId,
       userId: auth.sub,
     });
+    if ("error" in hasil) {
+      throw new HTTPException((hasil.code ?? 400) as 400 | 404, { message: hasil.error });
+    }
+    return c.json(hasil);
+  })
+  /**
+   * Daftar FAKTUR BELI perlengkapan ke CK. owner/admin lihat semua (atau filter
+   * ?branch_id = CK); peran terikat cabang hanya faktur di CK-nya.
+   */
+  .get("/beli", async (c) => {
+    const auth = c.get("auth");
+    let ckFilter: string | undefined;
+    if (terikatCabang(auth.role)) ckFilter = auth.branch_id ?? undefined;
+    else ckFilter = c.req.query("branch_id") || undefined;
+    return c.json(await daftarBeliPerlengkapan(auth.company_id!, ckFilter));
+  })
+  /**
+   * Barang faktur beli TIBA di CK → masuk stok CK (PL-) + otomatis kirim (KP-)
+   * ke cabang tujuan. owner/admin (manajemen memproses kedatangan di CK).
+   */
+  .post(
+    "/beli/:id/tiba",
+    requireRole("owner", "admin"),
+    zValidator(
+      "json",
+      z.object({
+        qty: z.number().positive().optional(),
+        total_harga: z.number().min(0).nullish(),
+      }),
+    ),
+    async (c) => {
+      const auth = c.get("auth");
+      const body = c.req.valid("json");
+      const hasil = await tibaBeliPerlengkapan({
+        companyId: auth.company_id!,
+        id: c.req.param("id"),
+        userId: auth.sub,
+        qty: body.qty,
+        totalHarga: body.total_harga ?? null,
+      });
+      if ("error" in hasil) {
+        throw new HTTPException((hasil.code ?? 400) as 400 | 404, { message: hasil.error });
+      }
+      return c.json(hasil);
+    },
+  )
+  /** Batalkan faktur beli perlengkapan yang masih 'menunggu'. owner/admin. */
+  .post("/beli/:id/batal", requireRole("owner", "admin"), async (c) => {
+    const auth = c.get("auth");
+    const hasil = await batalBeliPerlengkapan(auth.company_id!, c.req.param("id"));
     if ("error" in hasil) {
       throw new HTTPException((hasil.code ?? 400) as 400 | 404, { message: hasil.error });
     }
