@@ -74,9 +74,18 @@ export const danaTipeEnum = pgEnum("dana_tipe", ["cair", "tambahan", "kembali"])
 
 // ===== Tenancy & identitas =====
 
+/**
+ * Metode perhitungan HPP/harga pokok untuk laba-rugi: average (rata-rata
+ * bergerak) atau fifo (masuk pertama keluar pertama). Data pembelian dicatat
+ * per-lot (qty+harga+tanggal) sehingga mendukung keduanya.
+ */
+export const metodeHppEnum = pgEnum("metode_hpp", ["average", "fifo"]);
+
 export const companies = pgTable("companies", {
   id: uuid("id").primaryKey().defaultRandom(),
   nama: text("nama").notNull(),
+  /** metode HPP untuk laba-rugi (average default) */
+  metodeHpp: metodeHppEnum("metode_hpp").notNull().default("average"),
   slug: text("slug").notNull().unique(),
   alamat: text("alamat"),
   telepon: text("telepon"),

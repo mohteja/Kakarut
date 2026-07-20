@@ -1107,3 +1107,40 @@ export interface BelanjaPerlengkapanDto {
   total: number;
   per_item: { supply_id: string; nama: string; total: number }[];
 }
+
+/** Metode perhitungan HPP (laba-rugi) yang dipilih perusahaan. */
+export type MetodeHpp = "average" | "fifo";
+
+/**
+ * Satu "lot" pembelian barang (bahan baku / perlengkapan): satu baris beli
+ * dengan qty + total harga → dasar perhitungan HPP FIFO/rata-rata. `harga_satuan`
+ * = total_harga / qty (null bila harga belum dilaporkan).
+ */
+export interface RiwayatHargaLot {
+  id: string;
+  tanggal: string;
+  qty: number;
+  total_harga: number | null;
+  harga_satuan: number | null;
+  supplier: string | null;
+  /** nomor nota supplier (bila diisi manual) */
+  no_faktur: string | null;
+  /** nomor dokumen otomatis (PB-/PL-) */
+  nomor: string | null;
+}
+
+/**
+ * Riwayat harga beli satu barang: daftar lot pembelian + harga terkini &
+ * rata-rata tertimbang. Dipakai kartu "Riwayat Harga" (bahan baku & perlengkapan)
+ * sebagai fondasi hitung laba-rugi (FIFO/average).
+ */
+export interface RiwayatHargaDto {
+  item: { id: string; nama: string; satuan: string };
+  /** harga per satuan terkini (harga_beli / isi utk bahan; harga_beli utk perlengkapan) */
+  harga_terkini: number;
+  /** rata-rata tertimbang per satuan dari lot berharga (null bila belum ada) */
+  harga_rata: number | null;
+  /** jumlah lot pembelian tercatat */
+  jumlah_pembelian: number;
+  lots: RiwayatHargaLot[];
+}

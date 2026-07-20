@@ -1,5 +1,7 @@
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { Modal, btnPrimary, btnSecondary } from "../../components/ui";
+import { ErrorText, Modal, btnPrimary, btnSecondary, inputClass } from "../../components/ui";
+import { api } from "../../lib/api";
 import { formatAngka, formatRupiah, formatTanggalRingkas, formatWaktu } from "../../lib/format";
 import { unduhPdf } from "../../lib/pdf";
 import { badgeFaktur, labelTahapRingkas, type FakturGroup, type StokMasukRow } from "./TambahStokPage";
@@ -84,6 +86,44 @@ export function DokumenBelanjaModal({
   /** label tujuan satu baris (dipakai saat faktur campuran) */
   const tujuanBaris = (r: StokMasukRow) =>
     r.tujuan_branch_id != null ? `→ ${r.tujuan_cabang ?? "cabang"}` : `di ${lokalNama}`;
+
+  // ===== LAPORAN HARGA: catat harga riil yang dibayar per baris SETELAH barang
+  // dibeli/dikirim → memperbarui total baris + harga acuan bahan (untuk laba-rugi
+  // FIFO/rata-rata). Tersedia begitu ada baris yang sudah dikirim / diterima.
+  const queryClient = useQueryClient();
+  const bisaLapor =
+    grup.fakturId != null &&
+    rows.some((r) => r.status === "menunggu" || r.status === "dikonfirmasi");
+  const [lapor, setLapor] = useState(false);
+  const [hargaInput, setHargaInput] = useState<Record<string, string>>({});
+  const mulaiLapor = () => {
+    const awal: Record<string, string> = {};
+    for (const r of rows) awal[r.id] = r.total_harga != null ? String(r.total_harga) : "";
+    setHargaInput(awal);
+    setLapor(true);
+  };
+  const simpanLapor = useMutation({
+    mutationFn: () =>
+      api(`/pembelian/laporan-harga/${grup.fakturId}`, {
+        method: "POST",
+        body: {
+          items: rows
+            .filter((r) => (hargaInput[r.id] ?? "") !== "")
+            .map((r) => ({ id: r.id, total_harga: Math.max(0, Number(hargaInput[r.id]) || 0) })),
+        },
+      }),
+    onSuccess: () => {
+      // segarkan daftar faktur (total baru) + master bahan (harga acuan baru)
+      queryClient.invalidateQueries({ queryKey: ["/pembelian"] });
+      queryClient.invalidateQueries({ queryKey: ["bahan"] });
+      queryClient.invalidateQueries({ queryKey: ["stok"] });
+      setLapor(false);
+    },
+  });
+  const totalLapor = rows.reduce(
+    (t, r) => t + ((hargaInput[r.id] ?? "") !== "" ? Number(hargaInput[r.id]) || 0 : 0),
+    0,
+  );
 
   const isi = (cetak: boolean) => (
     <div className={cetak ? "text-black" : ""}>
@@ -308,19 +348,91 @@ export function DokumenBelanjaModal({
     <>
       <Modal open onClose={onClose} title={`📄 ${judul}`} lebar="max-w-xl">
         {isi(false)}
+
+        {/* Panel LAPORAN HARGA — input harga riil per bahan setelah dibeli */}
+        {lapor && (
+          <div className="mt-3 rounded-lg border border-emerald-300 bg-emerald-50/60 p-3">
+            <div className="mb-2 text-sm font-bold text-emerald-900">
+              💰 Laporan Harga — catat harga yang benar-benar dibayar
+            </div>
+            <p className="mb-2 text-xs text-emerald-800">
+              Isi total harga tiap bahan sesuai nota belanja. Harga acuan bahan ikut diperbarui
+              untuk perhitungan laba-rugi berikutnya.
+            </p>
+            <div className="space-y-1.5">
+              {rows.map((r) => (
+                <div key={r.id} className="flex items-center gap-2 text-sm">
+                  <span className="flex-1 truncate font-medium text-stone-700" title={r.bahan}>
+                    {r.bahan}
+                    <span className="ml-1 text-xs font-normal text-stone-400">
+                      {formatAngka(r.qty)} {r.satuan}
+                    </span>
+                  </span>
+                  <span className="text-xs text-stone-400">Rp</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step="any"
+                    value={hargaInput[r.id] ?? ""}
+                    onChange={(e) =>
+                      setHargaInput((s) => ({ ...s, [r.id]: e.target.value }))
+                    }
+                    placeholder="0"
+                    className={`${inputClass} max-w-32 text-right`}
+                  />
+                </div>
+              ))}
+            </div>
+            <div className="mt-2 flex justify-between border-t border-emerald-200 pt-2 text-sm font-semibold text-emerald-900">
+              <span>Total dilaporkan</span>
+              <span>{formatRupiah(totalLapor)}</span>
+            </div>
+            <ErrorText error={simpanLapor.error} />
+          </div>
+        )}
+
         <div className="mt-4 flex flex-wrap justify-end gap-2">
-          <button onClick={onClose} className={btnSecondary}>
-            Tutup
-          </button>
-          <button onClick={unduh} className={btnSecondary}>
-            ⬇ Unduh (HTML)
-          </button>
-          <button onClick={() => window.print()} className={btnSecondary}>
-            🖨 Cetak ke printer
-          </button>
-          <button onClick={simpanPdf} disabled={pdfBusy} className={btnPrimary}>
-            {pdfBusy ? "Membuat PDF…" : "📄 Download PDF"}
-          </button>
+          {lapor ? (
+            <>
+              <button
+                onClick={() => setLapor(false)}
+                disabled={simpanLapor.isPending}
+                className={btnSecondary}
+              >
+                Batal
+              </button>
+              <button
+                onClick={() => simpanLapor.mutate()}
+                disabled={simpanLapor.isPending}
+                className={btnPrimary}
+              >
+                {simpanLapor.isPending ? "Menyimpan…" : "💾 Simpan Laporan Harga"}
+              </button>
+            </>
+          ) : (
+            <>
+              <button onClick={onClose} className={btnSecondary}>
+                Tutup
+              </button>
+              {bisaLapor && (
+                <button
+                  onClick={mulaiLapor}
+                  className="rounded-lg border border-emerald-400 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-100"
+                >
+                  💰 Laporan Harga
+                </button>
+              )}
+              <button onClick={unduh} className={btnSecondary}>
+                ⬇ Unduh (HTML)
+              </button>
+              <button onClick={() => window.print()} className={btnSecondary}>
+                🖨 Cetak ke printer
+              </button>
+              <button onClick={simpanPdf} disabled={pdfBusy} className={btnPrimary}>
+                {pdfBusy ? "Membuat PDF…" : "📄 Download PDF"}
+              </button>
+            </>
+          )}
         </div>
       </Modal>
       {/* Kontainer khusus cetak — hanya dokumen yang tampil saat window.print() */}

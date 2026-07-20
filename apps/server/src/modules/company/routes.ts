@@ -25,6 +25,8 @@ const PatchBody = z.object({
   target_penjualan: z.number().min(0).nullish(),
   /** batas maks diskon kasir (%) — 0..100 */
   diskon_maks_persen: z.number().min(0).max(100).optional(),
+  /** metode HPP untuk laba-rugi */
+  metode_hpp: z.enum(["average", "fifo"]).optional(),
 });
 
 const ModeBody = z.object({ mode: z.enum(["lite", "pro"]) });
@@ -144,6 +146,7 @@ export const companyRoutes = new Hono<AppEnv>()
         ...(body.diskon_maks_persen !== undefined && {
           diskonMaksPersen: body.diskon_maks_persen,
         }),
+        ...(body.metode_hpp !== undefined && { metodeHpp: body.metode_hpp }),
         updatedAt: new Date(),
       })
       .where(eq(companies.id, auth.company_id!))

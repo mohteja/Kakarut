@@ -10,8 +10,10 @@ import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
+import type { RiwayatHargaDto, RiwayatHargaLot } from "@kakarut/shared";
 import { db } from "../../db/client";
 import {
+  dokumenNomor,
   storageLocations,
   suppliers,
   supplies,
@@ -99,6 +101,68 @@ async function pastikanRak(companyId: string, rakId: string | null | undefined) 
     );
   if (!rak) throw new HTTPException(400, { message: "Rak penyimpanan tidak valid" });
   return rak.id;
+}
+
+/**
+ * Riwayat harga beli perlengkapan: setiap stok MASUK (se-perusahaan) = satu lot
+ * pembelian. `harga_satuan` = total_harga / qty. Rata-rata tertimbang hanya dari
+ * lot berharga. Fondasi hitung HPP FIFO / rata-rata.
+ */
+async function riwayatHargaPerlengkapan(
+  companyId: string,
+  item: typeof supplies.$inferSelect,
+): Promise<RiwayatHargaDto> {
+  const rows = await db
+    .select({
+      id: supplyMutations.id,
+      tanggal: supplyMutations.tanggal,
+      qty: supplyMutations.qty,
+      totalHarga: supplyMutations.totalHarga,
+      nomor: dokumenNomor.nomorTeks,
+    })
+    .from(supplyMutations)
+    .leftJoin(
+      dokumenNomor,
+      and(
+        eq(dokumenNomor.companyId, supplyMutations.companyId),
+        eq(dokumenNomor.refId, supplyMutations.id),
+      ),
+    )
+    .where(
+      and(
+        eq(supplyMutations.companyId, companyId),
+        eq(supplyMutations.supplyId, item.id),
+        eq(supplyMutations.tipe, "masuk"),
+        eq(supplyMutations.status, "disetujui"),
+      ),
+    )
+    .orderBy(desc(supplyMutations.tanggal), desc(supplyMutations.waktu));
+  const lots: RiwayatHargaLot[] = rows.map((r) => ({
+    id: r.id,
+    tanggal: r.tanggal,
+    qty: r.qty,
+    total_harga: r.totalHarga,
+    harga_satuan:
+      r.totalHarga != null && r.qty > 0 ? Math.round((r.totalHarga / r.qty) * 100) / 100 : null,
+    supplier: null,
+    no_faktur: null,
+    nomor: r.nomor,
+  }));
+  let sumHarga = 0;
+  let sumQty = 0;
+  for (const r of rows) {
+    if (r.totalHarga != null && r.qty > 0) {
+      sumHarga += r.totalHarga;
+      sumQty += r.qty;
+    }
+  }
+  return {
+    item: { id: item.id, nama: item.nama, satuan: item.satuan },
+    harga_terkini: item.hargaBeli,
+    harga_rata: sumQty > 0 ? Math.round((sumHarga / sumQty) * 100) / 100 : null,
+    jumlah_pembelian: lots.length,
+    lots,
+  };
 }
 
 const MasukBody = z.object({
@@ -575,6 +639,37 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
         }
       });
       return c.json({ ok: true, jumlah: supplierIds.length });
+    },
+  )
+  /**
+   * RIWAYAT HARGA beli perlengkapan: daftar lot (stok masuk) + harga terkini &
+   * rata-rata tertimbang (fondasi HPP). Terbuka semua peran (info harga).
+   */
+  .get("/:id/pembelian", async (c) => {
+    const auth = c.get("auth");
+    const item = await muatSupplyAktif(auth.company_id!, c.req.param("id"));
+    if (!item) throw new HTTPException(404, { message: "Perlengkapan tidak ditemukan" });
+    return c.json(await riwayatHargaPerlengkapan(auth.company_id!, item));
+  })
+  /**
+   * CATAT HARGA perlengkapan (dari kartu Riwayat Harga): perbarui harga beli
+   * acuan per satuan → dipakai perkiraan belanja & HPP berikutnya. owner/admin.
+   */
+  .post(
+    "/:id/harga",
+    requireRole("owner", "admin"),
+    zValidator("json", z.object({ harga_per_unit: z.number().min(0) })),
+    async (c) => {
+      const auth = c.get("auth");
+      const { harga_per_unit } = c.req.valid("json");
+      const item = await muatSupplyAktif(auth.company_id!, c.req.param("id"));
+      if (!item) throw new HTTPException(404, { message: "Perlengkapan tidak ditemukan" });
+      const [row] = await db
+        .update(supplies)
+        .set({ hargaBeli: Math.round(harga_per_unit), updatedAt: new Date() })
+        .where(and(eq(supplies.id, item.id), eq(supplies.companyId, auth.company_id!)))
+        .returning();
+      return c.json(await riwayatHargaPerlengkapan(auth.company_id!, row));
     },
   )
   // Soft delete: ledger & riwayat tetap utuh; nama yang sama bisa dibuat ulang

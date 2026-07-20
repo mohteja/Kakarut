@@ -3177,6 +3177,81 @@ api "$OWNER" POST /stok/opname \
 cek "opname tanpa foto: selisih tetap masuk antrean 'belum'" "V >= 1" \
   "$(api "$OWNER" GET "/stok/penyesuaian?status=belum" | jq '[.[]|select(.bahan=="plastik take away")]|length')"
 
+echo "== 93. Riwayat harga + catat harga + laporan harga (fondasi HPP) =="
+# --- Metode HPP di Pengaturan Perusahaan ---
+cek "company: metode_hpp default 'average'" "V == 1" \
+  "$(api "$OWNER" GET /company | jq '(.metodeHpp=="average")|if . then 1 else 0 end')"
+api "$OWNER" PATCH /company '{"metode_hpp":"fifo"}' > /dev/null
+cek "company: metode_hpp bisa diubah ke 'fifo'" "V == 1" \
+  "$(api "$OWNER" GET /company | jq '(.metodeHpp=="fifo")|if . then 1 else 0 end')"
+cek "guard: kasir ubah metode_hpp → 403" "V == 403" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PATCH "$BASE/api/company" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d '{"metode_hpp":"average"}')"
+api "$OWNER" PATCH /company '{"metode_hpp":"average"}' > /dev/null   # kembalikan default
+
+# --- Bahan baku: faktur beli (masuk stok) → riwayat harga lot ---
+BH93=$(api "$OWNER" POST /bahan '{"nama":"Bahan Harga Uji 93","harga_beli":1000,"isi":1,"satuan":"pcs","pengadaan":"beli","track_stok":true}')
+BH93_ID=$(echo "$BH93" | jq -r .id)
+# lot: 10 pcs / Rp30.000 → harga_satuan 3000 (isi 1)
+FKH93=$(api "$OWNER" POST /pembelian/faktur "{\"items\":[{\"ingredient_id\":\"$BH93_ID\",\"mode\":\"pcs\",\"jumlah\":10,\"total_harga\":30000}]}")
+FKH93_ID=$(echo "$FKH93" | jq -r .faktur_id)
+api "$OWNER" POST "/pembelian/tahap/$FKH93_ID" '{"ke":"dikerjakan"}' > /dev/null
+api "$OWNER" POST "/pembelian/tahap/$FKH93_ID" '{"ke":"menunggu"}' > /dev/null   # cabang sendiri → masuk stok
+RH93=$(api "$OWNER" GET "/bahan/$BH93_ID/pembelian")
+cek "riwayat harga bahan: ≥1 lot tercatat" "V >= 1" "$(echo "$RH93" | jq '.jumlah_pembelian')"
+cek "riwayat harga bahan: lot harga_satuan = 3000 (30000/10)" "V == 1" \
+  "$(echo "$RH93" | jq '([.lots[]|select((.harga_satuan|round)==3000 and .qty==10)]|length>=1)|if . then 1 else 0 end')"
+cek "riwayat harga bahan: rata-rata tertimbang = 3000" "V == 1" \
+  "$(echo "$RH93" | jq '((.harga_rata|round)==3000)|if . then 1 else 0 end')"
+cek "riwayat harga bahan: nomor dokumen (PB-) tampil di lot" "V == 1" \
+  "$(echo "$RH93" | jq '([.lots[]|select(.nomor!=null)]|length>=1)|if . then 1 else 0 end')"
+# catat harga acuan (per satuan) → harga_terkini + harga_beli bahan terupdate
+api "$OWNER" POST "/bahan/$BH93_ID/harga" '{"harga_per_unit":3500}' > /dev/null
+cek "catat harga bahan: harga_terkini jadi 3500" "V == 1" \
+  "$(api "$OWNER" GET "/bahan/$BH93_ID/pembelian" | jq '((.harga_terkini|round)==3500)|if . then 1 else 0 end')"
+cek "catat harga bahan: harga_beli bahan ikut jadi 3500 (× isi 1)" "V == 1" \
+  "$(api "$OWNER" GET /bahan | jq --arg id "$BH93_ID" '([.[]|select(.id==$id)][0].harga_beli|round)==3500|if . then 1 else 0 end')"
+cek "guard: kasir catat harga bahan → 403" "V == 403" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/bahan/$BH93_ID/harga" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d '{"harga_per_unit":1}')"
+
+# --- Laporan Harga dari faktur belanja (setelah barang dikirim) ---
+FKL93=$(api "$OWNER" POST /pembelian/faktur "{\"items\":[{\"ingredient_id\":\"$BH93_ID\",\"mode\":\"pcs\",\"jumlah\":6,\"total_harga\":30000}]}")
+FKL93_ID=$(echo "$FKL93" | jq -r .faktur_id)
+api "$OWNER" POST "/pembelian/tahap/$FKL93_ID" '{"ke":"dikerjakan"}' > /dev/null
+api "$OWNER" POST "/pembelian/tahap/$FKL93_ID" '{"ke":"menunggu"}' > /dev/null
+ROWL93=$(api "$OWNER" GET "/pembelian?per_page=500" | jq -r --arg f "$FKL93_ID" '[.rows[]|select(.faktur_id==$f)][0].id')
+cek "laporan harga: id baris bukan milik faktur → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/pembelian/laporan-harga/$FKL93_ID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"items\":[{\"id\":\"$BH93_ID\",\"total_harga\":1}]}")"
+cek "guard: kasir laporan harga → 403" "V == 403" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/pembelian/laporan-harga/$FKL93_ID" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d "{\"items\":[{\"id\":\"$ROWL93\",\"total_harga\":1}]}")"
+cek "guard: laporan harga di jalur produksi → 400 (khusus beli)" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/produksi/laporan-harga/$FKL93_ID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"items\":[{\"id\":\"$ROWL93\",\"total_harga\":1}]}")"
+# lapor harga riil 42000 utk 6 pcs → harga/satuan 7000
+api "$OWNER" POST "/pembelian/laporan-harga/$FKL93_ID" "{\"items\":[{\"id\":\"$ROWL93\",\"total_harga\":42000}]}" > /dev/null
+cek "laporan harga: total baris jadi 42000" "V == 1" \
+  "$(api "$OWNER" GET "/pembelian?per_page=500" | jq --arg r "$ROWL93" '([.rows[]|select(.id==$r)][0].total_harga==42000)|if . then 1 else 0 end')"
+cek "laporan harga: harga_beli bahan disegarkan (42000/6 × isi 1 = 7000)" "V == 1" \
+  "$(api "$OWNER" GET /bahan | jq --arg id "$BH93_ID" '([.[]|select(.id==$id)][0].harga_beli|round)==7000|if . then 1 else 0 end')"
+cek "laporan harga: lot 42000 muncul di riwayat harga" "V == 1" \
+  "$(api "$OWNER" GET "/bahan/$BH93_ID/pembelian" | jq '([.lots[]|select(.total_harga==42000)]|length>=1)|if . then 1 else 0 end')"
+
+# --- Perlengkapan: stok masuk (lot) → riwayat harga + catat harga ---
+PL93=$(api "$OWNER" POST /perlengkapan '{"nama":"Perlengkapan Harga Uji 93","satuan":"pcs","harga_beli":500}')
+PL93_ID=$(echo "$PL93" | jq -r .id)
+api "$OWNER" POST "/perlengkapan/$PL93_ID/masuk" '{"qty":20,"total_harga":40000}' > /dev/null   # harga_satuan 2000
+RHP93=$(api "$OWNER" GET "/perlengkapan/$PL93_ID/pembelian")
+cek "riwayat harga perlengkapan: ≥1 lot" "V >= 1" "$(echo "$RHP93" | jq '.jumlah_pembelian')"
+cek "riwayat harga perlengkapan: harga_satuan = 2000 (40000/20)" "V == 1" \
+  "$(echo "$RHP93" | jq '([.lots[]|select((.harga_satuan|round)==2000 and .qty==20)]|length>=1)|if . then 1 else 0 end')"
+cek "riwayat harga perlengkapan: rata-rata tertimbang = 2000" "V == 1" \
+  "$(echo "$RHP93" | jq '((.harga_rata|round)==2000)|if . then 1 else 0 end')"
+cek "riwayat harga perlengkapan: nomor PL- tampil di lot" "V == 1" \
+  "$(echo "$RHP93" | jq '([.lots[]|select(.nomor!=null)]|length>=1)|if . then 1 else 0 end')"
+api "$OWNER" POST "/perlengkapan/$PL93_ID/harga" '{"harga_per_unit":2500}' > /dev/null
+cek "catat harga perlengkapan: harga_terkini jadi 2500" "V == 1" \
+  "$(api "$OWNER" GET "/perlengkapan/$PL93_ID/pembelian" | jq '((.harga_terkini|round)==2500)|if . then 1 else 0 end')"
+cek "guard: kasir catat harga perlengkapan → 403" "V == 403" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/perlengkapan/$PL93_ID/harga" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d '{"harga_per_unit":1}')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

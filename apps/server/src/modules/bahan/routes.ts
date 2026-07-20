@@ -9,10 +9,13 @@ import {
   type BahanDto,
   type BahanResepRow,
   type BahanSupplierDto,
+  type RiwayatHargaDto,
+  type RiwayatHargaLot,
 } from "@kakarut/shared";
 import { db } from "../../db/client";
 import {
   branches,
+  dokumenNomor,
   ingredientComponents,
   ingredientSuppliers,
   ingredients,
@@ -224,6 +227,74 @@ function toDto(
     supplier_utama: sup?.utama ?? null,
     jumlah_supplier: sup?.jumlah ?? 0,
     storage_location_id: row.storageLocationId,
+  };
+}
+
+/**
+ * Riwayat harga beli bahan baku: setiap faktur BELI yang sudah masuk stok
+ * ('dikonfirmasi') = satu lot pembelian. `harga_satuan` = total_harga / qty
+ * dalam satuan kerja (satuan). Rata-rata tertimbang hanya dari lot berharga.
+ * Fondasi hitung HPP FIFO / rata-rata.
+ */
+async function riwayatHargaBahan(
+  companyId: string,
+  ing: typeof ingredients.$inferSelect,
+): Promise<RiwayatHargaDto> {
+  const rows = await db
+    .select({
+      id: productions.id,
+      tanggal: productions.prodDate,
+      qty: productions.qty,
+      totalHarga: productions.totalHarga,
+      supplier: suppliers.nama,
+      noFaktur: productions.noFaktur,
+      nomor: dokumenNomor.nomorTeks,
+    })
+    .from(productions)
+    .leftJoin(suppliers, eq(productions.supplierId, suppliers.id))
+    .leftJoin(
+      dokumenNomor,
+      and(
+        eq(dokumenNomor.companyId, productions.companyId),
+        eq(dokumenNomor.refId, productions.fakturId),
+      ),
+    )
+    .where(
+      and(
+        eq(productions.companyId, companyId),
+        eq(productions.ingredientId, ing.id),
+        eq(productions.tipe, "beli"),
+        eq(productions.status, "dikonfirmasi"),
+        isNull(productions.deletedAt),
+      ),
+    )
+    .orderBy(desc(productions.prodDate), desc(productions.waktu));
+  const lots: RiwayatHargaLot[] = rows.map((r) => ({
+    id: r.id,
+    tanggal: r.tanggal,
+    qty: r.qty,
+    total_harga: r.totalHarga,
+    harga_satuan:
+      r.totalHarga != null && r.qty > 0 ? Math.round((r.totalHarga / r.qty) * 100) / 100 : null,
+    supplier: r.supplier,
+    no_faktur: r.noFaktur,
+    nomor: r.nomor,
+  }));
+  // rata-rata TERTIMBANG per satuan dari lot yang harganya sudah dilaporkan
+  let sumHarga = 0;
+  let sumQty = 0;
+  for (const r of rows) {
+    if (r.totalHarga != null && r.qty > 0) {
+      sumHarga += r.totalHarga;
+      sumQty += r.qty;
+    }
+  }
+  return {
+    item: { id: ing.id, nama: ing.nama, satuan: ing.satuan },
+    harga_terkini: hargaPerUnit(ing.hargaBeli, ing.isi),
+    harga_rata: sumQty > 0 ? Math.round((sumHarga / sumQty) * 100) / 100 : null,
+    jumlah_pembelian: lots.length,
+    lots,
   };
 }
 
@@ -737,6 +808,47 @@ export const bahanRoutes = new Hono<AppEnv>()
         }
       });
       return c.json(await listSupplierBahan(auth.company_id!, id));
+    },
+  )
+  /**
+   * RIWAYAT HARGA beli bahan: daftar lot pembelian + harga terkini & rata-rata
+   * tertimbang (fondasi HPP FIFO/average). Terbuka semua peran (info harga).
+   */
+  .get("/:id/pembelian", async (c) => {
+    const auth = c.get("auth");
+    const [ing] = await db
+      .select()
+      .from(ingredients)
+      .where(and(eq(ingredients.id, c.req.param("id")), eq(ingredients.companyId, auth.company_id!)));
+    if (!ing) throw new HTTPException(404, { message: "Bahan tidak ditemukan" });
+    return c.json(await riwayatHargaBahan(auth.company_id!, ing));
+  })
+  /**
+   * CATAT HARGA bahan (dari kartu Riwayat Harga): perbarui harga beli acuan per
+   * satuan → dipakai estimasi RAB & HPP berikutnya. owner/admin.
+   */
+  .post(
+    "/:id/harga",
+    requireRole("owner", "admin"),
+    zValidator("json", z.object({ harga_per_unit: z.number().nonnegative() })),
+    async (c) => {
+      const auth = c.get("auth");
+      const { harga_per_unit } = c.req.valid("json");
+      const [ing] = await db
+        .select()
+        .from(ingredients)
+        .where(
+          and(eq(ingredients.id, c.req.param("id")), eq(ingredients.companyId, auth.company_id!)),
+        );
+      if (!ing) throw new HTTPException(404, { message: "Bahan tidak ditemukan" });
+      // harga_beli disimpan per KEMASAN (isi) — konversi dari harga per satuan
+      const hargaBeli = Math.round(harga_per_unit * ing.isi);
+      const [row] = await db
+        .update(ingredients)
+        .set({ hargaBeli, updatedAt: new Date() })
+        .where(and(eq(ingredients.id, ing.id), eq(ingredients.companyId, auth.company_id!)))
+        .returning();
+      return c.json(await riwayatHargaBahan(auth.company_id!, row));
     },
   )
   /**
