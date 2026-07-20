@@ -1,0 +1,1 @@
+ALTER TABLE "productions" ADD COLUMN "laporan_harga_at" timestamp with time zone;

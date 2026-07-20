@@ -1,5 +1,5 @@
 import { zValidator } from "@hono/zod-validator";
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
@@ -248,7 +248,7 @@ export const penyimpananRoutes = new Hono<AppEnv>()
     const auth = c.get("auth");
     const locId = c.req.param("id");
     const [loc] = await db
-      .select({ id: storageLocations.id })
+      .select({ id: storageLocations.id, branchId: storageLocations.branchId })
       .from(storageLocations)
       .where(and(eq(storageLocations.id, locId), eq(storageLocations.companyId, auth.company_id!)));
     if (!loc) throw new HTTPException(404, { message: "Tempat penyimpanan tidak ditemukan" });
@@ -261,7 +261,26 @@ export const penyimpananRoutes = new Hono<AppEnv>()
           eq(storageLocationIngredients.storageLocationId, locId),
         ),
       );
-    return c.json({ ingredient_ids: rows.map((r) => r.ingredientId) });
+    // bahan yang SUDAH disimpan di rak LAIN pada cabang yang sama — 1 bahan
+    // hanya boleh di 1 rak per cabang, jadi ini disembunyikan dari picker.
+    const lain = await db
+      .select({ ingredientId: storageLocationIngredients.ingredientId })
+      .from(storageLocationIngredients)
+      .innerJoin(
+        storageLocations,
+        eq(storageLocations.id, storageLocationIngredients.storageLocationId),
+      )
+      .where(
+        and(
+          eq(storageLocationIngredients.companyId, auth.company_id!),
+          eq(storageLocations.branchId, loc.branchId),
+          ne(storageLocationIngredients.storageLocationId, locId),
+        ),
+      );
+    return c.json({
+      ingredient_ids: rows.map((r) => r.ingredientId),
+      terpakai_lain: lain.map((r) => r.ingredientId),
+    });
   })
   /**
    * Ganti seluruh daftar bahan baku yang disimpan di rak ini (owner/admin).

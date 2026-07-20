@@ -3238,6 +3238,9 @@ FKL93_ID=$(echo "$FKL93" | jq -r .faktur_id)
 api "$OWNER" POST "/pembelian/tahap/$FKL93_ID" '{"ke":"dikerjakan"}' > /dev/null
 api "$OWNER" POST "/pembelian/tahap/$FKL93_ID" '{"ke":"menunggu"}' > /dev/null
 ROWL93=$(api "$OWNER" GET "/pembelian?per_page=500" | jq -r --arg f "$FKL93_ID" '[.rows[]|select(.faktur_id==$f)][0].id')
+# sebelum laporan harga: baris belum berharga final (laporan_harga_at null) → faktur belum "Selesai"
+cek "sebelum laporan: laporan_harga_at baris null" "V == 1" \
+  "$(api "$OWNER" GET "/pembelian?per_page=500" | jq --arg r "$ROWL93" '([.rows[]|select(.id==$r)][0].laporan_harga_at==null)|if . then 1 else 0 end')"
 cek "laporan harga: id baris bukan milik faktur → 400" "V == 400" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/pembelian/laporan-harga/$FKL93_ID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"items\":[{\"id\":\"$BH93_ID\",\"total_harga\":1}]}")"
 cek "guard: kasir laporan harga → 403" "V == 403" \
@@ -3248,6 +3251,9 @@ cek "guard: laporan harga di jalur produksi → 400 (khusus beli)" "V == 400" \
 api "$OWNER" POST "/pembelian/laporan-harga/$FKL93_ID" "{\"items\":[{\"id\":\"$ROWL93\",\"total_harga\":42000}]}" > /dev/null
 cek "laporan harga: total baris jadi 42000" "V == 1" \
   "$(api "$OWNER" GET "/pembelian?per_page=500" | jq --arg r "$ROWL93" '([.rows[]|select(.id==$r)][0].total_harga==42000)|if . then 1 else 0 end')"
+# setelah laporan harga: baris berharga final (laporan_harga_at terisi) → faktur "Selesai"
+cek "setelah laporan: laporan_harga_at baris terisi (faktur Selesai)" "V == 1" \
+  "$(api "$OWNER" GET "/pembelian?per_page=500" | jq --arg r "$ROWL93" '([.rows[]|select(.id==$r)][0].laporan_harga_at!=null)|if . then 1 else 0 end')"
 cek "laporan harga: harga_beli bahan disegarkan (42000/6 × isi 1 = 7000)" "V == 1" \
   "$(api "$OWNER" GET /bahan | jq --arg id "$BH93_ID" '([.[]|select(.id==$id)][0].harga_beli|round)==7000|if . then 1 else 0 end')"
 cek "laporan harga: lot 42000 muncul di riwayat harga" "V == 1" \
@@ -3282,6 +3288,11 @@ cek "GET rak/bahan: berisi BH94" "V == 1" \
   "$(api "$OWNER" GET "/penyimpanan/$RC94/bahan" | jq --arg i "$BH94" '[.ingredient_ids[]|select(.==$i)]|length')"
 cek "daftar penyimpanan: jumlah_bahan RC94 = 1" "V == 1" \
   "$(api "$OWNER" GET "/penyimpanan?branch_id=$CB46_ID" | jq --arg r "$RC94" '[.[]|select(.id==$r)][0].jumlah_bahan')"
+# picker rak lain di cabang yang sama: BH94 tampil sebagai terpakai_lain (disembunyikan)
+cek "GET RC94B/bahan: BH94 di terpakai_lain (sudah di RC94)" "V == 1" \
+  "$(api "$OWNER" GET "/penyimpanan/$RC94B/bahan" | jq --arg i "$BH94" '[.terpakai_lain[]|select(.==$i)]|length')"
+cek "GET RC94/bahan: BH94 TIDAK di terpakai_lain (rak ini sendiri)" "V == 0" \
+  "$(api "$OWNER" GET "/penyimpanan/$RC94/bahan" | jq --arg i "$BH94" '[.terpakai_lain[]|select(.==$i)]|length')"
 cek "guard: kasir assign bahan rak → 403" "V == 403" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/penyimpanan/$RC94/bahan" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d "{\"ingredient_ids\":[\"$BH94\"]}")"
 cek "guard: bahan asing (uuid acak) → 400" "V == 400" \
