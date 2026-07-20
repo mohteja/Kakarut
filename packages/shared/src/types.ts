@@ -83,6 +83,8 @@ export interface BahanDto {
   jumlah_supplier: number;
   /** RAK SIMPAN default (home) di CK: barang tiba di CK otomatis diletakkan di sini */
   storage_location_id: string | null;
+  /** nama rak simpan default (null = tanpa tempat) — untuk ditampilkan di daftar */
+  storage_location_nama: string | null;
 }
 
 /** Mode impor CSV bahan baku. */

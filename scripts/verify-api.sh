@@ -2742,6 +2742,9 @@ cek "set rak home bahan (PUT storage_location_id) → 200" "V == 200" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/bahan/$BH79" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"storage_location_id\":\"$RAK79\"}")"
 cek "GET bahan: storage_location_id tersimpan == RAK79" "V == 1" \
   "$(api "$OWNER" GET /bahan | jq --arg i "$BH79" --arg r "$RAK79" '([.[]|select(.id==$i)][0].storage_location_id==$r) | if . then 1 else 0 end')"
+# nama rak ikut di DTO daftar (agar tampil di kolom "Rak simpan" tanpa fetch lagi)
+cek "GET bahan: storage_location_nama = nama rak (Rak A uji79)" "V == 1" \
+  "$(api "$OWNER" GET /bahan | jq --arg i "$BH79" '([.[]|select(.id==$i)][0].storage_location_nama=="Rak A uji79") | if . then 1 else 0 end')"
 cek "rak home invalid (uuid asing) ditolak (400)" "V == 400" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/bahan/$BH79" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"storage_location_id":"00000000-0000-4000-8000-000000000000"}')"
 # beli faktur di CK utk BH79 → Tiba di CK (menunggu, items) → baris auto-file ke RAK79
