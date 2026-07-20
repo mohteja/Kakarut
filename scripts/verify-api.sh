@@ -2311,6 +2311,17 @@ cek "bulk: boleh_eceran mengikuti baris" "V == 1" \
   "$(echo "$BULK" | jq '([.bahan[] | select(.nama=="bahan bulk A67")][0].boleh_eceran == true) | if . then 1 else 0 end')"
 cek "bulk: bahan muncul di daftar /bahan" "V == 2" \
   "$(api "$OWNER" GET /bahan | jq '[.[] | select(.nama | startswith("bahan bulk "))] | length')"
+# bulk field set PENUH (sama dgn form Ubah): min_beli, kemasan, complement, catatan
+BULKF=$(api "$OWNER" POST /bahan/bulk '{"items":[{"nama":"bahan bulk full67","harga_beli":8000,"isi":4,"satuan":"pcs","min_beli":6,"is_packaging":true,"is_complement":true,"catatan":"catatan bulk"}]}')
+BFID=$(echo "$BULKF" | jq -r '.bahan[0].id')
+BF=$(api "$OWNER" GET /bahan | jq --arg id "$BFID" '[.[]|select(.id==$id)][0]')
+cek "bulk full: min_beli tersimpan (6)" "V == 6" "$(echo "$BF" | jq '.min_beli')"
+cek "bulk full: is_packaging tersimpan" "V == 1" "$(echo "$BF" | jq '.is_packaging|if . then 1 else 0 end')"
+cek "bulk full: is_complement tersimpan" "V == 1" "$(echo "$BF" | jq '.is_complement|if . then 1 else 0 end')"
+cek "bulk full: catatan tersimpan" "V == 1" "$(echo "$BF" | jq '(.catatan=="catatan bulk")|if . then 1 else 0 end')"
+# guard: rak simpan asing (uuid acak) → 400
+cek "bulk: rak simpan tidak valid → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/bahan/bulk" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"items":[{"nama":"bahan rak invalid67","harga_beli":1,"isi":1,"satuan":"pcs","storage_location_id":"00000000-0000-0000-0000-000000000000"}]}')"
 
 # Kode unik: dua baris nama sama → kode berbeda (suffix)
 KEMBAR=$(api "$OWNER" POST /bahan/bulk '{"items":[{"nama":"kembar67","harga_beli":1,"isi":1,"satuan":"pcs"},{"nama":"kembar67","harga_beli":1,"isi":1,"satuan":"pcs"}]}')
@@ -2663,6 +2674,18 @@ api "$OWNER" DELETE "/bahan/$(api "$OWNER" GET /bahan | jq -r '[.[] | select(.na
 IMP6=$(api "$OWNER" POST /bahan/import '{"mode":"perbarui","items":[{"nama":"sampah uji76","jenis":"beli","harga_beli":7500,"isi":1,"satuan":"pcs"}]}')
 cek "impor perbarui via nama: bahan di Tempat Sampah dipulihkan" "V == 1" \
   "$(echo "$IMP6" | jq '((.dipulihkan==1) and (.dilewati==0)) | if . then 1 else 0 end')"
+# impor field set PENUH (kolom = form Ubah): min_beli, kemasan, complement
+IMP7=$(api "$OWNER" POST /bahan/import '{"mode":"tambah","items":[{"nama":"impor full76","jenis":"beli","harga_beli":1000,"isi":1,"satuan":"pcs","min_beli":12,"kemasan":true,"complement":true}]}')
+cek "impor full: 1 ditambah" "V == 1" "$(echo "$IMP7" | jq '(.ditambah==1)|if . then 1 else 0 end')"
+IMPF=$(api "$OWNER" GET /bahan | jq '[.[]|select(.nama=="impor full76")][0]')
+cek "impor full: min_beli tersimpan (12)" "V == 12" "$(echo "$IMPF" | jq '.min_beli')"
+cek "impor full: kemasan→is_packaging tersimpan" "V == 1" "$(echo "$IMPF" | jq '.is_packaging|if . then 1 else 0 end')"
+cek "impor full: complement→is_complement tersimpan" "V == 1" "$(echo "$IMPF" | jq '.is_complement|if . then 1 else 0 end')"
+# perbarui: matikan kemasan/complement + ubah min_beli → tersimpan
+api "$OWNER" POST /bahan/import '{"mode":"perbarui","items":[{"nama":"impor full76","jenis":"beli","harga_beli":1000,"isi":1,"satuan":"pcs","min_beli":0,"kemasan":false,"complement":false}]}' > /dev/null
+IMPF2=$(api "$OWNER" GET /bahan | jq '[.[]|select(.nama=="impor full76")][0]')
+cek "impor perbarui: kemasan/complement dimatikan" "V == 1" \
+  "$(echo "$IMPF2" | jq '((.is_packaging==false) and (.is_complement==false) and (.min_beli==0))|if . then 1 else 0 end')"
 # kasir tak boleh impor → 403
 cek "kasir impor CSV → 403" "V == 403" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/bahan/import" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d '{"mode":"tambah","items":[{"nama":"x","jenis":"beli","harga_beli":1,"isi":1,"satuan":"pcs"}]}')"

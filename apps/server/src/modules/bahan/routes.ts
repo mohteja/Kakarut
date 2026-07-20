@@ -95,7 +95,8 @@ const ResepBody = z.object({
     .default([]),
 });
 
-/** Satu baris "tambah bahan baku" (bulk) — selalu jalur beli, tanpa kemasan/complement. */
+/** Satu baris "tambah bahan baku" (bulk) — selalu jalur beli. Field set penuh
+ * (sama dengan form Ubah): min_beli, kemasan/complement, catatan, rak simpan. */
 const BahanBulkRow = z.object({
   kode: z.string().trim().max(20).nullish(),
   nama: z.string().trim().min(1),
@@ -107,6 +108,11 @@ const BahanBulkRow = z.object({
   track_stok: z.boolean().default(true),
   stok_minimum: z.number().nonnegative().default(0),
   boleh_eceran: z.boolean().default(false),
+  min_beli: z.number().nonnegative().default(0),
+  is_packaging: z.boolean().default(false),
+  is_complement: z.boolean().default(false),
+  catatan: z.string().nullish(),
+  storage_location_id: z.string().uuid().nullish(),
 });
 const BahanBulkBody = z.object({ items: z.array(BahanBulkRow).min(1).max(200) });
 
@@ -121,8 +127,11 @@ const BahanImportRowBody = z.object({
   satuan: z.string().trim().min(1).max(20).default("pcs"),
   satuan_beli: z.string().trim().max(20).nullish(),
   stok_minimum: z.number().nonnegative().default(0),
+  min_beli: z.number().nonnegative().default(0),
   boleh_eceran: z.boolean().default(false),
   lacak_stok: z.boolean().default(true),
+  kemasan: z.boolean().default(false),
+  complement: z.boolean().default(false),
   catatan: z.string().nullish(),
 });
 const BahanImportBody = z.object({
@@ -421,6 +430,9 @@ export const bahanRoutes = new Hono<AppEnv>()
   .post("/bulk", requireRole("owner", "admin"), zValidator("json", BahanBulkBody), async (c) => {
     const auth = c.get("auth");
     const { items } = c.req.valid("json");
+    // rak simpan (bila diisi) harus milik salah satu cabang perusahaan
+    const rakIds = [...new Set(items.map((b) => b.storage_location_id).filter(Boolean))] as string[];
+    for (const rakId of rakIds) await pastikanRakMilik(auth.company_id!, rakId);
     const existing = await db
       .select({ slug: ingredients.slug })
       .from(ingredients)
@@ -453,6 +465,11 @@ export const bahanRoutes = new Hono<AppEnv>()
           kategori: kanonikKategori(kmap, b.kategori),
           pengadaan: "beli" as const,
           bolehEceran: b.boleh_eceran,
+          minBeli: b.min_beli,
+          isPackaging: b.is_packaging,
+          isComplement: b.is_complement,
+          catatan: b.catatan ?? null,
+          storageLocationId: b.storage_location_id ?? null,
         })),
       )
       .returning();
@@ -554,8 +571,11 @@ export const bahanRoutes = new Hono<AppEnv>()
             satuan: u.item.satuan,
             satuanBeli: u.item.satuan_beli ?? null,
             stokMinimum: u.item.stok_minimum,
+            minBeli: u.item.min_beli,
             bolehEceran: u.item.boleh_eceran,
             trackStok: u.item.lacak_stok,
+            isPackaging: u.item.kemasan,
+            isComplement: u.item.complement,
             catatan: u.item.catatan ?? null,
             // baris pulih: aktifkan kembali dari Tempat Sampah
             ...(u.pulih && { isActive: true }),
@@ -582,9 +602,12 @@ export const bahanRoutes = new Hono<AppEnv>()
           satuanBeli: b.satuan_beli ?? null,
           trackStok: b.lacak_stok,
           stokMinimum: b.stok_minimum,
+          minBeli: b.min_beli,
           kategori: kanonikKategori(kmap, b.kategori),
           pengadaan: b.jenis,
           bolehEceran: b.boleh_eceran,
+          isPackaging: b.kemasan,
+          isComplement: b.complement,
           catatan: b.catatan ?? null,
         });
         ditambah++;

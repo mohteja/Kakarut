@@ -17,6 +17,7 @@ import { KategoriManagerModal } from "../../components/KategoriManagerModal";
 import { RiwayatHargaModal } from "../../components/RiwayatHargaModal";
 import { useAuth } from "../../context/AuthContext";
 import { api } from "../../lib/api";
+import { buatCsvBahan, unduhCsv } from "../../lib/bahanCsv";
 import { formatAngka, formatRupiah } from "../../lib/format";
 import { ImporBahanModal } from "./ImporBahanModal";
 import { SupplierBahanModal } from "./SupplierBahanModal";
@@ -151,6 +152,23 @@ export function BahanPage() {
             <div className="flex items-center gap-2">
               <button onClick={() => setKelolaKategori(true)} className={btnSecondary}>
                 🏷 Kategori
+              </button>
+              <button
+                onClick={() =>
+                  unduhCsv(
+                    adaFilter ? "bahan-baku-terfilter.csv" : "bahan-baku.csv",
+                    buatCsvBahan(tampil),
+                  )
+                }
+                disabled={tampil.length === 0}
+                title={
+                  adaFilter
+                    ? `Export ${tampil.length} bahan yang tampil ke CSV`
+                    : "Export semua bahan ke CSV"
+                }
+                className={btnSecondary}
+              >
+                📤 Export CSV{adaFilter ? ` (${tampil.length})` : ""}
               </button>
               <button onClick={() => setImporCsv(true)} className={btnSecondary}>
                 📥 Impor CSV

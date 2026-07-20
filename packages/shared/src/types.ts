@@ -103,8 +103,14 @@ export interface BahanImportRow {
   satuan: string;
   satuan_beli: string | null;
   stok_minimum: number;
+  /** minimal belanja (MOQ); 0 = tanpa minimum */
+  min_beli: number;
   boleh_eceran: boolean;
   lacak_stok: boolean;
+  /** kemasan take-away (is_packaging) */
+  kemasan: boolean;
+  /** complement (×0.5 dine-in) */
+  complement: boolean;
   catatan: string | null;
 }
 
@@ -185,6 +191,15 @@ export interface BahanBulkRow {
   track_stok: boolean;
   stok_minimum: number;
   boleh_eceran: boolean;
+  /** minimal belanja (MOQ); 0 = tanpa minimum */
+  min_beli?: number;
+  /** kemasan take-away */
+  is_packaging?: boolean;
+  /** complement (×0.5 dine-in) */
+  is_complement?: boolean;
+  catatan?: string | null;
+  /** rak simpan default (home) di CK */
+  storage_location_id?: string | null;
 }
 
 export interface MenuDto {

@@ -1,40 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { hargaPerUnit, type BahanKategori, type KategoriDto, type SatuanDto } from "@kakarut/shared";
+import type { KategoriDto, PenyimpananDto, SatuanDto } from "@kakarut/shared";
 import { Card, ErrorText, PageTitle, btnPrimary, btnSecondary } from "../../components/ui";
 import { KategoriManagerModal } from "../../components/KategoriManagerModal";
-import { SatuanSelect } from "../../components/SatuanSelect";
+import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
-import { formatAngka } from "../../lib/format";
+import { BahanEditorGrid, type BahanEditorRow } from "./BahanEditorGrid";
 
-/** Satu baris input bahan baku (nilai numerik sebagai string sampai disimpan). */
-interface Baris {
-  kode: string;
-  nama: string;
-  satuan_beli: string;
-  harga_beli: string;
-  satuan: string; // satuan resep/kerja
-  isi: string; // satuan resep per 1 satuan beli
-  kategori: BahanKategori;
-  boleh_eceran: boolean;
-  track_stok: boolean;
-  stok_minimum: string;
-}
-
-const cell = "rounded-lg border border-stone-300 px-2 py-1.5 text-sm focus:border-orange-500 focus:outline-none";
-const thCell = "px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide text-stone-500";
-// Judul grup dua panel: belanja (RAB) vs aturan resep — biar form seperti sketsa.
-const thGrupBelanja =
-  "border-l border-emerald-200 bg-emerald-50 px-2 py-1.5 text-center text-xs font-bold uppercase tracking-wide text-emerald-700";
-const thGrupResep =
-  "border-l border-sky-200 bg-sky-50 px-2 py-1.5 text-center text-xs font-bold uppercase tracking-wide text-sky-700";
-const sepKiri = "border-l border-stone-200"; // pemisah vertikal antar-zona di badan tabel
-
-function barisKosong(satuan: string): Baris {
+function barisKosong(satuan: string): BahanEditorRow {
   return {
     kode: "",
     nama: "",
+    pengadaan: "beli",
     satuan_beli: "",
     harga_beli: "",
     satuan,
@@ -43,14 +21,20 @@ function barisKosong(satuan: string): Baris {
     boleh_eceran: false,
     track_stok: true,
     stok_minimum: "0",
+    min_beli: "0",
+    is_packaging: false,
+    is_complement: false,
+    catatan: "",
+    storage_location_id: "",
   };
 }
 
 /**
- * Tambah Bahan Baku (multi-baris) — halaman tersendiri, bukan modal. Owner/admin
- * memasukkan banyak bahan sekaligus (jalur BELI). Memisahkan satuan BELI (mis.
- * dus, untuk belanja) dari satuan RESEP (mis. ml, satuan kerja); harga per
- * satuan resep dihitung otomatis = harga beli ÷ isi. Bahan produksi di menu Resep.
+ * Tambah Bahan Baku (multi-baris) — halaman tersendiri (jalur BELI). Memakai
+ * grid editor yang SAMA dengan halaman Ubah Bahan Baku (BahanEditorGrid), jadi
+ * format input tambah & edit identik. Memisahkan satuan BELI (belanja) dari
+ * satuan RESEP (kerja); harga per satuan resep dihitung otomatis. Bahan
+ * produksi dibuat di menu Resep.
  */
 export function TambahBahanBakuPage() {
   const navigate = useNavigate();
@@ -60,21 +44,39 @@ export function TambahBahanBakuPage() {
     queryKey: ["satuan"],
     queryFn: () => api<SatuanDto[]>("/satuan"),
   });
-  const { data: kategoriList } = useQuery({
+  const { data: kategoriList = [] } = useQuery({
     queryKey: ["kategori-bahan"],
     queryFn: () => api<KategoriDto[]>("/kategori-bahan"),
+  });
+  // Rak (tempat penyimpanan) di Central Kitchen — sama dengan halaman Ubah.
+  const { cabang } = useBranch();
+  const ckList = cabang.filter((b) => b.tipe === "central_kitchen" && b.is_active);
+  const banyakCk = ckList.length > 1;
+  const { data: rakCk = [] } = useQuery({
+    queryKey: ["penyimpanan-ck", ckList.map((c) => c.id).join(",")],
+    enabled: ckList.length > 0,
+    queryFn: async () => {
+      const per = await Promise.all(
+        ckList.map((ck) =>
+          api<PenyimpananDto[]>(`/penyimpanan?branch_id=${ck.id}`).then((rows) =>
+            rows.map((r) => ({ id: r.id, nama: banyakCk ? `${ck.nama} · ${r.nama}` : r.nama })),
+          ),
+        ),
+      );
+      return per.flat();
+    },
   });
   const satuanDefault = satuanList?.some((s) => s.nama === "pcs")
     ? "pcs"
     : satuanList?.[0]?.nama ?? "pcs";
 
-  const [rows, setRows] = useState<Baris[]>(() => [
+  const [rows, setRows] = useState<BahanEditorRow[]>(() => [
     barisKosong("pcs"),
     barisKosong("pcs"),
     barisKosong("pcs"),
   ]);
 
-  const ubah = (i: number, patch: Partial<Baris>) =>
+  const ubah = (i: number, patch: Partial<BahanEditorRow>) =>
     setRows((r) => r.map((b, j) => (j === i ? { ...b, ...patch } : b)));
   const tambahBaris = () => setRows((r) => [...r, barisKosong(satuanDefault)]);
   const hapusBaris = (i: number) => setRows((r) => (r.length > 1 ? r.filter((_, j) => j !== i) : r));
@@ -96,8 +98,13 @@ export function TambahBahanBakuPage() {
             satuan_beli: b.satuan_beli.trim() || null,
             kategori: b.kategori,
             track_stok: b.track_stok,
-            stok_minimum: Number(b.stok_minimum) || 0,
+            stok_minimum: b.track_stok ? Number(b.stok_minimum) || 0 : 0,
             boleh_eceran: b.boleh_eceran,
+            min_beli: Number(b.min_beli) || 0,
+            is_packaging: b.is_packaging,
+            is_complement: b.is_complement,
+            catatan: b.catatan.trim() || null,
+            storage_location_id: b.storage_location_id || null,
           })),
         },
       }),
@@ -144,163 +151,18 @@ export function TambahBahanBakuPage() {
           </span>
         </div>
         <p className="mt-1 text-xs text-stone-500">
-          Harga per satuan resep dihitung otomatis dari konversi. Bahan <b>produksi</b> dibuat di
-          menu Resep.
+          Format input <b>sama dengan halaman Ubah Bahan Baku</b>. Harga per satuan resep dihitung
+          otomatis dari konversi. Bahan <b>produksi</b> dibuat di menu Resep.
         </p>
       </div>
 
-      <Card className="overflow-x-auto p-0">
-        <table className="w-full min-w-[1260px]">
-          <thead className="border-b border-stone-200 bg-stone-50">
-            <tr>
-              <th className={thCell} rowSpan={2}>Kode</th>
-              <th className={thCell} rowSpan={2}>Nama *</th>
-              <th className={thGrupBelanja} colSpan={2}>🛒 Belanja (RAB)</th>
-              <th className={thGrupResep} colSpan={3}>🧪 Aturan resep</th>
-              <th className={`${thCell} ${sepKiri}`} rowSpan={2}>Kategori</th>
-              <th className={`${thCell} text-center`} rowSpan={2}>Ecer</th>
-              <th className={`${thCell} text-center`} rowSpan={2}>Lacak</th>
-              <th className={thCell} rowSpan={2}>Stok min</th>
-              <th className="px-2 py-2" rowSpan={2}></th>
-            </tr>
-            <tr>
-              <th className={`${thCell} border-l border-emerald-200`}>Satuan beli</th>
-              <th className={thCell}>Harga beli</th>
-              <th className={`${thCell} border-l border-sky-200`}>Satuan resep</th>
-              <th className={thCell}>Konversi</th>
-              <th className={`${thCell} text-right`}>Harga/satuan resep</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-stone-100">
-            {rows.map((b, i) => {
-              const hpsr =
-                Number(b.harga_beli) > 0 && Number(b.isi) > 0
-                  ? hargaPerUnit(Number(b.harga_beli), Number(b.isi))
-                  : null;
-              return (
-                <tr key={i} className="align-middle">
-                  <td className="px-2 py-1.5">
-                    <input
-                      value={b.kode}
-                      onChange={(e) => ubah(i, { kode: e.target.value })}
-                      placeholder="otomatis"
-                      className={`${cell} w-20`}
-                    />
-                  </td>
-                  <td className="px-2 py-1.5">
-                    <input
-                      value={b.nama}
-                      onChange={(e) => ubah(i, { nama: e.target.value })}
-                      placeholder="Nama bahan"
-                      className={`${cell} w-40`}
-                    />
-                  </td>
-                  <td className={`px-2 py-1.5 ${sepKiri}`}>
-                    <SatuanSelect
-                      value={b.satuan_beli}
-                      onChange={(v) => ubah(i, { satuan_beli: v })}
-                      bolehKosong
-                      selectClassName={`${cell} w-24`}
-                      aria-label="Satuan beli"
-                    />
-                  </td>
-                  <td className="px-2 py-1.5">
-                    <input
-                      type="number"
-                      min="0"
-                      step="any"
-                      value={b.harga_beli}
-                      onChange={(e) => ubah(i, { harga_beli: e.target.value })}
-                      placeholder="0"
-                      className={`${cell} w-24`}
-                    />
-                  </td>
-                  <td className={`px-2 py-1.5 ${sepKiri}`}>
-                    <SatuanSelect
-                      value={b.satuan}
-                      onChange={(v) => ubah(i, { satuan: v })}
-                      selectClassName={`${cell} w-24`}
-                      aria-label="Satuan resep"
-                    />
-                  </td>
-                  <td className="px-2 py-1.5">
-                    <div className="flex items-center gap-1 text-sm whitespace-nowrap text-stone-600">
-                      <span>1 {b.satuan_beli || "beli"} =</span>
-                      <input
-                        type="number"
-                        min="0.0001"
-                        step="any"
-                        value={b.isi}
-                        onChange={(e) => ubah(i, { isi: e.target.value })}
-                        className={`${cell} w-24`}
-                        aria-label="Konversi (satuan resep per 1 satuan beli)"
-                      />
-                      <span>{b.satuan}</span>
-                    </div>
-                  </td>
-                  <td className="px-2 py-1.5 text-right text-sm text-stone-600 whitespace-nowrap">
-                    {hpsr != null ? `Rp ${formatAngka(hpsr, 2)}/${b.satuan}` : "—"}
-                  </td>
-                  <td className={`px-2 py-1.5 ${sepKiri}`}>
-                    <select
-                      value={b.kategori}
-                      onChange={(e) => ubah(i, { kategori: e.target.value as BahanKategori })}
-                      className={`${cell} w-28`}
-                    >
-                      {!kategoriList?.some((k) => k.nama === b.kategori) && b.kategori && (
-                        <option value={b.kategori}>{b.kategori}</option>
-                      )}
-                      {(kategoriList ?? []).map((k) => (
-                        <option key={k.id} value={k.nama}>
-                          {k.nama}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
-                  <td className="px-2 py-1.5 text-center">
-                    <input
-                      type="checkbox"
-                      checked={b.boleh_eceran}
-                      onChange={(e) => ubah(i, { boleh_eceran: e.target.checked })}
-                      title="Bisa dibeli eceran (tanpa pembulatan per satuan beli)"
-                    />
-                  </td>
-                  <td className="px-2 py-1.5 text-center">
-                    <input
-                      type="checkbox"
-                      checked={b.track_stok}
-                      onChange={(e) => ubah(i, { track_stok: e.target.checked })}
-                      title="Lacak stok bahan ini"
-                    />
-                  </td>
-                  <td className="px-2 py-1.5">
-                    <input
-                      type="number"
-                      min="0"
-                      step="any"
-                      value={b.stok_minimum}
-                      onChange={(e) => ubah(i, { stok_minimum: e.target.value })}
-                      className={`${cell} w-20`}
-                      disabled={!b.track_stok}
-                    />
-                  </td>
-                  <td className="px-2 py-1.5 text-right">
-                    <button
-                      type="button"
-                      onClick={() => hapusBaris(i)}
-                      className="text-sm font-medium text-red-500 hover:underline disabled:opacity-30"
-                      disabled={rows.length <= 1}
-                      aria-label="Hapus baris"
-                    >
-                      ✕
-                    </button>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </Card>
+      <BahanEditorGrid
+        rows={rows}
+        onChange={ubah}
+        onRemove={hapusBaris}
+        kategoriList={kategoriList}
+        rakCk={rakCk}
+      />
 
       <div className="mt-3 flex flex-wrap items-center gap-3">
         <button type="button" onClick={tambahBaris} className={btnSecondary}>
