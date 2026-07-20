@@ -9,6 +9,7 @@ import {
   type BahanDto,
   type BahanResepRow,
   type BahanSupplierDto,
+  type RakLokasi,
   type RiwayatHargaDto,
   type RiwayatHargaLot,
 } from "@kakarut/shared";
@@ -22,6 +23,7 @@ import {
   menuComponents,
   menus,
   productions,
+  storageLocationIngredients,
   storageLocations,
   suppliers,
 } from "../../db/schema";
@@ -57,8 +59,6 @@ const BahanBody = z.object({
   boleh_eceran: z.boolean().default(false),
   /** minimal belanja (MOQ) saat belanja otomatis; 0 = tanpa minimum */
   min_beli: z.number().nonnegative().default(0),
-  /** rak simpan default (home) di CK; null = di CK tanpa tempat */
-  storage_location_id: z.string().uuid().nullish(),
 });
 
 /**
@@ -85,8 +85,6 @@ const BahanPatchBody = z.object({
   is_complement: z.boolean().optional(),
   boleh_eceran: z.boolean().optional(),
   min_beli: z.number().nonnegative().optional(),
-  /** rak simpan default (home) di CK; null = di CK tanpa tempat */
-  storage_location_id: z.string().uuid().nullish(),
 });
 
 const ResepBody = z.object({
@@ -96,7 +94,8 @@ const ResepBody = z.object({
 });
 
 /** Satu baris "tambah bahan baku" (bulk) — selalu jalur beli. Field set penuh
- * (sama dengan form Ubah): min_beli, kemasan/complement, catatan, rak simpan. */
+ * (sama dengan form Ubah): min_beli, kemasan/complement, catatan. Rak simpan
+ * diatur terpisah di Tempat Penyimpanan (per cabang), bukan di sini. */
 const BahanBulkRow = z.object({
   kode: z.string().trim().max(20).nullish(),
   nama: z.string().trim().min(1),
@@ -112,7 +111,6 @@ const BahanBulkRow = z.object({
   is_packaging: z.boolean().default(false),
   is_complement: z.boolean().default(false),
   catatan: z.string().nullish(),
-  storage_location_id: z.string().uuid().nullish(),
 });
 const BahanBulkBody = z.object({ items: z.array(BahanBulkRow).min(1).max(200) });
 
@@ -207,19 +205,45 @@ async function listSupplierBahan(
   }));
 }
 
-/** Peta id rak → nama (untuk menampilkan tempat penyimpanan di daftar bahan). */
-async function infoRak(companyId: string): Promise<Map<string, string>> {
+/**
+ * "DI SIMPAN DI MANA" per bahan: daftar rak (per cabang CK/store) tempat bahan
+ * disimpan — dari penugasan di Tempat Penyimpanan (storage_location_ingredients).
+ * Dipakai read-only di kolom "Rak simpan" daftar Bahan Baku.
+ */
+async function rakLokasiByBahan(companyId: string): Promise<Map<string, RakLokasi[]>> {
   const rows = await db
-    .select({ id: storageLocations.id, nama: storageLocations.nama })
-    .from(storageLocations)
-    .where(eq(storageLocations.companyId, companyId));
-  return new Map(rows.map((r) => [r.id, r.nama]));
+    .select({
+      ingredientId: storageLocationIngredients.ingredientId,
+      rakId: storageLocations.id,
+      rakNama: storageLocations.nama,
+      branchId: branches.id,
+      branchNama: branches.nama,
+      branchTipe: branches.tipe,
+    })
+    .from(storageLocationIngredients)
+    .innerJoin(storageLocations, eq(storageLocations.id, storageLocationIngredients.storageLocationId))
+    .innerJoin(branches, eq(branches.id, storageLocations.branchId))
+    .where(eq(storageLocationIngredients.companyId, companyId))
+    .orderBy(asc(branches.tipe), asc(branches.nama), asc(storageLocations.nama));
+  const map = new Map<string, RakLokasi[]>();
+  for (const r of rows) {
+    const list = map.get(r.ingredientId) ?? [];
+    list.push({
+      branch_id: r.branchId,
+      branch_nama: r.branchNama,
+      branch_tipe: r.branchTipe,
+      rak_id: r.rakId,
+      rak_nama: r.rakNama,
+    });
+    map.set(r.ingredientId, list);
+  }
+  return map;
 }
 
 function toDto(
   row: typeof ingredients.$inferSelect,
   sup?: { utama: string | null; jumlah: number },
-  rakNama?: string | null,
+  rakLokasi: RakLokasi[] = [],
 ): BahanDto {
   return {
     id: row.id,
@@ -245,8 +269,7 @@ function toDto(
     is_active: row.isActive,
     supplier_utama: sup?.utama ?? null,
     jumlah_supplier: sup?.jumlah ?? 0,
-    storage_location_id: row.storageLocationId,
-    storage_location_nama: rakNama ?? null,
+    rak_lokasi: rakLokasi,
   };
 }
 
@@ -318,18 +341,6 @@ async function riwayatHargaBahan(
   };
 }
 
-/** Rak simpan (home) harus milik salah satu cabang perusahaan. */
-async function pastikanRakMilik(companyId: string, storageLocationId: string) {
-  const [row] = await db
-    .select({ id: storageLocations.id })
-    .from(storageLocations)
-    .innerJoin(branches, eq(branches.id, storageLocations.branchId))
-    .where(
-      and(eq(storageLocations.id, storageLocationId), eq(branches.companyId, companyId)),
-    );
-  if (!row) throw new HTTPException(400, { message: "Rak simpan tidak valid" });
-}
-
 export const bahanRoutes = new Hono<AppEnv>()
   .get("/", async (c) => {
     const auth = c.get("auth");
@@ -340,18 +351,13 @@ export const bahanRoutes = new Hono<AppEnv>()
       .orderBy(asc(ingredients.nama));
     const [sup, rak] = await Promise.all([
       infoSupplier(auth.company_id!),
-      infoRak(auth.company_id!),
+      rakLokasiByBahan(auth.company_id!),
     ]);
-    return c.json(
-      rows.map((r) =>
-        toDto(r, sup.get(r.id), r.storageLocationId ? rak.get(r.storageLocationId) : null),
-      ),
-    );
+    return c.json(rows.map((r) => toDto(r, sup.get(r.id), rak.get(r.id) ?? [])));
   })
   .post("/", requireRole("owner", "admin"), zValidator("json", BahanBody), async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");
-    if (body.storage_location_id) await pastikanRakMilik(auth.company_id!, body.storage_location_id);
     const slug =
       body.slug ?? body.nama.toLowerCase().trim().replace(/\s+/g, " ");
     const [existing] = await db
@@ -405,7 +411,6 @@ export const bahanRoutes = new Hono<AppEnv>()
           isComplement: body.is_complement,
           bolehEceran: body.boleh_eceran,
           minBeli: body.min_beli,
-          storageLocationId: body.storage_location_id ?? null,
           updatedAt: new Date(),
         })
         .where(and(eq(ingredients.id, existing.id), eq(ingredients.companyId, auth.company_id!)))
@@ -435,7 +440,6 @@ export const bahanRoutes = new Hono<AppEnv>()
         isComplement: body.is_complement,
         bolehEceran: body.boleh_eceran,
         minBeli: body.min_beli,
-        storageLocationId: body.storage_location_id ?? null,
       })
       .returning();
     return c.json(toDto(row), 201);
@@ -448,9 +452,6 @@ export const bahanRoutes = new Hono<AppEnv>()
   .post("/bulk", requireRole("owner", "admin"), zValidator("json", BahanBulkBody), async (c) => {
     const auth = c.get("auth");
     const { items } = c.req.valid("json");
-    // rak simpan (bila diisi) harus milik salah satu cabang perusahaan
-    const rakIds = [...new Set(items.map((b) => b.storage_location_id).filter(Boolean))] as string[];
-    for (const rakId of rakIds) await pastikanRakMilik(auth.company_id!, rakId);
     const existing = await db
       .select({ slug: ingredients.slug })
       .from(ingredients)
@@ -487,7 +488,6 @@ export const bahanRoutes = new Hono<AppEnv>()
           isPackaging: b.is_packaging,
           isComplement: b.is_complement,
           catatan: b.catatan ?? null,
-          storageLocationId: b.storage_location_id ?? null,
         })),
       )
       .returning();
@@ -650,8 +650,6 @@ export const bahanRoutes = new Hono<AppEnv>()
         .from(ingredients)
         .where(and(eq(ingredients.id, id), eq(ingredients.companyId, auth.company_id!)));
       if (!lama) throw new HTTPException(404, { message: "Bahan tidak ditemukan" });
-      if (body.storage_location_id)
-        await pastikanRakMilik(auth.company_id!, body.storage_location_id);
       // Konservatif: bahan yang masih jadi INPUT resep aktif tak diizinkan
       // di-flip jenisnya ke "produksi" lewat jalur edit-bahan ini — ubah dulu
       // resep yang memakainya. (Memakai bahan produksi DI DALAM resep memang
@@ -736,9 +734,6 @@ export const bahanRoutes = new Hono<AppEnv>()
           ...(body.is_complement !== undefined && { isComplement: body.is_complement }),
           ...(body.boleh_eceran !== undefined && { bolehEceran: body.boleh_eceran }),
           ...(body.min_beli !== undefined && { minBeli: body.min_beli }),
-          ...(body.storage_location_id !== undefined && {
-            storageLocationId: body.storage_location_id ?? null,
-          }),
           updatedAt: new Date(),
         })
         .where(

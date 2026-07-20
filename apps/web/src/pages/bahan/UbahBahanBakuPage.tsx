@@ -6,7 +6,6 @@ import { Card, ErrorText, PageTitle, Spinner, btnPrimary, btnSecondary } from ".
 import { KategoriManagerModal } from "../../components/KategoriManagerModal";
 import { api } from "../../lib/api";
 import { BahanEditorGrid, type BahanEditorRow } from "./BahanEditorGrid";
-import { useRakSimpan } from "./useRakSimpan";
 
 function keBaris(b: BahanDto): BahanEditorRow {
   return {
@@ -26,7 +25,6 @@ function keBaris(b: BahanDto): BahanEditorRow {
     is_packaging: b.is_packaging,
     is_complement: b.is_complement,
     catatan: b.catatan ?? "",
-    storage_location_id: b.storage_location_id ?? "",
   };
 }
 
@@ -50,11 +48,6 @@ export function UbahBahanBakuPage() {
     queryKey: ["kategori-bahan"],
     queryFn: () => api<KategoriDto[]>("/kategori-bahan"),
   });
-  // Rak simpan (home) bahan — hook bersama dgn halaman Tambah (rak CK, atau rak
-  // cabang store bila usaha 1 cabang tanpa CK). Barang tiba otomatis diletakkan
-  // di rak ini.
-  const rakCk = useRakSimpan();
-
   // Seed draft sekali dari master begitu termuat (urut sesuai ids).
   const [rows, setRows] = useState<BahanEditorRow[] | null>(null);
   // Bahan produksi yang dilewati (diedit lewat halaman Resep, bukan grid ini).
@@ -97,7 +90,6 @@ export function UbahBahanBakuPage() {
               // eceran & minimal belanja hanya relevan utk jalur beli
               boleh_eceran: b.pengadaan === "beli" ? b.boleh_eceran : false,
               min_beli: b.pengadaan === "beli" ? Number(b.min_beli) || 0 : 0,
-              storage_location_id: b.storage_location_id || null,
             },
           }),
         ),
@@ -196,13 +188,7 @@ export function UbahBahanBakuPage() {
             </p>
           </div>
 
-          <BahanEditorGrid
-            rows={rows}
-            onChange={ubah}
-            kategoriList={kategoriList}
-            rakCk={rakCk}
-            showJenis
-          />
+          <BahanEditorGrid rows={rows} onChange={ubah} kategoriList={kategoriList} showJenis />
 
           <div className="mt-3 flex flex-wrap items-center gap-3">
             <div className="flex-1 text-sm text-stone-500">

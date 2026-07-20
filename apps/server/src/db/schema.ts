@@ -263,12 +263,14 @@ export const storageLocationPetugas = pgTable(
 );
 
 /**
- * Penugasan BAHAN BAKU ke tempat penyimpanan (rak) cabang: "bahan ini disimpan
- * di rak ini". Dipakai untuk RAK DEFAULT saat kiriman dari CK diterima di
- * cabang — barang otomatis diletakkan di rak yang ditugaskan (stok & opname per
- * rak jadi benar tanpa pilih manual). Rak CK per-bahan tetap diatur di form
- * Bahan Baku (ingredients.storage_location_id); ini terpisah & bisa berdampingan.
- * Satu bahan maksimal di SATU rak per cabang (dijaga di handler PUT).
+ * Penugasan BAHAN BAKU ke tempat penyimpanan (rak) SETIAP cabang (CK & store):
+ * "bahan ini disimpan di rak ini di cabang ini". SUMBER TUNGGAL rak simpan —
+ * diatur di Tempat Penyimpanan, bukan di form Bahan Baku. Dipakai sebagai RAK
+ * DEFAULT: saat barang tiba/diterima/dikonfirmasi di sebuah cabang, otomatis
+ * diletakkan di rak yang ditugaskan untuk bahan itu DI CABANG TERSEBUT (stok &
+ * opname per rak jadi benar tanpa pilih manual). Sebuah bahan bisa punya rak di
+ * CK DAN di cabang store (terpisah), tapi maksimal SATU rak per cabang (dijaga
+ * di handler PUT).
  */
 export const storageLocationIngredients = pgTable(
   "storage_location_ingredients",
@@ -383,10 +385,10 @@ export const ingredients = pgTable(
       .notNull()
       .default(0),
     /**
-     * RAK SIMPAN default (home) di CK: saat barang tiba di CK, otomatis
-     * "diletakkan" di rak ini (baris beli/produksi diberi storage_location_id
-     * ini bila raknya di cabang yang menerima). Null = di CK tanpa tempat.
-     * Diset di awal per bahan agar penyimpanan otomatis terkelompok per rak.
+     * WARISAN — jangan dipakai lagi. Dulu "rak simpan default (home)" per bahan
+     * yang diatur di form Bahan Baku. Kini rak simpan diatur per cabang di
+     * Tempat Penyimpanan (storage_location_ingredients). Nilai lama dipindah ke
+     * sana lalu kolom ini dikosongkan saat boot (backfillRakSimpanKeSli).
      */
     storageLocationId: uuid("storage_location_id").references(() => storageLocations.id, {
       onDelete: "set null",

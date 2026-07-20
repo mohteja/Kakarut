@@ -27,8 +27,6 @@ export interface BahanEditorRow {
   is_packaging: boolean;
   is_complement: boolean;
   catatan: string;
-  /** rak simpan default (home) di CK; "" = di CK tanpa tempat */
-  storage_location_id: string;
 }
 
 const cell =
@@ -51,14 +49,12 @@ export function BahanEditorGrid({
   onChange,
   onRemove,
   kategoriList,
-  rakCk,
   showJenis = false,
 }: {
   rows: BahanEditorRow[];
   onChange: (i: number, patch: Partial<BahanEditorRow>) => void;
   onRemove?: (i: number) => void;
   kategoriList: KategoriDto[];
-  rakCk: { id: string; nama: string }[];
   showJenis?: boolean;
 }) {
   return (
@@ -78,9 +74,6 @@ export function BahanEditorGrid({
             <th className={`${thCell} text-center`} rowSpan={2}>Lacak</th>
             <th className={thCell} rowSpan={2}>Stok min</th>
             <th className={thCell} rowSpan={2}>Min beli</th>
-            <th className={thCell} rowSpan={2} title="Rak simpan default (tempat penyimpanan)">
-              Rak simpan
-            </th>
             <th className={`${thCell} text-center`} rowSpan={2} title="Kemasan take-away">
               TA
             </th>
@@ -243,30 +236,6 @@ export function BahanEditorGrid({
                         : "Hanya untuk bahan jalur beli"
                     }
                   />
-                </td>
-                <td className="px-2 py-1.5">
-                  <select
-                    value={b.storage_location_id}
-                    onChange={(e) => onChange(i, { storage_location_id: e.target.value })}
-                    className={`${cell} w-32`}
-                    disabled={rakCk.length === 0}
-                    title={
-                      rakCk.length === 0
-                        ? "Belum ada rak/tempat penyimpanan (atur di Stok → Tempat Penyimpanan)"
-                        : "Rak simpan default — barang tiba otomatis diletakkan di sini"
-                    }
-                  >
-                    <option value="">Tanpa tempat</option>
-                    {b.storage_location_id &&
-                      !rakCk.some((r) => r.id === b.storage_location_id) && (
-                        <option value={b.storage_location_id}>(rak tersimpan)</option>
-                      )}
-                    {rakCk.map((r) => (
-                      <option key={r.id} value={r.id}>
-                        {r.nama}
-                      </option>
-                    ))}
-                  </select>
                 </td>
                 <td className="px-2 py-1.5 text-center">
                   <input

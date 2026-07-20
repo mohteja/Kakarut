@@ -17,6 +17,7 @@ import { arsipkanMembershipNonaktif, backfillEmployeeCode } from "./modules/user
 import { konfirmasiProduksiCkLokalTertahan } from "./modules/produksi/backfill";
 import { backfillNomorDokumen } from "./modules/dokumen/nomor";
 import { terapkanSemuaKonsumsiOtomatis } from "./modules/perlengkapan/service";
+import { backfillRakSimpanKeSli } from "./modules/penyimpanan/backfill";
 import { getStorage, localUploadDir } from "./modules/upload/storage";
 
 // Migrasi otomatis saat boot: deploy versi baru langsung menerapkan skema
@@ -71,6 +72,11 @@ if (env.AUTO_MIGRATE) {
   const autoPerlengkapan = await terapkanSemuaKonsumsiOtomatis();
   if (autoPerlengkapan > 0)
     console.log(`Pemakaian otomatis perlengkapan dicatat: ${autoPerlengkapan} baris.`);
+  // Pindahkan rak simpan lama per bahan (kolom warisan) ke penugasan per cabang
+  // (Tempat Penyimpanan) — sumber tunggal rak simpan sekarang.
+  const rakPindah = await backfillRakSimpanKeSli(db);
+  if (rakPindah > 0)
+    console.log(`Rak simpan lama dipindah ke Tempat Penyimpanan: ${rakPindah} bahan.`);
 }
 
 const app = createApp();

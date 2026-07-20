@@ -6,7 +6,6 @@ import { Card, ErrorText, PageTitle, btnPrimary, btnSecondary } from "../../comp
 import { KategoriManagerModal } from "../../components/KategoriManagerModal";
 import { api } from "../../lib/api";
 import { BahanEditorGrid, type BahanEditorRow } from "./BahanEditorGrid";
-import { useRakSimpan } from "./useRakSimpan";
 
 function barisKosong(satuan: string): BahanEditorRow {
   return {
@@ -25,7 +24,6 @@ function barisKosong(satuan: string): BahanEditorRow {
     is_packaging: false,
     is_complement: false,
     catatan: "",
-    storage_location_id: "",
   };
 }
 
@@ -48,8 +46,6 @@ export function TambahBahanBakuPage() {
     queryKey: ["kategori-bahan"],
     queryFn: () => api<KategoriDto[]>("/kategori-bahan"),
   });
-  // Rak simpan (home) bahan — sama persis dengan halaman Ubah (hook bersama).
-  const rakCk = useRakSimpan();
   const satuanDefault = satuanList?.some((s) => s.nama === "pcs")
     ? "pcs"
     : satuanList?.[0]?.nama ?? "pcs";
@@ -88,7 +84,6 @@ export function TambahBahanBakuPage() {
             is_packaging: b.is_packaging,
             is_complement: b.is_complement,
             catatan: b.catatan.trim() || null,
-            storage_location_id: b.storage_location_id || null,
           })),
         },
       }),
@@ -140,13 +135,7 @@ export function TambahBahanBakuPage() {
         </p>
       </div>
 
-      <BahanEditorGrid
-        rows={rows}
-        onChange={ubah}
-        onRemove={hapusBaris}
-        kategoriList={kategoriList}
-        rakCk={rakCk}
-      />
+      <BahanEditorGrid rows={rows} onChange={ubah} onRemove={hapusBaris} kategoriList={kategoriList} />
 
       <div className="mt-3 flex flex-wrap items-center gap-3">
         <button type="button" onClick={tambahBaris} className={btnSecondary}>

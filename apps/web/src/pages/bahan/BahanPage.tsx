@@ -412,9 +412,20 @@ export function BahanPage() {
                     <span className="text-stone-300">—</span>
                   )}
                 </td>
-                <td className={`${tdClass} whitespace-nowrap text-stone-600`}>
-                  {b.storage_location_nama ? (
-                    <span title="Rak simpan default">🗄 {b.storage_location_nama}</span>
+                <td className={`${tdClass} text-stone-600`}>
+                  {b.rak_lokasi.length > 0 ? (
+                    <span className="flex flex-wrap gap-1">
+                      {b.rak_lokasi.map((r) => (
+                        <span
+                          key={r.rak_id}
+                          title={`${r.branch_nama} — ${r.rak_nama} (atur di Tempat Penyimpanan)`}
+                          className="whitespace-nowrap rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs text-amber-800"
+                        >
+                          {r.branch_tipe === "central_kitchen" ? "🏭" : "🏪"} {r.branch_nama} ·{" "}
+                          {r.rak_nama}
+                        </span>
+                      ))}
+                    </span>
                   ) : (
                     <span className="text-stone-300">—</span>
                   )}

@@ -410,7 +410,7 @@ function TahapForm({
                   </select>
                   <div className="mt-1 text-[11px] text-stone-400">
                     Pilih satu rak untuk semua hasil, atau kosongkan → tiap hasil masuk rak
-                    default-nya (atur di <b>Bahan Baku → Ubah</b>); belum diatur → tanpa tempat.
+                    default-nya (atur di <b>Stok → Tempat Penyimpanan</b>); belum diatur → tanpa tempat.
                   </div>
                 </div>
               </>
@@ -452,8 +452,8 @@ function TahapForm({
                     ))
                   )}
                   <div className="text-[11px] text-stone-400">
-                    Atur rak default tiap bahan di <b>Bahan Baku → Ubah</b> (kolom Rak). Belum diatur
-                    → di CK tanpa tempat.
+                    Atur rak default tiap bahan di <b>Stok → Tempat Penyimpanan</b> (pilih cabang CK,
+                    lalu bahan per rak). Belum diatur → di CK tanpa tempat.
                   </div>
                 </div>
               </>
