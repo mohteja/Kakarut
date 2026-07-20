@@ -14,7 +14,6 @@ import type { RiwayatHargaDto, RiwayatHargaLot } from "@kakarut/shared";
 import { db } from "../../db/client";
 import {
   dokumenNomor,
-  storageLocations,
   suppliers,
   supplies,
   supplyMutations,
@@ -57,7 +56,6 @@ const ItemBody = z.object({
   kategori: z.string().trim().min(1).max(60).nullish(),
   boleh_eceran: z.boolean().default(true),
   dilacak: z.boolean().default(false),
-  storage_location_id: z.string().uuid().nullish(),
 });
 
 // PATCH parsial tanpa .default() — lihat catatan BahanPatchBody (zod v4).
@@ -70,7 +68,6 @@ const ItemPatchBody = z.object({
   kategori: z.string().trim().min(1).max(60).nullish(),
   boleh_eceran: z.boolean().optional(),
   dilacak: z.boolean().optional(),
-  storage_location_id: z.string().uuid().nullish(),
   is_active: z.boolean().optional(),
 });
 
@@ -86,22 +83,6 @@ const SupplierBody = z.object({
     .default([]),
 });
 
-/** Pastikan rak (tempat penyimpanan) milik company & aktif; return id / 400. */
-async function pastikanRak(companyId: string, rakId: string | null | undefined) {
-  if (!rakId) return null;
-  const [rak] = await db
-    .select({ id: storageLocations.id })
-    .from(storageLocations)
-    .where(
-      and(
-        eq(storageLocations.id, rakId),
-        eq(storageLocations.companyId, companyId),
-        eq(storageLocations.isActive, true),
-      ),
-    );
-  if (!rak) throw new HTTPException(400, { message: "Rak penyimpanan tidak valid" });
-  return rak.id;
-}
 
 /**
  * Riwayat harga beli perlengkapan: setiap stok MASUK (se-perusahaan) = satu lot
@@ -474,7 +455,6 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
   .post("/", requireRole("owner", "admin"), zValidator("json", ItemBody), async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");
-    const rakId = await pastikanRak(auth.company_id!, body.storage_location_id);
     // Nama sama (case-insensitive): item nonaktif → reaktivasi; aktif → 409.
     const [ada] = await db
       .select()
@@ -500,7 +480,6 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
           kategori: body.kategori ?? null,
           bolehEceran: body.boleh_eceran,
           dilacak: body.dilacak,
-          storageLocationId: rakId,
           isActive: true,
           updatedAt: new Date(),
         })
@@ -520,7 +499,6 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
         kategori: body.kategori ?? null,
         bolehEceran: body.boleh_eceran,
         dilacak: body.dilacak,
-        storageLocationId: rakId,
       })
       .returning();
     return c.json({ id: row.id, nama: row.nama, dipulihkan: false }, 201);
@@ -528,10 +506,6 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
   .patch("/:id", requireRole("owner", "admin"), zValidator("json", ItemPatchBody), async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");
-    const rakId =
-      body.storage_location_id !== undefined
-        ? await pastikanRak(auth.company_id!, body.storage_location_id)
-        : undefined;
     const [row] = await db
       .update(supplies)
       .set({
@@ -543,7 +517,6 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
         ...(body.kategori !== undefined && { kategori: body.kategori }),
         ...(body.boleh_eceran !== undefined && { bolehEceran: body.boleh_eceran }),
         ...(body.dilacak !== undefined && { dilacak: body.dilacak }),
-        ...(rakId !== undefined && { storageLocationId: rakId }),
         ...(body.is_active !== undefined && { isActive: body.is_active }),
         updatedAt: new Date(),
       })

@@ -3100,12 +3100,14 @@ api "$OWNER" POST /kategori-bahan '{"nama":"Kebersihan Uji"}' > /dev/null
 RAK88=$(api "$OWNER" POST /penyimpanan '{"nama":"Rak Perlengkapan Uji"}' | jq -r .id)
 SPL88=$(api "$OWNER" POST /supplier '{"nama":"Toko Perlengkapan Uji"}' | jq -r .id)
 SPL88B=$(api "$OWNER" POST /supplier '{"nama":"Grosir Perlengkapan Uji"}' | jq -r .id)
-KB88=$(api "$OWNER" POST /perlengkapan "{\"nama\":\"Karbol Uji\",\"satuan\":\"botol\",\"kategori\":\"Kebersihan Uji\",\"boleh_eceran\":false,\"dilacak\":true,\"storage_location_id\":\"$RAK88\"}" | jq -r .id)
+KB88=$(api "$OWNER" POST /perlengkapan "{\"nama\":\"Karbol Uji\",\"satuan\":\"botol\",\"kategori\":\"Kebersihan Uji\",\"boleh_eceran\":false,\"dilacak\":true}" | jq -r .id)
 [ -n "$KB88" ] && [ "$KB88" != "null" ] && ok "buat item lengkap (Karbol Uji)" || gagal "buat item: $KB88"
+# rak simpan kini diatur di Tempat Penyimpanan (SATU tabel dgn bahan baku)
+api "$OWNER" PUT "/penyimpanan/$RAK88/bahan" "{\"supply_ids\":[\"$KB88\"]}" > /dev/null
 api "$OWNER" PUT "/perlengkapan/$KB88/supplier" "{\"items\":[{\"supplier_id\":\"$SPL88\",\"is_utama\":true},{\"supplier_id\":\"$SPL88B\"}]}" > /dev/null
 M88=$(api "$OWNER" GET /perlengkapan/master | jq --arg id "$KB88" '[.[]|select(.id==$id)][0]')
-cek "master memuat kategori/utuh-kemasan/dilacak/rak/supplier utama (+1)" "V == 1" \
-  "$(echo "$M88" | jq --arg r "$RAK88" '((.kategori=="Kebersihan Uji") and (.boleh_eceran==false) and (.dilacak==true) and (.rak.id==$r) and (.rak.nama=="Rak Perlengkapan Uji") and (.supplier_utama=="Toko Perlengkapan Uji") and (.jumlah_supplier==2)) | if . then 1 else 0 end')"
+cek "master memuat kategori/utuh-kemasan/dilacak/rak_lokasi/supplier utama (+1)" "V == 1" \
+  "$(echo "$M88" | jq --arg r "$RAK88" '((.kategori=="Kebersihan Uji") and (.boleh_eceran==false) and (.dilacak==true) and ((.rak_lokasi|map(select(.rak_id==$r and .rak_nama=="Rak Perlengkapan Uji"))|length)==1) and (.supplier_utama=="Toko Perlengkapan Uji") and (.jumlah_supplier==2)) | if . then 1 else 0 end')"
 cek "daftar supplier item: 2 baris, utama di atas" "V == 1" \
   "$(api "$OWNER" GET "/perlengkapan/$KB88/supplier" | jq '((length==2) and (.[0].is_utama==true) and (.[0].nama=="Toko Perlengkapan Uji")) | if . then 1 else 0 end')"
 # GET /perlengkapan per-cabang membawa rak (utk pilih lokasi saat opname)
@@ -3113,8 +3115,6 @@ cek "daftar per-cabang membawa rak item (rak.id == RAK88)" "V == 1" \
   "$(api "$OWNER" GET /perlengkapan | jq --arg id "$KB88" --arg r "$RAK88" '([.[]|select(.id==$id)][0].rak.id==$r) | if . then 1 else 0 end')"
 cek "item tanpa rak → rak null" "V == 1" \
   "$(api "$OWNER" GET /perlengkapan | jq --arg id "$SB83" '([.[]|select(.id==$id)][0].rak == null) | if . then 1 else 0 end')"
-cek "rak asing/tak valid → 400" "V == 400" \
-  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/perlengkapan" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"nama":"Salah Rak Uji","storage_location_id":"00000000-0000-0000-0000-000000000000"}')"
 cek "dua supplier utama → 400" "V == 400" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/perlengkapan/$KB88/supplier" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"items\":[{\"supplier_id\":\"$SPL88\",\"is_utama\":true},{\"supplier_id\":\"$SPL88B\",\"is_utama\":true}]}")"
 cek "guard: kasir atur supplier → 403" "V == 403" "$(status_code "$KASIR" PUT "/perlengkapan/$KB88/supplier")"
@@ -3379,6 +3379,45 @@ cek "GET bahan: rak_lokasi BH94 memuat RC94 (store)" "V == 1" \
 api "$OWNER" PUT "/penyimpanan/$RAK79/bahan" "{\"ingredient_ids\":[\"$BH79\",\"$BH94\"]}" > /dev/null
 cek "rak CK + rak cabang berdampingan: rak_lokasi BH94 = 2 (CK & store)" "V == 1" \
   "$(api "$OWNER" GET /bahan | jq --arg i "$BH94" '([.[]|select(.id==$i)][0].rak_lokasi|( (map(.branch_tipe)|sort) == ["central_kitchen","store"] ))|if . then 1 else 0 end')"
+
+echo "== 95. Rak PERLENGKAPAN di Tempat Penyimpanan (satu tabel dgn bahan baku) =="
+# pakai ulang rak store RC94/RC94B (§94) + rak CK RAK79 (§79)
+SP95=$(api "$OWNER" POST /perlengkapan '{"nama":"perlengkapan rak uji95","satuan":"pcs","harga_beli":500,"stok_minimum":0}' | jq -r .id)
+cek "assign perlengkapan ke rak cabang → jumlah_perlengkapan 1" "V == 1" \
+  "$(api "$OWNER" PUT "/penyimpanan/$RC94/bahan" "{\"supply_ids\":[\"$SP95\"]}" | jq '.jumlah_perlengkapan')"
+cek "GET rak/bahan: supply_ids berisi SP95" "V == 1" \
+  "$(api "$OWNER" GET "/penyimpanan/$RC94/bahan" | jq --arg s "$SP95" '[.supply_ids[]|select(.==$s)]|length')"
+# per-tipe: assign perlengkapan TIDAK mengganggu bahan BH94 yang sudah di RC94
+cek "per-tipe: BH94 tetap di ingredient_ids RC94" "V == 1" \
+  "$(api "$OWNER" GET "/penyimpanan/$RC94/bahan" | jq --arg i "$BH94" '[.ingredient_ids[]|select(.==$i)]|length')"
+cek "daftar penyimpanan: jumlah_perlengkapan RC94 = 1" "V == 1" \
+  "$(api "$OWNER" GET "/penyimpanan?branch_id=$CB46_ID" | jq --arg r "$RC94" '[.[]|select(.id==$r)][0].jumlah_perlengkapan')"
+cek "GET RC94B/bahan: SP95 di supply_terpakai_lain (sudah di RC94)" "V == 1" \
+  "$(api "$OWNER" GET "/penyimpanan/$RC94B/bahan" | jq --arg s "$SP95" '[.supply_terpakai_lain[]|select(.==$s)]|length')"
+cek "GET RC94/bahan: SP95 TIDAK di supply_terpakai_lain (rak sendiri)" "V == 0" \
+  "$(api "$OWNER" GET "/penyimpanan/$RC94/bahan" | jq --arg s "$SP95" '[.supply_terpakai_lain[]|select(.==$s)]|length')"
+cek "guard: kasir assign perlengkapan rak → 403" "V == 403" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/penyimpanan/$RC94/bahan" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d "{\"supply_ids\":[\"$SP95\"]}")"
+cek "guard: perlengkapan asing (uuid acak) → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/penyimpanan/$RC94/bahan" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"supply_ids":["00000000-0000-0000-0000-000000000000"]}')"
+# 1 perlengkapan = 1 rak per cabang: pindah ke RC94B → lepas dari RC94
+api "$OWNER" PUT "/penyimpanan/$RC94B/bahan" "{\"supply_ids\":[\"$SP95\"]}" > /dev/null
+cek "pindah rak: RC94 tak lagi berisi SP95" "V == 0" \
+  "$(api "$OWNER" GET "/penyimpanan/$RC94/bahan" | jq --arg s "$SP95" '[.supply_ids[]|select(.==$s)]|length')"
+cek "pindah rak: RC94B berisi SP95" "V == 1" \
+  "$(api "$OWNER" GET "/penyimpanan/$RC94B/bahan" | jq --arg s "$SP95" '[.supply_ids[]|select(.==$s)]|length')"
+cek "per-tipe: BH94 tetap di RC94 setelah perlengkapan pindah" "V == 1" \
+  "$(api "$OWNER" GET "/penyimpanan/$RC94/bahan" | jq --arg i "$BH94" '[.ingredient_ids[]|select(.==$i)]|length')"
+# daftar Perlengkapan (master): rak_lokasi (read-only) memuat RC94B (store)
+cek "GET perlengkapan/master: rak_lokasi SP95 memuat RC94B (store)" "V == 1" \
+  "$(api "$OWNER" GET /perlengkapan/master | jq --arg i "$SP95" --arg r "$RC94B" '([.[]|select(.id==$i)][0].rak_lokasi|map(select(.rak_id==$r and .branch_tipe=="store"))|length)')"
+# daftar Perlengkapan per cabang: rak = rak di cabang itu
+cek "GET perlengkapan?branch_id=CB46: rak SP95 = RC94B" "V == 1" \
+  "$(api "$OWNER" GET "/perlengkapan?branch_id=$CB46_ID" | jq --arg i "$SP95" --arg r "$RC94B" '([.[]|select(.id==$i)][0].rak.id==$r)|if . then 1 else 0 end')"
+# TERPISAH: perlengkapan boleh punya rak di CK DAN cabang store (seperti bahan)
+api "$OWNER" PUT "/penyimpanan/$RAK79/bahan" "{\"supply_ids\":[\"$SP95\"]}" > /dev/null
+cek "rak CK + cabang berdampingan: rak_lokasi SP95 = 2 (CK & store)" "V == 1" \
+  "$(api "$OWNER" GET /perlengkapan/master | jq --arg i "$SP95" '([.[]|select(.id==$i)][0].rak_lokasi|( (map(.branch_tipe)|sort) == ["central_kitchen","store"] ))|if . then 1 else 0 end')"
 
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="

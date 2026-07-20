@@ -532,6 +532,8 @@ export interface PenyimpananDto {
   petugas: PetugasRingkas[];
   /** jumlah bahan baku yang ditugaskan disimpan di rak ini (rak default cabang) */
   jumlah_bahan: number;
+  /** jumlah perlengkapan yang ditugaskan disimpan di rak ini */
+  jumlah_perlengkapan: number;
 }
 
 /**
@@ -1001,8 +1003,12 @@ export interface PerlengkapanMasterRow {
   boleh_eceran: boolean;
   /** dilacak: konsumsinya dipantau — WAJIB punya aturan konsumsi */
   dilacak: boolean;
-  /** rak simpan default (tempat penyimpanan) */
-  rak: { id: string; nama: string } | null;
+  /**
+   * DI SIMPAN DI MANA: rak per cabang (CK & cabang store), sumbernya Tempat
+   * Penyimpanan (tabel yang sama dengan bahan baku). READ-ONLY — diatur di
+   * Tempat Penyimpanan, bukan di form Perlengkapan.
+   */
+  rak_lokasi: RakLokasi[];
   /** nama supplier utama/langganan (null = belum diatur) */
   supplier_utama: string | null;
   jumlah_supplier: number;

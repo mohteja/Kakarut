@@ -5,7 +5,7 @@
  * sebelum pakai/koreksi, dan sekali saat boot.
  */
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, gte, inArray, lt, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNotNull, lt, lte, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import type {
   BeliPerlengkapanRow,
@@ -13,6 +13,7 @@ import type {
   PerlengkapanMasterRow,
   PerlengkapanRowDto,
   PermintaanPerlengkapanOtomatisHasil,
+  RakLokasi,
   StokStatus,
 } from "@kakarut/shared";
 import { db } from "../../db/client";
@@ -20,6 +21,7 @@ import {
   branches,
   companies,
   dokumenNomor,
+  storageLocationIngredients,
   storageLocations,
   suppliers,
   supplies,
@@ -214,12 +216,26 @@ export async function saldoPerlengkapan(
     .from(branches)
     .where(and(eq(branches.id, branchId), eq(branches.companyId, companyId)));
   const ckId = cab && cab.tipe !== "central_kitchen" ? (cab.ckId ?? null) : null;
-  // rak simpan default (nama tempat penyimpanan) per item — utk memilih lokasi opname
+  // rak simpan per item DI CABANG INI (sumber: Tempat Penyimpanan / tabel sli)
   const rakRows = await db
-    .select({ id: storageLocations.id, nama: storageLocations.nama })
-    .from(storageLocations)
-    .where(eq(storageLocations.companyId, companyId));
-  const rakById = new Map(rakRows.map((r) => [r.id, r.nama]));
+    .select({
+      supplyId: storageLocationIngredients.supplyId,
+      id: storageLocations.id,
+      nama: storageLocations.nama,
+    })
+    .from(storageLocationIngredients)
+    .innerJoin(
+      storageLocations,
+      eq(storageLocations.id, storageLocationIngredients.storageLocationId),
+    )
+    .where(
+      and(
+        eq(storageLocationIngredients.companyId, companyId),
+        eq(storageLocations.branchId, branchId),
+        isNotNull(storageLocationIngredients.supplyId),
+      ),
+    );
+  const rakBySupply = new Map(rakRows.map((r) => [r.supplyId!, { id: r.id, nama: r.nama }]));
   const rows = await db
     .select({
       id: supplies.id,
@@ -228,7 +244,6 @@ export async function saldoPerlengkapan(
       hargaBeli: supplies.hargaBeli,
       stokMinimum: supplies.stokMinimum,
       catatan: supplies.catatan,
-      storageLocationId: supplies.storageLocationId,
       saldo: sql<number>`COALESCE((SELECT SUM(${supplyMutations.qty}) FROM ${supplyMutations} WHERE ${supplyMutations.supplyId} = ${supplies.id} AND ${supplyMutations.branchId} = ${branchId} AND ${supplyMutations.status} = 'disetujui'), 0)::float8`,
       saldoCk: ckId
         ? sql<number>`COALESCE((SELECT SUM(${supplyMutations.qty}) FROM ${supplyMutations} WHERE ${supplyMutations.supplyId} = ${supplies.id} AND ${supplyMutations.branchId} = ${ckId} AND ${supplyMutations.status} = 'disetujui'), 0)::float8`
@@ -255,10 +270,7 @@ export async function saldoPerlengkapan(
     catatan: r.catatan,
     saldo: r.saldo,
     status: statusPerlengkapan(r.saldo, r.stokMinimum),
-    rak:
-      r.storageLocationId && rakById.has(r.storageLocationId)
-        ? { id: r.storageLocationId, nama: rakById.get(r.storageLocationId)! }
-        : null,
+    rak: rakBySupply.get(r.id) ?? null,
     aturan:
       r.aturanQty != null
         ? {
@@ -284,12 +296,41 @@ export async function sebaranPerlengkapan(companyId: string): Promise<Perlengkap
     .from(supplies)
     .where(and(eq(supplies.companyId, companyId), eq(supplies.isActive, true)))
     .orderBy(asc(supplies.nama));
-  // rak simpan default (nama tempat penyimpanan) per item
-  const rakRows = await db
-    .select({ id: storageLocations.id, nama: storageLocations.nama })
-    .from(storageLocations)
-    .where(eq(storageLocations.companyId, companyId));
-  const rakById = new Map(rakRows.map((r) => [r.id, r.nama]));
+  // DI SIMPAN DI MANA: rak per cabang per item (sumber Tempat Penyimpanan / sli)
+  const rakLokasiRows = await db
+    .select({
+      supplyId: storageLocationIngredients.supplyId,
+      rakId: storageLocations.id,
+      rakNama: storageLocations.nama,
+      branchId: branches.id,
+      branchNama: branches.nama,
+      branchTipe: branches.tipe,
+    })
+    .from(storageLocationIngredients)
+    .innerJoin(
+      storageLocations,
+      eq(storageLocations.id, storageLocationIngredients.storageLocationId),
+    )
+    .innerJoin(branches, eq(branches.id, storageLocations.branchId))
+    .where(
+      and(
+        eq(storageLocationIngredients.companyId, companyId),
+        isNotNull(storageLocationIngredients.supplyId),
+      ),
+    )
+    .orderBy(asc(branches.tipe), asc(branches.nama), asc(storageLocations.nama));
+  const rakLokasiBySupply = new Map<string, RakLokasi[]>();
+  for (const r of rakLokasiRows) {
+    const arr = rakLokasiBySupply.get(r.supplyId!) ?? [];
+    arr.push({
+      branch_id: r.branchId,
+      branch_nama: r.branchNama,
+      branch_tipe: r.branchTipe,
+      rak_id: r.rakId,
+      rak_nama: r.rakNama,
+    });
+    rakLokasiBySupply.set(r.supplyId!, arr);
+  }
   // ringkasan supplier per item: nama utama + jumlah terdaftar
   const supRows = await db
     .select({
@@ -377,10 +418,7 @@ export async function sebaranPerlengkapan(companyId: string): Promise<Perlengkap
       kategori: it.kategori,
       boleh_eceran: it.bolehEceran,
       dilacak: it.dilacak,
-      rak:
-        it.storageLocationId && rakById.has(it.storageLocationId)
-          ? { id: it.storageLocationId, nama: rakById.get(it.storageLocationId)! }
-          : null,
+      rak_lokasi: rakLokasiBySupply.get(it.id) ?? [],
       supplier_utama: sup?.utama ?? null,
       jumlah_supplier: sup?.jumlah ?? 0,
       lokasi,
