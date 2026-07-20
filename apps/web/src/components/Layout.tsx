@@ -25,7 +25,7 @@ const BOLEH_STORE = [
   "/penerimaan",
   "/pengaturan/printer",
 ];
-const BOLEH_CK = ["/absen", "/profil", "/stok", "/perlengkapan", "/penerimaan", "/produksi", "/pembelian", "/bahan", "/resep"];
+const BOLEH_CK = ["/absen", "/profil", "/stok", "/perlengkapan", "/perlengkapan/beli", "/penerimaan", "/produksi", "/pembelian", "/bahan", "/resep"];
 
 const linkClass = ({ isActive }: { isActive: boolean }) =>
   `block rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
@@ -322,6 +322,9 @@ export function Layout() {
                   </NavLink>
                   <NavLink to="/pembelian" className={linkClass}>
                     🛒 Beli Bahan Baku
+                  </NavLink>
+                  <NavLink to="/perlengkapan/beli" className={linkClass}>
+                    🧺 Beli Perlengkapan
                   </NavLink>
                   {dCk && (
                     <>

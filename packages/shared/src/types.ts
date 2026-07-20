@@ -103,8 +103,14 @@ export interface BahanImportRow {
   satuan: string;
   satuan_beli: string | null;
   stok_minimum: number;
+  /** minimal belanja (MOQ); 0 = tanpa minimum */
+  min_beli: number;
   boleh_eceran: boolean;
   lacak_stok: boolean;
+  /** kemasan take-away (is_packaging) */
+  kemasan: boolean;
+  /** complement (×0.5 dine-in) */
+  complement: boolean;
   catatan: string | null;
 }
 
@@ -185,6 +191,15 @@ export interface BahanBulkRow {
   track_stok: boolean;
   stok_minimum: number;
   boleh_eceran: boolean;
+  /** minimal belanja (MOQ); 0 = tanpa minimum */
+  min_beli?: number;
+  /** kemasan take-away */
+  is_packaging?: boolean;
+  /** complement (×0.5 dine-in) */
+  is_complement?: boolean;
+  catatan?: string | null;
+  /** rak simpan default (home) di CK */
+  storage_location_id?: string | null;
 }
 
 export interface MenuDto {
@@ -641,6 +656,10 @@ export interface OpnameSesiDetail {
     system_qty: number | null;
     qty_fisik: number;
     selisih: number | null;
+    /** bukti foto selisih (URL) — dilampirkan saat pengecekan, untuk ACC admin */
+    foto_url: string | null;
+    /** alasan selisih (opsional) — dilampirkan saat pengecekan */
+    alasan: string | null;
   }[];
 }
 
@@ -986,10 +1005,42 @@ export interface PermintaanPerlengkapanOtomatisHasil {
     qty: number;
     nomor: string | null;
   }[];
-  /** item yang masih kurang setelah kiriman — CK harus beli lagi */
-  perlu_beli_ck: { supply_id: string; nama: string; satuan: string; qty: number }[];
+  /**
+   * kekurangan yang stok CK tak cukup → faktur BELI (BP-) ke CK diterbitkan;
+   * dibeli → tiba di CK → otomatis dikirim ke cabang tujuan (seperti bahan baku)
+   */
+  beli_dibuat: {
+    supply_id: string;
+    nama: string;
+    satuan: string;
+    qty: number;
+    nomor: string | null;
+    tujuan_nama: string | null;
+  }[];
   /** item ≤ minimum tapi cabang ini bukan store / tak terhubung CK */
   tak_bisa_kirim: { supply_id: string; nama: string; satuan: string; qty: number }[];
+}
+
+/** Status faktur beli perlengkapan ke CK. */
+export type BeliPerlengkapanStatus = "menunggu" | "tiba" | "batal";
+
+/** Satu faktur beli perlengkapan ke Central Kitchen (BP-). */
+export interface BeliPerlengkapanRow {
+  id: string;
+  supply_id: string;
+  nama: string;
+  satuan: string;
+  qty: number;
+  total_harga: number | null;
+  status: BeliPerlengkapanStatus;
+  /** CK tujuan beli (tempat barang masuk stok) */
+  ck_nama: string;
+  /** cabang store yang butuh — dikirim otomatis setelah tiba (null = stok CK saja) */
+  tujuan_nama: string | null;
+  catatan: string | null;
+  waktu: string;
+  oleh: string | null;
+  nomor: string | null;
 }
 
 /** Kiriman perlengkapan CK → cabang (stok pindah saat cabang menerima). */
@@ -1070,4 +1121,41 @@ export interface BelanjaPerlengkapanDto {
   sampai: string;
   total: number;
   per_item: { supply_id: string; nama: string; total: number }[];
+}
+
+/** Metode perhitungan HPP (laba-rugi) yang dipilih perusahaan. */
+export type MetodeHpp = "average" | "fifo";
+
+/**
+ * Satu "lot" pembelian barang (bahan baku / perlengkapan): satu baris beli
+ * dengan qty + total harga → dasar perhitungan HPP FIFO/rata-rata. `harga_satuan`
+ * = total_harga / qty (null bila harga belum dilaporkan).
+ */
+export interface RiwayatHargaLot {
+  id: string;
+  tanggal: string;
+  qty: number;
+  total_harga: number | null;
+  harga_satuan: number | null;
+  supplier: string | null;
+  /** nomor nota supplier (bila diisi manual) */
+  no_faktur: string | null;
+  /** nomor dokumen otomatis (PB-/PL-) */
+  nomor: string | null;
+}
+
+/**
+ * Riwayat harga beli satu barang: daftar lot pembelian + harga terkini &
+ * rata-rata tertimbang. Dipakai kartu "Riwayat Harga" (bahan baku & perlengkapan)
+ * sebagai fondasi hitung laba-rugi (FIFO/average).
+ */
+export interface RiwayatHargaDto {
+  item: { id: string; nama: string; satuan: string };
+  /** harga per satuan terkini (harga_beli / isi utk bahan; harga_beli utk perlengkapan) */
+  harga_terkini: number;
+  /** rata-rata tertimbang per satuan dari lot berharga (null bila belum ada) */
+  harga_rata: number | null;
+  /** jumlah lot pembelian tercatat */
+  jumlah_pembelian: number;
+  lots: RiwayatHargaLot[];
 }

@@ -10,8 +10,10 @@ import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
+import type { RiwayatHargaDto, RiwayatHargaLot } from "@kakarut/shared";
 import { db } from "../../db/client";
 import {
+  dokumenNomor,
   storageLocations,
   suppliers,
   supplies,
@@ -19,12 +21,15 @@ import {
   supplyRules,
   supplySuppliers,
 } from "../../db/schema";
-import { requireRole, resolveBranchId, type AppEnv } from "../../middleware/auth";
+import { requireRole, resolveBranchId, terikatCabang, type AppEnv } from "../../middleware/auth";
 import { terbitkanNomor } from "../dokumen/nomor";
 import {
+  batalBeliPerlengkapan,
   belanjaPerlengkapan,
+  buatBeliPerlengkapanManual,
   buatKirimanPerlengkapan,
   buatOpnamePerlengkapan,
+  daftarBeliPerlengkapan,
   daftarKirimanPerlengkapan,
   detailOpnamePerlengkapan,
   kartuPerlengkapan,
@@ -38,6 +43,7 @@ import {
   tanggalPerusahaan,
   terapkanKonsumsiOtomatis,
   terimaKirimanPerlengkapan,
+  tibaBeliPerlengkapan,
 } from "./service";
 
 const TANGGAL_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -95,6 +101,68 @@ async function pastikanRak(companyId: string, rakId: string | null | undefined) 
     );
   if (!rak) throw new HTTPException(400, { message: "Rak penyimpanan tidak valid" });
   return rak.id;
+}
+
+/**
+ * Riwayat harga beli perlengkapan: setiap stok MASUK (se-perusahaan) = satu lot
+ * pembelian. `harga_satuan` = total_harga / qty. Rata-rata tertimbang hanya dari
+ * lot berharga. Fondasi hitung HPP FIFO / rata-rata.
+ */
+async function riwayatHargaPerlengkapan(
+  companyId: string,
+  item: typeof supplies.$inferSelect,
+): Promise<RiwayatHargaDto> {
+  const rows = await db
+    .select({
+      id: supplyMutations.id,
+      tanggal: supplyMutations.tanggal,
+      qty: supplyMutations.qty,
+      totalHarga: supplyMutations.totalHarga,
+      nomor: dokumenNomor.nomorTeks,
+    })
+    .from(supplyMutations)
+    .leftJoin(
+      dokumenNomor,
+      and(
+        eq(dokumenNomor.companyId, supplyMutations.companyId),
+        eq(dokumenNomor.refId, supplyMutations.id),
+      ),
+    )
+    .where(
+      and(
+        eq(supplyMutations.companyId, companyId),
+        eq(supplyMutations.supplyId, item.id),
+        eq(supplyMutations.tipe, "masuk"),
+        eq(supplyMutations.status, "disetujui"),
+      ),
+    )
+    .orderBy(desc(supplyMutations.tanggal), desc(supplyMutations.waktu));
+  const lots: RiwayatHargaLot[] = rows.map((r) => ({
+    id: r.id,
+    tanggal: r.tanggal,
+    qty: r.qty,
+    total_harga: r.totalHarga,
+    harga_satuan:
+      r.totalHarga != null && r.qty > 0 ? Math.round((r.totalHarga / r.qty) * 100) / 100 : null,
+    supplier: null,
+    no_faktur: null,
+    nomor: r.nomor,
+  }));
+  let sumHarga = 0;
+  let sumQty = 0;
+  for (const r of rows) {
+    if (r.totalHarga != null && r.qty > 0) {
+      sumHarga += r.totalHarga;
+      sumQty += r.qty;
+    }
+  }
+  return {
+    item: { id: item.id, nama: item.nama, satuan: item.satuan },
+    harga_terkini: item.hargaBeli,
+    harga_rata: sumQty > 0 ? Math.round((sumHarga / sumQty) * 100) / 100 : null,
+    jumlah_pembelian: lots.length,
+    lots,
+  };
 }
 
 const MasukBody = z.object({
@@ -319,6 +387,90 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
     }
     return c.json(hasil);
   })
+  /**
+   * Daftar FAKTUR BELI perlengkapan ke CK. owner/admin lihat semua (atau filter
+   * ?branch_id = CK); peran terikat cabang hanya faktur di CK-nya.
+   */
+  .get("/beli", async (c) => {
+    const auth = c.get("auth");
+    let ckFilter: string | undefined;
+    if (terikatCabang(auth.role)) ckFilter = auth.branch_id ?? undefined;
+    else ckFilter = c.req.query("branch_id") || undefined;
+    return c.json(await daftarBeliPerlengkapan(auth.company_id!, ckFilter));
+  })
+  /** Buat faktur beli perlengkapan MANUAL ke CK. owner/admin. */
+  .post(
+    "/beli",
+    requireRole("owner", "admin"),
+    zValidator(
+      "json",
+      z.object({
+        supply_id: z.string().uuid(),
+        ck_branch_id: z.string().uuid().nullish(),
+        qty: z.number().positive(),
+        tujuan_branch_id: z.string().uuid().nullish(),
+        total_harga: z.number().min(0).nullish(),
+        catatan: z.string().nullish(),
+      }),
+    ),
+    async (c) => {
+      const auth = c.get("auth");
+      const b = c.req.valid("json");
+      const hasil = await buatBeliPerlengkapanManual({
+        companyId: auth.company_id!,
+        userId: auth.sub,
+        supplyId: b.supply_id,
+        ckBranchId: b.ck_branch_id ?? null,
+        qty: b.qty,
+        tujuanBranchId: b.tujuan_branch_id ?? null,
+        totalHarga: b.total_harga ?? null,
+        catatan: b.catatan ?? null,
+      });
+      if ("error" in hasil) {
+        throw new HTTPException((hasil.code ?? 400) as 400 | 404, { message: hasil.error });
+      }
+      return c.json(hasil, 201);
+    },
+  )
+  /**
+   * Barang faktur beli TIBA di CK → masuk stok CK (PL-) + otomatis kirim (KP-)
+   * ke cabang tujuan. owner/admin (manajemen memproses kedatangan di CK).
+   */
+  .post(
+    "/beli/:id/tiba",
+    requireRole("owner", "admin"),
+    zValidator(
+      "json",
+      z.object({
+        qty: z.number().positive().optional(),
+        total_harga: z.number().min(0).nullish(),
+      }),
+    ),
+    async (c) => {
+      const auth = c.get("auth");
+      const body = c.req.valid("json");
+      const hasil = await tibaBeliPerlengkapan({
+        companyId: auth.company_id!,
+        id: c.req.param("id"),
+        userId: auth.sub,
+        qty: body.qty,
+        totalHarga: body.total_harga ?? null,
+      });
+      if ("error" in hasil) {
+        throw new HTTPException((hasil.code ?? 400) as 400 | 404, { message: hasil.error });
+      }
+      return c.json(hasil);
+    },
+  )
+  /** Batalkan faktur beli perlengkapan yang masih 'menunggu'. owner/admin. */
+  .post("/beli/:id/batal", requireRole("owner", "admin"), async (c) => {
+    const auth = c.get("auth");
+    const hasil = await batalBeliPerlengkapan(auth.company_id!, c.req.param("id"));
+    if ("error" in hasil) {
+      throw new HTTPException((hasil.code ?? 400) as 400 | 404, { message: hasil.error });
+    }
+    return c.json(hasil);
+  })
   .post("/", requireRole("owner", "admin"), zValidator("json", ItemBody), async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");
@@ -487,6 +639,37 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
         }
       });
       return c.json({ ok: true, jumlah: supplierIds.length });
+    },
+  )
+  /**
+   * RIWAYAT HARGA beli perlengkapan: daftar lot (stok masuk) + harga terkini &
+   * rata-rata tertimbang (fondasi HPP). Terbuka semua peran (info harga).
+   */
+  .get("/:id/pembelian", async (c) => {
+    const auth = c.get("auth");
+    const item = await muatSupplyAktif(auth.company_id!, c.req.param("id"));
+    if (!item) throw new HTTPException(404, { message: "Perlengkapan tidak ditemukan" });
+    return c.json(await riwayatHargaPerlengkapan(auth.company_id!, item));
+  })
+  /**
+   * CATAT HARGA perlengkapan (dari kartu Riwayat Harga): perbarui harga beli
+   * acuan per satuan → dipakai perkiraan belanja & HPP berikutnya. owner/admin.
+   */
+  .post(
+    "/:id/harga",
+    requireRole("owner", "admin"),
+    zValidator("json", z.object({ harga_per_unit: z.number().min(0) })),
+    async (c) => {
+      const auth = c.get("auth");
+      const { harga_per_unit } = c.req.valid("json");
+      const item = await muatSupplyAktif(auth.company_id!, c.req.param("id"));
+      if (!item) throw new HTTPException(404, { message: "Perlengkapan tidak ditemukan" });
+      const [row] = await db
+        .update(supplies)
+        .set({ hargaBeli: Math.round(harga_per_unit), updatedAt: new Date() })
+        .where(and(eq(supplies.id, item.id), eq(supplies.companyId, auth.company_id!)))
+        .returning();
+      return c.json(await riwayatHargaPerlengkapan(auth.company_id!, row));
     },
   )
   // Soft delete: ledger & riwayat tetap utuh; nama yang sama bisa dibuat ulang

@@ -26,6 +26,7 @@ interface Company {
   mode: "lite" | "pro";
   receiptFooter: string | null;
   receiptShowAlamat: boolean;
+  metodeHpp: "average" | "fifo";
 }
 
 /** Kartu Mode Lite/Pro: penjelasan + tombol upgrade (modal) / turun ke Lite. */
@@ -153,6 +154,7 @@ export function PerusahaanPage() {
   const [pb1Enabled, setPb1Enabled] = useState(false);
   const [pb1Rate, setPb1Rate] = useState("10");
   const [diskonMaksPersen, setDiskonMaksPersen] = useState("100");
+  const [metodeHpp, setMetodeHpp] = useState<"average" | "fifo">("average");
 
   useEffect(() => {
     if (!company) return;
@@ -163,6 +165,7 @@ export function PerusahaanPage() {
     setPb1Enabled(company.pb1Enabled);
     setPb1Rate(String(company.pb1Rate));
     setDiskonMaksPersen(String(company.diskonMaksPersen));
+    setMetodeHpp(company.metodeHpp ?? "average");
   }, [company]);
 
   const simpan = useMutation({
@@ -177,6 +180,7 @@ export function PerusahaanPage() {
           pb1_enabled: pb1Enabled,
           pb1_rate: Number(pb1Rate),
           diskon_maks_persen: Math.min(100, Math.max(0, Number(diskonMaksPersen) || 0)),
+          metode_hpp: metodeHpp,
         },
       }),
     onSuccess: () => {
@@ -261,6 +265,26 @@ export function PerusahaanPage() {
           <p className="mt-1 text-xs text-stone-500">
             Diskon terbesar yang boleh diberikan <b>kasir</b> per transaksi. <b>100</b> = bebas,
             <b> 0</b> = kasir tak boleh memberi diskon. Owner &amp; admin selalu bebas.
+          </p>
+        </div>
+
+        <div className="rounded-lg border border-stone-200 p-3">
+          <label className="mb-1 block text-sm font-medium">
+            Metode perhitungan harga pokok (HPP)
+          </label>
+          <select
+            value={metodeHpp}
+            onChange={(e) => setMetodeHpp(e.target.value as "average" | "fifo")}
+            className={`${inputClass} max-w-xs`}
+          >
+            <option value="average">Rata-rata tertimbang (Average)</option>
+            <option value="fifo">FIFO (masuk pertama, keluar pertama)</option>
+          </select>
+          <p className="mt-1 text-xs text-stone-500">
+            Dasar hitung <b>laba-rugi</b> dari riwayat harga beli bahan &amp; perlengkapan.{" "}
+            <b>Average</b> memakai harga rata-rata semua pembelian; <b>FIFO</b> memakai harga lot
+            pembelian terlama lebih dulu. Riwayat harga tiap barang bisa dilihat dengan mengklik
+            namanya di halaman <b>Bahan Baku</b>/<b>Perlengkapan</b>.
           </p>
         </div>
         <ErrorText error={simpan.error} />

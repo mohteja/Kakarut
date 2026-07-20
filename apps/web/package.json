@@ -13,6 +13,7 @@
   "dependencies": {
     "@kakarut/shared": "*",
     "@tanstack/react-query": "^5.101.2",
+    "html2pdf.js": "^0.14.0",
     "jsqr": "^1.4.0",
     "leaflet": "^1.9.4",
     "qrcode": "^1.5.4",

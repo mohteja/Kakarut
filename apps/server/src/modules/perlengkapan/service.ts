@@ -8,6 +8,7 @@ import { randomUUID } from "node:crypto";
 import { and, asc, desc, eq, gte, inArray, lt, lte, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import type {
+  BeliPerlengkapanRow,
   KartuPerlengkapanDto,
   PerlengkapanMasterRow,
   PerlengkapanRowDto,
@@ -23,6 +24,7 @@ import {
   suppliers,
   supplies,
   supplyMutations,
+  supplyPurchases,
   supplyRules,
   supplySuppliers,
   supplyTransfers,
@@ -757,9 +759,128 @@ export async function buatKirimanPerlengkapan(params: {
 }
 
 /**
+ * Buat FAKTUR BELI perlengkapan ke CK (status 'menunggu'). Barang belum tiba;
+ * setelah dibeli & tiba dipanggil {@link tibaBeliPerlengkapan} → masuk stok CK
+ * + otomatis kirim ke cabang tujuan (bila diisi). Bernomor BP-.
+ */
+export async function buatBeliPerlengkapan(params: {
+  companyId: string;
+  ckBranchId: string;
+  supplyId: string;
+  qty: number;
+  userId: string;
+  tujuanBranchId?: string | null;
+  totalHarga?: number | null;
+  catatan?: string | null;
+}): Promise<{ id: string; nomor: string }> {
+  return db.transaction(async (tx) => {
+    const [row] = await tx
+      .insert(supplyPurchases)
+      .values({
+        companyId: params.companyId,
+        ckBranchId: params.ckBranchId,
+        supplyId: params.supplyId,
+        qty: params.qty,
+        tujuanBranchId: params.tujuanBranchId ?? null,
+        totalHarga: params.totalHarga ?? null,
+        catatan: params.catatan ?? null,
+        userId: params.userId,
+      })
+      .returning({ id: supplyPurchases.id });
+    const nomor = await terbitkanNomor(tx, params.companyId, "beli_perlengkapan", row.id);
+    return { id: row.id, nomor };
+  });
+}
+
+/**
+ * Buat faktur beli perlengkapan MANUAL (dari halaman Beli Perlengkapan). CK
+ * ditentukan eksplisit atau otomatis bila perusahaan hanya punya satu; cabang
+ * tujuan (opsional) harus store — dikirim otomatis setelah tiba.
+ */
+export async function buatBeliPerlengkapanManual(params: {
+  companyId: string;
+  userId: string;
+  supplyId: string;
+  ckBranchId?: string | null;
+  qty: number;
+  tujuanBranchId?: string | null;
+  totalHarga?: number | null;
+  catatan?: string | null;
+}): Promise<{ id: string; nomor: string } | { error: string; code?: number }> {
+  const [sup] = await db
+    .select({ id: supplies.id })
+    .from(supplies)
+    .where(
+      and(
+        eq(supplies.id, params.supplyId),
+        eq(supplies.companyId, params.companyId),
+        eq(supplies.isActive, true),
+      ),
+    );
+  if (!sup) return { error: "Perlengkapan tidak ditemukan", code: 404 };
+
+  // tentukan CK tujuan beli
+  let ckId = params.ckBranchId ?? null;
+  if (ckId) {
+    const [ck] = await db
+      .select({ id: branches.id })
+      .from(branches)
+      .where(
+        and(
+          eq(branches.id, ckId),
+          eq(branches.companyId, params.companyId),
+          eq(branches.tipe, "central_kitchen"),
+        ),
+      );
+    if (!ck) return { error: "Central Kitchen tidak valid", code: 400 };
+  } else {
+    const cks = await db
+      .select({ id: branches.id })
+      .from(branches)
+      .where(
+        and(
+          eq(branches.companyId, params.companyId),
+          eq(branches.tipe, "central_kitchen"),
+          eq(branches.isActive, true),
+        ),
+      );
+    if (cks.length === 0) return { error: "Belum ada Central Kitchen", code: 400 };
+    if (cks.length > 1) return { error: "Pilih Central Kitchen tujuan beli", code: 400 };
+    ckId = cks[0].id;
+  }
+
+  // cabang tujuan (opsional) wajib store
+  if (params.tujuanBranchId) {
+    const [st] = await db
+      .select({ id: branches.id })
+      .from(branches)
+      .where(
+        and(
+          eq(branches.id, params.tujuanBranchId),
+          eq(branches.companyId, params.companyId),
+          eq(branches.tipe, "store"),
+        ),
+      );
+    if (!st) return { error: "Cabang tujuan tidak valid (harus store)", code: 400 };
+  }
+
+  return buatBeliPerlengkapan({
+    companyId: params.companyId,
+    ckBranchId: ckId,
+    supplyId: params.supplyId,
+    qty: params.qty,
+    userId: params.userId,
+    tujuanBranchId: params.tujuanBranchId ?? null,
+    totalHarga: params.totalHarga ?? null,
+    catatan: params.catatan ?? null,
+  });
+}
+
+/**
  * Permintaan perlengkapan OTOMATIS untuk satu cabang: pindai item yang saldo ≤
  * stok minimum, lalu untuk tiap item terbitkan kiriman KP- sebanyak stok yang
- * ADA di CK; kekurangan yang belum tertutup dilaporkan "perlu beli di CK".
+ * ADA di CK; kekurangan yang belum tertutup diterbitkan sebagai FAKTUR BELI ke
+ * CK (BP-) — dibeli → masuk stok CK → dikirim ke cabang, persis bahan baku.
  */
 export async function permintaanOtomatisPerlengkapan(params: {
   companyId: string;
@@ -767,7 +888,7 @@ export async function permintaanOtomatisPerlengkapan(params: {
   userId: string;
 }): Promise<PermintaanPerlengkapanOtomatisHasil | { error: string; code?: number }> {
   const [cab] = await db
-    .select({ ckId: branches.centralKitchenId, tipe: branches.tipe })
+    .select({ ckId: branches.centralKitchenId, tipe: branches.tipe, nama: branches.nama })
     .from(branches)
     .where(and(eq(branches.id, params.cabangId), eq(branches.companyId, params.companyId)));
   if (!cab) return { error: "Cabang tidak valid", code: 400 };
@@ -778,11 +899,9 @@ export async function permintaanOtomatisPerlengkapan(params: {
   // saldo dijujurkan dulu (jatah otomatis) sebelum dibandingkan minimum
   await terapkanKonsumsiOtomatis(params.companyId, params.cabangId);
   const rows = await saldoPerlengkapan(params.companyId, params.cabangId);
-  const dibuat: import("@kakarut/shared").PermintaanPerlengkapanOtomatisHasil["dibuat"] = [];
-  const perluBeli: import("@kakarut/shared").PermintaanPerlengkapanOtomatisHasil["perlu_beli_ck"] =
-    [];
-  const takBisa: import("@kakarut/shared").PermintaanPerlengkapanOtomatisHasil["tak_bisa_kirim"] =
-    [];
+  const dibuat: PermintaanPerlengkapanOtomatisHasil["dibuat"] = [];
+  const beliDibuat: PermintaanPerlengkapanOtomatisHasil["beli_dibuat"] = [];
+  const takBisa: PermintaanPerlengkapanOtomatisHasil["tak_bisa_kirim"] = [];
   for (const r of rows) {
     if (!(r.stok_minimum > 0) || r.saldo >= r.stok_minimum) continue;
     // butuh dibulatkan ke atas agar tak minta pecahan yang mustahil dikirim
@@ -814,12 +933,207 @@ export async function permintaanOtomatisPerlengkapan(params: {
         });
       }
     }
+    // sisa yang tak tertutup stok CK → faktur beli ke CK (dibeli lalu dikirim)
     const sisa = kekurangan - kirim;
     if (sisa > 0) {
-      perluBeli.push({ supply_id: r.id, nama: r.nama, satuan: r.satuan, qty: sisa });
+      const beli = await buatBeliPerlengkapan({
+        companyId: params.companyId,
+        ckBranchId: cab.ckId,
+        supplyId: r.id,
+        qty: sisa,
+        userId: params.userId,
+        tujuanBranchId: params.cabangId,
+        catatan: `Permintaan ${cab.nama} (stok CK kurang)`,
+      });
+      beliDibuat.push({
+        supply_id: r.id,
+        nama: r.nama,
+        satuan: r.satuan,
+        qty: sisa,
+        nomor: beli.nomor,
+        tujuan_nama: cab.nama,
+      });
     }
   }
-  return { dibuat, perlu_beli_ck: perluBeli, tak_bisa_kirim: takBisa };
+  return { dibuat, beli_dibuat: beliDibuat, tak_bisa_kirim: takBisa };
+}
+
+/**
+ * Barang faktur beli TIBA di CK: qty final masuk stok CK (bernomor PL-),
+ * faktur → 'tiba', lalu otomatis kirim (KP-) ke cabang tujuan bila diisi &
+ * stok CK cukup. Idempoten via predikat status 'menunggu'.
+ */
+export async function tibaBeliPerlengkapan(params: {
+  companyId: string;
+  id: string;
+  userId: string;
+  qty?: number;
+  totalHarga?: number | null;
+}): Promise<
+  | { id: string; nomor_masuk: string; kiriman: { id: string; nomor: string } | null }
+  | { error: string; code?: number }
+> {
+  const [beli] = await db
+    .select({
+      ckBranchId: supplyPurchases.ckBranchId,
+      supplyId: supplyPurchases.supplyId,
+      qty: supplyPurchases.qty,
+      totalHarga: supplyPurchases.totalHarga,
+      tujuanBranchId: supplyPurchases.tujuanBranchId,
+      status: supplyPurchases.status,
+    })
+    .from(supplyPurchases)
+    .where(and(eq(supplyPurchases.id, params.id), eq(supplyPurchases.companyId, params.companyId)));
+  if (!beli) return { error: "Faktur beli tidak ditemukan", code: 404 };
+  if (beli.status !== "menunggu") {
+    return { error: "Faktur ini sudah tiba atau dibatalkan", code: 400 };
+  }
+  const qtyFinal = params.qty != null && params.qty > 0 ? params.qty : beli.qty;
+  const totalHarga = params.totalHarga ?? beli.totalHarga ?? null;
+  const tanggal = await tanggalPerusahaan(params.companyId);
+
+  // qty final masuk stok CK + faktur ditandai tiba (atomik). Update status
+  // DULU dengan predikat 'menunggu' → dua submit bersamaan tak menggandakan
+  // stok (yang kalah: 0 baris → rollback via sentinel).
+  const SUDAH = Symbol("sudah_tiba");
+  let nomorMasuk: string;
+  try {
+    nomorMasuk = await db.transaction(async (tx) => {
+      const dikunci = await tx
+        .update(supplyPurchases)
+        .set({
+          status: "tiba",
+          qty: qtyFinal,
+          totalHarga,
+          tibaBy: params.userId,
+          tibaAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(and(eq(supplyPurchases.id, params.id), eq(supplyPurchases.status, "menunggu")))
+        .returning({ id: supplyPurchases.id });
+      if (dikunci.length === 0) throw SUDAH;
+      const [mut] = await tx
+        .insert(supplyMutations)
+        .values({
+          companyId: params.companyId,
+          branchId: beli.ckBranchId,
+          supplyId: beli.supplyId,
+          tipe: "masuk",
+          qty: qtyFinal,
+          totalHarga,
+          tanggal,
+          catatan: "Tiba dari faktur beli perlengkapan",
+          userId: params.userId,
+        })
+        .returning({ id: supplyMutations.id });
+      return terbitkanNomor(tx, params.companyId, "perlengkapan", mut.id);
+    });
+  } catch (e) {
+    if (e === SUDAH) return { error: "Faktur ini sudah tiba atau dibatalkan", code: 400 };
+    throw e;
+  }
+
+  // otomatis kirim ke cabang tujuan (stok CK kini cukup)
+  let kiriman: { id: string; nomor: string } | null = null;
+  if (beli.tujuanBranchId) {
+    const ckSaldo = await saldoSatuPerlengkapan(beli.supplyId, beli.ckBranchId);
+    const kirimQty = Math.min(qtyFinal, Math.max(0, Math.floor(ckSaldo + 1e-9)));
+    if (kirimQty > 0) {
+      const hasil = await buatKirimanPerlengkapan({
+        companyId: params.companyId,
+        cabangId: beli.tujuanBranchId,
+        supplyId: beli.supplyId,
+        qty: kirimQty,
+        userId: params.userId,
+        catatan: "Kiriman otomatis (barang beli tiba di CK)",
+      });
+      if (!("error" in hasil)) {
+        kiriman = hasil;
+        await db
+          .update(supplyPurchases)
+          .set({ kirimTransferId: hasil.id })
+          .where(eq(supplyPurchases.id, params.id));
+      }
+    }
+  }
+  return { id: params.id, nomor_masuk: nomorMasuk, kiriman };
+}
+
+/** Batalkan faktur beli yang masih 'menunggu' (belum tiba). */
+export async function batalBeliPerlengkapan(
+  companyId: string,
+  id: string,
+): Promise<{ ok: true } | { error: string; code?: number }> {
+  const done = await db
+    .update(supplyPurchases)
+    .set({ status: "batal", updatedAt: new Date() })
+    .where(
+      and(
+        eq(supplyPurchases.id, id),
+        eq(supplyPurchases.companyId, companyId),
+        eq(supplyPurchases.status, "menunggu"),
+      ),
+    )
+    .returning({ id: supplyPurchases.id });
+  if (done.length === 0) {
+    return { error: "Faktur tidak ditemukan / sudah tiba", code: 404 };
+  }
+  return { ok: true };
+}
+
+/** Daftar faktur beli perlengkapan (menunggu dulu, lalu terbaru). Opsional CK. */
+export async function daftarBeliPerlengkapan(
+  companyId: string,
+  ckBranchId?: string,
+): Promise<BeliPerlengkapanRow[]> {
+  const ckB = alias(branches, "ck_beli");
+  const tujuanB = alias(branches, "tujuan_beli");
+  const conds = [eq(supplyPurchases.companyId, companyId)];
+  if (ckBranchId) conds.push(eq(supplyPurchases.ckBranchId, ckBranchId));
+  const rows = await db
+    .select({
+      id: supplyPurchases.id,
+      supplyId: supplyPurchases.supplyId,
+      nama: supplies.nama,
+      satuan: supplies.satuan,
+      qty: supplyPurchases.qty,
+      totalHarga: supplyPurchases.totalHarga,
+      status: supplyPurchases.status,
+      ckNama: ckB.nama,
+      tujuanNama: tujuanB.nama,
+      catatan: supplyPurchases.catatan,
+      waktu: supplyPurchases.createdAt,
+      oleh: users.nama,
+    })
+    .from(supplyPurchases)
+    .innerJoin(supplies, eq(supplyPurchases.supplyId, supplies.id))
+    .innerJoin(ckB, eq(supplyPurchases.ckBranchId, ckB.id))
+    .leftJoin(tujuanB, eq(supplyPurchases.tujuanBranchId, tujuanB.id))
+    .leftJoin(users, eq(supplyPurchases.userId, users.id))
+    .where(and(...conds))
+    // 'menunggu' di atas (butuh aksi), lalu terbaru
+    .orderBy(sql`(${supplyPurchases.status} = 'menunggu') desc`, desc(supplyPurchases.createdAt))
+    .limit(200);
+  const nomorMap = await nomorUntukRefs(
+    db,
+    companyId,
+    rows.map((r) => r.id),
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    supply_id: r.supplyId,
+    nama: r.nama,
+    satuan: r.satuan,
+    qty: r.qty,
+    total_harga: r.totalHarga,
+    status: r.status,
+    ck_nama: r.ckNama,
+    tujuan_nama: r.tujuanNama,
+    catatan: r.catatan,
+    waktu: r.waktu.toISOString(),
+    oleh: r.oleh,
+    nomor: nomorMap.get(r.id) ?? null,
+  }));
 }
 
 /** Kiriman yang melibatkan cabang ini (masuk & keluar), terbaru dulu. */

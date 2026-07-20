@@ -14,8 +14,10 @@ import {
   thClass,
 } from "../../components/ui";
 import { KategoriManagerModal } from "../../components/KategoriManagerModal";
+import { RiwayatHargaModal } from "../../components/RiwayatHargaModal";
 import { useAuth } from "../../context/AuthContext";
 import { api } from "../../lib/api";
+import { buatCsvBahan, unduhCsv } from "../../lib/bahanCsv";
 import { formatAngka, formatRupiah } from "../../lib/format";
 import { ImporBahanModal } from "./ImporBahanModal";
 import { SupplierBahanModal } from "./SupplierBahanModal";
@@ -45,6 +47,8 @@ export function BahanPage() {
   const [pesanHapus, setPesanHapus] = useState<string | null>(null);
   /** bahan yang sedang diatur suppliernya (modal) */
   const [aturSupplier, setAturSupplier] = useState<BahanDto | null>(null);
+  /** bahan yang riwayat harganya sedang dilihat (modal) */
+  const [riwayatHarga, setRiwayatHarga] = useState<BahanDto | null>(null);
 
   const hapus = useMutation({
     mutationFn: (id: string) => api(`/bahan/${id}`, { method: "DELETE" }),
@@ -148,6 +152,23 @@ export function BahanPage() {
             <div className="flex items-center gap-2">
               <button onClick={() => setKelolaKategori(true)} className={btnSecondary}>
                 🏷 Kategori
+              </button>
+              <button
+                onClick={() =>
+                  unduhCsv(
+                    adaFilter ? "bahan-baku-terfilter.csv" : "bahan-baku.csv",
+                    buatCsvBahan(tampil),
+                  )
+                }
+                disabled={tampil.length === 0}
+                title={
+                  adaFilter
+                    ? `Export ${tampil.length} bahan yang tampil ke CSV`
+                    : "Export semua bahan ke CSV"
+                }
+                className={btnSecondary}
+              >
+                📤 Export CSV{adaFilter ? ` (${tampil.length})` : ""}
               </button>
               <button onClick={() => setImporCsv(true)} className={btnSecondary}>
                 📥 Impor CSV
@@ -312,7 +333,13 @@ export function BahanPage() {
                   {b.kode ?? "—"}
                 </td>
                 <td className={`${tdClass} font-medium`}>
-                  {b.nama}
+                  <button
+                    onClick={() => setRiwayatHarga(b)}
+                    title={`Riwayat harga & catat harga "${b.nama}"`}
+                    className="text-left font-medium text-stone-800 hover:text-orange-600 hover:underline"
+                  >
+                    {b.nama}
+                  </button>
                   {b.is_packaging && (
                     <span className="ml-2 rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-700">
                       Kemasan TA
@@ -456,6 +483,17 @@ export function BahanPage() {
         />
       )}
       {imporCsv && <ImporBahanModal bahan={semua} onClose={() => setImporCsv(false)} />}
+      {riwayatHarga && (
+        <RiwayatHargaModal
+          key={riwayatHarga.id}
+          endpoint={`/bahan/${riwayatHarga.id}`}
+          nama={riwayatHarga.nama}
+          satuan={riwayatHarga.satuan}
+          bolehUbah={bolehUbah}
+          invalidateKeys={[["bahan"], ["stok"]]}
+          onClose={() => setRiwayatHarga(null)}
+        />
+      )}
     </div>
   );
 }

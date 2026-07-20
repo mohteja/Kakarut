@@ -2311,6 +2311,17 @@ cek "bulk: boleh_eceran mengikuti baris" "V == 1" \
   "$(echo "$BULK" | jq '([.bahan[] | select(.nama=="bahan bulk A67")][0].boleh_eceran == true) | if . then 1 else 0 end')"
 cek "bulk: bahan muncul di daftar /bahan" "V == 2" \
   "$(api "$OWNER" GET /bahan | jq '[.[] | select(.nama | startswith("bahan bulk "))] | length')"
+# bulk field set PENUH (sama dgn form Ubah): min_beli, kemasan, complement, catatan
+BULKF=$(api "$OWNER" POST /bahan/bulk '{"items":[{"nama":"bahan bulk full67","harga_beli":8000,"isi":4,"satuan":"pcs","min_beli":6,"is_packaging":true,"is_complement":true,"catatan":"catatan bulk"}]}')
+BFID=$(echo "$BULKF" | jq -r '.bahan[0].id')
+BF=$(api "$OWNER" GET /bahan | jq --arg id "$BFID" '[.[]|select(.id==$id)][0]')
+cek "bulk full: min_beli tersimpan (6)" "V == 6" "$(echo "$BF" | jq '.min_beli')"
+cek "bulk full: is_packaging tersimpan" "V == 1" "$(echo "$BF" | jq '.is_packaging|if . then 1 else 0 end')"
+cek "bulk full: is_complement tersimpan" "V == 1" "$(echo "$BF" | jq '.is_complement|if . then 1 else 0 end')"
+cek "bulk full: catatan tersimpan" "V == 1" "$(echo "$BF" | jq '(.catatan=="catatan bulk")|if . then 1 else 0 end')"
+# guard: rak simpan asing (uuid acak) → 400
+cek "bulk: rak simpan tidak valid → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/bahan/bulk" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"items":[{"nama":"bahan rak invalid67","harga_beli":1,"isi":1,"satuan":"pcs","storage_location_id":"00000000-0000-0000-0000-000000000000"}]}')"
 
 # Kode unik: dua baris nama sama → kode berbeda (suffix)
 KEMBAR=$(api "$OWNER" POST /bahan/bulk '{"items":[{"nama":"kembar67","harga_beli":1,"isi":1,"satuan":"pcs"},{"nama":"kembar67","harga_beli":1,"isi":1,"satuan":"pcs"}]}')
@@ -2663,6 +2674,18 @@ api "$OWNER" DELETE "/bahan/$(api "$OWNER" GET /bahan | jq -r '[.[] | select(.na
 IMP6=$(api "$OWNER" POST /bahan/import '{"mode":"perbarui","items":[{"nama":"sampah uji76","jenis":"beli","harga_beli":7500,"isi":1,"satuan":"pcs"}]}')
 cek "impor perbarui via nama: bahan di Tempat Sampah dipulihkan" "V == 1" \
   "$(echo "$IMP6" | jq '((.dipulihkan==1) and (.dilewati==0)) | if . then 1 else 0 end')"
+# impor field set PENUH (kolom = form Ubah): min_beli, kemasan, complement
+IMP7=$(api "$OWNER" POST /bahan/import '{"mode":"tambah","items":[{"nama":"impor full76","jenis":"beli","harga_beli":1000,"isi":1,"satuan":"pcs","min_beli":12,"kemasan":true,"complement":true}]}')
+cek "impor full: 1 ditambah" "V == 1" "$(echo "$IMP7" | jq '(.ditambah==1)|if . then 1 else 0 end')"
+IMPF=$(api "$OWNER" GET /bahan | jq '[.[]|select(.nama=="impor full76")][0]')
+cek "impor full: min_beli tersimpan (12)" "V == 12" "$(echo "$IMPF" | jq '.min_beli')"
+cek "impor full: kemasan→is_packaging tersimpan" "V == 1" "$(echo "$IMPF" | jq '.is_packaging|if . then 1 else 0 end')"
+cek "impor full: complement→is_complement tersimpan" "V == 1" "$(echo "$IMPF" | jq '.is_complement|if . then 1 else 0 end')"
+# perbarui: matikan kemasan/complement + ubah min_beli → tersimpan
+api "$OWNER" POST /bahan/import '{"mode":"perbarui","items":[{"nama":"impor full76","jenis":"beli","harga_beli":1000,"isi":1,"satuan":"pcs","min_beli":0,"kemasan":false,"complement":false}]}' > /dev/null
+IMPF2=$(api "$OWNER" GET /bahan | jq '[.[]|select(.nama=="impor full76")][0]')
+cek "impor perbarui: kemasan/complement dimatikan" "V == 1" \
+  "$(echo "$IMPF2" | jq '((.is_packaging==false) and (.is_complement==false) and (.min_beli==0))|if . then 1 else 0 end')"
 # kasir tak boleh impor → 403
 cek "kasir impor CSV → 403" "V == 403" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/bahan/import" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d '{"mode":"tambah","items":[{"nama":"x","jenis":"beli","harga_beli":1,"isi":1,"satuan":"pcs"}]}')"
@@ -3073,8 +3096,8 @@ api "$OWNER" POST "/perlengkapan/$PO90/masuk?branch_id=$CK52_UTAMA" '{"qty":6}' 
 HP90=$(api "$OWNER" POST "/perlengkapan/permintaan-otomatis?branch_id=$CB46_ID" '{}')
 cek "kiriman dibuat utk item ≤ minimum, qty = stok CK (6)" "V == 1" \
   "$(echo "$HP90" | jq --arg id "$PO90" '([.dibuat[]|select(.supply_id==$id)] | (length==1) and (.[0].qty==6) and (.[0].nomor|test("^KP-"))) | if . then 1 else 0 end')"
-cek "sisa kekurangan (10−6=4) dilaporkan perlu beli di CK" "V == 1" \
-  "$(echo "$HP90" | jq --arg id "$PO90" '([.perlu_beli_ck[]|select(.supply_id==$id)] | (length==1) and (.[0].qty==4)) | if . then 1 else 0 end')"
+cek "sisa kekurangan (10−6=4) jadi FAKTUR BELI ke CK (BP-)" "V == 1" \
+  "$(echo "$HP90" | jq --arg id "$PO90" '([.beli_dibuat[]|select(.supply_id==$id)] | (length==1) and (.[0].qty==4) and (.[0].nomor|test("^BP-"))) | if . then 1 else 0 end')"
 # kiriman KP- muncul di daftar kiriman cabang (menunggu diterima)
 cek "kiriman otomatis tampil di cabang (status dikirim)" "V == 1" \
   "$(api "$OWNER" GET "/perlengkapan/kiriman?branch_id=$CB46_ID" | jq --arg id "$PO90" '([.[]|select(.item.id==$id and .status=="dikirim")] | length >= 1) | if . then 1 else 0 end')"
@@ -3084,6 +3107,53 @@ cek "guard: kasir jalankan permintaan otomatis → 403" "V == 403" \
   "$(status_code "$KASIR" POST /perlengkapan/permintaan-otomatis)"
 cek "guard: target Central Kitchen → 400 (CK belanja langsung)" "V == 400" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/perlengkapan/permintaan-otomatis?branch_id=$CK52_UTAMA" -H "Authorization: Bearer $OWNER")"
+
+echo "== 92b. Faktur beli perlengkapan ke CK: tiba → masuk stok CK + otomatis kirim =="
+# faktur beli BP- (qty 4, tujuan CB46) dari §90 muncul di daftar 'menunggu'
+BELI90=$(api "$OWNER" GET /perlengkapan/beli | jq -r --arg id "$PO90" '[.[]|select(.supply_id==$id and .status=="menunggu")][0].id')
+[ "$BELI90" != "null" ] && [ -n "$BELI90" ] && ok "faktur beli BP- tampil (menunggu)"
+cek "guard: kasir tandai tiba → 403" "V == 403" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/perlengkapan/beli/$BELI90/tiba" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d '{"qty":4}')"
+# CK saldo sebelum tiba = 6 (masuk awal; kiriman KP-6 belum diterima → belum kurang)
+CKSALDO_A=$(api "$OWNER" GET "/perlengkapan?branch_id=$CK52_UTAMA" | jq --arg id "$PO90" '[.[]|select(.id==$id)][0].saldo // 0')
+cek "CK saldo sebelum tiba = 6" "abs(V - 6) < 0.001" "$CKSALDO_A"
+# tandai TIBA (qty 4, nilai 20.000) → masuk stok CK (PL-) + auto-kirim (KP-) ke CB46
+TIBA90=$(api "$OWNER" POST "/perlengkapan/beli/$BELI90/tiba" '{"qty":4,"total_harga":20000}')
+cek "tiba: dapat nomor masuk PL-" "V == 1" \
+  "$(echo "$TIBA90" | jq '((.nomor_masuk // "")|test("^PL-")) | if . then 1 else 0 end')"
+cek "tiba: kiriman otomatis KP- diterbitkan ke cabang" "V == 1" \
+  "$(echo "$TIBA90" | jq '((.kiriman.nomor // "")|test("^KP-")) | if . then 1 else 0 end')"
+cek "CK saldo setelah tiba = 10 (6 + beli 4)" "abs(V - 10) < 0.001" \
+  "$(api "$OWNER" GET "/perlengkapan?branch_id=$CK52_UTAMA" | jq --arg id "$PO90" '[.[]|select(.id==$id)][0].saldo // 0')"
+cek "faktur beli kini berstatus 'tiba'" "V == 1" \
+  "$(api "$OWNER" GET /perlengkapan/beli | jq -r --arg b "$BELI90" '([.[]|select(.id==$b and .status=="tiba")]|length) | if . >= 1 then 1 else 0 end')"
+# dua kiriman KP- (6 + 4) menunggu diterima di CB46 → terima semuanya
+for KID in $(api "$OWNER" GET "/perlengkapan/kiriman?branch_id=$CB46_ID" | jq -r --arg id "$PO90" '.[]|select(.item.id==$id and .status=="dikirim")|.id'); do
+  api "$OWNER" POST "/perlengkapan/kiriman/$KID/terima?branch_id=$CB46_ID" '{}' > /dev/null
+done
+cek "setelah terima semua: saldo cabang CB46 = 10" "abs(V - 10) < 0.001" \
+  "$(api "$OWNER" GET "/perlengkapan?branch_id=$CB46_ID" | jq --arg id "$PO90" '[.[]|select(.id==$id)][0].saldo // 0')"
+cek "CK saldo kembali 0 (semua terkirim)" "abs(V) < 0.001" \
+  "$(api "$OWNER" GET "/perlengkapan?branch_id=$CK52_UTAMA" | jq --arg id "$PO90" '[.[]|select(.id==$id)][0].saldo // 0')"
+cek "tiba lagi (idempoten) → 400 (sudah tiba)" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/perlengkapan/beli/$BELI90/tiba" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{}')"
+# batal: buat faktur beli baru lalu batalkan
+BELIBATAL=$(api "$OWNER" POST /perlengkapan '{"nama":"Sabun Colek Uji","satuan":"pcs","stok_minimum":5}' | jq -r .id)
+api "$OWNER" POST "/perlengkapan/permintaan-otomatis?branch_id=$CB46_ID" '{}' > /dev/null
+BB_ID=$(api "$OWNER" GET /perlengkapan/beli | jq -r --arg id "$BELIBATAL" '[.[]|select(.supply_id==$id and .status=="menunggu")][0].id')
+cek "batal faktur beli menunggu → ok" "V == 1" \
+  "$(api "$OWNER" POST "/perlengkapan/beli/$BB_ID/batal" '{}' | jq '(.ok==true)|if . then 1 else 0 end')"
+cek "batal lagi (sudah batal) → 404" "V == 404" \
+  "$(status_code "$OWNER" POST "/perlengkapan/beli/$BB_ID/batal")"
+# MANUAL: buat faktur beli perlengkapan langsung (halaman Beli Perlengkapan)
+SBMAN=$(api "$OWNER" POST /perlengkapan '{"nama":"Tisu Manual Uji","satuan":"pak"}' | jq -r .id)
+MAN92=$(api "$OWNER" POST /perlengkapan/beli "{\"supply_id\":\"$SBMAN\",\"ck_branch_id\":\"$CK52_UTAMA\",\"qty\":3,\"tujuan_branch_id\":\"$CB46_ID\",\"total_harga\":15000}")
+cek "manual: faktur beli BP- terbit" "V == 1" \
+  "$(echo "$MAN92" | jq '((.nomor // "")|test("^BP-"))|if . then 1 else 0 end')"
+cek "manual: muncul di daftar (menunggu, tujuan CB46)" "V == 1" \
+  "$(api "$OWNER" GET /perlengkapan/beli | jq --arg id "$SBMAN" '([.[]|select(.supply_id==$id and .status=="menunggu" and .tujuan_nama=="Cabang Uji 46")]|length>=1)|if . then 1 else 0 end')"
+cek "guard: kasir buat beli perlengkapan → 403" "V == 403" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/perlengkapan/beli" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d "{\"supply_id\":\"$SBMAN\",\"qty\":1}")"
 
 # NB: §91 mengosongkan SELURUH Tempat Sampah perusahaan (hapus permanen) —
 # maka HARUS jadi seksi TERAKHIR agar tak mengganggu cek soft-delete di atas.
@@ -3097,6 +3167,113 @@ cek "kosongkan melaporkan jumlah dihapus (penjualan+faktur ≥ 1)" "V >= 1" \
 cek "setelah kosongkan: Tempat Sampah KOSONG" "V == 0" "$(api "$OWNER" GET /sampah | jq 'length')"
 cek "kosongkan lagi (idempoten) → 0 dihapus" "V == 0" \
   "$(api "$OWNER" POST /sampah/kosongkan | jq '(.penjualan + .faktur)')"
+
+echo "== 92. Opname: bukti foto + alasan selisih inline (siap ACC admin) =="
+FOTO92="/uploads/companies/x/bukti/opname92.jpg"
+SALDO92=$(stok_of "$(api "$OWNER" GET /stok)" "plastik take away")
+FISIK92=$(python3 -c "print($SALDO92 + 5)")   # sengaja lebih 5 → selisih
+OP92=$(api "$OWNER" POST /stok/opname \
+  "{\"catatan\":\"opname bukti\",\"items\":[{\"ingredient_id\":\"$PLASTIK_ID\",\"qty\":$FISIK92,\"foto_url\":\"$FOTO92\",\"alasan\":\"barang lebih dari kiriman\"}]}")
+SESI92=$(echo "$OP92" | jq -r .session_id)
+cek "opname bukti: dapat session_id" "V == 1" \
+  "$(echo "$OP92" | jq '((.session_id|type)=="string")|if . then 1 else 0 end')"
+# bukti inline → baris langsung 'sudah' (siap ACC), muncul di menunggu_persetujuan
+PENY92=$(api "$OWNER" GET "/stok/penyesuaian?status=menunggu_persetujuan")
+cek "opname bukti: selisih 'sudah' + foto tersimpan" "V == 1" \
+  "$(echo "$PENY92" | jq --arg f "$FOTO92" '([.[]|select(.foto_url==$f and .klarifikasi_status=="sudah")]|length>=1)|if . then 1 else 0 end')"
+cek "opname bukti: alasan tersimpan di klarifikasi" "V == 1" \
+  "$(echo "$PENY92" | jq --arg f "$FOTO92" '([.[]|select(.foto_url==$f and .catatan=="barang lebih dari kiriman")]|length>=1)|if . then 1 else 0 end')"
+# sesi detail memuat foto + alasan (untuk direview owner/admin sebelum ACC)
+DET92=$(api "$OWNER" GET "/stok/opname/sesi/$SESI92")
+cek "sesi detail: item punya foto_url" "V == 1" \
+  "$(echo "$DET92" | jq --arg f "$FOTO92" '[.items[]|select(.foto_url==$f)]|length')"
+cek "sesi detail: item punya alasan" "V == 1" \
+  "$(echo "$DET92" | jq '[.items[]|select(.alasan=="barang lebih dari kiriman")]|length')"
+# ACC sesi → selisih diterapkan, saldo jadi fisik (tanpa langkah klarifikasi terpisah)
+api "$OWNER" POST "/stok/opname/sesi/$SESI92/acc" > /dev/null
+cek "opname bukti: ACC → saldo plastik jadi fisik" "abs(V - $FISIK92) < 0.001" \
+  "$(stok_of "$(api "$OWNER" GET /stok)" "plastik take away")"
+# kompatibilitas: opname selisih TANPA foto tetap diterima → klarifikasi 'belum'
+FISIK92B=$(python3 -c "print($FISIK92 - 2)")
+api "$OWNER" POST /stok/opname \
+  "{\"catatan\":\"opname tanpa bukti\",\"items\":[{\"ingredient_id\":\"$PLASTIK_ID\",\"qty\":$FISIK92B}]}" > /dev/null
+cek "opname tanpa foto: selisih tetap masuk antrean 'belum'" "V >= 1" \
+  "$(api "$OWNER" GET "/stok/penyesuaian?status=belum" | jq '[.[]|select(.bahan=="plastik take away")]|length')"
+
+echo "== 93. Riwayat harga + catat harga + laporan harga (fondasi HPP) =="
+# --- Metode HPP di Pengaturan Perusahaan ---
+cek "company: metode_hpp default 'average'" "V == 1" \
+  "$(api "$OWNER" GET /company | jq '(.metodeHpp=="average")|if . then 1 else 0 end')"
+api "$OWNER" PATCH /company '{"metode_hpp":"fifo"}' > /dev/null
+cek "company: metode_hpp bisa diubah ke 'fifo'" "V == 1" \
+  "$(api "$OWNER" GET /company | jq '(.metodeHpp=="fifo")|if . then 1 else 0 end')"
+cek "guard: kasir ubah metode_hpp → 403" "V == 403" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PATCH "$BASE/api/company" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d '{"metode_hpp":"average"}')"
+api "$OWNER" PATCH /company '{"metode_hpp":"average"}' > /dev/null   # kembalikan default
+
+# --- Bahan baku: faktur beli (masuk stok) → riwayat harga lot ---
+BH93=$(api "$OWNER" POST /bahan '{"nama":"Bahan Harga Uji 93","harga_beli":1000,"isi":1,"satuan":"pcs","pengadaan":"beli","track_stok":true}')
+BH93_ID=$(echo "$BH93" | jq -r .id)
+# lot: 10 pcs / Rp30.000 → harga_satuan 3000 (isi 1)
+FKH93=$(api "$OWNER" POST /pembelian/faktur "{\"items\":[{\"ingredient_id\":\"$BH93_ID\",\"mode\":\"pcs\",\"jumlah\":10,\"total_harga\":30000}]}")
+FKH93_ID=$(echo "$FKH93" | jq -r .faktur_id)
+api "$OWNER" POST "/pembelian/tahap/$FKH93_ID" '{"ke":"dikerjakan"}' > /dev/null
+api "$OWNER" POST "/pembelian/tahap/$FKH93_ID" '{"ke":"menunggu"}' > /dev/null   # cabang sendiri → masuk stok
+RH93=$(api "$OWNER" GET "/bahan/$BH93_ID/pembelian")
+cek "riwayat harga bahan: ≥1 lot tercatat" "V >= 1" "$(echo "$RH93" | jq '.jumlah_pembelian')"
+cek "riwayat harga bahan: lot harga_satuan = 3000 (30000/10)" "V == 1" \
+  "$(echo "$RH93" | jq '([.lots[]|select((.harga_satuan|round)==3000 and .qty==10)]|length>=1)|if . then 1 else 0 end')"
+cek "riwayat harga bahan: rata-rata tertimbang = 3000" "V == 1" \
+  "$(echo "$RH93" | jq '((.harga_rata|round)==3000)|if . then 1 else 0 end')"
+cek "riwayat harga bahan: nomor dokumen (PB-) tampil di lot" "V == 1" \
+  "$(echo "$RH93" | jq '([.lots[]|select(.nomor!=null)]|length>=1)|if . then 1 else 0 end')"
+# catat harga acuan (per satuan) → harga_terkini + harga_beli bahan terupdate
+api "$OWNER" POST "/bahan/$BH93_ID/harga" '{"harga_per_unit":3500}' > /dev/null
+cek "catat harga bahan: harga_terkini jadi 3500" "V == 1" \
+  "$(api "$OWNER" GET "/bahan/$BH93_ID/pembelian" | jq '((.harga_terkini|round)==3500)|if . then 1 else 0 end')"
+cek "catat harga bahan: harga_beli bahan ikut jadi 3500 (× isi 1)" "V == 1" \
+  "$(api "$OWNER" GET /bahan | jq --arg id "$BH93_ID" '([.[]|select(.id==$id)][0].harga_beli|round)==3500|if . then 1 else 0 end')"
+cek "guard: kasir catat harga bahan → 403" "V == 403" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/bahan/$BH93_ID/harga" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d '{"harga_per_unit":1}')"
+
+# --- Laporan Harga dari faktur belanja (setelah barang dikirim) ---
+FKL93=$(api "$OWNER" POST /pembelian/faktur "{\"items\":[{\"ingredient_id\":\"$BH93_ID\",\"mode\":\"pcs\",\"jumlah\":6,\"total_harga\":30000}]}")
+FKL93_ID=$(echo "$FKL93" | jq -r .faktur_id)
+api "$OWNER" POST "/pembelian/tahap/$FKL93_ID" '{"ke":"dikerjakan"}' > /dev/null
+api "$OWNER" POST "/pembelian/tahap/$FKL93_ID" '{"ke":"menunggu"}' > /dev/null
+ROWL93=$(api "$OWNER" GET "/pembelian?per_page=500" | jq -r --arg f "$FKL93_ID" '[.rows[]|select(.faktur_id==$f)][0].id')
+cek "laporan harga: id baris bukan milik faktur → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/pembelian/laporan-harga/$FKL93_ID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"items\":[{\"id\":\"$BH93_ID\",\"total_harga\":1}]}")"
+cek "guard: kasir laporan harga → 403" "V == 403" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/pembelian/laporan-harga/$FKL93_ID" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d "{\"items\":[{\"id\":\"$ROWL93\",\"total_harga\":1}]}")"
+cek "guard: laporan harga di jalur produksi → 400 (khusus beli)" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/produksi/laporan-harga/$FKL93_ID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"items\":[{\"id\":\"$ROWL93\",\"total_harga\":1}]}")"
+# lapor harga riil 42000 utk 6 pcs → harga/satuan 7000
+api "$OWNER" POST "/pembelian/laporan-harga/$FKL93_ID" "{\"items\":[{\"id\":\"$ROWL93\",\"total_harga\":42000}]}" > /dev/null
+cek "laporan harga: total baris jadi 42000" "V == 1" \
+  "$(api "$OWNER" GET "/pembelian?per_page=500" | jq --arg r "$ROWL93" '([.rows[]|select(.id==$r)][0].total_harga==42000)|if . then 1 else 0 end')"
+cek "laporan harga: harga_beli bahan disegarkan (42000/6 × isi 1 = 7000)" "V == 1" \
+  "$(api "$OWNER" GET /bahan | jq --arg id "$BH93_ID" '([.[]|select(.id==$id)][0].harga_beli|round)==7000|if . then 1 else 0 end')"
+cek "laporan harga: lot 42000 muncul di riwayat harga" "V == 1" \
+  "$(api "$OWNER" GET "/bahan/$BH93_ID/pembelian" | jq '([.lots[]|select(.total_harga==42000)]|length>=1)|if . then 1 else 0 end')"
+
+# --- Perlengkapan: stok masuk (lot) → riwayat harga + catat harga ---
+PL93=$(api "$OWNER" POST /perlengkapan '{"nama":"Perlengkapan Harga Uji 93","satuan":"pcs","harga_beli":500}')
+PL93_ID=$(echo "$PL93" | jq -r .id)
+api "$OWNER" POST "/perlengkapan/$PL93_ID/masuk" '{"qty":20,"total_harga":40000}' > /dev/null   # harga_satuan 2000
+RHP93=$(api "$OWNER" GET "/perlengkapan/$PL93_ID/pembelian")
+cek "riwayat harga perlengkapan: ≥1 lot" "V >= 1" "$(echo "$RHP93" | jq '.jumlah_pembelian')"
+cek "riwayat harga perlengkapan: harga_satuan = 2000 (40000/20)" "V == 1" \
+  "$(echo "$RHP93" | jq '([.lots[]|select((.harga_satuan|round)==2000 and .qty==20)]|length>=1)|if . then 1 else 0 end')"
+cek "riwayat harga perlengkapan: rata-rata tertimbang = 2000" "V == 1" \
+  "$(echo "$RHP93" | jq '((.harga_rata|round)==2000)|if . then 1 else 0 end')"
+cek "riwayat harga perlengkapan: nomor PL- tampil di lot" "V == 1" \
+  "$(echo "$RHP93" | jq '([.lots[]|select(.nomor!=null)]|length>=1)|if . then 1 else 0 end')"
+api "$OWNER" POST "/perlengkapan/$PL93_ID/harga" '{"harga_per_unit":2500}' > /dev/null
+cek "catat harga perlengkapan: harga_terkini jadi 2500" "V == 1" \
+  "$(api "$OWNER" GET "/perlengkapan/$PL93_ID/pembelian" | jq '((.harga_terkini|round)==2500)|if . then 1 else 0 end')"
+cek "guard: kasir catat harga perlengkapan → 403" "V == 403" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/perlengkapan/$PL93_ID/harga" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d '{"harga_per_unit":1}')"
 
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="

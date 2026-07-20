@@ -1,56 +1,24 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { hargaPerUnit, type BahanDto, type KategoriDto, type PenyimpananDto } from "@kakarut/shared";
+import type { BahanDto, KategoriDto } from "@kakarut/shared";
 import { Card, ErrorText, PageTitle, Spinner, btnPrimary, btnSecondary } from "../../components/ui";
 import { KategoriManagerModal } from "../../components/KategoriManagerModal";
-import { SatuanSelect } from "../../components/SatuanSelect";
-import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
-import { formatAngka } from "../../lib/format";
+import { BahanEditorGrid, type BahanEditorRow } from "./BahanEditorGrid";
+import { useRakSimpan } from "./useRakSimpan";
 
-/** Satu baris ubah bahan (nilai numerik sebagai string sampai disimpan). */
-interface BarisUbah {
-  id: string;
-  kode: string;
-  nama: string;
-  satuan_beli: string;
-  harga_beli: string;
-  satuan: string; // satuan resep/kerja
-  isi: string; // satuan resep per 1 satuan beli
-  kategori: string;
-  pengadaan: "produksi" | "beli";
-  boleh_eceran: boolean;
-  track_stok: boolean;
-  stok_minimum: string;
-  min_beli: string;
-  is_packaging: boolean;
-  is_complement: boolean;
-  catatan: string;
-  /** rak simpan default (home) di CK; "" = di CK tanpa tempat */
-  storage_location_id: string;
-}
-
-const cell = "rounded-lg border border-stone-300 px-2 py-1.5 text-sm focus:border-orange-500 focus:outline-none";
-const thCell = "px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide text-stone-500";
-// Judul grup dua panel — sama dengan halaman Tambah Bahan Baku.
-const thGrupBelanja =
-  "border-l border-emerald-200 bg-emerald-50 px-2 py-1.5 text-center text-xs font-bold uppercase tracking-wide text-emerald-700";
-const thGrupResep =
-  "border-l border-sky-200 bg-sky-50 px-2 py-1.5 text-center text-xs font-bold uppercase tracking-wide text-sky-700";
-const sepKiri = "border-l border-stone-200";
-
-function keBaris(b: BahanDto): BarisUbah {
+function keBaris(b: BahanDto): BahanEditorRow {
   return {
     id: b.id,
     kode: b.kode ?? "",
     nama: b.nama,
+    pengadaan: b.pengadaan,
     satuan_beli: b.satuan_beli ?? "",
     harga_beli: String(b.harga_beli),
     satuan: b.satuan,
     isi: String(b.isi),
     kategori: b.kategori,
-    pengadaan: b.pengadaan,
     boleh_eceran: b.boleh_eceran,
     track_stok: b.track_stok,
     stok_minimum: String(b.stok_minimum),
@@ -63,9 +31,9 @@ function keBaris(b: BahanDto): BarisUbah {
 }
 
 /**
- * Ubah Bahan Baku (multi-baris) — halaman tersendiri (bukan modal), tata letak
- * sama dengan Tambah Bahan Baku. Menerima ?ids=a,b,c dari halaman Bahan Baku
- * (satu baris "Ubah" atau banyak lewat checkbox) lalu menyimpan PUT per bahan.
+ * Ubah Bahan Baku (multi-baris) — halaman tersendiri, memakai grid editor yang
+ * SAMA dengan halaman Tambah (BahanEditorGrid). Menerima ?ids=a,b,c dari halaman
+ * Bahan Baku lalu menyimpan PUT per bahan.
  */
 export function UbahBahanBakuPage() {
   const navigate = useNavigate();
@@ -78,32 +46,17 @@ export function UbahBahanBakuPage() {
     queryKey: ["bahan"],
     queryFn: () => api<BahanDto[]>("/bahan"),
   });
-  const { data: kategoriList } = useQuery({
+  const { data: kategoriList = [] } = useQuery({
     queryKey: ["kategori-bahan"],
     queryFn: () => api<KategoriDto[]>("/kategori-bahan"),
   });
-  // Rak (tempat penyimpanan) di Central Kitchen — untuk memilih rak default tiap
-  // bahan. Barang tiba di CK otomatis "diletakkan" di rak ini.
-  const { cabang } = useBranch();
-  const ckList = cabang.filter((b) => b.tipe === "central_kitchen" && b.is_active);
-  const banyakCk = ckList.length > 1;
-  const { data: rakCk = [] } = useQuery({
-    queryKey: ["penyimpanan-ck", ckList.map((c) => c.id).join(",")],
-    enabled: ckList.length > 0,
-    queryFn: async () => {
-      const per = await Promise.all(
-        ckList.map((ck) =>
-          api<PenyimpananDto[]>(`/penyimpanan?branch_id=${ck.id}`).then((rows) =>
-            rows.map((r) => ({ id: r.id, nama: banyakCk ? `${ck.nama} · ${r.nama}` : r.nama })),
-          ),
-        ),
-      );
-      return per.flat();
-    },
-  });
+  // Rak simpan (home) bahan — hook bersama dgn halaman Tambah (rak CK, atau rak
+  // cabang store bila usaha 1 cabang tanpa CK). Barang tiba otomatis diletakkan
+  // di rak ini.
+  const rakCk = useRakSimpan();
 
   // Seed draft sekali dari master begitu termuat (urut sesuai ids).
-  const [rows, setRows] = useState<BarisUbah[] | null>(null);
+  const [rows, setRows] = useState<BahanEditorRow[] | null>(null);
   // Bahan produksi yang dilewati (diedit lewat halaman Resep, bukan grid ini).
   const [dilewatiProduksi, setDilewatiProduksi] = useState(0);
   useEffect(() => {
@@ -117,7 +70,7 @@ export function UbahBahanBakuPage() {
     }
   }, [bahan, ids, rows]);
 
-  const ubah = (i: number, patch: Partial<BarisUbah>) =>
+  const ubah = (i: number, patch: Partial<BahanEditorRow>) =>
     setRows((r) => (r ? r.map((b, j) => (j === i ? { ...b, ...patch } : b)) : r));
 
   const invalid = (rows ?? []).filter((b) => b.nama.trim() === "" || !(Number(b.isi) > 0));
@@ -243,241 +196,13 @@ export function UbahBahanBakuPage() {
             </p>
           </div>
 
-          <Card className="overflow-x-auto p-0">
-            <table className="w-full min-w-[1690px]">
-              <thead className="border-b border-stone-200 bg-stone-50">
-                <tr>
-                  <th className={thCell} rowSpan={2}>Kode</th>
-                  <th className={thCell} rowSpan={2}>Nama *</th>
-                  <th className={thCell} rowSpan={2}>Jenis</th>
-                  <th className={thGrupBelanja} colSpan={2}>🛒 Belanja (RAB)</th>
-                  <th className={thGrupResep} colSpan={3}>🧪 Aturan resep</th>
-                  <th className={`${thCell} ${sepKiri}`} rowSpan={2}>Kategori</th>
-                  <th className={`${thCell} text-center`} rowSpan={2}>Ecer</th>
-                  <th className={`${thCell} text-center`} rowSpan={2}>Lacak</th>
-                  <th className={thCell} rowSpan={2}>Stok min</th>
-                  <th className={thCell} rowSpan={2}>Min beli</th>
-                  <th className={thCell} rowSpan={2} title="Rak simpan default di Central Kitchen">
-                    Rak (CK)
-                  </th>
-                  <th className={`${thCell} text-center`} rowSpan={2} title="Kemasan take-away">
-                    TA
-                  </th>
-                  <th
-                    className={`${thCell} text-center`}
-                    rowSpan={2}
-                    title="Complement (×0.5 dine-in)"
-                  >
-                    Comp
-                  </th>
-                  <th className={thCell} rowSpan={2}>Catatan</th>
-                </tr>
-                <tr>
-                  <th className={`${thCell} border-l border-emerald-200`}>Satuan beli</th>
-                  <th className={thCell}>Harga beli</th>
-                  <th className={`${thCell} border-l border-sky-200`}>Satuan resep</th>
-                  <th className={thCell}>Konversi</th>
-                  <th className={`${thCell} text-right`}>Harga/satuan resep</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-stone-100">
-                {rows.map((b, i) => {
-                  const hpsr =
-                    Number(b.harga_beli) > 0 && Number(b.isi) > 0
-                      ? hargaPerUnit(Number(b.harga_beli), Number(b.isi))
-                      : null;
-                  const beli = b.pengadaan === "beli";
-                  return (
-                    <tr key={b.id} className="align-middle">
-                      <td className="px-2 py-1.5">
-                        <input
-                          value={b.kode}
-                          onChange={(e) => ubah(i, { kode: e.target.value })}
-                          placeholder="otomatis"
-                          className={`${cell} w-20`}
-                        />
-                      </td>
-                      <td className="px-2 py-1.5">
-                        <input
-                          value={b.nama}
-                          onChange={(e) => ubah(i, { nama: e.target.value })}
-                          placeholder="Nama bahan"
-                          className={`${cell} w-40`}
-                        />
-                      </td>
-                      <td className="px-2 py-1.5">
-                        <span
-                          className={`rounded-full px-2 py-0.5 text-xs font-semibold whitespace-nowrap ${
-                            beli ? "bg-teal-100 text-teal-700" : "bg-orange-100 text-orange-700"
-                          }`}
-                        >
-                          {beli ? "Beli" : "Produksi"}
-                        </span>
-                      </td>
-                      <td className={`px-2 py-1.5 ${sepKiri}`}>
-                        <SatuanSelect
-                          value={b.satuan_beli}
-                          onChange={(v) => ubah(i, { satuan_beli: v })}
-                          bolehKosong
-                          selectClassName={`${cell} w-24`}
-                          aria-label="Satuan beli"
-                        />
-                      </td>
-                      <td className="px-2 py-1.5">
-                        <input
-                          type="number"
-                          min="0"
-                          step="any"
-                          value={b.harga_beli}
-                          onChange={(e) => ubah(i, { harga_beli: e.target.value })}
-                          placeholder="0"
-                          className={`${cell} w-24`}
-                        />
-                      </td>
-                      <td className={`px-2 py-1.5 ${sepKiri}`}>
-                        <SatuanSelect
-                          value={b.satuan}
-                          onChange={(v) => ubah(i, { satuan: v })}
-                          selectClassName={`${cell} w-24`}
-                          aria-label="Satuan resep"
-                        />
-                      </td>
-                      <td className="px-2 py-1.5">
-                        <div className="flex items-center gap-1 text-sm whitespace-nowrap text-stone-600">
-                          <span>1 {b.satuan_beli || "beli"} =</span>
-                          <input
-                            type="number"
-                            min="0.0001"
-                            step="any"
-                            value={b.isi}
-                            onChange={(e) => ubah(i, { isi: e.target.value })}
-                            className={`${cell} w-24`}
-                            aria-label="Konversi (satuan resep per 1 satuan beli)"
-                          />
-                          <span>{b.satuan}</span>
-                        </div>
-                      </td>
-                      <td className="px-2 py-1.5 text-right text-sm text-stone-600 whitespace-nowrap">
-                        {hpsr != null ? `Rp ${formatAngka(hpsr, 2)}/${b.satuan}` : "—"}
-                      </td>
-                      <td className={`px-2 py-1.5 ${sepKiri}`}>
-                        <select
-                          value={b.kategori}
-                          onChange={(e) => ubah(i, { kategori: e.target.value })}
-                          className={`${cell} w-28`}
-                        >
-                          {!kategoriList?.some((k) => k.nama === b.kategori) && b.kategori && (
-                            <option value={b.kategori}>{b.kategori}</option>
-                          )}
-                          {(kategoriList ?? []).map((k) => (
-                            <option key={k.id} value={k.nama}>
-                              {k.nama}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td className="px-2 py-1.5 text-center">
-                        <input
-                          type="checkbox"
-                          checked={beli ? b.boleh_eceran : false}
-                          onChange={(e) => ubah(i, { boleh_eceran: e.target.checked })}
-                          disabled={!beli}
-                          title={
-                            beli
-                              ? "Bisa dibeli eceran (tanpa pembulatan per satuan beli)"
-                              : "Hanya untuk bahan jalur beli"
-                          }
-                        />
-                      </td>
-                      <td className="px-2 py-1.5 text-center">
-                        <input
-                          type="checkbox"
-                          checked={b.track_stok}
-                          onChange={(e) => ubah(i, { track_stok: e.target.checked })}
-                          title="Lacak stok bahan ini"
-                        />
-                      </td>
-                      <td className="px-2 py-1.5">
-                        <input
-                          type="number"
-                          min="0"
-                          step="any"
-                          value={b.stok_minimum}
-                          onChange={(e) => ubah(i, { stok_minimum: e.target.value })}
-                          className={`${cell} w-20`}
-                          disabled={!b.track_stok}
-                        />
-                      </td>
-                      <td className="px-2 py-1.5">
-                        <input
-                          type="number"
-                          min="0"
-                          step="any"
-                          value={beli ? b.min_beli : "0"}
-                          onChange={(e) => ubah(i, { min_beli: e.target.value })}
-                          className={`${cell} w-20`}
-                          disabled={!beli}
-                          title={
-                            beli
-                              ? `Minimal belanja (${b.satuan}); 0 = tanpa minimum`
-                              : "Hanya untuk bahan jalur beli"
-                          }
-                        />
-                      </td>
-                      <td className="px-2 py-1.5">
-                        <select
-                          value={b.storage_location_id}
-                          onChange={(e) => ubah(i, { storage_location_id: e.target.value })}
-                          className={`${cell} w-32`}
-                          disabled={rakCk.length === 0}
-                          title={
-                            rakCk.length === 0
-                              ? "Belum ada rak di Central Kitchen (atur di Pengaturan → Penyimpanan)"
-                              : "Rak simpan default di CK — barang tiba otomatis diletakkan di sini"
-                          }
-                        >
-                          <option value="">Tanpa tempat</option>
-                          {b.storage_location_id &&
-                            !rakCk.some((r) => r.id === b.storage_location_id) && (
-                              <option value={b.storage_location_id}>(rak tersimpan)</option>
-                            )}
-                          {rakCk.map((r) => (
-                            <option key={r.id} value={r.id}>
-                              {r.nama}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td className="px-2 py-1.5 text-center">
-                        <input
-                          type="checkbox"
-                          checked={b.is_packaging}
-                          onChange={(e) => ubah(i, { is_packaging: e.target.checked })}
-                          title="Kemasan take-away"
-                        />
-                      </td>
-                      <td className="px-2 py-1.5 text-center">
-                        <input
-                          type="checkbox"
-                          checked={b.is_complement}
-                          onChange={(e) => ubah(i, { is_complement: e.target.checked })}
-                          title="Complement (×0.5 dine-in)"
-                        />
-                      </td>
-                      <td className="px-2 py-1.5">
-                        <input
-                          value={b.catatan}
-                          onChange={(e) => ubah(i, { catatan: e.target.value })}
-                          placeholder="—"
-                          className={`${cell} w-40`}
-                        />
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </Card>
+          <BahanEditorGrid
+            rows={rows}
+            onChange={ubah}
+            kategoriList={kategoriList}
+            rakCk={rakCk}
+            showJenis
+          />
 
           <div className="mt-3 flex flex-wrap items-center gap-3">
             <div className="flex-1 text-sm text-stone-500">

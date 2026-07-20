@@ -19,6 +19,7 @@ import {
   tdClass,
   thClass,
 } from "../../components/ui";
+import { RiwayatHargaModal } from "../../components/RiwayatHargaModal";
 import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah } from "../../lib/format";
@@ -82,6 +83,7 @@ export function PerlengkapanPage() {
   });
 
   const [modal, setModal] = useState<ModalState>(null);
+  const [riwayat, setRiwayat] = useState<PerlengkapanMasterRow | null>(null);
   const [cari, setCari] = useState("");
 
   const segarkan = () => {
@@ -153,7 +155,14 @@ export function PerlengkapanPage() {
               {tampil.map((r) => (
                 <tr key={r.id} className="hover:bg-stone-50">
                   <td className={`${tdClass} font-medium`}>
-                    {r.nama} <span className="text-xs font-normal text-stone-400">({r.satuan})</span>
+                    <button
+                      onClick={() => setRiwayat(r)}
+                      title={`Riwayat harga & catat harga "${r.nama}"`}
+                      className="text-left font-medium text-stone-800 hover:text-orange-600 hover:underline"
+                    >
+                      {r.nama}
+                    </button>{" "}
+                    <span className="text-xs font-normal text-stone-400">({r.satuan})</span>
                     <div className="mt-0.5 flex flex-wrap gap-1 text-xs font-normal">
                       <span
                         className="rounded bg-stone-100 px-1.5 py-0.5 text-stone-600"
@@ -307,6 +316,17 @@ export function PerlengkapanPage() {
           cacheKey="perlengkapan-supplier"
           invalidateKeys={[["perlengkapan-master"]]}
           onClose={() => setModal(null)}
+        />
+      )}
+      {riwayat && (
+        <RiwayatHargaModal
+          key={riwayat.id}
+          endpoint={`/perlengkapan/${riwayat.id}`}
+          nama={riwayat.nama}
+          satuan={riwayat.satuan}
+          bolehUbah
+          invalidateKeys={[["perlengkapan-master"], ["perlengkapan"]]}
+          onClose={() => setRiwayat(null)}
         />
       )}
     </div>

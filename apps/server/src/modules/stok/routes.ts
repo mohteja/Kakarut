@@ -27,6 +27,15 @@ const OpnameBody = z.object({
       z.object({
         ingredient_id: z.string().uuid(),
         qty: z.number().min(0),
+        /**
+         * Bukti foto + alasan selisih dilampirkan LANGSUNG saat pengecekan
+         * (bukan lewat langkah klarifikasi terpisah). Hanya dipakai untuk baris
+         * yang berselisih; baris cocok mengabaikannya. Foto membuat baris
+         * "sudah diklarifikasi" → siap di-ACC owner/admin. Opsional di API demi
+         * kompatibilitas (mis. mobile lama); web mewajibkan foto tiap selisih.
+         */
+        foto_url: z.string().nullish(),
+        alasan: z.string().nullish(),
       }),
     )
     .min(1),
@@ -129,7 +138,14 @@ export const stokRoutes = new Hono<AppEnv>()
 
     // Gabungkan duplikat (entri terakhir menang)
     const qtyByIngredient = new Map<string, number>();
-    for (const item of body.items) qtyByIngredient.set(item.ingredient_id, item.qty);
+    // Bukti foto + alasan selisih per bahan (dilampirkan saat pengecekan)
+    const fotoByIngredient = new Map<string, string | null>();
+    const alasanByIngredient = new Map<string, string | null>();
+    for (const item of body.items) {
+      qtyByIngredient.set(item.ingredient_id, item.qty);
+      fotoByIngredient.set(item.ingredient_id, item.foto_url?.trim() || null);
+      alasanByIngredient.set(item.ingredient_id, item.alasan?.trim() || null);
+    }
 
     const ids = [...qtyByIngredient.keys()];
     const valid = await db
@@ -194,6 +210,7 @@ export const stokRoutes = new Hono<AppEnv>()
       kurang: 0,
       total_selisih: 0,
     };
+    const nowTs = new Date();
     const values = [...qtyByIngredient].map(([ingredientId, fisik]) => {
       const sistem = saldoById.get(ingredientId) ?? 0;
       const selisih = fisik - sistem;
@@ -202,6 +219,11 @@ export const stokRoutes = new Hono<AppEnv>()
       else if (selisih > 0) ringkasan.lebih++;
       else ringkasan.kurang++;
       ringkasan.total_selisih += selisih;
+      // Bukti foto + alasan hanya bermakna untuk baris berselisih. Bila foto
+      // dilampirkan saat pengecekan → baris langsung "sudah" (siap di-ACC);
+      // tanpa foto → "belum" (jalur klarifikasi terpisah, kompatibel lama).
+      const foto = adaSelisih ? (fotoByIngredient.get(ingredientId) ?? null) : null;
+      const alasan = adaSelisih ? (alasanByIngredient.get(ingredientId) ?? null) : null;
       return {
         companyId: auth.company_id!,
         branchId,
@@ -212,8 +234,11 @@ export const stokRoutes = new Hono<AppEnv>()
         sessionId,
         systemQty: sistem,
         selisih,
-        // selisih ≠ 0 → wajib diklarifikasi karyawan (waste vs koreksi)
-        klarifikasiStatus: adaSelisih ? ("belum" as const) : null,
+        // selisih ≠ 0 → wajib diklarifikasi; foto inline menuntaskannya langsung.
+        klarifikasiStatus: adaSelisih ? (foto ? ("sudah" as const) : ("belum" as const)) : null,
+        klarifikasiCatatan: alasan,
+        klarifikasiFotoUrl: foto,
+        ...(foto ? { klarifikasiBy: auth.sub, klarifikasiAt: nowTs } : {}),
         // selisih ≠ 0 → menunggu persetujuan owner/admin sebelum jadi baseline
         // saldo (stok belum berubah); selisih = 0 langsung efektif (no-op).
         penyesuaianStatus: adaSelisih ? ("menunggu" as const) : ("disetujui" as const),
@@ -631,6 +656,8 @@ export const stokRoutes = new Hono<AppEnv>()
         user_id: stockOpnames.userId,
         penyesuaian_status: stockOpnames.penyesuaianStatus,
         disetujui_by: stockOpnames.disetujuiBy,
+        foto_url: stockOpnames.klarifikasiFotoUrl,
+        alasan: stockOpnames.klarifikasiCatatan,
       })
       .from(stockOpnames)
       .innerJoin(ingredients, eq(stockOpnames.ingredientId, ingredients.id))
@@ -677,6 +704,8 @@ export const stokRoutes = new Hono<AppEnv>()
         system_qty: r.system_qty,
         qty_fisik: r.qty_fisik,
         selisih: r.selisih,
+        foto_url: r.foto_url,
+        alasan: r.alasan,
       })),
     });
   })

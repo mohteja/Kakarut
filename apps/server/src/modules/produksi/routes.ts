@@ -31,6 +31,7 @@ import { AKSI_TAHAP_LOG, catatLogFaktur, rpLog } from "./log";
 import { nomorUntukRefs, terbitkanNomor } from "../dokumen/nomor";
 import {
   pastikanCabang,
+  requireRole,
   resolveBranchId,
   terikatCabang,
   verifikasiPassword,
@@ -1400,6 +1401,92 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         .orderBy(asc(fakturLogs.waktu), asc(fakturLogs.id));
       return c.json({ rows });
     })
+    /**
+     * LAPORAN HARGA faktur belanja: catat harga riil yang dibayar per baris
+     * (setelah barang dibeli/dikirim) → total_harga baris diperbarui + harga
+     * beli acuan tiap bahan disegarkan (dari harga/satuan terakhir). Fondasi
+     * hitung laba-rugi FIFO/rata-rata. Khusus jalur BELI. owner/admin.
+     */
+    .post(
+      "/laporan-harga/:fakturId",
+      requireRole("owner", "admin"),
+      zValidator(
+        "json",
+        z.object({
+          items: z
+            .array(z.object({ id: z.string().uuid(), total_harga: z.number().min(0) }))
+            .min(1),
+        }),
+      ),
+      async (c) => {
+        if (tipe !== "beli") {
+          throw new HTTPException(400, {
+            message: "Laporan harga hanya untuk faktur belanja bahan baku",
+          });
+        }
+        const auth = c.get("auth");
+        const fakturId = c.req.param("fakturId");
+        const { items } = c.req.valid("json");
+        if (!/^[0-9a-f-]{36}$/i.test(fakturId)) {
+          throw new HTTPException(404, { message: "Faktur tidak ditemukan" });
+        }
+        // Baris faktur + isi bahan (utk konversi harga/satuan → harga beli/kemasan)
+        const barisFaktur = await db
+          .select({
+            id: productions.id,
+            ingredientId: productions.ingredientId,
+            qty: productions.qty,
+            isi: ingredients.isi,
+          })
+          .from(productions)
+          .innerJoin(ingredients, eq(productions.ingredientId, ingredients.id))
+          .where(
+            and(
+              eq(productions.companyId, auth.company_id!),
+              eq(productions.fakturId, fakturId),
+              eq(productions.tipe, "beli"),
+              isNull(productions.deletedAt),
+            ),
+          );
+        if (barisFaktur.length === 0) {
+          throw new HTTPException(404, { message: "Faktur tidak ditemukan" });
+        }
+        const byId = new Map(barisFaktur.map((b) => [b.id, b]));
+        // semua id yang dilaporkan harus milik faktur ini
+        for (const it of items) {
+          if (!byId.has(it.id)) {
+            throw new HTTPException(400, { message: "Ada baris yang bukan bagian faktur ini" });
+          }
+        }
+        // dedupe: id sama → laporan terakhir yang berlaku
+        const target = new Map(items.map((it) => [it.id, it.total_harga]));
+        await db.transaction(async (tx) => {
+          for (const [id, totalHarga] of target) {
+            const b = byId.get(id)!;
+            await tx
+              .update(productions)
+              .set({ totalHarga, updatedAt: new Date(), updatedBy: auth.sub })
+              .where(
+                and(eq(productions.id, id), eq(productions.companyId, auth.company_id!)),
+              );
+            // segarkan harga beli acuan bahan: harga/satuan × isi (per kemasan)
+            if (b.qty > 0) {
+              const hargaBeli = Math.round((totalHarga / b.qty) * b.isi);
+              await tx
+                .update(ingredients)
+                .set({ hargaBeli, updatedAt: new Date() })
+                .where(
+                  and(
+                    eq(ingredients.id, b.ingredientId),
+                    eq(ingredients.companyId, auth.company_id!),
+                  ),
+                );
+            }
+          }
+        });
+        return c.json({ ok: true, jumlah: target.size });
+      },
+    )
     .post("/", zValidator("json", TambahStokBody), async (c) => {
       const auth = c.get("auth");
       const body = c.req.valid("json");

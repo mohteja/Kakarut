@@ -9,10 +9,13 @@ import {
   type BahanDto,
   type BahanResepRow,
   type BahanSupplierDto,
+  type RiwayatHargaDto,
+  type RiwayatHargaLot,
 } from "@kakarut/shared";
 import { db } from "../../db/client";
 import {
   branches,
+  dokumenNomor,
   ingredientComponents,
   ingredientSuppliers,
   ingredients,
@@ -92,7 +95,8 @@ const ResepBody = z.object({
     .default([]),
 });
 
-/** Satu baris "tambah bahan baku" (bulk) — selalu jalur beli, tanpa kemasan/complement. */
+/** Satu baris "tambah bahan baku" (bulk) — selalu jalur beli. Field set penuh
+ * (sama dengan form Ubah): min_beli, kemasan/complement, catatan, rak simpan. */
 const BahanBulkRow = z.object({
   kode: z.string().trim().max(20).nullish(),
   nama: z.string().trim().min(1),
@@ -104,6 +108,11 @@ const BahanBulkRow = z.object({
   track_stok: z.boolean().default(true),
   stok_minimum: z.number().nonnegative().default(0),
   boleh_eceran: z.boolean().default(false),
+  min_beli: z.number().nonnegative().default(0),
+  is_packaging: z.boolean().default(false),
+  is_complement: z.boolean().default(false),
+  catatan: z.string().nullish(),
+  storage_location_id: z.string().uuid().nullish(),
 });
 const BahanBulkBody = z.object({ items: z.array(BahanBulkRow).min(1).max(200) });
 
@@ -118,8 +127,11 @@ const BahanImportRowBody = z.object({
   satuan: z.string().trim().min(1).max(20).default("pcs"),
   satuan_beli: z.string().trim().max(20).nullish(),
   stok_minimum: z.number().nonnegative().default(0),
+  min_beli: z.number().nonnegative().default(0),
   boleh_eceran: z.boolean().default(false),
   lacak_stok: z.boolean().default(true),
+  kemasan: z.boolean().default(false),
+  complement: z.boolean().default(false),
   catatan: z.string().nullish(),
 });
 const BahanImportBody = z.object({
@@ -224,6 +236,74 @@ function toDto(
     supplier_utama: sup?.utama ?? null,
     jumlah_supplier: sup?.jumlah ?? 0,
     storage_location_id: row.storageLocationId,
+  };
+}
+
+/**
+ * Riwayat harga beli bahan baku: setiap faktur BELI yang sudah masuk stok
+ * ('dikonfirmasi') = satu lot pembelian. `harga_satuan` = total_harga / qty
+ * dalam satuan kerja (satuan). Rata-rata tertimbang hanya dari lot berharga.
+ * Fondasi hitung HPP FIFO / rata-rata.
+ */
+async function riwayatHargaBahan(
+  companyId: string,
+  ing: typeof ingredients.$inferSelect,
+): Promise<RiwayatHargaDto> {
+  const rows = await db
+    .select({
+      id: productions.id,
+      tanggal: productions.prodDate,
+      qty: productions.qty,
+      totalHarga: productions.totalHarga,
+      supplier: suppliers.nama,
+      noFaktur: productions.noFaktur,
+      nomor: dokumenNomor.nomorTeks,
+    })
+    .from(productions)
+    .leftJoin(suppliers, eq(productions.supplierId, suppliers.id))
+    .leftJoin(
+      dokumenNomor,
+      and(
+        eq(dokumenNomor.companyId, productions.companyId),
+        eq(dokumenNomor.refId, productions.fakturId),
+      ),
+    )
+    .where(
+      and(
+        eq(productions.companyId, companyId),
+        eq(productions.ingredientId, ing.id),
+        eq(productions.tipe, "beli"),
+        eq(productions.status, "dikonfirmasi"),
+        isNull(productions.deletedAt),
+      ),
+    )
+    .orderBy(desc(productions.prodDate), desc(productions.waktu));
+  const lots: RiwayatHargaLot[] = rows.map((r) => ({
+    id: r.id,
+    tanggal: r.tanggal,
+    qty: r.qty,
+    total_harga: r.totalHarga,
+    harga_satuan:
+      r.totalHarga != null && r.qty > 0 ? Math.round((r.totalHarga / r.qty) * 100) / 100 : null,
+    supplier: r.supplier,
+    no_faktur: r.noFaktur,
+    nomor: r.nomor,
+  }));
+  // rata-rata TERTIMBANG per satuan dari lot yang harganya sudah dilaporkan
+  let sumHarga = 0;
+  let sumQty = 0;
+  for (const r of rows) {
+    if (r.totalHarga != null && r.qty > 0) {
+      sumHarga += r.totalHarga;
+      sumQty += r.qty;
+    }
+  }
+  return {
+    item: { id: ing.id, nama: ing.nama, satuan: ing.satuan },
+    harga_terkini: hargaPerUnit(ing.hargaBeli, ing.isi),
+    harga_rata: sumQty > 0 ? Math.round((sumHarga / sumQty) * 100) / 100 : null,
+    jumlah_pembelian: lots.length,
+    lots,
   };
 }
 
@@ -350,6 +430,9 @@ export const bahanRoutes = new Hono<AppEnv>()
   .post("/bulk", requireRole("owner", "admin"), zValidator("json", BahanBulkBody), async (c) => {
     const auth = c.get("auth");
     const { items } = c.req.valid("json");
+    // rak simpan (bila diisi) harus milik salah satu cabang perusahaan
+    const rakIds = [...new Set(items.map((b) => b.storage_location_id).filter(Boolean))] as string[];
+    for (const rakId of rakIds) await pastikanRakMilik(auth.company_id!, rakId);
     const existing = await db
       .select({ slug: ingredients.slug })
       .from(ingredients)
@@ -382,6 +465,11 @@ export const bahanRoutes = new Hono<AppEnv>()
           kategori: kanonikKategori(kmap, b.kategori),
           pengadaan: "beli" as const,
           bolehEceran: b.boleh_eceran,
+          minBeli: b.min_beli,
+          isPackaging: b.is_packaging,
+          isComplement: b.is_complement,
+          catatan: b.catatan ?? null,
+          storageLocationId: b.storage_location_id ?? null,
         })),
       )
       .returning();
@@ -483,8 +571,11 @@ export const bahanRoutes = new Hono<AppEnv>()
             satuan: u.item.satuan,
             satuanBeli: u.item.satuan_beli ?? null,
             stokMinimum: u.item.stok_minimum,
+            minBeli: u.item.min_beli,
             bolehEceran: u.item.boleh_eceran,
             trackStok: u.item.lacak_stok,
+            isPackaging: u.item.kemasan,
+            isComplement: u.item.complement,
             catatan: u.item.catatan ?? null,
             // baris pulih: aktifkan kembali dari Tempat Sampah
             ...(u.pulih && { isActive: true }),
@@ -511,9 +602,12 @@ export const bahanRoutes = new Hono<AppEnv>()
           satuanBeli: b.satuan_beli ?? null,
           trackStok: b.lacak_stok,
           stokMinimum: b.stok_minimum,
+          minBeli: b.min_beli,
           kategori: kanonikKategori(kmap, b.kategori),
           pengadaan: b.jenis,
           bolehEceran: b.boleh_eceran,
+          isPackaging: b.kemasan,
+          isComplement: b.complement,
           catatan: b.catatan ?? null,
         });
         ditambah++;
@@ -737,6 +831,47 @@ export const bahanRoutes = new Hono<AppEnv>()
         }
       });
       return c.json(await listSupplierBahan(auth.company_id!, id));
+    },
+  )
+  /**
+   * RIWAYAT HARGA beli bahan: daftar lot pembelian + harga terkini & rata-rata
+   * tertimbang (fondasi HPP FIFO/average). Terbuka semua peran (info harga).
+   */
+  .get("/:id/pembelian", async (c) => {
+    const auth = c.get("auth");
+    const [ing] = await db
+      .select()
+      .from(ingredients)
+      .where(and(eq(ingredients.id, c.req.param("id")), eq(ingredients.companyId, auth.company_id!)));
+    if (!ing) throw new HTTPException(404, { message: "Bahan tidak ditemukan" });
+    return c.json(await riwayatHargaBahan(auth.company_id!, ing));
+  })
+  /**
+   * CATAT HARGA bahan (dari kartu Riwayat Harga): perbarui harga beli acuan per
+   * satuan → dipakai estimasi RAB & HPP berikutnya. owner/admin.
+   */
+  .post(
+    "/:id/harga",
+    requireRole("owner", "admin"),
+    zValidator("json", z.object({ harga_per_unit: z.number().nonnegative() })),
+    async (c) => {
+      const auth = c.get("auth");
+      const { harga_per_unit } = c.req.valid("json");
+      const [ing] = await db
+        .select()
+        .from(ingredients)
+        .where(
+          and(eq(ingredients.id, c.req.param("id")), eq(ingredients.companyId, auth.company_id!)),
+        );
+      if (!ing) throw new HTTPException(404, { message: "Bahan tidak ditemukan" });
+      // harga_beli disimpan per KEMASAN (isi) — konversi dari harga per satuan
+      const hargaBeli = Math.round(harga_per_unit * ing.isi);
+      const [row] = await db
+        .update(ingredients)
+        .set({ hargaBeli, updatedAt: new Date() })
+        .where(and(eq(ingredients.id, ing.id), eq(ingredients.companyId, auth.company_id!)))
+        .returning();
+      return c.json(await riwayatHargaBahan(auth.company_id!, row));
     },
   )
   /**

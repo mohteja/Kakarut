@@ -918,15 +918,21 @@ export function KasirPage() {
               {metodeBayar === "tunai" && (
                 <div className="space-y-1.5">
                   <div className="flex items-center gap-1.5">
-                    <input
-                      type="number"
-                      inputMode="numeric"
-                      min="0"
-                      value={uangDiterima}
-                      onChange={(e) => setUangDiterima(e.target.value)}
-                      placeholder="Uang diterima"
-                      className="w-full rounded-lg border border-stone-300 px-3 py-1.5 text-right text-sm focus:border-orange-500 focus:outline-none"
-                    />
+                    {/* nominal berformat: prefix Rp + pemisah ribuan (titik).
+                        state uangDiterima disimpan sebagai angka mentah (digit). */}
+                    <div className="relative w-full">
+                      <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm font-medium text-stone-400">
+                        Rp
+                      </span>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={uangDiterima ? formatAngka(Number(uangDiterima), 0) : ""}
+                        onChange={(e) => setUangDiterima(e.target.value.replace(/\D/g, ""))}
+                        placeholder="Uang diterima"
+                        className="w-full rounded-lg border border-stone-300 py-1.5 pl-9 pr-3 text-right text-sm focus:border-orange-500 focus:outline-none"
+                      />
+                    </div>
                     <button
                       type="button"
                       onClick={() => setUangDiterima(String(total))}
