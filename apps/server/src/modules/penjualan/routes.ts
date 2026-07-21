@@ -4,7 +4,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { db } from "../../db/client";
-import { branches, companies, saleItems, sales, users } from "../../db/schema";
+import { branches, companies, saleItems, sales, shifts, users } from "../../db/schema";
 import {
   requireRole,
   resolveBranchId,
@@ -49,6 +49,23 @@ export const penjualanRoutes = new Hono<AppEnv>()
     const branchId = body.branch_id ?? (await resolveBranchId(c));
     if (terikatCabang(auth.role) && branchId !== auth.branch_id) {
       throw new HTTPException(403, { message: "Kasir hanya boleh transaksi di cabangnya" });
+    }
+    // Kasir wajib DIBUKA dulu: tanpa shift terbuka di cabang, transaksi ditolak
+    // (409) — frontend menampilkan modal "Buka Kasir".
+    const [shiftAktif] = await db
+      .select({ id: shifts.id })
+      .from(shifts)
+      .where(
+        and(
+          eq(shifts.companyId, auth.company_id!),
+          eq(shifts.branchId, branchId),
+          isNull(shifts.closedAt),
+        ),
+      );
+    if (!shiftAktif) {
+      throw new HTTPException(409, {
+        message: "Kasir belum dibuka — buka kasir dulu sebelum bertransaksi",
+      });
     }
     const result = await createSale({
       companyId: auth.company_id!,
