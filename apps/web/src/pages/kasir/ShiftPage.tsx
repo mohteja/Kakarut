@@ -13,6 +13,7 @@ import {
 } from "../../components/ui";
 import { useCabangData } from "../../context/BranchContext";
 import { CabangDataBar } from "../../components/CabangDataBar";
+import { ShiftDetailModal } from "../../components/ShiftDetailModal";
 import { api } from "../../lib/api";
 import { formatRupiah, formatTanggalRingkas, formatWaktu } from "../../lib/format";
 
@@ -51,6 +52,8 @@ export function ShiftPage() {
   const [modalAwal, setModalAwal] = useState("");
   const [uangFisik, setUangFisik] = useState("");
   const [catatan, setCatatan] = useState("");
+  // Shift yang sedang dilihat detailnya (klik kartu riwayat / shift berjalan).
+  const [detailId, setDetailId] = useState<string | null>(null);
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["shift-aktif"] });
@@ -125,9 +128,18 @@ export function ShiftPage() {
           <Card className="p-5">
             <div className="mb-3 flex items-center justify-between">
               <h2 className="text-lg font-bold text-stone-800">Shift berjalan</h2>
-              <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700">
-                Terbuka
-              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setDetailId(aktif.id)}
+                  className="text-xs font-semibold text-orange-600 hover:underline"
+                >
+                  Lihat detail
+                </button>
+                <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700">
+                  Terbuka
+                </span>
+              </div>
             </div>
             <div className="mb-3 text-sm text-stone-500">
               Dibuka oleh <b>{aktif.dibuka_oleh}</b> · {formatTanggalRingkas(aktif.dibuka_pada)}{" "}
@@ -206,33 +218,44 @@ export function ShiftPage() {
             {riwayat.map((s) => {
               const info = selisihInfo(s.selisih);
               return (
-                <Card key={s.id} className="p-3">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="text-sm font-semibold text-stone-800">
-                        {formatTanggalRingkas(s.dibuka_pada)} · {formatWaktu(s.dibuka_pada)} –{" "}
-                        {s.ditutup_pada ? formatWaktu(s.ditutup_pada) : "—"}
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => setDetailId(s.id)}
+                  className="block w-full text-left"
+                >
+                  <Card className="p-3 transition hover:border-orange-300 hover:bg-orange-50/40">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="text-sm font-semibold text-stone-800">
+                          {formatTanggalRingkas(s.dibuka_pada)} · {formatWaktu(s.dibuka_pada)} –{" "}
+                          {s.ditutup_pada ? formatWaktu(s.ditutup_pada) : "—"}
+                        </div>
+                        <div className="text-xs text-stone-500">
+                          🔓 {s.dibuka_oleh || "—"} · 🔒 {s.ditutup_oleh || "—"}
+                        </div>
+                        <div className="text-xs text-stone-400">
+                          {s.jumlah_transaksi}× · tunai {formatRupiah(s.penjualan_tunai)}
+                        </div>
                       </div>
-                      <div className="text-xs text-stone-500">
-                        {s.dibuka_oleh}
-                        {s.ditutup_oleh && s.ditutup_oleh !== s.dibuka_oleh ? ` → ${s.ditutup_oleh}` : ""}{" "}
-                        · {s.jumlah_transaksi}× · tunai {formatRupiah(s.penjualan_tunai)}
+                      <div className="shrink-0 text-right">
+                        <div className={`text-sm font-bold ${info.warna}`}>{info.label}</div>
+                        <div className="text-xs text-stone-400">
+                          fisik {formatRupiah(s.uang_fisik ?? 0)}
+                        </div>
+                        <div className="mt-0.5 text-xs font-medium text-orange-600">Detail ›</div>
                       </div>
                     </div>
-                    <div className="shrink-0 text-right">
-                      <div className={`text-sm font-bold ${info.warna}`}>{info.label}</div>
-                      <div className="text-xs text-stone-400">
-                        fisik {formatRupiah(s.uang_fisik ?? 0)}
-                      </div>
-                    </div>
-                  </div>
-                  {s.catatan && <div className="mt-1 text-xs text-stone-500">📝 {s.catatan}</div>}
-                </Card>
+                    {s.catatan && <div className="mt-1 text-xs text-stone-500">📝 {s.catatan}</div>}
+                  </Card>
+                </button>
               );
             })}
           </div>
         )}
       </div>
+
+      <ShiftDetailModal shiftId={detailId} onClose={() => setDetailId(null)} />
     </div>
   );
 }

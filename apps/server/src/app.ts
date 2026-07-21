@@ -93,10 +93,12 @@ export function createApp() {
   tenant.use("/sampah/*", requireRole("owner", "admin"));
   tenant.use("/karyawan/*", requireRole("owner", "admin"));
   tenant.use("/customer/*", requireRole("owner", "admin"));
-  // Transaksi POS (jual, tutup kasir/shift, open bill) HANYA peran kasir.
+  // Transaksi POS (jual, open bill) HANYA peran kasir.
   // Owner/admin memantau lewat Riwayat/Laporan, tak meng-input transaksi.
-  tenant.use("/shift/*", requireRole("cashier"));
   tenant.use("/open-bill/*", requireRole("cashier"));
+  // Shift kasir: BUKA/TUTUP hanya kasir (digerbang per-rute di modulnya), tetapi
+  // owner/admin boleh MEMANTAU (aktif, riwayat, detail, /pantau semua cabang).
+  tenant.use("/shift/*", requireRole("owner", "admin", "cashier"));
   // Absensi: semua peran boleh ABSEN SENDIRI (POST /absensi/saya) + lihat
   // ringkasan; hanya admin/kasir yang boleh STASIUN pindai (POST /absensi,
   // digerbang per-rute di modulnya). Tim ikut agar bisa absen sendiri.

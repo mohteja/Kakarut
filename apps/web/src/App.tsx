@@ -22,6 +22,7 @@ import { OnboardingPage } from "./pages/OnboardingPage";
 import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
 import { ResetPasswordPage } from "./pages/ResetPasswordPage";
 import { SmtpPage } from "./pages/superadmin/SmtpPage";
+import { OperasionalPage } from "./pages/operasional/OperasionalPage";
 import { MemberPage } from "./pages/member/MemberPage";
 import { LihatMenuPage } from "./pages/menu/LihatMenuPage";
 import { MenuFormPage } from "./pages/menu/MenuFormPage";
@@ -157,6 +158,7 @@ export default function App() {
               {isManajemen && (
                 <>
                   <Route path="/dashboard" element={<DashboardPage />} />
+                  <Route path="/operasional" element={<OperasionalPage />} />
                   {/* master perlengkapan (nama/harga/aturan) — operasi stoknya
                       utk semua peran ada di halaman Stok → tab Perlengkapan */}
                   <Route path="/perlengkapan" element={<PerlengkapanPage />} />

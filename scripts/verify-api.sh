@@ -3544,6 +3544,36 @@ cek "test-email owner (bukan super admin) → 403" "V == 403" \
 cek "test-email tujuan tak valid → 400 (validasi)" "V == 400" \
   "$(status_code_body "$SA" POST /admin/sistem/smtp/test-email '{"to":"bukan-email"}')"
 
+echo "== 98. Pantau operasional cabang + detail shift + jam operasional =="
+# Cabang store pertama (Pusat seed) + satu shift yang sudah ditutup (dari §36).
+PUSAT_ID=$(api "$OWNER" GET /cabang | jq -r '[.[] | select(.tipe=="store")][0].id')
+SHIFT_TTP=$(api "$KASIR" GET /shift | jq -r '.[0].id')
+# Pantau semua cabang (owner/admin) — kasir tak boleh.
+cek "pantau: owner dapat array cabang store" "V == 1" \
+  "$(api "$OWNER" GET /shift/pantau | jq 'if (type=="array" and length>=1) then 1 else 0 end')"
+cek "pantau: kasir → 403" "V == 403" "$(status_code "$KASIR" GET /shift/pantau)"
+cek "pantau: tiap baris punya flag telat_buka/lupa_tutup" "V == 1" \
+  "$(api "$OWNER" GET /shift/pantau | jq 'all(.[]; has("telat_buka") and has("lupa_tutup") and has("jam_buka")) | if . then 1 else 0 end')"
+# Atur jam operasional cabang (owner) → tampil di /cabang & /shift/pantau.
+api "$OWNER" PATCH "/cabang/$PUSAT_ID" '{"jam_buka":"08:00","jam_tutup":"22:00"}' > /dev/null
+cek "cabang: jam operasional tersimpan" "V == 1" \
+  "$(api "$OWNER" GET /cabang | jq --arg id "$PUSAT_ID" '[.[] | select(.id==$id)][0] | ((.jam_buka=="08:00") and (.jam_tutup=="22:00")) | if . then 1 else 0 end')"
+cek "pantau: jam operasional muncul di cabang" "V == 1" \
+  "$(api "$OWNER" GET /shift/pantau | jq --arg id "$PUSAT_ID" '[.[] | select(.branch_id==$id)][0].jam_buka=="08:00" | if . then 1 else 0 end')"
+cek "cabang: jam format salah → 400" "V == 400" \
+  "$(status_code_body "$OWNER" PATCH "/cabang/$PUSAT_ID" '{"jam_buka":"25:99"}')"
+# Detail shift: ringkasan + daftar transaksi; owner boleh lihat, kasir cabang sendiri boleh.
+DTL=$(api "$OWNER" GET "/shift/$SHIFT_TTP")
+cek "detail shift: id cocok" "V == 1" \
+  "$(echo "$DTL" | jq --arg id "$SHIFT_TTP" '(.id==$id) | if . then 1 else 0 end')"
+cek "detail shift: dibuka_oleh terisi" "V == 1" \
+  "$(echo "$DTL" | jq '((.dibuka_oleh|length)>0) | if . then 1 else 0 end')"
+cek "detail shift: transaksi berupa array" "V == 1" \
+  "$(echo "$DTL" | jq '(.transaksi|type=="array") | if . then 1 else 0 end')"
+cek "detail shift: kasir cabang sendiri → 200" "V == 200" "$(status_code "$KASIR" GET "/shift/$SHIFT_TTP")"
+cek "detail shift: id tak dikenal → 404" "V == 404" \
+  "$(status_code "$OWNER" GET "/shift/00000000-0000-0000-0000-000000000000")"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]
