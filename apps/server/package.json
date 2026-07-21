@@ -16,17 +16,19 @@
     "@aws-sdk/client-s3": "^3.1083.0",
     "@hono/node-server": "^2.0.8",
     "@hono/zod-validator": "^0.8.0",
+    "@kakarut/shared": "*",
     "bcryptjs": "^3.0.3",
     "drizzle-orm": "^0.45.2",
     "hono": "^4.12.28",
     "jsonwebtoken": "^9.0.3",
+    "nodemailer": "^9.0.3",
     "pg": "^8.22.0",
-    "zod": "^4.4.3",
-    "@kakarut/shared": "*"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^26.1.1",
+    "@types/nodemailer": "^8.0.1",
     "@types/pg": "^8.20.0",
     "drizzle-kit": "^0.31.10",
     "tsx": "^4.23.0",

@@ -163,6 +163,13 @@ export const users = pgTable("users", {
   nama: text("nama").notNull(),
   isSuperAdmin: boolean("is_super_admin").notNull().default(false),
   isActive: boolean("is_active").notNull().default(true),
+  /**
+   * Hapus akun sendiri = SOFT delete (tombstone): terisi = akun dihapus, tak
+   * bisa login. Riwayat (transaksi, absensi, log faktur) tetap utuh karena
+   * baris user tetap ada. Saat dihapus, email di-rename agar alamat bebas
+   * dipakai daftar ulang.
+   */
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -199,6 +206,87 @@ export const memberships = pgTable(
       .on(t.companyId, t.employeeCode)
       .where(sql`${t.employeeCode} IS NOT NULL`),
   ],
+);
+
+/** Status undangan karyawan: menunggu diterima / sudah diterima / dibatalkan. */
+export const invitationStatusEnum = pgEnum("invitation_status", [
+  "pending",
+  "accepted",
+  "revoked",
+]);
+
+/**
+ * Undangan karyawan (alur "menunggu diundang"): owner/admin mengundang sebuah
+ * EMAIL ke perusahaan + peran + cabang. Undangan tertunda; saat email itu
+ * mendaftar (auto-join) atau menerima dari halaman onboarding, membership
+ * dibuat & status → accepted. Satu undangan pending per (perusahaan, email).
+ */
+export const invitations = pgTable(
+  "invitations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    email: text("email").notNull(),
+    role: userRoleEnum("role").notNull(),
+    branchId: uuid("branch_id").references(() => branches.id, { onDelete: "set null" }),
+    /** token acak (untuk tautan email di PR berikutnya) — unik */
+    token: text("token").notNull().unique(),
+    status: invitationStatusEnum("status").notNull().default("pending"),
+    invitedBy: uuid("invited_by").references(() => users.id, { onDelete: "set null" }),
+    acceptedUserId: uuid("accepted_user_id").references(() => users.id, { onDelete: "set null" }),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("invitations_email_idx").on(t.email),
+    index("invitations_company_idx").on(t.companyId),
+    // satu undangan PENDING per (perusahaan, email) — cegah duplikat
+    uniqueIndex("invitations_company_email_pending_uq")
+      .on(t.companyId, t.email)
+      .where(sql`${t.status} = 'pending'`),
+  ],
+);
+
+/** Mode enkripsi koneksi SMTP: tanpa / SSL (465) / STARTTLS (587). */
+export const smtpEncryptionEnum = pgEnum("smtp_encryption", ["none", "ssl", "starttls"]);
+
+/**
+ * Pengaturan email (SMTP) TINGKAT PLATFORM — satu baris (singleton), diatur
+ * super admin. Dipakai untuk email sistem: reset password (termasuk user yang
+ * belum punya perusahaan) & undangan. Bila kosong/tak lengkap, email tak
+ * terkirim (dev: tautan dicatat di log / dikembalikan saat belum dikonfigurasi).
+ */
+export const smtpSettings = pgTable("smtp_settings", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  host: text("host"),
+  port: integer("port").notNull().default(587),
+  username: text("username"),
+  password: text("password"),
+  encryption: smtpEncryptionEnum("encryption").notNull().default("starttls"),
+  senderName: text("sender_name"),
+  senderEmail: text("sender_email"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * Token reset password (lupa password): dikirim via email sebagai tautan.
+ * Disimpan sebagai HASH (bukan token mentah). Sekali pakai + kedaluwarsa.
+ */
+export const passwordResetTokens = pgTable(
+  "password_reset_tokens",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash").notNull().unique(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("password_reset_user_idx").on(t.userId)],
 );
 
 /** Master supplier / sumber pengadaan (per perusahaan). */

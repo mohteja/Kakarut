@@ -10,6 +10,7 @@ import {
   btnPrimary,
   inputClass,
 } from "../../components/ui";
+import { HapusAkunButton } from "../../components/HapusAkunButton";
 import { api } from "../../lib/api";
 import { formatTanggalRingkas, formatWaktu } from "../../lib/format";
 
@@ -201,6 +202,16 @@ export function ProfilPage() {
             {ganti.isPending ? "Menyimpan…" : "Simpan Password Baru"}
           </button>
         </form>
+      </Card>
+
+      {/* Zona bahaya: hapus akun sendiri */}
+      <Card className="mt-4 border-red-200 p-4">
+        <h2 className="mb-1 font-bold text-red-700">⚠ Hapus Akun</h2>
+        <p className="mb-3 text-sm text-stone-500">
+          Menghapus akun berarti Anda tak bisa login lagi. Owner terakhir sebuah perusahaan
+          harus menyerahkan kepemilikan atau menghapus perusahaan lebih dulu.
+        </p>
+        <HapusAkunButton />
       </Card>
     </div>
   );

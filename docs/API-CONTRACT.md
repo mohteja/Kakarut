@@ -104,8 +104,25 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 
 ## 3. `/api/auth` — Autentikasi (`modules/auth/routes.ts`)
 
-- `POST /api/auth/login` — [public] — req: `{ email: string (trim, lowercase), password: string (min 1) }` — res: `{ token, user: AuthUser, company: {id,nama,slug,logo_url,pb1_enabled,pb1_rate,diskon_maks_persen,timezone} | null, branch: {id,nama} | null }` — error: **401** email/password salah, **403** akun tak terhubung ke perusahaan aktif
+> Bentuk sesi (dipakai login/register/onboarding): `{ token, user: AuthUser, company: {…} | null, branch: {id,nama} | null }`. **`company` bisa `null`** untuk user yang belum punya perusahaan (dan super-admin) — klien harus menangani: `company == null && !is_super_admin` → arahkan ke **onboarding** (buat perusahaan / terima undangan).
+
+- `POST /api/auth/login` — [public] — req: `{ email (trim, lowercase), password (min 1) }` — res: sesi (`company` bisa null bila user belum punya perusahaan) — error: **401** email/password salah **atau akun dihapus/nonaktif**. **(CATATAN: tak lagi 403 untuk user tanpa perusahaan — kini login sukses dgn `company: null`.)**
+- `POST /api/auth/register` — [public] — req: `{ nama, email (email valid, lowercase), password (min 8) }` — res: **201** sesi (langsung login; `company` null kecuali email punya undangan pending → auto-join) — error: **409** email sudah terdaftar, **400** validasi
+- `POST /api/auth/forgot-password` — [public] — req: `{ email }` — res: **200** `{ ok: true, dev_reset_url? }` — SELALU 200 (tak bocorkan apakah email ada). Bila akun aktif: token reset dibuat + tautan dikirim via email. `dev_reset_url` HANYA muncul saat email server belum dikonfigurasi & bukan produksi (bantuan setup) — abaikan di produksi.
+- `POST /api/auth/reset-password` — [public] — req: `{ token, password (min 8) }` — res: **200** `{ ok }` — error: **400** token tidak valid/kedaluwarsa/terpakai. Token berasal dari tautan email `APP_BASE_URL/reset-password?token=…` (halaman WEB).
 - `GET /api/auth/me` — [any authenticated, incl. super-admin] (`requireAuth` inline) — res: `{ user: AuthUser, company | null }` — error: **401**
+
+## `/api/onboarding` — Onboarding + lifecycle akun (`modules/onboarding/routes.ts`) — **[butuh login, TIDAK butuh perusahaan]**
+
+> Dipakai user tanpa perusahaan setelah daftar/login. Aksi buat-perusahaan &
+> terima-undangan mengembalikan **sesi BARU** (token+user+company) → klien harus
+> MENGGANTI sesi tersimpan (seperti login), bukan menggabung.
+
+- `GET /api/onboarding/status` — res: `{ has_company: bool, email: string, undangan: [{ id, company_nama, role, cabang_nama|null, diundang_pada }] }`
+- `POST /api/onboarding/perusahaan` — req: `{ nama }` — res: **201** sesi baru (jadi owner perusahaan baru) — error: **403** super-admin
+- `POST /api/onboarding/undangan/:id/terima` — res: sesi baru (bergabung ke perusahaan) — error: **404** bukan untuk email ini, **400** undangan tak berlaku
+- `POST /api/onboarding/undangan/:id/tolak` — res: `{ ok }` — error: **404**
+- `DELETE /api/onboarding/akun` — req: `{ password }` — SOFT delete akun sendiri — res: `{ ok }` — error: **401** password salah, **400** owner terakhir sebuah perusahaan (harus serahkan/hapus perusahaan dulu)
 
 ---
 
@@ -120,6 +137,13 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 
 - `GET /api/admin/sistem` — res: `{ database_ok, storage_mode, node_version, migrations }`
 - `POST /api/admin/sistem/migrate` — res: `{ ok: true, migrations }` — error: **500** migrasi gagal
+- `GET /api/admin/sistem/smtp` — res: `SmtpSettingsDto` (`{ host|null, port, username|null, has_password, encryption, sender_name|null, sender_email|null, configured, provider }` — password mentah TAK pernah dikembalikan)
+- `PUT /api/admin/sistem/smtp` — req: `{ host?, port?, username?, password?, encryption?: "none"|"ssl"|"starttls", sender_name?, sender_email? }` (password hanya berubah bila diisi non-kosong) — res: `SmtpSettingsDto`
+- `POST /api/admin/sistem/smtp/test` — uji koneksi SMTP tersimpan — res: `{ ok }` — error: **400** koneksi gagal
+- `POST /api/admin/sistem/smtp/test-email` — req: `{ to?: email }` (default email super-admin) — res: `{ ok, to, provider }` — error: **400** gagal kirim
+
+> **Untuk mobile:** SMTP diatur super-admin (email sistem: reset password &
+> undangan). Aplikasi kasir/karyawan **tak perlu** membangun halaman ini.
 
 ---
 
@@ -396,7 +420,10 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 ## `/api/karyawan` — Karyawan (`modules/users/routes.ts`) — group guard **[owner/admin]**
 
 - `GET /api/karyawan` — query: `arsip=true` (daftar arsip) — res: row karyawan
-- `POST /api/karyawan` — req `KaryawanBody`: `{ nama: string, email: string (lowercase), password: string (min 8), role: "owner"|"admin"|"cashier"|"tim", branch_id?: uuid|null }` — res: **201** `{ user_id, email, nama, role, employee_code }` — error: **400** (cashier/tim butuh cabang; mismatch peran/tipe cabang), **403** hanya owner boleh buat owner, **409** email ada
+- `POST /api/karyawan` — req `KaryawanBody`: `{ nama: string, email: string (lowercase), password: string (min 8), role: "owner"|"admin"|"cashier"|"tim", branch_id?: uuid|null }` — res: **201** `{ user_id, email, nama, role, employee_code }` — error: **400** (cashier/tim butuh cabang; mismatch peran/tipe cabang), **403** hanya owner boleh buat owner, **409** email ada — *(buat akun langsung + password. Untuk alur "menunggu diundang", pakai `/undang` di bawah.)*
+- `POST /api/karyawan/undang` — req: `{ email, role: enum, branch_id?: uuid|null }` — buat UNDANGAN pending (tanpa password; email dikirim best-effort). Saat email itu daftar/menerima → membership dibuat otomatis — res: **201** `{ id, email, role }` — error: **400** (cashier/tim butuh cabang), **403** hanya owner boleh undang owner, **409** sudah jadi karyawan aktif / sudah diundang
+- `GET /api/karyawan/undangan` — res: `UndanganKaryawanRow[]` (`{id,email,role,cabang_nama|null,status,diundang_pada}`, hanya pending)
+- `DELETE /api/karyawan/undangan/:id` — batalkan undangan pending — res: `{ ok }` — error: **404**
 - `GET /api/karyawan/:userId/aktivitas` — res: `{ rows: [...] }` (aktivitas faktur, maks 100)
 - `GET /api/karyawan/:userId/tempat` — res: `{ assigned: uuid[], tersedia: [{id,nama}] }` — error: **404**
 - `PUT /api/karyawan/:userId/tempat` — req: `{ tempat_ids: uuid[] }` — res: `{ ok, assigned }` — error: **400** (tempat luar cabang / tanpa cabang), **404**
