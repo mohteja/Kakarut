@@ -5,6 +5,8 @@ import { api, loadAuth, saveAuth, type AuthState } from "../lib/api";
 interface AuthContextValue {
   auth: AuthState | null;
   login: (email: string, password: string) => Promise<AuthState>;
+  /** Masuk sebagai tamu (guest mode) — akun bersama tanpa password. */
+  masukTamu: (peran: "owner" | "kasir") => Promise<AuthState>;
   register: (nama: string, email: string, password: string) => Promise<AuthState>;
   /** Ganti sesi aktif (mis. setelah buat perusahaan / terima undangan di onboarding). */
   setSession: (data: AuthState) => void;
@@ -42,6 +44,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [setSession],
   );
 
+  const masukTamu = useCallback(
+    async (peran: "owner" | "kasir") => {
+      const data = await api<AuthState>("/auth/guest", {
+        method: "POST",
+        body: { peran },
+      });
+      setSession(data);
+      return data;
+    },
+    [setSession],
+  );
+
   const register = useCallback(
     async (nama: string, email: string, password: string) => {
       const data = await api<AuthState>("/auth/register", {
@@ -63,7 +77,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [queryClient]);
 
   return (
-    <AuthContext.Provider value={{ auth, login, register, setSession, logout }}>
+    <AuthContext.Provider value={{ auth, login, masukTamu, register, setSession, logout }}>
       {children}
     </AuthContext.Provider>
   );

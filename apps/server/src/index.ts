@@ -18,6 +18,7 @@ import { pastikanSuperAdmin } from "./modules/auth/superadmin";
 import { konfirmasiProduksiCkLokalTertahan } from "./modules/produksi/backfill";
 import { backfillNomorDokumen } from "./modules/dokumen/nomor";
 import { terapkanSemuaKonsumsiOtomatis } from "./modules/perlengkapan/service";
+import { provisionGuest } from "./seed/guest";
 import {
   backfillRakPerlengkapanKeSli,
   backfillRakSimpanKeSli,
@@ -97,6 +98,13 @@ try {
   }
 } catch (e) {
   console.warn("Gagal memastikan super admin:", e instanceof Error ? e.message : String(e));
+}
+
+// Akun & perusahaan TAMU (guest mode) untuk uji coba bersama — idempoten.
+try {
+  await provisionGuest(db);
+} catch (e) {
+  console.warn("Gagal memprovisi akun tamu:", e instanceof Error ? e.message : String(e));
 }
 
 const app = createApp();

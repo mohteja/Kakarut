@@ -11,6 +11,7 @@ import { companies, passwordResetTokens, users } from "../../db/schema";
 import { requireAuth, type AppEnv } from "../../middleware/auth";
 import { emailTerkonfigurasi, kirimEmail } from "../mail/service";
 import { autoTerimaUndanganEmail } from "../onboarding/service";
+import { GUEST } from "../../seed/guest";
 import { buatSesi } from "./session";
 
 /** Token reset disimpan sebagai hash (bukan nilai mentah). */
@@ -43,6 +44,22 @@ export const authRoutes = new Hono<AppEnv>()
     // (buat perusahaan / terima undangan). buatSesi mengembalikan company null.
     return c.json(await buatSesi(user));
   })
+  // Masuk sebagai TAMU (guest mode) — akun bersama untuk mencoba aplikasi,
+  // tanpa password. Dua peran: owner & kasir, di perusahaan demo (tanpa
+  // geofence → absen bebas). Data bersifat sandbox bersama.
+  .post(
+    "/guest",
+    zValidator("json", z.object({ peran: z.enum(["owner", "kasir"]) })),
+    async (c) => {
+      const { peran } = c.req.valid("json");
+      const email = peran === "owner" ? GUEST.ownerEmail : GUEST.kasirEmail;
+      const [user] = await db.select().from(users).where(eq(users.email, email));
+      if (!user || !user.isActive || user.deletedAt) {
+        throw new HTTPException(503, { message: "Akun tamu belum siap — coba lagi sebentar" });
+      }
+      return c.json(await buatSesi(user));
+    },
+  )
   // Daftar akun sendiri (self sign-up). Membuat user TANPA perusahaan; bila ada
   // undangan pending untuk email ini, langsung auto-join (mereka set password
   // sendiri saat daftar). Selesai → langsung login (kembalikan sesi).

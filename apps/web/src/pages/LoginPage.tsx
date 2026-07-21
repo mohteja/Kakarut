@@ -5,12 +5,13 @@ import { Logo } from "../components/Logo";
 import { useAuth } from "../context/AuthContext";
 
 export function LoginPage() {
-  const { login } = useAuth();
+  const { login, masukTamu } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [tamuLoading, setTamuLoading] = useState<null | "owner" | "kasir">(null);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -23,6 +24,19 @@ export function LoginPage() {
       setError(err instanceof Error ? err.message : "Gagal login");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function cobaTamu(peran: "owner" | "kasir") {
+    setError(null);
+    setTamuLoading(peran);
+    try {
+      await masukTamu(peran);
+      navigate(peran === "owner" ? "/dashboard" : "/kasir", { replace: true });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Gagal masuk sebagai tamu");
+    } finally {
+      setTamuLoading(null);
     }
   }
 
@@ -75,6 +89,35 @@ export function LoginPage() {
             </Link>
           </div>
         </form>
+
+        {/* Mode Tamu — akun bersama untuk mencoba tanpa daftar (absen bebas) */}
+        <div className="mt-6">
+          <div className="flex items-center gap-3 text-xs text-stone-400">
+            <span className="h-px flex-1 bg-stone-200" />
+            atau coba tanpa daftar
+            <span className="h-px flex-1 bg-stone-200" />
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => cobaTamu("owner")}
+              disabled={tamuLoading !== null}
+              className="rounded-lg border border-stone-300 bg-white px-3 py-2.5 text-sm font-semibold text-stone-700 hover:bg-stone-50 disabled:opacity-60"
+            >
+              {tamuLoading === "owner" ? "Masuk…" : "👔 Tamu Owner"}
+            </button>
+            <button
+              type="button"
+              onClick={() => cobaTamu("kasir")}
+              disabled={tamuLoading !== null}
+              className="rounded-lg border border-stone-300 bg-white px-3 py-2.5 text-sm font-semibold text-stone-700 hover:bg-stone-50 disabled:opacity-60"
+            >
+              {tamuLoading === "kasir" ? "Masuk…" : "🧾 Tamu Kasir"}
+            </button>
+          </div>
+          <p className="mt-2 text-center text-xs text-stone-400">Data contoh bersama · absen tanpa lokasi</p>
+        </div>
+
         <p className="mt-4 text-center text-sm text-stone-500">
           Belum punya akun?{" "}
           <Link to="/daftar" className="font-semibold text-orange-600 hover:underline">

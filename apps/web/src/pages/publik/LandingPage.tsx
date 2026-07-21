@@ -1,5 +1,7 @@
-import { Link } from "react-router-dom";
+import { useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { Logo } from "../../components/Logo";
+import { useAuth } from "../../context/AuthContext";
 import { PublikFooter } from "./PublikLayout";
 import { DESKRIPSI_SINGKAT, NAMA_APP } from "./info";
 
@@ -18,6 +20,22 @@ const FITUR = [
  * dan dokumen legal/bantuan.
  */
 export function LandingPage() {
+  const { masukTamu } = useAuth();
+  const navigate = useNavigate();
+  const [tamu, setTamu] = useState(false);
+
+  async function cobaTamu() {
+    setTamu(true);
+    try {
+      await masukTamu("owner");
+      navigate("/dashboard", { replace: true });
+    } catch {
+      navigate("/login");
+    } finally {
+      setTamu(false);
+    }
+  }
+
   return (
     <div className="flex min-h-screen flex-col bg-white text-stone-800">
       {/* Header */}
@@ -55,7 +73,15 @@ export function LandingPage() {
             <Link to="/daftar" className="rounded-xl bg-orange-600 px-6 py-3 text-sm font-semibold text-white shadow-sm hover:bg-orange-700">
               Coba Gratis
             </Link>
-            <Link to="/login" className="rounded-xl border border-stone-300 bg-white px-6 py-3 text-sm font-semibold text-stone-700 hover:bg-stone-50">
+            <button
+              type="button"
+              onClick={cobaTamu}
+              disabled={tamu}
+              className="rounded-xl border border-stone-300 bg-white px-6 py-3 text-sm font-semibold text-stone-700 hover:bg-stone-50 disabled:opacity-60"
+            >
+              {tamu ? "Masuk…" : "🎫 Coba sebagai Tamu"}
+            </button>
+            <Link to="/login" className="rounded-xl px-6 py-3 text-sm font-semibold text-stone-500 hover:text-stone-800">
               Masuk ke Akun
             </Link>
           </div>
