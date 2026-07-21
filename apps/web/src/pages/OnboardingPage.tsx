@@ -56,7 +56,7 @@ export function OnboardingPage() {
       <div className="mx-auto w-full max-w-lg space-y-5">
         <div className="text-center">
           <Logo className="mx-auto h-16 w-16 shadow-lg" />
-          <h1 className="mt-3 text-2xl font-bold text-stone-800">Selamat datang di Kakarut</h1>
+          <h1 className="mt-3 text-2xl font-bold text-stone-800">Selamat datang di Terakasir</h1>
           <p className="text-sm text-stone-500">
             Halo <b>{auth?.user.nama}</b> — akun Anda belum terhubung ke perusahaan.
           </p>

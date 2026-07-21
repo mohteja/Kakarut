@@ -130,7 +130,7 @@ export function Layout() {
   const timDiCk =
     isTim &&
     cabang.find((b) => b.id === auth.user.branch_id)?.tipe === "central_kitchen";
-  const namaPerusahaan = auth.company?.nama ?? "Kakarut POS";
+  const namaPerusahaan = auth.company?.nama ?? "Terakasir";
   const subJudul = isSuperAdmin
     ? "Platform Super Admin"
     : `${auth.user.nama} · ${

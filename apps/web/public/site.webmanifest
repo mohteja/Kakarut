@@ -1,6 +1,6 @@
 {
-  "name": "Kakarut POS",
-  "short_name": "Kakarut",
+  "name": "Terakasir",
+  "short_name": "Terakasir",
   "description": "Point of Sale F&B multi-cabang",
   "start_url": "/",
   "display": "standalone",

@@ -117,10 +117,10 @@ export const adminSystemRoutes = new Hono<AppEnv>()
       const auth = c.get("auth");
       const body = c.req.valid("json");
       const to = body.to || auth.email;
-      const subject = body.subject?.trim() || "Email percobaan Kakarut";
+      const subject = body.subject?.trim() || "Email percobaan Terakasir";
       const html =
         body.html?.trim() ||
-        `<p>Halo! Ini email percobaan dari pengaturan SMTP Kakarut.</p><p>Bila Anda menerima ini, konfigurasi email sudah benar.</p>`;
+        `<p>Halo! Ini email percobaan dari pengaturan SMTP Terakasir.</p><p>Bila Anda menerima ini, konfigurasi email sudah benar.</p>`;
       try {
         const provider = await kirimEmail({ to, subject, html });
         return c.json({ ok: true, to, provider });

@@ -33,7 +33,7 @@ export function LoginPage() {
           <div className="mx-auto inline-block overflow-hidden rounded-2xl shadow-lg">
             <Logo className="block h-16 w-16" rounded={false} />
           </div>
-          <h1 className="mt-3 text-2xl font-bold text-stone-800">Kakarut POS</h1>
+          <h1 className="mt-3 text-2xl font-bold text-stone-800">Terakasir</h1>
           <p className="text-sm text-stone-500">Sistem kasir &amp; HPP untuk bisnis F&amp;B</p>
         </div>
         <form onSubmit={onSubmit} className="space-y-4">

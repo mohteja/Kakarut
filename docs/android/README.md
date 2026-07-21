@@ -1,4 +1,4 @@
-# 📱 Kakarut POS — Aplikasi Android
+# 📱 Terakasir — Aplikasi Android
 
 > ⚠️ **USANG / TIDAK DIPAKAI LAGI (deprecated).** Dokumen di folder `docs/android/`
 > ini menjelaskan rencana **Capacitor (WebView)**. Arah aplikasi mobile sekarang
@@ -10,7 +10,7 @@
 ---
 
 
-Dokumen ini menjelaskan rencana & cara membuat **aplikasi Android** Kakarut POS,
+Dokumen ini menjelaskan rencana & cara membuat **aplikasi Android** Terakasir,
 supaya **printer thermal Bluetooth lebih mudah** (langsung tersambung, tanpa
 aplikasi RawBT pihak ketiga) dan **kasir lebih nyaman** (ikon di layar utama,
 layar penuh, auto-print setelah bayar).

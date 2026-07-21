@@ -61,7 +61,7 @@ export function UpdatePrompt() {
         <div className="text-4xl">✨</div>
         <h2 className="mt-2 text-lg font-bold text-stone-800">Ada pembaruan aplikasi</h2>
         <p className="mt-1 text-sm text-stone-500">
-          Versi terbaru Kakarut sudah tersedia. Perbarui untuk memakai perbaikan &amp; fitur
+          Versi terbaru Terakasir sudah tersedia. Perbarui untuk memakai perbaikan &amp; fitur
           terbaru. Selesaikan dulu transaksi yang sedang berjalan bila perlu.
         </p>
         <div className="mt-5 flex flex-col gap-2">

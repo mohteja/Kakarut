@@ -1,6 +1,6 @@
-# 📱 Kakarut POS — Kontrak API (untuk Tim Mobile Flutter)
+# 📱 Terakasir — Kontrak API (untuk Tim Mobile Flutter)
 
-Halo tim mobile. Dokumen ini adalah **acuan lengkap API server Kakarut POS** untuk
+Halo tim mobile. Dokumen ini adalah **acuan lengkap API server Terakasir** untuk
 membangun aplikasi Flutter (native) yang bicara **langsung ke API**, bukan
 membungkus web di WebView.
 

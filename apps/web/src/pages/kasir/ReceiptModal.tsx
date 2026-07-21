@@ -121,7 +121,7 @@ export function ReceiptModal({
 
   function toReceiptData(): ReceiptData {
     return {
-      companyNama: company?.nama ?? auth?.company?.nama ?? "Kakarut POS",
+      companyNama: company?.nama ?? auth?.company?.nama ?? "Terakasir",
       alamat: alamatStruk,
       telepon: teleponStruk,
       showAlamat,
@@ -186,7 +186,7 @@ export function ReceiptModal({
         >
           <div className="text-center">
             <div className="text-base font-bold">
-              {company?.nama ?? auth?.company?.nama ?? "Kakarut POS"}
+              {company?.nama ?? auth?.company?.nama ?? "Terakasir"}
             </div>
             {showAlamat && alamatStruk && <div>{alamatStruk}</div>}
             {showAlamat && teleponStruk && <div>Telp: {teleponStruk}</div>}

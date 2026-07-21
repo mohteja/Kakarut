@@ -82,8 +82,8 @@ export const authRoutes = new Hono<AppEnv>()
         try {
           await kirimEmail({
             to: email,
-            subject: "Reset password Kakarut",
-            html: `<p>Halo ${user.nama},</p><p>Ada permintaan atur ulang password akun Kakarut Anda. Klik tautan di bawah (berlaku 1 jam):</p><p><a href="${url}">Atur ulang password</a></p><p>Abaikan email ini bila Anda tidak meminta.</p>`,
+            subject: "Reset password Terakasir",
+            html: `<p>Halo ${user.nama},</p><p>Ada permintaan atur ulang password akun Terakasir Anda. Klik tautan di bawah (berlaku 1 jam):</p><p><a href="${url}">Atur ulang password</a></p><p>Abaikan email ini bila Anda tidak meminta.</p>`,
           });
         } catch {
           /* best-effort: jangan gagalkan permintaan bila email error */

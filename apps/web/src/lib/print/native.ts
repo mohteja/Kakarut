@@ -34,7 +34,7 @@ export function isNativeApp(): boolean {
 function plugin(): KakarutPrinterPlugin {
   const p = window.Capacitor?.Plugins?.KakarutPrinter;
   if (!isNativeApp() || !p) {
-    throw new Error("Fitur ini hanya tersedia di aplikasi Android Kakarut");
+    throw new Error("Fitur ini hanya tersedia di aplikasi Android Terakasir");
   }
   return p;
 }

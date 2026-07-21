@@ -152,7 +152,7 @@ if (existsSync(webDist)) {
 }
 
 serve({ fetch: app.fetch, port: env.PORT }, (info) => {
-  console.log(`Kakarut POS berjalan di http://localhost:${info.port}`);
+  console.log(`Terakasir berjalan di http://localhost:${info.port}`);
   console.log(`Mode penyimpanan upload: ${storage.mode}`);
   console.log(`Frontend: ${existsSync(webDist) ? "tersedia (dist)" : "belum di-build"}`);
 });

@@ -218,8 +218,8 @@ export const karyawanRoutes = new Hono<AppEnv>()
       const url = `${env.APP_BASE_URL}/daftar`;
       await kirimEmail({
         to: body.email,
-        subject: `Undangan bergabung ${co?.nama ?? "perusahaan"} di Kakarut`,
-        html: `<p>Anda diundang bergabung ke <b>${co?.nama ?? "sebuah perusahaan"}</b> di Kakarut.</p><p>Daftar dengan email ini untuk otomatis bergabung: <a href="${url}">${url}</a></p><p>Bila sudah punya akun, cukup login — undangan muncul untuk diterima.</p>`,
+        subject: `Undangan bergabung ${co?.nama ?? "perusahaan"} di Terakasir`,
+        html: `<p>Anda diundang bergabung ke <b>${co?.nama ?? "sebuah perusahaan"}</b> di Terakasir.</p><p>Daftar dengan email ini untuk otomatis bergabung: <a href="${url}">${url}</a></p><p>Bila sudah punya akun, cukup login — undangan muncul untuk diterima.</p>`,
       });
     } catch {
       /* abaikan kegagalan email */

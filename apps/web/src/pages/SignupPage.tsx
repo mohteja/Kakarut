@@ -45,7 +45,7 @@ export function SignupPage() {
         <div className="mb-6 text-center">
           <Logo className="mx-auto h-16 w-16 shadow-lg" />
           <h1 className="mt-3 text-2xl font-bold text-stone-800">Daftar Akun</h1>
-          <p className="text-sm text-stone-500">Buat akun untuk mulai memakai Kakarut POS</p>
+          <p className="text-sm text-stone-500">Buat akun untuk mulai memakai Terakasir</p>
         </div>
         <form onSubmit={onSubmit} className="space-y-4">
           <div>
