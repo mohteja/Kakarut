@@ -1,6 +1,11 @@
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { Layout } from "./components/Layout";
 import { useAuth } from "./context/AuthContext";
+import { LandingPage } from "./pages/publik/LandingPage";
+import { PrivasiPage } from "./pages/publik/PrivasiPage";
+import { SyaratPage } from "./pages/publik/SyaratPage";
+import { KontakPage } from "./pages/publik/KontakPage";
+import { BantuanPage } from "./pages/publik/BantuanPage";
 import { BranchProvider } from "./context/BranchContext";
 import { PrinterProvider } from "./context/PrinterContext";
 import { PrinterPage } from "./pages/pengaturan/PrinterPage";
@@ -59,6 +64,17 @@ import { TempatSampahPage } from "./pages/TempatSampahPage";
 
 export default function App() {
   const { auth } = useAuth();
+  const { pathname } = useLocation();
+
+  // Halaman publik (tanpa login) — dapat diakses siapa pun, termasuk reviewer
+  // App Store/Play Store & pengunjung umum. Didahulukan sebelum gerbang auth.
+  if (pathname === "/tentang") return <LandingPage />;
+  if (pathname === "/privasi") return <PrivasiPage />;
+  if (pathname === "/syarat") return <SyaratPage />;
+  if (pathname === "/kontak") return <KontakPage />;
+  if (pathname === "/bantuan") return <BantuanPage />;
+  // Root domain saat belum login → landing/marketing (situs utama).
+  if (!auth && pathname === "/") return <LandingPage />;
 
   if (!auth) {
     return (

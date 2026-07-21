@@ -81,6 +81,15 @@ export function LoginPage() {
             Daftar
           </Link>
         </p>
+        <div className="mt-6 flex flex-wrap justify-center gap-x-3 gap-y-1 border-t border-stone-100 pt-4 text-xs text-stone-400">
+          <Link to="/bantuan" className="hover:text-orange-600 hover:underline">Bantuan</Link>
+          <span>·</span>
+          <Link to="/kontak" className="hover:text-orange-600 hover:underline">Kontak</Link>
+          <span>·</span>
+          <Link to="/privasi" className="hover:text-orange-600 hover:underline">Kebijakan Privasi</Link>
+          <span>·</span>
+          <Link to="/syarat" className="hover:text-orange-600 hover:underline">Syarat &amp; Ketentuan</Link>
+        </div>
       </div>
     </div>
   );
