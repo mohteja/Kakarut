@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { Logo } from "./Logo";
 import { labelCabang, useBranch, useCabangData } from "../context/BranchContext";
 import { api } from "../lib/api";
 import { useCompanyMode } from "../lib/useCompanyMode";
@@ -166,6 +167,7 @@ export function Layout() {
         >
           ☰
         </button>
+        <Logo className="h-9 w-9 shrink-0" />
         <div className="min-w-0">
           <div className="truncate text-base font-bold text-stone-800">{namaPerusahaan}</div>
           <div className="truncate text-xs text-stone-500">{subJudul}</div>
@@ -189,9 +191,12 @@ export function Layout() {
         }`}
       >
         <div className="mb-6 flex items-start justify-between gap-2 px-2">
-          <div className="min-w-0">
-            <div className="truncate text-xl font-bold text-white">{namaPerusahaan}</div>
-            <div className="truncate text-xs text-stone-400">{subJudul}</div>
+          <div className="flex min-w-0 items-center gap-2.5">
+            <Logo className="h-10 w-10 shrink-0" />
+            <div className="min-w-0">
+              <div className="truncate text-xl font-bold text-white">{namaPerusahaan}</div>
+              <div className="truncate text-xs text-stone-400">{subJudul}</div>
+            </div>
           </div>
           {/* Tombol tutup — hanya mobile */}
           <button
