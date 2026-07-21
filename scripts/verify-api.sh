@@ -3673,6 +3673,33 @@ B_PT=$(jq -nc --arg r "$(uuid99)" --arg w "$NOW99" '{commands:[{client_ref:$r,ti
 cek "sync fase2: penerimaan_terima faktur asing → gagal 404" "V == 1" \
   "$(api "$OWNER" POST /sync "$B_PT" | jq '(.hasil[0].status=="gagal" and .hasil[0].kode==404)|if . then 1 else 0 end')"
 
+echo "== 100. Rate limiting (anti brute-force / abuse) =="
+# Login dibatasi per (IP + email), max 10 / 5 menit. 10 percobaan gagal untuk
+# email throwaway → percobaan ke-11 (email SAMA) diblokir 429.
+RLMAIL="ratelimit100@example.com"
+for _ in $(seq 1 10); do
+  curl -s -o /dev/null -X POST "$BASE/api/auth/login" -H 'Content-Type: application/json' \
+    -d "{\"email\":\"$RLMAIL\",\"password\":\"salah\"}"
+done
+cek "login ke-11 (email sama) diblokir 429" "V == 429" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/auth/login" \
+     -H 'Content-Type: application/json' -d "{\"email\":\"$RLMAIL\",\"password\":\"salah\"}")"
+# Bucket per email: email LAIN dari IP sama tetap diproses (401, bukan 429).
+cek "login email lain tetap diproses (bukan 429)" "V == 401" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/auth/login" \
+     -H 'Content-Type: application/json' -d '{"email":"ratelimit100-lain@example.com","password":"salah"}')"
+# Header Retry-After ikut dikirim saat 429.
+cek "respons 429 menyertakan header Retry-After" "V == 1" \
+  "$(curl -s -D - -o /dev/null -X POST "$BASE/api/auth/login" -H 'Content-Type: application/json' \
+     -d "{\"email\":\"$RLMAIL\",\"password\":\"salah\"}" | grep -ci '^retry-after:')"
+# Endpoint lain tidak ikut terdampak bucket login → mode tamu tetap 200.
+cek "mode tamu tetap berfungsi (200) di tengah rate-limit login" "V == 200" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/auth/guest" \
+     -H 'Content-Type: application/json' -d '{"peran":"owner"}')"
+# Owner sah TIDAK terpengaruh (email berbeda dari yang di-spam) → login sukses.
+cek "login owner sah tetap sukses (bucket email terpisah)" "V == 1" \
+  "$([ -n "$(login "$OWNER_EMAIL" "$OWNER_PASS")" ] && echo 1 || echo 0)"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

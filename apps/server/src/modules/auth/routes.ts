@@ -9,6 +9,12 @@ import { env } from "../../config/env";
 import { db } from "../../db/client";
 import { companies, passwordResetTokens, users } from "../../db/schema";
 import { requireAuth, type AppEnv } from "../../middleware/auth";
+import {
+  emailDariBody,
+  ipKlien,
+  lewatiRateLimit,
+  rateLimit,
+} from "../../middleware/rateLimit";
 import { emailTerkonfigurasi, kirimEmail } from "../mail/service";
 import { autoTerimaUndanganEmail } from "../onboarding/service";
 import { GUEST } from "../../seed/guest";
@@ -28,8 +34,66 @@ const RegisterSchema = z.object({
   password: z.string().min(8, "Password minimal 8 karakter"),
 });
 
+// ---------------------------------------------------------------------------
+// Rate limiting endpoint publik (anti brute-force / abuse). Batas dipilih longgar
+// untuk manusia normal, tetapi memblokir skrip yang menghajar berulang-ulang.
+// `rl(...)` mematuhi sakelar env RATE_LIMIT_ENABLED (default aktif).
+// ---------------------------------------------------------------------------
+const rl = (mw: ReturnType<typeof rateLimit>) =>
+  env.RATE_LIMIT_ENABLED ? mw : lewatiRateLimit;
+
+/** Login: batasi per (IP + email) → tebak-password satu akun cepat mentok. */
+const batasLogin = rl(
+  rateLimit({
+    windowMs: 5 * 60_000,
+    max: 10,
+    key: async (c) => `login:${ipKlien(c)}:${await emailDariBody(c)}`,
+    message: "Terlalu banyak percobaan masuk — coba lagi beberapa menit lagi.",
+  }),
+);
+
+/** Daftar akun: batasi per IP (bcrypt + tulis DB → mahal bila di-spam). */
+const batasRegister = rl(
+  rateLimit({
+    windowMs: 60 * 60_000,
+    max: 20,
+    key: (c) => `register:${ipKlien(c)}`,
+    message: "Terlalu banyak pendaftaran dari perangkat ini — coba lagi nanti.",
+  }),
+);
+
+/** Masuk tamu: batasi per IP (bikin sesi + query berulang). */
+const batasTamu = rl(
+  rateLimit({
+    windowMs: 5 * 60_000,
+    max: 30,
+    key: (c) => `guest:${ipKlien(c)}`,
+    message: "Terlalu banyak permintaan mode tamu — coba lagi sebentar.",
+  }),
+);
+
+/** Lupa password: batasi per (IP + email) → cegah bom email ke korban. */
+const batasLupa = rl(
+  rateLimit({
+    windowMs: 15 * 60_000,
+    max: 6,
+    key: async (c) => `forgot:${ipKlien(c)}:${await emailDariBody(c)}`,
+    message: "Terlalu banyak permintaan reset — coba lagi beberapa menit lagi.",
+  }),
+);
+
+/** Atur ulang password: batasi per IP → cegah tebak token brute-force. */
+const batasReset = rl(
+  rateLimit({
+    windowMs: 15 * 60_000,
+    max: 20,
+    key: (c) => `reset:${ipKlien(c)}`,
+    message: "Terlalu banyak percobaan — coba lagi beberapa menit lagi.",
+  }),
+);
+
 export const authRoutes = new Hono<AppEnv>()
-  .post("/login", zValidator("json", LoginSchema), async (c) => {
+  .post("/login", batasLogin, zValidator("json", LoginSchema), async (c) => {
     const { email, password } = c.req.valid("json");
     const [user] = await db.select().from(users).where(eq(users.email, email));
     if (
@@ -49,6 +113,7 @@ export const authRoutes = new Hono<AppEnv>()
   // geofence → absen bebas). Data bersifat sandbox bersama.
   .post(
     "/guest",
+    batasTamu,
     zValidator("json", z.object({ peran: z.enum(["owner", "kasir"]) })),
     async (c) => {
       const { peran } = c.req.valid("json");
@@ -63,7 +128,7 @@ export const authRoutes = new Hono<AppEnv>()
   // Daftar akun sendiri (self sign-up). Membuat user TANPA perusahaan; bila ada
   // undangan pending untuk email ini, langsung auto-join (mereka set password
   // sendiri saat daftar). Selesai → langsung login (kembalikan sesi).
-  .post("/register", zValidator("json", RegisterSchema), async (c) => {
+  .post("/register", batasRegister, zValidator("json", RegisterSchema), async (c) => {
     const { nama, email, password } = c.req.valid("json");
     const [existing] = await db.select({ id: users.id }).from(users).where(eq(users.email, email));
     if (existing) {
@@ -83,6 +148,7 @@ export const authRoutes = new Hono<AppEnv>()
   // dev/setup — di produksi tak pernah dibocorkan).
   .post(
     "/forgot-password",
+    batasLupa,
     zValidator("json", z.object({ email: z.string().trim().toLowerCase().email() })),
     async (c) => {
       const { email } = c.req.valid("json");
@@ -115,6 +181,7 @@ export const authRoutes = new Hono<AppEnv>()
   // Reset password dengan token dari email.
   .post(
     "/reset-password",
+    batasReset,
     zValidator(
       "json",
       z.object({
