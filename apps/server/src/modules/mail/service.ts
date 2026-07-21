@@ -33,7 +33,7 @@ export async function emailTerkonfigurasi(): Promise<boolean> {
 
 function fromHeader(row: SmtpRow | null): string {
   const email = row?.senderEmail || "onboarding@resend.dev";
-  const nama = row?.senderName || "Kakarut";
+  const nama = row?.senderName || "Terakasir";
   return `${nama} <${email}>`;
 }
 

@@ -18,6 +18,7 @@ import { pastikanSuperAdmin } from "./modules/auth/superadmin";
 import { konfirmasiProduksiCkLokalTertahan } from "./modules/produksi/backfill";
 import { backfillNomorDokumen } from "./modules/dokumen/nomor";
 import { terapkanSemuaKonsumsiOtomatis } from "./modules/perlengkapan/service";
+import { provisionGuest } from "./seed/guest";
 import {
   backfillRakPerlengkapanKeSli,
   backfillRakSimpanKeSli,
@@ -99,6 +100,13 @@ try {
   console.warn("Gagal memastikan super admin:", e instanceof Error ? e.message : String(e));
 }
 
+// Akun & perusahaan TAMU (guest mode) untuk uji coba bersama — idempoten.
+try {
+  await provisionGuest(db);
+} catch (e) {
+  console.warn("Gagal memprovisi akun tamu:", e instanceof Error ? e.message : String(e));
+}
+
 const app = createApp();
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -152,7 +160,7 @@ if (existsSync(webDist)) {
 }
 
 serve({ fetch: app.fetch, port: env.PORT }, (info) => {
-  console.log(`Kakarut POS berjalan di http://localhost:${info.port}`);
+  console.log(`Terakasir berjalan di http://localhost:${info.port}`);
   console.log(`Mode penyimpanan upload: ${storage.mode}`);
   console.log(`Frontend: ${existsSync(webDist) ? "tersedia (dist)" : "belum di-build"}`);
 });

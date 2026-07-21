@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { btnPrimary, inputClass } from "../components/ui";
+import { Logo } from "../components/Logo";
 import { useAuth } from "../context/AuthContext";
 
 /**
@@ -42,9 +43,9 @@ export function SignupPage() {
     <div className="flex min-h-screen items-center justify-center bg-stone-900 p-4">
       <div className="w-full max-w-sm rounded-2xl bg-white p-8 shadow-2xl">
         <div className="mb-6 text-center">
-          <div className="text-3xl">🍜</div>
-          <h1 className="mt-2 text-2xl font-bold text-stone-800">Daftar Akun</h1>
-          <p className="text-sm text-stone-500">Buat akun untuk mulai memakai Kakarut POS</p>
+          <Logo className="mx-auto h-16 w-16 shadow-lg" />
+          <h1 className="mt-3 text-2xl font-bold text-stone-800">Daftar Akun</h1>
+          <p className="text-sm text-stone-500">Buat akun untuk mulai memakai Terakasir</p>
         </div>
         <form onSubmit={onSubmit} className="space-y-4">
           <div>

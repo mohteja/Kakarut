@@ -1,4 +1,4 @@
-# Kakarut POS — SaaS POS untuk Bisnis F&B
+# Terakasir — SaaS POS untuk Bisnis F&B
 
 Platform POS (point of sale) **multi-tenant** untuk bisnis F&B: banyak perusahaan,
 banyak cabang, dengan mesin **HPP (harga pokok penjualan)** berbasis resep,

@@ -5,7 +5,7 @@
 > dijadikan acuan. Untuk tim mobile Flutter, pakai **kontrak API** di
 > `docs/API-CONTRACT.md`.
 
-# Prompt: Bangun Aplikasi Android Kakarut POS (Capacitor + Printer Bluetooth Native)
+# Prompt: Bangun Aplikasi Android Terakasir (Capacitor + Printer Bluetooth Native)
 
 > Salin SELURUH isi di bawah garis ini, lalu tempel ke sesi Claude Code di
 > komputer lokal Anda (repo `mohteja/Kakarut` ter-clone, Android Studio terpasang).
@@ -13,7 +13,7 @@
 
 ---
 
-Kamu bekerja di repo **Kakarut POS** — SaaS POS F&B multi-tenant (bahasa UI:
+Kamu bekerja di repo **Terakasir** — SaaS POS F&B multi-tenant (bahasa UI:
 Indonesia). Tugasmu: membuat **aplikasi Android** memakai **Capacitor** yang
 membungkus web app produksi, plus **plugin printer Bluetooth klasik (SPP)
 native** supaya printer thermal murah langsung jalan dari aplikasi — tanpa
@@ -180,7 +180,7 @@ Ikuti gaya kode sekitar (komentar bahasa Indonesia, pola yang sudah ada).
    const APP_URL = "https://GANTI-DOMAIN-ANDA";
    const config: CapacitorConfig = {
      appId: "id.basooopa.kakarut",
-     appName: "Kakarut POS",
+     appName: "Terakasir",
      webDir: "www",
      server: { url: APP_URL, cleartext: false },
    };
@@ -214,7 +214,7 @@ Ikuti gaya kode sekitar (komentar bahasa Indonesia, pola yang sudah ada).
 
 4. **Ikon & splash**: buat `mobile/assets/icon.png` 1024×1024 sederhana (latar
    oranye `#f97316`, huruf “K” putih tebal) + `splash.png`, generate dengan
-   `@capacitor/assets`. Nama aplikasi: **Kakarut POS**.
+   `@capacitor/assets`. Nama aplikasi: **Terakasir**.
 
 5. **`mobile/README.md`** ringkas: prasyarat, `npm install`,
    `npx cap sync android`, buka Android Studio / `./gradlew assembleDebug`,

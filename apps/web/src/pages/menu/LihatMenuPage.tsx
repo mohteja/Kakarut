@@ -40,7 +40,7 @@ export function LihatMenuPage() {
   const { auth } = useAuth();
   const { branchQuery, divisi } = useBranch();
   const queryClient = useQueryClient();
-  const namaPerusahaan = auth?.company?.nama ?? "Kakarut POS";
+  const namaPerusahaan = auth?.company?.nama ?? "Terakasir";
 
   // Menu per lokasi: tampilkan hanya menu yang tersedia di cabang aktif.
   // Kantor = pusat: katalog PENUH (menu terbatas lokasi tidak boleh hilang).

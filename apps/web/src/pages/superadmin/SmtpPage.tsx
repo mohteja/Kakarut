@@ -15,9 +15,9 @@ import { api } from "../../lib/api";
 
 const DEFAULT_TEST_HTML = `<div style="font-family:system-ui,-apple-system,sans-serif;line-height:1.6;color:#1c1917;max-width:520px">
   <h2 style="margin:0 0 8px">Halo 👋</h2>
-  <p>Ini email percobaan dari <b>Kakarut POS</b>.</p>
+  <p>Ini email percobaan dari <b>Terakasir</b>.</p>
   <p>Bila Anda menerima email ini, konfigurasi SMTP sudah benar. 🎉</p>
-  <p style="color:#78716c;font-size:13px">— Tim Kakarut</p>
+  <p style="color:#78716c;font-size:13px">— Tim Terakasir</p>
 </div>`;
 
 interface FormState {
@@ -46,7 +46,7 @@ export function SmtpPage() {
   const [form, setForm] = useState<FormState | null>(null);
   // Test email: tujuan, subjek, & isi (HTML) bisa diedit + dipratinjau.
   const [testTo, setTestTo] = useState("");
-  const [testSubject, setTestSubject] = useState("Email percobaan Kakarut");
+  const [testSubject, setTestSubject] = useState("Email percobaan Terakasir");
   const [testHtml, setTestHtml] = useState(DEFAULT_TEST_HTML);
   useEffect(() => {
     if (data && form === null) {
@@ -193,7 +193,7 @@ export function SmtpPage() {
               <input
                 value={form.sender_name}
                 onChange={(e) => setForm({ ...form, sender_name: e.target.value })}
-                placeholder="Kakarut"
+                placeholder="Terakasir"
                 className={inputClass}
               />
             </div>
