@@ -14,6 +14,7 @@ import { backfillKodeBahan } from "./modules/bahan/kode";
 import { backfillUnits } from "./modules/satuan/service";
 import { backfillKategoriBahan } from "./modules/kategori-bahan/service";
 import { arsipkanMembershipNonaktif, backfillEmployeeCode } from "./modules/users/service";
+import { pastikanSuperAdmin } from "./modules/auth/superadmin";
 import { konfirmasiProduksiCkLokalTertahan } from "./modules/produksi/backfill";
 import { backfillNomorDokumen } from "./modules/dokumen/nomor";
 import { terapkanSemuaKonsumsiOtomatis } from "./modules/perlengkapan/service";
@@ -85,6 +86,17 @@ if (env.AUTO_MIGRATE) {
   const rakPerlengkapan = await backfillRakPerlengkapanKeSli(db);
   if (rakPerlengkapan > 0)
     console.log(`Rak perlengkapan lama dipindah ke Tempat Penyimpanan: ${rakPerlengkapan} item.`);
+}
+
+// Pastikan ada super admin platform (aman & idempoten — tidak menghapus data).
+// Deployment yang belum pernah di-seed pun otomatis punya akun super admin dari
+// SEED_SUPERADMIN_EMAIL/PASSWORD. Kegagalan tak boleh menggagalkan boot.
+try {
+  if (await pastikanSuperAdmin(db)) {
+    console.log(`Super admin dibuat otomatis: ${env.SEED_SUPERADMIN_EMAIL} (segera ganti password).`);
+  }
+} catch (e) {
+  console.warn("Gagal memastikan super admin:", e instanceof Error ? e.message : String(e));
 }
 
 const app = createApp();
