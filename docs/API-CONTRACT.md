@@ -83,7 +83,9 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
   `central_kitchen`** (`izinkanManajemenAtauKaryawanCk`; selain itu 403)
 - `/laporan/*`, `/rekomendasi/*`, `/sampah/*`, `/karyawan/*`, `/customer/*` →
   `requireRole("owner","admin")`
-- `/shift/*`, `/open-bill/*` → `requireRole("cashier")`
+- `/open-bill/*` → `requireRole("cashier")`
+- `/shift/*` → `requireRole("owner","admin","cashier")` (BACA dibuka untuk
+  owner/admin; **buka/tutup** digerbang `requireRole("cashier")` per-rute)
 - `/absensi/*` → `requireRole("owner","admin","cashier","tim")`
 - Modul tenant lain → semua anggota perusahaan yang login (owner/admin/cashier/
   tim), dengan `requireRole(...)` per-rute & pemeriksaan kunci-cabang seperti
@@ -155,10 +157,10 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 
 ## `/api/cabang` — Cabang (`modules/branches/routes.ts`)
 
-- `GET /api/cabang` — [any] — res: array `{ id, nama, alamat, telepon, tipe, central_kitchen_id, receipt_footer, receipt_show_alamat, latitude, longitude, radius_absen_m, is_active }`
+- `GET /api/cabang` — [any] — res: array `{ id, nama, alamat, telepon, tipe, central_kitchen_id, receipt_footer, receipt_show_alamat, latitude, longitude, radius_absen_m, jam_buka: string|null, jam_tutup: string|null, is_active }` — `jam_*` = jam operasional "HH:MM"
 - `PUT /api/cabang/struk` — [owner/admin/cashier] — query: `branch_id` (owner/admin; cashier terkunci) — req: `{ receipt_footer?|null (max 200), receipt_show_alamat?: bool }` — res: `{ ok: true }` — error: **404**
-- `POST /api/cabang` — [owner/admin] — req `CabangBody`: `{ nama: string, alamat?|null, telepon?|null, tipe?: "store"|"central_kitchen"|"kantor", central_kitchen_id?: uuid|null, receipt_footer?|null (max200), receipt_show_alamat?: bool, latitude?: number(-90..90)|null, longitude?: number(-180..180)|null, radius_absen_m?: int(10..10000), is_active?: bool }` — res: **201** `{ id, nama }` — error: **400** (Lite maks 1 cabang / CK invalid), **409** nama ada
-- `PATCH /api/cabang/:id` — [owner/admin] — req: `CabangBody` (semua field parsial) — res: `{ ok: true }` — error: **400** CK invalid, **404**
+- `POST /api/cabang` — [owner/admin] — req `CabangBody`: `{ nama: string, alamat?|null, telepon?|null, tipe?: "store"|"central_kitchen"|"kantor", central_kitchen_id?: uuid|null, receipt_footer?|null (max200), receipt_show_alamat?: bool, latitude?: number(-90..90)|null, longitude?: number(-180..180)|null, radius_absen_m?: int(10..10000), jam_buka?: string(HH:MM atau "")|null, jam_tutup?: string(HH:MM atau "")|null, is_active?: bool }` — res: **201** `{ id, nama }` — error: **400** (Lite maks 1 cabang / CK invalid / format jam bukan HH:MM), **409** nama ada
+- `PATCH /api/cabang/:id` — [owner/admin] — req: `CabangBody` (semua field parsial; termasuk `jam_buka`/`jam_tutup` untuk mengatur jam operasional) — res: `{ ok: true }` — error: **400** CK invalid / format jam salah, **404**
 
 ## `/api/customer` — Member/pelanggan (`modules/customer/routes.ts`) — group guard **[owner/admin]**
 
@@ -294,12 +296,19 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 - `PUT /api/open-bill/:id` — req: `BillBody` — res: `OpenBillDetail` — error: **400**, **404**
 - `DELETE /api/open-bill/:id` — res: `{ ok: true }` — error: **404**
 
-## `/api/shift` — Shift kasir (`modules/shift/routes.ts`) — group guard **[cashier only]**
+## `/api/shift` — Shift kasir (`modules/shift/routes.ts`) — group guard **[owner/admin/cashier]** (buka/tutup **cashier only**)
 
-- `GET /api/shift/aktif` — query: `branch_id?` — res: `Shift | null` (shift terbuka + rekap live)
-- `GET /api/shift` — query: `branch_id?` — res: `Shift[]` (shift tertutup, maks 50)
-- `POST /api/shift/buka` — req: `{ modal_awal: number(≥0)=0 }` — res: **201** `Shift` — error: **400** shift sudah terbuka **atau kasir belum absen masuk hari ini** (pesan: "Absen masuk dulu sebelum buka kasir"), **403** luar cabang
-- `POST /api/shift/tutup` — req: `{ uang_fisik: number(≥0), catatan?|null }` — res: `Shift` — error: **400** tak ada shift terbuka
+- `GET /api/shift/aktif` — [owner/admin/cashier] — query: `branch_id?` — res: `Shift | null` (shift terbuka + rekap live)
+- `GET /api/shift/pantau` — **[owner/admin]** — res: `ShiftPantauRow[]` — pantau operasional SEMUA cabang store: status kasir + rekap **hari ini** (zona waktu perusahaan) + jam operasional + tanda telat buka/lupa tutup
+- `GET /api/shift` — [owner/admin/cashier] — query: `branch_id?` — res: `Shift[]` (shift tertutup, maks 50)
+- `GET /api/shift/:id` — [owner/admin/cashier; cashier terkunci cabangnya] — res: `ShiftDetail` (= `Shift` + `transaksi: ShiftTransaksiRow[]`, maks 300, urut waktu desc) — error: **403** shift bukan cabang kasir, **404**
+- `POST /api/shift/buka` — **[cashier]** — req: `{ modal_awal: number(≥0)=0 }` — res: **201** `Shift` — error: **400** shift sudah terbuka **atau kasir belum absen masuk hari ini** (pesan: "Absen masuk dulu sebelum buka kasir"), **403** luar cabang
+- `POST /api/shift/tutup` — **[cashier]** — req: `{ uang_fisik: number(≥0), catatan?|null }` — res: `Shift` — error: **400** tak ada shift terbuka
+
+> **Tipe baru (shared):**
+> - `ShiftTransaksiRow`: `{ id, nomor, waktu (ISO), total, metode: "tunai"|"qris"|"transfer", kasir: string|null }`
+> - `ShiftDetail extends Shift`: `{ ...Shift, transaksi: ShiftTransaksiRow[] }`
+> - `ShiftPantauRow`: `{ branch_id, branch_nama, jam_buka: string|null, jam_tutup: string|null, shift_id: string|null, dibuka_oleh: string|null, dibuka_pada: string|null (ISO), modal_awal: number|null, penjualan_tunai, penjualan_nontunai, jumlah_transaksi, kas_sistem, buka_hari_ini: bool, telat_buka: bool, lupa_tutup: bool }` — `penjualan_*` = total HARI INI; meta `dibuka_*`/`modal_awal` hanya terisi bila kasir sedang terbuka.
 
 > **Gerbang Buka Kasir (penting untuk mobile):** transaksi POS (`POST /api/penjualan`)
 > HANYA jalan bila ada shift **terbuka** di cabang. Sebelum layar kasir bisa
