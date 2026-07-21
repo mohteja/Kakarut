@@ -3716,6 +3716,23 @@ cek "print/lan → ::ffff:127.0.0.1 (bypass lama) ditolak 400" "V == 400" "$(ssr
 cek "print/lan → metadata 169.254.169.254 ditolak 400" "V == 400" "$(ssrf_code 169.254.169.254)"
 cek "print/lan → 0.0.0.0 ditolak 400" "V == 400" "$(ssrf_code 0.0.0.0)"
 
+echo "== 102. Path-param sinkron wajib UUID (cegah manipulasi jalur) =="
+# faktur_id/supply_id di-interpolasi ke URL sub-request → wajib UUID valid.
+# Nilai jahat (path traversal / bukan UUID) → item gagal 400 SEBELUM dispatch.
+SYNC_BAD_FT=$(jq -nc --arg r "$(uuid99)" --arg w "$NOW99" \
+  '{commands:[{client_ref:$r,tipe:"faktur_tahap",waktu:$w,payload:{jalur:"pembelian",faktur_id:"../../admin/sistem",ke:"dikerjakan"}}]}')
+cek "sync: faktur_id non-UUID (path traversal) → gagal 400" "V == 1" \
+  "$(api "$OWNER" POST /sync "$SYNC_BAD_FT" | jq '(.hasil[0].status=="gagal" and .hasil[0].kode==400)|if . then 1 else 0 end')"
+SYNC_BAD_SP=$(jq -nc --arg r "$(uuid99)" --arg w "$NOW99" \
+  '{commands:[{client_ref:$r,tipe:"perlengkapan_pakai",waktu:$w,payload:{supply_id:"bukan-uuid",qty:1}}]}')
+cek "sync: supply_id non-UUID → gagal 400" "V == 1" \
+  "$(api "$OWNER" POST /sync "$SYNC_BAD_SP" | jq '(.hasil[0].status=="gagal" and .hasil[0].kode==400)|if . then 1 else 0 end')"
+# UUID v4 valid (tapi faktur tak ada) TETAP lolos validasi → dispatch → 404 dari handler asli.
+SYNC_OK_UUID=$(jq -nc --arg r "$(uuid99)" --arg w "$NOW99" \
+  '{commands:[{client_ref:$r,tipe:"penerimaan_terima",waktu:$w,payload:{faktur_id:"11111111-1111-4111-8111-111111111111"}}]}')
+cek "sync: faktur_id UUID valid → lolos validasi, dispatch (404 dari handler)" "V == 1" \
+  "$(api "$OWNER" POST /sync "$SYNC_OK_UUID" | jq '(.hasil[0].status=="gagal" and .hasil[0].kode==404)|if . then 1 else 0 end')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

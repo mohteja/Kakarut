@@ -116,7 +116,16 @@ async function panggilInternal(
   return { kode: res.status, data };
 }
 
-/** Pisahkan path-param wajib dari payload; sisanya jadi body request. */
+const UUID = z.string().uuid();
+
+/**
+ * Pisahkan path-param wajib dari payload; sisanya jadi body request.
+ *
+ * Path-param di-interpolasi ke URL sub-request internal, jadi kunci ber-akhiran
+ * `_id` (faktur_id/supply_id — konvensi UUID di seluruh skema) WAJIB UUID valid.
+ * Tanpa ini, nilai jahat (mis. berisi `/` atau `..`) bisa mengubah jalur yang
+ * dituju. Kunci non-`_id` (mis. `jalur`) divalidasi terpisah oleh pemanggil.
+ */
 function pisahParam<T extends string>(
   payload: unknown,
   kunci: readonly T[],
@@ -128,6 +137,9 @@ function pisahParam<T extends string>(
     const v = p[k];
     if (typeof v !== "string" || !v) {
       throw new HTTPException(400, { message: `Field '${k}' wajib pada payload perintah` });
+    }
+    if (k.endsWith("_id") && !UUID.safeParse(v).success) {
+      throw new HTTPException(400, { message: `Field '${k}' harus berupa UUID valid` });
     }
     params[k] = v;
     delete body[k];
