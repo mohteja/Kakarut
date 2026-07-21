@@ -421,6 +421,13 @@
       "when": 1784556983040,
       "tag": "0059_wooden_sasquatch",
       "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1784604663342,
+      "tag": "0060_flaky_gressill",
+      "breakpoints": true
     }
   ]
 }

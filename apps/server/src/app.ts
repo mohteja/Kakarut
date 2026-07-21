@@ -27,6 +27,7 @@ import { satuanRoutes } from "./modules/satuan/routes";
 import { laporanRoutes } from "./modules/laporan/routes";
 import { mejaRoutes } from "./modules/meja/routes";
 import { menuRoutes } from "./modules/menu/routes";
+import { onboardingRoutes } from "./modules/onboarding/routes";
 import { openBillRoutes } from "./modules/open-bill/routes";
 import { penjualanRoutes } from "./modules/penjualan/routes";
 import { penyimpananRoutes } from "./modules/penyimpanan/routes";
@@ -57,6 +58,9 @@ export function createApp() {
       return c.json({ ok: true, storage: getStorage().mode, build: getBuildId() });
     })
     .route("/auth", authRoutes)
+    // Onboarding + lifecycle akun (butuh login, TIDAK butuh perusahaan):
+    // status, buat perusahaan sendiri, terima/tolak undangan, hapus akun.
+    .route("/onboarding", onboardingRoutes)
     // Platform super-admin
     .use("/admin/*", requireAuth, requireSuperAdmin)
     .route("/admin/tenants", adminTenantsRoutes)

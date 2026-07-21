@@ -1,13 +1,16 @@
+import { randomBytes } from "node:crypto";
 import { zValidator } from "@hono/zod-validator";
 import bcrypt from "bcryptjs";
 import { and, asc, desc, eq, inArray, isNotNull, isNull, ne } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
+import type { UndanganKaryawanRow } from "@kakarut/shared";
 import { db } from "../../db/client";
 import {
   branches,
   fakturLogs,
+  invitations,
   memberships,
   storageLocationPetugas,
   storageLocations,
@@ -26,6 +29,13 @@ const KaryawanBody = z.object({
 
 /** kasir & tim terikat ke satu cabang — wajib punya lokasi kerja */
 const WAJIB_CABANG = new Set(["cashier", "tim"]);
+
+/** Undang karyawan via email (alur "menunggu diundang" — tanpa buat password). */
+const UndangBody = z.object({
+  email: z.string().trim().toLowerCase().email("Email tidak valid"),
+  role: z.enum(["owner", "admin", "cashier", "tim"]),
+  branch_id: z.string().uuid().nullish(),
+});
 
 const PatchKaryawanBody = z.object({
   nama: z.string().trim().min(1).optional(),
@@ -137,6 +147,111 @@ export const karyawanRoutes = new Hono<AppEnv>()
       }
     }
     return c.json(result!, 201);
+  })
+  /**
+   * UNDANG karyawan via email (alur "menunggu diundang"): buat undangan
+   * PENDING. Saat email itu daftar / login lalu menerima, membership otomatis
+   * dibuat. Tak perlu set password (mereka set sendiri saat daftar).
+   */
+  .post("/undang", zValidator("json", UndangBody), async (c) => {
+    const auth = c.get("auth");
+    const body = c.req.valid("json");
+    if (body.role === "owner" && auth.role !== "owner") {
+      throw new HTTPException(403, { message: "Hanya owner yang boleh mengundang owner" });
+    }
+    if (WAJIB_CABANG.has(body.role)) {
+      if (!body.branch_id) {
+        throw new HTTPException(400, { message: "Kasir/Tim wajib punya cabang" });
+      }
+      const cb = await pastikanCabangMilikPerusahaan(body.branch_id, auth.company_id!);
+      pastikanPeranCocokCabang(body.role, cb.tipe);
+    }
+    // sudah jadi karyawan aktif perusahaan ini?
+    const [aktif] = await db
+      .select({ id: memberships.id })
+      .from(memberships)
+      .innerJoin(users, eq(memberships.userId, users.id))
+      .where(
+        and(
+          eq(memberships.companyId, auth.company_id!),
+          eq(users.email, body.email),
+          isNull(memberships.archivedAt),
+        ),
+      );
+    if (aktif) {
+      throw new HTTPException(409, { message: `${body.email} sudah jadi karyawan aktif` });
+    }
+    // sudah ada undangan pending?
+    const [pending] = await db
+      .select({ id: invitations.id })
+      .from(invitations)
+      .where(
+        and(
+          eq(invitations.companyId, auth.company_id!),
+          eq(invitations.email, body.email),
+          eq(invitations.status, "pending"),
+        ),
+      );
+    if (pending) {
+      throw new HTTPException(409, { message: `${body.email} sudah diundang (menunggu diterima)` });
+    }
+    const [inv] = await db
+      .insert(invitations)
+      .values({
+        companyId: auth.company_id!,
+        email: body.email,
+        role: body.role,
+        branchId: WAJIB_CABANG.has(body.role) ? body.branch_id : (body.branch_id ?? null),
+        token: randomBytes(24).toString("hex"),
+        invitedBy: auth.sub,
+      })
+      .returning({ id: invitations.id });
+    return c.json({ id: inv.id, email: body.email, role: body.role }, 201);
+  })
+  /** Daftar undangan PENDING perusahaan (yang belum diterima). */
+  .get("/undangan", async (c) => {
+    const auth = c.get("auth");
+    const rows = await db
+      .select({
+        id: invitations.id,
+        email: invitations.email,
+        role: invitations.role,
+        cabang_nama: branches.nama,
+        status: invitations.status,
+        diundang_pada: invitations.createdAt,
+      })
+      .from(invitations)
+      .leftJoin(branches, eq(invitations.branchId, branches.id))
+      .where(
+        and(eq(invitations.companyId, auth.company_id!), eq(invitations.status, "pending")),
+      )
+      .orderBy(desc(invitations.createdAt));
+    const dto: UndanganKaryawanRow[] = rows.map((r) => ({
+      id: r.id,
+      email: r.email,
+      role: r.role,
+      cabang_nama: r.cabang_nama,
+      status: r.status,
+      diundang_pada: r.diundang_pada.toISOString(),
+    }));
+    return c.json(dto);
+  })
+  /** Batalkan undangan pending. */
+  .delete("/undangan/:id", async (c) => {
+    const auth = c.get("auth");
+    const [row] = await db
+      .update(invitations)
+      .set({ status: "revoked" })
+      .where(
+        and(
+          eq(invitations.id, c.req.param("id")),
+          eq(invitations.companyId, auth.company_id!),
+          eq(invitations.status, "pending"),
+        ),
+      )
+      .returning({ id: invitations.id });
+    if (!row) throw new HTTPException(404, { message: "Undangan tidak ditemukan" });
+    return c.json({ ok: true });
   })
   /**
    * Riwayat KEGIATAN satu karyawan: semua log faktur yang ia lakukan (buat

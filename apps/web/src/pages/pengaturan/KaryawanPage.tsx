@@ -13,7 +13,7 @@ import {
   tdClass,
   thClass,
 } from "../../components/ui";
-import type { AktivitasRow, KaryawanTempatDto } from "@kakarut/shared";
+import type { AktivitasRow, KaryawanTempatDto, UndanganKaryawanRow } from "@kakarut/shared";
 import { labelCabang, useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatTanggalRingkas, formatWaktu } from "../../lib/format";
@@ -216,8 +216,18 @@ export function KaryawanPage() {
     queryKey: ["karyawan", "arsip"],
     queryFn: () => api<Karyawan[]>("/karyawan?arsip=true"),
   });
+  // undangan pending (alur "menunggu diundang") + form undang via email
+  const { data: undangan = [] } = useQuery({
+    queryKey: ["undangan"],
+    queryFn: () => api<UndanganKaryawanRow[]>("/karyawan/undangan"),
+  });
   const [tab, setTab] = useState<"aktif" | "arsip">("aktif");
   const [form, setForm] = useState<FormState | null>(null);
+  const [undangForm, setUndangForm] = useState<{
+    email: string;
+    role: FormState["role"];
+    branch_id: string;
+  } | null>(null);
   // Modal QR karyawan (untuk absensi) + data URL QR yang digenerate
   const [qrFor, setQrFor] = useState<Karyawan | null>(null);
   const [qrUrl, setQrUrl] = useState<string | null>(null);
@@ -278,6 +288,27 @@ export function KaryawanPage() {
     },
   });
 
+  const undang = useMutation({
+    mutationFn: (f: { email: string; role: FormState["role"]; branch_id: string }) =>
+      api("/karyawan/undang", {
+        method: "POST",
+        body: {
+          email: f.email,
+          role: f.role,
+          branch_id: WAJIB_CABANG.has(f.role) ? f.branch_id : f.branch_id || null,
+        },
+      }),
+    onSuccess: () => {
+      setUndangForm(null);
+      queryClient.invalidateQueries({ queryKey: ["undangan"] });
+    },
+  });
+
+  const batalUndangan = useMutation({
+    mutationFn: (id: string) => api(`/karyawan/undangan/${id}`, { method: "DELETE" }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["undangan"] }),
+  });
+
   function onSubmit(e: FormEvent) {
     e.preventDefault();
     if (!form) return;
@@ -303,20 +334,30 @@ export function KaryawanPage() {
     <div className="max-w-4xl">
       <PageTitle
         aksi={
-          <button
-            onClick={() =>
-              setForm({
-                nama: "",
-                email: "",
-                password: "",
-                role: "cashier",
-                branch_id: cabang[0]?.id ?? "",
-              })
-            }
-            className={btnPrimary}
-          >
-            + Tambah Karyawan
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={() =>
+                setUndangForm({ email: "", role: "cashier", branch_id: storeDefault })
+              }
+              className={btnSecondary}
+            >
+              📨 Undang
+            </button>
+            <button
+              onClick={() =>
+                setForm({
+                  nama: "",
+                  email: "",
+                  password: "",
+                  role: "cashier",
+                  branch_id: cabang[0]?.id ?? "",
+                })
+              }
+              className={btnPrimary}
+            >
+              + Tambah Karyawan
+            </button>
+          </div>
         }
       >
         Karyawan
@@ -471,6 +512,130 @@ export function KaryawanPage() {
         </table>
       </Card>
       )}
+
+      {/* Undangan yang masih menunggu diterima (alur "menunggu diundang") */}
+      {tab === "aktif" && undangan.length > 0 && (
+        <Card className="mt-4 p-4">
+          <h2 className="mb-1 font-bold text-stone-800">📨 Undangan Tertunda ({undangan.length})</h2>
+          <p className="mb-3 text-sm text-stone-500">
+            Menunggu orang ini mendaftar / menerima undangan. Saat diterima, ia otomatis jadi
+            karyawan.
+          </p>
+          <div className="space-y-2">
+            {undangan.map((u) => (
+              <div
+                key={u.id}
+                className="flex items-center justify-between gap-2 rounded-lg border border-stone-200 p-2.5"
+              >
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-medium text-stone-800">{u.email}</div>
+                  <div className="text-xs text-stone-500">
+                    {labelRole[u.role]}
+                    {u.cabang_nama ? ` · 🏪 ${u.cabang_nama}` : ""} ·{" "}
+                    {formatTanggalRingkas(u.diundang_pada)}
+                  </div>
+                </div>
+                <button
+                  onClick={() => batalUndangan.mutate(u.id)}
+                  disabled={batalUndangan.isPending}
+                  className="shrink-0 rounded-lg border border-stone-300 px-2.5 py-1 text-xs font-medium text-red-600 hover:bg-red-50"
+                >
+                  Batalkan
+                </button>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {/* Modal undang via email (tanpa buat password — mereka set sendiri saat daftar) */}
+      <Modal
+        open={undangForm !== null}
+        onClose={() => setUndangForm(null)}
+        title="Undang Karyawan via Email"
+      >
+        {undangForm && (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (undangForm.email) undang.mutate(undangForm);
+            }}
+            className="space-y-3"
+          >
+            <p className="rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-800">
+              Undang lewat email. Bila email sudah punya akun → langsung bisa terima; bila belum →
+              undangan menunggu sampai ia mendaftar. Tak perlu buat password.
+            </p>
+            <div>
+              <label className="mb-1 block text-sm font-medium">Email</label>
+              <input
+                required
+                type="email"
+                value={undangForm.email}
+                onChange={(e) => setUndangForm({ ...undangForm, email: e.target.value })}
+                placeholder="calon@email.com"
+                className={inputClass}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="mb-1 block text-sm font-medium">Peran</label>
+                <select
+                  value={undangForm.role}
+                  onChange={(e) => {
+                    const r = e.target.value as FormState["role"];
+                    setUndangForm({
+                      ...undangForm,
+                      role: r,
+                      branch_id:
+                        r === "admin" && kantorId
+                          ? kantorId
+                          : undangForm.branch_id || storeDefault,
+                    });
+                  }}
+                  className={inputClass}
+                >
+                  <option value="cashier">Kasir</option>
+                  <option value="tim">Tim / Karyawan</option>
+                  <option value="admin">Admin</option>
+                  <option value="owner">Owner</option>
+                </select>
+              </div>
+              {isPro && undangForm.role !== "admin" && (
+                <div>
+                  <label className="mb-1 block text-sm font-medium">
+                    Lokasi kerja {WAJIB_CABANG.has(undangForm.role) ? "(wajib)" : "(opsional)"}
+                  </label>
+                  <select
+                    value={undangForm.branch_id}
+                    onChange={(e) => setUndangForm({ ...undangForm, branch_id: e.target.value })}
+                    className={inputClass}
+                    required={WAJIB_CABANG.has(undangForm.role)}
+                  >
+                    {!WAJIB_CABANG.has(undangForm.role) && <option value="">Semua lokasi</option>}
+                    {cabang
+                      .filter((b) => b.is_active && b.tipe !== "kantor")
+                      .map((b) => (
+                        <option key={b.id} value={b.id}>
+                          {labelCabang(b)}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+              )}
+            </div>
+            <ErrorText error={undang.error} />
+            <div className="flex justify-end gap-2 pt-2">
+              <button type="button" onClick={() => setUndangForm(null)} className={btnSecondary}>
+                Batal
+              </button>
+              <button type="submit" disabled={undang.isPending} className={btnPrimary}>
+                {undang.isPending ? "Mengirim…" : "Kirim Undangan"}
+              </button>
+            </div>
+          </form>
+        )}
+      </Modal>
 
       <Modal
         open={form !== null}

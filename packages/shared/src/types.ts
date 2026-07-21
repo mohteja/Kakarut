@@ -26,6 +26,34 @@ export interface ProfilDto {
   employee_code: string | null;
 }
 
+export type InvitationStatus = "pending" | "accepted" | "revoked";
+
+/** Undangan yang DITUJUKAN ke saya (dilihat calon karyawan di onboarding). */
+export interface UndanganDto {
+  id: string;
+  company_nama: string;
+  role: UserRole;
+  cabang_nama: string | null;
+  diundang_pada: string;
+}
+
+/** Status onboarding user tanpa perusahaan: sudah punya perusahaan? + undangan. */
+export interface OnboardingStatus {
+  has_company: boolean;
+  email: string;
+  undangan: UndanganDto[];
+}
+
+/** Undangan yang DIBUAT perusahaan (dilihat owner/admin di Kelola Karyawan). */
+export interface UndanganKaryawanRow {
+  id: string;
+  email: string;
+  role: UserRole;
+  cabang_nama: string | null;
+  status: InvitationStatus;
+  diundang_pada: string;
+}
+
 /** Satu entri riwayat kegiatan pada faktur (jejak ubah tahap). */
 export interface FakturLogRow {
   id: string;

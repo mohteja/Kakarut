@@ -3449,6 +3449,61 @@ api "$OWNER" PUT "/penyimpanan/$RAK79/bahan" "{\"supply_ids\":[\"$SP95\"]}" > /d
 cek "rak CK + cabang berdampingan: rak_lokasi SP95 = 2 (CK & store)" "V == 1" \
   "$(api "$OWNER" GET /perlengkapan/master | jq --arg i "$SP95" '([.[]|select(.id==$i)][0].rak_lokasi|( (map(.branch_tipe)|sort) == ["central_kitchen","store"] ))|if . then 1 else 0 end')"
 
+echo "== 96. Daftar / onboarding / undangan / hapus akun =="
+COID=$(api "$OWNER" GET /auth/me | jq -r '.company.id')
+PUSAT96=$(api "$OWNER" GET /cabang | jq -r '[.[]|select(.tipe=="store")][0].id')
+# 1. Daftar akun baru → tanpa perusahaan
+REG1=$(api "" POST /auth/register '{"nama":"Uji Daftar 96","email":"ujidaftar96@example.com","password":"Rahasia123"}')
+TOK1=$(echo "$REG1" | jq -r .token)
+cek "daftar: dapat token" "V == 1" "$(echo "$REG1" | jq '((.token|length)>0)|if . then 1 else 0 end')"
+cek "daftar: belum punya perusahaan (company null)" "V == 1" "$(echo "$REG1" | jq '(.company==null)|if . then 1 else 0 end')"
+# login user tanpa perusahaan TIDAK 403 (dapat sesi company null)
+cek "login tanpa perusahaan → 200" "V == 200" \
+  "$(status_code_body "" POST /auth/login '{"email":"ujidaftar96@example.com","password":"Rahasia123"}')"
+# onboarding status: belum punya perusahaan, tak ada undangan
+ST1=$(api "$TOK1" GET /onboarding/status)
+cek "onboarding: has_company false" "V == 1" "$(echo "$ST1" | jq '(.has_company==false)|if . then 1 else 0 end')"
+cek "onboarding: undangan kosong" "V == 0" "$(echo "$ST1" | jq '.undangan|length')"
+# 2. Buat perusahaan sendiri → jadi owner
+BP1=$(api "$TOK1" POST /onboarding/perusahaan '{"nama":"Warung Uji 96"}')
+cek "buat perusahaan: jadi owner" "V == 1" "$(echo "$BP1" | jq '(.user.role=="owner")|if . then 1 else 0 end')"
+cek "buat perusahaan: company terisi" "V == 1" "$(echo "$BP1" | jq '((.company.id|length)>0)|if . then 1 else 0 end')"
+# 3. Daftar validasi + duplikat
+cek "daftar password < 8 → 400" "V == 400" \
+  "$(status_code_body "" POST /auth/register '{"nama":"X","email":"pendek96@example.com","password":"123"}')"
+cek "daftar email sudah ada → 409" "V == 409" \
+  "$(status_code_body "" POST /auth/register "{\"nama\":\"X\",\"email\":\"$OWNER_EMAIL\",\"password\":\"Rahasia123\"}")"
+# 4. Undang (menunggu diundang) → daftar → auto-join
+INV=$(api "$OWNER" POST /karyawan/undang "{\"email\":\"undangan96@example.com\",\"role\":\"cashier\",\"branch_id\":\"$PUSAT96\"}")
+cek "undang: dibuat (ada id)" "V == 1" "$(echo "$INV" | jq '((.id|length)>0)|if . then 1 else 0 end')"
+cek "undang duplikat → 409" "V == 409" \
+  "$(status_code_body "$OWNER" POST /karyawan/undang "{\"email\":\"undangan96@example.com\",\"role\":\"cashier\",\"branch_id\":\"$PUSAT96\"}")"
+cek "daftar undangan memuat email" "V == 1" \
+  "$(api "$OWNER" GET /karyawan/undangan | jq '[.[]|select(.email=="undangan96@example.com")]|length')"
+REG2=$(api "" POST /auth/register '{"nama":"Undangan 96","email":"undangan96@example.com","password":"Rahasia123"}')
+cek "daftar via undangan: auto-join role cashier" "V == 1" "$(echo "$REG2" | jq '(.user.role=="cashier")|if . then 1 else 0 end')"
+cek "daftar via undangan: company = perusahaan OWNER" "V == 1" \
+  "$(echo "$REG2" | jq --arg c "$COID" '(.company.id==$c)|if . then 1 else 0 end')"
+cek "undangan diterima → hilang dari pending" "V == 0" \
+  "$(api "$OWNER" GET /karyawan/undangan | jq '[.[]|select(.email=="undangan96@example.com")]|length')"
+cek "undang email yang sudah anggota → 409" "V == 409" \
+  "$(status_code_body "$OWNER" POST /karyawan/undang "{\"email\":\"undangan96@example.com\",\"role\":\"cashier\",\"branch_id\":\"$PUSAT96\"}")"
+# 5. Hapus akun (soft) → login gagal → email bebas dipakai ulang
+REG3=$(api "" POST /auth/register '{"nama":"Hapus 96","email":"hapus96@example.com","password":"Rahasia123"}')
+TOK3=$(echo "$REG3" | jq -r .token)
+cek "hapus akun (tanpa perusahaan) → ok" "V == 1" \
+  "$(api "$TOK3" DELETE /onboarding/akun '{"password":"Rahasia123"}' | jq '(.ok==true)|if . then 1 else 0 end')"
+cek "login setelah hapus akun → 401" "V == 401" \
+  "$(status_code_body "" POST /auth/login '{"email":"hapus96@example.com","password":"Rahasia123"}')"
+REG3B=$(api "" POST /auth/register '{"nama":"Hapus96 Lagi","email":"hapus96@example.com","password":"Rahasia123"}')
+TOK3B=$(echo "$REG3B" | jq -r .token)
+cek "daftar ulang email yang dihapus → berhasil" "V == 1" "$(echo "$REG3B" | jq '((.token|length)>0)|if . then 1 else 0 end')"
+cek "hapus akun password salah → 401" "V == 401" \
+  "$(status_code_body "$TOK3B" DELETE /onboarding/akun '{"password":"salahbanget"}')"
+# 6. Owner terakhir tak boleh hapus akun
+cek "hapus akun owner terakhir → 400" "V == 400" \
+  "$(status_code_body "$OWNER" DELETE /onboarding/akun "{\"password\":\"$OWNER_PASS\"}")"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]
