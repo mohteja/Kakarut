@@ -921,8 +921,25 @@ export interface Shift {
   ada_transaksi_susulan: boolean;
 }
 
-/** Jenis perintah yang bisa diantre offline & disinkron via POST /api/sync. */
-export type SyncTipe = "penjualan" | "absen_saya" | "absen_stasiun";
+/**
+ * Jenis perintah yang bisa diantre offline & disinkron via POST /api/sync.
+ * Fase 1: penjualan + absen. Fase 2: opname, perlengkapan, faktur tahap/kirim,
+ * penerimaan. Payload = body endpoint asli (+ path param bila ditandai).
+ */
+export type SyncTipe =
+  | "penjualan"
+  | "absen_saya"
+  | "absen_stasiun"
+  // Fase 2
+  | "stok_opname"
+  | "perlengkapan_opname"
+  | "perlengkapan_pakai" // payload + supply_id
+  | "faktur_tahap" // payload + jalur ("produksi"|"pembelian") + faktur_id
+  | "faktur_kirim" // payload + jalur + faktur_id
+  | "produksi_kirim_hasil" // payload + faktur_id
+  | "penerimaan_terima" // payload + faktur_id
+  | "penerimaan_terima_sebagian" // payload + faktur_id
+  | "penerimaan_tolak"; // payload + faktur_id
 
 /** Satu perintah offline dalam batch sinkron (payload = body endpoint aslinya). */
 export interface SyncCommand {

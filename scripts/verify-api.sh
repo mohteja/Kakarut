@@ -3640,6 +3640,39 @@ if [ -n "$(api "$KASIR" GET /shift/aktif | jq -r '.id // empty')" ]; then
     "$(api "$KASIR" GET /shift | jq '([.[]|select(.ada_transaksi_susulan==true)]|length>=1)|if . then 1 else 0 end')"
 fi
 
+# --- Fase 2: dispatch ke endpoint asli (opname, faktur tahap, penerimaan) ---
+BBS99=$(api "$OWNER" POST /bahan '{"nama":"bahan sync fase2 99","harga_beli":1000,"isi":1,"satuan":"pcs","pengadaan":"beli","kategori":"lain","track_stok":true}' | jq -r .id)
+# stok_opname via sync (owner) → item ok (sesi opname terbentuk lewat handler asli).
+B_SO=$(jq -nc --arg r "$(uuid99)" --arg w "$NOW99" --arg i "$BBS99" '{commands:[{client_ref:$r,tipe:"stok_opname",waktu:$w,payload:{items:[{ingredient_id:$i,qty:88}]}}]}')
+cek "sync fase2: stok_opname → item ok" "V == 1" \
+  "$(api "$OWNER" POST /sync "$B_SO" | jq '(.hasil[0].status=="ok")|if . then 1 else 0 end')"
+
+# faktur_tahap (jalur=pembelian): buat faktur beli (rencana) → sync tahap 'dikerjakan'.
+FKS99=$(api "$OWNER" POST /pembelian/faktur "{\"items\":[{\"ingredient_id\":\"$BBS99\",\"mode\":\"pcs\",\"jumlah\":3,\"total_harga\":3000}]}" | jq -r .faktur_id)
+RFT=$(uuid99)
+B_FT=$(jq -nc --arg r "$RFT" --arg w "$NOW99" --arg f "$FKS99" '{commands:[{client_ref:$r,tipe:"faktur_tahap",waktu:$w,payload:{jalur:"pembelian",faktur_id:$f,ke:"dikerjakan"}}]}')
+cek "sync fase2: faktur_tahap → item ok" "V == 1" \
+  "$(api "$OWNER" POST /sync "$B_FT" | jq '(.hasil[0].status=="ok")|if . then 1 else 0 end')"
+cek "sync fase2: faktur jadi 'dikerjakan' (handler asli jalan)" "V == 1" \
+  "$(api "$OWNER" GET "/pembelian?per_page=500" | jq --arg f "$FKS99" '([.rows[]|select(.faktur_id==$f)][0].status=="dikerjakan")|if . then 1 else 0 end')"
+cek "sync fase2: faktur_tahap kirim ulang → sudah_ada" "V == 1" \
+  "$(api "$OWNER" POST /sync "$B_FT" | jq '(.hasil[0].status=="sudah_ada")|if . then 1 else 0 end')"
+
+# Role guard fase2: KASIR faktur_tahap → item gagal 403 (gerbang produksi/pembelian).
+B_RG2=$(jq -nc --arg r "$(uuid99)" --arg w "$NOW99" --arg f "$FKS99" '{commands:[{client_ref:$r,tipe:"faktur_tahap",waktu:$w,payload:{jalur:"pembelian",faktur_id:$f,ke:"menunggu"}}]}')
+cek "sync fase2: kasir faktur_tahap → gagal 403" "V == 1" \
+  "$(api "$KASIR" POST /sync "$B_RG2" | jq '(.hasil[0].status=="gagal" and .hasil[0].kode==403)|if . then 1 else 0 end')"
+
+# Param path wajib: faktur_tahap tanpa faktur_id → item gagal 400.
+B_PP=$(jq -nc --arg r "$(uuid99)" --arg w "$NOW99" '{commands:[{client_ref:$r,tipe:"faktur_tahap",waktu:$w,payload:{jalur:"pembelian",ke:"dikerjakan"}}]}')
+cek "sync fase2: faktur_tahap tanpa faktur_id → gagal 400" "V == 1" \
+  "$(api "$OWNER" POST /sync "$B_PP" | jq '(.hasil[0].status=="gagal" and .hasil[0].kode==400)|if . then 1 else 0 end')"
+
+# penerimaan_terima faktur asing → item gagal 404 (dari handler asli).
+B_PT=$(jq -nc --arg r "$(uuid99)" --arg w "$NOW99" '{commands:[{client_ref:$r,tipe:"penerimaan_terima",waktu:$w,payload:{faktur_id:"00000000-0000-0000-0000-000000000000"}}]}')
+cek "sync fase2: penerimaan_terima faktur asing → gagal 404" "V == 1" \
+  "$(api "$OWNER" POST /sync "$B_PT" | jq '(.hasil[0].status=="gagal" and .hasil[0].kode==404)|if . then 1 else 0 end')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

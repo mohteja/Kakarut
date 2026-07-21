@@ -16,6 +16,17 @@ const MAKS_PERINTAH = 100;
 const MAKS_UMUR_HARI = 7;
 const SKEW_MENIT = 5;
 
+/**
+ * Referensi aplikasi utk sub-request internal (Fase 2): perintah dieksekusi
+ * dengan MEMANGGIL ULANG endpoint aslinya lewat router yang sama (middleware +
+ * guard + handler berjalan apa adanya) — "pembungkus, bukan jalan pintas".
+ * Disuntik dari createApp() untuk menghindari import melingkar.
+ */
+let appRef: { fetch: (req: Request) => Response | Promise<Response> } | null = null;
+export function setSyncApp(a: { fetch: (req: Request) => Response | Promise<Response> }) {
+  appRef = a;
+}
+
 /** Bentuk minimal auth yang dipakai eksekutor perintah. */
 type SyncAuth = {
   sub: string;
@@ -24,6 +35,8 @@ type SyncAuth = {
   branch_id: string | null;
   nama: string;
 };
+type ExecCtx = { auth: SyncAuth; authHeader: string };
+type Eksekutor = (ctx: ExecCtx, payload: unknown, waktu: Date) => Promise<{ kode: number; data: unknown }>;
 
 const SyncBody = z.object({
   device_id: z.string().nullish(),
@@ -31,7 +44,20 @@ const SyncBody = z.object({
     .array(
       z.object({
         client_ref: z.string().uuid(),
-        tipe: z.enum(["penjualan", "absen_saya", "absen_stasiun"]),
+        tipe: z.enum([
+          "penjualan",
+          "absen_saya",
+          "absen_stasiun",
+          "stok_opname",
+          "perlengkapan_opname",
+          "perlengkapan_pakai",
+          "faktur_tahap",
+          "faktur_kirim",
+          "produksi_kirim_hasil",
+          "penerimaan_terima",
+          "penerimaan_terima_sebagian",
+          "penerimaan_tolak",
+        ]),
         waktu: z.string().datetime({ offset: true }),
         payload: z.unknown(),
       }),
@@ -40,11 +66,7 @@ const SyncBody = z.object({
     .max(MAKS_PERINTAH),
 });
 
-/**
- * Cabang efektif untuk sebuah perintah sinkron. Peran terikat (kasir/tim)
- * selalu ke cabangnya; owner/admin boleh menyebut cabang di payload (divalidasi
- * milik perusahaan) — default cabang akun.
- */
+/** Cabang efektif utk perintah sinkron (peran terikat → cabangnya). */
 async function resolveCabangSync(auth: SyncAuth, payloadBranchId?: string | null): Promise<string> {
   if (terikatCabang(auth.role)) {
     if (!auth.branch_id) throw new HTTPException(403, { message: "Akun tanpa cabang" });
@@ -65,16 +87,63 @@ async function resolveCabangSync(auth: SyncAuth, payloadBranchId?: string | null
   return first.id;
 }
 
-type Eksekutor = (auth: SyncAuth, payload: unknown, waktu: Date) => Promise<{ kode: number; data: unknown }>;
+/**
+ * Sub-request internal ke endpoint asli (di bawah /api). Meneruskan token
+ * pemanggil → middleware auth/company + role guard + handler asli berjalan.
+ * Mengembalikan {kode, data} (kode ≥ 400 dianggap gagal oleh pemanggil).
+ */
+async function panggilInternal(
+  authHeader: string,
+  path: string,
+  body: unknown,
+): Promise<{ kode: number; data: unknown }> {
+  if (!appRef) throw new HTTPException(500, { message: "Sinkron belum siap (app belum disuntik)" });
+  const req = new Request(`http://sync.internal/api${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: authHeader },
+    body: JSON.stringify(body ?? {}),
+  });
+  const res = await appRef.fetch(req);
+  const teks = await res.text();
+  let data: unknown = teks;
+  try {
+    data = teks ? JSON.parse(teks) : null;
+  } catch {
+    /* biarkan sebagai teks mentah */
+  }
+  return { kode: res.status, data };
+}
+
+/** Pisahkan path-param wajib dari payload; sisanya jadi body request. */
+function pisahParam<T extends string>(
+  payload: unknown,
+  kunci: readonly T[],
+): { params: Record<T, string>; body: Record<string, unknown> } {
+  const p = (payload ?? {}) as Record<string, unknown>;
+  const params = {} as Record<T, string>;
+  const body: Record<string, unknown> = { ...p };
+  for (const k of kunci) {
+    const v = p[k];
+    if (typeof v !== "string" || !v) {
+      throw new HTTPException(400, { message: `Field '${k}' wajib pada payload perintah` });
+    }
+    params[k] = v;
+    delete body[k];
+  }
+  return { params, body };
+}
+
+// ---------------------------------------------------------------------------
+// FASE 1 — eksekusi langsung lewat service (waktu = timestamp kejadian)
+// ---------------------------------------------------------------------------
 
 /** penjualan — kasir; tautkan ke shift yang jendelanya memuat `waktu`. */
-const execPenjualan: Eksekutor = async (auth, payload, waktu) => {
+const execPenjualan: Eksekutor = async ({ auth }, payload, waktu) => {
   if (auth.role !== "cashier") {
     throw new HTTPException(403, { message: "Hanya kasir yang boleh membuat transaksi" });
   }
   const p = SaleBody.parse(payload);
   const branchId = await resolveCabangSync(auth, p.branch_id);
-  // Cari shift kasir (terbuka ATAU tertutup) yang jendela waktunya memuat `waktu`.
   const [shift] = await db
     .select({ id: shifts.id, closedAt: shifts.closedAt })
     .from(shifts)
@@ -89,12 +158,8 @@ const execPenjualan: Eksekutor = async (auth, payload, waktu) => {
     .orderBy(desc(shifts.openedAt))
     .limit(1);
   if (!shift) {
-    throw new HTTPException(409, {
-      message: "Tidak ada shift kasir yang mencakup waktu transaksi ini",
-    });
+    throw new HTTPException(409, { message: "Tidak ada shift kasir yang mencakup waktu transaksi ini" });
   }
-  // Transaksi susulan pada shift yang SUDAH ditutup → tandai (rekap dihitung
-  // ulang otomatis karena berbasis jendela waktu).
   if (shift.closedAt) {
     await db.update(shifts).set({ adaTransaksiSusulan: true }).where(eq(shifts.id, shift.id));
   }
@@ -119,7 +184,7 @@ const execPenjualan: Eksekutor = async (auth, payload, waktu) => {
 };
 
 /** absen_saya — cap atas nama pemanggil sendiri (semua peran). */
-const execAbsenSaya: Eksekutor = async (auth, payload, waktu) => {
+const execAbsenSaya: Eksekutor = async ({ auth }, payload, waktu) => {
   const p = SelfBody.parse(payload);
   const branchId = await resolveCabangSync(auth, null);
   const { jarakM, namaCabang } = await cekRadius(branchId, p.lat, p.lng);
@@ -152,7 +217,7 @@ const execAbsenSaya: Eksekutor = async (auth, payload, waktu) => {
 };
 
 /** absen_stasiun — operator (owner/admin/kasir) memindai kode karyawan. */
-const execAbsenStasiun: Eksekutor = async (auth, payload, waktu) => {
+const execAbsenStasiun: Eksekutor = async ({ auth }, payload, waktu) => {
   if (auth.role !== "owner" && auth.role !== "admin" && auth.role !== "cashier") {
     throw new HTTPException(403, { message: "Peran Anda tidak boleh memakai stasiun absen" });
   }
@@ -192,26 +257,95 @@ const execAbsenStasiun: Eksekutor = async (auth, payload, waktu) => {
   return { kode: 201, data: result };
 };
 
+// ---------------------------------------------------------------------------
+// FASE 2 — dispatch ke endpoint asli (stok berubah saat sinkron; `waktu` untuk
+// audit di ledger). Validasi = aturan endpoint asli (role, kunci cabang, dsb.).
+// ---------------------------------------------------------------------------
+
+function cekJalur(j: string): "produksi" | "pembelian" {
+  if (j !== "produksi" && j !== "pembelian") {
+    throw new HTTPException(400, { message: "jalur harus 'produksi' atau 'pembelian'" });
+  }
+  return j;
+}
+
+const execStokOpname: Eksekutor = ({ authHeader }, payload) =>
+  panggilInternal(authHeader, "/stok/opname", payload);
+
+const execPerlengkapanOpname: Eksekutor = ({ authHeader }, payload) =>
+  panggilInternal(authHeader, "/perlengkapan/opname", payload);
+
+const execPerlengkapanPakai: Eksekutor = ({ authHeader }, payload) => {
+  const { params, body } = pisahParam(payload, ["supply_id"]);
+  return panggilInternal(authHeader, `/perlengkapan/${params.supply_id}/pakai`, body);
+};
+
+const execFakturTahap: Eksekutor = ({ authHeader }, payload) => {
+  const { params, body } = pisahParam(payload, ["jalur", "faktur_id"]);
+  return panggilInternal(authHeader, `/${cekJalur(params.jalur)}/tahap/${params.faktur_id}`, body);
+};
+
+const execFakturKirim: Eksekutor = ({ authHeader }, payload) => {
+  const { params, body } = pisahParam(payload, ["jalur", "faktur_id"]);
+  return panggilInternal(authHeader, `/${cekJalur(params.jalur)}/kirim/${params.faktur_id}`, body);
+};
+
+const execProduksiKirimHasil: Eksekutor = ({ authHeader }, payload) => {
+  const { params, body } = pisahParam(payload, ["faktur_id"]);
+  return panggilInternal(authHeader, `/produksi/kirim-hasil/${params.faktur_id}`, body);
+};
+
+const execPenerimaanTerima: Eksekutor = ({ authHeader }, payload) => {
+  const { params, body } = pisahParam(payload, ["faktur_id"]);
+  return panggilInternal(authHeader, `/penerimaan/${params.faktur_id}/terima`, body);
+};
+const execPenerimaanTerimaSebagian: Eksekutor = ({ authHeader }, payload) => {
+  const { params, body } = pisahParam(payload, ["faktur_id"]);
+  return panggilInternal(authHeader, `/penerimaan/${params.faktur_id}/terima-sebagian`, body);
+};
+const execPenerimaanTolak: Eksekutor = ({ authHeader }, payload) => {
+  const { params, body } = pisahParam(payload, ["faktur_id"]);
+  return panggilInternal(authHeader, `/penerimaan/${params.faktur_id}/tolak`, body);
+};
+
 const EKSEKUTOR: Record<string, Eksekutor> = {
   penjualan: execPenjualan,
   absen_saya: execAbsenSaya,
   absen_stasiun: execAbsenStasiun,
+  stok_opname: execStokOpname,
+  perlengkapan_opname: execPerlengkapanOpname,
+  perlengkapan_pakai: execPerlengkapanPakai,
+  faktur_tahap: execFakturTahap,
+  faktur_kirim: execFakturKirim,
+  produksi_kirim_hasil: execProduksiKirimHasil,
+  penerimaan_terima: execPenerimaanTerima,
+  penerimaan_terima_sebagian: execPenerimaanTerimaSebagian,
+  penerimaan_tolak: execPenerimaanTolak,
 };
 
+/** Ambil pesan error dari body respons sub-request (bila ada). */
+function pesanError(data: unknown): string {
+  if (data && typeof data === "object" && "error" in data) {
+    const e = (data as { error?: unknown }).error;
+    if (typeof e === "string") return e;
+  }
+  return typeof data === "string" && data ? data : "Perintah gagal";
+}
+
 /**
- * Sinkron antrean offline mobile. SATU endpoint generik: menerima batch
- * perintah ber-`client_ref` (idempotency), mengeksekusi tiap perintah lewat
- * logika service yang SUDAH ADA (validasi = aturan endpoint asli), lalu
- * membalas hasil per item. Selalu 200; kegagalan dilaporkan per item.
+ * Sinkron antrean offline mobile. SATU endpoint generik: batch perintah
+ * ber-`client_ref` (idempotency), dieksekusi lewat logika endpoint asli, balas
+ * hasil per item. Selalu 200; kegagalan dilaporkan per item.
  */
 export const syncRoutes = new Hono<AppEnv>().post("/", zValidator("json", SyncBody), async (c) => {
   const auth = c.get("auth") as SyncAuth;
+  const authHeader = c.req.header("authorization") ?? "";
   const { device_id, commands } = c.req.valid("json");
   const sekarang = Date.now();
   const hasil: SyncItemResult[] = [];
 
   for (const cmd of commands) {
-    // 1) Idempotency: perintah yang sudah tercatat → balas hasil tersimpan, JANGAN eksekusi ulang.
+    // 1) Idempotency: perintah yang sudah tercatat → balas hasil tersimpan.
     const [ada] = await db
       .select({ kode: syncCommands.kode, status: syncCommands.status, hasilJson: syncCommands.hasilJson })
       .from(syncCommands)
@@ -245,14 +379,21 @@ export const syncRoutes = new Hono<AppEnv>().post("/", zValidator("json", SyncBo
         throw new HTTPException(400, { message: `waktu kejadian lebih dari ${MAKS_UMUR_HARI} hari lalu` });
       }
       const exec = EKSEKUTOR[cmd.tipe];
-      const { kode, data } = await exec(auth, cmd.payload, waktu);
-      item = { client_ref: cmd.client_ref, status: "ok", kode, data };
-      simpanStatus = "ok";
-      simpanKode = kode;
-      simpanHasil = data;
+      const { kode, data } = await exec({ auth, authHeader }, cmd.payload, waktu);
+      if (kode >= 400) {
+        // Kegagalan yang DIBALAS (mis. dari sub-request) — bukan lemparan.
+        item = { client_ref: cmd.client_ref, status: "gagal", kode, error: pesanError(data) };
+        simpanStatus = "gagal";
+        simpanKode = kode;
+        simpanHasil = { error: pesanError(data) };
+      } else {
+        item = { client_ref: cmd.client_ref, status: "ok", kode, data };
+        simpanStatus = "ok";
+        simpanKode = kode;
+        simpanHasil = data;
+      }
     } catch (e) {
-      const kode =
-        e instanceof HTTPException ? e.status : e instanceof z.ZodError ? 400 : 500;
+      const kode = e instanceof HTTPException ? e.status : e instanceof z.ZodError ? 400 : 500;
       const pesan =
         e instanceof HTTPException
           ? e.message
@@ -265,8 +406,7 @@ export const syncRoutes = new Hono<AppEnv>().post("/", zValidator("json", SyncBo
       simpanHasil = { error: pesan };
     }
 
-    // 2) Catat hasil ke ledger (exactly-once). onConflictDoNothing melindungi
-    // dari balapan retry — bila kalah balapan, item tetap dilaporkan apa adanya.
+    // 2) Catat hasil ke ledger (exactly-once). onConflictDoNothing melindungi balapan retry.
     await db
       .insert(syncCommands)
       .values({
