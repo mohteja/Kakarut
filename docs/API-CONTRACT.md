@@ -201,7 +201,7 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 
 ## 7. `/api/penjualan` — Penjualan POS (`modules/penjualan/routes.ts`)
 
-- `POST /api/penjualan` — **[cashier only]** (`requireRole("cashier")` inline) — req `SaleBody`: `{ branch_id?: uuid, is_dine_in: bool=false, meja_id?: uuid, catatan?|null, diskon_tipe?: "persen"|"nominal", diskon_nilai?: number(≥0), customer_nama?|null, customer_wa?|null, metode_bayar?: "tunai"|"qris"|"transfer", uang_diterima?: number(≥0), items: [{menu_id:uuid, qty:number(>0), is_dine_in?:bool, catatan?}] (min 1) }` — res: **201** hasil sale + `{ kasir }` — error: **400** (validasi/diskon lewat batas), **403** kasir di luar cabang
+- `POST /api/penjualan` — **[cashier only]** (`requireRole("cashier")` inline) — req `SaleBody`: `{ branch_id?: uuid, is_dine_in: bool=false, meja_id?: uuid, catatan?|null, diskon_tipe?: "persen"|"nominal", diskon_nilai?: number(≥0), customer_nama?|null, customer_wa?|null, metode_bayar?: "tunai"|"qris"|"transfer", uang_diterima?: number(≥0), items: [{menu_id:uuid, qty:number(>0), is_dine_in?:bool, catatan?}] (min 1) }` — res: **201** hasil sale + `{ kasir }` — error: **400** (validasi/diskon lewat batas), **403** kasir di luar cabang, **409** kasir belum dibuka (tidak ada shift terbuka di cabang → tampilkan gerbang "Buka Kasir")
 - `GET /api/penjualan` — [any] — query: `branch_id?` (atau `all` untuk owner/admin), `tanggal?` (YYYY-MM-DD, default hari ini di TZ perusahaan) — res: array ringkasan sale — error: **400** format tanggal salah
 - `GET /api/penjualan/:id` — [any] — res: `{ sale, items, branch_nama, kasir }` — error: **403** kasir luar cabang, **404**
 - `DELETE /api/penjualan/:id` — [owner/admin] — soft delete → Tempat Sampah — res: `{ ok, nomor }` — error: **404**
@@ -274,8 +274,16 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 
 - `GET /api/shift/aktif` — query: `branch_id?` — res: `Shift | null` (shift terbuka + rekap live)
 - `GET /api/shift` — query: `branch_id?` — res: `Shift[]` (shift tertutup, maks 50)
-- `POST /api/shift/buka` — req: `{ modal_awal: number(≥0)=0 }` — res: **201** `Shift` — error: **400** shift sudah terbuka, **403** luar cabang
+- `POST /api/shift/buka` — req: `{ modal_awal: number(≥0)=0 }` — res: **201** `Shift` — error: **400** shift sudah terbuka **atau kasir belum absen masuk hari ini** (pesan: "Absen masuk dulu sebelum buka kasir"), **403** luar cabang
 - `POST /api/shift/tutup` — req: `{ uang_fisik: number(≥0), catatan?|null }` — res: `Shift` — error: **400** tak ada shift terbuka
+
+> **Gerbang Buka Kasir (penting untuk mobile):** transaksi POS (`POST /api/penjualan`)
+> HANYA jalan bila ada shift **terbuka** di cabang. Sebelum layar kasir bisa
+> dipakai, panggil `GET /api/shift/aktif`; bila `null`, tampilkan gerbang blokir
+> "Buka Kasir" dan **jangan** biarkan transaksi. Syarat buka kasir: akun kasir
+> **harus absen masuk dulu** hari ini — bila belum, `POST /api/shift/buka` balas
+> **400**. Urutan wajib: **absen masuk → buka kasir → transaksi**. Lihat
+> `docs/mobile/PROMPT-BUKA-KASIR.md` untuk spesifikasi UI lengkap.
 
 ## `/api/absensi` — Absensi (`modules/absensi/routes.ts`) — group guard **[owner/admin/cashier/tim]**
 

@@ -127,6 +127,33 @@ async function catatAbsen(opts: {
 }
 
 /**
+ * Apakah karyawan SEDANG HADIR (sudah absen masuk & belum absen keluar) hari
+ * ini di cabang tsb — dipakai gerbang buka-shift kasir: kasir wajib absen dulu.
+ * Cap absen terakhir hari ini = 'masuk' → hadir; 'keluar' atau belum ada → tidak.
+ */
+export async function sedangHadir(
+  companyId: string,
+  branchId: string,
+  userId: string,
+): Promise<boolean> {
+  const tanggal = tanggalDi(await timezoneOf(companyId));
+  const [last] = await db
+    .select({ tipe: attendances.tipe })
+    .from(attendances)
+    .where(
+      and(
+        eq(attendances.companyId, companyId),
+        eq(attendances.branchId, branchId),
+        eq(attendances.userId, userId),
+        eq(attendances.attendDate, tanggal),
+      ),
+    )
+    .orderBy(desc(attendances.waktu))
+    .limit(1);
+  return last?.tipe === "masuk";
+}
+
+/**
  * Absensi karyawan. Dua jalur:
  *  - POST /       : STASIUN pindai — admin/kasir memindai QR / ketik kode
  *    karyawan; baris dicatat atas nama pemilik kode, bukan operator.

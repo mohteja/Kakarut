@@ -44,6 +44,11 @@ status_code() { # status_code <token> <method> <path>
   curl -s -o /dev/null -w '%{http_code}' -X "$2" "$BASE/api$3" -H "Authorization: Bearer $1"
 }
 
+status_code_body() { # status_code_body <token> <method> <path> <json-body>
+  curl -s -o /dev/null -w '%{http_code}' -X "$2" "$BASE/api$3" -H "Authorization: Bearer $1" \
+    -H 'Content-Type: application/json' -d "$4"
+}
+
 echo "== 1. Login =="
 OWNER=$(login "$OWNER_EMAIL" "$OWNER_PASS");  [ -n "$OWNER" ] && ok "login owner"
 KASIR=$(login "$KASIR_EMAIL" "$KASIR_PASS");  [ -n "$KASIR" ] && ok "login kasir"
@@ -64,6 +69,20 @@ cek "Paket Yamin Misdasem bulat = 15000" "V == 15000" \
   "$(echo "$MENUS" | jq '[.[] | select(.nama == "Paket Yamin Misdasem")][0].harga_jual_bulat')"
 
 stok_of() { echo "$1" | jq --arg s "$2" '[.[] | select(.slug == $s)][0].saldo'; }
+
+echo "== 2b. Gerbang kasir: wajib absen + buka kasir sebelum transaksi =="
+# Tanpa shift terbuka, transaksi kasir DITOLAK (409) → frontend munculkan modal Buka Kasir.
+cek "penjualan tanpa shift terbuka → 409" "V == 409" \
+  "$(status_code_body "$KASIR" POST /penjualan "{\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")"
+# Buka kasir SEBELUM absen masuk → 400 (harus absen dulu).
+cek "buka kasir tanpa absen → 400" "V == 400" \
+  "$(status_code_body "$KASIR" POST /shift/buka '{"modal_awal":200000}')"
+# Kasir absen masuk sendiri (cabang Pusat tanpa geofence → tanpa GPS).
+ABSK=$(api "$KASIR" POST /absensi/saya '{"foto_url":"https://example.com/absen.jpg"}')
+cek "kasir absen masuk (tipe=masuk)" "V == 1" "$(echo "$ABSK" | jq '(.tipe == "masuk") | if . then 1 else 0 end')"
+# Setelah absen → buka kasir sukses (modal 200000) → transaksi berikutnya boleh.
+SHK=$(api "$KASIR" POST /shift/buka '{"modal_awal":200000}')
+cek "buka kasir setelah absen: modal 200000" "V == 200000" "$(echo "$SHK" | jq '.modal_awal')"
 
 echo "== 3. Penjualan take-away memotong stok =="
 S0=$(api "$KASIR" GET /stok)
@@ -1034,9 +1053,10 @@ cek "laporan: per_metode memuat tunai & qris" "V == 1" \
   "$(echo "$LAPM" | jq '([.per_metode[].metode] | (index("tunai") != null) and (index("qris") != null)) | if . then 1 else 0 end')"
 
 echo "== 36. Tutup kasir / shift =="
-SH=$(api "$KASIR" POST /shift/buka '{"modal_awal":200000}')
-cek "buka shift: modal awal 200000" "V == 200000" "$(echo "$SH" | jq '.modal_awal')"
-cek "buka shift: masih terbuka" "V == 1" "$(echo "$SH" | jq '(.ditutup_pada == null) | if . then 1 else 0 end')"
+# Shift kasir sudah TERBUKA sejak §2b (gerbang buka kasir). Pakai yang aktif.
+SH=$(api "$KASIR" GET /shift/aktif)
+cek "shift aktif: modal awal 200000" "V == 200000" "$(echo "$SH" | jq '.modal_awal')"
+cek "shift aktif: masih terbuka" "V == 1" "$(echo "$SH" | jq '(.ditutup_pada == null) | if . then 1 else 0 end')"
 cek "buka shift kedua ditolak (400)" "V == 400" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/shift/buka" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d '{"modal_awal":0}')"
 # transaksi dalam shift: tunai + qris
@@ -1053,6 +1073,10 @@ cek "tutup shift: selisih 0 (uang fisik = kas)" "V == 1" "$(echo "$TU" | jq '(.s
 cek "tutup shift: ditutup terisi" "V == 1" "$(echo "$TU" | jq '(.ditutup_pada != null) | if . then 1 else 0 end')"
 cek "setelah tutup: tak ada shift aktif" "V == 1" "$(api "$KASIR" GET /shift/aktif | jq '(. == null) | if . then 1 else 0 end')"
 cek "riwayat shift: ada shift tertutup" "V >= 1" "$(api "$KASIR" GET /shift | jq 'length')"
+# Buka lagi shift agar transaksi kasir di seksi berikutnya (§37+) tetap bisa jalan.
+api "$KASIR" POST /shift/buka '{"modal_awal":200000}' > /dev/null
+cek "shift dibuka lagi untuk lanjutan" "V == 1" \
+  "$(api "$KASIR" GET /shift/aktif | jq '(. != null) | if . then 1 else 0 end')"
 
 echo "== 37. Open bill (simpan, buka, ubah, bayar, hapus) =="
 MEJA_OB=$(api "$KASIR" GET /meja | jq -r '[.[] | select(.is_active)][0].id')
@@ -1128,7 +1152,9 @@ SBR39=$(api "$OWNER" GET /cabang | jq -r '[.[] | select(.tipe=="store")][0].id')
 NK39=$(api "$OWNER" POST /karyawan "{\"nama\":\"Kode Baru 39\",\"email\":\"kodebaru39@basooopa.id\",\"password\":\"KodeBaru39!\",\"role\":\"cashier\",\"branch_id\":\"$SBR39\"}")
 cek "karyawan baru: employee_code 8 digit angka" "V == 1" \
   "$(echo "$NK39" | jq '(.employee_code | test("^[0-9]{8}$")) | if . then 1 else 0 end')"
-KODE_KAR=$(api "$OWNER" GET /karyawan | jq -r '[.[] | select(.role == "cashier")][0].employee_code')
+# Pakai kode kasir BARU (NK39) yang belum punya absensi — kasir seed sudah absen
+# masuk di §2b (gerbang buka kasir), jadi auto-detect masuk/keluar-nya sudah "kotor".
+KODE_KAR=$(echo "$NK39" | jq -r '.employee_code')
 # Absen WAJIB foto (anti-titip). URL bukti dummy (server menyimpan teksnya apa adanya).
 FOTO="https://example.com/absen.jpg"
 cek "absen tanpa foto ditolak (400)" "V == 400" \
@@ -1420,6 +1446,10 @@ CB46_ID=$(api "$OWNER" POST /cabang '{"nama":"Cabang Uji 46"}' | jq -r .id)
 # untuk uji jual/menu-terbatas lintas cabang & data penjualan kantor (§51/§60).
 api "$OWNER" POST /karyawan "{\"nama\":\"Kasir 46\",\"email\":\"kasir46@basooopa.id\",\"password\":\"Kasir46Pass!\",\"role\":\"cashier\",\"branch_id\":\"$CB46_ID\"}" > /dev/null
 KASIR46=$(login "kasir46@basooopa.id" "Kasir46Pass!")
+# Kasir CB46 absen masuk + buka kasir (gate shift) agar bisa transaksi di §51/§60
+# (CB46 tanpa geofence → absen tanpa GPS). Shift tetap terbuka sampai akhir skrip.
+api "$KASIR46" POST /absensi/saya '{"foto_url":"https://example.com/absen.jpg"}' > /dev/null
+api "$KASIR46" POST /shift/buka '{"modal_awal":100000}' > /dev/null
 GD46_ID=$(api "$OWNER" POST /penyimpanan "{\"nama\":\"Gudang 46\",\"branch_id\":\"$CB46_ID\"}" | jq -r .id)
 PUSAT46_ID=$(api "$OWNER" GET /cabang | jq -r --arg x "$CB46_ID" '[.[] | select(.id != $x)][0].id')
 GD46P_ID=$(api "$OWNER" POST /penyimpanan "{\"nama\":\"Gudang 46P\",\"branch_id\":\"$PUSAT46_ID\"}" | jq -r .id)

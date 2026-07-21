@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type {
+  AbsensiRow,
   MejaDto,
   MemberCariRow,
   MenuDto,
@@ -9,8 +10,9 @@ import type {
   MetodeBayar,
   OpenBillDetail,
   OpenBillRow,
+  Shift,
 } from "@kakarut/shared";
-import { Card, ErrorText, Spinner, btnPrimary, btnSecondary } from "../../components/ui";
+import { Card, ErrorText, Spinner, btnPrimary, btnSecondary, inputClass } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { useCabangData } from "../../context/BranchContext";
 import { CabangDataBar } from "../../components/CabangDataBar";
@@ -93,6 +95,27 @@ export function KasirPage() {
       }>("/auth/me"),
   });
   const pb1Conf = me?.company ?? auth?.company;
+
+  // Gerbang buka kasir: transaksi kasir hanya jalan bila ada shift TERBUKA di
+  // cabang. `/shift/*` khusus peran kasir → hanya query saat isKasir.
+  const { data: shiftAktif } = useQuery({
+    queryKey: ["shift-aktif", branchQuery],
+    queryFn: () => api<Shift | null>(`/shift/aktif${branchQuery}`),
+    enabled: isKasir,
+    refetchInterval: 30_000,
+  });
+  const kasirTutup = isKasir && shiftAktif === null;
+  // Absensi hari ini di cabang — untuk cek apakah kasir sudah absen masuk
+  // (syarat buka kasir). Cukup diambil saat gerbang muncul.
+  const { data: absensiHariIni = [] } = useQuery({
+    queryKey: ["absensi", branchQuery],
+    queryFn: () => api<AbsensiRow[]>(`/absensi${branchQuery}`),
+    enabled: kasirTutup,
+  });
+  // Sudah absen masuk & belum absen keluar hari ini → boleh buka kasir.
+  const absenSaya = absensiHariIni.find((r) => r.user_id === auth?.user.sub);
+  const sudahAbsen = !!(absenSaya?.masuk && !absenSaya?.keluar);
+  const [modalAwalGate, setModalAwalGate] = useState("");
 
   const [aktifKategori, setAktifKategori] = useState<string | null>(null);
   const [cariMenu, setCariMenu] = useState("");
@@ -367,6 +390,21 @@ export function KasirPage() {
     onSuccess: () => {
       resetTransaksi();
       queryClient.invalidateQueries({ queryKey: ["open-bill"] });
+    },
+  });
+
+  // Buka kasir dari gerbang (butuh sudah absen masuk — divalidasi juga di
+  // server). Sukses → shift-aktif ter-invalidate → gerbang tertutup.
+  const bukaKasir = useMutation({
+    mutationFn: () =>
+      api<Shift>(`/shift/buka${branchQuery}`, {
+        method: "POST",
+        body: { modal_awal: Number(modalAwalGate) || 0 },
+      }),
+    onSuccess: () => {
+      setModalAwalGate("");
+      queryClient.invalidateQueries({ queryKey: ["shift-aktif"] });
+      queryClient.invalidateQueries({ queryKey: ["shift-riwayat"] });
     },
   });
 
@@ -978,6 +1016,70 @@ export function KasirPage() {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Gerbang Buka Kasir — bila belum ada shift terbuka, transaksi diblokir
+          (modal tak bisa ditutup). Kasir wajib ABSEN MASUK dulu, lalu buka. */}
+      {kasirTutup && !struk && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl">
+            <div className="mb-1 text-center text-4xl">🔒</div>
+            <h2 className="text-center text-lg font-bold text-stone-800">Kasir Belum Dibuka</h2>
+            <p className="mt-1 mb-4 text-center text-sm text-stone-500">
+              Transaksi belum bisa dilakukan. Buka kasir dulu untuk mulai berjualan.
+            </p>
+
+            {/* Syarat: kasir harus sudah absen masuk hari ini */}
+            {sudahAbsen ? (
+              <div className="mb-3 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm font-medium text-green-700">
+                ✓ Sudah absen masuk hari ini
+              </div>
+            ) : (
+              <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5">
+                <div className="text-sm font-semibold text-amber-800">
+                  Anda belum absen masuk
+                </div>
+                <div className="mt-0.5 text-xs text-amber-700">
+                  Absen masuk dulu sebelum membuka kasir.
+                </div>
+                <Link
+                  to="/absen"
+                  className={`${btnPrimary} mt-2 flex w-full items-center justify-center py-2.5`}
+                >
+                  🖐 Absen Sekarang
+                </Link>
+              </div>
+            )}
+
+            <label className="mb-1 block text-sm font-medium text-stone-700">
+              Modal awal (Rp)
+            </label>
+            <input
+              type="number"
+              min="0"
+              inputMode="numeric"
+              value={modalAwalGate}
+              onChange={(e) => setModalAwalGate(e.target.value)}
+              placeholder="mis. 200000"
+              className={inputClass}
+            />
+            <p className="mt-1 text-xs text-stone-400">Uang tunai di laci saat mulai shift.</p>
+            <ErrorText error={bukaKasir.error} />
+            <button
+              onClick={() => bukaKasir.mutate()}
+              disabled={bukaKasir.isPending}
+              className={`${btnPrimary} mt-3 w-full py-3`}
+            >
+              {bukaKasir.isPending ? "Membuka…" : "🔓 Buka Kasir"}
+            </button>
+            <Link
+              to="/kasir/tutup"
+              className="mt-2 block text-center text-xs text-stone-400 hover:text-orange-600 hover:underline"
+            >
+              Kelola shift (tutup / riwayat) →
+            </Link>
           </div>
         </div>
       )}

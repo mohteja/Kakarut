@@ -8,6 +8,7 @@ import type { Shift } from "@kakarut/shared";
 import { db } from "../../db/client";
 import { branches, sales, shifts, users } from "../../db/schema";
 import { resolveBranchId, terikatCabang, type AppEnv } from "../../middleware/auth";
+import { sedangHadir } from "../absensi/routes";
 
 const opener = alias(users, "shift_opener");
 const closer = alias(users, "shift_closer");
@@ -138,6 +139,13 @@ export const shiftRoutes = new Hono<AppEnv>()
     const branchId = await resolveBranchId(c);
     if (terikatCabang(auth.role) && branchId !== auth.branch_id) {
       throw new HTTPException(403, { message: "Kasir hanya boleh membuka shift di cabangnya" });
+    }
+    // Wajib ABSEN dulu: kasir harus sudah absen masuk (dan belum keluar) hari ini
+    // di cabangnya sebelum boleh buka kasir.
+    if (!(await sedangHadir(auth.company_id!, branchId, auth.sub))) {
+      throw new HTTPException(400, {
+        message: "Absen masuk dulu sebelum buka kasir",
+      });
     }
     const [open] = await db
       .select({ id: shifts.id })
