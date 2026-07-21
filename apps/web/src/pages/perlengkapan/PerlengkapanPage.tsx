@@ -2,7 +2,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import type {
   KategoriDto,
-  PenyimpananDto,
   PerlengkapanAturanDto,
   PerlengkapanAturanMetode,
   PerlengkapanMasterRow,
@@ -33,8 +32,6 @@ function labelAturan(a: PerlengkapanAturanDto, satuan: string): string {
   return a.aktif ? teks : `${teks} (nonaktif)`;
 }
 
-type RakOpsi = { id: string; nama: string };
-
 type ModalState =
   | { jenis: "item"; item: PerlengkapanMasterRow | null }
   | { jenis: "aturan"; item: PerlengkapanMasterRow }
@@ -59,27 +56,6 @@ export function PerlengkapanPage() {
   const { data: kategoriList = [] } = useQuery({
     queryKey: ["kategori-bahan"],
     queryFn: () => api<KategoriDto[]>("/kategori-bahan"),
-  });
-  // Rak simpan: gabungan tempat penyimpanan semua cabang non-kantor
-  const { cabang } = useBranch();
-  const lokasiCabang = cabang.filter((b) => b.tipe !== "kantor" && b.is_active);
-  const banyakCabang = lokasiCabang.length > 1;
-  const { data: rakList = [] } = useQuery({
-    queryKey: ["penyimpanan-semua", lokasiCabang.map((c) => c.id).join(",")],
-    enabled: lokasiCabang.length > 0,
-    queryFn: async () => {
-      const per = await Promise.all(
-        lokasiCabang.map((cb) =>
-          api<PenyimpananDto[]>(`/penyimpanan?branch_id=${cb.id}`).then((rws) =>
-            rws.map((r) => ({
-              id: r.id,
-              nama: banyakCabang ? `${cb.nama} · ${r.nama}` : r.nama,
-            })),
-          ),
-        ),
-      );
-      return per.flat() as RakOpsi[];
-    },
   });
 
   const [modal, setModal] = useState<ModalState>(null);
@@ -182,11 +158,15 @@ export function PerlengkapanPage() {
                           🎯 dilacak
                         </span>
                       )}
-                      {r.rak && (
-                        <span className="rounded bg-stone-100 px-1.5 py-0.5 text-stone-600" title="Rak simpan default">
-                          🗄 {r.rak.nama}
+                      {r.rak_lokasi.map((rl) => (
+                        <span
+                          key={rl.rak_id}
+                          className="rounded bg-stone-100 px-1.5 py-0.5 text-stone-600"
+                          title={`Disimpan di ${rl.branch_nama} — atur di Tempat Penyimpanan`}
+                        >
+                          🗄 {rl.branch_nama} · {rl.rak_nama}
                         </span>
-                      )}
+                      ))}
                       {r.catatan && <span className="text-stone-400">{r.catatan}</span>}
                     </div>
                   </td>
@@ -295,7 +275,6 @@ export function PerlengkapanPage() {
         <ItemModal
           item={modal.item}
           kategoriList={kategoriList}
-          rakList={rakList}
           onClose={() => setModal(null)}
           onSukses={(baru) => {
             segarkan();
@@ -336,13 +315,11 @@ export function PerlengkapanPage() {
 function ItemModal({
   item,
   kategoriList,
-  rakList,
   onClose,
   onSukses,
 }: {
   item: PerlengkapanMasterRow | null;
   kategoriList: KategoriDto[];
-  rakList: RakOpsi[];
   onClose: () => void;
   /** baru ≠ null → item baru dgn dilacak=true (lanjut atur aturan konsumsi) */
   onSukses: (baru: PerlengkapanMasterRow | null) => void;
@@ -355,7 +332,6 @@ function ItemModal({
   const [kategori, setKategori] = useState(item?.kategori ?? "");
   const [bolehEceran, setBolehEceran] = useState(item?.boleh_eceran ?? true);
   const [dilacak, setDilacak] = useState(item?.dilacak ?? false);
-  const [rakId, setRakId] = useState(item?.rak?.id ?? "");
   const simpan = useMutation({
     mutationFn: () =>
       api<{ id: string; nama: string }>(item ? `/perlengkapan/${item.id}` : "/perlengkapan", {
@@ -369,7 +345,6 @@ function ItemModal({
           kategori: kategori || null,
           boleh_eceran: bolehEceran,
           dilacak,
-          storage_location_id: rakId || null,
         },
       }),
     onSuccess: (d) => {
@@ -386,7 +361,7 @@ function ItemModal({
               kategori: kategori || null,
               boleh_eceran: bolehEceran,
               dilacak,
-              rak: null,
+              rak_lokasi: [],
               supplier_utama: null,
               jumlah_supplier: 0,
               lokasi: [],
@@ -433,21 +408,10 @@ function ItemModal({
             <input type="number" min={0} value={stokMin} onChange={(e) => setStokMin(e.target.value)} className={inputClass} />
           </label>
         </div>
-        <label className="block text-sm">
-          Simpan di rak
-          <select value={rakId} onChange={(e) => setRakId(e.target.value)} className={inputClass}>
-            <option value="">— tanpa rak —</option>
-            {/* rak tersimpan yang tak termuat daftar (nonaktif) tetap tampil */}
-            {rakId && !rakList.some((r) => r.id === rakId) && (
-              <option value={rakId}>{item?.rak?.nama ?? "(rak tersimpan)"}</option>
-            )}
-            {rakList.map((r) => (
-              <option key={r.id} value={r.id}>
-                {r.nama}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="rounded-lg bg-stone-50 px-3 py-2 text-xs text-stone-500">
+          🗄 <b>Rak simpan</b> diatur di menu <b>Tempat Penyimpanan</b> (per cabang, sama seperti
+          bahan baku). Lokasi penyimpanan item ini tampil di kolom daftar Perlengkapan.
+        </div>
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={bolehEceran} onChange={(e) => setBolehEceran(e.target.checked)} />
           Boleh dibeli/dikirim <b>eceran</b> (per {satuan.trim() || "pcs"}) — hilangkan centang bila harus utuh per kemasan

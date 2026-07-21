@@ -414,6 +414,13 @@
       "when": 1784534921035,
       "tag": "0058_skinny_magus",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1784556983040,
+      "tag": "0059_wooden_sasquatch",
+      "breakpoints": true
     }
   ]
 }

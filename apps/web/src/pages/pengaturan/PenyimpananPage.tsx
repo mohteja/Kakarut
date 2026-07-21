@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState, type FormEvent } from "react";
-import type { BahanDto, PenyimpananDto } from "@kakarut/shared";
+import type { BahanDto, PenyimpananDto, PerlengkapanMasterRow } from "@kakarut/shared";
 import {
   Card,
   ErrorText,
@@ -122,43 +122,80 @@ function PetugasModal({ tempat, onClose }: { tempat: PenyimpananDto; onClose: ()
   );
 }
 
+type JenisRak = "bahan" | "perlengkapan";
+interface RakItem {
+  id: string;
+  nama: string;
+  kode?: string | null;
+  label?: string | null;
+}
+
 /**
- * Pilih BANYAK bahan baku yang disimpan di sebuah rak cabang. Dipakai sebagai
- * rak default: saat kiriman dari CK diterima di cabang, bahan otomatis masuk
- * rak ini. (Rak CK per-bahan tetap di form Bahan Baku.)
+ * Pilih BANYAK item (bahan baku ATAU perlengkapan) yang disimpan di sebuah rak
+ * cabang — satu tabel yang sama untuk keduanya. Untuk bahan baku juga dipakai
+ * sebagai rak default (auto-file saat kiriman dari CK diterima). Satu item
+ * maksimal di satu rak per cabang.
  */
-function BahanRakModal({ tempat, onClose }: { tempat: PenyimpananDto; onClose: () => void }) {
+function IsiRakModal({
+  tempat,
+  jenis,
+  onClose,
+}: {
+  tempat: PenyimpananDto;
+  jenis: JenisRak;
+  onClose: () => void;
+}) {
   const queryClient = useQueryClient();
+  const isBahan = jenis === "bahan";
   const { data: bahan = [], isLoading: loadBahan } = useQuery({
     queryKey: ["bahan"],
     queryFn: () => api<BahanDto[]>("/bahan"),
+    enabled: isBahan,
+  });
+  const { data: perlengkapan = [], isLoading: loadPerl } = useQuery({
+    queryKey: ["perlengkapan", "master"],
+    queryFn: () => api<PerlengkapanMasterRow[]>("/perlengkapan/master"),
+    enabled: !isBahan,
   });
   const { data: terpasang, isLoading: loadAsg } = useQuery({
     queryKey: ["penyimpanan-bahan", tempat.id],
     queryFn: () =>
-      api<{ ingredient_ids: string[]; terpakai_lain: string[] }>(
-        `/penyimpanan/${tempat.id}/bahan`,
-      ),
+      api<{
+        ingredient_ids: string[];
+        terpakai_lain: string[];
+        supply_ids: string[];
+        supply_terpakai_lain: string[];
+      }>(`/penyimpanan/${tempat.id}/bahan`),
   });
+
+  const items: RakItem[] = isBahan
+    ? bahan.map((b) => ({
+        id: b.id,
+        nama: b.nama,
+        kode: b.kode,
+        label: b.pengadaan === "produksi" ? "Produksi" : "Beli",
+      }))
+    : perlengkapan.map((s) => ({ id: s.id, nama: s.nama, label: s.kategori }));
+  const terpasangIds = isBahan ? terpasang?.ingredient_ids : terpasang?.supply_ids;
+  const terpakaiLainArr = isBahan ? terpasang?.terpakai_lain : terpasang?.supply_terpakai_lain;
+
   const [selected, setSelected] = useState<Set<string> | null>(null);
   const [cari, setCari] = useState("");
   // seed pilihan sekali dari data server
-  const sel = selected ?? new Set(terpasang?.ingredient_ids ?? []);
-  // bahan yang sudah di rak LAIN pada cabang ini — disembunyikan (1 bahan = 1 rak per cabang)
-  const terpakaiLain = useMemo(
-    () => new Set(terpasang?.terpakai_lain ?? []),
-    [terpasang],
-  );
+  const sel = selected ?? new Set(terpasangIds ?? []);
+  // item yang sudah di rak LAIN pada cabang ini — disembunyikan (1 item = 1 rak per cabang)
+  const terpakaiLain = useMemo(() => new Set(terpakaiLainArr ?? []), [terpakaiLainArr]);
 
   const simpan = useMutation({
     mutationFn: () =>
       api(`/penyimpanan/${tempat.id}/bahan`, {
         method: "PUT",
-        body: { ingredient_ids: [...sel] },
+        body: isBahan ? { ingredient_ids: [...sel] } : { supply_ids: [...sel] },
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["penyimpanan"] });
       queryClient.invalidateQueries({ queryKey: ["penyimpanan-bahan", tempat.id] });
+      if (!isBahan) queryClient.invalidateQueries({ queryKey: ["perlengkapan"] });
       onClose();
     },
   });
@@ -172,44 +209,52 @@ function BahanRakModal({ tempat, onClose }: { tempat: PenyimpananDto; onClose: (
 
   const tampil = useMemo(
     () =>
-      bahan.filter(
+      items.filter(
         (b) =>
           !terpakaiLain.has(b.id) &&
           (b.nama.toLowerCase().includes(cari.toLowerCase()) ||
             (b.kode ?? "").toLowerCase().includes(cari.toLowerCase())),
       ),
-    [bahan, cari, terpakaiLain],
+    [items, cari, terpakaiLain],
   );
+  const jenisTeks = isBahan ? "bahan" : "perlengkapan";
 
   return (
-    <Modal open onClose={onClose} title={`Bahan Baku di ${tempat.nama}`} lebar="max-w-lg">
+    <Modal
+      open
+      onClose={onClose}
+      title={`${isBahan ? "Bahan Baku" : "Perlengkapan"} di ${tempat.nama}`}
+      lebar="max-w-lg"
+    >
       <div className="space-y-3">
         <div className="rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-800">
-          Pilih bahan baku yang <b>disimpan di rak ini</b>. Saat kiriman dari CK diterima di
-          cabang, bahan-bahan ini <b>otomatis diletakkan di sini</b> (stok &amp; opname per rak
-          jadi benar). Satu bahan hanya di satu rak per cabang.
+          Pilih {jenisTeks} yang <b>disimpan di rak ini</b>.{" "}
+          {isBahan
+            ? "Saat kiriman dari CK diterima di cabang, bahan-bahan ini otomatis diletakkan di sini (stok & opname per rak jadi benar)."
+            : "Info lokasi ini tampil di daftar Perlengkapan (“disimpan di mana”)."}{" "}
+          Satu {jenisTeks} hanya di satu rak per cabang.
         </div>
         <input
           value={cari}
           onChange={(e) => setCari(e.target.value)}
-          placeholder="Cari bahan (nama / kode)…"
+          placeholder={`Cari ${jenisTeks}…`}
           className={inputClass}
         />
         <div className="text-xs text-stone-500">
-          {sel.size} bahan dipilih
+          {sel.size} {jenisTeks} dipilih
           {terpakaiLain.size > 0 && (
             <span className="ml-2 text-stone-400">
-              · {terpakaiLain.size} bahan sudah di rak lain (disembunyikan)
+              · {terpakaiLain.size} {jenisTeks} sudah di rak lain (disembunyikan)
             </span>
           )}
         </div>
-        {loadBahan || loadAsg ? (
+        {loadAsg || (isBahan ? loadBahan : loadPerl) ? (
           <Spinner />
         ) : (
           <div className="max-h-80 space-y-1 overflow-y-auto">
             {tampil.length === 0 && (
               <div className="py-4 text-center text-sm text-stone-400">
-                Tidak ada bahan yang cocok.
+                Tidak ada {jenisTeks} yang cocok.
               </div>
             )}
             {tampil.map((b) => (
@@ -225,9 +270,11 @@ function BahanRakModal({ tempat, onClose }: { tempat: PenyimpananDto; onClose: (
                   {b.kode && (
                     <span className="ml-2 font-mono text-xs text-stone-400">{b.kode}</span>
                   )}
-                  <span className="ml-2 rounded-full bg-stone-100 px-1.5 py-0.5 text-xs text-stone-500">
-                    {b.pengadaan === "produksi" ? "Produksi" : "Beli"}
-                  </span>
+                  {b.label && (
+                    <span className="ml-2 rounded-full bg-stone-100 px-1.5 py-0.5 text-xs text-stone-500">
+                      {b.label}
+                    </span>
+                  )}
                 </span>
               </label>
             ))}
@@ -258,7 +305,7 @@ export function PenyimpananPage() {
   });
   const [form, setForm] = useState<FormState | null>(null);
   const [petugas, setPetugas] = useState<PenyimpananDto | null>(null);
-  const [bahanRak, setBahanRak] = useState<PenyimpananDto | null>(null);
+  const [isiRak, setIsiRak] = useState<{ tempat: PenyimpananDto; jenis: JenisRak } | null>(null);
 
   const simpan = useMutation({
     mutationFn: (f: FormState) => {
@@ -322,6 +369,7 @@ export function PenyimpananPage() {
             <tr>
               <th className={thClass}>Nama</th>
               <th className={thClass}>Bahan Baku</th>
+              <th className={thClass}>Perlengkapan</th>
               <th className={thClass}>Petugas Opname</th>
               <th className={thClass}>Status</th>
               <th className={thClass}></th>
@@ -338,7 +386,7 @@ export function PenyimpananPage() {
                 </td>
                 <td className={tdClass}>
                   <button
-                    onClick={() => setBahanRak(t)}
+                    onClick={() => setIsiRak({ tempat: t, jenis: "bahan" })}
                     title="Pilih bahan baku yang disimpan di rak ini (rak default saat kiriman diterima)"
                     className={`rounded-full border px-2.5 py-0.5 text-xs font-medium transition ${
                       t.jumlah_bahan > 0
@@ -347,6 +395,21 @@ export function PenyimpananPage() {
                     }`}
                   >
                     {t.jumlah_bahan > 0 ? `🥫 ${t.jumlah_bahan} bahan` : "+ Pilih bahan"}
+                  </button>
+                </td>
+                <td className={tdClass}>
+                  <button
+                    onClick={() => setIsiRak({ tempat: t, jenis: "perlengkapan" })}
+                    title="Pilih perlengkapan yang disimpan di rak ini"
+                    className={`rounded-full border px-2.5 py-0.5 text-xs font-medium transition ${
+                      t.jumlah_perlengkapan > 0
+                        ? "border-sky-200 bg-sky-50 text-sky-800 hover:border-orange-400"
+                        : "border-dashed border-stone-300 text-stone-500 hover:border-orange-400 hover:text-orange-600"
+                    }`}
+                  >
+                    {t.jumlah_perlengkapan > 0
+                      ? `🧰 ${t.jumlah_perlengkapan} perlengkapan`
+                      : "+ Pilih perlengkapan"}
                   </button>
                 </td>
                 <td className={tdClass}>
@@ -393,7 +456,7 @@ export function PenyimpananPage() {
             ))}
             {(tempat ?? []).length === 0 && (
               <tr>
-                <td colSpan={5} className="py-8 text-center text-sm text-stone-400">
+                <td colSpan={6} className="py-8 text-center text-sm text-stone-400">
                   Belum ada tempat penyimpanan di cabang ini.
                 </td>
               </tr>
@@ -441,8 +504,13 @@ export function PenyimpananPage() {
       </Modal>
 
       {petugas && <PetugasModal tempat={petugas} onClose={() => setPetugas(null)} />}
-      {bahanRak && (
-        <BahanRakModal key={bahanRak.id} tempat={bahanRak} onClose={() => setBahanRak(null)} />
+      {isiRak && (
+        <IsiRakModal
+          key={`${isiRak.tempat.id}-${isiRak.jenis}`}
+          tempat={isiRak.tempat}
+          jenis={isiRak.jenis}
+          onClose={() => setIsiRak(null)}
+        />
       )}
     </div>
   );

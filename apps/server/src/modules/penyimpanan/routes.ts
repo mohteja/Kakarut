@@ -1,5 +1,5 @@
 import { zValidator } from "@hono/zod-validator";
-import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
@@ -11,6 +11,7 @@ import {
   storageLocationIngredients,
   storageLocationPetugas,
   storageLocations,
+  supplies,
   users,
 } from "../../db/schema";
 import {
@@ -28,10 +29,12 @@ const PenyimpananBody = z.object({
   is_active: z.boolean().optional(),
 });
 
+type IsiRak = { bahan: number; perlengkapan: number };
+
 function toDto(
   row: typeof storageLocations.$inferSelect,
   petugas: PetugasRingkas[] = [],
-  jumlahBahan = 0,
+  isi: IsiRak = { bahan: 0, perlengkapan: 0 },
 ): PenyimpananDto {
   return {
     id: row.id,
@@ -40,21 +43,23 @@ function toDto(
     catatan: row.catatan,
     is_active: row.isActive,
     petugas,
-    jumlah_bahan: jumlahBahan,
+    jumlah_bahan: isi.bahan,
+    jumlah_perlengkapan: isi.perlengkapan,
   };
 }
 
-/** Jumlah bahan baku yang ditugaskan per tempat penyimpanan. */
-async function jumlahBahanByLokasi(
+/** Jumlah bahan baku & perlengkapan yang ditugaskan per tempat penyimpanan. */
+async function isiByLokasi(
   companyId: string,
   locationIds: string[],
-): Promise<Map<string, number>> {
-  const map = new Map<string, number>();
+): Promise<Map<string, IsiRak>> {
+  const map = new Map<string, IsiRak>();
   if (locationIds.length === 0) return map;
   const rows = await db
     .select({
       locId: storageLocationIngredients.storageLocationId,
-      n: sql<number>`COUNT(*)::int`,
+      bahan: sql<number>`COUNT(*) FILTER (WHERE ${storageLocationIngredients.ingredientId} IS NOT NULL)::int`,
+      perlengkapan: sql<number>`COUNT(*) FILTER (WHERE ${storageLocationIngredients.supplyId} IS NOT NULL)::int`,
     })
     .from(storageLocationIngredients)
     .where(
@@ -64,7 +69,7 @@ async function jumlahBahanByLokasi(
       ),
     )
     .groupBy(storageLocationIngredients.storageLocationId);
-  for (const r of rows) map.set(r.locId, r.n);
+  for (const r of rows) map.set(r.locId, { bahan: r.bahan, perlengkapan: r.perlengkapan });
   return map;
 }
 
@@ -117,13 +122,11 @@ export const penyimpananRoutes = new Hono<AppEnv>()
       )
       .orderBy(asc(storageLocations.nama));
     const ids = rows.map((r) => r.id);
-    const [byLoc, byBahan] = await Promise.all([
+    const [byLoc, byIsi] = await Promise.all([
       petugasByLokasi(auth.company_id!, ids),
-      jumlahBahanByLokasi(auth.company_id!, ids),
+      isiByLokasi(auth.company_id!, ids),
     ]);
-    return c.json(
-      rows.map((r) => toDto(r, byLoc.get(r.id) ?? [], byBahan.get(r.id) ?? 0)),
-    );
+    return c.json(rows.map((r) => toDto(r, byLoc.get(r.id) ?? [], byIsi.get(r.id))));
   })
   // POST boleh semua peran — dipakai quick-add saat mengisi faktur
   .post("/", zValidator("json", PenyimpananBody), async (c) => {
@@ -252,8 +255,12 @@ export const penyimpananRoutes = new Hono<AppEnv>()
       .from(storageLocations)
       .where(and(eq(storageLocations.id, locId), eq(storageLocations.companyId, auth.company_id!)));
     if (!loc) throw new HTTPException(404, { message: "Tempat penyimpanan tidak ditemukan" });
+    // isi rak ini: bahan baku + perlengkapan
     const rows = await db
-      .select({ ingredientId: storageLocationIngredients.ingredientId })
+      .select({
+        ingredientId: storageLocationIngredients.ingredientId,
+        supplyId: storageLocationIngredients.supplyId,
+      })
       .from(storageLocationIngredients)
       .where(
         and(
@@ -261,10 +268,13 @@ export const penyimpananRoutes = new Hono<AppEnv>()
           eq(storageLocationIngredients.storageLocationId, locId),
         ),
       );
-    // bahan yang SUDAH disimpan di rak LAIN pada cabang yang sama — 1 bahan
+    // item yang SUDAH disimpan di rak LAIN pada cabang yang sama — 1 item
     // hanya boleh di 1 rak per cabang, jadi ini disembunyikan dari picker.
     const lain = await db
-      .select({ ingredientId: storageLocationIngredients.ingredientId })
+      .select({
+        ingredientId: storageLocationIngredients.ingredientId,
+        supplyId: storageLocationIngredients.supplyId,
+      })
       .from(storageLocationIngredients)
       .innerJoin(
         storageLocations,
@@ -278,93 +288,153 @@ export const penyimpananRoutes = new Hono<AppEnv>()
         ),
       );
     return c.json({
-      ingredient_ids: rows.map((r) => r.ingredientId),
-      terpakai_lain: lain.map((r) => r.ingredientId),
+      ingredient_ids: rows.map((r) => r.ingredientId).filter((x): x is string => !!x),
+      terpakai_lain: lain.map((r) => r.ingredientId).filter((x): x is string => !!x),
+      supply_ids: rows.map((r) => r.supplyId).filter((x): x is string => !!x),
+      supply_terpakai_lain: lain.map((r) => r.supplyId).filter((x): x is string => !!x),
     });
   })
   /**
-   * Ganti seluruh daftar bahan baku yang disimpan di rak ini (owner/admin).
-   * Satu bahan maksimal di SATU rak per cabang: bahan yang ditugaskan ke sini
-   * otomatis dilepas dari rak lain di cabang yang sama.
+   * Ganti daftar isi rak ini (owner/admin). Body boleh berisi `ingredient_ids`
+   * (bahan baku) dan/atau `supply_ids` (perlengkapan) — tipe yang DISERTAKAN saja
+   * yang diganti (tipe yang tidak dikirim dibiarkan). Satu item maksimal di SATU
+   * rak per cabang: item yang ditugaskan ke sini otomatis dilepas dari rak lain
+   * di cabang yang sama.
    */
   .put(
     "/:id/bahan",
     requireRole("owner", "admin"),
-    zValidator("json", z.object({ ingredient_ids: z.array(z.string().uuid()).max(2000) })),
+    zValidator(
+      "json",
+      z.object({
+        ingredient_ids: z.array(z.string().uuid()).max(2000).optional(),
+        supply_ids: z.array(z.string().uuid()).max(2000).optional(),
+      }),
+    ),
     async (c) => {
       const auth = c.get("auth");
+      const companyId = auth.company_id!;
       const locId = c.req.param("id");
-      const { ingredient_ids } = c.req.valid("json");
-      const uniqueIds = [...new Set(ingredient_ids)];
+      const body = c.req.valid("json");
+      const bahanIds = body.ingredient_ids ? [...new Set(body.ingredient_ids)] : null;
+      const supplyIds = body.supply_ids ? [...new Set(body.supply_ids)] : null;
 
       const [loc] = await db
         .select({ id: storageLocations.id, branchId: storageLocations.branchId })
         .from(storageLocations)
-        .where(
-          and(eq(storageLocations.id, locId), eq(storageLocations.companyId, auth.company_id!)),
-        );
+        .where(and(eq(storageLocations.id, locId), eq(storageLocations.companyId, companyId)));
       if (!loc) throw new HTTPException(404, { message: "Tempat penyimpanan tidak ditemukan" });
 
-      if (uniqueIds.length > 0) {
+      if (bahanIds && bahanIds.length > 0) {
         const valid = await db
           .select({ id: ingredients.id })
           .from(ingredients)
           .where(
             and(
-              eq(ingredients.companyId, auth.company_id!),
+              eq(ingredients.companyId, companyId),
               eq(ingredients.isActive, true),
-              inArray(ingredients.id, uniqueIds),
+              inArray(ingredients.id, bahanIds),
             ),
           );
-        if (valid.length !== uniqueIds.length) {
+        if (valid.length !== bahanIds.length) {
           throw new HTTPException(400, { message: "Ada bahan yang tidak valid" });
         }
       }
+      if (supplyIds && supplyIds.length > 0) {
+        const valid = await db
+          .select({ id: supplies.id })
+          .from(supplies)
+          .where(
+            and(
+              eq(supplies.companyId, companyId),
+              eq(supplies.isActive, true),
+              inArray(supplies.id, supplyIds),
+            ),
+          );
+        if (valid.length !== supplyIds.length) {
+          throw new HTTPException(400, { message: "Ada perlengkapan yang tidak valid" });
+        }
+      }
 
-      // rak lain di cabang yang sama (untuk menjaga 1 bahan = 1 rak per cabang)
+      // rak lain di cabang yang sama (untuk menjaga 1 item = 1 rak per cabang)
       const rakCabang = await db
         .select({ id: storageLocations.id })
         .from(storageLocations)
         .where(
-          and(
-            eq(storageLocations.companyId, auth.company_id!),
-            eq(storageLocations.branchId, loc.branchId),
-          ),
+          and(eq(storageLocations.companyId, companyId), eq(storageLocations.branchId, loc.branchId)),
         );
       const rakLainIds = rakCabang.map((r) => r.id).filter((id) => id !== locId);
 
       await db.transaction(async (tx) => {
-        // ganti isi rak ini
-        await tx
-          .delete(storageLocationIngredients)
-          .where(
-            and(
-              eq(storageLocationIngredients.companyId, auth.company_id!),
-              eq(storageLocationIngredients.storageLocationId, locId),
-            ),
-          );
-        // lepas bahan yang dipindah ke sini dari rak lain di cabang yang sama
-        if (uniqueIds.length > 0 && rakLainIds.length > 0) {
+        if (bahanIds) {
+          // ganti isi BAHAN rak ini (baris supply dibiarkan)
           await tx
             .delete(storageLocationIngredients)
             .where(
               and(
-                eq(storageLocationIngredients.companyId, auth.company_id!),
-                inArray(storageLocationIngredients.storageLocationId, rakLainIds),
-                inArray(storageLocationIngredients.ingredientId, uniqueIds),
+                eq(storageLocationIngredients.companyId, companyId),
+                eq(storageLocationIngredients.storageLocationId, locId),
+                isNotNull(storageLocationIngredients.ingredientId),
               ),
             );
+          if (bahanIds.length > 0 && rakLainIds.length > 0) {
+            await tx
+              .delete(storageLocationIngredients)
+              .where(
+                and(
+                  eq(storageLocationIngredients.companyId, companyId),
+                  inArray(storageLocationIngredients.storageLocationId, rakLainIds),
+                  inArray(storageLocationIngredients.ingredientId, bahanIds),
+                ),
+              );
+          }
+          if (bahanIds.length > 0) {
+            await tx.insert(storageLocationIngredients).values(
+              bahanIds.map((ingredientId) => ({
+                companyId,
+                storageLocationId: locId,
+                ingredientId,
+              })),
+            );
+          }
         }
-        if (uniqueIds.length > 0) {
-          await tx.insert(storageLocationIngredients).values(
-            uniqueIds.map((ingredientId) => ({
-              companyId: auth.company_id!,
-              storageLocationId: locId,
-              ingredientId,
-            })),
-          );
+        if (supplyIds) {
+          // ganti isi PERLENGKAPAN rak ini (baris bahan dibiarkan)
+          await tx
+            .delete(storageLocationIngredients)
+            .where(
+              and(
+                eq(storageLocationIngredients.companyId, companyId),
+                eq(storageLocationIngredients.storageLocationId, locId),
+                isNotNull(storageLocationIngredients.supplyId),
+              ),
+            );
+          if (supplyIds.length > 0 && rakLainIds.length > 0) {
+            await tx
+              .delete(storageLocationIngredients)
+              .where(
+                and(
+                  eq(storageLocationIngredients.companyId, companyId),
+                  inArray(storageLocationIngredients.storageLocationId, rakLainIds),
+                  inArray(storageLocationIngredients.supplyId, supplyIds),
+                ),
+              );
+          }
+          if (supplyIds.length > 0) {
+            await tx.insert(storageLocationIngredients).values(
+              supplyIds.map((supplyId) => ({
+                companyId,
+                storageLocationId: locId,
+                supplyId,
+              })),
+            );
+          }
         }
       });
-      return c.json({ ok: true, jumlah: uniqueIds.length });
+      return c.json({
+        ok: true,
+        jumlah_bahan: bahanIds?.length ?? null,
+        jumlah_perlengkapan: supplyIds?.length ?? null,
+      });
     },
   );

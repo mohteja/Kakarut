@@ -1,5 +1,5 @@
 import { zValidator } from "@hono/zod-validator";
-import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -223,10 +223,17 @@ async function rakLokasiByBahan(companyId: string): Promise<Map<string, RakLokas
     .from(storageLocationIngredients)
     .innerJoin(storageLocations, eq(storageLocations.id, storageLocationIngredients.storageLocationId))
     .innerJoin(branches, eq(branches.id, storageLocations.branchId))
-    .where(eq(storageLocationIngredients.companyId, companyId))
+    // tabel sli kini juga memuat perlengkapan (supply_id) — batasi ke bahan baku
+    .where(
+      and(
+        eq(storageLocationIngredients.companyId, companyId),
+        isNotNull(storageLocationIngredients.ingredientId),
+      ),
+    )
     .orderBy(asc(branches.tipe), asc(branches.nama), asc(storageLocations.nama));
   const map = new Map<string, RakLokasi[]>();
   for (const r of rows) {
+    if (!r.ingredientId) continue;
     const list = map.get(r.ingredientId) ?? [];
     list.push({
       branch_id: r.branchId,

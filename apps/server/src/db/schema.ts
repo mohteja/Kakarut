@@ -263,14 +263,15 @@ export const storageLocationPetugas = pgTable(
 );
 
 /**
- * Penugasan BAHAN BAKU ke tempat penyimpanan (rak) SETIAP cabang (CK & store):
- * "bahan ini disimpan di rak ini di cabang ini". SUMBER TUNGGAL rak simpan —
- * diatur di Tempat Penyimpanan, bukan di form Bahan Baku. Dipakai sebagai RAK
- * DEFAULT: saat barang tiba/diterima/dikonfirmasi di sebuah cabang, otomatis
- * diletakkan di rak yang ditugaskan untuk bahan itu DI CABANG TERSEBUT (stok &
- * opname per rak jadi benar tanpa pilih manual). Sebuah bahan bisa punya rak di
- * CK DAN di cabang store (terpisah), tapi maksimal SATU rak per cabang (dijaga
- * di handler PUT).
+ * Penugasan ITEM (BAHAN BAKU atau PERLENGKAPAN) ke tempat penyimpanan (rak)
+ * SETIAP cabang (CK & store): "item ini disimpan di rak ini di cabang ini".
+ * SUMBER TUNGGAL rak simpan — diatur di Tempat Penyimpanan, bukan di form
+ * Bahan/Perlengkapan. SATU TABEL untuk keduanya: tiap baris merujuk TEPAT SATU
+ * dari ingredient_id / supply_id (dijaga check XOR). Untuk bahan baku juga
+ * dipakai sebagai RAK DEFAULT: saat barang tiba/diterima/dikonfirmasi di sebuah
+ * cabang, otomatis diletakkan di rak yang ditugaskan untuk item itu DI CABANG
+ * TERSEBUT. Sebuah item bisa punya rak di CK DAN di cabang store (terpisah),
+ * tapi maksimal SATU rak per cabang (dijaga di handler PUT).
  */
 export const storageLocationIngredients = pgTable(
   "storage_location_ingredients",
@@ -282,14 +283,24 @@ export const storageLocationIngredients = pgTable(
     storageLocationId: uuid("storage_location_id")
       .notNull()
       .references(() => storageLocations.id, { onDelete: "cascade" }),
-    ingredientId: uuid("ingredient_id")
-      .notNull()
-      .references(() => ingredients.id, { onDelete: "cascade" }),
+    /** salah satu diisi: bahan baku (ingredient) ATAU perlengkapan (supply) */
+    ingredientId: uuid("ingredient_id").references(() => ingredients.id, { onDelete: "cascade" }),
+    supplyId: uuid("supply_id").references(() => supplies.id, { onDelete: "cascade" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    uniqueIndex("storage_location_ingredients_uq").on(t.storageLocationId, t.ingredientId),
+    uniqueIndex("storage_location_ingredients_uq")
+      .on(t.storageLocationId, t.ingredientId)
+      .where(sql`${t.ingredientId} IS NOT NULL`),
+    uniqueIndex("storage_location_supplies_uq")
+      .on(t.storageLocationId, t.supplyId)
+      .where(sql`${t.supplyId} IS NOT NULL`),
     index("storage_location_ingredients_ing_idx").on(t.ingredientId),
+    index("storage_location_ingredients_sup_idx").on(t.supplyId),
+    check(
+      "storage_location_items_target_ck",
+      sql`(${t.ingredientId} IS NOT NULL) <> (${t.supplyId} IS NOT NULL)`,
+    ),
   ],
 );
 
