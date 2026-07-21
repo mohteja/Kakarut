@@ -3538,6 +3538,11 @@ cek "SMTP: password mentah TIDAK dikembalikan" "V == 1" \
   "$(echo "$SM" | jq '((has("password"))|not)|if . then 1 else 0 end')"
 cek "owner akses pengaturan SMTP → 403" "V == 403" "$(status_code "$OWNER" GET /admin/sistem/smtp)"
 cek "kasir akses pengaturan SMTP → 403" "V == 403" "$(status_code "$KASIR" GET /admin/sistem/smtp)"
+# Kirim test email: tujuan/subjek/isi bisa ditentukan; guard peran + validasi tujuan
+cek "test-email owner (bukan super admin) → 403" "V == 403" \
+  "$(status_code_body "$OWNER" POST /admin/sistem/smtp/test-email '{"to":"a@b.com"}')"
+cek "test-email tujuan tak valid → 400 (validasi)" "V == 400" \
+  "$(status_code_body "$SA" POST /admin/sistem/smtp/test-email '{"to":"bukan-email"}')"
 
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="

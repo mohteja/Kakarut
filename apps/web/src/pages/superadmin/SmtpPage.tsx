@@ -10,7 +10,15 @@ import {
   btnSecondary,
   inputClass,
 } from "../../components/ui";
+import { useAuth } from "../../context/AuthContext";
 import { api } from "../../lib/api";
+
+const DEFAULT_TEST_HTML = `<div style="font-family:system-ui,-apple-system,sans-serif;line-height:1.6;color:#1c1917;max-width:520px">
+  <h2 style="margin:0 0 8px">Halo 👋</h2>
+  <p>Ini email percobaan dari <b>Kakarut POS</b>.</p>
+  <p>Bila Anda menerima email ini, konfigurasi SMTP sudah benar. 🎉</p>
+  <p style="color:#78716c;font-size:13px">— Tim Kakarut</p>
+</div>`;
 
 interface FormState {
   host: string;
@@ -29,12 +37,17 @@ interface FormState {
  */
 export function SmtpPage() {
   const qc = useQueryClient();
+  const { auth } = useAuth();
   const { data, isLoading } = useQuery({
     queryKey: ["admin-smtp"],
     queryFn: () => api<SmtpSettingsDto>("/admin/sistem/smtp"),
   });
 
   const [form, setForm] = useState<FormState | null>(null);
+  // Test email: tujuan, subjek, & isi (HTML) bisa diedit + dipratinjau.
+  const [testTo, setTestTo] = useState("");
+  const [testSubject, setTestSubject] = useState("Email percobaan Kakarut");
+  const [testHtml, setTestHtml] = useState(DEFAULT_TEST_HTML);
   useEffect(() => {
     if (data && form === null) {
       setForm({
@@ -46,8 +59,10 @@ export function SmtpPage() {
         sender_name: data.sender_name ?? "",
         sender_email: data.sender_email ?? "",
       });
+      // default tujuan = email super admin yang login (bisa diganti)
+      setTestTo(auth?.user.email ?? data.sender_email ?? "");
     }
-  }, [data, form]);
+  }, [data, form, auth]);
 
   const simpan = useMutation({
     mutationFn: (f: FormState) =>
@@ -76,7 +91,7 @@ export function SmtpPage() {
     mutationFn: () =>
       api<{ ok: boolean; to: string; provider: string }>("/admin/sistem/smtp/test-email", {
         method: "POST",
-        body: {},
+        body: { to: testTo || undefined, subject: testSubject, html: testHtml },
       }),
   });
 
@@ -212,14 +227,6 @@ export function SmtpPage() {
             >
               {testKoneksi.isPending ? "Menguji…" : "🔌 Test Koneksi"}
             </button>
-            <button
-              type="button"
-              onClick={() => testEmail.mutate()}
-              disabled={testEmail.isPending}
-              className={btnSecondary}
-            >
-              {testEmail.isPending ? "Mengirim…" : "✈ Kirim Test Email"}
-            </button>
           </div>
           {testKoneksi.isSuccess && (
             <div className="rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
@@ -227,13 +234,76 @@ export function SmtpPage() {
             </div>
           )}
           <ErrorText error={testKoneksi.error} />
+        </form>
+      </Card>
+
+      {/* Kirim test email — tujuan, subjek, & isi bisa diedit + pratinjau */}
+      <Card className="mt-4 p-5">
+        <h2 className="mb-1 font-bold text-stone-800">✈ Kirim Test Email</h2>
+        <p className="mb-3 text-sm text-stone-500">
+          Tentukan tujuan, subjek, dan isi email. Pratinjau tampil di bawah — sunting isinya
+          lalu kirim untuk memastikan email tampil sesuai harapan.
+        </p>
+        <div className="space-y-3">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-sm font-medium">Email tujuan</label>
+              <input
+                type="email"
+                value={testTo}
+                onChange={(e) => setTestTo(e.target.value)}
+                placeholder="tujuan@email.com"
+                className={inputClass}
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium">Subjek</label>
+              <input
+                value={testSubject}
+                onChange={(e) => setTestSubject(e.target.value)}
+                placeholder="Subjek email"
+                className={inputClass}
+              />
+            </div>
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium">
+              Isi email <span className="font-normal text-stone-400">(HTML — boleh diedit)</span>
+            </label>
+            <textarea
+              value={testHtml}
+              onChange={(e) => setTestHtml(e.target.value)}
+              rows={7}
+              spellCheck={false}
+              className={`${inputClass} font-mono text-xs`}
+            />
+          </div>
+          <div>
+            <div className="mb-1 text-sm font-medium text-stone-600">Pratinjau</div>
+            <div className="overflow-hidden rounded-lg border border-stone-200 bg-white">
+              <iframe
+                title="Pratinjau email"
+                srcDoc={testHtml}
+                sandbox=""
+                className="h-56 w-full"
+              />
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => testEmail.mutate()}
+            disabled={testEmail.isPending || !testTo.trim()}
+            className={btnPrimary}
+          >
+            {testEmail.isPending ? "Mengirim…" : "✈ Kirim Test Email"}
+          </button>
           {testEmail.isSuccess && (
             <div className="rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
               ✅ Test email terkirim ke {testEmail.data.to} (via {testEmail.data.provider}).
             </div>
           )}
           <ErrorText error={testEmail.error} />
-        </form>
+        </div>
       </Card>
 
       {/* Panduan */}
