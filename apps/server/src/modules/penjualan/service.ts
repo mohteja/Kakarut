@@ -26,6 +26,12 @@ export interface CreateSaleParams {
   /** pembayaran: metode + uang tunai diterima (untuk kembalian) */
   metodeBayar?: "tunai" | "qris" | "transfer";
   uangDiterima?: number | null;
+  /**
+   * Waktu kejadian transaksi (sinkron offline). Bila diisi: dipakai sebagai
+   * timestamp struk + tanggal bisnis (untuk nomor & rekap/shift). Bila kosong:
+   * waktu server saat ini (jalur online biasa).
+   */
+  waktu?: Date;
   items: SaleItemInput[];
 }
 
@@ -163,7 +169,8 @@ export async function createSale(params: CreateSaleParams) {
     const subtotalNet = subtotal - diskon;
     const pb1Amount = company.pb1Enabled ? hitungPb1(subtotalNet, company.pb1Rate) : 0;
     const total = subtotalNet + pb1Amount;
-    const saleDate = tanggalDi(company.timezone);
+    // Tanggal bisnis dihitung dari waktu kejadian (offline) bila diberikan.
+    const saleDate = tanggalDi(company.timezone, params.waktu);
 
     // Pembayaran: metode + uang tunai diterima. Untuk tunai, uang (bila diisi)
     // wajib ≥ total; non-tunai → tanpa uang diterima (kembalian 0).
@@ -215,6 +222,7 @@ export async function createSale(params: CreateSaleParams) {
         metodeBayar,
         uangDiterima,
         saleDate,
+        ...(params.waktu ? { waktu: params.waktu } : {}),
       })
       .returning();
 

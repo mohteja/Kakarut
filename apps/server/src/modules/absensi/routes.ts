@@ -1,5 +1,5 @@
 import { zValidator } from "@hono/zod-validator";
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, lt, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
@@ -17,9 +17,9 @@ const KoordinatBody = {
   lng: z.number().min(-180).max(180).nullish(),
 };
 /** Absen operator (pindai QR / ketik kode karyawan). */
-const ClockBody = z.object({ kode: z.string().trim().min(1), ...KoordinatBody });
+export const ClockBody = z.object({ kode: z.string().trim().min(1), ...KoordinatBody });
 /** Absen SENDIRI (tombol absen di aplikasi) — tanpa kode, atas nama pemanggil. */
-const SelfBody = z.object(KoordinatBody);
+export const SelfBody = z.object(KoordinatBody);
 
 /** Validasi tanggal YYYY-MM-DD yang benar (menolak bulan/hari di luar rentang). */
 function tanggalValid(s: string): boolean {
@@ -41,7 +41,7 @@ async function timezoneOf(companyId: string): Promise<string> {
  * radius itu — perangkat wajib mengirim koordinat GPS. Mengembalikan nama
  * cabang + jarak (m) atau null bila cabang tanpa titik lokasi.
  */
-async function cekRadius(
+export async function cekRadius(
   branchId: string,
   lat: number | null | undefined,
   lng: number | null | undefined,
@@ -78,7 +78,7 @@ async function cekRadius(
  * cap terakhir HARI INI di cabang itu (branch-scoped, konsisten dgn ringkasan
  * GET), lalu sisipkan baris absensi. Mengembalikan AbsenResult.
  */
-async function catatAbsen(opts: {
+export async function catatAbsen(opts: {
   companyId: string;
   branchId: string;
   userId: string;
@@ -87,8 +87,10 @@ async function catatAbsen(opts: {
   namaCabang: string;
   fotoUrl: string;
   jarakM: number | null;
+  /** waktu kejadian (sinkron offline); bila kosong pakai waktu server */
+  waktu?: Date;
 }): Promise<AbsenResult> {
-  const tanggal = tanggalDi(await timezoneOf(opts.companyId));
+  const tanggal = tanggalDi(await timezoneOf(opts.companyId), opts.waktu);
   const [last] = await db
     .select({ tipe: attendances.tipe })
     .from(attendances)
@@ -98,6 +100,9 @@ async function catatAbsen(opts: {
         eq(attendances.branchId, opts.branchId),
         eq(attendances.userId, opts.userId),
         eq(attendances.attendDate, tanggal),
+        // untuk cap susulan (offline), alternasi masuk/keluar dihitung dari cap
+        // yang waktunya SEBELUM cap ini (bukan cap terbaru absolut)
+        ...(opts.waktu ? [lt(attendances.waktu, opts.waktu)] : []),
       ),
     )
     .orderBy(desc(attendances.waktu))
@@ -112,6 +117,7 @@ async function catatAbsen(opts: {
       tipe,
       attendDate: tanggal,
       fotoUrl: opts.fotoUrl,
+      ...(opts.waktu ? { waktu: opts.waktu } : {}),
     })
     .returning({ waktu: attendances.waktu });
   return {

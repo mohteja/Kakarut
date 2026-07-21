@@ -5,6 +5,7 @@ import {
   date,
   index,
   integer,
+  jsonb,
   numeric,
   pgEnum,
   pgTable,
@@ -727,6 +728,12 @@ export const shifts = pgTable(
     /** uang tunai fisik yang dihitung saat tutup (untuk selisih kas) */
     uangFisik: numeric("uang_fisik", { precision: 14, scale: 2, mode: "number" }),
     catatan: text("catatan"),
+    /**
+     * true bila ADA transaksi susulan (sinkron offline) yang jatuh di jendela
+     * shift ini SETELAH shift ditutup — rekap kas dihitung ulang; penanda ini
+     * memberi tahu bahwa angka penutupan awal bisa berbeda dari rekap terkini.
+     */
+    adaTransaksiSusulan: boolean("ada_transaksi_susulan").notNull().default(false),
   },
   (t) => [
     // hanya boleh ada satu shift terbuka per cabang pada satu waktu
@@ -1460,4 +1467,35 @@ export const supplyPurchases = pgTable(
     tibaAt: timestamp("tiba_at", { withTimezone: true }),
   },
   (t) => [index("supply_purchases_ck_status_idx").on(t.ckBranchId, t.status)],
+);
+
+/**
+ * Buku besar idempotency untuk sinkron offline mobile (POST /api/sync).
+ * Setiap perintah offline punya `client_ref` unik per perusahaan; hasil
+ * eksekusi (sukses/gagal) disimpan agar retry dari perangkat aman
+ * (exactly-once) — perintah yang sudah tercatat tidak dieksekusi ulang.
+ */
+export const syncCommands = pgTable(
+  "sync_commands",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    /** idempotency key dari perangkat — unik per perusahaan */
+    clientRef: uuid("client_ref").notNull(),
+    deviceId: text("device_id"),
+    userId: uuid("user_id").references(() => users.id),
+    tipe: text("tipe").notNull(),
+    /** waktu kejadian di perangkat (offline), bukan waktu sinkron */
+    waktu: timestamp("waktu", { withTimezone: true }).notNull(),
+    /** status hasil: 'ok' | 'gagal' */
+    status: text("status").notNull(),
+    /** kode HTTP hasil eksekusi (201/200/400/403/409/…) */
+    kode: integer("kode").notNull(),
+    /** payload hasil (data endpoint asli) atau pesan error */
+    hasilJson: jsonb("hasil_json"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("sync_commands_company_ref_uq").on(t.companyId, t.clientRef)],
 );

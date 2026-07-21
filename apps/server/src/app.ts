@@ -30,6 +30,7 @@ import { menuRoutes } from "./modules/menu/routes";
 import { onboardingRoutes } from "./modules/onboarding/routes";
 import { openBillRoutes } from "./modules/open-bill/routes";
 import { penjualanRoutes } from "./modules/penjualan/routes";
+import { setSyncApp, syncRoutes } from "./modules/sync/routes";
 import { penyimpananRoutes } from "./modules/penyimpanan/routes";
 import { printRoutes } from "./modules/print/routes";
 import { profilRoutes } from "./modules/profil/routes";
@@ -122,6 +123,8 @@ export function createApp() {
     .route("/meja", mejaRoutes)
     .route("/open-bill", openBillRoutes)
     .route("/shift", shiftRoutes)
+    // Sinkron antrean offline mobile (per-perintah divalidasi seperti endpoint aslinya)
+    .route("/sync", syncRoutes)
     // absensi karyawan (stasiun pindai) — hanya admin/kasir (digerbang di atas)
     .route("/absensi", absensiRoutes)
     // profil akun sendiri (identitas + QR absen + ganti password) — semua peran
@@ -143,6 +146,9 @@ export function createApp() {
   const app = new Hono<AppEnv>();
   app.use("*", logger());
   app.route("/api", api);
+  // Suntik referensi app ke modul sync agar bisa sub-request internal ke
+  // endpoint asli (Fase 2) tanpa import melingkar.
+  setSyncApp(app);
 
   app.onError((err, c) => {
     if (err instanceof HTTPException) {

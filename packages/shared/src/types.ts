@@ -917,6 +917,62 @@ export interface Shift {
   kas_sistem: number;
   /** uang_fisik − kas_sistem (null selagi terbuka) */
   selisih: number | null;
+  /** ada transaksi susulan (sinkron offline) setelah shift ditutup → rekap dihitung ulang */
+  ada_transaksi_susulan: boolean;
+}
+
+/**
+ * Jenis perintah yang bisa diantre offline & disinkron via POST /api/sync.
+ * Fase 1: penjualan + absen. Fase 2: opname, perlengkapan, faktur tahap/kirim,
+ * penerimaan. Payload = body endpoint asli (+ path param bila ditandai).
+ */
+export type SyncTipe =
+  | "penjualan"
+  | "absen_saya"
+  | "absen_stasiun"
+  // Fase 2
+  | "stok_opname"
+  | "perlengkapan_opname"
+  | "perlengkapan_pakai" // payload + supply_id
+  | "faktur_tahap" // payload + jalur ("produksi"|"pembelian") + faktur_id
+  | "faktur_kirim" // payload + jalur + faktur_id
+  | "produksi_kirim_hasil" // payload + faktur_id
+  | "penerimaan_terima" // payload + faktur_id
+  | "penerimaan_terima_sebagian" // payload + faktur_id
+  | "penerimaan_tolak"; // payload + faktur_id
+
+/** Satu perintah offline dalam batch sinkron (payload = body endpoint aslinya). */
+export interface SyncCommand {
+  /** idempotency key (uuid v4), unik per perusahaan */
+  client_ref: string;
+  tipe: SyncTipe;
+  /** waktu kejadian di perangkat (ISO UTC) */
+  waktu: string;
+  payload: unknown;
+}
+
+/** Body POST /api/sync — batch perintah urut kronologis (maks 100). */
+export interface SyncRequest {
+  device_id?: string | null;
+  commands: SyncCommand[];
+}
+
+/** Hasil satu perintah (urutan sama dengan permintaan). */
+export interface SyncItemResult {
+  client_ref: string;
+  /** ok = baru dieksekusi; sudah_ada = idempoten (retry); gagal = ditolak */
+  status: "ok" | "sudah_ada" | "gagal";
+  /** kode HTTP hasil eksekusi endpoint asli */
+  kode: number;
+  /** data respons endpoint asli (saat ok/sudah_ada sukses) */
+  data?: unknown;
+  /** pesan error endpoint asli (saat gagal) */
+  error?: string;
+}
+
+/** Respons POST /api/sync — selalu 200; detail per item. */
+export interface SyncResponse {
+  hasil: SyncItemResult[];
 }
 
 /** Satu transaksi di dalam jendela waktu sebuah shift (untuk detail shift). */
