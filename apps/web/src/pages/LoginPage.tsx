@@ -66,6 +66,11 @@ export function LoginPage() {
           <button type="submit" disabled={loading} className={`${btnPrimary} w-full`}>
             {loading ? "Masuk…" : "Masuk"}
           </button>
+          <div className="text-center">
+            <Link to="/lupa-password" className="text-sm text-stone-500 hover:text-orange-600 hover:underline">
+              Lupa password?
+            </Link>
+          </div>
         </form>
         <p className="mt-4 text-center text-sm text-stone-500">
           Belum punya akun?{" "}

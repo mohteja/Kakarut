@@ -1,14 +1,20 @@
+import { createHash, randomBytes } from "node:crypto";
 import { zValidator } from "@hono/zod-validator";
 import bcrypt from "bcryptjs";
-import { eq } from "drizzle-orm";
+import { and, eq, gt, isNull } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
+import { env } from "../../config/env";
 import { db } from "../../db/client";
-import { companies, users } from "../../db/schema";
+import { companies, passwordResetTokens, users } from "../../db/schema";
 import { requireAuth, type AppEnv } from "../../middleware/auth";
+import { emailTerkonfigurasi, kirimEmail } from "../mail/service";
 import { autoTerimaUndanganEmail } from "../onboarding/service";
 import { buatSesi } from "./session";
+
+/** Token reset disimpan sebagai hash (bukan nilai mentah). */
+const hashToken = (t: string) => createHash("sha256").update(t).digest("hex");
 
 const LoginSchema = z.object({
   email: z.string().trim().toLowerCase(),
@@ -54,6 +60,83 @@ export const authRoutes = new Hono<AppEnv>()
     });
     return c.json(await buatSesi(user, preferredCompanyId ?? undefined), 201);
   })
+  // Lupa password: selalu balas 200 (jangan bocorkan apakah email terdaftar).
+  // Bila akun ada & aktif, buat token reset + kirim tautan via email. Saat email
+  // BELUM dikonfigurasi & bukan produksi, kembalikan tautan langsung (bantuan
+  // dev/setup — di produksi tak pernah dibocorkan).
+  .post(
+    "/forgot-password",
+    zValidator("json", z.object({ email: z.string().trim().toLowerCase().email() })),
+    async (c) => {
+      const { email } = c.req.valid("json");
+      const [user] = await db.select().from(users).where(eq(users.email, email));
+      let devUrl: string | undefined;
+      if (user && !user.deletedAt && user.isActive) {
+        const raw = randomBytes(32).toString("hex");
+        await db.insert(passwordResetTokens).values({
+          userId: user.id,
+          tokenHash: hashToken(raw),
+          expiresAt: new Date(Date.now() + 60 * 60 * 1000), // 1 jam
+        });
+        const url = `${env.APP_BASE_URL}/reset-password?token=${raw}`;
+        try {
+          await kirimEmail({
+            to: email,
+            subject: "Reset password Kakarut",
+            html: `<p>Halo ${user.nama},</p><p>Ada permintaan atur ulang password akun Kakarut Anda. Klik tautan di bawah (berlaku 1 jam):</p><p><a href="${url}">Atur ulang password</a></p><p>Abaikan email ini bila Anda tidak meminta.</p>`,
+          });
+        } catch {
+          /* best-effort: jangan gagalkan permintaan bila email error */
+        }
+        if (!(await emailTerkonfigurasi()) && process.env.NODE_ENV !== "production") {
+          devUrl = url;
+        }
+      }
+      return c.json({ ok: true, ...(devUrl ? { dev_reset_url: devUrl } : {}) });
+    },
+  )
+  // Reset password dengan token dari email.
+  .post(
+    "/reset-password",
+    zValidator(
+      "json",
+      z.object({
+        token: z.string().min(1),
+        password: z.string().min(8, "Password minimal 8 karakter"),
+      }),
+    ),
+    async (c) => {
+      const { token, password } = c.req.valid("json");
+      const [row] = await db
+        .select()
+        .from(passwordResetTokens)
+        .where(
+          and(
+            eq(passwordResetTokens.tokenHash, hashToken(token)),
+            isNull(passwordResetTokens.usedAt),
+            gt(passwordResetTokens.expiresAt, new Date()),
+          ),
+        );
+      if (!row) {
+        throw new HTTPException(400, { message: "Tautan reset tidak valid atau sudah kedaluwarsa" });
+      }
+      const [user] = await db.select().from(users).where(eq(users.id, row.userId));
+      if (!user || user.deletedAt || !user.isActive) {
+        throw new HTTPException(400, { message: "Akun tidak aktif" });
+      }
+      await db.transaction(async (tx) => {
+        await tx
+          .update(users)
+          .set({ passwordHash: bcrypt.hashSync(password, 10) })
+          .where(eq(users.id, user.id));
+        await tx
+          .update(passwordResetTokens)
+          .set({ usedAt: new Date() })
+          .where(eq(passwordResetTokens.id, row.id));
+      });
+      return c.json({ ok: true });
+    },
+  )
   .get("/me", requireAuth, async (c) => {
     const auth = c.get("auth");
     let company = null;

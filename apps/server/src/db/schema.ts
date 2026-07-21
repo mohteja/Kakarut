@@ -249,6 +249,46 @@ export const invitations = pgTable(
   ],
 );
 
+/** Mode enkripsi koneksi SMTP: tanpa / SSL (465) / STARTTLS (587). */
+export const smtpEncryptionEnum = pgEnum("smtp_encryption", ["none", "ssl", "starttls"]);
+
+/**
+ * Pengaturan email (SMTP) TINGKAT PLATFORM — satu baris (singleton), diatur
+ * super admin. Dipakai untuk email sistem: reset password (termasuk user yang
+ * belum punya perusahaan) & undangan. Bila kosong/tak lengkap, email tak
+ * terkirim (dev: tautan dicatat di log / dikembalikan saat belum dikonfigurasi).
+ */
+export const smtpSettings = pgTable("smtp_settings", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  host: text("host"),
+  port: integer("port").notNull().default(587),
+  username: text("username"),
+  password: text("password"),
+  encryption: smtpEncryptionEnum("encryption").notNull().default("starttls"),
+  senderName: text("sender_name"),
+  senderEmail: text("sender_email"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * Token reset password (lupa password): dikirim via email sebagai tautan.
+ * Disimpan sebagai HASH (bukan token mentah). Sekali pakai + kedaluwarsa.
+ */
+export const passwordResetTokens = pgTable(
+  "password_reset_tokens",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash").notNull().unique(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("password_reset_user_idx").on(t.userId)],
+);
+
 /** Master supplier / sumber pengadaan (per perusahaan). */
 export const suppliers = pgTable(
   "suppliers",

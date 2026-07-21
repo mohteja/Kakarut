@@ -54,6 +54,24 @@ export interface UndanganKaryawanRow {
   diundang_pada: string;
 }
 
+export type SmtpEncryption = "none" | "ssl" | "starttls";
+
+/** Pengaturan email (SMTP) platform — GET tak pernah mengembalikan password mentah. */
+export interface SmtpSettingsDto {
+  host: string | null;
+  port: number;
+  username: string | null;
+  /** true = password sudah tersimpan (nilai asli tak dikirim ke klien) */
+  has_password: boolean;
+  encryption: SmtpEncryption;
+  sender_name: string | null;
+  sender_email: string | null;
+  /** true = email siap dikirim (SMTP lengkap ATAU fallback Resend aktif) */
+  configured: boolean;
+  /** penyedia efektif saat ini */
+  provider: "smtp" | "resend" | "none";
+}
+
 /** Satu entri riwayat kegiatan pada faktur (jejak ubah tahap). */
 export interface FakturLogRow {
   id: string;

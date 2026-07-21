@@ -19,6 +19,9 @@ import { DashboardPage } from "./pages/DashboardPage";
 import { LoginPage } from "./pages/LoginPage";
 import { SignupPage } from "./pages/SignupPage";
 import { OnboardingPage } from "./pages/OnboardingPage";
+import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
+import { ResetPasswordPage } from "./pages/ResetPasswordPage";
+import { SmtpPage } from "./pages/superadmin/SmtpPage";
 import { MemberPage } from "./pages/member/MemberPage";
 import { LihatMenuPage } from "./pages/menu/LihatMenuPage";
 import { MenuFormPage } from "./pages/menu/MenuFormPage";
@@ -60,6 +63,8 @@ export default function App() {
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/daftar" element={<SignupPage />} />
+        <Route path="/lupa-password" element={<ForgotPasswordPage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
     );
@@ -108,6 +113,7 @@ export default function App() {
             <>
               <Route path="/superadmin" element={<TenantsPage />} />
               <Route path="/superadmin/sistem" element={<SistemPage />} />
+              <Route path="/superadmin/email" element={<SmtpPage />} />
             </>
           )}
           {!isSuperAdmin && (

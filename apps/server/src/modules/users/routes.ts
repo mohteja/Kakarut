@@ -6,9 +6,11 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import type { UndanganKaryawanRow } from "@kakarut/shared";
+import { env } from "../../config/env";
 import { db } from "../../db/client";
 import {
   branches,
+  companies,
   fakturLogs,
   invitations,
   memberships,
@@ -17,6 +19,7 @@ import {
   users,
 } from "../../db/schema";
 import { type AppEnv } from "../../middleware/auth";
+import { kirimEmail } from "../mail/service";
 import { isKodeKaryawanConflict, resolveKodeKaryawan } from "./service";
 
 const KaryawanBody = z.object({
@@ -206,6 +209,21 @@ export const karyawanRoutes = new Hono<AppEnv>()
         invitedBy: auth.sub,
       })
       .returning({ id: invitations.id });
+    // Email undangan (best-effort — jangan gagalkan bila email belum diatur).
+    try {
+      const [co] = await db
+        .select({ nama: companies.nama })
+        .from(companies)
+        .where(eq(companies.id, auth.company_id!));
+      const url = `${env.APP_BASE_URL}/daftar`;
+      await kirimEmail({
+        to: body.email,
+        subject: `Undangan bergabung ${co?.nama ?? "perusahaan"} di Kakarut`,
+        html: `<p>Anda diundang bergabung ke <b>${co?.nama ?? "sebuah perusahaan"}</b> di Kakarut.</p><p>Daftar dengan email ini untuk otomatis bergabung: <a href="${url}">${url}</a></p><p>Bila sudah punya akun, cukup login — undangan muncul untuk diterima.</p>`,
+      });
+    } catch {
+      /* abaikan kegagalan email */
+    }
     return c.json({ id: inv.id, email: body.email, role: body.role }, 201);
   })
   /** Daftar undangan PENDING perusahaan (yang belum diterima). */

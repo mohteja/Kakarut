@@ -206,6 +206,9 @@ export function Layout() {
               <NavLink to="/superadmin/sistem" className={linkClass}>
                 🗄 Sistem &amp; Migrasi
               </NavLink>
+              <NavLink to="/superadmin/email" className={linkClass}>
+                ✉️ Pengaturan Email
+              </NavLink>
             </>
           ) : (
             <>

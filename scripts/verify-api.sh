@@ -3504,6 +3504,41 @@ cek "hapus akun password salah → 401" "V == 401" \
 cek "hapus akun owner terakhir → 400" "V == 400" \
   "$(status_code_body "$OWNER" DELETE /onboarding/akun "{\"password\":\"$OWNER_PASS\"}")"
 
+echo "== 97. Lupa/reset password + pengaturan SMTP =="
+# Reset password diuji SAAT email belum dikonfigurasi → forgot mengembalikan
+# tautan reset langsung (dev), jadi tokennya bisa dipakai.
+api "" POST /auth/register '{"nama":"Reset Uji 97","email":"reset97@example.com","password":"Lama12345"}' > /dev/null
+FP=$(api "" POST /auth/forgot-password '{"email":"reset97@example.com"}')
+cek "forgot: ok true" "V == 1" "$(echo "$FP" | jq '(.ok==true)|if . then 1 else 0 end')"
+cek "forgot: dev_reset_url ada (email belum diatur)" "V == 1" "$(echo "$FP" | jq '((.dev_reset_url|length)>0)|if . then 1 else 0 end')"
+RTOK=$(echo "$FP" | jq -r '.dev_reset_url' | sed 's/.*token=//')
+cek "reset dgn token → ok" "V == 1" \
+  "$(api "" POST /auth/reset-password "{\"token\":\"$RTOK\",\"password\":\"Baru12345\"}" | jq '(.ok==true)|if . then 1 else 0 end')"
+cek "login password BARU → 200" "V == 200" \
+  "$(status_code_body "" POST /auth/login '{"email":"reset97@example.com","password":"Baru12345"}')"
+cek "login password LAMA → 401" "V == 401" \
+  "$(status_code_body "" POST /auth/login '{"email":"reset97@example.com","password":"Lama12345"}')"
+cek "reset token bekas → 400" "V == 400" \
+  "$(status_code_body "" POST /auth/reset-password "{\"token\":\"$RTOK\",\"password\":\"Baru12345\"}")"
+cek "reset token ngawur → 400" "V == 400" \
+  "$(status_code_body "" POST /auth/reset-password '{"token":"tokenngawur","password":"Baru12345"}')"
+FU=$(api "" POST /auth/forgot-password '{"email":"tidakada97@example.com"}')
+cek "forgot email tak dikenal → ok tanpa url" "V == 1" \
+  "$(echo "$FU" | jq '((.ok==true) and (.dev_reset_url == null))|if . then 1 else 0 end')"
+# Pengaturan SMTP (super admin)
+cek "SMTP awal: belum dikonfigurasi" "V == 1" \
+  "$(api "$SA" GET /admin/sistem/smtp | jq '(.configured==false)|if . then 1 else 0 end')"
+api "$SA" PUT /admin/sistem/smtp '{"host":"smtp.example.com","port":587,"username":"u@example.com","password":"secret","encryption":"starttls","sender_name":"Kakarut","sender_email":"noreply@example.com"}' > /dev/null
+SM=$(api "$SA" GET /admin/sistem/smtp)
+cek "SMTP diatur: configured true + provider smtp" "V == 1" \
+  "$(echo "$SM" | jq '((.configured==true) and (.provider=="smtp"))|if . then 1 else 0 end')"
+cek "SMTP: has_password true, host tersimpan" "V == 1" \
+  "$(echo "$SM" | jq '((.has_password==true) and (.host=="smtp.example.com"))|if . then 1 else 0 end')"
+cek "SMTP: password mentah TIDAK dikembalikan" "V == 1" \
+  "$(echo "$SM" | jq '((has("password"))|not)|if . then 1 else 0 end')"
+cek "owner akses pengaturan SMTP → 403" "V == 403" "$(status_code "$OWNER" GET /admin/sistem/smtp)"
+cek "kasir akses pengaturan SMTP → 403" "V == 403" "$(status_code "$KASIR" GET /admin/sistem/smtp)"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]
