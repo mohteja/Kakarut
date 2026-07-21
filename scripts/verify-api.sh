@@ -3700,6 +3700,22 @@ cek "mode tamu tetap berfungsi (200) di tengah rate-limit login" "V == 200" \
 cek "login owner sah tetap sukses (bucket email terpisah)" "V == 1" \
   "$([ -n "$(login "$OWNER_EMAIL" "$OWNER_PASS")" ] && echo 1 || echo 0)"
 
+echo "== 101. Guard SSRF pada proxy cetak (POST /print/lan) =="
+# Host printer di-resolve lalu disaring; target internal (loopback/link-local/
+# metadata) ditolak 400 SEBELUM ada koneksi TCP — termasuk bentuk yang dulu bisa
+# menembus filter string (::ffff:127.0.0.1, format desimal).
+D64="AA=="  # 1 byte ESC/POS base64 (lolos validasi body)
+ssrf_code() { # ssrf_code <host>
+  curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/print/lan" \
+    -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' \
+    -d "{\"host\":\"$1\",\"port\":9100,\"data\":\"$D64\"}"
+}
+cek "print/lan → localhost ditolak 400" "V == 400" "$(ssrf_code localhost)"
+cek "print/lan → 127.0.0.1 ditolak 400" "V == 400" "$(ssrf_code 127.0.0.1)"
+cek "print/lan → ::ffff:127.0.0.1 (bypass lama) ditolak 400" "V == 400" "$(ssrf_code ::ffff:127.0.0.1)"
+cek "print/lan → metadata 169.254.169.254 ditolak 400" "V == 400" "$(ssrf_code 169.254.169.254)"
+cek "print/lan → 0.0.0.0 ditolak 400" "V == 400" "$(ssrf_code 0.0.0.0)"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]
