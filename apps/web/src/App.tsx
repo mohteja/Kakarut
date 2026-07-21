@@ -23,6 +23,7 @@ import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
 import { ResetPasswordPage } from "./pages/ResetPasswordPage";
 import { SmtpPage } from "./pages/superadmin/SmtpPage";
 import { OperasionalPage } from "./pages/operasional/OperasionalPage";
+import { TimBerandaPage } from "./pages/TimBerandaPage";
 import { MemberPage } from "./pages/member/MemberPage";
 import { LihatMenuPage } from "./pages/menu/LihatMenuPage";
 import { MenuFormPage } from "./pages/menu/MenuFormPage";
@@ -93,7 +94,7 @@ export default function App() {
     : isManajemen
       ? "/dashboard"
       : isTim
-        ? "/profil"
+        ? "/beranda"
         : "/kasir";
 
   return (
@@ -127,6 +128,8 @@ export default function App() {
               <Route path="/stok/kartu/:ingredientId" element={<KartuStokPage />} />
               {/* Absen: semua peran (tim absen sendiri; admin/kasir + stasiun pindai) */}
               <Route path="/absen" element={<AbsenPage />} />
+              {/* Beranda ringkas peran TIM (CK: beli/produksi belum selesai; toko: barang datang) */}
+              {isTim && <Route path="/beranda" element={<TimBerandaPage />} />}
               {/* printer & meja — bukan peran tim */}
               {!isTim && (
                 <>

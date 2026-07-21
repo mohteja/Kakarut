@@ -82,6 +82,34 @@ export function Layout() {
   const stokKritis = stok?.filter((r) => r.status !== "aman").length ?? 0;
   const adaHabis = stok?.some((r) => r.status === "habis") ?? false;
 
+  // Badge "belum selesai" utk pengadaan (beli & produksi) di nav Central Kitchen
+  // — notifikasi bagi tim CK & manajemen: faktur yang masih rencana/dikerjakan/
+  // menunggu (belum masuk stok). Aktif hanya bila menu pengadaan tampil.
+  const lihatPengadaan =
+    !!auth &&
+    !auth.user.is_super_admin &&
+    ((roleGuard === "tim" &&
+      cabang.find((b) => b.id === auth.user.branch_id)?.tipe === "central_kitchen") ||
+      (manajemenGuard && divisi !== "store"));
+  const qsPengadaan = `${dataQuery}${dataQuery ? "&" : "?"}per_page=200`;
+  const { data: prodNav } = useQuery({
+    queryKey: ["produksi-nav", dataQuery],
+    queryFn: () => api<{ rows: { faktur_id: string; status: string }[] }>(`/produksi${qsPengadaan}`),
+    enabled: lihatPengadaan,
+    refetchInterval: 60_000,
+  });
+  const { data: beliNav } = useQuery({
+    queryKey: ["pembelian-nav", dataQuery],
+    queryFn: () => api<{ rows: { faktur_id: string; status: string }[] }>(`/pembelian${qsPengadaan}`),
+    enabled: lihatPengadaan,
+    refetchInterval: 60_000,
+  });
+  const BELUM_SELESAI = new Set(["rencana", "dikerjakan", "menunggu"]);
+  const hitungBelum = (rows?: { faktur_id: string; status: string }[]) =>
+    new Set((rows ?? []).filter((r) => BELUM_SELESAI.has(r.status)).map((r) => r.faktur_id)).size;
+  const produksiBelum = hitungBelum(prodNav?.rows);
+  const beliBelum = hitungBelum(beliNav?.rows);
+
   if (!auth) return null;
 
   const role = auth.user.role;
@@ -109,6 +137,15 @@ export function Layout() {
       }`;
   // tutup drawer setelah navigasi/aksi di layar mobile
   const tutup = () => setMenuOpen(false);
+
+  // Badge notifikasi oranye (mis. jumlah faktur pengadaan belum selesai).
+  const badgeOranye = (n: number) =>
+    n > 0 ? (
+      <span className="ml-auto flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-orange-500 px-1 text-xs font-bold text-white">
+        {n}
+      </span>
+    ) : null;
+  const navFlex = (s: { isActive: boolean }) => `${linkClass(s)} flex items-center gap-2`;
 
   // Konten adalah AREA SCROLL TERSENDIRI (terpisah dari sidebar) — tiap
   // pindah halaman, mulai lagi dari paling atas (klik menu bawah sidebar
@@ -217,6 +254,12 @@ export function Layout() {
                   🏠 Beranda
                 </NavLink>
               )}
+              {/* Beranda ringkas peran TIM (CK & toko): notifikasi + tugas hari ini */}
+              {isTim && (
+                <NavLink to="/beranda" className={linkClass}>
+                  🏠 Beranda
+                </NavLink>
+              )}
               {/* Absen: semua peran (termasuk tim) — absen sendiri via tombol
                   (swafoto + radius GPS); admin/kasir juga jadi stasiun pindai. */}
               <NavLink to="/absen" className={linkClass}>
@@ -228,11 +271,13 @@ export function Layout() {
               {/* Karyawan CENTRAL KITCHEN: profil + produksi + beli + bahan baku */}
               {timDiCk && (
                 <>
-                  <NavLink to="/produksi" className={linkClass}>
-                    🏭 Produksi Bahan Baku
+                  <NavLink to="/produksi" className={navFlex}>
+                    <span>🏭 Produksi Bahan Baku</span>
+                    {badgeOranye(produksiBelum)}
                   </NavLink>
-                  <NavLink to="/pembelian" className={linkClass}>
-                    🛒 Beli Bahan Baku
+                  <NavLink to="/pembelian" className={navFlex}>
+                    <span>🛒 Beli Bahan Baku</span>
+                    {badgeOranye(beliBelum)}
                   </NavLink>
                   <NavLink to="/bahan" className={linkClass}>
                     🥩 Bahan Baku
@@ -325,11 +370,13 @@ export function Layout() {
                       🕐 Operasional Cabang
                     </NavLink>
                   )}
-                  <NavLink to="/produksi" className={linkClass}>
-                    🏭 Produksi Bahan Baku
+                  <NavLink to="/produksi" className={navFlex}>
+                    <span>🏭 Produksi Bahan Baku</span>
+                    {badgeOranye(produksiBelum)}
                   </NavLink>
-                  <NavLink to="/pembelian" className={linkClass}>
-                    🛒 Beli Bahan Baku
+                  <NavLink to="/pembelian" className={navFlex}>
+                    <span>🛒 Beli Bahan Baku</span>
+                    {badgeOranye(beliBelum)}
                   </NavLink>
                   <NavLink to="/perlengkapan/beli" className={linkClass}>
                     🧺 Beli Perlengkapan
