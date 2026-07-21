@@ -32,6 +32,17 @@ const CabangBody = z.object({
   latitude: z.number().min(-90).max(90).nullish(),
   longitude: z.number().min(-180).max(180).nullish(),
   radius_absen_m: z.number().int().min(10).max(10000).optional(),
+  /** jam operasional "HH:MM" (kosong = tak diatur) — pantau telat buka/lupa tutup */
+  jam_buka: z
+    .string()
+    .trim()
+    .regex(/^(([01]\d|2[0-3]):[0-5]\d)?$/, "Format jam harus HH:MM")
+    .nullish(),
+  jam_tutup: z
+    .string()
+    .trim()
+    .regex(/^(([01]\d|2[0-3]):[0-5]\d)?$/, "Format jam harus HH:MM")
+    .nullish(),
   is_active: z.boolean().optional(),
 });
 
@@ -107,6 +118,8 @@ export const cabangRoutes = new Hono<AppEnv>()
         latitude: r.latitude,
         longitude: r.longitude,
         radius_absen_m: r.radiusAbsenM,
+        jam_buka: r.jamBuka,
+        jam_tutup: r.jamTutup,
         is_active: r.isActive,
       })),
     );
@@ -177,6 +190,8 @@ export const cabangRoutes = new Hono<AppEnv>()
           latitude: body.latitude ?? null,
           longitude: body.longitude ?? null,
           ...(body.radius_absen_m !== undefined && { radiusAbsenM: body.radius_absen_m }),
+          jamBuka: body.jam_buka || null,
+          jamTutup: body.jam_tutup || null,
         })
         .onConflictDoNothing()
         .returning();
@@ -236,6 +251,8 @@ export const cabangRoutes = new Hono<AppEnv>()
           ...(body.latitude !== undefined && { latitude: body.latitude }),
           ...(body.longitude !== undefined && { longitude: body.longitude }),
           ...(body.radius_absen_m !== undefined && { radiusAbsenM: body.radius_absen_m }),
+          ...(body.jam_buka !== undefined && { jamBuka: body.jam_buka || null }),
+          ...(body.jam_tutup !== undefined && { jamTutup: body.jam_tutup || null }),
           ...(body.is_active !== undefined && { isActive: body.is_active }),
           ...ckPatch,
         })

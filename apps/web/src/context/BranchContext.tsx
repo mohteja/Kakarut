@@ -23,6 +23,9 @@ export interface Cabang {
   latitude: number | null;
   longitude: number | null;
   radius_absen_m: number;
+  /** jam operasional cabang "HH:MM" (null bila belum diatur) */
+  jam_buka: string | null;
+  jam_tutup: string | null;
   is_active: boolean;
 }
 

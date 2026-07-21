@@ -919,6 +919,50 @@ export interface Shift {
   selisih: number | null;
 }
 
+/** Satu transaksi di dalam jendela waktu sebuah shift (untuk detail shift). */
+export interface ShiftTransaksiRow {
+  id: string;
+  nomor: string;
+  waktu: string;
+  total: number;
+  metode: MetodeBayar;
+  kasir: string | null;
+}
+
+/** Detail satu shift = ringkasan shift + daftar transaksi di jendela waktunya. */
+export interface ShiftDetail extends Shift {
+  transaksi: ShiftTransaksiRow[];
+}
+
+/**
+ * Status operasional satu cabang store untuk pantauan owner/admin
+ * (GET /shift/pantau). Penjualan_* = total HARI INI (zona waktu perusahaan);
+ * meta shift (dibuka_*) hanya terisi bila ada shift kasir yang sedang terbuka.
+ */
+export interface ShiftPantauRow {
+  branch_id: string;
+  branch_nama: string;
+  /** jam operasional cabang "HH:MM" (null bila belum diatur) */
+  jam_buka: string | null;
+  jam_tutup: string | null;
+  /** shift kasir yang sedang terbuka (null = kasir tutup) */
+  shift_id: string | null;
+  dibuka_oleh: string | null;
+  dibuka_pada: string | null;
+  modal_awal: number | null;
+  penjualan_tunai: number;
+  penjualan_nontunai: number;
+  jumlah_transaksi: number;
+  /** kas seharusnya = modal_awal + penjualan tunai hari ini (0 bila tutup) */
+  kas_sistem: number;
+  /** sudah ada shift dibuka hari ini? */
+  buka_hari_ini: boolean;
+  /** sudah lewat jam buka tapi kasir belum dibuka hari ini */
+  telat_buka: boolean;
+  /** kasir masih terbuka padahal sudah lewat jam tutup */
+  lupa_tutup: boolean;
+}
+
 /** Baris ringan hasil pencarian member (autocomplete keranjang kasir). */
 export interface MemberCariRow {
   id: string;

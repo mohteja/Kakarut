@@ -101,19 +101,28 @@ export const adminSystemRoutes = new Hono<AppEnv>()
     }
     return c.json({ ok: true });
   })
-  // Kirim email percobaan ke alamat tujuan (default: email super admin).
+  // Kirim email percobaan — tujuan, subjek, & isi (HTML) bisa ditentukan; bila
+  // kosong pakai default (tujuan = email super admin pemanggil).
   .post(
     "/smtp/test-email",
-    zValidator("json", z.object({ to: z.string().trim().email().optional() })),
+    zValidator(
+      "json",
+      z.object({
+        to: z.string().trim().email().optional(),
+        subject: z.string().trim().optional(),
+        html: z.string().optional(),
+      }),
+    ),
     async (c) => {
       const auth = c.get("auth");
-      const to = c.req.valid("json").to ?? auth.email;
+      const body = c.req.valid("json");
+      const to = body.to || auth.email;
+      const subject = body.subject?.trim() || "Email percobaan Kakarut";
+      const html =
+        body.html?.trim() ||
+        `<p>Halo! Ini email percobaan dari pengaturan SMTP Kakarut.</p><p>Bila Anda menerima ini, konfigurasi email sudah benar.</p>`;
       try {
-        const provider = await kirimEmail({
-          to,
-          subject: "Email percobaan Kakarut",
-          html: `<p>Halo! Ini email percobaan dari pengaturan SMTP Kakarut.</p><p>Bila Anda menerima ini, konfigurasi email sudah benar.</p>`,
-        });
+        const provider = await kirimEmail({ to, subject, html });
         return c.json({ ok: true, to, provider });
       } catch (e) {
         throw new HTTPException(400, {

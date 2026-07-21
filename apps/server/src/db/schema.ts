@@ -150,6 +150,13 @@ export const branches = pgTable(
     latitude: numeric("latitude", { precision: 9, scale: 6, mode: "number" }),
     longitude: numeric("longitude", { precision: 9, scale: 6, mode: "number" }),
     radiusAbsenM: integer("radius_absen_m").notNull().default(100),
+    /**
+     * Jam operasional cabang "HH:MM" (opsional) — dipakai memantau operasional
+     * kasir: telat buka (lewat jamBuka tapi belum buka kasir) & lupa tutup
+     * (masih terbuka padahal sudah lewat jamTutup). Tidak memblokir transaksi.
+     */
+    jamBuka: text("jam_buka"),
+    jamTutup: text("jam_tutup"),
     isActive: boolean("is_active").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },

@@ -320,6 +320,11 @@ export function Layout() {
                   <div className="mt-4 mb-1 px-3 text-xs font-semibold uppercase tracking-wide text-stone-500">
                     Operasional
                   </div>
+                  {penuh && (
+                    <NavLink to="/operasional" className={linkClass}>
+                      🕐 Operasional Cabang
+                    </NavLink>
+                  )}
                   <NavLink to="/produksi" className={linkClass}>
                     🏭 Produksi Bahan Baku
                   </NavLink>
