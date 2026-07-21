@@ -98,6 +98,7 @@ type ShiftJoinRow = {
   closedAt: Date | null;
   uangFisik: number | null;
   catatan: string | null;
+  adaTransaksiSusulan: boolean;
   branch_nama: string | null;
   opener: string | null;
   closer: string | null;
@@ -114,6 +115,7 @@ function baseSelect() {
       closedAt: shifts.closedAt,
       uangFisik: shifts.uangFisik,
       catatan: shifts.catatan,
+      adaTransaksiSusulan: shifts.adaTransaksiSusulan,
       branch_nama: branches.nama,
       opener: opener.nama,
       closer: closer.nama,
@@ -140,6 +142,7 @@ async function toDto(r: ShiftJoinRow): Promise<Shift> {
     ...rekap,
     kas_sistem,
     selisih: r.uangFisik != null ? r.uangFisik - kas_sistem : null,
+    ada_transaksi_susulan: r.adaTransaksiSusulan,
   };
 }
 

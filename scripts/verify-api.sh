@@ -3584,6 +3584,62 @@ cek "detail shift: kasir cabang sendiri → 200" "V == 200" "$(status_code "$KAS
 cek "detail shift: id tak dikenal → 404" "V == 404" \
   "$(status_code "$OWNER" GET "/shift/00000000-0000-0000-0000-000000000000")"
 
+echo "== 99. Sinkron offline mobile (POST /api/sync) — Fase 1 =="
+NOW99=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+FUT99=$(date -u -d '+2 hours' +%Y-%m-%dT%H:%M:%SZ)
+OLD99=$(date -u -d '-10 days' +%Y-%m-%dT%H:%M:%SZ)
+KKODE=$(api "$OWNER" GET /karyawan | jq -r '[.[]|select(.role=="cashier")][0].employee_code')
+MENU99=$(api "$KASIR" GET /menu | jq -r '.[0].id')
+uuid99() { cat /proc/sys/kernel/random/uuid; }
+# Pastikan shift kasir TERBUKA untuk uji penjualan (kasir sudah absen di §2b).
+if [ -z "$(api "$KASIR" GET /shift/aktif | jq -r '.id // empty')" ]; then
+  api "$KASIR" POST /shift/buka '{"modal_awal":0}' > /dev/null 2>&1 || true
+fi
+
+# Role guard: OWNER kirim 'penjualan' → item gagal 403 (bukan gagal seluruh batch).
+B_RG=$(jq -nc --arg r "$(uuid99)" --arg w "$NOW99" '{device_id:"dev-uji",commands:[{client_ref:$r,tipe:"penjualan",waktu:$w,payload:{items:[]}}]}')
+cek "sync: owner penjualan → item gagal 403" "V == 1" \
+  "$(api "$OWNER" POST /sync "$B_RG" | jq '(.hasil[0].status=="gagal" and .hasil[0].kode==403)|if . then 1 else 0 end')"
+
+# Validasi waktu: masa depan & > 7 hari → item gagal 400.
+B_T=$(jq -nc --arg rf "$(uuid99)" --arg ro "$(uuid99)" --arg fut "$FUT99" --arg old "$OLD99" '{commands:[{client_ref:$rf,tipe:"absen_saya",waktu:$fut,payload:{foto_url:"http://x/f.jpg"}},{client_ref:$ro,tipe:"absen_saya",waktu:$old,payload:{foto_url:"http://x/f.jpg"}}]}')
+RES_T=$(api "$KASIR" POST /sync "$B_T")
+cek "sync: waktu masa depan → gagal 400" "V == 1" \
+  "$(echo "$RES_T" | jq '(.hasil[0].status=="gagal" and .hasil[0].kode==400)|if . then 1 else 0 end')"
+cek "sync: waktu > 7 hari → gagal 400" "V == 1" \
+  "$(echo "$RES_T" | jq '(.hasil[1].status=="gagal" and .hasil[1].kode==400)|if . then 1 else 0 end')"
+
+# Idempotency + tanpa efek ganda (penjualan): kirim → transaksi +1; kirim ulang → sudah_ada, tak dobel.
+N0=$(api "$KASIR" GET /penjualan | jq 'length')
+RP=$(uuid99)
+B_P=$(jq -nc --arg r "$RP" --arg w "$NOW99" --arg m "$MENU99" '{device_id:"dev",commands:[{client_ref:$r,tipe:"penjualan",waktu:$w,payload:{items:[{menu_id:$m,qty:1}]}}]}')
+cek "sync: penjualan → item ok 201" "V == 1" \
+  "$(api "$KASIR" POST /sync "$B_P" | jq '(.hasil[0].status=="ok" and .hasil[0].kode==201)|if . then 1 else 0 end')"
+N1=$(api "$KASIR" GET /penjualan | jq 'length')
+cek "sync: 1 transaksi bertambah" "V == 1" "$((N1 - N0))"
+cek "sync: kirim ulang → sudah_ada" "V == 1" \
+  "$(api "$KASIR" POST /sync "$B_P" | jq '(.hasil[0].status=="sudah_ada")|if . then 1 else 0 end')"
+N2=$(api "$KASIR" GET /penjualan | jq 'length')
+cek "sync: kirim ulang TIDAK menggandakan transaksi" "V == 0" "$((N2 - N1))"
+
+# Isolasi kegagalan: [penjualan ok, penjualan waktu-depan gagal, absen_stasiun ok] → item 2 gagal, 1 & 3 sukses.
+B_MIX=$(jq -nc --arg ra "$(uuid99)" --arg rb "$(uuid99)" --arg rc "$(uuid99)" --arg w "$NOW99" --arg fut "$FUT99" --arg m "$MENU99" --arg kk "$KKODE" '{commands:[{client_ref:$ra,tipe:"penjualan",waktu:$w,payload:{items:[{menu_id:$m,qty:1}]}},{client_ref:$rb,tipe:"penjualan",waktu:$fut,payload:{items:[{menu_id:$m,qty:1}]}},{client_ref:$rc,tipe:"absen_stasiun",waktu:$w,payload:{kode:$kk,foto_url:"http://x/f.jpg"}}]}')
+RES_MIX=$(api "$KASIR" POST /sync "$B_MIX")
+cek "sync isolasi: item1 ok, item2 gagal, item3 ok" "V == 1" \
+  "$(echo "$RES_MIX" | jq '(.hasil[0].status=="ok" and .hasil[1].status=="gagal" and .hasil[2].status=="ok")|if . then 1 else 0 end')"
+
+# Transaksi susulan: tutup shift, lalu sync penjualan dgn waktu DI DALAM jendela shift
+# tertutup → item ok + shift ditandai ada_transaksi_susulan (rekap dihitung ulang).
+if [ -n "$(api "$KASIR" GET /shift/aktif | jq -r '.id // empty')" ]; then
+  api "$KASIR" POST /shift/tutup '{"uang_fisik":0}' > /dev/null
+  WSUS=$(date -u -d '-5 seconds' +%Y-%m-%dT%H:%M:%SZ)
+  B_SUS=$(jq -nc --arg r "$(uuid99)" --arg w "$WSUS" --arg m "$MENU99" '{commands:[{client_ref:$r,tipe:"penjualan",waktu:$w,payload:{items:[{menu_id:$m,qty:1}]}}]}')
+  cek "sync susulan: penjualan pada shift tertutup → ok" "V == 1" \
+    "$(api "$KASIR" POST /sync "$B_SUS" | jq '(.hasil[0].status=="ok")|if . then 1 else 0 end')"
+  cek "sync susulan: shift ditandai ada_transaksi_susulan" "V == 1" \
+    "$(api "$KASIR" GET /shift | jq '([.[]|select(.ada_transaksi_susulan==true)]|length>=1)|if . then 1 else 0 end')"
+fi
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

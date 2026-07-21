@@ -318,6 +318,23 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 > **400**. Urutan wajib: **absen masuk → buka kasir → transaksi**. Lihat
 > `docs/mobile/PROMPT-BUKA-KASIR.md` untuk spesifikasi UI lengkap.
 
+## `/api/sync` — Sinkron antrean offline mobile (`modules/sync/routes.ts`) — group guard **[any]** (per-perintah divalidasi seperti endpoint aslinya)
+
+Satu endpoint generik untuk mengirim BATCH perintah offline yang tersimpan di
+perangkat. Server mengeksekusi tiap perintah lewat logika service yang SUDAH
+ADA (validasi = aturan endpoint asli), idempoten per `client_ref`.
+
+- `POST /api/sync` — [any] — req `SyncRequest`: `{ device_id?: string|null, commands: SyncCommand[] (1..100) }` di mana `SyncCommand = { client_ref: uuid (idempotency, unik per company), tipe: SyncTipe, waktu: ISO-8601 UTC, payload: <body endpoint asli> }`.
+  - res: **selalu 200** `SyncResponse`: `{ hasil: SyncItemResult[] }` (urutan sama dgn `commands`). `SyncItemResult = { client_ref, status: "ok"|"sudah_ada"|"gagal", kode: <HTTP endpoint asli>, data?: <respons endpoint asli>, error?: <pesan> }`.
+  - **Fase 1 `tipe`**: `penjualan` (payload = body `POST /penjualan`), `absen_saya` (body `POST /absensi/saya`), `absen_stasiun` (body `POST /absensi`).
+  - **Idempotency**: `client_ref` yang sudah tercatat → `sudah_ada` + hasil tersimpan (TIDAK dieksekusi ulang). Aman untuk retry (exactly-once).
+  - **Eksekusi berurutan**; item gagal TIDAK menghentikan item lain (kegagalan dilaporkan per item dgn `status:"gagal"` + `kode` + `error`).
+  - **Validasi `waktu`**: tolak masa depan (skew +5 mnt) & > 7 hari → item **gagal 400**. `waktu` = timestamp kejadian (bukan jam sinkron).
+  - **penjualan (semantik `waktu`)**: dipakai sebagai waktu struk + tanggal bisnis. Gerbang "Kasir belum dibuka" (409) TIDAK berlaku di sync — sebagai gantinya sale ditautkan ke shift yang JENDELA waktunya memuat `waktu` (terbuka atau tertutup). Shift tertutup → sale tetap masuk + rekap dihitung ulang + shift ditandai `ada_transaksi_susulan:true` (lihat DTO `Shift`). Tidak ada shift cocok → item **gagal 409**.
+  - **absen (semantik `waktu`)**: cap masuk/keluar dicatat pada `waktu`; geofence tetap divalidasi dari `lat`/`lng` payload.
+  - **Role guard**: sama dgn endpoint asli — mis. `penjualan` oleh non-kasir → item **gagal 403** (bukan gagal seluruh batch).
+- **Online-only (tidak lewat sync)**: login/auth, CRUD master, ACC/persetujuan, laporan, upload foto (mobile unggah `POST /upload` DULU saat online, lalu kirim perintah dgn `foto_url` hasil unggah). Shift buka/tutup tetap online-only (Fase 1).
+
 ## `/api/absensi` — Absensi (`modules/absensi/routes.ts`) — group guard **[owner/admin/cashier/tim]**
 
 - `POST /api/absensi` — **[owner/admin/cashier]** (inline, kecuali tim) — pindai stasiun — query: `branch_id?` — req: `{ kode: string, foto_url: string (wajib), lat?: number(-90..90)|null, lng?: number(-180..180)|null }` — res: **201** `AbsenResult` — error: **400** (di luar radius geofence / GPS wajib / karyawan nonaktif), **404** kode tak dikenal

@@ -14,7 +14,7 @@ import {
 import { tanggalDi } from "../../lib/time";
 import { createSale } from "./service";
 
-const SaleBody = z.object({
+export const SaleBody = z.object({
   branch_id: z.string().uuid().optional(),
   is_dine_in: z.boolean().default(false),
   meja_id: z.string().uuid().optional(),

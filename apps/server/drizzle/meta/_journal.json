@@ -442,6 +442,13 @@
       "when": 1784621466063,
       "tag": "0062_narrow_bulldozer",
       "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1784642414389,
+      "tag": "0063_optimal_boomerang",
+      "breakpoints": true
     }
   ]
 }
