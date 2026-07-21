@@ -3409,6 +3409,16 @@ cek "GET bahan: rak_lokasi BH94 memuat RC94 (store)" "V == 1" \
 api "$OWNER" PUT "/penyimpanan/$RAK79/bahan" "{\"ingredient_ids\":[\"$BH79\",\"$BH94\"]}" > /dev/null
 cek "rak CK + rak cabang berdampingan: rak_lokasi BH94 = 2 (CK & store)" "V == 1" \
   "$(api "$OWNER" GET /bahan | jq --arg i "$BH94" '([.[]|select(.id==$i)][0].rak_lokasi|( (map(.branch_tipe)|sort) == ["central_kitchen","store"] ))|if . then 1 else 0 end')"
+# BUG FIX: stok yang MASUK tanpa lokasi (mis. Stok Awal) tetap muncul di rak yang
+# di-assign saat Stok/Opname — tempat diambil dari assignment (sli), bukan hanya
+# dari entri masuk terakhir. Tanpa perbaikan, bahan ini "tanpa tempat".
+BHSO94=$(api "$OWNER" POST /bahan '{"nama":"bahan stok awal rak uji94","harga_beli":1000,"isi":1,"satuan":"pcs","pengadaan":"beli","kategori":"lain","track_stok":true}' | jq -r .id)
+api "$OWNER" PUT "/penyimpanan/$RC94B/bahan" "{\"ingredient_ids\":[\"$BHSO94\"]}" > /dev/null
+api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CB46_ID\",\"items\":[{\"ingredient_id\":\"$BHSO94\",\"qty\":50}]}" > /dev/null
+cek "stok awal + rak assign: saldo 50 di cabang" "V == 50" \
+  "$(api "$OWNER" GET "/stok?branch_id=$CB46_ID" | jq --arg i "$BHSO94" '[.[]|select(.ingredient_id==$i)][0].saldo')"
+cek "stok awal tanpa lokasi masuk → tempat ikut rak assign (RC94B), bukan tanpa tempat" "V == 1" \
+  "$(api "$OWNER" GET "/stok?branch_id=$CB46_ID" | jq --arg i "$BHSO94" --arg r "$RC94B" '([.[]|select(.ingredient_id==$i)][0].tempat_id==$r)|if . then 1 else 0 end')"
 
 echo "== 95. Rak PERLENGKAPAN di Tempat Penyimpanan (satu tabel dgn bahan baku) =="
 # pakai ulang rak store RC94/RC94B (§94) + rak CK RAK79 (§79)

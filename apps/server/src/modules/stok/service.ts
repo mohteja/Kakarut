@@ -39,8 +39,11 @@ export async function hitungSaldoCabang(
       i.satuan      AS satuan,
       i.stok_minimum AS stok_minimum,
       i.stok_minimum_toko AS stok_minimum_toko,
-      t.id          AS tempat_id,
-      t.nama        AS tempat,
+      -- Tempat penyimpanan bahan: utamakan RAK YANG DI-ASSIGN (Tempat
+      -- Penyimpanan = sumber tunggal), jatuh ke lokasi entri masuk terakhir
+      -- bila bahan belum di-assign ke rak mana pun.
+      COALESCE(tas.id, tin.id)     AS tempat_id,
+      COALESCE(tas.nama, tin.nama) AS tempat,
       COALESCE(b.qty, 0) AS stok_awal,
       COALESCE(p.qty, 0) AS produksi,
       COALESCE(u.qty, 0) + COALESCE(pc.qty, 0) AS terpakai,
@@ -96,7 +99,7 @@ export async function hitungSaldoCabang(
         AND (b.created_at IS NULL OR pr.waktu > b.created_at)
     ) k ON TRUE
     LEFT JOIN LATERAL (
-      -- tempat penyimpanan dari entri masuk terkonfirmasi terakhir
+      -- tempat penyimpanan dari entri masuk terkonfirmasi terakhir (fallback)
       SELECT sl.id, sl.nama
       FROM productions pr
       JOIN storage_locations sl ON sl.id = pr.storage_location_id
@@ -105,7 +108,17 @@ export async function hitungSaldoCabang(
         AND pr.storage_location_id IS NOT NULL
       ORDER BY pr.waktu DESC
       LIMIT 1
-    ) t ON TRUE
+    ) tin ON TRUE
+    LEFT JOIN LATERAL (
+      -- rak "home" yang di-assign per bahan di cabang ini (Tempat Penyimpanan).
+      -- Sumber utama lokasi: stok yang sudah ada (mis. stok awal, kiriman lama
+      -- tanpa lokasi) tetap muncul di rak yang di-assign saat stock opname.
+      SELECT sl.id, sl.nama
+      FROM storage_location_ingredients sli
+      JOIN storage_locations sl ON sl.id = sli.storage_location_id
+      WHERE sli.ingredient_id = i.id AND sl.branch_id = ${branchId} AND sl.is_active
+      LIMIT 1
+    ) tas ON TRUE
     LEFT JOIN LATERAL (
       -- produksi in-house yang BELUM masuk stok, per tahap. Sengaja TIDAK
       -- dibatasi baseline opname: ini stok masa depan (pending), bukan mutasi
