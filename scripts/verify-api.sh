@@ -3737,6 +3737,32 @@ SYNC_OK_UUID=$(jq -nc --arg r "$(uuid99)" --arg w "$NOW99" \
 cek "sync: faktur_id UUID valid → lolos validasi, dispatch (404 dari handler)" "V == 1" \
   "$(api "$OWNER" POST /sync "$SYNC_OK_UUID" | jq '(.hasil[0].status=="gagal" and .hasil[0].kode==404)|if . then 1 else 0 end')"
 
+echo "== 103. Isolasi lintas-perusahaan: edit kredensial akun multi-perusahaan =="
+# U daftar (tanpa perusahaan) → buat perusahaan sendiri (B) → diundang & terima di
+# Basooopa (A) sebagai kasir → jadi anggota DUA perusahaan (identitas users global).
+REGU103=$(api "" POST /auth/register '{"nama":"Dobel 103","email":"dua103@example.com","password":"Dobel10345"}')
+TOKU103=$(echo "$REGU103" | jq -r .token)
+api "$TOKU103" POST /onboarding/perusahaan '{"nama":"Warung Dua 103"}' > /dev/null
+INV103=$(api "$OWNER" POST /karyawan/undang "{\"email\":\"dua103@example.com\",\"role\":\"cashier\",\"branch_id\":\"$PUSAT96\"}" | jq -r .id)
+api "$TOKU103" POST "/onboarding/undangan/$INV103/terima" > /dev/null
+UID103=$(api "$OWNER" GET /karyawan | jq -r '[.[]|select(.email=="dua103@example.com")][0].user_id')
+cek "setup: U jadi anggota Basooopa (multi-perusahaan)" "V == 1" \
+  "$([ -n "$UID103" ] && [ "$UID103" != "null" ] && echo 1 || echo 0)"
+# Ganti PASSWORD akun yang juga aktif di perusahaan lain → 403 (cegah ambil-alih lintas-tenant)
+cek "PATCH password akun multi-perusahaan → 403" "V == 403" \
+  "$(status_code_body "$OWNER" PATCH "/karyawan/$UID103" '{"password":"Bajakxx99"}')"
+# Ganti EMAIL login → 403
+cek "PATCH email akun multi-perusahaan → 403" "V == 403" \
+  "$(status_code_body "$OWNER" PATCH "/karyawan/$UID103" '{"email":"ganti103@example.com"}')"
+# Edit non-kredensial (nama) tetap boleh → 200
+cek "PATCH nama akun multi-perusahaan → 200 (edit scoped tetap boleh)" "V == 200" \
+  "$(status_code_body "$OWNER" PATCH "/karyawan/$UID103" '{"nama":"Dobel Baru 103"}')"
+# Keluarkan (arsip) dari perusahaan ini → 200, TAPI login GLOBAL tidak terkunci
+cek "arsip akun multi-perusahaan dari sini → 200" "V == 200" \
+  "$(status_code_body "$OWNER" PATCH "/karyawan/$UID103" '{"arsip":true}')"
+cek "arsip lintas-tenant TIDAK mengunci login global (U masih bisa masuk)" "V == 1" \
+  "$([ -n "$(login "dua103@example.com" "Dobel10345")" ] && echo 1 || echo 0)"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]
