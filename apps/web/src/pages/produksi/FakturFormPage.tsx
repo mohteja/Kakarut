@@ -205,12 +205,17 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
   });
 
   // Kitchen cabang hanya boleh memproduksi bahan berlokasi produksi "cabang"
-  // (server menolak 400 untuk bahan CK) — saring dari pemilih sekalian.
+  // DAN (bila daftar cabang produsen diisi) yang memuat cabangnya sendiri —
+  // server menolak 400 untuk sisanya, jadi saring dari pemilih sekalian.
+  const bolehKitchen = (b: BahanDto) =>
+    b.produksi_di === "cabang" &&
+    ((b.produksi_branch_ids ?? []).length === 0 ||
+      (branchId != null && (b.produksi_branch_ids ?? []).includes(branchId)));
   const bahanJalur = (bahan ?? []).filter(
     (b) =>
       b.pengadaan === tipe &&
       b.track_stok &&
-      (!isKitchen || tipe !== "produksi" || b.produksi_di === "cabang"),
+      (!isKitchen || tipe !== "produksi" || bolehKitchen(b)),
   );
 
   const [supplierId, setSupplierId] = useState(""); // jalur beli

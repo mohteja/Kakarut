@@ -13,6 +13,7 @@ import {
   dokumenNomor,
   fakturDana,
   fakturLogs,
+  ingredientProduksiBranches,
   ingredientSuppliers,
   ingredients,
   memberships,
@@ -269,17 +270,50 @@ function pastikanJalur(
  * Role KITCHEN (dapur cabang store) hanya boleh memproduksi bahan yang memang
  * ditandai diproduksi DI CABANG (`produksi_di = "cabang"`, diatur di Resep).
  * Bahan ber-produksi_di "ck" tetap urusan Central Kitchen — kitchen cabang
- * tidak boleh menduplikasinya di store.
+ * tidak boleh menduplikasinya di store. Bila bahan punya DAFTAR CABANG
+ * PRODUSEN (ingredient_produksi_branches), kitchen di luar daftar juga
+ * ditolak; daftar kosong = semua cabang store boleh.
  */
-function pastikanBolehDiproduksiKitchen(
+async function pastikanBolehDiproduksiKitchen(
   role: string | null,
+  branchId: string,
   ings: Iterable<typeof ingredients.$inferSelect>,
 ) {
   if (role !== "kitchen") return;
+  const cabangIngs: (typeof ingredients.$inferSelect)[] = [];
   for (const ing of ings) {
-    if (ing.pengadaan === "produksi" && ing.produksiDi !== "cabang") {
+    if (ing.pengadaan !== "produksi") continue;
+    if (ing.produksiDi !== "cabang") {
       throw new HTTPException(400, {
         message: `"${ing.nama}" diproduksi di Central Kitchen — atur "Diproduksi di: Cabang" di Resep bila ingin diproduksi kitchen cabang`,
+      });
+    }
+    cabangIngs.push(ing);
+  }
+  if (cabangIngs.length === 0) return;
+  const rows = await db
+    .select({
+      ingredientId: ingredientProduksiBranches.ingredientId,
+      branchId: ingredientProduksiBranches.branchId,
+    })
+    .from(ingredientProduksiBranches)
+    .where(
+      inArray(
+        ingredientProduksiBranches.ingredientId,
+        cabangIngs.map((i) => i.id),
+      ),
+    );
+  const byIng = new Map<string, Set<string>>();
+  for (const r of rows) {
+    const set = byIng.get(r.ingredientId) ?? new Set<string>();
+    set.add(r.branchId);
+    byIng.set(r.ingredientId, set);
+  }
+  for (const ing of cabangIngs) {
+    const set = byIng.get(ing.id);
+    if (set && !set.has(branchId)) {
+      throw new HTTPException(400, {
+        message: `"${ing.nama}" tidak diproduksi di cabang ini — tambahkan cabang ini ke daftar cabang produsen di Resep bila kitchen-nya ikut memproduksi`,
       });
     }
   }
@@ -342,7 +376,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         );
       const ingById = new Map(ingRows.map((r) => [r.id, r]));
       // Kitchen cabang: hanya bahan ber-produksi_di "cabang" (diatur di Resep).
-      pastikanBolehDiproduksiKitchen(auth.role, ingRows);
+      await pastikanBolehDiproduksiKitchen(auth.role, branchId, ingRows);
 
       if (body.supplier_id) {
         const [s] = await db
@@ -1545,7 +1579,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         );
       const ing = pastikanJalur(ingRow, tipe, body.ingredient_id);
       // Kitchen cabang: hanya bahan ber-produksi_di "cabang" (diatur di Resep).
-      pastikanBolehDiproduksiKitchen(auth.role, [ing]);
+      await pastikanBolehDiproduksiKitchen(auth.role, branchId, [ing]);
 
       const [company] = await db
         .select({ timezone: companies.timezone })
