@@ -3483,6 +3483,10 @@ cek "daftar password < 8 → 400" "V == 400" \
   "$(status_code_body "" POST /auth/register '{"nama":"X","email":"pendek96@example.com","password":"123"}')"
 cek "daftar email sudah ada → 409" "V == 409" \
   "$(status_code_body "" POST /auth/register "{\"nama\":\"X\",\"email\":\"$OWNER_EMAIL\",\"password\":\"Rahasia123\"}")"
+# Anti-enumerasi: pesan duplikat GENERIK — tidak mengulang alamat email pemanggil.
+REGDUP96=$(api "" POST /auth/register "{\"nama\":\"X\",\"email\":\"$OWNER_EMAIL\",\"password\":\"Rahasia123\"}")
+cek "daftar duplikat: pesan generik (tak bocorkan alamat email)" "V == 1" \
+  "$(echo "$REGDUP96" | jq --arg e "$OWNER_EMAIL" '(((.error//"")|ascii_downcase|contains($e|ascii_downcase))|not)|if . then 1 else 0 end')"
 # 4. Undang (menunggu diundang) → daftar → auto-join
 INV=$(api "$OWNER" POST /karyawan/undang "{\"email\":\"undangan96@example.com\",\"role\":\"cashier\",\"branch_id\":\"$PUSAT96\"}")
 cek "undang: dibuat (ada id)" "V == 1" "$(echo "$INV" | jq '((.id|length)>0)|if . then 1 else 0 end')"

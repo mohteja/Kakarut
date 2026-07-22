@@ -132,7 +132,14 @@ export const authRoutes = new Hono<AppEnv>()
     const { nama, email, password } = c.req.valid("json");
     const [existing] = await db.select({ id: users.id }).from(users).where(eq(users.email, email));
     if (existing) {
-      throw new HTTPException(409, { message: `Email ${email} sudah terdaftar` });
+      // Kurangi enumerasi akun: pesan GENERIK yang tidak menyebutkan alamat email
+      // (tak mengulang input) dan tidak memastikan email tsb terdaftar — selaras
+      // dengan login & forgot-password yang juga generik. Rate limit (#2) membatasi
+      // percobaan massal. Menutup total oracle memerlukan alur verifikasi email
+      // (mengorbankan auto-login) — di luar cakupan; UX daftar-langsung dijaga.
+      throw new HTTPException(409, {
+        message: "Tidak dapat mendaftar. Jika email sudah terdaftar, silakan masuk atau atur ulang password.",
+      });
     }
     const passwordHash = bcrypt.hashSync(password, 10);
     const { user, preferredCompanyId } = await db.transaction(async (tx) => {
