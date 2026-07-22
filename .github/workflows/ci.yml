@@ -63,6 +63,10 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # Build SPA dulu: server mengambil build-id dari apps/web/dist saat boot,
+      # dan verify-api §61 memverifikasi build-id di /api/health + header.
+      - name: Build web (untuk build-id + uji SPA produksi)
+        run: npm run build -w @kakarut/web
       - name: Jalankan server (auto-migrate) + seed + verify-api
         run: |
           set -euo pipefail
