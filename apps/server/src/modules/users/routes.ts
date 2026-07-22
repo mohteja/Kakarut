@@ -130,7 +130,8 @@ export const karyawanRoutes = new Hono<AppEnv>()
         result = await db.transaction(async (tx) => {
           const [user] = await tx
             .insert(users)
-            .values({ email: body.email, passwordHash, nama: body.nama })
+            // Dibuat oleh owner/admin → langsung terverifikasi (boleh login).
+            .values({ email: body.email, passwordHash, nama: body.nama, emailVerifiedAt: new Date() })
             .returning();
           // kode karyawan otomatis (ID cepat absensi via ketik/scan QR): 8 digit acak, unik per perusahaan
           const employeeCode = await resolveKodeKaryawan(tx, auth.company_id!);

@@ -26,6 +26,7 @@ import { SignupPage } from "./pages/SignupPage";
 import { OnboardingPage } from "./pages/OnboardingPage";
 import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
 import { ResetPasswordPage } from "./pages/ResetPasswordPage";
+import { VerifikasiEmailPage } from "./pages/VerifikasiEmailPage";
 import { SmtpPage } from "./pages/superadmin/SmtpPage";
 import { OperasionalPage } from "./pages/operasional/OperasionalPage";
 import { TimBerandaPage } from "./pages/TimBerandaPage";
@@ -73,6 +74,8 @@ export default function App() {
   if (pathname === "/syarat") return <SyaratPage />;
   if (pathname === "/kontak") return <KontakPage />;
   if (pathname === "/bantuan") return <BantuanPage />;
+  // Verifikasi email dari tautan — layar penuh, jalan baik saat login maupun tidak.
+  if (pathname === "/verifikasi-email") return <VerifikasiEmailPage />;
   // Root domain saat belum login → landing/marketing (situs utama).
   if (!auth && pathname === "/") return <LandingPage />;
 

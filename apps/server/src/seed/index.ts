@@ -220,10 +220,11 @@ async function main() {
         passwordHash: bcrypt.hashSync(env.SEED_SUPERADMIN_PASSWORD, 10),
         nama: "Super Admin",
         isSuperAdmin: true,
+        emailVerifiedAt: new Date(),
       })
       .onConflictDoUpdate({
         target: users.email,
-        set: { isSuperAdmin: true, isActive: true },
+        set: { isSuperAdmin: true, isActive: true, emailVerifiedAt: new Date() },
       });
     credentials.push({
       peran: "Super Admin (platform)",
@@ -254,8 +255,9 @@ async function main() {
         email: env.SEED_OWNER_EMAIL.toLowerCase(),
         passwordHash: bcrypt.hashSync(env.SEED_OWNER_PASSWORD, 10),
         nama: "Owner Basooopa",
+        emailVerifiedAt: new Date(),
       })
-      .onConflictDoUpdate({ target: users.email, set: { isActive: true } })
+      .onConflictDoUpdate({ target: users.email, set: { isActive: true, emailVerifiedAt: new Date() } })
       .returning();
     await tx
       .insert(memberships)
@@ -276,8 +278,9 @@ async function main() {
         email: env.SEED_KASIR_EMAIL.toLowerCase(),
         passwordHash: bcrypt.hashSync(env.SEED_KASIR_PASSWORD, 10),
         nama: "Kasir Pusat",
+        emailVerifiedAt: new Date(),
       })
-      .onConflictDoUpdate({ target: users.email, set: { isActive: true } })
+      .onConflictDoUpdate({ target: users.email, set: { isActive: true, emailVerifiedAt: new Date() } })
       .returning();
     await tx
       .insert(memberships)

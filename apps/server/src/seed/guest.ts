@@ -56,13 +56,13 @@ export async function provisionGuest(dbc: Db = db): Promise<boolean> {
   // 1) Dua user tamu (idempoten; aktifkan bila pernah dinonaktifkan).
   const [owner] = await dbc
     .insert(users)
-    .values({ email: GUEST.ownerEmail, passwordHash: hash, nama: "Owner Demo (Tamu)" })
-    .onConflictDoUpdate({ target: users.email, set: { isActive: true, deletedAt: null } })
+    .values({ email: GUEST.ownerEmail, passwordHash: hash, nama: "Owner Demo (Tamu)", emailVerifiedAt: new Date() })
+    .onConflictDoUpdate({ target: users.email, set: { isActive: true, deletedAt: null, emailVerifiedAt: new Date() } })
     .returning();
   const [kasir] = await dbc
     .insert(users)
-    .values({ email: GUEST.kasirEmail, passwordHash: hash, nama: "Kasir Demo (Tamu)" })
-    .onConflictDoUpdate({ target: users.email, set: { isActive: true, deletedAt: null } })
+    .values({ email: GUEST.kasirEmail, passwordHash: hash, nama: "Kasir Demo (Tamu)", emailVerifiedAt: new Date() })
+    .onConflictDoUpdate({ target: users.email, set: { isActive: true, deletedAt: null, emailVerifiedAt: new Date() } })
     .returning();
 
   // 2) Sudah ada perusahaan demo? Pastikan keanggotaan, lalu selesai.

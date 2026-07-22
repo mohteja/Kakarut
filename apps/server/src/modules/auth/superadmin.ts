@@ -36,6 +36,7 @@ export async function pastikanSuperAdmin(dbx: Db | Tx): Promise<boolean> {
     passwordHash: bcrypt.hashSync(env.SEED_SUPERADMIN_PASSWORD, 10),
     nama: "Super Admin",
     isSuperAdmin: true,
+    emailVerifiedAt: new Date(),
   });
   return true;
 }

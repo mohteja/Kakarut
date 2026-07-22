@@ -2,12 +2,25 @@ import { useQueryClient } from "@tanstack/react-query";
 import { createContext, useCallback, useContext, useState, type ReactNode } from "react";
 import { api, loadAuth, saveAuth, type AuthState } from "../lib/api";
 
+/** Hasil daftar / kirim-ulang verifikasi (netral, tanpa sesi). */
+export interface DaftarResult {
+  ok: boolean;
+  message?: string;
+  /** Hanya di dev (email belum diatur) — tautan verifikasi langsung. */
+  dev_verify_url?: string;
+}
+
 interface AuthContextValue {
   auth: AuthState | null;
   login: (email: string, password: string) => Promise<AuthState>;
   /** Masuk sebagai tamu (guest mode) — akun bersama tanpa password. */
   masukTamu: (peran: "owner" | "kasir") => Promise<AuthState>;
-  register: (nama: string, email: string, password: string) => Promise<AuthState>;
+  /** Daftar akun. TIDAK auto-login: kirim tautan verifikasi ke email. */
+  register: (nama: string, email: string, password: string) => Promise<DaftarResult>;
+  /** Verifikasi email dari token tautan → langsung dapat sesi (auto-login). */
+  verifikasiEmail: (token: string) => Promise<AuthState>;
+  /** Kirim ulang tautan verifikasi ke email (netral). */
+  kirimUlangVerifikasi: (email: string) => Promise<DaftarResult>;
   /** Ganti sesi aktif (mis. setelah buat perusahaan / terima undangan di onboarding). */
   setSession: (data: AuthState) => void;
   logout: () => void;
@@ -57,15 +70,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const register = useCallback(
-    async (nama: string, email: string, password: string) => {
-      const data = await api<AuthState>("/auth/register", {
+    async (nama: string, email: string, password: string) =>
+      api<DaftarResult>("/auth/register", {
         method: "POST",
         body: { nama, email, password },
+      }),
+    [],
+  );
+
+  const verifikasiEmail = useCallback(
+    async (token: string) => {
+      const data = await api<AuthState>("/auth/verify-email", {
+        method: "POST",
+        body: { token },
       });
       setSession(data);
       return data;
     },
     [setSession],
+  );
+
+  const kirimUlangVerifikasi = useCallback(
+    async (email: string) =>
+      api<DaftarResult>("/auth/resend-verification", {
+        method: "POST",
+        body: { email },
+      }),
+    [],
   );
 
   const logout = useCallback(() => {
@@ -77,7 +108,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [queryClient]);
 
   return (
-    <AuthContext.Provider value={{ auth, login, masukTamu, register, setSession, logout }}>
+    <AuthContext.Provider
+      value={{
+        auth,
+        login,
+        masukTamu,
+        register,
+        verifikasiEmail,
+        kirimUlangVerifikasi,
+        setSession,
+        logout,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );
