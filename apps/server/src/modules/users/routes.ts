@@ -425,12 +425,57 @@ export const karyawanRoutes = new Hono<AppEnv>()
       }
     }
 
+    // Guard lintas-perusahaan: identitas login (email/password) & status aktif
+    // ada di baris `users` GLOBAL yang dibagi ke SEMUA keanggotaan orang ini.
+    // Bila target masih AKTIF di perusahaan LAIN, mengubah kredensial/menonaktifkan
+    // dari sini akan merembet ke sana (ambil-alih akun / kunci lintas-tenant).
+    // Perubahan yang scoped ke keanggotaan ini (peran/cabang/keluarkan dari
+    // perusahaan ini) tetap boleh — hanya tulisan ke baris global yang dijaga.
+    const aktifDiPerusahaanLain = await db
+      .select({ id: memberships.id })
+      .from(memberships)
+      .innerJoin(companies, eq(memberships.companyId, companies.id))
+      .where(
+        and(
+          eq(memberships.userId, userId),
+          ne(memberships.companyId, auth.company_id!),
+          isNull(memberships.archivedAt),
+          eq(companies.isActive, true),
+        ),
+      )
+      .limit(1);
+    const lintasPerusahaan = aktifDiPerusahaanLain.length > 0;
+    if (lintasPerusahaan) {
+      if (body.password) {
+        throw new HTTPException(403, {
+          message:
+            "Akun ini juga aktif di perusahaan lain — password hanya bisa diubah oleh pemilik akunnya sendiri.",
+        });
+      }
+      if (body.email !== undefined) {
+        const [u] = await db
+          .select({ email: users.email })
+          .from(users)
+          .where(eq(users.id, userId));
+        if (u && u.email !== body.email) {
+          throw new HTTPException(403, {
+            message:
+              "Akun ini juga aktif di perusahaan lain — email login tidak bisa diubah dari sini.",
+          });
+        }
+      }
+    }
+
     // NONAKTIF = ARSIP (satu status): menonaktifkan berarti masuk arsip,
     // memulihkan dari arsip berarti aktif kembali.
     const arsipEfektif =
       body.arsip ?? (body.is_active !== undefined ? !body.is_active : undefined);
     const aktifEfektif =
       body.is_active ?? (body.arsip !== undefined ? !body.arsip : undefined);
+    // Status aktif GLOBAL hanya ditulis bila akun tak aktif di perusahaan lain —
+    // arsip di perusahaan ini tetap berlaku (via memberships.archivedAt), tetapi
+    // tak boleh menonaktifkan login orang tsb di perusahaan lain.
+    const aktifGlobal = lintasPerusahaan ? undefined : aktifEfektif;
 
     // Jangan mengunci diri sendiri: nonaktif/arsip akun sendiri ditolak.
     if (userId === auth.sub && arsipEfektif === true) {
@@ -496,7 +541,7 @@ export const karyawanRoutes = new Hono<AppEnv>()
       if (
         body.nama !== undefined ||
         body.email !== undefined ||
-        aktifEfektif !== undefined ||
+        aktifGlobal !== undefined ||
         body.password
       ) {
         await tx
@@ -504,7 +549,7 @@ export const karyawanRoutes = new Hono<AppEnv>()
           .set({
             ...(body.nama !== undefined && { nama: body.nama }),
             ...(body.email !== undefined && { email: body.email }),
-            ...(aktifEfektif !== undefined && { isActive: aktifEfektif }),
+            ...(aktifGlobal !== undefined && { isActive: aktifGlobal }),
             ...(body.password && { passwordHash: bcrypt.hashSync(body.password, 10) }),
           })
           .where(eq(users.id, userId));

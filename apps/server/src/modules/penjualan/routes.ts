@@ -12,6 +12,12 @@ import {
   type AppEnv,
 } from "../../middleware/auth";
 import { tanggalDi } from "../../lib/time";
+import {
+  cariHasilIdempoten,
+  catatHasilIdempoten,
+  clientRefField,
+  deviceIdField,
+} from "../sync/idempoten";
 import { createSale } from "./service";
 
 export const SaleBody = z.object({
@@ -28,6 +34,9 @@ export const SaleBody = z.object({
   /** pembayaran */
   metode_bayar: z.enum(["tunai", "qris", "transfer"]).optional(),
   uang_diterima: z.number().nonnegative().optional(),
+  /** idempotensi antarjalur (online ↔ /sync) — UUID v4 dari perangkat, opsional */
+  client_ref: clientRefField,
+  device_id: deviceIdField,
   items: z
     .array(
       z.object({
@@ -46,6 +55,14 @@ export const penjualanRoutes = new Hono<AppEnv>()
   .post("/", requireRole("cashier"), zValidator("json", SaleBody), async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");
+    // Idempotensi lintas jalur: bila client_ref ini SUDAH sukses (online sebelumnya
+    // atau via /sync), balas sale yang ada — JANGAN buat ulang. Dicek PALING AWAL
+    // supaya retry (mis. setelah receiveTimeout) tak gagal hanya karena shift sudah
+    // ditutup / validasi lain berubah.
+    if (body.client_ref) {
+      const ada = await cariHasilIdempoten(auth.company_id!, body.client_ref);
+      if (ada) return c.json(ada.hasilJson, 200);
+    }
     const branchId = body.branch_id ?? (await resolveBranchId(c));
     if (terikatCabang(auth.role) && branchId !== auth.branch_id) {
       throw new HTTPException(403, { message: "Kasir hanya boleh transaksi di cabangnya" });
@@ -83,7 +100,19 @@ export const penjualanRoutes = new Hono<AppEnv>()
       uangDiterima: body.uang_diterima,
       items: body.items,
     });
-    return c.json({ ...result, kasir: auth.nama }, 201);
+    const data = { ...result, kasir: auth.nama };
+    // Catat ke ledger idempotensi bersama (dipakai retry online & /sync).
+    if (body.client_ref) {
+      await catatHasilIdempoten({
+        companyId: auth.company_id!,
+        clientRef: body.client_ref,
+        userId: auth.sub,
+        deviceId: body.device_id ?? null,
+        tipe: "penjualan",
+        hasilJson: data,
+      });
+    }
+    return c.json(data, 201);
   })
   .get("/", async (c) => {
     const auth = c.get("auth");

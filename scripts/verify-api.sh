@@ -3737,6 +3737,73 @@ SYNC_OK_UUID=$(jq -nc --arg r "$(uuid99)" --arg w "$NOW99" \
 cek "sync: faktur_id UUID valid → lolos validasi, dispatch (404 dari handler)" "V == 1" \
   "$(api "$OWNER" POST /sync "$SYNC_OK_UUID" | jq '(.hasil[0].status=="gagal" and .hasil[0].kode==404)|if . then 1 else 0 end')"
 
+echo "== 103. Isolasi lintas-perusahaan: edit kredensial akun multi-perusahaan =="
+# U daftar (tanpa perusahaan) → buat perusahaan sendiri (B) → diundang & terima di
+# Basooopa (A) sebagai kasir → jadi anggota DUA perusahaan (identitas users global).
+REGU103=$(api "" POST /auth/register '{"nama":"Dobel 103","email":"dua103@example.com","password":"Dobel10345"}')
+TOKU103=$(echo "$REGU103" | jq -r .token)
+api "$TOKU103" POST /onboarding/perusahaan '{"nama":"Warung Dua 103"}' > /dev/null
+INV103=$(api "$OWNER" POST /karyawan/undang "{\"email\":\"dua103@example.com\",\"role\":\"cashier\",\"branch_id\":\"$PUSAT96\"}" | jq -r .id)
+api "$TOKU103" POST "/onboarding/undangan/$INV103/terima" > /dev/null
+UID103=$(api "$OWNER" GET /karyawan | jq -r '[.[]|select(.email=="dua103@example.com")][0].user_id')
+cek "setup: U jadi anggota Basooopa (multi-perusahaan)" "V == 1" \
+  "$([ -n "$UID103" ] && [ "$UID103" != "null" ] && echo 1 || echo 0)"
+# Ganti PASSWORD akun yang juga aktif di perusahaan lain → 403 (cegah ambil-alih lintas-tenant)
+cek "PATCH password akun multi-perusahaan → 403" "V == 403" \
+  "$(status_code_body "$OWNER" PATCH "/karyawan/$UID103" '{"password":"Bajakxx99"}')"
+# Ganti EMAIL login → 403
+cek "PATCH email akun multi-perusahaan → 403" "V == 403" \
+  "$(status_code_body "$OWNER" PATCH "/karyawan/$UID103" '{"email":"ganti103@example.com"}')"
+# Edit non-kredensial (nama) tetap boleh → 200
+cek "PATCH nama akun multi-perusahaan → 200 (edit scoped tetap boleh)" "V == 200" \
+  "$(status_code_body "$OWNER" PATCH "/karyawan/$UID103" '{"nama":"Dobel Baru 103"}')"
+# Keluarkan (arsip) dari perusahaan ini → 200, TAPI login GLOBAL tidak terkunci
+cek "arsip akun multi-perusahaan dari sini → 200" "V == 200" \
+  "$(status_code_body "$OWNER" PATCH "/karyawan/$UID103" '{"arsip":true}')"
+cek "arsip lintas-tenant TIDAK mengunci login global (U masih bisa masuk)" "V == 1" \
+  "$([ -n "$(login "dua103@example.com" "Dobel10345")" ] && echo 1 || echo 0)"
+
+echo "== 104. Idempotensi client_ref lintas jalur (online /penjualan & /absensi ↔ /sync) =="
+# Pastikan kasir SEDANG HADIR (absen masuk, belum keluar) lalu buka shift —
+# syarat transaksi. Absen bersifat toggle: jadikan status terakhir 'masuk'.
+AT104=$(api "$KASIR" POST /absensi/saya '{"foto_url":"https://example.com/in104.jpg"}' | jq -r '.tipe')
+[ "$AT104" = "keluar" ] && api "$KASIR" POST /absensi/saya '{"foto_url":"https://example.com/in104b.jpg"}' > /dev/null
+api "$KASIR" POST /shift/buka '{"modal_awal":150000}' > /dev/null 2>&1 || true
+CR104=$(uuid99)
+# 1) Online pertama → sale terbentuk (punya nomor).
+J104=$(api "$KASIR" POST /penjualan "{\"is_dine_in\":false,\"client_ref\":\"$CR104\",\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")
+NOM104=$(echo "$J104" | jq -r '.sale.nomor')
+cek "penjualan online (client_ref) → sale dibuat" "V == 1" \
+  "$([ -n "$NOM104" ] && [ "$NOM104" != "null" ] && echo 1 || echo 0)"
+# 2) Retry client_ref SAMA → 200 (bukan 201), sale SAMA (tak ada sale kedua).
+cek "retry penjualan client_ref sama → 200 (bukan 201)" "V == 200" \
+  "$(status_code_body "$KASIR" POST /penjualan "{\"is_dine_in\":false,\"client_ref\":\"$CR104\",\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")"
+cek "retry mengembalikan sale yang SAMA (nomor identik)" "V == 1" \
+  "$(api "$KASIR" POST /penjualan "{\"is_dine_in\":false,\"client_ref\":\"$CR104\",\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}" | jq --arg n "$NOM104" '(.sale.nomor == $n) | if . then 1 else 0 end')"
+# 3) INTI: online lalu /sync dengan client_ref SAMA → sudah_ada (tak dibuat ulang).
+CR104B=$(uuid99)
+api "$KASIR" POST /penjualan "{\"is_dine_in\":false,\"client_ref\":\"$CR104B\",\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}" > /dev/null
+SYNC104=$(jq -nc --arg r "$CR104B" --arg w "$NOW99" --arg m "$PBA_ID" '{commands:[{client_ref:$r,tipe:"penjualan",waktu:$w,payload:{is_dine_in:false,items:[{menu_id:$m,qty:1}]}}]}')
+cek "sync penjualan client_ref yg SUDAH online → sudah_ada (inti perbaikan)" "V == 1" \
+  "$(api "$KASIR" POST /sync "$SYNC104" | jq '(.hasil[0].status == "sudah_ada") | if . then 1 else 0 end')"
+# 4) Absensi/saya dedup: retry client_ref sama → 200, hasil (tipe) tak berubah.
+AR104=$(uuid99)
+A104=$(api "$KASIR" POST /absensi/saya "{\"foto_url\":\"https://example.com/a104.jpg\",\"client_ref\":\"$AR104\"}")
+TIPE104=$(echo "$A104" | jq -r '.tipe')
+cek "retry absensi/saya client_ref sama → 200" "V == 200" \
+  "$(status_code_body "$KASIR" POST /absensi/saya "{\"foto_url\":\"https://example.com/a104.jpg\",\"client_ref\":\"$AR104\"}")"
+cek "retry absensi mengembalikan hasil SAMA (tipe tak berubah)" "V == 1" \
+  "$(api "$KASIR" POST /absensi/saya "{\"foto_url\":\"https://example.com/a104.jpg\",\"client_ref\":\"$AR104\"}" | jq --arg t "$TIPE104" '(.tipe == $t) | if . then 1 else 0 end')"
+# 5) INTI absen: online lalu /sync absen_saya client_ref sama → sudah_ada.
+AR104B=$(uuid99)
+api "$KASIR" POST /absensi/saya "{\"foto_url\":\"https://example.com/b104.jpg\",\"client_ref\":\"$AR104B\"}" > /dev/null
+SYNCA104=$(jq -nc --arg r "$AR104B" --arg w "$NOW99" '{commands:[{client_ref:$r,tipe:"absen_saya",waktu:$w,payload:{foto_url:"https://example.com/b104.jpg"}}]}')
+cek "sync absen_saya client_ref yg SUDAH online → sudah_ada" "V == 1" \
+  "$(api "$KASIR" POST /sync "$SYNCA104" | jq '(.hasil[0].status == "sudah_ada") | if . then 1 else 0 end')"
+# 6) Regresi nol: penjualan TANPA client_ref → tetap 201 (perilaku lama).
+cek "penjualan TANPA client_ref → tetap 201 (regresi nol)" "V == 201" \
+  "$(status_code_body "$KASIR" POST /penjualan "{\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

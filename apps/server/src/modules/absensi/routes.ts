@@ -8,6 +8,12 @@ import { db } from "../../db/client";
 import { attendances, branches, companies, memberships, users } from "../../db/schema";
 import { tanggalDi } from "../../lib/time";
 import { requireRole, resolveBranchId, type AppEnv } from "../../middleware/auth";
+import {
+  cariHasilIdempoten,
+  catatHasilIdempoten,
+  clientRefField,
+  deviceIdField,
+} from "../sync/idempoten";
 
 /** Koordinat perangkat — divalidasi terhadap radius titik cabang bila diatur. */
 const KoordinatBody = {
@@ -15,6 +21,9 @@ const KoordinatBody = {
   foto_url: z.string().trim().min(1, "Foto absen wajib dilampirkan"),
   lat: z.number().min(-90).max(90).nullish(),
   lng: z.number().min(-180).max(180).nullish(),
+  /** idempotensi antarjalur (online ↔ /sync) — UUID v4 dari perangkat, opsional */
+  client_ref: clientRefField,
+  device_id: deviceIdField,
 };
 /** Absen operator (pindai QR / ketik kode karyawan). */
 export const ClockBody = z.object({ kode: z.string().trim().min(1), ...KoordinatBody });
@@ -170,9 +179,14 @@ export async function sedangHadir(
 export const absensiRoutes = new Hono<AppEnv>()
   .post("/", requireRole("owner", "admin", "cashier"), zValidator("json", ClockBody), async (c) => {
     const auth = c.get("auth");
+    const body = c.req.valid("json");
+    if (body.client_ref) {
+      const ada = await cariHasilIdempoten(auth.company_id!, body.client_ref);
+      if (ada) return c.json(ada.hasilJson, 200);
+    }
     const branchId = await resolveBranchId(c);
-    const { lat, lng, foto_url } = c.req.valid("json");
-    const kode = c.req.valid("json").kode.trim();
+    const { lat, lng, foto_url } = body;
+    const kode = body.kode.trim();
     const { jarakM, namaCabang } = await cekRadius(branchId, lat, lng);
 
     // Resolusi karyawan lewat kode (case-insensitive) dalam perusahaan pemanggil.
@@ -206,14 +220,29 @@ export const absensiRoutes = new Hono<AppEnv>()
       fotoUrl: foto_url,
       jarakM,
     });
+    if (body.client_ref) {
+      await catatHasilIdempoten({
+        companyId: auth.company_id!,
+        clientRef: body.client_ref,
+        userId: auth.sub,
+        deviceId: body.device_id ?? null,
+        tipe: "absen_stasiun",
+        hasilJson: result,
+      });
+    }
     return c.json(result, 201);
   })
   // Absen SENDIRI — atas nama pemanggil (auth.sub). Aman untuk peran tim: tak
   // ada kode yang bisa dititipkan; server memakai keanggotaan pemanggil.
   .post("/saya", zValidator("json", SelfBody), async (c) => {
     const auth = c.get("auth");
+    const body = c.req.valid("json");
+    if (body.client_ref) {
+      const ada = await cariHasilIdempoten(auth.company_id!, body.client_ref);
+      if (ada) return c.json(ada.hasilJson, 200);
+    }
     const branchId = await resolveBranchId(c);
-    const { lat, lng, foto_url } = c.req.valid("json");
+    const { lat, lng, foto_url } = body;
     const { jarakM, namaCabang } = await cekRadius(branchId, lat, lng);
 
     const [m] = await db
@@ -247,6 +276,16 @@ export const absensiRoutes = new Hono<AppEnv>()
       fotoUrl: foto_url,
       jarakM,
     });
+    if (body.client_ref) {
+      await catatHasilIdempoten({
+        companyId: auth.company_id!,
+        clientRef: body.client_ref,
+        userId: auth.sub,
+        deviceId: body.device_id ?? null,
+        tipe: "absen_saya",
+        hasilJson: result,
+      });
+    }
     return c.json(result, 201);
   })
   // Ringkasan absensi hari ini (atau ?tanggal=YYYY-MM-DD) di cabang: jam masuk
