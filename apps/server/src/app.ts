@@ -88,7 +88,17 @@ export function createApp() {
       message: "Khusus manajemen atau karyawan Central Kitchen",
     });
   };
-  tenant.use("/produksi/*", izinkanManajemenAtauKaryawanCk);
+  // Produksi juga terbuka untuk role KITCHEN (dapur cabang store): memproduksi
+  // bahan ber-produksi_di="cabang" di cabangnya sendiri — hasil masuk stok
+  // cabang itu. Kitchen TIDAK mendapat /pembelian (belanja tetap urusan
+  // manajemen/CK); penempatan kitchen di cabang store dijaga saat buat/ubah
+  // karyawan, dan kunci per-request tetap lewat terikatCabang.
+  const izinkanProduksi: MiddlewareHandler<AppEnv> = async (c, next) => {
+    const auth = c.get("auth");
+    if (auth.role === "kitchen" && auth.branch_id) return next();
+    return izinkanManajemenAtauKaryawanCk(c, next);
+  };
+  tenant.use("/produksi/*", izinkanProduksi);
   tenant.use("/pembelian/*", izinkanManajemenAtauKaryawanCk);
   tenant.use("/laporan/*", requireRole("owner", "admin"));
   tenant.use("/rekomendasi/*", requireRole("owner", "admin"));
@@ -103,8 +113,8 @@ export function createApp() {
   tenant.use("/shift/*", requireRole("owner", "admin", "cashier"));
   // Absensi: semua peran boleh ABSEN SENDIRI (POST /absensi/saya) + lihat
   // ringkasan; hanya admin/kasir yang boleh STASIUN pindai (POST /absensi,
-  // digerbang per-rute di modulnya). Tim ikut agar bisa absen sendiri.
-  tenant.use("/absensi/*", requireRole("owner", "admin", "cashier", "tim"));
+  // digerbang per-rute di modulnya). Tim & kitchen ikut agar bisa absen sendiri.
+  tenant.use("/absensi/*", requireRole("owner", "admin", "cashier", "tim", "kitchen"));
   tenant
     .route("/company", companyRoutes)
     .route("/customer", customerRoutes)

@@ -470,6 +470,13 @@
       "when": 1784694643225,
       "tag": "0066_long_iron_monger",
       "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1784715137408,
+      "tag": "0067_wealthy_lily_hollister",
+      "breakpoints": true
     }
   ]
 }

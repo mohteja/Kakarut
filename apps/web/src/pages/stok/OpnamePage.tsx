@@ -25,9 +25,10 @@ export function OpnamePage() {
   const { query: branchQuery, id: branchId } = useCabangData();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  // Peran terikat cabang (kasir & tim) hanya melihat/opname tempat yang
-  // ditugaskan padanya (atau terbuka) — owner/admin bebas.
-  const terikat = auth?.user.role === "cashier" || auth?.user.role === "tim";
+  // Peran terikat cabang (kasir, tim & kitchen) hanya melihat/opname tempat
+  // yang ditugaskan padanya (atau terbuka) — owner/admin bebas.
+  const terikat =
+    auth?.user.role === "cashier" || auth?.user.role === "tim" || auth?.user.role === "kitchen";
 
   const { data: stok, isLoading: stokLoading } = useQuery({
     queryKey: ["stok", branchQuery],

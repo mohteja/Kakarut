@@ -21,7 +21,7 @@ export const PANDUAN_MARKUP: { kategori: string; persen: string; keterangan: str
 ];
 
 export type StokStatus = "habis" | "menipis" | "aman";
-export type UserRole = "owner" | "admin" | "cashier" | "tim";
+export type UserRole = "owner" | "admin" | "cashier" | "tim" | "kitchen";
 export type MenuTipe = "regular" | "paket";
 /**
  * Kategori bahan = teks bebas dari master `ingredient_categories` (bisa
@@ -30,3 +30,9 @@ export type MenuTipe = "regular" | "paket";
 export type BahanKategori = string;
 /** jalur pengadaan bahan baku: diproduksi sendiri vs dibeli jadi */
 export type JenisPengadaan = "produksi" | "beli";
+/**
+ * Lokasi produksi bahan jalur "produksi": diproduksi di Central Kitchen (lalu
+ * dikirim ke cabang) atau langsung di cabang store (dapur/kitchen toko —
+ * hasil masuk stok cabang itu). Hanya bermakna untuk pengadaan "produksi".
+ */
+export type ProduksiDi = "ck" | "cabang";

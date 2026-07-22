@@ -266,6 +266,26 @@ function pastikanJalur(
 }
 
 /**
+ * Role KITCHEN (dapur cabang store) hanya boleh memproduksi bahan yang memang
+ * ditandai diproduksi DI CABANG (`produksi_di = "cabang"`, diatur di Resep).
+ * Bahan ber-produksi_di "ck" tetap urusan Central Kitchen — kitchen cabang
+ * tidak boleh menduplikasinya di store.
+ */
+function pastikanBolehDiproduksiKitchen(
+  role: string | null,
+  ings: Iterable<typeof ingredients.$inferSelect>,
+) {
+  if (role !== "kitchen") return;
+  for (const ing of ings) {
+    if (ing.pengadaan === "produksi" && ing.produksiDi !== "cabang") {
+      throw new HTTPException(400, {
+        message: `"${ing.nama}" diproduksi di Central Kitchen — atur "Diproduksi di: Cabang" di Resep bila ingin diproduksi kitchen cabang`,
+      });
+    }
+  }
+}
+
+/**
  * Estimasi biaya proporsional dari harga per batch bahan:
  * jalur beli = harga default pembelian; jalur produksi = RAB (perkiraan biaya).
  */
@@ -321,6 +341,8 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
           and(eq(ingredients.companyId, auth.company_id!), inArray(ingredients.id, ingIds)),
         );
       const ingById = new Map(ingRows.map((r) => [r.id, r]));
+      // Kitchen cabang: hanya bahan ber-produksi_di "cabang" (diatur di Resep).
+      pastikanBolehDiproduksiKitchen(auth.role, ingRows);
 
       if (body.supplier_id) {
         const [s] = await db
@@ -589,11 +611,16 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
           }
           tujuanBranch = cb.id;
           tujuanNama = cb.nama;
-          // Khusus kasir: tak boleh lintas cabang. Karyawan CK (tim) justru
-          // tugasnya MENGIRIM ke store — validasi keterhubungan CK↔store di atas.
-          if (auth.role === "cashier" && auth.branch_id && tujuanBranch !== auth.branch_id) {
+          // Khusus kasir & kitchen: tak boleh lintas cabang. Karyawan CK (tim)
+          // justru tugasnya MENGIRIM ke store — validasi CK↔store di atas.
+          // Kitchen memproduksi LOKAL untuk cabangnya sendiri.
+          if (
+            (auth.role === "cashier" || auth.role === "kitchen") &&
+            auth.branch_id &&
+            tujuanBranch !== auth.branch_id
+          ) {
             throw new HTTPException(403, {
-              message: "Kasir tidak boleh mengirim ke cabang lain",
+              message: "Kasir/Kitchen tidak boleh mengirim ke cabang lain",
             });
           }
         }
@@ -1517,6 +1544,8 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
           ),
         );
       const ing = pastikanJalur(ingRow, tipe, body.ingredient_id);
+      // Kitchen cabang: hanya bahan ber-produksi_di "cabang" (diatur di Resep).
+      pastikanBolehDiproduksiKitchen(auth.role, [ing]);
 
       const [company] = await db
         .select({ timezone: companies.timezone })

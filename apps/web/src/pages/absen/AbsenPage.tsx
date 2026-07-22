@@ -116,7 +116,7 @@ type Mode = "idle" | "scan" | "capture";
 export function AbsenPage() {
   const { auth } = useAuth();
   const role = auth?.user.role;
-  const isTim = role === "tim";
+  const isTim = role === "tim" || role === "kitchen";
   // Stasiun pindai (memindai/ketik kode karyawan lain) hanya admin/kasir.
   const bisaStasiun = role === "owner" || role === "admin" || role === "cashier";
   const { branchQuery, branchId, cabang } = useBranch();

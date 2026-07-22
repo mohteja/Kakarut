@@ -184,8 +184,10 @@ export function belumSelesai(status: StatusFaktur) {
 export const STATUS_PRODUKSI: Record<KonfirmasiStatus, { label: string; cls: string }> = {
   rencana: { label: "📋 Belum dikerjakan", cls: "bg-stone-200 text-stone-700" },
   dikerjakan: { label: "🔨 Sedang dikerjakan", cls: "bg-blue-100 text-blue-800" },
-  menunggu: { label: "✅ Selesai — masuk stok CK", cls: "bg-yellow-100 text-yellow-800" },
-  dikonfirmasi: { label: "📦 Masuk stok CK ✓", cls: "bg-green-100 text-green-800" },
+  // Netral-lokasi: produksi bisa di CK maupun di cabang (kitchen toko) —
+  // hasil selalu masuk stok cabang pelaksana.
+  menunggu: { label: "✅ Selesai — masuk stok", cls: "bg-yellow-100 text-yellow-800" },
+  dikonfirmasi: { label: "📦 Masuk stok ✓", cls: "bg-green-100 text-green-800" },
   ditolak: { label: "❌ Ditolak", cls: "bg-red-100 text-red-700" },
 };
 
@@ -226,7 +228,7 @@ export type TahapTujuan = "dikerjakan" | "menunggu" | "dikonfirmasi";
 export const AKSI_TAHAP: Record<JenisPengadaan, Array<{ ke: TahapTujuan; label: string }>> = {
   produksi: [
     { ke: "dikerjakan", label: "🔨 Mulai dikerjakan" },
-    { ke: "menunggu", label: "✅ Selesai — masuk stok CK" },
+    { ke: "menunggu", label: "✅ Selesai — masuk stok" },
   ],
   beli: [
     { ke: "dikerjakan", label: "🔄 Diproses" },

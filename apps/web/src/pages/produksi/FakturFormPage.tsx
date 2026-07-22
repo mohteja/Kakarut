@@ -177,8 +177,9 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
   const { query: branchQuery, id: branchId } = useCabangData("produksi");
   const queryClient = useQueryClient();
   const isKasir = auth?.user.role === "cashier";
-  // karyawan CK (tim): faktur dibuat di cabangnya sendiri, pelaksana dirinya
-  const isTim = auth?.user.role === "tim";
+  // karyawan CK (tim) & kitchen cabang: faktur dibuat di cabangnya sendiri,
+  // pelaksana dirinya
+  const isTim = auth?.user.role === "tim" || auth?.user.role === "kitchen";
   const isManajemen = auth?.user.role === "owner" || auth?.user.role === "admin";
 
   const { data: bahan } = useQuery({ queryKey: ["bahan"], queryFn: () => api<BahanDto[]>("/bahan") });

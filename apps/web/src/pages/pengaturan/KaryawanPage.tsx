@@ -24,7 +24,7 @@ interface Karyawan {
   nama: string;
   email: string;
   is_active: boolean;
-  role: "owner" | "admin" | "cashier" | "tim";
+  role: "owner" | "admin" | "cashier" | "tim" | "kitchen";
   branch_id: string | null;
   cabang: string | null;
   employee_code: string | null;
@@ -39,13 +39,19 @@ interface FormState {
   email: string;
   /** saat ubah: kosongkan bila password tidak diganti */
   password: string;
-  role: "owner" | "admin" | "cashier" | "tim";
+  role: "owner" | "admin" | "cashier" | "tim" | "kitchen";
   branch_id: string;
 }
 
-const labelRole = { owner: "Owner", admin: "Admin", cashier: "Kasir", tim: "Tim" } as const;
-/** kasir & tim terikat ke satu cabang — lokasi kerja wajib */
-const WAJIB_CABANG = new Set(["cashier", "tim"]);
+const labelRole = {
+  owner: "Owner",
+  admin: "Admin",
+  cashier: "Kasir",
+  tim: "Tim",
+  kitchen: "Kitchen",
+} as const;
+/** kasir, tim & kitchen terikat ke satu cabang — lokasi kerja wajib */
+const WAJIB_CABANG = new Set(["cashier", "tim", "kitchen"]);
 
 /**
  * Dropdown aksi per baris — semua aksi selain QR dikumpulkan di sini agar
@@ -584,19 +590,27 @@ export function KaryawanPage() {
                   value={undangForm.role}
                   onChange={(e) => {
                     const r = e.target.value as FormState["role"];
+                    // Kitchen wajib cabang store — bila pilihan lokasi lama
+                    // bukan store, kembalikan ke store pertama.
+                    const lokasiStore = cabang.find(
+                      (b) => b.id === undangForm.branch_id && b.tipe === "store",
+                    );
                     setUndangForm({
                       ...undangForm,
                       role: r,
                       branch_id:
                         r === "admin" && kantorId
                           ? kantorId
-                          : undangForm.branch_id || storeDefault,
+                          : r === "kitchen"
+                            ? (lokasiStore?.id ?? storeDefault)
+                            : undangForm.branch_id || storeDefault,
                     });
                   }}
                   className={inputClass}
                 >
                   <option value="cashier">Kasir</option>
                   <option value="tim">Tim / Karyawan</option>
+                  <option value="kitchen">Kitchen</option>
                   <option value="admin">Admin</option>
                   <option value="owner">Owner</option>
                 </select>
@@ -614,7 +628,13 @@ export function KaryawanPage() {
                   >
                     {!WAJIB_CABANG.has(undangForm.role) && <option value="">Semua lokasi</option>}
                     {cabang
-                      .filter((b) => b.is_active && b.tipe !== "kantor")
+                      .filter(
+                        (b) =>
+                          b.is_active &&
+                          b.tipe !== "kantor" &&
+                          // kitchen hanya boleh ditempatkan di cabang store
+                          (undangForm.role !== "kitchen" || b.tipe === "store"),
+                      )
                       .map((b) => (
                         <option key={b.id} value={b.id}>
                           {labelCabang(b)}
@@ -713,18 +733,23 @@ export function KaryawanPage() {
                       // Admin dikunci ke Kantor (pusat) bila tersedia; saat pindah
                       // dari admin, lepas kunci Kantor agar peran lain memilih
                       // lokasi sendiri (bukan Kantor yang tak punya POS/stok).
+                      // Kitchen wajib cabang STORE — lokasi non-store dialihkan.
+                      const lokasi = cabang.find((x) => x.id === form.branch_id);
                       const branchPatch =
                         r === "admin" && kantorId
                           ? { branch_id: kantorId }
-                          : kantorId && form.branch_id === kantorId
+                          : r === "kitchen" && lokasi?.tipe !== "store"
                             ? { branch_id: storeDefault }
-                            : {};
+                            : kantorId && form.branch_id === kantorId
+                              ? { branch_id: storeDefault }
+                              : {};
                       setForm({ ...form, role: r, ...branchPatch });
                     }}
                     className={inputClass}
                   >
                     <option value="cashier">Kasir</option>
                     <option value="tim">Tim / Karyawan</option>
+                    <option value="kitchen">Kitchen</option>
                     <option value="admin">Admin</option>
                     <option value="owner">Owner</option>
                   </select>
@@ -751,11 +776,13 @@ export function KaryawanPage() {
                       value={form.branch_id}
                       onChange={(e) => {
                         const b = cabang.find((x) => x.id === e.target.value);
-                        // pilih Central Kitchen → peran lapangan otomatis Karyawan (tim)
+                        // pilih Central Kitchen → peran lapangan otomatis Karyawan
+                        // (tim) — berlaku juga bila peran sebelumnya kitchen.
                         setForm({
                           ...form,
                           branch_id: e.target.value,
-                          ...(b?.tipe === "central_kitchen" && form.role === "cashier"
+                          ...(b?.tipe === "central_kitchen" &&
+                          (form.role === "cashier" || form.role === "kitchen")
                             ? { role: "tim" as const }
                             : {}),
                         });
@@ -765,7 +792,12 @@ export function KaryawanPage() {
                     >
                       {!WAJIB_CABANG.has(form.role) && <option value="">Semua lokasi</option>}
                       {cabang
-                        .filter((b) => b.is_active)
+                        .filter(
+                          (b) =>
+                            b.is_active &&
+                            // kitchen hanya boleh ditempatkan di cabang store
+                            (form.role !== "kitchen" || b.tipe === "store"),
+                        )
                         .map((b) => (
                           <option key={b.id} value={b.id}>
                             {labelCabang(b)}

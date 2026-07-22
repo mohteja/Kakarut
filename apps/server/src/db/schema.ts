@@ -20,12 +20,19 @@ import {
 /**
  * Peran: owner/admin = manajemen (lintas cabang); cashier = kasir cabang;
  * tim = anggota tim cabang (cek stok, lihat menu, penerimaan barang, riwayat
- * transaksi — tanpa kasir). cashier & tim terikat ke satu cabang.
+ * transaksi — tanpa kasir); kitchen = tim cabang STORE + produksi lokal
+ * (hasil masuk stok cabangnya). cashier, tim & kitchen terikat ke satu cabang.
  */
-export const userRoleEnum = pgEnum("user_role", ["owner", "admin", "cashier", "tim"]);
+export const userRoleEnum = pgEnum("user_role", ["owner", "admin", "cashier", "tim", "kitchen"]);
 export const menuTipeEnum = pgEnum("menu_tipe", ["regular", "paket"]);
 /** jalur pengadaan bahan: diproduksi sendiri vs dibeli jadi */
 export const pengadaanEnum = pgEnum("pengadaan", ["produksi", "beli"]);
+/**
+ * Lokasi produksi bahan jalur "produksi": di Central Kitchen (default; hasil
+ * dikirim ke cabang) atau di CABANG store (kitchen toko memproduksi sendiri —
+ * hasil langsung masuk stok cabang itu). Diabaikan untuk pengadaan "beli".
+ */
+export const produksiDiEnum = pgEnum("produksi_di", ["ck", "cabang"]);
 /**
  * Status pipeline stok masuk: rencana (RAB) → dikerjakan (produksi: dikerjakan;
  * beli: diproses) → menunggu (produksi: selesai—menunggu konfirmasi; beli:
@@ -519,6 +526,9 @@ export const ingredients = pgTable(
     // tetap teks — master hanya menyediakan pilihan (pola satuan).
     kategori: text("kategori").notNull().default("lain"),
     pengadaan: pengadaanEnum("pengadaan").notNull().default("beli"),
+    // Lokasi produksi bahan jalur "produksi" (diatur di Resep): "ck" = Central
+    // Kitchen; "cabang" = diproduksi kitchen di cabang store (masuk stok cabang).
+    produksiDi: produksiDiEnum("produksi_di").notNull().default("ck"),
     catatan: text("catatan"),
     isPackaging: boolean("is_packaging").notNull().default(false),
     isComplement: boolean("is_complement").notNull().default(false),

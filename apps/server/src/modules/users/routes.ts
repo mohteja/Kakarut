@@ -26,24 +26,24 @@ const KaryawanBody = z.object({
   nama: z.string().trim().min(1),
   email: z.string().trim().toLowerCase(),
   password: z.string().min(8, "password minimal 8 karakter"),
-  role: z.enum(["owner", "admin", "cashier", "tim"]),
+  role: z.enum(["owner", "admin", "cashier", "tim", "kitchen"]),
   branch_id: z.string().uuid().nullish(),
 });
 
-/** kasir & tim terikat ke satu cabang — wajib punya lokasi kerja */
-const WAJIB_CABANG = new Set(["cashier", "tim"]);
+/** kasir, tim & kitchen terikat ke satu cabang — wajib punya lokasi kerja */
+const WAJIB_CABANG = new Set(["cashier", "tim", "kitchen"]);
 
 /** Undang karyawan via email (alur "menunggu diundang" — tanpa buat password). */
 const UndangBody = z.object({
   email: z.string().trim().toLowerCase().email("Email tidak valid"),
-  role: z.enum(["owner", "admin", "cashier", "tim"]),
+  role: z.enum(["owner", "admin", "cashier", "tim", "kitchen"]),
   branch_id: z.string().uuid().nullish(),
 });
 
 const PatchKaryawanBody = z.object({
   nama: z.string().trim().min(1).optional(),
   email: z.string().trim().toLowerCase().email().optional(),
-  role: z.enum(["owner", "admin", "cashier", "tim"]).optional(),
+  role: z.enum(["owner", "admin", "cashier", "tim", "kitchen"]).optional(),
   branch_id: z.string().uuid().nullish().optional(),
   is_active: z.boolean().optional(),
   password: z.string().min(8).optional(),
@@ -62,12 +62,18 @@ async function pastikanCabangMilikPerusahaan(branchId: string, companyId: string
 
 /**
  * Central Kitchen hanya punya SATU peran lapangan: karyawan (tim) — kasir
- * tidak berjualan di dapur produksi.
+ * tidak berjualan di dapur produksi. Kitchen (dapur cabang) sebaliknya:
+ * HANYA untuk cabang store — di CK sudah ada tim, di kantor tak ada dapur.
  */
 function pastikanPeranCocokCabang(role: string, tipe: string) {
   if (role === "cashier" && tipe === "central_kitchen") {
     throw new HTTPException(400, {
       message: "Central Kitchen hanya menerima peran Karyawan — bukan kasir",
+    });
+  }
+  if (role === "kitchen" && tipe !== "store") {
+    throw new HTTPException(400, {
+      message: "Peran Kitchen hanya untuk cabang toko (store)",
     });
   }
 }
@@ -108,7 +114,7 @@ export const karyawanRoutes = new Hono<AppEnv>()
     }
     if (WAJIB_CABANG.has(body.role)) {
       if (!body.branch_id) {
-        throw new HTTPException(400, { message: "Kasir/Tim wajib punya cabang" });
+        throw new HTTPException(400, { message: "Kasir/Tim/Kitchen wajib punya cabang" });
       }
       const cb = await pastikanCabangMilikPerusahaan(body.branch_id, auth.company_id!);
       pastikanPeranCocokCabang(body.role, cb.tipe);
@@ -165,7 +171,7 @@ export const karyawanRoutes = new Hono<AppEnv>()
     }
     if (WAJIB_CABANG.has(body.role)) {
       if (!body.branch_id) {
-        throw new HTTPException(400, { message: "Kasir/Tim wajib punya cabang" });
+        throw new HTTPException(400, { message: "Kasir/Tim/Kitchen wajib punya cabang" });
       }
       const cb = await pastikanCabangMilikPerusahaan(body.branch_id, auth.company_id!);
       pastikanPeranCocokCabang(body.role, cb.tipe);
@@ -508,7 +514,7 @@ export const karyawanRoutes = new Hono<AppEnv>()
     const targetBranch =
       body.branch_id !== undefined ? body.branch_id : member.branchId;
     if (WAJIB_CABANG.has(targetRole) && !targetBranch) {
-      throw new HTTPException(400, { message: "Kasir/Tim wajib punya cabang" });
+      throw new HTTPException(400, { message: "Kasir/Tim/Kitchen wajib punya cabang" });
     }
     if (targetBranch) {
       const cb = await pastikanCabangMilikPerusahaan(targetBranch, auth.company_id!);

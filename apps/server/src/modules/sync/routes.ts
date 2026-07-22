@@ -32,7 +32,7 @@ export function setSyncApp(a: { fetch: (req: Request) => Response | Promise<Resp
 /** Bentuk minimal auth yang dipakai eksekutor perintah. */
 type SyncAuth = {
   sub: string;
-  role: "owner" | "admin" | "cashier" | "tim" | null;
+  role: "owner" | "admin" | "cashier" | "tim" | "kitchen" | null;
   company_id: string | null;
   branch_id: string | null;
   nama: string;
