@@ -426,13 +426,15 @@ ADA (validasi = aturan endpoint asli), idempoten per `client_ref`.
 - `POST /api/perlengkapan/opname/sesi/:sessionId/acc` — [owner/admin] — res: `{ ok, jumlah }` — error: **404**
 - `POST /api/perlengkapan/opname/sesi/:sessionId/tolak` — [owner/admin] — res: `{ ok, jumlah }` — error: **404**
 - `DELETE /api/perlengkapan/opname/sesi/:sessionId` — [owner/admin] — res: `{ ok, jumlah }` — error: **404**
-- `POST /api/perlengkapan/permintaan-otomatis` — [owner/admin] — query: `branch_id?` — res: hasil kiriman — error: **400/404**
+- `POST /api/perlengkapan/permintaan-otomatis` — [owner/admin] — query: `branch_id?`, `rencana_id?` (tautkan faktur BP ke permintaan Tambah Stok dari Menu → tampil di `PermintaanStokRow.beli_perlengkapan`) — res: `PermintaanPerlengkapanOtomatisHasil` (seluruh item kurang jadi **SATU faktur BP multi-item** — lihat `beli_faktur`) — error: **400/404**
 - `GET /api/perlengkapan/kiriman` — [any] — query: `branch_id?` — res: daftar kiriman
 - `POST /api/perlengkapan/kiriman/:id/terima` — [any] — query: `branch_id?` — res: hasil — error: **400/404**
-- `GET /api/perlengkapan/beli` — [any] — query: `branch_id?` (owner/admin; cashier/tim terkunci CK-nya) — res: daftar faktur beli
-- `POST /api/perlengkapan/beli` — [owner/admin] — req: `{ supply_id:uuid, ck_branch_id?:uuid|null, qty:number(>0), tujuan_branch_id?:uuid|null, total_harga?:number(≥0)|null, catatan?|null }` — res: **201** hasil — error: **400/404**
-- `POST /api/perlengkapan/beli/:id/tiba` — [owner/admin] — req: `{ qty?:number(>0), total_harga?:number(≥0)|null }` — res: hasil — error: **400/404**
-- `POST /api/perlengkapan/beli/:id/batal` — [owner/admin] — res: hasil — error: **400/404**
+- `GET /api/perlengkapan/beli` — [any] — query: `branch_id?` (owner/admin; cashier/tim terkunci CK-nya) — res: `BeliPerlengkapanRow[]` (baris; kelompokkan per `faktur_id` — baris warisan `faktur_id=null` = faktur satu-item; `nomor` BP- kini per FAKTUR)
+- `POST /api/perlengkapan/beli` — [owner/admin] — req **multi-item**: `{ items: [{supply_id:uuid, qty:number(>0), total_harga?:number(≥0)|null}] (1..100), ck_branch_id?:uuid|null, tujuan_branch_id?:uuid|null, catatan?|null }` (bentuk lama satu-item `{supply_id, qty, …}` tetap diterima) — res: **201** `{ faktur_id, nomor, ids[] }` — error: **400/404**
+- `POST /api/perlengkapan/beli/faktur/:fakturId/tiba` — [owner/admin] — req: `{ items?: [{id:uuid, qty?:number(>0), total_harga?:number(≥0)|null}] }` — proses SEMUA baris 'menunggu' faktur (masuk stok CK PL- per baris + auto-kirim KP- per baris) — res: `{ faktur_id, jumlah_tiba, kiriman[] }` — error: **400/404**
+- `POST /api/perlengkapan/beli/faktur/:fakturId/batal` — [owner/admin] — batalkan semua baris 'menunggu' faktur — res: `{ ok, jumlah }` — error: **404**
+- `POST /api/perlengkapan/beli/:id/tiba` — [owner/admin] — per BARIS (warisan) — req: `{ qty?:number(>0), total_harga?:number(≥0)|null }` — res: hasil — error: **400/404**
+- `POST /api/perlengkapan/beli/:id/batal` — [owner/admin] — per BARIS (warisan) — res: hasil — error: **400/404**
 - `POST /api/perlengkapan` — [owner/admin] — req `ItemBody`: `{ nama: string (max60), satuan: string="pcs" (max20), harga_beli: number(≥0)=0, stok_minimum: number(≥0)=0, catatan?|null (max300), kategori?|null (max60), boleh_eceran: bool=true, dilacak: bool=false, storage_location_id?: uuid|null }` — res: **201** `{ id, nama, dipulihkan }` — error: **400** rak invalid, **409** nama ada
 - `PATCH /api/perlengkapan/:id` — [owner/admin] — req: `ItemPatchBody` (semua opsional + `is_active?`) — res: `{ ok: true }` — error: **400**, **404**
 - `GET /api/perlengkapan/:id/supplier` — [any] — res: daftar supplier — error: **404**
@@ -924,6 +926,20 @@ export interface PermintaanStokRow {
   beli_produksi: PermintaanStokBagian | null;
   /** KIRIM DARI STOK CK: stok jadi yang sudah ada di CK, dipindah ke cabang */
   kirim: PermintaanStokBagian | null;
+  /** faktur BELI PERLENGKAPAN (BP-) yang lahir bersama permintaan ini */
+  beli_perlengkapan: PermintaanStokBagianPerlengkapan | null;
+}
+
+/**
+ * Bagian FAKTUR BELI PERLENGKAPAN (BP-) sebuah permintaan — status memakai
+ * pipeline perlengkapan (menunggu dibeli → tiba di CK / batal); "sebagian" =
+ * campuran tiba & batal.
+ */
+export interface PermintaanStokBagianPerlengkapan {
+  faktur_id: string;
+  jumlah_baris: number;
+  status: BeliPerlengkapanStatus | "sebagian";
+  total: number;
 }
 
 /**
@@ -1587,6 +1603,11 @@ export interface PermintaanPerlengkapanOtomatisHasil {
     nomor: string | null;
     tujuan_nama: string | null;
   }[];
+  /**
+   * FAKTUR BP- yang menaungi seluruh `beli_dibuat` (satu faktur multi-item,
+   * seperti faktur beli bahan baku). Null bila tak ada yang perlu dibeli.
+   */
+  beli_faktur: { faktur_id: string; nomor: string; jumlah_baris: number } | null;
   /** item ≤ minimum tapi cabang ini bukan store / tak terhubung CK */
   tak_bisa_kirim: { supply_id: string; nama: string; satuan: string; qty: number }[];
 }
@@ -1594,9 +1615,14 @@ export interface PermintaanPerlengkapanOtomatisHasil {
 /** Status faktur beli perlengkapan ke CK. */
 export type BeliPerlengkapanStatus = "menunggu" | "tiba" | "batal";
 
-/** Satu faktur beli perlengkapan ke Central Kitchen (BP-). */
+/** Satu BARIS faktur beli perlengkapan ke Central Kitchen (BP-). */
 export interface BeliPerlengkapanRow {
   id: string;
+  /**
+   * FAKTUR pengelompokan: baris satu submit berbagi faktur_id & satu nomor
+   * BP-. Null hanya untuk baris warisan (pra-faktur, nomor per baris).
+   */
+  faktur_id: string | null;
   supply_id: string;
   nama: string;
   satuan: string;

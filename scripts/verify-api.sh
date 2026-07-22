@@ -4054,6 +4054,49 @@ cek "PUT produksi_di=ck → daftar produsen dikosongkan" "V == 1" \
 cek "GET /bahan: daftar produsen kosong setelah kembali ck" "V == 1" \
   "$(api "$OWNER" GET /bahan | jq --arg i "$IPRODA" '[.[]|select(.id==$i)][0].produksi_branch_ids==[]|if . then 1 else 0 end')"
 
+echo "== 110. Faktur beli perlengkapan per FAKTUR + tampil di Permintaan Stok =="
+# Beli perlengkapan kini berkelompok FAKTUR (seperti beli bahan baku): satu
+# submit = satu BP- multi-item; permintaan-otomatis ber-rencana_id menautkan
+# faktur ke Data Permintaan Stok (bagian beli_perlengkapan).
+# (a) rencana baru dari menu → rencana_id ikut di hasil faktur.
+B110="{\"items\":[{\"menu_id\":\"$PBA_ID\",\"porsi\":500}],\"tujuan_branch_id\":\"$CB46_ID\",\"ck_branch_id\":\"$CK52_UTAMA\"}"
+R110=$(api "$OWNER" POST /rekomendasi/menu/faktur "$B110" | jq -r '.rencana_id // ""')
+cek "hasil faktur rencana memuat rencana_id" "V == 1" \
+  "$([ -n "$R110" ] && echo 1 || echo 0)"
+# (b) dua item perlengkapan kurang (CK kosong) → SATU faktur BP multi-item.
+P110A=$(api "$OWNER" POST /perlengkapan '{"nama":"Serbet Uji 110","satuan":"pcs","stok_minimum":3}' | jq -r .id)
+P110B=$(api "$OWNER" POST /perlengkapan '{"nama":"Spons Uji 110","satuan":"pcs","stok_minimum":2}' | jq -r .id)
+HB110=$(api "$OWNER" POST "/perlengkapan/permintaan-otomatis?branch_id=$CB46_ID&rencana_id=$R110" '{}')
+FB110=$(echo "$HB110" | jq -r '.beli_faktur.faktur_id // ""')
+cek "SATU faktur BP- menaungi seluruh item beli (>=2 baris)" "V == 1" \
+  "$(echo "$HB110" | jq --arg a "$P110A" --arg b "$P110B" '((.beli_faktur.nomor // "")|test("^BP-")) and (.beli_faktur.jumlah_baris >= 2) and ([.beli_dibuat[].supply_id]|contains([$a,$b])) | if . then 1 else 0 end')"
+cek "semua item beli memakai SATU nomor BP- yang sama" "V == 1" \
+  "$(echo "$HB110" | jq '([.beli_dibuat[].nomor]|unique|length)==1 | if . then 1 else 0 end')"
+cek "daftar beli: baris kedua item berbagi faktur_id yang sama" "V == 1" \
+  "$(api "$OWNER" GET /perlengkapan/beli | jq --arg a "$P110A" --arg b "$P110B" --arg f "$FB110" '([.[]|select(.supply_id==$a or .supply_id==$b)|.faktur_id]|unique)==[$f] | if . then 1 else 0 end')"
+# (c) Data Permintaan Stok: bagian beli_perlengkapan tampil di entri rencana.
+cek "permintaan stok memuat bagian beli_perlengkapan (menunggu)" "V == 1" \
+  "$(api "$OWNER" GET /rekomendasi/permintaan | jq --arg r "$R110" --arg f "$FB110" '[.[]|select(.rencana_id==$r)][0].beli_perlengkapan | ((.faktur_id==$f) and (.status=="menunggu") and (.jumlah_baris>=2)) | if . then 1 else 0 end')"
+# (d) Tiba per FAKTUR: semua baris diproses sekaligus + kiriman otomatis.
+TB110=$(api "$OWNER" POST "/perlengkapan/beli/faktur/$FB110/tiba" '{}')
+cek "tiba per faktur: >=2 baris diproses + kiriman KP- terbit" "V == 1" \
+  "$(echo "$TB110" | jq '((.jumlah_tiba >= 2) and ((.kiriman|length) >= 2)) | if . then 1 else 0 end')"
+cek "semua baris faktur kini 'tiba'" "V == 1" \
+  "$(api "$OWNER" GET /perlengkapan/beli | jq --arg f "$FB110" '[.[]|select(.faktur_id==$f)|.status]|unique==["tiba"] | if . then 1 else 0 end')"
+cek "permintaan stok: bagian beli_perlengkapan → 'tiba'" "V == 1" \
+  "$(api "$OWNER" GET /rekomendasi/permintaan | jq --arg r "$R110" '[.[]|select(.rencana_id==$r)][0].beli_perlengkapan.status=="tiba" | if . then 1 else 0 end')"
+cek "tiba per faktur lagi (sudah tiba) → 400" "V == 400" \
+  "$(status_code_body "$OWNER" POST "/perlengkapan/beli/faktur/$FB110/tiba" '{}')"
+# (e) MANUAL multi-item: satu faktur berisi 2 item, lalu batal per faktur.
+MAN110=$(api "$OWNER" POST /perlengkapan/beli "{\"items\":[{\"supply_id\":\"$P110A\",\"qty\":1},{\"supply_id\":\"$P110B\",\"qty\":2,\"total_harga\":5000}],\"ck_branch_id\":\"$CK52_UTAMA\"}")
+FM110=$(echo "$MAN110" | jq -r '.faktur_id // ""')
+cek "manual multi-item: faktur BP- terbit (2 baris)" "V == 1" \
+  "$(echo "$MAN110" | jq '((.nomor // "")|test("^BP-")) and ((.ids|length)==2) | if . then 1 else 0 end')"
+cek "batal per faktur → 2 baris dibatalkan" "V == 1" \
+  "$(api "$OWNER" POST "/perlengkapan/beli/faktur/$FM110/batal" '{}' | jq '(.ok==true) and (.jumlah==2) | if . then 1 else 0 end')"
+cek "batal per faktur lagi → 404" "V == 404" \
+  "$(status_code "$OWNER" POST "/perlengkapan/beli/faktur/$FM110/batal")"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

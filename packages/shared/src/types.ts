@@ -396,6 +396,8 @@ export interface RencanaMenuPreview {
 
 /** Hasil pembuatan faktur otomatis dari rencana menu (null = jalur tak perlu). */
 export interface RencanaFakturResult {
+  /** id rencana — pengelompok semua faktur satu submit (Data Permintaan Stok) */
+  rencana_id: string;
   produksi: { faktur_id: string; jumlah_baris: number } | null;
   /**
    * Faktur produksi DI CABANG tujuan (bahan ber-produksi_di "cabang"): lahir di
@@ -415,6 +417,18 @@ export interface PermintaanStokBagian {
   jumlah_baris: number;
   /** status "paling awal" di antara baris faktur (tahap terkini) */
   status: KonfirmasiStatus;
+  total: number;
+}
+
+/**
+ * Bagian FAKTUR BELI PERLENGKAPAN (BP-) sebuah permintaan — status memakai
+ * pipeline perlengkapan (menunggu dibeli → tiba di CK / batal); "sebagian" =
+ * campuran tiba & batal.
+ */
+export interface PermintaanStokBagianPerlengkapan {
+  faktur_id: string;
+  jumlah_baris: number;
+  status: BeliPerlengkapanStatus | "sebagian";
   total: number;
 }
 
@@ -440,6 +454,8 @@ export interface PermintaanStokRow {
   beli_produksi: PermintaanStokBagian | null;
   /** KIRIM DARI STOK CK: stok jadi yang sudah ada di CK, dipindah ke cabang */
   kirim: PermintaanStokBagian | null;
+  /** faktur BELI PERLENGKAPAN (BP-) yang lahir bersama permintaan ini */
+  beli_perlengkapan: PermintaanStokBagianPerlengkapan | null;
 }
 
 /**
@@ -1215,6 +1231,11 @@ export interface PermintaanPerlengkapanOtomatisHasil {
     nomor: string | null;
     tujuan_nama: string | null;
   }[];
+  /**
+   * FAKTUR BP- yang menaungi seluruh `beli_dibuat` (satu faktur multi-item,
+   * seperti faktur beli bahan baku). Null bila tak ada yang perlu dibeli.
+   */
+  beli_faktur: { faktur_id: string; nomor: string; jumlah_baris: number } | null;
   /** item ≤ minimum tapi cabang ini bukan store / tak terhubung CK */
   tak_bisa_kirim: { supply_id: string; nama: string; satuan: string; qty: number }[];
 }
@@ -1222,9 +1243,14 @@ export interface PermintaanPerlengkapanOtomatisHasil {
 /** Status faktur beli perlengkapan ke CK. */
 export type BeliPerlengkapanStatus = "menunggu" | "tiba" | "batal";
 
-/** Satu faktur beli perlengkapan ke Central Kitchen (BP-). */
+/** Satu BARIS faktur beli perlengkapan ke Central Kitchen (BP-). */
 export interface BeliPerlengkapanRow {
   id: string;
+  /**
+   * FAKTUR pengelompokan: baris satu submit berbagi faktur_id & satu nomor
+   * BP-. Null hanya untuk baris warisan (pra-faktur, nomor per baris).
+   */
+  faktur_id: string | null;
   supply_id: string;
   nama: string;
   satuan: string;

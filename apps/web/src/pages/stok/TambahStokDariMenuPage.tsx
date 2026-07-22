@@ -305,11 +305,13 @@ export function TambahStokDariMenuPage() {
           },
         });
       }
-      // 2) SEKALIAN permintaan perlengkapan ≤ minimum → kiriman KP- dari CK
+      // 2) SEKALIAN permintaan perlengkapan ≤ minimum → kiriman KP- dari CK;
+      //    rencana_id ditautkan agar faktur beli BP- tampil di Permintaan Stok
       let perlengkapan: PermintaanPerlengkapanOtomatisHasil | null = null;
       if (mintaPerlengkapan && tujuanId) {
+        const tautan = menu?.rencana_id ? `&rencana_id=${menu.rencana_id}` : "";
         perlengkapan = await api<PermintaanPerlengkapanOtomatisHasil>(
-          `/perlengkapan/permintaan-otomatis?branch_id=${tujuanId}`,
+          `/perlengkapan/permintaan-otomatis?branch_id=${tujuanId}${tautan}`,
           { method: "POST" },
         );
       }
@@ -858,8 +860,14 @@ export function TambahStokDariMenuPage() {
             )}
             {hasilPerlengkapan.beli_dibuat.length > 0 && (
               <div>
-                <div className="mb-1 text-xs font-semibold uppercase text-amber-700">
-                  🛒 Faktur beli ke CK (stok CK kurang → dibeli lalu dikirim)
+                <div className="mb-1 flex items-center gap-2 text-xs font-semibold uppercase text-amber-700">
+                  🛒 Satu faktur beli ke CK
+                  {hasilPerlengkapan.beli_faktur?.nomor && (
+                    <span className="rounded bg-amber-200 px-1.5 py-0.5 font-mono text-xs font-bold normal-case text-amber-900">
+                      {hasilPerlengkapan.beli_faktur.nomor}
+                    </span>
+                  )}
+                  <span className="normal-case">(stok CK kurang → dibeli lalu dikirim)</span>
                 </div>
                 <div className="divide-y divide-amber-100 rounded-lg border border-amber-200 bg-amber-50/50">
                   {hasilPerlengkapan.beli_dibuat.map((d) => (
@@ -868,20 +876,16 @@ export function TambahStokDariMenuPage() {
                       className="flex items-center justify-between px-3 py-1.5 text-sm"
                     >
                       <span className="text-stone-700">{d.nama}</span>
-                      <span className="flex items-center gap-2">
-                        {d.nomor && (
-                          <span className="rounded bg-amber-200 px-1.5 py-0.5 font-mono text-xs font-bold text-amber-900">
-                            {d.nomor}
-                          </span>
-                        )}
+                      <span>
                         <b>{formatAngka(d.qty)}</b> {d.satuan}
                       </span>
                     </div>
                   ))}
                 </div>
                 <div className="mt-1 text-xs text-stone-400">
-                  Proses di <b>Perlengkapan → Faktur Beli ke CK</b>: tandai “Tiba di CK” →
-                  masuk stok CK &amp; otomatis dikirim ke cabang.
+                  Faktur juga tampil di <b>Data Permintaan Stok</b>. Proses di{" "}
+                  <b>Beli Perlengkapan</b>: tandai “Tiba di CK” → semua barang masuk stok CK
+                  &amp; otomatis dikirim ke cabang.
                 </div>
               </div>
             )}

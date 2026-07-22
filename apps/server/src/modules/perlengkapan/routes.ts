@@ -24,6 +24,7 @@ import { requireRole, resolveBranchId, terikatCabang, type AppEnv } from "../../
 import { terbitkanNomor } from "../dokumen/nomor";
 import {
   batalBeliPerlengkapan,
+  batalFakturBeliPerlengkapan,
   belanjaPerlengkapan,
   buatBeliPerlengkapanManual,
   buatKirimanPerlengkapan,
@@ -43,6 +44,7 @@ import {
   terapkanKonsumsiOtomatis,
   terimaKirimanPerlengkapan,
   tibaBeliPerlengkapan,
+  tibaFakturBeliPerlengkapan,
 } from "./service";
 
 const TANGGAL_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -339,10 +341,14 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
   .post("/permintaan-otomatis", requireRole("owner", "admin"), async (c) => {
     const auth = c.get("auth");
     const branchId = await resolveBranchId(c);
+    // rencana_id (opsional): faktur BP- ditautkan ke permintaan Tambah Stok
+    // dari Menu agar tampil di Data Permintaan Stok
+    const rencanaId = c.req.query("rencana_id") || null;
     const hasil = await permintaanOtomatisPerlengkapan({
       companyId: auth.company_id!,
       cabangId: branchId,
       userId: auth.sub,
+      rencanaId,
     });
     if ("error" in hasil) {
       throw new HTTPException((hasil.code ?? 400) as 400 | 404, { message: hasil.error });
@@ -379,32 +385,58 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
     else ckFilter = c.req.query("branch_id") || undefined;
     return c.json(await daftarBeliPerlengkapan(auth.company_id!, ckFilter));
   })
-  /** Buat faktur beli perlengkapan MANUAL ke CK. owner/admin. */
+  /**
+   * Buat FAKTUR beli perlengkapan MANUAL ke CK (multi-item — seperti faktur
+   * beli bahan baku). Bentuk lama satu-item (supply_id/qty di akar body)
+   * tetap diterima. owner/admin.
+   */
   .post(
     "/beli",
     requireRole("owner", "admin"),
     zValidator(
       "json",
       z.object({
-        supply_id: z.string().uuid(),
-        ck_branch_id: z.string().uuid().nullish(),
-        qty: z.number().positive(),
-        tujuan_branch_id: z.string().uuid().nullish(),
+        items: z
+          .array(
+            z.object({
+              supply_id: z.string().uuid(),
+              qty: z.number().positive(),
+              total_harga: z.number().min(0).nullish(),
+            }),
+          )
+          .min(1)
+          .max(100)
+          .optional(),
+        // bentuk lama (satu item) — dipakai bila `items` tidak dikirim
+        supply_id: z.string().uuid().optional(),
+        qty: z.number().positive().optional(),
         total_harga: z.number().min(0).nullish(),
+        ck_branch_id: z.string().uuid().nullish(),
+        tujuan_branch_id: z.string().uuid().nullish(),
         catatan: z.string().nullish(),
       }),
     ),
     async (c) => {
       const auth = c.get("auth");
       const b = c.req.valid("json");
+      const items =
+        b.items ??
+        (b.supply_id && b.qty
+          ? [{ supply_id: b.supply_id, qty: b.qty, total_harga: b.total_harga ?? null }]
+          : null);
+      if (!items) {
+        throw new HTTPException(400, { message: "items wajib diisi (min 1 perlengkapan)" });
+      }
       const hasil = await buatBeliPerlengkapanManual({
         companyId: auth.company_id!,
         userId: auth.sub,
-        supplyId: b.supply_id,
+        items: items.map((it) => ({
+          supplyId: it.supply_id,
+          qty: it.qty,
+          totalHarga: it.total_harga ?? null,
+        })),
         ckBranchId: b.ck_branch_id ?? null,
-        qty: b.qty,
         tujuanBranchId: b.tujuan_branch_id ?? null,
-        totalHarga: b.total_harga ?? null,
         catatan: b.catatan ?? null,
       });
       if ("error" in hasil) {
@@ -413,6 +445,53 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
       return c.json(hasil, 201);
     },
   )
+  /**
+   * Barang SATU FAKTUR tiba di CK: proses semua baris 'menunggu' (qty/harga
+   * per baris opsional via items) → masuk stok CK + otomatis kirim ke cabang
+   * tujuan. owner/admin.
+   */
+  .post(
+    "/beli/faktur/:fakturId/tiba",
+    requireRole("owner", "admin"),
+    zValidator(
+      "json",
+      z.object({
+        items: z
+          .array(
+            z.object({
+              id: z.string().uuid(),
+              qty: z.number().positive().optional(),
+              total_harga: z.number().min(0).nullish(),
+            }),
+          )
+          .max(100)
+          .optional(),
+      }),
+    ),
+    async (c) => {
+      const auth = c.get("auth");
+      const body = c.req.valid("json");
+      const hasil = await tibaFakturBeliPerlengkapan({
+        companyId: auth.company_id!,
+        fakturId: c.req.param("fakturId"),
+        userId: auth.sub,
+        items: body.items,
+      });
+      if ("error" in hasil) {
+        throw new HTTPException((hasil.code ?? 400) as 400 | 404, { message: hasil.error });
+      }
+      return c.json(hasil);
+    },
+  )
+  /** Batalkan semua baris 'menunggu' satu faktur beli perlengkapan. owner/admin. */
+  .post("/beli/faktur/:fakturId/batal", requireRole("owner", "admin"), async (c) => {
+    const auth = c.get("auth");
+    const hasil = await batalFakturBeliPerlengkapan(auth.company_id!, c.req.param("fakturId"));
+    if ("error" in hasil) {
+      throw new HTTPException((hasil.code ?? 400) as 400 | 404, { message: hasil.error });
+    }
+    return c.json(hasil);
+  })
   /**
    * Barang faktur beli TIBA di CK → masuk stok CK (PL-) + otomatis kirim (KP-)
    * ke cabang tujuan. owner/admin (manajemen memproses kedatangan di CK).

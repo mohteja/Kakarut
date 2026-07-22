@@ -690,6 +690,7 @@ export async function buatFakturDariRencana(
   });
 
   return {
+    rencana_id: rencanaId,
     produksi: prodFakturId ? { faktur_id: prodFakturId, jumlah_baris: prodRowsCk.length } : null,
     produksi_cabang: prodCabangFakturId
       ? { faktur_id: prodCabangFakturId, jumlah_baris: prodRowsCabang.length }
