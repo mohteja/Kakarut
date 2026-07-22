@@ -126,7 +126,7 @@ export const stokRoutes = new Hono<AppEnv>()
    * Menyimpan snapshot saldo sistem + selisih per sesi, qty fisik jadi
    * baseline saldo baru. Persetujuan selisih tetap owner/admin.
    */
-  .post("/opname", requireRole("owner", "admin", "cashier", "tim"), zValidator("json", OpnameBody), async (c) => {
+  .post("/opname", requireRole("owner", "admin", "cashier", "tim", "kitchen"), zValidator("json", OpnameBody), async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");
     const branchId = body.branch_id

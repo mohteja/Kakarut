@@ -122,13 +122,15 @@ export default function App() {
   const isManajemen = auth.user.role === "owner" || auth.user.role === "admin";
   // Tim: cek stok, lihat menu, profil, penerimaan barang, riwayat transaksi
   const isTim = auth.user.role === "tim";
+  // Kitchen: seperti tim di cabang store + Produksi lokal (hasil masuk stok cabang)
+  const isKitchen = auth.user.role === "kitchen";
   // Transaksi POS (Kasir + Tutup Kasir) HANYA peran kasir.
   const isKasir = auth.user.role === "cashier";
   const beranda = isSuperAdmin
     ? "/superadmin"
     : isManajemen
       ? "/dashboard"
-      : isTim
+      : isTim || isKitchen
         ? "/beranda"
         : "/kasir";
 
@@ -165,10 +167,10 @@ export default function App() {
               <Route path="/stok/kartu/:ingredientId" element={<KartuStokPage />} />
               {/* Absen: semua peran (tim absen sendiri; admin/kasir + stasiun pindai) */}
               <Route path="/absen" element={<AbsenPage />} />
-              {/* Beranda ringkas peran TIM (CK: beli/produksi belum selesai; toko: barang datang) */}
-              {isTim && <Route path="/beranda" element={<TimBerandaPage />} />}
-              {/* printer & meja — bukan peran tim */}
-              {!isTim && (
+              {/* Beranda ringkas peran TIM/KITCHEN (CK: beli/produksi belum selesai; toko: barang datang) */}
+              {(isTim || isKitchen) && <Route path="/beranda" element={<TimBerandaPage />} />}
+              {/* printer & meja — bukan peran tim/kitchen */}
+              {!isTim && !isKitchen && (
                 <>
                   <Route path="/pengaturan/printer" element={<PrinterPage />} />
                   <Route path="/pengaturan/meja" element={<MejaPage />} />
@@ -193,6 +195,15 @@ export default function App() {
                   <Route path="/pembelian/tahap" element={<TahapPage />} />
                   <Route path="/bahan" element={<BahanPage />} />
                   <Route path="/resep" element={<ResepPage />} />
+                </>
+              )}
+              {/* Kitchen (dapur cabang store): HANYA Produksi lokal — tanpa
+                  pembelian/bahan/resep (server menggerbang juga). */}
+              {isKitchen && (
+                <>
+                  <Route path="/produksi" element={<ProduksiPage />} />
+                  <Route path="/produksi/baru" element={<FakturFormPage tipe="produksi" />} />
+                  <Route path="/produksi/tahap" element={<TahapPage />} />
                 </>
               )}
               {isManajemen && (

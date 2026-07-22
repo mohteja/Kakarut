@@ -3908,6 +3908,67 @@ cek "kirim ulang (akun belum verif) → tautan baru" "V == 1" \
 cek "kirim ulang (email tak dikenal) → 200 tanpa tautan" "V == 1" \
   "$(api "" POST /auth/resend-verification '{"email":"tidakada106@example.com"}' | jq '((.ok==true) and (.dev_verify_url==null))|if . then 1 else 0 end')"
 
+echo "== 107. Role Kitchen: produksi lokal di cabang store =="
+# Kitchen = tim cabang store + akses Produksi lokal: hanya bahan yang di Resep
+# ditandai produksi_di="cabang"; hasil selesai LANGSUNG masuk stok cabangnya.
+# Tanpa /pembelian, tanpa kirim lintas cabang. Penempatan wajib cabang store.
+KANTOR107_ID=$(api "$OWNER" GET /cabang | jq -r '[.[]|select(.tipe=="kantor")][0].id')
+# (a) Guard penempatan: wajib cabang + wajib bertipe store.
+cek "buat kitchen tanpa cabang → 400" "V == 400" \
+  "$(status_code_body "$OWNER" POST /karyawan '{"nama":"K107","email":"kitchen107@basooopa.id","password":"Kitchen107!","role":"kitchen"}')"
+cek "buat kitchen di Central Kitchen → 400" "V == 400" \
+  "$(status_code_body "$OWNER" POST /karyawan "{\"nama\":\"K107\",\"email\":\"kitchen107@basooopa.id\",\"password\":\"Kitchen107!\",\"role\":\"kitchen\",\"branch_id\":\"$CK52_UTAMA\"}")"
+cek "buat kitchen di Kantor → 400" "V == 400" \
+  "$(status_code_body "$OWNER" POST /karyawan "{\"nama\":\"K107\",\"email\":\"kitchen107@basooopa.id\",\"password\":\"Kitchen107!\",\"role\":\"kitchen\",\"branch_id\":\"$KANTOR107_ID\"}")"
+api "$OWNER" POST /karyawan "{\"nama\":\"Kitchen 107\",\"email\":\"kitchen107@basooopa.id\",\"password\":\"Kitchen107!\",\"role\":\"kitchen\",\"branch_id\":\"$CB46_ID\"}" > /dev/null
+TKIT=$(login kitchen107@basooopa.id 'Kitchen107!')
+U107_ID=$(api "$OWNER" GET /karyawan | jq -r '[.[]|select(.email=="kitchen107@basooopa.id")][0].user_id')
+cek "login kitchen: role kitchen + terkunci cabang store" "V == 1" \
+  "$(api "$TKIT" GET /auth/me | jq --arg b "$CB46_ID" '((.user.role=="kitchen") and (.user.branch_id==$b))|if . then 1 else 0 end')"
+# (b) Gerbang menu: produksi terbuka, pembelian & manajemen tertutup, stok/opname boleh.
+cek "kitchen GET /produksi → 200" "V == 200" "$(status_code "$TKIT" GET /produksi)"
+cek "kitchen GET /pembelian → 403 (tanpa Beli)" "V == 403" "$(status_code "$TKIT" GET /pembelian)"
+cek "kitchen GET /stok → 200" "V == 200" "$(status_code "$TKIT" GET /stok)"
+cek "kitchen GET /karyawan → 403" "V == 403" "$(status_code "$TKIT" GET /karyawan)"
+cek "kitchen POST /penjualan → 403 (bukan kasir)" "V == 403" \
+  "$(status_code_body "$TKIT" POST /penjualan '{}')"
+cek "kitchen opname: lolos gerbang peran (400 validasi, bukan 403)" "V == 400" \
+  "$(status_code_body "$TKIT" POST /stok/opname '{}')"
+# (c) Pengaturan lokasi produksi di Resep: default "ck"; owner set ke "cabang".
+IPRODA=$(api "$OWNER" GET /bahan | jq -r '[.[]|select(.pengadaan=="produksi" and .track_stok)][0].id')
+cek "default bahan produksi: produksi_di == ck" "V == 1" \
+  "$(api "$OWNER" GET /bahan | jq '[.[]|select(.pengadaan=="produksi" and .track_stok)][0].produksi_di=="ck"|if . then 1 else 0 end')"
+# Kitchen belum boleh memproduksi bahan ber-produksi_di "ck".
+B107="{\"worker_id\":\"$U107_ID\",\"items\":[{\"ingredient_id\":\"$IPRODA\",\"mode\":\"pcs\",\"jumlah\":5}]}"
+cek "kitchen produksi bahan 'ck' → 400 (harus diatur di Resep dulu)" "V == 400" \
+  "$(status_code_body "$TKIT" POST /produksi/faktur "$B107")"
+cek "owner set produksi_di=cabang via PUT /bahan" "V == 1" \
+  "$(api "$OWNER" PUT "/bahan/$IPRODA" '{"produksi_di":"cabang"}' | jq '.produksi_di=="cabang"|if . then 1 else 0 end')"
+# (d) Faktur produksi kitchen: lahir di cabangnya sendiri; cabang lain ditolak.
+cek "kitchen faktur produksi dgn branch_id cabang lain → 403" "V == 403" \
+  "$(status_code_body "$TKIT" POST /produksi/faktur "{\"branch_id\":\"$ST52_ID\",\"worker_id\":\"$U107_ID\",\"items\":[{\"ingredient_id\":\"$IPRODA\",\"mode\":\"pcs\",\"jumlah\":5}]}")"
+FK107=$(api "$TKIT" POST /produksi/faktur "$B107" | jq -r .faktur_id)
+cek "kitchen buat faktur produksi lokal → faktur_id terbit" "V == 1" \
+  "$([ -n "$FK107" ] && [ "$FK107" != "null" ] && echo 1 || echo 0)"
+cek "faktur kitchen tercatat di cabang kitchen (CB46)" "V == 1" \
+  "$(api "$OWNER" GET "/produksi?branch_id=$CB46_ID&per_page=200" | jq --arg f "$FK107" '[.rows[]|select(.faktur_id==$f)]|length >= 1|if . then 1 else 0 end')"
+# (e) Selesai → LANGSUNG masuk stok cabang store (auto-confirm lokal).
+S107_AWAL=$(api "$OWNER" GET "/stok?branch_id=$CB46_ID" | jq --arg i "$IPRODA" '[.[]|select(.ingredient_id==$i)][0].saldo // 0')
+api "$TKIT" POST "/produksi/tahap/$FK107" '{"ke":"dikerjakan","paksa":true}' > /dev/null
+api "$TKIT" POST "/produksi/tahap/$FK107" '{"ke":"menunggu"}' > /dev/null
+cek "faktur kitchen otomatis dikonfirmasi (produksi lokal)" "V == 1" \
+  "$(api "$OWNER" GET "/produksi?branch_id=$CB46_ID&per_page=200" | jq --arg f "$FK107" '[.rows[]|select(.faktur_id==$f)|.status]|all(.=="dikonfirmasi")|if . then 1 else 0 end')"
+S107_AKHIR=$(api "$OWNER" GET "/stok?branch_id=$CB46_ID" | jq --arg i "$IPRODA" '[.[]|select(.ingredient_id==$i)][0].saldo // 0')
+cek "hasil produksi kitchen masuk stok cabang store (+5)" "abs(V - 5) < 0.001" \
+  "$(python3 -c "print($S107_AKHIR - $S107_AWAL)")"
+# (f) Kitchen tak boleh mengirim hasil ke cabang lain (produksi lokal saja) —
+#     jalur items (per-baris) yang memproses tujuan_branch_id.
+FK107B=$(api "$TKIT" POST /produksi/faktur "$B107" | jq -r .faktur_id)
+api "$TKIT" POST "/produksi/tahap/$FK107B" '{"ke":"dikerjakan","paksa":true}' > /dev/null
+RID107=$(api "$TKIT" GET "/produksi?per_page=200" | jq -r --arg f "$FK107B" '[.rows[]|select(.faktur_id==$f)][0].id')
+cek "kitchen kirim lintas cabang (tujuan_branch_id) → 403" "V == 403" \
+  "$(status_code_body "$TKIT" POST "/produksi/tahap/$FK107B" "{\"ke\":\"menunggu\",\"items\":[{\"id\":\"$RID107\",\"qty\":5}],\"tujuan_branch_id\":\"$ST52_ID\"}")"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

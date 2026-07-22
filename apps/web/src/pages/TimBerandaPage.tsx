@@ -51,9 +51,10 @@ function AttnCard({
 }
 
 /**
- * Beranda ringkas untuk peran TIM — menyesuaikan lokasi:
+ * Beranda ringkas untuk peran TIM & KITCHEN — menyesuaikan lokasi:
  * - Tim CENTRAL KITCHEN: beli & produksi yang belum selesai + bahan menipis.
  * - Tim TOKO (store): barang datang (kiriman menunggu diterima) + bahan menipis.
+ * - KITCHEN (dapur toko): seperti tim toko + produksi lokal belum selesai.
  * Semua data terkunci ke cabang tim (server memaksa cabangnya).
  */
 export function TimBerandaPage() {
@@ -63,6 +64,7 @@ export function TimBerandaPage() {
 
   const branch = cabang.find((b) => b.id === auth?.user.branch_id);
   const diCk = branch?.tipe === "central_kitchen";
+  const isKitchen = auth?.user.role === "kitchen";
 
   const { data: stok } = useQuery({
     queryKey: ["stok", ""],
@@ -76,11 +78,11 @@ export function TimBerandaPage() {
     enabled: !diCk,
     refetchInterval: 60_000,
   });
-  // Tim CK: beli & produksi yang belum selesai.
+  // Tim CK & kitchen toko: produksi yang belum selesai (kitchen: produksi lokal).
   const { data: prod } = useQuery({
     queryKey: ["produksi-beranda"],
     queryFn: () => api<{ rows: ProdRow[] }>("/produksi?per_page=200"),
-    enabled: diCk,
+    enabled: diCk || isKitchen,
     refetchInterval: 60_000,
   });
   const { data: beli } = useQuery({
@@ -102,7 +104,7 @@ export function TimBerandaPage() {
   const produksiBelum = fakturBelum(prod?.rows);
   const beliBelum = fakturBelum(beli?.rows);
 
-  const loading = !stok || (diCk ? !prod || !beli : !pen);
+  const loading = !stok || (diCk ? !prod || !beli : !pen || (isKitchen && !prod));
 
   return (
     <div>
@@ -139,14 +141,27 @@ export function TimBerandaPage() {
                   />
                 </>
               ) : (
-                <AttnCard
-                  to="/penerimaan"
-                  ikon="📥"
-                  label="Barang datang menunggu diterima"
-                  jumlah={jumlahDatang}
-                  satuan="kiriman"
-                  aktif={jumlahDatang > 0}
-                />
+                <>
+                  <AttnCard
+                    to="/penerimaan"
+                    ikon="📥"
+                    label="Barang datang menunggu diterima"
+                    jumlah={jumlahDatang}
+                    satuan="kiriman"
+                    aktif={jumlahDatang > 0}
+                  />
+                  {/* Kitchen: produksi lokal cabang yang belum selesai */}
+                  {isKitchen && (
+                    <AttnCard
+                      to="/produksi"
+                      ikon="🏭"
+                      label="Produksi belum selesai"
+                      jumlah={produksiBelum}
+                      satuan="faktur"
+                      aktif={produksiBelum > 0}
+                    />
+                  )}
+                </>
               )}
               <AttnCard
                 to="/stok"

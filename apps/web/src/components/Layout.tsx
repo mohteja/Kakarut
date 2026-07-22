@@ -91,6 +91,7 @@ export function Layout() {
     !auth.user.is_super_admin &&
     ((roleGuard === "tim" &&
       cabang.find((b) => b.id === auth.user.branch_id)?.tipe === "central_kitchen") ||
+      roleGuard === "kitchen" ||
       (manajemenGuard && divisi !== "store"));
   const qsPengadaan = `${dataQuery}${dataQuery ? "&" : "?"}per_page=200`;
   const { data: prodNav } = useQuery({
@@ -130,11 +131,21 @@ export function Layout() {
   const timDiCk =
     isTim &&
     cabang.find((b) => b.id === auth.user.branch_id)?.tipe === "central_kitchen";
+  // Kitchen (dapur cabang store): menu tim-store + Produksi lokal.
+  const isKitchen = role === "kitchen";
   const namaPerusahaan = auth.company?.nama ?? "Terakasir";
   const subJudul = isSuperAdmin
     ? "Platform Super Admin"
     : `${auth.user.nama} · ${
-        role === "owner" ? "Owner" : role === "admin" ? "Admin" : role === "tim" ? "Tim" : "Kasir"
+        role === "owner"
+          ? "Owner"
+          : role === "admin"
+            ? "Admin"
+            : role === "tim"
+              ? "Tim"
+              : role === "kitchen"
+                ? "Kitchen"
+                : "Kasir"
       }`;
   // tutup drawer setelah navigasi/aksi di layar mobile
   const tutup = () => setMenuOpen(false);
@@ -233,7 +244,7 @@ export function Layout() {
             Lokasi: <span className="font-semibold text-white">🏢 Kantor</span>
           </div>
         )}
-        {!isSuperAdmin && (role === "cashier" || isTim) && auth.branch && (
+        {!isSuperAdmin && (role === "cashier" || isTim || isKitchen) && auth.branch && (
           <div className="mb-4 rounded-lg bg-stone-800 px-3 py-2 text-xs text-stone-300">
             Cabang: <span className="font-semibold text-white">{auth.branch.nama}</span>
           </div>
@@ -259,8 +270,8 @@ export function Layout() {
                   🏠 Beranda
                 </NavLink>
               )}
-              {/* Beranda ringkas peran TIM (CK & toko): notifikasi + tugas hari ini */}
-              {isTim && (
+              {/* Beranda ringkas peran TIM/KITCHEN (CK & toko): notifikasi + tugas hari ini */}
+              {(isTim || isKitchen) && (
                 <NavLink to="/beranda" className={linkClass}>
                   🏠 Beranda
                 </NavLink>
@@ -292,6 +303,14 @@ export function Layout() {
                   </NavLink>
                 </>
               )}
+              {/* KITCHEN (dapur cabang store): Produksi lokal — hasil masuk
+                  stok cabangnya sendiri (bahan ber-"produksi di cabang"). */}
+              {isKitchen && (
+                <NavLink to="/produksi" className={navFlex}>
+                  <span>🏭 Produksi</span>
+                  {badgeOranye(produksiBelum)}
+                </NavLink>
+              )}
               {/* Kasir (jual) & Tutup Kasir: HANYA peran kasir */}
               {isKasir && !dCk && (
                 <NavLink to="/kasir" className={linkClass}>
@@ -314,7 +333,7 @@ export function Layout() {
                   🍜 Lihat Menu
                 </NavLink>
               )}
-              {!isTim && !dCk && (
+              {!isTim && !isKitchen && !dCk && (
                 <NavLink to="/pengaturan/meja" className={linkClass}>
                   🍽 Meja
                 </NavLink>
@@ -357,7 +376,7 @@ export function Layout() {
                   )}
                 </NavLink>
               )}
-              {!isTim && !dCk && (
+              {!isTim && !isKitchen && !dCk && (
                 <NavLink to="/pengaturan/printer" className={linkClass}>
                   🖨 Printer
                 </NavLink>

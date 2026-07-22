@@ -161,11 +161,11 @@ export async function pastikanCabang(branchId: string, companyId: string): Promi
 }
 
 /**
- * Peran yang TERIKAT ke satu cabang (kasir & tim) — selalu terkunci ke
- * cabangnya sendiri; owner/admin bebas lintas cabang.
+ * Peran yang TERIKAT ke satu cabang (kasir, tim & kitchen) — selalu terkunci
+ * ke cabangnya sendiri; owner/admin bebas lintas cabang.
  */
 export function terikatCabang(role: string | null): boolean {
-  return role === "cashier" || role === "tim";
+  return role === "cashier" || role === "tim" || role === "kitchen";
 }
 
 /**

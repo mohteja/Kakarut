@@ -30,7 +30,7 @@ import { formatAngka, formatRupiah } from "../../lib/format";
 interface Karyawan {
   user_id: string;
   nama: string;
-  role: "owner" | "admin" | "cashier" | "tim";
+  role: "owner" | "admin" | "cashier" | "tim" | "kitchen";
   is_active: boolean;
 }
 

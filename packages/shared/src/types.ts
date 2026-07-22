@@ -2,6 +2,7 @@ import type {
   BahanKategori,
   JenisPengadaan,
   MenuTipe,
+  ProduksiDi,
   StokStatus,
   UserRole,
 } from "./constants";
@@ -115,6 +116,12 @@ export interface BahanDto {
   harga_per_unit: number;
   kategori: BahanKategori;
   pengadaan: JenisPengadaan;
+  /**
+   * Lokasi produksi bahan jalur "produksi": "ck" (Central Kitchen, default) atau
+   * "cabang" (diproduksi kitchen di cabang store — hasil masuk stok cabang itu).
+   * Diabaikan untuk pengadaan "beli".
+   */
+  produksi_di: ProduksiDi;
   catatan: string | null;
   is_packaging: boolean;
   is_complement: boolean;

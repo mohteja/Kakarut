@@ -6,7 +6,7 @@ export interface AuthState {
     nama: string;
     is_super_admin: boolean;
     company_id: string | null;
-    role: "owner" | "admin" | "cashier" | "tim" | null;
+    role: "owner" | "admin" | "cashier" | "tim" | "kitchen" | null;
     branch_id: string | null;
   };
   company: {

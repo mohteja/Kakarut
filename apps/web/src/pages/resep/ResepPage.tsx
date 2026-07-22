@@ -41,6 +41,8 @@ interface PengaturanBatch {
   overhead: string; // pengali biaya resep → harga per batch (1 = mengikuti resep)
   stokMin: string; // ambang menipis di Central Kitchen
   stokMinToko: string; // ambang menipis di toko
+  /** lokasi produksi: "ck" (Central Kitchen) atau "cabang" (kitchen toko) */
+  produksiDi: "ck" | "cabang";
 }
 
 /**
@@ -136,6 +138,7 @@ export function ResepPage() {
             overhead: String(dipilih.overhead_x ?? 1),
             stokMin: String(dipilih.stok_minimum),
             stokMinToko: String(dipilih.stok_minimum_toko ?? 0),
+            produksiDi: dipilih.produksi_di ?? "ck",
           }
         : null,
     );
@@ -176,6 +179,7 @@ export function ResepPage() {
             stok_minimum: Number(atur.stokMin) || 0,
             stok_minimum_toko: Number(atur.stokMinToko) || 0,
             harga_beli: hargaBatch,
+            produksi_di: atur.produksiDi,
           },
         });
       }
@@ -552,6 +556,30 @@ export function ResepPage() {
                             />
                             <p className="mt-1 text-xs text-stone-500">
                               <b>0</b> = ikut nilai Central Kitchen.
+                            </p>
+                          </div>
+                          <div>
+                            <label className="mb-1 block text-xs font-medium text-stone-500">
+                              Diproduksi di
+                            </label>
+                            <select
+                              value={atur.produksiDi}
+                              onChange={(e) =>
+                                setAtur({
+                                  ...atur,
+                                  produksiDi: e.target.value as "ck" | "cabang",
+                                })
+                              }
+                              className={inputClass}
+                              disabled={!bolehUbah}
+                              aria-label="Lokasi produksi"
+                            >
+                              <option value="ck">Central Kitchen (dikirim ke cabang)</option>
+                              <option value="cabang">Cabang (kitchen toko)</option>
+                            </select>
+                            <p className="mt-1 text-xs text-stone-500">
+                              <b>Cabang</b> = diproduksi peran <b>Kitchen</b> di cabang
+                              masing-masing; hasil langsung masuk stok cabang itu.
                             </p>
                           </div>
                         </div>

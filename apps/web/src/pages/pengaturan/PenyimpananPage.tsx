@@ -27,14 +27,22 @@ interface KaryawanRow {
   user_id: string;
   nama: string;
   email: string;
-  role: "owner" | "admin" | "cashier" | "tim";
+  role: "owner" | "admin" | "cashier" | "tim" | "kitchen";
   is_active: boolean;
   branch_id: string | null;
   cabang: string | null;
 }
 
 const roleLabel = (r: string) =>
-  r === "owner" ? "Owner" : r === "admin" ? "Admin" : r === "tim" ? "Tim" : "Kasir";
+  r === "owner"
+    ? "Owner"
+    : r === "admin"
+      ? "Admin"
+      : r === "tim"
+        ? "Tim"
+        : r === "kitchen"
+          ? "Kitchen"
+          : "Kasir";
 
 /** Pilih akun yang boleh opname di sebuah tempat penyimpanan. */
 function PetugasModal({ tempat, onClose }: { tempat: PenyimpananDto; onClose: () => void }) {
