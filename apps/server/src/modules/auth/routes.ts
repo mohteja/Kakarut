@@ -113,6 +113,20 @@ const batasVerifikasiKirim = rl(
 );
 
 /**
+ * Blok "kode" yang mudah disalin di badan email — untuk klien (mis. aplikasi
+ * mobile) yang meminta pengguna MENEMPEL token secara manual, bukan lewat
+ * tautan/deep link. Nilai ini identik dengan parameter `token` pada URL tautan.
+ */
+function blokKodeEmail(raw: string): string {
+  return (
+    `<p>Atau salin kode berikut lalu tempel di aplikasi:</p>` +
+    `<p style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:15px;` +
+    `word-break:break-all;background:#f4f4f5;color:#111;padding:12px 14px;` +
+    `border-radius:8px;border:1px solid #e4e4e7">${raw}</p>`
+  );
+}
+
+/**
  * Buat token verifikasi email untuk seorang user + kirim tautannya. Balikkan
  * URL verifikasi bila email BELUM dikonfigurasi (bantuan dev/non-produksi);
  * di produksi tidak pernah dibocorkan.
@@ -133,7 +147,12 @@ async function kirimTautanVerifikasi(
     await kirimEmail({
       to: email,
       subject: "Verifikasi email Terakasir",
-      html: `<p>Halo ${nama},</p><p>Terima kasih sudah mendaftar Terakasir. Klik tautan di bawah untuk memverifikasi email &amp; mengaktifkan akun (berlaku 24 jam):</p><p><a href="${url}">Verifikasi email saya</a></p><p>Abaikan email ini bila Anda tidak mendaftar.</p>`,
+      html:
+        `<p>Halo ${nama},</p>` +
+        `<p>Terima kasih sudah mendaftar Terakasir. Klik tautan di bawah untuk memverifikasi email &amp; mengaktifkan akun (berlaku 24 jam):</p>` +
+        `<p><a href="${url}">Verifikasi email saya</a></p>` +
+        blokKodeEmail(raw) +
+        `<p>Abaikan email ini bila Anda tidak mendaftar.</p>`,
     });
   } catch {
     /* best-effort: jangan gagalkan permintaan bila email error */
@@ -238,7 +257,12 @@ export const authRoutes = new Hono<AppEnv>()
           await kirimEmail({
             to: email,
             subject: "Reset password Terakasir",
-            html: `<p>Halo ${user.nama},</p><p>Ada permintaan atur ulang password akun Terakasir Anda. Klik tautan di bawah (berlaku 1 jam):</p><p><a href="${url}">Atur ulang password</a></p><p>Abaikan email ini bila Anda tidak meminta.</p>`,
+            html:
+              `<p>Halo ${user.nama},</p>` +
+              `<p>Ada permintaan atur ulang password akun Terakasir Anda. Klik tautan di bawah (berlaku 1 jam):</p>` +
+              `<p><a href="${url}">Atur ulang password</a></p>` +
+              blokKodeEmail(raw) +
+              `<p>Abaikan email ini bila Anda tidak meminta.</p>`,
           });
         } catch {
           /* best-effort: jangan gagalkan permintaan bila email error */
