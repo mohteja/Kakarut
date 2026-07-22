@@ -3969,6 +3969,58 @@ RID107=$(api "$TKIT" GET "/produksi?per_page=200" | jq -r --arg f "$FK107B" '[.r
 cek "kitchen kirim lintas cabang (tujuan_branch_id) → 403" "V == 403" \
   "$(status_code_body "$TKIT" POST "/produksi/tahap/$FK107B" "{\"ke\":\"menunggu\",\"items\":[{\"id\":\"$RID107\",\"qty\":5}],\"tujuan_branch_id\":\"$ST52_ID\"}")"
 
+echo "== 108. Rencana dari menu sadar lokasi produksi (produksi_di=cabang) =="
+# Bahan produksi ber-"Diproduksi di: Cabang" pada rencana work-order CK:
+# TIDAK dikirim dari stok CK & TIDAK di-work-order-kan ke CK — faktur produksi
+# lahir di CABANG tujuan (kitchen mengerjakan; hasil langsung masuk stok
+# cabang). Bahan mentahnya dihitung terhadap stok cabang & belanjanya dikirim
+# ke cabang. Pola permintaan sama dgn §62: menu PBA, CK52_UTAMA → CB46.
+# porsi BESAR agar kebutuhan melampaui sisa stok CK (§62) → pasti ada baris
+# produksi baru (bukan hanya kirim-dari-stok)
+B108="{\"items\":[{\"menu_id\":\"$PBA_ID\",\"porsi\":2000}],\"tujuan_branch_id\":\"$CB46_ID\",\"ck_branch_id\":\"$CK52_UTAMA\"}"
+PRE108=$(api "$OWNER" POST /rekomendasi/menu "$B108")
+IP108=$(echo "$PRE108" | jq -r '[.bahan[]|select(.pengadaan=="produksi" and .qty_faktur!=null)][0].ingredient_id')
+cek "dasar uji: ada bahan produksi kurang di rencana" "V == 1" \
+  "$([ -n "$IP108" ] && [ "$IP108" != "null" ] && echo 1 || echo 0)"
+api "$OWNER" PUT "/bahan/$IP108" '{"produksi_di":"cabang"}' > /dev/null
+PRE108B=$(api "$OWNER" POST /rekomendasi/menu "$B108")
+cek "preview: baris bahan bertanda produksi_di=cabang" "V == 1" \
+  "$(echo "$PRE108B" | jq --arg i "$IP108" '[.bahan[]|select(.ingredient_id==$i)][0].produksi_di=="cabang"|if . then 1 else 0 end')"
+cek "preview: kirim_ck bahan cabang = 0 (tak ditutup stok CK)" "V == 0" \
+  "$(echo "$PRE108B" | jq --arg i "$IP108" '[.bahan[]|select(.ingredient_id==$i)][0].kirim_ck')"
+HAS108=$(api "$OWNER" POST /rekomendasi/menu/faktur "$B108")
+PC108=$(echo "$HAS108" | jq -r '.produksi_cabang.faktur_id')
+cek "faktur produksi_cabang terbit" "V == 1" \
+  "$([ -n "$PC108" ] && [ "$PC108" != "null" ] && echo 1 || echo 0)"
+cek "faktur cabang lahir di store CB46 (lokal: tujuan & untuk null, rencana)" "V == 1" \
+  "$(api "$OWNER" GET "/produksi?branch_id=$CB46_ID&per_page=500" | jq --arg f "$PC108" '([.rows[]|select(.faktur_id==$f)] | (length>0) and all(.[]; .tujuan_branch_id==null and .untuk_branch_id==null and .status=="rencana")) | if . then 1 else 0 end')"
+# faktur produksi CK (bila ada) TIDAK memuat bahan ber-produksi_di cabang
+PROD108=$(echo "$HAS108" | jq -r '.produksi.faktur_id // ""')
+if [ -n "$PROD108" ]; then
+  cek "faktur produksi CK tak memuat bahan cabang" "V == 0" \
+    "$(api "$OWNER" GET "/produksi?branch_id=$CK52_UTAMA&per_page=500" | jq --arg f "$PROD108" --arg i "$IP108" '[.rows[]|select(.faktur_id==$f and .ingredient_id==$i)] | length')"
+else
+  ok "faktur produksi CK tak memuat bahan cabang (tak ada faktur CK)"
+fi
+# kitchen cabang mengerjakan faktur → self-assign, selesai → LANGSUNG masuk stok
+S108_A=$(api "$OWNER" GET "/stok?branch_id=$CB46_ID" | jq --arg i "$IP108" '[.[]|select(.ingredient_id==$i)][0].saldo // 0')
+api "$TKIT" POST "/produksi/tahap/$PC108" '{"ke":"dikerjakan","paksa":true}' > /dev/null
+api "$TKIT" POST "/produksi/tahap/$PC108" '{"ke":"menunggu"}' > /dev/null
+cek "kitchen selesai → faktur cabang otomatis dikonfirmasi" "V == 1" \
+  "$(api "$OWNER" GET "/produksi?branch_id=$CB46_ID&per_page=500" | jq --arg f "$PC108" '([.rows[]|select(.faktur_id==$f)] | (length>0) and all(.[]; .status=="dikonfirmasi")) | if . then 1 else 0 end')"
+S108_B=$(api "$OWNER" GET "/stok?branch_id=$CB46_ID" | jq --arg i "$IP108" '[.[]|select(.ingredient_id==$i)][0].saldo // 0')
+cek "hasil produksi cabang masuk stok store (saldo naik)" "V == 1" \
+  "$(jq -n --argjson a "$S108_A" --argjson b "$S108_B" '($b > $a) | if . then 1 else 0 end')"
+# Data Permintaan Stok: bila ada DUA faktur produksi (CK + cabang), bagian
+# produksi_cabang terpisah; bila hanya faktur cabang, tampil sebagai `produksi`.
+if [ -n "$PROD108" ]; then
+  cek "permintaan: produksi CK & produksi_cabang terpisah dlm 1 entri" "V == 1" \
+    "$(api "$OWNER" GET /rekomendasi/permintaan | jq --arg p "$PROD108" --arg f "$PC108" '[.[]|select(.produksi.faktur_id==$p and .produksi_cabang.faktur_id==$f)] | length | if . >= 1 then 1 else 0 end')"
+else
+  cek "permintaan: faktur cabang (satu-satunya produksi) tercatat" "V == 1" \
+    "$(api "$OWNER" GET /rekomendasi/permintaan | jq --arg f "$PC108" '[.[]|select(.produksi.faktur_id==$f or .produksi_cabang.faktur_id==$f)] | length | if . >= 1 then 1 else 0 end')"
+fi
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

@@ -60,6 +60,7 @@ export async function rencanaDariMenu(
       .select({
         id: ingredients.id,
         pengadaan: ingredients.pengadaan,
+        produksiDi: ingredients.produksiDi,
         hargaBeli: ingredients.hargaBeli,
         bolehEceran: ingredients.bolehEceran,
         minBeli: ingredients.minBeli,
@@ -141,6 +142,10 @@ export async function rencanaDariMenu(
     if (!s) continue;
     const e = extraById.get(ingredientId);
     const pengadaan = e?.pengadaan ?? "beli";
+    // Lokasi produksi bahan jadi (diatur di Resep): "cabang" = diproduksi
+    // kitchen di cabang tujuan — TIDAK dikirim dari stok CK dan fakturnya
+    // lahir di cabang (bukan work-order CK). Hanya bermakna utk "produksi".
+    const produksiDi = pengadaan === "produksi" ? (e?.produksiDi ?? "ck") : null;
     const hargaPerUnit = e && s.isi > 0 ? e.hargaBeli / s.isi : 0;
     // Kekurangan dihitung terhadap saldo CABANG saja (jujur — cocok dengan
     // Kartu Stok cabang). Bagian yang STOK JADInya sudah ADA di CK dipenuhi
@@ -149,7 +154,9 @@ export async function rencanaDariMenu(
     const saldoCk = ckStok(ingredientId);
     const kurang = kekuranganBahan(butuh, s.saldo);
     // hanya bila ada CK pelaksana: stok jadi CK bisa dikirim menutup kekurangan
-    const kirimCk = pelaksanaId !== branchId ? Math.min(kurang, saldoCk) : 0;
+    // (bahan ber-produksi_di "cabang" TIDAK — diproduksi langsung di cabang)
+    const kirimCk =
+      pelaksanaId !== branchId && produksiDi !== "cabang" ? Math.min(kurang, saldoCk) : 0;
     ckDipakaiMenu.set(ingredientId, kirimCk);
     // sisa yang benar-benar perlu diproduksi/dibeli baru (setelah kirim CK)
     const perlu = kekuranganBahan(kurang, kirimCk);
@@ -175,6 +182,7 @@ export async function rencanaDariMenu(
       harga_per_unit: hargaPerUnit,
       // sama dengan hargaDefault faktur: round((qty/isi) × hargaBeli)
       estimasi_biaya: faktur ? Math.round(faktur.qty * hargaPerUnit) : null,
+      produksi_di: produksiDi,
     });
   }
   // urut: paling kurang dulu, lalu kebutuhan terbesar
@@ -210,71 +218,106 @@ export async function rencanaDariMenu(
         ),
       );
     if (resepRows.length > 0) {
-      // cabang pelaksana & stok CK sudah diresolusi di atas (dipakai juga utk
-      // menutup kebutuhan menu-level). Bahan mentah dibeli terhadap stok CK.
-      const saldoPelaksana = pelaksanaId === branchId ? bahanById : ckSaldoMap;
-
-      // total kebutuhan bahan mentah = Σ resep × (qty produksi ÷ isi batch)
-      const qtyFakturByProduced = new Map(prodShort.map((b) => [b.ingredient_id, b]));
-      const butuhInput = new Map<string, number>();
-      const untukByInput = new Map<string, Set<string>>();
-      for (const r of resepRows) {
-        const prod = qtyFakturByProduced.get(r.producedId);
-        if (!prod || prod.isi <= 0) continue;
-        const batch = prod.qty_faktur! / prod.isi;
-        butuhInput.set(r.inputId, (butuhInput.get(r.inputId) ?? 0) + r.qty * batch);
-        const set = untukByInput.get(r.inputId) ?? new Set<string>();
-        set.add(prod.nama);
-        untukByInput.set(r.inputId, set);
+      // Bahan mentah dihitung PER LOKASI PRODUKSI bahan jadinya:
+      // - bahan jadi produksi_di "ck" (default): terhadap stok cabang PELAKSANA
+      //   (CK bila store terhubung) — bahan mentah dibeli & disimpan di CK;
+      // - bahan jadi produksi_di "cabang": terhadap stok CABANG TUJUAN — bahan
+      //   mentahnya dibelanjakan CK lalu DIKIRIM ke cabang (kitchen yang
+      //   memproduksi butuh bahannya di cabang).
+      // Input yang sama bisa muncul di dua kelompok (dua baris, tujuan beda).
+      const kelompok: {
+        rows: RencanaBahanRow[];
+        saldoMap: Map<string, (typeof saldoRows)[number]>;
+        deduksi: (inputId: string) => number;
+        lokasi: "ck" | "cabang" | null;
+      }[] = [];
+      const adaCk = pelaksanaId !== branchId;
+      if (!adaCk) {
+        // tanpa CK semua produksi di tempat — satu kelompok (perilaku lama)
+        kelompok.push({
+          rows: prodShort,
+          saldoMap: bahanById,
+          deduksi: (id) => kebutuhan.get(id) ?? 0,
+          lokasi: null,
+        });
+      } else {
+        kelompok.push({
+          rows: prodShort.filter((b) => b.produksi_di !== "cabang"),
+          saldoMap: ckSaldoMap,
+          deduksi: (id) => ckDipakaiMenu.get(id) ?? 0,
+          lokasi: "ck",
+        });
+        kelompok.push({
+          rows: prodShort.filter((b) => b.produksi_di === "cabang"),
+          saldoMap: bahanById,
+          deduksi: (id) => kebutuhan.get(id) ?? 0,
+          lokasi: "cabang",
+        });
       }
 
-      for (const [inputId, butuh] of butuhInput) {
-        // bahan mentah tak dilacak/nonaktif dilewati — konsisten dgn aturan
-        // bahan menu (tak punya saldo cabang → tak direncanakan)
-        const si = saldoPelaksana.get(inputId);
-        if (!si) continue;
-        const e = extraById.get(inputId);
-        // Belanja otomatis hanya untuk input BELI (bahan baku). Input produksi
-        // di dalam resep bertingkat tidak "dibeli" — bahan itu diproduksi
-        // sendiri (dari stok / lewat faktur produksinya sendiri), jadi
-        // dilewati di rencana BELI ini. (Belum diurai/di-work-order otomatis.)
-        if (e?.pengadaan !== "beli") continue;
-        const hargaPerUnitInput = si.isi > 0 ? e.hargaBeli / si.isi : 0;
-        // Saldo efektif: bahan yang juga dipakai LANGSUNG oleh menu sudah
-        // dialokasikan di perhitungan menu-level — saldo yang sama tak boleh
-        // dihitung dua kali (double-count → under-buy). Produksi di store:
-        // kurangi kebutuhan menu dari saldo store; produksi di CK: kurangi
-        // porsi stok CK yang sudah "dikirim" menutup menu-level.
-        const saldoEfektif =
-          pelaksanaId === branchId
-            ? Math.max(0, si.saldo - (kebutuhan.get(inputId) ?? 0))
-            : Math.max(0, si.saldo - (ckDipakaiMenu.get(inputId) ?? 0));
-        // sama seperti menu-level: kebutuhan bahan mentah apa adanya, tanpa
-        // menambah stok minimum (reorder point) — cadangan diurus terpisah.
-        const kurang = kekuranganBahan(butuh, saldoEfektif);
-        const dasarFaktur = kurang > 0 ? Math.max(kurang, e.minBeli ?? 0) : 0;
-        const faktur =
-          kurang > 0 ? jumlahFaktur(dasarFaktur, "beli", si.isi, e.bolehEceran ?? false) : null;
-        bahanProduksi.push({
-          ingredient_id: inputId,
-          nama: si.nama,
-          satuan: si.satuan,
-          pengadaan: "beli",
-          kebutuhan: butuh,
-          saldo: si.saldo,
-          // bahan mentah dihitung terhadap stok PELAKSANA (CK bila ada)
-          saldo_ck: pelaksanaId === branchId ? 0 : si.saldo,
-          kurang,
-          // bahan mentah dibeli & disimpan di CK — tak ada "kirim dari stok"
-          kirim_ck: 0,
-          isi: si.isi,
-          mode_faktur: faktur?.mode ?? null,
-          jumlah_faktur: faktur?.jumlah ?? null,
-          qty_faktur: faktur?.qty ?? null,
-          harga_per_unit: hargaPerUnitInput,
-          estimasi_biaya: faktur ? Math.round(faktur.qty * hargaPerUnitInput) : null,
-          untuk: [...(untukByInput.get(inputId) ?? [])].join(", ") || null,
-        });
+      for (const grp of kelompok) {
+        if (grp.rows.length === 0) continue;
+        // total kebutuhan bahan mentah = Σ resep × (qty produksi ÷ isi batch)
+        const qtyFakturByProduced = new Map(grp.rows.map((b) => [b.ingredient_id, b]));
+        const butuhInput = new Map<string, number>();
+        const untukByInput = new Map<string, Set<string>>();
+        for (const r of resepRows) {
+          const prod = qtyFakturByProduced.get(r.producedId);
+          if (!prod || prod.isi <= 0) continue;
+          const batch = prod.qty_faktur! / prod.isi;
+          butuhInput.set(r.inputId, (butuhInput.get(r.inputId) ?? 0) + r.qty * batch);
+          const set = untukByInput.get(r.inputId) ?? new Set<string>();
+          set.add(prod.nama);
+          untukByInput.set(r.inputId, set);
+        }
+
+        for (const [inputId, butuh] of butuhInput) {
+          // bahan mentah tak dilacak/nonaktif dilewati — konsisten dgn aturan
+          // bahan menu (tak punya saldo cabang → tak direncanakan)
+          const si = grp.saldoMap.get(inputId);
+          if (!si) continue;
+          const e = extraById.get(inputId);
+          // Belanja otomatis hanya untuk input BELI (bahan baku). Input produksi
+          // di dalam resep bertingkat tidak "dibeli" — bahan itu diproduksi
+          // sendiri (dari stok / lewat faktur produksinya sendiri), jadi
+          // dilewati di rencana BELI ini. (Belum diurai/di-work-order otomatis.)
+          if (e?.pengadaan !== "beli") continue;
+          const hargaPerUnitInput = si.isi > 0 ? e.hargaBeli / si.isi : 0;
+          // Saldo efektif: bahan yang juga dipakai LANGSUNG oleh menu sudah
+          // dialokasikan di perhitungan menu-level — saldo yang sama tak boleh
+          // dihitung dua kali (double-count → under-buy).
+          const saldoEfektif = Math.max(0, si.saldo - grp.deduksi(inputId));
+          // sama seperti menu-level: kebutuhan bahan mentah apa adanya, tanpa
+          // menambah stok minimum (reorder point) — cadangan diurus terpisah.
+          const kurang = kekuranganBahan(butuh, saldoEfektif);
+          const dasarFaktur = kurang > 0 ? Math.max(kurang, e.minBeli ?? 0) : 0;
+          const faktur =
+            kurang > 0 ? jumlahFaktur(dasarFaktur, "beli", si.isi, e.bolehEceran ?? false) : null;
+          bahanProduksi.push({
+            ingredient_id: inputId,
+            nama: si.nama,
+            satuan: si.satuan,
+            pengadaan: "beli",
+            kebutuhan: butuh,
+            saldo: si.saldo,
+            // saldo_ck di baris bahan-mentah = saldo lokasi hitung bila CK
+            saldo_ck: grp.lokasi === "ck" ? si.saldo : 0,
+            kurang,
+            // bahan mentah dibeli (disimpan di CK / dikirim ke cabang) — tak
+            // ada "kirim dari stok" utk baris belanja
+            kirim_ck: 0,
+            isi: si.isi,
+            mode_faktur: faktur?.mode ?? null,
+            jumlah_faktur: faktur?.jumlah ?? null,
+            qty_faktur: faktur?.qty ?? null,
+            harga_per_unit: hargaPerUnitInput,
+            estimasi_biaya: faktur ? Math.round(faktur.qty * hargaPerUnitInput) : null,
+            untuk: [...(untukByInput.get(inputId) ?? [])].join(", ") || null,
+            // penanda utk faktur: belanja bahan-mentah produksi CABANG dikirim
+            // ke cabang tujuan (bukan disimpan di CK)
+            produksi_di: grp.lokasi === "cabang" ? "cabang" : null,
+          });
+        }
       }
       bahanProduksi.sort((a, b) => b.kurang - a.kurang || b.kebutuhan - a.kebutuhan);
     }
@@ -396,9 +439,16 @@ export async function buatFakturDariRencana(
     }
   }
   const workOrder = ck !== null;
+  // Pisah faktur produksi per LOKASI: bahan ber-produksi_di "cabang" lahir di
+  // CABANG TUJUAN (kitchen cabang mengerjakan; hasil langsung masuk stok
+  // cabang) — bukan work-order CK. Tanpa CK (produksi di tempat) semuanya
+  // sudah di cabang, tak perlu dipisah.
+  const prodRowsCabang = workOrder ? prodRows.filter((b) => b.produksi_di === "cabang") : [];
+  const prodRowsCk = workOrder ? prodRows.filter((b) => b.produksi_di !== "cabang") : prodRows;
 
   // Pelaksana wajib HANYA untuk produksi di tempat (bukan work-order). Pada
-  // work-order, karyawan CK menugaskan dirinya saat "Mulai dikerjakan".
+  // work-order, karyawan CK/kitchen cabang menugaskan dirinya saat "Mulai
+  // dikerjakan".
   if (prodRows.length > 0 && !workOrder && !params.workerId && !params.supplierId) {
     throw new HTTPException(400, {
       message: "Pelaksana (karyawan/supplier) wajib dipilih untuk faktur produksi",
@@ -447,20 +497,30 @@ export async function buatFakturDariRencana(
     tipe: "produksi" | "beli",
     fakturId: string,
     bahanProduksi = false,
+    /** true = faktur produksi DI CABANG tujuan (kitchen; hasil masuk stok cabang) */
+    produksiCabang = false,
   ) =>
     rows.map((b) => ({
       companyId: params.companyId,
-      branchId: srcBranchId,
+      // produksi_di "cabang": faktur lahir di CABANG TUJUAN (produksi lokal)
+      branchId: produksiCabang ? params.branchId : srcBranchId,
       // PRODUKSI → diproduksi & DISIMPAN dulu sebagai stok CK (dikonfirmasi di
       // CK saat selesai), lalu dikirim ke cabang lewat "kirim dari stok CK"
       // (transfer) — sesuai alur "hasil produksi masuk CK dulu, CK bisa
       // ngestock". BELI produk jadi → tetap dikirim langsung ke cabang peminta.
-      // Belanja bahan produksi (bahan mentah resep) → tetap di CK.
-      tujuanBranchId: workOrder && tipe === "beli" && !bahanProduksi ? params.branchId : null,
-      // PRODUKSI work-order: hasil masuk stok CK dulu (tujuan kosong), tapi
+      // Belanja bahan produksi (bahan mentah resep): tetap di CK, KECUALI utk
+      // bahan jadi ber-produksi_di "cabang" — bahannya DIKIRIM ke cabang
+      // (kitchen cabang yang memproduksi butuh bahan mentahnya di sana).
+      tujuanBranchId:
+        workOrder && tipe === "beli" && (!bahanProduksi || b.produksi_di === "cabang")
+          ? params.branchId
+          : null,
+      // PRODUKSI work-order CK: hasil masuk stok CK dulu (tujuan kosong), tapi
       // catat "diproduksi UNTUK cabang peminta" — pengingat kirim setelah
       // selesai + badge asal permintaan. Dikosongkan saat hasil dikirim.
-      untukBranchId: workOrder && tipe === "produksi" ? params.branchId : null,
+      // Produksi DI CABANG: lokal murni — tanpa untuk/tujuan.
+      untukBranchId:
+        workOrder && tipe === "produksi" && !produksiCabang ? params.branchId : null,
       bahanProduksi,
       ingredientId: b.ingredient_id,
       qty: b.qty_faktur!,
@@ -493,7 +553,10 @@ export async function buatFakturDariRencana(
       prodDate,
     }));
 
-  const prodFakturId = prodRows.length > 0 ? randomUUID() : null;
+  const prodFakturId = prodRowsCk.length > 0 ? randomUUID() : null;
+  // faktur produksi DI CABANG tujuan (bahan produksi_di "cabang") — terpisah
+  // dari faktur CK; kitchen cabang mengerjakannya (self-assign saat mulai)
+  const prodCabangFakturId = prodRowsCabang.length > 0 ? randomUUID() : null;
   // SATU faktur belanja per permintaan: produk jadi (bertujuan cabang) DAN
   // bahan produksi (tetap di CK) digabung dalam faktur beli yang sama —
   // pemisahan tujuannya per BARIS (tujuan_branch_id + flag bahan_produksi),
@@ -510,7 +573,7 @@ export async function buatFakturDariRencana(
     : ringkas;
   await db.transaction(async (tx) => {
     if (prodFakturId) {
-      await tx.insert(productions).values(barisFaktur(prodRows, "produksi", prodFakturId));
+      await tx.insert(productions).values(barisFaktur(prodRowsCk, "produksi", prodFakturId));
       await terbitkanNomor(tx, params.companyId, "produksi", prodFakturId);
       // Riwayat: owner/admin membuat permintaan tambah stok (jejak audit)
       await catatLogFaktur(tx, {
@@ -520,6 +583,21 @@ export async function buatFakturDariRencana(
         jalur: "produksi",
         aksi: "Permintaan tambah stok",
         detail: detailProd,
+        userId: params.userId,
+      });
+    }
+    if (prodCabangFakturId) {
+      await tx
+        .insert(productions)
+        .values(barisFaktur(prodRowsCabang, "produksi", prodCabangFakturId, false, true));
+      await terbitkanNomor(tx, params.companyId, "produksi", prodCabangFakturId);
+      await catatLogFaktur(tx, {
+        companyId: params.companyId,
+        branchId: params.branchId,
+        fakturId: prodCabangFakturId,
+        jalur: "produksi",
+        aksi: "Permintaan tambah stok",
+        detail: `Produksi di ${store.nama} (kitchen cabang) → stok cabang · ${ringkas}`,
         userId: params.userId,
       });
     }
@@ -587,7 +665,10 @@ export async function buatFakturDariRencana(
   });
 
   return {
-    produksi: prodFakturId ? { faktur_id: prodFakturId, jumlah_baris: prodRows.length } : null,
+    produksi: prodFakturId ? { faktur_id: prodFakturId, jumlah_baris: prodRowsCk.length } : null,
+    produksi_cabang: prodCabangFakturId
+      ? { faktur_id: prodCabangFakturId, jumlah_baris: prodRowsCabang.length }
+      : null,
     beli:
       beliRows.length > 0
         ? { faktur_id: beliFakturId!, jumlah_baris: beliRows.length }

@@ -358,6 +358,13 @@ export interface RencanaBahanRow {
   estimasi_biaya: number | null;
   /** khusus baris BAHAN PRODUKSI: nama bahan jadi yang membutuhkannya */
   untuk?: string | null;
+  /**
+   * Lokasi produksi (baris pengadaan "produksi"): "cabang" = diproduksi kitchen
+   * di cabang tujuan (faktur lahir di cabang, tanpa kirim CK). Pada baris
+   * BAHAN PRODUKSI: lokasi produksi bahan jadi yang dilayaninya — "cabang"
+   * berarti belanjanya dikirim ke cabang. Null/absen = CK (perilaku lama).
+   */
+  produksi_di?: ProduksiDi | null;
 }
 
 /** Preview rencana penambahan stok dari target porsi menu. */
@@ -384,6 +391,11 @@ export interface RencanaMenuPreview {
 /** Hasil pembuatan faktur otomatis dari rencana menu (null = jalur tak perlu). */
 export interface RencanaFakturResult {
   produksi: { faktur_id: string; jumlah_baris: number } | null;
+  /**
+   * Faktur produksi DI CABANG tujuan (bahan ber-produksi_di "cabang"): lahir di
+   * cabang store, dikerjakan kitchen cabang, hasil langsung masuk stok cabang.
+   */
+  produksi_cabang: { faktur_id: string; jumlah_baris: number } | null;
   beli: { faktur_id: string; jumlah_baris: number } | null;
   /** faktur beli BAHAN PRODUKSI (bahan mentah resep) — terpisah dari beli produk jadi */
   beli_produksi: { faktur_id: string; jumlah_baris: number } | null;
@@ -415,6 +427,8 @@ export interface PermintaanStokRow {
   /** nama pembuat permintaan */
   pembuat: string | null;
   produksi: PermintaanStokBagian | null;
+  /** produksi DI CABANG tujuan (kitchen cabang; hasil langsung masuk stok cabang) */
+  produksi_cabang: PermintaanStokBagian | null;
   beli: PermintaanStokBagian | null;
   /** belanja bahan mentah untuk produksi (dari resep) */
   beli_produksi: PermintaanStokBagian | null;

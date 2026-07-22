@@ -456,6 +456,8 @@ ADA (validasi = aturan endpoint asli), idempoten per `client_ref`.
 
 ## `/api/rekomendasi` — Rekomendasi beli & permintaan stok (`modules/rekomendasi/routes.ts`) — group guard **[owner/admin]**
 
+> **Lokasi produksi (BARU):** bahan produksi ber-`produksi_di: "cabang"` pada rencana-dari-menu TIDAK dikirim dari stok CK dan TIDAK di-work-order-kan ke CK — `POST /menu/faktur` menerbitkan faktur produksi TERPISAH yang lahir di CABANG tujuan (dikerjakan role `kitchen`; hasil selesai langsung masuk stok cabang), dan bahan mentah resepnya dihitung terhadap stok cabang lalu dibelanjakan CK dengan tujuan kirim ke cabang. Respons `RencanaFakturResult` dan `PermintaanStokRow` punya bagian baru `produksi_cabang`; baris preview `RencanaBahanRow` membawa `produksi_di`.
+
 - `GET /api/rekomendasi/beli` — query: `branch_id?`, `target?`, `acuan?` (`7hari`|`rentang`|`minggu_lalu`), `dari?`, `sampai?`, `pakai_dari?`, `pakai_sampai?` — res: hasil rekomendasi
 - `POST /api/rekomendasi/menu` — req: `{ items: [{menu_id:uuid, porsi:int(1..100000)}] (min1), ck_branch_id?:uuid|null }` — res: pratinjau rencana
 - `POST /api/rekomendasi/menu/faktur` — req: `RencanaBody` + `{ worker_id?, supplier_id?, supplier_beli_id?, tujuan_branch_id?, ck_branch_id?, catatan? }` (semua uuid/nullable) — res: **201** hasil faktur
@@ -846,6 +848,8 @@ export interface RencanaBahanRow {
   estimasi_biaya: number | null;
   /** khusus baris BAHAN PRODUKSI: nama bahan jadi yang membutuhkannya */
   untuk?: string | null;
+  /** lokasi produksi: "cabang" = diproduksi kitchen di cabang tujuan (null/absen = CK) */
+  produksi_di?: ProduksiDi | null;
 }
 
 /** Preview rencana penambahan stok dari target porsi menu. */
@@ -872,6 +876,8 @@ export interface RencanaMenuPreview {
 /** Hasil pembuatan faktur otomatis dari rencana menu (null = jalur tak perlu). */
 export interface RencanaFakturResult {
   produksi: { faktur_id: string; jumlah_baris: number } | null;
+  /** faktur produksi DI CABANG tujuan (bahan produksi_di "cabang"; dikerjakan kitchen) */
+  produksi_cabang: { faktur_id: string; jumlah_baris: number } | null;
   beli: { faktur_id: string; jumlah_baris: number } | null;
   /** faktur beli BAHAN PRODUKSI (bahan mentah resep) — terpisah dari beli produk jadi */
   beli_produksi: { faktur_id: string; jumlah_baris: number } | null;
@@ -903,6 +909,8 @@ export interface PermintaanStokRow {
   /** nama pembuat permintaan */
   pembuat: string | null;
   produksi: PermintaanStokBagian | null;
+  /** produksi DI CABANG tujuan (kitchen cabang; hasil langsung masuk stok cabang) */
+  produksi_cabang: PermintaanStokBagian | null;
   beli: PermintaanStokBagian | null;
   /** belanja bahan mentah untuk produksi (dari resep) */
   beli_produksi: PermintaanStokBagian | null;

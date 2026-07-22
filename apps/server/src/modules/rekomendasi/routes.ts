@@ -4,7 +4,12 @@ import { alias } from "drizzle-orm/pg-core";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import type { AcuanJenis, KonfirmasiStatus, PermintaanStokRow } from "@kakarut/shared";
+import type {
+  AcuanJenis,
+  KonfirmasiStatus,
+  PermintaanStokBagian,
+  PermintaanStokRow,
+} from "@kakarut/shared";
 import { db } from "../../db/client";
 import { branches, companies, productions, users } from "../../db/schema";
 import { resolveBranchId, type AppEnv } from "../../middleware/auth";
@@ -121,6 +126,8 @@ export const rekomendasiRoutes = new Hono<AppEnv>().get("/beli", async (c) => {
         tipe: productions.tipe,
         bahanProduksi: productions.bahanProduksi,
         asalBranchId: productions.asalBranchId,
+        untukBranchId: productions.untukBranchId,
+        dariBranchId: productions.dariBranchId,
         status: productions.status,
         totalHarga: productions.totalHarga,
         catatan: productions.catatan,
@@ -151,12 +158,23 @@ export const rekomendasiRoutes = new Hono<AppEnv>().get("/beli", async (c) => {
     };
     // jumlah_baris = bahan UNIK (bukan jumlah baris) — satu bahan bisa terpecah
     // jadi beberapa baris saat tahap sebagian.
+    // Bucket produksi PER FAKTUR: satu submit bisa punya DUA faktur produksi —
+    // work-order CK (baris ber-untuk/dari CK) dan produksi DI CABANG (bahan
+    // ber-produksi_di "cabang"; lokal murni tanpa untuk/tujuan).
+    type BucketProd = {
+      faktur_id: string;
+      ings: Set<string>;
+      total: number;
+      rank: number;
+      status: KonfirmasiStatus;
+      /** pernah ber-untuk/dari → faktur work-order CK (bukan produksi cabang) */
+      sisiCk: boolean;
+    };
     type Akum = PermintaanStokRow & {
-      _rankProd: number;
       _rankBeli: number;
       _rankBeliProd: number;
       _rankKirim: number;
-      _ingProd: Set<string>;
+      _prod: Map<string, BucketProd>;
       _ingBeli: Set<string>;
       _ingBeliProd: Set<string>;
       _ingKirim: Set<string>;
@@ -173,14 +191,14 @@ export const rekomendasiRoutes = new Hono<AppEnv>().get("/beli", async (c) => {
           tujuan_cabang: null,
           pembuat: r.pembuat,
           produksi: null,
+          produksi_cabang: null,
           beli: null,
           beli_produksi: null,
           kirim: null,
-          _rankProd: Infinity,
           _rankBeli: Infinity,
           _rankBeliProd: Infinity,
           _rankKirim: Infinity,
-          _ingProd: new Set(),
+          _prod: new Map(),
           _ingBeli: new Set(),
           _ingBeliProd: new Set(),
           _ingKirim: new Set(),
@@ -201,14 +219,17 @@ export const rekomendasiRoutes = new Hono<AppEnv>().get("/beli", async (c) => {
           g.kirim.status = st;
         }
       } else if (r.tipe === "produksi") {
-        if (!g.produksi)
-          g.produksi = { faktur_id: r.fakturId!, jumlah_baris: 0, status: st, total: 0 };
-        g._ingProd.add(r.ingredientId);
-        g.produksi.jumlah_baris = g._ingProd.size;
-        g.produksi.total += Number(r.totalHarga ?? 0);
-        if (rank < g._rankProd) {
-          g._rankProd = rank;
-          g.produksi.status = st;
+        let b = g._prod.get(r.fakturId!);
+        if (!b) {
+          b = { faktur_id: r.fakturId!, ings: new Set(), total: 0, rank: Infinity, status: st, sisiCk: false };
+          g._prod.set(r.fakturId!, b);
+        }
+        b.ings.add(r.ingredientId);
+        b.total += Number(r.totalHarga ?? 0);
+        if (r.untukBranchId || r.dariBranchId) b.sisiCk = true;
+        if (rank < b.rank) {
+          b.rank = rank;
+          b.status = st;
         }
       } else if (r.bahanProduksi) {
         // belanja bahan mentah utk produksi (dari resep) — bagian terpisah
@@ -233,17 +254,28 @@ export const rekomendasiRoutes = new Hono<AppEnv>().get("/beli", async (c) => {
       }
     }
     const hasil: PermintaanStokRow[] = [...map.values()].map(
-      ({
-        _rankProd,
-        _rankBeli,
-        _rankBeliProd,
-        _rankKirim,
-        _ingProd,
-        _ingBeli,
-        _ingBeliProd,
-        _ingKirim,
-        ...rest
-      }) => rest,
+      ({ _rankBeli, _rankBeliProd, _rankKirim, _prod, _ingBeli, _ingBeliProd, _ingKirim, ...rest }) => {
+        // Petakan bucket produksi → bagian: faktur ber-sisiCk (untuk/dari CK) =
+        // `produksi` (work-order CK); faktur lokal lainnya = `produksi_cabang`
+        // bila submit punya keduanya, atau `produksi` bila hanya satu (perilaku
+        // lama utk produksi di tempat / lite).
+        const buckets = [...(_prod as Map<string, BucketProd>).values()];
+        const keBagian = (b: BucketProd): PermintaanStokBagian => ({
+          faktur_id: b.faktur_id,
+          jumlah_baris: b.ings.size,
+          status: b.status,
+          total: b.total,
+        });
+        if (buckets.length === 1) {
+          rest.produksi = keBagian(buckets[0]);
+        } else if (buckets.length > 1) {
+          const ckSisi = buckets.find((b) => b.sisiCk) ?? buckets[0];
+          const lokal = buckets.find((b) => b !== ckSisi)!;
+          rest.produksi = keBagian(ckSisi);
+          rest.produksi_cabang = keBagian(lokal);
+        }
+        return rest;
+      },
     );
     return c.json(hasil);
   })

@@ -42,7 +42,7 @@ function BagianKurang({
   tipe,
   rows,
 }: {
-  tipe: "produksi" | "beli" | "beli_produksi" | "kirim";
+  tipe: "produksi" | "produksi_cabang" | "beli" | "beli_produksi" | "kirim";
   rows: RencanaBahanRow[];
 }) {
   if (rows.length === 0) return null;
@@ -52,16 +52,20 @@ function BagianKurang({
     ? { border: "border-emerald-200", head: "bg-emerald-50 text-emerald-800" }
     : tipe === "produksi"
       ? { border: "border-purple-200", head: "bg-purple-50 text-purple-800" }
-      : tipe === "beli"
-        ? { border: "border-blue-200", head: "bg-blue-50 text-blue-800" }
-        : { border: "border-amber-200", head: "bg-amber-50 text-amber-800" };
+      : tipe === "produksi_cabang"
+        ? { border: "border-rose-200", head: "bg-rose-50 text-rose-800" }
+        : tipe === "beli"
+          ? { border: "border-blue-200", head: "bg-blue-50 text-blue-800" }
+          : { border: "border-amber-200", head: "bg-amber-50 text-amber-800" };
   const judul = kirim
     ? "🚚 Kirim dari stok CK → cabang (stok sudah ada, tinggal dikirim)"
     : tipe === "produksi"
       ? "🏭 Harus diproduksi → masuk stok CK (lalu kirim ke cabang)"
-      : tipe === "beli"
-        ? "🛒 Beli produk jadi → faktur beli"
-        : "🧺 Belanja bahan produksi → faktur beli (bahan mentah resep)";
+      : tipe === "produksi_cabang"
+        ? "🏪 Diproduksi di CABANG (kitchen) → langsung masuk stok cabang"
+        : tipe === "beli"
+          ? "🛒 Beli produk jadi → faktur beli"
+          : "🧺 Belanja bahan produksi → faktur beli (bahan mentah resep)";
   const subtotal = rows.reduce((t, b) => t + (b.estimasi_biaya ?? 0), 0);
   return (
     <div className={`overflow-hidden rounded-lg border ${warna.border}`}>
@@ -93,6 +97,12 @@ function BagianKurang({
                   {b.untuk && (
                     <span className="block text-[11px] font-normal text-stone-400">
                       untuk {b.untuk}
+                    </span>
+                  )}
+                  {/* bahan mentah utk produksi di cabang: belanjanya DIKIRIM ke cabang */}
+                  {tipe === "beli_produksi" && b.produksi_di === "cabang" && (
+                    <span className="block text-[11px] font-semibold text-rose-600">
+                      🚚 dikirim ke cabang (diproduksi kitchen)
                     </span>
                   )}
                 </td>
@@ -246,7 +256,19 @@ export function TambahStokDariMenuPage() {
   // dipenuhi dari stok CK yang sudah ada.
   const kurangKirim = p?.bahan.filter((b) => b.kirim_ck > 0) ?? [];
   const kurangProduksi =
-    p?.bahan.filter((b) => b.pengadaan === "produksi" && b.qty_faktur != null) ?? [];
+    p?.bahan.filter(
+      (b) =>
+        b.pengadaan === "produksi" &&
+        b.qty_faktur != null &&
+        (!workOrder || b.produksi_di !== "cabang"),
+    ) ?? [];
+  // bahan ber-"Diproduksi di: Cabang" (Resep): faktur lahir di cabang tujuan,
+  // dikerjakan kitchen cabang — hasil langsung masuk stok cabang.
+  const kurangProduksiCabang = workOrder
+    ? (p?.bahan.filter(
+        (b) => b.pengadaan === "produksi" && b.qty_faktur != null && b.produksi_di === "cabang",
+      ) ?? [])
+    : [];
   const kurangBeli = p?.bahan.filter((b) => b.pengadaan === "beli" && b.qty_faktur != null) ?? [];
   const kurangBeliProduksi = p?.bahan_produksi.filter((b) => b.kurang > 0) ?? [];
   const bahanCukup = p?.bahan.filter((b) => b.kurang <= 0 && b.kirim_ck <= 0) ?? [];
@@ -327,7 +349,10 @@ export function TambahStokDariMenuPage() {
     (sertakanPerlengkapan && perlengkapanKurang.length > 0);
   const labelBagian = [
     p && adaKurang && p.jumlah_kirim > 0 ? `${p.jumlah_kirim} kirim` : null,
-    p && adaKurang && p.jumlah_produksi > 0 ? `${p.jumlah_produksi} produksi` : null,
+    p && adaKurang && kurangProduksi.length > 0 ? `${kurangProduksi.length} produksi` : null,
+    p && adaKurang && kurangProduksiCabang.length > 0
+      ? `${kurangProduksiCabang.length} produksi cabang`
+      : null,
     p && adaKurang && p.jumlah_beli > 0 ? `${p.jumlah_beli} beli` : null,
     p && adaKurang && p.jumlah_beli_produksi > 0 ? `${p.jumlah_beli_produksi} bahan produksi` : null,
     mintaPerlengkapan ? `${perlengkapanKurang.length} perlengkapan` : null,
@@ -368,8 +393,10 @@ export function TambahStokDariMenuPage() {
         bahan lalu membuat <b>permintaan</b> dengan faktur terpisah: bahan <b>produksi</b> menjadi
         work-order Central Kitchen (CK memproses → <b>hasilnya masuk stok CK</b>), <b>beli produk
         jadi</b> dikirim ke cabang tujuan setelah diproses CK, dan <b>belanja bahan produksi</b>{" "}
-        disimpan di CK. Pemroses tercatat otomatis saat faktur mulai diproses. Semua tercatat di
-        riwayat.
+        disimpan di CK. Bahan yang di Resep ditandai <b>“Diproduksi di: Cabang”</b> tidak lewat CK
+        — fakturnya lahir di cabang tujuan, dikerjakan <b>Kitchen</b> cabang, dan hasilnya langsung
+        masuk stok cabang (bahan mentahnya dibelanjakan CK lalu dikirim ke cabang). Pemroses
+        tercatat otomatis saat faktur mulai diproses. Semua tercatat di riwayat.
       </p>
       <p className="mb-4 max-w-3xl rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
         💡 Angka <b>Saldo</b> = stok CABANG saja (cocok dengan Kartu Stok). Bila stok jadi sudah
@@ -525,6 +552,7 @@ export function TambahStokDariMenuPage() {
                 <div className="space-y-3">
                   <BagianKurang tipe="kirim" rows={kurangKirim} />
                   <BagianKurang tipe="produksi" rows={kurangProduksi} />
+                  <BagianKurang tipe="produksi_cabang" rows={kurangProduksiCabang} />
                   <BagianKurang tipe="beli" rows={kurangBeli} />
                   <BagianKurang tipe="beli_produksi" rows={kurangBeliProduksi} />
                   {!adaKurang && (
@@ -737,6 +765,7 @@ export function TambahStokDariMenuPage() {
                 <div className="max-h-[45vh] space-y-3 overflow-y-auto">
                   <BagianKurang tipe="kirim" rows={kurangKirim} />
                   <BagianKurang tipe="produksi" rows={kurangProduksi} />
+                  <BagianKurang tipe="produksi_cabang" rows={kurangProduksiCabang} />
                   <BagianKurang tipe="beli" rows={kurangBeli} />
                   <BagianKurang tipe="beli_produksi" rows={kurangBeliProduksi} />
                 </div>

@@ -43,22 +43,36 @@ function Bagian({
   data,
   to,
 }: {
-  jalur: "produksi" | "beli" | "beli_produksi" | "kirim";
+  jalur: "produksi" | "produksi_cabang" | "beli" | "beli_produksi" | "kirim";
   data: PermintaanStokBagian;
   to: string;
 }) {
   const ikon =
-    jalur === "produksi" ? "🏭" : jalur === "beli" ? "🛒" : jalur === "kirim" ? "🚚" : "🧺";
+    jalur === "produksi"
+      ? "🏭"
+      : jalur === "produksi_cabang"
+        ? "🏪"
+        : jalur === "beli"
+          ? "🛒"
+          : jalur === "kirim"
+            ? "🚚"
+            : "🧺";
   const judul =
     jalur === "produksi"
       ? "Produksi"
-      : jalur === "beli"
-        ? "Beli produk jadi"
-        : jalur === "kirim"
-          ? "Kirim dari stok CK"
-          : "Bahan produksi";
+      : jalur === "produksi_cabang"
+        ? "Produksi di cabang (kitchen)"
+        : jalur === "beli"
+          ? "Beli produk jadi"
+          : jalur === "kirim"
+            ? "Kirim dari stok CK"
+            : "Bahan produksi";
   const label = (
-    jalur === "produksi" ? LABEL_PRODUKSI : jalur === "kirim" ? LABEL_KIRIM : LABEL_BELI
+    jalur === "produksi" || jalur === "produksi_cabang"
+      ? LABEL_PRODUKSI
+      : jalur === "kirim"
+        ? LABEL_KIRIM
+        : LABEL_BELI
   )[data.status];
   return (
     <Link
@@ -89,7 +103,7 @@ function Bagian({
 
 /** Permintaan dianggap selesai bila SEMUA bagiannya sudah dikonfirmasi/ditolak. */
 function selesaiPermintaan(r: PermintaanStokRow): boolean {
-  const st = [r.produksi, r.beli, r.beli_produksi, r.kirim]
+  const st = [r.produksi, r.produksi_cabang, r.beli, r.beli_produksi, r.kirim]
     .filter((b): b is PermintaanStokBagian => b != null)
     .map((b) => b.status);
   return st.length > 0 && st.every((s) => s === "dikonfirmasi" || s === "ditolak");
@@ -97,7 +111,7 @@ function selesaiPermintaan(r: PermintaanStokRow): boolean {
 
 /** Status keseluruhan satu permintaan = agregat status semua bagiannya. */
 function statusPermintaan(r: PermintaanStokRow): { label: string; cls: string } {
-  const st = [r.produksi, r.beli, r.beli_produksi, r.kirim]
+  const st = [r.produksi, r.produksi_cabang, r.beli, r.beli_produksi, r.kirim]
     .filter((b): b is PermintaanStokBagian => b != null)
     .map((b) => b.status);
   if (st.length > 0 && st.every((s) => s === "dikonfirmasi")) {
@@ -181,7 +195,8 @@ export function PermintaanStokPage() {
             // Belanja BAHAN PRODUKSI tidak dijumlahkan: itu input dari faktur
             // produksi yang nilainya sudah termasuk di total produksi —
             // menjumlahkannya lagi = dobel hitung.
-            const total = (r.produksi?.total ?? 0) + (r.beli?.total ?? 0);
+            const total =
+              (r.produksi?.total ?? 0) + (r.produksi_cabang?.total ?? 0) + (r.beli?.total ?? 0);
             return (
               <Card key={r.rencana_id} className="overflow-hidden">
                 {/* Header: tujuan + waktu di kiri, STATUS di pojok kanan atas */}
@@ -211,6 +226,10 @@ export function PermintaanStokPage() {
                   {/* stok yang SUDAH ADA di CK: dikirim langsung, tanpa produksi baru */}
                   {r.kirim && <Bagian jalur="kirim" data={r.kirim} to="/produksi" />}
                   {r.produksi && <Bagian jalur="produksi" data={r.produksi} to="/produksi" />}
+                  {/* produksi lokal di cabang tujuan (kitchen) — hasil masuk stok cabang */}
+                  {r.produksi_cabang && (
+                    <Bagian jalur="produksi_cabang" data={r.produksi_cabang} to="/produksi" />
+                  )}
                   {r.beli && <Bagian jalur="beli" data={r.beli} to="/pembelian" />}
                   {r.beli_produksi && (
                     <Bagian jalur="beli_produksi" data={r.beli_produksi} to="/pembelian" />
