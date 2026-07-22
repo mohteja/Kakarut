@@ -8,6 +8,7 @@ import { createApp } from "./app";
 import { env } from "./config/env";
 import { db } from "./db/client";
 import { computeBuildId, setBuildId } from "./lib/build";
+import { bersihkanRateLimitKedaluwarsa } from "./middleware/rateLimit";
 import { runMigrations } from "./db/migrate";
 import { backfillKodeMenu } from "./modules/menu/service";
 import { backfillKodeBahan } from "./modules/bahan/kode";
@@ -158,6 +159,11 @@ if (existsSync(webDist)) {
 } else {
   app.notFound((c) => c.json({ error: "Tidak ditemukan" }, 404));
 }
+
+// Sapu baris rate-limit kedaluwarsa: sekali saat boot + berkala tiap 15 menit
+// (unref → tak menahan proses tetap hidup). Idempoten, aman multi-instance.
+void bersihkanRateLimitKedaluwarsa();
+setInterval(() => void bersihkanRateLimitKedaluwarsa(), 15 * 60_000).unref();
 
 serve({ fetch: app.fetch, port: env.PORT }, (info) => {
   console.log(`Terakasir berjalan di http://localhost:${info.port}`);
