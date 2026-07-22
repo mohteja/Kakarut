@@ -27,12 +27,12 @@ export const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
   if (!header?.startsWith("Bearer ")) {
     throw new HTTPException(401, { message: "Perlu login (token tidak ada)" });
   }
-  let payload: AuthUser;
+  let payload: AuthUser & { tv?: number };
   try {
     // Pin algoritma HMAC (hindari kejutan alg-confusion di masa depan).
     payload = jwt.verify(header.slice(7), env.JWT_SECRET, {
       algorithms: ["HS256"],
-    }) as AuthUser;
+    }) as AuthUser & { tv?: number };
   } catch {
     throw new HTTPException(401, { message: "Token tidak valid atau kedaluwarsa" });
   }
@@ -50,10 +50,20 @@ export const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
       isActive: users.isActive,
       deletedAt: users.deletedAt,
       isSuperAdmin: users.isSuperAdmin,
+      tokenVersion: users.tokenVersion,
     })
     .from(users)
     .where(eq(users.id, payload.sub));
   if (!u || u.deletedAt || !u.isActive) {
+    throw new HTTPException(401, { message: "Sesi tidak berlaku lagi — silakan masuk kembali" });
+  }
+
+  // Pembatalan token saat password berubah: klaim `tv` di token harus sama
+  // dengan `users.token_version` terkini. Password diubah → versi DB naik →
+  // token lama (tv < versi) langsung ditolak. Token lama TANPA `tv` (sebelum
+  // fitur ini) dianggap 0 → tetap sah selama versi masih 0.
+  const tokenTv = typeof payload.tv === "number" ? payload.tv : 0;
+  if (tokenTv !== u.tokenVersion) {
     throw new HTTPException(401, { message: "Sesi tidak berlaku lagi — silakan masuk kembali" });
   }
 

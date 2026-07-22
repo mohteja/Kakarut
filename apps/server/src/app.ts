@@ -2,6 +2,7 @@ import { eq, sql } from "drizzle-orm";
 import { Hono, type MiddlewareHandler } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { logger } from "hono/logger";
+import { secureHeaders } from "hono/secure-headers";
 import { db } from "./db/client";
 import { branches } from "./db/schema";
 import { getBuildId } from "./lib/build";
@@ -144,6 +145,36 @@ export function createApp() {
   api.route("/", tenant);
 
   const app = new Hono<AppEnv>();
+  // Header keamanan HTTP (defense-in-depth) untuk SELURUH respons: API JSON,
+  // aset statis, dan shell SPA. Dipasang PALING AWAL agar juga menutupi rute
+  // statis yang didaftarkan belakangan (index.ts).
+  //
+  // CSP disetel agar KOMPATIBEL dengan SPA hasil build:
+  // - script-src 'self'  → hanya bundel ber-hash milik sendiri (tanpa inline).
+  // - style-src 'unsafe-inline' → Tailwind + gaya inline React/Leaflet + <style>
+  //   sementara pada jalur unduh PDF (html2pdf).
+  // - img-src https:/data:/blob: → ubin peta OpenStreetMap, logo dari R2, QR
+  //   data-URI, dan kanvas PDF (blob).
+  // - connect-src 'self' → SPA hanya memanggil API di origin yang sama.
+  // Tidak memakai upgrade-insecure-requests agar dev http://localhost tak rusak.
+  app.use(
+    "*",
+    secureHeaders({
+      contentSecurityPolicy: {
+        defaultSrc: ["'self'"],
+        baseUri: ["'self'"],
+        objectSrc: ["'none'"],
+        frameAncestors: ["'self'"],
+        formAction: ["'self'"],
+        scriptSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", "data:", "blob:", "https:"],
+        fontSrc: ["'self'", "data:"],
+        connectSrc: ["'self'"],
+        workerSrc: ["'self'", "blob:"],
+      },
+    }),
+  );
   app.use("*", logger());
   app.route("/api", api);
   // Suntik referensi app ke modul sync agar bisa sub-request internal ke

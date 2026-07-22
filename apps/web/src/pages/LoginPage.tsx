@@ -43,6 +43,12 @@ export function LoginPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-stone-900 p-4">
       <div className="w-full max-w-sm rounded-2xl bg-white p-8 shadow-2xl">
+        <Link
+          to="/"
+          className="mb-4 inline-flex items-center gap-1 text-sm text-stone-500 hover:text-orange-600 hover:underline"
+        >
+          ← Kembali ke beranda
+        </Link>
         <div className="mb-6 text-center">
           <div className="mx-auto inline-block overflow-hidden rounded-2xl shadow-lg">
             <Logo className="block h-16 w-16" rounded={false} />

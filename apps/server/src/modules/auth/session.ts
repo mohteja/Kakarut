@@ -82,7 +82,10 @@ export async function buatSesi(user: UserRow, preferredCompanyId?: string): Prom
     }
   }
 
-  const token = jwt.sign(payload, env.JWT_SECRET, {
+  // Klaim `tv` (token version) menyertai token agar bisa dibatalkan saat
+  // password berubah — divalidasi di requireAuth. Tidak ikut di `payload`
+  // (AuthUser) yang dikembalikan ke klien: klien menyimpan token apa adanya.
+  const token = jwt.sign({ ...payload, tv: user.tokenVersion }, env.JWT_SECRET, {
     expiresIn: env.JWT_EXPIRES_IN as jwt.SignOptions["expiresIn"],
   });
   return { token, user: payload, company, branch };

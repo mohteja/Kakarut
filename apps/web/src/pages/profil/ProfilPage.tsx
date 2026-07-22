@@ -11,7 +11,7 @@ import {
   inputClass,
 } from "../../components/ui";
 import { HapusAkunButton } from "../../components/HapusAkunButton";
-import { api } from "../../lib/api";
+import { api, saveAuth, type AuthState } from "../../lib/api";
 import { formatTanggalRingkas, formatWaktu } from "../../lib/format";
 
 const LABEL_ROLE: Record<string, string> = {
@@ -51,11 +51,14 @@ export function ProfilPage() {
   const [sukses, setSukses] = useState(false);
   const ganti = useMutation({
     mutationFn: () =>
-      api("/profil/password", {
+      api<{ ok: true } & Partial<AuthState>>("/profil/password", {
         method: "POST",
         body: { password_lama: lama, password_baru: baru },
       }),
-    onSuccess: () => {
+    onSuccess: (res) => {
+      // Server menaikkan token_version (mencabut sesi lama) & mengembalikan sesi
+      // baru; simpan token baru agar tab ini tetap masuk (tanpa re-login).
+      if (res?.token && res.user) saveAuth(res as AuthState);
       setLama("");
       setBaru("");
       setKonfirmasi("");

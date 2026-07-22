@@ -172,6 +172,14 @@ export const users = pgTable("users", {
   isSuperAdmin: boolean("is_super_admin").notNull().default(false),
   isActive: boolean("is_active").notNull().default(true),
   /**
+   * Versi token sesi — dinaikkan setiap password diubah (reset via email, ganti
+   * sendiri, atau di-reset admin) untuk MEMBATALKAN semua token lama. JWT
+   * membawa klaim `tv`; bila `tv` token ≠ nilai ini, sesi ditolak (401). Token
+   * lama tanpa `tv` dianggap 0 → tetap sah selama versi masih 0 (tanpa
+   * memaksa logout massal saat fitur ini dirilis).
+   */
+  tokenVersion: integer("token_version").notNull().default(0),
+  /**
    * Hapus akun sendiri = SOFT delete (tombstone): terisi = akun dihapus, tak
    * bisa login. Riwayat (transaksi, absensi, log faktur) tetap utuh karena
    * baris user tetap ada. Saat dihapus, email di-rename agar alamat bebas

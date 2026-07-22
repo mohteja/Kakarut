@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { zValidator } from "@hono/zod-validator";
 import bcrypt from "bcryptjs";
-import { and, asc, desc, eq, inArray, isNotNull, isNull, ne } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
@@ -550,7 +550,11 @@ export const karyawanRoutes = new Hono<AppEnv>()
             ...(body.nama !== undefined && { nama: body.nama }),
             ...(body.email !== undefined && { email: body.email }),
             ...(aktifGlobal !== undefined && { isActive: aktifGlobal }),
-            ...(body.password && { passwordHash: bcrypt.hashSync(body.password, 10) }),
+            ...(body.password && {
+              passwordHash: bcrypt.hashSync(body.password, 10),
+              // Reset password oleh admin → cabut semua sesi karyawan (token lama batal).
+              tokenVersion: sql`${users.tokenVersion} + 1`,
+            }),
           })
           .where(eq(users.id, userId));
       }
