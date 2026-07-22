@@ -1,12 +1,12 @@
 import bcrypt from "bcryptjs";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import type { Context, MiddlewareHandler } from "hono";
 import { HTTPException } from "hono/http-exception";
 import jwt from "jsonwebtoken";
 import type { AuthUser, UserRole } from "@kakarut/shared";
 import { env } from "../config/env";
 import { db } from "../db/client";
-import { branches, users } from "../db/schema";
+import { branches, companies, memberships, users } from "../db/schema";
 
 export type AppEnv = { Variables: { auth: AuthUser } };
 
@@ -27,13 +27,91 @@ export const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
   if (!header?.startsWith("Bearer ")) {
     throw new HTTPException(401, { message: "Perlu login (token tidak ada)" });
   }
+  let payload: AuthUser;
   try {
-    const payload = jwt.verify(header.slice(7), env.JWT_SECRET) as AuthUser;
-    c.set("auth", payload);
+    // Pin algoritma HMAC (hindari kejutan alg-confusion di masa depan).
+    payload = jwt.verify(header.slice(7), env.JWT_SECRET, {
+      algorithms: ["HS256"],
+    }) as AuthUser;
   } catch {
     throw new HTTPException(401, { message: "Token tidak valid atau kedaluwarsa" });
   }
-  await next();
+
+  // Validasi sesi terhadap keadaan TERKINI di database — bukan hanya isi token.
+  // Token menyimpan peran/perusahaan/cabang dan berumur panjang; tanpa cek ini,
+  // user yang dinonaktifkan/dihapus, keanggotaan yang diarsipkan, atau
+  // perubahan peran/cabang baru berlaku setelah token kedaluwarsa (bisa 12 jam).
+  // Di sini akses "basi" ditolak seketika dan peran/cabang disegarkan dari DB.
+  const [u] = await db
+    .select({
+      id: users.id,
+      email: users.email,
+      nama: users.nama,
+      isActive: users.isActive,
+      deletedAt: users.deletedAt,
+      isSuperAdmin: users.isSuperAdmin,
+    })
+    .from(users)
+    .where(eq(users.id, payload.sub));
+  if (!u || u.deletedAt || !u.isActive) {
+    throw new HTTPException(401, { message: "Sesi tidak berlaku lagi — silakan masuk kembali" });
+  }
+
+  // Super admin platform: tanpa perusahaan.
+  if (u.isSuperAdmin) {
+    c.set("auth", {
+      sub: u.id,
+      email: u.email,
+      nama: u.nama,
+      is_super_admin: true,
+      company_id: null,
+      role: null,
+      branch_id: null,
+    });
+    return next();
+  }
+
+  // Sesi tanpa perusahaan (baru daftar / menunggu onboarding) tetap sah.
+  if (!payload.company_id) {
+    c.set("auth", {
+      sub: u.id,
+      email: u.email,
+      nama: u.nama,
+      is_super_admin: false,
+      company_id: null,
+      role: null,
+      branch_id: null,
+    });
+    return next();
+  }
+
+  // Ada perusahaan di token → keanggotaan AKTIF wajib masih ada (perusahaan
+  // aktif + keanggotaan belum diarsip). Peran & cabang diambil ULANG dari DB.
+  const [m] = await db
+    .select({ role: memberships.role, branchId: memberships.branchId })
+    .from(memberships)
+    .innerJoin(companies, eq(memberships.companyId, companies.id))
+    .where(
+      and(
+        eq(memberships.userId, u.id),
+        eq(memberships.companyId, payload.company_id),
+        isNull(memberships.archivedAt),
+        eq(companies.isActive, true),
+      ),
+    );
+  if (!m) {
+    throw new HTTPException(401, { message: "Akses ke perusahaan ini sudah tidak berlaku" });
+  }
+  c.set("auth", {
+    sub: u.id,
+    email: u.email,
+    nama: u.nama,
+    is_super_admin: false,
+    company_id: payload.company_id,
+    role: m.role,
+    branch_id: m.branchId,
+  });
+  return next();
 };
 
 /** Rute internal perusahaan — butuh keanggotaan (bukan super admin tanpa tenant). */

@@ -15,6 +15,12 @@ const EnvSchema = z.object({
   JWT_SECRET: z.string().optional(),
   JWT_EXPIRES_IN: z.string().default("12h"),
 
+  /** Sakelar utama rate limiting endpoint sensitif (login/lupa-password/tamu/sinkron). */
+  RATE_LIMIT_ENABLED: z
+    .string()
+    .default("true")
+    .transform((v) => v !== "false" && v !== "0"),
+
   /** jalankan migrasi database otomatis saat server start (default: aktif) */
   AUTO_MIGRATE: z
     .string()

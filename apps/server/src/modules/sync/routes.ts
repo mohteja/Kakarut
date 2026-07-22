@@ -6,7 +6,9 @@ import { z } from "zod";
 import type { SyncItemResult, SyncResponse } from "@kakarut/shared";
 import { db } from "../../db/client";
 import { branches, memberships, shifts, syncCommands, users } from "../../db/schema";
+import { env } from "../../config/env";
 import { pastikanCabang, terikatCabang, type AppEnv } from "../../middleware/auth";
+import { lewatiRateLimit, rateLimit } from "../../middleware/rateLimit";
 import { createSale } from "../penjualan/service";
 import { SaleBody } from "../penjualan/routes";
 import { catatAbsen, cekRadius, ClockBody, SelfBody } from "../absensi/routes";
@@ -114,7 +116,16 @@ async function panggilInternal(
   return { kode: res.status, data };
 }
 
-/** Pisahkan path-param wajib dari payload; sisanya jadi body request. */
+const UUID = z.string().uuid();
+
+/**
+ * Pisahkan path-param wajib dari payload; sisanya jadi body request.
+ *
+ * Path-param di-interpolasi ke URL sub-request internal, jadi kunci ber-akhiran
+ * `_id` (faktur_id/supply_id — konvensi UUID di seluruh skema) WAJIB UUID valid.
+ * Tanpa ini, nilai jahat (mis. berisi `/` atau `..`) bisa mengubah jalur yang
+ * dituju. Kunci non-`_id` (mis. `jalur`) divalidasi terpisah oleh pemanggil.
+ */
 function pisahParam<T extends string>(
   payload: unknown,
   kunci: readonly T[],
@@ -126,6 +137,9 @@ function pisahParam<T extends string>(
     const v = p[k];
     if (typeof v !== "string" || !v) {
       throw new HTTPException(400, { message: `Field '${k}' wajib pada payload perintah` });
+    }
+    if (k.endsWith("_id") && !UUID.safeParse(v).success) {
+      throw new HTTPException(400, { message: `Field '${k}' harus berupa UUID valid` });
     }
     params[k] = v;
     delete body[k];
@@ -332,12 +346,24 @@ function pesanError(data: unknown): string {
   return typeof data === "string" && data ? data : "Perintah gagal";
 }
 
+// Batasi laju sinkron per perusahaan: tiap request bisa membawa 100 perintah
+// yang masing-masing memicu sub-request internal (mahal). Auth sudah dijalankan
+// oleh gerbang tenant sebelum handler ini, jadi company_id tersedia di key.
+const batasSync = env.RATE_LIMIT_ENABLED
+  ? rateLimit({
+      windowMs: 60_000,
+      max: 60,
+      key: (c) => `sync:${c.get("auth")?.company_id ?? "?"}`,
+      message: "Terlalu banyak sinkron beruntun — jeda sebentar lalu coba lagi.",
+    })
+  : lewatiRateLimit;
+
 /**
  * Sinkron antrean offline mobile. SATU endpoint generik: batch perintah
  * ber-`client_ref` (idempotency), dieksekusi lewat logika endpoint asli, balas
  * hasil per item. Selalu 200; kegagalan dilaporkan per item.
  */
-export const syncRoutes = new Hono<AppEnv>().post("/", zValidator("json", SyncBody), async (c) => {
+export const syncRoutes = new Hono<AppEnv>().post("/", batasSync, zValidator("json", SyncBody), async (c) => {
   const auth = c.get("auth") as SyncAuth;
   const authHeader = c.req.header("authorization") ?? "";
   const { device_id, commands } = c.req.valid("json");

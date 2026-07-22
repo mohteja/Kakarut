@@ -3483,6 +3483,10 @@ cek "daftar password < 8 → 400" "V == 400" \
   "$(status_code_body "" POST /auth/register '{"nama":"X","email":"pendek96@example.com","password":"123"}')"
 cek "daftar email sudah ada → 409" "V == 409" \
   "$(status_code_body "" POST /auth/register "{\"nama\":\"X\",\"email\":\"$OWNER_EMAIL\",\"password\":\"Rahasia123\"}")"
+# Anti-enumerasi: pesan duplikat GENERIK — tidak mengulang alamat email pemanggil.
+REGDUP96=$(api "" POST /auth/register "{\"nama\":\"X\",\"email\":\"$OWNER_EMAIL\",\"password\":\"Rahasia123\"}")
+cek "daftar duplikat: pesan generik (tak bocorkan alamat email)" "V == 1" \
+  "$(echo "$REGDUP96" | jq --arg e "$OWNER_EMAIL" '(((.error//"")|ascii_downcase|contains($e|ascii_downcase))|not)|if . then 1 else 0 end')"
 # 4. Undang (menunggu diundang) → daftar → auto-join
 INV=$(api "$OWNER" POST /karyawan/undang "{\"email\":\"undangan96@example.com\",\"role\":\"cashier\",\"branch_id\":\"$PUSAT96\"}")
 cek "undang: dibuat (ada id)" "V == 1" "$(echo "$INV" | jq '((.id|length)>0)|if . then 1 else 0 end')"
@@ -3672,6 +3676,66 @@ cek "sync fase2: faktur_tahap tanpa faktur_id → gagal 400" "V == 1" \
 B_PT=$(jq -nc --arg r "$(uuid99)" --arg w "$NOW99" '{commands:[{client_ref:$r,tipe:"penerimaan_terima",waktu:$w,payload:{faktur_id:"00000000-0000-0000-0000-000000000000"}}]}')
 cek "sync fase2: penerimaan_terima faktur asing → gagal 404" "V == 1" \
   "$(api "$OWNER" POST /sync "$B_PT" | jq '(.hasil[0].status=="gagal" and .hasil[0].kode==404)|if . then 1 else 0 end')"
+
+echo "== 100. Rate limiting (anti brute-force / abuse) =="
+# Login dibatasi per (IP + email), max 10 / 5 menit. 10 percobaan gagal untuk
+# email throwaway → percobaan ke-11 (email SAMA) diblokir 429.
+RLMAIL="ratelimit100@example.com"
+for _ in $(seq 1 10); do
+  curl -s -o /dev/null -X POST "$BASE/api/auth/login" -H 'Content-Type: application/json' \
+    -d "{\"email\":\"$RLMAIL\",\"password\":\"salah\"}"
+done
+cek "login ke-11 (email sama) diblokir 429" "V == 429" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/auth/login" \
+     -H 'Content-Type: application/json' -d "{\"email\":\"$RLMAIL\",\"password\":\"salah\"}")"
+# Bucket per email: email LAIN dari IP sama tetap diproses (401, bukan 429).
+cek "login email lain tetap diproses (bukan 429)" "V == 401" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/auth/login" \
+     -H 'Content-Type: application/json' -d '{"email":"ratelimit100-lain@example.com","password":"salah"}')"
+# Header Retry-After ikut dikirim saat 429.
+cek "respons 429 menyertakan header Retry-After" "V == 1" \
+  "$(curl -s -D - -o /dev/null -X POST "$BASE/api/auth/login" -H 'Content-Type: application/json' \
+     -d "{\"email\":\"$RLMAIL\",\"password\":\"salah\"}" | grep -ci '^retry-after:')"
+# Endpoint lain tidak ikut terdampak bucket login → mode tamu tetap 200.
+cek "mode tamu tetap berfungsi (200) di tengah rate-limit login" "V == 200" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/auth/guest" \
+     -H 'Content-Type: application/json' -d '{"peran":"owner"}')"
+# Owner sah TIDAK terpengaruh (email berbeda dari yang di-spam) → login sukses.
+cek "login owner sah tetap sukses (bucket email terpisah)" "V == 1" \
+  "$([ -n "$(login "$OWNER_EMAIL" "$OWNER_PASS")" ] && echo 1 || echo 0)"
+
+echo "== 101. Guard SSRF pada proxy cetak (POST /print/lan) =="
+# Host printer di-resolve lalu disaring; target internal (loopback/link-local/
+# metadata) ditolak 400 SEBELUM ada koneksi TCP — termasuk bentuk yang dulu bisa
+# menembus filter string (::ffff:127.0.0.1, format desimal).
+D64="AA=="  # 1 byte ESC/POS base64 (lolos validasi body)
+ssrf_code() { # ssrf_code <host>
+  curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/print/lan" \
+    -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' \
+    -d "{\"host\":\"$1\",\"port\":9100,\"data\":\"$D64\"}"
+}
+cek "print/lan → localhost ditolak 400" "V == 400" "$(ssrf_code localhost)"
+cek "print/lan → 127.0.0.1 ditolak 400" "V == 400" "$(ssrf_code 127.0.0.1)"
+cek "print/lan → ::ffff:127.0.0.1 (bypass lama) ditolak 400" "V == 400" "$(ssrf_code ::ffff:127.0.0.1)"
+cek "print/lan → metadata 169.254.169.254 ditolak 400" "V == 400" "$(ssrf_code 169.254.169.254)"
+cek "print/lan → 0.0.0.0 ditolak 400" "V == 400" "$(ssrf_code 0.0.0.0)"
+
+echo "== 102. Path-param sinkron wajib UUID (cegah manipulasi jalur) =="
+# faktur_id/supply_id di-interpolasi ke URL sub-request → wajib UUID valid.
+# Nilai jahat (path traversal / bukan UUID) → item gagal 400 SEBELUM dispatch.
+SYNC_BAD_FT=$(jq -nc --arg r "$(uuid99)" --arg w "$NOW99" \
+  '{commands:[{client_ref:$r,tipe:"faktur_tahap",waktu:$w,payload:{jalur:"pembelian",faktur_id:"../../admin/sistem",ke:"dikerjakan"}}]}')
+cek "sync: faktur_id non-UUID (path traversal) → gagal 400" "V == 1" \
+  "$(api "$OWNER" POST /sync "$SYNC_BAD_FT" | jq '(.hasil[0].status=="gagal" and .hasil[0].kode==400)|if . then 1 else 0 end')"
+SYNC_BAD_SP=$(jq -nc --arg r "$(uuid99)" --arg w "$NOW99" \
+  '{commands:[{client_ref:$r,tipe:"perlengkapan_pakai",waktu:$w,payload:{supply_id:"bukan-uuid",qty:1}}]}')
+cek "sync: supply_id non-UUID → gagal 400" "V == 1" \
+  "$(api "$OWNER" POST /sync "$SYNC_BAD_SP" | jq '(.hasil[0].status=="gagal" and .hasil[0].kode==400)|if . then 1 else 0 end')"
+# UUID v4 valid (tapi faktur tak ada) TETAP lolos validasi → dispatch → 404 dari handler asli.
+SYNC_OK_UUID=$(jq -nc --arg r "$(uuid99)" --arg w "$NOW99" \
+  '{commands:[{client_ref:$r,tipe:"penerimaan_terima",waktu:$w,payload:{faktur_id:"11111111-1111-4111-8111-111111111111"}}]}')
+cek "sync: faktur_id UUID valid → lolos validasi, dispatch (404 dari handler)" "V == 1" \
+  "$(api "$OWNER" POST /sync "$SYNC_OK_UUID" | jq '(.hasil[0].status=="gagal" and .hasil[0].kode==404)|if . then 1 else 0 end')"
 
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
