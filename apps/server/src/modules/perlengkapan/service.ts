@@ -1195,6 +1195,25 @@ export async function batalFakturBeliPerlengkapan(
   return { ok: true, jumlah: done.length };
 }
 
+/**
+ * Batalkan SEMUA baris beli yang masih 'menunggu' (bersih-bersih massal —
+ * mis. faktur warisan yang permintaannya sudah dihapus sebelum ada tautan
+ * rencana_id). Opsional dibatasi satu CK.
+ */
+export async function batalSemuaBeliPerlengkapan(
+  companyId: string,
+  ckBranchId?: string,
+): Promise<{ ok: true; jumlah: number }> {
+  const conds = [eq(supplyPurchases.companyId, companyId), eq(supplyPurchases.status, "menunggu")];
+  if (ckBranchId) conds.push(eq(supplyPurchases.ckBranchId, ckBranchId));
+  const done = await db
+    .update(supplyPurchases)
+    .set({ status: "batal", updatedAt: new Date() })
+    .where(and(...conds))
+    .returning({ id: supplyPurchases.id });
+  return { ok: true, jumlah: done.length };
+}
+
 /** Batalkan faktur beli yang masih 'menunggu' (belum tiba). */
 export async function batalBeliPerlengkapan(
   companyId: string,

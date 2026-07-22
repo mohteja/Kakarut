@@ -98,6 +98,12 @@ export function BeliPerlengkapanPage() {
         : api(`/perlengkapan/beli/${g.rows[0].id}/batal`, { method: "POST", body: {} }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["perlengkapan-beli"] }),
   });
+  // bersih-bersih massal: faktur lama yang permintaannya sudah terhapus
+  // (pra-tautan rencana) tak bisa dibatalkan otomatis — batalkan sekaligus
+  const batalSemua = useMutation({
+    mutationFn: () => api(`/perlengkapan/beli/batal-semua`, { method: "POST", body: {} }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["perlengkapan-beli"] }),
+  });
 
   const menunggu = grup.filter((g) => g.status === "menunggu");
 
@@ -121,6 +127,7 @@ export function BeliPerlengkapanPage() {
         <b>otomatis dikirim</b> ke cabang tujuan.
       </div>
       <ErrorText error={batal.error} />
+      <ErrorText error={batalSemua.error} />
 
       {isLoading ? (
         <Spinner />
@@ -131,8 +138,25 @@ export function BeliPerlengkapanPage() {
       ) : (
         <div className="space-y-3">
           {menunggu.length > 0 && (
-            <div className="rounded-lg bg-amber-50 px-4 py-2 text-xs font-semibold text-amber-800">
-              {menunggu.length} faktur menunggu dibeli
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-amber-50 px-4 py-2">
+              <span className="text-xs font-semibold text-amber-800">
+                {menunggu.length} faktur menunggu dibeli
+              </span>
+              {isManajemen && (
+                <button
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        `Batalkan SEMUA ${menunggu.length} faktur yang menunggu dibeli? (yang sudah tiba tidak disentuh)`,
+                      )
+                    )
+                      batalSemua.mutate();
+                  }}
+                  className="rounded-lg px-2 py-0.5 text-xs font-medium text-red-500 hover:bg-red-50"
+                >
+                  🧹 Batalkan semua
+                </button>
+              )}
             </div>
           )}
           {grup.map((g) => (
