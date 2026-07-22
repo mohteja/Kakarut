@@ -484,6 +484,13 @@
       "when": 1784721552961,
       "tag": "0068_faithful_supernaut",
       "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1784728764005,
+      "tag": "0069_productive_junta",
+      "breakpoints": true
     }
   ]
 }

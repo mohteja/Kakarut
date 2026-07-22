@@ -1,5 +1,5 @@
 import { zValidator } from "@hono/zod-validator";
-import { and, desc, eq, isNotNull, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -8,10 +8,18 @@ import type {
   AcuanJenis,
   KonfirmasiStatus,
   PermintaanStokBagian,
+  PermintaanStokBagianPerlengkapan,
   PermintaanStokRow,
 } from "@kakarut/shared";
 import { db } from "../../db/client";
-import { branches, companies, productions, users } from "../../db/schema";
+import {
+  branches,
+  companies,
+  productions,
+  supplies,
+  supplyPurchases,
+  users,
+} from "../../db/schema";
 import { resolveBranchId, type AppEnv } from "../../middleware/auth";
 import { buatFakturDariRencana, rencanaDariMenu } from "./rencana";
 import { rekomendasiBeli } from "./service";
@@ -195,6 +203,7 @@ export const rekomendasiRoutes = new Hono<AppEnv>().get("/beli", async (c) => {
           beli: null,
           beli_produksi: null,
           kirim: null,
+          beli_perlengkapan: null,
           _rankBeli: Infinity,
           _rankBeliProd: Infinity,
           _rankKirim: Infinity,
@@ -277,6 +286,65 @@ export const rekomendasiRoutes = new Hono<AppEnv>().get("/beli", async (c) => {
         return rest;
       },
     );
+    // FAKTUR BELI PERLENGKAPAN (BP-) yang lahir bersama permintaan: supply
+    // purchases ber-rencana_id sama — bagian tersendiri di tiap entri.
+    const rencanaIds = [...map.keys()];
+    if (rencanaIds.length > 0) {
+      const supRows = await db
+        .select({
+          rencanaId: supplyPurchases.rencanaId,
+          fakturId: supplyPurchases.fakturId,
+          id: supplyPurchases.id,
+          status: supplyPurchases.status,
+          qty: supplyPurchases.qty,
+          totalHarga: supplyPurchases.totalHarga,
+          hargaBeli: supplies.hargaBeli,
+        })
+        .from(supplyPurchases)
+        .innerJoin(supplies, eq(supplyPurchases.supplyId, supplies.id))
+        .where(
+          and(
+            eq(supplyPurchases.companyId, auth.company_id!),
+            inArray(supplyPurchases.rencanaId, rencanaIds),
+          ),
+        );
+      const perRencana = new Map<
+        string,
+        { faktur_id: string; jumlah: number; total: number; status: Set<string> }
+      >();
+      for (const s of supRows) {
+        const key = s.rencanaId!;
+        let agg = perRencana.get(key);
+        if (!agg) {
+          agg = { faktur_id: s.fakturId ?? s.id, jumlah: 0, total: 0, status: new Set() };
+          perRencana.set(key, agg);
+        }
+        agg.jumlah += 1;
+        // total: harga riil bila sudah diisi, selain itu estimasi qty × harga
+        // beli; baris batal tak menambah biaya (barang tidak jadi dibeli)
+        if (s.status !== "batal") agg.total += s.totalHarga ?? s.qty * (s.hargaBeli ?? 0);
+        agg.status.add(s.status);
+      }
+      const byRencana = new Map(hasil.map((h) => [h.rencana_id, h]));
+      for (const [rencanaId, agg] of perRencana) {
+        const h = byRencana.get(rencanaId);
+        if (!h) continue;
+        // masih ada yang menunggu → "menunggu"; campuran tiba+batal → "sebagian"
+        const status: PermintaanStokBagianPerlengkapan["status"] = agg.status.has("menunggu")
+          ? "menunggu"
+          : agg.status.size > 1
+            ? "sebagian"
+            : agg.status.has("tiba")
+              ? "tiba"
+              : "batal";
+        h.beli_perlengkapan = {
+          faktur_id: agg.faktur_id,
+          jumlah_baris: agg.jumlah,
+          status,
+          total: Math.round(agg.total),
+        };
+      }
+    }
     return c.json(hasil);
   })
   /**
@@ -306,5 +374,17 @@ export const rekomendasiRoutes = new Hono<AppEnv>().get("/beli", async (c) => {
     if (rows.length === 0) {
       throw new HTTPException(404, { message: "Permintaan tidak ditemukan" });
     }
+    // faktur beli PERLENGKAPAN yang lahir bersama permintaan ini: baris yang
+    // masih 'menunggu' ikut dibatalkan (yang sudah tiba tidak disentuh)
+    await db
+      .update(supplyPurchases)
+      .set({ status: "batal", updatedAt: new Date() })
+      .where(
+        and(
+          eq(supplyPurchases.companyId, auth.company_id!),
+          eq(supplyPurchases.rencanaId, rencanaId),
+          eq(supplyPurchases.status, "menunggu"),
+        ),
+      );
     return c.json({ ok: true, jumlah_baris: rows.length });
   });

@@ -1531,6 +1531,14 @@ export const supplyPurchases = pgTable(
     totalHarga: numeric("total_harga", { precision: 14, scale: 2, mode: "number" }),
     /** cabang store yang butuh — dikirim otomatis setelah tiba (null = stok CK saja) */
     tujuanBranchId: uuid("tujuan_branch_id").references(() => branches.id),
+    /**
+     * FAKTUR pengelompokan (seperti beli bahan baku): baris yang dibuat
+     * bersama berbagi faktur_id & SATU nomor BP- (dokumen_nomor ref =
+     * faktur_id). Null hanya untuk baris warisan (nomor per baris).
+     */
+    fakturId: uuid("faktur_id"),
+    /** tautan ke rencana Tambah Stok dari Menu — tampil di Data Permintaan Stok */
+    rencanaId: uuid("rencana_id"),
     status: supplyBeliStatusEnum("status").notNull().default("menunggu"),
     catatan: text("catatan"),
     userId: uuid("user_id").references(() => users.id),

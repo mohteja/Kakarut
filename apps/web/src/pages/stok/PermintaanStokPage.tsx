@@ -1,7 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import type { KonfirmasiStatus, PermintaanStokBagian, PermintaanStokRow } from "@kakarut/shared";
+import type {
+  KonfirmasiStatus,
+  PermintaanStokBagian,
+  PermintaanStokBagianPerlengkapan,
+  PermintaanStokRow,
+} from "@kakarut/shared";
 import { Card, ErrorText, PageTitle, Spinner, btnSecondary, inputClass } from "../../components/ui";
 import { api } from "../../lib/api";
 import { formatRupiah, formatWaktu } from "../../lib/format";
@@ -101,12 +106,56 @@ function Bagian({
   );
 }
 
+/**
+ * Bagian FAKTUR BELI PERLENGKAPAN (BP-): status pipeline sendiri
+ * (menunggu dibeli → tiba di CK / batal), tautan ke halaman Beli Perlengkapan.
+ */
+const STYLE_PERLENGKAPAN: Record<PermintaanStokBagianPerlengkapan["status"], string> = {
+  menunggu: "bg-amber-100 text-amber-700",
+  sebagian: "bg-lime-100 text-lime-700",
+  tiba: "bg-green-100 text-green-700",
+  batal: "bg-stone-100 text-stone-500",
+};
+const LABEL_PERLENGKAPAN: Record<PermintaanStokBagianPerlengkapan["status"], string> = {
+  menunggu: "Menunggu dibeli",
+  sebagian: "Sebagian tiba",
+  tiba: "Tiba di CK ✓",
+  batal: "Dibatalkan",
+};
+function BagianPerlengkapan({ data }: { data: PermintaanStokBagianPerlengkapan }) {
+  return (
+    <Link
+      to="/perlengkapan/beli"
+      className="flex items-center justify-between gap-3 rounded-lg border border-stone-200 bg-white px-3 py-2 transition hover:border-orange-400 hover:shadow-sm"
+    >
+      <div className="min-w-0">
+        <div className="text-sm font-semibold text-stone-800">
+          🧰 Beli perlengkapan · {data.jumlah_baris} item
+        </div>
+        {data.total > 0 && (
+          <div className="text-xs text-stone-500">≈ {formatRupiah(data.total)}</div>
+        )}
+      </div>
+      <span
+        className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold ${STYLE_PERLENGKAPAN[data.status]}`}
+      >
+        {LABEL_PERLENGKAPAN[data.status]}
+      </span>
+    </Link>
+  );
+}
+
 /** Permintaan dianggap selesai bila SEMUA bagiannya sudah dikonfirmasi/ditolak. */
 function selesaiPermintaan(r: PermintaanStokRow): boolean {
   const st = [r.produksi, r.produksi_cabang, r.beli, r.beli_produksi, r.kirim]
     .filter((b): b is PermintaanStokBagian => b != null)
     .map((b) => b.status);
-  return st.length > 0 && st.every((s) => s === "dikonfirmasi" || s === "ditolak");
+  const bahanSelesai =
+    st.length > 0 && st.every((s) => s === "dikonfirmasi" || s === "ditolak");
+  // perlengkapan final saat tak ada lagi yang 'menunggu dibeli'
+  const perlengkapanSelesai =
+    r.beli_perlengkapan == null || r.beli_perlengkapan.status !== "menunggu";
+  return bahanSelesai && perlengkapanSelesai;
 }
 
 /** Status keseluruhan satu permintaan = agregat status semua bagiannya. */
@@ -114,7 +163,11 @@ function statusPermintaan(r: PermintaanStokRow): { label: string; cls: string } 
   const st = [r.produksi, r.produksi_cabang, r.beli, r.beli_produksi, r.kirim]
     .filter((b): b is PermintaanStokBagian => b != null)
     .map((b) => b.status);
-  if (st.length > 0 && st.every((s) => s === "dikonfirmasi")) {
+  const mulus =
+    st.length > 0 &&
+    st.every((s) => s === "dikonfirmasi") &&
+    (r.beli_perlengkapan == null || r.beli_perlengkapan.status === "tiba");
+  if (mulus) {
     return { label: "📦 Selesai ✓", cls: "bg-green-100 text-green-700" };
   }
   if (selesaiPermintaan(r)) {
@@ -196,7 +249,10 @@ export function PermintaanStokPage() {
             // produksi yang nilainya sudah termasuk di total produksi —
             // menjumlahkannya lagi = dobel hitung.
             const total =
-              (r.produksi?.total ?? 0) + (r.produksi_cabang?.total ?? 0) + (r.beli?.total ?? 0);
+              (r.produksi?.total ?? 0) +
+              (r.produksi_cabang?.total ?? 0) +
+              (r.beli?.total ?? 0) +
+              (r.beli_perlengkapan?.total ?? 0);
             return (
               <Card key={r.rencana_id} className="overflow-hidden">
                 {/* Header: tujuan + waktu di kiri, STATUS di pojok kanan atas */}
@@ -234,6 +290,8 @@ export function PermintaanStokPage() {
                   {r.beli_produksi && (
                     <Bagian jalur="beli_produksi" data={r.beli_produksi} to="/pembelian" />
                   )}
+                  {/* faktur beli PERLENGKAPAN (BP-) yang lahir bersama permintaan */}
+                  {r.beli_perlengkapan && <BagianPerlengkapan data={r.beli_perlengkapan} />}
                 </div>
                 {/* Footer: total transaksi permintaan + pembuat + hapus */}
                 <div className="flex items-end justify-between gap-2 px-4 py-2.5">

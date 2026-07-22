@@ -797,65 +797,76 @@ export async function buatKirimanPerlengkapan(params: {
 }
 
 /**
- * Buat FAKTUR BELI perlengkapan ke CK (status 'menunggu'). Barang belum tiba;
- * setelah dibeli & tiba dipanggil {@link tibaBeliPerlengkapan} → masuk stok CK
- * + otomatis kirim ke cabang tujuan (bila diisi). Bernomor BP-.
+ * Buat FAKTUR BELI perlengkapan ke CK (status 'menunggu') — SATU faktur bisa
+ * memuat banyak item (seperti faktur beli bahan baku): semua baris berbagi
+ * `faktur_id` dan SATU nomor BP- (dokumen ref = faktur_id). Barang belum tiba;
+ * setelah dibeli & tiba dipanggil {@link tibaFakturBeliPerlengkapan} → masuk
+ * stok CK + otomatis kirim ke cabang tujuan (bila diisi).
  */
 export async function buatBeliPerlengkapan(params: {
   companyId: string;
   ckBranchId: string;
-  supplyId: string;
-  qty: number;
+  items: { supplyId: string; qty: number; totalHarga?: number | null }[];
   userId: string;
   tujuanBranchId?: string | null;
-  totalHarga?: number | null;
+  /** tautan ke rencana Tambah Stok dari Menu (tampil di Data Permintaan Stok) */
+  rencanaId?: string | null;
   catatan?: string | null;
-}): Promise<{ id: string; nomor: string }> {
+}): Promise<{ faktur_id: string; nomor: string; ids: string[] }> {
   return db.transaction(async (tx) => {
-    const [row] = await tx
+    const fakturId = randomUUID();
+    const rows = await tx
       .insert(supplyPurchases)
-      .values({
-        companyId: params.companyId,
-        ckBranchId: params.ckBranchId,
-        supplyId: params.supplyId,
-        qty: params.qty,
-        tujuanBranchId: params.tujuanBranchId ?? null,
-        totalHarga: params.totalHarga ?? null,
-        catatan: params.catatan ?? null,
-        userId: params.userId,
-      })
+      .values(
+        params.items.map((it) => ({
+          companyId: params.companyId,
+          ckBranchId: params.ckBranchId,
+          supplyId: it.supplyId,
+          qty: it.qty,
+          tujuanBranchId: params.tujuanBranchId ?? null,
+          totalHarga: it.totalHarga ?? null,
+          fakturId,
+          rencanaId: params.rencanaId ?? null,
+          catatan: params.catatan ?? null,
+          userId: params.userId,
+        })),
+      )
       .returning({ id: supplyPurchases.id });
-    const nomor = await terbitkanNomor(tx, params.companyId, "beli_perlengkapan", row.id);
-    return { id: row.id, nomor };
+    const nomor = await terbitkanNomor(tx, params.companyId, "beli_perlengkapan", fakturId);
+    return { faktur_id: fakturId, nomor, ids: rows.map((r) => r.id) };
   });
 }
 
 /**
- * Buat faktur beli perlengkapan MANUAL (dari halaman Beli Perlengkapan). CK
- * ditentukan eksplisit atau otomatis bila perusahaan hanya punya satu; cabang
- * tujuan (opsional) harus store — dikirim otomatis setelah tiba.
+ * Buat faktur beli perlengkapan MANUAL (dari halaman Beli Perlengkapan) — satu
+ * faktur bisa banyak item. CK ditentukan eksplisit atau otomatis bila
+ * perusahaan hanya punya satu; cabang tujuan (opsional) harus store — dikirim
+ * otomatis setelah tiba.
  */
 export async function buatBeliPerlengkapanManual(params: {
   companyId: string;
   userId: string;
-  supplyId: string;
+  items: { supplyId: string; qty: number; totalHarga?: number | null }[];
   ckBranchId?: string | null;
-  qty: number;
   tujuanBranchId?: string | null;
-  totalHarga?: number | null;
   catatan?: string | null;
-}): Promise<{ id: string; nomor: string } | { error: string; code?: number }> {
-  const [sup] = await db
+}): Promise<
+  { faktur_id: string; nomor: string; ids: string[] } | { error: string; code?: number }
+> {
+  const supplyIds = [...new Set(params.items.map((it) => it.supplyId))];
+  const supRows = await db
     .select({ id: supplies.id })
     .from(supplies)
     .where(
       and(
-        eq(supplies.id, params.supplyId),
+        inArray(supplies.id, supplyIds),
         eq(supplies.companyId, params.companyId),
         eq(supplies.isActive, true),
       ),
     );
-  if (!sup) return { error: "Perlengkapan tidak ditemukan", code: 404 };
+  if (supRows.length !== supplyIds.length) {
+    return { error: "Perlengkapan tidak ditemukan", code: 404 };
+  }
 
   // tentukan CK tujuan beli
   let ckId = params.ckBranchId ?? null;
@@ -905,11 +916,9 @@ export async function buatBeliPerlengkapanManual(params: {
   return buatBeliPerlengkapan({
     companyId: params.companyId,
     ckBranchId: ckId,
-    supplyId: params.supplyId,
-    qty: params.qty,
+    items: params.items,
     userId: params.userId,
     tujuanBranchId: params.tujuanBranchId ?? null,
-    totalHarga: params.totalHarga ?? null,
     catatan: params.catatan ?? null,
   });
 }
@@ -924,6 +933,8 @@ export async function permintaanOtomatisPerlengkapan(params: {
   companyId: string;
   cabangId: string;
   userId: string;
+  /** tautan ke rencana Tambah Stok dari Menu — faktur BP tampil di Data Permintaan Stok */
+  rencanaId?: string | null;
 }): Promise<PermintaanPerlengkapanOtomatisHasil | { error: string; code?: number }> {
   const [cab] = await db
     .select({ ckId: branches.centralKitchenId, tipe: branches.tipe, nama: branches.nama })
@@ -940,6 +951,8 @@ export async function permintaanOtomatisPerlengkapan(params: {
   const dibuat: PermintaanPerlengkapanOtomatisHasil["dibuat"] = [];
   const beliDibuat: PermintaanPerlengkapanOtomatisHasil["beli_dibuat"] = [];
   const takBisa: PermintaanPerlengkapanOtomatisHasil["tak_bisa_kirim"] = [];
+  // item beli dikumpulkan dulu → SATU faktur BP untuk seluruh permintaan
+  const beliItems: { supplyId: string; nama: string; satuan: string; qty: number }[] = [];
   for (const r of rows) {
     if (!(r.stok_minimum > 0) || r.saldo >= r.stok_minimum) continue;
     // butuh dibulatkan ke atas agar tak minta pecahan yang mustahil dikirim
@@ -971,29 +984,38 @@ export async function permintaanOtomatisPerlengkapan(params: {
         });
       }
     }
-    // sisa yang tak tertutup stok CK → faktur beli ke CK (dibeli lalu dikirim)
+    // sisa yang tak tertutup stok CK → item faktur beli ke CK (dibeli lalu dikirim)
     const sisa = kekurangan - kirim;
     if (sisa > 0) {
-      const beli = await buatBeliPerlengkapan({
-        companyId: params.companyId,
-        ckBranchId: cab.ckId,
-        supplyId: r.id,
-        qty: sisa,
-        userId: params.userId,
-        tujuanBranchId: params.cabangId,
-        catatan: `Permintaan ${cab.nama} (stok CK kurang)`,
-      });
+      beliItems.push({ supplyId: r.id, nama: r.nama, satuan: r.satuan, qty: sisa });
+    }
+  }
+  // seluruh item kurang jadi SATU faktur BP- (seperti faktur beli bahan baku);
+  // item hanya masuk daftar bila cab.ckId ada (guard di loop), jadi aman.
+  let beliFaktur: PermintaanPerlengkapanOtomatisHasil["beli_faktur"] = null;
+  if (beliItems.length > 0) {
+    const beli = await buatBeliPerlengkapan({
+      companyId: params.companyId,
+      ckBranchId: cab.ckId!,
+      items: beliItems.map((it) => ({ supplyId: it.supplyId, qty: it.qty })),
+      userId: params.userId,
+      tujuanBranchId: params.cabangId,
+      rencanaId: params.rencanaId ?? null,
+      catatan: `Permintaan ${cab.nama} (stok CK kurang)`,
+    });
+    beliFaktur = { faktur_id: beli.faktur_id, nomor: beli.nomor, jumlah_baris: beliItems.length };
+    for (const it of beliItems) {
       beliDibuat.push({
-        supply_id: r.id,
-        nama: r.nama,
-        satuan: r.satuan,
-        qty: sisa,
+        supply_id: it.supplyId,
+        nama: it.nama,
+        satuan: it.satuan,
+        qty: it.qty,
         nomor: beli.nomor,
         tujuan_nama: cab.nama,
       });
     }
   }
-  return { dibuat, beli_dibuat: beliDibuat, tak_bisa_kirim: takBisa };
+  return { dibuat, beli_dibuat: beliDibuat, beli_faktur: beliFaktur, tak_bisa_kirim: takBisa };
 }
 
 /**
@@ -1097,6 +1119,82 @@ export async function tibaBeliPerlengkapan(params: {
   return { id: params.id, nomor_masuk: nomorMasuk, kiriman };
 }
 
+/**
+ * Barang SATU FAKTUR beli tiba di CK: proses semua baris 'menunggu' faktur itu
+ * (qty/harga per baris bisa disesuaikan lewat `items`). Tiap baris atomik
+ * (CAS per baris di {@link tibaBeliPerlengkapan}) — masuk stok CK (PL-) +
+ * otomatis kirim (KP-) ke cabang tujuan masing-masing.
+ */
+export async function tibaFakturBeliPerlengkapan(params: {
+  companyId: string;
+  fakturId: string;
+  userId: string;
+  items?: { id: string; qty?: number; total_harga?: number | null }[];
+}): Promise<
+  | {
+      faktur_id: string;
+      jumlah_tiba: number;
+      kiriman: { id: string; nomor: string }[];
+    }
+  | { error: string; code?: number }
+> {
+  const rows = await db
+    .select({ id: supplyPurchases.id, status: supplyPurchases.status })
+    .from(supplyPurchases)
+    .where(
+      and(
+        eq(supplyPurchases.fakturId, params.fakturId),
+        eq(supplyPurchases.companyId, params.companyId),
+      ),
+    );
+  if (rows.length === 0) return { error: "Faktur beli tidak ditemukan", code: 404 };
+  const menunggu = rows.filter((r) => r.status === "menunggu");
+  if (menunggu.length === 0) {
+    return { error: "Faktur ini sudah tiba atau dibatalkan", code: 400 };
+  }
+  const override = new Map((params.items ?? []).map((it) => [it.id, it]));
+  const kiriman: { id: string; nomor: string }[] = [];
+  let jumlahTiba = 0;
+  for (const r of menunggu) {
+    const o = override.get(r.id);
+    const hasil = await tibaBeliPerlengkapan({
+      companyId: params.companyId,
+      id: r.id,
+      userId: params.userId,
+      qty: o?.qty,
+      totalHarga: o?.total_harga ?? undefined,
+    });
+    if (!("error" in hasil)) {
+      jumlahTiba += 1;
+      if (hasil.kiriman) kiriman.push(hasil.kiriman);
+    }
+  }
+  if (jumlahTiba === 0) return { error: "Tidak ada baris yang bisa diproses", code: 400 };
+  return { faktur_id: params.fakturId, jumlah_tiba: jumlahTiba, kiriman };
+}
+
+/** Batalkan SEMUA baris 'menunggu' satu faktur beli perlengkapan. */
+export async function batalFakturBeliPerlengkapan(
+  companyId: string,
+  fakturId: string,
+): Promise<{ ok: true; jumlah: number } | { error: string; code?: number }> {
+  const done = await db
+    .update(supplyPurchases)
+    .set({ status: "batal", updatedAt: new Date() })
+    .where(
+      and(
+        eq(supplyPurchases.fakturId, fakturId),
+        eq(supplyPurchases.companyId, companyId),
+        eq(supplyPurchases.status, "menunggu"),
+      ),
+    )
+    .returning({ id: supplyPurchases.id });
+  if (done.length === 0) {
+    return { error: "Faktur tidak ditemukan / sudah tiba", code: 404 };
+  }
+  return { ok: true, jumlah: done.length };
+}
+
 /** Batalkan faktur beli yang masih 'menunggu' (belum tiba). */
 export async function batalBeliPerlengkapan(
   companyId: string,
@@ -1131,6 +1229,7 @@ export async function daftarBeliPerlengkapan(
   const rows = await db
     .select({
       id: supplyPurchases.id,
+      fakturId: supplyPurchases.fakturId,
       supplyId: supplyPurchases.supplyId,
       nama: supplies.nama,
       satuan: supplies.satuan,
@@ -1152,13 +1251,15 @@ export async function daftarBeliPerlengkapan(
     // 'menunggu' di atas (butuh aksi), lalu terbaru
     .orderBy(sql`(${supplyPurchases.status} = 'menunggu') desc`, desc(supplyPurchases.createdAt))
     .limit(200);
+  // nomor BP-: ref = faktur_id (baris warisan tanpa faktur → ref = id baris)
   const nomorMap = await nomorUntukRefs(
     db,
     companyId,
-    rows.map((r) => r.id),
+    [...new Set(rows.map((r) => r.fakturId ?? r.id))],
   );
   return rows.map((r) => ({
     id: r.id,
+    faktur_id: r.fakturId,
     supply_id: r.supplyId,
     nama: r.nama,
     satuan: r.satuan,
@@ -1170,7 +1271,7 @@ export async function daftarBeliPerlengkapan(
     catatan: r.catatan,
     waktu: r.waktu.toISOString(),
     oleh: r.oleh,
-    nomor: nomorMap.get(r.id) ?? null,
+    nomor: nomorMap.get(r.fakturId ?? r.id) ?? null,
   }));
 }
 
