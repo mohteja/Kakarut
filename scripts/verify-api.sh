@@ -1789,6 +1789,9 @@ cek "arsipkan akun sendiri → 400" "V == 400" \
 cek "nonaktifkan akun sendiri → 400" "V == 400" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X PATCH "$BASE/api/karyawan/$OWN54_ID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"is_active":false}')"
 api "$OWNER" PATCH "/karyawan/$U53_ID" '{"is_active":true}' > /dev/null
+# T53 lama sudah dibatalkan token_version (password U53 diubah di §53) → login
+# ULANG dgn password terbaru untuk token admin yang segar sebelum uji guard.
+T53=$(login "edit53b@basooopa.id" "PwEdit53Baru!")
 cek "admin mengarsipkan akun owner → 403" "V == 403" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X PATCH "$BASE/api/karyawan/$OWN54_ID" -H "Authorization: Bearer $T53" -H 'Content-Type: application/json' -d '{"arsip":true}')"
 
@@ -3803,6 +3806,36 @@ cek "sync absen_saya client_ref yg SUDAH online → sudah_ada" "V == 1" \
 # 6) Regresi nol: penjualan TANPA client_ref → tetap 201 (perilaku lama).
 cek "penjualan TANPA client_ref → tetap 201 (regresi nol)" "V == 201" \
   "$(status_code_body "$KASIR" POST /penjualan "{\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")"
+
+echo "== 105. token_version: reset (admin) & ganti sendiri membatalkan token lama =="
+# CATATAN: bagian INI mengganti password kasir → letakkan PALING AKHIR agar
+# tak memengaruhi bagian lain yang login sebagai kasir dengan password awal.
+# (a) Admin mereset password karyawan → SEMUA token karyawan lama langsung batal.
+OLD105=$(login "$KASIR_EMAIL" "$KASIR_PASS")
+cek "token kasir lama valid sebelum reset (GET /auth/me → 200)" "V == 200" \
+  "$(status_code "$OLD105" GET /auth/me)"
+UIDK105=$(api "$OWNER" GET /karyawan | jq -r '[.[]|select(.email=="'"$KASIR_EMAIL"'")][0].user_id')
+NEWPASS105="KasirBaru123!"
+cek "admin reset password kasir → 200" "V == 200" \
+  "$(status_code_body "$OWNER" PATCH "/karyawan/$UIDK105" "{\"password\":\"$NEWPASS105\"}")"
+cek "token kasir LAMA → 401 setelah reset admin (token_version naik)" "V == 401" \
+  "$(status_code "$OLD105" GET /auth/me)"
+NEW105=$(login "$KASIR_EMAIL" "$NEWPASS105")
+cek "login kasir dgn password baru berhasil" "V == 1" \
+  "$([ -n "$NEW105" ] && [ "$NEW105" != "null" ] && echo 1 || echo 0)"
+cek "token kasir baru valid (GET /auth/me → 200)" "V == 200" \
+  "$(status_code "$NEW105" GET /auth/me)"
+# (b) Ganti password sendiri (profil) → token lama batal, respons beri token baru
+#     (re-issue) supaya tab yang mengganti tak ikut ter-logout.
+NEWPASS105B="KasirBaru456!"
+GP105=$(api "$NEW105" POST /profil/password "{\"password_lama\":\"$NEWPASS105\",\"password_baru\":\"$NEWPASS105B\"}")
+REISS105=$(echo "$GP105" | jq -r '.token // ""')
+cek "ganti password profil membalas token baru (re-issue)" "V == 1" \
+  "$([ -n "$REISS105" ] && echo 1 || echo 0)"
+cek "token sebelum-ganti → 401 setelah ganti password sendiri" "V == 401" \
+  "$(status_code "$NEW105" GET /auth/me)"
+cek "token re-issue valid (GET /auth/me → 200)" "V == 200" \
+  "$(status_code "$REISS105" GET /auth/me)"
 
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="

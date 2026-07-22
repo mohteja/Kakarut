@@ -1,11 +1,12 @@
 import bcrypt from "bcryptjs";
 import { zValidator } from "@hono/zod-validator";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
 import { db } from "../../db/client";
 import { branches, fakturLogs, memberships, users } from "../../db/schema";
 import { verifikasiPassword, type AppEnv } from "../../middleware/auth";
+import { buatSesi } from "../auth/session";
 
 const GantiPasswordBody = z.object({
   password_lama: z.string(),
@@ -79,9 +80,19 @@ export const profilRoutes = new Hono<AppEnv>()
     const auth = c.get("auth");
     const body = c.req.valid("json");
     await verifikasiPassword(auth.sub, body.password_lama);
-    await db
+    // Naikkan token_version → semua token lama (perangkat/tab lain, atau token
+    // yang bocor) langsung batal. Kembalikan baris terbaru untuk re-issue sesi.
+    const [updated] = await db
       .update(users)
-      .set({ passwordHash: bcrypt.hashSync(body.password_baru, 10) })
-      .where(eq(users.id, auth.sub));
-    return c.json({ ok: true });
+      .set({
+        passwordHash: bcrypt.hashSync(body.password_baru, 10),
+        tokenVersion: sql`${users.tokenVersion} + 1`,
+      })
+      .where(eq(users.id, auth.sub))
+      .returning();
+    // Re-issue sesi untuk TAB INI (token baru berversi terbaru) agar user yang
+    // baru mengganti password tidak ikut ter-logout. Pertahankan perusahaan
+    // aktif saat ini (penting untuk akun multi-perusahaan).
+    const sesi = await buatSesi(updated, auth.company_id ?? undefined);
+    return c.json({ ok: true, ...sesi });
   });

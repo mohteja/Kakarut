@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { zValidator } from "@hono/zod-validator";
 import bcrypt from "bcryptjs";
-import { and, eq, gt, isNull } from "drizzle-orm";
+import { and, eq, gt, isNull, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
@@ -218,7 +218,12 @@ export const authRoutes = new Hono<AppEnv>()
       await db.transaction(async (tx) => {
         await tx
           .update(users)
-          .set({ passwordHash: bcrypt.hashSync(password, 10) })
+          .set({
+            passwordHash: bcrypt.hashSync(password, 10),
+            // Naikkan versi token → SEMUA sesi lama (mis. token dicuri) langsung
+            // batal begitu pemilik akun mereset password lewat email.
+            tokenVersion: sql`${users.tokenVersion} + 1`,
+          })
           .where(eq(users.id, user.id));
         await tx
           .update(passwordResetTokens)
