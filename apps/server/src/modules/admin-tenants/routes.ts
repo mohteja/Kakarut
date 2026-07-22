@@ -92,6 +92,8 @@ export const adminTenantsRoutes = new Hono<AppEnv>()
           email: body.owner_email,
           passwordHash: bcrypt.hashSync(body.owner_password, 10),
           nama: body.owner_nama,
+          // Dibuat oleh super admin → langsung terverifikasi (boleh login).
+          emailVerifiedAt: new Date(),
         })
         .returning();
       await tx

@@ -30,6 +30,19 @@ cek()  { # cek "deskripsi" <ekspresi python bool dengan $V>
 login() { curl -sf -X POST "$BASE/api/auth/login" -H 'Content-Type: application/json' \
   -d "{\"email\":\"$1\",\"password\":\"$2\"}" | jq -r .token; }
 
+# Daftar + verifikasi email (jalur dev) → echo token sesi. Register tak lagi
+# auto-login: harus verifikasi email dulu. Hanya bekerja saat email BELUM
+# dikonfigurasi (register mengembalikan dev_verify_url).
+daftar_verif() { # <email> <password> <nama>
+  local email="$1" pass="$2" nama="${3:-Uji}" reg vt
+  reg=$(curl -s -X POST "$BASE/api/auth/register" -H 'Content-Type: application/json' \
+    -d "{\"nama\":\"$nama\",\"email\":\"$email\",\"password\":\"$pass\"}")
+  vt=$(echo "$reg" | jq -r '.dev_verify_url // ""' | sed -n 's/.*token=//p')
+  [ -z "$vt" ] && return 0
+  curl -s -X POST "$BASE/api/auth/verify-email" -H 'Content-Type: application/json' \
+    -d "{\"token\":\"$vt\"}" | jq -r '.token // ""'
+}
+
 api() { # api <token> <method> <path> [json-body]
   local token="$1" method="$2" path="$3" body="${4:-}"
   if [ -n "$body" ]; then
@@ -3465,13 +3478,23 @@ cek "rak CK + cabang berdampingan: rak_lokasi SP95 = 2 (CK & store)" "V == 1" \
 echo "== 96. Daftar / onboarding / undangan / hapus akun =="
 COID=$(api "$OWNER" GET /auth/me | jq -r '.company.id')
 PUSAT96=$(api "$OWNER" GET /cabang | jq -r '[.[]|select(.tipe=="store")][0].id')
-# 1. Daftar akun baru → tanpa perusahaan
+# 1. Daftar akun baru → respons NETRAL (tanpa sesi), kirim tautan verifikasi
 REG1=$(api "" POST /auth/register '{"nama":"Uji Daftar 96","email":"ujidaftar96@example.com","password":"Rahasia123"}')
-TOK1=$(echo "$REG1" | jq -r .token)
-cek "daftar: dapat token" "V == 1" "$(echo "$REG1" | jq '((.token|length)>0)|if . then 1 else 0 end')"
-cek "daftar: belum punya perusahaan (company null)" "V == 1" "$(echo "$REG1" | jq '(.company==null)|if . then 1 else 0 end')"
-# login user tanpa perusahaan TIDAK 403 (dapat sesi company null)
-cek "login tanpa perusahaan → 200" "V == 200" \
+cek "daftar: respons netral (ok true, tanpa token/sesi)" "V == 1" \
+  "$(echo "$REG1" | jq '((.ok==true) and (.token==null))|if . then 1 else 0 end')"
+cek "daftar: sertakan tautan verifikasi (dev, email belum diatur)" "V == 1" \
+  "$(echo "$REG1" | jq '((.dev_verify_url|length)>0)|if . then 1 else 0 end')"
+# login SEBELUM verifikasi email → 403 (diblokir sampai email diverifikasi)
+cek "login sebelum verifikasi email → 403" "V == 403" \
+  "$(status_code_body "" POST /auth/login '{"email":"ujidaftar96@example.com","password":"Rahasia123"}')"
+# verifikasi email (klik tautan) → dapat sesi (auto-login), company null
+VT1=$(echo "$REG1" | jq -r '.dev_verify_url' | sed 's/.*token=//')
+V1=$(api "" POST /auth/verify-email "{\"token\":\"$VT1\"}")
+TOK1=$(echo "$V1" | jq -r .token)
+cek "verifikasi email: dapat token sesi" "V == 1" "$(echo "$V1" | jq '((.token|length)>0)|if . then 1 else 0 end')"
+cek "verifikasi email: belum punya perusahaan (company null)" "V == 1" "$(echo "$V1" | jq '(.company==null)|if . then 1 else 0 end')"
+# login SESUDAH verifikasi → 200 (dapat sesi company null → diarahkan onboarding)
+cek "login sesudah verifikasi → 200" "V == 200" \
   "$(status_code_body "" POST /auth/login '{"email":"ujidaftar96@example.com","password":"Rahasia123"}')"
 # onboarding status: belum punya perusahaan, tak ada undangan
 ST1=$(api "$TOK1" GET /onboarding/status)
@@ -3484,12 +3507,15 @@ cek "buat perusahaan: company terisi" "V == 1" "$(echo "$BP1" | jq '((.company.i
 # 3. Daftar validasi + duplikat
 cek "daftar password < 8 → 400" "V == 400" \
   "$(status_code_body "" POST /auth/register '{"nama":"X","email":"pendek96@example.com","password":"123"}')"
-cek "daftar email sudah ada → 409" "V == 409" \
+# Anti-enumerasi TOTAL: email sudah terdaftar → 200 NETRAL (bukan 409), respons
+# identik dgn email baru & TANPA tautan verifikasi untuk email milik akun lain.
+cek "daftar email sudah ada → 200 netral (bukan 409)" "V == 200" \
   "$(status_code_body "" POST /auth/register "{\"nama\":\"X\",\"email\":\"$OWNER_EMAIL\",\"password\":\"Rahasia123\"}")"
-# Anti-enumerasi: pesan duplikat GENERIK — tidak mengulang alamat email pemanggil.
 REGDUP96=$(api "" POST /auth/register "{\"nama\":\"X\",\"email\":\"$OWNER_EMAIL\",\"password\":\"Rahasia123\"}")
-cek "daftar duplikat: pesan generik (tak bocorkan alamat email)" "V == 1" \
-  "$(echo "$REGDUP96" | jq --arg e "$OWNER_EMAIL" '(((.error//"")|ascii_downcase|contains($e|ascii_downcase))|not)|if . then 1 else 0 end')"
+cek "daftar duplikat: netral (ok true, tak bocorkan alamat email)" "V == 1" \
+  "$(echo "$REGDUP96" | jq --arg e "$OWNER_EMAIL" '((.ok==true) and ((((.message//"")+(.error//""))|ascii_downcase|contains($e|ascii_downcase))|not))|if . then 1 else 0 end')"
+cek "daftar duplikat: TANPA tautan verifikasi (email milik akun lain)" "V == 1" \
+  "$(echo "$REGDUP96" | jq '(.dev_verify_url==null)|if . then 1 else 0 end')"
 # 4. Undang (menunggu diundang) → daftar → auto-join
 INV=$(api "$OWNER" POST /karyawan/undang "{\"email\":\"undangan96@example.com\",\"role\":\"cashier\",\"branch_id\":\"$PUSAT96\"}")
 cek "undang: dibuat (ada id)" "V == 1" "$(echo "$INV" | jq '((.id|length)>0)|if . then 1 else 0 end')"
@@ -3498,23 +3524,29 @@ cek "undang duplikat → 409" "V == 409" \
 cek "daftar undangan memuat email" "V == 1" \
   "$(api "$OWNER" GET /karyawan/undangan | jq '[.[]|select(.email=="undangan96@example.com")]|length')"
 REG2=$(api "" POST /auth/register '{"nama":"Undangan 96","email":"undangan96@example.com","password":"Rahasia123"}')
-cek "daftar via undangan: auto-join role cashier" "V == 1" "$(echo "$REG2" | jq '(.user.role=="cashier")|if . then 1 else 0 end')"
-cek "daftar via undangan: company = perusahaan OWNER" "V == 1" \
-  "$(echo "$REG2" | jq --arg c "$COID" '(.company.id==$c)|if . then 1 else 0 end')"
-cek "undangan diterima → hilang dari pending" "V == 0" \
+# auto-join terjadi saat DAFTAR → undangan langsung hilang dari pending
+cek "undangan diterima saat daftar → hilang dari pending" "V == 0" \
   "$(api "$OWNER" GET /karyawan/undangan | jq '[.[]|select(.email=="undangan96@example.com")]|length')"
+# verifikasi email → sesi memuat keanggotaan hasil auto-join (role cashier)
+VT2=$(echo "$REG2" | jq -r '.dev_verify_url' | sed 's/.*token=//')
+V2=$(api "" POST /auth/verify-email "{\"token\":\"$VT2\"}")
+cek "verifikasi via undangan: sesi role cashier" "V == 1" "$(echo "$V2" | jq '(.user.role=="cashier")|if . then 1 else 0 end')"
+cek "verifikasi via undangan: company = perusahaan OWNER" "V == 1" \
+  "$(echo "$V2" | jq --arg c "$COID" '(.company.id==$c)|if . then 1 else 0 end')"
 cek "undang email yang sudah anggota → 409" "V == 409" \
   "$(status_code_body "$OWNER" POST /karyawan/undang "{\"email\":\"undangan96@example.com\",\"role\":\"cashier\",\"branch_id\":\"$PUSAT96\"}")"
 # 5. Hapus akun (soft) → login gagal → email bebas dipakai ulang
-REG3=$(api "" POST /auth/register '{"nama":"Hapus 96","email":"hapus96@example.com","password":"Rahasia123"}')
-TOK3=$(echo "$REG3" | jq -r .token)
+TOK3=$(daftar_verif "hapus96@example.com" "Rahasia123" "Hapus 96")
 cek "hapus akun (tanpa perusahaan) → ok" "V == 1" \
   "$(api "$TOK3" DELETE /onboarding/akun '{"password":"Rahasia123"}' | jq '(.ok==true)|if . then 1 else 0 end')"
 cek "login setelah hapus akun → 401" "V == 401" \
   "$(status_code_body "" POST /auth/login '{"email":"hapus96@example.com","password":"Rahasia123"}')"
+# daftar ulang email yg tadi dihapus → boleh (email tombstone dibebaskan) → tautan verifikasi baru
 REG3B=$(api "" POST /auth/register '{"nama":"Hapus96 Lagi","email":"hapus96@example.com","password":"Rahasia123"}')
-TOK3B=$(echo "$REG3B" | jq -r .token)
-cek "daftar ulang email yang dihapus → berhasil" "V == 1" "$(echo "$REG3B" | jq '((.token|length)>0)|if . then 1 else 0 end')"
+cek "daftar ulang email yang dihapus → berhasil (tautan verifikasi baru)" "V == 1" \
+  "$(echo "$REG3B" | jq '((.ok==true) and ((.dev_verify_url|length)>0))|if . then 1 else 0 end')"
+VT3B=$(echo "$REG3B" | jq -r '.dev_verify_url' | sed 's/.*token=//')
+TOK3B=$(api "" POST /auth/verify-email "{\"token\":\"$VT3B\"}" | jq -r .token)
 cek "hapus akun password salah → 401" "V == 401" \
   "$(status_code_body "$TOK3B" DELETE /onboarding/akun '{"password":"salahbanget"}')"
 # 6. Owner terakhir tak boleh hapus akun
@@ -3524,7 +3556,8 @@ cek "hapus akun owner terakhir → 400" "V == 400" \
 echo "== 97. Lupa/reset password + pengaturan SMTP =="
 # Reset password diuji SAAT email belum dikonfigurasi → forgot mengembalikan
 # tautan reset langsung (dev), jadi tokennya bisa dipakai.
-api "" POST /auth/register '{"nama":"Reset Uji 97","email":"reset97@example.com","password":"Lama12345"}' > /dev/null
+# daftar + verifikasi email dulu (login setelah reset butuh email terverifikasi)
+daftar_verif "reset97@example.com" "Lama12345" "Reset Uji 97" > /dev/null
 FP=$(api "" POST /auth/forgot-password '{"email":"reset97@example.com"}')
 cek "forgot: ok true" "V == 1" "$(echo "$FP" | jq '(.ok==true)|if . then 1 else 0 end')"
 cek "forgot: dev_reset_url ada (email belum diatur)" "V == 1" "$(echo "$FP" | jq '((.dev_reset_url|length)>0)|if . then 1 else 0 end')"
@@ -3560,6 +3593,9 @@ cek "test-email owner (bukan super admin) → 403" "V == 403" \
   "$(status_code_body "$OWNER" POST /admin/sistem/smtp/test-email '{"to":"a@b.com"}')"
 cek "test-email tujuan tak valid → 400 (validasi)" "V == 400" \
   "$(status_code_body "$SA" POST /admin/sistem/smtp/test-email '{"to":"bukan-email"}')"
+# Kosongkan SMTP lagi (host kosong → smtpLengkap=false) supaya bagian berikutnya
+# yang mendaftar/memverifikasi email kembali memakai mode dev (dev_verify_url).
+api "$SA" PUT /admin/sistem/smtp '{"host":""}' > /dev/null
 
 echo "== 98. Pantau operasional cabang + detail shift + jam operasional =="
 # Cabang store pertama (Pusat seed) + satu shift yang sudah ditutup (dari §36).
@@ -3743,8 +3779,7 @@ cek "sync: faktur_id UUID valid → lolos validasi, dispatch (404 dari handler)"
 echo "== 103. Isolasi lintas-perusahaan: edit kredensial akun multi-perusahaan =="
 # U daftar (tanpa perusahaan) → buat perusahaan sendiri (B) → diundang & terima di
 # Basooopa (A) sebagai kasir → jadi anggota DUA perusahaan (identitas users global).
-REGU103=$(api "" POST /auth/register '{"nama":"Dobel 103","email":"dua103@example.com","password":"Dobel10345"}')
-TOKU103=$(echo "$REGU103" | jq -r .token)
+TOKU103=$(daftar_verif "dua103@example.com" "Dobel10345" "Dobel 103")
 api "$TOKU103" POST /onboarding/perusahaan '{"nama":"Warung Dua 103"}' > /dev/null
 INV103=$(api "$OWNER" POST /karyawan/undang "{\"email\":\"dua103@example.com\",\"role\":\"cashier\",\"branch_id\":\"$PUSAT96\"}" | jq -r .id)
 api "$TOKU103" POST "/onboarding/undangan/$INV103/terima" > /dev/null
@@ -3836,6 +3871,42 @@ cek "token sebelum-ganti → 401 setelah ganti password sendiri" "V == 401" \
   "$(status_code "$NEW105" GET /auth/me)"
 cek "token re-issue valid (GET /auth/me → 200)" "V == 200" \
   "$(status_code "$REISS105" GET /auth/me)"
+
+echo "== 106. Verifikasi email wajib saat daftar (anti-enumerasi + blokir login) =="
+# (email sudah dikosongkan lagi di akhir §97 → mode dev: dev_verify_url tersedia)
+# (a) Daftar email BARU → respons netral + tautan verifikasi; belum bisa login.
+R106=$(api "" POST /auth/register '{"nama":"Verif 106","email":"verif106@example.com","password":"Verif10634"}')
+cek "daftar baru: ok true tanpa sesi" "V == 1" \
+  "$(echo "$R106" | jq '((.ok==true) and (.token==null))|if . then 1 else 0 end')"
+cek "daftar baru: ada tautan verifikasi (dev)" "V == 1" \
+  "$(echo "$R106" | jq '((.dev_verify_url|length)>0)|if . then 1 else 0 end')"
+cek "login sebelum verifikasi → 403" "V == 403" \
+  "$(status_code_body "" POST /auth/login '{"email":"verif106@example.com","password":"Verif10634"}')"
+# (b) Anti-enumerasi: daftar email yang SUDAH terdaftar → 200 netral, tanpa tautan.
+DUP106=$(api "" POST /auth/register "{\"nama\":\"X\",\"email\":\"$KASIR_EMAIL\",\"password\":\"Verif10634\"}")
+cek "daftar email terdaftar → 200 netral (bukan 409)" "V == 200" \
+  "$(status_code_body "" POST /auth/register "{\"nama\":\"X\",\"email\":\"$KASIR_EMAIL\",\"password\":\"Verif10634\"}")"
+cek "daftar email terdaftar → ok true & TANPA tautan (tak bocorkan keberadaan)" "V == 1" \
+  "$(echo "$DUP106" | jq '((.ok==true) and (.dev_verify_url==null))|if . then 1 else 0 end')"
+# (c) Verifikasi token → sesi; login sesudahnya → 200.
+VT106=$(echo "$R106" | jq -r '.dev_verify_url' | sed 's/.*token=//')
+V106=$(api "" POST /auth/verify-email "{\"token\":\"$VT106\"}")
+cek "verifikasi email: dapat sesi (token)" "V == 1" "$(echo "$V106" | jq '((.token|length)>0)|if . then 1 else 0 end')"
+cek "login sesudah verifikasi → 200" "V == 200" \
+  "$(status_code_body "" POST /auth/login '{"email":"verif106@example.com","password":"Verif10634"}')"
+# (d) Token bekas → 400; token ngawur → 400.
+cek "verifikasi token bekas → 400" "V == 400" \
+  "$(status_code_body "" POST /auth/verify-email "{\"token\":\"$VT106\"}")"
+cek "verifikasi token ngawur → 400" "V == 400" \
+  "$(status_code_body "" POST /auth/verify-email '{"token":"tokenngawur106"}')"
+# (e) Kirim ulang verifikasi: selalu netral. Akun belum-verif → tautan baru;
+#     email tak dikenal → 200 tanpa tautan.
+api "" POST /auth/register '{"nama":"Verif106B","email":"verif106b@example.com","password":"Verif10634"}' > /dev/null
+RESEND106=$(api "" POST /auth/resend-verification '{"email":"verif106b@example.com"}')
+cek "kirim ulang (akun belum verif) → tautan baru" "V == 1" \
+  "$(echo "$RESEND106" | jq '((.ok==true) and ((.dev_verify_url|length)>0))|if . then 1 else 0 end')"
+cek "kirim ulang (email tak dikenal) → 200 tanpa tautan" "V == 1" \
+  "$(api "" POST /auth/resend-verification '{"email":"tidakada106@example.com"}' | jq '((.ok==true) and (.dev_verify_url==null))|if . then 1 else 0 end')"
 
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="

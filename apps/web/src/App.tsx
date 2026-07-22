@@ -1,66 +1,83 @@
+import { lazy, Suspense } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { Layout } from "./components/Layout";
+import { Spinner } from "./components/ui";
 import { useAuth } from "./context/AuthContext";
+import { BranchProvider } from "./context/BranchContext";
+import { PrinterProvider } from "./context/PrinterContext";
+// Halaman publik & auth = jalur kritis / kecil → tetap eager (tanpa spinner).
 import { LandingPage } from "./pages/publik/LandingPage";
 import { PrivasiPage } from "./pages/publik/PrivasiPage";
 import { SyaratPage } from "./pages/publik/SyaratPage";
 import { KontakPage } from "./pages/publik/KontakPage";
 import { BantuanPage } from "./pages/publik/BantuanPage";
-import { BranchProvider } from "./context/BranchContext";
-import { PrinterProvider } from "./context/PrinterContext";
-import { PrinterPage } from "./pages/pengaturan/PrinterPage";
-import { AbsenPage } from "./pages/absen/AbsenPage";
-import { ProfilPage } from "./pages/profil/ProfilPage";
-import { BahanPage } from "./pages/bahan/BahanPage";
-import { TambahBahanBakuPage } from "./pages/bahan/TambahBahanBakuPage";
-import { UbahBahanBakuPage } from "./pages/bahan/UbahBahanBakuPage";
-import { KasirPage } from "./pages/kasir/KasirPage";
-import { RiwayatPage } from "./pages/kasir/RiwayatPage";
-import { ShiftPage } from "./pages/kasir/ShiftPage";
-import { LaporanPage } from "./pages/laporan/LaporanPage";
-import { LaporanMenuLarisPage } from "./pages/laporan/LaporanMenuLarisPage";
-import { LaporanPembelianPage } from "./pages/laporan/LaporanPembelianPage";
-import { DashboardPage } from "./pages/DashboardPage";
 import { LoginPage } from "./pages/LoginPage";
 import { SignupPage } from "./pages/SignupPage";
 import { OnboardingPage } from "./pages/OnboardingPage";
 import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
 import { ResetPasswordPage } from "./pages/ResetPasswordPage";
-import { SmtpPage } from "./pages/superadmin/SmtpPage";
-import { OperasionalPage } from "./pages/operasional/OperasionalPage";
-import { TimBerandaPage } from "./pages/TimBerandaPage";
-import { MemberPage } from "./pages/member/MemberPage";
-import { LihatMenuPage } from "./pages/menu/LihatMenuPage";
-import { MenuFormPage } from "./pages/menu/MenuFormPage";
-import { MenuListPage } from "./pages/menu/MenuListPage";
-import { FakturFormPage } from "./pages/produksi/FakturFormPage";
-import { PembelianPage } from "./pages/produksi/PembelianPage";
-import { PenerimaanPage } from "./pages/produksi/PenerimaanPage";
-import { ProduksiPage } from "./pages/produksi/ProduksiPage";
-import { RekomendasiBeliPage } from "./pages/produksi/RekomendasiBeliPage";
-import { TahapPage } from "./pages/produksi/TahapPage";
-import { ResepPage } from "./pages/resep/ResepPage";
-import { CabangPage } from "./pages/pengaturan/CabangPage";
-import { KaryawanPage } from "./pages/pengaturan/KaryawanPage";
-import { MejaPage } from "./pages/pengaturan/MejaPage";
-import { SatuanPage } from "./pages/pengaturan/SatuanPage";
-import { PenyimpananPage } from "./pages/pengaturan/PenyimpananPage";
-import { PerusahaanPage } from "./pages/pengaturan/PerusahaanPage";
-import { SupplierPage } from "./pages/pengaturan/SupplierPage";
-import { KartuSupplierPage } from "./pages/pengaturan/KartuSupplierPage";
-import { KartuStokPage } from "./pages/stok/KartuStokPage";
-import { PermintaanStokPage } from "./pages/stok/PermintaanStokPage";
-import { StokAwalPage } from "./pages/stok/StokAwalPage";
-import { TambahStokDariMenuPage } from "./pages/stok/TambahStokDariMenuPage";
-import { OpnamePage } from "./pages/stok/OpnamePage";
-import { OpnamePerlengkapanPage } from "./pages/stok/OpnamePerlengkapanPage";
-import { OpnameRiwayatPage } from "./pages/stok/OpnameRiwayatPage";
-import { StokPage } from "./pages/stok/StokPage";
-import { BeliPerlengkapanPage } from "./pages/perlengkapan/BeliPerlengkapanPage";
-import { PerlengkapanPage } from "./pages/perlengkapan/PerlengkapanPage";
-import { SistemPage } from "./pages/superadmin/SistemPage";
-import { TenantsPage } from "./pages/superadmin/TenantsPage";
-import { TempatSampahPage } from "./pages/TempatSampahPage";
+import { VerifikasiEmailPage } from "./pages/VerifikasiEmailPage";
+
+// Halaman aplikasi (setelah login) di-LAZY-load per rute → tiap halaman jadi
+// chunk terpisah, sehingga bundle awal jauh lebih kecil (library berat seperti
+// Leaflet/peta, pemindai QR, dan parser CSV ikut dipecah ke chunk halamannya).
+const PrinterPage = lazy(() => import("./pages/pengaturan/PrinterPage").then((m) => ({ default: m.PrinterPage })));
+const AbsenPage = lazy(() => import("./pages/absen/AbsenPage").then((m) => ({ default: m.AbsenPage })));
+const ProfilPage = lazy(() => import("./pages/profil/ProfilPage").then((m) => ({ default: m.ProfilPage })));
+const BahanPage = lazy(() => import("./pages/bahan/BahanPage").then((m) => ({ default: m.BahanPage })));
+const TambahBahanBakuPage = lazy(() => import("./pages/bahan/TambahBahanBakuPage").then((m) => ({ default: m.TambahBahanBakuPage })));
+const UbahBahanBakuPage = lazy(() => import("./pages/bahan/UbahBahanBakuPage").then((m) => ({ default: m.UbahBahanBakuPage })));
+const KasirPage = lazy(() => import("./pages/kasir/KasirPage").then((m) => ({ default: m.KasirPage })));
+const RiwayatPage = lazy(() => import("./pages/kasir/RiwayatPage").then((m) => ({ default: m.RiwayatPage })));
+const ShiftPage = lazy(() => import("./pages/kasir/ShiftPage").then((m) => ({ default: m.ShiftPage })));
+const LaporanPage = lazy(() => import("./pages/laporan/LaporanPage").then((m) => ({ default: m.LaporanPage })));
+const LaporanMenuLarisPage = lazy(() => import("./pages/laporan/LaporanMenuLarisPage").then((m) => ({ default: m.LaporanMenuLarisPage })));
+const LaporanPembelianPage = lazy(() => import("./pages/laporan/LaporanPembelianPage").then((m) => ({ default: m.LaporanPembelianPage })));
+const DashboardPage = lazy(() => import("./pages/DashboardPage").then((m) => ({ default: m.DashboardPage })));
+const SmtpPage = lazy(() => import("./pages/superadmin/SmtpPage").then((m) => ({ default: m.SmtpPage })));
+const OperasionalPage = lazy(() => import("./pages/operasional/OperasionalPage").then((m) => ({ default: m.OperasionalPage })));
+const TimBerandaPage = lazy(() => import("./pages/TimBerandaPage").then((m) => ({ default: m.TimBerandaPage })));
+const MemberPage = lazy(() => import("./pages/member/MemberPage").then((m) => ({ default: m.MemberPage })));
+const LihatMenuPage = lazy(() => import("./pages/menu/LihatMenuPage").then((m) => ({ default: m.LihatMenuPage })));
+const MenuFormPage = lazy(() => import("./pages/menu/MenuFormPage").then((m) => ({ default: m.MenuFormPage })));
+const MenuListPage = lazy(() => import("./pages/menu/MenuListPage").then((m) => ({ default: m.MenuListPage })));
+const FakturFormPage = lazy(() => import("./pages/produksi/FakturFormPage").then((m) => ({ default: m.FakturFormPage })));
+const PembelianPage = lazy(() => import("./pages/produksi/PembelianPage").then((m) => ({ default: m.PembelianPage })));
+const PenerimaanPage = lazy(() => import("./pages/produksi/PenerimaanPage").then((m) => ({ default: m.PenerimaanPage })));
+const ProduksiPage = lazy(() => import("./pages/produksi/ProduksiPage").then((m) => ({ default: m.ProduksiPage })));
+const RekomendasiBeliPage = lazy(() => import("./pages/produksi/RekomendasiBeliPage").then((m) => ({ default: m.RekomendasiBeliPage })));
+const TahapPage = lazy(() => import("./pages/produksi/TahapPage").then((m) => ({ default: m.TahapPage })));
+const ResepPage = lazy(() => import("./pages/resep/ResepPage").then((m) => ({ default: m.ResepPage })));
+const CabangPage = lazy(() => import("./pages/pengaturan/CabangPage").then((m) => ({ default: m.CabangPage })));
+const KaryawanPage = lazy(() => import("./pages/pengaturan/KaryawanPage").then((m) => ({ default: m.KaryawanPage })));
+const MejaPage = lazy(() => import("./pages/pengaturan/MejaPage").then((m) => ({ default: m.MejaPage })));
+const SatuanPage = lazy(() => import("./pages/pengaturan/SatuanPage").then((m) => ({ default: m.SatuanPage })));
+const PenyimpananPage = lazy(() => import("./pages/pengaturan/PenyimpananPage").then((m) => ({ default: m.PenyimpananPage })));
+const PerusahaanPage = lazy(() => import("./pages/pengaturan/PerusahaanPage").then((m) => ({ default: m.PerusahaanPage })));
+const SupplierPage = lazy(() => import("./pages/pengaturan/SupplierPage").then((m) => ({ default: m.SupplierPage })));
+const KartuSupplierPage = lazy(() => import("./pages/pengaturan/KartuSupplierPage").then((m) => ({ default: m.KartuSupplierPage })));
+const KartuStokPage = lazy(() => import("./pages/stok/KartuStokPage").then((m) => ({ default: m.KartuStokPage })));
+const PermintaanStokPage = lazy(() => import("./pages/stok/PermintaanStokPage").then((m) => ({ default: m.PermintaanStokPage })));
+const StokAwalPage = lazy(() => import("./pages/stok/StokAwalPage").then((m) => ({ default: m.StokAwalPage })));
+const TambahStokDariMenuPage = lazy(() => import("./pages/stok/TambahStokDariMenuPage").then((m) => ({ default: m.TambahStokDariMenuPage })));
+const OpnamePage = lazy(() => import("./pages/stok/OpnamePage").then((m) => ({ default: m.OpnamePage })));
+const OpnamePerlengkapanPage = lazy(() => import("./pages/stok/OpnamePerlengkapanPage").then((m) => ({ default: m.OpnamePerlengkapanPage })));
+const OpnameRiwayatPage = lazy(() => import("./pages/stok/OpnameRiwayatPage").then((m) => ({ default: m.OpnameRiwayatPage })));
+const StokPage = lazy(() => import("./pages/stok/StokPage").then((m) => ({ default: m.StokPage })));
+const BeliPerlengkapanPage = lazy(() => import("./pages/perlengkapan/BeliPerlengkapanPage").then((m) => ({ default: m.BeliPerlengkapanPage })));
+const PerlengkapanPage = lazy(() => import("./pages/perlengkapan/PerlengkapanPage").then((m) => ({ default: m.PerlengkapanPage })));
+const SistemPage = lazy(() => import("./pages/superadmin/SistemPage").then((m) => ({ default: m.SistemPage })));
+const TenantsPage = lazy(() => import("./pages/superadmin/TenantsPage").then((m) => ({ default: m.TenantsPage })));
+const TempatSampahPage = lazy(() => import("./pages/TempatSampahPage").then((m) => ({ default: m.TempatSampahPage })));
+
+/** Fallback saat chunk halaman sedang dimuat (lazy). */
+function PageLoading() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-stone-50">
+      <Spinner />
+    </div>
+  );
+}
 
 export default function App() {
   const { auth } = useAuth();
@@ -73,6 +90,8 @@ export default function App() {
   if (pathname === "/syarat") return <SyaratPage />;
   if (pathname === "/kontak") return <KontakPage />;
   if (pathname === "/bantuan") return <BantuanPage />;
+  // Verifikasi email dari tautan — layar penuh, jalan baik saat login maupun tidak.
+  if (pathname === "/verifikasi-email") return <VerifikasiEmailPage />;
   // Root domain saat belum login → landing/marketing (situs utama).
   if (!auth && pathname === "/") return <LandingPage />;
 
@@ -116,6 +135,8 @@ export default function App() {
   return (
     <BranchProvider>
       <PrinterProvider>
+      {/* Satu batas Suspense: menampilkan spinner saat chunk halaman (lazy) dimuat. */}
+      <Suspense fallback={<PageLoading />}>
       <Routes>
         <Route path="/login" element={<Navigate to={beranda} replace />} />
         {/* Opname = layar penuh tanpa sidebar (dipakai langsung di device) */}
@@ -210,6 +231,7 @@ export default function App() {
           <Route path="*" element={<Navigate to={beranda} replace />} />
         </Route>
       </Routes>
+      </Suspense>
       </PrinterProvider>
     </BranchProvider>
   );

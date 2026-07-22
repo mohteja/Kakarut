@@ -5,25 +5,44 @@ import { Logo } from "../components/Logo";
 import { useAuth } from "../context/AuthContext";
 
 export function LoginPage() {
-  const { login, masukTamu } = useAuth();
+  const { login, masukTamu, kirimUlangVerifikasi } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [tamuLoading, setTamuLoading] = useState<null | "owner" | "kasir">(null);
+  // Bila login gagal karena email belum diverifikasi → tawarkan kirim ulang.
+  const [belumVerif, setBelumVerif] = useState(false);
+  const [verifKirim, setVerifKirim] = useState<"idle" | "loading" | "sent">("idle");
+  const [verifDevUrl, setVerifDevUrl] = useState<string | null>(null);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
+    setBelumVerif(false);
+    setVerifKirim("idle");
     setLoading(true);
     try {
       const auth = await login(email, password);
       navigate(auth.user.is_super_admin ? "/superadmin" : "/kasir", { replace: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Gagal login");
+      const msg = err instanceof Error ? err.message : "Gagal login";
+      setError(msg);
+      setBelumVerif(msg.toLowerCase().includes("belum diverifikasi"));
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function kirimUlang() {
+    setVerifKirim("loading");
+    try {
+      const res = await kirimUlangVerifikasi(email);
+      setVerifDevUrl(res.dev_verify_url ?? null);
+      setVerifKirim("sent");
+    } catch {
+      setVerifKirim("idle");
     }
   }
 
@@ -86,6 +105,29 @@ export function LoginPage() {
             />
           </div>
           {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
+          {belumVerif && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              {verifKirim === "sent" ? (
+                <>
+                  <div>Tautan verifikasi baru sudah dikirim (bila email valid). Cek email Anda.</div>
+                  {verifDevUrl && (
+                    <a href={verifDevUrl} className="mt-1 block break-all font-mono underline">
+                      {verifDevUrl}
+                    </a>
+                  )}
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={kirimUlang}
+                  disabled={verifKirim === "loading" || !email}
+                  className="font-semibold underline disabled:opacity-60"
+                >
+                  {verifKirim === "loading" ? "Mengirim…" : "Kirim ulang tautan verifikasi"}
+                </button>
+              )}
+            </div>
+          )}
           <button type="submit" disabled={loading} className={`${btnPrimary} w-full`}>
             {loading ? "Masuk…" : "Masuk"}
           </button>

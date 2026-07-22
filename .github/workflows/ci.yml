@@ -1,0 +1,87 @@
+name: CI
+
+# Jaring pengaman tiap PR (dan push ke production): typecheck + unit test +
+# build web, lalu verifikasi API end-to-end (scripts/verify-api.sh) terhadap
+# database Postgres segar. Menangkap regresi sebelum merge.
+on:
+  pull_request:
+  push:
+    branches: [production]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Typecheck + unit test + build web
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Typecheck (shared/server/web)
+        run: npm run typecheck
+      - name: Unit test (server)
+        run: npm test
+      - name: Build web
+        run: npm run build -w @kakarut/web
+
+  verify-api:
+    name: Verify API end-to-end (DB segar)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: kakarut
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/kakarut
+      JWT_SECRET: ci-secret-bukan-untuk-produksi
+      PORT: "3000"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # Build SPA dulu: server mengambil build-id dari apps/web/dist saat boot,
+      # dan verify-api §61 memverifikasi build-id di /api/health + header.
+      - name: Build web (untuk build-id + uji SPA produksi)
+        run: npm run build -w @kakarut/web
+      - name: Jalankan server (auto-migrate) + seed + verify-api
+        run: |
+          set -euo pipefail
+          # Server boot menjalankan migrasi otomatis (AUTO_MIGRATE default aktif).
+          npm run start -w @kakarut/server > /tmp/server.log 2>&1 &
+          echo "$!" > /tmp/server.pid
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:3000/api/health >/dev/null 2>&1; then
+              echo "Server sehat setelah ${i}s"; break
+            fi
+            sleep 1
+          done
+          curl -sf http://localhost:3000/api/health
+          npm run seed
+          bash scripts/verify-api.sh
+      - name: Log server bila gagal
+        if: failure()
+        run: tail -n 200 /tmp/server.log || true

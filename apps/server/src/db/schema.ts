@@ -180,6 +180,12 @@ export const users = pgTable("users", {
    */
   tokenVersion: integer("token_version").notNull().default(0),
   /**
+   * Verifikasi email: terisi = email sudah dikonfirmasi (klik tautan). NULL =
+   * belum → login diblokir (kecuali super admin). Pendaftaran mandiri dibuat
+   * NULL; akun yang dibuat admin/seed/undangan langsung terisi (pra-verifikasi).
+   */
+  emailVerifiedAt: timestamp("email_verified_at", { withTimezone: true }),
+  /**
    * Hapus akun sendiri = SOFT delete (tombstone): terisi = akun dihapus, tak
    * bisa login. Riwayat (transaksi, absensi, log faktur) tetap utuh karena
    * baris user tetap ada. Saat dihapus, email di-rename agar alamat bebas
@@ -303,6 +309,22 @@ export const passwordResetTokens = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("password_reset_user_idx").on(t.userId)],
+);
+
+/** Token verifikasi email (hash, sekali pakai) — pola sama dgn reset password. */
+export const emailVerificationTokens = pgTable(
+  "email_verification_tokens",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash").notNull().unique(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("email_verification_user_idx").on(t.userId)],
 );
 
 /** Master supplier / sumber pengadaan (per perusahaan). */
