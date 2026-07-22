@@ -376,24 +376,35 @@ function TahapForm({
           <div className="space-y-2 rounded-lg border border-stone-200 p-3">
             <div className="text-sm font-semibold text-stone-700">
               {tipe !== "beli"
-                ? "📦 Disimpan di Central Kitchen — pilih tempat"
+                ? cabangIniCk
+                  ? "📦 Disimpan di Central Kitchen — pilih tempat"
+                  : "📦 Disimpan di cabang ini — pilih tempat"
                 : isWorkOrder
                   ? "📦 Tiba di CK — semua barang disimpan di CK dulu"
                   : "🚚 Dikirim / disimpan ke mana?"}
             </div>
             {tipe !== "beli" ? (
-              /* PRODUKSI SELESAI: belum ada pengiriman — hasil disimpan dulu di CK
-                 (bisa jadi stok CK). Tak ada realisasi biaya (bahan sudah dibeli di
-                 Beli Bahan Baku). User cukup PILIH tempat simpan di CK. */
+              /* PRODUKSI SELESAI: hasil disimpan di cabang faktur (CK maupun toko
+                 kitchen). Tak ada realisasi biaya (bahan sudah dibeli di Beli Bahan
+                 Baku). User cukup PILIH tempat simpan. */
               <>
                 <div className="rounded bg-purple-50 px-2 py-1.5 text-xs text-purple-800">
-                  Hasil produksi <b>langsung masuk stok CK</b> — tanpa konfirmasi lagi (orang CK
-                  yang produksi). Kirim ke cabang lewat <b>🚚 Kirim ke cabang</b> / Permintaan Stok
-                  setelah ini; di cabang barang <b>wajib diterima</b>.
+                  {cabangIniCk ? (
+                    <>
+                      Hasil produksi <b>langsung masuk stok CK</b> — tanpa konfirmasi lagi (orang
+                      CK yang produksi). Kirim ke cabang lewat <b>🚚 Kirim ke cabang</b> /
+                      Permintaan Stok setelah ini; di cabang barang <b>wajib diterima</b>.
+                    </>
+                  ) : (
+                    <>
+                      Hasil produksi <b>langsung masuk stok cabang ini</b> — tanpa konfirmasi &
+                      tanpa lewat CK (kitchen cabang yang produksi).
+                    </>
+                  )}
                 </div>
                 <div>
                   <label className="mb-1 block text-xs font-medium text-stone-500">
-                    Tempat penyimpanan di CK (opsional)
+                    Tempat penyimpanan di {cabangIniCk ? "CK" : "cabang"} (opsional)
                   </label>
                   <select
                     value={tujuanTempat}

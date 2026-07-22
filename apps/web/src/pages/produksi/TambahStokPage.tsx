@@ -15,7 +15,7 @@ import {
   thClass,
 } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
-import { useCabangData } from "../../context/BranchContext";
+import { useBranch, useCabangData } from "../../context/BranchContext";
 import { CabangDataBar } from "../../components/CabangDataBar";
 import { ApiError, api } from "../../lib/api";
 import { formatAngka, formatRupiah, formatTanggalRingkas, formatWaktu } from "../../lib/format";
@@ -254,8 +254,15 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
   const isManajemen = auth?.user.role === "owner" || auth?.user.role === "admin";
   // Faktur per cabang — DARI KANTOR tampil SEMUA cabang (kantor memantau
   // semuanya); di divisi/store lain terkunci ke cabang datanya.
-  const { query: dataQuery, dariKantor } = useCabangData();
+  const { query: dataQuery, dariKantor, id: dataBranchId } = useCabangData();
   const branchQuery = dariKantor ? "?branch_id=all" : dataQuery;
+  // Kitchen di toko: daftar ini berisi faktur produksi CABANG — hasil masuk
+  // stok cabang sendiri, tak ada langkah kirim/terima lewat CK.
+  const { cabang } = useBranch();
+  const produksiDiCabang =
+    tipe === "produksi" &&
+    !dariKantor &&
+    cabang.find((b) => b.id === dataBranchId)?.tipe === "store";
   const [detail, setDetail] = useState<FakturGroup | null>(null);
 
   // Kirim barang bertujuan cabang dari CK (produksi selesai / belanja yang
@@ -477,18 +484,30 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
 
       <div className="mb-4 rounded-lg bg-blue-50 px-4 py-2 text-sm text-blue-800">
         {tipe === "produksi" ? (
-          <>
-            Hasil produksi <b>langsung masuk stok CK</b> saat ditandai <b>✅ Selesai</b> — tak ada
-            konfirmasi lagi (orang CK yang produksi).
-          </>
+          produksiDiCabang ? (
+            <>
+              Hasil produksi <b>langsung masuk stok cabang ini</b> saat ditandai <b>✅ Selesai</b>{" "}
+              — tanpa konfirmasi & tanpa lewat CK (kitchen cabang yang produksi).
+            </>
+          ) : (
+            <>
+              Hasil produksi <b>langsung masuk stok CK</b> saat ditandai <b>✅ Selesai</b> — tak
+              ada konfirmasi lagi (orang CK yang produksi).
+            </>
+          )
         ) : (
           <>
             Belanja <b>langsung masuk stok CK</b> saat ditandai <b>📦 Tiba di CK</b> — tak perlu
             penerimaan (orang CK yang beli).
           </>
         )}{" "}
-        Barang untuk cabang <b>dikirim dulu</b>, lalu <b>wajib diterima di cabang</b>. Ubah tahap
-        lewat tombol <b>➡ Ubah Tahap</b> tiap kartu; bisa sebagian dulu bila barang belum lengkap.
+        {!produksiDiCabang && (
+          <>
+            Barang untuk cabang <b>dikirim dulu</b>, lalu <b>wajib diterima di cabang</b>.{" "}
+          </>
+        )}
+        Ubah tahap lewat tombol <b>➡ Ubah Tahap</b> tiap kartu; bisa sebagian dulu bila barang
+        belum lengkap.
       </div>
 
       <ErrorText error={kirim.error} />
