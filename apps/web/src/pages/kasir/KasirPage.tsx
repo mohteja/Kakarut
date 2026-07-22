@@ -1020,10 +1020,13 @@ export function KasirPage() {
         </div>
       )}
 
-      {/* Gerbang Buka Kasir — bila belum ada shift terbuka, transaksi diblokir
-          (modal tak bisa ditutup). Kasir wajib ABSEN MASUK dulu, lalu buka. */}
+      {/* Gerbang Buka Kasir — bila belum ada shift terbuka, transaksi diblokir.
+          Overlay HANYA menutup area kasir (kanan sidebar), BUKAN sidebar/header:
+          user tetap bisa Absen, SO, kelola shift, atau keluar tanpa buka kasir.
+          Karena itu md:left-56 (lebar sidebar) + z-20 (di bawah header z-30 &
+          drawer z-50 mobile, di atas konten kasir). */}
       {kasirTutup && !struk && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4">
+        <div className="fixed inset-y-0 right-0 left-0 z-20 flex items-center justify-center bg-black/60 p-4 md:left-56">
           <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl">
             <div className="mb-1 text-center text-4xl">🔒</div>
             <h2 className="text-center text-lg font-bold text-stone-800">Kasir Belum Dibuka</h2>
@@ -1084,8 +1087,10 @@ export function KasirPage() {
         </div>
       )}
 
-      {/* Modal pilih meja — muncul lebih dulu tiap memulai transaksi */}
-      {mejaModalOpen && !struk && (
+      {/* Modal pilih meja — muncul lebih dulu tiap memulai transaksi. TIDAK
+          muncul saat kasir belum dibuka (gerbang Buka Kasir yang tampil), supaya
+          sidebar tetap bebas diklik (Absen/SO/keluar tanpa buka kasir). */}
+      {mejaModalOpen && !struk && !kasirTutup && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
           onClick={() => setMejaModalOpen(false)}
