@@ -30,7 +30,16 @@ set base URL ke `https://<host-produksi>` lalu tambahkan path (mis.
 - Middleware `requireAuth` menolak token yang **tidak ada / tidak valid /
   kedaluwarsa** dengan **401**.
 - Payload JWT (tipe `AuthUser`) berisi: `sub` (id user), `email`, `nama`,
-  `is_super_admin`, `company_id`, `role`, `branch_id`.
+  `is_super_admin`, `company_id`, `role`, `branch_id`. Selain itu ada klaim
+  internal **`tv`** (token_version) yang **tidak** perlu dibaca klien.
+- **Invalidasi token saat password berubah (`tv` / token_version):** setiap
+  ganti/reset password (via profil sendiri, reset oleh admin, atau alur
+  `POST /api/auth/reset-password`) menaikkan versi token user, sehingga **SEMUA
+  token yang diterbitkan sebelumnya langsung menjadi `401`** di endpoint mana
+  pun. Klien mobile WAJIB menangani `401` di request apa pun sebagai "sesi tak
+  berlaku" → hapus token tersimpan → arahkan ke login. Endpoint yang mengganti
+  password sendiri **menerbitkan token baru** di responsnya — simpan token baru
+  itu menggantikan yang lama agar sesi tetap hidup tanpa login ulang.
 - **Tidak ada cookie / CSRF** — auth murni via Bearer token. Simpan token di
   secure storage aplikasi.
 
@@ -67,6 +76,17 @@ Handler global (`app.onError`):
 ### Header respons
 Setiap respons API membawa **`X-Kakarut-Build: <buildId>`** (sinyal versi
 frontend). Aman diabaikan oleh klien mobile.
+
+### Pembatasan laju (rate limiting) — **429**
+Endpoint sensitif dibatasi per (IP + email/identitas) untuk mencegah brute-force /
+abuse: **login, register, forgot/reset password, verifikasi email, kirim-ulang
+verifikasi, masuk tamu, dan sinkron antrean (`/sync`)**. Saat kuota jendela habis
+server membalas **`429`** `{ "error": "Terlalu banyak permintaan — coba lagi
+nanti." }` disertai header **`Retry-After: <detik>`**. Klien mobile sebaiknya:
+menampilkan pesan ramah ("coba lagi dalam N detik"), menonaktifkan tombol submit
+selama `Retry-After`, dan **tidak** melakukan retry otomatis agresif. Batas
+dihitung terpusat (di DB) sehingga konsisten di semua instance server dan
+bertahan lintas restart — nilai `Retry-After` akurat & bisa dipercaya.
 
 ### Urutan middleware (dari `app.ts`)
 1. `logger()` (global)
@@ -106,12 +126,16 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 
 ## 3. `/api/auth` — Autentikasi (`modules/auth/routes.ts`)
 
-> Bentuk sesi (dipakai login/register/onboarding): `{ token, user: AuthUser, company: {…} | null, branch: {id,nama} | null }`. **`company` bisa `null`** untuk user yang belum punya perusahaan (dan super-admin) — klien harus menangani: `company == null && !is_super_admin` → arahkan ke **onboarding** (buat perusahaan / terima undangan).
+> Bentuk sesi (dipakai login/verify-email/onboarding): `{ token, user: AuthUser, company: {…} | null, branch: {id,nama} | null }`. **`company` bisa `null`** untuk user yang belum punya perusahaan (dan super-admin) — klien harus menangani: `company == null && !is_super_admin` → arahkan ke **onboarding** (buat perusahaan / terima undangan).
+>
+> **PENTING — `register` TIDAK lagi mengembalikan sesi.** Alur daftar sekarang: `register` (email verifikasi dikirim) → user klik tautan di email → `verify-email` (baru di sini sesi diterbitkan). Lihat detail di bawah.
 
-- `POST /api/auth/login` — [public] — req: `{ email (trim, lowercase), password (min 1) }` — res: sesi (`company` bisa null bila user belum punya perusahaan) — error: **401** email/password salah **atau akun dihapus/nonaktif**. **(CATATAN: tak lagi 403 untuk user tanpa perusahaan — kini login sukses dgn `company: null`.)**
-- `POST /api/auth/register` — [public] — req: `{ nama, email (email valid, lowercase), password (min 8) }` — res: **201** sesi (langsung login; `company` null kecuali email punya undangan pending → auto-join) — error: **409** email sudah terdaftar, **400** validasi
+- `POST /api/auth/login` — [public] — req: `{ email (trim, lowercase), password (min 1) }` — res: sesi (`company` bisa null bila user belum punya perusahaan) — error: **401** email/password salah **atau akun dihapus/nonaktif**; **403** `{ error: "Email belum diverifikasi. …" }` bila email **belum diverifikasi** (dicek SETELAH password benar; super-admin dikecualikan). Klien: tangani `403` → tampilkan layar "verifikasi email" dengan tombol **kirim ulang** (panggil `/resend-verification`). **(CATATAN: tak lagi 403 untuk user tanpa perusahaan — user tanpa perusahaan login sukses dgn `company: null`; 403 di login kini KHUSUS email belum terverifikasi.)**
+- `POST /api/auth/register` — [public] — req: `{ nama, email (email valid, lowercase), password (min 8) }` — res: **200** `{ ok: true, message, dev_verify_url? }` — **TANPA sesi** (tidak auto-login). Respons **selalu netral** (anti-enumerasi akun): baik email baru maupun email yang sudah terdaftar mengembalikan `200` yang sama — **tak ada lagi `409`**. Untuk email baru, tautan verifikasi dikirim via email. `dev_verify_url` HANYA muncul saat email server belum dikonfigurasi & bukan produksi (bantuan setup) — abaikan di produksi. — error: **400** validasi. Setelah ini, arahkan user ke layar "cek email Anda".
+- `POST /api/auth/verify-email` — [public] — req: `{ token }` — res: **sesi** `{ token, user, company, branch }` (auto-login begitu email terverifikasi) — error: **400** token tidak valid/kedaluwarsa/terpakai **atau** akun nonaktif. Token berasal dari tautan email `APP_BASE_URL/verifikasi-email?token=…`. Klien mobile bisa menangkap token ini via deep link lalu memanggil endpoint ini, dan menyimpan sesi yang dikembalikan seperti hasil login.
+- `POST /api/auth/resend-verification` — [public] — req: `{ email }` — res: **200** `{ ok: true, dev_verify_url? }` — SELALU 200 (netral; tak bocorkan status email). Benar-benar mengirim tautan hanya bila akun ADA, aktif, & BELUM terverifikasi. Dibatasi rate limit (429 + `Retry-After`).
 - `POST /api/auth/forgot-password` — [public] — req: `{ email }` — res: **200** `{ ok: true, dev_reset_url? }` — SELALU 200 (tak bocorkan apakah email ada). Bila akun aktif: token reset dibuat + tautan dikirim via email. `dev_reset_url` HANYA muncul saat email server belum dikonfigurasi & bukan produksi (bantuan setup) — abaikan di produksi.
-- `POST /api/auth/reset-password` — [public] — req: `{ token, password (min 8) }` — res: **200** `{ ok }` — error: **400** token tidak valid/kedaluwarsa/terpakai. Token berasal dari tautan email `APP_BASE_URL/reset-password?token=…` (halaman WEB).
+- `POST /api/auth/reset-password` — [public] — req: `{ token, password (min 8) }` — res: **200** `{ ok }` — error: **400** token tidak valid/kedaluwarsa/terpakai. Token berasal dari tautan email `APP_BASE_URL/reset-password?token=…` (halaman WEB). **Efek samping:** menaikkan token_version user → semua token lama user itu jadi **401** (lihat bagian Autentikasi).
 - `GET /api/auth/me` — [any authenticated, incl. super-admin] (`requireAuth` inline) — res: `{ user: AuthUser, company | null }` — error: **401**
 
 ## `/api/onboarding` — Onboarding + lifecycle akun (`modules/onboarding/routes.ts`) — **[butuh login, TIDAK butuh perusahaan]**
@@ -476,9 +500,24 @@ ADA (validasi = aturan endpoint asli), idempoten per `client_ref`.
 - **Definisi DTO lengkap** ada di **Lampiran A** (isi utuh
   `packages/shared/src/types.ts`) dan konstanta (`UserRole`, `PANDUAN_MARKUP`,
   enum) di `packages/shared/src/constants.ts`.
-- **Alur login mobile disarankan:** `POST /api/auth/login` → simpan `token` di
-  secure storage → set header `Authorization: Bearer <token>` di semua request →
-  `GET /api/auth/me` saat buka app untuk validasi sesi (401 = minta login ulang).
+- **Alur daftar mobile disarankan:** `POST /api/auth/register` (balas `200`
+  netral, **tanpa sesi**) → tampilkan layar "cek email Anda" → user buka tautan
+  email (`APP_BASE_URL/verifikasi-email?token=…`, tangkap via **deep link**) →
+  `POST /api/auth/verify-email` `{ token }` → **simpan sesi** yang dikembalikan
+  (sama seperti hasil login). Sediakan tombol **Kirim ulang** →
+  `POST /api/auth/resend-verification` `{ email }`.
+- **Alur login mobile disarankan:** `POST /api/auth/login` → **`403`** = email
+  belum diverifikasi (tampilkan layar verifikasi + tombol kirim ulang); sukses →
+  simpan `token` di secure storage → set header `Authorization: Bearer <token>`
+  di semua request → `GET /api/auth/me` saat buka app untuk validasi sesi.
+- **Tangani `401` secara global:** `401` di endpoint mana pun berarti sesi tak
+  berlaku (token kedaluwarsa **atau** password diubah/di-reset → token_version
+  naik). Reaksi: hapus token tersimpan → arahkan ke login. Bila klien punya alur
+  ganti/reset password yang mengembalikan token baru, **ganti** token tersimpan
+  dengan yang baru itu.
+- **Tangani `429` (rate limit):** pada endpoint auth/sync, `429` disertai header
+  `Retry-After` (detik). Tampilkan "coba lagi dalam N detik" & jeda tombol
+  submit; hindari retry otomatis beruntun.
 
 ---
 
