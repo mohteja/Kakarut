@@ -15,6 +15,7 @@ import {
 import { BahanPicker } from "../../components/BahanPicker";
 import { SatuanSelect } from "../../components/SatuanSelect";
 import { useAuth } from "../../context/AuthContext";
+import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah } from "../../lib/format";
 
@@ -43,6 +44,8 @@ interface PengaturanBatch {
   stokMinToko: string; // ambang menipis di toko
   /** lokasi produksi: "ck" (Central Kitchen) atau "cabang" (kitchen toko) */
   produksiDi: "ck" | "cabang";
+  /** cabang produsen saat "cabang" (kosong = semua cabang store) */
+  produksiBranchIds: string[];
 }
 
 /**
@@ -55,6 +58,9 @@ export function ResepPage() {
   const queryClient = useQueryClient();
   const { auth } = useAuth();
   const bolehUbah = auth?.user.role === "owner" || auth?.user.role === "admin";
+  // daftar cabang toko aktif — pilihan "cabang produsen" saat produksi di cabang
+  const { cabang } = useBranch();
+  const cabangStore = cabang.filter((b) => b.is_active && b.tipe === "store");
 
   const { data: bahan, isLoading } = useQuery({
     queryKey: ["bahan"],
@@ -139,6 +145,7 @@ export function ResepPage() {
             stokMin: String(dipilih.stok_minimum),
             stokMinToko: String(dipilih.stok_minimum_toko ?? 0),
             produksiDi: dipilih.produksi_di ?? "ck",
+            produksiBranchIds: dipilih.produksi_branch_ids ?? [],
           }
         : null,
     );
@@ -180,6 +187,8 @@ export function ResepPage() {
             stok_minimum_toko: Number(atur.stokMinToko) || 0,
             harga_beli: hargaBatch,
             produksi_di: atur.produksiDi,
+            produksi_branch_ids:
+              atur.produksiDi === "cabang" ? atur.produksiBranchIds : [],
           },
         });
       }
@@ -581,6 +590,47 @@ export function ResepPage() {
                               <b>Cabang</b> = diproduksi peran <b>Kitchen</b> di cabang
                               masing-masing; hasil langsung masuk stok cabang itu.
                             </p>
+                            {atur.produksiDi === "cabang" && (
+                              <div className="mt-2 rounded-lg border border-stone-200 p-2">
+                                <div className="mb-1 text-xs font-medium text-stone-500">
+                                  Cabang produsen
+                                </div>
+                                {cabangStore.length === 0 ? (
+                                  <p className="text-xs text-stone-400">
+                                    Belum ada cabang toko aktif.
+                                  </p>
+                                ) : (
+                                  cabangStore.map((b) => (
+                                    <label
+                                      key={b.id}
+                                      className="flex items-center gap-2 py-0.5 text-sm"
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={atur.produksiBranchIds.includes(b.id)}
+                                        disabled={!bolehUbah}
+                                        onChange={(e) =>
+                                          setAtur({
+                                            ...atur,
+                                            produksiBranchIds: e.target.checked
+                                              ? [...atur.produksiBranchIds, b.id]
+                                              : atur.produksiBranchIds.filter(
+                                                  (id) => id !== b.id,
+                                                ),
+                                          })
+                                        }
+                                      />
+                                      {b.nama}
+                                    </label>
+                                  ))
+                                )}
+                                <p className="mt-1 text-xs text-stone-500">
+                                  Kosong = <b>semua cabang</b>. Cabang di luar daftar
+                                  dipenuhi lewat jalur CK (produksi CK → kirim) dan
+                                  kitchen-nya tidak bisa memproduksi bahan ini.
+                                </p>
+                              </div>
+                            )}
                           </div>
                         </div>
                         <div className="mt-3 rounded-lg bg-orange-50 px-3 py-2 text-sm text-orange-800">

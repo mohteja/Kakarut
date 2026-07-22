@@ -122,6 +122,12 @@ export interface BahanDto {
    * Diabaikan untuk pengadaan "beli".
    */
   produksi_di: ProduksiDi;
+  /**
+   * Cabang PRODUSEN saat produksi_di = "cabang": id cabang store yang
+   * kitchen-nya memproduksi bahan ini. KOSONG = semua cabang store. Cabang di
+   * luar daftar dipenuhi lewat jalur CK. Selalu [] untuk produksi_di = "ck".
+   */
+  produksi_branch_ids: string[];
   catatan: string | null;
   is_packaging: boolean;
   is_complement: boolean;

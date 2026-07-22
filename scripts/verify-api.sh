@@ -4021,6 +4021,39 @@ else
     "$(api "$OWNER" GET /rekomendasi/permintaan | jq --arg f "$PC108" '[.[]|select(.produksi.faktur_id==$f or .produksi_cabang.faktur_id==$f)] | length | if . >= 1 then 1 else 0 end')"
 fi
 
+echo "== 109. Cabang produsen bernama per bahan (produksi_branch_ids) =="
+# produksi_di="cabang" kini bisa dibatasi ke cabang store tertentu lewat daftar
+# produsen (kosong = semua cabang store). Kitchen di luar daftar ditolak 400;
+# planner memperlakukan cabang non-produsen lewat jalur CK (kirim/work-order).
+# (a) Validasi daftar: hanya cabang store aktif milik perusahaan.
+cek "set produsen berisi CK → 400" "V == 400" \
+  "$(status_code_body "$OWNER" PUT "/bahan/$IPRODA" "{\"produksi_di\":\"cabang\",\"produksi_branch_ids\":[\"$CK52_UTAMA\"]}")"
+cek "set produsen = [Store 52] → tersimpan" "V == 1" \
+  "$(api "$OWNER" PUT "/bahan/$IPRODA" "{\"produksi_di\":\"cabang\",\"produksi_branch_ids\":[\"$ST52_ID\"]}" | jq --arg b "$ST52_ID" '.produksi_branch_ids==[$b]|if . then 1 else 0 end')"
+cek "GET /bahan memuat daftar produsen" "V == 1" \
+  "$(api "$OWNER" GET /bahan | jq --arg i "$IPRODA" --arg b "$ST52_ID" '[.[]|select(.id==$i)][0].produksi_branch_ids==[$b]|if . then 1 else 0 end')"
+# (b) Kitchen CB46 (di LUAR daftar) tak boleh memproduksi; masuk daftar → boleh.
+B109="{\"worker_id\":\"$U107_ID\",\"items\":[{\"ingredient_id\":\"$IPRODA\",\"mode\":\"pcs\",\"jumlah\":2}]}"
+cek "kitchen cabang non-produsen → 400" "V == 400" \
+  "$(status_code_body "$TKIT" POST /produksi/faktur "$B109")"
+api "$OWNER" PUT "/bahan/$IPRODA" "{\"produksi_branch_ids\":[\"$CB46_ID\",\"$ST52_ID\"]}" > /dev/null
+FK109=$(api "$TKIT" POST /produksi/faktur "$B109" | jq -r .faktur_id)
+cek "cabang masuk daftar produsen → kitchen boleh produksi" "V == 1" \
+  "$([ -n "$FK109" ] && [ "$FK109" != "null" ] && echo 1 || echo 0)"
+# (c) Planner: cabang tujuan di LUAR daftar produsen jatuh ke jalur CK.
+api "$OWNER" PUT "/bahan/$IP108" "{\"produksi_di\":\"cabang\",\"produksi_branch_ids\":[\"$ST52_ID\"]}" > /dev/null
+cek "preview: tujuan CB46 non-produsen → bahan dihitung jalur CK" "V == 1" \
+  "$(api "$OWNER" POST /rekomendasi/menu "$B108" | jq --arg i "$IP108" '[.bahan[]|select(.ingredient_id==$i)][0].produksi_di=="ck"|if . then 1 else 0 end')"
+# (d) Daftar kosong = SEMUA cabang (perilaku lama).
+api "$OWNER" PUT "/bahan/$IP108" '{"produksi_branch_ids":[]}' > /dev/null
+cek "preview: daftar kosong → kembali produksi_di=cabang" "V == 1" \
+  "$(api "$OWNER" POST /rekomendasi/menu "$B108" | jq --arg i "$IP108" '[.bahan[]|select(.ingredient_id==$i)][0].produksi_di=="cabang"|if . then 1 else 0 end')"
+# (e) produksi_di kembali "ck" → daftar produsen ikut dibersihkan otomatis.
+cek "PUT produksi_di=ck → daftar produsen dikosongkan" "V == 1" \
+  "$(api "$OWNER" PUT "/bahan/$IPRODA" '{"produksi_di":"ck"}' | jq '.produksi_branch_ids==[]|if . then 1 else 0 end')"
+cek "GET /bahan: daftar produsen kosong setelah kembali ck" "V == 1" \
+  "$(api "$OWNER" GET /bahan | jq --arg i "$IPRODA" '[.[]|select(.id==$i)][0].produksi_branch_ids==[]|if . then 1 else 0 end')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

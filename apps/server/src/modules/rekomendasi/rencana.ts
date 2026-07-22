@@ -23,6 +23,7 @@ import {
   branches,
   companies,
   ingredientComponents,
+  ingredientProduksiBranches,
   ingredients,
   memberships,
   productions,
@@ -53,7 +54,7 @@ export async function rencanaDariMenu(
     porsiByMenu.set(it.menu_id, (porsiByMenu.get(it.menu_id) ?? 0) + it.porsi);
   }
 
-  const [katalog, saldoRows, extraRows] = await Promise.all([
+  const [katalog, saldoRows, extraRows, produsenRows] = await Promise.all([
     loadKatalog(db, companyId),
     hitungSaldoCabang(companyId, branchId),
     db
@@ -67,10 +68,32 @@ export async function rencanaDariMenu(
       })
       .from(ingredients)
       .where(eq(ingredients.companyId, companyId)),
+    db
+      .select({
+        ingredientId: ingredientProduksiBranches.ingredientId,
+        branchId: ingredientProduksiBranches.branchId,
+      })
+      .from(ingredientProduksiBranches)
+      .innerJoin(ingredients, eq(ingredients.id, ingredientProduksiBranches.ingredientId))
+      .where(eq(ingredients.companyId, companyId)),
   ]);
   const menuById = new Map(katalog.rows.map((r) => [r.id, r]));
   const bahanById = new Map(saldoRows.map((r) => [r.ingredient_id, r]));
   const extraById = new Map(extraRows.map((r) => [r.id, r]));
+  // Daftar CABANG PRODUSEN per bahan (produksi_di "cabang"): kosong = semua
+  // cabang store; berisi & TIDAK memuat cabang tujuan → bahan ini bagi cabang
+  // tsb diperlakukan seperti produksi CK (kirim CK / work-order CK).
+  const produsenByIng = new Map<string, Set<string>>();
+  for (const r of produsenRows) {
+    const set = produsenByIng.get(r.ingredientId) ?? new Set<string>();
+    set.add(r.branchId);
+    produsenByIng.set(r.ingredientId, set);
+  }
+  const produksiDiEfektif = (ingredientId: string, raw: "ck" | "cabang"): "ck" | "cabang" => {
+    if (raw !== "cabang") return raw;
+    const set = produsenByIng.get(ingredientId);
+    return !set || set.has(branchId) ? "cabang" : "ck";
+  };
 
   // Central Kitchen pelaksana (bila ada): STOK CK ikut menutup kebutuhan store —
   // barang yang sudah ada di CK tinggal dikirim ke store, jadi tak perlu
@@ -145,7 +168,9 @@ export async function rencanaDariMenu(
     // Lokasi produksi bahan jadi (diatur di Resep): "cabang" = diproduksi
     // kitchen di cabang tujuan — TIDAK dikirim dari stok CK dan fakturnya
     // lahir di cabang (bukan work-order CK). Hanya bermakna utk "produksi".
-    const produksiDi = pengadaan === "produksi" ? (e?.produksiDi ?? "ck") : null;
+    // Efektif PER CABANG: cabang di luar daftar produsen jatuh ke jalur CK.
+    const produksiDi =
+      pengadaan === "produksi" ? produksiDiEfektif(ingredientId, e?.produksiDi ?? "ck") : null;
     const hargaPerUnit = e && s.isi > 0 ? e.hargaBeli / s.isi : 0;
     // Kekurangan dihitung terhadap saldo CABANG saja (jujur — cocok dengan
     // Kartu Stok cabang). Bagian yang STOK JADInya sudah ADA di CK dipenuhi

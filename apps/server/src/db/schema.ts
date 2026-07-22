@@ -568,6 +568,25 @@ export const ingredients = pgTable(
 );
 
 /**
+ * CABANG PRODUSEN per BAHAN (untuk produksi_di = 'cabang'): daftar cabang
+ * store yang kitchen-nya memproduksi bahan ini. KOSONG = semua cabang store
+ * boleh (perilaku default). Cabang di luar daftar dipenuhi lewat jalur CK
+ * (planner) dan kitchen-nya tak boleh memproduksi bahan ini.
+ */
+export const ingredientProduksiBranches = pgTable(
+  "ingredient_produksi_branches",
+  {
+    ingredientId: uuid("ingredient_id")
+      .notNull()
+      .references(() => ingredients.id, { onDelete: "cascade" }),
+    branchId: uuid("branch_id")
+      .notNull()
+      .references(() => branches.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.ingredientId, t.branchId] })],
+);
+
+/**
  * SUPPLIER per BAHAN (many-to-many): info "beli di mana" untuk tiap bahan.
  * Satu bahan bisa punya beberapa supplier; is_utama menandai supplier
  * utama/langganan (maksimal SATU per bahan — dijaga partial unique index).

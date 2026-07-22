@@ -18,6 +18,7 @@ import {
   branches,
   dokumenNomor,
   ingredientComponents,
+  ingredientProduksiBranches,
   ingredientSuppliers,
   ingredients,
   menuComponents,
@@ -54,6 +55,8 @@ const BahanBody = z.object({
   pengadaan: z.enum(["produksi", "beli"]).default("beli"),
   /** lokasi produksi bahan jalur produksi: Central Kitchen atau cabang store */
   produksi_di: z.enum(["ck", "cabang"]).default("ck"),
+  /** cabang PRODUSEN saat produksi_di="cabang" (kosong = semua cabang store) */
+  produksi_branch_ids: z.array(z.string().uuid()).max(100).default([]),
   catatan: z.string().nullish(),
   is_packaging: z.boolean().default(false),
   is_complement: z.boolean().default(false),
@@ -83,6 +86,7 @@ const BahanPatchBody = z.object({
   kategori: z.string().trim().min(1).max(30).optional(),
   pengadaan: z.enum(["produksi", "beli"]).optional(),
   produksi_di: z.enum(["ck", "cabang"]).optional(),
+  produksi_branch_ids: z.array(z.string().uuid()).max(100).optional(),
   catatan: z.string().nullish(),
   is_packaging: z.boolean().optional(),
   is_complement: z.boolean().optional(),
@@ -250,10 +254,65 @@ async function rakLokasiByBahan(companyId: string): Promise<Map<string, RakLokas
   return map;
 }
 
+/** Daftar cabang produsen per bahan (produksi_di="cabang"; kosong = semua). */
+async function produsenByBahan(companyId: string): Promise<Map<string, string[]>> {
+  const rows = await db
+    .select({
+      ingredientId: ingredientProduksiBranches.ingredientId,
+      branchId: ingredientProduksiBranches.branchId,
+    })
+    .from(ingredientProduksiBranches)
+    .innerJoin(ingredients, eq(ingredients.id, ingredientProduksiBranches.ingredientId))
+    .where(eq(ingredients.companyId, companyId));
+  const map = new Map<string, string[]>();
+  for (const r of rows) {
+    const list = map.get(r.ingredientId) ?? [];
+    list.push(r.branchId);
+    map.set(r.ingredientId, list);
+  }
+  return map;
+}
+
+/** Cabang produsen wajib cabang TOKO (store) aktif milik company — 400 bila tidak. */
+async function pastikanCabangProdusen(companyId: string, ids: string[]): Promise<string[]> {
+  const unik = [...new Set(ids)];
+  if (unik.length === 0) return unik;
+  const rows = await db
+    .select({ id: branches.id })
+    .from(branches)
+    .where(
+      and(
+        eq(branches.companyId, companyId),
+        inArray(branches.id, unik),
+        eq(branches.tipe, "store"),
+        eq(branches.isActive, true),
+      ),
+    );
+  if (rows.length !== unik.length) {
+    throw new HTTPException(400, {
+      message: "Cabang produsen harus cabang toko (store) aktif milik perusahaan",
+    });
+  }
+  return unik;
+}
+
+/** Ganti seluruh daftar cabang produsen satu bahan (kosong = semua cabang). */
+async function simpanCabangProdusen(ingredientId: string, ids: string[]): Promise<void> {
+  await db
+    .delete(ingredientProduksiBranches)
+    .where(eq(ingredientProduksiBranches.ingredientId, ingredientId));
+  if (ids.length > 0) {
+    await db
+      .insert(ingredientProduksiBranches)
+      .values(ids.map((branchId) => ({ ingredientId, branchId })));
+  }
+}
+
 function toDto(
   row: typeof ingredients.$inferSelect,
   sup?: { utama: string | null; jumlah: number },
   rakLokasi: RakLokasi[] = [],
+  produksiBranchIds: string[] = [],
 ): BahanDto {
   return {
     id: row.id,
@@ -272,6 +331,7 @@ function toDto(
     kategori: row.kategori,
     pengadaan: row.pengadaan,
     produksi_di: row.produksiDi,
+    produksi_branch_ids: produksiBranchIds,
     catatan: row.catatan,
     is_packaging: row.isPackaging,
     is_complement: row.isComplement,
@@ -360,11 +420,14 @@ export const bahanRoutes = new Hono<AppEnv>()
       .from(ingredients)
       .where(and(eq(ingredients.companyId, auth.company_id!), eq(ingredients.isActive, true)))
       .orderBy(asc(ingredients.nama));
-    const [sup, rak] = await Promise.all([
+    const [sup, rak, produsen] = await Promise.all([
       infoSupplier(auth.company_id!),
       rakLokasiByBahan(auth.company_id!),
+      produsenByBahan(auth.company_id!),
     ]);
-    return c.json(rows.map((r) => toDto(r, sup.get(r.id), rak.get(r.id) ?? [])));
+    return c.json(
+      rows.map((r) => toDto(r, sup.get(r.id), rak.get(r.id) ?? [], produsen.get(r.id) ?? [])),
+    );
   })
   .post("/", requireRole("owner", "admin"), zValidator("json", BahanBody), async (c) => {
     const auth = c.get("auth");
@@ -383,6 +446,11 @@ export const bahanRoutes = new Hono<AppEnv>()
       );
     // samakan huruf kategori dengan master (mis. "buah segar" → "Buah segar")
     const kmap = await kategoriKanonikMap(db, auth.company_id!);
+    // cabang produsen hanya relevan saat produksi_di = "cabang"
+    const produsenIds =
+      body.produksi_di === "cabang"
+        ? await pastikanCabangProdusen(auth.company_id!, body.produksi_branch_ids)
+        : [];
     if (existing?.isActive) {
       // Duplikat sungguhan (masih aktif). Beri petunjuk lokasi — bahan BELI tak
       // muncul di daftar Resep Produksi, jadi owner bisa mengira "tak ada".
@@ -427,7 +495,8 @@ export const bahanRoutes = new Hono<AppEnv>()
         })
         .where(and(eq(ingredients.id, existing.id), eq(ingredients.companyId, auth.company_id!)))
         .returning();
-      return c.json(toDto(row), 200);
+      await simpanCabangProdusen(row.id, produsenIds);
+      return c.json(toDto(row, undefined, [], produsenIds), 200);
     }
     const kode = await resolveKodeBahan(db, auth.company_id!, body.kode, body.nama);
     const [row] = await db
@@ -455,7 +524,8 @@ export const bahanRoutes = new Hono<AppEnv>()
         minBeli: body.min_beli,
       })
       .returning();
-    return c.json(toDto(row), 201);
+    await simpanCabangProdusen(row.id, produsenIds);
+    return c.json(toDto(row, undefined, [], produsenIds), 201);
   })
   /**
    * Tambah banyak bahan baku sekaligus (halaman "Tambah Bahan Baku" multi-baris).
@@ -659,7 +729,11 @@ export const bahanRoutes = new Hono<AppEnv>()
       // Kepemilikan dicek DULU (404) agar guard di bawah tak jadi oracle
       // lintas-tenant; sekalian ambil nilai lama utk deteksi perubahan.
       const [lama] = await db
-        .select({ isi: ingredients.isi, pengadaan: ingredients.pengadaan })
+        .select({
+          isi: ingredients.isi,
+          pengadaan: ingredients.pengadaan,
+          produksiDi: ingredients.produksiDi,
+        })
         .from(ingredients)
         .where(and(eq(ingredients.id, id), eq(ingredients.companyId, auth.company_id!)));
       if (!lama) throw new HTTPException(404, { message: "Bahan tidak ditemukan" });
@@ -776,8 +850,28 @@ export const bahanRoutes = new Hono<AppEnv>()
             ),
           );
       }
+      // Daftar cabang produsen: ganti bila dikirim; bukan produksi-cabang lagi
+      // → daftar tak relevan, bersihkan sisa (kosong = semua cabang).
+      let produsenIds: string[];
+      if (row.produksiDi !== "cabang") {
+        if (lama.produksiDi === "cabang") await simpanCabangProdusen(row.id, []);
+        produsenIds = [];
+      } else if (body.produksi_branch_ids !== undefined) {
+        produsenIds = await pastikanCabangProdusen(
+          auth.company_id!,
+          body.produksi_branch_ids,
+        );
+        await simpanCabangProdusen(row.id, produsenIds);
+      } else {
+        produsenIds = (
+          await db
+            .select({ branchId: ingredientProduksiBranches.branchId })
+            .from(ingredientProduksiBranches)
+            .where(eq(ingredientProduksiBranches.ingredientId, row.id))
+        ).map((r) => r.branchId);
+      }
       const sup = await infoSupplier(auth.company_id!, [row.id]);
-      return c.json(toDto(row, sup.get(row.id)));
+      return c.json(toDto(row, sup.get(row.id), [], produsenIds));
     },
   )
   /**

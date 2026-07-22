@@ -11,7 +11,7 @@ import {
   inputClass,
 } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
-import { useCabangData } from "../../context/BranchContext";
+import { useBranch, useCabangData } from "../../context/BranchContext";
 import { CabangDataBar } from "../../components/CabangDataBar";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah } from "../../lib/format";
@@ -180,7 +180,13 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
   // karyawan CK (tim) & kitchen cabang: faktur dibuat di cabangnya sendiri,
   // pelaksana dirinya
   const isTim = auth?.user.role === "tim" || auth?.user.role === "kitchen";
+  const isKitchen = auth?.user.role === "kitchen";
   const isManajemen = auth?.user.role === "owner" || auth?.user.role === "admin";
+  // Faktur produksi di cabang TOKO (kitchen cabang): hasil masuk stok cabang
+  // itu sendiri — bukan CK, tak ada langkah kirim/terima.
+  const { cabang } = useBranch();
+  const produksiDiCabang =
+    tipe === "produksi" && cabang.find((b) => b.id === branchId)?.tipe === "store";
 
   const { data: bahan } = useQuery({ queryKey: ["bahan"], queryFn: () => api<BahanDto[]>("/bahan") });
   const { data: supplier = [] } = useQuery({
@@ -198,7 +204,19 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
     enabled: tipe === "produksi" && isManajemen,
   });
 
-  const bahanJalur = (bahan ?? []).filter((b) => b.pengadaan === tipe && b.track_stok);
+  // Kitchen cabang hanya boleh memproduksi bahan berlokasi produksi "cabang"
+  // DAN (bila daftar cabang produsen diisi) yang memuat cabangnya sendiri —
+  // server menolak 400 untuk sisanya, jadi saring dari pemilih sekalian.
+  const bolehKitchen = (b: BahanDto) =>
+    b.produksi_di === "cabang" &&
+    ((b.produksi_branch_ids ?? []).length === 0 ||
+      (branchId != null && (b.produksi_branch_ids ?? []).includes(branchId)));
+  const bahanJalur = (bahan ?? []).filter(
+    (b) =>
+      b.pengadaan === tipe &&
+      b.track_stok &&
+      (!isKitchen || tipe !== "produksi" || bolehKitchen(b)),
+  );
 
   const [supplierId, setSupplierId] = useState(""); // jalur beli
   // produksi: "k:<id>" / "s:<id>" — tim otomatis dirinya sendiri
@@ -587,8 +605,25 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
         {tipe === "produksi" ? (
           <>
             Faktur tersimpan sebagai <b>📋 Belum dikerjakan</b>, lalu maju bertahap:{" "}
-            <b>🔨 Mulai Kerjakan</b> → <b>✅ Selesai</b>. Selesai = <b>langsung masuk stok CK</b>{" "}
-            (tanpa konfirmasi). Untuk cabang: kirim dulu, lalu diterima di cabang.
+            <b>🔨 Mulai Kerjakan</b> → <b>✅ Selesai</b>.{" "}
+            {produksiDiCabang ? (
+              <>
+                Selesai = <b>langsung masuk stok cabang ini</b> (tanpa konfirmasi, tidak lewat
+                CK).
+                {isKitchen && (
+                  <>
+                    {" "}
+                    Hanya bahan dengan lokasi produksi <b>Cabang</b> (diatur di Resep) yang
+                    tampil di daftar.
+                  </>
+                )}
+              </>
+            ) : (
+              <>
+                Selesai = <b>langsung masuk stok CK</b> (tanpa konfirmasi). Untuk cabang: kirim
+                dulu, lalu diterima di cabang.
+              </>
+            )}
           </>
         ) : (
           <>
