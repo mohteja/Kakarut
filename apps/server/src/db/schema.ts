@@ -311,6 +311,22 @@ export const passwordResetTokens = pgTable(
   (t) => [index("password_reset_user_idx").on(t.userId)],
 );
 
+/**
+ * Rate limiter TERPUSAT (fixed window) — pengganti store in-memory per-proses.
+ * Satu baris per bucket (`<endpoint>:<ip/email/company>`); atomic upsert menaikkan
+ * `count` sampai `reset_at` lewat lalu di-reset. Aman multi-instance + bertahan
+ * lintas restart. Baris kedaluwarsa disapu berkala.
+ */
+export const rateLimits = pgTable(
+  "rate_limits",
+  {
+    bucket: text("bucket").primaryKey(),
+    count: integer("count").notNull(),
+    resetAt: timestamp("reset_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [index("rate_limits_reset_idx").on(t.resetAt)],
+);
+
 /** Token verifikasi email (hash, sekali pakai) — pola sama dgn reset password. */
 export const emailVerificationTokens = pgTable(
   "email_verification_tokens",
