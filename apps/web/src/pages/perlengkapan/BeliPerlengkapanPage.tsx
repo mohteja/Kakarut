@@ -32,9 +32,18 @@ interface FakturBeli {
   oleh: string | null;
   catatan: string | null;
   rows: BeliPerlengkapanRow[];
-  /** menunggu > tiba > batal (masih ada yang menunggu = butuh aksi) */
+  /** tahap paling tertinggal: menunggu > diproses > tiba > batal */
   status: BeliPerlengkapanRow["status"];
+  /** pemroses belanja (tercatat saat Diproses) */
+  diprosesOleh: string | null;
   totalHarga: number;
+  /** estimasi RAB: Σ (harga riil ?? qty × harga_beli master), tanpa baris batal */
+  totalEstimasi: number;
+}
+
+/** faktur masih perlu aksi (belum tiba/batal seluruhnya) */
+function butuhAksi(status: BeliPerlengkapanRow["status"]): boolean {
+  return status === "menunggu" || status === "diproses";
 }
 
 function kelompokkanFaktur(rows: BeliPerlengkapanRow[]): FakturBeli[] {
@@ -54,20 +63,25 @@ function kelompokkanFaktur(rows: BeliPerlengkapanRow[]): FakturBeli[] {
         catatan: r.catatan,
         rows: [],
         status: r.status,
+        diprosesOleh: null,
         totalHarga: 0,
+        totalEstimasi: 0,
       };
       byKey.set(key, g);
     }
     g.rows.push(r);
+    if (r.diproses_oleh && !g.diprosesOleh) g.diprosesOleh = r.diproses_oleh;
     if (r.total_harga != null && r.status !== "batal") g.totalHarga += r.total_harga;
-    // status faktur: masih ada 'menunggu' → menunggu; ada 'tiba' → tiba; sisanya batal
+    if (r.status !== "batal") g.totalEstimasi += r.total_harga ?? r.qty * (r.harga_beli ?? 0);
+    // status faktur = tahap PALING TERTINGGAL di antara barisnya
     if (r.status === "menunggu") g.status = "menunggu";
-    else if (r.status === "tiba" && g.status !== "menunggu") g.status = "tiba";
+    else if (r.status === "diproses" && g.status !== "menunggu") g.status = "diproses";
+    else if (r.status === "tiba" && !butuhAksi(g.status)) g.status = "tiba";
   }
-  // menunggu (butuh aksi) dulu, lalu terbaru — mengikuti urutan server
+  // butuh aksi dulu (menunggu/diproses), lalu terbaru — mengikuti urutan server
   return [...byKey.values()].sort((a, b) => {
-    const ba = a.status === "menunggu" ? 0 : 1;
-    const bb = b.status === "menunggu" ? 0 : 1;
+    const ba = butuhAksi(a.status) ? 0 : 1;
+    const bb = butuhAksi(b.status) ? 0 : 1;
     if (ba !== bb) return ba - bb;
     return b.waktu.localeCompare(a.waktu);
   });
@@ -84,6 +98,7 @@ export function BeliPerlengkapanPage() {
   const queryClient = useQueryClient();
   const isManajemen = auth?.user.role === "owner" || auth?.user.role === "admin";
   const [tiba, setTiba] = useState<FakturBeli | null>(null);
+  const [rab, setRab] = useState<FakturBeli | null>(null);
   const [buatOpen, setBuatOpen] = useState(false);
 
   const { data: rows = [], isLoading } = useQuery({
@@ -96,6 +111,12 @@ export function BeliPerlengkapanPage() {
       g.fakturId
         ? api(`/perlengkapan/beli/faktur/${g.fakturId}/batal`, { method: "POST", body: {} })
         : api(`/perlengkapan/beli/${g.rows[0].id}/batal`, { method: "POST", body: {} }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["perlengkapan-beli"] }),
+  });
+  // tandai sedang dibelanjakan (pemroses tercatat) — paritas tahap beli bahan baku
+  const proses = useMutation({
+    mutationFn: (g: FakturBeli) =>
+      api(`/perlengkapan/beli/faktur/${g.fakturId}/proses`, { method: "POST", body: {} }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["perlengkapan-beli"] }),
   });
   // bersih-bersih massal: faktur lama yang permintaannya sudah terhapus
@@ -127,6 +148,7 @@ export function BeliPerlengkapanPage() {
         <b>otomatis dikirim</b> ke cabang tujuan.
       </div>
       <ErrorText error={batal.error} />
+      <ErrorText error={proses.error} />
       <ErrorText error={batalSemua.error} />
 
       {isLoading ? (
@@ -161,24 +183,32 @@ export function BeliPerlengkapanPage() {
           )}
           {grup.map((g) => (
             <Card key={g.key} className="overflow-hidden">
-              {/* kepala kartu: nomor + arah + status */}
+              {/* kepala kartu: nomor + badge cabang tujuan + status */}
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-stone-100 bg-stone-50 px-4 py-2.5">
                 {g.nomor && (
-                  <span className="rounded bg-stone-200 px-1.5 py-0.5 font-mono text-xs font-bold text-stone-700">
+                  <span className="rounded-md bg-orange-100 px-1.5 py-0.5 font-mono text-xs font-bold text-orange-800">
                     {g.nomor}
                   </span>
                 )}
-                <span className="text-xs text-stone-500">
-                  {g.ckNama}
-                  {g.tujuanNama ? ` → ${g.tujuanNama}` : " (stok CK)"}
-                </span>
+                {/* BADGE CABANG TUJUAN — langsung nama cabangnya (tanpa rute CK) */}
+                {g.tujuanNama ? (
+                  <span className="whitespace-nowrap rounded-md bg-purple-100 px-2 py-0.5 text-sm font-bold text-purple-800">
+                    📦 {g.tujuanNama}
+                  </span>
+                ) : (
+                  <span className="text-xs text-stone-500">🏪 {g.ckNama} (stok CK)</span>
+                )}
                 <BeliStatusBadge status={g.status} />
+                {/* pemroses belanja — tercatat saat Diproses */}
+                {g.diprosesOleh && (
+                  <span className="text-xs font-medium text-stone-600">🔧 {g.diprosesOleh}</span>
+                )}
                 <span className="ml-auto text-xs text-stone-400">
                   {formatWaktu(g.waktu)}
                   {g.oleh ? ` · ${g.oleh}` : ""}
                 </span>
               </div>
-              {/* baris item */}
+              {/* baris item: nama + qty + tempat beli (supplier langganan) + harga */}
               <div className="divide-y divide-stone-50">
                 {g.rows.map((r) => (
                   <div
@@ -189,40 +219,66 @@ export function BeliPerlengkapanPage() {
                     <span className="text-stone-500">
                       {formatAngka(r.qty)} {r.satuan}
                     </span>
+                    {r.supplier_utama && (
+                      <span className="text-xs text-stone-400">🏬 {r.supplier_utama}</span>
+                    )}
                     {g.rows.length > 1 && r.status !== g.status && (
                       <BeliStatusBadge status={r.status} />
                     )}
-                    {r.total_harga != null && r.total_harga > 0 && (
-                      <span className="ml-auto text-xs text-stone-500">
-                        {formatRupiah(r.total_harga)}
-                      </span>
-                    )}
+                    <span className="ml-auto text-xs text-stone-500">
+                      {r.total_harga != null && r.total_harga > 0
+                        ? formatRupiah(r.total_harga)
+                        : r.harga_beli > 0
+                          ? `± ${formatRupiah(r.qty * r.harga_beli)}`
+                          : ""}
+                    </span>
                   </div>
                 ))}
               </div>
-              {/* kaki kartu: ringkasan + aksi */}
+              {/* kaki kartu: ringkasan + Dokumen RAB + Ubah Tahap */}
               <div className="flex flex-wrap items-center gap-2 border-t border-stone-100 px-4 py-2">
                 <span className="text-xs text-stone-500">
                   {g.rows.length} item
-                  {g.totalHarga > 0 && <> · {formatRupiah(g.totalHarga)}</>}
+                  {g.totalHarga > 0 ? (
+                    <> · {formatRupiah(g.totalHarga)}</>
+                  ) : (
+                    butuhAksi(g.status) &&
+                    g.totalEstimasi > 0 && <> · estimasi {formatRupiah(g.totalEstimasi)}</>
+                  )}
                 </span>
-                {isManajemen && g.status === "menunggu" && (
-                  <div className="ml-auto flex gap-2">
+                {isManajemen && butuhAksi(g.status) && (
+                  <div className="ml-auto flex items-center gap-2">
                     <button
-                      onClick={() => setTiba(g)}
-                      className="rounded-lg bg-green-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-green-700"
+                      onClick={() => setRab(g)}
+                      className="rounded-lg border border-stone-200 px-2.5 py-1 text-xs font-medium text-stone-600 hover:bg-stone-50"
                     >
-                      ✅ Tiba di CK
+                      📄 Dokumen RAB
                     </button>
-                    <button
-                      onClick={() => {
-                        if (window.confirm(`Batalkan faktur beli ${g.nomor ?? "ini"}?`))
-                          batal.mutate(g);
+                    {/* Ubah Tahap — dropdown seperti Beli Bahan Baku */}
+                    <select
+                      value=""
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        if (v === "diproses") proses.mutate(g);
+                        else if (v === "tiba") setTiba(g);
+                        else if (v === "batal") {
+                          if (window.confirm(`Batalkan faktur beli ${g.nomor ?? "ini"}?`))
+                            batal.mutate(g);
+                        }
+                        e.target.value = "";
                       }}
-                      className="rounded-lg px-2.5 py-1 text-xs font-medium text-red-500 hover:bg-red-50"
+                      aria-label={`Ubah tahap ${g.nomor ?? "faktur"}`}
+                      className="rounded-lg bg-orange-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-orange-700"
                     >
-                      Batal
-                    </button>
+                      <option value="" disabled>
+                        ➡ Ubah Tahap
+                      </option>
+                      {g.status === "menunggu" && g.fakturId && (
+                        <option value="diproses">🛒 Diproses (dibelanjakan)</option>
+                      )}
+                      <option value="tiba">📦 Tiba di CK</option>
+                      <option value="batal">❌ Batalkan</option>
+                    </select>
                   </div>
                 )}
               </div>
@@ -232,6 +288,7 @@ export function BeliPerlengkapanPage() {
       )}
 
       {tiba && <TibaFakturModal faktur={tiba} onClose={() => setTiba(null)} />}
+      {rab && <DokumenRabPerlengkapanModal faktur={rab} onClose={() => setRab(null)} />}
       {buatOpen && <BuatBeliModal onClose={() => setBuatOpen(false)} />}
     </div>
   );
@@ -239,12 +296,115 @@ export function BeliPerlengkapanPage() {
 
 export function BeliStatusBadge({ status }: { status: BeliPerlengkapanRow["status"] }) {
   const map = {
-    menunggu: { teks: "Menunggu dibeli", cls: "bg-amber-100 text-amber-800" },
+    menunggu: { teks: "RAB (Menunggu dibeli)", cls: "bg-amber-100 text-amber-800" },
+    diproses: { teks: "🛒 Diproses", cls: "bg-sky-100 text-sky-800" },
     tiba: { teks: "Tiba di CK ✓", cls: "bg-blue-100 text-blue-800" },
     batal: { teks: "Dibatalkan", cls: "bg-stone-100 text-stone-500" },
   }[status];
   return (
     <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${map.cls}`}>{map.teks}</span>
+  );
+}
+
+/**
+ * DOKUMEN RAB perlengkapan — pegangan belanja (paritas Dokumen RAB bahan
+ * baku): daftar item, qty, tempat beli (supplier langganan), dan estimasi
+ * biaya (harga riil bila sudah diisi, selain itu qty × harga master).
+ * Bisa dicetak lewat kontainer #dokumen-print.
+ */
+function DokumenRabPerlengkapanModal({
+  faktur,
+  onClose,
+}: {
+  faktur: FakturBeli;
+  onClose: () => void;
+}) {
+  const rows = faktur.rows.filter((r) => r.status !== "batal");
+  const estimasi = (r: BeliPerlengkapanRow) =>
+    r.total_harga != null && r.total_harga > 0 ? r.total_harga : r.qty * (r.harga_beli ?? 0);
+  const total = rows.reduce((t, r) => t + estimasi(r), 0);
+
+  const isi = (cetak: boolean) => (
+    <div className={cetak ? "text-black" : ""}>
+      <div className={`border-b pb-2 ${cetak ? "border-black" : "border-stone-200"}`}>
+        <div className="text-base font-bold">📄 Dokumen RAB — Beli Perlengkapan</div>
+        <div className={`text-xs ${cetak ? "" : "text-stone-500"}`}>
+          {faktur.nomor && <span className="font-mono">{faktur.nomor} · </span>}
+          {formatWaktu(faktur.waktu)}
+          {faktur.oleh && <> · dibuat {faktur.oleh}</>}
+          {faktur.catatan && <> · 📝 {faktur.catatan}</>}
+        </div>
+        <div
+          className={`mt-2 rounded-lg px-3 py-2 text-sm font-bold ${
+            cetak ? "border-2 border-black" : "bg-purple-100 text-purple-900"
+          }`}
+        >
+          {faktur.tujuanNama
+            ? `📦 Untuk cabang: ${faktur.tujuanNama} (lewat ${faktur.ckNama})`
+            : `🏪 Stok ${faktur.ckNama}`}
+        </div>
+      </div>
+      <table className="mt-2 w-full text-sm">
+        <thead>
+          <tr className={`text-left text-xs ${cetak ? "" : "text-stone-400"}`}>
+            <th className="py-1 pr-2 font-medium">Item</th>
+            <th className="py-1 pr-2 font-medium">Qty</th>
+            <th className="py-1 pr-2 font-medium">Tempat beli</th>
+            <th className="py-1 text-right font-medium">Estimasi</th>
+          </tr>
+        </thead>
+        <tbody className={`divide-y ${cetak ? "divide-stone-300" : "divide-stone-100"}`}>
+          {rows.map((r) => (
+            <tr key={r.id}>
+              <td className="py-1 pr-2 font-medium">{r.nama}</td>
+              <td className="whitespace-nowrap py-1 pr-2">
+                {formatAngka(r.qty)} {r.satuan}
+              </td>
+              <td className="py-1 pr-2">{r.supplier_utama ?? "—"}</td>
+              <td className="whitespace-nowrap py-1 text-right">
+                {estimasi(r) > 0 ? formatRupiah(estimasi(r)) : "—"}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div
+        className={`mt-2 flex justify-between border-t pt-2 text-sm ${cetak ? "border-black" : "border-stone-200"}`}
+      >
+        <span>Total {rows.length} item</span>
+        <b>{total > 0 ? formatRupiah(total) : "—"}</b>
+      </div>
+    </div>
+  );
+
+  return (
+    <>
+      <Modal open onClose={onClose} title="📄 Dokumen RAB" lebar="max-w-xl">
+        {isi(false)}
+        <div className="mt-4 flex justify-end gap-2">
+          <button onClick={onClose} className={btnSecondary}>
+            Tutup
+          </button>
+          <button onClick={() => window.print()} className={btnPrimary}>
+            🖨 Cetak dokumen
+          </button>
+        </div>
+      </Modal>
+      {/* Kontainer khusus cetak — hanya dokumen yang tampil saat window.print() */}
+      <div id="dokumen-print" className="hidden print:block">
+        {isi(true)}
+        <div className="mt-6 flex justify-between gap-4 text-xs">
+          <div className="text-center">
+            Pembelanja
+            <div className="mt-10 border-t border-black px-8">( ………… )</div>
+          </div>
+          <div className="text-center">
+            Finance
+            <div className="mt-10 border-t border-black px-8">( ………… )</div>
+          </div>
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -255,7 +415,7 @@ export function BeliStatusBadge({ status }: { status: BeliPerlengkapanRow["statu
  */
 function TibaFakturModal({ faktur, onClose }: { faktur: FakturBeli; onClose: () => void }) {
   const queryClient = useQueryClient();
-  const barisMenunggu = faktur.rows.filter((r) => r.status === "menunggu");
+  const barisMenunggu = faktur.rows.filter((r) => butuhAksi(r.status));
   const [draft, setDraft] = useState<Record<string, { qty: string; harga: string }>>(() =>
     Object.fromEntries(
       barisMenunggu.map((r) => [

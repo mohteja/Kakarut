@@ -25,6 +25,7 @@ import { terbitkanNomor } from "../dokumen/nomor";
 import {
   batalBeliPerlengkapan,
   batalFakturBeliPerlengkapan,
+  prosesFakturBeliPerlengkapan,
   batalSemuaBeliPerlengkapan,
   belanjaPerlengkapan,
   buatBeliPerlengkapanManual,
@@ -484,6 +485,22 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
       return c.json(hasil);
     },
   )
+  /**
+   * Tandai SATU FAKTUR beli 'diproses' (sedang dibelanjakan) — paritas tahap
+   * RAB → diproses beli bahan baku; pemroses tercatat. owner/admin.
+   */
+  .post("/beli/faktur/:fakturId/proses", requireRole("owner", "admin"), async (c) => {
+    const auth = c.get("auth");
+    const hasil = await prosesFakturBeliPerlengkapan(
+      auth.company_id!,
+      c.req.param("fakturId"),
+      auth.sub,
+    );
+    if ("error" in hasil) {
+      throw new HTTPException((hasil.code ?? 400) as 400 | 404, { message: hasil.error });
+    }
+    return c.json(hasil);
+  })
   /**
    * Batalkan SEMUA faktur beli yang masih 'menunggu' (bersih-bersih massal;
    * opsional ?branch_id = CK). owner/admin.

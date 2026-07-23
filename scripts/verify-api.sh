@@ -4222,6 +4222,27 @@ cek "semua baris faktur permintaan membawa permintaan_nomor sama" "V == 1" \
 cek "faktur input langsung tanpa permintaan_nomor" "V == 0" \
   "$(api "$OWNER" GET "/pembelian?branch_id=all&per_page=500" | jq '[.rows[]|select(.rencana_id==null and .permintaan_nomor!=null)]|length')"
 
+echo "== 116. Beli Perlengkapan paritas bahan baku: RAB → Diproses → Tiba =="
+# Faktur BP kini bertahap seperti beli bahan baku: menunggu (RAB) →
+# diproses (pemroses tercatat) → tiba/batal; supplier langganan item
+# (tempat beli) + harga estimasi ikut di daftar utk Dokumen RAB.
+SRB116=$(api "$OWNER" POST /perlengkapan '{"nama":"Serbet Uji 116","satuan":"pcs","harga_beli":7000,"stok_minimum":0}' | jq -r .id)
+api "$OWNER" PUT "/perlengkapan/$SRB116/supplier" "{\"items\":[{\"supplier_id\":\"$SUP112\",\"is_utama\":true}]}" > /dev/null
+F116=$(api "$OWNER" POST /perlengkapan/beli "{\"items\":[{\"supply_id\":\"$SRB116\",\"qty\":4}],\"ck_branch_id\":\"$CK52_UTAMA\",\"tujuan_branch_id\":\"$CB46_ID\"}" | jq -r '.faktur_id // ""')
+cek "daftar beli memuat tempat beli (supplier utama) + harga estimasi" "V == 1" \
+  "$(api "$OWNER" GET /perlengkapan/beli | jq --arg f "$F116" '[.[]|select(.faktur_id==$f)][0] | (.supplier_utama=="Supplier Uji 112") and (.harga_beli==7000) | if . then 1 else 0 end')"
+cek "guard: kitchen tandai diproses → 403" "V == 403" \
+  "$(status_code "$TKIT" POST "/perlengkapan/beli/faktur/$F116/proses")"
+cek "tandai Diproses → ok" "V == 1" \
+  "$(api "$OWNER" POST "/perlengkapan/beli/faktur/$F116/proses" '{}' | jq '(.ok==true) and (.jumlah>=1) | if . then 1 else 0 end')"
+cek "status diproses + pemroses tercatat" "V == 1" \
+  "$(api "$OWNER" GET /perlengkapan/beli | jq --arg f "$F116" '[.[]|select(.faktur_id==$f)][0] | (.status=="diproses") and (.diproses_oleh|type=="string") | if . then 1 else 0 end')"
+api "$OWNER" POST /perlengkapan/beli/batal-semua '{}' > /dev/null
+cek "batal-semua TIDAK menyapu faktur yang sedang diproses" "V == 1" \
+  "$(api "$OWNER" GET /perlengkapan/beli | jq --arg f "$F116" '[.[]|select(.faktur_id==$f)][0].status=="diproses" | if . then 1 else 0 end')"
+cek "tiba dari tahap diproses → masuk stok CK" "V == 1" \
+  "$(api "$OWNER" POST "/perlengkapan/beli/faktur/$F116/tiba" '{}' | jq '.jumlah_tiba>=1 | if . then 1 else 0 end')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

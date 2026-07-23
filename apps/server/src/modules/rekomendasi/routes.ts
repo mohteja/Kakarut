@@ -334,14 +334,17 @@ export const rekomendasiRoutes = new Hono<AppEnv>().get("/beli", async (c) => {
       for (const [rencanaId, agg] of perRencana) {
         const h = byRencana.get(rencanaId);
         if (!h) continue;
-        // masih ada yang menunggu → "menunggu"; campuran tiba+batal → "sebagian"
+        // tahap PALING TERTINGGAL menang: menunggu > diproses; sisanya
+        // campuran tiba+batal → "sebagian"
         const status: PermintaanStokBagianPerlengkapan["status"] = agg.status.has("menunggu")
           ? "menunggu"
-          : agg.status.size > 1
-            ? "sebagian"
-            : agg.status.has("tiba")
-              ? "tiba"
-              : "batal";
+          : agg.status.has("diproses")
+            ? "diproses"
+            : agg.status.size > 1
+              ? "sebagian"
+              : agg.status.has("tiba")
+                ? "tiba"
+                : "batal";
         h.beli_perlengkapan = {
           faktur_id: agg.faktur_id,
           jumlah_baris: agg.jumlah,

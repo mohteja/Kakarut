@@ -111,6 +111,20 @@ export function Layout() {
     new Set((rows ?? []).filter((r) => BELUM_SELESAI.has(r.status)).map((r) => r.faktur_id)).size;
   const produksiBelum = hitungBelum(prodNav?.rows);
   const beliBelum = hitungBelum(beliNav?.rows);
+  // Faktur BELI PERLENGKAPAN yang masih aktif (menunggu dibeli / diproses) →
+  // badge di nav "Beli Perlengkapan" — notifikasi yang sama dgn Beli Bahan Baku.
+  const { data: bpNav } = useQuery({
+    queryKey: ["perlengkapan-beli"],
+    queryFn: () =>
+      api<{ id: string; faktur_id: string | null; status: string }[]>("/perlengkapan/beli"),
+    enabled: !!auth && !auth.user.is_super_admin && manajemenGuard && divisi !== "store",
+    refetchInterval: 60_000,
+  });
+  const perlengkapanBelum = new Set(
+    (bpNav ?? [])
+      .filter((r) => r.status === "menunggu" || r.status === "diproses")
+      .map((r) => r.faktur_id ?? r.id),
+  ).size;
 
   if (!auth) return null;
 
@@ -409,8 +423,9 @@ export function Layout() {
                     <span>🛒 Beli Bahan Baku</span>
                     {badgeOranye(beliBelum)}
                   </NavLink>
-                  <NavLink to="/perlengkapan/beli" className={linkClass}>
-                    🧺 Beli Perlengkapan
+                  <NavLink to="/perlengkapan/beli" className={navFlex}>
+                    <span>🧺 Beli Perlengkapan</span>
+                    {badgeOranye(perlengkapanBelum)}
                   </NavLink>
                   {dCk && (
                     <>
