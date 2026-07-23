@@ -505,6 +505,13 @@
       "when": 1784782632724,
       "tag": "0071_glossy_klaw",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1784788856623,
+      "tag": "0072_nifty_fabian_cortez",
+      "breakpoints": true
     }
   ]
 }

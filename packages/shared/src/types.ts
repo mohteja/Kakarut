@@ -398,6 +398,8 @@ export interface RencanaMenuPreview {
 export interface RencanaFakturResult {
   /** id rencana — pengelompok semua faktur satu submit (Data Permintaan Stok) */
   rencana_id: string;
+  /** nomor dokumen permintaan (PM-xxxx); null bila tak ada faktur yang lahir */
+  nomor_permintaan: string | null;
   produksi: { faktur_id: string; jumlah_baris: number } | null;
   /**
    * Faktur produksi DI CABANG tujuan (bahan ber-produksi_di "cabang"): lahir di
@@ -438,6 +440,8 @@ export interface PermintaanStokBagianPerlengkapan {
  */
 export interface PermintaanStokRow {
   rencana_id: string;
+  /** nomor dokumen permintaan (PM-xxxx) — identitas tampil */
+  nomor: string | null;
   /** ISO timestamp pembuatan permintaan */
   waktu: string;
   /** ringkasan menu/porsi ("50× BASOAC, 30× PYO") dari catatan faktur */

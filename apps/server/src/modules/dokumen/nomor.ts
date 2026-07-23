@@ -12,12 +12,14 @@ export type DokumenJenis =
   | "perlengkapan"
   | "kiriman_perlengkapan"
   | "opname_perlengkapan"
-  | "beli_perlengkapan";
+  | "beli_perlengkapan"
+  | "permintaan";
 
 /**
  * Prefiks nomor per jenis dokumen: PB (pembelian), PR (produksi), SO (stock
  * opname bahan), PL (stok masuk perlengkapan), KP (kiriman perlengkapan
- * CK→cabang), OP (sesi opname perlengkapan), BP (faktur beli perlengkapan ke CK).
+ * CK→cabang), OP (sesi opname perlengkapan), BP (faktur beli perlengkapan ke
+ * CK), PM (permintaan Tambah Stok dari Menu — ref = rencana_id).
  */
 const PREFIKS: Record<DokumenJenis, string> = {
   beli: "PB",
@@ -27,6 +29,7 @@ const PREFIKS: Record<DokumenJenis, string> = {
   kiriman_perlengkapan: "KP",
   opname_perlengkapan: "OP",
   beli_perlengkapan: "BP",
+  permintaan: "PM",
 };
 
 export function formatNomor(jenis: DokumenJenis, nomor: number): string {
@@ -117,6 +120,30 @@ export async function backfillNomorDokumen(database: typeof DB): Promise<number>
     `);
     for (const r of sesi.rows as { company_id: string; ref_id: string }[]) {
       await terbitkanNomor(tx, r.company_id, "opname", r.ref_id);
+      total++;
+    }
+  });
+  return total;
+}
+
+/**
+ * Backfill boot (idempoten): permintaan Tambah Stok LAMA (grup rencana_id)
+ * yang belum bernomor → PM- urut kronologis. Permintaan baru bernomor saat
+ * dibuat; termasuk yang di Tempat Sampah (nomor tetap milik dokumen).
+ */
+export async function backfillNomorPermintaan(database: typeof DB): Promise<number> {
+  let total = 0;
+  await database.transaction(async (tx) => {
+    const rencana = await tx.execute(sql`
+      SELECT p.company_id, p.rencana_id AS ref_id, MIN(p.waktu) AS terawal
+      FROM productions p
+      LEFT JOIN dokumen_nomor dn ON dn.company_id = p.company_id AND dn.ref_id = p.rencana_id
+      WHERE p.rencana_id IS NOT NULL AND dn.ref_id IS NULL
+      GROUP BY p.company_id, p.rencana_id
+      ORDER BY p.company_id, MIN(p.waktu), p.rencana_id
+    `);
+    for (const r of rencana.rows as { company_id: string; ref_id: string }[]) {
+      await terbitkanNomor(tx, r.company_id, "permintaan", r.ref_id);
       total++;
     }
   });

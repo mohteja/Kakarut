@@ -18,7 +18,7 @@ import { backfillKategoriBahan } from "./modules/kategori-bahan/service";
 import { arsipkanMembershipNonaktif, backfillEmployeeCode } from "./modules/users/service";
 import { pastikanSuperAdmin } from "./modules/auth/superadmin";
 import { konfirmasiProduksiCkLokalTertahan } from "./modules/produksi/backfill";
-import { backfillNomorDokumen } from "./modules/dokumen/nomor";
+import { backfillNomorDokumen, backfillNomorPermintaan } from "./modules/dokumen/nomor";
 import { terapkanSemuaKonsumsiOtomatis } from "./modules/perlengkapan/service";
 import { provisionGuest } from "./seed/guest";
 import {
@@ -83,6 +83,9 @@ if (env.AUTO_MIGRATE) {
   // Dokumen lama tanpa nomor (faktur PB/PR & sesi opname SO) → beri nomor urut
   const bernomor = await sekaliSaja("nomor_dokumen", () => backfillNomorDokumen(db));
   if (bernomor > 0) console.log(`Nomor dokumen diisi untuk ${bernomor} dokumen lama.`);
+  // Permintaan Tambah Stok lama (grup rencana_id) tanpa nomor → PM- urut
+  const bernomorPm = await sekaliSaja("nomor_permintaan", () => backfillNomorPermintaan(db));
+  if (bernomorPm > 0) console.log(`Nomor permintaan diisi untuk ${bernomorPm} permintaan lama.`);
   // Konsumsi otomatis perlengkapan: catat hari-hari yang terlewat sejak server
   // terakhir hidup (BUKAN warisan — perlu tiap boot; idempoten via kursor +
   // unique per hari)

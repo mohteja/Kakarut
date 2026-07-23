@@ -260,10 +260,17 @@ export function PermintaanStokPage() {
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                       <span className="font-bold text-stone-800">📋 Permintaan</span>
+                      {/* nomor dokumen permintaan — identitas utama (dipakai juga
+                          badge asal di kartu Pembelian/Produksi) */}
+                      {r.nomor && (
+                        <span className="rounded-md bg-orange-100 px-1.5 py-0.5 font-mono text-xs font-bold text-orange-800">
+                          {r.nomor}
+                        </span>
+                      )}
                       {/* TUJUAN barang dibuat mencolok agar tak salah lihat */}
                       {r.tujuan_cabang && (
                         <span className="whitespace-nowrap rounded-md bg-purple-100 px-2 py-0.5 text-sm font-bold text-purple-800">
-                          📦 → {r.tujuan_cabang}
+                          📦 {r.tujuan_cabang}
                         </span>
                       )}
                     </div>

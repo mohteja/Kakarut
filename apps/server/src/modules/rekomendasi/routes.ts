@@ -21,6 +21,7 @@ import {
   users,
 } from "../../db/schema";
 import { resolveBranchId, type AppEnv } from "../../middleware/auth";
+import { nomorUntukRefs } from "../dokumen/nomor";
 import { buatFakturDariRencana, rencanaDariMenu } from "./rencana";
 import { rekomendasiBeli } from "./service";
 
@@ -194,6 +195,7 @@ export const rekomendasiRoutes = new Hono<AppEnv>().get("/beli", async (c) => {
       if (!g) {
         g = {
           rencana_id: id,
+          nomor: null,
           waktu: (r.waktu as Date).toISOString(),
           catatan: r.catatan,
           tujuan_cabang: null,
@@ -286,9 +288,12 @@ export const rekomendasiRoutes = new Hono<AppEnv>().get("/beli", async (c) => {
         return rest;
       },
     );
+    // Nomor dokumen permintaan (PM-xxxx) — identitas tampil tiap entri.
+    const rencanaIds = [...map.keys()];
+    const petaNomor = await nomorUntukRefs(db, auth.company_id!, rencanaIds);
+    for (const h of hasil) h.nomor = petaNomor.get(h.rencana_id) ?? null;
     // FAKTUR BELI PERLENGKAPAN (BP-) yang lahir bersama permintaan: supply
     // purchases ber-rencana_id sama — bagian tersendiri di tiap entri.
-    const rencanaIds = [...map.keys()];
     if (rencanaIds.length > 0) {
       const supRows = await db
         .select({

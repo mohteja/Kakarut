@@ -55,6 +55,8 @@ const untukProd = alias(branches, "untuk_prod");
 // supplier UTAMA bahan tiap baris (info "beli di mana" saat belanja diproses)
 const isupUtama = alias(ingredientSuppliers, "isup_utama");
 const supBahan = alias(suppliers, "sup_bahan");
+// nomor dokumen PERMINTAAN (PM-, ref = rencana_id) — join kedua atas dokumen_nomor
+const dokPermintaan = alias(dokumenNomor, "dok_permintaan");
 
 const FakturEditBody = z.object({
   password: z.string(),
@@ -1723,6 +1725,8 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         asal_branch_id: productions.asalBranchId,
         // asal permintaan (badge "Permintaan" vs "Langsung")
         rencana_id: productions.rencanaId,
+        // nomor dokumen permintaan (PM-xxxx) — badge identitas asal faktur
+        permintaan_nomor: dokPermintaan.nomorTeks,
         // "diproduksi UNTUK cabang" — pengingat kirim hasil setelah selesai
         untuk_branch_id: productions.untukBranchId,
         untuk_cabang: untukProd.nama,
@@ -1753,6 +1757,13 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
                 and(
                   eq(dokumenNomor.companyId, productions.companyId),
                   eq(dokumenNomor.refId, productions.fakturId),
+                ),
+              )
+              .leftJoin(
+                dokPermintaan,
+                and(
+                  eq(dokPermintaan.companyId, productions.companyId),
+                  eq(dokPermintaan.refId, productions.rencanaId),
                 ),
               )
               // maks SATU baris utama per bahan (partial unique index) → join 1:≤1
