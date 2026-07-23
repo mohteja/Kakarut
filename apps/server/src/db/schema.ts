@@ -1567,6 +1567,16 @@ export const supplyPurchases = pgTable(
 );
 
 /**
+ * Penanda BACKFILL BOOT yang sudah selesai — backfill warisan (perbaikan data
+ * pra-fitur) cukup berjalan SEKALI; boot berikutnya melompatinya sehingga
+ * start server tetap cepat saat data membesar. Baris = satu backfill selesai.
+ */
+export const bootFlags = pgTable("boot_flags", {
+  key: text("key").primaryKey(),
+  selesaiAt: timestamp("selesai_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
  * Buku besar idempotency untuk sinkron offline mobile (POST /api/sync).
  * Setiap perintah offline punya `client_ref` unik per perusahaan; hasil
  * eksekusi (sukses/gagal) disimpan agar retry dari perangkat aman

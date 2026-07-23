@@ -11,6 +11,22 @@ import "./index.css";
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 10_000 } },
 });
+// Data MASTER jarang berubah dan setiap mutasi sudah meng-invalidate kuncinya
+// sendiri — tak perlu refetch tiap pindah halaman. staleTime panjang memangkas
+// request beruntun saat navigasi (terasa di jaringan seluler); perubahan oleh
+// perangkat lain paling lambat terlihat 5 menit (atau saat mutasi lokal).
+const KUNCI_MASTER = [
+  "bahan",
+  "cabang",
+  "satuan",
+  "supplier",
+  "kategori-bahan",
+  "perlengkapan-master",
+  "company",
+];
+for (const kunci of KUNCI_MASTER) {
+  queryClient.setQueryDefaults([kunci], { staleTime: 5 * 60_000 });
+}
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
