@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import type { BahanDto, JenisPengadaan, PenyimpananDto, SupplierDto } from "@kakarut/shared";
 import {
@@ -60,6 +61,38 @@ function BahanPicker({
 }) {
   const [buka, setBuka] = useState(false);
   const [cari, setCari] = useState("");
+  const btnRef = useRef<HTMLButtonElement>(null);
+  // Posisi dropdown dihitung dari tombol; dropdown dirender via PORTAL ke
+  // <body> dengan position:fixed agar TIDAK terpotong overflow-hidden kartu
+  // "Daftar bahan". Bisa flip ke atas bila ruang bawah mepet.
+  const [pos, setPos] = useState<{
+    left: number;
+    width: number;
+    top: number;
+    bottom: number;
+    keAtas: boolean;
+  } | null>(null);
+  const hitungPosisi = () => {
+    const el = btnRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const perkiraanTinggi = 300;
+    const ruangBawah = window.innerHeight - r.bottom;
+    const keAtas = ruangBawah < perkiraanTinggi && r.top > ruangBawah;
+    setPos({ left: r.left, width: r.width, top: r.top, bottom: r.bottom, keAtas });
+  };
+  useLayoutEffect(() => {
+    if (!buka) return;
+    hitungPosisi();
+    const onMove = () => hitungPosisi();
+    window.addEventListener("scroll", onMove, true);
+    window.addEventListener("resize", onMove);
+    return () => {
+      window.removeEventListener("scroll", onMove, true);
+      window.removeEventListener("resize", onMove);
+    };
+  }, [buka]);
+
   const dipilih = opsi.find((b) => b.id === value) ?? null;
   const q = cari.toLowerCase();
   const cocok = q
@@ -71,6 +104,7 @@ function BahanPicker({
   return (
     <div className="relative">
       <button
+        ref={btnRef}
         type="button"
         onClick={() => {
           setBuka((v) => !v);
@@ -83,51 +117,63 @@ function BahanPicker({
         </span>
         <span className="shrink-0 text-stone-400">▾</span>
       </button>
-      {buka && (
-        <>
-          {/* penutup klik-di-luar */}
-          <div className="fixed inset-0 z-20" onClick={() => setBuka(false)} />
-          <div className="absolute left-0 right-0 z-30 mt-1 overflow-hidden rounded-lg border border-stone-200 bg-white shadow-lg">
-            <div className="border-b border-stone-100 p-2">
-              <input
-                autoFocus
-                value={cari}
-                onChange={(e) => setCari(e.target.value)}
-                placeholder="Cari nama / kode bahan…"
-                className={inputClass}
-              />
+      {buka &&
+        pos &&
+        createPortal(
+          <>
+            {/* penutup klik-di-luar */}
+            <div className="fixed inset-0 z-[60]" onClick={() => setBuka(false)} />
+            <div
+              className="fixed z-[61] overflow-hidden rounded-lg border border-stone-200 bg-white shadow-xl"
+              style={{
+                left: pos.left,
+                width: pos.width,
+                ...(pos.keAtas
+                  ? { bottom: window.innerHeight - pos.top + 4 }
+                  : { top: pos.bottom + 4 }),
+              }}
+            >
+              <div className="border-b border-stone-100 p-2">
+                <input
+                  autoFocus
+                  value={cari}
+                  onChange={(e) => setCari(e.target.value)}
+                  placeholder="Cari nama / kode bahan…"
+                  className={inputClass}
+                />
+              </div>
+              <div className="max-h-56 overflow-y-auto">
+                {cocok.length === 0 ? (
+                  <div className="px-3 py-4 text-center text-sm text-stone-400">
+                    {opsi.length === 0 && kosongInfo ? kosongInfo : "Tidak ada bahan yang cocok."}
+                  </div>
+                ) : (
+                  cocok.map((b) => (
+                    <button
+                      key={b.id}
+                      type="button"
+                      onClick={() => {
+                        onChange(b.id);
+                        setBuka(false);
+                      }}
+                      className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-orange-50 ${
+                        b.id === value ? "bg-orange-50 font-semibold" : ""
+                      }`}
+                    >
+                      {b.kode && (
+                        <span className="shrink-0 rounded bg-stone-100 px-1.5 py-0.5 font-mono text-xs text-stone-600">
+                          {b.kode}
+                        </span>
+                      )}
+                      <span className="truncate">{label(b)}</span>
+                    </button>
+                  ))
+                )}
+              </div>
             </div>
-            <div className="max-h-56 overflow-y-auto">
-              {cocok.length === 0 ? (
-                <div className="px-3 py-4 text-center text-sm text-stone-400">
-                  {opsi.length === 0 && kosongInfo ? kosongInfo : "Tidak ada bahan yang cocok."}
-                </div>
-              ) : (
-                cocok.map((b) => (
-                  <button
-                    key={b.id}
-                    type="button"
-                    onClick={() => {
-                      onChange(b.id);
-                      setBuka(false);
-                    }}
-                    className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-orange-50 ${
-                      b.id === value ? "bg-orange-50 font-semibold" : ""
-                    }`}
-                  >
-                    {b.kode && (
-                      <span className="shrink-0 rounded bg-stone-100 px-1.5 py-0.5 font-mono text-xs text-stone-600">
-                        {b.kode}
-                      </span>
-                    )}
-                    <span className="truncate">{label(b)}</span>
-                  </button>
-                ))
-              )}
-            </div>
-          </div>
-        </>
-      )}
+          </>,
+          document.body,
+        )}
     </div>
   );
 }
