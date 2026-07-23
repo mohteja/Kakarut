@@ -29,6 +29,16 @@ interface PilihanBaris {
   aktif: boolean;
   /** qty yang maju — disimpan sebagai teks agar desimal enak diketik */
   qty: string;
+  /** exp lot (YYYY-MM-DD) saat masuk stok — otomatis dari masa simpan, boleh diubah */
+  exp: string;
+}
+
+/** Hari ini + n hari (YYYY-MM-DD) — aritmetika Date.UTC bebas drift TZ. */
+function tanggalPlusHari(n: number): string {
+  const now = new Date();
+  const t = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate() + n));
+  const pad = (x: number) => String(x).padStart(2, "0");
+  return `${t.getUTCFullYear()}-${pad(t.getUTCMonth() + 1)}-${pad(t.getUTCDate())}`;
 }
 
 /** Data yang dikirim TambahStokPage lewat navigate(..., { state }). */
@@ -96,7 +106,19 @@ function TahapForm({
     grup.rows.some((r) => r.tujuan_branch_id != null) &&
     grup.rows.some((r) => r.tujuan_branch_id == null);
   const [pilih, setPilih] = useState<Record<string, PilihanBaris>>(() =>
-    Object.fromEntries(bisaMaju.map((r) => [r.id, { aktif: true, qty: String(r.qty) }])),
+    Object.fromEntries(
+      bisaMaju.map((r) => [
+        r.id,
+        {
+          aktif: true,
+          qty: String(r.qty),
+          // exp default: exp yang sudah ada, atau hari ini + masa simpan master
+          exp:
+            r.exp_date ??
+            ((r.masa_simpan_hari ?? 0) > 0 ? tanggalPlusHari(r.masa_simpan_hari!) : ""),
+        },
+      ]),
+    ),
   );
 
   const label =
@@ -123,11 +145,17 @@ function TahapForm({
     enabled: keSelesai && storageBranch !== "",
   });
 
+  // masuk stok (Tiba/Selesai/dikonfirmasi) → sertakan exp per baris bila terisi
+  const masukStok = keSelesai || keStok;
   const items = keProses
     ? bisaMaju.map((r) => ({ id: r.id, qty: r.qty }))
     : bisaMaju
         .filter((r) => pilih[r.id]?.aktif)
-        .map((r) => ({ id: r.id, qty: Number(pilih[r.id]?.qty) }));
+        .map((r) => ({
+          id: r.id,
+          qty: Number(pilih[r.id]?.qty),
+          ...(masukStok && pilih[r.id]?.exp ? { exp: pilih[r.id].exp } : {}),
+        }));
   const adaInvalid =
     !keProses &&
     bisaMaju.some((r) => {
@@ -363,6 +391,19 @@ function TahapForm({
                             qty harus 0&lt;qty≤{formatAngka(r.qty)}
                           </div>
                         )}
+                        {masukStok && p?.aktif && (
+                          <div className="mt-1 flex items-center justify-end gap-1">
+                            <span className="text-[10px] text-stone-400">exp</span>
+                            <input
+                              type="date"
+                              value={p?.exp ?? ""}
+                              onChange={(e) => ubah(r, { exp: e.target.value })}
+                              aria-label={`Exp ${r.bahan}`}
+                              title="Tanggal kedaluwarsa lot — otomatis dari masa simpan bahan, boleh diubah (baca dari kemasan). Kosong = tanpa exp."
+                              className="rounded-lg border border-stone-300 px-1.5 py-0.5 text-xs"
+                            />
+                          </div>
+                        )}
                       </td>
                     </tr>
                   );
@@ -455,7 +496,9 @@ function TahapForm({
                           {g.rows
                             .map(
                               (r) =>
-                                `${r.bahan} (${formatAngka(Number(pilih[r.id]?.qty) || r.qty)} ${r.satuan})`,
+                                `${r.bahan} (${formatAngka(Number(pilih[r.id]?.qty) || r.qty)} ${r.satuan})${
+                                  pilih[r.id]?.exp ? ` · ⏳ ${pilih[r.id].exp}` : ""
+                                }`,
                             )
                             .join(" · ")}
                         </div>

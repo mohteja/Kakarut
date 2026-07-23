@@ -4270,6 +4270,54 @@ cek "guard: tujuan bukan cabang valid → 400" "V == 400" \
 cek "guard: tujuan pada faktur PRODUKSI → 400" "V == 400" \
   "$(status_code_body "$OWNER" POST /produksi/faktur "{\"branch_id\":\"$CK52_UTAMA\",\"tujuan_branch_id\":\"$CB46_ID\",\"worker_id\":\"$U107_ID\",\"items\":[{\"ingredient_id\":\"$IPRODA\",\"mode\":\"pcs\",\"jumlah\":1}]}")"
 
+echo "== 118. Exp lot (masa simpan + override) + peringatan + catat waste + lead time =="
+# master: masa simpan 5 hari + lead time 3 hari pada bahan uji
+api "$OWNER" PUT "/bahan/$BH112_ID" '{"masa_simpan_hari":5,"lead_time_hari":3}' > /dev/null
+B118=$(api "$OWNER" GET /bahan | jq --arg i "$BH112_ID" '[.[]|select(.id==$i)][0]')
+cek "master: masa_simpan_hari tersimpan (5)" "V == 5" "$(echo "$B118" | jq '.masa_simpan_hari')"
+cek "master: lead_time_hari tersimpan (3)" "V == 3" "$(echo "$B118" | jq '.lead_time_hari')"
+# lead time terbawa ke Rekomendasi Beli (dasar "pesan jauh-jauh hari")
+cek "rekomendasi beli membawa lead_time_hari" "V == 3" \
+  "$(api "$OWNER" GET "/rekomendasi/beli?branch_id=$CB46_ID" | jq --arg i "$BH112_ID" '[.bahan[]|select(.ingredient_id==$i)][0].lead_time_hari // -1')"
+TGL118=$(TZ=Asia/Jakarta date +%F)
+EXP118=$(python3 -c "import datetime;print((datetime.date.fromisoformat('$TGL118')+datetime.timedelta(days=5)).isoformat())")
+# (a) exp OTOMATIS: beli di cabang → Tiba (auto-confirm) → exp = hari ini + 5
+FE118=$(api "$OWNER" POST /pembelian/faktur "{\"branch_id\":\"$CB46_ID\",\"items\":[{\"ingredient_id\":\"$BH112_ID\",\"mode\":\"pcs\",\"jumlah\":2}]}" | jq -r '.faktur_id // ""')
+api "$OWNER" POST "/pembelian/tahap/$FE118" '{"ke":"dikerjakan"}' > /dev/null
+api "$OWNER" POST "/pembelian/tahap/$FE118" '{"ke":"menunggu"}' > /dev/null
+cek "Tiba: exp otomatis = tanggal masuk + masa simpan" "V == 1" \
+  "$(api "$OWNER" GET "/pembelian?branch_id=all&per_page=500" | jq --arg f "$FE118" --arg e "$EXP118" '[.rows[]|select(.faktur_id==$f)][0].exp_date == $e | if . then 1 else 0 end')"
+# (b) exp OVERRIDE per baris (items[].exp) + SPLIT sebagian: qty 4 → maju 1
+FO118=$(api "$OWNER" POST /pembelian/faktur "{\"branch_id\":\"$CB46_ID\",\"items\":[{\"ingredient_id\":\"$BH112_ID\",\"mode\":\"pcs\",\"jumlah\":4}]}" | jq -r '.faktur_id // ""')
+api "$OWNER" POST "/pembelian/tahap/$FO118" '{"ke":"dikerjakan"}' > /dev/null
+IDO118=$(api "$OWNER" GET "/pembelian?branch_id=all&per_page=500" | jq -r --arg f "$FO118" '[.rows[]|select(.faktur_id==$f)][0].id')
+api "$OWNER" POST "/pembelian/tahap/$FO118" "{\"ke\":\"menunggu\",\"items\":[{\"id\":\"$IDO118\",\"qty\":1,\"exp\":\"2030-01-31\"}]}" > /dev/null
+cek "split: baris MAJU memakai exp override" "V == 1" \
+  "$(api "$OWNER" GET "/pembelian?branch_id=all&per_page=500" | jq --arg f "$FO118" '[.rows[]|select(.faktur_id==$f and .exp_date=="2030-01-31" and .status=="dikonfirmasi")] | length')"
+cek "split: baris SISA belum ber-exp (belum masuk stok)" "V == 1" \
+  "$(api "$OWNER" GET "/pembelian?branch_id=all&per_page=500" | jq --arg f "$FO118" '[.rows[]|select(.faktur_id==$f and .status=="dikerjakan")] | (length==1 and .[0].exp_date==null) | if . then 1 else 0 end')"
+# (c) GET /stok/exp: lot exp H+5 muncul di jendela 30 hari, tidak di jendela 0
+E118=$(api "$OWNER" GET "/stok/exp?branch_id=$CB46_ID&hari=30")
+cek "peringatan exp: lot muncul dgn sisa_hari=5 + saldo live" "V == 1" \
+  "$(echo "$E118" | jq --arg i "$BH112_ID" --arg e "$EXP118" '[.[]|select(.ingredient_id==$i and .exp_date==$e)] | (length>=1 and .[0].sisa_hari==5 and .[0].saldo>0) | if . then 1 else 0 end')"
+cek "peringatan exp: jendela hari=0 tidak memuat lot H+5" "V == 0" \
+  "$(api "$OWNER" GET "/stok/exp?branch_id=$CB46_ID&hari=0" | jq --arg i "$BH112_ID" --arg e "$EXP118" '[.[]|select(.ingredient_id==$i and .exp_date==$e)] | length')"
+# (d) catat waste: qty > saldo → 400; valid → sesi SO menunggu ACC
+SW118_A=$(api "$OWNER" GET "/stok?branch_id=$CB46_ID" | jq --arg i "$BH112_ID" '[.[]|select(.ingredient_id==$i)][0].saldo // 0')
+cek "waste: qty melebihi saldo → 400" "V == 400" \
+  "$(status_code_body "$OWNER" POST /stok/waste "{\"branch_id\":\"$CB46_ID\",\"ingredient_id\":\"$BH112_ID\",\"qty\":999999,\"foto_url\":\"/uploads/bukti-uji.jpg\"}")"
+W118=$(api "$OWNER" POST /stok/waste "{\"branch_id\":\"$CB46_ID\",\"ingredient_id\":\"$BH112_ID\",\"qty\":1,\"foto_url\":\"/uploads/bukti-uji.jpg\",\"catatan\":\"Waste kedaluwarsa uji118\"}")
+SID118=$(echo "$W118" | jq -r '.session_id // ""')
+cek "waste tercatat sbg sesi SO (nomor terbit)" "V == 1" \
+  "$(echo "$W118" | jq '(.ok==true and (.nomor|startswith("SO"))) | if . then 1 else 0 end')"
+cek "waste berkategori waste_bahan + selisih −1 (menunggu ACC)" "V == 1" \
+  "$(api "$OWNER" GET "/stok/opname/sesi/$SID118" | jq '[.items[]][0] | (.penyesuaian_status=="menunggu" and .selisih==-1) | if . then 1 else 0 end')"
+SW118_B=$(api "$OWNER" GET "/stok?branch_id=$CB46_ID" | jq --arg i "$BH112_ID" '[.[]|select(.ingredient_id==$i)][0].saldo // 0')
+cek "saldo TIDAK berubah sebelum ACC" "V == 0" "$(python3 -c "print(round($SW118_B - $SW118_A))")"
+api "$OWNER" POST "/stok/opname/sesi/$SID118/acc" > /dev/null
+SW118_C=$(api "$OWNER" GET "/stok?branch_id=$CB46_ID" | jq --arg i "$BH112_ID" '[.[]|select(.ingredient_id==$i)][0].saldo // 0')
+cek "setelah ACC: saldo turun 1 (waste efektif)" "V == -1" "$(python3 -c "print(round($SW118_C - $SW118_A))")"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

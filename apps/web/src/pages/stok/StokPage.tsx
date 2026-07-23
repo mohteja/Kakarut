@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import type { MenuDto, MenuStokDto, PenyimpananDto, StokRowDto } from "@kakarut/shared";
+import type { ExpLotRow, MenuDto, MenuStokDto, PenyimpananDto, StokRowDto } from "@kakarut/shared";
 import {
   Card,
   PageTitle,
@@ -14,6 +14,7 @@ import {
   thClass,
 } from "../../components/ui";
 import { CabangDataBar } from "../../components/CabangDataBar";
+import { CatatWasteModal } from "./CatatWasteModal";
 import { StokPerlengkapanTab } from "./StokPerlengkapanTab";
 import { useAuth } from "../../context/AuthContext";
 import { useBranch, useCabangData } from "../../context/BranchContext";
@@ -66,6 +67,22 @@ export function StokPage() {
     queryKey: ["penyimpanan", branchQuery],
     queryFn: () => api<PenyimpananDto[]>(`/penyimpanan${branchQuery}`),
   });
+  // PERINGATAN EXP: lot hampir/lewat tanggal kedaluwarsa (7 hari ke depan)
+  const { data: expLots = [] } = useQuery({
+    queryKey: ["stok-exp", branchQuery],
+    queryFn: () =>
+      api<ExpLotRow[]>(`/stok/exp${branchQuery ? `${branchQuery}&hari=7` : "?hari=7"}`),
+    enabled: !isKantorData,
+  });
+  const [bukaExp, setBukaExp] = useState(false);
+  const [wasteLot, setWasteLot] = useState<ExpLotRow | null>(null);
+  // sisa hari exp TERDEKAT per bahan → badge per baris tabel
+  const expByIng = new Map<string, number>();
+  for (const l of expLots) {
+    const ada = expByIng.get(l.ingredient_id);
+    if (ada == null || l.sisa_hari < ada) expByIng.set(l.ingredient_id, l.sisa_hari);
+  }
+  const adaLewat = expLots.some((l) => l.sisa_hari < 0);
 
   const [cari, setCari] = useState("");
   const [filterTempat, setFilterTempat] = useState<string>("semua");
@@ -281,6 +298,75 @@ export function StokPage() {
         <Spinner />
       ) : (
         <>
+      {/* PERINGATAN EXP: lot hampir/lewat kedaluwarsa → daftar + Catat waste.
+          Aproksimasi: qty = saat lot masuk (ledger agregat, bukan sisa lot). */}
+      {expLots.length > 0 && (
+        <div
+          className={`mb-3 rounded-lg border px-3 py-2 text-sm ${
+            adaLewat ? "border-red-200 bg-red-50" : "border-amber-200 bg-amber-50"
+          }`}
+        >
+          <button
+            type="button"
+            onClick={() => setBukaExp((v) => !v)}
+            className={`flex w-full items-center justify-between font-semibold ${
+              adaLewat ? "text-red-800" : "text-amber-800"
+            }`}
+          >
+            <span>
+              ⏳ {expLots.length} lot bahan {adaLewat ? "lewat/hampir" : "hampir"} kedaluwarsa
+              (≤ 7 hari)
+            </span>
+            <span>{bukaExp ? "▴" : "▾"}</span>
+          </button>
+          {bukaExp && (
+            <div className="mt-2 space-y-1.5">
+              {expLots.map((l) => (
+                <div
+                  key={l.production_id}
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-white/70 px-2.5 py-1.5"
+                >
+                  <div className="min-w-0 text-xs text-stone-700">
+                    <b>{l.nama}</b> · masuk {formatAngka(l.qty_masuk)} {l.satuan}
+                    {l.nomor && <> · {l.nomor}</>}
+                    {l.tempat && <> · 🗄 {l.tempat}</>}
+                    <span
+                      className={`ml-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
+                        l.sisa_hari < 0
+                          ? "bg-red-100 text-red-700"
+                          : "bg-amber-100 text-amber-800"
+                      }`}
+                    >
+                      {l.sisa_hari < 0
+                        ? `❌ lewat ${-l.sisa_hari} hr (exp ${l.exp_date})`
+                        : l.sisa_hari === 0
+                          ? "⚠ exp HARI INI"
+                          : `⚠ exp ${l.sisa_hari} hr lagi (${l.exp_date})`}
+                    </span>
+                    <div className="text-[10px] text-stone-400">
+                      qty saat masuk — saldo bahan kini {formatAngka(l.saldo)} {l.satuan}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setWasteLot(l)}
+                    disabled={l.saldo <= 0}
+                    className="rounded-lg bg-red-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-40"
+                    title={
+                      l.saldo <= 0
+                        ? "Saldo bahan sudah 0 — tidak ada yang bisa di-waste"
+                        : "Catat waste (masuk alur ACC Riwayat SO)"
+                    }
+                  >
+                    🗑 Catat waste
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <input
           value={cari}
@@ -351,6 +437,20 @@ export function StokPage() {
                       {labelTahapPembelian(s.pembelian_berjalan)}
                     </span>
                   )}
+                  {expByIng.has(s.ingredient_id) && (
+                    <span
+                      className={`ml-2 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold ${
+                        expByIng.get(s.ingredient_id)! < 0
+                          ? "bg-red-100 text-red-700"
+                          : "bg-amber-100 text-amber-800"
+                      }`}
+                      title="Ada lot bahan ini yang hampir/lewat tanggal kedaluwarsa — lihat peringatan di atas"
+                    >
+                      {expByIng.get(s.ingredient_id)! < 0
+                        ? "⏳ lewat exp"
+                        : `⏳ exp ${expByIng.get(s.ingredient_id)} hr`}
+                    </span>
+                  )}
                 </td>
                 <td className={`${tdClass} text-stone-500`}>{s.tempat ?? "—"}</td>
                 <td className={`${tdClass} text-right`}>{formatAngka(s.stok_awal)}</td>
@@ -381,6 +481,10 @@ export function StokPage() {
         </table>
       </Card>
         </>
+      )}
+
+      {wasteLot && (
+        <CatatWasteModal lot={wasteLot} branchId={dataId} onClose={() => setWasteLot(null)} />
       )}
     </div>
   );

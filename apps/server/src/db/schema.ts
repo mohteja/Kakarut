@@ -548,6 +548,18 @@ export const ingredients = pgTable(
       .notNull()
       .default(0),
     /**
+     * MASA SIMPAN (hari): umur layak pakai bahan setelah masuk stok. Saat
+     * baris faktur ditandai Tiba/Selesai, exp otomatis = tanggal masuk +
+     * masa simpan (bisa di-override per baris). 0 = tidak diatur (exp kosong).
+     */
+    masaSimpanHari: integer("masa_simpan_hari").notNull().default(0),
+    /**
+     * LEAD TIME (hari): jalur beli = lama pesanan sampai barang datang;
+     * jalur produksi = lama proses produksi. Dipakai perencanaan belanja
+     * ("pesan/buat jauh-jauh hari, H-n"). 0 = tanpa info.
+     */
+    leadTimeHari: integer("lead_time_hari").notNull().default(0),
+    /**
      * WARISAN — jangan dipakai lagi. Dulu "rak simpan default (home)" per bahan
      * yang diatur di form Bahan Baku. Kini rak simpan diatur per cabang di
      * Tempat Penyimpanan (storage_location_ingredients). Nilai lama dipindah ke
@@ -1080,6 +1092,13 @@ export const productions = pgTable(
     deletedBy: uuid("deleted_by").references(() => users.id),
     waktu: timestamp("waktu", { withTimezone: true }).notNull().defaultNow(),
     prodDate: date("prod_date").notNull(),
+    /**
+     * TANGGAL KEDALUWARSA lot: diisi saat baris masuk stok (beli Tiba /
+     * produksi Selesai) = tanggal masuk + masa simpan bahan, bisa di-override
+     * per baris. NULL = bahan tanpa masa simpan / baris lama / transfer stok
+     * (lot asal tak diketahui).
+     */
+    expDate: date("exp_date"),
   },
   (t) => [
     index("productions_branch_ing_idx").on(t.branchId, t.ingredientId, t.waktu),
@@ -1089,6 +1108,10 @@ export const productions = pgTable(
     index("productions_rencana_idx")
       .on(t.rencanaId)
       .where(sql`${t.rencanaId} IS NOT NULL`),
+    // peringatan exp memindai lot ber-exp saja (parsial)
+    index("productions_exp_idx")
+      .on(t.branchId, t.expDate)
+      .where(sql`${t.expDate} IS NOT NULL`),
     check("productions_qty_ck", sql`${t.qty} > 0`),
   ],
 );

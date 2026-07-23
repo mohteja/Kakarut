@@ -65,6 +65,7 @@ export async function rencanaDariMenu(
         hargaBeli: ingredients.hargaBeli,
         bolehEceran: ingredients.bolehEceran,
         minBeli: ingredients.minBeli,
+        leadTimeHari: ingredients.leadTimeHari,
       })
       .from(ingredients)
       .where(eq(ingredients.companyId, companyId)),
@@ -207,6 +208,7 @@ export async function rencanaDariMenu(
       harga_per_unit: hargaPerUnit,
       // sama dengan hargaDefault faktur: round((qty/isi) × hargaBeli)
       estimasi_biaya: faktur ? Math.round(faktur.qty * hargaPerUnit) : null,
+      lead_time_hari: e?.leadTimeHari ?? 0,
       produksi_di: produksiDi,
     });
   }
@@ -337,6 +339,7 @@ export async function rencanaDariMenu(
             qty_faktur: faktur?.qty ?? null,
             harga_per_unit: hargaPerUnitInput,
             estimasi_biaya: faktur ? Math.round(faktur.qty * hargaPerUnitInput) : null,
+            lead_time_hari: e?.leadTimeHari ?? 0,
             untuk: [...(untukByInput.get(inputId) ?? [])].join(", ") || null,
             // penanda utk faktur: belanja bahan-mentah produksi CABANG dikirim
             // ke cabang tujuan (bukan disimpan di CK)

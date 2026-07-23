@@ -160,6 +160,7 @@ export async function rekomendasiBeli(
         hargaBeli: ingredients.hargaBeli,
         isi: ingredients.isi,
         bolehEceran: ingredients.bolehEceran,
+        leadTimeHari: ingredients.leadTimeHari,
       })
       .from(ingredients)
       .where(eq(ingredients.companyId, companyId)),
@@ -204,6 +205,7 @@ export async function rekomendasiBeli(
         : saran_beli != null
           ? 0
           : null,
+      lead_time_hari: e?.leadTimeHari ?? 0,
     };
   });
 

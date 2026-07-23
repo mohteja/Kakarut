@@ -67,12 +67,20 @@ function BagianKurang({
           ? "🛒 Beli produk jadi → faktur beli"
           : "🧺 Belanja bahan produksi → faktur beli (bahan mentah resep)";
   const subtotal = rows.reduce((t, b) => t + (b.estimasi_biaya ?? 0), 0);
+  // LEAD TIME terpanjang bagian ini: pesan/buat jauh-jauh hari (H-n)
+  const maxLead = rows.reduce((t, b) => Math.max(t, b.lead_time_hari ?? 0), 0);
   return (
     <div className={`overflow-hidden rounded-lg border ${warna.border}`}>
       <div className={`flex items-center justify-between px-3 py-1.5 ${warna.head}`}>
         <span className="text-sm font-bold">{judul}</span>
         <span className="text-xs font-semibold">
           {rows.length} bahan{kirim ? "" : ` · ${formatRupiah(subtotal)}`}
+          {maxLead > 0 && (
+            <span title={`Lead time terpanjang ${maxLead} hari — siapkan jauh-jauh hari`}>
+              {" "}
+              · ⏱ paling lama {maxLead} hr
+            </span>
+          )}
         </span>
       </div>
       <div className="max-h-56 overflow-y-auto overflow-x-auto">
@@ -94,6 +102,14 @@ function BagianKurang({
               <tr key={b.ingredient_id}>
                 <td className={`${tdClass} font-medium`}>
                   {b.nama}
+                  {(b.lead_time_hari ?? 0) > 0 && (
+                    <span
+                      className="ml-1.5 whitespace-nowrap rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-800"
+                      title={`Lead time ${b.lead_time_hari} hari — siapkan jauh-jauh hari (H-${b.lead_time_hari})`}
+                    >
+                      ⏱ siapkan H-{b.lead_time_hari}
+                    </span>
+                  )}
                   {b.untuk && (
                     <span className="block text-[11px] font-normal text-stone-400">
                       untuk {b.untuk}

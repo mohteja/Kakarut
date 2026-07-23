@@ -64,6 +64,10 @@ const BahanBody = z.object({
   boleh_eceran: z.boolean().default(false),
   /** minimal belanja (MOQ) saat belanja otomatis; 0 = tanpa minimum */
   min_beli: z.number().nonnegative().default(0),
+  /** masa simpan (hari) setelah masuk stok — dasar exp otomatis lot; 0 = tak diatur */
+  masa_simpan_hari: z.number().int().min(0).max(3650).default(0),
+  /** lead time (hari): beli = lama pesanan datang; produksi = lama proses; 0 = tanpa info */
+  lead_time_hari: z.number().int().min(0).max(365).default(0),
 });
 
 /**
@@ -92,6 +96,8 @@ const BahanPatchBody = z.object({
   is_complement: z.boolean().optional(),
   boleh_eceran: z.boolean().optional(),
   min_beli: z.number().nonnegative().optional(),
+  masa_simpan_hari: z.number().int().min(0).max(3650).optional(),
+  lead_time_hari: z.number().int().min(0).max(365).optional(),
 });
 
 const ResepBody = z.object({
@@ -115,6 +121,8 @@ const BahanBulkRow = z.object({
   stok_minimum: z.number().nonnegative().default(0),
   boleh_eceran: z.boolean().default(false),
   min_beli: z.number().nonnegative().default(0),
+  masa_simpan_hari: z.number().int().min(0).max(3650).default(0),
+  lead_time_hari: z.number().int().min(0).max(365).default(0),
   is_packaging: z.boolean().default(false),
   is_complement: z.boolean().default(false),
   catatan: z.string().nullish(),
@@ -137,6 +145,8 @@ const BahanImportRowBody = z.object({
   lacak_stok: z.boolean().default(true),
   kemasan: z.boolean().default(false),
   complement: z.boolean().default(false),
+  masa_simpan_hari: z.number().int().min(0).max(3650).default(0),
+  lead_time_hari: z.number().int().min(0).max(365).default(0),
   catatan: z.string().nullish(),
 });
 const BahanImportBody = z.object({
@@ -337,6 +347,8 @@ function toDto(
     is_complement: row.isComplement,
     boleh_eceran: row.bolehEceran,
     min_beli: row.minBeli,
+    masa_simpan_hari: row.masaSimpanHari,
+    lead_time_hari: row.leadTimeHari,
     is_active: row.isActive,
     supplier_utama: sup?.utama ?? null,
     jumlah_supplier: sup?.jumlah ?? 0,
@@ -499,6 +511,8 @@ export const bahanRoutes = new Hono<AppEnv>()
           isComplement: body.is_complement,
           bolehEceran: body.boleh_eceran,
           minBeli: body.min_beli,
+          masaSimpanHari: body.masa_simpan_hari,
+          leadTimeHari: body.lead_time_hari,
           updatedAt: new Date(),
         })
         .where(and(eq(ingredients.id, existing.id), eq(ingredients.companyId, auth.company_id!)))
@@ -530,6 +544,8 @@ export const bahanRoutes = new Hono<AppEnv>()
         isComplement: body.is_complement,
         bolehEceran: body.boleh_eceran,
         minBeli: body.min_beli,
+        masaSimpanHari: body.masa_simpan_hari,
+        leadTimeHari: body.lead_time_hari,
       })
       .returning();
     await simpanCabangProdusen(row.id, produsenIds);
@@ -576,6 +592,8 @@ export const bahanRoutes = new Hono<AppEnv>()
           pengadaan: "beli" as const,
           bolehEceran: b.boleh_eceran,
           minBeli: b.min_beli,
+          masaSimpanHari: b.masa_simpan_hari,
+          leadTimeHari: b.lead_time_hari,
           isPackaging: b.is_packaging,
           isComplement: b.is_complement,
           catatan: b.catatan ?? null,
@@ -681,6 +699,8 @@ export const bahanRoutes = new Hono<AppEnv>()
             satuanBeli: u.item.satuan_beli ?? null,
             stokMinimum: u.item.stok_minimum,
             minBeli: u.item.min_beli,
+            masaSimpanHari: u.item.masa_simpan_hari,
+            leadTimeHari: u.item.lead_time_hari,
             bolehEceran: u.item.boleh_eceran,
             trackStok: u.item.lacak_stok,
             isPackaging: u.item.kemasan,
@@ -712,6 +732,8 @@ export const bahanRoutes = new Hono<AppEnv>()
           trackStok: b.lacak_stok,
           stokMinimum: b.stok_minimum,
           minBeli: b.min_beli,
+          masaSimpanHari: b.masa_simpan_hari,
+          leadTimeHari: b.lead_time_hari,
           kategori: kanonikKategori(kmap, b.kategori),
           pengadaan: b.jenis,
           bolehEceran: b.boleh_eceran,
@@ -830,6 +852,8 @@ export const bahanRoutes = new Hono<AppEnv>()
           ...(body.is_complement !== undefined && { isComplement: body.is_complement }),
           ...(body.boleh_eceran !== undefined && { bolehEceran: body.boleh_eceran }),
           ...(body.min_beli !== undefined && { minBeli: body.min_beli }),
+          ...(body.masa_simpan_hari !== undefined && { masaSimpanHari: body.masa_simpan_hari }),
+          ...(body.lead_time_hari !== undefined && { leadTimeHari: body.lead_time_hari }),
           updatedAt: new Date(),
         })
         .where(

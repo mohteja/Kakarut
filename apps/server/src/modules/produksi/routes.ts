@@ -39,7 +39,7 @@ import {
   verifikasiPassword,
   type AppEnv,
 } from "../../middleware/auth";
-import { tanggalDi } from "../../lib/time";
+import { tambahHari, tanggalDi } from "../../lib/time";
 import { hitungSaldoCabang } from "../stok/service";
 import { autoFileRakCabang } from "../penyimpanan/autoFile";
 
@@ -104,6 +104,16 @@ const TahapBody = z.object({
          * estimasi RAB pada bagian yang maju; sisa split tetap prorata RAB.
          */
         harga: z.number().nonnegative().max(1_000_000_000_000).nullish(),
+        /**
+         * Override tanggal EXP lot saat baris MASUK STOK (beli Tiba /
+         * produksi Selesai, target ≥ "menunggu"). Kosong = otomatis dari
+         * masa simpan bahan (tanggal masuk + masa_simpan_hari); diabaikan
+         * untuk target tahap lain.
+         */
+        exp: z
+          .string()
+          .regex(/^\d{4}-\d{2}-\d{2}$/, "Format exp harus YYYY-MM-DD")
+          .nullish(),
       }),
     )
     .min(1)
@@ -777,6 +787,38 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
           return rakDefault.get(`${b.ingredientId}|${b.branchId}`) ?? b.storageLocationId;
         };
 
+        // EXP LOT: saat baris MASUK STOK (>= menunggu: beli Tiba / produksi
+        // Selesai), exp otomatis = tanggal masuk + masa simpan bahan (master),
+        // bisa di-override per baris (items[].exp). Baris yang sudah ber-exp
+        // dipertahankan (mis. menunggu → dikonfirmasi tidak menggeser exp).
+        const masukStok = target >= URUTAN_TAHAP.menunggu;
+        const masaSimpanByIng = new Map<string, number>();
+        let hariMasuk = "";
+        if (masukStok) {
+          const [comp] = await db
+            .select({ timezone: companies.timezone })
+            .from(companies)
+            .where(eq(companies.id, auth.company_id!));
+          hariMasuk = tanggalDi(comp?.timezone ?? "Asia/Jakarta");
+          const msRows = await db
+            .select({ id: ingredients.id, masaSimpan: ingredients.masaSimpanHari })
+            .from(ingredients)
+            .where(
+              and(
+                eq(ingredients.companyId, auth.company_id!),
+                inArray(ingredients.id, [...new Set(baris.map((b) => b.ingredientId))]),
+              ),
+            );
+          for (const r of msRows) masaSimpanByIng.set(r.id, r.masaSimpan);
+        }
+        const expBaris = (b: (typeof baris)[number], override?: string | null) => {
+          if (!masukStok) return b.expDate;
+          if (override) return override;
+          if (b.expDate) return b.expDate;
+          const ms = masaSimpanByIng.get(b.ingredientId) ?? 0;
+          return ms > 0 ? tambahHari(hariMasuk, ms) : null;
+        };
+
         const now = new Date();
         // Baris yang TIBA/SELESAI di cabang sendiri (tujuan kosong & tak dikirim
         // ke cabang lain) LANGSUNG dikonfirmasi begitu mencapai "menunggu" → stok
@@ -850,6 +892,8 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
                     : {}),
                   // harga riil menggantikan estimasi RAB (harga pasar berubah)
                   ...(item.harga != null ? { totalHarga: item.harga } : {}),
+                  // exp lot saat masuk stok (otomatis dari masa simpan / override)
+                  ...(masukStok ? { expDate: expBaris(b, item.exp) } : {}),
                 })
                 .where(kunci)
                 .returning({ id: productions.id });
@@ -915,6 +959,8 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
                 tujuanBranchId: b.tujuanBranchId,
                 workerId: b.workerId ?? (selfAssign ? auth.sub : null),
                 prodDate: b.prodDate,
+                // exp lot bagian yang maju; sisa split tetap exp lama (belum masuk)
+                expDate: expBaris(b, item.exp),
                 ...naikBaris(b),
               })
                 .returning({ id: productions.id });
@@ -986,6 +1032,15 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         }
       }
 
+      // EXP LOT (jalur non-items): saat seluruh faktur TIBA/SELESAI
+      // (ke="menunggu"), isi exp otomatis = hari ini + masa simpan bahan bila
+      // belum ada. Auto-confirm dua-langkah di bawah tidak menyentuh expDate.
+      const [compTz] = await db
+        .select({ timezone: companies.timezone })
+        .from(companies)
+        .where(eq(companies.id, auth.company_id!));
+      const hariMasukPenuh = tanggalDi(compTz?.timezone ?? "Asia/Jakarta");
+
       const rows = await db.transaction(async (tx) => {
         const diperbarui = await tx
           .update(productions)
@@ -1003,6 +1058,12 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
             ...(tipe === "beli" && ke === "dikerjakan"
               ? {
                   supplierId: sql`COALESCE(${productions.supplierId}, (SELECT isup.supplier_id FROM ingredient_suppliers isup WHERE isup.ingredient_id = ${productions.ingredientId} AND isup.is_utama LIMIT 1))`,
+                }
+              : {}),
+            // masuk stok: exp otomatis dari masa simpan bahan (PG: date + int)
+            ...(ke === "menunggu"
+              ? {
+                  expDate: sql`COALESCE(${productions.expDate}, (SELECT CASE WHEN i.masa_simpan_hari > 0 THEN ${hariMasukPenuh}::date + i.masa_simpan_hari END FROM ingredients i WHERE i.id = ${productions.ingredientId}))`,
                 }
               : {}),
             // BELI bertujuan cabang: "menunggu" = barang TIBA DI CK — baris
@@ -1648,6 +1709,11 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
             catatan: body.catatan ?? null,
             userId: auth.sub,
             prodDate: tanggalDi(company?.timezone ?? "Asia/Jakarta"),
+            // lahir langsung dikonfirmasi (masuk stok) → exp dari masa simpan
+            expDate:
+              ing.masaSimpanHari > 0
+                ? tambahHari(tanggalDi(company?.timezone ?? "Asia/Jakarta"), ing.masaSimpanHari)
+                : null,
           })
           .returning();
         // baris lahir langsung 'dikonfirmasi' (tanpa tahap) → produksi selesai
@@ -1741,6 +1807,9 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         catatan: productions.catatan,
         waktu: productions.waktu,
         prod_date: productions.prodDate,
+        // exp lot (terisi saat masuk stok) + masa simpan master (default form Tiba)
+        exp_date: productions.expDate,
+        masa_simpan_hari: ingredients.masaSimpanHari,
         faktur_id: productions.fakturId,
         no_faktur: productions.noFaktur,
         // nomor dokumen otomatis (PB-/PR-) — sama untuk semua baris satu faktur
