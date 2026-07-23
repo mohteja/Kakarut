@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import type { FakturLogRow, JenisPengadaan, PenyimpananDto, SupplierDto } from "@kakarut/shared";
-import { ErrorText, Modal, btnPrimary, btnSecondary, inputClass } from "../../components/ui";
+import type { FakturLogRow, JenisPengadaan } from "@kakarut/shared";
+import { ErrorText, Modal, btnSecondary } from "../../components/ui";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah, formatTanggalRingkas, formatWaktu } from "../../lib/format";
 import {
@@ -12,12 +12,6 @@ import {
   type FakturGroup,
   type TahapTujuan,
 } from "./TambahStokPage";
-
-interface Karyawan {
-  user_id: string;
-  nama: string;
-  is_active: boolean;
-}
 
 /** Entri buku dana faktur: pencairan RAB, dana tambahan, atau sisa kembali. */
 interface DanaEntri {
@@ -30,8 +24,9 @@ interface DanaEntri {
 }
 
 /**
- * Detail satu faktur pembelian/produksi: lihat metadata + item, ubah metadata,
- * atau hapus (Tempat Sampah). Ubah & hapus butuh password akun.
+ * Detail satu faktur pembelian/produksi: lihat metadata + item, lalu Batalkan
+ * (faktur dari Permintaan Stok — relasi permintaan) atau Hapus ke Tempat Sampah
+ * (faktur input langsung). Keduanya bisa dipulihkan dari Tempat Sampah.
  */
 export function FakturDetailModal({
   grup,
@@ -47,40 +42,13 @@ export function FakturDetailModal({
   /** ganti tahap langsung dari detail (parent membuka halaman Ubah Tahap) */
   onUbahTahap?: (ke: TahapTujuan) => void;
 }) {
-  // Tempat penyimpanan diambil dari cabang FAKTUR ini (bukan pilihan Kantor),
-  // agar daftar tempat cocok dengan cabang faktur — termasuk faktur store lama
-  // yang dibuka dari Kantor.
-  const fakturBranchId = grup.rows[0]?.branch_id ?? null;
-  const branchQuery = fakturBranchId ? `?branch_id=${fakturBranchId}` : "";
   const queryClient = useQueryClient();
-  const [mode, setMode] = useState<"lihat" | "ubah" | "hapus">("lihat");
+  const [mode, setMode] = useState<"lihat" | "hapus">("lihat");
+  // Faktur dari Permintaan Stok: tak boleh dihapus langsung (relasinya ke
+  // permintaan) — hanya "Batalkan". Hapus permanen dilakukan dari halaman
+  // Permintaan Stok. Faktur input langsung tetap "Hapus" biasa.
+  const dariPermintaan = grup.dariPermintaan;
 
-  const [noFaktur, setNoFaktur] = useState(grup.noFaktur ?? "");
-  const [supplierId, setSupplierId] = useState(grup.supplierId ?? ""); // jalur beli
-  // jalur produksi: pelaksana "k:<user_id>" / "s:<supplier_id>"
-  const [pelaksana, setPelaksana] = useState(
-    grup.workerId ? `k:${grup.workerId}` : grup.supplierId ? `s:${grup.supplierId}` : "",
-  );
-  const [tempatId, setTempatId] = useState("__keep");
-  const [prodDate, setProdDate] = useState(grup.prodDate);
-  const [catatan, setCatatan] = useState(grup.catatan ?? "");
-  const [password, setPassword] = useState("");
-
-  const { data: supplier = [] } = useQuery({
-    queryKey: ["supplier"],
-    queryFn: () => api<SupplierDto[]>("/supplier"),
-    enabled: mode === "ubah",
-  });
-  const { data: tempat = [] } = useQuery({
-    queryKey: ["penyimpanan", branchQuery],
-    queryFn: () => api<PenyimpananDto[]>(`/penyimpanan${branchQuery}`),
-    enabled: mode === "ubah",
-  });
-  const { data: karyawan = [] } = useQuery({
-    queryKey: ["karyawan"],
-    queryFn: () => api<Karyawan[]>("/karyawan"),
-    enabled: mode === "ubah" && tipe === "produksi",
-  });
   const { data: dana } = useQuery({
     queryKey: [endpoint, "dana", grup.fakturId],
     queryFn: () =>
@@ -101,40 +69,20 @@ export function FakturDetailModal({
     onClose();
   }
 
-  const [pelTipe, pelId] = pelaksana ? pelaksana.split(":") : ["", ""];
-
-  const simpanUbah = useMutation({
-    mutationFn: () =>
-      api(`${endpoint}/faktur/${grup.key}`, {
-        method: "PATCH",
-        body: {
-          password,
-          no_faktur: noFaktur.trim() || null,
-          // beli: supplier langsung; produksi: pelaksana → worker_id/supplier_id
-          supplier_id:
-            tipe === "beli" ? supplierId || null : pelTipe === "s" ? pelId : null,
-          ...(tipe === "produksi" ? { worker_id: pelTipe === "k" ? pelId : null } : {}),
-          catatan: catatan.trim() || null,
-          prod_date: prodDate,
-          ...(tempatId !== "__keep" ? { storage_location_id: tempatId || null } : {}),
-        },
-      }),
-    onSuccess: selesai,
-  });
-
-  // Hapus = SOFT-DELETE ke Tempat Sampah (cukup konfirmasi, tanpa password —
-  // bisa dipulihkan dari Tempat Sampah).
+  // Batalkan / Hapus = SOFT-DELETE ke Tempat Sampah (cukup konfirmasi — bisa
+  // dipulihkan). Untuk faktur dari permintaan ini berarti "batalkan" faktur;
+  // permintaannya TIDAK tersentuh (tetap ada di Permintaan Stok).
   const hapus = useMutation({
     mutationFn: () => api(`${endpoint}/faktur/${grup.key}`, { method: "DELETE" }),
     onSuccess: selesai,
   });
 
   const judul =
-    mode === "ubah"
-      ? "Ubah Metadata Faktur"
-      : mode === "hapus"
-        ? "Hapus ke Tempat Sampah"
-        : `Detail ${tipe === "beli" ? "Pembelian" : "Produksi"}`;
+    mode === "hapus"
+      ? dariPermintaan
+        ? "Batalkan Faktur"
+        : "Hapus ke Tempat Sampah"
+      : `Detail ${tipe === "beli" ? "Pembelian" : "Produksi"}`;
 
   return (
     <Modal open onClose={onClose} title={judul}>
@@ -396,156 +344,63 @@ export function FakturDetailModal({
                   </select>
                 );
               })()}
-            <button onClick={() => setMode("ubah")} className={btnSecondary}>
-              ✏️ Ubah metadata
-            </button>
-            <button
-              onClick={() => setMode("hapus")}
-              className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700"
-            >
-              🗑 Hapus
-            </button>
+            {/* Faktur dari permintaan → Batalkan (relasi permintaan); input
+                langsung → Hapus biasa. Keduanya ke Tempat Sampah (dpt dipulihkan). */}
+            {dariPermintaan ? (
+              <button
+                onClick={() => setMode("hapus")}
+                className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-700"
+              >
+                🚫 Batalkan
+              </button>
+            ) : (
+              <button
+                onClick={() => setMode("hapus")}
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700"
+              >
+                🗑 Hapus
+              </button>
+            )}
           </div>
         </div>
       )}
 
-      {mode === "ubah" && (
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            simpanUbah.mutate();
-          }}
-          className="space-y-3"
-        >
-          <div className="rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-800">
-            Hanya metadata yang diubah — jumlah & harga tidak berubah (stok tetap).
-          </div>
-          {tipe === "beli" && (
-            <>
-              <div>
-                <label className="mb-1 block text-sm font-medium">Supplier</label>
-                <select
-                  value={supplierId}
-                  onChange={(e) => setSupplierId(e.target.value)}
-                  className={inputClass}
-                >
-                  <option value="">— tanpa supplier —</option>
-                  {supplier.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.nama}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="mb-1 block text-sm font-medium">No. faktur</label>
-                <input
-                  value={noFaktur}
-                  onChange={(e) => setNoFaktur(e.target.value)}
-                  className={inputClass}
-                />
-              </div>
-            </>
-          )}
-          {tipe === "produksi" && (
-            <div>
-              <label className="mb-1 block text-sm font-medium">Dikerjakan oleh (pelaksana)</label>
-              <select
-                value={pelaksana}
-                onChange={(e) => setPelaksana(e.target.value)}
-                className={inputClass}
-              >
-                <option value="">— tanpa pelaksana —</option>
-                {karyawan
-                  .filter((k) => k.is_active)
-                  .map((k) => (
-                    <option key={`k:${k.user_id}`} value={`k:${k.user_id}`}>
-                      {k.nama} (karyawan)
-                    </option>
-                  ))}
-                {supplier
-                  .filter((s) => s.is_active)
-                  .map((s) => (
-                    <option key={`s:${s.id}`} value={`s:${s.id}`}>
-                      {s.nama} (supplier)
-                    </option>
-                  ))}
-              </select>
-            </div>
-          )}
-          <div>
-            <label className="mb-1 block text-sm font-medium">Tempat penyimpanan (semua item)</label>
-            <select
-              value={tempatId}
-              onChange={(e) => setTempatId(e.target.value)}
-              className={inputClass}
-            >
-              <option value="__keep">— jangan ubah —</option>
-              <option value="">(kosongkan)</option>
-              {tempat.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.nama}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium">Tanggal</label>
-            <input
-              type="date"
-              value={prodDate}
-              onChange={(e) => setProdDate(e.target.value)}
-              className={inputClass}
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium">Catatan</label>
-            <input
-              value={catatan}
-              onChange={(e) => setCatatan(e.target.value)}
-              className={inputClass}
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium">Password akun (konfirmasi)</label>
-            <input
-              type="password"
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className={inputClass}
-              placeholder="••••••••"
-            />
-          </div>
-          <ErrorText error={simpanUbah.error} />
-          <div className="flex justify-end gap-2 pt-1">
-            <button type="button" onClick={() => setMode("lihat")} className={btnSecondary}>
-              Batal
-            </button>
-            <button type="submit" disabled={simpanUbah.isPending} className={btnPrimary}>
-              {simpanUbah.isPending ? "Menyimpan…" : "Simpan"}
-            </button>
-          </div>
-        </form>
-      )}
-
       {mode === "hapus" && (
         <div className="space-y-3">
-          <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">
-            Faktur akan dipindah ke <b>Tempat Sampah</b> dan stoknya dikoreksi. Masih bisa{" "}
-            <b>dipulihkan</b> dari Tempat Sampah bila terhapus tak sengaja.
-          </div>
+          {dariPermintaan ? (
+            <div className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              Faktur ini berasal dari <b>Permintaan {grup.permintaanNomor ?? "Stok"}</b>.
+              Membatalkan akan mengeluarkan faktur ini (stok dikoreksi) & memindahkannya ke{" "}
+              <b>Tempat Sampah</b> (bisa dipulihkan). <b>Permintaannya tetap ada</b> — untuk
+              menghapus permanen, hapus dari <b>Permintaan Stok</b>.
+            </div>
+          ) : (
+            <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">
+              Faktur akan dipindah ke <b>Tempat Sampah</b> dan stoknya dikoreksi. Masih bisa{" "}
+              <b>dipulihkan</b> dari Tempat Sampah bila terhapus tak sengaja.
+            </div>
+          )}
           <ErrorText error={hapus.error} />
           <div className="flex justify-end gap-2 pt-1">
             <button type="button" onClick={() => setMode("lihat")} className={btnSecondary}>
-              Batal
+              {dariPermintaan ? "Tidak" : "Batal"}
             </button>
             <button
               onClick={() => hapus.mutate()}
               disabled={hapus.isPending}
-              className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+              className={`rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 ${
+                dariPermintaan
+                  ? "bg-amber-600 hover:bg-amber-700"
+                  : "bg-red-600 hover:bg-red-700"
+              }`}
             >
-              {hapus.isPending ? "Menghapus…" : "Ya, pindahkan ke Tempat Sampah"}
+              {hapus.isPending
+                ? dariPermintaan
+                  ? "Membatalkan…"
+                  : "Menghapus…"
+                : dariPermintaan
+                  ? "Ya, Batalkan faktur"
+                  : "Ya, pindahkan ke Tempat Sampah"}
             </button>
           </div>
         </div>
