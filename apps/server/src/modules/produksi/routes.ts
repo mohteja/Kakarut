@@ -210,6 +210,12 @@ const TambahStokBody = z
 
 const FakturBody = z.object({
   branch_id: z.string().uuid().optional(),
+  /**
+   * BELI (opsional, manajemen): cabang STORE tujuan kirim — barang dibeli di
+   * cabang faktur (biasanya CK) lalu dikirim ke cabang ini setelah tiba
+   * (alur kirim → diterima di Penerimaan cabang, sama dgn faktur permintaan).
+   */
+  tujuan_branch_id: z.string().uuid().nullish(),
   supplier_id: z.string().uuid().nullish(),
   no_faktur: z.string().trim().max(60).nullish(),
   catatan: z.string().nullish(),
@@ -380,6 +386,43 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
       // Kitchen cabang: hanya bahan ber-produksi_di "cabang" (diatur di Resep).
       await pastikanBolehDiproduksiKitchen(auth.role, branchId, ingRows);
 
+      // Tujuan kirim (jalur beli, manajemen): barang dibeli di cabang faktur
+      // lalu DIKIRIM ke store ini setelah tiba — baris bertujuan tidak
+      // auto-confirm, mengikuti alur kirim → diterima di Penerimaan cabang.
+      let tujuanBranchId: string | null = null;
+      if (body.tujuan_branch_id && body.tujuan_branch_id !== branchId) {
+        if (tipe !== "beli") {
+          throw new HTTPException(400, { message: "Tujuan kirim hanya untuk faktur beli" });
+        }
+        if (auth.role !== "owner" && auth.role !== "admin") {
+          throw new HTTPException(403, {
+            message: "Hanya manajemen yang boleh membeli untuk cabang lain",
+          });
+        }
+        const [tb] = await db
+          .select({
+            id: branches.id,
+            tipe: branches.tipe,
+            isActive: branches.isActive,
+            ckId: branches.centralKitchenId,
+            nama: branches.nama,
+          })
+          .from(branches)
+          .where(
+            and(eq(branches.id, body.tujuan_branch_id), eq(branches.companyId, auth.company_id!)),
+          );
+        if (!tb || tb.tipe !== "store" || !tb.isActive) {
+          throw new HTTPException(400, { message: "Cabang tujuan harus store aktif" });
+        }
+        // Store terhubung SATU CK pemasok: CK lain tak boleh mengirim ke sana
+        if (tb.ckId && tb.ckId !== branchId) {
+          throw new HTTPException(400, {
+            message: `Cabang "${tb.nama}" terhubung ke Central Kitchen lain — beli dari CK pemasoknya`,
+          });
+        }
+        tujuanBranchId = tb.id;
+      }
+
       if (body.supplier_id) {
         const [s] = await db
           .select({ id: suppliers.id })
@@ -441,6 +484,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         return {
           companyId: auth.company_id!,
           branchId,
+          tujuanBranchId,
           ingredientId: ing.id,
           qty,
           tipe,

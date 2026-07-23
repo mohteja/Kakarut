@@ -47,12 +47,15 @@ function BahanPicker({
   value,
   opsi,
   label,
+  kosongInfo,
   onChange,
 }: {
   value: string;
   opsi: BahanDto[];
   /** teks tampil per opsi (nama + isi kemasan/batch) */
   label: (b: BahanDto) => string;
+  /** penjelasan saat daftar KOSONG total (bukan sekadar pencarian tak cocok) */
+  kosongInfo?: string;
   onChange: (id: string) => void;
 }) {
   const [buka, setBuka] = useState(false);
@@ -97,7 +100,7 @@ function BahanPicker({
             <div className="max-h-56 overflow-y-auto">
               {cocok.length === 0 ? (
                 <div className="px-3 py-4 text-center text-sm text-stone-400">
-                  Tidak ada bahan yang cocok.
+                  {opsi.length === 0 && kosongInfo ? kosongInfo : "Tidak ada bahan yang cocok."}
                 </div>
               ) : (
                 cocok.map((b) => (
@@ -172,9 +175,11 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
   const endpoint = tipe === "produksi" ? "/produksi" : "/pembelian";
   const navigate = useNavigate();
   const { auth } = useAuth();
-  // Produksi & beli bahan baku = urusan Central Kitchen. Dari Kantor, pilih
-  // CK-nya (default CK pertama) — bukan store.
-  const { query: branchQuery, id: branchId } = useCabangData("produksi");
+  // Produksi = urusan Central Kitchen; BELI boleh juga langsung di cabang
+  // store (belanja mendesak cabang). Dari Kantor default CK pertama.
+  const { query: branchQuery, id: branchId } = useCabangData(
+    tipe === "beli" ? "beli" : "produksi",
+  );
   const queryClient = useQueryClient();
   const isKasir = auth?.user.role === "cashier";
   // karyawan CK (tim) & kitchen cabang: faktur dibuat di cabangnya sendiri,
@@ -185,12 +190,17 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
   // Faktur produksi di cabang TOKO (kitchen cabang): hasil masuk stok cabang
   // itu sendiri — bukan CK, tak ada langkah kirim/terima.
   const { cabang } = useBranch();
-  const produksiDiCabang =
-    tipe === "produksi" && cabang.find((b) => b.id === branchId)?.tipe === "store";
+  const cabangTerpilih = cabang.find((b) => b.id === branchId);
+  const produksiDiCabang = tipe === "produksi" && cabangTerpilih?.tipe === "store";
+  // BELI langsung DI cabang store: barang Tiba langsung masuk stok cabang itu
+  const beliDiCabang = tipe === "beli" && cabangTerpilih?.tipe === "store";
+  const beliDiCk = tipe === "beli" && cabangTerpilih?.tipe === "central_kitchen";
 
+  // varian LENGKAP (bukan ringkas): supplier_utama dipakai menandai bahan
+  // langganan supplier terpilih di pemilih bahan
   const { data: bahan } = useQuery({
-    queryKey: ["bahan", "ringkas"],
-    queryFn: () => api<BahanDto[]>("/bahan?ringkas=1"),
+    queryKey: ["bahan"],
+    queryFn: () => api<BahanDto[]>("/bahan"),
   });
   const { data: supplier = [] } = useQuery({
     queryKey: ["supplier"],
@@ -222,6 +232,20 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
   );
 
   const [supplierId, setSupplierId] = useState(""); // jalur beli
+  // BELI dari CK: tujuan kirim opsional — barang tiba di CK lalu dikirim ke
+  // cabang store ini (kirim → diterima di Penerimaan cabang)
+  const [tujuanId, setTujuanId] = useState("");
+  // Bahan LANGGANAN supplier terpilih tampil paling atas di pemilih + badge 🏬
+  const namaSupplier =
+    tipe === "beli" && supplierId
+      ? (supplier.find((s) => s.id === supplierId)?.nama ?? null)
+      : null;
+  const bahanUrut = namaSupplier
+    ? [...bahanJalur].sort(
+        (a, b) =>
+          Number(b.supplier_utama === namaSupplier) - Number(a.supplier_utama === namaSupplier),
+      )
+    : bahanJalur;
   // produksi: "k:<id>" / "s:<id>" — tim otomatis dirinya sendiri
   const [pelaksana, setPelaksana] = useState(isTim && auth ? `k:${auth.user.sub}` : "");
   const [noFaktur, setNoFaktur] = useState("");
@@ -237,6 +261,7 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
     if (cabangSebelum.current === branchId) return;
     cabangSebelum.current = branchId;
     setItems((prev) => prev.map((it) => ({ ...it, storage_location_id: "" })));
+    setTujuanId(""); // tujuan kirim milik CK lama tidak relevan lagi
   }, [branchId]);
   const [tambahTempat, setTambahTempat] = useState(false);
 
@@ -273,6 +298,7 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
         method: "POST",
         body: {
           ...(isManajemen && branchId ? { branch_id: branchId } : {}),
+          ...(tipe === "beli" && beliDiCk && tujuanId ? { tujuan_branch_id: tujuanId } : {}),
           supplier_id: tipe === "produksi" ? (pelTipe === "s" ? pelId : null) : supplierId || null,
           ...(tipe === "produksi" ? { worker_id: pelTipe === "k" ? pelId : null } : {}),
           no_faktur: noFaktur || null,
@@ -317,7 +343,14 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
 
   return (
     <div className="max-w-5xl">
-      <CabangDataBar fokus="produksi" />
+      <CabangDataBar fokus={tipe === "beli" ? "beli" : "produksi"} />
+      {/* BELI langsung di cabang store: tanpa lewat CK */}
+      {beliDiCabang && (
+        <div className="mb-4 rounded-lg bg-purple-50 px-4 py-2 text-sm text-purple-900">
+          Faktur dibukukan di cabang <b>{cabangTerpilih?.nama}</b> — barang yang ditandai{" "}
+          <b>📦 Tiba</b> langsung masuk <b>stok cabang ini</b> (tanpa lewat Central Kitchen).
+        </div>
+      )}
       <PageTitle
         aksi={
           <button type="button" onClick={() => navigate(endpoint)} className={btnSecondary}>
@@ -396,6 +429,35 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
               />
             )}
             <ErrorText error={supplierBaru.error} />
+            {/* BELI dari CK (manajemen): tujuan kirim opsional ke cabang store */}
+            {beliDiCk && isManajemen && (
+              <div className="mt-3">
+                <label className="mb-1 block text-sm font-medium">Untuk cabang (opsional)</label>
+                <select
+                  value={tujuanId}
+                  onChange={(e) => setTujuanId(e.target.value)}
+                  className={inputClass}
+                >
+                  <option value="">— Stok CK saja (tidak dikirim) —</option>
+                  {cabang
+                    .filter(
+                      (b) =>
+                        b.is_active &&
+                        b.tipe === "store" &&
+                        (!b.central_kitchen_id || b.central_kitchen_id === branchId),
+                    )
+                    .map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.nama}
+                      </option>
+                    ))}
+                </select>
+                <div className="mt-1 text-xs text-stone-400">
+                  Bila diisi, barang <b>dikirim</b> ke cabang ini setelah Tiba di CK, lalu{" "}
+                  <b>diterima</b> di Penerimaan cabang.
+                </div>
+              </div>
+            )}
           </div>
           <div>
             {tipe === "beli" && (
@@ -459,9 +521,16 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
                     </label>
                     <BahanPicker
                       value={it.ingredient_id}
-                      opsi={bahanJalur}
+                      opsi={bahanUrut}
                       label={(x) =>
-                        `${x.nama} (1 ${tipe === "beli" ? "kemasan" : "batch"} = ${formatAngka(x.isi)} ${x.satuan})`
+                        `${x.nama} (1 ${tipe === "beli" ? "kemasan" : "batch"} = ${formatAngka(x.isi)} ${x.satuan})${
+                          namaSupplier && x.supplier_utama === namaSupplier ? " · 🏬 langganan" : ""
+                        }`
+                      }
+                      kosongInfo={
+                        tipe === "beli"
+                          ? `Belum ada bahan yang bisa dibeli. Pemilih ini hanya menampilkan bahan berjalur pengadaan "BELI" yang DILACAK stoknya — periksa kolom Pengadaan & Lacak Stok di master Bahan Baku. (Pilihan supplier tidak memfilter daftar ini.)`
+                          : `Belum ada bahan jalur PRODUKSI yang dilacak stoknya — periksa master Bahan Baku.`
                       }
                       onChange={(id) => ubahItem(i, { ingredient_id: id })}
                     />
