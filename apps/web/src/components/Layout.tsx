@@ -38,7 +38,7 @@ export function Layout() {
   const { cabang, branchId, setBranchId, divisi } = useBranch();
   // Badge stok/penerimaan mengikuti "cabang data" (dari Kantor = cabang yang
   // sedang dikelola, sama dengan isi halaman Stok/Penerimaan).
-  const { query: dataQuery } = useCabangData();
+  const { query: dataQuery, dariKantor } = useCabangData();
   const { isPro } = useCompanyMode();
   const [menuOpen, setMenuOpen] = useState(false);
   const location = useLocation();
@@ -93,15 +93,20 @@ export function Layout() {
       cabang.find((b) => b.id === auth.user.branch_id)?.tipe === "central_kitchen") ||
       roleGuard === "kitchen" ||
       (manajemenGuard && divisi !== "store"));
-  const qsPengadaan = `${dataQuery}${dataQuery ? "&" : "?"}per_page=200`;
+  // Cakupan badge = cakupan HALAMAN pengadaan (TambahStokPage): dari Kantor =
+  // SELURUH cabang (branch_id=all), selain itu cabang datanya. Sebelumnya badge
+  // memakai slot data "store" (useCabangData tanpa fokus) — faktur di Central
+  // Kitchen tak terhitung → notif "belum selesai" hilang walau sebenarnya ada.
+  const scopePengadaan = dariKantor ? "?branch_id=all" : dataQuery;
+  const qsPengadaan = `${scopePengadaan}${scopePengadaan ? "&" : "?"}per_page=500`;
   const { data: prodNav } = useQuery({
-    queryKey: ["produksi-nav", dataQuery],
+    queryKey: ["produksi-nav", scopePengadaan],
     queryFn: () => api<{ rows: { faktur_id: string; status: string }[] }>(`/produksi${qsPengadaan}`),
     enabled: lihatPengadaan,
     refetchInterval: 60_000,
   });
   const { data: beliNav } = useQuery({
-    queryKey: ["pembelian-nav", dataQuery],
+    queryKey: ["pembelian-nav", scopePengadaan],
     queryFn: () => api<{ rows: { faktur_id: string; status: string }[] }>(`/pembelian${qsPengadaan}`),
     enabled: lihatPengadaan,
     refetchInterval: 60_000,
