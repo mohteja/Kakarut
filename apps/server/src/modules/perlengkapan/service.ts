@@ -5,7 +5,7 @@
  * sebelum pakai/koreksi, dan sekali saat boot.
  */
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, gte, inArray, isNotNull, lt, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, sql, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import type {
   BeliPerlengkapanRow,
@@ -1323,6 +1323,17 @@ export async function daftarBeliPerlengkapan(
       oleh: users.nama,
       diprosesOleh: pemroses.nama,
       supplierUtama: supUtama.nama,
+      // terkait permintaan MASIH AKTIF: rencana_id punya produksi yg belum
+      // di-soft-delete → tak boleh Hapus permanen dari sini (kelola dari
+      // Permintaan Stok). manual / permintaan sudah tak ada → boleh Hapus.
+      permintaanAktif: sql<boolean>`(
+        ${supplyPurchases.rencanaId} IS NOT NULL
+        AND EXISTS (
+          SELECT 1 FROM ${productions} p
+          WHERE p.rencana_id = ${supplyPurchases.rencanaId}
+            AND p.company_id = ${companyId} AND p.deleted_at IS NULL
+        )
+      )`,
     })
     .from(supplyPurchases)
     .innerJoin(supplies, eq(supplyPurchases.supplyId, supplies.id))
@@ -1366,7 +1377,65 @@ export async function daftarBeliPerlengkapan(
     diproses_oleh: r.diprosesOleh,
     supplier_utama: r.supplierUtama,
     harga_beli: r.hargaBeli,
+    permintaan_aktif: r.permintaanAktif,
   }));
+}
+
+/**
+ * HAPUS PERMANEN faktur/baris beli perlengkapan (bersih-bersih data lama).
+ * HANYA boleh bila: TIDAK ada baris 'tiba' (tak pernah masuk stok) DAN tidak
+ * terkait permintaan yang masih AKTIF (rencana_id-nya punya produksi yang belum
+ * di-soft-delete) — faktur dari permintaan aktif dikelola dari Permintaan Stok.
+ */
+async function hapusBeliInternal(
+  companyId: string,
+  match: SQL,
+): Promise<{ ok: true; jumlah: number } | { error: string; code?: number }> {
+  const rows = await db
+    .select({
+      id: supplyPurchases.id,
+      status: supplyPurchases.status,
+      rencanaId: supplyPurchases.rencanaId,
+    })
+    .from(supplyPurchases)
+    .where(and(eq(supplyPurchases.companyId, companyId), match));
+  if (rows.length === 0) return { error: "Faktur tidak ditemukan", code: 404 };
+  if (rows.some((r) => r.status === "tiba")) {
+    return { error: "Faktur yang sudah tiba (masuk stok) tak bisa dihapus", code: 400 };
+  }
+  const rencanaIds = [...new Set(rows.map((r) => r.rencanaId).filter((x): x is string => !!x))];
+  if (rencanaIds.length > 0) {
+    const [aktif] = await db
+      .select({ id: productions.id })
+      .from(productions)
+      .where(
+        and(
+          eq(productions.companyId, companyId),
+          inArray(productions.rencanaId, rencanaIds),
+          isNull(productions.deletedAt),
+        ),
+      )
+      .limit(1);
+    if (aktif) {
+      return {
+        error: "Faktur dari permintaan aktif — kelola/hapus dari Permintaan Stok",
+        code: 400,
+      };
+    }
+  }
+  const done = await db
+    .delete(supplyPurchases)
+    .where(and(eq(supplyPurchases.companyId, companyId), match))
+    .returning({ id: supplyPurchases.id });
+  return { ok: true, jumlah: done.length };
+}
+
+export function hapusFakturBeliPerlengkapan(companyId: string, fakturId: string) {
+  return hapusBeliInternal(companyId, eq(supplyPurchases.fakturId, fakturId));
+}
+
+export function hapusBeliPerlengkapan(companyId: string, id: string) {
+  return hapusBeliInternal(companyId, eq(supplyPurchases.id, id));
 }
 
 /** Kiriman yang melibatkan cabang ini (masuk & keluar), terbaru dulu. */

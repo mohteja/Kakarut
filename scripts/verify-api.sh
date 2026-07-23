@@ -4334,6 +4334,42 @@ cek "produksi: lead_time_hari tersimpan (2)" "V == 2" "$(echo "$B118P" | jq '.le
 cek "produksi: pengadaan tetap 'produksi' (tak ke-reset PUT parsial)" "V == 1" \
   "$(echo "$B118P" | jq '.pengadaan == "produksi" | if . then 1 else 0 end')"
 
+echo "== 119. Hapus permanen faktur beli perlengkapan (bersih-bersih data lama) =="
+# Hapus permanen HANYA utk faktur yang TAK terkait permintaan aktif & belum
+# 'tiba' (masuk stok) — untuk membersihkan data lama/manual. Faktur dari
+# permintaan yang masih hidup dikelola dari Permintaan Stok (bukan dihapus di sini).
+SBH119=$(api "$OWNER" POST /perlengkapan '{"nama":"Serbet Hapus 119","satuan":"pcs","harga_beli":3000,"stok_minimum":0}' | jq -r .id)
+# (a) faktur MANUAL (tanpa permintaan) → permintaan_aktif=false → boleh Hapus
+FM119=$(api "$OWNER" POST /perlengkapan/beli "{\"items\":[{\"supply_id\":\"$SBH119\",\"qty\":2}],\"ck_branch_id\":\"$CK52_UTAMA\"}" | jq -r '.faktur_id // ""')
+cek "faktur manual: permintaan_aktif=false (boleh hapus)" "V == 1" \
+  "$(api "$OWNER" GET /perlengkapan/beli | jq --arg f "$FM119" '[.[]|select(.faktur_id==$f)][0].permintaan_aktif==false | if . then 1 else 0 end')"
+cek "guard: kitchen hapus faktur perlengkapan → 403" "V == 403" \
+  "$(status_code "$TKIT" DELETE "/perlengkapan/beli/faktur/$FM119")"
+cek "hapus faktur manual → ok + baris terhapus" "V == 1" \
+  "$(api "$OWNER" DELETE "/perlengkapan/beli/faktur/$FM119" | jq '(.ok==true) and (.jumlah>=1) | if . then 1 else 0 end')"
+cek "faktur manual HILANG permanen dari daftar" "V == 0" \
+  "$(api "$OWNER" GET /perlengkapan/beli | jq --arg f "$FM119" '[.[]|select(.faktur_id==$f)]|length')"
+cek "hapus faktur yang sudah tak ada → 404" "V == 404" \
+  "$(status_code "$OWNER" DELETE "/perlengkapan/beli/faktur/$FM119")"
+# (b) faktur DARI PERMINTAAN AKTIF (rencana punya produksi hidup) → tak boleh Hapus
+R119=$(api "$OWNER" POST /rekomendasi/menu/faktur "{\"items\":[{\"menu_id\":\"$PBA_ID\",\"porsi\":120}],\"tujuan_branch_id\":\"$CB46_ID\",\"ck_branch_id\":\"$CK52_UTAMA\"}" | jq -r '.rencana_id // ""')
+# item perlengkapan baru yang PASTI kurang (min 5, saldo 0) → jamin faktur BP terbit
+api "$OWNER" POST /perlengkapan '{"nama":"Spons Hapus 119","satuan":"pcs","stok_minimum":5}' > /dev/null
+FP119=$(api "$OWNER" POST "/perlengkapan/permintaan-otomatis?branch_id=$CB46_ID&rencana_id=$R119" '{}' | jq -r '.beli_faktur.faktur_id // ""')
+cek "dasar uji: faktur BP tertaut permintaan terbit" "V == 1" \
+  "$([ -n "$FP119" ] && echo 1 || echo 0)"
+cek "faktur permintaan aktif: permintaan_aktif=true" "V == 1" \
+  "$(api "$OWNER" GET /perlengkapan/beli | jq --arg f "$FP119" '[.[]|select(.faktur_id==$f)][0].permintaan_aktif==true | if . then 1 else 0 end')"
+cek "hapus faktur dari permintaan aktif → 400 (kelola dari Permintaan Stok)" "V == 400" \
+  "$(status_code "$OWNER" DELETE "/perlengkapan/beli/faktur/$FP119")"
+cek "faktur permintaan aktif TETAP ada (tak terhapus)" "V == 1" \
+  "$(api "$OWNER" GET /perlengkapan/beli | jq --arg f "$FP119" '[.[]|select(.faktur_id==$f)]|length>=1 | if . then 1 else 0 end')"
+# (c) faktur yang sudah 'tiba' (masuk stok CK) → tak boleh Hapus
+FT119=$(api "$OWNER" POST /perlengkapan/beli "{\"items\":[{\"supply_id\":\"$SBH119\",\"qty\":1}],\"ck_branch_id\":\"$CK52_UTAMA\"}" | jq -r '.faktur_id // ""')
+api "$OWNER" POST "/perlengkapan/beli/faktur/$FT119/tiba" '{}' > /dev/null
+cek "hapus faktur yang sudah tiba (masuk stok) → 400" "V == 400" \
+  "$(status_code "$OWNER" DELETE "/perlengkapan/beli/faktur/$FT119")"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

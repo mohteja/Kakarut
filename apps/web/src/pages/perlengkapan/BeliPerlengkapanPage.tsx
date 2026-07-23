@@ -39,6 +39,8 @@ interface FakturBeli {
   totalHarga: number;
   /** estimasi RAB: Σ (harga riil ?? qty × harga_beli master), tanpa baris batal */
   totalEstimasi: number;
+  /** terkait permintaan MASIH AKTIF → tak boleh Hapus permanen (kelola dari Permintaan Stok) */
+  permintaanAktif: boolean;
 }
 
 /** faktur masih perlu aksi (belum tiba/batal seluruhnya) */
@@ -66,10 +68,12 @@ function kelompokkanFaktur(rows: BeliPerlengkapanRow[]): FakturBeli[] {
         diprosesOleh: null,
         totalHarga: 0,
         totalEstimasi: 0,
+        permintaanAktif: false,
       };
       byKey.set(key, g);
     }
     g.rows.push(r);
+    if (r.permintaan_aktif) g.permintaanAktif = true;
     if (r.diproses_oleh && !g.diprosesOleh) g.diprosesOleh = r.diproses_oleh;
     if (r.total_harga != null && r.status !== "batal") g.totalHarga += r.total_harga;
     if (r.status !== "batal") g.totalEstimasi += r.total_harga ?? r.qty * (r.harga_beli ?? 0);
@@ -126,6 +130,15 @@ export function BeliPerlengkapanPage() {
     mutationFn: () => api(`/perlengkapan/beli/batal-semua`, { method: "POST", body: {} }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["perlengkapan-beli"] }),
   });
+  // HAPUS PERMANEN (bersih-bersih data lama) — hanya faktur yang tak terkait
+  // permintaan aktif & belum tiba; server menjaga guard-nya.
+  const hapus = useMutation({
+    mutationFn: (g: FakturBeli) =>
+      g.fakturId
+        ? api(`/perlengkapan/beli/faktur/${g.fakturId}`, { method: "DELETE" })
+        : api(`/perlengkapan/beli/${g.rows[0].id}`, { method: "DELETE" }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["perlengkapan-beli"] }),
+  });
 
   const menunggu = grup.filter((g) => g.status === "menunggu");
 
@@ -151,6 +164,7 @@ export function BeliPerlengkapanPage() {
       <ErrorText error={batal.error} />
       <ErrorText error={proses.error} />
       <ErrorText error={batalSemua.error} />
+      <ErrorText error={hapus.error} />
 
       {isLoading ? (
         <Spinner />
@@ -186,6 +200,10 @@ export function BeliPerlengkapanPage() {
             // ringkas ala Beli Bahan Baku: 1 barang pertama + jumlah lainnya;
             // rincian lengkap via klik kartu (modal detail)
             const utama = g.rows[0];
+            // Hapus permanen (data lama) — hanya bila TAK terkait permintaan
+            // aktif & belum ada baris tiba (tak ada dampak stok).
+            const bisaHapus =
+              isManajemen && !g.permintaanAktif && !g.rows.some((r) => r.status === "tiba");
             return (
             <Card
               key={g.key}
@@ -246,46 +264,68 @@ export function BeliPerlengkapanPage() {
                     g.totalEstimasi > 0 && <> · estimasi {formatRupiah(g.totalEstimasi)}</>
                   )}
                 </span>
-                {isManajemen && butuhAksi(g.status) && (
+                {(butuhAksi(g.status) && isManajemen) || bisaHapus ? (
                   <div className="ml-auto flex items-center gap-2">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setRab(g);
-                      }}
-                      className="rounded-lg border border-stone-200 px-2.5 py-1 text-xs font-medium text-stone-600 hover:bg-stone-50"
-                    >
-                      📄 Dokumen RAB
-                    </button>
-                    {/* Ubah Tahap — dropdown seperti Beli Bahan Baku */}
-                    <select
-                      value=""
-                      onClick={(e) => e.stopPropagation()}
-                      onChange={(e) => {
-                        e.stopPropagation();
-                        const v = e.target.value;
-                        if (v === "diproses") proses.mutate(g);
-                        else if (v === "tiba") setTiba(g);
-                        else if (v === "batal") {
-                          if (window.confirm(`Batalkan faktur beli ${g.nomor ?? "ini"}?`))
-                            batal.mutate(g);
-                        }
-                        e.target.value = "";
-                      }}
-                      aria-label={`Ubah tahap ${g.nomor ?? "faktur"}`}
-                      className="rounded-lg bg-orange-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-orange-700"
-                    >
-                      <option value="" disabled>
-                        ➡ Ubah Tahap
-                      </option>
-                      {g.status === "menunggu" && g.fakturId && (
-                        <option value="diproses">🛒 Diproses (dibelanjakan)</option>
-                      )}
-                      <option value="tiba">📦 Tiba di CK</option>
-                      <option value="batal">❌ Batalkan</option>
-                    </select>
+                    {isManajemen && butuhAksi(g.status) && (
+                      <>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setRab(g);
+                          }}
+                          className="rounded-lg border border-stone-200 px-2.5 py-1 text-xs font-medium text-stone-600 hover:bg-stone-50"
+                        >
+                          📄 Dokumen RAB
+                        </button>
+                        {/* Ubah Tahap — dropdown seperti Beli Bahan Baku */}
+                        <select
+                          value=""
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={(e) => {
+                            e.stopPropagation();
+                            const v = e.target.value;
+                            if (v === "diproses") proses.mutate(g);
+                            else if (v === "tiba") setTiba(g);
+                            else if (v === "batal") {
+                              if (window.confirm(`Batalkan faktur beli ${g.nomor ?? "ini"}?`))
+                                batal.mutate(g);
+                            }
+                            e.target.value = "";
+                          }}
+                          aria-label={`Ubah tahap ${g.nomor ?? "faktur"}`}
+                          className="rounded-lg bg-orange-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-orange-700"
+                        >
+                          <option value="" disabled>
+                            ➡ Ubah Tahap
+                          </option>
+                          {g.status === "menunggu" && g.fakturId && (
+                            <option value="diproses">🛒 Diproses (dibelanjakan)</option>
+                          )}
+                          <option value="tiba">📦 Tiba di CK</option>
+                          <option value="batal">❌ Batalkan</option>
+                        </select>
+                      </>
+                    )}
+                    {/* Hapus permanen — data lama yang tak terkait permintaan aktif */}
+                    {bisaHapus && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (
+                            window.confirm(
+                              `Hapus permanen faktur ${g.nomor ?? "ini"}? Data tidak bisa dikembalikan.`,
+                            )
+                          )
+                            hapus.mutate(g);
+                        }}
+                        disabled={hapus.isPending}
+                        className="rounded-lg border border-red-300 px-2.5 py-1 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50"
+                      >
+                        🗑 Hapus
+                      </button>
+                    )}
                   </div>
-                )}
+                ) : null}
               </div>
             </Card>
             );

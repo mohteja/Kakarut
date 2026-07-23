@@ -440,6 +440,8 @@ ADA (validasi = aturan endpoint asli), idempoten per `client_ref`.
 - `POST /api/perlengkapan/beli/batal-semua` — [owner/admin] — query: `branch_id?` (CK) — batalkan SEMUA faktur yang masih 'menunggu' (bersih-bersih massal; faktur ber-status 'diproses' TIDAK ikut tersapu) — res: `{ ok, jumlah }`. Catatan: `DELETE /api/rekomendasi/permintaan/:rencanaId` men-soft-delete productions permintaan itu & membatalkan baris BP tertaut yang masih 'menunggu' — baris BP tsb (permintaannya lenyap) OTOMATIS HILANG dari `GET /perlengkapan/beli` (tak lagi muncul "batal"); pulihkan permintaannya dari Tempat Sampah → baris BP tampil kembali.
 - `POST /api/perlengkapan/beli/:id/tiba` — [owner/admin] — per BARIS (warisan) — req: `{ qty?:number(>0), total_harga?:number(≥0)|null }` — res: hasil — error: **400/404**
 - `POST /api/perlengkapan/beli/:id/batal` — [owner/admin] — per BARIS (warisan) — res: hasil — error: **400/404**
+- `DELETE /api/perlengkapan/beli/faktur/:fakturId` — [owner/admin] — **HAPUS PERMANEN** satu faktur (bersih-bersih data lama). Boleh HANYA bila `permintaan_aktif=false` (tak terkait permintaan hidup) DAN tak ada baris `tiba` (belum masuk stok). Berbeda dari `…/batal` (soft): ini menghapus baris `supply_purchases` permanen — tak muncul di manapun. — res: `{ ok, jumlah }` — error: **400** (faktur dari permintaan aktif → kelola dari Permintaan Stok / ada baris sudah tiba), **404** (tidak ditemukan)
+- `DELETE /api/perlengkapan/beli/:id` — [owner/admin] — sama, per BARIS (warisan `faktur_id=null`) — res: `{ ok, jumlah }` — error: **400/404**
 - `POST /api/perlengkapan` — [owner/admin] — req `ItemBody`: `{ nama: string (max60), satuan: string="pcs" (max20), harga_beli: number(≥0)=0, stok_minimum: number(≥0)=0, catatan?|null (max300), kategori?|null (max60), boleh_eceran: bool=true, dilacak: bool=false, storage_location_id?: uuid|null }` — res: **201** `{ id, nama, dipulihkan }` — error: **400** rak invalid, **409** nama ada
 - `PATCH /api/perlengkapan/:id` — [owner/admin] — req: `ItemPatchBody` (semua opsional + `is_active?`) — res: `{ ok: true }` — error: **400**, **404**
 - `GET /api/perlengkapan/:id/supplier` — [any] — res: daftar supplier — error: **404**
@@ -1681,6 +1683,18 @@ export interface BeliPerlengkapanRow {
   waktu: string;
   oleh: string | null;
   nomor: string | null;
+  /** pemroses belanja — tercatat saat faktur ditandai 'diproses' */
+  diproses_oleh: string | null;
+  /** supplier LANGGANAN item (is_utama) — "tempat beli" di kartu & Dokumen RAB */
+  supplier_utama: string | null;
+  /** harga beli per satuan dari master — estimasi RAB (qty × harga_beli) */
+  harga_beli: number;
+  /**
+   * Faktur ini terkait PERMINTAAN yang MASIH AKTIF (rencana_id punya produksi
+   * yang belum dihapus). true → tak boleh Hapus permanen dari sini (kelola dari
+   * Permintaan Stok); false (manual / permintaan sudah tak ada) → boleh Hapus.
+   */
+  permintaan_aktif: boolean;
 }
 
 /** Kiriman perlengkapan CK → cabang (stok pindah saat cabang menerima). */
