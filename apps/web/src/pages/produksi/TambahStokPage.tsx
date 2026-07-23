@@ -653,6 +653,27 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
             // kartu ringkas ala transaksi marketplace: tampilkan 1 barang
             // pertama + jumlah bahan lainnya; rincian lengkap via klik kartu
             const utama = g.rows[0];
+            // pelaksana/vendor utk header — SEMBUNYIKAN bila namanya sama dgn
+            // pembuat faktur (sudah tampil di footer "dibuat oleh") agar tak
+            // muncul dobel. Kiriman menampilkan asal stok, bukan orang.
+            const pelaksanaNama = g.kiriman
+              ? null
+              : g.dikerjakanOleh ?? g.supplier ?? (tipe === "produksi" ? "Produksi sendiri" : null);
+            const pelaksanaHeader = g.kiriman
+              ? `🚚 Dari stok ${g.cabang ?? "CK"}`
+              : pelaksanaNama && pelaksanaNama !== g.dibuatOleh
+                ? `🔧 ${pelaksanaNama}`
+                : null;
+            // TUJUAN pembelian/produksi → badge di kanan, DI BAWAH badge tahap:
+            // cabang tujuan (ungu 📦), untuk-cabang permintaan (ungu 🎯), atau
+            // lokasi pembukuan/CK saat dari Kantor (teal 🏢).
+            const tujuanBadge = g.tujuanCabang
+              ? { label: `📦 ${g.tujuanCabang}`, cls: "bg-purple-100 text-purple-800" }
+              : g.untukCabang
+                ? { label: `🎯 untuk ${g.untukCabang}`, cls: "bg-purple-100 text-purple-800" }
+                : dariKantor && g.cabang
+                  ? { label: `🏢 ${g.cabang}`, cls: "bg-teal-100 text-teal-800" }
+                  : null;
             return (
             <Card
               key={g.key}
@@ -695,16 +716,10 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                     )}
                   </div>
                   <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-stone-500">
-                    {/* pelaksana bila SUDAH ada (tahap belum diproses cukup
-                        terbaca dari badge status kanan — tanpa teks ganda) */}
-                    {(g.kiriman || tipe === "produksi" || g.dikerjakanOleh || g.supplier) && (
-                      <span className="font-medium text-stone-600">
-                        {g.kiriman
-                          ? `🚚 Dari stok ${g.cabang ?? "CK"}` // transfer stok yang sudah ada
-                          : tipe === "produksi"
-                            ? `🔧 ${g.dikerjakanOleh ?? g.supplier ?? "Produksi sendiri"}`
-                            : `🔧 ${g.dikerjakanOleh ?? g.supplier}`}
-                      </span>
+                    {/* pelaksana/vendor — hanya bila menambah info (beda dari
+                        pembuat di footer); kiriman menampilkan asal stok */}
+                    {pelaksanaHeader && (
+                      <span className="font-medium text-stone-600">{pelaksanaHeader}</span>
                     )}
                     {g.danaCair > 0 && (
                       <span
@@ -714,33 +729,26 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                         💸 cair {formatRupiah(g.danaCair)}
                       </span>
                     )}
-                    {/* cabang faktur (Kantor) — hanya bila TANPA tujuan kirim;
-                        ada tujuan → cukup badge cabang tujuan di bawah */}
-                    {dariKantor && g.cabang && !g.tujuanCabang && <span>🏪 {g.cabang}</span>}
-                    {/* BADGE CABANG TUJUAN — langsung nama cabangnya */}
-                    {g.tujuanCabang && (
-                      <span className="whitespace-nowrap rounded-md bg-purple-100 px-2 py-0.5 text-sm font-bold text-purple-800">
-                        📦 {g.tujuanCabang}
-                      </span>
-                    )}
-                    {/* produksi dari permintaan: hasil UNTUK cabang peminta —
-                        pengingat "harus dikirim" tetap tampil setelah selesai */}
-                    {g.untukCabang && !g.tujuanCabang && (
-                      <span className="whitespace-nowrap rounded-md bg-purple-100 px-2 py-0.5 text-sm font-bold text-purple-800">
-                        🎯 untuk {g.untukCabang}
-                      </span>
-                    )}
                     {/* catatan manual saja — ringkasan "Rencana dari menu: …"
                         digantikan badge nomor permintaan di header */}
                     {g.catatan && !g.dariPermintaan && <span>· {g.catatan}</span>}
                   </div>
                 </div>
-                {/* status di pojok kanan atas kotak */}
-                <span
-                  className={`shrink-0 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold ${badgeTampil.cls}`}
-                >
-                  {badgeTampil.label}
-                </span>
+                {/* pojok kanan atas: badge tahap, lalu badge TUJUAN di bawahnya */}
+                <div className="flex shrink-0 flex-col items-end gap-1">
+                  <span
+                    className={`whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold ${badgeTampil.cls}`}
+                  >
+                    {badgeTampil.label}
+                  </span>
+                  {tujuanBadge && (
+                    <span
+                      className={`whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-bold ${tujuanBadge.cls}`}
+                    >
+                      {tujuanBadge.label}
+                    </span>
+                  )}
+                </div>
               </div>
 
               {/* Isi ringkas: cukup 1 barang + jumlah bahan lainnya — rincian
