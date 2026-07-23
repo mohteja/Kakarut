@@ -11,7 +11,7 @@ import {
   inputClass,
 } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
-import { useBranch, useCabangData } from "../../context/BranchContext";
+import { labelCabang, useBranch, useCabangData } from "../../context/BranchContext";
 import { CabangDataBar } from "../../components/CabangDataBar";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah } from "../../lib/format";
@@ -177,9 +177,15 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
   const { auth } = useAuth();
   // Produksi = urusan Central Kitchen; BELI boleh juga langsung di cabang
   // store (belanja mendesak cabang). Dari Kantor default CK pertama.
-  const { query: branchQuery, id: branchId } = useCabangData(
-    tipe === "beli" ? "beli" : "produksi",
-  );
+  // Untuk BELI, pemilihnya dirender SEBAGAI FIELD dalam form (bukan bar
+  // "Dari Kantor" di atas halaman) — lihat "Lokasi pembelian" di kartu form.
+  const {
+    query: branchQuery,
+    id: branchId,
+    dariKantor,
+    opsi: opsiLokasi,
+    pilih: pilihLokasi,
+  } = useCabangData(tipe === "beli" ? "beli" : "produksi");
   const queryClient = useQueryClient();
   const isKasir = auth?.user.role === "cashier";
   // karyawan CK (tim) & kitchen cabang: faktur dibuat di cabangnya sendiri,
@@ -196,8 +202,8 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
   const beliDiCabang = tipe === "beli" && cabangTerpilih?.tipe === "store";
   const beliDiCk = tipe === "beli" && cabangTerpilih?.tipe === "central_kitchen";
 
-  // varian LENGKAP (bukan ringkas): supplier_utama dipakai menandai bahan
-  // langganan supplier terpilih di pemilih bahan
+  // varian LENGKAP (bukan ringkas): supplier_utama + satuan_beli dipakai di
+  // pemilih bahan dan ringkasan belanja per supplier (jalur beli)
   const { data: bahan } = useQuery({
     queryKey: ["bahan"],
     queryFn: () => api<BahanDto[]>("/bahan"),
@@ -206,9 +212,12 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
     queryKey: ["supplier"],
     queryFn: () => api<SupplierDto[]>("/supplier"),
   });
+  // tempat simpan hanya dipilih di jalur produksi — beli otomatis ke rak
+  // home bahan (master) saat barang Tiba
   const { data: tempat = [] } = useQuery({
     queryKey: ["penyimpanan", branchQuery],
     queryFn: () => api<PenyimpananDto[]>(`/penyimpanan${branchQuery}`),
+    enabled: tipe === "produksi",
   });
   // daftar karyawan khusus manajemen — tim memakai dirinya sebagai pelaksana
   const { data: karyawan = [] } = useQuery({
@@ -231,26 +240,17 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
       (!isKitchen || tipe !== "produksi" || bolehKitchen(b)),
   );
 
-  const [supplierId, setSupplierId] = useState(""); // jalur beli
   // BELI dari CK: tujuan kirim opsional — barang tiba di CK lalu dikirim ke
   // cabang store ini (kirim → diterima di Penerimaan cabang)
   const [tujuanId, setTujuanId] = useState("");
-  // Bahan LANGGANAN supplier terpilih tampil paling atas di pemilih + badge 🏬
-  const namaSupplier =
-    tipe === "beli" && supplierId
-      ? (supplier.find((s) => s.id === supplierId)?.nama ?? null)
-      : null;
-  const bahanUrut = namaSupplier
-    ? [...bahanJalur].sort(
-        (a, b) =>
-          Number(b.supplier_utama === namaSupplier) - Number(a.supplier_utama === namaSupplier),
-      )
-    : bahanJalur;
   // produksi: "k:<id>" / "s:<id>" — tim otomatis dirinya sendiri
   const [pelaksana, setPelaksana] = useState(isTim && auth ? `k:${auth.user.sub}` : "");
   const [noFaktur, setNoFaktur] = useState("");
   const [catatan, setCatatan] = useState("");
-  const [items, setItems] = useState<ItemForm[]>([{ ...itemKosong }]);
+  // BELI: baris cukup bahan + jumlah — jumlah dihitung per KEMASAN (satuan
+  // beli master bahan); harga/supplier/rak simpan mengikuti master bahan.
+  const barisKosong: ItemForm = { ...itemKosong, mode: tipe === "beli" ? "batch" : "pcs" };
+  const [items, setItems] = useState<ItemForm[]>([{ ...barisKosong }]);
   const [tambahSupplier, setTambahSupplier] = useState(false);
 
   // Ganti cabang data (dari Kantor) → tempat penyimpanan milik cabang lama
@@ -269,8 +269,7 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
     mutationFn: (nama: string) => api<SupplierDto>("/supplier", { method: "POST", body: { nama } }),
     onSuccess: (s) => {
       queryClient.invalidateQueries({ queryKey: ["supplier"] });
-      if (tipe === "produksi") setPelaksana(`s:${s.id}`);
-      else setSupplierId(s.id);
+      setPelaksana(`s:${s.id}`);
       setTambahSupplier(false);
     },
   });
@@ -299,7 +298,9 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
         body: {
           ...(isManajemen && branchId ? { branch_id: branchId } : {}),
           ...(tipe === "beli" && beliDiCk && tujuanId ? { tujuan_branch_id: tujuanId } : {}),
-          supplier_id: tipe === "produksi" ? (pelTipe === "s" ? pelId : null) : supplierId || null,
+          // beli: tanpa supplier faktur — server mencatat supplier UTAMA tiap
+          // bahan (master) per baris saat faktur mulai Diproses
+          supplier_id: tipe === "produksi" && pelTipe === "s" ? pelId : null,
           ...(tipe === "produksi" ? { worker_id: pelTipe === "k" ? pelId : null } : {}),
           no_faktur: noFaktur || null,
           catatan: catatan || null,
@@ -341,16 +342,41 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
     return a + harga;
   }, 0);
 
+  // RINGKASAN BELANJA (beli): baris valid dikelompokkan per supplier UTAMA
+  // bahan dari master — pegangan "beli di mana" seperti Dokumen Belanja pada
+  // permintaan bahan baku. Supplier bernama tampil dulu, tanpa supplier akhir.
+  const kelompokSupplier = (() => {
+    if (tipe !== "beli") return [];
+    const byNama = new Map<
+      string,
+      {
+        nama: string | null;
+        subtotal: number;
+        baris: { b: BahanDto; jumlah: number; qtyPcs: number; estimasi: number | null }[];
+      }
+    >();
+    for (const it of items) {
+      const { b, qtyPcs, estimasi } = hitungBaris(it);
+      if (!b || qtyPcs <= 0) continue;
+      const key = b.supplier_utama ?? "__tanpa";
+      let g = byNama.get(key);
+      if (!g) {
+        g = { nama: b.supplier_utama ?? null, subtotal: 0, baris: [] };
+        byNama.set(key, g);
+      }
+      g.subtotal += estimasi ?? 0;
+      g.baris.push({ b, jumlah: Number(it.jumlah), qtyPcs, estimasi });
+    }
+    return [...byNama.values()].sort((a, z) =>
+      a.nama === null ? 1 : z.nama === null ? -1 : a.nama.localeCompare(z.nama),
+    );
+  })();
+
   return (
     <div className="max-w-5xl">
-      <CabangDataBar fokus={tipe === "beli" ? "beli" : "produksi"} />
-      {/* BELI langsung di cabang store: tanpa lewat CK */}
-      {beliDiCabang && (
-        <div className="mb-4 rounded-lg bg-purple-50 px-4 py-2 text-sm text-purple-900">
-          Faktur dibukukan di cabang <b>{cabangTerpilih?.nama}</b> — barang yang ditandai{" "}
-          <b>📦 Tiba</b> langsung masuk <b>stok cabang ini</b> (tanpa lewat Central Kitchen).
-        </div>
-      )}
+      {/* Produksi tetap pakai bar "Dari Kantor"; BELI memilih lokasi lewat
+          field "Lokasi pembelian" DI DALAM form (lebih menyatu). */}
+      {tipe === "produksi" && <CabangDataBar fokus="produksi" />}
       <PageTitle
         aksi={
           <button type="button" onClick={() => navigate(endpoint)} className={btnSecondary}>
@@ -394,41 +420,56 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
                       </option>
                     ))}
                 </select>
+                <button
+                  type="button"
+                  onClick={() => setTambahSupplier(!tambahSupplier)}
+                  className="mt-1 text-xs font-medium text-orange-600 hover:underline"
+                >
+                  ➕ Tambah supplier baru
+                </button>
+                {tambahSupplier && (
+                  <QuickAdd
+                    placeholder="nama supplier/sumber"
+                    onSubmit={(n) => supplierBaru.mutate(n)}
+                    pending={supplierBaru.isPending}
+                  />
+                )}
+                <ErrorText error={supplierBaru.error} />
               </>
             ) : (
               <>
-                <label className="mb-1 block text-sm font-medium">Sumber (supplier/toko)</label>
-                <select
-                  value={supplierId}
-                  onChange={(e) => setSupplierId(e.target.value)}
-                  className={inputClass}
-                >
-                  <option value="">— tanpa sumber —</option>
-                  {supplier
-                    .filter((s) => s.is_active)
-                    .map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.nama}
-                      </option>
-                    ))}
-                </select>
+                {/* Lokasi pembelian (dari Kantor): CK = stok CK (bisa dikirim
+                    ke cabang); cabang store = langsung masuk stok cabang itu */}
+                {dariKantor && (
+                  <div className="mb-3">
+                    <label className="mb-1 block text-sm font-medium">Lokasi pembelian</label>
+                    <select
+                      value={branchId ?? ""}
+                      onChange={(e) => pilihLokasi(e.target.value)}
+                      aria-label="Lokasi pembelian"
+                      className={inputClass}
+                    >
+                      {opsiLokasi.map((b) => (
+                        <option key={b.id} value={b.id}>
+                          {labelCabang(b)}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="mt-1 text-xs text-stone-400">
+                      {beliDiCabang ? (
+                        <>
+                          Dibukukan di cabang <b>{cabangTerpilih?.nama}</b> — barang yang
+                          ditandai 📦 Tiba <b>langsung masuk stok cabang ini</b> (tanpa lewat
+                          CK).
+                        </>
+                      ) : (
+                        <>Barang masuk stok CK saat Tiba — bisa dikirim ke cabang lewat “Untuk cabang”.</>
+                      )}
+                    </div>
+                  </div>
+                )}
               </>
             )}
-            <button
-              type="button"
-              onClick={() => setTambahSupplier(!tambahSupplier)}
-              className="mt-1 text-xs font-medium text-orange-600 hover:underline"
-            >
-              ➕ Tambah supplier baru
-            </button>
-            {tambahSupplier && (
-              <QuickAdd
-                placeholder="nama supplier/sumber"
-                onSubmit={(n) => supplierBaru.mutate(n)}
-                pending={supplierBaru.isPending}
-              />
-            )}
-            <ErrorText error={supplierBaru.error} />
             {/* BELI dari CK (manajemen): tujuan kirim opsional ke cabang store */}
             {beliDiCk && isManajemen && (
               <div className="mt-3">
@@ -490,7 +531,7 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
           </div>
           <button
             type="button"
-            onClick={() => setItems([...items, { ...itemKosong }])}
+            onClick={() => setItems([...items, { ...barisKosong }])}
             className={btnSecondary}
           >
             + Tambah baris
@@ -502,9 +543,9 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
           <div className="min-w-0 flex-1">Bahan</div>
           <div className="w-28 shrink-0">Satuan</div>
           <div className="w-20 shrink-0 text-right">Jumlah</div>
-          <div className="w-40 shrink-0">Disimpan di</div>
+          {tipe === "produksi" && <div className="w-40 shrink-0">Disimpan di</div>}
           <div className="w-32 shrink-0 text-right">
-            {tipe === "beli" ? "Harga (Rp)" : "Perkiraan (RAB)"}
+            {tipe === "beli" ? "Perkiraan (Rp)" : "Perkiraan (RAB)"}
           </div>
           <div className="w-5 shrink-0" />
         </div>
@@ -521,15 +562,17 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
                     </label>
                     <BahanPicker
                       value={it.ingredient_id}
-                      opsi={bahanUrut}
+                      opsi={bahanJalur}
                       label={(x) =>
-                        `${x.nama} (1 ${tipe === "beli" ? "kemasan" : "batch"} = ${formatAngka(x.isi)} ${x.satuan})${
-                          namaSupplier && x.supplier_utama === namaSupplier ? " · 🏬 langganan" : ""
-                        }`
+                        tipe === "beli"
+                          ? `${x.nama} (1 ${x.satuan_beli ?? "kemasan"} = ${formatAngka(x.isi)} ${x.satuan})${
+                              x.supplier_utama ? ` · 🏬 ${x.supplier_utama}` : ""
+                            }`
+                          : `${x.nama} (1 batch = ${formatAngka(x.isi)} ${x.satuan})`
                       }
                       kosongInfo={
                         tipe === "beli"
-                          ? `Belum ada bahan yang bisa dibeli. Pemilih ini hanya menampilkan bahan berjalur pengadaan "BELI" yang DILACAK stoknya — periksa kolom Pengadaan & Lacak Stok di master Bahan Baku. (Pilihan supplier tidak memfilter daftar ini.)`
+                          ? `Belum ada bahan yang bisa dibeli. Pemilih ini hanya menampilkan bahan berjalur pengadaan "BELI" yang DILACAK stoknya — periksa kolom Pengadaan & Lacak Stok di master Bahan Baku.`
                           : `Belum ada bahan jalur PRODUKSI yang dilacak stoknya — periksa master Bahan Baku.`
                       }
                       onChange={(id) => ubahItem(i, { ingredient_id: id })}
@@ -539,22 +582,29 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
                     <label className="mb-1 block text-xs font-medium text-stone-500 md:hidden">
                       Satuan
                     </label>
-                    <div className="flex overflow-hidden rounded-lg border border-stone-300 text-sm">
-                      <button
-                        type="button"
-                        onClick={() => ubahItem(i, { mode: "pcs" })}
-                        className={`flex-1 px-2 py-2 font-medium ${it.mode === "pcs" ? "bg-orange-600 text-white" : "bg-white text-stone-600"}`}
-                      >
-                        Pcs
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => ubahItem(i, { mode: "batch" })}
-                        className={`flex-1 px-2 py-2 font-medium ${it.mode === "batch" ? "bg-orange-600 text-white" : "bg-white text-stone-600"}`}
-                      >
-                        {tipe === "beli" ? "Kemasan" : "Batch"}
-                      </button>
-                    </div>
+                    {tipe === "beli" ? (
+                      // satuan mengikuti master bahan (satuan beli/kemasan)
+                      <div className="py-2 text-sm text-stone-700">
+                        {b ? (b.satuan_beli ?? "kemasan") : "—"}
+                      </div>
+                    ) : (
+                      <div className="flex overflow-hidden rounded-lg border border-stone-300 text-sm">
+                        <button
+                          type="button"
+                          onClick={() => ubahItem(i, { mode: "pcs" })}
+                          className={`flex-1 px-2 py-2 font-medium ${it.mode === "pcs" ? "bg-orange-600 text-white" : "bg-white text-stone-600"}`}
+                        >
+                          Pcs
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => ubahItem(i, { mode: "batch" })}
+                          className={`flex-1 px-2 py-2 font-medium ${it.mode === "batch" ? "bg-orange-600 text-white" : "bg-white text-stone-600"}`}
+                        >
+                          Batch
+                        </button>
+                      </div>
+                    )}
                   </div>
                   <div className="w-full shrink-0 md:w-20">
                     <label className="mb-1 block text-xs font-medium text-stone-500 md:hidden">
@@ -569,43 +619,35 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
                       className={`${inputClass} md:text-right`}
                     />
                   </div>
-                  <div className="w-full shrink-0 md:w-40">
-                    <label className="mb-1 block text-xs font-medium text-stone-500 md:hidden">
-                      Disimpan di
-                    </label>
-                    <select
-                      value={it.storage_location_id}
-                      onChange={(e) => ubahItem(i, { storage_location_id: e.target.value })}
-                      className={inputClass}
-                    >
-                      <option value="">— pilih tempat —</option>
-                      {tempat
-                        .filter((t) => t.is_active)
-                        .map((t) => (
-                          <option key={t.id} value={t.id}>
-                            {t.nama}
-                          </option>
-                        ))}
-                    </select>
-                  </div>
+                  {tipe === "produksi" && (
+                    <div className="w-full shrink-0 md:w-40">
+                      <label className="mb-1 block text-xs font-medium text-stone-500 md:hidden">
+                        Disimpan di
+                      </label>
+                      <select
+                        value={it.storage_location_id}
+                        onChange={(e) => ubahItem(i, { storage_location_id: e.target.value })}
+                        className={inputClass}
+                      >
+                        <option value="">— pilih tempat —</option>
+                        {tempat
+                          .filter((t) => t.is_active)
+                          .map((t) => (
+                            <option key={t.id} value={t.id}>
+                              {t.nama}
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+                  )}
                   <div className="w-full shrink-0 md:w-32">
                     <label className="mb-1 block text-xs font-medium text-stone-500 md:hidden">
-                      {tipe === "beli" ? "Harga (Rp)" : "Perkiraan (RAB)"}
+                      {tipe === "beli" ? "Perkiraan (Rp)" : "Perkiraan (RAB)"}
                     </label>
-                    {tipe === "beli" ? (
-                      <input
-                        type="number"
-                        min="0"
-                        value={it.total_harga}
-                        onChange={(e) => ubahItem(i, { total_harga: e.target.value })}
-                        className={`${inputClass} md:text-right`}
-                        placeholder={estimasi != null ? String(estimasi) : "otomatis"}
-                      />
-                    ) : (
-                      <div className="py-2 text-right text-sm font-medium text-stone-700">
-                        {estimasi != null ? formatRupiah(estimasi) : "—"}
-                      </div>
-                    )}
+                    {/* harga beli mengikuti master bahan — RAB otomatis */}
+                    <div className="py-2 text-right text-sm font-medium text-stone-700">
+                      {estimasi != null ? formatRupiah(estimasi) : "—"}
+                    </div>
                   </div>
                   <div className="hidden w-5 shrink-0 md:block">
                     {items.length > 1 && (
@@ -621,9 +663,10 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
                   </div>
                 </div>
                 <div className="mt-1 flex items-center justify-between">
-                  {b && it.mode === "batch" && Number(it.jumlah) > 0 ? (
+                  {b && it.mode === "batch" && b.isi !== 1 && Number(it.jumlah) > 0 ? (
                     <div className="text-xs text-orange-700">
-                      {formatAngka(Number(it.jumlah))} {tipe === "beli" ? "kemasan" : "batch"} ×{" "}
+                      {formatAngka(Number(it.jumlah))}{" "}
+                      {tipe === "beli" ? (b.satuan_beli ?? "kemasan") : "batch"} ×{" "}
                       {formatAngka(b.isi)} ={" "}
                       <b>
                         {formatAngka(qtyPcs)} {b.satuan}
@@ -649,19 +692,25 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
 
         {/* total */}
         <div className="flex items-center justify-between border-t border-stone-200 bg-stone-50 px-4 py-2.5">
-          <button
-            type="button"
-            onClick={() => setTambahTempat(!tambahTempat)}
-            className="text-xs font-medium text-orange-600 hover:underline"
-          >
-            ➕ Tambah tempat penyimpanan baru
-          </button>
+          {tipe === "produksi" ? (
+            <button
+              type="button"
+              onClick={() => setTambahTempat(!tambahTempat)}
+              className="text-xs font-medium text-orange-600 hover:underline"
+            >
+              ➕ Tambah tempat penyimpanan baru
+            </button>
+          ) : (
+            <span className="text-xs text-stone-400">
+              Satuan, harga, supplier & rak simpan mengikuti master Bahan Baku.
+            </span>
+          )}
           <div className="text-sm text-stone-700">
             {tipe === "beli" ? "Perkiraan total: " : "Perkiraan biaya (RAB): "}
             <b className="text-base">{formatRupiah(totalFaktur)}</b>
           </div>
         </div>
-        {tambahTempat && (
+        {tambahTempat && tipe === "produksi" && (
           <div className="px-4 pb-3">
             <QuickAdd
               placeholder="nama tempat (mis. Freezer 1)"
@@ -672,6 +721,46 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
           </div>
         )}
       </Card>
+
+      {/* Ringkasan belanja per supplier (beli) — seperti Dokumen Belanja */}
+      {tipe === "beli" && kelompokSupplier.length > 0 && (
+        <Card className="mb-4 overflow-hidden">
+          <div className="border-b border-stone-100 px-4 py-2.5 text-sm font-semibold text-stone-700">
+            Ringkasan belanja per supplier
+          </div>
+          {kelompokSupplier.map((g) => (
+            <div key={g.nama ?? "__tanpa"} className="border-b border-stone-100 last:border-b-0">
+              <div className="flex items-center justify-between bg-stone-50 px-4 py-1.5 text-xs font-semibold text-stone-600">
+                <span>{g.nama ? `🏬 ${g.nama}` : "🛒 Tanpa supplier utama (bebas)"}</span>
+                <span>{formatRupiah(g.subtotal)}</span>
+              </div>
+              {g.baris.map((r, idx) => (
+                <div
+                  key={idx}
+                  className="flex items-center justify-between gap-3 px-4 py-1.5 text-sm"
+                >
+                  <span className="min-w-0 truncate">{r.b.nama}</span>
+                  <span className="shrink-0 text-stone-500">
+                    {formatAngka(r.jumlah)} {r.b.satuan_beli ?? "kemasan"}
+                    {r.b.isi !== 1 && (
+                      <>
+                        {" "}
+                        ({formatAngka(r.qtyPcs)} {r.b.satuan})
+                      </>
+                    )}{" "}
+                    · {r.estimasi != null ? formatRupiah(r.estimasi) : "—"}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ))}
+          <div className="bg-stone-50 px-4 py-2 text-xs text-stone-500">
+            Supplier diambil dari <b>supplier utama</b> tiap bahan (master Bahan Baku) dan
+            tercatat otomatis per baris saat faktur mulai <b>Diproses</b> — kelompok yang sama
+            dipakai Dokumen Belanja.
+          </div>
+        </Card>
+      )}
 
       <div className="rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-800">
         {tipe === "produksi" ? (
