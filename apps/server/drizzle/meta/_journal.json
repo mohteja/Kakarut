@@ -491,6 +491,13 @@
       "when": 1784728764005,
       "tag": "0069_productive_junta",
       "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "7",
+      "when": 1784781883046,
+      "tag": "0070_absurd_punisher",
+      "breakpoints": true
     }
   ]
 }

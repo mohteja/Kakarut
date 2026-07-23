@@ -147,6 +147,13 @@ if (existsSync(webDist)) {
   // dari serveStatic) supaya tab yang dibuka via "/" ikut punya build id.
   app.get("/", kirimShell);
   app.get("/index.html", kirimShell);
+  // Aset ber-hash (nama file berganti tiap build) aman di-cache browser
+  // setahun penuh — kunjungan berikutnya tak perlu request sama sekali.
+  // Shell HTML tetap no-cache (di atas), jadi rilis baru langsung terambil.
+  app.use("/assets/*", async (c, next) => {
+    await next();
+    c.header("Cache-Control", "public, max-age=31536000, immutable");
+  });
   // Aset ber-hash (js/css/img) dilayani statis dari disk.
   app.use("/*", serveStatic({ root: path.relative(process.cwd(), webDist) }));
   // history fallback react-router untuk deep-link (mis. /dashboard).

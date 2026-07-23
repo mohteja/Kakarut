@@ -25,6 +25,7 @@ import { terbitkanNomor } from "../dokumen/nomor";
 import {
   batalBeliPerlengkapan,
   batalFakturBeliPerlengkapan,
+  batalSemuaBeliPerlengkapan,
   belanjaPerlengkapan,
   buatBeliPerlengkapanManual,
   buatKirimanPerlengkapan,
@@ -483,6 +484,15 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
       return c.json(hasil);
     },
   )
+  /**
+   * Batalkan SEMUA faktur beli yang masih 'menunggu' (bersih-bersih massal;
+   * opsional ?branch_id = CK). owner/admin.
+   */
+  .post("/beli/batal-semua", requireRole("owner", "admin"), async (c) => {
+    const auth = c.get("auth");
+    const ckId = c.req.query("branch_id") || undefined;
+    return c.json(await batalSemuaBeliPerlengkapan(auth.company_id!, ckId));
+  })
   /** Batalkan semua baris 'menunggu' satu faktur beli perlengkapan. owner/admin. */
   .post("/beli/faktur/:fakturId/batal", requireRole("owner", "admin"), async (c) => {
     const auth = c.get("auth");

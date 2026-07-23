@@ -4096,6 +4096,51 @@ cek "batal per faktur → 2 baris dibatalkan" "V == 1" \
   "$(api "$OWNER" POST "/perlengkapan/beli/faktur/$FM110/batal" '{}' | jq '(.ok==true) and (.jumlah==2) | if . then 1 else 0 end')"
 cek "batal per faktur lagi → 404" "V == 404" \
   "$(status_code "$OWNER" POST "/perlengkapan/beli/faktur/$FM110/batal")"
+# (f) HAPUS permintaan → faktur BP tertaut yang masih 'menunggu' ikut batal.
+api "$OWNER" POST /perlengkapan '{"nama":"Lap Uji 110","satuan":"pcs","stok_minimum":4}' > /dev/null
+R110B=$(api "$OWNER" POST /rekomendasi/menu/faktur "{\"items\":[{\"menu_id\":\"$PBA_ID\",\"porsi\":300}],\"tujuan_branch_id\":\"$CB46_ID\",\"ck_branch_id\":\"$CK52_UTAMA\"}" | jq -r '.rencana_id // ""')
+HB2=$(api "$OWNER" POST "/perlengkapan/permintaan-otomatis?branch_id=$CB46_ID&rencana_id=$R110B")
+FB2=$(echo "$HB2" | jq -r '.beli_faktur.faktur_id // ""')
+cek "dasar uji: faktur BP tertaut rencana baru terbit" "V == 1" \
+  "$([ -n "$FB2" ] && echo 1 || echo 0)"
+api "$OWNER" DELETE "/rekomendasi/permintaan/$R110B" > /dev/null
+cek "hapus permintaan → faktur BP tertaut ikut batal" "V == 1" \
+  "$(api "$OWNER" GET /perlengkapan/beli | jq --arg f "$FB2" '[.[]|select(.faktur_id==$f)|.status]|unique==["batal"] | if . then 1 else 0 end')"
+# (g) BATAL SEMUA yang menunggu (bersih-bersih faktur warisan tanpa tautan).
+LAP110=$(api "$OWNER" GET /perlengkapan/master | jq -r '[.[]|select(.nama=="Lap Uji 110")][0].id')
+api "$OWNER" POST /perlengkapan/beli "{\"items\":[{\"supply_id\":\"$LAP110\",\"qty\":1}],\"ck_branch_id\":\"$CK52_UTAMA\"}" > /dev/null
+# token $KASIR sudah 401 sejak §105 (token_version) — pakai kitchen (§107)
+cek "guard: kitchen batal-semua → 403" "V == 403" \
+  "$(status_code "$TKIT" POST /perlengkapan/beli/batal-semua)"
+cek "batal-semua → semua faktur menunggu dibatalkan (>=1)" "V == 1" \
+  "$(api "$OWNER" POST /perlengkapan/beli/batal-semua '{}' | jq '(.ok==true) and (.jumlah>=1) | if . then 1 else 0 end')"
+cek "tidak ada lagi faktur menunggu setelah batal-semua" "V == 0" \
+  "$(api "$OWNER" GET /perlengkapan/beli | jq '[.[]|select(.status=="menunggu")]|length')"
+
+echo "== 111. Performa HTTP: kompresi respons + cache aset ber-hash =="
+# Kompresi gzip utk respons kompresibel ≥1 KB; aset /assets/* (ber-hash per
+# build) di-cache immutable setahun; HTML shell tetap no-cache.
+header_of() { # header_of <nama-header> <curl args...>
+  local nama="$1"; shift
+  curl -s -o /dev/null -D - "$@" | tr -d '\r' | awk -F': ' -v n="$nama" 'tolower($1)==n{print $2}' | tail -1
+}
+ENC111=$(header_of "content-encoding" -H 'Accept-Encoding: gzip' -H "Authorization: Bearer $OWNER" "$BASE/api/bahan")
+cek "API JSON besar terkompresi gzip" "V == 1" "$([ "$ENC111" = "gzip" ] && echo 1 || echo 0)"
+ENC111B=$(header_of "content-encoding" -H "Authorization: Bearer $OWNER" "$BASE/api/bahan")
+cek "tanpa Accept-Encoding → tidak dikompresi" "V == 1" "$([ -z "$ENC111B" ] && echo 1 || echo 0)"
+CCSHELL=$(header_of "cache-control" "$BASE/")
+cek "HTML shell tetap no-cache" "V == 1" "$(echo "$CCSHELL" | grep -q no-cache && echo 1 || echo 0)"
+ASET111=$(curl -s "$BASE/" | grep -o '/assets/[^"]*\.js' | head -1)
+if [ -n "$ASET111" ]; then
+  CC111=$(header_of "cache-control" "$BASE$ASET111")
+  cek "aset ber-hash ber-Cache-Control immutable" "V == 1" \
+    "$(echo "$CC111" | grep -q immutable && echo 1 || echo 0)"
+  ENC111C=$(header_of "content-encoding" -H 'Accept-Encoding: gzip' "$BASE$ASET111")
+  cek "aset JS terkompresi gzip" "V == 1" "$([ "$ENC111C" = "gzip" ] && echo 1 || echo 0)"
+else
+  ok "aset ber-hash immutable (dilewati — web dist tak tersedia)"
+  ok "aset JS terkompresi (dilewati — web dist tak tersedia)"
+fi
 
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="

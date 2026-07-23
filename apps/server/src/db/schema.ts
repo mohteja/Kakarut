@@ -1083,6 +1083,12 @@ export const productions = pgTable(
   },
   (t) => [
     index("productions_branch_ing_idx").on(t.branchId, t.ingredientId, t.waktu),
+    // daftar Beli/Produksi difilter cabang + rentang tanggal faktur
+    index("productions_branch_date_idx").on(t.branchId, t.prodDate),
+    // Data Permintaan Stok memindai baris ber-rencana saja (parsial)
+    index("productions_rencana_idx")
+      .on(t.rencanaId)
+      .where(sql`${t.rencanaId} IS NOT NULL`),
     check("productions_qty_ck", sql`${t.qty} > 0`),
   ],
 );
@@ -1549,7 +1555,15 @@ export const supplyPurchases = pgTable(
     tibaBy: uuid("tiba_by").references(() => users.id),
     tibaAt: timestamp("tiba_at", { withTimezone: true }),
   },
-  (t) => [index("supply_purchases_ck_status_idx").on(t.ckBranchId, t.status)],
+  (t) => [
+    index("supply_purchases_ck_status_idx").on(t.ckBranchId, t.status),
+    index("supply_purchases_faktur_idx")
+      .on(t.fakturId)
+      .where(sql`${t.fakturId} IS NOT NULL`),
+    index("supply_purchases_rencana_idx")
+      .on(t.rencanaId)
+      .where(sql`${t.rencanaId} IS NOT NULL`),
+  ],
 );
 
 /**
