@@ -512,6 +512,13 @@
       "when": 1784788856623,
       "tag": "0072_nifty_fabian_cortez",
       "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1784790168283,
+      "tag": "0073_heavy_dorian_gray",
+      "breakpoints": true
     }
   ]
 }

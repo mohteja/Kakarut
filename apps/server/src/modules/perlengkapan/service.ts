@@ -1045,7 +1045,7 @@ export async function tibaBeliPerlengkapan(params: {
     .from(supplyPurchases)
     .where(and(eq(supplyPurchases.id, params.id), eq(supplyPurchases.companyId, params.companyId)));
   if (!beli) return { error: "Faktur beli tidak ditemukan", code: 404 };
-  if (beli.status !== "menunggu") {
+  if (beli.status !== "menunggu" && beli.status !== "diproses") {
     return { error: "Faktur ini sudah tiba atau dibatalkan", code: 400 };
   }
   const qtyFinal = params.qty != null && params.qty > 0 ? params.qty : beli.qty;
@@ -1069,7 +1069,12 @@ export async function tibaBeliPerlengkapan(params: {
           tibaAt: new Date(),
           updatedAt: new Date(),
         })
-        .where(and(eq(supplyPurchases.id, params.id), eq(supplyPurchases.status, "menunggu")))
+        .where(
+          and(
+            eq(supplyPurchases.id, params.id),
+            inArray(supplyPurchases.status, ["menunggu", "diproses"]),
+          ),
+        )
         .returning({ id: supplyPurchases.id });
       if (dikunci.length === 0) throw SUDAH;
       const [mut] = await tx
@@ -1148,7 +1153,7 @@ export async function tibaFakturBeliPerlengkapan(params: {
       ),
     );
   if (rows.length === 0) return { error: "Faktur beli tidak ditemukan", code: 404 };
-  const menunggu = rows.filter((r) => r.status === "menunggu");
+  const menunggu = rows.filter((r) => r.status === "menunggu" || r.status === "diproses");
   if (menunggu.length === 0) {
     return { error: "Faktur ini sudah tiba atau dibatalkan", code: 400 };
   }
@@ -1173,7 +1178,33 @@ export async function tibaFakturBeliPerlengkapan(params: {
   return { faktur_id: params.fakturId, jumlah_tiba: jumlahTiba, kiriman };
 }
 
-/** Batalkan SEMUA baris 'menunggu' satu faktur beli perlengkapan. */
+/**
+ * Tandai SATU FAKTUR beli 'diproses' (sedang dibelanjakan) — paritas tahap
+ * "RAB → diproses" beli bahan baku; pemroses & waktunya tercatat.
+ */
+export async function prosesFakturBeliPerlengkapan(
+  companyId: string,
+  fakturId: string,
+  userId: string,
+): Promise<{ ok: true; jumlah: number } | { error: string; code?: number }> {
+  const done = await db
+    .update(supplyPurchases)
+    .set({ status: "diproses", diprosesBy: userId, diprosesAt: new Date(), updatedAt: new Date() })
+    .where(
+      and(
+        eq(supplyPurchases.fakturId, fakturId),
+        eq(supplyPurchases.companyId, companyId),
+        eq(supplyPurchases.status, "menunggu"),
+      ),
+    )
+    .returning({ id: supplyPurchases.id });
+  if (done.length === 0) {
+    return { error: "Faktur tidak ditemukan / sudah diproses", code: 404 };
+  }
+  return { ok: true, jumlah: done.length };
+}
+
+/** Batalkan SEMUA baris 'menunggu'/'diproses' satu faktur beli perlengkapan. */
 export async function batalFakturBeliPerlengkapan(
   companyId: string,
   fakturId: string,
@@ -1185,7 +1216,7 @@ export async function batalFakturBeliPerlengkapan(
       and(
         eq(supplyPurchases.fakturId, fakturId),
         eq(supplyPurchases.companyId, companyId),
-        eq(supplyPurchases.status, "menunggu"),
+        inArray(supplyPurchases.status, ["menunggu", "diproses"]),
       ),
     )
     .returning({ id: supplyPurchases.id });
@@ -1226,7 +1257,7 @@ export async function batalBeliPerlengkapan(
       and(
         eq(supplyPurchases.id, id),
         eq(supplyPurchases.companyId, companyId),
-        eq(supplyPurchases.status, "menunggu"),
+        inArray(supplyPurchases.status, ["menunggu", "diproses"]),
       ),
     )
     .returning({ id: supplyPurchases.id });
@@ -1243,6 +1274,10 @@ export async function daftarBeliPerlengkapan(
 ): Promise<BeliPerlengkapanRow[]> {
   const ckB = alias(branches, "ck_beli");
   const tujuanB = alias(branches, "tujuan_beli");
+  const pemroses = alias(users, "pemroses_beli");
+  // supplier LANGGANAN item (is_utama, maks satu — partial unique index)
+  const ssUtama = alias(supplySuppliers, "ss_utama_beli");
+  const supUtama = alias(suppliers, "sup_utama_beli");
   const conds = [eq(supplyPurchases.companyId, companyId)];
   if (ckBranchId) conds.push(eq(supplyPurchases.ckBranchId, ckBranchId));
   const rows = await db
@@ -1252,6 +1287,7 @@ export async function daftarBeliPerlengkapan(
       supplyId: supplyPurchases.supplyId,
       nama: supplies.nama,
       satuan: supplies.satuan,
+      hargaBeli: supplies.hargaBeli,
       qty: supplyPurchases.qty,
       totalHarga: supplyPurchases.totalHarga,
       status: supplyPurchases.status,
@@ -1260,15 +1296,26 @@ export async function daftarBeliPerlengkapan(
       catatan: supplyPurchases.catatan,
       waktu: supplyPurchases.createdAt,
       oleh: users.nama,
+      diprosesOleh: pemroses.nama,
+      supplierUtama: supUtama.nama,
     })
     .from(supplyPurchases)
     .innerJoin(supplies, eq(supplyPurchases.supplyId, supplies.id))
     .innerJoin(ckB, eq(supplyPurchases.ckBranchId, ckB.id))
     .leftJoin(tujuanB, eq(supplyPurchases.tujuanBranchId, tujuanB.id))
     .leftJoin(users, eq(supplyPurchases.userId, users.id))
+    .leftJoin(pemroses, eq(supplyPurchases.diprosesBy, pemroses.id))
+    .leftJoin(
+      ssUtama,
+      and(eq(ssUtama.supplyId, supplyPurchases.supplyId), eq(ssUtama.isUtama, true)),
+    )
+    .leftJoin(supUtama, eq(ssUtama.supplierId, supUtama.id))
     .where(and(...conds))
-    // 'menunggu' di atas (butuh aksi), lalu terbaru
-    .orderBy(sql`(${supplyPurchases.status} = 'menunggu') desc`, desc(supplyPurchases.createdAt))
+    // butuh aksi di atas (menunggu/diproses), lalu terbaru
+    .orderBy(
+      sql`(${supplyPurchases.status} in ('menunggu','diproses')) desc`,
+      desc(supplyPurchases.createdAt),
+    )
     .limit(200);
   // nomor BP-: ref = faktur_id (baris warisan tanpa faktur → ref = id baris)
   const nomorMap = await nomorUntukRefs(
@@ -1291,6 +1338,9 @@ export async function daftarBeliPerlengkapan(
     waktu: r.waktu.toISOString(),
     oleh: r.oleh,
     nomor: nomorMap.get(r.fakturId ?? r.id) ?? null,
+    diproses_oleh: r.diprosesOleh,
+    supplier_utama: r.supplierUtama,
+    harga_beli: r.hargaBeli,
   }));
 }
 

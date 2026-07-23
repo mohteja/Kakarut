@@ -1510,6 +1510,8 @@ export const supplyTransfers = pgTable(
  */
 export const supplyBeliStatusEnum = pgEnum("supply_beli_status", [
   "menunggu",
+  // sedang dibelanjakan (pemroses tercatat) — paritas tahap "diproses" beli bahan baku
+  "diproses",
   "tiba",
   "batal",
 ]);
@@ -1556,6 +1558,9 @@ export const supplyPurchases = pgTable(
     kirimTransferId: uuid("kirim_transfer_id").references(() => supplyTransfers.id),
     tibaBy: uuid("tiba_by").references(() => users.id),
     tibaAt: timestamp("tiba_at", { withTimezone: true }),
+    /** pemroses belanja — tercatat saat faktur ditandai 'diproses' */
+    diprosesBy: uuid("diproses_by").references(() => users.id),
+    diprosesAt: timestamp("diproses_at", { withTimezone: true }),
   },
   (t) => [
     index("supply_purchases_ck_status_idx").on(t.ckBranchId, t.status),

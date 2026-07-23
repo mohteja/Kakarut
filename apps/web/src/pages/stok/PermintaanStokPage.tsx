@@ -112,12 +112,14 @@ function Bagian({
  */
 const STYLE_PERLENGKAPAN: Record<PermintaanStokBagianPerlengkapan["status"], string> = {
   menunggu: "bg-amber-100 text-amber-700",
+  diproses: "bg-sky-100 text-sky-700",
   sebagian: "bg-lime-100 text-lime-700",
   tiba: "bg-green-100 text-green-700",
   batal: "bg-stone-100 text-stone-500",
 };
 const LABEL_PERLENGKAPAN: Record<PermintaanStokBagianPerlengkapan["status"], string> = {
   menunggu: "Menunggu dibeli",
+  diproses: "🛒 Diproses",
   sebagian: "Sebagian tiba",
   tiba: "Tiba di CK ✓",
   batal: "Dibatalkan",
@@ -152,9 +154,10 @@ function selesaiPermintaan(r: PermintaanStokRow): boolean {
     .map((b) => b.status);
   const bahanSelesai =
     st.length > 0 && st.every((s) => s === "dikonfirmasi" || s === "ditolak");
-  // perlengkapan final saat tak ada lagi yang 'menunggu dibeli'
+  // perlengkapan final saat tak ada lagi yang menunggu dibeli / sedang dibelanjakan
   const perlengkapanSelesai =
-    r.beli_perlengkapan == null || r.beli_perlengkapan.status !== "menunggu";
+    r.beli_perlengkapan == null ||
+    (r.beli_perlengkapan.status !== "menunggu" && r.beli_perlengkapan.status !== "diproses");
   return bahanSelesai && perlengkapanSelesai;
 }
 

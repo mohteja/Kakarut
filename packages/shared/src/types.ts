@@ -1245,7 +1245,7 @@ export interface PermintaanPerlengkapanOtomatisHasil {
 }
 
 /** Status faktur beli perlengkapan ke CK. */
-export type BeliPerlengkapanStatus = "menunggu" | "tiba" | "batal";
+export type BeliPerlengkapanStatus = "menunggu" | "diproses" | "tiba" | "batal";
 
 /** Satu BARIS faktur beli perlengkapan ke Central Kitchen (BP-). */
 export interface BeliPerlengkapanRow {
@@ -1269,6 +1269,12 @@ export interface BeliPerlengkapanRow {
   waktu: string;
   oleh: string | null;
   nomor: string | null;
+  /** pemroses belanja — tercatat saat faktur ditandai 'diproses' */
+  diproses_oleh: string | null;
+  /** supplier LANGGANAN item (is_utama) — "tempat beli" di kartu & Dokumen RAB */
+  supplier_utama: string | null;
+  /** harga beli per satuan dari master — estimasi RAB (qty × harga_beli) */
+  harga_beli: number;
 }
 
 /** Kiriman perlengkapan CK → cabang (stok pindah saat cabang menerima). */
