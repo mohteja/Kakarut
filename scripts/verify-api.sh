@@ -4243,6 +4243,33 @@ cek "batal-semua TIDAK menyapu faktur yang sedang diproses" "V == 1" \
 cek "tiba dari tahap diproses → masuk stok CK" "V == 1" \
   "$(api "$OWNER" POST "/perlengkapan/beli/faktur/$F116/tiba" '{}' | jq '.jumlah_tiba>=1 | if . then 1 else 0 end')"
 
+echo "== 117. Faktur beli: langsung di cabang + tujuan kirim dari CK =="
+# (a) Faktur beli dibukukan DI cabang store: baris tanpa tujuan → auto-confirm
+#     saat 'menunggu' (barang langsung masuk stok cabang, tanpa lewat CK).
+S117_AWAL=$(api "$OWNER" GET "/stok?branch_id=$CB46_ID" | jq --arg i "$BH112_ID" '[.[]|select(.ingredient_id==$i)][0].saldo // 0')
+FC117=$(api "$OWNER" POST /pembelian/faktur "{\"branch_id\":\"$CB46_ID\",\"items\":[{\"ingredient_id\":\"$BH112_ID\",\"mode\":\"pcs\",\"jumlah\":5,\"total_harga\":60000}]}" | jq -r '.faktur_id // ""')
+cek "dasar uji: faktur beli di cabang store terbit" "V == 1" \
+  "$([ -n "$FC117" ] && echo 1 || echo 0)"
+api "$OWNER" POST "/pembelian/tahap/$FC117" '{"ke":"dikerjakan"}' > /dev/null
+api "$OWNER" POST "/pembelian/tahap/$FC117" '{"ke":"menunggu"}' > /dev/null
+S117_AKHIR=$(api "$OWNER" GET "/stok?branch_id=$CB46_ID" | jq --arg i "$BH112_ID" '[.[]|select(.ingredient_id==$i)][0].saldo // 0')
+cek "beli di cabang: Tiba → langsung masuk stok cabang (+5)" "V == 5" \
+  "$(python3 -c "print(round($S117_AKHIR - $S117_AWAL))")"
+# (b) Faktur beli dari CK dengan TUJUAN cabang: baris bertujuan, saat
+#     'menunggu' TIDAK auto-confirm (menunggu dikirim → diterima cabang).
+FT117=$(api "$OWNER" POST /pembelian/faktur "{\"branch_id\":\"$CK52_UTAMA\",\"tujuan_branch_id\":\"$CB46_ID\",\"items\":[{\"ingredient_id\":\"$BH112_ID\",\"mode\":\"pcs\",\"jumlah\":3}]}" | jq -r '.faktur_id // ""')
+cek "beli dari CK bertujuan: baris menyimpan tujuan cabang" "V == 1" \
+  "$(api "$OWNER" GET "/pembelian?branch_id=all&per_page=500" | jq --arg f "$FT117" --arg t "$CB46_ID" '[.rows[]|select(.faktur_id==$f)] | length>0 and all(.tujuan_branch_id==$t) | if . then 1 else 0 end')"
+api "$OWNER" POST "/pembelian/tahap/$FT117" '{"ke":"dikerjakan"}' > /dev/null
+api "$OWNER" POST "/pembelian/tahap/$FT117" '{"ke":"menunggu"}' > /dev/null
+cek "baris bertujuan TIDAK auto-confirm (tetap menunggu dikirim)" "V == 1" \
+  "$(api "$OWNER" GET "/pembelian?branch_id=all&per_page=500" | jq --arg f "$FT117" '[.rows[]|select(.faktur_id==$f)] | all(.status=="menunggu") | if . then 1 else 0 end')"
+# guard: tujuan bukan store aktif → 400; tujuan pada faktur produksi → 400
+cek "guard: tujuan bukan cabang valid → 400" "V == 400" \
+  "$(status_code_body "$OWNER" POST /pembelian/faktur "{\"branch_id\":\"$CK52_UTAMA\",\"tujuan_branch_id\":\"00000000-0000-0000-0000-000000000000\",\"items\":[{\"ingredient_id\":\"$BH112_ID\",\"mode\":\"pcs\",\"jumlah\":1}]}")"
+cek "guard: tujuan pada faktur PRODUKSI → 400" "V == 400" \
+  "$(status_code_body "$OWNER" POST /produksi/faktur "{\"branch_id\":\"$CK52_UTAMA\",\"tujuan_branch_id\":\"$CB46_ID\",\"worker_id\":\"$U107_ID\",\"items\":[{\"ingredient_id\":\"$IPRODA\",\"mode\":\"pcs\",\"jumlah\":1}]}")"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

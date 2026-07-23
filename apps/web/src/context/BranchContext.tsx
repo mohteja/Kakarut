@@ -182,7 +182,7 @@ export function useBranch(): BranchContextValue {
  * pemilih sidebar; DARI Kantor memakai pilihan "cabang data" tersendiri
  * (default cabang store pertama) — kantor sendiri tidak menyimpan stok/meja.
  */
-export function useCabangData(fokus?: "produksi"): {
+export function useCabangData(fokus?: "produksi" | "beli"): {
   id: string | null;
   query: string;
   dariKantor: boolean;
@@ -206,21 +206,24 @@ export function useCabangData(fokus?: "produksi"): {
   // (faktur/shift sebelum pembagian divisi) tetap bisa dibuka & diselesaikan.
   const aktif = cabang.filter((b) => b.is_active);
   const adaCk = aktif.some((b) => b.tipe === "central_kitchen");
-  // Produksi/beli bahan baku = urusan Central Kitchen; halaman lain (stok,
-  // kasir, meja, penerimaan) tetap berbasis store. Tanpa CK, produksi jatuh
-  // ke daftar store agar tetap bisa dibuat.
-  const fokusCk = fokus === "produksi" && adaCk;
+  // Produksi bahan baku = urusan Central Kitchen; BELI boleh juga langsung di
+  // cabang store (belanja mendesak cabang — barang Tiba langsung masuk stok
+  // cabang itu). Halaman lain (stok, kasir, meja, penerimaan) berbasis store.
+  // Tanpa CK, keduanya jatuh ke daftar store agar tetap bisa dibuat.
+  const fokusCk = (fokus === "produksi" || fokus === "beli") && adaCk;
   const utamaTipe = fokusCk ? "central_kitchen" : "store";
   const opsi = fokusCk
     ? [
         ...aktif.filter((b) => b.tipe === "central_kitchen"),
+        // beli: cabang store ikut ditawarkan (beli langsung di cabang)
+        ...(fokus === "beli" ? aktif.filter((b) => b.tipe === "store") : []),
         ...aktif.filter((b) => b.tipe === "kantor"),
       ]
     : [...aktif.filter((b) => b.tipe !== "kantor"), ...aktif.filter((b) => b.tipe === "kantor")];
   const utama = opsi.find((b) => b.tipe === utamaTipe) ?? opsi[0];
-  // Simpan pilihan di slot terpisah agar produksi (CK) & store tak saling timpa.
-  const tersimpan = fokus === "produksi" ? dataCkBranchId : dataBranchId;
-  const setTersimpan = fokus === "produksi" ? setDataCkBranchId : setDataBranchId;
+  // Simpan pilihan di slot terpisah agar produksi/beli (CK) & store tak saling timpa.
+  const tersimpan = fokus != null ? dataCkBranchId : dataBranchId;
+  const setTersimpan = fokus != null ? setDataCkBranchId : setDataBranchId;
   const id =
     tersimpan && opsi.some((b) => b.id === tersimpan) ? tersimpan : (utama?.id ?? null);
   return {
