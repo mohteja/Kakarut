@@ -27,8 +27,16 @@ const EnvSchema = z.object({
     .default("true")
     .transform((v) => v !== "false" && v !== "0"),
 
-  /** Base URL publik aplikasi — dipakai membangun tautan reset password di email. */
-  APP_BASE_URL: z.string().default("http://localhost:3000"),
+  /**
+   * Base URL publik aplikasi — dipakai membangun tautan email (verifikasi,
+   * reset password, undangan). OPSIONAL: bila kosong, base URL diturunkan dari
+   * header permintaan (proto + host) sehingga tautan mengikuti domain yang
+   * dipakai pengguna. Set eksplisit hanya bila perlu domain kustom tetap.
+   */
+  APP_BASE_URL: z
+    .string()
+    .optional()
+    .transform((v) => (v && v.trim() ? v.trim() : undefined)),
   /** Fallback pengirim email bila SMTP belum diatur (opsional). */
   RESEND_API_KEY: z.string().optional(),
 

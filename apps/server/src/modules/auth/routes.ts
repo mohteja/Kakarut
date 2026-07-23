@@ -6,6 +6,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { env } from "../../config/env";
+import { appBaseUrl } from "../../lib/base-url";
 import { db } from "../../db/client";
 import { companies, emailVerificationTokens, passwordResetTokens, users } from "../../db/schema";
 import { requireAuth, type AppEnv } from "../../middleware/auth";
@@ -135,6 +136,7 @@ async function kirimTautanVerifikasi(
   userId: string,
   email: string,
   nama: string,
+  baseUrl: string,
 ): Promise<string | undefined> {
   const raw = randomBytes(32).toString("hex");
   await db.insert(emailVerificationTokens).values({
@@ -142,7 +144,7 @@ async function kirimTautanVerifikasi(
     tokenHash: hashToken(raw),
     expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 jam
   });
-  const url = `${env.APP_BASE_URL}/verifikasi-email?token=${raw}`;
+  const url = `${baseUrl}/verifikasi-email?token=${raw}`;
   try {
     await kirimEmail({
       to: email,
@@ -220,7 +222,7 @@ export const authRoutes = new Hono<AppEnv>()
         await autoTerimaUndanganEmail(tx, u.id, email);
         return u;
       });
-      devUrl = await kirimTautanVerifikasi(user.id, email, nama);
+      devUrl = await kirimTautanVerifikasi(user.id, email, nama, appBaseUrl(c));
     }
     // Respons NETRAL & IDENTIK untuk email baru maupun yang sudah terdaftar →
     // menutup total celah enumerasi akun (di produksi dev_verify_url tak pernah
@@ -252,7 +254,7 @@ export const authRoutes = new Hono<AppEnv>()
           tokenHash: hashToken(raw),
           expiresAt: new Date(Date.now() + 60 * 60 * 1000), // 1 jam
         });
-        const url = `${env.APP_BASE_URL}/reset-password?token=${raw}`;
+        const url = `${appBaseUrl(c)}/reset-password?token=${raw}`;
         try {
           await kirimEmail({
             to: email,
@@ -376,7 +378,7 @@ export const authRoutes = new Hono<AppEnv>()
       const [user] = await db.select().from(users).where(eq(users.email, email));
       let devUrl: string | undefined;
       if (user && !user.deletedAt && user.isActive && !user.emailVerifiedAt) {
-        devUrl = await kirimTautanVerifikasi(user.id, email, user.nama);
+        devUrl = await kirimTautanVerifikasi(user.id, email, user.nama, appBaseUrl(c));
       }
       return c.json({ ok: true, ...(devUrl ? { dev_verify_url: devUrl } : {}) });
     },

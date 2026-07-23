@@ -3561,6 +3561,14 @@ daftar_verif "reset97@example.com" "Lama12345" "Reset Uji 97" > /dev/null
 FP=$(api "" POST /auth/forgot-password '{"email":"reset97@example.com"}')
 cek "forgot: ok true" "V == 1" "$(echo "$FP" | jq '(.ok==true)|if . then 1 else 0 end')"
 cek "forgot: dev_reset_url ada (email belum diatur)" "V == 1" "$(echo "$FP" | jq '((.dev_reset_url|length)>0)|if . then 1 else 0 end')"
+# Tautan reset MENGIKUTI host permintaan (APP_BASE_URL kosong) — bukan hardcode
+# localhost:3000. Frontend & API satu origin, jadi tautan email mengarah ke
+# domain yang dipakai pengguna. (Header X-Forwarded-* dihormati di belakang proxy.)
+RHOST=$(curl -s -X POST "$BASE/api/auth/forgot-password" -H 'Content-Type: application/json' \
+  -H 'X-Forwarded-Proto: https' -H 'X-Forwarded-Host: app.reset97.example' \
+  -d '{"email":"reset97@example.com"}' | jq -r '.dev_reset_url // ""')
+cek "reset url mengikuti host permintaan (bukan localhost hardcode)" "V == 1" \
+  "$(echo "$RHOST" | grep -Eq '^https://app\.reset97\.example/reset-password\?token=' && echo 1 || echo 0)"
 RTOK=$(echo "$FP" | jq -r '.dev_reset_url' | sed 's/.*token=//')
 cek "reset dgn token → ok" "V == 1" \
   "$(api "" POST /auth/reset-password "{\"token\":\"$RTOK\",\"password\":\"Baru12345\"}" | jq '(.ok==true)|if . then 1 else 0 end')"
