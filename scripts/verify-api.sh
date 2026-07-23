@@ -4204,6 +4204,24 @@ else
 fi
 rm -f "$PNG114"
 
+echo "== 115. Nomor faktur permintaan (PM-) =="
+# Satu submit Tambah Stok dari Menu = satu nomor PM- (ref = rencana_id):
+# tampil di Data Permintaan Stok dan sebagai badge asal di baris faktur.
+H115=$(api "$OWNER" POST /rekomendasi/menu/faktur "{\"items\":[{\"menu_id\":\"$PBA_ID\",\"porsi\":100}],\"tujuan_branch_id\":\"$CB46_ID\",\"ck_branch_id\":\"$CK52_UTAMA\"}")
+R115=$(echo "$H115" | jq -r '.rencana_id // ""')
+PM115=$(echo "$H115" | jq -r '.nomor_permintaan // ""')
+cek "submit rencana → nomor_permintaan berformat PM-" "V == 1" \
+  "$(echo "$PM115" | grep -Eq '^PM-[0-9]{4}$' && echo 1 || echo 0)"
+cek "GET /rekomendasi/permintaan memuat nomor yang sama" "V == 1" \
+  "$(api "$OWNER" GET /rekomendasi/permintaan | jq --arg r "$R115" --arg n "$PM115" '[.[]|select(.rencana_id==$r)][0].nomor==$n | if . then 1 else 0 end')"
+# faktur permintaan lahir di CK (bukan cabang default) → lihat semua cabang
+BR115=$(api "$OWNER" GET "/pembelian?branch_id=all&per_page=500" | jq --arg r "$R115" '[.rows[]|select(.rencana_id==$r)]')
+PR115=$(api "$OWNER" GET "/produksi?branch_id=all&per_page=500" | jq --arg r "$R115" '[.rows[]|select(.rencana_id==$r)]')
+cek "semua baris faktur permintaan membawa permintaan_nomor sama" "V == 1" \
+  "$(jq -n --argjson a "$BR115" --argjson b "$PR115" --arg n "$PM115" '($a+$b) | (length>0 and all(.permintaan_nomor==$n)) | if . then 1 else 0 end')"
+cek "faktur input langsung tanpa permintaan_nomor" "V == 0" \
+  "$(api "$OWNER" GET "/pembelian?branch_id=all&per_page=500" | jq '[.rows[]|select(.rencana_id==null and .permintaan_nomor!=null)]|length')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

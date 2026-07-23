@@ -1254,6 +1254,8 @@ export const dokumenJenisEnum = pgEnum("dokumen_jenis", [
   "opname_perlengkapan",
   // faktur beli perlengkapan ke CK (BP-, ref = supply_purchases.id)
   "beli_perlengkapan",
+  // permintaan Tambah Stok dari Menu (PM-, ref = productions.rencana_id)
+  "permintaan",
 ]);
 
 /**

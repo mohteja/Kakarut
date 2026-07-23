@@ -286,7 +286,7 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 - `GET /api/{mod}/log/:fakturId` — res: `{ rows: [{id,aksi,detail,oleh,waktu}] }` — error: **404**
 - `POST /api/pembelian/laporan-harga/:fakturId` — **[owner/admin]**, **beli saja** (produksi → **400**) — req: `{ items: [{id:uuid, total_harga:number(≥0)}] (min1) }` — res: `{ ok, jumlah }` — error: **400**, **404**
 - `POST /api/{mod}` — req `TambahStokBody`: `{ branch_id?:uuid, ingredient_id:uuid, qty?:number(>0), batch:bool=false, total_harga?:number(≥0)|null, catatan? }` (refine: `batch` ATAU `qty` wajib) — res: **201** row production + `{ bahan }` — error: **400**, **404**
-- `GET /api/{mod}` — query: `branch_id?` (atau `all`), `dari?`, `sampai?`, `tanggal?`, `page?` (default 1), `per_page?` (default 20, maks 200) — res: `{ rows, total, page, per_page, total_pengeluaran }`
+- `GET /api/{mod}` — query: `branch_id?` (atau `all`), `dari?`, `sampai?`, `tanggal?`, `page?` (default 1), `per_page?` (default 20, maks 200) — res: `{ rows, total, page, per_page, total_pengeluaran }` (tiap row memuat `rencana_id` + `permintaan_nomor` (PM-xxxx) bila faktur lahir dari permintaan Tambah Stok dari Menu)
 - `PATCH /api/{mod}/faktur/:key` — req `FakturEditBody`: `{ password: string (wajib), supplier_id?:uuid|null, no_faktur?|null (max60), catatan?|null, storage_location_id?:uuid|null, worker_id?:uuid|null, prod_date?: "YYYY-MM-DD" }` — res: `{ ok, jumlah_baris }` — error: **401** password salah, **400** supplier/storage invalid, **404**
 - `DELETE /api/{mod}/faktur/:key` — soft delete → Tempat Sampah (tanpa password) — res: `{ ok, jumlah_baris }` — error: **404**
 
@@ -887,6 +887,8 @@ export interface RencanaMenuPreview {
 
 /** Hasil pembuatan faktur otomatis dari rencana menu (null = jalur tak perlu). */
 export interface RencanaFakturResult {
+  /** nomor dokumen permintaan (PM-xxxx); null bila tak ada faktur yang lahir */
+  nomor_permintaan: string | null;
   produksi: { faktur_id: string; jumlah_baris: number } | null;
   /** faktur produksi DI CABANG tujuan (bahan produksi_di "cabang"; dikerjakan kitchen) */
   produksi_cabang: { faktur_id: string; jumlah_baris: number } | null;
@@ -912,6 +914,8 @@ export interface PermintaanStokBagian {
  */
 export interface PermintaanStokRow {
   rencana_id: string;
+  /** nomor dokumen permintaan (PM-xxxx) — identitas tampil */
+  nomor: string | null;
   /** ISO timestamp pembuatan permintaan */
   waktu: string;
   /** ringkasan menu/porsi ("50× BASOAC, 30× PYO") dari catatan faktur */

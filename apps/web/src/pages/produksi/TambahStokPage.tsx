@@ -76,6 +76,8 @@ export interface StokMasukRow {
   asal_branch_id?: string | null;
   /** dari Permintaan Tambah Stok (rencana menu); null = input langsung */
   rencana_id?: string | null;
+  /** nomor dokumen permintaan (PM-xxxx) — identitas asal faktur */
+  permintaan_nomor?: string | null;
   /** produksi dari permintaan: hasil masuk stok CK lalu PERLU DIKIRIM ke cabang ini */
   untuk_branch_id?: string | null;
   untuk_cabang?: string | null;
@@ -109,6 +111,8 @@ export interface FakturGroup {
   tujuanCabang: string | null;
   /** faktur lahir dari Permintaan Tambah Stok (badge asal faktur) */
   dariPermintaan: boolean;
+  /** nomor dokumen permintaan (PM-xxxx) — dipakai badge asal faktur */
+  permintaanNomor: string | null;
   /** transfer stok yang sudah ada (asal_branch_id terisi) — kartu "Kiriman" */
   kiriman: boolean;
   /** produksi dari permintaan: hasil perlu dikirim ke cabang ini */
@@ -428,6 +432,7 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
           cabang: r.cabang ?? null,
           tujuanCabang: r.tujuan_cabang ?? null,
           dariPermintaan: false,
+          permintaanNomor: null,
           kiriman: false,
           untukCabang: null,
           rows: [],
@@ -438,6 +443,7 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
       }
       g.rows.push(r);
       if (r.rencana_id) g.dariPermintaan = true;
+      if (r.permintaan_nomor && !g.permintaanNomor) g.permintaanNomor = r.permintaan_nomor;
       if (r.asal_branch_id) g.kiriman = true;
       if (!g.untukCabang && r.untuk_cabang) g.untukCabang = r.untuk_cabang;
       // faktur campuran (produk jadi + bahan produksi): tujuan diambil dari
@@ -663,7 +669,7 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                         {g.nomor}
                       </span>
                     )}
-                    {/* asal faktur: dari Permintaan Tambah Stok vs input langsung */}
+                    {/* asal faktur: nomor permintaan (PM-xxxx) vs input langsung */}
                     <span
                       className={`rounded-md px-1.5 py-0.5 text-xs font-semibold ${
                         g.dariPermintaan
@@ -671,7 +677,9 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                           : "bg-stone-100 text-stone-600"
                       }`}
                     >
-                      {g.dariPermintaan ? "\ud83d\udccb Permintaan" : "\u270d\ufe0f Langsung"}
+                      {g.dariPermintaan
+                        ? `\ud83d\udccb ${g.permintaanNomor ?? "Permintaan"}`
+                        : "\u270d\ufe0f Langsung"}
                     </span>
                     <span className="text-sm text-stone-500">
                       {formatTanggalRingkas(g.waktu)} · {formatWaktu(g.waktu)}
@@ -683,15 +691,17 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                     )}
                   </div>
                   <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-stone-500">
-                    <span className="font-medium text-stone-600">
-                      {g.kiriman
-                        ? `🚚 Dari stok ${g.cabang ?? "CK"}` // transfer stok yang sudah ada
-                        : tipe === "produksi"
-                          ? `🔧 ${g.dikerjakanOleh ?? g.supplier ?? "Produksi sendiri"}`
-                          : g.dikerjakanOleh
-                            ? `🔧 ${g.dikerjakanOleh}` // pemroses belanja (tercatat saat Diproses)
-                            : (g.supplier ?? "Belum diproses")}
-                    </span>
+                    {/* pelaksana bila SUDAH ada (tahap belum diproses cukup
+                        terbaca dari badge status kanan — tanpa teks ganda) */}
+                    {(g.kiriman || tipe === "produksi" || g.dikerjakanOleh || g.supplier) && (
+                      <span className="font-medium text-stone-600">
+                        {g.kiriman
+                          ? `🚚 Dari stok ${g.cabang ?? "CK"}` // transfer stok yang sudah ada
+                          : tipe === "produksi"
+                            ? `🔧 ${g.dikerjakanOleh ?? g.supplier ?? "Produksi sendiri"}`
+                            : `🔧 ${g.dikerjakanOleh ?? g.supplier}`}
+                      </span>
+                    )}
                     {g.danaCair > 0 && (
                       <span
                         className="whitespace-nowrap font-semibold text-emerald-700"
@@ -700,12 +710,13 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                         💸 cair {formatRupiah(g.danaCair)}
                       </span>
                     )}
-                    {/* cabang faktur (tampilan Kantor "semua cabang") */}
-                    {dariKantor && g.cabang && <span>🏪 {g.cabang}</span>}
-                    {/* TUJUAN pengiriman — dibuat mencolok agar tak salah lihat */}
+                    {/* cabang faktur (Kantor) — hanya bila TANPA tujuan kirim;
+                        ada tujuan → cukup badge cabang tujuan di bawah */}
+                    {dariKantor && g.cabang && !g.tujuanCabang && <span>🏪 {g.cabang}</span>}
+                    {/* BADGE CABANG TUJUAN — langsung nama cabangnya */}
                     {g.tujuanCabang && (
                       <span className="whitespace-nowrap rounded-md bg-purple-100 px-2 py-0.5 text-sm font-bold text-purple-800">
-                        📦 → {g.tujuanCabang}
+                        📦 {g.tujuanCabang}
                       </span>
                     )}
                     {/* produksi dari permintaan: hasil UNTUK cabang peminta —
@@ -715,7 +726,9 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                         🎯 untuk {g.untukCabang}
                       </span>
                     )}
-                    {g.catatan && <span>· {g.catatan}</span>}
+                    {/* catatan manual saja — ringkasan "Rencana dari menu: …"
+                        digantikan badge nomor permintaan di header */}
+                    {g.catatan && !g.dariPermintaan && <span>· {g.catatan}</span>}
                   </div>
                 </div>
                 {/* status di pojok kanan atas kotak */}

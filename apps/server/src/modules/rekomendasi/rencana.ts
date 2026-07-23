@@ -596,7 +596,16 @@ export async function buatFakturDariRencana(
   const detailProd = workOrder
     ? `Produksi di ${ck!.nama} → stok CK (untuk ${store.nama}) · ${ringkas}`
     : ringkas;
+  const adaFakturLahir = Boolean(
+    prodFakturId || prodCabangFakturId || beliFakturId || kirimFakturId,
+  );
+  let nomorPermintaan: string | null = null;
   await db.transaction(async (tx) => {
+    // Nomor dokumen PERMINTAAN (PM-) — identitas satu submit, dipakai badge
+    // di kartu faktur & Data Permintaan Stok. Hanya bila ada faktur lahir.
+    if (adaFakturLahir) {
+      nomorPermintaan = await terbitkanNomor(tx, params.companyId, "permintaan", rencanaId);
+    }
     if (prodFakturId) {
       await tx.insert(productions).values(barisFaktur(prodRowsCk, "produksi", prodFakturId));
       await terbitkanNomor(tx, params.companyId, "produksi", prodFakturId);
@@ -691,6 +700,7 @@ export async function buatFakturDariRencana(
 
   return {
     rencana_id: rencanaId,
+    nomor_permintaan: nomorPermintaan,
     produksi: prodFakturId ? { faktur_id: prodFakturId, jumlah_baris: prodRowsCk.length } : null,
     produksi_cabang: prodCabangFakturId
       ? { faktur_id: prodCabangFakturId, jumlah_baris: prodRowsCabang.length }
