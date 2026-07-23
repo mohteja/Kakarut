@@ -11,7 +11,7 @@ import {
   inputClass,
 } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
-import { useBranch, useCabangData } from "../../context/BranchContext";
+import { labelCabang, useBranch, useCabangData } from "../../context/BranchContext";
 import { CabangDataBar } from "../../components/CabangDataBar";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah } from "../../lib/format";
@@ -177,9 +177,15 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
   const { auth } = useAuth();
   // Produksi = urusan Central Kitchen; BELI boleh juga langsung di cabang
   // store (belanja mendesak cabang). Dari Kantor default CK pertama.
-  const { query: branchQuery, id: branchId } = useCabangData(
-    tipe === "beli" ? "beli" : "produksi",
-  );
+  // Untuk BELI, pemilihnya dirender SEBAGAI FIELD dalam form (bukan bar
+  // "Dari Kantor" di atas halaman) — lihat "Lokasi pembelian" di kartu form.
+  const {
+    query: branchQuery,
+    id: branchId,
+    dariKantor,
+    opsi: opsiLokasi,
+    pilih: pilihLokasi,
+  } = useCabangData(tipe === "beli" ? "beli" : "produksi");
   const queryClient = useQueryClient();
   const isKasir = auth?.user.role === "cashier";
   // karyawan CK (tim) & kitchen cabang: faktur dibuat di cabangnya sendiri,
@@ -343,14 +349,9 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
 
   return (
     <div className="max-w-5xl">
-      <CabangDataBar fokus={tipe === "beli" ? "beli" : "produksi"} />
-      {/* BELI langsung di cabang store: tanpa lewat CK */}
-      {beliDiCabang && (
-        <div className="mb-4 rounded-lg bg-purple-50 px-4 py-2 text-sm text-purple-900">
-          Faktur dibukukan di cabang <b>{cabangTerpilih?.nama}</b> — barang yang ditandai{" "}
-          <b>📦 Tiba</b> langsung masuk <b>stok cabang ini</b> (tanpa lewat Central Kitchen).
-        </div>
-      )}
+      {/* Produksi tetap pakai bar "Dari Kantor"; BELI memilih lokasi lewat
+          field "Lokasi pembelian" DI DALAM form (lebih menyatu). */}
+      {tipe === "produksi" && <CabangDataBar fokus="produksi" />}
       <PageTitle
         aksi={
           <button type="button" onClick={() => navigate(endpoint)} className={btnSecondary}>
@@ -397,6 +398,36 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
               </>
             ) : (
               <>
+                {/* Lokasi pembelian (dari Kantor): CK = stok CK (bisa dikirim
+                    ke cabang); cabang store = langsung masuk stok cabang itu */}
+                {dariKantor && (
+                  <div className="mb-3">
+                    <label className="mb-1 block text-sm font-medium">Lokasi pembelian</label>
+                    <select
+                      value={branchId ?? ""}
+                      onChange={(e) => pilihLokasi(e.target.value)}
+                      aria-label="Lokasi pembelian"
+                      className={inputClass}
+                    >
+                      {opsiLokasi.map((b) => (
+                        <option key={b.id} value={b.id}>
+                          {labelCabang(b)}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="mt-1 text-xs text-stone-400">
+                      {beliDiCabang ? (
+                        <>
+                          Dibukukan di cabang <b>{cabangTerpilih?.nama}</b> — barang yang
+                          ditandai 📦 Tiba <b>langsung masuk stok cabang ini</b> (tanpa lewat
+                          CK).
+                        </>
+                      ) : (
+                        <>Barang masuk stok CK saat Tiba — bisa dikirim ke cabang lewat “Untuk cabang”.</>
+                      )}
+                    </div>
+                  </div>
+                )}
                 <label className="mb-1 block text-sm font-medium">Sumber (supplier/toko)</label>
                 <select
                   value={supplierId}
