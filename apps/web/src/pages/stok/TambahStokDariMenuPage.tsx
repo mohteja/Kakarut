@@ -680,21 +680,43 @@ export function TambahStokDariMenuPage() {
                     )}
                   </>
                 )}
-                {/* ---- Sekalian perlengkapan ≤ stok minimum ---- */}
+                {/* ---- Sekalian perlengkapan ≤ stok minimum (SWITCH besar) ---- */}
                 {perlengkapanKurang.length > 0 && (
-                  <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-sm text-orange-900">
-                    <input
-                      type="checkbox"
-                      checked={sertakanPerlengkapan}
-                      onChange={(e) => setSertakanPerlengkapan(e.target.checked)}
-                      className="mt-0.5"
-                    />
+                  <div
+                    role="switch"
+                    aria-checked={sertakanPerlengkapan}
+                    tabIndex={0}
+                    onClick={() => setSertakanPerlengkapan((v) => !v)}
+                    onKeyDown={(e) => {
+                      if (e.key === " " || e.key === "Enter") {
+                        e.preventDefault();
+                        setSertakanPerlengkapan((v) => !v);
+                      }
+                    }}
+                    className={`flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-3 text-sm transition select-none ${
+                      sertakanPerlengkapan
+                        ? "border-orange-400 bg-orange-50 text-orange-900"
+                        : "border-stone-200 bg-stone-50 text-stone-600"
+                    }`}
+                  >
+                    {/* track + knob switch — besar biar ternotis */}
+                    <span
+                      className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition-colors ${
+                        sertakanPerlengkapan ? "bg-orange-600" : "bg-stone-300"
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-6 w-6 transform rounded-full bg-white shadow-md transition-transform ${
+                          sertakanPerlengkapan ? "translate-x-5" : "translate-x-0.5"
+                        }`}
+                      />
+                    </span>
                     <span>
                       🧰 <b>Sekalian minta {perlengkapanKurang.length} perlengkapan</b> yang saldo ≤
                       stok minimum di {store?.nama ?? "cabang"} — kiriman <b>KP-</b> otomatis dari
                       stok CK, sisanya dilaporkan perlu dibeli di CK.
                     </span>
-                  </label>
+                  </div>
                 )}
                 <button
                   onClick={() => setKonfirmasi(true)}
