@@ -21,6 +21,7 @@ import {
   branches,
   companies,
   dokumenNomor,
+  productions,
   storageLocationIngredients,
   storageLocations,
   suppliers,
@@ -1280,6 +1281,30 @@ export async function daftarBeliPerlengkapan(
   const supUtama = alias(suppliers, "sup_utama_beli");
   const conds = [eq(supplyPurchases.companyId, companyId)];
   if (ckBranchId) conds.push(eq(supplyPurchases.ckBranchId, ckBranchId));
+  // Sembunyikan faktur yang PERMINTAANNYA sudah DIHAPUS (bukan sekadar
+  // dibatalkan): saat permintaan dihapus, productions-nya di-soft-delete tapi
+  // baris beli perlengkapan hanya di-set status 'batal' — dulu tetap muncul
+  // sebagai "Dibatalkan" walau permintaannya lenyap (info tak konsisten).
+  // Kriteria "permintaan dihapus": rencana_id-nya hanya punya production yang
+  // sudah soft-delete (tak ada yang live). Baris yang SUDAH 'tiba' (stok nyata
+  // masuk) tetap ditampilkan; "Dibatalkan" dengan permintaan masih hidup pun
+  // tetap tampil (pembatalan sah).
+  conds.push(
+    sql`NOT (
+      ${supplyPurchases.status} <> 'tiba'
+      AND ${supplyPurchases.rencanaId} IS NOT NULL
+      AND EXISTS (
+        SELECT 1 FROM ${productions} p
+        WHERE p.rencana_id = ${supplyPurchases.rencanaId}
+          AND p.company_id = ${companyId} AND p.deleted_at IS NOT NULL
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM ${productions} p
+        WHERE p.rencana_id = ${supplyPurchases.rencanaId}
+          AND p.company_id = ${companyId} AND p.deleted_at IS NULL
+      )
+    )`,
+  );
   const rows = await db
     .select({
       id: supplyPurchases.id,
