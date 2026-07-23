@@ -11,7 +11,7 @@ import {
   inputClass,
 } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
-import { labelCabang, useBranch, useCabangData } from "../../context/BranchContext";
+import { useBranch, useCabangData } from "../../context/BranchContext";
 import { CabangDataBar } from "../../components/CabangDataBar";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah } from "../../lib/format";
@@ -175,17 +175,24 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
   const endpoint = tipe === "produksi" ? "/produksi" : "/pembelian";
   const navigate = useNavigate();
   const { auth } = useAuth();
-  // Produksi = urusan Central Kitchen; BELI boleh juga langsung di cabang
-  // store (belanja mendesak cabang). Dari Kantor default CK pertama.
-  // Untuk BELI, pemilihnya dirender SEBAGAI FIELD dalam form (bukan bar
-  // "Dari Kantor" di atas halaman) — lihat "Lokasi pembelian" di kartu form.
+  // Produksi = urusan Central Kitchen. BELI dari Kantor SELALU dibukukan di
+  // Central Kitchen — tujuan cabang ditentukan lewat "Untuk cabang" (tak ada
+  // lagi pemilih "Lokasi pembelian"). Di luar Kantor (kitchen/kasir store)
+  // beli tetap dibukukan di cabangnya sendiri (belanja mendesak → langsung
+  // masuk stok cabang itu).
   const {
     query: branchQuery,
-    id: branchId,
+    id: branchIdRaw,
     dariKantor,
     opsi: opsiLokasi,
-    pilih: pilihLokasi,
   } = useCabangData(tipe === "beli" ? "beli" : "produksi");
+  // Lokasi pembukuan efektif: BELI dari Kantor → Central Kitchen; selain itu
+  // ikut pilihan useCabangData (produksi CK/cabang; store beli di cabang).
+  const ckLokasi =
+    tipe === "beli" && dariKantor
+      ? (opsiLokasi.find((b) => b.tipe === "central_kitchen") ?? null)
+      : null;
+  const branchId = ckLokasi ? ckLokasi.id : branchIdRaw;
   const queryClient = useQueryClient();
   const isKasir = auth?.user.role === "cashier";
   // karyawan CK (tim) & kitchen cabang: faktur dibuat di cabangnya sendiri,
@@ -438,36 +445,24 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
               </>
             ) : (
               <>
-                {/* Lokasi pembelian (dari Kantor): CK = stok CK (bisa dikirim
-                    ke cabang); cabang store = langsung masuk stok cabang itu */}
-                {dariKantor && (
-                  <div className="mb-3">
-                    <label className="mb-1 block text-sm font-medium">Lokasi pembelian</label>
-                    <select
-                      value={branchId ?? ""}
-                      onChange={(e) => pilihLokasi(e.target.value)}
-                      aria-label="Lokasi pembelian"
-                      className={inputClass}
-                    >
-                      {opsiLokasi.map((b) => (
-                        <option key={b.id} value={b.id}>
-                          {labelCabang(b)}
-                        </option>
-                      ))}
-                    </select>
-                    <div className="mt-1 text-xs text-stone-400">
-                      {beliDiCabang ? (
-                        <>
-                          Dibukukan di cabang <b>{cabangTerpilih?.nama}</b> — barang yang
-                          ditandai 📦 Tiba <b>langsung masuk stok cabang ini</b> (tanpa lewat
-                          CK).
-                        </>
-                      ) : (
-                        <>Barang masuk stok CK saat Tiba — bisa dikirim ke cabang lewat “Untuk cabang”.</>
-                      )}
-                    </div>
-                  </div>
-                )}
+                {/* BELI dari Kantor SELALU dibukukan di Central Kitchen —
+                    tujuan cabang ditentukan lewat "Untuk cabang" di bawah
+                    (tak ada lagi pemilih "Lokasi pembelian"). Store yang beli
+                    sendiri: barang langsung masuk stok cabangnya. */}
+                <div className="rounded-lg bg-stone-50 px-3 py-2 text-sm text-stone-600">
+                  {beliDiCabang ? (
+                    <>
+                      Dibeli & <b>langsung masuk stok cabang {cabangTerpilih?.nama}</b> saat
+                      ditandai 📦 Tiba.
+                    </>
+                  ) : (
+                    <>
+                      Dibeli & dibukukan di{" "}
+                      <b>{cabangTerpilih?.nama ?? "Central Kitchen"}</b> — barang masuk stok CK
+                      saat Tiba. Untuk cabang, isi <b>“Untuk cabang”</b> di bawah.
+                    </>
+                  )}
+                </div>
               </>
             )}
             {/* BELI dari CK (manajemen): tujuan kirim opsional ke cabang store */}
@@ -529,17 +524,57 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
           <div className="text-sm font-semibold text-stone-700">
             Daftar bahan ({itemValid.length})
           </div>
-          <button
-            type="button"
-            onClick={() => setItems([...items, { ...barisKosong }])}
-            className={btnSecondary}
-          >
-            + Tambah baris
-          </button>
+          {bahanJalur.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setItems([...items, { ...barisKosong }])}
+              className={btnSecondary}
+            >
+              + Tambah baris
+            </button>
+          )}
         </div>
 
-        {/* header kolom (desktop) */}
-        <div className="hidden gap-3 border-b border-stone-100 bg-stone-50 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-stone-500 md:flex">
+        {bahanJalur.length === 0 ? (
+          // Picker kosong = perusahaan belum punya bahan sesuai jalur ini
+          // (server pun menolak bahan non-beli / tak dilacak) — jelaskan &
+          // arahkan ke master Bahan Baku alih-alih baris kosong yang bingung.
+          <div className="px-4 py-10 text-center">
+            <div className="text-3xl">📦</div>
+            <div className="mt-2 text-sm font-semibold text-stone-700">
+              {tipe === "beli"
+                ? "Belum ada bahan baku yang bisa dibeli"
+                : "Belum ada bahan baku yang bisa diproduksi"}
+            </div>
+            <div className="mx-auto mt-1 max-w-md text-xs leading-relaxed text-stone-500">
+              {(bahan ?? []).length === 0 ? (
+                <>Anda belum menambahkan bahan baku apa pun ke master.</>
+              ) : tipe === "beli" ? (
+                <>
+                  Yang muncul di sini hanya bahan berjenis <b>Beli</b> yang{" "}
+                  <b>dilacak stoknya</b>. Bahan “produksi sendiri” tidak dibeli — ubah
+                  jenisnya ke <b>Beli</b> (dan centang “Lacak stok”) di master Bahan Baku bila
+                  memang dibeli dari supplier.
+                </>
+              ) : (
+                <>
+                  Yang muncul di sini hanya bahan berjenis <b>Produksi sendiri</b> yang{" "}
+                  <b>dilacak stoknya</b>.
+                </>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => navigate("/bahan")}
+              className={`${btnPrimary} mt-3`}
+            >
+              Buka master Bahan Baku
+            </button>
+          </div>
+        ) : (
+          <>
+            {/* header kolom (desktop) */}
+            <div className="hidden gap-3 border-b border-stone-100 bg-stone-50 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-stone-500 md:flex">
           <div className="min-w-0 flex-1">Bahan</div>
           <div className="w-28 shrink-0">Satuan</div>
           <div className="w-20 shrink-0 text-right">Jumlah</div>
@@ -710,15 +745,17 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
             <b className="text-base">{formatRupiah(totalFaktur)}</b>
           </div>
         </div>
-        {tambahTempat && tipe === "produksi" && (
-          <div className="px-4 pb-3">
-            <QuickAdd
-              placeholder="nama tempat (mis. Freezer 1)"
-              onSubmit={(n) => tempatBaru.mutate(n)}
-              pending={tempatBaru.isPending}
-            />
-            <ErrorText error={tempatBaru.error} />
-          </div>
+            {tambahTempat && tipe === "produksi" && (
+              <div className="px-4 pb-3">
+                <QuickAdd
+                  placeholder="nama tempat (mis. Freezer 1)"
+                  onSubmit={(n) => tempatBaru.mutate(n)}
+                  pending={tempatBaru.isPending}
+                />
+                <ErrorText error={tempatBaru.error} />
+              </div>
+            )}
+          </>
         )}
       </Card>
 
