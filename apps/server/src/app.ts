@@ -1,5 +1,6 @@
 import { eq, sql } from "drizzle-orm";
 import { Hono, type MiddlewareHandler } from "hono";
+import { compress } from "hono/compress";
 import { HTTPException } from "hono/http-exception";
 import { logger } from "hono/logger";
 import { secureHeaders } from "hono/secure-headers";
@@ -185,6 +186,11 @@ export function createApp() {
       },
     }),
   );
+  // Kompresi respons (gzip/deflate, ambang 1 KB) untuk SEMUA rute — JSON daftar
+  // besar (/bahan, /stok, /produksi) maupun aset JS/CSS statis yang didaftarkan
+  // belakangan (index.ts). Filter bawaan hanya menyentuh tipe kompresibel —
+  // gambar/berkas yang sudah terkompresi dilewati otomatis.
+  app.use("*", compress());
   app.use("*", logger());
   app.route("/api", api);
   // Suntik referensi app ke modul sync agar bisa sub-request internal ke

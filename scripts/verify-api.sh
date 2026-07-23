@@ -4117,6 +4117,31 @@ cek "batal-semua → semua faktur menunggu dibatalkan (>=1)" "V == 1" \
 cek "tidak ada lagi faktur menunggu setelah batal-semua" "V == 0" \
   "$(api "$OWNER" GET /perlengkapan/beli | jq '[.[]|select(.status=="menunggu")]|length')"
 
+echo "== 111. Performa HTTP: kompresi respons + cache aset ber-hash =="
+# Kompresi gzip utk respons kompresibel ≥1 KB; aset /assets/* (ber-hash per
+# build) di-cache immutable setahun; HTML shell tetap no-cache.
+header_of() { # header_of <nama-header> <curl args...>
+  local nama="$1"; shift
+  curl -s -o /dev/null -D - "$@" | tr -d '\r' | awk -F': ' -v n="$nama" 'tolower($1)==n{print $2}' | tail -1
+}
+ENC111=$(header_of "content-encoding" -H 'Accept-Encoding: gzip' -H "Authorization: Bearer $OWNER" "$BASE/api/bahan")
+cek "API JSON besar terkompresi gzip" "V == 1" "$([ "$ENC111" = "gzip" ] && echo 1 || echo 0)"
+ENC111B=$(header_of "content-encoding" -H "Authorization: Bearer $OWNER" "$BASE/api/bahan")
+cek "tanpa Accept-Encoding → tidak dikompresi" "V == 1" "$([ -z "$ENC111B" ] && echo 1 || echo 0)"
+CCSHELL=$(header_of "cache-control" "$BASE/")
+cek "HTML shell tetap no-cache" "V == 1" "$(echo "$CCSHELL" | grep -q no-cache && echo 1 || echo 0)"
+ASET111=$(curl -s "$BASE/" | grep -o '/assets/[^"]*\.js' | head -1)
+if [ -n "$ASET111" ]; then
+  CC111=$(header_of "cache-control" "$BASE$ASET111")
+  cek "aset ber-hash ber-Cache-Control immutable" "V == 1" \
+    "$(echo "$CC111" | grep -q immutable && echo 1 || echo 0)"
+  ENC111C=$(header_of "content-encoding" -H 'Accept-Encoding: gzip' "$BASE$ASET111")
+  cek "aset JS terkompresi gzip" "V == 1" "$([ "$ENC111C" = "gzip" ] && echo 1 || echo 0)"
+else
+  ok "aset ber-hash immutable (dilewati — web dist tak tersedia)"
+  ok "aset JS terkompresi (dilewati — web dist tak tersedia)"
+fi
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]
