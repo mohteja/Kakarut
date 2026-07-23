@@ -1,6 +1,6 @@
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
-import type { Context } from "hono";
+import type { Context, Next } from "hono";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -124,9 +124,22 @@ try {
 const app = createApp();
 const here = path.dirname(fileURLToPath(import.meta.url));
 
+// File di jalur statis kita bernama unik per versi (aset build ber-hash;
+// upload ber-UUID) — konten di satu URL tak pernah berubah, aman di-cache
+// browser/CDN setahun penuh. HANYA respons sukses yang belum menyetel
+// Cache-Control sendiri: fallback shell (no-cache) dan 404 JSON tidak boleh
+// ikut tertanda immutable — CDN bisa meng-cache shell/404 di URL aset lama.
+const cacheImmutable = async (c: Context, next: Next) => {
+  await next();
+  if (c.res.ok && !c.res.headers.get("Cache-Control")) {
+    c.header("Cache-Control", "public, max-age=31536000, immutable");
+  }
+};
+
 // File upload mode lokal → sajikan dari disk
 const storage = getStorage();
 if (storage.mode === "local") {
+  app.use("/uploads/*", cacheImmutable);
   app.use(
     "/uploads/*",
     serveStatic({
@@ -162,11 +175,10 @@ if (existsSync(webDist)) {
   app.get("/index.html", kirimShell);
   // Aset ber-hash (nama file berganti tiap build) aman di-cache browser
   // setahun penuh — kunjungan berikutnya tak perlu request sama sekali.
-  // Shell HTML tetap no-cache (di atas), jadi rilis baru langsung terambil.
-  app.use("/assets/*", async (c, next) => {
-    await next();
-    c.header("Cache-Control", "public, max-age=31536000, immutable");
-  });
+  // Shell HTML tetap no-cache (di atas), jadi rilis baru langsung terambil;
+  // guard di cacheImmutable menjaga fallback shell utk chunk lama yang hilang
+  // TIDAK ikut tertanda immutable.
+  app.use("/assets/*", cacheImmutable);
   // Aset ber-hash (js/css/img) dilayani statis dari disk.
   app.use("/*", serveStatic({ root: path.relative(process.cwd(), webDist) }));
   // history fallback react-router untuk deep-link (mis. /dashboard).

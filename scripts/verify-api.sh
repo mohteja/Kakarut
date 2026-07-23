@@ -4180,6 +4180,30 @@ BP113B_ID=$(api "$OWNER" POST /bahan '{"nama":"adonan kosong uji113","harga_beli
 cek "bahan produksi tanpa resep tidak muncul di peta" "V == 0" \
   "$(api "$OWNER" GET /bahan/resep-ringkas | jq --arg i "$BP113B_ID" 'has($i) | if . then 1 else 0 end')"
 
+echo "== 114. Cache immutable /uploads/* + guard fallback tak ikut immutable =="
+# Nama file upload = UUID unik per unggahan (konten satu URL tak pernah
+# berubah) → aman di-cache setahun. Respons 404 dan fallback shell TIDAK
+# boleh ikut tertanda immutable (bisa meracuni cache CDN di URL lama).
+PNG114=$(mktemp --suffix=.png)
+printf 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==' | base64 -d > "$PNG114"
+URL114=$(curl -s -X POST "$BASE/api/upload?tujuan=menu" -H "Authorization: Bearer $OWNER" -F "file=@$PNG114;type=image/png" | jq -r '.url // ""')
+cek "dasar uji: upload gambar sukses (url /uploads/…)" "V == 1" \
+  "$(echo "$URL114" | grep -q '^/uploads/' && echo 1 || echo 0)"
+CC114=$(header_of "cache-control" "$BASE$URL114")
+cek "file upload tersaji ber-Cache-Control immutable" "V == 1" \
+  "$(echo "$CC114" | grep -q immutable && echo 1 || echo 0)"
+CC114B=$(header_of "cache-control" "$BASE/uploads/companies/x/menu/tidak-ada-114.png")
+cek "upload hilang → 404 tanpa immutable" "V == 1" \
+  "$([ "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/uploads/companies/x/menu/tidak-ada-114.png")" = "404" ] && ! echo "$CC114B" | grep -q immutable && echo 1 || echo 0)"
+if [ -n "$ASET111" ]; then
+  CC114C=$(header_of "cache-control" "$BASE/assets/tidak-ada-114.js")
+  cek "aset hilang → fallback shell no-cache (bukan immutable)" "V == 1" \
+    "$(echo "$CC114C" | grep -q no-cache && ! echo "$CC114C" | grep -q immutable && echo 1 || echo 0)"
+else
+  ok "aset hilang → fallback shell no-cache (dilewati — web dist tak tersedia)"
+fi
+rm -f "$PNG114"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]
