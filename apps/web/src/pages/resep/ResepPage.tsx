@@ -42,6 +42,10 @@ interface PengaturanBatch {
   overhead: string; // pengali biaya resep → harga per batch (1 = mengikuti resep)
   stokMin: string; // ambang menipis di Central Kitchen
   stokMinToko: string; // ambang menipis di toko
+  /** masa simpan hasil produksi (hari) → dasar exp otomatis saat masuk stok */
+  masaSimpan: string;
+  /** lama proses produksi (hari) → "buat H-n" agar dibuat jauh-jauh hari */
+  leadTime: string;
   /** lokasi produksi: "ck" (Central Kitchen) atau "cabang" (kitchen toko) */
   produksiDi: "ck" | "cabang";
   /** cabang produsen saat "cabang" (kosong = semua cabang store) */
@@ -131,6 +135,8 @@ export function ResepPage() {
             overhead: String(dipilih.overhead_x ?? 1),
             stokMin: String(dipilih.stok_minimum),
             stokMinToko: String(dipilih.stok_minimum_toko ?? 0),
+            masaSimpan: String(dipilih.masa_simpan_hari ?? 0),
+            leadTime: String(dipilih.lead_time_hari ?? 0),
             produksiDi: dipilih.produksi_di ?? "ck",
             produksiBranchIds: dipilih.produksi_branch_ids ?? [],
           }
@@ -172,6 +178,8 @@ export function ResepPage() {
             overhead_x: overhead,
             stok_minimum: Number(atur.stokMin) || 0,
             stok_minimum_toko: Number(atur.stokMinToko) || 0,
+            masa_simpan_hari: Math.max(0, Math.trunc(Number(atur.masaSimpan) || 0)),
+            lead_time_hari: Math.max(0, Math.trunc(Number(atur.leadTime) || 0)),
             harga_beli: hargaBatch,
             produksi_di: atur.produksiDi,
             produksi_branch_ids:
@@ -475,7 +483,7 @@ export function ResepPage() {
                     {atur && bolehUbah && (
                       <div className="mt-4 rounded-lg border border-stone-200 p-3">
                         <div className="mb-2 text-sm font-semibold text-stone-700">
-                          ⚙️ Batch, harga &amp; stok minimum
+                          ⚙️ Batch, harga, stok minimum &amp; masa simpan
                         </div>
                         <div className="grid gap-3 sm:grid-cols-2">
                           <div>
@@ -554,6 +562,44 @@ export function ResepPage() {
                             />
                             <p className="mt-1 text-xs text-stone-500">
                               <b>0</b> = ikut nilai Central Kitchen.
+                            </p>
+                          </div>
+                          <div>
+                            <label className="mb-1 block text-xs font-medium text-stone-500">
+                              Masa simpan (hari)
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              step="1"
+                              value={atur.masaSimpan}
+                              onChange={(e) => setAtur({ ...atur, masaSimpan: e.target.value })}
+                              className={inputClass}
+                              disabled={!bolehUbah}
+                              aria-label="Masa simpan hasil produksi (hari)"
+                            />
+                            <p className="mt-1 text-xs text-stone-500">
+                              Umur hasil produksi. <b>Tanggal exp otomatis</b> = tanggal masuk stok
+                              + masa simpan. <b>0</b> = tak diatur.
+                            </p>
+                          </div>
+                          <div>
+                            <label className="mb-1 block text-xs font-medium text-stone-500">
+                              Lama produksi (hari)
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              step="1"
+                              value={atur.leadTime}
+                              onChange={(e) => setAtur({ ...atur, leadTime: e.target.value })}
+                              className={inputClass}
+                              disabled={!bolehUbah}
+                              aria-label="Lama produksi / lead time (hari)"
+                            />
+                            <p className="mt-1 text-xs text-stone-500">
+                              Berapa hari proses produksi. Muncul sebagai <b>⏱ buat H-n</b> di
+                              rekomendasi/permintaan agar dibuat jauh-jauh hari. <b>0</b> = tanpa info.
                             </p>
                           </div>
                           <div>

@@ -63,7 +63,7 @@ export function BahanEditorGrid({
 }) {
   return (
     <Card className="overflow-x-auto p-0">
-      <table className="w-full min-w-[1600px]">
+      <table className="w-full min-w-[1450px]">
         <thead className="border-b border-stone-200 bg-stone-50">
           <tr>
             <th className={thCell} rowSpan={2}>Kode</th>
@@ -91,12 +91,6 @@ export function BahanEditorGrid({
               title="Lead time (hari): beli = lama pesanan datang; produksi = lama proses — pesan/buat jauh-jauh hari"
             >
               Lead time (hr)
-            </th>
-            <th className={`${thCell} text-center`} rowSpan={2} title="Kemasan take-away">
-              TA
-            </th>
-            <th className={`${thCell} text-center`} rowSpan={2} title="Complement (×0.5 dine-in)">
-              Comp
             </th>
             <th className={thCell} rowSpan={2}>Catatan</th>
             {onRemove && <th className="px-2 py-2" rowSpan={2}></th>}
@@ -279,22 +273,6 @@ export function BahanEditorGrid({
                         ? "Lead time (hari): lama pesanan sampai barang datang"
                         : "Lead time (hari): lama proses produksi"
                     }
-                  />
-                </td>
-                <td className="px-2 py-1.5 text-center">
-                  <input
-                    type="checkbox"
-                    checked={b.is_packaging}
-                    onChange={(e) => onChange(i, { is_packaging: e.target.checked })}
-                    title="Kemasan take-away"
-                  />
-                </td>
-                <td className="px-2 py-1.5 text-center">
-                  <input
-                    type="checkbox"
-                    checked={b.is_complement}
-                    onChange={(e) => onChange(i, { is_complement: e.target.checked })}
-                    title="Complement (×0.5 dine-in)"
                   />
                 </td>
                 <td className="px-2 py-1.5">

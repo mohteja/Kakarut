@@ -4318,6 +4318,15 @@ api "$OWNER" POST "/stok/opname/sesi/$SID118/acc" > /dev/null
 SW118_C=$(api "$OWNER" GET "/stok?branch_id=$CB46_ID" | jq --arg i "$BH112_ID" '[.[]|select(.ingredient_id==$i)][0].saldo // 0')
 cek "setelah ACC: saldo turun 1 (waste efektif)" "V == -1" "$(python3 -c "print(round($SW118_C - $SW118_A))")"
 
+# Masa simpan + lead time pada bahan PRODUKSI (jalur form Resep — PUT /bahan/:id
+# parsial: hanya field ini yang berubah, isi/harga/pengadaan tak tersentuh).
+api "$OWNER" PUT "/bahan/$URATB_ID" '{"masa_simpan_hari":7,"lead_time_hari":2}' > /dev/null
+B118P=$(api "$OWNER" GET /bahan | jq --arg i "$URATB_ID" '[.[]|select(.id==$i)][0]')
+cek "produksi: masa_simpan_hari tersimpan (7)" "V == 7" "$(echo "$B118P" | jq '.masa_simpan_hari')"
+cek "produksi: lead_time_hari tersimpan (2)" "V == 2" "$(echo "$B118P" | jq '.lead_time_hari')"
+cek "produksi: pengadaan tetap 'produksi' (tak ke-reset PUT parsial)" "V == 1" \
+  "$(echo "$B118P" | jq '.pengadaan == "produksi" | if . then 1 else 0 end')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]
