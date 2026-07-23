@@ -4165,6 +4165,21 @@ cek "ringkas: kolom lain identik dengan varian lengkap" "V == 1" \
           --argjson b "$(echo "$FL112" | jq --arg i "$BH112_ID" '[.[]|select(.id==$i)][0] | del(.supplier_utama,.jumlah_supplier,.rak_lokasi)')" \
           '$a==$b | if . then 1 else 0 end')"
 
+echo "== 113. GET /bahan/resep-ringkas (peta jumlah komponen, batch) =="
+# Satu request menggantikan satu GET /bahan/:id/resep per bahan produksi
+# (badge daftar Resep). Peta hanya memuat bahan yang punya komponen.
+BP113_ID=$(api "$OWNER" POST /bahan '{"nama":"adonan uji113","harga_beli":0,"isi":10,"satuan":"pcs","kategori":"lain","pengadaan":"produksi"}' | jq -r .id)
+BK113_ID=$(api "$OWNER" POST /bahan '{"nama":"tepung uji113","harga_beli":8000,"isi":1000,"satuan":"gr","kategori":"lain"}' | jq -r .id)
+api "$OWNER" PUT "/bahan/$BP113_ID/resep" "{\"komponen\":[{\"ingredient_id\":\"$BK113_ID\",\"qty\":500},{\"ingredient_id\":\"$BH112_ID\",\"qty\":200}]}" > /dev/null
+RR113=$(api "$OWNER" GET /bahan/resep-ringkas)
+cek "peta memuat jumlah komponen bahan ber-resep" "V == 2" \
+  "$(echo "$RR113" | jq --arg i "$BP113_ID" '.[$i] // 0')"
+cek "konsisten dengan GET /bahan/:id/resep" "V == 2" \
+  "$(api "$OWNER" GET "/bahan/$BP113_ID/resep" | jq 'length')"
+BP113B_ID=$(api "$OWNER" POST /bahan '{"nama":"adonan kosong uji113","harga_beli":0,"isi":5,"satuan":"pcs","kategori":"lain","pengadaan":"produksi"}' | jq -r .id)
+cek "bahan produksi tanpa resep tidak muncul di peta" "V == 0" \
+  "$(api "$OWNER" GET /bahan/resep-ringkas | jq --arg i "$BP113B_ID" 'has($i) | if . then 1 else 0 end')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

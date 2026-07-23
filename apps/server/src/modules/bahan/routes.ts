@@ -1004,6 +1004,27 @@ export const bahanRoutes = new Hono<AppEnv>()
     },
   )
   /**
+   * Ringkasan resep SEMUA bahan produksi sekaligus: peta ingredient_id →
+   * jumlah bahan mentah. Satu query GROUP BY — menggantikan satu request
+   * per bahan (N+1) dari daftar Resep di web. Bahan tanpa komponen tidak
+   * muncul di peta (klien memperlakukan absen = 0).
+   */
+  .get("/resep-ringkas", async (c) => {
+    const auth = c.get("auth");
+    const rows = await db
+      .select({
+        ingredientId: ingredientComponents.ingredientId,
+        jumlah: sql<number>`count(*)::int`,
+      })
+      .from(ingredientComponents)
+      .innerJoin(ingredients, eq(ingredients.id, ingredientComponents.ingredientId))
+      .where(and(eq(ingredients.companyId, auth.company_id!), eq(ingredients.isActive, true)))
+      .groupBy(ingredientComponents.ingredientId);
+    const peta: Record<string, number> = {};
+    for (const r of rows) peta[r.ingredientId] = r.jumlah;
+    return c.json(peta);
+  })
+  /**
    * RESEP PRODUKSI (BOM) bahan jadi: kebutuhan bahan mentah per 1 batch (isi).
    * GET terbuka utk semua peran (dipakai tampilan); PUT owner/admin.
    */

@@ -223,6 +223,7 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 - `PUT /api/bahan/:id/supplier` — [owner/admin] — req: `{ items: [{supplier_id: uuid, is_utama: bool=false}] (max50) }` — res: `BahanSupplierDto[]` — error: **400** (>1 utama / supplier invalid / bahan tipe produksi), **404**
 - `GET /api/bahan/:id/pembelian` — [any] — res: `RiwayatHargaDto` (riwayat/lot harga beli) — error: **404**
 - `POST /api/bahan/:id/harga` — [owner/admin] — req: `{ harga_per_unit: number(≥0) }` — res: `RiwayatHargaDto` — error: **404**
+- `GET /api/bahan/resep-ringkas` — [any] — res: `Record<ingredient_id, number>` (jumlah bahan mentah per bahan produksi ber-resep, satu query batch; bahan tanpa komponen tidak muncul — perlakukan absen = 0)
 - `GET /api/bahan/:id/resep` — [any] — res: `BahanResepRow[]` (BOM) — error: **404**
 - `PUT /api/bahan/:id/resep` — [owner/admin] — req: `{ komponen: [{ingredient_id: uuid, qty: number(>0)}] = [] }` — res: `{ ok, jumlah }` — error: **400** (bahan non-produksi / self-ref / input invalid / resep sirkular), **404**, **409** (tipe pengadaan berubah di tengah)
 - `DELETE /api/bahan/:id` — [owner/admin] — soft delete — res: `{ ok: true }` — error: **404**, **409** masih dipakai menu aktif atau resep aktif lain
