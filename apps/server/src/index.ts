@@ -1,12 +1,13 @@
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
-import type { Context } from "hono";
+import type { Context, Next } from "hono";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createApp } from "./app";
 import { env } from "./config/env";
 import { db } from "./db/client";
+import { sekaliSaja } from "./lib/boot-flags";
 import { computeBuildId, setBuildId } from "./lib/build";
 import { bersihkanRateLimitKedaluwarsa } from "./middleware/rateLimit";
 import { runMigrations } from "./db/migrate";
@@ -49,43 +50,55 @@ if (env.AUTO_MIGRATE) {
     }
   }
   console.log("Migrasi database selesai.");
+  // BACKFILL WARISAN — perbaikan data pra-fitur, masing-masing hanya perlu
+  // SEKALI seumur hidup database (data baru sudah benar sejak ditulis: kode
+  // terisi saat buat, nomor terbit saat buat, dst). Digerbang flag boot_flags
+  // agar boot berikutnya melompatinya — start server tetap cepat saat data
+  // membesar. Backfill-nya sendiri tetap idempoten (aman dijalankan ulang
+  // dengan menghapus baris flag-nya bila suatu saat perlu).
   // Menu lama tanpa kode → isi kode otomatis (idempotent, hanya baris NULL)
-  const terisi = await backfillKodeMenu(db);
+  const terisi = await sekaliSaja("kode_menu", () => backfillKodeMenu(db));
   if (terisi > 0) console.log(`Kode menu otomatis diisi untuk ${terisi} menu lama.`);
-  // Bahan lama tanpa kode → isi kode; perusahaan tanpa master satuan → seed bawaan.
-  const terisiKodeBahan = await backfillKodeBahan(db);
+  // Bahan lama tanpa kode → isi kode; perusahaan tanpa master satuan → seed
+  // bawaan (perusahaan BARU di-seed langsung saat onboarding/admin).
+  const terisiKodeBahan = await sekaliSaja("kode_bahan", () => backfillKodeBahan(db));
   if (terisiKodeBahan > 0) console.log(`Kode bahan otomatis diisi untuk ${terisiKodeBahan} bahan.`);
-  const unitDibuat = await backfillUnits(db);
+  const unitDibuat = await sekaliSaja("units_bawaan", () => backfillUnits(db));
   if (unitDibuat > 0) console.log(`Master satuan bawaan diisi (${unitDibuat} satuan).`);
-  const katBahan = await backfillKategoriBahan(db);
+  const katBahan = await sekaliSaja("kategori_bahan_bawaan", () => backfillKategoriBahan(db));
   if (katBahan > 0) console.log(`Master kategori bahan bawaan diisi (${katBahan} kategori).`);
   // Karyawan lama tanpa kode → isi kode karyawan otomatis (untuk absensi)
-  const terisiKar = await backfillEmployeeCode(db);
+  const terisiKar = await sekaliSaja("employee_code", () => backfillEmployeeCode(db));
   if (terisiKar > 0) console.log(`Kode karyawan otomatis diisi untuk ${terisiKar} karyawan.`);
   // Nonaktif = arsip: karyawan nonaktif lama dipindah ke arsip (idempoten)
-  const terarsip = await arsipkanMembershipNonaktif(db);
+  const terarsip = await sekaliSaja("arsip_nonaktif", () => arsipkanMembershipNonaktif(db));
   if (terarsip > 0) console.log(`${terarsip} karyawan nonaktif lama dipindah ke arsip.`);
   // Produksi/beli CK-lokal lama yang macet di 'menunggu' → 'dikonfirmasi'
   // (data sebelum fitur auto-confirm: "Selesai" tapi masih "menunggu konfirmasi").
-  const terkonfirmasi = await konfirmasiProduksiCkLokalTertahan(db);
+  const terkonfirmasi = await sekaliSaja("konfirmasi_ck_lokal", () =>
+    konfirmasiProduksiCkLokalTertahan(db),
+  );
   if (terkonfirmasi > 0)
     console.log(`${terkonfirmasi} baris produksi/beli CK-lokal lama dikonfirmasi (masuk stok).`);
   // Dokumen lama tanpa nomor (faktur PB/PR & sesi opname SO) → beri nomor urut
-  const bernomor = await backfillNomorDokumen(db);
+  const bernomor = await sekaliSaja("nomor_dokumen", () => backfillNomorDokumen(db));
   if (bernomor > 0) console.log(`Nomor dokumen diisi untuk ${bernomor} dokumen lama.`);
-  // Konsumsi otomatis perlengkapan: catat hari-hari yang terlewat sejak
-  // server terakhir hidup (idempoten — kursor + unique per hari)
+  // Konsumsi otomatis perlengkapan: catat hari-hari yang terlewat sejak server
+  // terakhir hidup (BUKAN warisan — perlu tiap boot; idempoten via kursor +
+  // unique per hari)
   const autoPerlengkapan = await terapkanSemuaKonsumsiOtomatis();
   if (autoPerlengkapan > 0)
     console.log(`Pemakaian otomatis perlengkapan dicatat: ${autoPerlengkapan} baris.`);
   // Pindahkan rak simpan lama per bahan (kolom warisan) ke penugasan per cabang
   // (Tempat Penyimpanan) — sumber tunggal rak simpan sekarang.
-  const rakPindah = await backfillRakSimpanKeSli(db);
+  const rakPindah = await sekaliSaja("rak_sli_bahan", () => backfillRakSimpanKeSli(db));
   if (rakPindah > 0)
     console.log(`Rak simpan lama dipindah ke Tempat Penyimpanan: ${rakPindah} bahan.`);
   // Sama untuk perlengkapan: rak lama (kolom warisan supplies) → penugasan per
   // cabang di tabel yang sama (satu tabel bahan + perlengkapan).
-  const rakPerlengkapan = await backfillRakPerlengkapanKeSli(db);
+  const rakPerlengkapan = await sekaliSaja("rak_sli_perlengkapan", () =>
+    backfillRakPerlengkapanKeSli(db),
+  );
   if (rakPerlengkapan > 0)
     console.log(`Rak perlengkapan lama dipindah ke Tempat Penyimpanan: ${rakPerlengkapan} item.`);
 }
@@ -111,9 +124,22 @@ try {
 const app = createApp();
 const here = path.dirname(fileURLToPath(import.meta.url));
 
+// File di jalur statis kita bernama unik per versi (aset build ber-hash;
+// upload ber-UUID) — konten di satu URL tak pernah berubah, aman di-cache
+// browser/CDN setahun penuh. HANYA respons sukses yang belum menyetel
+// Cache-Control sendiri: fallback shell (no-cache) dan 404 JSON tidak boleh
+// ikut tertanda immutable — CDN bisa meng-cache shell/404 di URL aset lama.
+const cacheImmutable = async (c: Context, next: Next) => {
+  await next();
+  if (c.res.ok && !c.res.headers.get("Cache-Control")) {
+    c.header("Cache-Control", "public, max-age=31536000, immutable");
+  }
+};
+
 // File upload mode lokal → sajikan dari disk
 const storage = getStorage();
 if (storage.mode === "local") {
+  app.use("/uploads/*", cacheImmutable);
   app.use(
     "/uploads/*",
     serveStatic({
@@ -149,11 +175,10 @@ if (existsSync(webDist)) {
   app.get("/index.html", kirimShell);
   // Aset ber-hash (nama file berganti tiap build) aman di-cache browser
   // setahun penuh — kunjungan berikutnya tak perlu request sama sekali.
-  // Shell HTML tetap no-cache (di atas), jadi rilis baru langsung terambil.
-  app.use("/assets/*", async (c, next) => {
-    await next();
-    c.header("Cache-Control", "public, max-age=31536000, immutable");
-  });
+  // Shell HTML tetap no-cache (di atas), jadi rilis baru langsung terambil;
+  // guard di cacheImmutable menjaga fallback shell utk chunk lama yang hilang
+  // TIDAK ikut tertanda immutable.
+  app.use("/assets/*", cacheImmutable);
   // Aset ber-hash (js/css/img) dilayani statis dari disk.
   app.use("/*", serveStatic({ root: path.relative(process.cwd(), webDist) }));
   // history fallback react-router untuk deep-link (mis. /dashboard).

@@ -63,8 +63,8 @@ export function ResepPage() {
   const cabangStore = cabang.filter((b) => b.is_active && b.tipe === "store");
 
   const { data: bahan, isLoading } = useQuery({
-    queryKey: ["bahan"],
-    queryFn: () => api<BahanDto[]>("/bahan"),
+    queryKey: ["bahan", "ringkas"],
+    queryFn: () => api<BahanDto[]>("/bahan?ringkas=1"),
   });
   const semua = bahan ?? [];
   const produksi = semua.filter((b) => b.pengadaan === "produksi");
@@ -87,25 +87,12 @@ export function ResepPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bahanParam, bahan]);
 
-  // Ringkasan jumlah bahan mentah per bahan produksi (utk badge di daftar).
-  // Satu query batch (Promise.all) — jumlah bahan produksi biasanya sedikit.
-  const producedIds = produksi.map((b) => b.id).sort();
+  // Ringkasan jumlah bahan mentah per bahan produksi (utk badge di daftar) —
+  // satu request batch; bahan yang tak ada di peta berarti belum punya resep.
   const { data: ringkas } = useQuery({
-    queryKey: ["resep-ringkas", producedIds],
-    enabled: producedIds.length > 0,
-    queryFn: async () => {
-      const pasang = await Promise.all(
-        producedIds.map(async (id) => {
-          try {
-            const rows = await api<BahanResepRow[]>(`/bahan/${id}/resep`);
-            return [id, rows.length] as const;
-          } catch {
-            return [id, null] as const;
-          }
-        }),
-      );
-      return Object.fromEntries(pasang) as Record<string, number | null>;
-    },
+    queryKey: ["resep-ringkas"],
+    enabled: produksi.length > 0,
+    queryFn: () => api<Record<string, number>>("/bahan/resep-ringkas"),
   });
 
   // Muat resep bahan terpilih. react-query membuang respons basi saat ganti
@@ -308,7 +295,9 @@ export function ResepPage() {
             />
             <div className="max-h-[70vh] space-y-1 overflow-y-auto">
               {daftar.map((b) => {
-                const n = ringkas?.[b.id];
+                // peta hanya berisi bahan yang PUNYA komponen — absen berarti
+                // 0 (belum ada resep); null hanya selagi peta belum termuat.
+                const n = ringkas ? (ringkas[b.id] ?? 0) : null;
                 const aktif = b.id === selectedId;
                 return (
                   <button

@@ -4142,6 +4142,68 @@ else
   ok "aset JS terkompresi (dilewati — web dist tak tersedia)"
 fi
 
+echo "== 112. GET /bahan?ringkas=1 (varian ringan untuk halaman picker) =="
+# Varian ringkas melewati agregasi supplier & rak (dua query terberat GET
+# /bahan) — bentuk DTO tetap sama: supplier_utama null, jumlah_supplier 0,
+# rak_lokasi []. produksi_branch_ids TETAP dimuat (filter picker kitchen).
+BH112_ID=$(api "$OWNER" POST /bahan '{"nama":"gula uji112","harga_beli":12000,"isi":1000,"satuan":"gr","kategori":"lain"}' | jq -r .id)
+SUP112=$(api "$OWNER" POST /supplier '{"nama":"Supplier Uji 112"}' | jq -r .id)
+api "$OWNER" PUT "/bahan/$BH112_ID/supplier" "{\"items\":[{\"supplier_id\":\"$SUP112\",\"is_utama\":true}]}" > /dev/null
+api "$OWNER" PUT "/bahan/$IPRODA" "{\"produksi_di\":\"cabang\",\"produksi_branch_ids\":[\"$ST52_ID\"]}" > /dev/null
+FL112=$(api "$OWNER" GET /bahan)
+RK112=$(api "$OWNER" GET "/bahan?ringkas=1")
+cek "varian lengkap tetap memuat supplier" "V == 1" \
+  "$(echo "$FL112" | jq --arg i "$BH112_ID" '[.[]|select(.id==$i)][0] | (.supplier_utama=="Supplier Uji 112") and (.jumlah_supplier==1) | if . then 1 else 0 end')"
+cek "ringkas: jumlah baris sama dengan varian lengkap" "V == 1" \
+  "$(jq -n --argjson a "$(echo "$RK112" | jq 'length')" --argjson b "$(echo "$FL112" | jq 'length')" '($a==$b) and ($a>0) | if . then 1 else 0 end')"
+cek "ringkas: supplier & rak kosong di semua baris" "V == 0" \
+  "$(echo "$RK112" | jq '[.[]|select(.supplier_utama!=null or .jumlah_supplier!=0 or .rak_lokasi!=[])]|length')"
+cek "ringkas: produksi_branch_ids tetap dimuat" "V == 1" \
+  "$(echo "$RK112" | jq --arg i "$IPRODA" --arg b "$ST52_ID" '[.[]|select(.id==$i)][0].produksi_branch_ids==[$b] | if . then 1 else 0 end')"
+cek "ringkas: kolom lain identik dengan varian lengkap" "V == 1" \
+  "$(jq -n --argjson a "$(echo "$RK112" | jq --arg i "$BH112_ID" '[.[]|select(.id==$i)][0] | del(.supplier_utama,.jumlah_supplier,.rak_lokasi)')" \
+          --argjson b "$(echo "$FL112" | jq --arg i "$BH112_ID" '[.[]|select(.id==$i)][0] | del(.supplier_utama,.jumlah_supplier,.rak_lokasi)')" \
+          '$a==$b | if . then 1 else 0 end')"
+
+echo "== 113. GET /bahan/resep-ringkas (peta jumlah komponen, batch) =="
+# Satu request menggantikan satu GET /bahan/:id/resep per bahan produksi
+# (badge daftar Resep). Peta hanya memuat bahan yang punya komponen.
+BP113_ID=$(api "$OWNER" POST /bahan '{"nama":"adonan uji113","harga_beli":0,"isi":10,"satuan":"pcs","kategori":"lain","pengadaan":"produksi"}' | jq -r .id)
+BK113_ID=$(api "$OWNER" POST /bahan '{"nama":"tepung uji113","harga_beli":8000,"isi":1000,"satuan":"gr","kategori":"lain"}' | jq -r .id)
+api "$OWNER" PUT "/bahan/$BP113_ID/resep" "{\"komponen\":[{\"ingredient_id\":\"$BK113_ID\",\"qty\":500},{\"ingredient_id\":\"$BH112_ID\",\"qty\":200}]}" > /dev/null
+RR113=$(api "$OWNER" GET /bahan/resep-ringkas)
+cek "peta memuat jumlah komponen bahan ber-resep" "V == 2" \
+  "$(echo "$RR113" | jq --arg i "$BP113_ID" '.[$i] // 0')"
+cek "konsisten dengan GET /bahan/:id/resep" "V == 2" \
+  "$(api "$OWNER" GET "/bahan/$BP113_ID/resep" | jq 'length')"
+BP113B_ID=$(api "$OWNER" POST /bahan '{"nama":"adonan kosong uji113","harga_beli":0,"isi":5,"satuan":"pcs","kategori":"lain","pengadaan":"produksi"}' | jq -r .id)
+cek "bahan produksi tanpa resep tidak muncul di peta" "V == 0" \
+  "$(api "$OWNER" GET /bahan/resep-ringkas | jq --arg i "$BP113B_ID" 'has($i) | if . then 1 else 0 end')"
+
+echo "== 114. Cache immutable /uploads/* + guard fallback tak ikut immutable =="
+# Nama file upload = UUID unik per unggahan (konten satu URL tak pernah
+# berubah) → aman di-cache setahun. Respons 404 dan fallback shell TIDAK
+# boleh ikut tertanda immutable (bisa meracuni cache CDN di URL lama).
+PNG114=$(mktemp --suffix=.png)
+printf 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==' | base64 -d > "$PNG114"
+URL114=$(curl -s -X POST "$BASE/api/upload?tujuan=menu" -H "Authorization: Bearer $OWNER" -F "file=@$PNG114;type=image/png" | jq -r '.url // ""')
+cek "dasar uji: upload gambar sukses (url /uploads/…)" "V == 1" \
+  "$(echo "$URL114" | grep -q '^/uploads/' && echo 1 || echo 0)"
+CC114=$(header_of "cache-control" "$BASE$URL114")
+cek "file upload tersaji ber-Cache-Control immutable" "V == 1" \
+  "$(echo "$CC114" | grep -q immutable && echo 1 || echo 0)"
+CC114B=$(header_of "cache-control" "$BASE/uploads/companies/x/menu/tidak-ada-114.png")
+cek "upload hilang → 404 tanpa immutable" "V == 1" \
+  "$([ "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/uploads/companies/x/menu/tidak-ada-114.png")" = "404" ] && ! echo "$CC114B" | grep -q immutable && echo 1 || echo 0)"
+if [ -n "$ASET111" ]; then
+  CC114C=$(header_of "cache-control" "$BASE/assets/tidak-ada-114.js")
+  cek "aset hilang → fallback shell no-cache (bukan immutable)" "V == 1" \
+    "$(echo "$CC114C" | grep -q no-cache && ! echo "$CC114C" | grep -q immutable && echo 1 || echo 0)"
+else
+  ok "aset hilang → fallback shell no-cache (dilewati — web dist tak tersedia)"
+fi
+rm -f "$PNG114"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

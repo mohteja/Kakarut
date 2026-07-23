@@ -270,6 +270,13 @@ export function Layout() {
                   🏠 Beranda
                 </NavLink>
               )}
+              {/* Laporan tepat di bawah Beranda — gating tetap sama seperti
+                  posisi lamanya di blok Operasional (manajemen di Kantor). */}
+              {isManajemen && penuh && (
+                <NavLink to="/laporan" className={linkClass}>
+                  📊 Laporan
+                </NavLink>
+              )}
               {/* Beranda ringkas peran TIM/KITCHEN (CK & toko): notifikasi + tugas hari ini */}
               {(isTim || isKitchen) && (
                 <NavLink to="/beranda" className={linkClass}>
@@ -424,9 +431,6 @@ export function Layout() {
                           ➕ di halaman Permintaan Stok (tidak lagi di sidebar) */}
                       <NavLink to="/permintaan-stok" className={linkClass}>
                         📋 Permintaan Stok
-                      </NavLink>
-                      <NavLink to="/laporan" className={linkClass}>
-                        📊 Laporan
                       </NavLink>
                       <NavLink to="/sampah" className={linkClass}>
                         🗑 Tempat Sampah

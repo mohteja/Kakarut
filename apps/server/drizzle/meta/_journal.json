@@ -498,6 +498,13 @@
       "when": 1784781883046,
       "tag": "0070_absurd_punisher",
       "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1784782632724,
+      "tag": "0071_glossy_klaw",
+      "breakpoints": true
     }
   ]
 }

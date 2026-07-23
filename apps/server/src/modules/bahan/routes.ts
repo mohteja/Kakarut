@@ -420,6 +420,14 @@ export const bahanRoutes = new Hono<AppEnv>()
       .from(ingredients)
       .where(and(eq(ingredients.companyId, auth.company_id!), eq(ingredients.isActive, true)))
       .orderBy(asc(ingredients.nama));
+    // ?ringkas=1 — varian ringan untuk halaman picker/editor yang tidak
+    // menampilkan supplier maupun rak: lewati dua agregasi terberatnya.
+    // produsen tetap dimuat (filter picker kitchen butuh produksi_branch_ids).
+    // Bentuk DTO tetap sama: supplier_utama null, jumlah_supplier 0, rak [].
+    if (c.req.query("ringkas") === "1") {
+      const produsen = await produsenByBahan(auth.company_id!);
+      return c.json(rows.map((r) => toDto(r, undefined, [], produsen.get(r.id) ?? [])));
+    }
     const [sup, rak, produsen] = await Promise.all([
       infoSupplier(auth.company_id!),
       rakLokasiByBahan(auth.company_id!),
@@ -995,6 +1003,27 @@ export const bahanRoutes = new Hono<AppEnv>()
       return c.json(await riwayatHargaBahan(auth.company_id!, row));
     },
   )
+  /**
+   * Ringkasan resep SEMUA bahan produksi sekaligus: peta ingredient_id →
+   * jumlah bahan mentah. Satu query GROUP BY — menggantikan satu request
+   * per bahan (N+1) dari daftar Resep di web. Bahan tanpa komponen tidak
+   * muncul di peta (klien memperlakukan absen = 0).
+   */
+  .get("/resep-ringkas", async (c) => {
+    const auth = c.get("auth");
+    const rows = await db
+      .select({
+        ingredientId: ingredientComponents.ingredientId,
+        jumlah: sql<number>`count(*)::int`,
+      })
+      .from(ingredientComponents)
+      .innerJoin(ingredients, eq(ingredients.id, ingredientComponents.ingredientId))
+      .where(and(eq(ingredients.companyId, auth.company_id!), eq(ingredients.isActive, true)))
+      .groupBy(ingredientComponents.ingredientId);
+    const peta: Record<string, number> = {};
+    for (const r of rows) peta[r.ingredientId] = r.jumlah;
+    return c.json(peta);
+  })
   /**
    * RESEP PRODUKSI (BOM) bahan jadi: kebutuhan bahan mentah per 1 batch (isi).
    * GET terbuka utk semua peran (dipakai tampilan); PUT owner/admin.
