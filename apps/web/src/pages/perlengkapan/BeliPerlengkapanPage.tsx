@@ -341,7 +341,35 @@ export function BeliPerlengkapanPage() {
   );
 }
 
-/** Detail satu faktur beli perlengkapan (BP-): metadata + seluruh item. */
+/** Estimasi biaya satu baris: harga riil bila terisi, selain itu qty × harga master. */
+function estimasiBaris(r: BeliPerlengkapanRow): number {
+  return r.total_harga != null && r.total_harga > 0 ? r.total_harga : r.qty * (r.harga_beli ?? 0);
+}
+
+/**
+ * Kelompokkan baris faktur perlengkapan per SUPPLIER langganan (tempat beli) —
+ * paritas Dokumen Belanja bahan baku: satu toko satu daftar. Supplier bernama
+ * dulu (urut abjad), "tanpa supplier" paling akhir.
+ */
+function perSupplierBeli(rows: BeliPerlengkapanRow[]) {
+  const byKey = new Map<string, { nama: string | null; rows: BeliPerlengkapanRow[] }>();
+  for (const r of rows) {
+    const key = r.supplier_utama ?? "__tanpa";
+    let g = byKey.get(key);
+    if (!g) {
+      g = { nama: r.supplier_utama ?? null, rows: [] };
+      byKey.set(key, g);
+    }
+    g.rows.push(r);
+  }
+  return [...byKey.values()].sort((a, b) => {
+    if (a.nama == null) return 1;
+    if (b.nama == null) return -1;
+    return a.nama.localeCompare(b.nama);
+  });
+}
+
+/** Detail satu faktur beli perlengkapan (BP-): metadata + item per supplier. */
 function DetailBeliPerlengkapanModal({
   faktur: g,
   onClose,
@@ -386,38 +414,51 @@ function DetailBeliPerlengkapanModal({
           )}
         </dl>
 
-        <div className="rounded-lg border border-stone-200">
-          <table className="w-full text-sm">
-            <tbody className="divide-y divide-stone-100">
-              {g.rows.map((r) => (
-                <tr key={r.id}>
-                  <td className="px-3 py-1.5 font-medium">
-                    {r.nama}
-                    {r.supplier_utama && (
-                      <div className="text-xs font-normal text-stone-400">
-                        🏬 {r.supplier_utama}
-                      </div>
-                    )}
-                    {g.rows.length > 1 && r.status !== g.status && (
-                      <span className="ml-1.5 inline-block">
-                        <BeliStatusBadge status={r.status} />
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-3 py-1.5 text-right whitespace-nowrap text-stone-600">
-                    {formatAngka(r.qty)} {r.satuan}
-                  </td>
-                  <td className="px-3 py-1.5 text-right whitespace-nowrap text-stone-500">
-                    {r.total_harga != null && r.total_harga > 0
-                      ? formatRupiah(r.total_harga)
-                      : r.harga_beli > 0
-                        ? `± ${formatRupiah(r.qty * r.harga_beli)}`
-                        : "—"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        {/* Item DIKELOMPOKKAN per SUPPLIER (tempat beli) — paritas bahan baku */}
+        <div className="space-y-2">
+          {perSupplierBeli(g.rows).map((s, i) => {
+            const subtotal = s.rows.reduce((t, r) => t + estimasiBaris(r), 0);
+            return (
+              <div key={i} className="overflow-hidden rounded-lg border border-stone-200">
+                <div className="flex items-center justify-between border-b border-stone-100 bg-stone-50 px-3 py-1.5 text-sm font-semibold text-stone-700">
+                  <span>
+                    {s.nama ? `🏬 ${s.nama}` : "🛒 Tanpa tempat beli (bebas beli di mana)"}
+                  </span>
+                  {subtotal > 0 && (
+                    <span className="text-xs font-medium text-stone-500">
+                      ± {formatRupiah(subtotal)}
+                    </span>
+                  )}
+                </div>
+                <table className="w-full text-sm">
+                  <tbody className="divide-y divide-stone-100">
+                    {s.rows.map((r) => (
+                      <tr key={r.id}>
+                        <td className="px-3 py-1.5 font-medium">
+                          {r.nama}
+                          {g.rows.length > 1 && r.status !== g.status && (
+                            <span className="ml-1.5 inline-block">
+                              <BeliStatusBadge status={r.status} />
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-3 py-1.5 text-right whitespace-nowrap text-stone-600">
+                          {formatAngka(r.qty)} {r.satuan}
+                        </td>
+                        <td className="px-3 py-1.5 text-right whitespace-nowrap text-stone-500">
+                          {r.total_harga != null && r.total_harga > 0
+                            ? formatRupiah(r.total_harga)
+                            : r.harga_beli > 0
+                              ? `± ${formatRupiah(r.qty * r.harga_beli)}`
+                              : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            );
+          })}
         </div>
 
         <div className="text-right text-sm font-semibold text-stone-700">
