@@ -4103,9 +4103,16 @@ HB2=$(api "$OWNER" POST "/perlengkapan/permintaan-otomatis?branch_id=$CB46_ID&re
 FB2=$(echo "$HB2" | jq -r '.beli_faktur.faktur_id // ""')
 cek "dasar uji: faktur BP tertaut rencana baru terbit" "V == 1" \
   "$([ -n "$FB2" ] && echo 1 || echo 0)"
-api "$OWNER" DELETE "/rekomendasi/permintaan/$R110B" > /dev/null
-cek "hapus permintaan → faktur BP tertaut ikut batal" "V == 1" \
+# Batalkan faktur SAAT permintaan MASIH ADA → tetap tampil sebagai 'batal'
+# (pembatalan sah; permintaannya masih hidup — inilah arti "Dibatalkan").
+api "$OWNER" POST "/perlengkapan/beli/faktur/$FB2/batal" '{}' > /dev/null
+cek "batal faktur (permintaan masih ada) → tetap tampil 'batal'" "V == 1" \
   "$(api "$OWNER" GET /perlengkapan/beli | jq --arg f "$FB2" '[.[]|select(.faktur_id==$f)|.status]|unique==["batal"] | if . then 1 else 0 end')"
+# HAPUS permintaan → productions soft-delete; faktur BP tertaut kini HILANG dari
+# daftar (tak lagi "Dibatalkan" menggantung — konsisten dgn permintaan yg lenyap).
+api "$OWNER" DELETE "/rekomendasi/permintaan/$R110B" > /dev/null
+cek "hapus permintaan → faktur BP tertaut HILANG dari daftar" "V == 0" \
+  "$(api "$OWNER" GET /perlengkapan/beli | jq --arg f "$FB2" '[.[]|select(.faktur_id==$f)]|length')"
 # (g) BATAL SEMUA yang menunggu (bersih-bersih faktur warisan tanpa tautan).
 LAP110=$(api "$OWNER" GET /perlengkapan/master | jq -r '[.[]|select(.nama=="Lap Uji 110")][0].id')
 api "$OWNER" POST /perlengkapan/beli "{\"items\":[{\"supply_id\":\"$LAP110\",\"qty\":1}],\"ck_branch_id\":\"$CK52_UTAMA\"}" > /dev/null
