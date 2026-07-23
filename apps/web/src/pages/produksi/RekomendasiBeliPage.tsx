@@ -281,6 +281,12 @@ export function RekomendasiBeliPage() {
             </div>
           ) : null}
 
+          {data.bahan.some((b) => b.lead_time_hari > 0) && (
+            <div className="mb-2 text-xs text-stone-500">
+              ⏱ = bahan ber-<b>lead time</b>: pesan/buat <b>jauh-jauh hari</b> (H-n hari
+              sebelum dibutuhkan) — beli = lama pesanan datang, produksi = lama proses.
+            </div>
+          )}
           <Card className="overflow-x-auto">
             <table className="w-full whitespace-nowrap text-sm">
               <thead className="border-b border-stone-200 bg-stone-50">
@@ -305,6 +311,14 @@ export function RekomendasiBeliPage() {
                       >
                         {b.pengadaan === "beli" ? "beli" : "produksi"}
                       </span>
+                      {b.lead_time_hari > 0 && (
+                        <span
+                          className="ml-1.5 rounded-full bg-amber-100 px-1.5 py-0.5 text-xs font-semibold text-amber-800"
+                          title={`Lead time ${b.lead_time_hari} hari — ${b.pengadaan === "beli" ? "pesan" : "buat"} jauh-jauh hari (H-${b.lead_time_hari})`}
+                        >
+                          ⏱ {b.pengadaan === "beli" ? "pesan" : "buat"} H-{b.lead_time_hari}
+                        </span>
+                      )}
                     </td>
                     <td className={`${tdClass} text-right`}>{formatAngka(b.terpakai)}</td>
                     <td className={`${tdClass} text-right`}>{formatAngka(b.sisa)}</td>

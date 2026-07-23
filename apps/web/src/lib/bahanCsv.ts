@@ -17,6 +17,8 @@ export const KOLOM_CSV = [
   "satuan_beli",
   "stok_minimum",
   "min_beli",
+  "masa_simpan_hari",
+  "lead_time_hari",
   "boleh_eceran",
   "lacak_stok",
   "kemasan",
@@ -45,6 +47,8 @@ export function buatCsvBahan(bahan: BahanDto[]): string {
       b.satuan_beli ?? "",
       String(b.stok_minimum),
       String(b.min_beli ?? 0),
+      String(b.masa_simpan_hari ?? 0),
+      String(b.lead_time_hari ?? 0),
       ya(b.boleh_eceran),
       ya(b.track_stok),
       ya(b.is_packaging),
@@ -58,7 +62,7 @@ export function buatCsvBahan(bahan: BahanDto[]): string {
   const contoh =
     bahan.length === 0
       ? [
-          'AMS,"Air Mineral 330 ml",minuman,beli,50000,24,botol,dus,5,0,tidak,ya,tidak,tidak,contoh — hapus baris ini',
+          'AMS,"Air Mineral 330 ml",minuman,beli,50000,24,botol,dus,5,0,30,2,tidak,ya,tidak,tidak,contoh — hapus baris ini',
         ]
       : [];
   return [KOLOM_CSV.join(","), ...baris, ...contoh].join("\n");
@@ -151,6 +155,8 @@ export function keRowsImpor(tabel: string[][]): TerbacaCsv {
   const iSatuanBeli = idx("satuan_beli");
   const iMin = idx("stok_minimum");
   const iMinBeli = idx("min_beli");
+  const iMasaSimpan = idx("masa_simpan_hari");
+  const iLeadTime = idx("lead_time_hari");
   const iEceran = idx("boleh_eceran");
   const iLacak = idx("lacak_stok");
   const iKemasan = idx("kemasan");
@@ -178,6 +184,8 @@ export function keRowsImpor(tabel: string[][]): TerbacaCsv {
       satuan_beli: amb(r, iSatuanBeli) || null,
       stok_minimum: keAngka(amb(r, iMin), 0),
       min_beli: keAngka(amb(r, iMinBeli), 0),
+      masa_simpan_hari: Math.max(0, Math.trunc(keAngka(amb(r, iMasaSimpan), 0))),
+      lead_time_hari: Math.max(0, Math.trunc(keAngka(amb(r, iLeadTime), 0))),
       boleh_eceran: keBool(amb(r, iEceran), false),
       lacak_stok: keBool(amb(r, iLacak), true),
       kemasan: keBool(amb(r, iKemasan), false),

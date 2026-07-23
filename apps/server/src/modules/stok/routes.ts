@@ -121,6 +121,170 @@ export const stokRoutes = new Hono<AppEnv>()
     );
   })
   /**
+   * PERINGATAN EXP: lot (baris faktur masuk stok) yang hampir/lewat tanggal
+   * kedaluwarsa dalam `hari` ke depan (default 7, clamp 0–60). APROKSIMASI:
+   * ledger stok agregat tanpa FIFO — qty_masuk = qty saat lot masuk, BUKAN
+   * sisa lot; saldo live bahan disandingkan agar user menilai sendiri.
+   * Lot sebelum baseline opname terakhir bahan itu dikecualikan (predikat
+   * HARUS identik dengan hitungSaldoCabang: waktu > baseline.created_at,
+   * penyesuaian_status 'disetujui') — opname me-reset lot juga.
+   */
+  .get("/exp", async (c) => {
+    const auth = c.get("auth");
+    const branchId = await resolveBranchId(c);
+    const hariQ = Number(c.req.query("hari") ?? 7);
+    const hari = Number.isFinite(hariQ) ? Math.min(60, Math.max(0, Math.trunc(hariQ))) : 7;
+
+    const [company] = await db
+      .select({ timezone: companies.timezone })
+      .from(companies)
+      .where(eq(companies.id, auth.company_id!));
+    const today = tanggalDi(company?.timezone ?? "Asia/Jakarta");
+
+    const result = await db.execute(sql`
+      SELECT
+        pr.id            AS production_id,
+        pr.ingredient_id AS ingredient_id,
+        i.nama           AS nama,
+        i.satuan         AS satuan,
+        pr.qty           AS qty_masuk,
+        pr.exp_date      AS exp_date,
+        pr.prod_date     AS prod_date,
+        pr.tipe          AS tipe,
+        pr.faktur_id     AS faktur_id,
+        dn.nomor_teks    AS nomor,
+        slk.nama         AS tempat,
+        (pr.exp_date - ${today}::date) AS sisa_hari
+      FROM productions pr
+      JOIN ingredients i ON i.id = pr.ingredient_id
+        AND i.is_active AND i.track_stok
+      LEFT JOIN storage_locations slk ON slk.id = pr.storage_location_id
+      LEFT JOIN dokumen_nomor dn
+        ON dn.company_id = pr.company_id AND dn.ref_id = pr.faktur_id
+      LEFT JOIN LATERAL (
+        SELECT so.created_at
+        FROM stock_opnames so
+        WHERE so.branch_id = pr.branch_id AND so.ingredient_id = pr.ingredient_id
+          AND so.penyesuaian_status = 'disetujui'
+        ORDER BY so.created_at DESC
+        LIMIT 1
+      ) b ON TRUE
+      WHERE pr.company_id = ${auth.company_id!} AND pr.branch_id = ${branchId}
+        AND pr.status = 'dikonfirmasi' AND pr.deleted_at IS NULL
+        AND pr.exp_date IS NOT NULL
+        AND pr.exp_date <= ${today}::date + ${hari}::int
+        AND (b.created_at IS NULL OR pr.waktu > b.created_at)
+      ORDER BY pr.exp_date ASC, i.nama ASC
+      LIMIT 300
+    `);
+
+    // saldo live per bahan (semua lot) — konteks menilai sisa
+    const saldoRows = await hitungSaldoCabang(auth.company_id!, branchId);
+    const saldoById = new Map(saldoRows.map((r) => [r.ingredient_id, r.saldo]));
+    const items = result.rows.map((r) => {
+      const row = r as Record<string, unknown>;
+      return {
+        production_id: String(row.production_id),
+        ingredient_id: String(row.ingredient_id),
+        nama: String(row.nama),
+        satuan: String(row.satuan),
+        qty_masuk: Number(row.qty_masuk),
+        exp_date: String(row.exp_date),
+        prod_date: String(row.prod_date),
+        tipe: row.tipe as "beli" | "produksi",
+        faktur_id: row.faktur_id ? String(row.faktur_id) : null,
+        nomor: row.nomor ? String(row.nomor) : null,
+        tempat: row.tempat ? String(row.tempat) : null,
+        saldo: saldoById.get(String(row.ingredient_id)) ?? 0,
+        sisa_hari: Number(row.sisa_hari),
+      };
+    });
+    return c.json(items);
+  })
+  /**
+   * CATAT WASTE (mis. bahan kedaluwarsa): memotong stok lewat mekanisme
+   * penyesuaian yang SUDAH ADA — satu baris stock_opnames (sesi tersendiri)
+   * dengan qty fisik = saldo − qty waste, kategori 'waste_bahan', bukti foto
+   * WAJIB, status 'menunggu' → efektif SETELAH di-ACC owner/admin di Riwayat
+   * SO (stok tidak langsung berubah). Catatan: dua waste beruntun sebelum ACC
+   * saling menimpa baseline (semantik opname "fisik terakhir menang") — UI
+   * meng-invalidate agresif untuk meminimalkan.
+   */
+  .post(
+    "/waste",
+    requireRole("owner", "admin", "cashier", "tim", "kitchen"),
+    zValidator(
+      "json",
+      z.object({
+        branch_id: z.string().uuid().optional(),
+        ingredient_id: z.string().uuid(),
+        qty: z.number().positive(),
+        foto_url: z.string().trim().min(1, "Bukti foto wajib dilampirkan"),
+        catatan: z.string().trim().max(300).nullish(),
+      }),
+    ),
+    async (c) => {
+      const auth = c.get("auth");
+      const body = c.req.valid("json");
+      const branchId = body.branch_id
+        ? await pastikanCabang(body.branch_id, auth.company_id!)
+        : await resolveBranchId(c);
+      if (terikatCabang(auth.role) && branchId !== auth.branch_id) {
+        throw new HTTPException(403, { message: "Anda hanya boleh mencatat waste di cabang Anda" });
+      }
+
+      const [ing] = await db
+        .select({ id: ingredients.id, nama: ingredients.nama, trackStok: ingredients.trackStok })
+        .from(ingredients)
+        .where(
+          and(eq(ingredients.id, body.ingredient_id), eq(ingredients.companyId, auth.company_id!)),
+        );
+      if (!ing || !ing.trackStok) {
+        throw new HTTPException(400, { message: "Bahan tidak valid atau stoknya tidak dilacak" });
+      }
+
+      const saldoRows = await hitungSaldoCabang(auth.company_id!, branchId);
+      const saldo = saldoRows.find((r) => r.ingredient_id === ing.id)?.saldo ?? 0;
+      if (body.qty > saldo + 1e-9) {
+        throw new HTTPException(400, {
+          message: `Qty waste melebihi saldo (${saldo}) — periksa lagi jumlahnya`,
+        });
+      }
+
+      const [company] = await db
+        .select({ timezone: companies.timezone })
+        .from(companies)
+        .where(eq(companies.id, auth.company_id!));
+      const today = tanggalDi(company?.timezone ?? "Asia/Jakarta");
+      const sessionId = randomUUID();
+      const nowTs = new Date();
+      const { nomor } = await db.transaction(async (tx) => {
+        await tx.insert(stockOpnames).values({
+          companyId: auth.company_id!,
+          branchId,
+          ingredientId: ing.id,
+          qty: saldo - body.qty,
+          opnameDate: today,
+          catatan: "Catat waste",
+          sessionId,
+          systemQty: saldo,
+          selisih: -body.qty,
+          klarifikasiStatus: "sudah",
+          penyesuaianKategori: "waste_bahan",
+          klarifikasiCatatan: body.catatan?.trim() || null,
+          klarifikasiFotoUrl: body.foto_url.trim(),
+          klarifikasiBy: auth.sub,
+          klarifikasiAt: nowTs,
+          penyesuaianStatus: "menunggu",
+          userId: auth.sub,
+        });
+        const nomorTeks = await terbitkanNomor(tx, auth.company_id!, "opname", sessionId);
+        return { nomor: nomorTeks };
+      });
+      return c.json({ ok: true, session_id: sessionId, nomor }, 201);
+    },
+  )
+  /**
    * Stock opname: bandingkan fisik vs sistem. owner/admin + peran terikat
    * cabang (kasir & tim, terkunci cabangnya + hanya tempat yang ditugaskan).
    * Menyimpan snapshot saldo sistem + selisih per sesi, qty fisik jadi

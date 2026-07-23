@@ -24,6 +24,10 @@ export interface BahanEditorRow {
   track_stok: boolean;
   stok_minimum: string;
   min_beli: string;
+  /** masa simpan (hari) setelah masuk stok — dasar exp otomatis; 0 = tak diatur */
+  masa_simpan: string;
+  /** lead time (hari): beli = lama pesanan datang; produksi = lama proses */
+  lead_time: string;
   is_packaging: boolean;
   is_complement: boolean;
   catatan: string;
@@ -74,6 +78,20 @@ export function BahanEditorGrid({
             <th className={`${thCell} text-center`} rowSpan={2}>Lacak</th>
             <th className={thCell} rowSpan={2}>Stok min</th>
             <th className={thCell} rowSpan={2}>Min beli</th>
+            <th
+              className={thCell}
+              rowSpan={2}
+              title="Masa simpan (hari) setelah masuk stok — dasar tanggal exp otomatis; 0 = tak diatur"
+            >
+              Masa simpan (hr)
+            </th>
+            <th
+              className={thCell}
+              rowSpan={2}
+              title="Lead time (hari): beli = lama pesanan datang; produksi = lama proses — pesan/buat jauh-jauh hari"
+            >
+              Lead time (hr)
+            </th>
             <th className={`${thCell} text-center`} rowSpan={2} title="Kemasan take-away">
               TA
             </th>
@@ -234,6 +252,32 @@ export function BahanEditorGrid({
                       beli
                         ? `Minimal belanja (${b.satuan}); 0 = tanpa minimum`
                         : "Hanya untuk bahan jalur beli"
+                    }
+                  />
+                </td>
+                <td className="px-2 py-1.5">
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={b.masa_simpan}
+                    onChange={(e) => onChange(i, { masa_simpan: e.target.value })}
+                    className={`${cell} w-20`}
+                    title="Masa simpan (hari); 0 = tak diatur (exp tidak diisi otomatis)"
+                  />
+                </td>
+                <td className="px-2 py-1.5">
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={b.lead_time}
+                    onChange={(e) => onChange(i, { lead_time: e.target.value })}
+                    className={`${cell} w-20`}
+                    title={
+                      beli
+                        ? "Lead time (hari): lama pesanan sampai barang datang"
+                        : "Lead time (hari): lama proses produksi"
                     }
                   />
                 </td>

@@ -3,7 +3,7 @@ import { useState } from "react";
 import type { FakturLogRow, JenisPengadaan, PenyimpananDto, SupplierDto } from "@kakarut/shared";
 import { ErrorText, Modal, btnPrimary, btnSecondary, inputClass } from "../../components/ui";
 import { api } from "../../lib/api";
-import { formatAngka, formatRupiah, formatWaktu } from "../../lib/format";
+import { formatAngka, formatRupiah, formatTanggalRingkas, formatWaktu } from "../../lib/format";
 import {
   AKSI_TAHAP,
   URUTAN_TAHAP,
@@ -299,6 +299,12 @@ export function FakturDetailModal({
                               📍 {r.supplier_bahan_alamat}
                             </div>
                           )}
+                        </div>
+                      )}
+                      {/* exp lot — terisi saat baris masuk stok (Tiba/Selesai) */}
+                      {r.exp_date && (
+                        <div className="mt-0.5 text-[11px] font-normal text-stone-500">
+                          ⏳ exp {formatTanggalRingkas(r.exp_date)}
                         </div>
                       )}
                     </td>

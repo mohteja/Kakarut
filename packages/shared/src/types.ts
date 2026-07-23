@@ -135,6 +135,10 @@ export interface BahanDto {
   boleh_eceran: boolean;
   /** MINIMAL BELANJA (MOQ): jumlah beli minimum saat belanja otomatis (0 = tanpa minimum) */
   min_beli: number;
+  /** MASA SIMPAN (hari) setelah masuk stok — dasar exp otomatis lot; 0 = tak diatur */
+  masa_simpan_hari: number;
+  /** LEAD TIME (hari): beli = lama pesanan datang; produksi = lama proses; 0 = tanpa info */
+  lead_time_hari: number;
   is_active: boolean;
   /** nama supplier UTAMA bahan ini (null = belum diatur) */
   supplier_utama: string | null;
@@ -183,6 +187,10 @@ export interface BahanImportRow {
   kemasan: boolean;
   /** complement (×0.5 dine-in) */
   complement: boolean;
+  /** masa simpan (hari); 0 = tak diatur */
+  masa_simpan_hari: number;
+  /** lead time (hari); 0 = tanpa info */
+  lead_time_hari: number;
   catatan: string | null;
 }
 
@@ -265,6 +273,10 @@ export interface BahanBulkRow {
   boleh_eceran: boolean;
   /** minimal belanja (MOQ); 0 = tanpa minimum */
   min_beli?: number;
+  /** masa simpan (hari); 0 = tak diatur */
+  masa_simpan_hari?: number;
+  /** lead time (hari); 0 = tanpa info */
+  lead_time_hari?: number;
   /** kemasan take-away */
   is_packaging?: boolean;
   /** complement (×0.5 dine-in) */
@@ -362,6 +374,8 @@ export interface RencanaBahanRow {
   qty_faktur: number | null;
   harga_per_unit: number;
   estimasi_biaya: number | null;
+  /** LEAD TIME bahan (hari): pesan/buat jauh-jauh hari (H-n); 0 = tanpa info */
+  lead_time_hari: number;
   /** khusus baris BAHAN PRODUKSI: nama bahan jadi yang membutuhkannya */
   untuk?: string | null;
   /**
@@ -506,6 +520,33 @@ export interface StokRowDto {
   pembelian_berjalan: ProduksiBerjalan | null;
 }
 
+/**
+ * Satu LOT (baris faktur masuk stok) yang hampir/lewat tanggal kedaluwarsa —
+ * GET /stok/exp. APROKSIMASI: ledger stok agregat (tanpa FIFO), jadi
+ * `qty_masuk` = qty saat lot masuk, BUKAN sisa lot; `saldo` (saldo live semua
+ * lot bahan) disandingkan agar user menilai sendiri sebelum mencatat waste.
+ */
+export interface ExpLotRow {
+  production_id: string;
+  ingredient_id: string;
+  nama: string;
+  satuan: string;
+  /** qty saat lot masuk stok (bukan sisa lot — lihat catatan aproksimasi) */
+  qty_masuk: number;
+  exp_date: string;
+  /** tanggal lot masuk (prod_date faktur) */
+  prod_date: string;
+  tipe: JenisPengadaan;
+  faktur_id: string | null;
+  /** nomor dokumen faktur (PB-/PR-) bila ada */
+  nomor: string | null;
+  tempat: string | null;
+  /** saldo live bahan saat ini (semua lot) */
+  saldo: number;
+  /** exp_date − hari ini (negatif = sudah lewat exp) */
+  sisa_hari: number;
+}
+
 export interface SupplierDto {
   id: string;
   nama: string;
@@ -591,6 +632,8 @@ export interface RekomendasiBahanRow {
   harga_per_unit: number;
   /** round(qty_faktur × harga_per_unit) — dari kuantitas terbulatkan */
   estimasi_biaya: number | null;
+  /** LEAD TIME bahan (hari): pesan/buat jauh-jauh hari (H-n); 0 = tanpa info */
+  lead_time_hari: number;
 }
 
 export interface RekomendasiBeli {

@@ -22,6 +22,8 @@ function keBaris(b: BahanDto): BahanEditorRow {
     track_stok: b.track_stok,
     stok_minimum: String(b.stok_minimum),
     min_beli: String(b.min_beli ?? 0),
+    masa_simpan: String(b.masa_simpan_hari ?? 0),
+    lead_time: String(b.lead_time_hari ?? 0),
     is_packaging: b.is_packaging,
     is_complement: b.is_complement,
     catatan: b.catatan ?? "",
@@ -90,6 +92,8 @@ export function UbahBahanBakuPage() {
               // eceran & minimal belanja hanya relevan utk jalur beli
               boleh_eceran: b.pengadaan === "beli" ? b.boleh_eceran : false,
               min_beli: b.pengadaan === "beli" ? Number(b.min_beli) || 0 : 0,
+              masa_simpan_hari: Math.max(0, Math.trunc(Number(b.masa_simpan) || 0)),
+              lead_time_hari: Math.max(0, Math.trunc(Number(b.lead_time) || 0)),
             },
           }),
         ),

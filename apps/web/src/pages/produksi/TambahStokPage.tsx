@@ -45,6 +45,10 @@ export interface StokMasukRow {
   catatan: string | null;
   waktu: string;
   prod_date: string;
+  /** tanggal kedaluwarsa lot — terisi saat baris masuk stok (Tiba/Selesai) */
+  exp_date?: string | null;
+  /** masa simpan (hari) dari master bahan — default form exp saat Tiba */
+  masa_simpan_hari?: number;
   faktur_id: string | null;
   no_faktur: string | null;
   /** nomor dokumen otomatis (PB-/PR-), sama untuk semua baris satu faktur */
