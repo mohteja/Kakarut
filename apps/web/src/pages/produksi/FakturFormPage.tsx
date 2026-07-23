@@ -188,7 +188,10 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
   const produksiDiCabang =
     tipe === "produksi" && cabang.find((b) => b.id === branchId)?.tipe === "store";
 
-  const { data: bahan } = useQuery({ queryKey: ["bahan"], queryFn: () => api<BahanDto[]>("/bahan") });
+  const { data: bahan } = useQuery({
+    queryKey: ["bahan", "ringkas"],
+    queryFn: () => api<BahanDto[]>("/bahan?ringkas=1"),
+  });
   const { data: supplier = [] } = useQuery({
     queryKey: ["supplier"],
     queryFn: () => api<SupplierDto[]>("/supplier"),

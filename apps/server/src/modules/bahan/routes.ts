@@ -420,6 +420,14 @@ export const bahanRoutes = new Hono<AppEnv>()
       .from(ingredients)
       .where(and(eq(ingredients.companyId, auth.company_id!), eq(ingredients.isActive, true)))
       .orderBy(asc(ingredients.nama));
+    // ?ringkas=1 — varian ringan untuk halaman picker/editor yang tidak
+    // menampilkan supplier maupun rak: lewati dua agregasi terberatnya.
+    // produsen tetap dimuat (filter picker kitchen butuh produksi_branch_ids).
+    // Bentuk DTO tetap sama: supplier_utama null, jumlah_supplier 0, rak [].
+    if (c.req.query("ringkas") === "1") {
+      const produsen = await produsenByBahan(auth.company_id!);
+      return c.json(rows.map((r) => toDto(r, undefined, [], produsen.get(r.id) ?? [])));
+    }
     const [sup, rak, produsen] = await Promise.all([
       infoSupplier(auth.company_id!),
       rakLokasiByBahan(auth.company_id!),

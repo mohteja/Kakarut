@@ -63,8 +63,8 @@ export function ResepPage() {
   const cabangStore = cabang.filter((b) => b.is_active && b.tipe === "store");
 
   const { data: bahan, isLoading } = useQuery({
-    queryKey: ["bahan"],
-    queryFn: () => api<BahanDto[]>("/bahan"),
+    queryKey: ["bahan", "ringkas"],
+    queryFn: () => api<BahanDto[]>("/bahan?ringkas=1"),
   });
   const semua = bahan ?? [];
   const produksi = semua.filter((b) => b.pengadaan === "produksi");

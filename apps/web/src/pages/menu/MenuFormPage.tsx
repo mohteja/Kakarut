@@ -46,8 +46,8 @@ export function MenuFormPage() {
   const { cabang } = useBranch();
 
   const { data: bahan } = useQuery({
-    queryKey: ["bahan"],
-    queryFn: () => api<BahanDto[]>("/bahan"),
+    queryKey: ["bahan", "ringkas"],
+    queryFn: () => api<BahanDto[]>("/bahan?ringkas=1"),
   });
   const { data: kategori } = useQuery({
     queryKey: ["kategori"],

@@ -156,8 +156,8 @@ function IsiRakModal({
   const queryClient = useQueryClient();
   const isBahan = jenis === "bahan";
   const { data: bahan = [], isLoading: loadBahan } = useQuery({
-    queryKey: ["bahan"],
-    queryFn: () => api<BahanDto[]>("/bahan"),
+    queryKey: ["bahan", "ringkas"],
+    queryFn: () => api<BahanDto[]>("/bahan?ringkas=1"),
     enabled: isBahan,
   });
   const { data: perlengkapan = [], isLoading: loadPerl } = useQuery({

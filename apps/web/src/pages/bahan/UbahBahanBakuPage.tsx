@@ -41,8 +41,8 @@ export function UbahBahanBakuPage() {
   const [kelolaKategori, setKelolaKategori] = useState(false);
 
   const { data: bahan, isLoading } = useQuery({
-    queryKey: ["bahan"],
-    queryFn: () => api<BahanDto[]>("/bahan"),
+    queryKey: ["bahan", "ringkas"],
+    queryFn: () => api<BahanDto[]>("/bahan?ringkas=1"),
   });
   const { data: kategoriList = [] } = useQuery({
     queryKey: ["kategori-bahan"],

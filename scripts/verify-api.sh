@@ -4142,6 +4142,29 @@ else
   ok "aset JS terkompresi (dilewati — web dist tak tersedia)"
 fi
 
+echo "== 112. GET /bahan?ringkas=1 (varian ringan untuk halaman picker) =="
+# Varian ringkas melewati agregasi supplier & rak (dua query terberat GET
+# /bahan) — bentuk DTO tetap sama: supplier_utama null, jumlah_supplier 0,
+# rak_lokasi []. produksi_branch_ids TETAP dimuat (filter picker kitchen).
+BH112_ID=$(api "$OWNER" POST /bahan '{"nama":"gula uji112","harga_beli":12000,"isi":1000,"satuan":"gr","kategori":"lain"}' | jq -r .id)
+SUP112=$(api "$OWNER" POST /supplier '{"nama":"Supplier Uji 112"}' | jq -r .id)
+api "$OWNER" PUT "/bahan/$BH112_ID/supplier" "{\"items\":[{\"supplier_id\":\"$SUP112\",\"is_utama\":true}]}" > /dev/null
+api "$OWNER" PUT "/bahan/$IPRODA" "{\"produksi_di\":\"cabang\",\"produksi_branch_ids\":[\"$ST52_ID\"]}" > /dev/null
+FL112=$(api "$OWNER" GET /bahan)
+RK112=$(api "$OWNER" GET "/bahan?ringkas=1")
+cek "varian lengkap tetap memuat supplier" "V == 1" \
+  "$(echo "$FL112" | jq --arg i "$BH112_ID" '[.[]|select(.id==$i)][0] | (.supplier_utama=="Supplier Uji 112") and (.jumlah_supplier==1) | if . then 1 else 0 end')"
+cek "ringkas: jumlah baris sama dengan varian lengkap" "V == 1" \
+  "$(jq -n --argjson a "$(echo "$RK112" | jq 'length')" --argjson b "$(echo "$FL112" | jq 'length')" '($a==$b) and ($a>0) | if . then 1 else 0 end')"
+cek "ringkas: supplier & rak kosong di semua baris" "V == 0" \
+  "$(echo "$RK112" | jq '[.[]|select(.supplier_utama!=null or .jumlah_supplier!=0 or .rak_lokasi!=[])]|length')"
+cek "ringkas: produksi_branch_ids tetap dimuat" "V == 1" \
+  "$(echo "$RK112" | jq --arg i "$IPRODA" --arg b "$ST52_ID" '[.[]|select(.id==$i)][0].produksi_branch_ids==[$b] | if . then 1 else 0 end')"
+cek "ringkas: kolom lain identik dengan varian lengkap" "V == 1" \
+  "$(jq -n --argjson a "$(echo "$RK112" | jq --arg i "$BH112_ID" '[.[]|select(.id==$i)][0] | del(.supplier_utama,.jumlah_supplier,.rak_lokasi)')" \
+          --argjson b "$(echo "$FL112" | jq --arg i "$BH112_ID" '[.[]|select(.id==$i)][0] | del(.supplier_utama,.jumlah_supplier,.rak_lokasi)')" \
+          '$a==$b | if . then 1 else 0 end')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]
