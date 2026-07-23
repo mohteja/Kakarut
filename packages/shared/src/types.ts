@@ -1318,6 +1318,12 @@ export interface BeliPerlengkapanRow {
   supplier_utama: string | null;
   /** harga beli per satuan dari master — estimasi RAB (qty × harga_beli) */
   harga_beli: number;
+  /**
+   * Faktur ini terkait PERMINTAAN yang MASIH AKTIF (rencana_id punya produksi
+   * yang belum dihapus). true → tak boleh Hapus permanen dari sini (kelola dari
+   * Permintaan Stok); false (manual / permintaan sudah tak ada) → boleh Hapus.
+   */
+  permintaan_aktif: boolean;
 }
 
 /** Kiriman perlengkapan CK → cabang (stok pindah saat cabang menerima). */

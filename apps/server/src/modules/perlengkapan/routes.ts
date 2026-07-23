@@ -25,6 +25,8 @@ import { terbitkanNomor } from "../dokumen/nomor";
 import {
   batalBeliPerlengkapan,
   batalFakturBeliPerlengkapan,
+  hapusBeliPerlengkapan,
+  hapusFakturBeliPerlengkapan,
   prosesFakturBeliPerlengkapan,
   batalSemuaBeliPerlengkapan,
   belanjaPerlengkapan,
@@ -520,6 +522,19 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
     return c.json(hasil);
   })
   /**
+   * HAPUS PERMANEN satu faktur beli perlengkapan (bersih-bersih data lama).
+   * owner/admin. Ditolak (400) bila terkait permintaan aktif atau ada baris
+   * yang sudah 'tiba' (masuk stok).
+   */
+  .delete("/beli/faktur/:fakturId", requireRole("owner", "admin"), async (c) => {
+    const auth = c.get("auth");
+    const hasil = await hapusFakturBeliPerlengkapan(auth.company_id!, c.req.param("fakturId"));
+    if ("error" in hasil) {
+      throw new HTTPException((hasil.code ?? 400) as 400 | 404, { message: hasil.error });
+    }
+    return c.json(hasil);
+  })
+  /**
    * Barang faktur beli TIBA di CK → masuk stok CK (PL-) + otomatis kirim (KP-)
    * ke cabang tujuan. owner/admin (manajemen memproses kedatangan di CK).
    */
@@ -553,6 +568,15 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
   .post("/beli/:id/batal", requireRole("owner", "admin"), async (c) => {
     const auth = c.get("auth");
     const hasil = await batalBeliPerlengkapan(auth.company_id!, c.req.param("id"));
+    if ("error" in hasil) {
+      throw new HTTPException((hasil.code ?? 400) as 400 | 404, { message: hasil.error });
+    }
+    return c.json(hasil);
+  })
+  /** HAPUS PERMANEN satu baris beli perlengkapan warisan (faktur_id null). owner/admin. */
+  .delete("/beli/:id", requireRole("owner", "admin"), async (c) => {
+    const auth = c.get("auth");
+    const hasil = await hapusBeliPerlengkapan(auth.company_id!, c.req.param("id"));
     if ("error" in hasil) {
       throw new HTTPException((hasil.code ?? 400) as 400 | 404, { message: hasil.error });
     }

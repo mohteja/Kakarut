@@ -39,6 +39,8 @@ interface FakturBeli {
   totalHarga: number;
   /** estimasi RAB: Σ (harga riil ?? qty × harga_beli master), tanpa baris batal */
   totalEstimasi: number;
+  /** terkait permintaan MASIH AKTIF → tak boleh Hapus permanen (kelola dari Permintaan Stok) */
+  permintaanAktif: boolean;
 }
 
 /** faktur masih perlu aksi (belum tiba/batal seluruhnya) */
@@ -66,10 +68,12 @@ function kelompokkanFaktur(rows: BeliPerlengkapanRow[]): FakturBeli[] {
         diprosesOleh: null,
         totalHarga: 0,
         totalEstimasi: 0,
+        permintaanAktif: false,
       };
       byKey.set(key, g);
     }
     g.rows.push(r);
+    if (r.permintaan_aktif) g.permintaanAktif = true;
     if (r.diproses_oleh && !g.diprosesOleh) g.diprosesOleh = r.diproses_oleh;
     if (r.total_harga != null && r.status !== "batal") g.totalHarga += r.total_harga;
     if (r.status !== "batal") g.totalEstimasi += r.total_harga ?? r.qty * (r.harga_beli ?? 0);
@@ -99,6 +103,7 @@ export function BeliPerlengkapanPage() {
   const isManajemen = auth?.user.role === "owner" || auth?.user.role === "admin";
   const [tiba, setTiba] = useState<FakturBeli | null>(null);
   const [rab, setRab] = useState<FakturBeli | null>(null);
+  const [detail, setDetail] = useState<FakturBeli | null>(null);
   const [buatOpen, setBuatOpen] = useState(false);
 
   const { data: rows = [], isLoading } = useQuery({
@@ -123,6 +128,15 @@ export function BeliPerlengkapanPage() {
   // (pra-tautan rencana) tak bisa dibatalkan otomatis — batalkan sekaligus
   const batalSemua = useMutation({
     mutationFn: () => api(`/perlengkapan/beli/batal-semua`, { method: "POST", body: {} }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["perlengkapan-beli"] }),
+  });
+  // HAPUS PERMANEN (bersih-bersih data lama) — hanya faktur yang tak terkait
+  // permintaan aktif & belum tiba; server menjaga guard-nya.
+  const hapus = useMutation({
+    mutationFn: (g: FakturBeli) =>
+      g.fakturId
+        ? api(`/perlengkapan/beli/faktur/${g.fakturId}`, { method: "DELETE" })
+        : api(`/perlengkapan/beli/${g.rows[0].id}`, { method: "DELETE" }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["perlengkapan-beli"] }),
   });
 
@@ -150,6 +164,7 @@ export function BeliPerlengkapanPage() {
       <ErrorText error={batal.error} />
       <ErrorText error={proses.error} />
       <ErrorText error={batalSemua.error} />
+      <ErrorText error={hapus.error} />
 
       {isLoading ? (
         <Spinner />
@@ -181,8 +196,20 @@ export function BeliPerlengkapanPage() {
               )}
             </div>
           )}
-          {grup.map((g) => (
-            <Card key={g.key} className="overflow-hidden">
+          {grup.map((g) => {
+            // ringkas ala Beli Bahan Baku: 1 barang pertama + jumlah lainnya;
+            // rincian lengkap via klik kartu (modal detail)
+            const utama = g.rows[0];
+            // Hapus permanen (data lama) — hanya bila TAK terkait permintaan
+            // aktif & belum ada baris tiba (tak ada dampak stok).
+            const bisaHapus =
+              isManajemen && !g.permintaanAktif && !g.rows.some((r) => r.status === "tiba");
+            return (
+            <Card
+              key={g.key}
+              onClick={() => setDetail(g)}
+              className="cursor-pointer overflow-hidden transition hover:border-orange-300 hover:shadow-sm"
+            >
               {/* kepala kartu: nomor + badge cabang tujuan + status */}
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-stone-100 bg-stone-50 px-4 py-2.5">
                 {g.nomor && (
@@ -208,32 +235,23 @@ export function BeliPerlengkapanPage() {
                   {g.oleh ? ` · ${g.oleh}` : ""}
                 </span>
               </div>
-              {/* baris item: nama + qty + tempat beli (supplier langganan) + harga */}
-              <div className="divide-y divide-stone-50">
-                {g.rows.map((r) => (
-                  <div
-                    key={r.id}
-                    className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2 text-sm"
-                  >
-                    <span className="font-semibold text-stone-800">{r.nama}</span>
-                    <span className="text-stone-500">
-                      {formatAngka(r.qty)} {r.satuan}
-                    </span>
-                    {r.supplier_utama && (
-                      <span className="text-xs text-stone-400">🏬 {r.supplier_utama}</span>
+              {/* isi ringkas: 1 barang + jumlah lainnya + detail › */}
+              <div className="flex items-center justify-between gap-3 px-4 py-2.5">
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-semibold text-stone-800">
+                    {utama.nama}
+                    {utama.supplier_utama && (
+                      <span className="ml-2 text-xs font-normal text-stone-400">
+                        🏬 {utama.supplier_utama}
+                      </span>
                     )}
-                    {g.rows.length > 1 && r.status !== g.status && (
-                      <BeliStatusBadge status={r.status} />
-                    )}
-                    <span className="ml-auto text-xs text-stone-500">
-                      {r.total_harga != null && r.total_harga > 0
-                        ? formatRupiah(r.total_harga)
-                        : r.harga_beli > 0
-                          ? `± ${formatRupiah(r.qty * r.harga_beli)}`
-                          : ""}
-                    </span>
                   </div>
-                ))}
+                  <div className="text-xs text-stone-500">
+                    {formatAngka(utama.qty)} {utama.satuan}
+                    {g.rows.length > 1 && <> · +{g.rows.length - 1} barang lainnya</>}
+                  </div>
+                </div>
+                <span className="shrink-0 text-xs text-stone-400">detail ›</span>
               </div>
               {/* kaki kartu: ringkasan + Dokumen RAB + Ubah Tahap */}
               <div className="flex flex-wrap items-center gap-2 border-t border-stone-100 px-4 py-2">
@@ -246,51 +264,173 @@ export function BeliPerlengkapanPage() {
                     g.totalEstimasi > 0 && <> · estimasi {formatRupiah(g.totalEstimasi)}</>
                   )}
                 </span>
-                {isManajemen && butuhAksi(g.status) && (
+                {(butuhAksi(g.status) && isManajemen) || bisaHapus ? (
                   <div className="ml-auto flex items-center gap-2">
-                    <button
-                      onClick={() => setRab(g)}
-                      className="rounded-lg border border-stone-200 px-2.5 py-1 text-xs font-medium text-stone-600 hover:bg-stone-50"
-                    >
-                      📄 Dokumen RAB
-                    </button>
-                    {/* Ubah Tahap — dropdown seperti Beli Bahan Baku */}
-                    <select
-                      value=""
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        if (v === "diproses") proses.mutate(g);
-                        else if (v === "tiba") setTiba(g);
-                        else if (v === "batal") {
-                          if (window.confirm(`Batalkan faktur beli ${g.nomor ?? "ini"}?`))
-                            batal.mutate(g);
-                        }
-                        e.target.value = "";
-                      }}
-                      aria-label={`Ubah tahap ${g.nomor ?? "faktur"}`}
-                      className="rounded-lg bg-orange-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-orange-700"
-                    >
-                      <option value="" disabled>
-                        ➡ Ubah Tahap
-                      </option>
-                      {g.status === "menunggu" && g.fakturId && (
-                        <option value="diproses">🛒 Diproses (dibelanjakan)</option>
-                      )}
-                      <option value="tiba">📦 Tiba di CK</option>
-                      <option value="batal">❌ Batalkan</option>
-                    </select>
+                    {isManajemen && butuhAksi(g.status) && (
+                      <>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setRab(g);
+                          }}
+                          className="rounded-lg border border-stone-200 px-2.5 py-1 text-xs font-medium text-stone-600 hover:bg-stone-50"
+                        >
+                          📄 Dokumen RAB
+                        </button>
+                        {/* Ubah Tahap — dropdown seperti Beli Bahan Baku */}
+                        <select
+                          value=""
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={(e) => {
+                            e.stopPropagation();
+                            const v = e.target.value;
+                            if (v === "diproses") proses.mutate(g);
+                            else if (v === "tiba") setTiba(g);
+                            else if (v === "batal") {
+                              if (window.confirm(`Batalkan faktur beli ${g.nomor ?? "ini"}?`))
+                                batal.mutate(g);
+                            }
+                            e.target.value = "";
+                          }}
+                          aria-label={`Ubah tahap ${g.nomor ?? "faktur"}`}
+                          className="rounded-lg bg-orange-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-orange-700"
+                        >
+                          <option value="" disabled>
+                            ➡ Ubah Tahap
+                          </option>
+                          {g.status === "menunggu" && g.fakturId && (
+                            <option value="diproses">🛒 Diproses (dibelanjakan)</option>
+                          )}
+                          <option value="tiba">📦 Tiba di CK</option>
+                          <option value="batal">❌ Batalkan</option>
+                        </select>
+                      </>
+                    )}
+                    {/* Hapus permanen — data lama yang tak terkait permintaan aktif */}
+                    {bisaHapus && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (
+                            window.confirm(
+                              `Hapus permanen faktur ${g.nomor ?? "ini"}? Data tidak bisa dikembalikan.`,
+                            )
+                          )
+                            hapus.mutate(g);
+                        }}
+                        disabled={hapus.isPending}
+                        className="rounded-lg border border-red-300 px-2.5 py-1 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50"
+                      >
+                        🗑 Hapus
+                      </button>
+                    )}
                   </div>
-                )}
+                ) : null}
               </div>
             </Card>
-          ))}
+            );
+          })}
         </div>
       )}
 
       {tiba && <TibaFakturModal faktur={tiba} onClose={() => setTiba(null)} />}
       {rab && <DokumenRabPerlengkapanModal faktur={rab} onClose={() => setRab(null)} />}
+      {detail && <DetailBeliPerlengkapanModal faktur={detail} onClose={() => setDetail(null)} />}
       {buatOpen && <BuatBeliModal onClose={() => setBuatOpen(false)} />}
     </div>
+  );
+}
+
+/** Detail satu faktur beli perlengkapan (BP-): metadata + seluruh item. */
+function DetailBeliPerlengkapanModal({
+  faktur: g,
+  onClose,
+}: {
+  faktur: FakturBeli;
+  onClose: () => void;
+}) {
+  return (
+    <Modal open onClose={onClose} title={`Detail ${g.nomor ?? "Faktur Perlengkapan"}`}>
+      <div className="space-y-3">
+        <dl className="grid grid-cols-3 gap-y-1.5 text-sm">
+          {g.nomor && (
+            <>
+              <dt className="text-stone-400">Nomor</dt>
+              <dd className="col-span-2 font-mono font-bold text-orange-700">{g.nomor}</dd>
+            </>
+          )}
+          <dt className="text-stone-400">Tujuan</dt>
+          <dd className="col-span-2">
+            {g.tujuanNama ? `📦 ${g.tujuanNama}` : `🏪 ${g.ckNama} (stok CK)`}
+          </dd>
+          <dt className="text-stone-400">Status</dt>
+          <dd className="col-span-2">
+            <BeliStatusBadge status={g.status} />
+          </dd>
+          <dt className="text-stone-400">Waktu</dt>
+          <dd className="col-span-2">
+            {formatWaktu(g.waktu)}
+            {g.oleh ? ` · ${g.oleh}` : ""}
+          </dd>
+          {g.diprosesOleh && (
+            <>
+              <dt className="text-stone-400">Diproses oleh</dt>
+              <dd className="col-span-2">{g.diprosesOleh}</dd>
+            </>
+          )}
+          {g.catatan && (
+            <>
+              <dt className="text-stone-400">Catatan</dt>
+              <dd className="col-span-2">{g.catatan}</dd>
+            </>
+          )}
+        </dl>
+
+        <div className="rounded-lg border border-stone-200">
+          <table className="w-full text-sm">
+            <tbody className="divide-y divide-stone-100">
+              {g.rows.map((r) => (
+                <tr key={r.id}>
+                  <td className="px-3 py-1.5 font-medium">
+                    {r.nama}
+                    {r.supplier_utama && (
+                      <div className="text-xs font-normal text-stone-400">
+                        🏬 {r.supplier_utama}
+                      </div>
+                    )}
+                    {g.rows.length > 1 && r.status !== g.status && (
+                      <span className="ml-1.5 inline-block">
+                        <BeliStatusBadge status={r.status} />
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-3 py-1.5 text-right whitespace-nowrap text-stone-600">
+                    {formatAngka(r.qty)} {r.satuan}
+                  </td>
+                  <td className="px-3 py-1.5 text-right whitespace-nowrap text-stone-500">
+                    {r.total_harga != null && r.total_harga > 0
+                      ? formatRupiah(r.total_harga)
+                      : r.harga_beli > 0
+                        ? `± ${formatRupiah(r.qty * r.harga_beli)}`
+                        : "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="text-right text-sm font-semibold text-stone-700">
+          Total{g.totalHarga > 0 ? "" : " estimasi"}:{" "}
+          {formatRupiah(g.totalHarga > 0 ? g.totalHarga : g.totalEstimasi)}
+        </div>
+        <div className="flex justify-end">
+          <button type="button" onClick={onClose} className={btnSecondary}>
+            Tutup
+          </button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
