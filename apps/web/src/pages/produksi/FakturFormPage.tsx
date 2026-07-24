@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
-import type { BahanDto, JenisPengadaan, PenyimpananDto } from "@kakarut/shared";
+import type { BahanDto, BahanResepRow, JenisPengadaan } from "@kakarut/shared";
 import {
   Card,
   ErrorText,
@@ -172,36 +172,49 @@ function BahanPicker({
   );
 }
 
-/** Quick-add inline: input nama + simpan, untuk supplier / tempat penyimpanan. */
-function QuickAdd({
-  placeholder,
-  onSubmit,
-  pending,
+/**
+ * Kolom "Bahan kurang" satu baris resep: kebutuhan BOM (qty per 1 batch) ×
+ * jumlah batch dibandingkan saldo stok di lokasi produksi. Komponen yang tak
+ * dilacak stoknya dilewati — server memakai perhitungan sama saat Mulai
+ * Kerjakan (409 bila kurang).
+ */
+function BahanKurangCell({
+  ingredientId,
+  jumlahBatch,
+  saldoByIng,
 }: {
-  placeholder: string;
-  onSubmit: (nama: string) => void;
-  pending: boolean;
+  ingredientId: string;
+  jumlahBatch: number;
+  saldoByIng: Map<string, number> | null;
 }) {
-  const [nama, setNama] = useState("");
+  const { data: resep } = useQuery({
+    queryKey: ["bahan-resep", ingredientId],
+    queryFn: () => api<BahanResepRow[]>(`/bahan/${ingredientId}/resep`),
+    enabled: !!ingredientId,
+  });
+  if (!ingredientId || !(jumlahBatch > 0)) return <span className="text-stone-400">—</span>;
+  if (!resep || saldoByIng == null) return <span className="text-stone-400">…</span>;
+  const kurang = resep
+    .filter((k) => k.track_stok)
+    .map((k) => ({
+      ...k,
+      butuh: k.qty * jumlahBatch,
+      saldo: saldoByIng.get(k.ingredient_id) ?? 0,
+    }))
+    .filter((k) => k.saldo + 1e-9 < k.butuh);
+  if (kurang.length === 0) {
+    return <span className="text-xs font-medium text-green-700">✓ bahan cukup</span>;
+  }
   return (
-    <div className="mt-1 flex gap-2">
-      <input
-        value={nama}
-        onChange={(e) => setNama(e.target.value)}
-        placeholder={placeholder}
-        className={`${inputClass} flex-1`}
-      />
-      <button
-        type="button"
-        disabled={!nama.trim() || pending}
-        onClick={() => {
-          onSubmit(nama.trim());
-          setNama("");
-        }}
-        className={btnSecondary}
-      >
-        Simpan
-      </button>
+    <div className="space-y-0.5 text-xs leading-tight text-red-600">
+      {kurang.map((k) => (
+        <div key={k.ingredient_id}>
+          {k.nama}{" "}
+          <b>
+            −{formatAngka(Math.round((k.butuh - k.saldo) * 100) / 100)} {k.satuan}
+          </b>
+        </div>
+      ))}
     </div>
   );
 }
@@ -253,13 +266,17 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
     queryKey: ["bahan"],
     queryFn: () => api<BahanDto[]>("/bahan"),
   });
-  // tempat simpan hanya dipilih di jalur produksi — beli otomatis ke rak
-  // home bahan (master) saat barang Tiba
-  const { data: tempat = [] } = useQuery({
-    queryKey: ["penyimpanan", branchQuery],
-    queryFn: () => api<PenyimpananDto[]>(`/penyimpanan${branchQuery}`),
+  // PRODUKSI: saldo stok lokasi produksi — dasar kolom "Bahan kurang"
+  // (kebutuhan resep × jumlah batch vs stok). Rak simpan TIDAK dipilih di
+  // form: otomatis ikut rak default bahan (Tempat Penyimpanan) saat selesai.
+  const { data: stokRows } = useQuery({
+    queryKey: ["stok", branchQuery],
+    queryFn: () => api<{ ingredient_id: string; saldo: number }[]>(`/stok${branchQuery}`),
     enabled: tipe === "produksi",
   });
+  const saldoByIng = stokRows
+    ? new Map(stokRows.map((s) => [s.ingredient_id, s.saldo]))
+    : null;
   // PRODUKSI = memilih RESEP: hanya bahan produksi yang sudah punya resep
   // (komponen bahan mentah) yang ditawarkan. resep-ringkas = jumlah komponen
   // per bahan ber-resep (absen = belum ada resep).
@@ -291,34 +308,18 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
   const [tujuanId, setTujuanId] = useState("");
   const [noFaktur, setNoFaktur] = useState("");
   const [catatan, setCatatan] = useState("");
-  // BELI: baris cukup bahan + jumlah — jumlah dihitung per KEMASAN (satuan
-  // beli master bahan); harga/supplier/rak simpan mengikuti master bahan.
-  const barisKosong: ItemForm = { ...itemKosong, mode: tipe === "beli" ? "batch" : "pcs" };
+  // Baris SELALU per batch/kemasan: beli per kemasan (satuan beli master),
+  // produksi per BATCH resep — harga/supplier/rak simpan mengikuti master.
+  const barisKosong: ItemForm = { ...itemKosong, mode: "batch" };
   const [items, setItems] = useState<ItemForm[]>([{ ...barisKosong }]);
 
-  // Ganti cabang data (dari Kantor) → tempat penyimpanan milik cabang lama
-  // tidak valid lagi di cabang baru; kosongkan agar tidak terkirim diam-diam
-  // (server menolak 400 padahal select tampak belum terisi).
+  // Ganti cabang data (dari Kantor) → tujuan kirim CK lama tidak relevan lagi
   const cabangSebelum = useRef(branchId);
   useEffect(() => {
     if (cabangSebelum.current === branchId) return;
     cabangSebelum.current = branchId;
-    setItems((prev) => prev.map((it) => ({ ...it, storage_location_id: "" })));
-    setTujuanId(""); // tujuan kirim milik CK lama tidak relevan lagi
+    setTujuanId("");
   }, [branchId]);
-  const [tambahTempat, setTambahTempat] = useState(false);
-
-  const tempatBaru = useMutation({
-    mutationFn: (nama: string) =>
-      api<PenyimpananDto>("/penyimpanan", {
-        method: "POST",
-        body: { nama, ...(!isKasir && branchId ? { branch_id: branchId } : {}) },
-      }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["penyimpanan"] });
-      setTambahTempat(false);
-    },
-  });
 
   function ubahItem(i: number, patch: Partial<ItemForm>) {
     setItems((prev) => prev.map((it, j) => (j === i ? { ...it, ...patch } : it)));
@@ -597,10 +598,11 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
           <div className="min-w-0 flex-1">{tipe === "produksi" ? "Resep" : "Bahan"}</div>
           <div className="w-28 shrink-0">Satuan</div>
           <div className="w-20 shrink-0 text-right">Jumlah</div>
-          {tipe === "produksi" && <div className="w-40 shrink-0">Disimpan di</div>}
-          <div className="w-32 shrink-0 text-right">
-            {tipe === "beli" ? "Perkiraan (Rp)" : "Perkiraan (RAB)"}
-          </div>
+          {tipe === "beli" ? (
+            <div className="w-32 shrink-0 text-right">Perkiraan (Rp)</div>
+          ) : (
+            <div className="w-44 shrink-0">Bahan kurang</div>
+          )}
           <div className="w-5 shrink-0" />
         </div>
 
@@ -637,29 +639,10 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
                     <label className="mb-1 block text-xs font-medium text-stone-500 md:hidden">
                       Satuan
                     </label>
-                    {tipe === "beli" ? (
-                      // satuan mengikuti master bahan (satuan beli/kemasan)
-                      <div className="py-2 text-sm text-stone-700">
-                        {b ? (b.satuan_beli ?? "kemasan") : "—"}
-                      </div>
-                    ) : (
-                      <div className="flex overflow-hidden rounded-lg border border-stone-300 text-sm">
-                        <button
-                          type="button"
-                          onClick={() => ubahItem(i, { mode: "pcs" })}
-                          className={`flex-1 px-2 py-2 font-medium ${it.mode === "pcs" ? "bg-orange-600 text-white" : "bg-white text-stone-600"}`}
-                        >
-                          Pcs
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => ubahItem(i, { mode: "batch" })}
-                          className={`flex-1 px-2 py-2 font-medium ${it.mode === "batch" ? "bg-orange-600 text-white" : "bg-white text-stone-600"}`}
-                        >
-                          Batch
-                        </button>
-                      </div>
-                    )}
+                    {/* satuan mengikuti master: beli per kemasan, produksi per BATCH resep */}
+                    <div className="py-2 text-sm text-stone-700">
+                      {tipe === "beli" ? (b ? (b.satuan_beli ?? "kemasan") : "—") : "batch"}
+                    </div>
                   </div>
                   <div className="w-full shrink-0 md:w-20">
                     <label className="mb-1 block text-xs font-medium text-stone-500 md:hidden">
@@ -674,36 +657,30 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
                       className={`${inputClass} md:text-right`}
                     />
                   </div>
-                  {tipe === "produksi" && (
-                    <div className="w-full shrink-0 md:w-40">
+                  {tipe === "beli" ? (
+                    <div className="w-full shrink-0 md:w-32">
                       <label className="mb-1 block text-xs font-medium text-stone-500 md:hidden">
-                        Disimpan di
+                        Perkiraan (Rp)
                       </label>
-                      <select
-                        value={it.storage_location_id}
-                        onChange={(e) => ubahItem(i, { storage_location_id: e.target.value })}
-                        className={inputClass}
-                      >
-                        <option value="">— pilih tempat —</option>
-                        {tempat
-                          .filter((t) => t.is_active)
-                          .map((t) => (
-                            <option key={t.id} value={t.id}>
-                              {t.nama}
-                            </option>
-                          ))}
-                      </select>
+                      {/* harga beli mengikuti master bahan — RAB otomatis */}
+                      <div className="py-2 text-right text-sm font-medium text-stone-700">
+                        {estimasi != null ? formatRupiah(estimasi) : "—"}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="w-full shrink-0 md:w-44">
+                      <label className="mb-1 block text-xs font-medium text-stone-500 md:hidden">
+                        Bahan kurang
+                      </label>
+                      <div className="py-2">
+                        <BahanKurangCell
+                          ingredientId={it.ingredient_id}
+                          jumlahBatch={Number(it.jumlah) || 0}
+                          saldoByIng={saldoByIng}
+                        />
+                      </div>
                     </div>
                   )}
-                  <div className="w-full shrink-0 md:w-32">
-                    <label className="mb-1 block text-xs font-medium text-stone-500 md:hidden">
-                      {tipe === "beli" ? "Perkiraan (Rp)" : "Perkiraan (RAB)"}
-                    </label>
-                    {/* harga beli mengikuti master bahan — RAB otomatis */}
-                    <div className="py-2 text-right text-sm font-medium text-stone-700">
-                      {estimasi != null ? formatRupiah(estimasi) : "—"}
-                    </div>
-                  </div>
                   <div className="hidden w-5 shrink-0 md:block">
                     {items.length > 1 && (
                       <button
@@ -745,36 +722,24 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
           })}
         </div>
 
-        {/* total */}
-        <div className="flex items-center justify-between border-t border-stone-200 bg-stone-50 px-4 py-2.5">
+        {/* footer: beli = perkiraan total; produksi = catatan (tanpa RAB) */}
+        <div className="flex items-center justify-between gap-3 border-t border-stone-200 bg-stone-50 px-4 py-2.5">
           {tipe === "produksi" ? (
-            <button
-              type="button"
-              onClick={() => setTambahTempat(!tambahTempat)}
-              className="text-xs font-medium text-orange-600 hover:underline"
-            >
-              ➕ Tambah tempat penyimpanan baru
-            </button>
-          ) : (
             <span className="text-xs text-stone-400">
-              Satuan, harga, supplier & rak simpan mengikuti master Bahan Baku.
+              Rak simpan otomatis mengikuti pengaturan bahan (Tempat Penyimpanan);{" "}
+              <b>Bahan kurang</b> dihitung dari resep × jumlah batch vs stok lokasi produksi.
             </span>
-          )}
-          <div className="text-sm text-stone-700">
-            {tipe === "beli" ? "Perkiraan total: " : "Perkiraan biaya (RAB): "}
-            <b className="text-base">{formatRupiah(totalFaktur)}</b>
-          </div>
-        </div>
-            {tambahTempat && tipe === "produksi" && (
-              <div className="px-4 pb-3">
-                <QuickAdd
-                  placeholder="nama tempat (mis. Freezer 1)"
-                  onSubmit={(n) => tempatBaru.mutate(n)}
-                  pending={tempatBaru.isPending}
-                />
-                <ErrorText error={tempatBaru.error} />
+          ) : (
+            <>
+              <span className="text-xs text-stone-400">
+                Satuan, harga, supplier & rak simpan mengikuti master Bahan Baku.
+              </span>
+              <div className="text-sm text-stone-700">
+                Perkiraan total: <b className="text-base">{formatRupiah(totalFaktur)}</b>
               </div>
-            )}
+            </>
+          )}
+        </div>
           </>
         )}
       </Card>
