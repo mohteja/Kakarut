@@ -2238,16 +2238,17 @@ cek "CK cukup: tak ada belanja bahan produksi (bahan_produksi kosong)" "V == 0" 
 api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CK52_UTAMA\",\"items\":[{\"ingredient_id\":\"$BASO66\",\"qty\":0}]}" > /dev/null
 # MOQ (min_beli): daging minimal belanja 12000 → qty_faktur naik ke 12000
 api "$OWNER" PUT "/bahan/$DAG66" '{"min_beli":12000}' > /dev/null
-# stok_minimum (reorder point) TIDAK menambah kebutuhan di rencana menu:
-# rencana murni "kebutuhan menu − saldo". Tepung tetap 1500 (3 kemasan × 500)
-# meski stok_minimum 700 diset. Cadangan diurus terpisah (status "menipis").
+# stok_minimum (reorder point) IKUT ditambahkan ke belanja bahan mentah:
+# kurang = kebutuhan + stok_minimum − saldo, agar sisa stok tak jatuh di
+# bawah ambang (selaras faktur beli otomatis di faktur produksi).
 api "$OWNER" PUT "/bahan/$TEP66" '{"stok_minimum":700}' > /dev/null
 cek "PUT parsial tak me-reset satuan bahan (tetap gr)" "V == 1" \
   "$(api "$OWNER" GET /bahan | jq --arg id "$DAG66" '[.[] | select(.id==$id)][0].satuan == "gr" | if . then 1 else 0 end')"
 PV66B=$(api "$OWNER" POST "/rekomendasi/menu?branch_id=$CB46_ID" "{\"items\":[{\"menu_id\":\"$MENU66\",\"porsi\":100}],\"ck_branch_id\":\"$CK52_UTAMA\"}")
 cek "MOQ: qty_faktur daging dibulatkan naik ke 12000" "abs(V - 12000) < 0.001" \
   "$(echo "$PV66B" | jq --arg id "$DAG66" '[.bahan_produksi[] | select(.ingredient_id==$id)][0].qty_faktur')"
-cek "reorder point tak menambah kebutuhan rencana: tepung tetap 1500" "abs(V - 1500) < 0.001" \
+# kebutuhan 1500 + minimum 700 = 2200 → 5 kemasan × 500 = 2500
+cek "reorder point ikut dibelanjakan: tepung 2500 (1500 + min 700, per kemasan)" "abs(V - 2500) < 0.001" \
   "$(echo "$PV66B" | jq --arg id "$TEP66" '[.bahan_produksi[] | select(.ingredient_id==$id)][0].qty_faktur')"
 # permintaan → faktur produksi (work-order CK) + faktur belanja (bahan produksi)
 WO66=$(api "$OWNER" POST /rekomendasi/menu/faktur "{\"items\":[{\"menu_id\":\"$MENU66\",\"porsi\":100}],\"tujuan_branch_id\":\"$CB46_ID\",\"ck_branch_id\":\"$CK52_UTAMA\"}")
@@ -4530,6 +4531,25 @@ api "$OWNER" PUT "/bahan/$P123B/resep" "{\"komponen\":[{\"ingredient_id\":\"$M12
 FP123B=$(api "$OWNER" POST /produksi/faktur "{\"items\":[{\"ingredient_id\":\"$P123B\",\"mode\":\"batch\",\"jumlah\":1}]}")
 cek "produksi bahan cukup di atas minimum → tanpa faktur beli otomatis" "V == 1" \
   "$(echo "$FP123B" | jq '(.beli_otomatis==null)|if . then 1 else 0 end')"
+
+echo "== 124. Rencana menu: belanja bahan mentah ikut STOK MINIMUM =="
+# produk resep 60 gr M123B per batch: saldo 350 cukup, tapi sisa (350-60=290)
+# bakal di bawah minimum 300 → planner ikut merencanakan belanja (1 kemasan)
+P124=$(api "$OWNER" POST /bahan '{"nama":"produk uji124","harga_beli":0,"isi":10,"satuan":"pcs","pengadaan":"produksi","track_stok":true}' | jq -r .id)
+api "$OWNER" PUT "/bahan/$P124/resep" "{\"komponen\":[{\"ingredient_id\":\"$M123B\",\"qty\":60}]}" > /dev/null
+CAT124=$(api "$OWNER" GET /menu | jq -r '.[0].category_id')
+MN124=$(api "$OWNER" POST /menu "{\"nama\":\"Menu Uji124\",\"category_id\":\"$CAT124\",\"tipe\":\"regular\",\"mult\":1,\"harga_jual\":10000,\"komponen\":[{\"ingredient_id\":\"$P124\",\"qty\":1}]}" | jq -r .id)
+# lokasi hitung bahan mentah = CK pemasok cabang (bila terhubung) — siapkan
+# saldo 350 DI SANA agar skenario "cukup tapi bakal di bawah minimum" terjadi
+CKP124=$(api "$OWNER" GET /cabang | jq -r '[.[]|select(.nama=="Pusat")][0].central_kitchen_id')
+if [ -n "$CKP124" ] && [ "$CKP124" != "null" ]; then
+  FB124=$(api "$OWNER" POST /pembelian/faktur "{\"branch_id\":\"$CKP124\",\"items\":[{\"ingredient_id\":\"$M123B\",\"mode\":\"pcs\",\"jumlah\":350,\"total_harga\":7000}]}" | jq -r .faktur_id)
+  api "$OWNER" POST "/pembelian/tahap/$FB124" '{"ke":"dikerjakan"}' > /dev/null
+  api "$OWNER" POST "/pembelian/tahap/$FB124" '{"ke":"menunggu"}' > /dev/null
+fi
+PRV124=$(api "$OWNER" POST /rekomendasi/menu "{\"items\":[{\"menu_id\":\"$MN124\",\"porsi\":10}]}")
+cek "planner: bahan mentah cukup tapi bakal di bawah minimum → ikut belanja" "V == 1" \
+  "$(echo "$PRV124" | jq --arg i "$M123B" '([.bahan_produksi[]|select(.ingredient_id==$i)][0] | (.kurang>0) and (.qty_faktur==100)) | if . then 1 else 0 end')"
 # harga per isi/kemasan: item riwayat bawa isi + satuan_beli (mis. 1 kg = 1000 gram)
 B121K=$(api "$OWNER" POST /bahan '{"nama":"Bahan Isi Uji 121","harga_beli":28000,"isi":1000,"satuan":"gram","satuan_beli":"kg","pengadaan":"beli","track_stok":true}' | jq -r .id)
 cek "riwayat harga bahan: item bawa isi 1000 + satuan_beli kg (harga per isi 28000)" "V == 1" \

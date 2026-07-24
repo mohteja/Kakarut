@@ -102,7 +102,8 @@ function BagianKurang({
       <div className={`flex items-center justify-between px-3 py-1.5 ${warna.head}`}>
         <span className="text-sm font-bold">{judul}</span>
         <span className="text-xs font-semibold">
-          {rows.length} bahan{kirim ? "" : ` · ${formatRupiah(subtotal)}`}
+          {/* RAB hanya utk jalur BELI — produksi cukup resep yang dikerjakan */}
+          {rows.length} bahan{beli ? ` · ${formatRupiah(subtotal)}` : ""}
           {maxLead > 0 && (
             <span title={`Lead time terpanjang ${maxLead} hari — siapkan jauh-jauh hari`}>
               {" "}
@@ -120,9 +121,7 @@ function BagianKurang({
               <th className={`${thClass} text-right`}>Saldo cabang</th>
               <th className={`${thClass} text-right`}>{kirim ? "Di CK" : "Kurang"}</th>
               <th className={thClass}>{kirim ? "Kirim" : beli ? "Beli" : "Produksi"}</th>
-              {!kirim && (
-                <th className={`${thClass} text-right`}>{beli ? "Est. biaya" : "Est. RAB"}</th>
-              )}
+              {beli && <th className={`${thClass} text-right`}>Est. biaya</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-stone-100">
@@ -167,7 +166,7 @@ function BagianKurang({
                         : `${formatAngka(b.jumlah_faktur)} ${b.satuan}`
                       : "—"}
                 </td>
-                {!kirim && (
+                {beli && (
                   <td className={`${tdClass} text-right`}>
                     {b.estimasi_biaya != null ? formatRupiah(b.estimasi_biaya) : "—"}
                   </td>
@@ -611,10 +610,6 @@ export function TambahStokDariMenuPage() {
                     ikon="🏭"
                     judul="Diproduksi"
                     jumlah={kurangProduksi.length + kurangProduksiCabang.length}
-                    subtotal={[...kurangProduksi, ...kurangProduksiCabang].reduce(
-                      (t, b) => t + (b.estimasi_biaya ?? 0),
-                      0,
-                    )}
                   >
                     <BagianKurang
                       tipe="produksi"
@@ -645,12 +640,12 @@ export function TambahStokDariMenuPage() {
                     />
                     <BagianKurang
                       tipe="beli_produksi"
-                      judul="Bahan mentah resep → dipakai produksi di CK"
+                      judul="Beli bahan baku untuk produksi → dipakai di CK (faktur beli terpisah)"
                       rows={beliProduksiCk}
                     />
                     <BagianKurang
                       tipe="beli_produksi"
-                      judul={`Bahan mentah resep → dikirim ke ${store?.nama ?? "cabang"} (diproduksi kitchen)`}
+                      judul={`Beli bahan baku untuk produksi → dikirim ke ${store?.nama ?? "cabang"} (diproduksi kitchen)`}
                       rows={beliProduksiCabang}
                     />
                   </KelompokAksi>

@@ -886,7 +886,10 @@ export interface RencanaMenuPreview {
   /**
    * BELANJA BAHAN PRODUKSI: bahan mentah (resep) yang dibutuhkan bahan jadi
    * yang akan diproduksi — kekurangan dihitung terhadap stok cabang PELAKSANA
-   * (Central Kitchen bila ada). Terpisah dari belanja produk langsung jadi.
+   * (Central Kitchen bila ada) DITAMBAH STOK MINIMUM lokasi itu: bahan yang
+   * cukup utk produksi tapi sisa stoknya bakal jatuh di bawah ambang minimum
+   * ikut direncanakan dibeli (kurang = kebutuhan + stok_minimum − saldo).
+   * Terpisah dari belanja produk langsung jadi.
    */
   bahan_produksi: RencanaBahanRow[];
   total_estimasi_biaya: number;
