@@ -3504,6 +3504,11 @@ cek "onboarding: undangan kosong" "V == 0" "$(echo "$ST1" | jq '.undangan|length
 BP1=$(api "$TOK1" POST /onboarding/perusahaan '{"nama":"Warung Uji 96"}')
 cek "buat perusahaan: jadi owner" "V == 1" "$(echo "$BP1" | jq '(.user.role=="owner")|if . then 1 else 0 end')"
 cek "buat perusahaan: company terisi" "V == 1" "$(echo "$BP1" | jq '((.company.id|length)>0)|if . then 1 else 0 end')"
+# Owner perusahaan BARU langsung punya kode karyawan (barcode/QR absen) —
+# tanpa ini kolom Kode di halaman Karyawan kosong & absen owner tak bisa dipindai.
+TOK1B=$(echo "$BP1" | jq -r '.token')
+cek "buat perusahaan: owner langsung ber-kode karyawan (8 digit)" "V == 1" \
+  "$(api "$TOK1B" GET /karyawan | jq '[.[]|select(.role=="owner")][0].employee_code // "" | test("^[0-9]{8}$") | if . then 1 else 0 end')"
 # 3. Daftar validasi + duplikat
 cek "daftar password < 8 → 400" "V == 400" \
   "$(status_code_body "" POST /auth/register '{"nama":"X","email":"pendek96@example.com","password":"123"}')"

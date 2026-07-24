@@ -67,8 +67,12 @@ if (env.AUTO_MIGRATE) {
   if (unitDibuat > 0) console.log(`Master satuan bawaan diisi (${unitDibuat} satuan).`);
   const katBahan = await sekaliSaja("kategori_bahan_bawaan", () => backfillKategoriBahan(db));
   if (katBahan > 0) console.log(`Master kategori bahan bawaan diisi (${katBahan} kategori).`);
-  // Karyawan lama tanpa kode → isi kode karyawan otomatis (untuk absensi)
-  const terisiKar = await sekaliSaja("employee_code", () => backfillEmployeeCode(db));
+  // Karyawan tanpa kode → isi kode karyawan otomatis (untuk absensi).
+  // SENGAJA dijalankan TIAP boot (bukan sekaliSaja): membership pernah dibuat
+  // tanpa kode di alur onboarding/admin-tenant lama — jaring pengaman ini
+  // menambal data yang terlanjur bolong. Idempoten + advisory lock, dan hanya
+  // menyentuh baris ber-kode NULL/format lama → murah.
+  const terisiKar = await backfillEmployeeCode(db);
   if (terisiKar > 0) console.log(`Kode karyawan otomatis diisi untuk ${terisiKar} karyawan.`);
   // Nonaktif = arsip: karyawan nonaktif lama dipindah ke arsip (idempoten)
   const terarsip = await sekaliSaja("arsip_nonaktif", () => arsipkanMembershipNonaktif(db));
