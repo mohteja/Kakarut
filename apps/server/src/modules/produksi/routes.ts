@@ -230,7 +230,10 @@ const FakturBody = z.object({
   supplier_id: z.string().uuid().nullish(),
   no_faktur: z.string().trim().max(60).nullish(),
   catatan: z.string().nullish(),
-  /** karyawan pelaksana — WAJIB untuk jalur produksi, diabaikan untuk beli */
+  /**
+   * karyawan pelaksana (jalur produksi) — opsional; bila kosong terisi
+   * otomatis dari yang menekan Mulai Kerjakan. Diabaikan untuk beli.
+   */
   worker_id: z.string().uuid().nullish(),
   items: z
     .array(
@@ -443,20 +446,13 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
           );
         if (!s) throw new HTTPException(400, { message: "Supplier tidak valid" });
       }
-      // Jalur produksi: pelaksana wajib — salah satu antara karyawan atau
-      // supplier (yang mengerjakan pasti salah satunya). Supplier sudah
-      // divalidasi milik perusahaan di atas.
+      // Jalur produksi: pelaksana OPSIONAL saat faktur dibuat — bila kosong,
+      // terisi otomatis (self-assign) dari siapa yang menekan Mulai Kerjakan
+      // di tahap "dikerjakan". Supplier sudah divalidasi milik perusahaan.
       let workerId: string | null = null;
-      if (tipe === "produksi") {
-        if (!body.worker_id && !body.supplier_id) {
-          throw new HTTPException(400, {
-            message: "Pelaksana (karyawan/supplier) wajib dipilih untuk faktur produksi",
-          });
-        }
-        if (body.worker_id) {
-          await pastikanKaryawan(body.worker_id, auth.company_id!);
-          workerId = body.worker_id;
-        }
+      if (tipe === "produksi" && body.worker_id) {
+        await pastikanKaryawan(body.worker_id, auth.company_id!);
+        workerId = body.worker_id;
       }
       const lokasiIds = [
         ...new Set(body.items.map((i) => i.storage_location_id).filter(Boolean) as string[]),
