@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import type {
   MenuDto,
@@ -35,14 +35,51 @@ interface Karyawan {
 }
 
 /**
- * Satu bagian kekurangan bahan — produksi ATAU beli — dengan tabel dan
- * subtotalnya sendiri, karena keduanya menjadi faktur yang berbeda.
+ * KELOMPOK AKSI (Dikirim / Diproduksi / Dibeli) — pembungkus sub-bagian per
+ * TUJUAN di dalamnya. Sembunyi bila tak ada bahan sama sekali.
+ */
+function KelompokAksi({
+  ikon,
+  judul,
+  jumlah,
+  subtotal,
+  children,
+}: {
+  ikon: string;
+  judul: string;
+  jumlah: number;
+  subtotal?: number;
+  children: ReactNode;
+}) {
+  if (jumlah === 0) return null;
+  return (
+    <div>
+      <div className="mb-1.5 flex items-baseline justify-between gap-2">
+        <span className="text-sm font-extrabold uppercase tracking-wide text-stone-700">
+          {ikon} {judul}
+        </span>
+        <span className="text-xs font-semibold text-stone-500">
+          {jumlah} bahan
+          {subtotal != null && subtotal > 0 ? ` · ${formatRupiah(subtotal)}` : ""}
+        </span>
+      </div>
+      <div className="space-y-2">{children}</div>
+    </div>
+  );
+}
+
+/**
+ * Satu sub-bagian kekurangan bahan (per aksi + TUJUAN) dengan tabel dan
+ * subtotalnya sendiri, karena tiap bagian menjadi faktur/kiriman berbeda.
  */
 function BagianKurang({
   tipe,
+  judul,
   rows,
 }: {
   tipe: "produksi" | "produksi_cabang" | "beli" | "beli_produksi" | "kirim";
+  /** judul sub-bagian — menyebut TUJUAN (mis. "→ dikirim ke Cabang X") */
+  judul: string;
   rows: RencanaBahanRow[];
 }) {
   if (rows.length === 0) return null;
@@ -57,15 +94,6 @@ function BagianKurang({
         : tipe === "beli"
           ? { border: "border-blue-200", head: "bg-blue-50 text-blue-800" }
           : { border: "border-amber-200", head: "bg-amber-50 text-amber-800" };
-  const judul = kirim
-    ? "🚚 Kirim dari stok CK → cabang (stok sudah ada, tinggal dikirim)"
-    : tipe === "produksi"
-      ? "🏭 Harus diproduksi → masuk stok CK (lalu kirim ke cabang)"
-      : tipe === "produksi_cabang"
-        ? "🏪 Diproduksi di CABANG (kitchen) → langsung masuk stok cabang"
-        : tipe === "beli"
-          ? "🛒 Beli produk jadi → faktur beli"
-          : "🧺 Belanja bahan produksi → faktur beli (bahan mentah resep)";
   const subtotal = rows.reduce((t, b) => t + (b.estimasi_biaya ?? 0), 0);
   // LEAD TIME terpanjang bagian ini: pesan/buat jauh-jauh hari (H-n)
   const maxLead = rows.reduce((t, b) => Math.max(t, b.lead_time_hari ?? 0), 0);
@@ -113,12 +141,6 @@ function BagianKurang({
                   {b.untuk && (
                     <span className="block text-[11px] font-normal text-stone-400">
                       untuk {b.untuk}
-                    </span>
-                  )}
-                  {/* bahan mentah utk produksi di cabang: belanjanya DIKIRIM ke cabang */}
-                  {tipe === "beli_produksi" && b.produksi_di === "cabang" && (
-                    <span className="block text-[11px] font-semibold text-rose-600">
-                      🚚 dikirim ke cabang (diproduksi kitchen)
                     </span>
                   )}
                 </td>
@@ -287,6 +309,10 @@ export function TambahStokDariMenuPage() {
     : [];
   const kurangBeli = p?.bahan.filter((b) => b.pengadaan === "beli" && b.qty_faktur != null) ?? [];
   const kurangBeliProduksi = p?.bahan_produksi.filter((b) => b.kurang > 0) ?? [];
+  // belanja bahan mentah dipisah per TUJUAN: dipakai produksi di CK vs
+  // dikirim ke cabang (bahan ber-"Diproduksi di: Cabang" — dimasak kitchen)
+  const beliProduksiCk = kurangBeliProduksi.filter((b) => b.produksi_di !== "cabang");
+  const beliProduksiCabang = kurangBeliProduksi.filter((b) => b.produksi_di === "cabang");
   const bahanCukup = p?.bahan.filter((b) => b.kurang <= 0 && b.kirim_ck <= 0) ?? [];
   // Pelaksana hanya wajib untuk produksi DI TEMPAT (bukan work-order CK).
   const butuhPelaksana = !workOrder && (p?.jumlah_produksi ?? 0) > 0 && !pelaksana;
@@ -567,12 +593,67 @@ export function TambahStokDariMenuPage() {
                     </div>
                   </div>
                 </div>
-                <div className="space-y-3">
-                  <BagianKurang tipe="kirim" rows={kurangKirim} />
-                  <BagianKurang tipe="produksi" rows={kurangProduksi} />
-                  <BagianKurang tipe="produksi_cabang" rows={kurangProduksiCabang} />
-                  <BagianKurang tipe="beli" rows={kurangBeli} />
-                  <BagianKurang tipe="beli_produksi" rows={kurangBeliProduksi} />
+                {/* Kelompok per AKSI (Dikirim / Diproduksi / Dibeli), sub-bagian
+                    di dalamnya per TUJUAN — tiap sub jadi faktur/kiriman sendiri. */}
+                <div className="space-y-4">
+                  <KelompokAksi
+                    ikon="🚚"
+                    judul="Dikirim"
+                    jumlah={kurangKirim.length}
+                  >
+                    <BagianKurang
+                      tipe="kirim"
+                      judul={`Dari stok CK → ke cabang ${store?.nama ?? ""} (stok sudah ada, tinggal dikirim)`}
+                      rows={kurangKirim}
+                    />
+                  </KelompokAksi>
+                  <KelompokAksi
+                    ikon="🏭"
+                    judul="Diproduksi"
+                    jumlah={kurangProduksi.length + kurangProduksiCabang.length}
+                    subtotal={[...kurangProduksi, ...kurangProduksiCabang].reduce(
+                      (t, b) => t + (b.estimasi_biaya ?? 0),
+                      0,
+                    )}
+                  >
+                    <BagianKurang
+                      tipe="produksi"
+                      judul={`Di Central Kitchen${ck ? ` (${ck.nama})` : ""} → masuk stok CK, lalu dikirim ke ${store?.nama ?? "cabang"}`}
+                      rows={kurangProduksi}
+                    />
+                    <BagianKurang
+                      tipe="produksi_cabang"
+                      judul={`Di cabang ${store?.nama ?? ""} (kitchen) → langsung masuk stok cabang`}
+                      rows={kurangProduksiCabang}
+                    />
+                  </KelompokAksi>
+                  <KelompokAksi
+                    ikon="🛒"
+                    judul="Dibeli"
+                    jumlah={
+                      kurangBeli.length + beliProduksiCk.length + beliProduksiCabang.length
+                    }
+                    subtotal={[...kurangBeli, ...beliProduksiCk, ...beliProduksiCabang].reduce(
+                      (t, b) => t + (b.estimasi_biaya ?? 0),
+                      0,
+                    )}
+                  >
+                    <BagianKurang
+                      tipe="beli"
+                      judul={`Produk jadi → ${workOrder ? `tiba di CK, dikirim ke ${store?.nama ?? "cabang"}` : `masuk stok ${store?.nama ?? "cabang"}`}`}
+                      rows={kurangBeli}
+                    />
+                    <BagianKurang
+                      tipe="beli_produksi"
+                      judul="Bahan mentah resep → dipakai produksi di CK"
+                      rows={beliProduksiCk}
+                    />
+                    <BagianKurang
+                      tipe="beli_produksi"
+                      judul={`Bahan mentah resep → dikirim ke ${store?.nama ?? "cabang"} (diproduksi kitchen)`}
+                      rows={beliProduksiCabang}
+                    />
+                  </KelompokAksi>
                   {!adaKurang && (
                     <div className="rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
                       ✅ Stok semua bahan masih cukup untuk rencana ini.
@@ -803,11 +884,36 @@ export function TambahStokDariMenuPage() {
                   </div>
                 )}
                 <div className="max-h-[45vh] space-y-3 overflow-y-auto">
-                  <BagianKurang tipe="kirim" rows={kurangKirim} />
-                  <BagianKurang tipe="produksi" rows={kurangProduksi} />
-                  <BagianKurang tipe="produksi_cabang" rows={kurangProduksiCabang} />
-                  <BagianKurang tipe="beli" rows={kurangBeli} />
-                  <BagianKurang tipe="beli_produksi" rows={kurangBeliProduksi} />
+                  <BagianKurang
+                    tipe="kirim"
+                    judul={`🚚 Dikirim — dari stok CK ke ${store?.nama ?? "cabang"}`}
+                    rows={kurangKirim}
+                  />
+                  <BagianKurang
+                    tipe="produksi"
+                    judul={`🏭 Diproduksi di CK → dikirim ke ${store?.nama ?? "cabang"}`}
+                    rows={kurangProduksi}
+                  />
+                  <BagianKurang
+                    tipe="produksi_cabang"
+                    judul={`🏪 Diproduksi di cabang ${store?.nama ?? ""} (kitchen)`}
+                    rows={kurangProduksiCabang}
+                  />
+                  <BagianKurang
+                    tipe="beli"
+                    judul="🛒 Dibeli — produk jadi"
+                    rows={kurangBeli}
+                  />
+                  <BagianKurang
+                    tipe="beli_produksi"
+                    judul="🧺 Dibeli — bahan mentah utk produksi di CK"
+                    rows={beliProduksiCk}
+                  />
+                  <BagianKurang
+                    tipe="beli_produksi"
+                    judul={`🧺 Dibeli — bahan mentah dikirim ke ${store?.nama ?? "cabang"} (kitchen)`}
+                    rows={beliProduksiCabang}
+                  />
                 </div>
               </>
             ) : (
