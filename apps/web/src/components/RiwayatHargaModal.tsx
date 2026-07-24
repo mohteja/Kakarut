@@ -7,8 +7,9 @@ import { ErrorText, Modal, Spinner, btnPrimary, btnSecondary, inputClass } from 
 
 /**
  * Isi kartu RIWAYAT HARGA satu barang (bahan baku / perlengkapan): daftar lot
- * pembelian + harga terkini & rata-rata tertimbang — fondasi hitung laba-rugi
- * FIFO/rata-rata. owner/admin bisa mencatat harga acuan terbaru di sini.
+ * pembelian + statistik terendah/tertinggi (berapa & kapan) + MEDIAN (dasar
+ * harga acuan RAB) + harga acuan kini & rata-rata tertimbang — fondasi hitung
+ * laba-rugi FIFO/rata-rata. owner/admin bisa mencatat harga acuan manual di sini.
  *
  * `endpoint` = basis path item (mis. `/bahan/<id>` atau `/perlengkapan/<id>`).
  * Server menyediakan GET `${endpoint}/pembelian` & POST `${endpoint}/harga`.
@@ -50,9 +51,38 @@ export function RiwayatHargaPanel({
 
   return (
     <div className="space-y-3">
+      {/* Statistik riwayat: terendah/tertinggi (berapa & kapan) + median.
+          Median = dasar harga acuan RAB; harga riil per lot dipakai HPP. */}
+      <div className="grid grid-cols-3 gap-2 text-center">
+        <div className="rounded-lg bg-green-50 px-2 py-2">
+          <div className="text-xs text-green-700">Terendah</div>
+          <div className="text-sm font-bold text-green-800">
+            {data.harga_terendah != null ? formatRupiah(data.harga_terendah.harga) : "—"}
+          </div>
+          <div className="text-[10px] text-green-600">
+            {data.harga_terendah != null ? formatTanggal(data.harga_terendah.tanggal) : `/ ${satuan}`}
+          </div>
+        </div>
+        <div className="rounded-lg border border-amber-300 bg-amber-50 px-2 py-2">
+          <div className="text-xs font-medium text-amber-700">Median · acuan RAB</div>
+          <div className="text-sm font-bold text-amber-800">
+            {data.harga_median != null ? formatRupiah(data.harga_median) : "—"}
+          </div>
+          <div className="text-[10px] text-amber-600">/ {satuan}</div>
+        </div>
+        <div className="rounded-lg bg-red-50 px-2 py-2">
+          <div className="text-xs text-red-700">Tertinggi</div>
+          <div className="text-sm font-bold text-red-800">
+            {data.harga_tertinggi != null ? formatRupiah(data.harga_tertinggi.harga) : "—"}
+          </div>
+          <div className="text-[10px] text-red-600">
+            {data.harga_tertinggi != null ? formatTanggal(data.harga_tertinggi.tanggal) : `/ ${satuan}`}
+          </div>
+        </div>
+      </div>
       <div className="grid grid-cols-3 gap-2 text-center">
         <div className="rounded-lg bg-stone-50 px-2 py-2">
-          <div className="text-xs text-stone-500">Harga terkini</div>
+          <div className="text-xs text-stone-500">Harga acuan kini</div>
           <div className="text-sm font-bold text-stone-800">
             {formatRupiah(data.harga_terkini)}
           </div>
@@ -71,6 +101,11 @@ export function RiwayatHargaPanel({
           <div className="text-[10px] text-stone-400">lot tercatat</div>
         </div>
       </div>
+      <p className="text-xs text-stone-500">
+        <b>Median</b> jadi harga acuan RAB belanja — disinkron otomatis tiap <b>Laporan
+        Harga</b>. Harga riil tiap pembelian tetap tercatat per lot dan dipakai perhitungan
+        HPP (FIFO) &amp; resep.
+      </p>
 
       {data.lots.length === 0 ? (
         <div className="rounded-lg bg-stone-50 px-3 py-6 text-center text-sm text-stone-400">

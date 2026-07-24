@@ -30,6 +30,7 @@ import {
   storageLocations,
   suppliers,
 } from "../../db/schema";
+import { statistikHargaLots } from "../../lib/harga-stats";
 import { requireRole, type AppEnv } from "../../middleware/auth";
 import { saldoBahanPerCabang } from "../stok/service";
 import { kanonikKategori, kategoriKanonikMap } from "../kategori-bahan/service";
@@ -422,6 +423,7 @@ async function riwayatHargaBahan(
     item: { id: ing.id, nama: ing.nama, satuan: ing.satuan },
     harga_terkini: hargaPerUnit(ing.hargaBeli, ing.isi),
     harga_rata: sumQty > 0 ? Math.round((sumHarga / sumQty) * 100) / 100 : null,
+    ...statistikHargaLots(lots),
     jumlah_pembelian: lots.length,
     lots,
   };

@@ -3354,8 +3354,9 @@ cek "laporan harga: total baris jadi 42000" "V == 1" \
 # setelah laporan harga: baris berharga final (laporan_harga_at terisi) → faktur "Selesai"
 cek "setelah laporan: laporan_harga_at baris terisi (faktur Selesai)" "V == 1" \
   "$(api "$OWNER" GET "/pembelian?per_page=500" | jq --arg r "$ROWL93" '([.rows[]|select(.id==$r)][0].laporan_harga_at!=null)|if . then 1 else 0 end')"
-cek "laporan harga: harga_beli bahan disegarkan (42000/6 × isi 1 = 7000)" "V == 1" \
-  "$(api "$OWNER" GET /bahan | jq --arg id "$BH93_ID" '([.[]|select(.id==$id)][0].harga_beli|round)==7000|if . then 1 else 0 end')"
+# acuan = MEDIAN riwayat: lot 3000 + lot 7000 (42000/6) → median 5000 (× isi 1)
+cek "laporan harga: harga_beli bahan = median riwayat (5000)" "V == 1" \
+  "$(api "$OWNER" GET /bahan | jq --arg id "$BH93_ID" '([.[]|select(.id==$id)][0].harga_beli|round)==5000|if . then 1 else 0 end')"
 cek "laporan harga: lot 42000 muncul di riwayat harga" "V == 1" \
   "$(api "$OWNER" GET "/bahan/$BH93_ID/pembelian" | jq '([.lots[]|select(.total_harga==42000)]|length>=1)|if . then 1 else 0 end')"
 
@@ -4430,6 +4431,51 @@ cek "hapus bahan dari detail → ok" "V == 1" \
   "$(api "$OWNER" DELETE "/bahan/$B120" | jq '(.ok==true)|if . then 1 else 0 end')"
 cek "bahan terhapus → detail 404" "V == 404" \
   "$(status_code "$OWNER" GET "/bahan/$B120/detail")"
+
+echo "== 121. Statistik riwayat harga (terendah/tertinggi/median) + median jadi acuan =="
+# bahan: 3 lot beli dikonfirmasi 1000 / 3000 / 2000 per pcs (urut sengaja acak)
+B121=$(api "$OWNER" POST /bahan '{"nama":"Bahan Median Uji 121","harga_beli":1000,"isi":1,"satuan":"pcs","pengadaan":"beli","track_stok":true}' | jq -r .id)
+beli121() { # $1=jumlah $2=total_harga → faktur beli dikonfirmasi (CK sendiri), echo faktur_id
+  local F
+  F=$(api "$OWNER" POST /pembelian/faktur "{\"items\":[{\"ingredient_id\":\"$B121\",\"mode\":\"pcs\",\"jumlah\":$1,\"total_harga\":$2}]}" | jq -r .faktur_id)
+  api "$OWNER" POST "/pembelian/tahap/$F" '{"ke":"dikerjakan"}' > /dev/null
+  api "$OWNER" POST "/pembelian/tahap/$F" '{"ke":"menunggu"}' > /dev/null
+  echo "$F"
+}
+beli121 10 10000 > /dev/null   # 1000/pcs
+beli121 10 30000 > /dev/null   # 3000/pcs
+F121C=$(beli121 10 20000)      # 2000/pcs
+RH121=$(api "$OWNER" GET "/bahan/$B121/pembelian")
+cek "stat bahan: harga_terendah 1000 + tanggalnya terisi" "V == 1" \
+  "$(echo "$RH121" | jq '(.harga_terendah.harga==1000) and (.harga_terendah.tanggal!=null) | if . then 1 else 0 end')"
+cek "stat bahan: harga_tertinggi 3000 + tanggalnya terisi" "V == 1" \
+  "$(echo "$RH121" | jq '(.harga_tertinggi.harga==3000) and (.harga_tertinggi.tanggal!=null) | if . then 1 else 0 end')"
+cek "stat bahan: harga_median 2000 (ganjil → nilai tengah)" "V == 1" \
+  "$(echo "$RH121" | jq '(.harga_median==2000) | if . then 1 else 0 end')"
+# Laporan Harga lot ke-3 jadi 50000 (5000/pcs) → acuan disegarkan ke MEDIAN
+# riwayat (1000,3000,5000 → 3000), BUKAN harga terakhir yang dilaporkan (5000)
+ROW121C=$(api "$OWNER" GET "/pembelian?per_page=500" | jq -r --arg f "$F121C" '[.rows[]|select(.faktur_id==$f)][0].id')
+api "$OWNER" POST "/pembelian/laporan-harga/$F121C" "{\"items\":[{\"id\":\"$ROW121C\",\"total_harga\":50000}]}" > /dev/null
+cek "laporan harga: acuan = median 3000 (bukan 5000 harga terakhir)" "V == 1" \
+  "$(api "$OWNER" GET /bahan | jq --arg id "$B121" '([.[]|select(.id==$id)][0].harga_beli|round)==3000|if . then 1 else 0 end')"
+cek "stat bahan: harga_terkini ikut median (3000)" "V == 1" \
+  "$(api "$OWNER" GET "/bahan/$B121/pembelian" | jq '((.harga_terkini|round)==3000) and (.harga_median==3000) | if . then 1 else 0 end')"
+# lot ke-4 7000/pcs → median genap (3000+5000)/2 = 4000; acuan TIDAK berubah
+# tanpa Laporan Harga (harga riil lot tetap tercatat utk HPP)
+beli121 10 70000 > /dev/null
+RH121D=$(api "$OWNER" GET "/bahan/$B121/pembelian")
+cek "stat bahan: median genap 4000 (rata-rata dua tengah) + tertinggi 7000" "V == 1" \
+  "$(echo "$RH121D" | jq '(.harga_median==4000) and (.harga_tertinggi.harga==7000) | if . then 1 else 0 end')"
+cek "acuan tak berubah tanpa Laporan Harga (tetap 3000)" "V == 1" \
+  "$(api "$OWNER" GET /bahan | jq --arg id "$B121" '([.[]|select(.id==$id)][0].harga_beli|round)==3000|if . then 1 else 0 end')"
+# perlengkapan: statistik yang sama dari lot stok masuk
+P121=$(api "$OWNER" POST /perlengkapan '{"nama":"Perlengkapan Median Uji 121","satuan":"pcs","harga_beli":500}' | jq -r .id)
+api "$OWNER" POST "/perlengkapan/$P121/masuk" '{"qty":10,"total_harga":10000}' > /dev/null
+api "$OWNER" POST "/perlengkapan/$P121/masuk" '{"qty":10,"total_harga":30000}' > /dev/null
+api "$OWNER" POST "/perlengkapan/$P121/masuk" '{"qty":10,"total_harga":20000}' > /dev/null
+RHP121=$(api "$OWNER" GET "/perlengkapan/$P121/pembelian")
+cek "stat perlengkapan: terendah 1000 / tertinggi 3000 / median 2000" "V == 1" \
+  "$(echo "$RHP121" | jq '(.harga_terendah.harga==1000) and (.harga_tertinggi.harga==3000) and (.harga_median==2000) | if . then 1 else 0 end')"
 
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="

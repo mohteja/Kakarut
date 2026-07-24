@@ -7,9 +7,9 @@ import type { FakturGroup } from "./TambahStokPage";
 
 /**
  * LAPORAN HARGA — catat harga riil yang dibayar per bahan SETELAH belanja
- * diterima. Memperbarui total baris + harga acuan bahan (untuk laba-rugi
- * FIFO/rata-rata). Setelah semua baris berharga final, faktur jadi "Selesai".
- * Hanya jalur BELI.
+ * diterima. Memperbarui total baris (harga riil utk HPP FIFO/resep) + harga
+ * acuan bahan disegarkan ke MEDIAN riwayat pembelian (acuan RAB). Setelah
+ * semua baris berharga final, faktur jadi "Selesai". Hanya jalur BELI.
  */
 export function LaporanHargaModal({
   grup,
@@ -53,9 +53,10 @@ export function LaporanHargaModal({
     <Modal open onClose={onClose} title="💰 Laporan Harga" lebar="max-w-lg">
       <div className="space-y-3">
         <div className="rounded-lg border border-emerald-300 bg-emerald-50/70 px-3 py-2 text-sm text-emerald-800">
-          Catat <b>harga yang benar-benar dibayar</b> tiap bahan sesuai nota belanja. Harga acuan
-          bahan ikut diperbarui untuk perhitungan laba-rugi berikutnya. Setelah dilaporkan, faktur
-          ini berstatus <b>✅ Selesai</b>.
+          Catat <b>harga yang benar-benar dibayar</b> tiap bahan sesuai nota belanja — dipakai
+          perhitungan HPP (FIFO) &amp; resep. Harga acuan bahan ikut disegarkan ke <b>median</b>{" "}
+          riwayat pembelian (acuan RAB belanja berikutnya). Setelah dilaporkan, faktur ini
+          berstatus <b>✅ Selesai</b>.
         </div>
         <div className="max-h-80 space-y-1.5 overflow-y-auto">
           {rows.map((r) => (
