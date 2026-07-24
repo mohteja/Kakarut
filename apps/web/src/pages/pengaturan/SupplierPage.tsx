@@ -22,6 +22,7 @@ interface FormState {
   telepon: string;
   alamat: string;
   catatan: string;
+  kategori: string;
 }
 
 export function SupplierPage() {
@@ -31,6 +32,9 @@ export function SupplierPage() {
     queryFn: () => api<SupplierDto[]>("/supplier"),
   });
   const [form, setForm] = useState<FormState | null>(null);
+  const [cari, setCari] = useState("");
+  // "" = semua kategori; "__tanpa__" = supplier tanpa kategori
+  const [filterKat, setFilterKat] = useState("");
 
   const simpan = useMutation({
     mutationFn: (f: FormState) => {
@@ -39,6 +43,7 @@ export function SupplierPage() {
         telepon: f.telepon || null,
         alamat: f.alamat || null,
         catatan: f.catatan || null,
+        kategori: f.kategori.trim() || null,
       };
       return f.id
         ? api(`/supplier/${f.id}`, { method: "PATCH", body })
@@ -63,12 +68,29 @@ export function SupplierPage() {
 
   if (isLoading) return <Spinner />;
 
+  const semua = supplier ?? [];
+  // daftar kategori (distinct, urut) — jadi chip filter & saran isian form
+  const kategoriList = [...new Set(semua.map((s) => s.kategori).filter((k): k is string => !!k))]
+    .sort((a, b) => a.localeCompare(b));
+  const adaTanpaKategori = semua.some((s) => !s.kategori);
+  const q = cari.trim().toLowerCase();
+  const terlihat = semua.filter((s) => {
+    if (filterKat === "__tanpa__") {
+      if (s.kategori) return false;
+    } else if (filterKat && s.kategori !== filterKat) return false;
+    if (!q) return true;
+    return [s.nama, s.telepon, s.alamat, s.kategori]
+      .some((v) => v?.toLowerCase().includes(q));
+  });
+
   return (
-    <div className="max-w-3xl">
+    <div className="max-w-4xl">
       <PageTitle
         aksi={
           <button
-            onClick={() => setForm({ nama: "", telepon: "", alamat: "", catatan: "" })}
+            onClick={() =>
+              setForm({ nama: "", telepon: "", alamat: "", catatan: "", kategori: "" })
+            }
             className={btnPrimary}
           >
             + Tambah Supplier
@@ -79,11 +101,62 @@ export function SupplierPage() {
       </PageTitle>
       <ErrorText error={toggle.error} />
 
+      {/* Cari + filter kategori */}
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <input
+          value={cari}
+          onChange={(e) => setCari(e.target.value)}
+          placeholder="Cari nama / telepon / alamat…"
+          aria-label="Cari supplier"
+          className={`${inputClass} max-w-72`}
+        />
+        {(kategoriList.length > 0 || filterKat) && (
+          <div className="flex flex-wrap items-center gap-1">
+            <button
+              onClick={() => setFilterKat("")}
+              className={`rounded-full px-3 py-1 text-xs font-medium transition ${
+                filterKat === ""
+                  ? "bg-orange-600 text-white"
+                  : "bg-stone-100 text-stone-600 hover:bg-stone-200"
+              }`}
+            >
+              Semua
+            </button>
+            {kategoriList.map((k) => (
+              <button
+                key={k}
+                onClick={() => setFilterKat(filterKat === k ? "" : k)}
+                className={`rounded-full px-3 py-1 text-xs font-medium transition ${
+                  filterKat === k
+                    ? "bg-orange-600 text-white"
+                    : "bg-stone-100 text-stone-600 hover:bg-stone-200"
+                }`}
+              >
+                {k}
+              </button>
+            ))}
+            {adaTanpaKategori && kategoriList.length > 0 && (
+              <button
+                onClick={() => setFilterKat(filterKat === "__tanpa__" ? "" : "__tanpa__")}
+                className={`rounded-full px-3 py-1 text-xs font-medium transition ${
+                  filterKat === "__tanpa__"
+                    ? "bg-orange-600 text-white"
+                    : "bg-stone-100 text-stone-500 hover:bg-stone-200"
+                }`}
+              >
+                Tanpa kategori
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
       <Card className="overflow-x-auto">
         <table className="w-full">
           <thead className="border-b border-stone-200 bg-stone-50">
             <tr>
               <th className={thClass}>Nama</th>
+              <th className={thClass}>Kategori</th>
               <th className={thClass}>Telepon</th>
               <th className={thClass}>Alamat</th>
               <th className={thClass}>Status</th>
@@ -91,7 +164,7 @@ export function SupplierPage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-stone-100">
-            {(supplier ?? []).map((s) => (
+            {terlihat.map((s) => (
               <tr key={s.id}>
                 <td className={`${tdClass} font-medium`}>
                   <Link
@@ -101,6 +174,15 @@ export function SupplierPage() {
                   >
                     {s.nama}
                   </Link>
+                </td>
+                <td className={tdClass}>
+                  {s.kategori ? (
+                    <span className="rounded-full bg-stone-100 px-2 py-0.5 text-xs font-medium text-stone-600">
+                      {s.kategori}
+                    </span>
+                  ) : (
+                    "—"
+                  )}
                 </td>
                 <td className={tdClass}>{s.telepon ?? "—"}</td>
                 <td className={`${tdClass} max-w-48 truncate`}>{s.alamat ?? "—"}</td>
@@ -128,6 +210,7 @@ export function SupplierPage() {
                         telepon: s.telepon ?? "",
                         alamat: s.alamat ?? "",
                         catatan: s.catatan ?? "",
+                        kategori: s.kategori ?? "",
                       })
                     }
                     className="ml-3 text-sm font-medium text-orange-600 hover:underline"
@@ -143,10 +226,12 @@ export function SupplierPage() {
                 </td>
               </tr>
             ))}
-            {(supplier ?? []).length === 0 && (
+            {terlihat.length === 0 && (
               <tr>
-                <td colSpan={5} className="py-8 text-center text-sm text-stone-400">
-                  Belum ada supplier — juga bisa ditambah langsung dari form faktur.
+                <td colSpan={6} className="py-8 text-center text-sm text-stone-400">
+                  {semua.length === 0
+                    ? "Belum ada supplier — juga bisa ditambah langsung dari form faktur."
+                    : "Tidak ada supplier yang cocok dengan pencarian/filter."}
                 </td>
               </tr>
             )}
@@ -169,6 +254,26 @@ export function SupplierPage() {
                 onChange={(e) => setForm({ ...form, nama: e.target.value })}
                 className={inputClass}
               />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium">Kategori</label>
+              <input
+                value={form.kategori}
+                onChange={(e) => setForm({ ...form, kategori: e.target.value })}
+                list="kategori-supplier"
+                maxLength={30}
+                placeholder="mis. sayur, daging, kemasan, toko online"
+                aria-label="Kategori supplier"
+                className={inputClass}
+              />
+              <datalist id="kategori-supplier">
+                {kategoriList.map((k) => (
+                  <option key={k} value={k} />
+                ))}
+              </datalist>
+              <p className="mt-1 text-xs text-stone-500">
+                Bebas diisi — jadi filter di daftar supplier. Kosongkan bila tak perlu.
+              </p>
             </div>
             <div>
               <label className="mb-1 block text-sm font-medium">Telepon</label>

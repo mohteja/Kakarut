@@ -4584,6 +4584,15 @@ cek "setelah pulih: kembali di daftar aktif + resep lama utuh" "V == 1" \
 cek "pulihkan bahan yang tidak terarsip → 404" "V == 404" \
   "$(status_code_body "$OWNER" POST "/bahan/$P125/pulihkan" '{}')"
 
+echo "== 126. Kategori supplier (kolom kategori + filter di halaman Supplier) =="
+S126=$(api "$OWNER" POST /supplier '{"nama":"Supplier Kategori Uji126","kategori":"sayur"}' | jq -r .id)
+cek "buat supplier dgn kategori → tersimpan di daftar" "V == 1" \
+  "$(api "$OWNER" GET /supplier | jq --arg i "$S126" '[.[]|select(.id==$i and .kategori=="sayur")]|length')"
+cek "ubah kategori supplier (PATCH)" "V == 1" \
+  "$(api "$OWNER" PATCH "/supplier/$S126" '{"kategori":"kemasan"}' | jq '(.kategori=="kemasan")|if . then 1 else 0 end')"
+cek "kosongkan kategori (null) → tanpa kategori" "V == 1" \
+  "$(api "$OWNER" PATCH "/supplier/$S126" '{"kategori":null}' | jq '(.kategori==null)|if . then 1 else 0 end')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

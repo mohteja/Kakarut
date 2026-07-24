@@ -306,7 +306,7 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 ## `/api/supplier` — Supplier (`modules/supplier/routes.ts`)
 
 - `GET /api/supplier` — [any] — res: `SupplierDto[]`
-- `POST /api/supplier` — [any] (quick-add saat input faktur) — req: `{ nama: string, telepon?|null, alamat?|null, catatan?|null, is_active?: bool }` — res: **201** `SupplierDto` — error: **409** ada
+- `POST /api/supplier` — [any] (quick-add saat input faktur) — req: `{ nama: string, telepon?|null, alamat?|null, catatan?|null, kategori?|null (max30 — kategori bebas utk pengelompokan/filter, mis. "sayur"/"kemasan"), is_active?: bool }` — res: **201** `SupplierDto` (ber-`kategori`) — error: **409** ada
 - `GET /api/supplier/:id/kartu` — [any] — res: `SupplierKartu` (riwayat beli + ringkasan + bahan terkait) — error: **404**
 - `PATCH /api/supplier/:id` — [owner/admin] — req: body supplier parsial — res: `SupplierDto` — error: **404**
 

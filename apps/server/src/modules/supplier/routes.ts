@@ -19,6 +19,7 @@ const SupplierBody = z.object({
   telepon: z.string().nullish(),
   alamat: z.string().nullish(),
   catatan: z.string().nullish(),
+  kategori: z.string().trim().max(30).nullish(),
   is_active: z.boolean().optional(),
 });
 
@@ -29,6 +30,7 @@ function toDto(row: typeof suppliers.$inferSelect): SupplierDto {
     telepon: row.telepon,
     alamat: row.alamat,
     catatan: row.catatan,
+    kategori: row.kategori,
     is_active: row.isActive,
   };
 }
@@ -55,6 +57,7 @@ export const supplierRoutes = new Hono<AppEnv>()
         telepon: body.telepon ?? null,
         alamat: body.alamat ?? null,
         catatan: body.catatan ?? null,
+        kategori: body.kategori || null,
       })
       .onConflictDoNothing()
       .returning();
@@ -151,6 +154,7 @@ export const supplierRoutes = new Hono<AppEnv>()
           ...(body.telepon !== undefined && { telepon: body.telepon }),
           ...(body.alamat !== undefined && { alamat: body.alamat }),
           ...(body.catatan !== undefined && { catatan: body.catatan }),
+          ...(body.kategori !== undefined && { kategori: body.kategori || null }),
           ...(body.is_active !== undefined && { isActive: body.is_active }),
         })
         .where(

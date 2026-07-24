@@ -362,6 +362,8 @@ export const suppliers = pgTable(
     telepon: text("telepon"),
     alamat: text("alamat"),
     catatan: text("catatan"),
+    /** Kategori bebas utk pengelompokan/filter (mis. "sayur", "kemasan"). */
+    kategori: text("kategori"),
     isActive: boolean("is_active").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
