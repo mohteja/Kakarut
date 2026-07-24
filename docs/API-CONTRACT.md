@@ -221,6 +221,7 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 - `PUT /api/bahan/:id` — [owner/admin] — req `BahanPatchBody` (semua field opsional, tanpa default) — res: `BahanDto` — error: **404**, **409** (ubah ke "produksi" saat dipakai resep aktif / ubah `isi` saat produksi berjalan)
 - `GET /api/bahan/:id/supplier` — [any] — res: `BahanSupplierDto[]` — error: **404**
 - `PUT /api/bahan/:id/supplier` — [owner/admin] — req: `{ items: [{supplier_id: uuid, is_utama: bool=false}] (max50) }` — res: `BahanSupplierDto[]` — error: **400** (>1 utama / supplier invalid / bahan tipe produksi), **404**
+- `GET /api/bahan/:id/detail` — [any] — **DETAIL PRODUK** satu bahan: `BahanDetailDto` = `{ bahan: BahanDto, metode_hpp: "average"|"fifo" (pengaturan Perusahaan), total_saldo, saldo_cabang: BahanSaldoCabang[] }` — error: **404** (termasuk bahan nonaktif)
 - `GET /api/bahan/:id/pembelian` — [any] — res: `RiwayatHargaDto` (riwayat/lot harga beli) — error: **404**
 - `POST /api/bahan/:id/harga` — [owner/admin] — req: `{ harga_per_unit: number(≥0) }` — res: `RiwayatHargaDto` — error: **404**
 - `GET /api/bahan/resep-ringkas` — [any] — res: `Record<ingredient_id, number>` (jumlah bahan mentah per bahan produksi ber-resep, satu query batch; bahan tanpa komponen tidak muncul — perlakukan absen = 0)
@@ -396,7 +397,8 @@ ADA (validasi = aturan endpoint asli), idempoten per `client_ref`.
 ## `/api/stok` — Stok & opname (`modules/stok/routes.ts`)
 
 - `GET /api/stok` — [any] — query: `branch_id?` — res: array saldo stok (saldo per ingredient)
-- `GET /api/stok/kartu/:ingredientId` — [any] — query: `branch_id?`, `dari?`, `sampai?` — res: kartu ledger stok — error: **400** stok tak dilacak, **404**
+- `GET /api/stok/kartu/:ingredientId` — [any] — query: `branch_id?`, `dari?`, `sampai?` — res: kartu ledger stok (`KartuStokDto`; mutasi kini juga memuat jenis `kirim` = kiriman keluar/transfer stok ke cabang lain yang sudah diterima) — error: **400** stok tak dilacak, **404**
+- `GET /api/stok/fifo/:ingredientId` — [any] — query: `branch_id?` — **KARTU FIFO** satu bahan pada satu cabang: seluruh riwayat masuk/keluar di-walk kronologis, keluar mengonsumsi lot **paling awal masuk** (First-In First-Out). Res: `BahanFifoDto` = lot masuk (qty/harga/terpakai/sisa/exp) + `pemakaian` (terbaru dulu, maks 300; tiap baris membawa `rincian` diambil dari lot mana + `hpp` biaya FIFO) + `saldo` (== saldo ledger) + `defisit` (stok minus tak tertutup lot). Opname disetujui = reset: selisih turun dikonsumsi FIFO, selisih naik jadi lot penyesuaian berharga acuan. — error: **400** stok tak dilacak, **404**
 - `GET /api/stok/exp` — [any] — query: `branch_id?`, `hari?=7` (clamp 0..60) — res: `ExpLotRow[]` (lot masuk stok ber-`exp_date` ≤ hari ini + `hari`, urut exp ASC, maks 300; lot sebelum baseline opname terakhir bahan itu dikecualikan). **APROKSIMASI**: ledger stok agregat tanpa FIFO — `qty_masuk` = qty saat lot masuk, BUKAN sisa lot; `saldo` live bahan disandingkan agar pemakai menilai sendiri. `sisa_hari` = exp − hari ini (negatif = lewat)
 - `POST /api/stok/waste` — [owner/admin/cashier/tim/kitchen] (peran terikat cabang hanya cabangnya) — req: `{ branch_id?: uuid, ingredient_id: uuid, qty: number(>0), foto_url: string (min 1, **bukti foto wajib**), catatan?|null (max300) }` — mencatat WASTE (mis. bahan kedaluwarsa) lewat mekanisme penyesuaian yang ada: menulis SATU sesi `stock_opnames` (fisik = saldo − qty, `penyesuaian_kategori:"waste_bahan"`, status `menunggu`) → tampil di Riwayat SO dan **baru memotong stok setelah di-ACC** owner/admin — res: **201** `{ ok, session_id, nomor }` (SO-xxxx) — error: **400** (bahan invalid/tak dilacak, qty > saldo), **403** luar cabang
 - `POST /api/stok/opname` — [owner/admin/cashier/tim/kitchen] (inline) — req `OpnameBody`: `{ branch_id?: uuid, catatan?|null, items: [{ingredient_id:uuid, qty:number(≥0), foto_url?|null, alasan?|null}] (min 1) }` — res: **201** `{ ok, jumlah, session_id, nomor, ringkasan }` — error: **400** bahan invalid/tak dilacak, **403** (luar cabang / bukan petugas opname rak itu)
@@ -1295,7 +1297,14 @@ export interface OpnameSesiDetail {
   }[];
 }
 
-export type MutasiJenis = "opname" | "produksi" | "beli" | "penjualan" | "pemakaian";
+export type MutasiJenis =
+  | "opname"
+  | "produksi"
+  | "beli"
+  | "penjualan"
+  | "pemakaian"
+  /** kiriman keluar: stok dipindah dari cabang ini ke cabang lain (diterima) */
+  | "kirim";
 
 /** Satu baris kartu stok (buku besar mutasi per bahan). */
 export interface MutasiStok {
@@ -1322,6 +1331,79 @@ export interface KartuStokDto {
   /** pembelian (beli jadi) yang belum masuk saldo (independen dari periode) */
   pembelian_berjalan: ProduksiBerjalan | null;
   mutasi: MutasiStok[];
+}
+
+/** Saldo satu bahan pada satu cabang — chip "Stok per Cabang" di Detail Produk. */
+export interface BahanSaldoCabang {
+  branch_id: string;
+  nama: string;
+  tipe: "store" | "central_kitchen" | "kantor";
+  saldo: number;
+}
+
+/** DETAIL PRODUK satu bahan (GET /api/bahan/:id/detail). */
+export interface BahanDetailDto {
+  bahan: BahanDto;
+  /** metode perhitungan biaya perusahaan (pengaturan Perusahaan) */
+  metode_hpp: "average" | "fifo";
+  /** total saldo seluruh cabang */
+  total_saldo: number;
+  saldo_cabang: BahanSaldoCabang[];
+}
+
+/**
+ * Satu LOT masuk pada kartu FIFO: pembelian/produksi/transfer masuk, atau
+ * penyesuaian opname naik. Urut PALING AWAL masuk — pemakaian mengonsumsi
+ * lot dari atas (FIFO).
+ */
+export interface FifoLot {
+  waktu: string;
+  jenis: "beli" | "produksi" | "transfer" | "opname";
+  nomor: string | null;
+  supplier: string | null;
+  qty_masuk: number;
+  /** harga per satuan kerja; null = tak diketahui (produksi/transfer tanpa harga) */
+  harga_satuan: number | null;
+  /** true bila harga_satuan dari harga acuan master (bukan faktur) */
+  harga_acuan: boolean;
+  terpakai: number;
+  sisa: number;
+  exp_date: string | null;
+}
+
+/** Rincian satu pemakaian FIFO: diambil dari lot mana saja. */
+export interface FifoAmbil {
+  /** indeks pada `lots`; null = stok minus (keluar tanpa lot tersedia) */
+  lot: number | null;
+  qty: number;
+  harga_satuan: number | null;
+}
+
+/** Satu peristiwa KELUAR pada kartu FIFO + rincian lot yang dikonsumsinya. */
+export interface FifoPemakaian {
+  waktu: string;
+  jenis: "penjualan" | "pemakaian" | "kirim" | "opname";
+  keterangan: string | null;
+  qty: number;
+  /** total biaya FIFO pemakaian ini; null bila ada bagian dari lot tanpa harga */
+  hpp: number | null;
+  rincian: FifoAmbil[];
+}
+
+/** Kartu FIFO satu bahan pada satu cabang (GET /api/stok/fifo/:ingredientId). */
+export interface BahanFifoDto {
+  bahan: { id: string; nama: string; satuan: string };
+  branch_id: string;
+  branch_nama: string;
+  metode_hpp: "average" | "fifo";
+  /** saldo akhir = Σ sisa lot − defisit; sama dengan saldo ledger cabang */
+  saldo: number;
+  /** stok minus yang belum tertutup lot mana pun */
+  defisit: number;
+  lots: FifoLot[];
+  /** pemakaian TERBARU dulu; maksimal 300 baris — selebihnya `terpotong` */
+  pemakaian: FifoPemakaian[];
+  terpotong: boolean;
 }
 
 export interface SaleItemInput {

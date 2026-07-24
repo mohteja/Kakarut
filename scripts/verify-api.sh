@@ -4378,6 +4378,54 @@ api "$OWNER" POST "/perlengkapan/beli/faktur/$FT119/tiba" '{}' > /dev/null
 cek "hapus faktur yang sudah tiba (masuk stok) → 400" "V == 400" \
   "$(status_code "$OWNER" DELETE "/perlengkapan/beli/faktur/$FT119")"
 
+echo "== 120. Detail Produk bahan + kartu FIFO (pemakaian dari lot paling awal) =="
+# Detail Produk: DTO + metode HPP + saldo per cabang. Kartu FIFO: seluruh
+# riwayat masuk/keluar di-walk kronologis — keluar mengonsumsi lot PALING AWAL;
+# opname disetujui = reset (selisih turun dikonsumsi FIFO). Saldo akhir walk
+# HARUS sama dengan saldo ledger (sumber peristiwa identik hitungSaldoCabang).
+B120=$(api "$OWNER" POST /bahan '{"nama":"gula fifo uji120","harga_beli":1500,"isi":1,"satuan":"pcs","kategori":"lain"}' | jq -r .id)
+# lot 1: 10 pcs @1000 → auto-confirm di cabang; lot 2: 5 pcs @2000
+FL120=$(api "$OWNER" POST /pembelian/faktur "{\"branch_id\":\"$CB46_ID\",\"items\":[{\"ingredient_id\":\"$B120\",\"mode\":\"pcs\",\"jumlah\":10,\"total_harga\":10000}]}" | jq -r '.faktur_id')
+api "$OWNER" POST "/pembelian/tahap/$FL120" '{"ke":"dikerjakan"}' > /dev/null
+api "$OWNER" POST "/pembelian/tahap/$FL120" '{"ke":"menunggu"}' > /dev/null
+sleep 1  # jamin urutan waktu lot 1 < lot 2
+FL120B=$(api "$OWNER" POST /pembelian/faktur "{\"branch_id\":\"$CB46_ID\",\"items\":[{\"ingredient_id\":\"$B120\",\"mode\":\"pcs\",\"jumlah\":5,\"total_harga\":10000}]}" | jq -r '.faktur_id')
+api "$OWNER" POST "/pembelian/tahap/$FL120B" '{"ke":"dikerjakan"}' > /dev/null
+api "$OWNER" POST "/pembelian/tahap/$FL120B" '{"ke":"menunggu"}' > /dev/null
+# (a) Detail Produk
+D120=$(api "$OWNER" GET "/bahan/$B120/detail")
+cek "detail: total_saldo 15 + metode HPP ada" "V == 1" \
+  "$(echo "$D120" | jq '(.total_saldo==15) and (.metode_hpp=="average" or .metode_hpp=="fifo") | if . then 1 else 0 end')"
+cek "detail: saldo_cabang memuat cabang uji = 15" "V == 15" \
+  "$(echo "$D120" | jq --arg b "$CB46_ID" '[.saldo_cabang[]|select(.branch_id==$b)][0].saldo')"
+cek "detail bahan asing → 404" "V == 404" \
+  "$(status_code "$OWNER" GET "/bahan/00000000-0000-0000-0000-000000000000/detail")"
+# (b) FIFO sebelum pemakaian: 2 lot urut paling awal, harga per satuan benar
+FF120=$(api "$OWNER" GET "/stok/fifo/$B120?branch_id=$CB46_ID")
+cek "fifo: 2 lot urut paling awal (1000 lalu 2000)" "V == 1" \
+  "$(echo "$FF120" | jq '(.lots|length==2) and (.lots[0].harga_satuan==1000) and (.lots[1].harga_satuan==2000) | if . then 1 else 0 end')"
+cek "fifo: saldo awal walk = 15 (== ledger)" "V == 15" "$(echo "$FF120" | jq '.saldo')"
+# (c) waste 12 + ACC → konsumsi FIFO: lot1 habis (10), lot2 terpakai 2 sisa 3
+W120=$(api "$OWNER" POST /stok/waste "{\"branch_id\":\"$CB46_ID\",\"ingredient_id\":\"$B120\",\"qty\":12,\"foto_url\":\"/uploads/bukti-uji.jpg\",\"catatan\":\"uji fifo 120\"}")
+api "$OWNER" POST "/stok/opname/sesi/$(echo "$W120" | jq -r '.session_id')/acc" > /dev/null
+FF120B=$(api "$OWNER" GET "/stok/fifo/$B120?branch_id=$CB46_ID")
+cek "fifo: lot PALING AWAL habis duluan (terpakai 10, sisa 0)" "V == 1" \
+  "$(echo "$FF120B" | jq '(.lots[0].terpakai==10) and (.lots[0].sisa==0) | if . then 1 else 0 end')"
+cek "fifo: lot kedua terpakai 2, sisa 3" "V == 1" \
+  "$(echo "$FF120B" | jq '(.lots[1].terpakai==2) and (.lots[1].sisa==3) | if . then 1 else 0 end')"
+cek "fifo: pemakaian opname 12 ber-HPP 14000 (10×1000 + 2×2000)" "V == 1" \
+  "$(echo "$FF120B" | jq '[.pemakaian[]|select(.jenis=="opname")][0] | (.qty==12) and (.hpp==14000) and (.rincian|length==2) | if . then 1 else 0 end')"
+SLDG120=$(api "$OWNER" GET "/stok?branch_id=$CB46_ID" | jq --arg i "$B120" '[.[]|select(.ingredient_id==$i)][0].saldo')
+cek "fifo: saldo walk == saldo ledger (3)" "V == 1" \
+  "$(echo "$FF120B" | jq --argjson s "$SLDG120" '(.saldo==3) and (.saldo==$s) | if . then 1 else 0 end')"
+cek "fifo bahan asing → 404" "V == 404" \
+  "$(status_code "$OWNER" GET "/stok/fifo/00000000-0000-0000-0000-000000000000?branch_id=$CB46_ID")"
+# (d) hapus dari Detail Produk (soft delete) → hilang dari daftar
+cek "hapus bahan dari detail → ok" "V == 1" \
+  "$(api "$OWNER" DELETE "/bahan/$B120" | jq '(.ok==true)|if . then 1 else 0 end')"
+cek "bahan terhapus → detail 404" "V == 404" \
+  "$(status_code "$OWNER" GET "/bahan/$B120/detail")"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

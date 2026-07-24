@@ -19,6 +19,8 @@ const JENIS_BADGE: Record<MutasiJenis, { label: string; cls: string }> = {
   penjualan: { label: "Penjualan", cls: "bg-red-100 text-red-700" },
   // bahan mentah terpakai resep saat produksi selesai (mutasi keluar)
   pemakaian: { label: "Pemakaian produksi", cls: "bg-amber-100 text-amber-800" },
+  // stok dipindah ke cabang lain & sudah diterima (mutasi keluar)
+  kirim: { label: "Kirim keluar", cls: "bg-purple-100 text-purple-800" },
 };
 
 function tanggal30HariLalu(): string {

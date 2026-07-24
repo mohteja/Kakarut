@@ -14,7 +14,6 @@ import {
   thClass,
 } from "../../components/ui";
 import { KategoriManagerModal } from "../../components/KategoriManagerModal";
-import { RiwayatHargaModal } from "../../components/RiwayatHargaModal";
 import { useAuth } from "../../context/AuthContext";
 import { api } from "../../lib/api";
 import { buatCsvBahan, unduhCsv } from "../../lib/bahanCsv";
@@ -47,8 +46,6 @@ export function BahanPage() {
   const [pesanHapus, setPesanHapus] = useState<string | null>(null);
   /** bahan yang sedang diatur suppliernya (modal) */
   const [aturSupplier, setAturSupplier] = useState<BahanDto | null>(null);
-  /** bahan yang riwayat harganya sedang dilihat (modal) */
-  const [riwayatHarga, setRiwayatHarga] = useState<BahanDto | null>(null);
 
   const hapus = useMutation({
     mutationFn: (id: string) => api(`/bahan/${id}`, { method: "DELETE" }),
@@ -338,8 +335,8 @@ export function BahanPage() {
                 </td>
                 <td className={`${tdClass} font-medium`}>
                   <button
-                    onClick={() => setRiwayatHarga(b)}
-                    title={`Riwayat harga & catat harga "${b.nama}"`}
+                    onClick={() => navigate(`/bahan/${b.id}`)}
+                    title={`Detail produk "${b.nama}"`}
                     className="text-left font-medium text-stone-800 hover:text-orange-600 hover:underline"
                   >
                     {b.nama}
@@ -530,17 +527,6 @@ export function BahanPage() {
         />
       )}
       {imporCsv && <ImporBahanModal bahan={semua} onClose={() => setImporCsv(false)} />}
-      {riwayatHarga && (
-        <RiwayatHargaModal
-          key={riwayatHarga.id}
-          endpoint={`/bahan/${riwayatHarga.id}`}
-          nama={riwayatHarga.nama}
-          satuan={riwayatHarga.satuan}
-          bolehUbah={bolehUbah}
-          invalidateKeys={[["bahan"], ["stok"]]}
-          onClose={() => setRiwayatHarga(null)}
-        />
-      )}
     </div>
   );
 }
