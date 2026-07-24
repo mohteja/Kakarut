@@ -240,7 +240,14 @@ export function DetailBahanPage() {
           <StatTile
             label="Harga acuan"
             value={formatRupiah(b.harga_per_unit)}
-            sub={`/ ${b.satuan}`}
+            sub={
+              // bahan berkemasan: tampilkan juga harga beli per isi (per kemasan)
+              b.isi !== 1 || (b.satuan_beli ?? "").trim() !== ""
+                ? `/ ${b.satuan} · ${formatRupiah(b.harga_beli)} / ${
+                    b.satuan_beli?.trim() || "kemasan"
+                  } (isi ${formatAngka(b.isi)} ${b.satuan})`
+                : `/ ${b.satuan}`
+            }
           />
           <StatTile
             label="Stok saat ini"

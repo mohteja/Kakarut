@@ -4476,6 +4476,12 @@ api "$OWNER" POST "/perlengkapan/$P121/masuk" '{"qty":10,"total_harga":20000}' >
 RHP121=$(api "$OWNER" GET "/perlengkapan/$P121/pembelian")
 cek "stat perlengkapan: terendah 1000 / tertinggi 3000 / median 2000" "V == 1" \
   "$(echo "$RHP121" | jq '(.harga_terendah.harga==1000) and (.harga_tertinggi.harga==3000) and (.harga_median==2000) | if . then 1 else 0 end')"
+# harga per isi/kemasan: item riwayat bawa isi + satuan_beli (mis. 1 kg = 1000 gram)
+B121K=$(api "$OWNER" POST /bahan '{"nama":"Bahan Isi Uji 121","harga_beli":28000,"isi":1000,"satuan":"gram","satuan_beli":"kg","pengadaan":"beli","track_stok":true}' | jq -r .id)
+cek "riwayat harga bahan: item bawa isi 1000 + satuan_beli kg (harga per isi 28000)" "V == 1" \
+  "$(api "$OWNER" GET "/bahan/$B121K/pembelian" | jq '(.item.isi==1000) and (.item.satuan_beli=="kg") and ((.harga_terkini*1000|round)==28000) | if . then 1 else 0 end')"
+cek "riwayat harga perlengkapan: item.isi 1 tanpa satuan_beli (tak berkemasan)" "V == 1" \
+  "$(echo "$RHP121" | jq '(.item.isi==1) and (.item.satuan_beli==null) | if . then 1 else 0 end')"
 
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="

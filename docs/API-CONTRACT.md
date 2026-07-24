@@ -1894,7 +1894,15 @@ export interface HargaEkstrem {
  * sebagai fondasi hitung laba-rugi (FIFO/average).
  */
 export interface RiwayatHargaDto {
-  item: { id: string; nama: string; satuan: string };
+  item: {
+    id: string;
+    nama: string;
+    satuan: string;
+    /** isi per kemasan dalam satuan (1 = tanpa kemasan; perlengkapan selalu 1) */
+    isi: number;
+    /** satuan beli/kemasan (mis. "kg", "dus") — null bila tak diatur */
+    satuan_beli: string | null;
+  };
   /** harga per satuan terkini (harga_beli / isi utk bahan; harga_beli utk perlengkapan) */
   harga_terkini: number;
   /** rata-rata tertimbang per satuan dari lot berharga (null bila belum ada) */
