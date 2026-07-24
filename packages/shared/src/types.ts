@@ -553,6 +553,8 @@ export interface SupplierDto {
   telepon: string | null;
   alamat: string | null;
   catatan: string | null;
+  /** kategori bebas utk pengelompokan/filter (mis. "sayur", "kemasan") */
+  kategori: string | null;
   is_active: boolean;
 }
 

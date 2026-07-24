@@ -438,6 +438,20 @@ async function riwayatHargaBahan(
 export const bahanRoutes = new Hono<AppEnv>()
   .get("/", async (c) => {
     const auth = c.get("auth");
+    // ?arsip=1 — bahan TERARSIP (nonaktif) untuk tab Arsip halaman Resep;
+    // hanya owner/admin. Bentuk ringkas (tanpa supplier/rak) — cukup untuk
+    // daftar arsip + tombol Pulihkan.
+    if (c.req.query("arsip") === "1") {
+      if (auth.role !== "owner" && auth.role !== "admin") {
+        throw new HTTPException(403, { message: "Hanya owner/admin" });
+      }
+      const arsipRows = await db
+        .select()
+        .from(ingredients)
+        .where(and(eq(ingredients.companyId, auth.company_id!), eq(ingredients.isActive, false)))
+        .orderBy(asc(ingredients.nama));
+      return c.json(arsipRows.map((r) => toDto(r, undefined, [], [])));
+    }
     const rows = await db
       .select()
       .from(ingredients)
@@ -1248,6 +1262,26 @@ export const bahanRoutes = new Hono<AppEnv>()
       return c.json({ ok: true, jumlah: inputIds.length });
     },
   )
+  // Pulihkan bahan terarsip (kebalikan DELETE): aktif kembali di semua daftar.
+  // Slug aman dari duplikat — POST /bahan me-reuse baris nonaktif ber-slug sama,
+  // jadi tidak pernah ada dua baris (aktif+arsip) dengan slug identik.
+  .post("/:id/pulihkan", requireRole("owner", "admin"), async (c) => {
+    const auth = c.get("auth");
+    const id = c.req.param("id");
+    const [row] = await db
+      .update(ingredients)
+      .set({ isActive: true, updatedAt: new Date() })
+      .where(
+        and(
+          eq(ingredients.id, id),
+          eq(ingredients.companyId, auth.company_id!),
+          eq(ingredients.isActive, false),
+        ),
+      )
+      .returning();
+    if (!row) throw new HTTPException(404, { message: "Bahan arsip tidak ditemukan" });
+    return c.json({ ok: true });
+  })
   .delete("/:id", requireRole("owner", "admin"), async (c) => {
     const auth = c.get("auth");
     const id = c.req.param("id");

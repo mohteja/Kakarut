@@ -6,6 +6,7 @@ import type { BahanDto, BahanResepRow, JenisPengadaan } from "@kakarut/shared";
 import {
   Card,
   ErrorText,
+  Modal,
   PageTitle,
   btnPrimary,
   btnSecondary,
@@ -325,9 +326,18 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
     setItems((prev) => prev.map((it, j) => (j === i ? { ...it, ...patch } : it)));
   }
 
+  // faktur beli otomatis (bahan mentah kurang / di bawah stok minimum) yang
+  // lahir bersama faktur produksi — tampilkan sebelum kembali ke daftar
+  const [hasilBeli, setHasilBeli] = useState<{ nomor: string; jumlah_baris: number } | null>(
+    null,
+  );
   const simpan = useMutation({
     mutationFn: () =>
-      api(`${endpoint}/faktur`, {
+      api<{
+        faktur_id: string;
+        nomor: string;
+        beli_otomatis: { faktur_id: string; nomor: string; jumlah_baris: number } | null;
+      }>(`${endpoint}/faktur`, {
         method: "POST",
         body: {
           ...(isManajemen && branchId ? { branch_id: branchId } : {}),
@@ -349,10 +359,16 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
             })),
         },
       }),
-    onSuccess: () => {
+    onSuccess: (d) => {
       queryClient.invalidateQueries({ queryKey: [endpoint] });
       queryClient.invalidateQueries({ queryKey: ["stok"] });
-      navigate(endpoint);
+      if (d.beli_otomatis) {
+        // beritahu dulu faktur beli otomatisnya sebelum kembali ke daftar
+        queryClient.invalidateQueries({ queryKey: ["/pembelian"] });
+        setHasilBeli(d.beli_otomatis);
+      } else {
+        navigate(endpoint);
+      }
     },
   });
 
@@ -727,7 +743,9 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
           {tipe === "produksi" ? (
             <span className="text-xs text-stone-400">
               Rak simpan otomatis mengikuti pengaturan bahan (Tempat Penyimpanan);{" "}
-              <b>Bahan kurang</b> dihitung dari resep × jumlah batch vs stok lokasi produksi.
+              <b>Bahan kurang</b> dihitung dari resep × jumlah batch vs stok lokasi produksi —
+              yang kurang / bakal di bawah <b>stok minimum</b> otomatis dibuatkan{" "}
+              <b>faktur beli</b> saat disimpan.
             </span>
           ) : (
             <>
@@ -831,6 +849,36 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
           {simpan.isPending ? "Menyimpan…" : "Simpan Faktur"}
         </button>
       </div>
+
+      {/* faktur beli otomatis lahir bersama faktur produksi — beritahu dulu */}
+      {hasilBeli && (
+        <Modal open onClose={() => navigate(endpoint)} title="✅ Faktur produksi tersimpan">
+          <div className="space-y-3">
+            <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900">
+              🛒 Faktur beli <b>{hasilBeli.nomor}</b> otomatis dibuat untuk{" "}
+              <b>{hasilBeli.jumlah_baris} bahan mentah</b> yang kurang atau bakal jatuh di
+              bawah <b>stok minimum</b> setelah produksi ini. Proses belanjanya di halaman{" "}
+              <b>Beli Bahan Baku</b>.
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => navigate(endpoint)}
+                className={btnSecondary}
+              >
+                Ke Daftar Produksi
+              </button>
+              <button
+                type="button"
+                onClick={() => navigate("/pembelian")}
+                className={btnPrimary}
+              >
+                🛒 Lihat Faktur Beli
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

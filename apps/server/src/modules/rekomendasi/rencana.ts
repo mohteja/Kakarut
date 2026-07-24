@@ -314,9 +314,10 @@ export async function rencanaDariMenu(
           // dialokasikan di perhitungan menu-level — saldo yang sama tak boleh
           // dihitung dua kali (double-count → under-buy).
           const saldoEfektif = Math.max(0, si.saldo - grp.deduksi(inputId));
-          // sama seperti menu-level: kebutuhan bahan mentah apa adanya, tanpa
-          // menambah stok minimum (reorder point) — cadangan diurus terpisah.
-          const kurang = kekuranganBahan(butuh, saldoEfektif);
+          // Termasuk STOK MINIMUM lokasi hitung: bahan mentah yang cukup utk
+          // produksi tapi sisa stoknya bakal jatuh di bawah ambang minimum
+          // IKUT dibeli — selaras faktur beli otomatis pada faktur produksi.
+          const kurang = kekuranganBahan(butuh + (si.stok_minimum ?? 0), saldoEfektif);
           const dasarFaktur = kurang > 0 ? Math.max(kurang, e.minBeli ?? 0) : 0;
           const faktur =
             kurang > 0 ? jumlahFaktur(dasarFaktur, "beli", si.isi, e.bolehEceran ?? false) : null;

@@ -526,6 +526,13 @@
       "when": 1784800992144,
       "tag": "0074_lowly_cloak",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1784908894621,
+      "tag": "0075_equal_vivisector",
+      "breakpoints": true
     }
   ]
 }
