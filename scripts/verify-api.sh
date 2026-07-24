@@ -4501,6 +4501,35 @@ api "$OWNER" PUT "/penyimpanan/$RK122/bahan" "{\"ingredient_ids\":[\"$B122\"]}" 
 api "$OWNER" POST "/produksi/tahap/$F122_ID" '{"ke":"menunggu"}' > /dev/null
 cek "selesai tanpa pilih tempat: rak default bahan terpasang otomatis" "V == 1" \
   "$(api "$OWNER" GET "/produksi?per_page=500" | jq --arg f "$F122_ID" --arg r "$RK122" '([.rows[]|select(.faktur_id==$f)][0].storage_location_id==$r)|if . then 1 else 0 end')"
+
+echo "== 123. Faktur produksi → faktur beli otomatis (bahan kurang / di bawah stok minimum) =="
+# bahan mentah A: kurang total (saldo 0, isi 500) → beli 1 kemasan
+M123A=$(api "$OWNER" POST /bahan '{"nama":"mentah uji123a","harga_beli":10000,"isi":500,"satuan":"gr","pengadaan":"beli","track_stok":true}' | jq -r .id)
+# bahan mentah B: CUKUP utk produksi tapi sisa bakal di bawah stok minimum 300
+M123B=$(api "$OWNER" POST /bahan '{"nama":"mentah uji123b","harga_beli":2000,"isi":100,"satuan":"gr","pengadaan":"beli","track_stok":true,"stok_minimum":300}' | jq -r .id)
+FB123=$(api "$OWNER" POST /pembelian/faktur "{\"items\":[{\"ingredient_id\":\"$M123B\",\"mode\":\"pcs\",\"jumlah\":350,\"total_harga\":7000}]}" | jq -r .faktur_id)
+api "$OWNER" POST "/pembelian/tahap/$FB123" '{"ke":"dikerjakan"}' > /dev/null
+api "$OWNER" POST "/pembelian/tahap/$FB123" '{"ke":"menunggu"}' > /dev/null   # saldo M123B = 350
+# produk ber-resep: 1 batch = 10 pcs, butuh 100 gr A + 40 gr B per batch
+P123=$(api "$OWNER" POST /bahan '{"nama":"produk uji123","harga_beli":0,"isi":10,"satuan":"pcs","pengadaan":"produksi","track_stok":true}' | jq -r .id)
+api "$OWNER" PUT "/bahan/$P123/resep" "{\"komponen\":[{\"ingredient_id\":\"$M123A\",\"qty\":100},{\"ingredient_id\":\"$M123B\",\"qty\":40}]}" > /dev/null
+# 2 batch: A butuh 200 (saldo 0 → kurang 200 → 1 kemasan = 500 gr);
+#          B butuh 80 (saldo 350, sisa 270 < min 300 → kurang 30 → 1 kemasan = 100 gr)
+FP123=$(api "$OWNER" POST /produksi/faktur "{\"items\":[{\"ingredient_id\":\"$P123\",\"mode\":\"batch\",\"jumlah\":2}]}")
+cek "produksi kurang bahan: faktur beli otomatis dibuat (2 baris)" "V == 1" \
+  "$(echo "$FP123" | jq '(.beli_otomatis!=null) and (.beli_otomatis.jumlah_baris==2) and (.beli_otomatis.nomor!=null) | if . then 1 else 0 end')"
+BO123=$(echo "$FP123" | jq -r .beli_otomatis.faktur_id)
+ROWS123=$(api "$OWNER" GET "/pembelian?per_page=500" | jq --arg f "$BO123" '[.rows[]|select(.faktur_id==$f)]')
+cek "beli otomatis: mentah A dibulatkan per kemasan (500 gr, rencana)" "V == 1" \
+  "$(echo "$ROWS123" | jq --arg i "$M123A" '([.[]|select(.ingredient_id==$i)][0] | (.qty==500) and (.status=="rencana")) | if . then 1 else 0 end')"
+cek "beli otomatis: mentah B ikut dibeli krn bakal di bawah minimum (100 gr)" "V == 1" \
+  "$(echo "$ROWS123" | jq --arg i "$M123B" '([.[]|select(.ingredient_id==$i)][0].qty==100) | if . then 1 else 0 end')"
+# bahan cukup & tetap di atas minimum → TANPA faktur beli otomatis
+P123B=$(api "$OWNER" POST /bahan '{"nama":"produk uji123b","harga_beli":0,"isi":10,"satuan":"pcs","pengadaan":"produksi","track_stok":true}' | jq -r .id)
+api "$OWNER" PUT "/bahan/$P123B/resep" "{\"komponen\":[{\"ingredient_id\":\"$M123B\",\"qty\":1}]}" > /dev/null
+FP123B=$(api "$OWNER" POST /produksi/faktur "{\"items\":[{\"ingredient_id\":\"$P123B\",\"mode\":\"batch\",\"jumlah\":1}]}")
+cek "produksi bahan cukup di atas minimum → tanpa faktur beli otomatis" "V == 1" \
+  "$(echo "$FP123B" | jq '(.beli_otomatis==null)|if . then 1 else 0 end')"
 # harga per isi/kemasan: item riwayat bawa isi + satuan_beli (mis. 1 kg = 1000 gram)
 B121K=$(api "$OWNER" POST /bahan '{"nama":"Bahan Isi Uji 121","harga_beli":28000,"isi":1000,"satuan":"gram","satuan_beli":"kg","pengadaan":"beli","track_stok":true}' | jq -r .id)
 cek "riwayat harga bahan: item bawa isi 1000 + satuan_beli kg (harga per isi 28000)" "V == 1" \

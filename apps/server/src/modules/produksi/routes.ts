@@ -5,7 +5,7 @@ import { alias } from "drizzle-orm/pg-core";
 import { Hono, type Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import type { JenisPengadaan } from "@kakarut/shared";
+import { jumlahFaktur, type JenisPengadaan } from "@kakarut/shared";
 import { median } from "../../lib/harga-stats";
 import { db } from "../../db/client";
 import {
@@ -14,6 +14,7 @@ import {
   dokumenNomor,
   fakturDana,
   fakturLogs,
+  ingredientComponents,
   ingredientProduksiBranches,
   ingredientSuppliers,
   ingredients,
@@ -513,7 +514,86 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         };
       });
 
-      const { inserted, nomor } = await db.transaction(async (tx) => {
+      // ==== FAKTUR BELI OTOMATIS bahan mentah resep (jalur produksi) ====
+      // Kekurangan = kebutuhan resep (BOM per 1 batch × jumlah batch) + STOK
+      // MINIMUM − saldo cabang. Bahan yang cukup untuk produksi tapi sisa
+      // stoknya bakal jatuh di bawah stok minimum IKUT dibeli. Hanya bahan
+      // jalur BELI yang dilacak stoknya; dibulatkan per kemasan + MOQ
+      // (min_beli), sama dengan planner rencana menu.
+      const beliRows: typeof rows = [];
+      const beliFakturId = randomUUID();
+      if (tipe === "produksi") {
+        const batchByProd = new Map<string, number>();
+        for (const r of rows) {
+          const ing = ingById.get(r.ingredientId)!;
+          const batch = ing.isi > 0 ? r.qty / ing.isi : r.qty;
+          batchByProd.set(r.ingredientId, (batchByProd.get(r.ingredientId) ?? 0) + batch);
+        }
+        const komponen = await db
+          .select({
+            produkId: ingredientComponents.ingredientId,
+            inputId: ingredientComponents.inputIngredientId,
+            qty: ingredientComponents.qty,
+          })
+          .from(ingredientComponents)
+          .where(inArray(ingredientComponents.ingredientId, [...batchByProd.keys()]));
+        const butuhByInput = new Map<string, number>();
+        for (const k of komponen) {
+          const batch = batchByProd.get(k.produkId) ?? 0;
+          if (batch > 0) {
+            butuhByInput.set(k.inputId, (butuhByInput.get(k.inputId) ?? 0) + k.qty * batch);
+          }
+        }
+        if (butuhByInput.size > 0) {
+          const inputRows = await db
+            .select()
+            .from(ingredients)
+            .where(
+              and(
+                eq(ingredients.companyId, auth.company_id!),
+                inArray(ingredients.id, [...butuhByInput.keys()]),
+              ),
+            );
+          const stokByIng = new Map(
+            (await hitungSaldoCabang(auth.company_id!, branchId)).map((s) => [
+              s.ingredient_id,
+              s,
+            ]),
+          );
+          for (const inp of inputRows) {
+            // hanya bahan BELI ber-stok — komponen produksi (resep bertingkat)
+            // tidak bisa dibeli, bahan tanpa lacak stok tak punya saldo
+            if (inp.pengadaan !== "beli" || !inp.trackStok || !inp.isActive) continue;
+            const s = stokByIng.get(inp.id);
+            const saldo = s?.saldo ?? 0;
+            const stokMin = s?.stok_minimum ?? inp.stokMinimum ?? 0;
+            const kurang = (butuhByInput.get(inp.id) ?? 0) + stokMin - saldo;
+            if (kurang <= 1e-9) continue;
+            const f = jumlahFaktur(Math.max(kurang, inp.minBeli ?? 0), "beli", inp.isi, inp.bolehEceran);
+            beliRows.push({
+              companyId: auth.company_id!,
+              branchId,
+              tujuanBranchId: null,
+              ingredientId: inp.id,
+              qty: f.qty,
+              tipe: "beli",
+              totalHarga: hargaDefault(f.qty, inp),
+              fakturId: beliFakturId,
+              noFaktur: null,
+              supplierId: null,
+              storageLocationId: null,
+              status: statusAwal,
+              isBatch: f.mode === "batch",
+              catatan: "Belanja bahan otomatis untuk produksi",
+              userId: auth.sub,
+              workerId: null,
+              prodDate,
+            });
+          }
+        }
+      }
+
+      const { inserted, nomor, beliNomor } = await db.transaction(async (tx) => {
         const hasil = await tx.insert(productions).values(rows).returning();
         const nomorTeks = await terbitkanNomor(tx, auth.company_id!, tipe, fakturId);
         await catatLogFaktur(tx, {
@@ -525,10 +605,44 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
           detail: `${nomorTeks} · ${hasil.length} baris`,
           userId: auth.sub,
         });
-        return { inserted: hasil, nomor: nomorTeks };
+        // faktur beli otomatis lahir dalam transaksi yang sama (atomik)
+        let nomorBeli: string | null = null;
+        if (beliRows.length > 0) {
+          await tx.insert(productions).values(beliRows);
+          nomorBeli = await terbitkanNomor(tx, auth.company_id!, "beli", beliFakturId);
+          await catatLogFaktur(tx, {
+            companyId: auth.company_id!,
+            branchId,
+            fakturId: beliFakturId,
+            jalur: "beli",
+            aksi: "Faktur dibuat (RAB)",
+            detail: `${nomorBeli} · ${beliRows.length} baris · otomatis dari produksi ${nomorTeks}`,
+            userId: auth.sub,
+          });
+          await catatLogFaktur(tx, {
+            companyId: auth.company_id!,
+            branchId,
+            fakturId,
+            jalur: tipe,
+            aksi: "Faktur beli bahan otomatis",
+            detail: `${nomorBeli} · ${beliRows.length} bahan kurang/di bawah stok minimum`,
+            userId: auth.sub,
+          });
+        }
+        return { inserted: hasil, nomor: nomorTeks, beliNomor: nomorBeli };
       });
       return c.json(
-        { faktur_id: fakturId, nomor, status: statusAwal, jumlah_baris: inserted.length },
+        {
+          faktur_id: fakturId,
+          nomor,
+          status: statusAwal,
+          jumlah_baris: inserted.length,
+          // faktur beli otomatis utk bahan mentah kurang / di bawah minimum
+          beli_otomatis:
+            beliNomor != null
+              ? { faktur_id: beliFakturId, nomor: beliNomor, jumlah_baris: beliRows.length }
+              : null,
+        },
         201,
       );
     })
