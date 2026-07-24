@@ -707,6 +707,8 @@ interface BarisBeliDraft {
   supplyId: string;
   qty: string;
   harga: string;
+  /** true bila harga diketik manual — auto-isi dari acuan berhenti menimpa */
+  hargaManual?: boolean;
 }
 
 /** Buat faktur beli perlengkapan manual MULTI-ITEM: daftar item + CK + cabang tujuan. */
@@ -731,7 +733,21 @@ function BuatBeliModal({ onClose }: { onClose: () => void }) {
   const [tujuanId, setTujuanId] = useState("");
 
   function ubahBaris(i: number, patch: Partial<BarisBeliDraft>) {
-    setBaris((prev) => prev.map((b, j) => (j === i ? { ...b, ...patch } : b)));
+    setBaris((prev) =>
+      prev.map((b, j) => {
+        if (j !== i) return b;
+        const next = { ...b, ...patch };
+        // HARGA ACUAN otomatis: item/qty berubah → isi harga dari master
+        // (harga_beli × qty) selama belum diketik manual; kosong bila belum
+        // lengkap. Ketikan manual mematikan auto-isi utk baris ini.
+        if (!next.hargaManual && ("supplyId" in patch || "qty" in patch)) {
+          const acuan = items.find((x) => x.id === next.supplyId)?.harga_beli ?? 0;
+          const qty = Number(next.qty);
+          next.harga = acuan > 0 && qty > 0 ? String(Math.round(acuan * qty)) : "";
+        }
+        return next;
+      }),
+    );
   }
 
   const barisValid = baris.filter((b) => b.supplyId && Number(b.qty) > 0);
@@ -798,7 +814,10 @@ function BuatBeliModal({ onClose }: { onClose: () => void }) {
                   inputMode="numeric"
                   min="0"
                   value={b.harga}
-                  onChange={(e) => ubahBaris(i, { harga: e.target.value })}
+                  onChange={(e) =>
+                    // ketikan manual mengunci nilai; dikosongkan = kembali auto
+                    ubahBaris(i, { harga: e.target.value, hargaManual: e.target.value !== "" })
+                  }
                   placeholder="harga (Rp)"
                   aria-label={`Harga baris ${i + 1}`}
                   className={`${inputClass} !w-28`}
@@ -812,6 +831,14 @@ function BuatBeliModal({ onClose }: { onClose: () => void }) {
                   >
                     ✕
                   </button>
+                )}
+                {item && item.harga_beli > 0 && (
+                  <div className="w-full text-[11px] text-stone-400">
+                    harga acuan {formatRupiah(item.harga_beli)} / {item.satuan}
+                    {!b.hargaManual && Number(b.qty) > 0 && (
+                      <> — terisi otomatis, boleh diubah</>
+                    )}
+                  </div>
                 )}
               </div>
             );
