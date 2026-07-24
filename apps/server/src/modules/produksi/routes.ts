@@ -1063,6 +1063,15 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
                   expDate: sql`COALESCE(${productions.expDate}, (SELECT CASE WHEN i.masa_simpan_hari > 0 THEN ${hariMasukPenuh}::date + i.masa_simpan_hari END FROM ingredients i WHERE i.id = ${productions.ingredientId}))`,
                 }
               : {}),
+            // masuk stok: rak simpan otomatis dari rak default bahan di cabang
+            // baris (Tempat Penyimpanan) — paritas dgn jalur items (rakBaris).
+            // Baris bertujuan cabang LAIN tetap tanpa rak (transit; di-auto-file
+            // saat diterima di cabang), rak yang sudah dipilih dipertahankan.
+            ...(ke === "menunggu"
+              ? {
+                  storageLocationId: sql`COALESCE(${productions.storageLocationId}, CASE WHEN (${productions.tujuanBranchId} IS NULL OR ${productions.tujuanBranchId} = ${productions.branchId}) THEN (SELECT sli.storage_location_id FROM storage_location_ingredients sli JOIN storage_locations sl ON sl.id = sli.storage_location_id WHERE sli.ingredient_id = ${productions.ingredientId} AND sli.company_id = ${auth.company_id!} AND sl.branch_id = ${productions.branchId} LIMIT 1) END)`,
+                }
+              : {}),
             // BELI bertujuan cabang: "menunggu" = barang TIBA DI CK — baris
             // TETAP di CK; pengiriman ke cabang lewat POST /kirim terpisah
             // (dengan dokumen kirim), baru muncul di Penerimaan cabang.

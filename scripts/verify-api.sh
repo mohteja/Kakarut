@@ -4493,6 +4493,14 @@ cek "sebelum dikerjakan: worker_id baris masih kosong" "V == 1" \
 api "$OWNER" POST "/produksi/tahap/$F122_ID" '{"ke":"dikerjakan"}' > /dev/null
 cek "Mulai Kerjakan: pelaksana terisi otomatis dari aktornya" "V == 1" \
   "$(api "$OWNER" GET "/produksi?per_page=500" | jq --arg f "$F122_ID" '[.rows[]|select(.faktur_id==$f)][0] | (.worker_id!=null) and (.dikerjakan_oleh!=null) | if . then 1 else 0 end')"
+# rak simpan tak dipilih di form: rak default bahan (Tempat Penyimpanan) di
+# cabang faktur otomatis terpasang saat SELESAI (jalur tahap non-items)
+BR122=$(api "$OWNER" GET "/produksi?per_page=500" | jq -r --arg f "$F122_ID" '[.rows[]|select(.faktur_id==$f)][0].branch_id')
+RK122=$(api "$OWNER" POST /penyimpanan "{\"branch_id\":\"$BR122\",\"nama\":\"Rak Produksi Uji 122\"}" | jq -r .id)
+api "$OWNER" PUT "/penyimpanan/$RK122/bahan" "{\"ingredient_ids\":[\"$B122\"]}" > /dev/null
+api "$OWNER" POST "/produksi/tahap/$F122_ID" '{"ke":"menunggu"}' > /dev/null
+cek "selesai tanpa pilih tempat: rak default bahan terpasang otomatis" "V == 1" \
+  "$(api "$OWNER" GET "/produksi?per_page=500" | jq --arg f "$F122_ID" --arg r "$RK122" '([.rows[]|select(.faktur_id==$f)][0].storage_location_id==$r)|if . then 1 else 0 end')"
 # harga per isi/kemasan: item riwayat bawa isi + satuan_beli (mis. 1 kg = 1000 gram)
 B121K=$(api "$OWNER" POST /bahan '{"nama":"Bahan Isi Uji 121","harga_beli":28000,"isi":1000,"satuan":"gram","satuan_beli":"kg","pengadaan":"beli","track_stok":true}' | jq -r .id)
 cek "riwayat harga bahan: item bawa isi 1000 + satuan_beli kg (harga per isi 28000)" "V == 1" \
