@@ -6,6 +6,7 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import {
   hargaPerUnit,
+  type BahanDetailDto,
   type BahanDto,
   type BahanResepRow,
   type BahanSupplierDto,
@@ -16,6 +17,7 @@ import {
 import { db } from "../../db/client";
 import {
   branches,
+  companies,
   dokumenNomor,
   ingredientComponents,
   ingredientProduksiBranches,
@@ -29,6 +31,7 @@ import {
   suppliers,
 } from "../../db/schema";
 import { requireRole, type AppEnv } from "../../middleware/auth";
+import { saldoBahanPerCabang } from "../stok/service";
 import { kanonikKategori, kategoriKanonikMap } from "../kategori-bahan/service";
 import { resolveKodeBahan, resolveKodeBahanBatch } from "./kode";
 
@@ -986,6 +989,42 @@ export const bahanRoutes = new Hono<AppEnv>()
       return c.json(await listSupplierBahan(auth.company_id!, id));
     },
   )
+  /**
+   * DETAIL PRODUK satu bahan: DTO lengkap (supplier utama + rak + produsen) +
+   * metode HPP perusahaan + sebaran saldo per cabang. Terbuka semua peran —
+   * data yang sama dengan daftar Bahan Baku, difokuskan satu item.
+   */
+  .get("/:id/detail", async (c) => {
+    const auth = c.get("auth");
+    const [ing] = await db
+      .select()
+      .from(ingredients)
+      .where(
+        and(
+          eq(ingredients.id, c.req.param("id")),
+          eq(ingredients.companyId, auth.company_id!),
+          eq(ingredients.isActive, true),
+        ),
+      );
+    if (!ing) throw new HTTPException(404, { message: "Bahan tidak ditemukan" });
+    const [sup, rak, produsen, [co], saldoCabang] = await Promise.all([
+      infoSupplier(auth.company_id!),
+      rakLokasiByBahan(auth.company_id!),
+      produsenByBahan(auth.company_id!),
+      db
+        .select({ metodeHpp: companies.metodeHpp })
+        .from(companies)
+        .where(eq(companies.id, auth.company_id!)),
+      saldoBahanPerCabang(auth.company_id!, c.req.param("id")),
+    ]);
+    const hasil: BahanDetailDto = {
+      bahan: toDto(ing, sup.get(ing.id), rak.get(ing.id) ?? [], produsen.get(ing.id) ?? []),
+      metode_hpp: co?.metodeHpp ?? "average",
+      total_saldo: saldoCabang.reduce((t, r) => t + r.saldo, 0),
+      saldo_cabang: saldoCabang,
+    };
+    return c.json(hasil);
+  })
   /**
    * RIWAYAT HARGA beli bahan: daftar lot pembelian + harga terkini & rata-rata
    * tertimbang (fondasi HPP FIFO/average). Terbuka semua peran (info harga).

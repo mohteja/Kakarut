@@ -2,6 +2,8 @@ import { eq, sql } from "drizzle-orm";
 import {
   saldoStok,
   statusStok,
+  type BahanFifoDto,
+  type BahanSaldoCabang,
   type KartuStokDto,
   type MutasiJenis,
   type MutasiStok,
@@ -9,6 +11,7 @@ import {
 } from "@kakarut/shared";
 import { db } from "../../db/client";
 import { branches } from "../../db/schema";
+import { jalankanFifo, type FifoEvent } from "../../lib/fifo";
 
 /**
  * Saldo stok per bahan untuk satu cabang, diturunkan (bukan disimpan):
@@ -253,6 +256,14 @@ export async function kartuStok(params: {
         WHERE pc.branch_id = ${branchId} AND pc.ingredient_id = ${ingredientId}
           AND pc.tanggal < ${dari} AND pr.deleted_at IS NULL
           AND (NOT EXISTS (SELECT 1 FROM baseline) OR pc.waktu > (SELECT created_at FROM baseline))
+      ), 0)
+      + COALESCE((
+        -- KIRIM KELUAR: stok dipindah dari cabang ini ke cabang lain & sudah
+        -- diterima — komponen yang sama dgn hitungSaldoCabang (asal_branch_id)
+        SELECT SUM(pr.qty) FROM productions pr
+        WHERE pr.asal_branch_id = ${branchId} AND pr.ingredient_id = ${ingredientId}
+          AND pr.status = 'dikonfirmasi' AND pr.deleted_at IS NULL AND pr.prod_date < ${dari}
+          AND (NOT EXISTS (SELECT 1 FROM baseline) OR pr.waktu > (SELECT created_at FROM baseline))
       ), 0) AS keluar
   `);
   const awal = awalRes.rows[0] as Record<string, unknown>;
@@ -301,6 +312,21 @@ export async function kartuStok(params: {
       WHERE pc.branch_id = ${branchId} AND pc.ingredient_id = ${ingredientId}
         AND pr.deleted_at IS NULL
         AND pc.tanggal >= ${dari} AND pc.tanggal <= ${sampai}
+      UNION ALL
+      -- KIRIM KELUAR: stok dipindah dari cabang ini & sudah diterima cabang
+      -- tujuan (asal_branch_id = cabang ini) — komponen saldo yang sama dgn
+      -- hitungSaldoCabang; sebelumnya tak tercatat di kartu (saldo melenceng).
+      SELECT pr.waktu, 'kirim' AS jenis, pr.qty,
+             ('Kirim ke ' || bt.nama) AS catatan,
+             COALESCE(dn.nomor_teks, pr.no_faktur) AS nomor,
+             NULL AS supplier, NULL AS tempat, false AS is_batch
+      FROM productions pr
+      JOIN branches bt ON bt.id = pr.branch_id
+      LEFT JOIN dokumen_nomor dn
+        ON dn.company_id = pr.company_id AND dn.ref_id = pr.faktur_id
+      WHERE pr.asal_branch_id = ${branchId} AND pr.ingredient_id = ${ingredientId}
+        AND pr.status = 'dikonfirmasi' AND pr.deleted_at IS NULL
+        AND pr.prod_date >= ${dari} AND pr.prod_date <= ${sampai}
     ) m
     ORDER BY m.waktu ASC
     LIMIT ${BATAS_MUTASI + 1}
@@ -363,6 +389,14 @@ export async function kartuStok(params: {
       totalKeluar += qty;
       saldo -= qty;
       keterangan = r.catatan ? String(r.catatan) : "Pemakaian produksi";
+    } else if (jenis === "kirim") {
+      // kiriman keluar (transfer stok ke cabang lain) — mutasi KELUAR
+      keluar = qty;
+      totalKeluar += qty;
+      saldo -= qty;
+      keterangan = [r.catatan ? String(r.catatan) : "Kiriman keluar", r.nomor ? `No. ${r.nomor}` : null]
+        .filter(Boolean)
+        .join(" · ");
     } else {
       masuk = qty;
       totalMasuk += qty;
@@ -404,5 +438,251 @@ export async function kartuStok(params: {
         ? { qty: qtyBeliBerjalan, rencana: bbRencana, dikerjakan: bbDikerjakan, menunggu: bbMenunggu }
         : null,
     mutasi,
+  };
+}
+
+/**
+ * Saldo SATU bahan di SEMUA cabang aktif — chip "Stok per Cabang" di Detail
+ * Produk. Rumus per cabang identik dengan hitungSaldoCabang (baseline opname +
+ * masuk − penjualan − pemakaian − kirim keluar), difokuskan ke satu bahan.
+ */
+export async function saldoBahanPerCabang(
+  companyId: string,
+  ingredientId: string,
+): Promise<BahanSaldoCabang[]> {
+  const result = await db.execute(sql`
+    SELECT br.id AS branch_id, br.nama AS nama, br.tipe AS tipe,
+      COALESCE(b.qty, 0) + COALESCE(p.qty, 0)
+        - COALESCE(u.qty, 0) - COALESCE(pc.qty, 0) - COALESCE(k.qty, 0) AS saldo
+    FROM branches br
+    LEFT JOIN LATERAL (
+      SELECT so.qty, so.created_at
+      FROM stock_opnames so
+      WHERE so.branch_id = br.id AND so.ingredient_id = ${ingredientId}
+        AND so.penyesuaian_status = 'disetujui'
+      ORDER BY so.created_at DESC
+      LIMIT 1
+    ) b ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT SUM(pr.qty) AS qty FROM productions pr
+      WHERE pr.branch_id = br.id AND pr.ingredient_id = ${ingredientId}
+        AND pr.status = 'dikonfirmasi' AND pr.deleted_at IS NULL
+        AND (b.created_at IS NULL OR pr.waktu > b.created_at)
+    ) p ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT SUM(sc.qty) AS qty FROM sale_consumptions sc
+      WHERE sc.branch_id = br.id AND sc.ingredient_id = ${ingredientId}
+        AND (b.created_at IS NULL OR sc.waktu > b.created_at)
+        AND EXISTS (SELECT 1 FROM sales s WHERE s.id = sc.sale_id AND s.deleted_at IS NULL)
+    ) u ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT SUM(pc.qty) AS qty FROM production_consumptions pc
+      WHERE pc.branch_id = br.id AND pc.ingredient_id = ${ingredientId}
+        AND (b.created_at IS NULL OR pc.waktu > b.created_at)
+        AND EXISTS (
+          SELECT 1 FROM productions pr WHERE pr.id = pc.production_id AND pr.deleted_at IS NULL
+        )
+    ) pc ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT SUM(pr.qty) AS qty FROM productions pr
+      WHERE pr.asal_branch_id = br.id AND pr.ingredient_id = ${ingredientId}
+        AND pr.status = 'dikonfirmasi' AND pr.deleted_at IS NULL
+        AND (b.created_at IS NULL OR pr.waktu > b.created_at)
+    ) k ON TRUE
+    WHERE br.company_id = ${companyId} AND br.is_active
+    ORDER BY br.tipe, br.nama
+  `);
+  return result.rows.map((r) => {
+    const row = r as Record<string, unknown>;
+    return {
+      branch_id: String(row.branch_id),
+      nama: String(row.nama),
+      tipe: row.tipe as BahanSaldoCabang["tipe"],
+      saldo: Number(row.saldo),
+    };
+  });
+}
+
+/** Batas aman jumlah peristiwa yang di-walk FIFO (jauh di atas skala nyata). */
+const BATAS_EVENT_FIFO = 20000;
+/** Maksimal baris pemakaian yang DIKIRIM ke klien (perhitungan tetap penuh). */
+const BATAS_PEMAKAIAN_FIFO = 300;
+
+/**
+ * KARTU FIFO satu bahan pada satu cabang: seluruh riwayat masuk/keluar
+ * di-walk kronologis — pemakaian mengonsumsi lot PALING AWAL masuk dulu.
+ * Sumber peristiwa identik dgn komponen hitungSaldoCabang, sehingga saldo
+ * akhir walk == saldo ledger cabang. Opname disetujui = reset (selisih turun
+ * dikonsumsi FIFO, selisih naik jadi lot penyesuaian berharga acuan).
+ */
+export async function fifoBahan(params: {
+  companyId: string;
+  branchId: string;
+  bahan: { id: string; nama: string; satuan: string };
+  /** harga acuan master per satuan kerja — utk lot penyesuaian opname naik */
+  hargaAcuan: number | null;
+  metodeHpp: "average" | "fifo";
+}): Promise<BahanFifoDto> {
+  // companyId tak dipakai di query (cakupan branch+ingredient, kepemilikan
+  // bahan sudah diverifikasi route) — diterima demi kejelasan pemanggil.
+  const { branchId, bahan, hargaAcuan, metodeHpp } = params;
+  const [cab] = await db
+    .select({ nama: branches.nama })
+    .from(branches)
+    .where(eq(branches.id, branchId));
+
+  // Deret peristiwa; `sejak` opsional membatasi ke waktu >= sejak (dipakai saat
+  // riwayat penuh melebihi batas — dijangkar ke baseline opname terakhir agar
+  // saldo walk tetap identik ledger, TIDAK memotong ekor terbaru).
+  const ambilEvents = (sejak: Date | null) =>
+    db.execute(sql`
+    SELECT * FROM (
+      -- MASUK: pembelian/produksi terkonfirmasi; baris ber-asal = transfer masuk
+      SELECT pr.waktu AS waktu, 'masuk' AS ev,
+             CASE WHEN pr.asal_branch_id IS NOT NULL THEN 'transfer'
+                  ELSE pr.tipe::text END AS jenis,
+             pr.qty AS qty, pr.total_harga AS total_harga, pr.exp_date AS exp_date,
+             COALESCE(dn.nomor_teks, pr.no_faktur) AS nomor,
+             sp.nama AS supplier, pr.catatan AS catatan
+      FROM productions pr
+      LEFT JOIN suppliers sp ON sp.id = pr.supplier_id
+      LEFT JOIN dokumen_nomor dn
+        ON dn.company_id = pr.company_id AND dn.ref_id = pr.faktur_id
+      WHERE pr.branch_id = ${branchId} AND pr.ingredient_id = ${bahan.id}
+        AND pr.status = 'dikonfirmasi' AND pr.deleted_at IS NULL
+        AND (${sejak}::timestamptz IS NULL OR pr.waktu >= ${sejak})
+      UNION ALL
+      -- KELUAR: konsumsi penjualan (BOM struk)
+      SELECT sc.waktu, 'keluar', 'penjualan', sc.qty, NULL, NULL,
+             s.nomor, NULL, NULL
+      FROM sale_consumptions sc
+      JOIN sales s ON s.id = sc.sale_id
+      WHERE sc.branch_id = ${branchId} AND sc.ingredient_id = ${bahan.id}
+        AND s.deleted_at IS NULL
+        AND (${sejak}::timestamptz IS NULL OR sc.waktu >= ${sejak})
+      UNION ALL
+      -- KELUAR: bahan mentah terpakai resep produksi
+      SELECT pc.waktu, 'keluar', 'pemakaian', pc.qty, NULL, NULL,
+             NULL, NULL, ('Untuk produksi ' || ij.nama)
+      FROM production_consumptions pc
+      JOIN productions pr ON pr.id = pc.production_id
+      JOIN ingredients ij ON ij.id = pr.ingredient_id
+      WHERE pc.branch_id = ${branchId} AND pc.ingredient_id = ${bahan.id}
+        AND pr.deleted_at IS NULL
+        AND (${sejak}::timestamptz IS NULL OR pc.waktu >= ${sejak})
+      UNION ALL
+      -- KELUAR: kiriman ke cabang lain yang sudah diterima
+      SELECT pr.waktu, 'keluar', 'kirim', pr.qty, NULL, NULL,
+             COALESCE(dn.nomor_teks, pr.no_faktur), NULL,
+             ('Kirim ke ' || bt.nama)
+      FROM productions pr
+      JOIN branches bt ON bt.id = pr.branch_id
+      LEFT JOIN dokumen_nomor dn
+        ON dn.company_id = pr.company_id AND dn.ref_id = pr.faktur_id
+      WHERE pr.asal_branch_id = ${branchId} AND pr.ingredient_id = ${bahan.id}
+        AND pr.status = 'dikonfirmasi' AND pr.deleted_at IS NULL
+        AND (${sejak}::timestamptz IS NULL OR pr.waktu >= ${sejak})
+      UNION ALL
+      -- OPNAME disetujui: reset saldo ke hitung fisik (termasuk stok awal)
+      SELECT so.created_at, 'opname', 'opname', so.qty, NULL, NULL,
+             dn.nomor_teks, NULL, so.catatan
+      FROM stock_opnames so
+      LEFT JOIN dokumen_nomor dn
+        ON dn.company_id = so.company_id AND dn.ref_id = so.session_id
+      WHERE so.branch_id = ${branchId} AND so.ingredient_id = ${bahan.id}
+        AND so.penyesuaian_status = 'disetujui'
+        AND (${sejak}::timestamptz IS NULL OR so.created_at >= ${sejak})
+    ) e
+    ORDER BY e.waktu ASC
+    LIMIT ${BATAS_EVENT_FIFO + 1}
+  `);
+
+  let rows = (await ambilEvents(null)).rows as Record<string, unknown>[];
+  let eventTerpotong = false;
+  if (rows.length > BATAS_EVENT_FIFO) {
+    // Riwayat penuh terlalu panjang. JANGAN buang ekor terbaru (saldo jadi basi)
+    // — jangkar ulang ke baseline opname terakhir: jendela persis sama dengan
+    // hitungSaldoCabang, event opname pertama me-reset walk → saldo tetap eksak.
+    // Riwayat lot pra-baseline tak ditampilkan (ditandai terpotong).
+    const base = await db.execute(sql`
+      SELECT created_at FROM stock_opnames
+      WHERE branch_id = ${branchId} AND ingredient_id = ${bahan.id}
+        AND penyesuaian_status = 'disetujui'
+      ORDER BY created_at DESC LIMIT 1
+    `);
+    const createdAt = (base.rows[0] as Record<string, unknown> | undefined)?.created_at;
+    if (createdAt != null) {
+      rows = (await ambilEvents(new Date(createdAt as string | Date))).rows as Record<
+        string,
+        unknown
+      >[];
+    }
+    eventTerpotong = true;
+    // kasus ekstrem (masih > batas tanpa baseline yang menolong): walk parsial
+    // dari awal jendela — saldo bisa tertinggal; flag terpotong memperingatkan.
+  }
+
+  const events: FifoEvent[] = rows.slice(0, BATAS_EVENT_FIFO).map((r) => {
+    const waktu = new Date(r.waktu as string | Date).toISOString();
+    const qty = Number(r.qty);
+    if (r.ev === "masuk") {
+      const jenis = String(r.jenis) as "beli" | "produksi" | "transfer";
+      const total = r.total_harga != null ? Number(r.total_harga) : null;
+      return {
+        ev: "masuk",
+        waktu,
+        jenis,
+        nomor: r.nomor != null ? String(r.nomor) : null,
+        supplier: r.supplier != null ? String(r.supplier) : null,
+        qty,
+        // harga menempel di lot hanya bila faktur berharga; transfer tak
+        // membawa harga (biayanya milik lot asal di CK) → null
+        hargaSatuan:
+          jenis !== "transfer" && total != null && total > 0 && qty > 0
+            ? Math.round((total / qty) * 100) / 100
+            : null,
+        expDate: r.exp_date != null ? String(r.exp_date) : null,
+      };
+    }
+    if (r.ev === "keluar") {
+      return {
+        ev: "keluar",
+        waktu,
+        jenis: String(r.jenis) as "penjualan" | "pemakaian" | "kirim",
+        keterangan:
+          r.catatan != null
+            ? String(r.catatan)
+            : r.nomor != null
+              ? `Struk ${r.nomor}`
+              : null,
+        qty,
+      };
+    }
+    return {
+      ev: "opname",
+      waktu,
+      qty,
+      keterangan: [
+        r.nomor != null ? String(r.nomor) : null,
+        r.catatan != null ? String(r.catatan) : null,
+      ]
+        .filter(Boolean)
+        .join(" · ") || null,
+    };
+  });
+
+  const hasil = jalankanFifo(events, hargaAcuan);
+  // tampilan: pemakaian TERBARU dulu, dibatasi — lot & saldo tetap dari walk penuh
+  const pemakaianTerbaru = hasil.pemakaian.slice(-BATAS_PEMAKAIAN_FIFO).reverse();
+  return {
+    bahan,
+    branch_id: branchId,
+    branch_nama: cab?.nama ?? "",
+    metode_hpp: metodeHpp,
+    saldo: hasil.saldo,
+    defisit: hasil.defisit,
+    lots: hasil.lots,
+    pemakaian: pemakaianTerbaru,
+    terpotong: eventTerpotong || hasil.pemakaian.length > BATAS_PEMAKAIAN_FIFO,
   };
 }

@@ -47,9 +47,13 @@ export async function buatPerusahaanUntuk(
   await seedMejaDefault(tx, company.id, branch.id);
   await seedUnitsPerusahaan(tx, company.id);
   await seedKategoriBahanPerusahaan(tx, company.id);
+  // Owner langsung dapat KODE KARYAWAN (barcode/QR absen) — sama seperti
+  // karyawan yang dibuat owner & undangan; tanpa ini kolom Kode kosong dan
+  // absen owner tak bisa dipindai.
+  const employeeCode = await resolveKodeKaryawan(tx, company.id);
   await tx
     .insert(memberships)
-    .values({ userId: opts.userId, companyId: company.id, role: "owner" });
+    .values({ userId: opts.userId, companyId: company.id, role: "owner", employeeCode });
   return company.id;
 }
 

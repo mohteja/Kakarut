@@ -15,9 +15,10 @@ import {
   users,
 } from "../../db/schema";
 import { pastikanCabang, requireRole, resolveBranchId, terikatCabang, type AppEnv } from "../../middleware/auth";
+import { hargaPerUnit } from "@kakarut/shared";
 import { tanggalDi } from "../../lib/time";
 import { nomorUntukRefs, terbitkanNomor } from "../dokumen/nomor";
-import { hitungSaldoCabang, kartuStok } from "./service";
+import { fifoBahan, hitungSaldoCabang, kartuStok } from "./service";
 
 const OpnameBody = z.object({
   branch_id: z.string().uuid().optional(),
@@ -117,6 +118,47 @@ export const stokRoutes = new Hono<AppEnv>()
         dari,
         sampai,
         bahan: { id: ing.id, nama: ing.nama, slug: ing.slug, satuan: ing.satuan },
+      }),
+    );
+  })
+  /**
+   * KARTU FIFO satu bahan pada satu cabang: riwayat penggunaan barang dari lot
+   * PALING AWAL masuk (First-In First-Out) — lot masuk + terpakai/sisa per lot
+   * + rincian tiap pemakaian mengambil dari lot mana. Saldo akhir walk sama
+   * dengan saldo ledger (sumber peristiwa identik dgn hitungSaldoCabang).
+   */
+  .get("/fifo/:ingredientId", async (c) => {
+    const auth = c.get("auth");
+    const branchId = await resolveBranchId(c);
+
+    const [ing] = await db
+      .select()
+      .from(ingredients)
+      .where(
+        and(
+          eq(ingredients.id, c.req.param("ingredientId")),
+          eq(ingredients.companyId, auth.company_id!),
+        ),
+      );
+    if (!ing) throw new HTTPException(404, { message: "Bahan tidak ditemukan" });
+    if (!ing.trackStok) {
+      throw new HTTPException(400, {
+        message: `Stok "${ing.nama}" tidak dilacak — tidak ada kartu FIFO`,
+      });
+    }
+
+    const [company] = await db
+      .select({ metodeHpp: companies.metodeHpp })
+      .from(companies)
+      .where(eq(companies.id, auth.company_id!));
+
+    return c.json(
+      await fifoBahan({
+        companyId: auth.company_id!,
+        branchId,
+        bahan: { id: ing.id, nama: ing.nama, satuan: ing.satuan },
+        hargaAcuan: hargaPerUnit(ing.hargaBeli, ing.isi),
+        metodeHpp: company?.metodeHpp ?? "average",
       }),
     );
   })

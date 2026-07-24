@@ -1,6 +1,13 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { createContext, useCallback, useContext, useState, type ReactNode } from "react";
-import { api, loadAuth, saveAuth, type AuthState } from "../lib/api";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useState,
+  type ReactNode,
+} from "react";
+import { api, AUTH_STORAGE_KEY, loadAuth, saveAuth, type AuthState } from "../lib/api";
 
 /** Hasil daftar / kirim-ulang verifikasi (netral, tanpa sesi). */
 export interface DaftarResult {
@@ -31,6 +38,32 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const [auth, setAuth] = useState<AuthState | null>(() => loadAuth());
+
+  // SINKRON SESI ANTAR-TAB (satu browser): event `storage` menyala di tab LAIN
+  // saat localStorage berubah — login/ganti sesi di satu tab langsung terpasang
+  // di semua tab; logout di satu tab melepas semua tab (App otomatis mengarahkan
+  // ke /login karena rute bergantung `auth`).
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      // key null = localStorage.clear(); selain kunci sesi → abaikan
+      if (e.key !== null && e.key !== AUTH_STORAGE_KEY) return;
+      const berikut = loadAuth();
+      setAuth((kini) => {
+        if (!berikut) {
+          if (!kini) return kini;
+          queryClient.clear();
+          return null; // logout dari tab lain
+        }
+        if (!kini || berikut.token !== kini.token) {
+          queryClient.clear(); // sesi baru/berganti dari tab lain
+          return berikut;
+        }
+        return kini;
+      });
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [queryClient]);
 
   // Pasang sesi baru + buang cache/pilihan cabang sesi sebelumnya (query key
   // tak memuat company_id, jadi cache lama = data tenant lama).

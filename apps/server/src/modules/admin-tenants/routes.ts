@@ -10,6 +10,7 @@ import type { AppEnv } from "../../middleware/auth";
 import { seedMejaDefault } from "../meja/defaults";
 import { seedUnitsPerusahaan } from "../satuan/service";
 import { seedKategoriBahanPerusahaan } from "../kategori-bahan/service";
+import { resolveKodeKaryawan } from "../users/service";
 
 const CreateTenantBody = z.object({
   nama: z.string().trim().min(1),
@@ -96,9 +97,11 @@ export const adminTenantsRoutes = new Hono<AppEnv>()
           emailVerifiedAt: new Date(),
         })
         .returning();
+      // Owner langsung dapat kode karyawan (barcode/QR absen)
+      const employeeCode = await resolveKodeKaryawan(tx, company.id);
       await tx
         .insert(memberships)
-        .values({ userId: owner.id, companyId: company.id, role: "owner" });
+        .values({ userId: owner.id, companyId: company.id, role: "owner", employeeCode });
 
       return { company, branch, owner: { id: owner.id, email: owner.email } };
     });

@@ -820,7 +820,14 @@ export interface OpnameSesiDetail {
   }[];
 }
 
-export type MutasiJenis = "opname" | "produksi" | "beli" | "penjualan" | "pemakaian";
+export type MutasiJenis =
+  | "opname"
+  | "produksi"
+  | "beli"
+  | "penjualan"
+  | "pemakaian"
+  /** kiriman keluar: stok dipindah dari cabang ini ke cabang lain (diterima) */
+  | "kirim";
 
 /** Satu baris kartu stok (buku besar mutasi per bahan). */
 export interface MutasiStok {
@@ -847,6 +854,83 @@ export interface KartuStokDto {
   /** pembelian (beli jadi) yang belum masuk saldo (independen dari periode) */
   pembelian_berjalan: ProduksiBerjalan | null;
   mutasi: MutasiStok[];
+}
+
+/** Saldo satu bahan pada satu cabang — chip "Stok per Cabang" di Detail Produk. */
+export interface BahanSaldoCabang {
+  branch_id: string;
+  nama: string;
+  tipe: "store" | "central_kitchen" | "kantor";
+  saldo: number;
+}
+
+/** DETAIL PRODUK satu bahan: DTO lengkap + metode HPP + sebaran stok per cabang. */
+export interface BahanDetailDto {
+  bahan: BahanDto;
+  /** metode perhitungan biaya perusahaan (pengaturan Perusahaan) */
+  metode_hpp: "average" | "fifo";
+  /** total saldo seluruh cabang */
+  total_saldo: number;
+  saldo_cabang: BahanSaldoCabang[];
+}
+
+/**
+ * Satu LOT masuk pada kartu FIFO: pembelian/produksi/transfer masuk, atau
+ * penyesuaian opname naik. Urut PALING AWAL masuk — pemakaian mengonsumsi
+ * lot dari atas (FIFO).
+ */
+export interface FifoLot {
+  /** waktu barang masuk stok (ISO) */
+  waktu: string;
+  jenis: "beli" | "produksi" | "transfer" | "opname";
+  nomor: string | null;
+  supplier: string | null;
+  qty_masuk: number;
+  /**
+   * harga per satuan kerja; null = tak diketahui (produksi/transfer tanpa
+   * harga faktur). Lot opname naik memakai harga acuan master.
+   */
+  harga_satuan: number | null;
+  /** true bila harga_satuan berasal dari harga acuan master (bukan faktur) */
+  harga_acuan: boolean;
+  terpakai: number;
+  sisa: number;
+  exp_date: string | null;
+}
+
+/** Rincian satu pemakaian FIFO: diambil dari lot mana saja. */
+export interface FifoAmbil {
+  /** indeks pada daftar `lots`; null = stok minus (keluar tanpa lot tersedia) */
+  lot: number | null;
+  qty: number;
+  harga_satuan: number | null;
+}
+
+/** Satu peristiwa KELUAR pada kartu FIFO + rincian lot yang dikonsumsinya. */
+export interface FifoPemakaian {
+  waktu: string;
+  jenis: "penjualan" | "pemakaian" | "kirim" | "opname";
+  keterangan: string | null;
+  qty: number;
+  /** total biaya FIFO pemakaian ini; null bila ada bagian dari lot tanpa harga */
+  hpp: number | null;
+  rincian: FifoAmbil[];
+}
+
+/** Kartu FIFO satu bahan pada satu cabang (riwayat penggunaan dari lot paling awal). */
+export interface BahanFifoDto {
+  bahan: { id: string; nama: string; satuan: string };
+  branch_id: string;
+  branch_nama: string;
+  metode_hpp: "average" | "fifo";
+  /** saldo akhir = Σ sisa lot − defisit; sama dengan saldo ledger cabang */
+  saldo: number;
+  /** stok minus yang belum tertutup lot mana pun (pemakaian saat stok kosong) */
+  defisit: number;
+  lots: FifoLot[];
+  /** pemakaian TERBARU dulu; maksimal 300 baris — selebihnya `terpotong` */
+  pemakaian: FifoPemakaian[];
+  terpotong: boolean;
 }
 
 export interface SaleItemInput {

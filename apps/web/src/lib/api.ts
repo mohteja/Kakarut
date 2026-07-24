@@ -22,7 +22,9 @@ export interface AuthState {
   branch: { id: string; nama: string } | null;
 }
 
-const STORAGE_KEY = "kakarut.auth";
+/** Kunci sesi di localStorage — dipantau lintas tab (event `storage`). */
+export const AUTH_STORAGE_KEY = "kakarut.auth";
+const STORAGE_KEY = AUTH_STORAGE_KEY;
 
 export function loadAuth(): AuthState | null {
   try {

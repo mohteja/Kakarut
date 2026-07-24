@@ -6,7 +6,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import type { UndanganKaryawanRow } from "@kakarut/shared";
-import { env } from "../../config/env";
+import { appBaseUrl } from "../../lib/base-url";
 import { db } from "../../db/client";
 import {
   branches,
@@ -222,7 +222,7 @@ export const karyawanRoutes = new Hono<AppEnv>()
         .select({ nama: companies.nama })
         .from(companies)
         .where(eq(companies.id, auth.company_id!));
-      const url = `${env.APP_BASE_URL}/daftar`;
+      const url = `${appBaseUrl(c)}/daftar`;
       await kirimEmail({
         to: body.email,
         subject: `Undangan bergabung ${co?.nama ?? "perusahaan"} di Terakasir`,

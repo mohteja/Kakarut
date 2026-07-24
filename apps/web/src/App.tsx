@@ -25,6 +25,7 @@ const PrinterPage = lazy(() => import("./pages/pengaturan/PrinterPage").then((m)
 const AbsenPage = lazy(() => import("./pages/absen/AbsenPage").then((m) => ({ default: m.AbsenPage })));
 const ProfilPage = lazy(() => import("./pages/profil/ProfilPage").then((m) => ({ default: m.ProfilPage })));
 const BahanPage = lazy(() => import("./pages/bahan/BahanPage").then((m) => ({ default: m.BahanPage })));
+const DetailBahanPage = lazy(() => import("./pages/bahan/DetailBahanPage").then((m) => ({ default: m.DetailBahanPage })));
 const TambahBahanBakuPage = lazy(() => import("./pages/bahan/TambahBahanBakuPage").then((m) => ({ default: m.TambahBahanBakuPage })));
 const UbahBahanBakuPage = lazy(() => import("./pages/bahan/UbahBahanBakuPage").then((m) => ({ default: m.UbahBahanBakuPage })));
 const KasirPage = lazy(() => import("./pages/kasir/KasirPage").then((m) => ({ default: m.KasirPage })));
@@ -194,6 +195,9 @@ export default function App() {
                   <Route path="/pembelian/baru" element={<FakturFormPage tipe="beli" />} />
                   <Route path="/pembelian/tahap" element={<TahapPage />} />
                   <Route path="/bahan" element={<BahanPage />} />
+                  {/* Detail Produk per bahan — /bahan/baru & /bahan/ubah menang
+                      (segmen statis diprioritaskan router di atas :id) */}
+                  <Route path="/bahan/:id" element={<DetailBahanPage />} />
                   <Route path="/resep" element={<ResepPage />} />
                 </>
               )}
