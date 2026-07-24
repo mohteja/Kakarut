@@ -73,6 +73,15 @@ export function ResepPage() {
   const semua = bahan ?? [];
   const produksi = semua.filter((b) => b.pengadaan === "produksi");
 
+  // Resep terarsip (bahan produksi nonaktif) — tab 🗄 Arsip, hanya owner/admin.
+  const { data: arsipData } = useQuery({
+    queryKey: ["bahan", "arsip"],
+    enabled: bolehUbah,
+    queryFn: () => api<BahanDto[]>("/bahan?arsip=1"),
+  });
+  const arsipProduksi = (arsipData ?? []).filter((b) => b.pengadaan === "produksi");
+  const [tab, setTab] = useState<"aktif" | "arsip">("aktif");
+
   const [cari, setCari] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const dipilih = produksi.find((b) => b.id === selectedId) ?? null;
@@ -202,6 +211,27 @@ export function ResepPage() {
     },
   });
 
+  // Arsipkan resep = nonaktifkan bahan produksi (soft-archive). Server menolak
+  // (409) bila masih dipakai menu aktif atau resep produksi lain — pesan tampil
+  // lewat ErrorText di bawah tombol.
+  const arsipkan = useMutation({
+    mutationFn: (id: string) => api(`/bahan/${id}`, { method: "DELETE" }),
+    onSuccess: () => {
+      setSelectedId(null);
+      queryClient.invalidateQueries({ queryKey: ["bahan"] });
+      queryClient.invalidateQueries({ queryKey: ["resep-ringkas"] });
+    },
+  });
+  const pulihkan = useMutation({
+    mutationFn: (id: string) => api(`/bahan/${id}/pulihkan`, { method: "POST" }),
+    onSuccess: (_data, id) => {
+      queryClient.invalidateQueries({ queryKey: ["bahan"] });
+      queryClient.invalidateQueries({ queryKey: ["resep-ringkas"] });
+      setTab("aktif");
+      setSelectedId(id);
+    },
+  });
+
   // Master satuan & kategori bahan (dropdown form buat bahan produksi)
   const { data: satuanList } = useQuery({
     queryKey: ["satuan"],
@@ -246,6 +276,9 @@ export function ResepPage() {
   const daftar = produksi
     .filter((b) => b.nama.toLowerCase().includes(cari.toLowerCase()))
     .sort((a, b) => a.nama.localeCompare(b.nama));
+  const daftarArsip = arsipProduksi
+    .filter((b) => b.nama.toLowerCase().includes(cari.toLowerCase()))
+    .sort((a, b) => a.nama.localeCompare(b.nama));
 
   const bukaFormBaru = () => setFormBaru({ kode: "", nama: "", kategori: "baso" });
 
@@ -277,7 +310,7 @@ export function ResepPage() {
         )}
       </div>
 
-      {produksi.length === 0 ? (
+      {produksi.length === 0 && arsipProduksi.length === 0 ? (
         <Card className="p-8 text-center text-sm text-stone-400">
           Belum ada bahan produksi.{" "}
           {bolehUbah ? (
@@ -295,12 +328,71 @@ export function ResepPage() {
         <div className="grid gap-4 md:grid-cols-[18rem_1fr]">
           {/* Kiri: daftar bahan produksi */}
           <Card className="p-3">
+            {/* Resep berjalan vs arsip (dinonaktifkan — riwayat tetap tersimpan) */}
+            {bolehUbah && (
+              <div className="mb-2 flex gap-1">
+                <button
+                  onClick={() => setTab("aktif")}
+                  className={`flex-1 rounded-lg px-2 py-1.5 text-sm font-medium transition ${
+                    tab === "aktif"
+                      ? "bg-orange-600 text-white"
+                      : "bg-stone-100 text-stone-600 hover:bg-stone-200"
+                  }`}
+                >
+                  Aktif ({produksi.length})
+                </button>
+                <button
+                  onClick={() => setTab("arsip")}
+                  className={`flex-1 rounded-lg px-2 py-1.5 text-sm font-medium transition ${
+                    tab === "arsip"
+                      ? "bg-orange-600 text-white"
+                      : "bg-stone-100 text-stone-600 hover:bg-stone-200"
+                  }`}
+                >
+                  🗄 Arsip ({arsipProduksi.length})
+                </button>
+              </div>
+            )}
             <input
               value={cari}
               onChange={(e) => setCari(e.target.value)}
               placeholder="Cari bahan produksi…"
               className={`${inputClass} mb-2`}
             />
+            {tab === "arsip" && bolehUbah ? (
+              <div className="max-h-[70vh] space-y-1 overflow-y-auto">
+                {daftarArsip.map((b) => (
+                  <div
+                    key={b.id}
+                    className="flex items-center gap-2 rounded-lg px-3 py-2 hover:bg-stone-50"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-semibold text-stone-600">
+                        {b.nama}
+                      </div>
+                      <div className="text-xs text-stone-400">
+                        batch {formatAngka(b.isi)} {b.satuan}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => pulihkan.mutate(b.id)}
+                      disabled={pulihkan.isPending}
+                      className="shrink-0 rounded-lg border border-stone-300 px-2 py-1 text-xs font-medium text-stone-600 hover:bg-stone-100"
+                    >
+                      ↩ Pulihkan
+                    </button>
+                  </div>
+                ))}
+                {daftarArsip.length === 0 && (
+                  <div className="py-6 text-center text-sm text-stone-400">
+                    {arsipProduksi.length === 0
+                      ? "Belum ada resep yang diarsipkan."
+                      : "Tidak ada yang cocok."}
+                  </div>
+                )}
+                <ErrorText error={pulihkan.error} />
+              </div>
+            ) : (
             <div className="max-h-[70vh] space-y-1 overflow-y-auto">
               {daftar.map((b) => {
                 // peta hanya berisi bahan yang PUNYA komponen — absen berarti
@@ -333,10 +425,11 @@ export function ResepPage() {
               })}
               {daftar.length === 0 && (
                 <div className="py-6 text-center text-sm text-stone-400">
-                  Tidak ada yang cocok.
+                  {produksi.length === 0 ? "Belum ada resep aktif." : "Tidak ada yang cocok."}
                 </div>
               )}
             </div>
+            )}
           </Card>
 
           {/* Kanan: editor resep bahan terpilih */}
@@ -697,9 +790,26 @@ export function ResepPage() {
                         {simpan.isSuccess && !simpan.isPending && (
                           <span className="text-sm font-medium text-green-600">✓ Tersimpan</span>
                         )}
+                        <span className="flex-1" />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (
+                              confirm(
+                                `Arsipkan resep "${dipilih.nama}"? Bahan produksi ini keluar dari daftar resep, rencana belanja, dan pilihan produksi. Riwayat lama tetap tersimpan dan bisa dipulihkan dari tab 🗄 Arsip.`,
+                              )
+                            )
+                              arsipkan.mutate(dipilih.id);
+                          }}
+                          disabled={arsipkan.isPending}
+                          className="text-sm font-medium text-red-500 hover:underline"
+                        >
+                          🗄 Arsipkan resep
+                        </button>
                       </div>
                     )}
                     <ErrorText error={simpan.error} />
+                    <ErrorText error={arsipkan.error} />
                   </>
                 )}
               </div>

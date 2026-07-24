@@ -4557,6 +4557,33 @@ cek "riwayat harga bahan: item bawa isi 1000 + satuan_beli kg (harga per isi 280
 cek "riwayat harga perlengkapan: item.isi 1 tanpa satuan_beli (tak berkemasan)" "V == 1" \
   "$(echo "$RHP121" | jq '(.item.isi==1) and (.item.satuan_beli==null) | if . then 1 else 0 end')"
 
+echo "== 125. Arsipkan resep (nonaktifkan bahan produksi) + tab Arsip + pulihkan =="
+P125=$(api "$OWNER" POST /bahan '{"nama":"produk arsip uji125","harga_beli":0,"isi":10,"satuan":"pcs","pengadaan":"produksi","track_stok":true}' | jq -r .id)
+api "$OWNER" PUT "/bahan/$P125/resep" "{\"komponen\":[{\"ingredient_id\":\"$M123B\",\"qty\":5}]}" > /dev/null
+cek "sebelum arsip: tampil di daftar bahan aktif" "V == 1" \
+  "$(api "$OWNER" GET /bahan | jq --arg i "$P125" '[.[]|select(.id==$i)]|length')"
+cek "sebelum arsip: punya resep di resep-ringkas" "V == 1" \
+  "$(api "$OWNER" GET /bahan/resep-ringkas | jq --arg i "$P125" 'has($i)|if . then 1 else 0 end')"
+cek "arsipkan resep (DELETE bahan) → ok" "V == 1" \
+  "$(api "$OWNER" DELETE "/bahan/$P125" | jq '.ok==true|if . then 1 else 0 end')"
+cek "setelah arsip: hilang dari daftar bahan aktif" "V == 0" \
+  "$(api "$OWNER" GET /bahan | jq --arg i "$P125" '[.[]|select(.id==$i)]|length')"
+cek "setelah arsip: hilang dari resep-ringkas" "V == 0" \
+  "$(api "$OWNER" GET /bahan/resep-ringkas | jq --arg i "$P125" 'has($i)|if . then 1 else 0 end')"
+cek "tab arsip (?arsip=1): memuat resep terarsip, is_active=false" "V == 1" \
+  "$(api "$OWNER" GET "/bahan?arsip=1" | jq --arg i "$P125" '[.[]|select(.id==$i and .is_active==false)]|length')"
+# token $KASIR sudah 401 sejak §105 (token_version) — pakai kitchen (§107)
+cek "tab arsip hanya owner/admin: kitchen → 403" "V == 403" \
+  "$(status_code "$TKIT" GET "/bahan?arsip=1")"
+cek "guard: arsipkan resep yang dipakai menu aktif → 409" "V == 409" \
+  "$(status_code "$OWNER" DELETE "/bahan/$P124")"
+cek "pulihkan dari arsip → ok" "V == 1" \
+  "$(api "$OWNER" POST "/bahan/$P125/pulihkan" '{}' | jq '.ok==true|if . then 1 else 0 end')"
+cek "setelah pulih: kembali di daftar aktif + resep lama utuh" "V == 1" \
+  "$(api "$OWNER" GET "/bahan/$P125/resep" | jq --arg i "$M123B" '[.[]|select(.ingredient_id==$i and .qty==5)]|length')"
+cek "pulihkan bahan yang tidak terarsip → 404" "V == 404" \
+  "$(status_code_body "$OWNER" POST "/bahan/$P125/pulihkan" '{}')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]
