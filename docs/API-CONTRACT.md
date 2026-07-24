@@ -557,6 +557,7 @@ import type {
   BahanKategori,
   JenisPengadaan,
   MenuTipe,
+  ProduksiDi,
   StokStatus,
   UserRole,
 } from "./constants";
@@ -579,6 +580,52 @@ export interface ProfilDto {
   role: UserRole | null;
   cabang: string | null;
   employee_code: string | null;
+}
+
+export type InvitationStatus = "pending" | "accepted" | "revoked";
+
+/** Undangan yang DITUJUKAN ke saya (dilihat calon karyawan di onboarding). */
+export interface UndanganDto {
+  id: string;
+  company_nama: string;
+  role: UserRole;
+  cabang_nama: string | null;
+  diundang_pada: string;
+}
+
+/** Status onboarding user tanpa perusahaan: sudah punya perusahaan? + undangan. */
+export interface OnboardingStatus {
+  has_company: boolean;
+  email: string;
+  undangan: UndanganDto[];
+}
+
+/** Undangan yang DIBUAT perusahaan (dilihat owner/admin di Kelola Karyawan). */
+export interface UndanganKaryawanRow {
+  id: string;
+  email: string;
+  role: UserRole;
+  cabang_nama: string | null;
+  status: InvitationStatus;
+  diundang_pada: string;
+}
+
+export type SmtpEncryption = "none" | "ssl" | "starttls";
+
+/** Pengaturan email (SMTP) platform — GET tak pernah mengembalikan password mentah. */
+export interface SmtpSettingsDto {
+  host: string | null;
+  port: number;
+  username: string | null;
+  /** true = password sudah tersimpan (nilai asli tak dikirim ke klien) */
+  has_password: boolean;
+  encryption: SmtpEncryption;
+  sender_name: string | null;
+  sender_email: string | null;
+  /** true = email siap dikirim (SMTP lengkap ATAU fallback Resend aktif) */
+  configured: boolean;
+  /** penyedia efektif saat ini */
+  provider: "smtp" | "resend" | "none";
 }
 
 /** Satu entri riwayat kegiatan pada faktur (jejak ubah tahap). */
@@ -624,12 +671,16 @@ export interface BahanDto {
   harga_per_unit: number;
   kategori: BahanKategori;
   pengadaan: JenisPengadaan;
-  /** lokasi produksi bahan jalur "produksi": "ck" | "cabang" (kitchen toko) */
+  /**
+   * Lokasi produksi bahan jalur "produksi": "ck" (Central Kitchen, default) atau
+   * "cabang" (diproduksi kitchen di cabang store — hasil masuk stok cabang itu).
+   * Diabaikan untuk pengadaan "beli".
+   */
   produksi_di: ProduksiDi;
   /**
-   * Cabang PRODUSEN saat produksi_di="cabang" (kosong = semua cabang store).
-   * Cabang di luar daftar dipenuhi lewat jalur CK; kitchen-nya ditolak 400.
-   * Selalu [] untuk produksi_di="ck".
+   * Cabang PRODUSEN saat produksi_di = "cabang": id cabang store yang
+   * kitchen-nya memproduksi bahan ini. KOSONG = semua cabang store. Cabang di
+   * luar daftar dipenuhi lewat jalur CK. Selalu [] untuk produksi_di = "ck".
    */
   produksi_branch_ids: string[];
   catatan: string | null;
@@ -639,15 +690,15 @@ export interface BahanDto {
   boleh_eceran: boolean;
   /** MINIMAL BELANJA (MOQ): jumlah beli minimum saat belanja otomatis (0 = tanpa minimum) */
   min_beli: number;
+  /** MASA SIMPAN (hari) setelah masuk stok — dasar exp otomatis lot; 0 = tak diatur */
+  masa_simpan_hari: number;
+  /** LEAD TIME (hari): beli = lama pesanan datang; produksi = lama proses; 0 = tanpa info */
+  lead_time_hari: number;
   is_active: boolean;
   /** nama supplier UTAMA bahan ini (null = belum diatur) */
   supplier_utama: string | null;
   /** jumlah supplier yang terdaftar untuk bahan ini */
   jumlah_supplier: number;
-  /** masa simpan (hari) setelah masuk stok — dasar `exp_date` otomatis lot; 0 = tak diatur */
-  masa_simpan_hari: number;
-  /** lead time (hari): beli = lama pesanan datang; produksi = lama proses; 0 = tanpa info */
-  lead_time_hari: number;
   /**
    * DI SIMPAN DI MANA: rak per cabang (CK & cabang store) tempat bahan ini
    * disimpan. READ-ONLY di daftar — diatur di Stok → Tempat Penyimpanan
@@ -691,6 +742,10 @@ export interface BahanImportRow {
   kemasan: boolean;
   /** complement (×0.5 dine-in) */
   complement: boolean;
+  /** masa simpan (hari); 0 = tak diatur */
+  masa_simpan_hari: number;
+  /** lead time (hari); 0 = tanpa info */
+  lead_time_hari: number;
   catatan: string | null;
 }
 
@@ -773,6 +828,10 @@ export interface BahanBulkRow {
   boleh_eceran: boolean;
   /** minimal belanja (MOQ); 0 = tanpa minimum */
   min_beli?: number;
+  /** masa simpan (hari); 0 = tak diatur */
+  masa_simpan_hari?: number;
+  /** lead time (hari); 0 = tanpa info */
+  lead_time_hari?: number;
   /** kemasan take-away */
   is_packaging?: boolean;
   /** complement (×0.5 dine-in) */
@@ -870,12 +929,17 @@ export interface RencanaBahanRow {
   qty_faktur: number | null;
   harga_per_unit: number;
   estimasi_biaya: number | null;
+  /** LEAD TIME bahan (hari): pesan/buat jauh-jauh hari (H-n); 0 = tanpa info */
+  lead_time_hari: number;
   /** khusus baris BAHAN PRODUKSI: nama bahan jadi yang membutuhkannya */
   untuk?: string | null;
-  /** lokasi produksi: "cabang" = diproduksi kitchen di cabang tujuan (null/absen = CK) */
+  /**
+   * Lokasi produksi (baris pengadaan "produksi"): "cabang" = diproduksi kitchen
+   * di cabang tujuan (faktur lahir di cabang, tanpa kirim CK). Pada baris
+   * BAHAN PRODUKSI: lokasi produksi bahan jadi yang dilayaninya — "cabang"
+   * berarti belanjanya dikirim ke cabang. Null/absen = CK (perilaku lama).
+   */
   produksi_di?: ProduksiDi | null;
-  /** lead time (hari) master bahan: beli = lama pesan datang; produksi = lama proses (badge "pesan/buat H-n") */
-  lead_time_hari: number;
 }
 
 /** Preview rencana penambahan stok dari target porsi menu. */
@@ -887,10 +951,7 @@ export interface RencanaMenuPreview {
   /**
    * BELANJA BAHAN PRODUKSI: bahan mentah (resep) yang dibutuhkan bahan jadi
    * yang akan diproduksi — kekurangan dihitung terhadap stok cabang PELAKSANA
-   * (Central Kitchen bila ada) DITAMBAH STOK MINIMUM lokasi itu: bahan yang
-   * cukup utk produksi tapi sisa stoknya bakal jatuh di bawah ambang minimum
-   * ikut direncanakan dibeli (kurang = kebutuhan + stok_minimum − saldo).
-   * Terpisah dari belanja produk langsung jadi.
+   * (Central Kitchen bila ada). Terpisah dari belanja produk langsung jadi.
    */
   bahan_produksi: RencanaBahanRow[];
   total_estimasi_biaya: number;
@@ -904,10 +965,15 @@ export interface RencanaMenuPreview {
 
 /** Hasil pembuatan faktur otomatis dari rencana menu (null = jalur tak perlu). */
 export interface RencanaFakturResult {
+  /** id rencana — pengelompok semua faktur satu submit (Data Permintaan Stok) */
+  rencana_id: string;
   /** nomor dokumen permintaan (PM-xxxx); null bila tak ada faktur yang lahir */
   nomor_permintaan: string | null;
   produksi: { faktur_id: string; jumlah_baris: number } | null;
-  /** faktur produksi DI CABANG tujuan (bahan produksi_di "cabang"; dikerjakan kitchen) */
+  /**
+   * Faktur produksi DI CABANG tujuan (bahan ber-produksi_di "cabang"): lahir di
+   * cabang store, dikerjakan kitchen cabang, hasil langsung masuk stok cabang.
+   */
   produksi_cabang: { faktur_id: string; jumlah_baris: number } | null;
   beli: { faktur_id: string; jumlah_baris: number } | null;
   /** faktur beli BAHAN PRODUKSI (bahan mentah resep) — terpisah dari beli produk jadi */
@@ -922,6 +988,18 @@ export interface PermintaanStokBagian {
   jumlah_baris: number;
   /** status "paling awal" di antara baris faktur (tahap terkini) */
   status: KonfirmasiStatus;
+  total: number;
+}
+
+/**
+ * Bagian FAKTUR BELI PERLENGKAPAN (BP-) sebuah permintaan — status memakai
+ * pipeline perlengkapan (menunggu dibeli → tiba di CK / batal); "sebagian" =
+ * campuran tiba & batal.
+ */
+export interface PermintaanStokBagianPerlengkapan {
+  faktur_id: string;
+  jumlah_baris: number;
+  status: BeliPerlengkapanStatus | "sebagian";
   total: number;
 }
 
@@ -954,18 +1032,6 @@ export interface PermintaanStokRow {
 }
 
 /**
- * Bagian FAKTUR BELI PERLENGKAPAN (BP-) sebuah permintaan — status memakai
- * pipeline perlengkapan (menunggu dibeli → diproses → tiba di CK / batal); "sebagian" =
- * campuran tiba & batal.
- */
-export interface PermintaanStokBagianPerlengkapan {
-  faktur_id: string;
-  jumlah_baris: number;
-  status: BeliPerlengkapanStatus | "sebagian";
-  total: number;
-}
-
-/**
  * Status pipeline stok masuk: rencana (RAB) → dikerjakan → menunggu →
  * dikonfirmasi (masuk stok). 'ditolak' khusus jalur beli (kiriman ditolak
  * penerima; bisa dibatalkan → dikonfirmasi). Stok terhitung saat 'dikonfirmasi'.
@@ -984,33 +1050,6 @@ export interface ProduksiBerjalan {
   rencana: number;
   dikerjakan: number;
   menunggu: number;
-}
-
-/**
- * Satu lot stok yang mendekati/lewat kedaluwarsa (hasil `GET /api/stok/exp`).
- * APROKSIMASI: ledger stok agregat tanpa FIFO — `qty_masuk` = qty saat lot
- * masuk (bukan sisa lot); `saldo` = saldo live bahan (semua lot) untuk
- * disandingkan pemakai.
- */
-export interface ExpLotRow {
-  production_id: string;
-  ingredient_id: string;
-  nama: string;
-  satuan: string;
-  /** qty saat lot masuk stok (bukan sisa lot — lihat catatan aproksimasi) */
-  qty_masuk: number;
-  exp_date: string;
-  /** tanggal lot masuk (prod_date faktur) */
-  prod_date: string;
-  tipe: JenisPengadaan;
-  faktur_id: string | null;
-  /** nomor dokumen faktur (PB-/PR-) bila ada */
-  nomor: string | null;
-  tempat: string | null;
-  /** saldo live bahan saat ini (semua lot) */
-  saldo: number;
-  /** exp_date − hari ini (negatif = sudah lewat exp) */
-  sisa_hari: number;
 }
 
 export interface StokRowDto {
@@ -1036,12 +1075,41 @@ export interface StokRowDto {
   pembelian_berjalan: ProduksiBerjalan | null;
 }
 
+/**
+ * Satu LOT (baris faktur masuk stok) yang hampir/lewat tanggal kedaluwarsa —
+ * GET /stok/exp. APROKSIMASI: ledger stok agregat (tanpa FIFO), jadi
+ * `qty_masuk` = qty saat lot masuk, BUKAN sisa lot; `saldo` (saldo live semua
+ * lot bahan) disandingkan agar user menilai sendiri sebelum mencatat waste.
+ */
+export interface ExpLotRow {
+  production_id: string;
+  ingredient_id: string;
+  nama: string;
+  satuan: string;
+  /** qty saat lot masuk stok (bukan sisa lot — lihat catatan aproksimasi) */
+  qty_masuk: number;
+  exp_date: string;
+  /** tanggal lot masuk (prod_date faktur) */
+  prod_date: string;
+  tipe: JenisPengadaan;
+  faktur_id: string | null;
+  /** nomor dokumen faktur (PB-/PR-) bila ada */
+  nomor: string | null;
+  tempat: string | null;
+  /** saldo live bahan saat ini (semua lot) */
+  saldo: number;
+  /** exp_date − hari ini (negatif = sudah lewat exp) */
+  sisa_hari: number;
+}
+
 export interface SupplierDto {
   id: string;
   nama: string;
   telepon: string | null;
   alamat: string | null;
   catatan: string | null;
+  /** kategori bebas utk pengelompokan/filter (mis. "sayur", "kemasan") */
+  kategori: string | null;
   is_active: boolean;
 }
 
@@ -1121,7 +1189,7 @@ export interface RekomendasiBahanRow {
   harga_per_unit: number;
   /** round(qty_faktur × harga_per_unit) — dari kuantitas terbulatkan */
   estimasi_biaya: number | null;
-  /** lead time (hari) master bahan: badge "pesan/buat H-n" agar dipesan/dibuat jauh-jauh hari */
+  /** LEAD TIME bahan (hari): pesan/buat jauh-jauh hari (H-n); 0 = tanpa info */
   lead_time_hari: number;
 }
 
@@ -1157,6 +1225,8 @@ export interface PenyimpananDto {
   petugas: PetugasRingkas[];
   /** jumlah bahan baku yang ditugaskan disimpan di rak ini (rak default cabang) */
   jumlah_bahan: number;
+  /** jumlah perlengkapan yang ditugaskan disimpan di rak ini */
+  jumlah_perlengkapan: number;
 }
 
 /**
@@ -1289,15 +1359,21 @@ export interface OpnameSesiDetail {
   /** owner/admin yang meng-ACC / menolak (bila ada) */
   ditinjau_oleh: string | null;
   items: {
+    /** id baris opname — dipakai untuk ACC/Tolak per produk */
+    id: string;
     nama: string;
     satuan: string;
     system_qty: number | null;
     qty_fisik: number;
     selisih: number | null;
+    /** status ACC baris ini (per produk): menunggu / disetujui / ditolak */
+    penyesuaian_status: PenyesuaianStatus;
     /** bukti foto selisih (URL) — dilampirkan saat pengecekan, untuk ACC admin */
     foto_url: string | null;
     /** alasan selisih (opsional) — dilampirkan saat pengecekan */
     alasan: string | null;
+    /** alasan penolakan baris (bila baris ini ditolak) */
+    tolak_alasan: string | null;
   }[];
 }
 
@@ -1345,7 +1421,7 @@ export interface BahanSaldoCabang {
   saldo: number;
 }
 
-/** DETAIL PRODUK satu bahan (GET /api/bahan/:id/detail). */
+/** DETAIL PRODUK satu bahan: DTO lengkap + metode HPP + sebaran stok per cabang. */
 export interface BahanDetailDto {
   bahan: BahanDto;
   /** metode perhitungan biaya perusahaan (pengaturan Perusahaan) */
@@ -1361,14 +1437,18 @@ export interface BahanDetailDto {
  * lot dari atas (FIFO).
  */
 export interface FifoLot {
+  /** waktu barang masuk stok (ISO) */
   waktu: string;
   jenis: "beli" | "produksi" | "transfer" | "opname";
   nomor: string | null;
   supplier: string | null;
   qty_masuk: number;
-  /** harga per satuan kerja; null = tak diketahui (produksi/transfer tanpa harga) */
+  /**
+   * harga per satuan kerja; null = tak diketahui (produksi/transfer tanpa
+   * harga faktur). Lot opname naik memakai harga acuan master.
+   */
   harga_satuan: number | null;
-  /** true bila harga_satuan dari harga acuan master (bukan faktur) */
+  /** true bila harga_satuan berasal dari harga acuan master (bukan faktur) */
   harga_acuan: boolean;
   terpakai: number;
   sisa: number;
@@ -1377,7 +1457,7 @@ export interface FifoLot {
 
 /** Rincian satu pemakaian FIFO: diambil dari lot mana saja. */
 export interface FifoAmbil {
-  /** indeks pada `lots`; null = stok minus (keluar tanpa lot tersedia) */
+  /** indeks pada daftar `lots`; null = stok minus (keluar tanpa lot tersedia) */
   lot: number | null;
   qty: number;
   harga_satuan: number | null;
@@ -1394,7 +1474,7 @@ export interface FifoPemakaian {
   rincian: FifoAmbil[];
 }
 
-/** Kartu FIFO satu bahan pada satu cabang (GET /api/stok/fifo/:ingredientId). */
+/** Kartu FIFO satu bahan pada satu cabang (riwayat penggunaan dari lot paling awal). */
 export interface BahanFifoDto {
   bahan: { id: string; nama: string; satuan: string };
   branch_id: string;
@@ -1402,7 +1482,7 @@ export interface BahanFifoDto {
   metode_hpp: "average" | "fifo";
   /** saldo akhir = Σ sisa lot − defisit; sama dengan saldo ledger cabang */
   saldo: number;
-  /** stok minus yang belum tertutup lot mana pun */
+  /** stok minus yang belum tertutup lot mana pun (pemakaian saat stok kosong) */
   defisit: number;
   lots: FifoLot[];
   /** pemakaian TERBARU dulu; maksimal 300 baris — selebihnya `terpotong` */
@@ -1568,6 +1648,106 @@ export interface Shift {
   kas_sistem: number;
   /** uang_fisik − kas_sistem (null selagi terbuka) */
   selisih: number | null;
+  /** ada transaksi susulan (sinkron offline) setelah shift ditutup → rekap dihitung ulang */
+  ada_transaksi_susulan: boolean;
+}
+
+/**
+ * Jenis perintah yang bisa diantre offline & disinkron via POST /api/sync.
+ * Fase 1: penjualan + absen. Fase 2: opname, perlengkapan, faktur tahap/kirim,
+ * penerimaan. Payload = body endpoint asli (+ path param bila ditandai).
+ */
+export type SyncTipe =
+  | "penjualan"
+  | "absen_saya"
+  | "absen_stasiun"
+  // Fase 2
+  | "stok_opname"
+  | "perlengkapan_opname"
+  | "perlengkapan_pakai" // payload + supply_id
+  | "faktur_tahap" // payload + jalur ("produksi"|"pembelian") + faktur_id
+  | "faktur_kirim" // payload + jalur + faktur_id
+  | "produksi_kirim_hasil" // payload + faktur_id
+  | "penerimaan_terima" // payload + faktur_id
+  | "penerimaan_terima_sebagian" // payload + faktur_id
+  | "penerimaan_tolak"; // payload + faktur_id
+
+/** Satu perintah offline dalam batch sinkron (payload = body endpoint aslinya). */
+export interface SyncCommand {
+  /** idempotency key (uuid v4), unik per perusahaan */
+  client_ref: string;
+  tipe: SyncTipe;
+  /** waktu kejadian di perangkat (ISO UTC) */
+  waktu: string;
+  payload: unknown;
+}
+
+/** Body POST /api/sync — batch perintah urut kronologis (maks 100). */
+export interface SyncRequest {
+  device_id?: string | null;
+  commands: SyncCommand[];
+}
+
+/** Hasil satu perintah (urutan sama dengan permintaan). */
+export interface SyncItemResult {
+  client_ref: string;
+  /** ok = baru dieksekusi; sudah_ada = idempoten (retry); gagal = ditolak */
+  status: "ok" | "sudah_ada" | "gagal";
+  /** kode HTTP hasil eksekusi endpoint asli */
+  kode: number;
+  /** data respons endpoint asli (saat ok/sudah_ada sukses) */
+  data?: unknown;
+  /** pesan error endpoint asli (saat gagal) */
+  error?: string;
+}
+
+/** Respons POST /api/sync — selalu 200; detail per item. */
+export interface SyncResponse {
+  hasil: SyncItemResult[];
+}
+
+/** Satu transaksi di dalam jendela waktu sebuah shift (untuk detail shift). */
+export interface ShiftTransaksiRow {
+  id: string;
+  nomor: string;
+  waktu: string;
+  total: number;
+  metode: MetodeBayar;
+  kasir: string | null;
+}
+
+/** Detail satu shift = ringkasan shift + daftar transaksi di jendela waktunya. */
+export interface ShiftDetail extends Shift {
+  transaksi: ShiftTransaksiRow[];
+}
+
+/**
+ * Status operasional satu cabang store untuk pantauan owner/admin
+ * (GET /shift/pantau). Penjualan_* = total HARI INI (zona waktu perusahaan);
+ * meta shift (dibuka_*) hanya terisi bila ada shift kasir yang sedang terbuka.
+ */
+export interface ShiftPantauRow {
+  branch_id: string;
+  branch_nama: string;
+  /** jam operasional cabang "HH:MM" (null bila belum diatur) */
+  jam_buka: string | null;
+  jam_tutup: string | null;
+  /** shift kasir yang sedang terbuka (null = kasir tutup) */
+  shift_id: string | null;
+  dibuka_oleh: string | null;
+  dibuka_pada: string | null;
+  modal_awal: number | null;
+  penjualan_tunai: number;
+  penjualan_nontunai: number;
+  jumlah_transaksi: number;
+  /** kas seharusnya = modal_awal + penjualan tunai hari ini (0 bila tutup) */
+  kas_sistem: number;
+  /** sudah ada shift dibuka hari ini? */
+  buka_hari_ini: boolean;
+  /** sudah lewat jam buka tapi kasir belum dibuka hari ini */
+  telat_buka: boolean;
+  /** kasir masih terbuka padahal sudah lewat jam tutup */
+  lupa_tutup: boolean;
 }
 
 /** Baris ringan hasil pencarian member (autocomplete keranjang kasir). */
@@ -1700,8 +1880,12 @@ export interface PerlengkapanMasterRow {
   boleh_eceran: boolean;
   /** dilacak: konsumsinya dipantau — WAJIB punya aturan konsumsi */
   dilacak: boolean;
-  /** rak simpan default (tempat penyimpanan) */
-  rak: { id: string; nama: string } | null;
+  /**
+   * DI SIMPAN DI MANA: rak per cabang (CK & cabang store), sumbernya Tempat
+   * Penyimpanan (tabel yang sama dengan bahan baku). READ-ONLY — diatur di
+   * Tempat Penyimpanan, bukan di form Perlengkapan.
+   */
+  rak_lokasi: RakLokasi[];
   /** nama supplier utama/langganan (null = belum diatur) */
   supplier_utama: string | null;
   jumlah_supplier: number;
