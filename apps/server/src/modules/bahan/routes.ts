@@ -420,7 +420,13 @@ async function riwayatHargaBahan(
     }
   }
   return {
-    item: { id: ing.id, nama: ing.nama, satuan: ing.satuan },
+    item: {
+      id: ing.id,
+      nama: ing.nama,
+      satuan: ing.satuan,
+      isi: ing.isi,
+      satuan_beli: ing.satuanBeli,
+    },
     harga_terkini: hargaPerUnit(ing.hargaBeli, ing.isi),
     harga_rata: sumQty > 0 ? Math.round((sumHarga / sumQty) * 100) / 100 : null,
     ...statistikHargaLots(lots),

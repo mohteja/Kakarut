@@ -145,7 +145,8 @@ async function riwayatHargaPerlengkapan(
     }
   }
   return {
-    item: { id: item.id, nama: item.nama, satuan: item.satuan },
+    // perlengkapan tak berkemasan: isi 1, harga per satuan = harga beli
+    item: { id: item.id, nama: item.nama, satuan: item.satuan, isi: 1, satuan_beli: null },
     harga_terkini: item.hargaBeli,
     harga_rata: sumQty > 0 ? Math.round((sumHarga / sumQty) * 100) / 100 : null,
     ...statistikHargaLots(lots),

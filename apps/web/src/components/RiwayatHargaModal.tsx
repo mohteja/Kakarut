@@ -33,12 +33,23 @@ export function RiwayatHargaPanel({
     queryFn: () => api<RiwayatHargaDto>(`${endpoint}/pembelian`),
   });
   const [hargaBaru, setHargaBaru] = useState("");
+  // basis input catat harga: per satuan kerja atau per isi/kemasan
+  const [basisIsi, setBasisIsi] = useState<boolean | null>(null);
+
+  // kemasan (harga per isi): 1 satuan_beli = isi satuan — mis. 1 kg = 1.000 gram
+  const isi = data && data.item.isi > 0 ? data.item.isi : 1;
+  const kemasan = data?.item.satuan_beli?.trim() || "kemasan";
+  const adaKemasan =
+    data != null && (isi !== 1 || (data.item.satuan_beli?.trim() ?? "") !== "");
+  const perIsi = (harga: number) => `${formatRupiah(Math.round(harga * isi))} / ${kemasan}`;
+  const pakaiBasisIsi = basisIsi ?? adaKemasan;
 
   const simpan = useMutation({
     mutationFn: () =>
       api<RiwayatHargaDto>(`${endpoint}/harga`, {
         method: "POST",
-        body: { harga_per_unit: Number(hargaBaru) || 0 },
+        // input per kemasan → konversi ke per satuan (server simpan × isi lagi)
+        body: { harga_per_unit: (Number(hargaBaru) || 0) / (pakaiBasisIsi ? isi : 1) },
       }),
     onSuccess: (d) => {
       queryClient.setQueryData(["riwayat-harga", endpoint], d);
@@ -59,6 +70,11 @@ export function RiwayatHargaPanel({
           <div className="text-sm font-bold text-green-800">
             {data.harga_terendah != null ? formatRupiah(data.harga_terendah.harga) : "—"}
           </div>
+          {adaKemasan && data.harga_terendah != null && (
+            <div className="text-[10px] font-medium text-green-700">
+              {perIsi(data.harga_terendah.harga)}
+            </div>
+          )}
           <div className="text-[10px] text-green-600">
             {data.harga_terendah != null ? formatTanggal(data.harga_terendah.tanggal) : `/ ${satuan}`}
           </div>
@@ -68,6 +84,11 @@ export function RiwayatHargaPanel({
           <div className="text-sm font-bold text-amber-800">
             {data.harga_median != null ? formatRupiah(data.harga_median) : "—"}
           </div>
+          {adaKemasan && data.harga_median != null && (
+            <div className="text-[10px] font-medium text-amber-700">
+              {perIsi(data.harga_median)}
+            </div>
+          )}
           <div className="text-[10px] text-amber-600">/ {satuan}</div>
         </div>
         <div className="rounded-lg bg-red-50 px-2 py-2">
@@ -75,6 +96,11 @@ export function RiwayatHargaPanel({
           <div className="text-sm font-bold text-red-800">
             {data.harga_tertinggi != null ? formatRupiah(data.harga_tertinggi.harga) : "—"}
           </div>
+          {adaKemasan && data.harga_tertinggi != null && (
+            <div className="text-[10px] font-medium text-red-700">
+              {perIsi(data.harga_tertinggi.harga)}
+            </div>
+          )}
           <div className="text-[10px] text-red-600">
             {data.harga_tertinggi != null ? formatTanggal(data.harga_tertinggi.tanggal) : `/ ${satuan}`}
           </div>
@@ -86,6 +112,11 @@ export function RiwayatHargaPanel({
           <div className="text-sm font-bold text-stone-800">
             {formatRupiah(data.harga_terkini)}
           </div>
+          {adaKemasan && (
+            <div className="text-[10px] font-medium text-stone-600">
+              {perIsi(data.harga_terkini)}
+            </div>
+          )}
           <div className="text-[10px] text-stone-400">/ {satuan}</div>
         </div>
         <div className="rounded-lg bg-stone-50 px-2 py-2">
@@ -93,6 +124,11 @@ export function RiwayatHargaPanel({
           <div className="text-sm font-bold text-stone-800">
             {data.harga_rata != null ? formatRupiah(data.harga_rata) : "—"}
           </div>
+          {adaKemasan && data.harga_rata != null && (
+            <div className="text-[10px] font-medium text-stone-600">
+              {perIsi(data.harga_rata)}
+            </div>
+          )}
           <div className="text-[10px] text-stone-400">tertimbang / {satuan}</div>
         </div>
         <div className="rounded-lg bg-stone-50 px-2 py-2">
@@ -102,6 +138,11 @@ export function RiwayatHargaPanel({
         </div>
       </div>
       <p className="text-xs text-stone-500">
+        {adaKemasan && (
+          <>
+            1 <b>{kemasan}</b> = {formatAngka(isi)} {satuan}.{" "}
+          </>
+        )}
         <b>Median</b> jadi harga acuan RAB belanja — disinkron otomatis tiap <b>Laporan
         Harga</b>. Harga riil tiap pembelian tetap tercatat per lot dan dipakai perhitungan
         HPP (FIFO) &amp; resep.
@@ -137,6 +178,11 @@ export function RiwayatHargaPanel({
                   </td>
                   <td className="px-2 py-1.5 text-right font-medium text-stone-800">
                     {l.harga_satuan != null ? formatRupiah(l.harga_satuan) : "—"}
+                    {adaKemasan && l.harga_satuan != null && (
+                      <div className="text-[10px] font-normal text-stone-500">
+                        {perIsi(l.harga_satuan)}
+                      </div>
+                    )}
                   </td>
                   <td className="px-2 py-1.5 text-right text-stone-600">
                     {l.total_harga != null ? formatRupiah(l.total_harga) : "—"}
@@ -150,9 +196,27 @@ export function RiwayatHargaPanel({
 
       {bolehUbah && (
         <div className="rounded-lg border border-stone-200 p-3">
-          <label className="mb-1 block text-sm font-medium">
-            Catat harga terbaru (Rp / {satuan})
-          </label>
+          <div className="mb-1 flex flex-wrap items-center gap-2">
+            <label className="text-sm font-medium">
+              Catat harga terbaru (Rp / {pakaiBasisIsi ? kemasan : satuan})
+            </label>
+            {adaKemasan && (
+              <div className="flex gap-1 text-xs">
+                <button
+                  onClick={() => setBasisIsi(true)}
+                  className={`rounded-full px-2 py-0.5 ${pakaiBasisIsi ? "bg-orange-500 text-white" : "bg-stone-100 text-stone-600"}`}
+                >
+                  per {kemasan}
+                </button>
+                <button
+                  onClick={() => setBasisIsi(false)}
+                  className={`rounded-full px-2 py-0.5 ${!pakaiBasisIsi ? "bg-orange-500 text-white" : "bg-stone-100 text-stone-600"}`}
+                >
+                  per {satuan}
+                </button>
+              </div>
+            )}
+          </div>
           <div className="flex items-center gap-2">
             <input
               type="number"
@@ -160,7 +224,9 @@ export function RiwayatHargaPanel({
               step="any"
               value={hargaBaru}
               onChange={(e) => setHargaBaru(e.target.value)}
-              placeholder={String(data.harga_terkini)}
+              placeholder={String(
+                pakaiBasisIsi ? Math.round(data.harga_terkini * isi) : data.harga_terkini,
+              )}
               className={`${inputClass} max-w-40`}
             />
             <button
@@ -172,6 +238,11 @@ export function RiwayatHargaPanel({
             </button>
             {simpan.isSuccess && <span className="text-sm text-green-600">Tersimpan ✓</span>}
           </div>
+          {pakaiBasisIsi && hargaBaru !== "" && Number(hargaBaru) >= 0 && (
+            <p className="mt-1 text-xs text-stone-500">
+              ≈ {formatRupiah(Number(hargaBaru) / isi)} / {satuan}
+            </p>
+          )}
           <p className="mt-1 text-xs text-stone-500">
             Memperbarui <b>harga acuan</b> — dipakai perkiraan biaya &amp; laba-rugi berikutnya.
           </p>
