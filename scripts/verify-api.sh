@@ -774,8 +774,12 @@ ISI24=$(echo "$B24" | jq -r .isi)
 HB24=$(echo "$B24" | jq -r .harga_beli)
 SALDO24=$(stok_of "$(api "$OWNER" GET /stok)" "baso urat besar")
 
-cek "faktur produksi tanpa pelaksana (worker/supplier) ditolak (400)" "V == 400" \
-  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/produksi/faktur" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"items\":[{\"ingredient_id\":\"$URATB_ID\",\"mode\":\"batch\",\"jumlah\":1}]}")"
+# pelaksana kini OPSIONAL — tanpa worker/supplier faktur tetap dibuat
+# (pelaksana terisi otomatis saat Mulai Kerjakan; lihat §122)
+FKNP24=$(api "$OWNER" POST /produksi/faktur "{\"items\":[{\"ingredient_id\":\"$URATB_ID\",\"mode\":\"batch\",\"jumlah\":1}]}")
+cek "faktur produksi tanpa pelaksana → boleh dibuat" "V == 1" \
+  "$(echo "$FKNP24" | jq '(.faktur_id!=null)|if . then 1 else 0 end')"
+api "$OWNER" DELETE "/produksi/faktur/$(echo "$FKNP24" | jq -r .faktur_id)" > /dev/null   # bersihkan
 cek "worker_id bukan anggota ditolak (400)" "V == 400" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/produksi/faktur" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"worker_id\":\"00000000-0000-4000-8000-000000000000\",\"items\":[{\"ingredient_id\":\"$URATB_ID\",\"mode\":\"batch\",\"jumlah\":1}]}")"
 
@@ -4476,6 +4480,19 @@ api "$OWNER" POST "/perlengkapan/$P121/masuk" '{"qty":10,"total_harga":20000}' >
 RHP121=$(api "$OWNER" GET "/perlengkapan/$P121/pembelian")
 cek "stat perlengkapan: terendah 1000 / tertinggi 3000 / median 2000" "V == 1" \
   "$(echo "$RHP121" | jq '(.harga_terendah.harga==1000) and (.harga_tertinggi.harga==3000) and (.harga_median==2000) | if . then 1 else 0 end')"
+
+echo "== 122. Faktur produksi tanpa pelaksana → pelaksana otomatis saat Mulai Kerjakan =="
+B122=$(api "$OWNER" POST /bahan '{"nama":"Bahan Produksi Uji 122","harga_beli":0,"isi":10,"satuan":"pcs","pengadaan":"produksi","track_stok":true}' | jq -r .id)
+# tanpa worker_id & supplier_id → BOLEH (dulu 400 "Pelaksana wajib")
+F122=$(api "$OWNER" POST /produksi/faktur "{\"items\":[{\"ingredient_id\":\"$B122\",\"mode\":\"pcs\",\"jumlah\":10}]}")
+F122_ID=$(echo "$F122" | jq -r .faktur_id)
+cek "faktur produksi tanpa pelaksana → dibuat" "V == 1" \
+  "$(echo "$F122" | jq '(.faktur_id!=null)|if . then 1 else 0 end')"
+cek "sebelum dikerjakan: worker_id baris masih kosong" "V == 1" \
+  "$(api "$OWNER" GET "/produksi?per_page=500" | jq --arg f "$F122_ID" '([.rows[]|select(.faktur_id==$f)][0].worker_id==null)|if . then 1 else 0 end')"
+api "$OWNER" POST "/produksi/tahap/$F122_ID" '{"ke":"dikerjakan"}' > /dev/null
+cek "Mulai Kerjakan: pelaksana terisi otomatis dari aktornya" "V == 1" \
+  "$(api "$OWNER" GET "/produksi?per_page=500" | jq --arg f "$F122_ID" '[.rows[]|select(.faktur_id==$f)][0] | (.worker_id!=null) and (.dikerjakan_oleh!=null) | if . then 1 else 0 end')"
 # harga per isi/kemasan: item riwayat bawa isi + satuan_beli (mis. 1 kg = 1000 gram)
 B121K=$(api "$OWNER" POST /bahan '{"nama":"Bahan Isi Uji 121","harga_beli":28000,"isi":1000,"satuan":"gram","satuan_beli":"kg","pengadaan":"beli","track_stok":true}' | jq -r .id)
 cek "riwayat harga bahan: item bawa isi 1000 + satuan_beli kg (harga per isi 28000)" "V == 1" \

@@ -206,17 +206,17 @@ export function useCabangData(fokus?: "produksi" | "beli"): {
   // (faktur/shift sebelum pembagian divisi) tetap bisa dibuka & diselesaikan.
   const aktif = cabang.filter((b) => b.is_active);
   const adaCk = aktif.some((b) => b.tipe === "central_kitchen");
-  // Produksi bahan baku = urusan Central Kitchen; BELI boleh juga langsung di
-  // cabang store (belanja mendesak cabang — barang Tiba langsung masuk stok
-  // cabang itu). Halaman lain (stok, kasir, meja, penerimaan) berbasis store.
-  // Tanpa CK, keduanya jatuh ke daftar store agar tetap bisa dibuat.
+  // Produksi bahan baku default di Central Kitchen tapi boleh dibukukan di
+  // cabang store (produksi lokal — hasil langsung masuk stok cabang itu);
+  // BELI juga boleh langsung di cabang (belanja mendesak — barang Tiba
+  // langsung masuk stok cabang itu). Halaman lain (stok, kasir, meja,
+  // penerimaan) berbasis store. Tanpa CK, jatuh ke daftar store.
   const fokusCk = (fokus === "produksi" || fokus === "beli") && adaCk;
   const utamaTipe = fokusCk ? "central_kitchen" : "store";
   const opsi = fokusCk
     ? [
         ...aktif.filter((b) => b.tipe === "central_kitchen"),
-        // beli: cabang store ikut ditawarkan (beli langsung di cabang)
-        ...(fokus === "beli" ? aktif.filter((b) => b.tipe === "store") : []),
+        ...aktif.filter((b) => b.tipe === "store"),
         ...aktif.filter((b) => b.tipe === "kantor"),
       ]
     : [...aktif.filter((b) => b.tipe !== "kantor"), ...aktif.filter((b) => b.tipe === "kantor")];
