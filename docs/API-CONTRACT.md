@@ -285,7 +285,7 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 - `GET /api/{mod}/dana/:fakturId` — res: `{ rows: [{id,tipe,nominal,catatan,oleh,waktu}], total }` — error: **404**
 - `POST /api/{mod}/konfirmasi/:fakturId` — res: `{ ok, jumlah_baris }` — error: **404** tak ada / sudah dikonfirmasi
 - `GET /api/{mod}/log/:fakturId` — res: `{ rows: [{id,aksi,detail,oleh,waktu}] }` — error: **404**
-- `POST /api/pembelian/laporan-harga/:fakturId` — **[owner/admin]**, **beli saja** (produksi → **400**) — req: `{ items: [{id:uuid, total_harga:number(≥0)}] (min1) }` — res: `{ ok, jumlah }` — error: **400**, **404**
+- `POST /api/pembelian/laporan-harga/:fakturId` — **[owner/admin]**, **beli saja** (produksi → **400**) — req: `{ items: [{id:uuid, total_harga:number(≥0)}] (min1) }` — res: `{ ok, jumlah }` — error: **400**, **404**. Selain memperbarui `total_harga` baris (harga riil utk HPP FIFO/resep), harga acuan tiap bahan yang dilaporkan (`harga_beli`) disegarkan ke **median** harga/satuan seluruh lot beli dikonfirmasi yang berharga (acuan RAB; fallback harga baris dilaporkan bila belum ada lot berharga).
 - `POST /api/{mod}` — req `TambahStokBody`: `{ branch_id?:uuid, ingredient_id:uuid, qty?:number(>0), batch:bool=false, total_harga?:number(≥0)|null, catatan? }` (refine: `batch` ATAU `qty` wajib) — res: **201** row production + `{ bahan }` — error: **400**, **404**
 - `GET /api/{mod}` — query: `branch_id?` (atau `all`), `dari?`, `sampai?`, `tanggal?`, `page?` (default 1), `per_page?` (default 20, maks 200) — res: `{ rows, total, page, per_page, total_pengeluaran }` (tiap row memuat `rencana_id` + `permintaan_nomor` (PM-xxxx) bila faktur lahir dari permintaan Tambah Stok dari Menu; juga `exp_date` (tanggal kedaluwarsa lot — terisi saat baris masuk stok; NULL utk transfer stok/kirim-hasil karena lot asal tak diketahui) dan `masa_simpan_hari` master bahan)
 - `PATCH /api/{mod}/faktur/:key` — req `FakturEditBody`: `{ password: string (wajib), supplier_id?:uuid|null, no_faktur?|null (max60), catatan?|null, storage_location_id?:uuid|null, worker_id?:uuid|null, prod_date?: "YYYY-MM-DD" }` — res: `{ ok, jumlah_baris }` — error: **401** password salah, **400** supplier/storage invalid, **404**
@@ -1880,6 +1880,14 @@ export interface RiwayatHargaLot {
   nomor: string | null;
 }
 
+/** Titik harga ekstrem riwayat pembelian: nilainya berapa & kapan terjadi. */
+export interface HargaEkstrem {
+  /** harga per satuan */
+  harga: number;
+  /** tanggal lot pembelian (YYYY-MM-DD) */
+  tanggal: string;
+}
+
 /**
  * Riwayat harga beli satu barang: daftar lot pembelian + harga terkini &
  * rata-rata tertimbang. Dipakai kartu "Riwayat Harga" (bahan baku & perlengkapan)
@@ -1891,6 +1899,16 @@ export interface RiwayatHargaDto {
   harga_terkini: number;
   /** rata-rata tertimbang per satuan dari lot berharga (null bila belum ada) */
   harga_rata: number | null;
+  /** harga per satuan terendah dari lot berharga + kapan (null bila belum ada) */
+  harga_terendah: HargaEkstrem | null;
+  /** harga per satuan tertinggi dari lot berharga + kapan (null bila belum ada) */
+  harga_tertinggi: HargaEkstrem | null;
+  /**
+   * median harga per satuan dari lot berharga (null bila belum ada) — dasar
+   * HARGA ACUAN utk RAB beli bahan baku (disinkron saat Laporan Harga); harga
+   * riil tiap pembelian tetap tercatat per lot utk HPP FIFO/resep.
+   */
+  harga_median: number | null;
   /** jumlah lot pembelian tercatat */
   jumlah_pembelian: number;
   lots: RiwayatHargaLot[];

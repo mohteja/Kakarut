@@ -11,6 +11,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import type { RiwayatHargaDto, RiwayatHargaLot } from "@kakarut/shared";
+import { statistikHargaLots } from "../../lib/harga-stats";
 import { db } from "../../db/client";
 import {
   dokumenNomor,
@@ -147,6 +148,7 @@ async function riwayatHargaPerlengkapan(
     item: { id: item.id, nama: item.nama, satuan: item.satuan },
     harga_terkini: item.hargaBeli,
     harga_rata: sumQty > 0 ? Math.round((sumHarga / sumQty) * 100) / 100 : null,
+    ...statistikHargaLots(lots),
     jumlah_pembelian: lots.length,
     lots,
   };

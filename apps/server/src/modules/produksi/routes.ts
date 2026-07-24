@@ -6,6 +6,7 @@ import { Hono, type Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import type { JenisPengadaan } from "@kakarut/shared";
+import { median } from "../../lib/harga-stats";
 import { db } from "../../db/client";
 import {
   branches,
@@ -1582,8 +1583,9 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
     /**
      * LAPORAN HARGA faktur belanja: catat harga riil yang dibayar per baris
      * (setelah barang dibeli/dikirim) → total_harga baris diperbarui + harga
-     * beli acuan tiap bahan disegarkan (dari harga/satuan terakhir). Fondasi
-     * hitung laba-rugi FIFO/rata-rata. Khusus jalur BELI. owner/admin.
+     * beli acuan tiap bahan disegarkan ke MEDIAN riwayat pembelian (acuan RAB;
+     * harga riil per lot tetap dipakai HPP FIFO/resep). Khusus jalur BELI.
+     * owner/admin.
      */
     .post(
       "/laporan-harga/:fakturId",
@@ -1640,7 +1642,6 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         const target = new Map(items.map((it) => [it.id, it.total_harga]));
         await db.transaction(async (tx) => {
           for (const [id, totalHarga] of target) {
-            const b = byId.get(id)!;
             await tx
               .update(productions)
               .set({
@@ -1652,15 +1653,45 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
               .where(
                 and(eq(productions.id, id), eq(productions.companyId, auth.company_id!)),
               );
-            // segarkan harga beli acuan bahan: harga/satuan × isi (per kemasan)
-            if (b.qty > 0) {
-              const hargaBeli = Math.round((totalHarga / b.qty) * b.isi);
+          }
+          // Segarkan HARGA ACUAN tiap bahan yang dilaporkan ke MEDIAN riwayat
+          // pembelian (semua lot beli dikonfirmasi yang berharga, termasuk yang
+          // barusan diperbarui) — acuan dipakai RAB belanja berikutnya; harga
+          // riil per lot tetap tercatat utk HPP FIFO/resep. Fallback bila belum
+          // ada lot dikonfirmasi berharga: harga baris yang dilaporkan.
+          const perBahan = new Map<string, { isi: number; fallback: number | null }>();
+          for (const [id, totalHarga] of target) {
+            const b = byId.get(id)!;
+            const sebelumnya = perBahan.get(b.ingredientId);
+            perBahan.set(b.ingredientId, {
+              isi: b.isi,
+              fallback: b.qty > 0 ? totalHarga / b.qty : (sebelumnya?.fallback ?? null),
+            });
+          }
+          for (const [ingredientId, info] of perBahan) {
+            const lotRows = await tx
+              .select({ qty: productions.qty, totalHarga: productions.totalHarga })
+              .from(productions)
+              .where(
+                and(
+                  eq(productions.companyId, auth.company_id!),
+                  eq(productions.ingredientId, ingredientId),
+                  eq(productions.tipe, "beli"),
+                  eq(productions.status, "dikonfirmasi"),
+                  isNull(productions.deletedAt),
+                ),
+              );
+            const hargaSatuan = lotRows
+              .filter((l) => l.totalHarga != null && l.qty > 0)
+              .map((l) => Math.round((l.totalHarga! / l.qty) * 100) / 100);
+            const acuan = median(hargaSatuan) ?? info.fallback;
+            if (acuan != null) {
               await tx
                 .update(ingredients)
-                .set({ hargaBeli, updatedAt: new Date() })
+                .set({ hargaBeli: Math.round(acuan * info.isi), updatedAt: new Date() })
                 .where(
                   and(
-                    eq(ingredients.id, b.ingredientId),
+                    eq(ingredients.id, ingredientId),
                     eq(ingredients.companyId, auth.company_id!),
                   ),
                 );

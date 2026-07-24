@@ -1511,6 +1511,14 @@ export interface RiwayatHargaLot {
   nomor: string | null;
 }
 
+/** Titik harga ekstrem riwayat pembelian: nilainya berapa & kapan terjadi. */
+export interface HargaEkstrem {
+  /** harga per satuan */
+  harga: number;
+  /** tanggal lot pembelian (YYYY-MM-DD) */
+  tanggal: string;
+}
+
 /**
  * Riwayat harga beli satu barang: daftar lot pembelian + harga terkini &
  * rata-rata tertimbang. Dipakai kartu "Riwayat Harga" (bahan baku & perlengkapan)
@@ -1522,6 +1530,16 @@ export interface RiwayatHargaDto {
   harga_terkini: number;
   /** rata-rata tertimbang per satuan dari lot berharga (null bila belum ada) */
   harga_rata: number | null;
+  /** harga per satuan terendah dari lot berharga + kapan (null bila belum ada) */
+  harga_terendah: HargaEkstrem | null;
+  /** harga per satuan tertinggi dari lot berharga + kapan (null bila belum ada) */
+  harga_tertinggi: HargaEkstrem | null;
+  /**
+   * median harga per satuan dari lot berharga (null bila belum ada) — dasar
+   * HARGA ACUAN utk RAB beli bahan baku (disinkron saat Laporan Harga); harga
+   * riil tiap pembelian tetap tercatat per lot utk HPP FIFO/resep.
+   */
+  harga_median: number | null;
   /** jumlah lot pembelian tercatat */
   jumlah_pembelian: number;
   lots: RiwayatHargaLot[];
