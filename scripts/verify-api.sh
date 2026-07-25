@@ -4704,6 +4704,28 @@ cek "divisi kembali ke kitchen → bar ditolak 400 (simetri)" "V == 400" \
   "$(api "$OWNER" PUT "/bahan/$BB129" '{"divisi_produksi":"kitchen"}' > /dev/null; status_code_body "$TBAR" POST /produksi/faktur "{\"worker_id\":\"$UBAR_ID\",\"items\":[{\"ingredient_id\":\"$BB129\",\"mode\":\"pcs\",\"jumlah\":4}]}")"
 api "$OWNER" PUT "/bahan/$BB129" '{"divisi_produksi":"bar"}' > /dev/null
 
+echo "== 130. Daftar produksi per divisi + badge divisi utk manajemen =="
+# Bar tidak melihat faktur produksi resep divisi kitchen (dan sebaliknya) di
+# GET /produksi — daftar & badge nav hanya pekerjaan divisinya. Owner tetap
+# melihat semua, kini dengan divisi_produksi per baris (badge Kitchen/Bar).
+# Konteks §129: BB129 (sirup, divisi bar) sudah punya faktur bar FK129;
+# buat faktur kitchen utk BK129 (divisi kitchen) sebagai pembanding.
+FK130=$(api "$TKIT" POST /produksi/faktur "{\"worker_id\":\"$U107_ID\",\"items\":[{\"ingredient_id\":\"$BK129\",\"mode\":\"pcs\",\"jumlah\":3}]}" | jq -r .faktur_id)
+cek "dasar uji: kitchen buat faktur divisi kitchen" "V == 1" \
+  "$([ -n "$FK130" ] && [ "$FK130" != "null" ] && echo 1 || echo 0)"
+cek "owner: baris faktur membawa divisi_produksi" "V == 1" \
+  "$(api "$OWNER" GET "/produksi?branch_id=$CB46_ID&per_page=500" | jq --arg f "$FK130" '[.rows[]|select(.faktur_id==$f)][0].divisi_produksi=="kitchen"|if . then 1 else 0 end')"
+cek "owner: melihat faktur kitchen DAN bar sekaligus" "V == 1" \
+  "$(api "$OWNER" GET "/produksi?branch_id=$CB46_ID&per_page=500" | jq --arg a "$FK130" --arg b "$FK129" '(([.rows[]|select(.faktur_id==$a)]|length) > 0 and ([.rows[]|select(.faktur_id==$b)]|length) > 0)|if . then 1 else 0 end')"
+cek "bar: faktur divisi kitchen TIDAK tampil" "V == 0" \
+  "$(api "$TBAR" GET "/produksi?per_page=500" | jq --arg f "$FK130" '[.rows[]|select(.faktur_id==$f)]|length')"
+cek "bar: faktur divisinya sendiri tetap tampil" "V == 1" \
+  "$(api "$TBAR" GET "/produksi?per_page=500" | jq --arg f "$FK129" '[.rows[]|select(.faktur_id==$f)]|length > 0|if . then 1 else 0 end')"
+cek "kitchen: faktur divisi bar TIDAK tampil" "V == 0" \
+  "$(api "$TKIT" GET "/produksi?per_page=500" | jq --arg f "$FK129" '[.rows[]|select(.faktur_id==$f)]|length')"
+cek "kitchen: faktur divisinya sendiri tetap tampil" "V == 1" \
+  "$(api "$TKIT" GET "/produksi?per_page=500" | jq --arg f "$FK130" '[.rows[]|select(.faktur_id==$f)]|length > 0|if . then 1 else 0 end')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

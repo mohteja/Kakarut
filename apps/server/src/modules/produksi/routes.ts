@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { zValidator } from "@hono/zod-validator";
-import { and, asc, eq, gte, inArray, isNull, lte, or, sql } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNull, lte, ne, notInArray, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Hono, type Context } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -1925,6 +1925,31 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
       if (satuHari) conds.push(eq(productions.prodDate, satuHari));
       if (dari) conds.push(gte(productions.prodDate, dari));
       if (sampai) conds.push(lte(productions.prodDate, sampai));
+      // Role KITCHEN/BAR hanya melihat pekerjaan DIVISINYA: baris produksi
+      // cabang milik divisi lain disembunyikan (bar tak melihat resep kitchen,
+      // dan sebaliknya). Baris lain (kiriman/bahan CK) tetap tampil — hanya
+      // resep cabang yang berdivisi. Berlaku juga utk hitungan badge nav.
+      // Dipakai di ketiga query (ringkas, kunci halaman, baris) agar faktur
+      // campuran divisi pun hanya menampilkan baris divisinya sendiri.
+      const condDivisi =
+        auth.role === "kitchen" || auth.role === "bar"
+          ? [
+              notInArray(
+                productions.ingredientId,
+                db
+                  .select({ id: ingredients.id })
+                  .from(ingredients)
+                  .where(
+                    and(
+                      eq(ingredients.companyId, auth.company_id!),
+                      eq(ingredients.produksiDi, "cabang"),
+                      ne(ingredients.divisiProduksi, auth.role),
+                    ),
+                  ),
+              ),
+            ]
+          : [];
+      conds.push(...condDivisi);
 
       const keyExpr = sql<string>`COALESCE(${productions.fakturId}::text, ${productions.id}::text)`;
 
@@ -1968,6 +1993,9 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         // exp lot (terisi saat masuk stok) + masa simpan master (default form Tiba)
         exp_date: productions.expDate,
         masa_simpan_hari: ingredients.masaSimpanHari,
+        // lokasi + divisi produksi resep (badge Kitchen/Bar utk produksi cabang)
+        produksi_di: ingredients.produksiDi,
+        divisi_produksi: ingredients.divisiProduksi,
         faktur_id: productions.fakturId,
         no_faktur: productions.noFaktur,
         // nomor dokumen otomatis (PB-/PR-) — sama untuk semua baris satu faktur
@@ -2050,6 +2078,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
                 and(
                   eq(productions.companyId, auth.company_id!),
                   ...condCabang,
+                  ...condDivisi,
                   eq(productions.tipe, tipe),
                   isNull(productions.deletedAt),
                   inArray(keyExpr, keys),

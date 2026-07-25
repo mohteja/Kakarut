@@ -413,7 +413,23 @@ export function ResepPage() {
                     }`}
                   >
                     <div className="flex items-baseline justify-between gap-2">
-                      <span className="text-sm font-semibold">{b.nama}</span>
+                      <span className="flex min-w-0 items-baseline gap-1.5">
+                        <span className="truncate text-sm font-semibold">{b.nama}</span>
+                        {/* divisi pelaksana resep produksi cabang (kitchen vs bar) */}
+                        {b.produksi_di === "cabang" && (
+                          <span
+                            className={`shrink-0 rounded px-1 py-0.5 text-[10px] font-bold ${
+                              aktif
+                                ? "bg-white/25 text-white"
+                                : b.divisi_produksi === "bar"
+                                  ? "bg-cyan-100 text-cyan-800"
+                                  : "bg-amber-100 text-amber-800"
+                            }`}
+                          >
+                            {b.divisi_produksi === "bar" ? "🍹 Bar" : "🍳 Kitchen"}
+                          </span>
+                        )}
+                      </span>
                       {/* harga hanya untuk owner/admin — tim cukup lihat resep & takaran */}
                       {bolehUbah && (
                         <span className="shrink-0 text-sm font-semibold tabular-nums">
