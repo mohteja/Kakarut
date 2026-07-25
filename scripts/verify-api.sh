@@ -4726,6 +4726,44 @@ cek "kitchen: faktur divisi bar TIDAK tampil" "V == 0" \
 cek "kitchen: faktur divisinya sendiri tetap tampil" "V == 1" \
   "$(api "$TKIT" GET "/produksi?per_page=500" | jq --arg f "$FK130" '[.rows[]|select(.faktur_id==$f)]|length > 0|if . then 1 else 0 end')"
 
+echo "== 131. Cara masak resep: langkah berfoto + foto hasil/packing + akses staf =="
+# Resep produksi kini punya CARA MASAK: langkah berurutan (teks + foto proses
+# opsional) di tabel ingredient_steps, plus foto bahan jadi & foto packing di
+# master bahan. Tulis: owner/admin (replace-whole-list, urutan array = urutan
+# langkah). Baca: semua pelaksana produksi (kitchen/bar/tim), lintas divisi.
+cek "owner PUT 2 langkah → daftar kembali (length 2)" "V == 2" \
+  "$(api "$OWNER" PUT "/bahan/$BB129/langkah" '{"langkah":[{"teks":"Rebus air sampai mendidih"},{"teks":"Tuang sirup lalu aduk","foto_url":"/uploads/companies/x/resep/uji131.jpg"}]}' | jq length)"
+cek "GET langkah: urut sesuai kiriman + foto terbawa" "V == 1" \
+  "$(api "$OWNER" GET "/bahan/$BB129/langkah" | jq '(.[0].teks=="Rebus air sampai mendidih" and .[1].foto_url=="/uploads/companies/x/resep/uji131.jpg")|if . then 1 else 0 end')"
+cek "bar baca langkah → 200" "V == 200" "$(status_code "$TBAR" GET "/bahan/$BB129/langkah")"
+cek "kitchen baca langkah divisi bar → 200 (baca lintas divisi boleh)" "V == 200" \
+  "$(status_code "$TKIT" GET "/bahan/$BB129/langkah")"
+cek "kitchen PUT langkah → 403" "V == 403" \
+  "$(status_code_body "$TKIT" PUT "/bahan/$BB129/langkah" '{"langkah":[]}')"
+cek "PUT urutan dibalik → replace total (langkah pertama berganti)" "V == 1" \
+  "$(api "$OWNER" PUT "/bahan/$BB129/langkah" '{"langkah":[{"teks":"Tuang sirup lalu aduk"},{"teks":"Rebus air sampai mendidih"}]}' | jq '.[0].teks=="Tuang sirup lalu aduk"|if . then 1 else 0 end')"
+cek "PUT 1 langkah → sisa 1 (bukan digabung)" "V == 1" \
+  "$(api "$OWNER" PUT "/bahan/$BB129/langkah" '{"langkah":[{"teks":"Campur semua lalu simpan dingin"}]}' | jq length)"
+cek "PUT langkah bahan jalur beli → 400" "V == 400" \
+  "$(status_code_body "$OWNER" PUT "/bahan/$PLASTIK_ID/langkah" '{"langkah":[{"teks":"x"}]}')"
+cek "PUT langkah id asing → 404" "V == 404" \
+  "$(status_code_body "$OWNER" PUT "/bahan/00000000-0000-0000-0000-000000000000/langkah" '{"langkah":[]}')"
+cek "teks 1001 karakter → 400 (validasi)" "V == 400" \
+  "$(status_code_body "$OWNER" PUT "/bahan/$BB129/langkah" "$(python3 -c "import json;print(json.dumps({'langkah':[{'teks':'x'*1001}]}))")")"
+cek "31 langkah → 400 (maks 30)" "V == 400" \
+  "$(status_code_body "$OWNER" PUT "/bahan/$BB129/langkah" "$(python3 -c "import json;print(json.dumps({'langkah':[{'teks':'l'} for _ in range(31)]}))")")"
+cek "PUT /bahan foto hasil+packing → memantul di DTO" "V == 1" \
+  "$(api "$OWNER" PUT "/bahan/$BB129" '{"foto_hasil_url":"/uploads/companies/x/resep/hasil131.jpg","foto_packing_url":"/uploads/companies/x/resep/packing131.jpg"}' | jq '(.foto_hasil_url=="/uploads/companies/x/resep/hasil131.jpg" and .foto_packing_url=="/uploads/companies/x/resep/packing131.jpg")|if . then 1 else 0 end')"
+cek "GET /bahan?ringkas=1: baris membawa foto_hasil_url (thumbnail grid)" "V == 1" \
+  "$(api "$OWNER" GET "/bahan?ringkas=1" | jq --arg i "$BB129" '[.[]|select(.id==$i)][0].foto_hasil_url=="/uploads/companies/x/resep/hasil131.jpg"|if . then 1 else 0 end')"
+# bucket upload "resep": tanpa allowlist server, tujuan asing diam-diam jadi
+# "menu" — cek URL benar-benar berprefix /resep/ (jaring regresi koersi).
+PNG131=$(mktemp --suffix=.png)
+printf 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==' | base64 -d > "$PNG131"
+URL131=$(curl -s -X POST "$BASE/api/upload?tujuan=resep" -H "Authorization: Bearer $OWNER" -F "file=@$PNG131;type=image/png" | jq -r '.url // ""')
+cek "upload tujuan=resep → tersimpan di bucket /resep/" "V == 1" \
+  "$(echo "$URL131" | grep -q '/resep/' && echo 1 || echo 0)"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

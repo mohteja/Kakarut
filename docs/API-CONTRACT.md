@@ -228,10 +228,10 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 ## 6. `/api/bahan` — Bahan baku (`modules/bahan/routes.ts`)
 
 - `GET /api/bahan` — [any] — query: `ringkas?=1` (varian ringan untuk halaman picker/editor: lewati agregasi supplier & rak — `supplier_utama` selalu `null`, `jumlah_supplier` selalu `0`, `rak_lokasi` selalu `[]`; kolom lain termasuk `produksi_branch_ids` tetap terisi) · `arsip?=1` ([owner/admin] daftar bahan TERARSIP/nonaktif — `is_active=false`; bentuk ringkas; dipakai tab 🗄 Arsip halaman Resep — **403** peran lain) — res: `BahanDto[]`
-- `POST /api/bahan` — [owner/admin] — req `BahanBody`: `{ slug?, kode?|null (max20), nama: string, harga_beli: number(≥0), isi: number(>0), satuan: string="pcs" (max20), satuan_beli?|null, track_stok: bool=true, stok_minimum: number(≥0)=0, stok_minimum_toko: number(≥0)=0, overhead_x: number(>0,≤1000)=1, kategori: string="lain" (max30), pengadaan: "produksi"|"beli"="beli", produksi_di?: "ck"|"cabang"="ck" (lokasi produksi bahan jalur produksi: Central Kitchen atau cabang/kitchen toko), produksi_branch_ids?: uuid[]=[] (cabang PRODUSEN saat produksi_di="cabang"; kosong = semua cabang store; wajib cabang store aktif → **400** bila bukan; diabaikan/dikosongkan saat produksi_di="ck"), divisi_produksi?: "kitchen"|"bar"="kitchen" (divisi yang MEMPRODUKSI saat produksi_di="cabang": role kitchen hanya boleh memproduksi resep divisi kitchen, role bar hanya divisi bar — silang divisi ditolak **400**; tak bermakna utk produksi_di="ck"), catatan?|null, is_packaging: bool=false, is_complement: bool=false, boleh_eceran: bool=false, min_beli: number(≥0)=0, masa_simpan_hari: int(0..3650)=0 (umur layak pakai setelah masuk stok — dasar `exp_date` otomatis lot; 0 = tak diatur), lead_time_hari: int(0..365)=0 (beli = lama pesanan datang; produksi = lama proses — dasar "pesan/buat jauh-jauh hari") }` — res: **201** `BahanDto` (atau **200** bila mereaktivasi slug yang di-soft-delete) — error: **409** bahan aktif sudah ada
+- `POST /api/bahan` — [owner/admin] — req `BahanBody`: `{ slug?, kode?|null (max20), nama: string, harga_beli: number(≥0), isi: number(>0), satuan: string="pcs" (max20), satuan_beli?|null, track_stok: bool=true, stok_minimum: number(≥0)=0, stok_minimum_toko: number(≥0)=0, overhead_x: number(>0,≤1000)=1, kategori: string="lain" (max30), pengadaan: "produksi"|"beli"="beli", produksi_di?: "ck"|"cabang"="ck" (lokasi produksi bahan jalur produksi: Central Kitchen atau cabang/kitchen toko), produksi_branch_ids?: uuid[]=[] (cabang PRODUSEN saat produksi_di="cabang"; kosong = semua cabang store; wajib cabang store aktif → **400** bila bukan; diabaikan/dikosongkan saat produksi_di="ck"), divisi_produksi?: "kitchen"|"bar"="kitchen" (divisi yang MEMPRODUKSI saat produksi_di="cabang": role kitchen hanya boleh memproduksi resep divisi kitchen, role bar hanya divisi bar — silang divisi ditolak **400**; tak bermakna utk produksi_di="ck"), foto_hasil_url?|null (max500, FOTO BAHAN JADI — URL hasil `POST /upload?tujuan=resep`), foto_packing_url?|null (max500, FOTO CARA PACKING), catatan?|null, is_packaging: bool=false, is_complement: bool=false, boleh_eceran: bool=false, min_beli: number(≥0)=0, masa_simpan_hari: int(0..3650)=0 (umur layak pakai setelah masuk stok — dasar `exp_date` otomatis lot; 0 = tak diatur), lead_time_hari: int(0..365)=0 (beli = lama pesanan datang; produksi = lama proses — dasar "pesan/buat jauh-jauh hari") }` — res: **201** `BahanDto` (atau **200** bila mereaktivasi slug yang di-soft-delete) — error: **409** bahan aktif sudah ada
 - `POST /api/bahan/bulk` — [owner/admin] — req: `{ items: BahanBulkRow[] (1..200) }` (tiap row bahan jalur beli) — res: **201** `{ jumlah, bahan: BahanDto[] }`
 - `POST /api/bahan/import` — [owner/admin] — req: `{ mode: "perbarui"|"tambah", items: BahanImportRow[] (1..1000) }` — res: `{ ditambah, diperbarui, dipulihkan, dilewati, gagal: [{nama,alasan}] }`
-- `PUT /api/bahan/:id` — [owner/admin] — req `BahanPatchBody` (semua field opsional, tanpa default) — res: `BahanDto` — error: **404**, **409** (ubah ke "produksi" saat dipakai resep aktif / ubah `isi` saat produksi berjalan)
+- `PUT /api/bahan/:id` — [owner/admin] — req `BahanPatchBody` (semua field opsional, tanpa default; termasuk `foto_hasil_url`/`foto_packing_url`) — res: `BahanDto` — error: **404**, **409** (ubah ke "produksi" saat dipakai resep aktif / ubah `isi` saat produksi berjalan)
 - `GET /api/bahan/:id/supplier` — [any] — res: `BahanSupplierDto[]` — error: **404**
 - `PUT /api/bahan/:id/supplier` — [owner/admin] — req: `{ items: [{supplier_id: uuid, is_utama: bool=false}] (max50) }` — res: `BahanSupplierDto[]` — error: **400** (>1 utama / supplier invalid / bahan tipe produksi), **404**
 - `GET /api/bahan/:id/detail` — [any] — **DETAIL PRODUK** satu bahan: `BahanDetailDto` = `{ bahan: BahanDto, metode_hpp: "average"|"fifo" (pengaturan Perusahaan), total_saldo, saldo_cabang: BahanSaldoCabang[] }` — error: **404** (termasuk bahan nonaktif)
@@ -240,6 +240,8 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 - `GET /api/bahan/resep-ringkas` — [any] — res: `Record<ingredient_id, number>` (jumlah bahan mentah per bahan produksi ber-resep, satu query batch; bahan tanpa komponen tidak muncul — perlakukan absen = 0)
 - `GET /api/bahan/:id/resep` — [any] — res: `BahanResepRow[]` (BOM) — error: **404**
 - `PUT /api/bahan/:id/resep` — [owner/admin] — req: `{ komponen: [{ingredient_id: uuid, qty: number(>0)}] = [] }` — res: `{ ok, jumlah }` — error: **400** (bahan non-produksi / self-ref / input invalid / resep sirkular), **404**, **409** (tipe pengadaan berubah di tengah)
+- `GET /api/bahan/:id/langkah` — [any] — res: `BahanLangkahRow[]` (LANGKAH CARA MASAK urut, tiap langkah `{id, teks, foto_url|null}`; `[]` bila belum diatur/bahan non-produksi) — error: **404** — semua pelaksana produksi (kitchen/bar/tim) boleh baca, lintas divisi
+- `PUT /api/bahan/:id/langkah` — [owner/admin] — req: `{ langkah: [{teks: string(1..1000), foto_url?|null (max500)}] (max 30) = [] }` — **urutan array = urutan langkah** (replace-whole-list; kirim `[]` utk mengosongkan) — res: `BahanLangkahRow[]` terbaru — error: **400** bahan non-produksi/teks invalid, **404**, **409** (pengadaan berubah konkuren)
 - `DELETE /api/bahan/:id` — [owner/admin] — soft delete (= **arsipkan**; hilang dari semua daftar aktif, muncul di `GET /bahan?arsip=1`) — res: `{ ok: true }` — error: **404**, **409** masih dipakai menu aktif atau resep aktif lain
 - `POST /api/bahan/:id/pulihkan` — [owner/admin] — pulihkan bahan terarsip (aktif kembali; resep/BOM lama tetap utuh) — res: `{ ok: true }` — error: **404** bukan bahan terarsip
 
@@ -508,7 +510,7 @@ ADA (validasi = aturan endpoint asli), idempoten per `client_ref`.
 
 ## `/api/upload` — Unggah file (`modules/upload/routes.ts`) — [any]
 
-- `POST /api/upload` — query: `tujuan=logo|bukti|menu` (default `menu`) — req: `multipart/form-data` field **`file`** (image/jpeg | image/png | image/webp, maks 5 MB) — res: **201** `{ url }` — error: **400** (file hilang / format salah / terlalu besar)
+- `POST /api/upload` — query: `tujuan=logo|bukti|menu|resep` (default `menu`; `resep` = foto cara masak/bahan jadi/packing) — req: `multipart/form-data` field **`file`** (image/jpeg | image/png | image/webp, maks 5 MB) — res: **201** `{ url }` — error: **400** (file hilang / format salah / terlalu besar)
 
 ## `/api/karyawan` — Karyawan (`modules/users/routes.ts`) — group guard **[owner/admin]**
 
@@ -750,6 +752,10 @@ export interface BahanDto {
   masa_simpan_hari: number;
   /** LEAD TIME (hari): beli = lama pesanan datang; produksi = lama proses; 0 = tanpa info */
   lead_time_hari: number;
+  /** FOTO BAHAN JADI hasil produksi (halaman Resep) — null = belum diunggah */
+  foto_hasil_url: string | null;
+  /** FOTO CARA PACKING hasil produksi (halaman Resep) — null = belum diunggah */
+  foto_packing_url: string | null;
   is_active: boolean;
   /** nama supplier UTAMA bahan ini (null = belum diatur) */
   supplier_utama: string | null;
@@ -826,6 +832,17 @@ export interface BahanSupplierDto {
   telepon: string | null;
   alamat: string | null;
   is_utama: boolean;
+}
+
+/**
+ * Satu LANGKAH CARA MASAK bahan produksi (urut sesuai sort_order). Dikelola
+ * owner/admin di halaman Resep; dibaca semua pelaksana produksi (kitchen,
+ * bar, tim CK). foto_url = foto proses langkah itu (opsional).
+ */
+export interface BahanLangkahRow {
+  id: string;
+  teks: string;
+  foto_url: string | null;
 }
 
 /**

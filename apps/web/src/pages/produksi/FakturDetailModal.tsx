@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import type { FakturLogRow, JenisPengadaan } from "@kakarut/shared";
 import { ErrorText, Modal, btnSecondary } from "../../components/ui";
 import { api } from "../../lib/api";
@@ -217,6 +218,15 @@ export function FakturDetailModal({
                   <tr key={r.id} className={ditolak ? "bg-red-50/60" : ""}>
                     <td className="px-3 py-1.5 font-medium">
                       {r.bahan}
+                      {/* buka resep + cara masak bahan ini — utk pelaksana produksi */}
+                      {tipe === "produksi" && r.ingredient_id && (
+                        <Link
+                          to={`/resep?bahan=${r.ingredient_id}`}
+                          className="ml-1.5 whitespace-nowrap text-xs font-medium text-orange-600 hover:underline"
+                        >
+                          📖 resep
+                        </Link>
+                      )}
                       {campuranTujuan && (
                         <span
                           className={`ml-1.5 whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-bold ${

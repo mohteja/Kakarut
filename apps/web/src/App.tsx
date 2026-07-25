@@ -203,14 +203,15 @@ export default function App() {
                   <Route path="/resep" element={<ResepPage />} />
                 </>
               )}
-              {/* Kitchen/Bar (divisi produksi cabang store): HANYA Produksi
-                  lokal divisinya — tanpa pembelian/bahan/resep (server
-                  menggerbang juga). */}
+              {/* Kitchen/Bar (divisi produksi cabang store): Produksi lokal
+                  divisinya + Resep (BACA saja: cara masak & takaran) — tanpa
+                  pembelian/bahan (server menggerbang juga). */}
               {(isKitchen || isBar) && (
                 <>
                   <Route path="/produksi" element={<ProduksiPage />} />
                   <Route path="/produksi/baru" element={<FakturFormPage tipe="produksi" />} />
                   <Route path="/produksi/tahap" element={<TahapPage />} />
+                  <Route path="/resep" element={<ResepPage />} />
                 </>
               )}
               {isManajemen && (

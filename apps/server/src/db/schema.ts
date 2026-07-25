@@ -580,6 +580,10 @@ export const ingredients = pgTable(
      * ("pesan/buat jauh-jauh hari, H-n"). 0 = tanpa info.
      */
     leadTimeHari: integer("lead_time_hari").notNull().default(0),
+    /** FOTO BAHAN JADI hasil produksi (diunggah di halaman Resep). */
+    fotoHasilUrl: text("foto_hasil_url"),
+    /** FOTO CARA PACKING hasil produksi (diunggah di halaman Resep). */
+    fotoPackingUrl: text("foto_packing_url"),
     /**
      * WARISAN — jangan dipakai lagi. Dulu "rak simpan default (home)" per bahan
      * yang diatur di form Bahan Baku. Kini rak simpan diatur per cabang di
@@ -617,6 +621,26 @@ export const ingredientProduksiBranches = pgTable(
       .references(() => branches.id, { onDelete: "cascade" }),
   },
   (t) => [primaryKey({ columns: [t.ingredientId, t.branchId] })],
+);
+
+/**
+ * LANGKAH CARA MASAK per BAHAN PRODUKSI: teks berurutan (sort_order) + foto
+ * proses opsional. Dikelola owner/admin di halaman Resep (replace-whole-list);
+ * dibaca semua pelaksana produksi. Tenancy lewat parent (ingredients) —
+ * kepemilikan dicek di route, pola sama dgn ingredient_components.
+ */
+export const ingredientSteps = pgTable(
+  "ingredient_steps",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    ingredientId: uuid("ingredient_id")
+      .notNull()
+      .references(() => ingredients.id, { onDelete: "cascade" }),
+    sortOrder: integer("sort_order").notNull().default(0),
+    teks: text("teks").notNull(),
+    fotoUrl: text("foto_url"),
+  },
+  (t) => [index("ingredient_steps_ingredient_idx").on(t.ingredientId)],
 );
 
 /**

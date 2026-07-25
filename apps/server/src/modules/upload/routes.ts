@@ -14,7 +14,8 @@ const ALLOWED: Record<string, string> = {
 export const uploadRoutes = new Hono<AppEnv>().post("/", async (c) => {
   const auth = c.get("auth");
   const q = c.req.query("tujuan");
-  const tujuan = q === "logo" ? "logo" : q === "bukti" ? "bukti" : "menu";
+  const tujuan =
+    q === "logo" ? "logo" : q === "bukti" ? "bukti" : q === "resep" ? "resep" : "menu";
 
   const body = await c.req.parseBody();
   const file = body.file;

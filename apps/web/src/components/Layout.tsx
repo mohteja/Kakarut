@@ -338,10 +338,15 @@ export function Layout() {
                   hasil masuk stok cabangnya sendiri (bahan "produksi di cabang"
                   sesuai divisinya). */}
               {(isKitchen || isBar) && (
-                <NavLink to="/produksi" className={navFlex}>
-                  <span>🏭 Produksi</span>
-                  {badgeOranye(produksiBelum)}
-                </NavLink>
+                <>
+                  <NavLink to="/produksi" className={navFlex}>
+                    <span>🏭 Produksi</span>
+                    {badgeOranye(produksiBelum)}
+                  </NavLink>
+                  <NavLink to="/resep" className={linkClass}>
+                    🧾 Resep
+                  </NavLink>
+                </>
               )}
               {/* Kasir (jual) & Tutup Kasir: HANYA peran kasir */}
               {isKasir && !dCk && (
