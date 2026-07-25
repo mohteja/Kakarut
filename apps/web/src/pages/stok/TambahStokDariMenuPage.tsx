@@ -30,7 +30,7 @@ import { formatAngka, formatRupiah } from "../../lib/format";
 interface Karyawan {
   user_id: string;
   nama: string;
-  role: "owner" | "admin" | "cashier" | "tim" | "kitchen";
+  role: "owner" | "admin" | "cashier" | "tim" | "kitchen" | "bar";
   is_active: boolean;
 }
 
@@ -618,7 +618,7 @@ export function TambahStokDariMenuPage() {
                     />
                     <BagianKurang
                       tipe="produksi_cabang"
-                      judul={`Di cabang ${store?.nama ?? ""} (kitchen) → langsung masuk stok cabang`}
+                      judul={`Di cabang ${store?.nama ?? ""} (kitchen/bar) → langsung masuk stok cabang`}
                       rows={kurangProduksiCabang}
                     />
                   </KelompokAksi>
@@ -645,7 +645,7 @@ export function TambahStokDariMenuPage() {
                     />
                     <BagianKurang
                       tipe="beli_produksi"
-                      judul={`Beli bahan baku untuk produksi → dikirim ke ${store?.nama ?? "cabang"} (diproduksi kitchen)`}
+                      judul={`Beli bahan baku untuk produksi → dikirim ke ${store?.nama ?? "cabang"} (diproduksi kitchen/bar)`}
                       rows={beliProduksiCabang}
                     />
                   </KelompokAksi>
@@ -891,7 +891,7 @@ export function TambahStokDariMenuPage() {
                   />
                   <BagianKurang
                     tipe="produksi_cabang"
-                    judul={`🏪 Diproduksi di cabang ${store?.nama ?? ""} (kitchen)`}
+                    judul={`🏪 Diproduksi di cabang ${store?.nama ?? ""} (kitchen/bar)`}
                     rows={kurangProduksiCabang}
                   />
                   <BagianKurang
@@ -906,7 +906,7 @@ export function TambahStokDariMenuPage() {
                   />
                   <BagianKurang
                     tipe="beli_produksi"
-                    judul={`🧺 Dibeli — bahan mentah dikirim ke ${store?.nama ?? "cabang"} (kitchen)`}
+                    judul={`🧺 Dibeli — bahan mentah dikirim ke ${store?.nama ?? "cabang"} (kitchen/bar)`}
                     rows={beliProduksiCabang}
                   />
                 </div>

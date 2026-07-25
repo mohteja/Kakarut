@@ -10,6 +10,7 @@ import { db } from "../../db/client";
 import {
   companies,
   ingredients,
+  memberships,
   stockOpnames,
   storageLocationPetugas,
   users,
@@ -254,7 +255,7 @@ export const stokRoutes = new Hono<AppEnv>()
    */
   .post(
     "/waste",
-    requireRole("owner", "admin", "cashier", "tim", "kitchen"),
+    requireRole("owner", "admin", "cashier", "tim", "kitchen", "bar"),
     zValidator(
       "json",
       z.object({
@@ -332,7 +333,7 @@ export const stokRoutes = new Hono<AppEnv>()
    * Menyimpan snapshot saldo sistem + selisih per sesi, qty fisik jadi
    * baseline saldo baru. Persetujuan selisih tetap owner/admin.
    */
-  .post("/opname", requireRole("owner", "admin", "cashier", "tim", "kitchen"), zValidator("json", OpnameBody), async (c) => {
+  .post("/opname", requireRole("owner", "admin", "cashier", "tim", "kitchen", "bar"), zValidator("json", OpnameBody), async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");
     const branchId = body.branch_id
@@ -384,7 +385,9 @@ export const stokRoutes = new Hono<AppEnv>()
     // Batasan petugas: peran terikat cabang (kasir/tim) hanya boleh opname
     // bahan di tempat yang terbuka (belum ada petugas) atau tempat yang
     // ditugaskan padanya. Bahan tanpa tempat boleh siapa saja. Owner/admin
-    // selalu boleh.
+    // selalu boleh. HANYA petugas yang masih ANGGOTA AKTIF yang dihitung —
+    // penugasan basi (akun dihapus/nonaktif/diarsip/dibuat ulang) tidak boleh
+    // mengunci rak diam-diam untuk semua orang.
     if (terikatCabang(auth.role)) {
       const petugasRows = await db
         .select({
@@ -392,6 +395,22 @@ export const stokRoutes = new Hono<AppEnv>()
           userId: storageLocationPetugas.userId,
         })
         .from(storageLocationPetugas)
+        .innerJoin(
+          users,
+          and(
+            eq(storageLocationPetugas.userId, users.id),
+            eq(users.isActive, true),
+            isNull(users.deletedAt),
+          ),
+        )
+        .innerJoin(
+          memberships,
+          and(
+            eq(memberships.userId, users.id),
+            eq(memberships.companyId, auth.company_id!),
+            isNull(memberships.archivedAt),
+          ),
+        )
         .where(eq(storageLocationPetugas.companyId, auth.company_id!));
       const lockedSet = new Set(petugasRows.map((r) => r.locId));
       const mineSet = new Set(

@@ -62,6 +62,7 @@ export async function rencanaDariMenu(
         id: ingredients.id,
         pengadaan: ingredients.pengadaan,
         produksiDi: ingredients.produksiDi,
+        divisiProduksi: ingredients.divisiProduksi,
         hargaBeli: ingredients.hargaBeli,
         bolehEceran: ingredients.bolehEceran,
         minBeli: ingredients.minBeli,
@@ -210,6 +211,7 @@ export async function rencanaDariMenu(
       estimasi_biaya: faktur ? Math.round(faktur.qty * hargaPerUnit) : null,
       lead_time_hari: e?.leadTimeHari ?? 0,
       produksi_di: produksiDi,
+      divisi_produksi: produksiDi === "cabang" ? (e?.divisiProduksi ?? "kitchen") : null,
     });
   }
   // urut: paling kurang dulu, lalu kebutuhan terbesar
@@ -474,6 +476,11 @@ export async function buatFakturDariRencana(
   // sudah di cabang, tak perlu dipisah.
   const prodRowsCabang = workOrder ? prodRows.filter((b) => b.produksi_di === "cabang") : [];
   const prodRowsCk = workOrder ? prodRows.filter((b) => b.produksi_di !== "cabang") : prodRows;
+  // Faktur produksi cabang DIPISAH PER DIVISI (penugasan resep): kitchen dan
+  // bar masing-masing dapat faktur sendiri sehingga tiap divisi hanya
+  // mengerjakan resep divisinya.
+  const prodRowsCabangKitchen = prodRowsCabang.filter((b) => b.divisi_produksi !== "bar");
+  const prodRowsCabangBar = prodRowsCabang.filter((b) => b.divisi_produksi === "bar");
 
   // Pelaksana wajib HANYA untuk produksi di tempat (bukan work-order). Pada
   // work-order, karyawan CK/kitchen cabang menugaskan dirinya saat "Mulai
@@ -584,8 +591,10 @@ export async function buatFakturDariRencana(
 
   const prodFakturId = prodRowsCk.length > 0 ? randomUUID() : null;
   // faktur produksi DI CABANG tujuan (bahan produksi_di "cabang") — terpisah
-  // dari faktur CK; kitchen cabang mengerjakannya (self-assign saat mulai)
-  const prodCabangFakturId = prodRowsCabang.length > 0 ? randomUUID() : null;
+  // dari faktur CK dan TERPISAH PER DIVISI; kitchen/bar cabang mengerjakan
+  // faktur divisinya (self-assign saat mulai)
+  const prodCabangFakturId = prodRowsCabangKitchen.length > 0 ? randomUUID() : null;
+  const prodCabangBarFakturId = prodRowsCabangBar.length > 0 ? randomUUID() : null;
   // SATU faktur belanja per permintaan: produk jadi (bertujuan cabang) DAN
   // bahan produksi (tetap di CK) digabung dalam faktur beli yang sama —
   // pemisahan tujuannya per BARIS (tujuan_branch_id + flag bahan_produksi),
@@ -601,7 +610,7 @@ export async function buatFakturDariRencana(
     ? `Produksi di ${ck!.nama} → stok CK (untuk ${store.nama}) · ${ringkas}`
     : ringkas;
   const adaFakturLahir = Boolean(
-    prodFakturId || prodCabangFakturId || beliFakturId || kirimFakturId,
+    prodFakturId || prodCabangFakturId || prodCabangBarFakturId || beliFakturId || kirimFakturId,
   );
   let nomorPermintaan: string | null = null;
   await db.transaction(async (tx) => {
@@ -627,7 +636,7 @@ export async function buatFakturDariRencana(
     if (prodCabangFakturId) {
       await tx
         .insert(productions)
-        .values(barisFaktur(prodRowsCabang, "produksi", prodCabangFakturId, false, true));
+        .values(barisFaktur(prodRowsCabangKitchen, "produksi", prodCabangFakturId, false, true));
       await terbitkanNomor(tx, params.companyId, "produksi", prodCabangFakturId);
       await catatLogFaktur(tx, {
         companyId: params.companyId,
@@ -636,6 +645,21 @@ export async function buatFakturDariRencana(
         jalur: "produksi",
         aksi: "Permintaan tambah stok",
         detail: `Produksi di ${store.nama} (kitchen cabang) → stok cabang · ${ringkas}`,
+        userId: params.userId,
+      });
+    }
+    if (prodCabangBarFakturId) {
+      await tx
+        .insert(productions)
+        .values(barisFaktur(prodRowsCabangBar, "produksi", prodCabangBarFakturId, false, true));
+      await terbitkanNomor(tx, params.companyId, "produksi", prodCabangBarFakturId);
+      await catatLogFaktur(tx, {
+        companyId: params.companyId,
+        branchId: params.branchId,
+        fakturId: prodCabangBarFakturId,
+        jalur: "produksi",
+        aksi: "Permintaan tambah stok",
+        detail: `Produksi di ${store.nama} (bar cabang) → stok cabang · ${ringkas}`,
         userId: params.userId,
       });
     }

@@ -4,6 +4,7 @@ dist/
 .env
 .env.local
 apps/server/uploads/
+apps/server/backups/
 apps/web/test-results/
 apps/web/playwright-report/
 .DS_Store

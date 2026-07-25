@@ -59,6 +59,8 @@ const BahanBody = z.object({
   pengadaan: z.enum(["produksi", "beli"]).default("beli"),
   /** lokasi produksi bahan jalur produksi: Central Kitchen atau cabang store */
   produksi_di: z.enum(["ck", "cabang"]).default("ck"),
+  /** divisi pelaksana saat produksi_di="cabang": kitchen (default) / bar */
+  divisi_produksi: z.enum(["kitchen", "bar"]).default("kitchen"),
   /** cabang PRODUSEN saat produksi_di="cabang" (kosong = semua cabang store) */
   produksi_branch_ids: z.array(z.string().uuid()).max(100).default([]),
   catatan: z.string().nullish(),
@@ -94,6 +96,7 @@ const BahanPatchBody = z.object({
   kategori: z.string().trim().min(1).max(30).optional(),
   pengadaan: z.enum(["produksi", "beli"]).optional(),
   produksi_di: z.enum(["ck", "cabang"]).optional(),
+  divisi_produksi: z.enum(["kitchen", "bar"]).optional(),
   produksi_branch_ids: z.array(z.string().uuid()).max(100).optional(),
   catatan: z.string().nullish(),
   is_packaging: z.boolean().optional(),
@@ -345,6 +348,7 @@ function toDto(
     kategori: row.kategori,
     pengadaan: row.pengadaan,
     produksi_di: row.produksiDi,
+    divisi_produksi: row.divisiProduksi,
     produksi_branch_ids: produksiBranchIds,
     catatan: row.catatan,
     is_packaging: row.isPackaging,
@@ -531,6 +535,7 @@ export const bahanRoutes = new Hono<AppEnv>()
           kategori: kanonikKategori(kmap, body.kategori),
           pengadaan: body.pengadaan,
           produksiDi: body.produksi_di,
+        divisiProduksi: body.divisi_produksi,
           catatan: body.catatan ?? null,
           isPackaging: body.is_packaging,
           isComplement: body.is_complement,
@@ -564,6 +569,7 @@ export const bahanRoutes = new Hono<AppEnv>()
         kategori: kanonikKategori(kmap, body.kategori),
         pengadaan: body.pengadaan,
         produksiDi: body.produksi_di,
+        divisiProduksi: body.divisi_produksi,
         catatan: body.catatan ?? null,
         isPackaging: body.is_packaging,
         isComplement: body.is_complement,
@@ -788,6 +794,7 @@ export const bahanRoutes = new Hono<AppEnv>()
           isi: ingredients.isi,
           pengadaan: ingredients.pengadaan,
           produksiDi: ingredients.produksiDi,
+          divisiProduksi: ingredients.divisiProduksi,
         })
         .from(ingredients)
         .where(and(eq(ingredients.id, id), eq(ingredients.companyId, auth.company_id!)));
@@ -872,6 +879,7 @@ export const bahanRoutes = new Hono<AppEnv>()
           ...(kategoriBaru !== undefined && { kategori: kategoriBaru }),
           ...(body.pengadaan !== undefined && { pengadaan: body.pengadaan }),
           ...(body.produksi_di !== undefined && { produksiDi: body.produksi_di }),
+          ...(body.divisi_produksi !== undefined && { divisiProduksi: body.divisi_produksi }),
           ...(body.catatan !== undefined && { catatan: body.catatan }),
           ...(body.is_packaging !== undefined && { isPackaging: body.is_packaging }),
           ...(body.is_complement !== undefined && { isComplement: body.is_complement }),

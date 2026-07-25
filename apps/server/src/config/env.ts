@@ -46,6 +46,29 @@ const EnvSchema = z.object({
   R2_BUCKET: z.string().optional(),
   R2_PUBLIC_URL: z.string().optional(),
   UPLOAD_DIR: z.string().optional(),
+  /**
+   * Bucket R2 khusus cadangan (backup) — TERPISAH & PRIVAT dari bucket upload
+   * publik. Bila kosong, cadangan disimpan di bucket upload (R2_BUCKET) dengan
+   * prefix `backups/`. Apa pun pilihannya, cadangan HANYA diunduh lewat
+   * endpoint super admin (server yang meng-stream), tak pernah lewat URL publik.
+   */
+  R2_BACKUP_BUCKET: z.string().optional(),
+
+  /** Pencadangan database otomatis (penjadwal saat boot). Default aktif. */
+  BACKUP_ENABLED: z
+    .string()
+    .default("true")
+    .transform((v) => v !== "false" && v !== "0"),
+  /** Selang cadangan otomatis (jam). Default 24 (harian). Minimum 1. */
+  BACKUP_INTERVAL_HOURS: z.coerce.number().min(1).default(24),
+  /** Retensi: jumlah cadangan sukses terakhir yang disimpan. Default 14. */
+  BACKUP_KEEP: z.coerce.number().min(1).default(14),
+  /**
+   * Folder cadangan saat mode penyimpanan LOKAL (R2 belum diatur). Default
+   * `<uploads>/../backups`. Di kontainer, arahkan ke volume ter-mount agar
+   * tidak hilang saat re-deploy.
+   */
+  BACKUP_DIR: z.string().optional(),
 
   SEED_SUPERADMIN_EMAIL: z.string().default("superadmin@kakarut.id"),
   SEED_SUPERADMIN_PASSWORD: z.string().default("SuperAdmin123!"),

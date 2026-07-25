@@ -1,5 +1,6 @@
 import type {
   BahanKategori,
+  DivisiProduksi,
   JenisPengadaan,
   MenuTipe,
   ProduksiDi,
@@ -73,6 +74,40 @@ export interface SmtpSettingsDto {
   provider: "smtp" | "resend" | "none";
 }
 
+/** Satu baris riwayat pencadangan database (panel super admin). */
+export interface BackupRunDto {
+  id: string;
+  waktu: string;
+  pemicu: "otomatis" | "manual";
+  status: "berjalan" | "sukses" | "gagal";
+  storage_mode: "r2" | "local";
+  /** kunci objek / nama berkas cadangan; null bila gagal sebelum tersimpan */
+  object_key: string | null;
+  ukuran_bytes: number | null;
+  jumlah_tabel: number | null;
+  jumlah_baris: number | null;
+  durasi_ms: number | null;
+  error: string | null;
+  /** true = berkas tersedia untuk diunduh */
+  bisa_unduh: boolean;
+}
+
+/** Status + konfigurasi pencadangan (GET /admin/sistem/backup). */
+export interface BackupStatusDto {
+  /** pencadangan otomatis (penjadwal) aktif */
+  aktif: boolean;
+  /** selang cadangan otomatis (jam) */
+  selang_jam: number;
+  /** retensi: jumlah cadangan sukses terakhir yang disimpan */
+  simpan: number;
+  /** target penyimpanan cadangan */
+  storage_mode: "r2" | "local";
+  /** waktu cadangan sukses terakhir (ISO) atau null */
+  terakhir_sukses: string | null;
+  /** riwayat 50 cadangan terakhir (terbaru dulu) */
+  riwayat: BackupRunDto[];
+}
+
 /** Satu entri riwayat kegiatan pada faktur (jejak ubah tahap). */
 export interface FakturLogRow {
   id: string;
@@ -118,14 +153,21 @@ export interface BahanDto {
   pengadaan: JenisPengadaan;
   /**
    * Lokasi produksi bahan jalur "produksi": "ck" (Central Kitchen, default) atau
-   * "cabang" (diproduksi kitchen di cabang store — hasil masuk stok cabang itu).
-   * Diabaikan untuk pengadaan "beli".
+   * "cabang" (diproduksi kitchen/bar di cabang store sesuai `divisi_produksi` —
+   * hasil masuk stok cabang itu). Diabaikan untuk pengadaan "beli".
    */
   produksi_di: ProduksiDi;
   /**
+   * PENUGASAN DIVISI resep saat produksi_di = "cabang": "kitchen" (default)
+   * atau "bar". Role kitchen hanya boleh memproduksi resep divisi kitchen;
+   * role bar hanya resep divisi bar. Diabaikan saat produksi_di = "ck".
+   */
+  divisi_produksi: DivisiProduksi;
+  /**
    * Cabang PRODUSEN saat produksi_di = "cabang": id cabang store yang
-   * kitchen-nya memproduksi bahan ini. KOSONG = semua cabang store. Cabang di
-   * luar daftar dipenuhi lewat jalur CK. Selalu [] untuk produksi_di = "ck".
+   * kitchen/bar-nya (sesuai divisi_produksi) memproduksi bahan ini. KOSONG =
+   * semua cabang store. Cabang di luar daftar dipenuhi lewat jalur CK. Selalu
+   * [] untuk produksi_di = "ck".
    */
   produksi_branch_ids: string[];
   catatan: string | null;
@@ -376,6 +418,11 @@ export interface RencanaBahanRow {
   estimasi_biaya: number | null;
   /** LEAD TIME bahan (hari): pesan/buat jauh-jauh hari (H-n); 0 = tanpa info */
   lead_time_hari: number;
+  /**
+   * DIVISI pelaksana saat produksi_di="cabang" ("kitchen"/"bar") — faktur
+   * produksi cabang dipisah per divisi. null utk jalur lain.
+   */
+  divisi_produksi?: DivisiProduksi | null;
   /** khusus baris BAHAN PRODUKSI: nama bahan jadi yang membutuhkannya */
   untuk?: string | null;
   /**
@@ -655,6 +702,14 @@ export interface PetugasRingkas {
   user_id: string;
   nama: string;
   role: UserRole;
+  /**
+   * true = masih ANGGOTA AKTIF perusahaan (user aktif, belum dihapus,
+   * membership belum diarsip). Petugas non-aktif (akun diarsip/dihapus/
+   * dibuat ulang) DIABAIKAN dalam pembatasan opname — rak tidak terkunci
+   * diam-diam oleh penugasan basi — dan ditandai ⚠ di pengaturan agar
+   * owner menugaskan ulang.
+   */
+  aktif: boolean;
 }
 
 export interface PenyimpananDto {

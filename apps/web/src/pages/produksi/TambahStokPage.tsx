@@ -497,7 +497,7 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
           produksiDiCabang ? (
             <>
               Hasil produksi <b>langsung masuk stok cabang ini</b> saat ditandai <b>✅ Selesai</b>{" "}
-              — tanpa konfirmasi & tanpa lewat CK (kitchen cabang yang produksi).
+              — tanpa konfirmasi & tanpa lewat CK (kitchen/bar cabang yang produksi).
             </>
           ) : (
             <>

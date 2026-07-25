@@ -8,6 +8,7 @@
     "start": "tsx src/index.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate-cli.ts",
+    "db:restore": "tsx src/scripts/restore-backup.ts",
     "seed": "tsx src/seed/index.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"

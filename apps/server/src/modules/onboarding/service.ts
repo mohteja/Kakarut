@@ -8,8 +8,8 @@ import { seedMejaDefault } from "../meja/defaults";
 import { seedUnitsPerusahaan } from "../satuan/service";
 import { resolveKodeKaryawan } from "../users/service";
 
-/** Kasir, tim & kitchen wajib punya cabang (mirror aturan Kelola Karyawan). */
-const WAJIB_CABANG = new Set(["cashier", "tim", "kitchen"]);
+/** Kasir, tim, kitchen & bar wajib punya cabang (mirror aturan Kelola Karyawan). */
+const WAJIB_CABANG = new Set(["cashier", "tim", "kitchen", "bar"]);
 
 function slugDasar(nama: string): string {
   return nama.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "usaha";

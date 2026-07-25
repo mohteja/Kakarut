@@ -251,6 +251,7 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
   const queryClient = useQueryClient();
   const isKasir = auth?.user.role === "cashier";
   const isKitchen = auth?.user.role === "kitchen";
+  const isBar = auth?.user.role === "bar";
   const isManajemen = auth?.user.role === "owner" || auth?.user.role === "admin";
   // Faktur produksi di cabang TOKO (kitchen cabang): hasil masuk stok cabang
   // itu sendiri — bukan CK, tak ada langkah kirim/terima.
@@ -291,8 +292,18 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
   // hanya bahan berlokasi produksi "cabang" DAN (bila daftar cabang produsen
   // diisi) yang memuat cabang itu — server menolak 400 untuk sisanya (role
   // kitchen), jadi saring dari pemilih sekalian.
+  // Resep produksi cabang punya DIVISI (kitchen/bar): role kitchen hanya boleh
+  // memproduksi resep divisi kitchen, role bar hanya divisi bar (server juga
+  // menolak 400) — manajemen bebas memilih keduanya.
+  const cocokDivisi = (b: BahanDto) =>
+    isKitchen
+      ? b.divisi_produksi !== "bar"
+      : isBar
+        ? b.divisi_produksi === "bar"
+        : true;
   const bolehDiStore = (b: BahanDto) =>
     b.produksi_di === "cabang" &&
+    cocokDivisi(b) &&
     ((b.produksi_branch_ids ?? []).length === 0 ||
       (branchId != null && (b.produksi_branch_ids ?? []).includes(branchId)));
   const bahanJalur = (bahan ?? []).filter(
@@ -811,11 +822,11 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
               <>
                 Selesai = <b>langsung masuk stok cabang ini</b> (tanpa konfirmasi, tidak lewat
                 CK).
-                {isKitchen && (
+                {(isKitchen || isBar) && (
                   <>
                     {" "}
-                    Hanya bahan dengan lokasi produksi <b>Cabang</b> (diatur di Resep) yang
-                    tampil di daftar.
+                    Hanya bahan dengan lokasi produksi <b>Cabang</b> divisi{" "}
+                    <b>{isBar ? "Bar" : "Kitchen"}</b> (diatur di Resep) yang tampil di daftar.
                   </>
                 )}
               </>

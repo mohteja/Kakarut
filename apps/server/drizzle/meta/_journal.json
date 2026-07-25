@@ -533,6 +533,20 @@
       "when": 1784908894621,
       "tag": "0075_equal_vivisector",
       "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1784943387124,
+      "tag": "0076_smart_legion",
+      "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1784969492528,
+      "tag": "0077_fuzzy_shriek",
+      "breakpoints": true
     }
   ]
 }

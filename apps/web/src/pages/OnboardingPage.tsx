@@ -14,6 +14,7 @@ const LABEL_ROLE: Record<UserRole, string> = {
   cashier: "Kasir",
   tim: "Tim",
   kitchen: "Kitchen",
+  bar: "Bar",
 };
 
 /**

@@ -63,9 +63,12 @@ const BranchContext = createContext<BranchContextValue | null>(null);
 export function BranchProvider({ children }: { children: ReactNode }) {
   const { auth } = useAuth();
   const { isPro } = useCompanyMode();
-  // kasir, tim & kitchen terkunci ke cabangnya sendiri — server yang menentukan
+  // kasir, tim, kitchen & bar terkunci ke cabangnya sendiri — server yang menentukan
   const isKasir =
-    auth?.user.role === "cashier" || auth?.user.role === "tim" || auth?.user.role === "kitchen";
+    auth?.user.role === "cashier" ||
+    auth?.user.role === "tim" ||
+    auth?.user.role === "kitchen" ||
+    auth?.user.role === "bar";
   const isManajemen = auth?.user.role === "owner" || auth?.user.role === "admin";
   // admin selalu berada di Kantor (pusat) — hanya owner yang boleh ganti lokasi
   // ke cabang/CK. Admin tetap bisa lihat data cabang lewat "cabang data" (drill).

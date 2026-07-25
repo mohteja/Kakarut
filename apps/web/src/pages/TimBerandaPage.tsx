@@ -64,7 +64,8 @@ export function TimBerandaPage() {
 
   const branch = cabang.find((b) => b.id === auth?.user.branch_id);
   const diCk = branch?.tipe === "central_kitchen";
-  const isKitchen = auth?.user.role === "kitchen";
+  // bar = divisi produksi kedua di cabang store — beranda sama dgn kitchen
+  const isKitchen = auth?.user.role === "kitchen" || auth?.user.role === "bar";
 
   const { data: stok } = useQuery({
     queryKey: ["stok", ""],

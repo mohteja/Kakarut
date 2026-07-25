@@ -4593,6 +4593,117 @@ cek "ubah kategori supplier (PATCH)" "V == 1" \
 cek "kosongkan kategori (null) → tanpa kategori" "V == 1" \
   "$(api "$OWNER" PATCH "/supplier/$S126" '{"kategori":null}' | jq '(.kategori==null)|if . then 1 else 0 end')"
 
+echo "== 127. Pencadangan database (super admin) =="
+cek "guard: owner GET /admin/sistem/backup → 403" "V == 403" \
+  "$(status_code "$OWNER" GET /admin/sistem/backup)"
+# Backup manual: bila kebetulan bertepatan dgn cadangan otomatis penjadwal
+# (advisory lock → 409), ulangi beberapa kali.
+BKP=""
+for _ in 1 2 3 4 5; do
+  BKP=$(api "$SA" POST /admin/sistem/backup '{}')
+  if [ "$(echo "$BKP" | jq -r '.status // empty')" = "sukses" ]; then break; fi
+  sleep 2
+done
+cek "backup manual → sukses, tabel>0 & baris>0" "V == 1" \
+  "$(echo "$BKP" | jq '(.status=="sukses") and (.jumlah_tabel>0) and (.jumlah_baris>0) and (.bisa_unduh==true) | if . then 1 else 0 end')"
+BK_ID=$(echo "$BKP" | jq -r .id)
+STAT=$(api "$SA" GET /admin/sistem/backup)
+cek "status backup: aktif + riwayat memuat run tadi" "V == 1" \
+  "$(echo "$STAT" | jq --arg i "$BK_ID" '(.aktif==true) and ([.riwayat[]|select(.id==$i)]|length==1) and (.terakhir_sukses!=null) | if . then 1 else 0 end')"
+BK_TMP=$(mktemp /tmp/kakarut-bk.XXXXXX.gz)
+curl -s -H "Authorization: Bearer $SA" "$BASE/api/admin/sistem/backup/$BK_ID/unduh" -o "$BK_TMP"
+cek "unduh cadangan = gzip valid (magic 1f8b)" "V == 1" \
+  "$(python3 -c "print(1 if open('$BK_TMP','rb').read(2)==b'\x1f\x8b' else 0)")"
+cek "isi arsip memuat tabel companies" "V == 1" \
+  "$(python3 -c "import gzip;print(1 if b'\"tabel\":\"companies\"' in gzip.decompress(open('$BK_TMP','rb').read()) else 0)")"
+rm -f "$BK_TMP"
+cek "hapus cadangan → ok" "V == 1" \
+  "$(api "$SA" DELETE "/admin/sistem/backup/$BK_ID" | jq '.ok==true|if . then 1 else 0 end')"
+cek "setelah hapus: hilang dari riwayat" "V == 0" \
+  "$(api "$SA" GET /admin/sistem/backup | jq --arg i "$BK_ID" '[.riwayat[]|select(.id==$i)]|length')"
+
+echo "== 128. Petugas rak BASI (bukan anggota aktif) diabaikan pembatasan opname =="
+# Latar: penugasan petugas bisa menunjuk akun yang kemudian diarsip/dihapus/
+# dibuat ulang. Dulu rak jadi TERKUNCI diam-diam utk semua orang. Kini petugas
+# non-aktif ditandai aktif=false & diabaikan dalam pembatasan.
+RAK128=$(api "$OWNER" GET "/penyimpanan" | jq -r '[.[] | select(.nama == "Rak Uji")][0].id')
+KBR128=$(api "$OWNER" GET /karyawan | jq -r '[.[] | select(.role == "cashier")][0].branch_id')
+T128A=$(api "$OWNER" POST /karyawan "{\"nama\":\"Petugas Uji128A\",\"email\":\"petugas128a@example.com\",\"password\":\"Petugas128!\",\"role\":\"tim\",\"branch_id\":\"$KBR128\"}" | jq -r .user_id)
+api "$OWNER" POST /karyawan "{\"nama\":\"Petugas Uji128B\",\"email\":\"petugas128b@example.com\",\"password\":\"Petugas128!\",\"role\":\"tim\",\"branch_id\":\"$KBR128\"}" > /dev/null
+T128B_TOK=$(login "petugas128b@example.com" "Petugas128!")
+api "$OWNER" PUT "/penyimpanan/$RAK128/petugas" "{\"user_ids\":[\"$T128A\"]}" > /dev/null
+cek "petugas baru bertanda aktif=true" "V == 1" \
+  "$(api "$OWNER" GET /penyimpanan | jq --arg id "$RAK128" '[.[]|select(.id==$id)][0].petugas | (length==1 and .[0].aktif==true) | if . then 1 else 0 end')"
+cek "tim BUKAN petugas → opname bahan rak itu 403" "V == 403" \
+  "$(status_code_body "$T128B_TOK" POST /stok/opname "{\"items\":[{\"ingredient_id\":\"$PLASTIK_ID\",\"qty\":480}]}")"
+# arsipkan petugas satu-satunya → penugasan BASI: rak tak boleh terkunci diam-diam
+api "$OWNER" PATCH "/karyawan/$T128A" '{"arsip":true}' > /dev/null
+cek "petugas terarsip bertanda aktif=false" "V == 1" \
+  "$(api "$OWNER" GET /penyimpanan | jq --arg id "$RAK128" '[.[]|select(.id==$id)][0].petugas[0].aktif==false | if . then 1 else 0 end')"
+SID128=$(api "$T128B_TOK" POST /stok/opname "{\"items\":[{\"ingredient_id\":\"$PLASTIK_ID\",\"qty\":480}]}" | jq -r '.session_id // empty')
+{ [ -n "$SID128" ]; } && ok "petugas basi diabaikan → tim lain boleh opname lagi" \
+  || gagal "tim lain seharusnya boleh opname (petugas basi diabaikan)"
+api "$OWNER" PUT "/penyimpanan/$RAK128/petugas" '{"user_ids":[]}' > /dev/null
+
+echo "== 129. Role Bar: divisi produksi kedua di cabang store =="
+# Bar = kembaran kitchen utk divisi minuman: terikat cabang store, produksi
+# lokal (hasil masuk stok cabangnya), TANPA /pembelian. Resep produksi cabang
+# kini punya divisi (kitchen|bar): kitchen hanya boleh memproduksi resep
+# divisi kitchen, bar hanya divisi bar — ditegakkan server saat buat faktur.
+# (a) Guard penempatan — sama seperti kitchen (wajib cabang bertipe store).
+cek "buat bar tanpa cabang → 400" "V == 400" \
+  "$(status_code_body "$OWNER" POST /karyawan '{"nama":"B129","email":"bar129@basooopa.id","password":"BarUji129!","role":"bar"}')"
+cek "buat bar di Central Kitchen → 400" "V == 400" \
+  "$(status_code_body "$OWNER" POST /karyawan "{\"nama\":\"B129\",\"email\":\"bar129@basooopa.id\",\"password\":\"BarUji129!\",\"role\":\"bar\",\"branch_id\":\"$CK52_UTAMA\"}")"
+cek "buat bar di Kantor → 400" "V == 400" \
+  "$(status_code_body "$OWNER" POST /karyawan "{\"nama\":\"B129\",\"email\":\"bar129@basooopa.id\",\"password\":\"BarUji129!\",\"role\":\"bar\",\"branch_id\":\"$KANTOR107_ID\"}")"
+api "$OWNER" POST /karyawan "{\"nama\":\"Bar 129\",\"email\":\"bar129@basooopa.id\",\"password\":\"BarUji129!\",\"role\":\"bar\",\"branch_id\":\"$CB46_ID\"}" > /dev/null
+TBAR=$(login bar129@basooopa.id 'BarUji129!')
+UBAR_ID=$(api "$OWNER" GET /karyawan | jq -r '[.[]|select(.email=="bar129@basooopa.id")][0].user_id')
+cek "login bar: role bar + terkunci cabang store" "V == 1" \
+  "$(api "$TBAR" GET /auth/me | jq --arg b "$CB46_ID" '((.user.role=="bar") and (.user.branch_id==$b))|if . then 1 else 0 end')"
+# (b) Gerbang menu: produksi terbuka; pembelian & manajemen tertutup.
+cek "bar GET /produksi → 200" "V == 200" "$(status_code "$TBAR" GET /produksi)"
+cek "bar GET /pembelian → 403 (tanpa Beli)" "V == 403" "$(status_code "$TBAR" GET /pembelian)"
+cek "bar GET /stok → 200" "V == 200" "$(status_code "$TBAR" GET /stok)"
+cek "bar GET /karyawan → 403" "V == 403" "$(status_code "$TBAR" GET /karyawan)"
+# (c) Divisi resep: default kitchen; owner pindahkan ke bar via PUT /bahan.
+BB129=$(api "$OWNER" POST /bahan '{"nama":"sirup uji129","harga_beli":10000,"isi":10,"satuan":"botol","pengadaan":"produksi","kategori":"baso","produksi_di":"cabang"}' | jq -r .id)
+BK129=$(api "$OWNER" POST /bahan '{"nama":"sambal uji129","harga_beli":10000,"isi":10,"satuan":"toples","pengadaan":"produksi","kategori":"baso","produksi_di":"cabang"}' | jq -r .id)
+cek "bahan produksi baru: default divisi_produksi=kitchen" "V == 1" \
+  "$(api "$OWNER" GET /bahan | jq --arg i "$BB129" '[.[]|select(.id==$i)][0].divisi_produksi=="kitchen"|if . then 1 else 0 end')"
+cek "owner set divisi_produksi=bar via PUT /bahan" "V == 1" \
+  "$(api "$OWNER" PUT "/bahan/$BB129" '{"divisi_produksi":"bar"}' | jq '.divisi_produksi=="bar"|if . then 1 else 0 end')"
+# (d) Penegakan divisi saat buat faktur produksi di cabang.
+cek "kitchen produksi resep divisi bar → 400" "V == 400" \
+  "$(status_code_body "$TKIT" POST /produksi/faktur "{\"worker_id\":\"$U107_ID\",\"items\":[{\"ingredient_id\":\"$BB129\",\"mode\":\"pcs\",\"jumlah\":4}]}")"
+cek "bar produksi resep divisi kitchen → 400" "V == 400" \
+  "$(status_code_body "$TBAR" POST /produksi/faktur "{\"worker_id\":\"$UBAR_ID\",\"items\":[{\"ingredient_id\":\"$BK129\",\"mode\":\"pcs\",\"jumlah\":4}]}")"
+# (e) Bar memproduksi resep divisinya: faktur lokal, selesai → stok cabang naik.
+FK129=$(api "$TBAR" POST /produksi/faktur "{\"worker_id\":\"$UBAR_ID\",\"items\":[{\"ingredient_id\":\"$BB129\",\"mode\":\"pcs\",\"jumlah\":4}]}" | jq -r .faktur_id)
+cek "bar buat faktur produksi divisi bar → faktur_id terbit" "V == 1" \
+  "$([ -n "$FK129" ] && [ "$FK129" != "null" ] && echo 1 || echo 0)"
+S129_A=$(api "$OWNER" GET "/stok?branch_id=$CB46_ID" | jq --arg i "$BB129" '[.[]|select(.ingredient_id==$i)][0].saldo // 0')
+api "$TBAR" POST "/produksi/tahap/$FK129" '{"ke":"dikerjakan","paksa":true}' > /dev/null
+api "$TBAR" POST "/produksi/tahap/$FK129" '{"ke":"menunggu"}' > /dev/null
+cek "faktur bar otomatis dikonfirmasi (produksi lokal)" "V == 1" \
+  "$(api "$OWNER" GET "/produksi?branch_id=$CB46_ID&per_page=500" | jq --arg f "$FK129" '([.rows[]|select(.faktur_id==$f)] | (length>0) and all(.[]; .status=="dikonfirmasi")) | if . then 1 else 0 end')"
+S129_B=$(api "$OWNER" GET "/stok?branch_id=$CB46_ID" | jq --arg i "$BB129" '[.[]|select(.ingredient_id==$i)][0].saldo // 0')
+cek "hasil produksi bar masuk stok cabang store (+4)" "abs(V - 4) < 0.001" \
+  "$(python3 -c "print($S129_B - $S129_A)")"
+# (f) Bar tak boleh mengirim hasil lintas cabang (produksi lokal saja).
+FK129B=$(api "$TBAR" POST /produksi/faktur "{\"worker_id\":\"$UBAR_ID\",\"items\":[{\"ingredient_id\":\"$BB129\",\"mode\":\"pcs\",\"jumlah\":4}]}" | jq -r .faktur_id)
+api "$TBAR" POST "/produksi/tahap/$FK129B" '{"ke":"dikerjakan","paksa":true}' > /dev/null
+RID129=$(api "$TBAR" GET "/produksi?per_page=500" | jq -r --arg f "$FK129B" '[.rows[]|select(.faktur_id==$f)][0].id')
+cek "bar kirim lintas cabang (tujuan_branch_id) → 403" "V == 403" \
+  "$(status_code_body "$TBAR" POST "/produksi/tahap/$FK129B" "{\"ke\":\"menunggu\",\"items\":[{\"id\":\"$RID129\",\"qty\":4}],\"tujuan_branch_id\":\"$ST52_ID\"}")"
+# (g) Planner memisahkan faktur produksi cabang per divisi — dua faktur bila
+#     kebutuhan mencakup resep kitchen DAN bar (diuji tak langsung: PUT divisi
+#     kembali ke kitchen → bar ditolak lagi; simetri penegakan).
+cek "divisi kembali ke kitchen → bar ditolak 400 (simetri)" "V == 400" \
+  "$(api "$OWNER" PUT "/bahan/$BB129" '{"divisi_produksi":"kitchen"}' > /dev/null; status_code_body "$TBAR" POST /produksi/faktur "{\"worker_id\":\"$UBAR_ID\",\"items\":[{\"ingredient_id\":\"$BB129\",\"mode\":\"pcs\",\"jumlah\":4}]}")"
+api "$OWNER" PUT "/bahan/$BB129" '{"divisi_produksi":"bar"}' > /dev/null
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

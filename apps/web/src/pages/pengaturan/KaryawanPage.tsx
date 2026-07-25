@@ -24,7 +24,7 @@ interface Karyawan {
   nama: string;
   email: string;
   is_active: boolean;
-  role: "owner" | "admin" | "cashier" | "tim" | "kitchen";
+  role: "owner" | "admin" | "cashier" | "tim" | "kitchen" | "bar";
   branch_id: string | null;
   cabang: string | null;
   employee_code: string | null;
@@ -39,7 +39,7 @@ interface FormState {
   email: string;
   /** saat ubah: kosongkan bila password tidak diganti */
   password: string;
-  role: "owner" | "admin" | "cashier" | "tim" | "kitchen";
+  role: "owner" | "admin" | "cashier" | "tim" | "kitchen" | "bar";
   branch_id: string;
 }
 
@@ -49,9 +49,10 @@ const labelRole = {
   cashier: "Kasir",
   tim: "Tim",
   kitchen: "Kitchen",
+  bar: "Bar",
 } as const;
-/** kasir, tim & kitchen terikat ke satu cabang — lokasi kerja wajib */
-const WAJIB_CABANG = new Set(["cashier", "tim", "kitchen"]);
+/** kasir, tim, kitchen & bar terikat ke satu cabang — lokasi kerja wajib */
+const WAJIB_CABANG = new Set(["cashier", "tim", "kitchen", "bar"]);
 
 /**
  * Dropdown aksi per baris — semua aksi selain QR dikumpulkan di sini agar
@@ -601,7 +602,7 @@ export function KaryawanPage() {
                       branch_id:
                         r === "admin" && kantorId
                           ? kantorId
-                          : r === "kitchen"
+                          : r === "kitchen" || r === "bar"
                             ? (lokasiStore?.id ?? storeDefault)
                             : undangForm.branch_id || storeDefault,
                     });
@@ -611,6 +612,7 @@ export function KaryawanPage() {
                   <option value="cashier">Kasir</option>
                   <option value="tim">Tim / Karyawan</option>
                   <option value="kitchen">Kitchen</option>
+                  <option value="bar">Bar</option>
                   <option value="admin">Admin</option>
                   <option value="owner">Owner</option>
                 </select>
@@ -632,8 +634,9 @@ export function KaryawanPage() {
                         (b) =>
                           b.is_active &&
                           b.tipe !== "kantor" &&
-                          // kitchen hanya boleh ditempatkan di cabang store
-                          (undangForm.role !== "kitchen" || b.tipe === "store"),
+                          // kitchen & bar hanya boleh ditempatkan di cabang store
+                          ((undangForm.role !== "kitchen" && undangForm.role !== "bar") ||
+                            b.tipe === "store"),
                       )
                       .map((b) => (
                         <option key={b.id} value={b.id}>
@@ -733,12 +736,12 @@ export function KaryawanPage() {
                       // Admin dikunci ke Kantor (pusat) bila tersedia; saat pindah
                       // dari admin, lepas kunci Kantor agar peran lain memilih
                       // lokasi sendiri (bukan Kantor yang tak punya POS/stok).
-                      // Kitchen wajib cabang STORE — lokasi non-store dialihkan.
+                      // Kitchen/Bar wajib cabang STORE — lokasi non-store dialihkan.
                       const lokasi = cabang.find((x) => x.id === form.branch_id);
                       const branchPatch =
                         r === "admin" && kantorId
                           ? { branch_id: kantorId }
-                          : r === "kitchen" && lokasi?.tipe !== "store"
+                          : (r === "kitchen" || r === "bar") && lokasi?.tipe !== "store"
                             ? { branch_id: storeDefault }
                             : kantorId && form.branch_id === kantorId
                               ? { branch_id: storeDefault }
@@ -750,6 +753,7 @@ export function KaryawanPage() {
                     <option value="cashier">Kasir</option>
                     <option value="tim">Tim / Karyawan</option>
                     <option value="kitchen">Kitchen</option>
+                    <option value="bar">Bar</option>
                     <option value="admin">Admin</option>
                     <option value="owner">Owner</option>
                   </select>
@@ -777,12 +781,14 @@ export function KaryawanPage() {
                       onChange={(e) => {
                         const b = cabang.find((x) => x.id === e.target.value);
                         // pilih Central Kitchen → peran lapangan otomatis Karyawan
-                        // (tim) — berlaku juga bila peran sebelumnya kitchen.
+                        // (tim) — berlaku juga bila peran sebelumnya kitchen/bar.
                         setForm({
                           ...form,
                           branch_id: e.target.value,
                           ...(b?.tipe === "central_kitchen" &&
-                          (form.role === "cashier" || form.role === "kitchen")
+                          (form.role === "cashier" ||
+                            form.role === "kitchen" ||
+                            form.role === "bar")
                             ? { role: "tim" as const }
                             : {}),
                         });
@@ -795,8 +801,9 @@ export function KaryawanPage() {
                         .filter(
                           (b) =>
                             b.is_active &&
-                            // kitchen hanya boleh ditempatkan di cabang store
-                            (form.role !== "kitchen" || b.tipe === "store"),
+                            // kitchen & bar hanya boleh ditempatkan di cabang store
+                            ((form.role !== "kitchen" && form.role !== "bar") ||
+                              b.tipe === "store"),
                         )
                         .map((b) => (
                           <option key={b.id} value={b.id}>

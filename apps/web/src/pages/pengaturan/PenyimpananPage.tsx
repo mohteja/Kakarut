@@ -27,7 +27,7 @@ interface KaryawanRow {
   user_id: string;
   nama: string;
   email: string;
-  role: "owner" | "admin" | "cashier" | "tim" | "kitchen";
+  role: "owner" | "admin" | "cashier" | "tim" | "kitchen" | "bar";
   is_active: boolean;
   branch_id: string | null;
   cabang: string | null;
@@ -42,7 +42,9 @@ const roleLabel = (r: string) =>
         ? "Tim"
         : r === "kitchen"
           ? "Kitchen"
-          : "Kasir";
+          : r === "bar"
+            ? "Bar"
+            : "Kasir";
 
 /** Pilih akun yang boleh opname di sebuah tempat penyimpanan. */
 function PetugasModal({ tempat, onClose }: { tempat: PenyimpananDto; onClose: () => void }) {
@@ -427,8 +429,30 @@ export function PenyimpananPage() {
                     </span>
                   ) : (
                     <span className="text-sm text-stone-700">
-                      {t.petugas.map((p) => p.nama).join(", ")}
+                      {/* petugas basi (bukan anggota aktif — akun diarsip/dihapus/
+                          dibuat ulang) DIABAIKAN pembatasan: coret + ⚠ agar
+                          owner sadar harus menugaskan ulang akun barunya */}
+                      {t.petugas.map((p, i) => (
+                        <span key={p.user_id}>
+                          {i > 0 && ", "}
+                          {p.aktif === false ? (
+                            <span
+                              className="text-stone-400 line-through"
+                              title="Bukan anggota aktif lagi (akun diarsip/dihapus/dibuat ulang) — tidak dihitung sebagai pembatasan. Tugaskan ulang akun yang benar."
+                            >
+                              {p.nama}⚠
+                            </span>
+                          ) : (
+                            p.nama
+                          )}
+                        </span>
+                      ))}
                     </span>
+                  )}
+                  {t.petugas.length > 0 && t.petugas.every((p) => p.aktif === false) && (
+                    <div className="mt-0.5 text-[11px] text-amber-600">
+                      Semua petugas sudah bukan anggota aktif — rak terbuka utk semua.
+                    </div>
                   )}
                 </td>
                 <td className={tdClass}>

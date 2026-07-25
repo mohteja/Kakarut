@@ -86,6 +86,9 @@ async function petugasByLokasi(
       user_id: users.id,
       nama: users.nama,
       role: memberships.role,
+      userAktif: users.isActive,
+      userDihapus: users.deletedAt,
+      arsip: memberships.archivedAt,
     })
     .from(storageLocationPetugas)
     .innerJoin(users, eq(storageLocationPetugas.userId, users.id))
@@ -101,7 +104,14 @@ async function petugasByLokasi(
     );
   for (const r of rows) {
     const list = byLoc.get(r.locId) ?? [];
-    list.push({ user_id: r.user_id, nama: r.nama, role: r.role ?? "cashier" });
+    list.push({
+      user_id: r.user_id,
+      nama: r.nama,
+      role: r.role ?? "cashier",
+      // Penugasan BASI (akun dihapus/nonaktif/diarsip/dibuat ulang) tidak
+      // boleh mengunci rak diam-diam: tandai non-aktif → diabaikan pembatasan.
+      aktif: Boolean(r.userAktif && !r.userDihapus && r.role != null && !r.arsip),
+    });
     byLoc.set(r.locId, list);
   }
   return byLoc;
