@@ -702,170 +702,6 @@ export function ResepPage() {
                     </button>
                   )}
 
-                  {/* ============ 👨‍🍳 CARA MASAK: langkah berurutan + foto ============ */}
-                  <div className="mt-4 rounded-lg border border-stone-200 p-3">
-                    <div className="mb-2 text-sm font-semibold text-stone-700">
-                      👨‍🍳 Cara Masak
-                    </div>
-                    {bolehUbah ? (
-                      <>
-                        <div className="space-y-3">
-                          {langkah.map((l, i) => (
-                            <div key={i} className="flex items-start gap-2">
-                              <span className="mt-1.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-orange-100 text-xs font-bold text-orange-700">
-                                {i + 1}
-                              </span>
-                              <div className="min-w-0 flex-1 space-y-1.5">
-                                <textarea
-                                  rows={2}
-                                  value={l.teks}
-                                  onChange={(e) => {
-                                    const s = [...langkah];
-                                    s[i] = { ...s[i], teks: e.target.value };
-                                    setLangkah(s);
-                                  }}
-                                  maxLength={1000}
-                                  placeholder={`Langkah ${i + 1} — mis. rebus air sampai mendidih…`}
-                                  className={`${inputClass} resize-y`}
-                                  aria-label={`Teks langkah ${i + 1}`}
-                                />
-                                <ImageUpload
-                                  value={l.foto_url}
-                                  onChange={(url) => {
-                                    const s = [...langkah];
-                                    s[i] = { ...s[i], foto_url: url };
-                                    setLangkah(s);
-                                  }}
-                                  tujuan="resep"
-                                  placeholder="📷"
-                                />
-                              </div>
-                              <div className="flex shrink-0 flex-col gap-1">
-                                <button
-                                  type="button"
-                                  disabled={i === 0}
-                                  onClick={() => {
-                                    const s = [...langkah];
-                                    [s[i - 1], s[i]] = [s[i], s[i - 1]];
-                                    setLangkah(s);
-                                  }}
-                                  className="rounded border border-stone-300 px-1.5 text-sm text-stone-600 hover:bg-stone-100 disabled:opacity-30"
-                                  aria-label={`Naikkan langkah ${i + 1}`}
-                                >
-                                  ↑
-                                </button>
-                                <button
-                                  type="button"
-                                  disabled={i === langkah.length - 1}
-                                  onClick={() => {
-                                    const s = [...langkah];
-                                    [s[i], s[i + 1]] = [s[i + 1], s[i]];
-                                    setLangkah(s);
-                                  }}
-                                  className="rounded border border-stone-300 px-1.5 text-sm text-stone-600 hover:bg-stone-100 disabled:opacity-30"
-                                  aria-label={`Turunkan langkah ${i + 1}`}
-                                >
-                                  ↓
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setLangkah(langkah.filter((_, j) => j !== i))}
-                                  className="rounded px-1.5 text-sm font-medium text-red-500 hover:underline"
-                                  aria-label={`Hapus langkah ${i + 1}`}
-                                >
-                                  ✕
-                                </button>
-                              </div>
-                            </div>
-                          ))}
-                          {langkah.length === 0 && (
-                            <div className="rounded-lg bg-stone-50 py-4 text-center text-sm text-stone-400">
-                              Belum ada langkah cara masak.
-                            </div>
-                          )}
-                        </div>
-                        {langkah.length < MAKS_LANGKAH && (
-                          <button
-                            type="button"
-                            onClick={() => setLangkah([...langkah, { teks: "", foto_url: null }])}
-                            className="mt-2 text-sm font-medium text-orange-600 hover:underline"
-                          >
-                            + Tambah langkah
-                          </button>
-                        )}
-                        <p className="mt-1 text-xs text-stone-400">
-                          Tersimpan saat “Simpan Resep”. Foto per langkah opsional (JPEG/PNG/WebP,
-                          maks 5 MB).
-                        </p>
-                      </>
-                    ) : langkah.length === 0 ? (
-                      <div className="rounded-lg bg-stone-50 py-4 text-center text-sm text-stone-400">
-                        Belum ada langkah cara masak.
-                      </div>
-                    ) : (
-                      <ol className="space-y-3">
-                        {langkah.map((l, i) => (
-                          <li key={i} className="flex items-start gap-2">
-                            <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-orange-100 text-xs font-bold text-orange-700">
-                              {i + 1}
-                            </span>
-                            <div className="min-w-0 flex-1">
-                              <p className="text-sm whitespace-pre-wrap text-stone-700">{l.teks}</p>
-                              {l.foto_url && (
-                                <a href={l.foto_url} target="_blank" rel="noreferrer">
-                                  <img
-                                    src={l.foto_url}
-                                    alt={`Foto langkah ${i + 1}`}
-                                    className="mt-1.5 max-h-48 rounded-lg border border-stone-200 object-contain"
-                                  />
-                                </a>
-                              )}
-                            </div>
-                          </li>
-                        ))}
-                      </ol>
-                    )}
-                  </div>
-
-                  {/* ============ 📷 FOTO bahan jadi & cara packing ============ */}
-                  <div className="mt-4 rounded-lg border border-stone-200 p-3">
-                    <div className="mb-2 text-sm font-semibold text-stone-700">📷 Foto</div>
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      {(
-                        [
-                          ["hasil", "Foto bahan jadi"],
-                          ["packing", "Foto cara packing"],
-                        ] as const
-                      ).map(([kunci, label]) => (
-                        <div key={kunci}>
-                          <label className="mb-1 block text-xs font-medium text-stone-500">
-                            {label}
-                          </label>
-                          {bolehUbah ? (
-                            <ImageUpload
-                              value={foto[kunci]}
-                              onChange={(url) => setFoto({ ...foto, [kunci]: url })}
-                              tujuan="resep"
-                              placeholder={kunci === "hasil" ? "🍲" : "📦"}
-                            />
-                          ) : foto[kunci] ? (
-                            <a href={foto[kunci]!} target="_blank" rel="noreferrer">
-                              <img
-                                src={foto[kunci]!}
-                                alt={label}
-                                className="max-h-48 rounded-lg border border-stone-200 object-contain"
-                              />
-                            </a>
-                          ) : (
-                            <div className="rounded-lg bg-stone-50 px-3 py-4 text-center text-sm text-stone-400">
-                              Belum ada foto.
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
                   {/* ⚙ Batch, harga & stok minimum — diatur DI BAWAH resep
                       (bukan di modal buat bahan). Harga per batch = biaya
                       bahan resep × overhead; tersimpan saat Simpan Resep.
@@ -1101,6 +937,170 @@ export function ResepPage() {
                       </div>
                     </div>
                   )}
+
+                  {/* ============ 👨‍🍳 CARA MASAK: langkah berurutan + foto ============ */}
+                  <div className="mt-4 rounded-lg border border-stone-200 p-3">
+                    <div className="mb-2 text-sm font-semibold text-stone-700">
+                      👨‍🍳 Cara Masak
+                    </div>
+                    {bolehUbah ? (
+                      <>
+                        <div className="space-y-3">
+                          {langkah.map((l, i) => (
+                            <div key={i} className="flex items-start gap-2">
+                              <span className="mt-1.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-orange-100 text-xs font-bold text-orange-700">
+                                {i + 1}
+                              </span>
+                              <div className="min-w-0 flex-1 space-y-1.5">
+                                <textarea
+                                  rows={2}
+                                  value={l.teks}
+                                  onChange={(e) => {
+                                    const s = [...langkah];
+                                    s[i] = { ...s[i], teks: e.target.value };
+                                    setLangkah(s);
+                                  }}
+                                  maxLength={1000}
+                                  placeholder={`Langkah ${i + 1} — mis. rebus air sampai mendidih…`}
+                                  className={`${inputClass} resize-y`}
+                                  aria-label={`Teks langkah ${i + 1}`}
+                                />
+                                <ImageUpload
+                                  value={l.foto_url}
+                                  onChange={(url) => {
+                                    const s = [...langkah];
+                                    s[i] = { ...s[i], foto_url: url };
+                                    setLangkah(s);
+                                  }}
+                                  tujuan="resep"
+                                  placeholder="📷"
+                                />
+                              </div>
+                              <div className="flex shrink-0 flex-col gap-1">
+                                <button
+                                  type="button"
+                                  disabled={i === 0}
+                                  onClick={() => {
+                                    const s = [...langkah];
+                                    [s[i - 1], s[i]] = [s[i], s[i - 1]];
+                                    setLangkah(s);
+                                  }}
+                                  className="rounded border border-stone-300 px-1.5 text-sm text-stone-600 hover:bg-stone-100 disabled:opacity-30"
+                                  aria-label={`Naikkan langkah ${i + 1}`}
+                                >
+                                  ↑
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={i === langkah.length - 1}
+                                  onClick={() => {
+                                    const s = [...langkah];
+                                    [s[i], s[i + 1]] = [s[i + 1], s[i]];
+                                    setLangkah(s);
+                                  }}
+                                  className="rounded border border-stone-300 px-1.5 text-sm text-stone-600 hover:bg-stone-100 disabled:opacity-30"
+                                  aria-label={`Turunkan langkah ${i + 1}`}
+                                >
+                                  ↓
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setLangkah(langkah.filter((_, j) => j !== i))}
+                                  className="rounded px-1.5 text-sm font-medium text-red-500 hover:underline"
+                                  aria-label={`Hapus langkah ${i + 1}`}
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                          {langkah.length === 0 && (
+                            <div className="rounded-lg bg-stone-50 py-4 text-center text-sm text-stone-400">
+                              Belum ada langkah cara masak.
+                            </div>
+                          )}
+                        </div>
+                        {langkah.length < MAKS_LANGKAH && (
+                          <button
+                            type="button"
+                            onClick={() => setLangkah([...langkah, { teks: "", foto_url: null }])}
+                            className="mt-2 text-sm font-medium text-orange-600 hover:underline"
+                          >
+                            + Tambah langkah
+                          </button>
+                        )}
+                        <p className="mt-1 text-xs text-stone-400">
+                          Tersimpan saat “Simpan Resep”. Foto per langkah opsional (JPEG/PNG/WebP,
+                          maks 5 MB).
+                        </p>
+                      </>
+                    ) : langkah.length === 0 ? (
+                      <div className="rounded-lg bg-stone-50 py-4 text-center text-sm text-stone-400">
+                        Belum ada langkah cara masak.
+                      </div>
+                    ) : (
+                      <ol className="space-y-3">
+                        {langkah.map((l, i) => (
+                          <li key={i} className="flex items-start gap-2">
+                            <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-orange-100 text-xs font-bold text-orange-700">
+                              {i + 1}
+                            </span>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm whitespace-pre-wrap text-stone-700">{l.teks}</p>
+                              {l.foto_url && (
+                                <a href={l.foto_url} target="_blank" rel="noreferrer">
+                                  <img
+                                    src={l.foto_url}
+                                    alt={`Foto langkah ${i + 1}`}
+                                    className="mt-1.5 max-h-48 rounded-lg border border-stone-200 object-contain"
+                                  />
+                                </a>
+                              )}
+                            </div>
+                          </li>
+                        ))}
+                      </ol>
+                    )}
+                  </div>
+
+                  {/* ============ 📷 FOTO bahan jadi & cara packing ============ */}
+                  <div className="mt-4 rounded-lg border border-stone-200 p-3">
+                    <div className="mb-2 text-sm font-semibold text-stone-700">📷 Foto</div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      {(
+                        [
+                          ["hasil", "Foto bahan jadi"],
+                          ["packing", "Foto cara packing"],
+                        ] as const
+                      ).map(([kunci, label]) => (
+                        <div key={kunci}>
+                          <label className="mb-1 block text-xs font-medium text-stone-500">
+                            {label}
+                          </label>
+                          {bolehUbah ? (
+                            <ImageUpload
+                              value={foto[kunci]}
+                              onChange={(url) => setFoto({ ...foto, [kunci]: url })}
+                              tujuan="resep"
+                              placeholder={kunci === "hasil" ? "🍲" : "📦"}
+                            />
+                          ) : foto[kunci] ? (
+                            <a href={foto[kunci]!} target="_blank" rel="noreferrer">
+                              <img
+                                src={foto[kunci]!}
+                                alt={label}
+                                className="max-h-48 rounded-lg border border-stone-200 object-contain"
+                              />
+                            </a>
+                          ) : (
+                            <div className="rounded-lg bg-stone-50 px-3 py-4 text-center text-sm text-stone-400">
+                              Belum ada foto.
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
 
                   {bolehUbah && (
                     <div className="mt-4 flex items-center gap-3">
