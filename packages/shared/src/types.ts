@@ -583,6 +583,53 @@ export interface StokRowDto {
 }
 
 /**
+ * TRANSFER STOK — satu baris bahan pada faktur transfer antar lokasi
+ * (CK↔cabang, cabang↔cabang). `pengadaan` dibawa agar tabel jelas menandai
+ * bahan BELI (dibeli jadi) vs PRODUKSI (dibuat sendiri).
+ */
+export interface TransferStokItemRow {
+  id: string;
+  ingredient_id: string;
+  nama: string;
+  satuan: string;
+  pengadaan: JenisPengadaan;
+  qty: number;
+  /** menunggu = dalam perjalanan; dikonfirmasi = diterima; ditolak = tak diterima */
+  status: KonfirmasiStatus;
+  alasan_tolak: string | null;
+}
+
+/** Satu FAKTUR transfer stok (nomor TF-) berisi banyak bahan. */
+export interface TransferStokFaktur {
+  faktur_id: string;
+  /** nomor dokumen TF-xxxx */
+  nomor: string | null;
+  waktu: string;
+  prod_date: string;
+  asal_branch_id: string | null;
+  asal_cabang: string | null;
+  tujuan_branch_id: string | null;
+  tujuan_cabang: string | null;
+  catatan: string | null;
+  dibuat_oleh: string | null;
+  /** agregat status baris; "sebagian" = ada yang diterima & ada yang ditolak */
+  status: KonfirmasiStatus | "sebagian";
+  items: TransferStokItemRow[];
+}
+
+/**
+ * Stok READY satu bahan di cabang asal — dasar pemilih bahan & validasi qty
+ * pada form Transfer Stok (hanya bahan berlacak-stok dengan saldo > 0).
+ */
+export interface TransferStokSaldoRow {
+  ingredient_id: string;
+  nama: string;
+  satuan: string;
+  pengadaan: JenisPengadaan;
+  saldo: number;
+}
+
+/**
  * Satu LOT (baris faktur masuk stok) yang hampir/lewat tanggal kedaluwarsa —
  * GET /stok/exp. APROKSIMASI: ledger stok agregat (tanpa FIFO), jadi
  * `qty_masuk` = qty saat lot masuk, BUKAN sisa lot; `saldo` (saldo live semua

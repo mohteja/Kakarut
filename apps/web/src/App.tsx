@@ -62,6 +62,7 @@ const PermintaanStokPage = lazy(() => import("./pages/stok/PermintaanStokPage").
 const StokAwalPage = lazy(() => import("./pages/stok/StokAwalPage").then((m) => ({ default: m.StokAwalPage })));
 const TambahStokDariMenuPage = lazy(() => import("./pages/stok/TambahStokDariMenuPage").then((m) => ({ default: m.TambahStokDariMenuPage })));
 const OpnamePage = lazy(() => import("./pages/stok/OpnamePage").then((m) => ({ default: m.OpnamePage })));
+const TransferStokPage = lazy(() => import("./pages/stok/TransferStokPage").then((m) => ({ default: m.TransferStokPage })));
 const OpnamePerlengkapanPage = lazy(() => import("./pages/stok/OpnamePerlengkapanPage").then((m) => ({ default: m.OpnamePerlengkapanPage })));
 const OpnameRiwayatPage = lazy(() => import("./pages/stok/OpnameRiwayatPage").then((m) => ({ default: m.OpnameRiwayatPage })));
 const StokPage = lazy(() => import("./pages/stok/StokPage").then((m) => ({ default: m.StokPage })));
@@ -172,6 +173,10 @@ export default function App() {
               <Route path="/absen" element={<AbsenPage />} />
               {/* Beranda ringkas peran TIM/KITCHEN (CK: beli/produksi belum selesai; toko: barang datang) */}
               {(isTim || isKitchen || isBar) && <Route path="/beranda" element={<TimBerandaPage />} />}
+              {/* Transfer stok antar lokasi — semua peran kecuali kasir
+                  (server: owner/admin/tim/kitchen/bar; peran terkunci hanya
+                  boleh mengirim dari cabangnya sendiri) */}
+              {!isKasir && <Route path="/transfer-stok" element={<TransferStokPage />} />}
               {/* printer & meja — bukan peran tim/kitchen/bar */}
               {!isTim && !isKitchen && !isBar && (
                 <>

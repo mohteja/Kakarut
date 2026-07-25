@@ -319,6 +319,34 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 - `POST /api/penerimaan/:fakturId/tolak` — req: `{ alasan?|null (max300) }` — res: `{ ok, jumlah_baris }` — error: **404**
 - `POST /api/penerimaan/:fakturId/batal-tolak` — res: `{ ok, jumlah_baris }` — error: **400** (sudah diterima sebagian), **404**
 
+## `/api/transfer-stok` — Transfer stok antar lokasi (`modules/transfer/routes.ts`)
+
+> **Group guard: [owner/admin, `tim`, `kitchen`, `bar`]** (kasir tidak membuat
+> transfer — hanya menerima lewat `/penerimaan`). Memindahkan stok yang **sudah
+> ada (ready)** antar lokasi: CK↔cabang atau cabang↔cabang, satu faktur (nomor
+> **TF-**) berisi BANYAK bahan. Dipakai mis. saat barang kiriman rusak di jalan
+> lalu dikirim ulang.
+>
+> **Representasi & saldo:** satu baris `productions` per bahan dengan pola
+> KIRIMAN yang sudah ada — `branch_id` = TUJUAN (menambah saldo tujuan saat
+> dikonfirmasi), `asal_branch_id` = ASAL (mengurangi saldo asal saat
+> dikonfirmasi), `tujuan_branch_id` = TUJUAN, `dari_branch_id` = ASAL, `tipe` =
+> "produksi", `status` = "menunggu", `total_harga` = 0. Konsekuensinya:
+> kiriman **otomatis muncul di `GET /penerimaan`** cabang tujuan dan **stok asal
+> baru berkurang saat kiriman DITERIMA** (selagi di jalan, stok masih tercatat
+> di asal) — sama seperti jalur kiriman lain. Rak simpan diisi otomatis (rak
+> default bahan) saat diterima.
+>
+> **Berdampingan** dengan "Kirim dari stok CK" pada Permintaan Stok: yang itu
+> lahir dari rencana menu (`rencana_id` terisi, nomor PR-), yang ini manual/
+> ad-hoc (`rencana_id` null, nomor TF-). Pembeda tegas di API: faktur transfer
+> adalah faktur yang punya nomor dokumen berjenis `transfer`.
+
+- `GET /api/transfer-stok/saldo` — query: `branch_id?` (peran terkunci cabang selalu dipaksa ke cabangnya) — res: `{ branch_id, rows: TransferStokSaldoRow[] }` — stok READY di cabang itu: hanya bahan **aktif + berlacak-stok + saldo > 0**, tiap baris membawa `pengadaan` ("beli"/"produksi") agar UI bisa menandai jenis bahan
+- `GET /api/transfer-stok` — query: `per_page?` (default 50, maks 200) — res: `{ rows: TransferStokFaktur[] }` (terbaru dulu; tiap faktur memuat `items[]` dengan `pengadaan` & `status` per bahan, plus `status` agregat: `menunggu`/`dikonfirmasi`/`ditolak`/`sebagian`). Peran terkunci cabang hanya melihat transfer yang menyangkut cabangnya (pengirim atau penerima)
+- `POST /api/transfer-stok` — req: `{ asal_branch_id: uuid, tujuan_branch_id: uuid, catatan?|null (max300), items: [{ingredient_id: uuid, qty: number(>0)}] (1..100; bahan sama digabung qty-nya) }` — res: **201** `{ ok, faktur_id, nomor (TF-xxxx), asal, tujuan, jumlah_baris }` — error: **400** (asal = tujuan; asal/tujuan Kantor; bahan invalid/nonaktif/tak lacak stok; **qty melebihi saldo asal** — dicek di dalam transaksi), **403** peran terkunci mengirim dari cabang lain, **404** cabang tidak ditemukan
+- `POST /api/transfer-stok/:fakturId/batal` — batalkan transfer yang belum diproses tujuan (baris masuk Tempat Sampah) — res: `{ ok, jumlah_baris }` — error: **403** bukan pengirim, **404** bukan faktur transfer, **409** sudah diterima/ditolak di tujuan
+
 ## `/api/supplier` — Supplier (`modules/supplier/routes.ts`)
 
 - `GET /api/supplier` — [any] — res: `SupplierDto[]`
@@ -1151,6 +1179,53 @@ export interface StokRowDto {
   produksi_berjalan: ProduksiBerjalan | null;
   /** pembelian (beli jadi) yang belum masuk stok (RAB→diproses→dikirim); null bila tak ada */
   pembelian_berjalan: ProduksiBerjalan | null;
+}
+
+/**
+ * TRANSFER STOK — satu baris bahan pada faktur transfer antar lokasi
+ * (CK↔cabang, cabang↔cabang). `pengadaan` dibawa agar tabel jelas menandai
+ * bahan BELI (dibeli jadi) vs PRODUKSI (dibuat sendiri).
+ */
+export interface TransferStokItemRow {
+  id: string;
+  ingredient_id: string;
+  nama: string;
+  satuan: string;
+  pengadaan: JenisPengadaan;
+  qty: number;
+  /** menunggu = dalam perjalanan; dikonfirmasi = diterima; ditolak = tak diterima */
+  status: KonfirmasiStatus;
+  alasan_tolak: string | null;
+}
+
+/** Satu FAKTUR transfer stok (nomor TF-) berisi banyak bahan. */
+export interface TransferStokFaktur {
+  faktur_id: string;
+  /** nomor dokumen TF-xxxx */
+  nomor: string | null;
+  waktu: string;
+  prod_date: string;
+  asal_branch_id: string | null;
+  asal_cabang: string | null;
+  tujuan_branch_id: string | null;
+  tujuan_cabang: string | null;
+  catatan: string | null;
+  dibuat_oleh: string | null;
+  /** agregat status baris; "sebagian" = ada yang diterima & ada yang ditolak */
+  status: KonfirmasiStatus | "sebagian";
+  items: TransferStokItemRow[];
+}
+
+/**
+ * Stok READY satu bahan di cabang asal — dasar pemilih bahan & validasi qty
+ * pada form Transfer Stok (hanya bahan berlacak-stok dengan saldo > 0).
+ */
+export interface TransferStokSaldoRow {
+  ingredient_id: string;
+  nama: string;
+  satuan: string;
+  pengadaan: JenisPengadaan;
+  saldo: number;
 }
 
 /**

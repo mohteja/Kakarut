@@ -13,13 +13,15 @@ export type DokumenJenis =
   | "kiriman_perlengkapan"
   | "opname_perlengkapan"
   | "beli_perlengkapan"
-  | "permintaan";
+  | "permintaan"
+  | "transfer";
 
 /**
  * Prefiks nomor per jenis dokumen: PB (pembelian), PR (produksi), SO (stock
  * opname bahan), PL (stok masuk perlengkapan), KP (kiriman perlengkapan
  * CK→cabang), OP (sesi opname perlengkapan), BP (faktur beli perlengkapan ke
- * CK), PM (permintaan Tambah Stok dari Menu — ref = rencana_id).
+ * CK), PM (permintaan Tambah Stok dari Menu — ref = rencana_id), TF (transfer
+ * stok antar lokasi — ref = faktur_id).
  */
 const PREFIKS: Record<DokumenJenis, string> = {
   beli: "PB",
@@ -30,6 +32,7 @@ const PREFIKS: Record<DokumenJenis, string> = {
   opname_perlengkapan: "OP",
   beli_perlengkapan: "BP",
   permintaan: "PM",
+  transfer: "TF",
 };
 
 export function formatNomor(jenis: DokumenJenis, nomor: number): string {
