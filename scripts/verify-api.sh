@@ -4593,6 +4593,28 @@ cek "ubah kategori supplier (PATCH)" "V == 1" \
 cek "kosongkan kategori (null) → tanpa kategori" "V == 1" \
   "$(api "$OWNER" PATCH "/supplier/$S126" '{"kategori":null}' | jq '(.kategori==null)|if . then 1 else 0 end')"
 
+echo "== 127. Pencadangan database (super admin) =="
+cek "guard: owner GET /admin/sistem/backup → 403" "V == 403" \
+  "$(status_code "$OWNER" GET /admin/sistem/backup)"
+BKP=$(api "$SA" POST /admin/sistem/backup '{}')
+cek "backup manual → sukses, tabel>0 & baris>0" "V == 1" \
+  "$(echo "$BKP" | jq '(.status=="sukses") and (.jumlah_tabel>0) and (.jumlah_baris>0) and (.bisa_unduh==true) | if . then 1 else 0 end')"
+BK_ID=$(echo "$BKP" | jq -r .id)
+STAT=$(api "$SA" GET /admin/sistem/backup)
+cek "status backup: aktif + riwayat memuat run tadi" "V == 1" \
+  "$(echo "$STAT" | jq --arg i "$BK_ID" '(.aktif==true) and ([.riwayat[]|select(.id==$i)]|length==1) and (.terakhir_sukses!=null) | if . then 1 else 0 end')"
+BK_TMP=$(mktemp /tmp/kakarut-bk.XXXXXX.gz)
+curl -s -H "Authorization: Bearer $SA" "$BASE/api/admin/sistem/backup/$BK_ID/unduh" -o "$BK_TMP"
+cek "unduh cadangan = gzip valid (magic 1f8b)" "V == 1" \
+  "$(python3 -c "print(1 if open('$BK_TMP','rb').read(2)==b'\x1f\x8b' else 0)")"
+cek "isi arsip memuat tabel companies" "V == 1" \
+  "$(python3 -c "import gzip;print(1 if b'\"tabel\":\"companies\"' in gzip.decompress(open('$BK_TMP','rb').read()) else 0)")"
+rm -f "$BK_TMP"
+cek "hapus cadangan → ok" "V == 1" \
+  "$(api "$SA" DELETE "/admin/sistem/backup/$BK_ID" | jq '.ok==true|if . then 1 else 0 end')"
+cek "setelah hapus: hilang dari riwayat" "V == 0" \
+  "$(api "$SA" GET /admin/sistem/backup | jq --arg i "$BK_ID" '[.riwayat[]|select(.id==$i)]|length')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

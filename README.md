@@ -96,6 +96,30 @@ Aman dijalankan berulang dan multi-instance (advisory lock PostgreSQL).
 - Nonaktifkan dengan `AUTO_MIGRATE=false` bila migrasi dikelola terpisah
   (mis. entrypoint Docker/CI menjalankan `npm run db:migrate`).
 
+### Pencadangan (backup) database otomatis
+
+Seluruh isi database diekspor berkala (JSONL ter-gzip) lalu diunggah ke
+**storage cadangan yang privat** — Cloudflare R2 bila dikonfigurasi, jika tidak
+ke disk lokal (`BACKUP_DIR`). Berjalan otomatis via penjadwal saat boot
+(advisory lock, aman multi-instance). File upload (foto) tidak ikut dicadangkan
+karena sudah tersimpan durable di R2.
+
+- Panel super-admin → **Sistem & Migrasi** → *Pencadangan Database*: backup
+  manual, riwayat, unduh, dan hapus (`GET/POST /api/admin/sistem/backup`).
+- Variabel: `BACKUP_ENABLED` (default `true`), `BACKUP_INTERVAL_HOURS`
+  (default `24`), `BACKUP_KEEP` (retensi, default `14`), `BACKUP_DIR` (folder
+  saat mode lokal — arahkan ke volume ter-mount di kontainer), dan
+  `R2_BACKUP_BUCKET` (opsional: bucket R2 privat khusus cadangan; bila kosong
+  memakai `R2_BUCKET` dengan prefix `backups/`). Cadangan **tidak pernah**
+  dilayani lewat URL publik — hanya diunduh lewat endpoint super-admin.
+- **Pulihkan** dari berkas cadangan (⚠️ menimpa DB tujuan):
+
+  ```sh
+  # unduh berkas .jsonl.gz dari panel super-admin, lalu:
+  npm run db:restore -w @kakarut/server -- <berkas.jsonl.gz>        # telaah (tanpa tulis)
+  npm run db:restore -w @kakarut/server -- <berkas.jsonl.gz> --yes  # pulihkan
+  ```
+
 ### Re-deploy tanpa "404 page not found" (Dokploy/Traefik)
 
 Halaman **"404 page not found"** polos saat deploy berasal dari **Traefik**

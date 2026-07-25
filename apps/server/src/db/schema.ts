@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  bigint,
   boolean,
   check,
   date,
@@ -1637,4 +1638,38 @@ export const syncCommands = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex("sync_commands_company_ref_uq").on(t.companyId, t.clientRef)],
+);
+
+/**
+ * Riwayat pencadangan (backup) database platform. Setiap kali cadangan dibuat
+ * — otomatis (penjadwal) atau manual (super admin) — satu baris dicatat di
+ * sini: statusnya, ke mana disimpan, ukuran, dan cakupannya. Dipakai panel
+ * super admin untuk menampilkan riwayat, mengunduh, dan menerapkan retensi
+ * (menyimpan N cadangan terakhir). Baris ini SENGAJA tidak ikut dicadangkan
+ * (menghindari referensi-diri yang membengkak).
+ */
+export const backupRuns = pgTable(
+  "backup_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    waktu: timestamp("waktu", { withTimezone: true }).notNull().defaultNow(),
+    /** 'otomatis' (penjadwal) | 'manual' (dipicu super admin) */
+    pemicu: text("pemicu").notNull(),
+    /** super admin pemicu (untuk manual); null bila otomatis */
+    olehUserId: uuid("oleh_user_id").references(() => users.id, { onDelete: "set null" }),
+    /** 'berjalan' | 'sukses' | 'gagal' */
+    status: text("status").notNull(),
+    /** 'r2' | 'local' — target penyimpanan cadangan ini */
+    storageMode: text("storage_mode").notNull(),
+    /** kunci objek (R2) atau nama berkas (lokal); null bila gagal sebelum tersimpan */
+    objectKey: text("object_key"),
+    ukuranBytes: bigint("ukuran_bytes", { mode: "number" }),
+    jumlahTabel: integer("jumlah_tabel"),
+    jumlahBaris: bigint("jumlah_baris", { mode: "number" }),
+    durasiMs: integer("durasi_ms"),
+    /** pesan galat bila status 'gagal' */
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("backup_runs_waktu_idx").on(t.waktu)],
 );

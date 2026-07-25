@@ -1,16 +1,40 @@
 import { zValidator } from "@hono/zod-validator";
-import { eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { sql } from "drizzle-orm";
 import { z } from "zod";
-import type { SmtpSettingsDto } from "@kakarut/shared";
+import type { BackupRunDto, BackupStatusDto, SmtpSettingsDto } from "@kakarut/shared";
 import { db } from "../../db/client";
-import { smtpSettings } from "../../db/schema";
+import { backupRuns, smtpSettings } from "../../db/schema";
+import { env } from "../../config/env";
 import { migrationStatus, runMigrations } from "../../db/migrate";
 import { getStorage } from "../upload/storage";
+import { getCadanganStorage } from "../upload/backup-storage";
+import {
+  backupSuksesTerakhir,
+  jalankanBackup,
+  terapkanRetensi,
+} from "../../lib/backup";
 import { getSmtpRow, kirimEmail, penyediaEmail, ujiKoneksiSmtp, type SmtpRow } from "../mail/service";
 import type { AppEnv } from "../../middleware/auth";
+
+function backupDto(row: typeof backupRuns.$inferSelect): BackupRunDto {
+  return {
+    id: row.id,
+    waktu: row.waktu.toISOString(),
+    pemicu: row.pemicu as "otomatis" | "manual",
+    status: row.status as "berjalan" | "sukses" | "gagal",
+    storage_mode: row.storageMode as "r2" | "local",
+    object_key: row.objectKey,
+    ukuran_bytes: row.ukuranBytes,
+    jumlah_tabel: row.jumlahTabel,
+    jumlah_baris: row.jumlahBaris,
+    durasi_ms: row.durasiMs,
+    error: row.error,
+    bisa_unduh: row.status === "sukses" && Boolean(row.objectKey),
+  };
+}
 
 function smtpDto(row: SmtpRow | null): SmtpSettingsDto {
   const provider = penyediaEmail(row);
@@ -64,6 +88,88 @@ export const adminSystemRoutes = new Hono<AppEnv>()
       });
     }
     return c.json({ ok: true, migrations: await migrationStatus() });
+  })
+  // ── PENCADANGAN DATABASE ──────────────────────────────────────────────
+  // Konfigurasi + riwayat cadangan (50 terbaru).
+  .get("/backup", async (c) => {
+    const rows = await db
+      .select()
+      .from(backupRuns)
+      .orderBy(desc(backupRuns.waktu))
+      .limit(50);
+    const terakhir = await backupSuksesTerakhir();
+    const status: BackupStatusDto = {
+      aktif: env.BACKUP_ENABLED,
+      selang_jam: env.BACKUP_INTERVAL_HOURS,
+      simpan: env.BACKUP_KEEP,
+      storage_mode: getCadanganStorage().mode,
+      terakhir_sukses: terakhir ? terakhir.toISOString() : null,
+      riwayat: rows.map(backupDto),
+    };
+    return c.json(status);
+  })
+  // Picu cadangan manual sekarang.
+  .post("/backup", async (c) => {
+    const auth = c.get("auth");
+    try {
+      const h = await jalankanBackup({ pemicu: "manual", olehUserId: auth.sub });
+      if (h.status === "gagal") {
+        throw new HTTPException(500, { message: `Cadangan gagal: ${h.error}` });
+      }
+      const [row] = await db.select().from(backupRuns).where(eq(backupRuns.id, h.id));
+      return c.json(backupDto(row), 201);
+    } catch (e) {
+      if (e instanceof HTTPException) throw e;
+      // mis. lock (cadangan lain sedang berjalan)
+      throw new HTTPException(409, {
+        message: e instanceof Error ? e.message : String(e),
+      });
+    }
+  })
+  // Unduh berkas cadangan (di-stream lewat server — tak pernah URL publik).
+  .get("/backup/:id/unduh", async (c) => {
+    const id = c.req.param("id");
+    const [row] = await db.select().from(backupRuns).where(eq(backupRuns.id, id));
+    if (!row) throw new HTTPException(404, { message: "Cadangan tidak ditemukan" });
+    if (row.status !== "sukses" || !row.objectKey) {
+      throw new HTTPException(400, { message: "Cadangan ini tidak punya berkas" });
+    }
+    let buf: Buffer;
+    try {
+      buf = await getCadanganStorage().ambil(row.objectKey);
+    } catch (e) {
+      throw new HTTPException(404, {
+        message: `Berkas cadangan tak bisa diambil: ${e instanceof Error ? e.message : String(e)}`,
+      });
+    }
+    return new Response(new Uint8Array(buf), {
+      headers: {
+        "Content-Type": "application/gzip",
+        "Content-Disposition": `attachment; filename="${row.objectKey}"`,
+        "Content-Length": String(buf.byteLength),
+        "Cache-Control": "no-store",
+      },
+    });
+  })
+  // Hapus satu cadangan (berkas + baris riwayat).
+  .delete("/backup/:id", async (c) => {
+    const id = c.req.param("id");
+    const [row] = await db.select().from(backupRuns).where(eq(backupRuns.id, id));
+    if (!row) throw new HTTPException(404, { message: "Cadangan tidak ditemukan" });
+    if (row.objectKey) {
+      await getCadanganStorage()
+        .hapus(row.objectKey)
+        .catch(() => {
+          /* objek mungkin sudah hilang — tetap hapus barisnya */
+        });
+    }
+    await db.delete(backupRuns).where(eq(backupRuns.id, id));
+    return c.json({ ok: true });
+  })
+  // Terapkan retensi sekarang (buang cadangan lama di luar batas simpan).
+  .post("/backup/retensi", async (c) => {
+    const dibuang = await terapkanRetensi();
+    return c.json({ ok: true, dibuang });
   })
   // Pengaturan email (SMTP) tingkat platform — dipakai reset password & undangan.
   .get("/smtp", async (c) => {

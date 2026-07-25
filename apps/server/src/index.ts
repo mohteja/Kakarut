@@ -10,6 +10,7 @@ import { db } from "./db/client";
 import { sekaliSaja } from "./lib/boot-flags";
 import { computeBuildId, setBuildId } from "./lib/build";
 import { bersihkanRateLimitKedaluwarsa } from "./middleware/rateLimit";
+import { jadwalkanBackupOtomatis } from "./lib/backup";
 import { runMigrations } from "./db/migrate";
 import { backfillKodeMenu } from "./modules/menu/service";
 import { backfillKodeBahan } from "./modules/bahan/kode";
@@ -203,6 +204,10 @@ if (existsSync(webDist)) {
 // (unref → tak menahan proses tetap hidup). Idempoten, aman multi-instance.
 void bersihkanRateLimitKedaluwarsa();
 setInterval(() => void bersihkanRateLimitKedaluwarsa(), 15 * 60_000).unref();
+
+// Pencadangan database otomatis ke storage (R2/lokal) — penjadwal berkala
+// (unref, advisory-lock; aman multi-instance). Nonaktifkan: BACKUP_ENABLED=false.
+jadwalkanBackupOtomatis();
 
 serve({ fetch: app.fetch, port: env.PORT }, (info) => {
   console.log(`Terakasir berjalan di http://localhost:${info.port}`);

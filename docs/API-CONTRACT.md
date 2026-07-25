@@ -175,6 +175,11 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 
 - `GET /api/admin/sistem` — res: `{ database_ok, storage_mode, node_version, migrations }`
 - `POST /api/admin/sistem/migrate` — res: `{ ok: true, migrations }` — error: **500** migrasi gagal
+- `GET /api/admin/sistem/backup` — res: `BackupStatusDto` (`{ aktif, selang_jam, simpan, storage_mode, terakhir_sukses|null, riwayat: BackupRunDto[] }` — pencadangan database platform: konfigurasi + 50 riwayat terakhir)
+- `POST /api/admin/sistem/backup` — picu cadangan manual sekarang — res: **201** `BackupRunDto` — error: **409** (cadangan lain sedang berjalan), **500** gagal
+- `GET /api/admin/sistem/backup/:id/unduh` — unduh berkas cadangan (di-stream server; `application/gzip`, `Content-Disposition: attachment`) — error: **404** (tak ada/berkas tak terambil), **400** (cadangan tanpa berkas)
+- `DELETE /api/admin/sistem/backup/:id` — hapus cadangan (berkas + riwayat) — res: `{ ok: true }` — error: **404**
+- `POST /api/admin/sistem/backup/retensi` — terapkan retensi sekarang (buang cadangan lama di luar `BACKUP_KEEP`) — res: `{ ok: true, dibuang }`
 - `GET /api/admin/sistem/smtp` — res: `SmtpSettingsDto` (`{ host|null, port, username|null, has_password, encryption, sender_name|null, sender_email|null, configured, provider }` — password mentah TAK pernah dikembalikan)
 - `PUT /api/admin/sistem/smtp` — req: `{ host?, port?, username?, password?, encryption?: "none"|"ssl"|"starttls", sender_name?, sender_email? }` (password hanya berubah bila diisi non-kosong) — res: `SmtpSettingsDto`
 - `POST /api/admin/sistem/smtp/test` — uji koneksi SMTP tersimpan — res: `{ ok }` — error: **400** koneksi gagal
@@ -626,6 +631,40 @@ export interface SmtpSettingsDto {
   configured: boolean;
   /** penyedia efektif saat ini */
   provider: "smtp" | "resend" | "none";
+}
+
+/** Satu baris riwayat pencadangan database (panel super admin). */
+export interface BackupRunDto {
+  id: string;
+  waktu: string;
+  pemicu: "otomatis" | "manual";
+  status: "berjalan" | "sukses" | "gagal";
+  storage_mode: "r2" | "local";
+  /** kunci objek / nama berkas cadangan; null bila gagal sebelum tersimpan */
+  object_key: string | null;
+  ukuran_bytes: number | null;
+  jumlah_tabel: number | null;
+  jumlah_baris: number | null;
+  durasi_ms: number | null;
+  error: string | null;
+  /** true = berkas tersedia untuk diunduh */
+  bisa_unduh: boolean;
+}
+
+/** Status + konfigurasi pencadangan (GET /admin/sistem/backup). */
+export interface BackupStatusDto {
+  /** pencadangan otomatis (penjadwal) aktif */
+  aktif: boolean;
+  /** selang cadangan otomatis (jam) */
+  selang_jam: number;
+  /** retensi: jumlah cadangan sukses terakhir yang disimpan */
+  simpan: number;
+  /** target penyimpanan cadangan */
+  storage_mode: "r2" | "local";
+  /** waktu cadangan sukses terakhir (ISO) atau null */
+  terakhir_sukses: string | null;
+  /** riwayat 50 cadangan terakhir (terbaru dulu) */
+  riwayat: BackupRunDto[];
 }
 
 /** Satu entri riwayat kegiatan pada faktur (jejak ubah tahap). */

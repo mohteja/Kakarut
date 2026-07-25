@@ -73,6 +73,40 @@ export interface SmtpSettingsDto {
   provider: "smtp" | "resend" | "none";
 }
 
+/** Satu baris riwayat pencadangan database (panel super admin). */
+export interface BackupRunDto {
+  id: string;
+  waktu: string;
+  pemicu: "otomatis" | "manual";
+  status: "berjalan" | "sukses" | "gagal";
+  storage_mode: "r2" | "local";
+  /** kunci objek / nama berkas cadangan; null bila gagal sebelum tersimpan */
+  object_key: string | null;
+  ukuran_bytes: number | null;
+  jumlah_tabel: number | null;
+  jumlah_baris: number | null;
+  durasi_ms: number | null;
+  error: string | null;
+  /** true = berkas tersedia untuk diunduh */
+  bisa_unduh: boolean;
+}
+
+/** Status + konfigurasi pencadangan (GET /admin/sistem/backup). */
+export interface BackupStatusDto {
+  /** pencadangan otomatis (penjadwal) aktif */
+  aktif: boolean;
+  /** selang cadangan otomatis (jam) */
+  selang_jam: number;
+  /** retensi: jumlah cadangan sukses terakhir yang disimpan */
+  simpan: number;
+  /** target penyimpanan cadangan */
+  storage_mode: "r2" | "local";
+  /** waktu cadangan sukses terakhir (ISO) atau null */
+  terakhir_sukses: string | null;
+  /** riwayat 50 cadangan terakhir (terbaru dulu) */
+  riwayat: BackupRunDto[];
+}
+
 /** Satu entri riwayat kegiatan pada faktur (jejak ubah tahap). */
 export interface FakturLogRow {
   id: string;
