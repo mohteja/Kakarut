@@ -13,6 +13,11 @@ membungkus web di WebView.
 Aplikasi Flutter dikembangkan di repo terpisah **`kakarut-mobile`**. Dokumen ini
 tidak menuntut akses ke repo server — cukup jadikan rujukan kontrak.
 
+> **Sudah pernah menerima dokumen ini sebelumnya?** Jangan bandingkan ulang
+> seluruh isinya. Baca **[`docs/mobile/CHANGELOG-API.md`](mobile/CHANGELOG-API.md)**
+> — di sana perubahan per rilis diringkas dan ditandai mana yang **wajib**
+> disesuaikan di aplikasi mobile, mana yang sekadar informasi.
+
 ---
 
 ## 1. Konvensi
