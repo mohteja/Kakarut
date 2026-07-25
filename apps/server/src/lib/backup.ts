@@ -69,14 +69,21 @@ export async function jalankanBackup(opts: {
 }): Promise<HasilBackup> {
   const storage = getCadanganStorage();
   // Cegah dua cadangan berjalan bersamaan (mis. penjadwal + manual, atau
-  // multi-instance). Advisory lock sesi — dilepas di `finally`.
-  const lock = await pool.query<{ locked: boolean }>(
+  // multi-instance). Advisory lock sesi bersifat per-KONEKSI: acquire & release
+  // WAJIB di koneksi yang sama, jadi kita pegang satu koneksi khusus sepanjang
+  // siklus lock. Memakai `pool.query` untuk lock akan mengambil koneksi acak →
+  // unlock di koneksi lain → lock bocor (tak pernah lepas).
+  const lockClient = await pool.connect();
+  let punyaLock = false;
+  const lock = await lockClient.query<{ locked: boolean }>(
     `SELECT pg_try_advisory_lock($1) AS locked`,
     [LOCK_KEY],
   );
   if (!lock.rows[0]?.locked) {
+    lockClient.release();
     throw new Error("Pencadangan lain sedang berjalan — coba lagi sebentar.");
   }
+  punyaLock = true;
 
   const mulai = Date.now();
   const waktu = new Date();
@@ -165,7 +172,13 @@ export async function jalankanBackup(opts: {
       error: pesan,
     };
   } finally {
-    await pool.query(`SELECT pg_advisory_unlock($1)`, [LOCK_KEY]).catch(() => {});
+    // Lepas lock di KONEKSI YANG SAMA lalu kembalikan koneksinya ke pool.
+    if (punyaLock) {
+      await lockClient
+        .query(`SELECT pg_advisory_unlock($1)`, [LOCK_KEY])
+        .catch(() => {});
+    }
+    lockClient.release();
   }
 }
 
@@ -240,7 +253,7 @@ export function jadwalkanBackupOtomatis(): void {
 
   // Jalankan cek pertama sesaat setelah boot (jangan menahan startup), lalu
   // berkala. Timer di-unref agar proses bisa keluar bersih.
-  setTimeout(() => void jalankanBilaPerlu(), 30_000).unref();
+  setTimeout(() => void jalankanBilaPerlu(), 60_000).unref();
   setInterval(() => void jalankanBilaPerlu(), selangMs).unref();
   console.log(
     `Pencadangan otomatis aktif: tiap ${env.BACKUP_INTERVAL_HOURS} jam, simpan ${env.BACKUP_KEEP} terakhir.`,

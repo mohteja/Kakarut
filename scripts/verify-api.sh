@@ -4596,7 +4596,14 @@ cek "kosongkan kategori (null) → tanpa kategori" "V == 1" \
 echo "== 127. Pencadangan database (super admin) =="
 cek "guard: owner GET /admin/sistem/backup → 403" "V == 403" \
   "$(status_code "$OWNER" GET /admin/sistem/backup)"
-BKP=$(api "$SA" POST /admin/sistem/backup '{}')
+# Backup manual: bila kebetulan bertepatan dgn cadangan otomatis penjadwal
+# (advisory lock → 409), ulangi beberapa kali.
+BKP=""
+for _ in 1 2 3 4 5; do
+  BKP=$(api "$SA" POST /admin/sistem/backup '{}')
+  if [ "$(echo "$BKP" | jq -r '.status // empty')" = "sukses" ]; then break; fi
+  sleep 2
+done
 cek "backup manual → sukses, tabel>0 & baris>0" "V == 1" \
   "$(echo "$BKP" | jq '(.status=="sukses") and (.jumlah_tabel>0) and (.jumlah_baris>0) and (.bisa_unduh==true) | if . then 1 else 0 end')"
 BK_ID=$(echo "$BKP" | jq -r .id)
