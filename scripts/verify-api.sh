@@ -4764,6 +4764,212 @@ URL131=$(curl -s -X POST "$BASE/api/upload?tujuan=resep" -H "Authorization: Bear
 cek "upload tujuan=resep → tersimpan di bucket /resep/" "V == 1" \
   "$(echo "$URL131" | grep -q '/resep/' && echo 1 || echo 0)"
 
+echo "== 132. Transfer Stok antar lokasi (faktur TF- multi bahan) =="
+# Memindahkan stok READY antar lokasi (CK↔cabang, cabang↔cabang) lewat faktur
+# TF- multi bahan. Satu baris productions per bahan: branch_id = TUJUAN (stok
+# masuk saat diterima), asal_branch_id = ASAL (stok keluar saat diterima) →
+# saldo, Penerimaan, dan Kartu Stok otomatis konsisten. Berdampingan dengan
+# "Kirim dari stok CK" (jalur Permintaan, nomor PR-).
+# Pilih cabang ASAL yang benar-benar punya stok siap kirim.
+ASAL132=""; SALDO132=""
+for B132 in "$CK52_UTAMA" "$CB46_ID" "$KBR128"; do
+  R132=$(api "$OWNER" GET "/transfer-stok/saldo?branch_id=$B132")
+  if [ "$(echo "$R132" | jq '.rows|length')" -gt 0 ]; then
+    ASAL132="$B132"; SALDO132="$R132"; break
+  fi
+done
+cek "dasar uji: ada lokasi dengan stok siap kirim" "V == 1" \
+  "$([ -n "$ASAL132" ] && echo 1 || echo 0)"
+TUJUAN132=$(api "$OWNER" GET /cabang | jq -r --arg a "$ASAL132" '[.[]|select(.is_active and .tipe!="kantor" and .id!=$a)][0].id')
+KANTOR132=$(api "$OWNER" GET /cabang | jq -r '[.[]|select(.tipe=="kantor")][0].id')
+ING132=$(echo "$SALDO132" | jq -r '([.rows[]|select(.saldo>=2)][0].ingredient_id) // .rows[0].ingredient_id')
+SAL132=$(echo "$SALDO132" | jq -r --arg i "$ING132" '[.rows[]|select(.ingredient_id==$i)][0].saldo')
+cek "GET /transfer-stok/saldo: tiap baris punya pengadaan (beli/produksi) & saldo > 0" "V == 1" \
+  "$(echo "$SALDO132" | jq '(([.rows[]|select((.pengadaan=="beli" or .pengadaan=="produksi") and .saldo>0)]|length) == (.rows|length))|if . then 1 else 0 end')"
+cek "transfer asal == tujuan → 400" "V == 400" \
+  "$(status_code_body "$OWNER" POST /transfer-stok "{\"asal_branch_id\":\"$ASAL132\",\"tujuan_branch_id\":\"$ASAL132\",\"items\":[{\"ingredient_id\":\"$ING132\",\"qty\":1}]}")"
+cek "transfer ke Kantor → 400 (kantor tak menyimpan stok)" "V == 400" \
+  "$(status_code_body "$OWNER" POST /transfer-stok "{\"asal_branch_id\":\"$ASAL132\",\"tujuan_branch_id\":\"$KANTOR132\",\"items\":[{\"ingredient_id\":\"$ING132\",\"qty\":1}]}")"
+cek "transfer qty melebihi stok asal → 400" "V == 400" \
+  "$(status_code_body "$OWNER" POST /transfer-stok "{\"asal_branch_id\":\"$ASAL132\",\"tujuan_branch_id\":\"$TUJUAN132\",\"items\":[{\"ingredient_id\":\"$ING132\",\"qty\":$(python3 -c "print($SAL132 + 1000)")}]}")"
+cek "transfer tanpa item → 400" "V == 400" \
+  "$(status_code_body "$OWNER" POST /transfer-stok "{\"asal_branch_id\":\"$ASAL132\",\"tujuan_branch_id\":\"$TUJUAN132\",\"items\":[]}")"
+# saldo SEBELUM transfer (asal & tujuan) — dasar pembanding
+SA132_AWAL=$(api "$OWNER" GET "/stok?branch_id=$ASAL132" | jq --arg i "$ING132" '[.[]|select(.ingredient_id==$i)][0].saldo // 0')
+ST132_AWAL=$(api "$OWNER" GET "/stok?branch_id=$TUJUAN132" | jq --arg i "$ING132" '[.[]|select(.ingredient_id==$i)][0].saldo // 0')
+TF132=$(api "$OWNER" POST /transfer-stok "{\"asal_branch_id\":\"$ASAL132\",\"tujuan_branch_id\":\"$TUJUAN132\",\"catatan\":\"ganti barang rusak di jalan\",\"items\":[{\"ingredient_id\":\"$ING132\",\"qty\":1}]}")
+TFID132=$(echo "$TF132" | jq -r '.faktur_id // ""')
+cek "transfer valid → 201 + nomor TF-" "V == 1" \
+  "$(echo "$TF132" | jq -r '(.nomor // "") | startswith("TF-") | if . then 1 else 0 end')"
+cek "daftar transfer memuat faktur (status menunggu, item ber-pengadaan)" "V == 1" \
+  "$(api "$OWNER" GET /transfer-stok | jq --arg f "$TFID132" '[.rows[]|select(.faktur_id==$f)][0] | (.status=="menunggu" and (.items|length)==1 and (.items[0].pengadaan|type)=="string" and .catatan=="ganti barang rusak di jalan") | if . then 1 else 0 end')"
+cek "SEBELUM diterima: saldo asal belum berkurang (barang masih di jalan)" "abs(V - 0) < 0.001" \
+  "$(python3 -c "print($(api "$OWNER" GET "/stok?branch_id=$ASAL132" | jq --arg i "$ING132" '[.[]|select(.ingredient_id==$i)][0].saldo // 0') - $SA132_AWAL)")"
+cek "kiriman transfer muncul di Penerimaan cabang tujuan" "V == 1" \
+  "$(api "$OWNER" GET "/penerimaan?branch_id=$TUJUAN132" | jq --arg f "$TFID132" '[.rows[]|select(.faktur_id==$f)]|length >= 1|if . then 1 else 0 end')"
+# terima di tujuan → stok tujuan naik, stok asal turun
+api "$OWNER" POST "/penerimaan/$TFID132/terima" '{}' > /dev/null
+cek "setelah diterima: stok TUJUAN naik +1" "abs(V - 1) < 0.001" \
+  "$(python3 -c "print($(api "$OWNER" GET "/stok?branch_id=$TUJUAN132" | jq --arg i "$ING132" '[.[]|select(.ingredient_id==$i)][0].saldo // 0') - $ST132_AWAL)")"
+cek "setelah diterima: stok ASAL turun -1" "abs(V + 1) < 0.001" \
+  "$(python3 -c "print($(api "$OWNER" GET "/stok?branch_id=$ASAL132" | jq --arg i "$ING132" '[.[]|select(.ingredient_id==$i)][0].saldo // 0') - $SA132_AWAL)")"
+cek "status faktur transfer jadi dikonfirmasi" "V == 1" \
+  "$(api "$OWNER" GET /transfer-stok | jq --arg f "$TFID132" '[.rows[]|select(.faktur_id==$f)][0].status=="dikonfirmasi"|if . then 1 else 0 end')"
+cek "batalkan transfer yang sudah diterima → 409" "V == 409" \
+  "$(status_code_body "$OWNER" POST "/transfer-stok/$TFID132/batal" '{}')"
+# batal transfer yang masih di jalan → hilang dari daftar & dari Penerimaan
+TF132B=$(api "$OWNER" POST /transfer-stok "{\"asal_branch_id\":\"$ASAL132\",\"tujuan_branch_id\":\"$TUJUAN132\",\"items\":[{\"ingredient_id\":\"$ING132\",\"qty\":1}]}" | jq -r .faktur_id)
+cek "batal transfer 'menunggu' → ok" "V == 1" \
+  "$(api "$OWNER" POST "/transfer-stok/$TF132B/batal" '{}' | jq '.ok==true|if . then 1 else 0 end')"
+cek "transfer dibatalkan hilang dari daftar transfer" "V == 0" \
+  "$(api "$OWNER" GET /transfer-stok | jq --arg f "$TF132B" '[.rows[]|select(.faktur_id==$f)]|length')"
+cek "transfer dibatalkan hilang dari Penerimaan tujuan" "V == 0" \
+  "$(api "$OWNER" GET "/penerimaan?branch_id=$TUJUAN132" | jq --arg f "$TF132B" '[.rows[]|select(.faktur_id==$f)]|length')"
+cek "batal faktur asing → 404" "V == 404" \
+  "$(status_code_body "$OWNER" POST "/transfer-stok/00000000-0000-0000-0000-000000000000/batal" '{}')"
+# gerbang peran: kasir tak boleh membuat transfer; peran terkunci hanya cabangnya
+api "$OWNER" POST /karyawan "{\"nama\":\"Kasir Uji132\",\"email\":\"kasir132@example.com\",\"password\":\"Kasir132!\",\"role\":\"cashier\",\"branch_id\":\"$KBR128\"}" > /dev/null
+K132_TOK=$(login "kasir132@example.com" "Kasir132!")
+cek "kasir buat transfer → 403 (bukan perannya)" "V == 403" \
+  "$(status_code_body "$K132_TOK" POST /transfer-stok "{\"asal_branch_id\":\"$ASAL132\",\"tujuan_branch_id\":\"$TUJUAN132\",\"items\":[{\"ingredient_id\":\"$ING132\",\"qty\":1}]}")"
+cek "kitchen transfer DARI cabang lain → 403 (hanya cabang sendiri)" "V == 403" \
+  "$(status_code_body "$TKIT" POST /transfer-stok "{\"asal_branch_id\":\"$CK52_UTAMA\",\"tujuan_branch_id\":\"$CB46_ID\",\"items\":[{\"ingredient_id\":\"$ING132\",\"qty\":1}]}")"
+
+# --- Stok yang MASIH DI JALAN tidak boleh dijanjikan ulang ---
+# Ledger baru mengurangi saldo asal saat tujuan mengonfirmasi, jadi saldo mentah
+# masih memuat barang yang sudah lepas. Tanpa potongan `dalam_jalan`, stok yang
+# sama bisa ditransfer berkali-kali dan saldo asal jadi minus saat semua tiba.
+SALDO132B=$(api "$OWNER" GET "/transfer-stok/saldo?branch_id=$ASAL132")
+cek "GET /transfer-stok/saldo: tiap baris membawa dalam_jalan (angka)" "V == 1" \
+  "$(echo "$SALDO132B" | jq '(([.rows[]|select((.dalam_jalan|type)=="number")]|length) == (.rows|length))|if . then 1 else 0 end')"
+cek "GET /transfer-stok/saldo: hanya bahan yang masih tersisa (saldo > dalam_jalan)" "V == 1" \
+  "$(echo "$SALDO132B" | jq '(([.rows[]|select(.saldo - .dalam_jalan > 0)]|length) == (.rows|length))|if . then 1 else 0 end')"
+ING132C=$(echo "$SALDO132B" | jq -r '.rows[0].ingredient_id')
+TSD132=$(echo "$SALDO132B" | jq -r '.rows[0] | (.saldo - .dalam_jalan)')
+cek "transfer sebesar SELURUH stok tersedia → 201" "V == 1" \
+  "$(api "$OWNER" POST /transfer-stok "{\"asal_branch_id\":\"$ASAL132\",\"tujuan_branch_id\":\"$TUJUAN132\",\"items\":[{\"ingredient_id\":\"$ING132C\",\"qty\":$TSD132}]}" | jq '(.ok==true)|if . then 1 else 0 end')"
+cek "transfer ulang stok yang masih di jalan → 400 (tak bisa dijanjikan dua kali)" "V == 400" \
+  "$(status_code_body "$OWNER" POST /transfer-stok "{\"asal_branch_id\":\"$ASAL132\",\"tujuan_branch_id\":\"$TUJUAN132\",\"items\":[{\"ingredient_id\":\"$ING132C\",\"qty\":1}]}")"
+cek "pesan tolak menyebut barang masih dalam perjalanan" "V == 1" \
+  "$(api "$OWNER" POST /transfer-stok "{\"asal_branch_id\":\"$ASAL132\",\"tujuan_branch_id\":\"$TUJUAN132\",\"items\":[{\"ingredient_id\":\"$ING132C\",\"qty\":1}]}" | jq '((.error // "")|test("dalam perjalanan"))|if . then 1 else 0 end')"
+cek "bahan yang seluruh stoknya di jalan hilang dari daftar siap kirim" "V == 0" \
+  "$(api "$OWNER" GET "/transfer-stok/saldo?branch_id=$ASAL132" | jq --arg i "$ING132C" '[.rows[]|select(.ingredient_id==$i)]|length')"
+# --- faktur transfer bukan pekerjaan produksi → jangan mengotori daftar Produksi ---
+cek "faktur TF- TIDAK muncul di daftar Produksi cabang tujuan" "V == 0" \
+  "$(api "$OWNER" GET "/produksi?branch_id=$TUJUAN132&tipe=produksi&per_page=100" | jq '[.rows[]|select((.nomor // "")|startswith("TF-"))]|length')"
+cek "faktur TF- TIDAK muncul di daftar Produksi cabang asal" "V == 0" \
+  "$(api "$OWNER" GET "/produksi?branch_id=$ASAL132&tipe=produksi&per_page=100" | jq '[.rows[]|select((.nomor // "")|startswith("TF-"))]|length')"
+
+echo "== 133. Stok CK yang sudah dijanjikan tak boleh dijanjikan ulang =="
+# Saldo CK sengaja masih memuat barang yang sudah dikirim tapi belum diterima
+# cabang (biar tak "hilang" dari pembukuan). Kalau perencana memakai saldo
+# mentah itu, DUA permintaan berturut-turut sama-sama direncanakan "tinggal
+# kirim dari CK" untuk stok yang sama → saldo CK MINUS saat semua kiriman tiba.
+api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CB46_ID\",\"items\":[{\"ingredient_id\":\"$BASO66\",\"qty\":0}]}" > /dev/null
+api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CK52_UTAMA\",\"items\":[{\"ingredient_id\":\"$BASO66\",\"qty\":500}]}" > /dev/null
+R133A=$(api "$OWNER" POST /rekomendasi/menu/faktur "{\"items\":[{\"menu_id\":\"$MENU66\",\"porsi\":100}],\"tujuan_branch_id\":\"$CB46_ID\",\"ck_branch_id\":\"$CK52_UTAMA\"}")
+KF133=$(echo "$R133A" | jq -r '.kirim.faktur_id // ""')
+cek "permintaan-1: stok CK cukup → ada faktur kirim" "V == 1" \
+  "$([ -n "$KF133" ] && echo 1 || echo 0)"
+api "$OWNER" POST "/produksi/kirim/$KF133" '{}' > /dev/null
+cek "selagi di jalan: saldo CK belum berkurang (barang masih tercatat di CK)" "abs(V - 500) < 0.001" \
+  "$(api "$OWNER" GET "/stok?branch_id=$CK52_UTAMA" | jq --arg i "$BASO66" '[.[]|select(.ingredient_id==$i)][0].saldo // 0')"
+cek "perencana melihat stok CK siap-janji = 0 (semua sudah di jalan)" "abs(V) < 0.001" \
+  "$(api "$OWNER" POST "/rekomendasi/menu?branch_id=$CB46_ID" "{\"items\":[{\"menu_id\":\"$MENU66\",\"porsi\":100}],\"ck_branch_id\":\"$CK52_UTAMA\"}" | jq --arg i "$BASO66" '[.bahan[]|select(.ingredient_id==$i)][0].kirim_ck // 0')"
+R133B=$(api "$OWNER" POST /rekomendasi/menu/faktur "{\"items\":[{\"menu_id\":\"$MENU66\",\"porsi\":100}],\"tujuan_branch_id\":\"$CB46_ID\",\"ck_branch_id\":\"$CK52_UTAMA\"}")
+cek "permintaan-2: TIDAK ada faktur kirim lagi (stok sudah dijanjikan)" "V == 0" \
+  "$(echo "$R133B" | jq '(.kirim != null)|if . then 1 else 0 end')"
+cek "permintaan-2: dialihkan jadi work-order produksi" "V == 1" \
+  "$(echo "$R133B" | jq '(.produksi != null)|if . then 1 else 0 end')"
+api "$OWNER" POST "/penerimaan/$KF133/terima" '{}' > /dev/null
+cek "setelah kiriman diterima: saldo CK 0 — TIDAK minus" "abs(V) < 0.001" \
+  "$(api "$OWNER" GET "/stok?branch_id=$CK52_UTAMA" | jq --arg i "$BASO66" '[.[]|select(.ingredient_id==$i)][0].saldo // 0')"
+cek "cabang menerima tepat 500 (bukan dobel)" "abs(V - 500) < 0.001" \
+  "$(api "$OWNER" GET "/stok?branch_id=$CB46_ID" | jq --arg i "$BASO66" '[.[]|select(.ingredient_id==$i)][0].saldo // 0')"
+
+echo "== 134. Tempat penyimpanan tampil SAMA untuk semua peran di cabang =="
+# Rak + isinya diatur owner; kitchen/bar/kasir di cabang yang sama harus melihat
+# rak, jumlah bahan, daftar petugas, dan isi rak yang persis sama. Menetapkan
+# PETUGAS hanya membatasi siapa yang boleh meng-OPNAME rak itu — bukan siapa
+# yang boleh melihatnya.
+RAK134=$(api "$OWNER" POST /penyimpanan "{\"branch_id\":\"$CB46_ID\",\"nama\":\"Rak Konsistensi 134\"}" | jq -r .id)
+api "$OWNER" PUT "/penyimpanan/$RAK134/bahan" "{\"ingredient_ids\":[\"$BB129\",\"$BK129\"]}" > /dev/null
+api "$OWNER" PUT "/penyimpanan/$RAK134/petugas" "{\"user_ids\":[\"$U107_ID\"]}" > /dev/null
+rak134() { api "$1" GET "/penyimpanan$2" | jq -r --arg r "$RAK134" '[.[]|select(.id==$r)][0] | "\(.nama)|\(.jumlah_bahan)|\([.petugas[].nama]|sort|join(","))"'; }
+R134=$(rak134 "$OWNER" "?branch_id=$CB46_ID")
+cek "owner melihat rak baru: nama|jumlah bahan|petugas" "V == 1" \
+  "$([ "$R134" = "Rak Konsistensi 134|2|Kitchen 107" ] && echo 1 || echo 0)"
+cek "kitchen (petugas rak) melihat rak identik" "V == 1" \
+  "$([ "$(rak134 "$TKIT" "")" = "$R134" ] && echo 1 || echo 0)"
+cek "bar (BUKAN petugas) tetap melihat rak identik" "V == 1" \
+  "$([ "$(rak134 "$TBAR" "")" = "$R134" ] && echo 1 || echo 0)"
+cek "kasir cabang tetap melihat rak identik" "V == 1" \
+  "$([ "$(rak134 "$KASIR46" "")" = "$R134" ] && echo 1 || echo 0)"
+isi134() { api "$1" GET "/penyimpanan/$RAK134/bahan" | jq -c '.ingredient_ids|sort'; }
+I134=$(isi134 "$OWNER")
+cek "isi rak (daftar bahan) sama untuk kitchen" "V == 1" "$([ "$(isi134 "$TKIT")" = "$I134" ] && echo 1 || echo 0)"
+cek "isi rak (daftar bahan) sama untuk bar" "V == 1" "$([ "$(isi134 "$TBAR")" = "$I134" ] && echo 1 || echo 0)"
+cek "isi rak (daftar bahan) sama untuk kasir" "V == 1" "$([ "$(isi134 "$KASIR46")" = "$I134" ] && echo 1 || echo 0)"
+tmp134() { api "$1" GET "/stok$2" | jq -c '[.[]|select(.tempat!=null)|[.nama,.tempat]]|sort'; }
+T134=$(tmp134 "$OWNER" "?branch_id=$CB46_ID")
+cek "kolom Tempat di halaman Stok sama untuk kitchen" "V == 1" "$([ "$(tmp134 "$TKIT" "")" = "$T134" ] && echo 1 || echo 0)"
+cek "kolom Tempat di halaman Stok sama untuk bar" "V == 1" "$([ "$(tmp134 "$TBAR" "")" = "$T134" ] && echo 1 || echo 0)"
+cek "kolom Tempat di halaman Stok sama untuk kasir" "V == 1" "$([ "$(tmp134 "$KASIR46" "")" = "$T134" ] && echo 1 || echo 0)"
+cek "rak cabang ini TIDAK bocor ke akun cabang lain (tim CK)" "V == 0" \
+  "$(api "$TCK58" GET /penyimpanan | jq --arg r "$RAK134" '[.[]|select(.id==$r)]|length')"
+
+echo "== 135. Resep hanya boleh diproduksi di LOKASI-nya =="
+# §129 sudah menjaga DIVISI (kitchen vs bar). Di sini yang dijaga LOKASI:
+# resep milik Central Kitchen tak boleh diproduksi peran cabang, dan resep
+# cabang tak boleh dikerjakan divisi lain — dua-duanya ditolak server.
+cek "kitchen cabang produksi resep milik CK → 400" "V == 400" \
+  "$(status_code_body "$TKIT" POST /produksi/faktur "{\"worker_id\":\"$U107_ID\",\"items\":[{\"ingredient_id\":\"$BASO66\",\"mode\":\"batch\",\"jumlah\":1}]}")"
+cek "bar cabang produksi resep milik CK → 400" "V == 400" \
+  "$(status_code_body "$TBAR" POST /produksi/faktur "{\"worker_id\":\"$UBAR_ID\",\"items\":[{\"ingredient_id\":\"$BASO66\",\"mode\":\"batch\",\"jumlah\":1}]}")"
+cek "pesan tolak menyebut resep itu diproduksi di Central Kitchen" "V == 1" \
+  "$(api "$TKIT" POST /produksi/faktur "{\"worker_id\":\"$U107_ID\",\"items\":[{\"ingredient_id\":\"$BASO66\",\"mode\":\"batch\",\"jumlah\":1}]}" | jq '((.error // "")|test("Central Kitchen"))|if . then 1 else 0 end')"
+cek "bar TETAP boleh produksi resep divisinya sendiri (tidak ikut terblokir)" "V == 1" \
+  "$(api "$TBAR" POST /produksi/faktur "{\"worker_id\":\"$UBAR_ID\",\"items\":[{\"ingredient_id\":\"$BB129\",\"mode\":\"pcs\",\"jumlah\":1}]}" | jq '((.faktur_id // "")|length > 0)|if . then 1 else 0 end')"
+
+echo "== 136. Permintaan pembelian produksi memunculkan SEMUA bahan resep =="
+# Resep baso uji66 = daging 2000 + tepung 300 per batch. Yang diperiksa: tidak
+# ada komponen yang hilang dari rencana, baik saat stok kosong, sebagian,
+# maupun sudah cukup (ditampilkan dgn kurang 0 agar tetap terlihat).
+nol136() { api "$OWNER" POST /stok/awal "{\"branch_id\":\"$1\",\"items\":[{\"ingredient_id\":\"$2\",\"qty\":$3}]}" > /dev/null; }
+nol136 "$CB46_ID" "$BASO66" 0; nol136 "$CK52_UTAMA" "$BASO66" 0
+nol136 "$CK52_UTAMA" "$DAG66" 0; nol136 "$CK52_UTAMA" "$TEP66" 0
+rencana136() { api "$OWNER" POST "/rekomendasi/menu?branch_id=$CB46_ID" "{\"items\":[{\"menu_id\":\"$MENU66\",\"porsi\":100}],\"ck_branch_id\":\"$CK52_UTAMA\"}"; }
+R136=$(rencana136)
+cek "stok kosong: KEDUA bahan mentah resep muncul di rencana" "V == 2" \
+  "$(echo "$R136" | jq --arg a "$DAG66" --arg b "$TEP66" '[.bahan_produksi[]|select(.ingredient_id==$a or .ingredient_id==$b)]|length')"
+cek "stok kosong: daging butuh 10000 (5 batch x 2000)" "abs(V - 10000) < 0.001" \
+  "$(echo "$R136" | jq --arg a "$DAG66" '[.bahan_produksi[]|select(.ingredient_id==$a)][0].kurang')"
+nol136 "$CK52_UTAMA" "$DAG66" 5000
+cek "stok SEBAGIAN: daging tetap muncul dgn sisa kekurangan 5000" "abs(V - 5000) < 0.001" \
+  "$(rencana136 | jq --arg a "$DAG66" '[.bahan_produksi[]|select(.ingredient_id==$a)][0].kurang')"
+nol136 "$CK52_UTAMA" "$DAG66" 10000
+cek "stok CUKUP: daging TETAP ditampilkan (tak disembunyikan) dgn kurang 0" "V == 1" \
+  "$(rencana136 | jq --arg a "$DAG66" '([.bahan_produksi[]|select(.ingredient_id==$a)][0] | (. != null) and (.kurang == 0))|if . then 1 else 0 end')"
+# Stok minimum: batch tercukupi tapi sisa di bawah minimum → tetap dibelikan,
+# dan HANYA bahan yang di bawah minimum (yang berlimpah tidak ikut dibeli).
+api "$OWNER" PUT "/bahan/$DAG66" '{"stok_minimum":3000}' > /dev/null
+nol136 "$CK52_UTAMA" "$DAG66" 2500; nol136 "$CK52_UTAMA" "$TEP66" 5000
+BO136=$(api "$OWNER" POST /produksi/faktur "{\"branch_id\":\"$CK52_UTAMA\",\"items\":[{\"ingredient_id\":\"$BASO66\",\"mode\":\"batch\",\"jumlah\":1}]}" | jq -r '.beli_otomatis.faktur_id // ""')
+cek "stok minimum: faktur beli otomatis terbit meski batch tercukupi" "V == 1" \
+  "$([ -n "$BO136" ] && echo 1 || echo 0)"
+cek "beli otomatis HANYA memuat bahan yang di bawah minimum (daging)" "V == 1" \
+  "$(api "$OWNER" GET "/pembelian?branch_id=$CK52_UTAMA&per_page=200" | jq --arg f "$BO136" --arg a "$DAG66" '[.rows[]|select(.faktur_id==$f)] | ((length==1) and (.[0].ingredient_id==$a)) | if . then 1 else 0 end')"
+api "$OWNER" PUT "/bahan/$DAG66" '{"stok_minimum":0}' > /dev/null
+# Resep BERTINGKAT: komponen yang juga resep tak bisa DIBELI, tapi tak boleh
+# hilang diam-diam — pengaman "Mulai Kerjakan" wajib menyebutnya.
+nol136 "$CK52_UTAMA" "$JANDO66" 0; nol136 "$CK52_UTAMA" "$BASO66" 0; nol136 "$CK52_UTAMA" "$TEP66" 0
+FJ136=$(api "$OWNER" POST /produksi/faktur "{\"branch_id\":\"$CK52_UTAMA\",\"items\":[{\"ingredient_id\":\"$JANDO66\",\"mode\":\"batch\",\"jumlah\":1}]}" | jq -r .faktur_id)
+ERR136=$(api "$OWNER" POST "/produksi/tahap/$FJ136" '{"ke":"dikerjakan"}')
+cek "resep bertingkat: mulai kerjakan ditahan saat bahan belum ada" "V == 1" \
+  "$(echo "$ERR136" | jq '((.error // "")|test("belum cukup"))|if . then 1 else 0 end')"
+cek "peringatan menyebut bahan mentah (tepung) DAN komponen resep (baso)" "V == 1" \
+  "$(echo "$ERR136" | jq '(((.error // "") | test("tepung uji66")) and ((.error // "") | test("baso uji66"))) | if . then 1 else 0 end')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

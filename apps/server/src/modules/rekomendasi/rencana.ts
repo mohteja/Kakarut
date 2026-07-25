@@ -33,7 +33,7 @@ import { tanggalDi } from "../../lib/time";
 import { terbitkanNomor } from "../dokumen/nomor";
 import { loadKatalog, tampilDiCabang } from "../menu/service";
 import { catatLogFaktur } from "../produksi/log";
-import { hitungSaldoCabang } from "../stok/service";
+import { hitungSaldoCabang, qtyDalamJalan } from "../stok/service";
 
 /**
  * Hitung preview rencana: kebutuhan per bahan = Σ porsi × qty per porsi
@@ -122,7 +122,17 @@ export async function rencanaDariMenu(
           (await hitungSaldoCabang(companyId, pelaksanaId)).map((r) => [r.ingredient_id, r]),
         )
       : new Map<string, (typeof saldoRows)[number]>();
-  const ckStok = (id: string) => ckSaldoMap.get(id)?.saldo ?? 0;
+  // Saldo CK masih memuat barang yang SUDAH dijanjikan ke cabang lain tapi
+  // belum diterima (kiriman/transfer 'menunggu'). Kalau tidak dipotong, dua
+  // permintaan berturut-turut sama-sama direncanakan "tinggal kirim dari CK"
+  // dan saldo CK jadi minus begitu semua kiriman diterima. Yang boleh
+  // dijanjikan hanyalah sisa yang benar-benar masih ada di CK.
+  const ckJalanMap =
+    pelaksanaId !== branchId
+      ? await qtyDalamJalan(db, companyId, pelaksanaId)
+      : new Map<string, number>();
+  const ckStok = (id: string) =>
+    Math.max(0, (ckSaldoMap.get(id)?.saldo ?? 0) - (ckJalanMap.get(id) ?? 0));
   // Porsi stok CK yang "terpakai" menutup kebutuhan menu-level tiap bahan —
   // dipakai agar bahan yang SAMA (dipakai langsung menu & jadi input produksi)
   // tak menghitung stok CK dua kali (double-count → under-buy).

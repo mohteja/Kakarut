@@ -686,3 +686,56 @@ export async function fifoBahan(params: {
     terpotong: eventTerpotong || hasil.pemakaian.length > BATAS_PEMAKAIAN_FIFO,
   };
 }
+
+/**
+ * Qty per bahan yang SUDAH dijanjikan keluar dari sebuah cabang tapi belum
+ * diterima tujuan (kiriman/transfer berstatus 'menunggu').
+ *
+ * `hitungSaldoCabang` sengaja baru mengurangi saldo asal saat tujuan
+ * mengonfirmasi — barang yang masih di jalan tetap tercatat di asal agar tidak
+ * "hilang" dari pembukuan. Karena itu saldo mentah TIDAK boleh dipakai sebagai
+ * batas pengiriman baru: tanpa potongan ini stok yang sama bisa dijanjikan
+ * berkali-kali dan saldo asal jadi minus begitu semua kiriman tiba.
+ *
+ * `exec` boleh `db` atau sebuah transaksi — pemanggil yang memvalidasi sebelum
+ * menulis harus memakai transaksi + `kunciKirimCabang` agar pemeriksaannya
+ * tidak balapan dengan pengiriman lain dari cabang yang sama.
+ */
+export async function qtyDalamJalan(
+  exec: Pick<typeof db, "execute">,
+  companyId: string,
+  branchId: string,
+  ingredientIds?: string[],
+): Promise<Map<string, number>> {
+  if (ingredientIds && ingredientIds.length === 0) return new Map();
+  const filterBahan = ingredientIds
+    ? sql` AND pr.ingredient_id IN (${sql.join(
+        ingredientIds.map((id) => sql`${id}::uuid`),
+        sql`, `,
+      )})`
+    : sql``;
+  const res = await exec.execute(sql`
+    SELECT pr.ingredient_id AS ingredient_id, SUM(pr.qty) AS qty
+    FROM productions pr
+    WHERE pr.company_id = ${companyId}
+      AND pr.asal_branch_id = ${branchId}
+      AND pr.status = 'menunggu'
+      AND pr.deleted_at IS NULL${filterBahan}
+    GROUP BY pr.ingredient_id
+  `);
+  const rows = (res as unknown as { rows?: Record<string, unknown>[] }).rows ?? [];
+  return new Map(rows.map((r) => [String(r.ingredient_id), Number(r.qty) || 0]));
+}
+
+/**
+ * Serialkan pengiriman keluar dari SATU cabang. Saldo diturunkan dari ledger
+ * (tak ada baris stok yang bisa dikunci), jadi tanpa kunci ini dua permintaan
+ * bersamaan sama-sama membaca saldo lama dan sama-sama lolos.
+ */
+export async function kunciKirimCabang(
+  tx: Pick<typeof db, "execute">,
+  companyId: string,
+  branchId: string,
+): Promise<void> {
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`kirim:${companyId}:${branchId}`}))`);
+}

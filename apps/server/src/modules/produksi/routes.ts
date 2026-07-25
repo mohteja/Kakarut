@@ -1,6 +1,19 @@
 import { randomUUID } from "node:crypto";
 import { zValidator } from "@hono/zod-validator";
-import { and, asc, eq, gte, inArray, isNull, lte, ne, notInArray, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  eq,
+  gte,
+  inArray,
+  isNull,
+  lte,
+  ne,
+  notExists,
+  notInArray,
+  or,
+  sql,
+} from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Hono, type Context } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -42,7 +55,7 @@ import {
   type AppEnv,
 } from "../../middleware/auth";
 import { tambahHari, tanggalDi } from "../../lib/time";
-import { hitungSaldoCabang } from "../stok/service";
+import { hitungSaldoCabang, kunciKirimCabang, qtyDalamJalan } from "../stok/service";
 import { autoFileRakCabang } from "../penyimpanan/autoFile";
 
 const pembuat = alias(users, "pembuat_prod");
@@ -1497,23 +1510,36 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
           kirimMap.set(it.ingredient_id, { qty: it.qty, rencanaId: asal.rencanaId });
         }
       }
-      const saldoCk = new Map(
-        (await hitungSaldoCabang(auth.company_id!, ckId)).map((r) => [r.ingredient_id, r]),
-      );
-      for (const [ingId, v] of kirimMap) {
-        const s = saldoCk.get(ingId);
-        if (!s || v.qty > s.saldo + 1e-9) {
-          throw new HTTPException(400, {
-            message: `Stok CK tidak cukup untuk ${s?.nama ?? "bahan"} (saldo ${s?.saldo ?? 0} ${s?.satuan ?? ""}) — kurangi jumlah kiriman`,
-          });
-        }
-      }
       // baris sumber yang bahannya ikut terkirim (pengingatnya dihapus);
       // bahan yang tidak disertakan tetap berpengingat "perlu dikirim"
       const sumberTerkirim = rows.filter((b) => kirimMap.has(b.ingredientId));
 
       const kirimFakturId = randomUUID();
       const hasil = await db.transaction(async (tx) => {
+        // Cek stok CK DI DALAM transaksi + kunci per cabang: saldo diturunkan
+        // dari ledger (tak ada baris yang bisa dikunci), jadi tanpa ini dua
+        // pengiriman bersamaan sama-sama membaca saldo lama dan lolos.
+        await kunciKirimCabang(tx, auth.company_id!, ckId);
+        const saldoCk = new Map(
+          (await hitungSaldoCabang(auth.company_id!, ckId)).map((r) => [r.ingredient_id, r]),
+        );
+        // Saldo CK masih memuat barang yang SUDAH dikirim tapi belum diterima
+        // cabang tujuan — harus dipotong dulu, kalau tidak stok yang sama bisa
+        // dijanjikan ke beberapa permintaan dan saldo CK jadi minus saat semua
+        // kiriman diterima.
+        const jalanCk = await qtyDalamJalan(tx, auth.company_id!, ckId, [...kirimMap.keys()]);
+        for (const [ingId, v] of kirimMap) {
+          const s = saldoCk.get(ingId);
+          const diJalan = jalanCk.get(ingId) ?? 0;
+          const tersedia = (s?.saldo ?? 0) - diJalan;
+          if (!s || v.qty > tersedia + 1e-9) {
+            const catatanJalan =
+              diJalan > 0 ? `, ${diJalan} masih dalam perjalanan ke cabang lain` : "";
+            throw new HTTPException(400, {
+              message: `Stok CK tidak cukup untuk ${s?.nama ?? "bahan"} (tersedia ${Math.max(0, tersedia)} ${s?.satuan ?? ""}${catatanJalan}) — kurangi jumlah kiriman`,
+            });
+          }
+        }
         const asalNomor = (await nomorUntukRefs(tx, auth.company_id!, [fakturId])).get(fakturId);
         // Faktur KIRIMAN (transfer stok CK): lahir langsung 'menunggu' di cabang
         // tujuan — muncul di Penerimaan; saat diterima stok CK asal berkurang.
@@ -1951,6 +1977,26 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
           : [];
       conds.push(...condDivisi);
 
+      // Faktur TRANSFER STOK (nomor TF-) menumpang bentuk baris `productions`
+      // yang sama, tapi itu pemindahan stok jadi — bukan pekerjaan produksi.
+      // Disaring di sini agar tidak mengotori daftar/badge Produksi; jalurnya
+      // sendiri ada di menu Transfer Stok & Penerimaan Barang.
+      const condBukanTransfer = [
+        notExists(
+          db
+            .select({ ada: sql`1` })
+            .from(dokumenNomor)
+            .where(
+              and(
+                eq(dokumenNomor.companyId, productions.companyId),
+                eq(dokumenNomor.refId, productions.fakturId),
+                eq(dokumenNomor.jenis, "transfer"),
+              ),
+            ),
+        ),
+      ];
+      conds.push(...condBukanTransfer);
+
       const keyExpr = sql<string>`COALESCE(${productions.fakturId}::text, ${productions.id}::text)`;
 
       const [ringkas] = await db
@@ -2079,6 +2125,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
                   eq(productions.companyId, auth.company_id!),
                   ...condCabang,
                   ...condDivisi,
+                  ...condBukanTransfer,
                   eq(productions.tipe, tipe),
                   isNull(productions.deletedAt),
                   inArray(keyExpr, keys),

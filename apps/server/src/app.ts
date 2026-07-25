@@ -42,6 +42,7 @@ import { rekomendasiRoutes } from "./modules/rekomendasi/routes";
 import { sampahRoutes } from "./modules/sampah/routes";
 import { shiftRoutes } from "./modules/shift/routes";
 import { supplierRoutes } from "./modules/supplier/routes";
+import { transferRoutes } from "./modules/transfer/routes";
 import { stokRoutes } from "./modules/stok/routes";
 import { uploadRoutes } from "./modules/upload/routes";
 import { karyawanRoutes } from "./modules/users/routes";
@@ -119,6 +120,11 @@ export function createApp() {
   // digerbang per-rute di modulnya). Tim, kitchen & bar ikut agar bisa absen
   // sendiri.
   tenant.use("/absensi/*", requireRole("owner", "admin", "cashier", "tim", "kitchen", "bar"));
+  // TRANSFER STOK antar lokasi (stok ready CK/cabang → CK/cabang lain):
+  // manajemen bebas memilih cabang asal; peran terkunci cabang (tim, kitchen,
+  // bar) hanya boleh mengirim DARI cabangnya sendiri (dijaga di modulnya).
+  // Kasir tidak membuat transfer — cukup menerima lewat Penerimaan.
+  tenant.use("/transfer-stok/*", requireRole("owner", "admin", "tim", "kitchen", "bar"));
   tenant
     .route("/company", companyRoutes)
     .route("/customer", customerRoutes)
@@ -134,6 +140,8 @@ export function createApp() {
     // penerimaan kiriman di toko — boleh kasir (terkunci cabangnya)
     .route("/penerimaan", penerimaanRoutes)
     .route("/supplier", supplierRoutes)
+    // transfer stok antar lokasi (faktur TF-, multi bahan)
+    .route("/transfer-stok", transferRoutes)
     .route("/penyimpanan", penyimpananRoutes)
     .route("/meja", mejaRoutes)
     .route("/open-bill", openBillRoutes)

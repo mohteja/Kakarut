@@ -13,6 +13,11 @@ membungkus web di WebView.
 Aplikasi Flutter dikembangkan di repo terpisah **`kakarut-mobile`**. Dokumen ini
 tidak menuntut akses ke repo server — cukup jadikan rujukan kontrak.
 
+> **Sudah pernah menerima dokumen ini sebelumnya?** Jangan bandingkan ulang
+> seluruh isinya. Baca **[`docs/mobile/CHANGELOG-API.md`](mobile/CHANGELOG-API.md)**
+> — di sana perubahan per rilis diringkas dan ditandai mana yang **wajib**
+> disesuaikan di aplikasi mobile, mana yang sekadar informasi.
+
 ---
 
 ## 1. Konvensi
@@ -318,6 +323,51 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 - `POST /api/penerimaan/:fakturId/terima-sebagian` — req: `{ items: [{id:uuid, qty_diterima:number(≥0)}] (min1), alasan?|null (max300) }` — res: `{ ok, jumlah_baris }` — error: **400** (baris hilang / qty > dikirim), **404**, **409** status berubah
 - `POST /api/penerimaan/:fakturId/tolak` — req: `{ alasan?|null (max300) }` — res: `{ ok, jumlah_baris }` — error: **404**
 - `POST /api/penerimaan/:fakturId/batal-tolak` — res: `{ ok, jumlah_baris }` — error: **400** (sudah diterima sebagian), **404**
+
+## `/api/transfer-stok` — Transfer stok antar lokasi (`modules/transfer/routes.ts`)
+
+> **Group guard: [owner/admin, `tim`, `kitchen`, `bar`]** (kasir tidak membuat
+> transfer — hanya menerima lewat `/penerimaan`). Memindahkan stok yang **sudah
+> ada (ready)** antar lokasi: CK↔cabang atau cabang↔cabang, satu faktur (nomor
+> **TF-**) berisi BANYAK bahan. Dipakai mis. saat barang kiriman rusak di jalan
+> lalu dikirim ulang.
+>
+> **Representasi & saldo:** satu baris `productions` per bahan dengan pola
+> KIRIMAN yang sudah ada — `branch_id` = TUJUAN (menambah saldo tujuan saat
+> dikonfirmasi), `asal_branch_id` = ASAL (mengurangi saldo asal saat
+> dikonfirmasi), `tujuan_branch_id` = TUJUAN, `dari_branch_id` = ASAL, `tipe` =
+> "produksi", `status` = "menunggu", `total_harga` = 0. Konsekuensinya:
+> kiriman **otomatis muncul di `GET /penerimaan`** cabang tujuan dan **stok asal
+> baru berkurang saat kiriman DITERIMA** (selagi di jalan, stok masih tercatat
+> di asal) — sama seperti jalur kiriman lain. Rak simpan diisi otomatis (rak
+> default bahan) saat diterima.
+>
+> **Batas kirim = `saldo − dalam_jalan`.** Karena saldo asal baru berkurang saat
+> tujuan mengonfirmasi, saldo mentah masih memuat barang yang fisiknya sudah
+> lepas. Barang berstatus `menunggu` yang keluar dari cabang itu (transfer MAUPUN
+> kiriman jalur lain) karena itu dipotong lebih dulu — tanpa ini stok yang sama
+> bisa dijanjikan berkali-kali dan saldo asal jadi minus saat semua kiriman tiba.
+> Transfer dari satu cabang asal juga diserialkan (advisory lock per cabang)
+> sehingga dua permintaan bersamaan tidak bisa sama-sama lolos.
+>
+> **Bukan pekerjaan produksi:** meski menumpang tabel `productions`, faktur
+> transfer TIDAK muncul di `GET /produksi` (daftar & badge) — jalurnya hanya
+> `/transfer-stok` dan `/penerimaan`.
+>
+> **Aturan yang sama berlaku di jalur Permintaan Stok:** perencana rencana-menu
+> memakai `saldo CK − barang di jalan` saat memutuskan "tinggal kirim dari CK",
+> sehingga dua permintaan berturut-turut tidak bisa dijanjikan stok yang sama
+> (permintaan kedua otomatis jadi work-order produksi).
+>
+> **Berdampingan** dengan "Kirim dari stok CK" pada Permintaan Stok: yang itu
+> lahir dari rencana menu (`rencana_id` terisi, nomor PR-), yang ini manual/
+> ad-hoc (`rencana_id` null, nomor TF-). Pembeda tegas di API: faktur transfer
+> adalah faktur yang punya nomor dokumen berjenis `transfer`.
+
+- `GET /api/transfer-stok/saldo` — query: `branch_id?` (peran terkunci cabang selalu dipaksa ke cabangnya) — res: `{ branch_id, rows: TransferStokSaldoRow[] }` — stok READY di cabang itu: hanya bahan **aktif + berlacak-stok + masih tersisa (`saldo − dalam_jalan > 0`)**. Tiap baris membawa `pengadaan` ("beli"/"produksi") agar UI bisa menandai jenis bahan, `saldo` (fisik) dan `dalam_jalan` (sudah dikirim, belum diterima tujuan) — **yang boleh ditransfer adalah `saldo − dalam_jalan`**
+- `GET /api/transfer-stok` — query: `per_page?` (default 50, maks 200) — res: `{ rows: TransferStokFaktur[] }` (terbaru dulu; tiap faktur memuat `items[]` dengan `pengadaan` & `status` per bahan, plus `status` agregat: `menunggu`/`dikonfirmasi`/`ditolak`/`sebagian`). Peran terkunci cabang hanya melihat transfer yang menyangkut cabangnya (pengirim atau penerima)
+- `POST /api/transfer-stok` — req: `{ asal_branch_id: uuid, tujuan_branch_id: uuid, catatan?|null (max300), items: [{ingredient_id: uuid, qty: number(>0)}] (1..100; bahan sama digabung qty-nya) }` — res: **201** `{ ok, faktur_id, nomor (TF-xxxx), asal, tujuan, jumlah_baris }` — error: **400** (asal = tujuan; asal/tujuan Kantor; bahan invalid/nonaktif/tak lacak stok; **qty melebihi `saldo − dalam_jalan` di asal** — dicek di dalam transaksi setelah advisory lock per cabang asal, pesannya menyebut berapa yang masih dalam perjalanan), **403** peran terkunci mengirim dari cabang lain, **404** cabang tidak ditemukan
+- `POST /api/transfer-stok/:fakturId/batal` — batalkan transfer yang belum diproses tujuan (baris masuk Tempat Sampah) — res: `{ ok, jumlah_baris }` — error: **403** bukan pengirim, **404** bukan faktur transfer, **409** sudah diterima/ditolak di tujuan
 
 ## `/api/supplier` — Supplier (`modules/supplier/routes.ts`)
 
@@ -988,7 +1038,13 @@ export interface RencanaBahanRow {
   kebutuhan: number;
   /** saldo stok cabang TUJUAN saja (bukan + CK) — cocok dgn Kartu Stok cabang */
   saldo: number;
-  /** stok jadi yang ADA di Central Kitchen (bisa dikirim ke cabang; 0 bila tak ada CK) */
+  /**
+   * stok jadi CK yang benar-benar BISA DIJANJIKAN ke cabang ini: saldo fisik CK
+   * dikurangi barang yang sudah dikirim tapi belum diterima cabang mana pun.
+   * 0 bila tak ada CK. Potongan itu penting: saldo CK sengaja masih memuat
+   * barang yang di jalan, jadi tanpa dipotong dua permintaan berturut-turut
+   * akan sama-sama dijanjikan "tinggal kirim" dan saldo CK jadi minus.
+   */
   saldo_ck: number;
   /** kekurangan cabang = max(0, kebutuhan − saldo cabang); 0 = stok cabang cukup */
   kurang: number;
@@ -1151,6 +1207,60 @@ export interface StokRowDto {
   produksi_berjalan: ProduksiBerjalan | null;
   /** pembelian (beli jadi) yang belum masuk stok (RAB→diproses→dikirim); null bila tak ada */
   pembelian_berjalan: ProduksiBerjalan | null;
+}
+
+/**
+ * TRANSFER STOK — satu baris bahan pada faktur transfer antar lokasi
+ * (CK↔cabang, cabang↔cabang). `pengadaan` dibawa agar tabel jelas menandai
+ * bahan BELI (dibeli jadi) vs PRODUKSI (dibuat sendiri).
+ */
+export interface TransferStokItemRow {
+  id: string;
+  ingredient_id: string;
+  nama: string;
+  satuan: string;
+  pengadaan: JenisPengadaan;
+  qty: number;
+  /** menunggu = dalam perjalanan; dikonfirmasi = diterima; ditolak = tak diterima */
+  status: KonfirmasiStatus;
+  alasan_tolak: string | null;
+}
+
+/** Satu FAKTUR transfer stok (nomor TF-) berisi banyak bahan. */
+export interface TransferStokFaktur {
+  faktur_id: string;
+  /** nomor dokumen TF-xxxx */
+  nomor: string | null;
+  waktu: string;
+  prod_date: string;
+  asal_branch_id: string | null;
+  asal_cabang: string | null;
+  tujuan_branch_id: string | null;
+  tujuan_cabang: string | null;
+  catatan: string | null;
+  dibuat_oleh: string | null;
+  /** agregat status baris; "sebagian" = ada yang diterima & ada yang ditolak */
+  status: KonfirmasiStatus | "sebagian";
+  items: TransferStokItemRow[];
+}
+
+/**
+ * Stok READY satu bahan di cabang asal — dasar pemilih bahan & validasi qty
+ * pada form Transfer Stok (hanya bahan berlacak-stok dengan saldo > 0).
+ */
+export interface TransferStokSaldoRow {
+  ingredient_id: string;
+  nama: string;
+  satuan: string;
+  pengadaan: JenisPengadaan;
+  /** saldo FISIK di lokasi asal (barang yang masih dalam perjalanan ikut terhitung) */
+  saldo: number;
+  /**
+   * qty yang SUDAH dijanjikan keluar tapi belum diterima tujuan (kiriman &
+   * transfer berstatus 'menunggu'). Barang ini fisik sudah lepas, jadi
+   * `tersedia untuk transfer baru` = `saldo − dalam_jalan`.
+   */
+  dalam_jalan: number;
 }
 
 /**

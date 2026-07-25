@@ -326,6 +326,9 @@ export function Layout() {
                     <span>🛒 Beli Bahan Baku</span>
                     {badgeOranye(beliBelum)}
                   </NavLink>
+                  <NavLink to="/transfer-stok" className={linkClass}>
+                    🔄 Transfer Stok
+                  </NavLink>
                   <NavLink to="/bahan" className={linkClass}>
                     🥩 Bahan Baku
                   </NavLink>
@@ -403,6 +406,12 @@ export function Layout() {
                   </NavLink>
                 </>
               )}
+              {/* Transfer stok dari cabang sendiri (mis. kembalikan/kirim ulang) */}
+              {(isTim || isKitchen || isBar) && !timDiCk && (
+                <NavLink to="/transfer-stok" className={linkClass}>
+                  🔄 Transfer Stok
+                </NavLink>
+              )}
               {!timDiCk && (
                 <NavLink to="/penerimaan" className={(s) => `${linkClass(s)} flex items-center gap-2`}>
                   <span>📥 Penerimaan Barang</span>
@@ -442,6 +451,10 @@ export function Layout() {
                   <NavLink to="/perlengkapan/beli" className={navFlex}>
                     <span>🧺 Beli Perlengkapan</span>
                     {badgeOranye(perlengkapanBelum)}
+                  </NavLink>
+                  {/* pindahkan stok READY antar lokasi (mis. ganti barang rusak) */}
+                  <NavLink to="/transfer-stok" className={linkClass}>
+                    🔄 Transfer Stok
                   </NavLink>
                   {dCk && (
                     <>

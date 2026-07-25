@@ -417,7 +417,13 @@ export interface RencanaBahanRow {
   kebutuhan: number;
   /** saldo stok cabang TUJUAN saja (bukan + CK) — cocok dgn Kartu Stok cabang */
   saldo: number;
-  /** stok jadi yang ADA di Central Kitchen (bisa dikirim ke cabang; 0 bila tak ada CK) */
+  /**
+   * stok jadi CK yang benar-benar BISA DIJANJIKAN ke cabang ini: saldo fisik CK
+   * dikurangi barang yang sudah dikirim tapi belum diterima cabang mana pun.
+   * 0 bila tak ada CK. Potongan itu penting: saldo CK sengaja masih memuat
+   * barang yang di jalan, jadi tanpa dipotong dua permintaan berturut-turut
+   * akan sama-sama dijanjikan "tinggal kirim" dan saldo CK jadi minus.
+   */
   saldo_ck: number;
   /** kekurangan cabang = max(0, kebutuhan − saldo cabang); 0 = stok cabang cukup */
   kurang: number;
@@ -580,6 +586,60 @@ export interface StokRowDto {
   produksi_berjalan: ProduksiBerjalan | null;
   /** pembelian (beli jadi) yang belum masuk stok (RAB→diproses→dikirim); null bila tak ada */
   pembelian_berjalan: ProduksiBerjalan | null;
+}
+
+/**
+ * TRANSFER STOK — satu baris bahan pada faktur transfer antar lokasi
+ * (CK↔cabang, cabang↔cabang). `pengadaan` dibawa agar tabel jelas menandai
+ * bahan BELI (dibeli jadi) vs PRODUKSI (dibuat sendiri).
+ */
+export interface TransferStokItemRow {
+  id: string;
+  ingredient_id: string;
+  nama: string;
+  satuan: string;
+  pengadaan: JenisPengadaan;
+  qty: number;
+  /** menunggu = dalam perjalanan; dikonfirmasi = diterima; ditolak = tak diterima */
+  status: KonfirmasiStatus;
+  alasan_tolak: string | null;
+}
+
+/** Satu FAKTUR transfer stok (nomor TF-) berisi banyak bahan. */
+export interface TransferStokFaktur {
+  faktur_id: string;
+  /** nomor dokumen TF-xxxx */
+  nomor: string | null;
+  waktu: string;
+  prod_date: string;
+  asal_branch_id: string | null;
+  asal_cabang: string | null;
+  tujuan_branch_id: string | null;
+  tujuan_cabang: string | null;
+  catatan: string | null;
+  dibuat_oleh: string | null;
+  /** agregat status baris; "sebagian" = ada yang diterima & ada yang ditolak */
+  status: KonfirmasiStatus | "sebagian";
+  items: TransferStokItemRow[];
+}
+
+/**
+ * Stok READY satu bahan di cabang asal — dasar pemilih bahan & validasi qty
+ * pada form Transfer Stok (hanya bahan berlacak-stok dengan saldo > 0).
+ */
+export interface TransferStokSaldoRow {
+  ingredient_id: string;
+  nama: string;
+  satuan: string;
+  pengadaan: JenisPengadaan;
+  /** saldo FISIK di lokasi asal (barang yang masih dalam perjalanan ikut terhitung) */
+  saldo: number;
+  /**
+   * qty yang SUDAH dijanjikan keluar tapi belum diterima tujuan (kiriman &
+   * transfer berstatus 'menunggu'). Barang ini fisik sudah lepas, jadi
+   * `tersedia untuk transfer baru` = `saldo − dalam_jalan`.
+   */
+  dalam_jalan: number;
 }
 
 /**
