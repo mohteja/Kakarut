@@ -181,6 +181,10 @@ export interface BahanDto {
   masa_simpan_hari: number;
   /** LEAD TIME (hari): beli = lama pesanan datang; produksi = lama proses; 0 = tanpa info */
   lead_time_hari: number;
+  /** FOTO BAHAN JADI hasil produksi (halaman Resep) — null = belum diunggah */
+  foto_hasil_url: string | null;
+  /** FOTO CARA PACKING hasil produksi (halaman Resep) — null = belum diunggah */
+  foto_packing_url: string | null;
   is_active: boolean;
   /** nama supplier UTAMA bahan ini (null = belum diatur) */
   supplier_utama: string | null;
@@ -257,6 +261,17 @@ export interface BahanSupplierDto {
   telepon: string | null;
   alamat: string | null;
   is_utama: boolean;
+}
+
+/**
+ * Satu LANGKAH CARA MASAK bahan produksi (urut sesuai sort_order). Dikelola
+ * owner/admin di halaman Resep; dibaca semua pelaksana produksi (kitchen,
+ * bar, tim CK). foto_url = foto proses langkah itu (opsional).
+ */
+export interface BahanLangkahRow {
+  id: string;
+  teks: string;
+  foto_url: string | null;
 }
 
 /**

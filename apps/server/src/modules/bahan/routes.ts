@@ -8,6 +8,7 @@ import {
   hargaPerUnit,
   type BahanDetailDto,
   type BahanDto,
+  type BahanLangkahRow,
   type BahanResepRow,
   type BahanSupplierDto,
   type RakLokasi,
@@ -21,6 +22,7 @@ import {
   dokumenNomor,
   ingredientComponents,
   ingredientProduksiBranches,
+  ingredientSteps,
   ingredientSuppliers,
   ingredients,
   menuComponents,
@@ -74,6 +76,9 @@ const BahanBody = z.object({
   masa_simpan_hari: z.number().int().min(0).max(3650).default(0),
   /** lead time (hari): beli = lama pesanan datang; produksi = lama proses; 0 = tanpa info */
   lead_time_hari: z.number().int().min(0).max(365).default(0),
+  /** foto bahan jadi & foto cara packing (URL hasil POST /upload?tujuan=resep) */
+  foto_hasil_url: z.string().trim().max(500).nullish(),
+  foto_packing_url: z.string().trim().max(500).nullish(),
 });
 
 /**
@@ -105,11 +110,26 @@ const BahanPatchBody = z.object({
   min_beli: z.number().nonnegative().optional(),
   masa_simpan_hari: z.number().int().min(0).max(3650).optional(),
   lead_time_hari: z.number().int().min(0).max(365).optional(),
+  foto_hasil_url: z.string().trim().max(500).nullish(),
+  foto_packing_url: z.string().trim().max(500).nullish(),
 });
 
 const ResepBody = z.object({
   komponen: z
     .array(z.object({ ingredient_id: z.string().uuid(), qty: z.number().positive() }))
+    .default([]),
+});
+
+/** Langkah cara masak bahan produksi — urutan array = urutan langkah. */
+const LangkahBody = z.object({
+  langkah: z
+    .array(
+      z.object({
+        teks: z.string().trim().min(1).max(1000),
+        foto_url: z.string().trim().max(500).nullish(),
+      }),
+    )
+    .max(30)
     .default([]),
 });
 
@@ -313,6 +333,20 @@ async function pastikanCabangProdusen(companyId: string, ids: string[]): Promise
   return unik;
 }
 
+/** Langkah cara masak satu bahan, urut sort_order — dipakai GET & PUT /langkah. */
+async function listLangkah(ingredientId: string): Promise<BahanLangkahRow[]> {
+  const rows = await db
+    .select({
+      id: ingredientSteps.id,
+      teks: ingredientSteps.teks,
+      fotoUrl: ingredientSteps.fotoUrl,
+    })
+    .from(ingredientSteps)
+    .where(eq(ingredientSteps.ingredientId, ingredientId))
+    .orderBy(asc(ingredientSteps.sortOrder));
+  return rows.map((r) => ({ id: r.id, teks: r.teks, foto_url: r.fotoUrl }));
+}
+
 /** Ganti seluruh daftar cabang produsen satu bahan (kosong = semua cabang). */
 async function simpanCabangProdusen(ingredientId: string, ids: string[]): Promise<void> {
   await db
@@ -357,6 +391,8 @@ function toDto(
     min_beli: row.minBeli,
     masa_simpan_hari: row.masaSimpanHari,
     lead_time_hari: row.leadTimeHari,
+    foto_hasil_url: row.fotoHasilUrl,
+    foto_packing_url: row.fotoPackingUrl,
     is_active: row.isActive,
     supplier_utama: sup?.utama ?? null,
     jumlah_supplier: sup?.jumlah ?? 0,
@@ -543,6 +579,8 @@ export const bahanRoutes = new Hono<AppEnv>()
           minBeli: body.min_beli,
           masaSimpanHari: body.masa_simpan_hari,
           leadTimeHari: body.lead_time_hari,
+          fotoHasilUrl: body.foto_hasil_url ?? null,
+          fotoPackingUrl: body.foto_packing_url ?? null,
           updatedAt: new Date(),
         })
         .where(and(eq(ingredients.id, existing.id), eq(ingredients.companyId, auth.company_id!)))
@@ -577,6 +615,8 @@ export const bahanRoutes = new Hono<AppEnv>()
         minBeli: body.min_beli,
         masaSimpanHari: body.masa_simpan_hari,
         leadTimeHari: body.lead_time_hari,
+        fotoHasilUrl: body.foto_hasil_url ?? null,
+        fotoPackingUrl: body.foto_packing_url ?? null,
       })
       .returning();
     await simpanCabangProdusen(row.id, produsenIds);
@@ -887,6 +927,10 @@ export const bahanRoutes = new Hono<AppEnv>()
           ...(body.min_beli !== undefined && { minBeli: body.min_beli }),
           ...(body.masa_simpan_hari !== undefined && { masaSimpanHari: body.masa_simpan_hari }),
           ...(body.lead_time_hari !== undefined && { leadTimeHari: body.lead_time_hari }),
+          ...(body.foto_hasil_url !== undefined && { fotoHasilUrl: body.foto_hasil_url ?? null }),
+          ...(body.foto_packing_url !== undefined && {
+            fotoPackingUrl: body.foto_packing_url ?? null,
+          }),
           updatedAt: new Date(),
         })
         .where(
@@ -1268,6 +1312,65 @@ export const bahanRoutes = new Hono<AppEnv>()
         }
       });
       return c.json({ ok: true, jumlah: inputIds.length });
+    },
+  )
+  // Langkah CARA MASAK bahan produksi: teks berurutan + foto proses opsional.
+  // BACA terbuka utk semua role (kitchen/bar/tim CK butuh saat memproduksi);
+  // TULIS owner/admin, replace-whole-list — urutan array = urutan langkah.
+  .get("/:id/langkah", async (c) => {
+    const auth = c.get("auth");
+    const id = c.req.param("id");
+    const [milik] = await db
+      .select({ id: ingredients.id })
+      .from(ingredients)
+      .where(and(eq(ingredients.id, id), eq(ingredients.companyId, auth.company_id!)));
+    if (!milik) throw new HTTPException(404, { message: "Bahan tidak ditemukan" });
+    return c.json(await listLangkah(id));
+  })
+  .put(
+    "/:id/langkah",
+    requireRole("owner", "admin"),
+    zValidator("json", LangkahBody),
+    async (c) => {
+      const auth = c.get("auth");
+      const id = c.req.param("id");
+      const body = c.req.valid("json");
+      const [induk] = await db
+        .select({ id: ingredients.id, pengadaan: ingredients.pengadaan })
+        .from(ingredients)
+        .where(and(eq(ingredients.id, id), eq(ingredients.companyId, auth.company_id!)));
+      if (!induk) throw new HTTPException(404, { message: "Bahan tidak ditemukan" });
+      if (induk.pengadaan !== "produksi") {
+        throw new HTTPException(400, {
+          message: "Cara masak hanya untuk bahan berjenis produksi",
+        });
+      }
+      await db.transaction(async (tx) => {
+        // Re-cek dalam transaksi (FOR UPDATE): PUT /bahan bisa flip pengadaan
+        // ke "beli" di sela validasi — tanpa ini langkah yatim tertulis.
+        const [indukTx] = await tx
+          .select({ pengadaan: ingredients.pengadaan })
+          .from(ingredients)
+          .where(and(eq(ingredients.id, id), eq(ingredients.companyId, auth.company_id!)))
+          .for("update");
+        if (indukTx?.pengadaan !== "produksi") {
+          throw new HTTPException(409, {
+            message: "Jenis pengadaan bahan berubah — muat ulang lalu coba lagi",
+          });
+        }
+        await tx.delete(ingredientSteps).where(eq(ingredientSteps.ingredientId, id));
+        if (body.langkah.length > 0) {
+          await tx.insert(ingredientSteps).values(
+            body.langkah.map((l, i) => ({
+              ingredientId: id,
+              sortOrder: i,
+              teks: l.teks,
+              fotoUrl: l.foto_url ?? null,
+            })),
+          );
+        }
+      });
+      return c.json(await listLangkah(id));
     },
   )
   // Pulihkan bahan terarsip (kebalikan DELETE): aktif kembali di semua daftar.

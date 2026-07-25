@@ -49,6 +49,10 @@ export interface StokMasukRow {
   exp_date?: string | null;
   /** masa simpan (hari) dari master bahan — default form exp saat Tiba */
   masa_simpan_hari?: number;
+  /** lokasi produksi resep ("cabang" = dikerjakan kitchen/bar cabang) */
+  produksi_di?: "ck" | "cabang" | null;
+  /** divisi pelaksana resep produksi cabang — dasar badge Kitchen/Bar */
+  divisi_produksi?: "kitchen" | "bar" | null;
   faktur_id: string | null;
   no_faktur: string | null;
   /** nomor dokumen otomatis (PB-/PR-), sama untuk semua baris satu faktur */
@@ -121,6 +125,8 @@ export interface FakturGroup {
   kiriman: boolean;
   /** produksi dari permintaan: hasil perlu dikirim ke cabang ini */
   untukCabang: string | null;
+  /** divisi produksi cabang yang muncul di faktur ini (badge Kitchen/Bar) */
+  divisi: ("kitchen" | "bar")[];
   rows: StokMasukRow[];
   totalHarga: number;
   /** total dana yang sudah cair untuk faktur ini */
@@ -439,6 +445,7 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
           permintaanNomor: null,
           kiriman: false,
           untukCabang: null,
+          divisi: [],
           rows: [],
           totalHarga: 0,
           danaCair: r.dana_cair ?? 0,
@@ -449,6 +456,11 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
       if (r.rencana_id) g.dariPermintaan = true;
       if (r.permintaan_nomor && !g.permintaanNomor) g.permintaanNomor = r.permintaan_nomor;
       if (r.asal_branch_id) g.kiriman = true;
+      // badge divisi: hanya resep produksi CABANG yang berdivisi (kitchen/bar)
+      if (r.produksi_di === "cabang") {
+        const d = r.divisi_produksi ?? "kitchen";
+        if (!g.divisi.includes(d)) g.divisi.push(d);
+      }
       if (!g.untukCabang && r.untuk_cabang) g.untukCabang = r.untuk_cabang;
       // faktur campuran (produk jadi + bahan produksi): tujuan diambil dari
       // baris mana pun yang punya — baris bahan produksi tujuannya null
@@ -688,6 +700,22 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                     <span className="font-bold text-stone-800">
                       {g.kiriman ? "🚚 Kiriman" : tipe === "produksi" ? "🏭 Produksi" : "🛒 Pembelian"}
                     </span>
+                    {/* divisi pelaksana produksi cabang — owner langsung tahu
+                        kartu ini pekerjaan Kitchen atau Bar */}
+                    {tipe === "produksi" &&
+                      !g.kiriman &&
+                      g.divisi.map((d) => (
+                        <span
+                          key={d}
+                          className={`rounded-md px-1.5 py-0.5 text-xs font-bold ${
+                            d === "bar"
+                              ? "bg-cyan-100 text-cyan-800"
+                              : "bg-amber-100 text-amber-800"
+                          }`}
+                        >
+                          {d === "bar" ? "🍹 Bar" : "🍳 Kitchen"}
+                        </span>
+                      ))}
                     {/* nomor dokumen otomatis — identitas utama faktur */}
                     {g.nomor && (
                       <span className="rounded-md bg-orange-100 px-1.5 py-0.5 font-mono text-xs font-bold text-orange-800">
