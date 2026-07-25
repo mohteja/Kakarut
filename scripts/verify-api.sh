@@ -4860,6 +4860,33 @@ cek "faktur TF- TIDAK muncul di daftar Produksi cabang tujuan" "V == 0" \
 cek "faktur TF- TIDAK muncul di daftar Produksi cabang asal" "V == 0" \
   "$(api "$OWNER" GET "/produksi?branch_id=$ASAL132&tipe=produksi&per_page=100" | jq '[.rows[]|select((.nomor // "")|startswith("TF-"))]|length')"
 
+echo "== 133. Stok CK yang sudah dijanjikan tak boleh dijanjikan ulang =="
+# Saldo CK sengaja masih memuat barang yang sudah dikirim tapi belum diterima
+# cabang (biar tak "hilang" dari pembukuan). Kalau perencana memakai saldo
+# mentah itu, DUA permintaan berturut-turut sama-sama direncanakan "tinggal
+# kirim dari CK" untuk stok yang sama → saldo CK MINUS saat semua kiriman tiba.
+api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CB46_ID\",\"items\":[{\"ingredient_id\":\"$BASO66\",\"qty\":0}]}" > /dev/null
+api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CK52_UTAMA\",\"items\":[{\"ingredient_id\":\"$BASO66\",\"qty\":500}]}" > /dev/null
+R133A=$(api "$OWNER" POST /rekomendasi/menu/faktur "{\"items\":[{\"menu_id\":\"$MENU66\",\"porsi\":100}],\"tujuan_branch_id\":\"$CB46_ID\",\"ck_branch_id\":\"$CK52_UTAMA\"}")
+KF133=$(echo "$R133A" | jq -r '.kirim.faktur_id // ""')
+cek "permintaan-1: stok CK cukup → ada faktur kirim" "V == 1" \
+  "$([ -n "$KF133" ] && echo 1 || echo 0)"
+api "$OWNER" POST "/produksi/kirim/$KF133" '{}' > /dev/null
+cek "selagi di jalan: saldo CK belum berkurang (barang masih tercatat di CK)" "abs(V - 500) < 0.001" \
+  "$(api "$OWNER" GET "/stok?branch_id=$CK52_UTAMA" | jq --arg i "$BASO66" '[.[]|select(.ingredient_id==$i)][0].saldo // 0')"
+cek "perencana melihat stok CK siap-janji = 0 (semua sudah di jalan)" "abs(V) < 0.001" \
+  "$(api "$OWNER" POST "/rekomendasi/menu?branch_id=$CB46_ID" "{\"items\":[{\"menu_id\":\"$MENU66\",\"porsi\":100}],\"ck_branch_id\":\"$CK52_UTAMA\"}" | jq --arg i "$BASO66" '[.bahan[]|select(.ingredient_id==$i)][0].kirim_ck // 0')"
+R133B=$(api "$OWNER" POST /rekomendasi/menu/faktur "{\"items\":[{\"menu_id\":\"$MENU66\",\"porsi\":100}],\"tujuan_branch_id\":\"$CB46_ID\",\"ck_branch_id\":\"$CK52_UTAMA\"}")
+cek "permintaan-2: TIDAK ada faktur kirim lagi (stok sudah dijanjikan)" "V == 0" \
+  "$(echo "$R133B" | jq '(.kirim != null)|if . then 1 else 0 end')"
+cek "permintaan-2: dialihkan jadi work-order produksi" "V == 1" \
+  "$(echo "$R133B" | jq '(.produksi != null)|if . then 1 else 0 end')"
+api "$OWNER" POST "/penerimaan/$KF133/terima" '{}' > /dev/null
+cek "setelah kiriman diterima: saldo CK 0 — TIDAK minus" "abs(V) < 0.001" \
+  "$(api "$OWNER" GET "/stok?branch_id=$CK52_UTAMA" | jq --arg i "$BASO66" '[.[]|select(.ingredient_id==$i)][0].saldo // 0')"
+cek "cabang menerima tepat 500 (bukan dobel)" "abs(V - 500) < 0.001" \
+  "$(api "$OWNER" GET "/stok?branch_id=$CB46_ID" | jq --arg i "$BASO66" '[.[]|select(.ingredient_id==$i)][0].saldo // 0')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

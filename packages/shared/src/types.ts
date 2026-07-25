@@ -417,7 +417,13 @@ export interface RencanaBahanRow {
   kebutuhan: number;
   /** saldo stok cabang TUJUAN saja (bukan + CK) — cocok dgn Kartu Stok cabang */
   saldo: number;
-  /** stok jadi yang ADA di Central Kitchen (bisa dikirim ke cabang; 0 bila tak ada CK) */
+  /**
+   * stok jadi CK yang benar-benar BISA DIJANJIKAN ke cabang ini: saldo fisik CK
+   * dikurangi barang yang sudah dikirim tapi belum diterima cabang mana pun.
+   * 0 bila tak ada CK. Potongan itu penting: saldo CK sengaja masih memuat
+   * barang yang di jalan, jadi tanpa dipotong dua permintaan berturut-turut
+   * akan sama-sama dijanjikan "tinggal kirim" dan saldo CK jadi minus.
+   */
   saldo_ck: number;
   /** kekurangan cabang = max(0, kebutuhan − saldo cabang); 0 = stok cabang cukup */
   kurang: number;

@@ -349,6 +349,11 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 > transfer TIDAK muncul di `GET /produksi` (daftar & badge) — jalurnya hanya
 > `/transfer-stok` dan `/penerimaan`.
 >
+> **Aturan yang sama berlaku di jalur Permintaan Stok:** perencana rencana-menu
+> memakai `saldo CK − barang di jalan` saat memutuskan "tinggal kirim dari CK",
+> sehingga dua permintaan berturut-turut tidak bisa dijanjikan stok yang sama
+> (permintaan kedua otomatis jadi work-order produksi).
+>
 > **Berdampingan** dengan "Kirim dari stok CK" pada Permintaan Stok: yang itu
 > lahir dari rencana menu (`rencana_id` terisi, nomor PR-), yang ini manual/
 > ad-hoc (`rencana_id` null, nomor TF-). Pembeda tegas di API: faktur transfer
@@ -1028,7 +1033,13 @@ export interface RencanaBahanRow {
   kebutuhan: number;
   /** saldo stok cabang TUJUAN saja (bukan + CK) — cocok dgn Kartu Stok cabang */
   saldo: number;
-  /** stok jadi yang ADA di Central Kitchen (bisa dikirim ke cabang; 0 bila tak ada CK) */
+  /**
+   * stok jadi CK yang benar-benar BISA DIJANJIKAN ke cabang ini: saldo fisik CK
+   * dikurangi barang yang sudah dikirim tapi belum diterima cabang mana pun.
+   * 0 bila tak ada CK. Potongan itu penting: saldo CK sengaja masih memuat
+   * barang yang di jalan, jadi tanpa dipotong dua permintaan berturut-turut
+   * akan sama-sama dijanjikan "tinggal kirim" dan saldo CK jadi minus.
+   */
   saldo_ck: number;
   /** kekurangan cabang = max(0, kebutuhan − saldo cabang); 0 = stok cabang cukup */
   kurang: number;

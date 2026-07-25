@@ -55,7 +55,7 @@ import {
   type AppEnv,
 } from "../../middleware/auth";
 import { tambahHari, tanggalDi } from "../../lib/time";
-import { hitungSaldoCabang } from "../stok/service";
+import { hitungSaldoCabang, kunciKirimCabang, qtyDalamJalan } from "../stok/service";
 import { autoFileRakCabang } from "../penyimpanan/autoFile";
 
 const pembuat = alias(users, "pembuat_prod");
@@ -1510,23 +1510,36 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
           kirimMap.set(it.ingredient_id, { qty: it.qty, rencanaId: asal.rencanaId });
         }
       }
-      const saldoCk = new Map(
-        (await hitungSaldoCabang(auth.company_id!, ckId)).map((r) => [r.ingredient_id, r]),
-      );
-      for (const [ingId, v] of kirimMap) {
-        const s = saldoCk.get(ingId);
-        if (!s || v.qty > s.saldo + 1e-9) {
-          throw new HTTPException(400, {
-            message: `Stok CK tidak cukup untuk ${s?.nama ?? "bahan"} (saldo ${s?.saldo ?? 0} ${s?.satuan ?? ""}) — kurangi jumlah kiriman`,
-          });
-        }
-      }
       // baris sumber yang bahannya ikut terkirim (pengingatnya dihapus);
       // bahan yang tidak disertakan tetap berpengingat "perlu dikirim"
       const sumberTerkirim = rows.filter((b) => kirimMap.has(b.ingredientId));
 
       const kirimFakturId = randomUUID();
       const hasil = await db.transaction(async (tx) => {
+        // Cek stok CK DI DALAM transaksi + kunci per cabang: saldo diturunkan
+        // dari ledger (tak ada baris yang bisa dikunci), jadi tanpa ini dua
+        // pengiriman bersamaan sama-sama membaca saldo lama dan lolos.
+        await kunciKirimCabang(tx, auth.company_id!, ckId);
+        const saldoCk = new Map(
+          (await hitungSaldoCabang(auth.company_id!, ckId)).map((r) => [r.ingredient_id, r]),
+        );
+        // Saldo CK masih memuat barang yang SUDAH dikirim tapi belum diterima
+        // cabang tujuan — harus dipotong dulu, kalau tidak stok yang sama bisa
+        // dijanjikan ke beberapa permintaan dan saldo CK jadi minus saat semua
+        // kiriman diterima.
+        const jalanCk = await qtyDalamJalan(tx, auth.company_id!, ckId, [...kirimMap.keys()]);
+        for (const [ingId, v] of kirimMap) {
+          const s = saldoCk.get(ingId);
+          const diJalan = jalanCk.get(ingId) ?? 0;
+          const tersedia = (s?.saldo ?? 0) - diJalan;
+          if (!s || v.qty > tersedia + 1e-9) {
+            const catatanJalan =
+              diJalan > 0 ? `, ${diJalan} masih dalam perjalanan ke cabang lain` : "";
+            throw new HTTPException(400, {
+              message: `Stok CK tidak cukup untuk ${s?.nama ?? "bahan"} (tersedia ${Math.max(0, tersedia)} ${s?.satuan ?? ""}${catatanJalan}) — kurangi jumlah kiriman`,
+            });
+          }
+        }
         const asalNomor = (await nomorUntukRefs(tx, auth.company_id!, [fakturId])).get(fakturId);
         // Faktur KIRIMAN (transfer stok CK): lahir langsung 'menunggu' di cabang
         // tujuan — muncul di Penerimaan; saat diterima stok CK asal berkurang.

@@ -29,7 +29,7 @@ import {
 } from "../../middleware/auth";
 import { terbitkanNomor } from "../dokumen/nomor";
 import { catatLogFaktur } from "../produksi/log";
-import { hitungSaldoCabang } from "../stok/service";
+import { hitungSaldoCabang, kunciKirimCabang, qtyDalamJalan } from "../stok/service";
 
 const TransferBody = z.object({
   /** cabang ASAL (stok berkurang saat kiriman diterima) */
@@ -68,42 +68,6 @@ async function pastikanCabangStok(companyId: string, id: string, peran: "Asal" |
     });
   }
   return b;
-}
-
-/**
- * Qty per bahan yang SUDAH dijanjikan keluar dari sebuah cabang tapi belum
- * diterima tujuan (kiriman/transfer berstatus 'menunggu').
- *
- * Ledger stok sengaja baru mengurangi saldo asal saat tujuan mengonfirmasi
- * (barang di jalan masih tercatat di asal), sehingga saldo mentah TIDAK boleh
- * dipakai langsung sebagai batas transfer baru — tanpa potongan ini stok yang
- * sama bisa dijanjikan berkali-kali dan saldo asal jadi minus saat semua
- * kiriman diterima.
- */
-async function qtyDalamJalan(
-  exec: Pick<typeof db, "execute">,
-  companyId: string,
-  branchId: string,
-  ingredientIds?: string[],
-): Promise<Map<string, number>> {
-  if (ingredientIds && ingredientIds.length === 0) return new Map();
-  const filterBahan = ingredientIds
-    ? sql` AND pr.ingredient_id IN (${sql.join(
-        ingredientIds.map((id) => sql`${id}::uuid`),
-        sql`, `,
-      )})`
-    : sql``;
-  const res = await exec.execute(sql`
-    SELECT pr.ingredient_id AS ingredient_id, SUM(pr.qty) AS qty
-    FROM productions pr
-    WHERE pr.company_id = ${companyId}
-      AND pr.asal_branch_id = ${branchId}
-      AND pr.status = 'menunggu'
-      AND pr.deleted_at IS NULL${filterBahan}
-    GROUP BY pr.ingredient_id
-  `);
-  const rows = (res as unknown as { rows?: Record<string, unknown>[] }).rows ?? [];
-  return new Map(rows.map((r) => [String(r.ingredient_id), Number(r.qty) || 0]));
 }
 
 /** Status agregat satu faktur transfer dari status baris-barisnya. */
@@ -340,7 +304,7 @@ export const transferRoutes = new Hono<AppEnv>()
       // jadi transfer dari SATU cabang asal diserialkan lewat advisory lock:
       // pemeriksaan "cukup atau tidak" di bawah baru berjalan setelah transfer
       // lain dari cabang yang sama selesai commit.
-      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`transfer:${auth.company_id}:${asal.id}`}))`);
+      await kunciKirimCabang(tx, auth.company_id!, asal.id);
       const saldoAsal = new Map(
         (await hitungSaldoCabang(auth.company_id!, asal.id)).map((r) => [r.ingredient_id, r]),
       );
