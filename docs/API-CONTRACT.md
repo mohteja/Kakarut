@@ -44,16 +44,16 @@ set base URL ke `https://<host-produksi>` lalu tambahkan path (mis.
   secure storage aplikasi.
 
 ### Peran (`UserRole`)
-Lima peran: **`owner`**, **`admin`**, **`cashier`**, **`tim`**, **`kitchen`**. Plus flag
-platform **`is_super_admin`** (terpisah dari empat peran). Semantik dari
-middleware:
+Enam peran: **`owner`**, **`admin`**, **`cashier`**, **`tim`**, **`kitchen`**,
+**`bar`**. Plus flag platform **`is_super_admin`** (terpisah dari peran).
+Semantik dari middleware:
 - `requireRole(...peran)` → **403** jika `auth.role` di luar himpunan yang
   diizinkan.
 - `requireCompany` → **403** jika akun tak punya `company_id` (tak terhubung ke
   perusahaan).
 - `requireSuperAdmin` → **403** kecuali `is_super_admin`.
-- `terikatCabang(role)` → true untuk **`cashier`**, **`tim`**, dan **`kitchen`**
-  (peran terkunci cabang). `owner`/`admin` bebas lintas cabang.
+- `terikatCabang(role)` → true untuk **`cashier`**, **`tim`**, **`kitchen`**,
+  dan **`bar`** (peran terkunci cabang). `owner`/`admin` bebas lintas cabang.
 - **`kitchen`** (BARU) = dapur cabang: semua akses `tim` di cabang store
   **plus** modul `/produksi` untuk produksi LOKAL cabangnya — hanya bahan yang
   di Resep ditandai `produksi_di: "cabang"`; hasil selesai langsung masuk stok
@@ -62,6 +62,14 @@ middleware:
   400 — daftar kosong = semua cabang store. Kitchen TIDAK mendapat
   `/pembelian`, tidak bisa mengirim hasil ke cabang lain, dan penempatannya
   WAJIB cabang bertipe `store` (400 bila di CK/kantor).
+- **`bar`** (BARU) = kembaran `kitchen` untuk divisi minuman: hak akses dan
+  batasan PERSIS sama (produksi lokal cabang store, tanpa `/pembelian`,
+  penempatan wajib store). Pembedanya **divisi resep**: bahan produksi
+  ber-`produksi_di:"cabang"` kini punya `divisi_produksi: "kitchen"|"bar"`
+  (default `"kitchen"`) — role `kitchen` hanya boleh memproduksi resep divisi
+  kitchen dan role `bar` hanya divisi bar (**400** bila silang divisi;
+  owner/admin bebas keduanya). Planner rencana-dari-menu menerbitkan faktur
+  produksi cabang TERPISAH per divisi bila kebutuhan mencakup keduanya.
 
 ### Aturan `branch_id` (`resolveBranchId`)
 - Untuk peran terkunci (`cashier`/`tim`), cabang **selalu dipaksa ke
@@ -107,8 +115,8 @@ bertahan lintas restart — nilai `Retry-After` akurat & bisa dipercaya.
 
 Gerbang per-prefix di grup tenant (terverifikasi: gerbang `/prefix/*` Hono juga
 jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
-- `/produksi/*` → **owner/admin, `tim` ber-cabang CK, ATAU `kitchen`**
-  (kitchen: produksi lokal di cabang store-nya)
+- `/produksi/*` → **owner/admin, `tim` ber-cabang CK, ATAU `kitchen`/`bar`**
+  (kitchen/bar: produksi lokal di cabang store-nya, resep divisinya saja)
 - `/pembelian/*` → **owner/admin, ATAU `tim` yang cabangnya
   `central_kitchen`** (`izinkanManajemenAtauKaryawanCk`; selain itu 403)
 - `/laporan/*`, `/rekomendasi/*`, `/sampah/*`, `/karyawan/*`, `/customer/*` →
@@ -116,7 +124,7 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 - `/open-bill/*` → `requireRole("cashier")`
 - `/shift/*` → `requireRole("owner","admin","cashier")` (BACA dibuka untuk
   owner/admin; **buka/tutup** digerbang `requireRole("cashier")` per-rute)
-- `/absensi/*` → `requireRole("owner","admin","cashier","tim","kitchen")`
+- `/absensi/*` → `requireRole("owner","admin","cashier","tim","kitchen","bar")`
 - Modul tenant lain → semua anggota perusahaan yang login (owner/admin/cashier/
   tim), dengan `requireRole(...)` per-rute & pemeriksaan kunci-cabang seperti
   dicatat.
@@ -220,7 +228,7 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 ## 6. `/api/bahan` — Bahan baku (`modules/bahan/routes.ts`)
 
 - `GET /api/bahan` — [any] — query: `ringkas?=1` (varian ringan untuk halaman picker/editor: lewati agregasi supplier & rak — `supplier_utama` selalu `null`, `jumlah_supplier` selalu `0`, `rak_lokasi` selalu `[]`; kolom lain termasuk `produksi_branch_ids` tetap terisi) · `arsip?=1` ([owner/admin] daftar bahan TERARSIP/nonaktif — `is_active=false`; bentuk ringkas; dipakai tab 🗄 Arsip halaman Resep — **403** peran lain) — res: `BahanDto[]`
-- `POST /api/bahan` — [owner/admin] — req `BahanBody`: `{ slug?, kode?|null (max20), nama: string, harga_beli: number(≥0), isi: number(>0), satuan: string="pcs" (max20), satuan_beli?|null, track_stok: bool=true, stok_minimum: number(≥0)=0, stok_minimum_toko: number(≥0)=0, overhead_x: number(>0,≤1000)=1, kategori: string="lain" (max30), pengadaan: "produksi"|"beli"="beli", produksi_di?: "ck"|"cabang"="ck" (lokasi produksi bahan jalur produksi: Central Kitchen atau cabang/kitchen toko), produksi_branch_ids?: uuid[]=[] (cabang PRODUSEN saat produksi_di="cabang"; kosong = semua cabang store; wajib cabang store aktif → **400** bila bukan; diabaikan/dikosongkan saat produksi_di="ck"), catatan?|null, is_packaging: bool=false, is_complement: bool=false, boleh_eceran: bool=false, min_beli: number(≥0)=0, masa_simpan_hari: int(0..3650)=0 (umur layak pakai setelah masuk stok — dasar `exp_date` otomatis lot; 0 = tak diatur), lead_time_hari: int(0..365)=0 (beli = lama pesanan datang; produksi = lama proses — dasar "pesan/buat jauh-jauh hari") }` — res: **201** `BahanDto` (atau **200** bila mereaktivasi slug yang di-soft-delete) — error: **409** bahan aktif sudah ada
+- `POST /api/bahan` — [owner/admin] — req `BahanBody`: `{ slug?, kode?|null (max20), nama: string, harga_beli: number(≥0), isi: number(>0), satuan: string="pcs" (max20), satuan_beli?|null, track_stok: bool=true, stok_minimum: number(≥0)=0, stok_minimum_toko: number(≥0)=0, overhead_x: number(>0,≤1000)=1, kategori: string="lain" (max30), pengadaan: "produksi"|"beli"="beli", produksi_di?: "ck"|"cabang"="ck" (lokasi produksi bahan jalur produksi: Central Kitchen atau cabang/kitchen toko), produksi_branch_ids?: uuid[]=[] (cabang PRODUSEN saat produksi_di="cabang"; kosong = semua cabang store; wajib cabang store aktif → **400** bila bukan; diabaikan/dikosongkan saat produksi_di="ck"), divisi_produksi?: "kitchen"|"bar"="kitchen" (divisi yang MEMPRODUKSI saat produksi_di="cabang": role kitchen hanya boleh memproduksi resep divisi kitchen, role bar hanya divisi bar — silang divisi ditolak **400**; tak bermakna utk produksi_di="ck"), catatan?|null, is_packaging: bool=false, is_complement: bool=false, boleh_eceran: bool=false, min_beli: number(≥0)=0, masa_simpan_hari: int(0..3650)=0 (umur layak pakai setelah masuk stok — dasar `exp_date` otomatis lot; 0 = tak diatur), lead_time_hari: int(0..365)=0 (beli = lama pesanan datang; produksi = lama proses — dasar "pesan/buat jauh-jauh hari") }` — res: **201** `BahanDto` (atau **200** bila mereaktivasi slug yang di-soft-delete) — error: **409** bahan aktif sudah ada
 - `POST /api/bahan/bulk` — [owner/admin] — req: `{ items: BahanBulkRow[] (1..200) }` (tiap row bahan jalur beli) — res: **201** `{ jumlah, bahan: BahanDto[] }`
 - `POST /api/bahan/import` — [owner/admin] — req: `{ mode: "perbarui"|"tambah", items: BahanImportRow[] (1..1000) }` — res: `{ ditambah, diperbarui, dipulihkan, dilewati, gagal: [{nama,alasan}] }`
 - `PUT /api/bahan/:id` — [owner/admin] — req `BahanPatchBody` (semua field opsional, tanpa default) — res: `BahanDto` — error: **404**, **409** (ubah ke "produksi" saat dipakai resep aktif / ubah `isi` saat produksi berjalan)
@@ -317,7 +325,7 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 
 ## `/api/penyimpanan` — Tempat penyimpanan / rak (`modules/penyimpanan/routes.ts`)
 
-- `GET /api/penyimpanan` — [any] — query: `branch_id?` — res: `PenyimpananDto[]` (dengan `petugas`, `jumlah_bahan`)
+- `GET /api/penyimpanan` — [any] — query: `branch_id?` — res: `PenyimpananDto[]` (dengan `petugas` — tiap petugas ber-`aktif`: false = bukan anggota aktif lagi (diarsip/dihapus/dibuat ulang) sehingga DIABAIKAN dalam pembatasan opname — dan `jumlah_bahan`)
 - `POST /api/penyimpanan` — [any] (quick-add; cashier cabang sendiri) — req: `{ branch_id?: uuid, nama: string, catatan?|null, is_active?: bool }` — res: **201** `PenyimpananDto` — error: **403** kasir luar cabang, **409** nama ada
 - `PATCH /api/penyimpanan/:id` — [owner/admin] — req: parsial `{ nama?, catatan?, is_active? }` — res: `PenyimpananDto` — error: **404**
 - `PUT /api/penyimpanan/:id/petugas` — [owner/admin] — req: `{ user_ids: uuid[] }` (replace-set petugas opname) — res: `{ ok, petugas }` — error: **400** bukan anggota, **404**
@@ -382,11 +390,11 @@ ADA (validasi = aturan endpoint asli), idempoten per `client_ref`.
   - **Role guard**: sama dgn endpoint asli — mis. `penjualan` oleh non-kasir → item **gagal 403** (bukan gagal seluruh batch).
 - **Online-only (tidak lewat sync)**: login/auth, CRUD master, ACC/persetujuan, laporan, upload foto (mobile unggah `POST /upload` DULU saat online, lalu kirim perintah dgn `foto_url` hasil unggah). Shift buka/tutup tetap online-only (Fase 1).
 
-## `/api/absensi` — Absensi (`modules/absensi/routes.ts`) — group guard **[owner/admin/cashier/tim/kitchen]**
+## `/api/absensi` — Absensi (`modules/absensi/routes.ts`) — group guard **[owner/admin/cashier/tim/kitchen/bar]**
 
 - `POST /api/absensi` — **[owner/admin/cashier]** (inline, kecuali tim) — pindai stasiun — query: `branch_id?` — req: `{ kode: string, foto_url: string (wajib), lat?: number(-90..90)|null, lng?: number(-180..180)|null }` — res: **201** `AbsenResult` — error: **400** (di luar radius geofence / GPS wajib / karyawan nonaktif), **404** kode tak dikenal
-- `POST /api/absensi/saya` — [owner/admin/cashier/tim/kitchen] — absen sendiri — query: `branch_id?` — req: `{ foto_url: string (wajib), lat?|null, lng?|null }` — res: **201** `AbsenResult` — error: **400** (geofence / tak ada kode karyawan / nonaktif), **403** bukan karyawan aktif
-- `GET /api/absensi` — [owner/admin/cashier/tim/kitchen] — query: `branch_id?`, `tanggal?` (YYYY-MM-DD) — res: `AbsensiRow[]` (masuk-pertama / keluar-terakhir per karyawan) — error: **400** tanggal salah
+- `POST /api/absensi/saya` — [owner/admin/cashier/tim/kitchen/bar] — absen sendiri — query: `branch_id?` — req: `{ foto_url: string (wajib), lat?|null, lng?|null }` — res: **201** `AbsenResult` — error: **400** (geofence / tak ada kode karyawan / nonaktif), **403** bukan karyawan aktif
+- `GET /api/absensi` — [owner/admin/cashier/tim/kitchen/bar] — query: `branch_id?`, `tanggal?` (YYYY-MM-DD) — res: `AbsensiRow[]` (masuk-pertama / keluar-terakhir per karyawan) — error: **400** tanggal salah
 
 > **Catatan absensi (penting untuk mobile):** payload QR absen = **string kode
 > mentah** (8 digit angka, teks polos tanpa prefix/JSON). Absen **wajib foto**:
@@ -406,8 +414,8 @@ ADA (validasi = aturan endpoint asli), idempoten per `client_ref`.
 - `GET /api/stok/kartu/:ingredientId` — [any] — query: `branch_id?`, `dari?`, `sampai?` — res: kartu ledger stok (`KartuStokDto`; mutasi kini juga memuat jenis `kirim` = kiriman keluar/transfer stok ke cabang lain yang sudah diterima) — error: **400** stok tak dilacak, **404**
 - `GET /api/stok/fifo/:ingredientId` — [any] — query: `branch_id?` — **KARTU FIFO** satu bahan pada satu cabang: seluruh riwayat masuk/keluar di-walk kronologis, keluar mengonsumsi lot **paling awal masuk** (First-In First-Out). Res: `BahanFifoDto` = lot masuk (qty/harga/terpakai/sisa/exp) + `pemakaian` (terbaru dulu, maks 300; tiap baris membawa `rincian` diambil dari lot mana + `hpp` biaya FIFO) + `saldo` (== saldo ledger) + `defisit` (stok minus tak tertutup lot). Opname disetujui = reset: selisih turun dikonsumsi FIFO, selisih naik jadi lot penyesuaian berharga acuan. — error: **400** stok tak dilacak, **404**
 - `GET /api/stok/exp` — [any] — query: `branch_id?`, `hari?=7` (clamp 0..60) — res: `ExpLotRow[]` (lot masuk stok ber-`exp_date` ≤ hari ini + `hari`, urut exp ASC, maks 300; lot sebelum baseline opname terakhir bahan itu dikecualikan). **APROKSIMASI**: ledger stok agregat tanpa FIFO — `qty_masuk` = qty saat lot masuk, BUKAN sisa lot; `saldo` live bahan disandingkan agar pemakai menilai sendiri. `sisa_hari` = exp − hari ini (negatif = lewat)
-- `POST /api/stok/waste` — [owner/admin/cashier/tim/kitchen] (peran terikat cabang hanya cabangnya) — req: `{ branch_id?: uuid, ingredient_id: uuid, qty: number(>0), foto_url: string (min 1, **bukti foto wajib**), catatan?|null (max300) }` — mencatat WASTE (mis. bahan kedaluwarsa) lewat mekanisme penyesuaian yang ada: menulis SATU sesi `stock_opnames` (fisik = saldo − qty, `penyesuaian_kategori:"waste_bahan"`, status `menunggu`) → tampil di Riwayat SO dan **baru memotong stok setelah di-ACC** owner/admin — res: **201** `{ ok, session_id, nomor }` (SO-xxxx) — error: **400** (bahan invalid/tak dilacak, qty > saldo), **403** luar cabang
-- `POST /api/stok/opname` — [owner/admin/cashier/tim/kitchen] (inline) — req `OpnameBody`: `{ branch_id?: uuid, catatan?|null, items: [{ingredient_id:uuid, qty:number(≥0), foto_url?|null, alasan?|null}] (min 1) }` — res: **201** `{ ok, jumlah, session_id, nomor, ringkasan }` — error: **400** bahan invalid/tak dilacak, **403** (luar cabang / bukan petugas opname rak itu)
+- `POST /api/stok/waste` — [owner/admin/cashier/tim/kitchen/bar] (peran terikat cabang hanya cabangnya) — req: `{ branch_id?: uuid, ingredient_id: uuid, qty: number(>0), foto_url: string (min 1, **bukti foto wajib**), catatan?|null (max300) }` — mencatat WASTE (mis. bahan kedaluwarsa) lewat mekanisme penyesuaian yang ada: menulis SATU sesi `stock_opnames` (fisik = saldo − qty, `penyesuaian_kategori:"waste_bahan"`, status `menunggu`) → tampil di Riwayat SO dan **baru memotong stok setelah di-ACC** owner/admin — res: **201** `{ ok, session_id, nomor }` (SO-xxxx) — error: **400** (bahan invalid/tak dilacak, qty > saldo), **403** luar cabang
+- `POST /api/stok/opname` — [owner/admin/cashier/tim/kitchen/bar] (inline) — req `OpnameBody`: `{ branch_id?: uuid, catatan?|null, items: [{ingredient_id:uuid, qty:number(≥0), foto_url?|null, alasan?|null}] (min 1) }` — res: **201** `{ ok, jumlah, session_id, nomor, ringkasan }` — error: **400** bahan invalid/tak dilacak, **403** (luar cabang / bukan petugas opname rak itu — hanya petugas ANGGOTA AKTIF yang dihitung; penugasan basi diabaikan)
 - `GET /api/stok/awal` — [owner/admin] — query: `branch_id?` — res: `{ tanggal, items: [{ingredient_id,qty,tanggal}] }`
 - `POST /api/stok/awal` — [owner/admin] — req: `OpnameBody` + `{ tanggal?: "YYYY-MM-DD" }` (upsert saldo awal) — res: **201** `{ ok, jumlah, tanggal }` — error: **400**
 - `GET /api/stok/penyesuaian` — [any] — query: `branch_id?`, `status?` (`belum` | `menunggu_persetujuan`) — res: row penyesuaian
@@ -475,7 +483,7 @@ ADA (validasi = aturan endpoint asli), idempoten per `client_ref`.
 
 ## `/api/rekomendasi` — Rekomendasi beli & permintaan stok (`modules/rekomendasi/routes.ts`) — group guard **[owner/admin]**
 
-> **Lokasi produksi (BARU):** bahan produksi ber-`produksi_di: "cabang"` pada rencana-dari-menu TIDAK dikirim dari stok CK dan TIDAK di-work-order-kan ke CK — `POST /menu/faktur` menerbitkan faktur produksi TERPISAH yang lahir di CABANG tujuan (dikerjakan role `kitchen`; hasil selesai langsung masuk stok cabang), dan bahan mentah resepnya dihitung terhadap stok cabang lalu dibelanjakan CK dengan tujuan kirim ke cabang. Respons `RencanaFakturResult` dan `PermintaanStokRow` punya bagian baru `produksi_cabang`; baris preview `RencanaBahanRow` membawa `produksi_di`. `produksi_di` pada baris preview sudah RESOLUSI PER CABANG TUJUAN: bila bahan punya daftar `produksi_branch_ids` dan cabang tujuan TIDAK termasuk, baris tampil `"ck"` (kebutuhan cabang itu dipenuhi lewat jalur CK — kirim stok / work-order CK).
+> **Lokasi produksi (BARU):** bahan produksi ber-`produksi_di: "cabang"` pada rencana-dari-menu TIDAK dikirim dari stok CK dan TIDAK di-work-order-kan ke CK — `POST /menu/faktur` menerbitkan faktur produksi TERPISAH yang lahir di CABANG tujuan (dikerjakan role `kitchen` — dan bila ada resep ber-`divisi_produksi:"bar"`, SATU faktur cabang LAGI khusus divisi bar, dikerjakan role `bar`; hasil selesai langsung masuk stok cabang), dan bahan mentah resepnya dihitung terhadap stok cabang lalu dibelanjakan CK dengan tujuan kirim ke cabang. Respons `RencanaFakturResult` dan `PermintaanStokRow` punya bagian baru `produksi_cabang`; baris preview `RencanaBahanRow` membawa `produksi_di`. `produksi_di` pada baris preview sudah RESOLUSI PER CABANG TUJUAN: bila bahan punya daftar `produksi_branch_ids` dan cabang tujuan TIDAK termasuk, baris tampil `"ck"` (kebutuhan cabang itu dipenuhi lewat jalur CK — kirim stok / work-order CK).
 
 - `GET /api/rekomendasi/beli` — query: `branch_id?`, `target?`, `acuan?` (`7hari`|`rentang`|`minggu_lalu`), `dari?`, `sampai?`, `pakai_dari?`, `pakai_sampai?` — res: hasil rekomendasi
 - `POST /api/rekomendasi/menu` — req: `{ items: [{menu_id:uuid, porsi:int(1..100000)}] (min1), ck_branch_id?:uuid|null }` — res: pratinjau rencana
@@ -504,7 +512,7 @@ ADA (validasi = aturan endpoint asli), idempoten per `client_ref`.
 ## `/api/karyawan` — Karyawan (`modules/users/routes.ts`) — group guard **[owner/admin]**
 
 - `GET /api/karyawan` — query: `arsip=true` (daftar arsip) — res: row karyawan
-- `POST /api/karyawan` — req `KaryawanBody`: `{ nama: string, email: string (lowercase), password: string (min 8), role: "owner"|"admin"|"cashier"|"tim"|"kitchen", branch_id?: uuid|null }` — res: **201** `{ user_id, email, nama, role, employee_code }` — error: **400** (cashier/tim/kitchen butuh cabang; mismatch peran/tipe cabang — kitchen hanya cabang store), **403** hanya owner boleh buat owner, **409** email ada — *(buat akun langsung + password. Untuk alur "menunggu diundang", pakai `/undang` di bawah.)*
+- `POST /api/karyawan` — req `KaryawanBody`: `{ nama: string, email: string (lowercase), password: string (min 8), role: "owner"|"admin"|"cashier"|"tim"|"kitchen"|"bar", branch_id?: uuid|null }` — res: **201** `{ user_id, email, nama, role, employee_code }` — error: **400** (cashier/tim/kitchen/bar butuh cabang; mismatch peran/tipe cabang — kitchen/bar hanya cabang store), **403** hanya owner boleh buat owner, **409** email ada — *(buat akun langsung + password. Untuk alur "menunggu diundang", pakai `/undang` di bawah.)*
 - `POST /api/karyawan/undang` — req: `{ email, role: enum, branch_id?: uuid|null }` — buat UNDANGAN pending (tanpa password; email dikirim best-effort). Saat email itu daftar/menerima → membership dibuat otomatis — res: **201** `{ id, email, role }` — error: **400** (cashier/tim butuh cabang), **403** hanya owner boleh undang owner, **409** sudah jadi karyawan aktif / sudah diundang
 - `GET /api/karyawan/undangan` — res: `UndanganKaryawanRow[]` (`{id,email,role,cabang_nama|null,status,diundang_pada}`, hanya pending)
 - `DELETE /api/karyawan/undangan/:id` — batalkan undangan pending — res: `{ ok }` — error: **404**
@@ -560,6 +568,7 @@ respons/DTO. Ini definisi TypeScript; terjemahkan ke model Dart sesuai kebutuhan
 ```typescript
 import type {
   BahanKategori,
+  DivisiProduksi,
   JenisPengadaan,
   MenuTipe,
   ProduksiDi,
@@ -712,14 +721,21 @@ export interface BahanDto {
   pengadaan: JenisPengadaan;
   /**
    * Lokasi produksi bahan jalur "produksi": "ck" (Central Kitchen, default) atau
-   * "cabang" (diproduksi kitchen di cabang store — hasil masuk stok cabang itu).
-   * Diabaikan untuk pengadaan "beli".
+   * "cabang" (diproduksi kitchen/bar di cabang store sesuai `divisi_produksi` —
+   * hasil masuk stok cabang itu). Diabaikan untuk pengadaan "beli".
    */
   produksi_di: ProduksiDi;
   /**
+   * PENUGASAN DIVISI resep saat produksi_di = "cabang": "kitchen" (default)
+   * atau "bar". Role kitchen hanya boleh memproduksi resep divisi kitchen;
+   * role bar hanya resep divisi bar. Diabaikan saat produksi_di = "ck".
+   */
+  divisi_produksi: DivisiProduksi;
+  /**
    * Cabang PRODUSEN saat produksi_di = "cabang": id cabang store yang
-   * kitchen-nya memproduksi bahan ini. KOSONG = semua cabang store. Cabang di
-   * luar daftar dipenuhi lewat jalur CK. Selalu [] untuk produksi_di = "ck".
+   * kitchen/bar-nya (sesuai divisi_produksi) memproduksi bahan ini. KOSONG =
+   * semua cabang store. Cabang di luar daftar dipenuhi lewat jalur CK. Selalu
+   * [] untuk produksi_di = "ck".
    */
   produksi_branch_ids: string[];
   catatan: string | null;
@@ -970,6 +986,11 @@ export interface RencanaBahanRow {
   estimasi_biaya: number | null;
   /** LEAD TIME bahan (hari): pesan/buat jauh-jauh hari (H-n); 0 = tanpa info */
   lead_time_hari: number;
+  /**
+   * DIVISI pelaksana saat produksi_di="cabang" ("kitchen"/"bar") — faktur
+   * produksi cabang dipisah per divisi. null utk jalur lain.
+   */
+  divisi_produksi?: DivisiProduksi | null;
   /** khusus baris BAHAN PRODUKSI: nama bahan jadi yang membutuhkannya */
   untuk?: string | null;
   /**
@@ -1249,6 +1270,14 @@ export interface PetugasRingkas {
   user_id: string;
   nama: string;
   role: UserRole;
+  /**
+   * true = masih ANGGOTA AKTIF perusahaan (user aktif, belum dihapus,
+   * membership belum diarsip). Petugas non-aktif (akun diarsip/dihapus/
+   * dibuat ulang) DIABAIKAN dalam pembatasan opname — rak tidak terkunci
+   * diam-diam oleh penugasan basi — dan ditandai ⚠ di pengaturan agar
+   * owner menugaskan ulang.
+   */
+  aktif: boolean;
 }
 
 export interface PenyimpananDto {

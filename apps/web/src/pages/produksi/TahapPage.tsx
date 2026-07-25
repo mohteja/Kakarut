@@ -439,7 +439,7 @@ function TahapForm({
                   ) : (
                     <>
                       Hasil produksi <b>langsung masuk stok cabang ini</b> — tanpa konfirmasi &
-                      tanpa lewat CK (kitchen cabang yang produksi).
+                      tanpa lewat CK (kitchen/bar cabang yang produksi).
                     </>
                   )}
                 </div>

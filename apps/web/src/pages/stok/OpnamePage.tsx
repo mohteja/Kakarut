@@ -28,7 +28,10 @@ export function OpnamePage() {
   // Peran terikat cabang (kasir, tim & kitchen) hanya melihat/opname tempat
   // yang ditugaskan padanya (atau terbuka) — owner/admin bebas.
   const terikat =
-    auth?.user.role === "cashier" || auth?.user.role === "tim" || auth?.user.role === "kitchen";
+    auth?.user.role === "cashier" ||
+    auth?.user.role === "tim" ||
+    auth?.user.role === "kitchen" ||
+    auth?.user.role === "bar";
 
   const { data: stok, isLoading: stokLoading } = useQuery({
     queryKey: ["stok", branchQuery],
@@ -69,11 +72,13 @@ export function OpnamePage() {
     return m;
   }, [tempatList]);
 
-  // tempat yang boleh diopname oleh user ini (kasir/tim dibatasi petugas)
+  // tempat yang boleh diopname oleh user ini (kasir/tim dibatasi petugas).
+  // Hanya petugas yang masih ANGGOTA AKTIF yang dihitung — penugasan basi
+  // (akun diarsip/dihapus/dibuat ulang) tidak boleh mengunci rak diam-diam.
   const tempatBoleh = useMemo(() => {
     if (!terikat) return tempatList;
     return tempatList.filter((t) => {
-      const p = t.petugas;
+      const p = t.petugas.filter((x) => x.aktif !== false);
       return p.length === 0 || p.some((x) => x.user_id === myId);
     });
   }, [tempatList, terikat, myId]);
@@ -82,7 +87,7 @@ export function OpnamePage() {
   const stokBoleh = useMemo(() => {
     return (stok ?? []).filter((s) => {
       if (!terikat || !s.tempat_id) return true;
-      const p = petugasByLoc.get(s.tempat_id) ?? [];
+      const p = (petugasByLoc.get(s.tempat_id) ?? []).filter((x) => x.aktif !== false);
       return p.length === 0 || p.some((x) => x.user_id === myId);
     });
   }, [stok, terikat, petugasByLoc, myId]);

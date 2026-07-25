@@ -46,8 +46,10 @@ interface PengaturanBatch {
   masaSimpan: string;
   /** lama proses produksi (hari) → "buat H-n" agar dibuat jauh-jauh hari */
   leadTime: string;
-  /** lokasi produksi: "ck" (Central Kitchen) atau "cabang" (kitchen toko) */
+  /** lokasi produksi: "ck" (Central Kitchen) atau "cabang" (kitchen/bar toko) */
   produksiDi: "ck" | "cabang";
+  /** divisi produksi di cabang: role kitchen atau bar yang mengerjakan */
+  divisiProduksi: "kitchen" | "bar";
   /** cabang produsen saat "cabang" (kosong = semua cabang store) */
   produksiBranchIds: string[];
 }
@@ -147,6 +149,7 @@ export function ResepPage() {
             masaSimpan: String(dipilih.masa_simpan_hari ?? 0),
             leadTime: String(dipilih.lead_time_hari ?? 0),
             produksiDi: dipilih.produksi_di ?? "ck",
+            divisiProduksi: dipilih.divisi_produksi ?? "kitchen",
             produksiBranchIds: dipilih.produksi_branch_ids ?? [],
           }
         : null,
@@ -191,6 +194,8 @@ export function ResepPage() {
             lead_time_hari: Math.max(0, Math.trunc(Number(atur.leadTime) || 0)),
             harga_beli: hargaBatch,
             produksi_di: atur.produksiDi,
+            // divisi hanya bermakna untuk produksi cabang — CK kembali ke default
+            divisi_produksi: atur.produksiDi === "cabang" ? atur.divisiProduksi : "kitchen",
             produksi_branch_ids:
               atur.produksiDi === "cabang" ? atur.produksiBranchIds : [],
           },
@@ -712,12 +717,38 @@ export function ResepPage() {
                               aria-label="Lokasi produksi"
                             >
                               <option value="ck">Central Kitchen (dikirim ke cabang)</option>
-                              <option value="cabang">Cabang (kitchen toko)</option>
+                              <option value="cabang">Cabang (kitchen/bar toko)</option>
                             </select>
                             <p className="mt-1 text-xs text-stone-500">
-                              <b>Cabang</b> = diproduksi peran <b>Kitchen</b> di cabang
-                              masing-masing; hasil langsung masuk stok cabang itu.
+                              <b>Cabang</b> = diproduksi peran <b>Kitchen</b> atau <b>Bar</b>{" "}
+                              di cabang masing-masing; hasil langsung masuk stok cabang itu.
                             </p>
+                            {atur.produksiDi === "cabang" && (
+                              <div className="mt-2">
+                                <label className="mb-1 block text-xs font-medium text-stone-500">
+                                  Divisi produksi
+                                </label>
+                                <select
+                                  value={atur.divisiProduksi}
+                                  onChange={(e) =>
+                                    setAtur({
+                                      ...atur,
+                                      divisiProduksi: e.target.value as "kitchen" | "bar",
+                                    })
+                                  }
+                                  className={inputClass}
+                                  disabled={!bolehUbah}
+                                  aria-label="Divisi produksi"
+                                >
+                                  <option value="kitchen">Kitchen (dapur)</option>
+                                  <option value="bar">Bar (minuman)</option>
+                                </select>
+                                <p className="mt-1 text-xs text-stone-500">
+                                  Hanya role divisi ini yang bisa memproduksi resep ini di
+                                  cabang — kitchen tak melihat resep bar, dan sebaliknya.
+                                </p>
+                              </div>
+                            )}
                             {atur.produksiDi === "cabang" && (
                               <div className="mt-2 rounded-lg border border-stone-200 p-2">
                                 <div className="mb-1 text-xs font-medium text-stone-500">
@@ -755,7 +786,7 @@ export function ResepPage() {
                                 <p className="mt-1 text-xs text-stone-500">
                                   Kosong = <b>semua cabang</b>. Cabang di luar daftar
                                   dipenuhi lewat jalur CK (produksi CK → kirim) dan
-                                  kitchen-nya tidak bisa memproduksi bahan ini.
+                                  kitchen/bar-nya tidak bisa memproduksi bahan ini.
                                 </p>
                               </div>
                             )}

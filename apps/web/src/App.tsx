@@ -123,15 +123,17 @@ export default function App() {
   const isManajemen = auth.user.role === "owner" || auth.user.role === "admin";
   // Tim: cek stok, lihat menu, profil, penerimaan barang, riwayat transaksi
   const isTim = auth.user.role === "tim";
-  // Kitchen: seperti tim di cabang store + Produksi lokal (hasil masuk stok cabang)
+  // Kitchen/Bar: seperti tim di cabang store + Produksi lokal divisinya
+  // (hasil masuk stok cabang) — kitchen resep divisi kitchen, bar divisi bar.
   const isKitchen = auth.user.role === "kitchen";
+  const isBar = auth.user.role === "bar";
   // Transaksi POS (Kasir + Tutup Kasir) HANYA peran kasir.
   const isKasir = auth.user.role === "cashier";
   const beranda = isSuperAdmin
     ? "/superadmin"
     : isManajemen
       ? "/dashboard"
-      : isTim || isKitchen
+      : isTim || isKitchen || isBar
         ? "/beranda"
         : "/kasir";
 
@@ -169,9 +171,9 @@ export default function App() {
               {/* Absen: semua peran (tim absen sendiri; admin/kasir + stasiun pindai) */}
               <Route path="/absen" element={<AbsenPage />} />
               {/* Beranda ringkas peran TIM/KITCHEN (CK: beli/produksi belum selesai; toko: barang datang) */}
-              {(isTim || isKitchen) && <Route path="/beranda" element={<TimBerandaPage />} />}
-              {/* printer & meja — bukan peran tim/kitchen */}
-              {!isTim && !isKitchen && (
+              {(isTim || isKitchen || isBar) && <Route path="/beranda" element={<TimBerandaPage />} />}
+              {/* printer & meja — bukan peran tim/kitchen/bar */}
+              {!isTim && !isKitchen && !isBar && (
                 <>
                   <Route path="/pengaturan/printer" element={<PrinterPage />} />
                   <Route path="/pengaturan/meja" element={<MejaPage />} />
@@ -201,9 +203,10 @@ export default function App() {
                   <Route path="/resep" element={<ResepPage />} />
                 </>
               )}
-              {/* Kitchen (dapur cabang store): HANYA Produksi lokal — tanpa
-                  pembelian/bahan/resep (server menggerbang juga). */}
-              {isKitchen && (
+              {/* Kitchen/Bar (divisi produksi cabang store): HANYA Produksi
+                  lokal divisinya — tanpa pembelian/bahan/resep (server
+                  menggerbang juga). */}
+              {(isKitchen || isBar) && (
                 <>
                   <Route path="/produksi" element={<ProduksiPage />} />
                   <Route path="/produksi/baru" element={<FakturFormPage tipe="produksi" />} />

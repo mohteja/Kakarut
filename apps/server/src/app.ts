@@ -89,14 +89,16 @@ export function createApp() {
       message: "Khusus manajemen atau karyawan Central Kitchen",
     });
   };
-  // Produksi juga terbuka untuk role KITCHEN (dapur cabang store): memproduksi
-  // bahan ber-produksi_di="cabang" di cabangnya sendiri — hasil masuk stok
-  // cabang itu. Kitchen TIDAK mendapat /pembelian (belanja tetap urusan
-  // manajemen/CK); penempatan kitchen di cabang store dijaga saat buat/ubah
-  // karyawan, dan kunci per-request tetap lewat terikatCabang.
+  // Produksi juga terbuka untuk role KITCHEN & BAR (dua divisi produksi cabang
+  // store): memproduksi bahan ber-produksi_di="cabang" DIVISINYA sendiri di
+  // cabangnya — hasil masuk stok cabang itu (kitchen hanya resep divisi
+  // kitchen; bar hanya divisi bar — ditegakkan di modul produksi). Keduanya
+  // TIDAK mendapat /pembelian (belanja tetap urusan manajemen/CK); penempatan
+  // di cabang store dijaga saat buat/ubah karyawan, dan kunci per-request
+  // tetap lewat terikatCabang.
   const izinkanProduksi: MiddlewareHandler<AppEnv> = async (c, next) => {
     const auth = c.get("auth");
-    if (auth.role === "kitchen" && auth.branch_id) return next();
+    if ((auth.role === "kitchen" || auth.role === "bar") && auth.branch_id) return next();
     return izinkanManajemenAtauKaryawanCk(c, next);
   };
   tenant.use("/produksi/*", izinkanProduksi);
@@ -114,8 +116,9 @@ export function createApp() {
   tenant.use("/shift/*", requireRole("owner", "admin", "cashier"));
   // Absensi: semua peran boleh ABSEN SENDIRI (POST /absensi/saya) + lihat
   // ringkasan; hanya admin/kasir yang boleh STASIUN pindai (POST /absensi,
-  // digerbang per-rute di modulnya). Tim & kitchen ikut agar bisa absen sendiri.
-  tenant.use("/absensi/*", requireRole("owner", "admin", "cashier", "tim", "kitchen"));
+  // digerbang per-rute di modulnya). Tim, kitchen & bar ikut agar bisa absen
+  // sendiri.
+  tenant.use("/absensi/*", requireRole("owner", "admin", "cashier", "tim", "kitchen", "bar"));
   tenant
     .route("/company", companyRoutes)
     .route("/customer", customerRoutes)

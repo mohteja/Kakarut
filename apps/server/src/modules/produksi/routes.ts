@@ -290,11 +290,13 @@ function pastikanJalur(
 }
 
 /**
- * Role KITCHEN (dapur cabang store) hanya boleh memproduksi bahan yang memang
- * ditandai diproduksi DI CABANG (`produksi_di = "cabang"`, diatur di Resep).
- * Bahan ber-produksi_di "ck" tetap urusan Central Kitchen — kitchen cabang
+ * Role KITCHEN & BAR (divisi produksi cabang store) hanya boleh memproduksi
+ * bahan yang memang ditandai diproduksi DI CABANG (`produksi_di = "cabang"`,
+ * diatur di Resep) DAN ber-divisi sesuai role-nya: kitchen hanya resep divisi
+ * "kitchen", bar hanya divisi "bar" (`divisi_produksi`, penugasan di Resep).
+ * Bahan ber-produksi_di "ck" tetap urusan Central Kitchen — kitchen/bar cabang
  * tidak boleh menduplikasinya di store. Bila bahan punya DAFTAR CABANG
- * PRODUSEN (ingredient_produksi_branches), kitchen di luar daftar juga
+ * PRODUSEN (ingredient_produksi_branches), kitchen/bar di luar daftar juga
  * ditolak; daftar kosong = semua cabang store boleh.
  */
 async function pastikanBolehDiproduksiKitchen(
@@ -302,13 +304,19 @@ async function pastikanBolehDiproduksiKitchen(
   branchId: string,
   ings: Iterable<typeof ingredients.$inferSelect>,
 ) {
-  if (role !== "kitchen") return;
+  if (role !== "kitchen" && role !== "bar") return;
   const cabangIngs: (typeof ingredients.$inferSelect)[] = [];
   for (const ing of ings) {
     if (ing.pengadaan !== "produksi") continue;
     if (ing.produksiDi !== "cabang") {
       throw new HTTPException(400, {
-        message: `"${ing.nama}" diproduksi di Central Kitchen — atur "Diproduksi di: Cabang" di Resep bila ingin diproduksi kitchen cabang`,
+        message: `"${ing.nama}" diproduksi di Central Kitchen — atur "Diproduksi di: Cabang" di Resep bila ingin diproduksi kitchen/bar cabang`,
+      });
+    }
+    // Penugasan divisi: kitchen hanya resep divisi kitchen, bar hanya bar.
+    if (ing.divisiProduksi !== role) {
+      throw new HTTPException(400, {
+        message: `"${ing.nama}" adalah resep divisi ${ing.divisiProduksi} — hanya role ${ing.divisiProduksi} yang boleh memproduksinya`,
       });
     }
     cabangIngs.push(ing);
@@ -812,16 +820,16 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
           }
           tujuanBranch = cb.id;
           tujuanNama = cb.nama;
-          // Khusus kasir & kitchen: tak boleh lintas cabang. Karyawan CK (tim)
-          // justru tugasnya MENGIRIM ke store — validasi CK↔store di atas.
-          // Kitchen memproduksi LOKAL untuk cabangnya sendiri.
+          // Khusus kasir, kitchen & bar: tak boleh lintas cabang. Karyawan CK
+          // (tim) justru tugasnya MENGIRIM ke store — validasi CK↔store di
+          // atas. Kitchen/bar memproduksi LOKAL untuk cabangnya sendiri.
           if (
-            (auth.role === "cashier" || auth.role === "kitchen") &&
+            (auth.role === "cashier" || auth.role === "kitchen" || auth.role === "bar") &&
             auth.branch_id &&
             tujuanBranch !== auth.branch_id
           ) {
             throw new HTTPException(403, {
-              message: "Kasir/Kitchen tidak boleh mengirim ke cabang lain",
+              message: "Kasir/Kitchen/Bar tidak boleh mengirim ke cabang lain",
             });
           }
         }

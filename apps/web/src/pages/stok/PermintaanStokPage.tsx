@@ -66,7 +66,7 @@ function Bagian({
     jalur === "produksi"
       ? "Produksi"
       : jalur === "produksi_cabang"
-        ? "Produksi di cabang (kitchen)"
+        ? "Produksi di cabang (kitchen/bar)"
         : jalur === "beli"
           ? "Beli produk jadi"
           : jalur === "kirim"

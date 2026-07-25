@@ -22,9 +22,18 @@ import {
  * Peran: owner/admin = manajemen (lintas cabang); cashier = kasir cabang;
  * tim = anggota tim cabang (cek stok, lihat menu, penerimaan barang, riwayat
  * transaksi — tanpa kasir); kitchen = tim cabang STORE + produksi lokal
- * (hasil masuk stok cabangnya). cashier, tim & kitchen terikat ke satu cabang.
+ * (hasil masuk stok cabangnya); bar = sama seperti kitchen tetapi DIVISI BAR —
+ * hanya memproduksi resep ber-divisi_produksi "bar" (kitchen hanya "kitchen").
+ * cashier, tim, kitchen & bar terikat ke satu cabang.
  */
-export const userRoleEnum = pgEnum("user_role", ["owner", "admin", "cashier", "tim", "kitchen"]);
+export const userRoleEnum = pgEnum("user_role", [
+  "owner",
+  "admin",
+  "cashier",
+  "tim",
+  "kitchen",
+  "bar",
+]);
 export const menuTipeEnum = pgEnum("menu_tipe", ["regular", "paket"]);
 /** jalur pengadaan bahan: diproduksi sendiri vs dibeli jadi */
 export const pengadaanEnum = pgEnum("pengadaan", ["produksi", "beli"]);
@@ -34,6 +43,12 @@ export const pengadaanEnum = pgEnum("pengadaan", ["produksi", "beli"]);
  * hasil langsung masuk stok cabang itu). Diabaikan untuk pengadaan "beli".
  */
 export const produksiDiEnum = pgEnum("produksi_di", ["ck", "cabang"]);
+/**
+ * Divisi produksi resep saat produksi_di="cabang": "kitchen" (dapur) atau
+ * "bar" (minuman). Role kitchen hanya boleh memproduksi resep divisi kitchen;
+ * role bar hanya resep divisi bar. Diabaikan saat produksi_di="ck".
+ */
+export const divisiProduksiEnum = pgEnum("divisi_produksi", ["kitchen", "bar"]);
 /**
  * Status pipeline stok masuk: rencana (RAB) → dikerjakan (produksi: dikerjakan;
  * beli: diproses) → menunggu (produksi: selesai—menunggu konfirmasi; beli:
@@ -530,8 +545,11 @@ export const ingredients = pgTable(
     kategori: text("kategori").notNull().default("lain"),
     pengadaan: pengadaanEnum("pengadaan").notNull().default("beli"),
     // Lokasi produksi bahan jalur "produksi" (diatur di Resep): "ck" = Central
-    // Kitchen; "cabang" = diproduksi kitchen di cabang store (masuk stok cabang).
+    // Kitchen; "cabang" = diproduksi kitchen/bar di cabang store (masuk stok
+    // cabang) sesuai `divisiProduksi`.
     produksiDi: produksiDiEnum("produksi_di").notNull().default("ck"),
+    /** divisi pelaksana saat produksi_di="cabang": kitchen (default) / bar */
+    divisiProduksi: divisiProduksiEnum("divisi_produksi").notNull().default("kitchen"),
     catatan: text("catatan"),
     isPackaging: boolean("is_packaging").notNull().default(false),
     isComplement: boolean("is_complement").notNull().default(false),
