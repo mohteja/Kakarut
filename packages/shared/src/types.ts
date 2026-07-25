@@ -626,7 +626,14 @@ export interface TransferStokSaldoRow {
   nama: string;
   satuan: string;
   pengadaan: JenisPengadaan;
+  /** saldo FISIK di lokasi asal (barang yang masih dalam perjalanan ikut terhitung) */
   saldo: number;
+  /**
+   * qty yang SUDAH dijanjikan keluar tapi belum diterima tujuan (kiriman &
+   * transfer berstatus 'menunggu'). Barang ini fisik sudah lepas, jadi
+   * `tersedia untuk transfer baru` = `saldo − dalam_jalan`.
+   */
+  dalam_jalan: number;
 }
 
 /**

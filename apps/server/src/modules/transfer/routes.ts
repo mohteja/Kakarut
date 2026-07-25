@@ -70,6 +70,42 @@ async function pastikanCabangStok(companyId: string, id: string, peran: "Asal" |
   return b;
 }
 
+/**
+ * Qty per bahan yang SUDAH dijanjikan keluar dari sebuah cabang tapi belum
+ * diterima tujuan (kiriman/transfer berstatus 'menunggu').
+ *
+ * Ledger stok sengaja baru mengurangi saldo asal saat tujuan mengonfirmasi
+ * (barang di jalan masih tercatat di asal), sehingga saldo mentah TIDAK boleh
+ * dipakai langsung sebagai batas transfer baru — tanpa potongan ini stok yang
+ * sama bisa dijanjikan berkali-kali dan saldo asal jadi minus saat semua
+ * kiriman diterima.
+ */
+async function qtyDalamJalan(
+  exec: Pick<typeof db, "execute">,
+  companyId: string,
+  branchId: string,
+  ingredientIds?: string[],
+): Promise<Map<string, number>> {
+  if (ingredientIds && ingredientIds.length === 0) return new Map();
+  const filterBahan = ingredientIds
+    ? sql` AND pr.ingredient_id IN (${sql.join(
+        ingredientIds.map((id) => sql`${id}::uuid`),
+        sql`, `,
+      )})`
+    : sql``;
+  const res = await exec.execute(sql`
+    SELECT pr.ingredient_id AS ingredient_id, SUM(pr.qty) AS qty
+    FROM productions pr
+    WHERE pr.company_id = ${companyId}
+      AND pr.asal_branch_id = ${branchId}
+      AND pr.status = 'menunggu'
+      AND pr.deleted_at IS NULL${filterBahan}
+    GROUP BY pr.ingredient_id
+  `);
+  const rows = (res as unknown as { rows?: Record<string, unknown>[] }).rows ?? [];
+  return new Map(rows.map((r) => [String(r.ingredient_id), Number(r.qty) || 0]));
+}
+
 /** Status agregat satu faktur transfer dari status baris-barisnya. */
 function statusFaktur(items: { status: KonfirmasiStatus }[]): KonfirmasiStatus | "sebagian" {
   const set = new Set(items.map((i) => i.status));
@@ -115,10 +151,14 @@ export const transferRoutes = new Hono<AppEnv>()
       .from(ingredients)
       .where(and(eq(ingredients.companyId, auth.company_id!), inArray(ingredients.id, ids)));
     const infoById = new Map(master.map((m) => [m.id, m]));
+    // barang yang sudah dijanjikan keluar tapi belum diterima tujuan tidak
+    // boleh ditransfer lagi → sisanya yang benar-benar bisa dikirim
+    const jalan = await qtyDalamJalan(db, auth.company_id!, branchId, ids);
     const rows: TransferStokSaldoRow[] = saldo
       .filter((r) => {
         const m = infoById.get(r.ingredient_id);
-        return r.saldo > 0 && m?.trackStok && m?.isActive;
+        if (!m?.trackStok || !m?.isActive) return false;
+        return r.saldo - (jalan.get(r.ingredient_id) ?? 0) > 0;
       })
       .map((r) => ({
         ingredient_id: r.ingredient_id,
@@ -126,6 +166,7 @@ export const transferRoutes = new Hono<AppEnv>()
         satuan: r.satuan,
         pengadaan: infoById.get(r.ingredient_id)!.pengadaan,
         saldo: r.saldo,
+        dalam_jalan: jalan.get(r.ingredient_id) ?? 0,
       }));
     return c.json({ branch_id: branchId, rows });
   })
@@ -141,6 +182,30 @@ export const transferRoutes = new Hono<AppEnv>()
             sql`(${productions.asalBranchId} = ${auth.branch_id} OR ${productions.branchId} = ${auth.branch_id})`,
           ]
         : [];
+    const kondisi = and(
+      eq(productions.companyId, auth.company_id!),
+      isNull(productions.deletedAt),
+      ...kunci,
+    );
+    // Ambil dulu ID faktur terbaru sebanyak perPage, baru tarik barisnya —
+    // tanpa ini seluruh riwayat transfer perusahaan ikut terbaca tiap request.
+    const fakturTerbaru = await db
+      .select({ faktur_id: productions.fakturId })
+      .from(productions)
+      .innerJoin(
+        dokumenNomor,
+        and(
+          eq(dokumenNomor.companyId, productions.companyId),
+          eq(dokumenNomor.refId, productions.fakturId),
+          eq(dokumenNomor.jenis, "transfer"),
+        ),
+      )
+      .where(kondisi)
+      .groupBy(productions.fakturId)
+      .orderBy(desc(sql`MAX(${productions.waktu})`))
+      .limit(perPage);
+    const fakturIds = fakturTerbaru.map((f) => f.faktur_id).filter((id): id is string => !!id);
+    if (fakturIds.length === 0) return c.json({ rows: [] });
     const rows = await db
       .select({
         id: productions.id,
@@ -176,13 +241,7 @@ export const transferRoutes = new Hono<AppEnv>()
       .leftJoin(cabangAsal, eq(productions.asalBranchId, cabangAsal.id))
       .leftJoin(cabangTujuan, eq(productions.tujuanBranchId, cabangTujuan.id))
       .leftJoin(pembuat, eq(productions.userId, pembuat.id))
-      .where(
-        and(
-          eq(productions.companyId, auth.company_id!),
-          isNull(productions.deletedAt),
-          ...kunci,
-        ),
-      )
+      .where(and(kondisi, inArray(productions.fakturId, fakturIds)))
       .orderBy(desc(productions.waktu), asc(productions.id));
 
     const byFaktur = new Map<string, TransferStokFaktur>();
@@ -218,7 +277,7 @@ export const transferRoutes = new Hono<AppEnv>()
       };
       f.items.push(item);
     }
-    const daftar = [...byFaktur.values()].slice(0, perPage);
+    const daftar = [...byFaktur.values()];
     for (const f of daftar) f.status = statusFaktur(f.items);
     return c.json({ rows: daftar });
   })
@@ -277,18 +336,26 @@ export const transferRoutes = new Hono<AppEnv>()
     const fakturId = randomUUID();
 
     const hasil = await db.transaction(async (tx) => {
-      // Saldo asal dicek DI DALAM transaksi (saldo diturunkan dari ledger, tak
-      // bisa dikunci baris) → jendela balapan sekecil mungkin; transfer paralel
-      // yang melebihi stok akan gagal di pemeriksaan ini.
+      // Saldo diturunkan dari ledger (tak ada baris stok yang bisa dikunci),
+      // jadi transfer dari SATU cabang asal diserialkan lewat advisory lock:
+      // pemeriksaan "cukup atau tidak" di bawah baru berjalan setelah transfer
+      // lain dari cabang yang sama selesai commit.
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`transfer:${auth.company_id}:${asal.id}`}))`);
       const saldoAsal = new Map(
         (await hitungSaldoCabang(auth.company_id!, asal.id)).map((r) => [r.ingredient_id, r]),
       );
+      // saldo mentah masih memuat barang yang sedang di jalan → potong dulu
+      const jalan = await qtyDalamJalan(tx, auth.company_id!, asal.id, ingIds);
       for (const [ingId, qty] of qtyByIng) {
         const s = saldoAsal.get(ingId);
         const nama = bahan.find((b) => b.id === ingId)?.nama ?? "bahan";
-        if (!s || qty > s.saldo + 1e-9) {
+        const diJalan = jalan.get(ingId) ?? 0;
+        const tersedia = (s?.saldo ?? 0) - diJalan;
+        if (!s || qty > tersedia + 1e-9) {
+          const catatanJalan =
+            diJalan > 0 ? `, ${diJalan} masih dalam perjalanan ke cabang lain` : "";
           throw new HTTPException(400, {
-            message: `Stok ${asal.nama} tidak cukup untuk ${nama} (saldo ${s?.saldo ?? 0} ${s?.satuan ?? ""}) — kurangi jumlah transfer`,
+            message: `Stok ${asal.nama} tidak cukup untuk ${nama} (tersedia ${Math.max(0, tersedia)} ${s?.satuan ?? ""}${catatanJalan}) — kurangi jumlah transfer`,
           });
         }
       }

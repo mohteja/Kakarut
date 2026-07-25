@@ -1,6 +1,19 @@
 import { randomUUID } from "node:crypto";
 import { zValidator } from "@hono/zod-validator";
-import { and, asc, eq, gte, inArray, isNull, lte, ne, notInArray, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  eq,
+  gte,
+  inArray,
+  isNull,
+  lte,
+  ne,
+  notExists,
+  notInArray,
+  or,
+  sql,
+} from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Hono, type Context } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -1951,6 +1964,26 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
           : [];
       conds.push(...condDivisi);
 
+      // Faktur TRANSFER STOK (nomor TF-) menumpang bentuk baris `productions`
+      // yang sama, tapi itu pemindahan stok jadi — bukan pekerjaan produksi.
+      // Disaring di sini agar tidak mengotori daftar/badge Produksi; jalurnya
+      // sendiri ada di menu Transfer Stok & Penerimaan Barang.
+      const condBukanTransfer = [
+        notExists(
+          db
+            .select({ ada: sql`1` })
+            .from(dokumenNomor)
+            .where(
+              and(
+                eq(dokumenNomor.companyId, productions.companyId),
+                eq(dokumenNomor.refId, productions.fakturId),
+                eq(dokumenNomor.jenis, "transfer"),
+              ),
+            ),
+        ),
+      ];
+      conds.push(...condBukanTransfer);
+
       const keyExpr = sql<string>`COALESCE(${productions.fakturId}::text, ${productions.id}::text)`;
 
       const [ringkas] = await db
@@ -2079,6 +2112,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
                   eq(productions.companyId, auth.company_id!),
                   ...condCabang,
                   ...condDivisi,
+                  ...condBukanTransfer,
                   eq(productions.tipe, tipe),
                   isNull(productions.deletedAt),
                   inArray(keyExpr, keys),

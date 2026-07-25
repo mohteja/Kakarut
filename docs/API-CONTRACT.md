@@ -337,14 +337,26 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 > di asal) — sama seperti jalur kiriman lain. Rak simpan diisi otomatis (rak
 > default bahan) saat diterima.
 >
+> **Batas kirim = `saldo − dalam_jalan`.** Karena saldo asal baru berkurang saat
+> tujuan mengonfirmasi, saldo mentah masih memuat barang yang fisiknya sudah
+> lepas. Barang berstatus `menunggu` yang keluar dari cabang itu (transfer MAUPUN
+> kiriman jalur lain) karena itu dipotong lebih dulu — tanpa ini stok yang sama
+> bisa dijanjikan berkali-kali dan saldo asal jadi minus saat semua kiriman tiba.
+> Transfer dari satu cabang asal juga diserialkan (advisory lock per cabang)
+> sehingga dua permintaan bersamaan tidak bisa sama-sama lolos.
+>
+> **Bukan pekerjaan produksi:** meski menumpang tabel `productions`, faktur
+> transfer TIDAK muncul di `GET /produksi` (daftar & badge) — jalurnya hanya
+> `/transfer-stok` dan `/penerimaan`.
+>
 > **Berdampingan** dengan "Kirim dari stok CK" pada Permintaan Stok: yang itu
 > lahir dari rencana menu (`rencana_id` terisi, nomor PR-), yang ini manual/
 > ad-hoc (`rencana_id` null, nomor TF-). Pembeda tegas di API: faktur transfer
 > adalah faktur yang punya nomor dokumen berjenis `transfer`.
 
-- `GET /api/transfer-stok/saldo` — query: `branch_id?` (peran terkunci cabang selalu dipaksa ke cabangnya) — res: `{ branch_id, rows: TransferStokSaldoRow[] }` — stok READY di cabang itu: hanya bahan **aktif + berlacak-stok + saldo > 0**, tiap baris membawa `pengadaan` ("beli"/"produksi") agar UI bisa menandai jenis bahan
+- `GET /api/transfer-stok/saldo` — query: `branch_id?` (peran terkunci cabang selalu dipaksa ke cabangnya) — res: `{ branch_id, rows: TransferStokSaldoRow[] }` — stok READY di cabang itu: hanya bahan **aktif + berlacak-stok + masih tersisa (`saldo − dalam_jalan > 0`)**. Tiap baris membawa `pengadaan` ("beli"/"produksi") agar UI bisa menandai jenis bahan, `saldo` (fisik) dan `dalam_jalan` (sudah dikirim, belum diterima tujuan) — **yang boleh ditransfer adalah `saldo − dalam_jalan`**
 - `GET /api/transfer-stok` — query: `per_page?` (default 50, maks 200) — res: `{ rows: TransferStokFaktur[] }` (terbaru dulu; tiap faktur memuat `items[]` dengan `pengadaan` & `status` per bahan, plus `status` agregat: `menunggu`/`dikonfirmasi`/`ditolak`/`sebagian`). Peran terkunci cabang hanya melihat transfer yang menyangkut cabangnya (pengirim atau penerima)
-- `POST /api/transfer-stok` — req: `{ asal_branch_id: uuid, tujuan_branch_id: uuid, catatan?|null (max300), items: [{ingredient_id: uuid, qty: number(>0)}] (1..100; bahan sama digabung qty-nya) }` — res: **201** `{ ok, faktur_id, nomor (TF-xxxx), asal, tujuan, jumlah_baris }` — error: **400** (asal = tujuan; asal/tujuan Kantor; bahan invalid/nonaktif/tak lacak stok; **qty melebihi saldo asal** — dicek di dalam transaksi), **403** peran terkunci mengirim dari cabang lain, **404** cabang tidak ditemukan
+- `POST /api/transfer-stok` — req: `{ asal_branch_id: uuid, tujuan_branch_id: uuid, catatan?|null (max300), items: [{ingredient_id: uuid, qty: number(>0)}] (1..100; bahan sama digabung qty-nya) }` — res: **201** `{ ok, faktur_id, nomor (TF-xxxx), asal, tujuan, jumlah_baris }` — error: **400** (asal = tujuan; asal/tujuan Kantor; bahan invalid/nonaktif/tak lacak stok; **qty melebihi `saldo − dalam_jalan` di asal** — dicek di dalam transaksi setelah advisory lock per cabang asal, pesannya menyebut berapa yang masih dalam perjalanan), **403** peran terkunci mengirim dari cabang lain, **404** cabang tidak ditemukan
 - `POST /api/transfer-stok/:fakturId/batal` — batalkan transfer yang belum diproses tujuan (baris masuk Tempat Sampah) — res: `{ ok, jumlah_baris }` — error: **403** bukan pengirim, **404** bukan faktur transfer, **409** sudah diterima/ditolak di tujuan
 
 ## `/api/supplier` — Supplier (`modules/supplier/routes.ts`)
@@ -1225,7 +1237,14 @@ export interface TransferStokSaldoRow {
   nama: string;
   satuan: string;
   pengadaan: JenisPengadaan;
+  /** saldo FISIK di lokasi asal (barang yang masih dalam perjalanan ikut terhitung) */
   saldo: number;
+  /**
+   * qty yang SUDAH dijanjikan keluar tapi belum diterima tujuan (kiriman &
+   * transfer berstatus 'menunggu'). Barang ini fisik sudah lepas, jadi
+   * `tersedia untuk transfer baru` = `saldo − dalam_jalan`.
+   */
+  dalam_jalan: number;
 }
 
 /**

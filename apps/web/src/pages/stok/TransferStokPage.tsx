@@ -85,6 +85,12 @@ export function TransferStokPage() {
     () => new Map(saldoRows.map((r) => [r.ingredient_id, r])),
     [saldoRows],
   );
+  /**
+   * Batas transfer = stok fisik DIKURANGI barang yang sudah dikirim tapi belum
+   * diterima tujuan. Tanpa potongan ini stok yang sama bisa dijanjikan
+   * berkali-kali dan saldo asal jadi minus saat semua kiriman diterima.
+   */
+  const tersediaDari = (r: TransferStokSaldoRow) => r.saldo - r.dalam_jalan;
   const bahanBeli = saldoRows.filter((r) => r.pengadaan === "beli");
   const bahanProduksi = saldoRows.filter((r) => r.pengadaan === "produksi");
 
@@ -130,7 +136,7 @@ export function TransferStokPage() {
   const barisTerisi = baris.filter((b) => b.ingredient_id && Number(b.qty) > 0);
   const adaQtyLebih = baris.some((b) => {
     const s = saldoById.get(b.ingredient_id);
-    return s != null && Number(b.qty) > s.saldo + 1e-9;
+    return s != null && Number(b.qty) > tersediaDari(s) + 1e-9;
   });
   const bisaKirim =
     !!asalId && !!tujuanId && asalId !== tujuanId && barisTerisi.length > 0 && !adaQtyLebih;
@@ -221,7 +227,7 @@ export function TransferStokPage() {
               <tbody className="divide-y divide-stone-100">
                 {baris.map((b, i) => {
                   const s = saldoById.get(b.ingredient_id);
-                  const lebih = s != null && Number(b.qty) > s.saldo + 1e-9;
+                  const lebih = s != null && Number(b.qty) > tersediaDari(s) + 1e-9;
                   // bahan yang sudah dipakai di baris lain disembunyikan
                   const dipakaiLain = new Set(
                     baris.filter((_, j) => j !== i).map((x) => x.ingredient_id),
@@ -246,7 +252,7 @@ export function TransferStokPage() {
                             <optgroup label="🛒 Bahan beli">
                               {opsi(bahanBeli).map((r) => (
                                 <option key={r.ingredient_id} value={r.ingredient_id}>
-                                  {r.nama} — {formatAngka(r.saldo)} {r.satuan}
+                                  {r.nama} — {formatAngka(tersediaDari(r))} {r.satuan}
                                 </option>
                               ))}
                             </optgroup>
@@ -255,7 +261,7 @@ export function TransferStokPage() {
                             <optgroup label="🏭 Bahan produksi">
                               {opsi(bahanProduksi).map((r) => (
                                 <option key={r.ingredient_id} value={r.ingredient_id}>
-                                  {r.nama} — {formatAngka(r.saldo)} {r.satuan}
+                                  {r.nama} — {formatAngka(tersediaDari(r))} {r.satuan}
                                 </option>
                               ))}
                             </optgroup>
@@ -264,7 +270,12 @@ export function TransferStokPage() {
                       </td>
                       <td className="py-2 pr-2">{s ? <BadgeJenis pengadaan={s.pengadaan} /> : "—"}</td>
                       <td className="py-2 pr-2 text-right tabular-nums text-stone-600">
-                        {s ? formatAngka(s.saldo) : "—"}
+                        {s ? formatAngka(tersediaDari(s)) : "—"}
+                        {s && s.dalam_jalan > 0 && (
+                          <div className="text-[11px] font-normal text-amber-600">
+                            {formatAngka(s.dalam_jalan)} dalam perjalanan
+                          </div>
+                        )}
                       </td>
                       <td className="py-2 pr-2 text-right">
                         <input

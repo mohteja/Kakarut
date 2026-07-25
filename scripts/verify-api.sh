@@ -4835,6 +4835,31 @@ cek "kasir buat transfer → 403 (bukan perannya)" "V == 403" \
 cek "kitchen transfer DARI cabang lain → 403 (hanya cabang sendiri)" "V == 403" \
   "$(status_code_body "$TKIT" POST /transfer-stok "{\"asal_branch_id\":\"$CK52_UTAMA\",\"tujuan_branch_id\":\"$CB46_ID\",\"items\":[{\"ingredient_id\":\"$ING132\",\"qty\":1}]}")"
 
+# --- Stok yang MASIH DI JALAN tidak boleh dijanjikan ulang ---
+# Ledger baru mengurangi saldo asal saat tujuan mengonfirmasi, jadi saldo mentah
+# masih memuat barang yang sudah lepas. Tanpa potongan `dalam_jalan`, stok yang
+# sama bisa ditransfer berkali-kali dan saldo asal jadi minus saat semua tiba.
+SALDO132B=$(api "$OWNER" GET "/transfer-stok/saldo?branch_id=$ASAL132")
+cek "GET /transfer-stok/saldo: tiap baris membawa dalam_jalan (angka)" "V == 1" \
+  "$(echo "$SALDO132B" | jq '(([.rows[]|select((.dalam_jalan|type)=="number")]|length) == (.rows|length))|if . then 1 else 0 end')"
+cek "GET /transfer-stok/saldo: hanya bahan yang masih tersisa (saldo > dalam_jalan)" "V == 1" \
+  "$(echo "$SALDO132B" | jq '(([.rows[]|select(.saldo - .dalam_jalan > 0)]|length) == (.rows|length))|if . then 1 else 0 end')"
+ING132C=$(echo "$SALDO132B" | jq -r '.rows[0].ingredient_id')
+TSD132=$(echo "$SALDO132B" | jq -r '.rows[0] | (.saldo - .dalam_jalan)')
+cek "transfer sebesar SELURUH stok tersedia → 201" "V == 1" \
+  "$(api "$OWNER" POST /transfer-stok "{\"asal_branch_id\":\"$ASAL132\",\"tujuan_branch_id\":\"$TUJUAN132\",\"items\":[{\"ingredient_id\":\"$ING132C\",\"qty\":$TSD132}]}" | jq '(.ok==true)|if . then 1 else 0 end')"
+cek "transfer ulang stok yang masih di jalan → 400 (tak bisa dijanjikan dua kali)" "V == 400" \
+  "$(status_code_body "$OWNER" POST /transfer-stok "{\"asal_branch_id\":\"$ASAL132\",\"tujuan_branch_id\":\"$TUJUAN132\",\"items\":[{\"ingredient_id\":\"$ING132C\",\"qty\":1}]}")"
+cek "pesan tolak menyebut barang masih dalam perjalanan" "V == 1" \
+  "$(api "$OWNER" POST /transfer-stok "{\"asal_branch_id\":\"$ASAL132\",\"tujuan_branch_id\":\"$TUJUAN132\",\"items\":[{\"ingredient_id\":\"$ING132C\",\"qty\":1}]}" | jq '((.error // "")|test("dalam perjalanan"))|if . then 1 else 0 end')"
+cek "bahan yang seluruh stoknya di jalan hilang dari daftar siap kirim" "V == 0" \
+  "$(api "$OWNER" GET "/transfer-stok/saldo?branch_id=$ASAL132" | jq --arg i "$ING132C" '[.rows[]|select(.ingredient_id==$i)]|length')"
+# --- faktur transfer bukan pekerjaan produksi → jangan mengotori daftar Produksi ---
+cek "faktur TF- TIDAK muncul di daftar Produksi cabang tujuan" "V == 0" \
+  "$(api "$OWNER" GET "/produksi?branch_id=$TUJUAN132&tipe=produksi&per_page=100" | jq '[.rows[]|select((.nomor // "")|startswith("TF-"))]|length')"
+cek "faktur TF- TIDAK muncul di daftar Produksi cabang asal" "V == 0" \
+  "$(api "$OWNER" GET "/produksi?branch_id=$ASAL132&tipe=produksi&per_page=100" | jq '[.rows[]|select((.nomor // "")|startswith("TF-"))]|length')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]
