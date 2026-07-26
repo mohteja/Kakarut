@@ -211,111 +211,182 @@ export function TransferStokPage() {
             </div>
           </div>
 
-          {/* Tabel bahan: JENIS (beli/produksi) selalu terlihat + saldo ready */}
-          <div className="mt-4 overflow-x-auto">
-            <table className="w-full min-w-[46rem] text-sm">
-              <thead>
-                <tr className="border-b border-stone-200 text-left text-xs text-stone-500">
-                  <th className="pb-2">Bahan baku</th>
-                  <th className="pb-2">Jenis</th>
-                  <th className="pb-2 text-right">Stok tersedia</th>
-                  <th className="pb-2 text-right">Jumlah kirim</th>
-                  <th className="pb-2">Satuan</th>
-                  <th className="pb-2" />
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-stone-100">
-                {baris.map((b, i) => {
-                  const s = saldoById.get(b.ingredient_id);
-                  const lebih = s != null && Number(b.qty) > tersediaDari(s) + 1e-9;
-                  // bahan yang sudah dipakai di baris lain disembunyikan
-                  const dipakaiLain = new Set(
-                    baris.filter((_, j) => j !== i).map((x) => x.ingredient_id),
-                  );
-                  const opsi = (rows: TransferStokSaldoRow[]) =>
-                    rows.filter((r) => r.ingredient_id === b.ingredient_id || !dipakaiLain.has(r.ingredient_id));
-                  return (
-                    <tr key={i}>
-                      <td className="py-2 pr-2">
-                        <select
-                          value={b.ingredient_id}
-                          onChange={(e) => {
-                            const s2 = [...baris];
-                            s2[i] = { ...s2[i], ingredient_id: e.target.value };
-                            setBaris(s2);
-                          }}
-                          className={inputClass}
-                          aria-label={`Bahan baris ${i + 1}`}
-                        >
-                          <option value="">— pilih bahan —</option>
-                          {bahanBeli.length > 0 && (
-                            <optgroup label="🛒 Bahan beli">
-                              {opsi(bahanBeli).map((r) => (
-                                <option key={r.ingredient_id} value={r.ingredient_id}>
-                                  {r.nama} — {formatAngka(tersediaDari(r))} {r.satuan}
-                                </option>
-                              ))}
-                            </optgroup>
+          {/*
+            Baris bahan. Tabel enam kolom butuh ~46rem; di layar HP (±390px) itu
+            memaksa geser horizontal dan kolom "Jumlah kirim" jatuh jauh di luar
+            layar sehingga input gramasi tak terlihat sama sekali. Karena itu HP
+            memakai kartu bertumpuk, tabel baru dipakai mulai lebar `sm`.
+            Kendali yang sama dirender lewat helper di bawah agar kedua tata
+            letak tak punya perilaku berbeda.
+          */}
+          {(() => {
+            const pilihBahan = (i: number, b: BarisTransfer) => {
+              // bahan yang sudah dipakai di baris lain disembunyikan
+              const dipakaiLain = new Set(
+                baris.filter((_, j) => j !== i).map((x) => x.ingredient_id),
+              );
+              const opsi = (rows: TransferStokSaldoRow[]) =>
+                rows.filter(
+                  (r) =>
+                    r.ingredient_id === b.ingredient_id ||
+                    !dipakaiLain.has(r.ingredient_id),
+                );
+              return (
+                <select
+                  value={b.ingredient_id}
+                  onChange={(e) => {
+                    const s2 = [...baris];
+                    s2[i] = { ...s2[i], ingredient_id: e.target.value };
+                    setBaris(s2);
+                  }}
+                  className={inputClass}
+                  aria-label={`Bahan baris ${i + 1}`}
+                >
+                  <option value="">— pilih bahan —</option>
+                  {bahanBeli.length > 0 && (
+                    <optgroup label="🛒 Bahan beli">
+                      {opsi(bahanBeli).map((r) => (
+                        <option key={r.ingredient_id} value={r.ingredient_id}>
+                          {r.nama} — {formatAngka(tersediaDari(r))} {r.satuan}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                  {bahanProduksi.length > 0 && (
+                    <optgroup label="🏭 Bahan produksi">
+                      {opsi(bahanProduksi).map((r) => (
+                        <option key={r.ingredient_id} value={r.ingredient_id}>
+                          {r.nama} — {formatAngka(tersediaDari(r))} {r.satuan}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                </select>
+              );
+            };
+
+            const inputQty = (i: number, b: BarisTransfer, lebih: boolean, lebar: string) => (
+              <input
+                type="number"
+                min="0.0001"
+                step="any"
+                inputMode="decimal"
+                value={b.qty}
+                onChange={(e) => {
+                  const s2 = [...baris];
+                  s2[i] = { ...s2[i], qty: e.target.value };
+                  setBaris(s2);
+                }}
+                className={`${lebar} rounded-lg border px-2 py-2 text-right text-sm focus:outline-none ${
+                  lebih
+                    ? "border-red-400 bg-red-50 focus:border-red-500"
+                    : "border-stone-300 focus:border-orange-500"
+                }`}
+                placeholder="0"
+                aria-label={`Jumlah kirim baris ${i + 1}`}
+              />
+            );
+
+            const tombolHapus = (i: number, teks: string) =>
+              baris.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() => setBaris(baris.filter((_, j) => j !== i))}
+                  className="text-sm font-medium text-red-500 hover:underline"
+                  aria-label={`Hapus baris ${i + 1}`}
+                >
+                  {teks}
+                </button>
+              );
+
+            const stokTersedia = (s: TransferStokSaldoRow | undefined) => (
+              <>
+                {s ? formatAngka(tersediaDari(s)) : "—"}
+                {s && s.dalam_jalan > 0 && (
+                  <div className="text-[11px] font-normal text-amber-600">
+                    {formatAngka(s.dalam_jalan)} dalam perjalanan
+                  </div>
+                )}
+              </>
+            );
+
+            return (
+              <>
+                {/* HP: satu kartu per bahan — semua kendali tetap di dalam layar */}
+                <div className="mt-4 space-y-3 sm:hidden">
+                  {baris.map((b, i) => {
+                    const s = saldoById.get(b.ingredient_id);
+                    const lebih = s != null && Number(b.qty) > tersediaDari(s) + 1e-9;
+                    return (
+                      <div key={i} className="rounded-xl border border-stone-200 p-3">
+                        {pilihBahan(i, b)}
+                        <div className="mt-2 flex items-center justify-between gap-2">
+                          {s ? (
+                            <BadgeJenis pengadaan={s.pengadaan} />
+                          ) : (
+                            <span className="text-xs text-stone-400">Bahan belum dipilih</span>
                           )}
-                          {bahanProduksi.length > 0 && (
-                            <optgroup label="🏭 Bahan produksi">
-                              {opsi(bahanProduksi).map((r) => (
-                                <option key={r.ingredient_id} value={r.ingredient_id}>
-                                  {r.nama} — {formatAngka(tersediaDari(r))} {r.satuan}
-                                </option>
-                              ))}
-                            </optgroup>
-                          )}
-                        </select>
-                      </td>
-                      <td className="py-2 pr-2">{s ? <BadgeJenis pengadaan={s.pengadaan} /> : "—"}</td>
-                      <td className="py-2 pr-2 text-right tabular-nums text-stone-600">
-                        {s ? formatAngka(tersediaDari(s)) : "—"}
-                        {s && s.dalam_jalan > 0 && (
-                          <div className="text-[11px] font-normal text-amber-600">
-                            {formatAngka(s.dalam_jalan)} dalam perjalanan
+                          {tombolHapus(i, "✕ Hapus")}
+                        </div>
+                        <div className="mt-3 grid grid-cols-2 items-end gap-3">
+                          <div>
+                            <div className="text-xs text-stone-500">Stok tersedia</div>
+                            <div className="tabular-nums text-sm text-stone-700">
+                              {stokTersedia(s)}
+                            </div>
                           </div>
-                        )}
-                      </td>
-                      <td className="py-2 pr-2 text-right">
-                        <input
-                          type="number"
-                          min="0.0001"
-                          step="any"
-                          value={b.qty}
-                          onChange={(e) => {
-                            const s2 = [...baris];
-                            s2[i] = { ...s2[i], qty: e.target.value };
-                            setBaris(s2);
-                          }}
-                          className={`w-28 rounded-lg border px-2 py-2 text-right text-sm focus:outline-none ${
-                            lebih
-                              ? "border-red-400 bg-red-50 focus:border-red-500"
-                              : "border-stone-300 focus:border-orange-500"
-                          }`}
-                          placeholder="0"
-                          aria-label={`Jumlah kirim baris ${i + 1}`}
-                        />
-                      </td>
-                      <td className="py-2 pr-2 text-xs text-stone-500">{s?.satuan ?? ""}</td>
-                      <td className="py-2 text-right">
-                        {baris.length > 1 && (
-                          <button
-                            type="button"
-                            onClick={() => setBaris(baris.filter((_, j) => j !== i))}
-                            className="text-sm font-medium text-red-500 hover:underline"
-                            aria-label={`Hapus baris ${i + 1}`}
-                          >
-                            ✕
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                          <div>
+                            <div className="mb-1 text-xs text-stone-500">
+                              Jumlah kirim{s?.satuan ? ` (${s.satuan})` : ""}
+                            </div>
+                            {inputQty(i, b, lebih, "w-full")}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Layar lebar: tabel seperti semula */}
+                <div className="mt-4 hidden overflow-x-auto sm:block">
+                  <table className="w-full min-w-[40rem] text-sm">
+                    <thead>
+                      <tr className="border-b border-stone-200 text-left text-xs text-stone-500">
+                        <th className="pb-2">Bahan baku</th>
+                        <th className="pb-2">Jenis</th>
+                        <th className="pb-2 text-right">Stok tersedia</th>
+                        <th className="pb-2 text-right">Jumlah kirim</th>
+                        <th className="pb-2">Satuan</th>
+                        <th className="pb-2" />
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-stone-100">
+                      {baris.map((b, i) => {
+                        const s = saldoById.get(b.ingredient_id);
+                        const lebih = s != null && Number(b.qty) > tersediaDari(s) + 1e-9;
+                        return (
+                          <tr key={i}>
+                            <td className="py-2 pr-2">{pilihBahan(i, b)}</td>
+                            <td className="py-2 pr-2">
+                              {s ? <BadgeJenis pengadaan={s.pengadaan} /> : "—"}
+                            </td>
+                            <td className="py-2 pr-2 text-right tabular-nums text-stone-600">
+                              {stokTersedia(s)}
+                            </td>
+                            <td className="py-2 pr-2 text-right">
+                              {inputQty(i, b, lebih, "w-28")}
+                            </td>
+                            <td className="py-2 pr-2 text-xs text-stone-500">{s?.satuan ?? ""}</td>
+                            <td className="py-2 text-right">{tombolHapus(i, "✕")}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            );
+          })()}
           {saldoLoading ? (
             <div className="mt-2">
               <Spinner />
@@ -351,8 +422,12 @@ export function TransferStokPage() {
               Ada jumlah kirim melebihi stok tersedia — perbaiki dulu.
             </p>
           )}
-          <div className="mt-3 flex items-center gap-3">
-            <button type="submit" disabled={!bisaKirim || kirim.isPending} className={btnPrimary}>
+          <div className="mt-3 flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:gap-3">
+            <button
+              type="submit"
+              disabled={!bisaKirim || kirim.isPending}
+              className={`${btnPrimary} w-full whitespace-nowrap sm:w-auto`}
+            >
               {kirim.isPending ? "Mengirim…" : "🔄 Kirim Transfer"}
             </button>
             {barisTerisi.length > 0 && (
@@ -428,7 +503,30 @@ export function TransferStokPage() {
                     )}
                   </div>
                 </div>
-                <div className="overflow-x-auto">
+                {/* HP: item ditumpuk agar tak perlu geser horizontal */}
+                <div className="divide-y divide-stone-100 sm:hidden">
+                  {f.items.map((it) => (
+                    <div
+                      key={it.id}
+                      className={`px-3 py-2 ${it.status === "ditolak" ? "bg-red-50/60" : ""}`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="font-medium">{it.nama}</span>
+                        <span className="shrink-0 tabular-nums text-sm">
+                          {formatAngka(it.qty)} {it.satuan}
+                        </span>
+                      </div>
+                      <div className="mt-1 flex flex-wrap items-center gap-2">
+                        <BadgeJenis pengadaan={it.pengadaan} />
+                        <span className="text-xs text-stone-500">
+                          {(BADGE_STATUS[it.status] ?? BADGE_STATUS.menunggu).label}
+                          {it.alasan_tolak && ` · ${it.alasan_tolak}`}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="hidden overflow-x-auto sm:block">
                   <table className="w-full min-w-[32rem] text-sm">
                     <thead>
                       <tr className="border-b border-stone-100 text-left text-xs text-stone-500">
