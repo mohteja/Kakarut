@@ -3,16 +3,14 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { BahanDto, KategoriDto } from "@kakarut/shared";
 import {
-  Card,
   ErrorText,
   PageTitle,
   Spinner,
   btnPrimary,
   btnSecondary,
   inputClass,
-  tdClass,
-  thClass,
 } from "../../components/ui";
+import { TabelResponsif } from "../../components/TabelResponsif";
 import { KategoriManagerModal } from "../../components/KategoriManagerModal";
 import { useAuth } from "../../context/AuthContext";
 import { api } from "../../lib/api";
@@ -139,14 +137,12 @@ export function BahanPage() {
     setFilterKategori("semua");
   }
 
-  const kolom = bolehUbah ? 15 : 14;
-
   return (
     <div>
       <PageTitle
         aksi={
           bolehUbah ? (
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <button onClick={() => setKelolaKategori(true)} className={btnSecondary}>
                 🏷 Kategori
               </button>
@@ -286,237 +282,276 @@ export function BahanPage() {
 
       <ErrorText error={hapus.error} />
 
-      <Card className="overflow-x-auto">
-        <table className="w-full">
-          <thead className="border-b border-stone-200 bg-stone-50">
-            <tr>
-              {bolehUbah && (
-                <th className={`${thClass} w-8`}>
-                  <input
-                    type="checkbox"
-                    checked={semuaTampilTerpilih}
-                    onChange={togglePilihSemua}
-                    aria-label="Pilih semua bahan yang tampil"
-                    title="Pilih semua yang tampil"
-                  />
-                </th>
-              )}
-              <th className={thClass}>Kode</th>
-              <th className={thClass}>Nama</th>
-              <th className={thClass}>Kategori</th>
-              <th className={thClass}>Jenis</th>
-              <th className={thClass}>Satuan beli</th>
-              <th className={`${thClass} text-right`}>Harga Beli</th>
-              <th className={`${thClass} text-right`}>Isi</th>
-              <th className={`${thClass} text-right`}>Harga / Unit</th>
-              <th className={`${thClass} text-right`}>Stok min</th>
-              <th className={`${thClass} text-right`}>Min beli</th>
-              <th className={thClass}>Rak simpan</th>
-              <th className={thClass}>Supplier</th>
-              <th className={thClass}>Catatan</th>
-              <th className={thClass}></th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-stone-100">
-            {tampil.map((b) => (
-              <tr key={b.id} className={pilih.has(b.id) ? "bg-orange-50/60" : "hover:bg-stone-50"}>
-                {bolehUbah && (
-                  <td className={tdClass}>
+      <TabelResponsif
+        data={tampil}
+        kunci={(b) => b.id}
+        kelasBaris={(b) => (pilih.has(b.id) ? "bg-orange-50/60" : "hover:bg-stone-50")}
+        judulKartu={
+          bolehUbah && tampil.length > 0 ? (
+            <label className="flex items-center gap-2 px-1 text-sm text-stone-600">
+              <input
+                type="checkbox"
+                checked={semuaTampilTerpilih}
+                onChange={togglePilihSemua}
+                aria-label="Pilih semua bahan yang tampil"
+              />
+              Pilih semua yang tampil ({tampil.length})
+            </label>
+          ) : undefined
+        }
+        kosong={
+          <>
+            Tidak ada bahan yang cocok dengan filter.{" "}
+            <button onClick={resetFilter} className="font-medium text-orange-600 hover:underline">
+              Reset filter
+            </button>
+          </>
+        }
+        kolom={[
+          ...(bolehUbah
+            ? [
+                {
+                  hp: "pilih" as const,
+                  kelasJudul: "w-8",
+                  judul: (
+                    <input
+                      type="checkbox"
+                      checked={semuaTampilTerpilih}
+                      onChange={togglePilihSemua}
+                      aria-label="Pilih semua bahan yang tampil"
+                      title="Pilih semua yang tampil"
+                    />
+                  ),
+                  sel: (b: BahanDto) => (
                     <input
                       type="checkbox"
                       checked={pilih.has(b.id)}
                       onChange={() => togglePilih(b.id)}
                       aria-label={`Pilih ${b.nama}`}
                     />
-                  </td>
-                )}
-                <td className={`${tdClass} whitespace-nowrap font-mono text-xs text-stone-500`}>
-                  {b.kode ?? "—"}
-                </td>
-                <td className={`${tdClass} font-medium`}>
-                  <button
-                    onClick={() => navigate(`/bahan/${b.id}`)}
-                    title={`Detail produk "${b.nama}"`}
-                    className="text-left font-medium text-stone-800 hover:text-orange-600 hover:underline"
-                  >
-                    {b.nama}
-                  </button>
-                  {b.is_packaging && (
-                    <span className="ml-2 rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-700">
-                      Kemasan TA
-                    </span>
-                  )}
-                  {b.is_complement && (
-                    <span className="ml-2 rounded-full bg-purple-100 px-2 py-0.5 text-xs text-purple-700">
-                      Complement
-                    </span>
-                  )}
-                  {b.pengadaan === "beli" && b.boleh_eceran && (
-                    <span
-                      className="ml-2 rounded-full bg-green-100 px-2 py-0.5 text-xs text-green-700"
-                      title="Bisa dibeli eceran — saran beli tidak dibulatkan per kemasan"
-                    >
-                      Eceran
-                    </span>
-                  )}
-                  {!b.track_stok && (
-                    <span className="ml-2 rounded-full bg-stone-200 px-2 py-0.5 text-xs text-stone-500">
-                      Stok tidak dilacak
-                    </span>
-                  )}
-                </td>
-                <td className={tdClass}>{b.kategori}</td>
-                <td className={tdClass}>
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
-                      b.pengadaan === "produksi"
-                        ? "bg-orange-100 text-orange-700"
-                        : "bg-teal-100 text-teal-700"
-                    }`}
-                  >
-                    {b.pengadaan === "produksi" ? "Produksi sendiri" : "Beli jadi"}
+                  ),
+                },
+              ]
+            : []),
+          {
+            judul: "Kode",
+            hp: "sub",
+            kelasSel: "whitespace-nowrap font-mono text-xs text-stone-500",
+            sel: (b) => <span className="font-mono">{b.kode ?? "—"}</span>,
+          },
+          {
+            judul: "Nama",
+            hp: "judul",
+            kelasSel: "font-medium",
+            sel: (b) => (
+              <>
+                <button
+                  onClick={() => navigate(`/bahan/${b.id}`)}
+                  title={`Detail produk "${b.nama}"`}
+                  className="text-left font-medium text-stone-800 hover:text-orange-600 hover:underline"
+                >
+                  {b.nama}
+                </button>
+                {b.is_packaging && (
+                  <span className="ml-2 rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-700">
+                    Kemasan TA
                   </span>
-                </td>
-                <td className={`${tdClass} whitespace-nowrap text-stone-600`}>
-                  {b.satuan_beli ?? <span className="text-stone-300">—</span>}
-                </td>
-                <td className={`${tdClass} text-right`}>{formatRupiah(b.harga_beli)}</td>
-                <td className={`${tdClass} text-right`}>
-                  {formatAngka(b.isi)} <span className="text-stone-400">{b.satuan}</span>
-                </td>
-                <td className={`${tdClass} text-right font-semibold`}>
-                  {formatRupiah(b.harga_per_unit)}
-                </td>
-                <td className={`${tdClass} text-right text-stone-600`}>
-                  {!b.track_stok ? (
-                    <span className="text-stone-300" title="Stok tidak dilacak">
-                      —
-                    </span>
-                  ) : b.stok_minimum > 0 ? (
-                    <>
-                      {formatAngka(b.stok_minimum)} <span className="text-stone-400">{b.satuan}</span>
-                    </>
-                  ) : (
-                    <span className="text-stone-300">0</span>
-                  )}
-                </td>
-                <td className={`${tdClass} text-right text-stone-600`}>
-                  {b.pengadaan === "beli" && b.min_beli > 0 ? (
-                    <>
-                      {formatAngka(b.min_beli)} <span className="text-stone-400">{b.satuan}</span>
-                    </>
-                  ) : (
-                    <span className="text-stone-300">—</span>
-                  )}
-                </td>
-                <td className={`${tdClass} text-stone-600`}>
-                  {b.rak_lokasi.length > 0 ? (
-                    <span className="flex flex-wrap gap-1">
-                      {b.rak_lokasi.map((r) => (
-                        <span
-                          key={r.rak_id}
-                          title={`${r.branch_nama} — ${r.rak_nama} (atur di Tempat Penyimpanan)`}
-                          className="whitespace-nowrap rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs text-amber-800"
-                        >
-                          {r.branch_tipe === "central_kitchen" ? "🏭" : "🏪"} {r.branch_nama} ·{" "}
-                          {r.rak_nama}
-                        </span>
-                      ))}
-                    </span>
-                  ) : (
-                    <span className="text-stone-300">—</span>
-                  )}
-                </td>
-                <td className={`${tdClass} whitespace-nowrap`}>
-                  {b.pengadaan === "produksi" ? (
-                    // dibuat di dapur sendiri — tidak memakai supplier
+                )}
+                {b.is_complement && (
+                  <span className="ml-2 rounded-full bg-purple-100 px-2 py-0.5 text-xs text-purple-700">
+                    Complement
+                  </span>
+                )}
+                {b.pengadaan === "beli" && b.boleh_eceran && (
+                  <span
+                    className="ml-2 rounded-full bg-green-100 px-2 py-0.5 text-xs text-green-700"
+                    title="Bisa dibeli eceran — saran beli tidak dibulatkan per kemasan"
+                  >
+                    Eceran
+                  </span>
+                )}
+                {!b.track_stok && (
+                  <span className="ml-2 rounded-full bg-stone-200 px-2 py-0.5 text-xs text-stone-500">
+                    Stok tidak dilacak
+                  </span>
+                )}
+              </>
+            ),
+          },
+          { judul: "Kategori", sel: (b) => b.kategori },
+          {
+            judul: "Jenis",
+            sel: (b) => (
+              <span
+                className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                  b.pengadaan === "produksi"
+                    ? "bg-orange-100 text-orange-700"
+                    : "bg-teal-100 text-teal-700"
+                }`}
+              >
+                {b.pengadaan === "produksi" ? "Produksi sendiri" : "Beli jadi"}
+              </span>
+            ),
+          },
+          {
+            judul: "Satuan beli",
+            // tanpa kolom Isi di sebelahnya angka ini tidak informatif di kartu
+            hp: "lewat",
+            kelasSel: "whitespace-nowrap text-stone-600",
+            sel: (b) => b.satuan_beli ?? <span className="text-stone-300">—</span>,
+          },
+          { judul: "Harga Beli", kanan: true, sel: (b) => formatRupiah(b.harga_beli) },
+          {
+            judul: "Isi",
+            kanan: true,
+            hp: "lewat",
+            sel: (b) => (
+              <>
+                {formatAngka(b.isi)} <span className="text-stone-400">{b.satuan}</span>
+              </>
+            ),
+          },
+          {
+            judul: "Harga / Unit",
+            kanan: true,
+            kelasSel: "font-semibold",
+            sel: (b) => formatRupiah(b.harga_per_unit),
+          },
+          {
+            judul: "Stok min",
+            kanan: true,
+            kelasSel: "text-stone-600",
+            sel: (b) =>
+              !b.track_stok ? (
+                <span className="text-stone-300" title="Stok tidak dilacak">
+                  —
+                </span>
+              ) : b.stok_minimum > 0 ? (
+                <>
+                  {formatAngka(b.stok_minimum)} <span className="text-stone-400">{b.satuan}</span>
+                </>
+              ) : (
+                <span className="text-stone-300">0</span>
+              ),
+          },
+          {
+            judul: "Min beli",
+            kanan: true,
+            hp: "lewat",
+            kelasSel: "text-stone-600",
+            sel: (b) =>
+              b.pengadaan === "beli" && b.min_beli > 0 ? (
+                <>
+                  {formatAngka(b.min_beli)} <span className="text-stone-400">{b.satuan}</span>
+                </>
+              ) : (
+                <span className="text-stone-300">—</span>
+              ),
+          },
+          {
+            judul: "Rak simpan",
+            kelasSel: "text-stone-600",
+            sel: (b) =>
+              b.rak_lokasi.length > 0 ? (
+                <span className="flex flex-wrap gap-1">
+                  {b.rak_lokasi.map((r) => (
                     <span
-                      className="text-xs text-stone-300"
-                      title="Produksi sendiri — tidak memakai supplier"
+                      key={r.rak_id}
+                      title={`${r.branch_nama} — ${r.rak_nama} (atur di Tempat Penyimpanan)`}
+                      className="whitespace-nowrap rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs text-amber-800"
                     >
-                      —
+                      {r.branch_tipe === "central_kitchen" ? "🏭" : "🏪"} {r.branch_nama} ·{" "}
+                      {r.rak_nama}
                     </span>
-                  ) : bolehUbah ? (
-                    <button
-                      onClick={() => setAturSupplier(b)}
-                      title={`Atur supplier "${b.nama}" — beli di mana & supplier utama`}
-                      aria-label={`Atur supplier ${b.nama}`}
-                      className={`rounded-full border px-2 py-0.5 text-xs font-medium transition ${
-                        b.supplier_utama
-                          ? "border-amber-200 bg-amber-50 text-amber-800 hover:border-orange-400"
-                          : "border-dashed border-stone-300 text-stone-500 hover:border-orange-400 hover:text-orange-600"
-                      }`}
-                    >
-                      {b.supplier_utama ? (
-                        <>
-                          ★ {b.supplier_utama}
-                          {b.jumlah_supplier > 1 && ` +${b.jumlah_supplier - 1}`}
-                        </>
-                      ) : (
-                        "+ Atur supplier"
-                      )}
-                    </button>
-                  ) : b.supplier_utama ? (
-                    <span className="text-xs text-stone-600">
+                  ))}
+                </span>
+              ) : (
+                <span className="text-stone-300">—</span>
+              ),
+          },
+          {
+            judul: "Supplier",
+            kelasSel: "whitespace-nowrap",
+            sel: (b) =>
+              b.pengadaan === "produksi" ? (
+                // dibuat di dapur sendiri — tidak memakai supplier
+                <span
+                  className="text-xs text-stone-300"
+                  title="Produksi sendiri — tidak memakai supplier"
+                >
+                  —
+                </span>
+              ) : bolehUbah ? (
+                <button
+                  onClick={() => setAturSupplier(b)}
+                  title={`Atur supplier "${b.nama}" — beli di mana & supplier utama`}
+                  aria-label={`Atur supplier ${b.nama}`}
+                  className={`rounded-full border px-2 py-0.5 text-xs font-medium transition ${
+                    b.supplier_utama
+                      ? "border-amber-200 bg-amber-50 text-amber-800 hover:border-orange-400"
+                      : "border-dashed border-stone-300 text-stone-500 hover:border-orange-400 hover:text-orange-600"
+                  }`}
+                >
+                  {b.supplier_utama ? (
+                    <>
                       ★ {b.supplier_utama}
                       {b.jumlah_supplier > 1 && ` +${b.jumlah_supplier - 1}`}
-                    </span>
-                  ) : (
-                    <span className="text-xs text-stone-300">—</span>
-                  )}
-                </td>
-                <td className={`${tdClass} max-w-48 truncate text-stone-400`} title={b.catatan ?? ""}>
-                  {b.catatan}
-                </td>
-                <td className={`${tdClass} whitespace-nowrap text-right`}>
-                  {bolehUbah && (
-                    <>
-                      <button
-                        onClick={() =>
-                          navigate(
-                            b.pengadaan === "produksi"
-                              ? `/resep?bahan=${b.id}`
-                              : `/bahan/ubah?ids=${b.id}`,
-                          )
-                        }
-                        title={
-                          b.pengadaan === "produksi"
-                            ? "Bahan produksi diubah lewat halaman Resep"
-                            : "Ubah bahan"
-                        }
-                        className="text-sm font-medium text-orange-600 hover:underline"
-                      >
-                        {b.pengadaan === "produksi" ? "Ubah resep" : "Ubah"}
-                      </button>
-                      <button
-                        onClick={() => {
-                          if (confirm(`Nonaktifkan bahan "${b.nama}"?`)) hapus.mutate(b.id);
-                        }}
-                        className="ml-3 text-sm font-medium text-red-500 hover:underline"
-                      >
-                        Hapus
-                      </button>
                     </>
+                  ) : (
+                    "+ Atur supplier"
                   )}
-                </td>
-              </tr>
-            ))}
-            {tampil.length === 0 && (
-              <tr>
-                <td colSpan={kolom} className="py-8 text-center text-sm text-stone-400">
-                  Tidak ada bahan yang cocok dengan filter.{" "}
+                </button>
+              ) : b.supplier_utama ? (
+                <span className="text-xs text-stone-600">
+                  ★ {b.supplier_utama}
+                  {b.jumlah_supplier > 1 && ` +${b.jumlah_supplier - 1}`}
+                </span>
+              ) : (
+                <span className="text-xs text-stone-300">—</span>
+              ),
+          },
+          {
+            judul: "Catatan",
+            hp: "lewat",
+            kelasSel: "max-w-48 truncate text-stone-400",
+            sel: (b) => b.catatan,
+          },
+          {
+            hp: "aksi",
+            kelasSel: "whitespace-nowrap text-right",
+            sel: (b) =>
+              bolehUbah && (
+                <>
                   <button
-                    onClick={resetFilter}
-                    className="font-medium text-orange-600 hover:underline"
+                    onClick={() =>
+                      navigate(
+                        b.pengadaan === "produksi"
+                          ? `/resep?bahan=${b.id}`
+                          : `/bahan/ubah?ids=${b.id}`,
+                      )
+                    }
+                    title={
+                      b.pengadaan === "produksi"
+                        ? "Bahan produksi diubah lewat halaman Resep"
+                        : "Ubah bahan"
+                    }
+                    className="text-sm font-medium text-orange-600 hover:underline"
                   >
-                    Reset filter
+                    {b.pengadaan === "produksi" ? "Ubah resep" : "Ubah"}
                   </button>
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </Card>
+                  <button
+                    onClick={() => {
+                      if (confirm(`Nonaktifkan bahan "${b.nama}"?`)) hapus.mutate(b.id);
+                    }}
+                    className="ml-3 text-sm font-medium text-red-500 hover:underline"
+                  >
+                    Hapus
+                  </button>
+                </>
+              ),
+          },
+        ]}
+      />
 
       {aturSupplier && (
         <SupplierBahanModal

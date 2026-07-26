@@ -10,9 +10,8 @@ import {
   btnPrimary,
   btnSecondary,
   inputClass,
-  tdClass,
-  thClass,
 } from "../../components/ui";
+import { TabelResponsif } from "../../components/TabelResponsif";
 import { CabangDataBar } from "../../components/CabangDataBar";
 import { CatatWasteModal } from "./CatatWasteModal";
 import { StokPerlengkapanTab } from "./StokPerlengkapanTab";
@@ -216,75 +215,81 @@ export function StokPage() {
               Sisa porsi dihitung otomatis dari saldo stok bahan (resep per porsi).
             </span>
           </div>
-          <Card className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="border-b border-stone-200 bg-stone-50">
-                <tr>
-                  <th className={thClass}>Kode</th>
-                  <th className={thClass}>Menu</th>
-                  <th className={thClass}>Kategori</th>
-                  <th className={`${thClass} text-right`}>Harga</th>
-                  <th className={`${thClass} text-right`}>Sisa Porsi</th>
-                  <th className={thClass}>Bahan Pembatas</th>
-                  <th className={thClass}>Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-stone-100">
-                {menuTampil.map(({ menu: m, stok: st }) => {
+          <TabelResponsif
+            data={menuTampil}
+            kunci={({ menu: m }) => m.id}
+            kosong={cari ? `Menu "${cari}" tidak ditemukan.` : "Belum ada menu aktif."}
+            kolom={[
+              {
+                judul: "Kode",
+                hp: "sub",
+                sel: ({ menu: m }) =>
+                  m.kode ? (
+                    <span className="rounded bg-orange-100 px-1.5 py-0.5 font-mono text-xs font-bold text-orange-700">
+                      {m.kode}
+                    </span>
+                  ) : (
+                    "—"
+                  ),
+              },
+              { judul: "Menu", hp: "judul", kelasSel: "font-medium", sel: ({ menu: m }) => m.nama },
+              {
+                judul: "Kategori",
+                kelasSel: "text-stone-500",
+                sel: ({ menu: m }) => m.kategori,
+              },
+              {
+                judul: "Harga",
+                kanan: true,
+                sel: ({ menu: m }) => formatRupiah(m.harga_jual),
+              },
+              {
+                judul: "Sisa Porsi",
+                kanan: true,
+                kelasSel: "text-lg font-bold",
+                sel: ({ stok: st }) => {
+                  const porsi = st?.porsi ?? null;
+                  return (
+                    <span className="text-lg font-bold">
+                      {porsi == null ? "∞" : formatAngka(porsi)}
+                    </span>
+                  );
+                },
+              },
+              {
+                judul: "Bahan Pembatas",
+                kelasSel: "text-stone-600",
+                sel: ({ stok: st }) =>
+                  st?.pembatas ? (
+                    <span
+                      title={`${formatAngka(st.pembatas.qty_per_porsi)} ${st.pembatas.satuan}/porsi`}
+                    >
+                      {st.pembatas.nama}
+                      <span className="ml-1 text-xs text-stone-400">
+                        (sisa {formatAngka(st.pembatas.saldo)} {st.pembatas.satuan})
+                      </span>
+                    </span>
+                  ) : (
+                    <span className="text-stone-400">tidak dibatasi bahan</span>
+                  ),
+              },
+              {
+                judul: "Status",
+                sel: ({ stok: st }) => {
                   const porsi = st?.porsi ?? null;
                   const status =
                     porsi == null ? null : porsi <= 0 ? "habis" : porsi <= 5 ? "menipis" : "aman";
-                  return (
-                    <tr key={m.id} className="hover:bg-stone-50">
-                      <td className={tdClass}>
-                        {m.kode ? (
-                          <span className="rounded bg-orange-100 px-1.5 py-0.5 font-mono text-xs font-bold text-orange-700">
-                            {m.kode}
-                          </span>
-                        ) : (
-                          "—"
-                        )}
-                      </td>
-                      <td className={`${tdClass} font-medium`}>{m.nama}</td>
-                      <td className={`${tdClass} text-stone-500`}>{m.kategori}</td>
-                      <td className={`${tdClass} text-right`}>{formatRupiah(m.harga_jual)}</td>
-                      <td className={`${tdClass} text-right text-lg font-bold`}>
-                        {porsi == null ? "∞" : formatAngka(porsi)}
-                      </td>
-                      <td className={`${tdClass} text-stone-600`}>
-                        {st?.pembatas ? (
-                          <span title={`${formatAngka(st.pembatas.qty_per_porsi)} ${st.pembatas.satuan}/porsi`}>
-                            {st.pembatas.nama}
-                            <span className="ml-1 text-xs text-stone-400">
-                              (sisa {formatAngka(st.pembatas.saldo)} {st.pembatas.satuan})
-                            </span>
-                          </span>
-                        ) : (
-                          <span className="text-stone-400">tidak dibatasi bahan</span>
-                        )}
-                      </td>
-                      <td className={tdClass}>
-                        {status ? (
-                          <StatusBadge status={status} />
-                        ) : (
-                          <span className="rounded-full bg-stone-100 px-2 py-0.5 text-xs font-semibold text-stone-500">
-                            tak terbatas
-                          </span>
-                        )}
-                      </td>
-                    </tr>
+                  return status ? (
+                    <StatusBadge status={status} />
+                  ) : (
+                    <span className="rounded-full bg-stone-100 px-2 py-0.5 text-xs font-semibold text-stone-500">
+                      tak terbatas
+                    </span>
                   );
-                })}
-                {menuTampil.length === 0 && (
-                  <tr>
-                    <td colSpan={7} className={`${tdClass} py-8 text-center text-stone-400`}>
-                      {cari ? `Menu "${cari}" tidak ditemukan.` : "Belum ada menu aktif."}
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </Card>
+                },
+              },
+            ]}
+          />
         </>
       ) : tab === "perlengkapan" ? (
         <StokPerlengkapanTab
@@ -398,88 +403,97 @@ export function StokPage() {
         )}
       </div>
 
-      <Card className="overflow-x-auto">
-        <table className="w-full">
-          <thead className="border-b border-stone-200 bg-stone-50">
-            <tr>
-              <th className={thClass}>Bahan</th>
-              <th className={thClass}>Tempat</th>
-              <th className={`${thClass} text-right`}>Stok Awal</th>
-              <th className={`${thClass} text-right`} title="Produksi + pembelian setelah opname terakhir">
-                Masuk
-              </th>
-              <th className={`${thClass} text-right`}>Terpakai</th>
-              <th className={`${thClass} text-right`}>Saldo</th>
-              <th className={thClass}>Status</th>
-              <th className={thClass}></th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-stone-100">
-            {tampil.map((s) => (
-              <tr key={s.ingredient_id} className="hover:bg-stone-50">
-                <td className={`${tdClass} font-medium`}>
-                  {s.nama}
-                  {s.produksi_berjalan && (
-                    <span
-                      className="ml-2 whitespace-nowrap rounded-full bg-orange-100 px-2 py-0.5 text-xs font-semibold text-orange-800"
-                      title={`Direncanakan ${formatAngka(s.produksi_berjalan.rencana)} · Dikerjakan ${formatAngka(s.produksi_berjalan.dikerjakan)} · Menunggu konfirmasi ${formatAngka(s.produksi_berjalan.menunggu)}`}
-                    >
-                      🏭 +{formatAngka(s.produksi_berjalan.qty)} ·{" "}
-                      {labelTahapProduksi(s.produksi_berjalan)}
-                    </span>
-                  )}
-                  {s.pembelian_berjalan && (
-                    <span
-                      className="ml-2 whitespace-nowrap rounded-full bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-800"
-                      title={`RAB ${formatAngka(s.pembelian_berjalan.rencana)} · Diproses ${formatAngka(s.pembelian_berjalan.dikerjakan)} · Dikirim ${formatAngka(s.pembelian_berjalan.menunggu)}`}
-                    >
-                      🛒 +{formatAngka(s.pembelian_berjalan.qty)} ·{" "}
-                      {labelTahapPembelian(s.pembelian_berjalan)}
-                    </span>
-                  )}
-                  {expByIng.has(s.ingredient_id) && (
-                    <span
-                      className={`ml-2 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold ${
-                        expByIng.get(s.ingredient_id)! < 0
-                          ? "bg-red-100 text-red-700"
-                          : "bg-amber-100 text-amber-800"
-                      }`}
-                      title="Ada lot bahan ini yang hampir/lewat tanggal kedaluwarsa — lihat peringatan di atas"
-                    >
-                      {expByIng.get(s.ingredient_id)! < 0
-                        ? "⏳ lewat exp"
-                        : `⏳ exp ${expByIng.get(s.ingredient_id)} hr`}
-                    </span>
-                  )}
-                </td>
-                <td className={`${tdClass} text-stone-500`}>{s.tempat ?? "—"}</td>
-                <td className={`${tdClass} text-right`}>{formatAngka(s.stok_awal)}</td>
-                <td className={`${tdClass} text-right text-green-700`}>
-                  {s.produksi > 0 ? `+${formatAngka(s.produksi)}` : "—"}
-                </td>
-                <td className={`${tdClass} text-right text-red-600`}>
-                  {s.terpakai > 0 ? `−${formatAngka(s.terpakai)}` : "—"}
-                </td>
-                <td className={`${tdClass} text-right font-bold`}>{formatAngka(s.saldo)}</td>
-                <td className={tdClass}>
-                  <StatusBadge status={s.status} />
-                </td>
-                <td className={`${tdClass} whitespace-nowrap text-right`}>
-                  <a
-                    href={`/stok/kartu/${s.ingredient_id}${branchQuery}`}
-                    target="_blank"
-                    rel="noopener"
-                    className="text-sm font-medium text-orange-600 hover:underline"
-                    title="Buka kartu stok di tab baru"
+      <TabelResponsif
+        data={tampil}
+        kunci={(s) => s.ingredient_id}
+        kosong="Belum ada bahan yang melacak stok di lokasi ini."
+        kolom={[
+          {
+            judul: "Bahan",
+            hp: "judul",
+            kelasSel: "font-medium",
+            sel: (s) => (
+              <>
+                {s.nama}
+                {s.produksi_berjalan && (
+                  <span
+                    className="ml-2 whitespace-nowrap rounded-full bg-orange-100 px-2 py-0.5 text-xs font-semibold text-orange-800"
+                    title={`Direncanakan ${formatAngka(s.produksi_berjalan.rencana)} · Dikerjakan ${formatAngka(s.produksi_berjalan.dikerjakan)} · Menunggu konfirmasi ${formatAngka(s.produksi_berjalan.menunggu)}`}
                   >
-                    📄 Kartu
-                  </a>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </Card>
+                    🏭 +{formatAngka(s.produksi_berjalan.qty)} ·{" "}
+                    {labelTahapProduksi(s.produksi_berjalan)}
+                  </span>
+                )}
+                {s.pembelian_berjalan && (
+                  <span
+                    className="ml-2 whitespace-nowrap rounded-full bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-800"
+                    title={`RAB ${formatAngka(s.pembelian_berjalan.rencana)} · Diproses ${formatAngka(s.pembelian_berjalan.dikerjakan)} · Dikirim ${formatAngka(s.pembelian_berjalan.menunggu)}`}
+                  >
+                    🛒 +{formatAngka(s.pembelian_berjalan.qty)} ·{" "}
+                    {labelTahapPembelian(s.pembelian_berjalan)}
+                  </span>
+                )}
+                {expByIng.has(s.ingredient_id) && (
+                  <span
+                    className={`ml-2 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold ${
+                      expByIng.get(s.ingredient_id)! < 0
+                        ? "bg-red-100 text-red-700"
+                        : "bg-amber-100 text-amber-800"
+                    }`}
+                    title="Ada lot bahan ini yang hampir/lewat tanggal kedaluwarsa — lihat peringatan di atas"
+                  >
+                    {expByIng.get(s.ingredient_id)! < 0
+                      ? "⏳ lewat exp"
+                      : `⏳ exp ${expByIng.get(s.ingredient_id)} hr`}
+                  </span>
+                )}
+              </>
+            ),
+          },
+          { judul: "Tempat", kelasSel: "text-stone-500", sel: (s) => s.tempat ?? "—" },
+          { judul: "Stok Awal", kanan: true, sel: (s) => formatAngka(s.stok_awal) },
+          {
+            judul: "Masuk",
+            kanan: true,
+            kelasJudul: "",
+            sel: (s) => (
+              <span className="text-green-700">
+                {s.produksi > 0 ? `+${formatAngka(s.produksi)}` : "—"}
+              </span>
+            ),
+          },
+          {
+            judul: "Terpakai",
+            kanan: true,
+            sel: (s) => (
+              <span className="text-red-600">
+                {s.terpakai > 0 ? `−${formatAngka(s.terpakai)}` : "—"}
+              </span>
+            ),
+          },
+          {
+            judul: "Saldo",
+            kanan: true,
+            sel: (s) => <span className="font-bold">{formatAngka(s.saldo)}</span>,
+          },
+          { judul: "Status", sel: (s) => <StatusBadge status={s.status} /> },
+          {
+            hp: "aksi",
+            kelasSel: "whitespace-nowrap text-right",
+            sel: (s) => (
+              <a
+                href={`/stok/kartu/${s.ingredient_id}${branchQuery}`}
+                target="_blank"
+                rel="noopener"
+                className="text-sm font-medium text-orange-600 hover:underline"
+                title="Buka kartu stok di tab baru"
+              >
+                📄 Kartu
+              </a>
+            ),
+          },
+        ]}
+      />
         </>
       )}
 

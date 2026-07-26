@@ -3,7 +3,6 @@ import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import type { SupplierDto } from "@kakarut/shared";
 import {
-  Card,
   ErrorText,
   Modal,
   PageTitle,
@@ -11,9 +10,8 @@ import {
   btnPrimary,
   btnSecondary,
   inputClass,
-  tdClass,
-  thClass,
 } from "../../components/ui";
+import { TabelResponsif } from "../../components/TabelResponsif";
 import { api } from "../../lib/api";
 
 interface FormState {
@@ -151,93 +149,91 @@ export function SupplierPage() {
         )}
       </div>
 
-      <Card className="overflow-x-auto">
-        <table className="w-full">
-          <thead className="border-b border-stone-200 bg-stone-50">
-            <tr>
-              <th className={thClass}>Nama</th>
-              <th className={thClass}>Kategori</th>
-              <th className={thClass}>Telepon</th>
-              <th className={thClass}>Alamat</th>
-              <th className={thClass}>Status</th>
-              <th className={thClass}></th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-stone-100">
-            {terlihat.map((s) => (
-              <tr key={s.id}>
-                <td className={`${tdClass} font-medium`}>
-                  <Link
-                    to={`/pengaturan/supplier/${s.id}`}
-                    className="hover:text-orange-600 hover:underline"
-                    title="Buka kartu supplier (riwayat transaksi)"
-                  >
-                    {s.nama}
-                  </Link>
-                </td>
-                <td className={tdClass}>
-                  {s.kategori ? (
-                    <span className="rounded-full bg-stone-100 px-2 py-0.5 text-xs font-medium text-stone-600">
-                      {s.kategori}
-                    </span>
-                  ) : (
-                    "—"
-                  )}
-                </td>
-                <td className={tdClass}>{s.telepon ?? "—"}</td>
-                <td className={`${tdClass} max-w-48 truncate`}>{s.alamat ?? "—"}</td>
-                <td className={tdClass}>
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
-                      s.is_active ? "bg-green-100 text-green-800" : "bg-stone-100 text-stone-500"
-                    }`}
-                  >
-                    {s.is_active ? "Aktif" : "Nonaktif"}
-                  </span>
-                </td>
-                <td className={`${tdClass} whitespace-nowrap text-right`}>
-                  <Link
-                    to={`/pengaturan/supplier/${s.id}`}
-                    className="text-sm font-medium text-stone-600 hover:underline"
-                  >
-                    📒 Kartu
-                  </Link>
-                  <button
-                    onClick={() =>
-                      setForm({
-                        id: s.id,
-                        nama: s.nama,
-                        telepon: s.telepon ?? "",
-                        alamat: s.alamat ?? "",
-                        catatan: s.catatan ?? "",
-                        kategori: s.kategori ?? "",
-                      })
-                    }
-                    className="ml-3 text-sm font-medium text-orange-600 hover:underline"
-                  >
-                    Ubah
-                  </button>
-                  <button
-                    onClick={() => toggle.mutate(s)}
-                    className="ml-3 text-sm font-medium text-stone-500 hover:underline"
-                  >
-                    {s.is_active ? "Nonaktifkan" : "Aktifkan"}
-                  </button>
-                </td>
-              </tr>
-            ))}
-            {terlihat.length === 0 && (
-              <tr>
-                <td colSpan={6} className="py-8 text-center text-sm text-stone-400">
-                  {semua.length === 0
-                    ? "Belum ada supplier — juga bisa ditambah langsung dari form faktur."
-                    : "Tidak ada supplier yang cocok dengan pencarian/filter."}
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </Card>
+      <TabelResponsif
+        data={terlihat}
+        kunci={(s) => s.id}
+        kosong={
+          semua.length === 0
+            ? "Belum ada supplier — juga bisa ditambah langsung dari form faktur."
+            : "Tidak ada supplier yang cocok dengan pencarian/filter."
+        }
+        kolom={[
+          {
+            judul: "Nama",
+            hp: "judul",
+            kelasSel: "font-medium",
+            sel: (s) => (
+              <Link
+                to={`/pengaturan/supplier/${s.id}`}
+                className="hover:text-orange-600 hover:underline"
+                title="Buka kartu supplier (riwayat transaksi)"
+              >
+                {s.nama}
+              </Link>
+            ),
+          },
+          {
+            judul: "Kategori",
+            sel: (s) =>
+              s.kategori ? (
+                <span className="rounded-full bg-stone-100 px-2 py-0.5 text-xs font-medium text-stone-600">
+                  {s.kategori}
+                </span>
+              ) : (
+                "—"
+              ),
+          },
+          { judul: "Telepon", sel: (s) => s.telepon ?? "—" },
+          { judul: "Alamat", kelasSel: "max-w-48 truncate", sel: (s) => s.alamat ?? "—" },
+          {
+            judul: "Status",
+            sel: (s) => (
+              <span
+                className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                  s.is_active ? "bg-green-100 text-green-800" : "bg-stone-100 text-stone-500"
+                }`}
+              >
+                {s.is_active ? "Aktif" : "Nonaktif"}
+              </span>
+            ),
+          },
+          {
+            hp: "aksi",
+            kelasSel: "whitespace-nowrap text-right",
+            sel: (s) => (
+              <>
+                <Link
+                  to={`/pengaturan/supplier/${s.id}`}
+                  className="text-sm font-medium text-stone-600 hover:underline"
+                >
+                  📒 Kartu
+                </Link>
+                <button
+                  onClick={() =>
+                    setForm({
+                      id: s.id,
+                      nama: s.nama,
+                      telepon: s.telepon ?? "",
+                      alamat: s.alamat ?? "",
+                      catatan: s.catatan ?? "",
+                      kategori: s.kategori ?? "",
+                    })
+                  }
+                  className="ml-3 text-sm font-medium text-orange-600 hover:underline"
+                >
+                  Ubah
+                </button>
+                <button
+                  onClick={() => toggle.mutate(s)}
+                  className="ml-3 text-sm font-medium text-stone-500 hover:underline"
+                >
+                  {s.is_active ? "Nonaktifkan" : "Aktifkan"}
+                </button>
+              </>
+            ),
+          },
+        ]}
+      />
 
       <Modal
         open={form !== null}

@@ -15,9 +15,8 @@ import {
   btnPrimary,
   btnSecondary,
   inputClass,
-  tdClass,
-  thClass,
 } from "../../components/ui";
+import { TabelResponsif } from "../../components/TabelResponsif";
 import { RiwayatHargaModal } from "../../components/RiwayatHargaModal";
 import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
@@ -113,162 +112,172 @@ export function PerlengkapanPage() {
             : "Belum ada perlengkapan. Tambahkan lewat “➕ Tambah Perlengkapan”."}
         </Card>
       ) : (
-        <Card className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="border-b border-stone-200 bg-stone-50">
-              <tr>
-                <th className={thClass}>Perlengkapan</th>
-                <th className={thClass}>Kategori</th>
-                <th className={thClass}>Supplier</th>
-                <th className={`${thClass} text-right`}>Harga Beli</th>
-                <th className={`${thClass} text-right`}>Stok Min</th>
-                <th className={thClass}>Ada di</th>
-                <th className={thClass}>Aturan Konsumsi</th>
-                <th className={thClass}></th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-stone-100">
-              {tampil.map((r) => (
-                <tr key={r.id} className="hover:bg-stone-50">
-                  <td className={`${tdClass} font-medium`}>
-                    <button
-                      onClick={() => setRiwayat(r)}
-                      title={`Riwayat harga & catat harga "${r.nama}"`}
-                      className="text-left font-medium text-stone-800 hover:text-orange-600 hover:underline"
+        <TabelResponsif
+          data={tampil}
+          kunci={(r) => r.id}
+          kosong="Belum ada perlengkapan."
+          kolom={[
+            {
+              judul: "Perlengkapan",
+              hp: "judul",
+              kelasSel: "font-medium",
+              sel: (r) => (
+                <>
+                  <button
+                    onClick={() => setRiwayat(r)}
+                    title={`Riwayat harga & catat harga "${r.nama}"`}
+                    className="text-left font-medium text-stone-800 hover:text-orange-600 hover:underline"
+                  >
+                    {r.nama}
+                  </button>{" "}
+                  <span className="text-xs font-normal text-stone-400">({r.satuan})</span>
+                  <div className="mt-0.5 flex flex-wrap gap-1 text-xs font-normal">
+                    <span
+                      className="rounded bg-stone-100 px-1.5 py-0.5 text-stone-600"
+                      title={
+                        r.boleh_eceran
+                          ? "Boleh dibeli/dikirim eceran (per satuan)"
+                          : "Harus utuh per kemasan — tidak dijual eceran"
+                      }
                     >
-                      {r.nama}
-                    </button>{" "}
-                    <span className="text-xs font-normal text-stone-400">({r.satuan})</span>
-                    <div className="mt-0.5 flex flex-wrap gap-1 text-xs font-normal">
-                      <span
-                        className="rounded bg-stone-100 px-1.5 py-0.5 text-stone-600"
-                        title={
-                          r.boleh_eceran
-                            ? "Boleh dibeli/dikirim eceran (per satuan)"
-                            : "Harus utuh per kemasan — tidak dijual eceran"
-                        }
-                      >
-                        {r.boleh_eceran ? "🧩 boleh ecer" : "📦 utuh kemasan"}
-                      </span>
-                      {r.dilacak && (
-                        <span
-                          className="rounded bg-orange-100 px-1.5 py-0.5 font-semibold text-orange-800"
-                          title="Konsumsi item ini dipantau — wajib punya aturan konsumsi"
-                        >
-                          🎯 dilacak
-                        </span>
-                      )}
-                      {r.rak_lokasi.map((rl) => (
-                        <span
-                          key={rl.rak_id}
-                          className="rounded bg-stone-100 px-1.5 py-0.5 text-stone-600"
-                          title={`Disimpan di ${rl.branch_nama} — atur di Tempat Penyimpanan`}
-                        >
-                          🗄 {rl.branch_nama} · {rl.rak_nama}
-                        </span>
-                      ))}
-                      {r.catatan && <span className="text-stone-400">{r.catatan}</span>}
-                    </div>
-                  </td>
-                  <td className={`${tdClass} text-stone-600`}>
-                    {r.kategori ?? <span className="text-stone-400">—</span>}
-                  </td>
-                  <td className={tdClass}>
-                    <button
-                      onClick={() => setModal({ jenis: "supplier", item: r })}
-                      title={`Atur supplier "${r.nama}" — beli di mana & supplier utama`}
-                      className={`rounded-lg px-2 py-1 text-xs font-medium ${
-                        r.supplier_utama
-                          ? "text-stone-700 hover:bg-stone-100"
-                          : "border border-dashed border-stone-300 text-stone-400 hover:bg-stone-50"
-                      }`}
-                    >
-                      {r.supplier_utama ? (
-                        <>
-                          ★ {r.supplier_utama}
-                          {r.jumlah_supplier > 1 && ` +${r.jumlah_supplier - 1}`}
-                        </>
-                      ) : (
-                        "+ Atur supplier"
-                      )}
-                    </button>
-                  </td>
-                  <td className={`${tdClass} text-right`}>
-                    {r.harga_beli > 0 ? formatRupiah(r.harga_beli) : "—"}
-                  </td>
-                  <td className={`${tdClass} text-right text-stone-500`}>
-                    {r.stok_minimum > 0 ? formatAngka(r.stok_minimum) : "—"}
-                  </td>
-                  <td className={tdClass}>
-                    {r.lokasi.length === 0 ? (
-                      <span className="text-xs text-stone-400">belum ada di cabang mana pun</span>
-                    ) : (
-                      <div className="flex flex-wrap gap-1.5">
-                        {r.lokasi.map((l) => (
-                          <span
-                            key={l.branch_id}
-                            className="rounded-full bg-stone-100 px-2 py-0.5 text-xs font-medium text-stone-700"
-                          >
-                            🏪 {l.branch_nama}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </td>
-                  <td className={tdClass}>
-                    {r.lokasi.some((l) => l.aturan) ? (
-                      <div className="space-y-0.5 text-xs text-stone-600">
-                        {r.lokasi
-                          .filter((l) => l.aturan)
-                          .map((l) => (
-                            <div key={l.branch_id} className="whitespace-nowrap">
-                              <span className="text-stone-400">{l.branch_nama}:</span>{" "}
-                              {labelAturan(l.aturan!, r.satuan)}
-                            </div>
-                          ))}
-                      </div>
-                    ) : r.dilacak ? (
-                      <button
-                        onClick={() => setModal({ jenis: "aturan", item: r })}
-                        className="rounded-lg bg-red-50 px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-100"
-                        title="Item dilacak wajib punya aturan konsumsi — klik untuk mengatur"
-                      >
-                        ⚠ wajib aturan — belum diatur
-                      </button>
-                    ) : (
-                      <span className="text-xs text-stone-400">belum diatur</span>
-                    )}
-                  </td>
-                  <td className={`${tdClass} whitespace-nowrap text-right`}>
-                    <span className="flex justify-end gap-1.5">
-                      <button
-                        onClick={() => setModal({ jenis: "aturan", item: r })}
-                        className="rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700 hover:bg-indigo-100"
-                      >
-                        ⏱ Aturan
-                      </button>
-                      <button
-                        onClick={() => setModal({ jenis: "item", item: r })}
-                        className="rounded-lg border border-stone-300 px-3 py-1 text-xs font-medium text-stone-600 hover:bg-stone-50"
-                      >
-                        ✏️ Ubah
-                      </button>
-                      <button
-                        onClick={() => {
-                          if (confirm(`Hapus perlengkapan "${r.nama}"? Riwayatnya tetap tersimpan.`))
-                            hapus.mutate(r.id);
-                        }}
-                        className="rounded-lg border border-red-300 px-3 py-1 text-xs font-medium text-red-600 hover:bg-red-50"
-                      >
-                        🗑
-                      </button>
+                      {r.boleh_eceran ? "🧩 boleh ecer" : "📦 utuh kemasan"}
                     </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Card>
+                    {r.dilacak && (
+                      <span
+                        className="rounded bg-orange-100 px-1.5 py-0.5 font-semibold text-orange-800"
+                        title="Konsumsi item ini dipantau — wajib punya aturan konsumsi"
+                      >
+                        🎯 dilacak
+                      </span>
+                    )}
+                    {r.rak_lokasi.map((rl) => (
+                      <span
+                        key={rl.rak_id}
+                        className="rounded bg-stone-100 px-1.5 py-0.5 text-stone-600"
+                        title={`Disimpan di ${rl.branch_nama} — atur di Tempat Penyimpanan`}
+                      >
+                        🗄 {rl.branch_nama} · {rl.rak_nama}
+                      </span>
+                    ))}
+                    {r.catatan && <span className="text-stone-400">{r.catatan}</span>}
+                  </div>
+                </>
+              ),
+            },
+            {
+              judul: "Kategori",
+              kelasSel: "text-stone-600",
+              sel: (r) => r.kategori ?? <span className="text-stone-400">—</span>,
+            },
+            {
+              judul: "Supplier",
+              sel: (r) => (
+                <button
+                  onClick={() => setModal({ jenis: "supplier", item: r })}
+                  title={`Atur supplier "${r.nama}" — beli di mana & supplier utama`}
+                  className={`rounded-lg px-2 py-1 text-xs font-medium ${
+                    r.supplier_utama
+                      ? "text-stone-700 hover:bg-stone-100"
+                      : "border border-dashed border-stone-300 text-stone-400 hover:bg-stone-50"
+                  }`}
+                >
+                  {r.supplier_utama ? (
+                    <>
+                      ★ {r.supplier_utama}
+                      {r.jumlah_supplier > 1 && ` +${r.jumlah_supplier - 1}`}
+                    </>
+                  ) : (
+                    "+ Atur supplier"
+                  )}
+                </button>
+              ),
+            },
+            {
+              judul: "Harga Beli",
+              kanan: true,
+              sel: (r) => (r.harga_beli > 0 ? formatRupiah(r.harga_beli) : "—"),
+            },
+            {
+              judul: "Stok Min",
+              kanan: true,
+              kelasSel: "text-stone-500",
+              sel: (r) => (r.stok_minimum > 0 ? formatAngka(r.stok_minimum) : "—"),
+            },
+            {
+              judul: "Ada di",
+              sel: (r) =>
+                r.lokasi.length === 0 ? (
+                  <span className="text-xs text-stone-400">belum ada di cabang mana pun</span>
+                ) : (
+                  <div className="flex flex-wrap gap-1.5">
+                    {r.lokasi.map((l) => (
+                      <span
+                        key={l.branch_id}
+                        className="rounded-full bg-stone-100 px-2 py-0.5 text-xs font-medium text-stone-700"
+                      >
+                        🏪 {l.branch_nama}
+                      </span>
+                    ))}
+                  </div>
+                ),
+            },
+            {
+              judul: "Aturan Konsumsi",
+              sel: (r) =>
+                r.lokasi.some((l) => l.aturan) ? (
+                  <div className="space-y-0.5 text-xs text-stone-600">
+                    {r.lokasi
+                      .filter((l) => l.aturan)
+                      .map((l) => (
+                        <div key={l.branch_id} className="whitespace-nowrap">
+                          <span className="text-stone-400">{l.branch_nama}:</span>{" "}
+                          {labelAturan(l.aturan!, r.satuan)}
+                        </div>
+                      ))}
+                  </div>
+                ) : r.dilacak ? (
+                  <button
+                    onClick={() => setModal({ jenis: "aturan", item: r })}
+                    className="rounded-lg bg-red-50 px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-100"
+                    title="Item dilacak wajib punya aturan konsumsi — klik untuk mengatur"
+                  >
+                    ⚠ wajib aturan — belum diatur
+                  </button>
+                ) : (
+                  <span className="text-xs text-stone-400">belum diatur</span>
+                ),
+            },
+            {
+              hp: "aksi",
+              kelasSel: "whitespace-nowrap text-right",
+              sel: (r) => (
+                <span className="flex flex-wrap justify-end gap-1.5">
+                  <button
+                    onClick={() => setModal({ jenis: "aturan", item: r })}
+                    className="rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700 hover:bg-indigo-100"
+                  >
+                    ⏱ Aturan
+                  </button>
+                  <button
+                    onClick={() => setModal({ jenis: "item", item: r })}
+                    className="rounded-lg border border-stone-300 px-3 py-1 text-xs font-medium text-stone-600 hover:bg-stone-50"
+                  >
+                    ✏️ Ubah
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (confirm(`Hapus perlengkapan "${r.nama}"? Riwayatnya tetap tersimpan.`))
+                        hapus.mutate(r.id);
+                    }}
+                    className="rounded-lg border border-red-300 px-3 py-1 text-xs font-medium text-red-600 hover:bg-red-50"
+                  >
+                    🗑
+                  </button>
+                </span>
+              ),
+            },
+          ]}
+        />
       )}
 
       {modal?.jenis === "item" && (

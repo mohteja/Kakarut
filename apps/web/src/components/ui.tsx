@@ -2,8 +2,10 @@ import type { ReactNode } from "react";
 import type { StokStatus } from "@kakarut/shared";
 
 export function PageTitle({ children, aksi }: { children: ReactNode; aksi?: ReactNode }) {
+  // `flex-wrap`: di layar HP judul + tombol aksi tidak muat sebaris, dan tanpa
+  // ini tombol paling kanan terpotong di luar layar.
   return (
-    <div className="mb-5 flex items-center justify-between">
+    <div className="mb-5 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
       <h1 className="text-2xl font-bold text-stone-800">{children}</h1>
       {aksi}
     </div>

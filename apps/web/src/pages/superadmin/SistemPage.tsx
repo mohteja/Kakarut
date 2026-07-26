@@ -1,15 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import type { BackupStatusDto } from "@kakarut/shared";
-import {
-  Card,
-  ErrorText,
-  PageTitle,
-  Spinner,
-  btnPrimary,
-  tdClass,
-  thClass,
-} from "../../components/ui";
+import { Card, ErrorText, PageTitle, Spinner, btnPrimary } from "../../components/ui";
+import { TabelResponsif } from "../../components/TabelResponsif";
 import { api, loadAuth } from "../../lib/api";
 
 interface MigrationEntry {
@@ -117,43 +110,43 @@ export function SistemPage() {
         </div>
       )}
 
-      <Card className="overflow-x-auto">
-        <table className="w-full">
-          <thead className="border-b border-stone-200 bg-stone-50">
-            <tr>
-              <th className={thClass}>Migrasi</th>
-              <th className={thClass}>Dibuat</th>
-              <th className={thClass}>Status</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-stone-100">
-            {m.daftar.map((e) => (
-              <tr key={e.tag}>
-                <td className={`${tdClass} font-mono`}>{e.tag}</td>
-                <td className={tdClass}>
-                  {e.dibuat
-                    ? new Intl.DateTimeFormat("id-ID", {
-                        dateStyle: "medium",
-                        timeZone: "Asia/Jakarta",
-                      }).format(new Date(e.dibuat))
-                    : "—"}
-                </td>
-                <td className={tdClass}>
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
-                      e.status === "terpasang"
-                        ? "bg-green-100 text-green-800"
-                        : "bg-yellow-100 text-yellow-800"
-                    }`}
-                  >
-                    {e.status === "terpasang" ? "Terpasang" : "Menunggu"}
-                  </span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </Card>
+      <TabelResponsif
+        data={m.daftar}
+        kunci={(e) => e.tag}
+        kosong="Belum ada migrasi terdaftar."
+        kolom={[
+          {
+            judul: "Migrasi",
+            hp: "judul",
+            kelasSel: "font-mono",
+            sel: (e) => <span className="font-mono">{e.tag}</span>,
+          },
+          {
+            judul: "Dibuat",
+            sel: (e) =>
+              e.dibuat
+                ? new Intl.DateTimeFormat("id-ID", {
+                    dateStyle: "medium",
+                    timeZone: "Asia/Jakarta",
+                  }).format(new Date(e.dibuat))
+                : "—",
+          },
+          {
+            judul: "Status",
+            sel: (e) => (
+              <span
+                className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                  e.status === "terpasang"
+                    ? "bg-green-100 text-green-800"
+                    : "bg-yellow-100 text-yellow-800"
+                }`}
+              >
+                {e.status === "terpasang" ? "Terpasang" : "Menunggu"}
+              </span>
+            ),
+          },
+        ]}
+      />
 
       <div className="mt-4 rounded-lg bg-blue-50 px-4 py-3 text-sm text-blue-800">
         <b>Cara kerja migrasi otomatis:</b> setiap rilis fitur baru menyertakan file migrasi
@@ -280,80 +273,69 @@ function BackupSection() {
           <ErrorText error={backupSekarang.error} />
           <ErrorText error={hapus.error} />
 
-          <Card className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="border-b border-stone-200 bg-stone-50">
-                <tr>
-                  <th className={thClass}>Waktu</th>
-                  <th className={thClass}>Pemicu</th>
-                  <th className={thClass}>Status</th>
-                  <th className={thClass}>Ukuran</th>
-                  <th className={thClass}>Cakupan</th>
-                  <th className={thClass}></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-stone-100">
-                {data.riwayat.map((b) => (
-                  <tr key={b.id}>
-                    <td className={tdClass}>{fmtWaktu(b.waktu)}</td>
-                    <td className={tdClass}>
-                      {b.pemicu === "otomatis" ? "Otomatis" : "Manual"}
-                    </td>
-                    <td className={tdClass}>
-                      <span
-                        className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
-                          b.status === "sukses"
-                            ? "bg-green-100 text-green-800"
-                            : b.status === "gagal"
-                              ? "bg-red-100 text-red-700"
-                              : "bg-yellow-100 text-yellow-800"
-                        }`}
-                        title={b.error ?? undefined}
-                      >
-                        {b.status === "sukses"
-                          ? "Sukses"
-                          : b.status === "gagal"
-                            ? "Gagal"
-                            : "Berjalan"}
-                      </span>
-                    </td>
-                    <td className={tdClass}>{fmtUkuran(b.ukuran_bytes)}</td>
-                    <td className={`${tdClass} text-stone-500`}>
-                      {b.jumlah_tabel != null
-                        ? `${b.jumlah_tabel} tabel · ${b.jumlah_baris?.toLocaleString("id-ID") ?? 0} baris`
-                        : "—"}
-                    </td>
-                    <td className={`${tdClass} whitespace-nowrap text-right`}>
-                      {b.bisa_unduh && (
-                        <button
-                          onClick={() => unduh(b.id, b.object_key)}
-                          className="text-sm font-medium text-orange-600 hover:underline"
-                        >
-                          ⬇ Unduh
-                        </button>
-                      )}
+          <TabelResponsif
+            data={data.riwayat}
+            kunci={(b) => b.id}
+            kosong="Belum ada cadangan. Klik “Backup sekarang” atau tunggu jadwal otomatis."
+            kolom={[
+              { judul: "Waktu", hp: "judul", sel: (b) => fmtWaktu(b.waktu) },
+              {
+                judul: "Pemicu",
+                sel: (b) => (b.pemicu === "otomatis" ? "Otomatis" : "Manual"),
+              },
+              {
+                judul: "Status",
+                sel: (b) => (
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                      b.status === "sukses"
+                        ? "bg-green-100 text-green-800"
+                        : b.status === "gagal"
+                          ? "bg-red-100 text-red-700"
+                          : "bg-yellow-100 text-yellow-800"
+                    }`}
+                    title={b.error ?? undefined}
+                  >
+                    {b.status === "sukses" ? "Sukses" : b.status === "gagal" ? "Gagal" : "Berjalan"}
+                  </span>
+                ),
+              },
+              { judul: "Ukuran", sel: (b) => fmtUkuran(b.ukuran_bytes) },
+              {
+                judul: "Cakupan",
+                kelasSel: "text-stone-500",
+                sel: (b) =>
+                  b.jumlah_tabel != null
+                    ? `${b.jumlah_tabel} tabel · ${b.jumlah_baris?.toLocaleString("id-ID") ?? 0} baris`
+                    : "—",
+              },
+              {
+                hp: "aksi",
+                kelasSel: "whitespace-nowrap text-right",
+                sel: (b) => (
+                  <>
+                    {b.bisa_unduh && (
                       <button
-                        onClick={() => {
-                          if (confirm("Hapus cadangan ini? Berkasnya ikut dihapus."))
-                            hapus.mutate(b.id);
-                        }}
-                        className="ml-3 text-sm font-medium text-stone-400 hover:text-red-600 hover:underline"
+                        onClick={() => unduh(b.id, b.object_key)}
+                        className="text-sm font-medium text-orange-600 hover:underline"
                       >
-                        Hapus
+                        ⬇ Unduh
                       </button>
-                    </td>
-                  </tr>
-                ))}
-                {data.riwayat.length === 0 && (
-                  <tr>
-                    <td colSpan={6} className="py-8 text-center text-sm text-stone-400">
-                      Belum ada cadangan. Klik “Backup sekarang” atau tunggu jadwal otomatis.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </Card>
+                    )}
+                    <button
+                      onClick={() => {
+                        if (confirm("Hapus cadangan ini? Berkasnya ikut dihapus."))
+                          hapus.mutate(b.id);
+                      }}
+                      className="ml-3 text-sm font-medium text-stone-400 hover:text-red-600 hover:underline"
+                    >
+                      Hapus
+                    </button>
+                  </>
+                ),
+              },
+            ]}
+          />
 
           <div className="mt-3 rounded-lg bg-blue-50 px-4 py-3 text-sm text-blue-800">
             <b>Cara kerja:</b> seluruh tabel database diekspor (JSONL ter-gzip) lalu diunggah

@@ -1,16 +1,14 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import {
-  Card,
   ErrorText,
   Modal,
   PageTitle,
   btnPrimary,
   btnSecondary,
   inputClass,
-  tdClass,
-  thClass,
 } from "../../components/ui";
+import { TabelResponsif } from "../../components/TabelResponsif";
 import { MapPicker } from "../../components/MapPicker";
 import { useBranch, type Cabang } from "../../context/BranchContext";
 import { api } from "../../lib/api";
@@ -117,92 +115,94 @@ export function CabangPage() {
       )}
       <ErrorText error={toggleAktif.error} />
 
-      <Card className="overflow-x-auto">
-        <table className="w-full">
-          <thead className="border-b border-stone-200 bg-stone-50">
-            <tr>
-              <th className={thClass}>Nama</th>
-              <th className={thClass}>Alamat</th>
-              <th className={thClass}>Pemasok (CK)</th>
-              <th className={thClass}>Status</th>
-              <th className={thClass}></th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-stone-100">
-            {cabang.map((b) => (
-              <tr key={b.id}>
-                <td className={`${tdClass} font-medium`}>
-                  {b.nama}
-                  <span
-                    className={`ml-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
-                      b.tipe === "central_kitchen"
-                        ? "bg-purple-100 text-purple-700"
-                        : b.tipe === "kantor"
-                          ? "bg-stone-200 text-stone-600"
-                          : "bg-blue-100 text-blue-700"
-                    }`}
-                  >
-                    {b.tipe === "central_kitchen"
-                      ? "🏭 Central Kitchen"
+      <TabelResponsif
+        data={cabang}
+        kunci={(b) => b.id}
+        kosong="Belum ada cabang."
+        kolom={[
+          {
+            judul: "Nama",
+            hp: "judul",
+            kelasSel: "font-medium",
+            sel: (b) => (
+              <>
+                {b.nama}
+                <span
+                  className={`ml-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
+                    b.tipe === "central_kitchen"
+                      ? "bg-purple-100 text-purple-700"
                       : b.tipe === "kantor"
-                        ? "🏢 Kantor"
-                        : "🏪 Store"}
-                  </span>
-                </td>
-                <td className={tdClass}>{b.alamat ?? "—"}</td>
-                <td className={tdClass}>
-                  {b.tipe === "store" ? (
-                    b.central_kitchen_id ? (
-                      <span className="whitespace-nowrap text-sm text-stone-600">
-                        🏭 {namaCk.get(b.central_kitchen_id) ?? "?"}
-                      </span>
-                    ) : (
-                      <span className="text-stone-300">—</span>
-                    )
-                  ) : (
-                    <span className="text-stone-300">—</span>
-                  )}
-                </td>
-                <td className={tdClass}>
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
-                      b.is_active ? "bg-green-100 text-green-800" : "bg-stone-100 text-stone-500"
-                    }`}
-                  >
-                    {b.is_active ? "Aktif" : "Nonaktif"}
-                  </span>
-                </td>
-                <td className={`${tdClass} whitespace-nowrap text-right`}>
-                  <button
-                    onClick={() =>
-                      setForm({
-                        id: b.id,
-                        nama: b.nama,
-                        alamat: b.alamat ?? "",
-                        telepon: b.telepon ?? "",
-                        tipe: b.tipe,
-                        central_kitchen_id: b.central_kitchen_id ?? "",
-                        latitude: b.latitude != null ? String(b.latitude) : "",
-                        longitude: b.longitude != null ? String(b.longitude) : "",
-                        radius_absen_m: String(b.radius_absen_m ?? 100),
-                      })
-                    }
-                    className="text-sm font-medium text-orange-600 hover:underline"
-                  >
-                    Ubah
-                  </button>
-                  <button
-                    onClick={() => toggleAktif.mutate(b)}
-                    className="ml-3 text-sm font-medium text-stone-500 hover:underline"
-                  >
-                    {b.is_active ? "Nonaktifkan" : "Aktifkan"}
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </Card>
+                        ? "bg-stone-200 text-stone-600"
+                        : "bg-blue-100 text-blue-700"
+                  }`}
+                >
+                  {b.tipe === "central_kitchen"
+                    ? "🏭 Central Kitchen"
+                    : b.tipe === "kantor"
+                      ? "🏢 Kantor"
+                      : "🏪 Store"}
+                </span>
+              </>
+            ),
+          },
+          { judul: "Alamat", sel: (b) => b.alamat ?? "—" },
+          {
+            judul: "Pemasok (CK)",
+            sel: (b) =>
+              b.tipe === "store" && b.central_kitchen_id ? (
+                <span className="whitespace-nowrap text-sm text-stone-600">
+                  🏭 {namaCk.get(b.central_kitchen_id) ?? "?"}
+                </span>
+              ) : (
+                <span className="text-stone-300">—</span>
+              ),
+          },
+          {
+            judul: "Status",
+            sel: (b) => (
+              <span
+                className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                  b.is_active ? "bg-green-100 text-green-800" : "bg-stone-100 text-stone-500"
+                }`}
+              >
+                {b.is_active ? "Aktif" : "Nonaktif"}
+              </span>
+            ),
+          },
+          {
+            hp: "aksi",
+            kelasSel: "whitespace-nowrap text-right",
+            sel: (b) => (
+              <>
+                <button
+                  onClick={() =>
+                    setForm({
+                      id: b.id,
+                      nama: b.nama,
+                      alamat: b.alamat ?? "",
+                      telepon: b.telepon ?? "",
+                      tipe: b.tipe,
+                      central_kitchen_id: b.central_kitchen_id ?? "",
+                      latitude: b.latitude != null ? String(b.latitude) : "",
+                      longitude: b.longitude != null ? String(b.longitude) : "",
+                      radius_absen_m: String(b.radius_absen_m ?? 100),
+                    })
+                  }
+                  className="text-sm font-medium text-orange-600 hover:underline"
+                >
+                  Ubah
+                </button>
+                <button
+                  onClick={() => toggleAktif.mutate(b)}
+                  className="ml-3 text-sm font-medium text-stone-500 hover:underline"
+                >
+                  {b.is_active ? "Nonaktifkan" : "Aktifkan"}
+                </button>
+              </>
+            ),
+          },
+        ]}
+      />
 
       <Modal open={form !== null} onClose={() => setForm(null)} title={form?.id ? "Ubah Cabang" : "Tambah Cabang"}>
         {form && (

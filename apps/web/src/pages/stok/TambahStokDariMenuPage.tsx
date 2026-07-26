@@ -484,9 +484,16 @@ export function TambahStokDariMenuPage() {
         </div>
       </Card>
 
+      {/*
+        `min-w-0` pada kedua kolom: anak grid punya `min-width: auto`, jadi
+        tanpa ini kolom menolak menyusut di bawah min-content-nya (nama menu
+        panjang) — lebarnya jadi 573px di layar 390px dan input porsi + tombol
+        ±10 terdorong keluar layar. Dengan min-w-0 kolom mengikuti lebar track
+        dan nama menu benar-benar ter-truncate.
+      */}
       <div className="grid gap-4 lg:grid-cols-2">
         {/* Kiri: pilih target porsi per menu */}
-        <Card className="p-4">
+        <Card className="min-w-0 p-4">
           <div className="mb-2 flex items-center justify-between gap-2">
             <h2 className="font-bold text-stone-800">2. Target porsi per menu</h2>
             {items.length > 0 && (
@@ -511,7 +518,10 @@ export function TambahStokDariMenuPage() {
               return (
                 <div key={m.id} className="flex items-center gap-2 py-1.5">
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1.5">
+                    {/* min-w-0 juga di flex dalam: tanpa itu `truncate` tidak
+                        pernah aktif, nama menu panjang melebarkan baris, dan
+                        input porsi + tombol ±10 terdorong keluar layar HP */}
+                    <div className="flex min-w-0 items-center gap-1.5">
                       {m.kode && (
                         <span className="shrink-0 rounded bg-orange-100 px-1.5 py-0.5 font-mono text-[11px] font-bold text-orange-700">
                           {m.kode}
@@ -557,7 +567,7 @@ export function TambahStokDariMenuPage() {
         </Card>
 
         {/* Kanan: kebutuhan bahan + aksi buat faktur */}
-        <div className="space-y-4">
+        <div className="min-w-0 space-y-4">
           <Card className="p-4">
             <h2 className="mb-2 font-bold text-stone-800">3. Kebutuhan bahan</h2>
             {items.length === 0 ? (

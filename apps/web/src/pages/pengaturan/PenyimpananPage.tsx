@@ -2,7 +2,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState, type FormEvent } from "react";
 import type { BahanDto, PenyimpananDto, PerlengkapanMasterRow } from "@kakarut/shared";
 import {
-  Card,
   ErrorText,
   Modal,
   PageTitle,
@@ -10,9 +9,8 @@ import {
   btnPrimary,
   btnSecondary,
   inputClass,
-  tdClass,
-  thClass,
 } from "../../components/ui";
+import { TabelResponsif } from "../../components/TabelResponsif";
 import { useCabangData } from "../../context/BranchContext";
 import { CabangDataBar } from "../../components/CabangDataBar";
 import { api } from "../../lib/api";
@@ -373,129 +371,136 @@ export function PenyimpananPage() {
       </div>
       <ErrorText error={toggle.error} />
 
-      <Card className="overflow-x-auto">
-        <table className="w-full">
-          <thead className="border-b border-stone-200 bg-stone-50">
-            <tr>
-              <th className={thClass}>Nama</th>
-              <th className={thClass}>Bahan Baku</th>
-              <th className={thClass}>Perlengkapan</th>
-              <th className={thClass}>Petugas Opname</th>
-              <th className={thClass}>Status</th>
-              <th className={thClass}></th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-stone-100">
-            {(tempat ?? []).map((t) => (
-              <tr key={t.id}>
-                <td className={`${tdClass} font-medium`}>
-                  {t.nama}
-                  {t.catatan && (
-                    <span className="block text-xs font-normal text-stone-400">{t.catatan}</span>
-                  )}
-                </td>
-                <td className={tdClass}>
-                  <button
-                    onClick={() => setIsiRak({ tempat: t, jenis: "bahan" })}
-                    title="Pilih bahan baku yang disimpan di rak ini (rak default saat kiriman diterima)"
-                    className={`rounded-full border px-2.5 py-0.5 text-xs font-medium transition ${
-                      t.jumlah_bahan > 0
-                        ? "border-amber-200 bg-amber-50 text-amber-800 hover:border-orange-400"
-                        : "border-dashed border-stone-300 text-stone-500 hover:border-orange-400 hover:text-orange-600"
-                    }`}
-                  >
-                    {t.jumlah_bahan > 0 ? `🥫 ${t.jumlah_bahan} bahan` : "+ Pilih bahan"}
-                  </button>
-                </td>
-                <td className={tdClass}>
-                  <button
-                    onClick={() => setIsiRak({ tempat: t, jenis: "perlengkapan" })}
-                    title="Pilih perlengkapan yang disimpan di rak ini"
-                    className={`rounded-full border px-2.5 py-0.5 text-xs font-medium transition ${
-                      t.jumlah_perlengkapan > 0
-                        ? "border-sky-200 bg-sky-50 text-sky-800 hover:border-orange-400"
-                        : "border-dashed border-stone-300 text-stone-500 hover:border-orange-400 hover:text-orange-600"
-                    }`}
-                  >
-                    {t.jumlah_perlengkapan > 0
-                      ? `🧰 ${t.jumlah_perlengkapan} perlengkapan`
-                      : "+ Pilih perlengkapan"}
-                  </button>
-                </td>
-                <td className={tdClass}>
-                  {t.petugas.length === 0 ? (
-                    <span className="rounded-full bg-stone-100 px-2 py-0.5 text-xs text-stone-500">
-                      Semua boleh
-                    </span>
-                  ) : (
-                    <span className="text-sm text-stone-700">
-                      {/* petugas basi (bukan anggota aktif — akun diarsip/dihapus/
-                          dibuat ulang) DIABAIKAN pembatasan: coret + ⚠ agar
-                          owner sadar harus menugaskan ulang akun barunya */}
-                      {t.petugas.map((p, i) => (
-                        <span key={p.user_id}>
-                          {i > 0 && ", "}
-                          {p.aktif === false ? (
-                            <span
-                              className="text-stone-400 line-through"
-                              title="Bukan anggota aktif lagi (akun diarsip/dihapus/dibuat ulang) — tidak dihitung sebagai pembatasan. Tugaskan ulang akun yang benar."
-                            >
-                              {p.nama}⚠
-                            </span>
-                          ) : (
-                            p.nama
-                          )}
-                        </span>
-                      ))}
-                    </span>
-                  )}
-                  {t.petugas.length > 0 && t.petugas.every((p) => p.aktif === false) && (
-                    <div className="mt-0.5 text-[11px] text-amber-600">
-                      Semua petugas sudah bukan anggota aktif — rak terbuka utk semua.
-                    </div>
-                  )}
-                </td>
-                <td className={tdClass}>
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
-                      t.is_active ? "bg-green-100 text-green-800" : "bg-stone-100 text-stone-500"
-                    }`}
-                  >
-                    {t.is_active ? "Aktif" : "Nonaktif"}
+      <TabelResponsif
+        data={tempat ?? []}
+        kunci={(t) => t.id}
+        kosong="Belum ada tempat penyimpanan di cabang ini."
+        kolom={[
+          {
+            judul: "Nama",
+            hp: "judul",
+            kelasSel: "font-medium",
+            sel: (t) => (
+              <>
+                {t.nama}
+                {t.catatan && (
+                  <span className="block text-xs font-normal text-stone-400">{t.catatan}</span>
+                )}
+              </>
+            ),
+          },
+          {
+            judul: "Bahan Baku",
+            sel: (t) => (
+              <button
+                onClick={() => setIsiRak({ tempat: t, jenis: "bahan" })}
+                title="Pilih bahan baku yang disimpan di rak ini (rak default saat kiriman diterima)"
+                className={`rounded-full border px-2.5 py-0.5 text-xs font-medium transition ${
+                  t.jumlah_bahan > 0
+                    ? "border-amber-200 bg-amber-50 text-amber-800 hover:border-orange-400"
+                    : "border-dashed border-stone-300 text-stone-500 hover:border-orange-400 hover:text-orange-600"
+                }`}
+              >
+                {t.jumlah_bahan > 0 ? `🥫 ${t.jumlah_bahan} bahan` : "+ Pilih bahan"}
+              </button>
+            ),
+          },
+          {
+            judul: "Perlengkapan",
+            sel: (t) => (
+              <button
+                onClick={() => setIsiRak({ tempat: t, jenis: "perlengkapan" })}
+                title="Pilih perlengkapan yang disimpan di rak ini"
+                className={`rounded-full border px-2.5 py-0.5 text-xs font-medium transition ${
+                  t.jumlah_perlengkapan > 0
+                    ? "border-sky-200 bg-sky-50 text-sky-800 hover:border-orange-400"
+                    : "border-dashed border-stone-300 text-stone-500 hover:border-orange-400 hover:text-orange-600"
+                }`}
+              >
+                {t.jumlah_perlengkapan > 0
+                  ? `🧰 ${t.jumlah_perlengkapan} perlengkapan`
+                  : "+ Pilih perlengkapan"}
+              </button>
+            ),
+          },
+          {
+            judul: "Petugas Opname",
+            sel: (t) => (
+              <>
+                {t.petugas.length === 0 ? (
+                  <span className="rounded-full bg-stone-100 px-2 py-0.5 text-xs text-stone-500">
+                    Semua boleh
                   </span>
-                </td>
-                <td className={`${tdClass} whitespace-nowrap text-right`}>
-                  <button
-                    onClick={() => setPetugas(t)}
-                    className="text-sm font-medium text-blue-600 hover:underline"
-                  >
-                    Petugas
-                  </button>
-                  <button
-                    onClick={() => setForm({ id: t.id, nama: t.nama, catatan: t.catatan ?? "" })}
-                    className="ml-3 text-sm font-medium text-orange-600 hover:underline"
-                  >
-                    Ubah
-                  </button>
-                  <button
-                    onClick={() => toggle.mutate(t)}
-                    className="ml-3 text-sm font-medium text-stone-500 hover:underline"
-                  >
-                    {t.is_active ? "Nonaktifkan" : "Aktifkan"}
-                  </button>
-                </td>
-              </tr>
-            ))}
-            {(tempat ?? []).length === 0 && (
-              <tr>
-                <td colSpan={6} className="py-8 text-center text-sm text-stone-400">
-                  Belum ada tempat penyimpanan di cabang ini.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </Card>
+                ) : (
+                  <span className="text-sm text-stone-700">
+                    {/* petugas basi (bukan anggota aktif — akun diarsip/dihapus/
+                        dibuat ulang) DIABAIKAN pembatasan: coret + ⚠ agar
+                        owner sadar harus menugaskan ulang akun barunya */}
+                    {t.petugas.map((p, i) => (
+                      <span key={p.user_id}>
+                        {i > 0 && ", "}
+                        {p.aktif === false ? (
+                          <span
+                            className="text-stone-400 line-through"
+                            title="Bukan anggota aktif lagi (akun diarsip/dihapus/dibuat ulang) — tidak dihitung sebagai pembatasan. Tugaskan ulang akun yang benar."
+                          >
+                            {p.nama}⚠
+                          </span>
+                        ) : (
+                          p.nama
+                        )}
+                      </span>
+                    ))}
+                  </span>
+                )}
+                {t.petugas.length > 0 && t.petugas.every((p) => p.aktif === false) && (
+                  <div className="mt-0.5 text-[11px] text-amber-600">
+                    Semua petugas sudah bukan anggota aktif — rak terbuka utk semua.
+                  </div>
+                )}
+              </>
+            ),
+          },
+          {
+            judul: "Status",
+            sel: (t) => (
+              <span
+                className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                  t.is_active ? "bg-green-100 text-green-800" : "bg-stone-100 text-stone-500"
+                }`}
+              >
+                {t.is_active ? "Aktif" : "Nonaktif"}
+              </span>
+            ),
+          },
+          {
+            hp: "aksi",
+            kelasSel: "whitespace-nowrap text-right",
+            sel: (t) => (
+              <>
+                <button
+                  onClick={() => setPetugas(t)}
+                  className="text-sm font-medium text-blue-600 hover:underline"
+                >
+                  Petugas
+                </button>
+                <button
+                  onClick={() => setForm({ id: t.id, nama: t.nama, catatan: t.catatan ?? "" })}
+                  className="ml-3 text-sm font-medium text-orange-600 hover:underline"
+                >
+                  Ubah
+                </button>
+                <button
+                  onClick={() => toggle.mutate(t)}
+                  className="ml-3 text-sm font-medium text-stone-500 hover:underline"
+                >
+                  {t.is_active ? "Nonaktifkan" : "Aktifkan"}
+                </button>
+              </>
+            ),
+          },
+        ]}
+      />
 
       <Modal
         open={form !== null}
