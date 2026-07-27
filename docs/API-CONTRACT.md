@@ -326,11 +326,19 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 
 ## `/api/transfer-stok` — Transfer stok antar lokasi (`modules/transfer/routes.ts`)
 
-> **Group guard: [owner/admin, `tim`, `kitchen`, `bar`]** (kasir tidak membuat
-> transfer — hanya menerima lewat `/penerimaan`). Memindahkan stok yang **sudah
-> ada (ready)** antar lokasi: CK↔cabang atau cabang↔cabang, satu faktur (nomor
-> **TF-**) berisi BANYAK bahan. Dipakai mis. saat barang kiriman rusak di jalan
-> lalu dikirim ulang.
+> **Group guard: [owner/admin, `cashier`, `tim`, `kitchen`, `bar`]** — SEMUA
+> peran boleh **MEMBACA**; kasir termasuk, karena cabang perlu tahu barang apa
+> yang sedang menuju ke sana.
+>
+> **Yang boleh MENGIRIM hanya Central Kitchen.** Ditegakkan pada cabang **ASAL**
+> (bukan pada peran): `POST` dengan `asal_branch_id` yang bukan cabang bertipe
+> `central_kitchen` → **403**, termasuk bila pemanggilnya owner. Cabang — juga
+> divisi `kitchen`/`bar` — hanya memantau kiriman masuk lalu menerimanya di
+> `/penerimaan`.
+>
+> Memindahkan stok yang **sudah ada (ready)** dari CK ke cabang, satu faktur
+> (nomor **TF-**) berisi BANYAK bahan. Dipakai mis. saat barang kiriman rusak di
+> jalan lalu dikirim ulang.
 >
 > **Representasi & saldo:** satu baris `productions` per bahan dengan pola
 > KIRIMAN yang sudah ada — `branch_id` = TUJUAN (menambah saldo tujuan saat
@@ -365,8 +373,8 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 > adalah faktur yang punya nomor dokumen berjenis `transfer`.
 
 - `GET /api/transfer-stok/saldo` — query: `branch_id?` (peran terkunci cabang selalu dipaksa ke cabangnya) — res: `{ branch_id, rows: TransferStokSaldoRow[] }` — stok READY di cabang itu: hanya bahan **aktif + berlacak-stok + masih tersisa (`saldo − dalam_jalan > 0`)**. Tiap baris membawa `pengadaan` ("beli"/"produksi") agar UI bisa menandai jenis bahan, `saldo` (fisik) dan `dalam_jalan` (sudah dikirim, belum diterima tujuan) — **yang boleh ditransfer adalah `saldo − dalam_jalan`**
-- `GET /api/transfer-stok` — query: `per_page?` (default 50, maks 200) — res: `{ rows: TransferStokFaktur[] }` (terbaru dulu; tiap faktur memuat `items[]` dengan `pengadaan` & `status` per bahan, plus `status` agregat: `menunggu`/`dikonfirmasi`/`ditolak`/`sebagian`). Peran terkunci cabang hanya melihat transfer yang menyangkut cabangnya (pengirim atau penerima)
-- `POST /api/transfer-stok` — req: `{ asal_branch_id: uuid, tujuan_branch_id: uuid, catatan?|null (max300), items: [{ingredient_id: uuid, qty: number(>0)}] (1..100; bahan sama digabung qty-nya) }` — res: **201** `{ ok, faktur_id, nomor (TF-xxxx), asal, tujuan, jumlah_baris }` — error: **400** (asal = tujuan; asal/tujuan Kantor; bahan invalid/nonaktif/tak lacak stok; **qty melebihi `saldo − dalam_jalan` di asal** — dicek di dalam transaksi setelah advisory lock per cabang asal, pesannya menyebut berapa yang masih dalam perjalanan), **403** peran terkunci mengirim dari cabang lain, **404** cabang tidak ditemukan
+- `GET /api/transfer-stok` — query: `per_page?` (default 50, maks 200) — res: `{ rows: TransferStokFaktur[] }` (terbaru dulu; tiap faktur memuat `items[]` dengan `pengadaan` & `status` per bahan, plus `status` agregat: `menunggu`/`dikonfirmasi`/`ditolak`/`sebagian`). Peran terkunci cabang — **kasir, `tim`, `kitchen`, `bar`** — hanya melihat transfer yang menyangkut cabangnya (pengirim atau penerima); owner/admin melihat semua
+- `POST /api/transfer-stok` — req: `{ asal_branch_id: uuid, tujuan_branch_id: uuid, catatan?|null (max300), items: [{ingredient_id: uuid, qty: number(>0)}] (1..100; bahan sama digabung qty-nya) }` — res: **201** `{ ok, faktur_id, nomor (TF-xxxx), asal, tujuan, jumlah_baris }` — error: **400** (asal = tujuan; asal/tujuan Kantor; bahan invalid/nonaktif/tak lacak stok; **qty melebihi `saldo − dalam_jalan` di asal** — dicek di dalam transaksi setelah advisory lock per cabang asal, pesannya menyebut berapa yang masih dalam perjalanan), **403** `asal_branch_id` BUKAN Central Kitchen (berlaku untuk semua peran, owner sekalipun — pesan: `Transfer stok hanya bisa dikirim DARI Central Kitchen — "<nama>" bukan Central Kitchen`) **atau** peran terkunci mengirim dari cabang lain, **404** cabang tidak ditemukan
 - `POST /api/transfer-stok/:fakturId/batal` — batalkan transfer yang belum diproses tujuan (baris masuk Tempat Sampah) — res: `{ ok, jumlah_baris }` — error: **403** bukan pengirim, **404** bukan faktur transfer, **409** sudah diterima/ditolak di tujuan
 
 ## `/api/supplier` — Supplier (`modules/supplier/routes.ts`)
