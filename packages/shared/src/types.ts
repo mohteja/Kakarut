@@ -96,8 +96,12 @@ export interface BackupRunDto {
 export interface BackupStatusDto {
   /** pencadangan otomatis (penjadwal) aktif */
   aktif: boolean;
-  /** selang cadangan otomatis (jam) */
-  selang_jam: number;
+  /** jam LOKAL jadwal harian (0–23) — bawaan 2 (02:00 dini hari) */
+  jam_lokal: number;
+  /** zona waktu jadwal — mengikuti zona waktu tenant terbanyak */
+  zona_waktu: string;
+  /** perkiraan jadwal berikutnya (ISO); null bila pencadangan nonaktif */
+  berikutnya: string | null;
   /** retensi: jumlah cadangan sukses terakhir yang disimpan */
   simpan: number;
   /** target penyimpanan cadangan */
@@ -106,6 +110,70 @@ export interface BackupStatusDto {
   terakhir_sukses: string | null;
   /** riwayat 50 cadangan terakhir (terbaru dulu) */
   riwayat: BackupRunDto[];
+}
+
+/**
+ * Satu KELOMPOK galat pada log error platform (panel super admin). Baris di
+ * database tetap satu-per-kejadian; kelompok ini hasil agregasi berdasarkan
+ * `sidik` (status + metode + pola jalur + pesan) supaya satu masalah yang
+ * terjadi ribuan kali tampil sebagai satu baris, bukan ribuan.
+ */
+export interface ErrorLogKelompokRow {
+  /** sidik jari kelompok — dipakai sebagai id untuk membuka detailnya */
+  sidik: string;
+  status: number;
+  metode: string;
+  /** pola jalur ter-normalisasi, mis. `/api/bahan/:id` */
+  jalur_pola: string;
+  pesan: string;
+  jumlah: number;
+  pertama_pada: string;
+  terakhir_pada: string;
+  /** berapa akun berbeda yang mengalaminya (0 bila semua anonim) */
+  jumlah_user: number;
+  /** berapa perusahaan berbeda yang terdampak (0 bila tanpa perusahaan) */
+  jumlah_perusahaan: number;
+}
+
+/** Satu KEJADIAN galat (baris mentah) — dipakai pada detail kelompok. */
+export interface ErrorLogKejadianRow {
+  id: string;
+  waktu: string;
+  status: number;
+  metode: string;
+  /** jalur apa adanya TANPA query string */
+  jalur: string;
+  pesan: string;
+  /** jejak tumpukan — hanya untuk 5xx */
+  stack: string | null;
+  user_nama: string | null;
+  user_email: string | null;
+  peran: string | null;
+  perusahaan_nama: string | null;
+  ip: string | null;
+  user_agent: string | null;
+}
+
+/** Ringkasan + daftar kelompok galat (GET /admin/error-log). */
+export interface ErrorLogDto {
+  /** rentang hari yang dicakup ringkasan & daftar */
+  hari: number;
+  /** total kejadian dalam rentang (sebelum penyaringan status) */
+  total: number;
+  /** kejadian 5xx — bug server */
+  total_5xx: number;
+  /** kejadian 4xx — penolakan (validasi/izin/tak ditemukan/rate limit) */
+  total_4xx: number;
+  /** jumlah kelompok berbeda pada hasil yang disaring */
+  jumlah_kelompok: number;
+  rows: ErrorLogKelompokRow[];
+}
+
+/** Detail satu kelompok galat (GET /admin/error-log/:sidik). */
+export interface ErrorLogDetailDto {
+  kelompok: ErrorLogKelompokRow;
+  /** kejadian terbaru pada kelompok ini (terbaru dulu) */
+  kejadian: ErrorLogKejadianRow[];
 }
 
 /** Satu entri riwayat kegiatan pada faktur (jejak ubah tahap). */

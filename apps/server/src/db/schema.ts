@@ -1733,3 +1733,56 @@ export const backupRuns = pgTable(
   },
   (t) => [index("backup_runs_waktu_idx").on(t.waktu)],
 );
+
+/**
+ * LOG GALAT PLATFORM. Setiap respons error yang keluar lewat `app.onError`
+ * dicatat di sini — 5xx (bug server) MAUPUN 4xx (penolakan: validasi, izin,
+ * tak ditemukan, rate limit). Dipakai panel super admin supaya masalah nyata
+ * terlihat tanpa harus membuka log container.
+ *
+ * LINTAS TENANT dan boleh memuat identitas pelapor → HANYA super admin
+ * (`requireSuperAdmin` di app.ts). Jangan pernah dipasang di router tenant.
+ *
+ * Yang SENGAJA tidak disimpan: badan request (bisa memuat password/token),
+ * query string (tautan verifikasi & reset membawa token di query), dan header
+ * Authorization. Yang dicatat cukup untuk melacak: jalur, pesan, jejak tumpukan
+ * (5xx saja), serta siapa & perusahaan mana yang mengalaminya.
+ */
+export const errorLogs = pgTable(
+  "error_logs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    waktu: timestamp("waktu", { withTimezone: true }).notNull().defaultNow(),
+    /** status HTTP yang dikirim ke klien (400–599) */
+    status: integer("status").notNull(),
+    metode: text("metode").notNull(),
+    /** jalur apa adanya TANPA query string, mis. `/api/bahan/9f3c…` */
+    jalur: text("jalur").notNull(),
+    /**
+     * Jalur ter-normalisasi untuk pengelompokan: UUID & angka diganti `:id`
+     * (`/api/bahan/:id`). Tanpa ini tiap id jadi kelompok sendiri dan daftar
+     * galat penuh baris yang sebenarnya satu masalah.
+     */
+    jalurPola: text("jalur_pola").notNull(),
+    pesan: text("pesan").notNull(),
+    /** jejak tumpukan — hanya diisi untuk 5xx (4xx adalah penolakan, bukan bug) */
+    stack: text("stack"),
+    /**
+     * Sidik jari kelompok: hash dari status + metode + jalur_pola + pesan.
+     * Baris tetap satu-per-kejadian (kronologi utuh); kolom ini yang membuat
+     * "12.000 baris" bisa disajikan sebagai "12 masalah berbeda".
+     */
+    sidik: text("sidik").notNull(),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    companyId: uuid("company_id").references(() => companies.id, { onDelete: "set null" }),
+    /** peran saat kejadian — disalin, bukan direferensi (peran bisa berubah) */
+    peran: text("peran"),
+    ip: text("ip"),
+    userAgent: text("user_agent"),
+  },
+  (t) => [
+    index("error_logs_waktu_idx").on(t.waktu),
+    index("error_logs_sidik_idx").on(t.sidik),
+    index("error_logs_status_idx").on(t.status),
+  ],
+);

@@ -4610,6 +4610,12 @@ BK_ID=$(echo "$BKP" | jq -r .id)
 STAT=$(api "$SA" GET /admin/sistem/backup)
 cek "status backup: aktif + riwayat memuat run tadi" "V == 1" \
   "$(echo "$STAT" | jq --arg i "$BK_ID" '(.aktif==true) and ([.riwayat[]|select(.id==$i)]|length==1) and (.terakhir_sukses!=null) | if . then 1 else 0 end')"
+# Jadwal harian pada jam LOKAL tenant (bawaan 02:00), bukan "tiap N jam sejak
+# boot" — cadangan harus jatuh saat outlet tutup, bukan mengikuti jam deploy.
+cek "status backup: jadwal harian jam 02 waktu tenant" "V == 1" \
+  "$(echo "$STAT" | jq '(.jam_lokal==2) and ((.zona_waktu|length)>0) and (.berikutnya!=null) | if . then 1 else 0 end')"
+cek "status backup: jadwal berikutnya di masa depan & < 24 jam lagi" "V == 1" \
+  "$(echo "$STAT" | jq --argjson now "$(date +%s)" '((.berikutnya|sub("\\.[0-9]+Z$";"Z")|fromdateiso8601) as $b | ($b > $now) and ($b - $now < 86400)) | if . then 1 else 0 end')"
 BK_TMP=$(mktemp /tmp/kakarut-bk.XXXXXX.gz)
 curl -s -H "Authorization: Bearer $SA" "$BASE/api/admin/sistem/backup/$BK_ID/unduh" -o "$BK_TMP"
 cek "unduh cadangan = gzip valid (magic 1f8b)" "V == 1" \
@@ -5366,6 +5372,80 @@ fi
 # memakai sesi basi selamanya.
 api "$OWNER" PATCH "/karyawan/$UID141" '{"arsip":true}' > /dev/null
 cek "keanggotaan diarsip → /auth/me 401" "V == 401" "$(status_code "$T141" GET /auth/me)"
+
+echo "== 142. Log galat platform (super admin) =="
+# Setiap respons error yang keluar lewat app.onError dicatat — 5xx (bug) MAUPUN
+# 4xx (penolakan). Daftarnya dikelompokkan per sidik jari supaya satu masalah
+# yang terjadi ribuan kali tak jadi ribuan baris.
+cek "guard: owner (bukan super admin) GET /admin/error-log → 403" "V == 403" \
+  "$(status_code "$OWNER" GET /admin/error-log)"
+cek "guard: tanpa token → 401" "V == 401" \
+  "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/admin/error-log")"
+
+# Mulai dari nol supaya angka bisa diuji pasti.
+api "$SA" DELETE /admin/error-log > /dev/null
+cek "bersihkan log → daftar kosong" "V == 0" \
+  "$(api "$SA" GET "/admin/error-log?hari=30&status=semua" | jq '.total')"
+
+# Picu 4xx yang pasti: bahan dengan id sah tapi tak ada → 404 dari handler.
+NIHIL142=00000000-0000-0000-0000-000000000000
+api "$OWNER" GET "/bahan/$NIHIL142/supplier" > /dev/null
+api "$OWNER" GET "/bahan/$NIHIL142/supplier" > /dev/null
+# Peran salah → 403 (kasir tak boleh melihat laporan). Pakai token kasir yang
+# DITERBITKAN ULANG di §105 — token awal sudah batal sejak passwordnya diubah.
+api "$REISS105" GET /laporan/ringkas > /dev/null
+sleep 1  # pencatatan sengaja tidak ditunggu (void) — beri waktu menulis
+
+LOG142=$(api "$SA" GET "/admin/error-log?hari=1&status=semua")
+cek "galat tercatat (total >= 3)" "V == 1" \
+  "$(echo "$LOG142" | jq '(.total>=3)|if . then 1 else 0 end')"
+cek "4xx terhitung, 5xx nol" "V == 1" \
+  "$(echo "$LOG142" | jq '(.total_4xx>=3) and (.total_5xx==0)|if . then 1 else 0 end')"
+
+# Dua panggilan 404 yang sama = SATU kelompok berjumlah 2.
+cek "dua 404 identik jadi satu kelompok (jumlah 2)" "V == 1" \
+  "$(echo "$LOG142" | jq '[.rows[]|select(.status==404 and .jumlah==2)]|length>=1|if . then 1 else 0 end')"
+# UUID pada jalur dinormalkan → :id, bukan id mentah.
+cek "jalur dinormalkan jadi pola :id" "V == 1" \
+  "$(echo "$LOG142" | jq '[.rows[]|select(.jalur_pola=="/api/bahan/:id/supplier")]|length>=1|if . then 1 else 0 end')"
+cek "kelompok membawa pelapor & perusahaan" "V == 1" \
+  "$(echo "$LOG142" | jq '[.rows[]|select(.jumlah_user>=1 and .jumlah_perusahaan>=1)]|length>=1|if . then 1 else 0 end')"
+
+# Saringan status.
+cek "saring 5xx → kosong (belum ada bug server)" "V == 0" \
+  "$(api "$SA" GET "/admin/error-log?hari=1&status=5xx" | jq '.rows|length')"
+cek "saring 4xx → ada isinya" "V == 1" \
+  "$(api "$SA" GET "/admin/error-log?hari=1&status=4xx" | jq '(.rows|length)>0|if . then 1 else 0 end')"
+cek "pencarian q= menyaring" "V == 1" \
+  "$(api "$SA" GET "/admin/error-log?hari=1&q=bahan" | jq '. as $r | (($r.rows|length) > 0) and (([$r.rows[]|select((.pesan|ascii_downcase|contains("bahan")) or (.jalur_pola|contains("bahan")))]|length) == ($r.rows|length)) | if . then 1 else 0 end')"
+
+# Detail kelompok: kronologi mentah + identitas pelapor.
+SIDIK142=$(echo "$LOG142" | jq -r '[.rows[]|select(.jalur_pola=="/api/bahan/:id/supplier")][0].sidik')
+DET142=$(api "$SA" GET "/admin/error-log/$SIDIK142?hari=1")
+cek "detail kelompok memuat kejadian mentah" "V == 1" \
+  "$(echo "$DET142" | jq '(.kelompok.sidik!=null) and ((.kejadian|length)>=2)|if . then 1 else 0 end')"
+cek "kejadian membawa jalur ASLI (bukan pola)" "V == 1" \
+  "$(echo "$DET142" | jq --arg n "$NIHIL142" '[.kejadian[]|select(.jalur|contains($n))]|length>=1|if . then 1 else 0 end')"
+cek "4xx TANPA jejak tumpukan (bukan bug, cuma penolakan)" "V == 1" \
+  "$(echo "$DET142" | jq '[.kejadian[]|select(.stack!=null)]|length==0|if . then 1 else 0 end')"
+cek "sidik tak dikenal → 404" "V == 404" \
+  "$(status_code "$SA" GET "/admin/error-log/tidakada123?hari=1")"
+
+# Query string TIDAK disimpan — tautan verifikasi & reset membawa token di sana.
+api "$OWNER" GET "/bahan/$NIHIL142/supplier?rahasia=jangan-disimpan" > /dev/null
+sleep 1
+cek "query string tidak ikut tercatat" "V == 0" \
+  "$(api "$SA" GET "/admin/error-log/$SIDIK142?hari=1" | jq '[.kejadian[]|select(.jalur|contains("rahasia"))]|length')"
+
+# Jalur API yang tak cocok rute mana pun tidak melewati app.onError — pernah
+# luput sama sekali dari log. Klien yang memanggil endpoint usang justru hal
+# yang paling perlu terlihat.
+api "$OWNER" GET "/endpoint-yang-tidak-ada-142" > /dev/null
+sleep 1
+cek "endpoint tak dikenal ikut tercatat" "V == 1" \
+  "$(api "$SA" GET "/admin/error-log?hari=1&status=4xx" | jq '[.rows[]|select(.jalur_pola=="/api/endpoint-yang-tidak-ada-142" and .status==404)]|length>=1|if . then 1 else 0 end')"
+
+cek "pangkas manual → 200" "V == 200" "$(status_code "$SA" POST /admin/error-log/pangkas)"
 
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="

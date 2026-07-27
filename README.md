@@ -104,10 +104,15 @@ ke disk lokal (`BACKUP_DIR`). Berjalan otomatis via penjadwal saat boot
 (advisory lock, aman multi-instance). File upload (foto) tidak ikut dicadangkan
 karena sudah tersimpan durable di R2.
 
-- Panel super-admin → **Sistem & Migrasi** → *Pencadangan Database*: backup
-  manual, riwayat, unduh, dan hapus (`GET/POST /api/admin/sistem/backup`).
-- Variabel: `BACKUP_ENABLED` (default `true`), `BACKUP_INTERVAL_HOURS`
-  (default `24`), `BACKUP_KEEP` (retensi, default `14`), `BACKUP_DIR` (folder
+- Panel super-admin → **Backup Database**: jadwal, backup manual, riwayat,
+  unduh, dan hapus (`GET/POST /api/admin/sistem/backup`).
+- Jadwalnya **harian pada jam lokal tenant** (bawaan 02:00) — dini hari saat
+  outlet tutup, karena ekspor penuh membebani database. Zona waktunya mengikuti
+  zona waktu tenant terbanyak. Server yang mati melewati jadwalnya akan
+  mencadangkan begitu hidup lagi (jaring pengaman 26 jam).
+- Variabel: `BACKUP_ENABLED` (default `true`), `BACKUP_HOUR` (jam lokal 0–23,
+  default `2`), `BACKUP_TIMEZONE` (opsional, paksa zona waktu jadwal),
+  `BACKUP_KEEP` (retensi, default `14`), `BACKUP_DIR` (folder
   saat mode lokal — arahkan ke volume ter-mount di kontainer), dan
   `R2_BACKUP_BUCKET` (opsional: bucket R2 privat khusus cadangan; bila kosong
   memakai `R2_BUCKET` dengan prefix `backups/`). Cadangan **tidak pernah**
@@ -119,6 +124,26 @@ karena sudah tersimpan durable di R2.
   npm run db:restore -w @kakarut/server -- <berkas.jsonl.gz>        # telaah (tanpa tulis)
   npm run db:restore -w @kakarut/server -- <berkas.jsonl.gz> --yes  # pulihkan
   ```
+
+## Log galat platform (super-admin)
+
+Setiap respons error yang keluar lewat `app.onError` — **5xx** (bug server)
+maupun **4xx** (penolakan: validasi, izin, tak ditemukan, rate limit) — dicatat
+ke tabel `error_logs`, termasuk jalur API yang tak cocok rute mana pun. Dipakai
+panel super-admin agar masalah nyata terlihat tanpa membuka log container.
+
+- Panel super-admin → **Log Galat** (`GET /api/admin/error-log`). Daftarnya
+  berisi **kelompok**, bukan baris mentah: kejadian dengan status, pola jalur,
+  dan pesan yang sama digabung lewat sidik jari, sehingga satu tombol yang rusak
+  tidak menghasilkan ribuan baris. Klik kelompok → kronologi kejadiannya
+  (siapa, perusahaan mana, jejak tumpukan untuk 5xx).
+- **Tidak** disimpan: badan request (bisa memuat password), query string
+  (tautan verifikasi & reset password membawa token di sana), dan header
+  `Authorization`.
+- Retensi 30 hari, maksimum 50.000 baris terbaru; dipangkas otomatis tiap 6 jam
+  (dan bisa dipicu manual: `POST /api/admin/error-log/pangkas`).
+- Pencatatan **tidak menahan respons** (fire-and-forget) dan menelan galatnya
+  sendiri — menulis log tak boleh menjelma jadi kegagalan kedua.
 
 ### Re-deploy tanpa "404 page not found" (Dokploy/Traefik)
 

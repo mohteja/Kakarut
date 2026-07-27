@@ -1,7 +1,7 @@
 import { gzipSync } from "node:zlib";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import { db, pool } from "../db/client";
-import { backupRuns } from "../db/schema";
+import { backupRuns, companies } from "../db/schema";
 import { env } from "../config/env";
 import { getCadanganStorage } from "../modules/upload/backup-storage";
 
@@ -219,24 +219,92 @@ export async function backupSuksesTerakhir(): Promise<Date | null> {
   return row?.waktu ?? null;
 }
 
+/** Zona waktu cadangan bila tak ada tenant sama sekali / gagal dibaca. */
+const ZONA_BAWAAN = "Asia/Jakarta";
+
 /**
- * Penjadwal cadangan otomatis. Dipanggil sekali saat boot. Menjalankan
- * cadangan bila yang terakhir sukses lebih lama dari selang, lalu memasang
- * interval berkala (`.unref()` agar tak menahan proses). Idempoten &
- * aman multi-instance (advisory lock di `jalankanBackup`).
+ * Zona waktu jadwal cadangan = zona waktu tenant TERBANYAK. Cadangan harus
+ * jatuh saat outlet tutup; kalau memakai zona server (biasanya UTC), "jam 2"
+ * bisa jatuh tepat di jam ramai. `BACKUP_TIMEZONE` memaksanya bila perlu.
+ */
+export async function zonaWaktuCadangan(): Promise<string> {
+  if (env.BACKUP_TIMEZONE) return env.BACKUP_TIMEZONE;
+  try {
+    const [row] = await db
+      .select({ tz: companies.timezone, jumlah: sql<number>`count(*)::int` })
+      .from(companies)
+      .where(eq(companies.isActive, true))
+      .groupBy(companies.timezone)
+      .orderBy(desc(sql`count(*)`))
+      .limit(1);
+    return row?.tz || ZONA_BAWAAN;
+  } catch {
+    return ZONA_BAWAAN;
+  }
+}
+
+/** Tanggal & jam LOKAL pada zona waktu tertentu. */
+function waktuLokal(zona: string, saat = new Date()): { tanggal: string; jam: number } {
+  const bagian = new Intl.DateTimeFormat("en-CA", {
+    timeZone: zona,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    // h23 (bukan hour12:false) — sebagian ICU memberi "24" untuk tengah malam.
+    hourCycle: "h23",
+  }).formatToParts(saat);
+  const p = Object.fromEntries(bagian.map((b) => [b.type, b.value]));
+  return { tanggal: `${p.year}-${p.month}-${p.day}`, jam: Number(p.hour) };
+}
+
+/**
+ * Perkiraan jadwal cadangan berikutnya (untuk ditampilkan di panel). Dicari
+ * dengan menggeser per jam lalu menyisir per menit — cukup untuk tampilan, dan
+ * benar melintasi perubahan offset (DST) tanpa aritmetika zona waktu manual.
+ */
+export function jadwalBerikutnya(zona: string, jamTarget: number, dari = new Date()): Date {
+  for (let menit = 1; menit <= 48 * 60; menit++) {
+    const calon = new Date(dari.getTime() + menit * 60_000);
+    const l = waktuLokal(zona, calon);
+    if (l.jam === jamTarget && waktuLokal(zona, new Date(calon.getTime() - 60_000)).jam !== jamTarget)
+      return calon;
+  }
+  return new Date(dari.getTime() + 24 * 3_600_000);
+}
+
+/**
+ * Penjadwal cadangan otomatis: SEKALI SEHARI pada `BACKUP_HOUR` waktu tenant
+ * (default 02:00). Dipanggil sekali saat boot.
+ *
+ * Cara kerjanya sengaja "cek berkala + tanda selesai", bukan satu timer panjang
+ * ke waktu target: timer panjang hilang tiap deploy (dan deploy bisa berkali-
+ * kali sehari), sedangkan pengecekan tiap 5 menit selalu menemukan jendelanya
+ * lagi setelah restart. Yang mencegah dobel adalah tanggal LOKAL cadangan
+ * sukses terakhir — bukan timernya.
+ *
+ * Idempoten & aman multi-instance (advisory lock di `jalankanBackup`).
  */
 export function jadwalkanBackupOtomatis(): void {
   if (!env.BACKUP_ENABLED) {
     console.log("Pencadangan otomatis nonaktif (BACKUP_ENABLED=false).");
     return;
   }
-  const selangMs = env.BACKUP_INTERVAL_HOURS * 3_600_000;
 
   const jalankanBilaPerlu = async () => {
     try {
+      const zona = await zonaWaktuCadangan();
+      const sekarang = waktuLokal(zona);
       const terakhir = await backupSuksesTerakhir();
-      // beri sedikit toleransi (5 mnt) agar tak melewatkan tepat di batas
-      if (terakhir && Date.now() - terakhir.getTime() < selangMs - 300_000) return;
+      const sudahHariIni = terakhir && waktuLokal(zona, terakhir).tanggal === sekarang.tanggal;
+      if (sudahHariIni) return;
+
+      // JARING PENGAMAN: server mati sepanjang jendela jadwal (mis. deploy
+      // panjang) tak boleh berarti sehari penuh tanpa cadangan. Lewat 26 jam
+      // tanpa cadangan sukses → jalankan sekarang, di jam berapa pun.
+      const kelamaan = !terakhir || Date.now() - terakhir.getTime() >= 26 * 3_600_000;
+      if (sekarang.jam !== env.BACKUP_HOUR && !kelamaan) return;
+
       const h = await jalankanBackup({ pemicu: "otomatis" });
       if (h.status === "sukses")
         console.log(
@@ -244,18 +312,17 @@ export function jadwalkanBackupOtomatis(): void {
         );
       else console.warn("Cadangan otomatis gagal:", h.error);
     } catch (e) {
-      console.warn(
-        "Penjadwal cadangan:",
-        e instanceof Error ? e.message : String(e),
-      );
+      console.warn("Penjadwal cadangan:", e instanceof Error ? e.message : String(e));
     }
   };
 
-  // Jalankan cek pertama sesaat setelah boot (jangan menahan startup), lalu
-  // berkala. Timer di-unref agar proses bisa keluar bersih.
+  // Cek pertama sesaat setelah boot (jangan menahan startup), lalu tiap 5
+  // menit. Timer di-unref agar proses bisa keluar bersih.
   setTimeout(() => void jalankanBilaPerlu(), 60_000).unref();
-  setInterval(() => void jalankanBilaPerlu(), selangMs).unref();
-  console.log(
-    `Pencadangan otomatis aktif: tiap ${env.BACKUP_INTERVAL_HOURS} jam, simpan ${env.BACKUP_KEEP} terakhir.`,
-  );
+  setInterval(() => void jalankanBilaPerlu(), 5 * 60_000).unref();
+  void zonaWaktuCadangan().then((zona) => {
+    console.log(
+      `Pencadangan otomatis aktif: tiap hari pukul ${String(env.BACKUP_HOUR).padStart(2, "0")}:00 ${zona}, simpan ${env.BACKUP_KEEP} terakhir.`,
+    );
+  });
 }
