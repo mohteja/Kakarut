@@ -4970,6 +4970,285 @@ cek "resep bertingkat: mulai kerjakan ditahan saat bahan belum ada" "V == 1" \
 cek "peringatan menyebut bahan mentah (tepung) DAN komponen resep (baso)" "V == 1" \
   "$(echo "$ERR136" | jq '(((.error // "") | test("tepung uji66")) and ((.error // "") | test("baso uji66"))) | if . then 1 else 0 end')"
 
+echo "== 137. Sinkron penjualan offline: shift tak cocok (transaksi susulan) =="
+# Celah yang ditutup: kasir OFFLINE masih melayani setelah shift ditutup dari
+# web/perangkat lain. Dulu item itu gagal 409 dan TIDAK PERNAH dicoba ulang oleh
+# mobile → uang tunai yang sudah diterima tak punya jejak sama sekali.
+# Sekarang sale dibukukan ke shift tertutup terdekat (<=6 jam, tanggal bisnis
+# sama) lewat kolom sales.shift_id, jadi uangnya muncul di rekap & selisih kas.
+uuid137() { cat /proc/sys/kernel/random/uuid; }
+# token $KASIR sudah 401 sejak §105 (password kasir diganti → token_version naik).
+# $REISS105 adalah token kasir hasil re-issue di §105 dan sudah diuji valid di sana.
+K137="$REISS105"
+MENU137=$(api "$K137" GET /menu | jq -r '.[0].id')
+# Bersihkan: pastikan tak ada shift terbuka, lalu buka+tutup satu shift baru.
+if [ -n "$(api "$K137" GET /shift/aktif | jq -r '.id // empty')" ]; then
+  api "$K137" POST /shift/tutup '{"uang_fisik":0}' > /dev/null
+fi
+api "$K137" POST /shift/buka '{"modal_awal":100000}' > /dev/null
+SH137=$(api "$K137" GET /shift/aktif | jq -r .id)
+api "$K137" POST /shift/tutup '{"uang_fisik":100000}' > /dev/null
+cek "dasar uji: shift dibuka lalu ditutup" "V == 1" \
+  "$([ -n "$SH137" ] && [ "$SH137" != "null" ] && echo 1 || echo 0)"
+SEL_AWAL=$(api "$K137" GET /shift | jq --arg s "$SH137" '[.[]|select(.id==$s)][0].selisih')
+TUNAI_AWAL=$(api "$K137" GET /shift | jq --arg s "$SH137" '[.[]|select(.id==$s)][0].penjualan_tunai')
+cek "shift tertutup: selisih kas 0 sebelum transaksi susulan" "V == 1" \
+  "$(echo "$SEL_AWAL" | jq '.==0|if . then 1 else 0 end')"
+
+# waktu 2 menit ke DEPAN: masih dalam toleransi jam perangkat (5 menit) tapi
+# sudah SETELAH ditutup_pada → persis kasus lapangan "tutup 20.30, jual 20.45".
+W137=$(date -u -d '+2 minutes' +%Y-%m-%dT%H:%M:%SZ)
+R137=$(uuid137)
+B137=$(jq -nc --arg r "$R137" --arg w "$W137" --arg m "$MENU137" '{device_id:"dev137",commands:[{client_ref:$r,tipe:"penjualan",waktu:$w,payload:{items:[{menu_id:$m,qty:1}],metode_bayar:"tunai"}}]}')
+RES137=$(api "$K137" POST /sync "$B137")
+cek "susulan di luar jendela: item ok 201 (bukan lagi gagal 409)" "V == 1" \
+  "$(echo "$RES137" | jq '(.hasil[0].status=="ok" and .hasil[0].kode==201)|if . then 1 else 0 end')"
+cek "data hasil memuat shift.id shift yang benar" "V == 1" \
+  "$(echo "$RES137" | jq --arg s "$SH137" '.hasil[0].data.shift.id==$s|if . then 1 else 0 end')"
+cek "data hasil memuat ada_transaksi_susulan=true" "V == 1" \
+  "$(echo "$RES137" | jq '.hasil[0].data.ada_transaksi_susulan==true|if . then 1 else 0 end')"
+cek "data hasil menandai di_luar_jendela_shift=true" "V == 1" \
+  "$(echo "$RES137" | jq '.hasil[0].data.di_luar_jendela_shift==true|if . then 1 else 0 end')"
+cek "shift ditandai ada_transaksi_susulan" "V == 1" \
+  "$(api "$K137" GET /shift | jq --arg s "$SH137" '[.[]|select(.id==$s)][0].ada_transaksi_susulan==true|if . then 1 else 0 end')"
+
+# Inti perbaikan: uangnya BENAR-BENAR masuk rekap shift itu. Sebelum ada kolom
+# shift_id, rekap menyaring waktu <= ditutup_pada sehingga sale ini tak terhitung
+# di mana pun — penanda susulan jadi penanda bohong.
+TUNAI_AKHIR=$(api "$K137" GET /shift | jq --arg s "$SH137" '[.[]|select(.id==$s)][0].penjualan_tunai')
+cek "rekap tunai shift BERTAMBAH (uang masuk hitungan)" "V == 1" \
+  "$(echo "$TUNAI_AKHIR $TUNAI_AWAL" | jq -s '.[0] > .[1]|if . then 1 else 0 end')"
+cek "selisih kas jadi negatif (uang fisik lama < kas sistem baru)" "V == 1" \
+  "$(api "$K137" GET /shift | jq --arg s "$SH137" '[.[]|select(.id==$s)][0].selisih < 0|if . then 1 else 0 end')"
+cek "detail shift memuat transaksi tsb dan menandainya susulan" "V == 1" \
+  "$(api "$K137" GET "/shift/$SH137" | jq '[.transaksi[]|select(.susulan==true)]|length>=1|if . then 1 else 0 end')"
+
+# Idempotency setelah fallback: kirim ulang tak boleh menggandakan rekap.
+TUNAI_X=$(api "$K137" GET /shift | jq --arg s "$SH137" '[.[]|select(.id==$s)][0].penjualan_tunai')
+RETRY137=$(api "$K137" POST /sync "$B137")
+cek "kirim ulang batch sama → sudah_ada" "V == 1" \
+  "$(echo "$RETRY137" | jq '.hasil[0].status=="sudah_ada"|if . then 1 else 0 end')"
+# Perangkat bisa mati SETELAH server membukukan sale tapi SEBELUM aplikasi
+# sempat memproses respons. Saat retry, mobile tetap butuh konteks shift untuk
+# memunculkan peringatan "masuk ke shift yang sudah ditutup" — kalau `data`
+# hilang di jalur idempoten, peringatan itu lenyap diam-diam.
+cek "retry item SUKSES membalas data UTUH: shift.id ikut" "V == 1" \
+  "$(echo "$RETRY137" | jq --arg s "$SH137" '.hasil[0].data.shift.id==$s|if . then 1 else 0 end')"
+cek "retry item SUKSES membalas data UTUH: di_luar_jendela_shift ikut" "V == 1" \
+  "$(echo "$RETRY137" | jq '.hasil[0].data.di_luar_jendela_shift==true|if . then 1 else 0 end')"
+cek "retry item SUKSES membalas data UTUH: ada_transaksi_susulan ikut" "V == 1" \
+  "$(echo "$RETRY137" | jq '.hasil[0].data.ada_transaksi_susulan==true|if . then 1 else 0 end')"
+cek "kirim ulang TIDAK menggandakan rekap shift" "V == 1" \
+  "$(api "$K137" GET /shift | jq --arg s "$SH137" --argjson t "$TUNAI_X" '[.[]|select(.id==$s)][0].penjualan_tunai == $t|if . then 1 else 0 end')"
+
+# Batas: tanggal yang benar-benar tak punya shift tetap ditolak — sale tidak
+# boleh nyasar ke shift hari lain. 409 kini membawa sebab terstruktur.
+W137X=$(date -u -d '-20 days' +%Y-%m-%dT%H:%M:%SZ)
+B137X=$(jq -nc --arg r "$(uuid137)" --arg w "$W137X" --arg m "$MENU137" '{commands:[{client_ref:$r,tipe:"penjualan",waktu:$w,payload:{items:[{menu_id:$m,qty:1}]}}]}')
+RES137X=$(api "$K137" POST /sync "$B137X")
+cek "tanggal tanpa shift sama sekali → tetap gagal 409" "V == 1" \
+  "$(echo "$RES137X" | jq '(.hasil[0].status=="gagal" and .hasil[0].kode==409)|if . then 1 else 0 end')"
+cek "409 membawa sebab='shift_tidak_cocok'" "V == 1" \
+  "$(echo "$RES137X" | jq '.hasil[0].sebab=="shift_tidak_cocok"|if . then 1 else 0 end')"
+cek "409 membawa data.shift_terdekat (null bila memang tak ada)" "V == 1" \
+  "$(echo "$RES137X" | jq '(.hasil[0].data|has("shift_terdekat"))|if . then 1 else 0 end')"
+cek "penolakan tersimpan dibalas utuh saat retry (sebab ikut)" "V == 1" \
+  "$(api "$K137" POST /sync "$B137X" | jq '(.hasil[0].status=="sudah_ada" and .hasil[0].sebab=="shift_tidak_cocok")|if . then 1 else 0 end')"
+
+# Batas umur per tipe: penjualan 30 hari (uang sudah diterima — jangan dibuang),
+# tipe lain tetap 7 hari (mengubah stok jauh ke belakang berbahaya).
+W137OLD=$(date -u -d '-20 days' +%Y-%m-%dT%H:%M:%SZ)
+B137A=$(jq -nc --arg r "$(uuid137)" --arg w "$W137OLD" '{commands:[{client_ref:$r,tipe:"absen_saya",waktu:$w,payload:{foto_url:"http://x/f.jpg"}}]}')
+cek "absen 20 hari lalu → tetap gagal 400 (batas 7 hari)" "V == 1" \
+  "$(api "$K137" POST /sync "$B137A" | jq '(.hasil[0].status=="gagal" and .hasil[0].kode==400)|if . then 1 else 0 end')"
+cek "penjualan 20 hari lalu → BUKAN 400 (batas 30 hari, ditolak krn shift saja)" "V == 1" \
+  "$(echo "$RES137X" | jq '.hasil[0].kode==409|if . then 1 else 0 end')"
+W137TOO=$(date -u -d '-40 days' +%Y-%m-%dT%H:%M:%SZ)
+B137B=$(jq -nc --arg r "$(uuid137)" --arg w "$W137TOO" --arg m "$MENU137" '{commands:[{client_ref:$r,tipe:"penjualan",waktu:$w,payload:{items:[{menu_id:$m,qty:1}]}}]}')
+cek "penjualan 40 hari lalu → gagal 400 (lewat batas 30 hari)" "V == 1" \
+  "$(api "$K137" POST /sync "$B137B" | jq '(.hasil[0].status=="gagal" and .hasil[0].kode==400)|if . then 1 else 0 end')"
+
+# Jalur lama tidak berubah: shift TERBUKA + waktu di dalam jendela → bukan susulan.
+api "$K137" POST /shift/buka '{"modal_awal":0}' > /dev/null
+W137N=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+B137N=$(jq -nc --arg r "$(uuid137)" --arg w "$W137N" --arg m "$MENU137" '{commands:[{client_ref:$r,tipe:"penjualan",waktu:$w,payload:{items:[{menu_id:$m,qty:1}]}}]}')
+RES137N=$(api "$K137" POST /sync "$B137N")
+cek "shift terbuka: penjualan ok dan TIDAK ditandai susulan" "V == 1" \
+  "$(echo "$RES137N" | jq '(.hasil[0].status=="ok" and .hasil[0].data.ada_transaksi_susulan==false and .hasil[0].data.di_luar_jendela_shift==false)|if . then 1 else 0 end')"
+
+echo "== 138. shift_buka lewat sinkron (pemadaman panjang ≠ nol transaksi) =="
+# Setelah snapshot shift offline mobile dirapatkan jadi 6 jam, perangkat yang
+# offline lebih lama tak bisa berjualan sama sekali karena POST /shift/buka
+# online-only. shift_buka kini bisa diantre: `waktu` jadi opened_at, sehingga
+# SELURUH penjualan hari itu jatuh di dalam jendela shift secara wajar — tanpa
+# bersandar pada toleransi transaksi susulan.
+uuid138() { cat /proc/sys/kernel/random/uuid; }
+MENU138=$(api "$K137" GET /menu | jq -r '.[0].id')
+if [ -n "$(api "$K137" GET /shift/aktif | jq -r '.id // empty')" ]; then
+  api "$K137" POST /shift/tutup '{"uang_fisik":0}' > /dev/null
+fi
+
+# Gerbang absen TIDAK dilewati, tapi dinilai pada tanggal bisnis `waktu`:
+# kasir tidak absen 3 hari lalu → ditolak, walau hari ini ia absen.
+W138OLD=$(date -u -d '-3 days' +%Y-%m-%dT%H:%M:%SZ)
+B138OLD=$(jq -nc --arg r "$(uuid138)" --arg w "$W138OLD" '{commands:[{client_ref:$r,tipe:"shift_buka",waktu:$w,payload:{modal_awal:50000}}]}')
+cek "absen dinilai pada tanggal WAKTU: 3 hari lalu tanpa absen → gagal 400" "V == 1" \
+  "$(api "$K137" POST /sync "$B138OLD" | jq '(.hasil[0].status=="gagal" and .hasil[0].kode==400 and ((.hasil[0].error//"")|test("Absen masuk dulu")))|if . then 1 else 0 end')"
+cek "tak ada shift terbuka setelah perintah ditolak" "V == 1" \
+  "$(api "$K137" GET /shift/aktif | jq 'if .==null then 1 else 0 end')"
+
+# Buka shift offline 4 jam lalu (hari ini — kasir sudah absen di §2b).
+W138=$(date -u -d '-4 hours' +%Y-%m-%dT%H:%M:%SZ)
+B138=$(jq -nc --arg r "$(uuid138)" --arg w "$W138" '{device_id:"dev138",commands:[{client_ref:$r,tipe:"shift_buka",waktu:$w,payload:{modal_awal:250000}}]}')
+RES138=$(api "$K137" POST /sync "$B138")
+cek "shift_buka lewat sinkron → item ok 201" "V == 1" \
+  "$(echo "$RES138" | jq '(.hasil[0].status=="ok" and .hasil[0].kode==201)|if . then 1 else 0 end')"
+cek "sudah_terbuka=false (shift benar-benar baru dibuat)" "V == 1" \
+  "$(echo "$RES138" | jq '.hasil[0].data.sudah_terbuka==false|if . then 1 else 0 end')"
+cek "modal_awal dari payload terbawa" "V == 250000" \
+  "$(echo "$RES138" | jq '.hasil[0].data.modal_awal')"
+SH138=$(echo "$RES138" | jq -r '.hasil[0].data.id')
+# INTI: dibuka_pada = waktu kejadian, BUKAN jam sinkron.
+cek "dibuka_pada memakai waktu kejadian (>3 jam lalu), bukan jam sinkron" "V == 1" \
+  "$(api "$K137" GET /shift/aktif | jq --arg n "$(date -u -d '-3 hours' +%Y-%m-%dT%H:%M:%SZ)" '(.dibuka_pada < $n)|if . then 1 else 0 end')"
+
+# Manfaatnya: penjualan offline 3 jam lalu masuk lewat JENDELA NORMAL —
+# bukan jalur toleransi susulan.
+W138S=$(date -u -d '-3 hours' +%Y-%m-%dT%H:%M:%SZ)
+B138S=$(jq -nc --arg r "$(uuid138)" --arg w "$W138S" --arg m "$MENU138" '{commands:[{client_ref:$r,tipe:"penjualan",waktu:$w,payload:{items:[{menu_id:$m,qty:1}],metode_bayar:"tunai"}}]}')
+RES138S=$(api "$K137" POST /sync "$B138S")
+cek "penjualan 3 jam lalu → ok, masuk shift yang dibuka offline" "V == 1" \
+  "$(echo "$RES138S" | jq --arg s "$SH138" '(.hasil[0].status=="ok" and .hasil[0].data.shift.id==$s)|if . then 1 else 0 end')"
+cek "penjualan itu BUKAN susulan (jendela normal, bukan toleransi)" "V == 1" \
+  "$(echo "$RES138S" | jq '(.hasil[0].data.di_luar_jendela_shift==false and .hasil[0].data.ada_transaksi_susulan==false)|if . then 1 else 0 end')"
+cek "rekap shift terbuka menghitung penjualan itu" "V == 1" \
+  "$(api "$K137" GET /shift/aktif | jq '.jumlah_transaksi>=1|if . then 1 else 0 end')"
+
+# Bentrok: manajer/perangkat lain sudah membuka shift → JANGAN gagal, kembalikan
+# shift yang ada. Menggagalkannya membuat penjualan yang bersandar padanya
+# kehilangan tempat berpijak — kelas bug yang baru ditutup di §137.
+B138B=$(jq -nc --arg r "$(uuid138)" --arg w "$(date -u -d '-2 hours' +%Y-%m-%dT%H:%M:%SZ)" '{commands:[{client_ref:$r,tipe:"shift_buka",waktu:$w,payload:{modal_awal:999}}]}')
+RES138B=$(api "$K137" POST /sync "$B138B")
+cek "shift sudah terbuka → tetap ok (bukan gagal)" "V == 1" \
+  "$(echo "$RES138B" | jq '.hasil[0].status=="ok"|if . then 1 else 0 end')"
+cek "ditandai sudah_terbuka=true + mengembalikan shift yang ADA" "V == 1" \
+  "$(echo "$RES138B" | jq --arg s "$SH138" '(.hasil[0].data.sudah_terbuka==true and .hasil[0].data.id==$s)|if . then 1 else 0 end')"
+cek "tidak membuat shift kedua (modal_awal tak tertimpa)" "V == 250000" \
+  "$(api "$K137" GET /shift/aktif | jq '.modal_awal')"
+
+# Retry perintah SUKSES: perangkat bisa mati setelah server membukukan tapi
+# sebelum aplikasi memproses respons. Jalur idempoten harus membalas `data`
+# UTUH — kalau menyusut, peringatan "modal awal tidak dipakai" hilang diam-diam.
+# Perhatikan: yang dibalas adalah HASIL SAAT DIEKSEKUSI (sudah_terbuka:false),
+# bukan penilaian ulang keadaan sekarang — walau kini shift memang terbuka.
+RETRY138=$(api "$K137" POST /sync "$B138")
+cek "retry shift_buka sukses → sudah_ada" "V == 1" \
+  "$(echo "$RETRY138" | jq '.hasil[0].status=="sudah_ada"|if . then 1 else 0 end')"
+cek "retry membalas data UTUH: id shift ikut" "V == 1" \
+  "$(echo "$RETRY138" | jq --arg s "$SH138" '.hasil[0].data.id==$s|if . then 1 else 0 end')"
+cek "retry membalas data UTUH: sudah_terbuka ikut (snapshot saat eksekusi)" "V == 1" \
+  "$(echo "$RETRY138" | jq '.hasil[0].data.sudah_terbuka==false|if . then 1 else 0 end')"
+cek "retry membalas data UTUH: modal_awal ikut" "V == 250000" \
+  "$(echo "$RETRY138" | jq '.hasil[0].data.modal_awal')"
+
+# Guard: peran & jalur online tidak berubah.
+cek "owner kirim shift_buka → item gagal 403" "V == 1" \
+  "$(api "$OWNER" POST /sync "$(jq -nc --arg r "$(uuid138)" --arg w "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{commands:[{client_ref:$r,tipe:"shift_buka",waktu:$w,payload:{}}]}')" | jq '(.hasil[0].status=="gagal" and .hasil[0].kode==403)|if . then 1 else 0 end')"
+cek "regresi nol: POST /shift/buka online TETAP 400 saat shift terbuka" "V == 400" \
+  "$(status_code_body "$K137" POST /shift/buka '{"modal_awal":0}')"
+
+echo
+echo "== 139. ETag / 304 pada endpoint daftar master data =="
+# Aplikasi mobile merevalidasi cache di latar belakang; tanpa ETag tiap
+# revalidasi menarik badan penuh walau tak ada yang berubah. Yang diuji di sini
+# bukan sekadar "ada header ETag", tapi tiga sifat yang kalau lepas membuat
+# fiturnya diam-diam tak berguna: stabil, peka perubahan, dan tak bocor
+# antar-endpoint.
+
+etag_of() { # etag_of <token> <path> [flag curl tambahan]
+  curl -s -o /dev/null -D - ${3:-} -X GET "$BASE/api$2" -H "Authorization: Bearer $1" \
+    | tr -d '\r' | sed -n 's/^[Ee][Tt][Aa][Gg]: *//p'
+}
+hdr_of() { # hdr_of <token> <path> <nama-header>
+  curl -s -o /dev/null -D - -X GET "$BASE/api$2" -H "Authorization: Bearer $1" \
+    | tr -d '\r' | sed -n "s/^$3: *//Ip"
+}
+status_inm() { # status_inm <token> <path> <if-none-match>
+  curl -s -o /dev/null -w '%{http_code}' -X GET "$BASE/api$2" \
+    -H "Authorization: Bearer $1" -H "If-None-Match: $3"
+}
+bytes_inm() { # bytes_inm <token> <path> <if-none-match>
+  curl -s -X GET "$BASE/api$2" -H "Authorization: Bearer $1" -H "If-None-Match: $3" | wc -c
+}
+
+for JALUR in /menu /kategori /cabang /meja; do
+  ET=$(etag_of "$OWNER" "$JALUR")
+  cek "GET $JALUR membawa header ETag" "V == 1" "$([ -n "$ET" ] && echo 1 || echo 0)"
+  cek "GET $JALUR + If-None-Match cocok → 304" "V == 304" "$(status_inm "$OWNER" "$JALUR" "$ET")"
+  cek "304 $JALUR tanpa badan (0 byte)" "V == 0" "$(bytes_inm "$OWNER" "$JALUR" "$ET")"
+  cek "GET $JALUR + ETag basi → 200 (bukan 304)" "V == 200" \
+    "$(status_inm "$OWNER" "$JALUR" '"basi-tidak-akan-pernah-cocok"')"
+done
+
+# SIFAT PALING RAPUH: digest harus stabil untuk data yang sama. Larik bersarang
+# tanpa ORDER BY (`komponen`, `branch_ids` pada /menu) atau kunci urut yang seri
+# membuat ETag berubah-ubah walau tak ada yang diubah — gejalanya menyamar jadi
+# "datanya memang sering berubah", jadi nyaris mustahil dilacak belakangan.
+for JALUR in /menu /kategori /cabang /meja; do
+  SAMA=1
+  E0=$(etag_of "$OWNER" "$JALUR")
+  for _ in 1 2 3 4 5; do
+    [ "$(etag_of "$OWNER" "$JALUR")" = "$E0" ] || SAMA=0
+  done
+  cek "ETag $JALUR stabil pada 6 permintaan beruntun (urutan JSON deterministik)" "V == 1" "$SAMA"
+done
+
+# Peka perubahan: kalau ETag tak bergerak setelah data berubah, klien memegang
+# data basi selamanya — kegagalan yang jauh lebih buruk daripada tanpa ETag.
+EK_SEBELUM=$(etag_of "$OWNER" /kategori)
+api "$OWNER" POST /kategori '{"nama":"Kategori ETag 139","sort_order":97}' > /dev/null
+EK_SESUDAH=$(etag_of "$OWNER" /kategori)
+cek "ETag /kategori BERUBAH setelah kategori baru dibuat" "V == 1" \
+  "$([ "$EK_SEBELUM" != "$EK_SESUDAH" ] && echo 1 || echo 0)"
+cek "ETag /kategori lama → 200 lagi (klien menarik data baru)" "V == 200" \
+  "$(status_inm "$OWNER" /kategori "$EK_SEBELUM")"
+
+# Tak bocor antar-endpoint: ETag terikat pada isi, bukan pada rute.
+cek "ETag /kategori dipakai di /menu → 200 (bukan 304 palsu)" "V == 200" \
+  "$(status_inm "$OWNER" /menu "$EK_SESUDAH")"
+
+# Interaksi dengan kompresi. compress() melemahkan ETag jadi W/"..." saat badan
+# jadi ter-gzip — RFC menuntut itu karena kompresi mengubah byte yang dikirim.
+# Pencocokan If-None-Match mengabaikan awalan W/, jadi klien ber-gzip dan
+# tanpa-gzip harus sama-sama kena 304. Kalau middleware dipasang di LUAR
+# compress(), digest dihitung dari byte terkompresi dan tak pernah cocok.
+ET_GZIP=$(etag_of "$OWNER" /menu "--compressed")
+cek "ETag /menu ada juga saat klien menerima gzip" "V == 1" \
+  "$([ -n "$ET_GZIP" ] && echo 1 || echo 0)"
+cek "ETag gzip cocok balik → 304" "V == 304" "$(status_inm "$OWNER" /menu "$ET_GZIP")"
+cek "ETag gzip = ETag polos setelah awalan W/ dilepas" "V == 1" \
+  "$([ "${ET_GZIP#W/}" = "$(etag_of "$OWNER" /menu)" ] && echo 1 || echo 0)"
+
+# Header cache: `private` supaya cache bersama tak pernah menyimpan badan milik
+# satu tenant, `no-cache` = wajib revalidasi (bukan "jangan simpan").
+cek "GET /menu membawa Cache-Control private, no-cache" "V == 1" \
+  "$([ "$(hdr_of "$OWNER" /menu 'Cache-Control')" = "private, no-cache" ] && echo 1 || echo 0)"
+cek "Cache-Control ikut terbawa pada respons 304" "V == 1" \
+  "$(curl -s -o /dev/null -D - -X GET "$BASE/api/menu" -H "Authorization: Bearer $OWNER" \
+      -H "If-None-Match: $(etag_of "$OWNER" /menu)" | tr -d '\r' \
+      | grep -qi '^cache-control: private, no-cache' && echo 1 || echo 0)"
+cek "GET /menu membawa Vary: Authorization" "V == 1" \
+  "$([ "$(hdr_of "$OWNER" /menu 'Vary')" = "Authorization" ] && echo 1 || echo 0)"
+
+# Regresi nol: hanya GET yang disentuh, dan sub-jalur tidak ikut tercakup.
+cek "POST /kategori tetap 201 (middleware hanya GET)" "V == 201" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/kategori" \
+      -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' \
+      -d '{"nama":"Kategori ETag 139b","sort_order":98}')"
+cek "GET /menu/ketersediaan TIDAK ber-ETag (berubah tiap penjualan)" "V == 1" \
+  "$([ -z "$(etag_of "$OWNER" /menu/ketersediaan)" ] && echo 1 || echo 0)"
+cek "GET /menu tanpa If-None-Match tetap 200 berbadan (klien lama)" "V == 1" \
+  "$(api "$OWNER" GET /menu | jq 'length>0|if . then 1 else 0 end')"
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

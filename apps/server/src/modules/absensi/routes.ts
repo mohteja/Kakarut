@@ -150,8 +150,14 @@ export async function sedangHadir(
   companyId: string,
   branchId: string,
   userId: string,
+  /**
+   * Waktu acuan — tanggal bisnisnya yang diperiksa. Default kini (jalur online).
+   * Sinkron offline WAJIB mengisinya dengan `waktu` kejadian: shift yang dibuka
+   * kemarin tapi baru disinkron hari ini harus dinilai dari absen KEMARIN.
+   */
+  pada: Date = new Date(),
 ): Promise<boolean> {
-  const tanggal = tanggalDi(await timezoneOf(companyId));
+  const tanggal = tanggalDi(await timezoneOf(companyId), pada);
   const [last] = await db
     .select({ tipe: attendances.tipe })
     .from(attendances)

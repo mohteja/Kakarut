@@ -561,6 +561,13 @@
       "when": 1784986518121,
       "tag": "0079_sour_thunderbolts",
       "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "7",
+      "when": 1785121153097,
+      "tag": "0080_abnormal_husk",
+      "breakpoints": true
     }
   ]
 }

@@ -430,18 +430,27 @@ perangkat. Server mengeksekusi tiap perintah lewat logika service yang SUDAH
 ADA (validasi = aturan endpoint asli), idempoten per `client_ref`.
 
 - `POST /api/sync` — [any] — req `SyncRequest`: `{ device_id?: string|null, commands: SyncCommand[] (1..100) }` di mana `SyncCommand = { client_ref: uuid (idempotency, unik per company), tipe: SyncTipe, waktu: ISO-8601 UTC, payload: <body endpoint asli> }`.
-  - res: **selalu 200** `SyncResponse`: `{ hasil: SyncItemResult[] }` (urutan sama dgn `commands`). `SyncItemResult = { client_ref, status: "ok"|"sudah_ada"|"gagal", kode: <HTTP endpoint asli>, data?: <respons endpoint asli>, error?: <pesan> }`.
-  - **Fase 1 `tipe`** (dieksekusi langsung lewat service; `waktu` = timestamp kejadian yang dibukukan): `penjualan` (payload = body `POST /penjualan`), `absen_saya` (body `POST /absensi/saya`), `absen_stasiun` (body `POST /absensi`).
+  - res: **selalu 200** `SyncResponse`: `{ hasil: SyncItemResult[] }` (urutan sama dgn `commands`). `SyncItemResult = { client_ref, status: "ok"|"sudah_ada"|"gagal", kode: <HTTP endpoint asli>, data?: <respons endpoint asli — atau data lanjutan saat gagal>, error?: <pesan>, sebab?: <kode penyebab, saat gagal> }`. `sebab` yang ada saat ini: `"shift_tidak_cocok"` (lihat penjualan di bawah). Penolakan yang tersimpan di ledger dibalas **utuh** saat retry — `sebab` & `data` ikut, jadi konteksnya tidak hilang..
+  - **Fase 1 `tipe`** (dieksekusi langsung lewat service; `waktu` = timestamp kejadian yang dibukukan): `shift_buka` (payload `{ branch_id?, modal_awal?=0 }`), `penjualan` (payload = body `POST /penjualan`), `absen_saya` (body `POST /absensi/saya`), `absen_stasiun` (body `POST /absensi`).
   - **Fase 2 `tipe`** (di-dispatch ke endpoint asli lewat sub-request internal → middleware + role guard + handler asli berjalan apa adanya; stok berubah **saat sinkron**, boleh minus, `waktu` cukup tercatat di ledger untuk audit): `stok_opname` (payload = body `POST /stok/opname`), `perlengkapan_opname` (body `POST /perlengkapan/opname`), `perlengkapan_pakai` (payload += `supply_id`, sisanya body `POST /perlengkapan/:id/pakai`), `faktur_tahap` (payload += `jalur` `"produksi"|"pembelian"` + `faktur_id`, sisanya body `POST /:jalur/tahap/:id`), `faktur_kirim` (payload += `jalur` + `faktur_id`, body `POST /:jalur/kirim/:id`), `produksi_kirim_hasil` (payload += `faktur_id`, body `POST /produksi/kirim-hasil/:id`), `penerimaan_terima` / `penerimaan_terima_sebagian` / `penerimaan_tolak` (payload += `faktur_id`, sisanya body `POST /penerimaan/:id/terima|terima-sebagian|tolak`).
     - **Path-param di payload**: perintah Fase 2 yang butuh id di URL mengambilnya dari field payload (`supply_id`/`faktur_id`/`jalur`); field wajib yang hilang → item **gagal 400**, `jalur` selain `produksi`/`pembelian` → item **gagal 400**. Sisa field payload jadi body request.
     - **Kode hasil**: `kode` = status HTTP endpoint asli; `kode ≥ 400` → item `status:"gagal"` (mis. role/guard salah → 403, faktur asing → 404) tanpa menghentikan item lain.
   - **Idempotency**: `client_ref` yang sudah tercatat → `sudah_ada` + hasil tersimpan (TIDAK dieksekusi ulang). Aman untuk retry (exactly-once) — berlaku untuk Fase 1 & Fase 2.
   - **Eksekusi berurutan**; item gagal TIDAK menghentikan item lain (kegagalan dilaporkan per item dgn `status:"gagal"` + `kode` + `error`).
-  - **Validasi `waktu`**: tolak masa depan (skew +5 mnt) & > 7 hari → item **gagal 400**. `waktu` = timestamp kejadian (bukan jam sinkron).
-  - **penjualan (semantik `waktu`)**: dipakai sebagai waktu struk + tanggal bisnis. Gerbang "Kasir belum dibuka" (409) TIDAK berlaku di sync — sebagai gantinya sale ditautkan ke shift yang JENDELA waktunya memuat `waktu` (terbuka atau tertutup). Shift tertutup → sale tetap masuk + rekap dihitung ulang + shift ditandai `ada_transaksi_susulan:true` (lihat DTO `Shift`). Tidak ada shift cocok → item **gagal 409**.
+  - **Validasi `waktu`**: tolak masa depan (skew +5 mnt) → item **gagal 400**. Batas usia **per tipe**: `penjualan` **30 hari**, tipe lain **7 hari** → lewat batas item **gagal 400**. (Penjualan dilonggarkan karena uangnya sudah diterima kasir — menolaknya berarti transaksi hilang permanen; tipe lain tetap ketat karena mengubah stok jauh ke belakang berbahaya.) `waktu` = timestamp kejadian (bukan jam sinkron).
+  - **penjualan (semantik `waktu`)**: dipakai sebagai waktu struk + tanggal bisnis. Gerbang "Kasir belum dibuka" (409) TIDAK berlaku di sync. Sale dibukukan ke shift lewat kolom **`sales.shift_id`** (penautan eksplisit, bukan lagi sekadar disimpulkan dari waktu), dengan dua tahap pencarian:
+    1. **Shift yang jendelanya memuat `waktu`** — batas **inklusif di kedua ujung** (`dibuka_pada ≤ waktu ≤ ditutup_pada`; shift terbuka = ujung kanan tak terbatas). Sisi buka diberi toleransi **5 menit** untuk jam perangkat yang mundur, jadi transaksi tepat sebelum shift dibuka tidak hilang.
+    2. **Bila tidak ada** — shift terakhir cabang itu yang **ditutup paling dekat sebelum `waktu`**, selama `waktu ≤ ditutup_pada + 6 jam` **DAN** masih tanggal bisnis yang sama (zona waktu perusahaan). Ini kasus "shift ditutup dari web/perangkat lain sementara perangkat kasir offline masih melayani".
+    Shift yang sudah tertutup (jalur 1 maupun 2) → sale tetap masuk, **ikut terhitung di rekap & selisih kas shift itu**, dan shift ditandai `ada_transaksi_susulan:true` (lihat DTO `Shift`). Baris transaksinya di `GET /api/shift/:id` bertanda `susulan:true`.
+    - **`data` saat ok** memuat `shift: { id, dibuka_pada, ditutup_pada }`, `ada_transaksi_susulan: boolean`, dan `di_luar_jendela_shift: boolean` (true = dibukukan lewat toleransi jalur 2 → beri tahu kasir agar selisih kas shift itu diperiksa). Catatan: tabel `shifts` **tidak punya kolom nomor**, jadi shift dikenali lewat `id` + jam buka/tutup.
+    - **Tetap gagal 409** hanya bila benar-benar tak ada shift yang memenuhi (mis. `waktu` di tanggal yang tak punya shift sama sekali, atau `waktu` sebelum shift pertama hari itu di luar toleransi 5 menit). Respons gagal membawa `sebab:"shift_tidak_cocok"` + `data.shift_terdekat` = `{ id, dibuka_pada, ditutup_pada }` shift tertutup terdekat sebelum `waktu`, atau `null` bila memang tak ada.
   - **absen (semantik `waktu`)**: cap masuk/keluar dicatat pada `waktu`; geofence tetap divalidasi dari `lat`/`lng` payload.
   - **Role guard**: sama dgn endpoint asli — mis. `penjualan` oleh non-kasir → item **gagal 403** (bukan gagal seluruh batch).
-- **Online-only (tidak lewat sync)**: login/auth, CRUD master, ACC/persetujuan, laporan, upload foto (mobile unggah `POST /upload` DULU saat online, lalu kirim perintah dgn `foto_url` hasil unggah). Shift buka/tutup tetap online-only (Fase 1).
+  - **shift_buka (semantik `waktu`)**: `waktu` jadi **`opened_at` shift** — bukan jam sinkron. Shift yang dibuka 08.00 lalu disinkron 20.00 membuat seluruh penjualan hari itu jatuh di dalam jendelanya secara wajar, tanpa bersandar pada toleransi transaksi susulan. Peran **kasir** saja (non-kasir → item **gagal 403**).
+    - **Gerbang absen tetap berlaku**, tapi dinilai pada **tanggal bisnis `waktu`**, bukan hari sinkron: kasir harus sudah absen masuk di tanggal itu. `absen_saya` juga bisa diantre — kirim kronologis dalam batch yang sama, perintah dieksekusi berurutan. Belum absen → item **gagal 400**.
+    - **Sudah ada shift terbuka di cabang itu** (mis. manajer membukanya lewat web) → **tetap `ok`**, mengembalikan shift yang ADA dengan `data.sudah_terbuka:true`, dan TIDAK membuat shift kedua (ada indeks unik satu-shift-terbuka-per-cabang). Sengaja tidak digagalkan: penjualan yang bersandar padanya akan kehilangan tempat berpijak.
+    - `data` = DTO `Shift` + `sudah_terbuka: boolean`.
+- **Online-only (tidak lewat sync)**: login/auth, CRUD master, ACC/persetujuan, laporan, upload foto (mobile unggah `POST /upload` DULU saat online, lalu kirim perintah dgn `foto_url` hasil unggah). **Shift TUTUP tetap online-only** — `closed_at` memakai jam server, jadi menutup shift lewat sync akan mencatat jam yang salah; shift yang dibuka offline tetap terbuka sampai ditutup online.
 
 ## `/api/absensi` — Absensi (`modules/absensi/routes.ts`) — group guard **[owner/admin/cashier/tim/kitchen/bar]**
 
@@ -610,6 +619,27 @@ ADA (validasi = aturan endpoint asli), idempoten per `client_ref`.
 - **Tangani `429` (rate limit):** pada endpoint auth/sync, `429` disertai header
   `Retry-After` (detik). Tampilkan "coba lagi dalam N detik" & jeda tombol
   submit; hindari retry otomatis beruntun.
+- **ETag / `304 Not Modified` pada endpoint daftar master data.** Berlaku untuk
+  **`GET /api/menu`, `/api/kategori`, `/api/cabang`, `/api/meja`** — dan hanya
+  itu. Setiap `200` membawa header `ETag`; kirim balik nilainya sebagai
+  `If-None-Match` dan bila datanya belum berubah server menjawab **`304` tanpa
+  badan**.
+  - **Kunci penyimpanan ETag harus memuat query string**, karena `/menu` dan
+    `/meja` disaring `?branch_id=`. Satu kunci global akan menyilangkan data
+    antar-cabang.
+  - **`304` bukan galat.** Tangani sebelum jalur error, jangan parse badannya
+    (kosong), dan perlakukan sebagai "salinan cache masih sah".
+  - **Kirim `If-None-Match` hanya bila salinan badannya benar-benar masih ada**,
+    supaya `304` tak pernah meninggalkan klien tanpa data.
+  - **Kompatibel penuh ke belakang:** klien yang tidak mengirim `If-None-Match`
+    tetap menerima `200` berbadan seperti sebelumnya.
+  - Respons juga membawa `Cache-Control: private, no-cache` (wajib revalidasi,
+    jangan disimpan cache bersama) dan `Vary: Authorization`.
+  - Saat badan terkirim ter-gzip, ETag dilemahkan jadi `W/"…"`. Pencocokan
+    mengabaikan awalan `W/`, jadi kirim balik nilai apa adanya.
+  - **Yang dihemat hanya byte di kabel.** Digest dihitung dari badan respons
+    yang sudah jadi, jadi query DB tetap berjalan penuh — `304` berarti "server
+    bekerja lalu tidak mengirim", bukan "server menjawab tanpa bekerja".
 
 ---
 
@@ -1854,6 +1884,8 @@ export interface Shift {
  * penerimaan. Payload = body endpoint asli (+ path param bila ditandai).
  */
 export type SyncTipe =
+  /** buka kasir; `waktu` jadi `opened_at` shift (payload `{branch_id?, modal_awal?}`) */
+  | "shift_buka"
   | "penjualan"
   | "absen_saya"
   | "absen_stasiun"
@@ -1891,10 +1923,22 @@ export interface SyncItemResult {
   status: "ok" | "sudah_ada" | "gagal";
   /** kode HTTP hasil eksekusi endpoint asli */
   kode: number;
-  /** data respons endpoint asli (saat ok/sudah_ada sukses) */
+  /**
+   * Saat ok/sudah_ada: data respons endpoint asli. Saat gagal: data lanjutan
+   * yang menyertai `sebab` — mis. `{ shift_terdekat: {...} }` pada
+   * `shift_tidak_cocok`, supaya mobile bisa menawarkan aksi perbaikan.
+   */
   data?: unknown;
   /** pesan error endpoint asli (saat gagal) */
   error?: string;
+  /**
+   * Penyebab penolakan dalam bentuk yang bisa dicabang oleh kode (saat gagal).
+   * Tanpa ini mobile hanya melihat teks generik dan tak bisa membedakan
+   * "shift tidak cocok" dari kegagalan lain. Kode `sebab` yang ada saat ini:
+   * - `shift_tidak_cocok` — 409 pada `penjualan`; `data.shift_terdekat` berisi
+   *   shift tertutup terdekat sebelum `waktu` (atau null bila memang tak ada).
+   */
+  sebab?: string;
 }
 
 /** Respons POST /api/sync — selalu 200; detail per item. */
@@ -1902,7 +1946,7 @@ export interface SyncResponse {
   hasil: SyncItemResult[];
 }
 
-/** Satu transaksi di dalam jendela waktu sebuah shift (untuk detail shift). */
+/** Satu transaksi milik sebuah shift (untuk detail shift). */
 export interface ShiftTransaksiRow {
   id: string;
   nomor: string;
@@ -1910,6 +1954,12 @@ export interface ShiftTransaksiRow {
   total: number;
   metode: MetodeBayar;
   kasir: string | null;
+  /**
+   * true bila transaksi masuk SETELAH shift ditutup (sinkron offline) —
+   * `waktu`-nya di luar jendela shift, jadi baris inilah yang membuat rekap
+   * terkini berbeda dari angka saat penutupan.
+   */
+  susulan: boolean;
 }
 
 /** Detail satu shift = ringkasan shift + daftar transaksi di jendela waktunya. */

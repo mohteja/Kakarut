@@ -32,6 +32,13 @@ export interface CreateSaleParams {
    * waktu server saat ini (jalur online biasa).
    */
   waktu?: Date;
+  /**
+   * Shift kasir tempat transaksi dibukukan (jalur sinkron offline). Diisi agar
+   * transaksi susulan tetap masuk rekap shift yang benar meski `waktu`-nya
+   * jatuh setelah shift ditutup. Jalur online biasa membiarkannya kosong —
+   * penautan lewat jendela waktu sudah cukup.
+   */
+  shiftId?: string | null;
   items: SaleItemInput[];
 }
 
@@ -222,6 +229,7 @@ export async function createSale(params: CreateSaleParams) {
         metodeBayar,
         uangDiterima,
         saleDate,
+        shiftId: params.shiftId ?? null,
         ...(params.waktu ? { waktu: params.waktu } : {}),
       })
       .returning();

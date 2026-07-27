@@ -20,6 +20,177 @@ tanpa akses repo server.
 
 ---
 
+## Rilis: Penjualan offline yang tak menemukan shift cocok
+
+> **Status:** menunggu rilis. **Belum ada di production** sampai PR-nya
+> di-merge — koordinasikan dulu sebelum mulai mengerjakan.
+>
+> Menjawab dokumen kalian *"Untuk tim backend — penjualan offline yang tak
+> menemukan shift cocok"*. **Opsi A dikerjakan.** Migrasi DB: `0080`
+> (menambah `sales.shift_id`).
+
+### ⚪️ INFO — koreksi premis: dulu TIDAK ada penautan sale↔shift
+
+Dokumen kalian menulis "sale ditautkan ke shift". Sebelum rilis ini itu tidak
+benar: `sales` tak punya kolom shift sama sekali — hubungannya **disimpulkan
+dari waktu** (`rekapWindow` menyaring `waktu BETWEEN dibuka_pada AND
+ditutup_pada`). Akibatnya Opsi A tak bisa dikerjakan sebagai perubahan kecil di
+`/sync`: menautkan sale jam 20.45 ke shift yang ditutup 20.30 tetap **tidak**
+memasukkannya ke rekap, dan `ada_transaksi_susulan:true` akan jadi penanda
+bohong. Karena itu kolom **`sales.shift_id`** ditambahkan supaya penautannya
+nyata. Baris lama tetap dihitung lewat jendela waktu (tidak perlu backfill,
+tidak ada hitung ganda).
+
+### 🟢 BARU — fallback shift: 409 itu hilang untuk kasus kalian
+
+`POST /api/sync` `tipe:"penjualan"` sekarang mencari shift dua tahap:
+
+1. shift yang jendelanya memuat `waktu` (seperti dulu), **plus toleransi 5
+   menit di sisi buka** untuk jam perangkat yang mundur;
+2. bila tak ada — shift terakhir cabang itu yang **ditutup paling dekat sebelum
+   `waktu`**, syarat `waktu ≤ ditutup_pada + 6 jam` **DAN** tanggal bisnis sama
+   (zona waktu perusahaan).
+
+Sale masuk lewat jalur 2 tetap **ikut terhitung di rekap & selisih kas** shift
+itu. Skenario kalian (tutup 20.30, jual 20.45) kini `status:"ok"`.
+
+### 🟢 BARU — `data` hasil `penjualan` membawa konteks shift
+
+```jsonc
+{ "status": "ok", "kode": 201, "data": {
+    "shift": { "id": "…", "dibuka_pada": "…", "ditutup_pada": "…" },
+    "ada_transaksi_susulan": true,
+    "di_luar_jendela_shift": true   // dibukukan lewat toleransi jalur 2
+}}
+```
+
+Pakai `di_luar_jendela_shift` untuk memunculkan "transaksi masuk ke shift yang
+sudah ditutup — periksa selisih kas", bukan diam-diam sukses.
+
+**Yang TIDAK bisa kami penuhi:** `nomor` shift. Tabel `shifts` tidak punya
+kolom nomor — tidak ada "SH-0142" di sistem ini. Shift dikenali lewat `id` +
+`dibuka_pada`/`ditutup_pada`. Kalau kalian butuh label pendek, bilang; itu
+fitur baru (penomoran shift), bukan penambahan field.
+
+### 🟢 BARU — `shift_buka` bisa diantre offline
+
+Konsekuensi dari merapatkan snapshot jadi 6 jam: pemadaman panjang berarti nol
+transaksi, karena `POST /shift/buka` online-only. `shift_buka` kini tipe sync:
+
+```jsonc
+{ "client_ref": "…", "tipe": "shift_buka", "waktu": "2026-03-10T01:00:00Z",
+  "payload": { "modal_awal": 250000 } }   // branch_id opsional
+```
+
+`waktu` jadi **`opened_at`** — bukan jam sinkron. Shift yang dibuka 08.00 lalu
+disinkron 20.00 membuat seluruh penjualan hari itu jatuh di dalam jendelanya
+secara wajar, **tanpa** menyentuh toleransi 6 jam sama sekali. Itu jalur yang
+kami sarankan untuk pemadaman panjang.
+
+- **Gerbang absen tetap ada**, dinilai pada **tanggal bisnis `waktu`** (bukan
+  hari sinkron). Kirim `absen_saya` lebih dulu dalam batch yang sama — perintah
+  dieksekusi berurutan. Belum absen di tanggal itu → **gagal 400**.
+- **Sudah ada shift terbuka** (manajer membukanya lewat web) → **tetap `ok`**,
+  membalas shift yang ADA + `data.sudah_terbuka:true`, tidak membuat shift
+  kedua. Sengaja tidak digagalkan supaya penjualan yang bersandar padanya tak
+  kehilangan tempat berpijak.
+- `data` = DTO `Shift` + `sudah_terbuka`.
+
+**`shift_tutup` TIDAK dibuka untuk sync** — `closed_at` memakai jam server,
+jadi menutup lewat sync akan mencatat jam yang salah. Shift yang dibuka offline
+tetap terbuka sampai ditutup online; itu justru lebih benar karena jam tutup
+mengikuti kapan kasir benar-benar mengakhiri.
+
+### 🟡 PERLU DICEK — 409 kini membawa `sebab` + `data`
+
+`SyncItemResult` bertambah **`sebab?: string`**. Saat `penjualan` benar-benar
+tak menemukan shift:
+
+```jsonc
+{ "status": "gagal", "kode": 409, "error": "Tidak ada shift kasir yang mencakup waktu transaksi ini",
+  "sebab": "shift_tidak_cocok",
+  "data": { "shift_terdekat": { "id": "…", "dibuka_pada": "…", "ditutup_pada": "…" } } }
+```
+
+`shift_terdekat` bernilai `null` bila memang tak ada shift sebelum `waktu`.
+Penolakan tersimpan dibalas **utuh** saat retry (`status:"sudah_ada"` + `sebab`
++ `data`), jadi konteksnya tidak hilang. Opsi B poin 2 (`shift_id` opsional di
+`SaleBody`) **tidak** dikerjakan — dengan Opsi A jalan, tidak ada lagi kasus
+yang butuh kasir memilih shift manual.
+
+### ⚪️ INFO — `sudah_ada` pada item SUKSES membalas `data` UTUH
+
+Berlaku untuk **semua** tipe, bukan hanya kegagalan. Retry `penjualan` membawa
+`shift` + `ada_transaksi_susulan` + `di_luar_jendela_shift`; retry `shift_buka`
+membawa DTO shift + `sudah_terbuka` + `modal_awal`. Jadi peringatan kalian
+("masuk ke shift yang sudah ditutup", "modal awal tidak dipakai") tetap muncul
+walau perangkat mati tepat setelah server membukukan.
+
+**Satu hal yang perlu diperhatikan:** yang dibalas adalah **hasil saat perintah
+dieksekusi**, bukan penilaian ulang keadaan sekarang. Retry `shift_buka` yang
+dulu benar-benar membuat shift tetap membalas `sudah_terbuka:false`, walau
+sekarang shift itu memang sudah terbuka. Itu memang semantik idempotensi yang
+benar — jangan diperlakukan sebagai keadaan terkini.
+
+Perilaku ini dikunci uji (`verify-api` §137 & §138), jadi penyempitan payload di
+kemudian hari akan ketahuan, bukan menghilangkan peringatan kalian diam-diam.
+
+### 🟢 BARU — batas usia `waktu` jadi per tipe
+
+`penjualan` **30 hari** (naik dari 7), tipe lain tetap **7 hari**. Sesuai usul
+kalian: perangkat cadangan / outlet event yang offline berminggu-minggu tak
+lagi kehilangan seluruh antreannya. Lewat batas tetap **gagal 400**.
+
+### ⚪️ INFO — jawaban pertanyaan §2 kalian
+
+Batas jendela shift **inklusif di kedua ujung** (`dibuka_pada ≤ waktu ≤
+ditutup_pada`). `waktu` yang jatuh **sebelum** shift pertama hari itu: dulu
+409, sekarang masih 409 **kecuali** selisihnya ≤ 5 menit (toleransi jam
+perangkat mundur yang kalian sebut) — di luar itu tetap ditolak, karena
+fallback hanya melihat ke belakang ke shift yang sudah ditutup.
+
+### ⚪️ INFO — `ShiftTransaksiRow` bertambah `susulan`
+
+`GET /api/shift/:id` → tiap baris `transaksi` kini punya `susulan: boolean`
+(true = masuk setelah shift ditutup). Field tambahan, tidak merusak.
+
+### 🟢 BARU — ETag / `304 Not Modified` pada endpoint daftar master data
+
+Menjawab usulan kalian: revalidasi latar tak perlu lagi menarik badan penuh
+setiap kali cache disajikan saat sinyal jelek.
+
+Berlaku untuk **`GET /menu`, `/kategori`, `/cabang`, `/meja`** — dan hanya itu.
+Setiap `200` membawa `ETag`; kirim balik sebagai `If-None-Match` → **`304` tanpa
+badan** bila belum ada perubahan.
+
+| Hal | Nilai |
+| --- | --- |
+| Header respons tambahan | `ETag`, `Cache-Control: private, no-cache`, `Vary: Authorization` |
+| Klien lama (tanpa `If-None-Match`) | `200` berbadan, persis seperti sebelumnya |
+| Urutan rilis | **tidak mengikat** — boleh naik & dipakai kapan saja |
+| Saat badan ter-gzip | ETag jadi `W/"…"`; pencocokan mengabaikan awalan `W/`, kirim balik apa adanya |
+
+**Kunci penyimpanan ETag harus memuat query string** — `/menu` dan `/meja`
+disaring `?branch_id=`, jadi satu kunci global akan menyilangkan data
+antar-cabang.
+
+**Batasnya jujur:** yang dihemat hanya byte di kabel. Digest dihitung dari badan
+respons yang sudah jadi, jadi query DB tetap berjalan penuh. `304` = "server
+bekerja lalu tidak mengirim", bukan "server menjawab tanpa bekerja".
+
+**`/menu/ketersediaan` sengaja TIDAK ber-ETag** — isinya berubah tiap penjualan,
+jadi digest-nya nyaris tak pernah cocok dan hanya menambah kerja.
+
+**Soal urutan field JSON yang kalian ingatkan:** benar, dan bukan hipotetis di
+sini. Tiga tempat diperbaiki bersama rilis ini — `komponen` dan `branch_ids`
+pada `/menu` dibangun dari query **tanpa `ORDER BY`**, dan `/cabang` diurut
+`created_at` yang identik untuk cabang-cabang yang dibuat dalam satu transaksi.
+Semua query daftar kini punya pemutus seri. verify-api §139 mengunci sifat itu
+dengan membandingkan ETag enam permintaan beruntun per endpoint, supaya
+kegoyahan urutan gagal di CI alih-alih menyamar jadi "hit rate rendah".
+
+---
+
 ## Rilis: Transfer Stok + perbaikan integritas stok
 
 > **Status:** menunggu rilis (PR #114). Endpoint di bawah **belum ada di

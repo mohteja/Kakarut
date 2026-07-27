@@ -1,22 +1,72 @@
 import { zValidator } from "@hono/zod-validator";
-import { and, desc, eq, isNull, lte, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull, isNull, lte, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import type { SyncItemResult, SyncResponse } from "@kakarut/shared";
 import { db } from "../../db/client";
-import { branches, memberships, shifts, syncCommands, users } from "../../db/schema";
+import { branches, companies, memberships, shifts, syncCommands, users } from "../../db/schema";
 import { env } from "../../config/env";
+import { tanggalDi } from "../../lib/time";
 import { pastikanCabang, terikatCabang, type AppEnv } from "../../middleware/auth";
 import { lewatiRateLimit, rateLimit } from "../../middleware/rateLimit";
 import { createSale } from "../penjualan/service";
+import { bukaShift } from "../shift/routes";
 import { SaleBody } from "../penjualan/routes";
 import { catatAbsen, cekRadius, ClockBody, SelfBody } from "../absensi/routes";
 
 /** Batas antrean & usia perintah (disepakati dgn tim mobile). */
 const MAKS_PERINTAH = 100;
-const MAKS_UMUR_HARI = 7;
+/**
+ * Usia maksimal perintah, per tipe. `penjualan` sengaja jauh lebih longgar:
+ * uangnya sudah diterima kasir, jadi menolak antrean lama = transaksi hilang
+ * permanen. Perangkat cadangan / outlet event bisa offline berminggu-minggu.
+ * Tipe lain tetap 7 hari — mengubah stok jauh ke belakang justru berbahaya.
+ */
+const MAKS_UMUR_HARI: Record<string, number> = { penjualan: 30 };
+const MAKS_UMUR_HARI_DEFAULT = 7;
 const SKEW_MENIT = 5;
+/**
+ * Toleransi transaksi susulan: sale yang `waktu`-nya jatuh SETELAH sebuah shift
+ * ditutup masih dibukukan ke shift itu selama tidak lebih dari sekian jam dan
+ * masih di tanggal bisnis yang sama. Menutup celah "shift ditutup dari web/
+ * perangkat lain sementara kasir offline masih melayani".
+ */
+export const SUSULAN_TOLERANSI_JAM = 6;
+
+/**
+ * Boleh-tidaknya sebuah sale dibukukan ke shift yang SUDAH ditutup.
+ *
+ * Dua syarat, keduanya wajib:
+ * - jeda dari penutupan tidak lebih dari `SUSULAN_TOLERANSI_JAM`;
+ * - masih tanggal bisnis yang sama (zona waktu perusahaan) — supaya transaksi
+ *   dini hari tidak nyasar ke shift hari sebelumnya.
+ *
+ * Fungsi murni agar batasnya bisa diuji tanpa database; pemanggilnya di
+ * `execPenjualan` hanya menyediakan datanya.
+ */
+export function dalamToleransiSusulan(waktu: Date, closedAt: Date, tz: string): boolean {
+  if (waktu.getTime() < closedAt.getTime()) return false; // bukan susulan
+  const jedaOk = waktu.getTime() <= closedAt.getTime() + SUSULAN_TOLERANSI_JAM * 3_600_000;
+  return jedaOk && tanggalDi(tz, waktu) === tanggalDi(tz, closedAt);
+}
+
+/**
+ * Kegagalan perintah sinkron yang membawa sebab terstruktur + data lanjutan.
+ * `HTTPException` biasa hanya membawa teks; mobile butuh tahu BEDA penyebab
+ * 409 agar bisa menawarkan aksi lanjutan, bukan sekadar menampilkan pesan.
+ */
+class SyncGagal extends Error {
+  constructor(
+    readonly kode: number,
+    message: string,
+    readonly sebab: string,
+    readonly data?: unknown,
+  ) {
+    super(message);
+    this.name = "SyncGagal";
+  }
+}
 
 /**
  * Referensi aplikasi utk sub-request internal (Fase 2): perintah dieksekusi
@@ -47,6 +97,7 @@ const SyncBody = z.object({
       z.object({
         client_ref: z.string().uuid(),
         tipe: z.enum([
+          "shift_buka",
           "penjualan",
           "absen_saya",
           "absen_stasiun",
@@ -151,30 +202,131 @@ function pisahParam<T extends string>(
 // FASE 1 — eksekusi langsung lewat service (waktu = timestamp kejadian)
 // ---------------------------------------------------------------------------
 
-/** penjualan — kasir; tautkan ke shift yang jendelanya memuat `waktu`. */
+/**
+ * shift_buka — kasir membuka kasir saat perangkat offline.
+ *
+ * `waktu` jadi `opened_at`, jadi shift yang dibuka 08.00 lalu disinkron 20.00
+ * membuat SELURUH penjualan hari itu jatuh di dalam jendelanya secara wajar —
+ * tidak bersandar pada toleransi transaksi susulan sama sekali. Ini yang
+ * membuat pemadaman panjang (mati listrik seharian, outlet tanpa sinyal) tidak
+ * lagi berarti nol transaksi.
+ *
+ * Gerbang absen TIDAK dilewati, hanya dinilai pada tanggal bisnis `waktu`:
+ * `absen_saya` juga bisa diantre offline dan perintah dalam satu batch
+ * dieksekusi berurutan, jadi absen yang dikirim lebih dulu sudah tercatat saat
+ * perintah ini jalan.
+ *
+ * Sudah ada shift terbuka (mis. manajer membukanya lewat web) → tetap `ok`
+ * dengan `sudah_terbuka:true`, bukan gagal. Menggagalkannya akan membuat
+ * penjualan yang bersandar pada shift ini kehilangan tempat berpijak.
+ */
+const execShiftBuka: Eksekutor = async ({ auth }, payload, waktu) => {
+  if (auth.role !== "cashier") {
+    throw new HTTPException(403, { message: "Hanya kasir yang boleh membuka shift" });
+  }
+  const p = z
+    .object({ branch_id: z.string().uuid().nullish(), modal_awal: z.number().nonnegative().default(0) })
+    .parse(payload ?? {});
+  const branchId = await resolveCabangSync(auth, p.branch_id);
+  const { shift, sudahTerbuka } = await bukaShift({
+    companyId: auth.company_id!,
+    branchId,
+    userId: auth.sub,
+    modalAwal: p.modal_awal,
+    waktu,
+  });
+  return { kode: 201, data: { ...shift, sudah_terbuka: sudahTerbuka } };
+};
+
+/**
+ * penjualan — kasir; bukukan ke shift kasir yang tepat.
+ *
+ * Dua tahap pencarian, karena uang tunainya SUDAH diterima kasir: menolak
+ * transaksi = uang itu tidak punya jejak sama sekali di sistem.
+ *
+ * 1. Shift yang jendelanya memuat `waktu` (inklusif kedua ujung). Sisi buka
+ *    diberi toleransi `SKEW_MENIT` untuk jam perangkat yang mundur beberapa
+ *    menit — tanpa itu transaksi tepat sebelum shift dibuka ikut hilang.
+ * 2. Bila tidak ada: shift terakhir cabang ini yang DITUTUP paling dekat
+ *    sebelum `waktu`, selama masih dalam `SUSULAN_TOLERANSI_JAM` dan tanggal
+ *    bisnis yang sama. Ini kasus "shift ditutup dari tempat lain sementara
+ *    perangkat kasir offline dan masih melayani".
+ *
+ * Keduanya menulis `sales.shift_id` supaya transaksi benar-benar masuk rekap
+ * & selisih kas shift tsb — penanda `ada_transaksi_susulan` saja tidak cukup,
+ * karena rekap menyaring per jendela waktu untuk baris yang tak tertaut.
+ */
 const execPenjualan: Eksekutor = async ({ auth }, payload, waktu) => {
   if (auth.role !== "cashier") {
     throw new HTTPException(403, { message: "Hanya kasir yang boleh membuat transaksi" });
   }
   const p = SaleBody.parse(payload);
   const branchId = await resolveCabangSync(auth, p.branch_id);
-  const [shift] = await db
-    .select({ id: shifts.id, closedAt: shifts.closedAt })
+  const batasBuka = new Date(waktu.getTime() + SKEW_MENIT * 60_000);
+
+  let [shift] = await db
+    .select({ id: shifts.id, openedAt: shifts.openedAt, closedAt: shifts.closedAt })
     .from(shifts)
     .where(
       and(
         eq(shifts.companyId, auth.company_id!),
         eq(shifts.branchId, branchId),
-        lte(shifts.openedAt, waktu),
+        lte(shifts.openedAt, batasBuka),
         sql`(${shifts.closedAt} IS NULL OR ${shifts.closedAt} >= ${waktu})`,
       ),
     )
     .orderBy(desc(shifts.openedAt))
     .limit(1);
+
+  // Tahap 2 — shift tertutup terdekat sebelum `waktu`.
+  let susulanDiLuarJendela = false;
   if (!shift) {
-    throw new HTTPException(409, { message: "Tidak ada shift kasir yang mencakup waktu transaksi ini" });
+    const [terdekat] = await db
+      .select({ id: shifts.id, openedAt: shifts.openedAt, closedAt: shifts.closedAt })
+      .from(shifts)
+      .where(
+        and(
+          eq(shifts.companyId, auth.company_id!),
+          eq(shifts.branchId, branchId),
+          isNotNull(shifts.closedAt),
+          lte(shifts.closedAt, waktu),
+        ),
+      )
+      .orderBy(desc(shifts.closedAt))
+      .limit(1);
+    if (terdekat?.closedAt) {
+      const [comp] = await db
+        .select({ tz: companies.timezone })
+        .from(companies)
+        .where(eq(companies.id, auth.company_id!));
+      const tz = comp?.tz ?? "Asia/Jakarta";
+      if (dalamToleransiSusulan(waktu, terdekat.closedAt, tz)) {
+        shift = terdekat;
+        susulanDiLuarJendela = true;
+      } else {
+        throw new SyncGagal(
+          409,
+          "Tidak ada shift kasir yang mencakup waktu transaksi ini",
+          "shift_tidak_cocok",
+          { shift_terdekat: ringkasShift(terdekat) },
+        );
+      }
+    }
   }
-  if (shift.closedAt) {
+
+  if (!shift) {
+    throw new SyncGagal(
+      409,
+      "Tidak ada shift kasir yang mencakup waktu transaksi ini",
+      "shift_tidak_cocok",
+      { shift_terdekat: null },
+    );
+  }
+
+  // Rekap dihitung saat dibaca, jadi cukup tandai agar pembaca tahu angka
+  // penutupan awal bisa berbeda dari rekap terkini.
+  const susulan = shift.closedAt != null;
+  if (susulan) {
     await db.update(shifts).set({ adaTransaksiSusulan: true }).where(eq(shifts.id, shift.id));
   }
   const result = await createSale({
@@ -192,10 +344,33 @@ const execPenjualan: Eksekutor = async ({ auth }, payload, waktu) => {
     metodeBayar: p.metode_bayar,
     uangDiterima: p.uang_diterima,
     waktu,
+    shiftId: shift.id,
     items: p.items,
   });
-  return { kode: 201, data: { ...result, kasir: auth.nama, ada_transaksi_susulan: shift.closedAt != null } };
+  return {
+    kode: 201,
+    data: {
+      ...result,
+      kasir: auth.nama,
+      shift: ringkasShift(shift),
+      ada_transaksi_susulan: susulan,
+      /** true bila `waktu` di LUAR jendela shift (dibukukan lewat toleransi) */
+      di_luar_jendela_shift: susulanDiLuarJendela,
+    },
+  };
 };
+
+/**
+ * Identitas shift untuk dibalas ke mobile. Tabel `shifts` tidak punya kolom
+ * nomor, jadi shift dikenali lewat id + jam buka/tutupnya.
+ */
+function ringkasShift(s: { id: string; openedAt: Date; closedAt: Date | null }) {
+  return {
+    id: s.id,
+    dibuka_pada: s.openedAt.toISOString(),
+    ditutup_pada: s.closedAt ? s.closedAt.toISOString() : null,
+  };
+}
 
 /** absen_saya — cap atas nama pemanggil sendiri (semua peran). */
 const execAbsenSaya: Eksekutor = async ({ auth }, payload, waktu) => {
@@ -323,6 +498,7 @@ const execPenerimaanTolak: Eksekutor = ({ authHeader }, payload) => {
 };
 
 const EKSEKUTOR: Record<string, Eksekutor> = {
+  shift_buka: execShiftBuka,
   penjualan: execPenjualan,
   absen_saya: execAbsenSaya,
   absen_stasiun: execAbsenStasiun,
@@ -377,16 +553,27 @@ export const syncRoutes = new Hono<AppEnv>().post("/", batasSync, zValidator("js
       .from(syncCommands)
       .where(and(eq(syncCommands.companyId, auth.company_id!), eq(syncCommands.clientRef, cmd.client_ref)));
     if (ada) {
-      hasil.push(
-        ada.status === "gagal"
-          ? {
-              client_ref: cmd.client_ref,
-              status: "sudah_ada",
-              kode: ada.kode,
-              error: (ada.hasilJson as { error?: string } | null)?.error ?? "gagal",
-            }
-          : { client_ref: cmd.client_ref, status: "sudah_ada", kode: ada.kode, data: ada.hasilJson },
-      );
+      if (ada.status === "gagal") {
+        // Penolakan tersimpan dibalas UTUH (termasuk sebab & data lanjutan),
+        // supaya retry tidak kehilangan konteks yang dipakai mobile menawarkan
+        // aksi perbaikan.
+        const j = ada.hasilJson as { error?: string; sebab?: string; data?: unknown } | null;
+        hasil.push({
+          client_ref: cmd.client_ref,
+          status: "sudah_ada",
+          kode: ada.kode,
+          error: j?.error ?? "gagal",
+          ...(j?.sebab ? { sebab: j.sebab } : {}),
+          ...(j?.data !== undefined ? { data: j.data } : {}),
+        });
+      } else {
+        hasil.push({
+          client_ref: cmd.client_ref,
+          status: "sudah_ada",
+          kode: ada.kode,
+          data: ada.hasilJson,
+        });
+      }
       continue;
     }
 
@@ -401,8 +588,9 @@ export const syncRoutes = new Hono<AppEnv>().post("/", batasSync, zValidator("js
       if (t > sekarang + SKEW_MENIT * 60_000) {
         throw new HTTPException(400, { message: "waktu kejadian di masa depan" });
       }
-      if (t < sekarang - MAKS_UMUR_HARI * 86_400_000) {
-        throw new HTTPException(400, { message: `waktu kejadian lebih dari ${MAKS_UMUR_HARI} hari lalu` });
+      const maksUmur = MAKS_UMUR_HARI[cmd.tipe] ?? MAKS_UMUR_HARI_DEFAULT;
+      if (t < sekarang - maksUmur * 86_400_000) {
+        throw new HTTPException(400, { message: `waktu kejadian lebih dari ${maksUmur} hari lalu` });
       }
       const exec = EKSEKUTOR[cmd.tipe];
       const { kode, data } = await exec({ auth, authHeader }, cmd.payload, waktu);
@@ -419,17 +607,31 @@ export const syncRoutes = new Hono<AppEnv>().post("/", batasSync, zValidator("js
         simpanHasil = data;
       }
     } catch (e) {
-      const kode = e instanceof HTTPException ? e.status : e instanceof z.ZodError ? 400 : 500;
+      const kode =
+        e instanceof SyncGagal
+          ? e.kode
+          : e instanceof HTTPException
+            ? e.status
+            : e instanceof z.ZodError
+              ? 400
+              : 500;
       const pesan =
-        e instanceof HTTPException
+        e instanceof SyncGagal || e instanceof HTTPException
           ? e.message
           : e instanceof z.ZodError
             ? e.issues.map((i) => i.message).join("; ")
             : "Kesalahan server";
-      item = { client_ref: cmd.client_ref, status: "gagal", kode, error: pesan };
+      item = {
+        client_ref: cmd.client_ref,
+        status: "gagal",
+        kode,
+        error: pesan,
+        ...(e instanceof SyncGagal ? { sebab: e.sebab, data: e.data } : {}),
+      };
       simpanStatus = "gagal";
       simpanKode = kode;
-      simpanHasil = { error: pesan };
+      simpanHasil =
+        e instanceof SyncGagal ? { error: pesan, sebab: e.sebab, data: e.data } : { error: pesan };
     }
 
     // 2) Catat hasil ke ledger (exactly-once). onConflictDoNothing melindungi balapan retry.
