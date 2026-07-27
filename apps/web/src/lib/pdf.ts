@@ -7,6 +7,20 @@
  *
  * CSS harus DI-SCOPE (mis. semua selektor diawali `.dok`) supaya tidak
  * mengubah tampilan halaman aplikasi saat elemen sementara ditempel ke DOM.
+ *
+ * PENTING — kenapa ada DUA lapis div:
+ * html2pdf tidak merender elemen yang kita berikan di tempatnya. Ia MENGKLONING
+ * elemen itu (`deepCloneBasic`, atribut `style` ikut tersalin) ke dalam
+ * container tersembunyinya sendiri, lalu html2canvas memotret CONTAINER-nya.
+ * Jadi gaya penyembunyi apa pun yang menempel pada elemen yang kita serahkan
+ * akan ikut hidup di dalam container itu: `position:fixed;left:-10000px`
+ * membuat kloningnya melayang ke luar container, container jadi tanpa isi, dan
+ * hasilnya PDF satu halaman KOSONG (±3 KB, hanya gambar putih).
+ *
+ * Karena itu penyembunyian dipasang di `luar` dan yang diserahkan ke html2pdf
+ * adalah `isi` yang bersih tanpa gaya posisi. `isi` tetap terpasang di DOM
+ * (lewat `luar`) supaya gambar sempat termuat dan gaya terkomputasi tersedia
+ * saat pengkloningan.
  */
 export async function unduhPdf(opts: {
   /** inner HTML dokumen (konten yang ingin dicetak) */
@@ -18,15 +32,22 @@ export async function unduhPdf(opts: {
   /** lebar kanvas render (px), default 680 */
   lebarPx?: number;
 }): Promise<void> {
-  const wrap = document.createElement("div");
-  // render di luar layar tetapi tetap ter-layout agar html2canvas bisa mengukur
-  wrap.style.position = "fixed";
-  wrap.style.left = "-10000px";
-  wrap.style.top = "0";
-  wrap.style.width = `${opts.lebarPx ?? 680}px`;
-  wrap.style.background = "#ffffff";
-  wrap.innerHTML = `<style>${opts.css}</style>${opts.bodyHtml}`;
-  document.body.appendChild(wrap);
+  // Pembungkus penyembunyi — TIDAK ikut dikloning, jadi aman diberi gaya posisi.
+  const luar = document.createElement("div");
+  luar.style.position = "fixed";
+  luar.style.left = "-10000px";
+  luar.style.top = "0";
+  luar.style.width = `${opts.lebarPx ?? 680}px`;
+  luar.style.background = "#ffffff";
+
+  // Elemen yang diserahkan ke html2pdf — sengaja TANPA gaya posisi/ukuran,
+  // agar kloningnya mengalir mengikuti lebar halaman A4 di container html2pdf.
+  const isi = document.createElement("div");
+  isi.innerHTML = `<style>${opts.css}</style>${opts.bodyHtml}`;
+
+  luar.appendChild(isi);
+  document.body.appendChild(luar);
+
   const nama =
     opts.namaBerkas
       .replace(/[^\w\d.-]+/g, "-")
@@ -42,9 +63,9 @@ export async function unduhPdf(opts: {
         html2canvas: { scale: 2, backgroundColor: "#ffffff", useCORS: true },
         jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
       })
-      .from(wrap)
+      .from(isi)
       .save();
   } finally {
-    wrap.remove();
+    luar.remove();
   }
 }

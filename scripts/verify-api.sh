@@ -4771,8 +4771,9 @@ echo "== 132. Transfer Stok antar lokasi (faktur TF- multi bahan) =="
 # saldo, Penerimaan, dan Kartu Stok otomatis konsisten. Berdampingan dengan
 # "Kirim dari stok CK" (jalur Permintaan, nomor PR-).
 # Pilih cabang ASAL yang benar-benar punya stok siap kirim.
+# ASAL wajib Central Kitchen: sejak §140 hanya CK yang boleh MENGIRIM transfer.
 ASAL132=""; SALDO132=""
-for B132 in "$CK52_UTAMA" "$CB46_ID" "$KBR128"; do
+for B132 in $(api "$OWNER" GET /cabang | jq -r '[.[]|select(.is_active and .tipe=="central_kitchen")][].id'); do
   R132=$(api "$OWNER" GET "/transfer-stok/saldo?branch_id=$B132")
   if [ "$(echo "$R132" | jq '.rows|length')" -gt 0 ]; then
     ASAL132="$B132"; SALDO132="$R132"; break
@@ -5249,6 +5250,56 @@ cek "GET /menu/ketersediaan TIDAK ber-ETag (berubah tiap penjualan)" "V == 1" \
   "$([ -z "$(etag_of "$OWNER" /menu/ketersediaan)" ] && echo 1 || echo 0)"
 cek "GET /menu tanpa If-None-Match tetap 200 berbadan (klien lama)" "V == 1" \
   "$(api "$OWNER" GET /menu | jq 'length>0|if . then 1 else 0 end')"
+echo "== 140. Transfer stok: HANYA Central Kitchen yang boleh mengirim =="
+# Arah stok satu pintu — cabang (termasuk divisi kitchen/bar) hanya MELIHAT apa
+# yang sedang dikirim ke sana. Ditegakkan pada ASAL, bukan pada peran, supaya
+# owner sekalipun tak bisa mengirim antar-toko lewat jalur ini.
+CK140=$(api "$OWNER" GET /cabang | jq -r '[.[]|select(.is_active and .tipe=="central_kitchen")][0].id')
+TOKO140=$(api "$OWNER" GET /cabang | jq -r '[.[]|select(.is_active and .tipe=="store")][0].id')
+TOKO140B=$(api "$OWNER" GET /cabang | jq -r '[.[]|select(.is_active and .tipe=="store")][1].id')
+ING140=$(api "$OWNER" GET "/transfer-stok/saldo?branch_id=$TOKO140" | jq -r '.rows[0].ingredient_id // ""')
+cek "dasar uji: ada CK + dua toko" "V == 1" \
+  "$([ -n "$CK140" ] && [ -n "$TOKO140" ] && [ -n "$TOKO140B" ] && echo 1 || echo 0)"
+
+# Owner pun ditolak saat ASAL bukan CK — inti aturannya.
+if [ -n "$ING140" ]; then
+  cek "owner kirim transfer DARI toko → 403" "V == 403" \
+    "$(status_code_body "$OWNER" POST /transfer-stok "{\"asal_branch_id\":\"$TOKO140\",\"tujuan_branch_id\":\"$TOKO140B\",\"items\":[{\"ingredient_id\":\"$ING140\",\"qty\":1}]}")"
+else
+  # toko tanpa stok siap kirim: pakai bahan mana pun — guard ASAL dinilai
+  # SEBELUM pemeriksaan saldo, jadi hasilnya tetap 403 (bukan 400 stok kurang).
+  ING140X=$(api "$OWNER" GET /bahan?ringkas=1 | jq -r '[.[]|select(.lacak_stok)][0].id')
+  cek "owner kirim transfer DARI toko → 403" "V == 403" \
+    "$(status_code_body "$OWNER" POST /transfer-stok "{\"asal_branch_id\":\"$TOKO140\",\"tujuan_branch_id\":\"$TOKO140B\",\"items\":[{\"ingredient_id\":\"$ING140X\",\"qty\":1}]}")"
+fi
+
+# Divisi produksi cabang: bar & kitchen tak boleh mengirim sama sekali.
+BRC140=$(api "$TBAR" GET /auth/me | jq -r '.branch.id // .branch_id // ""')
+ING140B=$(api "$TBAR" GET /transfer-stok/saldo | jq -r '.rows[0].ingredient_id // ""')
+if [ -n "$BRC140" ] && [ -n "$ING140B" ]; then
+  cek "bar kirim transfer dari cabangnya → 403" "V == 403" \
+    "$(status_code_body "$TBAR" POST /transfer-stok "{\"asal_branch_id\":\"$BRC140\",\"tujuan_branch_id\":\"$CK140\",\"items\":[{\"ingredient_id\":\"$ING140B\",\"qty\":1}]}")"
+fi
+cek "bar kirim transfer DARI CK (bukan cabangnya) → 403" "V == 403" \
+  "$(status_code_body "$TBAR" POST /transfer-stok "{\"asal_branch_id\":\"$CK140\",\"tujuan_branch_id\":\"$TOKO140\",\"items\":[{\"ingredient_id\":\"$ING132\",\"qty\":1}]}")"
+
+# MELIHAT tetap terbuka untuk semua peran cabang — itu gunanya halaman ini.
+cek "bar boleh MELIHAT daftar transfer (200)" "V == 200" "$(status_code "$TBAR" GET /transfer-stok)"
+cek "kitchen boleh MELIHAT daftar transfer (200)" "V == 200" "$(status_code "$TKIT" GET /transfer-stok)"
+cek "kasir boleh MELIHAT daftar transfer (200)" "V == 200" "$(status_code "$REISS105" GET /transfer-stok)"
+cek "daftar transfer utk bar hanya yang menyangkut cabangnya" "V == 1" \
+  "$(api "$TBAR" GET /transfer-stok | jq --arg b "$BRC140" '[.rows[]|select(.asal_branch_id!=$b and .tujuan_branch_id!=$b)]|length==0|if . then 1 else 0 end')"
+
+# Regresi nol: CK → cabang tetap jalan. Saldo dibaca ULANG di sini — §132 sudah
+# memakai sebagian stok CK, jadi memakai ING132 apa adanya bisa gagal 400 karena
+# stok kurang dan menyamar seolah aturan barunya yang menolak.
+SLD140=$(api "$OWNER" GET "/transfer-stok/saldo?branch_id=$CK140")
+ING140C=$(echo "$SLD140" | jq -r '[.rows[]|select((.saldo - .dalam_jalan) >= 1)][0].ingredient_id // ""')
+cek "dasar uji: CK masih punya bahan siap kirim" "V == 1" \
+  "$([ -n "$ING140C" ] && echo 1 || echo 0)"
+cek "regresi nol: CK → cabang tetap 201" "V == 201" \
+  "$(status_code_body "$OWNER" POST /transfer-stok "{\"asal_branch_id\":\"$CK140\",\"tujuan_branch_id\":\"$TOKO140\",\"items\":[{\"ingredient_id\":\"$ING140C\",\"qty\":1}]}")"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

@@ -173,10 +173,11 @@ export default function App() {
               <Route path="/absen" element={<AbsenPage />} />
               {/* Beranda ringkas peran TIM/KITCHEN (CK: beli/produksi belum selesai; toko: barang datang) */}
               {(isTim || isKitchen || isBar) && <Route path="/beranda" element={<TimBerandaPage />} />}
-              {/* Transfer stok antar lokasi — semua peran kecuali kasir
-                  (server: owner/admin/tim/kitchen/bar; peran terkunci hanya
-                  boleh mengirim dari cabangnya sendiri) */}
-              {!isKasir && <Route path="/transfer-stok" element={<TransferStokPage />} />}
+              {/* Transfer stok — DILIHAT semua peran (kasir termasuk: perlu tahu
+                  barang yang sedang menuju cabangnya). Yang boleh MENGIRIM
+                  hanya Central Kitchen; halaman menyembunyikan formulirnya di
+                  luar CK dan server menolak asal non-CK dengan 403. */}
+              <Route path="/transfer-stok" element={<TransferStokPage />} />
               {/* printer & meja — bukan peran tim/kitchen/bar */}
               {!isTim && !isKitchen && !isBar && (
                 <>

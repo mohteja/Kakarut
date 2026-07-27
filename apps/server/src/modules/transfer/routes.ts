@@ -260,6 +260,15 @@ export const transferRoutes = new Hono<AppEnv>()
     }
     const asal = await pastikanCabangStok(auth.company_id!, body.asal_branch_id, "Asal");
     const tujuan = await pastikanCabangStok(auth.company_id!, body.tujuan_branch_id, "Tujuan");
+    // PENGIRIM HANYA CENTRAL KITCHEN. Cabang (termasuk divisi kitchen/bar) cuma
+    // MELIHAT kiriman yang menuju ke sana — arah stok satu pintu supaya asal
+    // barang selalu bisa ditelusuri ke CK. Dicek pada ASAL, bukan pada peran,
+    // agar owner/admin pun tak bisa mengirim antar-toko lewat jalur ini.
+    if (asal.tipe !== "central_kitchen") {
+      throw new HTTPException(403, {
+        message: `Transfer stok hanya bisa dikirim DARI Central Kitchen — "${asal.nama}" bukan Central Kitchen`,
+      });
+    }
 
     // Gabungkan baris bahan yang sama (qty dijumlah) → satu baris per bahan.
     const qtyByIng = new Map<string, number>();
