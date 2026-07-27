@@ -90,6 +90,30 @@ export const metodeBayarEnum = pgEnum("metode_bayar", ["tunai", "qris", "transfe
 export const attendanceTipeEnum = pgEnum("attendance_tipe", ["masuk", "keluar"]);
 
 /**
+ * Ketidakhadiran yang DISENGAJA — dua jalur karena artinya beda di rekap:
+ * `cuti` = jatah/keperluan pribadi, `libur` = hari tidak bekerja yang memang
+ * disepakati. Keduanya BUKAN alpa. `jenis` selalu turunan `kategori` (server
+ * yang menurunkannya lewat `jenisKategori()` di @kakarut/shared) — klien tak
+ * pernah mengirimnya, jadi mustahil ada "libur" berkategori "melahirkan".
+ */
+export const pengajuanJenisEnum = pgEnum("pengajuan_jenis", ["cuti", "libur"]);
+export const pengajuanKategoriEnum = pgEnum("pengajuan_kategori", [
+  "tahunan",
+  "sakit",
+  "izin",
+  "melahirkan",
+  "penting",
+  "mingguan",
+  "tukar_jadwal",
+  "tanggal_merah",
+]);
+export const pengajuanStatusEnum = pgEnum("pengajuan_status", [
+  "menunggu",
+  "disetujui",
+  "ditolak",
+]);
+
+/**
  * Jenis entri buku dana faktur: 'cair' = pencairan RAB; 'tambahan' = dana
  * ekstra saat realisasi lebih besar (catatan: dari mana uangnya); 'kembali' =
  * sisa dana saat realisasi lebih kecil (catatan: di siapa uangnya).
@@ -906,6 +930,58 @@ export const attendances = pgTable(
   (t) => [
     index("attendances_company_branch_date_idx").on(t.companyId, t.branchId, t.attendDate),
     index("attendances_user_date_idx").on(t.userId, t.attendDate),
+  ],
+);
+
+/**
+ * PENGAJUAN CUTI / LIBUR karyawan. Sebelum ini, ketidakhadiran = tidak ada
+ * baris di `attendances` — tak terbedakan antara alpa, cuti, atau libur yang
+ * memang disepakati. Baris di sini yang berstatus `disetujui` itulah yang
+ * mengubah sebuah tanggal dari "alpa" menjadi "cuti"/"libur" pada rekap absen.
+ *
+ * Hanya yang DISETUJUI berpengaruh: pengajuan `menunggu`/`ditolak` tak pernah
+ * mengurangi hitungan tidak hadir.
+ */
+export const leaveRequests = pgTable(
+  "leave_requests",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    /** pemohon */
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** cabang pemohon saat mengajukan; null utk owner/admin tanpa cabang */
+    branchId: uuid("branch_id").references(() => branches.id),
+    jenis: pengajuanJenisEnum("jenis").notNull(),
+    kategori: pengajuanKategoriEnum("kategori").notNull(),
+    /** rentang INKLUSIF; satu hari → mulai == selesai */
+    tanggalMulai: date("tanggal_mulai").notNull(),
+    tanggalSelesai: date("tanggal_selesai").notNull(),
+    alasan: text("alasan"),
+    /** bukti pendukung (mis. surat dokter) — URL hasil POST /upload?tujuan=bukti */
+    lampiranUrl: text("lampiran_url"),
+    status: pengajuanStatusEnum("status").notNull().default("menunggu"),
+    /** owner/admin yang memutuskan; null selama masih menunggu */
+    diputusOlehUserId: uuid("diputus_oleh_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    diputusPada: timestamp("diputus_pada", { withTimezone: true }),
+    /** wajib terisi saat status "ditolak" (ditegakkan di route) */
+    alasanTolak: text("alasan_tolak"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("leave_requests_company_status_idx").on(t.companyId, t.status),
+    index("leave_requests_user_mulai_idx").on(t.userId, t.tanggalMulai),
+    // Rekap sebulan menyapu rentang yang BERTINDIH dengan bulan itu.
+    index("leave_requests_company_rentang_idx").on(
+      t.companyId,
+      t.tanggalMulai,
+      t.tanggalSelesai,
+    ),
   ],
 );
 

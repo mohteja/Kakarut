@@ -575,6 +575,13 @@
       "when": 1785163366000,
       "tag": "0081_whole_gressill",
       "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1785192613181,
+      "tag": "0082_jittery_next_avengers",
+      "breakpoints": true
     }
   ]
 }

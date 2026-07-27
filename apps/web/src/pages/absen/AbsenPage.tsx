@@ -5,6 +5,7 @@ import { jarakMeter, type AbsenResult, type AbsensiRow } from "@kakarut/shared";
 import { Card, ErrorText, PageTitle, btnPrimary, btnSecondary, inputClass } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { useBranch, type Cabang } from "../../context/BranchContext";
+import { PengajuanCutiSection } from "../../components/PengajuanCutiSection";
 import { api } from "../../lib/api";
 import { formatWaktu } from "../../lib/format";
 
@@ -505,6 +506,10 @@ export function AbsenPage() {
           )}
         </Card>
       </div>
+
+      {/* Pengajuan cuti & libur — semua peran boleh mengajukan; owner/admin
+          yang menyetujui dari halaman Rekap Absen. */}
+      <PengajuanCutiSection />
     </div>
   );
 }

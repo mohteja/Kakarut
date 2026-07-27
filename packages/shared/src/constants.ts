@@ -43,3 +43,64 @@ export type ProduksiDi = "ck" | "cabang";
  * saat produksi_di="ck".
  */
 export type DivisiProduksi = "kitchen" | "bar";
+
+/* ===== Pengajuan cuti & libur karyawan ===== */
+
+/**
+ * Dua jalur ketidakhadiran yang DISENGAJA. Dipisah karena artinya beda di
+ * rekap: `cuti` = jatah/keperluan pribadi (dihitung tersendiri untuk melihat
+ * pemakaian jatah), `libur` = hari tidak bekerja yang memang disepakati
+ * (mingguan/tukar jadwal/tanggal merah). Keduanya sama-sama BUKAN alpa.
+ */
+export type PengajuanJenis = "cuti" | "libur";
+
+export type PengajuanKategori =
+  | "tahunan"
+  | "sakit"
+  | "izin"
+  | "melahirkan"
+  | "penting"
+  | "mingguan"
+  | "tukar_jadwal"
+  | "tanggal_merah";
+
+export type PengajuanStatus = "menunggu" | "disetujui" | "ditolak";
+
+/**
+ * SUMBER TUNGGAL kategori pengajuan — dipakai bersama oleh dropdown di web,
+ * validasi zod di server, dan penurunan `jenis` dari `kategori`. Klien TIDAK
+ * pernah mengirim `jenis`: server selalu menurunkannya dari sini, sehingga
+ * mustahil ada baris "libur" berkategori "melahirkan".
+ */
+export const KATEGORI_PENGAJUAN: {
+  kode: PengajuanKategori;
+  jenis: PengajuanJenis;
+  label: string;
+  emoji: string;
+}[] = [
+  { kode: "tahunan", jenis: "cuti", label: "Cuti Tahunan", emoji: "🌴" },
+  { kode: "sakit", jenis: "cuti", label: "Sakit", emoji: "🤒" },
+  { kode: "izin", jenis: "cuti", label: "Izin", emoji: "📝" },
+  { kode: "melahirkan", jenis: "cuti", label: "Melahirkan", emoji: "🍼" },
+  { kode: "penting", jenis: "cuti", label: "Keperluan Penting", emoji: "🙏" },
+  { kode: "mingguan", jenis: "libur", label: "Libur Mingguan", emoji: "🗓" },
+  { kode: "tukar_jadwal", jenis: "libur", label: "Tukar Jadwal", emoji: "🔁" },
+  { kode: "tanggal_merah", jenis: "libur", label: "Tanggal Merah", emoji: "🎉" },
+];
+
+/** Semua kode kategori — untuk `z.enum()` di server. */
+export const KODE_KATEGORI_PENGAJUAN = KATEGORI_PENGAJUAN.map((k) => k.kode) as [
+  PengajuanKategori,
+  ...PengajuanKategori[],
+];
+
+/** Turunkan jenis (cuti/libur) dari kategori. Kategori tak dikenal → "cuti". */
+export function jenisKategori(kode: PengajuanKategori): PengajuanJenis {
+  return KATEGORI_PENGAJUAN.find((k) => k.kode === kode)?.jenis ?? "cuti";
+}
+
+/** Label tampilan kategori, mis. "🤒 Sakit". */
+export function labelKategoriPengajuan(kode: PengajuanKategori): string {
+  const k = KATEGORI_PENGAJUAN.find((x) => x.kode === kode);
+  return k ? `${k.emoji} ${k.label}` : kode;
+}

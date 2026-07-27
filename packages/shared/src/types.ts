@@ -3,6 +3,9 @@ import type {
   DivisiProduksi,
   JenisPengadaan,
   MenuTipe,
+  PengajuanJenis,
+  PengajuanKategori,
+  PengajuanStatus,
   ProduksiDi,
   StokStatus,
   UserRole,
@@ -1451,6 +1454,88 @@ export interface AbsensiRow {
   foto_masuk: string | null;
   /** foto bukti saat cap keluar terakhir (URL) */
   foto_keluar: string | null;
+}
+
+/* ===== Pengajuan cuti & libur + rekap absen bulanan ===== */
+
+/**
+ * Satu pengajuan cuti/libur. `jenis` SELALU turunan `kategori` (server yang
+ * menurunkannya lewat `jenisKategori()`) — klien tak pernah mengirimnya.
+ */
+export interface PengajuanRow {
+  id: string;
+  user_id: string;
+  nama: string;
+  employee_code: string | null;
+  /** cabang pemohon saat mengajukan; null untuk owner/admin tanpa cabang */
+  cabang: string | null;
+  jenis: PengajuanJenis;
+  kategori: PengajuanKategori;
+  /** YYYY-MM-DD; satu hari → mulai == selesai */
+  tanggal_mulai: string;
+  tanggal_selesai: string;
+  /** jumlah hari kalender yang dicakup (inklusif) */
+  jumlah_hari: number;
+  alasan: string | null;
+  /** bukti pendukung (mis. surat dokter) — hasil POST /upload?tujuan=bukti */
+  lampiran_url: string | null;
+  status: PengajuanStatus;
+  /** wajib terisi bila status "ditolak" */
+  alasan_tolak: string | null;
+  /** nama owner/admin yang memutuskan; null selama masih "menunggu" */
+  diputus_oleh: string | null;
+  diputus_pada: string | null;
+  created_at: string;
+}
+
+/**
+ * Status satu tanggal pada rekap. `kosong` = di LUAR jendela hitung (tanggal
+ * belum lewat, sebelum karyawan bergabung, atau setelah ia diarsipkan) — tidak
+ * pernah dihitung sebagai apa pun.
+ */
+export type RekapHariStatus = "hadir" | "cuti" | "libur" | "alpa" | "kosong";
+
+/** Isi satu kolom tanggal pada rekap absen. */
+export interface RekapAbsenHari {
+  tanggal: string;
+  status: RekapHariStatus;
+  /** terisi hanya bila status cuti/libur */
+  kategori: PengajuanKategori | null;
+  /** jam masuk pertama (ISO); null bila tak ada cap masuk */
+  masuk: string | null;
+  /** jam keluar terakhir (ISO); null bila belum/tak ada cap keluar */
+  keluar: string | null;
+}
+
+/** Satu baris (satu karyawan) pada rekap absen bulanan. */
+export interface RekapAbsenRow {
+  user_id: string;
+  nama: string;
+  employee_code: string | null;
+  role: UserRole | null;
+  cabang: string | null;
+  hadir: number;
+  tidak_hadir: number;
+  cuti: number;
+  libur: number;
+  /** satu entri per tanggal dalam bulan itu, urut tanggal 1..akhir */
+  harian: RekapAbsenHari[];
+}
+
+/** Rekap absen sebulan (GET /absensi/rekap) — khusus owner/admin. */
+export interface RekapAbsenDto {
+  /** YYYY-MM */
+  bulan: string;
+  dari: string;
+  sampai: string;
+  /** jumlah hari dalam bulan itu */
+  hari: number;
+  /**
+   * Jumlah hari yang SUDAH lewat (≤ hari ini) — pembagi yang benar untuk
+   * persentase kehadiran; hari yang belum datang tak pernah dihitung.
+   */
+  hari_terhitung: number;
+  rows: RekapAbsenRow[];
 }
 
 /** Laporan pengeluaran pembelian bahan baku (faktur beli terkonfirmasi) per rentang tanggal. */

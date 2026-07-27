@@ -149,6 +149,15 @@ export function Layout() {
       .filter((r) => r.status === "menunggu" || r.status === "diproses")
       .map((r) => r.faktur_id ?? r.id),
   ).size;
+  // Pengajuan cuti/libur yang menunggu ACC → badge di nav "Rekap Absen".
+  // Hanya manajemen yang memutuskan, jadi hanya mereka yang perlu di-query.
+  const { data: pengajuanNav } = useQuery({
+    queryKey: ["pengajuan", "menunggu"],
+    queryFn: () => api<{ id: string }[]>("/pengajuan?status=menunggu"),
+    enabled: !!auth && !auth.user.is_super_admin && manajemenGuard,
+    refetchInterval: 60_000,
+  });
+  const pengajuanMenunggu = (pengajuanNav ?? []).length;
 
   if (!auth) return null;
 
@@ -323,6 +332,14 @@ export function Layout() {
               {isManajemen && penuh && (
                 <NavLink to="/laporan" className={linkClass}>
                   📊 Laporan
+                </NavLink>
+              )}
+              {/* Rekap absen bulanan + ACC cuti/libur — Kantor saja, jadi tak
+                  perlu didaftarkan di BOLEH_STORE/BOLEH_CK. */}
+              {isManajemen && penuh && (
+                <NavLink to="/rekap-absen" className={navFlex}>
+                  <span>🗓 Rekap Absen</span>
+                  {badgeOranye(pengajuanMenunggu)}
                 </NavLink>
               )}
               {/* Beranda ringkas peran TIM/KITCHEN/BAR (CK & toko): notifikasi + tugas hari ini */}

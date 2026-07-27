@@ -23,6 +23,7 @@ import { VerifikasiEmailPage } from "./pages/VerifikasiEmailPage";
 // Leaflet/peta, pemindai QR, dan parser CSV ikut dipecah ke chunk halamannya).
 const PrinterPage = lazy(() => import("./pages/pengaturan/PrinterPage").then((m) => ({ default: m.PrinterPage })));
 const AbsenPage = lazy(() => import("./pages/absen/AbsenPage").then((m) => ({ default: m.AbsenPage })));
+const RekapAbsenPage = lazy(() => import("./pages/absen/RekapAbsenPage").then((m) => ({ default: m.RekapAbsenPage })));
 const ProfilPage = lazy(() => import("./pages/profil/ProfilPage").then((m) => ({ default: m.ProfilPage })));
 const BahanPage = lazy(() => import("./pages/bahan/BahanPage").then((m) => ({ default: m.BahanPage })));
 const DetailBahanPage = lazy(() => import("./pages/bahan/DetailBahanPage").then((m) => ({ default: m.DetailBahanPage })));
@@ -236,6 +237,7 @@ export default function App() {
                   <Route path="/stok/tambah-dari-menu" element={<TambahStokDariMenuPage />} />
                   <Route path="/stok/awal" element={<StokAwalPage />} />
                   <Route path="/permintaan-stok" element={<PermintaanStokPage />} />
+                  <Route path="/rekap-absen" element={<RekapAbsenPage />} />
                   <Route path="/laporan" element={<LaporanPage />} />
                   <Route path="/laporan/pembelian" element={<LaporanPembelianPage />} />
                   <Route path="/laporan/menu-laris" element={<LaporanMenuLarisPage />} />

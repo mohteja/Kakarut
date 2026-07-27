@@ -41,6 +41,7 @@ import { printRoutes } from "./modules/print/routes";
 import { profilRoutes } from "./modules/profil/routes";
 import { pembelianRoutes, produksiRoutes } from "./modules/produksi/routes";
 import { penerimaanRoutes } from "./modules/penerimaan/routes";
+import { pengajuanRoutes } from "./modules/pengajuan/routes";
 import { rekomendasiRoutes } from "./modules/rekomendasi/routes";
 import { sampahRoutes } from "./modules/sampah/routes";
 import { shiftRoutes } from "./modules/shift/routes";
@@ -124,6 +125,10 @@ export function createApp() {
   // digerbang per-rute di modulnya). Tim, kitchen & bar ikut agar bisa absen
   // sendiri.
   tenant.use("/absensi/*", requireRole("owner", "admin", "cashier", "tim", "kitchen", "bar"));
+  // Pengajuan cuti/libur: SEMUA peran boleh mengajukan (gerbang sama dengan
+  // absensi). Yang boleh MEMUTUSKAN (ACC/tolak) hanya owner/admin — digerbang
+  // inline pada PATCH di modulnya, bukan di sini.
+  tenant.use("/pengajuan/*", requireRole("owner", "admin", "cashier", "tim", "kitchen", "bar"));
   // TRANSFER STOK: yang MENGIRIM hanya Central Kitchen — ditegakkan di modulnya
   // pada cabang ASAL (403 bila bukan CK), jadi bukan urusan gerbang peran ini.
   // Gerbang di sini sengaja longgar sampai kasir: semua peran cabang perlu
@@ -159,6 +164,7 @@ export function createApp() {
     .route("/sync", syncRoutes)
     // absensi karyawan (stasiun pindai) — hanya admin/kasir (digerbang di atas)
     .route("/absensi", absensiRoutes)
+    .route("/pengajuan", pengajuanRoutes)
     // profil akun sendiri (identitas + QR absen + ganti password) — semua peran
     .route("/profil", profilRoutes)
     // pencarian member ringan untuk autocomplete kasir — semua peran
