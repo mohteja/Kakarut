@@ -5241,6 +5241,23 @@ cek "Cache-Control ikut terbawa pada respons 304" "V == 1" \
 cek "GET /menu membawa Vary: Authorization" "V == 1" \
   "$([ "$(hdr_of "$OWNER" /menu 'Vary')" = "Authorization" ] && echo 1 || echo 0)"
 
+# Build id WAJIB ikut pada 304. Middleware etag membangun respons 304 dari nol
+# dan membuang header non-retained; kalau X-Kakarut-Build ikut hilang, browser
+# memakai ulang nilai LAMA dari cache-nya → klien mengira ada versi baru
+# padahal barusan diperbarui, dan dialog "Ada pembaruan aplikasi" muncul lagi
+# tepat setelah dimuat ulang, berputar tanpa henti. Ini pernah terjadi.
+B139_200=$(hdr_of "$OWNER" /cabang 'X-Kakarut-Build')
+B139_304=$(curl -s -o /dev/null -D - -X GET "$BASE/api/cabang" \
+  -H "Authorization: Bearer $OWNER" -H "If-None-Match: $(etag_of "$OWNER" /cabang)" \
+  | tr -d '\r' | sed -n 's/^X-Kakarut-Build: *//Ip')
+if [ -z "$B139_200" ]; then
+  # server tanpa dist (CI job API-only) tak punya build id — tak ada yang diuji
+  ok "304: build id — dilewati, server tanpa dist frontend"
+else
+  cek "304 membawa X-Kakarut-Build sama dgn 200 (anti-loop 'Ada pembaruan')" "V == 1" \
+    "$([ "$B139_200" = "$B139_304" ] && echo 1 || echo 0)"
+fi
+
 # Regresi nol: hanya GET yang disentuh, dan sub-jalur tidak ikut tercakup.
 cek "POST /kategori tetap 201 (middleware hanya GET)" "V == 201" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/kategori" \
