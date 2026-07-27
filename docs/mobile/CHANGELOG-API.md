@@ -72,6 +72,35 @@ kolom nomor — tidak ada "SH-0142" di sistem ini. Shift dikenali lewat `id` +
 `dibuka_pada`/`ditutup_pada`. Kalau kalian butuh label pendek, bilang; itu
 fitur baru (penomoran shift), bukan penambahan field.
 
+### 🟢 BARU — `shift_buka` bisa diantre offline
+
+Konsekuensi dari merapatkan snapshot jadi 6 jam: pemadaman panjang berarti nol
+transaksi, karena `POST /shift/buka` online-only. `shift_buka` kini tipe sync:
+
+```jsonc
+{ "client_ref": "…", "tipe": "shift_buka", "waktu": "2026-03-10T01:00:00Z",
+  "payload": { "modal_awal": 250000 } }   // branch_id opsional
+```
+
+`waktu` jadi **`opened_at`** — bukan jam sinkron. Shift yang dibuka 08.00 lalu
+disinkron 20.00 membuat seluruh penjualan hari itu jatuh di dalam jendelanya
+secara wajar, **tanpa** menyentuh toleransi 6 jam sama sekali. Itu jalur yang
+kami sarankan untuk pemadaman panjang.
+
+- **Gerbang absen tetap ada**, dinilai pada **tanggal bisnis `waktu`** (bukan
+  hari sinkron). Kirim `absen_saya` lebih dulu dalam batch yang sama — perintah
+  dieksekusi berurutan. Belum absen di tanggal itu → **gagal 400**.
+- **Sudah ada shift terbuka** (manajer membukanya lewat web) → **tetap `ok`**,
+  membalas shift yang ADA + `data.sudah_terbuka:true`, tidak membuat shift
+  kedua. Sengaja tidak digagalkan supaya penjualan yang bersandar padanya tak
+  kehilangan tempat berpijak.
+- `data` = DTO `Shift` + `sudah_terbuka`.
+
+**`shift_tutup` TIDAK dibuka untuk sync** — `closed_at` memakai jam server,
+jadi menutup lewat sync akan mencatat jam yang salah. Shift yang dibuka offline
+tetap terbuka sampai ditutup online; itu justru lebih benar karena jam tutup
+mengikuti kapan kasir benar-benar mengakhiri.
+
 ### 🟡 PERLU DICEK — 409 kini membawa `sebab` + `data`
 
 `SyncItemResult` bertambah **`sebab?: string`**. Saat `penjualan` benar-benar

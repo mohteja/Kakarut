@@ -11,6 +11,7 @@ import { tanggalDi } from "../../lib/time";
 import { pastikanCabang, terikatCabang, type AppEnv } from "../../middleware/auth";
 import { lewatiRateLimit, rateLimit } from "../../middleware/rateLimit";
 import { createSale } from "../penjualan/service";
+import { bukaShift } from "../shift/routes";
 import { SaleBody } from "../penjualan/routes";
 import { catatAbsen, cekRadius, ClockBody, SelfBody } from "../absensi/routes";
 
@@ -96,6 +97,7 @@ const SyncBody = z.object({
       z.object({
         client_ref: z.string().uuid(),
         tipe: z.enum([
+          "shift_buka",
           "penjualan",
           "absen_saya",
           "absen_stasiun",
@@ -199,6 +201,42 @@ function pisahParam<T extends string>(
 // ---------------------------------------------------------------------------
 // FASE 1 — eksekusi langsung lewat service (waktu = timestamp kejadian)
 // ---------------------------------------------------------------------------
+
+/**
+ * shift_buka — kasir membuka kasir saat perangkat offline.
+ *
+ * `waktu` jadi `opened_at`, jadi shift yang dibuka 08.00 lalu disinkron 20.00
+ * membuat SELURUH penjualan hari itu jatuh di dalam jendelanya secara wajar —
+ * tidak bersandar pada toleransi transaksi susulan sama sekali. Ini yang
+ * membuat pemadaman panjang (mati listrik seharian, outlet tanpa sinyal) tidak
+ * lagi berarti nol transaksi.
+ *
+ * Gerbang absen TIDAK dilewati, hanya dinilai pada tanggal bisnis `waktu`:
+ * `absen_saya` juga bisa diantre offline dan perintah dalam satu batch
+ * dieksekusi berurutan, jadi absen yang dikirim lebih dulu sudah tercatat saat
+ * perintah ini jalan.
+ *
+ * Sudah ada shift terbuka (mis. manajer membukanya lewat web) → tetap `ok`
+ * dengan `sudah_terbuka:true`, bukan gagal. Menggagalkannya akan membuat
+ * penjualan yang bersandar pada shift ini kehilangan tempat berpijak.
+ */
+const execShiftBuka: Eksekutor = async ({ auth }, payload, waktu) => {
+  if (auth.role !== "cashier") {
+    throw new HTTPException(403, { message: "Hanya kasir yang boleh membuka shift" });
+  }
+  const p = z
+    .object({ branch_id: z.string().uuid().nullish(), modal_awal: z.number().nonnegative().default(0) })
+    .parse(payload ?? {});
+  const branchId = await resolveCabangSync(auth, p.branch_id);
+  const { shift, sudahTerbuka } = await bukaShift({
+    companyId: auth.company_id!,
+    branchId,
+    userId: auth.sub,
+    modalAwal: p.modal_awal,
+    waktu,
+  });
+  return { kode: 201, data: { ...shift, sudah_terbuka: sudahTerbuka } };
+};
 
 /**
  * penjualan — kasir; bukukan ke shift kasir yang tepat.
@@ -460,6 +498,7 @@ const execPenerimaanTolak: Eksekutor = ({ authHeader }, payload) => {
 };
 
 const EKSEKUTOR: Record<string, Eksekutor> = {
+  shift_buka: execShiftBuka,
   penjualan: execPenjualan,
   absen_saya: execAbsenSaya,
   absen_stasiun: execAbsenStasiun,

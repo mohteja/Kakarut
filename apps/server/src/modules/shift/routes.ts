@@ -110,6 +110,54 @@ async function transaksiWindow(
   }));
 }
 
+/**
+ * Buka shift kasir. SATU sumber untuk jalur online (`POST /shift/buka`) dan
+ * jalur sinkron offline (`tipe:"shift_buka"`) supaya guard-nya tak bisa
+ * menyimpang di antara keduanya.
+ *
+ * `waktu` = kapan shift BENAR-BENAR dibuka. Jalur online membiarkannya kosong
+ * (pakai jam server); jalur sinkron mengisinya dengan waktu kejadian, sehingga
+ * penjualan offline sepanjang hari itu jatuh di dalam jendela shift secara
+ * wajar — tanpa perlu bersandar pada toleransi transaksi susulan.
+ *
+ * Sudah ada shift terbuka di cabang ini → BUKAN error. Ada indeks unik
+ * `shifts_open_per_branch_uq` (satu shift terbuka per cabang), dan menggagalkan
+ * perintah sinkron berarti seluruh penjualan yang bersandar padanya kehilangan
+ * tempat berpijak — persis kelas bug yang baru saja ditutup. Kembalikan shift
+ * yang sudah ada dan tandai `sudah_terbuka`, biar pemanggil yang memberi tahu.
+ */
+export async function bukaShift(params: {
+  companyId: string;
+  branchId: string;
+  userId: string;
+  modalAwal: number;
+  waktu?: Date;
+}): Promise<{ shift: Shift; sudahTerbuka: boolean }> {
+  if (!(await sedangHadir(params.companyId, params.branchId, params.userId, params.waktu))) {
+    throw new HTTPException(400, { message: "Absen masuk dulu sebelum buka kasir" });
+  }
+  const [open] = await db
+    .select({ id: shifts.id })
+    .from(shifts)
+    .where(and(eq(shifts.branchId, params.branchId), isNull(shifts.closedAt)));
+  if (open) {
+    const [row] = await baseSelect().where(eq(shifts.id, open.id));
+    return { shift: await toDto(row), sudahTerbuka: true };
+  }
+  const [ins] = await db
+    .insert(shifts)
+    .values({
+      companyId: params.companyId,
+      branchId: params.branchId,
+      openedBy: params.userId,
+      modalAwal: params.modalAwal,
+      ...(params.waktu ? { openedAt: params.waktu } : {}),
+    })
+    .returning({ id: shifts.id });
+  const [row] = await baseSelect().where(eq(shifts.id, ins.id));
+  return { shift: await toDto(row), sudahTerbuka: false };
+}
+
 type ShiftJoinRow = {
   id: string;
   companyId: string;
@@ -326,33 +374,21 @@ export const shiftRoutes = new Hono<AppEnv>()
       if (terikatCabang(auth.role) && branchId !== auth.branch_id) {
         throw new HTTPException(403, { message: "Kasir hanya boleh membuka shift di cabangnya" });
       }
-      // Wajib ABSEN dulu: kasir harus sudah absen masuk (dan belum keluar) hari ini
-      // di cabangnya sebelum boleh buka kasir.
-      if (!(await sedangHadir(auth.company_id!, branchId, auth.sub))) {
-        throw new HTTPException(400, {
-          message: "Absen masuk dulu sebelum buka kasir",
-        });
-      }
-      const [open] = await db
-        .select({ id: shifts.id })
-        .from(shifts)
-        .where(and(eq(shifts.branchId, branchId), isNull(shifts.closedAt)));
-      if (open) {
+      const { shift, sudahTerbuka } = await bukaShift({
+        companyId: auth.company_id!,
+        branchId,
+        userId: auth.sub,
+        modalAwal: c.req.valid("json").modal_awal,
+      });
+      // Jalur online tetap MENOLAK bila sudah ada shift terbuka: kasir ada di
+      // depan layar dan harus tahu shift-nya bukan yang baru saja ia buka.
+      // (Jalur sinkron memilih sikap berbeda — lihat komentar di bukaShift.)
+      if (sudahTerbuka) {
         throw new HTTPException(400, {
           message: "Masih ada shift kasir yang terbuka di cabang ini",
         });
       }
-      const [ins] = await db
-        .insert(shifts)
-        .values({
-          companyId: auth.company_id!,
-          branchId,
-          openedBy: auth.sub,
-          modalAwal: c.req.valid("json").modal_awal,
-        })
-        .returning({ id: shifts.id });
-      const [row] = await baseSelect().where(eq(shifts.id, ins.id));
-      return c.json(await toDto(row), 201);
+      return c.json(shift, 201);
     },
   )
   .post(
