@@ -301,6 +301,12 @@ export function Layout() {
               <NavLink to="/superadmin/sistem" className={linkClass}>
                 🗄 Sistem &amp; Migrasi
               </NavLink>
+              <NavLink to="/superadmin/backup" className={linkClass}>
+                💾 Backup Database
+              </NavLink>
+              <NavLink to="/superadmin/error-log" className={linkClass}>
+                🚨 Log Galat
+              </NavLink>
               <NavLink to="/superadmin/email" className={linkClass}>
                 ✉️ Pengaturan Email
               </NavLink>

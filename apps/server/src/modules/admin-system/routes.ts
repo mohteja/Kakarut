@@ -13,8 +13,10 @@ import { getStorage } from "../upload/storage";
 import { getCadanganStorage } from "../upload/backup-storage";
 import {
   backupSuksesTerakhir,
+  jadwalBerikutnya,
   jalankanBackup,
   terapkanRetensi,
+  zonaWaktuCadangan,
 } from "../../lib/backup";
 import { getSmtpRow, kirimEmail, penyediaEmail, ujiKoneksiSmtp, type SmtpRow } from "../mail/service";
 import type { AppEnv } from "../../middleware/auth";
@@ -98,9 +100,14 @@ export const adminSystemRoutes = new Hono<AppEnv>()
       .orderBy(desc(backupRuns.waktu))
       .limit(50);
     const terakhir = await backupSuksesTerakhir();
+    const zona = await zonaWaktuCadangan();
     const status: BackupStatusDto = {
       aktif: env.BACKUP_ENABLED,
-      selang_jam: env.BACKUP_INTERVAL_HOURS,
+      jam_lokal: env.BACKUP_HOUR,
+      zona_waktu: zona,
+      berikutnya: env.BACKUP_ENABLED
+        ? jadwalBerikutnya(zona, env.BACKUP_HOUR).toISOString()
+        : null,
       simpan: env.BACKUP_KEEP,
       storage_mode: getCadanganStorage().mode,
       terakhir_sukses: terakhir ? terakhir.toISOString() : null,

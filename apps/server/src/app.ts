@@ -16,6 +16,8 @@ import {
   type AppEnv,
 } from "./middleware/auth";
 import { absensiRoutes } from "./modules/absensi/routes";
+import { catatGalat } from "./lib/error-log";
+import { adminErrorLogRoutes } from "./modules/admin-error-log/routes";
 import { adminSystemRoutes } from "./modules/admin-system/routes";
 import { adminTenantsRoutes } from "./modules/admin-tenants/routes";
 import { authRoutes } from "./modules/auth/routes";
@@ -69,7 +71,8 @@ export function createApp() {
     // Platform super-admin
     .use("/admin/*", requireAuth, requireSuperAdmin)
     .route("/admin/tenants", adminTenantsRoutes)
-    .route("/admin/sistem", adminSystemRoutes);
+    .route("/admin/sistem", adminSystemRoutes)
+    .route("/admin/error-log", adminErrorLogRoutes);
 
   // Rute internal perusahaan (butuh membership)
   const tenant = new Hono<AppEnv>().use("*", requireAuth, requireCompany);
@@ -256,11 +259,19 @@ export function createApp() {
   // endpoint asli (Fase 2) tanpa import melingkar.
   setSyncApp(app);
 
+  // SATU-SATUNYA pintu keluar galat API → sekaligus tempat mencatatnya ke
+  // `error_logs` (panel super admin). Pencatatan TIDAK ditunggu: menulis log
+  // tak boleh menambah latensi pada request yang sudah gagal, dan kegagalan
+  // menulisnya tak boleh menjelma jadi kegagalan kedua (catatGalat menelan
+  // galatnya sendiri). 4xx ikut dicatat — penolakan berulang sering justru
+  // petunjuk pertama ada yang rusak di klien.
   app.onError((err, c) => {
     if (err instanceof HTTPException) {
+      void catatGalat(c, err.status, err);
       return c.json({ error: err.message }, err.status);
     }
     console.error(err);
+    void catatGalat(c, 500, err);
     return c.json({ error: "Terjadi kesalahan pada server" }, 500);
   });
 

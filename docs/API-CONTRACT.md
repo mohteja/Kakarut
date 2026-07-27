@@ -201,7 +201,7 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 
 - `GET /api/admin/sistem` — res: `{ database_ok, storage_mode, node_version, migrations }`
 - `POST /api/admin/sistem/migrate` — res: `{ ok: true, migrations }` — error: **500** migrasi gagal
-- `GET /api/admin/sistem/backup` — res: `BackupStatusDto` (`{ aktif, selang_jam, simpan, storage_mode, terakhir_sukses|null, riwayat: BackupRunDto[] }` — pencadangan database platform: konfigurasi + 50 riwayat terakhir)
+- `GET /api/admin/sistem/backup` — res: `BackupStatusDto` (`{ aktif, jam_lokal, zona_waktu, berikutnya|null, simpan, storage_mode, terakhir_sukses|null, riwayat: BackupRunDto[] }` — pencadangan database platform: konfigurasi + 50 riwayat terakhir). Jadwalnya **harian pada `jam_lokal` waktu `zona_waktu`** (bawaan 02:00, zona mengikuti tenant terbanyak) — bukan lagi "tiap N jam sejak boot"; `selang_jam` DIHAPUS.
 - `POST /api/admin/sistem/backup` — picu cadangan manual sekarang — res: **201** `BackupRunDto` — error: **409** (cadangan lain sedang berjalan), **500** gagal
 - `GET /api/admin/sistem/backup/:id/unduh` — unduh berkas cadangan (di-stream server; `application/gzip`, `Content-Disposition: attachment`) — error: **404** (tak ada/berkas tak terambil), **400** (cadangan tanpa berkas)
 - `DELETE /api/admin/sistem/backup/:id` — hapus cadangan (berkas + riwayat) — res: `{ ok: true }` — error: **404**
@@ -215,6 +215,21 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 > undangan). Aplikasi kasir/karyawan **tak perlu** membangun halaman ini.
 
 ---
+
+## `/api/admin/error-log` — Log galat platform (`modules/admin-error-log/routes.ts`) — [super-admin]
+
+> Setiap respons error yang keluar lewat `app.onError` dicatat — **5xx** (bug
+> server) MAUPUN **4xx** (penolakan), termasuk jalur API yang tak cocok rute mana
+> pun. Daftarnya berisi **kelompok**, bukan baris mentah: kejadian dengan status,
+> pola jalur, dan pesan yang sama digabung lewat `sidik`, sehingga satu masalah
+> yang terjadi ribuan kali tampil sebagai satu baris. Pola jalur ternormalisasi
+> (`/api/bahan/:id`). Badan request, query string, dan header `Authorization`
+> **tidak** disimpan. Retensi 30 hari / 50.000 baris terbaru.
+
+- `GET /api/admin/error-log` — query: `hari` (1–90, default 7), `status` (`4xx`|`5xx`; selain itu = semua), `q` (cari pada pesan/pola jalur) — res: `ErrorLogDto` (`{ hari, total, total_5xx, total_4xx, jumlah_kelompok, rows: ErrorLogKelompokRow[] }`; ringkasan dihitung atas seluruh rentang, tak ikut tersaring)
+- `GET /api/admin/error-log/:sidik` — query: `hari` — res: `ErrorLogDetailDto` (`{ kelompok, kejadian: ErrorLogKejadianRow[] }`, maks 50 kejadian terbaru; `stack` hanya terisi untuk 5xx) — error: **404** sidik tak ada pada rentang itu
+- `DELETE /api/admin/error-log` — res: `{ ok, dihapus }` — buang SEMUA baris
+- `POST /api/admin/error-log/pangkas` — res: `{ ok, dihapus }` — jalankan retensi sekarang (biasanya lewat penjadwal tiap 6 jam)
 
 ## 5. `/api/company` — Pengaturan perusahaan (`modules/company/routes.ts`)
 
@@ -778,8 +793,12 @@ export interface BackupRunDto {
 export interface BackupStatusDto {
   /** pencadangan otomatis (penjadwal) aktif */
   aktif: boolean;
-  /** selang cadangan otomatis (jam) */
-  selang_jam: number;
+  /** jam LOKAL jadwal harian (0–23) — bawaan 2 (02:00 dini hari) */
+  jam_lokal: number;
+  /** zona waktu jadwal — mengikuti zona waktu tenant terbanyak */
+  zona_waktu: string;
+  /** perkiraan jadwal berikutnya (ISO); null bila pencadangan nonaktif */
+  berikutnya: string | null;
   /** retensi: jumlah cadangan sukses terakhir yang disimpan */
   simpan: number;
   /** target penyimpanan cadangan */
@@ -788,6 +807,70 @@ export interface BackupStatusDto {
   terakhir_sukses: string | null;
   /** riwayat 50 cadangan terakhir (terbaru dulu) */
   riwayat: BackupRunDto[];
+}
+
+/**
+ * Satu KELOMPOK galat pada log error platform (panel super admin). Baris di
+ * database tetap satu-per-kejadian; kelompok ini hasil agregasi berdasarkan
+ * `sidik` (status + metode + pola jalur + pesan) supaya satu masalah yang
+ * terjadi ribuan kali tampil sebagai satu baris, bukan ribuan.
+ */
+export interface ErrorLogKelompokRow {
+  /** sidik jari kelompok — dipakai sebagai id untuk membuka detailnya */
+  sidik: string;
+  status: number;
+  metode: string;
+  /** pola jalur ter-normalisasi, mis. `/api/bahan/:id` */
+  jalur_pola: string;
+  pesan: string;
+  jumlah: number;
+  pertama_pada: string;
+  terakhir_pada: string;
+  /** berapa akun berbeda yang mengalaminya (0 bila semua anonim) */
+  jumlah_user: number;
+  /** berapa perusahaan berbeda yang terdampak (0 bila tanpa perusahaan) */
+  jumlah_perusahaan: number;
+}
+
+/** Satu KEJADIAN galat (baris mentah) — dipakai pada detail kelompok. */
+export interface ErrorLogKejadianRow {
+  id: string;
+  waktu: string;
+  status: number;
+  metode: string;
+  /** jalur apa adanya TANPA query string */
+  jalur: string;
+  pesan: string;
+  /** jejak tumpukan — hanya untuk 5xx */
+  stack: string | null;
+  user_nama: string | null;
+  user_email: string | null;
+  peran: string | null;
+  perusahaan_nama: string | null;
+  ip: string | null;
+  user_agent: string | null;
+}
+
+/** Ringkasan + daftar kelompok galat (GET /admin/error-log). */
+export interface ErrorLogDto {
+  /** rentang hari yang dicakup ringkasan & daftar */
+  hari: number;
+  /** total kejadian dalam rentang (sebelum penyaringan status) */
+  total: number;
+  /** kejadian 5xx — bug server */
+  total_5xx: number;
+  /** kejadian 4xx — penolakan (validasi/izin/tak ditemukan/rate limit) */
+  total_4xx: number;
+  /** jumlah kelompok berbeda pada hasil yang disaring */
+  jumlah_kelompok: number;
+  rows: ErrorLogKelompokRow[];
+}
+
+/** Detail satu kelompok galat (GET /admin/error-log/:sidik). */
+export interface ErrorLogDetailDto {
+  kelompok: ErrorLogKelompokRow;
+  /** kejadian terbaru pada kelompok ini (terbaru dulu) */
+  kejadian: ErrorLogKejadianRow[];
 }
 
 /** Satu entri riwayat kegiatan pada faktur (jejak ubah tahap). */

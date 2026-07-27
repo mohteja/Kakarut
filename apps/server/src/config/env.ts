@@ -59,8 +59,18 @@ const EnvSchema = z.object({
     .string()
     .default("true")
     .transform((v) => v !== "false" && v !== "0"),
-  /** Selang cadangan otomatis (jam). Default 24 (harian). Minimum 1. */
-  BACKUP_INTERVAL_HOURS: z.coerce.number().min(1).default(24),
+  /**
+   * Jam LOKAL jadwal cadangan harian (0–23). Default 2 = 02:00 dini hari,
+   * saat outlet tutup — ekspor penuh membebani database, jangan sampai jatuh
+   * di jam ramai. Zona waktunya mengikuti tenant (lihat BACKUP_TIMEZONE).
+   */
+  BACKUP_HOUR: z.coerce.number().int().min(0).max(23).default(2),
+  /**
+   * Paksa zona waktu jadwal cadangan. Kosongkan (disarankan) agar server
+   * memakai zona waktu tenant TERBANYAK — cadangan jatuh saat outlet benar-
+   * benar tutup, bukan saat tengah malam di zona server.
+   */
+  BACKUP_TIMEZONE: z.string().optional(),
   /** Retensi: jumlah cadangan sukses terakhir yang disimpan. Default 14. */
   BACKUP_KEEP: z.coerce.number().min(1).default(14),
   /**

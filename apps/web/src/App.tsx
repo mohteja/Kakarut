@@ -69,6 +69,8 @@ const StokPage = lazy(() => import("./pages/stok/StokPage").then((m) => ({ defau
 const BeliPerlengkapanPage = lazy(() => import("./pages/perlengkapan/BeliPerlengkapanPage").then((m) => ({ default: m.BeliPerlengkapanPage })));
 const PerlengkapanPage = lazy(() => import("./pages/perlengkapan/PerlengkapanPage").then((m) => ({ default: m.PerlengkapanPage })));
 const SistemPage = lazy(() => import("./pages/superadmin/SistemPage").then((m) => ({ default: m.SistemPage })));
+const BackupPage = lazy(() => import("./pages/superadmin/BackupPage").then((m) => ({ default: m.BackupPage })));
+const ErrorLogPage = lazy(() => import("./pages/superadmin/ErrorLogPage").then((m) => ({ default: m.ErrorLogPage })));
 const TenantsPage = lazy(() => import("./pages/superadmin/TenantsPage").then((m) => ({ default: m.TenantsPage })));
 const TempatSampahPage = lazy(() => import("./pages/TempatSampahPage").then((m) => ({ default: m.TempatSampahPage })));
 
@@ -158,6 +160,8 @@ export default function App() {
             <>
               <Route path="/superadmin" element={<TenantsPage />} />
               <Route path="/superadmin/sistem" element={<SistemPage />} />
+              <Route path="/superadmin/backup" element={<BackupPage />} />
+              <Route path="/superadmin/error-log" element={<ErrorLogPage />} />
               <Route path="/superadmin/email" element={<SmtpPage />} />
             </>
           )}

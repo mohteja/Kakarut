@@ -11,6 +11,7 @@ import { sekaliSaja } from "./lib/boot-flags";
 import { computeBuildId, setBuildId } from "./lib/build";
 import { bersihkanRateLimitKedaluwarsa } from "./middleware/rateLimit";
 import { jadwalkanBackupOtomatis } from "./lib/backup";
+import { catatGalat, jadwalkanPangkasErrorLog } from "./lib/error-log";
 import { runMigrations } from "./db/migrate";
 import { backfillKodeMenu } from "./modules/menu/service";
 import { backfillKodeBahan } from "./modules/bahan/kode";
@@ -192,12 +193,21 @@ if (existsSync(webDist)) {
   // history fallback react-router untuk deep-link (mis. /dashboard).
   app.notFound((c) => {
     if (c.req.path.startsWith("/api") || c.req.path.startsWith("/uploads")) {
+      // Jalur API yang tak cocok rute mana pun TIDAK melewati app.onError, jadi
+      // dicatat di sini — klien yang memanggil endpoint usang/salah ketik justru
+      // hal yang paling perlu terlihat di log galat.
+      void catatGalat(c, 404, new Error(`Endpoint tidak ditemukan: ${c.req.path}`));
       return c.json({ error: "Tidak ditemukan" }, 404);
     }
     return kirimShell(c);
   });
 } else {
-  app.notFound((c) => c.json({ error: "Tidak ditemukan" }, 404));
+  app.notFound((c) => {
+    if (c.req.path.startsWith("/api")) {
+      void catatGalat(c, 404, new Error(`Endpoint tidak ditemukan: ${c.req.path}`));
+    }
+    return c.json({ error: "Tidak ditemukan" }, 404);
+  });
 }
 
 // Sapu baris rate-limit kedaluwarsa: sekali saat boot + berkala tiap 15 menit
@@ -208,6 +218,10 @@ setInterval(() => void bersihkanRateLimitKedaluwarsa(), 15 * 60_000).unref();
 // Pencadangan database otomatis ke storage (R2/lokal) — penjadwal berkala
 // (unref, advisory-lock; aman multi-instance). Nonaktifkan: BACKUP_ENABLED=false.
 jadwalkanBackupOtomatis();
+
+// Log galat platform (panel super admin): buang yang kedaluwarsa + kelebihan
+// kuota. Tanpa ini satu klien yang ngambek bisa menulis ratusan ribu baris.
+jadwalkanPangkasErrorLog();
 
 serve({ fetch: app.fetch, port: env.PORT }, (info) => {
   console.log(`Terakasir berjalan di http://localhost:${info.port}`);
