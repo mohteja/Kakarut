@@ -5136,6 +5136,21 @@ cek "ditandai sudah_terbuka=true + mengembalikan shift yang ADA" "V == 1" \
 cek "tidak membuat shift kedua (modal_awal tak tertimpa)" "V == 250000" \
   "$(api "$K137" GET /shift/aktif | jq '.modal_awal')"
 
+# Retry perintah SUKSES: perangkat bisa mati setelah server membukukan tapi
+# sebelum aplikasi memproses respons. Jalur idempoten harus membalas `data`
+# UTUH — kalau menyusut, peringatan "modal awal tidak dipakai" hilang diam-diam.
+# Perhatikan: yang dibalas adalah HASIL SAAT DIEKSEKUSI (sudah_terbuka:false),
+# bukan penilaian ulang keadaan sekarang — walau kini shift memang terbuka.
+RETRY138=$(api "$K137" POST /sync "$B138")
+cek "retry shift_buka sukses → sudah_ada" "V == 1" \
+  "$(echo "$RETRY138" | jq '.hasil[0].status=="sudah_ada"|if . then 1 else 0 end')"
+cek "retry membalas data UTUH: id shift ikut" "V == 1" \
+  "$(echo "$RETRY138" | jq --arg s "$SH138" '.hasil[0].data.id==$s|if . then 1 else 0 end')"
+cek "retry membalas data UTUH: sudah_terbuka ikut (snapshot saat eksekusi)" "V == 1" \
+  "$(echo "$RETRY138" | jq '.hasil[0].data.sudah_terbuka==false|if . then 1 else 0 end')"
+cek "retry membalas data UTUH: modal_awal ikut" "V == 250000" \
+  "$(echo "$RETRY138" | jq '.hasil[0].data.modal_awal')"
+
 # Guard: peran & jalur online tidak berubah.
 cek "owner kirim shift_buka → item gagal 403" "V == 1" \
   "$(api "$OWNER" POST /sync "$(jq -nc --arg r "$(uuid138)" --arg w "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{commands:[{client_ref:$r,tipe:"shift_buka",waktu:$w,payload:{}}]}')" | jq '(.hasil[0].status=="gagal" and .hasil[0].kode==403)|if . then 1 else 0 end')"

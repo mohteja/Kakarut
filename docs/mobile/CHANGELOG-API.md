@@ -118,6 +118,23 @@ Penolakan tersimpan dibalas **utuh** saat retry (`status:"sudah_ada"` + `sebab`
 `SaleBody`) **tidak** dikerjakan — dengan Opsi A jalan, tidak ada lagi kasus
 yang butuh kasir memilih shift manual.
 
+### ⚪️ INFO — `sudah_ada` pada item SUKSES membalas `data` UTUH
+
+Berlaku untuk **semua** tipe, bukan hanya kegagalan. Retry `penjualan` membawa
+`shift` + `ada_transaksi_susulan` + `di_luar_jendela_shift`; retry `shift_buka`
+membawa DTO shift + `sudah_terbuka` + `modal_awal`. Jadi peringatan kalian
+("masuk ke shift yang sudah ditutup", "modal awal tidak dipakai") tetap muncul
+walau perangkat mati tepat setelah server membukukan.
+
+**Satu hal yang perlu diperhatikan:** yang dibalas adalah **hasil saat perintah
+dieksekusi**, bukan penilaian ulang keadaan sekarang. Retry `shift_buka` yang
+dulu benar-benar membuat shift tetap membalas `sudah_terbuka:false`, walau
+sekarang shift itu memang sudah terbuka. Itu memang semantik idempotensi yang
+benar — jangan diperlakukan sebagai keadaan terkini.
+
+Perilaku ini dikunci uji (`verify-api` §137 & §138), jadi penyempitan payload di
+kemudian hari akan ketahuan, bukan menghilangkan peringatan kalian diam-diam.
+
 ### 🟢 BARU — batas usia `waktu` jadi per tipe
 
 `penjualan` **30 hari** (naik dari 7), tipe lain tetap **7 hari**. Sesuai usul
