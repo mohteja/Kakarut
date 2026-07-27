@@ -5025,8 +5025,19 @@ cek "detail shift memuat transaksi tsb dan menandainya susulan" "V == 1" \
 
 # Idempotency setelah fallback: kirim ulang tak boleh menggandakan rekap.
 TUNAI_X=$(api "$K137" GET /shift | jq --arg s "$SH137" '[.[]|select(.id==$s)][0].penjualan_tunai')
+RETRY137=$(api "$K137" POST /sync "$B137")
 cek "kirim ulang batch sama → sudah_ada" "V == 1" \
-  "$(api "$K137" POST /sync "$B137" | jq '.hasil[0].status=="sudah_ada"|if . then 1 else 0 end')"
+  "$(echo "$RETRY137" | jq '.hasil[0].status=="sudah_ada"|if . then 1 else 0 end')"
+# Perangkat bisa mati SETELAH server membukukan sale tapi SEBELUM aplikasi
+# sempat memproses respons. Saat retry, mobile tetap butuh konteks shift untuk
+# memunculkan peringatan "masuk ke shift yang sudah ditutup" — kalau `data`
+# hilang di jalur idempoten, peringatan itu lenyap diam-diam.
+cek "retry item SUKSES membalas data UTUH: shift.id ikut" "V == 1" \
+  "$(echo "$RETRY137" | jq --arg s "$SH137" '.hasil[0].data.shift.id==$s|if . then 1 else 0 end')"
+cek "retry item SUKSES membalas data UTUH: di_luar_jendela_shift ikut" "V == 1" \
+  "$(echo "$RETRY137" | jq '.hasil[0].data.di_luar_jendela_shift==true|if . then 1 else 0 end')"
+cek "retry item SUKSES membalas data UTUH: ada_transaksi_susulan ikut" "V == 1" \
+  "$(echo "$RETRY137" | jq '.hasil[0].data.ada_transaksi_susulan==true|if . then 1 else 0 end')"
 cek "kirim ulang TIDAK menggandakan rekap shift" "V == 1" \
   "$(api "$K137" GET /shift | jq --arg s "$SH137" --argjson t "$TUNAI_X" '[.[]|select(.id==$s)][0].penjualan_tunai == $t|if . then 1 else 0 end')"
 
