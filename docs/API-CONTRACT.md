@@ -1863,6 +1863,8 @@ export interface Shift {
  * penerimaan. Payload = body endpoint asli (+ path param bila ditandai).
  */
 export type SyncTipe =
+  /** buka kasir; `waktu` jadi `opened_at` shift (payload `{branch_id?, modal_awal?}`) */
+  | "shift_buka"
   | "penjualan"
   | "absen_saya"
   | "absen_stasiun"
@@ -1900,10 +1902,22 @@ export interface SyncItemResult {
   status: "ok" | "sudah_ada" | "gagal";
   /** kode HTTP hasil eksekusi endpoint asli */
   kode: number;
-  /** data respons endpoint asli (saat ok/sudah_ada sukses) */
+  /**
+   * Saat ok/sudah_ada: data respons endpoint asli. Saat gagal: data lanjutan
+   * yang menyertai `sebab` — mis. `{ shift_terdekat: {...} }` pada
+   * `shift_tidak_cocok`, supaya mobile bisa menawarkan aksi perbaikan.
+   */
   data?: unknown;
   /** pesan error endpoint asli (saat gagal) */
   error?: string;
+  /**
+   * Penyebab penolakan dalam bentuk yang bisa dicabang oleh kode (saat gagal).
+   * Tanpa ini mobile hanya melihat teks generik dan tak bisa membedakan
+   * "shift tidak cocok" dari kegagalan lain. Kode `sebab` yang ada saat ini:
+   * - `shift_tidak_cocok` — 409 pada `penjualan`; `data.shift_terdekat` berisi
+   *   shift tertutup terdekat sebelum `waktu` (atau null bila memang tak ada).
+   */
+  sebab?: string;
 }
 
 /** Respons POST /api/sync — selalu 200; detail per item. */
@@ -1911,7 +1925,7 @@ export interface SyncResponse {
   hasil: SyncItemResult[];
 }
 
-/** Satu transaksi di dalam jendela waktu sebuah shift (untuk detail shift). */
+/** Satu transaksi milik sebuah shift (untuk detail shift). */
 export interface ShiftTransaksiRow {
   id: string;
   nomor: string;
@@ -1919,6 +1933,12 @@ export interface ShiftTransaksiRow {
   total: number;
   metode: MetodeBayar;
   kasir: string | null;
+  /**
+   * true bila transaksi masuk SETELAH shift ditutup (sinkron offline) —
+   * `waktu`-nya di luar jendela shift, jadi baris inilah yang membuat rekap
+   * terkini berbeda dari angka saat penutupan.
+   */
+  susulan: boolean;
 }
 
 /** Detail satu shift = ringkasan shift + daftar transaksi di jendela waktunya. */

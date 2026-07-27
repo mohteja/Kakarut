@@ -1233,6 +1233,8 @@ export interface Shift {
  * penerimaan. Payload = body endpoint asli (+ path param bila ditandai).
  */
 export type SyncTipe =
+  /** buka kasir; `waktu` jadi `opened_at` shift (payload `{branch_id?, modal_awal?}`) */
+  | "shift_buka"
   | "penjualan"
   | "absen_saya"
   | "absen_stasiun"
