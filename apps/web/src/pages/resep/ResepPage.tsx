@@ -116,7 +116,11 @@ export function ResepPage() {
     queryFn: () => api<BahanDto[]>("/bahan?ringkas=1"),
   });
   const semua = bahan ?? [];
-  const produksi = semua.filter((b) => b.pengadaan === "produksi");
+  // `lingkupPeran` (didefinisikan di bawah) dipangkas DI SUMBER, bukan di
+  // penyaring grid — supaya hitungan chip, pencarian, dan terutama deep-link
+  // `?bahan=<id>` ikut terbatas. Menyaring hanya di grid akan menyisakan celah:
+  // menempel id resep divisi lain di URL tetap membuka detailnya.
+  const produksiSemua = semua.filter((b) => b.pengadaan === "produksi");
 
   // Resep terarsip (bahan produksi nonaktif) — chip 🗄 Arsip, hanya owner/admin.
   const { data: arsipData } = useQuery({
@@ -128,10 +132,27 @@ export function ResepPage() {
   const [tab, setTab] = useState<"aktif" | "arsip">("aktif");
 
   const [cari, setCari] = useState("");
-  // Filter lokasi/divisi — kitchen/bar dibuka langsung di divisinya sendiri.
-  const [filter, setFilter] = useState<FilterResep>(
-    role === "kitchen" ? "kitchen" : role === "bar" ? "bar" : "semua",
-  );
+  /**
+   * LINGKUP PELAKSANA: peran yang mengerjakan produksi hanya melihat resep yang
+   * MEREKA produksi — bar lihat resep bar, kitchen lihat resep kitchen, kru CK
+   * lihat resep CK. Bukan sekadar filter awal: chip-nya disembunyikan supaya
+   * divisi lain tak bisa dibuka sama sekali (daftar resep divisi lain hanya
+   * bikin bingung dan bukan urusan mereka).
+   *
+   * `tim` = kru Central Kitchen — nav Resep memang hanya muncul untuk tim yang
+   * ditempatkan di CK. Owner/admin TIDAK dibatasi: merekalah yang menyusun dan
+   * memindahkan resep antar-divisi, jadi butuh melihat semuanya.
+   */
+  const lingkupPeran: FilterResep | null =
+    role === "kitchen" ? "kitchen" : role === "bar" ? "bar" : role === "tim" ? "ck" : null;
+  const [filter, setFilter] = useState<FilterResep>(lingkupPeran ?? "semua");
+  const produksi = lingkupPeran
+    ? produksiSemua.filter((b) =>
+        lingkupPeran === "ck"
+          ? b.produksi_di === "ck"
+          : b.produksi_di === "cabang" && b.divisi_produksi === lingkupPeran,
+      )
+    : produksiSemua;
 
   // Bahan terpilih = ?bahan=<id> di URL (state persisten): kartu diklik →
   // param terpasang; ← Kembali → param dihapus. Deep-link dari Bahan Baku /
@@ -439,7 +460,9 @@ export function ResepPage() {
               placeholder="Cari resep…"
               className={`${inputClass} w-56 flex-none`}
             />
-            {tab === "aktif" && (
+            {/* Chip divisi disembunyikan untuk peran pelaksana — daftarnya sudah
+                dipangkas ke divisinya, jadi chip hanya akan menampilkan nol. */}
+            {tab === "aktif" && !lingkupPeran && (
               <>
                 <button onClick={() => setFilter("semua")} className={chipCls(filter === "semua")}>
                   Semua ({hitungFilter("semua")})
