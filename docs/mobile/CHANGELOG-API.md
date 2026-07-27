@@ -22,8 +22,9 @@ tanpa akses repo server.
 
 ## Rilis: Pengajuan cuti & libur + rekap absen bulanan
 
-> **Menunggu rilis.** Migrasi DB **0082** (tabel `leave_requests` + 3 enum).
-> Perubahan API **aditif** — tak ada endpoint lama yang berubah perilaku.
+> **Sudah di-merge ke production.** Migrasi DB **0082** (tabel `leave_requests`
+> + 3 enum). Perubahan API **aditif** — tak ada endpoint lama yang berubah
+> perilaku.
 
 ### 🟢 BARU — `/api/pengajuan`: karyawan mengajukan cuti/libur, owner/admin ACC
 
@@ -68,7 +69,10 @@ hari atau `selesai < mulai`. Lampiran (surat dokter) memakai
 
 ### 🟢 BARU — `GET /api/absensi/rekap` (khusus owner/admin)
 
-Rekap SEBULAN lintas karyawan: `?bulan=YYYY-MM` + `?branch_id=`. Balikannya
+Rekap SEBULAN lintas karyawan: `?bulan=YYYY-MM` + `?branch_id=` +
+`?status=aktif|arsip|semua` (**bawaan `aktif`** — karyawan yang sudah keluar tak
+ikut mengotori daftar & angka "tidak hadir"; `arsip` menampilkan mereka, dan
+tiap baris membawa `arsip_pada`). Balikannya
 `RekapAbsenDto` — per karyawan ada `hadir` / `tidak_hadir` / `cuti` / `libur`
 plus `harian[]` **selalu sepanjang jumlah hari bulan itu** (urut tanggal
 1..akhir), jadi bisa dirender langsung sebagai kolom tanpa mengisi lubang.
@@ -92,7 +96,7 @@ alur absen yang sudah kalian pasang tak perlu disentuh.
 
 ## Rilis: Sesi menyusul perubahan peran (`/auth/me` + `branch`)
 
-> **Menunggu rilis.** Tidak ada migrasi DB. Perubahan API **aditif**.
+> **Sudah di-merge ke production.** Tidak ada migrasi DB. Perubahan API **aditif**.
 
 ### 🔴 WAJIB — segarkan sesi dari `/api/auth/me`, jangan percaya sesi tersimpan
 

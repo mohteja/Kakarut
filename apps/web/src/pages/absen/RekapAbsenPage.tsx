@@ -17,7 +17,12 @@ import {
 } from "../../components/PengajuanCutiSection";
 import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
-import { formatTanggal, formatWaktu, hariIniWIB } from "../../lib/format";
+import {
+  formatTanggal,
+  formatTanggalRingkas,
+  formatWaktu,
+  hariIniWIB,
+} from "../../lib/format";
 
 /**
  * REKAP ABSEN BULANAN (owner/admin, di Kantor). Dua tab:
@@ -54,15 +59,20 @@ export function RekapAbsenPage() {
   const { cabang } = useBranch();
   const [bulan, setBulan] = useState(bulanIni());
   const [cabangFilter, setCabangFilter] = useState("all");
+  // Karyawan yang sudah keluar tak ikut mengotori daftar & angka ringkasnya;
+  // masih bisa dilihat lewat pilihan Arsip / Semua.
+  const [status, setStatus] = useState<"aktif" | "arsip" | "semua">("aktif");
   const [tab, setTab] = useState<"rekap" | "pengajuan">("rekap");
   const [saring, setSaring] = useState<PengajuanStatus | "semua">("menunggu");
   const [detail, setDetail] = useState<{ nama: string; hari: RekapAbsenHari } | null>(null);
   const [tolak, setTolak] = useState<{ id: string; nama: string; alasan: string } | null>(null);
 
   const { data: rekap, isLoading } = useQuery({
-    queryKey: ["rekap-absen", bulan, cabangFilter],
+    queryKey: ["rekap-absen", bulan, cabangFilter, status],
     queryFn: () =>
-      api<RekapAbsenDto>(`/absensi/rekap?bulan=${bulan}&branch_id=${cabangFilter}`),
+      api<RekapAbsenDto>(
+        `/absensi/rekap?bulan=${bulan}&branch_id=${cabangFilter}&status=${status}`,
+      ),
   });
 
   const { data: pengajuan = [] } = useQuery({
@@ -136,6 +146,18 @@ export function RekapAbsenPage() {
               ))}
           </select>
         </div>
+        <div>
+          <label className="mb-1 block text-xs font-medium text-stone-500">Karyawan</label>
+          <select
+            value={status}
+            onChange={(e) => setStatus(e.target.value as typeof status)}
+            className={inputClass}
+          >
+            <option value="aktif">Aktif</option>
+            <option value="arsip">🗄 Sudah keluar (arsip)</option>
+            <option value="semua">Semua</option>
+          </select>
+        </div>
       </Card>
 
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -192,16 +214,34 @@ export function RekapAbsenPage() {
                   {rekap.rows.length === 0 && (
                     <tr>
                       <td colSpan={5 + tanggalKolom.length} className="py-8 text-center text-sm text-stone-400">
-                        Belum ada karyawan pada cabang &amp; bulan ini.
+                        {status === "arsip"
+                          ? "Tidak ada karyawan yang keluar pada bulan ini."
+                          : "Belum ada karyawan pada cabang & bulan ini."}
                       </td>
                     </tr>
                   )}
                   {rekap.rows.map((r: RekapAbsenRow) => (
                     <tr key={r.user_id} className="hover:bg-stone-50">
-                      <td className="sticky left-0 z-10 max-w-[12rem] truncate bg-white px-3 py-2 font-medium text-stone-800">
-                        {r.nama}
-                        {r.cabang && (
-                          <span className="ml-1 text-xs font-normal text-stone-400">{r.cabang}</span>
+                      <td
+                        className={`sticky left-0 z-10 max-w-[14rem] bg-white px-3 py-2 font-medium ${
+                          r.arsip_pada ? "text-stone-400" : "text-stone-800"
+                        }`}
+                      >
+                        <span className="block truncate">
+                          {r.arsip_pada && "🗄 "}
+                          {r.nama}
+                          {r.cabang && (
+                            <span className="ml-1 text-xs font-normal text-stone-400">
+                              {r.cabang}
+                            </span>
+                          )}
+                        </span>
+                        {/* Baris kedua, bukan disambung: nama + cabang sudah
+                            memakan lebar kolom yang terkunci. */}
+                        {r.arsip_pada && (
+                          <span className="block text-xs font-normal text-stone-400">
+                            keluar {formatTanggalRingkas(r.arsip_pada)}
+                          </span>
                         )}
                       </td>
                       <td className="px-2 py-2 text-center font-semibold text-green-700">{r.hadir}</td>

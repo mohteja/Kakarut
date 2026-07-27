@@ -1514,6 +1514,12 @@ export interface RekapAbsenRow {
   employee_code: string | null;
   role: UserRole | null;
   cabang: string | null;
+  /**
+   * Kapan keanggotaannya diarsipkan (karyawan keluar) — null = masih aktif.
+   * Dipakai UI untuk menandai baris; hitungannya sendiri sudah berhenti di
+   * tanggal ini.
+   */
+  arsip_pada: string | null;
   hadir: number;
   tidak_hadir: number;
   cuti: number;
@@ -1522,7 +1528,10 @@ export interface RekapAbsenRow {
   harian: RekapAbsenHari[];
 }
 
-/** Rekap absen sebulan (GET /absensi/rekap) — khusus owner/admin. */
+/**
+ * Rekap absen sebulan (GET /absensi/rekap) — khusus owner/admin.
+ * Baris yang masuk mengikuti `?status=aktif|arsip|semua` (bawaan `aktif`).
+ */
 export interface RekapAbsenDto {
   /** YYYY-MM */
   bulan: string;

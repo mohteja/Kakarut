@@ -1,5 +1,5 @@
 import { zValidator } from "@hono/zod-validator";
-import { and, desc, eq, gte, isNull, lt, lte, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
@@ -368,7 +368,8 @@ export const absensiRoutes = new Hono<AppEnv>()
    * lintas karyawan setara laporan manajemen).
    *
    * Query: `?bulan=YYYY-MM` (default bulan berjalan di zona waktu perusahaan),
-   * `?branch_id=` (`all` = semua cabang; hanya owner/admin).
+   * `?branch_id=` (`all` = semua cabang), `?status=aktif|arsip|semua`
+   * (bawaan `aktif` — karyawan yang sudah keluar tak ikut mengotori rekap).
    *
    * Aturan hitung — "outlet buka tiap hari", tanpa tabel jadwal kerja:
    *   ada cap absen           → hadir
@@ -395,9 +396,24 @@ export const absensiRoutes = new Hono<AppEnv>()
     const branchQ = c.req.query("branch_id");
     const branchId = branchQ && branchQ !== "all" ? branchQ : undefined;
 
-    // (1) Karyawan: yang masih aktif ATAU baru diarsipkan setelah bulan dimulai
-    // (yang keluar di tengah bulan tetap muncul dengan hitungan sampai keluar).
-    const karyawan = await db
+    // (1) Karyawan mana yang masuk daftar — `?status=`:
+    //   aktif (bawaan) : keanggotaan belum diarsipkan — daftar kerja sehari-hari
+    //   arsip          : sudah keluar, TAPI keluarnya pada/sesudah bulan ini.
+    //                    Yang keluar tahun lalu tak punya satu pun hari kerja di
+    //                    bulan ini — barisnya cuma titik-titik, jadi disembunyikan.
+    //   semua          : gabungan keduanya.
+    const statusQ = c.req.query("status");
+    const status: "aktif" | "arsip" | "semua" =
+      statusQ === "arsip" || statusQ === "semua" ? statusQ : "aktif";
+    const awalBulan = new Date(`${dari}T00:00:00Z`);
+    const saringStatus =
+      status === "aktif"
+        ? isNull(memberships.archivedAt)
+        : status === "arsip"
+          ? and(isNotNull(memberships.archivedAt), gte(memberships.archivedAt, awalBulan))
+          : or(isNull(memberships.archivedAt), gte(memberships.archivedAt, awalBulan));
+
+    const karyawanMentah = await db
       .select({
         user_id: users.id,
         nama: users.nama,
@@ -414,10 +430,16 @@ export const absensiRoutes = new Hono<AppEnv>()
         and(
           eq(memberships.companyId, auth.company_id!),
           branchId ? eq(memberships.branchId, branchId) : undefined,
-          or(isNull(memberships.archivedAt), gte(memberships.archivedAt, new Date(`${dari}T00:00:00Z`))),
+          saringStatus,
         ),
       )
       .orderBy(users.nama);
+
+    // Yang baru bergabung SETELAH bulan ini berakhir tak punya hari kerja di
+    // sini — tanpa ini barisnya muncul berisi titik-titik semua. Disaring di
+    // memori (bukan SQL) agar konversi zona waktunya persis sama dengan
+    // perhitungan `mulaiHitung` di bawah.
+    const karyawan = karyawanMentah.filter((k) => tanggalDi(tz, k.bergabung) <= sampai);
 
     // (2) Absensi bulan itu, satu baris per (karyawan, tanggal).
     const cap = await db
@@ -512,6 +534,7 @@ export const absensiRoutes = new Hono<AppEnv>()
         employee_code: k.employee_code ?? null,
         role: k.role,
         cabang: k.cabang ?? null,
+        arsip_pada: k.arsip ? k.arsip.toISOString() : null,
         hadir,
         tidak_hadir: alpa,
         cuti,
