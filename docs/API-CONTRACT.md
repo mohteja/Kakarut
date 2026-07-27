@@ -161,7 +161,20 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 - `POST /api/auth/resend-verification` — [public] — req: `{ email }` — res: **200** `{ ok: true, dev_verify_url? }` — SELALU 200 (netral; tak bocorkan status email). Benar-benar mengirim tautan hanya bila akun ADA, aktif, & BELUM terverifikasi. Dibatasi rate limit (429 + `Retry-After`).
 - `POST /api/auth/forgot-password` — [public] — req: `{ email }` — res: **200** `{ ok: true, dev_reset_url? }` — SELALU 200 (tak bocorkan apakah email ada). Bila akun aktif: token reset dibuat + tautan dikirim via email. `dev_reset_url` HANYA muncul saat email server belum dikonfigurasi & bukan produksi (bantuan setup) — abaikan di produksi.
 - `POST /api/auth/reset-password` — [public] — req: `{ token, password (min 8) }` — res: **200** `{ ok }` (tanpa sesi — pengguna login ulang dengan password baru) — error: **400** token tidak valid/kedaluwarsa/terpakai. Token berasal dari tautan email `APP_BASE_URL/reset-password?token=…` (halaman WEB); email reset juga menampilkan **kode yang mudah disalin** (identik dengan parameter `token`) untuk klien tempel-manual. **Efek samping:** menaikkan token_version user → semua token lama user itu jadi **401** (lihat bagian Autentikasi).
-- `GET /api/auth/me` — [any authenticated, incl. super-admin] (`requireAuth` inline) — res: `{ user: AuthUser, company | null }` — error: **401**
+- `GET /api/auth/me` — [any authenticated, incl. super-admin] (`requireAuth` inline) — res: `{ user: AuthUser, company | null, branch: {id,nama} | null }` — error: **401**
+  > **Ini sumber kebenaran peran & cabang, bukan isi token.** `requireAuth`
+  > membaca ulang keanggotaan dari database pada **setiap** request, jadi
+  > `user.role` / `user.branch_id` di sini sudah mengikuti perubahan admin
+  > walaupun token yang dipakai adalah token lama (token TIDAK dicabut saat
+  > peran diubah — hanya reset password yang mencabut).
+  >
+  > Bentuknya sengaja dibuat **sama persis dengan sesi login minus `token`**
+  > (`branch` ditambahkan 27 Jul 2026 justru untuk itu) supaya klien bisa
+  > menimpakannya langsung ke sesi tersimpan. **Klien wajib menyegarkan sesi
+  > dari sini** — minimal saat aplikasi dibuka dan saat kembali ke foreground —
+  > karena menu/izin yang dibangun dari sesi tersimpan akan memakai peran LAMA
+  > selamanya bila tidak. `401` di sini = keanggotaan dicabut/diarsip → hapus
+  > sesi, arahkan ke login.
 
 ## `/api/onboarding` — Onboarding + lifecycle akun (`modules/onboarding/routes.ts`) — **[butuh login, TIDAK butuh perusahaan]**
 
@@ -619,6 +632,16 @@ ADA (validasi = aturan endpoint asli), idempoten per `client_ref`.
   belum diverifikasi (tampilkan layar verifikasi + tombol kirim ulang); sukses →
   simpan `token` di secure storage → set header `Authorization: Bearer <token>`
   di semua request → `GET /api/auth/me` saat buka app untuk validasi sesi.
+- **Segarkan sesi dari `/api/auth/me`, jangan percaya sesi tersimpan.** Peran &
+  cabang karyawan bisa diubah admin **saat sesinya berjalan**; token lama tetap
+  sah (server membaca ulang keanggotaan tiap request), jadi satu-satunya yang
+  basi adalah salinan sesi di perangkat. Panggil `/auth/me` saat app dibuka
+  **dan tiap kali kembali ke foreground**, lalu timpakan `user`/`company`/
+  `branch` ke sesi tersimpan (token tetap). Bila `role` atau `branch_id`
+  berubah: buang cache data lokal & bangun ulang menu/izin — cakupan datanya
+  ikut berubah. Tanpa ini, karyawan yang baru dijadikan `bar` tetap melihat
+  menu peran lamanya sampai logout–login (sudah terjadi di web, diperbaiki
+  27 Jul 2026).
 - **Tangani `401` secara global:** `401` di endpoint mana pun berarti sesi tak
   berlaku (token kedaluwarsa **atau** password diubah/di-reset → token_version
   naik). Reaksi: hapus token tersimpan → arahkan ke login. Bila klien punya alur

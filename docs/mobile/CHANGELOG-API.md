@@ -20,6 +20,68 @@ tanpa akses repo server.
 
 ---
 
+## Rilis: Sesi menyusul perubahan peran (`/auth/me` + `branch`)
+
+> **Menunggu rilis.** Tidak ada migrasi DB. Perubahan API **aditif**.
+
+### 🔴 WAJIB — segarkan sesi dari `/api/auth/me`, jangan percaya sesi tersimpan
+
+Bug yang baru kami perbaiki di web, dan **kemungkinan besar ada juga di mobile**
+karena penyebabnya sama.
+
+Peran & cabang karyawan bisa diubah admin **saat sesinya sedang berjalan**.
+Token TIDAK dicabut saat itu (hanya reset password yang mencabut) dan memang
+tidak perlu: `requireAuth` membaca ulang keanggotaan dari database pada **setiap**
+request, jadi sisi server sudah langsung memakai peran baru. Yang basi hanyalah
+**salinan sesi di perangkat** — dan menu/izin dibangun dari salinan itu.
+
+Gejalanya persis seperti laporan yang kami terima: akun yang sudah dijadikan
+`bar` tetap menampilkan menu peran lamanya (tanpa Produksi & Resep), dan
+**memuat ulang aplikasi tidak menolong** karena sesi tersimpan ikut bertahan.
+Satu-satunya jalan keluar sebelumnya: logout lalu login lagi.
+
+**Yang perlu kalian lakukan:**
+
+1. Panggil `GET /api/auth/me` **saat app dibuka** dan **tiap kali kembali ke
+   foreground** (`AppLifecycleState.resumed`). Beri jeda minimum (kami pakai
+   30 detik) supaya tidak jadi polling.
+2. Timpakan `user` / `company` / `branch` dari respons ke sesi tersimpan.
+   **`token` tidak berubah** — jangan ikut ditimpa/dihapus.
+3. Bila `user.role` **atau** `user.branch_id` berbeda dari yang tersimpan:
+   buang cache data lokal (termasuk ETag yang kalian simpan) dan bangun ulang
+   menu/izin — cakupan datanya ikut berubah.
+4. `401` dari `/auth/me` = keanggotaan dicabut/diarsip → hapus sesi, ke login.
+   Ini juga menutup kasus karyawan yang sudah diarsip tapi aplikasinya masih
+   terlihat "hidup".
+
+### 🟢 BARU — `GET /api/auth/me` kini mengembalikan `branch`
+
+Sebelumnya `{ user, company }`; sekarang `{ user, company, branch }` dengan
+`branch: { id, nama } | null` — **bentuknya jadi sama persis dengan sesi login
+minus `token`**, supaya bisa langsung ditimpakan tanpa mapping khusus.
+
+```jsonc
+// GET /api/auth/me
+{
+  "user": { "sub": "…", "email": "…", "nama": "…", "is_super_admin": false,
+            "company_id": "…", "role": "bar", "branch_id": "…" },
+  "company": { "id": "…", "nama": "…", /* … */ },
+  "branch": { "id": "…", "nama": "Ahmad Yani - Garut" }   // ← BARU
+}
+```
+
+Aditif: klien lama yang mengabaikan field ini tidak terpengaruh.
+
+### ⚪️ INFO — peran diubah ≠ sesi dicabut
+
+Sengaja begitu. Kalau setiap perubahan peran mencabut token, karyawan akan
+terlempar ke layar login di tengah kerja. Yang kami pilih: token tetap sah,
+otorisasi server ikut peran baru **seketika**, dan klien menyusul lewat
+`/auth/me`. Yang mencabut token hanyalah **reset/ganti password**
+(`token_version` naik → semua token lama jadi `401`).
+
+---
+
 ## Rilis: Transfer stok hanya dari Central Kitchen
 
 > **Sudah di production.** Tidak ada migrasi DB.
