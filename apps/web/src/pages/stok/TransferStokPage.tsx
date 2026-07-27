@@ -56,16 +56,21 @@ export function TransferStokPage() {
   const { auth } = useAuth();
   const { cabang } = useBranch();
   const role = auth?.user.role;
-  const terkunci = role === "tim" || role === "kitchen" || role === "bar";
+  const terkunci =
+    role === "tim" || role === "kitchen" || role === "bar" || role === "cashier";
   const lokasiStok = cabang.filter((b) => b.is_active && b.tipe !== "kantor");
+  // PENGIRIM HANYA CENTRAL KITCHEN. Cabang (kasir, tim toko, kitchen, bar) dan
+  // manajemen yang sedang berada di toko hanya MEMANTAU kiriman yang menuju ke
+  // sana. Server menegakkan aturan yang sama (403 bila asal bukan CK), jadi ini
+  // murni supaya tak ada formulir yang pasti gagal saat ditekan.
+  const daftarCk = lokasiStok.filter((b) => b.tipe === "central_kitchen");
+  const ckSaya = terkunci
+    ? daftarCk.find((b) => b.id === auth?.user.branch_id)
+    : daftarCk[0];
+  const bolehKirim = !!ckSaya;
 
-  // Cabang ASAL: peran terkunci dipaksa ke cabangnya; manajemen memilih —
-  // default Central Kitchen (sumber transfer paling umum).
-  const asalDefault =
-    (terkunci ? auth?.user.branch_id : null) ??
-    lokasiStok.find((b) => b.tipe === "central_kitchen")?.id ??
-    lokasiStok[0]?.id ??
-    "";
+  // Cabang ASAL selalu Central Kitchen; manajemen dgn >1 CK boleh memilih.
+  const asalDefault = ckSaya?.id ?? "";
   const [asalId, setAsalId] = useState(asalDefault);
   const [tujuanId, setTujuanId] = useState("");
   const [catatan, setCatatan] = useState("");
@@ -147,14 +152,22 @@ export function TransferStokPage() {
     <div>
       <PageTitle>🔄 Transfer Stok</PageTitle>
       <div className="mb-4 rounded-lg bg-blue-50 px-4 py-2 text-sm text-blue-800">
-        Memindahkan <b>stok yang sudah ada</b> antar lokasi — dari <b>Central Kitchen atau
-        cabang</b> ke <b>CK atau cabang lain</b>. Dipakai mis. saat barang kiriman{" "}
-        <b>rusak di jalan</b> lalu perlu dikirim ulang. Kiriman muncul di{" "}
-        <b>📥 Penerimaan Barang</b> cabang tujuan; <b>stok asal berkurang saat kiriman
-        diterima</b>. Terpisah dari <b>🚚 Kirim dari stok CK</b> pada Permintaan Stok (jalur
-        rencana menu) — keduanya tetap bisa dipakai.
+        Memindahkan <b>stok yang sudah ada</b> dari <b>Central Kitchen</b> ke cabang.
+        Dipakai mis. saat barang kiriman <b>rusak di jalan</b> lalu perlu dikirim ulang.
+        Kiriman muncul di <b>📥 Penerimaan Barang</b> cabang tujuan; <b>stok CK berkurang
+        saat kiriman diterima</b>. Terpisah dari <b>🚚 Kirim dari stok CK</b> pada
+        Permintaan Stok (jalur rencana menu) — keduanya tetap bisa dipakai.
       </div>
 
+      {!bolehKirim && (
+        <div className="mb-4 rounded-lg bg-stone-100 px-4 py-2 text-sm text-stone-700">
+          👀 <b>Tampilan pantauan.</b> Pengiriman transfer stok hanya dilakukan dari{" "}
+          <b>Central Kitchen</b>. Di halaman ini Anda melihat kiriman yang menyangkut
+          cabang Anda — terima barangnya di <b>📥 Penerimaan Barang</b>.
+        </div>
+      )}
+
+      {bolehKirim && (
       <Card className="mb-4 p-4">
         <form
           onSubmit={(e: FormEvent) => {
@@ -180,7 +193,8 @@ export function TransferStokPage() {
                   className={inputClass}
                   aria-label="Cabang asal transfer"
                 >
-                  {lokasiStok.map((b) => (
+                  {/* hanya Central Kitchen — cabang tidak boleh jadi pengirim */}
+                  {daftarCk.map((b) => (
                     <option key={b.id} value={b.id}>
                       {b.tipe === "central_kitchen" ? "🏭 " : "🏪 "}
                       {b.nama}
@@ -444,6 +458,7 @@ export function TransferStokPage() {
           <ErrorText error={kirim.error} />
         </form>
       </Card>
+      )}
 
       <h2 className="mb-2 text-lg font-bold text-stone-800">Riwayat Transfer</h2>
       {riwayatLoading ? (

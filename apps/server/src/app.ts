@@ -121,11 +121,16 @@ export function createApp() {
   // digerbang per-rute di modulnya). Tim, kitchen & bar ikut agar bisa absen
   // sendiri.
   tenant.use("/absensi/*", requireRole("owner", "admin", "cashier", "tim", "kitchen", "bar"));
-  // TRANSFER STOK antar lokasi (stok ready CK/cabang → CK/cabang lain):
-  // manajemen bebas memilih cabang asal; peran terkunci cabang (tim, kitchen,
-  // bar) hanya boleh mengirim DARI cabangnya sendiri (dijaga di modulnya).
-  // Kasir tidak membuat transfer — cukup menerima lewat Penerimaan.
-  tenant.use("/transfer-stok/*", requireRole("owner", "admin", "tim", "kitchen", "bar"));
+  // TRANSFER STOK: yang MENGIRIM hanya Central Kitchen — ditegakkan di modulnya
+  // pada cabang ASAL (403 bila bukan CK), jadi bukan urusan gerbang peran ini.
+  // Gerbang di sini sengaja longgar sampai kasir: semua peran cabang perlu
+  // MELIHAT barang yang sedang menuju cabangnya. Mereka tetap tak bisa membuat
+  // transfer — cabang mereka bukan CK, dan peran terkunci hanya boleh memakai
+  // cabangnya sendiri sebagai asal.
+  tenant.use(
+    "/transfer-stok/*",
+    requireRole("owner", "admin", "cashier", "tim", "kitchen", "bar"),
+  );
   tenant
     .route("/company", companyRoutes)
     .route("/customer", customerRoutes)

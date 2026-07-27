@@ -24,9 +24,27 @@ const BOLEH_STORE = [
   "/pengaturan/meja",
   "/stok",
   "/penerimaan",
+  // pantauan kiriman masuk — cabang tidak bisa mengirim, hanya melihat
+  "/transfer-stok",
   "/pengaturan/printer",
 ];
-const BOLEH_CK = ["/absen", "/profil", "/stok", "/perlengkapan", "/perlengkapan/beli", "/penerimaan", "/produksi", "/pembelian", "/bahan", "/resep"];
+// CATATAN: setiap NavLink yang bisa muncul saat divisi = CK WAJIB ada di sini.
+// Kalau tidak, tautannya tetap tampil tapi efek pengalih di bawah memantulkan
+// balik ke /produksi begitu halaman dibuka — gejalanya "menu diklik tak terjadi
+// apa-apa", bukan galat, jadi sulit dilacak. `/transfer-stok` pernah terlewat.
+const BOLEH_CK = [
+  "/absen",
+  "/profil",
+  "/stok",
+  "/perlengkapan",
+  "/perlengkapan/beli",
+  "/penerimaan",
+  "/produksi",
+  "/pembelian",
+  "/transfer-stok",
+  "/bahan",
+  "/resep",
+];
 
 const linkClass = ({ isActive }: { isActive: boolean }) =>
   `block rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
@@ -406,8 +424,11 @@ export function Layout() {
                   </NavLink>
                 </>
               )}
-              {/* Transfer stok dari cabang sendiri (mis. kembalikan/kirim ulang) */}
-              {(isTim || isKitchen || isBar) && !timDiCk && (
+              {/* Transfer stok DI CABANG = pantauan saja: yang boleh mengirim
+                  hanya Central Kitchen. Semua peran cabang (termasuk kasir dan
+                  divisi kitchen/bar) tetap perlu melihatnya untuk tahu barang
+                  apa yang sedang menuju ke sini. */}
+              {(isKasir || isTim || isKitchen || isBar || (isManajemen && dStore)) && !timDiCk && (
                 <NavLink to="/transfer-stok" className={linkClass}>
                   🔄 Transfer Stok
                 </NavLink>
