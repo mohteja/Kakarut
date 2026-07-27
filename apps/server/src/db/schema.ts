@@ -949,6 +949,20 @@ export const sales = pgTable(
     uangDiterima: numeric("uang_diterima", { precision: 14, scale: 2, mode: "number" }),
     waktu: timestamp("waktu", { withTimezone: true }).notNull().defaultNow(),
     saleDate: date("sale_date").notNull(),
+    /**
+     * Shift kasir tempat transaksi ini dibukukan. Sebelumnya hubungan sale↔shift
+     * hanya DISIMPULKAN dari waktu (`waktu` di dalam `[opened_at, closed_at]`),
+     * jadi transaksi offline yang tiba setelah shift ditutup tidak punya tempat
+     * berpijak: uangnya nyata ada di laci, tapi tak muncul di rekap mana pun.
+     * Kolom ini membuat penautan itu eksplisit sehingga transaksi susulan tetap
+     * masuk rekap & selisih kas shift yang benar.
+     *
+     * Nullable: baris lama (dan jalur online biasa) tetap ditautkan lewat
+     * jendela waktu — lihat `rekapWindow()` di modul shift. Jadi tidak perlu
+     * backfill, dan tidak ada risiko hitung ganda karena kedua jalur saling
+     * eksklusif (`shift_id` terisi ATAU `shift_id IS NULL` + di dalam jendela).
+     */
+    shiftId: uuid("shift_id").references(() => shifts.id),
     // soft-delete (Tempat Sampah): baris tetap disimpan sebagai catatan siapa yang menghapus
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
     deletedBy: uuid("deleted_by").references(() => users.id),
@@ -956,6 +970,8 @@ export const sales = pgTable(
   (t) => [
     uniqueIndex("sales_branch_nomor_uq").on(t.branchId, t.nomor),
     index("sales_company_branch_date_idx").on(t.companyId, t.branchId, t.saleDate),
+    // rekap shift menyaring per shift_id — indeks parsial cukup, mayoritas NULL
+    index("sales_shift_idx").on(t.shiftId),
   ],
 );
 

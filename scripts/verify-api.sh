@@ -4970,6 +4970,101 @@ cek "resep bertingkat: mulai kerjakan ditahan saat bahan belum ada" "V == 1" \
 cek "peringatan menyebut bahan mentah (tepung) DAN komponen resep (baso)" "V == 1" \
   "$(echo "$ERR136" | jq '(((.error // "") | test("tepung uji66")) and ((.error // "") | test("baso uji66"))) | if . then 1 else 0 end')"
 
+echo "== 137. Sinkron penjualan offline: shift tak cocok (transaksi susulan) =="
+# Celah yang ditutup: kasir OFFLINE masih melayani setelah shift ditutup dari
+# web/perangkat lain. Dulu item itu gagal 409 dan TIDAK PERNAH dicoba ulang oleh
+# mobile → uang tunai yang sudah diterima tak punya jejak sama sekali.
+# Sekarang sale dibukukan ke shift tertutup terdekat (<=6 jam, tanggal bisnis
+# sama) lewat kolom sales.shift_id, jadi uangnya muncul di rekap & selisih kas.
+uuid137() { cat /proc/sys/kernel/random/uuid; }
+# token $KASIR sudah 401 sejak §105 (password kasir diganti → token_version naik).
+# $REISS105 adalah token kasir hasil re-issue di §105 dan sudah diuji valid di sana.
+K137="$REISS105"
+MENU137=$(api "$K137" GET /menu | jq -r '.[0].id')
+# Bersihkan: pastikan tak ada shift terbuka, lalu buka+tutup satu shift baru.
+if [ -n "$(api "$K137" GET /shift/aktif | jq -r '.id // empty')" ]; then
+  api "$K137" POST /shift/tutup '{"uang_fisik":0}' > /dev/null
+fi
+api "$K137" POST /shift/buka '{"modal_awal":100000}' > /dev/null
+SH137=$(api "$K137" GET /shift/aktif | jq -r .id)
+api "$K137" POST /shift/tutup '{"uang_fisik":100000}' > /dev/null
+cek "dasar uji: shift dibuka lalu ditutup" "V == 1" \
+  "$([ -n "$SH137" ] && [ "$SH137" != "null" ] && echo 1 || echo 0)"
+SEL_AWAL=$(api "$K137" GET /shift | jq --arg s "$SH137" '[.[]|select(.id==$s)][0].selisih')
+TUNAI_AWAL=$(api "$K137" GET /shift | jq --arg s "$SH137" '[.[]|select(.id==$s)][0].penjualan_tunai')
+cek "shift tertutup: selisih kas 0 sebelum transaksi susulan" "V == 1" \
+  "$(echo "$SEL_AWAL" | jq '.==0|if . then 1 else 0 end')"
+
+# waktu 2 menit ke DEPAN: masih dalam toleransi jam perangkat (5 menit) tapi
+# sudah SETELAH ditutup_pada → persis kasus lapangan "tutup 20.30, jual 20.45".
+W137=$(date -u -d '+2 minutes' +%Y-%m-%dT%H:%M:%SZ)
+R137=$(uuid137)
+B137=$(jq -nc --arg r "$R137" --arg w "$W137" --arg m "$MENU137" '{device_id:"dev137",commands:[{client_ref:$r,tipe:"penjualan",waktu:$w,payload:{items:[{menu_id:$m,qty:1}],metode_bayar:"tunai"}}]}')
+RES137=$(api "$K137" POST /sync "$B137")
+cek "susulan di luar jendela: item ok 201 (bukan lagi gagal 409)" "V == 1" \
+  "$(echo "$RES137" | jq '(.hasil[0].status=="ok" and .hasil[0].kode==201)|if . then 1 else 0 end')"
+cek "data hasil memuat shift.id shift yang benar" "V == 1" \
+  "$(echo "$RES137" | jq --arg s "$SH137" '.hasil[0].data.shift.id==$s|if . then 1 else 0 end')"
+cek "data hasil memuat ada_transaksi_susulan=true" "V == 1" \
+  "$(echo "$RES137" | jq '.hasil[0].data.ada_transaksi_susulan==true|if . then 1 else 0 end')"
+cek "data hasil menandai di_luar_jendela_shift=true" "V == 1" \
+  "$(echo "$RES137" | jq '.hasil[0].data.di_luar_jendela_shift==true|if . then 1 else 0 end')"
+cek "shift ditandai ada_transaksi_susulan" "V == 1" \
+  "$(api "$K137" GET /shift | jq --arg s "$SH137" '[.[]|select(.id==$s)][0].ada_transaksi_susulan==true|if . then 1 else 0 end')"
+
+# Inti perbaikan: uangnya BENAR-BENAR masuk rekap shift itu. Sebelum ada kolom
+# shift_id, rekap menyaring waktu <= ditutup_pada sehingga sale ini tak terhitung
+# di mana pun — penanda susulan jadi penanda bohong.
+TUNAI_AKHIR=$(api "$K137" GET /shift | jq --arg s "$SH137" '[.[]|select(.id==$s)][0].penjualan_tunai')
+cek "rekap tunai shift BERTAMBAH (uang masuk hitungan)" "V == 1" \
+  "$(echo "$TUNAI_AKHIR $TUNAI_AWAL" | jq -s '.[0] > .[1]|if . then 1 else 0 end')"
+cek "selisih kas jadi negatif (uang fisik lama < kas sistem baru)" "V == 1" \
+  "$(api "$K137" GET /shift | jq --arg s "$SH137" '[.[]|select(.id==$s)][0].selisih < 0|if . then 1 else 0 end')"
+cek "detail shift memuat transaksi tsb dan menandainya susulan" "V == 1" \
+  "$(api "$K137" GET "/shift/$SH137" | jq '[.transaksi[]|select(.susulan==true)]|length>=1|if . then 1 else 0 end')"
+
+# Idempotency setelah fallback: kirim ulang tak boleh menggandakan rekap.
+TUNAI_X=$(api "$K137" GET /shift | jq --arg s "$SH137" '[.[]|select(.id==$s)][0].penjualan_tunai')
+cek "kirim ulang batch sama → sudah_ada" "V == 1" \
+  "$(api "$K137" POST /sync "$B137" | jq '.hasil[0].status=="sudah_ada"|if . then 1 else 0 end')"
+cek "kirim ulang TIDAK menggandakan rekap shift" "V == 1" \
+  "$(api "$K137" GET /shift | jq --arg s "$SH137" --argjson t "$TUNAI_X" '[.[]|select(.id==$s)][0].penjualan_tunai == $t|if . then 1 else 0 end')"
+
+# Batas: tanggal yang benar-benar tak punya shift tetap ditolak — sale tidak
+# boleh nyasar ke shift hari lain. 409 kini membawa sebab terstruktur.
+W137X=$(date -u -d '-20 days' +%Y-%m-%dT%H:%M:%SZ)
+B137X=$(jq -nc --arg r "$(uuid137)" --arg w "$W137X" --arg m "$MENU137" '{commands:[{client_ref:$r,tipe:"penjualan",waktu:$w,payload:{items:[{menu_id:$m,qty:1}]}}]}')
+RES137X=$(api "$K137" POST /sync "$B137X")
+cek "tanggal tanpa shift sama sekali → tetap gagal 409" "V == 1" \
+  "$(echo "$RES137X" | jq '(.hasil[0].status=="gagal" and .hasil[0].kode==409)|if . then 1 else 0 end')"
+cek "409 membawa sebab='shift_tidak_cocok'" "V == 1" \
+  "$(echo "$RES137X" | jq '.hasil[0].sebab=="shift_tidak_cocok"|if . then 1 else 0 end')"
+cek "409 membawa data.shift_terdekat (null bila memang tak ada)" "V == 1" \
+  "$(echo "$RES137X" | jq '(.hasil[0].data|has("shift_terdekat"))|if . then 1 else 0 end')"
+cek "penolakan tersimpan dibalas utuh saat retry (sebab ikut)" "V == 1" \
+  "$(api "$K137" POST /sync "$B137X" | jq '(.hasil[0].status=="sudah_ada" and .hasil[0].sebab=="shift_tidak_cocok")|if . then 1 else 0 end')"
+
+# Batas umur per tipe: penjualan 30 hari (uang sudah diterima — jangan dibuang),
+# tipe lain tetap 7 hari (mengubah stok jauh ke belakang berbahaya).
+W137OLD=$(date -u -d '-20 days' +%Y-%m-%dT%H:%M:%SZ)
+B137A=$(jq -nc --arg r "$(uuid137)" --arg w "$W137OLD" '{commands:[{client_ref:$r,tipe:"absen_saya",waktu:$w,payload:{foto_url:"http://x/f.jpg"}}]}')
+cek "absen 20 hari lalu → tetap gagal 400 (batas 7 hari)" "V == 1" \
+  "$(api "$K137" POST /sync "$B137A" | jq '(.hasil[0].status=="gagal" and .hasil[0].kode==400)|if . then 1 else 0 end')"
+cek "penjualan 20 hari lalu → BUKAN 400 (batas 30 hari, ditolak krn shift saja)" "V == 1" \
+  "$(echo "$RES137X" | jq '.hasil[0].kode==409|if . then 1 else 0 end')"
+W137TOO=$(date -u -d '-40 days' +%Y-%m-%dT%H:%M:%SZ)
+B137B=$(jq -nc --arg r "$(uuid137)" --arg w "$W137TOO" --arg m "$MENU137" '{commands:[{client_ref:$r,tipe:"penjualan",waktu:$w,payload:{items:[{menu_id:$m,qty:1}]}}]}')
+cek "penjualan 40 hari lalu → gagal 400 (lewat batas 30 hari)" "V == 1" \
+  "$(api "$K137" POST /sync "$B137B" | jq '(.hasil[0].status=="gagal" and .hasil[0].kode==400)|if . then 1 else 0 end')"
+
+# Jalur lama tidak berubah: shift TERBUKA + waktu di dalam jendela → bukan susulan.
+api "$K137" POST /shift/buka '{"modal_awal":0}' > /dev/null
+W137N=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+B137N=$(jq -nc --arg r "$(uuid137)" --arg w "$W137N" --arg m "$MENU137" '{commands:[{client_ref:$r,tipe:"penjualan",waktu:$w,payload:{items:[{menu_id:$m,qty:1}]}}]}')
+RES137N=$(api "$K137" POST /sync "$B137N")
+cek "shift terbuka: penjualan ok dan TIDAK ditandai susulan" "V == 1" \
+  "$(echo "$RES137N" | jq '(.hasil[0].status=="ok" and .hasil[0].data.ada_transaksi_susulan==false and .hasil[0].data.di_luar_jendela_shift==false)|if . then 1 else 0 end')"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

@@ -14,10 +14,29 @@ import { sedangHadir } from "../absensi/routes";
 const opener = alias(users, "shift_opener");
 const closer = alias(users, "shift_closer");
 
-/** Rekap penjualan pada jendela waktu shift (tunai vs non-tunai). */
+/**
+ * Sale yang masuk hitungan sebuah shift.
+ *
+ * Dua jalur yang SALING EKSKLUSIF, jadi tidak ada risiko hitung ganda:
+ * 1. `shift_id` = shift ini — penautan eksplisit. Dipakai transaksi susulan
+ *    dari sinkron offline, yang `waktu`-nya bisa jatuh SETELAH `closed_at`
+ *    (kasir masih melayani saat perangkat offline, shift ditutup dari tempat
+ *    lain). Tanpa jalur ini uangnya tidak muncul di rekap mana pun.
+ * 2. `shift_id IS NULL` + `waktu` di dalam jendela — perilaku lama, dipakai
+ *    seluruh transaksi online biasa dan semua baris sebelum kolom `shift_id`
+ *    ada. Karena itu kolom baru tidak perlu di-backfill.
+ */
+function milikShift(shiftId: string, openedAt: Date, closedAt: Date | null) {
+  return sql`(${sales.shiftId} = ${shiftId} OR (${sales.shiftId} IS NULL AND ${sales.waktu} >= ${openedAt}${
+    closedAt ? sql` AND ${sales.waktu} <= ${closedAt}` : sql``
+  }))`;
+}
+
+/** Rekap penjualan sebuah shift (tunai vs non-tunai). */
 async function rekapWindow(
   companyId: string,
   branchId: string,
+  shiftId: string,
   openedAt: Date,
   closedAt: Date | null,
 ) {
@@ -33,8 +52,7 @@ async function rekapWindow(
         eq(sales.companyId, companyId),
         eq(sales.branchId, branchId),
         isNull(sales.deletedAt),
-        gte(sales.waktu, openedAt),
-        closedAt ? lte(sales.waktu, closedAt) : undefined,
+        milikShift(shiftId, openedAt, closedAt),
       ),
     )
     .groupBy(sales.metodeBayar);
@@ -50,10 +68,11 @@ async function rekapWindow(
   return { penjualan_tunai: tunai, penjualan_nontunai: nontunai, jumlah_transaksi: jumlah };
 }
 
-/** Daftar transaksi individual pada jendela waktu shift (untuk detail). */
+/** Daftar transaksi individual sebuah shift (untuk detail). */
 async function transaksiWindow(
   companyId: string,
   branchId: string,
+  shiftId: string,
   openedAt: Date,
   closedAt: Date | null,
 ): Promise<ShiftTransaksiRow[]> {
@@ -73,8 +92,7 @@ async function transaksiWindow(
         eq(sales.companyId, companyId),
         eq(sales.branchId, branchId),
         isNull(sales.deletedAt),
-        gte(sales.waktu, openedAt),
-        closedAt ? lte(sales.waktu, closedAt) : undefined,
+        milikShift(shiftId, openedAt, closedAt),
       ),
     )
     .orderBy(desc(sales.waktu))
@@ -86,6 +104,9 @@ async function transaksiWindow(
     total: Number(r.total),
     metode: r.metode,
     kasir: r.kasir ?? null,
+    // transaksi yang tiba lewat sinkron setelah shift ditutup: waktunya di luar
+    // jendela, jadi kasir perlu tahu baris ini yang menggeser rekap penutupan
+    susulan: closedAt != null && r.waktu > closedAt,
   }));
 }
 
@@ -127,7 +148,7 @@ function baseSelect() {
 }
 
 async function toDto(r: ShiftJoinRow): Promise<Shift> {
-  const rekap = await rekapWindow(r.companyId, r.branchId, r.openedAt, r.closedAt);
+  const rekap = await rekapWindow(r.companyId, r.branchId, r.id, r.openedAt, r.closedAt);
   const kas_sistem = r.modalAwal + rekap.penjualan_tunai;
   return {
     id: r.id,
@@ -292,7 +313,7 @@ export const shiftRoutes = new Hono<AppEnv>()
       throw new HTTPException(403, { message: "Shift bukan dari cabang Anda" });
     }
     const dto = await toDto(row);
-    const transaksi = await transaksiWindow(row.companyId, row.branchId, row.openedAt, row.closedAt);
+    const transaksi = await transaksiWindow(row.companyId, row.branchId, row.id, row.openedAt, row.closedAt);
     return c.json({ ...dto, transaksi } satisfies ShiftDetail);
   })
   .post(

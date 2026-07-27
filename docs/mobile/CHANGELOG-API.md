@@ -20,6 +20,96 @@ tanpa akses repo server.
 
 ---
 
+## Rilis: Penjualan offline yang tak menemukan shift cocok
+
+> **Status:** menunggu rilis. **Belum ada di production** sampai PR-nya
+> di-merge — koordinasikan dulu sebelum mulai mengerjakan.
+>
+> Menjawab dokumen kalian *"Untuk tim backend — penjualan offline yang tak
+> menemukan shift cocok"*. **Opsi A dikerjakan.** Migrasi DB: `0080`
+> (menambah `sales.shift_id`).
+
+### ⚪️ INFO — koreksi premis: dulu TIDAK ada penautan sale↔shift
+
+Dokumen kalian menulis "sale ditautkan ke shift". Sebelum rilis ini itu tidak
+benar: `sales` tak punya kolom shift sama sekali — hubungannya **disimpulkan
+dari waktu** (`rekapWindow` menyaring `waktu BETWEEN dibuka_pada AND
+ditutup_pada`). Akibatnya Opsi A tak bisa dikerjakan sebagai perubahan kecil di
+`/sync`: menautkan sale jam 20.45 ke shift yang ditutup 20.30 tetap **tidak**
+memasukkannya ke rekap, dan `ada_transaksi_susulan:true` akan jadi penanda
+bohong. Karena itu kolom **`sales.shift_id`** ditambahkan supaya penautannya
+nyata. Baris lama tetap dihitung lewat jendela waktu (tidak perlu backfill,
+tidak ada hitung ganda).
+
+### 🟢 BARU — fallback shift: 409 itu hilang untuk kasus kalian
+
+`POST /api/sync` `tipe:"penjualan"` sekarang mencari shift dua tahap:
+
+1. shift yang jendelanya memuat `waktu` (seperti dulu), **plus toleransi 5
+   menit di sisi buka** untuk jam perangkat yang mundur;
+2. bila tak ada — shift terakhir cabang itu yang **ditutup paling dekat sebelum
+   `waktu`**, syarat `waktu ≤ ditutup_pada + 6 jam` **DAN** tanggal bisnis sama
+   (zona waktu perusahaan).
+
+Sale masuk lewat jalur 2 tetap **ikut terhitung di rekap & selisih kas** shift
+itu. Skenario kalian (tutup 20.30, jual 20.45) kini `status:"ok"`.
+
+### 🟢 BARU — `data` hasil `penjualan` membawa konteks shift
+
+```jsonc
+{ "status": "ok", "kode": 201, "data": {
+    "shift": { "id": "…", "dibuka_pada": "…", "ditutup_pada": "…" },
+    "ada_transaksi_susulan": true,
+    "di_luar_jendela_shift": true   // dibukukan lewat toleransi jalur 2
+}}
+```
+
+Pakai `di_luar_jendela_shift` untuk memunculkan "transaksi masuk ke shift yang
+sudah ditutup — periksa selisih kas", bukan diam-diam sukses.
+
+**Yang TIDAK bisa kami penuhi:** `nomor` shift. Tabel `shifts` tidak punya
+kolom nomor — tidak ada "SH-0142" di sistem ini. Shift dikenali lewat `id` +
+`dibuka_pada`/`ditutup_pada`. Kalau kalian butuh label pendek, bilang; itu
+fitur baru (penomoran shift), bukan penambahan field.
+
+### 🟡 PERLU DICEK — 409 kini membawa `sebab` + `data`
+
+`SyncItemResult` bertambah **`sebab?: string`**. Saat `penjualan` benar-benar
+tak menemukan shift:
+
+```jsonc
+{ "status": "gagal", "kode": 409, "error": "Tidak ada shift kasir yang mencakup waktu transaksi ini",
+  "sebab": "shift_tidak_cocok",
+  "data": { "shift_terdekat": { "id": "…", "dibuka_pada": "…", "ditutup_pada": "…" } } }
+```
+
+`shift_terdekat` bernilai `null` bila memang tak ada shift sebelum `waktu`.
+Penolakan tersimpan dibalas **utuh** saat retry (`status:"sudah_ada"` + `sebab`
++ `data`), jadi konteksnya tidak hilang. Opsi B poin 2 (`shift_id` opsional di
+`SaleBody`) **tidak** dikerjakan — dengan Opsi A jalan, tidak ada lagi kasus
+yang butuh kasir memilih shift manual.
+
+### 🟢 BARU — batas usia `waktu` jadi per tipe
+
+`penjualan` **30 hari** (naik dari 7), tipe lain tetap **7 hari**. Sesuai usul
+kalian: perangkat cadangan / outlet event yang offline berminggu-minggu tak
+lagi kehilangan seluruh antreannya. Lewat batas tetap **gagal 400**.
+
+### ⚪️ INFO — jawaban pertanyaan §2 kalian
+
+Batas jendela shift **inklusif di kedua ujung** (`dibuka_pada ≤ waktu ≤
+ditutup_pada`). `waktu` yang jatuh **sebelum** shift pertama hari itu: dulu
+409, sekarang masih 409 **kecuali** selisihnya ≤ 5 menit (toleransi jam
+perangkat mundur yang kalian sebut) — di luar itu tetap ditolak, karena
+fallback hanya melihat ke belakang ke shift yang sudah ditutup.
+
+### ⚪️ INFO — `ShiftTransaksiRow` bertambah `susulan`
+
+`GET /api/shift/:id` → tiap baris `transaksi` kini punya `susulan: boolean`
+(true = masuk setelah shift ditutup). Field tambahan, tidak merusak.
+
+---
+
 ## Rilis: Transfer Stok + perbaikan integritas stok
 
 > **Status:** menunggu rilis (PR #114). Endpoint di bawah **belum ada di

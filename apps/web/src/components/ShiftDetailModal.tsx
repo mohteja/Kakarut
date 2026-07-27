@@ -132,8 +132,18 @@ export function ShiftDetailModal({ shiftId, onClose }: { shiftId: string | null;
                   </thead>
                   <tbody className="divide-y divide-stone-100">
                     {data.transaksi.map((t) => (
-                      <tr key={t.id}>
-                        <td className={tdClass}>{t.nomor}</td>
+                      <tr key={t.id} className={t.susulan ? "bg-amber-50/60" : undefined}>
+                        <td className={tdClass}>
+                          {t.nomor}
+                          {t.susulan && (
+                            <span
+                              className="ml-1.5 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800"
+                              title="Masuk lewat sinkron SETELAH shift ditutup — inilah yang membuat rekap terkini berbeda dari angka penutupan"
+                            >
+                              susulan
+                            </span>
+                          )}
+                        </td>
                         <td className={tdClass}>{formatWaktu(t.waktu)}</td>
                         <td className={tdClass}>{t.kasir ?? "—"}</td>
                         <td className={tdClass}>{METODE_LABEL[t.metode] ?? t.metode}</td>
