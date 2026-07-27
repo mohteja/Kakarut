@@ -218,8 +218,9 @@ export function DokumenBelanjaModal({
     </div>
   );
 
-  // ===== UNDUH: berkas HTML mandiri (inline style) — bisa dibuka finance di
-  // browser mana pun & disimpan/di-print jadi PDF, tanpa perlu akses aplikasi.
+  // ===== Bangun dokumen HTML mandiri (inline style). Tidak lagi diunduh
+  // sebagai berkas .html — hanya dipakai jalur cadangan jendela cetak bila
+  // pembuatan PDF gagal.
   const esc = (s: unknown) =>
     String(s ?? "").replace(
       /[&<>"]/g,
@@ -259,23 +260,6 @@ export function DokumenBelanjaModal({
   };
   const buildHtml = () =>
     `<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(judul)}${grup.noFaktur ? " " + esc(grup.noFaktur) : ""}</title><style>${DOK_CSS}</style></head><body>${buildBody()}</body></html>`;
-  const unduh = () => {
-    const dasar = `${judul} ${grup.noFaktur ?? formatTanggalRingkas(grup.waktu)}`.trim();
-    const nama =
-      dasar
-        .replace(/[^\w\d.-]+/g, "-")
-        .replace(/-+/g, "-")
-        .replace(/^-|-$/g, "") + ".html";
-    const blob = new Blob([buildHtml()], { type: "text/html;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = nama;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-  };
 
   // ===== DOWNLOAD PDF: LANGSUNG unduh berkas .pdf (tanpa dialog cetak/preview)
   // — enak di HP: satu ketuk, file turun. Bila gagal (mis. lib tak termuat),
@@ -314,9 +298,6 @@ export function DokumenBelanjaModal({
         <div className="mt-4 flex flex-wrap justify-end gap-2">
           <button onClick={onClose} className={btnSecondary}>
             Tutup
-          </button>
-          <button onClick={unduh} className={btnSecondary}>
-            ⬇ Unduh (HTML)
           </button>
           <button onClick={() => window.print()} className={btnSecondary}>
             🖨 Cetak ke printer
