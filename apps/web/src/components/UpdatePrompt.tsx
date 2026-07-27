@@ -1,5 +1,15 @@
 import { useEffect, useState } from "react";
-import { UPDATE_AVAILABLE_EVENT, periksaBuildServer } from "../lib/api";
+import { LOADED_BUILD, UPDATE_AVAILABLE_EVENT, periksaBuildServer } from "../lib/api";
+
+/**
+ * Build yang tab ini sudah pernah "dimuat ulang untuk diperbarui". Dipakai agar
+ * dialog memblokir tak pernah tampil DUA KALI untuk build yang sama: kalau
+ * setelah muat ulang build yang termuat tetap sama, mengulang dialog tidak
+ * menolong siapa pun — cukup pil kecil. Pernah terjadi sungguhan: respons 304
+ * pada endpoint daftar mengembalikan build id basi, jadi tab yang SUDAH
+ * diperbarui terus dianggap ketinggalan.
+ */
+const KUNCI_MUAT_ULANG = "kakarut:muat-ulang-pembaruan";
 
 /**
  * Notifikasi "ada pembaruan": muncul saat versi frontend baru sudah ter-deploy
@@ -18,7 +28,16 @@ export function UpdatePrompt() {
   useEffect(() => {
     function onUpdate() {
       setAda(true);
-      setMinimal(false);
+      // Sudah pernah dimuat ulang untuk build INI tapi tetap dianggap tertinggal
+      // → memuat ulang lagi tak akan menolong. Turunkan ke pil kecil supaya
+      // kasir tidak terkurung dialog yang muncul terus.
+      let sudah = false;
+      try {
+        sudah = sessionStorage.getItem(KUNCI_MUAT_ULANG) === LOADED_BUILD;
+      } catch {
+        /* sessionStorage diblokir (mode privat) — anggap belum pernah */
+      }
+      setMinimal(sudah);
     }
     window.addEventListener(UPDATE_AVAILABLE_EVENT, onUpdate);
     return () => window.removeEventListener(UPDATE_AVAILABLE_EVENT, onUpdate);
@@ -66,7 +85,17 @@ export function UpdatePrompt() {
         </p>
         <div className="mt-5 flex flex-col gap-2">
           <button
-            onClick={() => window.location.reload()}
+            onClick={() => {
+              // Catat build yang SEDANG dimuat sebelum memuat ulang. Kalau
+              // setelah muat ulang build-nya masih sama dan tetap dianggap
+              // tertinggal, dialog tak ditampilkan lagi — cukup pil kecil.
+              try {
+                if (LOADED_BUILD) sessionStorage.setItem(KUNCI_MUAT_ULANG, LOADED_BUILD);
+              } catch {
+                /* sessionStorage diblokir — muat ulang tetap dilakukan */
+              }
+              window.location.reload();
+            }}
             className="rounded-lg bg-orange-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-orange-500"
           >
             🔄 Perbarui sekarang

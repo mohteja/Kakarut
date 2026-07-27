@@ -239,6 +239,15 @@ export function createApp() {
       // memang alur yang kita mau. Keduanya ikut terbawa pada respons 304.
       c.res.headers.set("Cache-Control", "private, no-cache");
       c.res.headers.set("Vary", "Authorization");
+      // WAJIB: pasang ulang build id di SINI, di luar middleware etag.
+      // Middleware itu membangun respons 304 dari nol dan hanya menyisakan
+      // header tertentu — `X-Kakarut-Build` yang dipasang middleware di dalam
+      // ikut terbuang. Browser lalu memakai ulang nilai LAMA dari entri
+      // cache-nya, klien mengira ada versi baru padahal barusan diperbarui,
+      // dan dialog "Ada pembaruan aplikasi" muncul lagi tepat setelah dimuat
+      // ulang — berputar tanpa henti.
+      const build = getBuildId();
+      if (build) c.res.headers.set("X-Kakarut-Build", build);
     });
   }
 
