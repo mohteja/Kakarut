@@ -3,15 +3,13 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import type { MenuDto } from "@kakarut/shared";
 import {
-  Card,
   ErrorText,
   PageTitle,
   Spinner,
   btnPrimary,
   btnSecondary,
-  tdClass,
-  thClass,
 } from "../../components/ui";
+import { TabelResponsif } from "../../components/TabelResponsif";
 import { KategoriManagerModal } from "../../components/KategoriManagerModal";
 import { labelCabang, useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
@@ -103,90 +101,108 @@ export function MenuListPage() {
       {[...grup.entries()].map(([kategori, list]) => (
         <div key={kategori} className="mb-6">
           <h2 className="mb-2 text-lg font-semibold text-stone-700">{kategori}</h2>
-          <Card className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="border-b border-stone-200 bg-stone-50">
-                <tr>
-                  <th className={thClass}>Kode</th>
-                  <th className={thClass}>Menu</th>
-                  <th className={`${thClass} text-right`}>HPP</th>
-                  <th className={`${thClass} text-right`}>HPP Dine-in</th>
-                  <th className={`${thClass} text-right`}>Markup</th>
-                  <th className={`${thClass} text-right`}>Harga Saran</th>
-                  <th className={`${thClass} text-right`}>Saran Bulat</th>
-                  <th className={`${thClass} text-right`}>Harga Jual</th>
-                  <th className={`${thClass} text-right`}>Food Cost</th>
-                  <th className={thClass}></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-stone-100">
-                {list.map((m) => (
-                  <tr key={m.id} className="hover:bg-stone-50">
-                    <td className={tdClass}>
-                      {m.kode ? (
-                        <span className="inline-block rounded bg-stone-100 px-2 py-0.5 font-mono text-xs font-semibold text-stone-600">
-                          {m.kode}
-                        </span>
-                      ) : (
-                        <span className="text-stone-300">—</span>
-                      )}
-                    </td>
-                    <td className={`${tdClass} font-medium`}>
-                      {m.nama}
-                      {m.tipe === "paket" && (
-                        <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-700">
-                          Paket · dasar: {m.base_menu_nama}
-                        </span>
-                      )}
-                      {m.branch_ids.length > 0 && (
-                        <span
-                          className="ml-2 rounded-full bg-sky-100 px-2 py-0.5 text-xs text-sky-700"
-                          title={m.branch_ids
-                            .map((bid) => namaCabang.get(bid) ?? "?")
-                            .join(", ")}
-                        >
-                          📍 {m.branch_ids.map((bid) => namaCabang.get(bid) ?? "?").join(", ")}
-                        </span>
-                      )}
-                    </td>
-                    <td className={`${tdClass} text-right`}>{formatRupiah(m.hpp)}</td>
-                    <td className={`${tdClass} text-right text-stone-400`}>
-                      {formatRupiah(m.hpp_dine_in)}
-                    </td>
-                    <td className={`${tdClass} text-right`}>
-                      {m.tipe === "paket" ? `dasar ×${m.base_mult}` : `×${m.mult}`}
-                    </td>
-                    <td className={`${tdClass} text-right`}>{formatRupiah(m.harga_saran)}</td>
-                    <td className={`${tdClass} text-right`}>
-                      {formatRupiah(m.harga_jual_bulat)}
-                    </td>
-                    <td className={`${tdClass} text-right font-bold`}>
-                      {formatRupiah(m.harga_jual)}
-                    </td>
-                    <td className={`${tdClass} text-right`}>
-                      <FoodCost persen={m.food_cost_persen} />
-                    </td>
-                    <td className={`${tdClass} whitespace-nowrap text-right`}>
-                      <Link
-                        to={`/menu/${m.id}/edit`}
-                        className="text-sm font-medium text-orange-600 hover:underline"
+          <TabelResponsif
+            data={list}
+            kunci={(m) => m.id}
+            kosong="Belum ada menu di kategori ini."
+            kolom={[
+              {
+                judul: "Kode",
+                hp: "sub",
+                sel: (m) =>
+                  m.kode ? (
+                    <span className="inline-block rounded bg-stone-100 px-2 py-0.5 font-mono text-xs font-semibold text-stone-600">
+                      {m.kode}
+                    </span>
+                  ) : (
+                    <span className="text-stone-300">—</span>
+                  ),
+              },
+              {
+                judul: "Menu",
+                hp: "judul",
+                kelasSel: "font-medium",
+                sel: (m) => (
+                  <>
+                    {m.nama}
+                    {m.tipe === "paket" && (
+                      <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-700">
+                        Paket · dasar: {m.base_menu_nama}
+                      </span>
+                    )}
+                    {m.branch_ids.length > 0 && (
+                      <span
+                        className="ml-2 rounded-full bg-sky-100 px-2 py-0.5 text-xs text-sky-700"
+                        title={m.branch_ids.map((bid) => namaCabang.get(bid) ?? "?").join(", ")}
                       >
-                        Ubah
-                      </Link>
-                      <button
-                        onClick={() => {
-                          if (confirm(`Nonaktifkan menu "${m.nama}"?`)) hapus.mutate(m.id);
-                        }}
-                        className="ml-3 text-sm font-medium text-red-500 hover:underline"
-                      >
-                        Hapus
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </Card>
+                        📍 {m.branch_ids.map((bid) => namaCabang.get(bid) ?? "?").join(", ")}
+                      </span>
+                    )}
+                  </>
+                ),
+              },
+              { judul: "HPP", kanan: true, sel: (m) => formatRupiah(m.hpp) },
+              {
+                judul: "HPP Dine-in",
+                kanan: true,
+                // turunan HPP: hanya berguna berdampingan dengan kolom lain
+                hp: "lewat",
+                kelasSel: "text-stone-400",
+                sel: (m) => formatRupiah(m.hpp_dine_in),
+              },
+              {
+                judul: "Markup",
+                kanan: true,
+                hp: "lewat",
+                sel: (m) => (m.tipe === "paket" ? `dasar ×${m.base_mult}` : `×${m.mult}`),
+              },
+              {
+                judul: "Harga Saran",
+                kanan: true,
+                hp: "lewat",
+                sel: (m) => formatRupiah(m.harga_saran),
+              },
+              {
+                judul: "Saran Bulat",
+                kanan: true,
+                hp: "lewat",
+                sel: (m) => formatRupiah(m.harga_jual_bulat),
+              },
+              {
+                judul: "Harga Jual",
+                kanan: true,
+                kelasSel: "font-bold",
+                sel: (m) => formatRupiah(m.harga_jual),
+              },
+              {
+                judul: "Food Cost",
+                kanan: true,
+                sel: (m) => <FoodCost persen={m.food_cost_persen} />,
+              },
+              {
+                hp: "aksi",
+                kelasSel: "whitespace-nowrap text-right",
+                sel: (m) => (
+                  <>
+                    <Link
+                      to={`/menu/${m.id}/edit`}
+                      className="text-sm font-medium text-orange-600 hover:underline"
+                    >
+                      Ubah
+                    </Link>
+                    <button
+                      onClick={() => {
+                        if (confirm(`Nonaktifkan menu "${m.nama}"?`)) hapus.mutate(m.id);
+                      }}
+                      className="ml-3 text-sm font-medium text-red-500 hover:underline"
+                    >
+                      Hapus
+                    </button>
+                  </>
+                ),
+              },
+            ]}
+          />
         </div>
       ))}
     </div>

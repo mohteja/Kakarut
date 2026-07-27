@@ -2,16 +2,14 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import type { SampahRow } from "@kakarut/shared";
 import {
-  Card,
   ErrorText,
   Modal,
   PageTitle,
   Spinner,
   btnPrimary,
   btnSecondary,
-  tdClass,
-  thClass,
 } from "../components/ui";
+import { TabelResponsif } from "../components/TabelResponsif";
 import { api } from "../lib/api";
 import { formatRupiah, formatWaktu } from "../lib/format";
 
@@ -74,62 +72,66 @@ export function TempatSampahPage() {
 
       {isLoading ? (
         <Spinner />
-      ) : list.length === 0 ? (
-        <Card className="p-8 text-center text-sm text-stone-400">Tempat sampah kosong.</Card>
       ) : (
-        <Card className="overflow-x-auto">
-          <table className="w-full whitespace-nowrap text-sm">
-            <thead className="border-b border-stone-200 bg-stone-50">
-              <tr>
-                <th className={thClass}>Jenis</th>
-                <th className={thClass}>Ringkasan</th>
-                <th className={thClass}>Waktu</th>
-                <th className={thClass}>Dibuat oleh</th>
-                <th className={thClass}>Dihapus oleh</th>
-                <th className={thClass}>Dihapus pada</th>
-                <th className={`${thClass} text-right`}>Total</th>
-                <th className={thClass}></th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-stone-100">
-              {list.map((r) => (
-                <tr key={`${r.jenis}-${r.key}`}>
-                  <td className={tdClass}>
-                    <span
-                      className={`rounded-full px-2 py-0.5 text-xs font-semibold ${JENIS[r.jenis].cls}`}
-                    >
-                      {JENIS[r.jenis].label}
-                    </span>
-                  </td>
-                  <td className={`${tdClass} max-w-xs truncate font-medium`}>{r.label}</td>
-                  <td className={tdClass}>{formatWaktu(r.waktu)}</td>
-                  <td className={tdClass}>{r.dibuat_oleh ?? "—"}</td>
-                  <td className={`${tdClass} font-medium text-red-600`}>{r.dihapus_oleh ?? "—"}</td>
-                  <td className={tdClass}>{formatWaktu(r.dihapus_pada)}</td>
-                  <td className={`${tdClass} text-right`}>
-                    {r.total > 0 ? formatRupiah(r.total) : "—"}
-                  </td>
-                  <td className={`${tdClass} text-right`}>
-                    <button
-                      onClick={() => {
-                        if (
-                          confirm(
-                            `Pulihkan ${JENIS[r.jenis].label.toLowerCase()} "${r.label}"? Stok & laporan akan terhitung kembali.`,
-                          )
-                        )
-                          pulihkan.mutate(r);
-                      }}
-                      disabled={pulihkan.isPending}
-                      className="text-sm font-medium text-emerald-700 hover:underline disabled:opacity-50"
-                    >
-                      ♻ Pulihkan
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Card>
+        <TabelResponsif
+          data={list}
+          kunci={(r) => `${r.jenis}-${r.key}`}
+          kosong="Tempat sampah kosong."
+          kolom={[
+            {
+              judul: "Jenis",
+              hp: "sub",
+              sel: (r) => (
+                <span
+                  className={`rounded-full px-2 py-0.5 text-xs font-semibold ${JENIS[r.jenis].cls}`}
+                >
+                  {JENIS[r.jenis].label}
+                </span>
+              ),
+            },
+            {
+              judul: "Ringkasan",
+              hp: "judul",
+              kelasSel: "max-w-xs truncate font-medium",
+              sel: (r) => r.label,
+            },
+            { judul: "Waktu", sel: (r) => formatWaktu(r.waktu) },
+            { judul: "Dibuat oleh", sel: (r) => r.dibuat_oleh ?? "—" },
+            {
+              judul: "Dihapus oleh",
+              kelasSel: "font-medium text-red-600",
+              sel: (r) => (
+                <span className="font-medium text-red-600">{r.dihapus_oleh ?? "—"}</span>
+              ),
+            },
+            { judul: "Dihapus pada", sel: (r) => formatWaktu(r.dihapus_pada) },
+            {
+              judul: "Total",
+              kanan: true,
+              sel: (r) => (r.total > 0 ? formatRupiah(r.total) : "—"),
+            },
+            {
+              hp: "aksi",
+              kelasSel: "text-right",
+              sel: (r) => (
+                <button
+                  onClick={() => {
+                    if (
+                      confirm(
+                        `Pulihkan ${JENIS[r.jenis].label.toLowerCase()} "${r.label}"? Stok & laporan akan terhitung kembali.`,
+                      )
+                    )
+                      pulihkan.mutate(r);
+                  }}
+                  disabled={pulihkan.isPending}
+                  className="text-sm font-medium text-emerald-700 hover:underline disabled:opacity-50"
+                >
+                  ♻ Pulihkan
+                </button>
+              ),
+            },
+          ]}
+        />
       )}
 
       {konfirmasiKosong && (

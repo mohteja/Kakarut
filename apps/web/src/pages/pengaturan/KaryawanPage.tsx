@@ -10,9 +10,8 @@ import {
   btnPrimary,
   btnSecondary,
   inputClass,
-  tdClass,
-  thClass,
 } from "../../components/ui";
+import { TabelResponsif } from "../../components/TabelResponsif";
 import type { AktivitasRow, KaryawanTempatDto, UndanganKaryawanRow } from "@kakarut/shared";
 import { labelCabang, useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
@@ -391,133 +390,116 @@ export function KaryawanPage() {
       </div>
 
       {tab === "arsip" ? (
-        <Card className="overflow-x-auto">
-          {arsip.length === 0 ? (
-            <p className="p-6 text-center text-sm text-stone-400">
-              Belum ada karyawan yang diarsipkan.
-            </p>
-          ) : (
-            <table className="w-full">
-              <thead className="border-b border-stone-200 bg-stone-50">
-                <tr>
-                  <th className={thClass}>Nama</th>
-                  <th className={thClass}>Kode</th>
-                  <th className={thClass}>Email</th>
-                  <th className={thClass}>Peran</th>
-                  <th className={thClass}>Diarsipkan</th>
-                  <th className={thClass}></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-stone-100">
-                {arsip.map((k) => (
-                  <tr key={k.user_id} className="text-stone-500">
-                    <td className={`${tdClass} font-medium`}>{k.nama}</td>
-                    <td className={tdClass}>
-                      <span className="font-mono">{k.employee_code ?? "—"}</span>
-                    </td>
-                    <td className={tdClass}>{k.email}</td>
-                    <td className={tdClass}>{labelRole[k.role]}</td>
-                    <td className={tdClass}>
-                      {k.archived_at ? formatTanggalRingkas(k.archived_at) : "—"}
-                    </td>
-                    <td className={`${tdClass} text-right`}>
-                      <AksiMenu
-                        items={[
-                          { label: "🗒 Aktivitas", onClick: () => setAktivitasFor(k) },
-                          {
-                            label: "↩ Pulihkan (aktifkan)",
-                            warna: "text-green-600",
-                            onClick: () =>
-                              ubah.mutate({ userId: k.user_id, body: { arsip: false } }),
-                          },
-                        ]}
-                      />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </Card>
+        <TabelResponsif
+          data={arsip}
+          kunci={(k) => k.user_id}
+          kosong="Belum ada karyawan yang diarsipkan."
+          kelasBaris={() => "text-stone-500"}
+          kolom={[
+            { judul: "Nama", hp: "judul", kelasSel: "font-medium", sel: (k) => k.nama },
+            {
+              judul: "Kode",
+              hp: "sub",
+              sel: (k) => <span className="font-mono">{k.employee_code ?? "—"}</span>,
+            },
+            { judul: "Email", sel: (k) => k.email },
+            { judul: "Peran", sel: (k) => labelRole[k.role] },
+            {
+              judul: "Diarsipkan",
+              sel: (k) => (k.archived_at ? formatTanggalRingkas(k.archived_at) : "—"),
+            },
+            {
+              hp: "aksi",
+              kelasSel: "text-right",
+              sel: (k) => (
+                <AksiMenu
+                  items={[
+                    { label: "🗒 Aktivitas", onClick: () => setAktivitasFor(k) },
+                    {
+                      label: "↩ Pulihkan (aktifkan)",
+                      warna: "text-green-600",
+                      onClick: () => ubah.mutate({ userId: k.user_id, body: { arsip: false } }),
+                    },
+                  ]}
+                />
+              ),
+            },
+          ]}
+        />
       ) : (
-      <Card className="overflow-x-auto">
-        <table className="w-full">
-          <thead className="border-b border-stone-200 bg-stone-50">
-            <tr>
-              <th className={thClass}>Nama</th>
-              <th className={thClass}>Kode</th>
-              <th className={thClass}>Email</th>
-              <th className={thClass}>Peran</th>
-              <th className={thClass}>Lokasi kerja</th>
-              <th className={thClass}></th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-stone-100">
-            {(karyawan ?? []).map((k) => (
-              <tr key={k.user_id}>
-                <td className={`${tdClass} font-medium`}>{k.nama}</td>
-                <td className={tdClass}>
-                  <span className="font-mono font-semibold text-stone-700">
-                    {k.employee_code ?? "—"}
-                  </span>
-                </td>
-                <td className={tdClass}>{k.email}</td>
-                <td className={tdClass}>{labelRole[k.role]}</td>
-                <td className={tdClass}>{k.cabang ?? "Semua"}</td>
-                <td className={`${tdClass} text-right`}>
-                  {/* QR sering dipakai → tetap terlihat; aksi lain masuk dropdown
-                      agar tidak terpencet sembarangan */}
-                  <div className="flex items-center justify-end gap-2">
-                    {k.employee_code && (
-                      <button
-                        onClick={() => setQrFor(k)}
-                        className="rounded-lg border border-orange-200 px-2.5 py-1 text-sm font-medium text-orange-600 hover:bg-orange-50"
-                      >
-                        QR
-                      </button>
-                    )}
-                    <AksiMenu
-                      items={[
-                        { label: "🗒 Aktivitas", onClick: () => setAktivitasFor(k) },
-                        // Tempat SO hanya untuk peran terikat cabang (kasir/tim)
-                        ...(WAJIB_CABANG.has(k.role)
-                          ? [{ label: "🗃 Tempat SO", onClick: () => setTempatFor(k) }]
-                          : []),
-                        {
-                          label: "✏️ Ubah",
-                          onClick: () =>
-                            setForm({
-                              id: k.user_id,
-                              nama: k.nama,
-                              email: k.email,
-                              password: "",
-                              role: k.role,
-                              // Admin selalu dikunci ke Kantor (pusat) bila ada.
-                              branch_id:
-                                k.role === "admin" && kantorId ? kantorId : (k.branch_id ?? ""),
-                            }),
-                        },
-                        {
-                          label: "🗄 Arsipkan (nonaktif)",
-                          warna: "text-red-600",
-                          onClick: () => {
-                            if (
-                              confirm(
-                                `Arsipkan ${k.nama}? Karyawan nonaktif — keluar dari daftar & tidak bisa login/absen. Riwayatnya tetap tersimpan dan bisa dipulihkan dari tab Arsip.`,
-                              )
+        <TabelResponsif
+          data={karyawan ?? []}
+          kunci={(k) => k.user_id}
+          kosong="Belum ada karyawan."
+          kolom={[
+            { judul: "Nama", hp: "judul", kelasSel: "font-medium", sel: (k) => k.nama },
+            {
+              judul: "Kode",
+              hp: "sub",
+              sel: (k) => (
+                <span className="font-mono font-semibold text-stone-700">
+                  {k.employee_code ?? "—"}
+                </span>
+              ),
+            },
+            { judul: "Email", sel: (k) => k.email },
+            { judul: "Peran", sel: (k) => labelRole[k.role] },
+            { judul: "Lokasi kerja", sel: (k) => k.cabang ?? "Semua" },
+            {
+              hp: "aksi",
+              kelasSel: "text-right",
+              sel: (k) => (
+                // QR sering dipakai → tetap terlihat; aksi lain masuk dropdown
+                // agar tidak terpencet sembarangan
+                <div className="flex items-center justify-end gap-2">
+                  {k.employee_code && (
+                    <button
+                      onClick={() => setQrFor(k)}
+                      className="rounded-lg border border-orange-200 px-2.5 py-1 text-sm font-medium text-orange-600 hover:bg-orange-50"
+                    >
+                      QR
+                    </button>
+                  )}
+                  <AksiMenu
+                    items={[
+                      { label: "🗒 Aktivitas", onClick: () => setAktivitasFor(k) },
+                      // Tempat SO hanya untuk peran terikat cabang (kasir/tim)
+                      ...(WAJIB_CABANG.has(k.role)
+                        ? [{ label: "🗃 Tempat SO", onClick: () => setTempatFor(k) }]
+                        : []),
+                      {
+                        label: "✏️ Ubah",
+                        onClick: () =>
+                          setForm({
+                            id: k.user_id,
+                            nama: k.nama,
+                            email: k.email,
+                            password: "",
+                            role: k.role,
+                            // Admin selalu dikunci ke Kantor (pusat) bila ada.
+                            branch_id:
+                              k.role === "admin" && kantorId ? kantorId : (k.branch_id ?? ""),
+                          }),
+                      },
+                      {
+                        label: "🗄 Arsipkan (nonaktif)",
+                        warna: "text-red-600",
+                        onClick: () => {
+                          if (
+                            confirm(
+                              `Arsipkan ${k.nama}? Karyawan nonaktif — keluar dari daftar & tidak bisa login/absen. Riwayatnya tetap tersimpan dan bisa dipulihkan dari tab Arsip.`,
                             )
-                              ubah.mutate({ userId: k.user_id, body: { arsip: true } });
-                          },
+                          )
+                            ubah.mutate({ userId: k.user_id, body: { arsip: true } });
                         },
-                      ]}
-                    />
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </Card>
+                      },
+                    ]}
+                  />
+                </div>
+              ),
+            },
+          ]}
+        />
       )}
 
       {/* Undangan yang masih menunggu diterima (alur "menunggu diundang") */}

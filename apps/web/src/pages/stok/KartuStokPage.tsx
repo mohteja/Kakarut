@@ -73,7 +73,9 @@ export function KartuStokPage() {
     <div className="max-w-4xl">
       <PageTitle
         aksi={
-          <div className="flex items-center gap-2 print:hidden">
+          // w-full di HP: dua input tanggal + "s/d" tidak muat di sisa baris
+          // judul, dan tanpa ini input "sampai" jatuh di luar layar
+          <div className="flex w-full items-center gap-2 print:hidden sm:w-auto">
             <input
               type="date"
               value={dari}

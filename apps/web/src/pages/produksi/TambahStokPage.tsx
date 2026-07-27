@@ -935,7 +935,9 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
       {total > 0 && (
         <div className="mt-4 flex flex-wrap items-center justify-center gap-x-3 gap-y-2 text-sm">
           {totalPages > 1 && (
-            <div className="flex items-center gap-1.5">
+            // flex-wrap: 5 tombol butuh ~420px, lebih lebar dari layar HP —
+            // tanpa ini tombol terakhir («/») jatuh di luar layar
+            <div className="flex flex-wrap items-center justify-center gap-1.5">
               <button
                 onClick={() => keHalaman(1)}
                 disabled={page <= 1}

@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import {
-  Card,
   ErrorText,
   Modal,
   PageTitle,
@@ -9,9 +8,8 @@ import {
   btnPrimary,
   btnSecondary,
   inputClass,
-  tdClass,
-  thClass,
 } from "../../components/ui";
+import { TabelResponsif } from "../../components/TabelResponsif";
 import { api } from "../../lib/api";
 
 interface Tenant {
@@ -103,59 +101,55 @@ export function TenantsPage() {
       <ErrorText error={toggle.error} />
       <ErrorText error={ubahPlan.error} />
 
-      <Card className="overflow-x-auto">
-        <table className="w-full">
-          <thead className="border-b border-stone-200 bg-stone-50">
-            <tr>
-              <th className={thClass}>Perusahaan</th>
-              <th className={thClass}>Slug</th>
-              <th className={thClass}>Plan</th>
-              <th className={`${thClass} text-right`}>Cabang</th>
-              <th className={`${thClass} text-right`}>User</th>
-              <th className={thClass}>Status</th>
-              <th className={thClass}></th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-stone-100">
-            {(tenants ?? []).map((t) => (
-              <tr key={t.id}>
-                <td className={`${tdClass} font-medium`}>{t.nama}</td>
-                <td className={tdClass}>{t.slug}</td>
-                <td className={tdClass}>
-                  <select
-                    value={t.plan === "pro" ? "pro" : "lite"}
-                    onChange={(e) => ubahPlan.mutate({ id: t.id, plan: e.target.value })}
-                    aria-label={`Plan ${t.nama}`}
-                    className="rounded-lg border border-stone-200 bg-stone-50 px-2 py-1 text-xs font-semibold uppercase"
-                  >
-                    <option value="lite">Lite</option>
-                    <option value="pro">Pro</option>
-                  </select>
-                </td>
-                <td className={`${tdClass} text-right`}>{t.jumlah_cabang}</td>
-                <td className={`${tdClass} text-right`}>{t.jumlah_user}</td>
-                <td className={tdClass}>
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
-                      t.is_active ? "bg-green-100 text-green-800" : "bg-red-100 text-red-700"
-                    }`}
-                  >
-                    {t.is_active ? "Aktif" : "Ditangguhkan"}
-                  </span>
-                </td>
-                <td className={`${tdClass} text-right`}>
-                  <button
-                    onClick={() => toggle.mutate(t)}
-                    className="text-sm font-medium text-stone-500 hover:underline"
-                  >
-                    {t.is_active ? "Tangguhkan" : "Aktifkan"}
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </Card>
+      <TabelResponsif
+        data={tenants ?? []}
+        kunci={(t) => t.id}
+        kosong="Belum ada tenant."
+        kolom={[
+          { judul: "Perusahaan", hp: "judul", kelasSel: "font-medium", sel: (t) => t.nama },
+          { judul: "Slug", hp: "sub", sel: (t) => t.slug },
+          {
+            judul: "Plan",
+            sel: (t) => (
+              <select
+                value={t.plan === "pro" ? "pro" : "lite"}
+                onChange={(e) => ubahPlan.mutate({ id: t.id, plan: e.target.value })}
+                aria-label={`Plan ${t.nama}`}
+                className="rounded-lg border border-stone-200 bg-stone-50 px-2 py-1 text-xs font-semibold uppercase"
+              >
+                <option value="lite">Lite</option>
+                <option value="pro">Pro</option>
+              </select>
+            ),
+          },
+          { judul: "Cabang", kanan: true, sel: (t) => t.jumlah_cabang },
+          { judul: "User", kanan: true, sel: (t) => t.jumlah_user },
+          {
+            judul: "Status",
+            sel: (t) => (
+              <span
+                className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                  t.is_active ? "bg-green-100 text-green-800" : "bg-red-100 text-red-700"
+                }`}
+              >
+                {t.is_active ? "Aktif" : "Ditangguhkan"}
+              </span>
+            ),
+          },
+          {
+            hp: "aksi",
+            kelasSel: "text-right",
+            sel: (t) => (
+              <button
+                onClick={() => toggle.mutate(t)}
+                className="text-sm font-medium text-stone-500 hover:underline"
+              >
+                {t.is_active ? "Tangguhkan" : "Aktifkan"}
+              </button>
+            ),
+          },
+        ]}
+      />
 
       <Modal open={form !== null} onClose={() => setForm(null)} title="Buat Tenant Baru">
         {form && (
