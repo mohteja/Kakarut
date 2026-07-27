@@ -25,7 +25,9 @@ export const kategoriRoutes = new Hono<AppEnv>()
       .select()
       .from(menuCategories)
       .where(eq(menuCategories.companyId, auth.company_id!))
-      .orderBy(asc(menuCategories.sortOrder), asc(menuCategories.nama));
+      // `id` sebagai pemutus seri — urutan harus sama persis tiap query agar
+      // ETag daftar tidak berubah walau datanya tidak berubah.
+      .orderBy(asc(menuCategories.sortOrder), asc(menuCategories.nama), asc(menuCategories.id));
     return c.json(
       rows.map((r) => ({ id: r.id, nama: r.nama, sort_order: r.sortOrder })),
     );

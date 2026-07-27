@@ -154,6 +154,41 @@ fallback hanya melihat ke belakang ke shift yang sudah ditutup.
 `GET /api/shift/:id` → tiap baris `transaksi` kini punya `susulan: boolean`
 (true = masuk setelah shift ditutup). Field tambahan, tidak merusak.
 
+### 🟢 BARU — ETag / `304 Not Modified` pada endpoint daftar master data
+
+Menjawab usulan kalian: revalidasi latar tak perlu lagi menarik badan penuh
+setiap kali cache disajikan saat sinyal jelek.
+
+Berlaku untuk **`GET /menu`, `/kategori`, `/cabang`, `/meja`** — dan hanya itu.
+Setiap `200` membawa `ETag`; kirim balik sebagai `If-None-Match` → **`304` tanpa
+badan** bila belum ada perubahan.
+
+| Hal | Nilai |
+| --- | --- |
+| Header respons tambahan | `ETag`, `Cache-Control: private, no-cache`, `Vary: Authorization` |
+| Klien lama (tanpa `If-None-Match`) | `200` berbadan, persis seperti sebelumnya |
+| Urutan rilis | **tidak mengikat** — boleh naik & dipakai kapan saja |
+| Saat badan ter-gzip | ETag jadi `W/"…"`; pencocokan mengabaikan awalan `W/`, kirim balik apa adanya |
+
+**Kunci penyimpanan ETag harus memuat query string** — `/menu` dan `/meja`
+disaring `?branch_id=`, jadi satu kunci global akan menyilangkan data
+antar-cabang.
+
+**Batasnya jujur:** yang dihemat hanya byte di kabel. Digest dihitung dari badan
+respons yang sudah jadi, jadi query DB tetap berjalan penuh. `304` = "server
+bekerja lalu tidak mengirim", bukan "server menjawab tanpa bekerja".
+
+**`/menu/ketersediaan` sengaja TIDAK ber-ETag** — isinya berubah tiap penjualan,
+jadi digest-nya nyaris tak pernah cocok dan hanya menambah kerja.
+
+**Soal urutan field JSON yang kalian ingatkan:** benar, dan bukan hipotetis di
+sini. Tiga tempat diperbaiki bersama rilis ini — `komponen` dan `branch_ids`
+pada `/menu` dibangun dari query **tanpa `ORDER BY`**, dan `/cabang` diurut
+`created_at` yang identik untuk cabang-cabang yang dibuat dalam satu transaksi.
+Semua query daftar kini punya pemutus seri. verify-api §139 mengunci sifat itu
+dengan membandingkan ETag enam permintaan beruntun per endpoint, supaya
+kegoyahan urutan gagal di CI alih-alih menyamar jadi "hit rate rendah".
+
 ---
 
 ## Rilis: Transfer Stok + perbaikan integritas stok

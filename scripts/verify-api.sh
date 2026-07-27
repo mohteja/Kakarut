@@ -5158,5 +5158,97 @@ cek "regresi nol: POST /shift/buka online TETAP 400 saat shift terbuka" "V == 40
   "$(status_code_body "$K137" POST /shift/buka '{"modal_awal":0}')"
 
 echo
+echo "== 139. ETag / 304 pada endpoint daftar master data =="
+# Aplikasi mobile merevalidasi cache di latar belakang; tanpa ETag tiap
+# revalidasi menarik badan penuh walau tak ada yang berubah. Yang diuji di sini
+# bukan sekadar "ada header ETag", tapi tiga sifat yang kalau lepas membuat
+# fiturnya diam-diam tak berguna: stabil, peka perubahan, dan tak bocor
+# antar-endpoint.
+
+etag_of() { # etag_of <token> <path> [flag curl tambahan]
+  curl -s -o /dev/null -D - ${3:-} -X GET "$BASE/api$2" -H "Authorization: Bearer $1" \
+    | tr -d '\r' | sed -n 's/^[Ee][Tt][Aa][Gg]: *//p'
+}
+hdr_of() { # hdr_of <token> <path> <nama-header>
+  curl -s -o /dev/null -D - -X GET "$BASE/api$2" -H "Authorization: Bearer $1" \
+    | tr -d '\r' | sed -n "s/^$3: *//Ip"
+}
+status_inm() { # status_inm <token> <path> <if-none-match>
+  curl -s -o /dev/null -w '%{http_code}' -X GET "$BASE/api$2" \
+    -H "Authorization: Bearer $1" -H "If-None-Match: $3"
+}
+bytes_inm() { # bytes_inm <token> <path> <if-none-match>
+  curl -s -X GET "$BASE/api$2" -H "Authorization: Bearer $1" -H "If-None-Match: $3" | wc -c
+}
+
+for JALUR in /menu /kategori /cabang /meja; do
+  ET=$(etag_of "$OWNER" "$JALUR")
+  cek "GET $JALUR membawa header ETag" "V == 1" "$([ -n "$ET" ] && echo 1 || echo 0)"
+  cek "GET $JALUR + If-None-Match cocok → 304" "V == 304" "$(status_inm "$OWNER" "$JALUR" "$ET")"
+  cek "304 $JALUR tanpa badan (0 byte)" "V == 0" "$(bytes_inm "$OWNER" "$JALUR" "$ET")"
+  cek "GET $JALUR + ETag basi → 200 (bukan 304)" "V == 200" \
+    "$(status_inm "$OWNER" "$JALUR" '"basi-tidak-akan-pernah-cocok"')"
+done
+
+# SIFAT PALING RAPUH: digest harus stabil untuk data yang sama. Larik bersarang
+# tanpa ORDER BY (`komponen`, `branch_ids` pada /menu) atau kunci urut yang seri
+# membuat ETag berubah-ubah walau tak ada yang diubah — gejalanya menyamar jadi
+# "datanya memang sering berubah", jadi nyaris mustahil dilacak belakangan.
+for JALUR in /menu /kategori /cabang /meja; do
+  SAMA=1
+  E0=$(etag_of "$OWNER" "$JALUR")
+  for _ in 1 2 3 4 5; do
+    [ "$(etag_of "$OWNER" "$JALUR")" = "$E0" ] || SAMA=0
+  done
+  cek "ETag $JALUR stabil pada 6 permintaan beruntun (urutan JSON deterministik)" "V == 1" "$SAMA"
+done
+
+# Peka perubahan: kalau ETag tak bergerak setelah data berubah, klien memegang
+# data basi selamanya — kegagalan yang jauh lebih buruk daripada tanpa ETag.
+EK_SEBELUM=$(etag_of "$OWNER" /kategori)
+api "$OWNER" POST /kategori '{"nama":"Kategori ETag 139","sort_order":97}' > /dev/null
+EK_SESUDAH=$(etag_of "$OWNER" /kategori)
+cek "ETag /kategori BERUBAH setelah kategori baru dibuat" "V == 1" \
+  "$([ "$EK_SEBELUM" != "$EK_SESUDAH" ] && echo 1 || echo 0)"
+cek "ETag /kategori lama → 200 lagi (klien menarik data baru)" "V == 200" \
+  "$(status_inm "$OWNER" /kategori "$EK_SEBELUM")"
+
+# Tak bocor antar-endpoint: ETag terikat pada isi, bukan pada rute.
+cek "ETag /kategori dipakai di /menu → 200 (bukan 304 palsu)" "V == 200" \
+  "$(status_inm "$OWNER" /menu "$EK_SESUDAH")"
+
+# Interaksi dengan kompresi. compress() melemahkan ETag jadi W/"..." saat badan
+# jadi ter-gzip — RFC menuntut itu karena kompresi mengubah byte yang dikirim.
+# Pencocokan If-None-Match mengabaikan awalan W/, jadi klien ber-gzip dan
+# tanpa-gzip harus sama-sama kena 304. Kalau middleware dipasang di LUAR
+# compress(), digest dihitung dari byte terkompresi dan tak pernah cocok.
+ET_GZIP=$(etag_of "$OWNER" /menu "--compressed")
+cek "ETag /menu ada juga saat klien menerima gzip" "V == 1" \
+  "$([ -n "$ET_GZIP" ] && echo 1 || echo 0)"
+cek "ETag gzip cocok balik → 304" "V == 304" "$(status_inm "$OWNER" /menu "$ET_GZIP")"
+cek "ETag gzip = ETag polos setelah awalan W/ dilepas" "V == 1" \
+  "$([ "${ET_GZIP#W/}" = "$(etag_of "$OWNER" /menu)" ] && echo 1 || echo 0)"
+
+# Header cache: `private` supaya cache bersama tak pernah menyimpan badan milik
+# satu tenant, `no-cache` = wajib revalidasi (bukan "jangan simpan").
+cek "GET /menu membawa Cache-Control private, no-cache" "V == 1" \
+  "$([ "$(hdr_of "$OWNER" /menu 'Cache-Control')" = "private, no-cache" ] && echo 1 || echo 0)"
+cek "Cache-Control ikut terbawa pada respons 304" "V == 1" \
+  "$(curl -s -o /dev/null -D - -X GET "$BASE/api/menu" -H "Authorization: Bearer $OWNER" \
+      -H "If-None-Match: $(etag_of "$OWNER" /menu)" | tr -d '\r' \
+      | grep -qi '^cache-control: private, no-cache' && echo 1 || echo 0)"
+cek "GET /menu membawa Vary: Authorization" "V == 1" \
+  "$([ "$(hdr_of "$OWNER" /menu 'Vary')" = "Authorization" ] && echo 1 || echo 0)"
+
+# Regresi nol: hanya GET yang disentuh, dan sub-jalur tidak ikut tercakup.
+cek "POST /kategori tetap 201 (middleware hanya GET)" "V == 201" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/kategori" \
+      -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' \
+      -d '{"nama":"Kategori ETag 139b","sort_order":98}')"
+cek "GET /menu/ketersediaan TIDAK ber-ETag (berubah tiap penjualan)" "V == 1" \
+  "$([ -z "$(etag_of "$OWNER" /menu/ketersediaan)" ] && echo 1 || echo 0)"
+cek "GET /menu tanpa If-None-Match tetap 200 berbadan (klien lama)" "V == 1" \
+  "$(api "$OWNER" GET /menu | jq 'length>0|if . then 1 else 0 end')"
+echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

@@ -42,11 +42,14 @@ export function tampilDiCabang(
  * sebagai basis paket & penjualan historis) beserta komponennya.
  */
 export async function loadKatalog(dbx: Db | Tx, companyId: string): Promise<KatalogMenu> {
+  // Tiebreak `id` bukan kosmetik: tanpa itu dua menu ber-sortOrder+nama sama
+  // bisa bertukar urutan antar-query (Postgres tak menjanjikan urutan pada
+  // kunci yang seri), dan ETag /menu ikut berubah walau datanya sama.
   const rows = await dbx
     .select()
     .from(menus)
     .where(eq(menus.companyId, companyId))
-    .orderBy(asc(menus.sortOrder), asc(menus.nama));
+    .orderBy(asc(menus.sortOrder), asc(menus.nama), asc(menus.id));
 
   const cats = await dbx
     .select()
@@ -65,7 +68,11 @@ export async function loadKatalog(dbx: Db | Tx, companyId: string): Promise<Kata
           menuBranches.menuId,
           rows.map((r) => r.id),
         ),
-      );
+      )
+      // Tanpa ORDER BY, isi `branch_ids` ikut urutan baris yang dikembalikan
+      // Postgres — bisa berubah karena ganti rencana query atau update HOT,
+      // walau himpunannya persis sama.
+      .orderBy(asc(menuBranches.branchId));
     for (const b of batasan) {
       const list = branchIdsByMenu.get(b.menuId) ?? [];
       list.push(b.branchId);
@@ -94,7 +101,10 @@ export async function loadKatalog(dbx: Db | Tx, companyId: string): Promise<Kata
           menuComponents.menuId,
           rows.map((r) => r.id),
         ),
-      );
+      )
+      // Sama seperti branch_ids: urutan `komponen` harus stabil. Urut nama agar
+      // tampilan editor resep juga rapi, dengan id sebagai pemutus seri.
+      .orderBy(asc(ingredients.nama), asc(menuComponents.ingredientId));
     for (const comp of comps) {
       const list = komponenByMenu.get(comp.menuId) ?? [];
       list.push({

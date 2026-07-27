@@ -52,7 +52,10 @@ export const mejaRoutes = new Hono<AppEnv>()
       .select()
       .from(meja)
       .where(and(eq(meja.companyId, auth.company_id!), eq(meja.branchId, branchId)))
-      .orderBy(asc(meja.posY), asc(meja.posX), asc(meja.nama));
+      // `id` sebagai pemutus seri — meja baru lazim menumpuk di pos (0,0)
+      // dengan nama mirip, jadi seri di sini justru sering terjadi. Urutan yang
+      // goyah membuat ETag daftar berubah walau datanya sama.
+      .orderBy(asc(meja.posY), asc(meja.posX), asc(meja.nama), asc(meja.id));
     return c.json(rows.map(toDto));
   })
   .post("/", zValidator("json", MejaBody), async (c) => {
@@ -102,7 +105,10 @@ export const mejaRoutes = new Hono<AppEnv>()
       .select()
       .from(meja)
       .where(and(eq(meja.companyId, auth.company_id!), eq(meja.branchId, branchId)))
-      .orderBy(asc(meja.posY), asc(meja.posX), asc(meja.nama));
+      // `id` sebagai pemutus seri — meja baru lazim menumpuk di pos (0,0)
+      // dengan nama mirip, jadi seri di sini justru sering terjadi. Urutan yang
+      // goyah membuat ETag daftar berubah walau datanya sama.
+      .orderBy(asc(meja.posY), asc(meja.posX), asc(meja.nama), asc(meja.id));
     return c.json(rows.map(toDto));
   })
   .patch("/:id", zValidator("json", MejaBody.partial()), async (c) => {

@@ -619,6 +619,27 @@ ADA (validasi = aturan endpoint asli), idempoten per `client_ref`.
 - **Tangani `429` (rate limit):** pada endpoint auth/sync, `429` disertai header
   `Retry-After` (detik). Tampilkan "coba lagi dalam N detik" & jeda tombol
   submit; hindari retry otomatis beruntun.
+- **ETag / `304 Not Modified` pada endpoint daftar master data.** Berlaku untuk
+  **`GET /api/menu`, `/api/kategori`, `/api/cabang`, `/api/meja`** — dan hanya
+  itu. Setiap `200` membawa header `ETag`; kirim balik nilainya sebagai
+  `If-None-Match` dan bila datanya belum berubah server menjawab **`304` tanpa
+  badan**.
+  - **Kunci penyimpanan ETag harus memuat query string**, karena `/menu` dan
+    `/meja` disaring `?branch_id=`. Satu kunci global akan menyilangkan data
+    antar-cabang.
+  - **`304` bukan galat.** Tangani sebelum jalur error, jangan parse badannya
+    (kosong), dan perlakukan sebagai "salinan cache masih sah".
+  - **Kirim `If-None-Match` hanya bila salinan badannya benar-benar masih ada**,
+    supaya `304` tak pernah meninggalkan klien tanpa data.
+  - **Kompatibel penuh ke belakang:** klien yang tidak mengirim `If-None-Match`
+    tetap menerima `200` berbadan seperti sebelumnya.
+  - Respons juga membawa `Cache-Control: private, no-cache` (wajib revalidasi,
+    jangan disimpan cache bersama) dan `Vary: Authorization`.
+  - Saat badan terkirim ter-gzip, ETag dilemahkan jadi `W/"…"`. Pencocokan
+    mengabaikan awalan `W/`, jadi kirim balik nilai apa adanya.
+  - **Yang dihemat hanya byte di kabel.** Digest dihitung dari badan respons
+    yang sudah jadi, jadi query DB tetap berjalan penuh — `304` berarti "server
+    bekerja lalu tidak mengirim", bukan "server menjawab tanpa bekerja".
 
 ---
 

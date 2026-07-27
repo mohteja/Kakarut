@@ -1,6 +1,7 @@
 import { eq, sql } from "drizzle-orm";
 import { Hono, type MiddlewareHandler } from "hono";
 import { compress } from "hono/compress";
+import { etag } from "hono/etag";
 import { HTTPException } from "hono/http-exception";
 import { logger } from "hono/logger";
 import { secureHeaders } from "hono/secure-headers";
@@ -203,6 +204,39 @@ export function createApp() {
   // gambar/berkas yang sudah terkompresi dilewati otomatis.
   app.use("*", compress());
   app.use("*", logger());
+
+  // ETag + 304 untuk endpoint DAFTAR master data. Aplikasi mobile merevalidasi
+  // cache-nya di latar belakang; tanpa ini tiap revalidasi menarik badan penuh
+  // walau tak ada yang berubah — mahal di sinyal buruk, dan itu justru saat
+  // revalidasi paling sering jalan.
+  //
+  // Yang dihemat HANYA byte di kabel: digest dihitung dari badan respons yang
+  // sudah jadi, jadi query DB + serialisasi tetap berjalan penuh.
+  //
+  // Didaftarkan SETELAH compress() supaya berjalan DI DALAMNYA — digest dihitung
+  // dari byte belum-terkompresi. Kalau terbalik, ETag ikut berubah mengikuti
+  // level kompresi dan tak pernah cocok. (Saat respons jadi terkompresi, compress
+  // melemahkan ETag jadi `W/"…"`; pencocokan If-None-Match mengabaikan awalan
+  // `W/`, jadi klien ber-gzip dan tanpa-gzip sama-sama kena 304.)
+  //
+  // Syarat yang tidak boleh lepas: urutan JSON harus deterministik. Semua query
+  // daftar di bawah ini — termasuk larik bersarang `komponen` & `branch_ids`
+  // pada /menu — memakai ORDER BY dengan pemutus seri. Tanpa itu digest berubah
+  // walau datanya sama, dan gejalanya menyamar jadi "data memang sering
+  // berubah" sehingga sangat sulit dilacak.
+  const etagDaftar = etag();
+  for (const jalur of ["/api/menu", "/api/kategori", "/api/cabang", "/api/meja"]) {
+    app.use(jalur, async (c, next) => {
+      if (c.req.method !== "GET") return next();
+      await etagDaftar(c, next);
+      // `private` menjaga cache bersama tak pernah menyimpan badan milik satu
+      // tenant; `no-cache` mewajibkan revalidasi (bukan "jangan simpan"), yang
+      // memang alur yang kita mau. Keduanya ikut terbawa pada respons 304.
+      c.res.headers.set("Cache-Control", "private, no-cache");
+      c.res.headers.set("Vary", "Authorization");
+    });
+  }
+
   app.route("/api", api);
   // Suntik referensi app ke modul sync agar bisa sub-request internal ke
   // endpoint asli (Fase 2) tanpa import melingkar.

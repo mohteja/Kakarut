@@ -104,7 +104,10 @@ export const cabangRoutes = new Hono<AppEnv>()
       .select()
       .from(branches)
       .where(eq(branches.companyId, auth.company_id!))
-      .orderBy(asc(branches.createdAt));
+      // `id` sebagai pemutus seri — seed & provisioning menyisipkan beberapa
+      // cabang dalam SATU transaksi, jadi `createdAt`-nya identik dan urutannya
+      // jadi undian tiap query kalau tak dipatok.
+      .orderBy(asc(branches.createdAt), asc(branches.id));
     return c.json(
       rows.map((r) => ({
         id: r.id,
