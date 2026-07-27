@@ -5521,6 +5521,35 @@ cek "pemohon batalkan saat menunggu → 200" "V == 200" \
   "$(status_code "$REISS105" DELETE "/pengajuan/$PID143B")"
 cek "pemohon batalkan yg sudah disetujui → 409" "V == 409" \
   "$(status_code "$REISS105" DELETE "/pengajuan/$PID143")"
+# Saringan aktif/arsip: karyawan yang sudah keluar tak boleh mengotori daftar
+# maupun angka "total tidak hadir" — tapi tetap bisa dilihat bila diminta.
+api "$OWNER" POST /karyawan \
+  "{\"nama\":\"Keluar Uji 143\",\"email\":\"keluar143@basooopa.id\",\"password\":\"Keluar143!\",\"role\":\"admin\"}" > /dev/null
+UIDK143=$(api "$OWNER" GET /karyawan | jq -r '[.[]|select(.email=="keluar143@basooopa.id")][0].user_id // ""')
+cek "karyawan uji muncul di rekap saat masih aktif" "V == 1" \
+  "$(api "$OWNER" GET "/absensi/rekap?bulan=$BULAN143&branch_id=all" | jq --arg u "$UIDK143" '[.rows[]|select(.user_id==$u)]|length==1|if . then 1 else 0 end')"
+cek "arsipkan karyawan uji → 200" "V == 200" \
+  "$(status_code_body "$OWNER" PATCH "/karyawan/$UIDK143" '{"arsip":true}')"
+
+AKTIF143=$(api "$OWNER" GET "/absensi/rekap?bulan=$BULAN143&branch_id=all&status=aktif")
+ARSIP143=$(api "$OWNER" GET "/absensi/rekap?bulan=$BULAN143&branch_id=all&status=arsip")
+SEMUA143=$(api "$OWNER" GET "/absensi/rekap?bulan=$BULAN143&branch_id=all&status=semua")
+cek "status=aktif: yang sudah keluar hilang dari rekap" "V == 0" \
+  "$(echo "$AKTIF143" | jq --arg u "$UIDK143" '[.rows[]|select(.user_id==$u)]|length')"
+cek "TANPA status= (bawaan) sama dengan status=aktif" "V == 1" \
+  "$(api "$OWNER" GET "/absensi/rekap?bulan=$BULAN143&branch_id=all" | jq --argjson n "$(echo "$AKTIF143" | jq '.rows|length')" '(.rows|length)==$n|if . then 1 else 0 end')"
+cek "status=arsip: yang keluar muncul + membawa arsip_pada" "V == 1" \
+  "$(echo "$ARSIP143" | jq --arg u "$UIDK143" '[.rows[]|select(.user_id==$u and .arsip_pada!=null)]|length==1|if . then 1 else 0 end')"
+cek "status=arsip: karyawan aktif TIDAK ikut" "V == 1" \
+  "$(echo "$ARSIP143" | jq '[.rows[]|select(.arsip_pada==null)]|length==0|if . then 1 else 0 end')"
+cek "status=semua: gabungan keduanya" "V == 1" \
+  "$(echo "$SEMUA143" | jq --arg u "$UIDK143" --argjson n "$(echo "$AKTIF143" | jq '.rows|length')" '(([.rows[]|select(.user_id==$u)]|length)==1) and ((.rows|length) > $n)|if . then 1 else 0 end')"
+cek "status ngawur → jatuh ke bawaan aktif" "V == 1" \
+  "$(api "$OWNER" GET "/absensi/rekap?bulan=$BULAN143&branch_id=all&status=ngasal" | jq --argjson n "$(echo "$AKTIF143" | jq '.rows|length')" '(.rows|length)==$n|if . then 1 else 0 end')"
+# Bulan SEBELUM ia bergabung: tak punya hari kerja di sana → tak usah muncul.
+cek "bulan lampau: karyawan yang belum bergabung tak muncul" "V == 0" \
+  "$(api "$OWNER" GET "/absensi/rekap?bulan=2020-01&branch_id=all&status=semua" | jq --arg u "$UIDK143" '[.rows[]|select(.user_id==$u)]|length')"
+
 
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="

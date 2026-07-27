@@ -494,7 +494,8 @@ ADA (validasi = aturan endpoint asli), idempoten per `client_ref`.
 - `POST /api/absensi` — **[owner/admin/cashier]** (inline, kecuali tim) — pindai stasiun — query: `branch_id?` — req: `{ kode: string, foto_url: string (wajib), lat?: number(-90..90)|null, lng?: number(-180..180)|null }` — res: **201** `AbsenResult` — error: **400** (di luar radius geofence / GPS wajib / karyawan nonaktif), **404** kode tak dikenal
 - `POST /api/absensi/saya` — [owner/admin/cashier/tim/kitchen/bar] — absen sendiri — query: `branch_id?` — req: `{ foto_url: string (wajib), lat?|null, lng?|null }` — res: **201** `AbsenResult` — error: **400** (geofence / tak ada kode karyawan / nonaktif), **403** bukan karyawan aktif
 - `GET /api/absensi` — [owner/admin/cashier/tim/kitchen/bar] — query: `branch_id?`, `tanggal?` (YYYY-MM-DD) — res: `AbsensiRow[]` (masuk-pertama / keluar-terakhir per karyawan) — error: **400** tanggal salah
-- `GET /api/absensi/rekap` — **[owner/admin]** (inline, setara `/laporan/*`) — rekap SEBULAN lintas karyawan — query: `bulan?` (`YYYY-MM`, default bulan berjalan di zona waktu perusahaan; nilai ngawur → default), `branch_id?` (`all` = semua cabang) — res: `RekapAbsenDto`
+- `GET /api/absensi/rekap` — **[owner/admin]** (inline, setara `/laporan/*`) — rekap SEBULAN lintas karyawan — query: `bulan?` (`YYYY-MM`, default bulan berjalan di zona waktu perusahaan; nilai ngawur → default), `branch_id?` (`all` = semua cabang), `status?` (`aktif`|`arsip`|`semua`; **bawaan `aktif`**, nilai ngawur → bawaan) — res: `RekapAbsenDto`
+  > **`status`** memilih siapa yang masuk daftar: `aktif` = keanggotaan belum diarsipkan; `arsip` = sudah keluar **dan** keluarnya pada/sesudah bulan itu (yang keluar jauh sebelumnya tak punya satu pun hari kerja di sana); `semua` = gabungan. Baris arsip membawa `arsip_pada` (ISO) — `null` berarti masih aktif. Karyawan yang baru bergabung **setelah** bulan itu berakhir tak pernah muncul pada status mana pun.
   > **Aturan hitung** — tak ada tabel jadwal kerja, outlet dianggap buka tiap hari. Tiap tanggal dinilai berurut: ada cap absen → `hadir`; ada pengajuan cuti/libur **berstatus `disetujui`** yang mencakupnya → `cuti`/`libur`; selain itu → `alpa` (inilah `tidak_hadir`). Tanggal **belum lewat**, **sebelum karyawan bergabung**, dan **setelah ia diarsipkan** berstatus `kosong` dan tak pernah dihitung — karyawan baru tidak terlihat alpa sebulan penuh.
   > `harian` selalu sepanjang jumlah hari bulan itu (urut tanggal 1..akhir), jadi klien bisa merendernya langsung sebagai kolom tanpa mengisi lubang.
 
@@ -2234,6 +2235,12 @@ export interface RekapAbsenRow {
   employee_code: string | null;
   role: UserRole | null;
   cabang: string | null;
+  /**
+   * Kapan keanggotaannya diarsipkan (karyawan keluar) — null = masih aktif.
+   * Dipakai UI untuk menandai baris; hitungannya sendiri sudah berhenti di
+   * tanggal ini.
+   */
+  arsip_pada: string | null;
   hadir: number;
   tidak_hadir: number;
   cuti: number;
@@ -2242,7 +2249,10 @@ export interface RekapAbsenRow {
   harian: RekapAbsenHari[];
 }
 
-/** Rekap absen sebulan (GET /absensi/rekap) — khusus owner/admin. */
+/**
+ * Rekap absen sebulan (GET /absensi/rekap) — khusus owner/admin.
+ * Baris yang masuk mengikuti `?status=aktif|arsip|semua` (bawaan `aktif`).
+ */
 export interface RekapAbsenDto {
   /** YYYY-MM */
   bulan: string;
