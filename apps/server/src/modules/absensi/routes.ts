@@ -1,13 +1,27 @@
 import { zValidator } from "@hono/zod-validator";
-import { and, desc, eq, isNull, lt, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import { absenTipeBerikutnya, jarakMeter, type AbsenResult, type AbsensiRow } from "@kakarut/shared";
+import {
+  absenTipeBerikutnya,
+  jarakMeter,
+  type AbsenResult,
+  type AbsensiRow,
+  type PengajuanKategori,
+  type RekapAbsenDto,
+  type RekapAbsenHari,
+  type RekapAbsenRow,
+} from "@kakarut/shared";
 import { db } from "../../db/client";
 import { attendances, branches, companies, memberships, users } from "../../db/schema";
 import { tanggalDi } from "../../lib/time";
 import { requireRole, resolveBranchId, type AppEnv } from "../../middleware/auth";
+import {
+  jumlahHari,
+  pengajuanDisetujuiPadaRentang,
+  tanggalDalamRentang,
+} from "../pengajuan/routes";
 import {
   cariHasilIdempoten,
   catatHasilIdempoten,
@@ -346,5 +360,173 @@ export const absensiRoutes = new Hono<AppEnv>()
       foto_masuk: r.foto_masuk ?? null,
       foto_keluar: r.foto_keluar ?? null,
     }));
+    return c.json(dto);
+  })
+  /**
+   * REKAP ABSEN SEBULAN — khusus owner/admin (gerbang INLINE: grup `/absensi/*`
+   * sengaja terbuka untuk 6 peran karena semua orang absen sendiri, tapi rekap
+   * lintas karyawan setara laporan manajemen).
+   *
+   * Query: `?bulan=YYYY-MM` (default bulan berjalan di zona waktu perusahaan),
+   * `?branch_id=` (`all` = semua cabang; hanya owner/admin).
+   *
+   * Aturan hitung — "outlet buka tiap hari", tanpa tabel jadwal kerja:
+   *   ada cap absen           → hadir
+   *   pengajuan DISETUJUI     → cuti / libur
+   *   selain itu (dan sudah lewat) → alpa
+   *   di luar jendela hitung  → kosong (tak pernah dihitung)
+   * Jendela hitung per karyawan dipotong tanggal bergabung & tanggal diarsipkan
+   * supaya karyawan baru/keluar tak terlihat alpa sebulan penuh.
+   */
+  .get("/rekap", requireRole("owner", "admin"), async (c) => {
+    const auth = c.get("auth");
+    const tz = await timezoneOf(auth.company_id!);
+    const hariIni = tanggalDi(tz);
+
+    const bulanQ = c.req.query("bulan");
+    const bulan = bulanQ && /^\d{4}-(0[1-9]|1[0-2])$/.test(bulanQ) ? bulanQ : hariIni.slice(0, 7);
+    const [th, bl] = bulan.split("-").map(Number);
+    const jumlahHariBulan = new Date(Date.UTC(th, bl, 0)).getUTCDate();
+    const dari = `${bulan}-01`;
+    const sampai = `${bulan}-${String(jumlahHariBulan).padStart(2, "0")}`;
+    // Batas kanan jendela: hari ini bila bulan berjalan, akhir bulan bila sudah lewat.
+    const batasHitung = hariIni < dari ? null : hariIni < sampai ? hariIni : sampai;
+
+    const branchQ = c.req.query("branch_id");
+    const branchId = branchQ && branchQ !== "all" ? branchQ : undefined;
+
+    // (1) Karyawan: yang masih aktif ATAU baru diarsipkan setelah bulan dimulai
+    // (yang keluar di tengah bulan tetap muncul dengan hitungan sampai keluar).
+    const karyawan = await db
+      .select({
+        user_id: users.id,
+        nama: users.nama,
+        employee_code: memberships.employeeCode,
+        role: memberships.role,
+        cabang: branches.nama,
+        bergabung: memberships.createdAt,
+        arsip: memberships.archivedAt,
+      })
+      .from(memberships)
+      .innerJoin(users, eq(users.id, memberships.userId))
+      .leftJoin(branches, eq(branches.id, memberships.branchId))
+      .where(
+        and(
+          eq(memberships.companyId, auth.company_id!),
+          branchId ? eq(memberships.branchId, branchId) : undefined,
+          or(isNull(memberships.archivedAt), gte(memberships.archivedAt, new Date(`${dari}T00:00:00Z`))),
+        ),
+      )
+      .orderBy(users.nama);
+
+    // (2) Absensi bulan itu, satu baris per (karyawan, tanggal).
+    const cap = await db
+      .select({
+        user_id: attendances.userId,
+        tanggal: attendances.attendDate,
+        masuk: sql<string | null>`min(${attendances.waktu}) filter (where ${attendances.tipe} = 'masuk')`,
+        keluar: sql<string | null>`max(${attendances.waktu}) filter (where ${attendances.tipe} = 'keluar')`,
+      })
+      .from(attendances)
+      .where(
+        and(
+          eq(attendances.companyId, auth.company_id!),
+          branchId ? eq(attendances.branchId, branchId) : undefined,
+          gte(attendances.attendDate, dari),
+          lte(attendances.attendDate, sampai),
+        ),
+      )
+      .groupBy(attendances.userId, attendances.attendDate);
+
+    const petaCap = new Map<string, { masuk: string | null; keluar: string | null }>();
+    for (const r of cap) {
+      petaCap.set(`${r.user_id}|${r.tanggal}`, {
+        masuk: r.masuk ? new Date(r.masuk).toISOString() : null,
+        keluar: r.keluar ? new Date(r.keluar).toISOString() : null,
+      });
+    }
+
+    // (3) Cuti/libur DISETUJUI yang bertindih bulan ini → tebar per tanggal.
+    const izin = await pengajuanDisetujuiPadaRentang(auth.company_id!, dari, sampai, branchId);
+    const petaIzin = new Map<string, { jenis: "cuti" | "libur"; kategori: PengajuanKategori }>();
+    for (const p of izin) {
+      const mulai = p.mulai < dari ? dari : p.mulai;
+      const selesai = p.selesai > sampai ? sampai : p.selesai;
+      for (const t of tanggalDalamRentang(mulai, selesai)) {
+        petaIzin.set(`${p.userId}|${t}`, {
+          jenis: p.jenis,
+          kategori: p.kategori as PengajuanKategori,
+        });
+      }
+    }
+
+    const semuaTanggal = tanggalDalamRentang(dari, sampai);
+    const rows: RekapAbsenRow[] = karyawan.map((k) => {
+      // Jendela per karyawan: sejak bergabung sampai diarsipkan (atau batas bulan).
+      const mulaiHitung = (() => {
+        const gabung = tanggalDi(tz, k.bergabung);
+        return gabung > dari ? gabung : dari;
+      })();
+      const akhirHitung = (() => {
+        if (!batasHitung) return null;
+        if (!k.arsip) return batasHitung;
+        const keluar = tanggalDi(tz, k.arsip);
+        return keluar < batasHitung ? keluar : batasHitung;
+      })();
+
+      let hadir = 0;
+      let alpa = 0;
+      let cuti = 0;
+      let libur = 0;
+      const harian: RekapAbsenHari[] = semuaTanggal.map((tanggal) => {
+        const kunci = `${k.user_id}|${tanggal}`;
+        const c1 = petaCap.get(kunci);
+        if (c1) {
+          hadir++;
+          return { tanggal, status: "hadir", kategori: null, masuk: c1.masuk, keluar: c1.keluar };
+        }
+        const i1 = petaIzin.get(kunci);
+        if (i1) {
+          if (i1.jenis === "cuti") cuti++;
+          else libur++;
+          return {
+            tanggal,
+            status: i1.jenis,
+            kategori: i1.kategori,
+            masuk: null,
+            keluar: null,
+          };
+        }
+        const dalamJendela =
+          akhirHitung !== null && tanggal >= mulaiHitung && tanggal <= akhirHitung;
+        if (dalamJendela) {
+          alpa++;
+          return { tanggal, status: "alpa", kategori: null, masuk: null, keluar: null };
+        }
+        return { tanggal, status: "kosong", kategori: null, masuk: null, keluar: null };
+      });
+
+      return {
+        user_id: k.user_id,
+        nama: k.nama,
+        employee_code: k.employee_code ?? null,
+        role: k.role,
+        cabang: k.cabang ?? null,
+        hadir,
+        tidak_hadir: alpa,
+        cuti,
+        libur,
+        harian,
+      };
+    });
+
+    const dto: RekapAbsenDto = {
+      bulan,
+      dari,
+      sampai,
+      hari: jumlahHariBulan,
+      hari_terhitung: batasHitung ? jumlahHari(dari, batasHitung) : 0,
+      rows,
+    };
     return c.json(dto);
   });

@@ -20,6 +20,76 @@ tanpa akses repo server.
 
 ---
 
+## Rilis: Pengajuan cuti & libur + rekap absen bulanan
+
+> **Menunggu rilis.** Migrasi DB **0082** (tabel `leave_requests` + 3 enum).
+> Perubahan API **aditif** — tak ada endpoint lama yang berubah perilaku.
+
+### 🟢 BARU — `/api/pengajuan`: karyawan mengajukan cuti/libur, owner/admin ACC
+
+Sebelum ini ketidakhadiran hanya berarti "tidak ada baris di `attendances`" —
+tak terbedakan antara alpa, cuti, dan libur yang memang disepakati. Sekarang ada
+alurnya.
+
+| | |
+| --- | --- |
+| `GET /api/pengajuan` | `?status=` `?dari=` `?sampai=` `?branch_id=` |
+| `POST /api/pengajuan` | semua peran, atas nama diri sendiri |
+| `PATCH /api/pengajuan/:id` | **owner/admin** — `{ status: "disetujui"\|"ditolak", alasan_tolak? }` |
+| `DELETE /api/pengajuan/:id` | pemohon membatalkan miliknya selama masih `menunggu` |
+
+**Dua hal yang mudah salah kalau tidak dibaca:**
+
+1. **Jangan kirim `jenis`.** Server menurunkannya sendiri dari `kategori`
+   (`cuti` vs `libur`). Kalau kalian mengirimnya, field itu diabaikan.
+2. **Peran terkunci cabang (`cashier`/`tim`/`kitchen`/`bar`) hanya melihat
+   pengajuan MILIKNYA** — beda dari `GET /absensi` yang memang terbuka
+   se-cabang. Pengajuan memuat alasan pribadi (mis. sakit), jadi tak dibagikan
+   ke sesama karyawan. `branch_id` diabaikan untuk peran itu.
+
+Delapan kategori resmi (dropdown pengajuan) — pakai daftar ini apa adanya:
+
+| kode | jenis | label |
+| --- | --- | --- |
+| `tahunan` | cuti | 🌴 Cuti Tahunan |
+| `sakit` | cuti | 🤒 Sakit |
+| `izin` | cuti | 📝 Izin |
+| `melahirkan` | cuti | 🍼 Melahirkan |
+| `penting` | cuti | 🙏 Keperluan Penting |
+| `mingguan` | libur | 🗓 Libur Mingguan |
+| `tukar_jadwal` | libur | 🔁 Tukar Jadwal |
+| `tanggal_merah` | libur | 🎉 Tanggal Merah |
+
+Galat yang perlu ditangani di layar pengajuan: **409** = tanggalnya bertindih
+dengan pengajuan pemohon sendiri yang masih `menunggu`/`disetujui` (tampilkan
+pesannya apa adanya, minta ia membatalkan yang lama); **400** = rentang > 100
+hari atau `selesai < mulai`. Lampiran (surat dokter) memakai
+`POST /api/upload?tujuan=bukti` yang sudah ada, lalu kirim `lampiran_url`.
+
+### 🟢 BARU — `GET /api/absensi/rekap` (khusus owner/admin)
+
+Rekap SEBULAN lintas karyawan: `?bulan=YYYY-MM` + `?branch_id=`. Balikannya
+`RekapAbsenDto` — per karyawan ada `hadir` / `tidak_hadir` / `cuti` / `libur`
+plus `harian[]` **selalu sepanjang jumlah hari bulan itu** (urut tanggal
+1..akhir), jadi bisa dirender langsung sebagai kolom tanpa mengisi lubang.
+
+Aturan hitungnya (tak ada tabel jadwal kerja — outlet dianggap buka tiap hari):
+ada cap absen → `hadir`; ada cuti/libur **disetujui** → `cuti`/`libur`; selain
+itu → `alpa`. Status `kosong` = tanggal belum lewat, sebelum karyawan bergabung,
+atau setelah ia diarsipkan — **tak pernah dihitung**, sehingga karyawan baru
+tidak terlihat alpa sebulan penuh.
+
+Gerbangnya **owner/admin**, dipasang inline pada rutenya — `/absensi/*` lain
+tetap terbuka untuk 6 peran seperti sebelumnya.
+
+### ⚪️ INFO — `attendances` tidak berubah
+
+Cap absen tetap seperti sekarang (alternasi masuk/keluar per tanggal bisnis).
+Cuti/libur disimpan di tabel terpisah dan hanya dibaca saat menyusun rekap, jadi
+alur absen yang sudah kalian pasang tak perlu disentuh.
+
+---
+
 ## Rilis: Sesi menyusul perubahan peran (`/auth/me` + `branch`)
 
 > **Menunggu rilis.** Tidak ada migrasi DB. Perubahan API **aditif**.

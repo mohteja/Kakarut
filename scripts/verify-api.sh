@@ -5447,6 +5447,81 @@ cek "endpoint tak dikenal ikut tercatat" "V == 1" \
 
 cek "pangkas manual → 200" "V == 200" "$(status_code "$SA" POST /admin/error-log/pangkas)"
 
+echo "== 143. Pengajuan cuti/libur + rekap absen bulanan =="
+# Sebelum ini, ketidakhadiran = tidak ada baris di attendances — tak terbedakan
+# antara alpa, cuti, dan libur yang memang disepakati. Pengajuan DISETUJUI-lah
+# yang mengubah sebuah tanggal dari "alpa" jadi "cuti"/"libur" di rekap.
+BULAN143=$(date +%Y-%m)
+M143="$BULAN143-05"; S143="$BULAN143-06"
+
+cek "guard: tanpa token → 401" "V == 401" \
+  "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/pengajuan")"
+cek "guard: kasir GET /absensi/rekap → 403 (setara laporan)" "V == 403" \
+  "$(status_code "$REISS105" GET /absensi/rekap)"
+cek "owner GET /absensi/rekap → 200" "V == 200" "$(status_code "$OWNER" GET /absensi/rekap)"
+
+# Kasir mengajukan — jenis DITURUNKAN server dari kategori, tak dikirim klien.
+P143=$(api "$REISS105" POST /pengajuan \
+  "{\"kategori\":\"sakit\",\"tanggal_mulai\":\"$M143\",\"tanggal_selesai\":\"$S143\",\"alasan\":\"demam\"}")
+PID143=$(echo "$P143" | jq -r '.id // ""')
+cek "kasir ajukan cuti sakit 2 hari → tercatat" "V == 1" \
+  "$(echo "$P143" | jq '((.jenis=="cuti") and (.kategori=="sakit") and (.jumlah_hari==2) and (.status=="menunggu"))|if . then 1 else 0 end')"
+
+cek "kategori ngawur → 400" "V == 400" \
+  "$(status_code_body "$REISS105" POST /pengajuan "{\"kategori\":\"ngasal\",\"tanggal_mulai\":\"$M143\",\"tanggal_selesai\":\"$M143\"}")"
+cek "selesai sebelum mulai → 400" "V == 400" \
+  "$(status_code_body "$REISS105" POST /pengajuan "{\"kategori\":\"izin\",\"tanggal_mulai\":\"$S143\",\"tanggal_selesai\":\"$M143\"}")"
+cek "rentang > 100 hari → 400" "V == 400" \
+  "$(status_code_body "$REISS105" POST /pengajuan "{\"kategori\":\"melahirkan\",\"tanggal_mulai\":\"2026-01-01\",\"tanggal_selesai\":\"2026-12-31\"}")"
+cek "bertindih dgn pengajuan sendiri → 409" "V == 409" \
+  "$(status_code_body "$REISS105" POST /pengajuan "{\"kategori\":\"izin\",\"tanggal_mulai\":\"$S143\",\"tanggal_selesai\":\"$S143\"}")"
+
+# Pengajuan memuat alasan pribadi (mis. sakit) → peran terkunci cabang hanya
+# boleh melihat MILIKNYA, tak seperti daftar absensi yang terbuka se-cabang.
+UID143=$(echo "$P143" | jq -r .user_id)
+cek "kasir hanya melihat pengajuan sendiri" "V == 1" \
+  "$(api "$REISS105" GET /pengajuan | jq --arg u "$UID143" '[.[]|select(.user_id != $u)]|length==0|if . then 1 else 0 end')"
+
+cek "kasir PATCH (ACC sendiri) → 403" "V == 403" \
+  "$(status_code_body "$REISS105" PATCH "/pengajuan/$PID143" '{"status":"disetujui"}')"
+cek "tolak tanpa alasan → 400" "V == 400" \
+  "$(status_code_body "$OWNER" PATCH "/pengajuan/$PID143" '{"status":"ditolak"}')"
+cek "owner setujui → disetujui + tercatat pemutusnya" "V == 1" \
+  "$(api "$OWNER" PATCH "/pengajuan/$PID143" '{"status":"disetujui"}' | jq '((.status=="disetujui") and ((.diputus_oleh|length)>0) and (.diputus_pada!=null))|if . then 1 else 0 end')"
+cek "putuskan dua kali → 409" "V == 409" \
+  "$(status_code_body "$OWNER" PATCH "/pengajuan/$PID143" '{"status":"ditolak","alasan_tolak":"berubah pikiran"}')"
+
+# REKAP: cuti yang disetujui harus tampak sebagai status per-tanggal.
+RK143=$(api "$OWNER" "GET" "/absensi/rekap?bulan=$BULAN143&branch_id=all")
+cek "rekap: bulan & jumlah hari benar" "V == 1" \
+  "$(echo "$RK143" | jq --arg b "$BULAN143" '((.bulan==$b) and (.hari>=28) and (.hari<=31) and (.hari_terhitung>=0))|if . then 1 else 0 end')"
+cek "rekap: panjang harian == jumlah hari bulan" "V == 1" \
+  "$(echo "$RK143" | jq '(.hari) as $h | [.rows[]|select((.harian|length) != $h)]|length==0|if . then 1 else 0 end')"
+cek "rekap: kasir tercatat cuti 2 hari" "V == 1" \
+  "$(echo "$RK143" | jq --arg u "$UID143" '[.rows[]|select(.user_id==$u and .cuti==2)]|length==1|if . then 1 else 0 end')"
+cek "rekap: tanggal cuti berstatus 'cuti' + kategori sakit" "V == 1" \
+  "$(echo "$RK143" | jq --arg u "$UID143" --arg t "$M143" '[.rows[]|select(.user_id==$u)|.harian[]|select(.tanggal==$t and .status=="cuti" and .kategori=="sakit")]|length==1|if . then 1 else 0 end')"
+cek "rekap: tanggal cuti TIDAK dihitung tidak hadir" "V == 1" \
+  "$(echo "$RK143" | jq '(.hari) as $h | [.rows[]|select((.hadir + .tidak_hadir + .cuti + .libur) > $h)]|length==0|if . then 1 else 0 end')"
+# Tanggal masa depan tak pernah dinilai — jendela hitung berhenti di hari ini.
+cek "rekap: tanggal setelah hari ini berstatus 'kosong'" "V == 1" \
+  "$(echo "$RK143" | jq --arg t "$(date -d '+3 days' +%Y-%m-%d 2>/dev/null || date +%Y-%m-%d)" '[.rows[]|.harian[]|select(.tanggal==$t and .status=="alpa")]|length==0|if . then 1 else 0 end')"
+cek "rekap: bulan tak valid → jatuh ke bulan berjalan" "V == 1" \
+  "$(api "$OWNER" GET "/absensi/rekap?bulan=ngawur" | jq --arg b "$BULAN143" '.bulan==$b|if . then 1 else 0 end')"
+
+# Batalkan: pemohon hanya boleh saat masih menunggu; orang lain tak boleh sama sekali.
+P143B=$(api "$REISS105" POST /pengajuan \
+  "{\"kategori\":\"mingguan\",\"tanggal_mulai\":\"$BULAN143-20\",\"tanggal_selesai\":\"$BULAN143-20\"}")
+cek "libur mingguan → jenis 'libur' (diturunkan server)" "V == 1" \
+  "$(echo "$P143B" | jq '.jenis=="libur"|if . then 1 else 0 end')"
+PID143B=$(echo "$P143B" | jq -r .id)
+cek "karyawan lain batalkan punya orang → 403" "V == 403" \
+  "$(status_code "$TKIT" DELETE "/pengajuan/$PID143B")"
+cek "pemohon batalkan saat menunggu → 200" "V == 200" \
+  "$(status_code "$REISS105" DELETE "/pengajuan/$PID143B")"
+cek "pemohon batalkan yg sudah disetujui → 409" "V == 409" \
+  "$(status_code "$REISS105" DELETE "/pengajuan/$PID143")"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

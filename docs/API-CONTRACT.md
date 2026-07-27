@@ -130,6 +130,7 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 - `/shift/*` → `requireRole("owner","admin","cashier")` (BACA dibuka untuk
   owner/admin; **buka/tutup** digerbang `requireRole("cashier")` per-rute)
 - `/absensi/*` → `requireRole("owner","admin","cashier","tim","kitchen","bar")`
+- `/pengajuan/*` → `requireRole("owner","admin","cashier","tim","kitchen","bar")` (semua boleh mengajukan; ACC/tolak digerbang inline ke owner/admin)
 - Modul tenant lain → semua anggota perusahaan yang login (owner/admin/cashier/
   tim), dengan `requireRole(...)` per-rute & pemeriksaan kunci-cabang seperti
   dicatat.
@@ -493,12 +494,34 @@ ADA (validasi = aturan endpoint asli), idempoten per `client_ref`.
 - `POST /api/absensi` — **[owner/admin/cashier]** (inline, kecuali tim) — pindai stasiun — query: `branch_id?` — req: `{ kode: string, foto_url: string (wajib), lat?: number(-90..90)|null, lng?: number(-180..180)|null }` — res: **201** `AbsenResult` — error: **400** (di luar radius geofence / GPS wajib / karyawan nonaktif), **404** kode tak dikenal
 - `POST /api/absensi/saya` — [owner/admin/cashier/tim/kitchen/bar] — absen sendiri — query: `branch_id?` — req: `{ foto_url: string (wajib), lat?|null, lng?|null }` — res: **201** `AbsenResult` — error: **400** (geofence / tak ada kode karyawan / nonaktif), **403** bukan karyawan aktif
 - `GET /api/absensi` — [owner/admin/cashier/tim/kitchen/bar] — query: `branch_id?`, `tanggal?` (YYYY-MM-DD) — res: `AbsensiRow[]` (masuk-pertama / keluar-terakhir per karyawan) — error: **400** tanggal salah
+- `GET /api/absensi/rekap` — **[owner/admin]** (inline, setara `/laporan/*`) — rekap SEBULAN lintas karyawan — query: `bulan?` (`YYYY-MM`, default bulan berjalan di zona waktu perusahaan; nilai ngawur → default), `branch_id?` (`all` = semua cabang) — res: `RekapAbsenDto`
+  > **Aturan hitung** — tak ada tabel jadwal kerja, outlet dianggap buka tiap hari. Tiap tanggal dinilai berurut: ada cap absen → `hadir`; ada pengajuan cuti/libur **berstatus `disetujui`** yang mencakupnya → `cuti`/`libur`; selain itu → `alpa` (inilah `tidak_hadir`). Tanggal **belum lewat**, **sebelum karyawan bergabung**, dan **setelah ia diarsipkan** berstatus `kosong` dan tak pernah dihitung — karyawan baru tidak terlihat alpa sebulan penuh.
+  > `harian` selalu sepanjang jumlah hari bulan itu (urut tanggal 1..akhir), jadi klien bisa merendernya langsung sebagai kolom tanpa mengisi lubang.
 
 > **Catatan absensi (penting untuk mobile):** payload QR absen = **string kode
 > mentah** (8 digit angka, teks polos tanpa prefix/JSON). Absen **wajib foto**:
 > ambil foto → upload ke `POST /api/upload?tujuan=bukti` → kirim `foto_url` hasil
 > di body absensi. Pencocokan kode case-insensitive. Input kode manual: keypad
 > numerik, maks 8 karakter.
+
+
+## `/api/pengajuan` — Pengajuan cuti & libur (`modules/pengajuan/routes.ts`) — group guard **[owner/admin/cashier/tim/kitchen/bar]**
+
+> **Semua peran boleh MENGAJUKAN; yang MEMUTUSKAN hanya owner/admin** (gerbang
+> inline pada `PATCH`). Hanya pengajuan berstatus `disetujui` yang mengubah
+> sebuah tanggal dari "tidak hadir" menjadi cuti/libur di `GET /absensi/rekap`.
+>
+> **`jenis` TIDAK dikirim klien** — server menurunkannya dari `kategori`
+> (`jenisKategori()` di `@kakarut/shared`), sehingga mustahil ada baris "libur"
+> berkategori "melahirkan". Daftar kategori resmi ada di konstanta
+> `KATEGORI_PENGAJUAN` (8 entri: `tahunan`/`sakit`/`izin`/`melahirkan`/`penting`
+> → jenis `cuti`; `mingguan`/`tukar_jadwal`/`tanggal_merah` → jenis `libur`).
+
+- `GET /api/pengajuan` — query: `status?` (`menunggu|disetujui|ditolak`), `dari?`/`sampai?` (menyaring yang **bertindih** rentang itu, bukan yang termuat seluruhnya), `branch_id?` (`all` = semua) — res: `PengajuanRow[]` (menunggu dulu, lalu terbaru).
+  > **Peran terkunci cabang (`cashier`/`tim`/`kitchen`/`bar`) SELALU hanya melihat pengajuan MILIKNYA** — berbeda dari `GET /absensi` yang terbuka se-cabang, karena pengajuan memuat alasan pribadi (mis. sakit). `branch_id` diabaikan untuk mereka.
+- `POST /api/pengajuan` — [semua peran, atas nama diri sendiri] — req: `{ kategori, tanggal_mulai, tanggal_selesai, alasan?, lampiran_url? }` (`lampiran_url` = hasil `POST /upload?tujuan=bukti`, mis. surat dokter) — res: **201** `PengajuanRow` — error: **400** kategori tak dikenal / tanggal tak valid / `selesai < mulai` / rentang > 100 hari; **409** bertindih dengan pengajuan sendiri yang masih `menunggu`/`disetujui`
+- `PATCH /api/pengajuan/:id` — **[owner/admin]** (inline) — req: `{ status: "disetujui"|"ditolak", alasan_tolak? }` (`alasan_tolak` **wajib** saat menolak) — res: `PengajuanRow` — error: **400** alasan tolak kosong; **404** bukan milik perusahaan ini; **409** sudah pernah diputuskan (tak bisa diubah lagi)
+- `DELETE /api/pengajuan/:id` — pemohon membatalkan MILIKNYA selama masih `menunggu`; owner/admin boleh kapan saja — res: `{ ok }` — error: **403** milik orang lain; **409** pemohon membatalkan yang sudah diputuskan; **404** tak ditemukan
 
 ## `/api/profil` — Akun sendiri (`modules/profil/routes.ts`) — [any]
 
@@ -700,6 +723,9 @@ import type {
   DivisiProduksi,
   JenisPengadaan,
   MenuTipe,
+  PengajuanJenis,
+  PengajuanKategori,
+  PengajuanStatus,
   ProduksiDi,
   StokStatus,
   UserRole,
@@ -2148,6 +2174,88 @@ export interface AbsensiRow {
   foto_masuk: string | null;
   /** foto bukti saat cap keluar terakhir (URL) */
   foto_keluar: string | null;
+}
+
+/* ===== Pengajuan cuti & libur + rekap absen bulanan ===== */
+
+/**
+ * Satu pengajuan cuti/libur. `jenis` SELALU turunan `kategori` (server yang
+ * menurunkannya lewat `jenisKategori()`) — klien tak pernah mengirimnya.
+ */
+export interface PengajuanRow {
+  id: string;
+  user_id: string;
+  nama: string;
+  employee_code: string | null;
+  /** cabang pemohon saat mengajukan; null untuk owner/admin tanpa cabang */
+  cabang: string | null;
+  jenis: PengajuanJenis;
+  kategori: PengajuanKategori;
+  /** YYYY-MM-DD; satu hari → mulai == selesai */
+  tanggal_mulai: string;
+  tanggal_selesai: string;
+  /** jumlah hari kalender yang dicakup (inklusif) */
+  jumlah_hari: number;
+  alasan: string | null;
+  /** bukti pendukung (mis. surat dokter) — hasil POST /upload?tujuan=bukti */
+  lampiran_url: string | null;
+  status: PengajuanStatus;
+  /** wajib terisi bila status "ditolak" */
+  alasan_tolak: string | null;
+  /** nama owner/admin yang memutuskan; null selama masih "menunggu" */
+  diputus_oleh: string | null;
+  diputus_pada: string | null;
+  created_at: string;
+}
+
+/**
+ * Status satu tanggal pada rekap. `kosong` = di LUAR jendela hitung (tanggal
+ * belum lewat, sebelum karyawan bergabung, atau setelah ia diarsipkan) — tidak
+ * pernah dihitung sebagai apa pun.
+ */
+export type RekapHariStatus = "hadir" | "cuti" | "libur" | "alpa" | "kosong";
+
+/** Isi satu kolom tanggal pada rekap absen. */
+export interface RekapAbsenHari {
+  tanggal: string;
+  status: RekapHariStatus;
+  /** terisi hanya bila status cuti/libur */
+  kategori: PengajuanKategori | null;
+  /** jam masuk pertama (ISO); null bila tak ada cap masuk */
+  masuk: string | null;
+  /** jam keluar terakhir (ISO); null bila belum/tak ada cap keluar */
+  keluar: string | null;
+}
+
+/** Satu baris (satu karyawan) pada rekap absen bulanan. */
+export interface RekapAbsenRow {
+  user_id: string;
+  nama: string;
+  employee_code: string | null;
+  role: UserRole | null;
+  cabang: string | null;
+  hadir: number;
+  tidak_hadir: number;
+  cuti: number;
+  libur: number;
+  /** satu entri per tanggal dalam bulan itu, urut tanggal 1..akhir */
+  harian: RekapAbsenHari[];
+}
+
+/** Rekap absen sebulan (GET /absensi/rekap) — khusus owner/admin. */
+export interface RekapAbsenDto {
+  /** YYYY-MM */
+  bulan: string;
+  dari: string;
+  sampai: string;
+  /** jumlah hari dalam bulan itu */
+  hari: number;
+  /**
+   * Jumlah hari yang SUDAH lewat (≤ hari ini) — pembagi yang benar untuk
+   * persentase kehadiran; hari yang belum datang tak pernah dihitung.
+   */
+  hari_terhitung: number;
+  rows: RekapAbsenRow[];
 }
 
 /** Laporan pengeluaran pembelian bahan baku (faktur beli terkonfirmasi) per rentang tanggal. */
