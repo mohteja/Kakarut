@@ -8,7 +8,13 @@ import { z } from "zod";
 import { env } from "../../config/env";
 import { appBaseUrl } from "../../lib/base-url";
 import { db } from "../../db/client";
-import { companies, emailVerificationTokens, passwordResetTokens, users } from "../../db/schema";
+import {
+  branches,
+  companies,
+  emailVerificationTokens,
+  passwordResetTokens,
+  users,
+} from "../../db/schema";
 import { requireAuth, type AppEnv } from "../../middleware/auth";
 import {
   emailDariBody,
@@ -383,6 +389,14 @@ export const authRoutes = new Hono<AppEnv>()
       return c.json({ ok: true, ...(devUrl ? { dev_verify_url: devUrl } : {}) });
     },
   )
+  /**
+   * Keadaan sesi TERKINI. `user` datang dari requireAuth, yang selalu membaca
+   * ulang keanggotaan dari database — jadi peran/cabang di sini sudah mengikuti
+   * perubahan admin walau token-nya token lama. Klien memakai endpoint ini
+   * untuk menyegarkan sesi tersimpan (peran berubah → menu ikut berubah tanpa
+   * login ulang); bentuk baliknya sengaja dibuat sama dengan hasil login
+   * (minus `token`) supaya bisa langsung ditimpakan ke sesi tersimpan.
+   */
   .get("/me", requireAuth, async (c) => {
     const auth = c.get("auth");
     let company = null;
@@ -401,5 +415,13 @@ export const authRoutes = new Hono<AppEnv>()
         };
       }
     }
-    return c.json({ user: auth, company });
+    let branch: { id: string; nama: string } | null = null;
+    if (auth.branch_id) {
+      const [b] = await db
+        .select({ id: branches.id, nama: branches.nama })
+        .from(branches)
+        .where(eq(branches.id, auth.branch_id));
+      branch = b ?? null;
+    }
+    return c.json({ user: auth, company, branch });
   });

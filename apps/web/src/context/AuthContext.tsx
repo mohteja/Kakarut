@@ -4,6 +4,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -35,9 +36,13 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+/** Jeda minimum antar penyegaran sesi (tab yang bolak-balik aktif). */
+const JEDA_SEGAR_MS = 30_000;
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const [auth, setAuth] = useState<AuthState | null>(() => loadAuth());
+  const terakhirSegar = useRef(0);
 
   // SINKRON SESI ANTAR-TAB (satu browser): event `storage` menyala di tab LAIN
   // saat localStorage berubah — login/ganti sesi di satu tab langsung terpasang
@@ -65,6 +70,61 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("storage", onStorage);
   }, [queryClient]);
 
+  // SEGARKAN SESI DARI SERVER. Peran & cabang seorang karyawan bisa diubah
+  // admin SAAT sesinya berjalan. Token tetap sah — server membaca ulang
+  // keanggotaan dari database pada tiap request — tapi sesi yang tersimpan di
+  // localStorage masih memuat peran LAMA, dan menu sidebar dibangun dari situ.
+  // Akibatnya karyawan yang baru dijadikan "bar" tetap melihat menu peran
+  // lamanya (tanpa Produksi/Resep) sampai ia logout lalu login lagi; memuat
+  // ulang halaman TIDAK menolong karena localStorage ikut bertahan.
+  // /auth/me mengembalikan bentuk yang sama dengan hasil login (minus token).
+  const segarkanSesi = useCallback(async () => {
+    const kini = loadAuth();
+    if (!kini?.token) return;
+    const sekarang = Date.now();
+    if (sekarang - terakhirSegar.current < JEDA_SEGAR_MS) return;
+    terakhirSegar.current = sekarang;
+    let baru: Pick<AuthState, "user" | "company" | "branch">;
+    try {
+      baru = await api<Pick<AuthState, "user" | "company" | "branch">>("/auth/me");
+    } catch {
+      // Jaringan mati → biarkan sesi apa adanya. 401 (keanggotaan dicabut)
+      // sudah ditangani api(): sesi dihapus & dialihkan ke /login.
+      return;
+    }
+    const sama =
+      JSON.stringify([kini.user, kini.company, kini.branch]) ===
+      JSON.stringify([baru.user, baru.company, baru.branch]);
+    if (sama) return;
+    const pindahPeran =
+      kini.user.role !== baru.user.role || kini.user.branch_id !== baru.user.branch_id;
+    saveAuth({ ...kini, ...baru });
+    setAuth({ ...kini, ...baru });
+    if (pindahPeran) {
+      // Cakupan data ikut berubah → buang cache & pilihan lokasi peran lama.
+      localStorage.removeItem("kakarut.branch");
+      localStorage.removeItem("kakarut.cabang-data");
+      localStorage.removeItem("kakarut.cabang-data-ck");
+      queryClient.clear();
+    }
+  }, [queryClient]);
+
+  // Cek saat aplikasi dibuka dan tiap kali tab kembali aktif (dibatasi
+  // JEDA_SEGAR_MS) — bukan polling: perubahan peran jarang dan tak mendesak.
+  useEffect(() => {
+    if (!auth?.token) return;
+    void segarkanSesi();
+    const onAktif = () => {
+      if (document.visibilityState === "visible") void segarkanSesi();
+    };
+    window.addEventListener("focus", onAktif);
+    document.addEventListener("visibilitychange", onAktif);
+    return () => {
+      window.removeEventListener("focus", onAktif);
+      document.removeEventListener("visibilitychange", onAktif);
+    };
+  }, [auth?.token, segarkanSesi]);
+
   // Pasang sesi baru + buang cache/pilihan cabang sesi sebelumnya (query key
   // tak memuat company_id, jadi cache lama = data tenant lama).
   const setSession = useCallback(
@@ -74,6 +134,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       localStorage.removeItem("kakarut.cabang-data");
       saveAuth(data);
       setAuth(data);
+      // Sesi baru = data server paling mutakhir; mulai lagi jendela jedanya
+      // supaya penyegaran berikutnya tak terhalang jeda sesi sebelumnya.
+      terakhirSegar.current = Date.now();
     },
     [queryClient],
   );

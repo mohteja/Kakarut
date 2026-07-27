@@ -5317,6 +5317,56 @@ cek "dasar uji: CK masih punya bahan siap kirim" "V == 1" \
 cek "regresi nol: CK → cabang tetap 201" "V == 201" \
   "$(status_code_body "$OWNER" POST /transfer-stok "{\"asal_branch_id\":\"$CK140\",\"tujuan_branch_id\":\"$TOKO140\",\"items\":[{\"ingredient_id\":\"$ING140C\",\"qty\":1}]}")"
 
+echo "== 141. Sesi menyusul perubahan peran (tanpa login ulang) =="
+# Admin mengubah peran karyawan SAAT sesinya berjalan. Token tetap sah — server
+# membaca ulang keanggotaan tiap request — jadi /auth/me wajib melaporkan peran
+# TERKINI. Web memakai endpoint ini untuk menyegarkan sesi tersimpan; tanpa itu
+# menu sidebar memakai peran lama sampai karyawan logout (pernah terjadi: akun
+# yang sudah dijadikan "bar" tak melihat Produksi/Resep di HP).
+CAB141=$(api "$OWNER" GET /cabang | jq -r '[.[]|select(.is_active and .tipe=="store")][0].id')
+api "$OWNER" POST /karyawan \
+  "{\"nama\":\"Peran Uji 141\",\"email\":\"peran141@basooopa.id\",\"password\":\"Peran141!\",\"role\":\"cashier\",\"branch_id\":\"$CAB141\"}" > /dev/null
+UID141=$(api "$OWNER" GET /karyawan | jq -r '[.[]|select(.email=="peran141@basooopa.id")][0].user_id // ""')
+SESI141=$(curl -s -X POST "$BASE/api/auth/login" -H 'Content-Type: application/json' \
+  -d '{"email":"peran141@basooopa.id","password":"Peran141!"}')
+T141=$(echo "$SESI141" | jq -r '.token // ""')
+cek "login karyawan uji berhasil" "V == 1" "$([ -n "$T141" ] && echo 1 || echo 0)"
+
+# Bentuk /auth/me harus sama dengan hasil login (minus token) supaya klien bisa
+# menimpakannya langsung ke sesi tersimpan.
+ME141=$(api "$T141" GET /auth/me)
+cek "/auth/me memuat user+company+branch" "V == 1" \
+  "$(echo "$ME141" | jq '((.user|type=="object") and (has("company")) and (has("branch")))|if . then 1 else 0 end')"
+cek "/auth/me branch = cabang keanggotaan" "V == 1" \
+  "$(echo "$ME141" | jq --arg b "$CAB141" '(.branch.id == $b and ((.branch.nama|length) > 0))|if . then 1 else 0 end')"
+cek "/auth/me peran awal = cashier" "V == 1" \
+  "$(echo "$ME141" | jq '.user.role == "cashier"|if . then 1 else 0 end')"
+
+cek "owner ubah peran → bar (200)" "V == 200" \
+  "$(status_code_body "$OWNER" PATCH "/karyawan/$UID141" '{"role":"bar"}')"
+# Token LAMA, tanpa login ulang.
+ME141B=$(api "$T141" GET /auth/me)
+cek "/auth/me lapor peran BARU dgn token lama" "V == 1" \
+  "$(echo "$ME141B" | jq '.user.role == "bar"|if . then 1 else 0 end')"
+cek "token lama tetap sah (peran diganti ≠ sesi dicabut)" "V == 200" \
+  "$(status_code "$T141" GET /cabang)"
+
+# Pindah cabang juga harus tersusul (web memakai branch_id utk mengunci lokasi).
+CAB141B=$(api "$OWNER" GET /cabang | jq -r --arg a "$CAB141" '[.[]|select(.is_active and .tipe=="store" and .id!=$a)][0].id // ""')
+if [ -n "$CAB141B" ]; then
+  api "$OWNER" PATCH "/karyawan/$UID141" "{\"branch_id\":\"$CAB141B\"}" > /dev/null
+  ME141C=$(api "$T141" GET /auth/me)
+  cek "/auth/me menyusul pindah cabang" "V == 1" \
+    "$(echo "$ME141C" | jq --arg b "$CAB141B" '(.user.branch_id == $b and .branch.id == $b)|if . then 1 else 0 end')"
+else
+  ok "pindah cabang — dilewati, hanya ada satu cabang store"
+fi
+
+# Keanggotaan dicabut → 401, sehingga klien menendang ke halaman login alih-alih
+# memakai sesi basi selamanya.
+api "$OWNER" PATCH "/karyawan/$UID141" '{"arsip":true}' > /dev/null
+cek "keanggotaan diarsip → /auth/me 401" "V == 401" "$(status_code "$T141" GET /auth/me)"
+
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

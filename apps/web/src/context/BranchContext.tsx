@@ -101,6 +101,16 @@ export function BranchProvider({ children }: { children: ReactNode }) {
     enabled: Boolean(auth?.user.company_id),
   });
 
+  // Peran terkunci selalu mengikuti cabang keanggotaannya — dan keanggotaan itu
+  // bisa dipindah admin saat sesi berjalan (AuthContext menyegarkannya dari
+  // /auth/me). Nilai awal useState hanya dibaca sekali, jadi tanpa efek ini
+  // kasir/tim/kitchen/bar yang dipindahkan tetap menampilkan cabang lamanya.
+  useEffect(() => {
+    if (!isKasir) return;
+    const milik = auth?.user.branch_id ?? null;
+    setBranchId((kini) => (kini === milik ? kini : milik));
+  }, [isKasir, auth?.user.branch_id]);
+
   // Validasi pilihan tersimpan: bila bukan cabang aktif milik perusahaan ini
   // (mis. sisa dari akun/perusahaan lain di browser yang sama), reset —
   // manajemen mendarat di Kantor (pusat, semua menu) bila ada.

@@ -20,10 +20,137 @@ tanpa akses repo server.
 
 ---
 
+## Rilis: Sesi menyusul perubahan peran (`/auth/me` + `branch`)
+
+> **Menunggu rilis.** Tidak ada migrasi DB. Perubahan API **aditif**.
+
+### 🔴 WAJIB — segarkan sesi dari `/api/auth/me`, jangan percaya sesi tersimpan
+
+Bug yang baru kami perbaiki di web, dan **kemungkinan besar ada juga di mobile**
+karena penyebabnya sama.
+
+Peran & cabang karyawan bisa diubah admin **saat sesinya sedang berjalan**.
+Token TIDAK dicabut saat itu (hanya reset password yang mencabut) dan memang
+tidak perlu: `requireAuth` membaca ulang keanggotaan dari database pada **setiap**
+request, jadi sisi server sudah langsung memakai peran baru. Yang basi hanyalah
+**salinan sesi di perangkat** — dan menu/izin dibangun dari salinan itu.
+
+Gejalanya persis seperti laporan yang kami terima: akun yang sudah dijadikan
+`bar` tetap menampilkan menu peran lamanya (tanpa Produksi & Resep), dan
+**memuat ulang aplikasi tidak menolong** karena sesi tersimpan ikut bertahan.
+Satu-satunya jalan keluar sebelumnya: logout lalu login lagi.
+
+**Yang perlu kalian lakukan:**
+
+1. Panggil `GET /api/auth/me` **saat app dibuka** dan **tiap kali kembali ke
+   foreground** (`AppLifecycleState.resumed`). Beri jeda minimum (kami pakai
+   30 detik) supaya tidak jadi polling.
+2. Timpakan `user` / `company` / `branch` dari respons ke sesi tersimpan.
+   **`token` tidak berubah** — jangan ikut ditimpa/dihapus.
+3. Bila `user.role` **atau** `user.branch_id` berbeda dari yang tersimpan:
+   buang cache data lokal (termasuk ETag yang kalian simpan) dan bangun ulang
+   menu/izin — cakupan datanya ikut berubah.
+4. `401` dari `/auth/me` = keanggotaan dicabut/diarsip → hapus sesi, ke login.
+   Ini juga menutup kasus karyawan yang sudah diarsip tapi aplikasinya masih
+   terlihat "hidup".
+
+### 🟢 BARU — `GET /api/auth/me` kini mengembalikan `branch`
+
+Sebelumnya `{ user, company }`; sekarang `{ user, company, branch }` dengan
+`branch: { id, nama } | null` — **bentuknya jadi sama persis dengan sesi login
+minus `token`**, supaya bisa langsung ditimpakan tanpa mapping khusus.
+
+```jsonc
+// GET /api/auth/me
+{
+  "user": { "sub": "…", "email": "…", "nama": "…", "is_super_admin": false,
+            "company_id": "…", "role": "bar", "branch_id": "…" },
+  "company": { "id": "…", "nama": "…", /* … */ },
+  "branch": { "id": "…", "nama": "Ahmad Yani - Garut" }   // ← BARU
+}
+```
+
+Aditif: klien lama yang mengabaikan field ini tidak terpengaruh.
+
+### ⚪️ INFO — peran diubah ≠ sesi dicabut
+
+Sengaja begitu. Kalau setiap perubahan peran mencabut token, karyawan akan
+terlempar ke layar login di tengah kerja. Yang kami pilih: token tetap sah,
+otorisasi server ikut peran baru **seketika**, dan klien menyusul lewat
+`/auth/me`. Yang mencabut token hanyalah **reset/ganti password**
+(`token_version` naik → semua token lama jadi `401`).
+
+---
+
+## Rilis: Transfer stok hanya dari Central Kitchen
+
+> **Sudah di production.** Tidak ada migrasi DB.
+
+### 🔴 WAJIB — `POST /api/transfer-stok` kini **403** bila asal bukan Central Kitchen
+
+Aturan arah stok dipersempit: **yang boleh MENGIRIM hanya Central Kitchen**.
+Cabang — termasuk divisi `kitchen`/`bar` — hanya **melihat** kiriman yang
+menuju ke sana, lalu menerimanya di `/penerimaan`.
+
+Ditegakkan pada cabang **ASAL**, bukan pada peran. Artinya **owner pun ditolak**
+saat mengirim dari toko:
+
+```
+POST /api/transfer-stok  { asal_branch_id: <toko>, ... }
+→ 403 "Transfer stok hanya bisa dikirim DARI Central Kitchen — \"Pusat\" bukan Central Kitchen"
+```
+
+**Yang perlu kalian lakukan** bila punya layar Transfer Stok: batasi pilihan
+cabang asal ke lokasi bertipe `central_kitchen` saja (`GET /api/cabang` →
+`tipe === "central_kitchen"`). Kalau tak ada CK yang bisa dipakai pengguna itu,
+sembunyikan formulir kirimnya dan tampilkan riwayat saja — jangan biarkan
+tombol yang pasti gagal.
+
+### 🟢 BARU — kasir sekarang boleh MEMBACA `/api/transfer-stok*`
+
+Gerbang peran endpoint dilonggarkan sampai `cashier`. Sebelumnya kasir dapat
+**403** di semua metode; kini `GET` berhasil (dibatasi cabangnya sendiri, sama
+seperti peran terkunci lain). Kasir tetap **tidak bisa** membuat transfer —
+cabangnya bukan CK.
+
+Gunanya: kasir bisa melihat barang yang sedang menuju cabangnya tanpa harus
+menunggu munculnya di Penerimaan.
+
+### ⚪️ INFO — respons `304` hanya membawa sedikit header
+
+Terkait ETag yang baru kalian pakai. Respons **304 dibangun ulang dari nol**
+dan hanya menyisakan sekumpulan header standar (`cache-control`, `etag`,
+`vary`, `date`, `expires`, `content-location`). **Header khusus tidak ikut**
+kecuali sengaja dipasang ulang.
+
+Kami sudah kena batunya: `X-Kakarut-Build` hilang pada 304, browser memakai
+ulang nilai lama dari cache-nya, dan aplikasi web terus mengira ada versi baru
+— dialog "ada pembaruan" berputar tanpa henti. Sudah diperbaiki (header itu
+kini dipasang ulang di luar middleware ETag) dan dikunci uji.
+
+**Untuk kalian:** kalau ada header khusus yang kalian baca dari respons
+endpoint ber-ETag (`/menu`, `/kategori`, `/cabang`, `/meja`), jangan berasumsi
+header itu ada saat `304`. Sebutkan header apa saja yang kalian andalkan —
+kami pasang ulang seperti `X-Kakarut-Build`.
+
+### ⚪️ INFO — keputusan produk: resep dibatasi per divisi
+
+Di aplikasi web, peran pelaksana kini hanya melihat resep yang **mereka**
+produksi: bar → resep bar, kitchen → resep kitchen, kru CK → resep CK.
+Owner/admin tetap melihat semua.
+
+**Server tidak berubah** — `GET /api/bahan` tetap mengembalikan seluruh bahan,
+karena endpoint yang sama dipakai layar Stok/Opname/Penerimaan yang memang
+butuh daftar penuh. Jadi kalau mobile punya layar Resep, penyaringannya perlu
+dikerjakan di sisi klien memakai `produksi_di` + `divisi_produksi` pada
+`BahanDto`, supaya perilakunya sama dengan web.
+
+---
+
 ## Rilis: Penjualan offline yang tak menemukan shift cocok
 
-> **Status:** menunggu rilis. **Belum ada di production** sampai PR-nya
-> di-merge — koordinasikan dulu sebelum mulai mengerjakan.
+> **Sudah di production.** Penahan rilis aplikasi mobile untuk bagian ini sudah
+> lepas.
 >
 > Menjawab dokumen kalian *"Untuk tim backend — penjualan offline yang tak
 > menemukan shift cocok"*. **Opsi A dikerjakan.** Migrasi DB: `0080`
@@ -264,7 +391,9 @@ alur terima/tolak yang sudah ada langsung bekerja. Yang perlu disesuaikan hanya
 tampilannya: bedakan nomor **TF-** (transfer manual/ad-hoc) dari **PR-**
 (kiriman dari Permintaan Stok), supaya kasir tahu asal-usul barangnya.
 
-Kasir **tidak** bisa membuat transfer, tapi tetap bisa menerimanya.
+Kasir **tidak** bisa membuat transfer, tapi tetap bisa menerimanya. *(Diperbarui
+di rilis "Transfer stok hanya dari Central Kitchen": kasir kini juga boleh
+**membaca** `/api/transfer-stok`, dan yang boleh mengirim hanya CK.)*
 
 ### 🟢 BARU — Transfer Stok (4 endpoint)
 

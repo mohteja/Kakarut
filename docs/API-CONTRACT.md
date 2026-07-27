@@ -161,7 +161,20 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 - `POST /api/auth/resend-verification` — [public] — req: `{ email }` — res: **200** `{ ok: true, dev_verify_url? }` — SELALU 200 (netral; tak bocorkan status email). Benar-benar mengirim tautan hanya bila akun ADA, aktif, & BELUM terverifikasi. Dibatasi rate limit (429 + `Retry-After`).
 - `POST /api/auth/forgot-password` — [public] — req: `{ email }` — res: **200** `{ ok: true, dev_reset_url? }` — SELALU 200 (tak bocorkan apakah email ada). Bila akun aktif: token reset dibuat + tautan dikirim via email. `dev_reset_url` HANYA muncul saat email server belum dikonfigurasi & bukan produksi (bantuan setup) — abaikan di produksi.
 - `POST /api/auth/reset-password` — [public] — req: `{ token, password (min 8) }` — res: **200** `{ ok }` (tanpa sesi — pengguna login ulang dengan password baru) — error: **400** token tidak valid/kedaluwarsa/terpakai. Token berasal dari tautan email `APP_BASE_URL/reset-password?token=…` (halaman WEB); email reset juga menampilkan **kode yang mudah disalin** (identik dengan parameter `token`) untuk klien tempel-manual. **Efek samping:** menaikkan token_version user → semua token lama user itu jadi **401** (lihat bagian Autentikasi).
-- `GET /api/auth/me` — [any authenticated, incl. super-admin] (`requireAuth` inline) — res: `{ user: AuthUser, company | null }` — error: **401**
+- `GET /api/auth/me` — [any authenticated, incl. super-admin] (`requireAuth` inline) — res: `{ user: AuthUser, company | null, branch: {id,nama} | null }` — error: **401**
+  > **Ini sumber kebenaran peran & cabang, bukan isi token.** `requireAuth`
+  > membaca ulang keanggotaan dari database pada **setiap** request, jadi
+  > `user.role` / `user.branch_id` di sini sudah mengikuti perubahan admin
+  > walaupun token yang dipakai adalah token lama (token TIDAK dicabut saat
+  > peran diubah — hanya reset password yang mencabut).
+  >
+  > Bentuknya sengaja dibuat **sama persis dengan sesi login minus `token`**
+  > (`branch` ditambahkan 27 Jul 2026 justru untuk itu) supaya klien bisa
+  > menimpakannya langsung ke sesi tersimpan. **Klien wajib menyegarkan sesi
+  > dari sini** — minimal saat aplikasi dibuka dan saat kembali ke foreground —
+  > karena menu/izin yang dibangun dari sesi tersimpan akan memakai peran LAMA
+  > selamanya bila tidak. `401` di sini = keanggotaan dicabut/diarsip → hapus
+  > sesi, arahkan ke login.
 
 ## `/api/onboarding` — Onboarding + lifecycle akun (`modules/onboarding/routes.ts`) — **[butuh login, TIDAK butuh perusahaan]**
 
@@ -326,11 +339,19 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 
 ## `/api/transfer-stok` — Transfer stok antar lokasi (`modules/transfer/routes.ts`)
 
-> **Group guard: [owner/admin, `tim`, `kitchen`, `bar`]** (kasir tidak membuat
-> transfer — hanya menerima lewat `/penerimaan`). Memindahkan stok yang **sudah
-> ada (ready)** antar lokasi: CK↔cabang atau cabang↔cabang, satu faktur (nomor
-> **TF-**) berisi BANYAK bahan. Dipakai mis. saat barang kiriman rusak di jalan
-> lalu dikirim ulang.
+> **Group guard: [owner/admin, `cashier`, `tim`, `kitchen`, `bar`]** — SEMUA
+> peran boleh **MEMBACA**; kasir termasuk, karena cabang perlu tahu barang apa
+> yang sedang menuju ke sana.
+>
+> **Yang boleh MENGIRIM hanya Central Kitchen.** Ditegakkan pada cabang **ASAL**
+> (bukan pada peran): `POST` dengan `asal_branch_id` yang bukan cabang bertipe
+> `central_kitchen` → **403**, termasuk bila pemanggilnya owner. Cabang — juga
+> divisi `kitchen`/`bar` — hanya memantau kiriman masuk lalu menerimanya di
+> `/penerimaan`.
+>
+> Memindahkan stok yang **sudah ada (ready)** dari CK ke cabang, satu faktur
+> (nomor **TF-**) berisi BANYAK bahan. Dipakai mis. saat barang kiriman rusak di
+> jalan lalu dikirim ulang.
 >
 > **Representasi & saldo:** satu baris `productions` per bahan dengan pola
 > KIRIMAN yang sudah ada — `branch_id` = TUJUAN (menambah saldo tujuan saat
@@ -365,8 +386,8 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 > adalah faktur yang punya nomor dokumen berjenis `transfer`.
 
 - `GET /api/transfer-stok/saldo` — query: `branch_id?` (peran terkunci cabang selalu dipaksa ke cabangnya) — res: `{ branch_id, rows: TransferStokSaldoRow[] }` — stok READY di cabang itu: hanya bahan **aktif + berlacak-stok + masih tersisa (`saldo − dalam_jalan > 0`)**. Tiap baris membawa `pengadaan` ("beli"/"produksi") agar UI bisa menandai jenis bahan, `saldo` (fisik) dan `dalam_jalan` (sudah dikirim, belum diterima tujuan) — **yang boleh ditransfer adalah `saldo − dalam_jalan`**
-- `GET /api/transfer-stok` — query: `per_page?` (default 50, maks 200) — res: `{ rows: TransferStokFaktur[] }` (terbaru dulu; tiap faktur memuat `items[]` dengan `pengadaan` & `status` per bahan, plus `status` agregat: `menunggu`/`dikonfirmasi`/`ditolak`/`sebagian`). Peran terkunci cabang hanya melihat transfer yang menyangkut cabangnya (pengirim atau penerima)
-- `POST /api/transfer-stok` — req: `{ asal_branch_id: uuid, tujuan_branch_id: uuid, catatan?|null (max300), items: [{ingredient_id: uuid, qty: number(>0)}] (1..100; bahan sama digabung qty-nya) }` — res: **201** `{ ok, faktur_id, nomor (TF-xxxx), asal, tujuan, jumlah_baris }` — error: **400** (asal = tujuan; asal/tujuan Kantor; bahan invalid/nonaktif/tak lacak stok; **qty melebihi `saldo − dalam_jalan` di asal** — dicek di dalam transaksi setelah advisory lock per cabang asal, pesannya menyebut berapa yang masih dalam perjalanan), **403** peran terkunci mengirim dari cabang lain, **404** cabang tidak ditemukan
+- `GET /api/transfer-stok` — query: `per_page?` (default 50, maks 200) — res: `{ rows: TransferStokFaktur[] }` (terbaru dulu; tiap faktur memuat `items[]` dengan `pengadaan` & `status` per bahan, plus `status` agregat: `menunggu`/`dikonfirmasi`/`ditolak`/`sebagian`). Peran terkunci cabang — **kasir, `tim`, `kitchen`, `bar`** — hanya melihat transfer yang menyangkut cabangnya (pengirim atau penerima); owner/admin melihat semua
+- `POST /api/transfer-stok` — req: `{ asal_branch_id: uuid, tujuan_branch_id: uuid, catatan?|null (max300), items: [{ingredient_id: uuid, qty: number(>0)}] (1..100; bahan sama digabung qty-nya) }` — res: **201** `{ ok, faktur_id, nomor (TF-xxxx), asal, tujuan, jumlah_baris }` — error: **400** (asal = tujuan; asal/tujuan Kantor; bahan invalid/nonaktif/tak lacak stok; **qty melebihi `saldo − dalam_jalan` di asal** — dicek di dalam transaksi setelah advisory lock per cabang asal, pesannya menyebut berapa yang masih dalam perjalanan), **403** `asal_branch_id` BUKAN Central Kitchen (berlaku untuk semua peran, owner sekalipun — pesan: `Transfer stok hanya bisa dikirim DARI Central Kitchen — "<nama>" bukan Central Kitchen`) **atau** peran terkunci mengirim dari cabang lain, **404** cabang tidak ditemukan
 - `POST /api/transfer-stok/:fakturId/batal` — batalkan transfer yang belum diproses tujuan (baris masuk Tempat Sampah) — res: `{ ok, jumlah_baris }` — error: **403** bukan pengirim, **404** bukan faktur transfer, **409** sudah diterima/ditolak di tujuan
 
 ## `/api/supplier` — Supplier (`modules/supplier/routes.ts`)
@@ -611,6 +632,16 @@ ADA (validasi = aturan endpoint asli), idempoten per `client_ref`.
   belum diverifikasi (tampilkan layar verifikasi + tombol kirim ulang); sukses →
   simpan `token` di secure storage → set header `Authorization: Bearer <token>`
   di semua request → `GET /api/auth/me` saat buka app untuk validasi sesi.
+- **Segarkan sesi dari `/api/auth/me`, jangan percaya sesi tersimpan.** Peran &
+  cabang karyawan bisa diubah admin **saat sesinya berjalan**; token lama tetap
+  sah (server membaca ulang keanggotaan tiap request), jadi satu-satunya yang
+  basi adalah salinan sesi di perangkat. Panggil `/auth/me` saat app dibuka
+  **dan tiap kali kembali ke foreground**, lalu timpakan `user`/`company`/
+  `branch` ke sesi tersimpan (token tetap). Bila `role` atau `branch_id`
+  berubah: buang cache data lokal & bangun ulang menu/izin — cakupan datanya
+  ikut berubah. Tanpa ini, karyawan yang baru dijadikan `bar` tetap melihat
+  menu peran lamanya sampai logout–login (sudah terjadi di web, diperbaiki
+  27 Jul 2026).
 - **Tangani `401` secara global:** `401` di endpoint mana pun berarti sesi tak
   berlaku (token kedaluwarsa **atau** password diubah/di-reset → token_version
   naik). Reaksi: hapus token tersimpan → arahkan ke login. Bila klien punya alur
