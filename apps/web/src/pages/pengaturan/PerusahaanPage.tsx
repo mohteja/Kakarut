@@ -295,21 +295,26 @@ export function PerusahaanPage() {
 
         <div className="rounded-lg border border-stone-200 p-3">
           <label className="mb-1 block text-sm font-medium">
-            Metode perhitungan harga pokok (HPP)
+            Metode biaya persediaan (kartu bahan)
           </label>
           <select
             value={metodeHpp}
             onChange={(e) => setMetodeHpp(e.target.value as "average" | "fifo")}
             className={`${inputClass} max-w-xs`}
           >
-            <option value="average">Rata-rata tertimbang (Average)</option>
+            <option value="average">Rata-rata bergerak (Average)</option>
             <option value="fifo">FIFO (masuk pertama, keluar pertama)</option>
           </select>
           <p className="mt-1 text-xs text-stone-500">
-            Dasar hitung <b>laba-rugi</b> dari riwayat harga beli bahan &amp; perlengkapan.{" "}
-            <b>Average</b> memakai harga rata-rata semua pembelian; <b>FIFO</b> memakai harga lot
-            pembelian terlama lebih dulu. Riwayat harga tiap barang bisa dilihat dengan mengklik
-            namanya di halaman <b>Bahan Baku</b>/<b>Perlengkapan</b>.
+            Cara membebankan biaya tiap pemakaian stok di <b>kartu persediaan</b> per bahan (buka
+            lewat <b>Bahan Baku</b> → klik nama barang). <b>Average</b> memakai harga rata-rata
+            seluruh sisa stok saat barang keluar; <b>FIFO</b> memakai harga lot yang keluar. Barang
+            fisiknya selalu keluar dari lot terlama, apa pun pilihan ini.
+          </p>
+          <p className="mt-1 rounded bg-stone-50 px-2 py-1 text-xs text-stone-500">
+            Catatan: <b>HPP di Laporan laba-rugi tidak memakai setelan ini.</b> HPP tiap transaksi
+            dikunci saat pembayaran dari <b>resep × harga acuan bahan</b> saat itu, sehingga laporan
+            lama tidak berubah kalau setelan ini diganti.
           </p>
         </div>
         <ErrorText error={simpan.error} />

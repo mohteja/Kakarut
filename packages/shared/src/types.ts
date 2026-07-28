@@ -1206,22 +1206,41 @@ export interface FifoAmbil {
   harga_satuan: number | null;
 }
 
-/** Satu peristiwa KELUAR pada kartu FIFO + rincian lot yang dikonsumsinya. */
+/** Satu peristiwa KELUAR pada kartu persediaan + rincian lot yang dikonsumsinya. */
 export interface FifoPemakaian {
   waktu: string;
   jenis: "penjualan" | "pemakaian" | "kirim" | "opname";
   keterangan: string | null;
   qty: number;
-  /** total biaya FIFO pemakaian ini; null bila ada bagian dari lot tanpa harga */
+  /**
+   * total biaya pemakaian ini menurut metode HPP perusahaan; null bila ada
+   * bagian tanpa harga yang diketahui.
+   *
+   * Mode `fifo`: Σ (qty × harga lot) — cocok dengan `rincian`.
+   * Mode `average`: qty × `harga_rata` — SENGAJA tidak sama dengan Σ rincian,
+   * karena biaya rata-rata tak mengenal identitas lot. `rincian` di mode ini
+   * tetap menunjukkan lot mana yang secara FISIK keluar (untuk kedaluwarsa).
+   */
   hpp: number | null;
+  /**
+   * harga rata-rata bergerak seluruh sisa stok sesaat SEBELUM pemakaian ini;
+   * hanya terisi di mode `average` (null di mode `fifo`, atau bila ada sisa
+   * lot yang harganya tak diketahui sehingga rata-rata tak bisa dihitung).
+   */
+  harga_rata: number | null;
   rincian: FifoAmbil[];
 }
 
-/** Kartu FIFO satu bahan pada satu cabang (riwayat penggunaan dari lot paling awal). */
+/**
+ * Kartu persediaan satu bahan pada satu cabang. Lot selalu dikuras dari yang
+ * PALING AWAL masuk (FIFO fisik, supaya kedaluwarsa benar); yang mengikuti
+ * setelan `metode_hpp` adalah cara membebankan BIAYA-nya.
+ */
 export interface BahanFifoDto {
   bahan: { id: string; nama: string; satuan: string };
   branch_id: string;
   branch_nama: string;
+  /** metode pembebanan biaya pemakaian: `average` = rata-rata bergerak */
   metode_hpp: "average" | "fifo";
   /** saldo akhir = Σ sisa lot − defisit; sama dengan saldo ledger cabang */
   saldo: number;
@@ -1240,6 +1259,12 @@ export interface SaleItemInput {
   is_dine_in?: boolean;
   /** catatan personalisasi per baris (mis. "tanpa gula") */
   catatan?: string | null;
+  /**
+   * baris open bill asal baris ini. Bila diisi (dan `open_bill_id` transaksi
+   * cocok), harga jual diambil dari harga yang DIKUNCI di bill — bukan harga
+   * menu terbaru. Qty tetap boleh berubah saat pembayaran.
+   */
+  open_bill_item_id?: string | null;
 }
 
 /** Baris riwayat transaksi kasir (untuk cek pesanan / cetak ulang struk). */
@@ -1344,7 +1369,16 @@ export interface MenuLaris {
 
 /** Satu baris item pada open bill (pesanan belum dibayar). */
 export interface OpenBillItemDto {
+  /** id baris — kirim balik saat PUT agar harga terkuncinya dipertahankan */
+  id: string;
   menu_id: string;
+  /** nama menu saat dipesan (snapshot) */
+  menu_nama: string;
+  /**
+   * harga jual per porsi yang DIKUNCI saat baris ini dimasukkan ke bill.
+   * Inilah yang ditagih saat bill dibayar, bukan harga menu terbaru.
+   */
+  harga_satuan: number;
   qty: number;
   /** null = ikut mode transaksi; true/false = override dine-in per baris */
   dine_in_override: boolean | null;

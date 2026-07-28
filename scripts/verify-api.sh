@@ -4419,18 +4419,33 @@ cek "fifo: saldo awal walk = 15 (== ledger)" "V == 15" "$(echo "$FF120" | jq '.s
 # (c) waste 12 + ACC → konsumsi FIFO: lot1 habis (10), lot2 terpakai 2 sisa 3
 W120=$(api "$OWNER" POST /stok/waste "{\"branch_id\":\"$CB46_ID\",\"ingredient_id\":\"$B120\",\"qty\":12,\"foto_url\":\"/uploads/bukti-uji.jpg\",\"catatan\":\"uji fifo 120\"}")
 api "$OWNER" POST "/stok/opname/sesi/$(echo "$W120" | jq -r '.session_id')/acc" > /dev/null
+# biaya di kartu mengikuti setelan Metode HPP → seksi ini menguji kedua mode
+api "$OWNER" PATCH /company '{"metode_hpp":"fifo"}' > /dev/null
 FF120B=$(api "$OWNER" GET "/stok/fifo/$B120?branch_id=$CB46_ID")
 cek "fifo: lot PALING AWAL habis duluan (terpakai 10, sisa 0)" "V == 1" \
   "$(echo "$FF120B" | jq '(.lots[0].terpakai==10) and (.lots[0].sisa==0) | if . then 1 else 0 end')"
 cek "fifo: lot kedua terpakai 2, sisa 3" "V == 1" \
   "$(echo "$FF120B" | jq '(.lots[1].terpakai==2) and (.lots[1].sisa==3) | if . then 1 else 0 end')"
 cek "fifo: pemakaian opname 12 ber-HPP 14000 (10×1000 + 2×2000)" "V == 1" \
-  "$(echo "$FF120B" | jq '[.pemakaian[]|select(.jenis=="opname")][0] | (.qty==12) and (.hpp==14000) and (.rincian|length==2) | if . then 1 else 0 end')"
+  "$(echo "$FF120B" | jq '[.pemakaian[]|select(.jenis=="opname")][0] | (.qty==12) and (.hpp==14000) and (.harga_rata==null) and (.rincian|length==2) | if . then 1 else 0 end')"
 SLDG120=$(api "$OWNER" GET "/stok?branch_id=$CB46_ID" | jq --arg i "$B120" '[.[]|select(.ingredient_id==$i)][0].saldo')
 cek "fifo: saldo walk == saldo ledger (3)" "V == 1" \
   "$(echo "$FF120B" | jq --argjson s "$SLDG120" '(.saldo==3) and (.saldo==$s) | if . then 1 else 0 end')"
 cek "fifo bahan asing → 404" "V == 404" \
   "$(status_code "$OWNER" GET "/stok/fifo/00000000-0000-0000-0000-000000000000?branch_id=$CB46_ID")"
+# (c2) METODE AVERAGE: aliran barang tetap FIFO, hanya BIAYA-nya yang berubah.
+# Setelan Metode HPP dulu tersimpan tapi tak pernah dibaca — kartu selalu FIFO.
+api "$OWNER" PATCH /company '{"metode_hpp":"average"}' > /dev/null
+FF120C=$(api "$OWNER" GET "/stok/fifo/$B120?branch_id=$CB46_ID")
+cek "average: DTO melaporkan metode yang dipakai" "V == 1" \
+  "$(echo "$FF120C" | jq '(.metode_hpp=="average")|if . then 1 else 0 end')"
+cek "average: aliran fisik & saldo TIDAK berubah (lot1 habis, lot2 sisa 3)" "V == 1" \
+  "$(echo "$FF120C" | jq '(.lots[0].terpakai==10) and (.lots[0].sisa==0) and (.lots[1].sisa==3) and (.saldo==3) | if . then 1 else 0 end')"
+# rata bergerak saat 12 keluar = (10×1000 + 5×2000) ÷ 15 = 1333.33 → 12 × 1333.33
+cek "average: harga_rata 1333.33 & biaya ≠ 14000 (bukan lagi FIFO)" "V == 1" \
+  "$(echo "$FF120C" | jq '[.pemakaian[]|select(.jenis=="opname")][0] | (.harga_rata==1333.33) and (.hpp!=14000) and ((.hpp-15999.96) < 0.01) and ((.hpp-15999.96) > -0.01) | if . then 1 else 0 end')"
+cek "average: rincian lot tetap dilaporkan (untuk lacak kedaluwarsa)" "V == 2" \
+  "$(echo "$FF120C" | jq '[.pemakaian[]|select(.jenis=="opname")][0].rincian|length')"
 # (d) hapus dari Detail Produk (soft delete) → hilang dari daftar
 cek "hapus bahan dari detail → ok" "V == 1" \
   "$(api "$OWNER" DELETE "/bahan/$B120" | jq '(.ok==true)|if . then 1 else 0 end')"
