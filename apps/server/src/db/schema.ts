@@ -803,6 +803,15 @@ export const menus = pgTable(
     nama: text("nama").notNull(),
     /** kode menu opsional (mis. "A1") untuk kasir & daftar menu */
     kode: text("kode"),
+    /**
+     * ISI menu untuk PEMBELI — mis. "1 baso urat besar, 2 baso kecil, 1 mie".
+     * SENGAJA terpisah dari resep (menu_components): resep itu dokumen BIAYA,
+     * takarannya boleh pecahan hasil konversi gram (mis. 0,7576 butir) dan
+     * memuat kemasan serta pelengkap yang tak pantas dicetak di daftar menu.
+     * Form menyediakan tombol isi-otomatis dari resep sebagai titik awal, lalu
+     * teksnya dirapikan sendiri oleh pemilik. NULL/kosong = tak ditampilkan.
+     */
+    deskripsi: text("deskripsi"),
     tipe: menuTipeEnum("tipe").notNull().default("regular"),
     mult: numeric("mult", { precision: 7, scale: 3, mode: "number" }),
     baseMenuId: uuid("base_menu_id").references((): AnyPgColumn => menus.id),

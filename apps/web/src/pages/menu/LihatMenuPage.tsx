@@ -178,10 +178,15 @@ export function LihatMenuPage() {
                           🍜
                         </span>
                       )}
-                      <span className="min-w-0 flex-1 truncate font-medium text-stone-800">
-                        {m.nama}
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate font-medium text-stone-800">{m.nama}</span>
+                        {m.deskripsi && (
+                          <span className="block text-xs leading-snug text-stone-500">
+                            {m.deskripsi}
+                          </span>
+                        )}
                       </span>
-                      <span className="font-semibold text-stone-700">
+                      <span className="shrink-0 font-semibold text-stone-700">
                         {formatRupiah(m.harga_jual)}
                       </span>
                     </li>
@@ -207,9 +212,16 @@ export function LihatMenuPage() {
               const m = byId.get(id);
               if (!m) return null;
               return (
-                <div key={id} className="flex items-baseline justify-between py-0.5 text-sm">
-                  <span>{m.nama}</span>
-                  <span className="font-semibold">{formatRupiah(m.harga_jual)}</span>
+                // break-inside-avoid: isi menu tak boleh terpotong ke halaman
+                // berikutnya, terpisah dari nama & harganya.
+                <div key={id} className="break-inside-avoid py-0.5 text-sm">
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span>{m.nama}</span>
+                    <span className="font-semibold">{formatRupiah(m.harga_jual)}</span>
+                  </div>
+                  {m.deskripsi && (
+                    <div className="pl-3 text-xs leading-snug text-neutral-600">{m.deskripsi}</div>
+                  )}
                 </div>
               );
             })}

@@ -2,6 +2,7 @@ export * from "./absensi";
 export * from "./constants";
 export * from "./escpos";
 export * from "./hpp";
+export * from "./isi-menu";
 export * from "./ketersediaan";
 export * from "./receipt";
 export * from "./satuan";

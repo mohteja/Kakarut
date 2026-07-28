@@ -40,6 +40,8 @@ const KomponenBody = z.object({
 const MenuCreateBody = z.object({
   nama: z.string().trim().min(1),
   kode: z.string().trim().max(20).nullish(),
+  /** isi menu untuk PEMBELI (bukan resep) — "" disimpan sebagai null */
+  deskripsi: z.string().trim().max(500).nullish(),
   category_id: z.string().uuid(),
   tipe: z.enum(["regular", "paket"]).default("regular"),
   mult: z.number().nonnegative().nullish(),
@@ -71,6 +73,8 @@ const MenuUpdateBody = z.object({
   nama: z.string().trim().min(1).optional(),
   /** undefined = pertahankan kode lama; ""/null = generate ulang dari nama */
   kode: z.string().trim().max(20).nullish(),
+  /** undefined = deskripsi lama tetap; ""/null = kosongkan */
+  deskripsi: z.string().trim().max(500).nullish(),
   category_id: z.string().uuid().optional(),
   tipe: z.enum(["regular", "paket"]).optional(),
   mult: z.number().nonnegative().nullish(),
@@ -92,6 +96,16 @@ type MenuEfektif = z.infer<typeof MenuCreateBody>;
 const UrutanBody = z.object({
   items: z.array(z.object({ id: z.string().uuid(), sort_order: z.number().int() })),
 });
+
+/**
+ * Teks opsional → null bila kosong. Tanpa ini, klien yang mengirim `""` untuk
+ * "hapus deskripsi" akan menyimpan string kosong, dan setiap pembaca harus
+ * memeriksa dua bentuk "tidak ada" (null DAN "").
+ */
+function teksAtauNull(v: string | null | undefined): string | null {
+  const t = v?.trim();
+  return t ? t : null;
+}
 
 function validatePaket(body: MenuEfektif) {
   if (body.tipe === "paket" && (!body.base_menu_id || body.base_mult == null)) {
@@ -456,6 +470,7 @@ export const menuRoutes = new Hono<AppEnv>()
           categoryId: body.category_id,
           nama: body.nama,
           kode,
+          deskripsi: teksAtauNull(body.deskripsi),
           tipe: body.tipe,
           mult: body.tipe === "regular" ? body.mult : null,
           baseMenuId: body.tipe === "paket" ? body.base_menu_id : null,
@@ -502,6 +517,7 @@ export const menuRoutes = new Hono<AppEnv>()
           .select({
             nama: menus.nama,
             kode: menus.kode,
+            deskripsi: menus.deskripsi,
             categoryId: menus.categoryId,
             tipe: menus.tipe,
             hargaJual: menus.hargaJual,
@@ -520,6 +536,7 @@ export const menuRoutes = new Hono<AppEnv>()
         const efektif: MenuEfektif = {
           nama: body.nama ?? lama.nama,
           kode: body.kode === undefined ? lama.kode : body.kode,
+          deskripsi: body.deskripsi === undefined ? lama.deskripsi : body.deskripsi,
           category_id: body.category_id ?? lama.categoryId,
           tipe: body.tipe ?? (lama.tipe as MenuEfektif["tipe"]),
           mult: body.mult === undefined ? lama.mult : body.mult,
@@ -544,6 +561,7 @@ export const menuRoutes = new Hono<AppEnv>()
             categoryId: efektif.category_id,
             nama: efektif.nama,
             kode,
+            deskripsi: teksAtauNull(efektif.deskripsi),
             tipe: efektif.tipe,
             mult: efektif.tipe === "regular" ? efektif.mult : null,
             baseMenuId: efektif.tipe === "paket" ? efektif.base_menu_id : null,

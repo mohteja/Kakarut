@@ -603,6 +603,13 @@
       "when": 1785209931002,
       "tag": "0085_old_meggan",
       "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "7",
+      "when": 1785224461075,
+      "tag": "0086_greedy_scorpion",
+      "breakpoints": true
     }
   ]
 }
