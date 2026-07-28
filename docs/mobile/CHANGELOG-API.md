@@ -463,9 +463,8 @@ kegoyahan urutan gagal di CI alih-alih menyamar jadi "hit rate rendah".
 
 ## Rilis: Transfer Stok + perbaikan integritas stok
 
-> **Status:** menunggu rilis (PR #114). Endpoint di bawah **belum ada di
-> production** sampai PR tersebut di-merge — koordinasikan dulu sebelum mulai
-> mengerjakan bagian 🟢.
+> **Sudah di-merge ke production** (PR #114). Endpoint di bawah sudah aktif —
+> bagian 🟢 boleh langsung dikerjakan tanpa koordinasi rilis lagi.
 >
 > **Baseline:** perubahan di bawah dihitung dari kontrak sebelum PR #114.
 > Migrasi DB yang menyertainya: `0079` (menambah jenis dokumen `transfer`).
