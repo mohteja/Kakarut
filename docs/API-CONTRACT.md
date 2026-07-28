@@ -341,6 +341,36 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 > `/kirim-hasil` khusus produksi, `/laporan-harga` khusus beli. Ganti `{mod}`
 > dengan `produksi` atau `pembelian`.
 
+> ### ⚠️ SATUAN BARIS FAKTUR — `qty` SELALU dalam `satuan`, bukan `satuan_beli`
+>
+> Baris faktur membawa tiga field yang mudah tertukar. Aturannya satu kalimat:
+> **tampilkan `qty` bersama `satuan`.** Titik.
+>
+> | Field | Artinya | Boleh dipasangkan dengan `qty`? |
+> | --- | --- | --- |
+> | `satuan` | satuan kerja/resep (`gr`, `ml`, `botol`, `pcs`) | ✅ **ya — ini pasangannya** |
+> | `satuan_beli` | satuan kemasan saat BELANJA (`kg`, `dus`); `null` = beli langsung dalam `satuan` | ❌ tidak — harus dibagi `isi` dulu |
+> | `is_batch` | **asal-usul input**, bukan satuan: `true` = user mengetiknya dalam kemasan | ❌ tidak — jangan tampilkan kata "batch" sebagai satuan |
+>
+> Saat faktur dibuat, server SUDAH mengonversi input ke satuan kerja:
+> `qty = mode === "batch" ? jumlah × isi : jumlah`. Jadi begitu baris tersimpan,
+> `qty` tidak pernah lagi berada dalam satuan kemasan — sekalipun `is_batch` true.
+>
+> Konversi ke kemasan (hanya untuk dokumen belanja) = `qty ÷ isi`, dan **lewati
+> bila `satuan_beli` null atau `isi` ≤ 1** — persis yang dilakukan
+> `DokumenBelanjaModal.tsx`:
+>
+> ```
+> Sayur   → satuan "gr", satuan_beli "kg", isi 1000, qty 900
+>   ✅ "900 gr"            (qty + satuan)
+>   ❌ "900 kg"            (qty + satuan_beli → salah 1000×)
+>   ℹ️ "≈ 0,9 kg"          (qty ÷ isi, untuk dokumen belanja saja)
+>
+> Mie basah → satuan "gr", is_batch true, qty 2000
+>   ✅ "2.000 gr"
+>   ❌ "2000 batch"        (is_batch itu cara input, bukan satuan)
+> ```
+
 - `POST /api/{mod}/faktur` — req `FakturBody`: `{ branch_id?: uuid, tujuan_branch_id?: uuid|null (KHUSUS BELI, manajemen: cabang STORE tujuan kirim — barang tiba di cabang faktur lalu dikirim & diterima di Penerimaan cabang; baris bertujuan TIDAK auto-confirm), supplier_id?: uuid|null, no_faktur?|null (max60), catatan?|null, worker_id?: uuid|null (produksi: OPSIONAL — bila kosong pelaksana terisi otomatis dari aktor yang memajukan tahap ke "dikerjakan"), items: [{ingredient_id:uuid, mode:"pcs"|"batch", jumlah:number(>0), storage_location_id?:uuid|null, total_harga?:number(≥0)|null}] (min 1) }`. `branch_id` boleh cabang STORE (beli langsung di cabang — barang Tiba langsung masuk stok cabang itu; produksi di cabang store = produksi lokal, hasil masuk stok cabang itu). — res: **201** `{ faktur_id, nomor, status:"rencana", jumlah_baris, beli_otomatis: { faktur_id, nomor, jumlah_baris } | null }` — `beli_otomatis` (jalur PRODUKSI): faktur BELI yang lahir otomatis di cabang sama untuk bahan mentah resep yang KURANG atau yang sisa stoknya bakal jatuh **di bawah stok minimum** setelah produksi (`kurang = kebutuhan resep + stok_minimum − saldo`, dibulatkan per kemasan + MOQ `min_beli`; hanya bahan jalur beli ber-lacak-stok; null bila tak ada). — error: **400** (supplier/ingredient/storage/tujuan invalid, jalur pengadaan salah, tujuan pada produksi), **403** kasir luar cabang / non-manajemen pakai tujuan, **404** ingredient tak ada
 - `POST /api/{mod}/tahap/:fakturId` — req `TahapBody`: `{ ke: "dikerjakan"|"menunggu"|"dikonfirmasi", items?: [{id:uuid, qty:number(>0), harga?:number(≥0)|null, exp?: "YYYY-MM-DD"|null (override tanggal kedaluwarsa lot saat baris MASUK STOK, target ≥ "menunggu"; kosong = otomatis `tanggal masuk + masa_simpan_hari` bahan; diabaikan utk target lain)}], dana_cair?:number|null, realisasi?:number|null, selisih_catatan?|null (max300), tujuan_branch_id?:uuid|null, tujuan_storage_id?:uuid|null, paksa?:bool }` — res: `{ ok, status, jumlah_baris }` — error: **400** (tahap tak urut, tujuan lintas cabang, qty>baris, dll), **403**, **404**, **409** (bahan mentah kurang → pesan kekurangan kecuali `paksa`; atau status berubah konkuren). Saat baris MASUK STOK (`menunggu`), rak simpan yang kosong otomatis diisi **rak default bahan** di cabang baris (Tempat Penyimpanan) — berlaku jalur items maupun non-items; baris bertujuan cabang lain tetap tanpa rak (transit) sampai diterima di cabang.
 - `POST /api/{mod}/kirim/:fakturId` — req: `{ tujuan_storage_id?: uuid|null }` — res: `{ ok, tujuan, jumlah_baris }` — error: **400** (belum ada yang siap / cabang/storage tujuan invalid), **403** bukan staf CK

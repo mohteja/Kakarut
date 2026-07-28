@@ -2224,10 +2224,28 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         ingredient_id: productions.ingredientId,
         bahan: ingredients.nama,
         isi: ingredients.isi,
+        /**
+         * SATUAN TAMPILAN BARIS INI. `qty` di bawah SELALU dinyatakan dalam
+         * `satuan` (satuan kerja/resep) — lihat pembuatan baris:
+         * `qty = mode === "batch" ? jumlah * isi : jumlah`. Jadi pasangan yang
+         * benar untuk ditampilkan adalah `qty` + `satuan`.
+         */
         satuan: ingredients.satuan,
+        /**
+         * Satuan BELI/kemasan (mis. "kg"), hanya untuk input pembelian &
+         * dokumen belanja. JANGAN dipasangkan langsung dengan `qty` — itu
+         * membuat 900 gr terbaca "900 kg". Konversinya: qty ÷ isi.
+         */
         satuan_beli: ingredients.satuanBeli,
+        /** jumlah dalam `satuan` (satuan kerja), bukan dalam `satuan_beli` */
         qty: productions.qty,
         total_harga: productions.totalHarga,
+        /**
+         * ASAL-USUL input, BUKAN satuan: true = user mengetiknya dalam kemasan
+         * (`mode:"batch"`) lalu server mengalikannya dengan `isi`. Menampilkan
+         * kata "batch" sebagai satuan `qty` salah — qty-nya sudah terlanjur
+         * dikonversi ke satuan kerja.
+         */
         is_batch: productions.isBatch,
         catatan: productions.catatan,
         waktu: productions.waktu,

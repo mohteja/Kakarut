@@ -20,6 +20,52 @@ tanpa akses repo server.
 
 ---
 
+## Koreksi kontrak: satuan baris faktur (`qty` vs `satuan_beli` vs `is_batch`)
+
+> **Tidak ada perubahan API.** Ini klarifikasi kontrak yang selama ini kurang
+> tegas — dan satu bug tampilan di aplikasi mobile yang perlu diperbaiki.
+
+### 🔴 WAJIB — baris faktur di mobile menampilkan satuan yang salah
+
+Pada faktur yang sama (PB-0058), web dan mobile menulis angka yang **sama persis**
+tapi satuan yang **berbeda**:
+
+| Bahan | Web (benar) | Mobile (salah) |
+| --- | --- | --- |
+| Sayur | `900 gr` | `900 kg` ← beda **1000×** |
+| Mie basah | `2.000 gr` | `2000 batch` |
+| Air Mineral 330 ml | `24 botol` | `24 batch` |
+| Air biasa | `15.000 ml` | `15000 batch` |
+
+Angkanya tidak salah — **labelnya** yang salah. Mobile memasangkan `qty` dengan
+`satuan_beli` (atau dengan kata "batch" saat `is_batch` true), padahal:
+
+**`qty` SELALU dinyatakan dalam `satuan` (satuan kerja/resep).**
+
+Saat faktur dibuat, server sudah mengonversi input ke satuan kerja —
+`qty = mode === "batch" ? jumlah × isi : jumlah`. Jadi begitu baris tersimpan,
+`qty` tidak pernah lagi berada dalam satuan kemasan, **sekalipun `is_batch`
+true**. `is_batch` itu catatan **cara input**, bukan satuan.
+
+**Perbaikannya satu baris:** tampilkan `qty` bersama **`satuan`**.
+
+```dart
+// ❌ salah — dua-duanya bikin 900 gr terbaca sebagai 900 kg / 900 batch
+final label = row.isBatch ? 'batch' : (row.satuanBeli ?? row.satuan);
+
+// ✅ benar
+final label = row.satuan;
+```
+
+`satuan_beli` hanya untuk **input pembelian** dan **dokumen belanja**. Bila
+memang mau menampilkan setara kemasannya, hitung `qty ÷ isi` dan lewati bila
+`satuan_beli` null atau `isi ≤ 1` — mis. Sayur `900 ÷ 1000` → "≈ 0,9 kg".
+
+Tabel lengkapnya ada di `docs/API-CONTRACT.md` bagian
+`/api/produksi` dan `/api/pembelian`.
+
+---
+
 ## Rilis: Tiga angka yang tak boleh berubah diam-diam
 
 > Migrasi DB **0085** (`open_bill_items.harga_satuan` + `menu_nama`).
