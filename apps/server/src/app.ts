@@ -42,6 +42,7 @@ import { profilRoutes } from "./modules/profil/routes";
 import { pembelianRoutes, produksiRoutes } from "./modules/produksi/routes";
 import { penerimaanRoutes } from "./modules/penerimaan/routes";
 import { pengajuanRoutes } from "./modules/pengajuan/routes";
+import { kebersihanRoutes } from "./modules/kebersihan/routes";
 import { rekomendasiRoutes } from "./modules/rekomendasi/routes";
 import { sampahRoutes } from "./modules/sampah/routes";
 import { shiftRoutes } from "./modules/shift/routes";
@@ -129,6 +130,10 @@ export function createApp() {
   // absensi). Yang boleh MEMUTUSKAN (ACC/tolak) hanya owner/admin — digerbang
   // inline pada PATCH di modulnya, bukan di sini.
   tenant.use("/pengajuan/*", requireRole("owner", "admin", "cashier", "tim", "kitchen", "bar"));
+  // Laporan kebersihan harian: SEMUA peran membuat laporannya masing-masing.
+  // Yang boleh membaca REKAP dan mengatur master area hanya owner/admin —
+  // digerbang inline pada rute terkait di modulnya, bukan di sini.
+  tenant.use("/kebersihan/*", requireRole("owner", "admin", "cashier", "tim", "kitchen", "bar"));
   // TRANSFER STOK: yang MENGIRIM hanya Central Kitchen — ditegakkan di modulnya
   // pada cabang ASAL (403 bila bukan CK), jadi bukan urusan gerbang peran ini.
   // Gerbang di sini sengaja longgar sampai kasir: semua peran cabang perlu
@@ -165,6 +170,8 @@ export function createApp() {
     // absensi karyawan (stasiun pindai) — hanya admin/kasir (digerbang di atas)
     .route("/absensi", absensiRoutes)
     .route("/pengajuan", pengajuanRoutes)
+    // laporan kebersihan harian (buat sendiri) + rekap owner
+    .route("/kebersihan", kebersihanRoutes)
     // profil akun sendiri (identitas + QR absen + ganti password) — semua peran
     .route("/profil", profilRoutes)
     // pencarian member ringan untuk autocomplete kasir — semua peran

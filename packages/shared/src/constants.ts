@@ -104,3 +104,38 @@ export function labelKategoriPengajuan(kode: PengajuanKategori): string {
   const k = KATEGORI_PENGAJUAN.find((x) => x.kode === kode);
   return k ? `${k.emoji} ${k.label}` : kode;
 }
+
+/* ===== Laporan kebersihan harian ===== */
+
+/**
+ * Sesi pembersihan dalam sehari. Toko dibersihkan beberapa kali, jadi laporan
+ * dipisah per sesi — satu karyawan boleh punya tiga laporan sehari, tapi hanya
+ * satu per sesi.
+ */
+export type KebersihanSesi = "pagi" | "siang" | "malam";
+
+/**
+ * SUMBER TUNGGAL sesi kebersihan — dipakai bersama oleh kartu sesi di web,
+ * validasi zod di server, dan label rekap.
+ */
+export const SESI_KEBERSIHAN: {
+  kode: KebersihanSesi;
+  label: string;
+  emoji: string;
+}[] = [
+  { kode: "pagi", label: "Pagi", emoji: "🌅" },
+  { kode: "siang", label: "Siang", emoji: "☀️" },
+  { kode: "malam", label: "Malam", emoji: "🌙" },
+];
+
+/** Semua kode sesi — untuk `z.enum()` di server. */
+export const KODE_SESI_KEBERSIHAN = SESI_KEBERSIHAN.map((s) => s.kode) as [
+  KebersihanSesi,
+  ...KebersihanSesi[],
+];
+
+/** Label tampilan sesi, mis. "🌅 Pagi". */
+export function labelSesiKebersihan(kode: KebersihanSesi): string {
+  const s = SESI_KEBERSIHAN.find((x) => x.kode === kode);
+  return s ? `${s.emoji} ${s.label}` : kode;
+}

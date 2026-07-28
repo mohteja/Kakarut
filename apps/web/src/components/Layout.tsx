@@ -18,6 +18,7 @@ const URUTAN_TIPE = { kantor: 0, central_kitchen: 1, store: 2 } as const;
 const BOLEH_STORE = [
   "/dashboard",
   "/absen",
+  "/kebersihan",
   "/profil",
   "/kasir",
   "/menu/lihat",
@@ -34,6 +35,7 @@ const BOLEH_STORE = [
 // apa-apa", bukan galat, jadi sulit dilacak. `/transfer-stok` pernah terlewat.
 const BOLEH_CK = [
   "/absen",
+  "/kebersihan",
   "/profil",
   "/stok",
   "/perlengkapan",
@@ -158,6 +160,16 @@ export function Layout() {
     refetchInterval: 60_000,
   });
   const pengajuanMenunggu = (pengajuanNav ?? []).length;
+
+  // Ringkasan kebersihan hari ini — endpoint ringan khusus badge (bukan /rekap
+  // yang memuat sebulan penuh), jadi aman di-poll tiap menit.
+  const { data: kebersihanNav } = useQuery({
+    queryKey: ["kebersihan-ringkas"],
+    queryFn: () => api<{ tanggal: string; total: number; kotor: number }>("/kebersihan/ringkas"),
+    enabled: !!auth && !auth.user.is_super_admin && manajemenGuard,
+    refetchInterval: 60_000,
+  });
+  const kebersihanKotor = kebersihanNav?.kotor ?? 0;
 
   if (!auth) return null;
 
@@ -342,6 +354,18 @@ export function Layout() {
                   {badgeOranye(pengajuanMenunggu)}
                 </NavLink>
               )}
+              {/* Rekap kebersihan harian — Kantor saja (sama seperti rekap absen).
+                  Badge MERAH: laporan hari ini yang memuat area belum bersih. */}
+              {isManajemen && penuh && (
+                <NavLink to="/rekap-kebersihan" className={navFlex}>
+                  <span>🧼 Rekap Kebersihan</span>
+                  {kebersihanKotor > 0 ? (
+                    <span className="ml-auto flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-red-500 px-1 text-xs font-bold text-white">
+                      {kebersihanKotor}
+                    </span>
+                  ) : null}
+                </NavLink>
+              )}
               {/* Beranda ringkas peran TIM/KITCHEN/BAR (CK & toko): notifikasi + tugas hari ini */}
               {(isTim || isKitchen || isBar) && (
                 <NavLink to="/beranda" className={linkClass}>
@@ -352,6 +376,11 @@ export function Layout() {
                   (swafoto + radius GPS); admin/kasir juga jadi stasiun pindai. */}
               <NavLink to="/absen" className={linkClass}>
                 🖐 Absen
+              </NavLink>
+              {/* Laporan kebersihan harian: semua peran mengisi miliknya sendiri.
+                  Terdaftar di BOLEH_STORE & BOLEH_CK agar bisa dibuka dari mana pun. */}
+              <NavLink to="/kebersihan" className={linkClass}>
+                🧹 Laporan Kebersihan
               </NavLink>
               <NavLink to="/profil" className={linkClass}>
                 👤 Profil Saya

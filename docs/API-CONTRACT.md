@@ -524,6 +524,52 @@ ADA (validasi = aturan endpoint asli), idempoten per `client_ref`.
 - `PATCH /api/pengajuan/:id` — **[owner/admin]** (inline) — req: `{ status: "disetujui"|"ditolak", alasan_tolak? }` (`alasan_tolak` **wajib** saat menolak) — res: `PengajuanRow` — error: **400** alasan tolak kosong; **404** bukan milik perusahaan ini; **409** sudah pernah diputuskan (tak bisa diubah lagi)
 - `DELETE /api/pengajuan/:id` — pemohon membatalkan MILIKNYA selama masih `menunggu`; owner/admin boleh kapan saja — res: `{ ok }` — error: **403** milik orang lain; **409** pemohon membatalkan yang sudah diputuskan; **404** tak ditemukan
 
+## `/api/kebersihan` — Laporan kebersihan harian (`modules/kebersihan/routes.ts`) — group guard **[owner/admin/cashier/tim/kitchen/bar]**
+
+> **Semua peran MEMBUAT laporannya masing-masing** (tim CK maupun tim cabang);
+> yang membaca REKAP dan mengatur master area hanya owner/admin (gerbang inline).
+>
+> Dua aturan yang tak bisa ditawar klien:
+> - **`tanggal` TIDAK dikirim klien** — server menurunkannya dari zona waktu
+>   perusahaan (`tanggalDi`), persis seperti `attendances.attend_date`. Field
+>   `tanggal` di body diabaikan diam-diam, jadi laporan mustahil dibuat mundur.
+> - **`branch_id` juga dari server** — diambil dari keanggotaan pelapor saat itu.
+>   Akun tanpa cabang (owner/admin di Kantor) → **400**.
+>
+> **Satu laporan per karyawan × tanggal × sesi** (unique index). Sesi resmi ada
+> di konstanta `SESI_KEBERSIHAN`: `pagi` / `siang` / `malam`.
+>
+> **Foto wajib:** minimal SATU baris checklist harus membawa `foto_url`
+> (hasil `POST /upload?tujuan=bukti`); per-baris sendiri tetap opsional.
+>
+> `area_nama` pada tiap baris adalah **salinan** nama area saat laporan dibuat —
+> menghapus/mengganti nama area master tidak merusak laporan lama (`area_id`
+> menjadi `null`, namanya tetap terbaca).
+
+Master area (`/area` dan `/rekap` didaftarkan **sebelum** `/:id` agar tidak tertangkap olehnya):
+
+- `GET /api/kebersihan/area` — query: `branch_id?` (`all` = tanpa saringan), `aktif?` (`1` = hanya aktif) — res: `AreaKebersihanDto[]` (urut `urutan`, lalu nama).
+  > **Peran terkunci cabang** hanya menerima area yang berlaku untuk lokasinya (`branch_id` null **atau** sama dengan cabangnya) dan hanya yang **aktif**; `branch_id` di query diabaikan untuk mereka.
+- `POST /api/kebersihan/area` — **[owner/admin]** (inline) — req: `{ nama, branch_id?, urutan?, is_active? }` (`branch_id` null/absen = berlaku semua lokasi) — res: **201** `{ id }` — error: **400** cabang bukan milik perusahaan ini
+- `PATCH /api/kebersihan/area/:id` — **[owner/admin]** (inline) — req: sebagian dari body di atas — res: `{ ok }` — error: **404** tak ditemukan
+- `DELETE /api/kebersihan/area/:id` — **[owner/admin]** (inline) — res: `{ ok }`. Aman terhadap riwayat (lihat catatan snapshot di atas).
+
+Rekap & ringkasan:
+
+- `GET /api/kebersihan/rekap` — **[owner/admin]** (inline) — query: `bulan?` (`YYYY-MM`, default bulan berjalan di zona waktu perusahaan; nilai ngawur → default), `branch_id?` (`all` = semua cabang), `sesi?` (`pagi|siang|malam`) — res: `RekapKebersihanDto`.
+  > **Day-major**, kebalikan `GET /absensi/rekap`: satu entri = satu HARI (terbaru dulu) berisi laporan semua tim hari itu. Hari tanpa laporan tetap muncul dengan `total: 0` — justru itu gunanya. Bulan berjalan berhenti di hari ini.
+- `GET /api/kebersihan/ringkas` — **[owner/admin]** (inline) — res: `{ tanggal, total, kotor }` — hitungan hari ini untuk badge sidebar; sengaja terpisah dari `/rekap` karena di-poll tiap menit.
+
+Laporan:
+
+- `GET /api/kebersihan` — query: `dari?`/`sampai?` (`YYYY-MM-DD`), `branch_id?` (`all` = semua), `sesi?` — res: `LaporanKebersihanDto[]` (terbaru dulu, maks 200, sudah membawa `items`).
+  > **Peran terkunci cabang SELALU hanya melihat laporan MILIKNYA** (sama seperti `/pengajuan`) — laporan ini penilaian kerja, bukan papan pengumuman. `branch_id` diabaikan untuk mereka.
+- `GET /api/kebersihan/:id` — pemilik laporan atau owner/admin — res: `LaporanKebersihanDto` — error: **404** milik orang lain (bagi peran terkunci cabang) atau tak ditemukan
+- `POST /api/kebersihan` — [semua peran, atas nama diri sendiri] — req: `{ sesi, catatan?, items: [{ area_id, bersih, catatan?, foto_url? }] }` (1–100 baris) — res: **201** `LaporanKebersihanDto` — error: **400** checklist kosong / area tak dikenal atau bukan untuk lokasi pelapor / area dikirim dua kali / **tanpa foto sama sekali** / akun tanpa cabang; **409** sesi itu sudah dilaporkan hari ini
+- `PATCH /api/kebersihan/:id` — **pemilik saja**, dan hanya selama masih tanggal yang sama — req: `{ catatan?, items }` (mengganti SELURUH checklist) — res: `LaporanKebersihanDto` — error: **403** milik orang lain; **409** laporan hari sebelumnya; **400** aturan yang sama seperti `POST`
+- `PATCH /api/kebersihan/:id/catatan` — **[owner/admin]** (inline) — req: `{ catatan_owner: string|null }` — res: `LaporanKebersihanDto`. Mengosongkan catatan ikut membersihkan `catatan_owner_oleh`/`catatan_owner_pada`.
+- `DELETE /api/kebersihan/:id` — pemilik menghapus MILIKNYA pada hari yang sama; owner/admin kapan saja — res: `{ ok }` — error: **403** milik orang lain; **409** pemilik menghapus laporan hari sebelumnya; **404** tak ditemukan
+
 ## `/api/profil` — Akun sendiri (`modules/profil/routes.ts`) — [any]
 
 - `GET /api/profil` — res: `ProfilDto` `{ nama, email, role, cabang, employee_code }`
@@ -723,6 +769,7 @@ import type {
   BahanKategori,
   DivisiProduksi,
   JenisPengadaan,
+  KebersihanSesi,
   MenuTipe,
   PengajuanJenis,
   PengajuanKategori,
@@ -2266,6 +2313,105 @@ export interface RekapAbsenDto {
    */
   hari_terhitung: number;
   rows: RekapAbsenRow[];
+}
+
+/* ===== Laporan kebersihan harian ===== */
+
+/**
+ * Satu area pada master checklist kebersihan (diatur owner).
+ * `branch_id` null = area berlaku di SEMUA lokasi.
+ */
+export interface AreaKebersihanDto {
+  id: string;
+  nama: string;
+  branch_id: string | null;
+  /** nama cabang bila area khusus satu lokasi; null = semua lokasi */
+  cabang: string | null;
+  urutan: number;
+  is_active: boolean;
+}
+
+/** Satu baris checklist di dalam sebuah laporan kebersihan. */
+export interface LaporanKebersihanItem {
+  id: string;
+  /** null bila area masternya sudah dihapus — `area_nama` tetap terbaca */
+  area_id: string | null;
+  /** salinan nama area saat laporan dibuat (tahan rename/hapus master) */
+  area_nama: string;
+  bersih: boolean;
+  catatan: string | null;
+  /** hasil POST /upload?tujuan=bukti; minimal satu item per laporan wajib terisi */
+  foto_url: string | null;
+  urutan: number;
+}
+
+/** Laporan kebersihan lengkap beserta checklist-nya (GET /kebersihan/:id). */
+export interface LaporanKebersihanDto {
+  id: string;
+  user_id: string;
+  nama: string;
+  branch_id: string;
+  cabang: string | null;
+  /** YYYY-MM-DD, selalu diturunkan server dari zona waktu perusahaan */
+  tanggal: string;
+  sesi: KebersihanSesi;
+  catatan: string | null;
+  /** balasan owner/admin; null bila belum dikomentari */
+  catatan_owner: string | null;
+  catatan_owner_oleh: string | null;
+  catatan_owner_pada: string | null;
+  total_area: number;
+  area_bersih: number;
+  area_kotor: number;
+  jumlah_foto: number;
+  created_at: string;
+  updated_at: string;
+  items: LaporanKebersihanItem[];
+}
+
+/** Baris ringkas sebuah laporan pada rekap harian (tanpa detail checklist). */
+export interface LaporanKebersihanRingkas {
+  id: string;
+  user_id: string;
+  nama: string;
+  branch_id: string;
+  cabang: string | null;
+  sesi: KebersihanSesi;
+  total_area: number;
+  area_bersih: number;
+  area_kotor: number;
+  jumlah_foto: number;
+  /** foto pertama sebagai pratinjau; null bila entah bagaimana tak ada */
+  foto_utama: string | null;
+  ada_catatan_owner: boolean;
+  created_at: string;
+}
+
+/** Satu kotak = satu hari pada rekap kebersihan. */
+export interface RekapKebersihanHari {
+  /** YYYY-MM-DD */
+  tanggal: string;
+  /** jumlah laporan hari itu (semua tim, semua cabang) */
+  total: number;
+  /** jumlah baris checklist yang ditandai TIDAK bersih hari itu */
+  area_kotor: number;
+  /** berapa laporan per sesi */
+  sesi: { pagi: number; siang: number; malam: number };
+  /** sudah terurut cabang → sesi → waktu kirim */
+  laporan: LaporanKebersihanRingkas[];
+}
+
+/**
+ * Rekap kebersihan sebulan (GET /kebersihan/rekap) — khusus owner/admin.
+ * Hari tanpa laporan tetap muncul (kotak kosong) supaya bolongnya kelihatan.
+ */
+export interface RekapKebersihanDto {
+  /** YYYY-MM */
+  bulan: string;
+  dari: string;
+  sampai: string;
+  /** terbaru di depan */
+  hari: RekapKebersihanHari[];
 }
 
 /** Laporan pengeluaran pembelian bahan baku (faktur beli terkonfirmasi) per rentang tanggal. */

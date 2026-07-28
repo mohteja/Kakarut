@@ -20,6 +20,75 @@ tanpa akses repo server.
 
 ---
 
+## Rilis: Laporan kebersihan harian (tim CK + seluruh tim cabang)
+
+> **Menunggu rilis.** Migrasi DB **0083** (enum `kebersihan_sesi` + tabel
+> `cleaning_areas`, `cleaning_reports`, `cleaning_report_items`). Perubahan API
+> **aditif** — tak ada endpoint lama yang berubah perilaku.
+
+### 🟢 BARU — `/api/kebersihan`: karyawan melapor per sesi, owner membaca rekap harian
+
+Tiap karyawan (tim CK maupun tim cabang) mengisi checklist kebersihan untuk
+sesi **pagi / siang / malam**, lengkap dengan foto bukti. Owner membacanya
+sebagai rekap **satu kotak satu hari** berisi laporan semua tim.
+
+| | |
+| --- | --- |
+| `GET /api/kebersihan/area` | daftar area checklist untuk lokasi pemanggil |
+| `POST\|PATCH\|DELETE /api/kebersihan/area[/:id]` | **owner/admin** — master area |
+| `GET /api/kebersihan/rekap` | **owner/admin** — `?bulan=` `?branch_id=` `?sesi=` |
+| `GET /api/kebersihan/ringkas` | **owner/admin** — `{ tanggal, total, kotor }` untuk badge |
+| `GET /api/kebersihan` | `?dari=` `?sampai=` `?branch_id=` `?sesi=` |
+| `GET /api/kebersihan/:id` | pemilik atau owner/admin |
+| `POST /api/kebersihan` | semua peran, atas nama diri sendiri |
+| `PATCH /api/kebersihan/:id` | **pemilik**, hanya di hari yang sama |
+| `PATCH /api/kebersihan/:id/catatan` | **owner/admin** — balasan untuk pelapor |
+| `DELETE /api/kebersihan/:id` | pemilik (hari itu) atau owner/admin |
+
+**Lima hal yang mudah salah kalau tidak dibaca:**
+
+1. **Jangan kirim `tanggal`.** Server menurunkannya dari zona waktu perusahaan.
+   Field itu diabaikan diam-diam, jadi laporan tak bisa dibuat mundur — jangan
+   bangun UI "pilih tanggal" untuk pengisian.
+2. **Jangan kirim `branch_id` saat membuat laporan.** Diambil dari keanggotaan
+   pelapor. Akun tanpa cabang → **400**.
+3. **Foto wajib minimal satu per laporan.** Kalau semua baris `foto_url` kosong
+   → **400 "Lampirkan minimal 1 foto bukti"**. Kunci tombol Kirim di klien
+   supaya galat ini tak pernah terlihat pengguna.
+4. **Satu laporan per sesi per hari.** Mengirim sesi yang sama dua kali →
+   **409**; tampilkan tombol "Perbarui" (`PATCH`), bukan pesan galat mentah.
+5. **Peran terkunci cabang hanya melihat laporan MILIKNYA** — sama seperti
+   `/pengajuan`. `branch_id` diabaikan untuk mereka.
+
+Tiga sesi resmi (konstanta `SESI_KEBERSIHAN`) — pakai apa adanya:
+
+| kode | label |
+| --- | --- |
+| `pagi` | 🌅 Pagi |
+| `siang` | ☀️ Siang |
+| `malam` | 🌙 Malam |
+
+**Master area** punya `branch_id` yang boleh `null` = berlaku di semua lokasi;
+terisi = khusus lokasi itu (mis. "Chiller" hanya untuk Central Kitchen).
+Karyawan hanya menerima area yang berlaku untuk cabangnya, dan memakai area
+milik cabang lain ditolak **400**.
+
+**Riwayat tahan hapus:** tiap baris checklist menyimpan salinan nama area
+(`area_nama`). Kalau owner menghapus areanya, `area_id` jadi `null` tapi nama
+tetap terbaca — tampilkan `area_nama`, jangan lookup ke master.
+
+**Bentuk rekap dibalik dari rekap absen.** `RekapKebersihanDto.hari[]` adalah
+**day-major**: satu entri = satu hari (terbaru dulu) berisi `laporan[]` semua
+tim hari itu, plus `total`, `area_kotor`, dan `sesi.{pagi,siang,malam}`. Hari
+tanpa laporan tetap dikirim dengan `total: 0` — jangan disaring, justru hari
+bolong itulah yang ingin dilihat owner.
+
+DTO baru: `AreaKebersihanDto`, `LaporanKebersihanItem`, `LaporanKebersihanDto`,
+`LaporanKebersihanRingkas`, `RekapKebersihanHari`, `RekapKebersihanDto`
+(Lampiran A pada `docs/API-CONTRACT.md`).
+
+---
+
 ## Rilis: Pengajuan cuti & libur + rekap absen bulanan
 
 > **Sudah di-merge ke production.** Migrasi DB **0082** (tabel `leave_requests`

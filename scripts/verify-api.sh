@@ -5550,6 +5550,116 @@ cek "status ngawur → jatuh ke bawaan aktif" "V == 1" \
 cek "bulan lampau: karyawan yang belum bergabung tak muncul" "V == 0" \
   "$(api "$OWNER" GET "/absensi/rekap?bulan=2020-01&branch_id=all&status=semua" | jq --arg u "$UIDK143" '[.rows[]|select(.user_id==$u)]|length')"
 
+echo
+echo "== 144. Laporan kebersihan harian (checklist area + foto wajib + rekap owner) =="
+# Master area: satu berlaku semua lokasi, satu khusus store, satu khusus CK.
+# Yang khusus CK tak boleh terlihat/dipakai karyawan store.
+AR144_UMUM=$(api "$OWNER" POST /kebersihan/area '{"nama":"Lantai Depan 144","urutan":0}' | jq -r .id)
+AR144_STORE=$(api "$OWNER" POST /kebersihan/area "{\"nama\":\"Toilet 144\",\"branch_id\":\"$CB46_ID\",\"urutan\":1}" | jq -r .id)
+AR144_CK=$(api "$OWNER" POST /kebersihan/area "{\"nama\":\"Chiller CK 144\",\"branch_id\":\"$CK52_UTAMA\",\"urutan\":2}" | jq -r .id)
+cek "owner buat 3 area kebersihan" "V == 1" \
+  "$([ -n "$AR144_UMUM" ] && [ -n "$AR144_STORE" ] && [ -n "$AR144_CK" ] && echo 1 || echo 0)"
+cek "karyawan tak boleh buat area → 403" "V == 403" \
+  "$(status_code_body "$TKIT" POST /kebersihan/area '{"nama":"Nakal 144"}')"
+
+AREA144=$(api "$TKIT" GET /kebersihan/area)
+cek "kitchen store: area umum + area cabangnya terlihat" "V == 1" \
+  "$(echo "$AREA144" | jq --arg a "$AR144_UMUM" --arg b "$AR144_STORE" '(([.[]|select(.id==$a)]|length)==1) and (([.[]|select(.id==$b)]|length)==1)|if . then 1 else 0 end')"
+cek "kitchen store: area khusus CK TIDAK terlihat" "V == 0" \
+  "$(echo "$AREA144" | jq --arg a "$AR144_CK" '[.[]|select(.id==$a)]|length')"
+
+# Foto wajib: satu laporan harus membawa minimal satu bukti.
+BODY144_TANPA="{\"sesi\":\"pagi\",\"items\":[{\"area_id\":\"$AR144_UMUM\",\"bersih\":true},{\"area_id\":\"$AR144_STORE\",\"bersih\":false,\"catatan\":\"masih bau\"}]}"
+cek "laporan tanpa foto → 400" "V == 400" \
+  "$(status_code_body "$TKIT" POST /kebersihan "$BODY144_TANPA")"
+cek "checklist kosong → 400" "V == 400" \
+  "$(status_code_body "$TKIT" POST /kebersihan '{"sesi":"pagi","items":[]}')"
+# Area milik cabang lain tak boleh dipakai walau id-nya ditebak.
+cek "pakai area khusus CK dari store → 400" "V == 400" \
+  "$(status_code_body "$TKIT" POST /kebersihan "{\"sesi\":\"pagi\",\"items\":[{\"area_id\":\"$AR144_CK\",\"bersih\":true,\"foto_url\":\"/uploads/bukti-144.jpg\"}]}")"
+
+# `tanggal` dikirim ngawur oleh klien — server WAJIB mengabaikannya.
+BODY144="{\"sesi\":\"pagi\",\"tanggal\":\"2020-01-01\",\"catatan\":\"sabun habis\",\"items\":[{\"area_id\":\"$AR144_UMUM\",\"bersih\":true,\"foto_url\":\"/uploads/bukti-144a.jpg\"},{\"area_id\":\"$AR144_STORE\",\"bersih\":false,\"catatan\":\"masih bau\"}]}"
+LAP144=$(api "$TKIT" POST /kebersihan "$BODY144")
+LID144=$(echo "$LAP144" | jq -r '.id // ""')
+cek "laporan sesi pagi dengan foto → tersimpan" "V == 1" \
+  "$([ -n "$LID144" ] && echo 1 || echo 0)"
+cek "tanggal diturunkan server (abaikan kiriman klien)" "V == 1" \
+  "$(echo "$LAP144" | jq --arg t "$(TZ=Asia/Jakarta date +%F)" '.tanggal==$t|if . then 1 else 0 end')"
+cek "hitungan area: 2 total, 1 bersih, 1 kotor, 1 foto" "V == 1" \
+  "$(echo "$LAP144" | jq '((.total_area==2) and (.area_bersih==1) and (.area_kotor==1) and (.jumlah_foto==1))|if . then 1 else 0 end')"
+cek "nama area disalin ke baris laporan (snapshot)" "V == 1" \
+  "$(echo "$LAP144" | jq '[.items[]|select(.area_nama=="Toilet 144" and .bersih==false)]|length==1|if . then 1 else 0 end')"
+cek "sesi pagi kedua di hari yang sama → 409" "V == 409" \
+  "$(status_code_body "$TKIT" POST /kebersihan "$BODY144")"
+LAP144B=$(api "$TKIT" POST /kebersihan "{\"sesi\":\"malam\",\"items\":[{\"area_id\":\"$AR144_UMUM\",\"bersih\":true,\"foto_url\":\"/uploads/bukti-144b.jpg\"}]}")
+cek "sesi berbeda di hari yang sama → boleh" "V == 1" \
+  "$(echo "$LAP144B" | jq '.sesi=="malam"|if . then 1 else 0 end')"
+cek "sesi ngawur → 400" "V == 400" \
+  "$(status_code_body "$TKIT" POST /kebersihan "{\"sesi\":\"subuh\",\"items\":[{\"area_id\":\"$AR144_UMUM\",\"bersih\":true,\"foto_url\":\"/uploads/x.jpg\"}]}")"
+
+# Laporan itu penilaian kerja — sesama karyawan tak boleh saling mengintip.
+cek "karyawan lain tak melihat laporan orang" "V == 0" \
+  "$(api "$TBAR" GET /kebersihan | jq --arg i "$LID144" '[.[]|select(.id==$i)]|length')"
+cek "karyawan lain buka detail → 404" "V == 404" \
+  "$(status_code "$TBAR" GET "/kebersihan/$LID144")"
+cek "pemilik melihat laporannya sendiri" "V == 1" \
+  "$(api "$TKIT" GET /kebersihan | jq --arg i "$LID144" '[.[]|select(.id==$i)]|length==1|if . then 1 else 0 end')"
+cek "owner melihat laporan semua tim" "V == 1" \
+  "$(api "$OWNER" GET "/kebersihan?branch_id=all" | jq --arg i "$LID144" '[.[]|select(.id==$i)]|length==1|if . then 1 else 0 end')"
+
+# Perbaikan: pemilik boleh mengganti isi selama masih hari yang sama.
+cek "karyawan lain ubah laporan orang → 403" "V == 403" \
+  "$(status_code_body "$TBAR" PATCH "/kebersihan/$LID144" "{\"items\":[{\"area_id\":\"$AR144_UMUM\",\"bersih\":true,\"foto_url\":\"/uploads/x.jpg\"}]}")"
+cek "pemilik perbarui: semua area jadi bersih" "V == 1" \
+  "$(api "$TKIT" PATCH "/kebersihan/$LID144" "{\"items\":[{\"area_id\":\"$AR144_UMUM\",\"bersih\":true,\"foto_url\":\"/uploads/bukti-144a.jpg\"},{\"area_id\":\"$AR144_STORE\",\"bersih\":true,\"foto_url\":\"/uploads/bukti-144c.jpg\"}]}" | jq '((.area_kotor==0) and (.jumlah_foto==2))|if . then 1 else 0 end')"
+cek "perbarui tanpa foto sama sekali → 400" "V == 400" \
+  "$(status_code_body "$TKIT" PATCH "/kebersihan/$LID144" "{\"items\":[{\"area_id\":\"$AR144_UMUM\",\"bersih\":true}]}")"
+# Kembalikan satu area jadi kotor supaya rekap & badge punya bahan uji.
+api "$TKIT" PATCH "/kebersihan/$LID144" "{\"items\":[{\"area_id\":\"$AR144_UMUM\",\"bersih\":true,\"foto_url\":\"/uploads/bukti-144a.jpg\"},{\"area_id\":\"$AR144_STORE\",\"bersih\":false,\"catatan\":\"masih bau\"}]}" > /dev/null
+
+# Catatan owner: hanya owner/admin, dan pelapor bisa membacanya.
+cek "karyawan beri catatan owner → 403" "V == 403" \
+  "$(status_code_body "$TKIT" PATCH "/kebersihan/$LID144/catatan" '{"catatan_owner":"tidak boleh"}')"
+cek "owner beri catatan → tersimpan + tercatat penulisnya" "V == 1" \
+  "$(api "$OWNER" PATCH "/kebersihan/$LID144/catatan" '{"catatan_owner":"Toilet tolong diulang"}' | jq '((.catatan_owner=="Toilet tolong diulang") and (.catatan_owner_oleh != null) and (.catatan_owner_pada != null))|if . then 1 else 0 end')"
+cek "pelapor membaca catatan owner" "V == 1" \
+  "$(api "$TKIT" GET "/kebersihan/$LID144" | jq '.catatan_owner=="Toilet tolong diulang"|if . then 1 else 0 end')"
+cek "catatan dikosongkan → jejak penulis ikut bersih" "V == 1" \
+  "$(api "$OWNER" PATCH "/kebersihan/$LID144/catatan" '{"catatan_owner":null}' | jq '((.catatan_owner==null) and (.catatan_owner_oleh==null) and (.catatan_owner_pada==null))|if . then 1 else 0 end')"
+api "$OWNER" PATCH "/kebersihan/$LID144/catatan" '{"catatan_owner":"Toilet tolong diulang"}' > /dev/null
+
+# Rekap: satu kotak satu hari, memuat laporan semua tim.
+cek "karyawan buka rekap → 403" "V == 403" "$(status_code "$TKIT" GET /kebersihan/rekap)"
+BULAN144=$(TZ=Asia/Jakarta date +%Y-%m)
+HARI144=$(TZ=Asia/Jakarta date +%F)
+RK144=$(api "$OWNER" GET "/kebersihan/rekap?bulan=$BULAN144&branch_id=all")
+cek "rekap: bulan sesuai + hari terurut terbaru dulu" "V == 1" \
+  "$(echo "$RK144" | jq --arg b "$BULAN144" --arg t "$HARI144" '((.bulan==$b) and (.hari[0].tanggal==$t))|if . then 1 else 0 end')"
+cek "rekap: kotak hari ini memuat 2 laporan (pagi + malam)" "V == 1" \
+  "$(echo "$RK144" | jq --arg t "$HARI144" '[.hari[]|select(.tanggal==$t)][0] | ((.total==2) and (.sesi.pagi==1) and (.sesi.malam==1) and (.sesi.siang==0))|if . then 1 else 0 end')"
+cek "rekap: area kotor hari ini terhitung" "V == 1" \
+  "$(echo "$RK144" | jq --arg t "$HARI144" '[.hari[]|select(.tanggal==$t)][0].area_kotor>=1|if . then 1 else 0 end')"
+cek "rekap: baris ringkas membawa foto_utama + tanda catatan owner" "V == 1" \
+  "$(echo "$RK144" | jq --arg i "$LID144" '[.hari[]|.laporan[]|select(.id==$i)][0] | ((.foto_utama != null) and (.ada_catatan_owner==true))|if . then 1 else 0 end')"
+cek "rekap: hari tanpa laporan tetap muncul sebagai kotak kosong" "V == 1" \
+  "$(echo "$RK144" | jq '[.hari[]|select(.total==0)]|length>=0|if . then 1 else 0 end')"
+cek "rekap: saring sesi=malam menyisakan laporan malam saja" "V == 1" \
+  "$(api "$OWNER" GET "/kebersihan/rekap?bulan=$BULAN144&branch_id=all&sesi=malam" | jq '[.hari[]|.laporan[]|select(.sesi!="malam")]|length==0|if . then 1 else 0 end')"
+cek "rekap: bulan ngawur → jatuh ke bulan berjalan" "V == 1" \
+  "$(api "$OWNER" GET "/kebersihan/rekap?bulan=ngawur" | jq --arg b "$BULAN144" '.bulan==$b|if . then 1 else 0 end')"
+cek "ringkas: badge hari ini menghitung laporan berarea kotor" "V == 1" \
+  "$(api "$OWNER" GET /kebersihan/ringkas | jq --arg t "$HARI144" '((.tanggal==$t) and (.total>=2) and (.kotor>=1))|if . then 1 else 0 end')"
+
+# Master area boleh dihapus tanpa merusak riwayat — nama sudah disalin.
+cek "hapus area master → 200" "V == 200" "$(status_code "$OWNER" DELETE "/kebersihan/area/$AR144_STORE")"
+cek "laporan lama tetap menyebut nama area yang dihapus" "V == 1" \
+  "$(api "$OWNER" GET "/kebersihan/$LID144" | jq '[.items[]|select(.area_nama=="Toilet 144" and .area_id==null)]|length==1|if . then 1 else 0 end')"
+
+cek "pemilik hapus laporannya → 200" "V == 200" "$(status_code "$TKIT" DELETE "/kebersihan/$(echo "$LAP144B" | jq -r .id)")"
+cek "owner hapus laporan siapa pun → 200" "V == 200" "$(status_code "$OWNER" DELETE "/kebersihan/$LID144")"
+cek "laporan yang dihapus → 404" "V == 404" "$(status_code "$OWNER" GET "/kebersihan/$LID144")"
+
 
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
