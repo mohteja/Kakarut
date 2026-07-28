@@ -20,6 +20,54 @@ tanpa akses repo server.
 
 ---
 
+## Rilis: Isi menu untuk pembeli (`MenuDto.deskripsi`)
+
+> Migrasi DB **0086** (`menus.deskripsi`, nullable — tak ada backfill, menu lama
+> bernilai `null`). **Tak ada yang rusak**: field baru, opsional.
+
+### 🟢 BARU — `MenuDto.deskripsi`
+
+Daftar menu kini bisa memuat **isi tiap menu** untuk pembeli:
+
+```
+Premium Basooopa A (PBA)                                Rp 34.000
+  1 baso urat besar, 2 baso kecil, 2 baso aci, 1 mie
+```
+
+| Field | Isi |
+| --- | --- |
+| `deskripsi` | `"1 baso urat besar, 2 baso kecil, 1 mie"` atau `null` |
+
+Tampilkan di bawah nama menu (teks kecil, warna redup) pada layar daftar menu
+dan kartu menu kasir. `null` → jangan tampilkan baris apa pun.
+
+**Dikirim & diterima di:** `GET /api/menu`, `GET /api/menu/:id`,
+`POST /api/menu`, `PUT /api/menu/:id`. Maksimum 500 karakter; `""` atau spasi
+saja disimpan sebagai `null`, jadi klien cukup memeriksa satu bentuk "kosong".
+
+⚠️ `PUT /api/menu/:id` tetap **perbarui-sebagian**: tak mengirim `deskripsi`
+berarti isi menu lama dipertahankan. Kirim `""` atau `null` eksplisit untuk
+mengosongkannya.
+
+### ⚪️ INFO — kenapa BUKAN diturunkan dari `komponen`
+
+Godaan pertamanya adalah menyusun teks ini otomatis dari resep. Data nyata
+menunjukkan itu salah: resep adalah dokumen **biaya**, bukan deskripsi hidangan.
+
+- Takarannya boleh pecahan hasil konversi gram — di katalog Basooopa ada baris
+  `0,7576 butir Baso halus kecil`, yang mustahil dicetak di daftar menu.
+- Memuat KEMASAN (kresek/plastik take away) dan PELENGKAP (saos & sambal) yang
+  bukan "isi" yang dijanjikan ke pembeli.
+- Angkanya pun kerap berbeda dari yang ingin diiklankan: resep menyebut
+  3 baso aci, sementara menu cetaknya menulis 2.
+
+Web menyediakan tombol **"Ambil dari resep"** yang hanya membuat **draf**
+(kemasan & pelengkap dibuang, pecahan dibulatkan ke atas), lalu teksnya
+dirapikan pemilik. Mobile tak perlu meniru tombol itu — cukup **tampilkan
+`deskripsi` apa adanya**.
+
+---
+
 ## Rilis: Satuan kiriman ditulis SERVER (`qty_teks`)
 
 > **Tidak ada migrasi DB.** Lanjutan langsung dari koreksi satuan di bawah —

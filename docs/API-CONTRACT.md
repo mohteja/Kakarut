@@ -310,8 +310,8 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 - `GET /api/menu/:id` — [any] — res: `MenuDto` — error: **404**
 - `GET /api/menu/:id/riwayat-harga` — **[owner/admin]** — res: `MenuPriceLogRow[]` (terbaru dulu, maks 50) — jejak tiap perubahan `harga_jual`/markup: `sebab` = `"buat"` (baris pembuka saat menu dibuat) | `"manual"` (lewat `PUT /api/menu/:id`) | `"terapkan_saran"`. `PUT` yang tidak mengubah harga jual maupun markup (mis. hanya ganti foto/resep) **tidak** menambah baris.
 - `PUT /api/menu/urutan` — [any] — req: `{ items: [{id: uuid, sort_order: int}] }` — res: `{ ok: true }`
-- `POST /api/menu` — [owner/admin] — req `MenuCreateBody`: `{ nama, kode?|null (max20), category_id: uuid, tipe: "regular"|"paket"="regular", mult?|null, base_menu_id?|null, base_mult?|null, harga_jual: number(≥0), image_url?|null, komponen: [{ingredient_id:uuid, qty:number(>0)}] = [], is_active: bool=true, branch_ids?: uuid[]|null }` — res: **201** `MenuDto` — error: **400** (paket butuh base_menu_id+base_mult / regular butuh mult / ref invalid / cabang non-store), **409** nama ada
-- `PUT /api/menu/:id` — [owner/admin] — req `MenuUpdateBody`: **perbarui SEBAGIAN — semua field opsional**. Field yang **tidak dikirim (`undefined`) dipertahankan apa adanya**; `null`/`[]` eksplisit tetap berarti "kosongkan". Berlaku untuk seluruh field, termasuk yang paling mudah hilang: `komponen` (tak dikirim → resep utuh; `[]` → resep dikosongkan), `image_url` (tak dikirim → foto tetap; `null` → foto dihapus), `is_active` (tak dikirim → menu terarsip TETAP terarsip), `kode` (tak dikirim → kode lama; `""`/`null` → digenerate ulang dari nama), `branch_ids` (tak dikirim → pembatasan lama; `null`/`[]` → tampil di semua cabang). Validasi paket/reguler dijalankan atas nilai **hasil gabungan** dengan baris lama, jadi `PUT {"harga_jual":X}` saja sah. — res: `MenuDto` — error: **400**, **404**
+- `POST /api/menu` — [owner/admin] — req `MenuCreateBody`: `{ nama, kode?|null (max20), deskripsi?|null (max500 — ISI menu untuk pembeli, mis. "1 baso urat besar, 2 baso kecil, 1 mie"; `""`/spasi disimpan sebagai `null`), category_id: uuid, tipe: "regular"|"paket"="regular", mult?|null, base_menu_id?|null, base_mult?|null, harga_jual: number(≥0), image_url?|null, komponen: [{ingredient_id:uuid, qty:number(>0)}] = [], is_active: bool=true, branch_ids?: uuid[]|null }` — res: **201** `MenuDto` — error: **400** (paket butuh base_menu_id+base_mult / regular butuh mult / ref invalid / cabang non-store), **409** nama ada
+- `PUT /api/menu/:id` — [owner/admin] — req `MenuUpdateBody`: **perbarui SEBAGIAN — semua field opsional**. Field yang **tidak dikirim (`undefined`) dipertahankan apa adanya**; `null`/`[]` eksplisit tetap berarti "kosongkan". Berlaku untuk seluruh field, termasuk yang paling mudah hilang: `komponen` (tak dikirim → resep utuh; `[]` → resep dikosongkan), `image_url` (tak dikirim → foto tetap; `null` → foto dihapus), `is_active` (tak dikirim → menu terarsip TETAP terarsip), `kode` (tak dikirim → kode lama; `""`/`null` → digenerate ulang dari nama), `deskripsi` (tak dikirim → isi menu lama tetap; `""`/spasi/`null` → dikosongkan jadi `null`), `branch_ids` (tak dikirim → pembatasan lama; `null`/`[]` → tampil di semua cabang). Validasi paket/reguler dijalankan atas nilai **hasil gabungan** dengan baris lama, jadi `PUT {"harga_jual":X}` saja sah. — res: `MenuDto` — error: **400**, **404**
 - `DELETE /api/menu/:id` — [owner/admin] — soft delete — res: `{ ok: true }` — error: **404**
 
 ---
@@ -1289,6 +1289,17 @@ export interface MenuDto {
   nama: string;
   /** kode menu opsional (mis. "A1"), untuk kasir & daftar menu */
   kode: string | null;
+  /**
+   * ISI menu untuk PEMBELI — mis. "1 baso urat besar, 2 baso kecil, 1 mie".
+   * Tampil di Daftar Menu (layar & cetak) dan di kartu menu kasir.
+   *
+   * SENGAJA bukan turunan `komponen`: resep itu dokumen BIAYA — takarannya
+   * boleh pecahan hasil konversi gram (mis. 0,7576 butir) dan memuat kemasan
+   * serta pelengkap yang tak pantas dicetak. Form menyediakan tombol
+   * isi-otomatis dari resep sebagai titik awal, teksnya lalu dirapikan
+   * pemilik. null = tak ditampilkan.
+   */
+  deskripsi: string | null;
   tipe: MenuTipe;
   category_id: string;
   kategori: string;

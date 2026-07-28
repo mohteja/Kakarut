@@ -6011,5 +6011,39 @@ cek "bahan tanpa kemasan: tersedia_setara null" "V == 1" \
 
 
 echo
+echo "── §150 Isi menu (deskripsi) — teks yang dikendalikan pemilik ──"
+# "Ingin ada detail isi dari masing-masing menu": field TERPISAH dari resep,
+# karena resep itu dokumen biaya (takaran boleh pecahan, memuat kemasan).
+KAT150=$(api "$OWNER" GET /kategori | jq -r '.[0].id')
+M150=$(api "$OWNER" POST /menu "{\"nama\":\"Menu Isi150\",\"category_id\":\"$KAT150\",\"harga_jual\":30000,\"mult\":2,\"deskripsi\":\"1 baso urat besar, 2 baso kecil, 1 mie\"}" | jq -r .id)
+cek "POST /menu menyimpan deskripsi apa adanya" "V == 1" \
+  "$(api "$OWNER" GET "/menu/$M150" | jq -r '(.deskripsi == "1 baso urat besar, 2 baso kecil, 1 mie")|if . then 1 else 0 end')"
+cek "deskripsi ikut terbawa di daftar /menu" "V == 1" \
+  "$(api "$OWNER" GET /menu | jq --arg i "$M150" '[.rows?[]? // .[] | select(.id==$i)][0].deskripsi != null|if . then 1 else 0 end')"
+# PUT parsial (§146): deskripsi TIDAK boleh hilang saat klien hanya kirim harga
+api "$OWNER" PUT "/menu/$M150" '{"harga_jual":31000}' > /dev/null
+cek "PUT hanya harga → deskripsi UTUH (perbarui-sebagian)" "V == 1" \
+  "$(api "$OWNER" GET "/menu/$M150" | jq -r '((.deskripsi == "1 baso urat besar, 2 baso kecil, 1 mie") and (.harga_jual == 31000))|if . then 1 else 0 end')"
+api "$OWNER" PUT "/menu/$M150" '{"deskripsi":"2 baso aci, 1 siomay"}' > /dev/null
+cek "PUT deskripsi baru → tergantikan" "V == 1" \
+  "$(api "$OWNER" GET "/menu/$M150" | jq -r '(.deskripsi == "2 baso aci, 1 siomay")|if . then 1 else 0 end')"
+# "" dan null sama-sama berarti KOSONGKAN — pembaca tak perlu cek dua bentuk
+api "$OWNER" PUT "/menu/$M150" '{"deskripsi":""}' > /dev/null
+cek "PUT deskripsi \"\" → null (bukan string kosong)" "V == 1" \
+  "$(api "$OWNER" GET "/menu/$M150" | jq -r '(.deskripsi == null)|if . then 1 else 0 end')"
+api "$OWNER" PUT "/menu/$M150" '{"deskripsi":"   "}' > /dev/null
+cek "PUT deskripsi spasi saja → null" "V == 1" \
+  "$(api "$OWNER" GET "/menu/$M150" | jq -r '(.deskripsi == null)|if . then 1 else 0 end')"
+cek "deskripsi > 500 karakter → 400" "V == 400" \
+  "$(status_code_body "$OWNER" PUT "/menu/$M150" "{\"deskripsi\":\"$(python3 -c 'print("x"*501)')\"}")"
+# menu tanpa deskripsi tetap sah (field opsional)
+M150B=$(api "$OWNER" POST /menu "{\"nama\":\"Menu Isi150b\",\"category_id\":\"$KAT150\",\"harga_jual\":12000,\"mult\":2}" | jq -r .id)
+cek "menu tanpa deskripsi → null, bukan gagal" "V == 1" \
+  "$(api "$OWNER" GET "/menu/$M150B" | jq -r '(.deskripsi == null)|if . then 1 else 0 end')"
+api "$OWNER" DELETE "/menu/$M150" > /dev/null
+api "$OWNER" DELETE "/menu/$M150B" > /dev/null
+
+
+echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

@@ -418,6 +418,17 @@ export interface MenuDto {
   nama: string;
   /** kode menu opsional (mis. "A1"), untuk kasir & daftar menu */
   kode: string | null;
+  /**
+   * ISI menu untuk PEMBELI — mis. "1 baso urat besar, 2 baso kecil, 1 mie".
+   * Tampil di Daftar Menu (layar & cetak) dan di kartu menu kasir.
+   *
+   * SENGAJA bukan turunan `komponen`: resep itu dokumen BIAYA — takarannya
+   * boleh pecahan hasil konversi gram (mis. 0,7576 butir) dan memuat kemasan
+   * serta pelengkap yang tak pantas dicetak. Form menyediakan tombol
+   * isi-otomatis dari resep sebagai titik awal, teksnya lalu dirapikan
+   * pemilik. null = tak ditampilkan.
+   */
+  deskripsi: string | null;
   tipe: MenuTipe;
   category_id: string;
   kategori: string;

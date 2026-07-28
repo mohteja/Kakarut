@@ -561,6 +561,12 @@ export function KasirPage() {
                   )}
                   <div className="line-clamp-2 text-sm font-semibold text-stone-800">{m.nama}</div>
                 </div>
+                {/* Isi menu — kasir bisa langsung menjawab "isinya apa?" */}
+                {m.deskripsi && (
+                  <div className="line-clamp-2 pt-0.5 text-[11px] leading-snug text-stone-500">
+                    {m.deskripsi}
+                  </div>
+                )}
                 {/* Sisa porsi di bawah nama menu — kasir bisa infokan ke konsumen */}
                 <div className="pt-0.5">
                   <StokBadge stok={sisaByMenu.get(m.id)} />
@@ -588,7 +594,7 @@ export function KasirPage() {
                     <button
                       key={m.id}
                       onClick={() => tambah(m)}
-                      title={m.nama}
+                      title={m.deskripsi ? `${m.nama} — ${m.deskripsi}` : m.nama}
                       className="flex flex-col items-center justify-center rounded-md border border-stone-200 bg-white px-1 py-1.5 text-center transition hover:border-orange-400 hover:shadow-sm"
                     >
                       <span className="max-w-full truncate font-mono text-xs font-bold leading-none text-stone-800">

@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   PANDUAN_MARKUP,
+  draftIsiMenu,
   foodCostPersen,
   hargaJualBulat,
   hargaSaran,
@@ -66,6 +67,7 @@ export function MenuFormPage() {
 
   const [nama, setNama] = useState("");
   const [kode, setKode] = useState("");
+  const [deskripsi, setDeskripsi] = useState("");
   const [categoryId, setCategoryId] = useState("");
   const [tipe, setTipe] = useState<"regular" | "paket">("regular");
   const [mult, setMult] = useState("2");
@@ -86,6 +88,7 @@ export function MenuFormPage() {
     dimuat.current = true;
     setNama(m.nama);
     setKode(m.kode ?? "");
+    setDeskripsi(m.deskripsi ?? "");
     setCategoryId(m.category_id);
     setTipe(m.tipe);
     setMult(String(m.mult ?? 2));
@@ -135,11 +138,37 @@ export function MenuFormPage() {
     return { hpp: ownHpp, hppDineIn: ownHppDineIn, saran, bulat: hargaJualBulat(saran) };
   }, [komponen, bahanById, tipe, mult, baseMenuId, baseMult, menus]);
 
+  /**
+   * Draf "isi menu" dari baris resep yang SEDANG diedit (belum tentu tersimpan),
+   * memakai fungsi yang sama dengan dokumentasi kontrak. Kemasan & pelengkap
+   * dibuang, takaran pecahan dibulatkan — hasilnya tetap harus dirapikan user.
+   */
+  function draftDariResep(): string {
+    const isi = komponen
+      .filter((k) => k.ingredient_id && Number(k.qty) > 0)
+      .map((k) => {
+        const b = bahanById.get(k.ingredient_id);
+        return {
+          nama: b?.nama ?? "",
+          qty: Number(k.qty),
+          satuan: b?.satuan ?? "",
+          is_packaging: b?.is_packaging ?? false,
+          is_complement: b?.is_complement ?? false,
+        };
+      })
+      .filter((k) => k.nama);
+    // Menu paket: isi menu dasar tak ada di `komponen`, sebut terpisah.
+    const base = tipe === "paket" ? menus?.find((m) => m.id === baseMenuId) : null;
+    const prefix = base ? `${Number(baseMult) || 1}\u00d7 ${base.nama}` : null;
+    return draftIsiMenu(isi, prefix);
+  }
+
   const simpan = useMutation({
     mutationFn: async () => {
       const body = {
         nama,
         kode: kode.trim() || null,
+        deskripsi: deskripsi.trim() || null,
         category_id: categoryId,
         tipe,
         mult: tipe === "regular" ? Number(mult) : null,
@@ -200,6 +229,34 @@ export function MenuFormPage() {
               />
               <p className="mt-1 text-xs text-stone-500">
                 Kosongkan untuk <b>generate otomatis</b> dari nama menu.
+              </p>
+            </div>
+            <div className="sm:col-span-2">
+              <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+                <label className="block text-sm font-medium">
+                  Isi menu <span className="font-normal text-stone-400">(opsional)</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setDeskripsi(draftDariResep())}
+                  disabled={komponen.length === 0}
+                  className="rounded-lg border border-stone-300 px-2 py-1 text-xs text-stone-600 hover:bg-stone-50 disabled:opacity-40"
+                >
+                  📋 Ambil dari resep
+                </button>
+              </div>
+              <textarea
+                value={deskripsi}
+                onChange={(e) => setDeskripsi(e.target.value)}
+                maxLength={500}
+                rows={2}
+                placeholder="mis. 1 baso urat besar, 2 baso kecil, 2 baso aci, 1 mie"
+                className={inputClass}
+              />
+              <p className="mt-1 text-xs text-stone-500">
+                Tampil di <b>Daftar Menu</b> (layar &amp; cetak) dan kartu menu kasir. Tombol
+                “Ambil dari resep” hanya membuat <b>draf</b> — resep itu dokumen biaya, jadi
+                takarannya bisa pecahan dan memuat kemasan; rapikan dulu sebelum disimpan.
               </p>
             </div>
             <div>
