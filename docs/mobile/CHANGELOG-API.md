@@ -22,10 +22,10 @@ tanpa akses repo server.
 
 ## Rilis: Tutup kasir HITUNG BUTA + kunci hitungan + ACC selisih owner
 
-> **BELUM tayang di production** per 28 Jul 2026 — masih di PR #127 (draft).
-> Selama belum tayang, `POST /shift/kunci-hitungan` memang **404**; penanganan
-> mobile (jatuh ke Tingkat 1, tetap mengirim `uang_fisik`) sudah tepat. Baris
-> ini diperbarui jadi "Sudah di-merge ke production" begitu tayang.
+> **Sudah di-merge ke production** (PR #127, 28 Jul 2026) — menjawab pertanyaan
+> nomor 3 di balasan mobile. `POST /shift/kunci-hitungan` yang sebelumnya **404**
+> kini aktif; fallback Tingkat 1 di mobile boleh tetap dipertahankan sebagai
+> jaring pengaman, tapi sejak rilis ini `•••` datang dari server, bukan dari UI.
 >
 > Migrasi DB **0087** (`shifts.selisih_status` dkk) & **0088**
 > (`shifts.hitungan_dikunci_at`) — semuanya nullable, shift lama tetap sah.
