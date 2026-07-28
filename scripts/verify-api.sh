@@ -1331,8 +1331,8 @@ cek "items: lompat rencana→menunggu → langsung masuk stok (dikonfirmasi)" "V
 # 4) penjaga: mundur ditolak, qty melebihi ditolak, baris asing ditolak, dikonfirmasi tanpa items ditolak
 cek "tahap mundur (menunggu→dikerjakan) → 400" "V == 400" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/pembelian/tahap/$FK42_ID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"ke\":\"dikerjakan\",\"items\":[{\"id\":\"$ID42B2\",\"qty\":5}]}")"
-cek "qty maju melebihi qty baris → 400" "V == 400" \
-  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/pembelian/tahap/$FK42_ID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"ke\":\"menunggu\",\"items\":[{\"id\":\"$ID42A\",\"qty\":999}]}")"
+cek "qty maju 0 → 400 (satu-satunya batas qty)" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/pembelian/tahap/$FK42_ID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"ke\":\"menunggu\",\"items\":[{\"id\":\"$ID42A\",\"qty\":0}]}")"
 cek "baris bukan milik faktur → 400" "V == 400" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/pembelian/tahap/$FK42_ID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"ke":"menunggu","items":[{"id":"00000000-0000-4000-8000-000000000000","qty":1}]}')"
 cek "ke=dikonfirmasi tanpa items → 400" "V == 400" \
@@ -6042,6 +6042,58 @@ cek "menu tanpa deskripsi → null, bukan gagal" "V == 1" \
   "$(api "$OWNER" GET "/menu/$M150B" | jq -r '(.deskripsi == null)|if . then 1 else 0 end')"
 api "$OWNER" DELETE "/menu/$M150" > /dev/null
 api "$OWNER" DELETE "/menu/$M150B" > /dev/null
+
+
+echo
+echo "── §151 Realisasi BOLEH lebih/kurang dari RAB ──"
+# RAB itu RENCANA, bukan pagu. Sayur direncanakan 900 gr tapi hanya dijual per
+# kilo → yang benar-benar dibeli 1.000 gr, dan itulah yang harus tercatat.
+CK151=$(api "$OWNER" GET /cabang | jq -r '[.[]|select(.tipe=="central_kitchen" and .is_active)][0].id')
+B151=$(api "$OWNER" POST /bahan '{"nama":"Sayur rab151","harga_beli":18000,"isi":1000,"satuan":"gr","satuan_beli":"kg","pengadaan":"beli","kategori":"lain"}' | jq -r .id)
+saldo151() { api "$OWNER" GET "/stok?branch_id=$CK151" | jq --arg i "$B151" '[.[]|select(.ingredient_id==$i)][0].saldo // 0'; }
+S151_0=$(saldo151)
+# RAB 900 gr seharga 16.200 (estimasi 18 rb/kg)
+F151=$(api "$OWNER" POST /pembelian/faktur "{\"branch_id\":\"$CK151\",\"items\":[{\"ingredient_id\":\"$B151\",\"mode\":\"pcs\",\"jumlah\":900,\"total_harga\":16200}]}" | jq -r .faktur_id)
+baris151() { api "$OWNER" GET "/pembelian?branch_id=$CK151&per_page=200" | jq --arg f "$F151" '[.rows[]|select(.faktur_id==$f)]'; }
+ID151=$(baris151 | jq -r '.[0].id')
+cek "dasar uji: RAB 900 gr" "abs(V - 900) < 0.001" "$(baris151 | jq -r '.[0].qty')"
+api "$OWNER" POST "/pembelian/tahap/$F151" "{\"ke\":\"dikerjakan\",\"items\":[{\"id\":\"$ID151\",\"qty\":900}]}" > /dev/null
+ID151=$(baris151 | jq -r '.[0].id')
+# realisasi 1.000 gr (1 kemasan penuh) — dulu ditolak 400
+cek "maju dgn qty LEBIH dari RAB (1.000 > 900) → 200" "V == 200" \
+  "$(status_code_body "$OWNER" POST "/pembelian/tahap/$F151" "{\"ke\":\"menunggu\",\"items\":[{\"id\":\"$ID151\",\"qty\":1000}]}")"
+cek "qty baris jadi 1.000 (angka yang benar-benar dibeli)" "abs(V - 1000) < 0.001" \
+  "$(baris151 | jq -r '[.[]|select(.status=="dikonfirmasi")][0].qty')"
+cek "TIDAK ada sisa tugas — seluruh baris maju" "V == 1" "$(baris151 | jq 'length')"
+cek "stok CK bertambah 1.000, bukan 900" "abs(V - 1000) < 0.001" "$(python3 -c "print($(saldo151) - $S151_0)")"
+cek "estimasi harga ikut diskalakan (16.200 × 1000/900 = 18.000)" "abs(V - 18000) < 1" \
+  "$(baris151 | jq -r '[.[]|select(.status=="dikonfirmasi")][0].total_harga')"
+cek "harga hasil skala TETAP tebakan (tak mencemari median acuan)" "V == 1" \
+  "$(baris151 | jq -r '[.[]|select(.status=="dikonfirmasi")][0].harga_tebakan|if . then 1 else 0 end')"
+
+# harga RIIL yang dikirim menang atas skala estimasi
+S151_1=$(saldo151)
+F151B=$(api "$OWNER" POST /pembelian/faktur "{\"branch_id\":\"$CK151\",\"items\":[{\"ingredient_id\":\"$B151\",\"mode\":\"pcs\",\"jumlah\":900,\"total_harga\":16200}]}" | jq -r .faktur_id)
+baris151b() { api "$OWNER" GET "/pembelian?branch_id=$CK151&per_page=200" | jq --arg f "$F151B" '[.rows[]|select(.faktur_id==$f)]'; }
+ID151B=$(baris151b | jq -r '.[0].id')
+api "$OWNER" POST "/pembelian/tahap/$F151B" "{\"ke\":\"dikerjakan\",\"items\":[{\"id\":\"$ID151B\",\"qty\":900}]}" > /dev/null
+ID151B=$(baris151b | jq -r '.[0].id')
+api "$OWNER" POST "/pembelian/tahap/$F151B" "{\"ke\":\"menunggu\",\"items\":[{\"id\":\"$ID151B\",\"qty\":2000,\"harga\":35000}]}" > /dev/null
+cek "qty lebih + harga riil: qty 2.000 & harga 35.000 (bukan hasil skala)" "V == 1" \
+  "$(baris151b | jq -r '[.[]|select(.status=="dikonfirmasi")][0] | ((.qty==2000) and (.total_harga==35000))|if . then 1 else 0 end')"
+cek "harga riil → harga_tebakan false" "V == 1" \
+  "$(baris151b | jq -r '[.[]|select(.status=="dikonfirmasi")][0].harga_tebakan|if . then 0 else 1 end')"
+cek "stok bertambah 2.000" "abs(V - 2000) < 0.001" "$(python3 -c "print($(saldo151) - $S151_1)")"
+
+# KURANG dari RAB tetap seperti dulu: split, sisanya jadi tugas
+F151C=$(api "$OWNER" POST /pembelian/faktur "{\"branch_id\":\"$CK151\",\"items\":[{\"ingredient_id\":\"$B151\",\"mode\":\"pcs\",\"jumlah\":900,\"total_harga\":16200}]}" | jq -r .faktur_id)
+baris151c() { api "$OWNER" GET "/pembelian?branch_id=$CK151&per_page=200" | jq --arg f "$F151C" '[.rows[]|select(.faktur_id==$f)]'; }
+ID151C=$(baris151c | jq -r '.[0].id')
+api "$OWNER" POST "/pembelian/tahap/$F151C" "{\"ke\":\"dikerjakan\",\"items\":[{\"id\":\"$ID151C\",\"qty\":900}]}" > /dev/null
+ID151C=$(baris151c | jq -r '.[0].id')
+api "$OWNER" POST "/pembelian/tahap/$F151C" "{\"ke\":\"menunggu\",\"items\":[{\"id\":\"$ID151C\",\"qty\":400}]}" > /dev/null
+cek "qty KURANG dari RAB → split: 400 maju, 500 tetap jadi tugas" "V == 1" \
+  "$(baris151c | jq '(([.[]|select(.status=="dikonfirmasi")][0].qty == 400) and ([.[]|select(.status=="dikerjakan")][0].qty == 500))|if . then 1 else 0 end')"
 
 
 echo

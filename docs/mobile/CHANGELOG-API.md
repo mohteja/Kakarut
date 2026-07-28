@@ -20,6 +20,45 @@ tanpa akses repo server.
 
 ---
 
+## Rilis: Realisasi qty boleh lebih dari RAB
+
+> Tidak ada migrasi DB. **Satu batasan dicabut** di `POST /api/{mod}/tahap/:id`,
+> plus satu field baru di baris faktur.
+
+### 🔴 WAJIB — `items[].qty` tak lagi dibatasi qty baris
+
+Dulu `items[].qty` yang melebihi qty baris ditolak **400** (*"Qty maju melebihi
+qty baris"*). Itu keliru: RAB adalah **rencana**, bukan pagu. Sayur
+direncanakan 900 gr tapi hanya dijual per kilo → yang benar-benar dibeli
+1.000 gr, dan angka itulah yang harus tercatat.
+
+Sekarang satu-satunya batas adalah **qty > 0**.
+
+| `items[].qty` vs qty baris | Yang terjadi |
+| --- | --- |
+| **kurang** | **split** — bagian yang maju jadi baris BARU, sisanya tetap jadi tugas |
+| **sama** | seluruh baris maju apa adanya |
+| **lebih** | seluruh baris maju, `qty` **diperbarui ke angka realisasi**; tak ada sisa tugas |
+
+**Klien yang memblokir input di sisi UI (`max = qty baris`) harus melepasnya** —
+kalau tidak, kasus paling umum (beli per kemasan) tetap mustahil dicatat.
+
+### 🟢 BARU — `harga_tebakan` pada baris `GET /api/produksi` & `/api/pembelian`
+
+`true` = `total_harga` baris itu **belum pernah dilihat manusia**: estimasi RAB,
+belanja otomatis, atau hasil skala saat realisasi melebihi rencana. Baris
+bertanda ini **dikecualikan dari kolam median harga acuan** — tanpa itu harga
+acuan menyeret dirinya sendiri naik.
+
+Berguna untuk menandai di UI mana harga yang masih perkiraan.
+
+⚪️ **Harga saat qty lebih:** kirim `items[].harga` bila tahu harga riilnya —
+itu menang dan menandai baris `harga_tebakan: false`. Bila tidak, server
+menskalakan harga RAB (`total_harga × qty_baru ÷ qty_lama`) dan menandainya
+`harga_tebakan: true`.
+
+---
+
 ## Rilis: Isi menu untuk pembeli (`MenuDto.deskripsi`)
 
 > Migrasi DB **0086** (`menus.deskripsi`, nullable — tak ada backfill, menu lama
