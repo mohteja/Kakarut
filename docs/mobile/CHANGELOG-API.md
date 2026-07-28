@@ -22,9 +22,10 @@ tanpa akses repo server.
 
 ## Rilis: Laporan kebersihan harian (tim CK + seluruh tim cabang)
 
-> **Menunggu rilis.** Migrasi DB **0083** (enum `kebersihan_sesi` + tabel
-> `cleaning_areas`, `cleaning_reports`, `cleaning_report_items`). Perubahan API
-> **aditif** — tak ada endpoint lama yang berubah perilaku.
+> **Sudah di-merge ke production** (PR #124). Migrasi DB **0083** (enum
+> `kebersihan_sesi` + tabel `cleaning_areas`, `cleaning_reports`,
+> `cleaning_report_items`). Perubahan API **aditif** — tak ada endpoint lama
+> yang berubah perilaku.
 
 ### 🟢 BARU — `/api/kebersihan`: karyawan melapor per sesi, owner membaca rekap harian
 
