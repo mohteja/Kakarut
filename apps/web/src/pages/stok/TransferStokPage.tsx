@@ -283,7 +283,7 @@ export function TransferStokPage() {
                     <optgroup label="🛒 Bahan beli">
                       {opsi(bahanBeli).map((r) => (
                         <option key={r.ingredient_id} value={r.ingredient_id}>
-                          {r.nama} — {formatAngka(tersediaDari(r))} {r.satuan}
+                          {r.nama} — {r.tersedia_teks}
                         </option>
                       ))}
                     </optgroup>
@@ -292,7 +292,7 @@ export function TransferStokPage() {
                     <optgroup label="🏭 Bahan produksi">
                       {opsi(bahanProduksi).map((r) => (
                         <option key={r.ingredient_id} value={r.ingredient_id}>
-                          {r.nama} — {formatAngka(tersediaDari(r))} {r.satuan}
+                          {r.nama} — {r.tersedia_teks}
                         </option>
                       ))}
                     </optgroup>
@@ -364,12 +364,17 @@ export function TransferStokPage() {
               );
             };
 
+            // Teks sisa datang dari server (`tersedia_teks`) supaya tampilan web
+            // dan mobile memakai satuan yang persis sama.
             const stokTersedia = (s: TransferStokSaldoRow | undefined) => (
               <>
-                {s ? formatAngka(tersediaDari(s)) : "—"}
+                {s ? s.tersedia_teks : "—"}
+                {s?.tersedia_setara && (
+                  <div className="text-[11px] font-normal text-stone-400">{s.tersedia_setara}</div>
+                )}
                 {s && s.dalam_jalan > 0 && (
                   <div className="text-[11px] font-normal text-amber-600">
-                    {formatAngka(s.dalam_jalan)} dalam perjalanan
+                    {formatAngka(s.dalam_jalan)} {s.satuan} dalam perjalanan
                   </div>
                 )}
               </>
@@ -581,7 +586,7 @@ export function TransferStokPage() {
                       <div className="flex items-start justify-between gap-2">
                         <span className="font-medium">{it.nama}</span>
                         <span className="shrink-0 tabular-nums text-sm">
-                          {formatAngka(it.qty)} {it.satuan}
+                          {it.qty_teks}
                         </span>
                       </div>
                       <div className="mt-1 flex flex-wrap items-center gap-2">
@@ -612,7 +617,7 @@ export function TransferStokPage() {
                             <BadgeJenis pengadaan={it.pengadaan} />
                           </td>
                           <td className="px-3 py-1.5 text-right tabular-nums">
-                            {formatAngka(it.qty)} {it.satuan}
+                            {it.qty_teks}
                           </td>
                           <td className="px-3 py-1.5 text-xs text-stone-500">
                             {(BADGE_STATUS[it.status] ?? BADGE_STATUS.menunggu).label}

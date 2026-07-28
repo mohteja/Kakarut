@@ -343,8 +343,21 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 
 > ### ⚠️ SATUAN BARIS FAKTUR — `qty` SELALU dalam `satuan`, bukan `satuan_beli`
 >
-> Baris faktur membawa tiga field yang mudah tertukar. Aturannya satu kalimat:
-> **tampilkan `qty` bersama `satuan`.** Titik.
+> **Cara termudah & paling aman: JANGAN merangkai sendiri — pakai `qty_teks`.**
+> Tiap baris faktur & kiriman membawa dua field yang sudah ditulis server dari
+> satu fungsi bersama (`qtyTeks()` di `packages/shared`):
+>
+> | Field | Isi | Cara pakai |
+> | --- | --- | --- |
+> | `qty_teks` | `"900 gr"` | **tampilkan apa adanya** |
+> | `qty_setara` | `"≈ 0,9 kg"`, atau `null` bila bahan tak berkemasan | pelengkap — boleh di samping, **tak boleh menggantikan** |
+>
+> Angkanya sudah diformat gaya Indonesia (`2.000`, `0,9`); `qty` mentah tetap
+> dikirim untuk perhitungan. Web memakai field yang sama, jadi web & mobile
+> mustahil berbeda satuan. Sisanya di bawah ini adalah aturan yang mendasarinya
+> — tetap berlaku, tapi tak perlu diketik ulang di klien.
+>
+> Aturannya satu kalimat: **tampilkan `qty` bersama `satuan`.** Titik.
 >
 > | Field | Artinya | Boleh dipasangkan dengan `qty`? |
 > | --- | --- | --- |
@@ -370,6 +383,12 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 >   ✅ "2.000 gr"
 >   ❌ "2000 batch"        (is_batch itu cara input, bukan satuan)
 > ```
+>
+> **Endpoint yang membawa `qty_teks`/`qty_setara`:** `GET /api/produksi`,
+> `GET /api/pembelian`, `GET /api/penerimaan` (+ `qty_dipesan_teks`),
+> `GET /api/transfer-stok` (pada `items[]`). `GET /api/transfer-stok/saldo`
+> memakai nama yang menyesuaikan artinya: `tersedia_teks`/`tersedia_setara`
+> (sisa siap kirim, yaitu `saldo − dalam_jalan`).
 
 - `POST /api/{mod}/faktur` — req `FakturBody`: `{ branch_id?: uuid, tujuan_branch_id?: uuid|null (KHUSUS BELI, manajemen: cabang STORE tujuan kirim — barang tiba di cabang faktur lalu dikirim & diterima di Penerimaan cabang; baris bertujuan TIDAK auto-confirm), supplier_id?: uuid|null, no_faktur?|null (max60), catatan?|null, worker_id?: uuid|null (produksi: OPSIONAL — bila kosong pelaksana terisi otomatis dari aktor yang memajukan tahap ke "dikerjakan"), items: [{ingredient_id:uuid, mode:"pcs"|"batch", jumlah:number(>0), storage_location_id?:uuid|null, total_harga?:number(≥0)|null}] (min 1) }`. `branch_id` boleh cabang STORE (beli langsung di cabang — barang Tiba langsung masuk stok cabang itu; produksi di cabang store = produksi lokal, hasil masuk stok cabang itu). — res: **201** `{ faktur_id, nomor, status:"rencana", jumlah_baris, beli_otomatis: { faktur_id, nomor, jumlah_baris } | null }` — `beli_otomatis` (jalur PRODUKSI): faktur BELI yang lahir otomatis di cabang sama untuk bahan mentah resep yang KURANG atau yang sisa stoknya bakal jatuh **di bawah stok minimum** setelah produksi (`kurang = kebutuhan resep + stok_minimum − saldo`, dibulatkan per kemasan + MOQ `min_beli`; hanya bahan jalur beli ber-lacak-stok; null bila tak ada). — error: **400** (supplier/ingredient/storage/tujuan invalid, jalur pengadaan salah, tujuan pada produksi), **403** kasir luar cabang / non-manajemen pakai tujuan, **404** ingredient tak ada
 - `POST /api/{mod}/tahap/:fakturId` — req `TahapBody`: `{ ke: "dikerjakan"|"menunggu"|"dikonfirmasi", items?: [{id:uuid, qty:number(>0), harga?:number(≥0)|null, exp?: "YYYY-MM-DD"|null (override tanggal kedaluwarsa lot saat baris MASUK STOK, target ≥ "menunggu"; kosong = otomatis `tanggal masuk + masa_simpan_hari` bahan; diabaikan utk target lain)}], dana_cair?:number|null, realisasi?:number|null, selisih_catatan?|null (max300), tujuan_branch_id?:uuid|null, tujuan_storage_id?:uuid|null, paksa?:bool }` — res: `{ ok, status, jumlah_baris }` — error: **400** (tahap tak urut, tujuan lintas cabang, qty>baris, dll), **403**, **404**, **409** (bahan mentah kurang → pesan kekurangan kecuali `paksa`; atau status berubah konkuren). Saat baris MASUK STOK (`menunggu`), rak simpan yang kosong otomatis diisi **rak default bahan** di cabang baris (Tempat Penyimpanan) — berlaku jalur items maupun non-items; baris bertujuan cabang lain tetap tanpa rak (transit) sampai diterima di cabang.
@@ -473,7 +492,7 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 >
 > Berlaku sama untuk `POST /api/produksi/kirim-hasil/:fakturId`.
 
-- `GET /api/transfer-stok/saldo` — query: `branch_id?` (peran terkunci cabang selalu dipaksa ke cabangnya) — res: `{ branch_id, rows: TransferStokSaldoRow[] }` — stok READY di cabang itu: hanya bahan **aktif + berlacak-stok + masih tersisa (`saldo − dalam_jalan > 0`)**. Tiap baris membawa `pengadaan` ("beli"/"produksi") agar UI bisa menandai jenis bahan, `saldo` (fisik) dan `dalam_jalan` (sudah dikirim, belum diterima tujuan) — **yang boleh ditransfer adalah `saldo − dalam_jalan`**. Untuk aturan kemasan tiap baris juga membawa `isi` (isi per kemasan, dalam `satuan` kerja), `satuan_beli` (label kemasan, mis. "kg"; `null` bila tak diisi) dan `wajib_kelipatan` (boolean) — **klien wajib memvalidasi qty di sisi UI memakai `wajib_kelipatan` + `isi`** supaya user tak menunggu 400 dari server
+- `GET /api/transfer-stok/saldo` — query: `branch_id?` (peran terkunci cabang selalu dipaksa ke cabangnya) — res: `{ branch_id, rows: TransferStokSaldoRow[] }` — stok READY di cabang itu: hanya bahan **aktif + berlacak-stok + masih tersisa (`saldo − dalam_jalan > 0`)**. Tiap baris membawa `pengadaan` ("beli"/"produksi") agar UI bisa menandai jenis bahan, `saldo` (fisik) dan `dalam_jalan` (sudah dikirim, belum diterima tujuan) — **yang boleh ditransfer adalah `saldo − dalam_jalan`**. Untuk aturan kemasan tiap baris juga membawa `isi` (isi per kemasan, dalam `satuan` kerja), `satuan_beli` (label kemasan, mis. "kg"; `null` bila tak diisi) dan `wajib_kelipatan` (boolean) — **klien wajib memvalidasi qty di sisi UI memakai `wajib_kelipatan` + `isi`** supaya user tak menunggu 400 dari server. Untuk TAMPILAN sisa siap kirim tersedia `tersedia_teks` (mis. `"900 gr"`, sudah ditulis server) + `tersedia_setara` (mis. `"≈ 0,9 kg"`, `null` bila tak berkemasan) — pakai itu, jangan merangkai `saldo`/`dalam_jalan` dengan satuan sendiri
 - `GET /api/transfer-stok` — query: `per_page?` (default 50, maks 200) — res: `{ rows: TransferStokFaktur[] }` (terbaru dulu; tiap faktur memuat `items[]` dengan `pengadaan` & `status` per bahan, plus `status` agregat: `menunggu`/`dikonfirmasi`/`ditolak`/`sebagian`). Peran terkunci cabang — **kasir, `tim`, `kitchen`, `bar`** — hanya melihat transfer yang menyangkut cabangnya (pengirim atau penerima); owner/admin melihat semua
 - `POST /api/transfer-stok` — req: `{ asal_branch_id: uuid, tujuan_branch_id: uuid, catatan?|null (max300), items: [{ingredient_id: uuid, qty: number(>0)}] (1..100; bahan sama digabung qty-nya) }` — res: **201** `{ ok, faktur_id, nomor (TF-xxxx), asal, tujuan, jumlah_baris }` — error: **400** (asal = tujuan; asal/tujuan Kantor; bahan invalid/nonaktif/tak lacak stok; **qty melebihi `saldo − dalam_jalan` di asal** — dicek di dalam transaksi setelah advisory lock per cabang asal, pesannya menyebut berapa yang masih dalam perjalanan; **qty bukan kelipatan `isi`** untuk bahan `wajib_kelipatan` — pesannya menyebut dua qty terdekat yang sah, mis. `Kirim 1000 atau 2000 gr, bukan 1500 gr`), **403** `asal_branch_id` BUKAN Central Kitchen (berlaku untuk semua peran, owner sekalipun — pesan: `Transfer stok hanya bisa dikirim DARI Central Kitchen — "<nama>" bukan Central Kitchen`) **atau** peran terkunci mengirim dari cabang lain, **404** cabang tidak ditemukan
 - `POST /api/transfer-stok/:fakturId/batal` — batalkan transfer yang belum diproses tujuan (baris masuk Tempat Sampah) — res: `{ ok, jumlah_baris }` — error: **403** bukan pengirim, **404** bukan faktur transfer, **409** sudah diterima/ditolak di tujuan
@@ -1620,6 +1639,16 @@ export interface TransferStokItemRow {
   satuan: string;
   pengadaan: JenisPengadaan;
   qty: number;
+  /**
+   * `qty` + `satuan` yang SUDAH ditulis server, mis. "900 gr" — tampilkan apa
+   * adanya. Ada agar web & mobile mustahil berbeda satuan (lihat qtyTeks()).
+   */
+  qty_teks: string;
+  /**
+   * setara kemasan beli, mis. "≈ 0,9 kg"; null bila bahan tak berkemasan.
+   * PELENGKAP — boleh ditampilkan di samping `qty_teks`, tak boleh menggantikannya.
+   */
+  qty_setara: string | null;
   /** menunggu = dalam perjalanan; dikonfirmasi = diterima; ditolak = tak diterima */
   status: KonfirmasiStatus;
   alasan_tolak: string | null;
@@ -1671,6 +1700,14 @@ export interface TransferStokSaldoRow {
    * kalau tidak sisa di bawah satu kemasan terjebak selamanya di cabang asal.
    */
   wajib_kelipatan: boolean;
+  /**
+   * sisa siap kirim (`saldo − dalam_jalan`) yang SUDAH ditulis server, mis.
+   * "900 gr" — tampilkan apa adanya supaya web & mobile tak mungkin berbeda
+   * satuan (lihat qtyTeks()).
+   */
+  tersedia_teks: string;
+  /** setara kemasan dari sisa siap kirim, mis. "≈ 0,9 kg"; null bila tak berkemasan */
+  tersedia_setara: string | null;
 }
 
 /**

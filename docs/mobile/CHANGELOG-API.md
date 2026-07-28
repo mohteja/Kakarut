@@ -20,6 +20,61 @@ tanpa akses repo server.
 
 ---
 
+## Rilis: Satuan kiriman ditulis SERVER (`qty_teks`)
+
+> **Tidak ada migrasi DB.** Lanjutan langsung dari koreksi satuan di bawah —
+> kali ini bukan cuma dokumentasi, tapi field baru yang membuat salah satuan
+> tidak mungkin lagi terjadi.
+
+### 🔴 WAJIB — pakai `qty_teks`, berhenti merangkai satuan sendiri
+
+Koreksi kontrak di bawah menjelaskan bahwa `qty` selalu dalam `satuan`. Karena
+mobile ditulis Flutter (tak bisa mengimpor paket `shared` yang dipakai web),
+aturan itu tetap harus diketik ulang di sisi mobile — dan di situlah "900 kg"
+lahir. Sekarang **server yang menulis teksnya**, jadi tak ada lagi yang perlu
+ditebak:
+
+| Field baru | Isi | Sifat |
+| --- | --- | --- |
+| `qty_teks` | `"900 gr"` | **tampilkan apa adanya** |
+| `qty_setara` | `"≈ 0,9 kg"` / `null` | pelengkap — boleh di samping, **tak boleh menggantikan** |
+
+```dart
+// ❌ jangan lagi
+Text('${row.qty} ${row.satuanBeli ?? row.satuan}');
+
+// ✅ cukup
+Text(row.qtyTeks);
+if (row.qtySetara != null) Text(row.qtySetara!, style: kecilAbuAbu);
+```
+
+Angkanya sudah diformat gaya Indonesia (`2.000`, `0,9`) — jangan diformat ulang.
+`qty` mentah tetap dikirim untuk perhitungan; `qty_teks` khusus tampilan.
+
+**Endpoint yang sudah membawanya:**
+
+| Endpoint | Field |
+| --- | --- |
+| `GET /api/transfer-stok` (`items[]`) | `qty_teks`, `qty_setara` |
+| `GET /api/transfer-stok/saldo` | `tersedia_teks`, `tersedia_setara` (sisa siap kirim) |
+| `GET /api/penerimaan` | `qty_teks`, `qty_setara`, `qty_dipesan_teks` |
+| `GET /api/produksi`, `GET /api/pembelian` | `qty_teks`, `qty_setara` |
+
+Empat kasus dari faktur PB-0058 dikunci uji otomatis dan sekarang berbunyi:
+
+| Bahan | `qty_teks` | `qty_setara` |
+| --- | --- | --- |
+| Sayur | `900 gr` | `≈ 0,9 kg` |
+| Mie basah | `2.000 gr` | `2 kg` |
+| Air Mineral 330 ml | `24 botol` | `1 dus` |
+| Air biasa | `15.000 ml` | `15 liter` |
+
+⚪️ `satuan`, `satuan_beli`, `isi`, dan `is_batch` **tetap dikirim** — tak ada
+yang dihapus, jadi layar yang belum diperbarui tidak rusak. Tapi selama masih
+merangkai sendiri, layar itu masih menampilkan satuan yang salah.
+
+---
+
 ## Rilis: Kiriman ikut aturan kemasan belanja
 
 > **Tidak ada migrasi DB.** Satu aturan validasi baru pada dua endpoint kiriman,

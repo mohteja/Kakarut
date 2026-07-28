@@ -6,6 +6,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import {
+  qtyTeks,
   wajibKelipatanKirim,
   type KonfirmasiStatus,
   type TransferStokFaktur,
@@ -132,18 +133,30 @@ export const transferRoutes = new Hono<AppEnv>()
       })
       .map((r) => {
         const m = infoById.get(r.ingredient_id)!;
+        const dalamJalan = jalan.get(r.ingredient_id) ?? 0;
+        // Teks ditulis SERVER, bukan klien: mobile (Flutter) tak bisa memakai
+        // qtyTeks() dari paket shared, dan menebak sendiri sudah pernah
+        // melahirkan "900 kg" untuk bahan yang sebenarnya 900 gr.
+        const t = qtyTeks({
+          qty: r.saldo - dalamJalan,
+          satuan: r.satuan,
+          isi: m.isi,
+          satuanBeli: m.satuanBeli,
+        });
         return {
           ingredient_id: r.ingredient_id,
           nama: r.nama,
           satuan: r.satuan,
           pengadaan: m.pengadaan,
           saldo: r.saldo,
-          dalam_jalan: jalan.get(r.ingredient_id) ?? 0,
+          dalam_jalan: dalamJalan,
           isi: m.isi,
           satuan_beli: m.satuanBeli,
           // predikat yang sama dengan yang ditegakkan POST /transfer-stok,
           // supaya form tak pernah menjanjikan sesuatu yang server tolak
           wajib_kelipatan: wajibKelipatanKirim(m.pengadaan, m.isi, m.bolehEceran),
+          tersedia_teks: t.teks,
+          tersedia_setara: t.setara,
         };
       });
     return c.json({ branch_id: branchId, rows });
@@ -194,6 +207,9 @@ export const transferRoutes = new Hono<AppEnv>()
         ingredient_id: productions.ingredientId,
         nama: ingredients.nama,
         satuan: ingredients.satuan,
+        // hanya untuk menulis teks setara kemasan — qty TETAP dalam `satuan`
+        isi: ingredients.isi,
+        satuan_beli: ingredients.satuanBeli,
         pengadaan: ingredients.pengadaan,
         qty: productions.qty,
         status: productions.status,
@@ -243,6 +259,12 @@ export const transferRoutes = new Hono<AppEnv>()
         };
         byFaktur.set(key, f);
       }
+      const t = qtyTeks({
+        qty: r.qty,
+        satuan: r.satuan,
+        isi: r.isi,
+        satuanBeli: r.satuan_beli,
+      });
       const item: TransferStokItemRow = {
         id: r.id,
         ingredient_id: r.ingredient_id,
@@ -250,6 +272,8 @@ export const transferRoutes = new Hono<AppEnv>()
         satuan: r.satuan,
         pengadaan: r.pengadaan,
         qty: r.qty,
+        qty_teks: t.teks,
+        qty_setara: t.setara,
         status: r.status,
         alasan_tolak: r.alasan_tolak,
       };

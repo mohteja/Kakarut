@@ -765,9 +765,21 @@ export interface TransferStokItemRow {
   id: string;
   ingredient_id: string;
   nama: string;
+  /** satuan kerja — SATU-SATUNYA label yang sah untuk `qty` */
   satuan: string;
   pengadaan: JenisPengadaan;
+  /** jumlah dalam `satuan` (satuan kerja), tak pernah dalam satuan kemasan */
   qty: number;
+  /**
+   * `qty` + `satuan` yang SUDAH ditulis server, mis. "900 gr" — tampilkan apa
+   * adanya. Ada agar web & mobile mustahil berbeda satuan (lihat qtyTeks()).
+   */
+  qty_teks: string;
+  /**
+   * setara kemasan beli, mis. "≈ 0,9 kg"; null bila bahan tak berkemasan.
+   * PELENGKAP — boleh ditampilkan di samping `qty_teks`, tak boleh menggantikannya.
+   */
+  qty_setara: string | null;
   /** menunggu = dalam perjalanan; dikonfirmasi = diterima; ditolak = tak diterima */
   status: KonfirmasiStatus;
   alasan_tolak: string | null;
@@ -798,6 +810,7 @@ export interface TransferStokFaktur {
 export interface TransferStokSaldoRow {
   ingredient_id: string;
   nama: string;
+  /** satuan kerja — SATU-SATUNYA label yang sah untuk `saldo`/`dalam_jalan`/qty kirim */
   satuan: string;
   pengadaan: JenisPengadaan;
   /** saldo FISIK di lokasi asal (barang yang masih dalam perjalanan ikut terhitung) */
@@ -819,6 +832,14 @@ export interface TransferStokSaldoRow {
    * kalau tidak sisa di bawah satu kemasan terjebak selamanya di cabang asal.
    */
   wajib_kelipatan: boolean;
+  /**
+   * sisa siap kirim (`saldo − dalam_jalan`) yang SUDAH ditulis server, mis.
+   * "900 gr" — tampilkan apa adanya supaya web & mobile tak mungkin berbeda
+   * satuan (lihat qtyTeks()).
+   */
+  tersedia_teks: string;
+  /** setara kemasan dari sisa siap kirim, mis. "≈ 0,9 kg"; null bila tak berkemasan */
+  tersedia_setara: string | null;
 }
 
 /**

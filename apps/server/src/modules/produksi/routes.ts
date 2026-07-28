@@ -21,6 +21,7 @@ import { z } from "zod";
 import {
   hargaPerUnit,
   jumlahFaktur,
+  qtyTeks,
   type DampakBahan,
   type DampakLaporanHarga,
   type DampakMenu,
@@ -2398,8 +2399,14 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
       const rowsRak = rows.map((r) => {
         const destBranch = r.tujuan_branch_id ?? r.branch_id;
         const rak = destBranch ? rakByKey.get(`${r.ingredient_id}|${destBranch}`) : undefined;
+        // Teks kuantitas ditulis SERVER. Klien yang menyusunnya sendiri pernah
+        // memasangkan `qty` dengan `satuan_beli` ("900 kg" untuk 900 gr) dan
+        // dengan kata "batch"; `qty_teks` menghapus ruang tebakan itu.
+        const t = qtyTeks({ qty: r.qty, satuan: r.satuan, isi: r.isi, satuanBeli: r.satuan_beli });
         return {
           ...r,
+          qty_teks: t.teks,
+          qty_setara: t.setara,
           default_storage_location_id: rak?.id ?? null,
           default_tempat: rak?.nama ?? null,
         };

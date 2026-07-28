@@ -5963,5 +5963,53 @@ cek "isi = 1 (tanpa kemasan): kirim 7 pcs → 201" "V == 201" "$(kirim148 "$B114
 
 
 echo
+echo "── §149 SATUAN kiriman sama di web & mobile (qty_teks ditulis server) ──"
+# Bug nyata: pada faktur PB-0058 yang SAMA, web menulis "Sayur 900 gr" sementara
+# mobile menulis "Sayur 900 kg" — beda 1000× — karena klien memasangkan `qty`
+# dengan `satuan_beli`. Server sekarang MENULIS teksnya, jadi tak ada lagi yang
+# perlu ditebak klien mana pun.
+# Bahan uji: satuan kerja gr, kemasan kg (1 kg = 1000 gr). Stok CK 900 gr.
+BT149=$(api "$OWNER" POST /bahan '{"nama":"Sayur teks 149","harga_beli":12000,"isi":1000,"satuan":"gr","satuan_beli":"kg","pengadaan":"beli","kategori":"lain","boleh_eceran":true}' | jq -r .id)
+masuk148 "$BT149" pcs 900 10800
+SLD149=$(api "$OWNER" GET "/transfer-stok/saldo?branch_id=$CK148" | jq --arg i "$BT149" '[.rows[]|select(.ingredient_id==$i)][0]')
+cek "saldo kirim: tersedia_teks = '900 gr' (satuan KERJA, bukan kemasan)" "V == 1" \
+  "$(echo "$SLD149" | jq -r '(.tersedia_teks == "900 gr")|if . then 1 else 0 end')"
+cek "saldo kirim: tersedia_teks TIDAK memakai satuan_beli" "V == 0" \
+  "$(echo "$SLD149" | jq -r '(.tersedia_teks|test("kg"))|if . then 1 else 0 end')"
+cek "saldo kirim: tersedia_setara = '≈ 0,9 kg' (pelengkap, bukan pengganti)" "V == 1" \
+  "$(echo "$SLD149" | jq -r '(.tersedia_setara == "≈ 0,9 kg")|if . then 1 else 0 end')"
+# kirim 900 gr → baris faktur transfer harus menuliskan satuan yang sama
+TF149=$(api "$OWNER" POST /transfer-stok "{\"asal_branch_id\":\"$CK148\",\"tujuan_branch_id\":\"$ST148\",\"items\":[{\"ingredient_id\":\"$BT149\",\"qty\":900}]}" | jq -r .faktur_id)
+IT149=$(api "$OWNER" GET /transfer-stok | jq --arg f "$TF149" '[.rows[]|select(.faktur_id==$f)][0].items[0]')
+cek "baris transfer: qty 900 + satuan 'gr'" "V == 1" \
+  "$(echo "$IT149" | jq -r '((.qty == 900) and (.satuan == "gr"))|if . then 1 else 0 end')"
+cek "baris transfer: qty_teks = '900 gr'" "V == 1" \
+  "$(echo "$IT149" | jq -r '(.qty_teks == "900 gr")|if . then 1 else 0 end')"
+cek "baris transfer: qty_setara = '≈ 0,9 kg'" "V == 1" \
+  "$(echo "$IT149" | jq -r '(.qty_setara == "≈ 0,9 kg")|if . then 1 else 0 end')"
+# penerimaan di cabang tujuan — layar tempat bug mobile terlihat
+PN149=$(api "$OWNER" GET "/penerimaan?branch_id=$ST148" | jq --arg f "$TF149" '[.rows[]|select(.faktur_id==$f)][0]')
+cek "penerimaan: qty_teks = '900 gr' (bukan '900 kg')" "V == 1" \
+  "$(echo "$PN149" | jq -r '(.qty_teks == "900 gr")|if . then 1 else 0 end')"
+cek "penerimaan: qty_setara = '≈ 0,9 kg'" "V == 1" \
+  "$(echo "$PN149" | jq -r '(.qty_setara == "≈ 0,9 kg")|if . then 1 else 0 end')"
+# baris faktur BELI mode batch — sumber "2000 batch" di mobile
+FB149=$(api "$OWNER" POST /pembelian/faktur "{\"branch_id\":\"$CK148\",\"items\":[{\"ingredient_id\":\"$BT149\",\"mode\":\"batch\",\"jumlah\":2,\"total_harga\":24000}]}" | jq -r .faktur_id)
+BR149=$(api "$OWNER" GET "/pembelian?branch_id=$CK148&per_page=100" | jq --arg f "$FB149" '[.rows[]|select(.faktur_id==$f)][0]')
+cek "faktur beli mode batch: is_batch true TAPI qty tetap dalam satuan kerja" "V == 1" \
+  "$(echo "$BR149" | jq -r '((.is_batch == true) and (.qty == 2000) and (.satuan == "gr"))|if . then 1 else 0 end')"
+cek "faktur beli: qty_teks = '2.000 gr' (bukan '2000 batch')" "V == 1" \
+  "$(echo "$BR149" | jq -r '(.qty_teks == "2.000 gr")|if . then 1 else 0 end')"
+cek "faktur beli: qty_teks TIDAK memuat kata 'batch'" "V == 0" \
+  "$(echo "$BR149" | jq -r '(.qty_teks|test("batch"))|if . then 1 else 0 end')"
+cek "faktur beli: qty_setara = '2 kg' (kelipatan pas, tanpa ≈)" "V == 1" \
+  "$(echo "$BR149" | jq -r '(.qty_setara == "2 kg")|if . then 1 else 0 end')"
+# bahan tanpa kemasan → tak ada teks setara yang bisa disalahtafsirkan
+SLD149B=$(api "$OWNER" GET "/transfer-stok/saldo?branch_id=$CK148" | jq --arg i "$B1148" '[.rows[]|select(.ingredient_id==$i)][0]')
+cek "bahan tanpa kemasan: tersedia_setara null" "V == 1" \
+  "$(echo "$SLD149B" | jq -r '(.tersedia_setara == null)|if . then 1 else 0 end')"
+
+
+echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

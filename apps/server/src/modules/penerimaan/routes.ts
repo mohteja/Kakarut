@@ -3,7 +3,7 @@ import { and, asc, eq, inArray, isNull, or } from "drizzle-orm";
 import { Hono, type Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import type { JenisPengadaan } from "@kakarut/shared";
+import { qtyTeks, type JenisPengadaan } from "@kakarut/shared";
 import { db } from "../../db/client";
 import {
   branches,
@@ -84,9 +84,13 @@ export const penerimaanRoutes = new Hono<AppEnv>()
         ingredient_id: productions.ingredientId,
         bahan: ingredients.nama,
         isi: ingredients.isi,
+        /** SATUAN TAMPILAN: `qty` di bawah SELALU dinyatakan dalam ini */
         satuan: ingredients.satuan,
+        /** satuan kemasan — hanya bahan teks setara, JANGAN dipasang ke `qty` */
+        satuan_beli: ingredients.satuanBeli,
         qty: productions.qty,
         total_harga: productions.totalHarga,
+        /** ASAL-USUL input, BUKAN satuan — lihat catatan di qty_teks */
         is_batch: productions.isBatch,
         catatan: productions.catatan,
         waktu: productions.waktu,
@@ -126,7 +130,23 @@ export const penerimaanRoutes = new Hono<AppEnv>()
         ),
       )
       .orderBy(asc(productions.waktu), asc(productions.id));
-    return c.json({ rows });
+    // Teks kuantitas ditulis SERVER supaya web & mobile mustahil berbeda
+    // satuan — menebak sendiri sudah pernah melahirkan "900 kg" untuk barang
+    // yang sebenarnya 900 gr, dan "batch" untuk barang bersatuan gr.
+    const rowsTeks = rows.map((r) => {
+      const t = qtyTeks({ qty: r.qty, satuan: r.satuan, isi: r.isi, satuanBeli: r.satuan_beli });
+      const d =
+        r.qty_dipesan == null
+          ? null
+          : qtyTeks({
+              qty: r.qty_dipesan,
+              satuan: r.satuan,
+              isi: r.isi,
+              satuanBeli: r.satuan_beli,
+            });
+      return { ...r, qty_teks: t.teks, qty_setara: t.setara, qty_dipesan_teks: d?.teks ?? null };
+    });
+    return c.json({ rows: rowsTeks });
   })
   /** Terima SEMUA barang kiriman → masuk stok. */
   .post("/:fakturId/terima", async (c) => {
