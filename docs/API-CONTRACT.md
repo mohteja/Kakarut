@@ -236,7 +236,7 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 
 - `GET /api/company` — [any] — res: row company + `{ mode: "lite"|"pro" }` — error: **404**
 - `POST /api/company/mode` — [owner] — req: `{ mode: "lite"|"pro" }` — res: `{ ok, mode, lokasi_baru: string[] }` — error: **400** (tak bisa ke Lite bila >1 cabang aktif)
-- `PATCH /api/company` — [owner/admin] — req: `{ nama?, alamat?|null, telepon?|null, logo_url?|null, pb1_enabled?: bool, pb1_rate?: number(0..100), receipt_footer?|null (max 200), receipt_show_alamat?: bool, target_penjualan?|null (≥0), diskon_maks_persen?: number(0..100), metode_hpp?: "average"|"fifo" }` — res: row company terupdate
+- `PATCH /api/company` — [owner/admin] — req: `{ nama?, alamat?|null, telepon?|null, logo_url?|null, pb1_enabled?: bool, pb1_rate?: number(0..100), receipt_footer?|null (max 200), receipt_show_alamat?: bool, target_penjualan?|null (≥0), diskon_maks_persen?: number(0..100), metode_hpp?: "average"|"fifo", food_cost_maks?: number(0..100) }` — res: row company terupdate. `food_cost_maks` = ambang food cost sehat (%) — menu di atasnya ditandai di daftar Menu & muncul di Analisis Harga (default **40**).
 
 ## `/api/cabang` — Cabang (`modules/branches/routes.ts`)
 
@@ -305,17 +305,29 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 - `GET /api/menu/panduan-markup` — [any] — res: konstanta `PANDUAN_MARKUP`
 - `GET /api/menu` — [any] — query: `kategori_id?`, `semua=true` (termasuk nonaktif), `branch_id?` (owner/admin; cashier terkunci cabangnya) — res: `MenuDto[]`
 - `GET /api/menu/ketersediaan` — [any] — query: `branch_id?` — res: row sisa-porsi per menu
+- `GET /api/menu/analisis-harga` — **[owner/admin]** — query: `semua=true` (termasuk menu nonaktif) — res: `AnalisisHargaRow[]` (urut food cost menurun). Tiap baris = `MenuDto` + `menu_diperbarui` (`menus.updated_at`), `food_cost_maks` (ambang perusahaan) dan `penyumbang` (maks 5 bahan penyumbang HPP terbesar, masing-masing membawa `bahan_diperbarui` = `ingredients.updated_at` dan `harga_dilaporkan_pada` = `MAX(productions.laporan_harga_at)`). Dipakai menjawab "kenapa food cost naik padahal harga jual tak diubah": HPP tidak pernah disimpan, selalu dihitung ulang dari harga bahan terkini.
+- `POST /api/menu/terapkan-saran` — **[owner/admin]** — req: `{ ids: uuid[] (1..500) }` — res: `TerapkanSaranHasil` `{ diperbarui, dilewati, rincian: [{menu_id, nama, harga_lama, harga_baru, diperbarui}] }` — error: **404** bila tak satu pun id milik perusahaan. Menyetel `harga_jual = harga_jual_bulat` yang **dihitung ulang di server** (angka klien diabaikan); menu yang harganya sudah sama, atau yang saran-nya 0 (resep kosong), dilewati. Tiap perubahan menulis satu baris riwayat harga.
 - `GET /api/menu/:id` — [any] — res: `MenuDto` — error: **404**
+- `GET /api/menu/:id/riwayat-harga` — **[owner/admin]** — res: `MenuPriceLogRow[]` (terbaru dulu, maks 50) — jejak tiap perubahan `harga_jual`/markup: `sebab` = `"buat"` (baris pembuka saat menu dibuat) | `"manual"` (lewat `PUT /api/menu/:id`) | `"terapkan_saran"`. `PUT` yang tidak mengubah harga jual maupun markup (mis. hanya ganti foto/resep) **tidak** menambah baris.
 - `PUT /api/menu/urutan` — [any] — req: `{ items: [{id: uuid, sort_order: int}] }` — res: `{ ok: true }`
-- `POST /api/menu` — [owner/admin] — req `MenuBody`: `{ nama, kode?|null (max20), category_id: uuid, tipe: "regular"|"paket"="regular", mult?|null, base_menu_id?|null, base_mult?|null, harga_jual: number(≥0), image_url?|null, komponen: [{ingredient_id:uuid, qty:number(>0)}] = [], is_active: bool=true, branch_ids?: uuid[]|null }` — res: **201** `MenuDto` — error: **400** (paket butuh base_menu_id+base_mult / regular butuh mult / ref invalid / cabang non-store), **409** nama ada
-- `PUT /api/menu/:id` — [owner/admin] — req: `MenuBody` (penuh) — res: `MenuDto` — error: **400**, **404**
+- `POST /api/menu` — [owner/admin] — req `MenuCreateBody`: `{ nama, kode?|null (max20), category_id: uuid, tipe: "regular"|"paket"="regular", mult?|null, base_menu_id?|null, base_mult?|null, harga_jual: number(≥0), image_url?|null, komponen: [{ingredient_id:uuid, qty:number(>0)}] = [], is_active: bool=true, branch_ids?: uuid[]|null }` — res: **201** `MenuDto` — error: **400** (paket butuh base_menu_id+base_mult / regular butuh mult / ref invalid / cabang non-store), **409** nama ada
+- `PUT /api/menu/:id` — [owner/admin] — req `MenuUpdateBody`: **perbarui SEBAGIAN — semua field opsional**. Field yang **tidak dikirim (`undefined`) dipertahankan apa adanya**; `null`/`[]` eksplisit tetap berarti "kosongkan". Berlaku untuk seluruh field, termasuk yang paling mudah hilang: `komponen` (tak dikirim → resep utuh; `[]` → resep dikosongkan), `image_url` (tak dikirim → foto tetap; `null` → foto dihapus), `is_active` (tak dikirim → menu terarsip TETAP terarsip), `kode` (tak dikirim → kode lama; `""`/`null` → digenerate ulang dari nama), `branch_ids` (tak dikirim → pembatasan lama; `null`/`[]` → tampil di semua cabang). Validasi paket/reguler dijalankan atas nilai **hasil gabungan** dengan baris lama, jadi `PUT {"harga_jual":X}` saja sah. — res: `MenuDto` — error: **400**, **404**
 - `DELETE /api/menu/:id` — [owner/admin] — soft delete — res: `{ ok: true }` — error: **404**
 
 ---
 
 ## 7. `/api/penjualan` — Penjualan POS (`modules/penjualan/routes.ts`)
 
-- `POST /api/penjualan` — **[cashier only]** (`requireRole("cashier")` inline) — req `SaleBody`: `{ branch_id?: uuid, is_dine_in: bool=false, meja_id?: uuid, catatan?|null, diskon_tipe?: "persen"|"nominal", diskon_nilai?: number(≥0), customer_nama?|null, customer_wa?|null, metode_bayar?: "tunai"|"qris"|"transfer", uang_diterima?: number(≥0), items: [{menu_id:uuid, qty:number(>0), is_dine_in?:bool, catatan?}] (min 1) }` — res: **201** hasil sale + `{ kasir }` — error: **400** (validasi/diskon lewat batas), **403** kasir di luar cabang, **409** kasir belum dibuka (tidak ada shift terbuka di cabang → tampilkan gerbang "Buka Kasir")
+- `POST /api/penjualan` — **[cashier only]** (`requireRole("cashier")` inline) — req `SaleBody`: `{ branch_id?: uuid, is_dine_in: bool=false, meja_id?: uuid, catatan?|null, diskon_tipe?: "persen"|"nominal", diskon_nilai?: number(≥0), customer_nama?|null, customer_wa?|null, metode_bayar?: "tunai"|"qris"|"transfer", uang_diterima?: number(≥0), open_bill_id?: uuid, items: [{menu_id:uuid, qty:number(>0), is_dine_in?:bool, catatan?, open_bill_item_id?:uuid|null}] (min 1) }` — res: **201** hasil sale + `{ kasir }` — error: **400** (validasi/diskon lewat batas / baris open bill tak cocok / `open_bill_item_id` tanpa `open_bill_id`), **403** kasir di luar cabang, **404** open bill tak ada di cabang ini, **409** kasir belum dibuka (tidak ada shift terbuka di cabang → tampilkan gerbang "Buka Kasir")
+
+> **Membayar open bill:** kirim `open_bill_id` transaksi **dan**
+> `items[].open_bill_item_id` untuk tiap baris yang berasal dari bill. Baris itu
+> ditagih memakai `harga_satuan` yang dikunci di bill saat dipesan; baris tanpa
+> `open_bill_item_id` (tambahan saat bayar) memakai harga menu hari ini. Server
+> memverifikasi baris tersebut milik bill, perusahaan, dan cabang yang sama —
+> `open_bill_item_id` milik bill lain ditolak **400**. `qty` bebas berubah saat
+> pembayaran. Yang dikunci hanya harga jual: `hpp_satuan` tetap dihitung saat
+> pembayaran dari resep × harga acuan bahan saat itu.
 - `GET /api/penjualan` — [any] — query: `branch_id?` (atau `all` untuk owner/admin), `tanggal?` (YYYY-MM-DD, default hari ini di TZ perusahaan) — res: array ringkasan sale — error: **400** format tanggal salah
 - `GET /api/penjualan/:id` — [any] — res: `{ sale, items, branch_nama, kasir }` — error: **403** kasir luar cabang, **404**
 - `DELETE /api/penjualan/:id` — [owner/admin] — soft delete → Tempat Sampah — res: `{ ok, nomor }` — error: **404**
@@ -329,14 +341,66 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 > `/kirim-hasil` khusus produksi, `/laporan-harga` khusus beli. Ganti `{mod}`
 > dengan `produksi` atau `pembelian`.
 
+> ### ⚠️ SATUAN BARIS FAKTUR — `qty` SELALU dalam `satuan`, bukan `satuan_beli`
+>
+> **Cara termudah & paling aman: JANGAN merangkai sendiri — pakai `qty_teks`.**
+> Tiap baris faktur & kiriman membawa dua field yang sudah ditulis server dari
+> satu fungsi bersama (`qtyTeks()` di `packages/shared`):
+>
+> | Field | Isi | Cara pakai |
+> | --- | --- | --- |
+> | `qty_teks` | `"900 gr"` | **tampilkan apa adanya** |
+> | `qty_setara` | `"≈ 0,9 kg"`, atau `null` bila bahan tak berkemasan | pelengkap — boleh di samping, **tak boleh menggantikan** |
+>
+> Angkanya sudah diformat gaya Indonesia (`2.000`, `0,9`); `qty` mentah tetap
+> dikirim untuk perhitungan. Web memakai field yang sama, jadi web & mobile
+> mustahil berbeda satuan. Sisanya di bawah ini adalah aturan yang mendasarinya
+> — tetap berlaku, tapi tak perlu diketik ulang di klien.
+>
+> Aturannya satu kalimat: **tampilkan `qty` bersama `satuan`.** Titik.
+>
+> | Field | Artinya | Boleh dipasangkan dengan `qty`? |
+> | --- | --- | --- |
+> | `satuan` | satuan kerja/resep (`gr`, `ml`, `botol`, `pcs`) | ✅ **ya — ini pasangannya** |
+> | `satuan_beli` | satuan kemasan saat BELANJA (`kg`, `dus`); `null` = beli langsung dalam `satuan` | ❌ tidak — harus dibagi `isi` dulu |
+> | `is_batch` | **asal-usul input**, bukan satuan: `true` = user mengetiknya dalam kemasan | ❌ tidak — jangan tampilkan kata "batch" sebagai satuan |
+>
+> Saat faktur dibuat, server SUDAH mengonversi input ke satuan kerja:
+> `qty = mode === "batch" ? jumlah × isi : jumlah`. Jadi begitu baris tersimpan,
+> `qty` tidak pernah lagi berada dalam satuan kemasan — sekalipun `is_batch` true.
+>
+> Konversi ke kemasan (hanya untuk dokumen belanja) = `qty ÷ isi`, dan **lewati
+> bila `satuan_beli` null atau `isi` ≤ 1** — persis yang dilakukan
+> `DokumenBelanjaModal.tsx`:
+>
+> ```
+> Sayur   → satuan "gr", satuan_beli "kg", isi 1000, qty 900
+>   ✅ "900 gr"            (qty + satuan)
+>   ❌ "900 kg"            (qty + satuan_beli → salah 1000×)
+>   ℹ️ "≈ 0,9 kg"          (qty ÷ isi, untuk dokumen belanja saja)
+>
+> Mie basah → satuan "gr", is_batch true, qty 2000
+>   ✅ "2.000 gr"
+>   ❌ "2000 batch"        (is_batch itu cara input, bukan satuan)
+> ```
+>
+> **Endpoint yang membawa `qty_teks`/`qty_setara`:** `GET /api/produksi`,
+> `GET /api/pembelian`, `GET /api/penerimaan` (+ `qty_dipesan_teks`),
+> `GET /api/transfer-stok` (pada `items[]`). `GET /api/transfer-stok/saldo`
+> memakai nama yang menyesuaikan artinya: `tersedia_teks`/`tersedia_setara`
+> (sisa siap kirim, yaitu `saldo − dalam_jalan`).
+
 - `POST /api/{mod}/faktur` — req `FakturBody`: `{ branch_id?: uuid, tujuan_branch_id?: uuid|null (KHUSUS BELI, manajemen: cabang STORE tujuan kirim — barang tiba di cabang faktur lalu dikirim & diterima di Penerimaan cabang; baris bertujuan TIDAK auto-confirm), supplier_id?: uuid|null, no_faktur?|null (max60), catatan?|null, worker_id?: uuid|null (produksi: OPSIONAL — bila kosong pelaksana terisi otomatis dari aktor yang memajukan tahap ke "dikerjakan"), items: [{ingredient_id:uuid, mode:"pcs"|"batch", jumlah:number(>0), storage_location_id?:uuid|null, total_harga?:number(≥0)|null}] (min 1) }`. `branch_id` boleh cabang STORE (beli langsung di cabang — barang Tiba langsung masuk stok cabang itu; produksi di cabang store = produksi lokal, hasil masuk stok cabang itu). — res: **201** `{ faktur_id, nomor, status:"rencana", jumlah_baris, beli_otomatis: { faktur_id, nomor, jumlah_baris } | null }` — `beli_otomatis` (jalur PRODUKSI): faktur BELI yang lahir otomatis di cabang sama untuk bahan mentah resep yang KURANG atau yang sisa stoknya bakal jatuh **di bawah stok minimum** setelah produksi (`kurang = kebutuhan resep + stok_minimum − saldo`, dibulatkan per kemasan + MOQ `min_beli`; hanya bahan jalur beli ber-lacak-stok; null bila tak ada). — error: **400** (supplier/ingredient/storage/tujuan invalid, jalur pengadaan salah, tujuan pada produksi), **403** kasir luar cabang / non-manajemen pakai tujuan, **404** ingredient tak ada
 - `POST /api/{mod}/tahap/:fakturId` — req `TahapBody`: `{ ke: "dikerjakan"|"menunggu"|"dikonfirmasi", items?: [{id:uuid, qty:number(>0), harga?:number(≥0)|null, exp?: "YYYY-MM-DD"|null (override tanggal kedaluwarsa lot saat baris MASUK STOK, target ≥ "menunggu"; kosong = otomatis `tanggal masuk + masa_simpan_hari` bahan; diabaikan utk target lain)}], dana_cair?:number|null, realisasi?:number|null, selisih_catatan?|null (max300), tujuan_branch_id?:uuid|null, tujuan_storage_id?:uuid|null, paksa?:bool }` — res: `{ ok, status, jumlah_baris }` — error: **400** (tahap tak urut, tujuan lintas cabang, qty>baris, dll), **403**, **404**, **409** (bahan mentah kurang → pesan kekurangan kecuali `paksa`; atau status berubah konkuren). Saat baris MASUK STOK (`menunggu`), rak simpan yang kosong otomatis diisi **rak default bahan** di cabang baris (Tempat Penyimpanan) — berlaku jalur items maupun non-items; baris bertujuan cabang lain tetap tanpa rak (transit) sampai diterima di cabang.
 - `POST /api/{mod}/kirim/:fakturId` — req: `{ tujuan_storage_id?: uuid|null }` — res: `{ ok, tujuan, jumlah_baris }` — error: **400** (belum ada yang siap / cabang/storage tujuan invalid), **403** bukan staf CK
-- `POST /api/produksi/kirim-hasil/:fakturId` — **produksi saja** (pembelian → **404**) — req: `{ tujuan_storage_id?: uuid|null, items?: [{ingredient_id:uuid, qty:number(>0)}] }` — res: `{ ok, faktur_id, nomor, tujuan, jumlah_baris }` — error: **400** (tak ada yang dikirim / stok CK kurang / tujuan invalid), **403**
+- `POST /api/produksi/kirim-hasil/:fakturId` — **produksi saja** (pembelian → **404**) — req: `{ tujuan_storage_id?: uuid|null, items?: [{ingredient_id:uuid, qty:number(>0)}] }` — res: `{ ok, faktur_id, nomor, tujuan, jumlah_baris }` — error: **400** (tak ada yang dikirim / stok CK kurang / tujuan invalid / **qty bukan kelipatan kemasan** untuk bahan `pengadaan:"beli"` yang tak boleh eceran — lihat "Kelipatan kemasan pada kiriman" di `/api/transfer-stok`), **403**
 - `GET /api/{mod}/dana/:fakturId` — res: `{ rows: [{id,tipe,nominal,catatan,oleh,waktu}], total }` — error: **404**
 - `POST /api/{mod}/konfirmasi/:fakturId` — res: `{ ok, jumlah_baris }` — error: **404** tak ada / sudah dikonfirmasi
 - `GET /api/{mod}/log/:fakturId` — res: `{ rows: [{id,aksi,detail,oleh,waktu}] }` — error: **404**
-- `POST /api/pembelian/laporan-harga/:fakturId` — **[owner/admin]**, **beli saja** (produksi → **400**) — req: `{ items: [{id:uuid, total_harga:number(≥0)}] (min1) }` — res: `{ ok, jumlah }` — error: **400**, **404**. Selain memperbarui `total_harga` baris (harga riil utk HPP FIFO/resep), harga acuan tiap bahan yang dilaporkan (`harga_beli`) disegarkan ke **median** harga/satuan seluruh lot beli dikonfirmasi yang berharga (acuan RAB; fallback harga baris dilaporkan bila belum ada lot berharga).
+- `POST /api/pembelian/laporan-harga/:fakturId` — **[owner/admin]**, **beli saja** (produksi → **400**) — req: `{ items: [{id:uuid, total_harga:number(≥0)}] (min1), perbarui_acuan?: bool }` — res: `{ ok, jumlah }` — error: **400**, **404**. Selain memperbarui `total_harga` baris (harga riil utk HPP FIFO/resep), harga acuan tiap bahan yang dilaporkan (`harga_beli`) disegarkan ke **median** harga/satuan lot beli dikonfirmasi yang berharga (acuan RAB; fallback harga baris dilaporkan bila belum ada lot berharga).
+  - **`perbarui_acuan` default `true`** — klien lama tak berubah perilaku. Kirim `false` untuk mencatat nota **tanpa** menyentuh harga acuan bahan (mis. nota beli eceran darurat yang tak mewakili harga pasar).
+  - **Kolam median hanya memuat lot yang harganya pernah dilihat manusia** (`productions.harga_tebakan = false`): harga diisi di faktur, dilaporkan lewat endpoint ini, atau direalisasi di `POST /{mod}/tahap`. Faktur yang dibuat **tanpa** `total_harga` memakai tebakan `qty × harga acuan saat itu`; bila tebakan ikut dihitung, harga acuan menyeret dirinya sendiri (acuan → tebakan → median → acuan) dan HPP seluruh menu hanyut naik tanpa ada yang mengubah harga jual.
+- `POST /api/pembelian/laporan-harga/:fakturId/dampak` — **[owner/admin]**, **beli saja** (produksi → **400**) — req: `{ items: [{id:uuid, total_harga:number(≥0)}] (min1) }` — res: `DampakLaporanHarga` `{ food_cost_maks, bahan: [{ingredient_id, nama, satuan, acuan_lama, acuan_baru, jumlah_menu_terdampak}], menu_lewat_ambang: [{menu_id, nama, food_cost_lama, food_cost_baru}] }` — error: **400**, **404**. Pratinjau **tanpa menulis apa pun**: memakai fungsi hitung yang sama dengan endpoint di atas, jadi angkanya identik dengan hasil bila disimpan. POST (bukan GET) karena dampak bergantung pada angka yang sedang diketik user. `menu_lewat_ambang` hanya memuat menu aktif yang **menyeberang** ambang food cost (bukan yang sudah di atas ambang sejak awal).
 - `POST /api/{mod}` — req `TambahStokBody`: `{ branch_id?:uuid, ingredient_id:uuid, qty?:number(>0), batch:bool=false, total_harga?:number(≥0)|null, catatan? }` (refine: `batch` ATAU `qty` wajib) — res: **201** row production + `{ bahan }` — error: **400**, **404**
 - `GET /api/{mod}` — query: `branch_id?` (atau `all`), `dari?`, `sampai?`, `tanggal?`, `page?` (default 1), `per_page?` (default 20, maks 200) — res: `{ rows, total, page, per_page, total_pengeluaran }` (tiap row memuat `rencana_id` + `permintaan_nomor` (PM-xxxx) bila faktur lahir dari permintaan Tambah Stok dari Menu; juga `exp_date` (tanggal kedaluwarsa lot — terisi saat baris masuk stok; NULL utk transfer stok/kirim-hasil karena lot asal tak diketahui) dan `masa_simpan_hari` master bahan; juga `produksi_di` + `divisi_produksi` bahan — dasar badge divisi Kitchen/Bar pada faktur produksi cabang). **Role `kitchen`/`bar`: daftar otomatis DISARING per divisi** — baris resep produksi-cabang milik divisi lain tidak dikembalikan (bar tak melihat pekerjaan kitchen dan sebaliknya; baris lain seperti kiriman/bahan CK tetap tampil). Owner/admin melihat semuanya.
 - `PATCH /api/{mod}/faktur/:key` — req `FakturEditBody`: `{ password: string (wajib), supplier_id?:uuid|null, no_faktur?|null (max60), catatan?|null, storage_location_id?:uuid|null, worker_id?:uuid|null, prod_date?: "YYYY-MM-DD" }` — res: `{ ok, jumlah_baris }` — error: **401** password salah, **400** supplier/storage invalid, **404**
@@ -400,10 +464,37 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 > lahir dari rencana menu (`rencana_id` terisi, nomor PR-), yang ini manual/
 > ad-hoc (`rencana_id` null, nomor TF-). Pembeda tegas di API: faktur transfer
 > adalah faktur yang punya nomor dokumen berjenis `transfer`.
+>
+> ### ⚠️ Kelipatan kemasan pada kiriman
+>
+> Barang yang hanya bisa **DIBELI** per kemasan utuh juga hanya boleh **DIKIRIM**
+> per kemasan utuh: sayur yang dibeli per kg tak bisa dikirim 900 gr. Aturannya
+> memakai predikat yang sama dengan mode belanja (`jumlahFaktur`) supaya keduanya
+> tak pernah berbeda pendapat.
+>
+> **Wajib kelipatan bila SEMUA benar:**
+> `pengadaan === "beli"` **dan** `isi > 1` **dan** `boleh_eceran === false`.
+> `qty` (selalu dalam `satuan` kerja) harus kelipatan `isi`.
+>
+> **Bahan `pengadaan: "produksi"` SENGAJA dikecualikan** — di situ `isi` adalah
+> UKURAN BATCH, bukan kemasan fisik. CK memproduksi 100 butir baso lalu mengirim
+> 40 butir ke cabang adalah alur normal; memaksanya kelipatan 100 akan mengunci
+> operasional cabang.
+>
+> **Pengecualian "kirim habis":** bila `qty` sama persis dengan seluruh sisa yang
+> boleh dikirim (`saldo − dalam_jalan`), kiriman tetap diterima walau bukan
+> kelipatan. Tanpa ini sisa 900 gr terjebak selamanya di gudang asal karena tak
+> akan pernah mencapai satu kemasan penuh.
+>
+> **Urutan pemeriksaan:** kecukupan stok dinilai LEBIH DULU, kelipatan kemasan
+> belakangan — jadi qty melebihi stok tetap memberi pesan "stok kurang", bukan
+> pesan kemasan yang menyesatkan.
+>
+> Berlaku sama untuk `POST /api/produksi/kirim-hasil/:fakturId`.
 
-- `GET /api/transfer-stok/saldo` — query: `branch_id?` (peran terkunci cabang selalu dipaksa ke cabangnya) — res: `{ branch_id, rows: TransferStokSaldoRow[] }` — stok READY di cabang itu: hanya bahan **aktif + berlacak-stok + masih tersisa (`saldo − dalam_jalan > 0`)**. Tiap baris membawa `pengadaan` ("beli"/"produksi") agar UI bisa menandai jenis bahan, `saldo` (fisik) dan `dalam_jalan` (sudah dikirim, belum diterima tujuan) — **yang boleh ditransfer adalah `saldo − dalam_jalan`**
+- `GET /api/transfer-stok/saldo` — query: `branch_id?` (peran terkunci cabang selalu dipaksa ke cabangnya) — res: `{ branch_id, rows: TransferStokSaldoRow[] }` — stok READY di cabang itu: hanya bahan **aktif + berlacak-stok + masih tersisa (`saldo − dalam_jalan > 0`)**. Tiap baris membawa `pengadaan` ("beli"/"produksi") agar UI bisa menandai jenis bahan, `saldo` (fisik) dan `dalam_jalan` (sudah dikirim, belum diterima tujuan) — **yang boleh ditransfer adalah `saldo − dalam_jalan`**. Untuk aturan kemasan tiap baris juga membawa `isi` (isi per kemasan, dalam `satuan` kerja), `satuan_beli` (label kemasan, mis. "kg"; `null` bila tak diisi) dan `wajib_kelipatan` (boolean) — **klien wajib memvalidasi qty di sisi UI memakai `wajib_kelipatan` + `isi`** supaya user tak menunggu 400 dari server. Untuk TAMPILAN sisa siap kirim tersedia `tersedia_teks` (mis. `"900 gr"`, sudah ditulis server) + `tersedia_setara` (mis. `"≈ 0,9 kg"`, `null` bila tak berkemasan) — pakai itu, jangan merangkai `saldo`/`dalam_jalan` dengan satuan sendiri
 - `GET /api/transfer-stok` — query: `per_page?` (default 50, maks 200) — res: `{ rows: TransferStokFaktur[] }` (terbaru dulu; tiap faktur memuat `items[]` dengan `pengadaan` & `status` per bahan, plus `status` agregat: `menunggu`/`dikonfirmasi`/`ditolak`/`sebagian`). Peran terkunci cabang — **kasir, `tim`, `kitchen`, `bar`** — hanya melihat transfer yang menyangkut cabangnya (pengirim atau penerima); owner/admin melihat semua
-- `POST /api/transfer-stok` — req: `{ asal_branch_id: uuid, tujuan_branch_id: uuid, catatan?|null (max300), items: [{ingredient_id: uuid, qty: number(>0)}] (1..100; bahan sama digabung qty-nya) }` — res: **201** `{ ok, faktur_id, nomor (TF-xxxx), asal, tujuan, jumlah_baris }` — error: **400** (asal = tujuan; asal/tujuan Kantor; bahan invalid/nonaktif/tak lacak stok; **qty melebihi `saldo − dalam_jalan` di asal** — dicek di dalam transaksi setelah advisory lock per cabang asal, pesannya menyebut berapa yang masih dalam perjalanan), **403** `asal_branch_id` BUKAN Central Kitchen (berlaku untuk semua peran, owner sekalipun — pesan: `Transfer stok hanya bisa dikirim DARI Central Kitchen — "<nama>" bukan Central Kitchen`) **atau** peran terkunci mengirim dari cabang lain, **404** cabang tidak ditemukan
+- `POST /api/transfer-stok` — req: `{ asal_branch_id: uuid, tujuan_branch_id: uuid, catatan?|null (max300), items: [{ingredient_id: uuid, qty: number(>0)}] (1..100; bahan sama digabung qty-nya) }` — res: **201** `{ ok, faktur_id, nomor (TF-xxxx), asal, tujuan, jumlah_baris }` — error: **400** (asal = tujuan; asal/tujuan Kantor; bahan invalid/nonaktif/tak lacak stok; **qty melebihi `saldo − dalam_jalan` di asal** — dicek di dalam transaksi setelah advisory lock per cabang asal, pesannya menyebut berapa yang masih dalam perjalanan; **qty bukan kelipatan `isi`** untuk bahan `wajib_kelipatan` — pesannya menyebut dua qty terdekat yang sah, mis. `Kirim 1000 atau 2000 gr, bukan 1500 gr`), **403** `asal_branch_id` BUKAN Central Kitchen (berlaku untuk semua peran, owner sekalipun — pesan: `Transfer stok hanya bisa dikirim DARI Central Kitchen — "<nama>" bukan Central Kitchen`) **atau** peran terkunci mengirim dari cabang lain, **404** cabang tidak ditemukan
 - `POST /api/transfer-stok/:fakturId/batal` — batalkan transfer yang belum diproses tujuan (baris masuk Tempat Sampah) — res: `{ ok, jumlah_baris }` — error: **403** bukan pengirim, **404** bukan faktur transfer, **409** sudah diterima/ditolak di tujuan
 
 ## `/api/supplier` — Supplier (`modules/supplier/routes.ts`)
@@ -434,9 +525,22 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 
 - `GET /api/open-bill` — query: `branch_id?` — res: `OpenBillRow[]`
 - `GET /api/open-bill/:id` — res: `OpenBillDetail` — error: **404**
-- `POST /api/open-bill` — req `BillBody`: `{ branch_id?: uuid, meja_id?: uuid|null, customer_nama?|null, customer_wa?|null, catatan?|null, items: [{menu_id:uuid, qty:number(>0), dine_in_override?:bool|null, catatan?}] (min 1) }` — res: **201** `OpenBillDetail` — error: **400** menu invalid/tak tersedia, **403** kasir luar cabang, **404** meja tak ada
-- `PUT /api/open-bill/:id` — req: `BillBody` — res: `OpenBillDetail` — error: **400**, **404**
+- `POST /api/open-bill` — req `BillBody`: `{ branch_id?: uuid, meja_id?: uuid|null, customer_nama?|null, customer_wa?|null, catatan?|null, items: [{id?:uuid, menu_id:uuid, qty:number(>0), dine_in_override?:bool|null, catatan?}] (min 1) }` — res: **201** `OpenBillDetail` — error: **400** menu invalid/tak tersedia, **403** kasir luar cabang, **404** meja tak ada
+- `PUT /api/open-bill/:id` — req: `BillBody` — res: `OpenBillDetail` — error: **400** (baris tak ditemukan / tak cocok menunya / dikirim dua kali), **404**
 - `DELETE /api/open-bill/:id` — res: `{ ok: true }` — error: **404**
+
+**HARGA BILL DIKUNCI SAAT ITEM DIMASUKKAN.** Tiap baris membawa `harga_satuan`
+dan `menu_nama` yang di-snapshot **server** dari katalog saat baris itu dibuat
+(nilai kiriman klien untuk harga tidak dipercaya). Inilah yang ditagih saat
+bill dibayar — bukan `menus.harga_jual` terbaru.
+
+Pada `PUT`, tiap baris kiriman dipasangkan ke baris lama supaya kuncinya tidak
+hilang: pertama lewat `items[].id` (dari `GET`), lalu sisanya dicocokkan per
+`menu_id` secara berurutan. **Kirim `id` untuk baris yang sudah ada** — itu
+pasangan yang pasti, dan satu-satunya cara benar bila satu menu muncul di lebih
+dari satu baris. Baris tanpa pasangan = tambahan baru → memakai harga hari ini;
+baris lama tanpa pasangan dihapus. `qty`/`catatan`/`dine_in_override` boleh
+berubah bebas tanpa melepas kunci harga.
 
 ## `/api/shift` — Shift kasir (`modules/shift/routes.ts`) — group guard **[owner/admin/cashier]** (buka/tutup **cashier only**)
 
@@ -1207,6 +1311,102 @@ export interface MenuDto {
   food_cost_persen: number;
 }
 
+/**
+ * Satu bahan penyumbang HPP sebuah menu — dipakai halaman Analisis Harga untuk
+ * menjawab "kenapa food cost menu ini naik padahal harga jualnya tak diubah".
+ */
+export interface PenyumbangHpp {
+  ingredient_id: string;
+  nama: string;
+  qty: number;
+  satuan: string;
+  harga_per_unit: number;
+  /** qty × harga_per_unit — rupiah yang bahan ini sumbangkan ke HPP */
+  kontribusi: number;
+  persen_hpp: number;
+  /** ingredients.updated_at — kapan harga bahan ini terakhir bergerak */
+  bahan_diperbarui: string;
+  /** MAX(productions.laporan_harga_at) — kapan harganya terakhir DILAPORKAN */
+  harga_dilaporkan_pada: string | null;
+}
+
+/**
+ * Satu baris Analisis Harga: MenuDto + jejak waktu. Bila `menu_diperbarui`
+ * jauh lebih tua dari `bahan_diperbarui` penyumbang terbesarnya, artinya yang
+ * bergerak adalah harga BAHAN, bukan harga jual menu.
+ */
+export interface AnalisisHargaRow extends MenuDto {
+  /** menus.updated_at — kapan menu (termasuk harga jualnya) terakhir disimpan */
+  menu_diperbarui: string;
+  /** ambang food cost perusahaan (%) — disalin agar klien tak perlu query lain */
+  food_cost_maks: number;
+  /** penyumbang HPP terbesar (maks 5), urut kontribusi menurun */
+  penyumbang: PenyumbangHpp[];
+}
+
+/** Dari mana perubahan harga jual menu berasal. */
+export type SebabHargaMenu = "buat" | "manual" | "terapkan_saran";
+
+/** Satu baris riwayat perubahan harga jual sebuah menu. */
+export interface MenuPriceLogRow {
+  id: string;
+  menu_id: string;
+  /** null = baris pertama (menu baru dibuat) */
+  harga_lama: number | null;
+  harga_baru: number;
+  mult_lama: number | null;
+  mult_baru: number | null;
+  sebab: SebabHargaMenu;
+  /** nama pengubah; null bila akunnya sudah dihapus */
+  oleh: string | null;
+  created_at: string;
+}
+
+/** Ringkasan hasil POST /menu/terapkan-saran. */
+export interface TerapkanSaranHasil {
+  diperbarui: number;
+  dilewati: number;
+  rincian: Array<{
+    menu_id: string;
+    nama: string;
+    harga_lama: number;
+    harga_baru: number;
+    /** false = harga sudah sama dengan saran, tak ada yang diubah */
+    diperbarui: boolean;
+  }>;
+}
+
+/** Satu bahan yang harga acuannya akan bergeser oleh sebuah laporan harga. */
+export interface DampakBahan {
+  ingredient_id: string;
+  nama: string;
+  satuan: string;
+  acuan_lama: number;
+  acuan_baru: number;
+  /** berapa menu yang memakai bahan ini (langsung maupun lewat menu dasar) */
+  jumlah_menu_terdampak: number;
+}
+
+/** Satu menu yang food cost-nya melewati ambang GARA-GARA laporan harga ini. */
+export interface DampakMenu {
+  menu_id: string;
+  nama: string;
+  food_cost_lama: number;
+  food_cost_baru: number;
+}
+
+/**
+ * Pratinjau dampak "Laporan Harga" — dihitung server tanpa menulis apa pun,
+ * supaya user tahu bahwa mencatat nota juga menggeser harga acuan bahan
+ * (dan karenanya HPP semua menu yang memakainya).
+ */
+export interface DampakLaporanHarga {
+  food_cost_maks: number;
+  bahan: DampakBahan[];
+  /** menu yang SEBELUMNYA di bawah ambang dan setelah ini melewatinya */
+  menu_lewat_ambang: DampakMenu[];
+}
+
 /** Bahan yang MEMBATASI sisa porsi sebuah menu (saldo ÷ qty paling kecil). */
 export interface MenuStokPembatas {
   ingredient_id: string;
@@ -1439,6 +1639,16 @@ export interface TransferStokItemRow {
   satuan: string;
   pengadaan: JenisPengadaan;
   qty: number;
+  /**
+   * `qty` + `satuan` yang SUDAH ditulis server, mis. "900 gr" — tampilkan apa
+   * adanya. Ada agar web & mobile mustahil berbeda satuan (lihat qtyTeks()).
+   */
+  qty_teks: string;
+  /**
+   * setara kemasan beli, mis. "≈ 0,9 kg"; null bila bahan tak berkemasan.
+   * PELENGKAP — boleh ditampilkan di samping `qty_teks`, tak boleh menggantikannya.
+   */
+  qty_setara: string | null;
   /** menunggu = dalam perjalanan; dikonfirmasi = diterima; ditolak = tak diterima */
   status: KonfirmasiStatus;
   alasan_tolak: string | null;
@@ -1479,6 +1689,25 @@ export interface TransferStokSaldoRow {
    * `tersedia untuk transfer baru` = `saldo − dalam_jalan`.
    */
   dalam_jalan: number;
+  /** isi per kemasan dalam `satuan` (1 = tanpa kemasan) */
+  isi: number;
+  /** satuan kemasan (mis. "kg"); null = tak diatur */
+  satuan_beli: string | null;
+  /**
+   * true = qty kiriman WAJIB kelipatan `isi` — barang yang hanya bisa dibeli
+   * per kemasan juga hanya boleh dikirim per kemasan. Pengecualiannya satu:
+   * qty = seluruh sisa (`saldo − dalam_jalan`) tetap boleh ("kirim habis"),
+   * kalau tidak sisa di bawah satu kemasan terjebak selamanya di cabang asal.
+   */
+  wajib_kelipatan: boolean;
+  /**
+   * sisa siap kirim (`saldo − dalam_jalan`) yang SUDAH ditulis server, mis.
+   * "900 gr" — tampilkan apa adanya supaya web & mobile tak mungkin berbeda
+   * satuan (lihat qtyTeks()).
+   */
+  tersedia_teks: string;
+  /** setara kemasan dari sisa siap kirim, mis. "≈ 0,9 kg"; null bila tak berkemasan */
+  tersedia_setara: string | null;
 }
 
 /**
@@ -1877,22 +2106,41 @@ export interface FifoAmbil {
   harga_satuan: number | null;
 }
 
-/** Satu peristiwa KELUAR pada kartu FIFO + rincian lot yang dikonsumsinya. */
+/** Satu peristiwa KELUAR pada kartu persediaan + rincian lot yang dikonsumsinya. */
 export interface FifoPemakaian {
   waktu: string;
   jenis: "penjualan" | "pemakaian" | "kirim" | "opname";
   keterangan: string | null;
   qty: number;
-  /** total biaya FIFO pemakaian ini; null bila ada bagian dari lot tanpa harga */
+  /**
+   * total biaya pemakaian ini menurut metode HPP perusahaan; null bila ada
+   * bagian tanpa harga yang diketahui.
+   *
+   * Mode `fifo`: Σ (qty × harga lot) — cocok dengan `rincian`.
+   * Mode `average`: qty × `harga_rata` — SENGAJA tidak sama dengan Σ rincian,
+   * karena biaya rata-rata tak mengenal identitas lot. `rincian` di mode ini
+   * tetap menunjukkan lot mana yang secara FISIK keluar (untuk kedaluwarsa).
+   */
   hpp: number | null;
+  /**
+   * harga rata-rata bergerak seluruh sisa stok sesaat SEBELUM pemakaian ini;
+   * hanya terisi di mode `average` (null di mode `fifo`, atau bila ada sisa
+   * lot yang harganya tak diketahui sehingga rata-rata tak bisa dihitung).
+   */
+  harga_rata: number | null;
   rincian: FifoAmbil[];
 }
 
-/** Kartu FIFO satu bahan pada satu cabang (riwayat penggunaan dari lot paling awal). */
+/**
+ * Kartu persediaan satu bahan pada satu cabang. Lot selalu dikuras dari yang
+ * PALING AWAL masuk (FIFO fisik, supaya kedaluwarsa benar); yang mengikuti
+ * setelan `metode_hpp` adalah cara membebankan BIAYA-nya.
+ */
 export interface BahanFifoDto {
   bahan: { id: string; nama: string; satuan: string };
   branch_id: string;
   branch_nama: string;
+  /** metode pembebanan biaya pemakaian: `average` = rata-rata bergerak */
   metode_hpp: "average" | "fifo";
   /** saldo akhir = Σ sisa lot − defisit; sama dengan saldo ledger cabang */
   saldo: number;
@@ -1911,6 +2159,12 @@ export interface SaleItemInput {
   is_dine_in?: boolean;
   /** catatan personalisasi per baris (mis. "tanpa gula") */
   catatan?: string | null;
+  /**
+   * baris open bill asal baris ini. Bila diisi (dan `open_bill_id` transaksi
+   * cocok), harga jual diambil dari harga yang DIKUNCI di bill — bukan harga
+   * menu terbaru. Qty tetap boleh berubah saat pembayaran.
+   */
+  open_bill_item_id?: string | null;
 }
 
 /** Baris riwayat transaksi kasir (untuk cek pesanan / cetak ulang struk). */
@@ -2015,7 +2269,16 @@ export interface MenuLaris {
 
 /** Satu baris item pada open bill (pesanan belum dibayar). */
 export interface OpenBillItemDto {
+  /** id baris — kirim balik saat PUT agar harga terkuncinya dipertahankan */
+  id: string;
   menu_id: string;
+  /** nama menu saat dipesan (snapshot) */
+  menu_nama: string;
+  /**
+   * harga jual per porsi yang DIKUNCI saat baris ini dimasukkan ke bill.
+   * Inilah yang ditagih saat bill dibayar, bukan harga menu terbaru.
+   */
+  harga_satuan: number;
   qty: number;
   /** null = ikut mode transaksi; true/false = override dine-in per baris */
   dine_in_override: boolean | null;

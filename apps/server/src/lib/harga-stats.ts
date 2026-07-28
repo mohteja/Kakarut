@@ -15,6 +15,43 @@ export function median(nilai: number[]): number | null {
   return Math.round(m * 100) / 100;
 }
 
+/** Satu lot pembelian yang ikut menentukan harga acuan. */
+export interface LotAcuan {
+  id: string;
+  qty: number;
+  totalHarga: number | null;
+}
+
+/**
+ * Harga acuan per satuan dari kolam lot.
+ *
+ * `lots` HANYA boleh berisi lot yang harganya PERNAH DILIHAT MANUSIA
+ * (`harga_tebakan = false`). Faktur yang dibuat tanpa harga memakai tebakan
+ * yang diturunkan dari harga acuan saat itu; kalau tebakan ikut masuk kolam,
+ * acuan menyeret dirinya sendiri (acuan → tebakan → median → acuan) sampai HPP
+ * seluruh menu hanyut ke atas.
+ *
+ * Baris yang SEDANG dilaporkan dikeluarkan dari `lots` (dicocokkan lewat `id`)
+ * lalu dimasukkan kembali dengan nilai barunya — hasilnya persis sama dengan
+ * kondisi setelah laporan tersimpan.
+ */
+export function acuanDariLot(
+  lots: LotAcuan[],
+  dilaporkan: Array<{ id: string; qty: number; totalHarga: number }>,
+  fallback: number | null,
+): number | null {
+  const perSatuan = (totalHarga: number, qty: number) =>
+    Math.round((totalHarga / qty) * 100) / 100;
+  const sedangDilaporkan = new Set(dilaporkan.map((d) => d.id));
+  const hargaSatuan = lots
+    .filter((l) => !sedangDilaporkan.has(l.id) && l.totalHarga != null && l.qty > 0)
+    .map((l) => perSatuan(l.totalHarga!, l.qty));
+  for (const d of dilaporkan) {
+    if (d.qty > 0) hargaSatuan.push(perSatuan(d.totalHarga, d.qty));
+  }
+  return median(hargaSatuan) ?? fallback;
+}
+
 export interface StatistikHarga {
   harga_terendah: HargaEkstrem | null;
   harga_tertinggi: HargaEkstrem | null;

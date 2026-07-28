@@ -20,11 +20,368 @@ tanpa akses repo server.
 
 ---
 
+## Rilis: Satuan kiriman ditulis SERVER (`qty_teks`)
+
+> **Tidak ada migrasi DB.** Lanjutan langsung dari koreksi satuan di bawah —
+> kali ini bukan cuma dokumentasi, tapi field baru yang membuat salah satuan
+> tidak mungkin lagi terjadi.
+
+### 🔴 WAJIB — pakai `qty_teks`, berhenti merangkai satuan sendiri
+
+Koreksi kontrak di bawah menjelaskan bahwa `qty` selalu dalam `satuan`. Karena
+mobile ditulis Flutter (tak bisa mengimpor paket `shared` yang dipakai web),
+aturan itu tetap harus diketik ulang di sisi mobile — dan di situlah "900 kg"
+lahir. Sekarang **server yang menulis teksnya**, jadi tak ada lagi yang perlu
+ditebak:
+
+| Field baru | Isi | Sifat |
+| --- | --- | --- |
+| `qty_teks` | `"900 gr"` | **tampilkan apa adanya** |
+| `qty_setara` | `"≈ 0,9 kg"` / `null` | pelengkap — boleh di samping, **tak boleh menggantikan** |
+
+```dart
+// ❌ jangan lagi
+Text('${row.qty} ${row.satuanBeli ?? row.satuan}');
+
+// ✅ cukup
+Text(row.qtyTeks);
+if (row.qtySetara != null) Text(row.qtySetara!, style: kecilAbuAbu);
+```
+
+Angkanya sudah diformat gaya Indonesia (`2.000`, `0,9`) — jangan diformat ulang.
+`qty` mentah tetap dikirim untuk perhitungan; `qty_teks` khusus tampilan.
+
+**Endpoint yang sudah membawanya:**
+
+| Endpoint | Field |
+| --- | --- |
+| `GET /api/transfer-stok` (`items[]`) | `qty_teks`, `qty_setara` |
+| `GET /api/transfer-stok/saldo` | `tersedia_teks`, `tersedia_setara` (sisa siap kirim) |
+| `GET /api/penerimaan` | `qty_teks`, `qty_setara`, `qty_dipesan_teks` |
+| `GET /api/produksi`, `GET /api/pembelian` | `qty_teks`, `qty_setara` |
+
+Empat kasus dari faktur PB-0058 dikunci uji otomatis dan sekarang berbunyi:
+
+| Bahan | `qty_teks` | `qty_setara` |
+| --- | --- | --- |
+| Sayur | `900 gr` | `≈ 0,9 kg` |
+| Mie basah | `2.000 gr` | `2 kg` |
+| Air Mineral 330 ml | `24 botol` | `1 dus` |
+| Air biasa | `15.000 ml` | `15 liter` |
+
+⚪️ `satuan`, `satuan_beli`, `isi`, dan `is_batch` **tetap dikirim** — tak ada
+yang dihapus, jadi layar yang belum diperbarui tidak rusak. Tapi selama masih
+merangkai sendiri, layar itu masih menampilkan satuan yang salah.
+
+---
+
+## Rilis: Kiriman ikut aturan kemasan belanja
+
+> **Tidak ada migrasi DB.** Satu aturan validasi baru pada dua endpoint kiriman,
+> plus tiga field baru di `TransferStokSaldoRow`.
+
+### 🔴 WAJIB — qty kiriman ditolak bila bukan kelipatan kemasan
+
+Barang yang hanya bisa **DIBELI** per kemasan utuh sekarang juga hanya boleh
+**DIKIRIM** per kemasan utuh. Sayur yang dibeli per kg tak bisa dikirim 900 gr.
+
+Berlaku di:
+
+- `POST /api/transfer-stok`
+- `POST /api/produksi/kirim-hasil/:fakturId`
+
+**Kapan aturannya menyala** — ketiganya harus benar:
+
+| Syarat | Nilai |
+| --- | --- |
+| `pengadaan` | `"beli"` |
+| `isi` | `> 1` |
+| `boleh_eceran` | `false` |
+
+Lalu `qty` (selalu dalam `satuan` kerja — lihat koreksi satuan di bawah) wajib
+kelipatan `isi`.
+
+**Bahan `pengadaan: "produksi"` SENGAJA tidak ikut aturan ini.** Di sana `isi`
+adalah **ukuran batch**, bukan kemasan fisik: CK memproduksi 100 butir baso lalu
+mengirim 40 butir ke cabang adalah alur normal, dan mengunci kelipatan 100 akan
+membuat cabang tak bisa dilayani.
+
+**Pengecualian "kirim habis":** bila `qty` sama persis dengan seluruh sisa yang
+boleh dikirim (`saldo − dalam_jalan`), kiriman tetap diterima walau bukan
+kelipatan. Tanpa ini sisa 900 gr terjebak selamanya di gudang asal.
+
+Pesan 400-nya sudah bisa langsung ditampilkan apa adanya:
+
+```
+"Sayur" hanya bisa dikirim per kemasan penuh — 1 kg = 1000 gr.
+Kirim 1000 atau 2000 gr, bukan 1500 gr.
+```
+
+### 🟢 BARU — `TransferStokSaldoRow` += `isi`, `satuan_beli`, `wajib_kelipatan`
+
+`GET /api/transfer-stok/saldo` kini mengirim bahan yang dibutuhkan untuk
+memvalidasi di sisi UI, **sebelum** user menunggu 400 dari server:
+
+```dart
+bool qtySalah(SaldoRow r, double qty) {
+  if (!r.wajibKelipatan || r.isi <= 1) return false;
+  final sisa = r.saldo - r.dalamJalan;
+  if ((qty - sisa).abs() < 1e-6) return false;      // kirim habis
+  final k = qty / r.isi;
+  return (k - k.roundToDouble()).abs() >= 1e-6;
+}
+```
+
+Tampilkan petunjuknya di bawah input qty, mis.
+*"Kelipatan 1000 gr (1 kg) — kirim 1000 atau 2000 gr"*. Web sudah melakukan ini
+di halaman Transfer Stok; mobile sebaiknya sama supaya user tak kena tolak
+mendadak.
+
+⚪️ Urutan pemeriksaan di server: **kecukupan stok dulu**, kelipatan kemasan
+belakangan. Jadi qty melebihi stok tetap memberi pesan "stok kurang", bukan
+pesan kemasan yang menyesatkan.
+
+---
+
+## Koreksi kontrak: satuan baris faktur (`qty` vs `satuan_beli` vs `is_batch`)
+
+> **Tidak ada perubahan API.** Ini klarifikasi kontrak yang selama ini kurang
+> tegas — dan satu bug tampilan di aplikasi mobile yang perlu diperbaiki.
+
+### 🔴 WAJIB — baris faktur di mobile menampilkan satuan yang salah
+
+Pada faktur yang sama (PB-0058), web dan mobile menulis angka yang **sama persis**
+tapi satuan yang **berbeda**:
+
+| Bahan | Web (benar) | Mobile (salah) |
+| --- | --- | --- |
+| Sayur | `900 gr` | `900 kg` ← beda **1000×** |
+| Mie basah | `2.000 gr` | `2000 batch` |
+| Air Mineral 330 ml | `24 botol` | `24 batch` |
+| Air biasa | `15.000 ml` | `15000 batch` |
+
+Angkanya tidak salah — **labelnya** yang salah. Mobile memasangkan `qty` dengan
+`satuan_beli` (atau dengan kata "batch" saat `is_batch` true), padahal:
+
+**`qty` SELALU dinyatakan dalam `satuan` (satuan kerja/resep).**
+
+Saat faktur dibuat, server sudah mengonversi input ke satuan kerja —
+`qty = mode === "batch" ? jumlah × isi : jumlah`. Jadi begitu baris tersimpan,
+`qty` tidak pernah lagi berada dalam satuan kemasan, **sekalipun `is_batch`
+true**. `is_batch` itu catatan **cara input**, bukan satuan.
+
+**Perbaikannya satu baris:** tampilkan `qty` bersama **`satuan`**.
+
+```dart
+// ❌ salah — dua-duanya bikin 900 gr terbaca sebagai 900 kg / 900 batch
+final label = row.isBatch ? 'batch' : (row.satuanBeli ?? row.satuan);
+
+// ✅ benar
+final label = row.satuan;
+```
+
+`satuan_beli` hanya untuk **input pembelian** dan **dokumen belanja**. Bila
+memang mau menampilkan setara kemasannya, hitung `qty ÷ isi` dan lewati bila
+`satuan_beli` null atau `isi ≤ 1` — mis. Sayur `900 ÷ 1000` → "≈ 0,9 kg".
+
+Tabel lengkapnya ada di `docs/API-CONTRACT.md` bagian
+`/api/produksi` dan `/api/pembelian`.
+
+---
+
+## Rilis: Tiga angka yang tak boleh berubah diam-diam
+
+> Migrasi DB **0085** (`open_bill_items.harga_satuan` + `menu_nama`).
+> **Dua kontrak berubah** — `PUT /api/menu/:id` dan `OpenBillItemDto`. Baca 🔴
+> dan 🟡 di bawah sebelum rilis berikutnya.
+
+### 🔴 WAJIB — `PUT /api/menu/:id` sekarang PERBARUI SEBAGIAN
+
+Dulu `PUT` memakai skema yang sama dengan `POST`, lengkap dengan nilai default.
+Artinya klien yang hanya ingin mengganti satu field **ikut menghapus** yang lain:
+
+| Tidak dikirim | Dulu | Sekarang |
+| --- | --- | --- |
+| `komponen` | **seluruh resep menu terhapus** | resep dipertahankan |
+| `image_url` | foto terhapus | foto dipertahankan |
+| `is_active` | menu terarsip **aktif kembali** | status dipertahankan |
+| `kode` | kode digenerate ulang | kode lama dipertahankan |
+| `branch_ids` | (sudah dipertahankan) | tak berubah |
+
+Sekarang **`undefined` = jangan sentuh**; `null`/`[]` eksplisit tetap berarti
+"kosongkan" (`{"komponen":[]}` mengosongkan resep, `{"image_url":null}` menghapus
+foto, `{"kode":""}` menggenerate ulang kode).
+
+**Yang perlu dikerjakan:**
+- Kirim `PUT` **parsial** untuk edit sebagian — jauh lebih aman dan kini sah,
+  termasuk `PUT {"harga_jual":25000}` saja (validasi paket/reguler dijalankan
+  atas nilai hasil gabungan, jadi tak lagi ditolak "wajib punya mult").
+- **Bila selama ini mengandalkan ganti-total untuk mengosongkan resep**, mulai
+  kirim `komponen: []` eksplisit.
+- Klien yang memang selalu mengirim body penuh **tidak perlu berubah apa pun**.
+
+### 🔴 WAJIB — open bill mengunci harga; kirim `open_bill_id` saat bayar
+
+`open_bill_items` dulu hanya menyimpan `menu_id` + `qty`, jadi bill yang dibuka
+hari ini lalu dibayar besok ditagih harga menu **terbaru** — bukan harga yang
+disepakati pembeli. Sekarang tiap baris membawa `harga_satuan` dan `menu_nama`
+hasil snapshot **server** saat baris dibuat.
+
+`OpenBillItemDto` bertambah tiga field: **`id`**, `menu_nama`, `harga_satuan`.
+
+**Yang perlu dikerjakan:**
+1. **Tampilkan/hitung total bill dari `harga_satuan`**, bukan dari `harga_jual`
+   di katalog menu. Bila keduanya berbeda, beri tanda bahwa yang berlaku adalah
+   harga saat memesan.
+2. **`PUT /api/open-bill/:id` → sertakan `items[].id`** untuk baris yang sudah
+   ada. Server memasangkan baris kiriman ke baris lama: `id` dulu, lalu sisanya
+   dicocokkan per `menu_id` berurutan — jadi klien lama yang belum mengirim `id`
+   **tetap aman**, kecuali bila satu menu muncul di lebih dari satu baris. Baris
+   tanpa pasangan = tambahan baru → memakai harga hari ini.
+3. **Saat membayar (`POST /api/penjualan`)** kirim `open_bill_id` transaksi +
+   `items[].open_bill_item_id` per baris yang berasal dari bill. Tanpa itu,
+   pembayaran memakai harga menu hari ini dan kuncinya sia-sia.
+   Server menolak **400** bila `open_bill_item_id` bukan milik bill tersebut,
+   tak cocok `menu_id`-nya, atau dikirim tanpa `open_bill_id`; **404** bila
+   bill-nya bukan milik cabang itu. `qty` bebas berubah saat pembayaran.
+
+Yang dikunci hanya **harga jual**. `hpp_satuan` tetap dihitung saat pembayaran
+dari resep × harga acuan bahan saat itu — biaya bahan memang biaya saat
+disajikan.
+
+> **Data lama:** bill yang masih terbuka saat migrasi dikunci ke harga menu
+> **saat migrasi** — harga saat bill itu dibuat memang tak pernah tersimpan.
+
+### 🟡 PERLU DICEK — setelan Metode HPP kini benar-benar dipakai (dan labelnya dikoreksi)
+
+Setelan `companies.metode_hpp` tersimpan tapi tak pernah dibaca: kartu
+persediaan **selalu** FIFO apa pun pilihan owner. Sekarang setelan itu
+dihormati di `GET /api/stok/fifo/:ingredientId`.
+
+- **Aliran barang tetap FIFO** — `lots[].terpakai`/`sisa`, kedaluwarsa, dan
+  `saldo` tidak berubah sedikit pun. Yang mengikuti setelan hanya
+  `pemakaian[].hpp`.
+- Mode `average` memakai **rata-rata bergerak** seluruh sisa stok sesaat sebelum
+  barang keluar. Di mode ini `pemakaian[].rincian` (lot fisik yang keluar)
+  **sengaja tidak menjumlah** ke `hpp` — jangan tampilkan seolah-olah begitu.
+- `FifoPemakaian` bertambah **`harga_rata: number | null`** — terisi hanya di
+  mode `average`, dan `null` bila rata-ratanya tak bisa dihitung (ada sisa lot
+  tanpa harga, atau qty jatuh ke stok minus).
+- **Dampak angka:** perusahaan bermetode `average` (nilai bawaan) akan melihat
+  `hpp` pemakaian **berbeda dari sebelumnya**. Angkanya sekarang benar; yang
+  dulu keliru.
+
+⚪️ **INFO — HPP di laporan laba-rugi TIDAK memakai setelan ini** dan tidak
+pernah memakainya. `sale_items.hpp_satuan` dikunci saat pembayaran dari
+**resep × harga acuan bahan** saat itu, lalu laporan menjumlah snapshot itu.
+Teks bantu di aplikasi web yang menyebut setelan ini "dasar hitung laba-rugi"
+sudah dikoreksi — samakan bila layar mobile menyalin kalimat lamanya.
+
+---
+
+## Rilis: Harga menu berubah sendiri — lacak, setop, perbaiki
+
+> Migrasi DB **0084** (`companies.food_cost_maks`, `productions.harga_tebakan`,
+> tabel `menu_price_logs`). **Tidak ada endpoint lama yang berubah kontraknya.**
+> Satu perubahan **perilaku** di `POST /api/pembelian/laporan-harga/:fakturId` —
+> baca 🟡 di bawah.
+
+### Latar: kenapa food cost naik tanpa ada yang mengubah harga jual
+
+`hpp`, `harga_saran`, `harga_jual_bulat`, dan `food_cost_persen` **tidak pernah
+disimpan** — server menghitungnya ulang tiap request dari `ingredients.harga_beli
+÷ isi` yang berlaku saat itu. Yang tersimpan hanya `menus.harga_jual`. Karena
+`food_cost = hpp ÷ harga_jual`, food cost bisa melonjak serempak di semua menu
+walau tak satu pun menu disimpan ulang. **Jangan cache `hpp`/`food_cost_persen`
+di sisi klien lebih lama dari daftar menunya sendiri.**
+
+### 🟡 PERLU DICEK — kolam median harga acuan kini menyaring TEBAKAN
+
+`POST /api/pembelian/laporan-harga/:fakturId` menyegarkan `ingredients.harga_beli`
+ke **median** riwayat pembelian. Sebelumnya kolam median memuat semua lot
+dikonfirmasi yang punya `total_harga` — termasuk baris faktur yang dibuat
+**tanpa** harga, yang `total_harga`-nya cuma tebakan `qty × harga acuan saat itu`.
+Akibatnya harga acuan menyeret dirinya sendiri (acuan → tebakan → median →
+acuan) dan HPP seluruh menu hanyut naik.
+
+Sekarang kolam median hanya memuat lot yang harganya **pernah dilihat manusia**
+(`productions.harga_tebakan = false`): harga diisi di `POST /{mod}/faktur`,
+dilaporkan lewat endpoint laporan harga, atau direalisasi lewat
+`POST /{mod}/tahap` (`items[].harga`).
+
+**Yang perlu dicek di mobile:** bila aplikasi membuat faktur beli **tanpa**
+`total_harga`, lot itu kini tak lagi ikut menentukan harga acuan sampai
+harganya dilaporkan. Ini yang diinginkan — tapi kalau layar Anda menampilkan
+"harga acuan" hasil hitungan sendiri, angkanya bisa berbeda dari server.
+
+### 🟢 BARU — `perbarui_acuan` pada Laporan Harga (default `true`)
+
+```jsonc
+POST /api/pembelian/laporan-harga/:fakturId
+{ "items": [{ "id": "…", "total_harga": 42000 }],
+  "perbarui_acuan": false }   // opsional
+```
+
+**Bawaannya `true`, jadi klien lama tak berubah perilaku.** Kirim `false` untuk
+mencatat nota tanpa menyentuh harga acuan bahan (nota beli eceran darurat yang
+tak mewakili harga pasar). Mencatat nota ≠ mengubah harga acuan — kalau layar
+mobile punya tombol Laporan Harga, sebaiknya kalimat itu ikut ditampilkan.
+
+### 🟢 BARU — pratinjau dampak sebelum menyimpan
+
+`POST /api/pembelian/laporan-harga/:fakturId/dampak` (owner/admin, beli saja) —
+body sama dengan endpoint simpan, **tidak menulis apa pun**, mengembalikan
+`DampakLaporanHarga`:
+
+| Field | Isi |
+| --- | --- |
+| `food_cost_maks` | ambang food cost perusahaan (%) |
+| `bahan[]` | `acuan_lama` → `acuan_baru` per bahan + `jumlah_menu_terdampak` |
+| `menu_lewat_ambang[]` | menu aktif yang **menyeberang** ambang gara-gara laporan ini |
+
+POST (bukan GET) karena dampaknya bergantung pada angka yang sedang **diketik**
+user, bukan yang sudah tersimpan. Server memakai fungsi hitung yang sama dengan
+endpoint simpan, jadi pratinjau tak bisa berbeda dari hasilnya.
+
+### 🟢 BARU — Analisis Harga + terapkan harga saran massal
+
+| | |
+| --- | --- |
+| `GET /api/menu/analisis-harga` | **owner/admin** — `AnalisisHargaRow[]`, urut food cost menurun |
+| `GET /api/menu/:id/riwayat-harga` | **owner/admin** — `MenuPriceLogRow[]` (maks 50, terbaru dulu) |
+| `POST /api/menu/terapkan-saran` | **owner/admin** — `{ ids: uuid[] }` → `TerapkanSaranHasil` |
+
+`AnalisisHargaRow` = `MenuDto` + `menu_diperbarui` + `food_cost_maks` +
+`penyumbang[]` (maks 5 bahan penyumbang HPP terbesar). Kunci pembacaannya:
+sandingkan `menu_diperbarui` dengan `penyumbang[].bahan_diperbarui` — kalau
+tanggal bahan **lebih baru** dari tanggal menu, yang bergerak adalah harga
+bahan, bukan harga jual.
+
+`POST /api/menu/terapkan-saran` menyetel `harga_jual = harga_jual_bulat` yang
+**dihitung ulang di server**; angka yang dikirim klien diabaikan. Ini mengubah
+harga yang ditagih ke pembeli — **wajib konfirmasi eksplisit** yang menyebut
+jumlah menu dan total perubahan rupiah sebelum memanggilnya.
+
+### ⚪️ INFO — riwayat harga jual menu
+
+`POST /api/menu` menulis baris pembuka (`sebab: "buat"`, `harga_lama: null`).
+`PUT /api/menu/:id` menulis baris `"manual"` **hanya bila `harga_jual` atau
+markup benar-benar berubah** — menyimpan ulang foto/resep tidak menambah baris.
+
+### ⚪️ INFO — ambang food cost perusahaan
+
+`PATCH /api/company` menerima `food_cost_maks` (0..100, default **40**).
+Tersedia di `GET /api/company` sebagai `foodCostMaks` (respons company memakai
+camelCase kolom DB, bukan snake_case seperti DTO lain).
+
+---
+
 ## Rilis: Laporan kebersihan harian (tim CK + seluruh tim cabang)
 
-> **Menunggu rilis.** Migrasi DB **0083** (enum `kebersihan_sesi` + tabel
-> `cleaning_areas`, `cleaning_reports`, `cleaning_report_items`). Perubahan API
-> **aditif** — tak ada endpoint lama yang berubah perilaku.
+> **Sudah di-merge ke production** (PR #124). Migrasi DB **0083** (enum
+> `kebersihan_sesi` + tabel `cleaning_areas`, `cleaning_reports`,
+> `cleaning_report_items`). Perubahan API **aditif** — tak ada endpoint lama
+> yang berubah perilaku.
 
 ### 🟢 BARU — `/api/kebersihan`: karyawan melapor per sesi, owner membaca rekap harian
 

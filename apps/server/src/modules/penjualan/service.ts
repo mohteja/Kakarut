@@ -2,7 +2,16 @@ import { and, desc, eq } from "drizzle-orm";
 import { HTTPException } from "hono/http-exception";
 import { hitungPb1, qtyEfektif, type SaleItemInput } from "@kakarut/shared";
 import { db } from "../../db/client";
-import { branches, companies, meja, saleConsumptions, saleItems, sales } from "../../db/schema";
+import {
+  branches,
+  companies,
+  meja,
+  openBillItems,
+  openBills,
+  saleConsumptions,
+  saleItems,
+  sales,
+} from "../../db/schema";
 import { kodeCabang, tanggalDi } from "../../lib/time";
 import { upsertCustomer } from "../customer/service";
 import { hitungHargaMenu, loadKatalog, tampilDiCabang } from "../menu/service";
@@ -39,6 +48,11 @@ export interface CreateSaleParams {
    * penautan lewat jendela waktu sudah cukup.
    */
   shiftId?: string | null;
+  /**
+   * Open bill yang sedang dibayar. Bila diisi, baris ber-`open_bill_item_id`
+   * ditagih memakai harga yang dikunci di bill saat dipesan.
+   */
+  openBillId?: string | null;
   items: SaleItemInput[];
 }
 
@@ -94,6 +108,48 @@ export async function createSale(params: CreateSaleParams) {
     const katalog = await loadKatalog(tx, params.companyId);
     const menuById = new Map(katalog.rows.map((r) => [r.id, r]));
 
+    // HARGA TERKUNCI OPEN BILL: pembeli ditagih harga saat memesan, bukan harga
+    // menu hari pembayaran. Baris bill dimuat di sini (dalam transaksi yang
+    // sama) dan divalidasi milik bill, perusahaan, dan cabang yang benar —
+    // tanpa itu kasir bisa menunjuk baris bill mana pun untuk menekan harga.
+    const hargaBill = new Map<string, number>();
+    if (params.openBillId) {
+      const [bill] = await tx
+        .select({ id: openBills.id, branchId: openBills.branchId })
+        .from(openBills)
+        .where(
+          and(
+            eq(openBills.id, params.openBillId),
+            eq(openBills.companyId, params.companyId),
+            eq(openBills.branchId, branch.id),
+          ),
+        );
+      if (!bill) throw new HTTPException(404, { message: "Open bill tidak ditemukan" });
+      const barisBill = await tx
+        .select({
+          id: openBillItems.id,
+          menuId: openBillItems.menuId,
+          hargaSatuan: openBillItems.hargaSatuan,
+        })
+        .from(openBillItems)
+        .where(eq(openBillItems.billId, bill.id));
+      const byId = new Map(barisBill.map((b) => [b.id, b]));
+      for (const item of params.items) {
+        if (!item.open_bill_item_id) continue;
+        const baris = byId.get(item.open_bill_item_id);
+        if (!baris || baris.menuId !== item.menu_id) {
+          throw new HTTPException(400, {
+            message: "Baris open bill tidak cocok dengan menu yang dibayar",
+          });
+        }
+        hargaBill.set(item.open_bill_item_id, baris.hargaSatuan);
+      }
+    } else if (params.items.some((i) => i.open_bill_item_id)) {
+      throw new HTTPException(400, {
+        message: "open_bill_item_id butuh open_bill_id transaksi",
+      });
+    }
+
     let subtotal = 0;
     let totalHpp = 0;
     const itemRows: Omit<typeof saleItems.$inferInsert, "saleId">[] = [];
@@ -115,15 +171,20 @@ export async function createSale(params: CreateSaleParams) {
         throw new HTTPException(400, { message: `Qty tidak valid untuk ${menu.nama}` });
       }
       const dineIn = item.is_dine_in ?? isDineIn;
+      // HPP tetap dihitung SAAT INI — biaya bahan memang biaya saat disajikan;
+      // yang dikunci open bill hanyalah harga jual yang disepakati pembeli.
       const hppSatuan = hitungHargaMenu(menu, katalog, dineIn);
-      const lineTotal = menu.hargaJual * item.qty;
+      const hargaSatuan = item.open_bill_item_id
+        ? hargaBill.get(item.open_bill_item_id) ?? menu.hargaJual
+        : menu.hargaJual;
+      const lineTotal = hargaSatuan * item.qty;
 
       subtotal += lineTotal;
       totalHpp += hppSatuan * item.qty;
       itemRows.push({
         menuId: menu.id,
         menuNama: menu.nama,
-        hargaSatuan: menu.hargaJual,
+        hargaSatuan,
         hppSatuan,
         qty: item.qty,
         isDineIn: dineIn,

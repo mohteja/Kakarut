@@ -8,6 +8,7 @@ import {
   Spinner,
   btnPrimary,
   btnSecondary,
+  inputClass,
 } from "../../components/ui";
 import { TabelResponsif } from "../../components/TabelResponsif";
 import { KategoriManagerModal } from "../../components/KategoriManagerModal";
@@ -15,10 +16,25 @@ import { labelCabang, useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatRupiah } from "../../lib/format";
 
-function FoodCost({ persen }: { persen: number }) {
-  const warna =
-    persen <= 40 ? "text-green-600" : persen <= 55 ? "text-yellow-600" : "text-red-600";
-  return <span className={`font-semibold ${warna}`}>{persen.toFixed(1)}%</span>;
+/**
+ * Food cost dinilai terhadap AMBANG perusahaan (Pengaturan → Perusahaan),
+ * bukan angka mati. HPP dihitung live dari harga bahan, jadi menu bisa jatuh
+ * ke atas ambang tanpa ada yang mengubah harga jualnya — kalau itu terjadi,
+ * tanda ⚠ di sini yang pertama memberi tahu.
+ */
+function FoodCost({ persen, maks }: { persen: number; maks: number }) {
+  const lewat = persen > maks;
+  const warna = lewat
+    ? "text-red-600"
+    : persen > maks * 0.85
+      ? "text-yellow-600"
+      : "text-green-600";
+  return (
+    <span className={`font-semibold ${warna}`} title={lewat ? `Ambang ${maks}%` : undefined}>
+      {lewat && "⚠ "}
+      {persen.toFixed(1)}%
+    </span>
+  );
 }
 
 export function MenuListPage() {
@@ -29,6 +45,11 @@ export function MenuListPage() {
     queryKey: ["menu"],
     queryFn: () => api<MenuDto[]>("/menu"),
   });
+  const { data: company } = useQuery({
+    queryKey: ["company"],
+    queryFn: () => api<{ foodCostMaks: number }>("/company"),
+  });
+  const foodCostMaks = company?.foodCostMaks ?? 40;
 
   const hapus = useMutation({
     mutationFn: (id: string) => api(`/menu/${id}`, { method: "DELETE" }),
@@ -39,13 +60,29 @@ export function MenuListPage() {
   // Lihat menu yang diatur untuk cabang tertentu — tanpa baris pembatasan
   // (branch_ids kosong) berarti tampil di semua lokasi.
   const [lokasi, setLokasi] = useState<string>("all");
+  const [cari, setCari] = useState("");
+  const [filterKat, setFilterKat] = useState("");
   const lokasiOpsi = cabang.filter((b) => b.is_active && b.tipe !== "kantor");
 
   if (isLoading) return <Spinner />;
 
-  const tampil = (menus ?? []).filter((m) =>
-    lokasi === "all" ? true : m.branch_ids.length === 0 || m.branch_ids.includes(lokasi),
-  );
+  const semua = menus ?? [];
+  // Chip kategori mengikuti urutan katalog (bukan alfabet) supaya sejajar
+  // dengan urutan grup di bawahnya. Diambil dari SELURUH menu, jadi daftar
+  // chip tidak menyusut saat mengetik di kotak cari.
+  const kategoriList = [...new Set(semua.map((m) => m.kategori))];
+  const q = cari.trim().toLowerCase();
+
+  const tampil = semua
+    .filter((m) =>
+      lokasi === "all" ? true : m.branch_ids.length === 0 || m.branch_ids.includes(lokasi),
+    )
+    .filter((m) => (filterKat ? m.kategori === filterKat : true))
+    .filter((m) =>
+      q === ""
+        ? true
+        : m.nama.toLowerCase().includes(q) || (m.kode ?? "").toLowerCase().includes(q),
+    );
 
   // kelompokkan per kategori mengikuti urutan katalog
   const grup = new Map<string, MenuDto[]>();
@@ -54,12 +91,16 @@ export function MenuListPage() {
     list.push(m);
     grup.set(m.kategori, list);
   }
+  const disaring = tampil.length !== semua.length;
 
   return (
     <div>
       <PageTitle
         aksi={
           <div className="flex items-center gap-2">
+            <Link to="/menu/analisis" className={btnSecondary}>
+              📊 Analisis Harga
+            </Link>
             <button onClick={() => setKelolaKategori(true)} className={btnSecondary}>
               🏷 Kategori
             </button>
@@ -69,7 +110,8 @@ export function MenuListPage() {
           </div>
         }
       >
-        Menu &amp; HPP ({tampil.length})
+        Menu &amp; HPP ({tampil.length}
+        {disaring ? ` dari ${semua.length}` : ""})
       </PageTitle>
       <KategoriManagerModal
         open={kelolaKategori}
@@ -79,6 +121,44 @@ export function MenuListPage() {
         judul="Kategori Menu"
         deskripsi="Kategori untuk mengelompokkan menu. Kategori yang masih dipakai menu tidak bisa dihapus."
       />
+      {/* Cari + filter kategori */}
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <input
+          value={cari}
+          onChange={(e) => setCari(e.target.value)}
+          placeholder="🔍 Cari menu / kode…"
+          aria-label="Cari menu"
+          className={`${inputClass} max-w-72`}
+        />
+        {kategoriList.length > 1 && (
+          <div className="flex flex-wrap items-center gap-1">
+            <button
+              onClick={() => setFilterKat("")}
+              className={`rounded-full px-3 py-1 text-xs font-medium transition ${
+                filterKat === ""
+                  ? "bg-orange-600 text-white"
+                  : "bg-stone-100 text-stone-600 hover:bg-stone-200"
+              }`}
+            >
+              Semua
+            </button>
+            {kategoriList.map((k) => (
+              <button
+                key={k}
+                onClick={() => setFilterKat(filterKat === k ? "" : k)}
+                className={`rounded-full px-3 py-1 text-xs font-medium capitalize transition ${
+                  filterKat === k
+                    ? "bg-orange-600 text-white"
+                    : "bg-stone-100 text-stone-600 hover:bg-stone-200"
+                }`}
+              >
+                {k}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
       {lokasiOpsi.length > 1 && (
         <div className="mb-4 flex items-center gap-2 text-sm text-stone-600">
           <span>Tampil di lokasi:</span>
@@ -97,6 +177,16 @@ export function MenuListPage() {
         </div>
       )}
       <ErrorText error={hapus.error} />
+
+      {tampil.length === 0 && (
+        <div className="rounded-lg border border-stone-200 bg-stone-50 px-4 py-10 text-center text-sm text-stone-400">
+          {semua.length === 0
+            ? "Belum ada menu."
+            : `Tidak ada menu yang cocok${q ? ` dengan "${cari.trim()}"` : ""}${
+                filterKat ? ` di kategori "${filterKat}"` : ""
+              }.`}
+        </div>
+      )}
 
       {[...grup.entries()].map(([kategori, list]) => (
         <div key={kategori} className="mb-6">
@@ -177,7 +267,7 @@ export function MenuListPage() {
               {
                 judul: "Food Cost",
                 kanan: true,
-                sel: (m) => <FoodCost persen={m.food_cost_persen} />,
+                sel: (m) => <FoodCost persen={m.food_cost_persen} maks={foodCostMaks} />,
               },
               {
                 hp: "aksi",

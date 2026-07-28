@@ -144,8 +144,8 @@ export function RiwayatHargaPanel({
           </>
         )}
         <b>Median</b> jadi harga acuan RAB belanja — disinkron otomatis tiap <b>Laporan
-        Harga</b>. Harga riil tiap pembelian tetap tercatat per lot dan dipakai perhitungan
-        HPP (FIFO) &amp; resep.
+        Harga</b>. Harga acuan itulah dasar HPP resep &amp; laba-rugi. Harga riil tiap
+        pembelian tetap tercatat per lot dan dipakai kartu persediaan bahan.
       </p>
 
       {data.lots.length === 0 ? (

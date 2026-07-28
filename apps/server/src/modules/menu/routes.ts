@@ -1,11 +1,28 @@
 import { zValidator } from "@hono/zod-validator";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, max } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import { PANDUAN_MARKUP } from "@kakarut/shared";
+import {
+  PANDUAN_MARKUP,
+  type AnalisisHargaRow,
+  type MenuPriceLogRow,
+  type PenyumbangHpp,
+  type SebabHargaMenu,
+  type TerapkanSaranHasil,
+} from "@kakarut/shared";
 import { db, type Tx } from "../../db/client";
-import { branches, ingredients, menuBranches, menuComponents, menus } from "../../db/schema";
+import {
+  branches,
+  companies,
+  ingredients,
+  menuBranches,
+  menuComponents,
+  menuPriceLogs,
+  menus,
+  productions,
+  users,
+} from "../../db/schema";
 import { requireRole, resolveBranchId, terikatCabang, type AppEnv } from "../../middleware/auth";
 import {
   ketersediaanMenu,
@@ -20,7 +37,7 @@ const KomponenBody = z.object({
   qty: z.number().positive(),
 });
 
-const MenuBody = z.object({
+const MenuCreateBody = z.object({
   nama: z.string().trim().min(1),
   kode: z.string().trim().max(20).nullish(),
   category_id: z.string().uuid(),
@@ -36,11 +53,47 @@ const MenuBody = z.object({
   branch_ids: z.array(z.string().uuid()).nullish(),
 });
 
+/**
+ * PUT = PERBARUI SEBAGIAN. Field yang tidak dikirim DIPERTAHANKAN apa adanya.
+ *
+ * Dulu PUT memakai skema yang sama dengan POST, lengkap dengan `.default()`.
+ * Akibatnya klien yang hanya ingin mengganti harga — misalnya aplikasi mobile
+ * yang tak menyimpan resep — ikut MENGHAPUS seluruh resep menu (`komponen`
+ * default `[]`), menghapus foto (`image_url` tak dikirim → null), dan
+ * MENGAKTIFKAN ULANG menu yang sudah diarsipkan (`is_active` default `true`).
+ * Sekarang tak ada satu pun `.default()` di sini: `undefined` berarti "jangan
+ * sentuh", sedangkan `null`/`[]` tetap berarti "kosongkan" — pola yang memang
+ * sudah dipakai `branch_ids` sejak awal.
+ *
+ * Klien lama yang mengirim body penuh berperilaku persis sama seperti dulu.
+ */
+const MenuUpdateBody = z.object({
+  nama: z.string().trim().min(1).optional(),
+  /** undefined = pertahankan kode lama; ""/null = generate ulang dari nama */
+  kode: z.string().trim().max(20).nullish(),
+  category_id: z.string().uuid().optional(),
+  tipe: z.enum(["regular", "paket"]).optional(),
+  mult: z.number().nonnegative().nullish(),
+  base_menu_id: z.string().uuid().nullish(),
+  base_mult: z.number().nonnegative().nullish(),
+  harga_jual: z.number().nonnegative().optional(),
+  /** undefined = foto lama tetap; null = hapus foto */
+  image_url: z.string().nullish(),
+  /** undefined = resep lama tetap; [] = kosongkan resep */
+  komponen: z.array(KomponenBody).optional(),
+  is_active: z.boolean().optional(),
+  /** undefined = pembatasan lama tetap; null/[] = tampil di semua cabang */
+  branch_ids: z.array(z.string().uuid()).nullish(),
+});
+
+/** Nilai menu setelah body PUT digabung dengan baris lama (POST: body apa adanya). */
+type MenuEfektif = z.infer<typeof MenuCreateBody>;
+
 const UrutanBody = z.object({
   items: z.array(z.object({ id: z.string().uuid(), sort_order: z.number().int() })),
 });
 
-function validatePaket(body: z.infer<typeof MenuBody>) {
+function validatePaket(body: MenuEfektif) {
   if (body.tipe === "paket" && (!body.base_menu_id || body.base_mult == null)) {
     throw new HTTPException(400, {
       message: "Menu paket wajib punya menu dasar (base_menu_id) dan base_mult",
@@ -54,7 +107,7 @@ function validatePaket(body: z.infer<typeof MenuBody>) {
 /** Semua referensi (bahan komponen, menu dasar) harus milik perusahaan pemanggil. */
 async function validateRefs(
   companyId: string,
-  body: z.infer<typeof MenuBody>,
+  body: MenuEfektif,
   selfId?: string,
 ) {
   const ids = [...new Set(body.komponen.map((k) => k.ingredient_id))];
@@ -128,6 +181,33 @@ async function replaceBranches(tx: Tx, menuId: string, branchIds: string[] | nul
   }
 }
 
+/** Markup efektif sebuah menu: reguler pakai `mult`, paket pakai `base_mult`. */
+function multEfektif(m: { tipe: string; mult: number | null; baseMult: number | null }) {
+  return m.tipe === "paket" ? m.baseMult : m.mult;
+}
+
+/**
+ * Catat perubahan harga jual menu. HPP bergerak sendiri mengikuti harga bahan,
+ * jadi tanpa jejak ini tak ada cara membedakan "food cost naik karena bahan
+ * mahal" dari "ada yang menurunkan harga jual" — persis pertanyaan yang sulit
+ * dijawab saat food cost tiba-tiba melonjak serempak.
+ */
+async function catatHargaMenu(
+  tx: Tx,
+  row: {
+    companyId: string;
+    menuId: string;
+    hargaLama: number | null;
+    hargaBaru: number;
+    multLama: number | null;
+    multBaru: number | null;
+    sebab: SebabHargaMenu;
+    olehUserId: string | null;
+  },
+) {
+  await tx.insert(menuPriceLogs).values(row);
+}
+
 export const menuRoutes = new Hono<AppEnv>()
   .get("/panduan-markup", (c) => c.json(PANDUAN_MARKUP))
   .get("/", async (c) => {
@@ -155,12 +235,196 @@ export const menuRoutes = new Hono<AppEnv>()
     const rows = await ketersediaanMenu(auth.company_id!, branchId);
     return c.json(rows);
   })
+  /**
+   * ANALISIS HARGA — menjawab "kenapa food cost menu naik padahal harga jualnya
+   * tidak pernah saya ubah".
+   *
+   * HPP TIDAK PERNAH DISIMPAN: tiap request dihitung ulang dari
+   * `ingredients.harga_beli ÷ isi` saat itu juga. Karena
+   * `food_cost = hpp ÷ harga_jual`, food cost bisa melonjak serempak di semua
+   * menu tanpa satu pun menu disimpan ulang. Endpoint ini menyandingkan
+   * `menus.updated_at` (kapan harga jual terakhir disentuh manusia) dengan
+   * `ingredients.updated_at` + `MAX(productions.laporan_harga_at)` tiap bahan
+   * penyumbang HPP terbesar, sehingga sumber pergerakannya kelihatan.
+   *
+   * Didaftarkan sebelum "/:id" agar tak tertangkap sebagai id. owner/admin.
+   */
+  .get("/analisis-harga", requireRole("owner", "admin"), async (c) => {
+    const auth = c.get("auth");
+    const includeInactive = c.req.query("semua") === "true";
+    const [katalog, perusahaan, bahanRows, laporanRows] = await Promise.all([
+      loadKatalog(db, auth.company_id!),
+      db
+        .select({ foodCostMaks: companies.foodCostMaks })
+        .from(companies)
+        .where(eq(companies.id, auth.company_id!)),
+      db
+        .select({ id: ingredients.id, updatedAt: ingredients.updatedAt })
+        .from(ingredients)
+        .where(eq(ingredients.companyId, auth.company_id!)),
+      db
+        .select({
+          ingredientId: productions.ingredientId,
+          terakhir: max(productions.laporanHargaAt),
+        })
+        .from(productions)
+        .where(
+          and(
+            eq(productions.companyId, auth.company_id!),
+            eq(productions.tipe, "beli"),
+            isNotNull(productions.laporanHargaAt),
+            isNull(productions.deletedAt),
+          ),
+        )
+        .groupBy(productions.ingredientId),
+    ]);
+    const foodCostMaks = perusahaan[0]?.foodCostMaks ?? 40;
+    const bahanDiperbarui = new Map(bahanRows.map((b) => [b.id, b.updatedAt]));
+    const dilaporkanPada = new Map(laporanRows.map((r) => [r.ingredientId, r.terakhir]));
+
+    const rows: AnalisisHargaRow[] = katalog.rows
+      .filter((r) => (includeInactive ? true : r.isActive))
+      .map((r) => {
+        const dto = toMenuDto(r, katalog);
+        // Penyumbang = komponen menu ini + (paket) komponen menu dasarnya,
+        // digabung per bahan — persis himpunan yang dijumlah `hitungHargaMenu`.
+        const semua = [
+          ...(katalog.komponenByMenu.get(r.id) ?? []),
+          ...(r.tipe === "paket" && r.baseMenuId
+            ? katalog.komponenByMenu.get(r.baseMenuId) ?? []
+            : []),
+        ];
+        const gabung = new Map<string, PenyumbangHpp>();
+        for (const k of semua) {
+          const ada = gabung.get(k.ingredient_id);
+          const qty = (ada?.qty ?? 0) + k.qty;
+          gabung.set(k.ingredient_id, {
+            ingredient_id: k.ingredient_id,
+            nama: k.nama,
+            qty,
+            satuan: k.satuan,
+            harga_per_unit: k.harga_per_unit,
+            kontribusi: qty * k.harga_per_unit,
+            persen_hpp: 0,
+            bahan_diperbarui: (bahanDiperbarui.get(k.ingredient_id) ?? new Date()).toISOString(),
+            harga_dilaporkan_pada: dilaporkanPada.get(k.ingredient_id)?.toISOString() ?? null,
+          });
+        }
+        const penyumbang = [...gabung.values()]
+          .map((p) => ({
+            ...p,
+            persen_hpp: dto.hpp > 0 ? (p.kontribusi / dto.hpp) * 100 : 0,
+          }))
+          .sort((a, b) => b.kontribusi - a.kontribusi)
+          .slice(0, 5);
+        return {
+          ...dto,
+          menu_diperbarui: r.updatedAt.toISOString(),
+          food_cost_maks: foodCostMaks,
+          penyumbang,
+        };
+      })
+      // Food cost tertinggi dulu — yang paling perlu dijelaskan ada di atas.
+      .sort((a, b) => b.food_cost_persen - a.food_cost_persen);
+    return c.json(rows);
+  })
+  /**
+   * Samakan harga jual sejumlah menu dengan HARGA SARAN BULAT-nya. Angka saran
+   * dihitung ulang di server dari HPP terkini — nilai kiriman klien sengaja
+   * tidak dipercaya, karena ini mengubah harga yang ditagih ke pembeli.
+   * owner/admin.
+   */
+  .post(
+    "/terapkan-saran",
+    requireRole("owner", "admin"),
+    zValidator("json", z.object({ ids: z.array(z.string().uuid()).min(1).max(500) })),
+    async (c) => {
+      const auth = c.get("auth");
+      const { ids } = c.req.valid("json");
+      const katalog = await loadKatalog(db, auth.company_id!);
+      const diminta = new Set(ids);
+      const sasaran = katalog.rows.filter((r) => diminta.has(r.id));
+      if (sasaran.length === 0) throw new HTTPException(404, { message: "Menu tidak ditemukan" });
+
+      const rincian: TerapkanSaranHasil["rincian"] = [];
+      await db.transaction(async (tx) => {
+        for (const r of sasaran) {
+          const dto = toMenuDto(r, katalog);
+          const hargaBaru = dto.harga_jual_bulat;
+          // Saran 0 = resep kosong / HPP nol; menurunkan harga jual ke 0 di situ
+          // hampir pasti bukan yang dimaui — lewati, dan laporkan apa adanya.
+          const berubah = hargaBaru > 0 && hargaBaru !== r.hargaJual;
+          if (berubah) {
+            await tx
+              .update(menus)
+              .set({ hargaJual: hargaBaru, updatedAt: new Date() })
+              .where(and(eq(menus.id, r.id), eq(menus.companyId, auth.company_id!)));
+            await catatHargaMenu(tx, {
+              companyId: auth.company_id!,
+              menuId: r.id,
+              hargaLama: r.hargaJual,
+              hargaBaru,
+              multLama: multEfektif(r),
+              multBaru: multEfektif(r),
+              sebab: "terapkan_saran",
+              olehUserId: auth.sub,
+            });
+          }
+          rincian.push({
+            menu_id: r.id,
+            nama: r.nama,
+            harga_lama: r.hargaJual,
+            harga_baru: berubah ? hargaBaru : r.hargaJual,
+            diperbarui: berubah,
+          });
+        }
+      });
+      const hasil: TerapkanSaranHasil = {
+        diperbarui: rincian.filter((x) => x.diperbarui).length,
+        dilewati: rincian.filter((x) => !x.diperbarui).length,
+        rincian,
+      };
+      return c.json(hasil);
+    },
+  )
   .get("/:id", async (c) => {
     const auth = c.get("auth");
     const katalog = await loadKatalog(db, auth.company_id!);
     const row = katalog.rows.find((r) => r.id === c.req.param("id"));
     if (!row) throw new HTTPException(404, { message: "Menu tidak ditemukan" });
     return c.json(toMenuDto(row, katalog));
+  })
+  /** Riwayat perubahan harga jual satu menu (terbaru dulu). owner/admin. */
+  .get("/:id/riwayat-harga", requireRole("owner", "admin"), async (c) => {
+    const auth = c.get("auth");
+    const rows = await db
+      .select({
+        id: menuPriceLogs.id,
+        menu_id: menuPriceLogs.menuId,
+        harga_lama: menuPriceLogs.hargaLama,
+        harga_baru: menuPriceLogs.hargaBaru,
+        mult_lama: menuPriceLogs.multLama,
+        mult_baru: menuPriceLogs.multBaru,
+        sebab: menuPriceLogs.sebab,
+        oleh: users.nama,
+        created_at: menuPriceLogs.createdAt,
+      })
+      .from(menuPriceLogs)
+      .leftJoin(users, eq(users.id, menuPriceLogs.olehUserId))
+      .where(
+        and(
+          eq(menuPriceLogs.companyId, auth.company_id!),
+          eq(menuPriceLogs.menuId, c.req.param("id")),
+        ),
+      )
+      .orderBy(desc(menuPriceLogs.createdAt))
+      .limit(50);
+    const hasil: MenuPriceLogRow[] = rows.map((r) => ({
+      ...r,
+      sebab: r.sebab as SebabHargaMenu,
+      created_at: r.created_at.toISOString(),
+    }));
+    return c.json(hasil);
   })
   // Atur urutan/posisi menu (untuk tampilan kasir & cetak daftar menu).
   // Boleh diakses semua peran (termasuk kasir); company-scoped di WHERE.
@@ -177,7 +441,7 @@ export const menuRoutes = new Hono<AppEnv>()
     });
     return c.json({ ok: true });
   })
-  .post("/", requireRole("owner", "admin"), zValidator("json", MenuBody), async (c) => {
+  .post("/", requireRole("owner", "admin"), zValidator("json", MenuCreateBody), async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");
     validatePaket(body);
@@ -205,6 +469,18 @@ export const menuRoutes = new Hono<AppEnv>()
       if (!menu) throw new HTTPException(409, { message: `Menu "${body.nama}" sudah ada` });
       await replaceKomponen(tx, menu.id, body.komponen);
       await replaceBranches(tx, menu.id, body.branch_ids);
+      // Baris pembuka riwayat harga (harga_lama null) — supaya nanti terlihat
+      // apakah harga jual pernah bergerak sama sekali sejak menu dibuat.
+      await catatHargaMenu(tx, {
+        companyId: auth.company_id!,
+        menuId: menu.id,
+        hargaLama: null,
+        hargaBaru: menu.hargaJual,
+        multLama: null,
+        multBaru: multEfektif(menu),
+        sebab: "buat",
+        olehUserId: auth.sub,
+      });
       return menu;
     });
     const katalog = await loadKatalog(db, auth.company_id!);
@@ -213,42 +489,89 @@ export const menuRoutes = new Hono<AppEnv>()
   .put(
     "/:id",
     requireRole("owner", "admin"),
-    zValidator("json", MenuBody),
+    zValidator("json", MenuUpdateBody),
     async (c) => {
       const auth = c.get("auth");
       const body = c.req.valid("json");
-      validatePaket(body);
-      await validateRefs(auth.company_id!, body, c.req.param("id"));
+      const id = c.req.param("id");
       const row = await db.transaction(async (tx) => {
+        // Nilai SEBELUM diubah. Dipakai dua hal: (1) mengisi field yang tidak
+        // dikirim klien, (2) memutuskan apakah perlu mencatat riwayat harga
+        // (menyimpan ulang foto/resep saja bukan perubahan harga).
+        const [lama] = await tx
+          .select({
+            nama: menus.nama,
+            kode: menus.kode,
+            categoryId: menus.categoryId,
+            tipe: menus.tipe,
+            hargaJual: menus.hargaJual,
+            mult: menus.mult,
+            baseMenuId: menus.baseMenuId,
+            baseMult: menus.baseMult,
+            imageUrl: menus.imageUrl,
+            isActive: menus.isActive,
+          })
+          .from(menus)
+          .where(and(eq(menus.id, id), eq(menus.companyId, auth.company_id!)));
+        if (!lama) throw new HTTPException(404, { message: "Menu tidak ditemukan" });
+
+        // `??` sengaja dipakai (bukan `||`): harga_jual 0 dan is_active false
+        // adalah nilai sah yang harus lolos, hanya undefined yang jatuh ke lama.
+        const efektif: MenuEfektif = {
+          nama: body.nama ?? lama.nama,
+          kode: body.kode === undefined ? lama.kode : body.kode,
+          category_id: body.category_id ?? lama.categoryId,
+          tipe: body.tipe ?? (lama.tipe as MenuEfektif["tipe"]),
+          mult: body.mult === undefined ? lama.mult : body.mult,
+          base_menu_id: body.base_menu_id === undefined ? lama.baseMenuId : body.base_menu_id,
+          base_mult: body.base_mult === undefined ? lama.baseMult : body.base_mult,
+          harga_jual: body.harga_jual ?? lama.hargaJual,
+          image_url: body.image_url === undefined ? lama.imageUrl : body.image_url,
+          // hanya resep yang dikirim yang perlu divalidasi; resep lama sudah
+          // tervalidasi saat disimpan dan tidak ikut ditulis ulang di bawah
+          komponen: body.komponen ?? [],
+          is_active: body.is_active ?? lama.isActive,
+          branch_ids: body.branch_ids,
+        };
+        validatePaket(efektif);
+        await validateRefs(auth.company_id!, efektif, id);
+
         // kode: manual bila diisi; kosong → generate otomatis dari nama (unik)
-        const kode = await resolveKode(
-          tx,
-          auth.company_id!,
-          body.kode,
-          body.nama,
-          c.req.param("id"),
-        );
+        const kode = await resolveKode(tx, auth.company_id!, efektif.kode, efektif.nama, id);
         const [menu] = await tx
           .update(menus)
           .set({
-            categoryId: body.category_id,
-            nama: body.nama,
+            categoryId: efektif.category_id,
+            nama: efektif.nama,
             kode,
-            tipe: body.tipe,
-            mult: body.tipe === "regular" ? body.mult : null,
-            baseMenuId: body.tipe === "paket" ? body.base_menu_id : null,
-            baseMult: body.tipe === "paket" ? body.base_mult : null,
-            hargaJual: body.harga_jual,
-            imageUrl: body.image_url ?? null,
-            isActive: body.is_active,
+            tipe: efektif.tipe,
+            mult: efektif.tipe === "regular" ? efektif.mult : null,
+            baseMenuId: efektif.tipe === "paket" ? efektif.base_menu_id : null,
+            baseMult: efektif.tipe === "paket" ? efektif.base_mult : null,
+            hargaJual: efektif.harga_jual,
+            imageUrl: efektif.image_url ?? null,
+            isActive: efektif.is_active,
             updatedAt: new Date(),
           })
-          .where(
-            and(eq(menus.id, c.req.param("id")), eq(menus.companyId, auth.company_id!)),
-          )
+          .where(and(eq(menus.id, id), eq(menus.companyId, auth.company_id!)))
           .returning();
         if (!menu) throw new HTTPException(404, { message: "Menu tidak ditemukan" });
-        await replaceKomponen(tx, menu.id, body.komponen);
+        if (lama.hargaJual !== menu.hargaJual || multEfektif(lama) !== multEfektif(menu)) {
+          await catatHargaMenu(tx, {
+            companyId: auth.company_id!,
+            menuId: menu.id,
+            hargaLama: lama.hargaJual,
+            hargaBaru: menu.hargaJual,
+            multLama: multEfektif(lama),
+            multBaru: multEfektif(menu),
+            sebab: "manual",
+            olehUserId: auth.sub,
+          });
+        }
+        // undefined = tidak dikirim → pertahankan resep lama; [] = kosongkan
+        if (body.komponen !== undefined) {
+          await replaceKomponen(tx, menu.id, body.komponen);
+        }
         // undefined = tidak dikirim → pertahankan pembatasan lama; null/[] = buka semua
         if (body.branch_ids !== undefined) {
           await replaceBranches(tx, menu.id, body.branch_ids);

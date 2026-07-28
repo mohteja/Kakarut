@@ -27,6 +27,7 @@ interface Company {
   receiptFooter: string | null;
   receiptShowAlamat: boolean;
   metodeHpp: "average" | "fifo";
+  foodCostMaks: number;
 }
 
 /** Kartu Mode Lite/Pro: penjelasan + tombol upgrade (modal) / turun ke Lite. */
@@ -155,6 +156,7 @@ export function PerusahaanPage() {
   const [pb1Rate, setPb1Rate] = useState("10");
   const [diskonMaksPersen, setDiskonMaksPersen] = useState("100");
   const [metodeHpp, setMetodeHpp] = useState<"average" | "fifo">("average");
+  const [foodCostMaks, setFoodCostMaks] = useState("40");
 
   useEffect(() => {
     if (!company) return;
@@ -166,6 +168,7 @@ export function PerusahaanPage() {
     setPb1Rate(String(company.pb1Rate));
     setDiskonMaksPersen(String(company.diskonMaksPersen));
     setMetodeHpp(company.metodeHpp ?? "average");
+    setFoodCostMaks(String(company.foodCostMaks ?? 40));
   }, [company]);
 
   const simpan = useMutation({
@@ -181,6 +184,7 @@ export function PerusahaanPage() {
           pb1_rate: Number(pb1Rate),
           diskon_maks_persen: Math.min(100, Math.max(0, Number(diskonMaksPersen) || 0)),
           metode_hpp: metodeHpp,
+          food_cost_maks: Math.min(100, Math.max(0, Number(foodCostMaks) || 0)),
         },
       }),
     onSuccess: () => {
@@ -269,22 +273,48 @@ export function PerusahaanPage() {
         </div>
 
         <div className="rounded-lg border border-stone-200 p-3">
+          <label className="mb-1 block text-sm font-medium">Ambang food cost sehat (%)</label>
+          <div className="flex items-center gap-2 text-sm">
+            <input
+              type="number"
+              min="0"
+              max="100"
+              step="any"
+              value={foodCostMaks}
+              onChange={(e) => setFoodCostMaks(e.target.value)}
+              className="w-24 rounded-lg border border-stone-300 px-2 py-1 text-right"
+            />
+            %
+          </div>
+          <p className="mt-1 text-xs text-stone-500">
+            Menu dengan food cost di atas angka ini ditandai <b>merah</b> di daftar Menu dan
+            muncul di halaman <b>Analisis Harga</b>. HPP dihitung dari harga bahan terkini, jadi
+            menu bisa melewati ambang tanpa harga jualnya diubah.
+          </p>
+        </div>
+
+        <div className="rounded-lg border border-stone-200 p-3">
           <label className="mb-1 block text-sm font-medium">
-            Metode perhitungan harga pokok (HPP)
+            Metode biaya persediaan (kartu bahan)
           </label>
           <select
             value={metodeHpp}
             onChange={(e) => setMetodeHpp(e.target.value as "average" | "fifo")}
             className={`${inputClass} max-w-xs`}
           >
-            <option value="average">Rata-rata tertimbang (Average)</option>
+            <option value="average">Rata-rata bergerak (Average)</option>
             <option value="fifo">FIFO (masuk pertama, keluar pertama)</option>
           </select>
           <p className="mt-1 text-xs text-stone-500">
-            Dasar hitung <b>laba-rugi</b> dari riwayat harga beli bahan &amp; perlengkapan.{" "}
-            <b>Average</b> memakai harga rata-rata semua pembelian; <b>FIFO</b> memakai harga lot
-            pembelian terlama lebih dulu. Riwayat harga tiap barang bisa dilihat dengan mengklik
-            namanya di halaman <b>Bahan Baku</b>/<b>Perlengkapan</b>.
+            Cara membebankan biaya tiap pemakaian stok di <b>kartu persediaan</b> per bahan (buka
+            lewat <b>Bahan Baku</b> → klik nama barang). <b>Average</b> memakai harga rata-rata
+            seluruh sisa stok saat barang keluar; <b>FIFO</b> memakai harga lot yang keluar. Barang
+            fisiknya selalu keluar dari lot terlama, apa pun pilihan ini.
+          </p>
+          <p className="mt-1 rounded bg-stone-50 px-2 py-1 text-xs text-stone-500">
+            Catatan: <b>HPP di Laporan laba-rugi tidak memakai setelan ini.</b> HPP tiap transaksi
+            dikunci saat pembayaran dari <b>resep × harga acuan bahan</b> saat itu, sehingga laporan
+            lama tidak berubah kalau setelan ini diganti.
           </p>
         </div>
         <ErrorText error={simpan.error} />

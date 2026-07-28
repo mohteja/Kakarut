@@ -124,6 +124,9 @@ export function DetailBahanPage() {
     queryFn: () => api<BahanFifoDto>(`/stok/fifo/${id}?branch_id=${branchSel}`),
     enabled: Boolean(id && branchSel && trackStok),
   });
+  // metode pembebanan biaya perusahaan — hanya memengaruhi angka biaya di kartu
+  // persediaan, aliran barangnya tetap FIFO
+  const rataRata = fifo?.metode_hpp === "average";
 
   const hapus = useMutation({
     mutationFn: () => api(`/bahan/${id}`, { method: "DELETE" }),
@@ -222,9 +225,14 @@ export function DetailBahanPage() {
           >
             {b.pengadaan === "beli" ? "BELI" : "PRODUKSI SENDIRI"}
           </span>
-          {/* metode perhitungan biaya perusahaan (pengaturan Perusahaan) */}
-          <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-semibold text-indigo-800">
-            {detail.metode_hpp === "fifo" ? "FIFO" : "Average Cost"}
+          {/* metode pembebanan biaya di kartu persediaan (pengaturan Perusahaan).
+              Sengaja diberi awalan "Kartu:" — setelan ini TIDAK dipakai laba-rugi,
+              yang memakai resep × harga acuan bahan. */}
+          <span
+            className="rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-semibold text-indigo-800"
+            title="Metode biaya untuk kartu persediaan bahan. HPP di Laporan laba-rugi memakai resep × harga acuan bahan."
+          >
+            Kartu: {detail.metode_hpp === "fifo" ? "FIFO" : "Average Cost"}
           </span>
           {!b.track_stok && (
             <span className="rounded-full bg-stone-100 px-2 py-0.5 text-xs font-semibold text-stone-500">
@@ -453,20 +461,28 @@ export function DetailBahanPage() {
             </div>
           </Card>
 
-          {/* Kartu FIFO */}
+          {/* Kartu persediaan — aliran barang selalu FIFO, biayanya ikut metode HPP */}
           <Card className="mb-4 p-4">
             <div className="mb-1 flex flex-wrap items-center gap-2">
               <h2 className="text-sm font-bold text-stone-700">
-                ⏳ Pemakaian FIFO {fifo ? `— ${fifo.branch_nama}` : ""}
+                ⏳ Kartu persediaan {fifo ? `— ${fifo.branch_nama}` : ""}
               </h2>
               <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-semibold text-indigo-800">
-                First-In First-Out
+                {rataRata ? "Biaya: Average Cost" : "Biaya: FIFO"}
               </span>
             </div>
             <p className="mb-3 text-xs text-stone-500">
-              Barang keluar dihitung dari lot yang <b>paling awal masuk</b>. Tiap lot menampilkan
-              berapa yang sudah terpakai &amp; sisanya; tiap pemakaian menampilkan diambil dari lot
-              mana saja.
+              Barang keluar selalu diambil dari lot yang <b>paling awal masuk</b> (supaya
+              kedaluwarsa terlacak benar). Yang mengikuti setelan <b>Metode HPP</b> perusahaan
+              adalah cara menghitung <b>biayanya</b>:{" "}
+              {rataRata ? (
+                <>
+                  biaya tiap pemakaian = qty × <b>rata-rata bergerak</b> seluruh sisa stok saat itu,
+                  jadi angkanya sengaja tidak sama dengan harga lot yang keluar.
+                </>
+              ) : (
+                <>biaya tiap pemakaian mengikuti harga lot yang keluar.</>
+              )}
             </p>
 
             {!fifo ? (
@@ -563,6 +579,12 @@ export function DetailBahanPage() {
                 <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-stone-500">
                   Riwayat penggunaan (dari lot paling awal)
                 </div>
+                {rataRata && (
+                  <p className="mb-2 text-[11px] text-stone-500">
+                    Biaya di kanan tiap baris memakai <b>rata-rata bergerak</b>, bukan penjumlahan
+                    harga lot di bawahnya — daftar lot hanya menunjukkan barang mana yang keluar.
+                  </p>
+                )}
                 {fifo.terpotong && (
                   <div className="mb-2 rounded-lg bg-yellow-50 px-3 py-1.5 text-xs text-yellow-800">
                     Menampilkan {fifo.pemakaian.length} pemakaian terbaru.
@@ -594,7 +616,15 @@ export function DetailBahanPage() {
                               −{formatAngka(p.qty)} {b.satuan}
                             </span>
                             {p.hpp != null && (
-                              <span className="text-xs text-stone-500">≈ {formatRupiah(p.hpp)}</span>
+                              <span className="text-xs text-stone-500">
+                                ≈ {formatRupiah(p.hpp)}
+                                {p.harga_rata != null && (
+                                  <span className="text-stone-400">
+                                    {" "}
+                                    (rata {formatRupiah(p.harga_rata)}/{b.satuan})
+                                  </span>
+                                )}
+                              </span>
                             )}
                           </div>
                           {/* diambil dari lot mana saja */}
@@ -603,7 +633,11 @@ export function DetailBahanPage() {
                               <span key={j} className="mr-2 whitespace-nowrap">
                                 {r.lot != null ? `Lot #${r.lot + 1}` : "tanpa lot (minus)"} ×
                                 {formatAngka(r.qty)}
-                                {r.harga_satuan != null ? ` @${formatRupiah(r.harga_satuan)}` : ""}
+                                {/* di mode average harga lot bukan dasar biaya → jangan ditampilkan
+                                    seolah-olah menjumlah jadi angka di atas */}
+                                {!rataRata && r.harga_satuan != null
+                                  ? ` @${formatRupiah(r.harga_satuan)}`
+                                  : ""}
                               </span>
                             ))}
                           </div>

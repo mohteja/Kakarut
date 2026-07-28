@@ -7,6 +7,7 @@ import type {
   BahanLangkahRow,
   BahanResepRow,
   KategoriDto,
+  MenuDto,
   SatuanDto,
 } from "@kakarut/shared";
 import {
@@ -162,6 +163,15 @@ export function ResepPage() {
   const bukaDetail = (id: string | null) => setSearchParams(id ? { bahan: id } : {});
   const dipilih = produksi.find((b) => b.id === selectedId) ?? null;
 
+  // Katalog menu — hanya untuk memberi tahu BERAPA menu yang HPP-nya ikut
+  // bergerak bila harga bahan ini diperbarui. Owner/admin saja; peran pelaksana
+  // tak menyentuh harga sehingga tak perlu request tambahan.
+  const { data: menuSemua } = useQuery({
+    queryKey: ["menu"],
+    enabled: bolehUbah,
+    queryFn: () => api<MenuDto[]>("/menu"),
+  });
+
   // Ringkasan jumlah bahan mentah per bahan produksi (utk badge di kartu) —
   // satu request batch; bahan yang tak ada di peta berarti belum punya resep.
   const { data: ringkas } = useQuery({
@@ -212,6 +222,9 @@ export function ResepPage() {
     hasil: null,
     packing: null,
   });
+  // Persetujuan sadar untuk menimpa harga bahan (lihat catatan di `simpan`).
+  // Sengaja kembali false tiap ganti bahan — persetujuan tidak menular.
+  const [setujuHarga, setSetujuHarga] = useState(false);
   useEffect(() => {
     setAtur(
       dipilih
@@ -233,6 +246,7 @@ export function ResepPage() {
       hasil: dipilih?.foto_hasil_url ?? null,
       packing: dipilih?.foto_packing_url ?? null,
     });
+    setSetujuHarga(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dipilih]);
 
@@ -247,9 +261,23 @@ export function ResepPage() {
   const hargaBatch = Math.round(biayaResep * overhead * 100) / 100;
   const isiBatch = Number(atur?.isi) > 0 ? Number(atur?.isi) : 0;
 
+  // Apakah menyimpan akan MENGGESER harga bahan ini? Selisih di bawah 1 rupiah
+  // dianggap sama (harga tersimpan dibulatkan, biaya resep tidak).
+  const hargaBerubah = !!dipilih && Math.abs(hargaBatch - dipilih.harga_beli) >= 1;
+  // Menu yang HPP-nya ikut bergerak bila harga bahan ini berubah — angka kasar
+  // (pemakaian langsung) supaya user tahu ini bukan perubahan sepele.
+  const menuTerdampak = (menuSemua ?? []).filter((m) =>
+    m.komponen.some((k) => k.ingredient_id === selectedId),
+  ).length;
+
   // Simpan resep + pengaturan + cara masak berantai: komponen → master bahan
   // (isi/harga/foto) → langkah PALING AKHIR (gagal langkah tak memblokir
   // simpan resep/harga; invalidasi onError merapikan sebagian tersimpan).
+  //
+  // `harga_beli` HANYA dikirim bila user mencentang persetujuan. Dulu selalu
+  // dikirim, jadi menyimpan perubahan foto atau cara masak diam-diam melepas
+  // kenaikan harga bahan mentah berbulan-bulan sekaligus ke HPP semua menu —
+  // persis kejutan "harga menu tiba-tiba berubah" yang sulit dilacak.
   const simpan = useMutation({
     mutationFn: async () => {
       await api(`/bahan/${selectedId}/resep`, {
@@ -271,7 +299,7 @@ export function ResepPage() {
             stok_minimum_toko: Number(atur.stokMinToko) || 0,
             masa_simpan_hari: Math.max(0, Math.trunc(Number(atur.masaSimpan) || 0)),
             lead_time_hari: Math.max(0, Math.trunc(Number(atur.leadTime) || 0)),
-            harga_beli: hargaBatch,
+            ...(hargaBerubah && setujuHarga ? { harga_beli: hargaBatch } : {}),
             produksi_di: atur.produksiDi,
             // divisi hanya bermakna untuk produksi cabang — CK kembali ke default
             divisi_produksi: atur.produksiDi === "cabang" ? atur.divisiProduksi : "kitchen",
@@ -955,9 +983,45 @@ export function ResepPage() {
                           </>
                         )}
                         <span className="block text-xs text-orange-700">
-                          Harga bahan diperbarui otomatis saat “Simpan Resep”.
+                          {hargaBerubah
+                            ? "Harga tersimpan bahan ini BERBEDA — lihat kotak di bawah."
+                            : "Sama dengan harga bahan yang tersimpan — menyimpan tidak menggesernya."}
                         </span>
                       </div>
+                      {/* Menyimpan resep TIDAK boleh diam-diam menggeser harga:
+                          user sering ke sini cuma untuk mengubah foto atau cara
+                          masak, dan dulu setiap simpan melepas kenaikan harga
+                          bahan mentah berbulan-bulan sekaligus ke HPP semua
+                          menu. Perubahan harga kini harus dicentang sadar. */}
+                      {hargaBerubah && dipilih && (
+                        <div className="mt-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                          <div>
+                            Harga batch: <b>{formatRupiah(dipilih.harga_beli)}</b> →{" "}
+                            <b>{formatRupiah(hargaBatch)}</b>
+                            {menuTerdampak > 0 && (
+                              <>
+                                {" "}
+                                — mengubah HPP <b>{menuTerdampak} menu</b>
+                              </>
+                            )}
+                          </div>
+                          <label className="mt-1.5 flex items-start gap-2">
+                            <input
+                              type="checkbox"
+                              checked={setujuHarga}
+                              onChange={(e) => setSetujuHarga(e.target.checked)}
+                              className="mt-0.5"
+                            />
+                            <span>
+                              Perbarui juga <b>harga bahan</b> ini saat menyimpan.
+                              <span className="block text-xs text-amber-700">
+                                Tanpa dicentang, resep &amp; cara masak tetap tersimpan dan harga
+                                bahan dibiarkan apa adanya.
+                              </span>
+                            </span>
+                          </label>
+                        </div>
+                      )}
                     </div>
                   )}
 

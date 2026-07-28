@@ -440,6 +440,102 @@ export interface MenuDto {
   food_cost_persen: number;
 }
 
+/**
+ * Satu bahan penyumbang HPP sebuah menu — dipakai halaman Analisis Harga untuk
+ * menjawab "kenapa food cost menu ini naik padahal harga jualnya tak diubah".
+ */
+export interface PenyumbangHpp {
+  ingredient_id: string;
+  nama: string;
+  qty: number;
+  satuan: string;
+  harga_per_unit: number;
+  /** qty × harga_per_unit — rupiah yang bahan ini sumbangkan ke HPP */
+  kontribusi: number;
+  persen_hpp: number;
+  /** ingredients.updated_at — kapan harga bahan ini terakhir bergerak */
+  bahan_diperbarui: string;
+  /** MAX(productions.laporan_harga_at) — kapan harganya terakhir DILAPORKAN */
+  harga_dilaporkan_pada: string | null;
+}
+
+/**
+ * Satu baris Analisis Harga: MenuDto + jejak waktu. Bila `menu_diperbarui`
+ * jauh lebih tua dari `bahan_diperbarui` penyumbang terbesarnya, artinya yang
+ * bergerak adalah harga BAHAN, bukan harga jual menu.
+ */
+export interface AnalisisHargaRow extends MenuDto {
+  /** menus.updated_at — kapan menu (termasuk harga jualnya) terakhir disimpan */
+  menu_diperbarui: string;
+  /** ambang food cost perusahaan (%) — disalin agar klien tak perlu query lain */
+  food_cost_maks: number;
+  /** penyumbang HPP terbesar (maks 5), urut kontribusi menurun */
+  penyumbang: PenyumbangHpp[];
+}
+
+/** Dari mana perubahan harga jual menu berasal. */
+export type SebabHargaMenu = "buat" | "manual" | "terapkan_saran";
+
+/** Satu baris riwayat perubahan harga jual sebuah menu. */
+export interface MenuPriceLogRow {
+  id: string;
+  menu_id: string;
+  /** null = baris pertama (menu baru dibuat) */
+  harga_lama: number | null;
+  harga_baru: number;
+  mult_lama: number | null;
+  mult_baru: number | null;
+  sebab: SebabHargaMenu;
+  /** nama pengubah; null bila akunnya sudah dihapus */
+  oleh: string | null;
+  created_at: string;
+}
+
+/** Ringkasan hasil POST /menu/terapkan-saran. */
+export interface TerapkanSaranHasil {
+  diperbarui: number;
+  dilewati: number;
+  rincian: Array<{
+    menu_id: string;
+    nama: string;
+    harga_lama: number;
+    harga_baru: number;
+    /** false = harga sudah sama dengan saran, tak ada yang diubah */
+    diperbarui: boolean;
+  }>;
+}
+
+/** Satu bahan yang harga acuannya akan bergeser oleh sebuah laporan harga. */
+export interface DampakBahan {
+  ingredient_id: string;
+  nama: string;
+  satuan: string;
+  acuan_lama: number;
+  acuan_baru: number;
+  /** berapa menu yang memakai bahan ini (langsung maupun lewat menu dasar) */
+  jumlah_menu_terdampak: number;
+}
+
+/** Satu menu yang food cost-nya melewati ambang GARA-GARA laporan harga ini. */
+export interface DampakMenu {
+  menu_id: string;
+  nama: string;
+  food_cost_lama: number;
+  food_cost_baru: number;
+}
+
+/**
+ * Pratinjau dampak "Laporan Harga" — dihitung server tanpa menulis apa pun,
+ * supaya user tahu bahwa mencatat nota juga menggeser harga acuan bahan
+ * (dan karenanya HPP semua menu yang memakainya).
+ */
+export interface DampakLaporanHarga {
+  food_cost_maks: number;
+  bahan: DampakBahan[];
+  /** menu yang SEBELUMNYA di bawah ambang dan setelah ini melewatinya */
+  menu_lewat_ambang: DampakMenu[];
+}
+
 /** Bahan yang MEMBATASI sisa porsi sebuah menu (saldo ÷ qty paling kecil). */
 export interface MenuStokPembatas {
   ingredient_id: string;
@@ -669,9 +765,21 @@ export interface TransferStokItemRow {
   id: string;
   ingredient_id: string;
   nama: string;
+  /** satuan kerja — SATU-SATUNYA label yang sah untuk `qty` */
   satuan: string;
   pengadaan: JenisPengadaan;
+  /** jumlah dalam `satuan` (satuan kerja), tak pernah dalam satuan kemasan */
   qty: number;
+  /**
+   * `qty` + `satuan` yang SUDAH ditulis server, mis. "900 gr" — tampilkan apa
+   * adanya. Ada agar web & mobile mustahil berbeda satuan (lihat qtyTeks()).
+   */
+  qty_teks: string;
+  /**
+   * setara kemasan beli, mis. "≈ 0,9 kg"; null bila bahan tak berkemasan.
+   * PELENGKAP — boleh ditampilkan di samping `qty_teks`, tak boleh menggantikannya.
+   */
+  qty_setara: string | null;
   /** menunggu = dalam perjalanan; dikonfirmasi = diterima; ditolak = tak diterima */
   status: KonfirmasiStatus;
   alasan_tolak: string | null;
@@ -702,6 +810,7 @@ export interface TransferStokFaktur {
 export interface TransferStokSaldoRow {
   ingredient_id: string;
   nama: string;
+  /** satuan kerja — SATU-SATUNYA label yang sah untuk `saldo`/`dalam_jalan`/qty kirim */
   satuan: string;
   pengadaan: JenisPengadaan;
   /** saldo FISIK di lokasi asal (barang yang masih dalam perjalanan ikut terhitung) */
@@ -712,6 +821,25 @@ export interface TransferStokSaldoRow {
    * `tersedia untuk transfer baru` = `saldo − dalam_jalan`.
    */
   dalam_jalan: number;
+  /** isi per kemasan dalam `satuan` (1 = tanpa kemasan) */
+  isi: number;
+  /** satuan kemasan (mis. "kg"); null = tak diatur */
+  satuan_beli: string | null;
+  /**
+   * true = qty kiriman WAJIB kelipatan `isi` — barang yang hanya bisa dibeli
+   * per kemasan juga hanya boleh dikirim per kemasan. Pengecualiannya satu:
+   * qty = seluruh sisa (`saldo − dalam_jalan`) tetap boleh ("kirim habis"),
+   * kalau tidak sisa di bawah satu kemasan terjebak selamanya di cabang asal.
+   */
+  wajib_kelipatan: boolean;
+  /**
+   * sisa siap kirim (`saldo − dalam_jalan`) yang SUDAH ditulis server, mis.
+   * "900 gr" — tampilkan apa adanya supaya web & mobile tak mungkin berbeda
+   * satuan (lihat qtyTeks()).
+   */
+  tersedia_teks: string;
+  /** setara kemasan dari sisa siap kirim, mis. "≈ 0,9 kg"; null bila tak berkemasan */
+  tersedia_setara: string | null;
 }
 
 /**
@@ -1110,22 +1238,41 @@ export interface FifoAmbil {
   harga_satuan: number | null;
 }
 
-/** Satu peristiwa KELUAR pada kartu FIFO + rincian lot yang dikonsumsinya. */
+/** Satu peristiwa KELUAR pada kartu persediaan + rincian lot yang dikonsumsinya. */
 export interface FifoPemakaian {
   waktu: string;
   jenis: "penjualan" | "pemakaian" | "kirim" | "opname";
   keterangan: string | null;
   qty: number;
-  /** total biaya FIFO pemakaian ini; null bila ada bagian dari lot tanpa harga */
+  /**
+   * total biaya pemakaian ini menurut metode HPP perusahaan; null bila ada
+   * bagian tanpa harga yang diketahui.
+   *
+   * Mode `fifo`: Σ (qty × harga lot) — cocok dengan `rincian`.
+   * Mode `average`: qty × `harga_rata` — SENGAJA tidak sama dengan Σ rincian,
+   * karena biaya rata-rata tak mengenal identitas lot. `rincian` di mode ini
+   * tetap menunjukkan lot mana yang secara FISIK keluar (untuk kedaluwarsa).
+   */
   hpp: number | null;
+  /**
+   * harga rata-rata bergerak seluruh sisa stok sesaat SEBELUM pemakaian ini;
+   * hanya terisi di mode `average` (null di mode `fifo`, atau bila ada sisa
+   * lot yang harganya tak diketahui sehingga rata-rata tak bisa dihitung).
+   */
+  harga_rata: number | null;
   rincian: FifoAmbil[];
 }
 
-/** Kartu FIFO satu bahan pada satu cabang (riwayat penggunaan dari lot paling awal). */
+/**
+ * Kartu persediaan satu bahan pada satu cabang. Lot selalu dikuras dari yang
+ * PALING AWAL masuk (FIFO fisik, supaya kedaluwarsa benar); yang mengikuti
+ * setelan `metode_hpp` adalah cara membebankan BIAYA-nya.
+ */
 export interface BahanFifoDto {
   bahan: { id: string; nama: string; satuan: string };
   branch_id: string;
   branch_nama: string;
+  /** metode pembebanan biaya pemakaian: `average` = rata-rata bergerak */
   metode_hpp: "average" | "fifo";
   /** saldo akhir = Σ sisa lot − defisit; sama dengan saldo ledger cabang */
   saldo: number;
@@ -1144,6 +1291,12 @@ export interface SaleItemInput {
   is_dine_in?: boolean;
   /** catatan personalisasi per baris (mis. "tanpa gula") */
   catatan?: string | null;
+  /**
+   * baris open bill asal baris ini. Bila diisi (dan `open_bill_id` transaksi
+   * cocok), harga jual diambil dari harga yang DIKUNCI di bill — bukan harga
+   * menu terbaru. Qty tetap boleh berubah saat pembayaran.
+   */
+  open_bill_item_id?: string | null;
 }
 
 /** Baris riwayat transaksi kasir (untuk cek pesanan / cetak ulang struk). */
@@ -1248,7 +1401,16 @@ export interface MenuLaris {
 
 /** Satu baris item pada open bill (pesanan belum dibayar). */
 export interface OpenBillItemDto {
+  /** id baris — kirim balik saat PUT agar harga terkuncinya dipertahankan */
+  id: string;
   menu_id: string;
+  /** nama menu saat dipesan (snapshot) */
+  menu_nama: string;
+  /**
+   * harga jual per porsi yang DIKUNCI saat baris ini dimasukkan ke bill.
+   * Inilah yang ditagih saat bill dibayar, bukan harga menu terbaru.
+   */
+  harga_satuan: number;
   qty: number;
   /** null = ikut mode transaksi; true/false = override dine-in per baris */
   dine_in_override: boolean | null;

@@ -4419,18 +4419,33 @@ cek "fifo: saldo awal walk = 15 (== ledger)" "V == 15" "$(echo "$FF120" | jq '.s
 # (c) waste 12 + ACC → konsumsi FIFO: lot1 habis (10), lot2 terpakai 2 sisa 3
 W120=$(api "$OWNER" POST /stok/waste "{\"branch_id\":\"$CB46_ID\",\"ingredient_id\":\"$B120\",\"qty\":12,\"foto_url\":\"/uploads/bukti-uji.jpg\",\"catatan\":\"uji fifo 120\"}")
 api "$OWNER" POST "/stok/opname/sesi/$(echo "$W120" | jq -r '.session_id')/acc" > /dev/null
+# biaya di kartu mengikuti setelan Metode HPP → seksi ini menguji kedua mode
+api "$OWNER" PATCH /company '{"metode_hpp":"fifo"}' > /dev/null
 FF120B=$(api "$OWNER" GET "/stok/fifo/$B120?branch_id=$CB46_ID")
 cek "fifo: lot PALING AWAL habis duluan (terpakai 10, sisa 0)" "V == 1" \
   "$(echo "$FF120B" | jq '(.lots[0].terpakai==10) and (.lots[0].sisa==0) | if . then 1 else 0 end')"
 cek "fifo: lot kedua terpakai 2, sisa 3" "V == 1" \
   "$(echo "$FF120B" | jq '(.lots[1].terpakai==2) and (.lots[1].sisa==3) | if . then 1 else 0 end')"
 cek "fifo: pemakaian opname 12 ber-HPP 14000 (10×1000 + 2×2000)" "V == 1" \
-  "$(echo "$FF120B" | jq '[.pemakaian[]|select(.jenis=="opname")][0] | (.qty==12) and (.hpp==14000) and (.rincian|length==2) | if . then 1 else 0 end')"
+  "$(echo "$FF120B" | jq '[.pemakaian[]|select(.jenis=="opname")][0] | (.qty==12) and (.hpp==14000) and (.harga_rata==null) and (.rincian|length==2) | if . then 1 else 0 end')"
 SLDG120=$(api "$OWNER" GET "/stok?branch_id=$CB46_ID" | jq --arg i "$B120" '[.[]|select(.ingredient_id==$i)][0].saldo')
 cek "fifo: saldo walk == saldo ledger (3)" "V == 1" \
   "$(echo "$FF120B" | jq --argjson s "$SLDG120" '(.saldo==3) and (.saldo==$s) | if . then 1 else 0 end')"
 cek "fifo bahan asing → 404" "V == 404" \
   "$(status_code "$OWNER" GET "/stok/fifo/00000000-0000-0000-0000-000000000000?branch_id=$CB46_ID")"
+# (c2) METODE AVERAGE: aliran barang tetap FIFO, hanya BIAYA-nya yang berubah.
+# Setelan Metode HPP dulu tersimpan tapi tak pernah dibaca — kartu selalu FIFO.
+api "$OWNER" PATCH /company '{"metode_hpp":"average"}' > /dev/null
+FF120C=$(api "$OWNER" GET "/stok/fifo/$B120?branch_id=$CB46_ID")
+cek "average: DTO melaporkan metode yang dipakai" "V == 1" \
+  "$(echo "$FF120C" | jq '(.metode_hpp=="average")|if . then 1 else 0 end')"
+cek "average: aliran fisik & saldo TIDAK berubah (lot1 habis, lot2 sisa 3)" "V == 1" \
+  "$(echo "$FF120C" | jq '(.lots[0].terpakai==10) and (.lots[0].sisa==0) and (.lots[1].sisa==3) and (.saldo==3) | if . then 1 else 0 end')"
+# rata bergerak saat 12 keluar = (10×1000 + 5×2000) ÷ 15 = 1333.33 → 12 × 1333.33
+cek "average: harga_rata 1333.33 & biaya ≠ 14000 (bukan lagi FIFO)" "V == 1" \
+  "$(echo "$FF120C" | jq '[.pemakaian[]|select(.jenis=="opname")][0] | (.harga_rata==1333.33) and (.hpp!=14000) and ((.hpp-15999.96) < 0.01) and ((.hpp-15999.96) > -0.01) | if . then 1 else 0 end')"
+cek "average: rincian lot tetap dilaporkan (untuk lacak kedaluwarsa)" "V == 2" \
+  "$(echo "$FF120C" | jq '[.pemakaian[]|select(.jenis=="opname")][0].rincian|length')"
 # (d) hapus dari Detail Produk (soft delete) → hilang dari daftar
 cek "hapus bahan dari detail → ok" "V == 1" \
   "$(api "$OWNER" DELETE "/bahan/$B120" | jq '(.ok==true)|if . then 1 else 0 end')"
@@ -4778,10 +4793,12 @@ echo "== 132. Transfer Stok antar lokasi (faktur TF- multi bahan) =="
 # "Kirim dari stok CK" (jalur Permintaan, nomor PR-).
 # Pilih cabang ASAL yang benar-benar punya stok siap kirim.
 # ASAL wajib Central Kitchen: sejak §140 hanya CK yang boleh MENGIRIM transfer.
+# Bahan yang wajib kelipatan kemasan (§148) sengaja DIHINDARI di sini: seksi ini
+# menguji mekanika transfer dengan qty 1, bukan aturan kemasan.
 ASAL132=""; SALDO132=""
 for B132 in $(api "$OWNER" GET /cabang | jq -r '[.[]|select(.is_active and .tipe=="central_kitchen")][].id'); do
   R132=$(api "$OWNER" GET "/transfer-stok/saldo?branch_id=$B132")
-  if [ "$(echo "$R132" | jq '.rows|length')" -gt 0 ]; then
+  if [ "$(echo "$R132" | jq '[.rows[]|select(.wajib_kelipatan|not)]|length')" -gt 0 ]; then
     ASAL132="$B132"; SALDO132="$R132"; break
   fi
 done
@@ -4789,7 +4806,11 @@ cek "dasar uji: ada lokasi dengan stok siap kirim" "V == 1" \
   "$([ -n "$ASAL132" ] && echo 1 || echo 0)"
 TUJUAN132=$(api "$OWNER" GET /cabang | jq -r --arg a "$ASAL132" '[.[]|select(.is_active and .tipe!="kantor" and .id!=$a)][0].id')
 KANTOR132=$(api "$OWNER" GET /cabang | jq -r '[.[]|select(.tipe=="kantor")][0].id')
-ING132=$(echo "$SALDO132" | jq -r '([.rows[]|select(.saldo>=2)][0].ingredient_id) // .rows[0].ingredient_id')
+ING132=$(echo "$SALDO132" | jq -r '
+  ([.rows[]|select((.wajib_kelipatan|not) and .saldo>=2)][0].ingredient_id)
+  // ([.rows[]|select(.wajib_kelipatan|not)][0].ingredient_id)')
+cek "dasar uji: bahan §132 bebas aturan kemasan" "V == 1" \
+  "$(echo "$SALDO132" | jq -r --arg i "$ING132" '[.rows[]|select(.ingredient_id==$i)][0].wajib_kelipatan|not|if . then 1 else 0 end')"
 SAL132=$(echo "$SALDO132" | jq -r --arg i "$ING132" '[.rows[]|select(.ingredient_id==$i)][0].saldo')
 cek "GET /transfer-stok/saldo: tiap baris punya pengadaan (beli/produksi) & saldo > 0" "V == 1" \
   "$(echo "$SALDO132" | jq '(([.rows[]|select((.pengadaan=="beli" or .pengadaan=="produksi") and .saldo>0)]|length) == (.rows|length))|if . then 1 else 0 end')"
@@ -4851,8 +4872,8 @@ cek "GET /transfer-stok/saldo: tiap baris membawa dalam_jalan (angka)" "V == 1" 
   "$(echo "$SALDO132B" | jq '(([.rows[]|select((.dalam_jalan|type)=="number")]|length) == (.rows|length))|if . then 1 else 0 end')"
 cek "GET /transfer-stok/saldo: hanya bahan yang masih tersisa (saldo > dalam_jalan)" "V == 1" \
   "$(echo "$SALDO132B" | jq '(([.rows[]|select(.saldo - .dalam_jalan > 0)]|length) == (.rows|length))|if . then 1 else 0 end')"
-ING132C=$(echo "$SALDO132B" | jq -r '.rows[0].ingredient_id')
-TSD132=$(echo "$SALDO132B" | jq -r '.rows[0] | (.saldo - .dalam_jalan)')
+ING132C=$(echo "$SALDO132B" | jq -r '([.rows[]|select(.wajib_kelipatan|not)][0] // .rows[0]).ingredient_id')
+TSD132=$(echo "$SALDO132B" | jq -r --arg i "$ING132C" '[.rows[]|select(.ingredient_id==$i)][0] | (.saldo - .dalam_jalan)')
 cek "transfer sebesar SELURUH stok tersedia → 201" "V == 1" \
   "$(api "$OWNER" POST /transfer-stok "{\"asal_branch_id\":\"$ASAL132\",\"tujuan_branch_id\":\"$TUJUAN132\",\"items\":[{\"ingredient_id\":\"$ING132C\",\"qty\":$TSD132}]}" | jq '(.ok==true)|if . then 1 else 0 end')"
 cek "transfer ulang stok yang masih di jalan → 400 (tak bisa dijanjikan dua kali)" "V == 400" \
@@ -5317,7 +5338,9 @@ cek "daftar transfer utk bar hanya yang menyangkut cabangnya" "V == 1" \
 # memakai sebagian stok CK, jadi memakai ING132 apa adanya bisa gagal 400 karena
 # stok kurang dan menyamar seolah aturan barunya yang menolak.
 SLD140=$(api "$OWNER" GET "/transfer-stok/saldo?branch_id=$CK140")
-ING140C=$(echo "$SLD140" | jq -r '[.rows[]|select((.saldo - .dalam_jalan) >= 1)][0].ingredient_id // ""')
+# Bahan wajib-kelipatan (§148) dilewati: qty 1 akan ditolak aturan kemasan, dan
+# yang diuji di sini adalah izin ASAL, bukan kemasan.
+ING140C=$(echo "$SLD140" | jq -r '[.rows[]|select((.saldo - .dalam_jalan) >= 1 and (.wajib_kelipatan|not))][0].ingredient_id // ""')
 cek "dasar uji: CK masih punya bahan siap kirim" "V == 1" \
   "$([ -n "$ING140C" ] && echo 1 || echo 0)"
 cek "regresi nol: CK → cabang tetap 201" "V == 201" \
@@ -5659,6 +5682,332 @@ cek "laporan lama tetap menyebut nama area yang dihapus" "V == 1" \
 cek "pemilik hapus laporannya → 200" "V == 200" "$(status_code "$TKIT" DELETE "/kebersihan/$(echo "$LAP144B" | jq -r .id)")"
 cek "owner hapus laporan siapa pun → 200" "V == 200" "$(status_code "$OWNER" DELETE "/kebersihan/$LID144")"
 cek "laporan yang dihapus → 404" "V == 404" "$(status_code "$OWNER" GET "/kebersihan/$LID144")"
+
+echo "== §145. Harga menu berubah sendiri: lacak, setop, perbaiki =="
+# Skenario yang ditiru persis keluhan "harga menu tiba-tiba berubah":
+# faktur belanja DIBUAT TANPA HARGA → `total_harga` barisnya diisi TEBAKAN
+# yang diturunkan dari harga acuan saat itu. Dulu tebakan itu ikut kolam
+# median saat "Laporan Harga", jadi acuan menyeret dirinya sendiri
+# (acuan → tebakan → median → acuan) dan food cost SEMUA menu merangkak naik
+# tanpa satu pun harga jual disentuh.
+CAT145=$(api "$OWNER" GET /kategori | jq -r '.[0].id')
+BH145=$(api "$OWNER" POST /bahan '{"nama":"bahan uji145","harga_beli":10000,"isi":1,"satuan":"pcs","pengadaan":"beli","kategori":"baso"}' | jq -r .id)
+MENU145=$(api "$OWNER" POST /menu "{\"nama\":\"Menu Uji145\",\"category_id\":\"$CAT145\",\"tipe\":\"regular\",\"mult\":3,\"harga_jual\":60000,\"komponen\":[{\"ingredient_id\":\"$BH145\",\"qty\":1}]}")
+MID145=$(echo "$MENU145" | jq -r .id)
+harga_acuan145() { api "$OWNER" GET /bahan | jq --arg id "$BH145" '([.[]|select(.id==$id)][0].harga_beli|round)'; }
+baris145() { api "$OWNER" GET "/pembelian?per_page=500" | jq -r --arg f "$1" '[.rows[]|select(.faktur_id==$f)][0].id'; }
+selesaikan145() { # <faktur_id> — majukan sampai stok masuk (dikonfirmasi)
+  api "$OWNER" POST "/pembelian/tahap/$1" '{"ke":"dikerjakan"}' > /dev/null
+  api "$OWNER" POST "/pembelian/tahap/$1" '{"ke":"menunggu"}' > /dev/null
+  api "$OWNER" POST "/pembelian/konfirmasi/$1" > /dev/null 2>&1 || true
+}
+
+# --- §2 riwayat harga jual: baris pembuka + hanya dicatat saat harga berubah
+cek "menu baru → riwayat harga punya baris pembuka 'buat'" "V == 1" \
+  "$(api "$OWNER" GET "/menu/$MID145/riwayat-harga" | jq '[.[]|select(.sebab=="buat" and .harga_lama==null and .harga_baru==60000)]|length==1|if . then 1 else 0 end')"
+BODY145_FOTO="{\"nama\":\"Menu Uji145\",\"category_id\":\"$CAT145\",\"tipe\":\"regular\",\"mult\":3,\"harga_jual\":60000,\"image_url\":\"/uploads/uji145.jpg\",\"komponen\":[{\"ingredient_id\":\"$BH145\",\"qty\":1}]}"
+api "$OWNER" PUT "/menu/$MID145" "$BODY145_FOTO" > /dev/null
+cek "ubah FOTO saja → riwayat harga TIDAK bertambah" "V == 1" \
+  "$(api "$OWNER" GET "/menu/$MID145/riwayat-harga" | jq 'length==1|if . then 1 else 0 end')"
+BODY145_HARGA="{\"nama\":\"Menu Uji145\",\"category_id\":\"$CAT145\",\"tipe\":\"regular\",\"mult\":3,\"harga_jual\":55000,\"image_url\":\"/uploads/uji145.jpg\",\"komponen\":[{\"ingredient_id\":\"$BH145\",\"qty\":1}]}"
+api "$OWNER" PUT "/menu/$MID145" "$BODY145_HARGA" > /dev/null
+cek "ubah harga jual → tercatat 'manual' 60000 → 55000" "V == 1" \
+  "$(api "$OWNER" GET "/menu/$MID145/riwayat-harga" | jq '[.[]|select(.sebab=="manual" and .harga_lama==60000 and .harga_baru==55000)]|length==1|if . then 1 else 0 end')"
+# $REISS105 = token kasir hasil re-issue di §105 ($KASIR sudah tak berlaku).
+cek "kasir buka riwayat harga menu → 403" "V == 403" "$(status_code "$REISS105" GET "/menu/$MID145/riwayat-harga")"
+
+# --- §3a kolam median: TEBAKAN tak boleh ikut menentukan harga acuan
+# Faktur B dibuat tanpa harga saat acuan masih 10000 → tebakan 3 × 10000.
+FB145=$(api "$OWNER" POST /pembelian/faktur "{\"items\":[{\"ingredient_id\":\"$BH145\",\"mode\":\"pcs\",\"jumlah\":3}]}" | jq -r .faktur_id)
+selesaikan145 "$FB145"
+ROWB145=$(baris145 "$FB145")
+cek "faktur tanpa harga → baris berisi TEBAKAN 30000 (3 × acuan 10000)" "V == 1" \
+  "$(api "$OWNER" GET "/pembelian?per_page=500" | jq --arg r "$ROWB145" '([.rows[]|select(.id==$r)][0] | (.total_harga==30000) and (.laporan_harga_at==null))|if . then 1 else 0 end')"
+# Faktur A dilaporkan 40000 utk 2 pcs → 20000/satuan. Kalau tebakan ikut kolam,
+# median jadi (10000+20000)/2 = 15000; dengan penyaringan yang benar → 20000.
+FA145=$(api "$OWNER" POST /pembelian/faktur "{\"items\":[{\"ingredient_id\":\"$BH145\",\"mode\":\"pcs\",\"jumlah\":2}]}" | jq -r .faktur_id)
+selesaikan145 "$FA145"
+ROWA145=$(baris145 "$FA145")
+api "$OWNER" POST "/pembelian/laporan-harga/$FA145" "{\"items\":[{\"id\":\"$ROWA145\",\"total_harga\":40000}]}" > /dev/null
+cek "acuan = 20000 (bukan 15000 — tebakan tak menyeret acuan)" "V == 20000" "$(harga_acuan145)"
+cek "baris tebakan tetap 30000 (tak ikut dilaporkan)" "V == 1" \
+  "$(api "$OWNER" GET "/pembelian?per_page=500" | jq --arg r "$ROWB145" '([.rows[]|select(.id==$r)][0].total_harga==30000)|if . then 1 else 0 end')"
+
+# --- §3b perbarui_acuan:false → nota tercatat, acuan tidak disentuh
+FC145=$(api "$OWNER" POST /pembelian/faktur "{\"items\":[{\"ingredient_id\":\"$BH145\",\"mode\":\"pcs\",\"jumlah\":1}]}" | jq -r .faktur_id)
+selesaikan145 "$FC145"
+ROWC145=$(baris145 "$FC145")
+api "$OWNER" POST "/pembelian/laporan-harga/$FC145" "{\"items\":[{\"id\":\"$ROWC145\",\"total_harga\":90000}],\"perbarui_acuan\":false}" > /dev/null
+cek "perbarui_acuan:false → harga acuan tetap 20000" "V == 20000" "$(harga_acuan145)"
+cek "perbarui_acuan:false → nota tetap tercatat di baris (90000)" "V == 1" \
+  "$(api "$OWNER" GET "/pembelian?per_page=500" | jq --arg r "$ROWC145" '([.rows[]|select(.id==$r)][0] | (.total_harga==90000) and (.laporan_harga_at!=null))|if . then 1 else 0 end')"
+
+# --- §3b pratinjau dampak: acuan lama→baru + menu yang menyeberang ambang
+FD145=$(api "$OWNER" POST /pembelian/faktur "{\"items\":[{\"ingredient_id\":\"$BH145\",\"mode\":\"pcs\",\"jumlah\":1}]}" | jq -r .faktur_id)
+selesaikan145 "$FD145"
+ROWD145=$(baris145 "$FD145")
+DMP145=$(api "$OWNER" POST "/pembelian/laporan-harga/$FD145/dampak" "{\"items\":[{\"id\":\"$ROWD145\",\"total_harga\":30000}]}")
+# kolam terlapor jadi 20000 (A), 90000 (C), 30000 (D) → median 30000
+cek "dampak: acuan 20000 → 30000, 1 menu memakai bahan ini" "V == 1" \
+  "$(echo "$DMP145" | jq --arg i "$BH145" '[.bahan[]|select(.ingredient_id==$i)][0] | ((.acuan_lama==20000) and (.acuan_baru==30000) and (.jumlah_menu_terdampak==1))|if . then 1 else 0 end')"
+cek "dampak: Menu Uji145 menyeberang ambang food cost" "V == 1" \
+  "$(echo "$DMP145" | jq --arg m "$MID145" '[.menu_lewat_ambang[]|select(.menu_id==$m)]|length==1|if . then 1 else 0 end')"
+cek "dampak: TIDAK menulis apa pun — acuan masih 20000" "V == 20000" "$(harga_acuan145)"
+cek "kasir minta pratinjau dampak → 403" "V == 403" \
+  "$(status_code_body "$REISS105" POST "/pembelian/laporan-harga/$FD145/dampak" "{\"items\":[{\"id\":\"$ROWD145\",\"total_harga\":1}]}")"
+cek "dampak: baris bukan milik faktur → 400" "V == 400" \
+  "$(status_code_body "$OWNER" POST "/pembelian/laporan-harga/$FD145/dampak" "{\"items\":[{\"id\":\"$ROWA145\",\"total_harga\":1}]}")"
+
+# --- §1 analisis harga: bukti bahwa yang bergerak adalah harga BAHAN
+AN145=$(api "$OWNER" GET /menu/analisis-harga)
+cek "analisis: baris menu memuat menu_diperbarui + ambang perusahaan" "V == 1" \
+  "$(echo "$AN145" | jq --arg m "$MID145" '[.[]|select(.id==$m)][0] | ((.menu_diperbarui|type)=="string" and (.food_cost_maks==40))|if . then 1 else 0 end')"
+cek "analisis: penyumbang HPP menyebut bahan + tanggal harganya bergerak" "V == 1" \
+  "$(echo "$AN145" | jq --arg m "$MID145" --arg i "$BH145" '[.[]|select(.id==$m)][0].penyumbang[0] | ((.ingredient_id==$i) and (.kontribusi==20000) and ((.persen_hpp|round)==100) and ((.bahan_diperbarui|type)=="string") and (.harga_dilaporkan_pada!=null))|if . then 1 else 0 end')"
+cek "analisis: urut food cost tertinggi lebih dulu" "V == 1" \
+  "$(echo "$AN145" | jq '[.[].food_cost_persen] as $f | ($f == ($f|sort|reverse))|if . then 1 else 0 end')"
+cek "kasir buka analisis harga → 403" "V == 403" "$(status_code "$REISS105" GET /menu/analisis-harga)"
+
+# --- §4 ambang food cost perusahaan bisa diatur
+api "$OWNER" PATCH /company '{"food_cost_maks":55}' > /dev/null
+cek "ambang food cost tersimpan & terbawa ke analisis" "V == 55" \
+  "$(api "$OWNER" GET /menu/analisis-harga | jq '.[0].food_cost_maks')"
+api "$OWNER" PATCH /company '{"food_cost_maks":40}' > /dev/null
+
+# --- §4 terapkan harga saran massal (server yang menghitung, bukan klien)
+cek "kasir terapkan harga saran → 403" "V == 403" \
+  "$(status_code_body "$REISS105" POST /menu/terapkan-saran "{\"ids\":[\"$MID145\"]}")"
+TS145=$(api "$OWNER" POST /menu/terapkan-saran "{\"ids\":[\"$MID145\"]}")
+# HPP 20000 × mult 3 = 60000 → harga_jual_bulat 60000 (dari 55000)
+cek "terapkan saran: 1 menu diperbarui 55000 → 60000" "V == 1" \
+  "$(echo "$TS145" | jq --arg m "$MID145" '((.diperbarui==1) and ([.rincian[]|select(.menu_id==$m and .harga_lama==55000 and .harga_baru==60000 and .diperbarui)]|length==1))|if . then 1 else 0 end')"
+cek "harga jual menu benar-benar berubah jadi 60000" "V == 60000" \
+  "$(api "$OWNER" GET "/menu/$MID145" | jq '.harga_jual')"
+cek "terapkan saran tercatat di riwayat harga" "V == 1" \
+  "$(api "$OWNER" GET "/menu/$MID145/riwayat-harga" | jq '[.[]|select(.sebab=="terapkan_saran" and .harga_lama==55000 and .harga_baru==60000)]|length==1|if . then 1 else 0 end')"
+TS145B=$(api "$OWNER" POST /menu/terapkan-saran "{\"ids\":[\"$MID145\"]}")
+cek "terapkan saran kedua kali → dilewati (harga sudah sama)" "V == 1" \
+  "$(echo "$TS145B" | jq '((.diperbarui==0) and (.dilewati==1))|if . then 1 else 0 end')"
+cek "menu yang dilewati tidak menambah baris riwayat" "V == 3" \
+  "$(api "$OWNER" GET "/menu/$MID145/riwayat-harga" | jq 'length')"
+cek "terapkan saran id ngawur → 404" "V == 404" \
+  "$(status_code_body "$OWNER" POST /menu/terapkan-saran '{"ids":["00000000-0000-0000-0000-000000000000"]}')"
+
+
+echo
+echo "── §146 PUT /menu/:id = perbarui SEBAGIAN (field tak dikirim dipertahankan) ──"
+# Dulu PUT memakai skema POST lengkap dengan .default(): klien yang cuma mengganti
+# harga ikut MENGHAPUS resep (komponen default []), menghapus foto, dan
+# MENGAKTIFKAN ULANG menu yang sudah diarsipkan. Seksi ini mengunci perbaikannya.
+M146=$(api "$OWNER" POST /menu "{\"nama\":\"Menu Uji146\",\"kode\":\"U146\",\"category_id\":\"$CAT145\",\"tipe\":\"regular\",\"mult\":3,\"harga_jual\":30000,\"image_url\":\"/uploads/uji146.jpg\",\"komponen\":[{\"ingredient_id\":\"$BH145\",\"qty\":2}]}")
+MID146=$(echo "$M146" | jq -r .id)
+cek "menu146 dibuat lengkap (resep 1 baris + foto + kode)" "V == 1" \
+  "$(echo "$M146" | jq '((.komponen|length)==1 and .image_url=="/uploads/uji146.jpg" and .kode=="U146" and .is_active)|if . then 1 else 0 end')"
+
+# PUT hanya harga_jual — persis pola aplikasi mobile yang tak menyimpan resep
+P146=$(api "$OWNER" PUT "/menu/$MID146" '{"harga_jual":33000}')
+cek "PUT {harga_jual} saja: harga berubah" "V == 33000" "$(echo "$P146" | jq '.harga_jual')"
+cek "PUT {harga_jual} saja: RESEP tetap utuh" "V == 1" \
+  "$(echo "$P146" | jq --arg i "$BH145" '((.komponen|length)==1 and .komponen[0].ingredient_id==$i and .komponen[0].qty==2)|if . then 1 else 0 end')"
+cek "PUT {harga_jual} saja: foto, kode, nama, mult tetap" "V == 1" \
+  "$(echo "$P146" | jq '(.image_url=="/uploads/uji146.jpg" and .kode=="U146" and .nama=="Menu Uji146" and .mult==3)|if . then 1 else 0 end')"
+cek "PUT sebagian tetap tercatat di riwayat harga" "V == 1" \
+  "$(api "$OWNER" GET "/menu/$MID146/riwayat-harga" | jq '[.[]|select(.sebab=="manual" and .harga_lama==30000 and .harga_baru==33000)]|length==1|if . then 1 else 0 end')"
+
+# is_active: menu yang diarsipkan tak boleh hidup lagi hanya karena harga diubah
+api "$OWNER" DELETE "/menu/$MID146" > /dev/null
+cek "menu146 diarsipkan" "V == 1" \
+  "$(api "$OWNER" GET "/menu/$MID146" | jq '(.is_active|not)|if . then 1 else 0 end')"
+cek "PUT {harga_jual} pada menu terarsip: TETAP terarsip" "V == 1" \
+  "$(api "$OWNER" PUT "/menu/$MID146" '{"harga_jual":34000}' | jq '((.is_active|not) and .harga_jual==34000)|if . then 1 else 0 end')"
+cek "is_active:true eksplisit → menu aktif kembali" "V == 1" \
+  "$(api "$OWNER" PUT "/menu/$MID146" '{"is_active":true}' | jq '.is_active|if . then 1 else 0 end')"
+
+# null/[] eksplisit tetap berarti "kosongkan" — bukan "pertahankan"
+cek "PUT {image_url:null} → foto dihapus, resep tetap" "V == 1" \
+  "$(api "$OWNER" PUT "/menu/$MID146" '{"image_url":null}' | jq '(.image_url==null and (.komponen|length)==1)|if . then 1 else 0 end')"
+cek "PUT {komponen:[]} → resep dikosongkan" "V == 0" \
+  "$(api "$OWNER" PUT "/menu/$MID146" '{"komponen":[]}' | jq '.komponen|length')"
+cek "PUT {komponen:[...]} → resep diisi ulang" "V == 1" \
+  "$(api "$OWNER" PUT "/menu/$MID146" "{\"komponen\":[{\"ingredient_id\":\"$BH145\",\"qty\":5}]}" | jq '[.komponen[]|select(.qty==5)]|length')"
+cek "PUT {kode:\"\"} → kode digenerate ulang dari nama" "V == 1" \
+  "$(api "$OWNER" PUT "/menu/$MID146" '{"kode":""}' | jq '(.kode!=null and .kode!="U146")|if . then 1 else 0 end')"
+cek "PUT {} kosong → tak ada yang berubah" "V == 1" \
+  "$(api "$OWNER" PUT "/menu/$MID146" '{}' | jq '((.komponen|length)==1 and .harga_jual==34000 and .nama=="Menu Uji146")|if . then 1 else 0 end')"
+
+# guard yang tak boleh ikut longgar
+cek "PUT {tipe:paket} tanpa base_menu_id → 400" "V == 400" \
+  "$(status_code_body "$OWNER" PUT "/menu/$MID146" '{"tipe":"paket"}')"
+cek "PUT {komponen} bahan milik perusahaan lain → 400" "V == 400" \
+  "$(status_code_body "$OWNER" PUT "/menu/$MID146" '{"komponen":[{"ingredient_id":"00000000-0000-0000-0000-000000000000","qty":1}]}')"
+cek "PUT {nama:\"\"} → 400 (nama tetap wajib berisi bila dikirim)" "V == 400" \
+  "$(status_code_body "$OWNER" PUT "/menu/$MID146" '{"nama":"  "}')"
+cek "PUT menu id ngawur → 404" "V == 404" \
+  "$(status_code_body "$OWNER" PUT "/menu/00000000-0000-0000-0000-000000000000" '{"harga_jual":1000}')"
+cek "kasir PUT /menu → 403" "V == 403" \
+  "$(status_code_body "$REISS105" PUT "/menu/$MID146" '{"harga_jual":1000}')"
+
+
+echo
+echo "── §147 Open bill MENGUNCI harga jual saat dipesan ──"
+# Bill dibuka hari ini, dibayar setelah harga menu naik. Dulu pembeli ditagih
+# harga TERBARU; sekarang harga saat memesan yang menang.
+M147=$(api "$OWNER" POST /menu "{\"nama\":\"Menu Uji147\",\"category_id\":\"$CAT145\",\"tipe\":\"regular\",\"mult\":2,\"harga_jual\":10000,\"komponen\":[]}" | jq -r .id)
+MEJA147=$(api "$REISS105" GET /meja | jq -r '[.[]|select(.is_active)][0].id')
+# transaksi kasir butuh shift terbuka — seksi sebelumnya bisa meninggalkannya tertutup
+if [ -z "$(api "$REISS105" GET /shift/aktif | jq -r '.id // empty')" ]; then
+  api "$REISS105" POST /shift/buka '{"modal_awal":0}' > /dev/null 2>&1 || true
+fi
+OB147=$(api "$REISS105" POST /open-bill "{\"meja_id\":\"$MEJA147\",\"items\":[{\"menu_id\":\"$M147\",\"qty\":2}]}")
+OBID147=$(echo "$OB147" | jq -r .id)
+ITEM147=$(echo "$OB147" | jq -r '.items[0].id')
+cek "bill baru: harga & nama menu di-snapshot server" "V == 1" \
+  "$(echo "$OB147" | jq '(.items[0].harga_satuan==10000) and (.items[0].menu_nama=="Menu Uji147") and ((.items[0].id|length)==36)|if . then 1 else 0 end')"
+
+# harga menu NAIK setelah bill dibuat
+api "$OWNER" PUT "/menu/$M147" '{"harga_jual":25000}' > /dev/null
+cek "harga menu sekarang 25000" "V == 25000" "$(api "$OWNER" GET "/menu/$M147" | jq '.harga_jual')"
+cek "bill TETAP memegang harga 10000 setelah menu naik" "V == 10000" \
+  "$(api "$REISS105" GET "/open-bill/$OBID147" | jq '.items[0].harga_satuan')"
+
+# menyunting bill (ubah qty) tidak boleh melepas kunci harga
+OBE147=$(api "$REISS105" PUT "/open-bill/$OBID147" "{\"meja_id\":\"$MEJA147\",\"items\":[{\"id\":\"$ITEM147\",\"menu_id\":\"$M147\",\"qty\":3}]}")
+cek "PUT baris ber-id: qty berubah, harga terkunci tetap 10000" "V == 1" \
+  "$(echo "$OBE147" | jq --arg i "$ITEM147" '[.items[]|select(.id==$i)][0] | (.qty==3) and (.harga_satuan==10000)|if . then 1 else 0 end')"
+# klien LAMA (tanpa id) juga tak boleh kehilangan kunci — dipasangkan per menu
+OBL147=$(api "$REISS105" PUT "/open-bill/$OBID147" "{\"meja_id\":\"$MEJA147\",\"items\":[{\"menu_id\":\"$M147\",\"qty\":4}]}")
+cek "PUT tanpa id (klien lama): harga terkunci tetap dipertahankan" "V == 1" \
+  "$(echo "$OBL147" | jq '(.items|length==1) and (.items[0].qty==4) and (.items[0].harga_satuan==10000)|if . then 1 else 0 end')"
+# baris TAMBAHAN memakai harga hari ini — bukan ikut terkunci
+ITEM147B=$(echo "$OBL147" | jq -r '.items[0].id')
+OBT147=$(api "$REISS105" PUT "/open-bill/$OBID147" "{\"meja_id\":\"$MEJA147\",\"items\":[{\"id\":\"$ITEM147B\",\"menu_id\":\"$M147\",\"qty\":4},{\"menu_id\":\"$M147\",\"qty\":1}]}")
+cek "baris tambahan pakai harga HARI INI (25000), yang lama tetap 10000" "V == 1" \
+  "$(echo "$OBT147" | jq '([.items[].harga_satuan]|sort) == [10000,25000]|if . then 1 else 0 end')"
+cek "PUT id milik bill lain → 400" "V == 400" \
+  "$(status_code_body "$REISS105" PUT "/open-bill/$OBID147" "{\"meja_id\":\"$MEJA147\",\"items\":[{\"id\":\"00000000-0000-0000-0000-000000000000\",\"menu_id\":\"$M147\",\"qty\":1}]}")"
+
+# BAYAR: yang ditagih adalah harga terkunci, bukan harga menu terbaru
+S147=$(api "$REISS105" POST /penjualan "{\"meja_id\":\"$MEJA147\",\"metode_bayar\":\"tunai\",\"open_bill_id\":\"$OBID147\",\"items\":[{\"menu_id\":\"$M147\",\"qty\":4,\"open_bill_item_id\":\"$ITEM147B\"},{\"menu_id\":\"$M147\",\"qty\":1}]}")
+SID147=$(echo "$S147" | jq -r '.sale.id')
+D147=$(api "$OWNER" GET "/penjualan/$SID147")
+# 4 × 10000 (terkunci) + 1 × 25000 (harga hari ini) = 65000
+cek "bayar bill: baris terkunci ditagih 10000/porsi" "V == 1" \
+  "$(echo "$D147" | jq '[.items[]|select(.hargaSatuan==10000 and .qty==4)]|length==1|if . then 1 else 0 end')"
+cek "bayar bill: baris non-bill ditagih harga hari ini 25000" "V == 1" \
+  "$(echo "$D147" | jq '[.items[]|select(.hargaSatuan==25000 and .qty==1)]|length==1|if . then 1 else 0 end')"
+cek "bayar bill: subtotal 65000 (bukan 5 × 25000 = 125000)" "V == 65000" \
+  "$(echo "$D147" | jq '.sale.subtotal')"
+
+# guard: kasir tak boleh menunjuk baris bill sembarangan untuk menekan harga
+OB147B=$(api "$REISS105" POST /open-bill "{\"meja_id\":\"$MEJA147\",\"items\":[{\"menu_id\":\"$M147\",\"qty\":1}]}")
+OBID147B=$(echo "$OB147B" | jq -r .id)
+ITEM147C=$(echo "$OB147B" | jq -r '.items[0].id')
+cek "open_bill_item_id milik bill LAIN → 400" "V == 400" \
+  "$(status_code_body "$REISS105" POST /penjualan "{\"meja_id\":\"$MEJA147\",\"metode_bayar\":\"tunai\",\"open_bill_id\":\"$OBID147\",\"items\":[{\"menu_id\":\"$M147\",\"qty\":1,\"open_bill_item_id\":\"$ITEM147C\"}]}")"
+cek "open_bill_item_id tanpa open_bill_id → 400" "V == 400" \
+  "$(status_code_body "$REISS105" POST /penjualan "{\"meja_id\":\"$MEJA147\",\"metode_bayar\":\"tunai\",\"items\":[{\"menu_id\":\"$M147\",\"qty\":1,\"open_bill_item_id\":\"$ITEM147C\"}]}")"
+cek "open_bill_id ngawur → 404" "V == 404" \
+  "$(status_code_body "$REISS105" POST /penjualan "{\"meja_id\":\"$MEJA147\",\"metode_bayar\":\"tunai\",\"open_bill_id\":\"00000000-0000-0000-0000-000000000000\",\"items\":[{\"menu_id\":\"$M147\",\"qty\":1}]}")"
+cek "open_bill_item_id vs menu_id tak cocok → 400" "V == 400" \
+  "$(status_code_body "$REISS105" POST /penjualan "{\"meja_id\":\"$MEJA147\",\"metode_bayar\":\"tunai\",\"open_bill_id\":\"$OBID147B\",\"items\":[{\"menu_id\":\"$MID146\",\"qty\":1,\"open_bill_item_id\":\"$ITEM147C\"}]}")"
+api "$REISS105" DELETE "/open-bill/$OBID147B" > /dev/null
+
+
+echo
+echo "── §148 Kiriman WAJIB kelipatan kemasan (sama seperti aturan belanja) ──"
+# Barang yang hanya bisa DIBELI per kilo juga hanya boleh DIKIRIM per kilo —
+# tanpa ini gudang mengirim 900 gr dari kemasan 1 kg dan sisa 100 gr menggantung.
+CK148=$(api "$OWNER" GET /cabang | jq -r '[.[]|select(.tipe=="central_kitchen" and .is_active)][0].id')
+ST148=$(api "$OWNER" GET /cabang | jq -r '[.[]|select(.tipe=="store" and .is_active)][0].id')
+masuk148() { # <ingredient_id> <mode> <jumlah> <total>
+  local f
+  f=$(api "$OWNER" POST /pembelian/faktur "{\"branch_id\":\"$CK148\",\"items\":[{\"ingredient_id\":\"$1\",\"mode\":\"$2\",\"jumlah\":$3,\"total_harga\":$4}]}" | jq -r .faktur_id)
+  api "$OWNER" POST "/pembelian/tahap/$f" '{"ke":"dikerjakan"}' > /dev/null
+  api "$OWNER" POST "/pembelian/tahap/$f" '{"ke":"menunggu"}' > /dev/null
+}
+kirim148() { # <ingredient_id> <qty> → kode HTTP
+  status_code_body "$OWNER" POST /transfer-stok \
+    "{\"asal_branch_id\":\"$CK148\",\"tujuan_branch_id\":\"$ST148\",\"items\":[{\"ingredient_id\":\"$1\",\"qty\":$2}]}"
+}
+
+# (a) bahan per kemasan: 1 kg = 1000 gr, TIDAK boleh eceran; stok CK 3 kg
+BK148=$(api "$OWNER" POST /bahan '{"nama":"Sayur kemasan 148","harga_beli":12000,"isi":1000,"satuan":"gr","satuan_beli":"kg","pengadaan":"beli","kategori":"lain","boleh_eceran":false}' | jq -r .id)
+masuk148 "$BK148" batch 3 36000
+cek "saldo CK 3.000 gr + DTO menandai wajib_kelipatan" "V == 1" \
+  "$(api "$OWNER" GET "/transfer-stok/saldo?branch_id=$CK148" | jq --arg i "$BK148" '[.rows[]|select(.ingredient_id==$i)][0] | ((.saldo==3000) and (.isi==1000) and (.satuan_beli=="kg") and (.wajib_kelipatan==true))|if . then 1 else 0 end')"
+cek "kirim 900 gr (kurang dari 1 kemasan) → 400" "V == 400" "$(kirim148 "$BK148" 900)"
+cek "kirim 1.500 gr (1,5 kemasan) → 400" "V == 400" "$(kirim148 "$BK148" 1500)"
+cek "pesan tolak menyebut kelipatan terdekat yang sah" "V == 1" \
+  "$(api "$OWNER" POST /transfer-stok "{\"asal_branch_id\":\"$CK148\",\"tujuan_branch_id\":\"$ST148\",\"items\":[{\"ingredient_id\":\"$BK148\",\"qty\":1500}]}" | jq '(.error|test("1000 atau 2000"))|if . then 1 else 0 end')"
+cek "kirim 2.000 gr (2 kg penuh) → 201" "V == 201" "$(kirim148 "$BK148" 2000)"
+
+# (b) KIRIM HABIS: sisa di bawah 1 kemasan tetap bisa dipindahkan
+BS148=$(api "$OWNER" POST /bahan '{"nama":"Sayur sisa 148","harga_beli":12000,"isi":1000,"satuan":"gr","satuan_beli":"kg","pengadaan":"beli","kategori":"lain","boleh_eceran":false}' | jq -r .id)
+masuk148 "$BS148" pcs 900 10800
+cek "sisa 900 gr: kirim 500 gr (sebagian) → 400" "V == 400" "$(kirim148 "$BS148" 500)"
+cek "pesan menawarkan jalan keluar 'kirim habis'" "V == 1" \
+  "$(api "$OWNER" POST /transfer-stok "{\"asal_branch_id\":\"$CK148\",\"tujuan_branch_id\":\"$ST148\",\"items\":[{\"ingredient_id\":\"$BS148\",\"qty\":500}]}" | jq '(.error|test("dikirim habis"))|if . then 1 else 0 end')"
+cek "sisa 900 gr: kirim 900 gr (KIRIM HABIS) → 201" "V == 201" "$(kirim148 "$BS148" 900)"
+
+# (c) bahan yang BOLEH eceran tidak ikut terkunci
+BE148=$(api "$OWNER" POST /bahan '{"nama":"Bumbu eceran 148","harga_beli":5000,"isi":1000,"satuan":"gr","satuan_beli":"kg","pengadaan":"beli","kategori":"lain","boleh_eceran":true}' | jq -r .id)
+masuk148 "$BE148" batch 2 10000
+cek "boleh eceran → wajib_kelipatan false" "V == 1" \
+  "$(api "$OWNER" GET "/transfer-stok/saldo?branch_id=$CK148" | jq --arg i "$BE148" '[.rows[]|select(.ingredient_id==$i)][0].wajib_kelipatan|if . then 0 else 1 end')"
+cek "boleh eceran: kirim 900 gr → 201" "V == 201" "$(kirim148 "$BE148" 900)"
+
+# (d) bahan tanpa kemasan (isi = 1) bebas seperti sebelumnya
+B1148=$(api "$OWNER" POST /bahan '{"nama":"Pcs polos 148","harga_beli":2000,"isi":1,"satuan":"pcs","pengadaan":"beli","kategori":"lain"}' | jq -r .id)
+masuk148 "$B1148" pcs 10 20000
+cek "isi = 1 (tanpa kemasan): kirim 7 pcs → 201" "V == 201" "$(kirim148 "$B1148" 7)"
+
+
+echo
+echo "── §149 SATUAN kiriman sama di web & mobile (qty_teks ditulis server) ──"
+# Bug nyata: pada faktur PB-0058 yang SAMA, web menulis "Sayur 900 gr" sementara
+# mobile menulis "Sayur 900 kg" — beda 1000× — karena klien memasangkan `qty`
+# dengan `satuan_beli`. Server sekarang MENULIS teksnya, jadi tak ada lagi yang
+# perlu ditebak klien mana pun.
+# Bahan uji: satuan kerja gr, kemasan kg (1 kg = 1000 gr). Stok CK 900 gr.
+BT149=$(api "$OWNER" POST /bahan '{"nama":"Sayur teks 149","harga_beli":12000,"isi":1000,"satuan":"gr","satuan_beli":"kg","pengadaan":"beli","kategori":"lain","boleh_eceran":true}' | jq -r .id)
+masuk148 "$BT149" pcs 900 10800
+SLD149=$(api "$OWNER" GET "/transfer-stok/saldo?branch_id=$CK148" | jq --arg i "$BT149" '[.rows[]|select(.ingredient_id==$i)][0]')
+cek "saldo kirim: tersedia_teks = '900 gr' (satuan KERJA, bukan kemasan)" "V == 1" \
+  "$(echo "$SLD149" | jq -r '(.tersedia_teks == "900 gr")|if . then 1 else 0 end')"
+cek "saldo kirim: tersedia_teks TIDAK memakai satuan_beli" "V == 0" \
+  "$(echo "$SLD149" | jq -r '(.tersedia_teks|test("kg"))|if . then 1 else 0 end')"
+cek "saldo kirim: tersedia_setara = '≈ 0,9 kg' (pelengkap, bukan pengganti)" "V == 1" \
+  "$(echo "$SLD149" | jq -r '(.tersedia_setara == "≈ 0,9 kg")|if . then 1 else 0 end')"
+# kirim 900 gr → baris faktur transfer harus menuliskan satuan yang sama
+TF149=$(api "$OWNER" POST /transfer-stok "{\"asal_branch_id\":\"$CK148\",\"tujuan_branch_id\":\"$ST148\",\"items\":[{\"ingredient_id\":\"$BT149\",\"qty\":900}]}" | jq -r .faktur_id)
+IT149=$(api "$OWNER" GET /transfer-stok | jq --arg f "$TF149" '[.rows[]|select(.faktur_id==$f)][0].items[0]')
+cek "baris transfer: qty 900 + satuan 'gr'" "V == 1" \
+  "$(echo "$IT149" | jq -r '((.qty == 900) and (.satuan == "gr"))|if . then 1 else 0 end')"
+cek "baris transfer: qty_teks = '900 gr'" "V == 1" \
+  "$(echo "$IT149" | jq -r '(.qty_teks == "900 gr")|if . then 1 else 0 end')"
+cek "baris transfer: qty_setara = '≈ 0,9 kg'" "V == 1" \
+  "$(echo "$IT149" | jq -r '(.qty_setara == "≈ 0,9 kg")|if . then 1 else 0 end')"
+# penerimaan di cabang tujuan — layar tempat bug mobile terlihat
+PN149=$(api "$OWNER" GET "/penerimaan?branch_id=$ST148" | jq --arg f "$TF149" '[.rows[]|select(.faktur_id==$f)][0]')
+cek "penerimaan: qty_teks = '900 gr' (bukan '900 kg')" "V == 1" \
+  "$(echo "$PN149" | jq -r '(.qty_teks == "900 gr")|if . then 1 else 0 end')"
+cek "penerimaan: qty_setara = '≈ 0,9 kg'" "V == 1" \
+  "$(echo "$PN149" | jq -r '(.qty_setara == "≈ 0,9 kg")|if . then 1 else 0 end')"
+# baris faktur BELI mode batch — sumber "2000 batch" di mobile
+FB149=$(api "$OWNER" POST /pembelian/faktur "{\"branch_id\":\"$CK148\",\"items\":[{\"ingredient_id\":\"$BT149\",\"mode\":\"batch\",\"jumlah\":2,\"total_harga\":24000}]}" | jq -r .faktur_id)
+BR149=$(api "$OWNER" GET "/pembelian?branch_id=$CK148&per_page=100" | jq --arg f "$FB149" '[.rows[]|select(.faktur_id==$f)][0]')
+cek "faktur beli mode batch: is_batch true TAPI qty tetap dalam satuan kerja" "V == 1" \
+  "$(echo "$BR149" | jq -r '((.is_batch == true) and (.qty == 2000) and (.satuan == "gr"))|if . then 1 else 0 end')"
+cek "faktur beli: qty_teks = '2.000 gr' (bukan '2000 batch')" "V == 1" \
+  "$(echo "$BR149" | jq -r '(.qty_teks == "2.000 gr")|if . then 1 else 0 end')"
+cek "faktur beli: qty_teks TIDAK memuat kata 'batch'" "V == 0" \
+  "$(echo "$BR149" | jq -r '(.qty_teks|test("batch"))|if . then 1 else 0 end')"
+cek "faktur beli: qty_setara = '2 kg' (kelipatan pas, tanpa ≈)" "V == 1" \
+  "$(echo "$BR149" | jq -r '(.qty_setara == "2 kg")|if . then 1 else 0 end')"
+# bahan tanpa kemasan → tak ada teks setara yang bisa disalahtafsirkan
+SLD149B=$(api "$OWNER" GET "/transfer-stok/saldo?branch_id=$CK148" | jq --arg i "$B1148" '[.rows[]|select(.ingredient_id==$i)][0]')
+cek "bahan tanpa kemasan: tersedia_setara null" "V == 1" \
+  "$(echo "$SLD149B" | jq -r '(.tersedia_setara == null)|if . then 1 else 0 end')"
 
 
 echo

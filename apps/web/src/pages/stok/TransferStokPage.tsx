@@ -138,13 +138,35 @@ export function TransferStokPage() {
     },
   });
 
+  /**
+   * Aturan KEMASAN: barang yang hanya bisa dibeli per kemasan juga hanya boleh
+   * dikirim per kemasan. Dicermin dari server (`wajib_kelipatan`) supaya form
+   * tak pernah menjanjikan sesuatu yang nanti ditolak POST /transfer-stok —
+   * termasuk pengecualian "kirim habis" (qty = seluruh sisa).
+   */
+  const salahKemasan = (s: TransferStokSaldoRow | undefined, qtyTeks: string) => {
+    const qty = Number(qtyTeks);
+    if (!s || !s.wajib_kelipatan || !(qty > 0)) return null;
+    const sisa = tersediaDari(s);
+    if (Math.abs(qty - sisa) < 1e-6) return null; // kirim habis
+    const kemasan = qty / s.isi;
+    if (Math.abs(kemasan - Math.round(kemasan)) < 1e-6) return null;
+    return { bawah: Math.floor(kemasan) * s.isi, atas: Math.ceil(kemasan) * s.isi, sisa };
+  };
+
   const barisTerisi = baris.filter((b) => b.ingredient_id && Number(b.qty) > 0);
   const adaQtyLebih = baris.some((b) => {
     const s = saldoById.get(b.ingredient_id);
     return s != null && Number(b.qty) > tersediaDari(s) + 1e-9;
   });
+  const adaSalahKemasan = baris.some((b) => salahKemasan(saldoById.get(b.ingredient_id), b.qty));
   const bisaKirim =
-    !!asalId && !!tujuanId && asalId !== tujuanId && barisTerisi.length > 0 && !adaQtyLebih;
+    !!asalId &&
+    !!tujuanId &&
+    asalId !== tujuanId &&
+    barisTerisi.length > 0 &&
+    !adaQtyLebih &&
+    !adaSalahKemasan;
 
   const namaCabang = (id: string) => cabang.find((b) => b.id === id)?.nama ?? "—";
 
@@ -261,7 +283,7 @@ export function TransferStokPage() {
                     <optgroup label="🛒 Bahan beli">
                       {opsi(bahanBeli).map((r) => (
                         <option key={r.ingredient_id} value={r.ingredient_id}>
-                          {r.nama} — {formatAngka(tersediaDari(r))} {r.satuan}
+                          {r.nama} — {r.tersedia_teks}
                         </option>
                       ))}
                     </optgroup>
@@ -270,7 +292,7 @@ export function TransferStokPage() {
                     <optgroup label="🏭 Bahan produksi">
                       {opsi(bahanProduksi).map((r) => (
                         <option key={r.ingredient_id} value={r.ingredient_id}>
-                          {r.nama} — {formatAngka(tersediaDari(r))} {r.satuan}
+                          {r.nama} — {r.tersedia_teks}
                         </option>
                       ))}
                     </optgroup>
@@ -313,12 +335,46 @@ export function TransferStokPage() {
                 </button>
               );
 
+            /**
+             * Petunjuk kemasan di bawah input: menyebut kelipatannya SEBELUM
+             * ditekan Kirim, dan saat salah menyebut angka terdekat yang sah —
+             * lebih berguna daripada sekadar "tidak boleh".
+             */
+            const hintKemasan = (s: TransferStokSaldoRow | undefined, qtyTeks: string) => {
+              if (!s?.wajib_kelipatan) return null;
+              const kemasan = s.satuan_beli ?? "kemasan";
+              const salah = salahKemasan(s, qtyTeks);
+              if (!salah) {
+                return (
+                  <div className="mt-1 text-[11px] text-stone-400">
+                    Per {kemasan} — kelipatan {formatAngka(s.isi)} {s.satuan}
+                  </div>
+                );
+              }
+              return (
+                <div className="mt-1 text-[11px] font-medium text-red-600">
+                  Harus kelipatan {formatAngka(s.isi)} {s.satuan} (1 {kemasan}) — isi{" "}
+                  {salah.bawah > 0 ? `${formatAngka(salah.bawah)} atau ` : ""}
+                  {formatAngka(salah.atas)}
+                  {salah.sisa < s.isi
+                    ? `, atau ${formatAngka(salah.sisa)} untuk kirim habis`
+                    : ""}
+                  .
+                </div>
+              );
+            };
+
+            // Teks sisa datang dari server (`tersedia_teks`) supaya tampilan web
+            // dan mobile memakai satuan yang persis sama.
             const stokTersedia = (s: TransferStokSaldoRow | undefined) => (
               <>
-                {s ? formatAngka(tersediaDari(s)) : "—"}
+                {s ? s.tersedia_teks : "—"}
+                {s?.tersedia_setara && (
+                  <div className="text-[11px] font-normal text-stone-400">{s.tersedia_setara}</div>
+                )}
                 {s && s.dalam_jalan > 0 && (
                   <div className="text-[11px] font-normal text-amber-600">
-                    {formatAngka(s.dalam_jalan)} dalam perjalanan
+                    {formatAngka(s.dalam_jalan)} {s.satuan} dalam perjalanan
                   </div>
                 )}
               </>
@@ -354,6 +410,7 @@ export function TransferStokPage() {
                               Jumlah kirim{s?.satuan ? ` (${s.satuan})` : ""}
                             </div>
                             {inputQty(i, b, lebih, "w-full")}
+                            {hintKemasan(s, b.qty)}
                           </div>
                         </div>
                       </div>
@@ -389,6 +446,7 @@ export function TransferStokPage() {
                             </td>
                             <td className="py-2 pr-2 text-right">
                               {inputQty(i, b, lebih, "w-28")}
+                              {hintKemasan(s, b.qty)}
                             </td>
                             <td className="py-2 pr-2 text-xs text-stone-500">{s?.satuan ?? ""}</td>
                             <td className="py-2 text-right">{tombolHapus(i, "✕")}</td>
@@ -528,7 +586,7 @@ export function TransferStokPage() {
                       <div className="flex items-start justify-between gap-2">
                         <span className="font-medium">{it.nama}</span>
                         <span className="shrink-0 tabular-nums text-sm">
-                          {formatAngka(it.qty)} {it.satuan}
+                          {it.qty_teks}
                         </span>
                       </div>
                       <div className="mt-1 flex flex-wrap items-center gap-2">
@@ -559,7 +617,7 @@ export function TransferStokPage() {
                             <BadgeJenis pengadaan={it.pengadaan} />
                           </td>
                           <td className="px-3 py-1.5 text-right tabular-nums">
-                            {formatAngka(it.qty)} {it.satuan}
+                            {it.qty_teks}
                           </td>
                           <td className="px-3 py-1.5 text-xs text-stone-500">
                             {(BADGE_STATUS[it.status] ?? BADGE_STATUS.menunggu).label}

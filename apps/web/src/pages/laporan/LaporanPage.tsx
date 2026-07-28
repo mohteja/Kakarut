@@ -147,6 +147,13 @@ export function LaporanPage() {
             />
             <StatCard label="PB1 Terkumpul" value={formatRupiah(lap.pb1_terkumpul)} />
           </div>
+          {/* Dari mana angka HPP ini datang — supaya tak dikira mengikuti setelan
+              Metode HPP (yang hanya berlaku untuk kartu persediaan per bahan). */}
+          <p className="-mt-4 mb-6 text-xs text-stone-500">
+            <b>HPP Terpakai</b> dijumlahkan dari biaya yang dikunci di tiap transaksi saat
+            pembayaran, dihitung dari <b>resep menu × harga acuan bahan</b> saat itu — bukan dari
+            harga lot stok, dan tidak terpengaruh setelan Metode biaya persediaan.
+          </p>
 
           {lap.per_metode.length > 0 && (
             <div className="mb-6">

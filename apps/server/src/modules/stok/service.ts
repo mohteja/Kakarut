@@ -671,7 +671,7 @@ export async function fifoBahan(params: {
     };
   });
 
-  const hasil = jalankanFifo(events, hargaAcuan);
+  const hasil = jalankanFifo(events, hargaAcuan, metodeHpp);
   // tampilan: pemakaian TERBARU dulu, dibatasi — lot & saldo tetap dari walk penuh
   const pemakaianTerbaru = hasil.pemakaian.slice(-BATAS_PEMAKAIAN_FIFO).reverse();
   return {

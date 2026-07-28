@@ -18,9 +18,18 @@ import { alias } from "drizzle-orm/pg-core";
 import { Hono, type Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import { jumlahFaktur, type JenisPengadaan } from "@kakarut/shared";
-import { median } from "../../lib/harga-stats";
-import { db } from "../../db/client";
+import {
+  hargaPerUnit,
+  jumlahFaktur,
+  qtyTeks,
+  type DampakBahan,
+  type DampakLaporanHarga,
+  type DampakMenu,
+  type JenisPengadaan,
+} from "@kakarut/shared";
+import { acuanDariLot } from "../../lib/harga-stats";
+import { wajibKelipatanKemasan } from "../../lib/kemasan";
+import { db, type Db, type Tx } from "../../db/client";
 import {
   branches,
   companies,
@@ -56,6 +65,12 @@ import {
 } from "../../middleware/auth";
 import { tambahHari, tanggalDi } from "../../lib/time";
 import { hitungSaldoCabang, kunciKirimCabang, qtyDalamJalan } from "../stok/service";
+import {
+  katalogDenganHarga,
+  loadKatalog,
+  menuMemakaiBahan,
+  toMenuDto,
+} from "../menu/service";
 import { autoFileRakCabang } from "../penyimpanan/autoFile";
 
 const pembuat = alias(users, "pembuat_prod");
@@ -393,6 +408,120 @@ async function pastikanKaryawan(userId: string, companyId: string) {
   if (!m) throw new HTTPException(400, { message: "Karyawan bukan anggota perusahaan" });
 }
 
+/** Satu baris faktur beli, secukupnya untuk menghitung harga acuan baru. */
+interface BarisHarga {
+  ingredientId: string;
+  qty: number;
+  isi: number;
+  status: string;
+}
+
+/** Baris harga yang dilaporkan — dipakai endpoint laporan harga & pratinjaunya. */
+const LaporanHargaItems = z
+  .array(z.object({ id: z.string().uuid(), total_harga: z.number().min(0) }))
+  .min(1);
+
+/**
+ * Muat baris faktur belanja + pastikan semua id yang dilaporkan memang milik
+ * faktur itu. Dipakai bersama endpoint laporan harga (yang menulis) dan
+ * pratinjau dampaknya (yang hanya membaca).
+ */
+async function bacaBarisLaporan(
+  companyId: string,
+  fakturId: string,
+  items: { id: string; total_harga: number }[],
+) {
+  if (!/^[0-9a-f-]{36}$/i.test(fakturId)) {
+    throw new HTTPException(404, { message: "Faktur tidak ditemukan" });
+  }
+  // Baris faktur + isi bahan (utk konversi harga/satuan → harga beli/kemasan)
+  const barisFaktur = await db
+    .select({
+      id: productions.id,
+      ingredientId: productions.ingredientId,
+      qty: productions.qty,
+      isi: ingredients.isi,
+      status: productions.status,
+    })
+    .from(productions)
+    .innerJoin(ingredients, eq(productions.ingredientId, ingredients.id))
+    .where(
+      and(
+        eq(productions.companyId, companyId),
+        eq(productions.fakturId, fakturId),
+        eq(productions.tipe, "beli"),
+        isNull(productions.deletedAt),
+      ),
+    );
+  if (barisFaktur.length === 0) {
+    throw new HTTPException(404, { message: "Faktur tidak ditemukan" });
+  }
+  const byId = new Map<string, BarisHarga>(barisFaktur.map((b) => [b.id, b]));
+  for (const it of items) {
+    if (!byId.has(it.id)) {
+      throw new HTTPException(400, { message: "Ada baris yang bukan bagian faktur ini" });
+    }
+  }
+  // dedupe: id sama → laporan terakhir yang berlaku
+  return { byId, target: new Map(items.map((it) => [it.id, it.total_harga])) };
+}
+
+/**
+ * Harga acuan BARU tiap bahan seandainya `target` (id baris → total harga)
+ * dilaporkan — satu sumber kebenaran yang dipakai bersama oleh endpoint yang
+ * MENULIS (laporan harga) dan endpoint yang cuma MENGINTIP (/dampak), supaya
+ * angka pratinjau tak pernah beda dari angka yang akhirnya tersimpan.
+ *
+ * Kolam median hanya memuat lot `dikonfirmasi` yang harganya BUKAN tebakan
+ * (`harga_tebakan = false`). Lot dari faktur ini dikeluarkan dari hasil query
+ * lalu dimasukkan kembali dengan nilai barunya — persis kondisi setelah update
+ * dijalankan.
+ */
+async function hitungAcuanBaru(
+  dbx: Db | Tx,
+  companyId: string,
+  baris: Map<string, BarisHarga>,
+  target: Map<string, number>,
+): Promise<Map<string, { isi: number; acuan: number | null }>> {
+  const perBahan = new Map<string, { isi: number; fallback: number | null }>();
+  for (const [id, totalHarga] of target) {
+    const b = baris.get(id)!;
+    const sebelumnya = perBahan.get(b.ingredientId);
+    perBahan.set(b.ingredientId, {
+      isi: b.isi,
+      fallback: b.qty > 0 ? totalHarga / b.qty : (sebelumnya?.fallback ?? null),
+    });
+  }
+  const hasil = new Map<string, { isi: number; acuan: number | null }>();
+  for (const [ingredientId, info] of perBahan) {
+    const lotRows = await dbx
+      .select({ id: productions.id, qty: productions.qty, totalHarga: productions.totalHarga })
+      .from(productions)
+      .where(
+        and(
+          eq(productions.companyId, companyId),
+          eq(productions.ingredientId, ingredientId),
+          eq(productions.tipe, "beli"),
+          eq(productions.status, "dikonfirmasi"),
+          eq(productions.hargaTebakan, false),
+          isNull(productions.deletedAt),
+        ),
+      );
+    const dilaporkan: Array<{ id: string; qty: number; totalHarga: number }> = [];
+    for (const [id, totalHarga] of target) {
+      const b = baris.get(id)!;
+      // Lot yang belum dikonfirmasi tak masuk kolam — sama seperti lot lain.
+      if (b.ingredientId !== ingredientId || b.status !== "dikonfirmasi") continue;
+      dilaporkan.push({ id, qty: b.qty, totalHarga });
+    }
+    hasil.set(ingredientId, {
+      isi: info.isi,
+      acuan: acuanDariLot(lotRows, dilaporkan, info.fallback),
+    });
+  }
+  return hasil;
+}
+
 /**
  * Dua jalur penambahan stok dengan aturan yang sama, dibedakan `tipe`:
  * - /produksi  → hanya bahan berjenis pengadaan "produksi" (dibuat sendiri)
@@ -522,6 +651,9 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
             tipe === "beli"
               ? (item.total_harga ?? hargaDefault(qty, ing))
               : hargaDefault(qty, ing),
+          // Tanpa harga di faktur, angkanya cuma tebakan dari harga acuan
+          // sekarang — tak boleh ikut menentukan harga acuan berikutnya.
+          hargaTebakan: tipe !== "beli" || item.total_harga == null,
           fakturId,
           noFaktur: body.no_faktur ?? null,
           supplierId: body.supplier_id ?? null,
@@ -599,6 +731,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
               qty: f.qty,
               tipe: "beli",
               totalHarga: hargaDefault(f.qty, inp),
+              hargaTebakan: true, // belanja otomatis: harga belum pernah dilihat
               fakturId: beliFakturId,
               noFaktur: null,
               supplierId: null,
@@ -1023,7 +1156,8 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
                     ? { supplierId: supplierBaris(b) }
                     : {}),
                   // harga riil menggantikan estimasi RAB (harga pasar berubah)
-                  ...(item.harga != null ? { totalHarga: item.harga } : {}),
+                  // — angka yang dilihat manusia, jadi bukan tebakan lagi
+                  ...(item.harga != null ? { totalHarga: item.harga, hargaTebakan: false } : {}),
                   // exp lot saat masuk stok (otomatis dari masa simpan / override)
                   ...(masukStok ? { expDate: expBaris(b, item.exp) } : {}),
                 })
@@ -1077,6 +1211,8 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
                 qty: item.qty,
                 tipe: b.tipe,
                 totalHarga: hargaBaris,
+                // harga riil → bukan tebakan; prorata mewarisi sifat induknya
+                hargaTebakan: item.harga != null ? false : b.hargaTebakan,
                 fakturId: b.fakturId,
                 // pertahankan penanda permintaan agar baris hasil tahap (split)
                 // tetap tergabung di "Data Permintaan Stok"
@@ -1528,6 +1664,24 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         // dijanjikan ke beberapa permintaan dan saldo CK jadi minus saat semua
         // kiriman diterima.
         const jalanCk = await qtyDalamJalan(tx, auth.company_id!, ckId, [...kirimMap.keys()]);
+        // Aturan kemasan kiriman: sama dengan belanja — barang yang hanya bisa
+        // dibeli per kemasan juga hanya boleh dikirim per kemasan.
+        const bahanKirim = new Map(
+          (
+            await tx
+              .select({
+                id: ingredients.id,
+                nama: ingredients.nama,
+                satuan: ingredients.satuan,
+                satuanBeli: ingredients.satuanBeli,
+                isi: ingredients.isi,
+                pengadaan: ingredients.pengadaan,
+                bolehEceran: ingredients.bolehEceran,
+              })
+              .from(ingredients)
+              .where(inArray(ingredients.id, [...kirimMap.keys()]))
+          ).map((b) => [b.id, b]),
+        );
         for (const [ingId, v] of kirimMap) {
           const s = saldoCk.get(ingId);
           const diJalan = jalanCk.get(ingId) ?? 0;
@@ -1539,6 +1693,8 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
               message: `Stok CK tidak cukup untuk ${s?.nama ?? "bahan"} (tersedia ${Math.max(0, tersedia)} ${s?.satuan ?? ""}${catatanJalan}) — kurangi jumlah kiriman`,
             });
           }
+          const b = bahanKirim.get(ingId);
+          if (b) wajibKelipatanKemasan(b, v.qty, Math.max(0, tersedia));
         }
         const asalNomor = (await nomorUntukRefs(tx, auth.company_id!, [fakturId])).get(fakturId);
         // Faktur KIRIMAN (transfer stok CK): lahir langsung 'menunggu' di cabang
@@ -1734,22 +1890,130 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
       return c.json({ rows });
     })
     /**
+     * PRATINJAU DAMPAK laporan harga — tidak menulis apa pun.
+     *
+     * "Laporan Harga" tampak seperti sekadar mencatat nota, padahal juga
+     * menyegarkan HARGA ACUAN bahan; dan karena HPP dihitung live dari harga
+     * acuan, food cost SEMUA menu yang memakai bahan itu ikut bergeser. Di sini
+     * pergeserannya dihitung lebih dulu dengan fungsi yang SAMA seperti yang
+     * menulis (`hitungAcuanBaru`), jadi pratinjau tak mungkin beda dari hasil.
+     *
+     * POST, bukan GET: dampaknya bergantung pada angka yang sedang DIKETIK
+     * user, bukan pada angka yang sudah tersimpan di faktur. owner/admin.
+     */
+    .post(
+      "/laporan-harga/:fakturId/dampak",
+      requireRole("owner", "admin"),
+      zValidator("json", z.object({ items: LaporanHargaItems })),
+      async (c) => {
+        if (tipe !== "beli") {
+          throw new HTTPException(400, {
+            message: "Laporan harga hanya untuk faktur belanja bahan baku",
+          });
+        }
+        const auth = c.get("auth");
+        const { items } = c.req.valid("json");
+        const { byId, target } = await bacaBarisLaporan(
+          auth.company_id!,
+          c.req.param("fakturId"),
+          items,
+        );
+        const acuanBaru = await hitungAcuanBaru(db, auth.company_id!, byId, target);
+        const idBahan = [...acuanBaru.keys()];
+        const [katalog, perusahaan, bahanRows] = await Promise.all([
+          loadKatalog(db, auth.company_id!),
+          db
+            .select({ foodCostMaks: companies.foodCostMaks })
+            .from(companies)
+            .where(eq(companies.id, auth.company_id!)),
+          idBahan.length > 0
+            ? db
+                .select({
+                  id: ingredients.id,
+                  nama: ingredients.nama,
+                  satuan: ingredients.satuan,
+                  satuanBeli: ingredients.satuanBeli,
+                  hargaBeli: ingredients.hargaBeli,
+                })
+                .from(ingredients)
+                .where(
+                  and(
+                    eq(ingredients.companyId, auth.company_id!),
+                    inArray(ingredients.id, idBahan),
+                  ),
+                )
+            : Promise.resolve([]),
+        ]);
+        const foodCostMaks = perusahaan[0]?.foodCostMaks ?? 40;
+        const bahanById = new Map(bahanRows.map((b) => [b.id, b]));
+
+        const hargaPerUnitBaru = new Map<string, number>();
+        const bahan: DampakBahan[] = [];
+        for (const [ingredientId, { isi, acuan }] of acuanBaru) {
+          const ing = bahanById.get(ingredientId);
+          if (!ing || acuan == null) continue;
+          const acuanBaruRp = Math.round(acuan * isi);
+          hargaPerUnitBaru.set(ingredientId, hargaPerUnit(acuanBaruRp, isi));
+          bahan.push({
+            ingredient_id: ingredientId,
+            nama: ing.nama,
+            // acuan itu harga per KEMASAN beli, bukan per satuan resep
+            satuan: ing.satuanBeli ?? ing.satuan,
+            acuan_lama: ing.hargaBeli,
+            acuan_baru: acuanBaruRp,
+            jumlah_menu_terdampak: menuMemakaiBahan(katalog, ingredientId).length,
+          });
+        }
+        const katalogBaru = katalogDenganHarga(katalog, hargaPerUnitBaru);
+        const menuLewat: DampakMenu[] = [];
+        for (const m of katalog.rows) {
+          if (!m.isActive) continue;
+          const lama = toMenuDto(m, katalog).food_cost_persen;
+          const baru = toMenuDto(m, katalogBaru).food_cost_persen;
+          // Hanya yang MENYEBERANG ambang — menu yang sudah tinggi sejak awal
+          // bukan kabar baru dan cuma membuat panel ini ramai.
+          if (lama <= foodCostMaks && baru > foodCostMaks) {
+            menuLewat.push({
+              menu_id: m.id,
+              nama: m.nama,
+              food_cost_lama: lama,
+              food_cost_baru: baru,
+            });
+          }
+        }
+        menuLewat.sort((a, b) => b.food_cost_baru - a.food_cost_baru);
+        const hasil: DampakLaporanHarga = {
+          food_cost_maks: foodCostMaks,
+          bahan,
+          menu_lewat_ambang: menuLewat,
+        };
+        return c.json(hasil);
+      },
+    )
+    /**
      * LAPORAN HARGA faktur belanja: catat harga riil yang dibayar per baris
      * (setelah barang dibeli/dikirim) → total_harga baris diperbarui + harga
      * beli acuan tiap bahan disegarkan ke MEDIAN riwayat pembelian (acuan RAB;
      * harga riil per lot tetap dipakai HPP FIFO/resep). Khusus jalur BELI.
      * owner/admin.
+     *
+     * PENTING — kolam median hanya memuat lot yang harganya PERNAH DILIHAT
+     * MANUSIA (`harga_tebakan = false`): harga diisi di faktur, dilaporkan
+     * lewat endpoint ini, atau direalisasi saat tahap. Faktur yang dibuat tanpa
+     * harga memakai TEBAKAN `hargaDefault()` yang diturunkan dari harga acuan
+     * saat itu; kalau tebakan ikut dihitung, acuan menyeret dirinya sendiri
+     * (acuan → tebakan → median → acuan) dan HPP seluruh menu ikut hanyut.
+     *
+     * `perbarui_acuan: false` mencatat harga nota saja tanpa menyentuh harga
+     * acuan bahan — dipakai saat nota tidak mewakili harga pasar (mis. beli
+     * eceran darurat). Bawaannya `true` supaya klien lama tak berubah perilaku.
      */
     .post(
       "/laporan-harga/:fakturId",
       requireRole("owner", "admin"),
       zValidator(
         "json",
-        z.object({
-          items: z
-            .array(z.object({ id: z.string().uuid(), total_harga: z.number().min(0) }))
-            .min(1),
-        }),
+        z.object({ items: LaporanHargaItems, perbarui_acuan: z.boolean().optional() }),
       ),
       async (c) => {
         if (tipe !== "beli") {
@@ -1758,47 +2022,22 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
           });
         }
         const auth = c.get("auth");
-        const fakturId = c.req.param("fakturId");
-        const { items } = c.req.valid("json");
-        if (!/^[0-9a-f-]{36}$/i.test(fakturId)) {
-          throw new HTTPException(404, { message: "Faktur tidak ditemukan" });
-        }
-        // Baris faktur + isi bahan (utk konversi harga/satuan → harga beli/kemasan)
-        const barisFaktur = await db
-          .select({
-            id: productions.id,
-            ingredientId: productions.ingredientId,
-            qty: productions.qty,
-            isi: ingredients.isi,
-          })
-          .from(productions)
-          .innerJoin(ingredients, eq(productions.ingredientId, ingredients.id))
-          .where(
-            and(
-              eq(productions.companyId, auth.company_id!),
-              eq(productions.fakturId, fakturId),
-              eq(productions.tipe, "beli"),
-              isNull(productions.deletedAt),
-            ),
-          );
-        if (barisFaktur.length === 0) {
-          throw new HTTPException(404, { message: "Faktur tidak ditemukan" });
-        }
-        const byId = new Map(barisFaktur.map((b) => [b.id, b]));
-        // semua id yang dilaporkan harus milik faktur ini
-        for (const it of items) {
-          if (!byId.has(it.id)) {
-            throw new HTTPException(400, { message: "Ada baris yang bukan bagian faktur ini" });
-          }
-        }
-        // dedupe: id sama → laporan terakhir yang berlaku
-        const target = new Map(items.map((it) => [it.id, it.total_harga]));
+        const { items, perbarui_acuan: perbaruiAcuanBody } = c.req.valid("json");
+        // Bawaan true: klien lama (termasuk aplikasi mobile) tak berubah perilaku.
+        const perbaruiAcuan = perbaruiAcuanBody ?? true;
+        const { byId, target } = await bacaBarisLaporan(
+          auth.company_id!,
+          c.req.param("fakturId"),
+          items,
+        );
         await db.transaction(async (tx) => {
           for (const [id, totalHarga] of target) {
             await tx
               .update(productions)
               .set({
                 totalHarga,
+                // angka dari nota — bukan tebakan lagi, boleh menentukan acuan
+                hargaTebakan: false,
                 laporanHargaAt: new Date(),
                 updatedAt: new Date(),
                 updatedBy: auth.sub,
@@ -1808,47 +2047,25 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
               );
           }
           // Segarkan HARGA ACUAN tiap bahan yang dilaporkan ke MEDIAN riwayat
-          // pembelian (semua lot beli dikonfirmasi yang berharga, termasuk yang
-          // barusan diperbarui) — acuan dipakai RAB belanja berikutnya; harga
-          // riil per lot tetap tercatat utk HPP FIFO/resep. Fallback bila belum
-          // ada lot dikonfirmasi berharga: harga baris yang dilaporkan.
-          const perBahan = new Map<string, { isi: number; fallback: number | null }>();
-          for (const [id, totalHarga] of target) {
-            const b = byId.get(id)!;
-            const sebelumnya = perBahan.get(b.ingredientId);
-            perBahan.set(b.ingredientId, {
-              isi: b.isi,
-              fallback: b.qty > 0 ? totalHarga / b.qty : (sebelumnya?.fallback ?? null),
-            });
-          }
-          for (const [ingredientId, info] of perBahan) {
-            const lotRows = await tx
-              .select({ qty: productions.qty, totalHarga: productions.totalHarga })
-              .from(productions)
+          // pembelian — acuan dipakai RAB belanja berikutnya; harga riil per lot
+          // tetap tercatat utk HPP FIFO/resep. Fallback bila belum ada lot
+          // berharga-dilaporkan: harga baris yang barusan dilaporkan.
+          //
+          // Kolam median HANYA memuat lot ber-`harga_tebakan = false` (lihat
+          // `hitungAcuanBaru`). Faktur yang dibuat tanpa harga membawa TEBAKAN
+          // `hargaDefault()` yang diturunkan dari harga acuan saat itu; kalau
+          // ikut dihitung, acuan menyeret dirinya sendiri (acuan → tebakan →
+          // median → acuan) sampai HPP seluruh menu hanyut naik.
+          if (!perbaruiAcuan) return;
+          const acuanBaru = await hitungAcuanBaru(tx, auth.company_id!, byId, target);
+          for (const [ingredientId, { isi, acuan }] of acuanBaru) {
+            if (acuan == null) continue;
+            await tx
+              .update(ingredients)
+              .set({ hargaBeli: Math.round(acuan * isi), updatedAt: new Date() })
               .where(
-                and(
-                  eq(productions.companyId, auth.company_id!),
-                  eq(productions.ingredientId, ingredientId),
-                  eq(productions.tipe, "beli"),
-                  eq(productions.status, "dikonfirmasi"),
-                  isNull(productions.deletedAt),
-                ),
+                and(eq(ingredients.id, ingredientId), eq(ingredients.companyId, auth.company_id!)),
               );
-            const hargaSatuan = lotRows
-              .filter((l) => l.totalHarga != null && l.qty > 0)
-              .map((l) => Math.round((l.totalHarga! / l.qty) * 100) / 100);
-            const acuan = median(hargaSatuan) ?? info.fallback;
-            if (acuan != null) {
-              await tx
-                .update(ingredients)
-                .set({ hargaBeli: Math.round(acuan * info.isi), updatedAt: new Date() })
-                .where(
-                  and(
-                    eq(ingredients.id, ingredientId),
-                    eq(ingredients.companyId, auth.company_id!),
-                  ),
-                );
-            }
           }
         });
         return c.json({ ok: true, jumlah: target.size });
@@ -1889,6 +2106,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
             tipe,
             totalHarga:
               tipe === "beli" ? (body.total_harga ?? hargaDefault(qty, ing)) : null,
+            hargaTebakan: tipe !== "beli" || body.total_harga == null,
             isBatch: body.batch,
             catatan: body.catatan ?? null,
             userId: auth.sub,
@@ -2028,10 +2246,28 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         ingredient_id: productions.ingredientId,
         bahan: ingredients.nama,
         isi: ingredients.isi,
+        /**
+         * SATUAN TAMPILAN BARIS INI. `qty` di bawah SELALU dinyatakan dalam
+         * `satuan` (satuan kerja/resep) — lihat pembuatan baris:
+         * `qty = mode === "batch" ? jumlah * isi : jumlah`. Jadi pasangan yang
+         * benar untuk ditampilkan adalah `qty` + `satuan`.
+         */
         satuan: ingredients.satuan,
+        /**
+         * Satuan BELI/kemasan (mis. "kg"), hanya untuk input pembelian &
+         * dokumen belanja. JANGAN dipasangkan langsung dengan `qty` — itu
+         * membuat 900 gr terbaca "900 kg". Konversinya: qty ÷ isi.
+         */
         satuan_beli: ingredients.satuanBeli,
+        /** jumlah dalam `satuan` (satuan kerja), bukan dalam `satuan_beli` */
         qty: productions.qty,
         total_harga: productions.totalHarga,
+        /**
+         * ASAL-USUL input, BUKAN satuan: true = user mengetiknya dalam kemasan
+         * (`mode:"batch"`) lalu server mengalikannya dengan `isi`. Menampilkan
+         * kata "batch" sebagai satuan `qty` salah — qty-nya sudah terlanjur
+         * dikonversi ke satuan kerja.
+         */
         is_batch: productions.isBatch,
         catatan: productions.catatan,
         waktu: productions.waktu,
@@ -2163,8 +2399,14 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
       const rowsRak = rows.map((r) => {
         const destBranch = r.tujuan_branch_id ?? r.branch_id;
         const rak = destBranch ? rakByKey.get(`${r.ingredient_id}|${destBranch}`) : undefined;
+        // Teks kuantitas ditulis SERVER. Klien yang menyusunnya sendiri pernah
+        // memasangkan `qty` dengan `satuan_beli` ("900 kg" untuk 900 gr) dan
+        // dengan kata "batch"; `qty_teks` menghapus ruang tebakan itu.
+        const t = qtyTeks({ qty: r.qty, satuan: r.satuan, isi: r.isi, satuanBeli: r.satuan_beli });
         return {
           ...r,
+          qty_teks: t.teks,
+          qty_setara: t.setara,
           default_storage_location_id: rak?.id ?? null,
           default_tempat: rak?.nama ?? null,
         };

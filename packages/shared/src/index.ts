@@ -4,5 +4,6 @@ export * from "./escpos";
 export * from "./hpp";
 export * from "./ketersediaan";
 export * from "./receipt";
+export * from "./satuan";
 export * from "./types";
 export * from "./geo";
