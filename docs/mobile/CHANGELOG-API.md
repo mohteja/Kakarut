@@ -20,6 +20,96 @@ tanpa akses repo server.
 
 ---
 
+## Rilis: Tiga angka yang tak boleh berubah diam-diam
+
+> Migrasi DB **0085** (`open_bill_items.harga_satuan` + `menu_nama`).
+> **Dua kontrak berubah** — `PUT /api/menu/:id` dan `OpenBillItemDto`. Baca 🔴
+> dan 🟡 di bawah sebelum rilis berikutnya.
+
+### 🔴 WAJIB — `PUT /api/menu/:id` sekarang PERBARUI SEBAGIAN
+
+Dulu `PUT` memakai skema yang sama dengan `POST`, lengkap dengan nilai default.
+Artinya klien yang hanya ingin mengganti satu field **ikut menghapus** yang lain:
+
+| Tidak dikirim | Dulu | Sekarang |
+| --- | --- | --- |
+| `komponen` | **seluruh resep menu terhapus** | resep dipertahankan |
+| `image_url` | foto terhapus | foto dipertahankan |
+| `is_active` | menu terarsip **aktif kembali** | status dipertahankan |
+| `kode` | kode digenerate ulang | kode lama dipertahankan |
+| `branch_ids` | (sudah dipertahankan) | tak berubah |
+
+Sekarang **`undefined` = jangan sentuh**; `null`/`[]` eksplisit tetap berarti
+"kosongkan" (`{"komponen":[]}` mengosongkan resep, `{"image_url":null}` menghapus
+foto, `{"kode":""}` menggenerate ulang kode).
+
+**Yang perlu dikerjakan:**
+- Kirim `PUT` **parsial** untuk edit sebagian — jauh lebih aman dan kini sah,
+  termasuk `PUT {"harga_jual":25000}` saja (validasi paket/reguler dijalankan
+  atas nilai hasil gabungan, jadi tak lagi ditolak "wajib punya mult").
+- **Bila selama ini mengandalkan ganti-total untuk mengosongkan resep**, mulai
+  kirim `komponen: []` eksplisit.
+- Klien yang memang selalu mengirim body penuh **tidak perlu berubah apa pun**.
+
+### 🔴 WAJIB — open bill mengunci harga; kirim `open_bill_id` saat bayar
+
+`open_bill_items` dulu hanya menyimpan `menu_id` + `qty`, jadi bill yang dibuka
+hari ini lalu dibayar besok ditagih harga menu **terbaru** — bukan harga yang
+disepakati pembeli. Sekarang tiap baris membawa `harga_satuan` dan `menu_nama`
+hasil snapshot **server** saat baris dibuat.
+
+`OpenBillItemDto` bertambah tiga field: **`id`**, `menu_nama`, `harga_satuan`.
+
+**Yang perlu dikerjakan:**
+1. **Tampilkan/hitung total bill dari `harga_satuan`**, bukan dari `harga_jual`
+   di katalog menu. Bila keduanya berbeda, beri tanda bahwa yang berlaku adalah
+   harga saat memesan.
+2. **`PUT /api/open-bill/:id` → sertakan `items[].id`** untuk baris yang sudah
+   ada. Server memasangkan baris kiriman ke baris lama: `id` dulu, lalu sisanya
+   dicocokkan per `menu_id` berurutan — jadi klien lama yang belum mengirim `id`
+   **tetap aman**, kecuali bila satu menu muncul di lebih dari satu baris. Baris
+   tanpa pasangan = tambahan baru → memakai harga hari ini.
+3. **Saat membayar (`POST /api/penjualan`)** kirim `open_bill_id` transaksi +
+   `items[].open_bill_item_id` per baris yang berasal dari bill. Tanpa itu,
+   pembayaran memakai harga menu hari ini dan kuncinya sia-sia.
+   Server menolak **400** bila `open_bill_item_id` bukan milik bill tersebut,
+   tak cocok `menu_id`-nya, atau dikirim tanpa `open_bill_id`; **404** bila
+   bill-nya bukan milik cabang itu. `qty` bebas berubah saat pembayaran.
+
+Yang dikunci hanya **harga jual**. `hpp_satuan` tetap dihitung saat pembayaran
+dari resep × harga acuan bahan saat itu — biaya bahan memang biaya saat
+disajikan.
+
+> **Data lama:** bill yang masih terbuka saat migrasi dikunci ke harga menu
+> **saat migrasi** — harga saat bill itu dibuat memang tak pernah tersimpan.
+
+### 🟡 PERLU DICEK — setelan Metode HPP kini benar-benar dipakai (dan labelnya dikoreksi)
+
+Setelan `companies.metode_hpp` tersimpan tapi tak pernah dibaca: kartu
+persediaan **selalu** FIFO apa pun pilihan owner. Sekarang setelan itu
+dihormati di `GET /api/stok/fifo/:ingredientId`.
+
+- **Aliran barang tetap FIFO** — `lots[].terpakai`/`sisa`, kedaluwarsa, dan
+  `saldo` tidak berubah sedikit pun. Yang mengikuti setelan hanya
+  `pemakaian[].hpp`.
+- Mode `average` memakai **rata-rata bergerak** seluruh sisa stok sesaat sebelum
+  barang keluar. Di mode ini `pemakaian[].rincian` (lot fisik yang keluar)
+  **sengaja tidak menjumlah** ke `hpp` — jangan tampilkan seolah-olah begitu.
+- `FifoPemakaian` bertambah **`harga_rata: number | null`** — terisi hanya di
+  mode `average`, dan `null` bila rata-ratanya tak bisa dihitung (ada sisa lot
+  tanpa harga, atau qty jatuh ke stok minus).
+- **Dampak angka:** perusahaan bermetode `average` (nilai bawaan) akan melihat
+  `hpp` pemakaian **berbeda dari sebelumnya**. Angkanya sekarang benar; yang
+  dulu keliru.
+
+⚪️ **INFO — HPP di laporan laba-rugi TIDAK memakai setelan ini** dan tidak
+pernah memakainya. `sale_items.hpp_satuan` dikunci saat pembayaran dari
+**resep × harga acuan bahan** saat itu, lalu laporan menjumlah snapshot itu.
+Teks bantu di aplikasi web yang menyebut setelan ini "dasar hitung laba-rugi"
+sudah dikoreksi — samakan bila layar mobile menyalin kalimat lamanya.
+
+---
+
 ## Rilis: Harga menu berubah sendiri — lacak, setop, perbaiki
 
 > Migrasi DB **0084** (`companies.food_cost_maks`, `productions.harga_tebakan`,

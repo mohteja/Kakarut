@@ -310,15 +310,24 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 - `GET /api/menu/:id` — [any] — res: `MenuDto` — error: **404**
 - `GET /api/menu/:id/riwayat-harga` — **[owner/admin]** — res: `MenuPriceLogRow[]` (terbaru dulu, maks 50) — jejak tiap perubahan `harga_jual`/markup: `sebab` = `"buat"` (baris pembuka saat menu dibuat) | `"manual"` (lewat `PUT /api/menu/:id`) | `"terapkan_saran"`. `PUT` yang tidak mengubah harga jual maupun markup (mis. hanya ganti foto/resep) **tidak** menambah baris.
 - `PUT /api/menu/urutan` — [any] — req: `{ items: [{id: uuid, sort_order: int}] }` — res: `{ ok: true }`
-- `POST /api/menu` — [owner/admin] — req `MenuBody`: `{ nama, kode?|null (max20), category_id: uuid, tipe: "regular"|"paket"="regular", mult?|null, base_menu_id?|null, base_mult?|null, harga_jual: number(≥0), image_url?|null, komponen: [{ingredient_id:uuid, qty:number(>0)}] = [], is_active: bool=true, branch_ids?: uuid[]|null }` — res: **201** `MenuDto` — error: **400** (paket butuh base_menu_id+base_mult / regular butuh mult / ref invalid / cabang non-store), **409** nama ada
-- `PUT /api/menu/:id` — [owner/admin] — req: `MenuBody` (penuh) — res: `MenuDto` — error: **400**, **404**
+- `POST /api/menu` — [owner/admin] — req `MenuCreateBody`: `{ nama, kode?|null (max20), category_id: uuid, tipe: "regular"|"paket"="regular", mult?|null, base_menu_id?|null, base_mult?|null, harga_jual: number(≥0), image_url?|null, komponen: [{ingredient_id:uuid, qty:number(>0)}] = [], is_active: bool=true, branch_ids?: uuid[]|null }` — res: **201** `MenuDto` — error: **400** (paket butuh base_menu_id+base_mult / regular butuh mult / ref invalid / cabang non-store), **409** nama ada
+- `PUT /api/menu/:id` — [owner/admin] — req `MenuUpdateBody`: **perbarui SEBAGIAN — semua field opsional**. Field yang **tidak dikirim (`undefined`) dipertahankan apa adanya**; `null`/`[]` eksplisit tetap berarti "kosongkan". Berlaku untuk seluruh field, termasuk yang paling mudah hilang: `komponen` (tak dikirim → resep utuh; `[]` → resep dikosongkan), `image_url` (tak dikirim → foto tetap; `null` → foto dihapus), `is_active` (tak dikirim → menu terarsip TETAP terarsip), `kode` (tak dikirim → kode lama; `""`/`null` → digenerate ulang dari nama), `branch_ids` (tak dikirim → pembatasan lama; `null`/`[]` → tampil di semua cabang). Validasi paket/reguler dijalankan atas nilai **hasil gabungan** dengan baris lama, jadi `PUT {"harga_jual":X}` saja sah. — res: `MenuDto` — error: **400**, **404**
 - `DELETE /api/menu/:id` — [owner/admin] — soft delete — res: `{ ok: true }` — error: **404**
 
 ---
 
 ## 7. `/api/penjualan` — Penjualan POS (`modules/penjualan/routes.ts`)
 
-- `POST /api/penjualan` — **[cashier only]** (`requireRole("cashier")` inline) — req `SaleBody`: `{ branch_id?: uuid, is_dine_in: bool=false, meja_id?: uuid, catatan?|null, diskon_tipe?: "persen"|"nominal", diskon_nilai?: number(≥0), customer_nama?|null, customer_wa?|null, metode_bayar?: "tunai"|"qris"|"transfer", uang_diterima?: number(≥0), items: [{menu_id:uuid, qty:number(>0), is_dine_in?:bool, catatan?}] (min 1) }` — res: **201** hasil sale + `{ kasir }` — error: **400** (validasi/diskon lewat batas), **403** kasir di luar cabang, **409** kasir belum dibuka (tidak ada shift terbuka di cabang → tampilkan gerbang "Buka Kasir")
+- `POST /api/penjualan` — **[cashier only]** (`requireRole("cashier")` inline) — req `SaleBody`: `{ branch_id?: uuid, is_dine_in: bool=false, meja_id?: uuid, catatan?|null, diskon_tipe?: "persen"|"nominal", diskon_nilai?: number(≥0), customer_nama?|null, customer_wa?|null, metode_bayar?: "tunai"|"qris"|"transfer", uang_diterima?: number(≥0), open_bill_id?: uuid, items: [{menu_id:uuid, qty:number(>0), is_dine_in?:bool, catatan?, open_bill_item_id?:uuid|null}] (min 1) }` — res: **201** hasil sale + `{ kasir }` — error: **400** (validasi/diskon lewat batas / baris open bill tak cocok / `open_bill_item_id` tanpa `open_bill_id`), **403** kasir di luar cabang, **404** open bill tak ada di cabang ini, **409** kasir belum dibuka (tidak ada shift terbuka di cabang → tampilkan gerbang "Buka Kasir")
+
+> **Membayar open bill:** kirim `open_bill_id` transaksi **dan**
+> `items[].open_bill_item_id` untuk tiap baris yang berasal dari bill. Baris itu
+> ditagih memakai `harga_satuan` yang dikunci di bill saat dipesan; baris tanpa
+> `open_bill_item_id` (tambahan saat bayar) memakai harga menu hari ini. Server
+> memverifikasi baris tersebut milik bill, perusahaan, dan cabang yang sama —
+> `open_bill_item_id` milik bill lain ditolak **400**. `qty` bebas berubah saat
+> pembayaran. Yang dikunci hanya harga jual: `hpp_satuan` tetap dihitung saat
+> pembayaran dari resep × harga acuan bahan saat itu.
 - `GET /api/penjualan` — [any] — query: `branch_id?` (atau `all` untuk owner/admin), `tanggal?` (YYYY-MM-DD, default hari ini di TZ perusahaan) — res: array ringkasan sale — error: **400** format tanggal salah
 - `GET /api/penjualan/:id` — [any] — res: `{ sale, items, branch_nama, kasir }` — error: **403** kasir luar cabang, **404**
 - `DELETE /api/penjualan/:id` — [owner/admin] — soft delete → Tempat Sampah — res: `{ ok, nomor }` — error: **404**
@@ -440,9 +449,22 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 
 - `GET /api/open-bill` — query: `branch_id?` — res: `OpenBillRow[]`
 - `GET /api/open-bill/:id` — res: `OpenBillDetail` — error: **404**
-- `POST /api/open-bill` — req `BillBody`: `{ branch_id?: uuid, meja_id?: uuid|null, customer_nama?|null, customer_wa?|null, catatan?|null, items: [{menu_id:uuid, qty:number(>0), dine_in_override?:bool|null, catatan?}] (min 1) }` — res: **201** `OpenBillDetail` — error: **400** menu invalid/tak tersedia, **403** kasir luar cabang, **404** meja tak ada
-- `PUT /api/open-bill/:id` — req: `BillBody` — res: `OpenBillDetail` — error: **400**, **404**
+- `POST /api/open-bill` — req `BillBody`: `{ branch_id?: uuid, meja_id?: uuid|null, customer_nama?|null, customer_wa?|null, catatan?|null, items: [{id?:uuid, menu_id:uuid, qty:number(>0), dine_in_override?:bool|null, catatan?}] (min 1) }` — res: **201** `OpenBillDetail` — error: **400** menu invalid/tak tersedia, **403** kasir luar cabang, **404** meja tak ada
+- `PUT /api/open-bill/:id` — req: `BillBody` — res: `OpenBillDetail` — error: **400** (baris tak ditemukan / tak cocok menunya / dikirim dua kali), **404**
 - `DELETE /api/open-bill/:id` — res: `{ ok: true }` — error: **404**
+
+**HARGA BILL DIKUNCI SAAT ITEM DIMASUKKAN.** Tiap baris membawa `harga_satuan`
+dan `menu_nama` yang di-snapshot **server** dari katalog saat baris itu dibuat
+(nilai kiriman klien untuk harga tidak dipercaya). Inilah yang ditagih saat
+bill dibayar — bukan `menus.harga_jual` terbaru.
+
+Pada `PUT`, tiap baris kiriman dipasangkan ke baris lama supaya kuncinya tidak
+hilang: pertama lewat `items[].id` (dari `GET`), lalu sisanya dicocokkan per
+`menu_id` secara berurutan. **Kirim `id` untuk baris yang sudah ada** — itu
+pasangan yang pasti, dan satu-satunya cara benar bila satu menu muncul di lebih
+dari satu baris. Baris tanpa pasangan = tambahan baru → memakai harga hari ini;
+baris lama tanpa pasangan dihapus. `qty`/`catatan`/`dine_in_override` boleh
+berubah bebas tanpa melepas kunci harga.
 
 ## `/api/shift` — Shift kasir (`modules/shift/routes.ts`) — group guard **[owner/admin/cashier]** (buka/tutup **cashier only**)
 
@@ -1979,22 +2001,41 @@ export interface FifoAmbil {
   harga_satuan: number | null;
 }
 
-/** Satu peristiwa KELUAR pada kartu FIFO + rincian lot yang dikonsumsinya. */
+/** Satu peristiwa KELUAR pada kartu persediaan + rincian lot yang dikonsumsinya. */
 export interface FifoPemakaian {
   waktu: string;
   jenis: "penjualan" | "pemakaian" | "kirim" | "opname";
   keterangan: string | null;
   qty: number;
-  /** total biaya FIFO pemakaian ini; null bila ada bagian dari lot tanpa harga */
+  /**
+   * total biaya pemakaian ini menurut metode HPP perusahaan; null bila ada
+   * bagian tanpa harga yang diketahui.
+   *
+   * Mode `fifo`: Σ (qty × harga lot) — cocok dengan `rincian`.
+   * Mode `average`: qty × `harga_rata` — SENGAJA tidak sama dengan Σ rincian,
+   * karena biaya rata-rata tak mengenal identitas lot. `rincian` di mode ini
+   * tetap menunjukkan lot mana yang secara FISIK keluar (untuk kedaluwarsa).
+   */
   hpp: number | null;
+  /**
+   * harga rata-rata bergerak seluruh sisa stok sesaat SEBELUM pemakaian ini;
+   * hanya terisi di mode `average` (null di mode `fifo`, atau bila ada sisa
+   * lot yang harganya tak diketahui sehingga rata-rata tak bisa dihitung).
+   */
+  harga_rata: number | null;
   rincian: FifoAmbil[];
 }
 
-/** Kartu FIFO satu bahan pada satu cabang (riwayat penggunaan dari lot paling awal). */
+/**
+ * Kartu persediaan satu bahan pada satu cabang. Lot selalu dikuras dari yang
+ * PALING AWAL masuk (FIFO fisik, supaya kedaluwarsa benar); yang mengikuti
+ * setelan `metode_hpp` adalah cara membebankan BIAYA-nya.
+ */
 export interface BahanFifoDto {
   bahan: { id: string; nama: string; satuan: string };
   branch_id: string;
   branch_nama: string;
+  /** metode pembebanan biaya pemakaian: `average` = rata-rata bergerak */
   metode_hpp: "average" | "fifo";
   /** saldo akhir = Σ sisa lot − defisit; sama dengan saldo ledger cabang */
   saldo: number;
@@ -2013,6 +2054,12 @@ export interface SaleItemInput {
   is_dine_in?: boolean;
   /** catatan personalisasi per baris (mis. "tanpa gula") */
   catatan?: string | null;
+  /**
+   * baris open bill asal baris ini. Bila diisi (dan `open_bill_id` transaksi
+   * cocok), harga jual diambil dari harga yang DIKUNCI di bill — bukan harga
+   * menu terbaru. Qty tetap boleh berubah saat pembayaran.
+   */
+  open_bill_item_id?: string | null;
 }
 
 /** Baris riwayat transaksi kasir (untuk cek pesanan / cetak ulang struk). */
@@ -2117,7 +2164,16 @@ export interface MenuLaris {
 
 /** Satu baris item pada open bill (pesanan belum dibayar). */
 export interface OpenBillItemDto {
+  /** id baris — kirim balik saat PUT agar harga terkuncinya dipertahankan */
+  id: string;
   menu_id: string;
+  /** nama menu saat dipesan (snapshot) */
+  menu_nama: string;
+  /**
+   * harga jual per porsi yang DIKUNCI saat baris ini dimasukkan ke bill.
+   * Inilah yang ditagih saat bill dibayar, bukan harga menu terbaru.
+   */
+  harga_satuan: number;
   qty: number;
   /** null = ikut mode transaksi; true/false = override dine-in per baris */
   dine_in_override: boolean | null;
