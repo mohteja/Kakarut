@@ -241,6 +241,12 @@ function RiwayatCabangModal({
                   </div>
                   <div className="shrink-0 text-right">
                     <div className={`text-sm font-bold ${info.warna}`}>{info.label}</div>
+                    {/* selisih yang belum diputuskan owner — biar tak terlewat */}
+                    {s.selisih_status === "menunggu" && (
+                      <div className="mt-0.5 inline-block rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
+                        ⏳ Perlu ACC
+                      </div>
+                    )}
                     <div className="mt-0.5 text-xs font-medium text-orange-600">Detail ›</div>
                   </div>
                 </div>

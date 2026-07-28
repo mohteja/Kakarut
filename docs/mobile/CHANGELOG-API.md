@@ -20,6 +20,61 @@ tanpa akses repo server.
 
 ---
 
+## Rilis: Tutup kasir jadi HITUNG BUTA + selisih perlu ACC owner
+
+> Migrasi DB **0087** (`shifts.selisih_status` dkk, semuanya nullable — shift
+> lama bernilai `null` alias "tak ada yang perlu disetujui").
+
+### 🔴 WAJIB — `kas_sistem` bisa `null` sekarang
+
+`Shift.kas_sistem` berubah dari `number` menjadi `number | null`. Untuk peran
+terkunci cabang (kasir/tim), selagi shift masih **terbuka**:
+
+| Field | Nilai |
+| --- | --- |
+| `buta` | `true` |
+| `kas_sistem` | `null` |
+| `penjualan_tunai` | `0` |
+| `jumlah_transaksi`, non-tunai | tetap terisi |
+
+Tampilkan `•••` (atau serupa) bila `buta`, jangan `Rp 0`.
+
+**Jangan menghitung sendiri `modal_awal + penjualan_tunai` sebagai pengganti** —
+itu persis yang dicegah. Kalau kasir bisa melihat kas seharusnya sebelum
+menghitung laci, penghitungan berhenti jadi pemeriksaan: angkanya tinggal
+disalin dan selisih apa pun takkan pernah terlihat.
+
+### 🟢 BARU — reveal ada di respons `POST /shift/tutup`
+
+Respons penutupan adalah momen angka dibuka: `kas_sistem` dan `selisih` terisi
+di sana. Tahan hasilnya di layar (jangan langsung dibuang) — itu satu-satunya
+kesempatan kasir melihat hasil hitungannya.
+
+Body menerima `selisih_alasan` (opsional, max 300). Bila tak dikirim, server
+memakai `catatan` sebagai cadangan — jadi klien lama tetap meneruskan
+keterangan kasir ke owner tanpa perubahan kode.
+
+### 🟢 BARU — persetujuan selisih
+
+| Field baru di `Shift` | Isi |
+| --- | --- |
+| `selisih_status` | `"menunggu"` / `"disetujui"` / `"ditolak"` / `null` |
+| `selisih_alasan` | keterangan kasir |
+| `disetujui_oleh`, `disetujui_pada` | siapa & kapan owner memutuskan |
+| `tolak_alasan` | alasan penolakan |
+
+`null` = tak ada yang perlu disetujui (shift masih terbuka, atau uang PAS).
+
+**`POST /api/shift/:id/selisih`** — [owner/admin] — `{ keputusan, alasan? }`.
+Menolak wajib menyertakan alasan. Endpoint ini **tidak mengubah angka apa pun**;
+`uang_fisik` & `kas_sistem` adalah fakta yang sudah terjadi. Kasir yang
+memanggilnya dapat **403**.
+
+Tampilkan badge "⏳ Perlu ACC" pada daftar shift ber-`selisih_status:"menunggu"`
+supaya tak terlewat.
+
+---
+
 ## Rilis: Realisasi qty boleh lebih dari RAB
 
 > Tidak ada migrasi DB. **Satu batasan dicabut** di `POST /api/{mod}/tahap/:id`,

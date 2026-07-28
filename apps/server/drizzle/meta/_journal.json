@@ -610,6 +610,13 @@
       "when": 1785224461075,
       "tag": "0086_greedy_scorpion",
       "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1785228254605,
+      "tag": "0087_neat_havok",
+      "breakpoints": true
     }
   ]
 }

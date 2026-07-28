@@ -1,6 +1,8 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import type { ShiftDetail } from "@kakarut/shared";
-import { Modal, Spinner, thClass, tdClass } from "./ui";
+import { ErrorText, Modal, Spinner, btnPrimary, btnSecondary, inputClass, thClass, tdClass } from "./ui";
+import { useAuth } from "../context/AuthContext";
 import { api } from "../lib/api";
 import { formatRupiah, formatTanggalRingkas, formatWaktu } from "../lib/format";
 
@@ -35,6 +37,8 @@ function Baris({ label, value, warna = "text-stone-800" }: { label: string; valu
  * owner/admin (Operasional Cabang).
  */
 export function ShiftDetailModal({ shiftId, onClose }: { shiftId: string | null; onClose: () => void }) {
+  const { auth } = useAuth();
+  const qc = useQueryClient();
   const { data, isLoading } = useQuery({
     queryKey: ["shift-detail", shiftId],
     queryFn: () => api<ShiftDetail>(`/shift/${shiftId}`),
@@ -42,6 +46,22 @@ export function ShiftDetailModal({ shiftId, onClose }: { shiftId: string | null;
   });
 
   const info = data ? selisihInfo(data.selisih) : null;
+  // Hanya owner/admin yang memutuskan selisih — kasir tak bisa meng-ACC dirinya
+  // sendiri (server juga menegakkannya, ini sekadar tak menampilkan tombolnya).
+  const bisaAcc = auth?.user?.role === "owner" || auth?.user?.role === "admin";
+  const [alasan, setAlasan] = useState("");
+  const putuskan = useMutation({
+    mutationFn: (keputusan: "disetujui" | "ditolak") =>
+      api(`/shift/${shiftId}/selisih`, {
+        method: "POST",
+        body: { keputusan, alasan: alasan.trim() || null },
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["shift-detail", shiftId] });
+      qc.invalidateQueries({ queryKey: ["shift-riwayat"] });
+      setAlasan("");
+    },
+  });
 
   return (
     <Modal open={!!shiftId} onClose={onClose} title="Detail Shift Kas" lebar="max-w-2xl">
@@ -88,10 +108,18 @@ export function ShiftDetailModal({ shiftId, onClose }: { shiftId: string | null;
           {/* Rekap kas */}
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             <Baris label="Modal awal" value={formatRupiah(data.modal_awal)} />
-            <Baris label="Penjualan tunai" value={formatRupiah(data.penjualan_tunai)} />
+            {/* "•••" = hitung buta: shift masih terbuka & yang melihat kasir */}
+            <Baris
+              label="Penjualan tunai"
+              value={data.buta ? "•••" : formatRupiah(data.penjualan_tunai)}
+            />
             <Baris label="Non-tunai" value={formatRupiah(data.penjualan_nontunai)} />
             <Baris label="Transaksi" value={`${data.jumlah_transaksi}×`} />
-            <Baris label="Kas seharusnya" value={formatRupiah(data.kas_sistem)} warna="text-orange-600" />
+            <Baris
+              label="Kas seharusnya"
+              value={data.kas_sistem == null ? "•••" : formatRupiah(data.kas_sistem)}
+              warna="text-orange-600"
+            />
             <Baris
               label="Uang fisik"
               value={data.uang_fisik != null ? formatRupiah(data.uang_fisik) : "—"}
@@ -106,6 +134,65 @@ export function ShiftDetailModal({ shiftId, onClose }: { shiftId: string | null;
           {data.catatan && (
             <div className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
               📝 {data.catatan}
+            </div>
+          )}
+
+          {/* PERSETUJUAN SELISIH KAS — hanya muncul bila memang ada selisih */}
+          {data.selisih_status === "menunggu" && (
+            <div className="space-y-2 rounded-lg border border-amber-300 bg-amber-50 p-3">
+              <div className="text-sm font-semibold text-amber-900">
+                ⏳ Selisih kas menunggu keputusan
+              </div>
+              {data.selisih_alasan && (
+                <div className="text-sm text-amber-800">
+                  Keterangan kasir: <i>{data.selisih_alasan}</i>
+                </div>
+              )}
+              {bisaAcc ? (
+                <>
+                  <input
+                    value={alasan}
+                    onChange={(e) => setAlasan(e.target.value)}
+                    placeholder="alasan (wajib bila menolak)"
+                    className={inputClass}
+                  />
+                  <ErrorText error={putuskan.error} />
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => putuskan.mutate("disetujui")}
+                      disabled={putuskan.isPending}
+                      className={btnPrimary}
+                    >
+                      ✅ Terima selisih
+                    </button>
+                    <button
+                      onClick={() => putuskan.mutate("ditolak")}
+                      disabled={putuskan.isPending}
+                      className={btnSecondary}
+                    >
+                      ✖ Tolak
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div className="text-xs text-amber-700">
+                  Menunggu owner memutuskan — tak ada yang perlu Anda lakukan.
+                </div>
+              )}
+            </div>
+          )}
+          {data.selisih_status === "disetujui" && (
+            <div className="rounded-lg bg-green-50 px-3 py-2 text-sm text-green-800">
+              ✅ Selisih <b>diterima</b>
+              {data.disetujui_oleh ? ` oleh ${data.disetujui_oleh}` : ""}
+              {data.disetujui_pada ? ` · ${formatTanggalRingkas(data.disetujui_pada)}` : ""}
+            </div>
+          )}
+          {data.selisih_status === "ditolak" && (
+            <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">
+              ✖ Selisih <b>ditolak</b>
+              {data.disetujui_oleh ? ` oleh ${data.disetujui_oleh}` : ""}
+              {data.tolak_alasan ? ` — ${data.tolak_alasan}` : ""}
             </div>
           )}
 

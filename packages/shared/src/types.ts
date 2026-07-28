@@ -1464,12 +1464,38 @@ export interface Shift {
   penjualan_tunai: number;
   penjualan_nontunai: number;
   jumlah_transaksi: number;
-  /** kas seharusnya di laci = modal_awal + penjualan_tunai */
-  kas_sistem: number;
-  /** uang_fisik − kas_sistem (null selagi terbuka) */
+  /** kas seharusnya di laci = modal_awal + penjualan_tunai; null bila `buta` */
+  kas_sistem: number | null;
+  /** uang_fisik − kas_sistem (null selagi terbuka atau bila `buta`) */
   selisih: number | null;
   /** ada transaksi susulan (sinkron offline) setelah shift ditutup → rekap dihitung ulang */
   ada_transaksi_susulan: boolean;
+  /**
+   * HITUNG BUTA. true = angka kas SENGAJA disembunyikan dari pemanggil:
+   * `penjualan_tunai` dan `kas_sistem` bernilai `null` selagi shift masih
+   * terbuka dan yang bertanya adalah peran terkunci cabang (kasir/tim).
+   *
+   * Alasannya: kalau kasir bisa melihat "seharusnya Rp X" sebelum menghitung,
+   * penghitungan laci berhenti jadi pemeriksaan — angka itu tinggal disalin
+   * dan selisih apa pun tak akan pernah terlihat. Angka aslinya baru dibuka
+   * pada respons `POST /shift/tutup`, setelah uang fisik dikirim.
+   *
+   * Owner/admin tak pernah dibutakan — merekalah yang menyetujui selisih.
+   */
+  buta: boolean;
+  /**
+   * Status persetujuan selisih kas. `null` = tak ada yang perlu disetujui
+   * (shift masih terbuka, atau uang fisik PAS). Selisih — lebih maupun
+   * kurang — selalu mulai dari "menunggu"; kasir tak bisa menyetujui sendiri.
+   */
+  selisih_status: PenyesuaianStatus | null;
+  /** keterangan kasir saat menutup dengan selisih */
+  selisih_alasan: string | null;
+  /** owner/admin yang memutuskan (null selama masih menunggu) */
+  disetujui_oleh: string | null;
+  disetujui_pada: string | null;
+  /** alasan owner menolak selisih */
+  tolak_alasan: string | null;
 }
 
 /**

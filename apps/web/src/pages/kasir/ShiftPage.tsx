@@ -68,22 +68,31 @@ export function ShiftPage() {
       setModalAwal("");
     },
   });
+  /**
+   * Hasil penutupan — INI momen "reveal"-nya. Selama shift terbuka kasir tak
+   * pernah melihat kas seharusnya (server membutakannya), jadi angka yang baru
+   * dibuka di sini ditahan di layar alih-alih langsung hilang bersama shift.
+   */
+  const [hasil, setHasil] = useState<Shift | null>(null);
   const tutup = useMutation({
     mutationFn: () =>
-      api(`/shift/tutup${branchQuery}`, {
+      api<Shift>(`/shift/tutup${branchQuery}`, {
         method: "POST",
-        body: { uang_fisik: Number(uangFisik) || 0, catatan: catatan || null },
+        body: {
+          uang_fisik: Number(uangFisik) || 0,
+          catatan: catatan || null,
+          selisih_alasan: catatan || null,
+        },
       }),
-    onSuccess: () => {
+    onSuccess: (r) => {
       invalidate();
+      setHasil(r);
       setUangFisik("");
       setCatatan("");
     },
   });
 
-  const uangNum = Number(uangFisik) || 0;
-  const selisihPreview = aktif && uangFisik !== "" ? uangNum - aktif.kas_sistem : null;
-  const previewInfo = selisihInfo(selisihPreview);
+  const hasilInfo = selisihInfo(hasil?.selisih ?? null);
 
   if (isLoading) return <Spinner />;
 
@@ -148,15 +157,25 @@ export function ShiftPage() {
             </div>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
               <Stat label="Modal awal" value={formatRupiah(aktif.modal_awal)} />
-              <Stat label="Penjualan tunai" value={formatRupiah(aktif.penjualan_tunai)} />
+              {/* Hitung buta: angka tunai & kas seharusnya sengaja ditutup
+                  sampai uang fisik dikirim — kalau terlihat lebih dulu,
+                  menghitung laci berhenti jadi pemeriksaan. */}
+              <Stat label="Penjualan tunai" value={aktif.buta ? "•••" : formatRupiah(aktif.penjualan_tunai)} />
               <Stat label="Non-tunai" value={formatRupiah(aktif.penjualan_nontunai)} />
               <Stat label="Transaksi" value={`${aktif.jumlah_transaksi}×`} />
               <Stat
                 label="Kas seharusnya"
-                value={formatRupiah(aktif.kas_sistem)}
+                value={aktif.kas_sistem == null ? "•••" : formatRupiah(aktif.kas_sistem)}
                 warna="text-orange-600"
               />
             </div>
+            {aktif.buta && (
+              <div className="mt-3 rounded-lg bg-sky-50 px-3 py-2 text-xs leading-relaxed text-sky-800">
+                🔒 <b>Hitung dulu, angka menyusul.</b> Kas yang seharusnya ada di laci
+                ditutup sampai Anda mengisi uang fisik — supaya hitungan Anda benar-benar
+                hasil menghitung. Selisihnya muncul begitu kasir ditutup.
+              </div>
+            )}
           </Card>
 
           <Card className="space-y-3 p-5">
@@ -173,14 +192,8 @@ export function ShiftPage() {
                 className={inputClass}
               />
             </div>
-            {selisihPreview != null && (
-              <div className="flex items-center justify-between rounded-lg bg-stone-50 px-3 py-2 text-sm">
-                <span className="text-stone-600">
-                  Selisih (fisik − seharusnya {formatRupiah(aktif.kas_sistem)})
-                </span>
-                <span className={`font-bold ${previewInfo.warna}`}>{previewInfo.label}</span>
-              </div>
-            )}
+            {/* TIDAK ada pratinjau selisih di sini — itu akan membocorkan kas
+                seharusnya sebelum uang dihitung, persis yang dicegah. */}
             <div>
               <label className="mb-1 block text-sm font-medium">
                 Catatan <span className="font-normal text-stone-400">(opsional)</span>
@@ -188,9 +201,13 @@ export function ShiftPage() {
               <input
                 value={catatan}
                 onChange={(e) => setCatatan(e.target.value)}
-                placeholder="mis. selisih karena kembalian kurang"
+                placeholder="mis. kembalian kurang — isi bila hitungan tak pas"
                 className={inputClass}
               />
+              <p className="mt-1 text-xs text-stone-500">
+                Bila nanti ada selisih, catatan ini ikut terkirim sebagai keterangan Anda ke
+                owner.
+              </p>
             </div>
             <ErrorText error={tutup.error} />
             <button
@@ -206,6 +223,35 @@ export function ShiftPage() {
             </button>
           </Card>
         </div>
+      )}
+
+      {/* REVEAL — angka yang selama shift ditutup, baru dibuka di sini */}
+      {hasil && (
+        <Card className="mt-5 space-y-3 border-2 border-orange-200 p-5">
+          <h2 className="text-lg font-bold text-stone-800">Hasil tutup kasir</h2>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            <Stat label="Uang fisik dihitung" value={formatRupiah(hasil.uang_fisik ?? 0)} />
+            <Stat
+              label="Kas seharusnya"
+              value={hasil.kas_sistem == null ? "—" : formatRupiah(hasil.kas_sistem)}
+            />
+            <Stat label="Selisih" value={hasilInfo.label} warna={hasilInfo.warna} />
+          </div>
+          {hasil.selisih_status === "menunggu" ? (
+            <div className="rounded-lg bg-amber-50 px-3 py-2 text-sm leading-relaxed text-amber-800">
+              ⏳ <b>Menunggu persetujuan owner.</b> Selisih ini sudah terkirim beserta
+              keterangan Anda. Owner yang memutuskan diterima atau tidak — Anda tak perlu
+              melakukan apa-apa lagi.
+            </div>
+          ) : (
+            <div className="rounded-lg bg-green-50 px-3 py-2 text-sm text-green-800">
+              ✅ <b>Pas.</b> Uang fisik sama dengan kas seharusnya — tak perlu persetujuan.
+            </div>
+          )}
+          <button type="button" onClick={() => setHasil(null)} className={btnSecondary}>
+            Tutup
+          </button>
+        </Card>
       )}
 
       {/* Riwayat shift */}

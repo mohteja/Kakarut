@@ -564,12 +564,22 @@ berubah bebas tanpa melepas kunci harga.
 
 ## `/api/shift` — Shift kasir (`modules/shift/routes.ts`) — group guard **[owner/admin/cashier]** (buka/tutup **cashier only**)
 
-- `GET /api/shift/aktif` — [owner/admin/cashier] — query: `branch_id?` — res: `Shift | null` (shift terbuka + rekap live)
+- `GET /api/shift/aktif` — [owner/admin/cashier] — query: `branch_id?` — res: `Shift | null` (shift terbuka + rekap live). **HITUNG BUTA:** untuk peran terkunci cabang (kasir/tim) selagi shift masih TERBUKA, `buta: true` dan angka tunai disembunyikan — `kas_sistem: null`, `penjualan_tunai: 0`. `jumlah_transaksi` & non-tunai tetap tampil. Owner/admin tak pernah dibutakan.
 - `GET /api/shift/pantau` — **[owner/admin]** — res: `ShiftPantauRow[]` — pantau operasional SEMUA cabang store: status kasir + rekap **hari ini** (zona waktu perusahaan) + jam operasional + tanda telat buka/lupa tutup
 - `GET /api/shift` — [owner/admin/cashier] — query: `branch_id?` — res: `Shift[]` (shift tertutup, maks 50)
 - `GET /api/shift/:id` — [owner/admin/cashier; cashier terkunci cabangnya] — res: `ShiftDetail` (= `Shift` + `transaksi: ShiftTransaksiRow[]`, maks 300, urut waktu desc) — error: **403** shift bukan cabang kasir, **404**
 - `POST /api/shift/buka` — **[cashier]** — req: `{ modal_awal: number(≥0)=0 }` — res: **201** `Shift` — error: **400** shift sudah terbuka **atau kasir belum absen masuk hari ini** (pesan: "Absen masuk dulu sebelum buka kasir"), **403** luar cabang
-- `POST /api/shift/tutup` — **[cashier]** — req: `{ uang_fisik: number(≥0), catatan?|null }` — res: `Shift` — error: **400** tak ada shift terbuka
+- `POST /api/shift/tutup` — **[cashier]** — req: `{ uang_fisik: number(≥0), catatan?|null, selisih_alasan?|null (max300) }` — res: `Shift` — error: **400** tak ada shift terbuka. **Respons inilah "reveal"-nya**: `kas_sistem` & `selisih` dibuka di sini, SETELAH uang fisik dikirim. Selisih (|selisih| > 0,005) → `selisih_status: "menunggu"`; uang PAS → `selisih_status: null` (tak butuh persetujuan). `selisih_alasan` diisi dari field itu, atau dari `catatan` bila tak dikirim (klien lama hanya punya satu kolom catatan).
+- `POST /api/shift/:id/selisih` — **[owner/admin]** — req: `{ keputusan: "disetujui"|"ditolak", alasan?|null (max300) }` — res: `Shift` — error: **400** (shift tak punya selisih; menolak tanpa alasan), **404**. Mencatat KEPUTUSAN saja — `uang_fisik` & `kas_sistem` adalah fakta yang sudah terjadi dan tak pernah diubah. Kasir **tak bisa** memutuskan selisihnya sendiri (**403** dari guard peran).
+
+> ### ⚠️ Kenapa hitung buta
+>
+> Kalau kasir bisa melihat "kas seharusnya Rp X" sebelum menghitung laci,
+> penghitungan berhenti menjadi pemeriksaan — angka itu tinggal disalin ke
+> `uang_fisik` dan selisih apa pun takkan pernah terlihat. Karena itu server
+> menyembunyikannya sampai `POST /shift/tutup`, bukan sekadar menyembunyikannya
+> di UI. **Klien tak boleh menghitung sendiri `modal_awal + penjualan_tunai`
+> sebagai pengganti** — itu membatalkan gunanya.
 
 > **Tipe baru (shared):**
 > - `ShiftTransaksiRow`: `{ id, nomor, waktu (ISO), total, metode: "tunai"|"qris"|"transfer", kasir: string|null }`

@@ -914,6 +914,19 @@ export const shifts = pgTable(
      * memberi tahu bahwa angka penutupan awal bisa berbeda dari rekap terkini.
      */
     adaTransaksiSusulan: boolean("ada_transaksi_susulan").notNull().default(false),
+    /**
+     * PERSETUJUAN SELISIH KAS. NULL = tak ada yang perlu disetujui: shift masih
+     * terbuka, atau uang fisik PAS dengan kas sistem. Begitu ada selisih —
+     * lebih maupun kurang — statusnya "menunggu" sampai owner/admin memutuskan.
+     * Kasir tidak bisa menyetujui selisihnya sendiri.
+     */
+    selisihStatus: penyesuaianStatusEnum("selisih_status"),
+    /** keterangan kasir saat menutup dengan selisih (mis. "kembalian kurang") */
+    selisihAlasan: text("selisih_alasan"),
+    disetujuiOleh: uuid("disetujui_oleh").references(() => users.id),
+    disetujuiAt: timestamp("disetujui_at", { withTimezone: true }),
+    /** alasan owner menolak selisih (wajib diisi saat menolak) */
+    tolakAlasan: text("tolak_alasan"),
   },
   (t) => [
     // hanya boleh ada satu shift terbuka per cabang pada satu waktu
