@@ -5825,6 +5825,70 @@ cek "kasir PUT /menu → 403" "V == 403" \
   "$(status_code_body "$REISS105" PUT "/menu/$MID146" '{"harga_jual":1000}')"
 
 
+echo
+echo "── §147 Open bill MENGUNCI harga jual saat dipesan ──"
+# Bill dibuka hari ini, dibayar setelah harga menu naik. Dulu pembeli ditagih
+# harga TERBARU; sekarang harga saat memesan yang menang.
+M147=$(api "$OWNER" POST /menu "{\"nama\":\"Menu Uji147\",\"category_id\":\"$CAT145\",\"tipe\":\"regular\",\"mult\":2,\"harga_jual\":10000,\"komponen\":[]}" | jq -r .id)
+MEJA147=$(api "$REISS105" GET /meja | jq -r '[.[]|select(.is_active)][0].id')
+# transaksi kasir butuh shift terbuka — seksi sebelumnya bisa meninggalkannya tertutup
+if [ -z "$(api "$REISS105" GET /shift/aktif | jq -r '.id // empty')" ]; then
+  api "$REISS105" POST /shift/buka '{"modal_awal":0}' > /dev/null 2>&1 || true
+fi
+OB147=$(api "$REISS105" POST /open-bill "{\"meja_id\":\"$MEJA147\",\"items\":[{\"menu_id\":\"$M147\",\"qty\":2}]}")
+OBID147=$(echo "$OB147" | jq -r .id)
+ITEM147=$(echo "$OB147" | jq -r '.items[0].id')
+cek "bill baru: harga & nama menu di-snapshot server" "V == 1" \
+  "$(echo "$OB147" | jq '(.items[0].harga_satuan==10000) and (.items[0].menu_nama=="Menu Uji147") and ((.items[0].id|length)==36)|if . then 1 else 0 end')"
+
+# harga menu NAIK setelah bill dibuat
+api "$OWNER" PUT "/menu/$M147" '{"harga_jual":25000}' > /dev/null
+cek "harga menu sekarang 25000" "V == 25000" "$(api "$OWNER" GET "/menu/$M147" | jq '.harga_jual')"
+cek "bill TETAP memegang harga 10000 setelah menu naik" "V == 10000" \
+  "$(api "$REISS105" GET "/open-bill/$OBID147" | jq '.items[0].harga_satuan')"
+
+# menyunting bill (ubah qty) tidak boleh melepas kunci harga
+OBE147=$(api "$REISS105" PUT "/open-bill/$OBID147" "{\"meja_id\":\"$MEJA147\",\"items\":[{\"id\":\"$ITEM147\",\"menu_id\":\"$M147\",\"qty\":3}]}")
+cek "PUT baris ber-id: qty berubah, harga terkunci tetap 10000" "V == 1" \
+  "$(echo "$OBE147" | jq --arg i "$ITEM147" '[.items[]|select(.id==$i)][0] | (.qty==3) and (.harga_satuan==10000)|if . then 1 else 0 end')"
+# klien LAMA (tanpa id) juga tak boleh kehilangan kunci — dipasangkan per menu
+OBL147=$(api "$REISS105" PUT "/open-bill/$OBID147" "{\"meja_id\":\"$MEJA147\",\"items\":[{\"menu_id\":\"$M147\",\"qty\":4}]}")
+cek "PUT tanpa id (klien lama): harga terkunci tetap dipertahankan" "V == 1" \
+  "$(echo "$OBL147" | jq '(.items|length==1) and (.items[0].qty==4) and (.items[0].harga_satuan==10000)|if . then 1 else 0 end')"
+# baris TAMBAHAN memakai harga hari ini — bukan ikut terkunci
+ITEM147B=$(echo "$OBL147" | jq -r '.items[0].id')
+OBT147=$(api "$REISS105" PUT "/open-bill/$OBID147" "{\"meja_id\":\"$MEJA147\",\"items\":[{\"id\":\"$ITEM147B\",\"menu_id\":\"$M147\",\"qty\":4},{\"menu_id\":\"$M147\",\"qty\":1}]}")
+cek "baris tambahan pakai harga HARI INI (25000), yang lama tetap 10000" "V == 1" \
+  "$(echo "$OBT147" | jq '([.items[].harga_satuan]|sort) == [10000,25000]|if . then 1 else 0 end')"
+cek "PUT id milik bill lain → 400" "V == 400" \
+  "$(status_code_body "$REISS105" PUT "/open-bill/$OBID147" "{\"meja_id\":\"$MEJA147\",\"items\":[{\"id\":\"00000000-0000-0000-0000-000000000000\",\"menu_id\":\"$M147\",\"qty\":1}]}")"
+
+# BAYAR: yang ditagih adalah harga terkunci, bukan harga menu terbaru
+S147=$(api "$REISS105" POST /penjualan "{\"meja_id\":\"$MEJA147\",\"metode_bayar\":\"tunai\",\"open_bill_id\":\"$OBID147\",\"items\":[{\"menu_id\":\"$M147\",\"qty\":4,\"open_bill_item_id\":\"$ITEM147B\"},{\"menu_id\":\"$M147\",\"qty\":1}]}")
+SID147=$(echo "$S147" | jq -r '.sale.id')
+D147=$(api "$OWNER" GET "/penjualan/$SID147")
+# 4 × 10000 (terkunci) + 1 × 25000 (harga hari ini) = 65000
+cek "bayar bill: baris terkunci ditagih 10000/porsi" "V == 1" \
+  "$(echo "$D147" | jq '[.items[]|select(.hargaSatuan==10000 and .qty==4)]|length==1|if . then 1 else 0 end')"
+cek "bayar bill: baris non-bill ditagih harga hari ini 25000" "V == 1" \
+  "$(echo "$D147" | jq '[.items[]|select(.hargaSatuan==25000 and .qty==1)]|length==1|if . then 1 else 0 end')"
+cek "bayar bill: subtotal 65000 (bukan 5 × 25000 = 125000)" "V == 65000" \
+  "$(echo "$D147" | jq '.sale.subtotal')"
+
+# guard: kasir tak boleh menunjuk baris bill sembarangan untuk menekan harga
+OB147B=$(api "$REISS105" POST /open-bill "{\"meja_id\":\"$MEJA147\",\"items\":[{\"menu_id\":\"$M147\",\"qty\":1}]}")
+OBID147B=$(echo "$OB147B" | jq -r .id)
+ITEM147C=$(echo "$OB147B" | jq -r '.items[0].id')
+cek "open_bill_item_id milik bill LAIN → 400" "V == 400" \
+  "$(status_code_body "$REISS105" POST /penjualan "{\"meja_id\":\"$MEJA147\",\"metode_bayar\":\"tunai\",\"open_bill_id\":\"$OBID147\",\"items\":[{\"menu_id\":\"$M147\",\"qty\":1,\"open_bill_item_id\":\"$ITEM147C\"}]}")"
+cek "open_bill_item_id tanpa open_bill_id → 400" "V == 400" \
+  "$(status_code_body "$REISS105" POST /penjualan "{\"meja_id\":\"$MEJA147\",\"metode_bayar\":\"tunai\",\"items\":[{\"menu_id\":\"$M147\",\"qty\":1,\"open_bill_item_id\":\"$ITEM147C\"}]}")"
+cek "open_bill_id ngawur → 404" "V == 404" \
+  "$(status_code_body "$REISS105" POST /penjualan "{\"meja_id\":\"$MEJA147\",\"metode_bayar\":\"tunai\",\"open_bill_id\":\"00000000-0000-0000-0000-000000000000\",\"items\":[{\"menu_id\":\"$M147\",\"qty\":1}]}")"
+cek "open_bill_item_id vs menu_id tak cocok → 400" "V == 400" \
+  "$(status_code_body "$REISS105" POST /penjualan "{\"meja_id\":\"$MEJA147\",\"metode_bayar\":\"tunai\",\"open_bill_id\":\"$OBID147B\",\"items\":[{\"menu_id\":\"$MID146\",\"qty\":1,\"open_bill_item_id\":\"$ITEM147C\"}]}")"
+api "$REISS105" DELETE "/open-bill/$OBID147B" > /dev/null
+
 
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="

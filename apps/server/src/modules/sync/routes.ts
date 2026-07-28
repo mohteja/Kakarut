@@ -345,6 +345,7 @@ const execPenjualan: Eksekutor = async ({ auth }, payload, waktu) => {
     uangDiterima: p.uang_diterima,
     waktu,
     shiftId: shift.id,
+    openBillId: p.open_bill_id,
     items: p.items,
   });
   return {

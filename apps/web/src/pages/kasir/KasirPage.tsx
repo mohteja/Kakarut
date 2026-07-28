@@ -27,6 +27,18 @@ interface CartLine {
   dineInOverride: boolean | null;
   /** catatan personalisasi baris (mis. "tanpa gula") */
   catatan: string;
+  /** id baris open bill asal (bila keranjang ini dimuat dari bill) */
+  billItemId?: string;
+  /**
+   * harga yang DIKUNCI di open bill saat dipesan. Ada nilainya → inilah yang
+   * ditagih, bukan `menu.harga_jual` yang bisa saja sudah berubah.
+   */
+  hargaKunci?: number;
+}
+
+/** Harga yang benar-benar ditagih untuk satu baris keranjang. */
+function hargaBaris(l: CartLine) {
+  return l.hargaKunci ?? l.menu.harga_jual;
 }
 
 interface Kategori {
@@ -295,7 +307,7 @@ export function KasirPage() {
     );
   }
 
-  const subtotal = cart.reduce((a, l) => a + l.menu.harga_jual * l.qty, 0);
+  const subtotal = cart.reduce((a, l) => a + hargaBaris(l) * l.qty, 0);
   // diskon per transaksi (cermin logika server: clamp ke [0, subtotal])
   const diskonNilaiNum = Number(diskonNilai) || 0;
   const diskonRaw =
@@ -331,11 +343,14 @@ export function KasirPage() {
           metode_bayar: metodeBayar,
           ...(metodeBayar === "tunai" && uangNum > 0 ? { uang_diterima: uangNum } : {}),
           ...(diskon > 0 ? { diskon_tipe: diskonTipe, diskon_nilai: diskonNilaiNum } : {}),
+          // membayar open bill → server menagih harga yang dikunci di bill
+          ...(editingBillId ? { open_bill_id: editingBillId } : {}),
           items: cart.map((l) => ({
             menu_id: l.menu.id,
             qty: l.qty,
             ...(l.dineInOverride !== null ? { is_dine_in: l.dineInOverride } : {}),
             ...(l.catatan.trim() ? { catatan: l.catatan.trim() } : {}),
+            ...(editingBillId && l.billItemId ? { open_bill_item_id: l.billItemId } : {}),
           })),
         },
       }),
@@ -377,6 +392,9 @@ export function KasirPage() {
         ...(konsumenNama.trim() ? { customer_nama: konsumenNama.trim() } : {}),
         ...(konsumenWa.trim() ? { customer_wa: konsumenWa.trim() } : {}),
         items: cart.map((l) => ({
+          // baris lama dikirim ber-id agar harga terkuncinya dipertahankan;
+          // baris tanpa id = tambahan baru → memakai harga hari ini
+          ...(l.billItemId ? { id: l.billItemId } : {}),
           menu_id: l.menu.id,
           qty: l.qty,
           ...(l.dineInOverride !== null ? { dine_in_override: l.dineInOverride } : {}),
@@ -415,7 +433,17 @@ export function KasirPage() {
     const lines: CartLine[] = [];
     for (const it of bill.items) {
       const menu = menuById.get(it.menu_id);
-      if (menu) lines.push({ menu, qty: it.qty, dineInOverride: it.dine_in_override, catatan: it.catatan ?? "" });
+      // harga & id baris ikut dibawa: yang ditagih adalah harga saat dipesan,
+      // dan id-nya dipakai agar PUT/bayar tidak kehilangan kunci harga itu
+      if (menu)
+        lines.push({
+          menu,
+          qty: it.qty,
+          dineInOverride: it.dine_in_override,
+          catatan: it.catatan ?? "",
+          billItemId: it.id,
+          hargaKunci: it.harga_satuan,
+        });
     }
     setCart(lines);
     setMejaId(bill.meja_id);
@@ -735,12 +763,22 @@ export function KasirPage() {
                       {l.menu.nama}
                     </div>
                     <div className="text-xs text-stone-500">
-                      {formatRupiah(l.menu.harga_jual)} ×{" "}
+                      {formatRupiah(hargaBaris(l))} ×{" "}
                       <span className="font-semibold">{l.qty}</span>
                     </div>
+                    {/* Harga menu berubah setelah bill dibuat: pembeli tetap
+                        ditagih harga saat memesan — katakan apa adanya. */}
+                    {l.hargaKunci != null && l.hargaKunci !== l.menu.harga_jual && (
+                      <div
+                        className="text-[11px] text-amber-700"
+                        title={`Harga menu sekarang ${formatRupiah(l.menu.harga_jual)}`}
+                      >
+                        🔒 harga saat dipesan (menu kini {formatRupiah(l.menu.harga_jual)})
+                      </div>
+                    )}
                   </div>
                   <div className="text-sm font-bold text-stone-800">
-                    {formatRupiah(l.menu.harga_jual * l.qty)}
+                    {formatRupiah(hargaBaris(l) * l.qty)}
                   </div>
                 </div>
                 <div className="mt-2 flex items-center justify-between">
@@ -868,7 +906,7 @@ export function KasirPage() {
                     )}
                   </span>
                   <span className="shrink-0 font-medium text-stone-700">
-                    {formatRupiah(l.menu.harga_jual * l.qty)}
+                    {formatRupiah(hargaBaris(l) * l.qty)}
                   </span>
                 </div>
               ))}

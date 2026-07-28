@@ -37,6 +37,12 @@ export const SaleBody = z.object({
   /** idempotensi antarjalur (online ↔ /sync) — UUID v4 dari perangkat, opsional */
   client_ref: clientRefField,
   device_id: deviceIdField,
+  /**
+   * Open bill yang sedang dibayar. Bila diisi, baris ber-`open_bill_item_id`
+   * ditagih dengan harga yang DIKUNCI di bill saat dipesan — bukan harga menu
+   * hari ini.
+   */
+  open_bill_id: z.string().uuid().optional(),
   items: z
     .array(
       z.object({
@@ -44,6 +50,8 @@ export const SaleBody = z.object({
         qty: z.number().positive(),
         is_dine_in: z.boolean().optional(),
         catatan: z.string().nullish(),
+        /** baris asal di open bill — pembawa harga terkunci */
+        open_bill_item_id: z.string().uuid().nullish(),
       }),
     )
     .min(1),
@@ -98,6 +106,7 @@ export const penjualanRoutes = new Hono<AppEnv>()
       customerWa: body.customer_wa,
       metodeBayar: body.metode_bayar,
       uangDiterima: body.uang_diterima,
+      openBillId: body.open_bill_id,
       items: body.items,
     });
     const data = { ...result, kasir: auth.nama };

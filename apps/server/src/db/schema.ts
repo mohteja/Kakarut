@@ -1247,6 +1247,14 @@ export const openBillItems = pgTable(
     menuId: uuid("menu_id")
       .notNull()
       .references(() => menus.id),
+    /**
+     * Harga jual per porsi yang DIKUNCI saat baris ini dimasukkan ke bill.
+     * Tanpa snapshot ini, bill yang dibuka hari ini lalu dibayar besok ditagih
+     * harga menu TERBARU — bukan harga yang disepakati pembeli saat memesan.
+     */
+    hargaSatuan: numeric("harga_satuan", { precision: 14, scale: 2, mode: "number" }).notNull(),
+    /** nama menu saat dipesan — bill tetap terbaca bila menu di-rename/diarsipkan */
+    menuNama: text("menu_nama").notNull(),
     qty: numeric("qty", { precision: 10, scale: 2, mode: "number" }).notNull(),
     /** null = ikut mode transaksi; true/false = override dine-in per baris */
     dineInOverride: boolean("dine_in_override"),
