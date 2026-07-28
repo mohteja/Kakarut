@@ -905,8 +905,19 @@ export const shifts = pgTable(
       .default(0),
     closedBy: uuid("closed_by").references(() => users.id),
     closedAt: timestamp("closed_at", { withTimezone: true }),
-    /** uang tunai fisik yang dihitung saat tutup (untuk selisih kas) */
+    /**
+     * Uang tunai fisik hasil hitung laci. Diisi lewat `POST /shift/kunci-hitungan`
+     * SEBELUM shift ditutup (hitung buta), atau langsung saat `POST /shift/tutup`.
+     * Terisi selagi `closed_at` masih NULL = hitungan sudah dikunci, angka kas
+     * boleh dibuka ke kasir.
+     */
     uangFisik: numeric("uang_fisik", { precision: 14, scale: 2, mode: "number" }),
+    /**
+     * Kapan hitungan dikunci. Jejak audit yang membedakan penutupan buta
+     * (kunci → angka terbuka → tutup) dari penutupan satu langkah; tanpa kolom
+     * ini keduanya terlihat sama persis setelah shift tertutup.
+     */
+    hitunganDikunciAt: timestamp("hitungan_dikunci_at", { withTimezone: true }),
     catatan: text("catatan"),
     /**
      * true bila ADA transaksi susulan (sinkron offline) yang jatuh di jendela
@@ -914,6 +925,22 @@ export const shifts = pgTable(
      * memberi tahu bahwa angka penutupan awal bisa berbeda dari rekap terkini.
      */
     adaTransaksiSusulan: boolean("ada_transaksi_susulan").notNull().default(false),
+    /**
+     * PERSETUJUAN SELISIH KAS. NULL = tak ada yang perlu disetujui: shift masih
+     * terbuka, atau uang fisik PAS dengan kas sistem. Begitu ada selisih —
+     * lebih maupun kurang — statusnya "menunggu" sampai owner/admin memutuskan.
+     * Kasir tidak bisa menyetujui selisihnya sendiri.
+     *
+     * DTO memisahkan dua makna NULL itu jadi `status_selisih: null` (masih
+     * terbuka) vs `"pas"` (sudah ditutup, tidak ada selisih) — lihat `toDto`.
+     */
+    selisihStatus: penyesuaianStatusEnum("selisih_status"),
+    /** keterangan kasir saat menutup dengan selisih (mis. "kembalian kurang") */
+    selisihAlasan: text("selisih_alasan"),
+    disetujuiOleh: uuid("disetujui_oleh").references(() => users.id),
+    disetujuiAt: timestamp("disetujui_at", { withTimezone: true }),
+    /** alasan owner menolak selisih (wajib diisi saat menolak) */
+    tolakAlasan: text("tolak_alasan"),
   },
   (t) => [
     // hanya boleh ada satu shift terbuka per cabang pada satu waktu

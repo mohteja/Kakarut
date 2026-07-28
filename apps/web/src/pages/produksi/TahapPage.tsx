@@ -162,7 +162,8 @@ function TahapForm({
       const p = pilih[r.id];
       if (!p?.aktif) return false;
       const q = Number(p.qty);
-      return !Number.isFinite(q) || q <= 0 || q > r.qty + 1e-9;
+      // qty boleh melebihi rencana (kemasan/hasil nyata) — hanya ≤ 0 yang salah
+      return !Number.isFinite(q) || q <= 0;
     });
   const sisaTugas = keProses
     ? 0
@@ -176,7 +177,10 @@ function TahapForm({
   const rabMaju = barisRab.reduce((t, r) => {
     const q = Number(pilih[r.id]?.qty);
     if (!Number.isFinite(q) || q <= 0 || r.total_harga == null) return t;
-    return t + Math.round((r.total_harga * Math.min(q, r.qty)) / r.qty);
+    // Diskalakan mengikuti qty yang benar-benar diambil — termasuk saat LEBIH
+    // dari rencana (beli per kemasan), supaya dana yang disarankan cukup.
+    // Rumusnya sama dengan yang dipakai server saat menulis baris.
+    return t + Math.round((r.total_harga * q) / r.qty);
   }, 0);
   // Dana cair hanya untuk BELI — produksi tak belanja apa pun, jadi tak ada
   // uang yang dicairkan.
@@ -322,8 +326,12 @@ function TahapForm({
                 {bisaMaju.map((r) => {
                   const p = pilih[r.id];
                   const q = Number(p?.qty);
-                  const salah = p?.aktif && (!Number.isFinite(q) || q <= 0 || q > r.qty + 1e-9);
+                  // RAB itu RENCANA, bukan pagu: qty realisasi boleh LEBIH
+                  // (sayur direncanakan 900 gr tapi hanya dijual per kilo → beli
+                  // 1.000) maupun KURANG. Yang salah hanya qty ≤ 0/kosong.
+                  const salah = p?.aktif && (!Number.isFinite(q) || q <= 0);
                   const sisa = p?.aktif && Number.isFinite(q) ? r.qty - q : r.qty;
+                  const lebih = p?.aktif && Number.isFinite(q) ? q - r.qty : 0;
                   return (
                     <tr key={r.id} className={p?.aktif ? "" : "opacity-50"}>
                       <td className={tdClass}>
@@ -369,7 +377,6 @@ function TahapForm({
                           <input
                             type="number"
                             min="0"
-                            max={r.qty}
                             step="any"
                             value={p?.qty ?? ""}
                             disabled={!p?.aktif}
@@ -386,9 +393,14 @@ function TahapForm({
                             sisa {formatAngka(sisa)} {r.satuan} tetap jadi tugas
                           </div>
                         )}
+                        {lebih > 1e-9 && !salah && (
+                          <div className="text-right text-[11px] text-sky-700">
+                            lebih {formatAngka(lebih)} {r.satuan} dari rencana — dicatat apa adanya
+                          </div>
+                        )}
                         {salah && (
                           <div className="text-right text-[11px] text-red-600">
-                            qty harus 0&lt;qty≤{formatAngka(r.qty)}
+                            qty harus lebih dari 0
                           </div>
                         )}
                         {masukStok && p?.aktif && (

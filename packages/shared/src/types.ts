@@ -1461,15 +1461,77 @@ export interface Shift {
   /** uang tunai fisik saat tutup (null selagi terbuka) */
   uang_fisik: number | null;
   catatan: string | null;
-  penjualan_tunai: number;
+  /** null saat `hitung_buta` — SENGAJA null, bukan 0 (0 berarti "tak ada penjualan tunai") */
+  penjualan_tunai: number | null;
   penjualan_nontunai: number;
   jumlah_transaksi: number;
-  /** kas seharusnya di laci = modal_awal + penjualan_tunai */
-  kas_sistem: number;
-  /** uang_fisik − kas_sistem (null selagi terbuka) */
+  /** kas seharusnya di laci = modal_awal + penjualan_tunai; null bila `hitung_buta` */
+  kas_sistem: number | null;
+  /** uang_fisik − kas_sistem (null sebelum hitungan dikunci / bila `hitung_buta`) */
   selisih: number | null;
   /** ada transaksi susulan (sinkron offline) setelah shift ditutup → rekap dihitung ulang */
   ada_transaksi_susulan: boolean;
+  /**
+   * HITUNG BUTA. true = angka kas SENGAJA disembunyikan dari pemanggil:
+   * `penjualan_tunai`, `kas_sistem`, dan `selisih` bernilai `null`.
+   *
+   * Berlaku untuk peran terkunci cabang (kasir/tim) selama shift masih terbuka
+   * DAN hitungan belum dikunci. Alasannya: kalau kasir bisa melihat "seharusnya
+   * Rp X" sebelum menghitung, penghitungan laci berhenti jadi pemeriksaan —
+   * angka itu tinggal disalin dan selisih apa pun tak akan pernah terlihat.
+   *
+   * Dibuka oleh `POST /shift/kunci-hitungan` (uang fisik dikunci lebih dulu,
+   * jadi angkanya tak bisa diubah setelah jawabannya terlihat). Owner/admin
+   * tak pernah dibutakan — merekalah yang menyetujui selisih.
+   *
+   * `modal_awal` TIDAK ikut disembunyikan: itu angka yang kasir sendiri ketik
+   * saat buka kasir, dan tanpa `penjualan_tunai` ia tak membocorkan apa pun.
+   */
+  hitung_buta: boolean;
+  /**
+   * Kapan hitungan uang fisik dikunci (`POST /shift/kunci-hitungan`). `null`
+   * bila shift ditutup satu langkah tanpa penguncian. Jejak audit: hanya shift
+   * ber-nilai inilah yang uang fisiknya benar-benar dihitung sebelum kas sistem
+   * terlihat.
+   */
+  hitungan_dikunci_pada: string | null;
+  /**
+   * `null` selagi shift masih TERBUKA. Setelah ditutup:
+   * - `"pas"` — uang fisik sama dengan kas sistem; tak perlu persetujuan;
+   * - `"menunggu"` — ada selisih, owner/admin belum memutuskan;
+   * - `"disetujui"` / `"ditolak"` — sudah diputuskan.
+   *
+   * Kasir tak pernah bisa mengubah status ini.
+   */
+  status_selisih: StatusSelisih | null;
+  /** keterangan kasir atas selisih (dari `catatan` bila tak dikirim terpisah) */
+  selisih_alasan: string | null;
+  /** nama owner/admin yang memutuskan (null selama masih menunggu) */
+  selisih_disetujui_oleh: string | null;
+  selisih_diputus_pada: string | null;
+  /** alasan penolakan — wajib diisi saat menolak */
+  alasan_tolak: string | null;
+}
+
+/**
+ * Status selisih kas satu shift. `"pas"` sengaja dipisah dari `null`: `null`
+ * berarti "shift masih terbuka, belum ada apa-apa untuk dinilai", sedangkan
+ * `"pas"` berarti "sudah dihitung dan memang tak ada selisih". Tanpa pemisahan
+ * itu klien tak bisa membedakan keduanya.
+ */
+export type StatusSelisih = "pas" | "menunggu" | "disetujui" | "ditolak";
+
+/** Satu baris daftar selisih kas yang menunggu keputusan owner. */
+export interface SelisihKasRow {
+  id: string;
+  branch_nama: string;
+  ditutup_oleh: string | null;
+  ditutup_pada: string | null;
+  kas_sistem: number;
+  uang_fisik: number;
+  selisih: number;
+  catatan: string | null;
+  status_selisih: StatusSelisih;
 }
 
 /**

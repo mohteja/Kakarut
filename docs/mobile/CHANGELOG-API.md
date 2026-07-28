@@ -20,6 +20,264 @@ tanpa akses repo server.
 
 ---
 
+## Rilis: Tutup kasir HITUNG BUTA + kunci hitungan + ACC selisih owner
+
+> **BELUM tayang di production** per 28 Jul 2026 — masih di PR #127 (draft).
+> Selama belum tayang, `POST /shift/kunci-hitungan` memang **404**; penanganan
+> mobile (jatuh ke Tingkat 1, tetap mengirim `uang_fisik`) sudah tepat. Baris
+> ini diperbarui jadi "Sudah di-merge ke production" begitu tayang.
+>
+> Migrasi DB **0087** (`shifts.selisih_status` dkk) & **0088**
+> (`shifts.hitungan_dikunci_at`) — semuanya nullable, shift lama tetap sah.
+
+**Kontrak ini menjawab usulan `PROMPTBACKENDSELISIHKAS.md` dari tim mobile.**
+Usulan itu diterima hampir seluruhnya, termasuk tiga hal yang lebih baik dari
+rancangan awal server: `penjualan_tunai` **tidak** dikirim 0, `status_selisih`
+punya nilai `'pas'` tersendiri, dan ada endpoint pengunci hitungan. Perbedaan
+penamaan yang tersisa disebut eksplisit di bawah — server sudah **mengikuti
+penamaan mobile**, jadi tak ada yang perlu diubah di sisi mobile kecuali yang
+ditandai.
+
+Server memilih **Tingkat 2** (buta di server). Tingkat 1 (buta di UI saja)
+tetap jalan tanpa perubahan — lihat "jalur satu langkah" di bawah.
+
+### 🔴 WAJIB — nama field berubah & tipe melonggar
+
+Field pada `Shift` **berganti nama**, mengikuti usulan mobile:
+
+| Lama | Baru |
+| --- | --- |
+| `buta` | `hitung_buta` |
+| `selisih_status` | `status_selisih` |
+| `disetujui_oleh` | `selisih_disetujui_oleh` |
+| `disetujui_pada` | `selisih_diputus_pada` |
+| `tolak_alasan` | `alasan_tolak` |
+
+Dan tipe yang melonggar:
+
+| Field | Dulu | Sekarang |
+| --- | --- | --- |
+| `kas_sistem` | `number` | `number \| null` |
+| `penjualan_tunai` | `number` | `number \| null` |
+
+### 🔴 WAJIB — `penjualan_tunai` bisa `null`, **bukan 0**
+
+Untuk peran terkunci cabang (kasir/tim), selagi shift **terbuka** DAN hitungan
+**belum dikunci**:
+
+| Field | Nilai |
+| --- | --- |
+| `hitung_buta` | `true` |
+| `kas_sistem` | `null` |
+| `penjualan_tunai` | `null` |
+| `selisih` | `null` |
+| `modal_awal`, `jumlah_transaksi`, non-tunai | tetap terisi |
+
+Mobile benar: mengirim `0` adalah kebohongan yang tak bisa dibedakan dari "belum
+ada penjualan tunai hari ini". Server sekarang mengirim `null`. Tampilkan `•••`
+bila `hitung_buta`, jangan `Rp 0`.
+
+`modal_awal` **tidak** ikut disembunyikan (usulan mobile menyebutnya) — itu
+angka yang kasir sendiri ketik saat buka kasir, dan tanpa `penjualan_tunai` ia
+tak membocorkan apa pun.
+
+**Jangan menghitung sendiri `modal_awal + penjualan_tunai` sebagai pengganti** —
+itu persis yang dicegah.
+
+### 🟢 BARU — `POST /api/shift/kunci-hitungan` (momen reveal)
+
+```
+POST /api/shift/kunci-hitungan   body: { "uang_fisik": number }
+→ 200 { uang_fisik, kas_sistem, selisih }
+```
+
+Persis seperti usulan mobile. Setelah ini `GET /shift/aktif` berhenti membutakan
+(shift belum ditutup), jadi layar bisa langsung menampilkan angka lengkap.
+
+- Nominal **berbeda** dikirim ulang → **409**, body `{ error, uang_fisik,
+  kas_sistem, selisih }` berisi nominal **pertama**.
+- Nominal **sama** dikirim ulang → tetap **200**. Retry jaringan bukan
+  kecurangan, dan menolaknya akan menyandera shift.
+
+Tombol **Kunci hitungan** yang sudah mobile buat cocok langsung ke endpoint ini.
+
+Baca status penguncian dari `Shift.uang_fisik != null` (dan `ditutup_pada ==
+null`), **bukan** dari state lokal — kalau aplikasi ditutup di antara mengunci
+dan menutup, kasir harus mendarat di langkah yang sama, bukan disuruh menghitung
+ulang.
+
+### ⚪️ `selisih_alasan` — jawabannya (a) **dan** (b)
+
+Body `POST /shift/tutup` lengkapnya:
+
+```
+{ uang_fisik?: number(≥0)|null, catatan?: string|null,
+  selisih_alasan?: string|null (max 300) }
+```
+
+- **(a) benar** — bila `selisih ≠ 0` dan `selisih_alasan` tak dikirim, server
+  menyalin `catatan` ke `selisih_alasan`. **Mobile tidak perlu berubah.**
+- **(b) juga benar** — `selisih_alasan` diterima sebagai field terpisah, dan
+  menang bila keduanya dikirim. Pakai ini kalau nanti mau memisahkan "catatan
+  penutupan" dari "alasan selisih" di UI.
+
+Urutannya: `selisih_alasan?.trim() || catatan?.trim() || null`, dan hanya
+diisi saat `selisih ≠ 0` (shift `pas` menyimpan `catatan` saja).
+
+**Soal kekhawatiran field asing:** validasinya **tidak** strict — field yang tak
+dikenal diabaikan (di-strip), bukan ditolak. Jadi mengirim field yang belum
+pasti diterima tak akan menggagalkan penutupan shift. Sudah dikunci di
+verify-api: penutupan diuji dengan satu field karangan ikut di body.
+
+### 🟡 PERLU DICEK — `POST /shift/tutup`: `uang_fisik` jadi opsional
+
+- Sudah `kunci-hitungan` → `uang_fisik` boleh dihilangkan (diambil dari yang
+  terkunci). Bila tetap dikirim dan **berbeda** → **409**.
+- Belum mengunci → `uang_fisik` **wajib**; tanpa itu **400**. Inilah jalur satu
+  langkah, jadi klien Tingkat 1 tetap berjalan tanpa perubahan kode.
+
+### 🟢 BARU — `status_selisih` punya nilai `'pas'`
+
+| Nilai | Arti |
+| --- | --- |
+| `null` | shift masih **terbuka** — belum ada yang dinilai |
+| `"pas"` | sudah ditutup, uang fisik sama dengan kas sistem, tak perlu persetujuan |
+| `"menunggu"` | ada selisih, owner/admin belum memutuskan |
+| `"disetujui"` / `"ditolak"` | sudah diputuskan |
+
+Usulan mobile diterima: memakai `null` untuk dua makna sekaligus membuat klien
+tak bisa membedakan "belum ditutup" dari "tidak ada selisih".
+
+Ambang "pas" adalah **0,005** — itu murni pembulatan `numeric(14,2)`, **bukan**
+toleransi bisnis (lihat jawaban pertanyaan 1).
+
+Field pendamping: `selisih_alasan` (keterangan kasir), `selisih_disetujui_oleh`,
+`selisih_diputus_pada`, `alasan_tolak`, dan `hitungan_dikunci_pada`
+(ISO `string | null` — jejak audit, `null` bila ditutup satu langkah tanpa
+mengunci; boleh tidak ditampilkan).
+
+`POST /shift/tutup` mengisi `status_selisih` otomatis. Kasir tak pernah bisa
+mengubahnya.
+
+**`selisih_disetujui_oleh` terisi saat DITOLAK juga.** Namanya memang warisan
+kolom DB dan menyesatkan — maknanya **pemutus**, bukan "yang menyetujui". Parsing
+mobile ("diputus oleh" untuk kedua kasus) sudah benar; tak ada field lain yang
+diisi saat penolakan. Namanya sengaja tidak diubah lagi karena mobile sudah
+rilis dengan nama ini — pasangannya `selisih_diputus_pada` menegaskan maknanya.
+
+**Field putusan ada di SEMUA endpoint yang mengembalikan `Shift`** — termasuk
+`GET /shift` (riwayat cabang), jadi penanda "⏳ menunggu / ✅ disetujui / ❌
+ditolak" di layar Tutup Kasir memang berfungsi: kasir bisa melihat nasib
+selisihnya sendiri tanpa akses ke layar owner. Daftarnya: `GET /shift/aktif`,
+`GET /shift`, `GET /shift/:id`, respons `POST /shift/tutup`, dan respons
+`POST /shift/:id/selisih/putuskan`. Keduanya dikunci di verify-api.
+
+### 🟢 BARU — putusan owner & daftar yang menunggu
+
+```
+POST /api/shift/:id/selisih/putuskan
+body: { "status": "disetujui" | "ditolak", "alasan_tolak"?: string }
+```
+
+- **409** bila sudah pernah diputuskan — *"Selisih shift ini sudah disetujui —
+  tidak bisa diputuskan lagi"*, pola sama dengan `POST /pengajuan/:id/putuskan`.
+- `alasan_tolak` **wajib** saat `ditolak` (400 bila kosong).
+- Tidak mengubah angka apa pun; kasir yang memanggilnya dapat **403**.
+
+```
+GET /api/shift/selisih?status=menunggu[&branch_id=]
+→ SelisihKasRow[]  (maks 50, urut tutup terbaru)
+   { id, branch_nama, ditutup_oleh, ditutup_pada, kas_sistem,
+     uang_fisik, selisih, catatan, status_selisih }
+```
+
+`status` menerima `pas` / `menunggu` / `disetujui` / `ditolak` (default
+`menunggu`). `catatan` = `selisih_alasan` bila ada, jika tidak `catatan`
+penutupan. Owner/admin saja (**403** untuk kasir).
+
+Sengaja **tidak** ditempel ke `GET /shift/pantau` seperti alternatif yang mobile
+tawarkan: `/pantau` bicara soal shift yang sedang berjalan **hari ini**, satu
+baris per cabang — sedangkan selisih yang menunggu bisa berasal dari shift
+kemarin di cabang yang hari ini belum buka. Baris itu takkan pernah punya tempat
+di `/pantau`.
+
+### ⚪️ Jawaban tiga pertanyaan di dokumen mobile
+
+1. **Ambang toleransi selisih?** ~~Tidak ada~~ — **disepakati BELUM dipasang**
+   (balasan mobile). Catatan aslinya tetap di sini sebagai alasan:
+   tidak ada, dan sengaja belum dibuat.
+   `0,005` di server murni pembulatan desimal. Toleransi bisnis (mis. "≤ Rp1.000
+   dianggap pas") adalah **kebijakan perusahaan**, bukan konstanta — dan
+   memasangnya sekarang berarti selisih di bawah ambang tak pernah sampai ke
+   owner. Kalau memang diinginkan, server akan menambahkannya sebagai setelan
+   perusahaan dan mengirimkannya sebagai `ambang_selisih` supaya web & mobile
+   tidak menghitung sendiri-sendiri. Beri tahu saja.
+2. **Setelah owner menolak?** Asumsi mobile **benar**: shift tetap tertutup,
+   angka tidak diubah sama sekali, dan kasir tidak diminta menghitung ulang.
+   Penolakan hanyalah penanda untuk ditindaklanjuti di luar aplikasi. Server
+   memang tak menyediakan jalan untuk membuka kembali shift yang sudah ditutup.
+3. **Notifikasi owner?** Ya — `GET /shift/selisih?status=menunggu` adalah sumber
+   badge-nya; jumlah barisnya = angka di badge. Web memakai endpoint yang sama
+   dan mem-poll tiap 60 detik saat halaman Operasional terbuka.
+
+### ⚪️ Web sudah ikut dibenahi
+
+Laporan lapangan yang memicu pekerjaan ini ("Kas seharusnya Rp 255.000"
+terpampang di atas kolom uang fisik yang masih kosong) datang dari layar **web**,
+dan halaman itu **sudah** ikut diubah di PR yang sama — bukan hanya server:
+Tutup Kasir kini dua langkah (isi nominal → **Kunci Hitungan** → angka terbuka →
+tutup), dan sebelum dikunci semua angka tunai tampil `•••`. Jadi begitu rilis ini
+tayang, web dan mobile menutup celah yang sama pada hari yang sama.
+
+### ⚪️ Catatan operasional
+
+Kasir salah ketik nominal lalu terlanjur mengunci **tidak bisa membatalkannya**
+— itu konsekuensi yang disengaja dari anti-pancing. Yang terjadi: shift ditutup
+dengan selisih besar, lalu **owner menolaknya**. Alurnya sudah menangani kasus
+ini; tak ada shift yang tersangkut. Kalau di lapangan ternyata terlalu sering,
+server bisa menambah "buka kunci" khusus owner — sebut saja.
+
+---
+
+## Rilis: Realisasi qty boleh lebih dari RAB
+
+> Tidak ada migrasi DB. **Satu batasan dicabut** di `POST /api/{mod}/tahap/:id`,
+> plus satu field baru di baris faktur.
+
+### 🔴 WAJIB — `items[].qty` tak lagi dibatasi qty baris
+
+Dulu `items[].qty` yang melebihi qty baris ditolak **400** (*"Qty maju melebihi
+qty baris"*). Itu keliru: RAB adalah **rencana**, bukan pagu. Sayur
+direncanakan 900 gr tapi hanya dijual per kilo → yang benar-benar dibeli
+1.000 gr, dan angka itulah yang harus tercatat.
+
+Sekarang satu-satunya batas adalah **qty > 0**.
+
+| `items[].qty` vs qty baris | Yang terjadi |
+| --- | --- |
+| **kurang** | **split** — bagian yang maju jadi baris BARU, sisanya tetap jadi tugas |
+| **sama** | seluruh baris maju apa adanya |
+| **lebih** | seluruh baris maju, `qty` **diperbarui ke angka realisasi**; tak ada sisa tugas |
+
+**Klien yang memblokir input di sisi UI (`max = qty baris`) harus melepasnya** —
+kalau tidak, kasus paling umum (beli per kemasan) tetap mustahil dicatat.
+
+### 🟢 BARU — `harga_tebakan` pada baris `GET /api/produksi` & `/api/pembelian`
+
+`true` = `total_harga` baris itu **belum pernah dilihat manusia**: estimasi RAB,
+belanja otomatis, atau hasil skala saat realisasi melebihi rencana. Baris
+bertanda ini **dikecualikan dari kolam median harga acuan** — tanpa itu harga
+acuan menyeret dirinya sendiri naik.
+
+Berguna untuk menandai di UI mana harga yang masih perkiraan.
+
+⚪️ **Harga saat qty lebih:** kirim `items[].harga` bila tahu harga riilnya —
+itu menang dan menandai baris `harga_tebakan: false`. Bila tidak, server
+menskalakan harga RAB (`total_harga × qty_baru ÷ qty_lama`) dan menandainya
+`harga_tebakan: true`.
+
+---
+
 ## Rilis: Isi menu untuk pembeli (`MenuDto.deskripsi`)
 
 > Migrasi DB **0086** (`menus.deskripsi`, nullable — tak ada backfill, menu lama

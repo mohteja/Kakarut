@@ -891,9 +891,11 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
                 "Barang bertujuan cabang lain — kirim dulu lalu terima di Penerimaan cabang tujuan",
             });
           }
-          if (item.qty > b.qty + 1e-9) {
-            throw new HTTPException(400, { message: "Qty maju melebihi qty baris" });
-          }
+          // Qty maju SENGAJA boleh melebihi qty baris: RAB itu RENCANA, bukan
+          // pagu. Sayur direncanakan 900 gr tapi hanya dijual per kilo → yang
+          // benar-benar dibeli 1.000 gr, dan angka itulah yang harus tercatat.
+          // Hal yang sama berlaku pada produksi (hasil sering lebih/kurang dari
+          // target). Yang dibatasi hanya qty ≤ 0, dijaga skema Zod.
         }
 
         // PENGAMAN BAHAN BAKU (produksi): sebelum baris rencana MULAI dikerjakan
@@ -1139,12 +1141,30 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
               eq(productions.qty, b.qty),
               isNull(productions.deletedAt),
             );
-            if (Math.abs(b.qty - item.qty) < 1e-9) {
+            // Qty realisasi ≥ rencana → SELURUH baris maju, tak ada sisa tugas.
+            // Bila lebih (beli 1.000 gr padahal RAB 900), qty baris diperbarui
+            // ke angka yang benar-benar terjadi.
+            if (item.qty >= b.qty - 1e-9) {
+              const lebih = item.qty > b.qty + 1e-9;
+              // Tanpa harga riil, harga RAB diskalakan mengikuti qty baru supaya
+              // harga per satuan tetap masuk akal. Angka hasil skala itu TAK
+              // PERNAH DILIHAT MANUSIA — walau harga awalnya diketik orang —
+              // jadi ia ditandai `harga_tebakan` agar tak ikut jadi bahan median
+              // harga acuan (invarian yang sama dengan perbaikan lingkaran umpan
+              // balik harga).
+              const hargaSkala =
+                lebih && b.totalHarga != null
+                  ? Math.round((b.totalHarga * item.qty) / b.qty)
+                  : null;
               const res = await tx
                 .update(productions)
                 .set({
                   ...naikBaris(b),
                   ...pindah,
+                  ...(lebih ? { qty: item.qty } : {}),
+                  ...(hargaSkala != null && item.harga == null
+                    ? { totalHarga: hargaSkala, hargaTebakan: true }
+                    : {}),
                   // rak simpan otomatis (home rak per bahan) saat barang tiba/disimpan
                   ...(bolehPindah ? { storageLocationId: rakBaris(b) } : {}),
                   // self-assign pelaksana (isi hanya bila masih kosong)
@@ -2288,6 +2308,13 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         storage_location_id: productions.storageLocationId,
         // laporan harga riil (jalur beli) sudah dibuat utk baris ini? → status "Selesai"
         laporan_harga_at: productions.laporanHargaAt,
+        /**
+         * true = `total_harga` baris ini TEBAKAN, belum pernah dilihat manusia
+         * (estimasi RAB, belanja otomatis, atau hasil skala saat realisasi qty
+         * melebihi rencana). Baris bertanda ini DIKECUALIKAN dari kolam median
+         * harga acuan — tanpa itu acuan menyeret dirinya sendiri naik.
+         */
+        harga_tebakan: productions.hargaTebakan,
         supplier_id: productions.supplierId,
         dibuat_oleh: pembuat.nama,
         diubah_oleh: pengubah.nama,

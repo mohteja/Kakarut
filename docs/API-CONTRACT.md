@@ -391,7 +391,27 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 > (sisa siap kirim, yaitu `saldo − dalam_jalan`).
 
 - `POST /api/{mod}/faktur` — req `FakturBody`: `{ branch_id?: uuid, tujuan_branch_id?: uuid|null (KHUSUS BELI, manajemen: cabang STORE tujuan kirim — barang tiba di cabang faktur lalu dikirim & diterima di Penerimaan cabang; baris bertujuan TIDAK auto-confirm), supplier_id?: uuid|null, no_faktur?|null (max60), catatan?|null, worker_id?: uuid|null (produksi: OPSIONAL — bila kosong pelaksana terisi otomatis dari aktor yang memajukan tahap ke "dikerjakan"), items: [{ingredient_id:uuid, mode:"pcs"|"batch", jumlah:number(>0), storage_location_id?:uuid|null, total_harga?:number(≥0)|null}] (min 1) }`. `branch_id` boleh cabang STORE (beli langsung di cabang — barang Tiba langsung masuk stok cabang itu; produksi di cabang store = produksi lokal, hasil masuk stok cabang itu). — res: **201** `{ faktur_id, nomor, status:"rencana", jumlah_baris, beli_otomatis: { faktur_id, nomor, jumlah_baris } | null }` — `beli_otomatis` (jalur PRODUKSI): faktur BELI yang lahir otomatis di cabang sama untuk bahan mentah resep yang KURANG atau yang sisa stoknya bakal jatuh **di bawah stok minimum** setelah produksi (`kurang = kebutuhan resep + stok_minimum − saldo`, dibulatkan per kemasan + MOQ `min_beli`; hanya bahan jalur beli ber-lacak-stok; null bila tak ada). — error: **400** (supplier/ingredient/storage/tujuan invalid, jalur pengadaan salah, tujuan pada produksi), **403** kasir luar cabang / non-manajemen pakai tujuan, **404** ingredient tak ada
-- `POST /api/{mod}/tahap/:fakturId` — req `TahapBody`: `{ ke: "dikerjakan"|"menunggu"|"dikonfirmasi", items?: [{id:uuid, qty:number(>0), harga?:number(≥0)|null, exp?: "YYYY-MM-DD"|null (override tanggal kedaluwarsa lot saat baris MASUK STOK, target ≥ "menunggu"; kosong = otomatis `tanggal masuk + masa_simpan_hari` bahan; diabaikan utk target lain)}], dana_cair?:number|null, realisasi?:number|null, selisih_catatan?|null (max300), tujuan_branch_id?:uuid|null, tujuan_storage_id?:uuid|null, paksa?:bool }` — res: `{ ok, status, jumlah_baris }` — error: **400** (tahap tak urut, tujuan lintas cabang, qty>baris, dll), **403**, **404**, **409** (bahan mentah kurang → pesan kekurangan kecuali `paksa`; atau status berubah konkuren). Saat baris MASUK STOK (`menunggu`), rak simpan yang kosong otomatis diisi **rak default bahan** di cabang baris (Tempat Penyimpanan) — berlaku jalur items maupun non-items; baris bertujuan cabang lain tetap tanpa rak (transit) sampai diterima di cabang.
+- `POST /api/{mod}/tahap/:fakturId` — req `TahapBody`: `{ ke: "dikerjakan"|"menunggu"|"dikonfirmasi", items?: [{id:uuid, qty:number(>0), harga?:number(≥0)|null, exp?: "YYYY-MM-DD"|null (override tanggal kedaluwarsa lot saat baris MASUK STOK, target ≥ "menunggu"; kosong = otomatis `tanggal masuk + masa_simpan_hari` bahan; diabaikan utk target lain)}], dana_cair?:number|null, realisasi?:number|null, selisih_catatan?|null (max300), tujuan_branch_id?:uuid|null, tujuan_storage_id?:uuid|null, paksa?:bool }` — res: `{ ok, status, jumlah_baris }` — error: **400** (tahap tak urut, tujuan lintas cabang, dll), **403**, **404**, **409** (bahan mentah kurang → pesan kekurangan kecuali `paksa`; atau status berubah konkuren). Saat baris MASUK STOK (`menunggu`), rak simpan yang kosong otomatis diisi **rak default bahan** di cabang baris (Tempat Penyimpanan) — berlaku jalur items maupun non-items; baris bertujuan cabang lain tetap tanpa rak (transit) sampai diterima di cabang.
+
+> ### `items[].qty` = REALISASI, boleh lebih/kurang dari rencana
+>
+> RAB adalah **rencana**, bukan pagu. Sayur direncanakan 900 gr tapi hanya
+> dijual per kilo → yang benar-benar dibeli 1.000 gr, dan angka itulah yang
+> harus tercatat. Hal yang sama berlaku pada produksi (hasil sering meleset
+> dari target). Satu-satunya batas qty adalah **> 0**.
+>
+> | `items[].qty` vs qty baris | Yang terjadi |
+> | --- | --- |
+> | **kurang** | **split** — bagian yang maju jadi baris BARU, sisanya tetap di tahap sekarang sebagai tugas; harga RAB dibagi prorata |
+> | **sama** | seluruh baris maju apa adanya |
+> | **lebih** | seluruh baris maju, `qty` baris **diperbarui ke angka realisasi**; tak ada sisa tugas |
+>
+> **Harga saat qty lebih:** bila `items[].harga` dikirim, itu harga riil dan
+> menang (`harga_tebakan` → `false`). Bila tidak, harga RAB **diskalakan**
+> `total_harga × qty_baru ÷ qty_lama` dan hasilnya ditandai
+> **`harga_tebakan = true`** — angka hasil skala tak pernah dilihat manusia,
+> jadi ia dikecualikan dari kolam median harga acuan (invarian yang sama dengan
+> perbaikan lingkaran umpan balik harga).
 - `POST /api/{mod}/kirim/:fakturId` — req: `{ tujuan_storage_id?: uuid|null }` — res: `{ ok, tujuan, jumlah_baris }` — error: **400** (belum ada yang siap / cabang/storage tujuan invalid), **403** bukan staf CK
 - `POST /api/produksi/kirim-hasil/:fakturId` — **produksi saja** (pembelian → **404**) — req: `{ tujuan_storage_id?: uuid|null, items?: [{ingredient_id:uuid, qty:number(>0)}] }` — res: `{ ok, faktur_id, nomor, tujuan, jumlah_baris }` — error: **400** (tak ada yang dikirim / stok CK kurang / tujuan invalid / **qty bukan kelipatan kemasan** untuk bahan `pengadaan:"beli"` yang tak boleh eceran — lihat "Kelipatan kemasan pada kiriman" di `/api/transfer-stok`), **403**
 - `GET /api/{mod}/dana/:fakturId` — res: `{ rows: [{id,tipe,nominal,catatan,oleh,waktu}], total }` — error: **404**
@@ -402,7 +422,7 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
   - **Kolam median hanya memuat lot yang harganya pernah dilihat manusia** (`productions.harga_tebakan = false`): harga diisi di faktur, dilaporkan lewat endpoint ini, atau direalisasi di `POST /{mod}/tahap`. Faktur yang dibuat **tanpa** `total_harga` memakai tebakan `qty × harga acuan saat itu`; bila tebakan ikut dihitung, harga acuan menyeret dirinya sendiri (acuan → tebakan → median → acuan) dan HPP seluruh menu hanyut naik tanpa ada yang mengubah harga jual.
 - `POST /api/pembelian/laporan-harga/:fakturId/dampak` — **[owner/admin]**, **beli saja** (produksi → **400**) — req: `{ items: [{id:uuid, total_harga:number(≥0)}] (min1) }` — res: `DampakLaporanHarga` `{ food_cost_maks, bahan: [{ingredient_id, nama, satuan, acuan_lama, acuan_baru, jumlah_menu_terdampak}], menu_lewat_ambang: [{menu_id, nama, food_cost_lama, food_cost_baru}] }` — error: **400**, **404**. Pratinjau **tanpa menulis apa pun**: memakai fungsi hitung yang sama dengan endpoint di atas, jadi angkanya identik dengan hasil bila disimpan. POST (bukan GET) karena dampak bergantung pada angka yang sedang diketik user. `menu_lewat_ambang` hanya memuat menu aktif yang **menyeberang** ambang food cost (bukan yang sudah di atas ambang sejak awal).
 - `POST /api/{mod}` — req `TambahStokBody`: `{ branch_id?:uuid, ingredient_id:uuid, qty?:number(>0), batch:bool=false, total_harga?:number(≥0)|null, catatan? }` (refine: `batch` ATAU `qty` wajib) — res: **201** row production + `{ bahan }` — error: **400**, **404**
-- `GET /api/{mod}` — query: `branch_id?` (atau `all`), `dari?`, `sampai?`, `tanggal?`, `page?` (default 1), `per_page?` (default 20, maks 200) — res: `{ rows, total, page, per_page, total_pengeluaran }` (tiap row memuat `rencana_id` + `permintaan_nomor` (PM-xxxx) bila faktur lahir dari permintaan Tambah Stok dari Menu; juga `exp_date` (tanggal kedaluwarsa lot — terisi saat baris masuk stok; NULL utk transfer stok/kirim-hasil karena lot asal tak diketahui) dan `masa_simpan_hari` master bahan; juga `produksi_di` + `divisi_produksi` bahan — dasar badge divisi Kitchen/Bar pada faktur produksi cabang). **Role `kitchen`/`bar`: daftar otomatis DISARING per divisi** — baris resep produksi-cabang milik divisi lain tidak dikembalikan (bar tak melihat pekerjaan kitchen dan sebaliknya; baris lain seperti kiriman/bahan CK tetap tampil). Owner/admin melihat semuanya.
+- `GET /api/{mod}` — query: `branch_id?` (atau `all`), `dari?`, `sampai?`, `tanggal?`, `page?` (default 1), `per_page?` (default 20, maks 200) — res: `{ rows, total, page, per_page, total_pengeluaran }` (tiap row memuat `harga_tebakan` (bool — `total_harga` masih tebakan, belum pernah dilihat manusia: estimasi RAB / belanja otomatis / hasil skala saat realisasi melebihi rencana; baris bertanda ini dikecualikan dari median harga acuan), `rencana_id` + `permintaan_nomor` (PM-xxxx) bila faktur lahir dari permintaan Tambah Stok dari Menu; juga `exp_date` (tanggal kedaluwarsa lot — terisi saat baris masuk stok; NULL utk transfer stok/kirim-hasil karena lot asal tak diketahui) dan `masa_simpan_hari` master bahan; juga `produksi_di` + `divisi_produksi` bahan — dasar badge divisi Kitchen/Bar pada faktur produksi cabang). **Role `kitchen`/`bar`: daftar otomatis DISARING per divisi** — baris resep produksi-cabang milik divisi lain tidak dikembalikan (bar tak melihat pekerjaan kitchen dan sebaliknya; baris lain seperti kiriman/bahan CK tetap tampil). Owner/admin melihat semuanya.
 - `PATCH /api/{mod}/faktur/:key` — req `FakturEditBody`: `{ password: string (wajib), supplier_id?:uuid|null, no_faktur?|null (max60), catatan?|null, storage_location_id?:uuid|null, worker_id?:uuid|null, prod_date?: "YYYY-MM-DD" }` — res: `{ ok, jumlah_baris }` — error: **401** password salah, **400** supplier/storage invalid, **404**
 - `DELETE /api/{mod}/faktur/:key` — soft delete → Tempat Sampah (tanpa password) — res: `{ ok, jumlah_baris }` — error: **404**
 
@@ -544,15 +564,43 @@ berubah bebas tanpa melepas kunci harga.
 
 ## `/api/shift` — Shift kasir (`modules/shift/routes.ts`) — group guard **[owner/admin/cashier]** (buka/tutup **cashier only**)
 
-- `GET /api/shift/aktif` — [owner/admin/cashier] — query: `branch_id?` — res: `Shift | null` (shift terbuka + rekap live)
+- `GET /api/shift/aktif` — [owner/admin/cashier] — query: `branch_id?` — res: `Shift | null` (shift terbuka + rekap live). **HITUNG BUTA:** untuk peran terkunci cabang (kasir/tim) selagi shift masih TERBUKA **dan hitungan belum dikunci**, `hitung_buta: true` dan angka tunai disembunyikan — `kas_sistem`, `penjualan_tunai`, dan `selisih` semuanya `null` (**bukan 0** — nol adalah angka yang sah). `jumlah_transaksi`, non-tunai, dan `modal_awal` tetap tampil. Owner/admin tak pernah dibutakan.
 - `GET /api/shift/pantau` — **[owner/admin]** — res: `ShiftPantauRow[]` — pantau operasional SEMUA cabang store: status kasir + rekap **hari ini** (zona waktu perusahaan) + jam operasional + tanda telat buka/lupa tutup
 - `GET /api/shift` — [owner/admin/cashier] — query: `branch_id?` — res: `Shift[]` (shift tertutup, maks 50)
 - `GET /api/shift/:id` — [owner/admin/cashier; cashier terkunci cabangnya] — res: `ShiftDetail` (= `Shift` + `transaksi: ShiftTransaksiRow[]`, maks 300, urut waktu desc) — error: **403** shift bukan cabang kasir, **404**
 - `POST /api/shift/buka` — **[cashier]** — req: `{ modal_awal: number(≥0)=0 }` — res: **201** `Shift` — error: **400** shift sudah terbuka **atau kasir belum absen masuk hari ini** (pesan: "Absen masuk dulu sebelum buka kasir"), **403** luar cabang
-- `POST /api/shift/tutup` — **[cashier]** — req: `{ uang_fisik: number(≥0), catatan?|null }` — res: `Shift` — error: **400** tak ada shift terbuka
+- `POST /api/shift/kunci-hitungan` — **[cashier]** — query: `branch_id?` — req: `{ uang_fisik: number(≥0) }` — res: `{ uang_fisik, kas_sistem, selisih }` — error: **400** tak ada shift terbuka, **409** hitungan sudah dikunci dengan nominal LAIN. **Ini "reveal"-nya**: `kas_sistem` & `selisih` dibuka di sini, setelah nominal fisik terkunci. Nominal yang **sama** dikirim ulang tetap **200** (retry jaringan bukan kecurangan). Respons 409 tetap membawa `uang_fisik`/`kas_sistem`/`selisih` milik penguncian pertama, di samping `error`.
+- `POST /api/shift/tutup` — **[cashier]** — req: `{ uang_fisik?: number(≥0)|null, catatan?|null, selisih_alasan?|null (max300) }` — `selisih_alasan` diisi `selisih_alasan?.trim() || catatan?.trim() || null`, hanya saat `selisih ≠ 0` — res: `Shift` — error: **400** tak ada shift terbuka / tak ada nominal (belum dikunci & `uang_fisik` tak dikirim), **409** `uang_fisik` berbeda dari yang sudah dikunci. Sudah `kunci-hitungan` → `uang_fisik` boleh dihilangkan. Belum mengunci → wajib diisi (jalur satu langkah untuk klien yang membutakan di UI saja). Selisih (|selisih| > 0,005) → `status_selisih: "menunggu"`; uang PAS → `status_selisih: "pas"` (tak butuh persetujuan). `selisih_alasan` diisi dari field itu, atau dari `catatan` bila tak dikirim (klien lama hanya punya satu kolom catatan).
+- `GET /api/shift/selisih` — **[owner/admin]** — query: `status?: "pas"|"menunggu"|"disetujui"|"ditolak"` (default `menunggu`), `branch_id?` — res: `SelisihKasRow[]` (maks 50, urut tutup terbaru). Sumber badge "perlu ACC". Sengaja terpisah dari `/pantau`: selisih yang menunggu bisa berasal dari shift kemarin di cabang yang hari ini belum buka.
+- `POST /api/shift/:id/selisih/putuskan` — **[owner/admin]** — req: `{ status: "disetujui"|"ditolak", alasan_tolak?|null (max300) }` — res: `Shift` — error: **400** (shift tak punya selisih; menolak tanpa `alasan_tolak`), **404**, **409** sudah pernah diputuskan (pola sama dengan `POST /pengajuan/:id/putuskan`). `selisih_disetujui_oleh`/`selisih_diputus_pada` terisi pada **kedua** putusan — namanya warisan kolom DB, maknanya **pemutus**, bukan "yang menyetujui". Mencatat KEPUTUSAN saja — `uang_fisik` & `kas_sistem` adalah fakta yang sudah terjadi dan tak pernah diubah; **menolak tidak membuka kembali shift**, ia penanda untuk ditindaklanjuti di luar aplikasi. Kasir **tak bisa** memutuskan selisihnya sendiri (**403** dari guard peran).
+
+> ### ⚠️ Kenapa hitung buta
+>
+> Kalau kasir bisa melihat "kas seharusnya Rp X" sebelum menghitung laci,
+> penghitungan berhenti menjadi pemeriksaan — angka itu tinggal disalin ke
+> `uang_fisik` dan selisih apa pun takkan pernah terlihat. Karena itu server
+> menyembunyikannya, bukan sekadar menyembunyikannya di UI: di web angka yang
+> "disembunyikan di layar" masih terbaca lewat devtools → Network.
+>
+> **Kenapa perlu `kunci-hitungan`, bukan sekadar buta lalu tutup:** tanpa
+> penguncian, kasir bisa MEMANCING angkanya — kirim `uang_fisik: 0`, baca
+> selisih yang muncul, lalu kirim ulang dengan nominal yang pas. Sekali
+> terkunci nominal tak bisa diubah (409), sehingga melihat kas sistem tak lagi
+> bisa memengaruhi apa yang dilaporkan.
+>
+> **Klien tak boleh menghitung sendiri `modal_awal + penjualan_tunai` sebagai
+> pengganti** — itu membatalkan gunanya.
+
+> **Field putusan selisih** (`status_selisih`, `selisih_alasan`,
+> `selisih_disetujui_oleh`, `selisih_diputus_pada`, `alasan_tolak`,
+> `hitungan_dikunci_pada`) ikut di **setiap** endpoint yang mengembalikan
+> `Shift` — termasuk `GET /api/shift` (riwayat cabang), supaya kasir bisa
+> melihat nasib selisihnya sendiri tanpa akses layar owner.
 
 > **Tipe baru (shared):**
 > - `ShiftTransaksiRow`: `{ id, nomor, waktu (ISO), total, metode: "tunai"|"qris"|"transfer", kasir: string|null }`
+> - `StatusSelisih`: `"pas" | "menunggu" | "disetujui" | "ditolak"` — `null` (shift masih terbuka) sengaja dipisah dari `"pas"` (sudah ditutup, tak ada selisih)
+> - `SelisihKasRow`: `{ id, branch_nama, ditutup_oleh, ditutup_pada, kas_sistem, uang_fisik, selisih, catatan, status_selisih }` — `catatan` = `selisih_alasan` bila ada, jika tidak `catatan` penutupan
 > - `ShiftDetail extends Shift`: `{ ...Shift, transaksi: ShiftTransaksiRow[] }`
 > - `ShiftPantauRow`: `{ branch_id, branch_nama, jam_buka: string|null, jam_tutup: string|null, shift_id: string|null, dibuka_oleh: string|null, dibuka_pada: string|null (ISO), modal_awal: number|null, penjualan_tunai, penjualan_nontunai, jumlah_transaksi, kas_sistem, buka_hari_ini: bool, telat_buka: bool, lupa_tutup: bool }` — `penjualan_*` = total HARI INI; meta `dibuka_*`/`modal_awal` hanya terisi bila kasir sedang terbuka.
 
@@ -2329,15 +2377,77 @@ export interface Shift {
   /** uang tunai fisik saat tutup (null selagi terbuka) */
   uang_fisik: number | null;
   catatan: string | null;
-  penjualan_tunai: number;
+  /** null saat `hitung_buta` — SENGAJA null, bukan 0 (0 berarti "tak ada penjualan tunai") */
+  penjualan_tunai: number | null;
   penjualan_nontunai: number;
   jumlah_transaksi: number;
-  /** kas seharusnya di laci = modal_awal + penjualan_tunai */
-  kas_sistem: number;
-  /** uang_fisik − kas_sistem (null selagi terbuka) */
+  /** kas seharusnya di laci = modal_awal + penjualan_tunai; null bila `hitung_buta` */
+  kas_sistem: number | null;
+  /** uang_fisik − kas_sistem (null sebelum hitungan dikunci / bila `hitung_buta`) */
   selisih: number | null;
   /** ada transaksi susulan (sinkron offline) setelah shift ditutup → rekap dihitung ulang */
   ada_transaksi_susulan: boolean;
+  /**
+   * HITUNG BUTA. true = angka kas SENGAJA disembunyikan dari pemanggil:
+   * `penjualan_tunai`, `kas_sistem`, dan `selisih` bernilai `null`.
+   *
+   * Berlaku untuk peran terkunci cabang (kasir/tim) selama shift masih terbuka
+   * DAN hitungan belum dikunci. Alasannya: kalau kasir bisa melihat "seharusnya
+   * Rp X" sebelum menghitung, penghitungan laci berhenti jadi pemeriksaan —
+   * angka itu tinggal disalin dan selisih apa pun tak akan pernah terlihat.
+   *
+   * Dibuka oleh `POST /shift/kunci-hitungan` (uang fisik dikunci lebih dulu,
+   * jadi angkanya tak bisa diubah setelah jawabannya terlihat). Owner/admin
+   * tak pernah dibutakan — merekalah yang menyetujui selisih.
+   *
+   * `modal_awal` TIDAK ikut disembunyikan: itu angka yang kasir sendiri ketik
+   * saat buka kasir, dan tanpa `penjualan_tunai` ia tak membocorkan apa pun.
+   */
+  hitung_buta: boolean;
+  /**
+   * Kapan hitungan uang fisik dikunci (`POST /shift/kunci-hitungan`). `null`
+   * bila shift ditutup satu langkah tanpa penguncian. Jejak audit: hanya shift
+   * ber-nilai inilah yang uang fisiknya benar-benar dihitung sebelum kas sistem
+   * terlihat.
+   */
+  hitungan_dikunci_pada: string | null;
+  /**
+   * `null` selagi shift masih TERBUKA. Setelah ditutup:
+   * - `"pas"` — uang fisik sama dengan kas sistem; tak perlu persetujuan;
+   * - `"menunggu"` — ada selisih, owner/admin belum memutuskan;
+   * - `"disetujui"` / `"ditolak"` — sudah diputuskan.
+   *
+   * Kasir tak pernah bisa mengubah status ini.
+   */
+  status_selisih: StatusSelisih | null;
+  /** keterangan kasir atas selisih (dari `catatan` bila tak dikirim terpisah) */
+  selisih_alasan: string | null;
+  /** nama owner/admin yang memutuskan (null selama masih menunggu) */
+  selisih_disetujui_oleh: string | null;
+  selisih_diputus_pada: string | null;
+  /** alasan penolakan — wajib diisi saat menolak */
+  alasan_tolak: string | null;
+}
+
+/**
+ * Status selisih kas satu shift. `"pas"` sengaja dipisah dari `null`: `null`
+ * berarti "shift masih terbuka, belum ada apa-apa untuk dinilai", sedangkan
+ * `"pas"` berarti "sudah dihitung dan memang tak ada selisih". Tanpa pemisahan
+ * itu klien tak bisa membedakan keduanya.
+ */
+export type StatusSelisih = "pas" | "menunggu" | "disetujui" | "ditolak";
+
+/** Satu baris daftar selisih kas yang menunggu keputusan owner. */
+export interface SelisihKasRow {
+  id: string;
+  branch_nama: string;
+  ditutup_oleh: string | null;
+  ditutup_pada: string | null;
+  kas_sistem: number;
+  uang_fisik: number;
+  selisih: number;
+  catatan: string | null;
+  status_selisih: StatusSelisih;
 }
 
 /**

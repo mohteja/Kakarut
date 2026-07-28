@@ -234,6 +234,7 @@ const execShiftBuka: Eksekutor = async ({ auth }, payload, waktu) => {
     userId: auth.sub,
     modalAwal: p.modal_awal,
     waktu,
+    role: auth.role,
   });
   return { kode: 201, data: { ...shift, sudah_terbuka: sudahTerbuka } };
 };

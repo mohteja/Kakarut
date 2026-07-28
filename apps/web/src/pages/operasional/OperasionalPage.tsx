@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import type { Shift, ShiftPantauRow } from "@kakarut/shared";
+import type { SelisihKasRow, Shift, ShiftPantauRow } from "@kakarut/shared";
 import {
   Card,
   ErrorText,
@@ -18,9 +18,66 @@ import { formatRupiah, formatTanggalRingkas, formatWaktu } from "../../lib/forma
 /** Label + warna selisih kas (fisik − seharusnya). */
 function selisihInfo(selisih: number | null) {
   if (selisih == null) return { label: "—", warna: "text-stone-500" };
-  if (selisih === 0) return { label: "Pas", warna: "text-green-600" };
+  if (Math.abs(selisih) < 0.005) return { label: "Pas", warna: "text-green-600" };
   if (selisih < 0) return { label: `Kurang ${formatRupiah(-selisih)}`, warna: "text-red-600" };
   return { label: `Lebih ${formatRupiah(selisih)}`, warna: "text-amber-600" };
+}
+
+/**
+ * Selisih kas yang menunggu keputusan owner, DARI SEMUA CABANG.
+ *
+ * Sengaja dipisah dari kartu per-cabang di bawahnya: selisih yang belum
+ * diputuskan bisa berasal dari shift kemarin di cabang yang hari ini belum
+ * buka — kalau hanya muncul di riwayat per cabang, ia harus dicari, dan yang
+ * harus dicari tidak akan ketemu.
+ */
+function PerluAccPanel({ onDetail }: { onDetail: (id: string) => void }) {
+  const { data = [] } = useQuery({
+    queryKey: ["shift-selisih", "menunggu"],
+    queryFn: () => api<SelisihKasRow[]>("/shift/selisih?status=menunggu"),
+    refetchInterval: 60_000,
+  });
+  if (data.length === 0) return null;
+  return (
+    <Card className="mb-4 border-amber-300 bg-amber-50/60 p-4">
+      <div className="mb-2 text-sm font-bold text-amber-900">
+        ⏳ Selisih kas menunggu keputusan Anda ({data.length})
+      </div>
+      <div className="space-y-2">
+        {data.map((s) => {
+          const info = selisihInfo(s.selisih);
+          return (
+            <button
+              key={s.id}
+              type="button"
+              onClick={() => onDetail(s.id)}
+              className="block w-full rounded-lg border border-amber-200 bg-white p-3 text-left transition hover:border-amber-400"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-stone-800">📍 {s.branch_nama}</div>
+                  <div className="text-xs text-stone-500">
+                    🔒 {s.ditutup_oleh || "—"}
+                    {s.ditutup_pada
+                      ? ` · ${formatTanggalRingkas(s.ditutup_pada)} ${formatWaktu(s.ditutup_pada)}`
+                      : ""}
+                  </div>
+                  {s.catatan && <div className="mt-0.5 text-xs text-stone-500">📝 {s.catatan}</div>}
+                </div>
+                <div className="shrink-0 text-right">
+                  <div className={`text-sm font-bold ${info.warna}`}>{info.label}</div>
+                  <div className="text-xs text-stone-400">
+                    fisik {formatRupiah(s.uang_fisik)} · sistem {formatRupiah(s.kas_sistem)}
+                  </div>
+                  <div className="mt-0.5 text-xs font-medium text-orange-600">Putuskan ›</div>
+                </div>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </Card>
+  );
 }
 
 function Stat({ label, value, warna = "text-stone-800" }: { label: string; value: string; warna?: string }) {
@@ -236,11 +293,17 @@ function RiwayatCabangModal({
                       🔓 {s.dibuka_oleh || "—"} · 🔒 {s.ditutup_oleh || "—"}
                     </div>
                     <div className="text-xs text-stone-400">
-                      {s.jumlah_transaksi}× · tunai {formatRupiah(s.penjualan_tunai)}
+                      {s.jumlah_transaksi}× · tunai {formatRupiah(s.penjualan_tunai ?? 0)}
                     </div>
                   </div>
                   <div className="shrink-0 text-right">
                     <div className={`text-sm font-bold ${info.warna}`}>{info.label}</div>
+                    {/* selisih yang belum diputuskan owner — biar tak terlewat */}
+                    {s.status_selisih === "menunggu" && (
+                      <div className="mt-0.5 inline-block rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
+                        ⏳ Perlu ACC
+                      </div>
+                    )}
                     <div className="mt-0.5 text-xs font-medium text-orange-600">Detail ›</div>
                   </div>
                 </div>
@@ -278,6 +341,8 @@ export function OperasionalPage() {
         cabang yang <b>telat buka</b> atau <b>lupa tutup</b> kasir. Buka/tutup kasir tetap dilakukan
         oleh kasir di cabang.
       </p>
+
+      <PerluAccPanel onDetail={setDetailId} />
 
       {data.length === 0 ? (
         <Card className="p-8 text-center text-sm text-stone-400">
