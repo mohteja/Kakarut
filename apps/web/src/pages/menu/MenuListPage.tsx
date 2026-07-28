@@ -8,6 +8,7 @@ import {
   Spinner,
   btnPrimary,
   btnSecondary,
+  inputClass,
 } from "../../components/ui";
 import { TabelResponsif } from "../../components/TabelResponsif";
 import { KategoriManagerModal } from "../../components/KategoriManagerModal";
@@ -59,13 +60,29 @@ export function MenuListPage() {
   // Lihat menu yang diatur untuk cabang tertentu — tanpa baris pembatasan
   // (branch_ids kosong) berarti tampil di semua lokasi.
   const [lokasi, setLokasi] = useState<string>("all");
+  const [cari, setCari] = useState("");
+  const [filterKat, setFilterKat] = useState("");
   const lokasiOpsi = cabang.filter((b) => b.is_active && b.tipe !== "kantor");
 
   if (isLoading) return <Spinner />;
 
-  const tampil = (menus ?? []).filter((m) =>
-    lokasi === "all" ? true : m.branch_ids.length === 0 || m.branch_ids.includes(lokasi),
-  );
+  const semua = menus ?? [];
+  // Chip kategori mengikuti urutan katalog (bukan alfabet) supaya sejajar
+  // dengan urutan grup di bawahnya. Diambil dari SELURUH menu, jadi daftar
+  // chip tidak menyusut saat mengetik di kotak cari.
+  const kategoriList = [...new Set(semua.map((m) => m.kategori))];
+  const q = cari.trim().toLowerCase();
+
+  const tampil = semua
+    .filter((m) =>
+      lokasi === "all" ? true : m.branch_ids.length === 0 || m.branch_ids.includes(lokasi),
+    )
+    .filter((m) => (filterKat ? m.kategori === filterKat : true))
+    .filter((m) =>
+      q === ""
+        ? true
+        : m.nama.toLowerCase().includes(q) || (m.kode ?? "").toLowerCase().includes(q),
+    );
 
   // kelompokkan per kategori mengikuti urutan katalog
   const grup = new Map<string, MenuDto[]>();
@@ -74,6 +91,7 @@ export function MenuListPage() {
     list.push(m);
     grup.set(m.kategori, list);
   }
+  const disaring = tampil.length !== semua.length;
 
   return (
     <div>
@@ -92,7 +110,8 @@ export function MenuListPage() {
           </div>
         }
       >
-        Menu &amp; HPP ({tampil.length})
+        Menu &amp; HPP ({tampil.length}
+        {disaring ? ` dari ${semua.length}` : ""})
       </PageTitle>
       <KategoriManagerModal
         open={kelolaKategori}
@@ -102,6 +121,44 @@ export function MenuListPage() {
         judul="Kategori Menu"
         deskripsi="Kategori untuk mengelompokkan menu. Kategori yang masih dipakai menu tidak bisa dihapus."
       />
+      {/* Cari + filter kategori */}
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <input
+          value={cari}
+          onChange={(e) => setCari(e.target.value)}
+          placeholder="🔍 Cari menu / kode…"
+          aria-label="Cari menu"
+          className={`${inputClass} max-w-72`}
+        />
+        {kategoriList.length > 1 && (
+          <div className="flex flex-wrap items-center gap-1">
+            <button
+              onClick={() => setFilterKat("")}
+              className={`rounded-full px-3 py-1 text-xs font-medium transition ${
+                filterKat === ""
+                  ? "bg-orange-600 text-white"
+                  : "bg-stone-100 text-stone-600 hover:bg-stone-200"
+              }`}
+            >
+              Semua
+            </button>
+            {kategoriList.map((k) => (
+              <button
+                key={k}
+                onClick={() => setFilterKat(filterKat === k ? "" : k)}
+                className={`rounded-full px-3 py-1 text-xs font-medium capitalize transition ${
+                  filterKat === k
+                    ? "bg-orange-600 text-white"
+                    : "bg-stone-100 text-stone-600 hover:bg-stone-200"
+                }`}
+              >
+                {k}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
       {lokasiOpsi.length > 1 && (
         <div className="mb-4 flex items-center gap-2 text-sm text-stone-600">
           <span>Tampil di lokasi:</span>
@@ -120,6 +177,16 @@ export function MenuListPage() {
         </div>
       )}
       <ErrorText error={hapus.error} />
+
+      {tampil.length === 0 && (
+        <div className="rounded-lg border border-stone-200 bg-stone-50 px-4 py-10 text-center text-sm text-stone-400">
+          {semua.length === 0
+            ? "Belum ada menu."
+            : `Tidak ada menu yang cocok${q ? ` dengan "${cari.trim()}"` : ""}${
+                filterKat ? ` di kategori "${filterKat}"` : ""
+              }.`}
+        </div>
+      )}
 
       {[...grup.entries()].map(([kategori, list]) => (
         <div key={kategori} className="mb-6">

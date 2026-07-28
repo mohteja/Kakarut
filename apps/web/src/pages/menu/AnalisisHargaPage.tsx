@@ -2,7 +2,15 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import type { AnalisisHargaRow, MenuPriceLogRow, TerapkanSaranHasil } from "@kakarut/shared";
-import { Card, ErrorText, PageTitle, Spinner, btnPrimary, btnSecondary } from "../../components/ui";
+import {
+  Card,
+  ErrorText,
+  PageTitle,
+  Spinner,
+  btnPrimary,
+  btnSecondary,
+  inputClass,
+} from "../../components/ui";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah, formatTanggalRingkas } from "../../lib/format";
 
@@ -108,6 +116,8 @@ export function AnalisisHargaPage() {
     queryFn: () => api<AnalisisHargaRow[]>("/menu/analisis-harga"),
   });
   const [hanyaLewat, setHanyaLewat] = useState(true);
+  const [cari, setCari] = useState("");
+  const [filterKat, setFilterKat] = useState("");
   const [buka, setBuka] = useState<string | null>(null);
   const [pilih, setPilih] = useState<Set<string>>(new Set());
   const [hasil, setHasil] = useState<TerapkanSaranHasil | null>(null);
@@ -127,7 +137,18 @@ export function AnalisisHargaPage() {
   const semua = rows ?? [];
   const ambang = semua[0]?.food_cost_maks ?? 40;
   const lewat = semua.filter((r) => r.food_cost_persen > ambang);
-  const tampil = hanyaLewat ? lewat : semua;
+  // Chip kategori dari SELURUH baris supaya daftarnya tidak menyusut saat
+  // mengetik di kotak cari / berpindah tab ambang.
+  const kategoriList = [...new Set(semua.map((r) => r.kategori))];
+  const q = cari.trim().toLowerCase();
+  const tampil = (hanyaLewat ? lewat : semua)
+    .filter((r) => (filterKat ? r.kategori === filterKat : true))
+    .filter((r) =>
+      q === ""
+        ? true
+        : r.nama.toLowerCase().includes(q) || (r.kode ?? "").toLowerCase().includes(q),
+    );
+  const disaring = q !== "" || filterKat !== "";
 
   const togglePilih = (id: string) =>
     setPilih((s) => {
@@ -204,6 +225,47 @@ export function AnalisisHargaPage() {
           </button>
         )}
       </div>
+
+      {/* Cari + filter kategori */}
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <input
+          value={cari}
+          onChange={(e) => setCari(e.target.value)}
+          placeholder="🔍 Cari menu / kode…"
+          aria-label="Cari menu"
+          className={`${inputClass} max-w-72`}
+        />
+        {kategoriList.length > 1 && (
+          <div className="flex flex-wrap items-center gap-1">
+            <button
+              onClick={() => setFilterKat("")}
+              className={`rounded-full px-3 py-1 text-xs font-medium transition ${
+                filterKat === ""
+                  ? "bg-orange-600 text-white"
+                  : "bg-stone-100 text-stone-600 hover:bg-stone-200"
+              }`}
+            >
+              Semua
+            </button>
+            {kategoriList.map((k) => (
+              <button
+                key={k}
+                onClick={() => setFilterKat(filterKat === k ? "" : k)}
+                className={`rounded-full px-3 py-1 text-xs font-medium capitalize transition ${
+                  filterKat === k
+                    ? "bg-orange-600 text-white"
+                    : "bg-stone-100 text-stone-600 hover:bg-stone-200"
+                }`}
+              >
+                {k}
+              </button>
+            ))}
+          </div>
+        )}
+        {disaring && (
+          <span className="text-xs text-stone-500">{tampil.length} menu cocok</span>
+        )}
+      </div>
       <ErrorText error={terapkan.error} />
 
       {hasil && (
@@ -215,9 +277,13 @@ export function AnalisisHargaPage() {
 
       {tampil.length === 0 ? (
         <Card className="p-6 text-center text-sm text-stone-500">
-          {hanyaLewat
-            ? `Tidak ada menu di atas ambang ${formatAngka(ambang, 0)}%. 👍`
-            : "Belum ada menu."}
+          {disaring
+            ? `Tidak ada menu yang cocok${q ? ` dengan "${cari.trim()}"` : ""}${
+                filterKat ? ` di kategori "${filterKat}"` : ""
+              }${hanyaLewat ? " di atas ambang" : ""}.`
+            : hanyaLewat
+              ? `Tidak ada menu di atas ambang ${formatAngka(ambang, 0)}%. 👍`
+              : "Belum ada menu."}
         </Card>
       ) : (
         <div className="space-y-2">
