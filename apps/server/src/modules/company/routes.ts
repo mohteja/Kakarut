@@ -27,6 +27,8 @@ const PatchBody = z.object({
   diskon_maks_persen: z.number().min(0).max(100).optional(),
   /** metode HPP untuk laba-rugi */
   metode_hpp: z.enum(["average", "fifo"]).optional(),
+  /** ambang food cost sehat (%) — menu di atasnya ditandai di daftar menu */
+  food_cost_maks: z.number().min(0).max(100).optional(),
 });
 
 const ModeBody = z.object({ mode: z.enum(["lite", "pro"]) });
@@ -140,6 +142,7 @@ export const companyRoutes = new Hono<AppEnv>()
         ...(body.receipt_show_alamat !== undefined && {
           receiptShowAlamat: body.receipt_show_alamat,
         }),
+        ...(body.food_cost_maks !== undefined && { foodCostMaks: body.food_cost_maks }),
         ...(body.target_penjualan !== undefined && {
           targetPenjualan: body.target_penjualan,
         }),

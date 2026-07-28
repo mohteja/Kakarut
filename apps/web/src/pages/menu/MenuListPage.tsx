@@ -15,10 +15,25 @@ import { labelCabang, useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatRupiah } from "../../lib/format";
 
-function FoodCost({ persen }: { persen: number }) {
-  const warna =
-    persen <= 40 ? "text-green-600" : persen <= 55 ? "text-yellow-600" : "text-red-600";
-  return <span className={`font-semibold ${warna}`}>{persen.toFixed(1)}%</span>;
+/**
+ * Food cost dinilai terhadap AMBANG perusahaan (Pengaturan → Perusahaan),
+ * bukan angka mati. HPP dihitung live dari harga bahan, jadi menu bisa jatuh
+ * ke atas ambang tanpa ada yang mengubah harga jualnya — kalau itu terjadi,
+ * tanda ⚠ di sini yang pertama memberi tahu.
+ */
+function FoodCost({ persen, maks }: { persen: number; maks: number }) {
+  const lewat = persen > maks;
+  const warna = lewat
+    ? "text-red-600"
+    : persen > maks * 0.85
+      ? "text-yellow-600"
+      : "text-green-600";
+  return (
+    <span className={`font-semibold ${warna}`} title={lewat ? `Ambang ${maks}%` : undefined}>
+      {lewat && "⚠ "}
+      {persen.toFixed(1)}%
+    </span>
+  );
 }
 
 export function MenuListPage() {
@@ -29,6 +44,11 @@ export function MenuListPage() {
     queryKey: ["menu"],
     queryFn: () => api<MenuDto[]>("/menu"),
   });
+  const { data: company } = useQuery({
+    queryKey: ["company"],
+    queryFn: () => api<{ foodCostMaks: number }>("/company"),
+  });
+  const foodCostMaks = company?.foodCostMaks ?? 40;
 
   const hapus = useMutation({
     mutationFn: (id: string) => api(`/menu/${id}`, { method: "DELETE" }),
@@ -60,6 +80,9 @@ export function MenuListPage() {
       <PageTitle
         aksi={
           <div className="flex items-center gap-2">
+            <Link to="/menu/analisis" className={btnSecondary}>
+              📊 Analisis Harga
+            </Link>
             <button onClick={() => setKelolaKategori(true)} className={btnSecondary}>
               🏷 Kategori
             </button>
@@ -177,7 +200,7 @@ export function MenuListPage() {
               {
                 judul: "Food Cost",
                 kanan: true,
-                sel: (m) => <FoodCost persen={m.food_cost_persen} />,
+                sel: (m) => <FoodCost persen={m.food_cost_persen} maks={foodCostMaks} />,
               },
               {
                 hp: "aksi",

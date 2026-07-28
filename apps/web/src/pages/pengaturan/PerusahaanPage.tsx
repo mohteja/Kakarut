@@ -27,6 +27,7 @@ interface Company {
   receiptFooter: string | null;
   receiptShowAlamat: boolean;
   metodeHpp: "average" | "fifo";
+  foodCostMaks: number;
 }
 
 /** Kartu Mode Lite/Pro: penjelasan + tombol upgrade (modal) / turun ke Lite. */
@@ -155,6 +156,7 @@ export function PerusahaanPage() {
   const [pb1Rate, setPb1Rate] = useState("10");
   const [diskonMaksPersen, setDiskonMaksPersen] = useState("100");
   const [metodeHpp, setMetodeHpp] = useState<"average" | "fifo">("average");
+  const [foodCostMaks, setFoodCostMaks] = useState("40");
 
   useEffect(() => {
     if (!company) return;
@@ -166,6 +168,7 @@ export function PerusahaanPage() {
     setPb1Rate(String(company.pb1Rate));
     setDiskonMaksPersen(String(company.diskonMaksPersen));
     setMetodeHpp(company.metodeHpp ?? "average");
+    setFoodCostMaks(String(company.foodCostMaks ?? 40));
   }, [company]);
 
   const simpan = useMutation({
@@ -181,6 +184,7 @@ export function PerusahaanPage() {
           pb1_rate: Number(pb1Rate),
           diskon_maks_persen: Math.min(100, Math.max(0, Number(diskonMaksPersen) || 0)),
           metode_hpp: metodeHpp,
+          food_cost_maks: Math.min(100, Math.max(0, Number(foodCostMaks) || 0)),
         },
       }),
     onSuccess: () => {
@@ -265,6 +269,27 @@ export function PerusahaanPage() {
           <p className="mt-1 text-xs text-stone-500">
             Diskon terbesar yang boleh diberikan <b>kasir</b> per transaksi. <b>100</b> = bebas,
             <b> 0</b> = kasir tak boleh memberi diskon. Owner &amp; admin selalu bebas.
+          </p>
+        </div>
+
+        <div className="rounded-lg border border-stone-200 p-3">
+          <label className="mb-1 block text-sm font-medium">Ambang food cost sehat (%)</label>
+          <div className="flex items-center gap-2 text-sm">
+            <input
+              type="number"
+              min="0"
+              max="100"
+              step="any"
+              value={foodCostMaks}
+              onChange={(e) => setFoodCostMaks(e.target.value)}
+              className="w-24 rounded-lg border border-stone-300 px-2 py-1 text-right"
+            />
+            %
+          </div>
+          <p className="mt-1 text-xs text-stone-500">
+            Menu dengan food cost di atas angka ini ditandai <b>merah</b> di daftar Menu dan
+            muncul di halaman <b>Analisis Harga</b>. HPP dihitung dari harga bahan terkini, jadi
+            menu bisa melewati ambang tanpa harga jualnya diubah.
           </p>
         </div>
 

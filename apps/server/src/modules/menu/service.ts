@@ -125,6 +125,48 @@ export async function loadKatalog(dbx: Db | Tx, companyId: string): Promise<Kata
   return { rows, categoryNameById, komponenByMenu, branchIdsByMenu };
 }
 
+/**
+ * Salinan katalog dengan harga sebagian bahan DIGANTI — untuk mengintip
+ * "kalau harga acuan bahan ini jadi sekian, HPP & food cost menu jadi berapa"
+ * tanpa menulis apa pun ke basis data. Baris asli tidak disentuh (salin dangkal
+ * per komponen), jadi katalog sumber tetap bisa dipakai sebagai pembanding.
+ */
+export function katalogDenganHarga(
+  katalog: KatalogMenu,
+  hargaPerUnitBaru: Map<string, number>,
+): KatalogMenu {
+  const komponenByMenu = new Map<string, KomponenDto[]>();
+  for (const [menuId, list] of katalog.komponenByMenu) {
+    komponenByMenu.set(
+      menuId,
+      list.map((k) =>
+        hargaPerUnitBaru.has(k.ingredient_id)
+          ? { ...k, harga_per_unit: hargaPerUnitBaru.get(k.ingredient_id)! }
+          : k,
+      ),
+    );
+  }
+  return { ...katalog, komponenByMenu };
+}
+
+/**
+ * Menu mana saja yang HPP-nya bergantung pada bahan-bahan ini — termasuk lewat
+ * MENU DASAR (paket ikut terdampak bila bahan itu ada di resep dasarnya).
+ */
+export function menuMemakaiBahan(katalog: KatalogMenu, ingredientId: string): string[] {
+  const langsung = new Set(
+    katalog.rows
+      .filter((m) =>
+        (katalog.komponenByMenu.get(m.id) ?? []).some((k) => k.ingredient_id === ingredientId),
+      )
+      .map((m) => m.id),
+  );
+  for (const m of katalog.rows) {
+    if (m.tipe === "paket" && m.baseMenuId && langsung.has(m.baseMenuId)) langsung.add(m.id);
+  }
+  return [...langsung];
+}
+
 function toKomponenHpp(list: KomponenDto[]) {
   return list.map((k) => ({
     qty: k.qty,

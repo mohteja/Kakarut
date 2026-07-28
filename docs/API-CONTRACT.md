@@ -236,7 +236,7 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 
 - `GET /api/company` — [any] — res: row company + `{ mode: "lite"|"pro" }` — error: **404**
 - `POST /api/company/mode` — [owner] — req: `{ mode: "lite"|"pro" }` — res: `{ ok, mode, lokasi_baru: string[] }` — error: **400** (tak bisa ke Lite bila >1 cabang aktif)
-- `PATCH /api/company` — [owner/admin] — req: `{ nama?, alamat?|null, telepon?|null, logo_url?|null, pb1_enabled?: bool, pb1_rate?: number(0..100), receipt_footer?|null (max 200), receipt_show_alamat?: bool, target_penjualan?|null (≥0), diskon_maks_persen?: number(0..100), metode_hpp?: "average"|"fifo" }` — res: row company terupdate
+- `PATCH /api/company` — [owner/admin] — req: `{ nama?, alamat?|null, telepon?|null, logo_url?|null, pb1_enabled?: bool, pb1_rate?: number(0..100), receipt_footer?|null (max 200), receipt_show_alamat?: bool, target_penjualan?|null (≥0), diskon_maks_persen?: number(0..100), metode_hpp?: "average"|"fifo", food_cost_maks?: number(0..100) }` — res: row company terupdate. `food_cost_maks` = ambang food cost sehat (%) — menu di atasnya ditandai di daftar Menu & muncul di Analisis Harga (default **40**).
 
 ## `/api/cabang` — Cabang (`modules/branches/routes.ts`)
 
@@ -305,7 +305,10 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 - `GET /api/menu/panduan-markup` — [any] — res: konstanta `PANDUAN_MARKUP`
 - `GET /api/menu` — [any] — query: `kategori_id?`, `semua=true` (termasuk nonaktif), `branch_id?` (owner/admin; cashier terkunci cabangnya) — res: `MenuDto[]`
 - `GET /api/menu/ketersediaan` — [any] — query: `branch_id?` — res: row sisa-porsi per menu
+- `GET /api/menu/analisis-harga` — **[owner/admin]** — query: `semua=true` (termasuk menu nonaktif) — res: `AnalisisHargaRow[]` (urut food cost menurun). Tiap baris = `MenuDto` + `menu_diperbarui` (`menus.updated_at`), `food_cost_maks` (ambang perusahaan) dan `penyumbang` (maks 5 bahan penyumbang HPP terbesar, masing-masing membawa `bahan_diperbarui` = `ingredients.updated_at` dan `harga_dilaporkan_pada` = `MAX(productions.laporan_harga_at)`). Dipakai menjawab "kenapa food cost naik padahal harga jual tak diubah": HPP tidak pernah disimpan, selalu dihitung ulang dari harga bahan terkini.
+- `POST /api/menu/terapkan-saran` — **[owner/admin]** — req: `{ ids: uuid[] (1..500) }` — res: `TerapkanSaranHasil` `{ diperbarui, dilewati, rincian: [{menu_id, nama, harga_lama, harga_baru, diperbarui}] }` — error: **404** bila tak satu pun id milik perusahaan. Menyetel `harga_jual = harga_jual_bulat` yang **dihitung ulang di server** (angka klien diabaikan); menu yang harganya sudah sama, atau yang saran-nya 0 (resep kosong), dilewati. Tiap perubahan menulis satu baris riwayat harga.
 - `GET /api/menu/:id` — [any] — res: `MenuDto` — error: **404**
+- `GET /api/menu/:id/riwayat-harga` — **[owner/admin]** — res: `MenuPriceLogRow[]` (terbaru dulu, maks 50) — jejak tiap perubahan `harga_jual`/markup: `sebab` = `"buat"` (baris pembuka saat menu dibuat) | `"manual"` (lewat `PUT /api/menu/:id`) | `"terapkan_saran"`. `PUT` yang tidak mengubah harga jual maupun markup (mis. hanya ganti foto/resep) **tidak** menambah baris.
 - `PUT /api/menu/urutan` — [any] — req: `{ items: [{id: uuid, sort_order: int}] }` — res: `{ ok: true }`
 - `POST /api/menu` — [owner/admin] — req `MenuBody`: `{ nama, kode?|null (max20), category_id: uuid, tipe: "regular"|"paket"="regular", mult?|null, base_menu_id?|null, base_mult?|null, harga_jual: number(≥0), image_url?|null, komponen: [{ingredient_id:uuid, qty:number(>0)}] = [], is_active: bool=true, branch_ids?: uuid[]|null }` — res: **201** `MenuDto` — error: **400** (paket butuh base_menu_id+base_mult / regular butuh mult / ref invalid / cabang non-store), **409** nama ada
 - `PUT /api/menu/:id` — [owner/admin] — req: `MenuBody` (penuh) — res: `MenuDto` — error: **400**, **404**
@@ -336,7 +339,10 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 - `GET /api/{mod}/dana/:fakturId` — res: `{ rows: [{id,tipe,nominal,catatan,oleh,waktu}], total }` — error: **404**
 - `POST /api/{mod}/konfirmasi/:fakturId` — res: `{ ok, jumlah_baris }` — error: **404** tak ada / sudah dikonfirmasi
 - `GET /api/{mod}/log/:fakturId` — res: `{ rows: [{id,aksi,detail,oleh,waktu}] }` — error: **404**
-- `POST /api/pembelian/laporan-harga/:fakturId` — **[owner/admin]**, **beli saja** (produksi → **400**) — req: `{ items: [{id:uuid, total_harga:number(≥0)}] (min1) }` — res: `{ ok, jumlah }` — error: **400**, **404**. Selain memperbarui `total_harga` baris (harga riil utk HPP FIFO/resep), harga acuan tiap bahan yang dilaporkan (`harga_beli`) disegarkan ke **median** harga/satuan seluruh lot beli dikonfirmasi yang berharga (acuan RAB; fallback harga baris dilaporkan bila belum ada lot berharga).
+- `POST /api/pembelian/laporan-harga/:fakturId` — **[owner/admin]**, **beli saja** (produksi → **400**) — req: `{ items: [{id:uuid, total_harga:number(≥0)}] (min1), perbarui_acuan?: bool }` — res: `{ ok, jumlah }` — error: **400**, **404**. Selain memperbarui `total_harga` baris (harga riil utk HPP FIFO/resep), harga acuan tiap bahan yang dilaporkan (`harga_beli`) disegarkan ke **median** harga/satuan lot beli dikonfirmasi yang berharga (acuan RAB; fallback harga baris dilaporkan bila belum ada lot berharga).
+  - **`perbarui_acuan` default `true`** — klien lama tak berubah perilaku. Kirim `false` untuk mencatat nota **tanpa** menyentuh harga acuan bahan (mis. nota beli eceran darurat yang tak mewakili harga pasar).
+  - **Kolam median hanya memuat lot yang harganya pernah dilihat manusia** (`productions.harga_tebakan = false`): harga diisi di faktur, dilaporkan lewat endpoint ini, atau direalisasi di `POST /{mod}/tahap`. Faktur yang dibuat **tanpa** `total_harga` memakai tebakan `qty × harga acuan saat itu`; bila tebakan ikut dihitung, harga acuan menyeret dirinya sendiri (acuan → tebakan → median → acuan) dan HPP seluruh menu hanyut naik tanpa ada yang mengubah harga jual.
+- `POST /api/pembelian/laporan-harga/:fakturId/dampak` — **[owner/admin]**, **beli saja** (produksi → **400**) — req: `{ items: [{id:uuid, total_harga:number(≥0)}] (min1) }` — res: `DampakLaporanHarga` `{ food_cost_maks, bahan: [{ingredient_id, nama, satuan, acuan_lama, acuan_baru, jumlah_menu_terdampak}], menu_lewat_ambang: [{menu_id, nama, food_cost_lama, food_cost_baru}] }` — error: **400**, **404**. Pratinjau **tanpa menulis apa pun**: memakai fungsi hitung yang sama dengan endpoint di atas, jadi angkanya identik dengan hasil bila disimpan. POST (bukan GET) karena dampak bergantung pada angka yang sedang diketik user. `menu_lewat_ambang` hanya memuat menu aktif yang **menyeberang** ambang food cost (bukan yang sudah di atas ambang sejak awal).
 - `POST /api/{mod}` — req `TambahStokBody`: `{ branch_id?:uuid, ingredient_id:uuid, qty?:number(>0), batch:bool=false, total_harga?:number(≥0)|null, catatan? }` (refine: `batch` ATAU `qty` wajib) — res: **201** row production + `{ bahan }` — error: **400**, **404**
 - `GET /api/{mod}` — query: `branch_id?` (atau `all`), `dari?`, `sampai?`, `tanggal?`, `page?` (default 1), `per_page?` (default 20, maks 200) — res: `{ rows, total, page, per_page, total_pengeluaran }` (tiap row memuat `rencana_id` + `permintaan_nomor` (PM-xxxx) bila faktur lahir dari permintaan Tambah Stok dari Menu; juga `exp_date` (tanggal kedaluwarsa lot — terisi saat baris masuk stok; NULL utk transfer stok/kirim-hasil karena lot asal tak diketahui) dan `masa_simpan_hari` master bahan; juga `produksi_di` + `divisi_produksi` bahan — dasar badge divisi Kitchen/Bar pada faktur produksi cabang). **Role `kitchen`/`bar`: daftar otomatis DISARING per divisi** — baris resep produksi-cabang milik divisi lain tidak dikembalikan (bar tak melihat pekerjaan kitchen dan sebaliknya; baris lain seperti kiriman/bahan CK tetap tampil). Owner/admin melihat semuanya.
 - `PATCH /api/{mod}/faktur/:key` — req `FakturEditBody`: `{ password: string (wajib), supplier_id?:uuid|null, no_faktur?|null (max60), catatan?|null, storage_location_id?:uuid|null, worker_id?:uuid|null, prod_date?: "YYYY-MM-DD" }` — res: `{ ok, jumlah_baris }` — error: **401** password salah, **400** supplier/storage invalid, **404**
@@ -1205,6 +1211,102 @@ export interface MenuDto {
   harga_saran: number;
   harga_jual_bulat: number;
   food_cost_persen: number;
+}
+
+/**
+ * Satu bahan penyumbang HPP sebuah menu — dipakai halaman Analisis Harga untuk
+ * menjawab "kenapa food cost menu ini naik padahal harga jualnya tak diubah".
+ */
+export interface PenyumbangHpp {
+  ingredient_id: string;
+  nama: string;
+  qty: number;
+  satuan: string;
+  harga_per_unit: number;
+  /** qty × harga_per_unit — rupiah yang bahan ini sumbangkan ke HPP */
+  kontribusi: number;
+  persen_hpp: number;
+  /** ingredients.updated_at — kapan harga bahan ini terakhir bergerak */
+  bahan_diperbarui: string;
+  /** MAX(productions.laporan_harga_at) — kapan harganya terakhir DILAPORKAN */
+  harga_dilaporkan_pada: string | null;
+}
+
+/**
+ * Satu baris Analisis Harga: MenuDto + jejak waktu. Bila `menu_diperbarui`
+ * jauh lebih tua dari `bahan_diperbarui` penyumbang terbesarnya, artinya yang
+ * bergerak adalah harga BAHAN, bukan harga jual menu.
+ */
+export interface AnalisisHargaRow extends MenuDto {
+  /** menus.updated_at — kapan menu (termasuk harga jualnya) terakhir disimpan */
+  menu_diperbarui: string;
+  /** ambang food cost perusahaan (%) — disalin agar klien tak perlu query lain */
+  food_cost_maks: number;
+  /** penyumbang HPP terbesar (maks 5), urut kontribusi menurun */
+  penyumbang: PenyumbangHpp[];
+}
+
+/** Dari mana perubahan harga jual menu berasal. */
+export type SebabHargaMenu = "buat" | "manual" | "terapkan_saran";
+
+/** Satu baris riwayat perubahan harga jual sebuah menu. */
+export interface MenuPriceLogRow {
+  id: string;
+  menu_id: string;
+  /** null = baris pertama (menu baru dibuat) */
+  harga_lama: number | null;
+  harga_baru: number;
+  mult_lama: number | null;
+  mult_baru: number | null;
+  sebab: SebabHargaMenu;
+  /** nama pengubah; null bila akunnya sudah dihapus */
+  oleh: string | null;
+  created_at: string;
+}
+
+/** Ringkasan hasil POST /menu/terapkan-saran. */
+export interface TerapkanSaranHasil {
+  diperbarui: number;
+  dilewati: number;
+  rincian: Array<{
+    menu_id: string;
+    nama: string;
+    harga_lama: number;
+    harga_baru: number;
+    /** false = harga sudah sama dengan saran, tak ada yang diubah */
+    diperbarui: boolean;
+  }>;
+}
+
+/** Satu bahan yang harga acuannya akan bergeser oleh sebuah laporan harga. */
+export interface DampakBahan {
+  ingredient_id: string;
+  nama: string;
+  satuan: string;
+  acuan_lama: number;
+  acuan_baru: number;
+  /** berapa menu yang memakai bahan ini (langsung maupun lewat menu dasar) */
+  jumlah_menu_terdampak: number;
+}
+
+/** Satu menu yang food cost-nya melewati ambang GARA-GARA laporan harga ini. */
+export interface DampakMenu {
+  menu_id: string;
+  nama: string;
+  food_cost_lama: number;
+  food_cost_baru: number;
+}
+
+/**
+ * Pratinjau dampak "Laporan Harga" — dihitung server tanpa menulis apa pun,
+ * supaya user tahu bahwa mencatat nota juga menggeser harga acuan bahan
+ * (dan karenanya HPP semua menu yang memakainya).
+ */
+export interface DampakLaporanHarga {
+  food_cost_maks: number;
+  bahan: DampakBahan[];
+  /** menu yang SEBELUMNYA di bawah ambang dan setelah ini melewatinya */
+  menu_lewat_ambang: DampakMenu[];
 }
 
 /** Bahan yang MEMBATASI sisa porsi sebuah menu (saldo ÷ qty paling kecil). */

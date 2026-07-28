@@ -440,6 +440,102 @@ export interface MenuDto {
   food_cost_persen: number;
 }
 
+/**
+ * Satu bahan penyumbang HPP sebuah menu — dipakai halaman Analisis Harga untuk
+ * menjawab "kenapa food cost menu ini naik padahal harga jualnya tak diubah".
+ */
+export interface PenyumbangHpp {
+  ingredient_id: string;
+  nama: string;
+  qty: number;
+  satuan: string;
+  harga_per_unit: number;
+  /** qty × harga_per_unit — rupiah yang bahan ini sumbangkan ke HPP */
+  kontribusi: number;
+  persen_hpp: number;
+  /** ingredients.updated_at — kapan harga bahan ini terakhir bergerak */
+  bahan_diperbarui: string;
+  /** MAX(productions.laporan_harga_at) — kapan harganya terakhir DILAPORKAN */
+  harga_dilaporkan_pada: string | null;
+}
+
+/**
+ * Satu baris Analisis Harga: MenuDto + jejak waktu. Bila `menu_diperbarui`
+ * jauh lebih tua dari `bahan_diperbarui` penyumbang terbesarnya, artinya yang
+ * bergerak adalah harga BAHAN, bukan harga jual menu.
+ */
+export interface AnalisisHargaRow extends MenuDto {
+  /** menus.updated_at — kapan menu (termasuk harga jualnya) terakhir disimpan */
+  menu_diperbarui: string;
+  /** ambang food cost perusahaan (%) — disalin agar klien tak perlu query lain */
+  food_cost_maks: number;
+  /** penyumbang HPP terbesar (maks 5), urut kontribusi menurun */
+  penyumbang: PenyumbangHpp[];
+}
+
+/** Dari mana perubahan harga jual menu berasal. */
+export type SebabHargaMenu = "buat" | "manual" | "terapkan_saran";
+
+/** Satu baris riwayat perubahan harga jual sebuah menu. */
+export interface MenuPriceLogRow {
+  id: string;
+  menu_id: string;
+  /** null = baris pertama (menu baru dibuat) */
+  harga_lama: number | null;
+  harga_baru: number;
+  mult_lama: number | null;
+  mult_baru: number | null;
+  sebab: SebabHargaMenu;
+  /** nama pengubah; null bila akunnya sudah dihapus */
+  oleh: string | null;
+  created_at: string;
+}
+
+/** Ringkasan hasil POST /menu/terapkan-saran. */
+export interface TerapkanSaranHasil {
+  diperbarui: number;
+  dilewati: number;
+  rincian: Array<{
+    menu_id: string;
+    nama: string;
+    harga_lama: number;
+    harga_baru: number;
+    /** false = harga sudah sama dengan saran, tak ada yang diubah */
+    diperbarui: boolean;
+  }>;
+}
+
+/** Satu bahan yang harga acuannya akan bergeser oleh sebuah laporan harga. */
+export interface DampakBahan {
+  ingredient_id: string;
+  nama: string;
+  satuan: string;
+  acuan_lama: number;
+  acuan_baru: number;
+  /** berapa menu yang memakai bahan ini (langsung maupun lewat menu dasar) */
+  jumlah_menu_terdampak: number;
+}
+
+/** Satu menu yang food cost-nya melewati ambang GARA-GARA laporan harga ini. */
+export interface DampakMenu {
+  menu_id: string;
+  nama: string;
+  food_cost_lama: number;
+  food_cost_baru: number;
+}
+
+/**
+ * Pratinjau dampak "Laporan Harga" — dihitung server tanpa menulis apa pun,
+ * supaya user tahu bahwa mencatat nota juga menggeser harga acuan bahan
+ * (dan karenanya HPP semua menu yang memakainya).
+ */
+export interface DampakLaporanHarga {
+  food_cost_maks: number;
+  bahan: DampakBahan[];
+  /** menu yang SEBELUMNYA di bawah ambang dan setelah ini melewatinya */
+  menu_lewat_ambang: DampakMenu[];
+}
+
 /** Bahan yang MEMBATASI sisa porsi sebuah menu (saldo ÷ qty paling kecil). */
 export interface MenuStokPembatas {
   ingredient_id: string;

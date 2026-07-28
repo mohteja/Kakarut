@@ -158,6 +158,14 @@ export const companies = pgTable("companies", {
     .default(100),
   /** target penjualan (Rp) default untuk rekomendasi kebutuhan bahan baku */
   targetPenjualan: numeric("target_penjualan", { precision: 14, scale: 2, mode: "number" }),
+  /**
+   * Ambang food cost (%) yang dianggap sehat. Menu yang melewatinya ditandai
+   * merah di daftar menu — HPP dihitung live dari harga bahan, jadi menu bisa
+   * jatuh ke atas ambang tanpa ada yang mengubah harga jualnya.
+   */
+  foodCostMaks: numeric("food_cost_maks", { precision: 5, scale: 2, mode: "number" })
+    .notNull()
+    .default(40),
   plan: text("plan").notNull().default("free"),
   planExpiresAt: timestamp("plan_expires_at", { withTimezone: true }),
   isActive: boolean("is_active").notNull().default(true),
@@ -1293,6 +1301,18 @@ export const productions = pgTable(
     tipe: pengadaanEnum("tipe").notNull().default("produksi"),
     /** total harga saat tipe='beli' (catatan pengeluaran, opsional) */
     totalHarga: numeric("total_harga", { precision: 14, scale: 2, mode: "number" }),
+    /**
+     * true = `total_harga` baris ini TEBAKAN, bukan angka yang dilihat manusia:
+     * faktur dibuat tanpa harga, jadi diisi `hargaDefault()` = qty × harga acuan
+     * bahan SAAT ITU.
+     *
+     * Wajib dibedakan karena "Laporan Harga" menyegarkan harga acuan bahan ke
+     * MEDIAN riwayat pembelian. Kalau tebakan ikut kolam median, acuan menyeret
+     * dirinya sendiri (acuan → tebakan → median → acuan) dan HPP seluruh menu
+     * hanyut naik tanpa ada yang mengubah harga jual. Menjadi false begitu
+     * harga sungguhan diisi (Laporan Harga / realisasi harga di tahap).
+     */
+    hargaTebakan: boolean("harga_tebakan").notNull().default(false),
     /** pengelompokan baris satu faktur penerimaan */
     fakturId: uuid("faktur_id"),
     /**
@@ -1970,5 +1990,38 @@ export const errorLogs = pgTable(
     index("error_logs_waktu_idx").on(t.waktu),
     index("error_logs_sidik_idx").on(t.sidik),
     index("error_logs_status_idx").on(t.status),
+  ],
+);
+
+/**
+ * RIWAYAT HARGA JUAL MENU — jejak siapa/kapan mengubah harga yang ditagih ke
+ * pembeli. Dibuat setelah keluhan "harga menu tiba-tiba berubah": tanpa jejak
+ * ini, membuktikan bahwa harga jual TIDAK pernah disentuh (dan yang bergerak
+ * sebenarnya HPP) hanya bisa lewat dugaan.
+ *
+ * `harga_lama` null = baris pertama, yaitu saat menu dibuat.
+ */
+export const menuPriceLogs = pgTable(
+  "menu_price_logs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    menuId: uuid("menu_id")
+      .notNull()
+      .references(() => menus.id, { onDelete: "cascade" }),
+    hargaLama: numeric("harga_lama", { precision: 12, scale: 2, mode: "number" }),
+    hargaBaru: numeric("harga_baru", { precision: 12, scale: 2, mode: "number" }).notNull(),
+    multLama: numeric("mult_lama", { precision: 7, scale: 3, mode: "number" }),
+    multBaru: numeric("mult_baru", { precision: 7, scale: 3, mode: "number" }),
+    /** "buat" | "manual" | "terapkan_saran" — dari mana perubahan datang */
+    sebab: text("sebab").notNull(),
+    /** pelaku; null bila akunnya sudah dihapus */
+    olehUserId: uuid("oleh_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("menu_price_logs_company_menu_idx").on(t.companyId, t.menuId, t.createdAt),
   ],
 );

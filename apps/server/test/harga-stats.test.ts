@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { median, statistikHargaLots } from "../src/lib/harga-stats";
+import { acuanDariLot, median, statistikHargaLots } from "../src/lib/harga-stats";
 
 describe("median", () => {
   it("kosong → null", () => {
@@ -22,6 +22,56 @@ describe("median", () => {
     const nilai = [3, 1, 2];
     median(nilai);
     expect(nilai).toEqual([3, 1, 2]);
+  });
+});
+
+describe("acuanDariLot", () => {
+  it("kolam kosong → pakai fallback (harga baris yang barusan dilaporkan)", () => {
+    expect(acuanDariLot([], [], 1234)).toBe(1234);
+  });
+
+  it("kolam kosong tanpa fallback → null (harga acuan tak disentuh)", () => {
+    expect(acuanDariLot([], [], null)).toBeNull();
+  });
+
+  it("median lot yang dilaporkan", () => {
+    const lots = [
+      { id: "a", qty: 2, totalHarga: 2000 }, // 1000/satuan
+      { id: "b", qty: 1, totalHarga: 3000 }, // 3000/satuan
+      { id: "c", qty: 5, totalHarga: 10000 }, // 2000/satuan
+    ];
+    expect(acuanDariLot(lots, [], null)).toBe(2000);
+  });
+
+  it("lot tanpa harga & lot ber-qty 0 tidak ikut", () => {
+    const lots = [
+      { id: "a", qty: 1, totalHarga: 1000 },
+      { id: "b", qty: 1, totalHarga: null },
+      { id: "c", qty: 0, totalHarga: 9_000_000 },
+    ];
+    expect(acuanDariLot(lots, [], null)).toBe(1000);
+  });
+
+  it("baris yang sedang dilaporkan dipakai nilai BARUNYA, bukan yang lama", () => {
+    // 'a' masih memegang harga lama 1000/satuan di basis data; laporan baru
+    // menaikkannya jadi 5000/satuan. Kolam harus memakai yang baru saja.
+    const lots = [
+      { id: "a", qty: 1, totalHarga: 1000 },
+      { id: "b", qty: 1, totalHarga: 3000 },
+      { id: "c", qty: 1, totalHarga: 7000 },
+    ];
+    const acuan = acuanDariLot(lots, [{ id: "a", qty: 1, totalHarga: 5000 }], null);
+    expect(acuan).toBe(5000); // median(3000, 7000, 5000)
+  });
+
+  it("TEBAKAN tak pernah masuk kolam — pemanggil hanya mengirim lot terlapor", () => {
+    // Inti perbaikan lingkaran umpan balik: faktur yang dibuat tanpa harga
+    // memakai tebakan dari harga acuan saat itu. Selama pemanggil menyaring
+    // ke lot ber-`laporan_harga_at`, tebakan itu tak bisa menggeser acuan.
+    const terlapor = [{ id: "a", qty: 1, totalHarga: 10000 }];
+    const tebakanIkut = [...terlapor, { id: "tebakan", qty: 1, totalHarga: 30000 }];
+    expect(acuanDariLot(terlapor, [], null)).toBe(10000);
+    expect(acuanDariLot(tebakanIkut, [], null)).toBe(20000); // bukti: ikut → hanyut
   });
 });
 

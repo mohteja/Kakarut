@@ -20,6 +20,103 @@ tanpa akses repo server.
 
 ---
 
+## Rilis: Harga menu berubah sendiri — lacak, setop, perbaiki
+
+> Migrasi DB **0084** (`companies.food_cost_maks`, `productions.harga_tebakan`,
+> tabel `menu_price_logs`). **Tidak ada endpoint lama yang berubah kontraknya.**
+> Satu perubahan **perilaku** di `POST /api/pembelian/laporan-harga/:fakturId` —
+> baca 🟡 di bawah.
+
+### Latar: kenapa food cost naik tanpa ada yang mengubah harga jual
+
+`hpp`, `harga_saran`, `harga_jual_bulat`, dan `food_cost_persen` **tidak pernah
+disimpan** — server menghitungnya ulang tiap request dari `ingredients.harga_beli
+÷ isi` yang berlaku saat itu. Yang tersimpan hanya `menus.harga_jual`. Karena
+`food_cost = hpp ÷ harga_jual`, food cost bisa melonjak serempak di semua menu
+walau tak satu pun menu disimpan ulang. **Jangan cache `hpp`/`food_cost_persen`
+di sisi klien lebih lama dari daftar menunya sendiri.**
+
+### 🟡 PERLU DICEK — kolam median harga acuan kini menyaring TEBAKAN
+
+`POST /api/pembelian/laporan-harga/:fakturId` menyegarkan `ingredients.harga_beli`
+ke **median** riwayat pembelian. Sebelumnya kolam median memuat semua lot
+dikonfirmasi yang punya `total_harga` — termasuk baris faktur yang dibuat
+**tanpa** harga, yang `total_harga`-nya cuma tebakan `qty × harga acuan saat itu`.
+Akibatnya harga acuan menyeret dirinya sendiri (acuan → tebakan → median →
+acuan) dan HPP seluruh menu hanyut naik.
+
+Sekarang kolam median hanya memuat lot yang harganya **pernah dilihat manusia**
+(`productions.harga_tebakan = false`): harga diisi di `POST /{mod}/faktur`,
+dilaporkan lewat endpoint laporan harga, atau direalisasi lewat
+`POST /{mod}/tahap` (`items[].harga`).
+
+**Yang perlu dicek di mobile:** bila aplikasi membuat faktur beli **tanpa**
+`total_harga`, lot itu kini tak lagi ikut menentukan harga acuan sampai
+harganya dilaporkan. Ini yang diinginkan — tapi kalau layar Anda menampilkan
+"harga acuan" hasil hitungan sendiri, angkanya bisa berbeda dari server.
+
+### 🟢 BARU — `perbarui_acuan` pada Laporan Harga (default `true`)
+
+```jsonc
+POST /api/pembelian/laporan-harga/:fakturId
+{ "items": [{ "id": "…", "total_harga": 42000 }],
+  "perbarui_acuan": false }   // opsional
+```
+
+**Bawaannya `true`, jadi klien lama tak berubah perilaku.** Kirim `false` untuk
+mencatat nota tanpa menyentuh harga acuan bahan (nota beli eceran darurat yang
+tak mewakili harga pasar). Mencatat nota ≠ mengubah harga acuan — kalau layar
+mobile punya tombol Laporan Harga, sebaiknya kalimat itu ikut ditampilkan.
+
+### 🟢 BARU — pratinjau dampak sebelum menyimpan
+
+`POST /api/pembelian/laporan-harga/:fakturId/dampak` (owner/admin, beli saja) —
+body sama dengan endpoint simpan, **tidak menulis apa pun**, mengembalikan
+`DampakLaporanHarga`:
+
+| Field | Isi |
+| --- | --- |
+| `food_cost_maks` | ambang food cost perusahaan (%) |
+| `bahan[]` | `acuan_lama` → `acuan_baru` per bahan + `jumlah_menu_terdampak` |
+| `menu_lewat_ambang[]` | menu aktif yang **menyeberang** ambang gara-gara laporan ini |
+
+POST (bukan GET) karena dampaknya bergantung pada angka yang sedang **diketik**
+user, bukan yang sudah tersimpan. Server memakai fungsi hitung yang sama dengan
+endpoint simpan, jadi pratinjau tak bisa berbeda dari hasilnya.
+
+### 🟢 BARU — Analisis Harga + terapkan harga saran massal
+
+| | |
+| --- | --- |
+| `GET /api/menu/analisis-harga` | **owner/admin** — `AnalisisHargaRow[]`, urut food cost menurun |
+| `GET /api/menu/:id/riwayat-harga` | **owner/admin** — `MenuPriceLogRow[]` (maks 50, terbaru dulu) |
+| `POST /api/menu/terapkan-saran` | **owner/admin** — `{ ids: uuid[] }` → `TerapkanSaranHasil` |
+
+`AnalisisHargaRow` = `MenuDto` + `menu_diperbarui` + `food_cost_maks` +
+`penyumbang[]` (maks 5 bahan penyumbang HPP terbesar). Kunci pembacaannya:
+sandingkan `menu_diperbarui` dengan `penyumbang[].bahan_diperbarui` — kalau
+tanggal bahan **lebih baru** dari tanggal menu, yang bergerak adalah harga
+bahan, bukan harga jual.
+
+`POST /api/menu/terapkan-saran` menyetel `harga_jual = harga_jual_bulat` yang
+**dihitung ulang di server**; angka yang dikirim klien diabaikan. Ini mengubah
+harga yang ditagih ke pembeli — **wajib konfirmasi eksplisit** yang menyebut
+jumlah menu dan total perubahan rupiah sebelum memanggilnya.
+
+### ⚪️ INFO — riwayat harga jual menu
+
+`POST /api/menu` menulis baris pembuka (`sebab: "buat"`, `harga_lama: null`).
+`PUT /api/menu/:id` menulis baris `"manual"` **hanya bila `harga_jual` atau
+markup benar-benar berubah** — menyimpan ulang foto/resep tidak menambah baris.
+
+### ⚪️ INFO — ambang food cost perusahaan
+
+`PATCH /api/company` menerima `food_cost_maks` (0..100, default **40**).
+Tersedia di `GET /api/company` sebagai `foodCostMaks` (respons company memakai
+camelCase kolom DB, bukan snake_case seperti DTO lain).
+
+---
+
 ## Rilis: Laporan kebersihan harian (tim CK + seluruh tim cabang)
 
 > **Sudah di-merge ke production** (PR #124). Migrasi DB **0083** (enum

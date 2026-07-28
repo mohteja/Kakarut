@@ -45,6 +45,7 @@ const MemberPage = lazy(() => import("./pages/member/MemberPage").then((m) => ({
 const LihatMenuPage = lazy(() => import("./pages/menu/LihatMenuPage").then((m) => ({ default: m.LihatMenuPage })));
 const MenuFormPage = lazy(() => import("./pages/menu/MenuFormPage").then((m) => ({ default: m.MenuFormPage })));
 const MenuListPage = lazy(() => import("./pages/menu/MenuListPage").then((m) => ({ default: m.MenuListPage })));
+const AnalisisHargaPage = lazy(() => import("./pages/menu/AnalisisHargaPage").then((m) => ({ default: m.AnalisisHargaPage })));
 const FakturFormPage = lazy(() => import("./pages/produksi/FakturFormPage").then((m) => ({ default: m.FakturFormPage })));
 const PembelianPage = lazy(() => import("./pages/produksi/PembelianPage").then((m) => ({ default: m.PembelianPage })));
 const PenerimaanPage = lazy(() => import("./pages/produksi/PenerimaanPage").then((m) => ({ default: m.PenerimaanPage })));
@@ -249,6 +250,7 @@ export default function App() {
                   <Route path="/sampah" element={<TempatSampahPage />} />
                   <Route path="/member" element={<MemberPage />} />
                   <Route path="/menu" element={<MenuListPage />} />
+                  <Route path="/menu/analisis" element={<AnalisisHargaPage />} />
                   <Route path="/menu/baru" element={<MenuFormPage />} />
                   <Route path="/menu/:id/edit" element={<MenuFormPage />} />
                   <Route path="/pengaturan/perusahaan" element={<PerusahaanPage />} />
