@@ -20,9 +20,14 @@ import { formatRupiah, formatTanggalRingkas, formatWaktu } from "../../lib/forma
 /** Label + warna selisih kas. */
 function selisihInfo(selisih: number | null) {
   if (selisih == null) return { label: "—", warna: "text-stone-500" };
-  if (selisih === 0) return { label: "Pas", warna: "text-green-600" };
+  if (Math.abs(selisih) < 0.005) return { label: "Pas", warna: "text-green-600" };
   if (selisih < 0) return { label: `Kurang ${formatRupiah(-selisih)}`, warna: "text-red-600" };
   return { label: `Lebih ${formatRupiah(selisih)}`, warna: "text-amber-600" };
+}
+
+/** Rupiah yang menghormati hitung buta: `null` dari server = sengaja ditutup. */
+function rp(n: number | null) {
+  return n == null ? "•••" : formatRupiah(n);
 }
 
 function Stat({ label, value, warna = "text-stone-800" }: { label: string; value: string; warna?: string }) {
@@ -69,20 +74,29 @@ export function ShiftPage() {
     },
   });
   /**
-   * Hasil penutupan — INI momen "reveal"-nya. Selama shift terbuka kasir tak
-   * pernah melihat kas seharusnya (server membutakannya), jadi angka yang baru
-   * dibuka di sini ditahan di layar alih-alih langsung hilang bersama shift.
+   * KUNCI HITUNGAN — momen "reveal"-nya. Selama shift terbuka & belum dikunci,
+   * server tak mengirimkan kas seharusnya sama sekali; angka itu baru muncul
+   * setelah nominal fisik dikunci, dan sejak itu tak bisa diubah lagi.
+   *
+   * Statusnya dibaca dari `aktif.uang_fisik`, bukan dari state React: kalau
+   * kasir me-refresh halaman di antara mengunci dan menutup, ia harus mendarat
+   * di langkah yang sama — bukan disuruh menghitung ulang.
    */
+  const kunci = useMutation({
+    mutationFn: () =>
+      api(`/shift/kunci-hitungan${branchQuery}`, {
+        method: "POST",
+        body: { uang_fisik: Number(uangFisik) || 0 },
+      }),
+    onSuccess: () => invalidate(),
+  });
+  /** Hasil penutupan, ditahan di layar alih-alih hilang bersama shift. */
   const [hasil, setHasil] = useState<Shift | null>(null);
   const tutup = useMutation({
     mutationFn: () =>
       api<Shift>(`/shift/tutup${branchQuery}`, {
         method: "POST",
-        body: {
-          uang_fisik: Number(uangFisik) || 0,
-          catatan: catatan || null,
-          selisih_alasan: catatan || null,
-        },
+        body: { catatan: catatan || null, selisih_alasan: catatan || null },
       }),
     onSuccess: (r) => {
       invalidate();
@@ -93,6 +107,11 @@ export function ShiftPage() {
   });
 
   const hasilInfo = selisihInfo(hasil?.selisih ?? null);
+  const terkunci = aktif != null && aktif.uang_fisik != null;
+  const infoAktif = selisihInfo(aktif?.selisih ?? null);
+  // Selisih wajib dijelaskan: catatan inilah satu-satunya konteks yang owner
+  // punya saat memutuskan menerima kekurangan/kelebihan kas.
+  const perluAlasan = terkunci && Math.abs(aktif!.selisih ?? 0) >= 0.005;
 
   if (isLoading) return <Spinner />;
 
@@ -158,69 +177,102 @@ export function ShiftPage() {
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
               <Stat label="Modal awal" value={formatRupiah(aktif.modal_awal)} />
               {/* Hitung buta: angka tunai & kas seharusnya sengaja ditutup
-                  sampai uang fisik dikirim — kalau terlihat lebih dulu,
-                  menghitung laci berhenti jadi pemeriksaan. */}
-              <Stat label="Penjualan tunai" value={aktif.buta ? "•••" : formatRupiah(aktif.penjualan_tunai)} />
+                  sampai hitungan laci dikunci — kalau terlihat lebih dulu,
+                  menghitung uang berhenti jadi pemeriksaan. */}
+              <Stat label="Penjualan tunai" value={rp(aktif.penjualan_tunai)} />
               <Stat label="Non-tunai" value={formatRupiah(aktif.penjualan_nontunai)} />
               <Stat label="Transaksi" value={`${aktif.jumlah_transaksi}×`} />
-              <Stat
-                label="Kas seharusnya"
-                value={aktif.kas_sistem == null ? "•••" : formatRupiah(aktif.kas_sistem)}
-                warna="text-orange-600"
-              />
+              <Stat label="Kas seharusnya" value={rp(aktif.kas_sistem)} warna="text-orange-600" />
             </div>
-            {aktif.buta && (
+            {aktif.hitung_buta && (
               <div className="mt-3 rounded-lg bg-sky-50 px-3 py-2 text-xs leading-relaxed text-sky-800">
                 🔒 <b>Hitung dulu, angka menyusul.</b> Kas yang seharusnya ada di laci
-                ditutup sampai Anda mengisi uang fisik — supaya hitungan Anda benar-benar
-                hasil menghitung. Selisihnya muncul begitu kasir ditutup.
+                ditutup sampai Anda mengunci hitungan — supaya angka yang Anda laporkan
+                benar-benar hasil menghitung.
               </div>
             )}
           </Card>
 
           <Card className="space-y-3 p-5">
             <h2 className="text-lg font-bold text-stone-800">Tutup & setor</h2>
+
+            {/* LANGKAH 1 — hitung & kunci. Tanpa pratinjau selisih apa pun:
+                itu akan membocorkan kas seharusnya sebelum uang dihitung. */}
             <div>
-              <label className="mb-1 block text-sm font-medium">Uang tunai fisik di laci (Rp)</label>
+              <label className="mb-1 block text-sm font-medium">
+                {terkunci ? "Uang tunai fisik (terkunci)" : "Uang tunai fisik di laci (Rp)"}
+              </label>
               <input
                 type="number"
                 min="0"
                 inputMode="numeric"
-                value={uangFisik}
+                value={terkunci ? String(aktif.uang_fisik) : uangFisik}
                 onChange={(e) => setUangFisik(e.target.value)}
+                readOnly={terkunci}
                 placeholder="hitung uang fisik lalu isi di sini"
-                className={inputClass}
+                className={`${inputClass} ${terkunci ? "bg-stone-100 text-stone-600" : ""}`}
               />
             </div>
-            {/* TIDAK ada pratinjau selisih di sini — itu akan membocorkan kas
-                seharusnya sebelum uang dihitung, persis yang dicegah. */}
-            <div>
-              <label className="mb-1 block text-sm font-medium">
-                Catatan <span className="font-normal text-stone-400">(opsional)</span>
-              </label>
-              <input
-                value={catatan}
-                onChange={(e) => setCatatan(e.target.value)}
-                placeholder="mis. kembalian kurang — isi bila hitungan tak pas"
-                className={inputClass}
-              />
-              <p className="mt-1 text-xs text-stone-500">
-                Bila nanti ada selisih, catatan ini ikut terkirim sebagai keterangan Anda ke
-                owner.
-              </p>
-            </div>
-            <ErrorText error={tutup.error} />
-            <button
-              onClick={() => {
-                if (confirm("Tutup kasir sekarang? Shift akan dikunci dan tercatat di riwayat.")) {
-                  tutup.mutate();
-                }
-              }}
-              disabled={uangFisik === "" || tutup.isPending}
-              className={`${btnPrimary} w-full py-3`}
-            >
-              {tutup.isPending ? "Menutup…" : "🔒 Tutup Kasir"}
-            </button>
+
+            {!terkunci ? (
+              <>
+                <p className="text-xs leading-relaxed text-stone-500">
+                  Hitung uang di laci, isi nominalnya, lalu <b>kunci</b>. Setelah dikunci
+                  nominal tak bisa diubah lagi — barulah kas seharusnya &amp; selisih
+                  ditampilkan.
+                </p>
+                <ErrorText error={kunci.error} />
+                <button
+                  onClick={() => kunci.mutate()}
+                  disabled={uangFisik === "" || kunci.isPending}
+                  className={`${btnPrimary} w-full py-3`}
+                >
+                  {kunci.isPending ? "Mengunci…" : "🔒 Kunci Hitungan"}
+                </button>
+              </>
+            ) : (
+              <>
+                {/* LANGKAH 2 — angka terbuka. */}
+                <div className="grid grid-cols-2 gap-2">
+                  <Stat label="Kas seharusnya" value={rp(aktif.kas_sistem)} />
+                  <Stat label="Selisih" value={infoAktif.label} warna={infoAktif.warna} />
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium">
+                    Catatan{" "}
+                    <span className="font-normal text-stone-400">
+                      {perluAlasan ? "(wajib — jelaskan selisihnya)" : "(opsional)"}
+                    </span>
+                  </label>
+                  <input
+                    value={catatan}
+                    onChange={(e) => setCatatan(e.target.value)}
+                    placeholder={
+                      perluAlasan ? "mis. kembalian kurang saat jam ramai" : "mis. setor ke owner"
+                    }
+                    className={inputClass}
+                  />
+                  {perluAlasan && (
+                    <p className="mt-1 text-xs text-stone-500">
+                      Selisih ini akan dikirim ke owner untuk disetujui. Catatan Anda ikut
+                      terkirim sebagai keterangannya.
+                    </p>
+                  )}
+                </div>
+                <ErrorText error={tutup.error} />
+                <button
+                  onClick={() => {
+                    if (confirm("Tutup kasir sekarang? Shift akan tercatat di riwayat.")) {
+                      tutup.mutate();
+                    }
+                  }}
+                  disabled={tutup.isPending || (perluAlasan && catatan.trim() === "")}
+                  className={`${btnPrimary} w-full py-3`}
+                >
+                  {tutup.isPending ? "Menutup…" : "🔒 Tutup Kasir"}
+                </button>
+              </>
+            )}
           </Card>
         </div>
       )}
@@ -231,13 +283,10 @@ export function ShiftPage() {
           <h2 className="text-lg font-bold text-stone-800">Hasil tutup kasir</h2>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             <Stat label="Uang fisik dihitung" value={formatRupiah(hasil.uang_fisik ?? 0)} />
-            <Stat
-              label="Kas seharusnya"
-              value={hasil.kas_sistem == null ? "—" : formatRupiah(hasil.kas_sistem)}
-            />
+            <Stat label="Kas seharusnya" value={rp(hasil.kas_sistem)} />
             <Stat label="Selisih" value={hasilInfo.label} warna={hasilInfo.warna} />
           </div>
-          {hasil.selisih_status === "menunggu" ? (
+          {hasil.status_selisih === "menunggu" ? (
             <div className="rounded-lg bg-amber-50 px-3 py-2 text-sm leading-relaxed text-amber-800">
               ⏳ <b>Menunggu persetujuan owner.</b> Selisih ini sudah terkirim beserta
               keterangan Anda. Owner yang memutuskan diterima atau tidak — Anda tak perlu
@@ -281,7 +330,7 @@ export function ShiftPage() {
                           🔓 {s.dibuka_oleh || "—"} · 🔒 {s.ditutup_oleh || "—"}
                         </div>
                         <div className="text-xs text-stone-400">
-                          {s.jumlah_transaksi}× · tunai {formatRupiah(s.penjualan_tunai)}
+                          {s.jumlah_transaksi}× · tunai {rp(s.penjualan_tunai)}
                         </div>
                       </div>
                       <div className="shrink-0 text-right">

@@ -4,7 +4,14 @@ import { alias } from "drizzle-orm/pg-core";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import type { Shift, ShiftDetail, ShiftPantauRow, ShiftTransaksiRow } from "@kakarut/shared";
+import {
+  formatRupiahAscii as rupiah,
+  type SelisihKasRow,
+  type Shift,
+  type ShiftDetail,
+  type ShiftPantauRow,
+  type ShiftTransaksiRow,
+} from "@kakarut/shared";
 import { db } from "../../db/client";
 import { branches, companies, sales, shifts, users } from "../../db/schema";
 import { requireRole, resolveBranchId, terikatCabang, type AppEnv } from "../../middleware/auth";
@@ -34,6 +41,23 @@ function milikShift(shiftId: string, openedAt: Date, closedAt: Date | null) {
   return sql`(${sales.shiftId} = ${shiftId} OR (${sales.shiftId} IS NULL AND ${sales.waktu} >= ${openedAt}${
     closedAt ? sql` AND ${sales.waktu} <= ${closedAt}` : sql``
   }))`;
+}
+
+/** Shift yang sedang terbuka di cabang — 400 bila tak ada. */
+async function shiftTerbuka(companyId: string, branchId: string) {
+  const [open] = await db
+    .select({
+      id: shifts.id,
+      modalAwal: shifts.modalAwal,
+      openedAt: shifts.openedAt,
+      uangFisik: shifts.uangFisik,
+    })
+    .from(shifts)
+    .where(
+      and(eq(shifts.companyId, companyId), eq(shifts.branchId, branchId), isNull(shifts.closedAt)),
+    );
+  if (!open) throw new HTTPException(400, { message: "Tidak ada shift kasir yang terbuka" });
+  return open;
 }
 
 /** Rekap penjualan sebuah shift (tunai vs non-tunai). */
@@ -136,6 +160,8 @@ export async function bukaShift(params: {
   userId: string;
   modalAwal: number;
   waktu?: Date;
+  /** peran pemanggil — dipakai membutakan responsnya, sama seperti endpoint lain */
+  role?: string | null;
 }): Promise<{ shift: Shift; sudahTerbuka: boolean }> {
   if (!(await sedangHadir(params.companyId, params.branchId, params.userId, params.waktu))) {
     throw new HTTPException(400, { message: "Absen masuk dulu sebelum buka kasir" });
@@ -146,7 +172,7 @@ export async function bukaShift(params: {
     .where(and(eq(shifts.branchId, params.branchId), isNull(shifts.closedAt)));
   if (open) {
     const [row] = await baseSelect().where(eq(shifts.id, open.id));
-    return { shift: await toDto(row), sudahTerbuka: true };
+    return { shift: await toDto(row, params.role), sudahTerbuka: true };
   }
   const [ins] = await db
     .insert(shifts)
@@ -159,7 +185,7 @@ export async function bukaShift(params: {
     })
     .returning({ id: shifts.id });
   const [row] = await baseSelect().where(eq(shifts.id, ins.id));
-  return { shift: await toDto(row), sudahTerbuka: false };
+  return { shift: await toDto(row, params.role), sudahTerbuka: false };
 }
 
 type ShiftJoinRow = {
@@ -170,6 +196,7 @@ type ShiftJoinRow = {
   modalAwal: number;
   closedAt: Date | null;
   uangFisik: number | null;
+  hitunganDikunciAt: Date | null;
   catatan: string | null;
   adaTransaksiSusulan: boolean;
   branch_nama: string | null;
@@ -192,6 +219,7 @@ function baseSelect() {
       modalAwal: shifts.modalAwal,
       closedAt: shifts.closedAt,
       uangFisik: shifts.uangFisik,
+      hitunganDikunciAt: shifts.hitunganDikunciAt,
       catatan: shifts.catatan,
       adaTransaksiSusulan: shifts.adaTransaksiSusulan,
       branch_nama: branches.nama,
@@ -211,25 +239,28 @@ function baseSelect() {
 }
 
 /**
- * HITUNG BUTA: selagi shift masih TERBUKA, peran terkunci cabang (kasir/tim)
- * tidak boleh melihat kas yang seharusnya ada di laci.
+ * HITUNG BUTA: selagi shift masih TERBUKA dan hitungan laci BELUM dikunci,
+ * peran terkunci cabang (kasir/tim) tidak boleh melihat kas yang seharusnya ada
+ * di laci.
  *
  * Kalau angka itu terlihat lebih dulu, penghitungan uang berhenti menjadi
  * pemeriksaan — tinggal disalin, dan selisih apa pun takkan pernah muncul.
  * Owner/admin tak pernah dibutakan: merekalah yang menyetujui selisih, dan
  * mereka memang perlu memantau kas berjalan.
  *
- * Angka aslinya dibuka pada respons `POST /shift/tutup`, yakni SETELAH uang
- * fisik dikirim — itu momen "reveal"-nya.
+ * `uangFisik` terisi = kasir sudah mengunci hitungannya lewat
+ * `POST /shift/kunci-hitungan`, jadi angka boleh dibuka: nominalnya sudah tak
+ * bisa diubah lagi (panggilan kedua dengan nominal berbeda → 409), sehingga
+ * melihat kas sistem tak lagi bisa memengaruhi apa yang dilaporkan.
  */
-function butaUntuk(role: string | null, closedAt: Date | null): boolean {
-  return closedAt == null && terikatCabang(role);
+function butaUntuk(role: string | null, closedAt: Date | null, uangFisik: number | null): boolean {
+  return closedAt == null && uangFisik == null && terikatCabang(role);
 }
 
 async function toDto(r: ShiftJoinRow, role?: string | null): Promise<Shift> {
   const rekap = await rekapWindow(r.companyId, r.branchId, r.id, r.openedAt, r.closedAt);
   const kasAsli = r.modalAwal + rekap.penjualan_tunai;
-  const buta = role != null && butaUntuk(role, r.closedAt);
+  const buta = role != null && butaUntuk(role, r.closedAt, r.uangFisik);
   return {
     id: r.id,
     branch_nama: r.branch_nama ?? "",
@@ -241,18 +272,25 @@ async function toDto(r: ShiftJoinRow, role?: string | null): Promise<Shift> {
     uang_fisik: r.uangFisik,
     catatan: r.catatan,
     ...rekap,
-    // yang dibutakan HANYA jejak tunai — jumlah transaksi & non-tunai tetap
+    // Yang dibutakan HANYA jejak tunai — jumlah transaksi & non-tunai tetap
     // tampil supaya kasir masih bisa memantau shiftnya berjalan.
-    penjualan_tunai: buta ? 0 : rekap.penjualan_tunai,
+    //
+    // `null`, BUKAN 0: nol adalah angka yang sah ("belum ada penjualan tunai
+    // hari ini") dan klien tak punya cara membedakannya dari penyembunyian.
+    penjualan_tunai: buta ? null : rekap.penjualan_tunai,
     kas_sistem: buta ? null : kasAsli,
     selisih: buta || r.uangFisik == null ? null : r.uangFisik - kasAsli,
     ada_transaksi_susulan: r.adaTransaksiSusulan,
-    buta,
-    selisih_status: r.selisihStatus,
+    hitung_buta: buta,
+    hitungan_dikunci_pada: r.hitunganDikunciAt ? r.hitunganDikunciAt.toISOString() : null,
+    // `null` (masih terbuka) sengaja dipisah dari `"pas"` (sudah ditutup, tak
+    // ada selisih). Kolom DB hanya menyimpan KEPUTUSAN, jadi "pas" diturunkan
+    // di sini — tak ada status kelima yang perlu disimpan.
+    status_selisih: r.closedAt == null ? null : (r.selisihStatus ?? "pas"),
     selisih_alasan: r.selisihAlasan,
-    disetujui_oleh: r.penyetuju,
-    disetujui_pada: r.disetujuiAt ? r.disetujuiAt.toISOString() : null,
-    tolak_alasan: r.tolakAlasan,
+    selisih_disetujui_oleh: r.penyetuju,
+    selisih_diputus_pada: r.disetujuiAt ? r.disetujuiAt.toISOString() : null,
+    alasan_tolak: r.tolakAlasan,
   };
 }
 
@@ -392,6 +430,62 @@ export const shiftRoutes = new Hono<AppEnv>()
     // Riwayat = shift yang SUDAH ditutup, jadi tak ada yang dibutakan di sini.
     return c.json(await Promise.all(rows.map((r) => toDto(r, auth.role))));
   })
+  /**
+   * Daftar selisih kas untuk owner/admin — sumber badge "perlu ACC".
+   *
+   * Sengaja TIDAK ditempel ke `/pantau`: `/pantau` bicara soal shift yang
+   * sedang BERJALAN hari ini (satu baris per cabang), sedangkan selisih yang
+   * menunggu bisa menumpuk dari shift kemarin di cabang yang hari ini belum
+   * buka — baris itu takkan pernah punya tempat di `/pantau`.
+   */
+  .get(
+    "/selisih",
+    requireRole("owner", "admin"),
+    zValidator(
+      "query",
+      z.object({
+        status: z.enum(["pas", "menunggu", "disetujui", "ditolak"]).default("menunggu"),
+        branch_id: z.string().uuid().optional(),
+      }),
+    ),
+    async (c) => {
+      const auth = c.get("auth");
+      const q = c.req.valid("query");
+      const rows = await baseSelect()
+        .where(
+          and(
+            eq(shifts.companyId, auth.company_id!),
+            isNotNull(shifts.closedAt),
+            q.branch_id ? eq(shifts.branchId, q.branch_id) : undefined,
+            // "pas" tak tersimpan di DB (lihat toDto) — itu justru baris yang
+            // TIDAK punya keputusan tapi sudah tertutup.
+            q.status === "pas" ? isNull(shifts.selisihStatus) : eq(shifts.selisihStatus, q.status),
+          ),
+        )
+        .orderBy(desc(shifts.closedAt))
+        .limit(50);
+      const hasil: SelisihKasRow[] = await Promise.all(
+        rows.map(async (r) => {
+          const rekap = await rekapWindow(r.companyId, r.branchId, r.id, r.openedAt, r.closedAt);
+          const kas = r.modalAwal + rekap.penjualan_tunai;
+          return {
+            id: r.id,
+            branch_nama: r.branch_nama ?? "",
+            ditutup_oleh: r.closer,
+            ditutup_pada: r.closedAt ? r.closedAt.toISOString() : null,
+            kas_sistem: kas,
+            uang_fisik: r.uangFisik ?? 0,
+            selisih: (r.uangFisik ?? 0) - kas,
+            // keterangan selisih lebih berguna daripada catatan umum, tapi
+            // klien lama hanya mengisi `catatan` — pakai yang ada.
+            catatan: r.selisihAlasan ?? r.catatan,
+            status_selisih: r.selisihStatus ?? "pas",
+          };
+        }),
+      );
+      return c.json(hasil);
+    },
+  )
   // detail satu shift = ringkasan + daftar transaksinya (kasir terkunci cabang)
   .get("/:id", async (c) => {
     const auth = c.get("auth");
@@ -421,6 +515,7 @@ export const shiftRoutes = new Hono<AppEnv>()
         branchId,
         userId: auth.sub,
         modalAwal: c.req.valid("json").modal_awal,
+        role: auth.role,
       });
       // Jalur online tetap MENOLAK bila sudah ada shift terbuka: kasir ada di
       // depan layar dan harus tahu shift-nya bukan yang baru saja ia buka.
@@ -434,16 +529,73 @@ export const shiftRoutes = new Hono<AppEnv>()
     },
   )
   /**
-   * TUTUP KASIR — momen "reveal" dari hitung buta.
+   * KUNCI HITUNGAN — momen "reveal" dari hitung buta.
    *
    * Kasir mengirim uang fisik hasil hitungan laci TANPA pernah melihat kas
-   * sistem (lihat `butaUntuk`). Respons endpoint inilah yang pertama kali
-   * membuka `kas_sistem` dan `selisih` — jadi angka yang dikirim benar-benar
-   * hasil menghitung, bukan hasil menyalin.
+   * sistem (lihat `butaUntuk`). Responsnya yang pertama kali membuka
+   * `kas_sistem` dan `selisih`, jadi angka yang dikirim benar-benar hasil
+   * menghitung, bukan hasil menyalin.
+   *
+   * Kenapa penguncian ini perlu, bukan sekadar menyembunyikan angka di layar:
+   * tanpanya kasir bisa MEMANCING kas sistem — kirim `uang_fisik: 0`, baca
+   * selisih yang muncul, lalu kirim ulang dengan angka yang pas. Sekali
+   * terkunci, nominal tak bisa diubah lagi (409), sehingga melihat kas sistem
+   * tak lagi bisa memengaruhi apa yang dilaporkan.
+   *
+   * Nominal yang SAMA dikirim ulang tetap 200 — jaringan putus lalu klien
+   * mengulang permintaan yang sama bukan kecurangan, dan menolaknya akan
+   * menyandera shift.
+   */
+  .post(
+    "/kunci-hitungan",
+    requireRole("cashier"),
+    zValidator("json", z.object({ uang_fisik: z.number().nonnegative() })),
+    async (c) => {
+      const auth = c.get("auth");
+      const branchId = await resolveBranchId(c);
+      const body = c.req.valid("json");
+      const open = await shiftTerbuka(auth.company_id!, branchId);
+      const rekap = await rekapWindow(auth.company_id!, branchId, open.id, open.openedAt, null);
+      const kas = open.modalAwal + rekap.penjualan_tunai;
+      if (open.uangFisik != null) {
+        const hasil = {
+          uang_fisik: open.uangFisik,
+          kas_sistem: kas,
+          selisih: open.uangFisik - kas,
+        };
+        if (Math.abs(open.uangFisik - body.uang_fisik) <= EPS_KAS) return c.json(hasil);
+        return c.json(
+          { error: `Hitungan sudah dikunci ${rupiah(open.uangFisik)}`, ...hasil },
+          409,
+        );
+      }
+      await db
+        .update(shifts)
+        .set({ uangFisik: body.uang_fisik, hitunganDikunciAt: new Date() })
+        .where(and(eq(shifts.id, open.id), isNull(shifts.uangFisik)));
+      // Baca ulang: bila dua permintaan berbarengan, yang kalah balapan harus
+      // melaporkan nominal yang BENAR-BENAR tersimpan, bukan yang ia kirim.
+      const [after] = await db
+        .select({ uangFisik: shifts.uangFisik })
+        .from(shifts)
+        .where(eq(shifts.id, open.id));
+      const terkunci = after.uangFisik ?? body.uang_fisik;
+      return c.json({ uang_fisik: terkunci, kas_sistem: kas, selisih: terkunci - kas });
+    },
+  )
+  /**
+   * TUTUP KASIR.
+   *
+   * Dua jalur yang sama-sama sah:
+   * 1. Sudah `kunci-hitungan` → `uang_fisik` boleh dihilangkan (diambil dari
+   *    yang terkunci). Bila tetap dikirim dan BERBEDA → 409; diam-diam memakai
+   *    salah satunya berarti salah satu angka yang dilihat kasir bohong.
+   * 2. Belum mengunci → `uang_fisik` wajib. Jalur satu langkah untuk klien yang
+   *    membutakan di UI saja (mobile tablet toko), tanpa endpoint tambahan.
    *
    * Selisih apa pun (lebih maupun kurang) langsung berstatus "menunggu"
    * persetujuan owner/admin; kasir tak bisa meng-ACC selisihnya sendiri.
-   * Uang fisik yang PAS tak butuh persetujuan (`selisih_status` tetap null).
+   * Uang fisik yang PAS tak butuh persetujuan (`status_selisih: "pas"`).
    */
   .post(
     "/tutup",
@@ -451,7 +603,8 @@ export const shiftRoutes = new Hono<AppEnv>()
     zValidator(
       "json",
       z.object({
-        uang_fisik: z.number().nonnegative(),
+        /** boleh kosong bila hitungan sudah dikunci lebih dulu */
+        uang_fisik: z.number().nonnegative().nullish(),
         catatan: z.string().nullish(),
         /** keterangan kasir bila hitungannya tak pas (mis. "kembalian kurang") */
         selisih_alasan: z.string().trim().max(300).nullish(),
@@ -461,28 +614,35 @@ export const shiftRoutes = new Hono<AppEnv>()
       const auth = c.get("auth");
       const branchId = await resolveBranchId(c);
       const body = c.req.valid("json");
-      const [open] = await db
-        .select({ id: shifts.id, modalAwal: shifts.modalAwal, openedAt: shifts.openedAt })
-        .from(shifts)
-        .where(
-          and(
-            eq(shifts.companyId, auth.company_id!),
-            eq(shifts.branchId, branchId),
-            isNull(shifts.closedAt),
-          ),
+      const open = await shiftTerbuka(auth.company_id!, branchId);
+      if (
+        open.uangFisik != null &&
+        body.uang_fisik != null &&
+        Math.abs(open.uangFisik - body.uang_fisik) > EPS_KAS
+      ) {
+        return c.json(
+          {
+            error: `Hitungan sudah dikunci ${rupiah(open.uangFisik)} — tak bisa ditutup dengan nominal lain`,
+            uang_fisik: open.uangFisik,
+          },
+          409,
         );
-      if (!open) throw new HTTPException(400, { message: "Tidak ada shift kasir yang terbuka" });
+      }
+      const uangFisik = open.uangFisik ?? body.uang_fisik;
+      if (uangFisik == null) {
+        throw new HTTPException(400, { message: "Uang fisik di laci wajib diisi" });
+      }
       // Kas sistem dihitung DI SINI (server), bukan dikirim klien — klien tak
-      // pernah memegang angka ini sebelum penutupan.
+      // pernah memegang angka ini sebelum hitungannya dikunci.
       const rekap = await rekapWindow(auth.company_id!, branchId, open.id, open.openedAt, null);
-      const selisih = body.uang_fisik - (open.modalAwal + rekap.penjualan_tunai);
+      const selisih = uangFisik - (open.modalAwal + rekap.penjualan_tunai);
       const perluAcc = Math.abs(selisih) > EPS_KAS;
       await db
         .update(shifts)
         .set({
           closedBy: auth.sub,
           closedAt: new Date(),
-          uangFisik: body.uang_fisik,
+          uangFisik,
           catatan: body.catatan ?? null,
           selisihStatus: perluAcc ? "menunggu" : null,
           // `catatan` jadi cadangan: klien lama (dan mobile) hanya punya satu
@@ -501,45 +661,56 @@ export const shiftRoutes = new Hono<AppEnv>()
    * Owner/admin memutuskan selisih kas: terima apa adanya (disetujui) atau
    * tolak dengan alasan. Sengaja TIDAK mengubah angka apa pun — uang fisik &
    * kas sistem adalah fakta yang sudah terjadi; yang dicatat di sini adalah
-   * KEPUTUSANNYA, lengkap dengan siapa dan kapan.
+   * KEPUTUSANNYA, lengkap dengan siapa dan kapan. Menolak pun tidak membuka
+   * kembali shift: penolakan adalah penanda untuk ditindaklanjuti di luar
+   * aplikasi, bukan perintah menghitung ulang.
    */
   .post(
-    "/:id/selisih",
+    "/:id/selisih/putuskan",
     requireRole("owner", "admin"),
     zValidator(
       "json",
       z.object({
-        keputusan: z.enum(["disetujui", "ditolak"]),
-        alasan: z.string().trim().max(300).nullish(),
+        status: z.enum(["disetujui", "ditolak"]),
+        alasan_tolak: z.string().trim().max(300).nullish(),
       }),
     ),
     async (c) => {
       const auth = c.get("auth");
       const body = c.req.valid("json");
       const [row] = await db
-        .select({ id: shifts.id, selisihStatus: shifts.selisihStatus })
+        .select({
+          id: shifts.id,
+          closedAt: shifts.closedAt,
+          selisihStatus: shifts.selisihStatus,
+        })
         .from(shifts)
-        .where(
-          and(eq(shifts.id, c.req.param("id")), eq(shifts.companyId, auth.company_id!)),
-        );
+        .where(and(eq(shifts.id, c.req.param("id")), eq(shifts.companyId, auth.company_id!)));
       if (!row) throw new HTTPException(404, { message: "Shift tidak ditemukan" });
-      if (row.selisihStatus == null) {
+      if (row.closedAt == null || row.selisihStatus == null) {
         throw new HTTPException(400, {
           message: "Shift ini tak punya selisih kas yang perlu diputuskan",
         });
       }
-      if (body.keputusan === "ditolak" && !body.alasan?.trim()) {
+      if (row.selisihStatus !== "menunggu") {
+        throw new HTTPException(409, {
+          message: `Selisih shift ini sudah ${row.selisihStatus} — tidak bisa diputuskan lagi`,
+        });
+      }
+      if (body.status === "ditolak" && !body.alasan_tolak?.trim()) {
         throw new HTTPException(400, { message: "Alasan wajib diisi saat menolak selisih" });
       }
       await db
         .update(shifts)
         .set({
-          selisihStatus: body.keputusan,
+          selisihStatus: body.status,
           disetujuiOleh: auth.sub,
           disetujuiAt: new Date(),
-          tolakAlasan: body.keputusan === "ditolak" ? body.alasan!.trim() : null,
+          tolakAlasan: body.status === "ditolak" ? body.alasan_tolak!.trim() : null,
         })
-        .where(eq(shifts.id, row.id));
+        // Guard balapan: dua owner menekan tombol bersamaan → yang kedua
+        // tidak menimpa keputusan pertama.
+        .where(and(eq(shifts.id, row.id), eq(shifts.selisihStatus, "menunggu")));
       const [after] = await baseSelect().where(eq(shifts.id, row.id));
       return c.json(await toDto(after, auth.role));
     },

@@ -1,0 +1,1 @@
+ALTER TABLE "shifts" ADD COLUMN "hitungan_dikunci_at" timestamp with time zone;

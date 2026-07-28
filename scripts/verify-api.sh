@@ -6100,59 +6100,103 @@ cek "qty KURANG dari RAB → split: 400 maju, 500 tetap jadi tugas" "V == 1" \
 
 
 echo
-echo "── §152 Tutup kasir: hitung BUTA + selisih perlu ACC owner ──"
-# Kasir hitung laci DULU tanpa melihat kas sistem; angka baru dibuka pada
-# respons tutup. Selisih apa pun diputuskan owner, bukan kasir sendiri.
+echo "── §152 Tutup kasir: hitung BUTA + kunci hitungan + ACC selisih ──"
+# Kasir menghitung laci DULU tanpa pernah melihat kas sistem; angka baru dibuka
+# setelah nominalnya DIKUNCI (tak bisa diubah lagi). Selisih apa pun diputuskan
+# owner, bukan kasir sendiri.
 CB152=$(api "$OWNER" GET /cabang | jq -r '[.[]|select(.tipe=="store" and .is_active)][0].id')
 AKTIF152=$(api "$REISS105" GET /shift/aktif)
 cek "dasar uji: kasir punya shift terbuka" "V == 1" \
   "$(echo "$AKTIF152" | jq -r '(.id != null)|if . then 1 else 0 end')"
-cek "KASIR dibutakan: buta=true selagi shift terbuka" "V == 1" \
-  "$(echo "$AKTIF152" | jq -r '(.buta == true)|if . then 1 else 0 end')"
+cek "KASIR dibutakan: hitung_buta=true selagi belum dikunci" "V == 1" \
+  "$(echo "$AKTIF152" | jq -r '(.hitung_buta == true)|if . then 1 else 0 end')"
 cek "KASIR dibutakan: kas_sistem null (bukan angka)" "V == 1" \
   "$(echo "$AKTIF152" | jq -r '(.kas_sistem == null)|if . then 1 else 0 end')"
-cek "KASIR dibutakan: penjualan_tunai ditutup jadi 0" "V == 1" \
-  "$(echo "$AKTIF152" | jq -r '(.penjualan_tunai == 0)|if . then 1 else 0 end')"
+cek "KASIR dibutakan: penjualan_tunai null — BUKAN 0 (0 itu angka yang sah)" "V == 1" \
+  "$(echo "$AKTIF152" | jq -r '(.penjualan_tunai == null)|if . then 1 else 0 end')"
+cek "KASIR dibutakan: selisih null" "V == 1" \
+  "$(echo "$AKTIF152" | jq -r '(.selisih == null)|if . then 1 else 0 end')"
 cek "KASIR tetap bisa melihat jumlah transaksi (pantau shift jalan)" "V == 1" \
   "$(echo "$AKTIF152" | jq -r '((.jumlah_transaksi|type) == "number")|if . then 1 else 0 end')"
+cek "shift terbuka: status_selisih null (belum ada yang dinilai)" "V == 1" \
+  "$(echo "$AKTIF152" | jq -r '(.status_selisih == null)|if . then 1 else 0 end')"
 # owner TIDAK pernah dibutakan — dialah yang menyetujui selisih
 SID152=$(echo "$AKTIF152" | jq -r .id)
 OWN152=$(api "$OWNER" GET "/shift/$SID152")
-cek "OWNER tidak dibutakan: buta=false & kas_sistem berupa angka" "V == 1" \
-  "$(echo "$OWN152" | jq -r '((.buta == false) and ((.kas_sistem|type) == "number"))|if . then 1 else 0 end')"
+cek "OWNER tidak dibutakan: hitung_buta=false & kas_sistem berupa angka" "V == 1" \
+  "$(echo "$OWN152" | jq -r '((.hitung_buta == false) and ((.kas_sistem|type) == "number"))|if . then 1 else 0 end')"
 KAS152=$(echo "$OWN152" | jq -r '.kas_sistem')
-# tutup dengan uang fisik LEBIH 5.000 dari kas sistem
-TUTUP152=$(api "$REISS105" POST /shift/tutup "{\"uang_fisik\":$(python3 -c "print($KAS152 + 5000)"),\"catatan\":\"kembalian dari pelanggan\"}")
-cek "REVEAL: respons tutup membuka kas_sistem" "V == 1" \
-  "$(echo "$TUTUP152" | jq -r '((.kas_sistem|type) == "number")|if . then 1 else 0 end')"
-cek "REVEAL: selisih = +5.000" "abs(V - 5000) < 0.01" "$(echo "$TUTUP152" | jq -r '.selisih')"
-cek "selisih → status menunggu (bukan langsung diterima)" "V == 1" \
-  "$(echo "$TUTUP152" | jq -r '(.selisih_status == "menunggu")|if . then 1 else 0 end')"
+FISIK152=$(python3 -c "print($KAS152 + 5000)")
+# tutup TANPA mengunci & tanpa uang_fisik → 400 (tak ada angka untuk dipakai)
+cek "tutup tanpa kunci & tanpa uang_fisik → 400" "V == 400" \
+  "$(status_code_body "$REISS105" POST "/shift/tutup" '{"catatan":"x"}')"
+# KUNCI HITUNGAN = momen reveal
+KUNCI152=$(api "$REISS105" POST /shift/kunci-hitungan "{\"uang_fisik\":$FISIK152}")
+cek "REVEAL: kunci-hitungan membuka kas_sistem" "abs(V - $KAS152) < 0.01" \
+  "$(echo "$KUNCI152" | jq -r '.kas_sistem')"
+cek "REVEAL: selisih = +5.000" "abs(V - 5000) < 0.01" "$(echo "$KUNCI152" | jq -r '.selisih')"
+AKTIF152B=$(api "$REISS105" GET /shift/aktif)
+cek "setelah dikunci kasir TIDAK lagi dibutakan" "V == 1" \
+  "$(echo "$AKTIF152B" | jq -r '((.hitung_buta == false) and ((.kas_sistem|type) == "number"))|if . then 1 else 0 end')"
+cek "hitungan_dikunci_pada tercatat (jejak audit)" "V == 1" \
+  "$(echo "$AKTIF152B" | jq -r '(.hitungan_dikunci_pada != null)|if . then 1 else 0 end')"
+# ANTI-PANCING: nominal lain ditolak, nominal sama tetap lolos (retry jaringan)
+cek "kunci ulang dgn nominal BERBEDA → 409 (anti-pancing angka sistem)" "V == 409" \
+  "$(status_code_body "$REISS105" POST "/shift/kunci-hitungan" '{"uang_fisik":1}')"
+cek "409 tetap membawa nominal yang PERTAMA" "abs(V - $FISIK152) < 0.01" \
+  "$(api "$REISS105" POST /shift/kunci-hitungan '{"uang_fisik":1}' | jq -r '.uang_fisik')"
+cek "kunci ulang dgn nominal SAMA → tetap 200 (retry jaringan bukan curang)" "V == 200" \
+  "$(status_code_body "$REISS105" POST "/shift/kunci-hitungan" "{\"uang_fisik\":$FISIK152}")"
+cek "tutup dgn nominal beda dari yang terkunci → 409" "V == 409" \
+  "$(status_code_body "$REISS105" POST "/shift/tutup" '{"uang_fisik":1}')"
+# tutup TANPA uang_fisik — diambil dari yang terkunci
+TUTUP152=$(api "$REISS105" POST /shift/tutup '{"catatan":"kembalian dari pelanggan"}')
+cek "tutup tanpa uang_fisik memakai nominal terkunci" "abs(V - $FISIK152) < 0.01" \
+  "$(echo "$TUTUP152" | jq -r '.uang_fisik')"
+cek "selisih tetap +5.000 setelah ditutup" "abs(V - 5000) < 0.01" "$(echo "$TUTUP152" | jq -r '.selisih')"
+cek "selisih → status_selisih menunggu (bukan langsung diterima)" "V == 1" \
+  "$(echo "$TUTUP152" | jq -r '(.status_selisih == "menunggu")|if . then 1 else 0 end')"
 cek "keterangan kasir tersimpan sebagai selisih_alasan" "V == 1" \
   "$(echo "$TUTUP152" | jq -r '(.selisih_alasan == "kembalian dari pelanggan")|if . then 1 else 0 end')"
 SID152B=$(echo "$TUTUP152" | jq -r .id)
+# daftar selisih menunggu (sumber badge owner)
+SEL152=$(api "$OWNER" GET "/shift/selisih?status=menunggu")
+cek "GET /shift/selisih?status=menunggu memuat shift ini" "V == 1" \
+  "$(echo "$SEL152" | jq --arg id "$SID152B" '[.[]|select(.id==$id)]|length')"
+cek "baris selisih lengkap: kas_sistem, uang_fisik, selisih, cabang" "V == 1" \
+  "$(echo "$SEL152" | jq -r --arg id "$SID152B" '[.[]|select(.id==$id)][0] | (((.kas_sistem|type)=="number") and ((.uang_fisik|type)=="number") and ((.selisih - 5000)|fabs < 0.01) and (.branch_nama != "") and (.status_selisih=="menunggu"))|if . then 1 else 0 end')"
+cek "KASIR tak boleh melihat daftar selisih → 403" "V == 403" \
+  "$(status_code "$REISS105" GET "/shift/selisih?status=menunggu")"
 cek "KASIR tak boleh memutuskan selisihnya sendiri → 403" "V == 403" \
-  "$(status_code_body "$REISS105" POST "/shift/$SID152B/selisih" '{"keputusan":"disetujui"}')"
-cek "owner MENOLAK tanpa alasan → 400" "V == 400" \
-  "$(status_code_body "$OWNER" POST "/shift/$SID152B/selisih" '{"keputusan":"ditolak"}')"
-ACC152=$(api "$OWNER" POST "/shift/$SID152B/selisih" '{"keputusan":"disetujui","alasan":"diterima, uang disetor"}')
-cek "owner menyetujui → status disetujui + tercatat siapa" "V == 1" \
-  "$(echo "$ACC152" | jq -r '((.selisih_status == "disetujui") and (.disetujui_oleh != null) and (.disetujui_pada != null))|if . then 1 else 0 end')"
+  "$(status_code_body "$REISS105" POST "/shift/$SID152B/selisih/putuskan" '{"status":"disetujui"}')"
+cek "owner MENOLAK tanpa alasan_tolak → 400" "V == 400" \
+  "$(status_code_body "$OWNER" POST "/shift/$SID152B/selisih/putuskan" '{"status":"ditolak"}')"
+ACC152=$(api "$OWNER" POST "/shift/$SID152B/selisih/putuskan" '{"status":"disetujui"}')
+cek "owner menyetujui → disetujui + tercatat siapa & kapan" "V == 1" \
+  "$(echo "$ACC152" | jq -r '((.status_selisih == "disetujui") and (.selisih_disetujui_oleh != null) and (.selisih_diputus_pada != null))|if . then 1 else 0 end')"
 cek "keputusan TIDAK mengubah angka apa pun (selisih tetap 5.000)" "abs(V - 5000) < 0.01" \
   "$(echo "$ACC152" | jq -r '.selisih')"
+cek "putuskan DUA KALI → 409 (pola sama dgn pengajuan/:id/putuskan)" "V == 409" \
+  "$(status_code_body "$OWNER" POST "/shift/$SID152B/selisih/putuskan" '{"status":"ditolak","alasan_tolak":"berubah pikiran"}')"
+cek "sudah diputuskan → hilang dari daftar menunggu" "V == 0" \
+  "$(api "$OWNER" GET "/shift/selisih?status=menunggu" | jq --arg id "$SID152B" '[.[]|select(.id==$id)]|length')"
 
 # shift yang PAS tak butuh persetujuan sama sekali
 api "$OWNER" POST "/absensi/masuk" "{\"branch_id\":\"$CB152\"}" > /dev/null 2>&1 || true
 BUKA152=$(api "$REISS105" POST /shift/buka '{"modal_awal":100000}')
 SID152C=$(echo "$BUKA152" | jq -r '.id // .shift.id')
 KAS152C=$(api "$OWNER" GET "/shift/$SID152C" | jq -r '.kas_sistem')
+# jalur SATU LANGKAH (klien yang membutakan di UI saja) tetap sah
 PAS152=$(api "$REISS105" POST /shift/tutup "{\"uang_fisik\":$KAS152C}")
-cek "uang fisik PAS → selisih 0 & TIDAK perlu persetujuan (status null)" "V == 1" \
-  "$(echo "$PAS152" | jq -r '(((.selisih|fabs) < 0.01) and (.selisih_status == null))|if . then 1 else 0 end')"
-cek "shift tanpa selisih → POST /selisih ditolak 400" "V == 400" \
-  "$(status_code_body "$OWNER" POST "/shift/$SID152C/selisih" '{"keputusan":"disetujui"}')"
+cek "uang fisik PAS → selisih 0 & status_selisih 'pas' (bukan null)" "V == 1" \
+  "$(echo "$PAS152" | jq -r '(((.selisih|fabs) < 0.01) and (.status_selisih == "pas"))|if . then 1 else 0 end')"
+cek "tutup satu langkah tanpa kunci: hitungan_dikunci_pada tetap null" "V == 1" \
+  "$(echo "$PAS152" | jq -r '(.hitungan_dikunci_pada == null)|if . then 1 else 0 end')"
+cek "shift tanpa selisih → putuskan ditolak 400" "V == 400" \
+  "$(status_code_body "$OWNER" POST "/shift/$SID152C/selisih/putuskan" '{"status":"disetujui"}')"
+cek "shift PAS masuk daftar status=pas" "V == 1" \
+  "$(api "$OWNER" GET "/shift/selisih?status=pas" | jq --arg id "$SID152C" '[.[]|select(.id==$id)]|length')"
 
 
-echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]
