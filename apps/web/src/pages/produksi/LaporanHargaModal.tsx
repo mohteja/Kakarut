@@ -81,8 +81,9 @@ export function LaporanHargaModal({
     <Modal open onClose={onClose} title="💰 Laporan Harga" lebar="max-w-lg">
       <div className="space-y-3">
         <div className="rounded-lg border border-emerald-300 bg-emerald-50/70 px-3 py-2 text-sm text-emerald-800">
-          Catat <b>harga yang benar-benar dibayar</b> tiap bahan sesuai nota belanja — dipakai
-          perhitungan HPP (FIFO) &amp; resep. Setelah dilaporkan, faktur ini berstatus{" "}
+          Catat <b>harga yang benar-benar dibayar</b> tiap bahan sesuai nota belanja — memperbarui
+          harga acuan yang jadi dasar HPP resep &amp; laba-rugi, dan tercatat per lot di kartu
+          persediaan. Setelah dilaporkan, faktur ini berstatus{" "}
           <b>✅ Selesai</b>.
         </div>
         <div className="max-h-64 space-y-1.5 overflow-y-auto">
