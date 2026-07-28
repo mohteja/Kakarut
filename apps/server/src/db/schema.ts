@@ -114,6 +114,13 @@ export const pengajuanStatusEnum = pgEnum("pengajuan_status", [
 ]);
 
 /**
+ * Sesi laporan kebersihan harian. Toko dibersihkan beberapa kali sehari, jadi
+ * satu laporan per hari tidak cukup: tiap sesi punya laporannya sendiri
+ * (dipaksa unik per karyawan × tanggal × sesi).
+ */
+export const kebersihanSesiEnum = pgEnum("kebersihan_sesi", ["pagi", "siang", "malam"]);
+
+/**
  * Jenis entri buku dana faktur: 'cair' = pencairan RAB; 'tambahan' = dana
  * ekstra saat realisasi lebih besar (catatan: dari mana uangnya); 'kembali' =
  * sisa dana saat realisasi lebih kecil (catatan: di siapa uangnya).
@@ -983,6 +990,109 @@ export const leaveRequests = pgTable(
       t.tanggalSelesai,
     ),
   ],
+);
+
+/**
+ * MASTER AREA KEBERSIHAN — daftar yang dicentang karyawan tiap sesi. Isinya
+ * diatur owner (bukan hard-code) karena tiap usaha beda: ada yang punya
+ * chiller, ada yang punya area parkir.
+ *
+ * `branchId` null = area berlaku di SEMUA lokasi; terisi = khusus lokasi itu.
+ * Itulah yang membuat Central Kitchen bisa punya area sendiri (ruang produksi,
+ * chiller) tanpa mengotori daftar area toko.
+ */
+export const cleaningAreas = pgTable(
+  "cleaning_areas",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    /** null = berlaku di semua cabang/CK */
+    branchId: uuid("branch_id").references(() => branches.id, { onDelete: "cascade" }),
+    nama: text("nama").notNull(),
+    /** urutan tampil pada checklist; kecil = di atas */
+    urutan: integer("urutan").notNull().default(0),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("cleaning_areas_company_aktif_idx").on(t.companyId, t.isActive)],
+);
+
+/**
+ * LAPORAN KEBERSIHAN HARIAN — satu baris per karyawan × tanggal × sesi.
+ * Karyawan membuat laporannya masing-masing; owner membacanya sebagai rekap
+ * satu kotak per hari.
+ *
+ * `tanggal` SELALU diturunkan server dari zona waktu perusahaan (seperti
+ * `attendances.attendDate`), tidak pernah dikirim klien — supaya laporan tak
+ * bisa dibuat mundur.
+ */
+export const cleaningReports = pgTable(
+  "cleaning_reports",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    /** lokasi pelapor, diambil dari membership — bukan dari body */
+    branchId: uuid("branch_id")
+      .notNull()
+      .references(() => branches.id),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    tanggal: date("tanggal").notNull(),
+    sesi: kebersihanSesiEnum("sesi").notNull(),
+    catatan: text("catatan"),
+    /** balasan owner/admin atas laporan ini — dibaca pelapor */
+    catatanOwner: text("catatan_owner"),
+    catatanOwnerOlehUserId: uuid("catatan_owner_oleh_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    catatanOwnerPada: timestamp("catatan_owner_pada", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // Inilah yang menegakkan "satu laporan per sesi".
+    uniqueIndex("cleaning_reports_user_tanggal_sesi_uq").on(
+      t.companyId,
+      t.userId,
+      t.tanggal,
+      t.sesi,
+    ),
+    index("cleaning_reports_company_tanggal_idx").on(t.companyId, t.tanggal),
+    index("cleaning_reports_company_branch_tanggal_idx").on(
+      t.companyId,
+      t.branchId,
+      t.tanggal,
+    ),
+  ],
+);
+
+/**
+ * Baris checklist sebuah laporan. `areaNama` disalin (snapshot) supaya
+ * mengganti nama atau menghapus area master tidak merusak laporan lama —
+ * pola yang sama dipakai `sales.mejaLabel`.
+ */
+export const cleaningReportItems = pgTable(
+  "cleaning_report_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    reportId: uuid("report_id")
+      .notNull()
+      .references(() => cleaningReports.id, { onDelete: "cascade" }),
+    /** null bila area masternya sudah dihapus — `areaNama` tetap terbaca */
+    areaId: uuid("area_id").references(() => cleaningAreas.id, { onDelete: "set null" }),
+    areaNama: text("area_nama").notNull(),
+    bersih: boolean("bersih").notNull(),
+    catatan: text("catatan"),
+    /** URL hasil POST /upload?tujuan=bukti; minimal 1 per laporan (ditegakkan di route) */
+    fotoUrl: text("foto_url"),
+    urutan: integer("urutan").notNull().default(0),
+  },
+  (t) => [index("cleaning_report_items_report_idx").on(t.reportId)],
 );
 
 export const sales = pgTable(

@@ -2,6 +2,7 @@ import type {
   BahanKategori,
   DivisiProduksi,
   JenisPengadaan,
+  KebersihanSesi,
   MenuTipe,
   PengajuanJenis,
   PengajuanKategori,
@@ -1545,6 +1546,105 @@ export interface RekapAbsenDto {
    */
   hari_terhitung: number;
   rows: RekapAbsenRow[];
+}
+
+/* ===== Laporan kebersihan harian ===== */
+
+/**
+ * Satu area pada master checklist kebersihan (diatur owner).
+ * `branch_id` null = area berlaku di SEMUA lokasi.
+ */
+export interface AreaKebersihanDto {
+  id: string;
+  nama: string;
+  branch_id: string | null;
+  /** nama cabang bila area khusus satu lokasi; null = semua lokasi */
+  cabang: string | null;
+  urutan: number;
+  is_active: boolean;
+}
+
+/** Satu baris checklist di dalam sebuah laporan kebersihan. */
+export interface LaporanKebersihanItem {
+  id: string;
+  /** null bila area masternya sudah dihapus — `area_nama` tetap terbaca */
+  area_id: string | null;
+  /** salinan nama area saat laporan dibuat (tahan rename/hapus master) */
+  area_nama: string;
+  bersih: boolean;
+  catatan: string | null;
+  /** hasil POST /upload?tujuan=bukti; minimal satu item per laporan wajib terisi */
+  foto_url: string | null;
+  urutan: number;
+}
+
+/** Laporan kebersihan lengkap beserta checklist-nya (GET /kebersihan/:id). */
+export interface LaporanKebersihanDto {
+  id: string;
+  user_id: string;
+  nama: string;
+  branch_id: string;
+  cabang: string | null;
+  /** YYYY-MM-DD, selalu diturunkan server dari zona waktu perusahaan */
+  tanggal: string;
+  sesi: KebersihanSesi;
+  catatan: string | null;
+  /** balasan owner/admin; null bila belum dikomentari */
+  catatan_owner: string | null;
+  catatan_owner_oleh: string | null;
+  catatan_owner_pada: string | null;
+  total_area: number;
+  area_bersih: number;
+  area_kotor: number;
+  jumlah_foto: number;
+  created_at: string;
+  updated_at: string;
+  items: LaporanKebersihanItem[];
+}
+
+/** Baris ringkas sebuah laporan pada rekap harian (tanpa detail checklist). */
+export interface LaporanKebersihanRingkas {
+  id: string;
+  user_id: string;
+  nama: string;
+  branch_id: string;
+  cabang: string | null;
+  sesi: KebersihanSesi;
+  total_area: number;
+  area_bersih: number;
+  area_kotor: number;
+  jumlah_foto: number;
+  /** foto pertama sebagai pratinjau; null bila entah bagaimana tak ada */
+  foto_utama: string | null;
+  ada_catatan_owner: boolean;
+  created_at: string;
+}
+
+/** Satu kotak = satu hari pada rekap kebersihan. */
+export interface RekapKebersihanHari {
+  /** YYYY-MM-DD */
+  tanggal: string;
+  /** jumlah laporan hari itu (semua tim, semua cabang) */
+  total: number;
+  /** jumlah baris checklist yang ditandai TIDAK bersih hari itu */
+  area_kotor: number;
+  /** berapa laporan per sesi */
+  sesi: { pagi: number; siang: number; malam: number };
+  /** sudah terurut cabang → sesi → waktu kirim */
+  laporan: LaporanKebersihanRingkas[];
+}
+
+/**
+ * Rekap kebersihan sebulan (GET /kebersihan/rekap) — khusus owner/admin.
+ * Hari tanpa laporan tetap muncul (kotak kosong) supaya bolongnya kelihatan.
+ */
+export interface RekapKebersihanDto {
+  /** YYYY-MM */
+  bulan: string;
+  dari: string;
+  sampai: string;
+  /** terbaru di depan */
+  hari: RekapKebersihanHari[];
 }
 
 /** Laporan pengeluaran pembelian bahan baku (faktur beli terkonfirmasi) per rentang tanggal. */

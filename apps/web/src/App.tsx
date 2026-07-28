@@ -24,6 +24,8 @@ import { VerifikasiEmailPage } from "./pages/VerifikasiEmailPage";
 const PrinterPage = lazy(() => import("./pages/pengaturan/PrinterPage").then((m) => ({ default: m.PrinterPage })));
 const AbsenPage = lazy(() => import("./pages/absen/AbsenPage").then((m) => ({ default: m.AbsenPage })));
 const RekapAbsenPage = lazy(() => import("./pages/absen/RekapAbsenPage").then((m) => ({ default: m.RekapAbsenPage })));
+const LaporanKebersihanPage = lazy(() => import("./pages/kebersihan/LaporanKebersihanPage").then((m) => ({ default: m.LaporanKebersihanPage })));
+const RekapKebersihanPage = lazy(() => import("./pages/kebersihan/RekapKebersihanPage").then((m) => ({ default: m.RekapKebersihanPage })));
 const ProfilPage = lazy(() => import("./pages/profil/ProfilPage").then((m) => ({ default: m.ProfilPage })));
 const BahanPage = lazy(() => import("./pages/bahan/BahanPage").then((m) => ({ default: m.BahanPage })));
 const DetailBahanPage = lazy(() => import("./pages/bahan/DetailBahanPage").then((m) => ({ default: m.DetailBahanPage })));
@@ -176,6 +178,8 @@ export default function App() {
               <Route path="/stok/kartu/:ingredientId" element={<KartuStokPage />} />
               {/* Absen: semua peran (tim absen sendiri; admin/kasir + stasiun pindai) */}
               <Route path="/absen" element={<AbsenPage />} />
+              {/* Laporan kebersihan: semua peran membuat laporannya sendiri */}
+              <Route path="/kebersihan" element={<LaporanKebersihanPage />} />
               {/* Beranda ringkas peran TIM/KITCHEN (CK: beli/produksi belum selesai; toko: barang datang) */}
               {(isTim || isKitchen || isBar) && <Route path="/beranda" element={<TimBerandaPage />} />}
               {/* Transfer stok — DILIHAT semua peran (kasir termasuk: perlu tahu
@@ -238,6 +242,7 @@ export default function App() {
                   <Route path="/stok/awal" element={<StokAwalPage />} />
                   <Route path="/permintaan-stok" element={<PermintaanStokPage />} />
                   <Route path="/rekap-absen" element={<RekapAbsenPage />} />
+                  <Route path="/rekap-kebersihan" element={<RekapKebersihanPage />} />
                   <Route path="/laporan" element={<LaporanPage />} />
                   <Route path="/laporan/pembelian" element={<LaporanPembelianPage />} />
                   <Route path="/laporan/menu-laris" element={<LaporanMenuLarisPage />} />
