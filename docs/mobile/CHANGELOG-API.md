@@ -22,6 +22,11 @@ tanpa akses repo server.
 
 ## Rilis: Tutup kasir HITUNG BUTA + kunci hitungan + ACC selisih owner
 
+> **BELUM tayang di production** per 28 Jul 2026 — masih di PR #127 (draft).
+> Selama belum tayang, `POST /shift/kunci-hitungan` memang **404**; penanganan
+> mobile (jatuh ke Tingkat 1, tetap mengirim `uang_fisik`) sudah tepat. Baris
+> ini diperbarui jadi "Sudah di-merge ke production" begitu tayang.
+>
 > Migrasi DB **0087** (`shifts.selisih_status` dkk) & **0088**
 > (`shifts.hitungan_dikunci_at`) — semuanya nullable, shift lama tetap sah.
 
@@ -101,6 +106,29 @@ null`), **bukan** dari state lokal — kalau aplikasi ditutup di antara mengunci
 dan menutup, kasir harus mendarat di langkah yang sama, bukan disuruh menghitung
 ulang.
 
+### ⚪️ `selisih_alasan` — jawabannya (a) **dan** (b)
+
+Body `POST /shift/tutup` lengkapnya:
+
+```
+{ uang_fisik?: number(≥0)|null, catatan?: string|null,
+  selisih_alasan?: string|null (max 300) }
+```
+
+- **(a) benar** — bila `selisih ≠ 0` dan `selisih_alasan` tak dikirim, server
+  menyalin `catatan` ke `selisih_alasan`. **Mobile tidak perlu berubah.**
+- **(b) juga benar** — `selisih_alasan` diterima sebagai field terpisah, dan
+  menang bila keduanya dikirim. Pakai ini kalau nanti mau memisahkan "catatan
+  penutupan" dari "alasan selisih" di UI.
+
+Urutannya: `selisih_alasan?.trim() || catatan?.trim() || null`, dan hanya
+diisi saat `selisih ≠ 0` (shift `pas` menyimpan `catatan` saja).
+
+**Soal kekhawatiran field asing:** validasinya **tidak** strict — field yang tak
+dikenal diabaikan (di-strip), bukan ditolak. Jadi mengirim field yang belum
+pasti diterima tak akan menggagalkan penutupan shift. Sudah dikunci di
+verify-api: penutupan diuji dengan satu field karangan ikut di body.
+
 ### 🟡 PERLU DICEK — `POST /shift/tutup`: `uang_fisik` jadi opsional
 
 - Sudah `kunci-hitungan` → `uang_fisik` boleh dihilangkan (diambil dari yang
@@ -130,6 +158,19 @@ mengunci; boleh tidak ditampilkan).
 
 `POST /shift/tutup` mengisi `status_selisih` otomatis. Kasir tak pernah bisa
 mengubahnya.
+
+**`selisih_disetujui_oleh` terisi saat DITOLAK juga.** Namanya memang warisan
+kolom DB dan menyesatkan — maknanya **pemutus**, bukan "yang menyetujui". Parsing
+mobile ("diputus oleh" untuk kedua kasus) sudah benar; tak ada field lain yang
+diisi saat penolakan. Namanya sengaja tidak diubah lagi karena mobile sudah
+rilis dengan nama ini — pasangannya `selisih_diputus_pada` menegaskan maknanya.
+
+**Field putusan ada di SEMUA endpoint yang mengembalikan `Shift`** — termasuk
+`GET /shift` (riwayat cabang), jadi penanda "⏳ menunggu / ✅ disetujui / ❌
+ditolak" di layar Tutup Kasir memang berfungsi: kasir bisa melihat nasib
+selisihnya sendiri tanpa akses ke layar owner. Daftarnya: `GET /shift/aktif`,
+`GET /shift`, `GET /shift/:id`, respons `POST /shift/tutup`, dan respons
+`POST /shift/:id/selisih/putuskan`. Keduanya dikunci di verify-api.
 
 ### 🟢 BARU — putusan owner & daftar yang menunggu
 
@@ -162,7 +203,9 @@ di `/pantau`.
 
 ### ⚪️ Jawaban tiga pertanyaan di dokumen mobile
 
-1. **Ambang toleransi selisih?** Tidak ada, dan sengaja belum dibuat.
+1. **Ambang toleransi selisih?** ~~Tidak ada~~ — **disepakati BELUM dipasang**
+   (balasan mobile). Catatan aslinya tetap di sini sebagai alasan:
+   tidak ada, dan sengaja belum dibuat.
    `0,005` di server murni pembulatan desimal. Toleransi bisnis (mis. "≤ Rp1.000
    dianggap pas") adalah **kebijakan perusahaan**, bukan konstanta — dan
    memasangnya sekarang berarti selisih di bawah ambang tak pernah sampai ke
@@ -176,6 +219,15 @@ di `/pantau`.
 3. **Notifikasi owner?** Ya — `GET /shift/selisih?status=menunggu` adalah sumber
    badge-nya; jumlah barisnya = angka di badge. Web memakai endpoint yang sama
    dan mem-poll tiap 60 detik saat halaman Operasional terbuka.
+
+### ⚪️ Web sudah ikut dibenahi
+
+Laporan lapangan yang memicu pekerjaan ini ("Kas seharusnya Rp 255.000"
+terpampang di atas kolom uang fisik yang masih kosong) datang dari layar **web**,
+dan halaman itu **sudah** ikut diubah di PR yang sama — bukan hanya server:
+Tutup Kasir kini dua langkah (isi nominal → **Kunci Hitungan** → angka terbuka →
+tutup), dan sebelum dikunci semua angka tunai tampil `•••`. Jadi begitu rilis ini
+tayang, web dan mobile menutup celah yang sama pada hari yang sama.
 
 ### ⚪️ Catatan operasional
 

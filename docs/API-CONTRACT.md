@@ -570,9 +570,9 @@ berubah bebas tanpa melepas kunci harga.
 - `GET /api/shift/:id` — [owner/admin/cashier; cashier terkunci cabangnya] — res: `ShiftDetail` (= `Shift` + `transaksi: ShiftTransaksiRow[]`, maks 300, urut waktu desc) — error: **403** shift bukan cabang kasir, **404**
 - `POST /api/shift/buka` — **[cashier]** — req: `{ modal_awal: number(≥0)=0 }` — res: **201** `Shift` — error: **400** shift sudah terbuka **atau kasir belum absen masuk hari ini** (pesan: "Absen masuk dulu sebelum buka kasir"), **403** luar cabang
 - `POST /api/shift/kunci-hitungan` — **[cashier]** — query: `branch_id?` — req: `{ uang_fisik: number(≥0) }` — res: `{ uang_fisik, kas_sistem, selisih }` — error: **400** tak ada shift terbuka, **409** hitungan sudah dikunci dengan nominal LAIN. **Ini "reveal"-nya**: `kas_sistem` & `selisih` dibuka di sini, setelah nominal fisik terkunci. Nominal yang **sama** dikirim ulang tetap **200** (retry jaringan bukan kecurangan). Respons 409 tetap membawa `uang_fisik`/`kas_sistem`/`selisih` milik penguncian pertama, di samping `error`.
-- `POST /api/shift/tutup` — **[cashier]** — req: `{ uang_fisik?: number(≥0)|null, catatan?|null, selisih_alasan?|null (max300) }` — res: `Shift` — error: **400** tak ada shift terbuka / tak ada nominal (belum dikunci & `uang_fisik` tak dikirim), **409** `uang_fisik` berbeda dari yang sudah dikunci. Sudah `kunci-hitungan` → `uang_fisik` boleh dihilangkan. Belum mengunci → wajib diisi (jalur satu langkah untuk klien yang membutakan di UI saja). Selisih (|selisih| > 0,005) → `status_selisih: "menunggu"`; uang PAS → `status_selisih: "pas"` (tak butuh persetujuan). `selisih_alasan` diisi dari field itu, atau dari `catatan` bila tak dikirim (klien lama hanya punya satu kolom catatan).
+- `POST /api/shift/tutup` — **[cashier]** — req: `{ uang_fisik?: number(≥0)|null, catatan?|null, selisih_alasan?|null (max300) }` — `selisih_alasan` diisi `selisih_alasan?.trim() || catatan?.trim() || null`, hanya saat `selisih ≠ 0` — res: `Shift` — error: **400** tak ada shift terbuka / tak ada nominal (belum dikunci & `uang_fisik` tak dikirim), **409** `uang_fisik` berbeda dari yang sudah dikunci. Sudah `kunci-hitungan` → `uang_fisik` boleh dihilangkan. Belum mengunci → wajib diisi (jalur satu langkah untuk klien yang membutakan di UI saja). Selisih (|selisih| > 0,005) → `status_selisih: "menunggu"`; uang PAS → `status_selisih: "pas"` (tak butuh persetujuan). `selisih_alasan` diisi dari field itu, atau dari `catatan` bila tak dikirim (klien lama hanya punya satu kolom catatan).
 - `GET /api/shift/selisih` — **[owner/admin]** — query: `status?: "pas"|"menunggu"|"disetujui"|"ditolak"` (default `menunggu`), `branch_id?` — res: `SelisihKasRow[]` (maks 50, urut tutup terbaru). Sumber badge "perlu ACC". Sengaja terpisah dari `/pantau`: selisih yang menunggu bisa berasal dari shift kemarin di cabang yang hari ini belum buka.
-- `POST /api/shift/:id/selisih/putuskan` — **[owner/admin]** — req: `{ status: "disetujui"|"ditolak", alasan_tolak?|null (max300) }` — res: `Shift` — error: **400** (shift tak punya selisih; menolak tanpa `alasan_tolak`), **404**, **409** sudah pernah diputuskan (pola sama dengan `POST /pengajuan/:id/putuskan`). Mencatat KEPUTUSAN saja — `uang_fisik` & `kas_sistem` adalah fakta yang sudah terjadi dan tak pernah diubah; **menolak tidak membuka kembali shift**, ia penanda untuk ditindaklanjuti di luar aplikasi. Kasir **tak bisa** memutuskan selisihnya sendiri (**403** dari guard peran).
+- `POST /api/shift/:id/selisih/putuskan` — **[owner/admin]** — req: `{ status: "disetujui"|"ditolak", alasan_tolak?|null (max300) }` — res: `Shift` — error: **400** (shift tak punya selisih; menolak tanpa `alasan_tolak`), **404**, **409** sudah pernah diputuskan (pola sama dengan `POST /pengajuan/:id/putuskan`). `selisih_disetujui_oleh`/`selisih_diputus_pada` terisi pada **kedua** putusan — namanya warisan kolom DB, maknanya **pemutus**, bukan "yang menyetujui". Mencatat KEPUTUSAN saja — `uang_fisik` & `kas_sistem` adalah fakta yang sudah terjadi dan tak pernah diubah; **menolak tidak membuka kembali shift**, ia penanda untuk ditindaklanjuti di luar aplikasi. Kasir **tak bisa** memutuskan selisihnya sendiri (**403** dari guard peran).
 
 > ### ⚠️ Kenapa hitung buta
 >
@@ -590,6 +590,12 @@ berubah bebas tanpa melepas kunci harga.
 >
 > **Klien tak boleh menghitung sendiri `modal_awal + penjualan_tunai` sebagai
 > pengganti** — itu membatalkan gunanya.
+
+> **Field putusan selisih** (`status_selisih`, `selisih_alasan`,
+> `selisih_disetujui_oleh`, `selisih_diputus_pada`, `alasan_tolak`,
+> `hitungan_dikunci_pada`) ikut di **setiap** endpoint yang mengembalikan
+> `Shift` — termasuk `GET /api/shift` (riwayat cabang), supaya kasir bisa
+> melihat nasib selisihnya sendiri tanpa akses layar owner.
 
 > **Tipe baru (shared):**
 > - `ShiftTransaksiRow`: `{ id, nomor, waktu (ISO), total, metode: "tunai"|"qris"|"transfer", kasir: string|null }`

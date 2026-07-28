@@ -6197,6 +6197,25 @@ cek "shift tanpa selisih → putuskan ditolak 400" "V == 400" \
 cek "shift PAS masuk daftar status=pas" "V == 1" \
   "$(api "$OWNER" GET "/shift/selisih?status=pas" | jq --arg id "$SID152C" '[.[]|select(.id==$id)]|length')"
 
+# PENOLAKAN — tiga hal yang mobile andalkan dan tak boleh diam-diam berubah:
+# nama pemutus terisi walau DITOLAK (namanya "disetujui_oleh", isinya pemutus),
+# `catatan` saja (tanpa selisih_alasan) tetap sampai ke owner, dan riwayat
+# `GET /shift` membawa putusannya supaya kasir tahu nasib selisihnya sendiri.
+api "$OWNER" POST "/absensi/masuk" "{\"branch_id\":\"$CB152\"}" > /dev/null 2>&1 || true
+BUKA152D=$(api "$REISS105" POST /shift/buka '{"modal_awal":75000}')
+SID152D=$(echo "$BUKA152D" | jq -r '.id // .shift.id')
+KAS152D=$(api "$OWNER" GET "/shift/$SID152D" | jq -r '.kas_sistem')
+# `field_ngaco` sengaja disertakan: klien yang mengirim field tak dikenal tak
+# boleh gagal menutup shift — itu terjadi tepat saat kasir mau pulang.
+TOLAK152=$(api "$REISS105" POST /shift/tutup "{\"uang_fisik\":$(python3 -c "print($KAS152D - 3000)"),\"catatan\":\"kembalian kurang jam ramai\",\"field_ngaco\":\"x\"}")
+cek "hanya \`catatan\` dikirim (+ field asing) → tersalin jadi selisih_alasan" "V == 1" \
+  "$(echo "$TOLAK152" | jq -r '(.selisih_alasan == "kembalian kurang jam ramai")|if . then 1 else 0 end')"
+PUT152=$(api "$OWNER" POST "/shift/$SID152D/selisih/putuskan" '{"status":"ditolak","alasan_tolak":"setoran belum cocok"}')
+cek "DITOLAK: selisih_disetujui_oleh tetap terisi (nama = pemutus)" "V == 1" \
+  "$(echo "$PUT152" | jq -r '((.status_selisih == "ditolak") and (.selisih_disetujui_oleh != null) and (.selisih_diputus_pada != null) and (.alasan_tolak == "setoran belum cocok"))|if . then 1 else 0 end')"
+cek "riwayat GET /shift membawa putusan lengkap (kasir tahu nasib selisihnya)" "V == 1" \
+  "$(api "$REISS105" GET /shift | jq -r --arg id "$SID152D" '[.[]|select(.id==$id)][0] | ((.status_selisih == "ditolak") and (.selisih_disetujui_oleh != null) and (.alasan_tolak != null) and (.selisih_alasan != null))|if . then 1 else 0 end')"
+
 
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]
