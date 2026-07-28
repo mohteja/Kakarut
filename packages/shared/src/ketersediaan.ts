@@ -104,11 +104,79 @@ export function jumlahFaktur(
   /** hanya berlaku untuk jalur beli; produksi selalu per batch bila isi > 1 */
   bolehEceran: boolean,
 ): { mode: "pcs" | "batch"; jumlah: number; qty: number } {
-  const perKemasan = isi > 1 && (pengadaan === "produksi" || !bolehEceran);
-  if (perKemasan) {
+  if (bergerakPerKemasan(pengadaan, isi, bolehEceran)) {
     const jumlah = Math.max(1, Math.ceil(kurang / isi));
     return { mode: "batch", jumlah, qty: jumlah * isi };
   }
   const jumlah = Math.max(1, Math.ceil(kurang));
   return { mode: "pcs", jumlah, qty: jumlah };
+}
+
+/** Toleransi pembanding kuantitas (qty numeric(…,2) → pecahan kecil wajar). */
+const EPS_QTY = 1e-6;
+
+/**
+ * Bahan ini bergerak per KEMASAN UTUH, bukan eceran?
+ *
+ * Predikat tunggal yang dipakai `jumlahFaktur` (belanja) DAN pemeriksaan
+ * kiriman antar-cabang, supaya keduanya tak pernah berbeda pendapat: barang
+ * yang hanya bisa DIBELI per kilo juga hanya bisa DIKIRIM per kilo.
+ */
+export function bergerakPerKemasan(
+  pengadaan: "produksi" | "beli",
+  isi: number,
+  bolehEceran: boolean,
+): boolean {
+  return isi > 1 && (pengadaan === "produksi" || !bolehEceran);
+}
+
+/**
+ * Kiriman bahan ini WAJIB kelipatan kemasan?
+ *
+ * SENGAJA lebih sempit daripada `bergerakPerKemasan`: hanya jalur **beli**.
+ * Alasannya, kendala kemasan itu nyata di sisi pemasok — sayur yang cuma dijual
+ * per kilo memang tak bisa dipecah jadi 900 gr. Untuk bahan **produksi** `isi`
+ * adalah UKURAN BATCH, bukan kemasan fisik: CK memproduksi 100 butir baso lalu
+ * mengirim 40 butir ke cabang adalah alur normal, dan memaksanya kelipatan 100
+ * akan mengunci operasional cabang.
+ */
+export function wajibKelipatanKirim(
+  pengadaan: "produksi" | "beli",
+  isi: number,
+  bolehEceran: boolean,
+): boolean {
+  return pengadaan === "beli" && bergerakPerKemasan(pengadaan, isi, bolehEceran);
+}
+
+/**
+ * Periksa qty kiriman terhadap aturan kemasan.
+ *
+ * Bahan yang wajib kelipatan hanya boleh dikirim dalam KELIPATAN `isi`
+ * (1 kg, 2 kg — bukan 900 gr). Satu pengecualian yang disengaja: bila qty sama
+ * dengan SELURUH sisa stok bahan itu di cabang asal, kiriman tetap boleh
+ * ("kirim habis") — tanpa itu sisa 900 gr terjebak selamanya di gudang asal
+ * karena tak akan pernah mencapai satu kemasan penuh.
+ *
+ * `sisa` = saldo tersedia di cabang asal (sudah dipotong barang di jalan);
+ * biarkan `undefined` bila tak diketahui — pengecualian kirim-habis dilewati.
+ */
+export function cekKirimKemasan(params: {
+  qty: number;
+  isi: number;
+  pengadaan: "produksi" | "beli";
+  bolehEceran: boolean;
+  sisa?: number;
+}): { ok: true } | { ok: false; kemasan: number; bawah: number; atas: number } {
+  const { qty, isi, pengadaan, bolehEceran, sisa } = params;
+  if (!wajibKelipatanKirim(pengadaan, isi, bolehEceran)) return { ok: true };
+  const kemasan = qty / isi;
+  if (Math.abs(kemasan - Math.round(kemasan)) < EPS_QTY) return { ok: true };
+  // kirim habis: sisa di bawah satu kemasan tetap boleh dipindahkan
+  if (sisa != null && Math.abs(qty - sisa) < EPS_QTY) return { ok: true };
+  return {
+    ok: false,
+    kemasan,
+    bawah: Math.floor(kemasan) * isi,
+    atas: Math.ceil(kemasan) * isi,
+  };
 }

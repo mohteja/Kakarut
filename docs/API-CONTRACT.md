@@ -374,7 +374,7 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 - `POST /api/{mod}/faktur` — req `FakturBody`: `{ branch_id?: uuid, tujuan_branch_id?: uuid|null (KHUSUS BELI, manajemen: cabang STORE tujuan kirim — barang tiba di cabang faktur lalu dikirim & diterima di Penerimaan cabang; baris bertujuan TIDAK auto-confirm), supplier_id?: uuid|null, no_faktur?|null (max60), catatan?|null, worker_id?: uuid|null (produksi: OPSIONAL — bila kosong pelaksana terisi otomatis dari aktor yang memajukan tahap ke "dikerjakan"), items: [{ingredient_id:uuid, mode:"pcs"|"batch", jumlah:number(>0), storage_location_id?:uuid|null, total_harga?:number(≥0)|null}] (min 1) }`. `branch_id` boleh cabang STORE (beli langsung di cabang — barang Tiba langsung masuk stok cabang itu; produksi di cabang store = produksi lokal, hasil masuk stok cabang itu). — res: **201** `{ faktur_id, nomor, status:"rencana", jumlah_baris, beli_otomatis: { faktur_id, nomor, jumlah_baris } | null }` — `beli_otomatis` (jalur PRODUKSI): faktur BELI yang lahir otomatis di cabang sama untuk bahan mentah resep yang KURANG atau yang sisa stoknya bakal jatuh **di bawah stok minimum** setelah produksi (`kurang = kebutuhan resep + stok_minimum − saldo`, dibulatkan per kemasan + MOQ `min_beli`; hanya bahan jalur beli ber-lacak-stok; null bila tak ada). — error: **400** (supplier/ingredient/storage/tujuan invalid, jalur pengadaan salah, tujuan pada produksi), **403** kasir luar cabang / non-manajemen pakai tujuan, **404** ingredient tak ada
 - `POST /api/{mod}/tahap/:fakturId` — req `TahapBody`: `{ ke: "dikerjakan"|"menunggu"|"dikonfirmasi", items?: [{id:uuid, qty:number(>0), harga?:number(≥0)|null, exp?: "YYYY-MM-DD"|null (override tanggal kedaluwarsa lot saat baris MASUK STOK, target ≥ "menunggu"; kosong = otomatis `tanggal masuk + masa_simpan_hari` bahan; diabaikan utk target lain)}], dana_cair?:number|null, realisasi?:number|null, selisih_catatan?|null (max300), tujuan_branch_id?:uuid|null, tujuan_storage_id?:uuid|null, paksa?:bool }` — res: `{ ok, status, jumlah_baris }` — error: **400** (tahap tak urut, tujuan lintas cabang, qty>baris, dll), **403**, **404**, **409** (bahan mentah kurang → pesan kekurangan kecuali `paksa`; atau status berubah konkuren). Saat baris MASUK STOK (`menunggu`), rak simpan yang kosong otomatis diisi **rak default bahan** di cabang baris (Tempat Penyimpanan) — berlaku jalur items maupun non-items; baris bertujuan cabang lain tetap tanpa rak (transit) sampai diterima di cabang.
 - `POST /api/{mod}/kirim/:fakturId` — req: `{ tujuan_storage_id?: uuid|null }` — res: `{ ok, tujuan, jumlah_baris }` — error: **400** (belum ada yang siap / cabang/storage tujuan invalid), **403** bukan staf CK
-- `POST /api/produksi/kirim-hasil/:fakturId` — **produksi saja** (pembelian → **404**) — req: `{ tujuan_storage_id?: uuid|null, items?: [{ingredient_id:uuid, qty:number(>0)}] }` — res: `{ ok, faktur_id, nomor, tujuan, jumlah_baris }` — error: **400** (tak ada yang dikirim / stok CK kurang / tujuan invalid), **403**
+- `POST /api/produksi/kirim-hasil/:fakturId` — **produksi saja** (pembelian → **404**) — req: `{ tujuan_storage_id?: uuid|null, items?: [{ingredient_id:uuid, qty:number(>0)}] }` — res: `{ ok, faktur_id, nomor, tujuan, jumlah_baris }` — error: **400** (tak ada yang dikirim / stok CK kurang / tujuan invalid / **qty bukan kelipatan kemasan** untuk bahan `pengadaan:"beli"` yang tak boleh eceran — lihat "Kelipatan kemasan pada kiriman" di `/api/transfer-stok`), **403**
 - `GET /api/{mod}/dana/:fakturId` — res: `{ rows: [{id,tipe,nominal,catatan,oleh,waktu}], total }` — error: **404**
 - `POST /api/{mod}/konfirmasi/:fakturId` — res: `{ ok, jumlah_baris }` — error: **404** tak ada / sudah dikonfirmasi
 - `GET /api/{mod}/log/:fakturId` — res: `{ rows: [{id,aksi,detail,oleh,waktu}] }` — error: **404**
@@ -445,10 +445,37 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 > lahir dari rencana menu (`rencana_id` terisi, nomor PR-), yang ini manual/
 > ad-hoc (`rencana_id` null, nomor TF-). Pembeda tegas di API: faktur transfer
 > adalah faktur yang punya nomor dokumen berjenis `transfer`.
+>
+> ### ⚠️ Kelipatan kemasan pada kiriman
+>
+> Barang yang hanya bisa **DIBELI** per kemasan utuh juga hanya boleh **DIKIRIM**
+> per kemasan utuh: sayur yang dibeli per kg tak bisa dikirim 900 gr. Aturannya
+> memakai predikat yang sama dengan mode belanja (`jumlahFaktur`) supaya keduanya
+> tak pernah berbeda pendapat.
+>
+> **Wajib kelipatan bila SEMUA benar:**
+> `pengadaan === "beli"` **dan** `isi > 1` **dan** `boleh_eceran === false`.
+> `qty` (selalu dalam `satuan` kerja) harus kelipatan `isi`.
+>
+> **Bahan `pengadaan: "produksi"` SENGAJA dikecualikan** — di situ `isi` adalah
+> UKURAN BATCH, bukan kemasan fisik. CK memproduksi 100 butir baso lalu mengirim
+> 40 butir ke cabang adalah alur normal; memaksanya kelipatan 100 akan mengunci
+> operasional cabang.
+>
+> **Pengecualian "kirim habis":** bila `qty` sama persis dengan seluruh sisa yang
+> boleh dikirim (`saldo − dalam_jalan`), kiriman tetap diterima walau bukan
+> kelipatan. Tanpa ini sisa 900 gr terjebak selamanya di gudang asal karena tak
+> akan pernah mencapai satu kemasan penuh.
+>
+> **Urutan pemeriksaan:** kecukupan stok dinilai LEBIH DULU, kelipatan kemasan
+> belakangan — jadi qty melebihi stok tetap memberi pesan "stok kurang", bukan
+> pesan kemasan yang menyesatkan.
+>
+> Berlaku sama untuk `POST /api/produksi/kirim-hasil/:fakturId`.
 
-- `GET /api/transfer-stok/saldo` — query: `branch_id?` (peran terkunci cabang selalu dipaksa ke cabangnya) — res: `{ branch_id, rows: TransferStokSaldoRow[] }` — stok READY di cabang itu: hanya bahan **aktif + berlacak-stok + masih tersisa (`saldo − dalam_jalan > 0`)**. Tiap baris membawa `pengadaan` ("beli"/"produksi") agar UI bisa menandai jenis bahan, `saldo` (fisik) dan `dalam_jalan` (sudah dikirim, belum diterima tujuan) — **yang boleh ditransfer adalah `saldo − dalam_jalan`**
+- `GET /api/transfer-stok/saldo` — query: `branch_id?` (peran terkunci cabang selalu dipaksa ke cabangnya) — res: `{ branch_id, rows: TransferStokSaldoRow[] }` — stok READY di cabang itu: hanya bahan **aktif + berlacak-stok + masih tersisa (`saldo − dalam_jalan > 0`)**. Tiap baris membawa `pengadaan` ("beli"/"produksi") agar UI bisa menandai jenis bahan, `saldo` (fisik) dan `dalam_jalan` (sudah dikirim, belum diterima tujuan) — **yang boleh ditransfer adalah `saldo − dalam_jalan`**. Untuk aturan kemasan tiap baris juga membawa `isi` (isi per kemasan, dalam `satuan` kerja), `satuan_beli` (label kemasan, mis. "kg"; `null` bila tak diisi) dan `wajib_kelipatan` (boolean) — **klien wajib memvalidasi qty di sisi UI memakai `wajib_kelipatan` + `isi`** supaya user tak menunggu 400 dari server
 - `GET /api/transfer-stok` — query: `per_page?` (default 50, maks 200) — res: `{ rows: TransferStokFaktur[] }` (terbaru dulu; tiap faktur memuat `items[]` dengan `pengadaan` & `status` per bahan, plus `status` agregat: `menunggu`/`dikonfirmasi`/`ditolak`/`sebagian`). Peran terkunci cabang — **kasir, `tim`, `kitchen`, `bar`** — hanya melihat transfer yang menyangkut cabangnya (pengirim atau penerima); owner/admin melihat semua
-- `POST /api/transfer-stok` — req: `{ asal_branch_id: uuid, tujuan_branch_id: uuid, catatan?|null (max300), items: [{ingredient_id: uuid, qty: number(>0)}] (1..100; bahan sama digabung qty-nya) }` — res: **201** `{ ok, faktur_id, nomor (TF-xxxx), asal, tujuan, jumlah_baris }` — error: **400** (asal = tujuan; asal/tujuan Kantor; bahan invalid/nonaktif/tak lacak stok; **qty melebihi `saldo − dalam_jalan` di asal** — dicek di dalam transaksi setelah advisory lock per cabang asal, pesannya menyebut berapa yang masih dalam perjalanan), **403** `asal_branch_id` BUKAN Central Kitchen (berlaku untuk semua peran, owner sekalipun — pesan: `Transfer stok hanya bisa dikirim DARI Central Kitchen — "<nama>" bukan Central Kitchen`) **atau** peran terkunci mengirim dari cabang lain, **404** cabang tidak ditemukan
+- `POST /api/transfer-stok` — req: `{ asal_branch_id: uuid, tujuan_branch_id: uuid, catatan?|null (max300), items: [{ingredient_id: uuid, qty: number(>0)}] (1..100; bahan sama digabung qty-nya) }` — res: **201** `{ ok, faktur_id, nomor (TF-xxxx), asal, tujuan, jumlah_baris }` — error: **400** (asal = tujuan; asal/tujuan Kantor; bahan invalid/nonaktif/tak lacak stok; **qty melebihi `saldo − dalam_jalan` di asal** — dicek di dalam transaksi setelah advisory lock per cabang asal, pesannya menyebut berapa yang masih dalam perjalanan; **qty bukan kelipatan `isi`** untuk bahan `wajib_kelipatan` — pesannya menyebut dua qty terdekat yang sah, mis. `Kirim 1000 atau 2000 gr, bukan 1500 gr`), **403** `asal_branch_id` BUKAN Central Kitchen (berlaku untuk semua peran, owner sekalipun — pesan: `Transfer stok hanya bisa dikirim DARI Central Kitchen — "<nama>" bukan Central Kitchen`) **atau** peran terkunci mengirim dari cabang lain, **404** cabang tidak ditemukan
 - `POST /api/transfer-stok/:fakturId/batal` — batalkan transfer yang belum diproses tujuan (baris masuk Tempat Sampah) — res: `{ ok, jumlah_baris }` — error: **403** bukan pengirim, **404** bukan faktur transfer, **409** sudah diterima/ditolak di tujuan
 
 ## `/api/supplier` — Supplier (`modules/supplier/routes.ts`)
@@ -1633,6 +1660,17 @@ export interface TransferStokSaldoRow {
    * `tersedia untuk transfer baru` = `saldo − dalam_jalan`.
    */
   dalam_jalan: number;
+  /** isi per kemasan dalam `satuan` (1 = tanpa kemasan) */
+  isi: number;
+  /** satuan kemasan (mis. "kg"); null = tak diatur */
+  satuan_beli: string | null;
+  /**
+   * true = qty kiriman WAJIB kelipatan `isi` — barang yang hanya bisa dibeli
+   * per kemasan juga hanya boleh dikirim per kemasan. Pengecualiannya satu:
+   * qty = seluruh sisa (`saldo − dalam_jalan`) tetap boleh ("kirim habis"),
+   * kalau tidak sisa di bawah satu kemasan terjebak selamanya di cabang asal.
+   */
+  wajib_kelipatan: boolean;
 }
 
 /**

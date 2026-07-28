@@ -5,11 +5,12 @@ import { alias } from "drizzle-orm/pg-core";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import type {
-  KonfirmasiStatus,
-  TransferStokFaktur,
-  TransferStokItemRow,
-  TransferStokSaldoRow,
+import {
+  wajibKelipatanKirim,
+  type KonfirmasiStatus,
+  type TransferStokFaktur,
+  type TransferStokItemRow,
+  type TransferStokSaldoRow,
 } from "@kakarut/shared";
 import { db } from "../../db/client";
 import {
@@ -27,6 +28,7 @@ import {
   terikatCabang,
   type AppEnv,
 } from "../../middleware/auth";
+import { wajibKelipatanKemasan } from "../../lib/kemasan";
 import { terbitkanNomor } from "../dokumen/nomor";
 import { catatLogFaktur } from "../produksi/log";
 import { hitungSaldoCabang, kunciKirimCabang, qtyDalamJalan } from "../stok/service";
@@ -111,6 +113,10 @@ export const transferRoutes = new Hono<AppEnv>()
         pengadaan: ingredients.pengadaan,
         trackStok: ingredients.trackStok,
         isActive: ingredients.isActive,
+        // dasar aturan kemasan di form kirim (lihat wajib_kelipatan)
+        isi: ingredients.isi,
+        satuanBeli: ingredients.satuanBeli,
+        bolehEceran: ingredients.bolehEceran,
       })
       .from(ingredients)
       .where(and(eq(ingredients.companyId, auth.company_id!), inArray(ingredients.id, ids)));
@@ -124,14 +130,22 @@ export const transferRoutes = new Hono<AppEnv>()
         if (!m?.trackStok || !m?.isActive) return false;
         return r.saldo - (jalan.get(r.ingredient_id) ?? 0) > 0;
       })
-      .map((r) => ({
-        ingredient_id: r.ingredient_id,
-        nama: r.nama,
-        satuan: r.satuan,
-        pengadaan: infoById.get(r.ingredient_id)!.pengadaan,
-        saldo: r.saldo,
-        dalam_jalan: jalan.get(r.ingredient_id) ?? 0,
-      }));
+      .map((r) => {
+        const m = infoById.get(r.ingredient_id)!;
+        return {
+          ingredient_id: r.ingredient_id,
+          nama: r.nama,
+          satuan: r.satuan,
+          pengadaan: m.pengadaan,
+          saldo: r.saldo,
+          dalam_jalan: jalan.get(r.ingredient_id) ?? 0,
+          isi: m.isi,
+          satuan_beli: m.satuanBeli,
+          // predikat yang sama dengan yang ditegakkan POST /transfer-stok,
+          // supaya form tak pernah menjanjikan sesuatu yang server tolak
+          wajib_kelipatan: wajibKelipatanKirim(m.pengadaan, m.isi, m.bolehEceran),
+        };
+      });
     return c.json({ branch_id: branchId, rows });
   })
   /** Daftar faktur transfer (terbaru dulu) — dikelompokkan per faktur. */
@@ -282,6 +296,12 @@ export const transferRoutes = new Hono<AppEnv>()
         nama: ingredients.nama,
         satuan: ingredients.satuan,
         trackStok: ingredients.trackStok,
+        // aturan kemasan: barang yang hanya bisa DIBELI per kemasan juga
+        // hanya boleh DIKIRIM per kemasan (lihat cekKirimKemasan di bawah)
+        isi: ingredients.isi,
+        satuanBeli: ingredients.satuanBeli,
+        pengadaan: ingredients.pengadaan,
+        bolehEceran: ingredients.bolehEceran,
       })
       .from(ingredients)
       .where(
@@ -321,7 +341,8 @@ export const transferRoutes = new Hono<AppEnv>()
       const jalan = await qtyDalamJalan(tx, auth.company_id!, asal.id, ingIds);
       for (const [ingId, qty] of qtyByIng) {
         const s = saldoAsal.get(ingId);
-        const nama = bahan.find((b) => b.id === ingId)?.nama ?? "bahan";
+        const b = bahan.find((x) => x.id === ingId);
+        const nama = b?.nama ?? "bahan";
         const diJalan = jalan.get(ingId) ?? 0;
         const tersedia = (s?.saldo ?? 0) - diJalan;
         if (!s || qty > tersedia + 1e-9) {
@@ -331,6 +352,9 @@ export const transferRoutes = new Hono<AppEnv>()
             message: `Stok ${asal.nama} tidak cukup untuk ${nama} (tersedia ${Math.max(0, tersedia)} ${s?.satuan ?? ""}${catatanJalan}) — kurangi jumlah transfer`,
           });
         }
+        // Kelipatan kemasan diperiksa SETELAH kecukupan stok: "stok kurang"
+        // masalah yang lebih mendasar dan pesannya lebih berguna duluan.
+        if (b) wajibKelipatanKemasan(b, qty, Math.max(0, tersedia));
       }
       await tx.insert(productions).values(
         [...qtyByIng.entries()].map(([ingredientId, qty]) => ({

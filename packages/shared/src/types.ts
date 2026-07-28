@@ -808,6 +808,17 @@ export interface TransferStokSaldoRow {
    * `tersedia untuk transfer baru` = `saldo − dalam_jalan`.
    */
   dalam_jalan: number;
+  /** isi per kemasan dalam `satuan` (1 = tanpa kemasan) */
+  isi: number;
+  /** satuan kemasan (mis. "kg"); null = tak diatur */
+  satuan_beli: string | null;
+  /**
+   * true = qty kiriman WAJIB kelipatan `isi` — barang yang hanya bisa dibeli
+   * per kemasan juga hanya boleh dikirim per kemasan. Pengecualiannya satu:
+   * qty = seluruh sisa (`saldo − dalam_jalan`) tetap boleh ("kirim habis"),
+   * kalau tidak sisa di bawah satu kemasan terjebak selamanya di cabang asal.
+   */
+  wajib_kelipatan: boolean;
 }
 
 /**

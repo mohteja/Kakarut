@@ -138,13 +138,35 @@ export function TransferStokPage() {
     },
   });
 
+  /**
+   * Aturan KEMASAN: barang yang hanya bisa dibeli per kemasan juga hanya boleh
+   * dikirim per kemasan. Dicermin dari server (`wajib_kelipatan`) supaya form
+   * tak pernah menjanjikan sesuatu yang nanti ditolak POST /transfer-stok —
+   * termasuk pengecualian "kirim habis" (qty = seluruh sisa).
+   */
+  const salahKemasan = (s: TransferStokSaldoRow | undefined, qtyTeks: string) => {
+    const qty = Number(qtyTeks);
+    if (!s || !s.wajib_kelipatan || !(qty > 0)) return null;
+    const sisa = tersediaDari(s);
+    if (Math.abs(qty - sisa) < 1e-6) return null; // kirim habis
+    const kemasan = qty / s.isi;
+    if (Math.abs(kemasan - Math.round(kemasan)) < 1e-6) return null;
+    return { bawah: Math.floor(kemasan) * s.isi, atas: Math.ceil(kemasan) * s.isi, sisa };
+  };
+
   const barisTerisi = baris.filter((b) => b.ingredient_id && Number(b.qty) > 0);
   const adaQtyLebih = baris.some((b) => {
     const s = saldoById.get(b.ingredient_id);
     return s != null && Number(b.qty) > tersediaDari(s) + 1e-9;
   });
+  const adaSalahKemasan = baris.some((b) => salahKemasan(saldoById.get(b.ingredient_id), b.qty));
   const bisaKirim =
-    !!asalId && !!tujuanId && asalId !== tujuanId && barisTerisi.length > 0 && !adaQtyLebih;
+    !!asalId &&
+    !!tujuanId &&
+    asalId !== tujuanId &&
+    barisTerisi.length > 0 &&
+    !adaQtyLebih &&
+    !adaSalahKemasan;
 
   const namaCabang = (id: string) => cabang.find((b) => b.id === id)?.nama ?? "—";
 
@@ -313,6 +335,35 @@ export function TransferStokPage() {
                 </button>
               );
 
+            /**
+             * Petunjuk kemasan di bawah input: menyebut kelipatannya SEBELUM
+             * ditekan Kirim, dan saat salah menyebut angka terdekat yang sah —
+             * lebih berguna daripada sekadar "tidak boleh".
+             */
+            const hintKemasan = (s: TransferStokSaldoRow | undefined, qtyTeks: string) => {
+              if (!s?.wajib_kelipatan) return null;
+              const kemasan = s.satuan_beli ?? "kemasan";
+              const salah = salahKemasan(s, qtyTeks);
+              if (!salah) {
+                return (
+                  <div className="mt-1 text-[11px] text-stone-400">
+                    Per {kemasan} — kelipatan {formatAngka(s.isi)} {s.satuan}
+                  </div>
+                );
+              }
+              return (
+                <div className="mt-1 text-[11px] font-medium text-red-600">
+                  Harus kelipatan {formatAngka(s.isi)} {s.satuan} (1 {kemasan}) — isi{" "}
+                  {salah.bawah > 0 ? `${formatAngka(salah.bawah)} atau ` : ""}
+                  {formatAngka(salah.atas)}
+                  {salah.sisa < s.isi
+                    ? `, atau ${formatAngka(salah.sisa)} untuk kirim habis`
+                    : ""}
+                  .
+                </div>
+              );
+            };
+
             const stokTersedia = (s: TransferStokSaldoRow | undefined) => (
               <>
                 {s ? formatAngka(tersediaDari(s)) : "—"}
@@ -354,6 +405,7 @@ export function TransferStokPage() {
                               Jumlah kirim{s?.satuan ? ` (${s.satuan})` : ""}
                             </div>
                             {inputQty(i, b, lebih, "w-full")}
+                            {hintKemasan(s, b.qty)}
                           </div>
                         </div>
                       </div>
@@ -389,6 +441,7 @@ export function TransferStokPage() {
                             </td>
                             <td className="py-2 pr-2 text-right">
                               {inputQty(i, b, lebih, "w-28")}
+                              {hintKemasan(s, b.qty)}
                             </td>
                             <td className="py-2 pr-2 text-xs text-stone-500">{s?.satuan ?? ""}</td>
                             <td className="py-2 text-right">{tombolHapus(i, "✕")}</td>

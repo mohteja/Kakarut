@@ -27,6 +27,7 @@ import {
   type JenisPengadaan,
 } from "@kakarut/shared";
 import { acuanDariLot } from "../../lib/harga-stats";
+import { wajibKelipatanKemasan } from "../../lib/kemasan";
 import { db, type Db, type Tx } from "../../db/client";
 import {
   branches,
@@ -1662,6 +1663,24 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         // dijanjikan ke beberapa permintaan dan saldo CK jadi minus saat semua
         // kiriman diterima.
         const jalanCk = await qtyDalamJalan(tx, auth.company_id!, ckId, [...kirimMap.keys()]);
+        // Aturan kemasan kiriman: sama dengan belanja — barang yang hanya bisa
+        // dibeli per kemasan juga hanya boleh dikirim per kemasan.
+        const bahanKirim = new Map(
+          (
+            await tx
+              .select({
+                id: ingredients.id,
+                nama: ingredients.nama,
+                satuan: ingredients.satuan,
+                satuanBeli: ingredients.satuanBeli,
+                isi: ingredients.isi,
+                pengadaan: ingredients.pengadaan,
+                bolehEceran: ingredients.bolehEceran,
+              })
+              .from(ingredients)
+              .where(inArray(ingredients.id, [...kirimMap.keys()]))
+          ).map((b) => [b.id, b]),
+        );
         for (const [ingId, v] of kirimMap) {
           const s = saldoCk.get(ingId);
           const diJalan = jalanCk.get(ingId) ?? 0;
@@ -1673,6 +1692,8 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
               message: `Stok CK tidak cukup untuk ${s?.nama ?? "bahan"} (tersedia ${Math.max(0, tersedia)} ${s?.satuan ?? ""}${catatanJalan}) — kurangi jumlah kiriman`,
             });
           }
+          const b = bahanKirim.get(ingId);
+          if (b) wajibKelipatanKemasan(b, v.qty, Math.max(0, tersedia));
         }
         const asalNomor = (await nomorUntukRefs(tx, auth.company_id!, [fakturId])).get(fakturId);
         // Faktur KIRIMAN (transfer stok CK): lahir langsung 'menunggu' di cabang

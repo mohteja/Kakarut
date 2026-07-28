@@ -20,6 +20,74 @@ tanpa akses repo server.
 
 ---
 
+## Rilis: Kiriman ikut aturan kemasan belanja
+
+> **Tidak ada migrasi DB.** Satu aturan validasi baru pada dua endpoint kiriman,
+> plus tiga field baru di `TransferStokSaldoRow`.
+
+### 🔴 WAJIB — qty kiriman ditolak bila bukan kelipatan kemasan
+
+Barang yang hanya bisa **DIBELI** per kemasan utuh sekarang juga hanya boleh
+**DIKIRIM** per kemasan utuh. Sayur yang dibeli per kg tak bisa dikirim 900 gr.
+
+Berlaku di:
+
+- `POST /api/transfer-stok`
+- `POST /api/produksi/kirim-hasil/:fakturId`
+
+**Kapan aturannya menyala** — ketiganya harus benar:
+
+| Syarat | Nilai |
+| --- | --- |
+| `pengadaan` | `"beli"` |
+| `isi` | `> 1` |
+| `boleh_eceran` | `false` |
+
+Lalu `qty` (selalu dalam `satuan` kerja — lihat koreksi satuan di bawah) wajib
+kelipatan `isi`.
+
+**Bahan `pengadaan: "produksi"` SENGAJA tidak ikut aturan ini.** Di sana `isi`
+adalah **ukuran batch**, bukan kemasan fisik: CK memproduksi 100 butir baso lalu
+mengirim 40 butir ke cabang adalah alur normal, dan mengunci kelipatan 100 akan
+membuat cabang tak bisa dilayani.
+
+**Pengecualian "kirim habis":** bila `qty` sama persis dengan seluruh sisa yang
+boleh dikirim (`saldo − dalam_jalan`), kiriman tetap diterima walau bukan
+kelipatan. Tanpa ini sisa 900 gr terjebak selamanya di gudang asal.
+
+Pesan 400-nya sudah bisa langsung ditampilkan apa adanya:
+
+```
+"Sayur" hanya bisa dikirim per kemasan penuh — 1 kg = 1000 gr.
+Kirim 1000 atau 2000 gr, bukan 1500 gr.
+```
+
+### 🟢 BARU — `TransferStokSaldoRow` += `isi`, `satuan_beli`, `wajib_kelipatan`
+
+`GET /api/transfer-stok/saldo` kini mengirim bahan yang dibutuhkan untuk
+memvalidasi di sisi UI, **sebelum** user menunggu 400 dari server:
+
+```dart
+bool qtySalah(SaldoRow r, double qty) {
+  if (!r.wajibKelipatan || r.isi <= 1) return false;
+  final sisa = r.saldo - r.dalamJalan;
+  if ((qty - sisa).abs() < 1e-6) return false;      // kirim habis
+  final k = qty / r.isi;
+  return (k - k.roundToDouble()).abs() >= 1e-6;
+}
+```
+
+Tampilkan petunjuknya di bawah input qty, mis.
+*"Kelipatan 1000 gr (1 kg) — kirim 1000 atau 2000 gr"*. Web sudah melakukan ini
+di halaman Transfer Stok; mobile sebaiknya sama supaya user tak kena tolak
+mendadak.
+
+⚪️ Urutan pemeriksaan di server: **kecukupan stok dulu**, kelipatan kemasan
+belakangan. Jadi qty melebihi stok tetap memberi pesan "stok kurang", bukan
+pesan kemasan yang menyesatkan.
+
+---
+
 ## Koreksi kontrak: satuan baris faktur (`qty` vs `satuan_beli` vs `is_batch`)
 
 > **Tidak ada perubahan API.** Ini klarifikasi kontrak yang selama ini kurang

@@ -4793,10 +4793,12 @@ echo "== 132. Transfer Stok antar lokasi (faktur TF- multi bahan) =="
 # "Kirim dari stok CK" (jalur Permintaan, nomor PR-).
 # Pilih cabang ASAL yang benar-benar punya stok siap kirim.
 # ASAL wajib Central Kitchen: sejak §140 hanya CK yang boleh MENGIRIM transfer.
+# Bahan yang wajib kelipatan kemasan (§148) sengaja DIHINDARI di sini: seksi ini
+# menguji mekanika transfer dengan qty 1, bukan aturan kemasan.
 ASAL132=""; SALDO132=""
 for B132 in $(api "$OWNER" GET /cabang | jq -r '[.[]|select(.is_active and .tipe=="central_kitchen")][].id'); do
   R132=$(api "$OWNER" GET "/transfer-stok/saldo?branch_id=$B132")
-  if [ "$(echo "$R132" | jq '.rows|length')" -gt 0 ]; then
+  if [ "$(echo "$R132" | jq '[.rows[]|select(.wajib_kelipatan|not)]|length')" -gt 0 ]; then
     ASAL132="$B132"; SALDO132="$R132"; break
   fi
 done
@@ -4804,7 +4806,11 @@ cek "dasar uji: ada lokasi dengan stok siap kirim" "V == 1" \
   "$([ -n "$ASAL132" ] && echo 1 || echo 0)"
 TUJUAN132=$(api "$OWNER" GET /cabang | jq -r --arg a "$ASAL132" '[.[]|select(.is_active and .tipe!="kantor" and .id!=$a)][0].id')
 KANTOR132=$(api "$OWNER" GET /cabang | jq -r '[.[]|select(.tipe=="kantor")][0].id')
-ING132=$(echo "$SALDO132" | jq -r '([.rows[]|select(.saldo>=2)][0].ingredient_id) // .rows[0].ingredient_id')
+ING132=$(echo "$SALDO132" | jq -r '
+  ([.rows[]|select((.wajib_kelipatan|not) and .saldo>=2)][0].ingredient_id)
+  // ([.rows[]|select(.wajib_kelipatan|not)][0].ingredient_id)')
+cek "dasar uji: bahan §132 bebas aturan kemasan" "V == 1" \
+  "$(echo "$SALDO132" | jq -r --arg i "$ING132" '[.rows[]|select(.ingredient_id==$i)][0].wajib_kelipatan|not|if . then 1 else 0 end')"
 SAL132=$(echo "$SALDO132" | jq -r --arg i "$ING132" '[.rows[]|select(.ingredient_id==$i)][0].saldo')
 cek "GET /transfer-stok/saldo: tiap baris punya pengadaan (beli/produksi) & saldo > 0" "V == 1" \
   "$(echo "$SALDO132" | jq '(([.rows[]|select((.pengadaan=="beli" or .pengadaan=="produksi") and .saldo>0)]|length) == (.rows|length))|if . then 1 else 0 end')"
@@ -4866,8 +4872,8 @@ cek "GET /transfer-stok/saldo: tiap baris membawa dalam_jalan (angka)" "V == 1" 
   "$(echo "$SALDO132B" | jq '(([.rows[]|select((.dalam_jalan|type)=="number")]|length) == (.rows|length))|if . then 1 else 0 end')"
 cek "GET /transfer-stok/saldo: hanya bahan yang masih tersisa (saldo > dalam_jalan)" "V == 1" \
   "$(echo "$SALDO132B" | jq '(([.rows[]|select(.saldo - .dalam_jalan > 0)]|length) == (.rows|length))|if . then 1 else 0 end')"
-ING132C=$(echo "$SALDO132B" | jq -r '.rows[0].ingredient_id')
-TSD132=$(echo "$SALDO132B" | jq -r '.rows[0] | (.saldo - .dalam_jalan)')
+ING132C=$(echo "$SALDO132B" | jq -r '([.rows[]|select(.wajib_kelipatan|not)][0] // .rows[0]).ingredient_id')
+TSD132=$(echo "$SALDO132B" | jq -r --arg i "$ING132C" '[.rows[]|select(.ingredient_id==$i)][0] | (.saldo - .dalam_jalan)')
 cek "transfer sebesar SELURUH stok tersedia → 201" "V == 1" \
   "$(api "$OWNER" POST /transfer-stok "{\"asal_branch_id\":\"$ASAL132\",\"tujuan_branch_id\":\"$TUJUAN132\",\"items\":[{\"ingredient_id\":\"$ING132C\",\"qty\":$TSD132}]}" | jq '(.ok==true)|if . then 1 else 0 end')"
 cek "transfer ulang stok yang masih di jalan → 400 (tak bisa dijanjikan dua kali)" "V == 400" \
@@ -5332,7 +5338,9 @@ cek "daftar transfer utk bar hanya yang menyangkut cabangnya" "V == 1" \
 # memakai sebagian stok CK, jadi memakai ING132 apa adanya bisa gagal 400 karena
 # stok kurang dan menyamar seolah aturan barunya yang menolak.
 SLD140=$(api "$OWNER" GET "/transfer-stok/saldo?branch_id=$CK140")
-ING140C=$(echo "$SLD140" | jq -r '[.rows[]|select((.saldo - .dalam_jalan) >= 1)][0].ingredient_id // ""')
+# Bahan wajib-kelipatan (§148) dilewati: qty 1 akan ditolak aturan kemasan, dan
+# yang diuji di sini adalah izin ASAL, bukan kemasan.
+ING140C=$(echo "$SLD140" | jq -r '[.rows[]|select((.saldo - .dalam_jalan) >= 1 and (.wajib_kelipatan|not))][0].ingredient_id // ""')
 cek "dasar uji: CK masih punya bahan siap kirim" "V == 1" \
   "$([ -n "$ING140C" ] && echo 1 || echo 0)"
 cek "regresi nol: CK → cabang tetap 201" "V == 201" \
@@ -5903,6 +5911,55 @@ cek "open_bill_id ngawur → 404" "V == 404" \
 cek "open_bill_item_id vs menu_id tak cocok → 400" "V == 400" \
   "$(status_code_body "$REISS105" POST /penjualan "{\"meja_id\":\"$MEJA147\",\"metode_bayar\":\"tunai\",\"open_bill_id\":\"$OBID147B\",\"items\":[{\"menu_id\":\"$MID146\",\"qty\":1,\"open_bill_item_id\":\"$ITEM147C\"}]}")"
 api "$REISS105" DELETE "/open-bill/$OBID147B" > /dev/null
+
+
+echo
+echo "── §148 Kiriman WAJIB kelipatan kemasan (sama seperti aturan belanja) ──"
+# Barang yang hanya bisa DIBELI per kilo juga hanya boleh DIKIRIM per kilo —
+# tanpa ini gudang mengirim 900 gr dari kemasan 1 kg dan sisa 100 gr menggantung.
+CK148=$(api "$OWNER" GET /cabang | jq -r '[.[]|select(.tipe=="central_kitchen" and .is_active)][0].id')
+ST148=$(api "$OWNER" GET /cabang | jq -r '[.[]|select(.tipe=="store" and .is_active)][0].id')
+masuk148() { # <ingredient_id> <mode> <jumlah> <total>
+  local f
+  f=$(api "$OWNER" POST /pembelian/faktur "{\"branch_id\":\"$CK148\",\"items\":[{\"ingredient_id\":\"$1\",\"mode\":\"$2\",\"jumlah\":$3,\"total_harga\":$4}]}" | jq -r .faktur_id)
+  api "$OWNER" POST "/pembelian/tahap/$f" '{"ke":"dikerjakan"}' > /dev/null
+  api "$OWNER" POST "/pembelian/tahap/$f" '{"ke":"menunggu"}' > /dev/null
+}
+kirim148() { # <ingredient_id> <qty> → kode HTTP
+  status_code_body "$OWNER" POST /transfer-stok \
+    "{\"asal_branch_id\":\"$CK148\",\"tujuan_branch_id\":\"$ST148\",\"items\":[{\"ingredient_id\":\"$1\",\"qty\":$2}]}"
+}
+
+# (a) bahan per kemasan: 1 kg = 1000 gr, TIDAK boleh eceran; stok CK 3 kg
+BK148=$(api "$OWNER" POST /bahan '{"nama":"Sayur kemasan 148","harga_beli":12000,"isi":1000,"satuan":"gr","satuan_beli":"kg","pengadaan":"beli","kategori":"lain","boleh_eceran":false}' | jq -r .id)
+masuk148 "$BK148" batch 3 36000
+cek "saldo CK 3.000 gr + DTO menandai wajib_kelipatan" "V == 1" \
+  "$(api "$OWNER" GET "/transfer-stok/saldo?branch_id=$CK148" | jq --arg i "$BK148" '[.rows[]|select(.ingredient_id==$i)][0] | ((.saldo==3000) and (.isi==1000) and (.satuan_beli=="kg") and (.wajib_kelipatan==true))|if . then 1 else 0 end')"
+cek "kirim 900 gr (kurang dari 1 kemasan) → 400" "V == 400" "$(kirim148 "$BK148" 900)"
+cek "kirim 1.500 gr (1,5 kemasan) → 400" "V == 400" "$(kirim148 "$BK148" 1500)"
+cek "pesan tolak menyebut kelipatan terdekat yang sah" "V == 1" \
+  "$(api "$OWNER" POST /transfer-stok "{\"asal_branch_id\":\"$CK148\",\"tujuan_branch_id\":\"$ST148\",\"items\":[{\"ingredient_id\":\"$BK148\",\"qty\":1500}]}" | jq '(.error|test("1000 atau 2000"))|if . then 1 else 0 end')"
+cek "kirim 2.000 gr (2 kg penuh) → 201" "V == 201" "$(kirim148 "$BK148" 2000)"
+
+# (b) KIRIM HABIS: sisa di bawah 1 kemasan tetap bisa dipindahkan
+BS148=$(api "$OWNER" POST /bahan '{"nama":"Sayur sisa 148","harga_beli":12000,"isi":1000,"satuan":"gr","satuan_beli":"kg","pengadaan":"beli","kategori":"lain","boleh_eceran":false}' | jq -r .id)
+masuk148 "$BS148" pcs 900 10800
+cek "sisa 900 gr: kirim 500 gr (sebagian) → 400" "V == 400" "$(kirim148 "$BS148" 500)"
+cek "pesan menawarkan jalan keluar 'kirim habis'" "V == 1" \
+  "$(api "$OWNER" POST /transfer-stok "{\"asal_branch_id\":\"$CK148\",\"tujuan_branch_id\":\"$ST148\",\"items\":[{\"ingredient_id\":\"$BS148\",\"qty\":500}]}" | jq '(.error|test("dikirim habis"))|if . then 1 else 0 end')"
+cek "sisa 900 gr: kirim 900 gr (KIRIM HABIS) → 201" "V == 201" "$(kirim148 "$BS148" 900)"
+
+# (c) bahan yang BOLEH eceran tidak ikut terkunci
+BE148=$(api "$OWNER" POST /bahan '{"nama":"Bumbu eceran 148","harga_beli":5000,"isi":1000,"satuan":"gr","satuan_beli":"kg","pengadaan":"beli","kategori":"lain","boleh_eceran":true}' | jq -r .id)
+masuk148 "$BE148" batch 2 10000
+cek "boleh eceran → wajib_kelipatan false" "V == 1" \
+  "$(api "$OWNER" GET "/transfer-stok/saldo?branch_id=$CK148" | jq --arg i "$BE148" '[.rows[]|select(.ingredient_id==$i)][0].wajib_kelipatan|if . then 0 else 1 end')"
+cek "boleh eceran: kirim 900 gr → 201" "V == 201" "$(kirim148 "$BE148" 900)"
+
+# (d) bahan tanpa kemasan (isi = 1) bebas seperti sebelumnya
+B1148=$(api "$OWNER" POST /bahan '{"nama":"Pcs polos 148","harga_beli":2000,"isi":1,"satuan":"pcs","pengadaan":"beli","kategori":"lain"}' | jq -r .id)
+masuk148 "$B1148" pcs 10 20000
+cek "isi = 1 (tanpa kemasan): kirim 7 pcs → 201" "V == 201" "$(kirim148 "$B1148" 7)"
 
 
 echo
