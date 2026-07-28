@@ -37,7 +37,7 @@ const KomponenBody = z.object({
   qty: z.number().positive(),
 });
 
-const MenuBody = z.object({
+const MenuCreateBody = z.object({
   nama: z.string().trim().min(1),
   kode: z.string().trim().max(20).nullish(),
   category_id: z.string().uuid(),
@@ -53,11 +53,47 @@ const MenuBody = z.object({
   branch_ids: z.array(z.string().uuid()).nullish(),
 });
 
+/**
+ * PUT = PERBARUI SEBAGIAN. Field yang tidak dikirim DIPERTAHANKAN apa adanya.
+ *
+ * Dulu PUT memakai skema yang sama dengan POST, lengkap dengan `.default()`.
+ * Akibatnya klien yang hanya ingin mengganti harga — misalnya aplikasi mobile
+ * yang tak menyimpan resep — ikut MENGHAPUS seluruh resep menu (`komponen`
+ * default `[]`), menghapus foto (`image_url` tak dikirim → null), dan
+ * MENGAKTIFKAN ULANG menu yang sudah diarsipkan (`is_active` default `true`).
+ * Sekarang tak ada satu pun `.default()` di sini: `undefined` berarti "jangan
+ * sentuh", sedangkan `null`/`[]` tetap berarti "kosongkan" — pola yang memang
+ * sudah dipakai `branch_ids` sejak awal.
+ *
+ * Klien lama yang mengirim body penuh berperilaku persis sama seperti dulu.
+ */
+const MenuUpdateBody = z.object({
+  nama: z.string().trim().min(1).optional(),
+  /** undefined = pertahankan kode lama; ""/null = generate ulang dari nama */
+  kode: z.string().trim().max(20).nullish(),
+  category_id: z.string().uuid().optional(),
+  tipe: z.enum(["regular", "paket"]).optional(),
+  mult: z.number().nonnegative().nullish(),
+  base_menu_id: z.string().uuid().nullish(),
+  base_mult: z.number().nonnegative().nullish(),
+  harga_jual: z.number().nonnegative().optional(),
+  /** undefined = foto lama tetap; null = hapus foto */
+  image_url: z.string().nullish(),
+  /** undefined = resep lama tetap; [] = kosongkan resep */
+  komponen: z.array(KomponenBody).optional(),
+  is_active: z.boolean().optional(),
+  /** undefined = pembatasan lama tetap; null/[] = tampil di semua cabang */
+  branch_ids: z.array(z.string().uuid()).nullish(),
+});
+
+/** Nilai menu setelah body PUT digabung dengan baris lama (POST: body apa adanya). */
+type MenuEfektif = z.infer<typeof MenuCreateBody>;
+
 const UrutanBody = z.object({
   items: z.array(z.object({ id: z.string().uuid(), sort_order: z.number().int() })),
 });
 
-function validatePaket(body: z.infer<typeof MenuBody>) {
+function validatePaket(body: MenuEfektif) {
   if (body.tipe === "paket" && (!body.base_menu_id || body.base_mult == null)) {
     throw new HTTPException(400, {
       message: "Menu paket wajib punya menu dasar (base_menu_id) dan base_mult",
@@ -71,7 +107,7 @@ function validatePaket(body: z.infer<typeof MenuBody>) {
 /** Semua referensi (bahan komponen, menu dasar) harus milik perusahaan pemanggil. */
 async function validateRefs(
   companyId: string,
-  body: z.infer<typeof MenuBody>,
+  body: MenuEfektif,
   selfId?: string,
 ) {
   const ids = [...new Set(body.komponen.map((k) => k.ingredient_id))];
@@ -405,7 +441,7 @@ export const menuRoutes = new Hono<AppEnv>()
     });
     return c.json({ ok: true });
   })
-  .post("/", requireRole("owner", "admin"), zValidator("json", MenuBody), async (c) => {
+  .post("/", requireRole("owner", "admin"), zValidator("json", MenuCreateBody), async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");
     validatePaket(body);
@@ -453,56 +489,74 @@ export const menuRoutes = new Hono<AppEnv>()
   .put(
     "/:id",
     requireRole("owner", "admin"),
-    zValidator("json", MenuBody),
+    zValidator("json", MenuUpdateBody),
     async (c) => {
       const auth = c.get("auth");
       const body = c.req.valid("json");
-      validatePaket(body);
-      await validateRefs(auth.company_id!, body, c.req.param("id"));
+      const id = c.req.param("id");
       const row = await db.transaction(async (tx) => {
-        // kode: manual bila diisi; kosong → generate otomatis dari nama (unik)
-        const kode = await resolveKode(
-          tx,
-          auth.company_id!,
-          body.kode,
-          body.nama,
-          c.req.param("id"),
-        );
-        // Nilai SEBELUM diubah — dipakai memutuskan apakah perlu mencatat
-        // riwayat harga (menyimpan ulang foto/resep saja bukan perubahan harga).
+        // Nilai SEBELUM diubah. Dipakai dua hal: (1) mengisi field yang tidak
+        // dikirim klien, (2) memutuskan apakah perlu mencatat riwayat harga
+        // (menyimpan ulang foto/resep saja bukan perubahan harga).
         const [lama] = await tx
           .select({
+            nama: menus.nama,
+            kode: menus.kode,
+            categoryId: menus.categoryId,
             tipe: menus.tipe,
             hargaJual: menus.hargaJual,
             mult: menus.mult,
+            baseMenuId: menus.baseMenuId,
             baseMult: menus.baseMult,
+            imageUrl: menus.imageUrl,
+            isActive: menus.isActive,
           })
           .from(menus)
-          .where(and(eq(menus.id, c.req.param("id")), eq(menus.companyId, auth.company_id!)));
+          .where(and(eq(menus.id, id), eq(menus.companyId, auth.company_id!)));
+        if (!lama) throw new HTTPException(404, { message: "Menu tidak ditemukan" });
+
+        // `??` sengaja dipakai (bukan `||`): harga_jual 0 dan is_active false
+        // adalah nilai sah yang harus lolos, hanya undefined yang jatuh ke lama.
+        const efektif: MenuEfektif = {
+          nama: body.nama ?? lama.nama,
+          kode: body.kode === undefined ? lama.kode : body.kode,
+          category_id: body.category_id ?? lama.categoryId,
+          tipe: body.tipe ?? (lama.tipe as MenuEfektif["tipe"]),
+          mult: body.mult === undefined ? lama.mult : body.mult,
+          base_menu_id: body.base_menu_id === undefined ? lama.baseMenuId : body.base_menu_id,
+          base_mult: body.base_mult === undefined ? lama.baseMult : body.base_mult,
+          harga_jual: body.harga_jual ?? lama.hargaJual,
+          image_url: body.image_url === undefined ? lama.imageUrl : body.image_url,
+          // hanya resep yang dikirim yang perlu divalidasi; resep lama sudah
+          // tervalidasi saat disimpan dan tidak ikut ditulis ulang di bawah
+          komponen: body.komponen ?? [],
+          is_active: body.is_active ?? lama.isActive,
+          branch_ids: body.branch_ids,
+        };
+        validatePaket(efektif);
+        await validateRefs(auth.company_id!, efektif, id);
+
+        // kode: manual bila diisi; kosong → generate otomatis dari nama (unik)
+        const kode = await resolveKode(tx, auth.company_id!, efektif.kode, efektif.nama, id);
         const [menu] = await tx
           .update(menus)
           .set({
-            categoryId: body.category_id,
-            nama: body.nama,
+            categoryId: efektif.category_id,
+            nama: efektif.nama,
             kode,
-            tipe: body.tipe,
-            mult: body.tipe === "regular" ? body.mult : null,
-            baseMenuId: body.tipe === "paket" ? body.base_menu_id : null,
-            baseMult: body.tipe === "paket" ? body.base_mult : null,
-            hargaJual: body.harga_jual,
-            imageUrl: body.image_url ?? null,
-            isActive: body.is_active,
+            tipe: efektif.tipe,
+            mult: efektif.tipe === "regular" ? efektif.mult : null,
+            baseMenuId: efektif.tipe === "paket" ? efektif.base_menu_id : null,
+            baseMult: efektif.tipe === "paket" ? efektif.base_mult : null,
+            hargaJual: efektif.harga_jual,
+            imageUrl: efektif.image_url ?? null,
+            isActive: efektif.is_active,
             updatedAt: new Date(),
           })
-          .where(
-            and(eq(menus.id, c.req.param("id")), eq(menus.companyId, auth.company_id!)),
-          )
+          .where(and(eq(menus.id, id), eq(menus.companyId, auth.company_id!)))
           .returning();
         if (!menu) throw new HTTPException(404, { message: "Menu tidak ditemukan" });
-        if (
-          lama &&
-          (lama.hargaJual !== menu.hargaJual || multEfektif(lama) !== multEfektif(menu))
-        ) {
+        if (lama.hargaJual !== menu.hargaJual || multEfektif(lama) !== multEfektif(menu)) {
           await catatHargaMenu(tx, {
             companyId: auth.company_id!,
             menuId: menu.id,
@@ -514,7 +568,10 @@ export const menuRoutes = new Hono<AppEnv>()
             olehUserId: auth.sub,
           });
         }
-        await replaceKomponen(tx, menu.id, body.komponen);
+        // undefined = tidak dikirim → pertahankan resep lama; [] = kosongkan
+        if (body.komponen !== undefined) {
+          await replaceKomponen(tx, menu.id, body.komponen);
+        }
         // undefined = tidak dikirim → pertahankan pembatasan lama; null/[] = buka semua
         if (body.branch_ids !== undefined) {
           await replaceBranches(tx, menu.id, body.branch_ids);

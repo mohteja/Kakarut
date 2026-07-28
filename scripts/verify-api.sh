@@ -5771,6 +5771,60 @@ cek "terapkan saran id ngawur → 404" "V == 404" \
   "$(status_code_body "$OWNER" POST /menu/terapkan-saran '{"ids":["00000000-0000-0000-0000-000000000000"]}')"
 
 
+echo
+echo "── §146 PUT /menu/:id = perbarui SEBAGIAN (field tak dikirim dipertahankan) ──"
+# Dulu PUT memakai skema POST lengkap dengan .default(): klien yang cuma mengganti
+# harga ikut MENGHAPUS resep (komponen default []), menghapus foto, dan
+# MENGAKTIFKAN ULANG menu yang sudah diarsipkan. Seksi ini mengunci perbaikannya.
+M146=$(api "$OWNER" POST /menu "{\"nama\":\"Menu Uji146\",\"kode\":\"U146\",\"category_id\":\"$CAT145\",\"tipe\":\"regular\",\"mult\":3,\"harga_jual\":30000,\"image_url\":\"/uploads/uji146.jpg\",\"komponen\":[{\"ingredient_id\":\"$BH145\",\"qty\":2}]}")
+MID146=$(echo "$M146" | jq -r .id)
+cek "menu146 dibuat lengkap (resep 1 baris + foto + kode)" "V == 1" \
+  "$(echo "$M146" | jq '((.komponen|length)==1 and .image_url=="/uploads/uji146.jpg" and .kode=="U146" and .is_active)|if . then 1 else 0 end')"
+
+# PUT hanya harga_jual — persis pola aplikasi mobile yang tak menyimpan resep
+P146=$(api "$OWNER" PUT "/menu/$MID146" '{"harga_jual":33000}')
+cek "PUT {harga_jual} saja: harga berubah" "V == 33000" "$(echo "$P146" | jq '.harga_jual')"
+cek "PUT {harga_jual} saja: RESEP tetap utuh" "V == 1" \
+  "$(echo "$P146" | jq --arg i "$BH145" '((.komponen|length)==1 and .komponen[0].ingredient_id==$i and .komponen[0].qty==2)|if . then 1 else 0 end')"
+cek "PUT {harga_jual} saja: foto, kode, nama, mult tetap" "V == 1" \
+  "$(echo "$P146" | jq '(.image_url=="/uploads/uji146.jpg" and .kode=="U146" and .nama=="Menu Uji146" and .mult==3)|if . then 1 else 0 end')"
+cek "PUT sebagian tetap tercatat di riwayat harga" "V == 1" \
+  "$(api "$OWNER" GET "/menu/$MID146/riwayat-harga" | jq '[.[]|select(.sebab=="manual" and .harga_lama==30000 and .harga_baru==33000)]|length==1|if . then 1 else 0 end')"
+
+# is_active: menu yang diarsipkan tak boleh hidup lagi hanya karena harga diubah
+api "$OWNER" DELETE "/menu/$MID146" > /dev/null
+cek "menu146 diarsipkan" "V == 1" \
+  "$(api "$OWNER" GET "/menu/$MID146" | jq '(.is_active|not)|if . then 1 else 0 end')"
+cek "PUT {harga_jual} pada menu terarsip: TETAP terarsip" "V == 1" \
+  "$(api "$OWNER" PUT "/menu/$MID146" '{"harga_jual":34000}' | jq '((.is_active|not) and .harga_jual==34000)|if . then 1 else 0 end')"
+cek "is_active:true eksplisit → menu aktif kembali" "V == 1" \
+  "$(api "$OWNER" PUT "/menu/$MID146" '{"is_active":true}' | jq '.is_active|if . then 1 else 0 end')"
+
+# null/[] eksplisit tetap berarti "kosongkan" — bukan "pertahankan"
+cek "PUT {image_url:null} → foto dihapus, resep tetap" "V == 1" \
+  "$(api "$OWNER" PUT "/menu/$MID146" '{"image_url":null}' | jq '(.image_url==null and (.komponen|length)==1)|if . then 1 else 0 end')"
+cek "PUT {komponen:[]} → resep dikosongkan" "V == 0" \
+  "$(api "$OWNER" PUT "/menu/$MID146" '{"komponen":[]}' | jq '.komponen|length')"
+cek "PUT {komponen:[...]} → resep diisi ulang" "V == 1" \
+  "$(api "$OWNER" PUT "/menu/$MID146" "{\"komponen\":[{\"ingredient_id\":\"$BH145\",\"qty\":5}]}" | jq '[.komponen[]|select(.qty==5)]|length')"
+cek "PUT {kode:\"\"} → kode digenerate ulang dari nama" "V == 1" \
+  "$(api "$OWNER" PUT "/menu/$MID146" '{"kode":""}' | jq '(.kode!=null and .kode!="U146")|if . then 1 else 0 end')"
+cek "PUT {} kosong → tak ada yang berubah" "V == 1" \
+  "$(api "$OWNER" PUT "/menu/$MID146" '{}' | jq '((.komponen|length)==1 and .harga_jual==34000 and .nama=="Menu Uji146")|if . then 1 else 0 end')"
+
+# guard yang tak boleh ikut longgar
+cek "PUT {tipe:paket} tanpa base_menu_id → 400" "V == 400" \
+  "$(status_code_body "$OWNER" PUT "/menu/$MID146" '{"tipe":"paket"}')"
+cek "PUT {komponen} bahan milik perusahaan lain → 400" "V == 400" \
+  "$(status_code_body "$OWNER" PUT "/menu/$MID146" '{"komponen":[{"ingredient_id":"00000000-0000-0000-0000-000000000000","qty":1}]}')"
+cek "PUT {nama:\"\"} → 400 (nama tetap wajib berisi bila dikirim)" "V == 400" \
+  "$(status_code_body "$OWNER" PUT "/menu/$MID146" '{"nama":"  "}')"
+cek "PUT menu id ngawur → 404" "V == 404" \
+  "$(status_code_body "$OWNER" PUT "/menu/00000000-0000-0000-0000-000000000000" '{"harga_jual":1000}')"
+cek "kasir PUT /menu → 403" "V == 403" \
+  "$(status_code_body "$REISS105" PUT "/menu/$MID146" '{"harga_jual":1000}')"
+
+
 
 echo
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
