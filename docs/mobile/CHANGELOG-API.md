@@ -13,6 +13,11 @@ kali menerima kiriman baru.
 | 🟢 **BARU** | Kemampuan baru. Kerjakan bila fiturnya memang mau dibawa ke mobile. |
 | ⚪️ **INFO** | Tidak menuntut perubahan kode. |
 
+**Status rilis:** setiap entri diawali baris **"Sudah di-merge ke production"**
+begitu tayang. Entri **tanpa** baris itu berarti belum tayang — mobile boleh
+menundanya. Baris ini wajib ada di setiap entri; kalau hilang, mobile akan
+mengira fitur yang sudah aktif belum bisa dipakai.
+
 **Acuan lengkap tetap `docs/API-CONTRACT.md`** — dokumen ini hanya penunjuk
 arah. Lampiran A pada dokumen itu adalah salinan utuh
 `packages/shared/src/types.ts`, jadi definisi tipe selalu bisa dicek di sana
@@ -241,6 +246,8 @@ server bisa menambah "buka kunci" khusus owner — sebut saja.
 
 ## Rilis: Realisasi qty boleh lebih dari RAB
 
+> **Sudah di-merge ke production** (PR #127).
+>
 > Tidak ada migrasi DB. **Satu batasan dicabut** di `POST /api/{mod}/tahap/:id`,
 > plus satu field baru di baris faktur.
 
@@ -280,6 +287,9 @@ menskalakan harga RAB (`total_harga × qty_baru ÷ qty_lama`) dan menandainya
 
 ## Rilis: Isi menu untuk pembeli (`MenuDto.deskripsi`)
 
+> **Sudah di-merge ke production** (PR #126) — endpoint sudah mengirim
+> `deskripsi` sejak saat itu.
+>
 > Migrasi DB **0086** (`menus.deskripsi`, nullable — tak ada backfill, menu lama
 > bernilai `null`). **Tak ada yang rusak**: field baru, opsional.
 
@@ -328,6 +338,8 @@ dirapikan pemilik. Mobile tak perlu meniru tombol itu — cukup **tampilkan
 
 ## Rilis: Satuan kiriman ditulis SERVER (`qty_teks`)
 
+> **Sudah di-merge ke production** (PR #125).
+>
 > **Tidak ada migrasi DB.** Lanjutan langsung dari koreksi satuan di bawah —
 > kali ini bukan cuma dokumentasi, tapi field baru yang membuat salah satuan
 > tidak mungkin lagi terjadi.
@@ -383,6 +395,8 @@ merangkai sendiri, layar itu masih menampilkan satuan yang salah.
 
 ## Rilis: Kiriman ikut aturan kemasan belanja
 
+> **Sudah di-merge ke production** (PR #125).
+>
 > **Tidak ada migrasi DB.** Satu aturan validasi baru pada dua endpoint kiriman,
 > plus tiga field baru di `TransferStokSaldoRow`.
 
@@ -497,6 +511,8 @@ Tabel lengkapnya ada di `docs/API-CONTRACT.md` bagian
 
 ## Rilis: Tiga angka yang tak boleh berubah diam-diam
 
+> **Sudah di-merge ke production** (PR #125).
+>
 > Migrasi DB **0085** (`open_bill_items.harga_satuan` + `menu_nama`).
 > **Dua kontrak berubah** — `PUT /api/menu/:id` dan `OpenBillItemDto`. Baca 🔴
 > dan 🟡 di bawah sebelum rilis berikutnya.
