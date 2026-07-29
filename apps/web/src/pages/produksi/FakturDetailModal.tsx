@@ -206,6 +206,22 @@ export function FakturDetailModal({
 
           <div className="rounded-lg border border-stone-200">
             <table className="w-full text-sm">
+              {/* Tanpa kepala tabel, "+2.100 ml" dan "—" adalah teka-teki:
+                  angka apa, dan kolom kosong itu maksudnya apa. */}
+              <thead className="border-b border-stone-200 bg-stone-50 text-xs text-stone-500">
+                <tr>
+                  <th className="px-3 py-1.5 text-left font-medium">
+                    {tipe === "produksi" ? "Bahan diproduksi" : "Bahan dibeli"}
+                  </th>
+                  <th className="px-3 py-1.5 text-right font-medium">
+                    {tipe === "produksi" ? "Hasil & batch" : "Jumlah"}
+                  </th>
+                  <th className="px-3 py-1.5 text-left font-medium">Rak simpan</th>
+                  {tipe === "beli" && (
+                    <th className="px-3 py-1.5 text-right font-medium">Biaya</th>
+                  )}
+                </tr>
+              </thead>
               <tbody className="divide-y divide-stone-100">
                 {grup.rows.map((r) => {
                   const ditolak = r.status === "ditolak";
@@ -280,6 +296,15 @@ export function FakturDetailModal({
                             </span>
                           )}
                         </>
+                      )}
+                      {/* BERAPA KALI MASAK. `qty` menjawab "jadinya berapa";
+                          yang dikerjakan orang di dapur adalah mengulang resep
+                          sekian kali. Teksnya ditulis server (`batch_teks`)
+                          supaya web & mobile tak mungkin berbeda. */}
+                      {r.batch_teks && (
+                        <div className="text-xs font-semibold text-orange-600">
+                          🍳 {r.batch_teks}
+                        </div>
                       )}
                     </td>
                     <td className="px-3 py-1.5 text-stone-500">{r.tempat ?? "—"}</td>

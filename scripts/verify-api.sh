@@ -6217,5 +6217,28 @@ cek "riwayat GET /shift membawa putusan lengkap (kasir tahu nasib selisihnya)" "
   "$(api "$REISS105" GET /shift | jq -r --arg id "$SID152D" '[.[]|select(.id==$id)][0] | ((.status_selisih == "ditolak") and (.selisih_disetujui_oleh != null) and (.alasan_tolak != null) and (.selisih_alasan != null))|if . then 1 else 0 end')"
 
 
+echo
+echo "── §153 Detail produksi: BERAPA BATCH, bukan cuma gramnya ──"
+# Pelaksana di dapur mengulang resep sekian kali; "2.100 ml" memaksanya membagi
+# sendiri di kepala. Teksnya ditulis SERVER supaya web & mobile tak berbeda.
+CK153=$(api "$OWNER" GET /cabang | jq -r '[.[]|select(.tipe=="central_kitchen" and .is_active)][0].id')
+B153=$(api "$OWNER" POST /bahan '{"nama":"Sambal uji153","satuan":"ml","satuan_beli":"botol","isi":700,"harga_beli":21000,"pengadaan":"produksi","kategori":"lain"}' | jq -r '.id')
+MENTAH153=$(api "$OWNER" POST /bahan '{"nama":"Cabai uji153","satuan":"gr","satuan_beli":"kg","isi":1000,"harga_beli":40000,"pengadaan":"beli","kategori":"lain"}' | jq -r '.id')
+api "$OWNER" PUT "/bahan/$B153/resep" "{\"komponen\":[{\"ingredient_id\":\"$MENTAH153\",\"qty\":100}]}" > /dev/null
+F153=$(api "$OWNER" POST /produksi/faktur "{\"branch_id\":\"$CK153\",\"items\":[{\"ingredient_id\":\"$B153\",\"mode\":\"batch\",\"jumlah\":3}]}" | jq -r .faktur_id)
+BARIS153=$(api "$OWNER" GET "/produksi?branch_id=$CK153&per_page=200" | jq --arg f "$F153" '[.rows[]|select(.faktur_id==$f)][0]')
+cek "dasar uji: 3 batch × 700 ml tersimpan sebagai qty 2.100 ml" "abs(V - 2100) < 0.001" \
+  "$(echo "$BARIS153" | jq -r '.qty')"
+cek "baris produksi membawa batch = 3 (bukan hanya qty)" "abs(V - 3) < 0.001" \
+  "$(echo "$BARIS153" | jq -r '.batch')"
+cek "batch_teks ditulis server: '3 batch × 700 ml'" "V == 1" \
+  "$(echo "$BARIS153" | jq -r '(.batch_teks == "3 batch × 700 ml")|if . then 1 else 0 end')"
+cek "qty_teks TETAP satuan kerja — batch tak menggantikannya" "V == 1" \
+  "$(echo "$BARIS153" | jq -r '(.qty_teks == "2.100 ml")|if . then 1 else 0 end')"
+# bahan BELI tak punya batch: membaginya akan mengarang pekerjaan yang tak ada
+FB153=$(api "$OWNER" POST /pembelian/faktur "{\"branch_id\":\"$CK153\",\"items\":[{\"ingredient_id\":\"$MENTAH153\",\"mode\":\"pcs\",\"jumlah\":2000,\"total_harga\":80000}]}" | jq -r .faktur_id)
+cek "bahan BELI: batch & batch_teks null (bukan angka karangan)" "V == 1" \
+  "$(api "$OWNER" GET "/pembelian?branch_id=$CK153&per_page=200" | jq -r --arg f "$FB153" '[.rows[]|select(.faktur_id==$f)][0] | ((.batch == null) and (.batch_teks == null))|if . then 1 else 0 end')"
+
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

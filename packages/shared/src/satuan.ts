@@ -65,3 +65,44 @@ export function qtyTeks(params: {
     setara: `${pas ? "" : "≈ "}${formatAngkaId(kemasan)} ${satuanBeli}`,
   };
 }
+
+export interface BatchTeks {
+  /** berapa kali resep dijalankan; null bila baris ini bukan produksi ber-batch */
+  batch: number | null;
+  /** mis. "3 batch × 700 ml"; null saat `batch` null */
+  teks: string | null;
+}
+
+/**
+ * Berapa BATCH resep yang harus dikerjakan untuk sebuah baris produksi.
+ *
+ * `qty` disimpan dalam satuan kerja ("2.100 ml"), tapi yang dikerjakan orang
+ * di dapur adalah **mengulang resep sekian kali** — dan satu resep menghasilkan
+ * `isi` satuan kerja (lihat `ingredient_components.qty` = "kebutuhan per 1
+ * batch"). Tanpa angka ini pelaksana harus membagi sendiri di kepala setiap
+ * kali membuka faktur, dan salah bagi = salah masak.
+ *
+ * Ukuran batch diambil dari master bahan SAAT INI. Itu aman untuk baris yang
+ * sedang berjalan: mengubah `isi` ditolak selama masih ada produksi berjalan
+ * (lihat guard di modul bahan). Baris yang sudah lama selesai bisa saja
+ * memakai ukuran batch yang berbeda dari saat ia dikerjakan — jumlah `qty`-nya
+ * tetap fakta, hanya pembagian batch-nya yang mengikuti master terbaru.
+ */
+export function batchTeks(params: {
+  qty: number;
+  /** satuan kerja/resep (mis. "ml") */
+  satuan: string;
+  /** hasil 1 batch resep dalam `satuan`; ≤ 1 = tak ada pengelompokan batch */
+  isi?: number | null;
+  /** hanya bahan "produksi" yang punya batch; "beli" tidak */
+  pengadaan?: string | null;
+}): BatchTeks {
+  const { qty, satuan, isi, pengadaan } = params;
+  if (pengadaan !== "produksi" || isi == null || isi <= 1) return { batch: null, teks: null };
+  const batch = qty / isi;
+  const pas = Math.abs(batch - Math.round(batch)) < 1e-6;
+  return {
+    batch,
+    teks: `${pas ? "" : "≈ "}${formatAngkaId(batch)} batch × ${formatAngkaId(isi)} ${satuan}`.trim(),
+  };
+}

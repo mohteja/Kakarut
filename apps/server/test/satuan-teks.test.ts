@@ -6,7 +6,7 @@
  * Semua kasus di bawah diambil langsung dari faktur itu.
  */
 import { describe, expect, it } from "vitest";
-import { formatAngkaId, qtyTeks } from "@kakarut/shared";
+import { batchTeks, formatAngkaId, qtyTeks } from "@kakarut/shared";
 
 describe("qtyTeks — kasus nyata faktur PB-0058", () => {
   it("Sayur 900 gr (dibeli per kg) → 'gr', BUKAN 'kg'", () => {
@@ -82,5 +82,27 @@ describe("formatAngkaId", () => {
     expect(formatAngkaId(2000)).toBe("2.000");
     expect(formatAngkaId(0.9)).toBe("0,9");
     expect(formatAngkaId(1234567.891)).toBe("1.234.567,89");
+  });
+});
+
+describe("batchTeks — berapa kali resep dijalankan", () => {
+  it("2.100 ml dari resep 700 ml → 3 batch, bukan sekadar '2.100 ml'", () => {
+    const r = batchTeks({ qty: 2100, satuan: "ml", isi: 700, pengadaan: "produksi" });
+    expect(r.batch).toBe(3);
+    expect(r.teks).toBe("3 batch × 700 ml");
+  });
+
+  it("tidak pas → diberi '≈' supaya tak dibaca sebagai angka bulat", () => {
+    const r = batchTeks({ qty: 1650, satuan: "ml", isi: 700, pengadaan: "produksi" });
+    expect(r.teks).toBe("≈ 2,36 batch × 700 ml");
+  });
+
+  it("bahan BELI tak punya batch — membaginya akan mengarang pekerjaan", () => {
+    expect(batchTeks({ qty: 900, satuan: "gr", isi: 1000, pengadaan: "beli" }).batch).toBeNull();
+  });
+
+  it("isi ≤ 1: tak ada pengelompokan batch ('2.100 batch × 1 ml' tak berarti)", () => {
+    expect(batchTeks({ qty: 2100, satuan: "ml", isi: 1, pengadaan: "produksi" }).teks).toBeNull();
+    expect(batchTeks({ qty: 2100, satuan: "ml", isi: null, pengadaan: "produksi" }).teks).toBeNull();
   });
 });

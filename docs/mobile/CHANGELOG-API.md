@@ -13,6 +13,11 @@ kali menerima kiriman baru.
 | 🟢 **BARU** | Kemampuan baru. Kerjakan bila fiturnya memang mau dibawa ke mobile. |
 | ⚪️ **INFO** | Tidak menuntut perubahan kode. |
 
+**Status rilis:** setiap entri diawali baris **"Sudah di-merge ke production"**
+begitu tayang. Entri **tanpa** baris itu berarti belum tayang — mobile boleh
+menundanya. Baris ini wajib ada di setiap entri; kalau hilang, mobile akan
+mengira fitur yang sudah aktif belum bisa dipakai.
+
 **Acuan lengkap tetap `docs/API-CONTRACT.md`** — dokumen ini hanya penunjuk
 arah. Lampiran A pada dokumen itu adalah salinan utuh
 `packages/shared/src/types.ts`, jadi definisi tipe selalu bisa dicek di sana
@@ -20,12 +25,62 @@ tanpa akses repo server.
 
 ---
 
+## Rilis: Detail produksi — BERAPA BATCH, bukan cuma gramnya (`batch_teks`)
+
+> **BELUM tayang di production** — masih di PR. Baris ini berubah jadi
+> "Sudah di-merge ke production" begitu tayang.
+>
+> Tidak ada migrasi DB. Dua field baru pada baris `GET /api/produksi` &
+> `GET /api/pembelian`; keduanya **aditif dan opsional**.
+
+Keluhan yang memicunya, dari layar Detail Produksi (web DAN mobile):
+
+> *"tidak ada jumlah batch yang harus dikerjakan, hanya jumlah gramnya saja.
+> Lalu tidak ada kepala tabelnya — ini 2.000 gram itu apa, terus '—' itu apa?"*
+
+### 🟢 BARU — `batch` & `batch_teks`
+
+`qty` menjawab **"jadinya berapa"**. Yang dikerjakan orang di dapur adalah
+**mengulang resep sekian kali** — dan itu tak pernah dikirim ke klien mana pun,
+jadi pelaksana harus membagi sendiri di kepala tiap kali membuka faktur.
+
+| Field | Isi |
+| --- | --- |
+| `batch` | `number \| null` — mis. `3` (= `qty ÷ isi`) |
+| `batch_teks` | `string \| null` — mis. `"3 batch × 700 ml"` |
+
+`null` pada **bahan beli** (tak punya resep) dan saat `isi ≤ 1` (tak ada
+pengelompokan batch — `"2.100 batch × 1 ml"` tak berarti). Bila pembagiannya tak
+bulat, teksnya diberi awalan `≈` (mis. `"≈ 2,36 batch × 700 ml"`) supaya tak
+terbaca sebagai angka bulat.
+
+Tampilkan **di samping/bawah `qty_teks`, jangan menggantikannya** — keduanya
+menjawab pertanyaan berbeda: berapa hasilnya, vs berapa kali masak. Teksnya
+ditulis server (fungsi yang sama dipakai web) supaya keduanya mustahil berbeda,
+persis alasan `qty_teks` dulu dibuat.
+
+### 🟡 PERLU DICEK — tabel baris faktur butuh KEPALA KOLOM
+
+Ini bukan perubahan API, tapi keluhannya menyebut mobile juga. Di web, tabel
+baris faktur tak punya `<thead>` sama sekali: pembaca melihat `+2.100 ml` dan
+`—` tanpa tahu kolomnya apa. Sudah diperbaiki jadi:
+
+| Bahan diproduksi | Hasil & batch | Rak simpan |
+| --- | --- | --- |
+| Sambal chilli oil 📖 resep | +2.100 ml<br>🍳 3 batch × 700 ml | — |
+
+(Untuk faktur beli: **Bahan dibeli / Jumlah / Rak simpan / Biaya**.) Kolom "—"
+yang membingungkan itu adalah **rak simpan**, memang kosong sampai barang masuk
+stok. Mohon beri label serupa di mobile.
+
+---
+
 ## Rilis: Tutup kasir HITUNG BUTA + kunci hitungan + ACC selisih owner
 
-> **BELUM tayang di production** per 28 Jul 2026 — masih di PR #127 (draft).
-> Selama belum tayang, `POST /shift/kunci-hitungan` memang **404**; penanganan
-> mobile (jatuh ke Tingkat 1, tetap mengirim `uang_fisik`) sudah tepat. Baris
-> ini diperbarui jadi "Sudah di-merge ke production" begitu tayang.
+> **Sudah di-merge ke production** (PR #127, 28 Jul 2026) — menjawab pertanyaan
+> nomor 3 di balasan mobile. `POST /shift/kunci-hitungan` yang sebelumnya **404**
+> kini aktif; fallback Tingkat 1 di mobile boleh tetap dipertahankan sebagai
+> jaring pengaman, tapi sejak rilis ini `•••` datang dari server, bukan dari UI.
 >
 > Migrasi DB **0087** (`shifts.selisih_status` dkk) & **0088**
 > (`shifts.hitungan_dikunci_at`) — semuanya nullable, shift lama tetap sah.
@@ -241,6 +296,8 @@ server bisa menambah "buka kunci" khusus owner — sebut saja.
 
 ## Rilis: Realisasi qty boleh lebih dari RAB
 
+> **Sudah di-merge ke production** (PR #127).
+>
 > Tidak ada migrasi DB. **Satu batasan dicabut** di `POST /api/{mod}/tahap/:id`,
 > plus satu field baru di baris faktur.
 
@@ -280,6 +337,9 @@ menskalakan harga RAB (`total_harga × qty_baru ÷ qty_lama`) dan menandainya
 
 ## Rilis: Isi menu untuk pembeli (`MenuDto.deskripsi`)
 
+> **Sudah di-merge ke production** (PR #126) — endpoint sudah mengirim
+> `deskripsi` sejak saat itu.
+>
 > Migrasi DB **0086** (`menus.deskripsi`, nullable — tak ada backfill, menu lama
 > bernilai `null`). **Tak ada yang rusak**: field baru, opsional.
 
@@ -328,6 +388,8 @@ dirapikan pemilik. Mobile tak perlu meniru tombol itu — cukup **tampilkan
 
 ## Rilis: Satuan kiriman ditulis SERVER (`qty_teks`)
 
+> **Sudah di-merge ke production** (PR #125).
+>
 > **Tidak ada migrasi DB.** Lanjutan langsung dari koreksi satuan di bawah —
 > kali ini bukan cuma dokumentasi, tapi field baru yang membuat salah satuan
 > tidak mungkin lagi terjadi.
@@ -383,6 +445,8 @@ merangkai sendiri, layar itu masih menampilkan satuan yang salah.
 
 ## Rilis: Kiriman ikut aturan kemasan belanja
 
+> **Sudah di-merge ke production** (PR #125).
+>
 > **Tidak ada migrasi DB.** Satu aturan validasi baru pada dua endpoint kiriman,
 > plus tiga field baru di `TransferStokSaldoRow`.
 
@@ -497,6 +561,8 @@ Tabel lengkapnya ada di `docs/API-CONTRACT.md` bagian
 
 ## Rilis: Tiga angka yang tak boleh berubah diam-diam
 
+> **Sudah di-merge ke production** (PR #125).
+>
 > Migrasi DB **0085** (`open_bill_items.harga_satuan` + `menu_nama`).
 > **Dua kontrak berubah** — `PUT /api/menu/:id` dan `OpenBillItemDto`. Baca 🔴
 > dan 🟡 di bawah sebelum rilis berikutnya.
