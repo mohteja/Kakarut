@@ -38,9 +38,12 @@ export function LaporanKebersihanPage() {
   const [catatan, setCatatan] = useState("");
   const [editId, setEditId] = useState<string | null>(null);
 
+  // `aktif=1` — checklist hanya boleh memuat area yang masih dipakai. Tanpa
+  // ini, pelapor berperan manajemen ikut menerima area cabang lain dan area
+  // yang sudah dinonaktifkan, lalu kirimannya ditolak server dengan 400.
   const { data: area = [], isLoading: memuatArea } = useQuery({
-    queryKey: ["kebersihan-area"],
-    queryFn: () => api<AreaKebersihanDto[]>("/kebersihan/area"),
+    queryKey: ["kebersihan-area", "checklist"],
+    queryFn: () => api<AreaKebersihanDto[]>("/kebersihan/area?aktif=1"),
   });
 
   // 14 hari terakhir cukup untuk "laporan saya" tanpa membebani daftar.
@@ -50,9 +53,13 @@ export function LaporanKebersihanPage() {
     return d.toISOString().slice(0, 10);
   }, []);
 
+  // `saya=1` WAJIB. Tanpa penanda itu, peran manajemen menerima laporan
+  // seluruh karyawan: kartu sesi menandai "sudah terisi" karena orang lain
+  // yang mengisinya, `editId` menunjuk laporan orang lain, dan tombol Perbarui
+  // ditolak 403 — pelapornya tak punya jalan mengirim laporannya sendiri.
   const { data: laporan = [], isLoading } = useQuery({
     queryKey: ["kebersihan-saya", dari],
-    queryFn: () => api<LaporanKebersihanDto[]>(`/kebersihan?dari=${dari}`),
+    queryFn: () => api<LaporanKebersihanDto[]>(`/kebersihan?saya=1&dari=${dari}`),
   });
 
   const hariIni = hariIniWIB();

@@ -103,11 +103,21 @@ export function RiwayatPage() {
                 )}
               </div>
               <div className="flex shrink-0 items-center gap-2">
-                <span
-                  className={`rounded-full px-2 py-0.5 text-xs font-semibold ${r.is_dine_in ? "bg-blue-100 text-blue-700" : "bg-stone-100 text-stone-600"}`}
-                >
-                  {r.is_dine_in ? "Dine-in" : "Bawa pulang"}
-                </span>
+                <div className="flex flex-col items-end gap-0.5">
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-xs font-semibold ${r.is_dine_in ? "bg-blue-100 text-blue-700" : "bg-stone-100 text-stone-600"}`}
+                  >
+                    {r.is_dine_in ? "Dine-in" : "Bawa pulang"}
+                  </span>
+                  {/* Dapur mengubah cara penyajian lewat Papan Pesanan setelah
+                      nota tercatat. Nota & perhitungan bahan TIDAK ikut berubah,
+                      jadi selisihnya ditampilkan — bukan disembunyikan. */}
+                  {r.sajian_takeaway === r.is_dine_in && (
+                    <span className="rounded-full bg-purple-100 px-2 py-0.5 text-[11px] font-semibold text-purple-700">
+                      disajikan {r.sajian_takeaway ? "🥡 bawa pulang" : "🍽 di tempat"}
+                    </span>
+                  )}
+                </div>
                 <div className="text-right">
                   <div className="font-bold text-stone-800">{formatRupiah(r.total)}</div>
                   <div className="text-xs text-orange-600">🧾 Struk</div>

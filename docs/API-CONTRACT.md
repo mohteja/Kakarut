@@ -417,10 +417,11 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 - `GET /api/{mod}/dana/:fakturId` — res: `{ rows: [{id,tipe,nominal,catatan,oleh,waktu}], total }` — error: **404**
 - `POST /api/{mod}/konfirmasi/:fakturId` — res: `{ ok, jumlah_baris }` — error: **404** tak ada / sudah dikonfirmasi
 - `GET /api/{mod}/log/:fakturId` — res: `{ rows: [{id,aksi,detail,oleh,waktu}] }` — error: **404**
-- `POST /api/pembelian/laporan-harga/:fakturId` — **[owner/admin]**, **beli saja** (produksi → **400**) — req: `{ items: [{id:uuid, total_harga:number(≥0)}] (min1), perbarui_acuan?: bool }` — res: `{ ok, jumlah }` — error: **400**, **404**. Selain memperbarui `total_harga` baris (harga riil utk HPP FIFO/resep), harga acuan tiap bahan yang dilaporkan (`harga_beli`) disegarkan ke **median** harga/satuan lot beli dikonfirmasi yang berharga (acuan RAB; fallback harga baris dilaporkan bila belum ada lot berharga).
+- `POST /api/pembelian/laporan-harga/:fakturId` — **[gate grup: owner/admin ATAU `tim` di Central Kitchen — TANPA penyempitan tambahan]**, **beli saja** (produksi → **400**) — req: `{ items: [{id:uuid, total_harga:number(≥0)}] (min1), perbarui_acuan?: bool }` — res: `{ ok, jumlah }` — error: **400**, **404**. Selain memperbarui `total_harga` baris (harga riil utk HPP FIFO/resep), harga acuan tiap bahan yang dilaporkan (`harga_beli`) disegarkan ke **median** harga/satuan lot beli dikonfirmasi yang berharga (acuan RAB; fallback harga baris dilaporkan bila belum ada lot berharga).
   - **`perbarui_acuan` default `true`** — klien lama tak berubah perilaku. Kirim `false` untuk mencatat nota **tanpa** menyentuh harga acuan bahan (mis. nota beli eceran darurat yang tak mewakili harga pasar).
+  - **Karyawan CK boleh melapor.** Yang belanja dan memegang notanya adalah tim Central Kitchen; bila hanya manajemen yang boleh menyimpan, harga riil baru masuk saat manajemen sempat menyalinnya — dan selama belum, RAB belanja berikutnya memakai harga basi. Pengamannya bukan peran melainkan (a) pratinjau `/dampak` yang menampilkan pergeseran food cost tiap menu **sebelum** apa pun ditulis, dan (b) `updated_by` + `laporan_harga_at` yang tersimpan di tiap baris yang dilaporkan (tampil sebagai `diubah_oleh` di `GET /api/pembelian`). Peran `cashier`/`kitchen`/`bar` dan `tim` di cabang **store** tetap **403** lewat gate grup.
   - **Kolam median hanya memuat lot yang harganya pernah dilihat manusia** (`productions.harga_tebakan = false`): harga diisi di faktur, dilaporkan lewat endpoint ini, atau direalisasi di `POST /{mod}/tahap`. Faktur yang dibuat **tanpa** `total_harga` memakai tebakan `qty × harga acuan saat itu`; bila tebakan ikut dihitung, harga acuan menyeret dirinya sendiri (acuan → tebakan → median → acuan) dan HPP seluruh menu hanyut naik tanpa ada yang mengubah harga jual.
-- `POST /api/pembelian/laporan-harga/:fakturId/dampak` — **[owner/admin]**, **beli saja** (produksi → **400**) — req: `{ items: [{id:uuid, total_harga:number(≥0)}] (min1) }` — res: `DampakLaporanHarga` `{ food_cost_maks, bahan: [{ingredient_id, nama, satuan, acuan_lama, acuan_baru, jumlah_menu_terdampak}], menu_lewat_ambang: [{menu_id, nama, food_cost_lama, food_cost_baru}] }` — error: **400**, **404**. Pratinjau **tanpa menulis apa pun**: memakai fungsi hitung yang sama dengan endpoint di atas, jadi angkanya identik dengan hasil bila disimpan. POST (bukan GET) karena dampak bergantung pada angka yang sedang diketik user. `menu_lewat_ambang` hanya memuat menu aktif yang **menyeberang** ambang food cost (bukan yang sudah di atas ambang sejak awal).
+- `POST /api/pembelian/laporan-harga/:fakturId/dampak` — **[gate grup: owner/admin ATAU `tim` di Central Kitchen — TANPA penyempitan tambahan]**, **beli saja** (produksi → **400**) — req: `{ items: [{id:uuid, total_harga:number(≥0)}] (min1) }` — res: `DampakLaporanHarga` `{ food_cost_maks, bahan: [{ingredient_id, nama, satuan, acuan_lama, acuan_baru, jumlah_menu_terdampak}], menu_lewat_ambang: [{menu_id, nama, food_cost_lama, food_cost_baru}] }` — error: **400**, **404**. Pratinjau **tanpa menulis apa pun**: memakai fungsi hitung yang sama dengan endpoint di atas, jadi angkanya identik dengan hasil bila disimpan. POST (bukan GET) karena dampak bergantung pada angka yang sedang diketik user. `menu_lewat_ambang` hanya memuat menu aktif yang **menyeberang** ambang food cost (bukan yang sudah di atas ambang sejak awal).
 - `POST /api/{mod}` — req `TambahStokBody`: `{ branch_id?:uuid, ingredient_id:uuid, qty?:number(>0), batch:bool=false, total_harga?:number(≥0)|null, catatan? }` (refine: `batch` ATAU `qty` wajib) — res: **201** row production + `{ bahan }` — error: **400**, **404**
 - `GET /api/{mod}` — query: `branch_id?` (atau `all`), `dari?`, `sampai?`, `tanggal?`, `page?` (default 1), `per_page?` (default 20, maks 200) — res: `{ rows, total, page, per_page, total_pengeluaran }` (tiap row memuat `harga_tebakan` (bool — `total_harga` masih tebakan, belum pernah dilihat manusia: estimasi RAB / belanja otomatis / hasil skala saat realisasi melebihi rencana; baris bertanda ini dikecualikan dari median harga acuan), `rencana_id` + `permintaan_nomor` (PM-xxxx) bila faktur lahir dari permintaan Tambah Stok dari Menu; juga `exp_date` (tanggal kedaluwarsa lot — terisi saat baris masuk stok; NULL utk transfer stok/kirim-hasil karena lot asal tak diketahui) dan `masa_simpan_hari` master bahan; juga `produksi_di` + `divisi_produksi` bahan — dasar badge divisi Kitchen/Bar pada faktur produksi cabang). **Role `kitchen`/`bar`: daftar otomatis DISARING per divisi** — baris resep produksi-cabang milik divisi lain tidak dikembalikan (bar tak melihat pekerjaan kitchen dan sebaliknya; baris lain seperti kiriman/bahan CK tetap tampil). Owner/admin melihat semuanya.
 - `PATCH /api/{mod}/faktur/:key` — req `FakturEditBody`: `{ password: string (wajib), supplier_id?:uuid|null, no_faktur?|null (max60), catatan?|null, storage_location_id?:uuid|null, worker_id?:uuid|null, prod_date?: "YYYY-MM-DD" }` — res: `{ ok, jumlah_baris }` — error: **401** password salah, **400** supplier/storage invalid, **404**
@@ -533,13 +534,61 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 - `GET /api/penyimpanan/:id/bahan` — [any] — res: `{ ingredient_ids: uuid[], terpakai_lain: uuid[] }` — error: **404**
 - `PUT /api/penyimpanan/:id/bahan` — [owner/admin] — req: `{ ingredient_ids: uuid[] (max 2000) }` (replace-set; satu bahan = satu rak per cabang) — res: `{ ok, jumlah }` — error: **400** bahan invalid, **404**
 
-## `/api/meja` — Meja (`modules/meja/routes.ts`)
+## `/api/meja` — Meja + papan status isi/kosong (`modules/meja/routes.ts`)
+
+Aksesnya sengaja **asimetris**: membaca terbuka untuk seluruh peran cabang
+(waiter perlu tahu meja mana yang kosong), mengubah master meja tidak.
 
 - `GET /api/meja` — [any] — query: `branch_id?` — res: `MejaDto[]`
-- `POST /api/meja` — [any] (cashier cabang sendiri) — req: `{ branch_id?: uuid, nama: string, tipe?: "dine_in"|"takeaway", is_active?: bool }` — res: **201** `MejaDto` — error: **403**, **409** nama ada di cabang
-- `PUT /api/meja/tata-letak` — [any] — query: `branch_id?` — req: `{ items: [{id:uuid, pos_x:int(0..100), pos_y:int(0..100)}] (max 500) }` — res: `MejaDto[]`
-- `PATCH /api/meja/:id` — [any] (cashier cabang sendiri) — req: parsial `{ nama?, tipe?, is_active?, branch_id? }` — res: `MejaDto` — error: **403**, **404**
-- `DELETE /api/meja/:id` — [any] (cashier cabang sendiri) — res: `{ ok: true }` — error: **400** (takeaway "Ruang Tunggu" tak bisa dihapus), **403**, **404**
+- `GET /api/meja/status` — [any] — query: `branch_id?` — res: `MejaStatusDto[]` — **hanya meja `dine_in`**
+- `POST /api/meja/:id/kosongkan` — **[owner/admin/cashier/tim]** — req: `{ paksa?: bool }` — res: `{ ok: true, status: "kosong", sudah_kosong: bool }` — error: **400** (meja takeaway), **404**, **409** `{ kode: "bill_berjalan", bill_terbuka: N }`
+- `GET /api/meja/:id/log` — [any] — res: `MejaKosongLogRow[]` (maks 50, terbaru dulu)
+- `POST /api/meja` — **[owner/admin/cashier]** — req: `{ branch_id?: uuid, nama: string, tipe?: "dine_in"|"takeaway", is_active?: bool }` — res: **201** `MejaDto` — error: **403**, **409** nama ada di cabang
+- `PUT /api/meja/tata-letak` — **[owner/admin/cashier]** — query: `branch_id?` — req: `{ items: [{id:uuid, pos_x:int(0..100), pos_y:int(0..100)}] (max 500) }` — res: `MejaDto[]`
+- `PATCH /api/meja/:id` — **[owner/admin/cashier]** — req: parsial `{ nama?, tipe?, is_active?, branch_id? }` — res: `MejaDto` — error: **403**, **404**, **409** meja masih terisi (khusus `is_active:false`)
+- `DELETE /api/meja/:id` — **[owner/admin/cashier]** — res: `{ ok: true }` — error: **400** (takeaway "Ruang Tunggu" tak bisa dihapus), **403**, **404**, **409** meja masih terisi
+
+> ### 🍽 Arti "meja terisi"
+>
+> Status **tidak disimpan** di mana pun — ia dihitung dari tagihan & transaksi
+> yang memang sudah tercatat. Sebuah meja `dine_in` disebut **isi** bila salah
+> satu ini benar:
+>
+> - masih ada **bill belum dibayar** yang menunjuk meja itu, atau
+> - ada **transaksi lunas** di meja itu yang belum dibereskan.
+>
+> **PEMBAYARAN TIDAK MENGOSONGKAN MEJA.** Orang lazim bayar dulu lalu duduk;
+> kalau meja langsung hijau begitu dibayar, waiter akan mendudukkan tamu baru di
+> meja yang masih ada orangnya. Meja baru bebas ketika seseorang menekan
+> **Kosongkan** — satu-satunya hal dari fitur ini yang benar-benar disimpan,
+> lengkap dengan siapa dan kapan (`GET /api/meja/:id/log`).
+>
+> Dua batas memotong perhitungan:
+> - **Batas pengosongan** — semua yang lebih tua dari penekanan tombol terakhir
+>   sudah dibereskan. Pengosongan biasa hanya memotong transaksi lunas; hanya
+>   `paksa: true` yang juga memotong bill yang belum dibayar.
+> - **Jendela bergulir 12 jam** — jaring pengaman bila tak ada yang menekan
+>   tombol semalaman, sekaligus menjaga dari antrean sinkron offline yang boleh
+>   berumur sampai 30 hari.
+>
+> **Meja `takeaway` ("Ruang Tunggu") tidak punya status** dan tidak muncul di
+> `GET /api/meja/status` sama sekali: seluruh penjualan bawa pulang cabang
+> menunjuk ke satu baris itu, jadi sekali ia bisa "terisi", ia terisi selamanya.
+> Mengosongkannya → **400**.
+>
+> **Status MEMBERI TAHU, TIDAK MELARANG.** Meja terisi tetap boleh dipilih untuk
+> transaksi baru — satu meja dua bill itu sah (split bill / rombongan kedua), dan
+> melanjutkan open bill di meja itu justru wajib.
+>
+> Alur tombol Kosongkan ada **dua tahap**: permintaan pertama pada meja yang
+> masih punya bill belum dibayar ditolak **409** `bill_berjalan`; kirim ulang
+> dengan `paksa: true` setelah pemakai menegaskan. Bill-nya **tidak dibatalkan
+> dan tidak hilang** — tetap ada di `GET /api/open-bill` dan tetap bisa ditagih.
+>
+> Status sengaja **TIDAK ada di `GET /api/meja`**: daftar master itu di-cache
+> lewat ETag (lihat bagian ETag di dokumen ini), dan status hidup akan membuat
+> sidik jarinya berubah tiap transaksi. Pakai `GET /api/meja/status` yang tidak
+> ber-ETag dan tarik berkala (web memakai 30 detik).
 
 ## `/api/open-bill` — Open bill (`modules/open-bill/routes.ts`) — group guard **[cashier only]**
 
@@ -548,6 +597,20 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 - `POST /api/open-bill` — req `BillBody`: `{ branch_id?: uuid, meja_id?: uuid|null, customer_nama?|null, customer_wa?|null, catatan?|null, items: [{id?:uuid, menu_id:uuid, qty:number(>0), dine_in_override?:bool|null, catatan?}] (min 1) }` — res: **201** `OpenBillDetail` — error: **400** menu invalid/tak tersedia, **403** kasir luar cabang, **404** meja tak ada
 - `PUT /api/open-bill/:id` — req: `BillBody` — res: `OpenBillDetail` — error: **400** (baris tak ditemukan / tak cocok menunya / dikirim dua kali), **404**
 - `DELETE /api/open-bill/:id` — res: `{ ok: true }` — error: **404**
+
+**`DELETE` = MEMBATALKAN, BUKAN MENGHAPUS.** Barisnya tetap ada dengan
+`pesanan_status = "batal"` + `closed_at` terisi, dan satu baris riwayat dicatat
+atas nama pemanggilnya. Yang terlihat kasir sama seperti dulu (bill hilang dari
+`GET /api/open-bill` dan `GET /api/open-bill/:id` → **404**), tapi Papan Pesanan
+masih menampilkannya di kolom **Batal** hari itu — pembatalan tanpa jejak persis
+kebalikan dari "riwayat perubahan status oleh siapa".
+
+**BILL DITUTUP SERVER SAAT DIBAYAR.** `POST /api/penjualan` dengan
+`open_bill_id` mengisi `closed_at` + `sale_id` **di dalam transaksi yang sama**.
+Klien **tidak perlu** (dan tidak boleh) mengirim `DELETE` sesudah membayar.
+Membayar bill yang sudah ditutup → **409**, jadi tombol bayar yang tertekan dua
+kali atau antrean offline yang mengirim ulang tak lagi menghasilkan dua
+transaksi.
 
 **HARGA BILL DIKUNCI SAAT ITEM DIMASUKKAN.** Tiap baris membawa `harga_satuan`
 dan `menu_nama` yang di-snapshot **server** dari katalog saat baris itu dibuat
@@ -577,6 +640,46 @@ berubah bebas tanpa melepas kunci harga.
 > menjawab pertanyaan berbeda. `null` → jangan tampilkan baris apa pun.
 > Teksnya ditulis server (`batchTeks()` di `packages/shared/src/satuan.ts`)
 > supaya web & mobile mustahil berbeda, sama seperti `qty_teks`.
+
+## `/api/pesanan` — Papan Pesanan Masuk (`modules/pesanan/routes.ts`) — group guard **[owner/admin/cashier/tim/kitchen/bar]**
+
+Layar kerja dapur/bar/kasir di lantai toko. **Ini satu-satunya cara dapur bisa
+melihat pesanan yang belum dibayar** — `/api/open-bill` tetap `cashier only` dan
+tidak dilonggarkan.
+
+- `GET /api/pesanan` — query: `branch_id?`, `tanggal?` (YYYY-MM-DD, default hari ini TZ perusahaan), `status?` (`dikerjakan|selesai|batal`) — res: `PesananRow[]`
+- `POST /api/pesanan/:jenis/:id/status` — `:jenis` = `open_bill|penjualan` — req: `{ status: "dikerjakan"|"selesai"|"batal" }` — res: `{ ok: true, status }` — error: **404** bukan cabangnya / tak ada, **409** status baru saja diubah orang lain, **409** bill sudah dibayar (ubah lewat kartu penjualannya)
+- `POST /api/pesanan/:jenis/:id/sajian` — req: `{ takeaway: boolean }` — res: `{ ok: true, sajian_takeaway }` — error: **404**
+- `GET /api/pesanan/:jenis/:id/log` — res: `PesananLogRow[]` (maks 100, terbaru dulu)
+
+**Isi papan** — tiga aturan yang sengaja tidak seragam:
+
+1. **Open bill yang masih berjalan — apa pun tanggalnya.** Pekerjaan yang belum
+   selesai tak boleh lenyap dari layar dapur hanya karena hari berganti.
+2. **Open bill yang dibatalkan pada `tanggal`** (kolom Batal).
+3. **Penjualan pada `tanggal`** yang belum dihapus.
+
+Bill yang sudah menjadi penjualan tak pernah ikut — kartu penjualannya yang
+mewakili, kalau tidak satu pesanan tampil dua kali sepanjang hari.
+
+**Status ikut terbawa saat bill dibayar.** `POST /api/penjualan` dengan
+`open_bill_id` mewarisi `pesanan_status` + penanda penyajian bill dan mengisi
+`sales.asal_open_bill_id`. `GET .../penjualan/:id/log` menggabungkan riwayat
+sebelum & sesudah pembayaran, jadi jejaknya tak terputus.
+
+> ### 🥡 `sajian_takeaway` — PENANDA PENYAJIAN, bukan angka pembukuan
+>
+> Tombol "jadikan bawa pulang" **tidak** menyentuh `is_dine_in`,
+> `sale_consumptions`, maupun `hpp_satuan`. Angka-angka itu sudah dibukukan saat
+> transaksi dibuat (`qtyEfektif()`: dine-in melewati kemasan & menghitung
+> pelengkap 50%), dan mengubahnya belakangan membuat baris penjualan berbohong
+> tentang pemakaian bahannya sendiri. Nota & laporan **tetap** membaca
+> `is_dine_in`.
+>
+> Penandanya **lahir sesuai pembukuannya** (`sajian_takeaway = !is_dine_in`),
+> jadi `sajian_takeaway == is_dine_in` berarti **ada yang benar-benar
+> mengubahnya** setelah transaksi tercatat — pakai itu untuk badge "diubah".
+> `RiwayatTransaksiRow` juga membawa `sajian_takeaway` untuk keperluan ini.
 
 ## `/api/shift` — Shift kasir (`modules/shift/routes.ts`) — group guard **[owner/admin/cashier]** (buka/tutup **cashier only**)
 
@@ -716,25 +819,30 @@ ADA (validasi = aturan endpoint asli), idempoten per `client_ref`.
 
 Master area (`/area` dan `/rekap` didaftarkan **sebelum** `/:id` agar tidak tertangkap olehnya):
 
-- `GET /api/kebersihan/area` — query: `branch_id?` (`all` = tanpa saringan), `aktif?` (`1` = hanya aktif) — res: `AreaKebersihanDto[]` (urut `urutan`, lalu nama).
+- `GET /api/kebersihan/area` — query: `branch_id?` (`all` = tanpa saringan; **wajib UUID** bila diisi → **400**), `aktif?` (`1` = hanya aktif) — res: `AreaKebersihanDto[]` (urut `urutan`, lalu nama).
   > **Peran terkunci cabang** hanya menerima area yang berlaku untuk lokasinya (`branch_id` null **atau** sama dengan cabangnya) dan hanya yang **aktif**; `branch_id` di query diabaikan untuk mereka.
+  > **Manajemen memakai endpoint ini untuk dua hal berbeda, jadi saringannya harus dipilih:** untuk **layar pengisian** kirim `?aktif=1` **tanpa** `branch_id` — daftarnya menyempit ke cabang penugasan sendiri dan hanya yang aktif, yaitu persis yang diterima jalur tulis. Untuk **layar master area** kirim `?branch_id=all` — seluruh area perusahaan apa adanya, termasuk yang nonaktif. Tanpa keduanya, admin bercabang menerima daftar cabangnya sendiri (bawaan "saya sedang jadi pelapor").
 - `POST /api/kebersihan/area` — **[owner/admin]** (inline) — req: `{ nama, branch_id?, urutan?, is_active? }` (`branch_id` null/absen = berlaku semua lokasi) — res: **201** `{ id }` — error: **400** cabang bukan milik perusahaan ini
 - `PATCH /api/kebersihan/area/:id` — **[owner/admin]** (inline) — req: sebagian dari body di atas — res: `{ ok }` — error: **404** tak ditemukan
 - `DELETE /api/kebersihan/area/:id` — **[owner/admin]** (inline) — res: `{ ok }`. Aman terhadap riwayat (lihat catatan snapshot di atas).
 
 Rekap & ringkasan:
 
-- `GET /api/kebersihan/rekap` — **[owner/admin]** (inline) — query: `bulan?` (`YYYY-MM`, default bulan berjalan di zona waktu perusahaan; nilai ngawur → default), `branch_id?` (`all` = semua cabang), `sesi?` (`pagi|siang|malam`) — res: `RekapKebersihanDto`.
+- `GET /api/kebersihan/rekap` — **[owner/admin]** (inline) — query: `bulan?` (`YYYY-MM`, **bulan wajib 01–12**; default bulan berjalan di zona waktu perusahaan; nilai ngawur — termasuk `2026-13`/`2026-00` — jatuh ke default, **bukan 500**), `branch_id?` (`all` = semua cabang; **wajib UUID** bila diisi → **400**), `sesi?` (`pagi|siang|malam`; nilai lain diabaikan) — res: `RekapKebersihanDto`.
   > **Day-major**, kebalikan `GET /absensi/rekap`: satu entri = satu HARI (terbaru dulu) berisi laporan semua tim hari itu. Hari tanpa laporan tetap muncul dengan `total: 0` — justru itu gunanya. Bulan berjalan berhenti di hari ini.
 - `GET /api/kebersihan/ringkas` — **[owner/admin]** (inline) — res: `{ tanggal, total, kotor }` — hitungan hari ini untuk badge sidebar; sengaja terpisah dari `/rekap` karena di-poll tiap menit.
 
 Laporan:
 
-- `GET /api/kebersihan` — query: `dari?`/`sampai?` (`YYYY-MM-DD`), `branch_id?` (`all` = semua), `sesi?` — res: `LaporanKebersihanDto[]` (terbaru dulu, maks 200, sudah membawa `items`).
+- `GET /api/kebersihan` — query: `saya?` (`1` = hanya laporan pemanggil), `dari?`/`sampai?` (`YYYY-MM-DD`), `branch_id?` (`all` = semua; **wajib UUID** bila diisi → **400**), `sesi?` — res: `LaporanKebersihanDto[]` (terbaru dulu, maks 200, sudah membawa `items`).
   > **Peran terkunci cabang SELALU hanya melihat laporan MILIKNYA** (sama seperti `/pengajuan`) — laporan ini penilaian kerja, bukan papan pengumuman. `branch_id` diabaikan untuk mereka.
+  > **Layar pengisian WAJIB mengirim `saya=1`.** Untuk owner/admin daftarnya berisi laporan seluruh karyawan; layar yang menyebutnya "laporan saya" akan menandai sesi milik orang lain sebagai sudah terisi, lalu mengarahkan tombol Perbarui ke laporan orang lain — dan `PATCH` menolaknya **403**, sehingga pelapornya tak punya jalan mengirim laporannya sendiri. `saya=1` memaksa penyempitan `user_id` untuk **semua** peran.
 - `GET /api/kebersihan/:id` — pemilik laporan atau owner/admin — res: `LaporanKebersihanDto` — error: **404** milik orang lain (bagi peran terkunci cabang) atau tak ditemukan
-- `POST /api/kebersihan` — [semua peran, atas nama diri sendiri] — req: `{ sesi, catatan?, items: [{ area_id, bersih, catatan?, foto_url? }] }` (1–100 baris) — res: **201** `LaporanKebersihanDto` — error: **400** checklist kosong / area tak dikenal atau bukan untuk lokasi pelapor / area dikirim dua kali / **tanpa foto sama sekali** / akun tanpa cabang; **409** sesi itu sudah dilaporkan hari ini
-- `PATCH /api/kebersihan/:id` — **pemilik saja**, dan hanya selama masih tanggal yang sama — req: `{ catatan?, items }` (mengganti SELURUH checklist) — res: `LaporanKebersihanDto` — error: **403** milik orang lain; **409** laporan hari sebelumnya; **400** aturan yang sama seperti `POST`
+- `POST /api/kebersihan` — [semua peran, atas nama diri sendiri] — req: `{ sesi, catatan?, items: [{ area_id, bersih, catatan?, foto_url? }] }` (1–100 baris) — res: **201** `LaporanKebersihanDto` — error: **400** checklist kosong / area tak dikenal, **sudah dinonaktifkan**, atau bukan untuk lokasi pelapor / area dikirim dua kali / **tanpa foto sama sekali** / akun tanpa cabang; **409** sesi itu sudah dilaporkan hari ini
+  > Baris induk + itemnya ditulis dalam **satu transaksi**, jadi laporan tanpa item mustahil ada.
+- `PATCH /api/kebersihan/:id` — **pemilik saja**, dan hanya selama masih tanggal yang sama — req: `{ catatan?, items }` (mengganti SELURUH checklist) — res: `LaporanKebersihanDto` — error: **403** milik orang lain; **409** laporan hari sebelumnya **atau** laporan baru saja diperbarui dari perangkat lain; **400** aturan yang sama seperti `POST`
+  > `items` **selalu** mengganti seluruh checklist. `catatan` sebaliknya bersifat **patch**: tak dikirim = dibiarkan apa adanya, dikirim `null` = dikosongkan. Penggantian item berjalan dalam satu transaksi, jadi checklist tak bisa hilang separuh jalan.
+  > **Dua PATCH bersamaan pada laporan yang sama: salah satunya kalah dengan 409.** Indeks unik `(report_id, area_id)` yang menegakkannya — transaksi saja tak cukup, karena di READ COMMITTED yang kalah menghapus 0 baris lalu tetap menyisipkan set keduanya, dan checklist jadi ganda. Klien cukup memuat ulang laporannya lalu mengirim ulang.
 - `PATCH /api/kebersihan/:id/catatan` — **[owner/admin]** (inline) — req: `{ catatan_owner: string|null }` — res: `LaporanKebersihanDto`. Mengosongkan catatan ikut membersihkan `catatan_owner_oleh`/`catatan_owner_pada`.
 - `DELETE /api/kebersihan/:id` — pemilik menghapus MILIKNYA pada hari yang sama; owner/admin kapan saja — res: `{ ok }` — error: **403** milik orang lain; **409** pemilik menghapus laporan hari sebelumnya; **404** tak ditemukan
 
@@ -1711,8 +1819,10 @@ export interface TransferStokItemRow {
   id: string;
   ingredient_id: string;
   nama: string;
+  /** satuan kerja — SATU-SATUNYA label yang sah untuk `qty` */
   satuan: string;
   pengadaan: JenisPengadaan;
+  /** jumlah dalam `satuan` (satuan kerja), tak pernah dalam satuan kemasan */
   qty: number;
   /**
    * `qty` + `satuan` yang SUDAH ditulis server, mis. "900 gr" — tampilkan apa
@@ -1754,6 +1864,7 @@ export interface TransferStokFaktur {
 export interface TransferStokSaldoRow {
   ingredient_id: string;
   nama: string;
+  /** satuan kerja — SATU-SATUNYA label yang sah untuk `saldo`/`dalam_jalan`/qty kirim */
   satuan: string;
   pengadaan: JenisPengadaan;
   /** saldo FISIK di lokasi asal (barang yang masih dalam perjalanan ikut terhitung) */
@@ -1969,6 +2080,48 @@ export interface MejaDto {
   pos_x: number;
   pos_y: number;
   is_active: boolean;
+}
+
+/** Meja sedang dipakai tamu, atau siap ditempati. */
+export type MejaStatus = "isi" | "kosong";
+
+/**
+ * Status okupansi satu meja — dari `GET /api/meja/status`, BUKAN dari
+ * `GET /api/meja` (daftar master itu di-cache lewat ETag; status hidup akan
+ * membuat sidik jarinya berubah tiap transaksi).
+ *
+ * Hanya meja `dine_in` yang punya status. "Ruang Tunggu" (takeaway) dipakai
+ * bergantian sepanjang hari oleh orang berbeda — menandainya terisi akan
+ * membuatnya merah selamanya sejak pesanan bawa pulang pertama.
+ */
+export interface MejaStatusDto {
+  meja_id: string;
+  nama: string;
+  status: MejaStatus;
+  /** tagihan yang BELUM dibayar di meja ini (0 = semua sudah lunas) */
+  bill_terbuka: number;
+  /** transaksi lunas yang masih dianggap menempati meja ini */
+  transaksi_aktif: number;
+  /**
+   * `true` bila semuanya sudah lunas tapi meja belum dibereskan — tamu yang
+   * "sudah bayar, masih duduk". Meja inilah yang paling layak ditawari tombol
+   * Kosongkan.
+   */
+  lunas_masih_duduk: boolean;
+  /** ISO — tagihan PALING AWAL di meja ini (dasar hitungan "sudah duduk berapa lama") */
+  sejak: string | null;
+  /** ISO — kapan meja ini terakhir dibereskan, null bila belum pernah */
+  dikosongkan_pada: string | null;
+  dikosongkan_oleh: string | null;
+}
+
+/** Satu baris riwayat "meja dibereskan" — dari `GET /api/meja/:id/log`. */
+export interface MejaKosongLogRow {
+  waktu: string;
+  aksi: string;
+  oleh: string | null;
+  paksa: boolean;
+  detail: string | null;
 }
 
 export type PenyesuaianKategori =
@@ -2249,6 +2402,12 @@ export interface RiwayatTransaksiRow {
   waktu: string;
   total: number;
   is_dine_in: boolean;
+  /**
+   * Penanda PENYAJIAN dari Papan Pesanan Masuk — dapur bisa mengubahnya jadi
+   * bawa pulang setelah transaksi tercatat. Sengaja TERPISAH dari `is_dine_in`
+   * (fakta pembukuan yang sudah dipakai menghitung konsumsi bahan & HPP).
+   */
+  sajian_takeaway: boolean;
   /** label meja terpilih (null bila transaksi lama tanpa meja) */
   meja: string | null;
   /** jumlah baris menu pada transaksi */
@@ -2379,6 +2538,62 @@ export interface OpenBillDetail {
   customer_wa: string | null;
   catatan: string | null;
   items: OpenBillItemDto[];
+}
+
+/**
+ * PAPAN PESANAN MASUK — pengerjaan dapur, bukan persetujuan. Pesanan lahir
+ * `dikerjakan` (masuk antrean) lalu ditandai `selesai` atau `batal`.
+ */
+export type PesananStatus = "dikerjakan" | "selesai" | "batal";
+
+/**
+ * Asal pesanan. `open_bill` = belum dibayar (masih bisa diubah kasir);
+ * `penjualan` = sudah dibayar dan dibukukan. Satu pesanan bisa berpindah dari
+ * `open_bill` ke `penjualan` saat dilunasi — statusnya ikut terbawa.
+ */
+export type PesananJenis = "open_bill" | "penjualan";
+
+/** Satu baris menu dalam pesanan, apa adanya untuk dibaca dapur. */
+export interface PesananItemRow {
+  nama: string;
+  qty: number;
+  /** personalisasi pelanggan, mis. "tanpa sambal" */
+  catatan: string | null;
+  is_dine_in: boolean;
+}
+
+/** Satu kartu di papan pesanan. */
+export interface PesananRow {
+  id: string;
+  jenis: PesananJenis;
+  /** nomor struk; null selama masih open bill (belum ada transaksi) */
+  nomor: string | null;
+  meja: string | null;
+  customer: string | null;
+  /** waktu pesanan masuk (ISO) */
+  waktu: string;
+  total: number;
+  dibayar: boolean;
+  status: PesananStatus;
+  /**
+   * Penanda penyajian "bawa pulang" dari papan. SENGAJA terpisah dari
+   * `is_dine_in`: yang terakhir itu fakta pembukuan yang sudah dipakai
+   * menghitung pemakaian bahan & HPP, dan tidak diubah oleh papan.
+   */
+  sajian_takeaway: boolean;
+  is_dine_in: boolean;
+  catatan: string | null;
+  items: PesananItemRow[];
+  /** siapa & kapan status terakhir diubah; null = belum pernah disentuh */
+  status_oleh: string | null;
+  status_pada: string | null;
+}
+
+/** Satu baris riwayat perubahan status sebuah pesanan. */
+export interface PesananLogRow {
+  waktu: string;
+  aksi: string;
+  oleh: string | null;
 }
 
 /** Sesi kas (shift) per cabang. ditutup_* null → shift masih terbuka. */

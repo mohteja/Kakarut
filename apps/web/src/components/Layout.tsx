@@ -5,6 +5,7 @@ import { useAuth } from "../context/AuthContext";
 import { Logo } from "./Logo";
 import { labelCabang, useBranch, useCabangData } from "../context/BranchContext";
 import { api } from "../lib/api";
+import { hariIniWIB } from "../lib/format";
 import { useCompanyMode } from "../lib/useCompanyMode";
 
 /** Urutan pemilih lokasi: Kantor (pusat) dulu, lalu Central Kitchen, lalu store. */
@@ -21,6 +22,7 @@ const BOLEH_STORE = [
   "/kebersihan",
   "/profil",
   "/kasir",
+  "/pesanan",
   "/menu/lihat",
   "/pengaturan/meja",
   "/stok",
@@ -170,6 +172,37 @@ export function Layout() {
     refetchInterval: 60_000,
   });
   const kebersihanKotor = kebersihanNav?.kotor ?? 0;
+
+  // Pesanan yang masih dikerjakan → badge di nav "Pesanan Masuk". Kunci & URL
+  // dibuat PERSIS sama dengan PesananPage supaya keduanya berbagi satu cache:
+  // badge turun seketika saat dapur menandai selesai, tanpa permintaan kedua.
+  const hariIniPesanan = hariIniWIB();
+  const qsPesanan = `${dataQuery ? `${dataQuery}&` : "?"}tanggal=${hariIniPesanan}`;
+  // Cakupan = cakupan tautannya: lantai toko saja, bukan Central Kitchen.
+  const lihatPesanan =
+    !!auth &&
+    !auth.user.is_super_admin &&
+    divisi !== "central_kitchen" &&
+    !(roleGuard === "tim" &&
+      cabang.find((b) => b.id === auth.user.branch_id)?.tipe === "central_kitchen");
+  const { data: pesananNav } = useQuery({
+    queryKey: ["pesanan", dataQuery, hariIniPesanan],
+    queryFn: () => api<{ status: string }[]>(`/pesanan${qsPesanan}`),
+    enabled: lihatPesanan,
+    refetchInterval: 30_000,
+  });
+  const pesananDikerjakan = (pesananNav ?? []).filter((r) => r.status === "dikerjakan").length;
+
+  // Meja yang sedang dipakai tamu → badge di nav "Meja". Kunci & URL sama
+  // persis dengan halaman Meja + modal Pilih Meja kasir, jadi ketiganya berbagi
+  // satu cache dan badge turun seketika begitu meja dibereskan.
+  const { data: mejaNav } = useQuery({
+    queryKey: ["meja-status", dataQuery],
+    queryFn: () => api<{ status: string }[]>(`/meja/status${dataQuery}`),
+    enabled: lihatPesanan,
+    refetchInterval: 30_000,
+  });
+  const mejaTerisi = (mejaNav ?? []).filter((r) => r.status === "isi").length;
 
   if (!auth) return null;
 
@@ -421,6 +454,15 @@ export function Layout() {
                   </NavLink>
                 </>
               )}
+              {/* Papan Pesanan Masuk — layar kerja lantai toko: dapur/bar/tim
+                  melihat pesanan kasir (termasuk yang belum dibayar) dan
+                  menandainya selesai. Bukan urusan Central Kitchen. */}
+              {!timDiCk && !dCk && (
+                <NavLink to="/pesanan" className={navFlex}>
+                  <span>🛎 Pesanan Masuk</span>
+                  {badgeOranye(pesananDikerjakan)}
+                </NavLink>
+              )}
               {/* Kasir (jual) & Tutup Kasir: HANYA peran kasir */}
               {isKasir && !dCk && (
                 <NavLink to="/kasir" className={linkClass}>
@@ -443,9 +485,16 @@ export function Layout() {
                   🍜 Lihat Menu
                 </NavLink>
               )}
-              {!isTim && !isKitchen && !isBar && !dCk && (
-                <NavLink to="/pengaturan/meja" className={linkClass}>
-                  🍽 Meja
+              {/* Meja: SELURUH peran cabang — waiter (tim), dapur, bar, dan
+                  kasir sama-sama perlu tahu meja mana yang kosong. Syaratnya
+                  disalin dari Papan Pesanan (`!timDiCk && !dCk`), BUKAN dari
+                  syarat Meja yang lama: setiap cabang baru — termasuk Central
+                  Kitchen — disemai meja bawaan, jadi tanpa `!timDiCk` tim CK
+                  akan menata denah dapur yang tak pernah dilihat siapa pun. */}
+              {!timDiCk && !dCk && (
+                <NavLink to="/pengaturan/meja" className={navFlex}>
+                  <span>🍽 Meja</span>
+                  {badgeOranye(mejaTerisi)}
                 </NavLink>
               )}
               {/* Menu STOK hanya di KANTOR (owner/admin). Di cabang & CK, staf

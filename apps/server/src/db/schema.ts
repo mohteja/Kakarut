@@ -83,6 +83,17 @@ export const penyesuaianStatusEnum = pgEnum("penyesuaian_status", [
   "disetujui",
   "ditolak",
 ]);
+/**
+ * PENGERJAAN pesanan pelanggan di papan dapur — sengaja BUKAN memakai ulang
+ * `penyesuaianStatusEnum`/`konfirmasiStatusEnum`: keduanya berkosakata
+ * PERSETUJUAN ("disetujui"/"dikonfirmasi"), sedangkan ini soal apakah
+ * makanannya sudah dibuat. Menyamakan "disetujui" dengan "makanan selesai"
+ * akan menyesatkan setiap pembaca kode berikutnya.
+ *
+ * Pesanan lahir "dikerjakan" (masuk antrean dapur) lalu ditandai "selesai"
+ * atau "batal".
+ */
+export const pesananStatusEnum = pgEnum("pesanan_status", ["dikerjakan", "selesai", "batal"]);
 /** jenis meja: meja makan biasa (dine-in) vs meja "Ruang Tunggu" untuk take away */
 export const mejaTipeEnum = pgEnum("meja_tipe", ["dine_in", "takeaway"]);
 export const metodeBayarEnum = pgEnum("metode_bayar", ["tunai", "qris", "transfer"]);
@@ -1136,7 +1147,23 @@ export const cleaningReportItems = pgTable(
     fotoUrl: text("foto_url"),
     urutan: integer("urutan").notNull().default(0),
   },
-  (t) => [index("cleaning_report_items_report_idx").on(t.reportId)],
+  (t) => [
+    index("cleaning_report_items_report_idx").on(t.reportId),
+    /**
+     * Satu area maksimal satu baris per laporan. `siapkanItems` sudah menolak
+     * area kembar DALAM satu permintaan, tapi itu tak menolong saat dua
+     * perangkat mem-PATCH laporan yang sama nyaris bersamaan: di READ
+     * COMMITTED, transaksi kedua menghapus 0 baris (yang pertama sudah
+     * menghapusnya) lalu tetap menyisipkan set lengkapnya — hasilnya checklist
+     * ganda yang MEMBEKU esok hari karena PATCH lintas-tanggal ditolak 409.
+     * Transaksi saja tak menutup ini; hanya indeks unik yang bisa.
+     *
+     * `areaId` boleh NULL (area masternya dihapus) dan Postgres memperlakukan
+     * NULL sebagai saling berbeda — jadi laporan lama yang areanya sudah
+     * dihapus tetap boleh punya banyak baris ber-`area_id` NULL.
+     */
+    uniqueIndex("cleaning_report_items_report_area_uq").on(t.reportId, t.areaId),
+  ],
 );
 
 export const sales = pgTable(
@@ -1193,6 +1220,26 @@ export const sales = pgTable(
      * eksklusif (`shift_id` terisi ATAU `shift_id IS NULL` + di dalam jendela).
      */
     shiftId: uuid("shift_id").references(() => shifts.id),
+    /**
+     * PAPAN PESANAN — apakah makanannya sudah dibuat. Terpisah sama sekali dari
+     * pembayaran: transaksi ini sudah lunas, yang dilacak di sini pengerjaannya.
+     */
+    pesananStatus: pesananStatusEnum("pesanan_status").notNull().default("dikerjakan"),
+    pesananStatusAt: timestamp("pesanan_status_at", { withTimezone: true }),
+    pesananStatusOleh: uuid("pesanan_status_oleh").references(() => users.id),
+    /**
+     * PENANDA PENYAJIAN "bawa pulang" dari papan dapur — SENGAJA bukan
+     * `is_dine_in`. `is_dine_in` adalah fakta pembukuan: `sale_consumptions`
+     * dan `hpp_satuan` sudah terlanjur dihitung darinya lewat `qtyEfektif()`
+     * (dine-in melewati kemasan, pelengkap 50%). Membaliknya membuat baris ini
+     * berbohong tentang angkanya sendiri. Kolom ini hanya instruksi penyajian.
+     */
+    sajianTakeaway: boolean("sajian_takeaway").notNull().default(false),
+    /**
+     * Bill asal bila transaksi ini lahir dari open bill. TANPA foreign key:
+     * bill bisa dibatalkan/dihapus permanen, dan jejak asalnya tetap berguna.
+     */
+    asalOpenBillId: uuid("asal_open_bill_id"),
     // soft-delete (Tempat Sampah): baris tetap disimpan sebagai catatan siapa yang menghapus
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
     deletedBy: uuid("deleted_by").references(() => users.id),
@@ -1202,6 +1249,8 @@ export const sales = pgTable(
     index("sales_company_branch_date_idx").on(t.companyId, t.branchId, t.saleDate),
     // rekap shift menyaring per shift_id — indeks parsial cukup, mayoritas NULL
     index("sales_shift_idx").on(t.shiftId),
+    // papan meja: "transaksi apa saja di meja X sejak jam sekian"
+    index("sales_meja_idx").on(t.branchId, t.mejaId, t.waktu),
   ],
 );
 
@@ -1269,8 +1318,123 @@ export const openBills = pgTable(
       .references(() => users.id),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    /** PAPAN PESANAN — pengerjaan dapur; lihat komentar di `sales.pesananStatus` */
+    pesananStatus: pesananStatusEnum("pesanan_status").notNull().default("dikerjakan"),
+    pesananStatusAt: timestamp("pesanan_status_at", { withTimezone: true }),
+    pesananStatusOleh: uuid("pesanan_status_oleh").references(() => users.id),
+    /** penanda penyajian "bawa pulang" — ikut diwarisi transaksi saat bill dibayar */
+    sajianTakeaway: boolean("sajian_takeaway").notNull().default(false),
+    /**
+     * Bill SELESAI: sudah dibayar (jadi `sale_id`) atau dibatalkan. Dulu bill
+     * dihapus keras oleh browser setelah bayar — panggilan yang tak dijamin
+     * sampai, dan yang jalur sinkron offline tak pernah kirim sama sekali,
+     * sehingga bill hantu menumpuk. Sekarang penutupan dilakukan server di
+     * dalam transaksi `createSale`, dan baris bill DIPERTAHANKAN sebagai
+     * jejak asal pesanan.
+     */
+    closedAt: timestamp("closed_at", { withTimezone: true }),
+    saleId: uuid("sale_id").references(() => sales.id),
   },
-  (t) => [index("open_bills_company_branch_idx").on(t.companyId, t.branchId, t.updatedAt)],
+  (t) => [
+    index("open_bills_company_branch_idx").on(t.companyId, t.branchId, t.updatedAt),
+    // Papan meja menanyakan "bill mana yang masih berjalan di meja X" tiap 30
+    // detik dari tiap layar cabang. Indeks PARSIAL: hanya bill yang belum
+    // ditutup yang pernah dicari, dan itu segelintir baris walau tabelnya
+    // tumbuh setahun. (Pola sama dengan `shifts_open_per_branch_uq`.)
+    index("open_bills_meja_aktif_idx")
+      .on(t.branchId, t.mejaId)
+      .where(sql`${t.closedAt} IS NULL`),
+  ],
+);
+
+/**
+ * RIWAYAT perubahan status pesanan — siapa menandai apa, kapan. Meniru
+ * `fakturLogs`: satu baris per aksi, tak pernah diubah/dihapus.
+ *
+ * Dua kolom rujukan yang saling eksklusif karena satu pesanan bisa hidup
+ * sebagai open bill lalu menjadi penjualan. Keduanya `onDelete: "cascade"` —
+ * bila induknya benar-benar dihapus permanen (Tempat Sampah dikosongkan),
+ * jejaknya ikut hilang bersamanya, bukan menggantung.
+ */
+export const pesananLogs = pgTable(
+  "pesanan_logs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    branchId: uuid("branch_id")
+      .notNull()
+      .references(() => branches.id),
+    saleId: uuid("sale_id").references(() => sales.id, { onDelete: "cascade" }),
+    openBillId: uuid("open_bill_id").references(() => openBills.id, { onDelete: "cascade" }),
+    /** label siap tampil, mis. "Ditandai selesai", "Diubah jadi bawa pulang" */
+    aksi: text("aksi").notNull(),
+    statusLama: pesananStatusEnum("status_lama"),
+    statusBaru: pesananStatusEnum("status_baru"),
+    userId: uuid("user_id").references(() => users.id),
+    waktu: timestamp("waktu", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("pesanan_logs_sale_idx").on(t.saleId, t.waktu),
+    index("pesanan_logs_bill_idx").on(t.openBillId, t.waktu),
+    index("pesanan_logs_cabang_idx").on(t.companyId, t.branchId, t.waktu),
+    // "riwayat kegiatan per karyawan" — pola yang sama dengan faktur_logs
+    index("pesanan_logs_user_idx").on(t.companyId, t.userId, t.waktu),
+  ],
+);
+
+/**
+ * PAPAN MEJA — jejak "meja ini sudah saya bereskan", satu baris per penekanan
+ * tombol Kosongkan. Tabel ini punya DUA pekerjaan sekaligus:
+ *
+ * 1. **Audit** — siapa mengosongkan meja mana, kapan, dan apakah ia menerobos
+ *    peringatan bahwa masih ada tagihan hidup di sana.
+ * 2. **Batas derivasi** — status "isi" TIDAK disimpan di mana pun; ia dihitung
+ *    dari tagihan & transaksi yang memang sudah tercatat. Kolom `sampai` di
+ *    sinilah yang memberitahu perhitungan itu "abaikan yang lebih tua dari ini".
+ *
+ * `sampai` sengaja BUKAN `now()` melainkan waktu transaksi TERBARU yang benar
+ * -benar ikut terhitung saat tombol ditekan (watermark). Bedanya menentukan:
+ * dengan `now()`, pesanan yang masuk sepersekian detik sebelum tombol ditekan
+ * ikut tersapu diam-diam dan meja jadi hijau padahal tamunya baru datang.
+ * Dengan watermark, pesanan itu lebih baru dari batas → meja tetap merah.
+ */
+export const mejaKosongLogs = pgTable(
+  "meja_kosong_logs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    branchId: uuid("branch_id")
+      .notNull()
+      .references(() => branches.id),
+    mejaId: uuid("meja_id")
+      .notNull()
+      .references(() => meja.id, { onDelete: "cascade" }),
+    /** label siap tampil, mis. "Meja dikosongkan" */
+    aksi: text("aksi").notNull(),
+    /**
+     * Pengosongan BIASA hanya memotong transaksi yang sudah lunas. Hanya baris
+     * ber-`paksa` yang juga memotong bill yang BELUM dibayar — itulah yang
+     * membuat tombol biasa mustahil menyembunyikan tagihan hidup tanpa sengaja.
+     * Bill-nya sendiri tak pernah dibatalkan: ia tetap ada dan tetap ditagih.
+     */
+    paksa: boolean("paksa").notNull().default(false),
+    /** ringkas untuk layar riwayat, mis. "2 transaksi · 1 bill belum dibayar" */
+    detail: text("detail"),
+    userId: uuid("user_id").references(() => users.id),
+    /** batas derivasi (watermark) — lihat komentar tabel */
+    sampai: timestamp("sampai", { withTimezone: true }).notNull(),
+    waktu: timestamp("waktu", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("meja_kosong_logs_meja_idx").on(t.mejaId, t.waktu),
+    index("meja_kosong_logs_cabang_idx").on(t.companyId, t.branchId, t.waktu),
+    // "riwayat kegiatan per karyawan" — pola yang sama dengan pesanan_logs
+    index("meja_kosong_logs_user_idx").on(t.companyId, t.userId, t.waktu),
+  ],
 );
 
 export const openBillItems = pgTable(

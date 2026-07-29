@@ -20,6 +20,7 @@ import { backfillKategoriBahan } from "./modules/kategori-bahan/service";
 import { arsipkanMembershipNonaktif, backfillEmployeeCode } from "./modules/users/service";
 import { pastikanSuperAdmin } from "./modules/auth/superadmin";
 import { konfirmasiProduksiCkLokalTertahan } from "./modules/produksi/backfill";
+import { backfillSajianTakeaway } from "./modules/penjualan/backfill";
 import { backfillNomorDokumen, backfillNomorPermintaan } from "./modules/dokumen/nomor";
 import { terapkanSemuaKonsumsiOtomatis } from "./modules/perlengkapan/service";
 import { provisionGuest } from "./seed/guest";
@@ -110,6 +111,11 @@ if (env.AUTO_MIGRATE) {
   );
   if (rakPerlengkapan > 0)
     console.log(`Rak perlengkapan lama dipindah ke Tempat Penyimpanan: ${rakPerlengkapan} item.`);
+  // Penanda penyajian (Papan Pesanan Masuk) lahir DEFAULT false → transaksi
+  // bawa pulang lama terbaca "makan di tempat". Selaraskan dgn is_dine_in.
+  const sajianLama = await sekaliSaja("sajian_takeaway_awal", () => backfillSajianTakeaway(db));
+  if (sajianLama > 0)
+    console.log(`Penanda penyajian transaksi lama diselaraskan: ${sajianLama} transaksi.`);
 }
 
 // Pastikan ada super admin platform (aman & idempoten — tidak menghapus data).

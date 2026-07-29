@@ -19,9 +19,13 @@ export function AreaKebersihanModal({ open, onClose }: { open: boolean; onClose:
   const [nama, setNama] = useState("");
   const [branchId, setBranchId] = useState("");
 
+  // `branch_id=all` — ini layar MASTER, jadi harus melihat area seluruh cabang
+  // termasuk yang nonaktif. Tanpa penanda itu daftarnya menyempit ke cabang
+  // penugasan pemanggil (bawaan "saya sedang jadi pelapor"), sehingga admin
+  // bercabang tak bisa lagi mengurus area cabang lain dari sini.
   const { data: area = [], isLoading } = useQuery({
     queryKey: ["kebersihan-area", "master"],
-    queryFn: () => api<AreaKebersihanDto[]>("/kebersihan/area"),
+    queryFn: () => api<AreaKebersihanDto[]>("/kebersihan/area?branch_id=all"),
     enabled: open,
   });
 

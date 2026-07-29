@@ -1039,6 +1039,48 @@ export interface MejaDto {
   is_active: boolean;
 }
 
+/** Meja sedang dipakai tamu, atau siap ditempati. */
+export type MejaStatus = "isi" | "kosong";
+
+/**
+ * Status okupansi satu meja — dari `GET /api/meja/status`, BUKAN dari
+ * `GET /api/meja` (daftar master itu di-cache lewat ETag; status hidup akan
+ * membuat sidik jarinya berubah tiap transaksi).
+ *
+ * Hanya meja `dine_in` yang punya status. "Ruang Tunggu" (takeaway) dipakai
+ * bergantian sepanjang hari oleh orang berbeda — menandainya terisi akan
+ * membuatnya merah selamanya sejak pesanan bawa pulang pertama.
+ */
+export interface MejaStatusDto {
+  meja_id: string;
+  nama: string;
+  status: MejaStatus;
+  /** tagihan yang BELUM dibayar di meja ini (0 = semua sudah lunas) */
+  bill_terbuka: number;
+  /** transaksi lunas yang masih dianggap menempati meja ini */
+  transaksi_aktif: number;
+  /**
+   * `true` bila semuanya sudah lunas tapi meja belum dibereskan — tamu yang
+   * "sudah bayar, masih duduk". Meja inilah yang paling layak ditawari tombol
+   * Kosongkan.
+   */
+  lunas_masih_duduk: boolean;
+  /** ISO — tagihan PALING AWAL di meja ini (dasar hitungan "sudah duduk berapa lama") */
+  sejak: string | null;
+  /** ISO — kapan meja ini terakhir dibereskan, null bila belum pernah */
+  dikosongkan_pada: string | null;
+  dikosongkan_oleh: string | null;
+}
+
+/** Satu baris riwayat "meja dibereskan" — dari `GET /api/meja/:id/log`. */
+export interface MejaKosongLogRow {
+  waktu: string;
+  aksi: string;
+  oleh: string | null;
+  paksa: boolean;
+  detail: string | null;
+}
+
 export type PenyesuaianKategori =
   | "waste_bahan"
   | "waste_matang"
@@ -1317,6 +1359,12 @@ export interface RiwayatTransaksiRow {
   waktu: string;
   total: number;
   is_dine_in: boolean;
+  /**
+   * Penanda PENYAJIAN dari Papan Pesanan Masuk — dapur bisa mengubahnya jadi
+   * bawa pulang setelah transaksi tercatat. Sengaja TERPISAH dari `is_dine_in`
+   * (fakta pembukuan yang sudah dipakai menghitung konsumsi bahan & HPP).
+   */
+  sajian_takeaway: boolean;
   /** label meja terpilih (null bila transaksi lama tanpa meja) */
   meja: string | null;
   /** jumlah baris menu pada transaksi */
@@ -1447,6 +1495,62 @@ export interface OpenBillDetail {
   customer_wa: string | null;
   catatan: string | null;
   items: OpenBillItemDto[];
+}
+
+/**
+ * PAPAN PESANAN MASUK — pengerjaan dapur, bukan persetujuan. Pesanan lahir
+ * `dikerjakan` (masuk antrean) lalu ditandai `selesai` atau `batal`.
+ */
+export type PesananStatus = "dikerjakan" | "selesai" | "batal";
+
+/**
+ * Asal pesanan. `open_bill` = belum dibayar (masih bisa diubah kasir);
+ * `penjualan` = sudah dibayar dan dibukukan. Satu pesanan bisa berpindah dari
+ * `open_bill` ke `penjualan` saat dilunasi — statusnya ikut terbawa.
+ */
+export type PesananJenis = "open_bill" | "penjualan";
+
+/** Satu baris menu dalam pesanan, apa adanya untuk dibaca dapur. */
+export interface PesananItemRow {
+  nama: string;
+  qty: number;
+  /** personalisasi pelanggan, mis. "tanpa sambal" */
+  catatan: string | null;
+  is_dine_in: boolean;
+}
+
+/** Satu kartu di papan pesanan. */
+export interface PesananRow {
+  id: string;
+  jenis: PesananJenis;
+  /** nomor struk; null selama masih open bill (belum ada transaksi) */
+  nomor: string | null;
+  meja: string | null;
+  customer: string | null;
+  /** waktu pesanan masuk (ISO) */
+  waktu: string;
+  total: number;
+  dibayar: boolean;
+  status: PesananStatus;
+  /**
+   * Penanda penyajian "bawa pulang" dari papan. SENGAJA terpisah dari
+   * `is_dine_in`: yang terakhir itu fakta pembukuan yang sudah dipakai
+   * menghitung pemakaian bahan & HPP, dan tidak diubah oleh papan.
+   */
+  sajian_takeaway: boolean;
+  is_dine_in: boolean;
+  catatan: string | null;
+  items: PesananItemRow[];
+  /** siapa & kapan status terakhir diubah; null = belum pernah disentuh */
+  status_oleh: string | null;
+  status_pada: string | null;
+}
+
+/** Satu baris riwayat perubahan status sebuah pesanan. */
+export interface PesananLogRow {
+  waktu: string;
+  aksi: string;
+  oleh: string | null;
 }
 
 /** Sesi kas (shift) per cabang. ditutup_* null → shift masih terbuka. */

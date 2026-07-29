@@ -25,10 +25,283 @@ tanpa akses repo server.
 
 ---
 
+## Rilis: Perbaikan Laporan Kebersihan (`saya=1`, validasi query, transaksi)
+
+> **BELUM di-merge ke production** — masih di PR. Jangan rilis klien yang
+> bergantung padanya sebelum baris ini berubah jadi "Sudah di-merge".
+>
+> Ada migrasi DB (`0091`): dedup `cleaning_report_items` lalu indeks unik
+> `(report_id, area_id)`. Tidak ada perubahan kolom maupun bentuk response.
+
+Hasil audit fitur Laporan Kebersihan. Tidak ada lubang keamanan yang ditemukan —
+isolasi perusahaan, gerbang peran, dan pemeriksaan kepemilikan semuanya utuh.
+Yang diperbaiki: dua **500** yang bisa dipicu klien, satu layar yang memakai data
+orang lain, dan tiga penyimpangan penulisan data.
+
+### 🔴 WAJIB — layar pengisian harus mengirim `?saya=1`
+
+`GET /api/kebersihan` sekarang menerima `saya=1`, yang memaksa penyempitan ke
+laporan pemanggil untuk **semua** peran.
+
+Selama ini endpoint itu hanya menyempit sendiri untuk peran terkunci cabang
+(`cashier`/`tim`/`kitchen`/`bar`). Untuk owner/admin ia mengembalikan laporan
+**seluruh karyawan**. Klien yang memakainya sebagai "laporan saya" akan:
+menandai kartu sesi sebagai sudah terisi padahal yang mengisi orang lain,
+memuat checklist orang lain saat kartunya dibuka, dan mengarahkan tombol
+Perbarui ke `PATCH /api/kebersihan/<id orang lain>` — yang ditolak **403**.
+Akibatnya admin yang punya cabang **tak bisa** mengirim laporannya sendiri.
+
+Kalau layar pengisian mobile memanggil `GET /api/kebersihan` polos, tambahkan
+`?saya=1`. Peran terkunci cabang tidak berubah perilaku sama sekali.
+
+### 🟡 PERLU DICEK — `GET /api/kebersihan/area` punya bawaan baru untuk manajemen
+
+Endpoint ini melayani dua layar yang berbeda, jadi saringannya kini harus dipilih:
+
+| Layar | Kirim | Isinya |
+| --- | --- | --- |
+| Pengisian checklist | `?aktif=1` (tanpa `branch_id`) | cabang penugasan sendiri, hanya yang aktif |
+| Master area | `?branch_id=all` | seluruh area perusahaan, termasuk nonaktif |
+
+Untuk peran terkunci cabang **tidak ada yang berubah** — mereka selalu menerima
+area lokasinya yang aktif. Yang berubah hanya bawaan bagi owner/admin: dulu
+tanpa query mereka menerima SEMUA area perusahaan, termasuk area cabang lain dan
+area nonaktif — yaitu persis yang ditolak jalur tulis dengan **400**.
+
+### 🟡 PERLU DICEK — dua query yang dulu menjatuhkan server kini 400/fallback
+
+| Permintaan | Dulu | Sekarang |
+| --- | --- | --- |
+| `rekap?bulan=2026-13` atau `2026-00` | **500** | **200**, jatuh ke bulan berjalan |
+| `?branch_id=<bukan-uuid>` (rekap & daftar) | **500** | **400** |
+
+Pola bulan dulu `\d{4}-\d{2}`, sehingga bulan 00/13/99 lolos lalu dirakit jadi
+tanggal mustahil (`2026-13-01`) dan Postgres melempar. Ini menggigit klien yang
+menyusun bulan dari indeks berbasis-0 atau kena off-by-one di bulan Desember.
+`branch_id` yang bukan UUID juga masuk langsung ke klausa `WHERE` kolom uuid.
+
+### 🟡 PERLU DICEK — `PATCH /api/kebersihan/:id` berhenti menghapus `catatan`
+
+`items` tetap **mengganti seluruh** checklist. `catatan` kini bersifat **patch**:
+
+- field tidak dikirim → nilai lama **dibiarkan**
+- field dikirim `null` → dikosongkan
+
+Dulu keduanya sama-sama menulis NULL, jadi klien yang cuma membetulkan checklist
+ikut menghapus pesan karyawan ke owner tanpa galat dan tanpa jejak. Klien yang
+selama ini selalu mengirim `catatan` tidak berubah perilaku.
+
+### 🟡 PERLU DICEK — `PATCH` bisa membalas **409** saat dua perangkat bentrok
+
+Kalau dua perangkat mem-PATCH laporan yang sama nyaris bersamaan, salah satunya
+kini kalah dengan **409** *"Laporan ini baru saja diperbarui dari perangkat lain
+— muat ulang lalu coba lagi"*. Tangani seperti bentrok biasa: muat ulang
+laporannya (`GET /api/kebersihan/:id`) lalu kirim ulang perubahannya.
+
+Sebelum ini keduanya sama-sama **berhasil**, dan checklist jadi ganda —
+`total_area`, `area_bersih`, `jumlah_foto`, dan `area_kotor` di rekap owner
+semuanya berlipat. Lebih buruk lagi, angka itu **membeku**: esok harinya PATCH
+lintas-tanggal ditolak 409 sehingga tak ada yang bisa membetulkannya.
+
+`409` pada `PATCH` sekarang punya dua arti — laporan hari sebelumnya, atau
+bentrok perangkat. Bedakan dari teks pesannya bila perlu.
+
+### ⚪️ INFO — area nonaktif ditolak, penulisan jadi atomik
+
+`POST` dan `PATCH` kini menolak `area_id` yang sudah dinonaktifkan owner
+(**400**, pesannya menyebut jumlah baris yang bermasalah). Muat ulang
+`GET /api/kebersihan/area` bila menerimanya.
+
+Keduanya juga menulis dalam satu transaksi, jadi laporan tanpa item atau
+checklist yang hilang separuh jalan tidak lagi mungkin.
+
+### ⚪️ INFO — migrasi `0091` membersihkan duplikat lama
+
+Database yang sudah terlanjur punya checklist ganda dibereskan otomatis saat
+migrasi: baris kembar per `(report_id, area_id)` dibuang, menyisakan yang paling
+berisi (berfoto dulu, lalu yang bercatatan). Baris ber-`area_id` NULL (area
+masternya sudah dihapus) sengaja tidak disentuh. Klien tak perlu berbuat apa pun
+— tapi angka rekap sebuah hari bisa **turun** setelah rilis, dan itu memang
+koreksi, bukan data yang hilang.
+
+---
+
+## Rilis: Laporan Harga dibuka untuk karyawan Central Kitchen
+
+> **BELUM di-merge ke production** — masih di PR. Jangan rilis klien yang
+> bergantung padanya sebelum baris ini berubah jadi "Sudah di-merge".
+>
+> Tidak ada migrasi DB. Tidak ada perubahan bentuk request/response.
+
+### 🟡 PERLU DICEK — dua endpoint laporan harga tak lagi khusus owner/admin
+
+| Endpoint | Sebelum | Sesudah |
+| --- | --- | --- |
+| `POST /api/pembelian/laporan-harga/:fakturId/dampak` | owner/admin | gerbang grup `/pembelian/*` |
+| `POST /api/pembelian/laporan-harga/:fakturId` | owner/admin | gerbang grup `/pembelian/*` |
+
+Gerbang grup itu = **owner/admin, ATAU `tim` yang cabangnya Central Kitchen** —
+sama persis dengan seluruh `/api/pembelian/*` lainnya. Kedua rute ini dulu satu-
+satunya yang menyempitkan diri lagi di dalam grup; penyempitan itu dihapus.
+
+Yang **tetap 403**: `cashier`, `kitchen`, `bar`, dan `tim` di cabang **store** —
+mereka ditolak gerbang grup, jadi tak ada pelonggaran ke luar Central Kitchen.
+
+**Yang perlu dicek di klien:** kalau layar mobile menyembunyikan tombol "Laporan
+Harga" berdasarkan peran, longgarkan syaratnya agar akun CK ikut melihatnya.
+Web justru tak pernah menyaring per peran — tombolnya sudah muncul untuk tim CK
+dan server-lah yang menolak, sehingga gejalanya adalah "peran tidak diizinkan"
+saat tombol ditekan. Bila klien mobile menyalin logika yang sama, tak ada yang
+perlu diubah.
+
+**Kenapa dibuka:** yang belanja dan memegang notanya adalah tim CK. Selama hanya
+manajemen yang boleh menyimpan, harga riil baru masuk kalau manajemen sempat
+menyalinnya — dan selama belum, RAB belanja berikutnya memakai harga basi.
+Pengamannya bukan peran, melainkan pratinjau `/dampak` (menghitung pergeseran
+food cost tiap menu **sebelum** apa pun ditulis) plus `updated_by` +
+`laporan_harga_at` yang tersimpan di tiap baris yang dilaporkan — pelakunya
+tampil sebagai `diubah_oleh` pada baris `GET /api/pembelian`.
+
+---
+
+## Rilis: Status meja isi/kosong (`/api/meja/status`) + gerbang tulis `/api/meja`
+
+> **BELUM di-merge ke production** — masih di PR. Jangan rilis klien yang
+> bergantung padanya sebelum baris ini berubah jadi "Sudah di-merge".
+>
+> Ada migrasi DB (`0090`): tabel `meja_kosong_logs` + 2 indeks bantu. Tidak ada
+> perubahan kolom pada tabel lama.
+
+Sampai sekarang tak ada cara apa pun mengetahui meja mana yang kosong: tabel
+meja hanya master data. Waiter menghafal atau berkeliling.
+
+### 🟢 BARU — `GET /api/meja/status` dan kawan-kawannya
+
+| Endpoint | Guna |
+| --- | --- |
+| `GET /api/meja/status` | `MejaStatusDto[]` — **hanya meja `dine_in`** |
+| `POST /api/meja/:id/kosongkan` | bereskan meja; `{ paksa?: bool }` |
+| `GET /api/meja/:id/log` | "siapa membereskan, kapan" |
+
+Detail lengkap + alasannya: blok `/api/meja` di `docs/API-CONTRACT.md`. Tiga hal
+yang paling mudah salah dipahami:
+
+1. **Dibayar ≠ kosong.** Orang lazim bayar dulu lalu duduk. Meja baru bebas saat
+   ada yang menekan Kosongkan. Jangan bikin klien mengosongkan meja sendiri
+   setelah transaksi berhasil.
+2. **Meja terisi tetap boleh dipilih.** Statusnya memberi tahu, bukan melarang —
+   satu meja dua bill itu sah, dan melanjutkan open bill di meja terisi wajib
+   bisa. Jangan menyaring meja terisi dari pemilih meja.
+3. **Ruang Tunggu tidak punya status** dan tidak muncul di daftar sama sekali.
+   Seluruh penjualan bawa pulang menunjuk ke satu baris itu; menandainya terisi
+   akan mengunci jalur bawa pulang cabang selamanya.
+
+Tombol Kosongkan bertahap dua: kalau meja masih punya bill belum dibayar,
+permintaan pertama ditolak **409** dengan badan `{ kode: "bill_berjalan",
+bill_terbuka: N }`. Tampilkan konfirmasi kedua, lalu kirim ulang dengan
+`{ paksa: true }`. Tagihannya **tidak dibatalkan** — tetap ada di
+`GET /api/open-bill`. **Baca `kode`, jangan mencocokkan teks pesannya** — teks
+bisa berubah kapan saja.
+
+### 🔴 WAJIB — `/api/meja` yang MENGUBAH kini tertutup untuk tim/kitchen/bar
+
+`POST /api/meja`, `PUT /api/meja/tata-letak`, `PATCH /api/meja/:id`, dan
+`DELETE /api/meja/:id` sekarang **[owner/admin/cashier]**. Klien yang memakai
+token `tim`, `kitchen`, atau `bar` untuk keempatnya akan mulai mendapat **403**.
+
+Ini menambal lubang yang sudah ada, bukan pengetatan baru yang direncanakan:
+modul meja selama ini **tidak punya gerbang peran sama sekali**, sehingga akun
+dapur bisa menghapus meja atau menimpa denah lewat API walau tombolnya tak ada
+di layar mana pun. `GET /api/meja` sendiri **tetap [any]** dan `MejaDto` tidak
+berubah satu byte pun.
+
+Dua penjaga baru yang bisa mengejutkan: menghapus atau menonaktifkan meja yang
+**masih terisi** kini ditolak **409** ("kosongkan dulu"). Sebelumnya berhasil
+dan membuat tagihan yang masih hidup jadi yatim (`meja_id` ber-`onDelete: set
+null`).
+
+### ⚪️ INFO — cache ETag tidak perlu disentuh
+
+Status okupansi sengaja **tidak** ditempel ke `GET /api/meja`. Daftar master itu
+tetap ber-ETag dan tetap kena 304 seperti biasa; `GET /api/meja/status` adalah
+endpoint terpisah tanpa ETag yang memang harus ditarik berkala (web memakai 30
+detik).
+
+---
+
+## Rilis: Papan Pesanan Masuk (`/api/pesanan`) + open bill ditutup server
+
+> **BELUM di-merge ke production** — masih di PR. Jangan rilis klien yang
+> bergantung padanya sebelum baris ini berubah jadi "Sudah di-merge".
+>
+> Ada migrasi DB (`0089`): enum `pesanan_status`, kolom baru di `sales` &
+> `open_bills`, tabel `pesanan_logs`.
+
+Sebelum ini sistem **tak punya konsep status pesanan sama sekali**. Baris
+`sales` lahir sudah-dibayar dan tak pernah berubah lagi; satu-satunya artefak
+"belum selesai" adalah open bill, yang **hanya bisa dibaca kasir**. Dapur tak
+punya layar kerja apa pun untuk pesanan pelanggan — jadi pesanan "tertinggal"
+tanpa ada tempat mengeceknya.
+
+### 🟢 BARU — `GET /api/pesanan` dan kawan-kawannya
+
+Papan menggabungkan **open bill yang belum dibayar** + **penjualan hari ini**
+jadi satu daftar kartu, dan bisa dibaca peran `kitchen`/`bar`/`tim` — bukan
+hanya kasir. Detail lengkap: blok `/api/pesanan` di `docs/API-CONTRACT.md`.
+
+| Endpoint | Guna |
+| --- | --- |
+| `GET /api/pesanan` | daftar kartu (`PesananRow[]`), item disertakan inline |
+| `POST /api/pesanan/:jenis/:id/status` | `dikerjakan` / `selesai` / `batal` |
+| `POST /api/pesanan/:jenis/:id/sajian` | penanda bawa pulang |
+| `GET /api/pesanan/:jenis/:id/log` | "siapa menandai apa, kapan" |
+
+`:jenis` = `open_bill` atau `penjualan`. Status **ikut terbawa** saat bill
+dibayar, jadi satu pesanan tetap satu kartu — bukan dua.
+
+### 🔴 WAJIB — jangan lagi kirim `DELETE /api/open-bill/:id` setelah membayar
+
+`POST /api/penjualan` dengan `open_bill_id` sekarang **menutup bill-nya sendiri
+di dalam transaksi yang sama**. Dua akibat langsung untuk klien:
+
+- **Hapus panggilan `DELETE` sesudah bayar.** Sudah mubazir. Web dulu
+  mengirimnya *fire-and-forget* (gagal diam-diam saat jaringan putus) dan jalur
+  `POST /api/sync` **tak pernah** mengirimnya sama sekali — jadi bill hantu
+  memang sudah menumpuk, cuma belum terlihat karena daftarnya hanya dibuka
+  kasir. Begitu papan menayangkannya, hantu itu jadi kartu ganda.
+- **Membayar bill yang sudah ditutup → `409`.** Tombol bayar tertekan dua kali
+  atau antrean offline yang mengirim ulang tak lagi menghasilkan dua transaksi.
+  Perlakukan `409` sebagai "sudah berhasil sebelumnya", bukan kegagalan.
+
+`DELETE /api/open-bill/:id` sendiri **tidak dihapus** — sekarang ia
+*membatalkan* (status `batal` + baris riwayat). Bill tetap hilang dari
+`GET /api/open-bill` dan `GET /api/open-bill/:id` → `404` seperti dulu, jadi
+alur "batalkan bill" di klien tak perlu diubah.
+
+### 🟡 PERLU DICEK — `RiwayatTransaksiRow.sajian_takeaway`
+
+Field baru pada daftar `GET /api/penjualan`. **Bukan pengganti `is_dine_in`.**
+
+- `is_dine_in` = fakta pembukuan; nota, laporan, dan perhitungan bahan tetap
+  memakainya. Tombol bawa-pulang di papan **tidak** menyentuhnya.
+- `sajian_takeaway` = instruksi penyajian, boleh diubah dapur setelah transaksi.
+
+Penandanya **lahir sesuai pembukuannya** (`sajian_takeaway = !is_dine_in`),
+sehingga `sajian_takeaway == is_dine_in` berarti memang ada yang mengubahnya —
+itu sinyal untuk badge "diubah setelah transaksi". Transaksi lama diselaraskan
+otomatis saat server boot, jadi tak ada baris warisan yang salah tanda.
+
+> **Risiko yang disadari:** `sales.pesanan_status` lahir NOT NULL DEFAULT
+> `dikerjakan`, sehingga SELURUH penjualan lama bernilai `dikerjakan`. Papan
+> menyaring per tanggal jadi baris lama tak pernah tampil, tapi laporan apa pun
+> yang kelak menghitung "pesanan belum selesai" lintas tanggal akan salah bila
+> tidak membatasi tanggalnya.
+
+---
+
 ## Rilis: Detail produksi — BERAPA BATCH, bukan cuma gramnya (`batch_teks`)
 
-> **BELUM tayang di production** — masih di PR. Baris ini berubah jadi
-> "Sudah di-merge ke production" begitu tayang.
+> **Sudah di-merge ke production** (PR #128).
 >
 > Tidak ada migrasi DB. Dua field baru pada baris `GET /api/produksi` &
 > `GET /api/pembelian`; keduanya **aditif dan opsional**.

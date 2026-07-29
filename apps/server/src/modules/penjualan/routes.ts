@@ -146,6 +146,7 @@ export const penjualanRoutes = new Hono<AppEnv>()
         waktu: sales.waktu,
         total: sales.total,
         is_dine_in: sales.isDineIn,
+        sajian_takeaway: sales.sajianTakeaway,
         meja: sales.mejaLabel,
         kasir: users.nama,
         konsumen: sales.customerNama,

@@ -33,6 +33,7 @@ const TambahBahanBakuPage = lazy(() => import("./pages/bahan/TambahBahanBakuPage
 const UbahBahanBakuPage = lazy(() => import("./pages/bahan/UbahBahanBakuPage").then((m) => ({ default: m.UbahBahanBakuPage })));
 const KasirPage = lazy(() => import("./pages/kasir/KasirPage").then((m) => ({ default: m.KasirPage })));
 const RiwayatPage = lazy(() => import("./pages/kasir/RiwayatPage").then((m) => ({ default: m.RiwayatPage })));
+const PesananPage = lazy(() => import("./pages/pesanan/PesananPage").then((m) => ({ default: m.PesananPage })));
 const ShiftPage = lazy(() => import("./pages/kasir/ShiftPage").then((m) => ({ default: m.ShiftPage })));
 const LaporanPage = lazy(() => import("./pages/laporan/LaporanPage").then((m) => ({ default: m.LaporanPage })));
 const LaporanMenuLarisPage = lazy(() => import("./pages/laporan/LaporanMenuLarisPage").then((m) => ({ default: m.LaporanMenuLarisPage })));
@@ -173,6 +174,10 @@ export default function App() {
             <>
               <Route path="/profil" element={<ProfilPage />} />
               <Route path="/kasir/riwayat" element={<RiwayatPage />} />
+              {/* Papan pesanan masuk — semua peran cabang + manajemen, sama
+                  persis dengan gerbang /pesanan/* di server. Dapur & bar butuh
+                  ini justru karena mereka tak boleh membuka /open-bill. */}
+              <Route path="/pesanan" element={<PesananPage />} />
               <Route path="/menu/lihat" element={<LihatMenuPage />} />
               <Route path="/stok" element={<StokPage />} />
               <Route path="/penerimaan" element={<PenerimaanPage />} />
@@ -188,13 +193,18 @@ export default function App() {
                   hanya Central Kitchen; halaman menyembunyikan formulirnya di
                   luar CK dan server menolak asal non-CK dengan 403. */}
               <Route path="/transfer-stok" element={<TransferStokPage />} />
-              {/* printer & meja — bukan peran tim/kitchen/bar */}
+              {/* Pengaturan Printer — bukan peran tim/kitchen/bar. Halaman ini
+                  bisa mengarahkan cetakan struk ke alamat jaringan mana pun,
+                  jadi TETAP tertutup. Rute Meja SENGAJA dikeluarkan dari blok
+                  ini alih-alih melonggarkan syaratnya: melonggarkan akan
+                  diam-diam membuka Printer juga. */}
               {!isTim && !isKitchen && !isBar && (
-                <>
-                  <Route path="/pengaturan/printer" element={<PrinterPage />} />
-                  <Route path="/pengaturan/meja" element={<MejaPage />} />
-                </>
+                <Route path="/pengaturan/printer" element={<PrinterPage />} />
               )}
+              {/* Meja: terbuka untuk SELURUH peran cabang — waiter perlu tahu
+                  meja mana yang kosong. Yang boleh mengubah master meja tetap
+                  owner/admin/kasir, ditegakkan di server dan di halamannya. */}
+              <Route path="/pengaturan/meja" element={<MejaPage />} />
               {/* Transaksi POS (jual + tutup kasir) — HANYA peran kasir */}
               {isKasir && (
                 <>

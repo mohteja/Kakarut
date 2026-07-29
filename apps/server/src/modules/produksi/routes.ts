@@ -58,7 +58,6 @@ import { AKSI_TAHAP_LOG, catatLogFaktur, rpLog } from "./log";
 import { nomorUntukRefs, terbitkanNomor } from "../dokumen/nomor";
 import {
   pastikanCabang,
-  requireRole,
   resolveBranchId,
   terikatCabang,
   verifikasiPassword,
@@ -1920,11 +1919,16 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
      * menulis (`hitungAcuanBaru`), jadi pratinjau tak mungkin beda dari hasil.
      *
      * POST, bukan GET: dampaknya bergantung pada angka yang sedang DIKETIK
-     * user, bukan pada angka yang sudah tersimpan di faktur. owner/admin.
+     * user, bukan pada angka yang sudah tersimpan di faktur.
+     *
+     * AKSES = gerbang `/pembelian/*` (manajemen ATAU karyawan Central Kitchen),
+     * tanpa penyempitan tambahan di sini. Yang belanja dan memegang notanya
+     * adalah tim CK; menutup laporan harga dari mereka berarti harga riil baru
+     * masuk kalau manajemen sempat menyalinnya — dan selama belum, RAB belanja
+     * berikutnya memakai harga yang sudah basi.
      */
     .post(
       "/laporan-harga/:fakturId/dampak",
-      requireRole("owner", "admin"),
       zValidator("json", z.object({ items: LaporanHargaItems })),
       async (c) => {
         if (tipe !== "beli") {
@@ -2016,7 +2020,14 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
      * (setelah barang dibeli/dikirim) → total_harga baris diperbarui + harga
      * beli acuan tiap bahan disegarkan ke MEDIAN riwayat pembelian (acuan RAB;
      * harga riil per lot tetap dipakai HPP FIFO/resep). Khusus jalur BELI.
-     * owner/admin.
+     *
+     * AKSES = gerbang `/pembelian/*` (manajemen ATAU karyawan Central Kitchen).
+     * Yang pulang dari pasar sambil memegang notanya adalah tim CK, jadi
+     * merekalah yang paling tahu harga sebenarnya. Pengamannya bukan peran,
+     * melainkan pratinjau: endpoint `/dampak` di atas menghitung pergeseran food
+     * cost tiap menu SEBELUM apa pun ditulis, dan layar menampilkannya. Tiap
+     * baris yang dilaporkan juga menyimpan `updated_by` + `laporan_harga_at`,
+     * jadi pelaku dan waktunya tercatat per baris (tampil sbg `diubah_oleh`).
      *
      * PENTING — kolam median hanya memuat lot yang harganya PERNAH DILIHAT
      * MANUSIA (`harga_tebakan = false`): harga diisi di faktur, dilaporkan
@@ -2031,7 +2042,6 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
      */
     .post(
       "/laporan-harga/:fakturId",
-      requireRole("owner", "admin"),
       zValidator(
         "json",
         z.object({ items: LaporanHargaItems, perbarui_acuan: z.boolean().optional() }),

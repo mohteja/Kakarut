@@ -12,8 +12,16 @@ import {
   inputClass,
 } from "../../components/ui";
 import { CabangDataBar } from "../../components/CabangDataBar";
+import { useAuth } from "../../context/AuthContext";
 import { useCabangData } from "../../context/BranchContext";
 import { api } from "../../lib/api";
+import { formatWaktu } from "../../lib/format";
+import {
+  KosongkanMejaModal,
+  kelasStatus,
+  labelStatus,
+  useMejaStatus,
+} from "./MejaStatusPanel";
 
 interface FormState {
   id?: string;
@@ -26,23 +34,40 @@ type Pos = Record<string, { x: number; y: number }>;
 const clamp = (v: number) => Math.max(4, Math.min(96, Math.round(v)));
 
 /**
- * Pengaturan meja per cabang. Dua mode terpisah:
- *  - "view": hanya melihat denah + daftar meja (tak bisa edit/tambah/seret).
- *  - "edit": masuk lewat "Tambah Meja"/"Atur Denah". Di sini boleh menambah,
- *    ubah, hapus, dan menyeret tata letak. Menekan "Simpan" menyimpan tata
- *    letak lalu kembali ke mode view.
+ * Meja per cabang — denah + status isi/kosong. Dua mode terpisah:
+ *  - "view": melihat denah, status okupansi, dan membereskan meja. TERBUKA
+ *    untuk seluruh peran cabang: waiter (tim), dapur, bar, dan kasir sama-sama
+ *    perlu tahu meja mana yang kosong.
+ *  - "edit": masuk lewat "Tambah Meja"/"Atur Denah" — HANYA owner/admin/kasir.
+ *    Di sini boleh menambah, ubah, hapus, dan menyeret tata letak.
+ *
+ * Pembatasan mode edit BUKAN cuma kosmetik: sebelum ini modul meja di server
+ * tak punya gerbang peran sama sekali, jadi siapa pun yang punya membership
+ * bisa menghapus meja lewat API. Gerbangnya sekarang ada di server; tombolnya
+ * disembunyikan di sini supaya layarnya jujur, bukan supaya aman.
+ *
  * Tata letak di kiri, daftar meja di kanan (desktop); di mobile denah di atas,
- * daftar di bawah. Kasir mengatur meja cabangnya sendiri; owner/admin lewat
- * pemilih cabang.
+ * daftar di bawah.
  */
 export function MejaPage() {
   // Meja fisik per cabang — dari Kantor pilih cabang yang mejanya diatur.
   const { query: branchQuery, id: branchId } = useCabangData();
+  const { auth } = useAuth();
+  const peran = auth?.user.role;
+  /** Master meja = owner/admin/kasir. Sama persis dengan gerbang server. */
+  const bolehAtur = peran === "owner" || peran === "admin" || peran === "cashier";
+  /** Membereskan meja = + tim (permintaan owner: "tim ataupun kasir"). */
+  const bolehKosongkan = bolehAtur || peran === "tim";
   const queryClient = useQueryClient();
   const { data: meja, isLoading } = useQuery({
     queryKey: ["meja", branchQuery],
     queryFn: () => api<MejaDto[]>(`/meja${branchQuery}`),
   });
+  const { data: statusList = [] } = useMejaStatus(branchQuery);
+  const statusById = new Map(statusList.map((s) => [s.meja_id, s]));
+  const [kosongkanId, setKosongkanId] = useState<string | null>(null);
+  const kosongkanTarget = statusList.find((s) => s.meja_id === kosongkanId) ?? null;
+  const jumlahIsi = statusList.filter((s) => s.status === "isi").length;
 
   const [mode, setMode] = useState<"view" | "edit">("view");
   const [form, setForm] = useState<FormState | null>(null);
@@ -71,6 +96,9 @@ export function MejaPage() {
   }, [meja]);
 
   function masukEdit() {
+    // penjaga keras, bukan cuma menyembunyikan tombol — supaya perubahan
+    // tampilan di kemudian hari tak diam-diam membuka mode edit ke semua peran
+    if (!bolehAtur) return;
     editingRef.current = true;
     setMode("edit");
   }
@@ -185,7 +213,7 @@ export function MejaPage() {
                 {simpanTataLetak.isPending ? "Menyimpan…" : "Simpan"}
               </button>
             </div>
-          ) : (
+          ) : bolehAtur ? (
             <div className="flex items-center gap-2">
               <button type="button" onClick={masukEdit} className={btnSecondary}>
                 ✏️ Atur Denah
@@ -201,10 +229,11 @@ export function MejaPage() {
                 + Tambah Meja
               </button>
             </div>
-          )
+          ) : null
         }
       >
-        Pengaturan Meja ({list.length})
+        Meja ({list.length}
+        {jumlahIsi > 0 ? ` · ${jumlahIsi} terisi` : ""})
       </PageTitle>
 
       {editing ? (
@@ -213,9 +242,12 @@ export function MejaPage() {
           menatanya. Tekan <b>Simpan</b> untuk menyimpan tata letak dan kembali ke tampilan.
         </div>
       ) : (
-        <div className="mb-3 text-sm text-stone-500">
-          Denah dan daftar meja cabang ini. Tekan <b>Atur Denah</b> atau <b>Tambah Meja</b> untuk
-          masuk mode edit. Meja <b>Ruang Tunggu</b> dipakai untuk pesanan bawa pulang (take away).
+        <div className="mb-3 rounded-lg bg-blue-50 px-4 py-2 text-sm text-blue-800">
+          <b className="text-red-700">Merah</b> = ada pesanan belum dibayar ·{" "}
+          <b className="text-amber-700">Kuning</b> = sudah bayar tapi tamu masih duduk ·{" "}
+          <b className="text-green-700">Hijau</b> = siap ditempati. Meja tetap terisi setelah
+          dibayar — tekan <b>Kosongkan</b> saat tamunya benar-benar pergi. Meja{" "}
+          <b>Ruang Tunggu</b> untuk bawa pulang, jadi tidak punya status.
         </div>
       )}
 
@@ -243,6 +275,15 @@ export function MejaPage() {
             {list.map((m) => {
               const p = pos[m.id] ?? { x: m.pos_x, y: m.pos_y };
               const takeaway = m.tipe === "takeaway";
+              const st = statusById.get(m.id);
+              // Saat menata denah, warna okupansi justru mengganggu — yang
+              // dicari mata adalah posisi, bukan siapa yang sedang duduk.
+              const warna =
+                takeaway || editing
+                  ? takeaway
+                    ? "border-amber-400 bg-amber-100 text-amber-800"
+                    : "border-blue-300 bg-blue-100 text-blue-800"
+                  : kelasStatus(st);
               return (
                 <div
                   key={m.id}
@@ -250,17 +291,14 @@ export function MejaPage() {
                   onPointerMove={(e) => onPointerMove(e, m.id)}
                   onPointerUp={(e) => onPointerUp(e, m.id)}
                   style={{ left: `${p.x}%`, top: `${p.y}%` }}
-                  className={`absolute flex -translate-x-1/2 -translate-y-1/2 touch-none select-none items-center justify-center rounded-lg px-3 py-2 text-center text-xs font-semibold shadow-sm ${
+                  className={`absolute flex max-w-[42%] -translate-x-1/2 -translate-y-1/2 touch-none select-none flex-col items-center justify-center rounded-lg border px-3 py-2 text-center text-xs font-semibold shadow-sm ${
                     editing ? "cursor-grab active:cursor-grabbing" : ""
-                  } ${
-                    takeaway
-                      ? "border border-amber-400 bg-amber-100 text-amber-800"
-                      : m.is_active
-                        ? "border border-blue-300 bg-blue-100 text-blue-800"
-                        : "border border-stone-300 bg-stone-100 text-stone-400"
-                  }`}
+                  } ${m.is_active || takeaway ? warna : "border-stone-300 bg-stone-100 text-stone-400"}`}
                 >
-                  {takeaway ? `🥡 ${m.nama}` : m.nama}
+                  <span>{takeaway ? `🥡 ${m.nama}` : m.nama}</span>
+                  {!takeaway && !editing && st && st.status === "isi" && (
+                    <span className="text-[10px] font-medium opacity-80">{labelStatus(st)}</span>
+                  )}
                 </div>
               );
             })}
@@ -268,7 +306,7 @@ export function MejaPage() {
           <div className="mt-2 text-xs text-stone-400">
             {editing
               ? 'Tip: seret meja untuk memindahkan, lalu tekan "Simpan".'
-              : "Meja biru = dine-in, kuning = ruang tunggu (take away)."}
+              : "🟥 belum bayar · 🟨 sudah bayar, masih duduk · 🟩 siap ditempati · 🥡 ruang tunggu."}
           </div>
         </Card>
 
@@ -292,7 +330,9 @@ export function MejaPage() {
                 Belum ada meja di cabang ini.
               </div>
             )}
-            {list.map((m) => (
+            {list.map((m) => {
+              const st = statusById.get(m.id);
+              return (
               <div key={m.id} className="flex items-center justify-between gap-3 p-3">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-1.5">
@@ -311,8 +351,30 @@ export function MejaPage() {
                         Nonaktif
                       </span>
                     )}
+                    {st && (
+                      <span
+                        className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${kelasStatus(st)}`}
+                      >
+                        {labelStatus(st)}
+                      </span>
+                    )}
                   </div>
+                  {st?.dikosongkan_pada && st.status === "kosong" && (
+                    <div className="mt-0.5 text-xs text-stone-400">
+                      Dibereskan {formatWaktu(st.dikosongkan_pada)}
+                      {st.dikosongkan_oleh ? ` oleh ${st.dikosongkan_oleh}` : ""}
+                    </div>
+                  )}
                 </div>
+                {!editing && st?.status === "isi" && bolehKosongkan && (
+                  <button
+                    type="button"
+                    onClick={() => setKosongkanId(m.id)}
+                    className="shrink-0 rounded-lg bg-green-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-green-700"
+                  >
+                    ✓ Kosongkan
+                  </button>
+                )}
                 {editing && (
                   <div className="flex shrink-0 items-center gap-2 text-sm">
                     <button
@@ -343,10 +405,19 @@ export function MejaPage() {
                   </div>
                 )}
               </div>
-            ))}
+              );
+            })}
           </div>
         </Card>
       </div>
+
+      {kosongkanTarget && (
+        <KosongkanMejaModal
+          meja={kosongkanTarget}
+          branchQuery={branchQuery}
+          onClose={() => setKosongkanId(null)}
+        />
+      )}
 
       <Modal
         open={form !== null}

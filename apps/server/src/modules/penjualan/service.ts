@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { HTTPException } from "hono/http-exception";
 import { hitungPb1, qtyEfektif, type SaleItemInput } from "@kakarut/shared";
 import { db } from "../../db/client";
@@ -113,9 +113,30 @@ export async function createSale(params: CreateSaleParams) {
     // sama) dan divalidasi milik bill, perusahaan, dan cabang yang benar —
     // tanpa itu kasir bisa menunjuk baris bill mana pun untuk menekan harga.
     const hargaBill = new Map<string, number>();
+    /**
+     * Status pengerjaan & penanda penyajian DIWARISI dari open bill. Dapur
+     * mungkin sudah menandai pesanan ini selesai sebelum pelanggan membayar;
+     * tanpa pewarisan, pembayaran akan memunculkannya lagi sebagai pesanan
+     * baru yang belum dikerjakan.
+     */
+    let pesananStatusAwal: "dikerjakan" | "selesai" | "batal" = "dikerjakan";
+    /**
+     * Penanda penyajian LAHIR sama dengan cara transaksi dibukukan. Kalau
+     * dibiarkan `false` untuk semua, transaksi bawa-pulang akan tampil
+     * "makan di tempat" di papan dan tertandai "diubah setelah transaksi"
+     * padahal tak ada yang menyentuhnya — persis kebalikan dari gunanya.
+     * Setelah lahir, perbedaan dgn `is_dine_in` = memang ada yang mengubah.
+     */
+    let sajianTakeawayAwal = !isDineIn;
     if (params.openBillId) {
       const [bill] = await tx
-        .select({ id: openBills.id, branchId: openBills.branchId })
+        .select({
+          id: openBills.id,
+          branchId: openBills.branchId,
+          pesananStatus: openBills.pesananStatus,
+          sajianTakeaway: openBills.sajianTakeaway,
+          closedAt: openBills.closedAt,
+        })
         .from(openBills)
         .where(
           and(
@@ -125,6 +146,18 @@ export async function createSale(params: CreateSaleParams) {
           ),
         );
       if (!bill) throw new HTTPException(404, { message: "Open bill tidak ditemukan" });
+      // Bill yang sudah ditutup (dibayar/dibatalkan) tak boleh dibayar lagi —
+      // tanpa penjaga ini satu bill bisa jadi dua transaksi bila tombol bayar
+      // tertekan dua kali atau antrean offline mengirim ulang.
+      if (bill.closedAt) {
+        throw new HTTPException(409, { message: "Open bill ini sudah ditutup" });
+      }
+      pesananStatusAwal = bill.pesananStatus;
+      // Bill lahir dari pelanggan yang duduk, jadi `false` di sana = "tak ada
+      // yang menyatakan apa pun", bukan "makan di tempat". Yang menang adalah
+      // sinyal EKSPLISIT terakhir: penanda bawa-pulang dari dapur, atau meja
+      // bawa-pulang yang dipilih kasir saat menagih.
+      sajianTakeawayAwal = bill.sajianTakeaway || !isDineIn;
       const barisBill = await tx
         .select({
           id: openBillItems.id,
@@ -291,9 +324,33 @@ export async function createSale(params: CreateSaleParams) {
         uangDiterima,
         saleDate,
         shiftId: params.shiftId ?? null,
+        pesananStatus: pesananStatusAwal,
+        sajianTakeaway: sajianTakeawayAwal,
+        asalOpenBillId: params.openBillId ?? null,
         ...(params.waktu ? { waktu: params.waktu } : {}),
       })
       .returning();
+
+    /**
+     * TUTUP open bill di sini — di dalam transaksi yang sama dengan
+     * pembuatan transaksinya.
+     *
+     * Dulu penutupan dikirim browser sebagai DELETE fire-and-forget setelah
+     * bayar, dan jalur sinkron offline tak pernah mengirimnya sama sekali.
+     * Akibatnya bill hantu menumpuk: pesanan yang sudah dibayar tetap
+     * nongkrong di daftar bill selamanya. Begitu papan pesanan menayangkan
+     * bill ke seluruh cabang, hantu itu jadi kartu ganda yang tak bisa
+     * dihilangkan siapa pun.
+     *
+     * Barisnya tidak dihapus, hanya ditutup — jejak asal pesanan (termasuk
+     * riwayat status sebelum dibayar) tetap bisa ditelusuri.
+     */
+    if (params.openBillId) {
+      await tx
+        .update(openBills)
+        .set({ closedAt: new Date(), saleId: sale.id })
+        .where(and(eq(openBills.id, params.openBillId), isNull(openBills.closedAt)));
+    }
 
     const insertedItems = await tx
       .insert(saleItems)
