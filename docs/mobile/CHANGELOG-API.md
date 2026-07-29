@@ -27,8 +27,7 @@ tanpa akses repo server.
 
 ## Rilis: Detail produksi — BERAPA BATCH, bukan cuma gramnya (`batch_teks`)
 
-> **BELUM tayang di production** — masih di PR. Baris ini berubah jadi
-> "Sudah di-merge ke production" begitu tayang.
+> **Sudah di-merge ke production** (PR #128).
 >
 > Tidak ada migrasi DB. Dua field baru pada baris `GET /api/produksi` &
 > `GET /api/pembelian`; keduanya **aditif dan opsional**.
