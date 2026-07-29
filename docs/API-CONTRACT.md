@@ -533,13 +533,61 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 - `GET /api/penyimpanan/:id/bahan` — [any] — res: `{ ingredient_ids: uuid[], terpakai_lain: uuid[] }` — error: **404**
 - `PUT /api/penyimpanan/:id/bahan` — [owner/admin] — req: `{ ingredient_ids: uuid[] (max 2000) }` (replace-set; satu bahan = satu rak per cabang) — res: `{ ok, jumlah }` — error: **400** bahan invalid, **404**
 
-## `/api/meja` — Meja (`modules/meja/routes.ts`)
+## `/api/meja` — Meja + papan status isi/kosong (`modules/meja/routes.ts`)
+
+Aksesnya sengaja **asimetris**: membaca terbuka untuk seluruh peran cabang
+(waiter perlu tahu meja mana yang kosong), mengubah master meja tidak.
 
 - `GET /api/meja` — [any] — query: `branch_id?` — res: `MejaDto[]`
-- `POST /api/meja` — [any] (cashier cabang sendiri) — req: `{ branch_id?: uuid, nama: string, tipe?: "dine_in"|"takeaway", is_active?: bool }` — res: **201** `MejaDto` — error: **403**, **409** nama ada di cabang
-- `PUT /api/meja/tata-letak` — [any] — query: `branch_id?` — req: `{ items: [{id:uuid, pos_x:int(0..100), pos_y:int(0..100)}] (max 500) }` — res: `MejaDto[]`
-- `PATCH /api/meja/:id` — [any] (cashier cabang sendiri) — req: parsial `{ nama?, tipe?, is_active?, branch_id? }` — res: `MejaDto` — error: **403**, **404**
-- `DELETE /api/meja/:id` — [any] (cashier cabang sendiri) — res: `{ ok: true }` — error: **400** (takeaway "Ruang Tunggu" tak bisa dihapus), **403**, **404**
+- `GET /api/meja/status` — [any] — query: `branch_id?` — res: `MejaStatusDto[]` — **hanya meja `dine_in`**
+- `POST /api/meja/:id/kosongkan` — **[owner/admin/cashier/tim]** — req: `{ paksa?: bool }` — res: `{ ok: true, status: "kosong", sudah_kosong: bool }` — error: **400** (meja takeaway), **404**, **409** `{ kode: "bill_berjalan", bill_terbuka: N }`
+- `GET /api/meja/:id/log` — [any] — res: `MejaKosongLogRow[]` (maks 50, terbaru dulu)
+- `POST /api/meja` — **[owner/admin/cashier]** — req: `{ branch_id?: uuid, nama: string, tipe?: "dine_in"|"takeaway", is_active?: bool }` — res: **201** `MejaDto` — error: **403**, **409** nama ada di cabang
+- `PUT /api/meja/tata-letak` — **[owner/admin/cashier]** — query: `branch_id?` — req: `{ items: [{id:uuid, pos_x:int(0..100), pos_y:int(0..100)}] (max 500) }` — res: `MejaDto[]`
+- `PATCH /api/meja/:id` — **[owner/admin/cashier]** — req: parsial `{ nama?, tipe?, is_active?, branch_id? }` — res: `MejaDto` — error: **403**, **404**, **409** meja masih terisi (khusus `is_active:false`)
+- `DELETE /api/meja/:id` — **[owner/admin/cashier]** — res: `{ ok: true }` — error: **400** (takeaway "Ruang Tunggu" tak bisa dihapus), **403**, **404**, **409** meja masih terisi
+
+> ### 🍽 Arti "meja terisi"
+>
+> Status **tidak disimpan** di mana pun — ia dihitung dari tagihan & transaksi
+> yang memang sudah tercatat. Sebuah meja `dine_in` disebut **isi** bila salah
+> satu ini benar:
+>
+> - masih ada **bill belum dibayar** yang menunjuk meja itu, atau
+> - ada **transaksi lunas** di meja itu yang belum dibereskan.
+>
+> **PEMBAYARAN TIDAK MENGOSONGKAN MEJA.** Orang lazim bayar dulu lalu duduk;
+> kalau meja langsung hijau begitu dibayar, waiter akan mendudukkan tamu baru di
+> meja yang masih ada orangnya. Meja baru bebas ketika seseorang menekan
+> **Kosongkan** — satu-satunya hal dari fitur ini yang benar-benar disimpan,
+> lengkap dengan siapa dan kapan (`GET /api/meja/:id/log`).
+>
+> Dua batas memotong perhitungan:
+> - **Batas pengosongan** — semua yang lebih tua dari penekanan tombol terakhir
+>   sudah dibereskan. Pengosongan biasa hanya memotong transaksi lunas; hanya
+>   `paksa: true` yang juga memotong bill yang belum dibayar.
+> - **Jendela bergulir 12 jam** — jaring pengaman bila tak ada yang menekan
+>   tombol semalaman, sekaligus menjaga dari antrean sinkron offline yang boleh
+>   berumur sampai 30 hari.
+>
+> **Meja `takeaway` ("Ruang Tunggu") tidak punya status** dan tidak muncul di
+> `GET /api/meja/status` sama sekali: seluruh penjualan bawa pulang cabang
+> menunjuk ke satu baris itu, jadi sekali ia bisa "terisi", ia terisi selamanya.
+> Mengosongkannya → **400**.
+>
+> **Status MEMBERI TAHU, TIDAK MELARANG.** Meja terisi tetap boleh dipilih untuk
+> transaksi baru — satu meja dua bill itu sah (split bill / rombongan kedua), dan
+> melanjutkan open bill di meja itu justru wajib.
+>
+> Alur tombol Kosongkan ada **dua tahap**: permintaan pertama pada meja yang
+> masih punya bill belum dibayar ditolak **409** `bill_berjalan`; kirim ulang
+> dengan `paksa: true` setelah pemakai menegaskan. Bill-nya **tidak dibatalkan
+> dan tidak hilang** — tetap ada di `GET /api/open-bill` dan tetap bisa ditagih.
+>
+> Status sengaja **TIDAK ada di `GET /api/meja`**: daftar master itu di-cache
+> lewat ETag (lihat bagian ETag di dokumen ini), dan status hidup akan membuat
+> sidik jarinya berubah tiap transaksi. Pakai `GET /api/meja/status` yang tidak
+> ber-ETag dan tarik berkala (web memakai 30 detik).
 
 ## `/api/open-bill` — Open bill (`modules/open-bill/routes.ts`) — group guard **[cashier only]**
 
@@ -2026,6 +2074,48 @@ export interface MejaDto {
   pos_x: number;
   pos_y: number;
   is_active: boolean;
+}
+
+/** Meja sedang dipakai tamu, atau siap ditempati. */
+export type MejaStatus = "isi" | "kosong";
+
+/**
+ * Status okupansi satu meja — dari `GET /api/meja/status`, BUKAN dari
+ * `GET /api/meja` (daftar master itu di-cache lewat ETag; status hidup akan
+ * membuat sidik jarinya berubah tiap transaksi).
+ *
+ * Hanya meja `dine_in` yang punya status. "Ruang Tunggu" (takeaway) dipakai
+ * bergantian sepanjang hari oleh orang berbeda — menandainya terisi akan
+ * membuatnya merah selamanya sejak pesanan bawa pulang pertama.
+ */
+export interface MejaStatusDto {
+  meja_id: string;
+  nama: string;
+  status: MejaStatus;
+  /** tagihan yang BELUM dibayar di meja ini (0 = semua sudah lunas) */
+  bill_terbuka: number;
+  /** transaksi lunas yang masih dianggap menempati meja ini */
+  transaksi_aktif: number;
+  /**
+   * `true` bila semuanya sudah lunas tapi meja belum dibereskan — tamu yang
+   * "sudah bayar, masih duduk". Meja inilah yang paling layak ditawari tombol
+   * Kosongkan.
+   */
+  lunas_masih_duduk: boolean;
+  /** ISO — tagihan PALING AWAL di meja ini (dasar hitungan "sudah duduk berapa lama") */
+  sejak: string | null;
+  /** ISO — kapan meja ini terakhir dibereskan, null bila belum pernah */
+  dikosongkan_pada: string | null;
+  dikosongkan_oleh: string | null;
+}
+
+/** Satu baris riwayat "meja dibereskan" — dari `GET /api/meja/:id/log`. */
+export interface MejaKosongLogRow {
+  waktu: string;
+  aksi: string;
+  oleh: string | null;
+  paksa: boolean;
+  detail: string | null;
 }
 
 export type PenyesuaianKategori =

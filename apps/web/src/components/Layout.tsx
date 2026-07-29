@@ -193,6 +193,17 @@ export function Layout() {
   });
   const pesananDikerjakan = (pesananNav ?? []).filter((r) => r.status === "dikerjakan").length;
 
+  // Meja yang sedang dipakai tamu → badge di nav "Meja". Kunci & URL sama
+  // persis dengan halaman Meja + modal Pilih Meja kasir, jadi ketiganya berbagi
+  // satu cache dan badge turun seketika begitu meja dibereskan.
+  const { data: mejaNav } = useQuery({
+    queryKey: ["meja-status", dataQuery],
+    queryFn: () => api<{ status: string }[]>(`/meja/status${dataQuery}`),
+    enabled: lihatPesanan,
+    refetchInterval: 30_000,
+  });
+  const mejaTerisi = (mejaNav ?? []).filter((r) => r.status === "isi").length;
+
   if (!auth) return null;
 
   const role = auth.user.role;
@@ -474,9 +485,16 @@ export function Layout() {
                   🍜 Lihat Menu
                 </NavLink>
               )}
-              {!isTim && !isKitchen && !isBar && !dCk && (
-                <NavLink to="/pengaturan/meja" className={linkClass}>
-                  🍽 Meja
+              {/* Meja: SELURUH peran cabang — waiter (tim), dapur, bar, dan
+                  kasir sama-sama perlu tahu meja mana yang kosong. Syaratnya
+                  disalin dari Papan Pesanan (`!timDiCk && !dCk`), BUKAN dari
+                  syarat Meja yang lama: setiap cabang baru — termasuk Central
+                  Kitchen — disemai meja bawaan, jadi tanpa `!timDiCk` tim CK
+                  akan menata denah dapur yang tak pernah dilihat siapa pun. */}
+              {!timDiCk && !dCk && (
+                <NavLink to="/pengaturan/meja" className={navFlex}>
+                  <span>🍽 Meja</span>
+                  {badgeOranye(mejaTerisi)}
                 </NavLink>
               )}
               {/* Menu STOK hanya di KANTOR (owner/admin). Di cabang & CK, staf

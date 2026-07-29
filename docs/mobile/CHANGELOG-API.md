@@ -25,6 +25,71 @@ tanpa akses repo server.
 
 ---
 
+## Rilis: Status meja isi/kosong (`/api/meja/status`) + gerbang tulis `/api/meja`
+
+> **BELUM di-merge ke production** — masih di PR. Jangan rilis klien yang
+> bergantung padanya sebelum baris ini berubah jadi "Sudah di-merge".
+>
+> Ada migrasi DB (`0090`): tabel `meja_kosong_logs` + 2 indeks bantu. Tidak ada
+> perubahan kolom pada tabel lama.
+
+Sampai sekarang tak ada cara apa pun mengetahui meja mana yang kosong: tabel
+meja hanya master data. Waiter menghafal atau berkeliling.
+
+### 🟢 BARU — `GET /api/meja/status` dan kawan-kawannya
+
+| Endpoint | Guna |
+| --- | --- |
+| `GET /api/meja/status` | `MejaStatusDto[]` — **hanya meja `dine_in`** |
+| `POST /api/meja/:id/kosongkan` | bereskan meja; `{ paksa?: bool }` |
+| `GET /api/meja/:id/log` | "siapa membereskan, kapan" |
+
+Detail lengkap + alasannya: blok `/api/meja` di `docs/API-CONTRACT.md`. Tiga hal
+yang paling mudah salah dipahami:
+
+1. **Dibayar ≠ kosong.** Orang lazim bayar dulu lalu duduk. Meja baru bebas saat
+   ada yang menekan Kosongkan. Jangan bikin klien mengosongkan meja sendiri
+   setelah transaksi berhasil.
+2. **Meja terisi tetap boleh dipilih.** Statusnya memberi tahu, bukan melarang —
+   satu meja dua bill itu sah, dan melanjutkan open bill di meja terisi wajib
+   bisa. Jangan menyaring meja terisi dari pemilih meja.
+3. **Ruang Tunggu tidak punya status** dan tidak muncul di daftar sama sekali.
+   Seluruh penjualan bawa pulang menunjuk ke satu baris itu; menandainya terisi
+   akan mengunci jalur bawa pulang cabang selamanya.
+
+Tombol Kosongkan bertahap dua: kalau meja masih punya bill belum dibayar,
+permintaan pertama ditolak **409** dengan badan `{ kode: "bill_berjalan",
+bill_terbuka: N }`. Tampilkan konfirmasi kedua, lalu kirim ulang dengan
+`{ paksa: true }`. Tagihannya **tidak dibatalkan** — tetap ada di
+`GET /api/open-bill`. **Baca `kode`, jangan mencocokkan teks pesannya** — teks
+bisa berubah kapan saja.
+
+### 🔴 WAJIB — `/api/meja` yang MENGUBAH kini tertutup untuk tim/kitchen/bar
+
+`POST /api/meja`, `PUT /api/meja/tata-letak`, `PATCH /api/meja/:id`, dan
+`DELETE /api/meja/:id` sekarang **[owner/admin/cashier]**. Klien yang memakai
+token `tim`, `kitchen`, atau `bar` untuk keempatnya akan mulai mendapat **403**.
+
+Ini menambal lubang yang sudah ada, bukan pengetatan baru yang direncanakan:
+modul meja selama ini **tidak punya gerbang peran sama sekali**, sehingga akun
+dapur bisa menghapus meja atau menimpa denah lewat API walau tombolnya tak ada
+di layar mana pun. `GET /api/meja` sendiri **tetap [any]** dan `MejaDto` tidak
+berubah satu byte pun.
+
+Dua penjaga baru yang bisa mengejutkan: menghapus atau menonaktifkan meja yang
+**masih terisi** kini ditolak **409** ("kosongkan dulu"). Sebelumnya berhasil
+dan membuat tagihan yang masih hidup jadi yatim (`meja_id` ber-`onDelete: set
+null`).
+
+### ⚪️ INFO — cache ETag tidak perlu disentuh
+
+Status okupansi sengaja **tidak** ditempel ke `GET /api/meja`. Daftar master itu
+tetap ber-ETag dan tetap kena 304 seperti biasa; `GET /api/meja/status` adalah
+endpoint terpisah tanpa ETag yang memang harus ditarik berkala (web memakai 30
+detik).
+
+---
+
 ## Rilis: Papan Pesanan Masuk (`/api/pesanan`) + open bill ditutup server
 
 > **BELUM di-merge ke production** — masih di PR. Jangan rilis klien yang

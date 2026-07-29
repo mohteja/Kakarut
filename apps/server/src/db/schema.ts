@@ -1233,6 +1233,8 @@ export const sales = pgTable(
     index("sales_company_branch_date_idx").on(t.companyId, t.branchId, t.saleDate),
     // rekap shift menyaring per shift_id — indeks parsial cukup, mayoritas NULL
     index("sales_shift_idx").on(t.shiftId),
+    // papan meja: "transaksi apa saja di meja X sejak jam sekian"
+    index("sales_meja_idx").on(t.branchId, t.mejaId, t.waktu),
   ],
 );
 
@@ -1317,7 +1319,16 @@ export const openBills = pgTable(
     closedAt: timestamp("closed_at", { withTimezone: true }),
     saleId: uuid("sale_id").references(() => sales.id),
   },
-  (t) => [index("open_bills_company_branch_idx").on(t.companyId, t.branchId, t.updatedAt)],
+  (t) => [
+    index("open_bills_company_branch_idx").on(t.companyId, t.branchId, t.updatedAt),
+    // Papan meja menanyakan "bill mana yang masih berjalan di meja X" tiap 30
+    // detik dari tiap layar cabang. Indeks PARSIAL: hanya bill yang belum
+    // ditutup yang pernah dicari, dan itu segelintir baris walau tabelnya
+    // tumbuh setahun. (Pola sama dengan `shifts_open_per_branch_uq`.)
+    index("open_bills_meja_aktif_idx")
+      .on(t.branchId, t.mejaId)
+      .where(sql`${t.closedAt} IS NULL`),
+  ],
 );
 
 /**
@@ -1354,6 +1365,59 @@ export const pesananLogs = pgTable(
     index("pesanan_logs_cabang_idx").on(t.companyId, t.branchId, t.waktu),
     // "riwayat kegiatan per karyawan" — pola yang sama dengan faktur_logs
     index("pesanan_logs_user_idx").on(t.companyId, t.userId, t.waktu),
+  ],
+);
+
+/**
+ * PAPAN MEJA — jejak "meja ini sudah saya bereskan", satu baris per penekanan
+ * tombol Kosongkan. Tabel ini punya DUA pekerjaan sekaligus:
+ *
+ * 1. **Audit** — siapa mengosongkan meja mana, kapan, dan apakah ia menerobos
+ *    peringatan bahwa masih ada tagihan hidup di sana.
+ * 2. **Batas derivasi** — status "isi" TIDAK disimpan di mana pun; ia dihitung
+ *    dari tagihan & transaksi yang memang sudah tercatat. Kolom `sampai` di
+ *    sinilah yang memberitahu perhitungan itu "abaikan yang lebih tua dari ini".
+ *
+ * `sampai` sengaja BUKAN `now()` melainkan waktu transaksi TERBARU yang benar
+ * -benar ikut terhitung saat tombol ditekan (watermark). Bedanya menentukan:
+ * dengan `now()`, pesanan yang masuk sepersekian detik sebelum tombol ditekan
+ * ikut tersapu diam-diam dan meja jadi hijau padahal tamunya baru datang.
+ * Dengan watermark, pesanan itu lebih baru dari batas → meja tetap merah.
+ */
+export const mejaKosongLogs = pgTable(
+  "meja_kosong_logs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    branchId: uuid("branch_id")
+      .notNull()
+      .references(() => branches.id),
+    mejaId: uuid("meja_id")
+      .notNull()
+      .references(() => meja.id, { onDelete: "cascade" }),
+    /** label siap tampil, mis. "Meja dikosongkan" */
+    aksi: text("aksi").notNull(),
+    /**
+     * Pengosongan BIASA hanya memotong transaksi yang sudah lunas. Hanya baris
+     * ber-`paksa` yang juga memotong bill yang BELUM dibayar — itulah yang
+     * membuat tombol biasa mustahil menyembunyikan tagihan hidup tanpa sengaja.
+     * Bill-nya sendiri tak pernah dibatalkan: ia tetap ada dan tetap ditagih.
+     */
+    paksa: boolean("paksa").notNull().default(false),
+    /** ringkas untuk layar riwayat, mis. "2 transaksi · 1 bill belum dibayar" */
+    detail: text("detail"),
+    userId: uuid("user_id").references(() => users.id),
+    /** batas derivasi (watermark) — lihat komentar tabel */
+    sampai: timestamp("sampai", { withTimezone: true }).notNull(),
+    waktu: timestamp("waktu", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("meja_kosong_logs_meja_idx").on(t.mejaId, t.waktu),
+    index("meja_kosong_logs_cabang_idx").on(t.companyId, t.branchId, t.waktu),
+    // "riwayat kegiatan per karyawan" — pola yang sama dengan pesanan_logs
+    index("meja_kosong_logs_user_idx").on(t.companyId, t.userId, t.waktu),
   ],
 );
 

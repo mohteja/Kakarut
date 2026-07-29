@@ -1039,6 +1039,48 @@ export interface MejaDto {
   is_active: boolean;
 }
 
+/** Meja sedang dipakai tamu, atau siap ditempati. */
+export type MejaStatus = "isi" | "kosong";
+
+/**
+ * Status okupansi satu meja — dari `GET /api/meja/status`, BUKAN dari
+ * `GET /api/meja` (daftar master itu di-cache lewat ETag; status hidup akan
+ * membuat sidik jarinya berubah tiap transaksi).
+ *
+ * Hanya meja `dine_in` yang punya status. "Ruang Tunggu" (takeaway) dipakai
+ * bergantian sepanjang hari oleh orang berbeda — menandainya terisi akan
+ * membuatnya merah selamanya sejak pesanan bawa pulang pertama.
+ */
+export interface MejaStatusDto {
+  meja_id: string;
+  nama: string;
+  status: MejaStatus;
+  /** tagihan yang BELUM dibayar di meja ini (0 = semua sudah lunas) */
+  bill_terbuka: number;
+  /** transaksi lunas yang masih dianggap menempati meja ini */
+  transaksi_aktif: number;
+  /**
+   * `true` bila semuanya sudah lunas tapi meja belum dibereskan — tamu yang
+   * "sudah bayar, masih duduk". Meja inilah yang paling layak ditawari tombol
+   * Kosongkan.
+   */
+  lunas_masih_duduk: boolean;
+  /** ISO — tagihan PALING AWAL di meja ini (dasar hitungan "sudah duduk berapa lama") */
+  sejak: string | null;
+  /** ISO — kapan meja ini terakhir dibereskan, null bila belum pernah */
+  dikosongkan_pada: string | null;
+  dikosongkan_oleh: string | null;
+}
+
+/** Satu baris riwayat "meja dibereskan" — dari `GET /api/meja/:id/log`. */
+export interface MejaKosongLogRow {
+  waktu: string;
+  aksi: string;
+  oleh: string | null;
+  paksa: boolean;
+  detail: string | null;
+}
+
 export type PenyesuaianKategori =
   | "waste_bahan"
   | "waste_matang"

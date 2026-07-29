@@ -6375,5 +6375,159 @@ SDI154=$(api "$REISS105" POST /penjualan "{\"meja_id\":\"$MEJA154\",\"metode_bay
 cek "transaksi DINE-IN lahir bertanda makan di tempat" "V == 1" \
   "$(api "$OWNER" GET "/pesanan?branch_id=$CB154" | jq -r --arg id "$SDI154" '[.[]|select(.id==$id)][0] | ((.sajian_takeaway==false) and (.is_dine_in==true))|if . then 1 else 0 end')"
 
+
+echo
+echo "── §155 Meja: status isi/kosong + kosongkan berjejak ──"
+# Sebelum ini tak ada cara apa pun mengetahui meja mana yang kosong: tabel meja
+# cuma master data, dan tak ada satu pun peristiwa di data yang menandai "tamu
+# pergi". Status DIHITUNG dari tagihan & transaksi yang sudah tercatat; yang
+# DISIMPAN hanya keputusan manusia "meja ini sudah saya bereskan".
+CB155=$(api "$REISS105" GET /auth/me | jq -r '.user.branch_id')
+M155=$(api "$OWNER" POST /menu "{\"nama\":\"Menu Uji155\",\"category_id\":\"$CAT145\",\"tipe\":\"regular\",\"mult\":2,\"harga_jual\":15000,\"komponen\":[]}" | jq -r .id)
+MEJA155=$(api "$OWNER" POST /meja "{\"nama\":\"Meja Uji155\",\"tipe\":\"dine_in\",\"branch_id\":\"$CB155\"}" | jq -r .id)
+TA155=$(api "$REISS105" GET /meja | jq -r '[.[]|select(.tipe=="takeaway")][0].id')
+if [ -z "$(api "$REISS105" GET /shift/aktif | jq -r '.id // empty')" ]; then
+  api "$OWNER" POST "/absensi/masuk" "{\"branch_id\":\"$CB155\"}" > /dev/null 2>&1 || true
+  api "$REISS105" POST /shift/buka '{"modal_awal":0}' > /dev/null 2>&1 || true
+fi
+stat155() { api "$1" GET "/meja/status?branch_id=$CB155" | jq --arg id "$MEJA155" '[.[]|select(.meja_id==$id)][0]'; }
+
+# (a) Ruang Tunggu TIDAK PUNYA status. Seluruh penjualan bawa pulang cabang
+#     menunjuk ke satu baris takeaway yang tak bisa dihapus — sekali ia bisa
+#     "terisi", ia terisi selamanya dan jalur bawa pulang cabang itu mati.
+cek "meja takeaway (Ruang Tunggu) tak pernah muncul di papan status" "V == 0" \
+  "$(api "$REISS105" GET "/meja/status?branch_id=$CB155" | jq '[.[]|select(.tipe=="takeaway")]|length')"
+cek "meja baru langsung terbaca KOSONG" "V == 1" \
+  "$(stat155 "$REISS105" | jq -r '((.status=="kosong") and (.bill_terbuka==0) and (.transaksi_aktif==0) and (.dikosongkan_pada==null))|if . then 1 else 0 end')"
+
+# (b) Kasir membuat pesanan → meja langsung terisi.
+OB155=$(api "$REISS105" POST /open-bill "{\"meja_id\":\"$MEJA155\",\"items\":[{\"menu_id\":\"$M155\",\"qty\":2}]}" | jq -r .id)
+cek "ada bill belum dibayar → meja ISI, belum lunas" "V == 1" \
+  "$(stat155 "$REISS105" | jq -r '((.status=="isi") and (.bill_terbuka==1) and (.lunas_masih_duduk==false) and (.sejak!=null))|if . then 1 else 0 end')"
+
+# (c) INTI FITUR: DIBAYAR ≠ KOSONG. Di rumah makan orang lazim bayar dulu lalu
+#     duduk; kalau meja langsung hijau begitu dibayar, waiter mendudukkan tamu
+#     baru di meja yang masih ada orangnya.
+api "$REISS105" POST /penjualan "{\"meja_id\":\"$MEJA155\",\"metode_bayar\":\"tunai\",\"open_bill_id\":\"$OB155\",\"items\":[{\"menu_id\":\"$M155\",\"qty\":2}]}" > /dev/null
+cek "SUDAH DIBAYAR tapi meja TETAP ISI (tamu masih duduk)" "V == 1" \
+  "$(stat155 "$REISS105" | jq -r '((.status=="isi") and (.bill_terbuka==0) and (.transaksi_aktif==1) and (.lunas_masih_duduk==true))|if . then 1 else 0 end')"
+
+# (d) Kasir mengosongkan + konfirmasi → meja siap untuk konsumen berikutnya.
+cek "kasir mengosongkan meja → 200" "V == 200" \
+  "$(status_code_body "$REISS105" POST "/meja/$MEJA155/kosongkan" '{}')"
+cek "setelah dikosongkan: KOSONG + tercatat siapa yang membereskan" "V == 1" \
+  "$(stat155 "$REISS105" | jq -r '((.status=="kosong") and (.transaksi_aktif==0) and (.dikosongkan_pada!=null) and (.dikosongkan_oleh!=null))|if . then 1 else 0 end')"
+cek "riwayat meja bertambah TEPAT satu baris ber-nama pelaku" "V == 1" \
+  "$(api "$REISS105" GET "/meja/$MEJA155/log" | jq '[.[]|select(.aksi=="Meja dikosongkan" and .oleh!=null and .paksa==false)]|length')"
+# tombol tertekan dua kali / dua orang berbarengan → idempoten, bukan galat,
+# dan TIDAK menulis jejak kedua untuk pembersihan yang tak terjadi
+cek "kosongkan lagi saat sudah kosong → 200 (bukan galat)" "V == 200" \
+  "$(status_code_body "$REISS105" POST "/meja/$MEJA155/kosongkan" '{}')"
+cek "dobel-klik: riwayat TETAP satu baris (bukan dua)" "V == 1" \
+  "$(api "$REISS105" GET "/meja/$MEJA155/log" | jq 'length')"
+
+# (e) "meja itu bisa di pilih untuk konsumen selanjutnya" — transaksi baru
+#     setelah pengosongan MENGISI ULANG meja. Ini yang membuktikan batas
+#     pengosongan bekerja: yang lama terpotong, yang baru tidak.
+SB155=$(api "$REISS105" POST /penjualan "{\"meja_id\":\"$MEJA155\",\"metode_bayar\":\"tunai\",\"items\":[{\"menu_id\":\"$M155\",\"qty\":1}]}" | jq -r '.sale.id')
+cek "tamu berikutnya di meja yang sama → meja ISI lagi" "V == 1" \
+  "$(stat155 "$REISS105" | jq -r '((.status=="isi") and (.transaksi_aktif==1))|if . then 1 else 0 end')"
+# transaksi yang DIHAPUS tak boleh menahan meja — turunan ikut Tempat Sampah
+api "$OWNER" DELETE "/penjualan/$SB155" > /dev/null
+cek "transaksi dibuang ke Tempat Sampah → meja ikut bebas" "V == 1" \
+  "$(stat155 "$REISS105" | jq -r '(.status=="kosong")|if . then 1 else 0 end')"
+
+# (f) "mengosongkan meja bisa di lakukan tim ataupun kasir".
+api "$OWNER" POST /karyawan "{\"nama\":\"Waiter 155\",\"email\":\"tim155@basooopa.id\",\"password\":\"Waiter155!\",\"role\":\"tim\",\"branch_id\":\"$CB155\"}" > /dev/null
+TTIM155=$(login tim155@basooopa.id 'Waiter155!')
+api "$REISS105" POST /penjualan "{\"meja_id\":\"$MEJA155\",\"metode_bayar\":\"tunai\",\"items\":[{\"menu_id\":\"$M155\",\"qty\":1}]}" > /dev/null
+cek "TIM (waiter) mengosongkan meja → 200" "V == 200" \
+  "$(status_code_body "$TTIM155" POST "/meja/$MEJA155/kosongkan" '{}')"
+cek "meja kembali kosong atas nama waiter" "V == 1" \
+  "$(stat155 "$TTIM155" | jq -r '((.status=="kosong") and (.dikosongkan_oleh=="Waiter 155"))|if . then 1 else 0 end')"
+
+# (g) Bill BELUM DIBAYAR menahan meja: ditolak dulu, baru boleh dipaksa —
+#     supaya tak ada yang membereskan meja tanpa sadar ada uang belum ditagih.
+OBA155=$(api "$REISS105" POST /open-bill "{\"meja_id\":\"$MEJA155\",\"items\":[{\"menu_id\":\"$M155\",\"qty\":1}]}" | jq -r .id)
+OBB155=$(api "$REISS105" POST /open-bill "{\"meja_id\":\"$MEJA155\",\"items\":[{\"menu_id\":\"$M155\",\"qty\":1}]}" | jq -r .id)
+cek "satu meja DUA bill tetap sah (split bill/rombongan kedua)" "V == 2" \
+  "$(stat155 "$REISS105" | jq -r '.bill_terbuka')"
+cek "kosongkan tanpa paksa → 409" "V == 409" \
+  "$(status_code_body "$TTIM155" POST "/meja/$MEJA155/kosongkan" '{}')"
+cek "badan galat berkode mesin: bill_berjalan + jumlahnya" "V == 1" \
+  "$(api "$TTIM155" POST "/meja/$MEJA155/kosongkan" '{}' | jq -r '((.kode=="bill_berjalan") and (.bill_terbuka==2))|if . then 1 else 0 end')"
+cek "kirim ulang dengan paksa → 200" "V == 200" \
+  "$(status_code_body "$TTIM155" POST "/meja/$MEJA155/kosongkan" '{"paksa":true}')"
+cek "meja bebas, dan jejaknya bertanda paksa" "V == 1" \
+  "$(api "$TTIM155" GET "/meja/$MEJA155/log" | jq '[.[]|select(.paksa==true)]|length>=1|if . then 1 else 0 end')"
+# UANG TIDAK PERNAH LENYAP KARENA TOMBOL MEJA — kedua bill masih bisa ditagih
+cek "kedua bill MASIH ADA di pemilih kasir (tagihan tidak dibatalkan)" "V == 2" \
+  "$(api "$REISS105" GET /open-bill | jq --arg a "$OBA155" --arg b "$OBB155" '[.[]|select(.id==$a or .id==$b)]|length')"
+api "$REISS105" DELETE "/open-bill/$OBA155" > /dev/null
+api "$REISS105" DELETE "/open-bill/$OBB155" > /dev/null
+
+# (h) "menu meja harus ada di semua role cabang" — BACA terbuka, TULIS tidak.
+#     Sebelum ini modul meja tak punya gerbang peran sama sekali: dapur bisa
+#     menghapus meja lewat API walau tombolnya tak ada di layarnya.
+cek "kitchen membaca papan meja → 200" "V == 200" "$(status_code "$TKIT154" GET "/meja/status")"
+cek "tim membaca papan meja → 200" "V == 200" "$(status_code "$TTIM155" GET "/meja/status")"
+cek "kitchen membaca riwayat meja → 200" "V == 200" \
+  "$(status_code "$TKIT154" GET "/meja/$MEJA155/log")"
+cek "LUBANG DITAMBAL — kitchen menambah meja → 403" "V == 403" \
+  "$(status_code_body "$TKIT154" POST /meja '{"nama":"Meja Dapur"}')"
+cek "LUBANG DITAMBAL — kitchen menimpa denah → 403" "V == 403" \
+  "$(status_code_body "$TKIT154" PUT /meja/tata-letak '{"items":[]}')"
+cek "LUBANG DITAMBAL — kitchen menghapus meja → 403" "V == 403" \
+  "$(status_code "$TKIT154" DELETE "/meja/$MEJA155")"
+cek "LUBANG DITAMBAL — tim menambah meja → 403" "V == 403" \
+  "$(status_code_body "$TTIM155" POST /meja '{"nama":"Meja Waiter"}')"
+cek "LUBANG DITAMBAL — tim mengubah meja → 403" "V == 403" \
+  "$(status_code_body "$TTIM155" PATCH "/meja/$MEJA155" '{"nama":"diubah"}')"
+cek "kitchen TIDAK boleh mengosongkan meja (bukan pekerjaannya)" "V == 403" \
+  "$(status_code_body "$TKIT154" POST "/meja/$MEJA155/kosongkan" '{}')"
+cek "kasir tetap boleh mengatur meja → 200" "V == 200" \
+  "$(status_code_body "$REISS105" PATCH "/meja/$MEJA155" '{"nama":"Meja Uji155"}')"
+
+# (i) Meja terisi tak boleh dihapus/dinonaktifkan — `meja_id` ber-onDelete
+#     "set null", jadi tagihan yang masih hidup akan jadi yatim.
+api "$REISS105" POST /penjualan "{\"meja_id\":\"$MEJA155\",\"metode_bayar\":\"tunai\",\"items\":[{\"menu_id\":\"$M155\",\"qty\":1}]}" > /dev/null
+cek "hapus meja yang masih terisi → 409" "V == 409" "$(status_code "$OWNER" DELETE "/meja/$MEJA155")"
+cek "nonaktifkan meja yang masih terisi → 409" "V == 409" \
+  "$(status_code_body "$OWNER" PATCH "/meja/$MEJA155" '{"is_active":false}')"
+api "$REISS105" POST "/meja/$MEJA155/kosongkan" '{}' > /dev/null
+cek "setelah dikosongkan, meja boleh dihapus → 200" "V == 200" \
+  "$(status_code "$OWNER" DELETE "/meja/$MEJA155")"
+
+# (j) Regresi yang harus tetap hidup.
+cek "Ruang Tunggu tak bisa 'dikosongkan' → 400" "V == 400" \
+  "$(status_code_body "$REISS105" POST "/meja/$TA155/kosongkan" '{}')"
+cek "bar bukan peran pembereskan meja → 403 (gerbang peran lebih dulu)" "V == 403" \
+  "$(status_code_body "$TBAR" POST "/meja/$TA155/kosongkan" '{}')"
+# Peran BENAR tapi cabang LAIN: mejanya tak terlihat sama sekali → 404, bukan
+# 403 — `resolveBranchId` mengunci peran cabang ke cabangnya sendiri.
+MJLAIN155=$(api "$OWNER" POST /meja "{\"nama\":\"Meja Cabang Lain 155\",\"tipe\":\"dine_in\",\"branch_id\":\"$CB46_ID\"}" | jq -r .id)
+cek "waiter mengosongkan meja CABANG LAIN → 404" "V == 404" \
+  "$(status_code_body "$TTIM155" POST "/meja/$MJLAIN155/kosongkan" '{}')"
+# Jalur bawa pulang TIDAK PERNAH terkunci: dua pesanan beruntun lewat Ruang
+# Tunggu yang sama sama-sama berhasil.
+cek "bawa pulang beruntun #1 lewat Ruang Tunggu → berhasil" "V == 1" \
+  "$(api "$REISS105" POST /penjualan "{\"meja_id\":\"$TA155\",\"metode_bayar\":\"tunai\",\"items\":[{\"menu_id\":\"$M155\",\"qty\":1}]}" | jq -r '(.sale.id!=null)|if . then 1 else 0 end')"
+cek "bawa pulang beruntun #2 lewat Ruang Tunggu yang SAMA → berhasil" "V == 1" \
+  "$(api "$REISS105" POST /penjualan "{\"meja_id\":\"$TA155\",\"metode_bayar\":\"tunai\",\"items\":[{\"menu_id\":\"$M155\",\"qty\":1}]}" | jq -r '(.sale.id!=null)|if . then 1 else 0 end')"
+# Status MEMBERI TAHU, TIDAK MELARANG: meja terisi tetap boleh dipakai. Kalau
+# ini gagal, §19/§147/§154 ikut rontok karena memakai ulang meja yang sama.
+MJ155B=$(api "$REISS105" GET /meja | jq -r '[.[]|select(.is_active and .tipe=="dine_in")][0].id')
+api "$REISS105" POST /penjualan "{\"meja_id\":\"$MJ155B\",\"metode_bayar\":\"tunai\",\"items\":[{\"menu_id\":\"$M155\",\"qty\":1}]}" > /dev/null
+cek "meja TERISI tetap bisa dipakai transaksi berikutnya → 201" "V == 201" \
+  "$(status_code_body "$REISS105" POST /penjualan "{\"meja_id\":\"$MJ155B\",\"metode_bayar\":\"tunai\",\"items\":[{\"menu_id\":\"$M155\",\"qty\":1}]}")"
+# ETag daftar master TIDAK boleh goyah karena ada meja terisi — status hidup
+# sengaja ditaruh di endpoint terpisah supaya cache mobile tetap kena 304.
+SAMA155=1
+E155=$(etag_of "$OWNER" /meja)
+for _ in 1 2 3 4 5; do
+  [ "$(etag_of "$OWNER" /meja)" = "$E155" ] || SAMA155=0
+done
+cek "ETag /meja tetap stabil MESKIPUN ada meja terisi" "V == 1" "$SAMA155"
+
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

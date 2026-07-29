@@ -193,13 +193,18 @@ export default function App() {
                   hanya Central Kitchen; halaman menyembunyikan formulirnya di
                   luar CK dan server menolak asal non-CK dengan 403. */}
               <Route path="/transfer-stok" element={<TransferStokPage />} />
-              {/* printer & meja — bukan peran tim/kitchen/bar */}
+              {/* Pengaturan Printer — bukan peran tim/kitchen/bar. Halaman ini
+                  bisa mengarahkan cetakan struk ke alamat jaringan mana pun,
+                  jadi TETAP tertutup. Rute Meja SENGAJA dikeluarkan dari blok
+                  ini alih-alih melonggarkan syaratnya: melonggarkan akan
+                  diam-diam membuka Printer juga. */}
               {!isTim && !isKitchen && !isBar && (
-                <>
-                  <Route path="/pengaturan/printer" element={<PrinterPage />} />
-                  <Route path="/pengaturan/meja" element={<MejaPage />} />
-                </>
+                <Route path="/pengaturan/printer" element={<PrinterPage />} />
               )}
+              {/* Meja: terbuka untuk SELURUH peran cabang — waiter perlu tahu
+                  meja mana yang kosong. Yang boleh mengubah master meja tetap
+                  owner/admin/kasir, ditegakkan di server dan di halamannya. */}
+              <Route path="/pengaturan/meja" element={<MejaPage />} />
               {/* Transaksi POS (jual + tutup kasir) — HANYA peran kasir */}
               {isKasir && (
                 <>

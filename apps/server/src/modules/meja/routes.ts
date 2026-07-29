@@ -1,12 +1,19 @@
 import { zValidator } from "@hono/zod-validator";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import type { MejaDto } from "@kakarut/shared";
+import type { MejaDto, MejaKosongLogRow, MejaStatusDto } from "@kakarut/shared";
 import { db } from "../../db/client";
-import { meja } from "../../db/schema";
-import { pastikanCabang, resolveBranchId, terikatCabang, type AppEnv } from "../../middleware/auth";
+import { meja, mejaKosongLogs, users } from "../../db/schema";
+import {
+  pastikanCabang,
+  requireRole,
+  resolveBranchId,
+  terikatCabang,
+  type AppEnv,
+} from "../../middleware/auth";
+import { hitungOkupansi, sedangTerisi } from "./okupansi";
 
 const MejaBody = z.object({
   branch_id: z.string().uuid().optional(),
@@ -39,10 +46,62 @@ function toDto(row: typeof meja.$inferSelect): MejaDto {
   };
 }
 
+/** Peran yang boleh MENGUBAH master meja (tambah/ubah/hapus/tata letak). */
+const bolehAturMeja = requireRole("owner", "admin", "cashier");
 /**
- * Master meja per cabang. Bisa diakses kasir (untuk cabangnya sendiri) agar
- * kasir mengatur meja + tata letak denah; owner/admin bisa untuk cabang mana pun
- * lewat ?branch_id. Meja "Ruang Tunggu" (tipe takeaway) tidak boleh dihapus.
+ * Peran yang boleh MENGOSONGKAN meja. Owner meminta "tim ataupun kasir";
+ * kitchen & bar tetap boleh MELIHAT papan meja (mereka perlu tahu ruangan
+ * seramai apa) tapi membereskan meja bukan pekerjaan mereka.
+ */
+const bolehKosongkanMeja = requireRole("owner", "admin", "cashier", "tim");
+
+/**
+ * Penjaga master data: meja yang masih ada tamunya tak boleh dihapus atau
+ * dinonaktifkan. Memakai perhitungan okupansi yang SAMA dengan papan, supaya
+ * layar dan penjaga mustahil berbeda pendapat soal arti "terisi".
+ */
+async function tolakBilaTerisi(
+  mejaId: string,
+  branchId: string,
+  auth: { company_id: string | null },
+) {
+  const [okupansi] = await hitungOkupansi(db, {
+    companyId: auth.company_id!,
+    branchId,
+    mejaId,
+  });
+  if (okupansi && sedangTerisi(okupansi)) {
+    throw new HTTPException(409, {
+      message: "Meja masih terisi — kosongkan dulu di papan meja",
+    });
+  }
+}
+
+/** Ringkas untuk kolom `detail` di jejak — dibaca manusia, bukan mesin. */
+function ringkasPengosongan(bill: number, jual: number): string {
+  const bagian: string[] = [];
+  if (jual > 0) bagian.push(`${jual} transaksi lunas`);
+  if (bill > 0) bagian.push(`${bill} bill belum dibayar`);
+  return bagian.join(" · ") || "tanpa transaksi";
+}
+
+/**
+ * Master meja per cabang + PAPAN STATUS meja (isi/kosong).
+ *
+ * Pembagian aksesnya sengaja ASIMETRIS, dan itulah alasan gerbangnya dipasang
+ * per-rute di sini alih-alih satu gerbang prefix di `app.ts` (gerbang prefix
+ * tak bisa membedakan metode):
+ *
+ * - **Membaca** (daftar meja, status, riwayat) terbuka untuk seluruh peran
+ *   cabang — kitchen, bar, dan tim perlu tahu meja mana yang kosong.
+ * - **Mengubah master** (tambah, ubah, hapus, tata letak denah) hanya
+ *   owner/admin/kasir. Sebelum ini modul ini TIDAK punya gerbang peran sama
+ *   sekali, jadi siapa pun yang punya membership bisa menghapus meja lewat API
+ *   walau tombolnya tak ada di layarnya.
+ * - **Mengosongkan meja** owner/admin/kasir/tim.
+ *
+ * Meja "Ruang Tunggu" (tipe takeaway) tidak boleh dihapus dan tidak punya
+ * status okupansi — lihat `okupansi.ts`.
  */
 export const mejaRoutes = new Hono<AppEnv>()
   .get("/", async (c) => {
@@ -58,14 +117,170 @@ export const mejaRoutes = new Hono<AppEnv>()
       .orderBy(asc(meja.posY), asc(meja.posX), asc(meja.nama), asc(meja.id));
     return c.json(rows.map(toDto));
   })
-  .post("/", zValidator("json", MejaBody), async (c) => {
+  /**
+   * PAPAN MEJA — status okupansi cabang. Sengaja TERPISAH dari `GET /meja`:
+   * daftar master itu di-cache klien lewat ETag, dan menempelkan status hidup
+   * ke badannya membuat sidik jarinya berubah tiap ada transaksi. Hemat data
+   * aplikasi mobile hilang, dan gejalanya menyamar jadi "jaringan lambat".
+   */
+  .get("/status", async (c) => {
+    const auth = c.get("auth");
+    const branchId = await resolveBranchId(c);
+    const rows = await hitungOkupansi(db, { companyId: auth.company_id!, branchId });
+    return c.json(
+      rows.map(
+        (r): MejaStatusDto => ({
+          meja_id: r.meja_id,
+          nama: r.nama,
+          status: sedangTerisi(r) ? "isi" : "kosong",
+          bill_terbuka: r.bill_terbuka,
+          transaksi_aktif: r.transaksi_aktif,
+          lunas_masih_duduk: r.bill_terbuka === 0 && r.transaksi_aktif > 0,
+          sejak: r.sejak ? r.sejak.toISOString() : null,
+          dikosongkan_pada: r.dikosongkan_pada ? r.dikosongkan_pada.toISOString() : null,
+          dikosongkan_oleh: r.dikosongkan_oleh,
+        }),
+      ),
+    );
+  })
+  /**
+   * Bereskan meja: tamu sudah pergi, meja siap ditempati orang berikutnya.
+   *
+   * Tidak ada satu pun peristiwa di data yang menandai "tamu pergi" — jadi
+   * inilah satu-satunya hal yang benar-benar disimpan dari seluruh fitur ini,
+   * lengkap dengan siapa dan kapan.
+   *
+   * Bila masih ada bill BELUM DIBAYAR di meja itu, permintaan pertama ditolak
+   * 409 `bill_berjalan` supaya tak ada yang membereskan meja tanpa sadar ada
+   * tagihan menggantung. Kirim ulang dengan `paksa: true` untuk tetap
+   * membereskannya — bill-nya TIDAK dibatalkan dan tidak hilang dari daftar
+   * kasir; yang berubah hanya: ia berhenti menahan mejanya.
+   */
+  .post(
+    "/:id/kosongkan",
+    bolehKosongkanMeja,
+    zValidator("json", z.object({ paksa: z.boolean().optional() }).optional()),
+    async (c) => {
+      const auth = c.get("auth");
+      const branchId = await resolveBranchId(c);
+      const id = c.req.param("id");
+      const paksa = c.req.valid("json")?.paksa === true;
+
+      const [row] = await db
+        .select({ id: meja.id, tipe: meja.tipe, nama: meja.nama })
+        .from(meja)
+        .where(
+          and(eq(meja.id, id), eq(meja.companyId, auth.company_id!), eq(meja.branchId, branchId)),
+        );
+      if (!row) throw new HTTPException(404, { message: "Meja tidak ditemukan" });
+      if (row.tipe === "takeaway") {
+        throw new HTTPException(400, {
+          message: "Ruang Tunggu dipakai bergantian sepanjang hari — tidak perlu dikosongkan",
+        });
+      }
+
+      return await db.transaction(async (tx) => {
+        // Status turunan tak punya baris untuk dikunci, jadi dipakai kunci
+        // penasihat per meja — pola yang sama dengan `kunciKirimCabang` di
+        // modul stok. Tanpa ini dua orang yang menekan bersamaan menulis dua
+        // baris jejak untuk satu pembersihan yang sama.
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`meja-kosong:${id}`}))`);
+        const [okupansi] = await hitungOkupansi(tx, {
+          companyId: auth.company_id!,
+          branchId,
+          mejaId: id,
+        });
+        if (!okupansi || !sedangTerisi(okupansi)) {
+          // Sudah kosong (mis. rekan menekan duluan) — bukan galat, dan JANGAN
+          // menulis jejak kedua untuk pembersihan yang tak terjadi.
+          return c.json({ ok: true, status: "kosong", sudah_kosong: true });
+        }
+        if (okupansi.bill_terbuka > 0 && !paksa) {
+          // DIKEMBALIKAN, bukan di-throw: penangan galat global membentuk ulang
+          // HTTPException jadi `{error}` saja, dan `kode` yang dibutuhkan klien
+          // untuk memunculkan konfirmasi kedua akan hilang di situ.
+          return c.json(
+            {
+              error: `Meja ini masih punya ${okupansi.bill_terbuka} pesanan yang belum dibayar`,
+              kode: "bill_berjalan",
+              bill_terbuka: okupansi.bill_terbuka,
+            },
+            409,
+          );
+        }
+        await tx.insert(mejaKosongLogs).values({
+          companyId: auth.company_id!,
+          branchId,
+          mejaId: id,
+          aksi: paksa ? "Meja dikosongkan (masih ada bill belum dibayar)" : "Meja dikosongkan",
+          paksa,
+          detail: ringkasPengosongan(okupansi.bill_terbuka, okupansi.transaksi_aktif),
+          userId: auth.sub,
+          // WATERMARK, bukan `now()`: batasnya adalah transaksi TERBARU yang
+          // benar-benar ikut terhitung barusan. Dengan `now()`, pesanan yang
+          // masuk sepersekian detik sebelum tombol ditekan ikut tersapu diam-
+          // diam dan meja jadi hijau padahal tamunya baru datang.
+          //
+          // Ditulis sebagai SQL dari teks aslinya, bukan lewat objek Date:
+          // `timestamptz` berpresisi mikrodetik, `Date` hanya milidetik, dan
+          // pembulatan itu membuat watermark SEDIKIT lebih tua dari transaksi
+          // yang baru dibereskan — mejanya tak pernah benar-benar kosong.
+          sampai: okupansi.batas_baru
+            ? sql`${okupansi.batas_baru}::timestamptz`
+            : sql`now()`,
+        });
+        return c.json({ ok: true, status: "kosong", sudah_kosong: false });
+      });
+    },
+  )
+  /** Riwayat "meja ini dibereskan siapa, kapan" — terbuka untuk semua peran cabang. */
+  .get("/:id/log", async (c) => {
+    const auth = c.get("auth");
+    const branchId = await resolveBranchId(c);
+    const [ada] = await db
+      .select({ id: meja.id })
+      .from(meja)
+      .where(
+        and(
+          eq(meja.id, c.req.param("id")),
+          eq(meja.companyId, auth.company_id!),
+          eq(meja.branchId, branchId),
+        ),
+      );
+    if (!ada) throw new HTTPException(404, { message: "Meja tidak ditemukan" });
+    const rows = await db
+      .select({
+        waktu: mejaKosongLogs.waktu,
+        aksi: mejaKosongLogs.aksi,
+        paksa: mejaKosongLogs.paksa,
+        detail: mejaKosongLogs.detail,
+        oleh: users.nama,
+      })
+      .from(mejaKosongLogs)
+      .leftJoin(users, eq(mejaKosongLogs.userId, users.id))
+      .where(eq(mejaKosongLogs.mejaId, ada.id))
+      .orderBy(desc(mejaKosongLogs.waktu))
+      .limit(50);
+    return c.json(
+      rows.map(
+        (r): MejaKosongLogRow => ({
+          waktu: r.waktu.toISOString(),
+          aksi: r.aksi,
+          oleh: r.oleh ?? null,
+          paksa: r.paksa,
+          detail: r.detail,
+        }),
+      ),
+    );
+  })
+  .post("/", bolehAturMeja, zValidator("json", MejaBody), async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");
     const branchId = body.branch_id
       ? await pastikanCabang(body.branch_id, auth.company_id!)
       : await resolveBranchId(c);
     if (terikatCabang(auth.role) && branchId !== auth.branch_id) {
-      throw new HTTPException(403, { message: "Kasir hanya boleh menambah meja di cabangnya" });
+      throw new HTTPException(403, { message: "Hanya boleh menambah meja di cabang sendiri" });
     }
     const [row] = await db
       .insert(meja)
@@ -83,7 +298,7 @@ export const mejaRoutes = new Hono<AppEnv>()
     return c.json(toDto(row), 201);
   })
   // Simpan tata letak denah sekaligus (posisi persen 0..100). Kasir untuk cabangnya.
-  .put("/tata-letak", zValidator("json", TataLetakBody), async (c) => {
+  .put("/tata-letak", bolehAturMeja, zValidator("json", TataLetakBody), async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");
     const branchId = await resolveBranchId(c);
@@ -111,7 +326,7 @@ export const mejaRoutes = new Hono<AppEnv>()
       .orderBy(asc(meja.posY), asc(meja.posX), asc(meja.nama), asc(meja.id));
     return c.json(rows.map(toDto));
   })
-  .patch("/:id", zValidator("json", MejaBody.partial()), async (c) => {
+  .patch("/:id", bolehAturMeja, zValidator("json", MejaBody.partial()), async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");
     const [existing] = await db
@@ -120,8 +335,12 @@ export const mejaRoutes = new Hono<AppEnv>()
       .where(and(eq(meja.id, c.req.param("id")), eq(meja.companyId, auth.company_id!)));
     if (!existing) throw new HTTPException(404, { message: "Meja tidak ditemukan" });
     if (terikatCabang(auth.role) && existing.branchId !== auth.branch_id) {
-      throw new HTTPException(403, { message: "Kasir hanya boleh mengubah meja di cabangnya" });
+      throw new HTTPException(403, { message: "Hanya boleh mengubah meja di cabang sendiri" });
     }
+    // Menonaktifkan meja yang masih ada tamunya membuat pilihan meja kasir
+    // tercabut di tengah transaksi (halaman kasir melepas meja yang hilang dari
+    // daftar aktif), dan bill yang sah jadi tak bisa ditagih.
+    if (body.is_active === false) await tolakBilaTerisi(existing.id, existing.branchId, auth);
     const [row] = await db
       .update(meja)
       .set({
@@ -132,7 +351,7 @@ export const mejaRoutes = new Hono<AppEnv>()
       .returning();
     return c.json(toDto(row));
   })
-  .delete("/:id", async (c) => {
+  .delete("/:id", bolehAturMeja, async (c) => {
     const auth = c.get("auth");
     const [existing] = await db
       .select()
@@ -140,11 +359,15 @@ export const mejaRoutes = new Hono<AppEnv>()
       .where(and(eq(meja.id, c.req.param("id")), eq(meja.companyId, auth.company_id!)));
     if (!existing) throw new HTTPException(404, { message: "Meja tidak ditemukan" });
     if (terikatCabang(auth.role) && existing.branchId !== auth.branch_id) {
-      throw new HTTPException(403, { message: "Kasir hanya boleh menghapus meja di cabangnya" });
+      throw new HTTPException(403, { message: "Hanya boleh menghapus meja di cabang sendiri" });
     }
     if (existing.tipe === "takeaway") {
       throw new HTTPException(400, { message: "Meja Ruang Tunggu tidak bisa dihapus" });
     }
+    // `sales.meja_id` & `open_bills.meja_id` ber-onDelete "set null": menghapus
+    // meja yang masih dipakai membuat tagihannya yatim — masih hidup, tapi tak
+    // lagi menempati apa pun, jadi tak akan pernah muncul di papan meja mana pun.
+    await tolakBilaTerisi(existing.id, existing.branchId, auth);
     await db.delete(meja).where(and(eq(meja.id, existing.id), eq(meja.companyId, auth.company_id!)));
     return c.json({ ok: true });
   });

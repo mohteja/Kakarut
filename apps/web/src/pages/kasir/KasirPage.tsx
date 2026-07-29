@@ -19,6 +19,12 @@ import { CabangDataBar } from "../../components/CabangDataBar";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah } from "../../lib/format";
 import { ReceiptModal, type SaleResult } from "./ReceiptModal";
+import {
+  KosongkanMejaModal,
+  kelasStatus,
+  labelStatus,
+  useMejaStatus,
+} from "../pengaturan/MejaStatusPanel";
 
 interface CartLine {
   menu: MenuDto;
@@ -145,6 +151,8 @@ export function KasirPage() {
   // Otomatis untuk kasir; owner/admin membukanya lewat tombol "Pilih/Ganti".
   const [mejaModalOpen, setMejaModalOpen] = useState(isKasir);
   const [mejaCari, setMejaCari] = useState("");
+  // meja yang sedang dikonfirmasi untuk dibereskan (dari modal Pilih Meja)
+  const [kosongkanId, setKosongkanId] = useState<string | null>(null);
   const [konsumenNama, setKonsumenNama] = useState("");
   const [konsumenWa, setKonsumenWa] = useState("");
   // Autocomplete member: q pencarian + apakah dropdown terbuka
@@ -191,6 +199,18 @@ export function KasirPage() {
     setCariMember("");
   }
 
+  // Status okupansi meja — MEMBERI TAHU, TIDAK MELARANG. `mejaAktif` di bawah
+  // sengaja TIDAK disaring berdasarkan status: efek di bawahnya melepas
+  // `mejaId` begitu meja hilang dari daftar aktif, sehingga menyembunyikan meja
+  // terisi akan membatalkan pemasangan meja saat melanjutkan open bill (bill
+  // sah jadi tak bisa ditagih) dan — lebih halus — membuat `dineIn` jatuh ke
+  // nilai cadangan `true`, sehingga pesanan bawa pulang terbukukan sebagai
+  // makan di tempat dengan HPP yang salah. Satu meja dua bill juga sah di sini.
+  const { data: mejaStatus = [] } = useMejaStatus(branchQuery, isKasir);
+  const statusMeja = useMemo(
+    () => new Map(mejaStatus.map((s) => [s.meja_id, s])),
+    [mejaStatus],
+  );
   const mejaAktif = useMemo(() => mejaList.filter((m) => m.is_active), [mejaList]);
   const mejaTerpilih = mejaAktif.find((m) => m.id === mejaId) ?? null;
   // Meja menentukan mode transaksi: meja bernomor = dine-in (default), meja
@@ -371,6 +391,8 @@ export function KasirPage() {
       // papan pesanan dapur/bar: kartu berpindah dari "belum dibayar" ke
       // penjualan pada detik ini juga, jangan tunggu polling 15 dtk berikutnya
       queryClient.invalidateQueries({ queryKey: ["pesanan"] });
+      // meja langsung tertandai terisi — transaksi lunas TIDAK mengosongkannya
+      queryClient.invalidateQueries({ queryKey: ["meja-status"] });
     },
   });
 
@@ -415,6 +437,7 @@ export function KasirPage() {
       queryClient.invalidateQueries({ queryKey: ["open-bill"] });
       // open bill = pesanan yang belum dibayar → langsung tampil di papan dapur
       queryClient.invalidateQueries({ queryKey: ["pesanan"] });
+      queryClient.invalidateQueries({ queryKey: ["meja-status"] });
     },
   });
 
@@ -1200,31 +1223,48 @@ export function KasirPage() {
                   {mejaCocok.map((m) => {
                     const takeaway = m.tipe === "takeaway";
                     const dipilih = mejaId === m.id;
+                    const st = statusMeja.get(m.id);
                     return (
-                      <button
+                      <div
                         key={m.id}
-                        onClick={() => pilihMeja(m.id)}
-                        className={`flex w-full items-center justify-between rounded-lg border px-3 py-2.5 text-left text-sm font-semibold ${
+                        className={`flex w-full items-center gap-2 rounded-lg border px-3 py-2.5 text-left text-sm font-semibold ${
                           dipilih
                             ? takeaway
                               ? "border-amber-500 bg-amber-500 text-white"
                               : "border-blue-600 bg-blue-600 text-white"
                             : takeaway
-                              ? "border-amber-300 bg-amber-50 text-amber-800 hover:border-amber-400"
-                              : "border-stone-200 bg-white text-stone-700 hover:border-blue-400"
+                              ? "border-amber-300 bg-amber-50 text-amber-800"
+                              : st
+                                ? kelasStatus(st)
+                                : "border-stone-200 bg-white text-stone-700"
                         }`}
                       >
-                        <span>
-                          {takeaway ? `🥡 ${m.nama}` : m.nama}
-                        </span>
-                        <span
-                          className={`text-xs font-medium ${
-                            dipilih ? "text-white/80" : takeaway ? "text-amber-600" : "text-blue-600"
-                          }`}
+                        {/* Meja terisi TETAP bisa dipilih: satu meja dua bill itu
+                            sah, dan melanjutkan bill di meja itu justru wajib. */}
+                        <button
+                          onClick={() => pilihMeja(m.id)}
+                          className="flex min-w-0 flex-1 items-center justify-between gap-2 text-left"
                         >
-                          {takeaway ? "Take away" : "Dine-in"}
-                        </span>
-                      </button>
+                          <span className="truncate">{takeaway ? `🥡 ${m.nama}` : m.nama}</span>
+                          <span
+                            className={`shrink-0 text-xs font-medium ${dipilih ? "text-white/80" : "opacity-80"}`}
+                          >
+                            {takeaway ? "Take away" : st ? labelStatus(st) : "Dine-in"}
+                          </span>
+                        </button>
+                        {st?.status === "isi" && (
+                          <button
+                            onClick={() => setKosongkanId(m.id)}
+                            className={`shrink-0 rounded-md px-2 py-1 text-[11px] font-semibold ${
+                              dipilih
+                                ? "bg-white/20 text-white hover:bg-white/30"
+                                : "bg-green-600 text-white hover:bg-green-700"
+                            }`}
+                          >
+                            ✓ Kosongkan
+                          </button>
+                        )}
+                      </div>
                     );
                   })}
                 </div>
@@ -1248,6 +1288,17 @@ export function KasirPage() {
             setStruk(null);
             setMejaModalOpen(isKasir); // kasir: lanjut pilih meja transaksi berikutnya
           }}
+        />
+      )}
+
+      {/* Bereskan meja langsung dari modal Pilih Meja — layar tempat kasir
+          sudah berdiri puluhan kali sehari, jadi tak perlu bolak-balik ke
+          halaman Meja hanya untuk satu ketukan. */}
+      {kosongkanId && statusMeja.get(kosongkanId) && (
+        <KosongkanMejaModal
+          meja={statusMeja.get(kosongkanId)!}
+          branchQuery={branchQuery}
+          onClose={() => setKosongkanId(null)}
         />
       )}
       </div>

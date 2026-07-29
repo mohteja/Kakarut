@@ -44,6 +44,13 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    /**
+     * Badan JSON galat apa adanya, bila ada. Beberapa endpoint menyertakan
+     * `kode` yang bisa dibaca mesin (mis. `"bill_berjalan"`) supaya klien tak
+     * perlu mencocokkan teks bahasa Indonesia untuk memutuskan langkah
+     * berikutnya — teksnya bisa berubah kapan saja.
+     */
+    public data?: Record<string, unknown>,
   ) {
     super(message);
   }
@@ -110,8 +117,10 @@ export async function api<T = unknown>(
   if (!res.ok) {
     let message = `Kesalahan (${res.status})`;
     let isJsonError = false;
+    let badan: Record<string, unknown> | undefined;
     try {
       const data = (await res.json()) as { error?: string };
+      badan = data as Record<string, unknown>;
       if (data.error) {
         message = data.error;
         isJsonError = true;
@@ -124,7 +133,7 @@ export async function api<T = unknown>(
     if (!isJsonError && (res.status === 404 || res.status >= 500)) {
       emitServerDown(true);
     }
-    throw new ApiError(res.status, message);
+    throw new ApiError(res.status, message, badan);
   }
   // request berhasil menyentuh server → pastikan overlay tertutup
   emitServerDown(false);
