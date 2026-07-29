@@ -1352,6 +1352,31 @@ export interface SaleItemInput {
   open_bill_item_id?: string | null;
 }
 
+/**
+ * SEBAB terstruktur penolakan `POST /api/penjualan` — juga muncul sebagai
+ * `sebab` pada perintah `penjualan` yang gagal di `POST /api/sync`.
+ *
+ * Ini ADA supaya klien offline bisa memutuskan nasib perintah di antreannya
+ * tanpa menebak dari teks pesan. Yang menentukan hanya satu pertanyaan:
+ * **transaksinya sudah tercatat di server atau belum?**
+ *
+ * - `bill_sudah_dibayar` — bill sudah punya penjualan. Transaksi ini kembar
+ *   dari yang sudah berhasil, jadi perintahnya AMAN dibuang dari antrean.
+ * - `bill_dibatalkan` — bill ditutup lewat pembatalan, TANPA penjualan.
+ *   Transaksi ini **tidak pernah tercatat**; membuangnya berarti kehilangan
+ *   satu transaksi. Tampilkan ke kasir.
+ * - `kasir_belum_dibuka` — tak ada shift terbuka di cabang (jalur online).
+ * - `shift_tidak_cocok` — tak ada shift yang mencakup waktu transaksi (jalur
+ *   `/api/sync`); membawa `data.shift_terdekat` sebagai konteks.
+ *
+ * Ketiga yang terakhir berarti transaksinya TIDAK tercatat.
+ */
+export type SebabPenjualanGagal =
+  | "bill_sudah_dibayar"
+  | "bill_dibatalkan"
+  | "kasir_belum_dibuka"
+  | "shift_tidak_cocok";
+
 /** Baris riwayat transaksi kasir (untuk cek pesanan / cetak ulang struk). */
 export interface RiwayatTransaksiRow {
   id: string;

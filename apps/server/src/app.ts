@@ -290,7 +290,11 @@ export function createApp() {
   app.onError((err, c) => {
     if (err instanceof HTTPException) {
       void catatGalat(c, err.status, err);
-      return c.json({ error: err.message }, err.status);
+      // Galat yang membawa `sebab` terstruktur meneruskannya ke badan respons.
+      // Tanpa ini `sebab` mati di sini dan klien terpaksa mencocokkan teks
+      // pesan — yang berubah kapan saja dan tak bisa diuji.
+      const sebab = (err as { sebab?: string }).sebab;
+      return c.json({ error: err.message, ...(sebab ? { sebab } : {}) }, err.status);
     }
     console.error(err);
     void catatGalat(c, 500, err);

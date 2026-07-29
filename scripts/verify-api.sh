@@ -87,6 +87,10 @@ echo "== 2b. Gerbang kasir: wajib absen + buka kasir sebelum transaksi =="
 # Tanpa shift terbuka, transaksi kasir DITOLAK (409) → frontend munculkan modal Buka Kasir.
 cek "penjualan tanpa shift terbuka → 409" "V == 409" \
   "$(status_code_body "$KASIR" POST /penjualan "{\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")"
+# Penolakan penjualan membawa SEBAB terstruktur. Klien offline memutuskan nasib
+# perintah di antreannya dari sini — mencocokkan teks pesan tak bisa diuji.
+cek "…: sebab = kasir_belum_dibuka (transaksi TIDAK tercatat)" "V == 1" \
+  "$(api "$KASIR" POST /penjualan "{\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}" | jq '(.sebab=="kasir_belum_dibuka")|if . then 1 else 0 end')"
 # Buka kasir SEBELUM absen masuk → 400 (harus absen dulu).
 cek "buka kasir tanpa absen → 400" "V == 400" \
   "$(status_code_body "$KASIR" POST /shift/buka '{"modal_awal":200000}')"
@@ -3709,6 +3713,14 @@ B_MIX=$(jq -nc --arg ra "$(uuid99)" --arg rb "$(uuid99)" --arg rc "$(uuid99)" --
 RES_MIX=$(api "$KASIR" POST /sync "$B_MIX")
 cek "sync isolasi: item1 ok, item2 gagal, item3 ok" "V == 1" \
   "$(echo "$RES_MIX" | jq '(.hasil[0].status=="ok" and .hasil[1].status=="gagal" and .hasil[2].status=="ok")|if . then 1 else 0 end')"
+# Penjualan berwaktu LAMPAU yang tak tercakup shift mana pun → 409 BER-SEBAB
+# `shift_tidak_cocok`, dan artinya transaksinya TIDAK tercatat. Klien yang
+# memperlakukan SEMUA 409 pada `penjualan` sebagai "sudah berhasil" akan
+# membuang transaksi ini diam-diam, jadi `sebab` wajib ada di item yang gagal.
+# (Kegagalan item2 di atas beda perkara: 400 "waktu di masa depan".)
+B_LAMA=$(jq -nc --arg r "$(uuid99)" --arg w "$OLD99" --arg m "$MENU99" '{commands:[{client_ref:$r,tipe:"penjualan",waktu:$w,payload:{items:[{menu_id:$m,qty:1}]}}]}')
+cek "sync: penjualan di luar jendela shift → 409 + sebab shift_tidak_cocok" "V == 1" \
+  "$(api "$KASIR" POST /sync "$B_LAMA" | jq '(.hasil[0].status=="gagal" and .hasil[0].kode==409 and .hasil[0].sebab=="shift_tidak_cocok")|if . then 1 else 0 end')"
 
 # Transaksi susulan: tutup shift, lalu sync penjualan dgn waktu DI DALAM jendela shift
 # tertutup → item ok + shift ditandai ada_transaksi_susulan (rekap dihitung ulang).
@@ -5998,6 +6010,23 @@ cek "open_bill_item_id milik bill LAIN → 400" "V == 400" \
 # kembar diam-diam karena klien gagal mengirim DELETE-nya.
 cek "membayar bill yang SUDAH dibayar → 409 (tak ada transaksi kembar)" "V == 409" \
   "$(status_code_body "$REISS105" POST /penjualan "{\"meja_id\":\"$MEJA147\",\"metode_bayar\":\"tunai\",\"open_bill_id\":\"$OBID147\",\"items\":[{\"menu_id\":\"$M147\",\"qty\":1}]}")"
+# DUA SEBAB BERBEDA di balik satu kode 409, dan artinya BERLAWANAN bagi antrean
+# offline: bill yang sudah DIBAYAR berarti transaksinya kembar (aman dibuang),
+# bill yang DIBATALKAN berarti transaksinya tak pernah tercatat (jangan dibuang).
+# Klien mustahil membedakannya tanpa `sebab`.
+cek "…: sebab = bill_sudah_dibayar (kiriman ulang, aman dibuang antrean)" "V == 1" \
+  "$(api "$REISS105" POST /penjualan "{\"meja_id\":\"$MEJA147\",\"metode_bayar\":\"tunai\",\"open_bill_id\":\"$OBID147\",\"items\":[{\"menu_id\":\"$M147\",\"qty\":1}]}" | jq '(.sebab=="bill_sudah_dibayar")|if . then 1 else 0 end')"
+OB147X=$(api "$REISS105" POST /open-bill "{\"meja_id\":\"$MEJA147\",\"items\":[{\"menu_id\":\"$M147\",\"qty\":1}]}")
+OBID147X=$(echo "$OB147X" | jq -r .id)
+api "$REISS105" DELETE "/open-bill/$OBID147X" > /dev/null
+cek "membayar bill yang DIBATALKAN → 409" "V == 409" \
+  "$(status_code_body "$REISS105" POST /penjualan "{\"meja_id\":\"$MEJA147\",\"metode_bayar\":\"tunai\",\"open_bill_id\":\"$OBID147X\",\"items\":[{\"menu_id\":\"$M147\",\"qty\":1}]}")"
+cek "…: sebab = bill_dibatalkan (transaksi TIDAK tercatat — jangan dibuang)" "V == 1" \
+  "$(api "$REISS105" POST /penjualan "{\"meja_id\":\"$MEJA147\",\"metode_bayar\":\"tunai\",\"open_bill_id\":\"$OBID147X\",\"items\":[{\"menu_id\":\"$M147\",\"qty\":1}]}" | jq '(.sebab=="bill_dibatalkan")|if . then 1 else 0 end')"
+# Sebab yang sama harus sampai lewat ANTREAN OFFLINE, bukan hanya jalur online.
+SYNC147=$(api "$REISS105" POST /sync "$(jq -nc --arg r "$(cat /proc/sys/kernel/random/uuid)" --arg w "$(date -u +%FT%TZ)" --arg mj "$MEJA147" --arg ob "$OBID147X" --arg m "$M147" '{commands:[{client_ref:$r,tipe:"penjualan",waktu:$w,payload:{meja_id:$mj,metode_bayar:"tunai",open_bill_id:$ob,items:[{menu_id:$m,qty:1}]}}]}')")
+cek "sync: bayar bill dibatalkan → gagal 409 + sebab bill_dibatalkan" "V == 1" \
+  "$(echo "$SYNC147" | jq '(.hasil[0].status=="gagal" and .hasil[0].kode==409 and .hasil[0].sebab=="bill_dibatalkan")|if . then 1 else 0 end')"
 cek "open_bill_item_id tanpa open_bill_id → 400" "V == 400" \
   "$(status_code_body "$REISS105" POST /penjualan "{\"meja_id\":\"$MEJA147\",\"metode_bayar\":\"tunai\",\"items\":[{\"menu_id\":\"$M147\",\"qty\":1,\"open_bill_item_id\":\"$ITEM147C\"}]}")"
 cek "open_bill_id ngawur → 404" "V == 404" \

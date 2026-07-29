@@ -25,6 +25,81 @@ tanpa akses repo server.
 
 ---
 
+## Rilis: `sebab` terstruktur pada 409 penjualan — jawaban pertanyaan antrean offline
+
+> **BELUM di-merge ke production** — masih di PR. Jangan rilis klien yang
+> bergantung padanya sebelum baris ini berubah jadi "Sudah di-merge".
+>
+> Tidak ada migrasi DB. Perubahan **aditif**: satu field baru pada badan galat.
+
+Menjawab pertanyaan yang menggantung dari mobile: *"409 pada `penjualan` kami
+perlakukan sebagai 'sudah berhasil' untuk SEMUA sebab, karena kami tak bisa
+membedakannya. Kalau `sebab`-nya bisa dibedakan, kirimkan kodenya."*
+
+**Bisa — dan aturan sementara itu memang berisiko.** Kami audit seluruh 409 yang
+bisa keluar dari jalur penjualan: dari empat sebab, hanya **satu** yang berarti
+transaksinya sudah tercatat. Tiga sisanya berarti transaksinya **tidak pernah
+tercatat**, jadi membuangnya dari antrean = kehilangan transaksi.
+
+### 🔴 WAJIB — persempit aturannya ke `sebab == "bill_sudah_dibayar"`
+
+`POST /api/penjualan` yang menolak dengan 409 kini **selalu** membawa `sebab` di
+badan galat (`{ error, sebab }`), dan `sebab` yang sama ikut pada item gagal
+`POST /api/sync` (`hasil[].sebab`).
+
+| `sebab` | Artinya | Tercatat? | Tindakan |
+| --- | --- | --- | --- |
+| `bill_sudah_dibayar` | bill sudah punya penjualan | **YA** | aman dibuang dari antrean |
+| `bill_dibatalkan` | bill ditutup lewat pembatalan, tanpa penjualan | **TIDAK** | jangan dibuang |
+| `kasir_belum_dibuka` | tak ada shift terbuka (jalur online) | **TIDAK** | gerbang "Buka Kasir" |
+| `shift_tidak_cocok` | tak ada shift mencakup `waktu` (jalur `/sync`) | **TIDAK** | tampilkan + `data.shift_terdekat` |
+
+Dua yang pertama berasal dari sumber yang sama — `open_bill_id` yang bill-nya
+sudah tertutup — dengan **kode HTTP identik dan arti berlawanan**. Itulah yang
+membuat aturan "semua 409 = sudah berhasil" berbahaya: bill yang **dibatalkan**
+kasir lalu dikirim ulang oleh antrean akan hilang tanpa jejak.
+
+`shift_tidak_cocok` juga sudah ada sebelum ini dan **sudah** dikirim server —
+tapi aturan "semua 409" ikut membuangnya, padahal itu justru kasus yang paling
+perlu dilihat kasir.
+
+### ⚪️ INFO — `sebab` kini bisa datang dari mana saja
+
+Sebelumnya hanya galat yang dilempar eksekutor di modul `/sync` yang membawa
+`sebab`; galat dari modul lain (mis. `createSale`) sampai sebagai 409 telanjang.
+Sekarang `app.onError` dan penampung galat `/sync` sama-sama meneruskan `sebab`
+bila galatnya membawanya, jadi kode sebab tak lagi mati di perbatasan modul.
+
+### 🧪 Cara memicu 409-nya untuk uji lapangan
+
+Mobile menyebut jalur ini belum bisa dibuktikan di perangkat. Dua resep, dua
+sebab berbeda — keduanya dipakai di `verify-api.sh` dan bisa dijalankan manual:
+
+**`bill_sudah_dibayar`** — bayar bill yang sama dua kali:
+1. `POST /api/open-bill` → simpan `id`
+2. `POST /api/penjualan` dengan `open_bill_id` itu → **201**
+3. `POST /api/penjualan` lagi dengan `open_bill_id` yang sama → **409**
+   `sebab: "bill_sudah_dibayar"`
+
+**`bill_dibatalkan`** — inilah yang berbahaya kalau dibuang:
+1. `POST /api/open-bill` → simpan `id`
+2. `DELETE /api/open-bill/<id>` (batalkan)
+3. `POST /api/penjualan` dengan `open_bill_id` itu → **409**
+   `sebab: "bill_dibatalkan"`
+
+Untuk menguji lewat antrean, bungkus langkah terakhir sebagai perintah
+`{tipe:"penjualan", payload:{open_bill_id:…}}` di `POST /api/sync` — hasilnya
+`hasil[0] = { status:"gagal", kode:409, sebab:"bill_dibatalkan" }`.
+
+### ⚪️ INFO — `MejaStatusDto` sudah ada di Lampiran A
+
+Menjawab pertanyaan di §2 balasan mobile: ya, bentuk respons
+`GET /api/meja/status` sudah tercatat lengkap — blok `/api/meja` di
+`docs/API-CONTRACT.md` dan definisi `MejaStatusDto` di Lampiran A. Tak perlu
+menebak.
+
+---
+
 ## Rilis: Perbaikan Laporan Kebersihan (`saya=1`, validasi query, transaksi)
 
 > **Sudah di-merge ke production** (PR #129, 29 Jul 2026).

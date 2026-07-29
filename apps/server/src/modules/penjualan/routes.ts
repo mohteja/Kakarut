@@ -18,7 +18,7 @@ import {
   clientRefField,
   deviceIdField,
 } from "../sync/idempoten";
-import { createSale } from "./service";
+import { createSale, PenjualanGagal } from "./service";
 
 export const SaleBody = z.object({
   branch_id: z.string().uuid().optional(),
@@ -88,9 +88,11 @@ export const penjualanRoutes = new Hono<AppEnv>()
         ),
       );
     if (!shiftAktif) {
-      throw new HTTPException(409, {
-        message: "Kasir belum dibuka — buka kasir dulu sebelum bertransaksi",
-      });
+      throw new PenjualanGagal(
+        409,
+        "Kasir belum dibuka — buka kasir dulu sebelum bertransaksi",
+        "kasir_belum_dibuka",
+      );
     }
     const result = await createSale({
       companyId: auth.company_id!,
