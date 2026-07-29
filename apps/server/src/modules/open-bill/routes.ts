@@ -312,30 +312,41 @@ export const openBillRoutes = new Hono<AppEnv>()
   .delete("/:id", async (c) => {
     const auth = c.get("auth");
     const sekarang = new Date();
-    const [row] = await db
-      .update(openBills)
-      .set({
-        pesananStatus: "batal",
-        pesananStatusAt: sekarang,
-        pesananStatusOleh: auth.sub,
-        closedAt: sekarang,
-      })
-      .where(
-        and(
-          eq(openBills.id, c.req.param("id")),
-          eq(openBills.companyId, auth.company_id!),
-          isNull(openBills.closedAt),
-        ),
-      )
-      .returning({ id: openBills.id, branchId: openBills.branchId });
-    if (!row) throw new HTTPException(404, { message: "Bill tidak ditemukan" });
-    await db.insert(pesananLogs).values({
-      companyId: auth.company_id!,
-      branchId: row.branchId,
-      openBillId: row.id,
-      aksi: "Dibatalkan",
-      statusBaru: "batal",
-      userId: auth.sub,
+    const row = await db.transaction(async (tx) => {
+      const [bill] = await tx
+        .update(openBills)
+        .set({ closedAt: sekarang })
+        .where(
+          and(
+            eq(openBills.id, c.req.param("id")),
+            eq(openBills.companyId, auth.company_id!),
+            isNull(openBills.closedAt),
+          ),
+        )
+        .returning({ id: openBills.id, branchId: openBills.branchId });
+      if (!bill) return null;
+      // Status pengerjaan hidup PER BARIS, jadi membatalkan bill berarti
+      // membatalkan setiap barisnya — kalau tidak, papan akan menurunkan status
+      // kartunya dari baris yang masih "dikerjakan" dan menyuruh dapur membuat
+      // pesanan yang sudah tak akan ditagih.
+      await tx
+        .update(openBillItems)
+        .set({
+          pesananStatus: "batal",
+          pesananStatusAt: sekarang,
+          pesananStatusOleh: auth.sub,
+        })
+        .where(eq(openBillItems.billId, bill.id));
+      await tx.insert(pesananLogs).values({
+        companyId: auth.company_id!,
+        branchId: bill.branchId,
+        openBillId: bill.id,
+        aksi: "Dibatalkan (semua baris)",
+        statusBaru: "batal",
+        userId: auth.sub,
+      });
+      return bill;
     });
+    if (!row) throw new HTTPException(404, { message: "Bill tidak ditemukan" });
     return c.json({ ok: true });
   });

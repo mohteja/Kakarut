@@ -4,7 +4,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import type { PesananItemRow, PesananLogRow, PesananRow, PesananStatus } from "@kakarut/shared";
-import { db } from "../../db/client";
+import { db, type Tx } from "../../db/client";
 import {
   companies,
   openBillItems,
@@ -29,8 +29,14 @@ import { tanggalDi } from "../../lib/time";
  * 2. **penjualan hari ini** — pesanan yang sudah dibayar.
  *
  * Satu pesanan bisa berpindah dari (1) ke (2) saat dilunasi; `createSale`
- * mewarisi status & penanda penyajiannya, jadi papan tetap menampilkan satu
- * kartu, bukan dua.
+ * mewarisi status & penanda penyajian TIAP BARIS, jadi papan tetap menampilkan
+ * satu kartu dan pekerjaan yang sudah selesai tidak kembali ke antrean.
+ *
+ * SATUAN KERJANYA ADALAH BARIS, BUKAN KARTU. Satu bill berisi banyak sajian
+ * yang selesai pada waktu berbeda; dengan status setingkat kartu dapur hanya
+ * bisa bilang "semua atau tak satu pun", dan tak ada cara tahu mana yang sudah
+ * keluar. Status kartu DITURUNKAN dari barisnya saat dibaca — bukan disimpan —
+ * supaya tak ada agregat yang bisa ketinggalan zaman.
  */
 
 /** Label aksi siap tampil untuk baris riwayat. */
@@ -41,6 +47,26 @@ const LABEL_STATUS: Record<PesananStatus, string> = {
 };
 
 const JenisParam = z.enum(["open_bill", "penjualan"]);
+const StatusBody = z.object({ status: z.enum(["dikerjakan", "selesai", "batal"]) });
+const SajianBody = z.object({ takeaway: z.boolean() });
+
+/**
+ * Status kartu = turunan barisnya.
+ *
+ * - semua baris `batal` → kartu `batal` (tak ada yang perlu dibuat lagi)
+ * - tak ada lagi baris `dikerjakan` → kartu `selesai` (sisanya sudah keluar
+ *   atau dibatalkan; dapur tak punya pekerjaan tersisa)
+ * - selain itu `dikerjakan`
+ *
+ * Kartu tanpa baris dianggap `dikerjakan`: kalau tidak, bill kosong yang baru
+ * dibuat kasir akan langsung mendarat di kolom Selesai.
+ */
+function turunkanStatus(items: { status: PesananStatus }[]): PesananStatus {
+  if (items.length === 0) return "dikerjakan";
+  if (items.every((i) => i.status === "batal")) return "batal";
+  if (items.every((i) => i.status !== "dikerjakan")) return "selesai";
+  return "dikerjakan";
+}
 
 /** Zona waktu perusahaan — dasar "hari ini" yang sama dengan modul lain. */
 async function tzPerusahaan(companyId: string): Promise<string> {
@@ -54,13 +80,93 @@ async function tzPerusahaan(companyId: string): Promise<string> {
 /** Baris log + nama pemakainya, dipakai endpoint riwayat. */
 async function riwayat(kolom: "sale" | "bill", id: string): Promise<PesananLogRow[]> {
   const rows = await db
-    .select({ waktu: pesananLogs.waktu, aksi: pesananLogs.aksi, oleh: users.nama })
+    .select({
+      waktu: pesananLogs.waktu,
+      aksi: pesananLogs.aksi,
+      itemNama: pesananLogs.itemNama,
+      oleh: users.nama,
+    })
     .from(pesananLogs)
     .leftJoin(users, eq(pesananLogs.userId, users.id))
     .where(kolom === "sale" ? eq(pesananLogs.saleId, id) : eq(pesananLogs.openBillId, id))
     .orderBy(desc(pesananLogs.waktu))
-    .limit(100);
-  return rows.map((r) => ({ waktu: r.waktu.toISOString(), aksi: r.aksi, oleh: r.oleh ?? null }));
+    .limit(200);
+  return rows.map((r) => ({
+    waktu: r.waktu.toISOString(),
+    aksi: r.aksi,
+    oleh: r.oleh ?? null,
+    item_nama: r.itemNama ?? null,
+  }));
+}
+
+/**
+ * Bill yang seluruh barisnya batal = bill selesai urusannya: ia harus lenyap
+ * dari pemilih kasir supaya tak bisa ditagihkan. Sebaliknya, satu baris yang
+ * dikembalikan ke antrean membukanya lagi — tanpa ini bill "dibatalkan lalu
+ * ternyata jadi" mustahil ditagih selamanya.
+ *
+ * `sale_id IS NULL` di klausa WHERE menjaga bill yang sudah DIBAYAR: penutupan
+ * miliknya berasal dari `createSale`, dan tak boleh dibuka lagi oleh papan.
+ */
+async function selaraskanTutupBill(
+  tx: Tx,
+  billId: string,
+  sekarang: Date,
+): Promise<PesananStatus> {
+  const rows = await tx
+    .select({ status: openBillItems.pesananStatus })
+    .from(openBillItems)
+    .where(eq(openBillItems.billId, billId));
+  const kartu = turunkanStatus(rows);
+  await tx
+    .update(openBills)
+    .set({ closedAt: kartu === "batal" ? sekarang : null })
+    .where(and(eq(openBills.id, billId), isNull(openBills.saleId)));
+  return kartu;
+}
+
+/** Pastikan kartunya ada, milik perusahaan & cabang penggunanya. */
+async function pastikanKartu(
+  jenis: "open_bill" | "penjualan",
+  id: string,
+  companyId: string,
+  branchId: string,
+  { untukUbah }: { untukUbah: boolean },
+): Promise<void> {
+  if (jenis === "open_bill") {
+    const [row] = await db
+      .select({ saleId: openBills.saleId })
+      .from(openBills)
+      .where(
+        and(
+          eq(openBills.id, id),
+          eq(openBills.companyId, companyId),
+          eq(openBills.branchId, branchId),
+        ),
+      );
+    if (!row) throw new HTTPException(404, { message: "Pesanan tidak ditemukan" });
+    // Bill yang sudah dibayar hidup sebagai penjualan; menandainya di sini akan
+    // mengubah kartu yang tak lagi tampil dan meninggalkan kartu penjualannya
+    // tak tersentuh.
+    if (untukUbah && row.saleId) {
+      throw new HTTPException(409, {
+        message: "Pesanan sudah dibayar — ubah statusnya lewat kartu penjualan",
+      });
+    }
+    return;
+  }
+  const [row] = await db
+    .select({ id: sales.id })
+    .from(sales)
+    .where(
+      and(
+        eq(sales.id, id),
+        eq(sales.companyId, companyId),
+        eq(sales.branchId, branchId),
+        isNull(sales.deletedAt),
+      ),
+    );
+  if (!row) throw new HTTPException(404, { message: "Pesanan tidak ditemukan" });
 }
 
 export const pesananRoutes = new Hono<AppEnv>()
@@ -79,9 +185,9 @@ export const pesananRoutes = new Hono<AppEnv>()
    * kartu penjualannyalah yang mewakilinya, kalau tidak satu pesanan tampil dua
    * kali sepanjang hari.
    *
-   * Item disertakan inline: papan menampilkan isi tiap pesanan, dan memuatnya
-   * satu per satu lewat `GET /penjualan/:id` akan jadi N+1 pada jam ramai —
-   * persis saat halaman ini paling dibutuhkan.
+   * Item disertakan inline: papan menampilkan isi tiap pesanan DAN status tiap
+   * barisnya, dan memuatnya satu per satu lewat `GET /penjualan/:id` akan jadi
+   * N+1 pada jam ramai — persis saat halaman ini paling dibutuhkan.
    */
   .get(
     "/",
@@ -108,13 +214,8 @@ export const pesananRoutes = new Hono<AppEnv>()
           customer: openBills.customerNama,
           waktu: openBills.createdAt,
           catatan: openBills.catatan,
-          status: openBills.pesananStatus,
-          sajianTakeaway: openBills.sajianTakeaway,
-          statusPada: openBills.pesananStatusAt,
-          statusOleh: users.nama,
         })
         .from(openBills)
-        .leftJoin(users, eq(openBills.pesananStatusOleh, users.id))
         .where(
           and(
             eq(openBills.companyId, auth.company_id!),
@@ -140,13 +241,8 @@ export const pesananRoutes = new Hono<AppEnv>()
           total: sales.total,
           isDineIn: sales.isDineIn,
           catatan: sales.catatan,
-          status: sales.pesananStatus,
-          sajianTakeaway: sales.sajianTakeaway,
-          statusPada: sales.pesananStatusAt,
-          statusOleh: users.nama,
         })
         .from(sales)
-        .leftJoin(users, eq(sales.pesananStatusOleh, users.id))
         .where(
           and(
             eq(sales.companyId, auth.company_id!),
@@ -166,23 +262,34 @@ export const pesananRoutes = new Hono<AppEnv>()
         const rows = await db
           .select({
             billId: openBillItems.billId,
+            id: openBillItems.id,
             nama: openBillItems.menuNama,
             qty: openBillItems.qty,
             harga: openBillItems.hargaSatuan,
             catatan: openBillItems.catatan,
             dineInOverride: openBillItems.dineInOverride,
+            status: openBillItems.pesananStatus,
+            sajianTakeaway: openBillItems.sajianTakeaway,
+            statusPada: openBillItems.pesananStatusAt,
+            statusOleh: users.nama,
           })
           .from(openBillItems)
+          .leftJoin(users, eq(openBillItems.pesananStatusOleh, users.id))
           .where(inArray(openBillItems.billId, billIds));
         for (const r of rows) {
           const arr = itemBill.get(r.billId) ?? [];
           arr.push({
+            id: r.id,
             nama: r.nama,
             qty: r.qty,
             catatan: r.catatan,
             // null = ikut mode transaksi; bill belum dibayar jadi belum ada
             // keputusan final — tampilkan dine-in sebagai bawaan.
             is_dine_in: r.dineInOverride ?? true,
+            status: r.status,
+            sajian_takeaway: r.sajianTakeaway,
+            status_oleh: r.statusOleh ?? null,
+            status_pada: r.statusPada ? r.statusPada.toISOString() : null,
           });
           itemBill.set(r.billId, arr);
           totalBill.set(r.billId, (totalBill.get(r.billId) ?? 0) + r.harga * r.qty);
@@ -193,55 +300,95 @@ export const pesananRoutes = new Hono<AppEnv>()
         const rows = await db
           .select({
             saleId: saleItems.saleId,
+            id: saleItems.id,
             nama: saleItems.menuNama,
             qty: saleItems.qty,
             catatan: saleItems.catatan,
             isDineIn: saleItems.isDineIn,
+            status: saleItems.pesananStatus,
+            sajianTakeaway: saleItems.sajianTakeaway,
+            statusPada: saleItems.pesananStatusAt,
+            statusOleh: users.nama,
           })
           .from(saleItems)
+          .leftJoin(users, eq(saleItems.pesananStatusOleh, users.id))
           .where(inArray(saleItems.saleId, saleIds));
         for (const r of rows) {
           const arr = itemSale.get(r.saleId) ?? [];
-          arr.push({ nama: r.nama, qty: r.qty, catatan: r.catatan, is_dine_in: r.isDineIn });
+          arr.push({
+            id: r.id,
+            nama: r.nama,
+            qty: r.qty,
+            catatan: r.catatan,
+            is_dine_in: r.isDineIn,
+            status: r.status,
+            sajian_takeaway: r.sajianTakeaway,
+            status_oleh: r.statusOleh ?? null,
+            status_pada: r.statusPada ? r.statusPada.toISOString() : null,
+          });
           itemSale.set(r.saleId, arr);
         }
       }
 
+      /** Ringkasan kartu — seluruhnya turunan barisnya, tak satu pun disimpan. */
+      function ringkas(items: PesananItemRow[]) {
+        // "Terakhir disentuh" = perubahan baris paling baru pada kartu ini.
+        let statusOleh: string | null = null;
+        let statusPada: string | null = null;
+        for (const it of items) {
+          if (it.status_pada && (!statusPada || it.status_pada > statusPada)) {
+            statusPada = it.status_pada;
+            statusOleh = it.status_oleh;
+          }
+        }
+        return {
+          status: turunkanStatus(items),
+          // Kartu "bawa pulang" hanya bila SELURUH barisnya begitu — satu piring
+          // yang tetap di tempat sudah cukup membuat pesanan ini bukan pesanan
+          // bawa pulang.
+          sajian_takeaway: items.length > 0 && items.every((i) => i.sajian_takeaway),
+          item_selesai: items.filter((i) => i.status === "selesai").length,
+          item_batal: items.filter((i) => i.status === "batal").length,
+          status_oleh: statusOleh,
+          status_pada: statusPada,
+        };
+      }
+
       const hasil: PesananRow[] = [
-        ...billRows.map((r) => ({
-          id: r.id,
-          jenis: "open_bill" as const,
-          nomor: null,
-          meja: r.meja,
-          customer: r.customer,
-          waktu: r.waktu.toISOString(),
-          total: totalBill.get(r.id) ?? 0,
-          dibayar: false,
-          status: r.status,
-          sajian_takeaway: r.sajianTakeaway,
-          is_dine_in: true,
-          catatan: r.catatan,
-          items: itemBill.get(r.id) ?? [],
-          status_oleh: r.statusOleh ?? null,
-          status_pada: r.statusPada ? r.statusPada.toISOString() : null,
-        })),
-        ...saleRows.map((r) => ({
-          id: r.id,
-          jenis: "penjualan" as const,
-          nomor: r.nomor,
-          meja: r.meja,
-          customer: r.customer,
-          waktu: r.waktu.toISOString(),
-          total: r.total,
-          dibayar: true,
-          status: r.status,
-          sajian_takeaway: r.sajianTakeaway,
-          is_dine_in: r.isDineIn,
-          catatan: r.catatan,
-          items: itemSale.get(r.id) ?? [],
-          status_oleh: r.statusOleh ?? null,
-          status_pada: r.statusPada ? r.statusPada.toISOString() : null,
-        })),
+        ...billRows.map((r) => {
+          const items = itemBill.get(r.id) ?? [];
+          return {
+            id: r.id,
+            jenis: "open_bill" as const,
+            nomor: null,
+            meja: r.meja,
+            customer: r.customer,
+            waktu: r.waktu.toISOString(),
+            total: totalBill.get(r.id) ?? 0,
+            dibayar: false,
+            is_dine_in: true,
+            catatan: r.catatan,
+            items,
+            ...ringkas(items),
+          };
+        }),
+        ...saleRows.map((r) => {
+          const items = itemSale.get(r.id) ?? [];
+          return {
+            id: r.id,
+            jenis: "penjualan" as const,
+            nomor: r.nomor,
+            meja: r.meja,
+            customer: r.customer,
+            waktu: r.waktu.toISOString(),
+            total: r.total,
+            dibayar: true,
+            is_dine_in: r.isDineIn,
+            catatan: r.catatan,
+            items,
+            ...ringkas(items),
+          };
+        }),
       ]
         .filter((r) => !q.status || r.status === q.status)
         // terbaru di atas: yang baru masuk paling perlu dilihat dapur
@@ -251,109 +398,104 @@ export const pesananRoutes = new Hono<AppEnv>()
     },
   )
   /**
-   * Ubah status pengerjaan. Guard balapan ada di klausa WHERE: dua orang di
-   * dapur menekan tombol bersamaan → yang kedua tidak menimpa yang pertama,
-   * dan mendapat 409 supaya layarnya menyegarkan diri.
+   * Ubah status SATU BARIS — tombol utama papan.
+   *
+   * Guard balapan ada di klausa WHERE: dua orang di dapur menekan tombol baris
+   * yang sama → yang kedua tidak menimpa yang pertama, dan mendapat 409 supaya
+   * layarnya menyegarkan diri.
    */
   .post(
-    "/:jenis/:id/status",
-    zValidator("json", z.object({ status: z.enum(["dikerjakan", "selesai", "batal"]) })),
+    "/:jenis/:id/item/:itemId/status",
+    zValidator("json", StatusBody),
     async (c) => {
       const auth = c.get("auth");
       const branchId = await resolveBranchId(c);
       const jenis = JenisParam.parse(c.req.param("jenis"));
       const id = c.req.param("id");
+      const itemId = c.req.param("itemId");
       const status = c.req.valid("json").status;
       const sekarang = new Date();
+      await pastikanKartu(jenis, id, auth.company_id!, branchId, { untukUbah: true });
 
       if (jenis === "open_bill") {
-        const [row] = await db
-          .select({ status: openBills.pesananStatus, saleId: openBills.saleId })
-          .from(openBills)
-          .where(
-            and(
-              eq(openBills.id, id),
-              eq(openBills.companyId, auth.company_id!),
-              eq(openBills.branchId, branchId),
-            ),
-          );
-        if (!row) throw new HTTPException(404, { message: "Pesanan tidak ditemukan" });
-        // Bill yang sudah dibayar hidup sebagai penjualan; menandainya di sini
-        // akan mengubah kartu yang tak lagi tampil dan meninggalkan kartu
-        // penjualannya tak tersentuh.
-        if (row.saleId) {
-          throw new HTTPException(409, {
-            message: "Pesanan sudah dibayar — ubah statusnya lewat kartu penjualan",
-          });
-        }
-        if (row.status === status) return c.json({ ok: true, status });
-        const ubah = await db
-          .update(openBills)
-          .set({
-            pesananStatus: status,
-            pesananStatusAt: sekarang,
-            pesananStatusOleh: auth.sub,
-            // Batal = tutup bill: hilang dari pemilih kasir supaya tak bisa
-            // ditagihkan. Keluar dari batal membukanya kembali — tanpa ini bill
-            // yang "dibatalkan lalu ternyata jadi" mustahil ditagih selamanya.
-            closedAt: status === "batal" ? sekarang : null,
-          })
-          .where(and(eq(openBills.id, id), eq(openBills.pesananStatus, row.status)))
-          .returning({ id: openBills.id });
-        if (ubah.length === 0) {
-          throw new HTTPException(409, {
-            message: "Status pesanan baru saja diubah orang lain — muat ulang papan",
-          });
-        }
-        await db.insert(pesananLogs).values({
-          companyId: auth.company_id!,
-          branchId,
-          openBillId: id,
-          aksi: LABEL_STATUS[status],
-          statusLama: row.status,
-          statusBaru: status,
-          userId: auth.sub,
+        const hasil = await db.transaction(async (tx) => {
+          const [baris] = await tx
+            .select({ nama: openBillItems.menuNama, status: openBillItems.pesananStatus })
+            .from(openBillItems)
+            .where(and(eq(openBillItems.id, itemId), eq(openBillItems.billId, id)));
+          if (!baris) throw new HTTPException(404, { message: "Baris pesanan tidak ditemukan" });
+          if (baris.status !== status) {
+            const ubah = await tx
+              .update(openBillItems)
+              .set({
+                pesananStatus: status,
+                pesananStatusAt: sekarang,
+                pesananStatusOleh: auth.sub,
+              })
+              .where(
+                and(eq(openBillItems.id, itemId), eq(openBillItems.pesananStatus, baris.status)),
+              )
+              .returning({ id: openBillItems.id });
+            if (ubah.length === 0) {
+              throw new HTTPException(409, {
+                message: "Status baris ini baru saja diubah orang lain — muat ulang papan",
+              });
+            }
+            await tx.insert(pesananLogs).values({
+              companyId: auth.company_id!,
+              branchId,
+              openBillId: id,
+              aksi: LABEL_STATUS[status],
+              itemNama: baris.nama,
+              statusLama: baris.status,
+              statusBaru: status,
+              userId: auth.sub,
+            });
+          }
+          return { kartu: await selaraskanTutupBill(tx, id, sekarang) };
         });
-        return c.json({ ok: true, status });
+        return c.json({ ok: true, status, kartu_status: hasil.kartu });
       }
 
-      const [row] = await db
-        .select({ status: sales.pesananStatus })
-        .from(sales)
-        .where(
-          and(
-            eq(sales.id, id),
-            eq(sales.companyId, auth.company_id!),
-            eq(sales.branchId, branchId),
-            isNull(sales.deletedAt),
-          ),
-        );
-      if (!row) throw new HTTPException(404, { message: "Pesanan tidak ditemukan" });
-      if (row.status === status) return c.json({ ok: true, status });
-      const ubah = await db
-        .update(sales)
-        .set({ pesananStatus: status, pesananStatusAt: sekarang, pesananStatusOleh: auth.sub })
-        .where(and(eq(sales.id, id), eq(sales.pesananStatus, row.status)))
-        .returning({ id: sales.id });
-      if (ubah.length === 0) {
-        throw new HTTPException(409, {
-          message: "Status pesanan baru saja diubah orang lain — muat ulang papan",
-        });
-      }
-      await db.insert(pesananLogs).values({
-        companyId: auth.company_id!,
-        branchId,
-        saleId: id,
-        aksi: LABEL_STATUS[status],
-        statusLama: row.status,
-        statusBaru: status,
-        userId: auth.sub,
+      const hasil = await db.transaction(async (tx) => {
+        const [baris] = await tx
+          .select({ nama: saleItems.menuNama, status: saleItems.pesananStatus })
+          .from(saleItems)
+          .where(and(eq(saleItems.id, itemId), eq(saleItems.saleId, id)));
+        if (!baris) throw new HTTPException(404, { message: "Baris pesanan tidak ditemukan" });
+        if (baris.status !== status) {
+          const ubah = await tx
+            .update(saleItems)
+            .set({ pesananStatus: status, pesananStatusAt: sekarang, pesananStatusOleh: auth.sub })
+            .where(and(eq(saleItems.id, itemId), eq(saleItems.pesananStatus, baris.status)))
+            .returning({ id: saleItems.id });
+          if (ubah.length === 0) {
+            throw new HTTPException(409, {
+              message: "Status baris ini baru saja diubah orang lain — muat ulang papan",
+            });
+          }
+          await tx.insert(pesananLogs).values({
+            companyId: auth.company_id!,
+            branchId,
+            saleId: id,
+            aksi: LABEL_STATUS[status],
+            itemNama: baris.nama,
+            statusLama: baris.status,
+            statusBaru: status,
+            userId: auth.sub,
+          });
+        }
+        const rows = await tx
+          .select({ status: saleItems.pesananStatus })
+          .from(saleItems)
+          .where(eq(saleItems.saleId, id));
+        return { kartu: turunkanStatus(rows) };
       });
-      return c.json({ ok: true, status });
+      return c.json({ ok: true, status, kartu_status: hasil.kartu });
     },
   )
   /**
-   * Tandai penyajian bawa pulang / makan di tempat.
+   * Tandai penyajian SATU BARIS bawa pulang / makan di tempat.
    *
    * PENANDA SAJA. `is_dine_in`, `sale_consumptions`, dan `hpp_satuan` tidak
    * disentuh — angka-angka itu sudah dibukukan saat transaksi dibuat, dan
@@ -361,64 +503,130 @@ export const pesananRoutes = new Hono<AppEnv>()
    * bahannya sendiri. Yang berubah hanya instruksi untuk yang menyajikan.
    */
   .post(
-    "/:jenis/:id/sajian",
-    zValidator("json", z.object({ takeaway: z.boolean() })),
+    "/:jenis/:id/item/:itemId/sajian",
+    zValidator("json", SajianBody),
     async (c) => {
       const auth = c.get("auth");
       const branchId = await resolveBranchId(c);
       const jenis = JenisParam.parse(c.req.param("jenis"));
       const id = c.req.param("id");
+      const itemId = c.req.param("itemId");
       const takeaway = c.req.valid("json").takeaway;
       const aksi = takeaway ? "Diubah jadi bawa pulang" : "Dikembalikan jadi makan di tempat";
+      await pastikanKartu(jenis, id, auth.company_id!, branchId, { untukUbah: true });
 
-      if (jenis === "open_bill") {
-        const ubah = await db
-          .update(openBills)
-          .set({ sajianTakeaway: takeaway })
-          .where(
-            and(
-              eq(openBills.id, id),
-              eq(openBills.companyId, auth.company_id!),
-              eq(openBills.branchId, branchId),
-              // sudah dibayar → penanda penyajiannya milik kartu penjualan
-              isNull(openBills.saleId),
-            ),
-          )
-          .returning({ id: openBills.id });
-        if (ubah.length === 0) throw new HTTPException(404, { message: "Pesanan tidak ditemukan" });
-        await db.insert(pesananLogs).values({
-          companyId: auth.company_id!,
-          branchId,
-          openBillId: id,
-          aksi,
-          userId: auth.sub,
-        });
-        return c.json({ ok: true, sajian_takeaway: takeaway });
-      }
-
-      const ubah = await db
-        .update(sales)
-        .set({ sajianTakeaway: takeaway })
-        .where(
-          and(
-            eq(sales.id, id),
-            eq(sales.companyId, auth.company_id!),
-            eq(sales.branchId, branchId),
-            isNull(sales.deletedAt),
-          ),
-        )
-        .returning({ id: sales.id });
-      if (ubah.length === 0) throw new HTTPException(404, { message: "Pesanan tidak ditemukan" });
+      const [baris] =
+        jenis === "open_bill"
+          ? await db
+              .update(openBillItems)
+              .set({ sajianTakeaway: takeaway })
+              .where(and(eq(openBillItems.id, itemId), eq(openBillItems.billId, id)))
+              .returning({ nama: openBillItems.menuNama })
+          : await db
+              .update(saleItems)
+              .set({ sajianTakeaway: takeaway })
+              .where(and(eq(saleItems.id, itemId), eq(saleItems.saleId, id)))
+              .returning({ nama: saleItems.menuNama });
+      if (!baris) throw new HTTPException(404, { message: "Baris pesanan tidak ditemukan" });
       await db.insert(pesananLogs).values({
         companyId: auth.company_id!,
         branchId,
-        saleId: id,
+        ...(jenis === "open_bill" ? { openBillId: id } : { saleId: id }),
         aksi,
+        itemNama: baris.nama,
         userId: auth.sub,
       });
       return c.json({ ok: true, sajian_takeaway: takeaway });
     },
   )
+  /**
+   * Ubah status SELURUH baris sekaligus — pintasan "pesanan ini kelar semua".
+   *
+   * Sengaja TANPA guard balapan: perintahnya bukan "ubah dari X ke Y" melainkan
+   * "jadikan semuanya Y", jadi dua orang yang menekannya bersamaan sampai di
+   * hasil yang sama. Yang butuh guard adalah tombol per baris, karena di sanalah
+   * dua orang bisa punya maksud berbeda atas satu sajian.
+   */
+  .post("/:jenis/:id/status", zValidator("json", StatusBody), async (c) => {
+    const auth = c.get("auth");
+    const branchId = await resolveBranchId(c);
+    const jenis = JenisParam.parse(c.req.param("jenis"));
+    const id = c.req.param("id");
+    const status = c.req.valid("json").status;
+    const sekarang = new Date();
+    await pastikanKartu(jenis, id, auth.company_id!, branchId, { untukUbah: true });
+
+    const kartu = await db.transaction(async (tx) => {
+      if (jenis === "open_bill") {
+        const ubah = await tx
+          .update(openBillItems)
+          .set({ pesananStatus: status, pesananStatusAt: sekarang, pesananStatusOleh: auth.sub })
+          .where(
+            and(eq(openBillItems.billId, id), sql`${openBillItems.pesananStatus} <> ${status}`),
+          )
+          .returning({ id: openBillItems.id });
+        if (ubah.length > 0) {
+          await tx.insert(pesananLogs).values({
+            companyId: auth.company_id!,
+            branchId,
+            openBillId: id,
+            aksi: `${LABEL_STATUS[status]} (${ubah.length} baris)`,
+            statusBaru: status,
+            userId: auth.sub,
+          });
+        }
+        return await selaraskanTutupBill(tx, id, sekarang);
+      }
+      const ubah = await tx
+        .update(saleItems)
+        .set({ pesananStatus: status, pesananStatusAt: sekarang, pesananStatusOleh: auth.sub })
+        .where(and(eq(saleItems.saleId, id), sql`${saleItems.pesananStatus} <> ${status}`))
+        .returning({ id: saleItems.id });
+      if (ubah.length > 0) {
+        await tx.insert(pesananLogs).values({
+          companyId: auth.company_id!,
+          branchId,
+          saleId: id,
+          aksi: `${LABEL_STATUS[status]} (${ubah.length} baris)`,
+          statusBaru: status,
+          userId: auth.sub,
+        });
+      }
+      const rows = await tx
+        .select({ status: saleItems.pesananStatus })
+        .from(saleItems)
+        .where(eq(saleItems.saleId, id));
+      return turunkanStatus(rows);
+    });
+    return c.json({ ok: true, status: kartu });
+  })
+  /** Tandai penyajian SELURUH baris sekaligus. Penanda saja — lihat versi per baris. */
+  .post("/:jenis/:id/sajian", zValidator("json", SajianBody), async (c) => {
+    const auth = c.get("auth");
+    const branchId = await resolveBranchId(c);
+    const jenis = JenisParam.parse(c.req.param("jenis"));
+    const id = c.req.param("id");
+    const takeaway = c.req.valid("json").takeaway;
+    const aksi = takeaway ? "Diubah jadi bawa pulang" : "Dikembalikan jadi makan di tempat";
+    await pastikanKartu(jenis, id, auth.company_id!, branchId, { untukUbah: true });
+
+    if (jenis === "open_bill") {
+      await db
+        .update(openBillItems)
+        .set({ sajianTakeaway: takeaway })
+        .where(eq(openBillItems.billId, id));
+    } else {
+      await db.update(saleItems).set({ sajianTakeaway: takeaway }).where(eq(saleItems.saleId, id));
+    }
+    await db.insert(pesananLogs).values({
+      companyId: auth.company_id!,
+      branchId,
+      ...(jenis === "open_bill" ? { openBillId: id } : { saleId: id }),
+      aksi: `${aksi} (semua baris)`,
+      userId: auth.sub,
+    });
+    return c.json({ ok: true, sajian_takeaway: takeaway });
+  })
   /**
    * Riwayat perubahan status satu pesanan — "siapa menandai apa, kapan".
    *
@@ -431,36 +639,16 @@ export const pesananRoutes = new Hono<AppEnv>()
     const branchId = await resolveBranchId(c);
     const jenis = JenisParam.parse(c.req.param("jenis"));
     const id = c.req.param("id");
+    await pastikanKartu(jenis, id, auth.company_id!, branchId, { untukUbah: false });
 
-    if (jenis === "open_bill") {
-      const [ada] = await db
-        .select({ id: openBills.id })
-        .from(openBills)
-        .where(
-          and(
-            eq(openBills.id, id),
-            eq(openBills.companyId, auth.company_id!),
-            eq(openBills.branchId, branchId),
-          ),
-        );
-      if (!ada) throw new HTTPException(404, { message: "Pesanan tidak ditemukan" });
-      return c.json(await riwayat("bill", id));
-    }
+    if (jenis === "open_bill") return c.json(await riwayat("bill", id));
 
     const [sale] = await db
-      .select({ id: sales.id, asal: sales.asalOpenBillId })
+      .select({ asal: sales.asalOpenBillId })
       .from(sales)
-      .where(
-        and(
-          eq(sales.id, id),
-          eq(sales.companyId, auth.company_id!),
-          eq(sales.branchId, branchId),
-          isNull(sales.deletedAt),
-        ),
-      );
-    if (!sale) throw new HTTPException(404, { message: "Pesanan tidak ditemukan" });
+      .where(eq(sales.id, id));
     const baris = await riwayat("sale", id);
-    if (sale.asal) baris.push(...(await riwayat("bill", sale.asal)));
+    if (sale?.asal) baris.push(...(await riwayat("bill", sale.asal)));
     baris.sort((a, b) => b.waktu.localeCompare(a.waktu));
     return c.json(baris satisfies PesananLogRow[]);
   });

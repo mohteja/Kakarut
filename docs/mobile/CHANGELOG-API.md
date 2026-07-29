@@ -25,6 +25,99 @@ tanpa akses repo server.
 
 ---
 
+## Rilis: Status pesanan turun ke SETIAP BARIS (papan pesanan per sajian)
+
+> Belum di-merge ke production.
+>
+> Ada migrasi DB (`0092`): kolom status **pindah** dari `sales`/`open_bills` ke
+> `sale_items`/`open_bill_items`, plus `pesanan_logs.item_nama`. Migrasinya
+> menyalin nilai lama ke tiap baris sebelum kolom lamanya dibuang — data
+> pengerjaan yang sedang berjalan tidak hilang.
+
+Permintaan owner: *"selesai, take away dan batal itu per baris pesanan per bill,
+bukan seluruh bill — jadi nanti ketika selesai bisa kirim satu satu dan kita tau
+mana yang sudah dan mana yang belum."*
+
+Satu bill berisi minuman yang keluar duluan dan gorengan yang menyusul. Dengan
+satu tombol untuk seluruh bill, dapur harus menahan "selesai" sampai sajian
+terakhir jadi — dan tak seorang pun bisa tahu mana yang sudah keluar.
+
+### 🟡 PERLU DICEK — `PesananRow.status` & `sajian_takeaway` kini TURUNAN, bukan kolom
+
+Bentuk responsnya **tidak berubah** — `GET /api/pesanan` tetap mengembalikan
+`PesananRow[]` dengan `status` dan `sajian_takeaway` di kartunya. Yang berubah
+adalah **asal nilainya**: keduanya sekarang dihitung dari `items[]` saat dibaca.
+
+| Field kartu | Aturan turunannya |
+| --- | --- |
+| `status` | `batal` bila **semua** baris batal; `selesai` bila **tak ada lagi** baris `dikerjakan`; selain itu `dikerjakan` |
+| `sajian_takeaway` | `true` hanya bila **SEMUA** baris bertanda bawa pulang |
+
+Jangan menyimpan sendiri agregat ini di sisi klien: agregat tersimpan harus ikut
+diperbarui di setiap perubahan baris, dan satu yang terlewat membuat papan
+berbohong. Baca ulang `GET /api/pesanan` setelah tiap aksi.
+
+`PesananRow` juga bertambah `item_selesai` dan `item_batal` (cacah baris) untuk
+ringkasan "2/3 selesai". `PesananItemRow` bertambah `id`, `status`,
+`sajian_takeaway`, `status_oleh`, `status_pada`. `PesananLogRow` bertambah
+`item_nama` (`null` = aksinya mengenai seluruh pesanan).
+
+### 🟢 BARU — endpoint per baris
+
+| Endpoint | Guna |
+| --- | --- |
+| `POST /api/pesanan/:jenis/:id/item/:itemId/status` | tandai **satu sajian** `dikerjakan`/`selesai`/`batal` |
+| `POST /api/pesanan/:jenis/:id/item/:itemId/sajian` | penanda bawa pulang **satu sajian** |
+
+`:itemId` = `PesananItemRow.id`. Responsnya
+`{ ok, status, kartu_status }` — `kartu_status` adalah status kartu setelah
+diturunkan ulang, jadi layar bisa memindahkan kartunya tanpa memuat ulang dulu.
+**409** bila baris itu baru saja diubah orang lain (dua orang di dapur menekan
+tombol yang sama) — muat ulang papan, jangan kirim paksa.
+
+Dua endpoint setingkat kartu yang lama **tetap ada** sebagai pintasan "semua
+baris" (`POST .../status` dan `POST .../sajian`) — pesanan satu-dua sajian
+adalah mayoritas. Bedanya, versi kartu **tidak** ber-409 balapan: perintahnya
+"jadikan semuanya X", jadi dua orang yang menekannya bersamaan sampai di hasil
+yang sama.
+
+### 🔴 WAJIB — kirim `open_bill_item_id` saat membayar open bill
+
+Pewarisan status ke penjualan sekarang **per baris**, dan pencocokannya lewat
+`items[].open_bill_item_id` pada `POST /api/penjualan`. Field itu **sudah ada
+sejak rilis kunci harga open bill** dan sudah wajib untuk alasan itu — sekarang
+ia juga yang membawa pekerjaan dapur ikut pindah.
+
+Tanpa field itu, tiap baris penjualan lahir sebagai pekerjaan baru yang belum
+tersentuh: **sajian yang sudah selesai akan kembali ke antrean dapur** begitu
+pelanggan membayar.
+
+### ⚪️ INFO — `RiwayatTransaksiRow.sajian_takeaway` ikut jadi turunan
+
+Nilainya `true` hanya bila SELURUH baris transaksi bertanda bawa pulang. Badge
+"diubah setelah transaksi" (`sajian_takeaway == is_dine_in`) masih berguna, tapi
+bacalah arahnya hati-hati:
+
+- `true` pada nota **dine-in** = semuanya dipindah jadi bawa pulang;
+- `false` pada nota **bawa pulang** = **ada** yang dikembalikan ke piring —
+  belum tentu semuanya. Hindari label "disajikan di tempat" yang mutlak.
+
+Penandanya juga **lahir per baris** (`= !sale_items.is_dine_in`), jadi satu nota
+bisa berisi sajian yang dibungkus dan sajian yang di piring sekaligus — persis
+yang mustahil diwakili satu penanda setingkat transaksi.
+
+### ⚪️ INFO — pembatalan bill & status meja ikut mengikuti baris
+
+`DELETE /api/open-bill/:id` sekarang menandai `batal` pada **setiap** barisnya
+(selain mengisi `closed_at`). Sebaliknya, bill yang seluruh barisnya batal
+otomatis tertutup — dan satu baris yang dikembalikan ke antrean **membukanya
+lagi** untuk kasir. Yang terlihat kasir tak berubah.
+
+`GET /api/meja/status` juga menurun dari baris: transaksi baru dianggap tidak
+lagi mengisi meja hanya kalau **seluruh** sajiannya dibatalkan.
+
+---
+
 ## Rilis: `sebab` terstruktur pada 409 penjualan — jawaban pertanyaan antrean offline
 
 > **Sudah di-merge ke production** (PR #131, 29 Jul 2026).
@@ -341,6 +434,11 @@ hanya kasir. Detail lengkap: blok `/api/pesanan` di `docs/API-CONTRACT.md`.
 
 `:jenis` = `open_bill` atau `penjualan`. Status **ikut terbawa** saat bill
 dibayar, jadi satu pesanan tetap satu kartu — bukan dua.
+
+> **Sudah disusul rilis berikutnya.** Status pindah ke **tiap baris**; kedua
+> endpoint `status`/`sajian` di atas kini pintasan "semua baris", dan ada versi
+> `.../item/:itemId/...` yang menjadi tombol utamanya. Lihat entri **"Status
+> pesanan turun ke SETIAP BARIS"** di paling atas dokumen ini.
 
 ### 🔴 WAJIB — jangan lagi kirim `DELETE /api/open-bill/:id` setelah membayar
 

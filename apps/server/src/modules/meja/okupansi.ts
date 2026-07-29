@@ -108,7 +108,13 @@ export async function hitungOkupansi(
          AND s.branch_id  = ${opts.branchId}
          AND s.meja_id IS NOT NULL
          AND s.deleted_at IS NULL
-         AND s.pesanan_status <> 'batal'
+         -- Transaksi yang SELURUH barisnya dibatalkan dapur tidak lagi mengisi
+         -- meja. Status pesanan hidup per baris sekarang, jadi ini diturunkan:
+         -- ada satu baris saja yang belum dibatalkan → mejanya masih terpakai.
+         AND EXISTS (
+               SELECT 1 FROM sale_items si
+                WHERE si.sale_id = s.id AND si.pesanan_status <> 'batal'
+             )
          AND s.waktu > GREATEST(
                COALESCE(b.sampai, '-infinity'::timestamptz),
                now() - interval '${sql.raw(JENDELA_OKUPANSI)}'

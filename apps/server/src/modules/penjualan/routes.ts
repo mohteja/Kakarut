@@ -148,7 +148,11 @@ export const penjualanRoutes = new Hono<AppEnv>()
         waktu: sales.waktu,
         total: sales.total,
         is_dine_in: sales.isDineIn,
-        sajian_takeaway: sales.sajianTakeaway,
+        // Penanda penyajian hidup PER BARIS sejak papan pesanan jadi per-baris.
+        // Riwayat cuma butuh satu badge, jadi diturunkan: "bawa pulang" hanya
+        // bila SEMUA barisnya begitu — satu piring yang tetap di tempat sudah
+        // cukup membuat pesanan ini bukan pesanan bawa pulang.
+        sajian_takeaway: sql<boolean>`COALESCE((SELECT bool_and(si.sajian_takeaway) FROM sale_items si WHERE si.sale_id = ${sales.id}), false)`,
         meja: sales.mejaLabel,
         kasir: users.nama,
         konsumen: sales.customerNama,

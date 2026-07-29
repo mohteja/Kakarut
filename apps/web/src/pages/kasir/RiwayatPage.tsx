@@ -111,10 +111,14 @@ export function RiwayatPage() {
                   </span>
                   {/* Dapur mengubah cara penyajian lewat Papan Pesanan setelah
                       nota tercatat. Nota & perhitungan bahan TIDAK ikut berubah,
-                      jadi selisihnya ditampilkan — bukan disembunyikan. */}
+                      jadi selisihnya ditampilkan — bukan disembunyikan.
+                      Penandanya per baris, dan `sajian_takeaway` berarti SEMUA
+                      baris — jadi kebalikannya cuma boleh dibaca "ada yang". */}
                   {r.sajian_takeaway === r.is_dine_in && (
                     <span className="rounded-full bg-purple-100 px-2 py-0.5 text-[11px] font-semibold text-purple-700">
-                      disajikan {r.sajian_takeaway ? "🥡 bawa pulang" : "🍽 di tempat"}
+                      {r.sajian_takeaway
+                        ? "disajikan 🥡 bawa pulang"
+                        : "ada yang 🍽 disajikan di tempat"}
                     </span>
                   )}
                 </div>

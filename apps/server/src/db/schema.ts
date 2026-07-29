@@ -1220,21 +1220,16 @@ export const sales = pgTable(
      * eksklusif (`shift_id` terisi ATAU `shift_id IS NULL` + di dalam jendela).
      */
     shiftId: uuid("shift_id").references(() => shifts.id),
-    /**
-     * PAPAN PESANAN — apakah makanannya sudah dibuat. Terpisah sama sekali dari
-     * pembayaran: transaksi ini sudah lunas, yang dilacak di sini pengerjaannya.
-     */
-    pesananStatus: pesananStatusEnum("pesanan_status").notNull().default("dikerjakan"),
-    pesananStatusAt: timestamp("pesanan_status_at", { withTimezone: true }),
-    pesananStatusOleh: uuid("pesanan_status_oleh").references(() => users.id),
-    /**
-     * PENANDA PENYAJIAN "bawa pulang" dari papan dapur — SENGAJA bukan
-     * `is_dine_in`. `is_dine_in` adalah fakta pembukuan: `sale_consumptions`
-     * dan `hpp_satuan` sudah terlanjur dihitung darinya lewat `qtyEfektif()`
-     * (dine-in melewati kemasan, pelengkap 50%). Membaliknya membuat baris ini
-     * berbohong tentang angkanya sendiri. Kolom ini hanya instruksi penyajian.
-     */
-    sajianTakeaway: boolean("sajian_takeaway").notNull().default(false),
+    // PAPAN PESANAN — status pengerjaan & penanda penyajian ADA DI BARIS
+    // (`sale_items`), bukan di sini. Dapur menyelesaikan pesanan
+    // sepotong-sepotong: minuman lebih dulu, gorengan menyusul. Status
+    // setingkat transaksi memaksa "semua atau tak satu pun", sehingga tak ada
+    // cara tahu mana yang sudah dan mana yang belum.
+    //
+    // Status kartu di papan DITURUNKAN dari barisnya saat dibaca, bukan
+    // disimpan. Agregat yang disimpan harus ikut diperbarui di setiap
+    // perubahan baris, dan satu yang terlewat membuat papan berbohong — itu
+    // pelajaran yang sama dengan status meja.
     /**
      * Bill asal bila transaksi ini lahir dari open bill. TANPA foreign key:
      * bill bisa dibatalkan/dihapus permanen, dan jejak asalnya tetap berguna.
@@ -1273,8 +1268,32 @@ export const saleItems = pgTable(
     // catatan personalisasi per baris (mis. "tanpa gula", "tanpa mie")
     catatan: text("catatan"),
     lineTotal: numeric("line_total", { precision: 14, scale: 2, mode: "number" }).notNull(),
+    /**
+     * PAPAN PESANAN — pengerjaan dapur PER BARIS. Dapur menyelesaikan pesanan
+     * sepotong-sepotong, jadi inilah satuan yang benar: minuman bisa `selesai`
+     * sementara gorengan masih `dikerjakan`.
+     *
+     * `batal` di sini adalah PENANDA DAPUR ("tidak jadi dibuat"), BUKAN void:
+     * `line_total`, `hpp_satuan`, `sale_consumptions`, struk, dan laporan tidak
+     * bergerak sedikit pun. Pengembalian uang tetap lewat hapus transaksi.
+     */
+    pesananStatus: pesananStatusEnum("pesanan_status").notNull().default("dikerjakan"),
+    pesananStatusAt: timestamp("pesanan_status_at", { withTimezone: true }),
+    pesananStatusOleh: uuid("pesanan_status_oleh").references(() => users.id),
+    /**
+     * PENANDA PENYAJIAN "bawa pulang" — SENGAJA bukan `is_dine_in`.
+     * `is_dine_in` adalah fakta pembukuan: `sale_consumptions` dan `hpp_satuan`
+     * sudah terlanjur dihitung darinya lewat `qtyEfektif()` (dine-in melewati
+     * kemasan, pelengkap 50%). Membaliknya membuat baris ini berbohong tentang
+     * angkanya sendiri. Kolom ini hanya instruksi penyajian.
+     */
+    sajianTakeaway: boolean("sajian_takeaway").notNull().default(false),
   },
-  (t) => [index("sale_items_sale_idx").on(t.saleId)],
+  (t) => [
+    index("sale_items_sale_idx").on(t.saleId),
+    // papan menyaring baris yang belum selesai per transaksi
+    index("sale_items_status_idx").on(t.saleId, t.pesananStatus),
+  ],
 );
 
 export const saleConsumptions = pgTable(
@@ -1318,12 +1337,8 @@ export const openBills = pgTable(
       .references(() => users.id),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-    /** PAPAN PESANAN — pengerjaan dapur; lihat komentar di `sales.pesananStatus` */
-    pesananStatus: pesananStatusEnum("pesanan_status").notNull().default("dikerjakan"),
-    pesananStatusAt: timestamp("pesanan_status_at", { withTimezone: true }),
-    pesananStatusOleh: uuid("pesanan_status_oleh").references(() => users.id),
-    /** penanda penyajian "bawa pulang" — ikut diwarisi transaksi saat bill dibayar */
-    sajianTakeaway: boolean("sajian_takeaway").notNull().default(false),
+    // PAPAN PESANAN — status pengerjaan ada di BARIS (`open_bill_items`);
+    // alasannya di catatan `sales` di atas.
     /**
      * Bill SELESAI: sudah dibayar (jadi `sale_id`) atau dibatalkan. Dulu bill
      * dihapus keras oleh browser setelah bayar — panggilan yang tak dijamin
@@ -1370,6 +1385,13 @@ export const pesananLogs = pgTable(
     openBillId: uuid("open_bill_id").references(() => openBills.id, { onDelete: "cascade" }),
     /** label siap tampil, mis. "Ditandai selesai", "Diubah jadi bawa pulang" */
     aksi: text("aksi").notNull(),
+    /**
+     * Nama baris yang disentuh, SNAPSHOT — null berarti aksinya mengenai
+     * seluruh pesanan. Sengaja teks, bukan FK: baris bill bisa diganti kasir
+     * saat pesanan ditambah, dan riwayat "Es Teh ditandai selesai" harus tetap
+     * terbaca meski barisnya sudah tak ada.
+     */
+    itemNama: text("item_nama"),
     statusLama: pesananStatusEnum("status_lama"),
     statusBaru: pesananStatusEnum("status_baru"),
     userId: uuid("user_id").references(() => users.id),
@@ -1459,8 +1481,22 @@ export const openBillItems = pgTable(
     /** null = ikut mode transaksi; true/false = override dine-in per baris */
     dineInOverride: boolean("dine_in_override"),
     catatan: text("catatan"),
+    /**
+     * PAPAN PESANAN — pengerjaan dapur per baris; kembaran
+     * `sale_items.pesananStatus`. Diwarisi baris penjualan saat bill dibayar
+     * lewat `open_bill_item_id`, jadi pekerjaan dapur tak hilang saat pelanggan
+     * membayar di tengah jalan.
+     */
+    pesananStatus: pesananStatusEnum("pesanan_status").notNull().default("dikerjakan"),
+    pesananStatusAt: timestamp("pesanan_status_at", { withTimezone: true }),
+    pesananStatusOleh: uuid("pesanan_status_oleh").references(() => users.id),
+    /** penanda penyajian "bawa pulang" per baris — ikut diwarisi saat dibayar */
+    sajianTakeaway: boolean("sajian_takeaway").notNull().default(false),
   },
-  (t) => [index("open_bill_items_bill_idx").on(t.billId)],
+  (t) => [
+    index("open_bill_items_bill_idx").on(t.billId),
+    index("open_bill_items_status_idx").on(t.billId, t.pesananStatus),
+  ],
 );
 
 export const productions = pgTable(

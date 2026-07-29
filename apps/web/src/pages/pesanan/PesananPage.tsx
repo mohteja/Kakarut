@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import type { PesananLogRow, PesananRow, PesananStatus } from "@kakarut/shared";
+import type { PesananItemRow, PesananLogRow, PesananRow, PesananStatus } from "@kakarut/shared";
 import { CabangDataBar } from "../../components/CabangDataBar";
 import { Card, ErrorText, Modal, PageTitle, Spinner } from "../../components/ui";
 import { useCabangData } from "../../context/BranchContext";
@@ -12,6 +12,17 @@ const KOLOM: { status: PesananStatus; judul: string; warna: string }[] = [
   { status: "selesai", judul: "✅ Selesai", warna: "border-green-300 bg-green-50" },
   { status: "batal", judul: "✖ Batal", warna: "border-stone-300 bg-stone-100" },
 ];
+
+const CHIP_BARIS: Record<PesananStatus, string> = {
+  dikerjakan: "bg-orange-100 text-orange-800",
+  selesai: "bg-green-100 text-green-800",
+  batal: "bg-stone-200 text-stone-500",
+};
+const LABEL_BARIS: Record<PesananStatus, string> = {
+  dikerjakan: "🔥 Dikerjakan",
+  selesai: "✅ Selesai",
+  batal: "✖ Batal",
+};
 
 /** Selisih jam pesanan → sekarang, dibulatkan ke menit. */
 function lamaMenunggu(iso: string): string {
@@ -26,13 +37,7 @@ function lamaMenunggu(iso: string): string {
  * Riwayat "siapa menandai apa" untuk satu pesanan. Dimuat saat dibuka saja —
  * papan bisa menampung puluhan kartu dan riwayat hampir tak pernah dibaca.
  */
-function RiwayatModal({
-  pesanan,
-  onClose,
-}: {
-  pesanan: PesananRow;
-  onClose: () => void;
-}) {
+function RiwayatModal({ pesanan, onClose }: { pesanan: PesananRow; onClose: () => void }) {
   const { data, isLoading } = useQuery({
     queryKey: ["pesanan-log", pesanan.jenis, pesanan.id],
     queryFn: () => api<PesananLogRow[]>(`/pesanan/${pesanan.jenis}/${pesanan.id}/log`),
@@ -49,7 +54,12 @@ function RiwayatModal({
         <ol className="space-y-2">
           {(data ?? []).map((r, i) => (
             <li key={i} className="rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm">
-              <div className="font-medium text-stone-800">{r.aksi}</div>
+              <div className="font-medium text-stone-800">
+                {/* nama baris di depan: yang dicari orang saat membuka riwayat
+                    adalah "sajian mana", bukan "aksi apa" */}
+                {r.item_nama && <span className="text-orange-700">{r.item_nama} — </span>}
+                {r.aksi}
+              </div>
               <div className="text-xs text-stone-500">
                 {formatWaktu(r.waktu)} · {r.oleh ?? "—"}
               </div>
@@ -61,17 +71,104 @@ function RiwayatModal({
   );
 }
 
-function KartuPesanan({
-  p,
+/**
+ * Satu sajian dalam pesanan — SATUAN KERJA dapur.
+ *
+ * Tombolnya ada di sini, bukan di kartunya: dapur menyelesaikan minuman lebih
+ * dulu lalu gorengan menyusul, dan dengan status setingkat kartu tak ada cara
+ * memberi tahu siapa pun mana yang sudah keluar.
+ */
+function BarisPesanan({
+  it,
   sibuk,
   onStatus,
   onSajian,
+}: {
+  it: PesananItemRow;
+  sibuk: boolean;
+  onStatus: (status: PesananStatus) => void;
+  onSajian: (takeaway: boolean) => void;
+}) {
+  return (
+    <li className="rounded-lg border border-stone-100 bg-stone-50/60 px-2 py-1.5">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0 text-sm text-stone-700">
+          <span className={it.status === "batal" ? "line-through text-stone-400" : ""}>
+            <span className="font-semibold text-stone-800">{it.qty}×</span> {it.nama}
+          </span>
+          {it.catatan && <div className="text-xs italic text-orange-600">📝 {it.catatan}</div>}
+        </div>
+        <span
+          className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${CHIP_BARIS[it.status]}`}
+        >
+          {LABEL_BARIS[it.status]}
+        </span>
+      </div>
+      <div className="mt-1 flex flex-wrap items-center gap-1">
+        {it.status !== "selesai" && (
+          <button
+            disabled={sibuk}
+            onClick={() => onStatus("selesai")}
+            className="rounded-md bg-green-600 px-2 py-1 text-[11px] font-semibold text-white hover:bg-green-700 disabled:opacity-50"
+          >
+            ✅ Selesai
+          </button>
+        )}
+        {it.status !== "dikerjakan" && (
+          <button
+            disabled={sibuk}
+            onClick={() => onStatus("dikerjakan")}
+            className="rounded-md bg-orange-100 px-2 py-1 text-[11px] font-semibold text-orange-800 hover:bg-orange-200 disabled:opacity-50"
+          >
+            ↩ Kembalikan
+          </button>
+        )}
+        {it.status !== "batal" && (
+          <button
+            disabled={sibuk}
+            onClick={() => onStatus("batal")}
+            className="rounded-md bg-red-50 px-2 py-1 text-[11px] font-semibold text-red-700 hover:bg-red-100 disabled:opacity-50"
+          >
+            ✖ Batal
+          </button>
+        )}
+        <button
+          disabled={sibuk}
+          onClick={() => onSajian(!it.sajian_takeaway)}
+          title={
+            it.sajian_takeaway ? "Sajikan di tempat" : "Bungkus untuk dibawa pulang"
+          }
+          className={`rounded-md px-2 py-1 text-[11px] font-semibold disabled:opacity-50 ${
+            it.sajian_takeaway
+              ? "bg-stone-200 text-stone-700 hover:bg-stone-300"
+              : "bg-blue-50 text-blue-700 hover:bg-blue-100"
+          }`}
+        >
+          {it.sajian_takeaway ? "🥡 Bawa pulang" : "🍽 Di tempat"}
+        </button>
+      </div>
+      {it.status_oleh && it.status_pada && (
+        <div className="mt-0.5 text-[10px] text-stone-400">
+          {it.status_oleh} · {formatWaktu(it.status_pada)}
+        </div>
+      )}
+    </li>
+  );
+}
+
+function KartuPesanan({
+  p,
+  sibuk,
+  onStatusItem,
+  onSajianItem,
+  onStatusSemua,
   onRiwayat,
 }: {
   p: PesananRow;
   sibuk: boolean;
-  onStatus: (status: PesananStatus) => void;
-  onSajian: (takeaway: boolean) => void;
+  onStatusItem: (itemId: string, status: PesananStatus) => void;
+  onSajianItem: (itemId: string, takeaway: boolean) => void;
+  onStatusSemua: (status: PesananStatus) => void;
   onRiwayat: () => void;
 }) {
   // label meja SUDAH berbunyi "Meja 1"/"Ruang Tunggu" — jangan diberi awalan
@@ -84,6 +181,7 @@ function KartuPesanan({
   // hidup. Pada pesanan batal tak ada yang perlu ditagih — menandainya kuning
   // justru menyuruh kasir mengejar uang yang memang tak akan datang.
   const perluDitagih = !p.dibayar && p.status !== "batal";
+  const sisa = p.items.length - p.item_selesai - p.item_batal;
   return (
     <div
       className={`rounded-xl border bg-white p-3 shadow-sm ${
@@ -114,14 +212,21 @@ function KartuPesanan({
         </div>
       </div>
 
-      <div className="mt-2 flex flex-wrap gap-1">
-        <span
-          className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-            p.sajian_takeaway ? "bg-stone-200 text-stone-700" : "bg-blue-100 text-blue-700"
-          }`}
-        >
-          {p.sajian_takeaway ? "🥡 Bawa pulang" : "🍽 Makan di tempat"}
-        </span>
+      <div className="mt-2 flex flex-wrap items-center gap-1">
+        {/* Ringkasan pengerjaan: inilah yang dicari orang dari kejauhan —
+            berapa sajian yang sudah keluar dari pesanan ini. */}
+        {p.items.length > 0 && (
+          <span className="rounded-full bg-stone-100 px-2 py-0.5 text-[11px] font-semibold text-stone-700">
+            {p.item_selesai}/{p.items.length} selesai
+            {sisa > 0 ? ` · ${sisa} jalan` : ""}
+            {p.item_batal > 0 ? ` · ${p.item_batal} batal` : ""}
+          </span>
+        )}
+        {p.sajian_takeaway && (
+          <span className="rounded-full bg-stone-200 px-2 py-0.5 text-[11px] font-semibold text-stone-700">
+            🥡 Semua bawa pulang
+          </span>
+        )}
         {diubah && (
           <span className="rounded-full bg-purple-100 px-2 py-0.5 text-[11px] font-semibold text-purple-700">
             diubah setelah transaksi
@@ -129,14 +234,15 @@ function KartuPesanan({
         )}
       </div>
 
-      <ul className="mt-2 space-y-1 border-t border-stone-100 pt-2">
-        {p.items.map((it, i) => (
-          <li key={i} className="text-sm text-stone-700">
-            <span className="font-semibold text-stone-800">{it.qty}×</span> {it.nama}
-            {it.catatan && (
-              <div className="pl-5 text-xs italic text-orange-600">📝 {it.catatan}</div>
-            )}
-          </li>
+      <ul className="mt-2 space-y-1.5 border-t border-stone-100 pt-2">
+        {p.items.map((it) => (
+          <BarisPesanan
+            key={it.id}
+            it={it}
+            sibuk={sibuk}
+            onStatus={(status) => onStatusItem(it.id, status)}
+            onSajian={(takeaway) => onSajianItem(it.id, takeaway)}
+          />
         ))}
         {p.items.length === 0 && <li className="text-xs text-stone-400">Tanpa item.</li>}
       </ul>
@@ -146,36 +252,32 @@ function KartuPesanan({
         </div>
       )}
 
-      <div className="mt-3 flex flex-wrap gap-1.5">
-        {p.status !== "selesai" && (
+      {/* Pintasan seluruh pesanan — tetap ada karena pesanan satu-dua sajian
+          adalah mayoritas, dan menekan tombol per baris untuk itu melelahkan. */}
+      <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-stone-100 pt-2">
+        <span className="text-[11px] font-medium text-stone-400">Semua:</span>
+        {p.status !== "selesai" && p.items.length > 0 && (
           <button
             disabled={sibuk}
-            onClick={() => onStatus("selesai")}
+            onClick={() => onStatusSemua("selesai")}
             className="rounded-lg bg-green-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-green-700 disabled:opacity-50"
           >
             ✅ Selesai
           </button>
         )}
-        {p.status !== "dikerjakan" && (
+        {p.status !== "dikerjakan" && p.items.length > 0 && (
           <button
             disabled={sibuk}
-            onClick={() => onStatus("dikerjakan")}
+            onClick={() => onStatusSemua("dikerjakan")}
             className="rounded-lg bg-orange-100 px-2.5 py-1.5 text-xs font-semibold text-orange-800 hover:bg-orange-200 disabled:opacity-50"
           >
             ↩ Kembalikan
           </button>
         )}
-        <button
-          disabled={sibuk}
-          onClick={() => onSajian(!p.sajian_takeaway)}
-          className="rounded-lg bg-stone-100 px-2.5 py-1.5 text-xs font-semibold text-stone-700 hover:bg-stone-200 disabled:opacity-50"
-        >
-          {p.sajian_takeaway ? "🍽 Makan di tempat" : "🥡 Jadikan bawa pulang"}
-        </button>
-        {p.status !== "batal" && (
+        {p.status !== "batal" && p.items.length > 0 && (
           <button
             disabled={sibuk}
-            onClick={() => onStatus("batal")}
+            onClick={() => onStatusSemua("batal")}
             className="rounded-lg bg-red-50 px-2.5 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-100 disabled:opacity-50"
           >
             ✖ Batal
@@ -203,7 +305,10 @@ function KartuPesanan({
  * Menyatukan pesanan yang belum dibayar (open bill) dengan yang sudah dibayar
  * pada tanggal berjalan, supaya tak ada pesanan yang "tertinggal" hanya karena
  * pelanggan belum ke kasir. Satu pesanan = satu kartu, bahkan saat berpindah
- * dari open bill ke penjualan (status & penanda penyajiannya ikut terbawa).
+ * dari open bill ke penjualan (status tiap barisnya ikut terbawa).
+ *
+ * Yang ditandai dapur adalah BARIS, bukan kartu. Status kartu cuma turunan:
+ * ia pindah ke kolom Selesai saat tak ada lagi sajian yang menunggu.
  */
 export function PesananPage() {
   const { query: branchQuery } = useCabangData();
@@ -225,7 +330,23 @@ export function PesananPage() {
     queryClient.invalidateQueries({ queryKey: ["pesanan"] });
     queryClient.invalidateQueries({ queryKey: ["pesanan-log"] });
   };
-  const ubahStatus = useMutation({
+  const statusItem = useMutation({
+    mutationFn: (v: { p: PesananRow; itemId: string; status: PesananStatus }) =>
+      api(`/pesanan/${v.p.jenis}/${v.p.id}/item/${v.itemId}/status`, {
+        method: "POST",
+        body: { status: v.status },
+      }),
+    onSettled: segarkan,
+  });
+  const sajianItem = useMutation({
+    mutationFn: (v: { p: PesananRow; itemId: string; takeaway: boolean }) =>
+      api(`/pesanan/${v.p.jenis}/${v.p.id}/item/${v.itemId}/sajian`, {
+        method: "POST",
+        body: { takeaway: v.takeaway },
+      }),
+    onSettled: segarkan,
+  });
+  const statusSemua = useMutation({
     mutationFn: (v: { p: PesananRow; status: PesananStatus }) =>
       api(`/pesanan/${v.p.jenis}/${v.p.id}/status`, {
         method: "POST",
@@ -233,19 +354,15 @@ export function PesananPage() {
       }),
     onSettled: segarkan,
   });
-  const ubahSajian = useMutation({
-    mutationFn: (v: { p: PesananRow; takeaway: boolean }) =>
-      api(`/pesanan/${v.p.jenis}/${v.p.id}/sajian`, {
-        method: "POST",
-        body: { takeaway: v.takeaway },
-      }),
-    onSettled: segarkan,
-  });
-  const sibuk = ubahStatus.isPending || ubahSajian.isPending;
-  const galat = ubahStatus.error ?? ubahSajian.error;
+  const sibuk = statusItem.isPending || sajianItem.isPending || statusSemua.isPending;
+  const galat = statusItem.error ?? sajianItem.error ?? statusSemua.error;
 
   const rows = data ?? [];
   const perKolom = (s: PesananStatus) => rows.filter((r) => r.status === s);
+  const sajianJalan = rows.reduce(
+    (n, r) => n + r.items.filter((i) => i.status === "dikerjakan").length,
+    0,
+  );
 
   return (
     <div className="max-w-6xl">
@@ -253,9 +370,9 @@ export function PesananPage() {
       <CabangDataBar />
       <div className="mb-3 rounded-lg bg-blue-50 px-4 py-2 text-sm text-blue-800">
         Setiap pesanan yang diinput kasir muncul di sini — termasuk yang{" "}
-        <b>belum dibayar</b>. Tandai <b>Selesai</b> bila sudah disajikan. Tombol{" "}
-        <b>bawa pulang</b> hanya mengubah cara penyajian, tidak mengubah nota atau
-        perhitungan stok.
+        <b>belum dibayar</b>. Tandai <b>tiap sajian</b> begitu keluar dari dapur, jadi
+        semua orang tahu mana yang sudah dan mana yang belum. Tombol <b>bawa pulang</b>{" "}
+        hanya mengubah cara penyajian, tidak mengubah nota atau perhitungan stok.
       </div>
 
       <div className="mb-3 flex flex-wrap items-center gap-3">
@@ -267,7 +384,7 @@ export function PesananPage() {
           aria-label="Tanggal pesanan"
         />
         <div className="text-sm text-stone-500">
-          {rows.length} pesanan · <b>{perKolom("dikerjakan").length}</b> masih dikerjakan
+          {rows.length} pesanan · <b>{sajianJalan}</b> sajian masih dikerjakan
         </div>
       </div>
 
@@ -310,8 +427,9 @@ export function PesananPage() {
                       key={`${p.jenis}:${p.id}`}
                       p={p}
                       sibuk={sibuk}
-                      onStatus={(status) => ubahStatus.mutate({ p, status })}
-                      onSajian={(takeaway) => ubahSajian.mutate({ p, takeaway })}
+                      onStatusItem={(itemId, status) => statusItem.mutate({ p, itemId, status })}
+                      onSajianItem={(itemId, takeaway) => sajianItem.mutate({ p, itemId, takeaway })}
+                      onStatusSemua={(status) => statusSemua.mutate({ p, status })}
                       onRiwayat={() => setRiwayat(p)}
                     />
                   ))}

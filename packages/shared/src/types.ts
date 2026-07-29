@@ -1388,6 +1388,9 @@ export interface RiwayatTransaksiRow {
    * Penanda PENYAJIAN dari Papan Pesanan Masuk — dapur bisa mengubahnya jadi
    * bawa pulang setelah transaksi tercatat. Sengaja TERPISAH dari `is_dine_in`
    * (fakta pembukuan yang sudah dipakai menghitung konsumsi bahan & HPP).
+   *
+   * DITURUNKAN dari baris: true hanya bila SELURUH baris transaksi ditandai
+   * bawa pulang. Penandanya sendiri disimpan per baris (`sale_items`).
    */
   sajian_takeaway: boolean;
   /** label meja terpilih (null bila transaksi lama tanpa meja) */
@@ -1535,13 +1538,31 @@ export type PesananStatus = "dikerjakan" | "selesai" | "batal";
  */
 export type PesananJenis = "open_bill" | "penjualan";
 
-/** Satu baris menu dalam pesanan, apa adanya untuk dibaca dapur. */
+/**
+ * Satu baris menu dalam pesanan — dan SATUAN KERJA dapur yang sebenarnya.
+ *
+ * Status hidup di sini, bukan di kartunya: satu bill bisa berisi minuman yang
+ * sudah keluar dan gorengan yang masih digoreng, jadi dapur menandainya satu
+ * per satu dan semua orang bisa melihat mana yang sudah dan mana yang belum.
+ */
 export interface PesananItemRow {
+  /** id baris (`sale_items.id` / `open_bill_items.id`) — tujuan tombol per baris */
+  id: string;
   nama: string;
   qty: number;
   /** personalisasi pelanggan, mis. "tanpa sambal" */
   catatan: string | null;
   is_dine_in: boolean;
+  status: PesananStatus;
+  /**
+   * Penanda penyajian "bawa pulang" per baris. SENGAJA terpisah dari
+   * `is_dine_in`: yang terakhir itu fakta pembukuan yang sudah dipakai
+   * menghitung pemakaian bahan & HPP, dan tidak diubah oleh papan.
+   */
+  sajian_takeaway: boolean;
+  /** siapa & kapan status baris ini terakhir diubah; null = belum disentuh */
+  status_oleh: string | null;
+  status_pada: string | null;
 }
 
 /** Satu kartu di papan pesanan. */
@@ -1556,17 +1577,22 @@ export interface PesananRow {
   waktu: string;
   total: number;
   dibayar: boolean;
-  status: PesananStatus;
   /**
-   * Penanda penyajian "bawa pulang" dari papan. SENGAJA terpisah dari
-   * `is_dine_in`: yang terakhir itu fakta pembukuan yang sudah dipakai
-   * menghitung pemakaian bahan & HPP, dan tidak diubah oleh papan.
+   * DITURUNKAN dari `items`, tidak disimpan: `batal` bila semua baris batal,
+   * `selesai` bila semua baris sudah selesai/batal (dan ada yang selesai),
+   * selain itu `dikerjakan`. Kartu tanpa baris dianggap `dikerjakan`.
    */
+  status: PesananStatus;
+  /** DITURUNKAN: true bila SEMUA baris ditandai bawa pulang */
   sajian_takeaway: boolean;
   is_dine_in: boolean;
   catatan: string | null;
   items: PesananItemRow[];
-  /** siapa & kapan status terakhir diubah; null = belum pernah disentuh */
+  /** jumlah baris yang sudah `selesai` — untuk ringkasan "2/3 selesai" */
+  item_selesai: number;
+  /** jumlah baris yang `batal` */
+  item_batal: number;
+  /** perubahan status baris terakhir pada kartu ini; null = belum ada */
   status_oleh: string | null;
   status_pada: string | null;
 }
@@ -1576,6 +1602,8 @@ export interface PesananLogRow {
   waktu: string;
   aksi: string;
   oleh: string | null;
+  /** nama baris yang disentuh; null = aksinya mengenai seluruh pesanan */
+  item_nama: string | null;
 }
 
 /** Sesi kas (shift) per cabang. ditutup_* null → shift masih terbuka. */

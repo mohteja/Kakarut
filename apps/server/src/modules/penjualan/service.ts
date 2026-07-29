@@ -138,27 +138,26 @@ export async function createSale(params: CreateSaleParams) {
     // tanpa itu kasir bisa menunjuk baris bill mana pun untuk menekan harga.
     const hargaBill = new Map<string, number>();
     /**
-     * Status pengerjaan & penanda penyajian DIWARISI dari open bill. Dapur
-     * mungkin sudah menandai pesanan ini selesai sebelum pelanggan membayar;
-     * tanpa pewarisan, pembayaran akan memunculkannya lagi sebagai pesanan
-     * baru yang belum dikerjakan.
+     * Status pengerjaan & penanda penyajian DIWARISI dari baris open bill,
+     * PER BARIS. Dapur mungkin sudah menyelesaikan sebagian pesanan ini sebelum
+     * pelanggan membayar; tanpa pewarisan, pembayaran memunculkannya lagi
+     * sebagai pekerjaan yang belum tersentuh — dan yang paling merugikan,
+     * pekerjaan yang SUDAH selesai ikut kembali ke antrean.
      */
-    let pesananStatusAwal: "dikerjakan" | "selesai" | "batal" = "dikerjakan";
-    /**
-     * Penanda penyajian LAHIR sama dengan cara transaksi dibukukan. Kalau
-     * dibiarkan `false` untuk semua, transaksi bawa-pulang akan tampil
-     * "makan di tempat" di papan dan tertandai "diubah setelah transaksi"
-     * padahal tak ada yang menyentuhnya — persis kebalikan dari gunanya.
-     * Setelah lahir, perbedaan dgn `is_dine_in` = memang ada yang mengubah.
-     */
-    let sajianTakeawayAwal = !isDineIn;
+    const warisBill = new Map<
+      string,
+      {
+        pesananStatus: "dikerjakan" | "selesai" | "batal";
+        pesananStatusAt: Date | null;
+        pesananStatusOleh: string | null;
+        sajianTakeaway: boolean;
+      }
+    >();
     if (params.openBillId) {
       const [bill] = await tx
         .select({
           id: openBills.id,
           branchId: openBills.branchId,
-          pesananStatus: openBills.pesananStatus,
-          sajianTakeaway: openBills.sajianTakeaway,
           closedAt: openBills.closedAt,
           saleId: openBills.saleId,
         })
@@ -185,17 +184,15 @@ export async function createSale(params: CreateSaleParams) {
           ? new PenjualanGagal(409, "Open bill ini sudah dibayar", "bill_sudah_dibayar")
           : new PenjualanGagal(409, "Open bill ini sudah dibatalkan", "bill_dibatalkan");
       }
-      pesananStatusAwal = bill.pesananStatus;
-      // Bill lahir dari pelanggan yang duduk, jadi `false` di sana = "tak ada
-      // yang menyatakan apa pun", bukan "makan di tempat". Yang menang adalah
-      // sinyal EKSPLISIT terakhir: penanda bawa-pulang dari dapur, atau meja
-      // bawa-pulang yang dipilih kasir saat menagih.
-      sajianTakeawayAwal = bill.sajianTakeaway || !isDineIn;
       const barisBill = await tx
         .select({
           id: openBillItems.id,
           menuId: openBillItems.menuId,
           hargaSatuan: openBillItems.hargaSatuan,
+          pesananStatus: openBillItems.pesananStatus,
+          pesananStatusAt: openBillItems.pesananStatusAt,
+          pesananStatusOleh: openBillItems.pesananStatusOleh,
+          sajianTakeaway: openBillItems.sajianTakeaway,
         })
         .from(openBillItems)
         .where(eq(openBillItems.billId, bill.id));
@@ -209,6 +206,12 @@ export async function createSale(params: CreateSaleParams) {
           });
         }
         hargaBill.set(item.open_bill_item_id, baris.hargaSatuan);
+        warisBill.set(item.open_bill_item_id, {
+          pesananStatus: baris.pesananStatus,
+          pesananStatusAt: baris.pesananStatusAt,
+          pesananStatusOleh: baris.pesananStatusOleh,
+          sajianTakeaway: baris.sajianTakeaway,
+        });
       }
     } else if (params.items.some((i) => i.open_bill_item_id)) {
       throw new HTTPException(400, {
@@ -247,6 +250,7 @@ export async function createSale(params: CreateSaleParams) {
 
       subtotal += lineTotal;
       totalHpp += hppSatuan * item.qty;
+      const waris = item.open_bill_item_id ? warisBill.get(item.open_bill_item_id) : undefined;
       itemRows.push({
         menuId: menu.id,
         menuNama: menu.nama,
@@ -256,6 +260,18 @@ export async function createSale(params: CreateSaleParams) {
         isDineIn: dineIn,
         catatan: item.catatan?.trim() || null,
         lineTotal,
+        // Pekerjaan dapur pindah utuh dari baris bill ke baris penjualan —
+        // termasuk siapa & kapan menandainya, supaya riwayatnya tidak putus
+        // di titik pembayaran.
+        pesananStatus: waris?.pesananStatus ?? "dikerjakan",
+        pesananStatusAt: waris?.pesananStatusAt ?? null,
+        pesananStatusOleh: waris?.pesananStatusOleh ?? null,
+        // Penanda penyajian LAHIR sesuai cara barisnya dibukukan. Kalau
+        // dibiarkan `false` untuk semua, baris bawa-pulang akan tampil "makan
+        // di tempat" di papan — persis kebalikan dari gunanya. Yang menang
+        // adalah sinyal EKSPLISIT: penanda dari dapur, atau baris yang memang
+        // dibukukan bukan dine-in.
+        sajianTakeaway: (waris?.sajianTakeaway ?? false) || !dineIn,
       });
 
       // Konsumsi bahan: komponen sendiri + (untuk paket) komponen menu dasar
@@ -357,8 +373,6 @@ export async function createSale(params: CreateSaleParams) {
         uangDiterima,
         saleDate,
         shiftId: params.shiftId ?? null,
-        pesananStatus: pesananStatusAwal,
-        sajianTakeaway: sajianTakeawayAwal,
         asalOpenBillId: params.openBillId ?? null,
         ...(params.waktu ? { waktu: params.waktu } : {}),
       })
