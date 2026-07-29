@@ -25,6 +25,97 @@ tanpa akses repo server.
 
 ---
 
+## Rilis: SATU MEJA DINE-IN = SATU BILL (`409 meja_sudah_ada_bill`)
+
+> Belum di-merge ke production.
+>
+> Tidak ada migrasi DB. Satu field baru pada DTO yang sudah ada + satu aturan
+> baru yang **menolak permintaan yang dulu berhasil**.
+
+Laporan dari lapangan: **kasir bisa membuat dua bill untuk satu meja di waktu
+yang sama** — lalu saat tamu pulang salah satunya tertinggal, tidak tertagih,
+dan baru terasa saat tutup kasir selisih.
+
+Keputusan owner: **selama masih ada open bill di meja itu, tidak boleh bikin
+bill kedua.** Pesanan tambahan wajib masuk ke bill yang masih terbuka.
+
+### 🔴 WAJIB — `POST /api/open-bill` kini **409** di meja dine-in yang sudah punya bill
+
+Permintaan yang dulu berhasil sekarang ditolak. Badan galatnya berkode:
+
+```json
+{ "error": "Meja 5 masih punya bill yang belum dibayar — tambahkan pesanan ke bill itu",
+  "kode": "meja_sudah_ada_bill",
+  "bill_id": "<uuid bill yang harus dipakai>" }
+```
+
+`bill_id` sengaja ikut supaya klien tak perlu mencari sendiri: muat bill itu
+(`GET /api/open-bill/:id`), gabungkan keranjang yang sekarang, lalu simpan lewat
+**`PUT /api/open-bill/:id`**. Itu satu-satunya jalan menambah pesanan ke meja
+yang sudah punya bill.
+
+**Baca `kode`, jangan mencocokkan teks pesannya.**
+
+Alur yang disarankan supaya kasir tak menabrak galat: sebelum menyimpan bill
+baru, cek `openBills.where((b) => b.meja_id == mejaTerpilih.id)` — kalau tidak
+kosong, langsung tawarkan "buka bill itu" alih-alih tombol simpan.
+
+**`PUT` ikut dijaga.** Memindahkan bill ke meja yang sudah punya bill lain juga
+**409** dengan kode yang sama. Tanpa itu larangannya cuma menutup pintu depan:
+bikin bill di meja lain lalu pindahkan. Menyimpan ulang bill di mejanya **sendiri**
+tetap boleh — itu justru jalur "tambahkan pesanan".
+
+### ⚪️ INFO — dua pengecualian yang TIDAK dijaga
+
+1. **Ruang Tunggu (meja `takeaway`) dikecualikan.** Seluruh pesanan bawa pulang
+   cabang menunjuk ke satu baris takeaway yang tak bisa dihapus. Kalau ia ikut
+   dijaga, satu bill bawa pulang yang terparkir akan memblokir **semua** pesanan
+   bawa pulang berikutnya — jalur itu mati. Bill kedua di Ruang Tunggu tetap
+   **201**.
+2. **Bill tanpa `meja_id`** tak punya apa pun untuk bertabrakan → tetap **201**.
+
+Juga tidak dijaga: **penjualan langsung** (`POST /api/penjualan`) di meja yang
+punya bill berjalan. Yang dilarang hanya bill kedua, bukan transaksi kedua.
+
+Setelah bill lama dibayar **atau** dibatalkan, mejanya bebas dan boleh punya
+bill baru lagi — kalau tidak, satu bill batal akan mengunci mejanya selamanya.
+
+### 🟢 BARU — `OpenBillRow.meja_id`
+
+`GET /api/open-bill` kini menyertakan `meja_id: string | null` di samping
+`meja_label`. Tidak ada field lama yang berubah.
+
+**Cocokkan bill ke meja lewat `meja_id`, JANGAN `meja_label`** — label itu
+snapshot saat bill dibuat, jadi pencocokan lewat nama gagal begitu mejanya
+diganti nama. Dan gagalnya **sunyi**: kasir tak melihat peringatan, lalu
+menabrak 409 tanpa tahu sebabnya.
+
+`null` = mejanya sudah dihapus dari master (`meja_id` ber-`onDelete: set null`)
+atau bill dibuat tanpa meja.
+
+### 🔴 WAJIB — layar meja di mobile: status okupansi + Kosongkan
+
+Endpoint `GET /api/meja/status`, `POST /api/meja/:id/kosongkan`, dan
+`GET /api/meja/:id/log` **sudah tayang di production sejak PR #129** dan sudah
+terbuka untuk token `cashier` — tapi mobile belum memakainya sama sekali.
+Akibatnya kasir mobile bekerja buta: tak tahu meja mana yang terisi, dan tak
+punya cara membereskan meja saat tamu pulang.
+
+Dengan aturan baru di atas, ini jadi lebih mendesak: tanpa status di pemilih
+meja, kasir baru tahu mejanya sudah terisi **setelah** ditolak 409.
+
+**Langkah lengkap + empat jebakan yang tak boleh diulang ada di
+`docs/mobile/PROMPT-MEJA-KASIR.md`.**
+
+### ⚪️ INFO — web sudah disesuaikan di rilis ini
+
+Web sudah menampilkan status okupansi + tombol Kosongkan di modal Pilih Meja.
+Rilis ini menambahkan pendahuluan 409-nya: menekan **Open Bill** di meja yang
+sudah punya bill langsung membuka daftar bill itu dengan tombol "Buka bill",
+tanpa opsi "tetap buat bill baru" — karena server memang menolaknya.
+
+---
+
 ## Rilis: Status pesanan turun ke SETIAP BARIS (papan pesanan per sajian)
 
 > Belum di-merge ke production.
@@ -373,8 +464,11 @@ yang paling mudah salah dipahami:
    ada yang menekan Kosongkan. Jangan bikin klien mengosongkan meja sendiri
    setelah transaksi berhasil.
 2. **Meja terisi tetap boleh dipilih.** Statusnya memberi tahu, bukan melarang —
-   satu meja dua bill itu sah, dan melanjutkan open bill di meja terisi wajib
-   bisa. Jangan menyaring meja terisi dari pemilih meja.
+   melanjutkan open bill di meja terisi wajib bisa, dan penjualan langsung di
+   meja terisi juga sah. Jangan menyaring meja terisi dari pemilih meja.
+   *(Disusul rilis berikutnya: bill **KEDUA** di satu meja dine-in kini ditolak
+   server **409** `meja_sudah_ada_bill`. Yang dilarang cuma itu — pemilihan
+   mejanya tetap bebas.)*
 3. **Ruang Tunggu tidak punya status** dan tidak muncul di daftar sama sekali.
    Seluruh penjualan bawa pulang menunjuk ke satu baris itu; menandainya terisi
    akan mengunci jalur bawa pulang cabang selamanya.

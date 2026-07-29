@@ -1,5 +1,5 @@
 import { zValidator } from "@hono/zod-validator";
-import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
@@ -80,13 +80,19 @@ async function validateMenus(
 
 /** Resolusi meja → label snapshot (validasi milik cabang). */
 async function resolveMeja(companyId: string, branchId: string, mejaId?: string | null) {
-  if (!mejaId) return { mejaId: null as string | null, mejaLabel: null as string | null };
+  if (!mejaId) {
+    return {
+      mejaId: null as string | null,
+      mejaLabel: null as string | null,
+      tipe: null as "dine_in" | "takeaway" | null,
+    };
+  }
   const [m] = await db
-    .select({ id: meja.id, nama: meja.nama })
+    .select({ id: meja.id, nama: meja.nama, tipe: meja.tipe })
     .from(meja)
     .where(and(eq(meja.id, mejaId), eq(meja.companyId, companyId), eq(meja.branchId, branchId)));
   if (!m) throw new HTTPException(404, { message: "Meja tidak ditemukan" });
-  return { mejaId: m.id, mejaLabel: m.nama };
+  return { mejaId: m.id, mejaLabel: m.nama, tipe: m.tipe };
 }
 
 async function loadDetail(companyId: string, id: string): Promise<OpenBillDetail | null> {
@@ -139,6 +145,11 @@ export const openBillRoutes = new Hono<AppEnv>()
     const rows = await db
       .select({
         id: openBills.id,
+        // `meja_id` DI SAMPING label: label itu snapshot saat bill dibuat, jadi
+        // mencocokkan bill ke meja lewat label akan gagal begitu mejanya diganti
+        // nama — dan gagalnya SUNYI (kasir cuma tak melihat peringatan bill
+        // ganda). Klien mencocokkan lewat id.
+        meja_id: openBills.mejaId,
         meja_label: openBills.mejaLabel,
         customer_nama: openBills.customerNama,
         waktu: openBills.updatedAt,
@@ -158,6 +169,7 @@ export const openBillRoutes = new Hono<AppEnv>()
       .orderBy(desc(openBills.updatedAt));
     const dto: OpenBillRow[] = rows.map((r) => ({
       id: r.id,
+      meja_id: r.meja_id,
       meja_label: r.meja_label,
       customer_nama: r.customer_nama,
       jumlah_item: r.jumlah_item,
@@ -179,8 +191,55 @@ export const openBillRoutes = new Hono<AppEnv>()
       throw new HTTPException(403, { message: "Kasir hanya boleh bill di cabangnya" });
     }
     const katalog = await validateMenus(auth.company_id!, branchId, body.items);
-    const { mejaId, mejaLabel } = await resolveMeja(auth.company_id!, branchId, body.meja_id);
-    const id = await db.transaction(async (tx) => {
+    const { mejaId, mejaLabel, tipe } = await resolveMeja(auth.company_id!, branchId, body.meja_id);
+    /**
+     * SATU MEJA DINE-IN = SATU BILL BERJALAN.
+     *
+     * Selama masih ada bill belum dibayar di meja itu, pesanan tambahan WAJIB
+     * masuk ke bill itu lewat `PUT /open-bill/:id` — bukan jadi bill kedua.
+     * Alasannya dari lapangan: dua bill di satu meja bikin salah satu
+     * tertinggal tak tertagih saat tamu pulang, dan kasir tak punya cara tahu
+     * sampai selisih muncul di tutup kasir.
+     *
+     * `bill_id` ikut dikirim supaya klien bisa langsung menawarkan
+     * "tambahkan ke bill ini" tanpa mencari sendiri.
+     *
+     * DUA PENGECUALIAN, keduanya penting:
+     *
+     * 1. **Meja takeaway (Ruang Tunggu) DIKECUALIKAN.** Seluruh pesanan bawa
+     *    pulang cabang menunjuk ke satu baris takeaway yang tak bisa dihapus.
+     *    Kalau ia ikut dijaga, satu bill bawa pulang yang terparkir akan
+     *    memblokir SEMUA pesanan bawa pulang berikutnya — jalur itu mati.
+     * 2. **Bill tanpa meja** tak punya apa pun untuk bertabrakan.
+     *
+     * Baris mejanya di-LOCK (`FOR UPDATE`) di dalam transaksi: tanpa itu dua
+     * perangkat yang menyimpan bill bersamaan sama-sama melihat "belum ada
+     * bill" lalu keduanya menyisipkan, dan aturan ini bocor persis di kondisi
+     * yang paling mungkin terjadi — jam ramai.
+     */
+    type HasilSimpan =
+      | { bentrok: { id: string; mejaLabel: string | null }; id?: undefined }
+      | { id: string; bentrok?: undefined };
+    const hasil: HasilSimpan = await db.transaction(async (tx): Promise<HasilSimpan> => {
+      // Kunci + periksa + sisipkan dalam SATU transaksi. Kalau pemeriksaannya
+      // di transaksi terpisah, kuncinya lepas begitu transaksi itu commit dan
+      // celah balapannya terbuka lagi tepat sebelum penyisipan.
+      if (mejaId && tipe === "dine_in") {
+        await tx.execute(sql`SELECT 1 FROM meja WHERE id = ${mejaId} FOR UPDATE`);
+        const [ada] = await tx
+          .select({ id: openBills.id, mejaLabel: openBills.mejaLabel })
+          .from(openBills)
+          .where(
+            and(
+              eq(openBills.companyId, auth.company_id!),
+              eq(openBills.branchId, branchId),
+              eq(openBills.mejaId, mejaId),
+              isNull(openBills.closedAt),
+            ),
+          )
+          .limit(1);
+        if (ada) return { bentrok: ada };
+      }
       const [bill] = await tx
         .insert(openBills)
         .values({
@@ -197,9 +256,20 @@ export const openBillRoutes = new Hono<AppEnv>()
       await tx
         .insert(openBillItems)
         .values(body.items.map((it) => barisBaru(bill.id, it, katalog)));
-      return bill.id;
+      return { id: bill.id };
     });
-    return c.json(await loadDetail(auth.company_id!, id), 201);
+    if (hasil.bentrok) {
+      // Badan galat BERKODE — klien membaca `kode`, bukan teks pesannya.
+      return c.json(
+        {
+          error: `${hasil.bentrok.mejaLabel ?? "Meja ini"} masih punya bill yang belum dibayar — tambahkan pesanan ke bill itu`,
+          kode: "meja_sudah_ada_bill",
+          bill_id: hasil.bentrok.id,
+        },
+        409,
+      );
+    }
+    return c.json(await loadDetail(auth.company_id!, hasil.id), 201);
   })
   .put("/:id", zValidator("json", BillBody), async (c) => {
     const auth = c.get("auth");
@@ -210,11 +280,48 @@ export const openBillRoutes = new Hono<AppEnv>()
       throw new HTTPException(404, { message: "Bill tidak ditemukan" });
     }
     const katalog = await validateMenus(auth.company_id!, existing.branchId, body.items);
-    const { mejaId, mejaLabel } = await resolveMeja(
+    const { mejaId, mejaLabel, tipe } = await resolveMeja(
       auth.company_id!,
       existing.branchId,
       body.meja_id,
     );
+    /**
+     * PINDAH MEJA ikut dijaga aturan "satu meja dine-in = satu bill".
+     *
+     * Tanpa ini larangan di `POST` cuma menutup pintu depan: kasir tetap bisa
+     * membuat bill di meja lain lalu MEMINDAHKANNYA ke meja yang sudah punya
+     * bill, dan mendarat di keadaan yang justru dilarang. `ne(id)` mengecualikan
+     * bill ini sendiri — menyimpan ulang bill di mejanya sendiri harus tetap
+     * boleh, itu justru jalur "tambahkan pesanan ke bill yang ada".
+     */
+    const bentrokPindah = await db.transaction(async (tx) => {
+      if (!mejaId || tipe !== "dine_in") return null;
+      await tx.execute(sql`SELECT 1 FROM meja WHERE id = ${mejaId} FOR UPDATE`);
+      const [ada] = await tx
+        .select({ id: openBills.id, mejaLabel: openBills.mejaLabel })
+        .from(openBills)
+        .where(
+          and(
+            eq(openBills.companyId, auth.company_id!),
+            eq(openBills.branchId, existing.branchId),
+            eq(openBills.mejaId, mejaId),
+            isNull(openBills.closedAt),
+            ne(openBills.id, id),
+          ),
+        )
+        .limit(1);
+      return ada ?? null;
+    });
+    if (bentrokPindah) {
+      return c.json(
+        {
+          error: `${bentrokPindah.mejaLabel ?? "Meja itu"} masih punya bill yang belum dibayar — gabungkan pesanannya ke bill itu`,
+          kode: "meja_sudah_ada_bill",
+          bill_id: bentrokPindah.id,
+        },
+        409,
+      );
+    }
     await db.transaction(async (tx) => {
       await tx
         .update(openBills)

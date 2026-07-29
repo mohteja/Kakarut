@@ -1507,6 +1507,13 @@ export interface OpenBillItemDto {
 /** Ringkasan open bill untuk daftar/pemilih bill di kasir. */
 export interface OpenBillRow {
   id: string;
+  /**
+   * Meja yang ditagih. Dipakai mencocokkan bill ke meja tanpa mengandalkan
+   * `meja_label` — label itu SNAPSHOT saat bill dibuat, jadi ia berbeda dari
+   * nama meja sekarang begitu mejanya diganti nama. `null` = meja sudah dihapus
+   * dari master (`meja_id` ber-`onDelete: set null`) atau bill tanpa meja.
+   */
+  meja_id: string | null;
   meja_label: string | null;
   customer_nama: string | null;
   jumlah_item: number;

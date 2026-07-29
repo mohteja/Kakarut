@@ -6633,25 +6633,58 @@ cek "TIM (waiter) mengosongkan meja → 200" "V == 200" \
 cek "meja kembali kosong atas nama waiter" "V == 1" \
   "$(stat155 "$TTIM155" | jq -r '((.status=="kosong") and (.dikosongkan_oleh=="Waiter 155"))|if . then 1 else 0 end')"
 
-# (g) Bill BELUM DIBAYAR menahan meja: ditolak dulu, baru boleh dipaksa —
-#     supaya tak ada yang membereskan meja tanpa sadar ada uang belum ditagih.
+# (g) SATU MEJA DINE-IN = SATU BILL BERJALAN. Selama bill itu belum dibayar,
+#     pesanan tambahan WAJIB masuk ke bill itu (PUT), bukan jadi bill kedua.
+#     Dari lapangan: dua bill di satu meja bikin salah satunya tertinggal tak
+#     tertagih saat tamu pulang, dan tak ada yang tahu sampai selisih muncul di
+#     tutup kasir.
 OBA155=$(api "$REISS105" POST /open-bill "{\"meja_id\":\"$MEJA155\",\"items\":[{\"menu_id\":\"$M155\",\"qty\":1}]}" | jq -r .id)
-OBB155=$(api "$REISS105" POST /open-bill "{\"meja_id\":\"$MEJA155\",\"items\":[{\"menu_id\":\"$M155\",\"qty\":1}]}" | jq -r .id)
-cek "satu meja DUA bill tetap sah (split bill/rombongan kedua)" "V == 2" \
+cek "bill KEDUA di meja dine-in yang sama → 409 (bukan split bill)" "V == 409" \
+  "$(status_code_body "$REISS105" POST /open-bill "{\"meja_id\":\"$MEJA155\",\"items\":[{\"menu_id\":\"$M155\",\"qty\":1}]}")"
+cek "badan galat berkode mesin: meja_sudah_ada_bill + bill_id yang harus dipakai" "V == 1" \
+  "$(api "$REISS105" POST /open-bill "{\"meja_id\":\"$MEJA155\",\"items\":[{\"menu_id\":\"$M155\",\"qty\":1}]}" | jq -r --arg a "$OBA155" '((.kode=="meja_sudah_ada_bill") and (.bill_id==$a))|if . then 1 else 0 end')"
+cek "ditolak = TIDAK tersimpan: meja itu tetap satu bill" "V == 1" \
   "$(stat155 "$REISS105" | jq -r '.bill_terbuka')"
+# Jalan yang BENAR: tambahkan pesanan ke bill yang sudah ada lewat PUT.
+cek "menambah pesanan ke bill yang ada → 200 (jalan resminya)" "V == 200" \
+  "$(status_code_body "$REISS105" PUT "/open-bill/$OBA155" "{\"meja_id\":\"$MEJA155\",\"items\":[{\"menu_id\":\"$M155\",\"qty\":1},{\"menu_id\":\"$M155\",\"qty\":2}]}")"
+cek "bill itu kini berisi DUA baris, dan tetap satu bill" "V == 1" \
+  "$(api "$REISS105" GET "/open-bill/$OBA155" | jq -r '((.items|length)==2)|if . then 1 else 0 end')"
+# RUANG TUNGGU DIKECUALIKAN — kalau ikut dijaga, satu bill bawa pulang yang
+# terparkir memblokir SEMUA pesanan bawa pulang berikutnya: jalur itu mati.
+OBTA155=$(api "$REISS105" POST /open-bill "{\"meja_id\":\"$TA155\",\"items\":[{\"menu_id\":\"$M155\",\"qty\":1}]}" | jq -r .id)
+cek "bill KEDUA di Ruang Tunggu tetap BOLEH → 201 (jalur bawa pulang hidup)" "V == 201" \
+  "$(status_code_body "$REISS105" POST /open-bill "{\"meja_id\":\"$TA155\",\"items\":[{\"menu_id\":\"$M155\",\"qty\":1}]}")"
+# Bill TANPA meja tak punya apa pun untuk bertabrakan.
+cek "dua bill tanpa meja tetap boleh → 201" "V == 201" \
+  "$(status_code_body "$REISS105" POST /open-bill "{\"items\":[{\"menu_id\":\"$M155\",\"qty\":1}]}")"
+# `meja_id` di daftar bill = bahan peringatan "meja ini sudah punya bill".
+# Klien WAJIB mencocokkan lewat id, bukan `meja_label`: label itu snapshot saat
+# bill dibuat, jadi pencocokan lewat nama gagal SUNYI begitu mejanya diganti
+# nama — kasir cuma tak melihat peringatan, lalu menabrak 409 tanpa tahu sebabnya.
+api "$REISS105" PATCH "/meja/$MEJA155" '{"nama":"Meja Ganti Nama 155"}' > /dev/null
+cek "meja DIGANTI NAMA: meja_id tetap cocok (label lama sudah beda)" "V == 1" \
+  "$(api "$REISS105" GET /open-bill | jq -r --arg m "$MEJA155" --arg a "$OBA155" '[.[]|select(.id==$a)][0] | ((.meja_id==$m) and (.meja_label!="Meja Ganti Nama 155"))|if . then 1 else 0 end')"
+api "$REISS105" PATCH "/meja/$MEJA155" '{"nama":"Meja Uji155"}' > /dev/null
 cek "kosongkan tanpa paksa → 409" "V == 409" \
   "$(status_code_body "$TTIM155" POST "/meja/$MEJA155/kosongkan" '{}')"
 cek "badan galat berkode mesin: bill_berjalan + jumlahnya" "V == 1" \
-  "$(api "$TTIM155" POST "/meja/$MEJA155/kosongkan" '{}' | jq -r '((.kode=="bill_berjalan") and (.bill_terbuka==2))|if . then 1 else 0 end')"
+  "$(api "$TTIM155" POST "/meja/$MEJA155/kosongkan" '{}' | jq -r '((.kode=="bill_berjalan") and (.bill_terbuka==1))|if . then 1 else 0 end')"
 cek "kirim ulang dengan paksa → 200" "V == 200" \
   "$(status_code_body "$TTIM155" POST "/meja/$MEJA155/kosongkan" '{"paksa":true}')"
 cek "meja bebas, dan jejaknya bertanda paksa" "V == 1" \
   "$(api "$TTIM155" GET "/meja/$MEJA155/log" | jq '[.[]|select(.paksa==true)]|length>=1|if . then 1 else 0 end')"
-# UANG TIDAK PERNAH LENYAP KARENA TOMBOL MEJA — kedua bill masih bisa ditagih
-cek "kedua bill MASIH ADA di pemilih kasir (tagihan tidak dibatalkan)" "V == 2" \
-  "$(api "$REISS105" GET /open-bill | jq --arg a "$OBA155" --arg b "$OBB155" '[.[]|select(.id==$a or .id==$b)]|length')"
+# UANG TIDAK PERNAH LENYAP KARENA TOMBOL MEJA — bill-nya masih bisa ditagih
+cek "bill MASIH ADA di pemilih kasir (tagihan tidak dibatalkan)" "V == 1" \
+  "$(api "$REISS105" GET /open-bill | jq --arg a "$OBA155" '[.[]|select(.id==$a)]|length')"
+# Setelah bill lama DIBATALKAN, meja itu boleh punya bill baru lagi — kalau
+# tidak, satu bill batal akan mengunci mejanya selamanya.
 api "$REISS105" DELETE "/open-bill/$OBA155" > /dev/null
-api "$REISS105" DELETE "/open-bill/$OBB155" > /dev/null
+cek "bill lama dibatalkan → meja itu boleh dipakai bill baru → 201" "V == 201" \
+  "$(status_code_body "$REISS105" POST /open-bill "{\"meja_id\":\"$MEJA155\",\"items\":[{\"menu_id\":\"$M155\",\"qty\":1}]}")"
+for _bid in $(api "$REISS105" GET /open-bill | jq -r '.[].id'); do
+  api "$REISS105" DELETE "/open-bill/$_bid" > /dev/null
+done
 
 # (h) "menu meja harus ada di semua role cabang" — BACA terbuka, TULIS tidak.
 #     Sebelum ini modul meja tak punya gerbang peran sama sekali: dapur bisa

@@ -589,8 +589,13 @@ Aksesnya sengaja **asimetris**: membaca terbuka untuk seluruh peran cabang
 > Mengosongkannya → **400**.
 >
 > **Status MEMBERI TAHU, TIDAK MELARANG.** Meja terisi tetap boleh dipilih untuk
-> transaksi baru — satu meja dua bill itu sah (split bill / rombongan kedua), dan
-> melanjutkan open bill di meja itu justru wajib.
+> transaksi baru, dan melanjutkan open bill di meja itu justru wajib. Jangan
+> menyaring meja terisi dari pemilih meja.
+>
+> Yang MELARANG bukan status ini, melainkan `POST /api/open-bill`: **satu meja
+> dine-in = satu bill berjalan** (**409** `meja_sudah_ada_bill`) — lihat blok
+> `/api/open-bill`. Penjualan langsung di meja terisi tetap boleh; yang ditolak
+> hanya bill KEDUA.
 >
 > Alur tombol Kosongkan ada **dua tahap**: permintaan pertama pada meja yang
 > masih punya bill belum dibayar ditolak **409** `bill_berjalan`; kirim ulang
@@ -606,8 +611,47 @@ Aksesnya sengaja **asimetris**: membaca terbuka untuk seluruh peran cabang
 
 - `GET /api/open-bill` — query: `branch_id?` — res: `OpenBillRow[]`
 - `GET /api/open-bill/:id` — res: `OpenBillDetail` — error: **404**
-- `POST /api/open-bill` — req `BillBody`: `{ branch_id?: uuid, meja_id?: uuid|null, customer_nama?|null, customer_wa?|null, catatan?|null, items: [{id?:uuid, menu_id:uuid, qty:number(>0), dine_in_override?:bool|null, catatan?}] (min 1) }` — res: **201** `OpenBillDetail` — error: **400** menu invalid/tak tersedia, **403** kasir luar cabang, **404** meja tak ada
-- `PUT /api/open-bill/:id` — req: `BillBody` — res: `OpenBillDetail` — error: **400** (baris tak ditemukan / tak cocok menunya / dikirim dua kali), **404**
+- `POST /api/open-bill` — req `BillBody`: `{ branch_id?: uuid, meja_id?: uuid|null, customer_nama?|null, customer_wa?|null, catatan?|null, items: [{id?:uuid, menu_id:uuid, qty:number(>0), dine_in_override?:bool|null, catatan?}] (min 1) }` — res: **201** `OpenBillDetail` — error: **400** menu invalid/tak tersedia, **403** kasir luar cabang, **404** meja tak ada, **409** `{ kode: "meja_sudah_ada_bill", bill_id }` meja dine-in itu masih punya bill belum dibayar
+- `PUT /api/open-bill/:id` — req: `BillBody` — res: `OpenBillDetail` — error: **400** (baris tak ditemukan / tak cocok menunya / dikirim dua kali), **404**, **409** `meja_sudah_ada_bill` bila `meja_id` dipindah ke meja yang sudah punya bill lain
+
+> ### 🪑 SATU MEJA DINE-IN = SATU BILL BERJALAN
+>
+> Selama masih ada bill belum dibayar di sebuah meja `dine_in`, pesanan tambahan
+> **wajib** masuk ke bill itu lewat `PUT /api/open-bill/:id`. `POST` untuk bill
+> kedua ditolak **409** dengan badan berkode:
+>
+> ```json
+> { "error": "…", "kode": "meja_sudah_ada_bill", "bill_id": "<uuid>" }
+> ```
+>
+> `bill_id` ikut dikirim supaya klien langsung bisa memuat bill itu tanpa
+> mencari. **Baca `kode`, jangan mencocokkan teks pesannya.**
+>
+> Alasannya dari lapangan: dua bill di satu meja bikin salah satunya tertinggal
+> tak tertagih saat tamu pulang, dan tak ada yang tahu sampai selisih muncul di
+> tutup kasir.
+>
+> **DUA PENGECUALIAN.** (1) Meja `takeaway` ("Ruang Tunggu") **dikecualikan** —
+> seluruh pesanan bawa pulang cabang menunjuk ke satu baris itu, jadi kalau ia
+> ikut dijaga, satu bill bawa pulang yang terparkir memblokir SEMUA pesanan bawa
+> pulang berikutnya. (2) Bill **tanpa** `meja_id` tak punya apa pun untuk
+> bertabrakan.
+>
+> Yang TIDAK dijaga: `POST /api/penjualan` di meja yang punya bill berjalan.
+> Yang dilarang hanya bill kedua, bukan transaksi kedua.
+>
+> `PUT` ikut dijaga (pindah meja), dengan pengecualian bill itu sendiri —
+> menyimpan ulang bill di mejanya sendiri justru jalur "tambahkan pesanan".
+> Tanpa penjagaan di `PUT`, larangannya cuma menutup pintu depan: buat bill di
+> meja lain lalu pindahkan.
+>
+> Barisnya di-`SELECT … FOR UPDATE` per meja di dalam transaksi yang sama dengan
+> penyisipannya. Tanpa itu dua perangkat yang menyimpan bersamaan sama-sama
+> melihat "belum ada bill" lalu keduanya menyisipkan — aturannya bocor persis di
+> jam ramai.
+>
+> Setelah bill lama dibayar **atau** dibatalkan, mejanya bebas dan boleh punya
+> bill baru — kalau tidak, satu bill batal mengunci mejanya selamanya.
 - `DELETE /api/open-bill/:id` — res: `{ ok: true }` — error: **404**
 
 **`DELETE` = MEMBATALKAN, BUKAN MENGHAPUS.** Barisnya tetap ada: `closed_at`
@@ -2577,6 +2621,13 @@ export interface OpenBillItemDto {
 /** Ringkasan open bill untuk daftar/pemilih bill di kasir. */
 export interface OpenBillRow {
   id: string;
+  /**
+   * Meja yang ditagih. Dipakai mencocokkan bill ke meja tanpa mengandalkan
+   * `meja_label` — label itu SNAPSHOT saat bill dibuat, jadi ia berbeda dari
+   * nama meja sekarang begitu mejanya diganti nama. `null` = meja sudah dihapus
+   * dari master (`meja_id` ber-`onDelete: set null`) atau bill tanpa meja.
+   */
+  meja_id: string | null;
   meja_label: string | null;
   customer_nama: string | null;
   jumlah_item: number;
