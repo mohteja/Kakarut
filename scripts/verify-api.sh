@@ -5641,6 +5641,16 @@ cek "sesi berbeda di hari yang sama → boleh" "V == 1" \
 cek "sesi ngawur → 400" "V == 400" \
   "$(status_code_body "$TKIT" POST /kebersihan "{\"sesi\":\"subuh\",\"items\":[{\"area_id\":\"$AR144_UMUM\",\"bersih\":true,\"foto_url\":\"/uploads/x.jpg\"}]}")"
 
+# Area yang sudah DINONAKTIFKAN owner tak boleh lagi masuk laporan. Tanpa
+# penjaga di jalur tulis, tablet yang cache daftarnya belum segar tetap bisa
+# mengirimnya dan `total_area` di rekap ikut menghitung area yang dipensiunkan.
+AR144_MATI=$(api "$OWNER" POST /kebersihan/area '{"nama":"Gudang Lama 144","urutan":3}' | jq -r .id)
+api "$OWNER" PATCH "/kebersihan/area/$AR144_MATI" '{"is_active":false}' > /dev/null
+cek "area nonaktif hilang dari daftar karyawan" "V == 0" \
+  "$(api "$TKIT" GET /kebersihan/area | jq --arg a "$AR144_MATI" '[.[]|select(.id==$a)]|length')"
+cek "lapor memakai area nonaktif → 400" "V == 400" \
+  "$(status_code_body "$TKIT" POST /kebersihan "{\"sesi\":\"siang\",\"items\":[{\"area_id\":\"$AR144_MATI\",\"bersih\":true,\"foto_url\":\"/uploads/x.jpg\"}]}")"
+
 # Laporan itu penilaian kerja — sesama karyawan tak boleh saling mengintip.
 cek "karyawan lain tak melihat laporan orang" "V == 0" \
   "$(api "$TBAR" GET /kebersihan | jq --arg i "$LID144" '[.[]|select(.id==$i)]|length')"
@@ -5650,6 +5660,17 @@ cek "pemilik melihat laporannya sendiri" "V == 1" \
   "$(api "$TKIT" GET /kebersihan | jq --arg i "$LID144" '[.[]|select(.id==$i)]|length==1|if . then 1 else 0 end')"
 cek "owner melihat laporan semua tim" "V == 1" \
   "$(api "$OWNER" GET "/kebersihan?branch_id=all" | jq --arg i "$LID144" '[.[]|select(.id==$i)]|length==1|if . then 1 else 0 end')"
+# `saya=1` menyempitkan ke pelapornya sendiri UNTUK SEMUA PERAN. Layar
+# pengisian bergantung penuh pada ini: tanpa penanda tsb manajemen melihat
+# laporan orang lain sebagai miliknya, kartu sesinya tertandai "sudah terisi",
+# dan tombol Perbarui menunjuk laporan orang lain (ditolak 403).
+cek "owner + saya=1 TIDAK memuat laporan karyawan lain" "V == 0" \
+  "$(api "$OWNER" GET "/kebersihan?saya=1" | jq --arg i "$LID144" '[.[]|select(.id==$i)]|length')"
+cek "pemilik + saya=1 tetap melihat laporannya sendiri" "V == 1" \
+  "$(api "$TKIT" GET "/kebersihan?saya=1" | jq --arg i "$LID144" '[.[]|select(.id==$i)]|length==1|if . then 1 else 0 end')"
+# branch_id ngawur masuk ke klausa WHERE kolom uuid → dulu 500, kini 400.
+cek "daftar: branch_id bukan UUID → 400 (bukan 500)" "V == 400" \
+  "$(status_code "$OWNER" GET "/kebersihan?branch_id=bukan-uuid")"
 
 # Perbaikan: pemilik boleh mengganti isi selama masih hari yang sama.
 cek "karyawan lain ubah laporan orang → 403" "V == 403" \
@@ -5658,8 +5679,15 @@ cek "pemilik perbarui: semua area jadi bersih" "V == 1" \
   "$(api "$TKIT" PATCH "/kebersihan/$LID144" "{\"items\":[{\"area_id\":\"$AR144_UMUM\",\"bersih\":true,\"foto_url\":\"/uploads/bukti-144a.jpg\"},{\"area_id\":\"$AR144_STORE\",\"bersih\":true,\"foto_url\":\"/uploads/bukti-144c.jpg\"}]}" | jq '((.area_kotor==0) and (.jumlah_foto==2))|if . then 1 else 0 end')"
 cek "perbarui tanpa foto sama sekali → 400" "V == 400" \
   "$(status_code_body "$TKIT" PATCH "/kebersihan/$LID144" "{\"items\":[{\"area_id\":\"$AR144_UMUM\",\"bersih\":true}]}")"
-# Kembalikan satu area jadi kotor supaya rekap & badge punya bahan uji.
-api "$TKIT" PATCH "/kebersihan/$LID144" "{\"items\":[{\"area_id\":\"$AR144_UMUM\",\"bersih\":true,\"foto_url\":\"/uploads/bukti-144a.jpg\"},{\"area_id\":\"$AR144_STORE\",\"bersih\":false,\"catatan\":\"masih bau\"}]}" > /dev/null
+# PATCH di atas TIDAK mengirim `catatan`. Field yang tak dikirim harus dibiarkan
+# apa adanya: pernah `?.trim() || null` menulis NULL untuk `undefined`, jadi
+# klien yang cuma membetulkan checklist ikut menghapus pesan karyawan ke owner.
+cek "perbarui tanpa field catatan → catatan karyawan tetap utuh" "V == 1" \
+  "$(api "$TKIT" GET "/kebersihan/$LID144" | jq '.catatan=="sabun habis"|if . then 1 else 0 end')"
+cek "perbarui dengan catatan:null → catatan memang dikosongkan" "V == 1" \
+  "$(api "$TKIT" PATCH "/kebersihan/$LID144" "{\"catatan\":null,\"items\":[{\"area_id\":\"$AR144_UMUM\",\"bersih\":true,\"foto_url\":\"/uploads/bukti-144a.jpg\"}]}" | jq '.catatan==null|if . then 1 else 0 end')"
+# Kembalikan satu area jadi kotor + catatan semula supaya rekap & badge punya bahan uji.
+api "$TKIT" PATCH "/kebersihan/$LID144" "{\"catatan\":\"sabun habis\",\"items\":[{\"area_id\":\"$AR144_UMUM\",\"bersih\":true,\"foto_url\":\"/uploads/bukti-144a.jpg\"},{\"area_id\":\"$AR144_STORE\",\"bersih\":false,\"catatan\":\"masih bau\"}]}" > /dev/null
 
 # Catatan owner: hanya owner/admin, dan pelapor bisa membacanya.
 cek "karyawan beri catatan owner → 403" "V == 403" \
@@ -5685,12 +5713,28 @@ cek "rekap: area kotor hari ini terhitung" "V == 1" \
   "$(echo "$RK144" | jq --arg t "$HARI144" '[.hari[]|select(.tanggal==$t)][0].area_kotor>=1|if . then 1 else 0 end')"
 cek "rekap: baris ringkas membawa foto_utama + tanda catatan owner" "V == 1" \
   "$(echo "$RK144" | jq --arg i "$LID144" '[.hari[]|.laporan[]|select(.id==$i)][0] | ((.foto_utama != null) and (.ada_catatan_owner==true))|if . then 1 else 0 end')"
-cek "rekap: hari tanpa laporan tetap muncul sebagai kotak kosong" "V == 1" \
-  "$(echo "$RK144" | jq '[.hari[]|select(.total==0)]|length>=0|if . then 1 else 0 end')"
+# Hari BOLONG adalah alasan rekap ini ada, jadi diuji dengan angka pasti:
+# jumlah kotak = tanggal hari ini, dan semua hari SEBELUM hari ini kosong
+# (tanggal laporan selalu diturunkan server, jadi tak ada laporan hari lain).
+# Versi lama berbunyi `length>=0` — selalu benar, jadi tak menguji apa pun.
+DOM144=$(TZ=Asia/Jakarta date +%-d)
+cek "rekap: kotak = jumlah hari berjalan, hari tanpa laporan tetap tampil" "V == 1" \
+  "$(echo "$RK144" | jq --argjson d "$DOM144" '(((.hari|length)==$d) and (([.hari[]|select(.total==0)]|length)==($d-1)))|if . then 1 else 0 end')"
 cek "rekap: saring sesi=malam menyisakan laporan malam saja" "V == 1" \
   "$(api "$OWNER" GET "/kebersihan/rekap?bulan=$BULAN144&branch_id=all&sesi=malam" | jq '[.hari[]|.laporan[]|select(.sesi!="malam")]|length==0|if . then 1 else 0 end')"
 cek "rekap: bulan ngawur → jatuh ke bulan berjalan" "V == 1" \
   "$(api "$OWNER" GET "/kebersihan/rekap?bulan=ngawur" | jq --arg b "$BULAN144" '.bulan==$b|if . then 1 else 0 end')"
+# "ngawur" di atas GAGAL pola, jadi jalur amannya memang terpakai. Yang
+# berbahaya justru nilai yang LOLOS pola tapi bukan bulan: "2026-13"/"2026-00"
+# dulu dirakit jadi "2026-13-01" dan membuat Postgres melempar → 500, padahal
+# kontrak menjanjikan jatuh ke bulan berjalan.
+THN144=$(TZ=Asia/Jakarta date +%Y)
+cek "rekap: bulan 13 → jatuh ke bulan berjalan (bukan 500)" "V == 1" \
+  "$(api "$OWNER" GET "/kebersihan/rekap?bulan=$THN144-13" | jq --arg b "$BULAN144" '.bulan==$b|if . then 1 else 0 end')"
+cek "rekap: bulan 00 → jatuh ke bulan berjalan (bukan 500)" "V == 1" \
+  "$(api "$OWNER" GET "/kebersihan/rekap?bulan=$THN144-00" | jq --arg b "$BULAN144" '.bulan==$b|if . then 1 else 0 end')"
+cek "rekap: branch_id bukan UUID → 400 (bukan 500)" "V == 400" \
+  "$(status_code "$OWNER" GET "/kebersihan/rekap?branch_id=bukan-uuid")"
 cek "ringkas: badge hari ini menghitung laporan berarea kotor" "V == 1" \
   "$(api "$OWNER" GET /kebersihan/ringkas | jq --arg t "$HARI144" '((.tanggal==$t) and (.total>=2) and (.kotor>=1))|if . then 1 else 0 end')"
 
@@ -5699,6 +5743,11 @@ cek "hapus area master → 200" "V == 200" "$(status_code "$OWNER" DELETE "/kebe
 cek "laporan lama tetap menyebut nama area yang dihapus" "V == 1" \
   "$(api "$OWNER" GET "/kebersihan/$LID144" | jq '[.items[]|select(.area_nama=="Toilet 144" and .area_id==null)]|length==1|if . then 1 else 0 end')"
 
+# Hapus punya aturan kepemilikan yang sama dengan ubah — dan dulu tak satu pun
+# cabang penolakannya dijalankan uji, jadi refactor yang membalik kondisinya
+# akan tetap lolos 39/39.
+cek "karyawan lain hapus laporan orang → 403" "V == 403" \
+  "$(status_code "$TBAR" DELETE "/kebersihan/$LID144")"
 cek "pemilik hapus laporannya → 200" "V == 200" "$(status_code "$TKIT" DELETE "/kebersihan/$(echo "$LAP144B" | jq -r .id)")"
 cek "owner hapus laporan siapa pun → 200" "V == 200" "$(status_code "$OWNER" DELETE "/kebersihan/$LID144")"
 cek "laporan yang dihapus → 404" "V == 404" "$(status_code "$OWNER" GET "/kebersihan/$LID144")"

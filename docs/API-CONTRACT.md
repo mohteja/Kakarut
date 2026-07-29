@@ -819,25 +819,29 @@ ADA (validasi = aturan endpoint asli), idempoten per `client_ref`.
 
 Master area (`/area` dan `/rekap` didaftarkan **sebelum** `/:id` agar tidak tertangkap olehnya):
 
-- `GET /api/kebersihan/area` — query: `branch_id?` (`all` = tanpa saringan), `aktif?` (`1` = hanya aktif) — res: `AreaKebersihanDto[]` (urut `urutan`, lalu nama).
+- `GET /api/kebersihan/area` — query: `branch_id?` (`all` = tanpa saringan; **wajib UUID** bila diisi → **400**), `aktif?` (`1` = hanya aktif) — res: `AreaKebersihanDto[]` (urut `urutan`, lalu nama).
   > **Peran terkunci cabang** hanya menerima area yang berlaku untuk lokasinya (`branch_id` null **atau** sama dengan cabangnya) dan hanya yang **aktif**; `branch_id` di query diabaikan untuk mereka.
+  > **Manajemen memakai endpoint ini untuk dua hal berbeda, jadi saringannya harus dipilih:** untuk **layar pengisian** kirim `?aktif=1` **tanpa** `branch_id` — daftarnya menyempit ke cabang penugasan sendiri dan hanya yang aktif, yaitu persis yang diterima jalur tulis. Untuk **layar master area** kirim `?branch_id=all` — seluruh area perusahaan apa adanya, termasuk yang nonaktif. Tanpa keduanya, admin bercabang menerima daftar cabangnya sendiri (bawaan "saya sedang jadi pelapor").
 - `POST /api/kebersihan/area` — **[owner/admin]** (inline) — req: `{ nama, branch_id?, urutan?, is_active? }` (`branch_id` null/absen = berlaku semua lokasi) — res: **201** `{ id }` — error: **400** cabang bukan milik perusahaan ini
 - `PATCH /api/kebersihan/area/:id` — **[owner/admin]** (inline) — req: sebagian dari body di atas — res: `{ ok }` — error: **404** tak ditemukan
 - `DELETE /api/kebersihan/area/:id` — **[owner/admin]** (inline) — res: `{ ok }`. Aman terhadap riwayat (lihat catatan snapshot di atas).
 
 Rekap & ringkasan:
 
-- `GET /api/kebersihan/rekap` — **[owner/admin]** (inline) — query: `bulan?` (`YYYY-MM`, default bulan berjalan di zona waktu perusahaan; nilai ngawur → default), `branch_id?` (`all` = semua cabang), `sesi?` (`pagi|siang|malam`) — res: `RekapKebersihanDto`.
+- `GET /api/kebersihan/rekap` — **[owner/admin]** (inline) — query: `bulan?` (`YYYY-MM`, **bulan wajib 01–12**; default bulan berjalan di zona waktu perusahaan; nilai ngawur — termasuk `2026-13`/`2026-00` — jatuh ke default, **bukan 500**), `branch_id?` (`all` = semua cabang; **wajib UUID** bila diisi → **400**), `sesi?` (`pagi|siang|malam`; nilai lain diabaikan) — res: `RekapKebersihanDto`.
   > **Day-major**, kebalikan `GET /absensi/rekap`: satu entri = satu HARI (terbaru dulu) berisi laporan semua tim hari itu. Hari tanpa laporan tetap muncul dengan `total: 0` — justru itu gunanya. Bulan berjalan berhenti di hari ini.
 - `GET /api/kebersihan/ringkas` — **[owner/admin]** (inline) — res: `{ tanggal, total, kotor }` — hitungan hari ini untuk badge sidebar; sengaja terpisah dari `/rekap` karena di-poll tiap menit.
 
 Laporan:
 
-- `GET /api/kebersihan` — query: `dari?`/`sampai?` (`YYYY-MM-DD`), `branch_id?` (`all` = semua), `sesi?` — res: `LaporanKebersihanDto[]` (terbaru dulu, maks 200, sudah membawa `items`).
+- `GET /api/kebersihan` — query: `saya?` (`1` = hanya laporan pemanggil), `dari?`/`sampai?` (`YYYY-MM-DD`), `branch_id?` (`all` = semua; **wajib UUID** bila diisi → **400**), `sesi?` — res: `LaporanKebersihanDto[]` (terbaru dulu, maks 200, sudah membawa `items`).
   > **Peran terkunci cabang SELALU hanya melihat laporan MILIKNYA** (sama seperti `/pengajuan`) — laporan ini penilaian kerja, bukan papan pengumuman. `branch_id` diabaikan untuk mereka.
+  > **Layar pengisian WAJIB mengirim `saya=1`.** Untuk owner/admin daftarnya berisi laporan seluruh karyawan; layar yang menyebutnya "laporan saya" akan menandai sesi milik orang lain sebagai sudah terisi, lalu mengarahkan tombol Perbarui ke laporan orang lain — dan `PATCH` menolaknya **403**, sehingga pelapornya tak punya jalan mengirim laporannya sendiri. `saya=1` memaksa penyempitan `user_id` untuk **semua** peran.
 - `GET /api/kebersihan/:id` — pemilik laporan atau owner/admin — res: `LaporanKebersihanDto` — error: **404** milik orang lain (bagi peran terkunci cabang) atau tak ditemukan
-- `POST /api/kebersihan` — [semua peran, atas nama diri sendiri] — req: `{ sesi, catatan?, items: [{ area_id, bersih, catatan?, foto_url? }] }` (1–100 baris) — res: **201** `LaporanKebersihanDto` — error: **400** checklist kosong / area tak dikenal atau bukan untuk lokasi pelapor / area dikirim dua kali / **tanpa foto sama sekali** / akun tanpa cabang; **409** sesi itu sudah dilaporkan hari ini
+- `POST /api/kebersihan` — [semua peran, atas nama diri sendiri] — req: `{ sesi, catatan?, items: [{ area_id, bersih, catatan?, foto_url? }] }` (1–100 baris) — res: **201** `LaporanKebersihanDto` — error: **400** checklist kosong / area tak dikenal, **sudah dinonaktifkan**, atau bukan untuk lokasi pelapor / area dikirim dua kali / **tanpa foto sama sekali** / akun tanpa cabang; **409** sesi itu sudah dilaporkan hari ini
+  > Baris induk + itemnya ditulis dalam **satu transaksi**, jadi laporan tanpa item mustahil ada.
 - `PATCH /api/kebersihan/:id` — **pemilik saja**, dan hanya selama masih tanggal yang sama — req: `{ catatan?, items }` (mengganti SELURUH checklist) — res: `LaporanKebersihanDto` — error: **403** milik orang lain; **409** laporan hari sebelumnya; **400** aturan yang sama seperti `POST`
+  > `items` **selalu** mengganti seluruh checklist. `catatan` sebaliknya bersifat **patch**: tak dikirim = dibiarkan apa adanya, dikirim `null` = dikosongkan. Penggantian item berjalan dalam satu transaksi, jadi checklist tak bisa hilang separuh jalan.
 - `PATCH /api/kebersihan/:id/catatan` — **[owner/admin]** (inline) — req: `{ catatan_owner: string|null }` — res: `LaporanKebersihanDto`. Mengosongkan catatan ikut membersihkan `catatan_owner_oleh`/`catatan_owner_pada`.
 - `DELETE /api/kebersihan/:id` — pemilik menghapus MILIKNYA pada hari yang sama; owner/admin kapan saja — res: `{ ok }` — error: **403** milik orang lain; **409** pemilik menghapus laporan hari sebelumnya; **404** tak ditemukan
 

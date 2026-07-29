@@ -257,13 +257,20 @@ async function siapkanItems(
         inArray(cleaningAreas.id, ids),
         // Area khusus cabang lain tak boleh dipakai.
         or(isNull(cleaningAreas.branchId), eq(cleaningAreas.branchId, branchId))!,
+        // Area yang sudah dinonaktifkan owner tak boleh masuk laporan baru:
+        // tanpa ini, tablet dapur yang cache-nya belum segar tetap bisa
+        // mengirimnya dan `total_area` di rekap owner ikut menghitung baris
+        // yang sengaja sudah dipensiunkan.
+        eq(cleaningAreas.isActive, true),
       ),
     );
   const peta = new Map(master.map((m) => [m.id, m]));
   const kurang = ids.filter((id) => !peta.has(id));
   if (kurang.length > 0) {
+    // Sebut jumlahnya: pesan lama tak menyebut apa pun, jadi pengirim tak tahu
+    // baris mana yang harus dibuang.
     throw new HTTPException(400, {
-      message: "Ada area yang tidak dikenal atau bukan untuk lokasi Anda",
+      message: `${kurang.length} area tidak dikenal, sudah dinonaktifkan, atau bukan untuk lokasi Anda — muat ulang daftar area`,
     });
   }
   if (!items.some((i) => !!i.foto_url?.trim())) {
@@ -282,6 +289,24 @@ async function siapkanItems(
   });
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * `branch_id` dari query masuk langsung ke klausa WHERE kolom uuid. Nilai yang
+ * bukan uuid membuat Postgres melempar `invalid input syntax for type uuid`,
+ * yang keluar sebagai **500** — padahal itu murni salah input klien. Disaring
+ * lebih dulu jadi 400 yang bisa ditindaklanjuti.
+ *
+ * Mengembalikan null bila tak ada saringan (`all` / tak dikirim).
+ */
+function saringCabang(v: string | undefined): string | null {
+  if (!v || v === "all") return null;
+  if (!UUID_RE.test(v)) {
+    throw new HTTPException(400, { message: "branch_id bukan UUID yang sah" });
+  }
+  return v;
+}
+
 /** Deteksi pelanggaran unique (user × tanggal × sesi) tanpa menebak-nebak pesan. */
 function bentrokSesi(err: unknown): boolean {
   const kode = (err as { cause?: { code?: string }; code?: string })?.cause?.code ??
@@ -295,6 +320,15 @@ export const kebersihanRoutes = new Hono<AppEnv>()
   /**
    * Daftar area checklist. Peran terkunci cabang hanya menerima area yang
    * berlaku untuk lokasinya (umum + khusus cabangnya).
+   *
+   * Manajemen memakai endpoint yang sama untuk DUA hal yang berbeda, jadi
+   * saringannya harus dipilih pemanggil:
+   *  - layar pengisian → `?aktif=1` tanpa `branch_id` = "area yang boleh SAYA
+   *    laporkan": ikut cabang penugasan sendiri, hanya yang aktif. Tanpa
+   *    bawaan ini, admin bercabang melihat area cabang lain + area nonaktif di
+   *    formulirnya, lalu `siapkanItems` menolak kirimannya dengan 400.
+   *  - modal master area → `?branch_id=all` = seluruh area perusahaan apa
+   *    adanya, termasuk yang nonaktif (memang itu yang diatur di sana).
    */
   .get("/area", async (c) => {
     const auth = c.get("auth");
@@ -308,9 +342,13 @@ export const kebersihanRoutes = new Hono<AppEnv>()
       }
       syarat.push(eq(cleaningAreas.isActive, true));
     } else {
-      const branchId = c.req.query("branch_id");
-      if (branchId && branchId !== "all") {
+      const q = c.req.query("branch_id");
+      const branchId = saringCabang(q);
+      if (branchId) {
         syarat.push(or(isNull(cleaningAreas.branchId), eq(cleaningAreas.branchId, branchId))!);
+      } else if (q !== "all" && auth.branch_id) {
+        // Tak menyebut cabang = bertindak sebagai pelapor di cabangnya sendiri.
+        syarat.push(or(isNull(cleaningAreas.branchId), eq(cleaningAreas.branchId, auth.branch_id))!);
       }
       if (c.req.query("aktif") === "1") syarat.push(eq(cleaningAreas.isActive, true));
     }
@@ -409,8 +447,12 @@ export const kebersihanRoutes = new Hono<AppEnv>()
     const tz = await timezoneOf(auth.company_id!);
     const hariIni = tanggalDi(tz);
 
+    // Bulan HARUS 01–12. Pola longgar `\d{2}` meloloskan "2026-13"/"2026-00",
+    // yang lalu dirakit jadi tanggal mustahil ("2026-13-01") dan membuat
+    // Postgres melempar → 500, padahal kontraknya menjanjikan jatuh ke bulan
+    // berjalan. Pola ketat ini sama dengan rekap absensi (absensi/routes.ts).
     const bulanQ = c.req.query("bulan");
-    const bulan = bulanQ && /^\d{4}-\d{2}$/.test(bulanQ) ? bulanQ : hariIni.slice(0, 7);
+    const bulan = bulanQ && /^\d{4}-(0[1-9]|1[0-2])$/.test(bulanQ) ? bulanQ : hariIni.slice(0, 7);
     const dari = `${bulan}-01`;
     const [th, bl] = bulan.split("-").map(Number);
     const akhirBulan = new Date(Date.UTC(th, bl, 0)).toISOString().slice(0, 10);
@@ -422,8 +464,8 @@ export const kebersihanRoutes = new Hono<AppEnv>()
       gte(cleaningReports.tanggal, dari),
       lte(cleaningReports.tanggal, sampai),
     ];
-    const branchId = c.req.query("branch_id");
-    if (branchId && branchId !== "all") syarat.push(eq(cleaningReports.branchId, branchId));
+    const branchId = saringCabang(c.req.query("branch_id"));
+    if (branchId) syarat.push(eq(cleaningReports.branchId, branchId));
     const sesi = c.req.query("sesi");
     if (sesi === "pagi" || sesi === "siang" || sesi === "malam") {
       syarat.push(eq(cleaningReports.sesi, sesi));
@@ -511,16 +553,22 @@ export const kebersihanRoutes = new Hono<AppEnv>()
   /**
    * Daftar laporan. Peran terkunci cabang SELALU hanya melihat miliknya —
    * laporan memuat penilaian pekerjaan, jadi tak dibagikan antar karyawan.
+   *
+   * `?saya=1` memaksa penyempitan itu untuk SEMUA peran. Manajemen butuh ini
+   * di layar pengisian: tanpa penanda eksplisit, daftarnya berisi laporan
+   * seluruh karyawan, dan layar yang menyebutnya "laporan saya" akan menandai
+   * sesi milik orang lain sebagai sudah terisi lalu mencoba mem-PATCH-nya
+   * (ditolak 403 — pelapornya jadi buntu).
    */
   .get("/", async (c) => {
     const auth = c.get("auth");
     const syarat = [eq(cleaningReports.companyId, auth.company_id!)];
 
-    if (terikatCabang(auth.role)) {
+    if (terikatCabang(auth.role) || c.req.query("saya") === "1") {
       syarat.push(eq(cleaningReports.userId, auth.sub));
     } else {
-      const branchId = c.req.query("branch_id");
-      if (branchId && branchId !== "all") syarat.push(eq(cleaningReports.branchId, branchId));
+      const branchId = saringCabang(c.req.query("branch_id"));
+      if (branchId) syarat.push(eq(cleaningReports.branchId, branchId));
     }
     const dari = c.req.query("dari");
     const sampai = c.req.query("sampai");
@@ -561,21 +609,31 @@ export const kebersihanRoutes = new Hono<AppEnv>()
     const tanggal = tanggalDi(await timezoneOf(auth.company_id!));
     const baris = await siapkanItems(auth.company_id!, branchId, b.items);
 
+    // SATU TRANSAKSI: baris induk + itemnya. Bila keduanya terpisah, kegagalan
+    // di tengah meninggalkan laporan tanpa item sama sekali — melanggar
+    // invarian "minimal 1 area + minimal 1 foto" yang baru saja divalidasi,
+    // dan indeks unik sesi membuat pelapor tak bisa mengirim ulang (409).
     let id: string;
     try {
-      const [baru] = await db
-        .insert(cleaningReports)
-        .values({
-          companyId: auth.company_id!,
-          branchId,
-          userId: auth.sub,
-          tanggal,
-          sesi: b.sesi,
-          catatan: b.catatan?.trim() || null,
-        })
-        .returning({ id: cleaningReports.id });
-      id = baru.id;
+      id = await db.transaction(async (tx) => {
+        const [baru] = await tx
+          .insert(cleaningReports)
+          .values({
+            companyId: auth.company_id!,
+            branchId,
+            userId: auth.sub,
+            tanggal,
+            sesi: b.sesi,
+            catatan: b.catatan?.trim() || null,
+          })
+          .returning({ id: cleaningReports.id });
+        await tx
+          .insert(cleaningReportItems)
+          .values(baris.map((r) => ({ ...r, reportId: baru.id })));
+        return baru.id;
+      });
     } catch (err) {
+      // 23505 tetap terbaca dari dalam transaksi yang di-rollback.
       if (bentrokSesi(err)) {
         throw new HTTPException(409, {
           message: "Laporan sesi ini sudah dibuat — perbarui laporan yang ada",
@@ -584,7 +642,6 @@ export const kebersihanRoutes = new Hono<AppEnv>()
       throw err;
     }
 
-    await db.insert(cleaningReportItems).values(baris.map((r) => ({ ...r, reportId: id })));
     return c.json(await ambilSatu(id, auth.company_id!), 201);
   })
 
@@ -617,12 +674,24 @@ export const kebersihanRoutes = new Hono<AppEnv>()
     }
 
     const baris = await siapkanItems(auth.company_id!, ada.branchId, b.items);
-    await db.delete(cleaningReportItems).where(eq(cleaningReportItems.reportId, id));
-    await db.insert(cleaningReportItems).values(baris.map((r) => ({ ...r, reportId: id })));
-    await db
-      .update(cleaningReports)
-      .set({ catatan: b.catatan?.trim() || null, updatedAt: new Date() })
-      .where(eq(cleaningReports.id, id));
+    // SATU TRANSAKSI: tanpa ini, INSERT yang gagal setelah DELETE sukses
+    // membuang seluruh checklist berikut foto buktinya — dan mulai besok
+    // laporan itu terkunci (409) sehingga tak bisa diisi ulang.
+    await db.transaction(async (tx) => {
+      await tx.delete(cleaningReportItems).where(eq(cleaningReportItems.reportId, id));
+      await tx.insert(cleaningReportItems).values(baris.map((r) => ({ ...r, reportId: id })));
+      await tx
+        .update(cleaningReports)
+        .set({
+          // Hanya sentuh `catatan` bila field-nya memang dikirim. `?.trim() ||
+          // null` tanpa penjaga ini mengubah field yang TIDAK dikirim menjadi
+          // NULL, jadi klien yang cuma memperbaiki checklist ikut menghapus
+          // pesan karyawan ke owner tanpa galat dan tanpa jejak.
+          ...(b.catatan !== undefined ? { catatan: b.catatan?.trim() || null } : {}),
+          updatedAt: new Date(),
+        })
+        .where(eq(cleaningReports.id, id));
+    });
     return c.json(await ambilSatu(id, auth.company_id!));
   })
 

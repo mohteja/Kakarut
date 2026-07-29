@@ -25,6 +25,82 @@ tanpa akses repo server.
 
 ---
 
+## Rilis: Perbaikan Laporan Kebersihan (`saya=1`, validasi query, transaksi)
+
+> **BELUM di-merge ke production** — masih di PR. Jangan rilis klien yang
+> bergantung padanya sebelum baris ini berubah jadi "Sudah di-merge".
+>
+> Tidak ada migrasi DB. Tidak ada perubahan bentuk response.
+
+Hasil audit fitur Laporan Kebersihan. Tidak ada lubang keamanan yang ditemukan —
+isolasi perusahaan, gerbang peran, dan pemeriksaan kepemilikan semuanya utuh.
+Yang diperbaiki: dua **500** yang bisa dipicu klien, satu layar yang memakai data
+orang lain, dan tiga penyimpangan penulisan data.
+
+### 🔴 WAJIB — layar pengisian harus mengirim `?saya=1`
+
+`GET /api/kebersihan` sekarang menerima `saya=1`, yang memaksa penyempitan ke
+laporan pemanggil untuk **semua** peran.
+
+Selama ini endpoint itu hanya menyempit sendiri untuk peran terkunci cabang
+(`cashier`/`tim`/`kitchen`/`bar`). Untuk owner/admin ia mengembalikan laporan
+**seluruh karyawan**. Klien yang memakainya sebagai "laporan saya" akan:
+menandai kartu sesi sebagai sudah terisi padahal yang mengisi orang lain,
+memuat checklist orang lain saat kartunya dibuka, dan mengarahkan tombol
+Perbarui ke `PATCH /api/kebersihan/<id orang lain>` — yang ditolak **403**.
+Akibatnya admin yang punya cabang **tak bisa** mengirim laporannya sendiri.
+
+Kalau layar pengisian mobile memanggil `GET /api/kebersihan` polos, tambahkan
+`?saya=1`. Peran terkunci cabang tidak berubah perilaku sama sekali.
+
+### 🟡 PERLU DICEK — `GET /api/kebersihan/area` punya bawaan baru untuk manajemen
+
+Endpoint ini melayani dua layar yang berbeda, jadi saringannya kini harus dipilih:
+
+| Layar | Kirim | Isinya |
+| --- | --- | --- |
+| Pengisian checklist | `?aktif=1` (tanpa `branch_id`) | cabang penugasan sendiri, hanya yang aktif |
+| Master area | `?branch_id=all` | seluruh area perusahaan, termasuk nonaktif |
+
+Untuk peran terkunci cabang **tidak ada yang berubah** — mereka selalu menerima
+area lokasinya yang aktif. Yang berubah hanya bawaan bagi owner/admin: dulu
+tanpa query mereka menerima SEMUA area perusahaan, termasuk area cabang lain dan
+area nonaktif — yaitu persis yang ditolak jalur tulis dengan **400**.
+
+### 🟡 PERLU DICEK — dua query yang dulu menjatuhkan server kini 400/fallback
+
+| Permintaan | Dulu | Sekarang |
+| --- | --- | --- |
+| `rekap?bulan=2026-13` atau `2026-00` | **500** | **200**, jatuh ke bulan berjalan |
+| `?branch_id=<bukan-uuid>` (rekap & daftar) | **500** | **400** |
+
+Pola bulan dulu `\d{4}-\d{2}`, sehingga bulan 00/13/99 lolos lalu dirakit jadi
+tanggal mustahil (`2026-13-01`) dan Postgres melempar. Ini menggigit klien yang
+menyusun bulan dari indeks berbasis-0 atau kena off-by-one di bulan Desember.
+`branch_id` yang bukan UUID juga masuk langsung ke klausa `WHERE` kolom uuid.
+
+### 🟡 PERLU DICEK — `PATCH /api/kebersihan/:id` berhenti menghapus `catatan`
+
+`items` tetap **mengganti seluruh** checklist. `catatan` kini bersifat **patch**:
+
+- field tidak dikirim → nilai lama **dibiarkan**
+- field dikirim `null` → dikosongkan
+
+Dulu keduanya sama-sama menulis NULL, jadi klien yang cuma membetulkan checklist
+ikut menghapus pesan karyawan ke owner tanpa galat dan tanpa jejak. Klien yang
+selama ini selalu mengirim `catatan` tidak berubah perilaku.
+
+### ⚪️ INFO — area nonaktif ditolak, penulisan jadi atomik
+
+`POST` dan `PATCH` kini menolak `area_id` yang sudah dinonaktifkan owner
+(**400**, pesannya menyebut jumlah baris yang bermasalah). Muat ulang
+`GET /api/kebersihan/area` bila menerimanya.
+
+Keduanya juga menulis dalam satu transaksi, jadi laporan tanpa item atau
+checklist yang hilang separuh jalan tidak lagi mungkin.
+
+---
+
 ## Rilis: Laporan Harga dibuka untuk karyawan Central Kitchen
 
 > **BELUM di-merge ke production** — masih di PR. Jangan rilis klien yang
