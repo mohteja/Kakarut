@@ -27,8 +27,7 @@ tanpa akses repo server.
 
 ## Rilis: `sebab` terstruktur pada 409 penjualan — jawaban pertanyaan antrean offline
 
-> **BELUM di-merge ke production** — masih di PR. Jangan rilis klien yang
-> bergantung padanya sebelum baris ini berubah jadi "Sudah di-merge".
+> **Sudah di-merge ke production** (PR #131, 29 Jul 2026).
 >
 > Tidak ada migrasi DB. Perubahan **aditif**: satu field baru pada badan galat.
 
