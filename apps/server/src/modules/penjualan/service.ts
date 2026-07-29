@@ -1,6 +1,11 @@
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { HTTPException } from "hono/http-exception";
-import { hitungPb1, qtyEfektif, type SaleItemInput } from "@kakarut/shared";
+import {
+  hitungPb1,
+  qtyEfektif,
+  type SaleItemInput,
+  type SebabPenjualanGagal,
+} from "@kakarut/shared";
 import { db } from "../../db/client";
 import {
   branches,
@@ -15,6 +20,25 @@ import {
 import { kodeCabang, tanggalDi } from "../../lib/time";
 import { upsertCustomer } from "../customer/service";
 import { hitungHargaMenu, loadKatalog, tampilDiCabang } from "../menu/service";
+
+/**
+ * Penolakan penjualan yang membawa SEBAB terstruktur, bukan cuma teks.
+ *
+ * Klien offline harus memutuskan nasib perintah di antreannya: dibuang (karena
+ * transaksinya SUDAH tercatat) atau ditampilkan ke kasir (karena TIDAK). Teks
+ * pesan tak boleh jadi dasar keputusan itu — ia berubah kapan saja dan tak
+ * bisa diuji. `sebab` ikut ke badan respons lewat `app.onError` (jalur online)
+ * maupun lewat item gagal `POST /api/sync` (jalur antrean).
+ */
+export class PenjualanGagal extends HTTPException {
+  constructor(
+    status: 409,
+    message: string,
+    readonly sebab: SebabPenjualanGagal,
+  ) {
+    super(status, { message });
+  }
+}
 
 export interface CreateSaleParams {
   companyId: string;
@@ -136,6 +160,7 @@ export async function createSale(params: CreateSaleParams) {
           pesananStatus: openBills.pesananStatus,
           sajianTakeaway: openBills.sajianTakeaway,
           closedAt: openBills.closedAt,
+          saleId: openBills.saleId,
         })
         .from(openBills)
         .where(
@@ -146,11 +171,19 @@ export async function createSale(params: CreateSaleParams) {
           ),
         );
       if (!bill) throw new HTTPException(404, { message: "Open bill tidak ditemukan" });
-      // Bill yang sudah ditutup (dibayar/dibatalkan) tak boleh dibayar lagi —
-      // tanpa penjaga ini satu bill bisa jadi dua transaksi bila tombol bayar
-      // tertekan dua kali atau antrean offline mengirim ulang.
+      // Bill yang sudah ditutup tak boleh dibayar lagi — tanpa penjaga ini satu
+      // bill bisa jadi dua transaksi bila tombol bayar tertekan dua kali atau
+      // antrean offline mengirim ulang.
+      //
+      // DUA SEBAB, ARTINYA BERLAWANAN, dan klien offline WAJIB bisa
+      // membedakannya: `saleId` terisi = bill ini sudah jadi penjualan, jadi
+      // kiriman ulangnya kembar dan aman dibuang dari antrean. `saleId` kosong
+      // = bill DIBATALKAN tanpa pernah jadi penjualan, jadi membuang
+      // perintahnya berarti kehilangan satu transaksi sungguhan.
       if (bill.closedAt) {
-        throw new HTTPException(409, { message: "Open bill ini sudah ditutup" });
+        throw bill.saleId
+          ? new PenjualanGagal(409, "Open bill ini sudah dibayar", "bill_sudah_dibayar")
+          : new PenjualanGagal(409, "Open bill ini sudah dibatalkan", "bill_dibatalkan");
       }
       pesananStatusAwal = bill.pesananStatus;
       // Bill lahir dari pelanggan yang duduk, jadi `false` di sana = "tak ada

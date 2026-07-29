@@ -623,17 +623,24 @@ export const syncRoutes = new Hono<AppEnv>().post("/", batasSync, zValidator("js
           : e instanceof z.ZodError
             ? e.issues.map((i) => i.message).join("; ")
             : "Kesalahan server";
+      // `sebab` boleh datang dari DUA sumber: SyncGagal (dilempar eksekutor di
+      // berkas ini) dan HTTPException ber-`sebab` yang dilempar modul lain —
+      // mis. PenjualanGagal dari createSale. Tanpa cabang kedua, penolakan
+      // paling penting bagi antrean offline ("bill sudah dibayar" vs "bill
+      // dibatalkan") sampai ke klien sebagai 409 telanjang yang tak bisa
+      // dibedakan, dan klien terpaksa menebak.
+      const sebab = e instanceof SyncGagal ? e.sebab : (e as { sebab?: string })?.sebab;
+      const data = e instanceof SyncGagal ? e.data : undefined;
       item = {
         client_ref: cmd.client_ref,
         status: "gagal",
         kode,
         error: pesan,
-        ...(e instanceof SyncGagal ? { sebab: e.sebab, data: e.data } : {}),
+        ...(sebab ? { sebab, ...(data !== undefined ? { data } : {}) } : {}),
       };
       simpanStatus = "gagal";
       simpanKode = kode;
-      simpanHasil =
-        e instanceof SyncGagal ? { error: pesan, sebab: e.sebab, data: e.data } : { error: pesan };
+      simpanHasil = sebab ? { error: pesan, sebab, data } : { error: pesan };
     }
 
     // 2) Catat hasil ke ledger (exactly-once). onConflictDoNothing melindungi balapan retry.
