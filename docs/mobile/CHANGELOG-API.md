@@ -25,6 +25,56 @@ tanpa akses repo server.
 
 ---
 
+## Rilis: Detail produksi — BERAPA BATCH, bukan cuma gramnya (`batch_teks`)
+
+> **BELUM tayang di production** — masih di PR. Baris ini berubah jadi
+> "Sudah di-merge ke production" begitu tayang.
+>
+> Tidak ada migrasi DB. Dua field baru pada baris `GET /api/produksi` &
+> `GET /api/pembelian`; keduanya **aditif dan opsional**.
+
+Keluhan yang memicunya, dari layar Detail Produksi (web DAN mobile):
+
+> *"tidak ada jumlah batch yang harus dikerjakan, hanya jumlah gramnya saja.
+> Lalu tidak ada kepala tabelnya — ini 2.000 gram itu apa, terus '—' itu apa?"*
+
+### 🟢 BARU — `batch` & `batch_teks`
+
+`qty` menjawab **"jadinya berapa"**. Yang dikerjakan orang di dapur adalah
+**mengulang resep sekian kali** — dan itu tak pernah dikirim ke klien mana pun,
+jadi pelaksana harus membagi sendiri di kepala tiap kali membuka faktur.
+
+| Field | Isi |
+| --- | --- |
+| `batch` | `number \| null` — mis. `3` (= `qty ÷ isi`) |
+| `batch_teks` | `string \| null` — mis. `"3 batch × 700 ml"` |
+
+`null` pada **bahan beli** (tak punya resep) dan saat `isi ≤ 1` (tak ada
+pengelompokan batch — `"2.100 batch × 1 ml"` tak berarti). Bila pembagiannya tak
+bulat, teksnya diberi awalan `≈` (mis. `"≈ 2,36 batch × 700 ml"`) supaya tak
+terbaca sebagai angka bulat.
+
+Tampilkan **di samping/bawah `qty_teks`, jangan menggantikannya** — keduanya
+menjawab pertanyaan berbeda: berapa hasilnya, vs berapa kali masak. Teksnya
+ditulis server (fungsi yang sama dipakai web) supaya keduanya mustahil berbeda,
+persis alasan `qty_teks` dulu dibuat.
+
+### 🟡 PERLU DICEK — tabel baris faktur butuh KEPALA KOLOM
+
+Ini bukan perubahan API, tapi keluhannya menyebut mobile juga. Di web, tabel
+baris faktur tak punya `<thead>` sama sekali: pembaca melihat `+2.100 ml` dan
+`—` tanpa tahu kolomnya apa. Sudah diperbaiki jadi:
+
+| Bahan diproduksi | Hasil & batch | Rak simpan |
+| --- | --- | --- |
+| Sambal chilli oil 📖 resep | +2.100 ml<br>🍳 3 batch × 700 ml | — |
+
+(Untuk faktur beli: **Bahan dibeli / Jumlah / Rak simpan / Biaya**.) Kolom "—"
+yang membingungkan itu adalah **rak simpan**, memang kosong sampai barang masuk
+stok. Mohon beri label serupa di mobile.
+
+---
+
 ## Rilis: Tutup kasir HITUNG BUTA + kunci hitungan + ACC selisih owner
 
 > **Sudah di-merge ke production** (PR #127, 28 Jul 2026) — menjawab pertanyaan

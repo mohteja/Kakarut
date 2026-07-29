@@ -562,6 +562,22 @@ dari satu baris. Baris tanpa pasangan = tambahan baru → memakai harga hari ini
 baris lama tanpa pasangan dihapus. `qty`/`catatan`/`dine_in_override` boleh
 berubah bebas tanpa melepas kunci harga.
 
+> ### 🍳 `batch` & `batch_teks` pada baris produksi/pembelian
+>
+> `qty` menjawab **"jadinya berapa"** (selalu satuan kerja, mis. `2100` + `"ml"`).
+> Yang dikerjakan orang di dapur adalah **mengulang resep sekian kali** — itu
+> `batch = qty ÷ isi`, karena satu batch resep menghasilkan `isi` satuan kerja.
+>
+> | Field | Isi |
+> | --- | --- |
+> | `batch` | `number \| null` — mis. `3`; `null` untuk bahan **beli** atau `isi ≤ 1` |
+> | `batch_teks` | `string \| null` — mis. `"3 batch × 700 ml"`, `"≈ 2,36 batch × 700 ml"` bila tak pas |
+>
+> Tampilkan **di samping/bawah `qty_teks`, bukan menggantikannya** — keduanya
+> menjawab pertanyaan berbeda. `null` → jangan tampilkan baris apa pun.
+> Teksnya ditulis server (`batchTeks()` di `packages/shared/src/satuan.ts`)
+> supaya web & mobile mustahil berbeda, sama seperti `qty_teks`.
+
 ## `/api/shift` — Shift kasir (`modules/shift/routes.ts`) — group guard **[owner/admin/cashier]** (buka/tutup **cashier only**)
 
 - `GET /api/shift/aktif` — [owner/admin/cashier] — query: `branch_id?` — res: `Shift | null` (shift terbuka + rekap live). **HITUNG BUTA:** untuk peran terkunci cabang (kasir/tim) selagi shift masih TERBUKA **dan hitungan belum dikunci**, `hitung_buta: true` dan angka tunai disembunyikan — `kas_sistem`, `penjualan_tunai`, dan `selisih` semuanya `null` (**bukan 0** — nol adalah angka yang sah). `jumlah_transaksi`, non-tunai, dan `modal_awal` tetap tampil. Owner/admin tak pernah dibutakan.

@@ -40,6 +40,14 @@ export interface StokMasukRow {
   /** satuan beli/kemasan (mis. "dus"); 1 satuan_beli = isi satuan */
   satuan_beli?: string | null;
   qty: number;
+  /**
+   * BERAPA KALI RESEP DIJALANKAN (`qty ÷ isi`) — null untuk bahan beli atau
+   * bahan tanpa ukuran batch. `qty` menjawab "jadinya berapa"; ini menjawab
+   * "berapa kali masak", yang justru itulah pekerjaannya.
+   */
+  batch?: number | null;
+  /** teks siap tampil dari server, mis. "3 batch × 700 ml"; null = tak relevan */
+  batch_teks?: string | null;
   total_harga: number | null;
   is_batch: boolean;
   catatan: string | null;

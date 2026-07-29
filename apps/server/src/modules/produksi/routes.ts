@@ -19,6 +19,7 @@ import { Hono, type Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import {
+  batchTeks,
   hargaPerUnit,
   jumlahFaktur,
   qtyTeks,
@@ -2295,6 +2296,8 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         // exp lot (terisi saat masuk stok) + masa simpan master (default form Tiba)
         exp_date: productions.expDate,
         masa_simpan_hari: ingredients.masaSimpanHari,
+        /** "produksi" | "beli" — penentu apakah baris ini punya batch resep */
+        pengadaan: ingredients.pengadaan,
         // lokasi + divisi produksi resep (badge Kitchen/Bar utk produksi cabang)
         produksi_di: ingredients.produksiDi,
         divisi_produksi: ingredients.divisiProduksi,
@@ -2430,10 +2433,16 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         // memasangkan `qty` dengan `satuan_beli` ("900 kg" untuk 900 gr) dan
         // dengan kata "batch"; `qty_teks` menghapus ruang tebakan itu.
         const t = qtyTeks({ qty: r.qty, satuan: r.satuan, isi: r.isi, satuanBeli: r.satuan_beli });
+        // Berapa kali resep dijalankan. `qty` menjawab "berapa banyak jadinya",
+        // `batch` menjawab "berapa kali masak" — itu yang dikerjakan orang di
+        // dapur, dan sebelumnya tak pernah dikirim ke klien mana pun.
+        const b = batchTeks({ qty: r.qty, satuan: r.satuan, isi: r.isi, pengadaan: r.pengadaan });
         return {
           ...r,
           qty_teks: t.teks,
           qty_setara: t.setara,
+          batch: b.batch,
+          batch_teks: b.teks,
           default_storage_location_id: rak?.id ?? null,
           default_tempat: rak?.nama ?? null,
         };
