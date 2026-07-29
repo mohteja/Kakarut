@@ -84,13 +84,32 @@ yang sama.
 ### 🔴 WAJIB — kirim `open_bill_item_id` saat membayar open bill
 
 Pewarisan status ke penjualan sekarang **per baris**, dan pencocokannya lewat
-`items[].open_bill_item_id` pada `POST /api/penjualan`. Field itu **sudah ada
-sejak rilis kunci harga open bill** dan sudah wajib untuk alasan itu — sekarang
-ia juga yang membawa pekerjaan dapur ikut pindah.
+`items[].open_bill_item_id` pada `POST /api/penjualan`. Field itu sudah ada sejak
+rilis kunci harga open bill dan sudah dibutuhkan untuk alasan itu — sekarang ia
+juga yang membawa pekerjaan dapur ikut pindah.
 
 Tanpa field itu, tiap baris penjualan lahir sebagai pekerjaan baru yang belum
 tersentuh: **sajian yang sudah selesai akan kembali ke antrean dapur** begitu
 pelanggan membayar.
+
+> ### ⚠️ TOLONG DICEK ULANG DI KODE, JANGAN DARI INGATAN
+>
+> **Server tidak menolak permintaan tanpa field ini.** Skemanya
+> `open_bill_item_id: z.string().uuid().nullish()` — opsional. Bila tak dikirim,
+> `createSale` diam-diam memakai `menus.harga_jual` **hari pembayaran** (bukan
+> harga yang disepakati pembeli) dan baris penjualannya lahir `dikerjakan`.
+> Tidak ada 400, tidak ada peringatan, tidak ada apa pun di log.
+>
+> Artinya: klien yang **belum** mengirimnya tak akan pernah tahu — sejak rilis
+> kunci harga pun tidak. "Tidak ada galat" **bukan** bukti field ini terkirim.
+> Buka kode pembayaran open bill dan pastikan tiap baris keranjang membawa
+> `id` baris bill-nya (`OpenBillDetail.items[].id`), bukan hanya `menu_id`.
+>
+> Kami sengaja **tidak** menjadikannya 400 di rilis ini: kalau ternyata mobile
+> belum mengirimnya, mengetatkan server akan mematikan pembayaran open bill di
+> produksi, bukan memperbaikinya. Beri tahu kami hasil pengecekannya — kalau
+> sudah aman, gerbangnya bisa kami ketatkan supaya lubang ini tertutup
+> selamanya.
 
 ### ⚪️ INFO — `RiwayatTransaksiRow.sajian_takeaway` ikut jadi turunan
 
