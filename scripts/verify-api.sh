@@ -6525,6 +6525,43 @@ cek "Riwayat: item_takeaway=1, item_dine_in=1, badge mutlak tetap false" "V == 1
 cek "item_takeaway + item_dine_in == jumlah_item" "V == 1"   "$(echo "$R154P" | jq -r '((.item_takeaway + .item_dine_in)==.jumlah_item)|if . then 1 else 0 end')"
 api "$OWNER" PUT "/menu/$M154" '{"harga_jual":12000}' > /dev/null
 
+# (f3) PISAH PORSI DI `PUT` — kasir memisah porsi lalu menekan "Perbarui Open
+#      Bill" alih-alih membayar. Di pembayaran id boleh berulang (lihat f2),
+#      tapi di PUT `items[].id` adalah kunci PASANGAN dan hakikatnya 1:1 —
+#      dikirim dua kali ditolak. `pisah_dari` adalah kunci WARISAN yang memang
+#      boleh berulang, jadi porsi pecahan tetap membawa harga terkunci & status
+#      dapurnya tanpa membuat pasangan baris jadi ambigu.
+OB154Q=$(api "$REISS105" POST /open-bill "{\"meja_id\":\"$MEJA154\",\"items\":[{\"menu_id\":\"$M154\",\"qty\":3}]}")
+OBID154Q=$(echo "$OB154Q" | jq -r .id)
+BR154Q=$(echo "$OB154Q" | jq -r '.items[0].id')
+api "$TKIT154" POST "/pesanan/open_bill/$OBID154Q/item/$BR154Q/status" '{"status":"selesai"}' > /dev/null
+api "$OWNER" PUT "/menu/$M154" '{"harga_jual":20000}' > /dev/null
+cek "PUT id yang sama dua kali → 400 (pasangan baris jadi ambigu)" "V == 400" \
+  "$(status_code_body "$REISS105" PUT "/open-bill/$OBID154Q" "{\"meja_id\":\"$MEJA154\",\"items\":[{\"id\":\"$BR154Q\",\"menu_id\":\"$M154\",\"qty\":2},{\"id\":\"$BR154Q\",\"menu_id\":\"$M154\",\"qty\":1}]}")"
+cek "PUT id + pisah_dari sekaligus → 400 (dua maksud bertabrakan)" "V == 400" \
+  "$(status_code_body "$REISS105" PUT "/open-bill/$OBID154Q" "{\"meja_id\":\"$MEJA154\",\"items\":[{\"id\":\"$BR154Q\",\"pisah_dari\":\"$BR154Q\",\"menu_id\":\"$M154\",\"qty\":3}]}")"
+cek "pisah_dari beda menu → 400" "V == 400" \
+  "$(status_code_body "$REISS105" PUT "/open-bill/$OBID154Q" "{\"meja_id\":\"$MEJA154\",\"items\":[{\"id\":\"$BR154Q\",\"menu_id\":\"$M154\",\"qty\":2},{\"pisah_dari\":\"$BR154Q\",\"menu_id\":\"$M154B\",\"qty\":1}]}")"
+cek "pisah_dari di POST bill BARU → 400 (belum ada baris utk diwarisi)" "V == 400" \
+  "$(status_code_body "$REISS105" POST /open-bill "{\"items\":[{\"pisah_dari\":\"$BR154Q\",\"menu_id\":\"$M154\",\"qty\":1}]}")"
+# Jalan yang benar: baris asal tetap ber-`id`, pecahannya ber-`pisah_dari`.
+OBP154=$(api "$REISS105" PUT "/open-bill/$OBID154Q" "{\"meja_id\":\"$MEJA154\",\"items\":[{\"id\":\"$BR154Q\",\"menu_id\":\"$M154\",\"qty\":2},{\"pisah_dari\":\"$BR154Q\",\"menu_id\":\"$M154\",\"qty\":1,\"dine_in_override\":false}]}")
+cek "bill jadi DUA baris (2 + 1), tak ada yang hilang" "V == 1" \
+  "$(echo "$OBP154" | jq -r '(((.items|length)==2) and (([.items[].qty]|sort)==[1,2]))|if . then 1 else 0 end')"
+cek "KEDUA baris berharga TERKUNCI 12000 (pecahan tak kena 20000)" "V == 2" \
+  "$(echo "$OBP154" | jq '[.items[]|select(.harga_satuan==12000)]|length')"
+cek "baris pecahan bertanda bawa pulang lewat dine_in_override" "V == 1" \
+  "$(echo "$OBP154" | jq '[.items[]|select(.dine_in_override==false and .qty==1)]|length')"
+cek "baris pecahan MEWARISI 'selesai' (tak kembali ke antrean dapur)" "V == 1" \
+  "$(kartu154 "$TKIT154" "$OBID154Q" | jq -r '((.status=="selesai") and (.item_selesai==2))|if . then 1 else 0 end')"
+# Dibayar: harga terkuncinya bertahan sampai nota.
+BRQ1=$(echo "$OBP154" | jq -r '[.items[]|select(.qty==2)][0].id')
+BRQ2=$(echo "$OBP154" | jq -r '[.items[]|select(.qty==1)][0].id')
+SQ154=$(api "$REISS105" POST /penjualan "{\"meja_id\":\"$MEJA154\",\"metode_bayar\":\"tunai\",\"open_bill_id\":\"$OBID154Q\",\"items\":[{\"menu_id\":\"$M154\",\"qty\":2,\"open_bill_item_id\":\"$BRQ1\"},{\"menu_id\":\"$M154\",\"qty\":1,\"open_bill_item_id\":\"$BRQ2\",\"is_dine_in\":false}]}")
+cek "nota pisah-porsi-lewat-PUT: subtotal 3 × 12000 = 36000" "V == 36000" \
+  "$(echo "$SQ154" | jq '.sale.subtotal')"
+api "$OWNER" PUT "/menu/$M154" '{"harga_jual":12000}' > /dev/null
+
 # (g) BATAL per baris. Bill baru boleh lepas dari pemilih kasir saat TAK ADA
 #     LAGI yang bisa ditagih — satu baris batal tidak menghapus tagihannya.
 OB154B=$(api "$REISS105" POST /open-bill "{\"meja_id\":\"$MEJA154\",\"items\":[{\"menu_id\":\"$M154\",\"qty\":1},{\"menu_id\":\"$M154B\",\"qty\":1}]}")

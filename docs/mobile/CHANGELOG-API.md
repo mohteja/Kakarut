@@ -25,6 +25,49 @@ tanpa akses repo server.
 
 ---
 
+## Rilis: `pisah_dari` — memecah porsi di `PUT /open-bill/:id`
+
+> Belum di-merge ke production. Tidak ada migrasi DB. Field **baru** pada body
+> `PUT`/`POST /api/open-bill`; tidak ada perilaku lama yang berubah.
+
+### 🟢 BARU — `items[].pisah_dari` di `PUT /api/open-bill/:id`
+
+Menjawab pertanyaan tim mobile: **tidak**, `PUT` TIDAK memetakan `items[].id`
+lewat map seperti pembayaran. Mengirim `id` yang sama dua kali ditolak **400**
+("Baris bill dikirim lebih dari sekali"), dan itu memang disengaja — kedua field
+punya arti berbeda:
+
+| Field | Arti | Boleh berulang? |
+| --- | --- | --- |
+| `id` | **pasangan** — baris lama mana yang diperbarui baris ini | **tidak**, 1:1 |
+| `pisah_dari` | **warisan** — baris BARU yang mewarisi harga terkunci & status dapur | **ya**, many:1 |
+
+Jadi jangan hapus penjaga kalian — ganti dengan `pisah_dari`:
+
+```jsonc
+{ "items": [
+    { "id": "B1",         "menu_id": "M", "qty": 2 },
+    { "pisah_dari": "B1", "menu_id": "M", "qty": 1, "dine_in_override": false }
+]}
+```
+
+Baris pecahan mewarisi `harga_satuan`, `menu_nama`, dan trio status dapur.
+`sajian_takeaway` **tidak** diwarisi — memecah porsi justru dilakukan supaya
+penyajiannya berbeda, jadi penandanya lahir dari `dine_in_override` baris itu
+sendiri saat bill dibayar.
+
+**Solusi sementara kalian (id hanya pada kemunculan pertama) bukan "aman tapi
+tidak ideal" — itu bug harga yang sama** yang baru kalian balikkan, cuma di
+momen yang berbeda: porsi pecahannya jadi baris baru berharga hari ini, jadi
+pembeli ditagih lebih mahal, dan porsi yang sudah matang kembali ke antrean
+dapur. Tolong pindah ke `pisah_dari`.
+
+Ditolak **400**: `pisah_dari` bersamaan dengan `id`, menunjuk baris bill lain /
+tak ada, beda `menu_id`, atau dipakai di `POST /api/open-bill` (bill baru belum
+punya baris untuk diwarisi).
+
+---
+
 ## Rilis: Pisah porsi berbagi `open_bill_item_id` + cacah penyajian di riwayat
 
 > Belum di-merge ke production. Tidak ada migrasi DB, tidak ada perubahan

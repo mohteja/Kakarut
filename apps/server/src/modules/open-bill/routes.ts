@@ -30,6 +30,22 @@ const BillBody = z.object({
          * memakai harga katalog hari ini.
          */
         id: z.string().uuid().optional(),
+        /**
+         * PISAH PORSI: baris ini adalah baris BARU, tapi harga terkunci &
+         * status dapurnya diwarisi dari baris bill yang disebut di sini.
+         *
+         * Sengaja TERPISAH dari `id`: `id` adalah kunci PASANGAN (baris lama
+         * mana yang diperbarui baris ini) dan hakikatnya satu-ke-satu — dikirim
+         * dua kali ditolak 400. `pisah_dari` adalah kunci WARISAN dan memang
+         * boleh berulang: 3 porsi bisa jadi 2 + 1 yang dua-duanya menunjuk
+         * baris asal yang sama.
+         *
+         * Tanpa jalur ini, memecah porsi di `PUT` memaksa porsi pecahannya jadi
+         * baris baru berharga HARI INI — pembeli ditagih lebih mahal hanya
+         * karena kasir menekan "bungkus satu", dan porsi yang sudah matang
+         * kembali ke antrean dapur.
+         */
+        pisah_dari: z.string().uuid().nullish(),
         menu_id: z.string().uuid(),
         qty: z.number().positive(),
         dine_in_override: z.boolean().nullish(),
@@ -190,6 +206,11 @@ export const openBillRoutes = new Hono<AppEnv>()
     if (terikatCabang(auth.role) && branchId !== auth.branch_id) {
       throw new HTTPException(403, { message: "Kasir hanya boleh bill di cabangnya" });
     }
+    if (body.items.some((i) => i.pisah_dari)) {
+      // Bill baru belum punya baris apa pun untuk diwarisi — mengizinkannya
+      // hanya akan diam-diam memakai harga hari ini, jadi lebih jujur ditolak.
+      throw new HTTPException(400, { message: "pisah_dari hanya berlaku saat memperbarui bill" });
+    }
     const katalog = await validateMenus(auth.company_id!, branchId, body.items);
     const { mejaId, mejaLabel, tipe } = await resolveMeja(auth.company_id!, branchId, body.meja_id);
     /**
@@ -346,13 +367,35 @@ export const openBillRoutes = new Hono<AppEnv>()
       // Baris lama yang tak berpasangan dihapus; baris kiriman yang tak dapat
       // pasangan = tambahan baru → memakai harga katalog hari ini.
       const lama = await tx
-        .select({ id: openBillItems.id, menuId: openBillItems.menuId })
+        .select({
+          id: openBillItems.id,
+          menuId: openBillItems.menuId,
+          menuNama: openBillItems.menuNama,
+          hargaSatuan: openBillItems.hargaSatuan,
+          pesananStatus: openBillItems.pesananStatus,
+          pesananStatusAt: openBillItems.pesananStatusAt,
+          pesananStatusOleh: openBillItems.pesananStatusOleh,
+        })
         .from(openBillItems)
         .where(eq(openBillItems.billId, id));
       const lamaById = new Map(lama.map((r) => [r.id, r]));
       const pasangan = new Map<number, string>(); // indeks item kiriman → id baris lama
       const terpakai = new Set<string>();
 
+      for (const [i, it] of body.items.entries()) {
+        if (it.id && it.pisah_dari) {
+          throw new HTTPException(400, {
+            message: "Baris tidak boleh sekaligus memperbarui baris lama dan pisah dari baris lain",
+          });
+        }
+        if (!it.pisah_dari) continue;
+        const asal = lamaById.get(it.pisah_dari);
+        if (!asal) throw new HTTPException(400, { message: "Baris asal pisah porsi tidak ditemukan" });
+        if (asal.menuId !== it.menu_id) {
+          throw new HTTPException(400, { message: "Baris asal pisah porsi beda menu" });
+        }
+        void i;
+      }
       for (const [i, it] of body.items.entries()) {
         if (!it.id) continue;
         const row = lamaById.get(it.id);
@@ -375,7 +418,10 @@ export const openBillRoutes = new Hono<AppEnv>()
         sisaPerMenu.set(r.menuId, antre);
       }
       for (const [i, it] of body.items.entries()) {
-        if (it.id) continue;
+        // Baris pisah porsi SELALU baris baru — kalau ia ikut pencocokan
+        // per-menu, ia akan merebut baris lama yang seharusnya jadi pasangan
+        // baris lain, dan hasilnya bill kehilangan satu baris tanpa sebab.
+        if (it.id || it.pisah_dari) continue;
         const cocok = sisaPerMenu.get(it.menu_id)?.shift();
         if (cocok) {
           terpakai.add(cocok);
@@ -402,7 +448,24 @@ export const openBillRoutes = new Hono<AppEnv>()
       }
       const baru = body.items.filter((_, i) => !pasangan.has(i));
       if (baru.length > 0) {
-        await tx.insert(openBillItems).values(baru.map((it) => barisBaru(id, it, katalog)));
+        await tx.insert(openBillItems).values(
+          baru.map((it) => {
+            const dasar = barisBaru(id, it, katalog);
+            const asal = it.pisah_dari ? lamaById.get(it.pisah_dari) : undefined;
+            if (!asal) return dasar;
+            // `sajianTakeaway` SENGAJA tidak diwarisi: memecah porsi justru
+            // dilakukan supaya penyajiannya BERBEDA. Penandanya lahir dari
+            // `dine_in_override` baris ini saat bill dibayar.
+            return {
+              ...dasar,
+              menuNama: asal.menuNama,
+              hargaSatuan: asal.hargaSatuan,
+              pesananStatus: asal.pesananStatus,
+              pesananStatusAt: asal.pesananStatusAt,
+              pesananStatusOleh: asal.pesananStatusOleh,
+            };
+          }),
+        );
       }
     });
     return c.json(await loadDetail(auth.company_id!, id));

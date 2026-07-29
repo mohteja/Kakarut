@@ -667,7 +667,41 @@ Aksesnya sengaja **asimetris**: membaca terbuka untuk seluruh peran cabang
 - `GET /api/open-bill` — query: `branch_id?` — res: `OpenBillRow[]`
 - `GET /api/open-bill/:id` — res: `OpenBillDetail` — error: **404**
 - `POST /api/open-bill` — req `BillBody`: `{ branch_id?: uuid, meja_id?: uuid|null, customer_nama?|null, customer_wa?|null, catatan?|null, items: [{id?:uuid, menu_id:uuid, qty:number(>0), dine_in_override?:bool|null, catatan?}] (min 1) }` — res: **201** `OpenBillDetail` — error: **400** menu invalid/tak tersedia, **403** kasir luar cabang, **404** meja tak ada, **409** `{ kode: "meja_sudah_ada_bill", bill_id }` meja dine-in itu masih punya bill belum dibayar
-- `PUT /api/open-bill/:id` — req: `BillBody` — res: `OpenBillDetail` — error: **400** (baris tak ditemukan / tak cocok menunya / dikirim dua kali), **404**, **409** `meja_sudah_ada_bill` bila `meja_id` dipindah ke meja yang sudah punya bill lain
+- `PUT /api/open-bill/:id` — req: `BillBody` — res: `OpenBillDetail` — error: **400** (baris tak ditemukan / tak cocok menunya / dikirim dua kali / `pisah_dari` tak valid), **404**, **409** `meja_sudah_ada_bill` bila `meja_id` dipindah ke meja yang sudah punya bill lain
+
+> ### ✂️ `pisah_dari` — memecah porsi SEBELUM bayar
+>
+> `items[].id` dan `items[].pisah_dari` punya arti berbeda dan tidak boleh
+> ditukar:
+>
+> | Field | Arti | Boleh berulang? |
+> | --- | --- | --- |
+> | `id` | **pasangan** — baris lama mana yang diperbarui baris ini | **tidak**, 1:1. Dikirim dua kali → **400** |
+> | `pisah_dari` | **warisan** — baris ini BARU, tapi mewarisi harga terkunci & status dapur dari baris itu | **ya**, many:1 |
+>
+> Kirim begini untuk memecah 3 porsi jadi 2 di piring + 1 dibungkus:
+>
+> ```jsonc
+> { "items": [
+>     { "id": "B1",          "menu_id": "M", "qty": 2 },
+>     { "pisah_dari": "B1",  "menu_id": "M", "qty": 1, "dine_in_override": false }
+> ]}
+> ```
+>
+> Baris pecahan mewarisi `harga_satuan`, `menu_nama`, dan trio status dapur
+> (`pesanan_status` + siapa + kapan). Yang **tidak** diwarisi adalah
+> `sajian_takeaway` — memecah porsi justru dilakukan supaya penyajiannya
+> BERBEDA, jadi penandanya lahir dari `dine_in_override` baris itu sendiri saat
+> bill dibayar.
+>
+> Ditolak **400**: `pisah_dari` bersamaan dengan `id` (dua maksud bertabrakan),
+> menunjuk baris bill lain / tak ada, beda `menu_id`, atau dipakai di
+> `POST /api/open-bill` (bill baru belum punya baris untuk diwarisi).
+>
+> **Tanpa jalur ini** porsi pecahan harus jadi baris baru berharga hari ini —
+> pembeli ditagih lebih mahal hanya karena kasir menekan "bungkus satu", dan
+> porsi yang sudah matang kembali ke antrean dapur. Sama seperti di pembayaran,
+> memecah porsi adalah keputusan **pengemasan**, bukan pesanan baru.
 
 > ### 🪑 SATU MEJA DINE-IN = SATU BILL BERJALAN
 >

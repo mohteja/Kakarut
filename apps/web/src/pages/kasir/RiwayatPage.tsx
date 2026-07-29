@@ -112,15 +112,31 @@ export function RiwayatPage() {
                   {/* Dapur mengubah cara penyajian lewat Papan Pesanan setelah
                       nota tercatat. Nota & perhitungan bahan TIDAK ikut berubah,
                       jadi selisihnya ditampilkan — bukan disembunyikan.
-                      Penandanya per baris, dan `sajian_takeaway` berarti SEMUA
-                      baris — jadi kebalikannya cuma boleh dibaca "ada yang". */}
-                  {r.sajian_takeaway === r.is_dine_in && (
-                    <span className="rounded-full bg-purple-100 px-2 py-0.5 text-[11px] font-semibold text-purple-700">
-                      {r.sajian_takeaway
-                        ? "disajikan 🥡 bawa pulang"
-                        : "ada yang 🍽 disajikan di tempat"}
-                    </span>
-                  )}
+
+                      Penandanya per baris, jadi badge yang mutlak menyesatkan:
+                      `sajian_takeaway` itu bool_and, ia false begitu SATU baris
+                      tetap di piring. Cacah barisnya yang bisa membedakan
+                      "semuanya" dari "sebagian" — pakai itu kalau memang
+                      sebagian, dan tulis apa adanya. */}
+                  {(() => {
+                    const campur = r.item_takeaway > 0 && r.item_dine_in > 0;
+                    if (campur) {
+                      return (
+                        <span className="rounded-full bg-purple-100 px-2 py-0.5 text-[11px] font-semibold text-purple-700">
+                          {r.item_takeaway} dari {r.jumlah_item} 🥡 dibungkus
+                        </span>
+                      );
+                    }
+                    // Seragam semuanya — hanya menarik bila BERBEDA dari nota.
+                    if (r.sajian_takeaway !== r.is_dine_in) return null;
+                    return (
+                      <span className="rounded-full bg-purple-100 px-2 py-0.5 text-[11px] font-semibold text-purple-700">
+                        {r.sajian_takeaway
+                          ? "disajikan 🥡 bawa pulang"
+                          : "disajikan 🍽 di tempat"}
+                      </span>
+                    );
+                  })()}
                 </div>
                 <div className="text-right">
                   <div className="font-bold text-stone-800">{formatRupiah(r.total)}</div>
