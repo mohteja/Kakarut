@@ -3355,13 +3355,30 @@ cek "guard: kasir laporan harga → 403" "V == 403" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/pembelian/laporan-harga/$FKL93_ID" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d "{\"items\":[{\"id\":\"$ROWL93\",\"total_harga\":1}]}")"
 cek "guard: laporan harga di jalur produksi → 400 (khusus beli)" "V == 400" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/produksi/laporan-harga/$FKL93_ID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"items\":[{\"id\":\"$ROWL93\",\"total_harga\":1}]}")"
-# lapor harga riil 42000 utk 6 pcs → harga/satuan 7000
-api "$OWNER" POST "/pembelian/laporan-harga/$FKL93_ID" "{\"items\":[{\"id\":\"$ROWL93\",\"total_harga\":42000}]}" > /dev/null
+# KARYAWAN CENTRAL KITCHEN BOLEH MELAPORKAN HARGA. Merekalah yang belanja dan
+# memegang notanya; menutup ini dari mereka membuat harga riil baru masuk kalau
+# manajemen sempat menyalinnya — dan selama belum, RAB belanja berikutnya
+# memakai harga yang sudah basi. Pengamannya bukan peran melainkan pratinjau
+# dampak + jejak updated_by/laporan_harga_at di tiap baris yang dilaporkan.
+cek "karyawan CK minta pratinjau dampak → 200" "V == 200" \
+  "$(status_code_body "$TCK58" POST "/pembelian/laporan-harga/$FKL93_ID/dampak" "{\"items\":[{\"id\":\"$ROWL93\",\"total_harga\":42000}]}")"
+cek "tim cabang STORE tetap ditolak (bukan Central Kitchen) → 403" "V == 403" \
+  "$(status_code_body "$T56" POST "/pembelian/laporan-harga/$FKL93_ID/dampak" "{\"items\":[{\"id\":\"$ROWL93\",\"total_harga\":42000}]}")"
+# lapor harga riil 42000 utk 6 pcs → harga/satuan 7000. DIKERJAKAN KARYAWAN CK:
+# seluruh pemeriksaan §93 di bawah ini sekaligus membuktikan hasil laporan
+# harga yang ditulis tim CK sama benarnya dengan yang ditulis manajemen.
+cek "karyawan CK menyimpan laporan harga → 200" "V == 200" \
+  "$(status_code_body "$TCK58" POST "/pembelian/laporan-harga/$FKL93_ID" "{\"items\":[{\"id\":\"$ROWL93\",\"total_harga\":42000}]}")"
 cek "laporan harga: total baris jadi 42000" "V == 1" \
   "$(api "$OWNER" GET "/pembelian?per_page=500" | jq --arg r "$ROWL93" '([.rows[]|select(.id==$r)][0].total_harga==42000)|if . then 1 else 0 end')"
 # setelah laporan harga: baris berharga final (laporan_harga_at terisi) → faktur "Selesai"
 cek "setelah laporan: laporan_harga_at baris terisi (faktur Selesai)" "V == 1" \
   "$(api "$OWNER" GET "/pembelian?per_page=500" | jq --arg r "$ROWL93" '([.rows[]|select(.id==$r)][0].laporan_harga_at!=null)|if . then 1 else 0 end')"
+# JEJAK PELAKU — ini pengganti gerbang peran yang dicabut: siapa pun yang melapor,
+# namanya menempel di baris. Kalau kolom ini berhenti terisi, membuka akses ke
+# karyawan CK berubah dari "tercatat" jadi "anonim".
+cek "laporan harga oleh karyawan CK tercatat di baris (diubah_oleh)" "V == 1" \
+  "$(api "$OWNER" GET "/pembelian?per_page=500" | jq --arg r "$ROWL93" '([.rows[]|select(.id==$r)][0].diubah_oleh=="Karyawan CK 58")|if . then 1 else 0 end')"
 # acuan = MEDIAN riwayat: lot 3000 + lot 7000 (42000/6) → median 5000 (× isi 1)
 cek "laporan harga: harga_beli bahan = median riwayat (5000)" "V == 1" \
   "$(api "$OWNER" GET /bahan | jq --arg id "$BH93_ID" '([.[]|select(.id==$id)][0].harga_beli|round)==5000|if . then 1 else 0 end')"

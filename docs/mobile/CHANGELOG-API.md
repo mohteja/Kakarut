@@ -25,6 +25,44 @@ tanpa akses repo server.
 
 ---
 
+## Rilis: Laporan Harga dibuka untuk karyawan Central Kitchen
+
+> **BELUM di-merge ke production** — masih di PR. Jangan rilis klien yang
+> bergantung padanya sebelum baris ini berubah jadi "Sudah di-merge".
+>
+> Tidak ada migrasi DB. Tidak ada perubahan bentuk request/response.
+
+### 🟡 PERLU DICEK — dua endpoint laporan harga tak lagi khusus owner/admin
+
+| Endpoint | Sebelum | Sesudah |
+| --- | --- | --- |
+| `POST /api/pembelian/laporan-harga/:fakturId/dampak` | owner/admin | gerbang grup `/pembelian/*` |
+| `POST /api/pembelian/laporan-harga/:fakturId` | owner/admin | gerbang grup `/pembelian/*` |
+
+Gerbang grup itu = **owner/admin, ATAU `tim` yang cabangnya Central Kitchen** —
+sama persis dengan seluruh `/api/pembelian/*` lainnya. Kedua rute ini dulu satu-
+satunya yang menyempitkan diri lagi di dalam grup; penyempitan itu dihapus.
+
+Yang **tetap 403**: `cashier`, `kitchen`, `bar`, dan `tim` di cabang **store** —
+mereka ditolak gerbang grup, jadi tak ada pelonggaran ke luar Central Kitchen.
+
+**Yang perlu dicek di klien:** kalau layar mobile menyembunyikan tombol "Laporan
+Harga" berdasarkan peran, longgarkan syaratnya agar akun CK ikut melihatnya.
+Web justru tak pernah menyaring per peran — tombolnya sudah muncul untuk tim CK
+dan server-lah yang menolak, sehingga gejalanya adalah "peran tidak diizinkan"
+saat tombol ditekan. Bila klien mobile menyalin logika yang sama, tak ada yang
+perlu diubah.
+
+**Kenapa dibuka:** yang belanja dan memegang notanya adalah tim CK. Selama hanya
+manajemen yang boleh menyimpan, harga riil baru masuk kalau manajemen sempat
+menyalinnya — dan selama belum, RAB belanja berikutnya memakai harga basi.
+Pengamannya bukan peran, melainkan pratinjau `/dampak` (menghitung pergeseran
+food cost tiap menu **sebelum** apa pun ditulis) plus `updated_by` +
+`laporan_harga_at` yang tersimpan di tiap baris yang dilaporkan — pelakunya
+tampil sebagai `diubah_oleh` pada baris `GET /api/pembelian`.
+
+---
+
 ## Rilis: Status meja isi/kosong (`/api/meja/status`) + gerbang tulis `/api/meja`
 
 > **BELUM di-merge ke production** — masih di PR. Jangan rilis klien yang
