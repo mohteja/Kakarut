@@ -25,6 +25,76 @@ tanpa akses repo server.
 
 ---
 
+## Rilis: Papan Pesanan Masuk (`/api/pesanan`) + open bill ditutup server
+
+> **BELUM di-merge ke production** — masih di PR. Jangan rilis klien yang
+> bergantung padanya sebelum baris ini berubah jadi "Sudah di-merge".
+>
+> Ada migrasi DB (`0089`): enum `pesanan_status`, kolom baru di `sales` &
+> `open_bills`, tabel `pesanan_logs`.
+
+Sebelum ini sistem **tak punya konsep status pesanan sama sekali**. Baris
+`sales` lahir sudah-dibayar dan tak pernah berubah lagi; satu-satunya artefak
+"belum selesai" adalah open bill, yang **hanya bisa dibaca kasir**. Dapur tak
+punya layar kerja apa pun untuk pesanan pelanggan — jadi pesanan "tertinggal"
+tanpa ada tempat mengeceknya.
+
+### 🟢 BARU — `GET /api/pesanan` dan kawan-kawannya
+
+Papan menggabungkan **open bill yang belum dibayar** + **penjualan hari ini**
+jadi satu daftar kartu, dan bisa dibaca peran `kitchen`/`bar`/`tim` — bukan
+hanya kasir. Detail lengkap: blok `/api/pesanan` di `docs/API-CONTRACT.md`.
+
+| Endpoint | Guna |
+| --- | --- |
+| `GET /api/pesanan` | daftar kartu (`PesananRow[]`), item disertakan inline |
+| `POST /api/pesanan/:jenis/:id/status` | `dikerjakan` / `selesai` / `batal` |
+| `POST /api/pesanan/:jenis/:id/sajian` | penanda bawa pulang |
+| `GET /api/pesanan/:jenis/:id/log` | "siapa menandai apa, kapan" |
+
+`:jenis` = `open_bill` atau `penjualan`. Status **ikut terbawa** saat bill
+dibayar, jadi satu pesanan tetap satu kartu — bukan dua.
+
+### 🔴 WAJIB — jangan lagi kirim `DELETE /api/open-bill/:id` setelah membayar
+
+`POST /api/penjualan` dengan `open_bill_id` sekarang **menutup bill-nya sendiri
+di dalam transaksi yang sama**. Dua akibat langsung untuk klien:
+
+- **Hapus panggilan `DELETE` sesudah bayar.** Sudah mubazir. Web dulu
+  mengirimnya *fire-and-forget* (gagal diam-diam saat jaringan putus) dan jalur
+  `POST /api/sync` **tak pernah** mengirimnya sama sekali — jadi bill hantu
+  memang sudah menumpuk, cuma belum terlihat karena daftarnya hanya dibuka
+  kasir. Begitu papan menayangkannya, hantu itu jadi kartu ganda.
+- **Membayar bill yang sudah ditutup → `409`.** Tombol bayar tertekan dua kali
+  atau antrean offline yang mengirim ulang tak lagi menghasilkan dua transaksi.
+  Perlakukan `409` sebagai "sudah berhasil sebelumnya", bukan kegagalan.
+
+`DELETE /api/open-bill/:id` sendiri **tidak dihapus** — sekarang ia
+*membatalkan* (status `batal` + baris riwayat). Bill tetap hilang dari
+`GET /api/open-bill` dan `GET /api/open-bill/:id` → `404` seperti dulu, jadi
+alur "batalkan bill" di klien tak perlu diubah.
+
+### 🟡 PERLU DICEK — `RiwayatTransaksiRow.sajian_takeaway`
+
+Field baru pada daftar `GET /api/penjualan`. **Bukan pengganti `is_dine_in`.**
+
+- `is_dine_in` = fakta pembukuan; nota, laporan, dan perhitungan bahan tetap
+  memakainya. Tombol bawa-pulang di papan **tidak** menyentuhnya.
+- `sajian_takeaway` = instruksi penyajian, boleh diubah dapur setelah transaksi.
+
+Penandanya **lahir sesuai pembukuannya** (`sajian_takeaway = !is_dine_in`),
+sehingga `sajian_takeaway == is_dine_in` berarti memang ada yang mengubahnya —
+itu sinyal untuk badge "diubah setelah transaksi". Transaksi lama diselaraskan
+otomatis saat server boot, jadi tak ada baris warisan yang salah tanda.
+
+> **Risiko yang disadari:** `sales.pesanan_status` lahir NOT NULL DEFAULT
+> `dikerjakan`, sehingga SELURUH penjualan lama bernilai `dikerjakan`. Papan
+> menyaring per tanggal jadi baris lama tak pernah tampil, tapi laporan apa pun
+> yang kelak menghitung "pesanan belum selesai" lintas tanggal akan salah bila
+> tidak membatasi tanggalnya.
+
+---
+
 ## Rilis: Detail produksi — BERAPA BATCH, bukan cuma gramnya (`batch_teks`)
 
 > **Sudah di-merge ke production** (PR #128).

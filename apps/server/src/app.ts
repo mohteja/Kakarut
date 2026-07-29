@@ -34,6 +34,7 @@ import { mejaRoutes } from "./modules/meja/routes";
 import { menuRoutes } from "./modules/menu/routes";
 import { onboardingRoutes } from "./modules/onboarding/routes";
 import { openBillRoutes } from "./modules/open-bill/routes";
+import { pesananRoutes } from "./modules/pesanan/routes";
 import { penjualanRoutes } from "./modules/penjualan/routes";
 import { setSyncApp, syncRoutes } from "./modules/sync/routes";
 import { penyimpananRoutes } from "./modules/penyimpanan/routes";
@@ -118,6 +119,13 @@ export function createApp() {
   // Transaksi POS (jual, open bill) HANYA peran kasir.
   // Owner/admin memantau lewat Riwayat/Laporan, tak meng-input transaksi.
   tenant.use("/open-bill/*", requireRole("cashier"));
+  // Papan pesanan masuk: seluruh peran cabang boleh melihat & menandai —
+  // dapur (kitchen/bar) justru pengguna utamanya, dan sampai sekarang mereka
+  // tak punya cara apa pun untuk tahu ada pesanan masuk.
+  tenant.use(
+    "/pesanan/*",
+    requireRole("owner", "admin", "cashier", "tim", "kitchen", "bar"),
+  );
   // Shift kasir: BUKA/TUTUP hanya kasir (digerbang per-rute di modulnya), tetapi
   // owner/admin boleh MEMANTAU (aktif, riwayat, detail, /pantau semua cabang).
   tenant.use("/shift/*", requireRole("owner", "admin", "cashier"));
@@ -164,6 +172,7 @@ export function createApp() {
     .route("/penyimpanan", penyimpananRoutes)
     .route("/meja", mejaRoutes)
     .route("/open-bill", openBillRoutes)
+    .route("/pesanan", pesananRoutes)
     .route("/shift", shiftRoutes)
     // Sinkron antrean offline mobile (per-perintah divalidasi seperti endpoint aslinya)
     .route("/sync", syncRoutes)

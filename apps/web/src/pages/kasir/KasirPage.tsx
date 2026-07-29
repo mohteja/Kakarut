@@ -357,8 +357,10 @@ export function KasirPage() {
     onSuccess: (data) => {
       setStruk(data);
       setResumeOpen(false);
-      // bila membayar open bill → hapus bill (sudah menjadi transaksi)
-      if (editingBillId) api(`/open-bill/${editingBillId}`, { method: "DELETE" }).catch(() => {});
+      // bill ditutup SERVER di dalam transaksi createSale (open_bills.closed_at
+      // + sale_id). Dulu dikirim dari sini sebagai DELETE fire-and-forget —
+      // gagal diam-diam bila jaringan putus, dan jalur sinkron offline tak
+      // pernah mengirimnya sama sekali, jadi bill hantu menumpuk.
       resetTransaksi();
       // modal pilih meja dibuka lagi saat struk ditutup (transaksi berikutnya)
       queryClient.invalidateQueries({ queryKey: ["stok"] });
@@ -366,6 +368,9 @@ export function KasirPage() {
       queryClient.invalidateQueries({ queryKey: ["penjualan"] });
       queryClient.invalidateQueries({ queryKey: ["open-bill"] });
       queryClient.invalidateQueries({ queryKey: ["menu-ketersediaan"] });
+      // papan pesanan dapur/bar: kartu berpindah dari "belum dibayar" ke
+      // penjualan pada detik ini juga, jangan tunggu polling 15 dtk berikutnya
+      queryClient.invalidateQueries({ queryKey: ["pesanan"] });
     },
   });
 
@@ -408,6 +413,8 @@ export function KasirPage() {
     onSuccess: () => {
       resetTransaksi();
       queryClient.invalidateQueries({ queryKey: ["open-bill"] });
+      // open bill = pesanan yang belum dibayar → langsung tampil di papan dapur
+      queryClient.invalidateQueries({ queryKey: ["pesanan"] });
     },
   });
 

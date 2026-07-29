@@ -33,6 +33,7 @@ const TambahBahanBakuPage = lazy(() => import("./pages/bahan/TambahBahanBakuPage
 const UbahBahanBakuPage = lazy(() => import("./pages/bahan/UbahBahanBakuPage").then((m) => ({ default: m.UbahBahanBakuPage })));
 const KasirPage = lazy(() => import("./pages/kasir/KasirPage").then((m) => ({ default: m.KasirPage })));
 const RiwayatPage = lazy(() => import("./pages/kasir/RiwayatPage").then((m) => ({ default: m.RiwayatPage })));
+const PesananPage = lazy(() => import("./pages/pesanan/PesananPage").then((m) => ({ default: m.PesananPage })));
 const ShiftPage = lazy(() => import("./pages/kasir/ShiftPage").then((m) => ({ default: m.ShiftPage })));
 const LaporanPage = lazy(() => import("./pages/laporan/LaporanPage").then((m) => ({ default: m.LaporanPage })));
 const LaporanMenuLarisPage = lazy(() => import("./pages/laporan/LaporanMenuLarisPage").then((m) => ({ default: m.LaporanMenuLarisPage })));
@@ -173,6 +174,10 @@ export default function App() {
             <>
               <Route path="/profil" element={<ProfilPage />} />
               <Route path="/kasir/riwayat" element={<RiwayatPage />} />
+              {/* Papan pesanan masuk — semua peran cabang + manajemen, sama
+                  persis dengan gerbang /pesanan/* di server. Dapur & bar butuh
+                  ini justru karena mereka tak boleh membuka /open-bill. */}
+              <Route path="/pesanan" element={<PesananPage />} />
               <Route path="/menu/lihat" element={<LihatMenuPage />} />
               <Route path="/stok" element={<StokPage />} />
               <Route path="/penerimaan" element={<PenerimaanPage />} />

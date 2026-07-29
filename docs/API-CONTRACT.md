@@ -549,6 +549,20 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 - `PUT /api/open-bill/:id` — req: `BillBody` — res: `OpenBillDetail` — error: **400** (baris tak ditemukan / tak cocok menunya / dikirim dua kali), **404**
 - `DELETE /api/open-bill/:id` — res: `{ ok: true }` — error: **404**
 
+**`DELETE` = MEMBATALKAN, BUKAN MENGHAPUS.** Barisnya tetap ada dengan
+`pesanan_status = "batal"` + `closed_at` terisi, dan satu baris riwayat dicatat
+atas nama pemanggilnya. Yang terlihat kasir sama seperti dulu (bill hilang dari
+`GET /api/open-bill` dan `GET /api/open-bill/:id` → **404**), tapi Papan Pesanan
+masih menampilkannya di kolom **Batal** hari itu — pembatalan tanpa jejak persis
+kebalikan dari "riwayat perubahan status oleh siapa".
+
+**BILL DITUTUP SERVER SAAT DIBAYAR.** `POST /api/penjualan` dengan
+`open_bill_id` mengisi `closed_at` + `sale_id` **di dalam transaksi yang sama**.
+Klien **tidak perlu** (dan tidak boleh) mengirim `DELETE` sesudah membayar.
+Membayar bill yang sudah ditutup → **409**, jadi tombol bayar yang tertekan dua
+kali atau antrean offline yang mengirim ulang tak lagi menghasilkan dua
+transaksi.
+
 **HARGA BILL DIKUNCI SAAT ITEM DIMASUKKAN.** Tiap baris membawa `harga_satuan`
 dan `menu_nama` yang di-snapshot **server** dari katalog saat baris itu dibuat
 (nilai kiriman klien untuk harga tidak dipercaya). Inilah yang ditagih saat
@@ -577,6 +591,46 @@ berubah bebas tanpa melepas kunci harga.
 > menjawab pertanyaan berbeda. `null` → jangan tampilkan baris apa pun.
 > Teksnya ditulis server (`batchTeks()` di `packages/shared/src/satuan.ts`)
 > supaya web & mobile mustahil berbeda, sama seperti `qty_teks`.
+
+## `/api/pesanan` — Papan Pesanan Masuk (`modules/pesanan/routes.ts`) — group guard **[owner/admin/cashier/tim/kitchen/bar]**
+
+Layar kerja dapur/bar/kasir di lantai toko. **Ini satu-satunya cara dapur bisa
+melihat pesanan yang belum dibayar** — `/api/open-bill` tetap `cashier only` dan
+tidak dilonggarkan.
+
+- `GET /api/pesanan` — query: `branch_id?`, `tanggal?` (YYYY-MM-DD, default hari ini TZ perusahaan), `status?` (`dikerjakan|selesai|batal`) — res: `PesananRow[]`
+- `POST /api/pesanan/:jenis/:id/status` — `:jenis` = `open_bill|penjualan` — req: `{ status: "dikerjakan"|"selesai"|"batal" }` — res: `{ ok: true, status }` — error: **404** bukan cabangnya / tak ada, **409** status baru saja diubah orang lain, **409** bill sudah dibayar (ubah lewat kartu penjualannya)
+- `POST /api/pesanan/:jenis/:id/sajian` — req: `{ takeaway: boolean }` — res: `{ ok: true, sajian_takeaway }` — error: **404**
+- `GET /api/pesanan/:jenis/:id/log` — res: `PesananLogRow[]` (maks 100, terbaru dulu)
+
+**Isi papan** — tiga aturan yang sengaja tidak seragam:
+
+1. **Open bill yang masih berjalan — apa pun tanggalnya.** Pekerjaan yang belum
+   selesai tak boleh lenyap dari layar dapur hanya karena hari berganti.
+2. **Open bill yang dibatalkan pada `tanggal`** (kolom Batal).
+3. **Penjualan pada `tanggal`** yang belum dihapus.
+
+Bill yang sudah menjadi penjualan tak pernah ikut — kartu penjualannya yang
+mewakili, kalau tidak satu pesanan tampil dua kali sepanjang hari.
+
+**Status ikut terbawa saat bill dibayar.** `POST /api/penjualan` dengan
+`open_bill_id` mewarisi `pesanan_status` + penanda penyajian bill dan mengisi
+`sales.asal_open_bill_id`. `GET .../penjualan/:id/log` menggabungkan riwayat
+sebelum & sesudah pembayaran, jadi jejaknya tak terputus.
+
+> ### 🥡 `sajian_takeaway` — PENANDA PENYAJIAN, bukan angka pembukuan
+>
+> Tombol "jadikan bawa pulang" **tidak** menyentuh `is_dine_in`,
+> `sale_consumptions`, maupun `hpp_satuan`. Angka-angka itu sudah dibukukan saat
+> transaksi dibuat (`qtyEfektif()`: dine-in melewati kemasan & menghitung
+> pelengkap 50%), dan mengubahnya belakangan membuat baris penjualan berbohong
+> tentang pemakaian bahannya sendiri. Nota & laporan **tetap** membaca
+> `is_dine_in`.
+>
+> Penandanya **lahir sesuai pembukuannya** (`sajian_takeaway = !is_dine_in`),
+> jadi `sajian_takeaway == is_dine_in` berarti **ada yang benar-benar
+> mengubahnya** setelah transaksi tercatat — pakai itu untuk badge "diubah".
+> `RiwayatTransaksiRow` juga membawa `sajian_takeaway` untuk keperluan ini.
 
 ## `/api/shift` — Shift kasir (`modules/shift/routes.ts`) — group guard **[owner/admin/cashier]** (buka/tutup **cashier only**)
 
@@ -1711,8 +1765,10 @@ export interface TransferStokItemRow {
   id: string;
   ingredient_id: string;
   nama: string;
+  /** satuan kerja — SATU-SATUNYA label yang sah untuk `qty` */
   satuan: string;
   pengadaan: JenisPengadaan;
+  /** jumlah dalam `satuan` (satuan kerja), tak pernah dalam satuan kemasan */
   qty: number;
   /**
    * `qty` + `satuan` yang SUDAH ditulis server, mis. "900 gr" — tampilkan apa
@@ -1754,6 +1810,7 @@ export interface TransferStokFaktur {
 export interface TransferStokSaldoRow {
   ingredient_id: string;
   nama: string;
+  /** satuan kerja — SATU-SATUNYA label yang sah untuk `saldo`/`dalam_jalan`/qty kirim */
   satuan: string;
   pengadaan: JenisPengadaan;
   /** saldo FISIK di lokasi asal (barang yang masih dalam perjalanan ikut terhitung) */
@@ -2249,6 +2306,12 @@ export interface RiwayatTransaksiRow {
   waktu: string;
   total: number;
   is_dine_in: boolean;
+  /**
+   * Penanda PENYAJIAN dari Papan Pesanan Masuk — dapur bisa mengubahnya jadi
+   * bawa pulang setelah transaksi tercatat. Sengaja TERPISAH dari `is_dine_in`
+   * (fakta pembukuan yang sudah dipakai menghitung konsumsi bahan & HPP).
+   */
+  sajian_takeaway: boolean;
   /** label meja terpilih (null bila transaksi lama tanpa meja) */
   meja: string | null;
   /** jumlah baris menu pada transaksi */
@@ -2379,6 +2442,62 @@ export interface OpenBillDetail {
   customer_wa: string | null;
   catatan: string | null;
   items: OpenBillItemDto[];
+}
+
+/**
+ * PAPAN PESANAN MASUK — pengerjaan dapur, bukan persetujuan. Pesanan lahir
+ * `dikerjakan` (masuk antrean) lalu ditandai `selesai` atau `batal`.
+ */
+export type PesananStatus = "dikerjakan" | "selesai" | "batal";
+
+/**
+ * Asal pesanan. `open_bill` = belum dibayar (masih bisa diubah kasir);
+ * `penjualan` = sudah dibayar dan dibukukan. Satu pesanan bisa berpindah dari
+ * `open_bill` ke `penjualan` saat dilunasi — statusnya ikut terbawa.
+ */
+export type PesananJenis = "open_bill" | "penjualan";
+
+/** Satu baris menu dalam pesanan, apa adanya untuk dibaca dapur. */
+export interface PesananItemRow {
+  nama: string;
+  qty: number;
+  /** personalisasi pelanggan, mis. "tanpa sambal" */
+  catatan: string | null;
+  is_dine_in: boolean;
+}
+
+/** Satu kartu di papan pesanan. */
+export interface PesananRow {
+  id: string;
+  jenis: PesananJenis;
+  /** nomor struk; null selama masih open bill (belum ada transaksi) */
+  nomor: string | null;
+  meja: string | null;
+  customer: string | null;
+  /** waktu pesanan masuk (ISO) */
+  waktu: string;
+  total: number;
+  dibayar: boolean;
+  status: PesananStatus;
+  /**
+   * Penanda penyajian "bawa pulang" dari papan. SENGAJA terpisah dari
+   * `is_dine_in`: yang terakhir itu fakta pembukuan yang sudah dipakai
+   * menghitung pemakaian bahan & HPP, dan tidak diubah oleh papan.
+   */
+  sajian_takeaway: boolean;
+  is_dine_in: boolean;
+  catatan: string | null;
+  items: PesananItemRow[];
+  /** siapa & kapan status terakhir diubah; null = belum pernah disentuh */
+  status_oleh: string | null;
+  status_pada: string | null;
+}
+
+/** Satu baris riwayat perubahan status sebuah pesanan. */
+export interface PesananLogRow {
+  waktu: string;
+  aksi: string;
+  oleh: string | null;
 }
 
 /** Sesi kas (shift) per cabang. ditutup_* null → shift masih terbuka. */

@@ -5906,7 +5906,12 @@ OB147B=$(api "$REISS105" POST /open-bill "{\"meja_id\":\"$MEJA147\",\"items\":[{
 OBID147B=$(echo "$OB147B" | jq -r .id)
 ITEM147C=$(echo "$OB147B" | jq -r '.items[0].id')
 cek "open_bill_item_id milik bill LAIN → 400" "V == 400" \
-  "$(status_code_body "$REISS105" POST /penjualan "{\"meja_id\":\"$MEJA147\",\"metode_bayar\":\"tunai\",\"open_bill_id\":\"$OBID147\",\"items\":[{\"menu_id\":\"$M147\",\"qty\":1,\"open_bill_item_id\":\"$ITEM147C\"}]}")"
+  "$(status_code_body "$REISS105" POST /penjualan "{\"meja_id\":\"$MEJA147\",\"metode_bayar\":\"tunai\",\"open_bill_id\":\"$OBID147B\",\"items\":[{\"menu_id\":\"$M147\",\"qty\":1,\"open_bill_item_id\":\"$ITEM147B\"}]}")"
+# Bill DITUTUP server saat dibayar (open_bills.closed_at + sale_id), jadi
+# membayarnya dua kali ditolak di sini — bukan lagi menghasilkan transaksi
+# kembar diam-diam karena klien gagal mengirim DELETE-nya.
+cek "membayar bill yang SUDAH dibayar → 409 (tak ada transaksi kembar)" "V == 409" \
+  "$(status_code_body "$REISS105" POST /penjualan "{\"meja_id\":\"$MEJA147\",\"metode_bayar\":\"tunai\",\"open_bill_id\":\"$OBID147\",\"items\":[{\"menu_id\":\"$M147\",\"qty\":1}]}")"
 cek "open_bill_item_id tanpa open_bill_id → 400" "V == 400" \
   "$(status_code_body "$REISS105" POST /penjualan "{\"meja_id\":\"$MEJA147\",\"metode_bayar\":\"tunai\",\"items\":[{\"menu_id\":\"$M147\",\"qty\":1,\"open_bill_item_id\":\"$ITEM147C\"}]}")"
 cek "open_bill_id ngawur → 404" "V == 404" \
@@ -6239,6 +6244,136 @@ cek "qty_teks TETAP satuan kerja — batch tak menggantikannya" "V == 1" \
 FB153=$(api "$OWNER" POST /pembelian/faktur "{\"branch_id\":\"$CK153\",\"items\":[{\"ingredient_id\":\"$MENTAH153\",\"mode\":\"pcs\",\"jumlah\":2000,\"total_harga\":80000}]}" | jq -r .faktur_id)
 cek "bahan BELI: batch & batch_teks null (bukan angka karangan)" "V == 1" \
   "$(api "$OWNER" GET "/pembelian?branch_id=$CK153&per_page=200" | jq -r --arg f "$FB153" '[.rows[]|select(.faktur_id==$f)][0] | ((.batch == null) and (.batch_teks == null))|if . then 1 else 0 end')"
+
+
+echo
+echo "── §154 Papan Pesanan Masuk: satu kartu dari dipesan sampai dibayar ──"
+# Sebelum ini dapur tak punya layar kerja apa pun: pesanan yang masih open bill
+# HANYA terlihat kasir (/open-bill dijaga requireRole("cashier")), jadi pesanan
+# "tertinggal" tanpa ada tempat untuk mengeceknya. Papan menggabungkan bill
+# belum-dibayar + penjualan hari ini, dan status pesanan IKUT saat bill dilunasi
+# supaya satu pesanan tetap satu kartu.
+CB154=$(api "$REISS105" GET /auth/me | jq -r '.user.branch_id')
+# menu BERBAHAN — supaya uji "penanda tak menggeser stok" punya angka nyata
+M154=$(api "$OWNER" POST /menu "{\"nama\":\"Menu Uji154\",\"category_id\":\"$CAT145\",\"tipe\":\"regular\",\"mult\":2,\"harga_jual\":12000,\"komponen\":[{\"ingredient_id\":\"$MENTAH153\",\"qty\":10}]}" | jq -r .id)
+saldo154() { api "$OWNER" GET "/stok?branch_id=$CB154" | jq -r --arg i "$MENTAH153" '[.[]|select(.ingredient_id==$i)][0].saldo // 0'; }
+# meja DINE-IN eksplisit: uji (f) membuktikan penanda bawa-pulang TIDAK membalik
+# is_dine_in, jadi transaksinya harus benar-benar lahir sebagai dine-in
+MEJA154=$(api "$REISS105" GET /meja | jq -r '[.[]|select(.is_active and .tipe=="dine_in")][0].id')
+if [ -z "$(api "$REISS105" GET /shift/aktif | jq -r '.id // empty')" ]; then
+  api "$OWNER" POST "/absensi/masuk" "{\"branch_id\":\"$CB154\"}" > /dev/null 2>&1 || true
+  api "$REISS105" POST /shift/buka '{"modal_awal":0}' > /dev/null 2>&1 || true
+fi
+
+# (a) Bill yang baru dibuat kasir MUNCUL di papan, lengkap dengan isinya.
+OB154=$(api "$REISS105" POST /open-bill "{\"meja_id\":\"$MEJA154\",\"items\":[{\"menu_id\":\"$M154\",\"qty\":2,\"catatan\":\"pedas\"}]}")
+OBID154=$(echo "$OB154" | jq -r .id)
+P154=$(api "$OWNER" GET "/pesanan?branch_id=$CB154" | jq --arg id "$OBID154" '[.[]|select(.id==$id)][0]')
+cek "bill belum dibayar tampil di papan: jenis open_bill, dibayar=false" "V == 1" \
+  "$(echo "$P154" | jq -r '((.jenis=="open_bill") and (.dibayar==false) and (.status=="dikerjakan") and (.nomor==null))|if . then 1 else 0 end')"
+cek "kartu membawa ITEM + catatan per baris (papan tak perlu N+1)" "V == 1" \
+  "$(echo "$P154" | jq -r '((.items|length)==1) and (.items[0].qty==2) and (.items[0].catatan=="pedas") and (.total==24000)|if . then 1 else 0 end')"
+
+# (b) Dapur boleh membaca papan; pintu /open-bill yang lama TETAP tertutup.
+api "$OWNER" POST /karyawan "{\"nama\":\"Dapur 154\",\"email\":\"kitchen154@basooopa.id\",\"password\":\"Dapur154!\",\"role\":\"kitchen\",\"branch_id\":\"$CB154\"}" > /dev/null
+TKIT154=$(login kitchen154@basooopa.id 'Dapur154!')
+cek "kitchen GET /pesanan → 200 (layar kerja dapur terbuka)" "V == 200" \
+  "$(status_code "$TKIT154" GET /pesanan)"
+cek "kitchen GET /open-bill → 403 (gerbang kasir-saja tak dilonggarkan)" "V == 403" \
+  "$(status_code "$TKIT154" GET /open-bill)"
+cek "kitchen melihat bill cabangnya sendiri di papan" "V == 1" \
+  "$(api "$TKIT154" GET /pesanan | jq --arg id "$OBID154" '[.[]|select(.id==$id)]|length')"
+
+# (c) Tandai selesai → status + siapa yang menandai + satu baris riwayat.
+api "$TKIT154" POST "/pesanan/open_bill/$OBID154/status" '{"status":"selesai"}' > /dev/null
+PS154=$(api "$TKIT154" GET /pesanan | jq --arg id "$OBID154" '[.[]|select(.id==$id)][0]')
+cek "ditandai selesai: status berubah + status_oleh & status_pada terisi" "V == 1" \
+  "$(echo "$PS154" | jq -r '((.status=="selesai") and (.status_oleh=="Dapur 154") and (.status_pada!=null))|if . then 1 else 0 end')"
+cek "riwayat bertambah satu baris bernama pelakunya" "V == 1" \
+  "$(api "$TKIT154" GET "/pesanan/open_bill/$OBID154/log" | jq '[.[]|select(.oleh=="Dapur 154" and .aksi=="Ditandai selesai")]|length')"
+# status yang SAMA dikirim ulang (tombol dobel-klik) → idempoten, riwayat tak menggelembung
+api "$TKIT154" POST "/pesanan/open_bill/$OBID154/status" '{"status":"selesai"}' > /dev/null
+cek "status sama dikirim ulang: riwayat TETAP satu baris (bukan dua)" "V == 1" \
+  "$(api "$TKIT154" GET "/pesanan/open_bill/$OBID154/log" | jq '[.[]|select(.aksi=="Ditandai selesai")]|length')"
+
+# (d) Penanda BAWA PULANG hanya mengubah cara menyajikan.
+api "$TKIT154" POST "/pesanan/open_bill/$OBID154/sajian" '{"takeaway":true}' > /dev/null
+cek "sajian takeaway=true tercatat di kartu" "V == 1" \
+  "$(api "$TKIT154" GET /pesanan | jq -r --arg id "$OBID154" '[.[]|select(.id==$id)][0].sajian_takeaway|if . then 1 else 0 end')"
+
+# (e) DIBAYAR: status & penanda IKUT ke penjualan; bill lenyap, tak ada kartu ganda.
+S154=$(api "$REISS105" POST /penjualan "{\"meja_id\":\"$MEJA154\",\"metode_bayar\":\"tunai\",\"open_bill_id\":\"$OBID154\",\"items\":[{\"menu_id\":\"$M154\",\"qty\":2}]}")
+SID154=$(echo "$S154" | jq -r '.sale.id')
+PAPAN154=$(api "$OWNER" GET "/pesanan?branch_id=$CB154")
+cek "bill hilang dari papan setelah dibayar (bukan kartu ganda)" "V == 0" \
+  "$(echo "$PAPAN154" | jq --arg id "$OBID154" '[.[]|select(.id==$id)]|length')"
+PJ154=$(echo "$PAPAN154" | jq --arg id "$SID154" '[.[]|select(.id==$id)][0]')
+cek "penjualan MEWARISI status selesai + penanda bawa pulang dari bill-nya" "V == 1" \
+  "$(echo "$PJ154" | jq -r '((.jenis=="penjualan") and (.dibayar==true) and (.status=="selesai") and (.sajian_takeaway==true) and (.nomor!=null))|if . then 1 else 0 end')"
+cek "is_dine_in TIDAK ikut dibalik — pembukuan tetap dine-in" "V == 1" \
+  "$(echo "$PJ154" | jq -r '.is_dine_in|if . then 1 else 0 end')"
+cek "riwayat penjualan menyertakan jejak SEBELUM dibayar (lewat asal bill)" "V == 1" \
+  "$(api "$OWNER" GET "/pesanan/penjualan/$SID154/log" | jq '[.[]|select(.aksi=="Ditandai selesai")]|length>=1|if . then 1 else 0 end')"
+cek "bill yang sudah dibayar hilang juga dari pemilih kasir (bukan bill hantu)" "V == 0" \
+  "$(api "$REISS105" GET /open-bill | jq --arg id "$OBID154" '[.[]|select(.id==$id)]|length')"
+cek "menandai bill yang SUDAH dibayar → 409 (kartunya ada di penjualan)" "V == 409" \
+  "$(status_code_body "$TKIT154" POST "/pesanan/open_bill/$OBID154/status" '{"status":"dikerjakan"}')"
+
+# (f) Penanda penyajian pada PENJUALAN tak boleh menggeser konsumsi bahan
+#     sebutir pun — angka itu sudah dibukukan saat transaksi dibuat.
+HPP154A=$(api "$OWNER" GET "/penjualan/$SID154" | jq -r '[.items[].hppSatuan]|add')
+SALDO154A=$(saldo154)
+api "$OWNER" POST "/pesanan/penjualan/$SID154/sajian" '{"takeaway":false}' > /dev/null
+cek "ubah penyajian: saldo bahan cabang sama persis sebelum & sesudah" "abs(V) < 0.001" \
+  "$(python3 -c "print($(saldo154) - $SALDO154A)")"
+cek "ubah penyajian: hpp_satuan penjualan tak bergeser sepeser pun" "abs(V) < 0.001" \
+  "$(python3 -c "print($(api "$OWNER" GET "/penjualan/$SID154" | jq -r '[.items[].hppSatuan]|add') - $HPP154A)")"
+cek "penjualan: sajian_takeaway kembali false, is_dine_in tetap true" "V == 1" \
+  "$(api "$OWNER" GET "/pesanan?branch_id=$CB154" | jq -r --arg id "$SID154" '[.[]|select(.id==$id)][0] | ((.sajian_takeaway==false) and (.is_dine_in==true))|if . then 1 else 0 end')"
+cek "Riwayat Transaksi ikut membawa sajian_takeaway (badge 'diubah')" "V == 1" \
+  "$(api "$REISS105" GET /penjualan | jq -r --arg id "$SID154" '[.[]|select(.id==$id)][0] | ((.sajian_takeaway|type)=="boolean")|if . then 1 else 0 end')"
+
+# (g) BATAL: bill tetap tampil di kolom Batal hari itu (jejak, bukan lenyap),
+#     tapi kasir tak bisa lagi menagihnya.
+OB154B=$(api "$REISS105" POST /open-bill "{\"meja_id\":\"$MEJA154\",\"items\":[{\"menu_id\":\"$M154\",\"qty\":1}]}")
+OBID154B=$(echo "$OB154B" | jq -r .id)
+api "$TKIT154" POST "/pesanan/open_bill/$OBID154B/status" '{"status":"batal"}' > /dev/null
+cek "dibatalkan: MASIH di papan dengan status batal (ada jejaknya)" "V == 1" \
+  "$(api "$TKIT154" GET /pesanan | jq -r --arg id "$OBID154B" '[.[]|select(.id==$id)][0] | (.status=="batal")|if . then 1 else 0 end')"
+cek "dibatalkan: hilang dari pemilih kasir (tak bisa ditagihkan)" "V == 0" \
+  "$(api "$REISS105" GET /open-bill | jq --arg id "$OBID154B" '[.[]|select(.id==$id)]|length')"
+api "$TKIT154" POST "/pesanan/open_bill/$OBID154B/status" '{"status":"dikerjakan"}' > /dev/null
+cek "keluar dari batal: bill terbuka lagi utk kasir (tak terkunci selamanya)" "V == 1" \
+  "$(api "$REISS105" GET /open-bill | jq --arg id "$OBID154B" '[.[]|select(.id==$id)]|length')"
+# DELETE lama = batalkan bercatatan, bukan hapus keras tanpa jejak
+api "$REISS105" DELETE "/open-bill/$OBID154B" > /dev/null
+cek "DELETE /open-bill kini MEMBATALKAN (status batal), bukan hapus keras" "V == 1" \
+  "$(api "$TKIT154" GET /pesanan | jq -r --arg id "$OBID154B" '[.[]|select(.id==$id)][0] | (.status=="batal")|if . then 1 else 0 end')"
+cek "pembatalan lewat DELETE tetap meninggalkan baris riwayat" "V == 1" \
+  "$(api "$TKIT154" GET "/pesanan/open_bill/$OBID154B/log" | jq '[.[]|select(.aksi=="Dibatalkan")]|length>=1|if . then 1 else 0 end')"
+
+# (h) Peran terkunci cabang tak bisa menyentuh pesanan cabang lain.
+OB154C=$(api "$REISS105" POST /open-bill "{\"meja_id\":\"$MEJA154\",\"items\":[{\"menu_id\":\"$M154\",\"qty\":1}]}" | jq -r .id)
+cek "kitchen cabang LAIN tak melihat pesanan ini" "V == 0" \
+  "$(api "$TBAR" GET /pesanan | jq --arg id "$OB154C" '[.[]|select(.id==$id)]|length')"
+cek "kitchen cabang LAIN menandainya → 404" "V == 404" \
+  "$(status_code_body "$TBAR" POST "/pesanan/open_bill/$OB154C/status" '{"status":"selesai"}')"
+cek "peran terkunci cabang: ?branch_id= milik orang lain diabaikan" "V == 1" \
+  "$(api "$TKIT154" GET "/pesanan?branch_id=$CB46_ID" | jq --arg id "$OB154C" '[.[]|select(.id==$id)]|length')"
+cek "filter ?status= menyaring papan" "V == 0" \
+  "$(api "$TKIT154" GET "/pesanan?status=batal" | jq --arg id "$OB154C" '[.[]|select(.id==$id)]|length')"
+api "$REISS105" DELETE "/open-bill/$OB154C" > /dev/null
+
+# (i) Penanda penyajian LAHIR sesuai pembukuannya. Kalau semua transaksi mulai
+#     dari `false`, transaksi bawa pulang akan disuruh disajikan di piring dan
+#     ditandai "diubah" padahal tak seorang pun menyentuhnya.
+MEJATA154=$(api "$REISS105" GET /meja | jq -r '[.[]|select(.is_active and .tipe=="takeaway")][0].id')
+STA154=$(api "$REISS105" POST /penjualan "{\"meja_id\":\"$MEJATA154\",\"metode_bayar\":\"tunai\",\"items\":[{\"menu_id\":\"$M154\",\"qty\":1}]}" | jq -r '.sale.id')
+cek "transaksi BAWA PULANG lahir bertanda bawa pulang (bukan 'makan di tempat')" "V == 1" \
+  "$(api "$OWNER" GET "/pesanan?branch_id=$CB154" | jq -r --arg id "$STA154" '[.[]|select(.id==$id)][0] | ((.sajian_takeaway==true) and (.is_dine_in==false))|if . then 1 else 0 end')"
+SDI154=$(api "$REISS105" POST /penjualan "{\"meja_id\":\"$MEJA154\",\"metode_bayar\":\"tunai\",\"items\":[{\"menu_id\":\"$M154\",\"qty\":1}]}" | jq -r '.sale.id')
+cek "transaksi DINE-IN lahir bertanda makan di tempat" "V == 1" \
+  "$(api "$OWNER" GET "/pesanan?branch_id=$CB154" | jq -r --arg id "$SDI154" '[.[]|select(.id==$id)][0] | ((.sajian_takeaway==false) and (.is_dine_in==true))|if . then 1 else 0 end')"
 
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

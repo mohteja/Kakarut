@@ -1,11 +1,18 @@
 import { zValidator } from "@hono/zod-validator";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import type { OpenBillDetail, OpenBillRow } from "@kakarut/shared";
 import { db } from "../../db/client";
-import { meja, menuBranches, menus, openBillItems, openBills } from "../../db/schema";
+import {
+  meja,
+  menuBranches,
+  menus,
+  openBillItems,
+  openBills,
+  pesananLogs,
+} from "../../db/schema";
 import { resolveBranchId, terikatCabang, type AppEnv } from "../../middleware/auth";
 
 const BillBody = z.object({
@@ -84,7 +91,10 @@ async function resolveMeja(companyId: string, branchId: string, mejaId?: string 
 
 async function loadDetail(companyId: string, id: string): Promise<OpenBillDetail | null> {
   const [bill] = await db.select().from(openBills).where(eq(openBills.id, id));
-  if (!bill || bill.companyId !== companyId) return null;
+  // Bill yang sudah ditutup (dibayar atau dibatalkan) tak lagi bisa dilanjutkan
+  // kasir — sama seperti ia tak muncul di daftar. Barisnya tetap ada untuk
+  // papan pesanan & jejak audit, tapi jalur kasir memperlakukannya hilang.
+  if (!bill || bill.companyId !== companyId || bill.closedAt) return null;
   const items = await db.select().from(openBillItems).where(eq(openBillItems.billId, id));
   return {
     id: bill.id,
@@ -136,7 +146,14 @@ export const openBillRoutes = new Hono<AppEnv>()
       })
       .from(openBills)
       .leftJoin(openBillItems, eq(openBillItems.billId, openBills.id))
-      .where(and(eq(openBills.companyId, auth.company_id!), eq(openBills.branchId, branchId)))
+      .where(
+        and(
+          eq(openBills.companyId, auth.company_id!),
+          eq(openBills.branchId, branchId),
+          // bill yang sudah dibayar/dibatalkan tidak lagi bisa dilanjutkan
+          isNull(openBills.closedAt),
+        ),
+      )
       .groupBy(openBills.id)
       .orderBy(desc(openBills.updatedAt));
     const dto: OpenBillRow[] = rows.map((r) => ({
@@ -283,12 +300,42 @@ export const openBillRoutes = new Hono<AppEnv>()
     });
     return c.json(await loadDetail(auth.company_id!, id));
   })
+  /**
+   * BATALKAN bill (bukan hapus keras lagi).
+   *
+   * Sejak papan pesanan menayangkan bill ke seluruh cabang, penghapusan keras
+   * membuat kartu lenyap tanpa jejak siapa pun — kebalikan dari riwayat
+   * perubahan status yang justru diminta. Bill ditandai `batal` + `closed_at`,
+   * jadi hilang dari pemilih kasir persis seperti dulu, tapi papan masih bisa
+   * menampilkannya di kolom Batal lengkap dengan pelakunya.
+   */
   .delete("/:id", async (c) => {
     const auth = c.get("auth");
+    const sekarang = new Date();
     const [row] = await db
-      .delete(openBills)
-      .where(and(eq(openBills.id, c.req.param("id")), eq(openBills.companyId, auth.company_id!)))
-      .returning({ id: openBills.id });
+      .update(openBills)
+      .set({
+        pesananStatus: "batal",
+        pesananStatusAt: sekarang,
+        pesananStatusOleh: auth.sub,
+        closedAt: sekarang,
+      })
+      .where(
+        and(
+          eq(openBills.id, c.req.param("id")),
+          eq(openBills.companyId, auth.company_id!),
+          isNull(openBills.closedAt),
+        ),
+      )
+      .returning({ id: openBills.id, branchId: openBills.branchId });
     if (!row) throw new HTTPException(404, { message: "Bill tidak ditemukan" });
+    await db.insert(pesananLogs).values({
+      companyId: auth.company_id!,
+      branchId: row.branchId,
+      openBillId: row.id,
+      aksi: "Dibatalkan",
+      statusBaru: "batal",
+      userId: auth.sub,
+    });
     return c.json({ ok: true });
   });

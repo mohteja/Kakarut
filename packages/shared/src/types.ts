@@ -1317,6 +1317,12 @@ export interface RiwayatTransaksiRow {
   waktu: string;
   total: number;
   is_dine_in: boolean;
+  /**
+   * Penanda PENYAJIAN dari Papan Pesanan Masuk — dapur bisa mengubahnya jadi
+   * bawa pulang setelah transaksi tercatat. Sengaja TERPISAH dari `is_dine_in`
+   * (fakta pembukuan yang sudah dipakai menghitung konsumsi bahan & HPP).
+   */
+  sajian_takeaway: boolean;
   /** label meja terpilih (null bila transaksi lama tanpa meja) */
   meja: string | null;
   /** jumlah baris menu pada transaksi */
@@ -1447,6 +1453,62 @@ export interface OpenBillDetail {
   customer_wa: string | null;
   catatan: string | null;
   items: OpenBillItemDto[];
+}
+
+/**
+ * PAPAN PESANAN MASUK — pengerjaan dapur, bukan persetujuan. Pesanan lahir
+ * `dikerjakan` (masuk antrean) lalu ditandai `selesai` atau `batal`.
+ */
+export type PesananStatus = "dikerjakan" | "selesai" | "batal";
+
+/**
+ * Asal pesanan. `open_bill` = belum dibayar (masih bisa diubah kasir);
+ * `penjualan` = sudah dibayar dan dibukukan. Satu pesanan bisa berpindah dari
+ * `open_bill` ke `penjualan` saat dilunasi — statusnya ikut terbawa.
+ */
+export type PesananJenis = "open_bill" | "penjualan";
+
+/** Satu baris menu dalam pesanan, apa adanya untuk dibaca dapur. */
+export interface PesananItemRow {
+  nama: string;
+  qty: number;
+  /** personalisasi pelanggan, mis. "tanpa sambal" */
+  catatan: string | null;
+  is_dine_in: boolean;
+}
+
+/** Satu kartu di papan pesanan. */
+export interface PesananRow {
+  id: string;
+  jenis: PesananJenis;
+  /** nomor struk; null selama masih open bill (belum ada transaksi) */
+  nomor: string | null;
+  meja: string | null;
+  customer: string | null;
+  /** waktu pesanan masuk (ISO) */
+  waktu: string;
+  total: number;
+  dibayar: boolean;
+  status: PesananStatus;
+  /**
+   * Penanda penyajian "bawa pulang" dari papan. SENGAJA terpisah dari
+   * `is_dine_in`: yang terakhir itu fakta pembukuan yang sudah dipakai
+   * menghitung pemakaian bahan & HPP, dan tidak diubah oleh papan.
+   */
+  sajian_takeaway: boolean;
+  is_dine_in: boolean;
+  catatan: string | null;
+  items: PesananItemRow[];
+  /** siapa & kapan status terakhir diubah; null = belum pernah disentuh */
+  status_oleh: string | null;
+  status_pada: string | null;
+}
+
+/** Satu baris riwayat perubahan status sebuah pesanan. */
+export interface PesananLogRow {
+  waktu: string;
+  aksi: string;
+  oleh: string | null;
 }
 
 /** Sesi kas (shift) per cabang. ditutup_* null → shift masih terbuka. */
