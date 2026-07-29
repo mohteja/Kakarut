@@ -27,8 +27,7 @@ tanpa akses repo server.
 
 ## Rilis: Perbaikan Laporan Kebersihan (`saya=1`, validasi query, transaksi)
 
-> **BELUM di-merge ke production** — masih di PR. Jangan rilis klien yang
-> bergantung padanya sebelum baris ini berubah jadi "Sudah di-merge".
+> **Sudah di-merge ke production** (PR #129, 29 Jul 2026).
 >
 > Ada migrasi DB (`0091`): dedup `cleaning_report_items` lalu indeks unik
 > `(report_id, area_id)`. Tidak ada perubahan kolom maupun bentuk response.
@@ -128,8 +127,7 @@ koreksi, bukan data yang hilang.
 
 ## Rilis: Laporan Harga dibuka untuk karyawan Central Kitchen
 
-> **BELUM di-merge ke production** — masih di PR. Jangan rilis klien yang
-> bergantung padanya sebelum baris ini berubah jadi "Sudah di-merge".
+> **Sudah di-merge ke production** (PR #129, 29 Jul 2026).
 >
 > Tidak ada migrasi DB. Tidak ada perubahan bentuk request/response.
 
@@ -166,8 +164,7 @@ tampil sebagai `diubah_oleh` pada baris `GET /api/pembelian`.
 
 ## Rilis: Status meja isi/kosong (`/api/meja/status`) + gerbang tulis `/api/meja`
 
-> **BELUM di-merge ke production** — masih di PR. Jangan rilis klien yang
-> bergantung padanya sebelum baris ini berubah jadi "Sudah di-merge".
+> **Sudah di-merge ke production** (PR #129, 29 Jul 2026).
 >
 > Ada migrasi DB (`0090`): tabel `meja_kosong_logs` + 2 indeks bantu. Tidak ada
 > perubahan kolom pada tabel lama.
@@ -209,6 +206,13 @@ bisa berubah kapan saja.
 `DELETE /api/meja/:id` sekarang **[owner/admin/cashier]**. Klien yang memakai
 token `tim`, `kitchen`, atau `bar` untuk keempatnya akan mulai mendapat **403**.
 
+**Aplikasi kasir tidak terdampak:** token `cashier` tetap boleh menulis. Yang
+justru perlu diperiksa adalah **pemilih meja** di layar Kasir — lihat poin 2 di
+atas: meja terisi WAJIB tetap muncul dan tetap bisa dipilih. Menyaringnya
+membuat pemasangan meja batal saat melanjutkan open bill (tagihan sah jadi tak
+bisa ditagih) dan membuat `dineIn` jatuh ke nilai cadangan `true`, sehingga
+pesanan bawa pulang terbukukan makan-di-tempat dengan HPP salah.
+
 Ini menambal lubang yang sudah ada, bukan pengetatan baru yang direncanakan:
 modul meja selama ini **tidak punya gerbang peran sama sekali**, sehingga akun
 dapur bisa menghapus meja atau menimpa denah lewat API walau tombolnya tak ada
@@ -231,8 +235,7 @@ detik).
 
 ## Rilis: Papan Pesanan Masuk (`/api/pesanan`) + open bill ditutup server
 
-> **BELUM di-merge ke production** — masih di PR. Jangan rilis klien yang
-> bergantung padanya sebelum baris ini berubah jadi "Sudah di-merge".
+> **Sudah di-merge ke production** (PR #129, 29 Jul 2026).
 >
 > Ada migrasi DB (`0089`): enum `pesanan_status`, kolom baru di `sales` &
 > `open_bills`, tabel `pesanan_logs`.
@@ -242,6 +245,12 @@ Sebelum ini sistem **tak punya konsep status pesanan sama sekali**. Baris
 "belum selesai" adalah open bill, yang **hanya bisa dibaca kasir**. Dapur tak
 punya layar kerja apa pun untuk pesanan pelanggan — jadi pesanan "tertinggal"
 tanpa ada tempat mengeceknya.
+
+> **Papannya sendiri layar komputer cabang — mobile tak perlu membangunnya.**
+> Tapi JANGAN lewati entri ini: bagian 🔴 WAJIB di bawah mengubah perilaku
+> `POST /api/penjualan`, dan justru mobile yang paling terdampak karena
+> **antrean sinkron offline** (`POST /api/sync`) memang mengirim ulang
+> transaksi yang sama.
 
 ### 🟢 BARU — `GET /api/pesanan` dan kawan-kawannya
 
