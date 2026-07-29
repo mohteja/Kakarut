@@ -6490,6 +6490,41 @@ api "$TKIT154" POST "/pesanan/penjualan/$SID154/status" '{"status":"selesai"}' >
 cek "tombol 'semua selesai' menurun ke tiap baris, kartu jadi selesai" "V == 1" \
   "$(kartu154 "$TKIT154" "$SID154" | jq -r '((.status=="selesai") and (.item_selesai==2))|if . then 1 else 0 end')"
 
+# (f2) PISAH PORSI: satu baris bill dipecah jadi beberapa baris penjualan
+#      (3 porsi = 2 di piring + 1 dibungkus). `open_bill_item_id` yang SAMA
+#      dipakai bersama oleh baris-baris pecahannya — dan itu memang jalannya:
+#      memecah porsi adalah keputusan PENGEMASAN saat bayar, bukan pesanan baru.
+#
+#      Dua hal ikut hancur kalau baris pecahan dibiarkan TANPA id:
+#        1. harga terkuncinya lepas → pembeli ditagih harga hari pembayaran,
+#           padahal ia memesan di harga yang lain;
+#        2. pewarisan status lepas → sajian yang SUDAH selesai kembali ke
+#           antrean dapur begitu pelanggan membayar.
+#      Blok ini mengunci keduanya.
+OB154P=$(api "$REISS105" POST /open-bill "{\"meja_id\":\"$MEJA154\",\"items\":[{\"menu_id\":\"$M154\",\"qty\":3}]}")
+OBID154P=$(echo "$OB154P" | jq -r .id)
+BR154P=$(echo "$OB154P" | jq -r '.items[0].id')
+cek "bill pisah-porsi terkunci di harga hari pesan (12000)" "V == 12000"   "$(echo "$OB154P" | jq -r '.items[0].harga_satuan')"
+api "$TKIT154" POST "/pesanan/open_bill/$OBID154P/item/$BR154P/status" '{"status":"selesai"}' > /dev/null
+# Harga menu NAIK setelah tamu memesan — inilah yang membuat kuncinya berarti.
+api "$OWNER" PUT "/menu/$M154" '{"harga_jual":20000}' > /dev/null
+# Bayar: satu baris bill → DUA baris penjualan, id-nya dipakai bersama.
+S154P=$(api "$REISS105" POST /penjualan "{\"meja_id\":\"$MEJA154\",\"metode_bayar\":\"tunai\",\"open_bill_id\":\"$OBID154P\",\"items\":[{\"menu_id\":\"$M154\",\"qty\":2,\"open_bill_item_id\":\"$BR154P\",\"is_dine_in\":true},{\"menu_id\":\"$M154\",\"qty\":1,\"open_bill_item_id\":\"$BR154P\",\"is_dine_in\":false}]}")
+SID154P=$(echo "$S154P" | jq -r '.sale.id')
+cek "pisah porsi diterima → 201 (bukan ditolak karena id dipakai dua kali)" "V == 1"   "$(test "$SID154P" != "null" && echo 1 || echo 0)"
+D154P=$(api "$OWNER" GET "/penjualan/$SID154P")
+cek "KEDUA baris pecahan ditagih harga TERKUNCI 12000 (bukan 20000)" "V == 2"   "$(echo "$D154P" | jq '[.items[]|select(.hargaSatuan==12000)]|length')"
+cek "subtotal 3 × 12000 = 36000 (bukan 3 × 20000)" "V == 36000"   "$(echo "$D154P" | jq '.sale.subtotal')"
+PJ154P=$(api "$OWNER" GET "/pesanan?branch_id=$CB154" | jq --arg id "$SID154P" '[.[]|select(.id==$id)][0]')
+cek "KEDUA baris pecahan mewarisi 'selesai' (tak kembali ke antrean dapur)" "V == 1"   "$(echo "$PJ154P" | jq -r '((.status=="selesai") and (.item_selesai==2))|if . then 1 else 0 end')"
+cek "penanda penyajian tetap per baris: 1 dibungkus, 1 di piring" "V == 1"   "$(echo "$PJ154P" | jq -r '((([.items[]|select(.sajian_takeaway==true)]|length)==1) and (([.items[]|select(.sajian_takeaway==false)]|length)==1))|if . then 1 else 0 end')"
+# Cacah baris per cara penyajian — permintaan tim mobile: `bool_and` tak bisa
+# membedakan "semuanya di piring" dari "sebagian dibungkus", keduanya false.
+R154P=$(api "$REISS105" GET /penjualan | jq --arg id "$SID154P" '[.[]|select(.id==$id)][0]')
+cek "Riwayat: item_takeaway=1, item_dine_in=1, badge mutlak tetap false" "V == 1"   "$(echo "$R154P" | jq -r '((.item_takeaway==1) and (.item_dine_in==1) and (.sajian_takeaway==false))|if . then 1 else 0 end')"
+cek "item_takeaway + item_dine_in == jumlah_item" "V == 1"   "$(echo "$R154P" | jq -r '((.item_takeaway + .item_dine_in)==.jumlah_item)|if . then 1 else 0 end')"
+api "$OWNER" PUT "/menu/$M154" '{"harga_jual":12000}' > /dev/null
+
 # (g) BATAL per baris. Bill baru boleh lepas dari pemilih kasir saat TAK ADA
 #     LAGI yang bisa ditagih — satu baris batal tidak menghapus tagihannya.
 OB154B=$(api "$REISS105" POST /open-bill "{\"meja_id\":\"$MEJA154\",\"items\":[{\"menu_id\":\"$M154\",\"qty\":1},{\"menu_id\":\"$M154B\",\"qty\":1}]}")

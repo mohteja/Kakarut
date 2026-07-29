@@ -25,6 +25,62 @@ tanpa akses repo server.
 
 ---
 
+## Rilis: Pisah porsi berbagi `open_bill_item_id` + cacah penyajian di riwayat
+
+> Belum di-merge ke production. Tidak ada migrasi DB, tidak ada perubahan
+> perilaku server — satu field baru + satu aturan yang **diperjelas**.
+
+### 🔴 WAJIB — baris PISAH PORSI harus tetap membawa `open_bill_item_id`
+
+Memecah 3 porsi jadi 2 di piring + 1 dibungkus adalah keputusan **pengemasan**
+saat bayar, **bukan pesanan baru**. Kirim baris pecahannya dengan
+`open_bill_item_id` **yang sama** — id itu memang boleh berulang, dan server
+sudah mendukungnya hari ini (pemetaan `id → harga` dan `id → status` lewat map).
+
+```jsonc
+{ "open_bill_id": "…", "items": [
+    { "menu_id": "M", "qty": 2, "open_bill_item_id": "B1", "is_dine_in": true  },
+    { "menu_id": "M", "qty": 1, "open_bill_item_id": "B1", "is_dine_in": false }
+]}
+```
+
+Menghilangkan id pada baris pecahan merusak **dua** hal, keduanya sunyi:
+
+1. **harga lepas dari kunci** → pembeli ditagih harga hari pembayaran;
+2. **pewarisan status lepas** → `pesananStatus` jatuh ke bawaan `dikerjakan`,
+   jadi sajian yang **sudah selesai kembali ke antrean dapur** saat pelanggan
+   membayar.
+
+Dikunci uji end-to-end di `verify-api.sh` §154(f2).
+
+Server **tidak** memeriksa `sum(qty)` pecahan terhadap qty baris bill-nya —
+sengaja, karena alur web yang sudah jalan mengizinkan kasir menaikkan qty baris
+bill saat membayar. Jaga konsistensinya di klien.
+
+### ⚪️ INFO — `open_bill_item_id` TETAP opsional (tidak jadi 400)
+
+Rencana mengetatkannya **dibatalkan**. Baris tanpa id itu sah — pesanan tambahan
+yang baru diketik saat membayar memang tak punya baris bill dan memang memakai
+harga hari ini. Server tak bisa membedakannya dari "klien lupa"; keduanya
+identik di kabel. Mewajibkannya akan mematikan pesanan tambahan, bukan menutup
+lubangnya.
+
+Yang tetap berlaku: **"tidak ada galat" bukan bukti field itu terkirim.**
+Pastikan lewat pengujian klien. Kalau nanti perlu kepastian dari server, jalannya
+penanda niat eksplisit per baris (`harga_hari_ini: true`) — belum ada, minta bila
+perlu.
+
+### 🟢 BARU — `RiwayatTransaksiRow.item_takeaway` & `item_dine_in`
+
+Cacah baris per cara penyajian. `sajian_takeaway` adalah `bool_and`: ia `false`
+begitu SATU baris tetap di piring, jadi tak bisa membedakan "semuanya di piring"
+dari "sebagian dibungkus". Dua cacah ini yang membedakannya — pakai untuk
+menulis "2 dari 3 dibungkus" alih-alih badge mutlak.
+
+`item_takeaway + item_dine_in == jumlah_item` selalu.
+
+---
+
 ## Rilis: Satu meja = satu bill + pilihan tamu sama / tamu baru
 
 > Belum di-merge ke production.

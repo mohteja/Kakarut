@@ -340,6 +340,44 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 > `open_bill_item_id` milik bill lain ditolak **400**. `qty` bebas berubah saat
 > pembayaran. Yang dikunci hanya harga jual: `hpp_satuan` tetap dihitung saat
 > pembayaran dari resep × harga acuan bahan saat itu.
+>
+> ### 🍱 PISAH PORSI — satu `open_bill_item_id` boleh dipakai BEBERAPA baris
+>
+> Memecah 3 porsi jadi 2 di piring + 1 dibungkus adalah keputusan
+> **pengemasan** saat bayar, **bukan pesanan baru**. Jadi kirim baris pecahannya
+> dengan `open_bill_item_id` **yang sama** — id itu memang boleh berulang.
+>
+> ```jsonc
+> { "open_bill_id": "…", "items": [
+>     { "menu_id": "M", "qty": 2, "open_bill_item_id": "B1", "is_dine_in": true  },
+>     { "menu_id": "M", "qty": 1, "open_bill_item_id": "B1", "is_dine_in": false }
+> ]}
+> ```
+>
+> Keduanya lalu ditagih **harga terkunci** bill dan mewarisi **status dapur yang
+> sama**; `sajian_takeaway` tetap lahir per baris dari `is_dine_in` masing-masing.
+>
+> **Jangan menghilangkan `open_bill_item_id` pada baris pecahan.** Dua hal rusak
+> sekaligus, dan keduanya sunyi:
+>
+> 1. **Harganya lepas dari kunci** → pembeli ditagih harga hari pembayaran,
+>    padahal ia memesan di harga yang lain.
+> 2. **Pewarisan statusnya lepas** → `pesananStatus` jatuh ke nilai bawaan
+>    `dikerjakan`, jadi sajian yang **sudah selesai kembali ke antrean dapur**
+>    tepat saat pelanggan membayar.
+>
+> ### Kenapa field ini TIDAK diwajibkan (bukan 400)
+>
+> Baris **tanpa** `open_bill_item_id` itu sah dan harus tetap bisa: pesanan
+> tambahan yang baru diketik di kasir saat membayar memang tak punya baris bill,
+> dan memang harus memakai harga hari ini. Server tak punya cara membedakan
+> "baris baru yang sah" dari "klien lupa mengirim id" — keduanya terlihat sama
+> persis di kabel. Mewajibkannya akan mematikan pesanan tambahan saat bayar,
+> bukan menutup lubangnya.
+>
+> Konsekuensinya harus disadari klien: **"tidak ada galat" bukan bukti
+> `open_bill_item_id` terkirim.** Pastikan lewat pengujian di sisi klien, bukan
+> lewat respons server.
 - `GET /api/penjualan` — [any] — query: `branch_id?` (atau `all` untuk owner/admin), `tanggal?` (YYYY-MM-DD, default hari ini di TZ perusahaan) — res: array ringkasan sale — error: **400** format tanggal salah
 - `GET /api/penjualan/:id` — [any] — res: `{ sale, items, branch_nama, kasir }` — error: **403** kasir luar cabang, **404**
 - `DELETE /api/penjualan/:id` — [owner/admin] — soft delete → Tempat Sampah — res: `{ ok, nomor }` — error: **404**
@@ -2534,6 +2572,18 @@ export interface RiwayatTransaksiRow {
    * bawa pulang. Penandanya sendiri disimpan per baris (`sale_items`).
    */
   sajian_takeaway: boolean;
+  /**
+   * Cacah baris per cara penyajian — supaya klien bisa menulis "2 dari 3
+   * dibungkus" alih-alih badge mutlak yang menyesatkan.
+   *
+   * `sajian_takeaway` di atas adalah `bool_and`: ia `false` begitu SATU baris
+   * tetap di piring, jadi ia tak bisa membedakan "semuanya di piring" dari
+   * "sebagian dibungkus". Dua cacah ini yang membedakannya.
+   *
+   * `item_takeaway + item_dine_in == jumlah_item` selalu.
+   */
+  item_takeaway: number;
+  item_dine_in: number;
   /** label meja terpilih (null bila transaksi lama tanpa meja) */
   meja: string | null;
   /** jumlah baris menu pada transaksi */

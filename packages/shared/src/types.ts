@@ -1403,6 +1403,18 @@ export interface RiwayatTransaksiRow {
    * bawa pulang. Penandanya sendiri disimpan per baris (`sale_items`).
    */
   sajian_takeaway: boolean;
+  /**
+   * Cacah baris per cara penyajian — supaya klien bisa menulis "2 dari 3
+   * dibungkus" alih-alih badge mutlak yang menyesatkan.
+   *
+   * `sajian_takeaway` di atas adalah `bool_and`: ia `false` begitu SATU baris
+   * tetap di piring, jadi ia tak bisa membedakan "semuanya di piring" dari
+   * "sebagian dibungkus". Dua cacah ini yang membedakannya.
+   *
+   * `item_takeaway + item_dine_in == jumlah_item` selalu.
+   */
+  item_takeaway: number;
+  item_dine_in: number;
   /** label meja terpilih (null bila transaksi lama tanpa meja) */
   meja: string | null;
   /** jumlah baris menu pada transaksi */

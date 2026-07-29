@@ -153,6 +153,10 @@ export const penjualanRoutes = new Hono<AppEnv>()
         // bila SEMUA barisnya begitu — satu piring yang tetap di tempat sudah
         // cukup membuat pesanan ini bukan pesanan bawa pulang.
         sajian_takeaway: sql<boolean>`COALESCE((SELECT bool_and(si.sajian_takeaway) FROM sale_items si WHERE si.sale_id = ${sales.id}), false)`,
+        // Cacah per cara penyajian: `bool_and` di atas tak bisa membedakan
+        // "semuanya di piring" dari "sebagian dibungkus" — keduanya false.
+        item_takeaway: sql<number>`(SELECT COUNT(*)::int FROM sale_items si WHERE si.sale_id = ${sales.id} AND si.sajian_takeaway)`,
+        item_dine_in: sql<number>`(SELECT COUNT(*)::int FROM sale_items si WHERE si.sale_id = ${sales.id} AND NOT si.sajian_takeaway)`,
         meja: sales.mejaLabel,
         kasir: users.nama,
         konsumen: sales.customerNama,
