@@ -25,7 +25,7 @@ tanpa akses repo server.
 
 ---
 
-## Rilis: SATU MEJA DINE-IN = SATU BILL (`409 meja_sudah_ada_bill`)
+## Rilis: Satu meja = satu bill + pilihan tamu sama / tamu baru
 
 > Belum di-merge ke production.
 >
@@ -93,6 +93,38 @@ menabrak 409 tanpa tahu sebabnya.
 `null` = mejanya sudah dihapus dari master (`meja_id` ber-`onDelete: set null`)
 atau bill dibuat tanpa meja.
 
+### 🔴 WAJIB — meja SUDAH BAYAR dipilih lagi: tanya tamunya sama atau baru
+
+`lunas_masih_duduk: true` = semuanya lunas tapi meja belum dibereskan. Kalau
+kasir memilih meja itu lagi, ada **dua kejadian yang server tak bisa
+membedakan**, dan keduanya sah:
+
+| Pilihan | Yang harus dilakukan klien |
+| --- | --- |
+| 🍽 **Tamu yang sama — tambah pesanan** | pakai mejanya apa adanya + isikan `konsumen_nama`/`konsumen_wa` ke keranjang |
+| ✓ **Tamu baru — bereskan meja dulu** | `POST /api/meja/:id/kosongkan` **dulu** (200 langsung, tanpa `paksa`), baru pakai mejanya |
+
+**Kalau tidak ditanya, papan berbohong.** Tamu baru di meja yang belum
+dibereskan membuat `sejak` tetap menunjuk transaksi tamu **sebelumnya** — papan
+bilang "sudah duduk 2 jam" untuk orang yang baru lima menit duduk, dan salahnya
+bertahan sampai jendela okupansi **12 jam** meluruhkannya. Membereskan meja
+menulis batas di `meja_kosong_logs`, dan itulah satu-satunya yang memotong
+hitungan itu.
+
+Meja yang masih punya bill belum dibayar TIDAK masuk alur ini — di sana jalurnya
+"tambahkan ke bill yang ada" (lihat 409 di atas).
+
+### 🟢 BARU — `MejaStatusDto.konsumen_nama` & `konsumen_wa`
+
+Konsumen pada transaksi **terbaru** yang masih menempati meja itu. **Selalu
+`null` bila mejanya `kosong`**, jadi klien tak pernah menawarkan tamu yang sudah
+dibereskan.
+
+Gunanya: tanpa ini, tamu member yang memesan dua kali di meja yang sama tercatat
+sebagai satu transaksi ber-member dan satu tanpa member — poin/riwayatnya
+terputus justru pada tamu yang paling sering datang. Kasir tetap boleh
+menghapus/mengganti namanya.
+
 ### 🔴 WAJIB — layar meja di mobile: status okupansi + Kosongkan
 
 Endpoint `GET /api/meja/status`, `POST /api/meja/:id/kosongkan`, dan
@@ -110,9 +142,11 @@ meja, kasir baru tahu mejanya sudah terisi **setelah** ditolak 409.
 ### ⚪️ INFO — web sudah disesuaikan di rilis ini
 
 Web sudah menampilkan status okupansi + tombol Kosongkan di modal Pilih Meja.
-Rilis ini menambahkan pendahuluan 409-nya: menekan **Open Bill** di meja yang
-sudah punya bill langsung membuka daftar bill itu dengan tombol "Buka bill",
-tanpa opsi "tetap buat bill baru" — karena server memang menolaknya.
+Rilis ini menambahkan dua hal: (1) pendahuluan 409-nya — menekan **Open Bill** di
+meja yang sudah punya bill langsung membuka daftar bill itu dengan tombol "Buka
+bill", tanpa opsi "tetap buat bill baru" karena server memang menolaknya; dan
+(2) dialog "tamu yang sama / tamu baru" saat memilih meja yang sudah dibayar,
+persis seperti yang diminta di atas untuk mobile.
 
 ---
 

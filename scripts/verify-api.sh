@@ -6595,15 +6595,29 @@ cek "ada bill belum dibayar → meja ISI, belum lunas" "V == 1" \
 # (c) INTI FITUR: DIBAYAR ≠ KOSONG. Di rumah makan orang lazim bayar dulu lalu
 #     duduk; kalau meja langsung hijau begitu dibayar, waiter mendudukkan tamu
 #     baru di meja yang masih ada orangnya.
-api "$REISS105" POST /penjualan "{\"meja_id\":\"$MEJA155\",\"metode_bayar\":\"tunai\",\"open_bill_id\":\"$OB155\",\"items\":[{\"menu_id\":\"$M155\",\"qty\":2}]}" > /dev/null
+api "$REISS105" POST /penjualan "{\"meja_id\":\"$MEJA155\",\"metode_bayar\":\"tunai\",\"open_bill_id\":\"$OB155\",\"customer_nama\":\"Bu Rina 155\",\"customer_wa\":\"08155000155\",\"items\":[{\"menu_id\":\"$M155\",\"qty\":2}]}" > /dev/null
 cek "SUDAH DIBAYAR tapi meja TETAP ISI (tamu masih duduk)" "V == 1" \
   "$(stat155 "$REISS105" | jq -r '((.status=="isi") and (.bill_terbuka==0) and (.transaksi_aktif==1) and (.lunas_masih_duduk==true))|if . then 1 else 0 end')"
+
+# (c2) MEJA LUNAS MEMBAWA KONSUMEN TERAKHIR — bahan pilihan "tamu yang sama,
+#      tambah pesanan" di kasir. Tanpa ini, tamu member yang memesan dua kali di
+#      meja yang sama tercatat sebagai satu transaksi ber-member dan satu tanpa
+#      member: poin/riwayatnya terputus justru pada tamu yang paling sering datang.
+cek "meja lunas membawa konsumen transaksi terakhirnya" "V == 1" \
+  "$(stat155 "$REISS105" | jq -r '((.konsumen_nama=="Bu Rina 155") and (.konsumen_wa!=null))|if . then 1 else 0 end')"
+# Transaksi BERIKUTNYA di meja yang sama → yang terbawa yang PALING BARU, bukan
+# yang pertama. Kalau tertukar, kasir ditawari nama tamu yang sudah pergi.
+api "$REISS105" POST /penjualan "{\"meja_id\":\"$MEJA155\",\"metode_bayar\":\"tunai\",\"customer_nama\":\"Pak Joko 155\",\"items\":[{\"menu_id\":\"$M155\",\"qty\":1}]}" > /dev/null
+cek "konsumen yang terbawa = transaksi TERBARU (bukan yang pertama)" "V == 1" \
+  "$(stat155 "$REISS105" | jq -r '(.konsumen_nama=="Pak Joko 155")|if . then 1 else 0 end')"
 
 # (d) Kasir mengosongkan + konfirmasi → meja siap untuk konsumen berikutnya.
 cek "kasir mengosongkan meja → 200" "V == 200" \
   "$(status_code_body "$REISS105" POST "/meja/$MEJA155/kosongkan" '{}')"
 cek "setelah dikosongkan: KOSONG + tercatat siapa yang membereskan" "V == 1" \
   "$(stat155 "$REISS105" | jq -r '((.status=="kosong") and (.transaksi_aktif==0) and (.dikosongkan_pada!=null) and (.dikosongkan_oleh!=null))|if . then 1 else 0 end')"
+cek "meja yang sudah dibereskan TIDAK lagi membawa konsumen (tamu sudah pergi)" "V == 1" \
+  "$(stat155 "$REISS105" | jq -r '((.konsumen_nama==null) and (.konsumen_wa==null))|if . then 1 else 0 end')"
 cek "riwayat meja bertambah TEPAT satu baris ber-nama pelaku" "V == 1" \
   "$(api "$REISS105" GET "/meja/$MEJA155/log" | jq '[.[]|select(.aksi=="Meja dikosongkan" and .oleh!=null and .paksa==false)]|length')"
 # tombol tertekan dua kali / dua orang berbarengan → idempoten, bukan galat,

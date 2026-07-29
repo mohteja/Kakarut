@@ -184,6 +184,19 @@ export function KasirPage() {
    * yang sudah ada.
    */
   const [billGandaOpen, setBillGandaOpen] = useState(false);
+  /**
+   * Meja SUDAH DIBAYAR tapi belum dibereskan, lalu dipilih lagi.
+   *
+   * Dua kejadian yang berbeda mendarat di sini dan tak bisa dibedakan server:
+   * tamu yang sama memesan lagi setelah membayar, ATAU tamu baru duduk di meja
+   * yang belum dibereskan. Keduanya sah, jadi kasir yang memutuskan.
+   *
+   * Kalau tak ditanya dan ternyata tamu baru, `sejak` tetap menunjuk transaksi
+   * tamu SEBELUMNYA — papan bilang "sudah duduk 2 jam" untuk orang yang baru
+   * lima menit duduk, dan salahnya bertahan sampai jendela okupansi 12 jam
+   * meluruhkannya sendiri.
+   */
+  const [tamuMejaId, setTamuMejaId] = useState<string | null>(null);
 
   const { data: openBills = [] } = useQuery({
     queryKey: ["open-bill", branchQuery],
@@ -277,7 +290,25 @@ export function KasirPage() {
   }, [tampilan]);
 
   function pilihMeja(id: string) {
+    // Meja lunas-tapi-belum-dibereskan: tanya dulu tamunya sama atau baru.
+    // Meja yang masih punya bill belum dibayar TIDAK ditanya di sini — di sana
+    // jalurnya "buka bill yang ada", dan itu ditangani tombol Open Bill.
+    const st = statusMeja.get(id);
+    if (st?.lunas_masih_duduk) {
+      setTamuMejaId(id);
+      return;
+    }
     setMejaId(id);
+    setMejaModalOpen(false);
+  }
+
+  /** "Tamu yang sama" — lanjut di meja itu, konsumennya dibawa supaya member tak terputus. */
+  function lanjutTamuSama(id: string) {
+    const st = statusMeja.get(id);
+    setMejaId(id);
+    if (st?.konsumen_nama) setKonsumenNama(st.konsumen_nama);
+    if (st?.konsumen_wa) setKonsumenWa(st.konsumen_wa);
+    setTamuMejaId(null);
     setMejaModalOpen(false);
   }
 
@@ -433,6 +464,30 @@ export function KasirPage() {
     setMejaId(null);
     setEditingBillId(null);
   }
+
+  /**
+   * "Tamu baru" — bereskan meja dulu, lalu pakai untuk tamu berikutnya.
+   *
+   * Pengosongan HARUS lewat server, bukan sekadar tidak ditanya lagi: batasnya
+   * ditulis ke `meja_kosong_logs`, dan itulah yang memotong hitungan "sudah
+   * duduk berapa lama". Tanpa panggilan ini, `sejak` tetap menunjuk transaksi
+   * tamu sebelumnya.
+   *
+   * Meja lunas tak punya tagihan berjalan, jadi tak perlu `paksa` — server
+   * menjawab 200 langsung.
+   */
+  const bereskanLaluPakai = useMutation({
+    mutationFn: (id: string) =>
+      api(`/meja/${id}/kosongkan${branchQuery}`, { method: "POST", body: {} }),
+    onSuccess: (_d, id) => {
+      setMejaId(id);
+      setKonsumenNama("");
+      setKonsumenWa("");
+      setTamuMejaId(null);
+      setMejaModalOpen(false);
+      queryClient.invalidateQueries({ queryKey: ["meja-status"] });
+    },
+  });
 
   // Simpan keranjang sebagai open bill (belum dibayar) — buat baru / perbarui.
   const simpanBill = useMutation({
@@ -1332,6 +1387,67 @@ export function KasirPage() {
           branchQuery={branchQuery}
           onClose={() => setKosongkanId(null)}
         />
+      )}
+
+      {/* Meja SUDAH DIBAYAR tapi belum dibereskan. Server tak bisa membedakan
+          "tamu sama pesan lagi" dari "tamu baru duduk", jadi kasir memutuskan —
+          dan pilihan "tamu baru" memanggil /kosongkan supaya hitungan lama
+          duduk mulai dari nol. Tanpa langkah itu papan bilang "sudah 2 jam"
+          untuk orang yang baru lima menit duduk. */}
+      {tamuMejaId && statusMeja.get(tamuMejaId) && (
+        <Modal
+          open
+          onClose={() => setTamuMejaId(null)}
+          title={`${statusMeja.get(tamuMejaId)!.nama} — tamu yang sama atau tamu baru?`}
+        >
+          <p className="text-sm text-stone-600">
+            Meja ini <b>sudah dibayar</b> tapi belum dibereskan (
+            {labelStatus(statusMeja.get(tamuMejaId)!).replace("✓ Sudah bayar · ", "")}).
+            {statusMeja.get(tamuMejaId)!.konsumen_nama && (
+              <>
+                {" "}
+                Konsumen terakhir: <b>{statusMeja.get(tamuMejaId)!.konsumen_nama}</b>.
+              </>
+            )}
+          </p>
+          <ErrorText error={bereskanLaluPakai.error} />
+          <div className="mt-3 space-y-2">
+            <button
+              onClick={() => lanjutTamuSama(tamuMejaId)}
+              disabled={bereskanLaluPakai.isPending}
+              className="w-full rounded-lg border border-blue-300 bg-blue-50 px-3 py-3 text-left hover:bg-blue-100 disabled:opacity-50"
+            >
+              <span className="block text-sm font-bold text-blue-900">
+                🍽 Tamu yang sama — tambah pesanan
+              </span>
+              <span className="block text-xs text-blue-700">
+                Meja tetap terisi sejak tamu datang
+                {statusMeja.get(tamuMejaId)!.konsumen_nama
+                  ? ", nama konsumen diisi otomatis"
+                  : ""}
+                .
+              </span>
+            </button>
+            <button
+              onClick={() => bereskanLaluPakai.mutate(tamuMejaId)}
+              disabled={bereskanLaluPakai.isPending}
+              className="w-full rounded-lg border border-green-300 bg-green-50 px-3 py-3 text-left hover:bg-green-100 disabled:opacity-50"
+            >
+              <span className="block text-sm font-bold text-green-900">
+                {bereskanLaluPakai.isPending ? "Membereskan…" : "✓ Tamu baru — bereskan meja dulu"}
+              </span>
+              <span className="block text-xs text-green-700">
+                Hitungan lama duduk mulai dari nol, konsumen dikosongkan.
+              </span>
+            </button>
+          </div>
+          <button
+            onClick={() => setTamuMejaId(null)}
+            className={`${btnSecondary} mt-3 w-full`}
+          >
+            Batal, pilih meja lain
+          </button>
+        </Modal>
       )}
 
       {/* SATU MEJA DINE-IN = SATU BILL. Pesanan tambahan wajib masuk ke bill

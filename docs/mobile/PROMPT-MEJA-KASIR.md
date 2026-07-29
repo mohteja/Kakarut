@@ -25,7 +25,7 @@ Web sudah punya keduanya. Itu isi dokumen ini.
 
 ---
 
-## Yang perlu dibangun (3 hal)
+## Yang perlu dibangun (4 hal)
 
 ### 1. Status okupansi di pemilih meja
 
@@ -40,7 +40,9 @@ MejaStatusDto {
   transaksi_aktif: number,     // lunas tapi masih dianggap menempati
   lunas_masih_duduk: boolean,  // paling layak ditawari tombol Kosongkan
   sejak: string | null,        // ISO — tagihan paling awal (utk "sudah 40 mnt")
-  dikosongkan_pada, dikosongkan_oleh
+  dikosongkan_pada, dikosongkan_oleh,
+  konsumen_nama: string | null, // 🆕 konsumen transaksi TERBARU di meja itu
+  konsumen_wa: string | null    // 🆕 null bila mejanya kosong
 }
 ```
 
@@ -113,6 +115,48 @@ boleh — itu memang jalur ini.
 > mencocokkan lewat nama akan gagal begitu mejanya diganti nama — dan gagalnya
 > **sunyi**: kasir tak melihat peringatan, lalu menabrak 409 tanpa tahu sebabnya.
 
+### 4. Meja SUDAH BAYAR dipilih lagi → tanya tamunya sama atau baru
+
+`lunas_masih_duduk: true` berarti semuanya sudah lunas tapi mejanya belum
+dibereskan. Kalau kasir memilih meja itu lagi, ada **dua kejadian** yang server
+tak bisa membedakan — dan keduanya sah:
+
+```
+kasir memilih meja dengan lunas_masih_duduk == true → tampilkan:
+   "Meja 5 — tamu yang sama atau tamu baru?"
+   "Sudah dibayar tapi belum dibereskan (40 mnt). Konsumen terakhir: Bu Rina."
+
+   [ 🍽 Tamu yang sama — tambah pesanan ]
+       → pakai mejanya apa adanya
+       → isikan konsumen_nama / konsumen_wa ke keranjang
+
+   [ ✓ Tamu baru — bereskan meja dulu ]
+       → POST /api/meja/:id/kosongkan   (200 langsung, TANPA paksa —
+                                         meja lunas tak punya tagihan berjalan)
+       → baru pakai mejanya, konsumen dikosongkan
+
+   [ Batal, pilih meja lain ]
+```
+
+**Kenapa wajib ditanya:** kalau ternyata tamu baru dan mejanya tidak dibereskan,
+`sejak` tetap menunjuk transaksi tamu **sebelumnya**. Papan bilang *"sudah duduk
+2 jam"* untuk orang yang baru lima menit duduk, dan salahnya bertahan sampai
+jendela okupansi **12 jam** meluruhkannya sendiri. Membereskan meja menulis batas
+di `meja_kosong_logs`, dan itulah satu-satunya yang memotong hitungan itu.
+
+**Kenapa konsumennya dibawa:** tanpa itu, tamu member yang memesan dua kali di
+meja yang sama tercatat sebagai satu transaksi ber-member dan satu tanpa member —
+poin/riwayatnya terputus justru pada tamu yang paling sering datang. Kasir tetap
+boleh menghapus/mengganti namanya.
+
+`konsumen_nama`/`konsumen_wa` diambil dari transaksi **terbaru** yang masih
+menempati meja itu, dan **selalu `null`** saat mejanya `kosong` — jadi jangan
+pernah menawarkan "tamu yang sama" untuk meja yang sudah dibereskan.
+
+> Meja yang masih punya **bill belum dibayar** (`lunas_masih_duduk: false`,
+> `bill_terbuka > 0`) TIDAK masuk alur ini — di sana jalurnya bagian 3
+> ("tambahkan ke bill yang ada").
+
 ### Dua pengecualian yang TIDAK dijaga
 
 1. **Ruang Tunggu (meja `takeaway`)** — bill kedua di sana tetap **201**. Kalau
@@ -141,6 +185,8 @@ Semuanya sudah pernah membuat masalah nyata di web:
    bebas saat ada manusia yang menekan Kosongkan. **Jangan** memanggil
    `/kosongkan` otomatis setelah transaksi berhasil — kalau itu dilakukan,
    waiter akan mendudukkan tamu baru di meja yang masih ada orangnya.
+   Pengosongannya dipicu MANUSIA, di bagian 4 — saat kasir menyatakan "tamu
+   baru".
 
 3. **Ruang Tunggu tidak punya status** — lihat peringatan di bagian 1.
 

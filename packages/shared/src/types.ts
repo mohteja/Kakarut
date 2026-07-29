@@ -1070,6 +1070,16 @@ export interface MejaStatusDto {
   /** ISO — kapan meja ini terakhir dibereskan, null bila belum pernah */
   dikosongkan_pada: string | null;
   dikosongkan_oleh: string | null;
+  /**
+   * Konsumen pada transaksi TERAKHIR yang masih menempati meja ini — bahan
+   * pilihan "tamu yang sama, tambah pesanan". Selalu `null` bila mejanya
+   * `kosong`, supaya klien tak pernah menawarkan tamu yang sudah dibereskan.
+   *
+   * Gunanya: tamu member yang memesan dua kali di meja yang sama tak lagi
+   * tercatat sebagai satu transaksi ber-member dan satu tanpa member.
+   */
+  konsumen_nama: string | null;
+  konsumen_wa: string | null;
 }
 
 /** Satu baris riwayat "meja dibereskan" — dari `GET /api/meja/:id/log`. */

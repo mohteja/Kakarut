@@ -597,6 +597,23 @@ Aksesnya sengaja **asimetris**: membaca terbuka untuk seluruh peran cabang
 > `/api/open-bill`. Penjualan langsung di meja terisi tetap boleh; yang ditolak
 > hanya bill KEDUA.
 >
+> **DIBAYAR ≠ KOSONG, dan itu memunculkan dua kejadian yang server tak bisa
+> membedakan.** Meja `lunas_masih_duduk` yang dipilih lagi bisa berarti *tamu
+> yang sama memesan lagi* ATAU *tamu baru duduk di meja yang belum dibereskan* —
+> keduanya sah. **Klien WAJIB menanyakannya**, karena kalau ternyata tamu baru
+> dan mejanya tak dibereskan, `sejak` tetap menunjuk transaksi tamu SEBELUMNYA:
+> papan bilang "sudah duduk 2 jam" untuk orang yang baru lima menit duduk, dan
+> salahnya bertahan sampai jendela okupansi 12 jam meluruhkannya.
+>
+> - *Tamu yang sama* → pakai mejanya apa adanya, dan isikan `konsumen_nama` /
+>   `konsumen_wa` ke transaksi baru supaya member/poinnya tak terputus.
+> - *Tamu baru* → `POST /api/meja/:id/kosongkan` DULU (meja lunas tak punya
+>   tagihan berjalan, jadi langsung **200** tanpa `paksa`), baru pakai mejanya.
+>
+> `konsumen_nama`/`konsumen_wa` diambil dari transaksi **terbaru** yang masih
+> menempati meja itu, dan selalu `null` saat mejanya `kosong` — jadi klien tak
+> pernah menawarkan tamu yang sudah dibereskan.
+>
 > Alur tombol Kosongkan ada **dua tahap**: permintaan pertama pada meja yang
 > masih punya bill belum dibayar ditolak **409** `bill_berjalan`; kirim ulang
 > dengan `paksa: true` setelah pemakai menegaskan. Bill-nya **tidak dibatalkan
@@ -2209,6 +2226,16 @@ export interface MejaStatusDto {
   /** ISO — kapan meja ini terakhir dibereskan, null bila belum pernah */
   dikosongkan_pada: string | null;
   dikosongkan_oleh: string | null;
+  /**
+   * Konsumen pada transaksi TERAKHIR yang masih menempati meja ini — bahan
+   * pilihan "tamu yang sama, tambah pesanan". Selalu `null` bila mejanya
+   * `kosong`, supaya klien tak pernah menawarkan tamu yang sudah dibereskan.
+   *
+   * Gunanya: tamu member yang memesan dua kali di meja yang sama tak lagi
+   * tercatat sebagai satu transaksi ber-member dan satu tanpa member.
+   */
+  konsumen_nama: string | null;
+  konsumen_wa: string | null;
 }
 
 /** Satu baris riwayat "meja dibereskan" — dari `GET /api/meja/:id/log`. */
