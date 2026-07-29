@@ -1147,7 +1147,23 @@ export const cleaningReportItems = pgTable(
     fotoUrl: text("foto_url"),
     urutan: integer("urutan").notNull().default(0),
   },
-  (t) => [index("cleaning_report_items_report_idx").on(t.reportId)],
+  (t) => [
+    index("cleaning_report_items_report_idx").on(t.reportId),
+    /**
+     * Satu area maksimal satu baris per laporan. `siapkanItems` sudah menolak
+     * area kembar DALAM satu permintaan, tapi itu tak menolong saat dua
+     * perangkat mem-PATCH laporan yang sama nyaris bersamaan: di READ
+     * COMMITTED, transaksi kedua menghapus 0 baris (yang pertama sudah
+     * menghapusnya) lalu tetap menyisipkan set lengkapnya — hasilnya checklist
+     * ganda yang MEMBEKU esok hari karena PATCH lintas-tanggal ditolak 409.
+     * Transaksi saja tak menutup ini; hanya indeks unik yang bisa.
+     *
+     * `areaId` boleh NULL (area masternya dihapus) dan Postgres memperlakukan
+     * NULL sebagai saling berbeda — jadi laporan lama yang areanya sudah
+     * dihapus tetap boleh punya banyak baris ber-`area_id` NULL.
+     */
+    uniqueIndex("cleaning_report_items_report_area_uq").on(t.reportId, t.areaId),
+  ],
 );
 
 export const sales = pgTable(

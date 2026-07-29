@@ -5686,6 +5686,26 @@ cek "perbarui tanpa field catatan → catatan karyawan tetap utuh" "V == 1" \
   "$(api "$TKIT" GET "/kebersihan/$LID144" | jq '.catatan=="sabun habis"|if . then 1 else 0 end')"
 cek "perbarui dengan catatan:null → catatan memang dikosongkan" "V == 1" \
   "$(api "$TKIT" PATCH "/kebersihan/$LID144" "{\"catatan\":null,\"items\":[{\"area_id\":\"$AR144_UMUM\",\"bersih\":true,\"foto_url\":\"/uploads/bukti-144a.jpg\"}]}" | jq '.catatan==null|if . then 1 else 0 end')"
+
+# BALAPAN PATCH — satu-satunya jalur yang bisa menggandakan checklist. Transaksi
+# saja tak menutupnya: di READ COMMITTED yang kalah menghapus 0 baris (yang
+# menang sudah menghapusnya) lalu tetap menyisipkan set lengkapnya. Yang
+# menutupnya adalah indeks unik (report_id, area_id) dari migrasi 0091.
+# Dua hasil sama-sama sah — keduanya 200 bila permintaannya kebetulan
+# terserialkan, atau satu 409 bila benar-benar bertabrakan. Yang TIDAK boleh:
+# 500, dan checklist berlipat.
+RACE144="{\"items\":[{\"area_id\":\"$AR144_UMUM\",\"bersih\":true,\"foto_url\":\"/uploads/race-144.jpg\"}]}"
+RC1=$(mktemp); RC2=$(mktemp)
+curl -s -o /dev/null -w '%{http_code}' -X PATCH "$BASE/api/kebersihan/$LID144" \
+  -H "Authorization: Bearer $TKIT" -H 'Content-Type: application/json' -d "$RACE144" > "$RC1" &
+curl -s -o /dev/null -w '%{http_code}' -X PATCH "$BASE/api/kebersihan/$LID144" \
+  -H "Authorization: Bearer $TKIT" -H 'Content-Type: application/json' -d "$RACE144" > "$RC2" &
+wait
+C1_144=$(cat "$RC1"); C2_144=$(cat "$RC2"); rm -f "$RC1" "$RC2"
+cek "PATCH balapan: tiap respons 200 atau 409, tak ada 500" "V == 1" \
+  "$( { [ "$C1_144" = "200" ] || [ "$C1_144" = "409" ]; } && { [ "$C2_144" = "200" ] || [ "$C2_144" = "409" ]; } && echo 1 || echo 0)"
+cek "PATCH balapan: checklist tidak berlipat (tetap 1 baris)" "V == 1" \
+  "$(api "$TKIT" GET "/kebersihan/$LID144" | jq '(.items|length)==1|if . then 1 else 0 end')"
 # Kembalikan satu area jadi kotor + catatan semula supaya rekap & badge punya bahan uji.
 api "$TKIT" PATCH "/kebersihan/$LID144" "{\"catatan\":\"sabun habis\",\"items\":[{\"area_id\":\"$AR144_UMUM\",\"bersih\":true,\"foto_url\":\"/uploads/bukti-144a.jpg\"},{\"area_id\":\"$AR144_STORE\",\"bersih\":false,\"catatan\":\"masih bau\"}]}" > /dev/null
 

@@ -30,7 +30,8 @@ tanpa akses repo server.
 > **BELUM di-merge ke production** — masih di PR. Jangan rilis klien yang
 > bergantung padanya sebelum baris ini berubah jadi "Sudah di-merge".
 >
-> Tidak ada migrasi DB. Tidak ada perubahan bentuk response.
+> Ada migrasi DB (`0091`): dedup `cleaning_report_items` lalu indeks unik
+> `(report_id, area_id)`. Tidak ada perubahan kolom maupun bentuk response.
 
 Hasil audit fitur Laporan Kebersihan. Tidak ada lubang keamanan yang ditemukan —
 isolasi perusahaan, gerbang peran, dan pemeriksaan kepemilikan semuanya utuh.
@@ -90,6 +91,21 @@ Dulu keduanya sama-sama menulis NULL, jadi klien yang cuma membetulkan checklist
 ikut menghapus pesan karyawan ke owner tanpa galat dan tanpa jejak. Klien yang
 selama ini selalu mengirim `catatan` tidak berubah perilaku.
 
+### 🟡 PERLU DICEK — `PATCH` bisa membalas **409** saat dua perangkat bentrok
+
+Kalau dua perangkat mem-PATCH laporan yang sama nyaris bersamaan, salah satunya
+kini kalah dengan **409** *"Laporan ini baru saja diperbarui dari perangkat lain
+— muat ulang lalu coba lagi"*. Tangani seperti bentrok biasa: muat ulang
+laporannya (`GET /api/kebersihan/:id`) lalu kirim ulang perubahannya.
+
+Sebelum ini keduanya sama-sama **berhasil**, dan checklist jadi ganda —
+`total_area`, `area_bersih`, `jumlah_foto`, dan `area_kotor` di rekap owner
+semuanya berlipat. Lebih buruk lagi, angka itu **membeku**: esok harinya PATCH
+lintas-tanggal ditolak 409 sehingga tak ada yang bisa membetulkannya.
+
+`409` pada `PATCH` sekarang punya dua arti — laporan hari sebelumnya, atau
+bentrok perangkat. Bedakan dari teks pesannya bila perlu.
+
 ### ⚪️ INFO — area nonaktif ditolak, penulisan jadi atomik
 
 `POST` dan `PATCH` kini menolak `area_id` yang sudah dinonaktifkan owner
@@ -98,6 +114,15 @@ selama ini selalu mengirim `catatan` tidak berubah perilaku.
 
 Keduanya juga menulis dalam satu transaksi, jadi laporan tanpa item atau
 checklist yang hilang separuh jalan tidak lagi mungkin.
+
+### ⚪️ INFO — migrasi `0091` membersihkan duplikat lama
+
+Database yang sudah terlanjur punya checklist ganda dibereskan otomatis saat
+migrasi: baris kembar per `(report_id, area_id)` dibuang, menyisakan yang paling
+berisi (berfoto dulu, lalu yang bercatatan). Baris ber-`area_id` NULL (area
+masternya sudah dihapus) sengaja tidak disentuh. Klien tak perlu berbuat apa pun
+— tapi angka rekap sebuah hari bisa **turun** setelah rilis, dan itu memang
+koreksi, bukan data yang hilang.
 
 ---
 

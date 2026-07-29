@@ -307,8 +307,12 @@ function saringCabang(v: string | undefined): string | null {
   return v;
 }
 
-/** Deteksi pelanggaran unique (user × tanggal × sesi) tanpa menebak-nebak pesan. */
-function bentrokSesi(err: unknown): boolean {
+/**
+ * Deteksi pelanggaran UNIQUE apa pun tanpa menebak-nebak teks pesannya. Dipakai
+ * dua kali dengan arti berbeda: satu laporan per sesi (POST), dan satu area per
+ * laporan (PATCH yang balapan) — pesannya dipilih di masing-masing pemanggil.
+ */
+function bentrokUnik(err: unknown): boolean {
   const kode = (err as { cause?: { code?: string }; code?: string })?.cause?.code ??
     (err as { code?: string })?.code;
   return kode === "23505";
@@ -634,7 +638,7 @@ export const kebersihanRoutes = new Hono<AppEnv>()
       });
     } catch (err) {
       // 23505 tetap terbaca dari dalam transaksi yang di-rollback.
-      if (bentrokSesi(err)) {
+      if (bentrokUnik(err)) {
         throw new HTTPException(409, {
           message: "Laporan sesi ini sudah dibuat — perbarui laporan yang ada",
         });
@@ -677,21 +681,35 @@ export const kebersihanRoutes = new Hono<AppEnv>()
     // SATU TRANSAKSI: tanpa ini, INSERT yang gagal setelah DELETE sukses
     // membuang seluruh checklist berikut foto buktinya — dan mulai besok
     // laporan itu terkunci (409) sehingga tak bisa diisi ulang.
-    await db.transaction(async (tx) => {
-      await tx.delete(cleaningReportItems).where(eq(cleaningReportItems.reportId, id));
-      await tx.insert(cleaningReportItems).values(baris.map((r) => ({ ...r, reportId: id })));
-      await tx
-        .update(cleaningReports)
-        .set({
-          // Hanya sentuh `catatan` bila field-nya memang dikirim. `?.trim() ||
-          // null` tanpa penjaga ini mengubah field yang TIDAK dikirim menjadi
-          // NULL, jadi klien yang cuma memperbaiki checklist ikut menghapus
-          // pesan karyawan ke owner tanpa galat dan tanpa jejak.
-          ...(b.catatan !== undefined ? { catatan: b.catatan?.trim() || null } : {}),
-          updatedAt: new Date(),
-        })
-        .where(eq(cleaningReports.id, id));
-    });
+    try {
+      await db.transaction(async (tx) => {
+        await tx.delete(cleaningReportItems).where(eq(cleaningReportItems.reportId, id));
+        await tx.insert(cleaningReportItems).values(baris.map((r) => ({ ...r, reportId: id })));
+        await tx
+          .update(cleaningReports)
+          .set({
+            // Hanya sentuh `catatan` bila field-nya memang dikirim. `?.trim() ||
+            // null` tanpa penjaga ini mengubah field yang TIDAK dikirim menjadi
+            // NULL, jadi klien yang cuma memperbaiki checklist ikut menghapus
+            // pesan karyawan ke owner tanpa galat dan tanpa jejak.
+            ...(b.catatan !== undefined ? { catatan: b.catatan?.trim() || null } : {}),
+            updatedAt: new Date(),
+          })
+          .where(eq(cleaningReports.id, id));
+      });
+    } catch (err) {
+      // Indeks unik (report_id, area_id) menolak PATCH yang balapan: yang kalah
+      // sudah menghapus 0 baris (yang menang lebih dulu menghapusnya) lalu
+      // mencoba menyisipkan set keduanya. Dulu — sebelum indeksnya ada — ini
+      // BERHASIL dan checklist jadi ganda. Sekarang ditolak, dan ditolaknya
+      // harus 409 yang bisa dibaca, bukan 500.
+      if (bentrokUnik(err)) {
+        throw new HTTPException(409, {
+          message: "Laporan ini baru saja diperbarui dari perangkat lain — muat ulang lalu coba lagi",
+        });
+      }
+      throw err;
+    }
     return c.json(await ambilSatu(id, auth.company_id!));
   })
 
