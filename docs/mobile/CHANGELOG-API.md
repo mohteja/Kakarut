@@ -25,6 +25,71 @@ tanpa akses repo server.
 
 ---
 
+## Rilis: Tombol 🥡 kini memindahkan UANG dan STOK
+
+> Belum di-merge ke production. Tidak ada migrasi DB. **Mengubah perilaku lama**
+> pada satu titik, dan titik itu menyentuh laba-rugi — tolong baca sampai habis
+> sebelum merilis layar papan pesanan berikutnya.
+
+### 🔴 WAJIB — `POST .../sajian` pada penjualan yang SUDAH DIBAYAR menghitung ulang biayanya
+
+Dulu `sajian_takeaway` adalah penanda murni: menekan 🥡 hanya mengubah instruksi
+penyajian. Itu ternyata melubangi pembukuan. Kasus nyata dari lapangan: pesanan
+dibukukan di meja dine-in, lalu pelanggan berubah pikiran dan minta dibungkus.
+Dusnya benar-benar diambil dari rak — tapi HPP tetap memakai basis dine-in (yang
+**melewati** kemasan) dan `sale_consumptions` tak pernah mencatat dusnya. Owner
+melihat laba lebih besar dari kenyataan, dan stok kemasan habis tanpa jejak.
+
+Sekarang **basis biaya sebuah baris = `sajian_takeaway`**, bukan `is_dine_in`.
+Akibatnya, menandai baris pada transaksi yang sudah dibayar akan:
+
+- menulis ulang `hpp_satuan` tiap baris dan `sales.total_hpp`;
+- menulis ulang `sale_consumptions` transaksi itu (kemasan take away masuk /
+  keluar dari pemakaian bahan) → **saldo stok bergerak**;
+- mencatat perpindahannya di `GET /api/pesanan/:jenis/:id/log`, mis.
+  `"Diubah jadi bawa pulang (HPP Rp 8.000 → Rp 9.500)"`.
+
+**Yang perlu tim mobile lakukan:**
+
+1. **Segarkan data setelah menekan 🥡** — bukan hanya kartu papannya. Layar
+   Riwayat Transaksi, Laporan (laba-rugi), dan Stok bisa ikut berubah. Responsnya
+   kini membawa `total_hpp` (HPP transaksi sesudah hitung-ulang) supaya kalian
+   tak perlu menebak; `null` berarti open bill (tak ada yang dihitung ulang).
+2. **Jangan sajikan tombol ini sebagai aksi ringan.** Pada pesanan yang sudah
+   dibayar ia menggerakkan uang. Kalau layar kalian punya konfirmasi untuk aksi
+   berdampak, tombol ini masuk kategori itu.
+
+`is_dine_in` **tidak** berubah — ia tetap fakta pembukuan (di mana pesanan
+dimakan; dasar pemisahan omzet dan label meja pada nota). Jadi badge "diubah"
+yang membandingkan `sajian_takeaway` dengan `is_dine_in` tetap bekerja seperti
+sebelumnya.
+
+Operasinya **idempoten**: bolak-balik TA → dine-in → TA mendarat di angka yang
+sama persis, karena selalu dihitung dari nol. Penjualan di Tempat Sampah tidak
+dihitung ulang.
+
+### 🟢 BARU — tanda TA dari dapur pada bill BELUM DIBAYAR akhirnya sampai ke angka
+
+Celah kedua, dan yang paling sering terlihat: dapur menandai satu sajian bawa
+pulang selagi bill masih terbuka. Penandanya memang ikut ke baris penjualan saat
+kasir menagih — tapi biayanya dulu diambil dari `is_dine_in`, jadi kemasannya
+hilang tepat di titik pembayaran. Sekarang penanda itu yang jadi basis biaya,
+sehingga kemasan masuk HPP dan stoknya berkurang begitu dibayar. **Tanpa
+endpoint baru** — cukup `open_bill_item_id` tetap dikirim saat membayar (sudah
+wajib sejak rilis harga terkunci).
+
+### ⚪️ INFO — prasyarat data: bahan harus bertanda `is_packaging`
+
+Aturan take away hanya bergigi bila resep menunya memuat bahan ber-`is_packaging`
+(dus/box/plastik). Tanpa itu, HPP bawa pulang = HPP dine-in dan menekan 🥡 tak
+mengubah apa pun — bukan bug. Field-nya sudah lama ada di
+`POST/PATCH /api/bahan` dan di `BahanDto`; yang baru adalah **web akhirnya punya
+centang "🥡 Kemasan TA"** untuk mengisinya (sebelumnya hanya badge baca-saja, dan
+tak ada satu pun cara membuatnya dari antarmuka). Kalau layar bahan baku di
+mobile bisa menyunting bahan, pertimbangkan menampilkan centang yang sama.
+
+---
+
 ## Rilis: Papan pesanan — urutan "terakhir diubah" + `selesai` tak menghidupkan yang batal
 
 > Belum di-merge ke production. Tidak ada migrasi DB. **Mengubah perilaku lama**

@@ -31,7 +31,7 @@ import {
 } from "../../db/schema";
 import { tanggalDi } from "../../lib/time";
 import { terbitkanNomor } from "../dokumen/nomor";
-import { loadKatalog, tampilDiCabang } from "../menu/service";
+import { komponenEfektif, loadKatalog, tampilDiCabang } from "../menu/service";
 import { catatLogFaktur } from "../produksi/log";
 import { hitungSaldoCabang, qtyDalamJalan } from "../stok/service";
 
@@ -151,13 +151,7 @@ export async function rencanaDariMenu(
         message: `Menu "${menu.nama}" tidak tersedia di cabang ini`,
       });
     }
-    const komponen = [
-      ...(katalog.komponenByMenu.get(menu.id) ?? []),
-      ...(menu.tipe === "paket" && menu.baseMenuId
-        ? katalog.komponenByMenu.get(menu.baseMenuId) ?? []
-        : []),
-    ];
-    rencana.push({ qtyPerPorsi: qtyBahanPerPorsi(komponen), porsi });
+    rencana.push({ qtyPerPorsi: qtyBahanPerPorsi(komponenEfektif(katalog, menu)), porsi });
     menus.push({
       menu_id: menu.id,
       nama: menu.nama,

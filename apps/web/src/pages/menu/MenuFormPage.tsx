@@ -17,6 +17,7 @@ import { ImageUpload } from "../../components/ImageUpload";
 import {
   Card,
   ErrorText,
+  Modal,
   PageTitle,
   Spinner,
   btnPrimary,
@@ -79,6 +80,8 @@ export function MenuFormPage() {
   const [komponen, setKomponen] = useState<KomponenForm[]>([]);
   /** pembatasan lokasi (mode Pro) — [] = tampil di semua lokasi */
   const [branchIds, setBranchIds] = useState<string[]>([]);
+  /** dialog "menu ini belum punya kemasan take away" sedang terbuka */
+  const [tanyaKemasan, setTanyaKemasan] = useState(false);
   const dimuat = useRef(false);
 
   // muat data saat edit
@@ -137,6 +140,35 @@ export function MenuFormPage() {
     const saran = hargaSaran(ownHpp, Number(mult) || 0);
     return { hpp: ownHpp, hppDineIn: ownHppDineIn, saran, bulat: hargaJualBulat(saran) };
   }, [komponen, bahanById, tipe, mult, baseMenuId, baseMult, menus]);
+
+  /**
+   * Apakah menu ini punya bahan KEMASAN TAKE AWAY?
+   *
+   * Semua menu bisa dijual bawa pulang, jadi tiap menu semestinya punya
+   * kemasannya. Tanpa satu pun komponen ber-`is_packaging`, `hitungHpp` bawa
+   * pulang dan dine-in menghasilkan angka yang SAMA (lihat `qtyEfektif` di
+   * @kakarut/shared) — artinya biaya dus/box tak pernah masuk laba-rugi dan
+   * stok kemasan tak pernah berkurang saat pesanan dibawa pulang.
+   *
+   * Menu paket: resep menu dasarnya tidak ada di `komponen` (yang diedit di
+   * sini hanya toppingnya), jadi kemasan bisa saja diwarisi dari sana —
+   * `GET /menu` sudah mengirim `komponen` lengkap untuk tiap menu.
+   */
+  const punyaKemasan = useMemo(() => {
+    const sendiri = komponen.some(
+      (k) => Number(k.qty) > 0 && bahanById.get(k.ingredient_id)?.is_packaging,
+    );
+    if (sendiri) return true;
+    if (tipe !== "paket" || !baseMenuId) return false;
+    return menus?.find((m) => m.id === baseMenuId)?.komponen.some((k) => k.is_packaging) ?? false;
+  }, [komponen, bahanById, tipe, baseMenuId, menus]);
+
+  /**
+   * Menu tanpa komponen sama sekali belum punya HPP apa pun — menegurnya soal
+   * kemasan hanya jadi bising. Peringatan baru berlaku begitu resepnya diisi.
+   */
+  const adaResep = komponen.some((k) => k.ingredient_id && Number(k.qty) > 0);
+  const perluKemasan = adaResep && !punyaKemasan;
 
   /**
    * Draf "isi menu" dari baris resep yang SEDANG diedit (belum tentu tersimpan),
@@ -206,6 +238,13 @@ export function MenuFormPage() {
       <form
         onSubmit={(e) => {
           e.preventDefault();
+          // Konfirmasi dulu bila menu berresep ini belum punya kemasan take
+          // away — bukan larangan (ada menu yang memang tak pernah dibawa
+          // pulang), tapi keputusannya harus disadari, bukan kelewatan.
+          if (perluKemasan) {
+            setTanyaKemasan(true);
+            return;
+          }
           simpan.mutate();
         }}
         className="space-y-5"
@@ -523,13 +562,29 @@ export function MenuFormPage() {
               </div>
             )}
           </div>
+          {perluKemasan && (
+            <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+              🥡 <b>Semua menu bisa dijual bawa pulang.</b> Menu ini belum punya bahan{" "}
+              <b>Kemasan TA</b>, jadi HPP bawa pulang sama dengan HPP dine-in — biaya dus/box
+              tidak pernah masuk laba-rugi dan stok kemasan tidak berkurang saat pesanan
+              dibawa pulang. Tandai bahan kemasannya dengan centang <b>🥡 Kemasan TA</b> di{" "}
+              <Link to="/bahan" className="font-medium text-orange-600 hover:underline">
+                Bahan Baku
+              </Link>
+              , lalu tambahkan ke resep menu ini.
+            </div>
+          )}
         </Card>
 
         <Card className="p-4">
           <h2 className="mb-3 font-semibold text-stone-700">Preview harga (live)</h2>
           <div className="grid grid-cols-2 gap-3 text-sm lg:grid-cols-5">
             <div>
-              <div className="text-stone-500">HPP</div>
+              {/* `preview.hpp` memakai `hitungHpp(k)` dengan dineIn=false — itu
+                  memang HPP bawa pulang (kemasan penuh). Label lamanya cuma
+                  "HPP" dan menyembunyikan fakta itu tepat di layar tempat
+                  kemasan take away semestinya diputuskan. */}
+              <div className="text-stone-500">HPP bawa pulang</div>
               <div className="text-lg font-bold">{formatRupiah(preview.hpp)}</div>
             </div>
             <div>
@@ -555,6 +610,11 @@ export function MenuFormPage() {
               </div>
             </div>
           </div>
+          <p className="mt-2 text-xs text-stone-500">
+            Selisih <b>bawa pulang</b> vs <b>dine-in</b> = bahan bertanda 🥡 Kemasan TA (dihitung
+            penuh saat bawa pulang, dilewati saat makan di tempat) + separuh takaran bahan
+            pelengkap. Selisih Rp 0 berarti menu ini belum punya kemasan take away.
+          </p>
           <details className="mt-3 text-sm text-stone-500">
             <summary className="cursor-pointer font-medium">Panduan markup per kategori</summary>
             <table className="mt-2 w-full max-w-lg">
@@ -581,6 +641,57 @@ export function MenuFormPage() {
           </Link>
         </div>
       </form>
+
+      {/*
+        Konfirmasi, bukan larangan: ada menu yang memang tak pernah dibawa
+        pulang. Yang tak boleh terjadi adalah menyimpan menu tanpa kemasan
+        TANPA SADAR — akibatnya baru muncul berbulan-bulan kemudian sebagai
+        laba yang terlihat lebih besar dari kenyataan.
+      */}
+      <Modal
+        open={tanyaKemasan}
+        onClose={() => setTanyaKemasan(false)}
+        title="Menu ini belum punya kemasan take away"
+      >
+        <div className="space-y-4 text-sm text-stone-700">
+          <p>
+            <b>Semua menu bisa dijual bawa pulang.</b> Resep menu{" "}
+            <b>{nama || "ini"}</b> belum memuat bahan bertanda <b>🥡 Kemasan TA</b>.
+          </p>
+          <ul className="list-disc space-y-1 pl-5 text-stone-600">
+            <li>
+              HPP bawa pulang = HPP dine-in ({formatRupiah(preview.hpp)}) — biaya dus/box
+              tidak pernah masuk laba-rugi.
+            </li>
+            <li>Stok kemasan tidak berkurang saat pesanan ini dibawa pulang.</li>
+          </ul>
+          <p className="text-stone-500">
+            Tandai bahan kemasannya dengan centang <b>🥡 Kemasan TA</b> di halaman Bahan Baku,
+            lalu tambahkan ke resep menu ini.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setTanyaKemasan(false)}
+              className={btnPrimary}
+              autoFocus
+            >
+              Tambah kemasan dulu
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setTanyaKemasan(false);
+                simpan.mutate();
+              }}
+              disabled={simpan.isPending}
+              className={btnSecondary}
+            >
+              Simpan tanpa kemasan
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
