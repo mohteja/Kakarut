@@ -125,20 +125,32 @@ function BarisPesanan({
             ✅ Selesai
           </button>
         )}
+        {/*
+          TIDAK ADA tombol Batal di papan. Membatalkan pesanan menyentuh uang —
+          tagihan, stok, dan tamu yang mungkin sudah menerima piringnya — dan itu
+          keputusan kasir, bukan dapur. Papan ini hanya menandai mana yang sudah
+          keluar dari dapur.
+
+          Kolom "Batal" TETAP ada: pesanan yang dibatalkan kasir (hapus bill di
+          daftar Open Bill) harus tetap terlihat di sini, supaya dapur yang sedang
+          memasaknya dapat sinyal untuk berhenti. Kalau kolomnya ikut dihapus,
+          kartunya lenyap dari papan tanpa pemberitahuan apa pun.
+
+          `↩ Kembalikan` DIPERTAHANKAN, termasuk pada baris yang batal: setelah
+          Batal hilang, ini satu-satunya jalan mundur kalau ada yang salah tekan —
+          dan pada baris batal ia membuka lagi bill yang telanjur dihapus kasir.
+        */}
         {it.status !== "dikerjakan" && (
           <button
             onClick={() => onStatus("dikerjakan")}
+            title={
+              it.status === "batal"
+                ? "Kembalikan ke dapur — pesanan ini dibatalkan kasir"
+                : "Belum selesai — kembalikan ke daftar kerja"
+            }
             className="rounded-md bg-orange-100 px-2 py-1 text-[11px] font-semibold text-orange-800 hover:bg-orange-200"
           >
             ↩ Kembalikan
-          </button>
-        )}
-        {it.status !== "batal" && (
-          <button
-            onClick={() => onStatus("batal")}
-            className="rounded-md bg-red-50 px-2 py-1 text-[11px] font-semibold text-red-700 hover:bg-red-100"
-          >
-            ✖ Batal
           </button>
         )}
         <button
@@ -262,11 +274,9 @@ function KartuPesanan({
         Selesai. Pesanan satu-dua sajian adalah mayoritas, dan menekan tombol
         per baris untuk itu melelahkan — jadi pintasannya tetap perlu ada.
 
-        TIDAK ADA "batal semua". Membatalkan sepiring makanan adalah keputusan
-        per sajian: siapa yang membatalkan apa harus terbaca di riwayat, dan satu
-        tombol yang menghapus seluruh pesanan sekaligus menghilangkan justru
-        keterangan itu. Batal tetap ada di tiap baris. "Kembalikan semua" ikut
-        dihapus dengan alasan yang sama — mengembalikan pesanan yang sudah keluar
+        Papan ini TIDAK punya Batal sama sekali — tidak per sajian, tidak per
+        kartu. Membatalkan pesanan menyentuh uang, dan itu pekerjaan kasir.
+        "Kembalikan semua" juga tak ada: mengembalikan pesanan yang sudah keluar
         adalah koreksi, dan koreksi menunjuk sajian tertentu.
       */}
       <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-stone-100 pt-2">
@@ -440,6 +450,13 @@ export function PesananPage() {
         <b>belum dibayar</b>. Tandai <b>tiap sajian</b> begitu keluar dari dapur, jadi
         semua orang tahu mana yang sudah dan mana yang belum. Tombol <b>bawa pulang</b>{" "}
         hanya mengubah cara penyajian, tidak mengubah nota atau perhitungan stok.
+        {/* Tanpa keterangan ini, dapur akan mencari tombol Batal yang sudah tak
+            ada dan menyangka papannya rusak. */}
+        <div className="mt-1">
+          <b>Membatalkan pesanan dilakukan kasir</b>, bukan dari papan ini — karena
+          menyangkut tagihan. Pesanan yang dibatalkan kasir tetap muncul di kolom{" "}
+          <b>Batal</b> supaya dapur tahu harus berhenti memasak.
+        </div>
       </div>
 
       <div className="mb-3 flex flex-wrap items-center gap-3">
