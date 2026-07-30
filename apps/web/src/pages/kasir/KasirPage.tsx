@@ -197,6 +197,16 @@ export function KasirPage() {
    * meluruhkannya sendiri.
    */
   const [tamuMejaId, setTamuMejaId] = useState<string | null>(null);
+  /**
+   * Konfirmasi "yakin ganti meja?" saat keranjang sudah terisi.
+   *
+   * Menukar meja diam-diam itu berbahaya dua arah: pesanan yang sudah diketik
+   * untuk meja lama bisa ikut terbawa ke meja baru tanpa disadari, atau justru
+   * hilang karena kasir mengira ganti meja = mulai dari nol. Jadi kasir yang
+   * memutuskan: bawa pesanannya, simpan dulu jadi Open Bill di meja lama, atau
+   * buang.
+   */
+  const [gantiMejaOpen, setGantiMejaOpen] = useState(false);
 
   const { data: openBills = [] } = useQuery({
     queryKey: ["open-bill", branchQuery],
@@ -260,6 +270,16 @@ export function KasirPage() {
   const perluPilihMeja = !mejaId;
   const mejaAktif = useMemo(() => mejaList.filter((m) => m.is_active), [mejaList]);
   const mejaTerpilih = mejaAktif.find((m) => m.id === mejaId) ?? null;
+  /**
+   * Bill yang sedang dibuka, menurut catatan SERVER (bukan pilihan di layar).
+   * Dipakai memastikan perpindahan meja terlihat sebelum disimpan: kasir menekan
+   * Ganti, mejanya berubah di layar, tapi kartu Open Bill masih menyebut meja
+   * lama — karena itu memang belum tersimpan. Tanpa keterangan, itu terbaca
+   * "ganti mejanya tidak berpengaruh".
+   */
+  const billDibuka = editingBillId ? openBills.find((b) => b.id === editingBillId) : undefined;
+  const pindahMeja =
+    billDibuka && mejaId && billDibuka.meja_id !== mejaId ? billDibuka : undefined;
   // Meja menentukan mode transaksi: meja bernomor = dine-in (default), meja
   // Ruang Tunggu = bawa pulang. Sebelum meja dipilih, tampilan default dine-in.
   const dineIn = mejaTerpilih ? mejaTerpilih.tipe === "dine_in" : true;
@@ -301,8 +321,6 @@ export function KasirPage() {
 
   function pilihMeja(id: string) {
     // Meja lunas-tapi-belum-dibereskan: tanya dulu tamunya sama atau baru.
-    // Meja yang masih punya bill belum dibayar TIDAK ditanya di sini — di sana
-    // jalurnya "buka bill yang ada", dan itu ditangani tombol Open Bill.
     const st = statusMeja.get(id);
     if (st?.lunas_masih_duduk) {
       setTamuMejaId(id);
@@ -310,6 +328,33 @@ export function KasirPage() {
     }
     setMejaId(id);
     setMejaModalOpen(false);
+
+    /**
+     * Meja dine-in yang masih punya bill BELUM DIBAYAR → tampilkan pesanannya.
+     *
+     * Sebelum ini memilih meja hanya menyetel `mejaId`. Kasir lalu melihat
+     * keranjang kosong, mengira mejanya kosong, mengetik pesanan dari nol —
+     * dan baru ditolak 409 di tombol Simpan, harus mundur lagi. Pesanan yang
+     * sedang berjalan di meja itu memang yang paling ingin ia lihat.
+     *
+     * Ruang Tunggu DIKECUALIKAN: ia sengaja boleh menampung banyak bill bawa
+     * pulang sekaligus (tak kena aturan satu-meja-satu-bill), jadi memuat
+     * salah satunya justru menebak yang salah.
+     */
+    const m = mejaAktif.find((x) => x.id === id);
+    if (m?.tipe !== "dine_in") return;
+    const billDiSitu = openBills.filter((b) => b.meja_id === id);
+    if (billDiSitu.length === 0) return;
+    // Sudah membuka bill meja itu → tak ada yang perlu dimuat lagi.
+    if (billDiSitu.some((b) => b.id === editingBillId)) return;
+    // Keranjang kosong & cuma satu bill → muat langsung, tak ada yang hilang.
+    if (billDiSitu.length === 1 && cart.length === 0) {
+      void bukaBill(billDiSitu[0].id);
+      return;
+    }
+    // Keranjang terisi (ada yang bisa hilang) atau lebih dari satu bill →
+    // biarkan kasir memilih; modalnya sudah memperingatkan soal tertimpa.
+    setBillGandaOpen(true);
   }
 
   /** "Tamu yang sama" — lanjut di meja itu, konsumennya dibawa supaya member tak terputus. */
@@ -813,7 +858,11 @@ export function KasirPage() {
 
         {/* Meja terpilih (dipilih lewat modal di awal transaksi) + tombol ganti */}
         <button
-          onClick={() => setMejaModalOpen(true)}
+          onClick={() => {
+            // Keranjang kosong = tak ada yang bisa hilang → langsung ke pemilih.
+            if (cart.length > 0 && mejaId) setGantiMejaOpen(true);
+            else setMejaModalOpen(true);
+          }}
           className={`mb-3 flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left ${
             mejaTerpilih
               ? dineIn
@@ -841,6 +890,18 @@ export function KasirPage() {
             {mejaTerpilih ? "Ganti" : "Pilih"}
           </span>
         </button>
+
+        {/* Perpindahan meja belum tersimpan — katakan apa adanya, termasuk meja
+            asalnya, supaya kasir tahu perubahannya tercatat dan tahu cara
+            membatalkannya (pilih kembali meja asal). */}
+        {pindahMeja && (
+          <div className="-mt-1 mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs leading-snug text-amber-800">
+            Bill ini masih tercatat di <b>{pindahMeja.meja_label ?? "tanpa meja"}</b>. Menekan{" "}
+            <b>Perbarui Bill</b> akan <b>memindahkannya</b> ke{" "}
+            <b>{mejaTerpilih?.nama ?? "meja ini"}</b>. Batal? Pilih kembali{" "}
+            {pindahMeja.meja_label ?? "meja asalnya"}.
+          </div>
+        )}
 
         {/* Konsumen/member (opsional) — di bawah meja; ketik nama ATAU WA →
             dropdown member muncul, pilih untuk isi keduanya sekaligus. */}
@@ -1470,6 +1531,89 @@ export function KasirPage() {
           branchQuery={branchQuery}
           onClose={() => setKosongkanId(null)}
         />
+      )}
+
+      {/* "Yakin ganti meja?" — muncul HANYA bila keranjang terisi, karena hanya
+          di situ ada yang bisa hilang. Tiga jalan keluar, semuanya menyebut
+          akibatnya ke pesanan yang sudah diketik; tak ada yang menghapus tanpa
+          diminta. */}
+      {gantiMejaOpen && (
+        <Modal open onClose={() => setGantiMejaOpen(false)} title="Yakin ganti meja?">
+          <p className="text-sm text-stone-600">
+            Ada <b>{cart.length} pesanan</b> di keranjang untuk{" "}
+            <b>{mejaTerpilih?.nama ?? "meja ini"}</b>. Pesanannya mau diapakan?
+          </p>
+          <ErrorText error={simpanBill.error} />
+          <div className="mt-3 space-y-2">
+            <button
+              onClick={() => {
+                // Keranjang dibiarkan utuh — pilihan meja berikutnya yang
+                // menentukan ke mana pesanan ini dibukukan.
+                setGantiMejaOpen(false);
+                setMejaModalOpen(true);
+              }}
+              disabled={simpanBill.isPending}
+              className="w-full rounded-lg border border-blue-300 bg-blue-50 px-3 py-3 text-left hover:bg-blue-100 disabled:opacity-50"
+            >
+              <span className="block text-sm font-bold text-blue-900">
+                🍽 Bawa pesanan ini ke meja baru
+              </span>
+              <span className="block text-xs text-blue-700">
+                Salah pilih meja — keranjang ikut pindah, tak ada yang hilang.
+              </span>
+            </button>
+            <button
+              onClick={async () => {
+                // Pesanan meja LAMA diamankan dulu jadi bill, baru pindah.
+                await simpanBill.mutateAsync().catch(() => null);
+                if (simpanBill.isError) return;
+                setGantiMejaOpen(false);
+                setMejaModalOpen(true);
+              }}
+              disabled={simpanBill.isPending}
+              className="w-full rounded-lg border border-amber-300 bg-amber-50 px-3 py-3 text-left hover:bg-amber-100 disabled:opacity-50"
+            >
+              <span className="block text-sm font-bold text-amber-900">
+                {simpanBill.isPending
+                  ? "Menyimpan…"
+                  : editingBillId
+                    ? `💾 Simpan perubahan di ${mejaTerpilih?.nama ?? "meja ini"} dulu`
+                    : `💾 Simpan jadi Open Bill di ${mejaTerpilih?.nama ?? "meja ini"}`}
+              </span>
+              <span className="block text-xs text-amber-700">
+                Pesanan ini tetap tertagih di meja lama, lalu keranjang bersih untuk meja baru.
+              </span>
+            </button>
+            <button
+              onClick={() => {
+                // Baris yang SUDAH jadi bill tak dihapus dari sini — bill-nya
+                // tetap utuh di server, yang dibuang hanya suntingan di layar.
+                // Menghapus bill sungguhan harus lewat jalur yang berjejak.
+                resetTransaksi();
+                setGantiMejaOpen(false);
+                setMejaModalOpen(true);
+              }}
+              disabled={simpanBill.isPending}
+              className="w-full rounded-lg border border-red-300 bg-red-50 px-3 py-3 text-left hover:bg-red-100 disabled:opacity-50"
+            >
+              <span className="block text-sm font-bold text-red-900">
+                {editingBillId ? "↩ Tinggalkan perubahan" : "🗑 Hapus pesanan ini"}
+              </span>
+              <span className="block text-xs text-red-700">
+                {editingBillId
+                  ? "Bill tetap seperti yang sudah tersimpan — hanya suntingan di layar yang dibuang."
+                  : "Keranjang dikosongkan, tak ada yang tersimpan."}
+              </span>
+            </button>
+          </div>
+          <button
+            onClick={() => setGantiMejaOpen(false)}
+            disabled={simpanBill.isPending}
+            className={`${btnSecondary} mt-3 w-full`}
+          >
+            Batal, tetap di {mejaTerpilih?.nama ?? "meja ini"}
+          </button>
+        </Modal>
       )}
 
       {/* Meja SUDAH DIBAYAR tapi belum dibereskan. Server tak bisa membedakan
