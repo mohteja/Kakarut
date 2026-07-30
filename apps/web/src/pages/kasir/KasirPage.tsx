@@ -377,7 +377,22 @@ export function KasirPage() {
   function ubahQty(menuId: string, delta: number) {
     setCart((prev) =>
       prev
-        .map((l) => (l.menu.id === menuId ? { ...l, qty: l.qty + delta } : l))
+        .map((l) => {
+          if (l.menu.id !== menuId) return l;
+          /**
+           * Baris yang SUDAH masuk bill sudah tayang di papan dapur sejak bill
+           * disimpan — bisa jadi sudah dimasak. Menghapusnya dari keranjang
+           * membuat `PUT` membuangnya dari bill, dan barisnya lenyap dari papan
+           * tanpa jejak siapa pun: dapur kehilangan pekerjaan yang sudah
+           * dikerjakan tanpa ada yang bisa menjelaskan ke mana.
+           *
+           * Jadi qty-nya dijaga minimal 1. Membatalkannya lewat Papan Pesanan,
+           * yang menyimpan pelaku & waktunya. Penjagaan ditaruh DI SINI, bukan
+           * cuma di tombolnya, supaya tak ada jalur lain yang melewatinya.
+           */
+          const minQty = l.billItemId ? 1 : 0;
+          return { ...l, qty: Math.max(minQty, l.qty + delta) };
+        })
         .filter((l) => l.qty > 0),
     );
   }
@@ -885,6 +900,16 @@ export function KasirPage() {
           )}
         </div>
 
+        {/* Keterangan warna, sekali di atas daftar — menjawab "kenapa baris ini
+            tak bisa dihapus" tanpa menempelkan peringatan di setiap baris. */}
+        {editingBillId && cart.some((l) => l.billItemId) && (
+          <div className="mb-2 rounded-lg border border-stone-200 bg-stone-50 px-2 py-1.5 text-[11px] leading-snug text-stone-600">
+            <b className="text-emerald-800">✓ Sudah masuk pesanan</b> = sudah tayang di papan
+            dapur, jadi tak bisa dihapus dari sini — batalkan lewat <b>Papan Pesanan</b> supaya
+            ada jejaknya. <b className="text-orange-800">Baru</b> = tambahan yang belum
+            disimpan.
+          </div>
+        )}
         <div className="space-y-2 md:flex-1 md:overflow-y-auto">
           {cart.length === 0 && (
             <div className="py-10 text-center text-sm text-stone-400">
@@ -896,8 +921,24 @@ export function KasirPage() {
           )}
           {cart.map((l) => {
             const efektifDineIn = l.dineInOverride ?? dineIn;
+            // Saat MEMPERBARUI bill: bedakan baris yang sudah tayang di papan
+            // dapur dari baris yang baru diketik. Tanpa itu kasir tak tahu mana
+            // yang sudah diproses, dan tak tahu kenapa satu baris tak bisa
+            // dihapus sementara yang lain bisa. Pada transaksi baru semua baris
+            // memang baru, jadi penandanya tak perlu muncul.
+            const sudahKeDapur = editingBillId != null && l.billItemId != null;
+            const barisBaru = editingBillId != null && l.billItemId == null;
             return (
-              <div key={l.menu.id} className="rounded-lg border border-stone-200 p-2">
+              <div
+                key={l.menu.id}
+                className={`rounded-lg border p-2 ${
+                  sudahKeDapur
+                    ? "border-emerald-200 bg-emerald-50/40"
+                    : barisBaru
+                      ? "border-orange-300 bg-orange-50/40"
+                      : "border-stone-200"
+                }`}
+              >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <div className="truncate text-sm font-semibold text-stone-800">
@@ -909,6 +950,16 @@ export function KasirPage() {
                     </div>
                     {/* Harga menu berubah setelah bill dibuat: pembeli tetap
                         ditagih harga saat memesan — katakan apa adanya. */}
+                    {sudahKeDapur && (
+                      <div className="mt-0.5 inline-flex items-center rounded-full bg-emerald-100 px-1.5 py-0.5 text-[11px] font-semibold text-emerald-800">
+                        ✓ Sudah masuk pesanan
+                      </div>
+                    )}
+                    {barisBaru && (
+                      <div className="mt-0.5 inline-flex items-center rounded-full bg-orange-100 px-1.5 py-0.5 text-[11px] font-semibold text-orange-800">
+                        Baru — belum disimpan
+                      </div>
+                    )}
                     {l.hargaKunci != null && l.hargaKunci !== l.menu.harga_jual && (
                       <div
                         className="text-[11px] text-amber-700"
@@ -937,7 +988,13 @@ export function KasirPage() {
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => ubahQty(l.menu.id, -1)}
-                      className="h-7 w-7 rounded-lg border border-stone-300 text-stone-600 hover:bg-stone-50"
+                      disabled={sudahKeDapur && l.qty <= 1}
+                      title={
+                        sudahKeDapur && l.qty <= 1
+                          ? "Sudah masuk pesanan — batalkan dari Papan Pesanan supaya ada jejaknya"
+                          : "Kurangi jumlah"
+                      }
+                      className="h-7 w-7 rounded-lg border border-stone-300 text-stone-600 hover:bg-stone-50 disabled:cursor-not-allowed disabled:border-stone-200 disabled:text-stone-300 disabled:hover:bg-transparent"
                     >
                       −
                     </button>
