@@ -248,6 +248,16 @@ export function KasirPage() {
     () => (mejaId ? openBills.filter((b) => b.meja_id === mejaId) : []),
     [openBills, mejaId],
   );
+  /**
+   * MEJA DULU, BARU MENU.
+   *
+   * Tanpa meja, transaksi ini memang tak bisa diselesaikan — kedua tombol di
+   * kaki keranjang sudah mati sejak awal. Yang salah selama ini: kasir tetap
+   * bisa mengisi keranjang lebih dulu, lalu baru menabrak tombol mati di ujung
+   * dan harus mundur mencari meja sambil pembeli menunggu. Jadi katalognya
+   * ditutup sampai mejanya dipilih — sama seperti aplikasi mobile.
+   */
+  const perluPilihMeja = !mejaId;
   const mejaAktif = useMemo(() => mejaList.filter((m) => m.is_active), [mejaList]);
   const mejaTerpilih = mejaAktif.find((m) => m.id === mejaId) ?? null;
   // Meja menentukan mode transaksi: meja bernomor = dine-in (default), meja
@@ -577,11 +587,12 @@ export function KasirPage() {
             setCariMenu(e.target.value);
             if (e.target.value) setAktifKategori(null);
           }}
-          placeholder="🔍 Cari menu / kode…"
-          className="mb-3 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm focus:border-orange-500 focus:outline-none"
+          disabled={perluPilihMeja}
+          placeholder={perluPilihMeja ? "🔍 Pilih meja dulu…" : "🔍 Cari menu / kode…"}
+          className="mb-3 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm focus:border-orange-500 focus:outline-none disabled:cursor-not-allowed disabled:bg-stone-100 disabled:text-stone-400"
         />
         {/* Toggle tampilan: foto (thumbnail) / kode (ringkas per kategori) */}
-        <div className="mb-3 flex items-center gap-2">
+        <div className={`mb-3 flex items-center gap-2 ${perluPilihMeja ? "hidden" : ""}`}>
           <div className="flex overflow-hidden rounded-lg border border-stone-300 text-sm">
             <button
               type="button"
@@ -609,7 +620,7 @@ export function KasirPage() {
         </div>
 
         {/* Kategori — hanya pada tampilan foto; tampilan kode menampilkan semua kategori sekaligus */}
-        {tampilan === "foto" && (
+        {!perluPilihMeja && tampilan === "foto" && (
           <div className="mb-3 flex flex-wrap gap-2">
             <button
               onClick={() => {
@@ -643,7 +654,19 @@ export function KasirPage() {
           </div>
         )}
 
-        {tampilan === "foto" ? (
+        {perluPilihMeja ? (
+          <div className="flex flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed border-stone-300 bg-stone-50 px-6 py-12 text-center md:flex-1">
+            <div className="text-4xl">🍽</div>
+            <div className="text-base font-bold text-stone-700">Pilih meja dulu</div>
+            <p className="max-w-xs text-sm text-stone-500">
+              Menu terbuka setelah mejanya dipilih. Untuk pesanan bawa pulang, pilih{" "}
+              <b>Ruang Tunggu</b>.
+            </p>
+            <button onClick={() => setMejaModalOpen(true)} className={`${btnPrimary} mt-1`}>
+              🍽 Pilih meja
+            </button>
+          </div>
+        ) : tampilan === "foto" ? (
           <div className="grid auto-rows-min grid-cols-2 gap-3 pb-4 md:flex-1 md:grid-cols-3 md:overflow-y-auto xl:grid-cols-4">
             {menuTampil.map((m) => (
               <button
@@ -865,7 +888,10 @@ export function KasirPage() {
         <div className="space-y-2 md:flex-1 md:overflow-y-auto">
           {cart.length === 0 && (
             <div className="py-10 text-center text-sm text-stone-400">
-              Ketuk menu untuk menambahkan.
+              {/* Jangan menyuruh "ketuk menu" saat katalognya memang masih
+                  tertutup — dua petunjuk yang bertabrakan justru bikin kasir
+                  mencari-cari menu yang tak ada. */}
+              {perluPilihMeja ? "Pilih meja dulu, menunya menyusul." : "Ketuk menu untuk menambahkan."}
             </div>
           )}
           {cart.map((l) => {
