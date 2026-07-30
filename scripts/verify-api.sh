@@ -6562,6 +6562,52 @@ cek "nota pisah-porsi-lewat-PUT: subtotal 3 × 12000 = 36000" "V == 36000" \
   "$(echo "$SQ154" | jq '.sale.subtotal')"
 api "$OWNER" PUT "/menu/$M154" '{"harga_jual":12000}' > /dev/null
 
+# (f4) BARIS BILL TAK BISA DIHAPUS LEWAT `PUT`. Bill tayang di papan dapur
+#      begitu disimpan, jadi tiap barisnya sudah dilihat — bisa jadi sudah
+#      dimasak. Dulu baris yang tak dikirim ulang di-hard-delete: pekerjaan dapur
+#      lenyap dari papan tanpa jejak siapa pun. Membatalkan satu sajian jalurnya
+#      papan pesanan, yang menyimpan pelaku & waktunya.
+OB154H=$(api "$REISS105" POST /open-bill "{\"meja_id\":\"$MEJA154\",\"customer_nama\":\"Bu Sri 154\",\"items\":[{\"menu_id\":\"$M154\",\"qty\":1},{\"menu_id\":\"$M154B\",\"qty\":1}]}")
+OBID154H=$(echo "$OB154H" | jq -r .id)
+BH1=$(echo "$OB154H" | jq -r --arg m "$M154" '[.items[]|select(.menu_id==$m)][0].id')
+BH2=$(echo "$OB154H" | jq -r --arg m "$M154B" '[.items[]|select(.menu_id==$m)][0].id')
+cek "PUT tanpa salah satu baris bill → 400 (bukan dihapus diam-diam)" "V == 400" \
+  "$(status_code_body "$REISS105" PUT "/open-bill/$OBID154H" "{\"meja_id\":\"$MEJA154\",\"items\":[{\"id\":\"$BH1\",\"menu_id\":\"$M154\",\"qty\":1}]}")"
+cek "badan galat berkode mesin + item_ids yang menolak dihapus" "V == 1" \
+  "$(api "$REISS105" PUT "/open-bill/$OBID154H" "{\"meja_id\":\"$MEJA154\",\"items\":[{\"id\":\"$BH1\",\"menu_id\":\"$M154\",\"qty\":1}]}" | jq -r --arg b "$BH2" '((.kode=="baris_bill_tak_bisa_dihapus") and ([.item_ids[]]|index($b)!=null))|if . then 1 else 0 end')"
+# DITOLAK = TIDAK ADA YANG BERUBAH. Galat di tengah transaksi tak me-rollback
+# `update` yang sudah jalan, jadi penjagaannya harus di depan semua mutasi —
+# assertion ini yang membuktikannya.
+cek "ditolak: kedua baris MASIH ada, qty & nama konsumen tak bergeser" "V == 1" \
+  "$(api "$REISS105" GET "/open-bill/$OBID154H" | jq -r '(((.items|length)==2) and ([.items[].qty]|add==2) and (.customer_nama=="Bu Sri 154"))|if . then 1 else 0 end')"
+# Jalan yang BENAR: batalkan sajiannya di papan pesanan — barisnya tetap ada.
+api "$TKIT154" POST "/pesanan/open_bill/$OBID154H/item/$BH2/status" '{"status":"batal"}' > /dev/null
+cek "batal lewat papan: baris tetap ada, statusnya batal (berjejak)" "V == 1" \
+  "$(kartu154 "$TKIT154" "$OBID154H" | jq -r --arg b "$BH2" '((([.items[]]|length)==2) and ([.items[]|select(.id==$b)][0].status=="batal"))|if . then 1 else 0 end')"
+cek "PUT masih boleh menambah pesanan (yang dilarang cuma menghapus)" "V == 200" \
+  "$(status_code_body "$REISS105" PUT "/open-bill/$OBID154H" "{\"meja_id\":\"$MEJA154\",\"items\":[{\"id\":\"$BH1\",\"menu_id\":\"$M154\",\"qty\":2},{\"id\":\"$BH2\",\"menu_id\":\"$M154B\",\"qty\":1},{\"menu_id\":\"$M154\",\"qty\":1}]}")"
+cek "seluruh bill dibatalkan tetap boleh lewat DELETE" "V == 200" \
+  "$(status_code_body "$REISS105" DELETE "/open-bill/$OBID154H" '')"
+# MENU DIARSIPKAN setelah bill dibuat — pasangan wajib dari penjagaan di atas.
+# `GET /menu` menyaring menu nonaktif, jadi klien yang membuang baris tanpa
+# pasangan katalog akan mengirim PUT tanpa baris itu dan kini kena 400: kasir
+# tak bisa memperbarui bill sama sekali. Server HARUS tetap menerima barisnya,
+# dan klien HARUS menyusunnya dari snapshot bill (`menu_nama`+`harga_satuan`).
+OB154Z=$(api "$REISS105" POST /open-bill "{\"meja_id\":\"$MEJA154\",\"items\":[{\"menu_id\":\"$M154B\",\"qty\":1}]}")
+OBID154Z=$(echo "$OB154Z" | jq -r .id)
+BZ1=$(echo "$OB154Z" | jq -r '.items[0].id')
+api "$OWNER" PUT "/menu/$M154B" '{"is_active":false}' > /dev/null
+cek "menu diarsipkan: hilang dari GET /menu (sebab bug klien dulu)" "V == 0" \
+  "$(api "$REISS105" GET /menu | jq --arg m "$M154B" '[.[]|select(.id==$m)]|length')"
+cek "baris bill-nya TETAP ada di GET /open-bill/:id (dengan snapshot namanya)" "V == 1" \
+  "$(api "$REISS105" GET "/open-bill/$OBID154Z" | jq -r --arg b "$BZ1" '[.items[]|select(.id==$b and (.menu_nama|length>0))]|length')"
+cek "PUT bill bermenu-arsip masih 200 (kasir tak terkunci)" "V == 200" \
+  "$(status_code_body "$REISS105" PUT "/open-bill/$OBID154Z" "{\"meja_id\":\"$MEJA154\",\"items\":[{\"id\":\"$BZ1\",\"menu_id\":\"$M154B\",\"qty\":3}]}")"
+cek "qty-nya benar-benar tersimpan, harga terkunci tak bergeser" "V == 1" \
+  "$(api "$REISS105" GET "/open-bill/$OBID154Z" | jq -r --arg b "$BZ1" '[.items[]|select(.id==$b)][0] | ((.qty==3) and (.harga_satuan==8000))|if . then 1 else 0 end')"
+api "$OWNER" PUT "/menu/$M154B" '{"is_active":true}' > /dev/null
+api "$REISS105" DELETE "/open-bill/$OBID154Z" > /dev/null
+
 # (g) BATAL per baris. Bill baru boleh lepas dari pemilih kasir saat TAK ADA
 #     LAGI yang bisa ditagih — satu baris batal tidak menghapus tagihannya.
 OB154B=$(api "$REISS105" POST /open-bill "{\"meja_id\":\"$MEJA154\",\"items\":[{\"menu_id\":\"$M154\",\"qty\":1},{\"menu_id\":\"$M154B\",\"qty\":1}]}")

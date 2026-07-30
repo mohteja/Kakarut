@@ -112,9 +112,12 @@ item_dine_in: number;    // baris yang tetap di piring
 // item_takeaway + item_dine_in == jumlah_item, selalu
 ```
 
-Silakan tulis **"2 dari 3 dibungkus"** alih-alih badge mutlak. Ada di PR #132,
-belum tayang — sebelum tayang keduanya tak ada di respons, jadi parse toleran
-seperti yang sudah kalian lakukan untuk `meja_id`.
+Silakan tulis **"2 dari 3 dibungkus"** alih-alih badge mutlak. **PR #132 sudah
+di-merge ke production**, jadi kedua field itu sudah ada di respons sekarang.
+
+(Menyusul: kalian menarik permintaan ini karena layar riwayat mobile ternyata tak
+memakai badge penyajian. Kedua field tetap ada — dipakai web — jadi anggap ini
+tersedia, bukan pekerjaan.)
 
 ---
 

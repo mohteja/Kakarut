@@ -4,9 +4,12 @@ Satu berkas, cukup dibaca ini saja untuk mengerjakan batch ini. Acuan lengkap
 tetap `docs/API-CONTRACT.md` (Lampiran A = salinan utuh
 `packages/shared/src/types.ts`).
 
-**Tanggal snapshot: 30 Juli 2026.** Semua yang di sini ada di **PR #132** dan
-**BELUM tayang di production** — kecuali yang ditandai "sudah tayang". Jangan
-rilis klien yang bergantung padanya sebelum kami kabari PR-nya sudah di-merge.
+**Tanggal snapshot: 30 Juli 2026.** ✅ **PR #132 SUDAH di-merge ke production** —
+seluruh isi dokumen ini sudah tayang dan aman dipakai. Tak ada lagi yang perlu
+ditunggu.
+
+Bacaan tabel di bawah sudah disesuaikan: kolom "Status server" yang tadinya
+"PR #132" kini berarti **sudah tayang**.
 
 ---
 
@@ -16,9 +19,9 @@ rilis klien yang bergantung padanya sebelum kami kabari PR-nya sudah di-merge.
 | --- | --- | --- | --- |
 | 1 | **CEK DULU:** `open_bill_item_id` saat membayar open bill | sudah tayang (tak berubah) | pengecekan kode, mungkin nol perubahan |
 | 2 | Layar meja: status okupansi + tombol Kosongkan | **sudah tayang** sejak PR #129 | layar baru |
-| 3 | Satu meja = satu bill → tangani **409** `meja_sudah_ada_bill` | PR #132 | perubahan alur simpan bill |
-| 4 | Meja sudah bayar dipilih lagi → tanya **tamu sama / tamu baru** | PR #132 | dialog baru |
-| 5 | Papan pesanan per sajian (`/api/pesanan`) | PR #132 | opsional untuk mobile |
+| 3 | Satu meja = satu bill → tangani **409** `meja_sudah_ada_bill` | ✅ sudah tayang | perubahan alur simpan bill |
+| 4 | Meja sudah bayar dipilih lagi → tanya **tamu sama / tamu baru** | ✅ sudah tayang | dialog baru |
+| 5 | Papan pesanan per sajian (`/api/pesanan`) | ✅ sudah tayang | opsional untuk mobile |
 
 Nomor 1 kami minta **dijawab dulu** sebelum yang lain — hasilnya menentukan
 apakah ada data yang sedang rusak diam-diam di produksi.
@@ -397,5 +400,6 @@ terisi** ditolak **409** ("kosongkan dulu").
    membayar open bill? Ini yang paling mendesak.
 2. Konfirmasi apakah bagian 5 (papan pesanan) mau dibawa ke mobile atau cukup di
    komputer cabang, supaya kami tahu perlu tidaknya menyiapkan apa pun lagi.
-3. Kalau ada bentuk respons yang menyulitkan di sisi Flutter, bilang sekarang —
-   selagi PR #132 belum di-merge, mengubahnya masih murah.
+3. Kalau ada bentuk respons yang menyulitkan di sisi Flutter, bilang saja.
+   PR #132 sudah tayang, jadi mengubahnya sekarang berarti perubahan kontrak
+   berikutnya — masih bisa, hanya tak lagi gratis. Lebih awal lebih murah.

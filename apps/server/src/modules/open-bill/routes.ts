@@ -343,6 +343,56 @@ export const openBillRoutes = new Hono<AppEnv>()
         409,
       );
     }
+    /**
+     * BARIS BILL TAK BISA DIHAPUS LEWAT `PUT` — diperiksa SEBELUM apa pun
+     * ditulis. Mengembalikan galat di tengah transaksi TIDAK me-rollback apa
+     * yang sudah di-`update`, jadi pemasangan barisnya dihitung dulu di sini,
+     * di luar transaksi penulisan.
+     *
+     * Bill tayang di papan dapur begitu disimpan, jadi setiap barisnya sudah
+     * dilihat — bisa jadi sudah dimasak. Dulu baris yang tak berpasangan
+     * di-hard-delete: pekerjaan dapur lenyap dari papan tanpa jejak siapa pun.
+     *
+     * Membatalkan satu sajian jalurnya
+     * `POST /pesanan/open_bill/:id/item/:itemId/status {status:"batal"}` —
+     * barisnya tetap ada, lengkap dengan pelaku & waktunya. Membatalkan SELURUH
+     * bill tetap lewat `DELETE /open-bill/:id`.
+     */
+    const lamaCek = await db
+      .select({ id: openBillItems.id, menuId: openBillItems.menuId })
+      .from(openBillItems)
+      .where(eq(openBillItems.billId, id));
+    const terpakaiCek = new Set<string>();
+    for (const it of body.items) {
+      if (it.id && lamaCek.some((r) => r.id === it.id)) terpakaiCek.add(it.id);
+    }
+    const sisaCek = new Map<string, string[]>();
+    for (const r of lamaCek) {
+      if (terpakaiCek.has(r.id)) continue;
+      const antre = sisaCek.get(r.menuId) ?? [];
+      antre.push(r.id);
+      sisaCek.set(r.menuId, antre);
+    }
+    for (const it of body.items) {
+      if (it.id || it.pisah_dari) continue;
+      const cocok = sisaCek.get(it.menu_id)?.shift();
+      if (cocok) terpakaiCek.add(cocok);
+    }
+    const akanTerhapus = lamaCek.filter((r) => !terpakaiCek.has(r.id));
+    if (akanTerhapus.length > 0) {
+      // Pesan ditulis untuk KASIR, bukan developer: klien menampilkan `error`
+      // apa adanya di snackbar, jadi yang membacanya orang yang sedang berdiri
+      // di depan pelanggan.
+      return c.json(
+        {
+          error:
+            "Pesanan yang sudah masuk dapur tidak bisa dihapus dari sini — batalkan per sajian di Papan Pesanan.",
+          kode: "baris_bill_tak_bisa_dihapus",
+          item_ids: akanTerhapus.map((r) => r.id),
+        },
+        400,
+      );
+    }
     await db.transaction(async (tx) => {
       await tx
         .update(openBills)
@@ -442,9 +492,15 @@ export const openBillRoutes = new Hono<AppEnv>()
           })
           .where(eq(openBillItems.id, barisId));
       }
+      // Penjaga terakhir. Kasus ini sudah ditolak 400 di atas sebelum transaksi
+      // dibuka; kalau sampai ke sini berarti perhitungan pasangan di kedua
+      // tempat berbeda — lebih baik gagal terdengar daripada menghapus baris
+      // yang mungkin sudah dimasak.
       const dibuang = lama.filter((r) => !terpakai.has(r.id)).map((r) => r.id);
       if (dibuang.length > 0) {
-        await tx.delete(openBillItems).where(inArray(openBillItems.id, dibuang));
+        throw new HTTPException(500, {
+          message: "Perhitungan baris bill tidak konsisten — perubahan dibatalkan",
+        });
       }
       const baru = body.items.filter((_, i) => !pasangan.has(i));
       if (baru.length > 0) {
