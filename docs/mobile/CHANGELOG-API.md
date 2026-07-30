@@ -27,8 +27,10 @@ tanpa akses repo server.
 
 ## Rilis: `pisah_dari` — memecah porsi di `PUT /open-bill/:id`
 
-> Belum di-merge ke production. Tidak ada migrasi DB. Field **baru** pada body
-> `PUT`/`POST /api/open-bill`; tidak ada perilaku lama yang berubah.
+> **Sudah di-merge ke production** (PR #132, 30 Jul 2026).
+>
+> Tidak ada migrasi DB. Field **baru** pada body `PUT`/`POST /api/open-bill`;
+> tidak ada perilaku lama yang berubah.
 
 ### 🟢 BARU — `items[].pisah_dari` di `PUT /api/open-bill/:id`
 
@@ -70,8 +72,10 @@ punya baris untuk diwarisi).
 
 ## Rilis: Pisah porsi berbagi `open_bill_item_id` + cacah penyajian di riwayat
 
-> Belum di-merge ke production. Tidak ada migrasi DB, tidak ada perubahan
-> perilaku server — satu field baru + satu aturan yang **diperjelas**.
+> **Sudah di-merge ke production** (PR #132, 30 Jul 2026).
+>
+> Tidak ada migrasi DB, tidak ada perubahan perilaku server — satu field baru +
+> satu aturan yang **diperjelas**.
 
 ### 🔴 WAJIB — baris PISAH PORSI harus tetap membawa `open_bill_item_id`
 
@@ -126,7 +130,7 @@ menulis "2 dari 3 dibungkus" alih-alih badge mutlak.
 
 ## Rilis: Satu meja = satu bill + pilihan tamu sama / tamu baru
 
-> Belum di-merge ke production.
+> **Sudah di-merge ke production** (PR #132, 30 Jul 2026).
 >
 > Tidak ada migrasi DB. Satu field baru pada DTO yang sudah ada + satu aturan
 > baru yang **menolak permintaan yang dulu berhasil**.
@@ -251,7 +255,7 @@ persis seperti yang diminta di atas untuk mobile.
 
 ## Rilis: Status pesanan turun ke SETIAP BARIS (papan pesanan per sajian)
 
-> Belum di-merge ke production.
+> **Sudah di-merge ke production** (PR #132, 30 Jul 2026).
 >
 > Ada migrasi DB (`0092`): kolom status **pindah** dari `sales`/`open_bills` ke
 > `sale_items`/`open_bill_items`, plus `pesanan_logs.item_nama`. Migrasinya
