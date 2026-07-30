@@ -206,8 +206,21 @@ export function KasirPage() {
   const [metodeBayar, setMetodeBayar] = useState<MetodeBayar>("tunai");
   const [uangDiterima, setUangDiterima] = useState("");
   const [struk, setStruk] = useState<SaleResult | null>(null);
-  // Modal "Resume Order" (diskon + pembayaran) muncul saat tombol Lanjut ditekan
+  // Modal "Resume Order" muncul saat tombol Lanjut ditekan
   const [resumeOpen, setResumeOpen] = useState(false);
+  /**
+   * DUA LANGKAH, bukan satu layar.
+   *
+   * Membaca ulang pesanan dan menerima uang adalah dua pekerjaan berbeda:
+   * yang pertama dicocokkan dengan tamu ("betul, tiga porsi?"), yang kedua
+   * dengan uang di tangan. Menggabungkannya membuat kasir memilih metode bayar
+   * sambil masih mengoreksi pesanan — nominal "uang pas" ikut bergeser setiap
+   * diskon diubah, dan tak ada satu titik pun di mana pesanan dinyatakan benar.
+   *
+   * Jadi: `resume` (pesanan + diskon + total) → `bayar` (metode + uang). Tombol
+   * kembali tetap ada supaya pesanan masih bisa dikoreksi tanpa menutup modal.
+   */
+  const [langkahBayar, setLangkahBayar] = useState<"resume" | "bayar">("resume");
   // id open bill yang sedang dibuka/diedit (null = pesanan baru)
   const [editingBillId, setEditingBillId] = useState<string | null>(null);
   /**
@@ -566,6 +579,7 @@ export function KasirPage() {
     setDiskonNilai("");
     setMetodeBayar("tunai");
     setUangDiterima("");
+    setLangkahBayar("resume");
     setMejaId(null);
     setEditingBillId(null);
   }
@@ -1169,7 +1183,11 @@ export function KasirPage() {
               {simpanBill.isPending ? "Menyimpan…" : editingBillId ? "💾 Perbarui Bill" : "📋 Open Bill"}
             </button>
             <button
-              onClick={() => setResumeOpen(true)}
+              onClick={() => {
+                // selalu mulai dari baca-ulang pesanan, bukan dari layar uang
+                setLangkahBayar("resume");
+                setResumeOpen(true);
+              }}
               disabled={cart.length === 0 || !mejaId}
               className={`${btnPrimary} py-3`}
             >
@@ -1179,7 +1197,8 @@ export function KasirPage() {
         </div>
       </Card>
 
-      {/* Modal Resume Order — kasir baca ulang pesanan, isi diskon, terima uang, lalu Simpan */}
+      {/* Modal dua langkah: (1) Resume Order — baca ulang pesanan + diskon,
+          (2) Pembayaran — metode + uang diterima. Lihat catatan `langkahBayar`. */}
       {resumeOpen && !struk && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
@@ -1190,7 +1209,16 @@ export function KasirPage() {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="mb-1 flex items-center justify-between">
-              <h2 className="text-lg font-bold text-stone-800">Resume Order</h2>
+              <div>
+                <h2 className="text-lg font-bold text-stone-800">
+                  {langkahBayar === "resume" ? "Resume Order" : "Pembayaran"}
+                </h2>
+                <div className="text-xs font-medium text-stone-400">
+                  {langkahBayar === "resume"
+                    ? "Langkah 1 dari 2 · cocokkan pesanan dengan tamu"
+                    : "Langkah 2 dari 2 · terima uang"}
+                </div>
+              </div>
               <button
                 onClick={() => setResumeOpen(false)}
                 className="text-stone-400 hover:text-stone-700"
@@ -1208,9 +1236,13 @@ export function KasirPage() {
               {" · "}
               {dineIn ? "Dine-in" : "Bawa pulang"}
               {konsumenNama.trim() ? ` · 👤 ${konsumenNama.trim()}` : ""}
+              {` · ${cart.reduce((a, l) => a + l.qty, 0)} item`}
             </div>
 
-            {/* Baca ulang pesanan */}
+            {/* Baca ulang pesanan — hanya di langkah resume. Di langkah bayar,
+                yang dibutuhkan kasir cuma nominal; daftar panjang justru
+                menutupi angka yang harus ia baca ke tamu. */}
+            {langkahBayar === "resume" && (
             <div className="mb-3 divide-y divide-stone-100 rounded-lg border border-stone-200">
               {cart.map((l) => (
                 <div
@@ -1229,13 +1261,21 @@ export function KasirPage() {
                 </div>
               ))}
             </div>
+            )}
 
             <div className="space-y-2">
+              {langkahBayar === "resume" && (
               <div className="flex justify-between text-sm text-stone-600">
                 <span>Subtotal</span>
                 <span>{formatRupiah(subtotal)}</span>
               </div>
-              {/* Diskon per transaksi: toggle %/Rp + input (dibatasi utk kasir) */}
+              )}
+              {/* Diskon per transaksi: toggle %/Rp + input (dibatasi utk kasir).
+                  Hanya di langkah resume — diskon adalah bagian dari "apakah
+                  pesanan ini sudah benar", bukan bagian dari menerima uang.
+                  Kalau bisa diubah di layar bayar, nominal "uang pas" yang sudah
+                  diketik jadi basi tanpa kasir menyadarinya. */}
+              {langkahBayar === "resume" && (
               <div>
                 <div className="flex items-center justify-between gap-2 text-sm text-stone-600">
                   <div className="flex items-center gap-1.5">
@@ -1281,18 +1321,36 @@ export function KasirPage() {
                   </div>
                 )}
               </div>
-              {pb1 > 0 && (
+              )}
+              {langkahBayar === "resume" && pb1 > 0 && (
                 <div className="flex justify-between text-sm text-stone-600">
                   <span>PB1 ({pb1Conf?.pb1_rate}%)</span>
                   <span>{formatRupiah(pb1)}</span>
                 </div>
               )}
-              <div className="flex justify-between text-xl font-bold text-stone-800">
-                <span>Total</span>
-                <span>{formatRupiah(total)}</span>
-              </div>
+              {/* Total: di langkah bayar ini angka yang dibacakan ke tamu, jadi
+                  dijadikan kotak — bukan satu baris di antara baris lain. */}
+              {langkahBayar === "resume" ? (
+                <div className="flex justify-between text-xl font-bold text-stone-800">
+                  <span>Total</span>
+                  <span>{formatRupiah(total)}</span>
+                </div>
+              ) : (
+                <div className="rounded-xl border border-stone-200 bg-stone-50 px-4 py-3 text-center">
+                  <div className="text-xs font-medium tracking-wide text-stone-500 uppercase">
+                    Total tagihan
+                  </div>
+                  <div className="text-3xl font-bold text-stone-800">{formatRupiah(total)}</div>
+                  {diskon > 0 && (
+                    <div className="text-xs text-stone-500">
+                      sudah termasuk diskon {formatRupiah(diskon)}
+                    </div>
+                  )}
+                </div>
+              )}
 
-              {/* Metode pembayaran */}
+              {/* Metode pembayaran — langkah 2 saja */}
+              {langkahBayar === "bayar" && (
               <div className="grid grid-cols-3 gap-1.5 pt-1">
                 {(["tunai", "qris", "transfer"] as const).map((m) => (
                   <button
@@ -1309,7 +1367,8 @@ export function KasirPage() {
                   </button>
                 ))}
               </div>
-              {metodeBayar === "tunai" && (
+              )}
+              {langkahBayar === "bayar" && metodeBayar === "tunai" && (
                 <div className="space-y-1.5">
                   <div className="flex items-center gap-1.5">
                     {/* nominal berformat: prefix Rp + pemisah ribuan (titik).
@@ -1358,19 +1417,40 @@ export function KasirPage() {
                 </div>
               )}
 
-              <ErrorText error={bayar.error} />
-              <div className="grid grid-cols-2 gap-2 pt-1">
-                <button onClick={() => setResumeOpen(false)} className={`${btnSecondary} py-3`}>
-                  ← Kembali
-                </button>
-                <button
-                  onClick={() => bayar.mutate()}
-                  disabled={uangKurang || bayar.isPending}
-                  className={`${btnPrimary} py-3`}
-                >
-                  {bayar.isPending ? "Menyimpan…" : "💾 Simpan & Cetak"}
-                </button>
-              </div>
+              {langkahBayar === "resume" ? (
+                <div className="grid grid-cols-2 gap-2 pt-1">
+                  <button onClick={() => setResumeOpen(false)} className={`${btnSecondary} py-3`}>
+                    ← Kembali
+                  </button>
+                  <button
+                    onClick={() => setLangkahBayar("bayar")}
+                    className={`${btnPrimary} py-3`}
+                  >
+                    Lanjut ke Pembayaran →
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <ErrorText error={bayar.error} />
+                  <div className="grid grid-cols-2 gap-2 pt-1">
+                    {/* Kembali ke resume, BUKAN menutup modal — pesanan masih
+                        bisa dikoreksi tanpa kehilangan konteks pembayaran. */}
+                    <button
+                      onClick={() => setLangkahBayar("resume")}
+                      className={`${btnSecondary} py-3`}
+                    >
+                      ← Ubah pesanan
+                    </button>
+                    <button
+                      onClick={() => bayar.mutate()}
+                      disabled={uangKurang || bayar.isPending}
+                      className={`${btnPrimary} py-3`}
+                    >
+                      {bayar.isPending ? "Menyimpan…" : "💾 Simpan & Cetak"}
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>
