@@ -27,7 +27,7 @@ tanpa akses repo server.
 
 ## Rilis: Tombol 🥡 kini memindahkan UANG dan STOK
 
-> Belum di-merge ke production. Tidak ada migrasi DB. **Mengubah perilaku lama**
+> Sudah di-merge ke production. Tidak ada migrasi DB. **Mengubah perilaku lama**
 > pada satu titik, dan titik itu menyentuh laba-rugi — tolong baca sampai habis
 > sebelum merilis layar papan pesanan berikutnya.
 
@@ -92,7 +92,7 @@ mobile bisa menyunting bahan, pertimbangkan menampilkan centang yang sama.
 
 ## Rilis: Papan pesanan — urutan "terakhir diubah" + `selesai` tak menghidupkan yang batal
 
-> Belum di-merge ke production. Tidak ada migrasi DB. **Mengubah perilaku lama**
+> Sudah di-merge ke production. Tidak ada migrasi DB. **Mengubah perilaku lama**
 > pada dua titik; keduanya menyempit, bukan melebar.
 
 ### 🟡 PERLU DICEK — `GET /api/pesanan` diurut "terakhir DIUBAH", bukan "terakhir masuk"
@@ -136,7 +136,7 @@ yang dikirim server.
 
 ## Rilis: `PUT /open-bill/:id` tak lagi bisa MENGHAPUS baris bill
 
-> Belum di-merge ke production. Tidak ada migrasi DB. **Mengubah perilaku
+> Sudah di-merge ke production. Tidak ada migrasi DB. **Mengubah perilaku
 > lama** — baca §🔴 di bawah sebelum merilis build mobile berikutnya.
 
 Balasan lengkapnya ada di `docs/mobile/BALASAN-HAPUS-BARIS-BILL.md`.
