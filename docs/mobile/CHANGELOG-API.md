@@ -25,6 +25,50 @@ tanpa akses repo server.
 
 ---
 
+## Rilis: Papan pesanan — urutan "terakhir diubah" + `selesai` tak menghidupkan yang batal
+
+> Belum di-merge ke production. Tidak ada migrasi DB. **Mengubah perilaku lama**
+> pada dua titik; keduanya menyempit, bukan melebar.
+
+### 🟡 PERLU DICEK — `GET /api/pesanan` diurut "terakhir DIUBAH", bukan "terakhir masuk"
+
+Kuncinya sekarang **`status_pada ?? waktu`, menurun**. Dapur menandai sajian
+sepanjang shift, dan kartu yang baru disentuh adalah kartu yang sedang dikerjakan
+orang — itu yang harus di depan mata. Kartu yang belum pernah disentuh jatuh ke
+waktu masuknya, jadi pesanan baru tetap di atas dan tak ada yang tenggelam.
+
+Kalau layar papan kalian memakai urutan dari server apa adanya, tak ada yang
+perlu dikerjakan. Kalau kalian mengurut ulang sendiri **atau** memperbarui kartu
+secara optimistis, pakai kunci yang sama — kalau tidak, kartu yang baru ditandai
+tetap di tempatnya sampai polling berikutnya.
+
+### 🔴 WAJIB (kalau memakai pintasan kartu) — `status:"selesai"` tak menyentuh baris `batal`
+
+`POST /api/pesanan/:jenis/:id/status` dengan `{"status":"selesai"}` dulu membuat
+**semua** baris jadi `selesai`, termasuk yang sudah dibatalkan. Sekarang baris
+`batal` dibiarkan.
+
+Menandai sebuah pesanan kelar bukan alasan menghidupkan lagi sajian yang
+dibatalkan — porsinya tak pernah keluar dari dapur, dan papan yang mengklaim
+sebaliknya berbohong tentang apa yang disajikan. Kartunya **tetap** pindah ke
+kolom Selesai, karena status kartu hanya menuntut tak ada lagi baris
+`dikerjakan`. `dikerjakan` dan `batal` tetap mengenai semua baris.
+
+⚪️ **INFO** — di web, pintasan kartu kini satu tombol bernama **"Pindahkan ke
+Selesai"**; "batal semua" dan "kembalikan semua" dihapus dari antarmuka.
+Endpoint-nya masih menerima ketiga status, jadi tak ada yang rusak di mobile.
+Alasannya: membatalkan sepiring makanan adalah keputusan per sajian, dan satu
+tombol yang melakukannya serentak menghapus keterangan siapa membatalkan apa.
+
+### ⚪️ INFO — aturan turunan kartu kini di `@kakarut/shared`
+
+`turunkanStatusPesanan`, `ringkasPesanan`, `kunciUrutPesanan`, dan
+`urutkanPesanan` tinggal di satu tempat dan dipakai server maupun web. Tidak ada
+perubahan bentuk respons — hanya jaminan bahwa yang dihitung klien sama dengan
+yang dikirim server.
+
+---
+
 ## Rilis: `PUT /open-bill/:id` tak lagi bisa MENGHAPUS baris bill
 
 > Belum di-merge ke production. Tidak ada migrasi DB. **Mengubah perilaku

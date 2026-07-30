@@ -830,6 +830,21 @@ tidak dilonggarkan.
 - `POST /api/pesanan/:jenis/:id/item/:itemId/status` — **tombol utama papan** — `:jenis` = `open_bill|penjualan`, `:itemId` = `PesananItemRow.id` — req: `{ status: "dikerjakan"|"selesai"|"batal" }` — res: `{ ok: true, status, kartu_status }` (`kartu_status` = status kartu setelah diturunkan ulang) — error: **404** bukan cabangnya / kartu atau barisnya tak ada, **409** status baris baru saja diubah orang lain, **409** bill sudah dibayar (ubah lewat kartu penjualannya)
 - `POST /api/pesanan/:jenis/:id/item/:itemId/sajian` — req: `{ takeaway: boolean }` — res: `{ ok: true, sajian_takeaway }` — error: **404**, **409** bill sudah dibayar
 - `POST /api/pesanan/:jenis/:id/status` — **pintasan "semua baris"** — req: `{ status: … }` — res: `{ ok: true, status }` (status **kartu** hasil turunan) — error: sama seperti versi per baris, **tanpa** 409 balapan: perintahnya "jadikan semuanya X", jadi dua orang yang menekannya bersamaan sampai di hasil yang sama
+  - ⚠️ **`status:"selesai"` TIDAK menyentuh baris yang sudah `batal`.** Menandai sebuah pesanan kelar bukan alasan menghidupkan lagi sajian yang dibatalkan — porsinya tak pernah keluar dari dapur. Kartunya tetap pindah ke kolom Selesai, karena status kartu hanya menuntut tak ada lagi baris `dikerjakan`. `dikerjakan`/`batal` tetap mengenai semua baris.
+  - Di web tombol ini bernama **"Pindahkan ke Selesai"**. Pintasan "batal semua" dan "kembalikan semua" **dihapus dari antarmuka** (endpoint-nya masih menerimanya): membatalkan/mengembalikan sepiring makanan adalah keputusan per sajian, dan satu tombol yang melakukannya serentak menghapus keterangan siapa membatalkan apa.
+
+> ### 🔝 Urutan papan: yang TERAKHIR DIUBAH di atas
+>
+> `GET /api/pesanan` mengurutkan kartu dengan kunci
+> **`status_pada ?? waktu`, menurun** — bukan `waktu` saja. Dapur menandai sajian
+> sepanjang shift, dan kartu yang baru disentuh adalah kartu yang sedang
+> dikerjakan orang; itu yang harus ada di depan mata. Kartu yang belum pernah
+> disentuh jatuh ke waktu masuknya, jadi pesanan baru tetap muncul di atas dan
+> tak ada yang tenggelam.
+>
+> Klien yang memperbarui kartu secara optimistis **harus mengurut ulang dengan
+> kunci yang sama**, kalau tidak kartu yang baru ditandai tetap di tempatnya
+> sampai polling berikutnya.
 - `POST /api/pesanan/:jenis/:id/sajian` — pintasan "semua baris" — req: `{ takeaway: boolean }` — res: `{ ok: true, sajian_takeaway }` — error: **404**, **409** bill sudah dibayar
 - `GET /api/pesanan/:jenis/:id/log` — res: `PesananLogRow[]` (maks 200, terbaru dulu; `item_nama` = baris yang disentuh, `null` = aksinya mengenai seluruh pesanan)
 

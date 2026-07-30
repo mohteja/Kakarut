@@ -6635,6 +6635,53 @@ cek "DELETE /open-bill membatalkan SELURUH barisnya, bukan hapus keras" "V == 1"
 cek "pembatalan lewat DELETE tetap meninggalkan baris riwayat" "V == 1" \
   "$(api "$TKIT154" GET "/pesanan/open_bill/$OBID154B/log" | jq '[.[]|select(.aksi|startswith("Dibatalkan"))]|length>=1|if . then 1 else 0 end')"
 
+# (g2) "PINDAHKAN KE SELESAI" TIDAK MENGHIDUPKAN SAJIAN YANG SUDAH DIBATALKAN.
+#      Menandai sebuah pesanan kelar bukan alasan membuat porsi yang dibatalkan
+#      jadi "selesai" — porsinya tak pernah keluar dari dapur, dan papan yang
+#      mengklaim sebaliknya berbohong tentang apa yang disajikan. Kartunya tetap
+#      pindah ke kolom Selesai, karena status kartu hanya menuntut tak ada lagi
+#      baris `dikerjakan`.
+OB154P=$(api "$REISS105" POST /open-bill "{\"meja_id\":\"$MEJA154\",\"items\":[{\"menu_id\":\"$M154\",\"qty\":1},{\"menu_id\":\"$M154B\",\"qty\":1}]}")
+OBID154P=$(echo "$OB154P" | jq -r .id)
+PP154=$(kartu154 "$TKIT154" "$OBID154P")
+BP154A=$(echo "$PP154" | jq -r '[.items[]|select(.nama=="Menu Uji154")][0].id')
+api "$TKIT154" POST "/pesanan/open_bill/$OBID154P/item/$BP154A/status" '{"status":"batal"}' > /dev/null
+cek "pindahkan-ke-selesai seluruh kartu → 200" "V == 200" \
+  "$(status_code_body "$TKIT154" POST "/pesanan/open_bill/$OBID154P/status" '{"status":"selesai"}')"
+cek "baris yang batal TETAP batal (tidak dihidupkan jadi selesai)" "V == 1" \
+  "$(kartu154 "$TKIT154" "$OBID154P" | jq -r --arg b "$BP154A" '[.items[]|select(.id==$b)][0].status=="batal"|if . then 1 else 0 end')"
+cek "baris yang masih dikerjakan jadi selesai (1 selesai, 1 batal)" "V == 1" \
+  "$(kartu154 "$TKIT154" "$OBID154P" | jq -r '((.item_selesai==1) and (.item_batal==1))|if . then 1 else 0 end')"
+cek "kartunya tetap PINDAH ke kolom Selesai" "V == 1" \
+  "$(kartu154 "$TKIT154" "$OBID154P" | jq -r '.status=="selesai"|if . then 1 else 0 end')"
+
+# (g3) URUTAN PAPAN: yang TERAKHIR DIUBAH di atas, bukan yang terakhir masuk.
+#      Dapur menandai sajian sepanjang shift; kartu yang baru disentuh adalah
+#      kartu yang sedang dikerjakan orang, dan itu yang harus ada di depan mata.
+#
+#      Diuji RELATIF antara dua kartu yang bagian ini sendiri buat — bukan lewat
+#      `.[0]`. Papan cabang ini juga menampung kartu dari bagian lain, jadi
+#      assertion "paling atas" akan lolos/gagal karena data tetangga dan bukan
+#      karena aturannya.
+urut154() { api "$TKIT154" GET "/pesanan?branch_id=$CB154" | jq --arg i "$2" '[.[].id]|index($i)'; }
+# TANPA meja: OBID154P masih memegang MEJA154, dan satu meja dine-in cuma boleh
+# punya satu bill (409 `meja_sudah_ada_bill`). Bill tanpa meja dikecualikan.
+OB154U=$(api "$REISS105" POST /open-bill "{\"items\":[{\"menu_id\":\"$M154\",\"qty\":1}]}")
+OBID154U=$(echo "$OB154U" | jq -r '.id // empty')
+cek "bill pembanding berhasil dibuat (tanpa meja, jadi tak kena guard satu-bill)" "V == 1" \
+  "$([ -n "$OBID154U" ] && echo 1 || echo 0)"
+cek "pesanan yang baru masuk ada DI ATAS kartu yang lebih tua" "V == 1" \
+  "$([ "$(urut154 "$TKIT154" "$OBID154U")" -lt "$(urut154 "$TKIT154" "$OBID154P")" ] && echo 1 || echo 0)"
+# sentuh kartu YANG LEBIH TUA → ia harus melompat ke atas kartu yang lebih baru
+BU154=$(kartu154 "$TKIT154" "$OBID154P" | jq -r '[.items[]|select(.status=="selesai")][0].id')
+api "$TKIT154" POST "/pesanan/open_bill/$OBID154P/item/$BU154/status" '{"status":"dikerjakan"}' > /dev/null
+cek "kartu lama yang BARU DIUBAH melompat ke atas kartu yang lebih baru" "V == 1" \
+  "$([ "$(urut154 "$TKIT154" "$OBID154P")" -lt "$(urut154 "$TKIT154" "$OBID154U")" ] && echo 1 || echo 0)"
+cek "kartu yang belum disentuh tetap ada di papan (tidak lenyap)" "V == 1" \
+  "$(kartu154 "$TKIT154" "$OBID154U" | jq -r 'if .id then 1 else 0 end')"
+api "$REISS105" DELETE "/open-bill/$OBID154U" > /dev/null
+api "$REISS105" DELETE "/open-bill/$OBID154P" > /dev/null
+
 # (h) Status meja ikut turunan baris: transaksi yang SELURUH sajiannya
 #     dibatalkan tak boleh menahan meja yang sudah tak ada orangnya.
 MEJAC154=$(api "$OWNER" POST /meja "{\"nama\":\"Meja Batal 154\",\"tipe\":\"dine_in\",\"branch_id\":\"$CB154\"}" | jq -r .id)

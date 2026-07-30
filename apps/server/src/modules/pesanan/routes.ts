@@ -3,7 +3,15 @@ import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import type { PesananItemRow, PesananLogRow, PesananRow, PesananStatus } from "@kakarut/shared";
+import {
+  ringkasPesanan,
+  turunkanStatusPesanan,
+  urutkanPesanan,
+  type PesananItemRow,
+  type PesananLogRow,
+  type PesananRow,
+  type PesananStatus,
+} from "@kakarut/shared";
 import { db, type Tx } from "../../db/client";
 import {
   companies,
@@ -60,13 +68,12 @@ const SajianBody = z.object({ takeaway: z.boolean() });
  *
  * Kartu tanpa baris dianggap `dikerjakan`: kalau tidak, bill kosong yang baru
  * dibuat kasir akan langsung mendarat di kolom Selesai.
+ *
+ * Aturannya tinggal di `@kakarut/shared` karena web ikut memakainya saat
+ * memperbarui kartu secara optimistis — dua salinan berarti papan bisa
+ * menampilkan kolom yang berbeda dari yang dikirim server.
  */
-function turunkanStatus(items: { status: PesananStatus }[]): PesananStatus {
-  if (items.length === 0) return "dikerjakan";
-  if (items.every((i) => i.status === "batal")) return "batal";
-  if (items.every((i) => i.status !== "dikerjakan")) return "selesai";
-  return "dikerjakan";
-}
+const turunkanStatus = turunkanStatusPesanan;
 
 /** Zona waktu perusahaan — dasar "hari ini" yang sama dengan modul lain. */
 async function tzPerusahaan(companyId: string): Promise<string> {
@@ -330,31 +337,14 @@ export const pesananRoutes = new Hono<AppEnv>()
         }
       }
 
-      /** Ringkasan kartu — seluruhnya turunan barisnya, tak satu pun disimpan. */
-      function ringkas(items: PesananItemRow[]) {
-        // "Terakhir disentuh" = perubahan baris paling baru pada kartu ini.
-        let statusOleh: string | null = null;
-        let statusPada: string | null = null;
-        for (const it of items) {
-          if (it.status_pada && (!statusPada || it.status_pada > statusPada)) {
-            statusPada = it.status_pada;
-            statusOleh = it.status_oleh;
-          }
-        }
-        return {
-          status: turunkanStatus(items),
-          // Kartu "bawa pulang" hanya bila SELURUH barisnya begitu — satu piring
-          // yang tetap di tempat sudah cukup membuat pesanan ini bukan pesanan
-          // bawa pulang.
-          sajian_takeaway: items.length > 0 && items.every((i) => i.sajian_takeaway),
-          item_selesai: items.filter((i) => i.status === "selesai").length,
-          item_batal: items.filter((i) => i.status === "batal").length,
-          status_oleh: statusOleh,
-          status_pada: statusPada,
-        };
-      }
+      /**
+       * Ringkasan kartu — seluruhnya turunan barisnya, tak satu pun disimpan.
+       * Implementasinya di `@kakarut/shared` supaya web bisa memakai aturan yang
+       * SAMA saat memperbarui kartu secara optimistis.
+       */
+      const ringkas = ringkasPesanan;
 
-      const hasil: PesananRow[] = [
+      const hasil: PesananRow[] = urutkanPesanan([
         ...billRows.map((r) => {
           const items = itemBill.get(r.id) ?? [];
           return {
@@ -389,10 +379,7 @@ export const pesananRoutes = new Hono<AppEnv>()
             ...ringkas(items),
           };
         }),
-      ]
-        .filter((r) => !q.status || r.status === q.status)
-        // terbaru di atas: yang baru masuk paling perlu dilihat dapur
-        .sort((a, b) => b.waktu.localeCompare(a.waktu));
+      ]).filter((r) => !q.status || r.status === q.status);
 
       return c.json(hasil);
     },
@@ -546,6 +533,13 @@ export const pesananRoutes = new Hono<AppEnv>()
    * "jadikan semuanya Y", jadi dua orang yang menekannya bersamaan sampai di
    * hasil yang sama. Yang butuh guard adalah tombol per baris, karena di sanalah
    * dua orang bisa punya maksud berbeda atas satu sajian.
+   *
+   * SATU PENGECUALIAN: `selesai` TIDAK menyentuh baris yang sudah `batal`.
+   * Menandai sebuah pesanan kelar bukan alasan untuk menghidupkan lagi sajian
+   * yang dibatalkan — porsinya tak pernah keluar dari dapur, dan membuatnya
+   * "selesai" membuat papan berbohong tentang apa yang benar-benar disajikan.
+   * Kartunya tetap pindah ke kolom Selesai, karena status kartu hanya menuntut
+   * tak ada lagi baris `dikerjakan`.
    */
   .post("/:jenis/:id/status", zValidator("json", StatusBody), async (c) => {
     const auth = c.get("auth");
@@ -557,13 +551,21 @@ export const pesananRoutes = new Hono<AppEnv>()
     await pastikanKartu(jenis, id, auth.company_id!, branchId, { untukUbah: true });
 
     const kartu = await db.transaction(async (tx) => {
+      /**
+       * Baris mana yang ikut berubah. Untuk `selesai` hanya yang masih
+       * `dikerjakan` — baris `batal` dibiarkan (lihat catatan di atas). Untuk
+       * status lain: semua yang belum bernilai itu.
+       */
+      const sasaran = (kolom: typeof openBillItems.pesananStatus | typeof saleItems.pesananStatus) =>
+        status === "selesai"
+          ? sql`${kolom} = 'dikerjakan'`
+          : sql`${kolom} <> ${status}`;
+
       if (jenis === "open_bill") {
         const ubah = await tx
           .update(openBillItems)
           .set({ pesananStatus: status, pesananStatusAt: sekarang, pesananStatusOleh: auth.sub })
-          .where(
-            and(eq(openBillItems.billId, id), sql`${openBillItems.pesananStatus} <> ${status}`),
-          )
+          .where(and(eq(openBillItems.billId, id), sasaran(openBillItems.pesananStatus)))
           .returning({ id: openBillItems.id });
         if (ubah.length > 0) {
           await tx.insert(pesananLogs).values({
@@ -580,7 +582,7 @@ export const pesananRoutes = new Hono<AppEnv>()
       const ubah = await tx
         .update(saleItems)
         .set({ pesananStatus: status, pesananStatusAt: sekarang, pesananStatusOleh: auth.sub })
-        .where(and(eq(saleItems.saleId, id), sql`${saleItems.pesananStatus} <> ${status}`))
+        .where(and(eq(saleItems.saleId, id), sasaran(saleItems.pesananStatus)))
         .returning({ id: saleItems.id });
       if (ubah.length > 0) {
         await tx.insert(pesananLogs).values({
