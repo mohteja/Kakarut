@@ -27,6 +27,25 @@ export interface KatalogMenu {
   branchIdsByMenu: Map<string, string[]>;
 }
 
+/**
+ * Komponen yang BENAR-BENAR dipakai sebuah menu: komponennya sendiri, plus —
+ * untuk menu paket — komponen menu dasarnya.
+ *
+ * Gabungan ini dulu ditulis ulang identik di lima tempat (penjualan,
+ * rekalkulasi biaya, dua endpoint menu, perencanaan stok). Satu salinan yang
+ * lupa menyertakan resep dasar akan diam-diam melewatkan seluruh bahan menu
+ * dasar sebuah paket — HPP dan konsumsi stoknya jadi terlalu kecil tanpa galat
+ * apa pun. Cukup satu fungsi.
+ */
+export function komponenEfektif(katalog: KatalogMenu, menu: MenuRow): KomponenDto[] {
+  return [
+    ...(katalog.komponenByMenu.get(menu.id) ?? []),
+    ...(menu.tipe === "paket" && menu.baseMenuId
+      ? katalog.komponenByMenu.get(menu.baseMenuId) ?? []
+      : []),
+  ];
+}
+
 /** Apakah menu tampil di cabang ini? (tanpa pembatasan = semua cabang) */
 export function tampilDiCabang(
   katalog: KatalogMenu,
@@ -316,13 +335,7 @@ export async function ketersediaanMenu(
     .map((menu) => {
     // qty bahan terlacak per porsi = komponen sendiri + (paket) komponen menu
     // dasar, digabung per bahan (persis logika konsumsi bawa-pulang).
-    const komponen = [
-      ...(katalog.komponenByMenu.get(menu.id) ?? []),
-      ...(menu.tipe === "paket" && menu.baseMenuId
-        ? katalog.komponenByMenu.get(menu.baseMenuId) ?? []
-        : []),
-    ];
-    const qtyPerPorsi = qtyBahanPerPorsi(komponen);
+    const qtyPerPorsi = qtyBahanPerPorsi(komponenEfektif(katalog, menu));
     const ketat = bahanPembatas(qtyPerPorsi, saldoByIngredient);
     const bahan = ketat ? bahanById.get(ketat.ingredient_id) : undefined;
     return {

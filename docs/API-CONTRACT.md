@@ -828,9 +828,24 @@ tidak dilonggarkan.
 
 - `GET /api/pesanan` — query: `branch_id?`, `tanggal?` (YYYY-MM-DD, default hari ini TZ perusahaan), `status?` (`dikerjakan|selesai|batal`) — res: `PesananRow[]`
 - `POST /api/pesanan/:jenis/:id/item/:itemId/status` — **tombol utama papan** — `:jenis` = `open_bill|penjualan`, `:itemId` = `PesananItemRow.id` — req: `{ status: "dikerjakan"|"selesai"|"batal" }` — res: `{ ok: true, status, kartu_status }` (`kartu_status` = status kartu setelah diturunkan ulang) — error: **404** bukan cabangnya / kartu atau barisnya tak ada, **409** status baris baru saja diubah orang lain, **409** bill sudah dibayar (ubah lewat kartu penjualannya)
-- `POST /api/pesanan/:jenis/:id/item/:itemId/sajian` — req: `{ takeaway: boolean }` — res: `{ ok: true, sajian_takeaway }` — error: **404**, **409** bill sudah dibayar
+- `POST /api/pesanan/:jenis/:id/item/:itemId/sajian` — req: `{ takeaway: boolean }` — res: `{ ok: true, sajian_takeaway, total_hpp }` (`total_hpp` = HPP transaksi SESUDAH hitung-ulang; `null` untuk open bill) — error: **404**, **409** bill sudah dibayar. ⚠️ **Menggeser biaya & stok** pada penjualan yang sudah dibayar — lihat blok `sajian_takeaway` di bawah.
 - `POST /api/pesanan/:jenis/:id/status` — **pintasan "semua baris"** — req: `{ status: … }` — res: `{ ok: true, status }` (status **kartu** hasil turunan) — error: sama seperti versi per baris, **tanpa** 409 balapan: perintahnya "jadikan semuanya X", jadi dua orang yang menekannya bersamaan sampai di hasil yang sama
-- `POST /api/pesanan/:jenis/:id/sajian` — pintasan "semua baris" — req: `{ takeaway: boolean }` — res: `{ ok: true, sajian_takeaway }` — error: **404**, **409** bill sudah dibayar
+  - ⚠️ **`status:"selesai"` TIDAK menyentuh baris yang sudah `batal`.** Menandai sebuah pesanan kelar bukan alasan menghidupkan lagi sajian yang dibatalkan — porsinya tak pernah keluar dari dapur. Kartunya tetap pindah ke kolom Selesai, karena status kartu hanya menuntut tak ada lagi baris `dikerjakan`. `dikerjakan`/`batal` tetap mengenai semua baris.
+  - Di web tombol ini bernama **"Pindahkan ke Selesai"**. Pintasan "batal semua" dan "kembalikan semua" **dihapus dari antarmuka** (endpoint-nya masih menerimanya): membatalkan/mengembalikan sepiring makanan adalah keputusan per sajian, dan satu tombol yang melakukannya serentak menghapus keterangan siapa membatalkan apa.
+
+> ### 🔝 Urutan papan: yang TERAKHIR DIUBAH di atas
+>
+> `GET /api/pesanan` mengurutkan kartu dengan kunci
+> **`status_pada ?? waktu`, menurun** — bukan `waktu` saja. Dapur menandai sajian
+> sepanjang shift, dan kartu yang baru disentuh adalah kartu yang sedang
+> dikerjakan orang; itu yang harus ada di depan mata. Kartu yang belum pernah
+> disentuh jatuh ke waktu masuknya, jadi pesanan baru tetap muncul di atas dan
+> tak ada yang tenggelam.
+>
+> Klien yang memperbarui kartu secara optimistis **harus mengurut ulang dengan
+> kunci yang sama**, kalau tidak kartu yang baru ditandai tetap di tempatnya
+> sampai polling berikutnya.
+- `POST /api/pesanan/:jenis/:id/sajian` — pintasan "semua baris" — req: `{ takeaway: boolean }` — res: `{ ok: true, sajian_takeaway, total_hpp }` — error: **404**, **409** bill sudah dibayar. Aturan biaya identik dengan versi per baris.
 - `GET /api/pesanan/:jenis/:id/log` — res: `PesananLogRow[]` (maks 200, terbaru dulu; `item_nama` = baris yang disentuh, `null` = aksinya mengenai seluruh pesanan)
 
 **Isi papan** — tiga aturan yang sengaja tidak seragam:
@@ -879,19 +894,45 @@ jadi jejaknya tak terputus.
 juga yang mengunci harga (lihat `/api/open-bill`); tanpanya baris penjualan
 lahir sebagai pekerjaan baru yang belum tersentuh.
 
-> ### 🥡 `sajian_takeaway` — PENANDA PENYAJIAN, bukan angka pembukuan
+> ### 🥡 `sajian_takeaway` — BASIS BIAYA; `is_dine_in` tetap fakta pembukuan
 >
-> Tombol "jadikan bawa pulang" **tidak** menyentuh `is_dine_in`,
-> `sale_consumptions`, maupun `hpp_satuan`. Angka-angka itu sudah dibukukan saat
-> transaksi dibuat (`qtyEfektif()`: dine-in melewati kemasan & menghitung
-> pelengkap 50%), dan mengubahnya belakangan membuat baris penjualan berbohong
-> tentang pemakaian bahannya sendiri. Nota & laporan **tetap** membaca
-> `is_dine_in`.
+> Dua kolom, dua pertanyaan berbeda — jangan disatukan:
+>
+> | | menjawab | dipakai untuk |
+> | --- | --- | --- |
+> | `is_dine_in` | di mana pesanan **dimakan** | pemisahan omzet dine-in/bawa-pulang, label meja pada nota |
+> | `sajian_takeaway` | apakah **kemasannya terpakai** | `hpp_satuan`, `sales.total_hpp`, `sale_consumptions` (`qtyEfektif()`: bawa pulang memakai kemasan penuh; dine-in melewati kemasan & menghitung pelengkap 50%) |
+>
+> Tombol "jadikan bawa pulang" **tidak** menyentuh `is_dine_in` — nota & laporan
+> omzet tetap membacanya. Tapi ia **memindahkan biaya**, karena sebuah porsi bisa
+> dibukukan di meja dine-in lalu akhirnya dibungkus; dusnya benar-benar keluar
+> dari rak.
+>
+> ⚠️ **Menandai baris pada penjualan yang SUDAH DIBAYAR memicu hitung-ulang
+> biaya SELURUH transaksi itu** (`penjualan/rekalkulasi.ts`): `hpp_satuan` per
+> baris, `sales.total_hpp`, dan `sale_consumptions` ditulis ulang dari
+> `sale_items`. Konsekuensinya nyata di layar owner: laba-rugi berubah dan stok
+> kemasan berkurang. Operasinya **idempoten** (dihitung dari nol tiap kali, jadi
+> TA → dine-in → TA mendarat di angka yang sama) dan `sale_consumptions.waktu`
+> **tetap** waktu transaksinya, bukan saat dihitung ulang — kalau tidak,
+> konsumsi lama melompat ke seberang garis opname. Respons `sajian` membawa
+> `total_hpp` barunya (`null` untuk open bill). Penjualan di Tempat Sampah tidak
+> dihitung ulang.
+>
+> Pada **open bill** tak ada yang dihitung ulang: belum ada biaya terbuku.
+> Penandanya ikut ke baris penjualan saat dibayar, dan **di situlah** ia jadi
+> basis biaya — jadi TA yang ditandai dapur sebelum pelanggan membayar tetap
+> sampai ke angkanya.
 >
 > Penandanya **lahir sesuai pembukuannya, per baris**
 > (`sale_items.sajian_takeaway = !sale_items.is_dine_in`), jadi satu nota bisa
 > berisi sajian yang dibungkus dan sajian yang di piring sekaligus — persis yang
 > mustahil diwakili satu penanda setingkat transaksi.
+>
+> **Prasyarat data:** aturan ini hanya bergigi bila ada bahan bertanda
+> `is_packaging` di resep menunya. Tanpa itu, HPP bawa pulang = HPP dine-in dan
+> menandai TA tak mengubah apa pun. Tandai bahan kemasan lewat centang
+> **🥡 Kemasan TA** di Bahan Baku (`is_packaging` pada `POST/PATCH /api/bahan`).
 >
 > Pada `RiwayatTransaksiRow`, `sajian_takeaway` adalah **turunan**: `true` hanya
 > bila SELURUH baris bertanda bawa pulang. Karena itu `sajian_takeaway ==

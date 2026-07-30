@@ -25,9 +25,118 @@ tanpa akses repo server.
 
 ---
 
+## Rilis: Tombol 🥡 kini memindahkan UANG dan STOK
+
+> Sudah di-merge ke production. Tidak ada migrasi DB. **Mengubah perilaku lama**
+> pada satu titik, dan titik itu menyentuh laba-rugi — tolong baca sampai habis
+> sebelum merilis layar papan pesanan berikutnya.
+
+### 🔴 WAJIB — `POST .../sajian` pada penjualan yang SUDAH DIBAYAR menghitung ulang biayanya
+
+Dulu `sajian_takeaway` adalah penanda murni: menekan 🥡 hanya mengubah instruksi
+penyajian. Itu ternyata melubangi pembukuan. Kasus nyata dari lapangan: pesanan
+dibukukan di meja dine-in, lalu pelanggan berubah pikiran dan minta dibungkus.
+Dusnya benar-benar diambil dari rak — tapi HPP tetap memakai basis dine-in (yang
+**melewati** kemasan) dan `sale_consumptions` tak pernah mencatat dusnya. Owner
+melihat laba lebih besar dari kenyataan, dan stok kemasan habis tanpa jejak.
+
+Sekarang **basis biaya sebuah baris = `sajian_takeaway`**, bukan `is_dine_in`.
+Akibatnya, menandai baris pada transaksi yang sudah dibayar akan:
+
+- menulis ulang `hpp_satuan` tiap baris dan `sales.total_hpp`;
+- menulis ulang `sale_consumptions` transaksi itu (kemasan take away masuk /
+  keluar dari pemakaian bahan) → **saldo stok bergerak**;
+- mencatat perpindahannya di `GET /api/pesanan/:jenis/:id/log`, mis.
+  `"Diubah jadi bawa pulang (HPP Rp 8.000 → Rp 9.500)"`.
+
+**Yang perlu tim mobile lakukan:**
+
+1. **Segarkan data setelah menekan 🥡** — bukan hanya kartu papannya. Layar
+   Riwayat Transaksi, Laporan (laba-rugi), dan Stok bisa ikut berubah. Responsnya
+   kini membawa `total_hpp` (HPP transaksi sesudah hitung-ulang) supaya kalian
+   tak perlu menebak; `null` berarti open bill (tak ada yang dihitung ulang).
+2. **Jangan sajikan tombol ini sebagai aksi ringan.** Pada pesanan yang sudah
+   dibayar ia menggerakkan uang. Kalau layar kalian punya konfirmasi untuk aksi
+   berdampak, tombol ini masuk kategori itu.
+
+`is_dine_in` **tidak** berubah — ia tetap fakta pembukuan (di mana pesanan
+dimakan; dasar pemisahan omzet dan label meja pada nota). Jadi badge "diubah"
+yang membandingkan `sajian_takeaway` dengan `is_dine_in` tetap bekerja seperti
+sebelumnya.
+
+Operasinya **idempoten**: bolak-balik TA → dine-in → TA mendarat di angka yang
+sama persis, karena selalu dihitung dari nol. Penjualan di Tempat Sampah tidak
+dihitung ulang.
+
+### 🟢 BARU — tanda TA dari dapur pada bill BELUM DIBAYAR akhirnya sampai ke angka
+
+Celah kedua, dan yang paling sering terlihat: dapur menandai satu sajian bawa
+pulang selagi bill masih terbuka. Penandanya memang ikut ke baris penjualan saat
+kasir menagih — tapi biayanya dulu diambil dari `is_dine_in`, jadi kemasannya
+hilang tepat di titik pembayaran. Sekarang penanda itu yang jadi basis biaya,
+sehingga kemasan masuk HPP dan stoknya berkurang begitu dibayar. **Tanpa
+endpoint baru** — cukup `open_bill_item_id` tetap dikirim saat membayar (sudah
+wajib sejak rilis harga terkunci).
+
+### ⚪️ INFO — prasyarat data: bahan harus bertanda `is_packaging`
+
+Aturan take away hanya bergigi bila resep menunya memuat bahan ber-`is_packaging`
+(dus/box/plastik). Tanpa itu, HPP bawa pulang = HPP dine-in dan menekan 🥡 tak
+mengubah apa pun — bukan bug. Field-nya sudah lama ada di
+`POST/PATCH /api/bahan` dan di `BahanDto`; yang baru adalah **web akhirnya punya
+centang "🥡 Kemasan TA"** untuk mengisinya (sebelumnya hanya badge baca-saja, dan
+tak ada satu pun cara membuatnya dari antarmuka). Kalau layar bahan baku di
+mobile bisa menyunting bahan, pertimbangkan menampilkan centang yang sama.
+
+---
+
+## Rilis: Papan pesanan — urutan "terakhir diubah" + `selesai` tak menghidupkan yang batal
+
+> Sudah di-merge ke production. Tidak ada migrasi DB. **Mengubah perilaku lama**
+> pada dua titik; keduanya menyempit, bukan melebar.
+
+### 🟡 PERLU DICEK — `GET /api/pesanan` diurut "terakhir DIUBAH", bukan "terakhir masuk"
+
+Kuncinya sekarang **`status_pada ?? waktu`, menurun**. Dapur menandai sajian
+sepanjang shift, dan kartu yang baru disentuh adalah kartu yang sedang dikerjakan
+orang — itu yang harus di depan mata. Kartu yang belum pernah disentuh jatuh ke
+waktu masuknya, jadi pesanan baru tetap di atas dan tak ada yang tenggelam.
+
+Kalau layar papan kalian memakai urutan dari server apa adanya, tak ada yang
+perlu dikerjakan. Kalau kalian mengurut ulang sendiri **atau** memperbarui kartu
+secara optimistis, pakai kunci yang sama — kalau tidak, kartu yang baru ditandai
+tetap di tempatnya sampai polling berikutnya.
+
+### 🔴 WAJIB (kalau memakai pintasan kartu) — `status:"selesai"` tak menyentuh baris `batal`
+
+`POST /api/pesanan/:jenis/:id/status` dengan `{"status":"selesai"}` dulu membuat
+**semua** baris jadi `selesai`, termasuk yang sudah dibatalkan. Sekarang baris
+`batal` dibiarkan.
+
+Menandai sebuah pesanan kelar bukan alasan menghidupkan lagi sajian yang
+dibatalkan — porsinya tak pernah keluar dari dapur, dan papan yang mengklaim
+sebaliknya berbohong tentang apa yang disajikan. Kartunya **tetap** pindah ke
+kolom Selesai, karena status kartu hanya menuntut tak ada lagi baris
+`dikerjakan`. `dikerjakan` dan `batal` tetap mengenai semua baris.
+
+⚪️ **INFO** — di web, pintasan kartu kini satu tombol bernama **"Pindahkan ke
+Selesai"**; "batal semua" dan "kembalikan semua" dihapus dari antarmuka.
+Endpoint-nya masih menerima ketiga status, jadi tak ada yang rusak di mobile.
+Alasannya: membatalkan sepiring makanan adalah keputusan per sajian, dan satu
+tombol yang melakukannya serentak menghapus keterangan siapa membatalkan apa.
+
+### ⚪️ INFO — aturan turunan kartu kini di `@kakarut/shared`
+
+`turunkanStatusPesanan`, `ringkasPesanan`, `kunciUrutPesanan`, dan
+`urutkanPesanan` tinggal di satu tempat dan dipakai server maupun web. Tidak ada
+perubahan bentuk respons — hanya jaminan bahwa yang dihitung klien sama dengan
+yang dikirim server.
+
+---
+
 ## Rilis: `PUT /open-bill/:id` tak lagi bisa MENGHAPUS baris bill
 
-> Belum di-merge ke production. Tidak ada migrasi DB. **Mengubah perilaku
+> Sudah di-merge ke production. Tidak ada migrasi DB. **Mengubah perilaku
 > lama** — baca §🔴 di bawah sebelum merilis build mobile berikutnya.
 
 Balasan lengkapnya ada di `docs/mobile/BALASAN-HAPUS-BARIS-BILL.md`.

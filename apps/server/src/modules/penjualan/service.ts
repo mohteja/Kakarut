@@ -19,7 +19,7 @@ import {
 } from "../../db/schema";
 import { kodeCabang, tanggalDi } from "../../lib/time";
 import { upsertCustomer } from "../customer/service";
-import { hitungHargaMenu, loadKatalog, tampilDiCabang } from "../menu/service";
+import { hitungHargaMenu, komponenEfektif, loadKatalog, tampilDiCabang } from "../menu/service";
 
 /**
  * Penolakan penjualan yang membawa SEBAB terstruktur, bukan cuma teks.
@@ -239,10 +239,33 @@ export async function createSale(params: CreateSaleParams) {
       if (item.qty <= 0) {
         throw new HTTPException(400, { message: `Qty tidak valid untuk ${menu.nama}` });
       }
+      // FAKTA PEMBUKUAN: di mana pesanan ini dimakan. Menentukan pemisahan
+      // omzet dine-in/bawa-pulang dan label meja pada struk — bukan biaya.
       const dineIn = item.is_dine_in ?? isDineIn;
+      const waris = item.open_bill_item_id ? warisBill.get(item.open_bill_item_id) : undefined;
+      /**
+       * Penanda penyajian. Yang menang adalah sinyal EKSPLISIT: penanda dari
+       * dapur/papan pesanan, atau baris yang memang dibukukan bukan dine-in.
+       */
+      const sajianTakeaway = (waris?.sajianTakeaway ?? false) || !dineIn;
+      /**
+       * BASIS BIAYA = penyajiannya, bukan pembukuannya.
+       *
+       * Kemasan take away benar-benar keluar dari rak begitu sebuah porsi
+       * dibawa pulang — walau transaksinya dibukukan di meja dine-in karena
+       * pembeli baru berubah pikiran setelah pesan. Sebelumnya biaya diambil
+       * dari `dineIn`, sehingga penanda dapur "jadikan TA" sampai ke layar
+       * tapi tidak pernah sampai ke HPP maupun ke `sale_consumptions`: dusnya
+       * terpakai, laba-rugi tak tahu, stok kemasan tak berkurang.
+       *
+       * Hari ini nilainya identik dengan `dineIn` di jalur biasa (penanda
+       * lahir dari `!dineIn`); ia baru berbeda tepat pada kasus "diubah
+       * menjadi TA" — dan di situlah perbedaannya memang diinginkan.
+       */
+      const dasarDineIn = !sajianTakeaway;
       // HPP tetap dihitung SAAT INI — biaya bahan memang biaya saat disajikan;
       // yang dikunci open bill hanyalah harga jual yang disepakati pembeli.
-      const hppSatuan = hitungHargaMenu(menu, katalog, dineIn);
+      const hppSatuan = hitungHargaMenu(menu, katalog, dasarDineIn);
       const hargaSatuan = item.open_bill_item_id
         ? hargaBill.get(item.open_bill_item_id) ?? menu.hargaJual
         : menu.hargaJual;
@@ -250,7 +273,6 @@ export async function createSale(params: CreateSaleParams) {
 
       subtotal += lineTotal;
       totalHpp += hppSatuan * item.qty;
-      const waris = item.open_bill_item_id ? warisBill.get(item.open_bill_item_id) : undefined;
       itemRows.push({
         menuId: menu.id,
         menuNama: menu.nama,
@@ -266,29 +288,17 @@ export async function createSale(params: CreateSaleParams) {
         pesananStatus: waris?.pesananStatus ?? "dikerjakan",
         pesananStatusAt: waris?.pesananStatusAt ?? null,
         pesananStatusOleh: waris?.pesananStatusOleh ?? null,
-        // Penanda penyajian LAHIR sesuai cara barisnya dibukukan. Kalau
-        // dibiarkan `false` untuk semua, baris bawa-pulang akan tampil "makan
-        // di tempat" di papan — persis kebalikan dari gunanya. Yang menang
-        // adalah sinyal EKSPLISIT: penanda dari dapur, atau baris yang memang
-        // dibukukan bukan dine-in.
-        sajianTakeaway: (waris?.sajianTakeaway ?? false) || !dineIn,
+        sajianTakeaway,
       });
 
-      // Konsumsi bahan: komponen sendiri + (untuk paket) komponen menu dasar
-      const sumberKomponen = [
-        ...(katalog.komponenByMenu.get(menu.id) ?? []),
-        ...(menu.tipe === "paket" && menu.baseMenuId
-          ? katalog.komponenByMenu.get(menu.baseMenuId) ?? []
-          : []),
-      ];
-      for (const k of sumberKomponen) {
+      for (const k of komponenEfektif(katalog, menu)) {
         // bahan yang tidak dilacak stoknya: tetap masuk HPP, tapi tidak
         // menghasilkan catatan konsumsi
         if (!k.track_stok) continue;
         const qty =
           qtyEfektif(
             { qty: k.qty, isPackaging: k.is_packaging, isComplement: k.is_complement },
-            dineIn,
+            dasarDineIn,
           ) * item.qty;
         if (qty <= 0) continue;
         konsumsi.set(k.ingredient_id, (konsumsi.get(k.ingredient_id) ?? 0) + qty);

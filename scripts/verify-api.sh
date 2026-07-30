@@ -6471,14 +6471,19 @@ cek "bill yang sudah dibayar hilang juga dari pemilih kasir (bukan bill hantu)" 
 cek "menandai bill yang SUDAH dibayar → 409 (kartunya ada di penjualan)" "V == 409" \
   "$(status_code_body "$TKIT154" POST "/pesanan/open_bill/$OBID154/status" '{"status":"dikerjakan"}')"
 
-# (f) Penanda penyajian pada PENJUALAN tak boleh menggeser konsumsi bahan
-#     sebutir pun — angka itu sudah dibukukan saat transaksi dibuat.
+# (f) Mengubah penyajian menggeser biaya HANYA lewat aturan dine-in — jadi menu
+#     yang resepnya TAK PUNYA kemasan/pelengkap tidak boleh bergerak sepeser
+#     pun. Resep Menu Uji154 cuma cabai biasa (bukan kemasan, bukan pelengkap),
+#     jadi `qtyEfektif` mengembalikan takaran yang sama untuk kedua cara
+#     penyajian. Kalau angka di sini bergerak, hitung-ulangnya salah kaprah:
+#     ia mengarang biaya alih-alih menerapkan aturan take away.
+#     (Kasus kemasan yang MEMANG harus bergerak diuji di §156.)
 HPP154A=$(api "$OWNER" GET "/penjualan/$SID154" | jq -r '[.items[].hppSatuan]|add')
 SALDO154A=$(saldo154)
 api "$OWNER" POST "/pesanan/penjualan/$SID154/sajian" '{"takeaway":false}' > /dev/null
-cek "ubah penyajian: saldo bahan cabang sama persis sebelum & sesudah" "abs(V) < 0.001" \
+cek "resep tanpa kemasan: saldo bahan cabang sama persis sebelum & sesudah" "abs(V) < 0.001" \
   "$(python3 -c "print($(saldo154) - $SALDO154A)")"
-cek "ubah penyajian: hpp_satuan penjualan tak bergeser sepeser pun" "abs(V) < 0.001" \
+cek "resep tanpa kemasan: hpp_satuan tak bergeser sepeser pun" "abs(V) < 0.001" \
   "$(python3 -c "print($(api "$OWNER" GET "/penjualan/$SID154" | jq -r '[.items[].hppSatuan]|add') - $HPP154A)")"
 cek "tombol 'semua': SELURUH baris kembali makan di tempat, is_dine_in utuh" "V == 1" \
   "$(kartu154 "$OWNER" "$SID154" | jq -r '((.sajian_takeaway==false) and (.is_dine_in==true) and (([.items[]|select(.sajian_takeaway==false)]|length)==2))|if . then 1 else 0 end')"
@@ -6634,6 +6639,83 @@ cek "DELETE /open-bill membatalkan SELURUH barisnya, bukan hapus keras" "V == 1"
   "$(kartu154 "$TKIT154" "$OBID154B" | jq -r '((.status=="batal") and (.item_batal==2))|if . then 1 else 0 end')"
 cek "pembatalan lewat DELETE tetap meninggalkan baris riwayat" "V == 1" \
   "$(api "$TKIT154" GET "/pesanan/open_bill/$OBID154B/log" | jq '[.[]|select(.aksi|startswith("Dibatalkan"))]|length>=1|if . then 1 else 0 end')"
+
+# (g2) "PINDAHKAN KE SELESAI" TIDAK MENGHIDUPKAN SAJIAN YANG SUDAH DIBATALKAN.
+#      Menandai sebuah pesanan kelar bukan alasan membuat porsi yang dibatalkan
+#      jadi "selesai" — porsinya tak pernah keluar dari dapur, dan papan yang
+#      mengklaim sebaliknya berbohong tentang apa yang disajikan. Kartunya tetap
+#      pindah ke kolom Selesai, karena status kartu hanya menuntut tak ada lagi
+#      baris `dikerjakan`.
+OB154P=$(api "$REISS105" POST /open-bill "{\"meja_id\":\"$MEJA154\",\"items\":[{\"menu_id\":\"$M154\",\"qty\":1},{\"menu_id\":\"$M154B\",\"qty\":1}]}")
+OBID154P=$(echo "$OB154P" | jq -r .id)
+PP154=$(kartu154 "$TKIT154" "$OBID154P")
+BP154A=$(echo "$PP154" | jq -r '[.items[]|select(.nama=="Menu Uji154")][0].id')
+api "$TKIT154" POST "/pesanan/open_bill/$OBID154P/item/$BP154A/status" '{"status":"batal"}' > /dev/null
+cek "pindahkan-ke-selesai seluruh kartu → 200" "V == 200" \
+  "$(status_code_body "$TKIT154" POST "/pesanan/open_bill/$OBID154P/status" '{"status":"selesai"}')"
+cek "baris yang batal TETAP batal (tidak dihidupkan jadi selesai)" "V == 1" \
+  "$(kartu154 "$TKIT154" "$OBID154P" | jq -r --arg b "$BP154A" '[.items[]|select(.id==$b)][0].status=="batal"|if . then 1 else 0 end')"
+cek "baris yang masih dikerjakan jadi selesai (1 selesai, 1 batal)" "V == 1" \
+  "$(kartu154 "$TKIT154" "$OBID154P" | jq -r '((.item_selesai==1) and (.item_batal==1))|if . then 1 else 0 end')"
+cek "kartunya tetap PINDAH ke kolom Selesai" "V == 1" \
+  "$(kartu154 "$TKIT154" "$OBID154P" | jq -r '.status=="selesai"|if . then 1 else 0 end')"
+
+# (g3) URUTAN PAPAN: yang TERAKHIR DIUBAH di atas, bukan yang terakhir masuk.
+#      Dapur menandai sajian sepanjang shift; kartu yang baru disentuh adalah
+#      kartu yang sedang dikerjakan orang, dan itu yang harus ada di depan mata.
+#
+#      Diuji RELATIF antara dua kartu yang bagian ini sendiri buat — bukan lewat
+#      `.[0]`. Papan cabang ini juga menampung kartu dari bagian lain, jadi
+#      assertion "paling atas" akan lolos/gagal karena data tetangga dan bukan
+#      karena aturannya.
+urut154() { api "$TKIT154" GET "/pesanan?branch_id=$CB154" | jq --arg i "$2" '[.[].id]|index($i)'; }
+# TANPA meja: OBID154P masih memegang MEJA154, dan satu meja dine-in cuma boleh
+# punya satu bill (409 `meja_sudah_ada_bill`). Bill tanpa meja dikecualikan.
+OB154U=$(api "$REISS105" POST /open-bill "{\"items\":[{\"menu_id\":\"$M154\",\"qty\":1}]}")
+OBID154U=$(echo "$OB154U" | jq -r '.id // empty')
+cek "bill pembanding berhasil dibuat (tanpa meja, jadi tak kena guard satu-bill)" "V == 1" \
+  "$([ -n "$OBID154U" ] && echo 1 || echo 0)"
+cek "pesanan yang baru masuk ada DI ATAS kartu yang lebih tua" "V == 1" \
+  "$([ "$(urut154 "$TKIT154" "$OBID154U")" -lt "$(urut154 "$TKIT154" "$OBID154P")" ] && echo 1 || echo 0)"
+# sentuh kartu YANG LEBIH TUA → ia harus melompat ke atas kartu yang lebih baru
+BU154=$(kartu154 "$TKIT154" "$OBID154P" | jq -r '[.items[]|select(.status=="selesai")][0].id')
+api "$TKIT154" POST "/pesanan/open_bill/$OBID154P/item/$BU154/status" '{"status":"dikerjakan"}' > /dev/null
+cek "kartu lama yang BARU DIUBAH melompat ke atas kartu yang lebih baru" "V == 1" \
+  "$([ "$(urut154 "$TKIT154" "$OBID154P")" -lt "$(urut154 "$TKIT154" "$OBID154U")" ] && echo 1 || echo 0)"
+cek "kartu yang belum disentuh tetap ada di papan (tidak lenyap)" "V == 1" \
+  "$(kartu154 "$TKIT154" "$OBID154U" | jq -r 'if .id then 1 else 0 end')"
+api "$REISS105" DELETE "/open-bill/$OBID154U" > /dev/null
+api "$REISS105" DELETE "/open-bill/$OBID154P" > /dev/null
+
+# (g4) PENANDA TAKE AWAY KASIR HARUS TERBACA DI PAPAN, SEJAK BILL MASIH TERBUKA.
+#      Kasir menandai SATU baris take away (`dine_in_override:false`); dulu
+#      `sajian_takeaway` dibiarkan default false, jadi papan menandai SEMUA baris
+#      "di tempat" dan baru benar setelah dibayar — telat, makanannya sudah
+#      keluar di piring.
+OB154T=$(api "$REISS105" POST /open-bill "{\"meja_id\":\"$MEJA154\",\"items\":[{\"menu_id\":\"$M154\",\"qty\":1,\"dine_in_override\":false},{\"menu_id\":\"$M154B\",\"qty\":1}]}")
+OBID154T=$(echo "$OB154T" | jq -r .id)
+PT154=$(kartu154 "$TKIT154" "$OBID154T")
+cek "baris yang ditandai kasir take away → papan ikut 🥡 (bukan di tempat)" "V == 1" \
+  "$(echo "$PT154" | jq -r '[.items[]|select(.nama=="Menu Uji154")][0].sajian_takeaway|if . then 1 else 0 end')"
+cek "baris LAIN tetap di tempat (tidak ikut terbawa)" "V == 0" \
+  "$(echo "$PT154" | jq -r '[.items[]|select(.nama=="Minum Uji154")][0].sajian_takeaway|if . then 1 else 0 end')"
+cek "kartu BUKAN 'semua bawa pulang' (baru satu baris)" "V == 0" \
+  "$(echo "$PT154" | jq -r '.sajian_takeaway|if . then 1 else 0 end')"
+# Dapur menekan 🍽 pada baris itu → keputusan dapur menang…
+BT154=$(echo "$PT154" | jq -r '[.items[]|select(.nama=="Menu Uji154")][0].id')
+api "$TKIT154" POST "/pesanan/open_bill/$OBID154T/item/$BT154/sajian" '{"takeaway":false}' > /dev/null
+cek "dapur boleh mengoreksi jadi di tempat" "V == 0" \
+  "$(kartu154 "$TKIT154" "$OBID154T" | jq -r --arg b "$BT154" '[.items[]|select(.id==$b)][0].sajian_takeaway|if . then 1 else 0 end')"
+# …dan PUT yang TIDAK mengubah dine_in_override tak boleh menimpanya kembali.
+api "$REISS105" PUT "/open-bill/$OBID154T" "{\"meja_id\":\"$MEJA154\",\"items\":[{\"id\":\"$BT154\",\"menu_id\":\"$M154\",\"qty\":2,\"dine_in_override\":false},{\"menu_id\":\"$M154B\",\"qty\":1}]}" > /dev/null
+cek "PUT tanpa mengubah pilihan kasir TIDAK menimpa koreksi dapur" "V == 0" \
+  "$(kartu154 "$TKIT154" "$OBID154T" | jq -r --arg b "$BT154" '[.items[]|select(.id==$b)][0].sajian_takeaway|if . then 1 else 0 end')"
+# Tapi kalau kasir benar-benar MENGUBAH pilihannya, papan ikut lagi.
+api "$REISS105" PUT "/open-bill/$OBID154T" "{\"meja_id\":\"$MEJA154\",\"items\":[{\"id\":\"$BT154\",\"menu_id\":\"$M154\",\"qty\":2,\"dine_in_override\":true},{\"menu_id\":\"$M154B\",\"qty\":1}]}" > /dev/null
+api "$REISS105" PUT "/open-bill/$OBID154T" "{\"meja_id\":\"$MEJA154\",\"items\":[{\"id\":\"$BT154\",\"menu_id\":\"$M154\",\"qty\":2,\"dine_in_override\":false},{\"menu_id\":\"$M154B\",\"qty\":1}]}" > /dev/null
+cek "kasir MENGUBAH pilihannya → papan ikut lagi 🥡" "V == 1" \
+  "$(kartu154 "$TKIT154" "$OBID154T" | jq -r --arg b "$BT154" '[.items[]|select(.id==$b)][0].sajian_takeaway|if . then 1 else 0 end')"
+api "$REISS105" DELETE "/open-bill/$OBID154T" > /dev/null
 
 # (h) Status meja ikut turunan baris: transaksi yang SELURUH sajiannya
 #     dibatalkan tak boleh menahan meja yang sudah tak ada orangnya.
@@ -6880,6 +6962,114 @@ for _ in 1 2 3 4 5; do
   [ "$(etag_of "$OWNER" /meja)" = "$E155" ] || SAMA155=0
 done
 cek "ETag /meja tetap stabil MESKIPUN ada meja terisi" "V == 1" "$SAMA155"
+
+echo "── §156 Diubah jadi TA → kemasan masuk HPP & stoknya berkurang ──"
+# Dulu tombol 🥡 di papan hanya penanda: `hpp_satuan`, `total_hpp`, dan
+# `sale_consumptions` sudah dibukukan dari `is_dine_in` dan tak pernah dihitung
+# ulang. Akibatnya dus yang benar-benar dipakai tak pernah muncul di laba-rugi
+# dan stok kemasan tak pernah turun — pemilik melihat laba lebih besar dari
+# kenyataan, dan kemasan habis tanpa ada yang tahu.
+#
+# BASIS BIAYA kini = `sajian_takeaway` (penyajian), BUKAN `is_dine_in`
+# (pembukuan). Angka di bawah dipilih bulat supaya salahnya kelihatan:
+#   isi   : 100 gr × Rp 10/gr  = Rp 1.000/porsi (bahan biasa, selalu terpakai)
+#   dus   :   1 pcs × Rp 2.000 = Rp 2.000/porsi (kemasan, HANYA saat bawa pulang)
+CB156=$(api "$REISS105" GET /auth/me | jq -r '.user.branch_id')
+ISI156=$(api "$OWNER" POST /bahan '{"nama":"Isi uji156","satuan":"gr","satuan_beli":"kg","isi":1000,"harga_beli":10000,"pengadaan":"beli","kategori":"lain"}' | jq -r .id)
+DUS156=$(api "$OWNER" POST /bahan '{"nama":"Dus uji156","satuan":"pcs","satuan_beli":"pcs","isi":1,"harga_beli":2000,"pengadaan":"beli","kategori":"lain","is_packaging":true}' | jq -r .id)
+cek "bahan bisa DIBUAT sebagai Kemasan TA lewat API (is_packaging bolak-balik)" "V == 1" \
+  "$(api "$OWNER" GET /bahan | jq -r --arg i "$DUS156" '[.[]|select(.id==$i)][0].is_packaging|if . then 1 else 0 end')"
+M156=$(api "$OWNER" POST /menu "{\"nama\":\"Menu Uji156\",\"category_id\":\"$CAT145\",\"tipe\":\"regular\",\"mult\":3,\"harga_jual\":9000,\"komponen\":[{\"ingredient_id\":\"$ISI156\",\"qty\":100},{\"ingredient_id\":\"$DUS156\",\"qty\":1}]}" | jq -r .id)
+cek "menu berkemasan: hpp bawa pulang 3000, hpp dine-in 1000" "V == 1" \
+  "$(api "$OWNER" GET /menu | jq -r --arg i "$M156" '[.[]|select(.id==$i)][0] | ((.hpp==3000) and (.hpp_dine_in==1000))|if . then 1 else 0 end')"
+dus156() { api "$OWNER" GET "/stok?branch_id=$CB156" | jq -r --arg i "$DUS156" '[.[]|select(.ingredient_id==$i)][0].saldo // 0'; }
+isi156() { api "$OWNER" GET "/stok?branch_id=$CB156" | jq -r --arg i "$ISI156" '[.[]|select(.ingredient_id==$i)][0].saldo // 0'; }
+hpp156() { api "$OWNER" GET "/penjualan/$1" | jq -r '.sale.totalHpp'; }
+MEJA156=$(api "$REISS105" GET /meja | jq -r '[.[]|select(.is_active and .tipe=="dine_in")][0].id')
+if [ -z "$(api "$REISS105" GET /shift/aktif | jq -r '.id // empty')" ]; then
+  api "$OWNER" POST "/absensi/masuk" "{\"branch_id\":\"$CB156\"}" > /dev/null 2>&1 || true
+  api "$REISS105" POST /shift/buka '{"modal_awal":0}' > /dev/null 2>&1 || true
+fi
+
+# (a) Jual 2 porsi di meja DINE-IN: kemasan dilewati, stok dus tak bergerak.
+DUS156_0=$(dus156); ISI156_0=$(isi156)
+S156=$(api "$REISS105" POST /penjualan "{\"meja_id\":\"$MEJA156\",\"metode_bayar\":\"tunai\",\"items\":[{\"menu_id\":\"$M156\",\"qty\":2}]}")
+SID156=$(echo "$S156" | jq -r '.sale.id')
+cek "dine-in: total_hpp = 2 × 1000 (dus TIDAK dihitung)" "V == 2000" "$(hpp156 "$SID156")"
+cek "dine-in: stok dus tidak bergerak sebutir pun" "abs(V) < 0.001" \
+  "$(python3 -c "print($(dus156) - $DUS156_0)")"
+cek "dine-in: isi tetap terpakai 2 × 100 gr" "abs(V - 200) < 0.001" \
+  "$(python3 -c "print($ISI156_0 - $(isi156))")"
+
+# (b) INTI PERMINTAAN: papan menandai baris itu bawa pulang. Dusnya sudah
+#     dipakai, jadi HPP naik TEPAT sebesar kemasannya dan stok dus turun.
+BR156=$(api "$OWNER" GET "/pesanan?branch_id=$CB156" | jq -r --arg id "$SID156" '[.[]|select(.id==$id)][0].items[0].id')
+DUS156_1=$(dus156); ISI156_1=$(isi156)
+api "$OWNER" POST "/pesanan/penjualan/$SID156/item/$BR156/sajian" '{"takeaway":true}' > /dev/null
+cek "diubah jadi TA: total_hpp 2000 → 6000 (naik tepat 2 × Rp 2.000 kemasan)" "V == 6000" \
+  "$(hpp156 "$SID156")"
+cek "diubah jadi TA: stok dus BERKURANG tepat 2 pcs" "abs(V - 2) < 0.001" \
+  "$(python3 -c "print($DUS156_1 - $(dus156))")"
+cek "diubah jadi TA: pemakaian bahan biasa TIDAK ikut berubah" "abs(V) < 0.001" \
+  "$(python3 -c "print($ISI156_1 - $(isi156))")"
+cek "is_dine_in penjualan MAUPUN barisnya tetap true (pembukuan tak dibalik)" "V == 1" \
+  "$(api "$OWNER" GET "/penjualan/$SID156" | jq -r '((.sale.isDineIn==true) and ([.items[]|select(.isDineIn==true)]|length==1))|if . then 1 else 0 end')"
+cek "riwayat mencatat perpindahan HPP-nya (bukan cuma labelnya)" "V == 1" \
+  "$(api "$OWNER" GET "/pesanan/penjualan/$SID156/log" | jq '[.[]|select(.aksi|test("bawa pulang.*HPP"))]|length>=1|if . then 1 else 0 end')"
+
+# (c) IDEMPOTEN: dikembalikan ke makan di tempat → angkanya kembali PERSIS.
+#     Hitung-ulang selalu dari nol (bukan selisih), jadi bolak-balik tak
+#     menumpuk galat sepeser pun.
+api "$OWNER" POST "/pesanan/penjualan/$SID156/item/$BR156/sajian" '{"takeaway":false}' > /dev/null
+cek "dikembalikan ke dine-in: total_hpp kembali PERSIS 2000" "V == 2000" "$(hpp156 "$SID156")"
+cek "dikembalikan ke dine-in: stok dus kembali PERSIS ke angka awal" "abs(V) < 0.001" \
+  "$(python3 -c "print($(dus156) - $DUS156_1)")"
+
+# (c2) `waktu` konsumsi WAJIB tetap waktu transaksinya, bukan saat dihitung
+#      ulang. Saldo stok mem-window-kan `sc.waktu > baseline_opname`; kalau
+#      hitung-ulang memakai now(), konsumsi lama melompat ke seberang garis
+#      opname dan stok berkurang DUA KALI di pembukuan yang sudah ditutup.
+api "$OWNER" POST "/pesanan/penjualan/$SID156/item/$BR156/sajian" '{"takeaway":true}' > /dev/null
+TGL156=$(api "$OWNER" GET "/penjualan/$SID156" | jq -r '.sale.saleDate')
+NOM156=$(api "$OWNER" GET "/penjualan/$SID156" | jq -r '.sale.nomor')
+cek "kartu stok dus: pemakaiannya tetap di TANGGAL TRANSAKSI, keluar 2 pcs" "V == 1" \
+  "$(api "$OWNER" GET "/stok/kartu/$DUS156?branch_id=$CB156&dari=$TGL156&sampai=$TGL156" | jq -r --arg n "Struk $NOM156" '[.mutasi[]|select(.jenis=="penjualan" and .keterangan==$n)] | ((length==1) and (.[0].keluar==2))|if . then 1 else 0 end')"
+
+# (d) CELAH YANG DILAPORKAN: dapur menandai TA saat bill BELUM dibayar. Dulu
+#     penandanya sampai ke layar tapi tidak ke angka — basis biaya diambil dari
+#     `is_dine_in`, jadi kemasannya hilang dari pembukuan begitu kasir menagih.
+OB156=$(api "$REISS105" POST /open-bill "{\"meja_id\":\"$MEJA156\",\"items\":[{\"menu_id\":\"$M156\",\"qty\":1},{\"menu_id\":\"$M156\",\"qty\":1}]}")
+OBID156=$(echo "$OB156" | jq -r .id)
+BRA156=$(echo "$OB156" | jq -r '.items[0].id'); BRB156=$(echo "$OB156" | jq -r '.items[1].id')
+api "$OWNER" POST "/pesanan/open_bill/$OBID156/item/$BRA156/sajian" '{"takeaway":true}' > /dev/null
+DUS156_2=$(dus156)
+S156B=$(api "$REISS105" POST /penjualan "{\"meja_id\":\"$MEJA156\",\"metode_bayar\":\"tunai\",\"open_bill_id\":\"$OBID156\",\"items\":[{\"menu_id\":\"$M156\",\"qty\":1,\"open_bill_item_id\":\"$BRA156\"},{\"menu_id\":\"$M156\",\"qty\":1,\"open_bill_item_id\":\"$BRB156\"}]}")
+SID156B=$(echo "$S156B" | jq -r '.sale.id')
+cek "tanda TA dapur sampai ke ANGKA saat dibayar: total_hpp 3000+1000" "V == 4000" \
+  "$(hpp156 "$SID156B")"
+cek "stok dus turun 1 pcs saja — hanya baris yang ditandai" "abs(V - 1) < 0.001" \
+  "$(python3 -c "print($DUS156_2 - $(dus156))")"
+cek "transaksi tetap dibukukan dine-in walau satu barisnya dibungkus" "V == 1" \
+  "$(api "$OWNER" GET "/penjualan/$SID156B" | jq -r '.sale.isDineIn|if . then 1 else 0 end')"
+
+# (e) Pintasan "semua baris": kedua porsi dibungkus → basis bawa pulang penuh.
+DUS156_3=$(dus156)
+api "$OWNER" POST "/pesanan/penjualan/$SID156B/sajian" '{"takeaway":true}' > /dev/null
+cek "tombol 'semua': total_hpp jadi 2 × 3000 (bawa pulang penuh)" "V == 6000" "$(hpp156 "$SID156B")"
+cek "tombol 'semua': dus turun 1 lagi (baris yang tadi masih di piring)" "abs(V - 1) < 0.001" \
+  "$(python3 -c "print($DUS156_3 - $(dus156))")"
+
+# (f) Penjualan di Tempat Sampah TIDAK dihitung ulang — seluruh agregasi stok &
+#     laporan sudah mengabaikannya, jadi menggeser biayanya cuma menambah baris
+#     hantu yang tak pernah terbaca.
+S156C=$(api "$REISS105" POST /penjualan "{\"meja_id\":\"$MEJA156\",\"metode_bayar\":\"tunai\",\"items\":[{\"menu_id\":\"$M156\",\"qty\":1}]}")
+SID156C=$(echo "$S156C" | jq -r '.sale.id')
+BR156C=$(api "$OWNER" GET "/pesanan?branch_id=$CB156" | jq -r --arg id "$SID156C" '[.[]|select(.id==$id)][0].items[0].id')
+api "$OWNER" DELETE "/penjualan/$SID156C" > /dev/null
+DUS156_4=$(dus156)
+api "$OWNER" POST "/pesanan/penjualan/$SID156C/item/$BR156C/sajian" '{"takeaway":true}' > /dev/null 2>&1 || true
+cek "penjualan terhapus: menandainya TA tidak menggerakkan stok apa pun" "abs(V) < 0.001" \
+  "$(python3 -c "print($DUS156_4 - $(dus156))")"
 
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

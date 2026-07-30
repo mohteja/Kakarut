@@ -1,8 +1,16 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import type { PesananItemRow, PesananLogRow, PesananRow, PesananStatus } from "@kakarut/shared";
+import {
+  ringkasPesanan,
+  urutkanPesanan,
+  type PesananItemRow,
+  type PesananLogRow,
+  type PesananRow,
+  type PesananStatus,
+} from "@kakarut/shared";
 import { CabangDataBar } from "../../components/CabangDataBar";
 import { Card, ErrorText, Modal, PageTitle, Spinner } from "../../components/ui";
+import { useAuth } from "../../context/AuthContext";
 import { useCabangData } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatRupiah, formatWaktu, hariIniWIB } from "../../lib/format";
@@ -77,15 +85,19 @@ function RiwayatModal({ pesanan, onClose }: { pesanan: PesananRow; onClose: () =
  * Tombolnya ada di sini, bukan di kartunya: dapur menyelesaikan minuman lebih
  * dulu lalu gorengan menyusul, dan dengan status setingkat kartu tak ada cara
  * memberi tahu siapa pun mana yang sudah keluar.
+ *
+ * Tombolnya SENGAJA tidak pernah dinonaktifkan sambil menunggu server. Dulu satu
+ * bendera `sibuk` mematikan setiap tombol di SELURUH papan sampai satu permintaan
+ * selesai — menandai satu minuman membekukan semua kartu. Sekarang perubahannya
+ * sudah tampil sebelum permintaan berangkat, jadi tak ada yang perlu ditunggu;
+ * menekan dua kali pun aman karena perintahnya "jadikan X", bukan "naikkan satu".
  */
 function BarisPesanan({
   it,
-  sibuk,
   onStatus,
   onSajian,
 }: {
   it: PesananItemRow;
-  sibuk: boolean;
   onStatus: (status: PesananStatus) => void;
   onSajian: (takeaway: boolean) => void;
 }) {
@@ -107,38 +119,46 @@ function BarisPesanan({
       <div className="mt-1 flex flex-wrap items-center gap-1">
         {it.status !== "selesai" && (
           <button
-            disabled={sibuk}
             onClick={() => onStatus("selesai")}
-            className="rounded-md bg-green-600 px-2 py-1 text-[11px] font-semibold text-white hover:bg-green-700 disabled:opacity-50"
+            className="rounded-md bg-green-600 px-2 py-1 text-[11px] font-semibold text-white hover:bg-green-700"
           >
             ✅ Selesai
           </button>
         )}
+        {/*
+          TIDAK ADA tombol Batal di papan. Membatalkan pesanan menyentuh uang —
+          tagihan, stok, dan tamu yang mungkin sudah menerima piringnya — dan itu
+          keputusan kasir, bukan dapur. Papan ini hanya menandai mana yang sudah
+          keluar dari dapur.
+
+          Kolom "Batal" TETAP ada: pesanan yang dibatalkan kasir (hapus bill di
+          daftar Open Bill) harus tetap terlihat di sini, supaya dapur yang sedang
+          memasaknya dapat sinyal untuk berhenti. Kalau kolomnya ikut dihapus,
+          kartunya lenyap dari papan tanpa pemberitahuan apa pun.
+
+          `↩ Kembalikan` DIPERTAHANKAN, termasuk pada baris yang batal: setelah
+          Batal hilang, ini satu-satunya jalan mundur kalau ada yang salah tekan —
+          dan pada baris batal ia membuka lagi bill yang telanjur dihapus kasir.
+        */}
         {it.status !== "dikerjakan" && (
           <button
-            disabled={sibuk}
             onClick={() => onStatus("dikerjakan")}
-            className="rounded-md bg-orange-100 px-2 py-1 text-[11px] font-semibold text-orange-800 hover:bg-orange-200 disabled:opacity-50"
+            title={
+              it.status === "batal"
+                ? "Kembalikan ke dapur — pesanan ini dibatalkan kasir"
+                : "Belum selesai — kembalikan ke daftar kerja"
+            }
+            className="rounded-md bg-orange-100 px-2 py-1 text-[11px] font-semibold text-orange-800 hover:bg-orange-200"
           >
             ↩ Kembalikan
           </button>
         )}
-        {it.status !== "batal" && (
-          <button
-            disabled={sibuk}
-            onClick={() => onStatus("batal")}
-            className="rounded-md bg-red-50 px-2 py-1 text-[11px] font-semibold text-red-700 hover:bg-red-100 disabled:opacity-50"
-          >
-            ✖ Batal
-          </button>
-        )}
         <button
-          disabled={sibuk}
           onClick={() => onSajian(!it.sajian_takeaway)}
           title={
             it.sajian_takeaway ? "Sajikan di tempat" : "Bungkus untuk dibawa pulang"
           }
-          className={`rounded-md px-2 py-1 text-[11px] font-semibold disabled:opacity-50 ${
+          className={`rounded-md px-2 py-1 text-[11px] font-semibold ${
             it.sajian_takeaway
               ? "bg-stone-200 text-stone-700 hover:bg-stone-300"
               : "bg-blue-50 text-blue-700 hover:bg-blue-100"
@@ -158,17 +178,15 @@ function BarisPesanan({
 
 function KartuPesanan({
   p,
-  sibuk,
   onStatusItem,
   onSajianItem,
-  onStatusSemua,
+  onPindahSelesai,
   onRiwayat,
 }: {
   p: PesananRow;
-  sibuk: boolean;
   onStatusItem: (itemId: string, status: PesananStatus) => void;
   onSajianItem: (itemId: string, takeaway: boolean) => void;
-  onStatusSemua: (status: PesananStatus) => void;
+  onPindahSelesai: () => void;
   onRiwayat: () => void;
 }) {
   // label meja SUDAH berbunyi "Meja 1"/"Ruang Tunggu" — jangan diberi awalan
@@ -239,7 +257,6 @@ function KartuPesanan({
           <BarisPesanan
             key={it.id}
             it={it}
-            sibuk={sibuk}
             onStatus={(status) => onStatusItem(it.id, status)}
             onSajian={(takeaway) => onSajianItem(it.id, takeaway)}
           />
@@ -252,35 +269,24 @@ function KartuPesanan({
         </div>
       )}
 
-      {/* Pintasan seluruh pesanan — tetap ada karena pesanan satu-dua sajian
-          adalah mayoritas, dan menekan tombol per baris untuk itu melelahkan. */}
+      {/*
+        SATU pintasan kartu, dan hanya yang aman: pindahkan pesanan ini ke
+        Selesai. Pesanan satu-dua sajian adalah mayoritas, dan menekan tombol
+        per baris untuk itu melelahkan — jadi pintasannya tetap perlu ada.
+
+        Papan ini TIDAK punya Batal sama sekali — tidak per sajian, tidak per
+        kartu. Membatalkan pesanan menyentuh uang, dan itu pekerjaan kasir.
+        "Kembalikan semua" juga tak ada: mengembalikan pesanan yang sudah keluar
+        adalah koreksi, dan koreksi menunjuk sajian tertentu.
+      */}
       <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-stone-100 pt-2">
-        <span className="text-[11px] font-medium text-stone-400">Semua:</span>
         {p.status !== "selesai" && p.items.length > 0 && (
           <button
-            disabled={sibuk}
-            onClick={() => onStatusSemua("selesai")}
-            className="rounded-lg bg-green-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-green-700 disabled:opacity-50"
+            onClick={onPindahSelesai}
+            title="Tandai semua sajian yang masih dikerjakan sebagai selesai (yang batal tetap batal)"
+            className="rounded-lg bg-green-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-green-700"
           >
-            ✅ Selesai
-          </button>
-        )}
-        {p.status !== "dikerjakan" && p.items.length > 0 && (
-          <button
-            disabled={sibuk}
-            onClick={() => onStatusSemua("dikerjakan")}
-            className="rounded-lg bg-orange-100 px-2.5 py-1.5 text-xs font-semibold text-orange-800 hover:bg-orange-200 disabled:opacity-50"
-          >
-            ↩ Kembalikan
-          </button>
-        )}
-        {p.status !== "batal" && p.items.length > 0 && (
-          <button
-            disabled={sibuk}
-            onClick={() => onStatusSemua("batal")}
-            className="rounded-lg bg-red-50 px-2.5 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-100 disabled:opacity-50"
-          >
-            ✖ Batal
+            ✅ Pindahkan ke Selesai
           </button>
         )}
         <button
@@ -313,49 +319,120 @@ function KartuPesanan({
 export function PesananPage() {
   const { query: branchQuery } = useCabangData();
   const queryClient = useQueryClient();
+  const { auth } = useAuth();
   const [tanggal, setTanggal] = useState(hariIniWIB());
   const [fokus, setFokus] = useState<PesananStatus>("dikerjakan");
   const [riwayat, setRiwayat] = useState<PesananRow | null>(null);
 
+  const kunci = ["pesanan", branchQuery, tanggal];
   const qs = `${branchQuery ? `${branchQuery}&` : "?"}tanggal=${tanggal}`;
+  /**
+   * Selama ada tombol status yang belum dijawab server, polling DIMATIKAN.
+   *
+   * Kalau tidak: jawaban polling yang berangkat sebelum perubahan tersimpan akan
+   * mendarat sesudahnya dan menimpa tampilan optimistis dengan status lama —
+   * badge berkedip balik lalu maju lagi. Itu justru terbaca "lemot", bukan cepat.
+   */
+  const adaAksi = useIsMutating({ mutationKey: ["pesanan-aksi"] }) > 0;
   const { data, isLoading, error } = useQuery({
-    queryKey: ["pesanan", branchQuery, tanggal],
+    queryKey: kunci,
     queryFn: () => api<PesananRow[]>(`/pesanan${qs}`),
     // Papan dapur = satu-satunya layar yang keterlambatannya berujung makanan
     // tak dibuat, jadi lebih rapat dari norma 30 dtk aplikasi ini.
-    refetchInterval: 15_000,
+    refetchInterval: adaAksi ? false : 15_000,
   });
 
+  /**
+   * TAMPILKAN DULU, KIRIM BELAKANGAN.
+   *
+   * Dapur menekan tombol ini puluhan kali per shift sambil memegang piring.
+   * Menunggu satu putaran jaringan + satu refetch penuh sebelum badge berubah
+   * membuat setiap ketukan terasa menggantung — itu keluhan "lemot"-nya. Kartu
+   * di cache diperbarui lebih dulu memakai aturan turunan yang SAMA dengan
+   * server (`ringkasPesanan`), jadi kolom, hitungan "2/3 selesai", dan urutan
+   * langsung benar. Kalau servernya menolak, `onError` memulihkan apa adanya.
+   */
+  function terapkanOptimistis(
+    p: PesananRow,
+    ubahBaris: (it: PesananItemRow) => PesananItemRow,
+  ): { sebelum: PesananRow[] | undefined } {
+    const sebelum = queryClient.getQueryData<PesananRow[]>(kunci);
+    queryClient.setQueryData<PesananRow[]>(kunci, (lama) =>
+      lama
+        ? urutkanPesanan(
+            lama.map((r) => {
+              if (r.jenis !== p.jenis || r.id !== p.id) return r;
+              const items = r.items.map(ubahBaris);
+              return { ...r, items, ...ringkasPesanan(items) };
+            }),
+          )
+        : lama,
+    );
+    return { sebelum };
+  }
+  const pulihkan = (ctx: { sebelum: PesananRow[] | undefined } | undefined) => {
+    if (ctx?.sebelum) queryClient.setQueryData(kunci, ctx.sebelum);
+  };
   const segarkan = () => {
     queryClient.invalidateQueries({ queryKey: ["pesanan"] });
     queryClient.invalidateQueries({ queryKey: ["pesanan-log"] });
   };
+  /** Jejak "siapa & kapan" versi klien — ditimpa jawaban server saat refetch. */
+  const jejak = () => ({
+    status_oleh: auth?.user.nama ?? null,
+    status_pada: new Date().toISOString(),
+  });
+
   const statusItem = useMutation({
+    mutationKey: ["pesanan-aksi"],
     mutationFn: (v: { p: PesananRow; itemId: string; status: PesananStatus }) =>
       api(`/pesanan/${v.p.jenis}/${v.p.id}/item/${v.itemId}/status`, {
         method: "POST",
         body: { status: v.status },
       }),
+    onMutate: (v) =>
+      terapkanOptimistis(v.p, (it) =>
+        it.id === v.itemId ? { ...it, status: v.status, ...jejak() } : it,
+      ),
+    onError: (_e, _v, ctx) => pulihkan(ctx),
     onSettled: segarkan,
   });
   const sajianItem = useMutation({
+    mutationKey: ["pesanan-aksi"],
     mutationFn: (v: { p: PesananRow; itemId: string; takeaway: boolean }) =>
       api(`/pesanan/${v.p.jenis}/${v.p.id}/item/${v.itemId}/sajian`, {
         method: "POST",
         body: { takeaway: v.takeaway },
       }),
+    onMutate: (v) =>
+      terapkanOptimistis(v.p, (it) =>
+        it.id === v.itemId ? { ...it, sajian_takeaway: v.takeaway } : it,
+      ),
+    onError: (_e, _v, ctx) => pulihkan(ctx),
     onSettled: segarkan,
   });
-  const statusSemua = useMutation({
-    mutationFn: (v: { p: PesananRow; status: PesananStatus }) =>
+  /**
+   * "Pindahkan ke Selesai" — satu tombol untuk seluruh kartu.
+   *
+   * Hanya baris yang masih `dikerjakan` yang ikut selesai; yang `batal` tetap
+   * batal. Menandai pesanan kelar bukan alasan menghidupkan lagi sajian yang
+   * dibatalkan — servernya menerapkan aturan yang sama.
+   */
+  const pindahSelesai = useMutation({
+    mutationKey: ["pesanan-aksi"],
+    mutationFn: (v: { p: PesananRow }) =>
       api(`/pesanan/${v.p.jenis}/${v.p.id}/status`, {
         method: "POST",
-        body: { status: v.status },
+        body: { status: "selesai" },
       }),
+    onMutate: (v) =>
+      terapkanOptimistis(v.p, (it) =>
+        it.status === "dikerjakan" ? { ...it, status: "selesai", ...jejak() } : it,
+      ),
+    onError: (_e, _v, ctx) => pulihkan(ctx),
     onSettled: segarkan,
   });
-  const sibuk = statusItem.isPending || sajianItem.isPending || statusSemua.isPending;
-  const galat = statusItem.error ?? sajianItem.error ?? statusSemua.error;
+  const galat = statusItem.error ?? sajianItem.error ?? pindahSelesai.error;
 
   const rows = data ?? [];
   const perKolom = (s: PesananStatus) => rows.filter((r) => r.status === s);
@@ -373,6 +450,13 @@ export function PesananPage() {
         <b>belum dibayar</b>. Tandai <b>tiap sajian</b> begitu keluar dari dapur, jadi
         semua orang tahu mana yang sudah dan mana yang belum. Tombol <b>bawa pulang</b>{" "}
         hanya mengubah cara penyajian, tidak mengubah nota atau perhitungan stok.
+        {/* Tanpa keterangan ini, dapur akan mencari tombol Batal yang sudah tak
+            ada dan menyangka papannya rusak. */}
+        <div className="mt-1">
+          <b>Membatalkan pesanan dilakukan kasir</b>, bukan dari papan ini — karena
+          menyangkut tagihan. Pesanan yang dibatalkan kasir tetap muncul di kolom{" "}
+          <b>Batal</b> supaya dapur tahu harus berhenti memasak.
+        </div>
       </div>
 
       <div className="mb-3 flex flex-wrap items-center gap-3">
@@ -426,10 +510,9 @@ export function PesananPage() {
                     <KartuPesanan
                       key={`${p.jenis}:${p.id}`}
                       p={p}
-                      sibuk={sibuk}
                       onStatusItem={(itemId, status) => statusItem.mutate({ p, itemId, status })}
                       onSajianItem={(itemId, takeaway) => sajianItem.mutate({ p, itemId, takeaway })}
-                      onStatusSemua={(status) => statusSemua.mutate({ p, status })}
+                      onPindahSelesai={() => pindahSelesai.mutate({ p })}
                       onRiwayat={() => setRiwayat(p)}
                     />
                   ))}

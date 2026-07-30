@@ -1281,11 +1281,20 @@ export const saleItems = pgTable(
     pesananStatusAt: timestamp("pesanan_status_at", { withTimezone: true }),
     pesananStatusOleh: uuid("pesanan_status_oleh").references(() => users.id),
     /**
-     * PENANDA PENYAJIAN "bawa pulang" — SENGAJA bukan `is_dine_in`.
-     * `is_dine_in` adalah fakta pembukuan: `sale_consumptions` dan `hpp_satuan`
-     * sudah terlanjur dihitung darinya lewat `qtyEfektif()` (dine-in melewati
-     * kemasan, pelengkap 50%). Membaliknya membuat baris ini berbohong tentang
-     * angkanya sendiri. Kolom ini hanya instruksi penyajian.
+     * PENYAJIAN "bawa pulang" — SENGAJA terpisah dari `is_dine_in`.
+     *
+     * Keduanya menjawab pertanyaan berbeda dan tidak boleh disatukan:
+     * - `is_dine_in` = FAKTA PEMBUKUAN, di mana pesanan dimakan. Dasar
+     *   pemisahan omzet dine-in/bawa-pulang dan label meja pada struk.
+     * - `sajian_takeaway` = BASIS BIAYA. `hpp_satuan` dan `sale_consumptions`
+     *   dihitung dari kolom INI lewat `qtyEfektif()` (bawa pulang memakai
+     *   kemasan penuh; dine-in melewati kemasan dan menghitung pelengkap 50%).
+     *
+     * Sebabnya: sebuah porsi bisa dibukukan di meja dine-in tapi akhirnya
+     * dibungkus. Dusnya benar-benar keluar dari rak, jadi biaya & stok harus
+     * mengikuti penyajiannya — bukan mejanya. Membalik kolom ini pada
+     * penjualan yang sudah dibayar MEMICU hitung-ulang biaya seluruh
+     * transaksi (`penjualan/rekalkulasi.ts`).
      */
     sajianTakeaway: boolean("sajian_takeaway").notNull().default(false),
   },
@@ -1490,7 +1499,13 @@ export const openBillItems = pgTable(
     pesananStatus: pesananStatusEnum("pesanan_status").notNull().default("dikerjakan"),
     pesananStatusAt: timestamp("pesanan_status_at", { withTimezone: true }),
     pesananStatusOleh: uuid("pesanan_status_oleh").references(() => users.id),
-    /** penanda penyajian "bawa pulang" per baris — ikut diwarisi saat dibayar */
+    /**
+     * Penyajian "bawa pulang" per baris — ikut diwarisi baris penjualan saat
+     * dibayar, dan di sanalah ia menjadi BASIS BIAYA (kemasan take away masuk
+     * HPP & `sale_consumptions`). Di bill sendiri belum ada biaya terbuku,
+     * jadi menandainya di sini tidak menggerakkan angka apa pun — cukup
+     * instruksi kerja sampai pesanannya dilunasi.
+     */
     sajianTakeaway: boolean("sajian_takeaway").notNull().default(false),
   },
   (t) => [

@@ -59,7 +59,7 @@ function FieldHp({ label, children }: { label: string; children: ReactNode }) {
  * - `showJenis` (Ubah): tampilkan badge Jenis (beli/produksi) — hanya-baca.
  * - `onRemove` (Tambah): tampilkan kolom hapus baris (✕).
  *
- * Ada 15 kolom, artinya tabelnya butuh ~1450px. Di layar HP itu jauh di luar
+ * Ada 16 kolom, artinya tabelnya butuh ~1560px. Di layar HP itu jauh di luar
  * layar dan hampir semua input tidak terjangkau, jadi di bawah `sm` setiap
  * baris dirender sebagai kartu bertumpuk. Kendali dibuat sekali lewat helper
  * di bawah supaya kedua tata letak tidak bisa berbeda perilaku — helper
@@ -204,6 +204,24 @@ export function BahanEditorGrid({
       onChange={(e) => onChange(i, { track_stok: e.target.checked })}
       aria-label={`Lacak stok baris ${i + 1}`}
       title="Lacak stok bahan ini"
+    />
+  );
+
+  /**
+   * Kemasan take away. Bukan atribut kosmetik: inilah satu-satunya sumber
+   * `is_packaging`, dan seluruh aturan bawa-pulang bergantung padanya
+   * (`qtyEfektif` di @kakarut/shared) — dus dihitung saat pesanan dibawa
+   * pulang, dilewati saat makan di tempat. Tanpa satu pun bahan bertanda ini,
+   * HPP bawa pulang sebuah menu akan sama dengan HPP dine-in dan biaya
+   * dus/box tak pernah masuk laba-rugi.
+   */
+  const fKemasan = (b: BahanEditorRow, i: number) => (
+    <input
+      type="checkbox"
+      checked={b.is_packaging}
+      onChange={(e) => onChange(i, { is_packaging: e.target.checked })}
+      aria-label={`Kemasan take away baris ${i + 1}`}
+      title="Kemasan take away (dus/box/plastik) — dihitung hanya saat pesanan bawa pulang, dilewati saat makan di tempat"
     />
   );
 
@@ -356,6 +374,9 @@ export function BahanEditorGrid({
                   <label className="flex items-center gap-2">
                     {fLacak(b, i)} Lacak stok
                   </label>
+                  <label className="flex items-center gap-2">
+                    {fKemasan(b, i)} 🥡 Kemasan TA
+                  </label>
                 </div>
 
                 <FieldHp label="Catatan">{fCatatan(b, i, "w-full")}</FieldHp>
@@ -367,7 +388,7 @@ export function BahanEditorGrid({
 
       {/* Desktop: grid seperti semula */}
       <div className="hidden overflow-x-auto rounded-xl border border-stone-200 bg-white shadow-sm sm:block">
-        <table className="w-full min-w-[1450px]">
+        <table className="w-full min-w-[1560px]">
           <thead className="border-b border-stone-200 bg-stone-50">
             <tr>
               <th className={thCell} rowSpan={2}>Kode</th>
@@ -380,6 +401,13 @@ export function BahanEditorGrid({
               <th className={`${thCell} ${sepKiri}`} rowSpan={2}>Kategori</th>
               <th className={`${thCell} text-center`} rowSpan={2}>Ecer</th>
               <th className={`${thCell} text-center`} rowSpan={2}>Lacak</th>
+              <th
+                className={`${thCell} text-center`}
+                rowSpan={2}
+                title="Kemasan take away (dus/box/plastik) — dihitung hanya saat pesanan bawa pulang, dilewati saat makan di tempat"
+              >
+                🥡 Kemasan TA
+              </th>
               <th className={thCell} rowSpan={2}>Stok min</th>
               <th className={thCell} rowSpan={2}>Min beli</th>
               <th
@@ -425,6 +453,7 @@ export function BahanEditorGrid({
                   <td className={`px-2 py-1.5 ${sepKiri}`}>{fKategori(b, i, "w-28")}</td>
                   <td className="px-2 py-1.5 text-center">{fEcer(b, i)}</td>
                   <td className="px-2 py-1.5 text-center">{fLacak(b, i)}</td>
+                  <td className="px-2 py-1.5 text-center">{fKemasan(b, i)}</td>
                   <td className="px-2 py-1.5">{fStokMin(b, i, "w-20")}</td>
                   <td className="px-2 py-1.5">{fMinBeli(b, i, "w-20")}</td>
                   <td className="px-2 py-1.5">{fMasaSimpan(b, i, "w-20")}</td>

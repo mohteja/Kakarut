@@ -26,6 +26,7 @@ import {
 import { requireRole, resolveBranchId, terikatCabang, type AppEnv } from "../../middleware/auth";
 import {
   ketersediaanMenu,
+  komponenEfektif,
   loadKatalog,
   resolveKode,
   tampilDiCabang,
@@ -302,12 +303,7 @@ export const menuRoutes = new Hono<AppEnv>()
         const dto = toMenuDto(r, katalog);
         // Penyumbang = komponen menu ini + (paket) komponen menu dasarnya,
         // digabung per bahan — persis himpunan yang dijumlah `hitungHargaMenu`.
-        const semua = [
-          ...(katalog.komponenByMenu.get(r.id) ?? []),
-          ...(r.tipe === "paket" && r.baseMenuId
-            ? katalog.komponenByMenu.get(r.baseMenuId) ?? []
-            : []),
-        ];
+        const semua = komponenEfektif(katalog, r);
         const gabung = new Map<string, PenyumbangHpp>();
         for (const k of semua) {
           const ada = gabung.get(k.ingredient_id);

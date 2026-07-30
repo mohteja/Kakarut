@@ -1395,9 +1395,12 @@ export interface RiwayatTransaksiRow {
   total: number;
   is_dine_in: boolean;
   /**
-   * Penanda PENYAJIAN dari Papan Pesanan Masuk — dapur bisa mengubahnya jadi
-   * bawa pulang setelah transaksi tercatat. Sengaja TERPISAH dari `is_dine_in`
-   * (fakta pembukuan yang sudah dipakai menghitung konsumsi bahan & HPP).
+   * PENYAJIAN dari Papan Pesanan Masuk — dapur bisa mengubahnya jadi bawa
+   * pulang setelah transaksi tercatat. Sengaja TERPISAH dari `is_dine_in`:
+   * yang terakhir itu fakta pembukuan (di mana pesanan dimakan), sedangkan
+   * INI adalah basis biaya — `hpp_satuan`, `total_hpp`, dan pemakaian bahan
+   * dihitung darinya. Mengubahnya pada transaksi yang sudah dibayar MEMICU
+   * hitung-ulang biaya transaksi tersebut, termasuk stok kemasan take away.
    *
    * DITURUNKAN dari baris: true hanya bila SELURUH baris transaksi ditandai
    * bawa pulang. Penandanya sendiri disimpan per baris (`sale_items`).
@@ -1584,9 +1587,11 @@ export interface PesananItemRow {
   is_dine_in: boolean;
   status: PesananStatus;
   /**
-   * Penanda penyajian "bawa pulang" per baris. SENGAJA terpisah dari
-   * `is_dine_in`: yang terakhir itu fakta pembukuan yang sudah dipakai
-   * menghitung pemakaian bahan & HPP, dan tidak diubah oleh papan.
+   * Penyajian "bawa pulang" per baris. SENGAJA terpisah dari `is_dine_in`:
+   * yang terakhir itu fakta pembukuan (di mana pesanan dimakan) dan TIDAK
+   * diubah oleh papan; yang INI adalah basis biaya — pemakaian bahan & HPP
+   * baris ini dihitung darinya, jadi menandainya bawa pulang membuat kemasan
+   * take away benar-benar terpakai dan stoknya berkurang.
    */
   sajian_takeaway: boolean;
   /** siapa & kapan status baris ini terakhir diubah; null = belum disentuh */
