@@ -140,6 +140,20 @@ async function loadDetail(companyId: string, id: string): Promise<OpenBillDetail
 type BillItemInput = z.infer<typeof BillBody>["items"][number];
 type KatalogHarga = Map<string, { nama: string; hargaJual: number }>;
 
+/**
+ * Penanda penyajian awal untuk papan dapur, DITURUNKAN dari perkataan kasir.
+ *
+ * `dine_in_override === false` berarti kasir sudah bilang "porsi ini dibungkus".
+ * Dapur harus melihatnya dari kartu, bukan menebak: dulu `sajian_takeaway`
+ * dibiarkan default `false`, jadi papan menandai SEMUA baris "🍽 Di tempat"
+ * meski kasir sudah menandai salah satunya take away. Barisnya baru jadi benar
+ * setelah dibayar (`createSale` memakai aturan yang sama) — dan itu terlambat:
+ * makanannya sudah keluar di piring.
+ */
+function sajianDariKasir(dineInOverride: boolean | null | undefined): boolean {
+  return !(dineInOverride ?? true);
+}
+
 /** Baris BARU: nama + harga di-snapshot dari katalog saat ini. */
 function barisBaru(billId: string, it: BillItemInput, katalog: KatalogHarga) {
   const m = katalog.get(it.menu_id)!;
@@ -150,6 +164,7 @@ function barisBaru(billId: string, it: BillItemInput, katalog: KatalogHarga) {
     hargaSatuan: m.hargaJual,
     qty: it.qty,
     dineInOverride: it.dine_in_override ?? null,
+    sajianTakeaway: sajianDariKasir(it.dine_in_override),
     catatan: it.catatan?.trim() || null,
   };
 }
@@ -425,6 +440,7 @@ export const openBillRoutes = new Hono<AppEnv>()
           pesananStatus: openBillItems.pesananStatus,
           pesananStatusAt: openBillItems.pesananStatusAt,
           pesananStatusOleh: openBillItems.pesananStatusOleh,
+          dineInOverride: openBillItems.dineInOverride,
         })
         .from(openBillItems)
         .where(eq(openBillItems.billId, id));
@@ -483,12 +499,22 @@ export const openBillRoutes = new Hono<AppEnv>()
         const barisId = pasangan.get(i);
         if (!barisId) continue;
         // hargaSatuan & menuNama SENGAJA tidak ikut diperbarui — itulah kuncinya
+        const baruOverride = it.dine_in_override ?? null;
+        /*
+         * Penanda penyajian hanya ikut BERUBAH bila kasir memang mengubah
+         * `dine_in_override` baris ini. Kalau nilainya sama, jangan disentuh:
+         * dapur boleh sudah menekan 🥡/🍽 sendiri di papan, dan menimpanya
+         * dengan nilai kasir yang tak berubah akan membatalkan keputusan itu
+         * setiap kali kasir menambah satu pesanan lain ke bill yang sama.
+         */
+        const overrideBerubah = (lamaById.get(barisId)?.dineInOverride ?? null) !== baruOverride;
         await tx
           .update(openBillItems)
           .set({
             qty: it.qty,
-            dineInOverride: it.dine_in_override ?? null,
+            dineInOverride: baruOverride,
             catatan: it.catatan?.trim() || null,
+            ...(overrideBerubah ? { sajianTakeaway: sajianDariKasir(baruOverride) } : {}),
           })
           .where(eq(openBillItems.id, barisId));
       }

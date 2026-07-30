@@ -6682,6 +6682,36 @@ cek "kartu yang belum disentuh tetap ada di papan (tidak lenyap)" "V == 1" \
 api "$REISS105" DELETE "/open-bill/$OBID154U" > /dev/null
 api "$REISS105" DELETE "/open-bill/$OBID154P" > /dev/null
 
+# (g4) PENANDA TAKE AWAY KASIR HARUS TERBACA DI PAPAN, SEJAK BILL MASIH TERBUKA.
+#      Kasir menandai SATU baris take away (`dine_in_override:false`); dulu
+#      `sajian_takeaway` dibiarkan default false, jadi papan menandai SEMUA baris
+#      "di tempat" dan baru benar setelah dibayar — telat, makanannya sudah
+#      keluar di piring.
+OB154T=$(api "$REISS105" POST /open-bill "{\"meja_id\":\"$MEJA154\",\"items\":[{\"menu_id\":\"$M154\",\"qty\":1,\"dine_in_override\":false},{\"menu_id\":\"$M154B\",\"qty\":1}]}")
+OBID154T=$(echo "$OB154T" | jq -r .id)
+PT154=$(kartu154 "$TKIT154" "$OBID154T")
+cek "baris yang ditandai kasir take away → papan ikut 🥡 (bukan di tempat)" "V == 1" \
+  "$(echo "$PT154" | jq -r '[.items[]|select(.nama=="Menu Uji154")][0].sajian_takeaway|if . then 1 else 0 end')"
+cek "baris LAIN tetap di tempat (tidak ikut terbawa)" "V == 0" \
+  "$(echo "$PT154" | jq -r '[.items[]|select(.nama=="Minum Uji154")][0].sajian_takeaway|if . then 1 else 0 end')"
+cek "kartu BUKAN 'semua bawa pulang' (baru satu baris)" "V == 0" \
+  "$(echo "$PT154" | jq -r '.sajian_takeaway|if . then 1 else 0 end')"
+# Dapur menekan 🍽 pada baris itu → keputusan dapur menang…
+BT154=$(echo "$PT154" | jq -r '[.items[]|select(.nama=="Menu Uji154")][0].id')
+api "$TKIT154" POST "/pesanan/open_bill/$OBID154T/item/$BT154/sajian" '{"takeaway":false}' > /dev/null
+cek "dapur boleh mengoreksi jadi di tempat" "V == 0" \
+  "$(kartu154 "$TKIT154" "$OBID154T" | jq -r --arg b "$BT154" '[.items[]|select(.id==$b)][0].sajian_takeaway|if . then 1 else 0 end')"
+# …dan PUT yang TIDAK mengubah dine_in_override tak boleh menimpanya kembali.
+api "$REISS105" PUT "/open-bill/$OBID154T" "{\"meja_id\":\"$MEJA154\",\"items\":[{\"id\":\"$BT154\",\"menu_id\":\"$M154\",\"qty\":2,\"dine_in_override\":false},{\"menu_id\":\"$M154B\",\"qty\":1}]}" > /dev/null
+cek "PUT tanpa mengubah pilihan kasir TIDAK menimpa koreksi dapur" "V == 0" \
+  "$(kartu154 "$TKIT154" "$OBID154T" | jq -r --arg b "$BT154" '[.items[]|select(.id==$b)][0].sajian_takeaway|if . then 1 else 0 end')"
+# Tapi kalau kasir benar-benar MENGUBAH pilihannya, papan ikut lagi.
+api "$REISS105" PUT "/open-bill/$OBID154T" "{\"meja_id\":\"$MEJA154\",\"items\":[{\"id\":\"$BT154\",\"menu_id\":\"$M154\",\"qty\":2,\"dine_in_override\":true},{\"menu_id\":\"$M154B\",\"qty\":1}]}" > /dev/null
+api "$REISS105" PUT "/open-bill/$OBID154T" "{\"meja_id\":\"$MEJA154\",\"items\":[{\"id\":\"$BT154\",\"menu_id\":\"$M154\",\"qty\":2,\"dine_in_override\":false},{\"menu_id\":\"$M154B\",\"qty\":1}]}" > /dev/null
+cek "kasir MENGUBAH pilihannya → papan ikut lagi 🥡" "V == 1" \
+  "$(kartu154 "$TKIT154" "$OBID154T" | jq -r --arg b "$BT154" '[.items[]|select(.id==$b)][0].sajian_takeaway|if . then 1 else 0 end')"
+api "$REISS105" DELETE "/open-bill/$OBID154T" > /dev/null
+
 # (h) Status meja ikut turunan baris: transaksi yang SELURUH sajiannya
 #     dibatalkan tak boleh menahan meja yang sudah tak ada orangnya.
 MEJAC154=$(api "$OWNER" POST /meja "{\"nama\":\"Meja Batal 154\",\"tipe\":\"dine_in\",\"branch_id\":\"$CB154\"}" | jq -r .id)

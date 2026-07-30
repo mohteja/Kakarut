@@ -19,6 +19,7 @@ import { backfillUnits } from "./modules/satuan/service";
 import { backfillKategoriBahan } from "./modules/kategori-bahan/service";
 import { arsipkanMembershipNonaktif, backfillEmployeeCode } from "./modules/users/service";
 import { pastikanSuperAdmin } from "./modules/auth/superadmin";
+import { backfillSajianTakeawayBill } from "./modules/open-bill/backfill";
 import { konfirmasiProduksiCkLokalTertahan } from "./modules/produksi/backfill";
 import { backfillNomorDokumen, backfillNomorPermintaan } from "./modules/dokumen/nomor";
 import { terapkanSemuaKonsumsiOtomatis } from "./modules/perlengkapan/service";
@@ -86,6 +87,15 @@ if (env.AUTO_MIGRATE) {
   );
   if (terkonfirmasi > 0)
     console.log(`${terkonfirmasi} baris produksi/beli CK-lokal lama dikonfirmasi (masuk stok).`);
+  // Baris open bill yang kasirnya sudah tandai take away tapi papan dapurnya
+  // masih "di tempat" (data sebelum `sajian_takeaway` diturunkan dari
+  // `dine_in_override`). Tanpa ini, bill yang SEKARANG terbuka tetap salah
+  // sampai kasir menyimpannya lagi.
+  const sajianBill = await sekaliSaja("sajian_takeaway_bill", () =>
+    backfillSajianTakeawayBill(db),
+  );
+  if (sajianBill > 0)
+    console.log(`Penanda take away disamakan dengan pilihan kasir: ${sajianBill} baris bill.`);
   // Dokumen lama tanpa nomor (faktur PB/PR & sesi opname SO) → beri nomor urut
   const bernomor = await sekaliSaja("nomor_dokumen", () => backfillNomorDokumen(db));
   if (bernomor > 0) console.log(`Nomor dokumen diisi untuk ${bernomor} dokumen lama.`);
