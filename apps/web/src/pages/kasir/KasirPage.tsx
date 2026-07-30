@@ -34,6 +34,41 @@ import {
   useMejaStatus,
 } from "../pengaturan/MejaStatusPanel";
 
+/**
+ * `MenuDto` darurat dari snapshot baris bill — dipakai HANYA saat katalog tak
+ * lagi punya menunya (diarsipkan, atau dibatasi ke cabang lain).
+ *
+ * `is_active: false` supaya UI bisa menandainya; angka turunan (hpp, saran
+ * harga) diisi nol karena memang tak diketahui dari sisi klien — yang ditagih
+ * tetap `harga_satuan` bill yang dibawa di `hargaKunci`.
+ */
+function menuDariBarisBill(it: OpenBillDetail["items"][number]): MenuDto {
+  return {
+    id: it.menu_id,
+    nama: it.menu_nama,
+    kode: null,
+    deskripsi: null,
+    tipe: "regular",
+    category_id: "",
+    kategori: "",
+    mult: null,
+    base_menu_id: null,
+    base_menu_nama: null,
+    base_mult: null,
+    harga_jual: it.harga_satuan,
+    image_url: null,
+    is_active: false,
+    sort_order: 0,
+    branch_ids: [],
+    komponen: [],
+    hpp: 0,
+    hpp_dine_in: 0,
+    harga_saran: 0,
+    harga_jual_bulat: it.harga_satuan,
+    food_cost_persen: 0,
+  };
+}
+
 interface CartLine {
   menu: MenuDto;
   qty: number;
@@ -611,18 +646,28 @@ export function KasirPage() {
     const menuById = new Map((menus ?? []).map((m) => [m.id, m]));
     const lines: CartLine[] = [];
     for (const it of bill.items) {
-      const menu = menuById.get(it.menu_id);
+      // TIDAK BOLEH ada baris bill yang hilang di sini.
+      //
+      // `GET /menu` menyaring menu nonaktif (dan menu yang dibatasi ke cabang
+      // lain), jadi baris bill yang menunya baru diarsipkan — "bakso habis" —
+      // tak punya pasangan di katalog. Dulu baris itu dilewati: ia lenyap dari
+      // keranjang tanpa ada yang menekan apa pun, lalu `PUT` menghapusnya dari
+      // bill. Tamu sudah memakannya, tak ada galat, tak ada jejak.
+      //
+      // Jadi kalau katalog tak punya menunya, barisnya disusun dari SNAPSHOT
+      // bill sendiri (`menu_nama` + `harga_satuan`) — cukup untuk ditampilkan,
+      // ditagih, dan dikirim balik utuh.
+      const menu = menuById.get(it.menu_id) ?? menuDariBarisBill(it);
       // harga & id baris ikut dibawa: yang ditagih adalah harga saat dipesan,
       // dan id-nya dipakai agar PUT/bayar tidak kehilangan kunci harga itu
-      if (menu)
-        lines.push({
-          menu,
-          qty: it.qty,
-          dineInOverride: it.dine_in_override,
-          catatan: it.catatan ?? "",
-          billItemId: it.id,
-          hargaKunci: it.harga_satuan,
-        });
+      lines.push({
+        menu,
+        qty: it.qty,
+        dineInOverride: it.dine_in_override,
+        catatan: it.catatan ?? "",
+        billItemId: it.id,
+        hargaKunci: it.harga_satuan,
+      });
     }
     setCart(lines);
     setMejaId(bill.meja_id);
@@ -1009,8 +1054,14 @@ export function KasirPage() {
                       {formatRupiah(hargaBaris(l))} ×{" "}
                       <span className="font-semibold">{l.qty}</span>
                     </div>
-                    {/* Harga menu berubah setelah bill dibuat: pembeli tetap
-                        ditagih harga saat memesan — katakan apa adanya. */}
+                    {/* Menu sudah diarsipkan setelah bill dibuat: barisnya tetap
+                        ditagih di harga saat dipesan, tapi katakan apa adanya
+                        supaya kasir tak mencarinya di katalog. */}
+                    {l.billItemId && !l.menu.is_active && (
+                      <div className="mt-0.5 inline-flex items-center rounded-full bg-stone-200 px-1.5 py-0.5 text-[11px] font-semibold text-stone-700">
+                        menu sudah tak aktif — tetap ditagih
+                      </div>
+                    )}
                     {sudahKeDapur && (
                       <div className="mt-0.5 inline-flex items-center rounded-full bg-emerald-100 px-1.5 py-0.5 text-[11px] font-semibold text-emerald-800">
                         ✓ Sudah masuk pesanan
@@ -1021,6 +1072,8 @@ export function KasirPage() {
                         Baru — belum disimpan
                       </div>
                     )}
+                    {/* Harga menu berubah setelah bill dibuat: pembeli tetap
+                        ditagih harga saat memesan — katakan apa adanya. */}
                     {l.hargaKunci != null && l.hargaKunci !== l.menu.harga_jual && (
                       <div
                         className="text-[11px] text-amber-700"

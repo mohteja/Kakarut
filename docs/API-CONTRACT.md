@@ -667,7 +667,41 @@ Aksesnya sengaja **asimetris**: membaca terbuka untuk seluruh peran cabang
 - `GET /api/open-bill` — query: `branch_id?` — res: `OpenBillRow[]`
 - `GET /api/open-bill/:id` — res: `OpenBillDetail` — error: **404**
 - `POST /api/open-bill` — req `BillBody`: `{ branch_id?: uuid, meja_id?: uuid|null, customer_nama?|null, customer_wa?|null, catatan?|null, items: [{id?:uuid, menu_id:uuid, qty:number(>0), dine_in_override?:bool|null, catatan?}] (min 1) }` — res: **201** `OpenBillDetail` — error: **400** menu invalid/tak tersedia, **403** kasir luar cabang, **404** meja tak ada, **409** `{ kode: "meja_sudah_ada_bill", bill_id }` meja dine-in itu masih punya bill belum dibayar
-- `PUT /api/open-bill/:id` — req: `BillBody` — res: `OpenBillDetail` — error: **400** (baris tak ditemukan / tak cocok menunya / dikirim dua kali / `pisah_dari` tak valid), **404**, **409** `meja_sudah_ada_bill` bila `meja_id` dipindah ke meja yang sudah punya bill lain
+- `PUT /api/open-bill/:id` — req: `BillBody` — res: `OpenBillDetail` — error: **400** (baris tak ditemukan / tak cocok menunya / dikirim dua kali / `pisah_dari` tak valid / **`baris_bill_tak_bisa_dihapus`**), **404**, **409** `meja_sudah_ada_bill` bila `meja_id` dipindah ke meja yang sudah punya bill lain
+
+> ### 🚫 `PUT` TIDAK bisa menghapus baris bill
+>
+> Setiap baris bill yang tak berpasangan dengan `items[]` yang dikirim membuat
+> **seluruh** `PUT` ditolak:
+>
+> ```json
+> {
+>   "error": "Pesanan yang sudah masuk dapur tidak bisa dihapus dari sini — batalkan per sajian di Papan Pesanan.",
+>   "kode": "baris_bill_tak_bisa_dihapus",
+>   "item_ids": ["<id baris yang akan terhapus>"]
+> }
+> ```
+>
+> Alasannya: bill tayang di **Papan Pesanan** begitu disimpan, jadi setiap
+> barisnya sudah dilihat dapur dan bisa saja sudah dimasak. Hard-delete lama
+> membuat pekerjaan itu lenyap tanpa jejak siapa pun.
+>
+> **Penolakan dihitung sebelum satu baris pun ditulis** — bill tidak berubah
+> sedikit pun saat 400 (tidak qty, tidak `customer_nama`). Yang **tetap boleh**:
+> menambah baris baru, mengubah qty/catatan/`dine_in_override`, `pisah_dari`,
+> dan memindahkan meja.
+>
+> | Perlu | Pakai |
+> | --- | --- |
+> | Batal **satu sajian** | `POST /api/pesanan/open_bill/:billId/item/:itemId/status` `{"status":"batal"}` — barisnya tetap ada, berjejak |
+> | Batal **seluruh bill** | `DELETE /api/open-bill/:id` |
+>
+> ⚠️ **Jangan syaratkan baris bill ada di katalog.** `GET /api/menu` menyaring
+> menu nonaktif, jadi klien yang menyusun keranjang dari katalog akan membuang
+> baris bill yang menunya baru diarsipkan — lalu `PUT`-nya kena 400 ini dan
+> kasir terkunci dari bill yang tamunya masih duduk. Untuk menampilkan baris
+> bill, `items[].menu_nama` + `items[].harga_satuan` adalah sumber yang benar;
+> katalog hanya pelengkap (foto, kategori, ketersediaan).
 
 > ### ✂️ `pisah_dari` — memecah porsi SEBELUM bayar
 >

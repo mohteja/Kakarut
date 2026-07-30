@@ -25,6 +25,60 @@ tanpa akses repo server.
 
 ---
 
+## Rilis: `PUT /open-bill/:id` tak lagi bisa MENGHAPUS baris bill
+
+> Belum di-merge ke production. Tidak ada migrasi DB. **Mengubah perilaku
+> lama** — baca §🔴 di bawah sebelum merilis build mobile berikutnya.
+
+Balasan lengkapnya ada di `docs/mobile/BALASAN-HAPUS-BARIS-BILL.md`.
+
+### 🔴 WAJIB — baris bill yang dihilangkan dari `items[]` sekarang ditolak 400
+
+Dulu: baris bill yang tak berpasangan dengan `items[]` yang dikirim
+**di-hard-delete**. Bill sudah tayang di papan dapur begitu disimpan, jadi baris
+itu bisa saja sudah dimasak — dan hilangnya tak meninggalkan jejak siapa pun.
+
+Sekarang seluruh `PUT` ditolak:
+
+```json
+{
+  "error": "Pesanan yang sudah masuk dapur tidak bisa dihapus dari sini — batalkan per sajian di Papan Pesanan.",
+  "kode": "baris_bill_tak_bisa_dihapus",
+  "item_ids": ["<id baris yang akan terhapus>"]
+}
+```
+
+**Baca `kode`, jangan teks `error`** — kalimatnya ditulis untuk kasir dan bisa
+berubah; `kode` tidak.
+
+**Penolakan dihitung sebelum apa pun ditulis.** Bill tidak berubah sedikit pun
+saat 400 — tidak qty, tidak `customer_nama`. `PUT` yang gagal gagal seluruhnya,
+termasuk pesanan tambahan di payload yang sama.
+
+Yang **tetap boleh** lewat `PUT`: menambah baris baru, mengubah
+qty/catatan/`dine_in_override`, `pisah_dari`, dan memindahkan meja.
+
+| Perlu | Pakai |
+| --- | --- |
+| Batal **satu sajian** | `POST /api/pesanan/open_bill/:billId/item/:itemId/status` `{"status":"batal"}` — barisnya tetap ada, berjejak |
+| Batal **seluruh bill** | `DELETE /api/open-bill/:id` (tak berubah) |
+
+### 🟡 PERLU DICEK — jangan syaratkan baris bill ada di katalog
+
+`GET /api/menu` menyaring menu nonaktif. Klien yang menyusun keranjang dari
+katalog akan **membuang** baris bill yang menunya baru diarsipkan ("bakso
+habis") — tanpa ada yang menekan apa pun. Digabung dengan gerbang di atas,
+akibatnya bukan lagi baris hilang diam-diam, tapi bill itu **tak bisa disimpan
+sama sekali**.
+
+Aturannya: untuk menampilkan baris bill, `items[].menu_nama` +
+`items[].harga_satuan` dari bill adalah **sumber yang benar**. Katalog hanya
+pelengkap (foto, kategori, ketersediaan).
+
+Mobile sudah menutup ini di `a33cfd0`; web ikut diperbaiki di rilis ini.
+
+---
+
 ## Rilis: `pisah_dari` — memecah porsi di `PUT /open-bill/:id`
 
 > **Sudah di-merge ke production** (PR #132, 30 Jul 2026).
