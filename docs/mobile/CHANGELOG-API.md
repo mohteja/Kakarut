@@ -25,10 +25,345 @@ tanpa akses repo server.
 
 ---
 
+## Rilis: `pisah_dari` — memecah porsi di `PUT /open-bill/:id`
+
+> Belum di-merge ke production. Tidak ada migrasi DB. Field **baru** pada body
+> `PUT`/`POST /api/open-bill`; tidak ada perilaku lama yang berubah.
+
+### 🟢 BARU — `items[].pisah_dari` di `PUT /api/open-bill/:id`
+
+Menjawab pertanyaan tim mobile: **tidak**, `PUT` TIDAK memetakan `items[].id`
+lewat map seperti pembayaran. Mengirim `id` yang sama dua kali ditolak **400**
+("Baris bill dikirim lebih dari sekali"), dan itu memang disengaja — kedua field
+punya arti berbeda:
+
+| Field | Arti | Boleh berulang? |
+| --- | --- | --- |
+| `id` | **pasangan** — baris lama mana yang diperbarui baris ini | **tidak**, 1:1 |
+| `pisah_dari` | **warisan** — baris BARU yang mewarisi harga terkunci & status dapur | **ya**, many:1 |
+
+Jadi jangan hapus penjaga kalian — ganti dengan `pisah_dari`:
+
+```jsonc
+{ "items": [
+    { "id": "B1",         "menu_id": "M", "qty": 2 },
+    { "pisah_dari": "B1", "menu_id": "M", "qty": 1, "dine_in_override": false }
+]}
+```
+
+Baris pecahan mewarisi `harga_satuan`, `menu_nama`, dan trio status dapur.
+`sajian_takeaway` **tidak** diwarisi — memecah porsi justru dilakukan supaya
+penyajiannya berbeda, jadi penandanya lahir dari `dine_in_override` baris itu
+sendiri saat bill dibayar.
+
+**Solusi sementara kalian (id hanya pada kemunculan pertama) bukan "aman tapi
+tidak ideal" — itu bug harga yang sama** yang baru kalian balikkan, cuma di
+momen yang berbeda: porsi pecahannya jadi baris baru berharga hari ini, jadi
+pembeli ditagih lebih mahal, dan porsi yang sudah matang kembali ke antrean
+dapur. Tolong pindah ke `pisah_dari`.
+
+Ditolak **400**: `pisah_dari` bersamaan dengan `id`, menunjuk baris bill lain /
+tak ada, beda `menu_id`, atau dipakai di `POST /api/open-bill` (bill baru belum
+punya baris untuk diwarisi).
+
+---
+
+## Rilis: Pisah porsi berbagi `open_bill_item_id` + cacah penyajian di riwayat
+
+> Belum di-merge ke production. Tidak ada migrasi DB, tidak ada perubahan
+> perilaku server — satu field baru + satu aturan yang **diperjelas**.
+
+### 🔴 WAJIB — baris PISAH PORSI harus tetap membawa `open_bill_item_id`
+
+Memecah 3 porsi jadi 2 di piring + 1 dibungkus adalah keputusan **pengemasan**
+saat bayar, **bukan pesanan baru**. Kirim baris pecahannya dengan
+`open_bill_item_id` **yang sama** — id itu memang boleh berulang, dan server
+sudah mendukungnya hari ini (pemetaan `id → harga` dan `id → status` lewat map).
+
+```jsonc
+{ "open_bill_id": "…", "items": [
+    { "menu_id": "M", "qty": 2, "open_bill_item_id": "B1", "is_dine_in": true  },
+    { "menu_id": "M", "qty": 1, "open_bill_item_id": "B1", "is_dine_in": false }
+]}
+```
+
+Menghilangkan id pada baris pecahan merusak **dua** hal, keduanya sunyi:
+
+1. **harga lepas dari kunci** → pembeli ditagih harga hari pembayaran;
+2. **pewarisan status lepas** → `pesananStatus` jatuh ke bawaan `dikerjakan`,
+   jadi sajian yang **sudah selesai kembali ke antrean dapur** saat pelanggan
+   membayar.
+
+Dikunci uji end-to-end di `verify-api.sh` §154(f2).
+
+Server **tidak** memeriksa `sum(qty)` pecahan terhadap qty baris bill-nya —
+sengaja, karena alur web yang sudah jalan mengizinkan kasir menaikkan qty baris
+bill saat membayar. Jaga konsistensinya di klien.
+
+### ⚪️ INFO — `open_bill_item_id` TETAP opsional (tidak jadi 400)
+
+Rencana mengetatkannya **dibatalkan**. Baris tanpa id itu sah — pesanan tambahan
+yang baru diketik saat membayar memang tak punya baris bill dan memang memakai
+harga hari ini. Server tak bisa membedakannya dari "klien lupa"; keduanya
+identik di kabel. Mewajibkannya akan mematikan pesanan tambahan, bukan menutup
+lubangnya.
+
+Yang tetap berlaku: **"tidak ada galat" bukan bukti field itu terkirim.**
+Pastikan lewat pengujian klien. Kalau nanti perlu kepastian dari server, jalannya
+penanda niat eksplisit per baris (`harga_hari_ini: true`) — belum ada, minta bila
+perlu.
+
+### 🟢 BARU — `RiwayatTransaksiRow.item_takeaway` & `item_dine_in`
+
+Cacah baris per cara penyajian. `sajian_takeaway` adalah `bool_and`: ia `false`
+begitu SATU baris tetap di piring, jadi tak bisa membedakan "semuanya di piring"
+dari "sebagian dibungkus". Dua cacah ini yang membedakannya — pakai untuk
+menulis "2 dari 3 dibungkus" alih-alih badge mutlak.
+
+`item_takeaway + item_dine_in == jumlah_item` selalu.
+
+---
+
+## Rilis: Satu meja = satu bill + pilihan tamu sama / tamu baru
+
+> Belum di-merge ke production.
+>
+> Tidak ada migrasi DB. Satu field baru pada DTO yang sudah ada + satu aturan
+> baru yang **menolak permintaan yang dulu berhasil**.
+
+Laporan dari lapangan: **kasir bisa membuat dua bill untuk satu meja di waktu
+yang sama** — lalu saat tamu pulang salah satunya tertinggal, tidak tertagih,
+dan baru terasa saat tutup kasir selisih.
+
+Keputusan owner: **selama masih ada open bill di meja itu, tidak boleh bikin
+bill kedua.** Pesanan tambahan wajib masuk ke bill yang masih terbuka.
+
+### 🔴 WAJIB — `POST /api/open-bill` kini **409** di meja dine-in yang sudah punya bill
+
+Permintaan yang dulu berhasil sekarang ditolak. Badan galatnya berkode:
+
+```json
+{ "error": "Meja 5 masih punya bill yang belum dibayar — tambahkan pesanan ke bill itu",
+  "kode": "meja_sudah_ada_bill",
+  "bill_id": "<uuid bill yang harus dipakai>" }
+```
+
+`bill_id` sengaja ikut supaya klien tak perlu mencari sendiri: muat bill itu
+(`GET /api/open-bill/:id`), gabungkan keranjang yang sekarang, lalu simpan lewat
+**`PUT /api/open-bill/:id`**. Itu satu-satunya jalan menambah pesanan ke meja
+yang sudah punya bill.
+
+**Baca `kode`, jangan mencocokkan teks pesannya.**
+
+Alur yang disarankan supaya kasir tak menabrak galat: sebelum menyimpan bill
+baru, cek `openBills.where((b) => b.meja_id == mejaTerpilih.id)` — kalau tidak
+kosong, langsung tawarkan "buka bill itu" alih-alih tombol simpan.
+
+**`PUT` ikut dijaga.** Memindahkan bill ke meja yang sudah punya bill lain juga
+**409** dengan kode yang sama. Tanpa itu larangannya cuma menutup pintu depan:
+bikin bill di meja lain lalu pindahkan. Menyimpan ulang bill di mejanya **sendiri**
+tetap boleh — itu justru jalur "tambahkan pesanan".
+
+### ⚪️ INFO — dua pengecualian yang TIDAK dijaga
+
+1. **Ruang Tunggu (meja `takeaway`) dikecualikan.** Seluruh pesanan bawa pulang
+   cabang menunjuk ke satu baris takeaway yang tak bisa dihapus. Kalau ia ikut
+   dijaga, satu bill bawa pulang yang terparkir akan memblokir **semua** pesanan
+   bawa pulang berikutnya — jalur itu mati. Bill kedua di Ruang Tunggu tetap
+   **201**.
+2. **Bill tanpa `meja_id`** tak punya apa pun untuk bertabrakan → tetap **201**.
+
+Juga tidak dijaga: **penjualan langsung** (`POST /api/penjualan`) di meja yang
+punya bill berjalan. Yang dilarang hanya bill kedua, bukan transaksi kedua.
+
+Setelah bill lama dibayar **atau** dibatalkan, mejanya bebas dan boleh punya
+bill baru lagi — kalau tidak, satu bill batal akan mengunci mejanya selamanya.
+
+### 🟢 BARU — `OpenBillRow.meja_id`
+
+`GET /api/open-bill` kini menyertakan `meja_id: string | null` di samping
+`meja_label`. Tidak ada field lama yang berubah.
+
+**Cocokkan bill ke meja lewat `meja_id`, JANGAN `meja_label`** — label itu
+snapshot saat bill dibuat, jadi pencocokan lewat nama gagal begitu mejanya
+diganti nama. Dan gagalnya **sunyi**: kasir tak melihat peringatan, lalu
+menabrak 409 tanpa tahu sebabnya.
+
+`null` = mejanya sudah dihapus dari master (`meja_id` ber-`onDelete: set null`)
+atau bill dibuat tanpa meja.
+
+### 🔴 WAJIB — meja SUDAH BAYAR dipilih lagi: tanya tamunya sama atau baru
+
+`lunas_masih_duduk: true` = semuanya lunas tapi meja belum dibereskan. Kalau
+kasir memilih meja itu lagi, ada **dua kejadian yang server tak bisa
+membedakan**, dan keduanya sah:
+
+| Pilihan | Yang harus dilakukan klien |
+| --- | --- |
+| 🍽 **Tamu yang sama — tambah pesanan** | pakai mejanya apa adanya + isikan `konsumen_nama`/`konsumen_wa` ke keranjang |
+| ✓ **Tamu baru — bereskan meja dulu** | `POST /api/meja/:id/kosongkan` **dulu** (200 langsung, tanpa `paksa`), baru pakai mejanya |
+
+**Kalau tidak ditanya, papan berbohong.** Tamu baru di meja yang belum
+dibereskan membuat `sejak` tetap menunjuk transaksi tamu **sebelumnya** — papan
+bilang "sudah duduk 2 jam" untuk orang yang baru lima menit duduk, dan salahnya
+bertahan sampai jendela okupansi **12 jam** meluruhkannya. Membereskan meja
+menulis batas di `meja_kosong_logs`, dan itulah satu-satunya yang memotong
+hitungan itu.
+
+Meja yang masih punya bill belum dibayar TIDAK masuk alur ini — di sana jalurnya
+"tambahkan ke bill yang ada" (lihat 409 di atas).
+
+### 🟢 BARU — `MejaStatusDto.konsumen_nama` & `konsumen_wa`
+
+Konsumen pada transaksi **terbaru** yang masih menempati meja itu. **Selalu
+`null` bila mejanya `kosong`**, jadi klien tak pernah menawarkan tamu yang sudah
+dibereskan.
+
+Gunanya: tanpa ini, tamu member yang memesan dua kali di meja yang sama tercatat
+sebagai satu transaksi ber-member dan satu tanpa member — poin/riwayatnya
+terputus justru pada tamu yang paling sering datang. Kasir tetap boleh
+menghapus/mengganti namanya.
+
+### 🔴 WAJIB — layar meja di mobile: status okupansi + Kosongkan
+
+Endpoint `GET /api/meja/status`, `POST /api/meja/:id/kosongkan`, dan
+`GET /api/meja/:id/log` **sudah tayang di production sejak PR #129** dan sudah
+terbuka untuk token `cashier` — tapi mobile belum memakainya sama sekali.
+Akibatnya kasir mobile bekerja buta: tak tahu meja mana yang terisi, dan tak
+punya cara membereskan meja saat tamu pulang.
+
+Dengan aturan baru di atas, ini jadi lebih mendesak: tanpa status di pemilih
+meja, kasir baru tahu mejanya sudah terisi **setelah** ditolak 409.
+
+**Langkah lengkap + empat jebakan yang tak boleh diulang ada di
+`docs/mobile/PROMPT-MEJA-KASIR.md`.**
+
+### ⚪️ INFO — web sudah disesuaikan di rilis ini
+
+Web sudah menampilkan status okupansi + tombol Kosongkan di modal Pilih Meja.
+Rilis ini menambahkan dua hal: (1) pendahuluan 409-nya — menekan **Open Bill** di
+meja yang sudah punya bill langsung membuka daftar bill itu dengan tombol "Buka
+bill", tanpa opsi "tetap buat bill baru" karena server memang menolaknya; dan
+(2) dialog "tamu yang sama / tamu baru" saat memilih meja yang sudah dibayar,
+persis seperti yang diminta di atas untuk mobile.
+
+---
+
+## Rilis: Status pesanan turun ke SETIAP BARIS (papan pesanan per sajian)
+
+> Belum di-merge ke production.
+>
+> Ada migrasi DB (`0092`): kolom status **pindah** dari `sales`/`open_bills` ke
+> `sale_items`/`open_bill_items`, plus `pesanan_logs.item_nama`. Migrasinya
+> menyalin nilai lama ke tiap baris sebelum kolom lamanya dibuang — data
+> pengerjaan yang sedang berjalan tidak hilang.
+
+Permintaan owner: *"selesai, take away dan batal itu per baris pesanan per bill,
+bukan seluruh bill — jadi nanti ketika selesai bisa kirim satu satu dan kita tau
+mana yang sudah dan mana yang belum."*
+
+Satu bill berisi minuman yang keluar duluan dan gorengan yang menyusul. Dengan
+satu tombol untuk seluruh bill, dapur harus menahan "selesai" sampai sajian
+terakhir jadi — dan tak seorang pun bisa tahu mana yang sudah keluar.
+
+### 🟡 PERLU DICEK — `PesananRow.status` & `sajian_takeaway` kini TURUNAN, bukan kolom
+
+Bentuk responsnya **tidak berubah** — `GET /api/pesanan` tetap mengembalikan
+`PesananRow[]` dengan `status` dan `sajian_takeaway` di kartunya. Yang berubah
+adalah **asal nilainya**: keduanya sekarang dihitung dari `items[]` saat dibaca.
+
+| Field kartu | Aturan turunannya |
+| --- | --- |
+| `status` | `batal` bila **semua** baris batal; `selesai` bila **tak ada lagi** baris `dikerjakan`; selain itu `dikerjakan` |
+| `sajian_takeaway` | `true` hanya bila **SEMUA** baris bertanda bawa pulang |
+
+Jangan menyimpan sendiri agregat ini di sisi klien: agregat tersimpan harus ikut
+diperbarui di setiap perubahan baris, dan satu yang terlewat membuat papan
+berbohong. Baca ulang `GET /api/pesanan` setelah tiap aksi.
+
+`PesananRow` juga bertambah `item_selesai` dan `item_batal` (cacah baris) untuk
+ringkasan "2/3 selesai". `PesananItemRow` bertambah `id`, `status`,
+`sajian_takeaway`, `status_oleh`, `status_pada`. `PesananLogRow` bertambah
+`item_nama` (`null` = aksinya mengenai seluruh pesanan).
+
+### 🟢 BARU — endpoint per baris
+
+| Endpoint | Guna |
+| --- | --- |
+| `POST /api/pesanan/:jenis/:id/item/:itemId/status` | tandai **satu sajian** `dikerjakan`/`selesai`/`batal` |
+| `POST /api/pesanan/:jenis/:id/item/:itemId/sajian` | penanda bawa pulang **satu sajian** |
+
+`:itemId` = `PesananItemRow.id`. Responsnya
+`{ ok, status, kartu_status }` — `kartu_status` adalah status kartu setelah
+diturunkan ulang, jadi layar bisa memindahkan kartunya tanpa memuat ulang dulu.
+**409** bila baris itu baru saja diubah orang lain (dua orang di dapur menekan
+tombol yang sama) — muat ulang papan, jangan kirim paksa.
+
+Dua endpoint setingkat kartu yang lama **tetap ada** sebagai pintasan "semua
+baris" (`POST .../status` dan `POST .../sajian`) — pesanan satu-dua sajian
+adalah mayoritas. Bedanya, versi kartu **tidak** ber-409 balapan: perintahnya
+"jadikan semuanya X", jadi dua orang yang menekannya bersamaan sampai di hasil
+yang sama.
+
+### 🔴 WAJIB — kirim `open_bill_item_id` saat membayar open bill
+
+Pewarisan status ke penjualan sekarang **per baris**, dan pencocokannya lewat
+`items[].open_bill_item_id` pada `POST /api/penjualan`. Field itu sudah ada sejak
+rilis kunci harga open bill dan sudah dibutuhkan untuk alasan itu — sekarang ia
+juga yang membawa pekerjaan dapur ikut pindah.
+
+Tanpa field itu, tiap baris penjualan lahir sebagai pekerjaan baru yang belum
+tersentuh: **sajian yang sudah selesai akan kembali ke antrean dapur** begitu
+pelanggan membayar.
+
+> ### ⚠️ TOLONG DICEK ULANG DI KODE, JANGAN DARI INGATAN
+>
+> **Server tidak menolak permintaan tanpa field ini.** Skemanya
+> `open_bill_item_id: z.string().uuid().nullish()` — opsional. Bila tak dikirim,
+> `createSale` diam-diam memakai `menus.harga_jual` **hari pembayaran** (bukan
+> harga yang disepakati pembeli) dan baris penjualannya lahir `dikerjakan`.
+> Tidak ada 400, tidak ada peringatan, tidak ada apa pun di log.
+>
+> Artinya: klien yang **belum** mengirimnya tak akan pernah tahu — sejak rilis
+> kunci harga pun tidak. "Tidak ada galat" **bukan** bukti field ini terkirim.
+> Buka kode pembayaran open bill dan pastikan tiap baris keranjang membawa
+> `id` baris bill-nya (`OpenBillDetail.items[].id`), bukan hanya `menu_id`.
+>
+> Kami sengaja **tidak** menjadikannya 400 di rilis ini: kalau ternyata mobile
+> belum mengirimnya, mengetatkan server akan mematikan pembayaran open bill di
+> produksi, bukan memperbaikinya. Beri tahu kami hasil pengecekannya — kalau
+> sudah aman, gerbangnya bisa kami ketatkan supaya lubang ini tertutup
+> selamanya.
+
+### ⚪️ INFO — `RiwayatTransaksiRow.sajian_takeaway` ikut jadi turunan
+
+Nilainya `true` hanya bila SELURUH baris transaksi bertanda bawa pulang. Badge
+"diubah setelah transaksi" (`sajian_takeaway == is_dine_in`) masih berguna, tapi
+bacalah arahnya hati-hati:
+
+- `true` pada nota **dine-in** = semuanya dipindah jadi bawa pulang;
+- `false` pada nota **bawa pulang** = **ada** yang dikembalikan ke piring —
+  belum tentu semuanya. Hindari label "disajikan di tempat" yang mutlak.
+
+Penandanya juga **lahir per baris** (`= !sale_items.is_dine_in`), jadi satu nota
+bisa berisi sajian yang dibungkus dan sajian yang di piring sekaligus — persis
+yang mustahil diwakili satu penanda setingkat transaksi.
+
+### ⚪️ INFO — pembatalan bill & status meja ikut mengikuti baris
+
+`DELETE /api/open-bill/:id` sekarang menandai `batal` pada **setiap** barisnya
+(selain mengisi `closed_at`). Sebaliknya, bill yang seluruh barisnya batal
+otomatis tertutup — dan satu baris yang dikembalikan ke antrean **membukanya
+lagi** untuk kasir. Yang terlihat kasir tak berubah.
+
+`GET /api/meja/status` juga menurun dari baris: transaksi baru dianggap tidak
+lagi mengisi meja hanya kalau **seluruh** sajiannya dibatalkan.
+
+---
+
 ## Rilis: `sebab` terstruktur pada 409 penjualan — jawaban pertanyaan antrean offline
 
-> **BELUM di-merge ke production** — masih di PR. Jangan rilis klien yang
-> bergantung padanya sebelum baris ini berubah jadi "Sudah di-merge".
+> **Sudah di-merge ke production** (PR #131, 29 Jul 2026).
 >
 > Tidak ada migrasi DB. Perubahan **aditif**: satu field baru pada badan galat.
 
@@ -262,8 +597,11 @@ yang paling mudah salah dipahami:
    ada yang menekan Kosongkan. Jangan bikin klien mengosongkan meja sendiri
    setelah transaksi berhasil.
 2. **Meja terisi tetap boleh dipilih.** Statusnya memberi tahu, bukan melarang —
-   satu meja dua bill itu sah, dan melanjutkan open bill di meja terisi wajib
-   bisa. Jangan menyaring meja terisi dari pemilih meja.
+   melanjutkan open bill di meja terisi wajib bisa, dan penjualan langsung di
+   meja terisi juga sah. Jangan menyaring meja terisi dari pemilih meja.
+   *(Disusul rilis berikutnya: bill **KEDUA** di satu meja dine-in kini ditolak
+   server **409** `meja_sudah_ada_bill`. Yang dilarang cuma itu — pemilihan
+   mejanya tetap bebas.)*
 3. **Ruang Tunggu tidak punya status** dan tidak muncul di daftar sama sekali.
    Seluruh penjualan bawa pulang menunjuk ke satu baris itu; menandainya terisi
    akan mengunci jalur bawa pulang cabang selamanya.
@@ -342,6 +680,11 @@ hanya kasir. Detail lengkap: blok `/api/pesanan` di `docs/API-CONTRACT.md`.
 
 `:jenis` = `open_bill` atau `penjualan`. Status **ikut terbawa** saat bill
 dibayar, jadi satu pesanan tetap satu kartu — bukan dua.
+
+> **Sudah disusul rilis berikutnya.** Status pindah ke **tiap baris**; kedua
+> endpoint `status`/`sajian` di atas kini pintasan "semua baris", dan ada versi
+> `.../item/:itemId/...` yang menjadi tombol utamanya. Lihat entri **"Status
+> pesanan turun ke SETIAP BARIS"** di paling atas dokumen ini.
 
 ### 🔴 WAJIB — jangan lagi kirim `DELETE /api/open-bill/:id` setelah membayar
 

@@ -139,6 +139,11 @@ export const mejaRoutes = new Hono<AppEnv>()
           sejak: r.sejak ? r.sejak.toISOString() : null,
           dikosongkan_pada: r.dikosongkan_pada ? r.dikosongkan_pada.toISOString() : null,
           dikosongkan_oleh: r.dikosongkan_oleh,
+          // Hanya bermakna saat mejanya masih terisi. Meja kosong sengaja
+          // dikosongkan juga di sini supaya klien tak pernah menawarkan
+          // "tamu yang sama" untuk meja yang sudah dibereskan.
+          konsumen_nama: sedangTerisi(r) ? r.konsumen_nama : null,
+          konsumen_wa: sedangTerisi(r) ? r.konsumen_wa : null,
         }),
       ),
     );

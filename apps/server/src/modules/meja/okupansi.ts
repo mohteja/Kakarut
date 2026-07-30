@@ -54,6 +54,17 @@ export interface BarisOkupansi {
   batas_baru: string | null;
   dikosongkan_pada: Date | null;
   dikosongkan_oleh: string | null;
+  /**
+   * Konsumen pada transaksi TERAKHIR yang masih menempati meja ini — bahan
+   * pilihan "tamu yang sama, tambah pesanan" di kasir. `null` bila mejanya
+   * kosong atau transaksi terakhirnya tanpa nama konsumen.
+   *
+   * Tanpa ini, tamu member yang memesan dua kali di meja yang sama tercatat
+   * sebagai satu transaksi ber-member dan satu tanpa member: poin/riwayatnya
+   * terputus justru pada tamu yang paling sering datang.
+   */
+  konsumen_nama: string | null;
+  konsumen_wa: string | null;
 }
 
 /**
@@ -97,6 +108,25 @@ export async function hitungOkupansi(
          AND ob.created_at > COALESCE(b.sampai_paksa, '-infinity'::timestamptz)
        GROUP BY ob.meja_id
     ),
+    konsumen AS (
+      SELECT DISTINCT ON (s.meja_id)
+             s.meja_id, s.customer_nama, s.customer_wa
+        FROM sales s
+        LEFT JOIN batas b ON b.meja_id = s.meja_id
+       WHERE s.company_id = ${opts.companyId}
+         AND s.branch_id  = ${opts.branchId}
+         AND s.meja_id IS NOT NULL
+         AND s.deleted_at IS NULL
+         AND EXISTS (
+               SELECT 1 FROM sale_items si
+                WHERE si.sale_id = s.id AND si.pesanan_status <> 'batal'
+             )
+         AND s.waktu > GREATEST(
+               COALESCE(b.sampai, '-infinity'::timestamptz),
+               now() - interval '${sql.raw(JENDELA_OKUPANSI)}'
+             )
+       ORDER BY s.meja_id, s.waktu DESC
+    ),
     jual AS (
       SELECT s.meja_id,
              COUNT(*)::int  AS jumlah,
@@ -108,7 +138,13 @@ export async function hitungOkupansi(
          AND s.branch_id  = ${opts.branchId}
          AND s.meja_id IS NOT NULL
          AND s.deleted_at IS NULL
-         AND s.pesanan_status <> 'batal'
+         -- Transaksi yang SELURUH barisnya dibatalkan dapur tidak lagi mengisi
+         -- meja. Status pesanan hidup per baris sekarang, jadi ini diturunkan:
+         -- ada satu baris saja yang belum dibatalkan → mejanya masih terpakai.
+         AND EXISTS (
+               SELECT 1 FROM sale_items si
+                WHERE si.sale_id = s.id AND si.pesanan_status <> 'batal'
+             )
          AND s.waktu > GREATEST(
                COALESCE(b.sampai, '-infinity'::timestamptz),
                now() - interval '${sql.raw(JENDELA_OKUPANSI)}'
@@ -123,11 +159,14 @@ export async function hitungOkupansi(
            -- ::text SENGAJA (presisi mikrodetik) — lihat komentar di tipenya
            GREATEST(bill.sampai, jual.sampai)::text AS batas_baru,
            terakhir.waktu                   AS dikosongkan_pada,
-           terakhir.oleh                    AS dikosongkan_oleh
+           terakhir.oleh                    AS dikosongkan_oleh,
+           konsumen.customer_nama           AS konsumen_nama,
+           konsumen.customer_wa             AS konsumen_wa
       FROM meja m
       LEFT JOIN bill     ON bill.meja_id     = m.id
       LEFT JOIN jual     ON jual.meja_id     = m.id
       LEFT JOIN terakhir ON terakhir.meja_id = m.id
+      LEFT JOIN konsumen ON konsumen.meja_id = m.id
      WHERE m.company_id = ${opts.companyId}
        AND m.branch_id  = ${opts.branchId}
        -- "Ruang Tunggu" dikecualikan DI SINI, bukan di tampilan: seluruh
@@ -149,6 +188,8 @@ export async function hitungOkupansi(
       batas_baru: row.batas_baru ? String(row.batas_baru) : null,
       dikosongkan_pada: tgl(row.dikosongkan_pada),
       dikosongkan_oleh: row.dikosongkan_oleh ? String(row.dikosongkan_oleh) : null,
+      konsumen_nama: row.konsumen_nama ? String(row.konsumen_nama) : null,
+      konsumen_wa: row.konsumen_wa ? String(row.konsumen_wa) : null,
     };
   });
 }

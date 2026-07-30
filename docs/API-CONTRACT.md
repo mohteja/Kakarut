@@ -340,6 +340,44 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 > `open_bill_item_id` milik bill lain ditolak **400**. `qty` bebas berubah saat
 > pembayaran. Yang dikunci hanya harga jual: `hpp_satuan` tetap dihitung saat
 > pembayaran dari resep × harga acuan bahan saat itu.
+>
+> ### 🍱 PISAH PORSI — satu `open_bill_item_id` boleh dipakai BEBERAPA baris
+>
+> Memecah 3 porsi jadi 2 di piring + 1 dibungkus adalah keputusan
+> **pengemasan** saat bayar, **bukan pesanan baru**. Jadi kirim baris pecahannya
+> dengan `open_bill_item_id` **yang sama** — id itu memang boleh berulang.
+>
+> ```jsonc
+> { "open_bill_id": "…", "items": [
+>     { "menu_id": "M", "qty": 2, "open_bill_item_id": "B1", "is_dine_in": true  },
+>     { "menu_id": "M", "qty": 1, "open_bill_item_id": "B1", "is_dine_in": false }
+> ]}
+> ```
+>
+> Keduanya lalu ditagih **harga terkunci** bill dan mewarisi **status dapur yang
+> sama**; `sajian_takeaway` tetap lahir per baris dari `is_dine_in` masing-masing.
+>
+> **Jangan menghilangkan `open_bill_item_id` pada baris pecahan.** Dua hal rusak
+> sekaligus, dan keduanya sunyi:
+>
+> 1. **Harganya lepas dari kunci** → pembeli ditagih harga hari pembayaran,
+>    padahal ia memesan di harga yang lain.
+> 2. **Pewarisan statusnya lepas** → `pesananStatus` jatuh ke nilai bawaan
+>    `dikerjakan`, jadi sajian yang **sudah selesai kembali ke antrean dapur**
+>    tepat saat pelanggan membayar.
+>
+> ### Kenapa field ini TIDAK diwajibkan (bukan 400)
+>
+> Baris **tanpa** `open_bill_item_id` itu sah dan harus tetap bisa: pesanan
+> tambahan yang baru diketik di kasir saat membayar memang tak punya baris bill,
+> dan memang harus memakai harga hari ini. Server tak punya cara membedakan
+> "baris baru yang sah" dari "klien lupa mengirim id" — keduanya terlihat sama
+> persis di kabel. Mewajibkannya akan mematikan pesanan tambahan saat bayar,
+> bukan menutup lubangnya.
+>
+> Konsekuensinya harus disadari klien: **"tidak ada galat" bukan bukti
+> `open_bill_item_id` terkirim.** Pastikan lewat pengujian di sisi klien, bukan
+> lewat respons server.
 - `GET /api/penjualan` — [any] — query: `branch_id?` (atau `all` untuk owner/admin), `tanggal?` (YYYY-MM-DD, default hari ini di TZ perusahaan) — res: array ringkasan sale — error: **400** format tanggal salah
 - `GET /api/penjualan/:id` — [any] — res: `{ sale, items, branch_nama, kasir }` — error: **403** kasir luar cabang, **404**
 - `DELETE /api/penjualan/:id` — [owner/admin] — soft delete → Tempat Sampah — res: `{ ok, nomor }` — error: **404**
@@ -589,8 +627,30 @@ Aksesnya sengaja **asimetris**: membaca terbuka untuk seluruh peran cabang
 > Mengosongkannya → **400**.
 >
 > **Status MEMBERI TAHU, TIDAK MELARANG.** Meja terisi tetap boleh dipilih untuk
-> transaksi baru — satu meja dua bill itu sah (split bill / rombongan kedua), dan
-> melanjutkan open bill di meja itu justru wajib.
+> transaksi baru, dan melanjutkan open bill di meja itu justru wajib. Jangan
+> menyaring meja terisi dari pemilih meja.
+>
+> Yang MELARANG bukan status ini, melainkan `POST /api/open-bill`: **satu meja
+> dine-in = satu bill berjalan** (**409** `meja_sudah_ada_bill`) — lihat blok
+> `/api/open-bill`. Penjualan langsung di meja terisi tetap boleh; yang ditolak
+> hanya bill KEDUA.
+>
+> **DIBAYAR ≠ KOSONG, dan itu memunculkan dua kejadian yang server tak bisa
+> membedakan.** Meja `lunas_masih_duduk` yang dipilih lagi bisa berarti *tamu
+> yang sama memesan lagi* ATAU *tamu baru duduk di meja yang belum dibereskan* —
+> keduanya sah. **Klien WAJIB menanyakannya**, karena kalau ternyata tamu baru
+> dan mejanya tak dibereskan, `sejak` tetap menunjuk transaksi tamu SEBELUMNYA:
+> papan bilang "sudah duduk 2 jam" untuk orang yang baru lima menit duduk, dan
+> salahnya bertahan sampai jendela okupansi 12 jam meluruhkannya.
+>
+> - *Tamu yang sama* → pakai mejanya apa adanya, dan isikan `konsumen_nama` /
+>   `konsumen_wa` ke transaksi baru supaya member/poinnya tak terputus.
+> - *Tamu baru* → `POST /api/meja/:id/kosongkan` DULU (meja lunas tak punya
+>   tagihan berjalan, jadi langsung **200** tanpa `paksa`), baru pakai mejanya.
+>
+> `konsumen_nama`/`konsumen_wa` diambil dari transaksi **terbaru** yang masih
+> menempati meja itu, dan selalu `null` saat mejanya `kosong` — jadi klien tak
+> pernah menawarkan tamu yang sudah dibereskan.
 >
 > Alur tombol Kosongkan ada **dua tahap**: permintaan pertama pada meja yang
 > masih punya bill belum dibayar ditolak **409** `bill_berjalan`; kirim ulang
@@ -606,16 +666,89 @@ Aksesnya sengaja **asimetris**: membaca terbuka untuk seluruh peran cabang
 
 - `GET /api/open-bill` — query: `branch_id?` — res: `OpenBillRow[]`
 - `GET /api/open-bill/:id` — res: `OpenBillDetail` — error: **404**
-- `POST /api/open-bill` — req `BillBody`: `{ branch_id?: uuid, meja_id?: uuid|null, customer_nama?|null, customer_wa?|null, catatan?|null, items: [{id?:uuid, menu_id:uuid, qty:number(>0), dine_in_override?:bool|null, catatan?}] (min 1) }` — res: **201** `OpenBillDetail` — error: **400** menu invalid/tak tersedia, **403** kasir luar cabang, **404** meja tak ada
-- `PUT /api/open-bill/:id` — req: `BillBody` — res: `OpenBillDetail` — error: **400** (baris tak ditemukan / tak cocok menunya / dikirim dua kali), **404**
+- `POST /api/open-bill` — req `BillBody`: `{ branch_id?: uuid, meja_id?: uuid|null, customer_nama?|null, customer_wa?|null, catatan?|null, items: [{id?:uuid, menu_id:uuid, qty:number(>0), dine_in_override?:bool|null, catatan?}] (min 1) }` — res: **201** `OpenBillDetail` — error: **400** menu invalid/tak tersedia, **403** kasir luar cabang, **404** meja tak ada, **409** `{ kode: "meja_sudah_ada_bill", bill_id }` meja dine-in itu masih punya bill belum dibayar
+- `PUT /api/open-bill/:id` — req: `BillBody` — res: `OpenBillDetail` — error: **400** (baris tak ditemukan / tak cocok menunya / dikirim dua kali / `pisah_dari` tak valid), **404**, **409** `meja_sudah_ada_bill` bila `meja_id` dipindah ke meja yang sudah punya bill lain
+
+> ### ✂️ `pisah_dari` — memecah porsi SEBELUM bayar
+>
+> `items[].id` dan `items[].pisah_dari` punya arti berbeda dan tidak boleh
+> ditukar:
+>
+> | Field | Arti | Boleh berulang? |
+> | --- | --- | --- |
+> | `id` | **pasangan** — baris lama mana yang diperbarui baris ini | **tidak**, 1:1. Dikirim dua kali → **400** |
+> | `pisah_dari` | **warisan** — baris ini BARU, tapi mewarisi harga terkunci & status dapur dari baris itu | **ya**, many:1 |
+>
+> Kirim begini untuk memecah 3 porsi jadi 2 di piring + 1 dibungkus:
+>
+> ```jsonc
+> { "items": [
+>     { "id": "B1",          "menu_id": "M", "qty": 2 },
+>     { "pisah_dari": "B1",  "menu_id": "M", "qty": 1, "dine_in_override": false }
+> ]}
+> ```
+>
+> Baris pecahan mewarisi `harga_satuan`, `menu_nama`, dan trio status dapur
+> (`pesanan_status` + siapa + kapan). Yang **tidak** diwarisi adalah
+> `sajian_takeaway` — memecah porsi justru dilakukan supaya penyajiannya
+> BERBEDA, jadi penandanya lahir dari `dine_in_override` baris itu sendiri saat
+> bill dibayar.
+>
+> Ditolak **400**: `pisah_dari` bersamaan dengan `id` (dua maksud bertabrakan),
+> menunjuk baris bill lain / tak ada, beda `menu_id`, atau dipakai di
+> `POST /api/open-bill` (bill baru belum punya baris untuk diwarisi).
+>
+> **Tanpa jalur ini** porsi pecahan harus jadi baris baru berharga hari ini —
+> pembeli ditagih lebih mahal hanya karena kasir menekan "bungkus satu", dan
+> porsi yang sudah matang kembali ke antrean dapur. Sama seperti di pembayaran,
+> memecah porsi adalah keputusan **pengemasan**, bukan pesanan baru.
+
+> ### 🪑 SATU MEJA DINE-IN = SATU BILL BERJALAN
+>
+> Selama masih ada bill belum dibayar di sebuah meja `dine_in`, pesanan tambahan
+> **wajib** masuk ke bill itu lewat `PUT /api/open-bill/:id`. `POST` untuk bill
+> kedua ditolak **409** dengan badan berkode:
+>
+> ```json
+> { "error": "…", "kode": "meja_sudah_ada_bill", "bill_id": "<uuid>" }
+> ```
+>
+> `bill_id` ikut dikirim supaya klien langsung bisa memuat bill itu tanpa
+> mencari. **Baca `kode`, jangan mencocokkan teks pesannya.**
+>
+> Alasannya dari lapangan: dua bill di satu meja bikin salah satunya tertinggal
+> tak tertagih saat tamu pulang, dan tak ada yang tahu sampai selisih muncul di
+> tutup kasir.
+>
+> **DUA PENGECUALIAN.** (1) Meja `takeaway` ("Ruang Tunggu") **dikecualikan** —
+> seluruh pesanan bawa pulang cabang menunjuk ke satu baris itu, jadi kalau ia
+> ikut dijaga, satu bill bawa pulang yang terparkir memblokir SEMUA pesanan bawa
+> pulang berikutnya. (2) Bill **tanpa** `meja_id` tak punya apa pun untuk
+> bertabrakan.
+>
+> Yang TIDAK dijaga: `POST /api/penjualan` di meja yang punya bill berjalan.
+> Yang dilarang hanya bill kedua, bukan transaksi kedua.
+>
+> `PUT` ikut dijaga (pindah meja), dengan pengecualian bill itu sendiri —
+> menyimpan ulang bill di mejanya sendiri justru jalur "tambahkan pesanan".
+> Tanpa penjagaan di `PUT`, larangannya cuma menutup pintu depan: buat bill di
+> meja lain lalu pindahkan.
+>
+> Barisnya di-`SELECT … FOR UPDATE` per meja di dalam transaksi yang sama dengan
+> penyisipannya. Tanpa itu dua perangkat yang menyimpan bersamaan sama-sama
+> melihat "belum ada bill" lalu keduanya menyisipkan — aturannya bocor persis di
+> jam ramai.
+>
+> Setelah bill lama dibayar **atau** dibatalkan, mejanya bebas dan boleh punya
+> bill baru — kalau tidak, satu bill batal mengunci mejanya selamanya.
 - `DELETE /api/open-bill/:id` — res: `{ ok: true }` — error: **404**
 
-**`DELETE` = MEMBATALKAN, BUKAN MENGHAPUS.** Barisnya tetap ada dengan
-`pesanan_status = "batal"` + `closed_at` terisi, dan satu baris riwayat dicatat
-atas nama pemanggilnya. Yang terlihat kasir sama seperti dulu (bill hilang dari
-`GET /api/open-bill` dan `GET /api/open-bill/:id` → **404**), tapi Papan Pesanan
-masih menampilkannya di kolom **Batal** hari itu — pembatalan tanpa jejak persis
-kebalikan dari "riwayat perubahan status oleh siapa".
+**`DELETE` = MEMBATALKAN, BUKAN MENGHAPUS.** Barisnya tetap ada: `closed_at`
+terisi, **setiap baris item** ditandai `pesanan_status = "batal"`, dan satu baris
+riwayat dicatat atas nama pemanggilnya. Yang terlihat kasir sama seperti dulu
+(bill hilang dari `GET /api/open-bill` dan `GET /api/open-bill/:id` → **404**),
+tapi Papan Pesanan masih menampilkannya di kolom **Batal** hari itu — pembatalan
+tanpa jejak persis kebalikan dari "riwayat perubahan status oleh siapa".
 
 **BILL DITUTUP SERVER SAAT DIBAYAR.** `POST /api/penjualan` dengan
 `open_bill_id` mengisi `closed_at` + `sale_id` **di dalam transaksi yang sama**.
@@ -660,9 +793,11 @@ melihat pesanan yang belum dibayar** — `/api/open-bill` tetap `cashier only` d
 tidak dilonggarkan.
 
 - `GET /api/pesanan` — query: `branch_id?`, `tanggal?` (YYYY-MM-DD, default hari ini TZ perusahaan), `status?` (`dikerjakan|selesai|batal`) — res: `PesananRow[]`
-- `POST /api/pesanan/:jenis/:id/status` — `:jenis` = `open_bill|penjualan` — req: `{ status: "dikerjakan"|"selesai"|"batal" }` — res: `{ ok: true, status }` — error: **404** bukan cabangnya / tak ada, **409** status baru saja diubah orang lain, **409** bill sudah dibayar (ubah lewat kartu penjualannya)
-- `POST /api/pesanan/:jenis/:id/sajian` — req: `{ takeaway: boolean }` — res: `{ ok: true, sajian_takeaway }` — error: **404**
-- `GET /api/pesanan/:jenis/:id/log` — res: `PesananLogRow[]` (maks 100, terbaru dulu)
+- `POST /api/pesanan/:jenis/:id/item/:itemId/status` — **tombol utama papan** — `:jenis` = `open_bill|penjualan`, `:itemId` = `PesananItemRow.id` — req: `{ status: "dikerjakan"|"selesai"|"batal" }` — res: `{ ok: true, status, kartu_status }` (`kartu_status` = status kartu setelah diturunkan ulang) — error: **404** bukan cabangnya / kartu atau barisnya tak ada, **409** status baris baru saja diubah orang lain, **409** bill sudah dibayar (ubah lewat kartu penjualannya)
+- `POST /api/pesanan/:jenis/:id/item/:itemId/sajian` — req: `{ takeaway: boolean }` — res: `{ ok: true, sajian_takeaway }` — error: **404**, **409** bill sudah dibayar
+- `POST /api/pesanan/:jenis/:id/status` — **pintasan "semua baris"** — req: `{ status: … }` — res: `{ ok: true, status }` (status **kartu** hasil turunan) — error: sama seperti versi per baris, **tanpa** 409 balapan: perintahnya "jadikan semuanya X", jadi dua orang yang menekannya bersamaan sampai di hasil yang sama
+- `POST /api/pesanan/:jenis/:id/sajian` — pintasan "semua baris" — req: `{ takeaway: boolean }` — res: `{ ok: true, sajian_takeaway }` — error: **404**, **409** bill sudah dibayar
+- `GET /api/pesanan/:jenis/:id/log` — res: `PesananLogRow[]` (maks 200, terbaru dulu; `item_nama` = baris yang disentuh, `null` = aksinya mengenai seluruh pesanan)
 
 **Isi papan** — tiga aturan yang sengaja tidak seragam:
 
@@ -674,10 +809,41 @@ tidak dilonggarkan.
 Bill yang sudah menjadi penjualan tak pernah ikut — kartu penjualannya yang
 mewakili, kalau tidak satu pesanan tampil dua kali sepanjang hari.
 
-**Status ikut terbawa saat bill dibayar.** `POST /api/penjualan` dengan
-`open_bill_id` mewarisi `pesanan_status` + penanda penyajian bill dan mengisi
-`sales.asal_open_bill_id`. `GET .../penjualan/:id/log` menggabungkan riwayat
-sebelum & sesudah pembayaran, jadi jejaknya tak terputus.
+> ### 🍽 SATUAN KERJANYA ADALAH BARIS, BUKAN KARTU
+>
+> Satu bill berisi minuman yang keluar duluan dan gorengan yang menyusul. Status
+> setingkat kartu memaksa "semua atau tak satu pun", jadi tak ada cara memberi
+> tahu siapa pun sajian mana yang sudah keluar. Karena itu `status` +
+> `sajian_takeaway` disimpan **per baris** (`PesananItemRow`), dan yang ada di
+> kartu adalah **turunan yang dihitung saat dibaca — bukan kolom tersimpan**:
+>
+> | Field kartu | Aturan turunannya |
+> | --- | --- |
+> | `status` | `batal` bila **semua** baris batal; `selesai` bila **tak ada lagi** baris `dikerjakan`; selain itu `dikerjakan`. Kartu tanpa baris = `dikerjakan` |
+> | `sajian_takeaway` | `true` hanya bila **semua** baris bertanda bawa pulang |
+> | `item_selesai` / `item_batal` | cacah baris per status — untuk ringkasan "2/3 selesai" |
+> | `status_oleh` / `status_pada` | perubahan **baris** terbaru pada kartu itu |
+>
+> Klien **tidak boleh** menyimpan sendiri agregat ini: agregat tersimpan harus
+> ikut diperbarui di setiap perubahan baris, dan satu yang terlewat membuat
+> papan berbohong. Baca ulang `GET /api/pesanan` setelah tiap aksi.
+>
+> **Bill ikut tutup/buka mengikuti barisnya.** Bill yang seluruh barisnya batal
+> otomatis `closed_at` terisi (lenyap dari pemilih kasir — tak bisa ditagihkan);
+> satu baris yang dikembalikan ke antrean **membukanya lagi**. Bill yang sudah
+> dibayar tak pernah dibuka ulang oleh papan.
+
+**Status ikut terbawa PER BARIS saat bill dibayar.** `POST /api/penjualan`
+dengan `open_bill_id` menyalin `pesanan_status` + penanda penyajian **tiap baris
+bill** (dicocokkan lewat `items[].open_bill_item_id`) ke baris penjualannya,
+termasuk siapa & kapan yang menandainya, lalu mengisi `sales.asal_open_bill_id`.
+Baris yang sudah selesai **tidak kembali ke antrean** saat pelanggan membayar.
+`GET .../penjualan/:id/log` menggabungkan riwayat sebelum & sesudah pembayaran,
+jadi jejaknya tak terputus.
+
+**Kirimkan `open_bill_item_id`** pada tiap baris saat membayar open bill. Itu
+juga yang mengunci harga (lihat `/api/open-bill`); tanpanya baris penjualan
+lahir sebagai pekerjaan baru yang belum tersentuh.
 
 > ### 🥡 `sajian_takeaway` — PENANDA PENYAJIAN, bukan angka pembukuan
 >
@@ -688,10 +854,17 @@ sebelum & sesudah pembayaran, jadi jejaknya tak terputus.
 > tentang pemakaian bahannya sendiri. Nota & laporan **tetap** membaca
 > `is_dine_in`.
 >
-> Penandanya **lahir sesuai pembukuannya** (`sajian_takeaway = !is_dine_in`),
-> jadi `sajian_takeaway == is_dine_in` berarti **ada yang benar-benar
-> mengubahnya** setelah transaksi tercatat — pakai itu untuk badge "diubah".
-> `RiwayatTransaksiRow` juga membawa `sajian_takeaway` untuk keperluan ini.
+> Penandanya **lahir sesuai pembukuannya, per baris**
+> (`sale_items.sajian_takeaway = !sale_items.is_dine_in`), jadi satu nota bisa
+> berisi sajian yang dibungkus dan sajian yang di piring sekaligus — persis yang
+> mustahil diwakili satu penanda setingkat transaksi.
+>
+> Pada `RiwayatTransaksiRow`, `sajian_takeaway` adalah **turunan**: `true` hanya
+> bila SELURUH baris bertanda bawa pulang. Karena itu `sajian_takeaway ==
+> is_dine_in` masih berguna sebagai badge "diubah", tapi bacalah arahnya
+> hati-hati: `true` pada nota dine-in = semuanya dipindah jadi bawa pulang;
+> `false` pada nota bawa pulang = **ada** yang dikembalikan ke piring, belum
+> tentu semuanya.
 
 ## `/api/shift` — Shift kasir (`modules/shift/routes.ts`) — group guard **[owner/admin/cashier]** (buka/tutup **cashier only**)
 
@@ -2125,6 +2298,16 @@ export interface MejaStatusDto {
   /** ISO — kapan meja ini terakhir dibereskan, null bila belum pernah */
   dikosongkan_pada: string | null;
   dikosongkan_oleh: string | null;
+  /**
+   * Konsumen pada transaksi TERAKHIR yang masih menempati meja ini — bahan
+   * pilihan "tamu yang sama, tambah pesanan". Selalu `null` bila mejanya
+   * `kosong`, supaya klien tak pernah menawarkan tamu yang sudah dibereskan.
+   *
+   * Gunanya: tamu member yang memesan dua kali di meja yang sama tak lagi
+   * tercatat sebagai satu transaksi ber-member dan satu tanpa member.
+   */
+  konsumen_nama: string | null;
+  konsumen_wa: string | null;
 }
 
 /** Satu baris riwayat "meja dibereskan" — dari `GET /api/meja/:id/log`. */
@@ -2418,8 +2601,23 @@ export interface RiwayatTransaksiRow {
    * Penanda PENYAJIAN dari Papan Pesanan Masuk — dapur bisa mengubahnya jadi
    * bawa pulang setelah transaksi tercatat. Sengaja TERPISAH dari `is_dine_in`
    * (fakta pembukuan yang sudah dipakai menghitung konsumsi bahan & HPP).
+   *
+   * DITURUNKAN dari baris: true hanya bila SELURUH baris transaksi ditandai
+   * bawa pulang. Penandanya sendiri disimpan per baris (`sale_items`).
    */
   sajian_takeaway: boolean;
+  /**
+   * Cacah baris per cara penyajian — supaya klien bisa menulis "2 dari 3
+   * dibungkus" alih-alih badge mutlak yang menyesatkan.
+   *
+   * `sajian_takeaway` di atas adalah `bool_and`: ia `false` begitu SATU baris
+   * tetap di piring, jadi ia tak bisa membedakan "semuanya di piring" dari
+   * "sebagian dibungkus". Dua cacah ini yang membedakannya.
+   *
+   * `item_takeaway + item_dine_in == jumlah_item` selalu.
+   */
+  item_takeaway: number;
+  item_dine_in: number;
   /** label meja terpilih (null bila transaksi lama tanpa meja) */
   meja: string | null;
   /** jumlah baris menu pada transaksi */
@@ -2534,6 +2732,13 @@ export interface OpenBillItemDto {
 /** Ringkasan open bill untuk daftar/pemilih bill di kasir. */
 export interface OpenBillRow {
   id: string;
+  /**
+   * Meja yang ditagih. Dipakai mencocokkan bill ke meja tanpa mengandalkan
+   * `meja_label` — label itu SNAPSHOT saat bill dibuat, jadi ia berbeda dari
+   * nama meja sekarang begitu mejanya diganti nama. `null` = meja sudah dihapus
+   * dari master (`meja_id` ber-`onDelete: set null`) atau bill tanpa meja.
+   */
+  meja_id: string | null;
   meja_label: string | null;
   customer_nama: string | null;
   jumlah_item: number;
@@ -2565,13 +2770,31 @@ export type PesananStatus = "dikerjakan" | "selesai" | "batal";
  */
 export type PesananJenis = "open_bill" | "penjualan";
 
-/** Satu baris menu dalam pesanan, apa adanya untuk dibaca dapur. */
+/**
+ * Satu baris menu dalam pesanan — dan SATUAN KERJA dapur yang sebenarnya.
+ *
+ * Status hidup di sini, bukan di kartunya: satu bill bisa berisi minuman yang
+ * sudah keluar dan gorengan yang masih digoreng, jadi dapur menandainya satu
+ * per satu dan semua orang bisa melihat mana yang sudah dan mana yang belum.
+ */
 export interface PesananItemRow {
+  /** id baris (`sale_items.id` / `open_bill_items.id`) — tujuan tombol per baris */
+  id: string;
   nama: string;
   qty: number;
   /** personalisasi pelanggan, mis. "tanpa sambal" */
   catatan: string | null;
   is_dine_in: boolean;
+  status: PesananStatus;
+  /**
+   * Penanda penyajian "bawa pulang" per baris. SENGAJA terpisah dari
+   * `is_dine_in`: yang terakhir itu fakta pembukuan yang sudah dipakai
+   * menghitung pemakaian bahan & HPP, dan tidak diubah oleh papan.
+   */
+  sajian_takeaway: boolean;
+  /** siapa & kapan status baris ini terakhir diubah; null = belum disentuh */
+  status_oleh: string | null;
+  status_pada: string | null;
 }
 
 /** Satu kartu di papan pesanan. */
@@ -2586,17 +2809,22 @@ export interface PesananRow {
   waktu: string;
   total: number;
   dibayar: boolean;
-  status: PesananStatus;
   /**
-   * Penanda penyajian "bawa pulang" dari papan. SENGAJA terpisah dari
-   * `is_dine_in`: yang terakhir itu fakta pembukuan yang sudah dipakai
-   * menghitung pemakaian bahan & HPP, dan tidak diubah oleh papan.
+   * DITURUNKAN dari `items`, tidak disimpan: `batal` bila semua baris batal,
+   * `selesai` bila semua baris sudah selesai/batal (dan ada yang selesai),
+   * selain itu `dikerjakan`. Kartu tanpa baris dianggap `dikerjakan`.
    */
+  status: PesananStatus;
+  /** DITURUNKAN: true bila SEMUA baris ditandai bawa pulang */
   sajian_takeaway: boolean;
   is_dine_in: boolean;
   catatan: string | null;
   items: PesananItemRow[];
-  /** siapa & kapan status terakhir diubah; null = belum pernah disentuh */
+  /** jumlah baris yang sudah `selesai` — untuk ringkasan "2/3 selesai" */
+  item_selesai: number;
+  /** jumlah baris yang `batal` */
+  item_batal: number;
+  /** perubahan status baris terakhir pada kartu ini; null = belum ada */
   status_oleh: string | null;
   status_pada: string | null;
 }
@@ -2606,6 +2834,8 @@ export interface PesananLogRow {
   waktu: string;
   aksi: string;
   oleh: string | null;
+  /** nama baris yang disentuh; null = aksinya mengenai seluruh pesanan */
+  item_nama: string | null;
 }
 
 /** Sesi kas (shift) per cabang. ditutup_* null → shift masih terbuka. */
