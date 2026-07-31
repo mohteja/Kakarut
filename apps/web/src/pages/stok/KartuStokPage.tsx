@@ -29,11 +29,24 @@ function tanggal30HariLalu(): string {
   );
 }
 
-function StatCard({ label, value, warna = "text-stone-800" }: { label: string; value: string; warna?: string }) {
+function StatCard({
+  label,
+  value,
+  warna = "text-stone-800",
+  rincian,
+}: {
+  label: string;
+  value: string;
+  warna?: string;
+  /** baris kecil di bawah angka — dipakai kartu Saldo Awal utk memperlihatkan
+   *  dari mana angkanya, supaya penjumlahan di layar bisa dicocokkan sendiri */
+  rincian?: string;
+}) {
   return (
     <Card className="p-4">
       <div className="text-xs font-semibold uppercase tracking-wide text-stone-500">{label}</div>
       <div className={`mt-1 text-xl font-bold ${warna}`}>{value}</div>
+      {rincian && <div className="mt-0.5 text-xs text-stone-500">{rincian}</div>}
     </Card>
   );
 }
@@ -69,6 +82,22 @@ export function KartuStokPage() {
 
   const fmt = (n: number) => `${formatAngka(n)} ${kartu.bahan.satuan}`;
 
+  /**
+   * EFEK STOK AWAL (opname) pada periode ini.
+   *
+   * Opname MENYETEL ULANG saldo, bukan menambah barang, jadi ia sengaja tak
+   * masuk `total_masuk`/`total_keluar`. Akibatnya identitas biasa
+   * `awal + masuk − keluar = akhir` TIDAK berlaku bila ada opname; selisihnya
+   * persis sebesar efek penyetelan itu. Diturunkan dari keempat angka yang
+   * sudah dikirim server (bukan dijumlah ulang dari baris mutasi) supaya tetap
+   * benar berapa pun jumlah opname di periode itu dan di mana pun letaknya.
+   */
+  const dasarOpname = Math.round(
+    (kartu.saldo_akhir - (kartu.saldo_awal + kartu.total_masuk - kartu.total_keluar)) * 1e6,
+  ) / 1e6;
+  /** titik tolak EFEKTIF — angka yang membuat penjumlahan di layar ketemu */
+  const dasarAwal = kartu.saldo_awal + dasarOpname;
+
   return (
     <div className="max-w-4xl">
       <PageTitle
@@ -101,7 +130,27 @@ export function KartuStokPage() {
       </div>
 
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatCard label="Saldo Awal" value={fmt(kartu.saldo_awal)} />
+        {/* SALDO AWAL DIGABUNG DENGAN STOK AWAL.
+         *
+         * Stok Awal (opname) MENYETEL ULANG saldo — ia bukan barang masuk, jadi
+         * tak ikut "Total Masuk". Dulu efeknya tak tampil di ringkasan sama
+         * sekali, sehingga penjumlahan di layar tidak pernah ketemu: orang
+         * membaca 0 + 125 − 134 lalu mengharapkan −9, padahal tertulis 91.
+         * Angka yang tampak salah membuat SELURUH halaman kehilangan
+         * kepercayaan, walau tiap barisnya benar.
+         *
+         * Yang ditampilkan sekarang adalah titik tolak EFEKTIF-nya, dan
+         * dijabarkan di baris kecil supaya bisa dicocokkan sendiri:
+         *   titik tolak + total masuk − total keluar = saldo akhir. */}
+        <StatCard
+          label={dasarOpname !== 0 ? "Saldo Awal + Stok Awal" : "Saldo Awal"}
+          value={fmt(dasarAwal)}
+          rincian={
+            dasarOpname !== 0
+              ? `${fmt(kartu.saldo_awal)} lalu disetel Stok Awal ${dasarOpname > 0 ? "+" : "−"}${fmt(Math.abs(dasarOpname))}`
+              : undefined
+          }
+        />
         <StatCard label="Total Masuk" value={`+${fmt(kartu.total_masuk)}`} warna="text-green-600" />
         <StatCard label="Total Keluar" value={`−${fmt(kartu.total_keluar)}`} warna="text-red-600" />
         <StatCard label="Saldo Akhir" value={fmt(kartu.saldo_akhir)} warna="text-orange-600" />
