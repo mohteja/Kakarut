@@ -27,7 +27,7 @@ tanpa akses repo server.
 
 ## Rilis: Kiriman antar-cabang — "sudah kirim tapi tak sampai" ditutup
 
-> Belum di-merge ke production. Tidak ada migrasi DB.
+> **Sudah di-merge ke production** (PR #137, 31 Jul 2026). Tidak ada migrasi DB.
 
 ### 🔴 WAJIB — `POST /{mod}/konfirmasi/:fakturId` kini **409** untuk kiriman beralamat
 

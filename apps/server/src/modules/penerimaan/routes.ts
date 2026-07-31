@@ -220,14 +220,18 @@ export const penerimaanRoutes = new Hono<AppEnv>()
   .get("/anomali", async (c) => {
     const auth = c.get("auth");
     /**
-     * Peran terkunci cabang (kasir, tim, kitchen, bar) hanya melihat barang
-     * yang MENDARAT DI CABANGNYA — aturan yang sama dengan daftar Penerimaan
-     * di atas. Mereka justru orang yang paling berguna melihatnya: kardusnya
-     * ada di rak mereka, tinggal dicari. Owner/admin melihat semuanya.
+     * Peran terkunci cabang (kasir, tim, kitchen, bar) melihat barang yang
+     * MENDARAT di cabangnya ATAU yang DIKIRIM DARI cabangnya. Dua-duanya
+     * perlu, karena dua orang berbeda punya kepentingan atas kardus yang sama:
+     * penerima ("katanya dikirim, mana barangnya?") dan pengirim ("sudah saya
+     * kirim, kok fakturnya masih menggantung?"). Pengirim pula yang faktur
+     * belanja/produksinya diberi tanda peringatan di layar Beli & Produksi —
+     * tanpa cabang asal di sini, tandanya tak akan pernah muncul untuk mereka.
+     * Owner/admin melihat semuanya.
      */
     const kunciCabang =
       terikatCabang(auth.role) && auth.branch_id
-        ? sql`AND g.branch_id = ${auth.branch_id}`
+        ? sql`AND (g.branch_id = ${auth.branch_id} OR g.asal_faktur = ${auth.branch_id})`
         : sql``;
     const rows = await db.execute(sql`
       ${cteMenggantung(auth.company_id!)}
@@ -235,11 +239,16 @@ export const penerimaanRoutes = new Hono<AppEnv>()
              i.nama AS bahan, i.satuan,
              bp.nama AS posisi_sekarang,
              ba.nama AS dikirim_dari,
+             dn.nomor_teks AS nomor,
              EXTRACT(DAY FROM now() - g.waktu)::int AS umur_hari
       FROM g
       JOIN ingredients i ON i.id = g.ingredient_id
       LEFT JOIN branches bp ON bp.id = g.branch_id
       LEFT JOIN branches ba ON ba.id = g.asal_faktur
+      -- nomor faktur (PB-/PR-) supaya orang bisa mencocokkannya dengan kartu
+      -- di layar Beli/Produksi, bukan cuma melihat UUID
+      LEFT JOIN dokumen_nomor dn
+        ON dn.company_id = ${auth.company_id!} AND dn.ref_id = g.faktur_id
       WHERE ${MENGGANTUNG}
         ${kunciCabang}
       ORDER BY g.waktu ASC

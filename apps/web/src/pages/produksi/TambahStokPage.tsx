@@ -19,6 +19,7 @@ import { useBranch, useCabangData } from "../../context/BranchContext";
 import { CabangDataBar } from "../../components/CabangDataBar";
 import { ApiError, api } from "../../lib/api";
 import { formatAngka, formatRupiah, formatTanggalRingkas, formatWaktu } from "../../lib/format";
+import { useKirimanMenggantung } from "../../lib/menggantung";
 
 interface StokMasukPage {
   rows: StokMasukRow[];
@@ -272,6 +273,9 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
   const t = TEKS[tipe];
   const { auth } = useAuth();
   const queryClient = useQueryClient();
+  // faktur yang barangnya "sudah dikirim" tapi tak pernah bisa diterima —
+  // ditandai di kartunya supaya tak terbaca beres (lihat lib/menggantung.ts)
+  const { fakturBermasalah } = useKirimanMenggantung();
   // rekomendasi beli = analitik manajemen; karyawan CK cukup buat faktur
   const isManajemen = auth?.user.role === "owner" || auth?.user.role === "admin";
   // Faktur per cabang — DARI KANTOR tampil SEMUA cabang (kantor memantau
@@ -666,10 +670,18 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
               : tipe === "beli" && g.status === "menunggu" && siapKirim
                 ? { label: "📦 Di CK — siap kirim ke cabang", cls: "bg-purple-100 text-purple-800" }
                 : badgeFaktur(tipe, g.status);
+            // KIRIMAN MENGGANTUNG: faktur ini berbunyi "Dikirim" tapi barangnya
+            // tak pernah bisa diterima siapa pun, jadi stok cabang tak pernah
+            // bertambah. Status normal ("Dikirim") justru MENYESATKAN di sini —
+            // orang menganggapnya beres dan baru sadar saat stok tak cocok
+            // berminggu-minggu kemudian. Karena itu ia MENIMPA badge lain.
+            const menggantung = g.fakturId != null && fakturBermasalah.has(g.fakturId);
             // faktur beli yang laporan harganya sudah lengkap → "Selesai"
-            const badgeTampil = laporanSelesai
-              ? { label: "✅ Selesai", cls: "bg-emerald-100 text-emerald-800" }
-              : badge;
+            const badgeTampil = menggantung
+              ? { label: "⚠️ Tidak sampai — stok tidak masuk", cls: "bg-red-100 text-red-800" }
+              : laporanSelesai
+                ? { label: "✅ Selesai", cls: "bg-emerald-100 text-emerald-800" }
+                : badge;
             // kartu ringkas ala transaksi marketplace: tampilkan 1 barang
             // pertama + jumlah bahan lainnya; rincian lengkap via klik kartu
             const utama = g.rows[0];
@@ -786,6 +798,18 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                   )}
                 </div>
               </div>
+
+              {/* Barang faktur ini tak pernah sampai. Badge saja tidak cukup:
+                  orang perlu tahu APA yang harus dilakukan, dan tempatnya bukan
+                  di sini melainkan di layar Penerimaan. */}
+              {menggantung && (
+                <div className="border-b border-red-100 bg-red-50 px-3 py-2 text-xs text-red-800 sm:px-4">
+                  <b>Barang tidak sampai ke cabang.</b> Faktur ini tercatat
+                  &ldquo;Dikirim&rdquo;, tapi kirimannya tak pernah muncul di layar Penerimaan
+                  sehingga <b>stok cabang tidak bertambah</b>. Bereskan di menu{" "}
+                  <b>Penerimaan Barang</b>.
+                </div>
+              )}
 
               {/* Isi ringkas: cukup 1 barang + jumlah bahan lainnya — rincian
                   lengkap tetap tersedia dgn mengetuk kartu */}
