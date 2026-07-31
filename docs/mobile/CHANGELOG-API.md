@@ -76,6 +76,25 @@ justru yang paling berguna melihatnya, kardusnya ada di rak mereka.
 Cocok dijadikan lencana peringatan di layar Penerimaan; kalau `jumlah` 0
 (keadaan normal), jangan tampilkan apa pun.
 
+### 🟢 BARU — `POST /penerimaan/anomali/tutup`: hapuskan kiriman yang terlanjur menggantung
+
+**[owner/admin]** — req `{ ids: uuid[] (1..500), alasan? }`, res `{ ditutup, dilewati }`.
+
+Untuk barang yang cabangnya **sudah dikompensasi manual** (Stok Awal, opname,
+atau faktur manual). Barang itu **tidak boleh diterima** lewat
+`/penerimaan/:id/terima`: penerimaan menyetel `waktu = now()` yang jatuh
+**sesudah** garis Stok Awal, jadi qty-nya ditumpuk di atas saldo pembuka —
+terhitung dua kali. Jalan yang benar adalah dihapuskan.
+
+Soft-delete → bisa dipulihkan dari Tempat Sampah kalau ternyata salah.
+
+**Yang perlu diketahui saat memakainya:** daftar `ids` **tidak dipercaya
+server**. Predikat menggantung dihitung ulang di sana dengan definisi yang sama
+persis dengan `GET /anomali`, dan `ids` hanya dipakai sebagai irisan. Jadi id
+baris sehat tidak akan menghapus apa pun — ia dilaporkan di `dilewati`, bukan
+menggagalkan seluruh permintaan. Kalau `ditutup` lebih kecil dari yang kalian
+kirim, itu wajar: daftarnya basi, muat ulang `/anomali`.
+
 ---
 
 ## Rilis: Tombol 🥡 kini memindahkan UANG dan STOK

@@ -39,7 +39,50 @@ const KIRIMAN_MASUK = or(
   ),
 )!;
 
+/**
+ * KIRIMAN MENGGANTUNG — satu definisi, dipakai pendeteksi DAN penghapusnya.
+ *
+ * Sengaja satu tempat: kalau pendeteksi dan penghapus punya salinan predikat
+ * masing-masing, suatu saat keduanya akan berbeda pendapat soal "mana yang
+ * menggantung" — dan bedanya baru ketahuan setelah ada baris SEHAT yang
+ * terhapus. Predikat penghapusan tak boleh lebih longgar dari yang ditampilkan.
+ */
+function cteMenggantung(companyId: string) {
+  return sql`
+    WITH g AS (
+      SELECT pr.id, pr.faktur_id, pr.tipe, pr.status, pr.qty, pr.waktu,
+             pr.branch_id, pr.tujuan_branch_id, pr.ingredient_id,
+             COALESCE(
+               ((pr.tipe = 'beli' AND (pr.tujuan_branch_id IS NULL OR pr.tujuan_branch_id = pr.branch_id))
+                OR (pr.tipe = 'produksi' AND pr.tujuan_branch_id = pr.branch_id)),
+               false
+             ) AS lolos_gerbang,
+             COALESCE(
+               pr.dari_branch_id,
+               (SELECT p2.dari_branch_id FROM productions p2
+                 WHERE p2.faktur_id = pr.faktur_id AND p2.dari_branch_id IS NOT NULL LIMIT 1),
+               (SELECT fl.branch_id FROM faktur_logs fl
+                 WHERE fl.faktur_id = pr.faktur_id ORDER BY fl.waktu ASC LIMIT 1)
+             ) AS asal_faktur
+      FROM productions pr
+      WHERE pr.company_id = ${companyId}
+        AND pr.status IN ('menunggu', 'ditolak')
+        AND pr.deleted_at IS NULL
+    )
+  `;
+}
+
+/** Predikat pendampingnya — dipakai di WHERE atas CTE `g` di atas. */
+const MENGGANTUNG = sql`g.lolos_gerbang = false
+        AND g.asal_faktur IS NOT NULL
+        AND g.asal_faktur <> g.branch_id`;
+
 const TolakBody = z.object({ alasan: z.string().trim().max(300).nullish() });
+
+const TutupAnomaliBody = z.object({
+  ids: z.array(z.string().uuid()).min(1).max(500),
+  alasan: z.string().trim().max(300).nullish(),
+});
 
 const TerimaSebagianBody = z.object({
   /** qty yang benar-benar diterima per baris; 0 = baris itu ditolak */
@@ -187,26 +230,7 @@ export const penerimaanRoutes = new Hono<AppEnv>()
         ? sql`AND g.branch_id = ${auth.branch_id}`
         : sql``;
     const rows = await db.execute(sql`
-      WITH g AS (
-        SELECT pr.id, pr.faktur_id, pr.tipe, pr.status, pr.qty, pr.waktu,
-               pr.branch_id, pr.tujuan_branch_id, pr.ingredient_id,
-               COALESCE(
-                 ((pr.tipe = 'beli' AND (pr.tujuan_branch_id IS NULL OR pr.tujuan_branch_id = pr.branch_id))
-                  OR (pr.tipe = 'produksi' AND pr.tujuan_branch_id = pr.branch_id)),
-                 false
-               ) AS lolos_gerbang,
-               COALESCE(
-                 pr.dari_branch_id,
-                 (SELECT p2.dari_branch_id FROM productions p2
-                   WHERE p2.faktur_id = pr.faktur_id AND p2.dari_branch_id IS NOT NULL LIMIT 1),
-                 (SELECT fl.branch_id FROM faktur_logs fl
-                   WHERE fl.faktur_id = pr.faktur_id ORDER BY fl.waktu ASC LIMIT 1)
-               ) AS asal_faktur
-        FROM productions pr
-        WHERE pr.company_id = ${auth.company_id!}
-          AND pr.status IN ('menunggu', 'ditolak')
-          AND pr.deleted_at IS NULL
-      )
+      ${cteMenggantung(auth.company_id!)}
       SELECT g.id, g.faktur_id, g.tipe, g.status, g.qty, g.waktu,
              i.nama AS bahan, i.satuan,
              bp.nama AS posisi_sekarang,
@@ -216,9 +240,7 @@ export const penerimaanRoutes = new Hono<AppEnv>()
       JOIN ingredients i ON i.id = g.ingredient_id
       LEFT JOIN branches bp ON bp.id = g.branch_id
       LEFT JOIN branches ba ON ba.id = g.asal_faktur
-      WHERE g.lolos_gerbang = false
-        AND g.asal_faktur IS NOT NULL
-        AND g.asal_faktur <> g.branch_id
+      WHERE ${MENGGANTUNG}
         ${kunciCabang}
       ORDER BY g.waktu ASC
     `);
@@ -227,6 +249,97 @@ export const penerimaanRoutes = new Hono<AppEnv>()
       jumlah: daftar.length,
       qty_total: daftar.reduce((t, r) => t + Number(r.qty ?? 0), 0),
       rows: daftar,
+    });
+  })
+  /**
+   * TUTUP kiriman menggantung — hapuskan (soft-delete → Tempat Sampah).
+   *
+   * Untuk barang yang TERLANJUR menggantung sebelum perbaikan "alamat ikut
+   * barang". Kalau cabang SUDAH mengompensasi manual (Stok Awal / opname /
+   * faktur manual), barangnya sudah ada di pembukuan — MENERIMA kirimannya
+   * sekarang justru menghitungnya DUA KALI, karena penerimaan menyetel
+   * `waktu = now()` yang jatuh SESUDAH garis Stok Awal, sehingga qty-nya
+   * ditumpuk di atas saldo pembuka. Jadi jalan yang benar bukan diterima,
+   * melainkan dihapuskan.
+   *
+   * PENGAMANNYA — dan ini inti berkas ini: daftar id yang dikirim klien TIDAK
+   * dipercaya. Predikat menggantung dihitung ULANG di server dengan CTE yang
+   * SAMA PERSIS dengan pendeteksi di atas, lalu id yang dikirim hanya dipakai
+   * sebagai IRISAN. Baris yang sehat MUSTAHIL terhapus lewat sini walau
+   * id-nya diketik manual — dan karena kedua endpoint memakai satu sumber
+   * predikat, keduanya tak bisa berbeda pendapat soal "mana yang menggantung".
+   *
+   * Soft-delete, jadi bisa dipulihkan dari Tempat Sampah bila ternyata salah.
+   */
+  .post("/anomali/tutup", zValidator("json", TutupAnomaliBody), async (c) => {
+    const auth = c.get("auth");
+    // Penghapusan pembukuan = keputusan manajemen. Modul ini tanpa group guard
+    // ([any] — kasir pun boleh menerima barang), jadi gerbangnya di sini.
+    if (auth.role !== "owner" && auth.role !== "admin") {
+      throw new HTTPException(403, {
+        message: "Hanya owner/admin yang boleh menghapuskan kiriman menggantung",
+      });
+    }
+    const body = c.req.valid("json");
+    const ids = [...new Set(body.ids)];
+    const now = new Date();
+    const hasil = await db.transaction(async (tx) => {
+      const target = await tx.execute(sql`
+        ${cteMenggantung(auth.company_id!)}
+        SELECT g.id, g.faktur_id, g.tipe, g.branch_id, g.qty
+        FROM g
+        WHERE ${MENGGANTUNG}
+          AND g.id IN (${sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `)})
+      `);
+      const baris = target.rows as {
+        id: string;
+        faktur_id: string;
+        tipe: string;
+        branch_id: string;
+        qty: string | number;
+      }[];
+      if (baris.length === 0) return { baris: [] as typeof baris };
+      await tx
+        .update(productions)
+        .set({ deletedAt: now, deletedBy: auth.sub })
+        .where(
+          and(
+            eq(productions.companyId, auth.company_id!),
+            isNull(productions.deletedAt),
+            inArray(
+              productions.id,
+              baris.map((b) => b.id),
+            ),
+          ),
+        );
+      return { baris };
+    });
+    // Satu entri log per faktur — jejak siapa menghapuskan apa, dan alasannya.
+    const perFaktur = new Map<string, typeof hasil.baris>();
+    for (const b of hasil.baris) {
+      const kump = perFaktur.get(b.faktur_id) ?? [];
+      kump.push(b);
+      perFaktur.set(b.faktur_id, kump);
+    }
+    for (const [fakturId, kump] of perFaktur) {
+      await catatLogFaktur(db, {
+        companyId: auth.company_id!,
+        branchId: kump[0].branch_id,
+        fakturId,
+        jalur: kump[0].tipe as JenisPengadaan,
+        aksi: "Kiriman menggantung dihapuskan (tidak pernah sampai)",
+        detail:
+          `${kump.length} baris` +
+          (body.alasan ? ` — ${body.alasan}` : " — sudah dikompensasi manual"),
+        userId: auth.sub,
+      });
+    }
+    return c.json({
+      ditutup: hasil.baris.length,
+      // id yang TIDAK menggantung (atau sudah terhapus) sengaja dilewati, bukan
+      // digagalkan: kalau satu id basi membatalkan seluruh permintaan, orang
+      // akan mencoba lagi dengan daftar yang sama dan macet selamanya.
+      dilewati: ids.length - hasil.baris.length,
     });
   })
   /** Terima SEMUA barang kiriman → masuk stok. */

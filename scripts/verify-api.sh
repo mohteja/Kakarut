@@ -7154,5 +7154,27 @@ cek "pendeteksi boleh dibaca peran terkunci cabang (kasir) → 200" "V == 200" \
 cek "kasir hanya melihat yang mendarat di cabangnya sendiri" "V == 1" \
   "$(api "$REISS105" GET /penerimaan/anomali | jq '(.rows | length) == 0 | if . then 1 else 0 end')"
 
+# PENGHAPUSAN kiriman menggantung — untuk barang yang cabang SUDAH kompensasi
+# manual lewat Stok Awal. Menerimanya justru menghitung dua kali (penerimaan
+# menyetel waktu=now() yang jatuh SESUDAH garis Stok Awal), jadi jalannya
+# dihapuskan, bukan diterima.
+#
+# YANG PALING PENTING DIUJI: daftar id dari klien TIDAK dipercaya. Baris SEHAT
+# yang id-nya dikirim ke sini harus SELAMAT — kalau tidak, endpoint ini berubah
+# jadi penghapus stok massal berkedok perbaikan data.
+SEHAT157=$(api "$OWNER" GET "/produksi?branch_id=$ST157&per_page=500" | jq -r --arg f "$FK157" '[.rows[]|select(.faktur_id==$f)][0].id')
+TUTUP157=$(api "$OWNER" POST /penerimaan/anomali/tutup "{\"ids\":[\"$SEHAT157\"]}")
+cek "id baris SEHAT dikirim ke penutup → TIDAK ada yang dihapus" "V == 0" \
+  "$(echo "$TUTUP157" | jq '.ditutup')"
+cek "id sehat itu dilaporkan dilewati, bukan digagalkan diam-diam" "V == 1" \
+  "$(echo "$TUTUP157" | jq '.dilewati')"
+cek "baris sehat masih hidup sesudah dicoba dihapuskan" "V == 1" \
+  "$(api "$OWNER" GET "/produksi?branch_id=$ST157&per_page=500" | jq --arg f "$FK157" '[.rows[]|select(.faktur_id==$f)] | length | if . == 1 then 1 else 0 end')"
+cek "saldo cabang TIDAK bergeser sesudah percobaan itu" "abs(V - 15) < 0.001" "$(saldo157 "$ST157")"
+cek "penghapusan = keputusan manajemen: kasir → 403" "V == 403" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/penerimaan/anomali/tutup" -H "Authorization: Bearer $REISS105" -H 'Content-Type: application/json' -d "{\"ids\":[\"$SEHAT157\"]}")"
+cek "penutup menolak daftar id kosong → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/penerimaan/anomali/tutup" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"ids":[]}')"
+
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]
