@@ -1491,11 +1491,25 @@ cek "baris terkirim tampil di cabang tujuan + gudang tujuan" "V == 1" \
 cek "cabang asal: sisa tugas B diproses + jejak baris terkirim tetap terlihat" "V == 1" \
   "$(api "$OWNER" GET "/pembelian?branch_id=$PUSAT46_ID&per_page=500" | jq --arg f "$FK46_ID" --arg p "$PUSAT46_ID" '([.rows[] | select(.faktur_id==$f)] | (length == 2) and (([.[] | select(.status=="dikerjakan" and .branch_id==$p)] | length) == 1)) | if . then 1 else 0 end')"
 
-# diterima → stok masuk di cabang TUJUAN
+# ALAMAT IKUT LOKASI: sesudah dikirim, baris ada DI cabang tujuan DAN
+# beralamat ke situ — syarat mutlak agar gerbang Penerimaan mengenalinya.
+cek "dikirim: posisi = alamat (kardus & alamatnya berpindah bersama)" "V == 1" \
+  "$(api "$OWNER" GET "/pembelian?branch_id=$CB46_ID&per_page=500" | jq --arg f "$FK46_ID" --arg c "$CB46_ID" '([.rows[] | select(.faktur_id==$f)][0] | (.branch_id == $c and .tujuan_branch_id == $c)) | if . then 1 else 0 end')"
+cek "kiriman MUNCUL di layar Penerimaan cabang tujuan" "V == 1" \
+  "$(api "$OWNER" GET "/penerimaan?branch_id=$CB46_ID" | jq --arg f "$FK46_ID" '[.rows[] | select(.faktur_id==$f)] | length')"
+
+# PENGAMAN: barang beralamat TIDAK bisa dituntaskan sepihak oleh pengirimnya —
+# harus lewat Penerimaan di cabang tujuan (409, bukan 404: fakturnya ADA).
 S46_0=$(api "$OWNER" GET "/stok?branch_id=$CB46_ID" | jq --arg i "$ING42A" '([.[] | select(.ingredient_id==$i)][0].saldo) // 0')
-api "$OWNER" POST "/pembelian/konfirmasi/$FK46_ID" > /dev/null
+cek "PENGAMAN: konfirmasi sepihak kiriman beralamat → 409" "V == 409" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/pembelian/konfirmasi/$FK46_ID" -H "Authorization: Bearer $OWNER")"
+cek "ditolak konfirmasi → saldo cabang tujuan BELUM bergerak" "abs(V - $S46_0) < 0.001" \
+  "$(api "$OWNER" GET "/stok?branch_id=$CB46_ID" | jq --arg i "$ING42A" '([.[] | select(.ingredient_id==$i)][0].saldo) // 0')"
+
+# baru sesudah DITERIMA di cabang → stok masuk di cabang TUJUAN
+api "$OWNER" POST "/penerimaan/$FK46_ID/terima" > /dev/null
 S46_1=$(api "$OWNER" GET "/stok?branch_id=$CB46_ID" | jq --arg i "$ING42A" '([.[] | select(.ingredient_id==$i)][0].saldo) // 0')
-cek "diterima → saldo bertambah di cabang tujuan (+10)" "abs(V - 10) < 0.001" "$(python3 -c "print($S46_1 - $S46_0)")"
+cek "diterima di cabang → saldo bertambah di cabang tujuan (+10)" "abs(V - 10) < 0.001" "$(python3 -c "print($S46_1 - $S46_0)")"
 
 # penjaga: tempat bukan milik cabang tujuan → 400
 cek "tempat bukan milik cabang tujuan → 400" "V == 400" \
@@ -7070,6 +7084,97 @@ DUS156_4=$(dus156)
 api "$OWNER" POST "/pesanan/penjualan/$SID156C/item/$BR156C/sajian" '{"takeaway":true}' > /dev/null 2>&1 || true
 cek "penjualan terhapus: menandainya TA tidak menggerakkan stok apa pun" "abs(V) < 0.001" \
   "$(python3 -c "print($DUS156_4 - $(dus156))")"
+
+echo "── §157 Kiriman antar-cabang: ALAMAT ikut berpindah bersama barangnya ──"
+# Satu baris `productions` membawa dua keterangan yang harus dibaca bersama:
+#   branch_id        = "barang ini SEKARANG ADA DI MANA"
+#   tujuan_branch_id = "barang ini ALAMATNYA KE MANA"
+# Layar Penerimaan cabang hanya menampilkan kiriman yang KEDUANYA SAMA. Dulu
+# pintu "Ubah Tahap" memindahkan barangnya TANPA memperbarui alamatnya: faktur
+# berbunyi "Dikirim", tapi tak ada satu pun layar yang bisa menerimanya dan stok
+# cabang tak pernah bertambah. Bagian ini menjaga agar keduanya berpindah
+# bersama — untuk PRODUKSI (korban utamanya) dan lewat pintu yang dulu rusak.
+CK157=$CK52_UTAMA
+ST157=$CB46_ID
+MTH157=$(api "$OWNER" POST /bahan '{"nama":"mentah uji157","harga_beli":10000,"isi":1000,"satuan":"gr","pengadaan":"beli","kategori":"lain"}' | jq -r .id)
+JDI157=$(api "$OWNER" POST /bahan '{"nama":"jadi uji157","harga_beli":5000,"isi":1,"satuan":"pcs","pengadaan":"produksi","kategori":"lain"}' | jq -r .id)
+api "$OWNER" PUT "/bahan/$JDI157/resep" "{\"komponen\":[{\"ingredient_id\":\"$MTH157\",\"qty\":10}]}" > /dev/null
+saldo157() { api "$OWNER" GET "/stok?branch_id=$1" | jq -r --arg i "$JDI157" '[.[]|select(.ingredient_id==$i)][0].saldo // 0'; }
+# bahan mentah masuk stok CK dulu — /tahap 'dikerjakan' menolak bila resep kurang
+FKM157=$(api "$OWNER" POST /pembelian/faktur "{\"branch_id\":\"$CK157\",\"items\":[{\"ingredient_id\":\"$MTH157\",\"mode\":\"pcs\",\"jumlah\":5000,\"total_harga\":50000}]}" | jq -r .faktur_id)
+api "$OWNER" POST "/pembelian/tahap/$FKM157" '{"ke":"dikerjakan"}' > /dev/null
+api "$OWNER" POST "/pembelian/tahap/$FKM157" '{"ke":"menunggu"}' > /dev/null
+
+FK157=$(api "$OWNER" POST /produksi/faktur "{\"branch_id\":\"$CK157\",\"items\":[{\"ingredient_id\":\"$JDI157\",\"mode\":\"pcs\",\"jumlah\":15}]}" | jq -r .faktur_id)
+api "$OWNER" POST "/produksi/tahap/$FK157" '{"ke":"dikerjakan"}' > /dev/null
+BID157=$(api "$OWNER" GET "/produksi?branch_id=$CK157&per_page=500" | jq -r --arg f "$FK157" '[.rows[]|select(.faktur_id==$f)][0].id')
+
+# BELUM dikirim: masih di CK, dan pendeteksi TIDAK BOLEH mengusiknya — barang
+# yang sah menunggu di rak CK bukan kiriman menggantung.
+cek "belum dikirim: pendeteksi tidak menandai barang yang masih di CK" "V == 0" \
+  "$(api "$OWNER" GET /penerimaan/anomali | jq --arg f "$FK157" '[.rows[]|select(.faktur_id==$f)] | length')"
+
+# PINTU YANG DULU RUSAK: "Ubah Tahap" → selesai + kirim ke cabang sekaligus.
+api "$OWNER" POST "/produksi/tahap/$FK157" "{\"ke\":\"menunggu\",\"items\":[{\"id\":\"$BID157\",\"qty\":15}],\"tujuan_branch_id\":\"$ST157\"}" > /dev/null
+R157=$(api "$OWNER" GET "/produksi?branch_id=$ST157&per_page=500" | jq --arg f "$FK157" '[.rows[]|select(.faktur_id==$f)][0]')
+cek "dikirim lewat Ubah Tahap: posisi = alamat (dulu alamatnya KOSONG)" "V == 1" \
+  "$(echo "$R157" | jq --arg s "$ST157" '(.branch_id == $s and .tujuan_branch_id == $s) | if . then 1 else 0 end')"
+cek "dikirim: status masih 'menunggu' (belum diterima siapa pun)" "V == 1" \
+  "$(echo "$R157" | jq '(.status == "menunggu") | if . then 1 else 0 end')"
+cek "jejak pengirim tersimpan (CK tetap melihatnya di daftarnya)" "V == 1" \
+  "$(api "$OWNER" GET "/produksi?branch_id=$CK157&per_page=500" | jq --arg f "$FK157" '[.rows[]|select(.faktur_id==$f)] | length | if . == 1 then 1 else 0 end')"
+cek "kiriman MUNCUL di layar Penerimaan cabang tujuan" "V == 1" \
+  "$(api "$OWNER" GET "/penerimaan?branch_id=$ST157" | jq --arg f "$FK157" '[.rows[]|select(.faktur_id==$f)] | length')"
+cek "sudah dikirim & sehat: pendeteksi tetap NOL untuk faktur ini" "V == 0" \
+  "$(api "$OWNER" GET /penerimaan/anomali | jq --arg f "$FK157" '[.rows[]|select(.faktur_id==$f)] | length')"
+
+# PENGAMAN: selama belum DITERIMA, stok tak boleh bertambah di mana pun.
+cek "belum diterima: saldo cabang tujuan masih 0" "abs(V) < 0.001" "$(saldo157 "$ST157")"
+cek "belum diterima: saldo CK juga 0 (barangnya sudah keluar)" "abs(V) < 0.001" "$(saldo157 "$CK157")"
+cek "PENGAMAN: konfirmasi sepihak kiriman produksi → 409" "V == 409" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/produksi/konfirmasi/$FK157" -H "Authorization: Bearer $OWNER")"
+cek "ditolak konfirmasi → saldo cabang tujuan tetap 0" "abs(V) < 0.001" "$(saldo157 "$ST157")"
+
+# Baru sesudah orang di cabang menekan Terima, barangnya jadi stok.
+api "$OWNER" POST "/penerimaan/$FK157/terima" > /dev/null
+cek "DITERIMA di cabang → saldo cabang tujuan jadi 15" "abs(V - 15) < 0.001" "$(saldo157 "$ST157")"
+cek "diterima: status jadi 'dikonfirmasi'" "V == 1" \
+  "$(api "$OWNER" GET "/produksi?branch_id=$ST157&per_page=500" | jq --arg f "$FK157" '([.rows[]|select(.faktur_id==$f)][0].status == "dikonfirmasi") | if . then 1 else 0 end')"
+
+# PENJAGA MENYELURUH — nilai benarnya NOL. Seluruh skrip ini menempuh setiap
+# pintu kirim yang ada (Ubah Tahap, /kirim, transfer stok, kirim hasil, beli
+# bertujuan cabang). Bila SATU saja di antaranya memindahkan barang tanpa
+# alamatnya, angka ini bukan nol lagi — dan bug "sudah kirim tapi tak sampai"
+# ketahuan di sini, bukan di pembukuan cabang sebulan kemudian.
+ANOM157=$(api "$OWNER" GET /penerimaan/anomali)
+cek "TIDAK ADA kiriman menggantung di seluruh perusahaan" "V == 0" "$(echo "$ANOM157" | jq '.jumlah')"
+cek "tidak ada qty yang hilang dalam perjalanan" "abs(V) < 0.001" "$(echo "$ANOM157" | jq '.qty_total')"
+cek "pendeteksi boleh dibaca peran terkunci cabang (kasir) → 200" "V == 200" \
+  "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/penerimaan/anomali" -H "Authorization: Bearer $REISS105")"
+cek "kasir hanya melihat yang mendarat di cabangnya sendiri" "V == 1" \
+  "$(api "$REISS105" GET /penerimaan/anomali | jq '(.rows | length) == 0 | if . then 1 else 0 end')"
+
+# PENGHAPUSAN kiriman menggantung — untuk barang yang cabang SUDAH kompensasi
+# manual lewat Stok Awal. Menerimanya justru menghitung dua kali (penerimaan
+# menyetel waktu=now() yang jatuh SESUDAH garis Stok Awal), jadi jalannya
+# dihapuskan, bukan diterima.
+#
+# YANG PALING PENTING DIUJI: daftar id dari klien TIDAK dipercaya. Baris SEHAT
+# yang id-nya dikirim ke sini harus SELAMAT — kalau tidak, endpoint ini berubah
+# jadi penghapus stok massal berkedok perbaikan data.
+SEHAT157=$(api "$OWNER" GET "/produksi?branch_id=$ST157&per_page=500" | jq -r --arg f "$FK157" '[.rows[]|select(.faktur_id==$f)][0].id')
+TUTUP157=$(api "$OWNER" POST /penerimaan/anomali/tutup "{\"ids\":[\"$SEHAT157\"]}")
+cek "id baris SEHAT dikirim ke penutup → TIDAK ada yang dihapus" "V == 0" \
+  "$(echo "$TUTUP157" | jq '.ditutup')"
+cek "id sehat itu dilaporkan dilewati, bukan digagalkan diam-diam" "V == 1" \
+  "$(echo "$TUTUP157" | jq '.dilewati')"
+cek "baris sehat masih hidup sesudah dicoba dihapuskan" "V == 1" \
+  "$(api "$OWNER" GET "/produksi?branch_id=$ST157&per_page=500" | jq --arg f "$FK157" '[.rows[]|select(.faktur_id==$f)] | length | if . == 1 then 1 else 0 end')"
+cek "saldo cabang TIDAK bergeser sesudah percobaan itu" "abs(V - 15) < 0.001" "$(saldo157 "$ST157")"
+cek "penghapusan = keputusan manajemen: kasir → 403" "V == 403" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/penerimaan/anomali/tutup" -H "Authorization: Bearer $REISS105" -H 'Content-Type: application/json' -d "{\"ids\":[\"$SEHAT157\"]}")"
+cek "penutup menolak daftar id kosong → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/penerimaan/anomali/tutup" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"ids":[]}')"
 
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

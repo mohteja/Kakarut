@@ -25,6 +25,78 @@ tanpa akses repo server.
 
 ---
 
+## Rilis: Kiriman antar-cabang — "sudah kirim tapi tak sampai" ditutup
+
+> Belum di-merge ke production. Tidak ada migrasi DB.
+
+### 🔴 WAJIB — `POST /{mod}/konfirmasi/:fakturId` kini **409** untuk kiriman beralamat
+
+**Bug yang diperbaiki.** Satu baris kiriman membawa dua keterangan yang harus
+dibaca bersama: `branch_id` ("barang ini sekarang ada di mana") dan
+`tujuan_branch_id` ("alamatnya ke mana"). Layar Penerimaan cabang hanya
+menampilkan kiriman yang **keduanya sama**.
+
+Dari lima pintu kirim yang ada, satu — **Ubah Tahap** (`POST /{mod}/tahap`
+dengan `tujuan_branch_id`) — memindahkan `branch_id` **tanpa** memperbarui
+`tujuan_branch_id`. Kardusnya berpindah, alamatnya tertinggal. Akibatnya faktur
+berbunyi "Dikirim", tapi tak satu pun layar bisa menerimanya: `GET /penerimaan`
+cabang tujuan kosong, dan stok cabang tak pernah bertambah. Korban utamanya
+jalur **produksi** (alamatnya jadi kosong sama sekali). Barangnya hilang dari
+pembukuan tanpa satu pun galat.
+
+Sekarang keduanya selalu berpindah bersama. Konsekuensi yang menyentuh mobile:
+
+- Sesudah dikirim lewat `POST /{mod}/tahap` + `tujuan_branch_id`, baris itu
+  **muncul di `GET /penerimaan`** cabang tujuan dan berstatus `menunggu`.
+- `POST /{mod}/konfirmasi/:fakturId` **menolak** faktur beralamat dengan
+  **409** (dulu jalur beli lolos diam-diam, dan stoknya masuk tanpa ada yang
+  menerima). Selesaikan lewat `POST /penerimaan/:fakturId/terima`.
+  **Satu barang, satu pintu.**
+- Stok cabang tujuan baru bertambah **saat diterima**, bukan saat dikirim.
+
+**Yang perlu tim mobile lakukan:** kalau layar kalian memanggil
+`/{mod}/konfirmasi` untuk faktur yang punya `tujuan_branch_id`, ganti ke
+`/penerimaan/:fakturId/terima`. Tangani **409** dengan menunjukkan pesannya apa
+adanya — ia sudah menjelaskan harus lewat Penerimaan.
+
+### 🟢 BARU — `GET /penerimaan/anomali`: pendeteksi kiriman menggantung
+
+Res: `{ jumlah, qty_total, rows: [{id, faktur_id, tipe, status, qty, waktu,
+bahan, satuan, posisi_sekarang, dikirim_dari, umur_hari}] }`.
+
+Memuat barang yang **sudah berpindah cabang tapi tak bisa diterima siapa pun**.
+**Nilai sehatnya `jumlah: 0`** — apa pun di atas nol berarti ada barang yang
+hilang dari pembukuan dan perlu ditangani manusia.
+
+Yang **belum** dikirim (masih di cabang asalnya) sengaja tidak muncul: kalau ikut
+ditampilkan, cabang bisa "menerima" barang yang fisiknya masih di rak pengirim.
+Peran terkunci cabang hanya melihat yang mendarat di cabangnya sendiri — mereka
+justru yang paling berguna melihatnya, kardusnya ada di rak mereka.
+
+Cocok dijadikan lencana peringatan di layar Penerimaan; kalau `jumlah` 0
+(keadaan normal), jangan tampilkan apa pun.
+
+### 🟢 BARU — `POST /penerimaan/anomali/tutup`: hapuskan kiriman yang terlanjur menggantung
+
+**[owner/admin]** — req `{ ids: uuid[] (1..500), alasan? }`, res `{ ditutup, dilewati }`.
+
+Untuk barang yang cabangnya **sudah dikompensasi manual** (Stok Awal, opname,
+atau faktur manual). Barang itu **tidak boleh diterima** lewat
+`/penerimaan/:id/terima`: penerimaan menyetel `waktu = now()` yang jatuh
+**sesudah** garis Stok Awal, jadi qty-nya ditumpuk di atas saldo pembuka —
+terhitung dua kali. Jalan yang benar adalah dihapuskan.
+
+Soft-delete → bisa dipulihkan dari Tempat Sampah kalau ternyata salah.
+
+**Yang perlu diketahui saat memakainya:** daftar `ids` **tidak dipercaya
+server**. Predikat menggantung dihitung ulang di sana dengan definisi yang sama
+persis dengan `GET /anomali`, dan `ids` hanya dipakai sebagai irisan. Jadi id
+baris sehat tidak akan menghapus apa pun — ia dilaporkan di `dilewati`, bukan
+menggagalkan seluruh permintaan. Kalau `ditutup` lebih kecil dari yang kalian
+kirim, itu wajar: daftarnya basi, muat ulang `/anomali`.
+
+---
+
 ## Rilis: Tombol 🥡 kini memindahkan UANG dan STOK
 
 > Sudah di-merge ke production. Tidak ada migrasi DB. **Mengubah perilaku lama**

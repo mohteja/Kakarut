@@ -55,6 +55,7 @@ import {
   type BarisProduksiSelesai,
 } from "./konsumsi";
 import { AKSI_TAHAP_LOG, catatLogFaktur, rpLog } from "./log";
+import { kolomBarisPindah, kolomPindahCabang } from "./pindah";
 import { nomorUntukRefs, terbitkanNomor } from "../dokumen/nomor";
 import {
   pastikanCabang,
@@ -1004,15 +1005,17 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         // (>= menunggu). Pindah dini (mis. ke 'dikerjakan') membuat konsumsi
         // bahan resep tercatat di cabang yang salah — abaikan tujuannya.
         const bolehPindah = target >= URUTAN_TAHAP.menunggu;
-        // dari_branch_id = jejak cabang PENGIRIM (visibilitas: CK tetap melihat
-        // faktur terkirim di daftarnya) — pertahankan asal pertama bila sudah ada
-        const pindah =
-          bolehPindah && tujuanBranch
-            ? {
-                branchId: tujuanBranch,
-                dariBranchId: sql`COALESCE(${productions.dariBranchId}, ${productions.branchId})`,
-              }
-            : {};
+        /**
+         * Lewat `kolomPindahCabang`, JANGAN dirakit di sini.
+         *
+         * Dulu blok ini hanya mengisi `branchId` + `dariBranchId` dan LUPA
+         * `tujuanBranchId`. Akibatnya barang berpindah ke cabang tapi
+         * alamatnya tertinggal (kosong untuk produksi, cabang lain untuk
+         * beli), sehingga gerbang Penerimaan tak pernah mengenalinya:
+         * faktur berbunyi "Dikirim" tapi tak ada layar mana pun yang bisa
+         * menerimanya, dan stok cabang tak pernah bertambah.
+         */
+        const pindah = bolehPindah && tujuanBranch ? kolomPindahCabang(tujuanBranch) : {};
 
         // RAK DEFAULT per bahan PER CABANG: saat barang TIBA/DISIMPAN
         // (>= menunggu) di cabang tujuan, otomatis diletakkan di rak yang
@@ -1226,7 +1229,6 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
                 .insert(productions)
                 .values({
                 companyId: b.companyId,
-                branchId: tujuanBranch ?? b.branchId,
                 ingredientId: b.ingredientId,
                 qty: item.qty,
                 tipe: b.tipe,
@@ -1244,7 +1246,27 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
                 isBatch: b.isBatch,
                 catatan: b.catatan,
                 userId: b.userId,
-                tujuanBranchId: b.tujuanBranchId,
+                /**
+                 * Baris hasil "maju sebagian" adalah baris BARU, jadi seluruh
+                 * penanda induknya harus ikut disalin. Empat di antaranya dulu
+                 * tertinggal, masing-masing dengan akibatnya sendiri:
+                 *
+                 * - `untukBranchId` → tombol "Kirim hasil ke cabang" hilang,
+                 *   sisa barang jadi mengendap selamanya di CK;
+                 * - `asalBranchId`  → baris pecahan sebuah transfer BERHENTI
+                 *   mengurangi saldo CK (kebocoran saldo yang senyap);
+                 * - `bahanProduksi` → belanja bahan mentah tercampur dengan
+                 *   belanja produk jadi;
+                 * - `dariBranchId`  → pendeteksi kiriman menggantung jadi buta.
+                 */
+                untukBranchId: b.untukBranchId,
+                asalBranchId: b.asalBranchId,
+                bahanProduksi: b.bahanProduksi,
+                // Pindah cabang: alamat WAJIB ikut lokasi (lihat pindah.ts).
+                // Tanpa tujuan/tak boleh pindah → tetap di cabangnya sendiri.
+                ...(bolehPindah && tujuanBranch
+                  ? kolomBarisPindah(tujuanBranch, b.branchId)
+                  : { branchId: b.branchId, tujuanBranchId: b.tujuanBranchId, dariBranchId: b.dariBranchId }),
                 workerId: b.workerId ?? (selfAssign ? auth.sub : null),
                 prodDate: b.prodDate,
                 // exp lot bagian yang maju; sisa split tetap exp lama (belum masuk)
@@ -1526,9 +1548,9 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         await tx
           .update(productions)
           .set({
-            branchId: tujuanId,
-            // jejak cabang pengirim — CK tetap melihat faktur terkirim di daftar
-            dariBranchId: sql`COALESCE(${productions.dariBranchId}, ${productions.branchId})`,
+            // Jalur ini SUDAH benar sejak awal; disatukan ke helper supaya tak
+            // ada lagi tempat kedua yang merakit perpindahan dengan tangan.
+            ...kolomPindahCabang(tujuanId),
             // tempat penyimpanan CK tidak berlaku di cabang tujuan → set ke
             // pilihan di cabang (bila ada) atau kosongkan (hindari bocor gudang CK)
             storageLocationId: tujuanStorage,
@@ -1826,7 +1848,15 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
       );
       return c.json({ rows, total });
     })
-    /** Konfirmasi "ya, ada": barang benar-benar diterima → stok terhitung. */
+    /**
+     * Konfirmasi "ya, ada": barang benar-benar diterima → stok terhitung.
+     *
+     * PINTU UNTUK BARANG YANG TIDAK KE MANA-MANA. Faktur yang PUNYA ALAMAT
+     * (`tujuan_branch_id`) sengaja tidak bisa lewat sini: barang berpindah
+     * cabang harus DITERIMA orang di cabang tujuan lewat Penerimaan, bukan
+     * dituntaskan sepihak oleh pengirimnya. Itulah pengaman "harus ada
+     * penerimaan dulu" — satu barang, satu pintu.
+     */
     .post("/konfirmasi/:fakturId", async (c) => {
       const auth = c.get("auth");
       const conds = [
@@ -1834,9 +1864,8 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         eq(productions.fakturId, c.req.param("fakturId")),
         eq(productions.tipe, tipe),
         eq(productions.status, "menunggu"),
-        // Work-order CK (punya cabang tujuan) TIDAK dikonfirmasi di sini —
-        // dikirim ke cabang lalu diterima lewat Penerimaan cabang. Cegah stok
-        // mendarat di CK, bukan di store tujuan.
+        // Barang beralamat (work-order CK maupun belanja yang dikirim ke
+        // cabang) TIDAK dikonfirmasi di sini — lihat blok dokumentasi di atas.
         isNull(productions.tujuanBranchId),
       ];
       if (terikatCabang(auth.role) && auth.branch_id) {
@@ -1853,6 +1882,29 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         .where(and(...conds))
         .returning();
       if (rows.length === 0) {
+        // Bedakan "tidak ada apa-apa" dari "ADA, tapi ini kiriman beralamat".
+        // Tanpa pembedaan ini penolakannya terbaca seperti faktur hilang, dan
+        // orang akan mengira datanya rusak padahal pengamannya sedang bekerja.
+        const beralamat = await db
+          .select({ id: productions.id })
+          .from(productions)
+          .where(
+            and(
+              eq(productions.companyId, auth.company_id!),
+              eq(productions.fakturId, c.req.param("fakturId")),
+              eq(productions.tipe, tipe),
+              eq(productions.status, "menunggu"),
+              isNull(productions.deletedAt),
+              sql`${productions.tujuanBranchId} IS NOT NULL`,
+            ),
+          )
+          .limit(1);
+        if (beralamat.length > 0) {
+          throw new HTTPException(409, {
+            message:
+              "Kiriman ini beralamat ke cabang — selesaikan lewat Penerimaan di cabang tujuan, bukan konfirmasi di sini",
+          });
+        }
         throw new HTTPException(404, {
           message: "Faktur tidak ditemukan atau sudah dikonfirmasi",
         });
