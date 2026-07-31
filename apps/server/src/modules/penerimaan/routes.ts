@@ -1,5 +1,5 @@
 import { zValidator } from "@hono/zod-validator";
-import { and, asc, eq, inArray, isNull, or } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { Hono, type Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
@@ -147,6 +147,87 @@ export const penerimaanRoutes = new Hono<AppEnv>()
       return { ...r, qty_teks: t.teks, qty_setara: t.setara, qty_dipesan_teks: d?.teks ?? null };
     });
     return c.json({ rows: rowsTeks });
+  })
+  /**
+   * PENDETEKSI KIRIMAN MENGGANTUNG — nilai benarnya NOL.
+   *
+   * Sebuah baris yang SUDAH BERPINDAH CABANG tapi TIDAK lolos `KIRIMAN_MASUK`
+   * adalah barang yang dikirim ke cabang tapi tak bisa diterima siapa pun:
+   * tak ada tombol Terima, stok tak pernah bertambah, dan tak ada satu pun
+   * layar yang menampilkannya. Barang hilang dari pembukuan tanpa galat.
+   *
+   * Yang PALING sulit di sini adalah membedakan dua keadaan yang bentuk
+   * datanya mirip:
+   *
+   *   (a) BELUM dikirim — masih di CK menunggu tombol Kirim. SAH, jangan
+   *       diusik; memunculkannya di Penerimaan membuat cabang bisa "menerima"
+   *       barang yang masih di rak CK.
+   *   (b) SUDAH dikirim tapi menggantung — INI korbannya.
+   *
+   * Pembedanya: DI MANA FAKTUR ITU LAHIR. Diambil berjenjang karena tak satu
+   * pun sumber lengkap sendirian:
+   *   1. `dari_branch_id` baris itu (diisi saat pindah — paling andal),
+   *   2. `dari_branch_id` baris saudara sefaktur (baris hasil "maju sebagian"
+   *      dulu tak kebagian kolom ini),
+   *   3. entri `faktur_logs` paling awal (ditulis saat faktur dibuat).
+   *
+   * Baris berstatus selesai (`dikonfirmasi`) sengaja di luar cakupan: stoknya
+   * sudah masuk, jadi tak ada yang hilang.
+   */
+  .get("/anomali", async (c) => {
+    const auth = c.get("auth");
+    /**
+     * Peran terkunci cabang (kasir, tim, kitchen, bar) hanya melihat barang
+     * yang MENDARAT DI CABANGNYA — aturan yang sama dengan daftar Penerimaan
+     * di atas. Mereka justru orang yang paling berguna melihatnya: kardusnya
+     * ada di rak mereka, tinggal dicari. Owner/admin melihat semuanya.
+     */
+    const kunciCabang =
+      terikatCabang(auth.role) && auth.branch_id
+        ? sql`AND g.branch_id = ${auth.branch_id}`
+        : sql``;
+    const rows = await db.execute(sql`
+      WITH g AS (
+        SELECT pr.id, pr.faktur_id, pr.tipe, pr.status, pr.qty, pr.waktu,
+               pr.branch_id, pr.tujuan_branch_id, pr.ingredient_id,
+               COALESCE(
+                 ((pr.tipe = 'beli' AND (pr.tujuan_branch_id IS NULL OR pr.tujuan_branch_id = pr.branch_id))
+                  OR (pr.tipe = 'produksi' AND pr.tujuan_branch_id = pr.branch_id)),
+                 false
+               ) AS lolos_gerbang,
+               COALESCE(
+                 pr.dari_branch_id,
+                 (SELECT p2.dari_branch_id FROM productions p2
+                   WHERE p2.faktur_id = pr.faktur_id AND p2.dari_branch_id IS NOT NULL LIMIT 1),
+                 (SELECT fl.branch_id FROM faktur_logs fl
+                   WHERE fl.faktur_id = pr.faktur_id ORDER BY fl.waktu ASC LIMIT 1)
+               ) AS asal_faktur
+        FROM productions pr
+        WHERE pr.company_id = ${auth.company_id!}
+          AND pr.status IN ('menunggu', 'ditolak')
+          AND pr.deleted_at IS NULL
+      )
+      SELECT g.id, g.faktur_id, g.tipe, g.status, g.qty, g.waktu,
+             i.nama AS bahan, i.satuan,
+             bp.nama AS posisi_sekarang,
+             ba.nama AS dikirim_dari,
+             EXTRACT(DAY FROM now() - g.waktu)::int AS umur_hari
+      FROM g
+      JOIN ingredients i ON i.id = g.ingredient_id
+      LEFT JOIN branches bp ON bp.id = g.branch_id
+      LEFT JOIN branches ba ON ba.id = g.asal_faktur
+      WHERE g.lolos_gerbang = false
+        AND g.asal_faktur IS NOT NULL
+        AND g.asal_faktur <> g.branch_id
+        ${kunciCabang}
+      ORDER BY g.waktu ASC
+    `);
+    const daftar = rows.rows as Record<string, unknown>[];
+    return c.json({
+      jumlah: daftar.length,
+      qty_total: daftar.reduce((t, r) => t + Number(r.qty ?? 0), 0),
+      rows: daftar,
+    });
   })
   /** Terima SEMUA barang kiriman → masuk stok. */
   .post("/:fakturId/terima", async (c) => {
