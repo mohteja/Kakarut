@@ -4,6 +4,7 @@ import type { KonfirmasiStatus } from "@kakarut/shared";
 import {
   Card,
   ErrorText,
+  Modal,
   PageTitle,
   Spinner,
   btnPrimary,
@@ -14,8 +15,10 @@ import {
 } from "../../components/ui";
 import type { JenisPengadaan } from "@kakarut/shared";
 import { useCabangData } from "../../context/BranchContext";
+import { useAuth } from "../../context/AuthContext";
 import { CabangDataBar } from "../../components/CabangDataBar";
 import { api } from "../../lib/api";
+import { KUNCI_ANOMALI, useKirimanMenggantung } from "../../lib/menggantung";
 import { formatAngka, formatRupiah, formatTanggalRingkas, formatWaktu } from "../../lib/format";
 
 interface PenerimaanRow {
@@ -172,6 +175,8 @@ export function PenerimaanPage() {
       </div>
 
       <ErrorText error={terima.error || terimaSebagian.error || tolak.error || batalTolak.error} />
+
+      <PanelMenggantung />
 
       <h2 className="mb-2 text-lg font-semibold text-stone-700">
         🚚 Menunggu penerimaan{" "}
@@ -389,5 +394,163 @@ export function PenerimaanPage() {
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * KIRIMAN MENGGANTUNG — barang yang fakturnya berbunyi "Dikirim" tapi tak
+ * pernah sampai ke layar Penerimaan siapa pun, jadi stoknya tak pernah masuk.
+ *
+ * Panel ini SENGAJA hanya muncul saat ada masalah. Keadaan sehat adalah nol,
+ * dan spanduk peringatan yang selalu nongol setiap hari akan berhenti dibaca
+ * persis pada hari ia benar-benar penting.
+ */
+function PanelMenggantung() {
+  const { auth } = useAuth();
+  const queryClient = useQueryClient();
+  const { data, jumlah } = useKirimanMenggantung();
+  const [pilih, setPilih] = useState<Set<string>>(new Set());
+  const [konfirmasi, setKonfirmasi] = useState(false);
+  const [alasan, setAlasan] = useState("");
+
+  const bolehHapus = auth?.user.role === "owner" || auth?.user.role === "admin";
+
+  const tutup = useMutation({
+    mutationFn: () =>
+      api<{ ditutup: number; dilewati: number }>("/penerimaan/anomali/tutup", {
+        method: "POST",
+        body: { ids: [...pilih], alasan: alasan.trim() || null },
+      }),
+    onSuccess: () => {
+      for (const key of [...KUNCI_ANOMALI, "penerimaan", "/pembelian", "/produksi", "stok"]) {
+        queryClient.invalidateQueries({ queryKey: [key] });
+      }
+      setPilih(new Set());
+      setKonfirmasi(false);
+      setAlasan("");
+    },
+  });
+
+  if (jumlah === 0) return null;
+  const rows = data?.rows ?? [];
+
+  function toggle(id: string) {
+    setPilih((s) => {
+      const n = new Set(s);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  }
+
+  return (
+    <Card className="mb-6 overflow-hidden border-red-300 bg-red-50/40">
+      <div className="border-b border-red-200 px-4 py-3">
+        <div className="font-semibold text-red-800">
+          ⚠️ {jumlah} kiriman tidak sampai — stok tidak pernah masuk
+        </div>
+        <p className="mt-1 text-sm text-red-700">
+          Barang ini <b>sudah dikirim</b> menurut fakturnya, tapi tak pernah muncul di layar
+          Penerimaan mana pun sehingga stok cabang tak bertambah. Penyebabnya sudah diperbaiki
+          untuk pengiriman baru; yang di bawah ini sisa dari sebelumnya.
+        </p>
+        <p className="mt-2 text-sm text-red-700">
+          Kalau stoknya <b>sudah dicatat manual</b> (Stok Awal / opname / faktur manual),
+          <b> hapuskan</b> — menerimanya justru menghitung barang yang sama dua kali. Yang
+          dihapuskan masuk <b>Tempat Sampah</b> dan masih bisa dipulihkan.
+        </p>
+      </div>
+
+      <ul className="divide-y divide-red-100 text-sm">
+        {rows.map((r) => (
+          <li key={r.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2">
+            {bolehHapus && (
+              <input
+                type="checkbox"
+                className="h-4 w-4 accent-red-600"
+                checked={pilih.has(r.id)}
+                onChange={() => toggle(r.id)}
+                aria-label={`Pilih ${r.bahan}`}
+              />
+            )}
+            <span className="font-medium text-stone-800">{r.bahan}</span>
+            <span className="text-stone-600">
+              {formatAngka(r.qty)} {r.satuan}
+            </span>
+            {r.nomor && (
+              <span className="rounded bg-white px-1.5 py-0.5 font-mono text-xs font-bold text-orange-800">
+                {r.nomor}
+              </span>
+            )}
+            <span className="text-xs text-stone-500">
+              {r.tipe === "produksi" ? "🏭" : "🛒"} {r.dikirim_dari ?? "?"} →{" "}
+              {r.posisi_sekarang ?? "?"}
+            </span>
+            <span className="ml-auto text-xs text-red-700">
+              menggantung {r.umur_hari} hari
+            </span>
+          </li>
+        ))}
+      </ul>
+
+      {bolehHapus && (
+        <div className="flex flex-wrap items-center gap-2 border-t border-red-200 px-4 py-3">
+          <button
+            type="button"
+            className={btnSecondary}
+            onClick={() => setPilih(new Set(rows.map((r) => r.id)))}
+          >
+            Pilih semua
+          </button>
+          <button
+            type="button"
+            className={`${btnPrimary} bg-red-600 hover:bg-red-700`}
+            disabled={pilih.size === 0}
+            onClick={() => setKonfirmasi(true)}
+          >
+            Hapuskan {pilih.size > 0 ? `(${pilih.size})` : ""}
+          </button>
+          <span className="text-xs text-stone-500">
+            Hanya owner/admin. Bisa dipulihkan dari Tempat Sampah.
+          </span>
+        </div>
+      )}
+
+      <ErrorText error={tutup.error} />
+
+      <Modal
+        open={konfirmasi}
+        onClose={() => setKonfirmasi(false)}
+        title="Hapuskan kiriman yang tidak sampai?"
+      >
+        <p className="text-sm text-stone-600">
+          <b>{pilih.size} baris</b> akan dihapuskan dari pembukuan dan masuk Tempat Sampah.
+          Stok <b>tidak</b> akan bertambah — itu memang tujuannya: barangnya sudah dicatat
+          lewat jalur lain, jadi menerimanya akan menghitungnya dua kali.
+        </p>
+        <label className="mt-3 block text-sm font-medium text-stone-700">
+          Alasan (opsional, tersimpan di riwayat faktur)
+          <input
+            className={inputClass}
+            value={alasan}
+            onChange={(e) => setAlasan(e.target.value)}
+            placeholder="mis. sudah dicatat lewat Stok Awal"
+          />
+        </label>
+        <div className="mt-4 flex justify-end gap-2">
+          <button type="button" className={btnSecondary} onClick={() => setKonfirmasi(false)}>
+            Batal
+          </button>
+          <button
+            type="button"
+            className={`${btnPrimary} bg-red-600 hover:bg-red-700`}
+            disabled={tutup.isPending}
+            onClick={() => tutup.mutate()}
+          >
+            {tutup.isPending ? "Menghapuskan…" : "Ya, hapuskan"}
+          </button>
+        </div>
+      </Modal>
+    </Card>
   );
 }

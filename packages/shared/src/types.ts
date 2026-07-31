@@ -2250,6 +2250,47 @@ export interface BeliPerlengkapanRow {
   permintaan_aktif: boolean;
 }
 
+/**
+ * KIRIMAN MENGGANTUNG — barang yang sudah berpindah cabang tapi tak bisa
+ * diterima siapa pun: tak ada tombol Terima, stok tak pernah bertambah, dan
+ * tak ada satu pun layar yang menampilkannya. Fakturnya berbunyi "Dikirim"
+ * padahal barangnya hilang dari pembukuan.
+ *
+ * Jumlah yang BENAR adalah NOL. Apa pun di atas nol berarti ada barang yang
+ * perlu ditangani manusia — bukan sekadar angka untuk dipajang.
+ */
+export interface KirimanMenggantung {
+  id: string;
+  faktur_id: string;
+  /** nomor faktur (PB-/PR-) supaya bisa dicocokkan dgn kartu Beli/Produksi */
+  nomor: string | null;
+  tipe: JenisPengadaan;
+  status: KonfirmasiStatus;
+  qty: number;
+  waktu: string;
+  bahan: string;
+  satuan: string;
+  /** cabang tempat barangnya tercatat sekarang */
+  posisi_sekarang: string | null;
+  /** cabang yang mengirimnya */
+  dikirim_dari: string | null;
+  /** sudah berapa hari menggantung — makin tua makin gawat */
+  umur_hari: number;
+}
+
+/** Ringkasan pendeteksi kiriman menggantung; `jumlah: 0` = sehat. */
+export interface AnomaliKiriman {
+  jumlah: number;
+  qty_total: number;
+  rows: KirimanMenggantung[];
+}
+
+/** Hasil penghapusan kiriman menggantung (id yang tak menggantung dilewati). */
+export interface TutupAnomaliHasil {
+  ditutup: number;
+  dilewati: number;
+}
+
 /** Kiriman perlengkapan CK → cabang (stok pindah saat cabang menerima). */
 export interface KirimanPerlengkapanDto {
   id: string;
