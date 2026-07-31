@@ -1506,10 +1506,38 @@ cek "PENGAMAN: konfirmasi sepihak kiriman beralamat → 409" "V == 409" \
 cek "ditolak konfirmasi → saldo cabang tujuan BELUM bergerak" "abs(V - $S46_0) < 0.001" \
   "$(api "$OWNER" GET "/stok?branch_id=$CB46_ID" | jq --arg i "$ING42A" '([.[] | select(.ingredient_id==$i)][0].saldo) // 0')"
 
+# sebelum diterima, faktur ini BELUM boleh ada di riwayat penerimaan
+cek "belum diterima: belum tercatat di riwayat penerimaan" "V == 0" \
+  "$(api "$OWNER" GET "/penerimaan/riwayat?branch_id=$CB46_ID" | jq --arg f "$FK46_ID" '[.rows[]|select(.faktur_id==$f)] | length')"
+
 # baru sesudah DITERIMA di cabang → stok masuk di cabang TUJUAN
 api "$OWNER" POST "/penerimaan/$FK46_ID/terima" > /dev/null
 S46_1=$(api "$OWNER" GET "/stok?branch_id=$CB46_ID" | jq --arg i "$ING42A" '([.[] | select(.ingredient_id==$i)][0].saldo) // 0')
 cek "diterima di cabang → saldo bertambah di cabang tujuan (+10)" "abs(V - 10) < 0.001" "$(python3 -c "print($S46_1 - $S46_0)")"
+
+# RIWAYAT PENERIMAAN — jejak yang dulu hilang begitu kiriman diterima.
+R46=$(api "$OWNER" GET "/penerimaan/riwayat?branch_id=$CB46_ID" | jq --arg f "$FK46_ID" '[.rows[]|select(.faktur_id==$f)][0]')
+cek "sesudah diterima: MASUK riwayat penerimaan (per faktur)" "V == 1" \
+  "$(echo "$R46" | jq '(. != null) | if . then 1 else 0 end')"
+cek "riwayat: hasilnya 'diterima' (utuh, tak ada yang kurang)" "V == 1" \
+  "$(echo "$R46" | jq '(.hasil == "diterima") | if . then 1 else 0 end')"
+cek "riwayat: mencatat SIAPA yang menerima" "V == 1" \
+  "$(echo "$R46" | jq '((.oleh | type) == "string") | if . then 1 else 0 end')"
+cek "riwayat: satu entri memuat barangnya (1 item, qty 10)" "V == 1" \
+  "$(echo "$R46" | jq '((.jumlah_item == 1) and (.items[0].qty == 10)) | if . then 1 else 0 end')"
+cek "riwayat: membawa nomor faktur utk dicocokkan" "V == 1" \
+  "$(echo "$R46" | jq '((.nomor | type) == "string") | if . then 1 else 0 end')"
+# Baris SISA faktur yang sama (ID46B, masih 'dikerjakan') TIDAK boleh ikut —
+# riwayat hanya memuat yang benar-benar sudah diputuskan orang cabang. Itu
+# sudah dibuktikan oleh jumlah_item == 1 di atas.
+cek "riwayat urut dari penerimaan TERBARU" "V == 1" \
+  "$(api "$OWNER" GET "/penerimaan/riwayat?branch_id=all" | jq '([.rows[].waktu] | . == (sort | reverse)) | if . then 1 else 0 end')"
+cek "riwayat: halaman & total terisi" "V == 1" \
+  "$(api "$OWNER" GET "/penerimaan/riwayat?branch_id=$CB46_ID" | jq '((.page == 1) and (.total >= 1) and (.per_page > 0)) | if . then 1 else 0 end')"
+cek "riwayat: saringan tanggal jauh di masa lalu → kosong" "V == 0" \
+  "$(api "$OWNER" GET "/penerimaan/riwayat?branch_id=$CB46_ID&dari=2000-01-01&sampai=2000-12-31" | jq '.rows | length')"
+cek "riwayat boleh dibaca peran terkunci cabang (kasir) → 200" "V == 200" \
+  "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/penerimaan/riwayat" -H "Authorization: Bearer $KASIR")"
 
 # penjaga: tempat bukan milik cabang tujuan → 400
 cek "tempat bukan milik cabang tujuan → 400" "V == 400" \
@@ -5520,7 +5548,10 @@ echo "== 143. Pengajuan cuti/libur + rekap absen bulanan =="
 # Sebelum ini, ketidakhadiran = tidak ada baris di attendances — tak terbedakan
 # antara alpa, cuti, dan libur yang memang disepakati. Pengajuan DISETUJUI-lah
 # yang mengubah sebuah tanggal dari "alpa" jadi "cuti"/"libur" di rekap.
-BULAN143=$(date +%Y-%m)
+# Zona waktu WAJIB sama dengan server (Asia/Jakarta). Dengan `date` polos,
+# skrip memakai UTC sementara rekap memakai WIB — dari jam 00:00–07:00 WIB
+# keduanya berbeda BULAN, dan seluruh blok ini gagal tanpa ada yang rusak.
+BULAN143=$(TZ=Asia/Jakarta date +%Y-%m)
 M143="$BULAN143-05"; S143="$BULAN143-06"
 
 cek "guard: tanpa token → 401" "V == 401" \
@@ -5574,7 +5605,7 @@ cek "rekap: tanggal cuti TIDAK dihitung tidak hadir" "V == 1" \
   "$(echo "$RK143" | jq '(.hari) as $h | [.rows[]|select((.hadir + .tidak_hadir + .cuti + .libur) > $h)]|length==0|if . then 1 else 0 end')"
 # Tanggal masa depan tak pernah dinilai — jendela hitung berhenti di hari ini.
 cek "rekap: tanggal setelah hari ini berstatus 'kosong'" "V == 1" \
-  "$(echo "$RK143" | jq --arg t "$(date -d '+3 days' +%Y-%m-%d 2>/dev/null || date +%Y-%m-%d)" '[.rows[]|.harian[]|select(.tanggal==$t and .status=="alpa")]|length==0|if . then 1 else 0 end')"
+  "$(echo "$RK143" | jq --arg t "$(TZ=Asia/Jakarta date -d '+3 days' +%Y-%m-%d 2>/dev/null || TZ=Asia/Jakarta date +%Y-%m-%d)" '[.rows[]|.harian[]|select(.tanggal==$t and .status=="alpa")]|length==0|if . then 1 else 0 end')"
 cek "rekap: bulan tak valid → jatuh ke bulan berjalan" "V == 1" \
   "$(api "$OWNER" GET "/absensi/rekap?bulan=ngawur" | jq --arg b "$BULAN143" '.bulan==$b|if . then 1 else 0 end')"
 

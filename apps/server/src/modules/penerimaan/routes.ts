@@ -1,5 +1,6 @@
 import { zValidator } from "@hono/zod-validator";
-import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, lte, or, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { Hono, type Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
@@ -12,7 +13,11 @@ import {
   productions,
   storageLocations,
   suppliers,
+  users,
 } from "../../db/schema";
+
+/** penerima kiriman — siapa yang menekan Terima/Tolak */
+const penerima = alias(users, "penerima_kiriman");
 import { resolveBranchId, terikatCabang, type AppEnv } from "../../middleware/auth";
 import { catatLogFaktur } from "../produksi/log";
 import { autoFileRakCabang } from "../penyimpanan/autoFile";
@@ -190,6 +195,178 @@ export const penerimaanRoutes = new Hono<AppEnv>()
       return { ...r, qty_teks: t.teks, qty_setara: t.setara, qty_dipesan_teks: d?.teks ?? null };
     });
     return c.json({ rows: rowsTeks });
+  })
+  /**
+   * RIWAYAT PENERIMAAN — PER FAKTUR.
+   *
+   * Daftar di atas sengaja hanya memuat yang BELUM selesai. Akibatnya begitu
+   * sebuah kiriman diterima, kartunya lenyap tanpa jejak: tak ada catatan
+   * kapan diterima, oleh siapa, dan berapa yang benar-benar masuk dibanding
+   * yang dikirim. Padahal justru itu yang dicari saat stok tak cocok dan orang
+   * bertanya "kiriman kemarin jadi diterima berapa?".
+   *
+   * Dikelompokkan PER FAKTUR, bukan per baris barang, karena satu kiriman
+   * datang sebagai satu surat jalan — itu satuan yang dipakai orang gudang
+   * saat mencocokkan, dan satuan yang sama dengan tampilan Menunggu di atas.
+   *
+   * Halaman dipotong per FAKTUR (bukan per baris): memotong di tengah faktur
+   * akan menampilkan kiriman yang isinya separuh, dan orang akan mengira
+   * sisanya tidak pernah diterima.
+   */
+  .get("/riwayat", async (c) => {
+    const auth = c.get("auth");
+    const semuaCabang = !terikatCabang(auth.role) && c.req.query("branch_id") === "all";
+    const branchId = semuaCabang ? null : await resolveBranchId(c);
+    const perPage = Math.min(Math.max(Number(c.req.query("per_page")) || 20, 1), 100);
+    const page = Math.max(Number(c.req.query("page")) || 1, 1);
+    const dari = c.req.query("dari");
+    const sampai = c.req.query("sampai");
+
+    const dasar = and(
+      eq(productions.companyId, auth.company_id!),
+      ...(branchId ? [eq(productions.branchId, branchId)] : []),
+      KIRIMAN_MASUK,
+      // hanya yang SUDAH diputuskan orang cabang — "menunggu" ada di daftar atas
+      inArray(productions.status, ["dikonfirmasi", "ditolak"]),
+      isNull(productions.deletedAt),
+      // Disaring pada SAAT DIPUTUSKAN, bukan `waktu` (waktu barang masuk stok).
+      // Orang mencari "penerimaan minggu lalu" berdasarkan kapan mereka
+      // menerimanya, bukan kapan fakturnya dibuat.
+      ...(dari ? [gte(productions.confirmedAt, new Date(`${dari}T00:00:00Z`))] : []),
+      ...(sampai ? [lte(productions.confirmedAt, new Date(`${sampai}T23:59:59.999Z`))] : []),
+      // baris tanpa jejak keputusan bukan hasil penerimaan (mis. CK-lokal yang
+      // auto-konfirmasi) — memasukkannya membuat riwayat penuh hal yang tak
+      // pernah diterima siapa pun
+      sql`${productions.confirmedAt} IS NOT NULL`,
+      sql`${productions.fakturId} IS NOT NULL`,
+    );
+
+    // 1) faktur mana yang masuk halaman ini — diurut dari penerimaan terbaru
+    const halaman = await db
+      .select({
+        fakturId: productions.fakturId,
+        terakhir: sql<string>`MAX(${productions.confirmedAt})`.as("terakhir"),
+      })
+      .from(productions)
+      .where(dasar)
+      .groupBy(productions.fakturId)
+      .orderBy(desc(sql`MAX(${productions.confirmedAt})`))
+      .limit(perPage)
+      .offset((page - 1) * perPage);
+
+    const [{ total } = { total: 0 }] = await db
+      .select({ total: sql<number>`COUNT(DISTINCT ${productions.fakturId})::int` })
+      .from(productions)
+      .where(dasar);
+
+    const ids = halaman.map((h) => h.fakturId!).filter(Boolean);
+    if (ids.length === 0) return c.json({ rows: [], total, page, per_page: perPage });
+
+    // 2) seluruh baris milik faktur-faktur itu — sekali jalan, bukan N+1
+    const baris = await db
+      .select({
+        id: productions.id,
+        faktur_id: productions.fakturId,
+        bahan: ingredients.nama,
+        isi: ingredients.isi,
+        satuan: ingredients.satuan,
+        satuan_beli: ingredients.satuanBeli,
+        qty: productions.qty,
+        qty_dipesan: productions.qtyDipesan,
+        total_harga: productions.totalHarga,
+        status: productions.status,
+        alasan_tolak: productions.alasanTolak,
+        tempat: storageLocations.nama,
+        waktu: productions.confirmedAt,
+        oleh: penerima.nama,
+        jalur: productions.tipe,
+        cabang: branches.nama,
+        supplier: suppliers.nama,
+        no_faktur: productions.noFaktur,
+        nomor: dokumenNomor.nomorTeks,
+      })
+      .from(productions)
+      .innerJoin(ingredients, eq(productions.ingredientId, ingredients.id))
+      .leftJoin(penerima, eq(productions.confirmedBy, penerima.id))
+      .leftJoin(storageLocations, eq(productions.storageLocationId, storageLocations.id))
+      .leftJoin(branches, eq(productions.branchId, branches.id))
+      .leftJoin(suppliers, eq(productions.supplierId, suppliers.id))
+      .leftJoin(
+        dokumenNomor,
+        and(
+          eq(dokumenNomor.companyId, productions.companyId),
+          eq(dokumenNomor.refId, productions.fakturId),
+        ),
+      )
+      .where(and(dasar, inArray(productions.fakturId, ids)))
+      .orderBy(asc(productions.waktu), asc(productions.id));
+
+    const byFaktur = new Map<string, typeof baris>();
+    for (const b of baris) {
+      const kump = byFaktur.get(b.faktur_id!) ?? [];
+      kump.push(b);
+      byFaktur.set(b.faktur_id!, kump);
+    }
+
+    const rows = ids.map((fakturId) => {
+      const items = byFaktur.get(fakturId) ?? [];
+      const p = items[0];
+      const ditolak = items.filter((i) => i.status === "ditolak");
+      const diterima = items.filter((i) => i.status === "dikonfirmasi");
+      /**
+       * "Kurang" = qty yang diterima lebih kecil dari yang dikirim. `qty_dipesan`
+       * baru terisi saat seseorang memakai Terima Sebagian; bila kosong berarti
+       * diterima apa adanya, jadi jangan dianggap kurang.
+       */
+      const adaKurang = diterima.some(
+        (i) => i.qty_dipesan != null && i.qty < i.qty_dipesan - 1e-9,
+      );
+      const hasil =
+        diterima.length === 0 ? "ditolak" : ditolak.length > 0 || adaKurang ? "sebagian" : "diterima";
+      return {
+        faktur_id: fakturId,
+        nomor: p?.nomor ?? null,
+        no_faktur: p?.no_faktur ?? null,
+        jalur: p?.jalur ?? "beli",
+        cabang: p?.cabang ?? null,
+        supplier: p?.supplier ?? null,
+        // waktu keputusan TERAKHIR — sebuah faktur bisa diterima bertahap
+        waktu: items.reduce<string | null>(
+          (t, i) => (i.waktu && (!t || String(i.waktu) > t) ? String(i.waktu) : t),
+          null,
+        ),
+        oleh: items.find((i) => i.oleh)?.oleh ?? null,
+        alasan_tolak: items.find((i) => i.alasan_tolak)?.alasan_tolak ?? null,
+        hasil,
+        jumlah_item: items.length,
+        items: items.map((i) => {
+          const t = qtyTeks({ qty: i.qty, satuan: i.satuan, isi: i.isi, satuanBeli: i.satuan_beli });
+          const d =
+            i.qty_dipesan == null
+              ? null
+              : qtyTeks({
+                  qty: i.qty_dipesan,
+                  satuan: i.satuan,
+                  isi: i.isi,
+                  satuanBeli: i.satuan_beli,
+                });
+          return {
+            id: i.id,
+            bahan: i.bahan,
+            satuan: i.satuan,
+            qty: i.qty,
+            qty_teks: t.teks,
+            qty_dipesan: i.qty_dipesan,
+            qty_dipesan_teks: d?.teks ?? null,
+            status: i.status,
+            tempat: i.tempat,
+            total_harga: i.total_harga,
+          };
+        }),
+      };
+    });
+
+    return c.json({ rows, total, page, per_page: perPage });
   })
   /**
    * PENDETEKSI KIRIMAN MENGGANTUNG — nilai benarnya NOL.

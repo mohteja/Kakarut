@@ -25,6 +25,45 @@ tanpa akses repo server.
 
 ---
 
+## Rilis: Riwayat penerimaan barang (per faktur)
+
+> Belum di-merge ke production. Tidak ada migrasi DB.
+
+### 🟢 BARU — `GET /penerimaan/riwayat`: jejak kiriman yang sudah diterima/ditolak
+
+`GET /api/penerimaan` sengaja hanya memuat yang BELUM selesai. Akibatnya begitu
+sebuah kiriman diterima, kartunya lenyap tanpa jejak — tak ada catatan kapan
+diterima, oleh siapa, dan berapa yang benar-benar masuk dibanding yang dikirim.
+Padahal justru itu yang dicari saat stok tak cocok.
+
+Query: `branch_id?` (atau `all`), `dari?`/`sampai?` (`YYYY-MM-DD`), `page?`
+(default 1), `per_page?` (default 20, maks 100).
+Res: `{ rows: RiwayatPenerimaanFaktur[], total, page, per_page }`.
+
+**Satu entri = SATU FAKTUR**, satuan yang sama dengan daftar Menunggu — orang
+gudang tak perlu berpindah cara pandang saat mencocokkan surat jalan. Tiap entri
+membawa `nomor` (PB-/PR-/TF-), `waktu` (keputusan terakhir), `oleh` (penerima),
+`hasil` (`diterima` / `sebagian` / `ditolak`), dan `items[]` dengan qty yang
+benar-benar diterima **plus** `qty_dipesan` (yang dikirim) — selisih itulah yang
+dicari orang.
+
+Dua hal yang mudah keliru saat memakainya:
+
+1. **Halaman dipotong per FAKTUR, bukan per baris.** Jangan hitung `total`
+   sebagai jumlah barang; ia jumlah surat jalan.
+2. **`dari`/`sampai` menyaring SAAT DIPUTUSKAN**, bukan tanggal faktur dibuat.
+   Orang mencari "penerimaan minggu lalu" berdasarkan kapan mereka menerimanya.
+
+### 🟡 PERLU DICEK — `GET /absensi/rekap?status=arsip` sempat kehilangan baris
+
+Batas bulannya dulu dihitung pada tengah malam **UTC**, padahal seluruh endpoint
+itu bekerja dalam zona perusahaan. Untuk WIB (UTC+7) keduanya berselisih 7 jam,
+jadi karyawan yang diarsipkan antara **00:00–07:00** waktu setempat pada tanggal
+1 dianggap "keluar bulan lalu" dan hilang dari rekap arsip bulan itu. Sudah
+diperbaiki — tak ada perubahan bentuk respons, hanya barisnya jadi lengkap.
+
+---
+
 ## Rilis: Kiriman antar-cabang — "sudah kirim tapi tak sampai" ditutup
 
 > **Sudah di-merge ke production** (PR #137, 31 Jul 2026). Tidak ada migrasi DB.
