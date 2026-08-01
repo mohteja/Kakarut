@@ -234,9 +234,11 @@ export const penerimaanRoutes = new Hono<AppEnv>()
       // menerimanya, bukan kapan fakturnya dibuat.
       ...(dari ? [gte(productions.confirmedAt, new Date(`${dari}T00:00:00Z`))] : []),
       ...(sampai ? [lte(productions.confirmedAt, new Date(`${sampai}T23:59:59.999Z`))] : []),
-      // baris tanpa jejak keputusan bukan hasil penerimaan (mis. CK-lokal yang
-      // auto-konfirmasi) — memasukkannya membuat riwayat penuh hal yang tak
-      // pernah diterima siapa pun
+      // Baris tanpa jejak keputusan bukan hasil penerimaan — memasukkannya
+      // membuat riwayat penuh hal yang tak pernah diterima siapa pun. (Barang
+      // yang TIBA DI CK ikut tercatat di sini: auto-konfirmasinya tetap
+      // menuliskan siapa yang memajukan tahapnya, dan bagi orang CK itu
+      // memang penerimaan — barangnya benar-benar masuk rak mereka.)
       sql`${productions.confirmedAt} IS NOT NULL`,
       sql`${productions.fakturId} IS NOT NULL`,
     );
