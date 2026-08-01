@@ -71,9 +71,18 @@ interface KirimanGroup {
  * Dapat diakses semua peran; kasir terkunci ke cabangnya.
  */
 export function PenerimaanPage() {
-  // Kiriman diterima di cabang tujuan. Dari KANTOR tampil SEMUA cabang.
-  const { query: dataQuery, dariKantor } = useCabangData();
-  const branchQuery = dariKantor ? "?branch_id=all" : dataQuery;
+  /**
+   * SATU CABANG SEKALI LIHAT — halaman ini menirukan berdirinya orang di
+   * gudang satu cabang: apa yang menunggu di SINI, apa yang sudah diterima di
+   * SINI. Dulu dari Kantor dipaksa "semua cabang", dan riwayatnya jadi campuran
+   * penerimaan CK + cabang tanpa ada cara memisahkannya — sementara badge
+   * "Penerimaan Barang" di sidebar sudah menghitung PER CABANG (`dataQuery`),
+   * jadi angkanya tak pernah cocok dengan isi halamannya.
+   *
+   * Sekarang keduanya memakai satu sumber yang sama, dan dari Kantor cabangnya
+   * dipilih lewat CabangDataBar — pola yang sama dengan Stok, Meja, dan Kasir.
+   */
+  const { query: branchQuery, dariKantor } = useCabangData();
   const queryClient = useQueryClient();
 
   const { data, isLoading } = useQuery({
@@ -165,7 +174,11 @@ export function PenerimaanPage() {
 
   return (
     <div className="max-w-4xl">
-      {!dariKantor && <CabangDataBar />}
+      {/* Dari Kantor: pemilih cabang. Komponennya menyembunyikan diri sendiri
+          saat bukan dari Kantor — membungkusnya dengan `!dariKantor` (seperti
+          dulu) membuatnya TIDAK PERNAH tampil, karena kedua syaratnya
+          berlawanan. Itulah sebabnya Kantor tak punya cara memilih cabang. */}
+      <CabangDataBar />
       <PageTitle>Penerimaan Barang</PageTitle>
       <div className="mb-4 text-sm text-stone-500">
         Kiriman pembelian yang sudah <b>dikirim ke toko</b> diterima di sini. Bila barang
@@ -394,7 +407,7 @@ export function PenerimaanPage() {
         </div>
       )}
 
-      <RiwayatPenerimaan branchQuery={branchQuery} />
+      <RiwayatPenerimaan />
     </div>
   );
 }
@@ -415,7 +428,11 @@ const HASIL_BADGE = {
  * Satu kartu = satu faktur, sama seperti daftar Menunggu di atas — orang gudang
  * tak perlu berpindah cara pandang saat mencocokkan surat jalan.
  */
-function RiwayatPenerimaan({ branchQuery }: { branchQuery: string }) {
+function RiwayatPenerimaan() {
+  // Cabangnya dibaca dari sumber yang SAMA dengan daftar Menunggu di atas,
+  // bukan dioper lewat prop — riwayat yang cabangnya beda dari daftar di
+  // atasnya adalah persis kekeliruan yang membuat halaman ini membingungkan.
+  const { query: branchQuery, dariKantor } = useCabangData();
   const [page, setPage] = useState(1);
   const [buka, setBuka] = useState<Set<string>>(new Set());
   const q = branchQuery ? `${branchQuery}&page=${page}` : `?page=${page}`;
@@ -486,7 +503,9 @@ function RiwayatPenerimaan({ branchQuery }: { branchQuery: string }) {
                     <div className="mt-0.5 text-xs text-stone-500">
                       {r.jumlah_item} barang
                       {r.oleh && <> · diterima oleh {r.oleh}</>}
-                      {r.cabang && <> · 🏪 {r.cabang}</>}
+                      {/* nama cabang hanya perlu saat bekerja dari Kantor —
+                          orang di cabangnya sendiri sudah tahu di mana ia berdiri */}
+                      {dariKantor && r.cabang && <> · 🏪 {r.cabang}</>}
                       {r.alasan_tolak && (
                         <> · <span className="text-red-600">{r.alasan_tolak}</span></>
                       )}
