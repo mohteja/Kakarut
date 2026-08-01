@@ -13,7 +13,7 @@ import {
   tdClass,
   thClass,
 } from "../../components/ui";
-import type { JenisPengadaan } from "@kakarut/shared";
+import type { JenisPengadaan, RiwayatPenerimaanFaktur } from "@kakarut/shared";
 import { useCabangData } from "../../context/BranchContext";
 import { useAuth } from "../../context/AuthContext";
 import { CabangDataBar } from "../../components/CabangDataBar";
@@ -393,7 +393,169 @@ export function PenerimaanPage() {
           ))}
         </div>
       )}
+
+      <RiwayatPenerimaan branchQuery={branchQuery} />
     </div>
+  );
+}
+
+const HASIL_BADGE = {
+  diterima: { label: "✅ Diterima", cls: "bg-green-100 text-green-800" },
+  sebagian: { label: "📦 Diterima sebagian", cls: "bg-amber-100 text-amber-800" },
+  ditolak: { label: "❌ Ditolak", cls: "bg-red-100 text-red-800" },
+} as const;
+
+/**
+ * RIWAYAT PENERIMAAN — PER FAKTUR.
+ *
+ * Daftar di atas sengaja hanya memuat yang belum selesai, jadi begitu sebuah
+ * kiriman diterima kartunya lenyap tanpa jejak. Padahal justru itu yang dicari
+ * saat stok tak cocok: "kiriman kemarin jadi diterima berapa, oleh siapa?".
+ *
+ * Satu kartu = satu faktur, sama seperti daftar Menunggu di atas — orang gudang
+ * tak perlu berpindah cara pandang saat mencocokkan surat jalan.
+ */
+function RiwayatPenerimaan({ branchQuery }: { branchQuery: string }) {
+  const [page, setPage] = useState(1);
+  const [buka, setBuka] = useState<Set<string>>(new Set());
+  const q = branchQuery ? `${branchQuery}&page=${page}` : `?page=${page}`;
+
+  const { data, isLoading } = useQuery({
+    queryKey: ["penerimaan-riwayat", branchQuery, page],
+    queryFn: () =>
+      api<{
+        rows: RiwayatPenerimaanFaktur[];
+        total: number;
+        page: number;
+        per_page: number;
+      }>(`/penerimaan/riwayat${q}`),
+  });
+
+  const rows = data?.rows ?? [];
+  const total = data?.total ?? 0;
+  const perPage = data?.per_page ?? 20;
+  const halamanAkhir = Math.max(Math.ceil(total / perPage), 1);
+
+  return (
+    <>
+      <h2 className="mb-2 mt-8 text-lg font-semibold text-stone-700">
+        📜 Riwayat penerimaan{" "}
+        <span className="text-sm font-normal text-stone-400">({total})</span>
+      </h2>
+      {isLoading ? (
+        <Spinner />
+      ) : rows.length === 0 ? (
+        <Card className="p-6 text-center text-sm text-stone-400">
+          Belum ada kiriman yang pernah diterima atau ditolak.
+        </Card>
+      ) : (
+        <div className="space-y-3">
+          {rows.map((r) => {
+            const badge = HASIL_BADGE[r.hasil];
+            const terbuka = buka.has(r.faktur_id);
+            return (
+              <Card key={r.faktur_id} className="overflow-hidden">
+                <button
+                  type="button"
+                  className="flex w-full flex-wrap items-start justify-between gap-2 px-4 py-2.5 text-left hover:bg-stone-50"
+                  onClick={() =>
+                    setBuka((s) => {
+                      const n = new Set(s);
+                      if (n.has(r.faktur_id)) n.delete(r.faktur_id);
+                      else n.add(r.faktur_id);
+                      return n;
+                    })
+                  }
+                >
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2 text-sm">
+                      <span className="font-semibold text-stone-700">
+                        {r.waktu ? `${formatTanggalRingkas(r.waktu)} ${formatWaktu(r.waktu)}` : "—"}
+                      </span>
+                      {r.nomor && (
+                        <span className="rounded-md bg-orange-100 px-1.5 py-0.5 font-mono text-xs font-bold text-orange-800">
+                          {r.nomor}
+                        </span>
+                      )}
+                      <span className="text-stone-500">
+                        {r.jalur === "produksi"
+                          ? "🏭 Dari Central Kitchen"
+                          : (r.supplier ?? "🛒 Tanpa supplier")}
+                      </span>
+                    </div>
+                    <div className="mt-0.5 text-xs text-stone-500">
+                      {r.jumlah_item} barang
+                      {r.oleh && <> · diterima oleh {r.oleh}</>}
+                      {r.cabang && <> · 🏪 {r.cabang}</>}
+                      {r.alasan_tolak && (
+                        <> · <span className="text-red-600">{r.alasan_tolak}</span></>
+                      )}
+                    </div>
+                  </div>
+                  <span
+                    className={`shrink-0 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold ${badge.cls}`}
+                  >
+                    {badge.label}
+                  </span>
+                </button>
+                {terbuka && (
+                  <ul className="divide-y divide-stone-100 border-t border-stone-100 px-4 py-1 text-sm">
+                    {r.items.map((i) => (
+                      <li key={i.id} className="flex flex-wrap justify-between gap-2 py-1.5">
+                        <span className="font-medium">
+                          {i.bahan}
+                          {i.status === "ditolak" && (
+                            <span className="ml-1.5 text-xs font-normal text-red-600">ditolak</span>
+                          )}
+                          {i.tempat && (
+                            <span className="ml-1.5 text-xs font-normal text-stone-400">
+                              → {i.tempat}
+                            </span>
+                          )}
+                        </span>
+                        <span className="text-stone-500">
+                          {i.qty_teks}
+                          {/* Yang dikirim ditampilkan HANYA saat berbeda dari yang
+                              diterima — itulah selisih yang dicari orang. */}
+                          {i.qty_dipesan != null && i.qty_dipesan !== i.qty && (
+                            <span className="ml-1 text-xs text-amber-700">
+                              (dikirim {i.qty_dipesan_teks})
+                            </span>
+                          )}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </Card>
+            );
+          })}
+        </div>
+      )}
+      {halamanAkhir > 1 && (
+        <div className="mt-3 flex items-center justify-center gap-3 text-sm">
+          <button
+            type="button"
+            className={btnSecondary}
+            disabled={page <= 1}
+            onClick={() => setPage((p) => Math.max(p - 1, 1))}
+          >
+            ← Sebelumnya
+          </button>
+          <span className="text-stone-500">
+            Halaman {page} dari {halamanAkhir}
+          </span>
+          <button
+            type="button"
+            className={btnSecondary}
+            disabled={page >= halamanAkhir}
+            onClick={() => setPage((p) => Math.min(p + 1, halamanAkhir))}
+          >
+            Berikutnya →
+          </button>
+        </div>
+      )}
+    </>
   );
 }
 

@@ -2278,6 +2278,46 @@ export interface KirimanMenggantung {
   umur_hari: number;
 }
 
+/** Satu barang di dalam satu kiriman yang sudah diterima/ditolak. */
+export interface RiwayatPenerimaanItem {
+  id: string;
+  bahan: string;
+  satuan: string;
+  /** qty yang BENAR-BENAR diterima */
+  qty: number;
+  qty_teks: string;
+  /** qty yang dikirim — hanya terisi bila dipakai Terima Sebagian */
+  qty_dipesan: number | null;
+  qty_dipesan_teks: string | null;
+  status: KonfirmasiStatus;
+  tempat: string | null;
+  total_harga: number | null;
+}
+
+/**
+ * RIWAYAT PENERIMAAN, satu entri = SATU FAKTUR (satu surat jalan) — satuan
+ * yang sama dengan daftar "Menunggu penerimaan", supaya orang gudang tak perlu
+ * berpindah cara pandang saat mencocokkan.
+ */
+export interface RiwayatPenerimaanFaktur {
+  faktur_id: string;
+  /** nomor dokumen (PB-/PR-/TF-) */
+  nomor: string | null;
+  no_faktur: string | null;
+  jalur: JenisPengadaan;
+  cabang: string | null;
+  supplier: string | null;
+  /** waktu keputusan TERAKHIR — satu faktur bisa diterima bertahap */
+  waktu: string | null;
+  /** siapa yang menerima/menolak */
+  oleh: string | null;
+  alasan_tolak: string | null;
+  /** diterima = utuh, sebagian = ada yang kurang/ditolak, ditolak = tak ada yang masuk */
+  hasil: "diterima" | "sebagian" | "ditolak";
+  jumlah_item: number;
+  items: RiwayatPenerimaanItem[];
+}
+
 /** Ringkasan pendeteksi kiriman menggantung; `jumlah: 0` = sehat. */
 export interface AnomaliKiriman {
   jumlah: number;

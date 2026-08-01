@@ -25,6 +25,94 @@ tanpa akses repo server.
 
 ---
 
+## Rilis: Terima barang hanya lewat Penerimaan + jejak "diterima oleh siapa"
+
+> Belum di-merge ke production. Tidak ada migrasi DB.
+
+### 🔴 WAJIB — `POST /{mod}/tahap` dengan `ke:"dikonfirmasi"` kini **409** untuk kiriman beralamat cabang
+
+Selama ini ada dua jalan menutup satu kiriman: tombol Terima di Penerimaan
+Barang, dan "Ubah Tahap" langsung ke `dikonfirmasi`. Jalan kedua memasukkan stok
+**tanpa** ada orang di cabang yang benar-benar memegang barangnya. Saat
+kirimannya kurang atau rusak, pembukuan berkata "diterima" sementara tak ada
+satu nama pun yang bisa ditanya.
+
+Sekarang satu pintu saja. Baris yang punya `tujuan_branch_id` (termasuk
+`tujuan_branch_id` yang baru ikut dikirim di permintaan yang sama, supaya
+"pindahkan sekaligus konfirmasi" tak menyelinap lewat) ditolak dengan **409**:
+
+> Kiriman beralamat ke cabang tidak bisa dikonfirmasi dari sini — barangnya
+> harus DITERIMA di menu Penerimaan Barang oleh orang di cabang tujuan
+
+Aturannya persis sama dengan `POST /{mod}/konfirmasi/:fakturId`, yang sudah
+menolak dengan 409 sejak rilis sebelumnya.
+
+**Yang perlu dikerjakan mobile:** layar Ubah Tahap tidak boleh lagi menawarkan
+"Dikonfirmasi" untuk faktur ber-`tujuan_branch_id`; arahkan ke Penerimaan
+Barang. Bila tombolnya telanjur ada, tangani 409 dengan menampilkan pesannya apa
+adanya — pesannya sudah menyebutkan ke mana harus pergi.
+
+Yang **tidak** berubah: faktur yang tinggal di cabangnya sendiri
+(`tujuan_branch_id` kosong atau sama dengan `branch_id`) tetap bisa dikonfirmasi
+lewat Ubah Tahap seperti biasa.
+
+### 🟢 BARU — `diterima_oleh` + `diterima_pada` di tiap baris `GET /{mod}`
+
+Dua kolom baru pada baris faktur beli & produksi: `diterima_oleh` (nama orang
+yang menerima) dan `diterima_pada` (waktunya). Keduanya berasal dari
+`confirmed_by`/`confirmed_at`.
+
+Karena perubahan di atas menutup semua jalan lain, untuk barang beralamat cabang
+kolom ini **hanya** bisa terisi lewat tombol Terima — jadi nilainya bisa
+dipercaya sebagai bukti penerimaan, dan kosongnya berarti barang itu memang
+belum diterima siapa pun. (Untuk faktur CK-lokal yang masuk stok sendiri,
+isinya adalah orang yang memajukan tahapnya.)
+
+Satu faktur bisa diterima bertahap; bila ingin menampilkan satu nama per faktur,
+ambil baris dengan `diterima_pada` **paling akhir**. Jejak per-faktur yang lebih
+lengkap tetap ada di `GET /penerimaan/riwayat`.
+
+---
+
+## Rilis: Riwayat penerimaan barang (per faktur)
+
+> Belum di-merge ke production. Tidak ada migrasi DB.
+
+### 🟢 BARU — `GET /penerimaan/riwayat`: jejak kiriman yang sudah diterima/ditolak
+
+`GET /api/penerimaan` sengaja hanya memuat yang BELUM selesai. Akibatnya begitu
+sebuah kiriman diterima, kartunya lenyap tanpa jejak — tak ada catatan kapan
+diterima, oleh siapa, dan berapa yang benar-benar masuk dibanding yang dikirim.
+Padahal justru itu yang dicari saat stok tak cocok.
+
+Query: `branch_id?` (atau `all`), `dari?`/`sampai?` (`YYYY-MM-DD`), `page?`
+(default 1), `per_page?` (default 20, maks 100).
+Res: `{ rows: RiwayatPenerimaanFaktur[], total, page, per_page }`.
+
+**Satu entri = SATU FAKTUR**, satuan yang sama dengan daftar Menunggu — orang
+gudang tak perlu berpindah cara pandang saat mencocokkan surat jalan. Tiap entri
+membawa `nomor` (PB-/PR-/TF-), `waktu` (keputusan terakhir), `oleh` (penerima),
+`hasil` (`diterima` / `sebagian` / `ditolak`), dan `items[]` dengan qty yang
+benar-benar diterima **plus** `qty_dipesan` (yang dikirim) — selisih itulah yang
+dicari orang.
+
+Dua hal yang mudah keliru saat memakainya:
+
+1. **Halaman dipotong per FAKTUR, bukan per baris.** Jangan hitung `total`
+   sebagai jumlah barang; ia jumlah surat jalan.
+2. **`dari`/`sampai` menyaring SAAT DIPUTUSKAN**, bukan tanggal faktur dibuat.
+   Orang mencari "penerimaan minggu lalu" berdasarkan kapan mereka menerimanya.
+
+### 🟡 PERLU DICEK — `GET /absensi/rekap?status=arsip` sempat kehilangan baris
+
+Batas bulannya dulu dihitung pada tengah malam **UTC**, padahal seluruh endpoint
+itu bekerja dalam zona perusahaan. Untuk WIB (UTC+7) keduanya berselisih 7 jam,
+jadi karyawan yang diarsipkan antara **00:00–07:00** waktu setempat pada tanggal
+1 dianggap "keluar bulan lalu" dan hilang dari rekap arsip bulan itu. Sudah
+diperbaiki — tak ada perubahan bentuk respons, hanya barisnya jadi lengkap.
+
+---
+
 ## Rilis: Kiriman antar-cabang — "sudah kirim tapi tak sampai" ditutup
 
 > **Sudah di-merge ke production** (PR #137, 31 Jul 2026). Tidak ada migrasi DB.

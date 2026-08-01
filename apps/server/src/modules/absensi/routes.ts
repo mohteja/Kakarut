@@ -1,5 +1,5 @@
 import { zValidator } from "@hono/zod-validator";
-import { and, desc, eq, gte, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNotNull, isNull, lt, lte, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
@@ -405,13 +405,22 @@ export const absensiRoutes = new Hono<AppEnv>()
     const statusQ = c.req.query("status");
     const status: "aktif" | "arsip" | "semua" =
       statusQ === "arsip" || statusQ === "semua" ? statusQ : "aktif";
-    const awalBulan = new Date(`${dari}T00:00:00Z`);
+    /**
+     * Saringan KASAR di SQL: sudah keluar atau belum. Batas BULAN-nya sengaja
+     * TIDAK dikerjakan di sini.
+     *
+     * Dulu batasnya `archived_at >= '<awal bulan>T00:00:00Z'` — tengah malam
+     * UTC, padahal seluruh endpoint ini bekerja dalam zona perusahaan. Untuk
+     * Asia/Jakarta (UTC+7) keduanya berselisih 7 jam, jadi karyawan yang
+     * diarsipkan antara 00:00–07:00 waktu setempat pada tanggal 1 dianggap
+     * "keluar bulan lalu" dan LENYAP dari rekap arsip bulan itu.
+     */
     const saringStatus =
       status === "aktif"
         ? isNull(memberships.archivedAt)
         : status === "arsip"
-          ? and(isNotNull(memberships.archivedAt), gte(memberships.archivedAt, awalBulan))
-          : or(isNull(memberships.archivedAt), gte(memberships.archivedAt, awalBulan));
+          ? isNotNull(memberships.archivedAt)
+          : undefined;
 
     const karyawanMentah = await db
       .select({
@@ -439,7 +448,16 @@ export const absensiRoutes = new Hono<AppEnv>()
     // sini — tanpa ini barisnya muncul berisi titik-titik semua. Disaring di
     // memori (bukan SQL) agar konversi zona waktunya persis sama dengan
     // perhitungan `mulaiHitung` di bawah.
-    const karyawan = karyawanMentah.filter((k) => tanggalDi(tz, k.bergabung) <= sampai);
+    //
+    // Batas bulan untuk yang SUDAH KELUAR ikut di sini, alasannya sama persis:
+    // dibandingkan sebagai TANGGAL SETEMPAT, bukan sebagai timestamp UTC. Yang
+    // keluar sebelum bulan ini tak punya satu pun hari kerja di dalamnya, jadi
+    // barisnya cuma titik-titik dan disembunyikan.
+    const karyawan = karyawanMentah.filter(
+      (k) =>
+        tanggalDi(tz, k.bergabung) <= sampai &&
+        (k.arsip == null || tanggalDi(tz, k.arsip) >= dari),
+    );
 
     // (2) Absensi bulan itu, satu baris per (karyawan, tanggal).
     const cap = await db
