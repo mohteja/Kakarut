@@ -116,6 +116,15 @@ export function FakturDetailModal({
             )}
             <dt className="text-stone-400">Status</dt>
             <dd className="col-span-2">{badgeFaktur(tipe, grup.status).label}</dd>
+            {grup.diterimaOleh && (
+              <>
+                <dt className="text-stone-400">Diterima oleh</dt>
+                <dd className="col-span-2 text-emerald-700">
+                  📥 {grup.diterimaOleh}
+                  {grup.diterimaPada ? ` · ${formatWaktu(grup.diterimaPada)}` : ""}
+                </dd>
+              </>
+            )}
             {grup.danaCair > 0 && (
               <>
                 <dt className="text-stone-400">Dana cair</dt>

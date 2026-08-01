@@ -2732,8 +2732,9 @@ cek "kirim: baris produk jadi pindah ke cabang (menunggu)" "V == 1" \
   "$(api "$OWNER" GET "/pembelian?branch_id=$CB46_ID&per_page=500" | jq --arg f "$BF74" '([.rows[] | select(.faktur_id==$f)] | (length==1) and (.[0].status=="menunggu")) | if . then 1 else 0 end')"
 cek "bahan produksi masih di CK (dikerjakan) + jejak kiriman terlihat" "V == 1" \
   "$(api "$OWNER" GET "/pembelian?branch_id=$CK52_UTAMA&per_page=500" | jq --arg f "$BF74" --arg i "$CB74" --arg c "$CK52_UTAMA" '([.rows[] | select(.faktur_id==$f)] | (length==2) and (([.[] | select(.ingredient_id==$i and .status=="dikerjakan" and .branch_id==$c)] | length)==1)) | if . then 1 else 0 end')"
-# baris bertujuan cabang tak boleh dikonfirmasi di CK → 400
-cek "konfirmasi baris bertujuan cabang → 400" "V == 400" \
+# baris bertujuan cabang tak boleh dikonfirmasi di CK — barangnya sudah pindah,
+# yang berhak menutupnya adalah orang di cabang lewat tombol Terima (§158)
+cek "konfirmasi baris bertujuan cabang → 409" "V == 409" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/pembelian/tahap/$BF74" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"ke\":\"dikonfirmasi\",\"items\":[{\"id\":\"$IDJ74\",\"qty\":$QJ74}]}")"
 # bahan produksi diterima di CK (baris tanpa tujuan boleh dikonfirmasi)
 IDC74=$(api "$OWNER" GET "/pembelian?branch_id=$CK52_UTAMA&per_page=500" | jq -r --arg f "$BF74" --arg i "$CB74" '[.rows[] | select(.faktur_id==$f and .ingredient_id==$i)][0].id')
@@ -7206,6 +7207,72 @@ cek "penghapusan = keputusan manajemen: kasir → 403" "V == 403" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/penerimaan/anomali/tutup" -H "Authorization: Bearer $REISS105" -H 'Content-Type: application/json' -d "{\"ids\":[\"$SEHAT157\"]}")"
 cek "penutup menolak daftar id kosong → 400" "V == 400" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/penerimaan/anomali/tutup" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"ids":[]}')"
+
+echo "── §158 Barang beralamat cabang: SAH hanya lewat tombol Terima, dan tercatat siapa ──"
+# Yang dijaga di sini bukan sekadar angka stok, tapi PERTANGGUNGJAWABAN.
+#
+# "Ubah Tahap" bisa melompatkan faktur langsung ke "dikonfirmasi". Dipakai pada
+# kiriman yang beralamat cabang, stoknya masuk tanpa satu pun orang di cabang
+# yang benar-benar memegang barangnya. Saat kirimannya kurang atau rusak, tak
+# ada nama yang bisa ditanya — pembukuan berkata "diterima", tak ada yang
+# menerimanya. Jadi: satu pintu (tombol Terima di Penerimaan Barang), dan pintu
+# itu selalu meninggalkan nama.
+NAMA158=$(api "$OWNER" GET /profil | jq -r .nama)
+FK158=$(api "$OWNER" POST /produksi/faktur "{\"branch_id\":\"$CK157\",\"items\":[{\"ingredient_id\":\"$JDI157\",\"mode\":\"pcs\",\"jumlah\":8}]}" | jq -r .faktur_id)
+api "$OWNER" POST "/produksi/tahap/$FK158" '{"ke":"dikerjakan"}' > /dev/null
+BID158=$(api "$OWNER" GET "/produksi?branch_id=$CK157&per_page=500" | jq -r --arg f "$FK158" '[.rows[]|select(.faktur_id==$f)][0].id')
+api "$OWNER" POST "/produksi/tahap/$FK158" "{\"ke\":\"menunggu\",\"items\":[{\"id\":\"$BID158\",\"qty\":8}],\"tujuan_branch_id\":\"$ST157\"}" > /dev/null
+
+baris158() { api "$OWNER" GET "/produksi?branch_id=$ST157&per_page=500" | jq --arg f "$FK158" '[.rows[]|select(.faktur_id==$f)][0]'; }
+cek "belum diterima: tak ada nama penerima di faktur" "V == 1" \
+  "$(baris158 | jq '(.diterima_oleh == null and .diterima_pada == null) | if . then 1 else 0 end')"
+
+# PINTU BELAKANG YANG DITUTUP: Ubah Tahap per-baris → langsung "dikonfirmasi".
+# (Bentuk seluruh-faktur memang sudah lama tak bisa menutup faktur — dijaga
+# assertion di bawahnya — jadi celahnya hanya ada di bentuk per-baris ini.)
+cek "PENGAMAN: Ubah Tahap → 'dikonfirmasi' pada kiriman beralamat → 409" "V == 409" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/produksi/tahap/$FK158" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"ke\":\"dikonfirmasi\",\"items\":[{\"id\":\"$BID158\",\"qty\":8}]}")"
+cek "ditolak: status baris tetap 'menunggu'" "V == 1" \
+  "$(baris158 | jq '(.status == "menunggu") | if . then 1 else 0 end')"
+cek "ditolak: saldo cabang TIDAK bertambah (masih 15 dari §157)" "abs(V - 15) < 0.001" "$(saldo157 "$ST157")"
+cek "bentuk seluruh-faktur tetap menolak 'dikonfirmasi' → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/produksi/tahap/$FK158" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"ke":"dikonfirmasi"}')"
+cek "masih menunggu penerimaan di layar cabang" "V == 1" \
+  "$(api "$OWNER" GET "/penerimaan?branch_id=$ST157" | jq --arg f "$FK158" '[.rows[]|select(.faktur_id==$f)] | length')"
+
+# JALUR BELI juga — permintaan owner menyebut "faktur bahan baku DAN beli".
+FKB158=$(api "$OWNER" POST /pembelian/faktur "{\"branch_id\":\"$CK157\",\"tujuan_branch_id\":\"$ST157\",\"items\":[{\"ingredient_id\":\"$MTH157\",\"mode\":\"pcs\",\"jumlah\":300,\"total_harga\":3000}]}" | jq -r .faktur_id)
+api "$OWNER" POST "/pembelian/tahap/$FKB158" '{"ke":"dikerjakan"}' > /dev/null
+api "$OWNER" POST "/pembelian/tahap/$FKB158" '{"ke":"menunggu"}' > /dev/null
+api "$OWNER" POST "/pembelian/kirim/$FKB158" '{}' > /dev/null
+BIDB158=$(api "$OWNER" GET "/pembelian?branch_id=$ST157&per_page=500" | jq -r --arg f "$FKB158" '[.rows[]|select(.faktur_id==$f)][0].id')
+cek "PENGAMAN: faktur BELI beralamat cabang → 'dikonfirmasi' juga 409" "V == 409" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/pembelian/tahap/$FKB158" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"ke\":\"dikonfirmasi\",\"items\":[{\"id\":\"$BIDB158\",\"qty\":300}]}")"
+cek "beli: saldo bahan mentah di cabang tetap 0" "abs(V) < 0.001" \
+  "$(api "$OWNER" GET "/stok?branch_id=$ST157" | jq -r --arg i "$MTH157" '[.[]|select(.ingredient_id==$i)][0].saldo // 0')"
+
+# SATU-SATUNYA PINTU — dan pintu itu menuliskan namanya.
+api "$OWNER" POST "/penerimaan/$FK158/terima" > /dev/null
+R158=$(baris158)
+cek "lewat tombol Terima → saldo cabang jadi 23 (15 + 8)" "abs(V - 23) < 0.001" "$(saldo157 "$ST157")"
+cek "jejak tersimpan: nama penerima = orang yang menekan Terima" "V == 1" \
+  "$(echo "$R158" | jq --arg n "$NAMA158" '(.diterima_oleh == $n) | if . then 1 else 0 end')"
+cek "jejak tersimpan: waktu terima terisi" "V == 1" \
+  "$(echo "$R158" | jq '(.diterima_pada != null) | if . then 1 else 0 end')"
+cek "riwayat penerimaan memuat faktur ini beserta penerimanya" "V == 1" \
+  "$(api "$OWNER" GET "/penerimaan/riwayat?branch_id=$ST157" | jq --arg f "$FK158" --arg n "$NAMA158" '([.rows[]|select(.faktur_id==$f and .oleh==$n and .hasil=="diterima")] | length) | if . == 1 then 1 else 0 end')"
+
+# TIDAK KELEBIHAN: faktur yang memang tinggal di CK sendiri tak ikut terkunci —
+# di sana tak ada "cabang tujuan" yang harus menerimanya.
+FKL158=$(api "$OWNER" POST /pembelian/faktur "{\"branch_id\":\"$CK157\",\"items\":[{\"ingredient_id\":\"$MTH157\",\"mode\":\"pcs\",\"jumlah\":200,\"total_harga\":2000}]}" | jq -r .faktur_id)
+api "$OWNER" POST "/pembelian/tahap/$FKL158" '{"ke":"dikerjakan"}' > /dev/null
+BIDL158=$(api "$OWNER" GET "/pembelian?branch_id=$CK157&per_page=500" | jq -r --arg f "$FKL158" '[.rows[]|select(.faktur_id==$f)][0].id')
+cek "faktur CK-lokal tetap boleh 'dikonfirmasi' dari Ubah Tahap → 200" "V == 200" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/pembelian/tahap/$FKL158" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"ke\":\"dikonfirmasi\",\"items\":[{\"id\":\"$BIDL158\",\"qty\":200}]}")"
+cek "faktur CK-lokal: masuk stok CK tanpa penerimaan terpisah" "V == 1" \
+  "$(api "$OWNER" GET "/pembelian?branch_id=$CK157&per_page=500" | jq --arg f "$FKL158" '([.rows[]|select(.faktur_id==$f)][0].status == "dikonfirmasi") | if . then 1 else 0 end')"
+cek "faktur CK-lokal pun berjejak penerima" "V == 1" \
+  "$(api "$OWNER" GET "/pembelian?branch_id=$CK157&per_page=500" | jq --arg f "$FKL158" --arg n "$NAMA158" '([.rows[]|select(.faktur_id==$f)][0].diterima_oleh == $n) | if . then 1 else 0 end')"
 
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

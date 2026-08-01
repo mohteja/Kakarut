@@ -76,6 +76,13 @@ export interface StokMasukRow {
   default_tempat?: string | null;
   dibuat_oleh: string | null;
   diubah_oleh: string | null;
+  /**
+   * Siapa yang MENERIMA baris ini. Untuk kiriman beralamat cabang satu-satunya
+   * pintu yang mengisinya adalah tombol Terima di Penerimaan Barang — jadi ini
+   * sekaligus bukti bahwa penerimaannya sah, bukan hasil ubah tahap manual.
+   */
+  diterima_oleh?: string | null;
+  diterima_pada?: string | null;
   updated_at: string | null;
   worker_id: string | null;
   dikerjakan_oleh: string | null;
@@ -120,6 +127,9 @@ export interface FakturGroup {
   catatan: string | null;
   dibuatOleh: string | null;
   diubahOleh: string | null;
+  /** penerima + waktu terima paling akhir di faktur ini (null = belum diterima) */
+  diterimaOleh: string | null;
+  diterimaPada: string | null;
   updatedAt: string | null;
   workerId: string | null;
   dikerjakanOleh: string | null;
@@ -448,6 +458,8 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
           catatan: r.catatan,
           dibuatOleh: r.dibuat_oleh,
           diubahOleh: r.diubah_oleh,
+          diterimaOleh: null,
+          diterimaPada: null,
           updatedAt: r.updated_at,
           workerId: r.worker_id,
           dikerjakanOleh: r.dikerjakan_oleh,
@@ -465,6 +477,12 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
         byKey.set(key, g);
       }
       g.rows.push(r);
+      // jejak terima: ambil yang PALING AKHIR — pada terima sebagian, faktur
+      // bisa punya beberapa penerimaan dan yang terakhir itulah keadaan kini
+      if (r.diterima_pada && (g.diterimaPada == null || r.diterima_pada > g.diterimaPada)) {
+        g.diterimaPada = r.diterima_pada;
+        g.diterimaOleh = r.diterima_oleh ?? null;
+      }
       if (r.rencana_id) g.dariPermintaan = true;
       if (r.permintaan_nomor && !g.permintaanNomor) g.permintaanNomor = r.permintaan_nomor;
       if (r.asal_branch_id) g.kiriman = true;
@@ -852,6 +870,14 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
                   {/* pembuat faktur cukup di footer — header tetap ringkas */}
                   {g.dibuatOleh && (
                     <div className="text-xs text-stone-400">dibuat oleh {g.dibuatOleh}</div>
+                  )}
+                  {/* jejak penerimaan: barang beralamat cabang hanya bisa sah
+                      lewat tombol Terima, jadi nama ini juga buktinya */}
+                  {g.diterimaOleh && (
+                    <div className="text-xs text-emerald-700">
+                      📥 diterima oleh {g.diterimaOleh}
+                      {g.diterimaPada ? ` · ${formatWaktu(g.diterimaPada)}` : ""}
+                    </div>
                   )}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">

@@ -77,6 +77,12 @@ import { autoFileRakCabang } from "../penyimpanan/autoFile";
 const pembuat = alias(users, "pembuat_prod");
 const pengubah = alias(users, "pengubah_prod");
 const pekerja = alias(users, "pekerja_prod");
+/**
+ * Yang MENERIMA barang. Untuk kiriman beralamat cabang, satu-satunya pintu yang
+ * mengisi `confirmed_by` adalah tombol Terima di Penerimaan Barang — jadi nama
+ * di sini otomatis jadi jejak "diterima oleh siapa", bukan sekadar hiasan.
+ */
+const penerima = alias(users, "penerima_prod");
 const danaOleh = alias(users, "dana_oleh");
 const logOleh = alias(users, "log_oleh");
 // cabang baris + cabang tujuan (dipakai tampilan lintas-cabang di Kantor)
@@ -843,6 +849,34 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         }
         const byId = new Map(baris.map((b) => [b.id, b]));
 
+        /**
+         * SATU PINTU: barang BERALAMAT hanya sah diterima lewat Penerimaan.
+         *
+         * `/tahap` bisa melompatkan faktur langsung ke "dikonfirmasi", dan itu
+         * memasukkan stok TANPA ada orang di cabang yang menekan Terima —
+         * padahal merekalah yang memegang barangnya. Akibatnya stok bertambah
+         * atas nama orang yang tak pernah melihat barangnya, dan bila kirimannya
+         * ternyata kurang/rusak tak ada satu pun jejak siapa yang menerimanya.
+         *
+         * Aturannya dibuat SAMA PERSIS dengan `/konfirmasi` (lihat blok di
+         * sana): punya `tujuan_branch_id` = kiriman = wajib lewat Penerimaan.
+         * Dua pintu dengan aturan berbeda hanya akan jadi lubang berikutnya.
+         *
+         * Tujuan diambil EFEKTIF — termasuk `tujuan_branch_id` yang baru dikirim
+         * di permintaan ini, supaya "pindahkan sekaligus konfirmasi" dalam satu
+         * panggilan tidak menyelinap lewat.
+         */
+        if (ke === "dikonfirmasi") {
+          const kena = items ? baris.filter((b) => items.some((it) => it.id === b.id)) : baris;
+          const beralamat = kena.find((b) => (tujuan_branch_id ?? b.tujuanBranchId) != null);
+          if (beralamat) {
+            throw new HTTPException(409, {
+              message:
+                "Kiriman beralamat ke cabang tidak bisa dikonfirmasi dari sini — barangnya harus DITERIMA di menu Penerimaan Barang oleh orang di cabang tujuan",
+            });
+          }
+        }
+
         // BELI mulai DIPROSES: transaksi tercatat ke supplier UTAMA bahan
         // (baris tanpa supplier diisi otomatis) — dasar kartu supplier.
         const utamaByIng = new Map<string, string>();
@@ -883,15 +917,10 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
               message: `Baris berstatus "${b.status}" tidak bisa dipindah ke "${ke}" — tahap hanya bisa maju`,
             });
           }
-          // Barang bertujuan cabang lain diterima di cabang tujuan (lewat
-          // Penerimaan), bukan dikonfirmasi di sini — cegah stok mendarat di
-          // cabang yang salah.
-          if (ke === "dikonfirmasi" && b.tujuanBranchId) {
-            throw new HTTPException(400, {
-              message:
-                "Barang bertujuan cabang lain — kirim dulu lalu terima di Penerimaan cabang tujuan",
-            });
-          }
+          // (Barang bertujuan cabang sudah ditolak lebih awal oleh pengaman
+          // SATU PINTU di atas — lihat blok "ke === dikonfirmasi" sebelum loop
+          // ini. Sengaja tidak diulang di sini: dua pemeriksaan untuk satu
+          // aturan hanya menunggu untuk saling menyimpang.)
           // Qty maju SENGAJA boleh melebihi qty baris: RAB itu RENCANA, bukan
           // pagu. Sayur direncanakan 900 gr tapi hanya dijual per kilo → yang
           // benar-benar dibeli 1.000 gr, dan angka itulah yang harus tercatat.
@@ -2383,6 +2412,9 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         supplier_id: productions.supplierId,
         dibuat_oleh: pembuat.nama,
         diubah_oleh: pengubah.nama,
+        // jejak penerimaan: siapa yang menekan Terima, dan kapan
+        diterima_oleh: penerima.nama,
+        diterima_pada: productions.confirmedAt,
         updated_at: productions.updatedAt,
         worker_id: productions.workerId,
         dikerjakan_oleh: pekerja.nama,
@@ -2422,6 +2454,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
               .leftJoin(pembuat, eq(productions.userId, pembuat.id))
               .leftJoin(pengubah, eq(productions.updatedBy, pengubah.id))
               .leftJoin(pekerja, eq(productions.workerId, pekerja.id))
+              .leftJoin(penerima, eq(productions.confirmedBy, penerima.id))
               .leftJoin(cabangProd, eq(productions.branchId, cabangProd.id))
               .leftJoin(tujuanProd, eq(productions.tujuanBranchId, tujuanProd.id))
               .leftJoin(untukProd, eq(productions.untukBranchId, untukProd.id))
