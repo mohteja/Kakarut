@@ -337,6 +337,25 @@ export function ResepPage() {
     const x = semuaById.get(r.ingredient_id);
     return a + (x ? (angkaDari(r.qty) || 0) * x.harga_per_unit : 0);
   }, 0);
+  /**
+   * Baris resep yang SUDAH DIISI takarannya tapi tidak akan ikut tersimpan.
+   *
+   * Kembaran persis dari penjaga di `MenuFormPage`: penyaring kiriman memakai
+   * `angkaDari(r.qty) > 0`, jadi takaran tak terbaca dibuang di sisi klien —
+   * tak pernah sampai ke server, tak pernah jadi galat, dan tombol Simpan tak
+   * menahannya.
+   *
+   * Resep produksi (BOM) sama awetnya dengan resep menu, dengan satu tambahan
+   * yang khas halaman ini: `biayaResep` di atas juga melewatkan baris itu
+   * (`angkaDari(r.qty) || 0`), jadi HARGA BATCH yang ditawarkan ikut turun —
+   * dan bila persetujuan harga dicentang, harga bahan hasil produksi ini
+   * tersimpan lebih murah daripada kenyataannya. Satu salah ketik menggeser
+   * biaya sekaligus stok.
+   */
+  const qtyTerbuang = resep
+    .filter((r) => r.ingredient_id && r.qty.trim() !== "" && !(angkaDari(r.qty) > 0))
+    .map((r) => semuaById.get(r.ingredient_id)?.nama)
+    .filter((n): n is string => !!n);
   const overhead = angkaDari(atur?.overhead) > 0 ? angkaDari(atur?.overhead) : 1;
   const hargaBatch = Math.round(biayaResep * overhead * 100) / 100;
   const isiBatch = angkaDari(atur?.isi) > 0 ? angkaDari(atur?.isi) : 0;
@@ -1304,11 +1323,19 @@ export function ResepPage() {
                     </div>
                   </div>
 
+                  {bolehUbah && qtyTerbuang.length > 0 && (
+                    <div className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-800">
+                      Takaran pada <b>{qtyTerbuang.join(", ")}</b> belum terbaca sebagai angka
+                      lebih dari 0 — tulis seperti <b>0,25</b> atau <b>100</b>. Tanpa itu
+                      bahannya tidak ikut masuk resep, dan harga batch yang ditawarkan ikut
+                      kurang hitung.
+                    </div>
+                  )}
                   {bolehUbah && (
                     <div className="mt-4 flex items-center gap-3">
                       <button
                         onClick={() => simpan.mutate()}
-                        disabled={simpan.isPending}
+                        disabled={simpan.isPending || qtyTerbuang.length > 0}
                         className={btnPrimary}
                       >
                         Simpan Resep

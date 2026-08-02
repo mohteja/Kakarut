@@ -173,6 +173,29 @@ export function MenuFormPage() {
   const perluKemasan = adaResep && !punyaKemasan;
 
   /**
+   * Baris resep yang SUDAH DIISI takarannya tapi tidak akan ikut tersimpan.
+   *
+   * Penyaring kiriman memakai `angkaDari(k.qty) > 0`, jadi takaran tak terbaca
+   * gagal perbandingan itu dan barisnya dibuang DI SISI KLIEN — tak pernah
+   * sampai ke server, tak pernah jadi galat. Tombol Simpan tidak menahannya
+   * sama sekali.
+   *
+   * Di halaman ini kerusakannya paling AWET, karena yang disimpan adalah
+   * ATURAN, bukan satu transaksi: resep menu yang kehilangan satu bahan akan
+   * (a) menghitung HPP tanpa biaya bahan itu — food cost terlihat lebih sehat
+   * daripada kenyataannya — dan (b) tidak pernah memotong stoknya pada SETIAP
+   * penjualan menu itu, selamanya, sampai ada yang sadar. Salah ketik sekali,
+   * salahnya berulang tiap hari.
+   *
+   * Nol dan minus ikut terjaring lewat `!(… > 0)` yang sama: keduanya terbaca
+   * sebagai angka, tapi nasib barisnya persis sama.
+   */
+  const qtyTerbuang = komponen
+    .filter((k) => k.ingredient_id && k.qty.trim() !== "" && !(angkaDari(k.qty) > 0))
+    .map((k) => bahanById.get(k.ingredient_id)?.nama)
+    .filter((n): n is string => !!n);
+
+  /**
    * Draf "isi menu" dari baris resep yang SEDANG diedit (belum tentu tersimpan),
    * memakai fungsi yang sama dengan dokumentasi kontrak. Kemasan & pelengkap
    * dibuang, takaran pecahan dibulatkan — hasilnya tetap harus dirapikan user.
@@ -240,6 +263,10 @@ export function MenuFormPage() {
       <form
         onSubmit={(e) => {
           e.preventDefault();
+          // Takaran tak terbaca ditahan LEBIH DULU: menyimpan resep yang
+          // diam-diam kehilangan bahan lebih merusak daripada menyimpannya
+          // tanpa kemasan, dan tombolnya pun sudah mati — ini pagar keduanya.
+          if (qtyTerbuang.length > 0) return;
           // Konfirmasi dulu bila menu berresep ini belum punya kemasan take
           // away — bukan larangan (ada menu yang memang tak pernah dibawa
           // pulang), tapi keputusannya harus disadari, bukan kelewatan.
@@ -638,9 +665,21 @@ export function MenuFormPage() {
           </details>
         </Card>
 
+        {qtyTerbuang.length > 0 && (
+          <div className="rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-800">
+            Takaran pada <b>{qtyTerbuang.join(", ")}</b> belum terbaca sebagai angka lebih dari
+            0 — tulis seperti <b>0,25</b> atau <b>100</b>. Tanpa itu bahannya tidak ikut masuk
+            resep, jadi HPP-nya kurang hitung dan stoknya tak pernah terpotong saat menu ini
+            terjual.
+          </div>
+        )}
         <ErrorText error={simpan.error} />
         <div className="flex gap-2">
-          <button type="submit" disabled={simpan.isPending} className={btnPrimary}>
+          <button
+            type="submit"
+            disabled={simpan.isPending || qtyTerbuang.length > 0}
+            className={btnPrimary}
+          >
             {simpan.isPending ? "Menyimpan…" : "Simpan Menu"}
           </button>
           <Link to="/menu" className={btnSecondary}>
