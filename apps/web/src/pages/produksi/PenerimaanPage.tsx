@@ -128,8 +128,27 @@ export function PenerimaanPage() {
   const dikirim = grup.filter((g) => g.status === "menunggu");
   const ditolak = grup.filter((g) => g.status === "ditolak");
 
+  /**
+   * Semua yang berubah begitu barang diterima/ditolak — daftarnya harus utuh,
+   * karena kunci yang terlewat tidak memberi tanda apa pun: layarnya cuma diam
+   * menampilkan keadaan lama sampai pengguna memuat ulang.
+   *
+   * - `penerimaan-riwayat` BUKAN turunan `penerimaan`: pencocokan awalan
+   *   TanStack membandingkan elemen pertama utuh, jadi `["penerimaan"]` tak
+   *   pernah mengenai `["penerimaan-riwayat", …]`. Tanpa ini faktur yang baru
+   *   diterima lenyap dari Menunggu tapi tak muncul di Riwayat di bawahnya —
+   *   persis bagian layar yang seharusnya membuktikan penerimaannya tercatat.
+   * - `/produksi` sama pentingnya dengan `/pembelian`: sejak kiriman beralamat
+   *   hanya sah lewat tombol Terima, faktur PRODUKSI pun diselesaikan di sini.
+   */
   function segarkan() {
-    for (const key of ["penerimaan", "/pembelian", "stok"]) {
+    for (const key of [
+      "penerimaan",
+      "penerimaan-riwayat",
+      "/pembelian",
+      "/produksi",
+      "stok",
+    ]) {
       queryClient.invalidateQueries({ queryKey: [key] });
     }
     setSebagianKey(null);
