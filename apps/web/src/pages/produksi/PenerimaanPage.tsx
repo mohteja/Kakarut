@@ -481,9 +481,16 @@ function RiwayatPenerimaan() {
   }, [branchQuery]);
   // Jaring pengaman: penerimaan baru menggeser jumlah halaman tanpa sentuhan
   // filter apa pun.
+  //
+  // Penjagaan `data` WAJIB, jangan dilepas. `page` ikut ke dalam queryKey dan
+  // query ini tak memakai `placeholderData`, jadi begitu berpindah ke halaman
+  // yang belum pernah di-cache, `data` undefined sesaat → `total` jatuh ke 0 →
+  // `halamanAkhir` jadi 1. Tanpa penjagaan ini, klik "halaman berikutnya"
+  // langsung dipental balik ke halaman 1 sebelum datanya sempat tiba — jumlah
+  // halaman hanya bermakna setelah ada data yang menghitungnya.
   useEffect(() => {
-    if (page > halamanAkhir) setPage(halamanAkhir);
-  }, [page, halamanAkhir]);
+    if (data && page > halamanAkhir) setPage(halamanAkhir);
+  }, [data, page, halamanAkhir]);
 
   return (
     <>
