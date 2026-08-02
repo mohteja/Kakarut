@@ -57,7 +57,7 @@ export function LaporanPage() {
   // Owner/admin memilih cabang lewat filter halaman; kasir dikunci server ke cabangnya.
   const branchParam = isManajemen ? `&branch_id=${cabangFilter}` : "";
 
-  const { data: lap, isLoading } = useQuery({
+  const { data: lap, isLoading, error } = useQuery({
     queryKey: ["laporan", dari, sampai, isManajemen ? cabangFilter : "self"],
     queryFn: () =>
       api<LaporanHarian>(`/laporan?dari=${dari}&sampai=${sampai}${branchParam}`),
@@ -127,8 +127,21 @@ export function LaporanPage() {
         )}
       </Card>
 
-      {isLoading || !lap ? (
+      {/*
+        MENUNGGU vs GAGAL. `isLoading || !lap` menyatukan keduanya, jadi
+        permintaan yang ditolak membuat `lap` tetap `undefined` dan halaman
+        berputar selamanya — TanStack sudah berhenti mencoba, layarnya tak
+        pernah mengatakannya.
+      */}
+      {isLoading ? (
         <Spinner />
+      ) : error || !lap ? (
+        <Card className="p-4">
+          <ErrorText error={error ?? new Error("Laporan tidak dapat dimuat")} />
+          <div className="mt-2 text-sm text-stone-500">
+            Angkanya tidak ditampilkan karena datanya gagal dimuat — <b>bukan</b> berarti nol.
+          </div>
+        </Card>
       ) : (
         <>
           <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-3">

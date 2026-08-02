@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import type { LaporanPembelian } from "@kakarut/shared";
-import { Card, PageTitle, Spinner, inputClass, tdClass, thClass } from "../../components/ui";
+import { Card, ErrorText, PageTitle, Spinner, inputClass, tdClass, thClass } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
@@ -28,7 +28,7 @@ export function LaporanPembelianPage() {
 
   const branchParam = isManajemen ? `&branch_id=${cabangFilter}` : "";
 
-  const { data: lap, isLoading } = useQuery({
+  const { data: lap, isLoading, error } = useQuery({
     queryKey: ["laporan-pembelian", dari, sampai, isManajemen ? cabangFilter : "self"],
     queryFn: () =>
       api<LaporanPembelian>(`/laporan/pembelian?dari=${dari}&sampai=${sampai}${branchParam}`),
@@ -85,8 +85,21 @@ export function LaporanPembelianPage() {
         )}
       </Card>
 
-      {isLoading || !lap ? (
+      {/*
+        MENUNGGU vs GAGAL. `isLoading || !lap` menyatukan keduanya, jadi
+        permintaan yang ditolak membuat `lap` tetap `undefined` dan halaman
+        berputar selamanya — TanStack sudah berhenti mencoba, layarnya tak
+        pernah mengatakannya.
+      */}
+      {isLoading ? (
         <Spinner />
+      ) : error || !lap ? (
+        <Card className="p-4">
+          <ErrorText error={error ?? new Error("Laporan tidak dapat dimuat")} />
+          <div className="mt-2 text-sm text-stone-500">
+            Angkanya tidak ditampilkan karena datanya gagal dimuat — <b>bukan</b> berarti nol.
+          </div>
+        </Card>
       ) : (
         <>
           <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-3">
