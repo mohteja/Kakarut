@@ -45,6 +45,17 @@ perlakukan `null` sebagai "normal", jangan sampai seluruh bill mendadak gratis.
 
 Sudah dikerjakan di klien Flutter (`CartState.linesTagih`).
 
+### 🔴 WAJIB — kirim `client_ref` pada refund, dan PAKAI ULANG saat mencoba lagi
+
+Refund yang terkirim dua kali **mengembalikan uang dua kali**. Pagar "melebihi
+sisa porsi" tidak menolong: selama masih ada porsi tersisa, permintaan kedua sah
+menurut aturan dan langsung dijalankan.
+
+Buat kuncinya **sekali** saat tombol pertama ditekan, lalu pakai kunci yang sama
+di tiap percobaan. Membuat kunci baru tiap percobaan sama saja dengan tidak
+mengirimnya — justru percobaan KEDUA-lah yang harus membawa kunci yang sama.
+Sudah dikerjakan di klien Flutter (`_RefundSheetState._clientRef`).
+
 ### 🟢 BARU — `POST /api/penjualan/:id/refund` (kasir boleh)
 
 Untuk transaksi yang **sudah dibayar** lalu ketahuan bahannya habis. Kasir boleh

@@ -1,9 +1,10 @@
 import { useMutation } from "@tanstack/react-query";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { hitungUangSetelahRefund, nominalRefund, qtyDitagih } from "@kakarut/shared";
 import { ErrorText, btnSecondary } from "../../components/ui";
 import { api } from "../../lib/api";
 import { formatRupiah } from "../../lib/format";
+import { uuidV4 } from "../../lib/idempoten";
 import type { SaleResult } from "./ReceiptModal";
 
 /**
@@ -62,15 +63,28 @@ export function RefundPanel({
   );
   const nominal = nominalRefund({ ...asal, total: data.sale.total }, sesudah);
 
+  /**
+   * Kunci idempotensi satu kejadian refund, bertahan melintasi percobaan ulang.
+   *
+   * Akibat salahnya lebih buruk daripada pada pembayaran: refund yang terkirim
+   * dua kali MENGEMBALIKAN UANG DUA KALI. Pagar "melebihi sisa porsi" tak
+   * menolong — selama masih ada porsi tersisa, permintaan kedua sah menurut
+   * aturan dan langsung dijalankan.
+   */
+  const refKejadian = useRef<string | null>(null);
+
   const kirim = useMutation({
-    mutationFn: () =>
-      api(`/penjualan/${data.sale.id}/refund`, {
+    mutationFn: () => {
+      refKejadian.current ??= uuidV4();
+      return api(`/penjualan/${data.sale.id}/refund`, {
         method: "POST",
         body: {
+          client_ref: refKejadian.current,
           alasan: alasan.trim() || null,
           items: dipilih.map(([sale_item_id, qty]) => ({ sale_item_id, qty })),
         },
-      }),
+      });
+    },
     onSuccess: onSelesai,
   });
 

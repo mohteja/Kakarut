@@ -381,7 +381,20 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 - `GET /api/penjualan` — [any] — query: `branch_id?` (atau `all` untuk owner/admin), `tanggal?` (YYYY-MM-DD, default hari ini di TZ perusahaan) — res: array ringkasan sale — error: **400** format tanggal salah
 - `GET /api/penjualan/:id` — [any] — res: `{ sale, items, branch_nama, kasir }` — error: **403** kasir luar cabang, **404**
 - `DELETE /api/penjualan/:id` — [owner/admin] — soft delete → Tempat Sampah — res: `{ ok, nomor }` — error: **404**
-- `POST /api/penjualan/:id/refund` — **[owner/admin/cashier]** — req: `{ alasan?: string|null, items: [{ sale_item_id: uuid, qty: number(>0) }] (min 1) }` — res: `{ ok, nominal, total_lama, total_baru }` — error: **400** (sajian bukan milik transaksi ini / qty ≤ 0 / melebihi sisa porsi), **404** (transaksi tak ada, sudah di Tempat Sampah, atau bukan cabang kasir ini)
+- `POST /api/penjualan/:id/refund` — **[owner/admin/cashier]** — req: `{ alasan?: string|null, client_ref?: uuid, device_id?: string|null, items: [{ sale_item_id: uuid, qty: number(>0) }] (min 1) }` — res: `{ ok, nominal, total_lama, total_baru }` — error: **400** (sajian bukan milik transaksi ini / qty ≤ 0 / melebihi sisa porsi), **404** (transaksi tak ada, sudah di Tempat Sampah, atau bukan cabang kasir ini)
+
+> **`client_ref` SANGAT DIANJURKAN di sini** — lebih penting daripada pada
+> `POST /api/penjualan`, karena refund yang terkirim dua kali **mengembalikan
+> uang dua kali**. Pagar "melebihi sisa porsi" tidak menolong: selama masih ada
+> porsi tersisa, permintaan kedua sah menurut aturan dan langsung dijalankan.
+>
+> Kejadiannya sama seperti pada penjualan — jaringan putus SESUDAH server
+> menyimpan tapi SEBELUM balasannya sampai, lalu kasir menekan tombolnya lagi
+> karena ia tak punya cara tahu refundnya sudah tercatat. Buat kuncinya SEKALI
+> saat tombol pertama ditekan dan pakai ulang kunci yang sama di tiap percobaan;
+> membuat kunci baru tiap percobaan sama saja dengan tidak mengirimnya. Bila
+> `client_ref` sudah pernah sukses, server membalas **200** dengan hasil yang
+> tersimpan dan TIDAK merefund ulang.
 
 > **REFUND SEBAGIAN PER SAJIAN.** Kasusnya satu: pembeli sudah membayar, lalu
 > ketahuan bahan salah satu sajian habis sehingga sajian itu tak jadi dibuat.

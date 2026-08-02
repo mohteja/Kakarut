@@ -247,6 +247,8 @@ export const penjualanRoutes = new Hono<AppEnv>()
       "json",
       z.object({
         alasan: z.string().nullish(),
+        client_ref: clientRefField,
+        device_id: deviceIdField,
         items: z
           .array(
             z.object({
@@ -261,6 +263,21 @@ export const penjualanRoutes = new Hono<AppEnv>()
       const auth = c.get("auth");
       const body = c.req.valid("json");
       const saleId = c.req.param("id");
+      /**
+       * IDEMPOTENSI — sama pentingnya di sini seperti di `POST /penjualan`,
+       * dan akibat salahnya justru lebih buruk: refund yang terkirim dua kali
+       * MENGEMBALIKAN UANG DUA KALI. Validasi "melebihi sisa porsi" tak
+       * menolongnya — selama masih ada porsi tersisa, permintaan kedua sah
+       * secara aturan dan langsung dieksekusi.
+       *
+       * Kejadiannya sama persis: jaringan putus sesudah server menyimpan tapi
+       * sebelum balasannya sampai, kasir menekan tombolnya lagi karena ia tak
+       * punya cara tahu refundnya sudah tercatat.
+       */
+      if (body.client_ref) {
+        const ada = await cariHasilIdempoten(auth.company_id!, body.client_ref);
+        if (ada) return c.json(ada.hasilJson, 200);
+      }
       // Kasir hanya boleh menyentuh transaksi CABANGNYA. Tanpa ini, id
       // transaksi cabang lain yang bocor ke tangan kasir cukup untuk
       // mengembalikan uang di pembukuan yang bukan urusannya.
@@ -282,11 +299,25 @@ export const penjualanRoutes = new Hono<AppEnv>()
           items: body.items.map((i) => ({ saleItemId: i.sale_item_id, qty: i.qty })),
         }),
       );
-      return c.json({
+      const data = {
         ok: true,
         nominal: hasil.nominal,
         total_lama: hasil.totalLama,
         total_baru: hasil.totalBaru,
-      });
+      };
+      // Dicatat SESUDAH transaksinya sukses: kalau refundnya sendiri gagal,
+      // ledger tak boleh menyimpan apa pun — percobaan ulang harus benar-benar
+      // dijalankan, bukan dibalas "sudah beres" untuk sesuatu yang tak terjadi.
+      if (body.client_ref) {
+        await catatHasilIdempoten({
+          companyId: auth.company_id!,
+          clientRef: body.client_ref,
+          userId: auth.sub,
+          deviceId: body.device_id ?? null,
+          tipe: "refund",
+          hasilJson: data,
+        });
+      }
+      return c.json(data);
     },
   );
