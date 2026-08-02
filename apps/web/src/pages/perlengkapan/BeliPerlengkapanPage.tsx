@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import type { BeliPerlengkapanRow, PerlengkapanMasterRow } from "@kakarut/shared";
-import { angkaDari } from "@kakarut/shared";
+import { angkaDari, teksAngka } from "@kakarut/shared";
 import {
   Card,
   ErrorText,
@@ -602,7 +602,7 @@ function TibaFakturModal({ faktur, onClose }: { faktur: FakturBeli; onClose: () 
     Object.fromEntries(
       barisMenunggu.map((r) => [
         r.id,
-        { qty: String(r.qty), harga: r.total_harga ? String(r.total_harga) : "" },
+        { qty: teksAngka(r.qty), harga: r.total_harga ? teksAngka(r.total_harga) : "" },
       ]),
     ),
   );
@@ -682,9 +682,12 @@ function TibaFakturModal({ faktur, onClose }: { faktur: FakturBeli; onClose: () 
               />
               <span className="text-xs text-stone-500">{r.satuan}</span>
               <input
-                type="number"
-                inputMode="numeric"
-                min="0"
+                /* Harga: `type="number"` menyimpan "12.500" apa adanya —
+                   `angkaDari` sudah membacanya benar — tapi MEMBUANG koma,
+                   jadi "12,5" mendarat sebagai 125 dan pembacanya tak bisa
+                   memulihkan apa yang sudah dibuang browser. */
+                type="text"
+                inputMode="decimal"
                 value={draft[r.id]?.harga ?? ""}
                 onChange={(e) =>
                   setDraft((p) => ({ ...p, [r.id]: { ...p[r.id], harga: e.target.value } }))
@@ -754,7 +757,7 @@ function BuatBeliModal({ onClose }: { onClose: () => void }) {
         if (!next.hargaManual && ("supplyId" in patch || "qty" in patch)) {
           const acuan = items.find((x) => x.id === next.supplyId)?.harga_beli ?? 0;
           const qty = angkaDari(next.qty);
-          next.harga = acuan > 0 && qty > 0 ? String(Math.round(acuan * qty)) : "";
+          next.harga = acuan > 0 && qty > 0 ? teksAngka(Math.round(acuan * qty)) : "";
         }
         return next;
       }),
@@ -821,9 +824,8 @@ function BuatBeliModal({ onClose }: { onClose: () => void }) {
                   className={`${inputClass} !w-24`}
                 />
                 <input
-                  type="number"
-                  inputMode="numeric"
-                  min="0"
+                  type="text"
+                  inputMode="decimal"
                   value={b.harga}
                   onChange={(e) =>
                     // ketikan manual mengunci nilai; dikosongkan = kembali auto

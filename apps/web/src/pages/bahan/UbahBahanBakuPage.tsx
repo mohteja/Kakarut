@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import type { BahanDto, KategoriDto } from "@kakarut/shared";
-import { angkaDari } from "@kakarut/shared";
+import { angkaDari, teksAngka } from "@kakarut/shared";
 import { Card, ErrorText, PageTitle, Spinner, btnPrimary, btnSecondary } from "../../components/ui";
 import { KategoriManagerModal } from "../../components/KategoriManagerModal";
 import { api } from "../../lib/api";
@@ -15,16 +15,16 @@ function keBaris(b: BahanDto): BahanEditorRow {
     nama: b.nama,
     pengadaan: b.pengadaan,
     satuan_beli: b.satuan_beli ?? "",
-    harga_beli: String(b.harga_beli),
+    harga_beli: teksAngka(b.harga_beli),
     satuan: b.satuan,
-    isi: String(b.isi),
+    isi: teksAngka(b.isi),
     kategori: b.kategori,
     boleh_eceran: b.boleh_eceran,
     track_stok: b.track_stok,
-    stok_minimum: String(b.stok_minimum),
-    min_beli: String(b.min_beli ?? 0),
-    masa_simpan: String(b.masa_simpan_hari ?? 0),
-    lead_time: String(b.lead_time_hari ?? 0),
+    stok_minimum: teksAngka(b.stok_minimum),
+    min_beli: teksAngka(b.min_beli ?? 0),
+    masa_simpan: teksAngka(b.masa_simpan_hari ?? 0),
+    lead_time: teksAngka(b.lead_time_hari ?? 0),
     is_packaging: b.is_packaging,
     is_complement: b.is_complement,
     catatan: b.catatan ?? "",

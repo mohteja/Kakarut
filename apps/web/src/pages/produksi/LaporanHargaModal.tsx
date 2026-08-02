@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import type { DampakLaporanHarga } from "@kakarut/shared";
-import { angkaDari } from "@kakarut/shared";
+import { angkaDari, teksAngka } from "@kakarut/shared";
 import { Modal, ErrorText, btnPrimary, btnSecondary, inputClass } from "../../components/ui";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah } from "../../lib/format";
@@ -29,7 +29,7 @@ export function LaporanHargaModal({
   // hanya baris yang tidak ditolak yang perlu dilaporkan harganya
   const rows = grup.rows.filter((r) => r.status !== "ditolak");
   const [harga, setHarga] = useState<Record<string, string>>(() =>
-    Object.fromEntries(rows.map((r) => [r.id, r.total_harga != null ? String(r.total_harga) : ""])),
+    Object.fromEntries(rows.map((r) => [r.id, r.total_harga != null ? teksAngka(r.total_harga) : ""])),
   );
   const [perbaruiAcuan, setPerbaruiAcuan] = useState(true);
   const total = rows.reduce(

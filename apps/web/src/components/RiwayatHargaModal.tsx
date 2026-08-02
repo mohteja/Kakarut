@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import type { RiwayatHargaDto } from "@kakarut/shared";
-import { angkaDari } from "@kakarut/shared";
+import { angkaDari, teksAngka } from "@kakarut/shared";
 import { api } from "../lib/api";
 import { formatAngka, formatRupiah, formatTanggal } from "../lib/format";
 import { ErrorText, Modal, Spinner, SpinnerAtauGalat, btnPrimary, btnSecondary, inputClass } from "./ui";
@@ -224,7 +224,7 @@ export function RiwayatHargaPanel({
               inputMode="decimal"
               value={hargaBaru}
               onChange={(e) => setHargaBaru(e.target.value)}
-              placeholder={String(
+              placeholder={teksAngka(
                 pakaiBasisIsi ? Math.round(data.harga_terkini * isi) : data.harga_terkini,
               )}
               className={`${inputClass} max-w-40`}

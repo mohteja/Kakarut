@@ -72,6 +72,35 @@ export function angkaDari(teks: string | number | null | undefined): number {
   return Number.isFinite(n) ? n : NaN;
 }
 
+/**
+ * Kebalikan `angkaDari`: mengubah angka SERVER jadi teks untuk MENGISI kotak
+ * isian, dalam bentuk yang terbaca balik utuh.
+ *
+ * Ini bukan hiasan, dan bukan sekadar soal selera tampilan. `String(n)` memakai
+ * titik desimal, dan aturan ke-3 `angkaDari` — satu titik diikuti TEPAT tiga
+ * angka berarti ribuan — memakan justru bentuk itu:
+ *
+ *     String(0.125)  → "0.125"  → angkaDari → 125     ← 1000× lebih besar
+ *     String(1.375)  → "1.375"  → angkaDari → 1375
+ *     String(0.001)  → "0.001"  → angkaDari → 1
+ *
+ * Aturan itu benar untuk yang DIKETIK orang ("1.500" memang seribu lima ratus;
+ * tak ada yang menulis begitu untuk satu setengah) dan salah untuk yang
+ * DICETAK mesin. Bedanya cuma terlihat kalau penulisnya satu pintu dengan
+ * pembacanya — karena itu fungsi ini hidup bersebelahan dengan `angkaDari`.
+ *
+ * Bentuk kegagalannya khas: takaran resep 0,125 kg (125 gram) dibuka lalu
+ * disimpan ulang TANPA disentuh, dan berubah jadi 125 kg. Halamannya tak perlu
+ * diedit sama sekali — cukup dibuka dan disimpan.
+ */
+export function teksAngka(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return "";
+  const s = String(n);
+  // Notasi eksponen (|n| < 1e-6 atau ≥ 1e21) di luar jangkauan qty/harga
+  // aplikasi ini; dibiarkan apa adanya daripada dikarang jadi angka lain.
+  return s.includes("e") || s.includes("E") ? s : s.replace(".", ",");
+}
+
 /** `angkaDari`, tapi memulangkan `null` alih-alih NaN — enak untuk badan JSON. */
 export function angkaAtauNull(teks: string | number | null | undefined): number | null {
   const n = angkaDari(teks);

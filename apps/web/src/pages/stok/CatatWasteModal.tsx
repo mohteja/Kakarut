@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import type { ExpLotRow } from "@kakarut/shared";
+import { angkaDari, teksAngka } from "@kakarut/shared";
 import { ErrorText, Modal, btnPrimary, btnSecondary, inputClass } from "../../components/ui";
 import { ImageUpload } from "../../components/ImageUpload";
 import { api } from "../../lib/api";
@@ -23,14 +24,14 @@ export function CatatWasteModal({
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
-  const [qty, setQty] = useState(String(Math.min(lot.qty_masuk, Math.max(lot.saldo, 0))));
+  const [qty, setQty] = useState(teksAngka(Math.min(lot.qty_masuk, Math.max(lot.saldo, 0))));
   const [foto, setFoto] = useState<string | null>(null);
   const [catatan, setCatatan] = useState(
     `Waste kedaluwarsa (exp ${formatTanggalRingkas(lot.exp_date)})`,
   );
   const [sukses, setSukses] = useState<{ nomor: string } | null>(null);
 
-  const q = Number(qty);
+  const q = angkaDari(qty);
   const qtyInvalid = !Number.isFinite(q) || q <= 0 || q > lot.saldo + 1e-9;
 
   const simpan = useMutation({
@@ -86,9 +87,13 @@ export function CatatWasteModal({
               Qty waste ({lot.satuan}) <span className="text-red-500">*</span>
             </label>
             <input
-              type="number"
-              min="0"
-              step="any"
+              /* Koma adalah pemisah desimal bahasa Indonesia, dan
+                                 `type="number"` MEMBUANG-nya saat diketik: "1,5"
+                                 tersimpan "15" dengan `badInput` false — tak ada
+                                 satu pun tanda di layar. `angkaDari` membaca
+                                 koma maupun titik ribuan. */
+              type="text"
+              inputMode="decimal"
               value={qty}
               onChange={(e) => setQty(e.target.value)}
               className={`${inputClass} ${qtyInvalid ? "!border-red-400" : ""}`}

@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import type { JenisPengadaan, KonfirmasiStatus, StokRowDto } from "@kakarut/shared";
+import { angkaDari, teksAngka } from "@kakarut/shared";
 import {
   Card,
   ErrorText,
@@ -1049,7 +1050,7 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
             Baris / halaman
             <select
               value={perPage}
-              onChange={(e) => gantiFilter(() => setPerPage(Number(e.target.value)))}
+              onChange={(e) => gantiFilter(() => setPerPage(angkaDari(e.target.value)))}
               className={`${inputClass} w-auto`}
             >
               {[10, 20, 50, 100].map((n) => (
@@ -1203,7 +1204,7 @@ function KirimHasilModal({
   }
   const daftar = [...perBahan.entries()];
   const [qty, setQty] = useState<Record<string, string>>(
-    () => Object.fromEntries(daftar.map(([id, b]) => [id, String(b.qty)])),
+    () => Object.fromEntries(daftar.map(([id, b]) => [id, teksAngka(b.qty)])),
   );
   // saldo stok CK per bahan — batas atas kiriman (transfer stok nyata)
   const ckBranchId = siap[0]?.branch_id ?? null;
@@ -1214,8 +1215,8 @@ function KirimHasilModal({
   });
   const saldoCk = new Map((stokCk ?? []).map((s) => [s.ingredient_id, s.saldo]));
   const items = daftar
-    .filter(([id]) => Number(qty[id]) > 0)
-    .map(([id]) => ({ ingredient_id: id, qty: Number(qty[id]) }));
+    .filter(([id]) => angkaDari(qty[id]) > 0)
+    .map(([id]) => ({ ingredient_id: id, qty: angkaDari(qty[id]) }));
   const adaLebihDariSaldo = items.some(
     (it) => saldoCk.has(it.ingredient_id) && it.qty > (saldoCk.get(it.ingredient_id) ?? 0),
   );
@@ -1237,9 +1238,13 @@ function KirimHasilModal({
             </div>
             <div className="w-28 shrink-0">
               <input
-                type="number"
-                min={0}
-                step="any"
+                /* Koma adalah pemisah desimal bahasa Indonesia, dan
+                                 `type="number"` MEMBUANG-nya saat diketik: "1,5"
+                                 tersimpan "15" dengan `badInput` false — tak ada
+                                 satu pun tanda di layar. `angkaDari` membaca
+                                 koma maupun titik ribuan. */
+                type="text"
+                inputMode="decimal"
                 value={qty[id] ?? ""}
                 onChange={(e) => setQty((p) => ({ ...p, [id]: e.target.value }))}
                 className={`${inputClass} text-right`}

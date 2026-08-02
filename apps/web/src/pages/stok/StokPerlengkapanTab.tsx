@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { angkaDari } from "@kakarut/shared";
+import { angkaDari, teksAngka } from "@kakarut/shared";
 import { useState } from "react";
 import type {
   BelanjaPerlengkapanDto,
@@ -434,7 +434,7 @@ function MasukModal({
             value={totalHarga}
             onChange={(e) => setTotalHarga(e.target.value)}
             className={inputClass}
-            placeholder={perkiraan != null ? String(perkiraan) : "0"}
+            placeholder={perkiraan != null ? teksAngka(perkiraan) : "0"}
           />
         </label>
         <label className="block text-sm">
@@ -471,7 +471,7 @@ function MintaModal({
 }) {
   // saran: cukupi sampai stok minimum (minimal 1)
   const saran = Math.max(1, Math.ceil(item.stok_minimum - item.saldo));
-  const [qty, setQty] = useState(String(Math.min(saran, item.saldo_ck ?? saran)));
+  const [qty, setQty] = useState(teksAngka(Math.min(saran, item.saldo_ck ?? saran)));
   const [catatan, setCatatan] = useState("");
   const kirim = useMutation({
     mutationFn: () =>

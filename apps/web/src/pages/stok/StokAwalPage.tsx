@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import type { StokRowDto } from "@kakarut/shared";
-import { angkaDari } from "@kakarut/shared";
+import { angkaDari, teksAngka } from "@kakarut/shared";
 import { ErrorText, btnPrimary, btnSecondary } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { useBranch, useCabangData } from "../../context/BranchContext";
@@ -53,7 +53,7 @@ export function StokAwalPage() {
     setTanggal(tersimpan.tanggal || hariIniWIB());
     if (tersimpan.items.length > 0) {
       const map: Record<string, string> = {};
-      for (const it of tersimpan.items) map[it.ingredient_id] = String(it.qty);
+      for (const it of tersimpan.items) map[it.ingredient_id] = teksAngka(it.qty);
       setAwal(map);
     }
   }, [tersimpan]);

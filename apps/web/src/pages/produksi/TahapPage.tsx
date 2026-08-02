@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import type { JenisPengadaan, PenyimpananDto } from "@kakarut/shared";
+import { angkaDari, teksAngka } from "@kakarut/shared";
 import {
   Card,
   ErrorText,
@@ -122,7 +123,7 @@ function TahapForm({
         r.id,
         {
           aktif: true,
-          qty: String(r.qty),
+          qty: teksAngka(r.qty),
           // exp default: exp yang sudah ada, atau hari ini + masa simpan master
           exp:
             r.exp_date ??
@@ -164,7 +165,7 @@ function TahapForm({
         .filter((r) => pilih[r.id]?.aktif)
         .map((r) => ({
           id: r.id,
-          qty: Number(pilih[r.id]?.qty),
+          qty: angkaDari(pilih[r.id]?.qty),
           ...(masukStok && pilih[r.id]?.exp ? { exp: pilih[r.id].exp } : {}),
         }));
   const adaInvalid =
@@ -172,7 +173,7 @@ function TahapForm({
     bisaMaju.some((r) => {
       const p = pilih[r.id];
       if (!p?.aktif) return false;
-      const q = Number(p.qty);
+      const q = angkaDari(p.qty);
       // qty boleh melebihi rencana (kemasan/hasil nyata) — hanya ≤ 0 yang salah
       return !Number.isFinite(q) || q <= 0;
     });
@@ -180,13 +181,13 @@ function TahapForm({
     ? 0
     : bisaMaju.filter((r) => {
         const p = pilih[r.id];
-        return !p?.aktif || Number(p.qty) < r.qty - 1e-9;
+        return !p?.aktif || angkaDari(p.qty) < r.qty - 1e-9;
       }).length;
 
   // Dana cair untuk baris yang meninggalkan tahap RAB (prorata qty maju).
   const barisRab = bisaMaju.filter((r) => r.status === "rencana" && pilih[r.id]?.aktif);
   const rabMaju = barisRab.reduce((t, r) => {
-    const q = Number(pilih[r.id]?.qty);
+    const q = angkaDari(pilih[r.id]?.qty);
     if (!Number.isFinite(q) || q <= 0 || r.total_harga == null) return t;
     // Diskalakan mengikuti qty yang benar-benar diambil — termasuk saat LEBIH
     // dari rencana (beli per kemasan), supaya dana yang disarankan cukup.
@@ -196,7 +197,7 @@ function TahapForm({
   // Dana cair hanya untuk BELI — produksi tak belanja apa pun, jadi tak ada
   // uang yang dicairkan.
   const tanyaDana = tipe === "beli" && barisRab.length > 0;
-  const danaCair = !tanyaDana ? null : danaManual ? Number(danaNominal) : rabMaju;
+  const danaCair = !tanyaDana ? null : danaManual ? angkaDari(danaNominal) : rabMaju;
   const danaInvalid =
     tanyaDana && danaManual && (!Number.isFinite(danaCair) || danaCair! < 0);
 
@@ -336,7 +337,7 @@ function TahapForm({
               <tbody className="divide-y divide-stone-100">
                 {bisaMaju.map((r) => {
                   const p = pilih[r.id];
-                  const q = Number(p?.qty);
+                  const q = angkaDari(p?.qty);
                   // RAB itu RENCANA, bukan pagu: qty realisasi boleh LEBIH
                   // (sayur direncanakan 900 gr tapi hanya dijual per kilo → beli
                   // 1.000) maupun KURANG. Yang salah hanya qty ≤ 0/kosong.
@@ -386,9 +387,12 @@ function TahapForm({
                       <td className={`${tdClass} text-right`}>
                         <div className="flex items-center justify-end gap-1.5">
                           <input
-                            type="number"
-                            min="0"
-                            step="any"
+                            /* Qty barang: pecahan normal ("1,5" kg) dan koma
+                               adalah pemisah desimal bahasa Indonesia.
+                               `type="number"` MEMBUANG koma saat diketik —
+                               "1,5" jadi "15" tanpa `badInput`. */
+                            type="text"
+                            inputMode="decimal"
                             value={p?.qty ?? ""}
                             disabled={!p?.aktif}
                             onChange={(e) => ubah(r, { qty: e.target.value })}
@@ -519,7 +523,7 @@ function TahapForm({
                           {g.rows
                             .map(
                               (r) =>
-                                `${r.bahan} (${formatAngka(Number(pilih[r.id]?.qty) || r.qty)} ${r.satuan})${
+                                `${r.bahan} (${formatAngka(angkaDari(pilih[r.id]?.qty) || r.qty)} ${r.satuan})${
                                   pilih[r.id]?.exp ? ` · ⏳ ${pilih[r.id].exp}` : ""
                                 }`,
                             )
@@ -613,10 +617,12 @@ function TahapForm({
             <label className="flex flex-wrap items-center gap-2 text-sm">
               <span>Nominal yang cair:</span>
               <input
-                type="number"
-                min="0"
-                step="any"
-                value={danaManual ? danaNominal : String(rabMaju)}
+                /* Nominal uang. `type="number"` menyimpan "1.500.000" apa
+                   adanya dan `Number` membacanya 1,5 — dana cair Rp 1,5 juta
+                   tercatat Rp 1,5. `angkaDari` membaca kedua bentuk. */
+                type="text"
+                inputMode="decimal"
+                value={danaManual ? danaNominal : teksAngka(rabMaju)}
                 onChange={(e) => {
                   setDanaManual(true);
                   setDanaNominal(e.target.value);

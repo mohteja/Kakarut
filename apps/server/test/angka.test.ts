@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { angkaAtauNull, angkaDari } from "@kakarut/shared";
+import { angkaAtauNull, angkaDari, teksAngka } from "@kakarut/shared";
 
 /**
  * Membaca angka yang diketik orang, dalam format yang aplikasi ini SENDIRI
@@ -78,5 +78,27 @@ describe("angkaDari: baca angka gaya id-ID", () => {
     for (const n of [0, 1.5, 470, 1500, 12000, 1500000, 0.25, 1234567.89]) {
       expect(angkaDari(cetak(n))).toBe(n);
     }
+  });
+
+  it("teksAngka → angkaDari bolak-balik utuh, termasuk yang String() rusakkan", () => {
+    /**
+     * Yang MENGISI kotak isian harus satu pintu dengan yang membacanya.
+     * `String()` bukan pintu itu: aturan "satu titik + tepat tiga angka =
+     * ribuan" — benar untuk ketikan orang — memakan justru keluaran `String()`.
+     *
+     * Tiga baris pertama adalah kasus yang benar-benar rusak sebelum ada
+     * `teksAngka`; sisanya jaring pengaman supaya perbaikannya tak menggeser
+     * yang tadinya sudah benar.
+     */
+    for (const n of [0.125, 1.375, 0.001, 0.625, 2.5, 0.5, 1500, 12.75, 0, 1500000, 470]) {
+      expect(angkaDari(teksAngka(n)), `bolak-balik ${n}`).toBe(n);
+    }
+    // Bentuk id-ID, bukan gaya mesin — inilah yang dibaca mata pemakainya.
+    expect(teksAngka(0.125)).toBe("0,125");
+    expect(teksAngka(1500)).toBe("1500");
+    // Kosong = belum diisi; NaN/null tak pernah bocor jadi teks "NaN".
+    expect(teksAngka(null)).toBe("");
+    expect(teksAngka(undefined)).toBe("");
+    expect(teksAngka(NaN)).toBe("");
   });
 });

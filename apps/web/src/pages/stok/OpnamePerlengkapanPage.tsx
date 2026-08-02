@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import type { PerlengkapanRowDto } from "@kakarut/shared";
-import { angkaDari } from "@kakarut/shared";
+import { angkaDari, teksAngka } from "@kakarut/shared";
 import { ErrorText, Spinner, btnPrimary, btnSecondary } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { useBranch, useCabangData } from "../../context/BranchContext";
@@ -336,7 +336,7 @@ export function OpnamePerlengkapanPage() {
                         className="h-12 flex-1 rounded-lg border border-stone-300 px-3 text-lg font-semibold focus:border-orange-500 focus:outline-none"
                       />
                       <button
-                        onClick={() => setFisik({ ...fisik, [r.id]: String(r.saldo) })}
+                        onClick={() => setFisik({ ...fisik, [r.id]: teksAngka(r.saldo) })}
                         className="h-12 shrink-0 rounded-lg border border-stone-300 px-3 text-sm font-medium text-stone-600"
                         title="Isi sama dengan sistem"
                       >

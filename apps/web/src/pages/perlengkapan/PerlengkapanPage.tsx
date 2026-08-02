@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { angkaDari } from "@kakarut/shared";
+import { angkaDari, teksAngka } from "@kakarut/shared";
 import { useState } from "react";
 import type {
   KategoriDto,
@@ -336,8 +336,8 @@ function ItemModal({
 }) {
   const [nama, setNama] = useState(item?.nama ?? "");
   const [satuan, setSatuan] = useState(item?.satuan ?? "pcs");
-  const [hargaBeli, setHargaBeli] = useState(item ? String(item.harga_beli) : "");
-  const [stokMin, setStokMin] = useState(item ? String(item.stok_minimum) : "");
+  const [hargaBeli, setHargaBeli] = useState(item ? teksAngka(item.harga_beli) : "");
+  const [stokMin, setStokMin] = useState(item ? teksAngka(item.stok_minimum) : "");
   const [catatan, setCatatan] = useState(item?.catatan ?? "");
   const [kategori, setKategori] = useState(item?.kategori ?? "");
   const [bolehEceran, setBolehEceran] = useState(item?.boleh_eceran ?? true);
@@ -528,8 +528,8 @@ function AturanForm({
   onSukses: () => void;
 }) {
   const [metode, setMetode] = useState<PerlengkapanAturanMetode>(aturan?.metode ?? "otomatis");
-  const [qty, setQty] = useState(aturan && aturan.qty > 0 ? String(aturan.qty) : "1");
-  const [perHari, setPerHari] = useState(aturan ? String(aturan.per_hari) : "1");
+  const [qty, setQty] = useState(aturan && aturan.qty > 0 ? teksAngka(aturan.qty) : "1");
+  const [perHari, setPerHari] = useState(aturan ? teksAngka(aturan.per_hari) : "1");
   const [aktif, setAktif] = useState(aturan?.aktif ?? true);
   const [mulai, setMulai] = useState(aturan?.mulai ?? "");
   const kirim = useMutation({

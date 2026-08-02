@@ -10,6 +10,7 @@ import type {
   MenuDto,
   SatuanDto,
 } from "@kakarut/shared";
+import { angkaDari, teksAngka } from "@kakarut/shared";
 import {
   Card,
   ErrorText,
@@ -228,7 +229,7 @@ export function ResepPage() {
   useEffect(() => {
     if (resepServer) {
       setResep(
-        resepServer.map((r) => ({ ingredient_id: r.ingredient_id, qty: String(r.qty) })),
+        resepServer.map((r) => ({ ingredient_id: r.ingredient_id, qty: teksAngka(r.qty) })),
       );
     } else {
       setResep([]);
@@ -274,13 +275,13 @@ export function ResepPage() {
     setAtur(
       dipilih
         ? {
-            isi: String(dipilih.isi),
+            isi: teksAngka(dipilih.isi),
             satuan: dipilih.satuan,
-            overhead: String(dipilih.overhead_x ?? 1),
-            stokMin: String(dipilih.stok_minimum),
-            stokMinToko: String(dipilih.stok_minimum_toko ?? 0),
-            masaSimpan: String(dipilih.masa_simpan_hari ?? 0),
-            leadTime: String(dipilih.lead_time_hari ?? 0),
+            overhead: teksAngka(dipilih.overhead_x ?? 1),
+            stokMin: teksAngka(dipilih.stok_minimum),
+            stokMinToko: teksAngka(dipilih.stok_minimum_toko ?? 0),
+            masaSimpan: teksAngka(dipilih.masa_simpan_hari ?? 0),
+            leadTime: teksAngka(dipilih.lead_time_hari ?? 0),
             produksiDi: dipilih.produksi_di ?? "ck",
             divisiProduksi: dipilih.divisi_produksi ?? "kitchen",
             produksiBranchIds: dipilih.produksi_branch_ids ?? [],
@@ -300,11 +301,11 @@ export function ResepPage() {
   const semuaById = new Map(semua.map((b) => [b.id, b]));
   const biayaResep = resep.reduce((a, r) => {
     const x = semuaById.get(r.ingredient_id);
-    return a + (x ? (Number(r.qty) || 0) * x.harga_per_unit : 0);
+    return a + (x ? (angkaDari(r.qty) || 0) * x.harga_per_unit : 0);
   }, 0);
-  const overhead = Number(atur?.overhead) > 0 ? Number(atur?.overhead) : 1;
+  const overhead = angkaDari(atur?.overhead) > 0 ? angkaDari(atur?.overhead) : 1;
   const hargaBatch = Math.round(biayaResep * overhead * 100) / 100;
-  const isiBatch = Number(atur?.isi) > 0 ? Number(atur?.isi) : 0;
+  const isiBatch = angkaDari(atur?.isi) > 0 ? angkaDari(atur?.isi) : 0;
 
   // Apakah menyimpan akan MENGGESER harga bahan ini? Selisih di bawah 1 rupiah
   // dianggap sama (harga tersimpan dibulatkan, biaya resep tidak).
@@ -329,21 +330,21 @@ export function ResepPage() {
         method: "PUT",
         body: {
           komponen: resep
-            .filter((r) => r.ingredient_id && Number(r.qty) > 0)
-            .map((r) => ({ ingredient_id: r.ingredient_id, qty: Number(r.qty) })),
+            .filter((r) => r.ingredient_id && angkaDari(r.qty) > 0)
+            .map((r) => ({ ingredient_id: r.ingredient_id, qty: angkaDari(r.qty) })),
         },
       });
       if (atur) {
         await api(`/bahan/${selectedId}`, {
           method: "PUT",
           body: {
-            isi: Number(atur.isi) > 0 ? Number(atur.isi) : 1,
+            isi: angkaDari(atur.isi) > 0 ? angkaDari(atur.isi) : 1,
             satuan: atur.satuan.trim() || "pcs",
             overhead_x: overhead,
-            stok_minimum: Number(atur.stokMin) || 0,
-            stok_minimum_toko: Number(atur.stokMinToko) || 0,
-            masa_simpan_hari: Math.max(0, Math.trunc(Number(atur.masaSimpan) || 0)),
-            lead_time_hari: Math.max(0, Math.trunc(Number(atur.leadTime) || 0)),
+            stok_minimum: angkaDari(atur.stokMin) || 0,
+            stok_minimum_toko: angkaDari(atur.stokMinToko) || 0,
+            masa_simpan_hari: Math.max(0, Math.trunc(angkaDari(atur.masaSimpan) || 0)),
+            lead_time_hari: Math.max(0, Math.trunc(angkaDari(atur.leadTime) || 0)),
             ...(hargaBerubah && setujuHarga ? { harga_beli: hargaBatch } : {}),
             produksi_di: atur.produksiDi,
             // divisi hanya bermakna untuk produksi cabang — CK kembali ke default
@@ -721,9 +722,13 @@ export function ResepPage() {
                             disabled={!bolehUbah}
                           />
                           <input
-                            type="number"
-                            min="0.0001"
-                            step="any"
+                            /* Takaran resep: pecahan adalah normal ("0,5" kg)
+                               dan koma adalah pemisah desimal bahasa Indonesia.
+                               `type="number"` MEMBUANG koma saat diketik — "0,5"
+                               tersimpan "05" (=5) tanpa `badInput`, jadi HPP
+                               seluruh resep melenceng 10× tanpa tanda apa pun. */
+                            type="text"
+                            inputMode="decimal"
                             value={r.qty}
                             onChange={(e) => {
                               const salinan = [...resep];
@@ -746,8 +751,8 @@ export function ResepPage() {
                                 {terpilih ? `× Rp ${formatAngka(terpilih.harga_per_unit, 2)}` : ""}
                               </span>
                               <span className="w-28 shrink-0 text-right text-sm whitespace-nowrap font-medium text-stone-700 tabular-nums">
-                                {terpilih && Number(r.qty) > 0
-                                  ? formatRupiah(Number(r.qty) * terpilih.harga_per_unit)
+                                {terpilih && angkaDari(r.qty) > 0
+                                  ? formatRupiah(angkaDari(r.qty) * terpilih.harga_per_unit)
                                   : "—"}
                               </span>
                             </>
@@ -815,9 +820,8 @@ export function ResepPage() {
                           </label>
                           <div className="flex gap-2">
                             <input
-                              type="number"
-                              min="0.0001"
-                              step="any"
+                              type="text"
+                              inputMode="decimal"
                               value={atur.isi}
                               onChange={(e) => setAtur({ ...atur, isi: e.target.value })}
                               className={inputClass}
@@ -838,9 +842,8 @@ export function ResepPage() {
                             Overhead biaya (×)
                           </label>
                           <input
-                            type="number"
-                            min="0.01"
-                            step="any"
+                            type="text"
+                            inputMode="decimal"
                             value={atur.overhead}
                             onChange={(e) => setAtur({ ...atur, overhead: e.target.value })}
                             className={inputClass}
@@ -857,9 +860,8 @@ export function ResepPage() {
                             Stok minimum di Central Kitchen ({atur.satuan})
                           </label>
                           <input
-                            type="number"
-                            min="0"
-                            step="any"
+                            type="text"
+                            inputMode="decimal"
                             value={atur.stokMin}
                             onChange={(e) => setAtur({ ...atur, stokMin: e.target.value })}
                             className={inputClass}
@@ -872,9 +874,8 @@ export function ResepPage() {
                             Stok minimum di toko ({atur.satuan})
                           </label>
                           <input
-                            type="number"
-                            min="0"
-                            step="any"
+                            type="text"
+                            inputMode="decimal"
                             value={atur.stokMinToko}
                             onChange={(e) =>
                               setAtur({ ...atur, stokMinToko: e.target.value })
@@ -892,9 +893,8 @@ export function ResepPage() {
                             Masa simpan (hari)
                           </label>
                           <input
-                            type="number"
-                            min="0"
-                            step="1"
+                            type="text"
+                            inputMode="numeric"
                             value={atur.masaSimpan}
                             onChange={(e) => setAtur({ ...atur, masaSimpan: e.target.value })}
                             className={inputClass}
@@ -911,9 +911,8 @@ export function ResepPage() {
                             Lama produksi (hari)
                           </label>
                           <input
-                            type="number"
-                            min="0"
-                            step="1"
+                            type="text"
+                            inputMode="numeric"
                             value={atur.leadTime}
                             onChange={(e) => setAtur({ ...atur, leadTime: e.target.value })}
                             className={inputClass}

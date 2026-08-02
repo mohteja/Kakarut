@@ -261,9 +261,10 @@ export function BahanEditorGrid({
 
   const fMasaSimpan = (b: BahanEditorRow, i: number, lebar: string) => (
     <input
-      type="number"
-      min="0"
-      step="1"
+      /* Sama dengan isian hari di ResepPage: `type="text"` supaya seluruh
+         isian angka di aplikasi ini dibaca oleh satu pengurai (`angkaDari`),
+         bukan separuh oleh browser. */
+      type="text"
       inputMode="numeric"
       value={b.masa_simpan}
       onChange={(e) => onChange(i, { masa_simpan: e.target.value })}
@@ -275,9 +276,7 @@ export function BahanEditorGrid({
 
   const fLeadTime = (b: BahanEditorRow, i: number, lebar: string) => (
     <input
-      type="number"
-      min="0"
-      step="1"
+      type="text"
       inputMode="numeric"
       value={b.lead_time}
       onChange={(e) => onChange(i, { lead_time: e.target.value })}

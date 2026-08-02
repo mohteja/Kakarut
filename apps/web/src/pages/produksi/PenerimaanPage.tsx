@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import type { KonfirmasiStatus } from "@kakarut/shared";
+import { angkaDari, teksAngka } from "@kakarut/shared";
 import {
   Card,
   ErrorText,
@@ -168,7 +169,7 @@ export function PenerimaanPage() {
         body: {
           items: g.rows.map((r) => ({
             id: r.id,
-            qty_diterima: Number(qtyDraft[r.id] ?? r.qty) || 0,
+            qty_diterima: angkaDari(qtyDraft[r.id] ?? r.qty) || 0,
           })),
           alasan: alasan.trim() || null,
         },
@@ -277,11 +278,14 @@ export function PenerimaanPage() {
                         {modeSebagian && (
                           <td className={`${tdClass} text-right`}>
                             <input
-                              type="number"
-                              min="0"
-                              max={r.qty}
-                              step="any"
-                              value={qtyDraft[r.id] ?? String(r.qty)}
+                              /* Koma adalah pemisah desimal bahasa Indonesia, dan
+                                 `type="number"` MEMBUANG-nya saat diketik: "1,5"
+                                 tersimpan "15" dengan `badInput` false — tak ada
+                                 satu pun tanda di layar. `angkaDari` membaca
+                                 koma maupun titik ribuan. */
+                              type="text"
+                              inputMode="decimal"
+                              value={qtyDraft[r.id] ?? teksAngka(r.qty)}
                               onChange={(e) =>
                                 setQtyDraft((p) => ({ ...p, [r.id]: e.target.value }))
                               }
