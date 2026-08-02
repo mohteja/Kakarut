@@ -398,6 +398,33 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
   }
 
   const itemValid = items.filter((it) => it.ingredient_id && angkaDari(it.jumlah) > 0);
+  /**
+   * Baris yang SUDAH DIISI orang tapi tidak akan ikut tersimpan.
+   *
+   * Penyaring kiriman di atas (`angkaDari(it.jumlah) > 0`) memakai
+   * perbandingan, bukan `!== ""` seperti empat halaman kembarnya
+   * (`StokAwalPage`, `OpnamePage`, `OpnamePerlengkapanPage`,
+   * `StokPerlengkapanTab`) — dan itu membuat kegagalannya jauh lebih sunyi.
+   * Di sana salah ketik jadi NaN, lolos ke server, lalu ditolak zod dengan
+   * galat yang menyebut indeks larik; berisik, tapi setidaknya ada galat.
+   * Di sini NaN gagal `> 0`, jadi barisnya dibuang DI SISI KLIEN: hilang dari
+   * `itemValid` sekaligus dari `items` yang dikirim. Selama masih ada satu
+   * baris yang benar, fakturnya tersimpan — tanpa galat, tanpa peringatan,
+   * tanpa bahan itu.
+   *
+   * Kolomnya memang mengundang salah ketik, dan itu disengaja: komentar di
+   * atas `<input>` menjelaskan kenapa ia `type="text"` — `type="number"`
+   * MEMBUANG koma desimal Indonesia diam-diam. Membiarkannya teks adalah
+   * pilihan yang benar; yang belum ada cuma separuh keduanya, yaitu menahan
+   * teks yang tak terbaca. "2 kg", "2kg", "dua", dan "1/2" semuanya NaN.
+   *
+   * Nol dan minus ikut dijaring lewat `!(… > 0)` yang sama: keduanya terbaca
+   * sebagai angka, tapi nasib barisnya persis sama — dibuang diam-diam.
+   */
+  const jumlahTerbuang = items
+    .filter((it) => it.ingredient_id && it.jumlah.trim() !== "" && !(angkaDari(it.jumlah) > 0))
+    .map((it) => bahanJalur.find((x) => x.id === it.ingredient_id)?.nama)
+    .filter((n): n is string => !!n);
   const totalFaktur = items.reduce((a, it) => {
     const { estimasi } = hitungBaris(it);
     const harga = it.total_harga ? angkaDari(it.total_harga) : (estimasi ?? 0);
@@ -851,6 +878,12 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
         )}
       </div>
 
+      {jumlahTerbuang.length > 0 && (
+        <div className="mt-3 rounded-lg bg-red-50 px-3 py-1.5 text-xs font-medium text-red-800">
+          Jumlah pada <b>{jumlahTerbuang.join(", ")}</b> belum terbaca sebagai angka lebih dari
+          0 — tulis seperti <b>3</b> atau <b>1,5</b>. Tanpa itu barisnya tidak ikut tersimpan.
+        </div>
+      )}
       <ErrorText error={simpan.error} />
       <div className="mt-3 flex justify-end gap-2">
         <button type="button" onClick={() => navigate(endpoint)} className={btnSecondary}>
@@ -859,7 +892,7 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
         <button
           type="button"
           onClick={() => simpan.mutate()}
-          disabled={itemValid.length === 0 || simpan.isPending}
+          disabled={itemValid.length === 0 || jumlahTerbuang.length > 0 || simpan.isPending}
           className={btnPrimary}
         >
           {simpan.isPending ? "Menyimpan…" : "Simpan Faktur"}
