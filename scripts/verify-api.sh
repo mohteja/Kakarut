@@ -7440,7 +7440,7 @@ echo "── §161 Buka kasir BERBARENGAN: satu shift, tanpa 500 ──"
 api "$REISS105" POST /shift/tutup '{"uang_fisik":0}' > /dev/null 2>&1 || true
 R161A=$(mktemp); R161B=$(mktemp); R161C=$(mktemp)
 for f in "$R161A" "$R161B" "$R161C"; do
-  curl -s -X POST "$BASE/api/shift/buka" -H "Authorization: Bearer $KASIR" \
+  curl -s -X POST "$BASE/api/shift/buka" -H "Authorization: Bearer $REISS105" \
     -H 'Content-Type: application/json' -d '{"modal_awal":123000}' \
     -w '\n%{http_code}' > "$f" &
 done
