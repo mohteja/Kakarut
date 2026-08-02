@@ -7426,6 +7426,10 @@ cek "shift BARU yang mencatat uang keluar laci: −9.000" "abs(V + 9000) < 0.001
 
 echo
 echo "── §161 Buka kasir BERBARENGAN: satu shift, tanpa 500 ──"
+# Token: $REISS105, BUKAN $KASIR. $KASIR sudah tak berlaku sejak §105
+# me-reissue-nya (ganti password menaikkan token_version); memakainya di sini
+# membuat seluruh bagian ini balas 401 dan ujinya gagal tanpa menyentuh
+# perilaku yang sebenarnya diuji. §160 di atas juga memakai $REISS105.
 # Indeks parsial `shifts_open_per_branch_uq` (migrasi 0023) yang benar-benar
 # menjaga "satu shift terbuka per cabang" — SELECT-lalu-INSERT selalu punya
 # jeda di antaranya. Yang kalah balapan HARUS mendarat di hasil yang sama
@@ -7433,7 +7437,7 @@ echo "── §161 Buka kasir BERBARENGAN: satu shift, tanpa 500 ──"
 # 23505 mentah alias 500 — dan di web, 500 yang bukan galat aplikasi memicu
 # overlay global "server sedang diperbarui": aplikasinya terlihat tumbang
 # padahal kasir cuma membuka laci.
-api "$KASIR" POST /shift/tutup '{"uang_fisik":0}' > /dev/null 2>&1 || true
+api "$REISS105" POST /shift/tutup '{"uang_fisik":0}' > /dev/null 2>&1 || true
 R161A=$(mktemp); R161B=$(mktemp); R161C=$(mktemp)
 for f in "$R161A" "$R161B" "$R161C"; do
   curl -s -X POST "$BASE/api/shift/buka" -H "Authorization: Bearer $KASIR" \
@@ -7459,7 +7463,7 @@ cek "ketiganya menunjuk shift yang SAMA (bukan dua laci)" "V == 1" \
 # yang menang adalah shift lama dengan modal lain — dan itu tetap BENAR. Yang
 # dijaga: angka yang dilaporkan ketiganya sama dengan yang tersimpan di server,
 # bukan angka yang dikarang masing-masing dari permintaannya sendiri.
-AKTIF161=$(api "$KASIR" GET /shift/aktif)
+AKTIF161=$(api "$REISS105" GET /shift/aktif)
 cek "server menyisakan tepat SATU shift terbuka di cabang ini" "V == 1" \
   "$(printf '%s' "$AKTIF161" | jq -r 'if .id then 1 else 0 end')"
 cek "id yang disepakati ketiganya == shift aktif di server" "V == 1" \

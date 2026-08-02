@@ -6,6 +6,7 @@ import { z } from "zod";
 import { db } from "../../db/client";
 import { menuCategories, menus } from "../../db/schema";
 import { requireRole, type AppEnv } from "../../middleware/auth";
+import { tanpaBentrok } from "../../lib/pg-galat";
 
 const KategoriBody = z.object({
   nama: z.string().trim().min(1),
@@ -27,26 +28,38 @@ export const kategoriRoutes = new Hono<AppEnv>()
       .where(eq(menuCategories.companyId, auth.company_id!))
       // `id` sebagai pemutus seri — urutan harus sama persis tiap query agar
       // ETag daftar tidak berubah walau datanya tidak berubah.
-      .orderBy(asc(menuCategories.sortOrder), asc(menuCategories.nama), asc(menuCategories.id));
+      .orderBy(
+        asc(menuCategories.sortOrder),
+        asc(menuCategories.nama),
+        asc(menuCategories.id),
+      );
     return c.json(
       rows.map((r) => ({ id: r.id, nama: r.nama, sort_order: r.sortOrder })),
     );
   })
-  .post("/", requireRole("owner", "admin"), zValidator("json", KategoriBody), async (c) => {
-    const auth = c.get("auth");
-    const body = c.req.valid("json");
-    const [row] = await db
-      .insert(menuCategories)
-      .values({
-        companyId: auth.company_id!,
-        nama: body.nama,
-        sortOrder: body.sort_order,
-      })
-      .onConflictDoNothing()
-      .returning();
-    if (!row) throw new HTTPException(409, { message: "Kategori sudah ada" });
-    return c.json({ id: row.id, nama: row.nama, sort_order: row.sortOrder }, 201);
-  })
+  .post(
+    "/",
+    requireRole("owner", "admin"),
+    zValidator("json", KategoriBody),
+    async (c) => {
+      const auth = c.get("auth");
+      const body = c.req.valid("json");
+      const [row] = await db
+        .insert(menuCategories)
+        .values({
+          companyId: auth.company_id!,
+          nama: body.nama,
+          sortOrder: body.sort_order,
+        })
+        .onConflictDoNothing()
+        .returning();
+      if (!row) throw new HTTPException(409, { message: "Kategori sudah ada" });
+      return c.json(
+        { id: row.id, nama: row.nama, sort_order: row.sortOrder },
+        201,
+      );
+    },
+  )
   .patch(
     "/:id",
     requireRole("owner", "admin"),
@@ -54,20 +67,25 @@ export const kategoriRoutes = new Hono<AppEnv>()
     async (c) => {
       const auth = c.get("auth");
       const body = c.req.valid("json");
-      const [row] = await db
-        .update(menuCategories)
-        .set({
-          ...(body.nama !== undefined && { nama: body.nama }),
-          ...(body.sort_order !== undefined && { sortOrder: body.sort_order }),
-        })
-        .where(
-          and(
-            eq(menuCategories.id, c.req.param("id")),
-            eq(menuCategories.companyId, auth.company_id!),
-          ),
-        )
-        .returning();
-      if (!row) throw new HTTPException(404, { message: "Kategori tidak ditemukan" });
+      const [row] = await tanpaBentrok("Nama kategori itu sudah dipakai", () =>
+        db
+          .update(menuCategories)
+          .set({
+            ...(body.nama !== undefined && { nama: body.nama }),
+            ...(body.sort_order !== undefined && {
+              sortOrder: body.sort_order,
+            }),
+          })
+          .where(
+            and(
+              eq(menuCategories.id, c.req.param("id")),
+              eq(menuCategories.companyId, auth.company_id!),
+            ),
+          )
+          .returning(),
+      );
+      if (!row)
+        throw new HTTPException(404, { message: "Kategori tidak ditemukan" });
       return c.json({ id: row.id, nama: row.nama, sort_order: row.sortOrder });
     },
   )
@@ -79,14 +97,24 @@ export const kategoriRoutes = new Hono<AppEnv>()
     const [{ n }] = await db
       .select({ n: count() })
       .from(menus)
-      .where(and(eq(menus.categoryId, id), eq(menus.companyId, auth.company_id!)));
+      .where(
+        and(eq(menus.categoryId, id), eq(menus.companyId, auth.company_id!)),
+      );
     if (n > 0) {
-      throw new HTTPException(409, { message: `Kategori masih dipakai ${n} menu` });
+      throw new HTTPException(409, {
+        message: `Kategori masih dipakai ${n} menu`,
+      });
     }
     const [row] = await db
       .delete(menuCategories)
-      .where(and(eq(menuCategories.id, id), eq(menuCategories.companyId, auth.company_id!)))
+      .where(
+        and(
+          eq(menuCategories.id, id),
+          eq(menuCategories.companyId, auth.company_id!),
+        ),
+      )
       .returning({ id: menuCategories.id });
-    if (!row) throw new HTTPException(404, { message: "Kategori tidak ditemukan" });
+    if (!row)
+      throw new HTTPException(404, { message: "Kategori tidak ditemukan" });
     return c.json({ ok: true });
   });

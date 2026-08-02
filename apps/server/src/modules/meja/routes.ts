@@ -6,6 +6,7 @@ import { z } from "zod";
 import type { MejaDto, MejaKosongLogRow, MejaStatusDto } from "@kakarut/shared";
 import { db } from "../../db/client";
 import { meja, mejaKosongLogs, users } from "../../db/schema";
+import { tanpaBentrok } from "../../lib/pg-galat";
 import {
   pastikanCabang,
   requireRole,
@@ -110,7 +111,9 @@ export const mejaRoutes = new Hono<AppEnv>()
     const rows = await db
       .select()
       .from(meja)
-      .where(and(eq(meja.companyId, auth.company_id!), eq(meja.branchId, branchId)))
+      .where(
+        and(eq(meja.companyId, auth.company_id!), eq(meja.branchId, branchId)),
+      )
       // `id` sebagai pemutus seri — meja baru lazim menumpuk di pos (0,0)
       // dengan nama mirip, jadi seri di sini justru sering terjadi. Urutan yang
       // goyah membuat ETag daftar berubah walau datanya sama.
@@ -126,7 +129,10 @@ export const mejaRoutes = new Hono<AppEnv>()
   .get("/status", async (c) => {
     const auth = c.get("auth");
     const branchId = await resolveBranchId(c);
-    const rows = await hitungOkupansi(db, { companyId: auth.company_id!, branchId });
+    const rows = await hitungOkupansi(db, {
+      companyId: auth.company_id!,
+      branchId,
+    });
     return c.json(
       rows.map(
         (r): MejaStatusDto => ({
@@ -137,7 +143,9 @@ export const mejaRoutes = new Hono<AppEnv>()
           transaksi_aktif: r.transaksi_aktif,
           lunas_masih_duduk: r.bill_terbuka === 0 && r.transaksi_aktif > 0,
           sejak: r.sejak ? r.sejak.toISOString() : null,
-          dikosongkan_pada: r.dikosongkan_pada ? r.dikosongkan_pada.toISOString() : null,
+          dikosongkan_pada: r.dikosongkan_pada
+            ? r.dikosongkan_pada.toISOString()
+            : null,
           dikosongkan_oleh: r.dikosongkan_oleh,
           // Hanya bermakna saat mejanya masih terisi. Meja kosong sengaja
           // dikosongkan juga di sini supaya klien tak pernah menawarkan
@@ -175,12 +183,18 @@ export const mejaRoutes = new Hono<AppEnv>()
         .select({ id: meja.id, tipe: meja.tipe, nama: meja.nama })
         .from(meja)
         .where(
-          and(eq(meja.id, id), eq(meja.companyId, auth.company_id!), eq(meja.branchId, branchId)),
+          and(
+            eq(meja.id, id),
+            eq(meja.companyId, auth.company_id!),
+            eq(meja.branchId, branchId),
+          ),
         );
-      if (!row) throw new HTTPException(404, { message: "Meja tidak ditemukan" });
+      if (!row)
+        throw new HTTPException(404, { message: "Meja tidak ditemukan" });
       if (row.tipe === "takeaway") {
         throw new HTTPException(400, {
-          message: "Ruang Tunggu dipakai bergantian sepanjang hari — tidak perlu dikosongkan",
+          message:
+            "Ruang Tunggu dipakai bergantian sepanjang hari — tidak perlu dikosongkan",
         });
       }
 
@@ -189,7 +203,9 @@ export const mejaRoutes = new Hono<AppEnv>()
         // penasihat per meja — pola yang sama dengan `kunciKirimCabang` di
         // modul stok. Tanpa ini dua orang yang menekan bersamaan menulis dua
         // baris jejak untuk satu pembersihan yang sama.
-        await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`meja-kosong:${id}`}))`);
+        await tx.execute(
+          sql`SELECT pg_advisory_xact_lock(hashtext(${`meja-kosong:${id}`}))`,
+        );
         const [okupansi] = await hitungOkupansi(tx, {
           companyId: auth.company_id!,
           branchId,
@@ -217,9 +233,14 @@ export const mejaRoutes = new Hono<AppEnv>()
           companyId: auth.company_id!,
           branchId,
           mejaId: id,
-          aksi: paksa ? "Meja dikosongkan (masih ada bill belum dibayar)" : "Meja dikosongkan",
+          aksi: paksa
+            ? "Meja dikosongkan (masih ada bill belum dibayar)"
+            : "Meja dikosongkan",
           paksa,
-          detail: ringkasPengosongan(okupansi.bill_terbuka, okupansi.transaksi_aktif),
+          detail: ringkasPengosongan(
+            okupansi.bill_terbuka,
+            okupansi.transaksi_aktif,
+          ),
           userId: auth.sub,
           // WATERMARK, bukan `now()`: batasnya adalah transaksi TERBARU yang
           // benar-benar ikut terhitung barusan. Dengan `now()`, pesanan yang
@@ -285,7 +306,9 @@ export const mejaRoutes = new Hono<AppEnv>()
       ? await pastikanCabang(body.branch_id, auth.company_id!)
       : await resolveBranchId(c);
     if (terikatCabang(auth.role) && branchId !== auth.branch_id) {
-      throw new HTTPException(403, { message: "Hanya boleh menambah meja di cabang sendiri" });
+      throw new HTTPException(403, {
+        message: "Hanya boleh menambah meja di cabang sendiri",
+      });
     }
     const [row] = await db
       .insert(meja)
@@ -298,81 +321,130 @@ export const mejaRoutes = new Hono<AppEnv>()
       .onConflictDoNothing()
       .returning();
     if (!row) {
-      throw new HTTPException(409, { message: `Meja "${body.nama}" sudah ada di cabang ini` });
+      throw new HTTPException(409, {
+        message: `Meja "${body.nama}" sudah ada di cabang ini`,
+      });
     }
     return c.json(toDto(row), 201);
   })
   // Simpan tata letak denah sekaligus (posisi persen 0..100). Kasir untuk cabangnya.
-  .put("/tata-letak", bolehAturMeja, zValidator("json", TataLetakBody), async (c) => {
-    const auth = c.get("auth");
-    const body = c.req.valid("json");
-    const branchId = await resolveBranchId(c);
-    await db.transaction(async (tx) => {
-      for (const it of body.items) {
-        await tx
-          .update(meja)
-          .set({ posX: it.pos_x, posY: it.pos_y })
-          .where(
-            and(
-              eq(meja.id, it.id),
-              eq(meja.companyId, auth.company_id!),
-              eq(meja.branchId, branchId),
-            ),
-          );
+  .put(
+    "/tata-letak",
+    bolehAturMeja,
+    zValidator("json", TataLetakBody),
+    async (c) => {
+      const auth = c.get("auth");
+      const body = c.req.valid("json");
+      const branchId = await resolveBranchId(c);
+      await db.transaction(async (tx) => {
+        for (const it of body.items) {
+          await tx
+            .update(meja)
+            .set({ posX: it.pos_x, posY: it.pos_y })
+            .where(
+              and(
+                eq(meja.id, it.id),
+                eq(meja.companyId, auth.company_id!),
+                eq(meja.branchId, branchId),
+              ),
+            );
+        }
+      });
+      const rows = await db
+        .select()
+        .from(meja)
+        .where(
+          and(
+            eq(meja.companyId, auth.company_id!),
+            eq(meja.branchId, branchId),
+          ),
+        )
+        // `id` sebagai pemutus seri — meja baru lazim menumpuk di pos (0,0)
+        // dengan nama mirip, jadi seri di sini justru sering terjadi. Urutan yang
+        // goyah membuat ETag daftar berubah walau datanya sama.
+        .orderBy(asc(meja.posY), asc(meja.posX), asc(meja.nama), asc(meja.id));
+      return c.json(rows.map(toDto));
+    },
+  )
+  .patch(
+    "/:id",
+    bolehAturMeja,
+    zValidator("json", MejaBody.partial()),
+    async (c) => {
+      const auth = c.get("auth");
+      const body = c.req.valid("json");
+      const [existing] = await db
+        .select()
+        .from(meja)
+        .where(
+          and(
+            eq(meja.id, c.req.param("id")),
+            eq(meja.companyId, auth.company_id!),
+          ),
+        );
+      if (!existing)
+        throw new HTTPException(404, { message: "Meja tidak ditemukan" });
+      if (terikatCabang(auth.role) && existing.branchId !== auth.branch_id) {
+        throw new HTTPException(403, {
+          message: "Hanya boleh mengubah meja di cabang sendiri",
+        });
       }
-    });
-    const rows = await db
-      .select()
-      .from(meja)
-      .where(and(eq(meja.companyId, auth.company_id!), eq(meja.branchId, branchId)))
-      // `id` sebagai pemutus seri — meja baru lazim menumpuk di pos (0,0)
-      // dengan nama mirip, jadi seri di sini justru sering terjadi. Urutan yang
-      // goyah membuat ETag daftar berubah walau datanya sama.
-      .orderBy(asc(meja.posY), asc(meja.posX), asc(meja.nama), asc(meja.id));
-    return c.json(rows.map(toDto));
-  })
-  .patch("/:id", bolehAturMeja, zValidator("json", MejaBody.partial()), async (c) => {
-    const auth = c.get("auth");
-    const body = c.req.valid("json");
-    const [existing] = await db
-      .select()
-      .from(meja)
-      .where(and(eq(meja.id, c.req.param("id")), eq(meja.companyId, auth.company_id!)));
-    if (!existing) throw new HTTPException(404, { message: "Meja tidak ditemukan" });
-    if (terikatCabang(auth.role) && existing.branchId !== auth.branch_id) {
-      throw new HTTPException(403, { message: "Hanya boleh mengubah meja di cabang sendiri" });
-    }
-    // Menonaktifkan meja yang masih ada tamunya membuat pilihan meja kasir
-    // tercabut di tengah transaksi (halaman kasir melepas meja yang hilang dari
-    // daftar aktif), dan bill yang sah jadi tak bisa ditagih.
-    if (body.is_active === false) await tolakBilaTerisi(existing.id, existing.branchId, auth);
-    const [row] = await db
-      .update(meja)
-      .set({
-        ...(body.nama !== undefined && { nama: body.nama }),
-        ...(body.is_active !== undefined && { isActive: body.is_active }),
-      })
-      .where(and(eq(meja.id, existing.id), eq(meja.companyId, auth.company_id!)))
-      .returning();
-    return c.json(toDto(row));
-  })
+      // Menonaktifkan meja yang masih ada tamunya membuat pilihan meja kasir
+      // tercabut di tengah transaksi (halaman kasir melepas meja yang hilang dari
+      // daftar aktif), dan bill yang sah jadi tak bisa ditagih.
+      if (body.is_active === false)
+        await tolakBilaTerisi(existing.id, existing.branchId, auth);
+      const [row] = await tanpaBentrok(
+        "Nama meja itu sudah dipakai di cabang ini",
+        () =>
+          db
+            .update(meja)
+            .set({
+              ...(body.nama !== undefined && { nama: body.nama }),
+              ...(body.is_active !== undefined && { isActive: body.is_active }),
+            })
+            .where(
+              and(
+                eq(meja.id, existing.id),
+                eq(meja.companyId, auth.company_id!),
+              ),
+            )
+            .returning(),
+      );
+      return c.json(toDto(row));
+    },
+  )
   .delete("/:id", bolehAturMeja, async (c) => {
     const auth = c.get("auth");
     const [existing] = await db
       .select()
       .from(meja)
-      .where(and(eq(meja.id, c.req.param("id")), eq(meja.companyId, auth.company_id!)));
-    if (!existing) throw new HTTPException(404, { message: "Meja tidak ditemukan" });
+      .where(
+        and(
+          eq(meja.id, c.req.param("id")),
+          eq(meja.companyId, auth.company_id!),
+        ),
+      );
+    if (!existing)
+      throw new HTTPException(404, { message: "Meja tidak ditemukan" });
     if (terikatCabang(auth.role) && existing.branchId !== auth.branch_id) {
-      throw new HTTPException(403, { message: "Hanya boleh menghapus meja di cabang sendiri" });
+      throw new HTTPException(403, {
+        message: "Hanya boleh menghapus meja di cabang sendiri",
+      });
     }
     if (existing.tipe === "takeaway") {
-      throw new HTTPException(400, { message: "Meja Ruang Tunggu tidak bisa dihapus" });
+      throw new HTTPException(400, {
+        message: "Meja Ruang Tunggu tidak bisa dihapus",
+      });
     }
     // `sales.meja_id` & `open_bills.meja_id` ber-onDelete "set null": menghapus
     // meja yang masih dipakai membuat tagihannya yatim — masih hidup, tapi tak
     // lagi menempati apa pun, jadi tak akan pernah muncul di papan meja mana pun.
     await tolakBilaTerisi(existing.id, existing.branchId, auth);
-    await db.delete(meja).where(and(eq(meja.id, existing.id), eq(meja.companyId, auth.company_id!)));
+    await db
+      .delete(meja)
+      .where(
+        and(eq(meja.id, existing.id), eq(meja.companyId, auth.company_id!)),
+      );
     return c.json({ ok: true });
   });

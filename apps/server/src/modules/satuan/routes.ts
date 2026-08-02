@@ -6,6 +6,7 @@ import { z } from "zod";
 import { db } from "../../db/client";
 import { ingredients, units } from "../../db/schema";
 import { requireRole, type AppEnv } from "../../middleware/auth";
+import { tanpaBentrok } from "../../lib/pg-galat";
 
 const SatuanBody = z.object({
   nama: z.string().trim().min(1).max(20),
@@ -34,7 +35,10 @@ export const satuanRoutes = new Hono<AppEnv>()
     // web bisa mencegah hapus satuan yang masih terpakai. Satu bahan dihitung
     // sekali per nama satuan yang dirujuknya.
     const pakai = await db
-      .select({ satuan: ingredients.satuan, satuanBeli: ingredients.satuanBeli })
+      .select({
+        satuan: ingredients.satuan,
+        satuanBeli: ingredients.satuanBeli,
+      })
       .from(ingredients)
       .where(eq(ingredients.companyId, auth.company_id!));
     const dipakai = new Map<string, number>();
@@ -53,17 +57,29 @@ export const satuanRoutes = new Hono<AppEnv>()
       })),
     );
   })
-  .post("/", requireRole("owner", "admin"), zValidator("json", SatuanBody), async (c) => {
-    const auth = c.get("auth");
-    const body = c.req.valid("json");
-    const [row] = await db
-      .insert(units)
-      .values({ companyId: auth.company_id!, nama: body.nama, sortOrder: body.sort_order })
-      .onConflictDoNothing()
-      .returning();
-    if (!row) throw new HTTPException(409, { message: "Satuan sudah ada" });
-    return c.json({ id: row.id, nama: row.nama, sort_order: row.sortOrder }, 201);
-  })
+  .post(
+    "/",
+    requireRole("owner", "admin"),
+    zValidator("json", SatuanBody),
+    async (c) => {
+      const auth = c.get("auth");
+      const body = c.req.valid("json");
+      const [row] = await db
+        .insert(units)
+        .values({
+          companyId: auth.company_id!,
+          nama: body.nama,
+          sortOrder: body.sort_order,
+        })
+        .onConflictDoNothing()
+        .returning();
+      if (!row) throw new HTTPException(409, { message: "Satuan sudah ada" });
+      return c.json(
+        { id: row.id, nama: row.nama, sort_order: row.sortOrder },
+        201,
+      );
+    },
+  )
   .patch(
     "/:id",
     requireRole("owner", "admin"),
@@ -71,15 +87,25 @@ export const satuanRoutes = new Hono<AppEnv>()
     async (c) => {
       const auth = c.get("auth");
       const body = c.req.valid("json");
-      const [row] = await db
-        .update(units)
-        .set({
-          ...(body.nama !== undefined && { nama: body.nama }),
-          ...(body.sort_order !== undefined && { sortOrder: body.sort_order }),
-        })
-        .where(and(eq(units.id, c.req.param("id")), eq(units.companyId, auth.company_id!)))
-        .returning();
-      if (!row) throw new HTTPException(404, { message: "Satuan tidak ditemukan" });
+      const [row] = await tanpaBentrok("Nama satuan itu sudah dipakai", () =>
+        db
+          .update(units)
+          .set({
+            ...(body.nama !== undefined && { nama: body.nama }),
+            ...(body.sort_order !== undefined && {
+              sortOrder: body.sort_order,
+            }),
+          })
+          .where(
+            and(
+              eq(units.id, c.req.param("id")),
+              eq(units.companyId, auth.company_id!),
+            ),
+          )
+          .returning(),
+      );
+      if (!row)
+        throw new HTTPException(404, { message: "Satuan tidak ditemukan" });
       return c.json({ id: row.id, nama: row.nama, sort_order: row.sortOrder });
     },
   )
@@ -91,7 +117,8 @@ export const satuanRoutes = new Hono<AppEnv>()
       .select({ nama: units.nama })
       .from(units)
       .where(and(eq(units.id, id), eq(units.companyId, auth.company_id!)));
-    if (!milik) throw new HTTPException(404, { message: "Satuan tidak ditemukan" });
+    if (!milik)
+      throw new HTTPException(404, { message: "Satuan tidak ditemukan" });
     // Satuan yang masih dipakai bahan tak boleh dihapus — baik sebagai satuan
     // resep (ingredients.satuan) maupun satuan beli (ingredients.satuan_beli).
     const [{ n }] = await db
@@ -100,12 +127,19 @@ export const satuanRoutes = new Hono<AppEnv>()
       .where(
         and(
           eq(ingredients.companyId, auth.company_id!),
-          or(eq(ingredients.satuan, milik.nama), eq(ingredients.satuanBeli, milik.nama)),
+          or(
+            eq(ingredients.satuan, milik.nama),
+            eq(ingredients.satuanBeli, milik.nama),
+          ),
         ),
       );
     if (n > 0) {
-      throw new HTTPException(409, { message: `Satuan masih dipakai ${n} bahan` });
+      throw new HTTPException(409, {
+        message: `Satuan masih dipakai ${n} bahan`,
+      });
     }
-    await db.delete(units).where(and(eq(units.id, id), eq(units.companyId, auth.company_id!)));
+    await db
+      .delete(units)
+      .where(and(eq(units.id, id), eq(units.companyId, auth.company_id!)));
     return c.json({ ok: true });
   });

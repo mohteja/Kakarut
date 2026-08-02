@@ -5,7 +5,12 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { db } from "../../db/client";
 import { branches, companies } from "../../db/schema";
-import { requireRole, resolveBranchId, type AppEnv } from "../../middleware/auth";
+import {
+  requireRole,
+  resolveBranchId,
+  type AppEnv,
+} from "../../middleware/auth";
+import { tanpaBentrok } from "../../lib/pg-galat";
 import { seedMejaDefault } from "../meja/defaults";
 
 /** Pengaturan struk milik SATU cabang (dipakai dari halaman Printer). */
@@ -67,14 +72,18 @@ async function resolveCentralKitchen(
   }
   if (given) {
     if (selfId && given === selfId) {
-      throw new HTTPException(400, { message: "Cabang tidak bisa terhubung ke dirinya sendiri" });
+      throw new HTTPException(400, {
+        message: "Cabang tidak bisa terhubung ke dirinya sendiri",
+      });
     }
     const [ck] = await db
       .select({ id: branches.id, tipe: branches.tipe })
       .from(branches)
       .where(and(eq(branches.id, given), eq(branches.companyId, companyId)));
     if (!ck || ck.tipe !== "central_kitchen") {
-      throw new HTTPException(400, { message: "Central Kitchen tujuan tidak valid" });
+      throw new HTTPException(400, {
+        message: "Central Kitchen tujuan tidak valid",
+      });
     }
     return ck.id;
   }
@@ -132,79 +141,110 @@ export const cabangRoutes = new Hono<AppEnv>()
    * Printer "di cabang masing-masing". Kasir terkunci ke cabangnya; owner/admin
    * memilih cabang lewat ?branch_id. Hanya field struk yang bisa diubah di sini.
    */
-  .put("/struk", requireRole("owner", "admin", "cashier"), zValidator("json", StrukBody), async (c) => {
-    const auth = c.get("auth");
-    const branchId = await resolveBranchId(c);
-    const body = c.req.valid("json");
-    // Tanpa field struk apa pun → no-op (hindari UPDATE SET kosong yang error).
-    if (body.receipt_footer === undefined && body.receipt_show_alamat === undefined) {
-      return c.json({ ok: true });
-    }
-    const [row] = await db
-      .update(branches)
-      .set({
-        ...(body.receipt_footer !== undefined && { receiptFooter: body.receipt_footer }),
-        ...(body.receipt_show_alamat !== undefined && {
-          receiptShowAlamat: body.receipt_show_alamat,
-        }),
-      })
-      .where(and(eq(branches.id, branchId), eq(branches.companyId, auth.company_id!)))
-      .returning({ id: branches.id });
-    if (!row) throw new HTTPException(404, { message: "Cabang tidak ditemukan" });
-    return c.json({ ok: true });
-  })
-  .post("/", requireRole("owner", "admin"), zValidator("json", CabangBody), async (c) => {
-    const auth = c.get("auth");
-    const body = c.req.valid("json");
-    // Mode Lite dibatasi 1 cabang — multi-lokasi butuh upgrade ke Pro.
-    const [comp] = await db
-      .select({ plan: companies.plan })
-      .from(companies)
-      .where(eq(companies.id, auth.company_id!));
-    if (comp?.plan !== "pro") {
-      const ada = await db
-        .select({ id: branches.id })
-        .from(branches)
-        .where(eq(branches.companyId, auth.company_id!))
-        .limit(1);
-      if (ada.length > 0) {
-        throw new HTTPException(400, {
-          message: "Mode Lite hanya 1 cabang — upgrade ke Pro untuk multi-lokasi",
-        });
+  .put(
+    "/struk",
+    requireRole("owner", "admin", "cashier"),
+    zValidator("json", StrukBody),
+    async (c) => {
+      const auth = c.get("auth");
+      const branchId = await resolveBranchId(c);
+      const body = c.req.valid("json");
+      // Tanpa field struk apa pun → no-op (hindari UPDATE SET kosong yang error).
+      if (
+        body.receipt_footer === undefined &&
+        body.receipt_show_alamat === undefined
+      ) {
+        return c.json({ ok: true });
       }
-    }
-    const tipe = body.tipe ?? "store";
-    const ckId = await resolveCentralKitchen(auth.company_id!, tipe, body.central_kitchen_id);
-    // Cabang + meja bawaan dibuat atomik: bila seed gagal, pembuatan cabang ikut rollback.
-    const row = await db.transaction(async (tx) => {
-      const [b] = await tx
-        .insert(branches)
-        .values({
-          companyId: auth.company_id!,
-          nama: body.nama,
-          alamat: body.alamat ?? null,
-          telepon: body.telepon ?? null,
-          tipe,
-          centralKitchenId: ckId,
-          receiptFooter: body.receipt_footer ?? null,
+      const [row] = await db
+        .update(branches)
+        .set({
+          ...(body.receipt_footer !== undefined && {
+            receiptFooter: body.receipt_footer,
+          }),
           ...(body.receipt_show_alamat !== undefined && {
             receiptShowAlamat: body.receipt_show_alamat,
           }),
-          latitude: body.latitude ?? null,
-          longitude: body.longitude ?? null,
-          ...(body.radius_absen_m !== undefined && { radiusAbsenM: body.radius_absen_m }),
-          jamBuka: body.jam_buka || null,
-          jamTutup: body.jam_tutup || null,
         })
-        .onConflictDoNothing()
-        .returning();
-      if (!b) throw new HTTPException(409, { message: `Cabang "${body.nama}" sudah ada` });
-      // Meja bawaan (Ruang Tunggu + Meja 1) supaya usaha take away langsung bisa jualan.
-      await seedMejaDefault(tx, auth.company_id!, b.id);
-      return b;
-    });
-    return c.json({ id: row.id, nama: row.nama }, 201);
-  })
+        .where(
+          and(
+            eq(branches.id, branchId),
+            eq(branches.companyId, auth.company_id!),
+          ),
+        )
+        .returning({ id: branches.id });
+      if (!row)
+        throw new HTTPException(404, { message: "Cabang tidak ditemukan" });
+      return c.json({ ok: true });
+    },
+  )
+  .post(
+    "/",
+    requireRole("owner", "admin"),
+    zValidator("json", CabangBody),
+    async (c) => {
+      const auth = c.get("auth");
+      const body = c.req.valid("json");
+      // Mode Lite dibatasi 1 cabang — multi-lokasi butuh upgrade ke Pro.
+      const [comp] = await db
+        .select({ plan: companies.plan })
+        .from(companies)
+        .where(eq(companies.id, auth.company_id!));
+      if (comp?.plan !== "pro") {
+        const ada = await db
+          .select({ id: branches.id })
+          .from(branches)
+          .where(eq(branches.companyId, auth.company_id!))
+          .limit(1);
+        if (ada.length > 0) {
+          throw new HTTPException(400, {
+            message:
+              "Mode Lite hanya 1 cabang — upgrade ke Pro untuk multi-lokasi",
+          });
+        }
+      }
+      const tipe = body.tipe ?? "store";
+      const ckId = await resolveCentralKitchen(
+        auth.company_id!,
+        tipe,
+        body.central_kitchen_id,
+      );
+      // Cabang + meja bawaan dibuat atomik: bila seed gagal, pembuatan cabang ikut rollback.
+      const row = await db.transaction(async (tx) => {
+        const [b] = await tx
+          .insert(branches)
+          .values({
+            companyId: auth.company_id!,
+            nama: body.nama,
+            alamat: body.alamat ?? null,
+            telepon: body.telepon ?? null,
+            tipe,
+            centralKitchenId: ckId,
+            receiptFooter: body.receipt_footer ?? null,
+            ...(body.receipt_show_alamat !== undefined && {
+              receiptShowAlamat: body.receipt_show_alamat,
+            }),
+            latitude: body.latitude ?? null,
+            longitude: body.longitude ?? null,
+            ...(body.radius_absen_m !== undefined && {
+              radiusAbsenM: body.radius_absen_m,
+            }),
+            jamBuka: body.jam_buka || null,
+            jamTutup: body.jam_tutup || null,
+          })
+          .onConflictDoNothing()
+          .returning();
+        if (!b)
+          throw new HTTPException(409, {
+            message: `Cabang "${body.nama}" sudah ada`,
+          });
+        // Meja bawaan (Ruang Tunggu + Meja 1) supaya usaha take away langsung bisa jualan.
+        await seedMejaDefault(tx, auth.company_id!, b.id);
+        return b;
+      });
+      return c.json({ id: row.id, nama: row.nama }, 201);
+    },
+  )
   .patch(
     "/:id",
     requireRole("owner", "admin"),
@@ -214,14 +254,24 @@ export const cabangRoutes = new Hono<AppEnv>()
       const body = c.req.valid("json");
       const branchId = c.req.param("id");
       const [ada] = await db
-        .select({ tipe: branches.tipe, centralKitchenId: branches.centralKitchenId })
+        .select({
+          tipe: branches.tipe,
+          centralKitchenId: branches.centralKitchenId,
+        })
         .from(branches)
-        .where(and(eq(branches.id, branchId), eq(branches.companyId, auth.company_id!)));
-      if (!ada) throw new HTTPException(404, { message: "Cabang tidak ditemukan" });
+        .where(
+          and(
+            eq(branches.id, branchId),
+            eq(branches.companyId, auth.company_id!),
+          ),
+        );
+      if (!ada)
+        throw new HTTPException(404, { message: "Cabang tidak ditemukan" });
 
       // Koneksi CK dihitung ulang saat tipe/koneksi diubah: store wajib punya
       // SATU CK pemasok; ganti tipe ke CK/kantor memutus koneksinya.
-      let ckPatch: { centralKitchenId: string | null } | Record<string, never> = {};
+      let ckPatch: { centralKitchenId: string | null } | Record<string, never> =
+        {};
       if (body.tipe !== undefined || body.central_kitchen_id !== undefined) {
         const tipeBaru = body.tipe ?? ada.tipe;
         const diminta =
@@ -240,30 +290,44 @@ export const cabangRoutes = new Hono<AppEnv>()
         };
       }
 
-      const [row] = await db
-        .update(branches)
-        .set({
-          ...(body.nama !== undefined && { nama: body.nama }),
-          ...(body.alamat !== undefined && { alamat: body.alamat }),
-          ...(body.telepon !== undefined && { telepon: body.telepon }),
-          ...(body.tipe !== undefined && { tipe: body.tipe }),
-          ...(body.receipt_footer !== undefined && { receiptFooter: body.receipt_footer }),
-          ...(body.receipt_show_alamat !== undefined && {
-            receiptShowAlamat: body.receipt_show_alamat,
-          }),
-          ...(body.latitude !== undefined && { latitude: body.latitude }),
-          ...(body.longitude !== undefined && { longitude: body.longitude }),
-          ...(body.radius_absen_m !== undefined && { radiusAbsenM: body.radius_absen_m }),
-          ...(body.jam_buka !== undefined && { jamBuka: body.jam_buka || null }),
-          ...(body.jam_tutup !== undefined && { jamTutup: body.jam_tutup || null }),
-          ...(body.is_active !== undefined && { isActive: body.is_active }),
-          ...ckPatch,
-        })
-        .where(
-          and(eq(branches.id, branchId), eq(branches.companyId, auth.company_id!)),
-        )
-        .returning();
-      if (!row) throw new HTTPException(404, { message: "Cabang tidak ditemukan" });
+      const [row] = await tanpaBentrok("Nama cabang itu sudah dipakai", () =>
+        db
+          .update(branches)
+          .set({
+            ...(body.nama !== undefined && { nama: body.nama }),
+            ...(body.alamat !== undefined && { alamat: body.alamat }),
+            ...(body.telepon !== undefined && { telepon: body.telepon }),
+            ...(body.tipe !== undefined && { tipe: body.tipe }),
+            ...(body.receipt_footer !== undefined && {
+              receiptFooter: body.receipt_footer,
+            }),
+            ...(body.receipt_show_alamat !== undefined && {
+              receiptShowAlamat: body.receipt_show_alamat,
+            }),
+            ...(body.latitude !== undefined && { latitude: body.latitude }),
+            ...(body.longitude !== undefined && { longitude: body.longitude }),
+            ...(body.radius_absen_m !== undefined && {
+              radiusAbsenM: body.radius_absen_m,
+            }),
+            ...(body.jam_buka !== undefined && {
+              jamBuka: body.jam_buka || null,
+            }),
+            ...(body.jam_tutup !== undefined && {
+              jamTutup: body.jam_tutup || null,
+            }),
+            ...(body.is_active !== undefined && { isActive: body.is_active }),
+            ...ckPatch,
+          })
+          .where(
+            and(
+              eq(branches.id, branchId),
+              eq(branches.companyId, auth.company_id!),
+            ),
+          )
+          .returning(),
+      );
+      if (!row)
+        throw new HTTPException(404, { message: "Cabang tidak ditemukan" });
       return c.json({ ok: true });
     },
   );

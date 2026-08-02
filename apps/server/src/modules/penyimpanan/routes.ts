@@ -5,6 +5,7 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import type { PenyimpananDto, PetugasRingkas } from "@kakarut/shared";
 import { db } from "../../db/client";
+import { tanpaBentrok } from "../../lib/pg-galat";
 import {
   ingredients,
   memberships,
@@ -69,7 +70,8 @@ async function isiByLokasi(
       ),
     )
     .groupBy(storageLocationIngredients.storageLocationId);
-  for (const r of rows) map.set(r.locId, { bahan: r.bahan, perlengkapan: r.perlengkapan });
+  for (const r of rows)
+    map.set(r.locId, { bahan: r.bahan, perlengkapan: r.perlengkapan });
   return map;
 }
 
@@ -94,7 +96,10 @@ async function petugasByLokasi(
     .innerJoin(users, eq(storageLocationPetugas.userId, users.id))
     .leftJoin(
       memberships,
-      and(eq(memberships.userId, users.id), eq(memberships.companyId, companyId)),
+      and(
+        eq(memberships.userId, users.id),
+        eq(memberships.companyId, companyId),
+      ),
     )
     .where(
       and(
@@ -110,7 +115,9 @@ async function petugasByLokasi(
       role: r.role ?? "cashier",
       // Penugasan BASI (akun dihapus/nonaktif/diarsip/dibuat ulang) tidak
       // boleh mengunci rak diam-diam: tandai non-aktif → diabaikan pembatasan.
-      aktif: Boolean(r.userAktif && !r.userDihapus && r.role != null && !r.arsip),
+      aktif: Boolean(
+        r.userAktif && !r.userDihapus && r.role != null && !r.arsip,
+      ),
     });
     byLoc.set(r.locId, list);
   }
@@ -136,7 +143,9 @@ export const penyimpananRoutes = new Hono<AppEnv>()
       petugasByLokasi(auth.company_id!, ids),
       isiByLokasi(auth.company_id!, ids),
     ]);
-    return c.json(rows.map((r) => toDto(r, byLoc.get(r.id) ?? [], byIsi.get(r.id))));
+    return c.json(
+      rows.map((r) => toDto(r, byLoc.get(r.id) ?? [], byIsi.get(r.id))),
+    );
   })
   // POST boleh semua peran — dipakai quick-add saat mengisi faktur
   .post("/", zValidator("json", PenyimpananBody), async (c) => {
@@ -146,7 +155,9 @@ export const penyimpananRoutes = new Hono<AppEnv>()
       ? await pastikanCabang(body.branch_id, auth.company_id!)
       : await resolveBranchId(c);
     if (terikatCabang(auth.role) && branchId !== auth.branch_id) {
-      throw new HTTPException(403, { message: "Kasir hanya boleh menambah di cabangnya" });
+      throw new HTTPException(403, {
+        message: "Kasir hanya boleh menambah di cabangnya",
+      });
     }
     const [row] = await db
       .insert(storageLocations)
@@ -159,7 +170,9 @@ export const penyimpananRoutes = new Hono<AppEnv>()
       .onConflictDoNothing()
       .returning();
     if (!row) {
-      throw new HTTPException(409, { message: `Tempat "${body.nama}" sudah ada di cabang ini` });
+      throw new HTTPException(409, {
+        message: `Tempat "${body.nama}" sudah ada di cabang ini`,
+      });
     }
     return c.json(toDto(row), 201);
   })
@@ -170,21 +183,28 @@ export const penyimpananRoutes = new Hono<AppEnv>()
     async (c) => {
       const auth = c.get("auth");
       const body = c.req.valid("json");
-      const [row] = await db
-        .update(storageLocations)
-        .set({
-          ...(body.nama !== undefined && { nama: body.nama }),
-          ...(body.catatan !== undefined && { catatan: body.catatan }),
-          ...(body.is_active !== undefined && { isActive: body.is_active }),
-        })
-        .where(
-          and(
-            eq(storageLocations.id, c.req.param("id")),
-            eq(storageLocations.companyId, auth.company_id!),
-          ),
-        )
-        .returning();
-      if (!row) throw new HTTPException(404, { message: "Tempat penyimpanan tidak ditemukan" });
+      const [row] = await tanpaBentrok(
+        "Nama tempat penyimpanan itu sudah dipakai di cabang ini",
+        () =>
+          db
+            .update(storageLocations)
+            .set({
+              ...(body.nama !== undefined && { nama: body.nama }),
+              ...(body.catatan !== undefined && { catatan: body.catatan }),
+              ...(body.is_active !== undefined && { isActive: body.is_active }),
+            })
+            .where(
+              and(
+                eq(storageLocations.id, c.req.param("id")),
+                eq(storageLocations.companyId, auth.company_id!),
+              ),
+            )
+            .returning(),
+      );
+      if (!row)
+        throw new HTTPException(404, {
+          message: "Tempat penyimpanan tidak ditemukan",
+        });
       const byLoc = await petugasByLokasi(auth.company_id!, [row.id]);
       return c.json(toDto(row, byLoc.get(row.id) ?? []));
     },
@@ -211,7 +231,10 @@ export const penyimpananRoutes = new Hono<AppEnv>()
             eq(storageLocations.companyId, auth.company_id!),
           ),
         );
-      if (!loc) throw new HTTPException(404, { message: "Tempat penyimpanan tidak ditemukan" });
+      if (!loc)
+        throw new HTTPException(404, {
+          message: "Tempat penyimpanan tidak ditemukan",
+        });
 
       const uniqueIds = [...new Set(body.user_ids)];
       if (uniqueIds.length > 0) {
@@ -225,7 +248,9 @@ export const penyimpananRoutes = new Hono<AppEnv>()
             ),
           );
         if (members.length !== uniqueIds.length) {
-          throw new HTTPException(400, { message: "Ada akun yang bukan anggota perusahaan" });
+          throw new HTTPException(400, {
+            message: "Ada akun yang bukan anggota perusahaan",
+          });
         }
       }
 
@@ -263,8 +288,16 @@ export const penyimpananRoutes = new Hono<AppEnv>()
     const [loc] = await db
       .select({ id: storageLocations.id, branchId: storageLocations.branchId })
       .from(storageLocations)
-      .where(and(eq(storageLocations.id, locId), eq(storageLocations.companyId, auth.company_id!)));
-    if (!loc) throw new HTTPException(404, { message: "Tempat penyimpanan tidak ditemukan" });
+      .where(
+        and(
+          eq(storageLocations.id, locId),
+          eq(storageLocations.companyId, auth.company_id!),
+        ),
+      );
+    if (!loc)
+      throw new HTTPException(404, {
+        message: "Tempat penyimpanan tidak ditemukan",
+      });
     // isi rak ini: bahan baku + perlengkapan
     const rows = await db
       .select({
@@ -298,10 +331,16 @@ export const penyimpananRoutes = new Hono<AppEnv>()
         ),
       );
     return c.json({
-      ingredient_ids: rows.map((r) => r.ingredientId).filter((x): x is string => !!x),
-      terpakai_lain: lain.map((r) => r.ingredientId).filter((x): x is string => !!x),
+      ingredient_ids: rows
+        .map((r) => r.ingredientId)
+        .filter((x): x is string => !!x),
+      terpakai_lain: lain
+        .map((r) => r.ingredientId)
+        .filter((x): x is string => !!x),
       supply_ids: rows.map((r) => r.supplyId).filter((x): x is string => !!x),
-      supply_terpakai_lain: lain.map((r) => r.supplyId).filter((x): x is string => !!x),
+      supply_terpakai_lain: lain
+        .map((r) => r.supplyId)
+        .filter((x): x is string => !!x),
     });
   })
   /**
@@ -326,14 +365,27 @@ export const penyimpananRoutes = new Hono<AppEnv>()
       const companyId = auth.company_id!;
       const locId = c.req.param("id");
       const body = c.req.valid("json");
-      const bahanIds = body.ingredient_ids ? [...new Set(body.ingredient_ids)] : null;
+      const bahanIds = body.ingredient_ids
+        ? [...new Set(body.ingredient_ids)]
+        : null;
       const supplyIds = body.supply_ids ? [...new Set(body.supply_ids)] : null;
 
       const [loc] = await db
-        .select({ id: storageLocations.id, branchId: storageLocations.branchId })
+        .select({
+          id: storageLocations.id,
+          branchId: storageLocations.branchId,
+        })
         .from(storageLocations)
-        .where(and(eq(storageLocations.id, locId), eq(storageLocations.companyId, companyId)));
-      if (!loc) throw new HTTPException(404, { message: "Tempat penyimpanan tidak ditemukan" });
+        .where(
+          and(
+            eq(storageLocations.id, locId),
+            eq(storageLocations.companyId, companyId),
+          ),
+        );
+      if (!loc)
+        throw new HTTPException(404, {
+          message: "Tempat penyimpanan tidak ditemukan",
+        });
 
       if (bahanIds && bahanIds.length > 0) {
         const valid = await db
@@ -347,7 +399,9 @@ export const penyimpananRoutes = new Hono<AppEnv>()
             ),
           );
         if (valid.length !== bahanIds.length) {
-          throw new HTTPException(400, { message: "Ada bahan yang tidak valid" });
+          throw new HTTPException(400, {
+            message: "Ada bahan yang tidak valid",
+          });
         }
       }
       if (supplyIds && supplyIds.length > 0) {
@@ -362,7 +416,9 @@ export const penyimpananRoutes = new Hono<AppEnv>()
             ),
           );
         if (valid.length !== supplyIds.length) {
-          throw new HTTPException(400, { message: "Ada perlengkapan yang tidak valid" });
+          throw new HTTPException(400, {
+            message: "Ada perlengkapan yang tidak valid",
+          });
         }
       }
 
@@ -371,9 +427,14 @@ export const penyimpananRoutes = new Hono<AppEnv>()
         .select({ id: storageLocations.id })
         .from(storageLocations)
         .where(
-          and(eq(storageLocations.companyId, companyId), eq(storageLocations.branchId, loc.branchId)),
+          and(
+            eq(storageLocations.companyId, companyId),
+            eq(storageLocations.branchId, loc.branchId),
+          ),
         );
-      const rakLainIds = rakCabang.map((r) => r.id).filter((id) => id !== locId);
+      const rakLainIds = rakCabang
+        .map((r) => r.id)
+        .filter((id) => id !== locId);
 
       await db.transaction(async (tx) => {
         if (bahanIds) {
@@ -393,7 +454,10 @@ export const penyimpananRoutes = new Hono<AppEnv>()
               .where(
                 and(
                   eq(storageLocationIngredients.companyId, companyId),
-                  inArray(storageLocationIngredients.storageLocationId, rakLainIds),
+                  inArray(
+                    storageLocationIngredients.storageLocationId,
+                    rakLainIds,
+                  ),
                   inArray(storageLocationIngredients.ingredientId, bahanIds),
                 ),
               );
@@ -425,7 +489,10 @@ export const penyimpananRoutes = new Hono<AppEnv>()
               .where(
                 and(
                   eq(storageLocationIngredients.companyId, companyId),
-                  inArray(storageLocationIngredients.storageLocationId, rakLainIds),
+                  inArray(
+                    storageLocationIngredients.storageLocationId,
+                    rakLainIds,
+                  ),
                   inArray(storageLocationIngredients.supplyId, supplyIds),
                 ),
               );
