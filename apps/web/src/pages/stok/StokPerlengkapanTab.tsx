@@ -324,6 +324,16 @@ function StokAwalModal({
   const items = rows
     .filter((r) => qty[r.id] !== undefined && qty[r.id] !== "")
     .map((r) => ({ supply_id: r.id, qty: angkaDari(qty[r.id]) }));
+  /**
+   * Sama seperti `StokAwalPage` untuk bahan baku: angka yang tak terbaca
+   * ditahan di sini. Penyaring di atas cuma `!== ""`, jadi salah ketik lolos
+   * jadi NaN, `JSON.stringify` mengubahnya jadi `null`, dan zod server
+   * (`qty: z.number()`) menolak SELURUH kiriman dengan galat yang menyebut
+   * indeks larik — bukan nama perlengkapannya.
+   */
+  const salahKetik = rows.filter(
+    (r) => qty[r.id] !== undefined && qty[r.id] !== "" && Number.isNaN(angkaDari(qty[r.id])),
+  );
   const kirim = useMutation({
     mutationFn: () =>
       api(`/perlengkapan/stok-awal${branchQuery}`, { method: "POST", body: { items } }),
@@ -358,7 +368,7 @@ function StokAwalModal({
                   <td className={tdClass}>
                     <input
                       type="text"
-            inputMode="decimal"
+                      inputMode="decimal"
                       step="any"
                       value={qty[r.id] ?? ""}
                       onChange={(e) => setQty((p) => ({ ...p, [r.id]: e.target.value }))}
@@ -371,12 +381,18 @@ function StokAwalModal({
             </tbody>
           </table>
         </div>
+        {salahKetik.length > 0 && (
+          <div className="rounded-lg bg-red-50 px-3 py-1.5 text-xs font-medium text-red-800">
+            Angka tidak terbaca pada <b>{salahKetik.map((r) => r.nama).join(", ")}</b> — tulis
+            seperti <b>470</b> atau <b>1,5</b>.
+          </div>
+        )}
         <ErrorText error={kirim.error} />
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className={btnSecondary}>Batal</button>
           <button
             onClick={() => kirim.mutate()}
-            disabled={items.length === 0 || kirim.isPending}
+            disabled={items.length === 0 || salahKetik.length > 0 || kirim.isPending}
             className={btnPrimary}
           >
             📦 Simpan Stok Awal ({items.length} item)
@@ -423,7 +439,8 @@ function MasukModal({
       <div className="space-y-3">
         <label className="block text-sm">
           Jumlah masuk ({item.satuan})
-          <input type="text"
+          <input
+            type="text"
             inputMode="decimal" step="any" value={qty} onChange={(e) => setQty(e.target.value)} className={inputClass} autoFocus />
         </label>
         <label className="block text-sm">
@@ -495,7 +512,8 @@ function MintaModal({
         </div>
         <label className="block text-sm">
           Jumlah diminta ({item.satuan})
-          <input type="text"
+          <input
+            type="text"
             inputMode="decimal" step="any" value={qty} onChange={(e) => setQty(e.target.value)} className={inputClass} autoFocus />
         </label>
         <label className="block text-sm">

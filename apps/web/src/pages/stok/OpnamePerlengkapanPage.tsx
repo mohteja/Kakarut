@@ -95,6 +95,23 @@ export function OpnamePerlengkapanPage() {
   );
   const semuaTercentang = tampilProduk.length > 0 && tampilProduk.every((r) => dipilih[r.id]);
   const terisi = produkTerpilih.filter((r) => fisik[r.id] !== undefined && fisik[r.id] !== "").length;
+  /**
+   * Angka yang tak terbaca DITAHAN DI SINI, bukan dibiarkan ke server.
+   *
+   * Alasannya sudah ditulis di `OpnamePage` — kembarannya untuk bahan baku —
+   * dan berlaku sama persis di sini: penyaringnya cuma `!== ""`, jadi salah
+   * ketik lolos jadi NaN, `JSON.stringify` mengubahnya jadi `null`, dan zod
+   * server (`qty_fisik: z.number()`) membalas galat yang menyebut INDEKS
+   * larik, bukan nama barangnya. Pada opname berisi puluhan baris, satu salah
+   * ketik menolak seluruh kiriman tanpa memberi tahu baris mana.
+   *
+   * Yang menulis penjaga itu memikirkannya untuk bahan baku dan tak menyeberang
+   * ke perlengkapan; halamannya berpasangan, jadi penjaganya ikut berpasangan.
+   */
+  const salahKetik = produkTerpilih.filter(
+    (r) =>
+      fisik[r.id] !== undefined && fisik[r.id] !== "" && Number.isNaN(angkaDari(fisik[r.id])),
+  );
 
   const simpan = useMutation({
     mutationFn: () => {
@@ -348,17 +365,25 @@ export function OpnamePerlengkapanPage() {
               })}
             </div>
           </main>
-          <div className="fixed inset-x-0 bottom-0 flex gap-2 border-t border-stone-200 bg-white p-3">
+          <div className="fixed inset-x-0 bottom-0 border-t border-stone-200 bg-white p-3">
+            {salahKetik.length > 0 && (
+              <div className="mb-2 rounded-lg bg-red-50 px-3 py-1.5 text-center text-xs font-medium text-red-800">
+                Angka tidak terbaca pada <b>{salahKetik.map((r) => r.nama).join(", ")}</b> — tulis
+                seperti <b>470</b> atau <b>1,5</b>.
+              </div>
+            )}
+            <div className="flex gap-2">
             <button onClick={() => setLangkah("produk")} className={`${btnSecondary} shrink-0`}>
               ← Produk
             </button>
             <button
               onClick={() => setKonfirmasi(true)}
-              disabled={terisi === 0}
+              disabled={terisi === 0 || salahKetik.length > 0}
               className={`${btnPrimary} flex-1 py-3 text-base`}
             >
               Simpan Opname ({terisi} dihitung)
             </button>
+            </div>
           </div>
         </>
       )}

@@ -415,7 +415,8 @@ function ItemModal({
           </label>
           <label className="block text-sm">
             Stok minimum (peringatan menipis)
-            <input type="text"
+            <input
+            type="text"
             inputMode="decimal" value={stokMin} onChange={(e) => setStokMin(e.target.value)} className={inputClass} />
           </label>
         </div>
@@ -614,12 +615,14 @@ function AturanForm({
           <div className="grid grid-cols-2 gap-3">
             <label className="block text-sm">
               Jumlah terpakai ({item.satuan})
-              <input type="text"
+              <input
+            type="text"
             inputMode="decimal" step="any" value={qty} onChange={(e) => setQty(e.target.value)} className={inputClass} />
             </label>
             <label className="block text-sm">
               Setiap … hari
-              <input type="text"
+              <input
+            type="text"
             inputMode="decimal" min={1} max={365} value={perHari} onChange={(e) => setPerHari(e.target.value)} className={inputClass} />
             </label>
           </div>
