@@ -77,7 +77,14 @@ export function StokAwalPage() {
     () => new Map((stok ?? []).map((s) => [s.ingredient_id, s.nama])),
     [stok],
   );
-  const terisi = Object.values(awal).filter((v) => v !== "").length;
+  const diisi = Object.entries(awal).filter(([, v]) => v !== "");
+  const terisi = diisi.length;
+  // Isian TERISI tapi tak terbaca sebagai angka. Tanpa pagar ini ia lolos
+  // penyaring `!== ""`, jadi NaN, lalu `JSON.stringify` mengubahnya jadi `null`
+  // dan server membalas galat validasi yang tak menyebut bahan mana. Saldo
+  // pembuka mengunci pembukuan per tanggal — lebih baik ditahan di sini,
+  // dengan nama bahannya disebut. (Pagar kembar ada di Opname.)
+  const salahKetik = diisi.filter(([, v]) => Number.isNaN(angkaDari(v)));
 
   const simpan = useMutation({
     mutationFn: () => {
@@ -172,9 +179,16 @@ export function StokAwalPage() {
       </main>
 
       <div className="fixed inset-x-0 bottom-0 border-t border-stone-200 bg-white p-3">
+        {salahKetik.length > 0 && (
+          <div className="mb-2 rounded-lg bg-red-50 px-3 py-1.5 text-center text-xs font-medium text-red-800">
+            Angka tidak terbaca pada{" "}
+            <b>{salahKetik.map(([id]) => namaById.get(id) ?? id).join(", ")}</b> — tulis
+            seperti <b>470</b> atau <b>1,5</b>.
+          </div>
+        )}
         <button
           onClick={() => setKonfirmasi(true)}
-          disabled={terisi === 0}
+          disabled={terisi === 0 || salahKetik.length > 0}
           className={`${btnPrimary} w-full py-3 text-base`}
         >
           Simpan Stok Awal ({terisi} bahan)
