@@ -64,9 +64,19 @@ export function PengajuanCutiSection() {
   const queryClient = useQueryClient();
   const [form, setForm] = useState<FormPengajuan | null>(null);
 
+  /**
+   * `?saya=1` WAJIB, bukan hiasan.
+   *
+   * Tanpa parameter itu `GET /pengajuan` mengembalikan pengajuan SEPERUSAHAAN
+   * bagi owner/admin (yang tidak terkunci cabang). Daftar di bawah judul
+   * "Pengajuan cuti & libur saya" ini lalu memajang pengajuan seluruh karyawan
+   * sebagai milik sendiri — berikut alasan pribadinya, dan berikut tombol
+   * Batalkan yang memang dituruti server untuk manajemen. Owner yang merasa
+   * membatalkan pengajuannya sendiri bisa menghapus pengajuan orang lain.
+   */
   const { data: daftar = [] } = useQuery({
     queryKey: ["pengajuan", "saya"],
-    queryFn: () => api<PengajuanRow[]>("/pengajuan"),
+    queryFn: () => api<PengajuanRow[]>("/pengajuan?saya=1"),
   });
 
   const segarkan = () => {
