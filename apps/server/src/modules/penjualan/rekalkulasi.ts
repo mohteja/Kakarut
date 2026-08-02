@@ -8,11 +8,16 @@
  * biaya dine-in atas porsi yang dibungkus dan stok kemasan tak pernah
  * berkurang.
  *
- * SELALU hitung ULANG SELURUH transaksi, bukan selisih baris yang diubah.
- * `sale_consumptions` disimpan pra-agregat per (sale_id, ingredient_id) dan
- * TIDAK punya `sale_item_id`, jadi kontribusi satu baris tak bisa dicabut dari
- * angka gabungannya. Menghitung dari nol juga membuat operasi ini idempoten:
- * bolak-balik TA → dine-in → TA selalu mendarat di angka yang sama.
+ * KONSUMSI selalu disusun ULANG untuk SELURUH transaksi, bukan selisih baris
+ * yang diubah: `sale_consumptions` disimpan pra-agregat per
+ * (sale_id, ingredient_id) dan TIDAK punya `sale_item_id`, jadi kontribusi satu
+ * baris tak bisa dicabut dari angka gabungannya.
+ *
+ * UANG tidak. `hpp_satuan` adalah fakta historis dan `laporan` menjumlahnya
+ * sebagai harga pokok penjualan periode itu, sementara harga bahan bergerak
+ * sendiri di luar transaksi ini — jadi yang diterapkan hanya SELISIH basis
+ * penyajian, atas baris yang basisnya memang berubah (`basisBerubah`). Lihat
+ * `hppSatuanBaru`; sifat idempotennya tetap terjaga.
  */
 import { and, eq, isNull } from "drizzle-orm";
 import { qtyDitagih, qtyEfektif } from "@kakarut/shared";
@@ -27,10 +32,66 @@ export interface HasilRekalkulasi {
   alasanGagal?: string;
 }
 
+/**
+ * Baris mana yang basis penyajiannya BERUBAH pada operasi ini — `"semua"` atau
+ * himpunan `sale_items.id`.
+ *
+ * SENGAJA tanpa nilai bawaan. Ini satu-satunya hal yang boleh menggeser harga
+ * pokok sebuah baris; pemanggil yang lupa menyebutkannya akan ketahuan oleh
+ * typecheck, bukan diam-diam menulis ulang pembukuan yang sudah tutup.
+ */
+export type BasisBerubah = "semua" | ReadonlySet<string>;
+
+/** Tidak ada penyajian yang berubah — dipakai jalur refund. */
+export const TANPA_UBAH_BASIS: ReadonlySet<string> = new Set<string>();
+
+/**
+ * Harga pokok satu porsi SESUDAH operasi ini.
+ *
+ * `hpp_satuan` adalah FAKTA HISTORIS: biaya satu porsi memakai harga bahan pada
+ * hari transaksi. `laporan` menjumlah `sales.total_hpp` apa adanya, jadi angka
+ * itu adalah harga pokok penjualan periode tersebut — bukan taksiran hari ini.
+ *
+ * Yang dulu terjadi: hitung-ulang selalu memakai `hitungHargaMenu` atas katalog
+ * HARI INI untuk SETIAP baris. Padahal `ingredients.harga_beli` bergerak sendiri
+ * — Laporan Harga menyetelnya ke median riwayat pembelian tiap kali belanja
+ * dilaporkan. Akibatnya satu refund sebagian pada transaksi bulan lalu menulis
+ * ulang seluruh HPP transaksi itu dengan harga bulan ini, dan laba-rugi bulan
+ * lalu ikut berubah — diam-diam, tanpa ada yang menyentuh transaksinya.
+ * Transaksi yang tak pernah direfund tetap beku pada harga saat dijual, jadi
+ * satu laporan berisi dua dasar harga sekaligus.
+ *
+ * Karena itu yang diterapkan adalah SELISIH BASIS, bukan hitung dari nol:
+ * hanya bagian yang benar-benar berubah (kemasan take away + separuh pelengkap)
+ * yang ditambahkan/dikurangkan, dengan harga hari ini karena harga lamanya
+ * memang tak tersimpan. Tingkat historisnya utuh.
+ *
+ * Sifatnya ikut terjaga:
+ *  - baris yang tak disentuh → angkanya tak bergerak sama sekali;
+ *  - menekan tombol yang sama dua kali → selisihnya nol, angkanya tetap;
+ *  - TA → dine-in → TA → kembali PERSIS ke angka semula.
+ */
+export function hppSatuanBaru(p: {
+  /** `sale_items.hpp_satuan` yang tersimpan — biaya historis satu porsi */
+  hppLama: number;
+  /** basis penyajian baris INI berubah pada operasi ini? */
+  basisBerubah: boolean;
+  /** biaya satu porsi pada basis BARU, harga hari ini */
+  hppBasisBaru: number;
+  /** biaya satu porsi pada basis LAMA, harga hari ini */
+  hppBasisLama: number;
+}): number {
+  if (!p.basisBerubah) return p.hppLama;
+  // Dijaga tak negatif: harga kemasan hari ini bisa saja melampaui seluruh HPP
+  // historis sebuah porsi, dan biaya negatif akan jadi "laba" palsu di laporan.
+  return Math.max(0, p.hppLama + (p.hppBasisBaru - p.hppBasisLama));
+}
+
 export async function hitungUlangBiayaPenjualan(
   tx: Tx,
   saleId: string,
   companyId: string,
+  basisBerubah: BasisBerubah,
 ): Promise<HasilRekalkulasi> {
   /**
    * `FOR UPDATE` bukan hiasan: dua orang membalik dua baris berbeda pada satu
@@ -86,7 +147,12 @@ export async function hitungUlangBiayaPenjualan(
     const menu = menuById.get(b.menuId)!;
     // BASIS BIAYA = penyajiannya. Aturan yang sama dengan `createSale`.
     const dasarDineIn = !b.sajianTakeaway;
-    const hppSatuan = hitungHargaMenu(menu, katalog, dasarDineIn);
+    const hppSatuan = hppSatuanBaru({
+      hppLama: b.hppSatuan,
+      basisBerubah: basisBerubah === "semua" || basisBerubah.has(b.id),
+      hppBasisBaru: hitungHargaMenu(menu, katalog, dasarDineIn),
+      hppBasisLama: hitungHargaMenu(menu, katalog, !dasarDineIn),
+    });
     /*
      * PORSI YANG DITAGIH, bukan porsi yang dipesan.
      *
@@ -103,6 +169,15 @@ export async function hitungUlangBiayaPenjualan(
     if (hppSatuan !== b.hppSatuan) {
       await tx.update(saleItems).set({ hppSatuan }).where(eq(saleItems.id, b.id));
     }
+    /*
+     * Konsumsi memang disusun ulang dari resep HARI INI untuk seluruh baris,
+     * termasuk baris yang penyajiannya tak berubah — takaran resep saat
+     * transaksi terjadi tak tersimpan di mana pun, dan `sale_consumptions`
+     * pra-agregat per (sale_id, ingredient_id) tanpa `sale_item_id` sehingga
+     * kontribusi satu baris tak bisa dicabut sendiri. Yang bisa dijaga adalah
+     * UANG-nya (lihat `hppSatuanBaru`); resep jarang diubah, harga bahan
+     * bergerak tiap kali belanja dilaporkan.
+     */
     for (const k of komponenEfektif(katalog, menu)) {
       if (!k.track_stok) continue;
       const qty =

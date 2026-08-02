@@ -556,7 +556,9 @@ export const pesananRoutes = new Hono<AppEnv>()
         if (!baris) throw new HTTPException(404, { message: "Baris pesanan tidak ditemukan" });
         return {
           nama: baris.nama,
-          biaya: await hitungUlangBiayaPenjualan(tx, id, auth.company_id!),
+          // Hanya baris INI yang basis penyajiannya berubah; harga pokok baris
+          // lain tetap angka historisnya.
+          biaya: await hitungUlangBiayaPenjualan(tx, id, auth.company_id!, new Set([itemId])),
         };
       });
 
@@ -673,7 +675,7 @@ export const pesananRoutes = new Hono<AppEnv>()
         return null;
       }
       await tx.update(saleItems).set({ sajianTakeaway: takeaway }).where(eq(saleItems.saleId, id));
-      return await hitungUlangBiayaPenjualan(tx, id, auth.company_id!);
+      return await hitungUlangBiayaPenjualan(tx, id, auth.company_id!, "semua");
     });
 
     await db.insert(pesananLogs).values({

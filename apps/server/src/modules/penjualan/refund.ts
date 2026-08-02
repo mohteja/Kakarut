@@ -26,7 +26,7 @@ import { HTTPException } from "hono/http-exception";
 import { hitungUangSetelahRefund, nominalRefund, qtyDitagih } from "@kakarut/shared";
 import type { Tx } from "../../db/client";
 import { saleItems, saleRefunds, sales } from "../../db/schema";
-import { hitungUlangBiayaPenjualan } from "./rekalkulasi";
+import { hitungUlangBiayaPenjualan, TANPA_UBAH_BASIS } from "./rekalkulasi";
 
 export interface PermintaanRefund {
   saleItemId: string;
@@ -172,7 +172,12 @@ export async function refundSajian(
     .where(eq(sales.id, params.saleId));
 
   // HPP & stok menyusul kenyataan: sajian yang tak dibuat tak memakai bahan.
-  await hitungUlangBiayaPenjualan(tx, params.saleId, params.companyId);
+  // `TANPA_UBAH_BASIS`: refund tidak mengubah cara penyajian satu baris pun,
+  // jadi harga pokok per porsi harus tetap angka historisnya — yang menyusut
+  // cuma jumlah porsi yang ditagih. Tanpa ini, merefund satu porsi menulis
+  // ulang HPP seluruh transaksi dengan harga bahan hari ini dan menggeser
+  // laba-rugi periode yang sudah lewat.
+  await hitungUlangBiayaPenjualan(tx, params.saleId, params.companyId, TANPA_UBAH_BASIS);
 
   return { nominal, totalLama: sale.total, totalBaru: sesudah.total };
 }
