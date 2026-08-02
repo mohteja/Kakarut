@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { MenuDto } from "@kakarut/shared";
-import { Card, PageTitle, Spinner, btnPrimary, btnSecondary } from "../../components/ui";
+import { Card, ErrorText, PageTitle, Spinner, btnPrimary, btnSecondary } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
@@ -152,6 +152,16 @@ export function LihatMenuPage() {
       <div className="mb-4 text-sm text-stone-500">
         Menu siap jual &amp; harga jualnya. Atur <b>urutan (posisi)</b> menu dengan tombol ▲ / ▼,
         lalu <b>Cetak Daftar Menu</b> untuk mencetak (A4/PDF).
+      </div>
+      {/*
+        Simpan yang gagal memang menyisakan tombol "Simpan Urutan" (karena
+        `dirty` tak pernah dilepas) — tapi itu petunjuk yang harus ditebak
+        sendiri. Tanpa pesannya, urutan yang tampak sudah berpindah di layar
+        akan kembali ke semula saat halaman dimuat ulang, dan tak ada yang tahu
+        sebabnya penolakan server atau jaringan yang putus.
+      */}
+      <div className="mb-4">
+        <ErrorText error={simpan.error} />
       </div>
 
       {kosong ? (

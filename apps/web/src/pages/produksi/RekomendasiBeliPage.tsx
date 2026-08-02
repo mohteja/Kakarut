@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import type { AcuanJenis, RekomendasiBeli } from "@kakarut/shared";
 import {
   Card,
+  ErrorText,
   PageTitle,
   Spinner,
   btnPrimary,
@@ -156,6 +157,14 @@ export function RekomendasiBeliPage() {
             {simpanDefault.isPending ? "Menyimpan…" : "Simpan default"}
           </button>
         </div>
+        {/*
+          Tanpa ini, simpan yang GAGAL tak meninggalkan jejak apa pun: tombolnya
+          kembali dari "Menyimpan…" ke "Simpan default", angka di layar tetap
+          angka yang barusan diketik, dan pemilik pergi yakin targetnya
+          tersimpan. Baru ketahuan saat halaman dibuka lagi dan angkanya kembali
+          ke yang lama — tanpa sebab yang bisa ditebak siapa pun.
+        */}
+        <ErrorText error={simpanDefault.error} />
         <div className="flex flex-wrap items-end gap-3">
           <div>
             <label className="mb-1 block text-sm font-medium">Periode acuan</label>
