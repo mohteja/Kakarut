@@ -39,7 +39,27 @@ export function angkaDari(teks: string | number | null | undefined): number {
   if (typeof teks === "number") return teks;
   if (teks == null) return NaN;
 
-  const bersih = teks.trim().replace(/\s/g, "");
+  const bersih = teks
+    .trim()
+    .replace(/\s/g, "")
+    // Imbuhan rupiah, dibuang SEBELUM pemeriksaan ketat di bawah.
+    //
+    // Harga di dunia nyata jarang diketik ulang — ia DITEMPEL, dari daftar
+    // harga WhatsApp supplier atau dari spreadsheet, dan datang lengkap
+    // dengan bajunya: "Rp 15.000", "Rp15000", "12.500,-".
+    //
+    // Tanpa ini semuanya jadi NaN, dan hampir semua pemanggil menulis
+    // `angkaDari(x) || 0` — jadi harga yang ditempel tersimpan NOL, bukan
+    // ditolak. Pengurai CSV di repo ini sudah membuang "Rp" persis karena
+    // alasan yang sama ("Jadi harga ber-'Rp' tak lagi terbaca 0"); isian
+    // form punya paparan yang sama dan tak ikut dibereskan.
+    //
+    // SENGAJA hanya imbuhan ini, bukan "buang semua yang bukan angka" gaya
+    // CSV: `OpnamePage` dan `StokAwalPage` memakai `Number.isNaN(angkaDari(…))`
+    // untuk menandai salah ketik, dan kelonggaran penuh mengubah "12abc" jadi
+    // 12 — penanda salah ketiknya mati tanpa suara.
+    .replace(/^rp\.?/i, "")
+    .replace(/[,.]-$/, "");
   if (bersih === "") return NaN;
 
   // Hanya angka, pemisah, dan tanda minus di depan. Menolak "12abc" — yang

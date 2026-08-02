@@ -101,4 +101,36 @@ describe("angkaDari: baca angka gaya id-ID", () => {
     expect(teksAngka(undefined)).toBe("");
     expect(teksAngka(NaN)).toBe("");
   });
+
+  it("harga yang DITEMPEL (ber-Rp) terbaca, bukan jadi nol", () => {
+    /**
+     * Harga jarang diketik ulang — ia ditempel, dari daftar harga WhatsApp
+     * supplier atau dari spreadsheet, lengkap dengan bajunya. Diukur di
+     * Chromium: kotak `type="text"` menyimpan tempelan APA ADANYA, jadi
+     * "Rp 15.000" sungguh-sungguh sampai ke pengurai.
+     *
+     * Dulu semuanya NaN, dan hampir semua pemanggil menulis `angkaDari(x) || 0`
+     * — jadi harga yang ditempel tersimpan NOL. Bukan ditolak: nol.
+     */
+    expect(angkaDari("Rp 15.000")).toBe(15000);
+    expect(angkaDari("Rp15000")).toBe(15000);
+    expect(angkaDari("rp 12.500")).toBe(12500);
+    expect(angkaDari("12.500,-")).toBe(12500);
+    expect(angkaDari("Rp 1.500.000")).toBe(1500000);
+    expect(angkaDari("Rp2,5")).toBe(2.5);
+  });
+
+  it("kelonggaran itu TIDAK boleh mematikan penanda salah ketik", () => {
+    /**
+     * `OpnamePage` dan `StokAwalPage` menandai salah ketik lewat
+     * `Number.isNaN(angkaDari(…))`. Pengurai CSV di repo ini jauh lebih longgar
+     * — ia membuang SEMUA yang bukan angka, jadi "12abc" jadi 12 — dan menyalin
+     * kelonggaran itu ke sini akan mematikan kedua penanda tanpa suara.
+     *
+     * Karena itu yang dibuang cuma imbuhan rupiah, bukan sembarang huruf.
+     */
+    for (const salah of ["12abc", "abc", "Rp", "Rpabc", "-", "1,5,5"]) {
+      expect(angkaDari(salah), salah).toBeNaN();
+    }
+  });
 });
