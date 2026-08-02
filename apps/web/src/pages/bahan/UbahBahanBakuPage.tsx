@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import type { BahanDto, KategoriDto } from "@kakarut/shared";
+import { angkaDari } from "@kakarut/shared";
 import { Card, ErrorText, PageTitle, Spinner, btnPrimary, btnSecondary } from "../../components/ui";
 import { KategoriManagerModal } from "../../components/KategoriManagerModal";
 import { api } from "../../lib/api";
@@ -68,7 +69,7 @@ export function UbahBahanBakuPage() {
   const ubah = (i: number, patch: Partial<BahanEditorRow>) =>
     setRows((r) => (r ? r.map((b, j) => (j === i ? { ...b, ...patch } : b)) : r));
 
-  const invalid = (rows ?? []).filter((b) => b.nama.trim() === "" || !(Number(b.isi) > 0));
+  const invalid = (rows ?? []).filter((b) => b.nama.trim() === "" || !(angkaDari(b.isi) > 0));
 
   const simpan = useMutation({
     mutationFn: async () => {
@@ -79,21 +80,21 @@ export function UbahBahanBakuPage() {
             body: {
               kode: b.kode.trim() || null,
               nama: b.nama.trim(),
-              harga_beli: Number(b.harga_beli) || 0,
-              isi: Number(b.isi),
+              harga_beli: angkaDari(b.harga_beli) || 0,
+              isi: angkaDari(b.isi),
               satuan: b.satuan.trim() || "pcs",
               satuan_beli: b.satuan_beli.trim() || null,
               kategori: b.kategori,
               track_stok: b.track_stok,
-              stok_minimum: b.track_stok ? Number(b.stok_minimum) || 0 : 0,
+              stok_minimum: b.track_stok ? angkaDari(b.stok_minimum) || 0 : 0,
               catatan: b.catatan.trim() || null,
               is_packaging: b.is_packaging,
               is_complement: b.is_complement,
               // eceran & minimal belanja hanya relevan utk jalur beli
               boleh_eceran: b.pengadaan === "beli" ? b.boleh_eceran : false,
-              min_beli: b.pengadaan === "beli" ? Number(b.min_beli) || 0 : 0,
-              masa_simpan_hari: Math.max(0, Math.trunc(Number(b.masa_simpan) || 0)),
-              lead_time_hari: Math.max(0, Math.trunc(Number(b.lead_time) || 0)),
+              min_beli: b.pengadaan === "beli" ? angkaDari(b.min_beli) || 0 : 0,
+              masa_simpan_hari: Math.max(0, Math.trunc(angkaDari(b.masa_simpan) || 0)),
+              lead_time_hari: Math.max(0, Math.trunc(angkaDari(b.lead_time) || 0)),
             },
           }),
         ),

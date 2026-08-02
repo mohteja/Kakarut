@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { KategoriDto, SatuanDto } from "@kakarut/shared";
+import { angkaDari } from "@kakarut/shared";
 import { Card, ErrorText, PageTitle, btnPrimary, btnSecondary } from "../../components/ui";
 import { KategoriManagerModal } from "../../components/KategoriManagerModal";
 import { api } from "../../lib/api";
@@ -64,7 +65,7 @@ export function TambahBahanBakuPage() {
   const hapusBaris = (i: number) => setRows((r) => (r.length > 1 ? r.filter((_, j) => j !== i) : r));
 
   // baris valid: punya nama & isi > 0 (harga boleh 0)
-  const valid = rows.filter((b) => b.nama.trim() !== "" && Number(b.isi) > 0);
+  const valid = rows.filter((b) => b.nama.trim() !== "" && angkaDari(b.isi) > 0);
 
   const simpan = useMutation({
     mutationFn: () =>
@@ -74,17 +75,17 @@ export function TambahBahanBakuPage() {
           items: valid.map((b) => ({
             kode: b.kode.trim() || null,
             nama: b.nama.trim(),
-            harga_beli: Number(b.harga_beli) || 0,
-            isi: Number(b.isi),
+            harga_beli: angkaDari(b.harga_beli) || 0,
+            isi: angkaDari(b.isi),
             satuan: b.satuan.trim() || "pcs",
             satuan_beli: b.satuan_beli.trim() || null,
             kategori: b.kategori,
             track_stok: b.track_stok,
-            stok_minimum: b.track_stok ? Number(b.stok_minimum) || 0 : 0,
+            stok_minimum: b.track_stok ? angkaDari(b.stok_minimum) || 0 : 0,
             boleh_eceran: b.boleh_eceran,
-            min_beli: Number(b.min_beli) || 0,
-            masa_simpan_hari: Math.max(0, Math.trunc(Number(b.masa_simpan) || 0)),
-            lead_time_hari: Math.max(0, Math.trunc(Number(b.lead_time) || 0)),
+            min_beli: angkaDari(b.min_beli) || 0,
+            masa_simpan_hari: Math.max(0, Math.trunc(angkaDari(b.masa_simpan) || 0)),
+            lead_time_hari: Math.max(0, Math.trunc(angkaDari(b.lead_time) || 0)),
             is_packaging: b.is_packaging,
             is_complement: b.is_complement,
             catatan: b.catatan.trim() || null,
