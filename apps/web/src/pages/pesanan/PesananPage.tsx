@@ -403,6 +403,30 @@ export function PesananPage() {
     queryClient.invalidateQueries({ queryKey: ["pesanan"] });
     queryClient.invalidateQueries({ queryKey: ["pesanan-log"] });
   };
+  /**
+   * Menandai TA pada penjualan yang SUDAH DIBAYAR bukan lagi sekadar penanda
+   * penyajian: server menghitung ulang `hpp_satuan`/`total_hpp` dan menulis
+   * ulang `sale_consumptions` (`hitungUlangBiayaPenjualan`). Uang dan stok
+   * benar-benar berpindah.
+   *
+   * Tanpa ini papan tampak berhasil sementara Laporan dan Stok masih memajang
+   * angka lama — dan gejalanya justru membuat orang menyimpulkan fiturnya tak
+   * bekerja, padahal pembukuannya sudah benar.
+   *
+   * Sengaja TIDAK disatukan ke `segarkan`: papan dapur menekan tombol status
+   * terus-menerus, dan menyegarkan stok/laporan tiap ketukan membebani tablet
+   * tanpa alasan. Hanya `sajian` yang memindahkan uang.
+   *
+   * Cakupannya pun dipilih, bukan disapu rata: `laporan` memuat `total_hpp`,
+   * `riwayat` memajang penjualan yang penandanya baru berubah, `stok` memuat
+   * saldo bahan kemasan. `menu-laris` tak memuat HPP dan `laporan-pembelian`
+   * urusan pembelian — keduanya tak tersentuh.
+   */
+  const segarkanBiaya = () => {
+    queryClient.invalidateQueries({ queryKey: ["stok"] });
+    queryClient.invalidateQueries({ queryKey: ["laporan"] });
+    queryClient.invalidateQueries({ queryKey: ["riwayat"] });
+  };
   /** Jejak "siapa & kapan" versi klien — ditimpa jawaban server saat refetch. */
   const jejak = () => ({
     status_oleh: auth?.user.nama ?? null,
@@ -435,7 +459,12 @@ export function PesananPage() {
         it.id === v.itemId ? { ...it, sajian_takeaway: v.takeaway } : it,
       ),
     onError: (_e, _v, ctx) => pulihkan(ctx),
-    onSettled: segarkan,
+    onSettled: (_d, _e, v) => {
+      segarkan();
+      // Bill yang belum dibayar belum punya biaya terbuku — penandanya baru
+      // sampai ke angka saat dibayar, jadi tak ada yang basi untuk disegarkan.
+      if (v.p.jenis === "penjualan") segarkanBiaya();
+    },
   });
   /**
    * "Pindahkan ke Selesai" — satu tombol untuk seluruh kartu.
