@@ -52,6 +52,17 @@ export interface ReceiptData {
   metodeBayar?: MetodeBayar | null;
   /** uang tunai diterima (untuk hitung kembalian di struk) */
   uangDiterima?: number | null;
+  /**
+   * Uang yang SUDAH DIKEMBALIKAN atas nota ini (kumulatif; 0/undefined = belum
+   * pernah ada refund).
+   *
+   * Barisnya dicetak SESUDAH total, dan totalnya sendiri sudah menyusut. Tanpa
+   * baris ini, struk cetak ulang hanya menampilkan porsi & total yang lebih
+   * kecil dari struk asli di tangan pembeli — dua kertas dengan angka berbeda
+   * dan tak satu pun menjelaskan sebabnya. Cetak ulang justru dipakai saat ada
+   * perselisihan, jadi di situlah keterangannya paling dibutuhkan.
+   */
+  refundTotal?: number | null;
   catatan?: string | null;
   /** nama kasir yang melayani (dicetak di bawah nota) */
   kasir?: string | null;
@@ -127,6 +138,9 @@ export function buildReceiptBytes(data: ReceiptData, opts: ReceiptOptions): Uint
     b.line(`PB1${data.pb1Rate ? ` ${data.pb1Rate}%` : ""}`, formatRupiahAscii(data.pb1Amount));
   }
   b.bold(true).size("tall").line("TOTAL", formatRupiahAscii(data.total)).size("normal").bold(false);
+  if (data.refundTotal && data.refundTotal > 0) {
+    b.line("Sudah dikembalikan", formatRupiahAscii(data.refundTotal));
+  }
 
   // Metode bayar + kembalian (tunai)
   if (data.metodeBayar) {

@@ -239,6 +239,28 @@ describe("buildReceiptBytes", () => {
     expect(all).toContain("-Rp4.400");
   });
 
+  /*
+   * Cetak ulang adalah kertas yang dipegang pembeli saat ada perselisihan.
+   * Sesudah refund, porsi & totalnya lebih kecil dari struk aslinya — tanpa
+   * baris ini, dua kertas berbeda angka dan tak satu pun menjelaskan sebabnya.
+   */
+  it("mencetak 'Sudah dikembalikan' sesudah TOTAL bila ada refund", () => {
+    const b2 = buildReceiptBytes({ ...DATA, refundTotal: 8910 }, OPTS);
+    const baris = textLines(b2);
+    const iTotal = baris.findIndex((l) => l.startsWith("TOTAL"));
+    const iRefund = baris.findIndex((l) => l.startsWith("Sudah dikembalikan"));
+    expect(iTotal).toBeGreaterThanOrEqual(0);
+    expect(iRefund).toBeGreaterThan(iTotal);
+    expect(baris[iRefund]).toContain("Rp8.910");
+  });
+
+  it("tanpa refund: barisnya tidak dicetak sama sekali", () => {
+    for (const nilai of [undefined, null, 0]) {
+      const b2 = buildReceiptBytes({ ...DATA, refundTotal: nilai }, OPTS);
+      expect(textLines(b2).join("\n")).not.toContain("Sudah dikembalikan");
+    }
+  });
+
   it("footer default saat kosong", () => {
     const b2 = buildReceiptBytes({ ...DATA, footer: null }, OPTS);
     expect(textLines(b2).join("\n")).toContain("Terima kasih!");

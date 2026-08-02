@@ -188,6 +188,7 @@ export function ReceiptModal({
       pb1Amount: data.sale.pb1Amount,
       pb1Rate: company?.pb1Rate ?? null,
       total: data.sale.total,
+      refundTotal: data.sale.refundTotal,
       metodeBayar: data.sale.metodeBayar,
       uangDiterima: data.sale.uangDiterima,
       catatan: data.sale.catatan,

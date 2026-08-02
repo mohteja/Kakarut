@@ -99,6 +99,19 @@ menyusut sendiri akan terbaca seperti kesalahan sistem. Web menuliskannya
 tinggal 0. Status barisnya sengaja TIDAK ikut berubah jadi `batal`: status
 adalah catatan dapur, bukan turunan uang.
 
+### 🟡 PERLU DICEK — struk termal: baris "Sudah dikembalikan"
+
+`ReceiptData` (di `@kakarut/shared`, dipakai bersama untuk ESC/POS) bertambah
+`refundTotal?: number | null`. Bila > 0, satu baris `Sudah dikembalikan`
+dicetak PERSIS SESUDAH `TOTAL`; bila 0/null/undefined barisnya tak ada sama
+sekali, jadi struk lama tak berubah.
+
+Kalau mobile merakit `ReceiptData` sendiri, isi field ini dari
+`sales.refund_total`. Tanpa itu, cetak ulang sesudah refund hanya menampilkan
+porsi & total yang lebih kecil dari struk asli di tangan pembeli — dua kertas
+berbeda angka, tak satu pun menjelaskan sebabnya. Cetak ulang justru dipakai
+saat ada perselisihan.
+
 ### ⚪️ INFO — laporan & rekap shift kini sadar refund
 
 Tidak ada perubahan bentuk respons; hanya **angkanya** yang kini benar sesudah
