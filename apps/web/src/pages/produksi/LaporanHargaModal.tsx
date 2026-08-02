@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import type { DampakLaporanHarga } from "@kakarut/shared";
+import { angkaDari } from "@kakarut/shared";
 import { Modal, ErrorText, btnPrimary, btnSecondary, inputClass } from "../../components/ui";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah } from "../../lib/format";
@@ -32,12 +33,12 @@ export function LaporanHargaModal({
   );
   const [perbaruiAcuan, setPerbaruiAcuan] = useState(true);
   const total = rows.reduce(
-    (t, r) => t + ((harga[r.id] ?? "") !== "" ? Number(harga[r.id]) || 0 : 0),
+    (t, r) => t + ((harga[r.id] ?? "") !== "" ? angkaDari(harga[r.id]) || 0 : 0),
     0,
   );
   const items = rows
     .filter((r) => (harga[r.id] ?? "") !== "")
-    .map((r) => ({ id: r.id, total_harga: Math.max(0, Number(harga[r.id]) || 0) }));
+    .map((r) => ({ id: r.id, total_harga: Math.max(0, angkaDari(harga[r.id]) || 0) }));
 
   // Dampak dihitung dari angka yang SEDANG diketik, jadi ditunda sebentar
   // supaya tiap ketukan tombol tidak memicu satu request.
@@ -97,9 +98,8 @@ export function LaporanHargaModal({
               </span>
               <span className="text-xs text-stone-400">Rp</span>
               <input
-                type="number"
-                min={0}
-                step="any"
+                type="text"
+                inputMode="decimal"
                 value={harga[r.id] ?? ""}
                 onChange={(e) => setHarga((s) => ({ ...s, [r.id]: e.target.value }))}
                 placeholder="0"

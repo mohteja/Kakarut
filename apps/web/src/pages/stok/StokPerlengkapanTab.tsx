@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { angkaDari } from "@kakarut/shared";
 import { useState } from "react";
 import type {
   BelanjaPerlengkapanDto,
@@ -322,7 +323,7 @@ function StokAwalModal({
   const [qty, setQty] = useState<Record<string, string>>({});
   const items = rows
     .filter((r) => qty[r.id] !== undefined && qty[r.id] !== "")
-    .map((r) => ({ supply_id: r.id, qty: Number(qty[r.id]) }));
+    .map((r) => ({ supply_id: r.id, qty: angkaDari(qty[r.id]) }));
   const kirim = useMutation({
     mutationFn: () =>
       api(`/perlengkapan/stok-awal${branchQuery}`, { method: "POST", body: { items } }),
@@ -356,8 +357,8 @@ function StokAwalModal({
                   <td className={`${tdClass} text-right`}>{formatAngka(r.saldo)}</td>
                   <td className={tdClass}>
                     <input
-                      type="number"
-                      min={0}
+                      type="text"
+            inputMode="decimal"
                       step="any"
                       value={qty[r.id] ?? ""}
                       onChange={(e) => setQty((p) => ({ ...p, [r.id]: e.target.value }))}
@@ -401,14 +402,14 @@ function MasukModal({
   const [totalHarga, setTotalHarga] = useState("");
   const [catatan, setCatatan] = useState("");
   // harga default = qty × harga beli item (bisa ditimpa manual)
-  const perkiraan = Number(qty) > 0 && item.harga_beli > 0 ? Number(qty) * item.harga_beli : null;
+  const perkiraan = angkaDari(qty) > 0 && item.harga_beli > 0 ? angkaDari(qty) * item.harga_beli : null;
   const kirim = useMutation({
     mutationFn: () =>
       api(`/perlengkapan/${item.id}/masuk${branchQuery}`, {
         method: "POST",
         body: {
-          qty: Number(qty),
-          total_harga: totalHarga !== "" ? Number(totalHarga) : perkiraan,
+          qty: angkaDari(qty),
+          total_harga: totalHarga !== "" ? angkaDari(totalHarga) : perkiraan,
           catatan: catatan.trim() || null,
         },
       }),
@@ -422,13 +423,14 @@ function MasukModal({
       <div className="space-y-3">
         <label className="block text-sm">
           Jumlah masuk ({item.satuan})
-          <input type="number" min={0} step="any" value={qty} onChange={(e) => setQty(e.target.value)} className={inputClass} autoFocus />
+          <input type="text"
+            inputMode="decimal" step="any" value={qty} onChange={(e) => setQty(e.target.value)} className={inputClass} autoFocus />
         </label>
         <label className="block text-sm">
           Total harga (Rp{perkiraan != null ? ` — perkiraan ${formatRupiah(perkiraan)}` : ", opsional"})
           <input
-            type="number"
-            min={0}
+            type="text"
+            inputMode="decimal"
             value={totalHarga}
             onChange={(e) => setTotalHarga(e.target.value)}
             className={inputClass}
@@ -444,7 +446,7 @@ function MasukModal({
           <button onClick={onClose} className={btnSecondary}>Batal</button>
           <button
             onClick={() => kirim.mutate()}
-            disabled={!(Number(qty) > 0) || kirim.isPending}
+            disabled={!(angkaDari(qty) > 0) || kirim.isPending}
             className={btnPrimary}
           >
             📦 Simpan
@@ -475,7 +477,7 @@ function MintaModal({
     mutationFn: () =>
       api(`/perlengkapan/${item.id}/minta${branchQuery}`, {
         method: "POST",
-        body: { qty: Number(qty), catatan: catatan.trim() || null },
+        body: { qty: angkaDari(qty), catatan: catatan.trim() || null },
       }),
     onSuccess: () => {
       onSukses();
@@ -493,7 +495,8 @@ function MintaModal({
         </div>
         <label className="block text-sm">
           Jumlah diminta ({item.satuan})
-          <input type="number" min={0} step="any" value={qty} onChange={(e) => setQty(e.target.value)} className={inputClass} autoFocus />
+          <input type="text"
+            inputMode="decimal" step="any" value={qty} onChange={(e) => setQty(e.target.value)} className={inputClass} autoFocus />
         </label>
         <label className="block text-sm">
           Catatan (opsional)
@@ -507,7 +510,7 @@ function MintaModal({
           <button onClick={onClose} className={btnSecondary}>Batal</button>
           <button
             onClick={() => kirim.mutate()}
-            disabled={!(Number(qty) > 0) || kirim.isPending}
+            disabled={!(angkaDari(qty) > 0) || kirim.isPending}
             className={btnPrimary}
           >
             📥 Minta Kiriman

@@ -25,6 +25,18 @@ const akar = fileURLToPath(new URL("../../web/src/", import.meta.url));
 
 /** Berkas yang mengurai angka ketikan pemakai. */
 const KELUARGA = [
+  // Empat isian HARGA yang menyusul, dan yang membuat mereka luput selama ini
+  // patut dicatat: sapuan pertama saya menyaring berkas berdasarkan keberadaan
+  // `inputMode`. Keempatnya `type="number"` POLOS — tak ada `inputMode` sama
+  // sekali — jadi saringan itu melewatinya, bukan karena mereka aman.
+  //
+  // Diukur di Chromium: `type="number"` menerima "15.000" apa adanya, lalu
+  // `Number("15.000")` = 15. Pemilik menetapkan harga acuan Rp 15.000 dan
+  // tersimpan Rp 15 — tanpa satu pun tanda di layar.
+  "components/RiwayatHargaModal.tsx",
+  "pages/produksi/LaporanHargaModal.tsx",
+  "pages/perlengkapan/PerlengkapanPage.tsx",
+  "pages/stok/StokPerlengkapanTab.tsx",
   "pages/bahan/BahanEditorGrid.tsx",
   "pages/bahan/TambahBahanBakuPage.tsx",
   "pages/bahan/UbahBahanBakuPage.tsx",

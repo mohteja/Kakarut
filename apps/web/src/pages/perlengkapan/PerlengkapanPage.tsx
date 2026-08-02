@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { angkaDari } from "@kakarut/shared";
 import { useState } from "react";
 import type {
   KategoriDto,
@@ -348,8 +349,8 @@ function ItemModal({
         body: {
           nama: nama.trim(),
           satuan: satuan.trim() || "pcs",
-          harga_beli: Number(hargaBeli) || 0,
-          stok_minimum: Number(stokMin) || 0,
+          harga_beli: angkaDari(hargaBeli) || 0,
+          stok_minimum: angkaDari(stokMin) || 0,
           catatan: catatan.trim() || null,
           kategori: kategori || null,
           boleh_eceran: bolehEceran,
@@ -364,8 +365,8 @@ function ItemModal({
               id: d.id,
               nama: nama.trim(),
               satuan: satuan.trim() || "pcs",
-              harga_beli: Number(hargaBeli) || 0,
-              stok_minimum: Number(stokMin) || 0,
+              harga_beli: angkaDari(hargaBeli) || 0,
+              stok_minimum: angkaDari(stokMin) || 0,
               catatan: catatan.trim() || null,
               kategori: kategori || null,
               boleh_eceran: bolehEceran,
@@ -410,11 +411,12 @@ function ItemModal({
         <div className="grid grid-cols-2 gap-3">
           <label className="block text-sm">
             Harga beli / satuan (Rp)
-            <input type="number" min={0} value={hargaBeli} onChange={(e) => setHargaBeli(e.target.value)} className={inputClass} />
+            <input type="text" inputMode="decimal" value={hargaBeli} onChange={(e) => setHargaBeli(e.target.value)} className={inputClass} />
           </label>
           <label className="block text-sm">
             Stok minimum (peringatan menipis)
-            <input type="number" min={0} value={stokMin} onChange={(e) => setStokMin(e.target.value)} className={inputClass} />
+            <input type="text"
+            inputMode="decimal" value={stokMin} onChange={(e) => setStokMin(e.target.value)} className={inputClass} />
           </label>
         </div>
         <div className="rounded-lg bg-stone-50 px-3 py-2 text-xs text-stone-500">
@@ -536,8 +538,8 @@ function AturanForm({
         method: "PUT",
         body: {
           metode,
-          qty: metode === "manual" ? 0 : Number(qty),
-          per_hari: Number(perHari) || 1,
+          qty: metode === "manual" ? 0 : angkaDari(qty),
+          per_hari: angkaDari(perHari) || 1,
           aktif: metode === "manual" ? true : aktif,
           mulai: metode === "manual" ? undefined : mulai || undefined,
         },
@@ -612,11 +614,13 @@ function AturanForm({
           <div className="grid grid-cols-2 gap-3">
             <label className="block text-sm">
               Jumlah terpakai ({item.satuan})
-              <input type="number" min={0} step="any" value={qty} onChange={(e) => setQty(e.target.value)} className={inputClass} />
+              <input type="text"
+            inputMode="decimal" step="any" value={qty} onChange={(e) => setQty(e.target.value)} className={inputClass} />
             </label>
             <label className="block text-sm">
               Setiap … hari
-              <input type="number" min={1} max={365} value={perHari} onChange={(e) => setPerHari(e.target.value)} className={inputClass} />
+              <input type="text"
+            inputMode="decimal" min={1} max={365} value={perHari} onChange={(e) => setPerHari(e.target.value)} className={inputClass} />
             </label>
           </div>
           <label className="block text-sm">
@@ -634,7 +638,7 @@ function AturanForm({
         <button onClick={onClose} className={btnSecondary}>Batal</button>
         <button
           onClick={() => kirim.mutate()}
-          disabled={!branchId || (metode === "otomatis" && !(Number(qty) > 0)) || kirim.isPending}
+          disabled={!branchId || (metode === "otomatis" && !(angkaDari(qty) > 0)) || kirim.isPending}
           className={btnPrimary}
         >
           Simpan Aturan

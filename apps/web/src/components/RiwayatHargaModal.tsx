@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import type { RiwayatHargaDto } from "@kakarut/shared";
+import { angkaDari } from "@kakarut/shared";
 import { api } from "../lib/api";
 import { formatAngka, formatRupiah, formatTanggal } from "../lib/format";
 import { ErrorText, Modal, Spinner, SpinnerAtauGalat, btnPrimary, btnSecondary, inputClass } from "./ui";
@@ -49,7 +50,7 @@ export function RiwayatHargaPanel({
       api<RiwayatHargaDto>(`${endpoint}/harga`, {
         method: "POST",
         // input per kemasan → konversi ke per satuan (server simpan × isi lagi)
-        body: { harga_per_unit: (Number(hargaBaru) || 0) / (pakaiBasisIsi ? isi : 1) },
+        body: { harga_per_unit: (angkaDari(hargaBaru) || 0) / (pakaiBasisIsi ? isi : 1) },
       }),
     onSuccess: (d) => {
       queryClient.setQueryData(["riwayat-harga", endpoint], d);
@@ -219,9 +220,8 @@ export function RiwayatHargaPanel({
           </div>
           <div className="flex items-center gap-2">
             <input
-              type="number"
-              min={0}
-              step="any"
+              type="text"
+              inputMode="decimal"
               value={hargaBaru}
               onChange={(e) => setHargaBaru(e.target.value)}
               placeholder={String(
@@ -231,16 +231,16 @@ export function RiwayatHargaPanel({
             />
             <button
               onClick={() => simpan.mutate()}
-              disabled={!(Number(hargaBaru) >= 0) || hargaBaru === "" || simpan.isPending}
+              disabled={!(angkaDari(hargaBaru) >= 0) || hargaBaru === "" || simpan.isPending}
               className={btnPrimary}
             >
               {simpan.isPending ? "Menyimpan…" : "Catat"}
             </button>
             {simpan.isSuccess && <span className="text-sm text-green-600">Tersimpan ✓</span>}
           </div>
-          {pakaiBasisIsi && hargaBaru !== "" && Number(hargaBaru) >= 0 && (
+          {pakaiBasisIsi && hargaBaru !== "" && angkaDari(hargaBaru) >= 0 && (
             <p className="mt-1 text-xs text-stone-500">
-              ≈ {formatRupiah(Number(hargaBaru) / isi)} / {satuan}
+              ≈ {formatRupiah(angkaDari(hargaBaru) / isi)} / {satuan}
             </p>
           )}
           <p className="mt-1 text-xs text-stone-500">
