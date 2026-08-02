@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { ErrorLogDetailDto, ErrorLogDto, ErrorLogKelompokRow } from "@kakarut/shared";
 import { Card, ErrorText, PageTitle, SpinnerAtauGalat } from "../../components/ui";
 import { api } from "../../lib/api";
@@ -66,15 +66,42 @@ export function ErrorLogPage() {
   const [cari, setCari] = useState("");
   const [dibuka, setDibuka] = useState<string | null>(null);
 
-  const kunci = ["admin-error-log", hari, saring, cari] as const;
-  const { data, error: gagalMuat } = useQuery({
+  /**
+   * KOTAK PENCARIAN ADA DI DALAM CABANG `data` DI BAWAH — jadi apa pun yang
+   * membuat `data` sesaat `undefined` MENCABUT kotaknya dari DOM, dan fokus
+   * ketikan ikut hilang bersamanya. Dulu `cari` masuk langsung ke queryKey
+   * tanpa penahan apa pun: satu ketukan tombol = kunci baru = query tanpa
+   * cache = `data` undefined = kotaknya lenyap. Praktis kotak ini hanya bisa
+   * menerima SATU huruf, lalu pengguna harus mengklik ulang untuk huruf
+   * berikutnya — pencariannya ada, tapi tak bisa dipakai.
+   *
+   * Dua penahan, keduanya pola yang sudah dipakai di repo ini:
+   * - ketikan ditunda dulu (`LaporanHargaModal`), jadi mengetik cepat tidak
+   *   menembakkan satu request per huruf;
+   * - `placeholderData` menahan hasil sebelumnya selama yang baru diambil
+   *   (`TambahStokPage`), jadi tak ada satu render pun tanpa `data` — ini yang
+   *   benar-benar menyelamatkan fokusnya, sebab menunda saja hanya menggeser
+   *   pencabutannya ke 400 ms kemudian.
+   *
+   * Saringan hari & status ikut kecipratan untungnya: menekan chip tak lagi
+   * mengedipkan seluruh halaman jadi spinner.
+   */
+  const [cariTunda, setCariTunda] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setCariTunda(cari), 400);
+    return () => clearTimeout(t);
+  }, [cari]);
+
+  const kunci = ["admin-error-log", hari, saring, cariTunda] as const;
+  const { data, isFetching, error: gagalMuat } = useQuery({
     queryKey: kunci,
     queryFn: () =>
       api<ErrorLogDto>(
         `/admin/error-log?hari=${hari}${saring === "semua" ? "" : `&status=${saring}`}${
-          cari ? `&q=${encodeURIComponent(cari)}` : ""
+          cariTunda ? `&q=${encodeURIComponent(cariTunda)}` : ""
         }`,
       ),
+    placeholderData: (prev) => prev,
     refetchInterval: 30_000,
   });
 
@@ -137,6 +164,12 @@ export function ErrorLogPage() {
                 {h === 1 ? "24 jam" : `${h} hari`}
               </button>
             ))}
+            {/*
+              Angka & daftar di layar bisa sesaat milik saringan SEBELUMNYA
+              (itulah harga `placeholderData`), jadi katakan saat itu terjadi —
+              tanpa penanda ini, hasil lama terlihat seperti jawaban final.
+            */}
+            {isFetching && <span className="text-xs text-stone-400">Memuat…</span>}
             <input
               value={cari}
               onChange={(e) => setCari(e.target.value)}
