@@ -82,6 +82,15 @@ export function StokPerlengkapanTab({
     queryClient.invalidateQueries({ queryKey: ["perlengkapan-kiriman"] });
     queryClient.invalidateQueries({ queryKey: ["perlengkapan-opname"] });
     queryClient.invalidateQueries({ queryKey: ["kartu-perlengkapan"] });
+    // Halaman MASTER Perlengkapan menampilkan sebaran saldo per cabang, jadi
+    // tiap mutasi di sini mengubah angkanya. Kuncinya HARUS disebut sendiri:
+    // pencocokan awalan TanStack Query membandingkan elemen pertama secara
+    // utuh, sehingga ["perlengkapan"] di atas tidak pernah mengenai
+    // ["perlengkapan-master"] — keduanya kunci berbeda, bukan induk & anak.
+    // Kunci ini pula yang ber-staleTime 5 menit (lihat KUNCI_MASTER di
+    // main.tsx), jadi tanpa baris ini saldonya basi bukan 10 detik tapi lima
+    // menit penuh.
+    queryClient.invalidateQueries({ queryKey: ["perlengkapan-master"] });
   };
 
   const terima = useMutation({

@@ -311,6 +311,10 @@ function DetailSheetPerl({ sessionId, onClose }: { sessionId: string; onClose: (
     queryClient.invalidateQueries({ queryKey: ["perlengkapan-opname"] });
     queryClient.invalidateQueries({ queryKey: ["perlengkapan"] });
     queryClient.invalidateQueries({ queryKey: ["kartu-perlengkapan"] });
+    // ACC opname membukukan selisihnya ke saldo — halaman MASTER Perlengkapan
+    // menampilkan saldo itu per cabang. ["perlengkapan"] di atas tidak
+    // menjangkaunya: pencocokan awalan membandingkan elemen pertama secara utuh.
+    queryClient.invalidateQueries({ queryKey: ["perlengkapan-master"] });
   };
   const aksi = useMutation({
     mutationFn: (jenis: "acc" | "tolak" | "hapus") =>

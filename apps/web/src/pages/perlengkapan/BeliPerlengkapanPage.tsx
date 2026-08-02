@@ -627,7 +627,17 @@ function TibaFakturModal({ faktur, onClose }: { faktur: FakturBeli; onClose: () 
       });
     },
     onSuccess: () => {
-      for (const key of ["perlengkapan-beli", "perlengkapan", "perlengkapan-kiriman", "penerimaan"]) {
+      // "perlengkapan-master" ikut disebut sendiri: barang yang tiba menambah
+      // saldo CK, dan halaman MASTER Perlengkapan menampilkan sebaran saldo itu.
+      // ["perlengkapan"] tidak menjangkaunya — pencocokan awalan TanStack Query
+      // membandingkan elemen pertama secara utuh.
+      for (const key of [
+        "perlengkapan-beli",
+        "perlengkapan",
+        "perlengkapan-master",
+        "perlengkapan-kiriman",
+        "penerimaan",
+      ]) {
         queryClient.invalidateQueries({ queryKey: [key] });
       }
       onClose();
