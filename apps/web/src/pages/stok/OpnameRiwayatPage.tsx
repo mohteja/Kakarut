@@ -58,12 +58,32 @@ function DetailSheet({ sessionId, onClose }: { sessionId: string; onClose: () =>
     queryFn: () => api<OpnameSesiDetail>(`/stok/opname/sesi/${sessionId}`),
   });
 
-  // Setelah ACC/tolak/hapus: segarkan riwayat + stok + kartu + detail sesi ini.
+  /**
+   * Setelah ACC/tolak/hapus: segarkan SEMUA yang ikut berubah.
+   *
+   * Ketiganya mengubah `stock_opnames.penyesuaian_status`, dan status itu
+   * dibaca lebih jauh daripada yang tampak:
+   *
+   *   /stok/exp   — `JOIN stock_opnames … penyesuaian_status = 'disetujui'`
+   *   /stok/fifo  — `UNION ALL … FROM stock_opnames` (lot 'opname')
+   *
+   * Jadi dua layar ikut basi: panel lot mendekati kedaluwarsa di halaman Stok,
+   * dan rincian FIFO di Detail Bahan. Keduanya TIDAK terjangkau `["stok"]` —
+   * pencocokan awalan React Query membandingkan elemen pertama secara UTUH,
+   * jadi `"stok"` tak pernah cocok dengan `"stok-exp"` maupun `"stok-fifo"`.
+   *
+   * Jebakan yang sama sudah dipelajari dua kali di repo ini: `CatatWasteModal`
+   * menyebut `stok-exp` satu per satu, dan pasangan perlengkapan di berkas ini
+   * menuliskan alasannya sendiri untuk `perlengkapan-master`. Sisi bahan baku
+   * belum ikut — padahal ia yang justru punya kedua layar itu.
+   */
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["opname-riwayat"] });
     queryClient.invalidateQueries({ queryKey: ["opname-sesi", sessionId] });
     queryClient.invalidateQueries({ queryKey: ["stok"] });
     queryClient.invalidateQueries({ queryKey: ["kartu-stok"] });
+    queryClient.invalidateQueries({ queryKey: ["stok-exp"] });
+    queryClient.invalidateQueries({ queryKey: ["stok-fifo"] });
   };
 
   // ACC/Tolak menerima daftar id baris. Kosong = semua sisa (bulk). Modal TETAP

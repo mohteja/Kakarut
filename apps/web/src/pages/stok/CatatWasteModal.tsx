@@ -47,7 +47,12 @@ export function CatatWasteModal({
         },
       }),
     onSuccess: (res) => {
-      for (const key of ["stok", "stok-exp", "opname"]) {
+      // Waste dicatat SEBAGAI baris opname (kategori waste_bahan) yang masih
+      // menunggu ACC — jadi sesinya muncul di Riwayat Opname. Kuncinya dulu
+      // `"opname"`, dan tak ada satu pun query memakai kunci itu; pencocokan
+      // awalan React Query membandingkan elemen pertama secara UTUH, jadi
+      // `"opname"` tak pernah menyentuh `"opname-riwayat"`.
+      for (const key of ["stok", "stok-exp", "opname-riwayat"]) {
         queryClient.invalidateQueries({ queryKey: [key] });
       }
       setSukses({ nomor: res.nomor });

@@ -187,7 +187,14 @@ export function OpnamePage() {
       setDipilih({});
       setBucket(null);
       setLangkah("lokasi");
-      queryClient.invalidateQueries({ queryKey: ["stok"] });
+      // Baris BERSELISIH menunggu ACC (belum mengubah saldo), tapi baris yang
+      // COCOK masuk langsung `disetujui` — dan itu sudah cukup menggeser
+      // keluaran `/stok/fifo` (baris 'opname' baru di rentetan event) maupun
+      // `/stok/exp` (baseline opname terakhir bergeser). Sesinya juga muncul
+      // di Riwayat Opname.
+      for (const k of ["stok", "kartu-stok", "stok-exp", "stok-fifo", "opname-riwayat"]) {
+        queryClient.invalidateQueries({ queryKey: [k] });
+      }
     },
   });
 

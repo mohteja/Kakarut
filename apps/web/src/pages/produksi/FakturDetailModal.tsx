@@ -64,7 +64,7 @@ export function FakturDetailModal({
   });
 
   function selesai() {
-    for (const key of [endpoint, "stok", "sampah", "laporan", "penjualan", "rekomendasi"]) {
+    for (const key of [endpoint, "stok", "sampah", "laporan", "rekomendasi"]) {
       queryClient.invalidateQueries({ queryKey: [key] });
     }
     onClose();

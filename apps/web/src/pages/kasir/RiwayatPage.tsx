@@ -58,14 +58,7 @@ export function RiwayatPage() {
    */
   function segarkan(tutup: boolean) {
     if (tutup) setSelectedId(null);
-    for (const key of [
-      "riwayat",
-      "penjualan",
-      "transaksi-detail",
-      "stok",
-      "laporan",
-      "rekomendasi",
-    ]) {
+    for (const key of ["riwayat", "transaksi-detail", "stok", "laporan", "rekomendasi", "sampah"]) {
       queryClient.invalidateQueries({ queryKey: [key] });
     }
   }

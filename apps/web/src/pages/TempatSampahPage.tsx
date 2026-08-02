@@ -33,8 +33,19 @@ export function TempatSampahPage() {
     mutationFn: (r: SampahRow) =>
       api("/sampah/pulihkan", { method: "POST", body: { jenis: r.jenis, key: r.key } }),
     onSuccess: () => {
-      // stok/laporan/daftar transaksi langsung terhitung lagi
-      for (const key of ["sampah", "stok", "laporan", "penjualan", "/pembelian", "/produksi", "rekomendasi"]) {
+      // stok/laporan/daftar transaksi langsung terhitung lagi. Daftar transaksi
+      // itu "riwayat" + "transaksi-detail" — "penjualan" cuma nama endpoint-nya
+      // dan tak dipakai sebagai kunci query mana pun.
+      for (const key of [
+        "sampah",
+        "stok",
+        "laporan",
+        "riwayat",
+        "transaksi-detail",
+        "/pembelian",
+        "/produksi",
+        "rekomendasi",
+      ]) {
         queryClient.invalidateQueries({ queryKey: [key] });
       }
     },

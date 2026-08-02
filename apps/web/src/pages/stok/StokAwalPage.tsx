@@ -99,9 +99,19 @@ export function StokAwalPage() {
     onSuccess: () => {
       setKonfirmasi(false);
       setSelesai(true);
+      // Stok awal masuk sebagai baris opname yang LANGSUNG `disetujui`, jadi
+      // ia seketika mengubah saldo, kartu stok, daftar lot mendekati exp, dan
+      // rincian FIFO — `/stok/fifo` bahkan berjangkar pada baseline opname ini.
+      //
+      // `["kartu"]` dulu tak menyegarkan apa pun: tak ada query yang memakainya
+      // (yang benar `["kartu-stok"]`), dan pencocokan awalan React Query
+      // membandingkan elemen pertama secara UTUH — jadi barisnya mati sejak
+      // ditulis. Jebakan yang sama membuat `stok-exp` & `stok-fifo` luput.
       queryClient.invalidateQueries({ queryKey: ["stok"] });
       queryClient.invalidateQueries({ queryKey: ["stok-awal"] });
-      queryClient.invalidateQueries({ queryKey: ["kartu"] });
+      queryClient.invalidateQueries({ queryKey: ["kartu-stok"] });
+      queryClient.invalidateQueries({ queryKey: ["stok-exp"] });
+      queryClient.invalidateQueries({ queryKey: ["stok-fifo"] });
     },
   });
 

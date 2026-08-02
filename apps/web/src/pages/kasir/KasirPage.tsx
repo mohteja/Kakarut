@@ -650,7 +650,9 @@ export function KasirPage() {
       // modal pilih meja dibuka lagi saat struk ditutup (transaksi berikutnya)
       queryClient.invalidateQueries({ queryKey: ["stok"] });
       queryClient.invalidateQueries({ queryKey: ["laporan"] });
-      queryClient.invalidateQueries({ queryKey: ["penjualan"] });
+      // daftar Riwayat Transaksi — kuncinya "riwayat", BUKAN "penjualan"
+      // (itu nama endpoint-nya, bukan kunci query-nya)
+      queryClient.invalidateQueries({ queryKey: ["riwayat"] });
       queryClient.invalidateQueries({ queryKey: ["open-bill"] });
       queryClient.invalidateQueries({ queryKey: ["menu-ketersediaan"] });
       // papan pesanan dapur/bar: kartu berpindah dari "belum dibayar" ke
