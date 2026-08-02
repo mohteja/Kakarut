@@ -5220,8 +5220,35 @@ cek "absen dinilai pada tanggal WAKTU: 3 hari lalu tanpa absen → gagal 400" "V
 cek "tak ada shift terbuka setelah perintah ditolak" "V == 1" \
   "$(api "$K137" GET /shift/aktif | jq 'if .==null then 1 else 0 end')"
 
-# Buka shift offline 4 jam lalu (hari ini — kasir sudah absen di §2b).
-W138=$(date -u -d '-4 hours' +%Y-%m-%dT%H:%M:%SZ)
+# Buka shift offline BEBERAPA WAKTU lalu, tapi masih HARI INI — kasir absennya
+# ada di tanggal bisnis hari ini (§2b), dan gerbang absen dinilai pada tanggal
+# bisnis `waktu` (dibuktikan tepat di atas oleh kasus "3 hari lalu").
+#
+# Karena itu offsetnya TIDAK boleh dipatok 4 jam. Antara 00.00–03.59 WIB,
+# `now - 4 jam` mendarat di HARI KEMARIN, absennya tak ada di sana, dan
+# perintahnya ditolak 400 — 13 pemeriksaan di bawah runtuh berurutan karena
+# kalender, bukan karena produk. Itu yang terjadi pada run 17:05 UTC
+# (= 00:05 WIB); jendela rusaknya empat jam penuh setiap hari.
+#
+# Angka 4 jam sendiri tak pernah jadi inti: yang diuji adalah `dibuka_pada`
+# memakai WAKTU KEJADIAN, bukan jam sinkron. Jadi rentangnya dibuat sebesar
+# yang muat di hari ini, dengan urutan buka < jual < kedua < sekarang tetap
+# terjaga.
+WIB_MENIT=$(( 10#$(TZ=Asia/Jakarta date +%H) * 60 + 10#$(TZ=Asia/Jakarta date +%M) ))
+if [ "$WIB_MENIT" -lt 10 ]; then
+  # Beberapa menit pertama hari bisnis: skenario "dibuka lebih awal hari ini"
+  # memang belum bisa ada. Ditunggu (maks 10 menit, ~0,7% run) — bukan
+  # dilewati, karena lubang cakupan yang muncul sendiri tengah malam adalah
+  # lubang yang tak akan pernah ada yang sadari.
+  echo "   … §138 menunggu $(( (10 - WIB_MENIT) * 60 ))s: butuh jarak dari tengah malam WIB"
+  sleep $(( (10 - WIB_MENIT) * 60 ))
+  WIB_MENIT=10
+fi
+SPAN138=$(( WIB_MENIT - 2 )); [ "$SPAN138" -gt 240 ] && SPAN138=240
+OFF_BUKA138=$SPAN138                      # buka shift
+OFF_JUAL138=$(( SPAN138 * 3 / 4 ))        # penjualan offline + ambang dibuka_pada
+OFF_DUA138=$(( SPAN138 / 2 ))             # perintah shift_buka kedua
+W138=$(date -u -d "-${OFF_BUKA138} minutes" +%Y-%m-%dT%H:%M:%SZ)
 B138=$(jq -nc --arg r "$(uuid138)" --arg w "$W138" '{device_id:"dev138",commands:[{client_ref:$r,tipe:"shift_buka",waktu:$w,payload:{modal_awal:250000}}]}')
 RES138=$(api "$K137" POST /sync "$B138")
 cek "shift_buka lewat sinkron → item ok 201" "V == 1" \
@@ -5232,12 +5259,12 @@ cek "modal_awal dari payload terbawa" "V == 250000" \
   "$(echo "$RES138" | jq '.hasil[0].data.modal_awal')"
 SH138=$(echo "$RES138" | jq -r '.hasil[0].data.id')
 # INTI: dibuka_pada = waktu kejadian, BUKAN jam sinkron.
-cek "dibuka_pada memakai waktu kejadian (>3 jam lalu), bukan jam sinkron" "V == 1" \
-  "$(api "$K137" GET /shift/aktif | jq --arg n "$(date -u -d '-3 hours' +%Y-%m-%dT%H:%M:%SZ)" '(.dibuka_pada < $n)|if . then 1 else 0 end')"
+cek "dibuka_pada memakai waktu kejadian (jauh sebelum jam sinkron)" "V == 1" \
+  "$(api "$K137" GET /shift/aktif | jq --arg n "$(date -u -d "-${OFF_JUAL138} minutes" +%Y-%m-%dT%H:%M:%SZ)" '(.dibuka_pada < $n)|if . then 1 else 0 end')"
 
 # Manfaatnya: penjualan offline 3 jam lalu masuk lewat JENDELA NORMAL —
 # bukan jalur toleransi susulan.
-W138S=$(date -u -d '-3 hours' +%Y-%m-%dT%H:%M:%SZ)
+W138S=$(date -u -d "-${OFF_JUAL138} minutes" +%Y-%m-%dT%H:%M:%SZ)
 B138S=$(jq -nc --arg r "$(uuid138)" --arg w "$W138S" --arg m "$MENU138" '{commands:[{client_ref:$r,tipe:"penjualan",waktu:$w,payload:{items:[{menu_id:$m,qty:1}],metode_bayar:"tunai"}}]}')
 RES138S=$(api "$K137" POST /sync "$B138S")
 cek "penjualan 3 jam lalu → ok, masuk shift yang dibuka offline" "V == 1" \
@@ -5250,7 +5277,7 @@ cek "rekap shift terbuka menghitung penjualan itu" "V == 1" \
 # Bentrok: manajer/perangkat lain sudah membuka shift → JANGAN gagal, kembalikan
 # shift yang ada. Menggagalkannya membuat penjualan yang bersandar padanya
 # kehilangan tempat berpijak — kelas bug yang baru ditutup di §137.
-B138B=$(jq -nc --arg r "$(uuid138)" --arg w "$(date -u -d '-2 hours' +%Y-%m-%dT%H:%M:%SZ)" '{commands:[{client_ref:$r,tipe:"shift_buka",waktu:$w,payload:{modal_awal:999}}]}')
+B138B=$(jq -nc --arg r "$(uuid138)" --arg w "$(date -u -d "-${OFF_DUA138} minutes" +%Y-%m-%dT%H:%M:%SZ)" '{commands:[{client_ref:$r,tipe:"shift_buka",waktu:$w,payload:{modal_awal:999}}]}')
 RES138B=$(api "$K137" POST /sync "$B138B")
 cek "shift sudah terbuka → tetap ok (bukan gagal)" "V == 1" \
   "$(echo "$RES138B" | jq '.hasil[0].status=="ok"|if . then 1 else 0 end')"
