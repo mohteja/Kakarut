@@ -26,6 +26,7 @@ import {
 import { resolveBranchId, type AppEnv } from "../../middleware/auth";
 import { tanggalDi } from "../../lib/time";
 import {
+  barisBerpindah,
   hitungUlangBiayaPenjualan,
   type HasilRekalkulasi,
 } from "../penjualan/rekalkulasi";
@@ -548,17 +549,28 @@ export const pesananRoutes = new Hono<AppEnv>()
           if (!baris) throw new HTTPException(404, { message: "Baris pesanan tidak ditemukan" });
           return { nama: baris.nama, biaya: null };
         }
+        // Nilai LAMA dibaca dulu: menandai TA sebuah baris yang memang sudah TA
+        // bukan perpindahan basis, dan melaporkannya sebagai perpindahan akan
+        // menambahkan biaya kemasan untuk kedua kalinya.
         const [baris] = await tx
+          .select({ nama: saleItems.menuNama, ta: saleItems.sajianTakeaway })
+          .from(saleItems)
+          .where(and(eq(saleItems.id, itemId), eq(saleItems.saleId, id)));
+        if (!baris) throw new HTTPException(404, { message: "Baris pesanan tidak ditemukan" });
+        await tx
           .update(saleItems)
           .set({ sajianTakeaway: takeaway })
-          .where(and(eq(saleItems.id, itemId), eq(saleItems.saleId, id)))
-          .returning({ nama: saleItems.menuNama });
-        if (!baris) throw new HTTPException(404, { message: "Baris pesanan tidak ditemukan" });
+          .where(and(eq(saleItems.id, itemId), eq(saleItems.saleId, id)));
         return {
           nama: baris.nama,
-          // Hanya baris INI yang basis penyajiannya berubah; harga pokok baris
-          // lain tetap angka historisnya.
-          biaya: await hitungUlangBiayaPenjualan(tx, id, auth.company_id!, new Set([itemId])),
+          // Hanya baris ini yang mungkin berpindah; harga pokok baris lain
+          // tetap angka historisnya.
+          biaya: await hitungUlangBiayaPenjualan(
+            tx,
+            id,
+            auth.company_id!,
+            barisBerpindah([{ id: itemId, sajianTakeaway: baris.ta }], takeaway),
+          ),
         };
       });
 
@@ -674,8 +686,21 @@ export const pesananRoutes = new Hono<AppEnv>()
           .where(eq(openBillItems.billId, id));
         return null;
       }
+      // "Semua baris ditulis" bukan "semua baris berubah": pesanan campur —
+      // satu porsi sudah dibungkus kasir, sisanya belum — akan kena biaya
+      // kemasan dua kali pada baris yang memang sudah bawa pulang. Yang
+      // dilaporkan berpindah hanya baris yang nilainya benar-benar beda.
+      const lama = await tx
+        .select({ id: saleItems.id, sajianTakeaway: saleItems.sajianTakeaway })
+        .from(saleItems)
+        .where(eq(saleItems.saleId, id));
       await tx.update(saleItems).set({ sajianTakeaway: takeaway }).where(eq(saleItems.saleId, id));
-      return await hitungUlangBiayaPenjualan(tx, id, auth.company_id!, "semua");
+      return await hitungUlangBiayaPenjualan(
+        tx,
+        id,
+        auth.company_id!,
+        barisBerpindah(lama, takeaway),
+      );
     });
 
     await db.insert(pesananLogs).values({

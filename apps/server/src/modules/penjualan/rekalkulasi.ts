@@ -33,17 +33,41 @@ export interface HasilRekalkulasi {
 }
 
 /**
- * Baris mana yang basis penyajiannya BERUBAH pada operasi ini — `"semua"` atau
- * himpunan `sale_items.id`.
+ * `sale_items.id` yang penyajiannya BENAR-BENAR BERPINDAH pada operasi ini —
+ * nilainya berubah, bukan sekadar ikut ditulis.
  *
- * SENGAJA tanpa nilai bawaan. Ini satu-satunya hal yang boleh menggeser harga
- * pokok sebuah baris; pemanggil yang lupa menyebutkannya akan ketahuan oleh
- * typecheck, bukan diam-diam menulis ulang pembukuan yang sudah tutup.
+ * Bedanya bukan main-main, dan pernah salah persis di sini. Endpoint `/sajian`
+ * menyetel penanda SELURUH baris tanpa memeriksa nilai lamanya, jadi "semua
+ * baris ditulis" tidak sama dengan "semua baris berubah". Baris yang sudah
+ * bawa pulang lalu ditandai bawa pulang lagi tidak berpindah basis — dan
+ * memasukkannya ke sini membuat `hppSatuanBaru` memakai `!dasarDineIn` sebagai
+ * basis lamanya, padahal basis lamanya sama dengan yang baru. Kemasannya
+ * ditambahkan untuk KEDUA kalinya.
+ *
+ * Karena itu tak ada lagi varian `"semua"`: pemanggil wajib menyodorkan
+ * himpunan yang ia buktikan sendiri dengan membandingkan nilai lama dan baru.
+ * SENGAJA tanpa nilai bawaan — yang lupa ketahuan typecheck, bukan diam-diam
+ * menulis ulang pembukuan yang sudah tutup.
  */
-export type BasisBerubah = "semua" | ReadonlySet<string>;
+export type BasisBerubah = ReadonlySet<string>;
 
 /** Tidak ada penyajian yang berubah — dipakai jalur refund. */
 export const TANPA_UBAH_BASIS: ReadonlySet<string> = new Set<string>();
+
+/**
+ * Baris mana yang BERPINDAH bila penyajiannya disetel ke `takeaway`.
+ *
+ * Satu-satunya cara sah menyusun `BasisBerubah` dari endpoint `/sajian`:
+ * bandingkan nilai lama tiap baris dengan nilai yang diminta. Baris yang sudah
+ * berada di nilai itu tidak berpindah, dan pesanan CAMPUR — satu porsi sudah
+ * dibungkus kasir, sisanya belum — adalah kasus normal, bukan kasus pinggir.
+ */
+export function barisBerpindah(
+  baris: readonly { id: string; sajianTakeaway: boolean }[],
+  takeaway: boolean,
+): ReadonlySet<string> {
+  return new Set(baris.filter((b) => b.sajianTakeaway !== takeaway).map((b) => b.id));
+}
 
 /**
  * Harga pokok satu porsi SESUDAH operasi ini.
@@ -149,7 +173,7 @@ export async function hitungUlangBiayaPenjualan(
     const dasarDineIn = !b.sajianTakeaway;
     const hppSatuan = hppSatuanBaru({
       hppLama: b.hppSatuan,
-      basisBerubah: basisBerubah === "semua" || basisBerubah.has(b.id),
+      basisBerubah: basisBerubah.has(b.id),
       hppBasisBaru: hitungHargaMenu(menu, katalog, dasarDineIn),
       hppBasisLama: hitungHargaMenu(menu, katalog, !dasarDineIn),
     });
