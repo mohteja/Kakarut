@@ -586,6 +586,7 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
           <input
             type="date"
             value={dari}
+            max={sampai}
             onChange={(e) => gantiFilter(() => setDari(e.target.value))}
             className={inputClass}
           />
@@ -595,6 +596,7 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
           <input
             type="date"
             value={sampai}
+            min={dari}
             onChange={(e) => gantiFilter(() => setSampai(e.target.value))}
             className={inputClass}
           />

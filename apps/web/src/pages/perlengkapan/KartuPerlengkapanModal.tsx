@@ -41,11 +41,11 @@ export function KartuPerlengkapanModal({
       <div className="mb-3 flex flex-wrap items-end gap-2 text-sm">
         <label className="block">
           Dari
-          <input type="date" value={dari} onChange={(e) => setDari(e.target.value)} className={inputClass} />
+          <input type="date" value={dari} max={sampai} onChange={(e) => setDari(e.target.value)} className={inputClass} />
         </label>
         <label className="block">
           Sampai
-          <input type="date" value={sampai} onChange={(e) => setSampai(e.target.value)} className={inputClass} />
+          <input type="date" value={sampai} min={dari} onChange={(e) => setSampai(e.target.value)} className={inputClass} />
         </label>
         {data && (
           <div className="ml-auto text-right text-xs text-stone-500">
