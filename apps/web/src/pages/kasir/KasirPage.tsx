@@ -27,6 +27,7 @@ import { useCabangData } from "../../context/BranchContext";
 import { CabangDataBar } from "../../components/CabangDataBar";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah } from "../../lib/format";
+import { uuidV4 } from "../../lib/idempoten";
 import { ReceiptModal, type SaleResult } from "./ReceiptModal";
 import {
   KosongkanMejaModal,
@@ -551,11 +552,40 @@ export function KasirPage() {
   const uangKurang = metodeBayar === "tunai" && uangNum > 0 && uangNum < total;
   const kembalian = metodeBayar === "tunai" && uangNum > total ? uangNum - total : 0;
 
+  /**
+   * KUNCI IDEMPOTENSI satu pembayaran, bertahan melintasi percobaan ulang.
+   *
+   * Dibuat sekali saat Bayar pertama kali ditekan dan BARU dilepas setelah
+   * transaksinya benar-benar tercatat. Kalau ia dibuat ulang tiap percobaan,
+   * pengaman ini tak ada gunanya: justru percobaan KEDUA-lah yang harus
+   * membawa kunci yang sama, karena di situlah penjualan dobel lahir.
+   */
+  const refPembayaran = useRef<string | null>(null);
+
   const bayar = useMutation({
-    mutationFn: () =>
-      api<SaleResult>("/penjualan", {
+    mutationFn: () => {
+      refPembayaran.current ??= uuidV4();
+      return api<SaleResult>("/penjualan", {
         method: "POST",
         body: {
+          /*
+           * Jaringan yang putus SESUDAH server menyimpan tapi SEBELUM
+           * balasannya sampai membuat kasir melihat galat, lalu menekan Bayar
+           * lagi — ia tak punya cara tahu transaksinya sudah tercatat. Tanpa
+           * `client_ref`, tekanan kedua itu membuat penjualan KEDUA untuk satu
+           * kali pembayaran: omzet, stok, dan HPP terhitung dua kali.
+           *
+           * Server sudah lama menyediakan penangkalnya — `cariHasilIdempoten`
+           * diperiksa paling awal di `POST /penjualan` dan membalas penjualan
+           * yang sudah ada — dan klien Flutter memakainya. Web tidak, sampai
+           * sekarang.
+           *
+           * Catatan yang disengaja: bila kasir mengubah keranjang lalu menekan
+           * Bayar lagi SESUDAH percobaan yang ternyata sudah tersimpan, server
+           * membalas penjualan yang ASLI, bukan keranjang barunya. Itu memang
+           * yang benar — uangnya sudah berpindah untuk transaksi yang itu.
+           */
+          client_ref: refPembayaran.current,
           ...(!isKasir && branchId ? { branch_id: branchId } : {}),
           is_dine_in: dineIn,
           meja_id: mejaId ?? undefined,
@@ -597,8 +627,14 @@ export function KasirPage() {
             ...(editingBillId && l.billItemId ? { open_bill_item_id: l.billItemId } : {}),
           })),
         },
-      }),
+      });
+    },
     onSuccess: (data) => {
+      // Transaksi ini sudah punya rumah. Kunci berikutnya harus BARU — memakai
+      // ulang kunci ini akan membuat server membalas struk yang lama untuk
+      // transaksi berikutnya, dan penjualan yang sesungguhnya tak pernah
+      // tercatat.
+      refPembayaran.current = null;
       setStruk(data);
       setResumeOpen(false);
       // bill ditutup SERVER di dalam transaksi createSale (open_bills.closed_at
