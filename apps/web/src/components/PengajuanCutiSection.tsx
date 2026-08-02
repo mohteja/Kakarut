@@ -242,9 +242,27 @@ export function PengajuanCutiSection() {
               <label className="mb-1 block text-xs font-medium text-stone-500">
                 Lampiran (opsional) — mis. surat dokter
               </label>
+              {/*
+                Bentuk fungsional, BUKAN `{ ...form }` seperti isian lain di
+                form ini. Isian lain sinkron — tiap ketukan punya closure segar.
+                Unggahan TIDAK: callback-nya mendarat beberapa detik kemudian
+                membawa `form` dari render saat unggahan dimulai.
+
+                Alurnya justru yang paling wajar: lampirkan surat dokter, lalu
+                sambil menunggu, ketik keterangannya di kotak tepat di atas ini.
+                Saat unggahannya mendarat, `{ ...form }` yang basi menimpa balik
+                dan keterangannya hilang.
+
+                `prev ? … : prev` menjaga hal kedua: bila modalnya sudah ditutup
+                (`setForm(null)`) sementara unggahan berjalan, menyebar snapshot
+                lama akan MENGHIDUPKAN kembali form yang sudah ditutup —
+                modalnya terbuka sendiri tanpa disentuh.
+              */}
               <ImageUpload
                 value={form.lampiran_url}
-                onChange={(url) => setForm({ ...form, lampiran_url: url })}
+                onChange={(url) =>
+                  setForm((prev) => (prev ? { ...prev, lampiran_url: url } : prev))
+                }
                 tujuan="bukti"
                 placeholder="📄"
               />
