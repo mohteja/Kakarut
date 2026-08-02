@@ -5098,6 +5098,26 @@ TUNAI_AWAL=$(api "$K137" GET /shift | jq --arg s "$SH137" '[.[]|select(.id==$s)]
 cek "shift tertutup: selisih kas 0 sebelum transaksi susulan" "V == 1" \
   "$(echo "$SEL_AWAL" | jq '.==0|if . then 1 else 0 end')"
 
+# Jendela susulan mensyaratkan TANGGAL BISNIS yang sama (lihat
+# `dalamToleransiSusulan` di sync/routes.ts): penjualan 00:00 WIB tidak boleh
+# masuk ke shift kemarin. Itu aturan yang benar dan memang disengaja.
+#
+# Tapi `+2 menit` di bawah MELEWATI tengah malam WIB bila blok ini kebetulan
+# berjalan pukul 23.58–23.59 — dan ke-11 pemeriksaan di bawahnya gagal karena
+# kalender, bukan karena produknya. Itu bukan kemungkinan teoretis: run CI
+# 16:58 UTC (= 23:58 WIB) gagal persis begitu.
+#
+# DITUNGGU, bukan dilewati. Melewatkan blok ini akan menghapus cakupan tepat di
+# jalur yang paling jarang tersentuh (kasir offline menjual sesudah shift-nya
+# ditutup dari perangkat lain), dan lubang cakupan yang muncul sendiri di
+# tengah malam adalah lubang yang tak pernah ada yang sadari. Menunggunya
+# paling lama ~3 menit dan hanya kena pada ~0,2% run.
+JAM_WIB=$(TZ=Asia/Jakarta date +%H%M)
+if [ "$((10#$JAM_WIB))" -ge 2357 ]; then
+  TUNGGU137=$(( $(TZ=Asia/Jakarta date -d 'tomorrow 00:00:10' +%s) - $(date +%s) ))
+  echo "   … §137 menunggu ${TUNGGU137}s melewati tengah malam WIB (jendela susulan wajib satu tanggal bisnis)"
+  sleep "$TUNGGU137"
+fi
 # waktu 2 menit ke DEPAN: masih dalam toleransi jam perangkat (5 menit) tapi
 # sudah SETELAH ditutup_pada → persis kasus lapangan "tutup 20.30, jual 20.45".
 W137=$(date -u -d '+2 minutes' +%Y-%m-%dT%H:%M:%SZ)
