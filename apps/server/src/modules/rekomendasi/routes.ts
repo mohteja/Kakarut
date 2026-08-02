@@ -80,8 +80,12 @@ export const rekomendasiRoutes = new Hono<AppEnv>().get("/beli", async (c) => {
   const hasil = await rekomendasiBeli(auth.company_id!, branchId, tz, {
     target,
     acuan,
-    dari: c.req.query("dari") ?? undefined,
-    sampai: c.req.query("sampai") ?? undefined,
+    // Lewat `tgl` seperti sepasangnya di bawah. Keduanya sempat mentah padahal
+    // penyaringnya sudah berdiri dua baris di atas — dan dari sini nilainya
+    // mendarat di `gte(sales.saleDate, ...)`, pembanding kolom `date`. Yang
+    // salah ketik tak ditolak rapi, ia menjatuhkan permintaannya.
+    dari: tgl(c.req.query("dari")),
+    sampai: tgl(c.req.query("sampai")),
     pakaiDari: tgl(c.req.query("pakai_dari")),
     pakaiSampai: tgl(c.req.query("pakai_sampai")),
   });
