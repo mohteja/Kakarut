@@ -7274,5 +7274,87 @@ cek "faktur CK-lokal: masuk stok CK tanpa penerimaan terpisah" "V == 1" \
 cek "faktur CK-lokal pun berjejak penerima" "V == 1" \
   "$(api "$OWNER" GET "/pembelian?branch_id=$CK157&per_page=500" | jq --arg f "$FKL158" --arg n "$NAMA158" '([.rows[]|select(.faktur_id==$f)][0].diterima_oleh == $n) | if . then 1 else 0 end')"
 
+echo "── §159 Refund sebagian per sajian: uang, HPP, dan stok bahan ikut kembali ──"
+# Kasusnya satu, dan owner menyebutkannya sendiri: pembeli sudah membayar, lalu
+# ketahuan bahan salah satu sajian habis sehingga sajian itu tak jadi dibuat.
+# Uang untuk sajian itu — dan hanya sajian itu — dikembalikan.
+#
+# Yang dijaga di sini justru bagian yang paling mudah salah: `nominal` BUKAN
+# `harga × qty`. Diskon dan PB1 melekat pada transaksi, bukan pada baris; kalau
+# keduanya dibiarkan utuh, pembeli menerima kembali LEBIH SEDIKIT daripada yang
+# benar-benar ia bayarkan untuk sajian itu.
+#
+# Angka dipilih bulat supaya salahnya kelihatan (menu §156, harga jual 9.000):
+#   3 porsi        = 27.000
+#   diskon 10%     =  2.700  → net 24.300
+#   PB1 10%        =  2.430  → total 26.730
+#   refund 1 porsi → subtotal 18.000, diskon 1.800, PB1 1.620, total 17.820
+#   nominal        = 26.730 − 17.820 = 8.910  (bukan 9.000!)
+api "$OWNER" PATCH /company '{"pb1_enabled":true,"pb1_rate":10}' > /dev/null
+ISI159_0=$(isi156)
+S159=$(api "$REISS105" POST /penjualan "{\"meja_id\":\"$MEJA156\",\"metode_bayar\":\"tunai\",\"uang_diterima\":50000,\"diskon_tipe\":\"persen\",\"diskon_nilai\":10,\"items\":[{\"menu_id\":\"$M156\",\"qty\":3}]}")
+SID159=$(echo "$S159" | jq -r '.sale.id')
+IT159=$(echo "$S159" | jq -r '.items[0].id')
+jual159() { api "$OWNER" GET "/penjualan/$SID159"; }
+cek "sebelum refund: total 26.730 (27.000 − 2.700 + 2.430)" "abs(V - 26730) < 0.001" \
+  "$(jual159 | jq -r '.sale.total')"
+cek "sebelum refund: belum ada jangkar *_asal (null = belum pernah direfund)" "V == 1" \
+  "$(jual159 | jq '(.sale.subtotalAsal == null and .sale.refundTotal == 0)|if . then 1 else 0 end')"
+cek "sebelum refund: bahan terpakai 3 × 100 gr" "abs(V - 300) < 0.001" \
+  "$(python3 -c "print($ISI159_0 - $(isi156))")"
+HPP159_0=$(hpp156 "$SID159")
+
+# (a) Refund 1 porsi. Uang, HPP, dan stok bahan bergerak bersama-sama.
+R159=$(api "$REISS105" POST "/penjualan/$SID159/refund" "{\"alasan\":\"Bahan habis\",\"items\":[{\"sale_item_id\":\"$IT159\",\"qty\":1}]}")
+cek "KASIR boleh merefund sendiri (tanpa memanggil owner)" "V == 1" \
+  "$(echo "$R159" | jq '(.ok == true)|if . then 1 else 0 end')"
+cek "nominal = 8.910, BUKAN 9.000 — diskon & PB1 porsi itu ikut kembali" "abs(V - 8910) < 0.001" \
+  "$(echo "$R159" | jq -r '.nominal')"
+cek "total penjualan disusutkan jadi 17.820" "abs(V - 17820) < 0.001" "$(jual159 | jq -r '.sale.total')"
+cek "subtotal/diskon/PB1 ikut proporsional (18.000 / 1.800 / 1.620)" "V == 1" \
+  "$(jual159 | jq '((.sale.subtotal==18000) and (.sale.diskon==1800) and (.sale.pb1Amount==1620))|if . then 1 else 0 end')"
+cek "jangkar *_asal terisi dengan angka SEBELUM refund" "V == 1" \
+  "$(jual159 | jq '((.sale.subtotalAsal==27000) and (.sale.diskonAsal==2700) and (.sale.pb1Asal==2430))|if . then 1 else 0 end')"
+cek "refund_total tercatat 8.910" "abs(V - 8910) < 0.001" "$(jual159 | jq -r '.sale.refundTotal')"
+cek "qty baris TIDAK dikurangi (tetap 3) — qty_refund yang bertambah jadi 1" "V == 1" \
+  "$(jual159 | jq '((.items[0].qty==3) and (.items[0].qtyRefund==1))|if . then 1 else 0 end')"
+cek "uang_diterima ikut turun → 'kembalian' di struk tetap angka yang nyata" "abs(V - 41090) < 0.001" \
+  "$(jual159 | jq -r '.sale.uangDiterima')"
+cek "HPP menyusut: sajian yang tak dibuat tak menanggung biaya" "V == 1" \
+  "$(python3 -c "print(1 if $(hpp156 "$SID159") < $HPP159_0 - 0.001 else 0)")"
+cek "STOK BAHAN KEMBALI: pemakaian tinggal 2 × 100 gr" "abs(V - 200) < 0.001" \
+  "$(python3 -c "print($ISI159_0 - $(isi156))")"
+
+# (b) Penolakan divalidasi SELURUHNYA sebelum menulis apa pun. Menolak di tengah
+#     akan meninggalkan sebagian refund tertulis dengan uang yang tak diserahkan.
+cek "melebihi sisa porsi → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/penjualan/$SID159/refund" -H "Authorization: Bearer $REISS105" -H 'Content-Type: application/json' -d "{\"items\":[{\"sale_item_id\":\"$IT159\",\"qty\":99}]}")"
+cek "ditolak: tak ada yang berubah (refund_total masih 8.910)" "abs(V - 8910) < 0.001" \
+  "$(jual159 | jq -r '.sale.refundTotal')"
+
+# (c) BERTAHAP = SEKALIGUS. Jangkar `*_asal` yang membuatnya benar: tanpa itu,
+#     refund kedua menghitung diskon dari angka yang sudah menyusut dan
+#     potongannya tergerus dua kali.
+R159B=$(api "$REISS105" POST "/penjualan/$SID159/refund" "{\"items\":[{\"sale_item_id\":\"$IT159\",\"qty\":2}]}")
+cek "refund sisanya = 17.820 (bertahap 8.910 + 17.820 = 26.730 persis)" "abs(V - 17820) < 0.001" \
+  "$(echo "$R159B" | jq -r '.nominal')"
+cek "seluruh porsi dikembalikan → total 0" "abs(V) < 0.001" "$(jual159 | jq -r '.sale.total')"
+cek "refund_total kumulatif = total asal, tak lebih & tak kurang" "abs(V - 26730) < 0.001" \
+  "$(jual159 | jq -r '.sale.refundTotal')"
+cek "stok bahan kembali SELURUHNYA ke angka sebelum transaksi" "abs(V) < 0.001" \
+  "$(python3 -c "print($ISI159_0 - $(isi156))")"
+cek "HPP jadi 0 — tak ada satu porsi pun yang jadi dibuat" "abs(V) < 0.001" "$(hpp156 "$SID159")"
+cek "sudah habis: refund lagi → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/penjualan/$SID159/refund" -H "Authorization: Bearer $REISS105" -H 'Content-Type: application/json' -d "{\"items\":[{\"sale_item_id\":\"$IT159\",\"qty\":1}]}")"
+
+# (d) Penjualan di Tempat Sampah tak punya arti untuk direfund — seluruh laporan
+#     sudah mengabaikannya, jadi angkanya tak akan pernah terbaca siapa pun.
+S159C=$(api "$REISS105" POST /penjualan "{\"meja_id\":\"$MEJA156\",\"metode_bayar\":\"tunai\",\"items\":[{\"menu_id\":\"$M156\",\"qty\":1}]}")
+SID159C=$(echo "$S159C" | jq -r '.sale.id'); IT159C=$(echo "$S159C" | jq -r '.items[0].id')
+api "$OWNER" DELETE "/penjualan/$SID159C" > /dev/null
+cek "penjualan terhapus → refund 404" "V == 404" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/penjualan/$SID159C/refund" -H "Authorization: Bearer $REISS105" -H 'Content-Type: application/json' -d "{\"items\":[{\"sale_item_id\":\"$IT159C\",\"qty\":1}]}")"
+api "$OWNER" PATCH /company '{"pb1_enabled":false,"pb1_rate":0}' > /dev/null
+
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]
