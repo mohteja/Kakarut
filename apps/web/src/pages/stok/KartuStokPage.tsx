@@ -71,15 +71,69 @@ export function KartuStokPage() {
     enabled: Boolean(ingredientId),
   });
 
-  if (isLoading) return <Spinner />;
-  if (error || !kartu) {
-    return (
-      <div className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
-        {error instanceof Error ? error.message : "Kartu stok tidak dapat dimuat"}
-      </div>
-    );
-  }
+  /**
+   * Pemilih tanggal TIDAK ikut hilang saat memuat/gagal.
+   *
+   * `dari`/`sampai` ada di dalam `queryKey`, jadi tiap perubahan tanggal
+   * membuat query pending lagi. Kalau spinner/pesan galat menggantikan seluruh
+   * halaman (termasuk baris judul yang MEMUAT kedua input ini), input-nya
+   * ter-unmount di tengah pengguna menyetel tanggal: fokus lepas, pemilih
+   * tanggal ponsel tertutup, dan untuk menyetel rentang dua sisi orang harus
+   * menunggu satu putaran jaringan lalu mencari kembali input keduanya. Pada
+   * galat, halaman bahkan jadi jalan buntu — tak ada lagi kontrol untuk
+   * memperbaiki rentangnya. Sama seperti Laporan/Laporan Pembelian/Menu
+   * Terlaris: kontrol selalu terpasang, status muat hanya membungkus isinya.
+   */
+  const pemilihTanggal = (
+    // w-full di HP: dua input tanggal + "s/d" tidak muat di sisa baris
+    // judul, dan tanpa ini input "sampai" jatuh di luar layar
+    <div className="flex w-full items-center gap-2 print:hidden sm:w-auto">
+      <input
+        type="date"
+        value={dari}
+        // Rentang terbalik (dari > sampai) bukan cuma kosong: jendelanya
+        // negatif, sehingga `saldo_akhir` jatuh di bawah `saldo_awal` tanpa
+        // satu pun mutasi — dan kartu ringkasan MENGARANG "disetel Stok Awal
+        // −N" untuk penyesuaian yang tak pernah ada. Dijaga di input, persis
+        // seperti halaman laporan lain.
+        max={sampai}
+        onChange={(e) => setDari(e.target.value)}
+        className={inputClass}
+        aria-label="Dari tanggal"
+      />
+      <span className="text-stone-400">s/d</span>
+      <input
+        type="date"
+        value={sampai}
+        min={dari}
+        onChange={(e) => setSampai(e.target.value)}
+        className={inputClass}
+        aria-label="Sampai tanggal"
+      />
+    </div>
+  );
 
+  return (
+    <div className="max-w-4xl">
+      <PageTitle aksi={pemilihTanggal}>
+        Kartu Stok{kartu ? ` — ${kartu.bahan.nama}` : ""}
+      </PageTitle>
+      {isLoading ? (
+        <Spinner />
+      ) : error || !kartu ? (
+        <div className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
+          {error instanceof Error ? error.message : "Kartu stok tidak dapat dimuat"}
+        </div>
+      ) : (
+        <IsiKartu kartu={kartu} />
+      )}
+    </div>
+  );
+}
+
+/** Ringkasan + buku besar mutasi satu periode. Dipisah supaya `kartu` di sini
+ *  dijamin ada dan pemilih tanggal di induknya tetap terpasang saat memuat. */
+function IsiKartu({ kartu }: { kartu: KartuStokDto }) {
   const fmt = (n: number) => `${formatAngka(n)} ${kartu.bahan.satuan}`;
 
   /**
@@ -98,36 +152,35 @@ export function KartuStokPage() {
   /** titik tolak EFEKTIF — angka yang membuat penjumlahan di layar ketemu */
   const dasarAwal = kartu.saldo_awal + dasarOpname;
 
+  /**
+   * Rentang terbalik: penurunan itu SELISIH PERIODE, bukan penyetelan.
+   *
+   * Turunan `dasarOpname` di atas hanya sah bila jendelanya maju. Saat
+   * `dari > sampai` jendelanya negatif — tak ada mutasi yang tercakup, jadi
+   * `total_masuk`/`total_keluar` nol sementara `saldo_akhir` (posisi tanggal
+   * lebih awal) berada di bawah `saldo_awal` (posisi tanggal lebih akhir).
+   * Rumusnya lalu menyerap seluruh beda itu dan kartu ringkasan MENGARANG
+   * "disetel Stok Awal −N" untuk penyesuaian yang tak pernah ada — persis
+   * jenis angka mengada-ada yang membuat orang berhenti percaya halaman ini.
+   * Pemilih tanggalnya sudah dijaga `min`/`max`, tapi rentang juga bisa datang
+   * dari URL yang disunting tangan (halaman ini memang dibuka lewat tautan
+   * ber-query), jadi angkanya dijaga sendiri, bukan hanya input-nya.
+   */
+  const rentangTerbalik = kartu.periode.dari > kartu.periode.sampai;
+  const adaSetelan = !rentangTerbalik && dasarOpname !== 0;
+
   return (
-    <div className="max-w-4xl">
-      <PageTitle
-        aksi={
-          // w-full di HP: dua input tanggal + "s/d" tidak muat di sisa baris
-          // judul, dan tanpa ini input "sampai" jatuh di luar layar
-          <div className="flex w-full items-center gap-2 print:hidden sm:w-auto">
-            <input
-              type="date"
-              value={dari}
-              onChange={(e) => setDari(e.target.value)}
-              className={inputClass}
-              aria-label="Dari tanggal"
-            />
-            <span className="text-stone-400">s/d</span>
-            <input
-              type="date"
-              value={sampai}
-              onChange={(e) => setSampai(e.target.value)}
-              className={inputClass}
-              aria-label="Sampai tanggal"
-            />
-          </div>
-        }
-      >
-        Kartu Stok — {kartu.bahan.nama}
-      </PageTitle>
+    <>
       <div className="mb-4 text-sm text-stone-500">
         {formatTanggal(kartu.periode.dari)} — {formatTanggal(kartu.periode.sampai)}
       </div>
+
+      {rentangTerbalik && (
+        <div className="mb-4 rounded-lg bg-yellow-50 px-4 py-2 text-sm text-yellow-800">
+          Tanggal <b>dari</b> melewati tanggal <b>sampai</b>, jadi periodenya kosong — angka
+          ringkasan di bawah tidak bisa dijumlahkan. Tukar kedua tanggalnya.
+        </div>
+      )}
 
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
         {/* SALDO AWAL DIGABUNG DENGAN STOK AWAL.
@@ -143,10 +196,10 @@ export function KartuStokPage() {
          * dijabarkan di baris kecil supaya bisa dicocokkan sendiri:
          *   titik tolak + total masuk − total keluar = saldo akhir. */}
         <StatCard
-          label={dasarOpname !== 0 ? "Saldo Awal + Stok Awal" : "Saldo Awal"}
-          value={fmt(dasarAwal)}
+          label={adaSetelan ? "Saldo Awal + Stok Awal" : "Saldo Awal"}
+          value={fmt(adaSetelan ? dasarAwal : kartu.saldo_awal)}
           rincian={
-            dasarOpname !== 0
+            adaSetelan
               ? `${fmt(kartu.saldo_awal)} lalu disetel Stok Awal ${dasarOpname > 0 ? "+" : "−"}${fmt(Math.abs(dasarOpname))}`
               : undefined
           }
@@ -257,6 +310,6 @@ export function KartuStokPage() {
           </tbody>
         </table>
       </Card>
-    </div>
+    </>
   );
 }
