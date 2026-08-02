@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import type { StokRowDto } from "@kakarut/shared";
-import { Card, PageTitle, Spinner, StatusBadge, tdClass, thClass } from "../components/ui";
+import { Card, ErrorText, PageTitle, Spinner, StatusBadge, tdClass, thClass } from "../components/ui";
 import { useAuth } from "../context/AuthContext";
 import { useBranch } from "../context/BranchContext";
 import { api } from "../lib/api";
@@ -67,26 +67,26 @@ export function TimBerandaPage() {
   // bar = divisi produksi kedua di cabang store — beranda sama dgn kitchen
   const isKitchen = auth?.user.role === "kitchen" || auth?.user.role === "bar";
 
-  const { data: stok } = useQuery({
+  const { data: stok, error: eStok } = useQuery({
     queryKey: ["stok", ""],
     queryFn: () => api<StokRowDto[]>("/stok"),
     refetchInterval: 120_000,
   });
   // Tim toko: kiriman yang menunggu diterima ("barang datang").
-  const { data: pen } = useQuery({
+  const { data: pen, error: ePen } = useQuery({
     queryKey: ["penerimaan", ""],
     queryFn: () => api<{ rows: PenRow[] }>("/penerimaan"),
     enabled: !diCk,
     refetchInterval: 60_000,
   });
   // Tim CK & kitchen toko: produksi yang belum selesai (kitchen: produksi lokal).
-  const { data: prod } = useQuery({
+  const { data: prod, error: eProd } = useQuery({
     queryKey: ["produksi-beranda"],
     queryFn: () => api<{ rows: ProdRow[] }>("/produksi?per_page=200"),
     enabled: diCk || isKitchen,
     refetchInterval: 60_000,
   });
-  const { data: beli } = useQuery({
+  const { data: beli, error: eBeli } = useQuery({
     queryKey: ["pembelian-beranda"],
     queryFn: () => api<{ rows: ProdRow[] }>("/pembelian?per_page=200"),
     enabled: diCk,
@@ -105,6 +105,14 @@ export function TimBerandaPage() {
   const produksiBelum = fakturBelum(prod?.rows);
   const beliBelum = fakturBelum(beli?.rows);
 
+  /*
+   * MENUNGGU vs GAGAL — `loading` diturunkan dari ada-tidaknya data, jadi query
+   * yang ditolak membuat halaman ini berputar selamanya. Beranda tim adalah
+   * layar pertama karyawan gudang/dapur; menggantung di situ terbaca seperti
+   * aplikasinya rusak. Query yang `enabled:false` tak pernah bergalat, jadi
+   * aman ikut dikumpulkan apa adanya.
+   */
+  const galat = eStok ?? ePen ?? eProd ?? eBeli;
   const loading = !stok || (diCk ? !prod || !beli : !pen || (isKitchen && !prod));
 
   return (
@@ -115,7 +123,15 @@ export function TimBerandaPage() {
         {branch ? ` · ${branch.nama}` : ""} · Halo, {auth?.user.nama} 👋
       </div>
 
-      {loading ? (
+      {galat ? (
+        <Card className="p-4">
+          <ErrorText error={galat} />
+          <div className="mt-2 text-sm text-stone-500">
+            Sebagian data tidak bisa dimuat, jadi peringatan stok dan hitungan pekerjaan tidak
+            ditampilkan — <b>bukan</b> berarti tak ada yang perlu dikerjakan.
+          </div>
+        </Card>
+      ) : loading ? (
         <Spinner />
       ) : (
         <div className="space-y-6">
