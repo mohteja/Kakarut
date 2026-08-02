@@ -91,7 +91,7 @@ describe("hitungUangSetelahRefund", () => {
   });
 
   it("qtyDitagih tak pernah negatif walau data lama menyimpan refund berlebih", () => {
-    expect(qtyDitagih({ hargaSatuan: 1, qty: 2, qtyRefund: 5 })).toBe(0);
+    expect(qtyDitagih({ qty: 2, qtyRefund: 5 })).toBe(0);
   });
 
   it("acak: total sesudah refund tak pernah melebihi total asal", () => {

@@ -1193,6 +1193,24 @@ export const sales = pgTable(
       .notNull()
       .default(0),
     total: numeric("total", { precision: 14, scale: 2, mode: "number" }).notNull(),
+    /**
+     * ANGKA ASAL sebelum refund apa pun — jangkar tetap untuk menghitung
+     * refund bertahap. `subtotal`/`diskon`/`pb1_amount`/`total` di atas selalu
+     * berisi nilai TERKINI (sudah dikurangi refund), karena seluruh laporan,
+     * rekap kas, dan laba-rugi membacanya apa adanya.
+     *
+     * null = belum pernah direfund → nilai terkini MEMANG nilai asalnya. Itu
+     * sebabnya kolom ini nullable: tak ada backfill untuk jutaan baris lama.
+     * Diisi sekali saat refund pertama, lalu tak pernah berubah lagi — kalau
+     * ikut berubah, refund kedua akan menggerus diskon untuk kedua kalinya.
+     */
+    subtotalAsal: numeric("subtotal_asal", { precision: 14, scale: 2, mode: "number" }),
+    diskonAsal: numeric("diskon_asal", { precision: 14, scale: 2, mode: "number" }),
+    pb1Asal: numeric("pb1_asal", { precision: 14, scale: 2, mode: "number" }),
+    /** total uang yang sudah dikembalikan ke pembeli (kumulatif, Rp) */
+    refundTotal: numeric("refund_total", { precision: 14, scale: 2, mode: "number" })
+      .notNull()
+      .default(0),
     totalHpp: numeric("total_hpp", { precision: 16, scale: 4, mode: "number" }).notNull(),
     catatan: text("catatan"),
     // member/pelanggan (opsional) — identitas via WA; snapshot nama/wa agar
@@ -1297,11 +1315,70 @@ export const saleItems = pgTable(
      * transaksi (`penjualan/rekalkulasi.ts`).
      */
     sajianTakeaway: boolean("sajian_takeaway").notNull().default(false),
+    /**
+     * Porsi baris ini yang sudah DIKEMBALIKAN ke pembeli — KUMULATIF, bukan
+     * per-kejadian. Refund terjadi saat bahan ternyata habis sehingga sajiannya
+     * tak jadi dibuat setelah transaksi dibayar.
+     *
+     * `qty` TIDAK dikurangi: berapa yang dipesan dan berapa yang dikembalikan
+     * adalah dua fakta berbeda, dan struk asli harus tetap bisa dibaca. Yang
+     * ditagih = `qty − qty_refund`; itu pula dasar HPP dan konsumsi bahan
+     * (`penjualan/rekalkulasi.ts`), sehingga stok bahannya kembali sendiri.
+     */
+    qtyRefund: numeric("qty_refund", { precision: 10, scale: 2, mode: "number" })
+      .notNull()
+      .default(0),
   },
   (t) => [
     index("sale_items_sale_idx").on(t.saleId),
     // papan menyaring baris yang belum selesai per transaksi
     index("sale_items_status_idx").on(t.saleId, t.pesananStatus),
+  ],
+);
+
+/**
+ * REFUND SEBAGIAN — satu baris per kejadian pengembalian uang.
+ *
+ * Sebabnya di lapangan cuma satu: bahan ternyata habis sehingga sajiannya tak
+ * jadi dibuat setelah transaksi dibayar. Kasir boleh melakukannya sendiri
+ * (pembeli sedang berdiri di depannya), jadi `user_id` WAJIB — wewenangnya
+ * ditukar dengan jejak.
+ *
+ * Tabel ini adalah RIWAYAT, bukan sumber kebenaran angka: nilai terkini
+ * penjualan hidup di `sales.*` dan `sale_items.qty_refund`. Yang disimpan di
+ * sini adalah "apa yang terjadi, kapan, oleh siapa, berapa" — supaya owner bisa
+ * memeriksa belakangan tanpa harus merekonstruksi dari selisih.
+ */
+export const saleRefunds = pgTable(
+  "sale_refunds",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    branchId: uuid("branch_id")
+      .notNull()
+      .references(() => branches.id),
+    saleId: uuid("sale_id")
+      .notNull()
+      .references(() => sales.id, { onDelete: "cascade" }),
+    saleItemId: uuid("sale_item_id")
+      .notNull()
+      .references(() => saleItems.id, { onDelete: "cascade" }),
+    /** porsi yang dikembalikan PADA KEJADIAN INI (bukan kumulatif) */
+    qty: numeric("qty", { precision: 10, scale: 2, mode: "number" }).notNull(),
+    /** uang yang benar-benar dikembalikan ke pembeli (Rp) */
+    nominal: numeric("nominal", { precision: 14, scale: 2, mode: "number" }).notNull(),
+    alasan: text("alasan"),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("sale_refunds_sale_idx").on(t.saleId),
+    // laporan refund per cabang per rentang waktu
+    index("sale_refunds_cabang_waktu_idx").on(t.companyId, t.branchId, t.createdAt),
   ],
 );
 

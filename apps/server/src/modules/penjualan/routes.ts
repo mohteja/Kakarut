@@ -18,6 +18,7 @@ import {
   clientRefField,
   deviceIdField,
 } from "../sync/idempoten";
+import { refundSajian } from "./refund";
 import { createSale, PenjualanGagal } from "./service";
 
 export const SaleBody = z.object({
@@ -227,4 +228,65 @@ export const penjualanRoutes = new Hono<AppEnv>()
         .returning();
       if (!row) throw new HTTPException(404, { message: "Transaksi tidak ditemukan" });
       return c.json({ ok: true, nomor: row.nomor });
-  });
+  })
+  /**
+   * REFUND SEBAGIAN — sajian yang tak jadi dibuat karena bahannya habis.
+   *
+   * KASIR BOLEH, dan itu disengaja: pembelinya sedang berdiri di depan kasir,
+   * memanggil owner berarti menahan antrean. Wewenangnya ditukar dengan jejak —
+   * `sale_refunds` menyimpan siapa, kapan, berapa, dan alasannya, dan owner
+   * memeriksanya belakangan.
+   *
+   * Peran terikat cabang otomatis terkunci ke cabangnya sendiri lewat
+   * `resolveBranchId`; owner/admin bisa merefund transaksi cabang mana pun.
+   */
+  .post(
+    "/:id/refund",
+    requireRole("owner", "admin", "cashier"),
+    zValidator(
+      "json",
+      z.object({
+        alasan: z.string().nullish(),
+        items: z
+          .array(
+            z.object({
+              sale_item_id: z.string().uuid(),
+              qty: z.number().positive(),
+            }),
+          )
+          .min(1),
+      }),
+    ),
+    async (c) => {
+      const auth = c.get("auth");
+      const body = c.req.valid("json");
+      const saleId = c.req.param("id");
+      // Kasir hanya boleh menyentuh transaksi CABANGNYA. Tanpa ini, id
+      // transaksi cabang lain yang bocor ke tangan kasir cukup untuk
+      // mengembalikan uang di pembukuan yang bukan urusannya.
+      if (terikatCabang(auth.role)) {
+        const [milik] = await db
+          .select({ branchId: sales.branchId })
+          .from(sales)
+          .where(and(eq(sales.id, saleId), eq(sales.companyId, auth.company_id!)));
+        if (!milik || milik.branchId !== auth.branch_id) {
+          throw new HTTPException(404, { message: "Transaksi tidak ditemukan" });
+        }
+      }
+      const hasil = await db.transaction((tx) =>
+        refundSajian(tx, {
+          saleId,
+          companyId: auth.company_id!,
+          userId: auth.sub,
+          alasan: body.alasan,
+          items: body.items.map((i) => ({ saleItemId: i.sale_item_id, qty: i.qty })),
+        }),
+      );
+      return c.json({
+        ok: true,
+        nominal: hasil.nominal,
+        total_lama: hasil.totalLama,
+        total_baru: hasil.totalBaru,
+      });
+    },
+  );

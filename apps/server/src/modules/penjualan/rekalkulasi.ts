@@ -15,7 +15,7 @@
  * bolak-balik TA → dine-in → TA selalu mendarat di angka yang sama.
  */
 import { and, eq, isNull } from "drizzle-orm";
-import { qtyEfektif } from "@kakarut/shared";
+import { qtyDitagih, qtyEfektif } from "@kakarut/shared";
 import type { Tx } from "../../db/client";
 import { saleConsumptions, saleItems, sales } from "../../db/schema";
 import { hitungHargaMenu, komponenEfektif, loadKatalog } from "../menu/service";
@@ -59,6 +59,7 @@ export async function hitungUlangBiayaPenjualan(
       qty: saleItems.qty,
       hppSatuan: saleItems.hppSatuan,
       sajianTakeaway: saleItems.sajianTakeaway,
+      qtyRefund: saleItems.qtyRefund,
     })
     .from(saleItems)
     .where(eq(saleItems.saleId, saleId));
@@ -86,7 +87,19 @@ export async function hitungUlangBiayaPenjualan(
     // BASIS BIAYA = penyajiannya. Aturan yang sama dengan `createSale`.
     const dasarDineIn = !b.sajianTakeaway;
     const hppSatuan = hitungHargaMenu(menu, katalog, dasarDineIn);
-    totalHpp += hppSatuan * b.qty;
+    /*
+     * PORSI YANG DITAGIH, bukan porsi yang dipesan.
+     *
+     * Sajian yang direfund (bahan ternyata habis) tak pernah dibuat: bahannya
+     * tak jadi terpakai dan biayanya tak jadi keluar. Memakai `qty` mentah di
+     * sini akan membuat laba-rugi menanggung HPP makanan yang tak ada, dan
+     * stok bahannya tetap tercatat berkurang selamanya.
+     *
+     * `hpp_satuan` tetap disimpan PER PORSI (bukan dikalikan) — ia harga
+     * pokok satu porsi, dan itu tidak berubah karena sebagian dikembalikan.
+     */
+    const qtyBayar = qtyDitagih(b);
+    totalHpp += hppSatuan * qtyBayar;
     if (hppSatuan !== b.hppSatuan) {
       await tx.update(saleItems).set({ hppSatuan }).where(eq(saleItems.id, b.id));
     }
@@ -96,7 +109,7 @@ export async function hitungUlangBiayaPenjualan(
         qtyEfektif(
           { qty: k.qty, isPackaging: k.is_packaging, isComplement: k.is_complement },
           dasarDineIn,
-        ) * b.qty;
+        ) * qtyBayar;
       if (qty <= 0) continue;
       konsumsi.set(k.ingredient_id, (konsumsi.get(k.ingredient_id) ?? 0) + qty);
     }

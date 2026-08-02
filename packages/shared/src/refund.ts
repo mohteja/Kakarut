@@ -39,8 +39,15 @@ export interface UangPenjualan {
   total: number;
 }
 
-/** Porsi yang benar-benar jadi ditagih pada satu baris. */
-export function qtyDitagih(b: BarisRefund): number {
+/**
+ * Porsi yang benar-benar jadi ditagih pada satu baris.
+ *
+ * Parameternya sengaja lebih longgar dari `BarisRefund`: harga tak dipakai di
+ * sini, dan pemanggil seperti hitung-ulang HPP hanya membaca qty — memaksanya
+ * ikut memilih kolom harga hanya untuk memuaskan tipe akan membuat query
+ * mengambil data yang tak dipakainya.
+ */
+export function qtyDitagih(b: { qty: number; qtyRefund: number }): number {
   const sisa = b.qty - b.qtyRefund;
   return sisa > 0 ? sisa : 0;
 }
