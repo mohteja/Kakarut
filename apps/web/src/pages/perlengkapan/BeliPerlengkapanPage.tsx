@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import type { BeliPerlengkapanRow, PerlengkapanMasterRow } from "@kakarut/shared";
+import { angkaDari, teksAngka } from "@kakarut/shared";
 import {
   Card,
   ErrorText,
@@ -601,7 +602,7 @@ function TibaFakturModal({ faktur, onClose }: { faktur: FakturBeli; onClose: () 
     Object.fromEntries(
       barisMenunggu.map((r) => [
         r.id,
-        { qty: String(r.qty), harga: r.total_harga ? String(r.total_harga) : "" },
+        { qty: teksAngka(r.qty), harga: r.total_harga ? teksAngka(r.total_harga) : "" },
       ]),
     ),
   );
@@ -610,8 +611,11 @@ function TibaFakturModal({ faktur, onClose }: { faktur: FakturBeli; onClose: () 
     mutationFn: () => {
       const items = barisMenunggu.map((r) => ({
         id: r.id,
-        qty: Number(draft[r.id]?.qty) || r.qty,
-        total_harga: draft[r.id]?.harga === "" ? null : Number(draft[r.id]?.harga),
+        qty: angkaDari(draft[r.id]?.qty) || r.qty,
+        // `trim()`: dikosongkan = "pakai harga rencana" (server: `?? beli.totalHarga`).
+        // Yang tak terbaca tak sampai ke sini — ditahan `hargaSalahKetik` di bawah.
+        total_harga:
+          (draft[r.id]?.harga ?? "").trim() === "" ? null : angkaDari(draft[r.id]?.harga),
       }));
       if (faktur.fakturId) {
         return api(`/perlengkapan/beli/faktur/${faktur.fakturId}/tiba`, {
@@ -644,7 +648,31 @@ function TibaFakturModal({ faktur, onClose }: { faktur: FakturBeli; onClose: () 
     },
   });
 
-  const adaInvalid = barisMenunggu.some((r) => !(Number(draft[r.id]?.qty) > 0));
+  const adaInvalid = barisMenunggu.some((r) => !(angkaDari(draft[r.id]?.qty) > 0));
+  /**
+   * Harga yang TERISI tapi tak terbaca sebagai angka ≥ 0.
+   *
+   * Qty di sebelahnya sudah dijaga oleh `adaInvalid`; kolom harga di baris yang
+   * sama tidak — padahal salah ketiknya jauh lebih sunyi. NaN lolos cek
+   * `harga === ""`, `JSON.stringify` mengubahnya jadi `null`, dan zod server
+   * (`total_harga: z.number().min(0).nullish()`) MENERIMA null. Sesudah itu
+   * `tibaBeliPerlengkapan` menjalankan `params.totalHarga ?? beli.totalHarga`,
+   * jadi null berarti "pakai harga rencana" — persis arti kolom yang sengaja
+   * DIKOSONGKAN.
+   *
+   * Akibatnya salah ketik tak terbedakan dari kosong: ESTIMASI RAB dibukukan
+   * sebagai belanja riil ke `supply_mutations.total_harga` — angka yang mengisi
+   * total belanja kartu perlengkapan dan laporan belanja per supplier. Orang
+   * yang mengetik "125rb" merasa sudah mencatat harga sebenarnya.
+   *
+   * Minus ikut dijaring: zod menolaknya, tapi galatnya menyebut INDEKS larik
+   * `items`, bukan nama barangnya — keluhan yang sama yang membuat empat
+   * halaman lain memasang penjaganya di form.
+   */
+  const hargaSalahKetik = barisMenunggu.filter((r) => {
+    const t = (draft[r.id]?.harga ?? "").trim();
+    return t !== "" && !(angkaDari(t) >= 0);
+  });
 
   return (
     <Modal open onClose={onClose} title={`Tiba di CK — ${faktur.nomor ?? "faktur"}`}>
@@ -668,7 +696,7 @@ function TibaFakturModal({ faktur, onClose }: { faktur: FakturBeli; onClose: () 
                 {r.nama}
               </span>
               <input
-                type="number"
+                type="text"
                 inputMode="decimal"
                 min="0"
                 step="any"
@@ -681,9 +709,12 @@ function TibaFakturModal({ faktur, onClose }: { faktur: FakturBeli; onClose: () 
               />
               <span className="text-xs text-stone-500">{r.satuan}</span>
               <input
-                type="number"
-                inputMode="numeric"
-                min="0"
+                /* Harga: `type="number"` menyimpan "12.500" apa adanya —
+                   `angkaDari` sudah membacanya benar — tapi MEMBUANG koma,
+                   jadi "12,5" mendarat sebagai 125 dan pembacanya tak bisa
+                   memulihkan apa yang sudah dibuang browser. */
+                type="text"
+                inputMode="decimal"
                 value={draft[r.id]?.harga ?? ""}
                 onChange={(e) =>
                   setDraft((p) => ({ ...p, [r.id]: { ...p[r.id], harga: e.target.value } }))
@@ -695,6 +726,13 @@ function TibaFakturModal({ faktur, onClose }: { faktur: FakturBeli; onClose: () 
             </div>
           ))}
         </div>
+        {hargaSalahKetik.length > 0 && (
+          <div className="rounded-lg bg-red-50 px-3 py-1.5 text-xs font-medium text-red-800">
+            Harga tidak terbaca pada{" "}
+            <b>{hargaSalahKetik.map((r) => r.nama).join(", ")}</b> — tulis angkanya saja,
+            seperti <b>125000</b> atau <b>125.000</b>. Kosongkan bila mau memakai harga rencana.
+          </div>
+        )}
         <ErrorText error={simpan.error} />
         <div className="flex justify-end gap-2 pt-1">
           <button onClick={onClose} className={btnSecondary}>
@@ -702,7 +740,7 @@ function TibaFakturModal({ faktur, onClose }: { faktur: FakturBeli; onClose: () 
           </button>
           <button
             onClick={() => simpan.mutate()}
-            disabled={simpan.isPending || adaInvalid}
+            disabled={simpan.isPending || adaInvalid || hargaSalahKetik.length > 0}
             className={btnPrimary}
           >
             {simpan.isPending ? "Menyimpan…" : "✅ Tiba & Kirim"}
@@ -752,15 +790,15 @@ function BuatBeliModal({ onClose }: { onClose: () => void }) {
         // lengkap. Ketikan manual mematikan auto-isi utk baris ini.
         if (!next.hargaManual && ("supplyId" in patch || "qty" in patch)) {
           const acuan = items.find((x) => x.id === next.supplyId)?.harga_beli ?? 0;
-          const qty = Number(next.qty);
-          next.harga = acuan > 0 && qty > 0 ? String(Math.round(acuan * qty)) : "";
+          const qty = angkaDari(next.qty);
+          next.harga = acuan > 0 && qty > 0 ? teksAngka(Math.round(acuan * qty)) : "";
         }
         return next;
       }),
     );
   }
 
-  const barisValid = baris.filter((b) => b.supplyId && Number(b.qty) > 0);
+  const barisValid = baris.filter((b) => b.supplyId && angkaDari(b.qty) > 0);
   const simpan = useMutation({
     mutationFn: () =>
       api("/perlengkapan/beli", {
@@ -768,8 +806,8 @@ function BuatBeliModal({ onClose }: { onClose: () => void }) {
         body: {
           items: barisValid.map((b) => ({
             supply_id: b.supplyId,
-            qty: Number(b.qty),
-            total_harga: b.harga === "" ? null : Number(b.harga),
+            qty: angkaDari(b.qty),
+            total_harga: b.harga === "" ? null : angkaDari(b.harga),
           })),
           ck_branch_id: ckId || null,
           tujuan_branch_id: tujuanId || null,
@@ -809,7 +847,7 @@ function BuatBeliModal({ onClose }: { onClose: () => void }) {
                   ))}
                 </select>
                 <input
-                  type="number"
+                  type="text"
                   inputMode="decimal"
                   min="0"
                   step="any"
@@ -820,9 +858,8 @@ function BuatBeliModal({ onClose }: { onClose: () => void }) {
                   className={`${inputClass} !w-24`}
                 />
                 <input
-                  type="number"
-                  inputMode="numeric"
-                  min="0"
+                  type="text"
+                  inputMode="decimal"
                   value={b.harga}
                   onChange={(e) =>
                     // ketikan manual mengunci nilai; dikosongkan = kembali auto
@@ -845,7 +882,7 @@ function BuatBeliModal({ onClose }: { onClose: () => void }) {
                 {item && item.harga_beli > 0 && (
                   <div className="w-full text-[11px] text-stone-400">
                     harga acuan {formatRupiah(item.harga_beli)} / {item.satuan}
-                    {!b.hargaManual && Number(b.qty) > 0 && (
+                    {!b.hargaManual && angkaDari(b.qty) > 0 && (
                       <> — terisi otomatis, boleh diubah</>
                     )}
                   </div>

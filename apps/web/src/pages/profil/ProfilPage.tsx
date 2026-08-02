@@ -7,6 +7,7 @@ import {
   ErrorText,
   PageTitle,
   Spinner,
+  SpinnerAtauGalat,
   btnPrimary,
   inputClass,
 } from "../../components/ui";
@@ -25,7 +26,7 @@ const LABEL_ROLE: Record<string, string> = {
  * absen (ditunjukkan ke admin/kasir untuk dipindai), dan ganti password.
  */
 export function ProfilPage() {
-  const { data: profil, isLoading } = useQuery({
+  const { data: profil, isLoading, error } = useQuery({
     queryKey: ["profil"],
     queryFn: () => api<ProfilDto>("/profil"),
   });
@@ -74,7 +75,7 @@ export function ProfilPage() {
     if (baru.length >= 8 && baru === konfirmasi) ganti.mutate();
   }
 
-  if (isLoading || !profil) return <Spinner />;
+  if (!profil) return <SpinnerAtauGalat error={error} apa="Profil" />;
 
   return (
     <div className="max-w-xl">

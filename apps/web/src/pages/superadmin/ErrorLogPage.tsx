@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import type { ErrorLogDetailDto, ErrorLogDto, ErrorLogKelompokRow } from "@kakarut/shared";
-import { Card, ErrorText, PageTitle, Spinner } from "../../components/ui";
+import { Card, ErrorText, PageTitle, SpinnerAtauGalat } from "../../components/ui";
 import { api } from "../../lib/api";
 
 /**
@@ -67,7 +67,7 @@ export function ErrorLogPage() {
   const [dibuka, setDibuka] = useState<string | null>(null);
 
   const kunci = ["admin-error-log", hari, saring, cari] as const;
-  const { data, isLoading } = useQuery({
+  const { data, error: gagalMuat } = useQuery({
     queryKey: kunci,
     queryFn: () =>
       api<ErrorLogDto>(
@@ -106,8 +106,8 @@ export function ErrorLogPage() {
         </button>
       </div>
 
-      {isLoading || !data ? (
-        <Spinner />
+      {!data ? (
+        <SpinnerAtauGalat error={gagalMuat} apa="Log galat" />
       ) : (
         <>
           <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -193,7 +193,7 @@ function BarisKelompok({
   terbuka: boolean;
   onToggle: () => void;
 }) {
-  const { data } = useQuery({
+  const { data, error: detailGagal } = useQuery({
     queryKey: ["admin-error-log-detail", k.sidik, hari],
     queryFn: () => api<ErrorLogDetailDto>(`/admin/error-log/${k.sidik}?hari=${hari}`),
     enabled: terbuka,
@@ -224,7 +224,7 @@ function BarisKelompok({
       {terbuka && (
         <div className="border-t border-stone-200 bg-stone-50 p-3">
           {!data ? (
-            <Spinner />
+            <SpinnerAtauGalat error={detailGagal} apa="Rincian galat" />
           ) : (
             <>
               <div className="mb-2 text-xs text-stone-500">

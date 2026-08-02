@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import type {
   BahanDto,
@@ -10,6 +10,7 @@ import type {
   MenuDto,
   SatuanDto,
 } from "@kakarut/shared";
+import { angkaDari, teksAngka } from "@kakarut/shared";
 import {
   Card,
   ErrorText,
@@ -36,8 +37,39 @@ interface ResepDraft {
 
 /** Draft satu langkah cara masak (editor lokal — id server tak dibawa). */
 interface LangkahDraft {
+  /**
+   * Identitas SISI KLIEN saja — tak pernah ikut ke server (`simpan` me-map
+   * ulang jadi `{teks, foto_url}`).
+   *
+   * Ada karena langkah bisa DIURUT ULANG (↑/↓) dan DIHAPUS, sementara
+   * `ImageUpload` mengunggah secara asinkron. Tanpa identitas, satu-satunya
+   * pegangan adalah indeks — dan indeks berpindah makna di tengah unggahan.
+   */
+  _id: string;
   teks: string;
   foto_url: string | null;
+}
+
+let urutLangkah = 0;
+const idLangkah = () => `l${++urutLangkah}`;
+
+/**
+ * Ubah SATU langkah berdasarkan identitasnya, dari state terbaru.
+ *
+ * Dua hal sekaligus, dan keduanya perlu:
+ * - bentuk fungsional `(prev) => …` membaca state TERBARU, bukan snapshot yang
+ *   tertangkap saat render. Callback `ImageUpload` bisa mendarat detik-detik
+ *   kemudian; dengan snapshot lama ia menulis ulang seluruh array dan
+ *   MENGHAPUS semua yang diketik sejak unggahan dimulai.
+ * - dicari lewat `_id`, bukan indeks. Menekan ↑ selagi foto diunggah menggeser
+ *   arti indeks itu, jadi fotonya mendarat di langkah yang salah.
+ */
+function ubahLangkah(
+  setLangkah: React.Dispatch<React.SetStateAction<LangkahDraft[]>>,
+  id: string,
+  ubah: (l: LangkahDraft) => LangkahDraft,
+) {
+  setLangkah((prev) => prev.map((l) => (l._id === id ? ubah(l) : l)));
 }
 
 /**
@@ -192,16 +224,30 @@ export function ResepPage() {
     queryFn: () => api<BahanResepRow[]>(`/bahan/${selectedId}/resep`),
   });
 
-  // Draft editor lokal, di-seed dari resep server tiap kali data/bahan berubah.
+  /**
+   * Draft editor lokal, di-seed dari resep server SEKALI PER RESEP.
+   *
+   * Kuncinya `selectedId`, bukan identitas objek `resepServer`. Dulu efek ini
+   * menyemai ulang tiap kali objek itu berganti — dan React Query menggantinya
+   * tiap penyegaran ulang, yang terjadi begitu query basi dan jendela kembali
+   * fokus (`staleTime` 10 detik). Takaran yang baru diketik lenyap balik ke
+   * angka server tanpa satu pun pesan; yang mengetik baru sadar setelah
+   * menyimpan resep yang tak jadi berubah.
+   *
+   * Berganti resep TETAP menyemai ulang — itu memang yang diinginkan, dan
+   * itulah kenapa penjagaannya menyimpan `selectedId`, bukan sekadar "sudah".
+   */
   const [resep, setResep] = useState<ResepDraft[]>([]);
+  const resepTersemai = useRef<string | null>(null);
   useEffect(() => {
-    if (resepServer) {
-      setResep(
-        resepServer.map((r) => ({ ingredient_id: r.ingredient_id, qty: String(r.qty) })),
-      );
-    } else {
+    if (!resepServer) {
       setResep([]);
+      resepTersemai.current = null;
+      return;
     }
+    if (resepTersemai.current === selectedId) return;
+    resepTersemai.current = selectedId;
+    setResep(resepServer.map((r) => ({ ingredient_id: r.ingredient_id, qty: teksAngka(r.qty) })));
   }, [resepServer, selectedId]);
 
   // CARA MASAK: langkah berurutan + foto proses per langkah.
@@ -211,8 +257,19 @@ export function ResepPage() {
     queryFn: () => api<BahanLangkahRow[]>(`/bahan/${selectedId}/langkah`),
   });
   const [langkah, setLangkah] = useState<LangkahDraft[]>([]);
+  // Sekali per resep — alasannya sama dengan draft resep di atas. Di sini
+  // taruhannya lebih besar: satu langkah masak bisa beberapa kalimat, dan
+  // menyemai ulang juga memberi `_id` baru sehingga fotonya ikut terlepas.
+  const langkahTersemai = useRef<string | null>(null);
   useEffect(() => {
-    setLangkah((langkahServer ?? []).map((l) => ({ teks: l.teks, foto_url: l.foto_url })));
+    if (!langkahServer) {
+      setLangkah([]);
+      langkahTersemai.current = null;
+      return;
+    }
+    if (langkahTersemai.current === selectedId) return;
+    langkahTersemai.current = selectedId;
+    setLangkah(langkahServer.map((l) => ({ _id: idLangkah(), teks: l.teks, foto_url: l.foto_url })));
   }, [langkahServer, selectedId]);
 
   // Pengaturan batch & harga + foto hasil/packing, di-seed dari bahan terpilih
@@ -222,20 +279,43 @@ export function ResepPage() {
     hasil: null,
     packing: null,
   });
+  /**
+   * Resep yang SEDANG dibuka, dibaca dari luar closure render.
+   *
+   * `foto` di-reset tiap ganti bahan (efek di bawah), sementara `ImageUpload`
+   * mendarat beberapa detik kemudian. Tanpa pegangan ini, foto yang diunggah
+   * untuk resep A mendarat di form resep B yang sudah terlanjur dibuka — lalu
+   * ikut tersimpan ke sana. Langkah masak sudah kebal karena `_id`-nya tak
+   * pernah dipakai ulang antar resep; `foto` tak punya identitas semacam itu,
+   * jadi pemiliknya dicatat terpisah.
+   */
+  const idResepRef = useRef<string | null>(null);
+  useEffect(() => {
+    idResepRef.current = dipilih?.id ?? null;
+  }, [dipilih]);
   // Persetujuan sadar untuk menimpa harga bahan (lihat catatan di `simpan`).
   // Sengaja kembali false tiap ganti bahan — persetujuan tidak menular.
   const [setujuHarga, setSetujuHarga] = useState(false);
+  /**
+   * Sekali per resep. `dipilih` dicari ulang dari daftar `bahan`, jadi objeknya
+   * berganti identitas tiap daftar itu disegarkan — dan efek ini dulu ikut
+   * menembak, mengembalikan isi/overhead/stok minimum yang sedang disunting ke
+   * angka server. Kuncinya `dipilih?.id`, supaya berganti resep tetap menyemai.
+   */
+  const aturTersemai = useRef<string | null>(null);
   useEffect(() => {
+    if (aturTersemai.current === (dipilih?.id ?? null)) return;
+    aturTersemai.current = dipilih?.id ?? null;
     setAtur(
       dipilih
         ? {
-            isi: String(dipilih.isi),
+            isi: teksAngka(dipilih.isi),
             satuan: dipilih.satuan,
-            overhead: String(dipilih.overhead_x ?? 1),
-            stokMin: String(dipilih.stok_minimum),
-            stokMinToko: String(dipilih.stok_minimum_toko ?? 0),
-            masaSimpan: String(dipilih.masa_simpan_hari ?? 0),
-            leadTime: String(dipilih.lead_time_hari ?? 0),
+            overhead: teksAngka(dipilih.overhead_x ?? 1),
+            stokMin: teksAngka(dipilih.stok_minimum),
+            stokMinToko: teksAngka(dipilih.stok_minimum_toko ?? 0),
+            masaSimpan: teksAngka(dipilih.masa_simpan_hari ?? 0),
+            leadTime: teksAngka(dipilih.lead_time_hari ?? 0),
             produksiDi: dipilih.produksi_di ?? "ck",
             divisiProduksi: dipilih.divisi_produksi ?? "kitchen",
             produksiBranchIds: dipilih.produksi_branch_ids ?? [],
@@ -255,11 +335,30 @@ export function ResepPage() {
   const semuaById = new Map(semua.map((b) => [b.id, b]));
   const biayaResep = resep.reduce((a, r) => {
     const x = semuaById.get(r.ingredient_id);
-    return a + (x ? (Number(r.qty) || 0) * x.harga_per_unit : 0);
+    return a + (x ? (angkaDari(r.qty) || 0) * x.harga_per_unit : 0);
   }, 0);
-  const overhead = Number(atur?.overhead) > 0 ? Number(atur?.overhead) : 1;
+  /**
+   * Baris resep yang SUDAH DIISI takarannya tapi tidak akan ikut tersimpan.
+   *
+   * Kembaran persis dari penjaga di `MenuFormPage`: penyaring kiriman memakai
+   * `angkaDari(r.qty) > 0`, jadi takaran tak terbaca dibuang di sisi klien —
+   * tak pernah sampai ke server, tak pernah jadi galat, dan tombol Simpan tak
+   * menahannya.
+   *
+   * Resep produksi (BOM) sama awetnya dengan resep menu, dengan satu tambahan
+   * yang khas halaman ini: `biayaResep` di atas juga melewatkan baris itu
+   * (`angkaDari(r.qty) || 0`), jadi HARGA BATCH yang ditawarkan ikut turun —
+   * dan bila persetujuan harga dicentang, harga bahan hasil produksi ini
+   * tersimpan lebih murah daripada kenyataannya. Satu salah ketik menggeser
+   * biaya sekaligus stok.
+   */
+  const qtyTerbuang = resep
+    .filter((r) => r.ingredient_id && r.qty.trim() !== "" && !(angkaDari(r.qty) > 0))
+    .map((r) => semuaById.get(r.ingredient_id)?.nama)
+    .filter((n): n is string => !!n);
+  const overhead = angkaDari(atur?.overhead) > 0 ? angkaDari(atur?.overhead) : 1;
   const hargaBatch = Math.round(biayaResep * overhead * 100) / 100;
-  const isiBatch = Number(atur?.isi) > 0 ? Number(atur?.isi) : 0;
+  const isiBatch = angkaDari(atur?.isi) > 0 ? angkaDari(atur?.isi) : 0;
 
   // Apakah menyimpan akan MENGGESER harga bahan ini? Selisih di bawah 1 rupiah
   // dianggap sama (harga tersimpan dibulatkan, biaya resep tidak).
@@ -284,21 +383,21 @@ export function ResepPage() {
         method: "PUT",
         body: {
           komponen: resep
-            .filter((r) => r.ingredient_id && Number(r.qty) > 0)
-            .map((r) => ({ ingredient_id: r.ingredient_id, qty: Number(r.qty) })),
+            .filter((r) => r.ingredient_id && angkaDari(r.qty) > 0)
+            .map((r) => ({ ingredient_id: r.ingredient_id, qty: angkaDari(r.qty) })),
         },
       });
       if (atur) {
         await api(`/bahan/${selectedId}`, {
           method: "PUT",
           body: {
-            isi: Number(atur.isi) > 0 ? Number(atur.isi) : 1,
+            isi: angkaDari(atur.isi) > 0 ? angkaDari(atur.isi) : 1,
             satuan: atur.satuan.trim() || "pcs",
             overhead_x: overhead,
-            stok_minimum: Number(atur.stokMin) || 0,
-            stok_minimum_toko: Number(atur.stokMinToko) || 0,
-            masa_simpan_hari: Math.max(0, Math.trunc(Number(atur.masaSimpan) || 0)),
-            lead_time_hari: Math.max(0, Math.trunc(Number(atur.leadTime) || 0)),
+            stok_minimum: angkaDari(atur.stokMin) || 0,
+            stok_minimum_toko: angkaDari(atur.stokMinToko) || 0,
+            masa_simpan_hari: Math.max(0, Math.trunc(angkaDari(atur.masaSimpan) || 0)),
+            lead_time_hari: Math.max(0, Math.trunc(angkaDari(atur.leadTime) || 0)),
             ...(hargaBerubah && setujuHarga ? { harga_beli: hargaBatch } : {}),
             produksi_di: atur.produksiDi,
             // divisi hanya bermakna untuk produksi cabang — CK kembali ke default
@@ -328,7 +427,13 @@ export function ResepPage() {
       queryClient.invalidateQueries({ queryKey: ["stok"] });
     },
     onError: () => {
-      // sebagian rantai bisa saja sudah tersimpan sebelum yang gagal — refresh
+      // Sebagian rantai bisa saja sudah tersimpan sebelum yang gagal — refresh.
+      // Penjaga "semai sekali per resep" SENGAJA dilepas di sini: justru pada
+      // jalur ini draft harus mengikuti server lagi, supaya yang terlihat adalah
+      // apa yang benar-benar tersimpan, bukan ketikan yang sebagian gagal.
+      resepTersemai.current = null;
+      langkahTersemai.current = null;
+      aturTersemai.current = null;
       queryClient.invalidateQueries({ queryKey: ["bahan-resep", selectedId] });
       queryClient.invalidateQueries({ queryKey: ["bahan-langkah", selectedId] });
       queryClient.invalidateQueries({ queryKey: ["bahan"] });
@@ -676,9 +781,13 @@ export function ResepPage() {
                             disabled={!bolehUbah}
                           />
                           <input
-                            type="number"
-                            min="0.0001"
-                            step="any"
+                            /* Takaran resep: pecahan adalah normal ("0,5" kg)
+                               dan koma adalah pemisah desimal bahasa Indonesia.
+                               `type="number"` MEMBUANG koma saat diketik — "0,5"
+                               tersimpan "05" (=5) tanpa `badInput`, jadi HPP
+                               seluruh resep melenceng 10× tanpa tanda apa pun. */
+                            type="text"
+                            inputMode="decimal"
                             value={r.qty}
                             onChange={(e) => {
                               const salinan = [...resep];
@@ -701,8 +810,8 @@ export function ResepPage() {
                                 {terpilih ? `× Rp ${formatAngka(terpilih.harga_per_unit, 2)}` : ""}
                               </span>
                               <span className="w-28 shrink-0 text-right text-sm whitespace-nowrap font-medium text-stone-700 tabular-nums">
-                                {terpilih && Number(r.qty) > 0
-                                  ? formatRupiah(Number(r.qty) * terpilih.harga_per_unit)
+                                {terpilih && angkaDari(r.qty) > 0
+                                  ? formatRupiah(angkaDari(r.qty) * terpilih.harga_per_unit)
                                   : "—"}
                               </span>
                             </>
@@ -770,9 +879,8 @@ export function ResepPage() {
                           </label>
                           <div className="flex gap-2">
                             <input
-                              type="number"
-                              min="0.0001"
-                              step="any"
+                              type="text"
+                              inputMode="decimal"
                               value={atur.isi}
                               onChange={(e) => setAtur({ ...atur, isi: e.target.value })}
                               className={inputClass}
@@ -793,9 +901,8 @@ export function ResepPage() {
                             Overhead biaya (×)
                           </label>
                           <input
-                            type="number"
-                            min="0.01"
-                            step="any"
+                            type="text"
+                            inputMode="decimal"
                             value={atur.overhead}
                             onChange={(e) => setAtur({ ...atur, overhead: e.target.value })}
                             className={inputClass}
@@ -812,9 +919,8 @@ export function ResepPage() {
                             Stok minimum di Central Kitchen ({atur.satuan})
                           </label>
                           <input
-                            type="number"
-                            min="0"
-                            step="any"
+                            type="text"
+                            inputMode="decimal"
                             value={atur.stokMin}
                             onChange={(e) => setAtur({ ...atur, stokMin: e.target.value })}
                             className={inputClass}
@@ -827,9 +933,8 @@ export function ResepPage() {
                             Stok minimum di toko ({atur.satuan})
                           </label>
                           <input
-                            type="number"
-                            min="0"
-                            step="any"
+                            type="text"
+                            inputMode="decimal"
                             value={atur.stokMinToko}
                             onChange={(e) =>
                               setAtur({ ...atur, stokMinToko: e.target.value })
@@ -847,9 +952,8 @@ export function ResepPage() {
                             Masa simpan (hari)
                           </label>
                           <input
-                            type="number"
-                            min="0"
-                            step="1"
+                            type="text"
+                            inputMode="numeric"
                             value={atur.masaSimpan}
                             onChange={(e) => setAtur({ ...atur, masaSimpan: e.target.value })}
                             className={inputClass}
@@ -866,9 +970,8 @@ export function ResepPage() {
                             Lama produksi (hari)
                           </label>
                           <input
-                            type="number"
-                            min="0"
-                            step="1"
+                            type="text"
+                            inputMode="numeric"
                             value={atur.leadTime}
                             onChange={(e) => setAtur({ ...atur, leadTime: e.target.value })}
                             className={inputClass}
@@ -1034,7 +1137,7 @@ export function ResepPage() {
                       <>
                         <div className="space-y-3">
                           {langkah.map((l, i) => (
-                            <div key={i} className="flex items-start gap-2">
+                            <div key={l._id} className="flex items-start gap-2">
                               <span className="mt-1.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-orange-100 text-xs font-bold text-orange-700">
                                 {i + 1}
                               </span>
@@ -1042,11 +1145,12 @@ export function ResepPage() {
                                 <textarea
                                   rows={2}
                                   value={l.teks}
-                                  onChange={(e) => {
-                                    const s = [...langkah];
-                                    s[i] = { ...s[i], teks: e.target.value };
-                                    setLangkah(s);
-                                  }}
+                                  onChange={(e) =>
+                                    ubahLangkah(setLangkah, l._id, (x) => ({
+                                      ...x,
+                                      teks: e.target.value,
+                                    }))
+                                  }
                                   maxLength={1000}
                                   placeholder={`Langkah ${i + 1} — mis. rebus air sampai mendidih…`}
                                   className={`${inputClass} resize-y`}
@@ -1054,11 +1158,12 @@ export function ResepPage() {
                                 />
                                 <ImageUpload
                                   value={l.foto_url}
-                                  onChange={(url) => {
-                                    const s = [...langkah];
-                                    s[i] = { ...s[i], foto_url: url };
-                                    setLangkah(s);
-                                  }}
+                                  onChange={(url) =>
+                                    ubahLangkah(setLangkah, l._id, (x) => ({
+                                      ...x,
+                                      foto_url: url,
+                                    }))
+                                  }
                                   tujuan="resep"
                                   placeholder="📷"
                                 />
@@ -1067,11 +1172,15 @@ export function ResepPage() {
                                 <button
                                   type="button"
                                   disabled={i === 0}
-                                  onClick={() => {
-                                    const s = [...langkah];
-                                    [s[i - 1], s[i]] = [s[i], s[i - 1]];
-                                    setLangkah(s);
-                                  }}
+                                  onClick={() =>
+                                    setLangkah((prev) => {
+                                      const s = [...prev];
+                                      const j = s.findIndex((x) => x._id === l._id);
+                                      if (j <= 0) return prev;
+                                      [s[j - 1], s[j]] = [s[j], s[j - 1]];
+                                      return s;
+                                    })
+                                  }
                                   className="rounded border border-stone-300 px-1.5 text-sm text-stone-600 hover:bg-stone-100 disabled:opacity-30"
                                   aria-label={`Naikkan langkah ${i + 1}`}
                                 >
@@ -1080,11 +1189,15 @@ export function ResepPage() {
                                 <button
                                   type="button"
                                   disabled={i === langkah.length - 1}
-                                  onClick={() => {
-                                    const s = [...langkah];
-                                    [s[i], s[i + 1]] = [s[i + 1], s[i]];
-                                    setLangkah(s);
-                                  }}
+                                  onClick={() =>
+                                    setLangkah((prev) => {
+                                      const s = [...prev];
+                                      const j = s.findIndex((x) => x._id === l._id);
+                                      if (j < 0 || j >= s.length - 1) return prev;
+                                      [s[j], s[j + 1]] = [s[j + 1], s[j]];
+                                      return s;
+                                    })
+                                  }
                                   className="rounded border border-stone-300 px-1.5 text-sm text-stone-600 hover:bg-stone-100 disabled:opacity-30"
                                   aria-label={`Turunkan langkah ${i + 1}`}
                                 >
@@ -1092,7 +1205,7 @@ export function ResepPage() {
                                 </button>
                                 <button
                                   type="button"
-                                  onClick={() => setLangkah(langkah.filter((_, j) => j !== i))}
+                                  onClick={() => setLangkah((prev) => prev.filter((x) => x._id !== l._id))}
                                   className="rounded px-1.5 text-sm font-medium text-red-500 hover:underline"
                                   aria-label={`Hapus langkah ${i + 1}`}
                                 >
@@ -1110,7 +1223,7 @@ export function ResepPage() {
                         {langkah.length < MAKS_LANGKAH && (
                           <button
                             type="button"
-                            onClick={() => setLangkah([...langkah, { teks: "", foto_url: null }])}
+                            onClick={() => setLangkah((prev) => [...prev, { _id: idLangkah(), teks: "", foto_url: null }])}
                             className="mt-2 text-sm font-medium text-orange-600 hover:underline"
                           >
                             + Tambah langkah
@@ -1167,7 +1280,28 @@ export function ResepPage() {
                           {bolehUbah ? (
                             <ImageUpload
                               value={foto[kunci]}
-                              onChange={(url) => setFoto({ ...foto, [kunci]: url })}
+                              /*
+                                Bentuk fungsional, dan pemiliknya diperiksa —
+                                dua kebocoran berbeda di satu baris.
+
+                                `{ ...foto }` menyebar snapshot saat unggahan
+                                DIMULAI. Dua foto (hasil & packing) memang
+                                dipilih berurutan dalam hitungan detik; yang
+                                mendarat belakangan mengembalikan pasangannya
+                                jadi null. Satu foto hilang tanpa tanda apa pun.
+
+                                Pemeriksaan pemilik menjaga hal kedua: pindah
+                                resep selagi mengunggah membuat fotonya mendarat
+                                di form resep lain — dan ikut tersimpan ke sana.
+                              */
+                              onChange={(url) => {
+                                const milik = dipilih?.id ?? null;
+                                setFoto((prev) =>
+                                  idResepRef.current === milik
+                                    ? { ...prev, [kunci]: url }
+                                    : prev,
+                                );
+                              }}
                               tujuan="resep"
                               placeholder={kunci === "hasil" ? "🍲" : "📦"}
                             />
@@ -1189,11 +1323,19 @@ export function ResepPage() {
                     </div>
                   </div>
 
+                  {bolehUbah && qtyTerbuang.length > 0 && (
+                    <div className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-800">
+                      Takaran pada <b>{qtyTerbuang.join(", ")}</b> belum terbaca sebagai angka
+                      lebih dari 0 — tulis seperti <b>0,25</b> atau <b>100</b>. Tanpa itu
+                      bahannya tidak ikut masuk resep, dan harga batch yang ditawarkan ikut
+                      kurang hitung.
+                    </div>
+                  )}
                   {bolehUbah && (
                     <div className="mt-4 flex items-center gap-3">
                       <button
                         onClick={() => simpan.mutate()}
-                        disabled={simpan.isPending}
+                        disabled={simpan.isPending || qtyTerbuang.length > 0}
                         className={btnPrimary}
                       >
                         Simpan Resep

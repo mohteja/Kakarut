@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import type { ShiftDetail } from "@kakarut/shared";
-import { ErrorText, Modal, Spinner, btnPrimary, btnSecondary, inputClass, thClass, tdClass } from "./ui";
+import { ErrorText, Modal, SpinnerAtauGalat, btnPrimary, btnSecondary, inputClass, thClass, tdClass } from "./ui";
 import { useAuth } from "../context/AuthContext";
 import { api } from "../lib/api";
 import { formatRupiah, formatTanggalRingkas, formatWaktu } from "../lib/format";
@@ -44,7 +44,7 @@ function Baris({ label, value, warna = "text-stone-800" }: { label: string; valu
 export function ShiftDetailModal({ shiftId, onClose }: { shiftId: string | null; onClose: () => void }) {
   const { auth } = useAuth();
   const qc = useQueryClient();
-  const { data, isLoading } = useQuery({
+  const { data, error: gagalMuat } = useQuery({
     queryKey: ["shift-detail", shiftId],
     queryFn: () => api<ShiftDetail>(`/shift/${shiftId}`),
     enabled: !!shiftId,
@@ -71,8 +71,11 @@ export function ShiftDetailModal({ shiftId, onClose }: { shiftId: string | null;
 
   return (
     <Modal open={!!shiftId} onClose={onClose} title="Detail Shift Kas" lebar="max-w-2xl">
-      {isLoading || !data ? (
-        <Spinner />
+      {/* `isLoading` sengaja tidak dipakai: bacaan yang gagal berakhir
+          `isLoading === false` DAN `data === undefined`, jadi syarat lama tetap
+          benar dan spinnernya berputar selamanya. */}
+      {!data ? (
+        <SpinnerAtauGalat error={gagalMuat} apa="Detail shift" />
       ) : (
         <div className="space-y-4">
           {/* Status + cabang */}

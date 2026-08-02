@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import type { BahanDetailDto, BahanFifoDto, KartuStokDto, MutasiJenis } from "@kakarut/shared";
 import { RiwayatHargaPanel } from "../../components/RiwayatHargaModal";
-import { Card, ErrorText, PageTitle, Spinner, btnSecondary, tdClass, thClass } from "../../components/ui";
+import { Card, ErrorText, PageTitle, Spinner, SpinnerAtauGalat, btnSecondary, tdClass, thClass } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah, formatTanggal, hariIniWIB } from "../../lib/format";
@@ -119,7 +119,7 @@ export function DetailBahanPage() {
       api<KartuStokDto>(`/stok/kartu/${id}?dari=${dari}&sampai=${sampai}&branch_id=${branchSel}`),
     enabled: Boolean(id && branchSel && trackStok),
   });
-  const { data: fifo } = useQuery({
+  const { data: fifo, error: fifoGagal } = useQuery({
     queryKey: ["stok-fifo", id, branchSel],
     queryFn: () => api<BahanFifoDto>(`/stok/fifo/${id}?branch_id=${branchSel}`),
     enabled: Boolean(id && branchSel && trackStok),
@@ -486,7 +486,7 @@ export function DetailBahanPage() {
             </p>
 
             {!fifo ? (
-              <Spinner />
+              <SpinnerAtauGalat error={fifoGagal} apa="Rincian lot FIFO" />
             ) : (
               <>
                 {fifo.defisit > 0 && (

@@ -15,7 +15,7 @@ import { useCabangData } from "../../context/BranchContext";
 import { CabangDataBar } from "../../components/CabangDataBar";
 import { ShiftDetailModal } from "../../components/ShiftDetailModal";
 import { api } from "../../lib/api";
-import { formatRupiah, formatTanggalRingkas, formatWaktu } from "../../lib/format";
+import { formatAngka, formatRupiah, formatTanggalRingkas, formatWaktu } from "../../lib/format";
 
 /** Label + warna selisih kas. */
 function selisihInfo(selisih: number | null) {
@@ -137,12 +137,16 @@ export function ShiftPage() {
           <div>
             <label className="mb-1 block text-sm font-medium">Modal awal (Rp)</label>
             <input
-              type="number"
-              min="0"
+              /* Pola rupiah rumah ini (lihat "Uang diterima" di KasirPage):
+                 state = DIGIT MURNI, tampilan = berkelompok. `type="number"`
+                 tak bisa dipakai — Chromium menyimpan "150.000" apa adanya
+                 (Number → 150) dan MEMBUANG titik kedua pada "1.500.000"
+                 (Number → 1,5). Dua-duanya diam-diam. */
+              type="text"
               inputMode="numeric"
-              value={modalAwal}
-              onChange={(e) => setModalAwal(e.target.value)}
-              placeholder="mis. 200000"
+              value={modalAwal ? formatAngka(Number(modalAwal), 0) : ""}
+              onChange={(e) => setModalAwal(e.target.value.replace(/\D/g, ""))}
+              placeholder="mis. 200.000"
               className={inputClass}
             />
           </div>
@@ -203,11 +207,20 @@ export function ShiftPage() {
                 {terkunci ? "Uang tunai fisik (terkunci)" : "Uang tunai fisik di laci (Rp)"}
               </label>
               <input
-                type="number"
-                min="0"
+                /* Hitungan uang laci — salah baca di sini langsung jadi
+                   selisih kas yang dituduhkan ke kasir. */
+                type="text"
                 inputMode="numeric"
-                value={terkunci ? String(aktif.uang_fisik) : uangFisik}
-                onChange={(e) => setUangFisik(e.target.value)}
+                value={
+                  terkunci
+                    ? // `uang_fisik` nullable di DTO; `terkunci` memang berarti
+                      // sudah terisi, tapi jangan mencetak "0" bila ternyata tidak.
+                      (aktif.uang_fisik != null ? formatAngka(aktif.uang_fisik, 0) : "")
+                    : uangFisik
+                      ? formatAngka(Number(uangFisik), 0)
+                      : ""
+                }
+                onChange={(e) => setUangFisik(e.target.value.replace(/\D/g, ""))}
                 readOnly={terkunci}
                 placeholder="hitung uang fisik lalu isi di sini"
                 className={`${inputClass} ${terkunci ? "bg-stone-100 text-stone-600" : ""}`}

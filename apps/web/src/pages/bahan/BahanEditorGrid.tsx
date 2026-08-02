@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import type { KategoriDto } from "@kakarut/shared";
+import { angkaDari } from "@kakarut/shared";
 import { hargaPerUnit } from "@kakarut/shared";
 import { SatuanSelect } from "../../components/SatuanSelect";
 import { formatAngka } from "../../lib/format";
@@ -80,8 +81,8 @@ export function BahanEditorGrid({
   showJenis?: boolean;
 }) {
   const hpsrDari = (b: BahanEditorRow) =>
-    Number(b.harga_beli) > 0 && Number(b.isi) > 0
-      ? hargaPerUnit(Number(b.harga_beli), Number(b.isi))
+    angkaDari(b.harga_beli) > 0 && angkaDari(b.isi) > 0
+      ? hargaPerUnit(angkaDari(b.harga_beli), angkaDari(b.isi))
       : null;
 
   const fKode = (b: BahanEditorRow, i: number, lebar: string) => (
@@ -126,7 +127,7 @@ export function BahanEditorGrid({
 
   const fHargaBeli = (b: BahanEditorRow, i: number, lebar: string) => (
     <input
-      type="number"
+      type="text"
       min="0"
       step="any"
       inputMode="decimal"
@@ -151,7 +152,7 @@ export function BahanEditorGrid({
     <div className="flex items-center gap-1 text-sm whitespace-nowrap text-stone-600">
       <span>1 {b.satuan_beli || "beli"} =</span>
       <input
-        type="number"
+        type="text"
         min="0.0001"
         step="any"
         inputMode="decimal"
@@ -227,7 +228,7 @@ export function BahanEditorGrid({
 
   const fStokMin = (b: BahanEditorRow, i: number, lebar: string) => (
     <input
-      type="number"
+      type="text"
       min="0"
       step="any"
       inputMode="decimal"
@@ -241,7 +242,7 @@ export function BahanEditorGrid({
 
   const fMinBeli = (b: BahanEditorRow, i: number, lebar: string) => (
     <input
-      type="number"
+      type="text"
       min="0"
       step="any"
       inputMode="decimal"
@@ -260,9 +261,10 @@ export function BahanEditorGrid({
 
   const fMasaSimpan = (b: BahanEditorRow, i: number, lebar: string) => (
     <input
-      type="number"
-      min="0"
-      step="1"
+      /* Sama dengan isian hari di ResepPage: `type="text"` supaya seluruh
+         isian angka di aplikasi ini dibaca oleh satu pengurai (`angkaDari`),
+         bukan separuh oleh browser. */
+      type="text"
       inputMode="numeric"
       value={b.masa_simpan}
       onChange={(e) => onChange(i, { masa_simpan: e.target.value })}
@@ -274,9 +276,7 @@ export function BahanEditorGrid({
 
   const fLeadTime = (b: BahanEditorRow, i: number, lebar: string) => (
     <input
-      type="number"
-      min="0"
-      step="1"
+      type="text"
       inputMode="numeric"
       value={b.lead_time}
       onChange={(e) => onChange(i, { lead_time: e.target.value })}

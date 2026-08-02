@@ -13,6 +13,7 @@ import type {
   PesananStatus,
   Shift,
 } from "@kakarut/shared";
+import { angkaDari } from "@kakarut/shared";
 import {
   Card,
   ErrorText,
@@ -309,7 +310,7 @@ export function KasirPage() {
   // sah jadi tak bisa ditagih) dan — lebih halus — membuat `dineIn` jatuh ke
   // nilai cadangan `true`, sehingga pesanan bawa pulang terbukukan sebagai
   // makan di tempat dengan HPP yang salah. Satu meja dua bill juga sah di sini.
-  const { data: mejaStatus = [] } = useMejaStatus(branchQuery, isKasir);
+  const { data: mejaStatus = [], error: mejaStatusGagal } = useMejaStatus(branchQuery, isKasir);
   const statusMeja = useMemo(
     () => new Map(mejaStatus.map((s) => [s.meja_id, s])),
     [mejaStatus],
@@ -531,7 +532,11 @@ export function KasirPage() {
   const cartTagih = cart.filter((l) => !dibatalkan(l));
   const subtotal = cartTagih.reduce((a, l) => a + hargaBaris(l) * l.qty, 0);
   // diskon per transaksi (cermin logika server: clamp ke [0, subtotal])
-  const diskonNilaiNum = Number(diskonNilai) || 0;
+  // `angkaDari`, bukan `Number`: kotaknya melayani DUA mode sekaligus —
+  // persen ("7,5") dan nominal rupiah ("10.000"). `Number` salah di keduanya:
+  // komanya jadi NaN, titik ribuannya jadi 10. Satu pengurai menutup dua-duanya
+  // tanpa perlu percabangan per mode.
+  const diskonNilaiNum = angkaDari(diskonNilai) || 0;
   const diskonRaw =
     diskonNilaiNum <= 0
       ? 0
@@ -645,7 +650,9 @@ export function KasirPage() {
       // modal pilih meja dibuka lagi saat struk ditutup (transaksi berikutnya)
       queryClient.invalidateQueries({ queryKey: ["stok"] });
       queryClient.invalidateQueries({ queryKey: ["laporan"] });
-      queryClient.invalidateQueries({ queryKey: ["penjualan"] });
+      // daftar Riwayat Transaksi — kuncinya "riwayat", BUKAN "penjualan"
+      // (itu nama endpoint-nya, bukan kunci query-nya)
+      queryClient.invalidateQueries({ queryKey: ["riwayat"] });
       queryClient.invalidateQueries({ queryKey: ["open-bill"] });
       queryClient.invalidateQueries({ queryKey: ["menu-ketersediaan"] });
       // papan pesanan dapur/bar: kartu berpindah dari "belum dibayar" ke
@@ -1410,8 +1417,11 @@ export function KasirPage() {
                       </button>
                     </div>
                     <input
-                      type="number"
-                      min="0"
+                      /* `type="text"` supaya yang diketik benar-benar sampai:
+                         pada `type="number"` Chromium membuang koma ("7,5"→"75")
+                         dan titik ribuan kedua ("1.500.000"→"1.500000"). */
+                      type="text"
+                      inputMode="decimal"
                       max={diskonTipe === "persen" ? (isKasir ? maksDiskonPersen : 100) : undefined}
                       disabled={!diskonBoleh}
                       value={diskonNilai}
@@ -1607,11 +1617,12 @@ export function KasirPage() {
               Modal awal (Rp)
             </label>
             <input
-              type="number"
-              min="0"
+              /* Sama seperti "Uang diterima" di halaman ini: digit murni di
+                 state, berkelompok di layar. */
+              type="text"
               inputMode="numeric"
-              value={modalAwalGate}
-              onChange={(e) => setModalAwalGate(e.target.value)}
+              value={modalAwalGate ? formatAngka(Number(modalAwalGate), 0) : ""}
+              onChange={(e) => setModalAwalGate(e.target.value.replace(/\D/g, ""))}
               placeholder="mis. 200000"
               className={inputClass}
             />
@@ -1676,6 +1687,17 @@ export function KasirPage() {
               </div>
             ) : (
               <div className="space-y-3">
+                {/* Bacaan okupansi gagal → daftar di bawah TETAP terpakai (memilih
+                    meja tak butuh statusnya), tapi warnanya, tombol Kosongkan, dan
+                    pertanyaan "tamu yang sama?" semuanya hilang tanpa jejak. Tanpa
+                    baris ini, meja yang menunggak bayar tampak sama persis dengan
+                    meja kosong. */}
+                {mejaStatusGagal && (
+                  <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                    <b>Status terisi/kosong belum termuat.</b> Meja tetap bisa dipilih, tapi
+                    tanda merah/kuning tidak muncul — pastikan langsung ke mejanya.
+                  </div>
+                )}
                 {/* Pencarian: ketik nomor/kata, cocok sebagian (mis. "8" → Meja 8) */}
                 <input
                   autoFocus

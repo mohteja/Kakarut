@@ -13,6 +13,7 @@ import {
   suppliers,
 } from "../../db/schema";
 import { requireRole, type AppEnv } from "../../middleware/auth";
+import { tanpaBentrok } from "../../lib/pg-galat";
 
 const SupplierBody = z.object({
   nama: z.string().trim().min(1),
@@ -62,7 +63,9 @@ export const supplierRoutes = new Hono<AppEnv>()
       .onConflictDoNothing()
       .returning();
     if (!row) {
-      throw new HTTPException(409, { message: `Supplier "${body.nama}" sudah ada` });
+      throw new HTTPException(409, {
+        message: `Supplier "${body.nama}" sudah ada`,
+      });
     }
     return c.json(toDto(row), 201);
   })
@@ -78,8 +81,11 @@ export const supplierRoutes = new Hono<AppEnv>()
     const [sup] = await db
       .select()
       .from(suppliers)
-      .where(and(eq(suppliers.id, id), eq(suppliers.companyId, auth.company_id!)));
-    if (!sup) throw new HTTPException(404, { message: "Supplier tidak ditemukan" });
+      .where(
+        and(eq(suppliers.id, id), eq(suppliers.companyId, auth.company_id!)),
+      );
+    if (!sup)
+      throw new HTTPException(404, { message: "Supplier tidak ditemukan" });
 
     const condsTransaksi = and(
       eq(productions.companyId, auth.company_id!),
@@ -122,7 +128,10 @@ export const supplierRoutes = new Hono<AppEnv>()
         is_utama: ingredientSuppliers.isUtama,
       })
       .from(ingredientSuppliers)
-      .innerJoin(ingredients, eq(ingredientSuppliers.ingredientId, ingredients.id))
+      .innerJoin(
+        ingredients,
+        eq(ingredientSuppliers.ingredientId, ingredients.id),
+      )
       .where(
         and(
           eq(ingredientSuppliers.companyId, auth.company_id!),
@@ -147,21 +156,29 @@ export const supplierRoutes = new Hono<AppEnv>()
     async (c) => {
       const auth = c.get("auth");
       const body = c.req.valid("json");
-      const [row] = await db
-        .update(suppliers)
-        .set({
-          ...(body.nama !== undefined && { nama: body.nama }),
-          ...(body.telepon !== undefined && { telepon: body.telepon }),
-          ...(body.alamat !== undefined && { alamat: body.alamat }),
-          ...(body.catatan !== undefined && { catatan: body.catatan }),
-          ...(body.kategori !== undefined && { kategori: body.kategori || null }),
-          ...(body.is_active !== undefined && { isActive: body.is_active }),
-        })
-        .where(
-          and(eq(suppliers.id, c.req.param("id")), eq(suppliers.companyId, auth.company_id!)),
-        )
-        .returning();
-      if (!row) throw new HTTPException(404, { message: "Supplier tidak ditemukan" });
+      const [row] = await tanpaBentrok("Nama supplier itu sudah dipakai", () =>
+        db
+          .update(suppliers)
+          .set({
+            ...(body.nama !== undefined && { nama: body.nama }),
+            ...(body.telepon !== undefined && { telepon: body.telepon }),
+            ...(body.alamat !== undefined && { alamat: body.alamat }),
+            ...(body.catatan !== undefined && { catatan: body.catatan }),
+            ...(body.kategori !== undefined && {
+              kategori: body.kategori || null,
+            }),
+            ...(body.is_active !== undefined && { isActive: body.is_active }),
+          })
+          .where(
+            and(
+              eq(suppliers.id, c.req.param("id")),
+              eq(suppliers.companyId, auth.company_id!),
+            ),
+          )
+          .returning(),
+      );
+      if (!row)
+        throw new HTTPException(404, { message: "Supplier tidak ditemukan" });
       return c.json(toDto(row));
     },
   );

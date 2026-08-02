@@ -1,11 +1,13 @@
+import { angkaDari, teksAngka } from "@kakarut/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ImageUpload } from "../../components/ImageUpload";
 import {
   Card,
   ErrorText,
   PageTitle,
   Spinner,
+  SpinnerAtauGalat,
   btnPrimary,
   inputClass,
 } from "../../components/ui";
@@ -143,7 +145,7 @@ function KartuMode({ company }: { company: Company }) {
 
 export function PerusahaanPage() {
   const queryClient = useQueryClient();
-  const { data: company, isLoading } = useQuery({
+  const { data: company, isLoading, error: errorCompany } = useQuery({
     queryKey: ["company"],
     queryFn: () => api<Company>("/company"),
   });
@@ -158,17 +160,26 @@ export function PerusahaanPage() {
   const [metodeHpp, setMetodeHpp] = useState<"average" | "fifo">("average");
   const [foodCostMaks, setFoodCostMaks] = useState("40");
 
+  /**
+   * Semai SEKALI. `["company"]` disegarkan ulang saat jendela kembali fokus
+   * (dan langsung saat kartu Mode di atas meng-invalidate-nya sesudah upgrade),
+   * dan tiap penyegaran menimpa apa yang sedang diketik owner — alamat, telepon,
+   * tarif PB1 — tanpa jejak. Sesudah Simpan berhasil, isi form memang sudah
+   * sama dengan server, jadi tak ada yang perlu disemai ulang.
+   */
+  const tersemai = useRef(false);
   useEffect(() => {
-    if (!company) return;
+    if (!company || tersemai.current) return;
+    tersemai.current = true;
     setNama(company.nama);
     setAlamat(company.alamat ?? "");
     setTelepon(company.telepon ?? "");
     setLogoUrl(company.logoUrl);
     setPb1Enabled(company.pb1Enabled);
-    setPb1Rate(String(company.pb1Rate));
-    setDiskonMaksPersen(String(company.diskonMaksPersen));
+    setPb1Rate(teksAngka(company.pb1Rate));
+    setDiskonMaksPersen(teksAngka(company.diskonMaksPersen));
     setMetodeHpp(company.metodeHpp ?? "average");
-    setFoodCostMaks(String(company.foodCostMaks ?? 40));
+    setFoodCostMaks(teksAngka(company.foodCostMaks ?? 40));
   }, [company]);
 
   const simpan = useMutation({
@@ -181,10 +192,10 @@ export function PerusahaanPage() {
           telepon: telepon || null,
           logo_url: logoUrl,
           pb1_enabled: pb1Enabled,
-          pb1_rate: Number(pb1Rate),
-          diskon_maks_persen: Math.min(100, Math.max(0, Number(diskonMaksPersen) || 0)),
+          pb1_rate: Math.min(100, Math.max(0, angkaDari(pb1Rate) || 0)),
+          diskon_maks_persen: Math.min(100, Math.max(0, angkaDari(diskonMaksPersen) || 0)),
           metode_hpp: metodeHpp,
-          food_cost_maks: Math.min(100, Math.max(0, Number(foodCostMaks) || 0)),
+          food_cost_maks: Math.min(100, Math.max(0, angkaDari(foodCostMaks) || 0)),
         },
       }),
     onSuccess: () => {
@@ -193,7 +204,7 @@ export function PerusahaanPage() {
     },
   });
 
-  if (isLoading || !company) return <Spinner />;
+  if (!company) return <SpinnerAtauGalat error={errorCompany} apa="Data perusahaan" />;
 
   return (
     <div className="max-w-2xl">
@@ -239,10 +250,11 @@ export function PerusahaanPage() {
             <div className="mt-2 flex items-center gap-2 text-sm">
               Tarif:
               <input
-                type="number"
-                min="0"
-                max="100"
-                step="any"
+                /* Persen bertitik-koma: "12,5" pada `type="number"` jadi
+                   "125", dan "0,5" jadi "5" — yang kedua LOLOS zod server
+                   (0..100) jadi tarif 0,5% diam-diam tersimpan 5%. */
+                type="text"
+                inputMode="decimal"
                 value={pb1Rate}
                 onChange={(e) => setPb1Rate(e.target.value)}
                 className="w-20 rounded-lg border border-stone-300 px-2 py-1 text-right"
@@ -256,10 +268,8 @@ export function PerusahaanPage() {
           <label className="mb-1 block text-sm font-medium">Batas maksimal diskon kasir (%)</label>
           <div className="flex items-center gap-2 text-sm">
             <input
-              type="number"
-              min="0"
-              max="100"
-              step="any"
+              type="text"
+              inputMode="decimal"
               value={diskonMaksPersen}
               onChange={(e) => setDiskonMaksPersen(e.target.value)}
               className="w-24 rounded-lg border border-stone-300 px-2 py-1 text-right"
@@ -276,10 +286,8 @@ export function PerusahaanPage() {
           <label className="mb-1 block text-sm font-medium">Ambang food cost sehat (%)</label>
           <div className="flex items-center gap-2 text-sm">
             <input
-              type="number"
-              min="0"
-              max="100"
-              step="any"
+              type="text"
+              inputMode="decimal"
               value={foodCostMaks}
               onChange={(e) => setFoodCostMaks(e.target.value)}
               className="w-24 rounded-lg border border-stone-300 px-2 py-1 text-right"

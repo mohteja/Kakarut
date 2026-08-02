@@ -12,6 +12,7 @@ import {
   Modal,
   PageTitle,
   Spinner,
+  SpinnerAtauGalat,
   btnPrimary,
   btnSecondary,
   inputClass,
@@ -57,7 +58,7 @@ export function RekapKebersihanPage() {
   const [detailId, setDetailId] = useState<string | null>(null);
   const [draftCatatan, setDraftCatatan] = useState("");
 
-  const { data: rekap, isLoading } = useQuery({
+  const { data: rekap, isLoading, error } = useQuery({
     queryKey: ["rekap-kebersihan", bulan, cabangFilter, sesiFilter],
     queryFn: () =>
       api<RekapKebersihanDto>(
@@ -65,7 +66,7 @@ export function RekapKebersihanPage() {
       ),
   });
 
-  const { data: detail } = useQuery({
+  const { data: detail, error: detailGagal } = useQuery({
     queryKey: ["kebersihan-detail", detailId],
     queryFn: () => api<LaporanKebersihanDto>(`/kebersihan/${detailId}`),
     enabled: !!detailId,
@@ -153,20 +154,40 @@ export function RekapKebersihanPage() {
         </div>
       </Card>
 
-      <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <KartuAngka label="Total laporan" value={totalLaporan} />
-        <KartuAngka label="Hari terisi" value={`${hariTerisi}/${hari.length}`} />
-        <KartuAngka
-          label="Area kotor"
-          value={totalKotor}
-          nada={totalKotor > 0 ? "text-red-600" : "text-green-600"}
-        />
-        <KartuAngka label="Karyawan melapor" value={pelapor} />
-      </div>
-
-      {isLoading || !rekap ? (
-        <Spinner />
+      {/*
+        BACAAN YANG DITOLAK ≠ SEMUANYA BERSIH. `hari = rekap?.hari ?? []`
+        membuat keempat kartu terisi NOL walau permintaannya gagal — dan "Area
+        kotor: 0" bahkan ditulis HIJAU, pernyataan paling meyakinkan yang bisa
+        dibuat halaman ini, justru saat ia tak tahu apa-apa. Daftarnya sendiri
+        berputar di Spinner selamanya karena `!rekap` disatukan dengan
+        `isLoading`; TanStack sudah berhenti mencoba, layarnya tak pernah
+        mengatakannya. Galat diperiksa LEBIH DULU: angkanya tak boleh muncul
+        sama sekali kalau sumbernya tak terbaca.
+      */}
+      {error ? (
+        <Card className="p-4">
+          <ErrorText error={error} />
+          <div className="mt-2 text-sm text-stone-500">
+            Rekap kebersihan tidak dapat dimuat, jadi angkanya tidak ditampilkan — <b>bukan</b>{" "}
+            berarti nol area kotor. Muat ulang halaman setelah masalahnya beres.
+          </div>
+        </Card>
       ) : (
+        <>
+          <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <KartuAngka label="Total laporan" value={totalLaporan} />
+            <KartuAngka label="Hari terisi" value={`${hariTerisi}/${hari.length}`} />
+            <KartuAngka
+              label="Area kotor"
+              value={totalKotor}
+              nada={totalKotor > 0 ? "text-red-600" : "text-green-600"}
+            />
+            <KartuAngka label="Karyawan melapor" value={pelapor} />
+          </div>
+
+          {isLoading || !rekap ? (
+            <Spinner />
+          ) : (
         <div className="space-y-3">
           {hari.map((h) =>
             // Hari kosong tetap ditampilkan (itu justru informasinya), tapi
@@ -232,6 +253,8 @@ export function RekapKebersihanPage() {
             ),
           )}
         </div>
+          )}
+        </>
       )}
 
       <Modal
@@ -241,7 +264,7 @@ export function RekapKebersihanPage() {
         lebar="max-w-2xl"
       >
         {!detail ? (
-          <Spinner />
+          <SpinnerAtauGalat error={detailGagal} apa="Detail laporan kebersihan" />
         ) : (
           <>
             <div className="mb-3 text-sm text-stone-600">

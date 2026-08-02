@@ -21,7 +21,13 @@ import {
   supplyRules,
   supplySuppliers,
 } from "../../db/schema";
-import { requireRole, resolveBranchId, terikatCabang, type AppEnv } from "../../middleware/auth";
+import {
+  requireRole,
+  resolveBranchId,
+  terikatCabang,
+  type AppEnv,
+} from "../../middleware/auth";
+import { tanpaBentrok } from "../../lib/pg-galat";
 import { terbitkanNomor } from "../dokumen/nomor";
 import {
   batalBeliPerlengkapan,
@@ -90,7 +96,6 @@ const SupplierBody = z.object({
     .default([]),
 });
 
-
 /**
  * Riwayat harga beli perlengkapan: setiap stok MASUK (se-perusahaan) = satu lot
  * pembelian. `harga_satuan` = total_harga / qty. Rata-rata tertimbang hanya dari
@@ -131,7 +136,9 @@ async function riwayatHargaPerlengkapan(
     qty: r.qty,
     total_harga: r.totalHarga,
     harga_satuan:
-      r.totalHarga != null && r.qty > 0 ? Math.round((r.totalHarga / r.qty) * 100) / 100 : null,
+      r.totalHarga != null && r.qty > 0
+        ? Math.round((r.totalHarga / r.qty) * 100) / 100
+        : null,
     supplier: null,
     no_faktur: null,
     nomor: r.nomor,
@@ -146,7 +153,13 @@ async function riwayatHargaPerlengkapan(
   }
   return {
     // perlengkapan tak berkemasan: isi 1, harga per satuan = harga beli
-    item: { id: item.id, nama: item.nama, satuan: item.satuan, isi: 1, satuan_beli: null },
+    item: {
+      id: item.id,
+      nama: item.nama,
+      satuan: item.satuan,
+      isi: 1,
+      satuan_beli: null,
+    },
     harga_terkini: item.hargaBeli,
     harga_rata: sumQty > 0 ? Math.round((sumHarga / sumQty) * 100) / 100 : null,
     ...statistikHargaLots(lots),
@@ -184,7 +197,9 @@ const AturanBody = z.object({
 
 const OpnameBody = z.object({
   items: z
-    .array(z.object({ supply_id: z.string().uuid(), qty_fisik: z.number().min(0) }))
+    .array(
+      z.object({ supply_id: z.string().uuid(), qty_fisik: z.number().min(0) }),
+    )
     .min(1),
   catatan: z.string().max(300).nullish(),
 });
@@ -222,7 +237,12 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
         ? c.req.query("sampai")!
         : hariIni;
     return c.json(
-      await belanjaPerlengkapan({ companyId: auth.company_id!, branchId, dari, sampai }),
+      await belanjaPerlengkapan({
+        companyId: auth.company_id!,
+        branchId,
+        dari,
+        sampai,
+      }),
     );
   })
   // MASTER se-perusahaan (halaman Manajemen tanpa pemilih cabang): semua item
@@ -250,7 +270,10 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
       // validasi seluruh item dulu supaya kegagalan tidak menyisakan tulisan sebagian
       for (const supplyId of target.keys()) {
         const item = await muatSupplyAktif(auth.company_id!, supplyId);
-        if (!item) throw new HTTPException(404, { message: "Perlengkapan tidak ditemukan" });
+        if (!item)
+          throw new HTTPException(404, {
+            message: "Perlengkapan tidak ditemukan",
+          });
       }
       const tanggal = await tanggalPerusahaan(auth.company_id!);
       let diubah = 0;
@@ -290,7 +313,8 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
       catatan: body.catatan ?? null,
     });
     // semua sesuai sistem → tanpa sesi (tak ada yang perlu di-ACC)
-    if (!hasil) return c.json({ session_id: null, nomor: null, jumlah_selisih: 0 });
+    if (!hasil)
+      return c.json({ session_id: null, nomor: null, jumlah_selisih: 0 });
     return c.json(hasil, 201);
   })
   .get("/opname/riwayat", async (c) => {
@@ -300,48 +324,69 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
   })
   .get("/opname/sesi/:sessionId", async (c) => {
     const auth = c.get("auth");
-    const detail = await detailOpnamePerlengkapan(auth.company_id!, c.req.param("sessionId"));
-    if (!detail) throw new HTTPException(404, { message: "Sesi opname tidak ditemukan" });
+    const detail = await detailOpnamePerlengkapan(
+      auth.company_id!,
+      c.req.param("sessionId"),
+    );
+    if (!detail)
+      throw new HTTPException(404, { message: "Sesi opname tidak ditemukan" });
     return c.json(detail);
   })
-  .post("/opname/sesi/:sessionId/acc", requireRole("owner", "admin"), async (c) => {
-    const auth = c.get("auth");
-    const n = await setStatusOpnamePerlengkapan(
-      auth.company_id!,
-      c.req.param("sessionId"),
-      "disetujui",
-    );
-    if (n === 0) {
-      throw new HTTPException(404, { message: "Sesi tidak ditemukan / sudah ditinjau" });
-    }
-    return c.json({ ok: true, jumlah: n });
-  })
-  .post("/opname/sesi/:sessionId/tolak", requireRole("owner", "admin"), async (c) => {
-    const auth = c.get("auth");
-    const n = await setStatusOpnamePerlengkapan(
-      auth.company_id!,
-      c.req.param("sessionId"),
-      "ditolak",
-    );
-    if (n === 0) {
-      throw new HTTPException(404, { message: "Sesi tidak ditemukan / sudah ditinjau" });
-    }
-    return c.json({ ok: true, jumlah: n });
-  })
-  .delete("/opname/sesi/:sessionId", requireRole("owner", "admin"), async (c) => {
-    const auth = c.get("auth");
-    const rows = await db
-      .delete(supplyMutations)
-      .where(
-        and(
-          eq(supplyMutations.companyId, auth.company_id!),
-          eq(supplyMutations.sessionId, c.req.param("sessionId")),
-        ),
-      )
-      .returning({ id: supplyMutations.id });
-    if (rows.length === 0) throw new HTTPException(404, { message: "Sesi tidak ditemukan" });
-    return c.json({ ok: true, jumlah: rows.length });
-  })
+  .post(
+    "/opname/sesi/:sessionId/acc",
+    requireRole("owner", "admin"),
+    async (c) => {
+      const auth = c.get("auth");
+      const n = await setStatusOpnamePerlengkapan(
+        auth.company_id!,
+        c.req.param("sessionId"),
+        "disetujui",
+      );
+      if (n === 0) {
+        throw new HTTPException(404, {
+          message: "Sesi tidak ditemukan / sudah ditinjau",
+        });
+      }
+      return c.json({ ok: true, jumlah: n });
+    },
+  )
+  .post(
+    "/opname/sesi/:sessionId/tolak",
+    requireRole("owner", "admin"),
+    async (c) => {
+      const auth = c.get("auth");
+      const n = await setStatusOpnamePerlengkapan(
+        auth.company_id!,
+        c.req.param("sessionId"),
+        "ditolak",
+      );
+      if (n === 0) {
+        throw new HTTPException(404, {
+          message: "Sesi tidak ditemukan / sudah ditinjau",
+        });
+      }
+      return c.json({ ok: true, jumlah: n });
+    },
+  )
+  .delete(
+    "/opname/sesi/:sessionId",
+    requireRole("owner", "admin"),
+    async (c) => {
+      const auth = c.get("auth");
+      const rows = await db
+        .delete(supplyMutations)
+        .where(
+          and(
+            eq(supplyMutations.companyId, auth.company_id!),
+            eq(supplyMutations.sessionId, c.req.param("sessionId")),
+          ),
+        )
+        .returning({ id: supplyMutations.id });
+      if (rows.length === 0)
+        throw new HTTPException(404, { message: "Sesi tidak ditemukan" });
+      return c.json({ ok: true, jumlah: rows.length });
+    },
+  )
   /* ===== KIRIMAN CK → CABANG (permintaan stok ≤ minimum) ===== */
   // Permintaan OTOMATIS: pindai perlengkapan cabang yang saldo ≤ minimum,
   // terbitkan kiriman KP- sebanyak stok yang ada di CK (owner/admin).
@@ -358,7 +403,9 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
       rencanaId,
     });
     if ("error" in hasil) {
-      throw new HTTPException((hasil.code ?? 400) as 400 | 404, { message: hasil.error });
+      throw new HTTPException((hasil.code ?? 400) as 400 | 404, {
+        message: hasil.error,
+      });
     }
     return c.json(hasil);
   })
@@ -377,7 +424,9 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
       userId: auth.sub,
     });
     if ("error" in hasil) {
-      throw new HTTPException((hasil.code ?? 400) as 400 | 404, { message: hasil.error });
+      throw new HTTPException((hasil.code ?? 400) as 400 | 404, {
+        message: hasil.error,
+      });
     }
     return c.json(hasil);
   })
@@ -429,10 +478,18 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
       const items =
         b.items ??
         (b.supply_id && b.qty
-          ? [{ supply_id: b.supply_id, qty: b.qty, total_harga: b.total_harga ?? null }]
+          ? [
+              {
+                supply_id: b.supply_id,
+                qty: b.qty,
+                total_harga: b.total_harga ?? null,
+              },
+            ]
           : null);
       if (!items) {
-        throw new HTTPException(400, { message: "items wajib diisi (min 1 perlengkapan)" });
+        throw new HTTPException(400, {
+          message: "items wajib diisi (min 1 perlengkapan)",
+        });
       }
       const hasil = await buatBeliPerlengkapanManual({
         companyId: auth.company_id!,
@@ -447,7 +504,9 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
         catatan: b.catatan ?? null,
       });
       if ("error" in hasil) {
-        throw new HTTPException((hasil.code ?? 400) as 400 | 404, { message: hasil.error });
+        throw new HTTPException((hasil.code ?? 400) as 400 | 404, {
+          message: hasil.error,
+        });
       }
       return c.json(hasil, 201);
     },
@@ -485,7 +544,9 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
         items: body.items,
       });
       if ("error" in hasil) {
-        throw new HTTPException((hasil.code ?? 400) as 400 | 404, { message: hasil.error });
+        throw new HTTPException((hasil.code ?? 400) as 400 | 404, {
+          message: hasil.error,
+        });
       }
       return c.json(hasil);
     },
@@ -494,18 +555,24 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
    * Tandai SATU FAKTUR beli 'diproses' (sedang dibelanjakan) — paritas tahap
    * RAB → diproses beli bahan baku; pemroses tercatat. owner/admin.
    */
-  .post("/beli/faktur/:fakturId/proses", requireRole("owner", "admin"), async (c) => {
-    const auth = c.get("auth");
-    const hasil = await prosesFakturBeliPerlengkapan(
-      auth.company_id!,
-      c.req.param("fakturId"),
-      auth.sub,
-    );
-    if ("error" in hasil) {
-      throw new HTTPException((hasil.code ?? 400) as 400 | 404, { message: hasil.error });
-    }
-    return c.json(hasil);
-  })
+  .post(
+    "/beli/faktur/:fakturId/proses",
+    requireRole("owner", "admin"),
+    async (c) => {
+      const auth = c.get("auth");
+      const hasil = await prosesFakturBeliPerlengkapan(
+        auth.company_id!,
+        c.req.param("fakturId"),
+        auth.sub,
+      );
+      if ("error" in hasil) {
+        throw new HTTPException((hasil.code ?? 400) as 400 | 404, {
+          message: hasil.error,
+        });
+      }
+      return c.json(hasil);
+    },
+  )
   /**
    * Batalkan SEMUA faktur beli yang masih 'menunggu' (bersih-bersih massal;
    * opsional ?branch_id = CK). owner/admin.
@@ -516,27 +583,45 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
     return c.json(await batalSemuaBeliPerlengkapan(auth.company_id!, ckId));
   })
   /** Batalkan semua baris 'menunggu' satu faktur beli perlengkapan. owner/admin. */
-  .post("/beli/faktur/:fakturId/batal", requireRole("owner", "admin"), async (c) => {
-    const auth = c.get("auth");
-    const hasil = await batalFakturBeliPerlengkapan(auth.company_id!, c.req.param("fakturId"));
-    if ("error" in hasil) {
-      throw new HTTPException((hasil.code ?? 400) as 400 | 404, { message: hasil.error });
-    }
-    return c.json(hasil);
-  })
+  .post(
+    "/beli/faktur/:fakturId/batal",
+    requireRole("owner", "admin"),
+    async (c) => {
+      const auth = c.get("auth");
+      const hasil = await batalFakturBeliPerlengkapan(
+        auth.company_id!,
+        c.req.param("fakturId"),
+      );
+      if ("error" in hasil) {
+        throw new HTTPException((hasil.code ?? 400) as 400 | 404, {
+          message: hasil.error,
+        });
+      }
+      return c.json(hasil);
+    },
+  )
   /**
    * HAPUS PERMANEN satu faktur beli perlengkapan (bersih-bersih data lama).
    * owner/admin. Ditolak (400) bila terkait permintaan aktif atau ada baris
    * yang sudah 'tiba' (masuk stok).
    */
-  .delete("/beli/faktur/:fakturId", requireRole("owner", "admin"), async (c) => {
-    const auth = c.get("auth");
-    const hasil = await hapusFakturBeliPerlengkapan(auth.company_id!, c.req.param("fakturId"));
-    if ("error" in hasil) {
-      throw new HTTPException((hasil.code ?? 400) as 400 | 404, { message: hasil.error });
-    }
-    return c.json(hasil);
-  })
+  .delete(
+    "/beli/faktur/:fakturId",
+    requireRole("owner", "admin"),
+    async (c) => {
+      const auth = c.get("auth");
+      const hasil = await hapusFakturBeliPerlengkapan(
+        auth.company_id!,
+        c.req.param("fakturId"),
+      );
+      if ("error" in hasil) {
+        throw new HTTPException((hasil.code ?? 400) as 400 | 404, {
+          message: hasil.error,
+        });
+      }
+      return c.json(hasil);
+    },
+  )
   /**
    * Barang faktur beli TIBA di CK → masuk stok CK (PL-) + otomatis kirim (KP-)
    * ke cabang tujuan. owner/admin (manajemen memproses kedatangan di CK).
@@ -562,7 +647,9 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
         totalHarga: body.total_harga ?? null,
       });
       if ("error" in hasil) {
-        throw new HTTPException((hasil.code ?? 400) as 400 | 404, { message: hasil.error });
+        throw new HTTPException((hasil.code ?? 400) as 400 | 404, {
+          message: hasil.error,
+        });
       }
       return c.json(hasil);
     },
@@ -570,41 +657,76 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
   /** Batalkan faktur beli perlengkapan yang masih 'menunggu'. owner/admin. */
   .post("/beli/:id/batal", requireRole("owner", "admin"), async (c) => {
     const auth = c.get("auth");
-    const hasil = await batalBeliPerlengkapan(auth.company_id!, c.req.param("id"));
+    const hasil = await batalBeliPerlengkapan(
+      auth.company_id!,
+      c.req.param("id"),
+    );
     if ("error" in hasil) {
-      throw new HTTPException((hasil.code ?? 400) as 400 | 404, { message: hasil.error });
+      throw new HTTPException((hasil.code ?? 400) as 400 | 404, {
+        message: hasil.error,
+      });
     }
     return c.json(hasil);
   })
   /** HAPUS PERMANEN satu baris beli perlengkapan warisan (faktur_id null). owner/admin. */
   .delete("/beli/:id", requireRole("owner", "admin"), async (c) => {
     const auth = c.get("auth");
-    const hasil = await hapusBeliPerlengkapan(auth.company_id!, c.req.param("id"));
+    const hasil = await hapusBeliPerlengkapan(
+      auth.company_id!,
+      c.req.param("id"),
+    );
     if ("error" in hasil) {
-      throw new HTTPException((hasil.code ?? 400) as 400 | 404, { message: hasil.error });
+      throw new HTTPException((hasil.code ?? 400) as 400 | 404, {
+        message: hasil.error,
+      });
     }
     return c.json(hasil);
   })
-  .post("/", requireRole("owner", "admin"), zValidator("json", ItemBody), async (c) => {
-    const auth = c.get("auth");
-    const body = c.req.valid("json");
-    // Nama sama (case-insensitive): item nonaktif → reaktivasi; aktif → 409.
-    const [ada] = await db
-      .select()
-      .from(supplies)
-      .where(
-        and(
-          eq(supplies.companyId, auth.company_id!),
-          sql`lower(${supplies.nama}) = lower(${body.nama})`,
-        ),
-      );
-    if (ada) {
-      if (ada.isActive) {
-        throw new HTTPException(409, { message: `Perlengkapan "${ada.nama}" sudah ada` });
+  .post(
+    "/",
+    requireRole("owner", "admin"),
+    zValidator("json", ItemBody),
+    async (c) => {
+      const auth = c.get("auth");
+      const body = c.req.valid("json");
+      // Nama sama (case-insensitive): item nonaktif → reaktivasi; aktif → 409.
+      const [ada] = await db
+        .select()
+        .from(supplies)
+        .where(
+          and(
+            eq(supplies.companyId, auth.company_id!),
+            sql`lower(${supplies.nama}) = lower(${body.nama})`,
+          ),
+        );
+      if (ada) {
+        if (ada.isActive) {
+          throw new HTTPException(409, {
+            message: `Perlengkapan "${ada.nama}" sudah ada`,
+          });
+        }
+        const [row] = await db
+          .update(supplies)
+          .set({
+            nama: body.nama,
+            satuan: body.satuan,
+            hargaBeli: body.harga_beli,
+            stokMinimum: body.stok_minimum,
+            catatan: body.catatan ?? null,
+            kategori: body.kategori ?? null,
+            bolehEceran: body.boleh_eceran,
+            dilacak: body.dilacak,
+            isActive: true,
+            updatedAt: new Date(),
+          })
+          .where(eq(supplies.id, ada.id))
+          .returning();
+        return c.json({ id: row.id, nama: row.nama, dipulihkan: true }, 201);
       }
       const [row] = await db
-        .update(supplies)
-        .set({
+        .insert(supplies)
+        .values({
+          companyId: auth.company_id!,
           nama: body.nama,
           satuan: body.satuan,
           hargaBeli: body.harga_beli,
@@ -613,56 +735,62 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
           kategori: body.kategori ?? null,
           bolehEceran: body.boleh_eceran,
           dilacak: body.dilacak,
-          isActive: true,
-          updatedAt: new Date(),
         })
-        .where(eq(supplies.id, ada.id))
         .returning();
-      return c.json({ id: row.id, nama: row.nama, dipulihkan: true }, 201);
-    }
-    const [row] = await db
-      .insert(supplies)
-      .values({
-        companyId: auth.company_id!,
-        nama: body.nama,
-        satuan: body.satuan,
-        hargaBeli: body.harga_beli,
-        stokMinimum: body.stok_minimum,
-        catatan: body.catatan ?? null,
-        kategori: body.kategori ?? null,
-        bolehEceran: body.boleh_eceran,
-        dilacak: body.dilacak,
-      })
-      .returning();
-    return c.json({ id: row.id, nama: row.nama, dipulihkan: false }, 201);
-  })
-  .patch("/:id", requireRole("owner", "admin"), zValidator("json", ItemPatchBody), async (c) => {
-    const auth = c.get("auth");
-    const body = c.req.valid("json");
-    const [row] = await db
-      .update(supplies)
-      .set({
-        ...(body.nama !== undefined && { nama: body.nama }),
-        ...(body.satuan !== undefined && { satuan: body.satuan }),
-        ...(body.harga_beli !== undefined && { hargaBeli: body.harga_beli }),
-        ...(body.stok_minimum !== undefined && { stokMinimum: body.stok_minimum }),
-        ...(body.catatan !== undefined && { catatan: body.catatan }),
-        ...(body.kategori !== undefined && { kategori: body.kategori }),
-        ...(body.boleh_eceran !== undefined && { bolehEceran: body.boleh_eceran }),
-        ...(body.dilacak !== undefined && { dilacak: body.dilacak }),
-        ...(body.is_active !== undefined && { isActive: body.is_active }),
-        updatedAt: new Date(),
-      })
-      .where(and(eq(supplies.id, c.req.param("id")), eq(supplies.companyId, auth.company_id!)))
-      .returning();
-    if (!row) throw new HTTPException(404, { message: "Perlengkapan tidak ditemukan" });
-    return c.json({ ok: true });
-  })
+      return c.json({ id: row.id, nama: row.nama, dipulihkan: false }, 201);
+    },
+  )
+  .patch(
+    "/:id",
+    requireRole("owner", "admin"),
+    zValidator("json", ItemPatchBody),
+    async (c) => {
+      const auth = c.get("auth");
+      const body = c.req.valid("json");
+      const [row] = await tanpaBentrok(
+        "Nama perlengkapan itu sudah dipakai",
+        () =>
+          db
+            .update(supplies)
+            .set({
+              ...(body.nama !== undefined && { nama: body.nama }),
+              ...(body.satuan !== undefined && { satuan: body.satuan }),
+              ...(body.harga_beli !== undefined && {
+                hargaBeli: body.harga_beli,
+              }),
+              ...(body.stok_minimum !== undefined && {
+                stokMinimum: body.stok_minimum,
+              }),
+              ...(body.catatan !== undefined && { catatan: body.catatan }),
+              ...(body.kategori !== undefined && { kategori: body.kategori }),
+              ...(body.boleh_eceran !== undefined && {
+                bolehEceran: body.boleh_eceran,
+              }),
+              ...(body.dilacak !== undefined && { dilacak: body.dilacak }),
+              ...(body.is_active !== undefined && { isActive: body.is_active }),
+              updatedAt: new Date(),
+            })
+            .where(
+              and(
+                eq(supplies.id, c.req.param("id")),
+                eq(supplies.companyId, auth.company_id!),
+              ),
+            )
+            .returning(),
+      );
+      if (!row)
+        throw new HTTPException(404, {
+          message: "Perlengkapan tidak ditemukan",
+        });
+      return c.json({ ok: true });
+    },
+  )
   /* ===== SUPPLIER per perlengkapan (pola persis /bahan/:id/supplier) ===== */
   .get("/:id/supplier", async (c) => {
     const auth = c.get("auth");
     const item = await muatSupplyAktif(auth.company_id!, c.req.param("id"));
-    if (!item) throw new HTTPException(404, { message: "Perlengkapan tidak ditemukan" });
+    if (!item)
+      throw new HTTPException(404, { message: "Perlengkapan tidak ditemukan" });
     const rows = await db
       .select({
         id: supplySuppliers.id,
@@ -700,15 +828,23 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
       const auth = c.get("auth");
       const { items } = c.req.valid("json");
       const item = await muatSupplyAktif(auth.company_id!, c.req.param("id"));
-      if (!item) throw new HTTPException(404, { message: "Perlengkapan tidak ditemukan" });
+      if (!item)
+        throw new HTTPException(404, {
+          message: "Perlengkapan tidak ditemukan",
+        });
       // gabungkan duplikat (utama di-OR-kan) agar unique index tak meledak
       const byId = new Map<string, boolean>();
       for (const it of items) {
-        byId.set(it.supplier_id, (byId.get(it.supplier_id) ?? false) || it.is_utama);
+        byId.set(
+          it.supplier_id,
+          (byId.get(it.supplier_id) ?? false) || it.is_utama,
+        );
       }
       const utama = [...byId.values()].filter(Boolean).length;
       if (utama > 1) {
-        throw new HTTPException(400, { message: "Hanya boleh satu supplier utama" });
+        throw new HTTPException(400, {
+          message: "Hanya boleh satu supplier utama",
+        });
       }
       const supplierIds = [...byId.keys()];
       if (supplierIds.length > 0) {
@@ -716,10 +852,15 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
           .select({ id: suppliers.id })
           .from(suppliers)
           .where(
-            and(eq(suppliers.companyId, auth.company_id!), inArray(suppliers.id, supplierIds)),
+            and(
+              eq(suppliers.companyId, auth.company_id!),
+              inArray(suppliers.id, supplierIds),
+            ),
           );
         if (valid.length !== supplierIds.length) {
-          throw new HTTPException(400, { message: "Ada supplier yang tidak valid" });
+          throw new HTTPException(400, {
+            message: "Ada supplier yang tidak valid",
+          });
         }
         // tanpa penanda utama → item pertama jadi utama (selalu ada langganan)
         if (utama === 0) byId.set(supplierIds[0], true);
@@ -754,7 +895,8 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
   .get("/:id/pembelian", async (c) => {
     const auth = c.get("auth");
     const item = await muatSupplyAktif(auth.company_id!, c.req.param("id"));
-    if (!item) throw new HTTPException(404, { message: "Perlengkapan tidak ditemukan" });
+    if (!item)
+      throw new HTTPException(404, { message: "Perlengkapan tidak ditemukan" });
     return c.json(await riwayatHargaPerlengkapan(auth.company_id!, item));
   })
   /**
@@ -769,11 +911,19 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
       const auth = c.get("auth");
       const { harga_per_unit } = c.req.valid("json");
       const item = await muatSupplyAktif(auth.company_id!, c.req.param("id"));
-      if (!item) throw new HTTPException(404, { message: "Perlengkapan tidak ditemukan" });
+      if (!item)
+        throw new HTTPException(404, {
+          message: "Perlengkapan tidak ditemukan",
+        });
       const [row] = await db
         .update(supplies)
         .set({ hargaBeli: Math.round(harga_per_unit), updatedAt: new Date() })
-        .where(and(eq(supplies.id, item.id), eq(supplies.companyId, auth.company_id!)))
+        .where(
+          and(
+            eq(supplies.id, item.id),
+            eq(supplies.companyId, auth.company_id!),
+          ),
+        )
         .returning();
       return c.json(await riwayatHargaPerlengkapan(auth.company_id!, row));
     },
@@ -785,43 +935,63 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
     const [row] = await db
       .update(supplies)
       .set({ isActive: false, updatedAt: new Date() })
-      .where(and(eq(supplies.id, c.req.param("id")), eq(supplies.companyId, auth.company_id!)))
+      .where(
+        and(
+          eq(supplies.id, c.req.param("id")),
+          eq(supplies.companyId, auth.company_id!),
+        ),
+      )
       .returning();
-    if (!row) throw new HTTPException(404, { message: "Perlengkapan tidak ditemukan" });
+    if (!row)
+      throw new HTTPException(404, { message: "Perlengkapan tidak ditemukan" });
     return c.json({ ok: true });
   })
-  .post("/:id/masuk", requireRole("owner", "admin"), zValidator("json", MasukBody), async (c) => {
-    const auth = c.get("auth");
-    const body = c.req.valid("json");
-    const branchId = await resolveBranchId(c);
-    const item = await muatSupplyAktif(auth.company_id!, c.req.param("id"));
-    if (!item) throw new HTTPException(404, { message: "Perlengkapan tidak ditemukan" });
-    // tiap stok masuk = dokumen belanja kecil → bernomor PL- (ref = id mutasi)
-    const nomor = await db.transaction(async (tx) => {
-      const [mut] = await tx
-        .insert(supplyMutations)
-        .values({
-          companyId: auth.company_id!,
-          branchId,
-          supplyId: item.id,
-          tipe: "masuk",
-          qty: body.qty,
-          totalHarga: body.total_harga ?? null,
-          tanggal: body.tanggal ?? (await tanggalPerusahaan(auth.company_id!)),
-          catatan: body.catatan ?? null,
-          userId: auth.sub,
-        })
-        .returning({ id: supplyMutations.id });
-      return terbitkanNomor(tx, auth.company_id!, "perlengkapan", mut.id);
-    });
-    return c.json({ ok: true, nomor, saldo: await saldoSatuPerlengkapan(item.id, branchId) });
-  })
+  .post(
+    "/:id/masuk",
+    requireRole("owner", "admin"),
+    zValidator("json", MasukBody),
+    async (c) => {
+      const auth = c.get("auth");
+      const body = c.req.valid("json");
+      const branchId = await resolveBranchId(c);
+      const item = await muatSupplyAktif(auth.company_id!, c.req.param("id"));
+      if (!item)
+        throw new HTTPException(404, {
+          message: "Perlengkapan tidak ditemukan",
+        });
+      // tiap stok masuk = dokumen belanja kecil → bernomor PL- (ref = id mutasi)
+      const nomor = await db.transaction(async (tx) => {
+        const [mut] = await tx
+          .insert(supplyMutations)
+          .values({
+            companyId: auth.company_id!,
+            branchId,
+            supplyId: item.id,
+            tipe: "masuk",
+            qty: body.qty,
+            totalHarga: body.total_harga ?? null,
+            tanggal:
+              body.tanggal ?? (await tanggalPerusahaan(auth.company_id!)),
+            catatan: body.catatan ?? null,
+            userId: auth.sub,
+          })
+          .returning({ id: supplyMutations.id });
+        return terbitkanNomor(tx, auth.company_id!, "perlengkapan", mut.id);
+      });
+      return c.json({
+        ok: true,
+        nomor,
+        saldo: await saldoSatuPerlengkapan(item.id, branchId),
+      });
+    },
+  )
   .post("/:id/pakai", zValidator("json", PakaiBody), async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");
     const branchId = await resolveBranchId(c);
     const item = await muatSupplyAktif(auth.company_id!, c.req.param("id"));
-    if (!item) throw new HTTPException(404, { message: "Perlengkapan tidak ditemukan" });
+    if (!item)
+      throw new HTTPException(404, { message: "Perlengkapan tidak ditemukan" });
     // jatah otomatis hari ini dipotong dulu agar saldo yang divalidasi jujur
     await terapkanKonsumsiOtomatis(auth.company_id!, branchId);
     const saldo = await saldoSatuPerlengkapan(item.id, branchId);
@@ -851,7 +1021,10 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
       const body = c.req.valid("json");
       const branchId = await resolveBranchId(c);
       const item = await muatSupplyAktif(auth.company_id!, c.req.param("id"));
-      if (!item) throw new HTTPException(404, { message: "Perlengkapan tidak ditemukan" });
+      if (!item)
+        throw new HTTPException(404, {
+          message: "Perlengkapan tidak ditemukan",
+        });
       await terapkanKonsumsiOtomatis(auth.company_id!, branchId);
       const saldo = await saldoSatuPerlengkapan(item.id, branchId);
       const selisih = body.qty_fisik - saldo;
@@ -885,7 +1058,10 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
       }
       const branchId = await resolveBranchId(c);
       const item = await muatSupplyAktif(auth.company_id!, c.req.param("id"));
-      if (!item) throw new HTTPException(404, { message: "Perlengkapan tidak ditemukan" });
+      if (!item)
+        throw new HTTPException(404, {
+          message: "Perlengkapan tidak ditemukan",
+        });
       const mulai = body.mulai ?? (await tanggalPerusahaan(auth.company_id!));
       // Ganti aturan = hitung ulang jadwal dari `mulai` (kursor direset).
       // Hari yang SUDAH tercatat aman — unique index auto per hari menahannya.
@@ -915,7 +1091,10 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
           },
         });
       await terapkanKonsumsiOtomatis(auth.company_id!, branchId);
-      return c.json({ ok: true, saldo: await saldoSatuPerlengkapan(item.id, branchId) });
+      return c.json({
+        ok: true,
+        saldo: await saldoSatuPerlengkapan(item.id, branchId),
+      });
     },
   )
   // Cabang minta ke CK (stok ≤ minimum): faktur kiriman KP- terbit bila stok
@@ -925,7 +1104,8 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
     const body = c.req.valid("json");
     const branchId = await resolveBranchId(c);
     const item = await muatSupplyAktif(auth.company_id!, c.req.param("id"));
-    if (!item) throw new HTTPException(404, { message: "Perlengkapan tidak ditemukan" });
+    if (!item)
+      throw new HTTPException(404, { message: "Perlengkapan tidak ditemukan" });
     const hasil = await buatKirimanPerlengkapan({
       companyId: auth.company_id!,
       cabangId: branchId,
@@ -934,7 +1114,8 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
       userId: auth.sub,
       catatan: body.catatan ?? null,
     });
-    if ("error" in hasil) throw new HTTPException(400, { message: hasil.error });
+    if ("error" in hasil)
+      throw new HTTPException(400, { message: hasil.error });
     return c.json({ ok: true, kiriman_id: hasil.id, nomor: hasil.nomor }, 201);
   })
   .get("/:id/kartu", async (c) => {
@@ -943,7 +1124,9 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
     await terapkanKonsumsiOtomatis(auth.company_id!, branchId);
     const hariIni = await tanggalPerusahaan(auth.company_id!);
     const q = (nama: string) =>
-      c.req.query(nama) && TANGGAL_RE.test(c.req.query(nama)!) ? c.req.query(nama)! : null;
+      c.req.query(nama) && TANGGAL_RE.test(c.req.query(nama)!)
+        ? c.req.query(nama)!
+        : null;
     const sampai = q("sampai") ?? hariIni;
     const dari =
       q("dari") ??
@@ -957,6 +1140,7 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
       dari,
       sampai,
     });
-    if (!kartu) throw new HTTPException(404, { message: "Perlengkapan tidak ditemukan" });
+    if (!kartu)
+      throw new HTTPException(404, { message: "Perlengkapan tidak ditemukan" });
     return c.json(kartu);
   });

@@ -260,12 +260,15 @@ export function LaporanPage() {
                     Biaya tetap per bulan (Rp)
                   </label>
                   <input
-                    type="number"
-                    min="1"
-                    value={biayaTetap}
-                    onChange={(e) => setBiayaTetap(e.target.value)}
+                    /* Rupiah, pola rumah: digit murni di state, berkelompok di
+                       layar. BEP dipakai owner untuk memutuskan harga — salah
+                       1000× di sini menyesatkan keputusan, bukan cuma tampilan. */
+                    type="text"
+                    inputMode="numeric"
+                    value={biayaTetap ? formatAngka(Number(biayaTetap), 0) : ""}
+                    onChange={(e) => setBiayaTetap(e.target.value.replace(/\D/g, ""))}
                     className={inputClass}
-                    placeholder="mis. 15000000"
+                    placeholder="mis. 15.000.000"
                   />
                 </div>
                 <button onClick={hitungBep} disabled={!biayaTetap} className={btnPrimary}>

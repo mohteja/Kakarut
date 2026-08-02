@@ -99,6 +99,13 @@ function KartuCabang({
 }) {
   const qc = useQueryClient();
   const [edit, setEdit] = useState(false);
+  /**
+   * Nilai awal ini SEKALI PAKAI — `useState` hanya memakainya saat komponen
+   * pertama dipasang, dan kartu ini tak pernah dipasang ulang: kuncinya
+   * `branch_id` yang tetap, sementara halamannya menarik `/shift/pantau` tiap
+   * 60 detik. Jadi isinya membeku pada keadaan saat halaman dibuka, bisa
+   * berjam-jam lalu. Karena itu editor di bawah MENYEMAI ULANG saat dibuka.
+   */
   const [jamBuka, setJamBuka] = useState(row.jam_buka ?? "");
   const [jamTutup, setJamTutup] = useState(row.jam_tutup ?? "");
 
@@ -184,7 +191,27 @@ function KartuCabang({
           🕑 Riwayat shift
         </button>
         {!edit && (
-          <button type="button" onClick={() => setEdit(true)} className={btnSecondary}>
+          /*
+            SEMAI ULANG SAAT DIBUKA — bukan sekadar `setEdit(true)`.
+            Baris "Jam operasional" di atas dibaca dari `row`, jadi ia ikut
+            hasil penarikan terbaru; isian di bawah tidak. Tanpa penyemaian
+            ini keduanya bisa berbeda di layar yang sama: kartunya menampilkan
+            08:00 yang baru diatur admin lain, editornya terbuka kosong.
+            Menekan Simpan lalu mengirim yang kosong itu — dan kosong berarti
+            `jam_buka` null, yang MEMATIKAN peringatan "telat buka"/"lupa
+            tutup" cabang tersebut (`telat_buka` disyaratkan `Boolean(jam_buka)`).
+            Tombol Batal di bawah memang sudah menyemai ulang; membukanya pun
+            harus.
+          */
+          <button
+            type="button"
+            onClick={() => {
+              setJamBuka(row.jam_buka ?? "");
+              setJamTutup(row.jam_tutup ?? "");
+              setEdit(true);
+            }}
+            className={btnSecondary}
+          >
             🕐 Atur jam operasional
           </button>
         )}

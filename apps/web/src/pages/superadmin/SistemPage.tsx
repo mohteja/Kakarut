@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Card, ErrorText, PageTitle, Spinner, btnPrimary } from "../../components/ui";
+import { Card, ErrorText, PageTitle, Spinner, SpinnerAtauGalat, btnPrimary } from "../../components/ui";
 import { TabelResponsif } from "../../components/TabelResponsif";
 import { api } from "../../lib/api";
 
@@ -39,7 +39,7 @@ function InfoCard({ label, value, ok }: { label: string; value: string; ok?: boo
 
 export function SistemPage() {
   const queryClient = useQueryClient();
-  const { data: sistem, isLoading } = useQuery({
+  const { data: sistem, isLoading, error } = useQuery({
     queryKey: ["admin-sistem"],
     queryFn: () => api<SistemStatus>("/admin/sistem"),
   });
@@ -49,7 +49,7 @@ export function SistemPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin-sistem"] }),
   });
 
-  if (isLoading || !sistem) return <Spinner />;
+  if (!sistem) return <SpinnerAtauGalat error={error} apa="Status sistem" />;
 
   const m = sistem.migrations;
 

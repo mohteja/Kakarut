@@ -5098,6 +5098,26 @@ TUNAI_AWAL=$(api "$K137" GET /shift | jq --arg s "$SH137" '[.[]|select(.id==$s)]
 cek "shift tertutup: selisih kas 0 sebelum transaksi susulan" "V == 1" \
   "$(echo "$SEL_AWAL" | jq '.==0|if . then 1 else 0 end')"
 
+# Jendela susulan mensyaratkan TANGGAL BISNIS yang sama (lihat
+# `dalamToleransiSusulan` di sync/routes.ts): penjualan 00:00 WIB tidak boleh
+# masuk ke shift kemarin. Itu aturan yang benar dan memang disengaja.
+#
+# Tapi `+2 menit` di bawah MELEWATI tengah malam WIB bila blok ini kebetulan
+# berjalan pukul 23.58–23.59 — dan ke-11 pemeriksaan di bawahnya gagal karena
+# kalender, bukan karena produknya. Itu bukan kemungkinan teoretis: run CI
+# 16:58 UTC (= 23:58 WIB) gagal persis begitu.
+#
+# DITUNGGU, bukan dilewati. Melewatkan blok ini akan menghapus cakupan tepat di
+# jalur yang paling jarang tersentuh (kasir offline menjual sesudah shift-nya
+# ditutup dari perangkat lain), dan lubang cakupan yang muncul sendiri di
+# tengah malam adalah lubang yang tak pernah ada yang sadari. Menunggunya
+# paling lama ~3 menit dan hanya kena pada ~0,2% run.
+JAM_WIB=$(TZ=Asia/Jakarta date +%H%M)
+if [ "$((10#$JAM_WIB))" -ge 2357 ]; then
+  TUNGGU137=$(( $(TZ=Asia/Jakarta date -d 'tomorrow 00:00:10' +%s) - $(date +%s) ))
+  echo "   … §137 menunggu ${TUNGGU137}s melewati tengah malam WIB (jendela susulan wajib satu tanggal bisnis)"
+  sleep "$TUNGGU137"
+fi
 # waktu 2 menit ke DEPAN: masih dalam toleransi jam perangkat (5 menit) tapi
 # sudah SETELAH ditutup_pada → persis kasus lapangan "tutup 20.30, jual 20.45".
 W137=$(date -u -d '+2 minutes' +%Y-%m-%dT%H:%M:%SZ)
@@ -5200,8 +5220,35 @@ cek "absen dinilai pada tanggal WAKTU: 3 hari lalu tanpa absen → gagal 400" "V
 cek "tak ada shift terbuka setelah perintah ditolak" "V == 1" \
   "$(api "$K137" GET /shift/aktif | jq 'if .==null then 1 else 0 end')"
 
-# Buka shift offline 4 jam lalu (hari ini — kasir sudah absen di §2b).
-W138=$(date -u -d '-4 hours' +%Y-%m-%dT%H:%M:%SZ)
+# Buka shift offline BEBERAPA WAKTU lalu, tapi masih HARI INI — kasir absennya
+# ada di tanggal bisnis hari ini (§2b), dan gerbang absen dinilai pada tanggal
+# bisnis `waktu` (dibuktikan tepat di atas oleh kasus "3 hari lalu").
+#
+# Karena itu offsetnya TIDAK boleh dipatok 4 jam. Antara 00.00–03.59 WIB,
+# `now - 4 jam` mendarat di HARI KEMARIN, absennya tak ada di sana, dan
+# perintahnya ditolak 400 — 13 pemeriksaan di bawah runtuh berurutan karena
+# kalender, bukan karena produk. Itu yang terjadi pada run 17:05 UTC
+# (= 00:05 WIB); jendela rusaknya empat jam penuh setiap hari.
+#
+# Angka 4 jam sendiri tak pernah jadi inti: yang diuji adalah `dibuka_pada`
+# memakai WAKTU KEJADIAN, bukan jam sinkron. Jadi rentangnya dibuat sebesar
+# yang muat di hari ini, dengan urutan buka < jual < kedua < sekarang tetap
+# terjaga.
+WIB_MENIT=$(( 10#$(TZ=Asia/Jakarta date +%H) * 60 + 10#$(TZ=Asia/Jakarta date +%M) ))
+if [ "$WIB_MENIT" -lt 10 ]; then
+  # Beberapa menit pertama hari bisnis: skenario "dibuka lebih awal hari ini"
+  # memang belum bisa ada. Ditunggu (maks 10 menit, ~0,7% run) — bukan
+  # dilewati, karena lubang cakupan yang muncul sendiri tengah malam adalah
+  # lubang yang tak akan pernah ada yang sadari.
+  echo "   … §138 menunggu $(( (10 - WIB_MENIT) * 60 ))s: butuh jarak dari tengah malam WIB"
+  sleep $(( (10 - WIB_MENIT) * 60 ))
+  WIB_MENIT=10
+fi
+SPAN138=$(( WIB_MENIT - 2 )); [ "$SPAN138" -gt 240 ] && SPAN138=240
+OFF_BUKA138=$SPAN138                      # buka shift
+OFF_JUAL138=$(( SPAN138 * 3 / 4 ))        # penjualan offline + ambang dibuka_pada
+OFF_DUA138=$(( SPAN138 / 2 ))             # perintah shift_buka kedua
+W138=$(date -u -d "-${OFF_BUKA138} minutes" +%Y-%m-%dT%H:%M:%SZ)
 B138=$(jq -nc --arg r "$(uuid138)" --arg w "$W138" '{device_id:"dev138",commands:[{client_ref:$r,tipe:"shift_buka",waktu:$w,payload:{modal_awal:250000}}]}')
 RES138=$(api "$K137" POST /sync "$B138")
 cek "shift_buka lewat sinkron → item ok 201" "V == 1" \
@@ -5212,12 +5259,12 @@ cek "modal_awal dari payload terbawa" "V == 250000" \
   "$(echo "$RES138" | jq '.hasil[0].data.modal_awal')"
 SH138=$(echo "$RES138" | jq -r '.hasil[0].data.id')
 # INTI: dibuka_pada = waktu kejadian, BUKAN jam sinkron.
-cek "dibuka_pada memakai waktu kejadian (>3 jam lalu), bukan jam sinkron" "V == 1" \
-  "$(api "$K137" GET /shift/aktif | jq --arg n "$(date -u -d '-3 hours' +%Y-%m-%dT%H:%M:%SZ)" '(.dibuka_pada < $n)|if . then 1 else 0 end')"
+cek "dibuka_pada memakai waktu kejadian (jauh sebelum jam sinkron)" "V == 1" \
+  "$(api "$K137" GET /shift/aktif | jq --arg n "$(date -u -d "-${OFF_JUAL138} minutes" +%Y-%m-%dT%H:%M:%SZ)" '(.dibuka_pada < $n)|if . then 1 else 0 end')"
 
 # Manfaatnya: penjualan offline 3 jam lalu masuk lewat JENDELA NORMAL —
 # bukan jalur toleransi susulan.
-W138S=$(date -u -d '-3 hours' +%Y-%m-%dT%H:%M:%SZ)
+W138S=$(date -u -d "-${OFF_JUAL138} minutes" +%Y-%m-%dT%H:%M:%SZ)
 B138S=$(jq -nc --arg r "$(uuid138)" --arg w "$W138S" --arg m "$MENU138" '{commands:[{client_ref:$r,tipe:"penjualan",waktu:$w,payload:{items:[{menu_id:$m,qty:1}],metode_bayar:"tunai"}}]}')
 RES138S=$(api "$K137" POST /sync "$B138S")
 cek "penjualan 3 jam lalu → ok, masuk shift yang dibuka offline" "V == 1" \
@@ -5230,7 +5277,7 @@ cek "rekap shift terbuka menghitung penjualan itu" "V == 1" \
 # Bentrok: manajer/perangkat lain sudah membuka shift → JANGAN gagal, kembalikan
 # shift yang ada. Menggagalkannya membuat penjualan yang bersandar padanya
 # kehilangan tempat berpijak — kelas bug yang baru ditutup di §137.
-B138B=$(jq -nc --arg r "$(uuid138)" --arg w "$(date -u -d '-2 hours' +%Y-%m-%dT%H:%M:%SZ)" '{commands:[{client_ref:$r,tipe:"shift_buka",waktu:$w,payload:{modal_awal:999}}]}')
+B138B=$(jq -nc --arg r "$(uuid138)" --arg w "$(date -u -d "-${OFF_DUA138} minutes" +%Y-%m-%dT%H:%M:%SZ)" '{commands:[{client_ref:$r,tipe:"shift_buka",waktu:$w,payload:{modal_awal:999}}]}')
 RES138B=$(api "$K137" POST /sync "$B138B")
 cek "shift sudah terbuka → tetap ok (bukan gagal)" "V == 1" \
   "$(echo "$RES138B" | jq '.hasil[0].status=="ok"|if . then 1 else 0 end')"
@@ -5481,6 +5528,18 @@ cek "guard: tanpa token → 401" "V == 401" \
   "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/admin/error-log")"
 
 # Mulai dari nol supaya angka bisa diuji pasti.
+#
+# Jeda SEBELUM menghapus, dan itu bukan hiasan. Pencatatan galat sengaja tidak
+# ditunggu (`void` di `app.onError`) — bagian ini sendiri mengakuinya dua puluh
+# baris di bawah, dengan `sleep 1` sebelum MEMBACA. Yang luput: dua asersi
+# guard tepat di atas ini (403 owner-bukan-super-admin dan 401 tanpa token)
+# JUGA melahirkan catatan, lewat jalur tak-ditunggu yang sama.
+#
+# Tanpa jeda ini, salah satu tulisan itu bisa mendarat SESUDAH DELETE-nya, dan
+# "daftar kosong" melihat 1. Persis itu yang terjadi di CI: 1997 lolos, 1
+# gagal, nilainya 1 — satu penyintas, bukan pola. Hapus-lalu-baca yang balapan
+# dengan tulisannya sendiri akan gagal sesekali selamanya.
+sleep 1
 api "$SA" DELETE /admin/error-log > /dev/null
 cek "bersihkan log → daftar kosong" "V == 0" \
   "$(api "$SA" GET "/admin/error-log?hari=30&status=semua" | jq '.total')"
@@ -7423,6 +7482,72 @@ cek "refund lintas shift TIDAK menggeser rekap shift yang sudah ditutup" "abs(V)
   "$(python3 -c "print($(api "$OWNER" GET "/shift/$SHIFT160L" | jq -r '.penjualan_tunai') - $TUNAI160L)")"
 cek "shift BARU yang mencatat uang keluar laci: −9.000" "abs(V + 9000) < 0.001" \
   "$(rekap160 .penjualan_tunai)"
+
+echo
+echo "── §161 Buka kasir BERBARENGAN: satu shift, tanpa 500 ──"
+# Token: $REISS105, BUKAN $KASIR. $KASIR sudah tak berlaku sejak §105
+# me-reissue-nya (ganti password menaikkan token_version); memakainya di sini
+# membuat seluruh bagian ini balas 401 dan ujinya gagal tanpa menyentuh
+# perilaku yang sebenarnya diuji. §160 di atas juga memakai $REISS105.
+# Indeks parsial `shifts_open_per_branch_uq` (migrasi 0023) yang benar-benar
+# menjaga "satu shift terbuka per cabang" — SELECT-lalu-INSERT selalu punya
+# jeda di antaranya.
+#
+# Yang dijaga bagian ini: yang kalah balapan mendarat di hasil yang SAMA dengan
+# jalur berurutan. Untuk jalur ONLINE itu berarti 400 berpesan, bukan 500.
+# Penolakannya memang disengaja dan didokumentasikan di rutenya sendiri (kasir
+# ada di depan layar dan harus tahu shift itu bukan yang baru saja ia buka) —
+# ada pula asersi regresi terpisah yang mematoknya. Dulu yang kalah menerima
+# 23505 mentah alias 500, dan di web 500 yang BUKAN galat aplikasi memicu
+# overlay global "server sedang diperbarui": aplikasinya terlihat tumbang
+# padahal kasir cuma membuka laci. Itu bedanya, dan itu yang diuji.
+#
+# Jadi pola kode yang benar adalah 201 untuk yang menang dan 400 untuk sisanya —
+# BUKAN "ketiganya 200". Rute ini menjawab 201 saat membuat.
+api "$REISS105" POST /shift/tutup '{"uang_fisik":0}' > /dev/null 2>&1 || true
+# Prasyarat dipatok TERPISAH, jangan digabung ke asersi balapan. Bila penutupan
+# di atas diam-diam gagal, shift lama tetap terbuka dan KETIGA permintaan akan
+# dijawab 400 — bentuk kegagalan yang sama persis dengan "tak ada yang berhasil
+# membuka", padahal sebabnya jauh sebelum balapan dimulai. Dipisah supaya
+# kegagalannya menyebut dirinya sendiri.
+cek "prasyarat §161: tak ada shift terbuka sebelum balapan" "V == 0" \
+  "$(api "$REISS105" GET /shift/aktif | jq -r 'if .id then 1 else 0 end')"
+R161A=$(mktemp); R161B=$(mktemp); R161C=$(mktemp)
+for f in "$R161A" "$R161B" "$R161C"; do
+  curl -s -X POST "$BASE/api/shift/buka" -H "Authorization: Bearer $REISS105" \
+    -H 'Content-Type: application/json' -d '{"modal_awal":123000}' \
+    -w '\n%{http_code}' > "$f" &
+done
+wait
+KODE161=""; ID161=""; PESAN161=""
+for f in "$R161A" "$R161B" "$R161C"; do
+  KODE161="$KODE161$(tail -n1 "$f") "
+  BODY161=$(sed '$d' "$f")
+  ID161="$ID161$(printf '%s' "$BODY161" | jq -r '.id // empty') "
+  # Amplop galat server adalah {"error": "..."} — yang ditagih di sini adalah
+  # ADANYA amplop itu, karena persis itu yang membedakan penolakan aplikasi
+  # dari tumbangnya server di mata klien web.
+  PESAN161="$PESAN161$(printf '%s' "$BODY161" | jq -r 'if .error then 1 else 0 end') "
+done
+rm -f "$R161A" "$R161B" "$R161C"
+cek "tiga permintaan bersamaan: TAK ADA yang 5xx" "V == 1" \
+  "$(printf '%s' "$KODE161" | grep -qE '\b5[0-9][0-9]\b' && echo 0 || echo 1)"
+cek "tepat SATU yang menang (201 dibuat)" "V == 1" \
+  "$(printf '%s' "$KODE161" | tr ' ' '\n' | grep -c '^201$')"
+cek "dua yang kalah ditolak 400 BERPESAN, bukan 500" "V == 2" \
+  "$(printf '%s' "$KODE161" | tr ' ' '\n' | grep -c '^400$')"
+cek "tiap yang kalah membawa amplop galat aplikasi {error}" "V == 2" \
+  "$(printf '%s' "$PESAN161" | tr ' ' '\n' | grep -c '^1$')"
+cek "hanya SATU badan yang membawa id shift (yang menang)" "V == 1" \
+  "$(printf '%s' "$ID161" | tr ' ' '\n' | grep -v '^$' | wc -l)"
+AKTIF161=$(api "$REISS105" GET /shift/aktif)
+cek "server menyisakan tepat SATU shift terbuka di cabang ini" "V == 1" \
+  "$(printf '%s' "$AKTIF161" | jq -r 'if .id then 1 else 0 end')"
+cek "id pemenang == shift aktif di server (bukan laci kedua)" "V == 1" \
+  "$(printf '%s' "$ID161" | tr ' ' '\n' | grep -v '^$' \
+     | grep -qxF "$(printf '%s' "$AKTIF161" | jq -r '.id')" && echo 1 || echo 0)"
+cek "modal shift aktif == yang dikirim ketiganya (123.000)" "V == 123000" \
+  "$(printf '%s' "$AKTIF161" | jq -r '.modal_awal')"
 
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

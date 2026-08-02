@@ -26,6 +26,7 @@ import {
 } from "../../db/schema";
 import { tanggalDi } from "../../lib/time";
 import { requireRole, terikatCabang, type AppEnv } from "../../middleware/auth";
+import { bentrokUnik } from "../../lib/pg-galat";
 import { tanggalDalamRentang } from "../pengajuan/routes";
 
 /**
@@ -312,12 +313,6 @@ function saringCabang(v: string | undefined): string | null {
  * dua kali dengan arti berbeda: satu laporan per sesi (POST), dan satu area per
  * laporan (PATCH yang balapan) — pesannya dipilih di masing-masing pemanggil.
  */
-function bentrokUnik(err: unknown): boolean {
-  const kode = (err as { cause?: { code?: string }; code?: string })?.cause?.code ??
-    (err as { code?: string })?.code;
-  return kode === "23505";
-}
-
 export const kebersihanRoutes = new Hono<AppEnv>()
   /* ===== Master area — DIDAFTARKAN SEBELUM /:id agar tidak tertangkap olehnya ===== */
 

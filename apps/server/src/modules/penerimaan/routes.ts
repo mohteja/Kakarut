@@ -219,8 +219,12 @@ export const penerimaanRoutes = new Hono<AppEnv>()
     const branchId = semuaCabang ? null : await resolveBranchId(c);
     const perPage = Math.min(Math.max(Number(c.req.query("per_page")) || 20, 1), 100);
     const page = Math.max(Number(c.req.query("page")) || 1, 1);
-    const dari = c.req.query("dari");
-    const sampai = c.req.query("sampai");
+    // Disaring dulu: nilainya dipakai menyusun `new Date(`${dari}T00:00:00Z`)`,
+    // dan teks yang bukan tanggal menghasilkan Invalid Date yang diam-diam
+    // ikut ke pembanding — bukan penolakan yang bisa dibaca pemakainya.
+    const tglValid = (v?: string) => (v && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : undefined);
+    const dari = tglValid(c.req.query("dari"));
+    const sampai = tglValid(c.req.query("sampai"));
 
     const dasar = and(
       eq(productions.companyId, auth.company_id!),

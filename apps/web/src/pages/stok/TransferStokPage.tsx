@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { TransferStokFaktur, TransferStokSaldoRow } from "@kakarut/shared";
+import { angkaDari } from "@kakarut/shared";
 import {
   Card,
   ErrorText,
@@ -72,6 +73,28 @@ export function TransferStokPage() {
   // Cabang ASAL selalu Central Kitchen; manajemen dgn >1 CK boleh memilih.
   const asalDefault = ckSaya?.id ?? "";
   const [asalId, setAsalId] = useState(asalDefault);
+  /**
+   * `asalDefault` diturunkan dari `cabang`, dan `cabang` datang dari useQuery
+   * di BranchContext yang TIDAK menahan render. Saat halaman ini dimuat ulang
+   * langsung (F5/bookmark) dengan chunk-nya sudah hangat di cache, daftar itu
+   * masih kosong ketika komponen mount — dan nilai awal useState hanya dibaca
+   * sekali, jadi `asalId` terkunci "" selamanya.
+   *
+   * Akibatnya halaman TERLIHAT siap: `<select value="">` tak punya opsi yang
+   * cocok, jadi browser menampilkan opsi pertama ("🏭 Dapur Pusat") seolah
+   * terpilih. Tapi state-nya kosong, `enabled: !!asalId` membuat saldo tak
+   * pernah diminta, dan pilihan bahannya kosong tanpa satu pun keterangan.
+   * Yang terkunci di CK lebih buntu lagi: asalnya dirender sebagai teks mati,
+   * jadi tak ada cara memperbaikinya selain memuat ulang dan beruntung.
+   *
+   * Sengaja tidak menimpa pilihan yang SAH — manajemen dengan >1 CK yang sudah
+   * memilih CK kedua tak boleh ditarik balik ke CK pertama tiap render.
+   */
+  const asalSah = daftarCk.some((b) => b.id === asalId);
+  useEffect(() => {
+    if (asalSah || !asalDefault) return;
+    setAsalId(asalDefault);
+  }, [asalSah, asalDefault]);
   const [tujuanId, setTujuanId] = useState("");
   const [catatan, setCatatan] = useState("");
   const [baris, setBaris] = useState<BarisTransfer[]>([{ ingredient_id: "", qty: "" }]);
@@ -113,8 +136,8 @@ export function TransferStokPage() {
           tujuan_branch_id: tujuanId,
           catatan: catatan.trim() || null,
           items: baris
-            .filter((b) => b.ingredient_id && Number(b.qty) > 0)
-            .map((b) => ({ ingredient_id: b.ingredient_id, qty: Number(b.qty) })),
+            .filter((b) => b.ingredient_id && angkaDari(b.qty) > 0)
+            .map((b) => ({ ingredient_id: b.ingredient_id, qty: angkaDari(b.qty) })),
         },
       }),
     onSuccess: () => {
@@ -145,7 +168,7 @@ export function TransferStokPage() {
    * termasuk pengecualian "kirim habis" (qty = seluruh sisa).
    */
   const salahKemasan = (s: TransferStokSaldoRow | undefined, qtyTeks: string) => {
-    const qty = Number(qtyTeks);
+    const qty = angkaDari(qtyTeks);
     if (!s || !s.wajib_kelipatan || !(qty > 0)) return null;
     const sisa = tersediaDari(s);
     if (Math.abs(qty - sisa) < 1e-6) return null; // kirim habis
@@ -154,10 +177,29 @@ export function TransferStokPage() {
     return { bawah: Math.floor(kemasan) * s.isi, atas: Math.ceil(kemasan) * s.isi, sisa };
   };
 
-  const barisTerisi = baris.filter((b) => b.ingredient_id && Number(b.qty) > 0);
+  const barisTerisi = baris.filter((b) => b.ingredient_id && angkaDari(b.qty) > 0);
+  /**
+   * Baris berbahan yang qty-nya SUDAH DIISI tapi tidak akan ikut terkirim.
+   *
+   * Halaman ini sudah cermat menolak apa yang server akan tolak — `adaQtyLebih`
+   * dan `adaSalahKemasan` sengaja mencerminkan aturan server "supaya form tak
+   * pernah menjanjikan sesuatu yang nanti ditolak". Celahnya justru pada yang
+   * TIDAK ditolak server: NaN gagal `angkaDari(b.qty) > 0`, jadi barisnya
+   * dibuang di sisi klien — hilang dari `barisTerisi` sekaligus dari `items`
+   * yang dikirim. Selama satu baris lain benar, `bisaKirim` tetap true dan
+   * transfernya berangkat TANPA bahan itu; asal mengira sudah mengirim, tujuan
+   * tak pernah menerimanya, dan tak ada galat di mana pun.
+   *
+   * Nol dan minus terjaring lewat `!(… > 0)` yang sama: nasib barisnya persis
+   * sama, dibuang diam-diam.
+   */
+  const qtyTerbuang = baris
+    .filter((b) => b.ingredient_id && b.qty.trim() !== "" && !(angkaDari(b.qty) > 0))
+    .map((b) => saldoById.get(b.ingredient_id)?.nama)
+    .filter((n): n is string => !!n);
   const adaQtyLebih = baris.some((b) => {
     const s = saldoById.get(b.ingredient_id);
-    return s != null && Number(b.qty) > tersediaDari(s) + 1e-9;
+    return s != null && angkaDari(b.qty) > tersediaDari(s) + 1e-9;
   });
   const adaSalahKemasan = baris.some((b) => salahKemasan(saldoById.get(b.ingredient_id), b.qty));
   const bisaKirim =
@@ -165,6 +207,7 @@ export function TransferStokPage() {
     !!tujuanId &&
     asalId !== tujuanId &&
     barisTerisi.length > 0 &&
+    qtyTerbuang.length === 0 &&
     !adaQtyLebih &&
     !adaSalahKemasan;
 
@@ -303,7 +346,7 @@ export function TransferStokPage() {
 
             const inputQty = (i: number, b: BarisTransfer, lebih: boolean, lebar: string) => (
               <input
-                type="number"
+                type="text"
                 min="0.0001"
                 step="any"
                 inputMode="decimal"
@@ -386,7 +429,7 @@ export function TransferStokPage() {
                 <div className="mt-4 space-y-3 sm:hidden">
                   {baris.map((b, i) => {
                     const s = saldoById.get(b.ingredient_id);
-                    const lebih = s != null && Number(b.qty) > tersediaDari(s) + 1e-9;
+                    const lebih = s != null && angkaDari(b.qty) > tersediaDari(s) + 1e-9;
                     return (
                       <div key={i} className="rounded-xl border border-stone-200 p-3">
                         {pilihBahan(i, b)}
@@ -434,7 +477,7 @@ export function TransferStokPage() {
                     <tbody className="divide-y divide-stone-100">
                       {baris.map((b, i) => {
                         const s = saldoById.get(b.ingredient_id);
-                        const lebih = s != null && Number(b.qty) > tersediaDari(s) + 1e-9;
+                        const lebih = s != null && angkaDari(b.qty) > tersediaDari(s) + 1e-9;
                         return (
                           <tr key={i}>
                             <td className="py-2 pr-2">{pilihBahan(i, b)}</td>
@@ -492,6 +535,12 @@ export function TransferStokPage() {
           {adaQtyLebih && (
             <p className="mt-2 text-sm font-medium text-red-600">
               Ada jumlah kirim melebihi stok tersedia — perbaiki dulu.
+            </p>
+          )}
+          {qtyTerbuang.length > 0 && (
+            <p className="mt-2 text-sm font-medium text-red-600">
+              Jumlah pada <b>{qtyTerbuang.join(", ")}</b> belum terbaca sebagai angka lebih dari
+              0 — tulis seperti <b>3</b> atau <b>1,5</b>. Tanpa itu bahannya tidak ikut terkirim.
             </p>
           )}
           <div className="mt-3 flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:gap-3">

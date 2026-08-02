@@ -185,6 +185,7 @@ export function RekomendasiBeliPage() {
                 <input
                   type="date"
                   value={dari}
+                  max={sampai}
                   onChange={(e) => setDari(e.target.value)}
                   className={inputClass}
                 />
@@ -194,6 +195,7 @@ export function RekomendasiBeliPage() {
                 <input
                   type="date"
                   value={sampai}
+                  min={dari}
                   onChange={(e) => setSampai(e.target.value)}
                   className={inputClass}
                 />
@@ -234,6 +236,7 @@ export function RekomendasiBeliPage() {
                 <input
                   type="date"
                   value={pakaiDari}
+                  max={pakaiSampai}
                   onChange={(e) => setPakaiDari(e.target.value)}
                   className={inputClass}
                 />
@@ -243,6 +246,7 @@ export function RekomendasiBeliPage() {
                 <input
                   type="date"
                   value={pakaiSampai}
+                  min={pakaiDari}
                   onChange={(e) => setPakaiSampai(e.target.value)}
                   className={inputClass}
                 />

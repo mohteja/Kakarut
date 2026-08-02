@@ -6,6 +6,7 @@ import {
   ErrorText,
   PageTitle,
   Spinner,
+  SpinnerAtauGalat,
   btnPrimary,
   btnSecondary,
   inputClass,
@@ -38,7 +39,7 @@ interface FormState {
 export function SmtpPage() {
   const qc = useQueryClient();
   const { auth } = useAuth();
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey: ["admin-smtp"],
     queryFn: () => api<SmtpSettingsDto>("/admin/sistem/smtp"),
   });
@@ -95,7 +96,10 @@ export function SmtpPage() {
       }),
   });
 
-  if (isLoading || !data || !form) return <Spinner />;
+  if (!data) return <SpinnerAtauGalat error={error} apa="Pengaturan SMTP" />;
+  // `form` di-seed dari `data` lewat useEffect: satu render setelahnya.
+  // Di sini `data` sudah pasti ada, jadi ini penantian yang memang berakhir.
+  if (!form) return <Spinner />;
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();

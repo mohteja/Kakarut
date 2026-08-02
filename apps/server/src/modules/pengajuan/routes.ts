@@ -124,17 +124,33 @@ async function ambilSatu(id: string, companyId: string): Promise<PengajuanRow> {
   return toDto(row);
 }
 
+/**
+ * Haruskah daftar ini dipersempit ke milik pemanggil sendiri?
+ *
+ * Dua sebab yang berbeda, dan keduanya harus ada:
+ *
+ * 1. Peran terkunci cabang (kasir/tim/kitchen/bar) tak pernah boleh melihat
+ *    milik orang lain — pengajuan memuat alasan pribadi (mis. sakit, surat
+ *    dokter), jadi tak dibagikan ke sesama karyawan seperti daftar absensi.
+ * 2. `?saya=1` — PEMANGGILNYA yang meminta, berlaku untuk SEMUA peran termasuk
+ *    owner/admin. Tanpa ini, satu-satunya daftar yang tersedia bagi mereka
+ *    adalah daftar SEPERUSAHAAN, dan layar "Pengajuan saya" di halaman Absen
+ *    memakainya apa adanya: pengajuan seluruh karyawan tampil sebagai milik
+ *    sendiri, lengkap dengan tombol Batalkan yang memang dituruti server untuk
+ *    manajemen. Owner yang membatalkan "pengajuannya" bisa membatalkan
+ *    pengajuan orang lain tanpa satu pun petunjuk bahwa itu bukan miliknya.
+ */
+export function hanyaMilikSendiri(role: string | null, saya: string | undefined): boolean {
+  return saya === "1" || terikatCabang(role);
+}
+
 export const pengajuanRoutes = new Hono<AppEnv>()
-  /**
-   * Daftar pengajuan. Peran terkunci cabang (kasir/tim/kitchen/bar) SELALU
-   * hanya melihat miliknya sendiri — pengajuan memuat alasan pribadi (mis.
-   * sakit), jadi tak dibagikan ke sesama karyawan seperti daftar absensi.
-   */
+  /** Daftar pengajuan — lihat `hanyaMilikSendiri` untuk aturan cakupannya. */
   .get("/", async (c) => {
     const auth = c.get("auth");
     const syarat = [eq(leaveRequests.companyId, auth.company_id!)];
 
-    if (terikatCabang(auth.role)) {
+    if (hanyaMilikSendiri(auth.role, c.req.query("saya"))) {
       syarat.push(eq(leaveRequests.userId, auth.sub));
     } else {
       const branchId = c.req.query("branch_id");

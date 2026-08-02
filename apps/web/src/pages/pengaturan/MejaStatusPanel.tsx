@@ -43,8 +43,24 @@ export function labelStatus(s: MejaStatusDto): string {
   return `Belum bayar · ${s.bill_terbuka} pesanan`;
 }
 
+/**
+ * Warna meja yang statusnya TIDAK diketahui — abu-abu, bukan hijau.
+ *
+ * `GET /meja/status` mengembalikan satu baris untuk SETIAP meja dine-in cabang
+ * (LEFT JOIN dari tabel meja, lihat `okupansi.ts`). Jadi status yang hilang
+ * tidak pernah berarti "meja ini kosong"; ia hanya bisa berarti bacaannya
+ * gagal atau belum tiba.
+ */
+export const KELAS_TAK_DIKETAHUI = "border-stone-300 bg-stone-100 text-stone-500";
+
 export function kelasStatus(s: MejaStatusDto | undefined): string {
-  if (!s || s.status === "kosong") return "border-green-300 bg-green-50 text-green-800";
+  // Dulu `!s` ikut dijawab hijau bersama "kosong". Hijau di layar ini punya
+  // arti yang dicetak di legendanya sendiri: "siap ditempati". Menjawab hijau
+  // untuk status yang tak diketahui membuat SATU permintaan gagal mengubah
+  // seluruh denah jadi hijau — semua meja tampak bebas, termasuk yang masih
+  // menunggak bayar, dan tak ada satu pun tanda bahwa layarnya sedang buta.
+  if (!s) return KELAS_TAK_DIKETAHUI;
+  if (s.status === "kosong") return "border-green-300 bg-green-50 text-green-800";
   if (s.lunas_masih_duduk) return "border-amber-400 bg-amber-50 text-amber-800";
   return "border-red-400 bg-red-50 text-red-800";
 }
@@ -70,7 +86,11 @@ export function KosongkanMejaModal({
   const [galat, setGalat] = useState<string | null>(null);
   const [lihatRiwayat, setLihatRiwayat] = useState(false);
 
-  const { data: riwayat } = useQuery({
+  const {
+    data: riwayat,
+    isLoading: riwayatMuat,
+    error: riwayatGagal,
+  } = useQuery({
     queryKey: ["meja-log", meja.meja_id],
     queryFn: () => api<MejaKosongLogRow[]>(`/meja/${meja.meja_id}/log`),
     enabled: lihatRiwayat,
@@ -162,7 +182,15 @@ export function KosongkanMejaModal({
 
       {lihatRiwayat && (
         <div className="mt-3 border-t border-stone-100 pt-3">
-          {!riwayat ? (
+          {/* Cabang GAGAL didahulukan. Dulu syaratnya `!riwayat`, dan `riwayat`
+              tetap undefined saat bacaannya gagal — spinner berputar selamanya,
+              tanpa pernah menyebut ada yang salah. */}
+          {riwayatGagal ? (
+            <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+              Riwayat meja gagal dimuat
+              {riwayatGagal instanceof Error ? `: ${riwayatGagal.message}` : ""}.
+            </p>
+          ) : riwayatMuat || !riwayat ? (
             <Spinner />
           ) : riwayat.length === 0 ? (
             <p className="py-3 text-center text-sm text-stone-400">

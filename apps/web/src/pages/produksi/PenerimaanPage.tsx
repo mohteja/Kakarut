@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import type { KonfirmasiStatus } from "@kakarut/shared";
+import { angkaDari, teksAngka } from "@kakarut/shared";
 import {
   Card,
   ErrorText,
@@ -156,6 +157,30 @@ export function PenerimaanPage() {
     setAlasan("");
   }
 
+  /**
+   * Baris yang qty diterimanya tak terbaca sebagai angka ≥ 0.
+   *
+   * Di layar ini salah ketik tidak menghasilkan angka yang salah — ia
+   * menghasilkan HASIL YANG BERLAWANAN. Bentuk lamanya `angkaDari(...) || 0`,
+   * dan nol punya arti tegas yang ditulis di dua tempat sekaligus: label di
+   * bawah tabel ("0 = baris ditolak") dan server, yang menyetel baris ber-qty 0
+   * jadi status "ditolak" beralasan "Barang tidak diterima". Jadi yang mengetik
+   * "5 kg" — bermaksud "saya menerima sebanyak ini" — justru menolak barangnya,
+   * dan stoknya tak pernah masuk.
+   *
+   * `angkaDari` sendiri sudah melarang bentuk itu, dengan alasan yang sama
+   * persis: "Sengaja TIDAK memulangkan 0: 0 adalah angka yang sah dan bermakna
+   * di stok, dan menjadikannya nilai kegagalan membuat salah ketik tak bisa
+   * dibedakan dari 'memang nol'."
+   *
+   * Kotak KOSONG ikut ditahan, bukan dianggap "pakai bawaan": kotaknya sudah
+   * terisi qty kiriman sejak awal, jadi mengosongkannya adalah tindakan — dan
+   * hari ini tindakan itu berarti menolak. Yang mau menolak mengetik 0.
+   */
+  function qtyTakTerbaca(g: KirimanGroup) {
+    return g.rows.filter((r) => !(angkaDari(qtyDraft[r.id] ?? r.qty) >= 0));
+  }
+
   const terima = useMutation({
     mutationFn: (fakturId: string) =>
       api(`/penerimaan/${fakturId}/terima`, { method: "POST" }),
@@ -168,7 +193,13 @@ export function PenerimaanPage() {
         body: {
           items: g.rows.map((r) => ({
             id: r.id,
-            qty_diterima: Number(qtyDraft[r.id] ?? r.qty) || 0,
+            // TANPA `|| 0`. Nol di sini bukan nilai cadangan — ia PERINTAH:
+            // server menyetel baris ber-qty 0 jadi status "ditolak" beralasan
+            // "Barang tidak diterima". `qtyTakTerbaca` di bawah menahannya
+            // sebelum sampai sini; kalaupun lolos, JSON `null` ditolak zod
+            // dengan berisik, dan berisik jauh lebih baik daripada penolakan
+            // barang yang diam-diam.
+            qty_diterima: angkaDari(qtyDraft[r.id] ?? r.qty),
           })),
           alasan: alasan.trim() || null,
         },
@@ -277,11 +308,14 @@ export function PenerimaanPage() {
                         {modeSebagian && (
                           <td className={`${tdClass} text-right`}>
                             <input
-                              type="number"
-                              min="0"
-                              max={r.qty}
-                              step="any"
-                              value={qtyDraft[r.id] ?? String(r.qty)}
+                              /* Koma adalah pemisah desimal bahasa Indonesia, dan
+                                 `type="number"` MEMBUANG-nya saat diketik: "1,5"
+                                 tersimpan "15" dengan `badInput` false — tak ada
+                                 satu pun tanda di layar. `angkaDari` membaca
+                                 koma maupun titik ribuan. */
+                              type="text"
+                              inputMode="decimal"
+                              value={qtyDraft[r.id] ?? teksAngka(r.qty)}
                               onChange={(e) =>
                                 setQtyDraft((p) => ({ ...p, [r.id]: e.target.value }))
                               }
@@ -319,12 +353,21 @@ export function PenerimaanPage() {
                     </>
                   ) : modeSebagian ? (
                     <>
-                      <span className="mr-auto text-xs text-stone-500">
-                        Isi jumlah yang benar-benar diterima (0 = baris ditolak).
-                      </span>
+                      {qtyTakTerbaca(g).length > 0 ? (
+                        <span className="mr-auto rounded-lg bg-red-50 px-2 py-1 text-xs font-medium text-red-800">
+                          Jumlah tidak terbaca pada{" "}
+                          <b>{qtyTakTerbaca(g).map((r) => r.bahan).join(", ")}</b> — tulis
+                          seperti <b>5</b> atau <b>1,5</b>. Isi <b>0</b> bila barisnya memang
+                          tidak diterima.
+                        </span>
+                      ) : (
+                        <span className="mr-auto text-xs text-stone-500">
+                          Isi jumlah yang benar-benar diterima (0 = baris ditolak).
+                        </span>
+                      )}
                       <button
                         onClick={() => terimaSebagian.mutate(g)}
-                        disabled={terimaSebagian.isPending}
+                        disabled={terimaSebagian.isPending || qtyTakTerbaca(g).length > 0}
                         className={btnPrimary}
                       >
                         {terimaSebagian.isPending ? "Menyimpan…" : "Simpan Penerimaan"}

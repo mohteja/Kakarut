@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import type { PerlengkapanRowDto } from "@kakarut/shared";
+import { angkaDari, teksAngka } from "@kakarut/shared";
 import { ErrorText, Spinner, btnPrimary, btnSecondary } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { useBranch, useCabangData } from "../../context/BranchContext";
@@ -94,12 +95,29 @@ export function OpnamePerlengkapanPage() {
   );
   const semuaTercentang = tampilProduk.length > 0 && tampilProduk.every((r) => dipilih[r.id]);
   const terisi = produkTerpilih.filter((r) => fisik[r.id] !== undefined && fisik[r.id] !== "").length;
+  /**
+   * Angka yang tak terbaca DITAHAN DI SINI, bukan dibiarkan ke server.
+   *
+   * Alasannya sudah ditulis di `OpnamePage` — kembarannya untuk bahan baku —
+   * dan berlaku sama persis di sini: penyaringnya cuma `!== ""`, jadi salah
+   * ketik lolos jadi NaN, `JSON.stringify` mengubahnya jadi `null`, dan zod
+   * server (`qty_fisik: z.number()`) membalas galat yang menyebut INDEKS
+   * larik, bukan nama barangnya. Pada opname berisi puluhan baris, satu salah
+   * ketik menolak seluruh kiriman tanpa memberi tahu baris mana.
+   *
+   * Yang menulis penjaga itu memikirkannya untuk bahan baku dan tak menyeberang
+   * ke perlengkapan; halamannya berpasangan, jadi penjaganya ikut berpasangan.
+   */
+  const salahKetik = produkTerpilih.filter(
+    (r) =>
+      fisik[r.id] !== undefined && fisik[r.id] !== "" && Number.isNaN(angkaDari(fisik[r.id])),
+  );
 
   const simpan = useMutation({
     mutationFn: () => {
       const items = produkTerpilih
         .filter((r) => fisik[r.id] !== undefined && fisik[r.id] !== "")
-        .map((r) => ({ supply_id: r.id, qty_fisik: Number(fisik[r.id]) }));
+        .map((r) => ({ supply_id: r.id, qty_fisik: angkaDari(fisik[r.id]) }));
       return api<{ session_id: string | null; nomor: string | null; jumlah_selisih: number }>(
         `/perlengkapan/opname${branchQuery}`,
         { method: "POST", body: { items, catatan: catatan.trim() || null } },
@@ -113,14 +131,40 @@ export function OpnamePerlengkapanPage() {
       setBucket(null);
       setCatatan("");
       setLangkah("lokasi");
-      queryClient.invalidateQueries({ queryKey: ["perlengkapan"] });
+      /**
+       * Menyimpan opname MENULIS mutasi, bukan cuma mengajukan selisih.
+       *
+       * `POST /perlengkapan/opname` memanggil `terapkanKonsumsiOtomatis` lebih
+       * dulu — "jatah otomatis dipotong dulu agar saldo sistem yang
+       * dibandingkan jujur" — dan itu menyisipkan baris `supply_mutations`
+       * ber-status `disetujui` (bawaan kolomnya). Baris itu langsung terpakai:
+       * kartu perlengkapan menyaring `status = 'disetujui'`, dan
+       * `/perlengkapan/master` juga memotong jatah otomatis sebelum menghitung
+       * sebarannya. Sesinya sendiri muncul di Riwayat Opname — yang tautannya
+       * ada di header halaman ini, jadi klik paling wajar sesudah menyimpan
+       * mendarat tepat di daftar yang belum tahu.
+       *
+       * Himpunannya sengaja SAMA PERSIS dengan yang disegarkan saat sesi ini
+       * di-ACC/ditolak di `OpnameRiwayatPage`: kedua peristiwa menggerakkan
+       * angka yang sama, jadi keduanya harus menyegarkan layar yang sama.
+       * Kembarannya untuk bahan baku (`OpnamePage`) sudah begitu sejak awal —
+       * ia menyertakan kartu & riwayat; sisi perlengkapan yang tertinggal.
+       */
+      for (const k of [
+        "perlengkapan",
+        "kartu-perlengkapan",
+        "perlengkapan-opname",
+        "perlengkapan-master",
+      ]) {
+        queryClient.invalidateQueries({ queryKey: [k] });
+      }
     },
   });
 
   function selisihDari(r: PerlengkapanRowDto): number | null {
     const v = fisik[r.id];
     if (v === undefined || v === "") return null;
-    return Number(v) - r.saldo;
+    return angkaDari(v) - r.saldo;
   }
 
   function kembali() {
@@ -325,7 +369,7 @@ export function OpnamePerlengkapanPage() {
                     </div>
                     <div className="mt-2 flex items-center gap-2">
                       <input
-                        type="number"
+                        type="text"
                         inputMode="decimal"
                         min="0"
                         step="any"
@@ -335,7 +379,7 @@ export function OpnamePerlengkapanPage() {
                         className="h-12 flex-1 rounded-lg border border-stone-300 px-3 text-lg font-semibold focus:border-orange-500 focus:outline-none"
                       />
                       <button
-                        onClick={() => setFisik({ ...fisik, [r.id]: String(r.saldo) })}
+                        onClick={() => setFisik({ ...fisik, [r.id]: teksAngka(r.saldo) })}
                         className="h-12 shrink-0 rounded-lg border border-stone-300 px-3 text-sm font-medium text-stone-600"
                         title="Isi sama dengan sistem"
                       >
@@ -347,17 +391,25 @@ export function OpnamePerlengkapanPage() {
               })}
             </div>
           </main>
-          <div className="fixed inset-x-0 bottom-0 flex gap-2 border-t border-stone-200 bg-white p-3">
+          <div className="fixed inset-x-0 bottom-0 border-t border-stone-200 bg-white p-3">
+            {salahKetik.length > 0 && (
+              <div className="mb-2 rounded-lg bg-red-50 px-3 py-1.5 text-center text-xs font-medium text-red-800">
+                Angka tidak terbaca pada <b>{salahKetik.map((r) => r.nama).join(", ")}</b> — tulis
+                seperti <b>470</b> atau <b>1,5</b>.
+              </div>
+            )}
+            <div className="flex gap-2">
             <button onClick={() => setLangkah("produk")} className={`${btnSecondary} shrink-0`}>
               ← Produk
             </button>
             <button
               onClick={() => setKonfirmasi(true)}
-              disabled={terisi === 0}
+              disabled={terisi === 0 || salahKetik.length > 0}
               className={`${btnPrimary} flex-1 py-3 text-base`}
             >
               Simpan Opname ({terisi} dihitung)
             </button>
+            </div>
           </div>
         </>
       )}
@@ -394,7 +446,7 @@ export function OpnamePerlengkapanPage() {
                               : "text-red-600"
                         }
                       >
-                        {formatAngka(r.saldo)} → {formatAngka(Number(fisik[r.id]))}
+                        {formatAngka(r.saldo)} → {formatAngka(angkaDari(fisik[r.id]))}
                         {Math.abs(sel) >= 1e-9 && ` (${sel > 0 ? "+" : ""}${formatAngka(sel)})`}
                       </span>
                     </div>

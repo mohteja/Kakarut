@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import type { BahanDto, BahanResepRow, JenisPengadaan } from "@kakarut/shared";
+import { angkaDari } from "@kakarut/shared";
 import {
   Card,
   ErrorText,
@@ -360,13 +361,13 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
           no_faktur: noFaktur || null,
           catatan: catatan || null,
           items: items
-            .filter((it) => it.ingredient_id && Number(it.jumlah) > 0)
+            .filter((it) => it.ingredient_id && angkaDari(it.jumlah) > 0)
             .map((it) => ({
               ingredient_id: it.ingredient_id,
               mode: it.mode,
-              jumlah: Number(it.jumlah),
+              jumlah: angkaDari(it.jumlah),
               storage_location_id: it.storage_location_id || null,
-              ...(tipe === "beli" && it.total_harga ? { total_harga: Number(it.total_harga) } : {}),
+              ...(tipe === "beli" && it.total_harga ? { total_harga: angkaDari(it.total_harga) } : {}),
             })),
         },
       }),
@@ -387,19 +388,46 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
   function hitungBaris(it: ItemForm) {
     const b = bahanJalur.find((x) => x.id === it.ingredient_id);
     const qtyPcs =
-      b && Number(it.jumlah) > 0
+      b && angkaDari(it.jumlah) > 0
         ? it.mode === "batch"
-          ? Number(it.jumlah) * b.isi
-          : Number(it.jumlah)
+          ? angkaDari(it.jumlah) * b.isi
+          : angkaDari(it.jumlah)
         : 0;
     const estimasi = b && qtyPcs > 0 ? Math.round((qtyPcs / b.isi) * b.harga_beli) : null;
     return { b, qtyPcs, estimasi };
   }
 
-  const itemValid = items.filter((it) => it.ingredient_id && Number(it.jumlah) > 0);
+  const itemValid = items.filter((it) => it.ingredient_id && angkaDari(it.jumlah) > 0);
+  /**
+   * Baris yang SUDAH DIISI orang tapi tidak akan ikut tersimpan.
+   *
+   * Penyaring kiriman di atas (`angkaDari(it.jumlah) > 0`) memakai
+   * perbandingan, bukan `!== ""` seperti empat halaman kembarnya
+   * (`StokAwalPage`, `OpnamePage`, `OpnamePerlengkapanPage`,
+   * `StokPerlengkapanTab`) — dan itu membuat kegagalannya jauh lebih sunyi.
+   * Di sana salah ketik jadi NaN, lolos ke server, lalu ditolak zod dengan
+   * galat yang menyebut indeks larik; berisik, tapi setidaknya ada galat.
+   * Di sini NaN gagal `> 0`, jadi barisnya dibuang DI SISI KLIEN: hilang dari
+   * `itemValid` sekaligus dari `items` yang dikirim. Selama masih ada satu
+   * baris yang benar, fakturnya tersimpan — tanpa galat, tanpa peringatan,
+   * tanpa bahan itu.
+   *
+   * Kolomnya memang mengundang salah ketik, dan itu disengaja: komentar di
+   * atas `<input>` menjelaskan kenapa ia `type="text"` — `type="number"`
+   * MEMBUANG koma desimal Indonesia diam-diam. Membiarkannya teks adalah
+   * pilihan yang benar; yang belum ada cuma separuh keduanya, yaitu menahan
+   * teks yang tak terbaca. "2 kg", "2kg", "dua", dan "1/2" semuanya NaN.
+   *
+   * Nol dan minus ikut dijaring lewat `!(… > 0)` yang sama: keduanya terbaca
+   * sebagai angka, tapi nasib barisnya persis sama — dibuang diam-diam.
+   */
+  const jumlahTerbuang = items
+    .filter((it) => it.ingredient_id && it.jumlah.trim() !== "" && !(angkaDari(it.jumlah) > 0))
+    .map((it) => bahanJalur.find((x) => x.id === it.ingredient_id)?.nama)
+    .filter((n): n is string => !!n);
   const totalFaktur = items.reduce((a, it) => {
     const { estimasi } = hitungBaris(it);
-    const harga = it.total_harga ? Number(it.total_harga) : (estimasi ?? 0);
+    const harga = it.total_harga ? angkaDari(it.total_harga) : (estimasi ?? 0);
     return a + harga;
   }, 0);
 
@@ -426,7 +454,7 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
         byNama.set(key, g);
       }
       g.subtotal += estimasi ?? 0;
-      g.baris.push({ b, jumlah: Number(it.jumlah), qtyPcs, estimasi });
+      g.baris.push({ b, jumlah: angkaDari(it.jumlah), qtyPcs, estimasi });
     }
     return [...byNama.values()].sort((a, z) =>
       a.nama === null ? 1 : z.nama === null ? -1 : a.nama.localeCompare(z.nama),
@@ -676,9 +704,13 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
                       Jumlah
                     </label>
                     <input
-                      type="number"
-                      min="0.01"
-                      step="any"
+                      /* Koma adalah pemisah desimal bahasa Indonesia, dan
+                                 `type="number"` MEMBUANG-nya saat diketik: "1,5"
+                                 tersimpan "15" dengan `badInput` false — tak ada
+                                 satu pun tanda di layar. `angkaDari` membaca
+                                 koma maupun titik ribuan. */
+                      type="text"
+                      inputMode="decimal"
                       value={it.jumlah}
                       onChange={(e) => ubahItem(i, { jumlah: e.target.value })}
                       className={`${inputClass} md:text-right`}
@@ -702,7 +734,7 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
                       <div className="py-2">
                         <BahanKurangCell
                           ingredientId={it.ingredient_id}
-                          jumlahBatch={Number(it.jumlah) || 0}
+                          jumlahBatch={angkaDari(it.jumlah) || 0}
                           saldoByIng={saldoByIng}
                         />
                       </div>
@@ -722,9 +754,9 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
                   </div>
                 </div>
                 <div className="mt-1 flex items-center justify-between">
-                  {b && it.mode === "batch" && b.isi !== 1 && Number(it.jumlah) > 0 ? (
+                  {b && it.mode === "batch" && b.isi !== 1 && angkaDari(it.jumlah) > 0 ? (
                     <div className="text-xs text-orange-700">
-                      {formatAngka(Number(it.jumlah))}{" "}
+                      {formatAngka(angkaDari(it.jumlah))}{" "}
                       {tipe === "beli" ? (b.satuan_beli ?? "kemasan") : "batch"} ×{" "}
                       {formatAngka(b.isi)} ={" "}
                       <b>
@@ -846,6 +878,12 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
         )}
       </div>
 
+      {jumlahTerbuang.length > 0 && (
+        <div className="mt-3 rounded-lg bg-red-50 px-3 py-1.5 text-xs font-medium text-red-800">
+          Jumlah pada <b>{jumlahTerbuang.join(", ")}</b> belum terbaca sebagai angka lebih dari
+          0 — tulis seperti <b>3</b> atau <b>1,5</b>. Tanpa itu barisnya tidak ikut tersimpan.
+        </div>
+      )}
       <ErrorText error={simpan.error} />
       <div className="mt-3 flex justify-end gap-2">
         <button type="button" onClick={() => navigate(endpoint)} className={btnSecondary}>
@@ -854,7 +892,7 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
         <button
           type="button"
           onClick={() => simpan.mutate()}
-          disabled={itemValid.length === 0 || simpan.isPending}
+          disabled={itemValid.length === 0 || jumlahTerbuang.length > 0 || simpan.isPending}
           className={btnPrimary}
         >
           {simpan.isPending ? "Menyimpan…" : "Simpan Faktur"}

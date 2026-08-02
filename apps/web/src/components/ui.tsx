@@ -94,6 +94,47 @@ export function ErrorText({ error }: { error: unknown }) {
   return <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{msg}</div>;
 }
 
+/**
+ * Pengganti `<Spinner />` untuk tempat yang menunggu SATU bacaan: berputar
+ * selagi dimuat, tapi berhenti dan menjelaskan begitu bacaannya gagal.
+ *
+ * Kenapa ada: pola `{isLoading || !data ? <Spinner /> : …}` tersebar di banyak
+ * modal, dan semuanya salah dengan cara yang sama. Di React Query v5 sebuah
+ * bacaan yang gagal berakhir dengan `isLoading === false` DAN `data ===
+ * undefined` — jadi syaratnya tetap benar dan spinnernya berputar selamanya.
+ * Layarnya tak pernah menyebut ada yang salah, dan tak ada apa pun yang bisa
+ * ditekan; satu-satunya jalan keluar adalah menutup modalnya dan menebak.
+ *
+ * `apa` dipakai untuk menamai yang gagal ("Detail opname", "Riwayat meja") —
+ * di dalam modal, "gagal dimuat" tanpa subjek tak memberi tahu apa pun tentang
+ * apa yang hilang.
+ */
+export function SpinnerAtauGalat({
+  error,
+  apa,
+  onCoba,
+}: {
+  error: unknown;
+  apa?: string;
+  /** Tombol coba-lagi. Wajib diisi di layar yang tak punya jalan keluar lain. */
+  onCoba?: () => void;
+}) {
+  if (!error) return <Spinner />;
+  const msg = error instanceof Error ? error.message : String(error);
+  return (
+    <div className="rounded-lg bg-red-50 px-3 py-4 text-center text-sm text-red-700">
+      <div>
+        <b>{apa ?? "Data"} gagal dimuat.</b> {msg}
+      </div>
+      {onCoba && (
+        <button type="button" onClick={onCoba} className={`mt-3 ${btnSecondary}`}>
+          Coba lagi
+        </button>
+      )}
+    </div>
+  );
+}
+
 export const inputClass =
   "w-full rounded-lg border border-stone-300 px-3 py-2 text-sm focus:border-orange-500 focus:outline-none";
 export const btnPrimary =

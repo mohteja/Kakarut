@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import type { StokRowDto } from "@kakarut/shared";
+import { angkaDari, teksAngka } from "@kakarut/shared";
 import { ErrorText, btnPrimary, btnSecondary } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { useBranch, useCabangData } from "../../context/BranchContext";
@@ -52,7 +53,7 @@ export function StokAwalPage() {
     setTanggal(tersimpan.tanggal || hariIniWIB());
     if (tersimpan.items.length > 0) {
       const map: Record<string, string> = {};
-      for (const it of tersimpan.items) map[it.ingredient_id] = String(it.qty);
+      for (const it of tersimpan.items) map[it.ingredient_id] = teksAngka(it.qty);
       setAwal(map);
     }
   }, [tersimpan]);
@@ -76,13 +77,20 @@ export function StokAwalPage() {
     () => new Map((stok ?? []).map((s) => [s.ingredient_id, s.nama])),
     [stok],
   );
-  const terisi = Object.values(awal).filter((v) => v !== "").length;
+  const diisi = Object.entries(awal).filter(([, v]) => v !== "");
+  const terisi = diisi.length;
+  // Isian TERISI tapi tak terbaca sebagai angka. Tanpa pagar ini ia lolos
+  // penyaring `!== ""`, jadi NaN, lalu `JSON.stringify` mengubahnya jadi `null`
+  // dan server membalas galat validasi yang tak menyebut bahan mana. Saldo
+  // pembuka mengunci pembukuan per tanggal — lebih baik ditahan di sini,
+  // dengan nama bahannya disebut. (Pagar kembar ada di Opname.)
+  const salahKetik = diisi.filter(([, v]) => Number.isNaN(angkaDari(v)));
 
   const simpan = useMutation({
     mutationFn: () => {
       const items = Object.entries(awal)
         .filter(([, v]) => v !== "")
-        .map(([ingredient_id, v]) => ({ ingredient_id, qty: Number(v) }));
+        .map(([ingredient_id, v]) => ({ ingredient_id, qty: angkaDari(v) }));
       return api<{ ok: true; jumlah: number; tanggal: string }>("/stok/awal", {
         method: "POST",
         body: { ...(branchId ? { branch_id: branchId } : {}), tanggal, items },
@@ -91,9 +99,19 @@ export function StokAwalPage() {
     onSuccess: () => {
       setKonfirmasi(false);
       setSelesai(true);
+      // Stok awal masuk sebagai baris opname yang LANGSUNG `disetujui`, jadi
+      // ia seketika mengubah saldo, kartu stok, daftar lot mendekati exp, dan
+      // rincian FIFO — `/stok/fifo` bahkan berjangkar pada baseline opname ini.
+      //
+      // `["kartu"]` dulu tak menyegarkan apa pun: tak ada query yang memakainya
+      // (yang benar `["kartu-stok"]`), dan pencocokan awalan React Query
+      // membandingkan elemen pertama secara UTUH — jadi barisnya mati sejak
+      // ditulis. Jebakan yang sama membuat `stok-exp` & `stok-fifo` luput.
       queryClient.invalidateQueries({ queryKey: ["stok"] });
       queryClient.invalidateQueries({ queryKey: ["stok-awal"] });
-      queryClient.invalidateQueries({ queryKey: ["kartu"] });
+      queryClient.invalidateQueries({ queryKey: ["kartu-stok"] });
+      queryClient.invalidateQueries({ queryKey: ["stok-exp"] });
+      queryClient.invalidateQueries({ queryKey: ["stok-fifo"] });
     },
   });
 
@@ -151,7 +169,7 @@ export function StokAwalPage() {
                 {s.nama}
               </div>
               <input
-                type="number"
+                type="text"
                 inputMode="decimal"
                 min="0"
                 step="any"
@@ -171,9 +189,16 @@ export function StokAwalPage() {
       </main>
 
       <div className="fixed inset-x-0 bottom-0 border-t border-stone-200 bg-white p-3">
+        {salahKetik.length > 0 && (
+          <div className="mb-2 rounded-lg bg-red-50 px-3 py-1.5 text-center text-xs font-medium text-red-800">
+            Angka tidak terbaca pada{" "}
+            <b>{salahKetik.map(([id]) => namaById.get(id) ?? id).join(", ")}</b> — tulis
+            seperti <b>470</b> atau <b>1,5</b>.
+          </div>
+        )}
         <button
           onClick={() => setKonfirmasi(true)}
-          disabled={terisi === 0}
+          disabled={terisi === 0 || salahKetik.length > 0}
           className={`${btnPrimary} w-full py-3 text-base`}
         >
           Simpan Stok Awal ({terisi} bahan)
@@ -201,7 +226,7 @@ export function StokAwalPage() {
                   <div key={id} className="flex justify-between text-sm">
                     <span className="text-stone-700">{namaById.get(id) ?? id}</span>
                     <span className="font-semibold text-stone-800">
-                      {formatAngka(Number(v))} {satuanById.get(id) ?? ""}
+                      {formatAngka(angkaDari(v))} {satuanById.get(id) ?? ""}
                     </span>
                   </div>
                 ))}

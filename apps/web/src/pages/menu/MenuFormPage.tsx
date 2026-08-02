@@ -3,6 +3,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   PANDUAN_MARKUP,
+  angkaDari,
+  teksAngka,
   draftIsiMenu,
   foodCostPersen,
   hargaJualBulat,
@@ -94,14 +96,14 @@ export function MenuFormPage() {
     setDeskripsi(m.deskripsi ?? "");
     setCategoryId(m.category_id);
     setTipe(m.tipe);
-    setMult(String(m.mult ?? 2));
+    setMult(teksAngka(m.mult ?? 2));
     setBaseMenuId(m.base_menu_id ?? "");
-    setBaseMult(String(m.base_mult ?? 2));
-    setHargaJual(String(m.harga_jual));
+    setBaseMult(teksAngka(m.base_mult ?? 2));
+    setHargaJual(teksAngka(m.harga_jual));
     setImageUrl(m.image_url);
     setIsActive(m.is_active);
     setKomponen(
-      m.komponen.map((k) => ({ ingredient_id: k.ingredient_id, qty: String(k.qty) })),
+      m.komponen.map((k) => ({ ingredient_id: k.ingredient_id, qty: teksAngka(k.qty) })),
     );
     setBranchIds(m.branch_ids ?? []);
   }, [id, menuEdit]);
@@ -113,11 +115,11 @@ export function MenuFormPage() {
   // bahan — aturan resep diubah di halaman Bahan Baku, bukan dari sini.
   const preview = useMemo(() => {
     const komponenHpp = komponen
-      .filter((k) => k.ingredient_id && Number(k.qty) > 0)
+      .filter((k) => k.ingredient_id && angkaDari(k.qty) > 0)
       .map((k) => {
         const b = bahanById.get(k.ingredient_id);
         return {
-          qty: Number(k.qty),
+          qty: angkaDari(k.qty),
           hargaPerUnit: b?.harga_per_unit ?? 0,
           isPackaging: b?.is_packaging ?? false,
           isComplement: b?.is_complement ?? false,
@@ -129,7 +131,7 @@ export function MenuFormPage() {
     if (tipe === "paket") {
       const base = menus?.find((m) => m.id === baseMenuId);
       const baseHpp = base?.hpp ?? 0;
-      const saran = hargaSaranPaket(baseHpp, Number(baseMult) || 0, ownHpp);
+      const saran = hargaSaranPaket(baseHpp, angkaDari(baseMult) || 0, ownHpp);
       return {
         hpp: baseHpp + ownHpp,
         hppDineIn: (base?.hpp_dine_in ?? 0) + ownHppDineIn,
@@ -137,7 +139,7 @@ export function MenuFormPage() {
         bulat: hargaJualBulat(saran),
       };
     }
-    const saran = hargaSaran(ownHpp, Number(mult) || 0);
+    const saran = hargaSaran(ownHpp, angkaDari(mult) || 0);
     return { hpp: ownHpp, hppDineIn: ownHppDineIn, saran, bulat: hargaJualBulat(saran) };
   }, [komponen, bahanById, tipe, mult, baseMenuId, baseMult, menus]);
 
@@ -156,7 +158,7 @@ export function MenuFormPage() {
    */
   const punyaKemasan = useMemo(() => {
     const sendiri = komponen.some(
-      (k) => Number(k.qty) > 0 && bahanById.get(k.ingredient_id)?.is_packaging,
+      (k) => angkaDari(k.qty) > 0 && bahanById.get(k.ingredient_id)?.is_packaging,
     );
     if (sendiri) return true;
     if (tipe !== "paket" || !baseMenuId) return false;
@@ -167,8 +169,31 @@ export function MenuFormPage() {
    * Menu tanpa komponen sama sekali belum punya HPP apa pun — menegurnya soal
    * kemasan hanya jadi bising. Peringatan baru berlaku begitu resepnya diisi.
    */
-  const adaResep = komponen.some((k) => k.ingredient_id && Number(k.qty) > 0);
+  const adaResep = komponen.some((k) => k.ingredient_id && angkaDari(k.qty) > 0);
   const perluKemasan = adaResep && !punyaKemasan;
+
+  /**
+   * Baris resep yang SUDAH DIISI takarannya tapi tidak akan ikut tersimpan.
+   *
+   * Penyaring kiriman memakai `angkaDari(k.qty) > 0`, jadi takaran tak terbaca
+   * gagal perbandingan itu dan barisnya dibuang DI SISI KLIEN — tak pernah
+   * sampai ke server, tak pernah jadi galat. Tombol Simpan tidak menahannya
+   * sama sekali.
+   *
+   * Di halaman ini kerusakannya paling AWET, karena yang disimpan adalah
+   * ATURAN, bukan satu transaksi: resep menu yang kehilangan satu bahan akan
+   * (a) menghitung HPP tanpa biaya bahan itu — food cost terlihat lebih sehat
+   * daripada kenyataannya — dan (b) tidak pernah memotong stoknya pada SETIAP
+   * penjualan menu itu, selamanya, sampai ada yang sadar. Salah ketik sekali,
+   * salahnya berulang tiap hari.
+   *
+   * Nol dan minus ikut terjaring lewat `!(… > 0)` yang sama: keduanya terbaca
+   * sebagai angka, tapi nasib barisnya persis sama.
+   */
+  const qtyTerbuang = komponen
+    .filter((k) => k.ingredient_id && k.qty.trim() !== "" && !(angkaDari(k.qty) > 0))
+    .map((k) => bahanById.get(k.ingredient_id)?.nama)
+    .filter((n): n is string => !!n);
 
   /**
    * Draf "isi menu" dari baris resep yang SEDANG diedit (belum tentu tersimpan),
@@ -177,12 +202,12 @@ export function MenuFormPage() {
    */
   function draftDariResep(): string {
     const isi = komponen
-      .filter((k) => k.ingredient_id && Number(k.qty) > 0)
+      .filter((k) => k.ingredient_id && angkaDari(k.qty) > 0)
       .map((k) => {
         const b = bahanById.get(k.ingredient_id);
         return {
           nama: b?.nama ?? "",
-          qty: Number(k.qty),
+          qty: angkaDari(k.qty),
           satuan: b?.satuan ?? "",
           is_packaging: b?.is_packaging ?? false,
           is_complement: b?.is_complement ?? false,
@@ -191,7 +216,7 @@ export function MenuFormPage() {
       .filter((k) => k.nama);
     // Menu paket: isi menu dasar tak ada di `komponen`, sebut terpisah.
     const base = tipe === "paket" ? menus?.find((m) => m.id === baseMenuId) : null;
-    const prefix = base ? `${Number(baseMult) || 1}\u00d7 ${base.nama}` : null;
+    const prefix = base ? `${angkaDari(baseMult) || 1}\u00d7 ${base.nama}` : null;
     return draftIsiMenu(isi, prefix);
   }
 
@@ -203,15 +228,15 @@ export function MenuFormPage() {
         deskripsi: deskripsi.trim() || null,
         category_id: categoryId,
         tipe,
-        mult: tipe === "regular" ? Number(mult) : null,
+        mult: tipe === "regular" ? angkaDari(mult) : null,
         base_menu_id: tipe === "paket" ? baseMenuId : null,
-        base_mult: tipe === "paket" ? Number(baseMult) : null,
-        harga_jual: Number(hargaJual),
+        base_mult: tipe === "paket" ? angkaDari(baseMult) : null,
+        harga_jual: angkaDari(hargaJual),
         image_url: imageUrl,
         is_active: isActive,
         komponen: komponen
-          .filter((k) => k.ingredient_id && Number(k.qty) > 0)
-          .map((k) => ({ ingredient_id: k.ingredient_id, qty: Number(k.qty) })),
+          .filter((k) => k.ingredient_id && angkaDari(k.qty) > 0)
+          .map((k) => ({ ingredient_id: k.ingredient_id, qty: angkaDari(k.qty) })),
         // hanya cabang store (POS) yang jadi lokasi menu — buang id non-store
         // (mis. central kitchen dari data lama) agar simpan tak ditolak server
         branch_ids: branchIds.filter((bid) =>
@@ -238,6 +263,10 @@ export function MenuFormPage() {
       <form
         onSubmit={(e) => {
           e.preventDefault();
+          // Takaran tak terbaca ditahan LEBIH DULU: menyimpan resep yang
+          // diam-diam kehilangan bahan lebih merusak daripada menyimpannya
+          // tanpa kemasan, dan tombolnya pun sudah mati — ini pagar keduanya.
+          if (qtyTerbuang.length > 0) return;
           // Konfirmasi dulu bila menu berresep ini belum punya kemasan take
           // away — bukan larangan (ada menu yang memang tak pernah dibawa
           // pulang), tapi keputusannya harus disadari, bukan kelewatan.
@@ -330,9 +359,12 @@ export function MenuFormPage() {
                 <label className="mb-1 block text-sm font-medium">Markup (mult)</label>
                 <input
                   required
-                  type="number"
-                  min="0"
-                  step="any"
+                  /* Markup menentukan harga jual. `type="number"` MEMBUANG koma
+                     saat diketik — "2,5" tersimpan "25" tanpa `badInput`, jadi
+                     markup 2,5× diam-diam jadi 25×. Koma adalah pemisah desimal
+                     bahasa Indonesia; `angkaDari` yang membacanya. */
+                  type="text"
+                  inputMode="decimal"
                   value={mult}
                   onChange={(e) => setMult(e.target.value)}
                   className={inputClass}
@@ -362,9 +394,8 @@ export function MenuFormPage() {
                   <label className="mb-1 block text-sm font-medium">Markup menu dasar (base_mult)</label>
                   <input
                     required
-                    type="number"
-                    min="0"
-                    step="any"
+                    type="text"
+                    inputMode="decimal"
                     value={baseMult}
                     onChange={(e) => setBaseMult(e.target.value)}
                     className={inputClass}
@@ -377,15 +408,17 @@ export function MenuFormPage() {
               <div className="flex gap-2">
                 <input
                   required
-                  type="number"
-                  min="0"
-                  value={hargaJual}
-                  onChange={(e) => setHargaJual(e.target.value)}
+                  /* Harga jual: angka paling menentukan di aplikasi ini.
+                     `type="number"` menyimpan "15.000" sebagai 15. */
+                  type="text"
+                  inputMode="numeric"
+                  value={hargaJual ? formatAngka(angkaDari(hargaJual), 0) : ""}
+                  onChange={(e) => setHargaJual(e.target.value.replace(/\D/g, ""))}
                   className={inputClass}
                 />
                 <button
                   type="button"
-                  onClick={() => setHargaJual(String(preview.bulat))}
+                  onClick={() => setHargaJual(teksAngka(preview.bulat))}
                   className={btnSecondary}
                   title="Pakai harga saran bulat"
                 >
@@ -465,7 +498,7 @@ export function MenuFormPage() {
           <div className="space-y-3">
             {komponen.map((k, i) => {
               const b = k.ingredient_id ? bahanById.get(k.ingredient_id) : undefined;
-              const hargaKomponen = b ? b.harga_per_unit * Number(k.qty || 0) : 0;
+              const hargaKomponen = b ? b.harga_per_unit * angkaDari(k.qty || 0) : 0;
               return (
                 <div key={i} className="rounded-lg border border-stone-200 p-3">
                   <div className="flex items-center gap-2">
@@ -497,9 +530,10 @@ export function MenuFormPage() {
                             Takaran resep ({b.satuan})
                           </label>
                           <input
-                            type="number"
-                            min="0.0001"
-                            step="any"
+                            /* Takaran resep hampir selalu pecahan ("0,5" kg).
+                               Lihat catatan pada Markup di atas. */
+                            type="text"
+                            inputMode="decimal"
                             value={k.qty}
                             onChange={(e) => {
                               const copy = [...komponen];
@@ -604,8 +638,8 @@ export function MenuFormPage() {
             <div>
               <div className="text-stone-500">Food cost</div>
               <div className="text-lg font-bold">
-                {Number(hargaJual) > 0
-                  ? `${foodCostPersen(preview.hpp, Number(hargaJual)).toFixed(1)}%`
+                {angkaDari(hargaJual) > 0
+                  ? `${foodCostPersen(preview.hpp, angkaDari(hargaJual)).toFixed(1)}%`
                   : "—"}
               </div>
             </div>
@@ -631,9 +665,21 @@ export function MenuFormPage() {
           </details>
         </Card>
 
+        {qtyTerbuang.length > 0 && (
+          <div className="rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-800">
+            Takaran pada <b>{qtyTerbuang.join(", ")}</b> belum terbaca sebagai angka lebih dari
+            0 — tulis seperti <b>0,25</b> atau <b>100</b>. Tanpa itu bahannya tidak ikut masuk
+            resep, jadi HPP-nya kurang hitung dan stoknya tak pernah terpotong saat menu ini
+            terjual.
+          </div>
+        )}
         <ErrorText error={simpan.error} />
         <div className="flex gap-2">
-          <button type="submit" disabled={simpan.isPending} className={btnPrimary}>
+          <button
+            type="submit"
+            disabled={simpan.isPending || qtyTerbuang.length > 0}
+            className={btnPrimary}
+          >
             {simpan.isPending ? "Menyimpan…" : "Simpan Menu"}
           </button>
           <Link to="/menu" className={btnSecondary}>

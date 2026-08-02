@@ -41,7 +41,7 @@ export function LaporanKebersihanPage() {
   // `aktif=1` — checklist hanya boleh memuat area yang masih dipakai. Tanpa
   // ini, pelapor berperan manajemen ikut menerima area cabang lain dan area
   // yang sudah dinonaktifkan, lalu kirimannya ditolak server dengan 400.
-  const { data: area = [], isLoading: memuatArea } = useQuery({
+  const { data: area = [], isLoading: memuatArea, error: gagalArea } = useQuery({
     queryKey: ["kebersihan-area", "checklist"],
     queryFn: () => api<AreaKebersihanDto[]>("/kebersihan/area?aktif=1"),
   });
@@ -57,7 +57,7 @@ export function LaporanKebersihanPage() {
   // seluruh karyawan: kartu sesi menandai "sudah terisi" karena orang lain
   // yang mengisinya, `editId` menunjuk laporan orang lain, dan tombol Perbarui
   // ditolak 403 — pelapornya tak punya jalan mengirim laporannya sendiri.
-  const { data: laporan = [], isLoading } = useQuery({
+  const { data: laporan = [], isLoading, error: gagalLaporan } = useQuery({
     queryKey: ["kebersihan-saya", dari],
     queryFn: () => api<LaporanKebersihanDto[]>(`/kebersihan?saya=1&dari=${dari}`),
   });
@@ -126,7 +126,21 @@ export function LaporanKebersihanPage() {
     <div>
       <PageTitle>🧹 Laporan Kebersihan</PageTitle>
 
-      {area.length === 0 ? (
+      {/*
+        DITOLAK ≠ BELUM DIATUR. `data: area = []` menyamakan keduanya, jadi
+        permintaan yang gagal berbunyi "Owner belum membuat daftar area" —
+        karyawannya lalu mengejar owner untuk masalah yang tidak ada, dan
+        laporan hari itu tak pernah terkirim.
+      */}
+      {gagalArea ? (
+        <Card className="p-4">
+          <ErrorText error={gagalArea} />
+          <div className="mt-2 text-sm text-stone-500">
+            Daftar area tidak dapat dimuat — <b>bukan</b> berarti owner belum mengaturnya. Muat
+            ulang halaman setelah masalahnya beres.
+          </div>
+        </Card>
+      ) : area.length === 0 ? (
         <Card className="p-6 text-center text-sm text-stone-500">
           Owner belum membuat daftar area kebersihan untuk lokasi ini. Minta owner mengaturnya
           lewat <span className="font-medium">Rekap Kebersihan → ⚙ Atur Area</span>.
@@ -237,6 +251,25 @@ export function LaporanKebersihanPage() {
       ) : (
         <>
           <div className="mb-2 text-sm text-stone-500">{formatTanggal(hariIni)}</div>
+          {/*
+            Kalau "laporan saya" gagal dibaca, `perSesi` kosong dan KETIGA kartu
+            menyatakan "Belum diisi" — padahal laporannya mungkin sudah ada.
+            Yang mengisinya lalu menandai ulang seluruh area, mengunggah ulang
+            fotonya, menekan Kirim, dan server menolak 409 "sudah dibuat —
+            perbarui laporan yang ada": kartunya sendiri tak pernah menawarkan
+            jalan ke laporan itu, karena ia mengira belum ada. Statusnya
+            dikatakan apa adanya: TIDAK TERBACA.
+          */}
+          {gagalLaporan && (
+            <Card className="mb-3 border-amber-300 bg-amber-50 p-3">
+              <ErrorText error={gagalLaporan} />
+              <div className="text-sm text-amber-900">
+                Status laporan hari ini <b>tidak terbaca</b>, jadi ketiga sesi di bawah belum tentu
+                kosong. Muat ulang halaman dulu — mengirim laporan sekarang bisa ditolak sebagai
+                laporan ganda.
+              </div>
+            </Card>
+          )}
           <div className="grid gap-3 sm:grid-cols-3">
             {SESI_KEBERSIHAN.map((s) => {
               const ada = perSesi.get(s.kode);
@@ -262,6 +295,8 @@ export function LaporanKebersihanPage() {
                         </div>
                       )}
                     </div>
+                  ) : gagalLaporan ? (
+                    <div className="mt-2 text-sm text-amber-700">Status tidak terbaca</div>
                   ) : (
                     <div className="mt-2 text-sm text-stone-400">Belum diisi — ketuk untuk mengisi</div>
                   )}
@@ -275,6 +310,10 @@ export function LaporanKebersihanPage() {
           </h2>
           {isLoading ? (
             <Spinner />
+          ) : gagalLaporan ? (
+            <Card className="p-6 text-center text-sm text-stone-500">
+              Riwayat laporan tidak dapat dimuat — <b>bukan</b> berarti belum pernah melapor.
+            </Card>
           ) : laporan.length === 0 ? (
             <Card className="p-6 text-center text-sm text-stone-500">Belum ada laporan.</Card>
           ) : (

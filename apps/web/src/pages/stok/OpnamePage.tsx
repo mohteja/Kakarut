@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import type { OpnameRingkasan, PenyimpananDto, StokRowDto } from "@kakarut/shared";
+import { angkaDari, teksAngka } from "@kakarut/shared";
 import { ImageUpload } from "../../components/ImageUpload";
 import { ErrorText, Spinner, btnPrimary, btnSecondary } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
@@ -141,18 +142,27 @@ export function OpnamePage() {
     s.nama.toLowerCase().includes(cari.toLowerCase()),
   );
   const semuaTercentang = tampilProduk.length > 0 && tampilProduk.every((s) => dipilih[s.ingredient_id]);
-  const terisi = produkTerpilih.filter((s) => fisik[s.ingredient_id] !== undefined && fisik[s.ingredient_id] !== "").length;
+  const diisi = produkTerpilih.filter(
+    (s) => fisik[s.ingredient_id] !== undefined && fisik[s.ingredient_id] !== "",
+  );
+  const terisi = diisi.length;
+  // Isian yang TERISI tapi tak terbaca sebagai angka. Tanpa pagar ini ia lolos
+  // penyaring `!== ""`, jadi NaN, lalu `JSON.stringify` mengubahnya jadi `null`
+  // dan server membalas galat validasi yang tak menyebut baris mana. Opname
+  // menulis penyesuaian stok sungguhan — lebih baik ditahan di sini, dengan
+  // nama bahannya disebut.
+  const salahKetik = diisi.filter((s) => Number.isNaN(angkaDari(fisik[s.ingredient_id])));
 
   const simpan = useMutation({
     mutationFn: () => {
       const items = produkTerpilih
         .filter((s) => fisik[s.ingredient_id] !== undefined && fisik[s.ingredient_id] !== "")
         .map((s) => {
-          const sel = Number(fisik[s.ingredient_id]) - s.saldo;
+          const sel = angkaDari(fisik[s.ingredient_id]) - s.saldo;
           const ada = Math.abs(sel) > 1e-9;
           return {
             ingredient_id: s.ingredient_id,
-            qty: Number(fisik[s.ingredient_id]),
+            qty: angkaDari(fisik[s.ingredient_id]),
             // bukti + alasan hanya untuk baris berselisih
             foto_url: ada ? (fotoSelisih[s.ingredient_id] ?? null) : null,
             alasan: ada ? (alasanSelisih[s.ingredient_id]?.trim() || null) : null,
@@ -177,14 +187,21 @@ export function OpnamePage() {
       setDipilih({});
       setBucket(null);
       setLangkah("lokasi");
-      queryClient.invalidateQueries({ queryKey: ["stok"] });
+      // Baris BERSELISIH menunggu ACC (belum mengubah saldo), tapi baris yang
+      // COCOK masuk langsung `disetujui` — dan itu sudah cukup menggeser
+      // keluaran `/stok/fifo` (baris 'opname' baru di rentetan event) maupun
+      // `/stok/exp` (baseline opname terakhir bergeser). Sesinya juga muncul
+      // di Riwayat Opname.
+      for (const k of ["stok", "kartu-stok", "stok-exp", "stok-fifo", "opname-riwayat"]) {
+        queryClient.invalidateQueries({ queryKey: [k] });
+      }
     },
   });
 
   function selisihDari(s: StokRowDto): number | null {
     const v = fisik[s.ingredient_id];
     if (v === undefined || v === "") return null;
-    return Number(v) - s.saldo;
+    return angkaDari(v) - s.saldo;
   }
 
   // Baris berselisih yang belum dilampiri bukti foto — memblokir Simpan.
@@ -407,7 +424,7 @@ export function OpnamePage() {
                     </div>
                     <div className="mt-2 flex items-center gap-2">
                       <input
-                        type="number"
+                        type="text"
                         inputMode="decimal"
                         min="0"
                         step="any"
@@ -417,7 +434,7 @@ export function OpnamePage() {
                         className="h-12 flex-1 rounded-lg border border-stone-300 px-3 text-lg font-semibold focus:border-orange-500 focus:outline-none"
                       />
                       <button
-                        onClick={() => setFisik({ ...fisik, [s.ingredient_id]: String(s.saldo) })}
+                        onClick={() => setFisik({ ...fisik, [s.ingredient_id]: teksAngka(s.saldo) })}
                         className="h-12 shrink-0 rounded-lg border border-stone-300 px-3 text-sm font-medium text-stone-600"
                         title="Isi sama dengan sistem"
                       >
@@ -465,6 +482,13 @@ export function OpnamePage() {
             </div>
           </main>
           <div className="fixed inset-x-0 bottom-0 border-t border-stone-200 bg-white p-3">
+            {salahKetik.length > 0 && (
+              <div className="mb-2 rounded-lg bg-red-50 px-3 py-1.5 text-center text-xs font-medium text-red-800">
+                Angka tidak terbaca pada{" "}
+                <b>{salahKetik.map((s) => s.nama).join(", ")}</b> — tulis seperti{" "}
+                <b>470</b> atau <b>1,5</b>.
+              </div>
+            )}
             {selisihTanpaFoto.length > 0 && (
               <div className="mb-2 rounded-lg bg-amber-50 px-3 py-1.5 text-center text-xs font-medium text-amber-800">
                 Lampirkan bukti foto untuk {selisihTanpaFoto.length} selisih sebelum menyimpan.
@@ -476,7 +500,7 @@ export function OpnamePage() {
               </button>
               <button
                 onClick={() => setKonfirmasi(true)}
-                disabled={terisi === 0 || selisihTanpaFoto.length > 0}
+                disabled={terisi === 0 || salahKetik.length > 0 || selisihTanpaFoto.length > 0}
                 className={`${btnPrimary} flex-1 py-3 text-base`}
               >
                 Simpan Opname ({terisi} dihitung)
@@ -512,7 +536,7 @@ export function OpnamePage() {
                               : "text-red-600"
                         }
                       >
-                        {formatAngka(s.saldo)} → {formatAngka(Number(fisik[s.ingredient_id]))}
+                        {formatAngka(s.saldo)} → {formatAngka(angkaDari(fisik[s.ingredient_id]))}
                         {Math.abs(sel) >= 1e-9 && ` (${sel > 0 ? "+" : ""}${formatAngka(sel)})`}
                       </span>
                     </div>

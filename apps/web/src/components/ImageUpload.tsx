@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { api } from "../lib/api";
 import { btnSecondary } from "./ui";
+import { alasanTolak } from "../lib/unggah";
 
 /**
  * Upload gambar dengan preview yang jelas — pengganti <input type="file">
@@ -28,6 +29,21 @@ export function ImageUpload({
   const [error, setError] = useState<string | null>(null);
 
   async function upload(file: File) {
+    // Tolak SEBELUM mengunggah, bukan sesudah. Dua aturan di bawah sudah
+    // dipajang di layar ini ("JPEG/PNG/WebP, maks 5 MB") dan sudah ditegakkan
+    // server — yang hilang cuma pemeriksaannya di sini, dan itu berarti
+    // berkasnya terkirim UTUH dulu baru ditolak.
+    //
+    // Bukan sekadar lambat: `tujuan="bukti"` dipakai untuk foto opname dan
+    // swafoto absen, yang diambil dari kamera ponsel di dapur lewat data
+    // seluler. Foto kamera 12 MP rutin di atas 5 MB, jadi jalur yang paling
+    // sering dipakai justru yang paling sering menunggu percuma.
+    const tolak = alasanTolak(file);
+    if (tolak) {
+      setError(tolak);
+      if (fileRef.current) fileRef.current.value = "";
+      return;
+    }
     setError(null);
     setUploading(true);
     try {

@@ -305,10 +305,25 @@ export const laporanRoutes = new Hono<AppEnv>()
       throw new HTTPException(400, { message: "Parameter biaya_tetap wajib berupa angka > 0" });
     }
     const branchCond = await branchCondLaporan(c);
-    const sampai = c.req.query("sampai") ?? tanggalDi("Asia/Jakarta");
+    // Dua hal yang di sini sempat berbeda sendiri dari tiga saudaranya di
+    // berkas ini, dan dua-duanya menular ke angka yang keluar:
+    //
+    // 1. Zona waktu diambil dari perusahaan, bukan dipatok Asia/Jakarta.
+    //    Untuk cabang WITA/WIT, "hari ini" versi Jakarta masih kemarin selama
+    //    satu sampai dua jam sesudah tengah malam setempat — seluruh jendela
+    //    30 hari bergeser sehari, termasuk penjualan yang baru saja terjadi.
+    // 2. `tglValid` menyaring `dari`/`sampai`. Tanpa itu teks apa pun mendarat
+    //    utuh di pembanding kolom `date` Postgres; yang salah ketik tak
+    //    ditolak rapi, ia menjatuhkan permintaannya.
+    const [company] = await db
+      .select({ timezone: companies.timezone })
+      .from(companies)
+      .where(eq(companies.id, auth.company_id!));
+    const tz = company?.timezone ?? "Asia/Jakarta";
+    const sampai = tglValid(c.req.query("sampai")) ?? tanggalDi(tz);
     const dari =
-      c.req.query("dari") ??
-      tanggalDi("Asia/Jakarta", new Date(Date.now() - 30 * 24 * 3600 * 1000));
+      tglValid(c.req.query("dari")) ??
+      tanggalDi(tz, new Date(Date.now() - 30 * 24 * 3600 * 1000));
 
     const [agg] = await db
       .select({

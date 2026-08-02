@@ -7,17 +7,58 @@ import type { PesananItemRow, PesananRow, PesananStatus } from "./types";
  * pesanan ini belum batal. `selesai` bila tak ada lagi yang `dikerjakan`, jadi
  * pesanan yang separuh batal separuh matang tetap lepas dari kolom dapur.
  */
-export function turunkanStatusPesanan(items: { status: PesananStatus }[]): PesananStatus {
+export function turunkanStatusPesanan(
+  items: { status: PesananStatus }[],
+): PesananStatus {
   if (items.length === 0) return "dikerjakan";
   if (items.every((i) => i.status === "batal")) return "batal";
   if (items.every((i) => i.status !== "dikerjakan")) return "selesai";
   return "dikerjakan";
 }
 
+/**
+ * Apakah penyajian pesanan yang SUDAH DIBAYAR pernah dikoreksi?
+ *
+ * Saat dibuat, tiap baris SELALU lahir sebagai kebalikan `is_dine_in` BARISNYA
+ * sendiri — `sajianDariKasir(override) = !(override ?? true)`, dan `createSale`
+ * memakai `item.is_dine_in ?? isDineIn` untuk kolom yang sama. Baris yang
+ * justru SAMA dengan `is_dine_in`-nya berarti ada yang membaliknya di papan
+ * sesudah transaksi ditutup, dan pada penjualan yang sudah dibayar pembalikan
+ * itu bukan kosmetik: server menghitung ulang HPP dan menulis ulang pemakaian
+ * stok kemasan.
+ *
+ * DUA HAL yang gampang salah, dan keduanya pernah salah di sini:
+ *
+ * 1. Jangan pakai `sajian_takeaway` KARTU. Itu `items.every(…)` — "semua baris
+ *    bawa pulang" — jadi pesanan dine-in yang cuma SEBAGIAN dibungkus tetap
+ *    beragregat false, `false === true` tak pernah cocok, dan kartunya diam
+ *    meski uang sudah berpindah. Arah sebaliknya kebetulan tertangkap, dan
+ *    ketimpangan itulah yang membuatnya terbaca benar sekilas.
+ *
+ * 2. Jangan bandingkan baris dengan `is_dine_in` KARTU. Kasir boleh menandai
+ *    satu porsi dibungkus di meja yang makan di tempat (`dine_in_override`),
+ *    dan baris itu memang lahir `is_dine_in` false di penjualan yang
+ *    `is_dine_in`-nya true. Membandingkannya dengan penanda kartu menuduhnya
+ *    "diubah setelah transaksi" padahal kasir sendiri yang menetapkannya
+ *    sebelum uang diterima.
+ */
+export function adaKoreksiSajian(
+  p: Pick<PesananRow, "dibayar" | "items">,
+): boolean {
+  return (
+    p.dibayar && p.items.some((it) => it.sajian_takeaway === it.is_dine_in)
+  );
+}
+
 /** Bagian `PesananRow` yang seluruhnya turunan `items`. */
 export type RingkasanPesanan = Pick<
   PesananRow,
-  "status" | "sajian_takeaway" | "item_selesai" | "item_batal" | "status_oleh" | "status_pada"
+  | "status"
+  | "sajian_takeaway"
+  | "item_selesai"
+  | "item_batal"
+  | "status_oleh"
+  | "status_pada"
 >;
 
 /**
@@ -60,13 +101,17 @@ export function ringkasPesanan(items: PesananItemRow[]): RingkasanPesanan {
  * pernah disentuh jatuh ke waktu masuknya, jadi pesanan baru tetap muncul di
  * atas dan tak ada yang tenggelam.
  */
-export function kunciUrutPesanan(p: Pick<PesananRow, "waktu" | "status_pada">): string {
+export function kunciUrutPesanan(
+  p: Pick<PesananRow, "waktu" | "status_pada">,
+): string {
   return p.status_pada && p.status_pada > p.waktu ? p.status_pada : p.waktu;
 }
 
 /** Urutkan papan di tempat baru (tidak mengubah array masukan). */
-export function urutkanPesanan<T extends Pick<PesananRow, "waktu" | "status_pada">>(
-  rows: readonly T[],
-): T[] {
-  return [...rows].sort((a, b) => kunciUrutPesanan(b).localeCompare(kunciUrutPesanan(a)));
+export function urutkanPesanan<
+  T extends Pick<PesananRow, "waktu" | "status_pada">,
+>(rows: readonly T[]): T[] {
+  return [...rows].sort((a, b) =>
+    kunciUrutPesanan(b).localeCompare(kunciUrutPesanan(a)),
+  );
 }

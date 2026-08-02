@@ -1,5 +1,6 @@
 import { eq, sql } from "drizzle-orm";
 import { Hono, type MiddlewareHandler } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { compress } from "hono/compress";
 import { etag } from "hono/etag";
 import { HTTPException } from "hono/http-exception";
@@ -8,6 +9,7 @@ import { secureHeaders } from "hono/secure-headers";
 import { db } from "./db/client";
 import { branches } from "./db/schema";
 import { getBuildId } from "./lib/build";
+import { nilaiTakSah } from "./lib/pg-galat";
 import {
   requireAuth,
   requireCompany,
@@ -54,8 +56,54 @@ import { uploadRoutes } from "./modules/upload/routes";
 import { karyawanRoutes } from "./modules/users/routes";
 import { getStorage } from "./modules/upload/storage";
 
+/**
+ * Batas ukuran badan permintaan.
+ *
+ * Tanpa ini TAK ADA batas sama sekali: satu akun yang sah — kasir pun cukup —
+ * bisa mengirim `catatan` berukuran ratusan MB ke mana saja yang menerimanya
+ * (penjualan, kebersihan, opname), dan seluruhnya masuk kolom `text`. Diulang,
+ * ia menggelembungkan basis data penyewa lain di mesin yang sama, dan biaya
+ * penyimpanan/cadangan ikut naik. Yang mengirimnya pun tak harus jahat: satu
+ * klien mobile yang salah mengulang unggahan sudah cukup.
+ *
+ * Dua angka, bukan satu, karena dua jalurnya memang beda ukuran wajar:
+ * - JSON: 2 MB. Cukup longgar untuk impor CSV bahan & `POST /bahan/bulk`
+ *   yang memang mengirim ribuan baris sekaligus.
+ * - Unggahan berkas: 8 MB. Rute `/upload` sudah punya pagarnya sendiri di
+ *   `MAX_SIZE = 5 MB`; angka ini sengaja LEBIH BESAR supaya yang menolak tetap
+ *   pesan 413 yang bisa dibaca dari rute itu, bukan pemutusan mentah di sini.
+ */
+const BATAS_JSON = 2 * 1024 * 1024;
+const BATAS_UNGGAH = 8 * 1024 * 1024;
+
+const tolakKebesaran = (batas: number) =>
+  bodyLimit({
+    maxSize: batas,
+    onError: () => {
+      throw new HTTPException(413, {
+        message: `Data yang dikirim terlalu besar (batas ${Math.round(batas / 1024 / 1024)} MB).`,
+      });
+    },
+  });
+
+/**
+ * SATU middleware, bukan dua `.use()` berpola jalur: di Hono semua middleware
+ * yang cocok ikut berjalan, jadi memasang `/upload` lalu `*` akan membuat
+ * unggahan tetap terkena batas JSON yang lebih kecil — persis kebalikan dari
+ * yang dimaksud. Jalurnya `/upload` PERSIS (klien memanggil `/upload?tujuan=`),
+ * jadi pola `/upload/*` pun tak akan pernah cocok.
+ */
+const batasBadan: MiddlewareHandler<AppEnv> = (c, next) => {
+  const unggah =
+    c.req.path === "/api/upload" || c.req.path.startsWith("/api/upload/");
+  return tolakKebesaran(unggah ? BATAS_UNGGAH : BATAS_JSON)(c, next);
+};
+
 export function createApp() {
   const api = new Hono<AppEnv>()
+    // Pagar ukuran badan — dipasang PALING AWAL supaya berlaku sebelum
+    // autentikasi, parsing zod, maupun rute mana pun sempat menyentuhnya.
+    .use("*", batasBadan)
     // Tandai tiap respons API dengan build id frontend saat ini → klien tahu
     // ada versi baru (build server ≠ build tab yang dimuat) tanpa polling khusus.
     .use("*", async (c, next) => {
@@ -65,7 +113,11 @@ export function createApp() {
     })
     .get("/health", async (c) => {
       await db.execute(sql`SELECT 1`);
-      return c.json({ ok: true, storage: getStorage().mode, build: getBuildId() });
+      return c.json({
+        ok: true,
+        storage: getStorage().mode,
+        build: getBuildId(),
+      });
     })
     .route("/auth", authRoutes)
     // Onboarding + lifecycle akun (butuh login, TIDAK butuh perusahaan):
@@ -83,7 +135,10 @@ export function createApp() {
   // dijalankan lebih dulu. Kasir hanya butuh kasir/stok/opname/penyesuaian.
   // Produksi & pembelian: manajemen ATAU karyawan (tim) yang lokasi kerjanya
   // Central Kitchen — CK memang tempatnya memproduksi & membeli bahan.
-  const izinkanManajemenAtauKaryawanCk: MiddlewareHandler<AppEnv> = async (c, next) => {
+  const izinkanManajemenAtauKaryawanCk: MiddlewareHandler<AppEnv> = async (
+    c,
+    next,
+  ) => {
     const auth = c.get("auth");
     if (auth.role === "owner" || auth.role === "admin") return next();
     if (auth.role === "tim" && auth.branch_id) {
@@ -106,7 +161,8 @@ export function createApp() {
   // tetap lewat terikatCabang.
   const izinkanProduksi: MiddlewareHandler<AppEnv> = async (c, next) => {
     const auth = c.get("auth");
-    if ((auth.role === "kitchen" || auth.role === "bar") && auth.branch_id) return next();
+    if ((auth.role === "kitchen" || auth.role === "bar") && auth.branch_id)
+      return next();
     return izinkanManajemenAtauKaryawanCk(c, next);
   };
   tenant.use("/produksi/*", izinkanProduksi);
@@ -133,15 +189,24 @@ export function createApp() {
   // ringkasan; hanya admin/kasir yang boleh STASIUN pindai (POST /absensi,
   // digerbang per-rute di modulnya). Tim, kitchen & bar ikut agar bisa absen
   // sendiri.
-  tenant.use("/absensi/*", requireRole("owner", "admin", "cashier", "tim", "kitchen", "bar"));
+  tenant.use(
+    "/absensi/*",
+    requireRole("owner", "admin", "cashier", "tim", "kitchen", "bar"),
+  );
   // Pengajuan cuti/libur: SEMUA peran boleh mengajukan (gerbang sama dengan
   // absensi). Yang boleh MEMUTUSKAN (ACC/tolak) hanya owner/admin — digerbang
   // inline pada PATCH di modulnya, bukan di sini.
-  tenant.use("/pengajuan/*", requireRole("owner", "admin", "cashier", "tim", "kitchen", "bar"));
+  tenant.use(
+    "/pengajuan/*",
+    requireRole("owner", "admin", "cashier", "tim", "kitchen", "bar"),
+  );
   // Laporan kebersihan harian: SEMUA peran membuat laporannya masing-masing.
   // Yang boleh membaca REKAP dan mengatur master area hanya owner/admin —
   // digerbang inline pada rute terkait di modulnya, bukan di sini.
-  tenant.use("/kebersihan/*", requireRole("owner", "admin", "cashier", "tim", "kitchen", "bar"));
+  tenant.use(
+    "/kebersihan/*",
+    requireRole("owner", "admin", "cashier", "tim", "kitchen", "bar"),
+  );
   // TRANSFER STOK: yang MENGIRIM hanya Central Kitchen — ditegakkan di modulnya
   // pada cabang ASAL (403 bila bukan CK), jadi bukan urusan gerbang peran ini.
   // Gerbang di sini sengaja longgar sampai kasir: semua peran cabang perlu
@@ -255,7 +320,12 @@ export function createApp() {
   // walau datanya sama, dan gejalanya menyamar jadi "data memang sering
   // berubah" sehingga sangat sulit dilacak.
   const etagDaftar = etag();
-  for (const jalur of ["/api/menu", "/api/kategori", "/api/cabang", "/api/meja"]) {
+  for (const jalur of [
+    "/api/menu",
+    "/api/kategori",
+    "/api/cabang",
+    "/api/meja",
+  ]) {
     app.use(jalur, async (c, next) => {
       if (c.req.method !== "GET") return next();
       await etagDaftar(c, next);
@@ -294,7 +364,19 @@ export function createApp() {
       // Tanpa ini `sebab` mati di sini dan klien terpaksa mencocokkan teks
       // pesan — yang berubah kapan saja dan tak bisa diuji.
       const sebab = (err as { sebab?: string }).sebab;
-      return c.json({ error: err.message, ...(sebab ? { sebab } : {}) }, err.status);
+      return c.json(
+        { error: err.message, ...(sebab ? { sebab } : {}) },
+        err.status,
+      );
+    }
+    // Id cacat di path/query (mis. `/customer/abc`) sampai ke pembanding kolom
+    // uuid dan ditolak Postgres sebagai 22P02. Itu salah input klien, jadi
+    // 400 — bukan 500 yang mengaku aplikasinya rusak dan menambah baris merah
+    // palsu di panel galat super admin. Tetap DICATAT (sebagai 400): 22P02
+    // juga bisa lahir dari literal cacat buatan kode sendiri.
+    if (nilaiTakSah(err)) {
+      void catatGalat(c, 400, err);
+      return c.json({ error: "Id atau nilai pada alamat tidak valid" }, 400);
     }
     console.error(err);
     void catatGalat(c, 500, err);

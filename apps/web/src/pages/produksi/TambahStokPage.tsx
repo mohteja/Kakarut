@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import type { JenisPengadaan, KonfirmasiStatus, StokRowDto } from "@kakarut/shared";
+import { angkaDari, teksAngka } from "@kakarut/shared";
 import {
   Card,
   ErrorText,
@@ -585,6 +586,7 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
           <input
             type="date"
             value={dari}
+            max={sampai}
             onChange={(e) => gantiFilter(() => setDari(e.target.value))}
             className={inputClass}
           />
@@ -594,6 +596,7 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
           <input
             type="date"
             value={sampai}
+            min={dari}
             onChange={(e) => gantiFilter(() => setSampai(e.target.value))}
             className={inputClass}
           />
@@ -1049,7 +1052,7 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
             Baris / halaman
             <select
               value={perPage}
-              onChange={(e) => gantiFilter(() => setPerPage(Number(e.target.value)))}
+              onChange={(e) => gantiFilter(() => setPerPage(angkaDari(e.target.value)))}
               className={`${inputClass} w-auto`}
             >
               {[10, 20, 50, 100].map((n) => (
@@ -1203,7 +1206,7 @@ function KirimHasilModal({
   }
   const daftar = [...perBahan.entries()];
   const [qty, setQty] = useState<Record<string, string>>(
-    () => Object.fromEntries(daftar.map(([id, b]) => [id, String(b.qty)])),
+    () => Object.fromEntries(daftar.map(([id, b]) => [id, teksAngka(b.qty)])),
   );
   // saldo stok CK per bahan — batas atas kiriman (transfer stok nyata)
   const ckBranchId = siap[0]?.branch_id ?? null;
@@ -1214,8 +1217,24 @@ function KirimHasilModal({
   });
   const saldoCk = new Map((stokCk ?? []).map((s) => [s.ingredient_id, s.saldo]));
   const items = daftar
-    .filter(([id]) => Number(qty[id]) > 0)
-    .map(([id]) => ({ ingredient_id: id, qty: Number(qty[id]) }));
+    .filter(([id]) => angkaDari(qty[id]) > 0)
+    .map(([id]) => ({ ingredient_id: id, qty: angkaDari(qty[id]) }));
+  /**
+   * Bahan yang kotaknya SUDAH DIISI tapi tidak akan ikut terkirim.
+   *
+   * Tiap kotak di sini sudah terisi sejak awal — hasil produksinya — jadi
+   * mengetiknya adalah mengubah, bukan mengisi dari kosong. NaN gagal
+   * `angkaDari(qty[id]) > 0`, jadi bahannya lenyap dari `items`; selama satu
+   * bahan lain masih benar tombolnya tetap hidup dan kirimannya berangkat
+   * TANPA bahan itu. Barangnya tertinggal di CK sementara cabang tak pernah
+   * tahu ada yang tidak dikirim.
+   *
+   * Nol dan minus ikut terjaring: keduanya terbaca sebagai angka, tapi nasib
+   * barisnya persis sama.
+   */
+  const qtyTerbuang = daftar
+    .filter(([id]) => (qty[id] ?? "").trim() !== "" && !(angkaDari(qty[id]) > 0))
+    .map(([, b]) => b.nama);
   const adaLebihDariSaldo = items.some(
     (it) => saldoCk.has(it.ingredient_id) && it.qty > (saldoCk.get(it.ingredient_id) ?? 0),
   );
@@ -1237,9 +1256,13 @@ function KirimHasilModal({
             </div>
             <div className="w-28 shrink-0">
               <input
-                type="number"
-                min={0}
-                step="any"
+                /* Koma adalah pemisah desimal bahasa Indonesia, dan
+                                 `type="number"` MEMBUANG-nya saat diketik: "1,5"
+                                 tersimpan "15" dengan `badInput` false — tak ada
+                                 satu pun tanda di layar. `angkaDari` membaca
+                                 koma maupun titik ribuan. */
+                type="text"
+                inputMode="decimal"
                 value={qty[id] ?? ""}
                 onChange={(e) => setQty((p) => ({ ...p, [id]: e.target.value }))}
                 className={`${inputClass} text-right`}
@@ -1253,6 +1276,12 @@ function KirimHasilModal({
             Ada jumlah yang melebihi stok CK — kurangi dulu.
           </div>
         )}
+        {qtyTerbuang.length > 0 && (
+          <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+            Jumlah pada <b>{qtyTerbuang.join(", ")}</b> belum terbaca sebagai angka lebih dari 0
+            — tulis seperti <b>3</b> atau <b>1,5</b>. Tanpa itu bahannya tidak ikut terkirim.
+          </div>
+        )}
         <ErrorText error={error} />
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className={btnSecondary}>
@@ -1260,7 +1289,9 @@ function KirimHasilModal({
           </button>
           <button
             onClick={() => onKirim(items)}
-            disabled={items.length === 0 || adaLebihDariSaldo || isPending}
+            disabled={
+              items.length === 0 || qtyTerbuang.length > 0 || adaLebihDariSaldo || isPending
+            }
             className="rounded-lg bg-purple-600 px-4 py-2 text-sm font-bold text-white hover:bg-purple-500 disabled:opacity-60"
           >
             🚚 Kirim ({items.length} bahan)
