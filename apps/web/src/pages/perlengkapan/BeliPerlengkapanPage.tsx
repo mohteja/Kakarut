@@ -612,7 +612,10 @@ function TibaFakturModal({ faktur, onClose }: { faktur: FakturBeli; onClose: () 
       const items = barisMenunggu.map((r) => ({
         id: r.id,
         qty: angkaDari(draft[r.id]?.qty) || r.qty,
-        total_harga: draft[r.id]?.harga === "" ? null : angkaDari(draft[r.id]?.harga),
+        // `trim()`: dikosongkan = "pakai harga rencana" (server: `?? beli.totalHarga`).
+        // Yang tak terbaca tak sampai ke sini — ditahan `hargaSalahKetik` di bawah.
+        total_harga:
+          (draft[r.id]?.harga ?? "").trim() === "" ? null : angkaDari(draft[r.id]?.harga),
       }));
       if (faktur.fakturId) {
         return api(`/perlengkapan/beli/faktur/${faktur.fakturId}/tiba`, {
@@ -646,6 +649,30 @@ function TibaFakturModal({ faktur, onClose }: { faktur: FakturBeli; onClose: () 
   });
 
   const adaInvalid = barisMenunggu.some((r) => !(angkaDari(draft[r.id]?.qty) > 0));
+  /**
+   * Harga yang TERISI tapi tak terbaca sebagai angka ≥ 0.
+   *
+   * Qty di sebelahnya sudah dijaga oleh `adaInvalid`; kolom harga di baris yang
+   * sama tidak — padahal salah ketiknya jauh lebih sunyi. NaN lolos cek
+   * `harga === ""`, `JSON.stringify` mengubahnya jadi `null`, dan zod server
+   * (`total_harga: z.number().min(0).nullish()`) MENERIMA null. Sesudah itu
+   * `tibaBeliPerlengkapan` menjalankan `params.totalHarga ?? beli.totalHarga`,
+   * jadi null berarti "pakai harga rencana" — persis arti kolom yang sengaja
+   * DIKOSONGKAN.
+   *
+   * Akibatnya salah ketik tak terbedakan dari kosong: ESTIMASI RAB dibukukan
+   * sebagai belanja riil ke `supply_mutations.total_harga` — angka yang mengisi
+   * total belanja kartu perlengkapan dan laporan belanja per supplier. Orang
+   * yang mengetik "125rb" merasa sudah mencatat harga sebenarnya.
+   *
+   * Minus ikut dijaring: zod menolaknya, tapi galatnya menyebut INDEKS larik
+   * `items`, bukan nama barangnya — keluhan yang sama yang membuat empat
+   * halaman lain memasang penjaganya di form.
+   */
+  const hargaSalahKetik = barisMenunggu.filter((r) => {
+    const t = (draft[r.id]?.harga ?? "").trim();
+    return t !== "" && !(angkaDari(t) >= 0);
+  });
 
   return (
     <Modal open onClose={onClose} title={`Tiba di CK — ${faktur.nomor ?? "faktur"}`}>
@@ -699,6 +726,13 @@ function TibaFakturModal({ faktur, onClose }: { faktur: FakturBeli; onClose: () 
             </div>
           ))}
         </div>
+        {hargaSalahKetik.length > 0 && (
+          <div className="rounded-lg bg-red-50 px-3 py-1.5 text-xs font-medium text-red-800">
+            Harga tidak terbaca pada{" "}
+            <b>{hargaSalahKetik.map((r) => r.nama).join(", ")}</b> — tulis angkanya saja,
+            seperti <b>125000</b> atau <b>125.000</b>. Kosongkan bila mau memakai harga rencana.
+          </div>
+        )}
         <ErrorText error={simpan.error} />
         <div className="flex justify-end gap-2 pt-1">
           <button onClick={onClose} className={btnSecondary}>
@@ -706,7 +740,7 @@ function TibaFakturModal({ faktur, onClose }: { faktur: FakturBeli; onClose: () 
           </button>
           <button
             onClick={() => simpan.mutate()}
-            disabled={simpan.isPending || adaInvalid}
+            disabled={simpan.isPending || adaInvalid || hargaSalahKetik.length > 0}
             className={btnPrimary}
           >
             {simpan.isPending ? "Menyimpan…" : "✅ Tiba & Kirim"}
