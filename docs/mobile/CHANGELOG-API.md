@@ -25,6 +25,52 @@ tanpa akses repo server.
 
 ---
 
+## Rilis: Sajian batal tidak ditagih + refund sebagian per sajian
+
+> Belum di-merge ke production. **Ada migrasi DB** (`0093`, seluruhnya aditif:
+> `sale_refunds`, `sale_items.qty_refund`, `sales.subtotal_asal/diskon_asal/
+> pb1_asal/refund_total`).
+
+### 🔴 WAJIB — baris bill berstatus `batal` **tidak boleh ditagih**
+
+`OpenBillItemDto` bertambah `pesanan_status: PesananStatus`. Baris yang dapur
+tandai `batal` **tak jadi dibuat** — di lapangan sebabnya bahannya ternyata
+habis — jadi pembeli tidak boleh membayarnya.
+
+Barisnya **tetap harus ikut** di `PUT /open-bill/:id` (menghilangkannya ditolak
+server, dan jejak pembatalannya ikut lenyap), tapi **keluar** dari subtotal,
+struk, dan payload `POST /penjualan`. Pisahkan dua daftar: satu utuh untuk PUT,
+satu tersaring untuk uang. Server versi lama tidak mengirim field ini —
+perlakukan `null` sebagai "normal", jangan sampai seluruh bill mendadak gratis.
+
+Sudah dikerjakan di klien Flutter (`CartState.linesTagih`).
+
+### 🟢 BARU — `POST /api/penjualan/:id/refund` (kasir boleh)
+
+Untuk transaksi yang **sudah dibayar** lalu ketahuan bahannya habis. Kasir boleh
+melakukannya sendiri — pembelinya sedang berdiri di depan kasir — dan tiap
+refund menyimpan siapa, kapan, berapa, serta alasannya.
+
+Req `{ alasan?, items: [{ sale_item_id, qty }] }` → res `{ ok, nominal,
+total_lama, total_baru }`. Rincian lengkap di `docs/API-CONTRACT.md` §7.
+
+### 🔴 WAJIB — layar yang menampilkan `GET /api/penjualan/:id` harus memakai `qty − qty_refund`
+
+Ini bagian yang paling mudah terlewat. `sale_items.qty` **tidak** dikurangi saat
+refund (berapa yang dipesan dan berapa yang dikembalikan adalah dua fakta
+berbeda), dan `line_total` juga masih nilai asal. Sementara itu
+`sales.subtotal/total` **sudah** menyusut.
+
+Artinya: layar yang masih menjumlahkan `line_total` akan menampilkan struk yang
+bertentangan dengan totalnya sendiri. Hitung ulang dari
+`harga_satuan × (qty − qty_refund)`, dan tampilkan porsi yang dikembalikan
+sebagai keterangan supaya pembeli bisa mencocokkan dengan struk lamanya.
+
+Juga: `nominal` **bukan** `harga_satuan × qty` — bagian diskon & PB1 milik porsi
+itu ikut kembali. Jangan menghitungnya sendiri.
+
+---
+
 ## Rilis: Terima barang hanya lewat Penerimaan + jejak "diterima oleh siapa"
 
 > Belum di-merge ke production. Tidak ada migrasi DB.
