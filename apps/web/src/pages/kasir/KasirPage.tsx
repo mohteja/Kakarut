@@ -535,7 +535,25 @@ export function KasirPage() {
           ...(konsumenWa.trim() ? { customer_wa: konsumenWa.trim() } : {}),
           metode_bayar: metodeBayar,
           ...(metodeBayar === "tunai" && uangNum > 0 ? { uang_diterima: uangNum } : {}),
-          ...(diskon > 0 ? { diskon_tipe: diskonTipe, diskon_nilai: diskonNilaiNum } : {}),
+          // Yang DIKIRIM harus sama persis dengan yang DITAMPILKAN. `diskon` di
+          // atas sudah dipotong ke jatah maksimal kasir, dan layar resume sudah
+          // menuliskan angka terpotong itu berikut totalnya — uang yang
+          // diterima kasir mengikuti angka itu. Mengirim `diskonNilaiNum`
+          // mentah membuat server menghitung diskon PENUH, mendapati diskon itu
+          // melebihi batas kasir, lalu menolak seluruh transaksi dengan 400 —
+          // padahal layarnya sudah menulis "dibatasi" seolah sudah diurus, dan
+          // kasir tak punya petunjuk bahwa ia harus mengetik ulang diskonnya.
+          //
+          // Saat terpotong, kirim sebagai NOMINAL: persentasenya memang tidak
+          // jadi dipakai, jadi menyimpannya sebagai "persen" akan membuat struk
+          // menulis "Diskon (20%)" di sebelah nilai 10% — angka yang tak pernah
+          // terjadi. Saat tidak terpotong, kirim apa adanya agar persentasenya
+          // tetap tercatat untuk laporan.
+          ...(diskon > 0
+            ? diskonDibatasi
+              ? { diskon_tipe: "nominal" as const, diskon_nilai: diskon }
+              : { diskon_tipe: diskonTipe, diskon_nilai: diskonNilaiNum }
+            : {}),
           // membayar open bill → server menagih harga yang dikunci di bill
           ...(editingBillId ? { open_bill_id: editingBillId } : {}),
           items: cart.map((l) => ({
