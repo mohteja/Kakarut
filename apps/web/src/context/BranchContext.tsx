@@ -134,6 +134,31 @@ export function BranchProvider({ children }: { children: ReactNode }) {
     }
   }, [cabang, branchId, isKasir, isAdmin]);
 
+  // Validasi yang sama untuk kedua pilihan "cabang data" — efek di atas hanya
+  // menjaga `branchId`, padahal alasannya berlaku persis sama: sisa pilihan
+  // dari akun/perusahaan lain di browser yang sama.
+  //
+  // Membersihkannya saat login/logout saja tidak cukup. Itu menutup jalur yang
+  // kita ingat hari ini; `cabang-data-ck` sudah membuktikan bahwa satu jalur
+  // saja terlewat sudah menjadikan pilihan warung lain bertahan melintasi
+  // sesi. Di sini nilainya sembuh sendiri begitu daftar cabang tiba, tak peduli
+  // dari mana asalnya.
+  //
+  // `null` memang nilai sah ("belum menyelam ke cabang mana pun"), jadi yang
+  // tak sah dikembalikan ke null — bukan ditebak ke cabang lain.
+  useEffect(() => {
+    if (cabang.length === 0) return;
+    const sah = (id: string | null) => !id || cabang.some((b) => b.id === id && b.is_active);
+    if (!sah(dataBranchId)) {
+      localStorage.removeItem("kakarut.cabang-data");
+      setDataBranchIdState(null);
+    }
+    if (!sah(dataCkBranchId)) {
+      localStorage.removeItem("kakarut.cabang-data-ck");
+      setDataCkBranchIdState(null);
+    }
+  }, [cabang, dataBranchId, dataCkBranchId]);
+
   const set = (id: string) => {
     // Admin tak boleh mengganti lokasi utama (terkunci di Kantor); pemilih
     // lokasi memang disembunyikan, ini penjaga tambahan. Drill "cabang data"

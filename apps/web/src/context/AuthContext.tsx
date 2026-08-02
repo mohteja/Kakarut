@@ -132,6 +132,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       queryClient.clear();
       localStorage.removeItem("kakarut.branch");
       localStorage.removeItem("kakarut.cabang-data");
+      // Ketiganya, bukan dua. `cabang-data-ck` dulu cuma dibuang di jalur
+      // ganti-peran, jadi ia bertahan melintasi logout DAN login: pemilik
+      // warung B mewarisi pilihan CK milik warung A di browser POS yang sama.
+      localStorage.removeItem("kakarut.cabang-data-ck");
       saveAuth(data);
       setAuth(data);
       // Sesi baru = data server paling mutakhir; mulai lagi jendela jedanya
@@ -199,6 +203,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     saveAuth(null);
     localStorage.removeItem("kakarut.branch");
     localStorage.removeItem("kakarut.cabang-data");
+    localStorage.removeItem("kakarut.cabang-data-ck");
     queryClient.clear();
     setAuth(null);
   }, [queryClient]);
