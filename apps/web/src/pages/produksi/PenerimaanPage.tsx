@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { KonfirmasiStatus } from "@kakarut/shared";
 import {
   Card,
@@ -471,6 +471,19 @@ function RiwayatPenerimaan() {
   const total = data?.total ?? 0;
   const perPage = data?.per_page ?? 20;
   const halamanAkhir = Math.max(Math.ceil(total / perPage), 1);
+  // Ganti cabang mengganti seluruh isi riwayat, tapi `page` bertahan. Kontrol
+  // paginasi hanya dirender saat `halamanAkhir > 1`, jadi pindah ke cabang yang
+  // riwayatnya muat satu halaman akan menampilkan halaman 2 yang kosong SEKALIGUS
+  // menghilangkan tombol untuk kembali — persis pesan "belum ada kiriman yang
+  // pernah diterima" pada cabang yang riwayatnya justru ada.
+  useEffect(() => {
+    setPage(1);
+  }, [branchQuery]);
+  // Jaring pengaman: penerimaan baru menggeser jumlah halaman tanpa sentuhan
+  // filter apa pun.
+  useEffect(() => {
+    if (page > halamanAkhir) setPage(halamanAkhir);
+  }, [page, halamanAkhir]);
 
   return (
     <>

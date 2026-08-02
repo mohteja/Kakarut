@@ -370,6 +370,20 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
   function keHalaman(n: number) {
     setPage(Math.min(totalPages, Math.max(1, n)));
   }
+  // Ganti cabang lewat bar data Kantor mengganti SELURUH isi daftar, tapi
+  // `page` bertahan — dan itu bisa mengunci pengguna di layar kosong. Kontrol
+  // paginasi hanya dirender saat `totalPages > 1`, jadi begitu pindah ke cabang
+  // yang fakturnya cukup untuk satu halaman saja, server menjawab halaman 3
+  // dengan nol baris DAN tombol untuk kembali ke halaman 1 ikut hilang. Daftar
+  // yang sebenarnya berisi terlihat kosong permanen.
+  useEffect(() => {
+    setPage(1);
+  }, [branchQuery]);
+  // Jaring pengaman untuk sebab lain yang memendekkan daftar tanpa mengubah
+  // filter — faktur dihapus ke Tempat Sampah, atau tab Beli/Produksi berganti.
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
 
   // Ubah tahap lewat dropdown → HALAMAN penyesuaian (bukan modal, agar gestur
   // back touchpad tak menutup form tak sengaja). Grup dikirim lewat router
