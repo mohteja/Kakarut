@@ -4,7 +4,7 @@ import type { AuthState } from "../lib/api";
 import type { OnboardingStatus, UserRole } from "@kakarut/shared";
 import { HapusAkunButton } from "../components/HapusAkunButton";
 import { Logo } from "../components/Logo";
-import { ErrorText, Spinner, btnPrimary, btnSecondary, inputClass } from "../components/ui";
+import { ErrorText, SpinnerAtauGalat, btnPrimary, btnSecondary, inputClass } from "../components/ui";
 import { useAuth } from "../context/AuthContext";
 import { api } from "../lib/api";
 
@@ -24,7 +24,7 @@ const LABEL_ROLE: Record<UserRole, string> = {
  */
 export function OnboardingPage() {
   const { auth, logout, setSession } = useAuth();
-  const { data, isLoading, refetch } = useQuery({
+  const { data, error: statusGagal, refetch } = useQuery({
     queryKey: ["onboarding-status"],
     queryFn: () => api<OnboardingStatus>("/onboarding/status"),
   });
@@ -64,8 +64,17 @@ export function OnboardingPage() {
           </p>
         </div>
 
-        {isLoading || !data ? (
-          <Spinner />
+        {/* Layar ini satu-satunya yang dilihat akun tanpa perusahaan: tak ada
+            nav, tak ada halaman lain. Spinner abadi di sini bukan sekadar
+            mengganggu — ia mengunci orang di luar aplikasi pada langkah
+            pertama, tanpa kalimat apa pun dan tanpa tombol apa pun. Karena
+            itu tombol coba-lagi wajib, bukan pemanis. */}
+        {!data ? (
+          <SpinnerAtauGalat
+            error={statusGagal}
+            apa="Status undangan"
+            onCoba={() => void refetch()}
+          />
         ) : (
           <>
             {/* Undangan yang menunggu */}

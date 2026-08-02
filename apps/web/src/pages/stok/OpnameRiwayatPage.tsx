@@ -9,7 +9,7 @@ import type {
   OpnameSesiStatus,
   PenyesuaianStatus,
 } from "@kakarut/shared";
-import { ErrorText, Spinner } from "../../components/ui";
+import { ErrorText, Spinner, SpinnerAtauGalat } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { useCabangData } from "../../context/BranchContext";
 import { api } from "../../lib/api";
@@ -53,7 +53,7 @@ function DetailSheet({ sessionId, onClose }: { sessionId: string; onClose: () =>
   const queryClient = useQueryClient();
   const { auth } = useAuth();
   const bolehUbah = auth?.user.role === "owner" || auth?.user.role === "admin";
-  const { data, isLoading } = useQuery({
+  const { data, error: gagalMuat } = useQuery({
     queryKey: ["opname-sesi", sessionId],
     queryFn: () => api<OpnameSesiDetail>(`/stok/opname/sesi/${sessionId}`),
   });
@@ -107,8 +107,11 @@ function DetailSheet({ sessionId, onClose }: { sessionId: string; onClose: () =>
           <h2 className="text-lg font-bold text-stone-800">Detail Opname</h2>
           <button onClick={onClose} className="text-stone-400">✕</button>
         </div>
-        {isLoading || !data ? (
-          <Spinner />
+        {/* `isLoading` sengaja tidak dipakai: bacaan yang GAGAL berakhir
+            `isLoading === false` DAN `data === undefined`, jadi syarat lama
+            tetap benar dan spinnernya berputar selamanya. */}
+        {!data ? (
+          <SpinnerAtauGalat error={gagalMuat} apa="Detail opname" />
         ) : (
           <>
             <div className="mb-2 flex items-center justify-between gap-2">
@@ -313,7 +316,7 @@ function DetailSheetPerl({ sessionId, onClose }: { sessionId: string; onClose: (
   const queryClient = useQueryClient();
   const { auth } = useAuth();
   const bolehUbah = auth?.user.role === "owner" || auth?.user.role === "admin";
-  const { data, isLoading } = useQuery({
+  const { data, error: gagalMuat } = useQuery({
     queryKey: ["perlengkapan-opname", "sesi", sessionId],
     queryFn: () => api<OpnamePerlengkapanDetail>(`/perlengkapan/opname/sesi/${sessionId}`),
   });
@@ -347,8 +350,11 @@ function DetailSheetPerl({ sessionId, onClose }: { sessionId: string; onClose: (
           <h2 className="text-lg font-bold text-stone-800">Detail Opname Perlengkapan</h2>
           <button onClick={onClose} className="text-stone-400">✕</button>
         </div>
-        {isLoading || !data ? (
-          <Spinner />
+        {/* `isLoading` sengaja tidak dipakai: bacaan yang GAGAL berakhir
+            `isLoading === false` DAN `data === undefined`, jadi syarat lama
+            tetap benar dan spinnernya berputar selamanya. */}
+        {!data ? (
+          <SpinnerAtauGalat error={gagalMuat} apa="Detail opname perlengkapan" />
         ) : (
           <>
             <div className="mb-2 flex items-center justify-between gap-2">
@@ -459,12 +465,12 @@ export function OpnameRiwayatPage() {
   const [detail, setDetail] = useState<string | null>(null);
   const [detailPerl, setDetailPerl] = useState<string | null>(null);
 
-  const { data: sesi, isLoading } = useQuery({
+  const { data: sesi, isLoading, error: sesiGagal } = useQuery({
     queryKey: ["opname-riwayat", branchQuery],
     queryFn: () => api<OpnameSesiRow[]>(`/stok/opname/riwayat${branchQuery}`),
     enabled: tab === "bahan",
   });
-  const { data: sesiPerl, isLoading: loadingPerl } = useQuery({
+  const { data: sesiPerl, isLoading: loadingPerl, error: sesiPerlGagal } = useQuery({
     queryKey: ["perlengkapan-opname", branchQuery],
     queryFn: () => api<OpnamePerlengkapanSesiRow[]>(`/perlengkapan/opname/riwayat${branchQuery}`),
     enabled: tab === "perlengkapan",
@@ -507,7 +513,9 @@ export function OpnameRiwayatPage() {
 
       <main className="flex-1 space-y-2 p-3">
         {tab === "bahan" ? (
-          isLoading ? (
+          sesiGagal ? (
+            <SpinnerAtauGalat error={sesiGagal} apa="Riwayat opname bahan baku" />
+          ) : isLoading ? (
             <Spinner />
           ) : (sesi ?? []).length === 0 ? (
             <div className="py-10 text-center text-sm text-stone-400">
@@ -538,6 +546,8 @@ export function OpnameRiwayatPage() {
               </button>
             ))
           )
+        ) : sesiPerlGagal ? (
+          <SpinnerAtauGalat error={sesiPerlGagal} apa="Riwayat opname perlengkapan" />
         ) : loadingPerl ? (
           <Spinner />
         ) : (sesiPerl ?? []).length === 0 ? (

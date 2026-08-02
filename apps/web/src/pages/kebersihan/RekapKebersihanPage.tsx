@@ -12,6 +12,7 @@ import {
   Modal,
   PageTitle,
   Spinner,
+  SpinnerAtauGalat,
   btnPrimary,
   btnSecondary,
   inputClass,
@@ -65,7 +66,7 @@ export function RekapKebersihanPage() {
       ),
   });
 
-  const { data: detail } = useQuery({
+  const { data: detail, error: detailGagal } = useQuery({
     queryKey: ["kebersihan-detail", detailId],
     queryFn: () => api<LaporanKebersihanDto>(`/kebersihan/${detailId}`),
     enabled: !!detailId,
@@ -263,7 +264,7 @@ export function RekapKebersihanPage() {
         lebar="max-w-2xl"
       >
         {!detail ? (
-          <Spinner />
+          <SpinnerAtauGalat error={detailGagal} apa="Detail laporan kebersihan" />
         ) : (
           <>
             <div className="mb-3 text-sm text-stone-600">

@@ -46,13 +46,24 @@ function lamaMenunggu(iso: string): string {
  * papan bisa menampung puluhan kartu dan riwayat hampir tak pernah dibaca.
  */
 function RiwayatModal({ pesanan, onClose }: { pesanan: PesananRow; onClose: () => void }) {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey: ["pesanan-log", pesanan.jenis, pesanan.id],
     queryFn: () => api<PesananLogRow[]>(`/pesanan/${pesanan.jenis}/${pesanan.id}/log`),
   });
   return (
     <Modal open onClose={onClose} title="Riwayat perubahan">
-      {isLoading ? (
+      {/* Cabang GAGAL didahulukan. Tanpa ini, bacaan yang gagal jatuh ke
+          `(data ?? []).length === 0` dan layar menjawab "belum ada perubahan
+          status" — kalimat yang justru menutup pertanyaan yang sedang dibawa
+          orang ke sini. Riwayat ini dibuka untuk memastikan SIAPA yang menandai
+          sajian; menjawab "tak ada apa-apa" saat sebenarnya tak terbaca membuat
+          orang menyimpulkan tak ada yang menyentuhnya. */}
+      {error ? (
+        <p className="rounded-lg bg-red-50 px-3 py-3 text-center text-sm text-red-700">
+          Riwayat gagal dimuat{error instanceof Error ? `: ${error.message}` : ""}. Tutup lalu
+          buka lagi untuk mencoba ulang.
+        </p>
+      ) : isLoading ? (
         <Spinner />
       ) : (data ?? []).length === 0 ? (
         <p className="py-6 text-center text-sm text-stone-400">

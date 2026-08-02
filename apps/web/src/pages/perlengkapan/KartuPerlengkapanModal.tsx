@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import type { KartuPerlengkapanDto, PerlengkapanRowDto } from "@kakarut/shared";
-import { ErrorText, Modal, Spinner, inputClass, tdClass, thClass } from "../../components/ui";
+import { Modal, SpinnerAtauGalat, inputClass, tdClass, thClass } from "../../components/ui";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah, formatTanggal } from "../../lib/format";
 
@@ -55,9 +55,8 @@ export function KartuPerlengkapanModal({
           </div>
         )}
       </div>
-      <ErrorText error={error} />
-      {isLoading || !data ? (
-        <Spinner />
+      {!data ? (
+        <SpinnerAtauGalat error={error} apa="Kartu perlengkapan" />
       ) : (
         <>
           <div className="mb-2 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
