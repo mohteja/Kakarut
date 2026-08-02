@@ -36,8 +36,39 @@ interface ResepDraft {
 
 /** Draft satu langkah cara masak (editor lokal — id server tak dibawa). */
 interface LangkahDraft {
+  /**
+   * Identitas SISI KLIEN saja — tak pernah ikut ke server (`simpan` me-map
+   * ulang jadi `{teks, foto_url}`).
+   *
+   * Ada karena langkah bisa DIURUT ULANG (↑/↓) dan DIHAPUS, sementara
+   * `ImageUpload` mengunggah secara asinkron. Tanpa identitas, satu-satunya
+   * pegangan adalah indeks — dan indeks berpindah makna di tengah unggahan.
+   */
+  _id: string;
   teks: string;
   foto_url: string | null;
+}
+
+let urutLangkah = 0;
+const idLangkah = () => `l${++urutLangkah}`;
+
+/**
+ * Ubah SATU langkah berdasarkan identitasnya, dari state terbaru.
+ *
+ * Dua hal sekaligus, dan keduanya perlu:
+ * - bentuk fungsional `(prev) => …` membaca state TERBARU, bukan snapshot yang
+ *   tertangkap saat render. Callback `ImageUpload` bisa mendarat detik-detik
+ *   kemudian; dengan snapshot lama ia menulis ulang seluruh array dan
+ *   MENGHAPUS semua yang diketik sejak unggahan dimulai.
+ * - dicari lewat `_id`, bukan indeks. Menekan ↑ selagi foto diunggah menggeser
+ *   arti indeks itu, jadi fotonya mendarat di langkah yang salah.
+ */
+function ubahLangkah(
+  setLangkah: React.Dispatch<React.SetStateAction<LangkahDraft[]>>,
+  id: string,
+  ubah: (l: LangkahDraft) => LangkahDraft,
+) {
+  setLangkah((prev) => prev.map((l) => (l._id === id ? ubah(l) : l)));
 }
 
 /**
@@ -212,7 +243,7 @@ export function ResepPage() {
   });
   const [langkah, setLangkah] = useState<LangkahDraft[]>([]);
   useEffect(() => {
-    setLangkah((langkahServer ?? []).map((l) => ({ teks: l.teks, foto_url: l.foto_url })));
+    setLangkah((langkahServer ?? []).map((l) => ({ _id: idLangkah(), teks: l.teks, foto_url: l.foto_url })));
   }, [langkahServer, selectedId]);
 
   // Pengaturan batch & harga + foto hasil/packing, di-seed dari bahan terpilih
@@ -1034,7 +1065,7 @@ export function ResepPage() {
                       <>
                         <div className="space-y-3">
                           {langkah.map((l, i) => (
-                            <div key={i} className="flex items-start gap-2">
+                            <div key={l._id} className="flex items-start gap-2">
                               <span className="mt-1.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-orange-100 text-xs font-bold text-orange-700">
                                 {i + 1}
                               </span>
@@ -1042,11 +1073,12 @@ export function ResepPage() {
                                 <textarea
                                   rows={2}
                                   value={l.teks}
-                                  onChange={(e) => {
-                                    const s = [...langkah];
-                                    s[i] = { ...s[i], teks: e.target.value };
-                                    setLangkah(s);
-                                  }}
+                                  onChange={(e) =>
+                                    ubahLangkah(setLangkah, l._id, (x) => ({
+                                      ...x,
+                                      teks: e.target.value,
+                                    }))
+                                  }
                                   maxLength={1000}
                                   placeholder={`Langkah ${i + 1} — mis. rebus air sampai mendidih…`}
                                   className={`${inputClass} resize-y`}
@@ -1054,11 +1086,12 @@ export function ResepPage() {
                                 />
                                 <ImageUpload
                                   value={l.foto_url}
-                                  onChange={(url) => {
-                                    const s = [...langkah];
-                                    s[i] = { ...s[i], foto_url: url };
-                                    setLangkah(s);
-                                  }}
+                                  onChange={(url) =>
+                                    ubahLangkah(setLangkah, l._id, (x) => ({
+                                      ...x,
+                                      foto_url: url,
+                                    }))
+                                  }
                                   tujuan="resep"
                                   placeholder="📷"
                                 />
@@ -1067,11 +1100,15 @@ export function ResepPage() {
                                 <button
                                   type="button"
                                   disabled={i === 0}
-                                  onClick={() => {
-                                    const s = [...langkah];
-                                    [s[i - 1], s[i]] = [s[i], s[i - 1]];
-                                    setLangkah(s);
-                                  }}
+                                  onClick={() =>
+                                    setLangkah((prev) => {
+                                      const s = [...prev];
+                                      const j = s.findIndex((x) => x._id === l._id);
+                                      if (j <= 0) return prev;
+                                      [s[j - 1], s[j]] = [s[j], s[j - 1]];
+                                      return s;
+                                    })
+                                  }
                                   className="rounded border border-stone-300 px-1.5 text-sm text-stone-600 hover:bg-stone-100 disabled:opacity-30"
                                   aria-label={`Naikkan langkah ${i + 1}`}
                                 >
@@ -1080,11 +1117,15 @@ export function ResepPage() {
                                 <button
                                   type="button"
                                   disabled={i === langkah.length - 1}
-                                  onClick={() => {
-                                    const s = [...langkah];
-                                    [s[i], s[i + 1]] = [s[i + 1], s[i]];
-                                    setLangkah(s);
-                                  }}
+                                  onClick={() =>
+                                    setLangkah((prev) => {
+                                      const s = [...prev];
+                                      const j = s.findIndex((x) => x._id === l._id);
+                                      if (j < 0 || j >= s.length - 1) return prev;
+                                      [s[j], s[j + 1]] = [s[j + 1], s[j]];
+                                      return s;
+                                    })
+                                  }
                                   className="rounded border border-stone-300 px-1.5 text-sm text-stone-600 hover:bg-stone-100 disabled:opacity-30"
                                   aria-label={`Turunkan langkah ${i + 1}`}
                                 >
@@ -1092,7 +1133,7 @@ export function ResepPage() {
                                 </button>
                                 <button
                                   type="button"
-                                  onClick={() => setLangkah(langkah.filter((_, j) => j !== i))}
+                                  onClick={() => setLangkah((prev) => prev.filter((x) => x._id !== l._id))}
                                   className="rounded px-1.5 text-sm font-medium text-red-500 hover:underline"
                                   aria-label={`Hapus langkah ${i + 1}`}
                                 >
@@ -1110,7 +1151,7 @@ export function ResepPage() {
                         {langkah.length < MAKS_LANGKAH && (
                           <button
                             type="button"
-                            onClick={() => setLangkah([...langkah, { teks: "", foto_url: null }])}
+                            onClick={() => setLangkah((prev) => [...prev, { _id: idLangkah(), teks: "", foto_url: null }])}
                             className="mt-2 text-sm font-medium text-orange-600 hover:underline"
                           >
                             + Tambah langkah
