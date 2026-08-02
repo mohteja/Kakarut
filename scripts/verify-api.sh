@@ -7432,12 +7432,27 @@ echo "── §161 Buka kasir BERBARENGAN: satu shift, tanpa 500 ──"
 # perilaku yang sebenarnya diuji. §160 di atas juga memakai $REISS105.
 # Indeks parsial `shifts_open_per_branch_uq` (migrasi 0023) yang benar-benar
 # menjaga "satu shift terbuka per cabang" — SELECT-lalu-INSERT selalu punya
-# jeda di antaranya. Yang kalah balapan HARUS mendarat di hasil yang sama
-# dengan jalur berurutan: shift yang sudah ada, bukan galat. Dulu ia menerima
-# 23505 mentah alias 500 — dan di web, 500 yang bukan galat aplikasi memicu
+# jeda di antaranya.
+#
+# Yang dijaga bagian ini: yang kalah balapan mendarat di hasil yang SAMA dengan
+# jalur berurutan. Untuk jalur ONLINE itu berarti 400 berpesan, bukan 500.
+# Penolakannya memang disengaja dan didokumentasikan di rutenya sendiri (kasir
+# ada di depan layar dan harus tahu shift itu bukan yang baru saja ia buka) —
+# ada pula asersi regresi terpisah yang mematoknya. Dulu yang kalah menerima
+# 23505 mentah alias 500, dan di web 500 yang BUKAN galat aplikasi memicu
 # overlay global "server sedang diperbarui": aplikasinya terlihat tumbang
-# padahal kasir cuma membuka laci.
+# padahal kasir cuma membuka laci. Itu bedanya, dan itu yang diuji.
+#
+# Jadi pola kode yang benar adalah 201 untuk yang menang dan 400 untuk sisanya —
+# BUKAN "ketiganya 200". Rute ini menjawab 201 saat membuat.
 api "$REISS105" POST /shift/tutup '{"uang_fisik":0}' > /dev/null 2>&1 || true
+# Prasyarat dipatok TERPISAH, jangan digabung ke asersi balapan. Bila penutupan
+# di atas diam-diam gagal, shift lama tetap terbuka dan KETIGA permintaan akan
+# dijawab 400 — bentuk kegagalan yang sama persis dengan "tak ada yang berhasil
+# membuka", padahal sebabnya jauh sebelum balapan dimulai. Dipisah supaya
+# kegagalannya menyebut dirinya sendiri.
+cek "prasyarat §161: tak ada shift terbuka sebelum balapan" "V == 0" \
+  "$(api "$REISS105" GET /shift/aktif | jq -r 'if .id then 1 else 0 end')"
 R161A=$(mktemp); R161B=$(mktemp); R161C=$(mktemp)
 for f in "$R161A" "$R161B" "$R161C"; do
   curl -s -X POST "$BASE/api/shift/buka" -H "Authorization: Bearer $REISS105" \
@@ -7445,33 +7460,35 @@ for f in "$R161A" "$R161B" "$R161C"; do
     -w '\n%{http_code}' > "$f" &
 done
 wait
-KODE161=""; ID161=""; MOD161=""
+KODE161=""; ID161=""; PESAN161=""
 for f in "$R161A" "$R161B" "$R161C"; do
   KODE161="$KODE161$(tail -n1 "$f") "
   BODY161=$(sed '$d' "$f")
   ID161="$ID161$(printf '%s' "$BODY161" | jq -r '.id // empty') "
-  MOD161="$MOD161$(printf '%s' "$BODY161" | jq -r '.modal_awal // empty') "
+  # Amplop galat server adalah {"error": "..."} — yang ditagih di sini adalah
+  # ADANYA amplop itu, karena persis itu yang membedakan penolakan aplikasi
+  # dari tumbangnya server di mata klien web.
+  PESAN161="$PESAN161$(printf '%s' "$BODY161" | jq -r 'if .error then 1 else 0 end') "
 done
 rm -f "$R161A" "$R161B" "$R161C"
 cek "tiga permintaan bersamaan: TAK ADA yang 5xx" "V == 1" \
   "$(printf '%s' "$KODE161" | grep -qE '\b5[0-9][0-9]\b' && echo 0 || echo 1)"
-cek "ketiganya 200 (yang kalah pun dilayani, bukan ditolak)" "V == 3" \
-  "$(printf '%s' "$KODE161" | tr ' ' '\n' | grep -c '^200$')"
-cek "ketiganya menunjuk shift yang SAMA (bukan dua laci)" "V == 1" \
-  "$(printf '%s' "$ID161" | tr ' ' '\n' | grep -v '^$' | sort -u | wc -l)"
-# Sengaja TIDAK mematok 123.000: bila shift sebelumnya tak sempat ditutup,
-# yang menang adalah shift lama dengan modal lain — dan itu tetap BENAR. Yang
-# dijaga: angka yang dilaporkan ketiganya sama dengan yang tersimpan di server,
-# bukan angka yang dikarang masing-masing dari permintaannya sendiri.
+cek "tepat SATU yang menang (201 dibuat)" "V == 1" \
+  "$(printf '%s' "$KODE161" | tr ' ' '\n' | grep -c '^201$')"
+cek "dua yang kalah ditolak 400 BERPESAN, bukan 500" "V == 2" \
+  "$(printf '%s' "$KODE161" | tr ' ' '\n' | grep -c '^400$')"
+cek "tiap yang kalah membawa amplop galat aplikasi {error}" "V == 2" \
+  "$(printf '%s' "$PESAN161" | tr ' ' '\n' | grep -c '^1$')"
+cek "hanya SATU badan yang membawa id shift (yang menang)" "V == 1" \
+  "$(printf '%s' "$ID161" | tr ' ' '\n' | grep -v '^$' | wc -l)"
 AKTIF161=$(api "$REISS105" GET /shift/aktif)
 cek "server menyisakan tepat SATU shift terbuka di cabang ini" "V == 1" \
   "$(printf '%s' "$AKTIF161" | jq -r 'if .id then 1 else 0 end')"
-cek "id yang disepakati ketiganya == shift aktif di server" "V == 1" \
-  "$(printf '%s' "$ID161" | tr ' ' '\n' | grep -v '^$' | sort -u \
+cek "id pemenang == shift aktif di server (bukan laci kedua)" "V == 1" \
+  "$(printf '%s' "$ID161" | tr ' ' '\n' | grep -v '^$' \
      | grep -qxF "$(printf '%s' "$AKTIF161" | jq -r '.id')" && echo 1 || echo 0)"
-cek "modal yang dilaporkan ketiganya == modal tersimpan (tak dikarang)" "V == 1" \
-  "$(printf '%s' "$MOD161" | tr ' ' '\n' | grep -v '^$' | sort -u \
-     | grep -qxF "$(printf '%s' "$AKTIF161" | jq -r '.modal_awal')" && echo 1 || echo 0)"
+cek "modal shift aktif == yang dikirim ketiganya (123.000)" "V == 123000" \
+  "$(printf '%s' "$AKTIF161" | jq -r '.modal_awal')"
 
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]
