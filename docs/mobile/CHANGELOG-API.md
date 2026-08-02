@@ -99,6 +99,8 @@ menyusut sendiri akan terbaca seperti kesalahan sistem. Web menuliskannya
 tinggal 0. Status barisnya sengaja TIDAK ikut berubah jadi `batal`: status
 adalah catatan dapur, bukan turunan uang.
 
+Sudah dikerjakan di klien Flutter (`PesananItem.qtyRefund` + `habisRefund`).
+
 ### 🟡 PERLU DICEK — struk termal: baris "Sudah dikembalikan"
 
 `ReceiptData` (di `@kakarut/shared`, dipakai bersama untuk ESC/POS) bertambah
@@ -111,6 +113,9 @@ Kalau mobile merakit `ReceiptData` sendiri, isi field ini dari
 porsi & total yang lebih kecil dari struk asli di tangan pembeli — dua kertas
 berbeda angka, tak satu pun menjelaskan sebabnya. Cetak ulang justru dipakai
 saat ada perselisihan.
+
+Sudah dikerjakan di klien Flutter (`ReceiptData.refundTotal` diisi dari
+`sale.refundTotal`, berikut `qtyDitagih`/`lineTotalDitagih` per baris).
 
 ### ⚪️ INFO — laporan & rekap shift kini sadar refund
 
