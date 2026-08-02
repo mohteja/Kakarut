@@ -53,6 +53,23 @@ function berkasTsx(dir: string): string[] {
  */
 const SPINNER_MENUNGGU_DATA = /!\s*(\w+)\s*\?\s*\(?\s*\n?\s*<Spinner\s*\/>/g;
 
+/**
+ * Bentuk KEDUA, dan ini yang lolos dari penjaga versi pertama:
+ *
+ *     if (isLoading || !data) return <Spinner />;
+ *
+ * Sama persis akibatnya — bacaan gagal → `isLoading` false, `data` undefined →
+ * berputar selamanya — tapi tak ada tanda tanya di dalamnya, jadi pola ternary
+ * di atas tak pernah mengenainya. Enam halaman mengidapnya diam-diam
+ * (riwayat harga, perusahaan, profil, dan tiga panel superadmin) SESUDAH kelas
+ * ini saya nyatakan terkunci.
+ *
+ * Pelajarannya bukan "tambah satu regex": penjaga yang cuma mengunci SATU
+ * penulisan dari sebuah kesalahan memberi rasa aman yang lebih berbahaya
+ * daripada tak ada penjaga sama sekali, karena kelasnya dilaporkan beres.
+ */
+const SPINNER_RETURN_AWAL = /if\s*\([^)]*?!\s*(\w+)[^)]*\)\s*return\s*<Spinner\s*\/>/g;
+
 /** Nama yang di-bind ke `data` pada tiap `useQuery`, + apakah `error` dibaca. */
 function queryPerBerkas(isi: string): Map<string, boolean> {
   const hasil = new Map<string, boolean>();
@@ -70,13 +87,15 @@ describe("tak ada spinner abadi di web", () => {
   for (const berkas of berkasTsx(akarWeb)) {
     const isi = readFileSync(berkas, "utf8");
     const query = queryPerBerkas(isi);
-    for (const m of isi.matchAll(SPINNER_MENUNGGU_DATA)) {
-      const nama = m[1];
-      // Bukan dari useQuery (mis. state lokal) → bukan urusan penjaga ini.
-      if (!query.has(nama)) continue;
-      if (query.get(nama)) continue; // `error` dibaca → cabang galat mungkin
-      const baris = isi.slice(0, m.index).split("\n").length;
-      pelanggar.push(`${berkas.slice(akarWeb.length)}:${baris} (${nama})`);
+    for (const pola of [SPINNER_MENUNGGU_DATA, SPINNER_RETURN_AWAL]) {
+      for (const m of isi.matchAll(pola)) {
+        const nama = m[1];
+        // Bukan dari useQuery (mis. state lokal) → bukan urusan penjaga ini.
+        if (!query.has(nama)) continue;
+        if (query.get(nama)) continue; // `error` dibaca → cabang galat mungkin
+        const baris = isi.slice(0, m.index).split("\n").length;
+        pelanggar.push(`${berkas.slice(akarWeb.length)}:${baris} (${nama})`);
+      }
     }
   }
 

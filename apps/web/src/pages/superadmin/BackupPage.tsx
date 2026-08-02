@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import type { BackupStatusDto } from "@kakarut/shared";
-import { Card, ErrorText, PageTitle, Spinner, btnPrimary } from "../../components/ui";
+import { Card, ErrorText, PageTitle, Spinner, SpinnerAtauGalat, btnPrimary } from "../../components/ui";
 import { TabelResponsif } from "../../components/TabelResponsif";
 import { api, loadAuth } from "../../lib/api";
 
@@ -63,7 +63,7 @@ function InfoCard({
 export function BackupPage() {
   const queryClient = useQueryClient();
   const [pesan, setPesan] = useState<string | null>(null);
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey: ["admin-backup"],
     queryFn: () => api<BackupStatusDto>("/admin/sistem/backup"),
     refetchInterval: 15_000,
@@ -103,7 +103,7 @@ export function BackupPage() {
     URL.revokeObjectURL(url);
   }
 
-  if (isLoading || !data) return <Spinner />;
+  if (!data) return <SpinnerAtauGalat error={error} apa="Status cadangan" />;
 
   const jam = `${String(data.jam_lokal).padStart(2, "0")}:00`;
   const gagalTerakhir = data.riwayat.find((b) => b.status === "gagal");

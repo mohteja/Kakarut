@@ -3,7 +3,7 @@ import { useState } from "react";
 import type { RiwayatHargaDto } from "@kakarut/shared";
 import { api } from "../lib/api";
 import { formatAngka, formatRupiah, formatTanggal } from "../lib/format";
-import { ErrorText, Modal, Spinner, btnPrimary, btnSecondary, inputClass } from "./ui";
+import { ErrorText, Modal, Spinner, SpinnerAtauGalat, btnPrimary, btnSecondary, inputClass } from "./ui";
 
 /**
  * Isi kartu RIWAYAT HARGA satu barang (bahan baku / perlengkapan): daftar lot
@@ -28,7 +28,7 @@ export function RiwayatHargaPanel({
   invalidateKeys?: string[][];
 }) {
   const queryClient = useQueryClient();
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey: ["riwayat-harga", endpoint],
     queryFn: () => api<RiwayatHargaDto>(`${endpoint}/pembelian`),
   });
@@ -58,7 +58,7 @@ export function RiwayatHargaPanel({
     },
   });
 
-  if (isLoading || !data) return <Spinner />;
+  if (!data) return <SpinnerAtauGalat error={error} apa="Riwayat harga" />;
 
   return (
     <div className="space-y-3">

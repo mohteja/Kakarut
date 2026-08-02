@@ -6,6 +6,7 @@ import {
   ErrorText,
   PageTitle,
   Spinner,
+  SpinnerAtauGalat,
   btnPrimary,
   inputClass,
 } from "../../components/ui";
@@ -143,7 +144,7 @@ function KartuMode({ company }: { company: Company }) {
 
 export function PerusahaanPage() {
   const queryClient = useQueryClient();
-  const { data: company, isLoading } = useQuery({
+  const { data: company, isLoading, error: errorCompany } = useQuery({
     queryKey: ["company"],
     queryFn: () => api<Company>("/company"),
   });
@@ -193,7 +194,7 @@ export function PerusahaanPage() {
     },
   });
 
-  if (isLoading || !company) return <Spinner />;
+  if (!company) return <SpinnerAtauGalat error={errorCompany} apa="Data perusahaan" />;
 
   return (
     <div className="max-w-2xl">
