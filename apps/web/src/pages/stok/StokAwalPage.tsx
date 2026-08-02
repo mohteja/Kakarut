@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import type { StokRowDto } from "@kakarut/shared";
+import { angkaDari } from "@kakarut/shared";
 import { ErrorText, btnPrimary, btnSecondary } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { useBranch, useCabangData } from "../../context/BranchContext";
@@ -82,7 +83,7 @@ export function StokAwalPage() {
     mutationFn: () => {
       const items = Object.entries(awal)
         .filter(([, v]) => v !== "")
-        .map(([ingredient_id, v]) => ({ ingredient_id, qty: Number(v) }));
+        .map(([ingredient_id, v]) => ({ ingredient_id, qty: angkaDari(v) }));
       return api<{ ok: true; jumlah: number; tanggal: string }>("/stok/awal", {
         method: "POST",
         body: { ...(branchId ? { branch_id: branchId } : {}), tanggal, items },
@@ -201,7 +202,7 @@ export function StokAwalPage() {
                   <div key={id} className="flex justify-between text-sm">
                     <span className="text-stone-700">{namaById.get(id) ?? id}</span>
                     <span className="font-semibold text-stone-800">
-                      {formatAngka(Number(v))} {satuanById.get(id) ?? ""}
+                      {formatAngka(angkaDari(v))} {satuanById.get(id) ?? ""}
                     </span>
                   </div>
                 ))}

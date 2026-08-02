@@ -10,3 +10,4 @@ export * from "./refund";
 export * from "./satuan";
 export * from "./types";
 export * from "./geo";
+export * from "./angka";

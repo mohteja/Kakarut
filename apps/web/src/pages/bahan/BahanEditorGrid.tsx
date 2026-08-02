@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import type { KategoriDto } from "@kakarut/shared";
+import { angkaDari } from "@kakarut/shared";
 import { hargaPerUnit } from "@kakarut/shared";
 import { SatuanSelect } from "../../components/SatuanSelect";
 import { formatAngka } from "../../lib/format";
@@ -80,8 +81,8 @@ export function BahanEditorGrid({
   showJenis?: boolean;
 }) {
   const hpsrDari = (b: BahanEditorRow) =>
-    Number(b.harga_beli) > 0 && Number(b.isi) > 0
-      ? hargaPerUnit(Number(b.harga_beli), Number(b.isi))
+    angkaDari(b.harga_beli) > 0 && angkaDari(b.isi) > 0
+      ? hargaPerUnit(angkaDari(b.harga_beli), angkaDari(b.isi))
       : null;
 
   const fKode = (b: BahanEditorRow, i: number, lebar: string) => (

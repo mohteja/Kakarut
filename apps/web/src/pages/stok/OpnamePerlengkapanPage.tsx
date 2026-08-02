@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import type { PerlengkapanRowDto } from "@kakarut/shared";
+import { angkaDari } from "@kakarut/shared";
 import { ErrorText, Spinner, btnPrimary, btnSecondary } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { useBranch, useCabangData } from "../../context/BranchContext";
@@ -99,7 +100,7 @@ export function OpnamePerlengkapanPage() {
     mutationFn: () => {
       const items = produkTerpilih
         .filter((r) => fisik[r.id] !== undefined && fisik[r.id] !== "")
-        .map((r) => ({ supply_id: r.id, qty_fisik: Number(fisik[r.id]) }));
+        .map((r) => ({ supply_id: r.id, qty_fisik: angkaDari(fisik[r.id]) }));
       return api<{ session_id: string | null; nomor: string | null; jumlah_selisih: number }>(
         `/perlengkapan/opname${branchQuery}`,
         { method: "POST", body: { items, catatan: catatan.trim() || null } },
@@ -120,7 +121,7 @@ export function OpnamePerlengkapanPage() {
   function selisihDari(r: PerlengkapanRowDto): number | null {
     const v = fisik[r.id];
     if (v === undefined || v === "") return null;
-    return Number(v) - r.saldo;
+    return angkaDari(v) - r.saldo;
   }
 
   function kembali() {
@@ -394,7 +395,7 @@ export function OpnamePerlengkapanPage() {
                               : "text-red-600"
                         }
                       >
-                        {formatAngka(r.saldo)} → {formatAngka(Number(fisik[r.id]))}
+                        {formatAngka(r.saldo)} → {formatAngka(angkaDari(fisik[r.id]))}
                         {Math.abs(sel) >= 1e-9 && ` (${sel > 0 ? "+" : ""}${formatAngka(sel)})`}
                       </span>
                     </div>

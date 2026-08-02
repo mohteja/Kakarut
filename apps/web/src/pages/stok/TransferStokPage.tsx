@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { TransferStokFaktur, TransferStokSaldoRow } from "@kakarut/shared";
+import { angkaDari } from "@kakarut/shared";
 import {
   Card,
   ErrorText,
@@ -135,8 +136,8 @@ export function TransferStokPage() {
           tujuan_branch_id: tujuanId,
           catatan: catatan.trim() || null,
           items: baris
-            .filter((b) => b.ingredient_id && Number(b.qty) > 0)
-            .map((b) => ({ ingredient_id: b.ingredient_id, qty: Number(b.qty) })),
+            .filter((b) => b.ingredient_id && angkaDari(b.qty) > 0)
+            .map((b) => ({ ingredient_id: b.ingredient_id, qty: angkaDari(b.qty) })),
         },
       }),
     onSuccess: () => {
@@ -167,7 +168,7 @@ export function TransferStokPage() {
    * termasuk pengecualian "kirim habis" (qty = seluruh sisa).
    */
   const salahKemasan = (s: TransferStokSaldoRow | undefined, qtyTeks: string) => {
-    const qty = Number(qtyTeks);
+    const qty = angkaDari(qtyTeks);
     if (!s || !s.wajib_kelipatan || !(qty > 0)) return null;
     const sisa = tersediaDari(s);
     if (Math.abs(qty - sisa) < 1e-6) return null; // kirim habis
@@ -176,10 +177,10 @@ export function TransferStokPage() {
     return { bawah: Math.floor(kemasan) * s.isi, atas: Math.ceil(kemasan) * s.isi, sisa };
   };
 
-  const barisTerisi = baris.filter((b) => b.ingredient_id && Number(b.qty) > 0);
+  const barisTerisi = baris.filter((b) => b.ingredient_id && angkaDari(b.qty) > 0);
   const adaQtyLebih = baris.some((b) => {
     const s = saldoById.get(b.ingredient_id);
-    return s != null && Number(b.qty) > tersediaDari(s) + 1e-9;
+    return s != null && angkaDari(b.qty) > tersediaDari(s) + 1e-9;
   });
   const adaSalahKemasan = baris.some((b) => salahKemasan(saldoById.get(b.ingredient_id), b.qty));
   const bisaKirim =
@@ -408,7 +409,7 @@ export function TransferStokPage() {
                 <div className="mt-4 space-y-3 sm:hidden">
                   {baris.map((b, i) => {
                     const s = saldoById.get(b.ingredient_id);
-                    const lebih = s != null && Number(b.qty) > tersediaDari(s) + 1e-9;
+                    const lebih = s != null && angkaDari(b.qty) > tersediaDari(s) + 1e-9;
                     return (
                       <div key={i} className="rounded-xl border border-stone-200 p-3">
                         {pilihBahan(i, b)}
@@ -456,7 +457,7 @@ export function TransferStokPage() {
                     <tbody className="divide-y divide-stone-100">
                       {baris.map((b, i) => {
                         const s = saldoById.get(b.ingredient_id);
-                        const lebih = s != null && Number(b.qty) > tersediaDari(s) + 1e-9;
+                        const lebih = s != null && angkaDari(b.qty) > tersediaDari(s) + 1e-9;
                         return (
                           <tr key={i}>
                             <td className="py-2 pr-2">{pilihBahan(i, b)}</td>

@@ -4,11 +4,26 @@ const rupiah = new Intl.NumberFormat("id-ID", {
   maximumFractionDigits: 0,
 });
 
+/**
+ * Angka yang bukan angka dicetak "—", bukan "NaN".
+ *
+ * `Intl.NumberFormat` mencetak NaN secara harfiah: layar menampilkan tulisan
+ * "NaN" atau "Rp NaN" kepada kasir. Itu tak berarti apa-apa bagi pemakainya
+ * dan tampak seperti aplikasi rusak. NaN sampai ke sini lewat jalur yang wajar
+ * — isian yang belum/salah diketik — jadi menjaganya di satu tempat ini
+ * menutup seluruh pemanggil sekaligus.
+ *
+ * "—" dipakai konsisten di aplikasi ini untuk "belum diketahui".
+ */
+const TAK_DIKETAHUI = "—";
+
 export function formatRupiah(n: number): string {
+  if (!Number.isFinite(n)) return TAK_DIKETAHUI;
   return rupiah.format(Math.round(n));
 }
 
 export function formatAngka(n: number, maxDecimals = 2): string {
+  if (!Number.isFinite(n)) return TAK_DIKETAHUI;
   return new Intl.NumberFormat("id-ID", { maximumFractionDigits: maxDecimals }).format(n);
 }
 

@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import type { BeliPerlengkapanRow, PerlengkapanMasterRow } from "@kakarut/shared";
+import { angkaDari } from "@kakarut/shared";
 import {
   Card,
   ErrorText,
@@ -610,8 +611,8 @@ function TibaFakturModal({ faktur, onClose }: { faktur: FakturBeli; onClose: () 
     mutationFn: () => {
       const items = barisMenunggu.map((r) => ({
         id: r.id,
-        qty: Number(draft[r.id]?.qty) || r.qty,
-        total_harga: draft[r.id]?.harga === "" ? null : Number(draft[r.id]?.harga),
+        qty: angkaDari(draft[r.id]?.qty) || r.qty,
+        total_harga: draft[r.id]?.harga === "" ? null : angkaDari(draft[r.id]?.harga),
       }));
       if (faktur.fakturId) {
         return api(`/perlengkapan/beli/faktur/${faktur.fakturId}/tiba`, {
@@ -644,7 +645,7 @@ function TibaFakturModal({ faktur, onClose }: { faktur: FakturBeli; onClose: () 
     },
   });
 
-  const adaInvalid = barisMenunggu.some((r) => !(Number(draft[r.id]?.qty) > 0));
+  const adaInvalid = barisMenunggu.some((r) => !(angkaDari(draft[r.id]?.qty) > 0));
 
   return (
     <Modal open onClose={onClose} title={`Tiba di CK — ${faktur.nomor ?? "faktur"}`}>
@@ -752,7 +753,7 @@ function BuatBeliModal({ onClose }: { onClose: () => void }) {
         // lengkap. Ketikan manual mematikan auto-isi utk baris ini.
         if (!next.hargaManual && ("supplyId" in patch || "qty" in patch)) {
           const acuan = items.find((x) => x.id === next.supplyId)?.harga_beli ?? 0;
-          const qty = Number(next.qty);
+          const qty = angkaDari(next.qty);
           next.harga = acuan > 0 && qty > 0 ? String(Math.round(acuan * qty)) : "";
         }
         return next;
@@ -760,7 +761,7 @@ function BuatBeliModal({ onClose }: { onClose: () => void }) {
     );
   }
 
-  const barisValid = baris.filter((b) => b.supplyId && Number(b.qty) > 0);
+  const barisValid = baris.filter((b) => b.supplyId && angkaDari(b.qty) > 0);
   const simpan = useMutation({
     mutationFn: () =>
       api("/perlengkapan/beli", {
@@ -768,8 +769,8 @@ function BuatBeliModal({ onClose }: { onClose: () => void }) {
         body: {
           items: barisValid.map((b) => ({
             supply_id: b.supplyId,
-            qty: Number(b.qty),
-            total_harga: b.harga === "" ? null : Number(b.harga),
+            qty: angkaDari(b.qty),
+            total_harga: b.harga === "" ? null : angkaDari(b.harga),
           })),
           ck_branch_id: ckId || null,
           tujuan_branch_id: tujuanId || null,
@@ -845,7 +846,7 @@ function BuatBeliModal({ onClose }: { onClose: () => void }) {
                 {item && item.harga_beli > 0 && (
                   <div className="w-full text-[11px] text-stone-400">
                     harga acuan {formatRupiah(item.harga_beli)} / {item.satuan}
-                    {!b.hargaManual && Number(b.qty) > 0 && (
+                    {!b.hargaManual && angkaDari(b.qty) > 0 && (
                       <> — terisi otomatis, boleh diubah</>
                     )}
                   </div>
