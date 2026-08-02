@@ -131,7 +131,33 @@ export function OpnamePerlengkapanPage() {
       setBucket(null);
       setCatatan("");
       setLangkah("lokasi");
-      queryClient.invalidateQueries({ queryKey: ["perlengkapan"] });
+      /**
+       * Menyimpan opname MENULIS mutasi, bukan cuma mengajukan selisih.
+       *
+       * `POST /perlengkapan/opname` memanggil `terapkanKonsumsiOtomatis` lebih
+       * dulu — "jatah otomatis dipotong dulu agar saldo sistem yang
+       * dibandingkan jujur" — dan itu menyisipkan baris `supply_mutations`
+       * ber-status `disetujui` (bawaan kolomnya). Baris itu langsung terpakai:
+       * kartu perlengkapan menyaring `status = 'disetujui'`, dan
+       * `/perlengkapan/master` juga memotong jatah otomatis sebelum menghitung
+       * sebarannya. Sesinya sendiri muncul di Riwayat Opname — yang tautannya
+       * ada di header halaman ini, jadi klik paling wajar sesudah menyimpan
+       * mendarat tepat di daftar yang belum tahu.
+       *
+       * Himpunannya sengaja SAMA PERSIS dengan yang disegarkan saat sesi ini
+       * di-ACC/ditolak di `OpnameRiwayatPage`: kedua peristiwa menggerakkan
+       * angka yang sama, jadi keduanya harus menyegarkan layar yang sama.
+       * Kembarannya untuk bahan baku (`OpnamePage`) sudah begitu sejak awal —
+       * ia menyertakan kartu & riwayat; sisi perlengkapan yang tertinggal.
+       */
+      for (const k of [
+        "perlengkapan",
+        "kartu-perlengkapan",
+        "perlengkapan-opname",
+        "perlengkapan-master",
+      ]) {
+        queryClient.invalidateQueries({ queryKey: [k] });
+      }
     },
   });
 
