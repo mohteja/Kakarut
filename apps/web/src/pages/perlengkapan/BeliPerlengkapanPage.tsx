@@ -669,7 +669,7 @@ function TibaFakturModal({ faktur, onClose }: { faktur: FakturBeli; onClose: () 
                 {r.nama}
               </span>
               <input
-                type="number"
+                type="text"
                 inputMode="decimal"
                 min="0"
                 step="any"
@@ -810,7 +810,7 @@ function BuatBeliModal({ onClose }: { onClose: () => void }) {
                   ))}
                 </select>
                 <input
-                  type="number"
+                  type="text"
                   inputMode="decimal"
                   min="0"
                   step="any"

@@ -326,7 +326,7 @@ export function TransferStokPage() {
 
             const inputQty = (i: number, b: BarisTransfer, lebih: boolean, lebar: string) => (
               <input
-                type="number"
+                type="text"
                 min="0.0001"
                 step="any"
                 inputMode="decimal"

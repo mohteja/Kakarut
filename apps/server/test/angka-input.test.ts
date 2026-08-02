@@ -46,6 +46,32 @@ describe("isian angka: satu pembaca saja (angkaDari)", () => {
     });
   }
 
+  it("isian desimal bukan type=number — peramban membuang komanya", () => {
+    /**
+     * Diukur di Chromium, bukan dikira-kira dari spesifikasi:
+     *
+     *   <input type="number">  ketik "1,5"  → value "15"     ← koma HILANG
+     *   <input type="text">    ketik "1,5"  → value "1,5"
+     *
+     * `type="number"` hanya menerima literal pecahan gaya mesin, jadi komanya
+     * dibuang DIAM-DIAM sebelum kode kita melihatnya — `angkaDari` menerima
+     * "15" dan menjawab 15 dengan benar. Salah 10×, tanpa satu pun tanda.
+     *
+     * Karena itu `angkaDari` saja tidak cukup: isiannya harus `type="text"`
+     * supaya yang diketik benar-benar sampai. (Arah titik-ribuan sudah beres
+     * lebih dulu: "15.000" bertahan utuh bahkan di `type="number"`.)
+     *
+     * Yang hilang: `min`/`step` bawaan peramban. Itu bukan kemunduran —
+     * pagarnya ada dua lapis di bawahnya: penahan simpan di halaman masing-
+     * masing, dan batas zod di server.
+     */
+    for (const berkas of KELUARGA) {
+      const isi = readFileSync(akar + berkas, "utf8");
+      const salah = /type="number"(?:\s*\n\s*\w+="[^"]*")*?\s*\n\s*inputMode="decimal"/.exec(isi);
+      expect(salah?.[0] ?? null).toBeNull();
+    }
+  });
+
   it("lintang/bujur cabang SENGAJA tidak ikut", () => {
     // Di sana "-6.200" adalah koordinat mesin yang berarti -6,2 derajat, bukan
     // -6200. Aturan id-ID hanya berlaku untuk angka yang berasal dari layar

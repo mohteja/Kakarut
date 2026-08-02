@@ -127,7 +127,7 @@ export function BahanEditorGrid({
 
   const fHargaBeli = (b: BahanEditorRow, i: number, lebar: string) => (
     <input
-      type="number"
+      type="text"
       min="0"
       step="any"
       inputMode="decimal"
@@ -152,7 +152,7 @@ export function BahanEditorGrid({
     <div className="flex items-center gap-1 text-sm whitespace-nowrap text-stone-600">
       <span>1 {b.satuan_beli || "beli"} =</span>
       <input
-        type="number"
+        type="text"
         min="0.0001"
         step="any"
         inputMode="decimal"
@@ -228,7 +228,7 @@ export function BahanEditorGrid({
 
   const fStokMin = (b: BahanEditorRow, i: number, lebar: string) => (
     <input
-      type="number"
+      type="text"
       min="0"
       step="any"
       inputMode="decimal"
@@ -242,7 +242,7 @@ export function BahanEditorGrid({
 
   const fMinBeli = (b: BahanEditorRow, i: number, lebar: string) => (
     <input
-      type="number"
+      type="text"
       min="0"
       step="any"
       inputMode="decimal"
