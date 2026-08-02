@@ -140,9 +140,31 @@ export function TenantsPage() {
             hp: "aksi",
             kelasSel: "text-right",
             sel: (t) => (
+              /*
+                MENANGGUHKAN = MENGUNCI SELURUH PERUSAHAAN, SEKETIKA.
+                Gerbang sesi menyaring `companies.is_active` (middleware auth),
+                jadi begitu ditangguhkan SETIAP permintaan dari SETIAP
+                penggunanya dijawab 401 — kasir yang sedang melayani antrean
+                ikut terlempar, di tengah bill yang belum dibayar.
+
+                Tombolnya duduk di kolom yang sama pada tiap baris tenant, jadi
+                salah baris berarti mematikan perusahaan yang salah. Karena itu
+                konfirmasinya MENYEBUT NAMA: yang dibaca orang sebelum menekan
+                "OK" adalah nama perusahaannya, bukan pertanyaan umum.
+
+                Ini juga menyamakan langkah dengan sisa aplikasi — menghapus
+                SATU member pun sudah minta konfirmasi, begitu pula bersihkan
+                log galat. Aksi paling merusak di sini justru yang tak punya.
+              */
               <button
-                onClick={() => toggle.mutate(t)}
-                className="text-sm font-medium text-stone-500 hover:underline"
+                onClick={() => {
+                  const pesan = t.is_active
+                    ? `Tangguhkan "${t.nama}"?\n\nSeluruh penggunanya langsung tidak bisa memakai aplikasi — termasuk kasir yang sedang melayani. Bisa diaktifkan lagi kapan saja.`
+                    : `Aktifkan kembali "${t.nama}"?\n\nPenggunanya bisa masuk lagi seperti biasa.`;
+                  if (confirm(pesan)) toggle.mutate(t);
+                }}
+                disabled={toggle.isPending}
+                className="text-sm font-medium text-stone-500 hover:underline disabled:opacity-50"
               >
                 {t.is_active ? "Tangguhkan" : "Aktifkan"}
               </button>
