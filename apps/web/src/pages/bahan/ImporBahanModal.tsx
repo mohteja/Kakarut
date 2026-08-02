@@ -3,7 +3,8 @@ import { useState } from "react";
 import type { BahanDto, BahanImportMode, BahanImportResult } from "@kakarut/shared";
 import { ErrorText, Modal, btnPrimary, btnSecondary } from "../../components/ui";
 import { api } from "../../lib/api";
-import { buatCsvBahan, keRowsImpor, parseCsv, unduhCsv, type TerbacaCsv } from "../../lib/bahanCsv";
+import { buatCsvBahan, keRowsImpor, parseCsv, type TerbacaCsv } from "../../lib/bahanCsv";
+import { unduhCsv } from "../../lib/unduh";
 
 /**
  * Impor bahan baku dari CSV: unduh template (berisi data lama) → edit → unggah →

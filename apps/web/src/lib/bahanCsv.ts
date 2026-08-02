@@ -33,6 +33,37 @@ function selCsv(v: string): string {
 
 const ya = (b: boolean) => (b ? "ya" : "tidak");
 
+/**
+ * Angka untuk SEL CSV, dalam bentuk yang `keAngka` di bawah baca balik UTUH.
+ *
+ * `String(n)` bukan bentuk itu. Pemisah ribuan dikenali dari grup tiga angka,
+ * dan pecahan tiga digit adalah grup tiga angka:
+ *
+ *     String(0.125) → "0.125"  → keAngka → 125     ← 1000× lebih besar
+ *     String(1.375) → "1.375"  → keAngka → 1375
+ *
+ * Akibatnya ekspor → impor TANPA disentuh sama sekali sudah merusak datanya:
+ * vanili 0,125 kg jadi 125 kg. Pemilik menekan Ekspor untuk mencadangkan, lalu
+ * Impor untuk memulihkan, dan justru itu yang menghancurkannya.
+ *
+ * Yang diperbaiki cuma bentuk tulisnya, seminimal mungkin:
+ * - bilangan bulat apa adanya (`50000`) — bagian terbesar isi berkas ini, dan
+ *   berkas hasil ekspor yang sudah ada tak berubah sedikit pun;
+ * - pecahan pakai KOMA (kaidah id-ID, sama dengan seluruh aplikasi), dan bila
+ *   pecahannya TEPAT tiga digit ditambah satu nol. Hanya panjang tiga yang
+ *   bertabrakan dengan pola ribuan, jadi hanya itu yang perlu diganggu —
+ *   tanpa pembulatan, tanpa memaksa semua angka berekor nol.
+ */
+function selAngka(n: number): string {
+  if (!Number.isFinite(n)) return "0";
+  if (Number.isInteger(n)) return String(n);
+  const s = String(n);
+  // Notasi eksponen (|n| < 1e-6) di luar jangkauan harga/takaran; biarkan.
+  if (s.includes("e") || s.includes("E")) return s;
+  const [bulat, pecah = ""] = s.split(".");
+  return `${bulat},${pecah.length === 3 ? `${pecah}0` : pecah}`;
+}
+
 /** Susun CSV dari daftar bahan — kolom persis form Ubah (ekspor & template). */
 export function buatCsvBahan(bahan: BahanDto[]): string {
   const baris = bahan.map((b) =>
@@ -41,14 +72,14 @@ export function buatCsvBahan(bahan: BahanDto[]): string {
       b.nama,
       b.kategori,
       b.pengadaan,
-      String(b.harga_beli),
-      String(b.isi),
+      selAngka(b.harga_beli),
+      selAngka(b.isi),
       b.satuan,
       b.satuan_beli ?? "",
-      String(b.stok_minimum),
-      String(b.min_beli ?? 0),
-      String(b.masa_simpan_hari ?? 0),
-      String(b.lead_time_hari ?? 0),
+      selAngka(b.stok_minimum),
+      selAngka(b.min_beli ?? 0),
+      selAngka(b.masa_simpan_hari ?? 0),
+      selAngka(b.lead_time_hari ?? 0),
       ya(b.boleh_eceran),
       ya(b.track_stok),
       ya(b.is_packaging),
@@ -103,6 +134,22 @@ export function parseCsv(teks: string): string[][] {
 }
 
 /**
+ * Pola "ini pemisah RIBUAN", untuk sel yang cuma punya satu jenis pemisah.
+ *
+ * Grup pertama sengaja `[1-9]`, bukan `\d`: pemisah ribuan tak pernah mengikuti
+ * nol telanjang. Tanpa syarat itu `0,125` — takaran yang lumrah ditulis orang —
+ * cocok dengan pola ribuan dan terbaca 125. Bukan cuma soal ekspor: petugas
+ * yang mengetik sendiri "0,125" di Excel pun mendapat 125, diam-diam.
+ *
+ * Yang memang tetap kabur dibiarkan kabur ke arah ribuan, karena itulah maksud
+ * yang lebih lazim pada berkas ketikan tangan: `1.500` → 1500, `123,456` →
+ * 123456. Ekspor tak pernah menghasilkan bentuk itu untuk pecahan (lihat
+ * `selAngka`), jadi ronde ekspor→impor tetap utuh.
+ */
+const RIBUAN_KOMA = /^[1-9]\d{0,2}(,\d{3})+$/;
+const RIBUAN_TITIK = /^[1-9]\d{0,2}(\.\d{3})+$/;
+
+/**
  * Koersi angka dari sel CSV — toleran terhadap input pengguna/Excel:
  * - buang simbol mata uang ("Rp"), spasi, dan karakter lain ("Rp 10.000,-").
  * - titik/koma ribuan dibedakan dari desimal: bila keduanya ada, pemisah desimal
@@ -121,8 +168,8 @@ function keAngka(v: string, fallback: number): number {
         ? s.replace(/\./g, "").replace(",", ".") // desimal koma (ID)
         : s.replace(/,/g, ""); // desimal titik (EN)
   } else if (adaKoma) {
-    s = /^\d{1,3}(,\d{3})+$/.test(s) ? s.replace(/,/g, "") : s.replace(",", ".");
-  } else if (adaTitik && /^\d{1,3}(\.\d{3})+$/.test(s)) {
+    s = RIBUAN_KOMA.test(s) ? s.replace(/,/g, "") : s.replace(",", ".");
+  } else if (adaTitik && RIBUAN_TITIK.test(s)) {
     s = s.replace(/\./g, ""); // titik ribuan (mis. 10.000)
   }
   const n = Number(s);
@@ -194,15 +241,4 @@ export function keRowsImpor(tabel: string[][]): TerbacaCsv {
     });
   }
   return { rows, dilewatiTanpaNama };
-}
-
-/** Unduh string sebagai berkas CSV (BOM UTF-8 agar Excel membaca aksara Indonesia). */
-export function unduhCsv(nama: string, isi: string) {
-  const blob = new Blob([`﻿${isi}`], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = nama;
-  a.click();
-  URL.revokeObjectURL(url);
 }
