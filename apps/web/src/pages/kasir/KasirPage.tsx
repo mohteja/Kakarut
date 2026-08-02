@@ -13,6 +13,7 @@ import type {
   PesananStatus,
   Shift,
 } from "@kakarut/shared";
+import { angkaDari } from "@kakarut/shared";
 import {
   Card,
   ErrorText,
@@ -531,7 +532,11 @@ export function KasirPage() {
   const cartTagih = cart.filter((l) => !dibatalkan(l));
   const subtotal = cartTagih.reduce((a, l) => a + hargaBaris(l) * l.qty, 0);
   // diskon per transaksi (cermin logika server: clamp ke [0, subtotal])
-  const diskonNilaiNum = Number(diskonNilai) || 0;
+  // `angkaDari`, bukan `Number`: kotaknya melayani DUA mode sekaligus —
+  // persen ("7,5") dan nominal rupiah ("10.000"). `Number` salah di keduanya:
+  // komanya jadi NaN, titik ribuannya jadi 10. Satu pengurai menutup dua-duanya
+  // tanpa perlu percabangan per mode.
+  const diskonNilaiNum = angkaDari(diskonNilai) || 0;
   const diskonRaw =
     diskonNilaiNum <= 0
       ? 0
@@ -1410,8 +1415,11 @@ export function KasirPage() {
                       </button>
                     </div>
                     <input
-                      type="number"
-                      min="0"
+                      /* `type="text"` supaya yang diketik benar-benar sampai:
+                         pada `type="number"` Chromium membuang koma ("7,5"→"75")
+                         dan titik ribuan kedua ("1.500.000"→"1.500000"). */
+                      type="text"
+                      inputMode="decimal"
                       max={diskonTipe === "persen" ? (isKasir ? maksDiskonPersen : 100) : undefined}
                       disabled={!diskonBoleh}
                       value={diskonNilai}
