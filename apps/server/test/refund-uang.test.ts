@@ -94,6 +94,40 @@ describe("hitungUangSetelahRefund", () => {
     expect(qtyDitagih({ qty: 2, qtyRefund: 5 })).toBe(0);
   });
 
+  /**
+   * Sifat yang DIANDALKAN rekap tutup kasir: `total + refund_total` harus
+   * kembali persis ke nilai yang dulu benar-benar ditagih. Rekap shift memakai
+   * itu sebagai angka kotor lalu mengurangi refund yang terjadi di jendelanya
+   * sendiri — supaya refund atas transaksi shift kemarin tidak menggeser rekap
+   * shift yang sudah ditutup. Kalau penjumlahan nominalnya meleset walau satu
+   * rupiah karena pembulatan bertahap, selisih kas ikut meleset.
+   */
+  it("nominal refund bertahap menjumlah persis ke total asal", () => {
+    for (let i = 0; i < 2000; i++) {
+      const harga = 333 + ((i * 977) % 40_000);
+      const qty = 2 + (i % 8);
+      const subtotal = harga * qty;
+      const diskon = Math.round((subtotal * (i % 37)) / 100);
+      const pb1 = Math.round(((subtotal - diskon) * 10) / 100);
+      const asalI = { subtotal, diskon, pb1 };
+      let total = subtotal - diskon + pb1;
+      const totalAsal = total;
+      let refundTotal = 0;
+      // Dikembalikan satu porsi demi satu porsi sampai habis — tiap langkah
+      // berjangkar ke `asalI`, persis seperti kolom `*_asal` di database.
+      for (let r = 1; r <= qty; r++) {
+        const sesudah = hitungUangSetelahRefund(
+          [{ hargaSatuan: harga, qty, qtyRefund: r }],
+          asalI,
+        );
+        refundTotal += nominalRefund({ ...asalI, total }, sesudah);
+        total = sesudah.total;
+      }
+      expect(total).toBe(0);
+      expect(total + refundTotal).toBe(totalAsal);
+    }
+  });
+
   it("acak: total sesudah refund tak pernah melebihi total asal", () => {
     for (let i = 0; i < 2000; i++) {
       const harga = 500 + ((i * 137) % 50_000);

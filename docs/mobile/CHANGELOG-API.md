@@ -80,6 +80,23 @@ sebagai keterangan supaya pembeli bisa mencocokkan dengan struk lamanya.
 Juga: `nominal` **bukan** `harga_satuan × qty` — bagian diskon & PB1 milik porsi
 itu ikut kembali. Jangan menghitungnya sendiri.
 
+### ⚪️ INFO — laporan & rekap shift kini sadar refund
+
+Tidak ada perubahan bentuk respons; hanya **angkanya** yang kini benar sesudah
+ada refund. Kalau mobile pernah menghitung ulang salah satu dari ini sendiri
+dari data mentah, samakan sekarang:
+
+- `GET /laporan` (`item_terjual[]`) dan `GET /laporan/menu-laris` menghitung
+  porsi sebagai `qty − qty_refund`, omzetnya `harga_satuan ×` porsi itu. Dulu
+  memakai `qty`/`line_total` mentah, sehingga rincian per menu berselisih dengan
+  `omzet` di respons yang sama persis sebesar refundnya — dan menu yang bahannya
+  habis justru naik peringkat "terlaris".
+- `GET /laporan/bep` ikut memakai porsi & HPP yang ditagih.
+- `GET /shift/aktif` & `GET /shift/:id`: refund dihitung pada shift **tempat
+  uangnya keluar laci**, bukan shift transaksi aslinya. Rekap shift yang sudah
+  ditutup tidak lagi bergeser sendiri ketika transaksinya direfund berhari-hari
+  kemudian. Untuk refund pada shift yang sama, angkanya tidak berubah.
+
 ---
 
 ## Rilis: Terima barang hanya lewat Penerimaan + jejak "diterima oleh siapa"

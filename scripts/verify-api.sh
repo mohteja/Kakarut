@@ -7356,5 +7356,63 @@ cek "penjualan terhapus → refund 404" "V == 404" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/penjualan/$SID159C/refund" -H "Authorization: Bearer $REISS105" -H 'Content-Type: application/json' -d "{\"items\":[{\"sale_item_id\":\"$IT159C\",\"qty\":1}]}")"
 api "$OWNER" PATCH /company '{"pb1_enabled":false,"pb1_rate":0}' > /dev/null
 
+echo "── §160 Refund tidak boleh cuma menyusutkan angka besar ──"
+# Refund menyusutkan `sales.subtotal/total/total_hpp`, TAPI `sale_items.qty` dan
+# `line_total` sengaja tetap merekam apa yang DIPESAN. Akibatnya tiap laporan
+# yang menjumlah `sale_items` mentah-mentah menghitung porsi yang uangnya sudah
+# dikembalikan sebagai porsi terjual — dan berselisih dengan angka utama pada
+# LAYAR YANG SAMA, persis sebesar refundnya. Yang paling menyesatkan: menu yang
+# bahannya habis justru naik peringkat "terlaris".
+#
+# Dan rekap tutup kasir: refund atas transaksi shift KEMARIN tak boleh menggeser
+# rekap shift yang sudah ditutup — uangnya keluar dari laci HARI INI.
+#
+# Angka bulat (menu §156, harga jual 9.000, tanpa diskon & tanpa PB1):
+#   3 porsi = 27.000 → refund 1 porsi = 9.000 → tersisa 2 porsi / 18.000
+HARI160=$(TZ=Asia/Jakarta date +%F)
+laris160() { api "$OWNER" GET "/laporan/menu-laris?dari=$HARI160&sampai=$HARI160&branch_id=$CB156" | jq -r "[.items[]|select(.menu_id==\"$M156\")|.$1]|add // 0"; }
+harian160() { api "$OWNER" GET "/laporan?tanggal=$HARI160&branch_id=$CB156" | jq -r "$1"; }
+rekap160() { api "$OWNER" GET "/shift/aktif?branch_id=$CB156" | jq -r "$1"; }
+
+LARIS160_0=$(laris160 qty)
+OMZ160_0=$(laris160 omzet)
+TUNAI160_0=$(rekap160 .penjualan_tunai)
+
+S160=$(api "$REISS105" POST /penjualan "{\"meja_id\":\"$MEJA156\",\"metode_bayar\":\"tunai\",\"uang_diterima\":30000,\"items\":[{\"menu_id\":\"$M156\",\"qty\":3}]}")
+SID160=$(echo "$S160" | jq -r '.sale.id')
+IT160=$(echo "$S160" | jq -r '.items[0].id')
+cek "3 porsi terjual → Menu Terlaris naik 3" "abs(V - 3) < 0.001" \
+  "$(python3 -c "print($(laris160 qty) - $LARIS160_0)")"
+cek "3 porsi terjual → omzet Menu Terlaris naik 27.000" "abs(V - 27000) < 0.001" \
+  "$(python3 -c "print($(laris160 omzet) - $OMZ160_0)")"
+cek "rekap shift berjalan naik 27.000" "abs(V - 27000) < 0.001" \
+  "$(python3 -c "print($(rekap160 .penjualan_tunai) - $TUNAI160_0)")"
+
+api "$REISS105" POST "/penjualan/$SID160/refund" "{\"alasan\":\"Bahan habis\",\"items\":[{\"sale_item_id\":\"$IT160\",\"qty\":1}]}" > /dev/null
+cek "refund 1 porsi → Menu Terlaris tinggal +2, bukan tetap +3" "abs(V - 2) < 0.001" \
+  "$(python3 -c "print($(laris160 qty) - $LARIS160_0)")"
+cek "refund 1 porsi → omzet Menu Terlaris tinggal +18.000" "abs(V - 18000) < 0.001" \
+  "$(python3 -c "print($(laris160 omzet) - $OMZ160_0)")"
+# Inti temuannya: dua angka pada satu halaman Laporan harus cocok. `omzet` besar
+# datang dari `sales.subtotal` (menyusut saat refund); rincian per menu dulu
+# datang dari `sale_items.line_total` (tidak menyusut).
+cek "Laporan: total item_terjual == omzet — bukan dua angka berbeda" "abs(V) < 0.001" \
+  "$(python3 -c "print($(harian160 '[.item_terjual[].omzet]|add // 0') - $(harian160 '.omzet'))")"
+cek "refund pada shift yang SAMA → rekap tinggal +18.000" "abs(V - 18000) < 0.001" \
+  "$(python3 -c "print($(rekap160 .penjualan_tunai) - $TUNAI160_0)")"
+
+# Tutup lalu buka shift baru: uang refund keluar dari laci SHIFT BARU.
+# Id shift diambil SEBELUM ditutup — jangan bergantung pada urutan daftar.
+SHIFT160L=$(api "$REISS105" GET /shift/aktif | jq -r .id)
+KAS160L=$(api "$OWNER" GET "/shift/$SHIFT160L" | jq -r '.kas_sistem')
+api "$REISS105" POST /shift/tutup "{\"uang_fisik\":$KAS160L,\"catatan\":\"uji 160\"}" > /dev/null
+TUNAI160L=$(api "$OWNER" GET "/shift/$SHIFT160L" | jq -r '.penjualan_tunai')
+api "$REISS105" POST /shift/buka '{"modal_awal":0}' > /dev/null
+api "$REISS105" POST "/penjualan/$SID160/refund" "{\"alasan\":\"Bahan habis\",\"items\":[{\"sale_item_id\":\"$IT160\",\"qty\":1}]}" > /dev/null
+cek "refund lintas shift TIDAK menggeser rekap shift yang sudah ditutup" "abs(V) < 0.001" \
+  "$(python3 -c "print($(api "$OWNER" GET "/shift/$SHIFT160L" | jq -r '.penjualan_tunai') - $TUNAI160L)")"
+cek "shift BARU yang mencatat uang keluar laci: −9.000" "abs(V + 9000) < 0.001" \
+  "$(rekap160 .penjualan_tunai)"
+
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

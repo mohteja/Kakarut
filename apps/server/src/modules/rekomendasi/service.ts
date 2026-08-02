@@ -11,6 +11,7 @@ import {
 import { db } from "../../db/client";
 import { ingredients, saleConsumptions, saleItems, sales } from "../../db/schema";
 import { tanggalDi } from "../../lib/time";
+import { omzetDitagihSql, sumQtyDitagihSql } from "../../lib/porsi-ditagih";
 import { hitungSaldoCabang } from "../stok/service";
 
 /** tanggal N hari lalu (tz perusahaan). Jakarta tanpa DST → geser ms tepat. */
@@ -71,8 +72,12 @@ async function menuTerlarisPeriode(
   const rows = await db
     .select({
       menu_nama: saleItems.menuNama,
-      qty: sum(saleItems.qty),
-      omzet: sum(saleItems.lineTotal),
+      // Porsi yang direfund justru lahir dari bahan yang habis. Menghitungnya
+      // sebagai terjual membuat rekomendasi belanja memakai permintaan yang
+      // tak pernah terlayani sebagai bukti laku — dan angkanya juga tak lagi
+      // sama dengan omzet di Laporan.
+      qty: sumQtyDitagihSql,
+      omzet: omzetDitagihSql,
     })
     .from(saleItems)
     .innerJoin(sales, eq(saleItems.saleId, sales.id))
@@ -86,7 +91,7 @@ async function menuTerlarisPeriode(
       ),
     )
     .groupBy(saleItems.menuNama)
-    .orderBy(desc(sum(saleItems.lineTotal)))
+    .orderBy(desc(omzetDitagihSql))
     .limit(8);
   return rows.map((r) => ({
     menu_nama: r.menu_nama,
