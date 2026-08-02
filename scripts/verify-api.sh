@@ -5528,6 +5528,18 @@ cek "guard: tanpa token → 401" "V == 401" \
   "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/admin/error-log")"
 
 # Mulai dari nol supaya angka bisa diuji pasti.
+#
+# Jeda SEBELUM menghapus, dan itu bukan hiasan. Pencatatan galat sengaja tidak
+# ditunggu (`void` di `app.onError`) — bagian ini sendiri mengakuinya dua puluh
+# baris di bawah, dengan `sleep 1` sebelum MEMBACA. Yang luput: dua asersi
+# guard tepat di atas ini (403 owner-bukan-super-admin dan 401 tanpa token)
+# JUGA melahirkan catatan, lewat jalur tak-ditunggu yang sama.
+#
+# Tanpa jeda ini, salah satu tulisan itu bisa mendarat SESUDAH DELETE-nya, dan
+# "daftar kosong" melihat 1. Persis itu yang terjadi di CI: 1997 lolos, 1
+# gagal, nilainya 1 — satu penyintas, bukan pola. Hapus-lalu-baca yang balapan
+# dengan tulisannya sendiri akan gagal sesekali selamanya.
+sleep 1
 api "$SA" DELETE /admin/error-log > /dev/null
 cek "bersihkan log → daftar kosong" "V == 0" \
   "$(api "$SA" GET "/admin/error-log?hari=30&status=semua" | jq '.total')"
