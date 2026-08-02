@@ -3,10 +3,14 @@
  *
  * Masalahnya bukan klik ganda — tombolnya sudah dimatikan selama pending.
  * Masalahnya jaringan putus SESUDAH server menyimpan transaksi tapi SEBELUM
- * balasannya sampai ke browser: kasir melihat pesan galat, menekan Bayar lagi
- * karena ia tak punya cara tahu transaksinya sudah tercatat, dan penjualan
- * kedua terbuat untuk satu kali pembayaran. Omzet, stok, dan HPP semuanya
- * terhitung dua kali.
+ * balasannya sampai ke browser: transaksi kedua terbuat untuk satu kali
+ * pembayaran, dan omzet, stok, serta HPP semuanya terhitung dua kali.
+ *
+ * DAN ITU TIDAK SELALU BUTUH MANUSIA. Terukur di Chromium: saat server menutup
+ * koneksi keep-alive yang sedang dipakai ulang, browser MENGULANG SENDIRI POST
+ * itu tanpa aksi siapa pun. Jadi kuncinya bukan cuma pengaman dari kasir yang
+ * menekan tombol dua kali — ia pengaman dari perilaku browser yang tak bisa
+ * kita larang.
  *
  * Server sudah punya penangkalnya sejak lama (`cariHasilIdempoten`, diperiksa
  * paling awal di `POST /penjualan`) — tapi itu hanya bekerja kalau klien

@@ -271,8 +271,10 @@ export const penjualanRoutes = new Hono<AppEnv>()
        * secara aturan dan langsung dieksekusi.
        *
        * Kejadiannya sama persis: jaringan putus sesudah server menyimpan tapi
-       * sebelum balasannya sampai, kasir menekan tombolnya lagi karena ia tak
-       * punya cara tahu refundnya sudah tercatat.
+       * sebelum balasannya sampai. Dan itu TIDAK SELALU BUTUH MANUSIA — terukur
+       * di Chromium, browser mengulang sendiri POST yang soketnya ditutup pada
+       * koneksi keep-alive yang dipakai ulang. Klien tanpa `client_ref` bisa
+       * merefund dua kali walau kasirnya menekan tombol sekali.
        */
       if (body.client_ref) {
         const ada = await cariHasilIdempoten(auth.company_id!, body.client_ref);

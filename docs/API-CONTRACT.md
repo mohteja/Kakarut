@@ -389,8 +389,11 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 > porsi tersisa, permintaan kedua sah menurut aturan dan langsung dijalankan.
 >
 > Kejadiannya sama seperti pada penjualan — jaringan putus SESUDAH server
-> menyimpan tapi SEBELUM balasannya sampai, lalu kasir menekan tombolnya lagi
-> karena ia tak punya cara tahu refundnya sudah tercatat. Buat kuncinya SEKALI
+> menyimpan tapi SEBELUM balasannya sampai. **Dan itu tidak selalu butuh
+> manusia:** terukur di Chromium, saat server menutup koneksi keep-alive yang
+> sedang dipakai ulang, browser MENGULANG SENDIRI POST itu tanpa aksi siapa
+> pun. Jadi klien yang tidak mengirim `client_ref` bisa merefund dua kali
+> walau kasirnya hanya menekan tombol sekali. Buat kuncinya SEKALI
 > saat tombol pertama ditekan dan pakai ulang kunci yang sama di tiap percobaan;
 > membuat kunci baru tiap percobaan sama saja dengan tidak mengirimnya. Bila
 > `client_ref` sudah pernah sukses, server membalas **200** dengan hasil yang
