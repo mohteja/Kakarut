@@ -1,5 +1,6 @@
 import { eq, sql } from "drizzle-orm";
 import { Hono, type MiddlewareHandler } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { compress } from "hono/compress";
 import { etag } from "hono/etag";
 import { HTTPException } from "hono/http-exception";
@@ -54,8 +55,53 @@ import { uploadRoutes } from "./modules/upload/routes";
 import { karyawanRoutes } from "./modules/users/routes";
 import { getStorage } from "./modules/upload/storage";
 
+/**
+ * Batas ukuran badan permintaan.
+ *
+ * Tanpa ini TAK ADA batas sama sekali: satu akun yang sah — kasir pun cukup —
+ * bisa mengirim `catatan` berukuran ratusan MB ke mana saja yang menerimanya
+ * (penjualan, kebersihan, opname), dan seluruhnya masuk kolom `text`. Diulang,
+ * ia menggelembungkan basis data penyewa lain di mesin yang sama, dan biaya
+ * penyimpanan/cadangan ikut naik. Yang mengirimnya pun tak harus jahat: satu
+ * klien mobile yang salah mengulang unggahan sudah cukup.
+ *
+ * Dua angka, bukan satu, karena dua jalurnya memang beda ukuran wajar:
+ * - JSON: 2 MB. Cukup longgar untuk impor CSV bahan & `POST /bahan/bulk`
+ *   yang memang mengirim ribuan baris sekaligus.
+ * - Unggahan berkas: 8 MB. Rute `/upload` sudah punya pagarnya sendiri di
+ *   `MAX_SIZE = 5 MB`; angka ini sengaja LEBIH BESAR supaya yang menolak tetap
+ *   pesan 413 yang bisa dibaca dari rute itu, bukan pemutusan mentah di sini.
+ */
+const BATAS_JSON = 2 * 1024 * 1024;
+const BATAS_UNGGAH = 8 * 1024 * 1024;
+
+const tolakKebesaran = (batas: number) =>
+  bodyLimit({
+    maxSize: batas,
+    onError: () => {
+      throw new HTTPException(413, {
+        message: `Data yang dikirim terlalu besar (batas ${Math.round(batas / 1024 / 1024)} MB).`,
+      });
+    },
+  });
+
+/**
+ * SATU middleware, bukan dua `.use()` berpola jalur: di Hono semua middleware
+ * yang cocok ikut berjalan, jadi memasang `/upload` lalu `*` akan membuat
+ * unggahan tetap terkena batas JSON yang lebih kecil — persis kebalikan dari
+ * yang dimaksud. Jalurnya `/upload` PERSIS (klien memanggil `/upload?tujuan=`),
+ * jadi pola `/upload/*` pun tak akan pernah cocok.
+ */
+const batasBadan: MiddlewareHandler<AppEnv> = (c, next) => {
+  const unggah = c.req.path === "/api/upload" || c.req.path.startsWith("/api/upload/");
+  return tolakKebesaran(unggah ? BATAS_UNGGAH : BATAS_JSON)(c, next);
+};
+
 export function createApp() {
   const api = new Hono<AppEnv>()
+    // Pagar ukuran badan — dipasang PALING AWAL supaya berlaku sebelum
+    // autentikasi, parsing zod, maupun rute mana pun sempat menyentuhnya.
+    .use("*", batasBadan)
     // Tandai tiap respons API dengan build id frontend saat ini → klien tahu
     // ada versi baru (build server ≠ build tab yang dimuat) tanpa polling khusus.
     .use("*", async (c, next) => {
