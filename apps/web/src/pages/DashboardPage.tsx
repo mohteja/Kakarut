@@ -2,7 +2,7 @@ import { useQueries, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import type { LaporanHarian, LaporanPembelian, MenuLaris, StokRowDto } from "@kakarut/shared";
-import { Card, PageTitle, Spinner, StatusBadge, tdClass, thClass } from "../components/ui";
+import { Card, ErrorText, PageTitle, Spinner, StatusBadge, tdClass, thClass } from "../components/ui";
 import { useAuth } from "../context/AuthContext";
 import { labelCabang, useBranch } from "../context/BranchContext";
 import { api } from "../lib/api";
@@ -73,15 +73,15 @@ export function DashboardPage() {
       : (cabang.find((b) => b.id === lihat)?.nama ?? "")
     : cabang.find((b) => b.id === branchId)?.nama;
 
-  const { data: jual } = useQuery({
+  const { data: jual, error: eJual } = useQuery({
     queryKey: ["laporan", hari, hari, kunciLihat],
     queryFn: () => api<LaporanHarian>(`/laporan?dari=${hari}&sampai=${hari}${branchParam}`),
   });
-  const { data: beli } = useQuery({
+  const { data: beli, error: eBeli } = useQuery({
     queryKey: ["laporan-pembelian", hari, hari, kunciLihat],
     queryFn: () => api<LaporanPembelian>(`/laporan/pembelian?dari=${hari}&sampai=${hari}${branchParam}`),
   });
-  const { data: laris } = useQuery({
+  const { data: laris, error: eLaris } = useQuery({
     queryKey: ["menu-laris", hari, hari, kunciLihat],
     queryFn: () => api<MenuLaris>(`/laporan/menu-laris?dari=${hari}&sampai=${hari}${branchParam}`),
   });
@@ -130,6 +130,17 @@ export function DashboardPage() {
     0,
   );
 
+  /*
+   * MENUNGGU vs GAGAL — dulu keduanya satu kondisi.
+   *
+   * `loading` diturunkan dari ADA-TIDAKNYA data, jadi query yang galat membuat
+   * `data` tetap `undefined` selamanya dan Beranda tersangkut di "Memuat…"
+   * tanpa ujung: TanStack sudah berhenti mencoba, tapi layar tak pernah
+   * mengatakannya. Ini halaman pertama sesudah login — menggantung di situ
+   * terbaca seperti aplikasinya rusak, bukan seperti satu permintaan ditolak.
+   */
+  const galat =
+    eJual ?? eBeli ?? eLaris ?? stokQs.find((q) => q.error)?.error ?? penQs.find((q) => q.error)?.error;
   const loading = !jual || !beli || stokQs.some((q) => !q.data) || penQs.some((q) => !q.data);
 
   return (
@@ -169,7 +180,15 @@ export function DashboardPage() {
         </div>
       )}
 
-      {loading ? (
+      {galat ? (
+        <Card className="p-4">
+          <ErrorText error={galat} />
+          <div className="mt-2 text-sm text-stone-500">
+            Sebagian data beranda tidak bisa dimuat, jadi angka hari ini dan peringatan stok tidak
+            ditampilkan — <b>bukan</b> berarti nol. Muat ulang halaman setelah masalahnya beres.
+          </div>
+        </Card>
+      ) : loading ? (
         <Spinner />
       ) : (
         <div className="space-y-6">

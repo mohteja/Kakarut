@@ -9,7 +9,7 @@ import type {
   OpnameSesiStatus,
   PenyesuaianStatus,
 } from "@kakarut/shared";
-import { Spinner } from "../../components/ui";
+import { ErrorText, Spinner } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { useCabangData } from "../../context/BranchContext";
 import { api } from "../../lib/api";
@@ -233,6 +233,16 @@ function DetailSheet({ sessionId, onClose }: { sessionId: string; onClose: () =>
               </tbody>
             </table>
 
+            {/* ACC/Tolak SENGAJA membiarkan modal terbuka supaya sebagian bisa
+                disetujui & sebagian ditolak dalam satu sesi. Konsekuensinya:
+                bila permintaannya gagal, tak ada satu pun yang berubah di layar
+                — persis sama dengan "belum diklik". Galatnya harus terlihat.
+                Yang paling sering muncul di sini bukan gangguan jaringan
+                melainkan "Sesi tidak ditemukan / sudah ditinjau": rekan lain
+                sudah meninjau sesi yang sama dari perangkat lain. Tanpa pesan
+                itu, owner menekan ACC, tak melihat apa-apa, lalu menutup modal
+                dengan keyakinan selisih stoknya sudah dibukukan. */}
+            <ErrorText error={acc.error ?? tolak.error ?? hapus.error} />
             {/* Aksi massal + Hapus — HANYA owner/admin */}
             {bolehUbah && (
               <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-stone-200 pt-4">
@@ -311,6 +321,10 @@ function DetailSheetPerl({ sessionId, onClose }: { sessionId: string; onClose: (
     queryClient.invalidateQueries({ queryKey: ["perlengkapan-opname"] });
     queryClient.invalidateQueries({ queryKey: ["perlengkapan"] });
     queryClient.invalidateQueries({ queryKey: ["kartu-perlengkapan"] });
+    // ACC opname membukukan selisihnya ke saldo — halaman MASTER Perlengkapan
+    // menampilkan saldo itu per cabang. ["perlengkapan"] di atas tidak
+    // menjangkaunya: pencocokan awalan membandingkan elemen pertama secara utuh.
+    queryClient.invalidateQueries({ queryKey: ["perlengkapan-master"] });
   };
   const aksi = useMutation({
     mutationFn: (jenis: "acc" | "tolak" | "hapus") =>
@@ -386,6 +400,11 @@ function DetailSheetPerl({ sessionId, onClose }: { sessionId: string; onClose: (
                 ))}
               </tbody>
             </table>
+            {/* Modal hanya menutup saat berhasil, jadi kegagalan meninggalkan
+                layar yang sama tanpa sebab apa pun. Sama seperti opname bahan:
+                "Sesi tidak ditemukan / sudah ditinjau" adalah jawaban yang
+                paling mungkin, dan justru itulah yang perlu dibaca owner. */}
+            <ErrorText error={aksi.error} />
             {bolehUbah && (
               <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-stone-200 pt-4">
                 {data.status === "menunggu" && (

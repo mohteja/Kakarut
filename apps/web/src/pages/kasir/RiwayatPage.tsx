@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import type { RiwayatTransaksiRow } from "@kakarut/shared";
-import { Card, PageTitle, Spinner, btnSecondary, inputClass } from "../../components/ui";
+import { Card, ErrorText, PageTitle, Spinner, btnSecondary, inputClass } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
@@ -30,7 +30,7 @@ export function RiwayatPage() {
   // (cabang menyetor data penjualan ke kantor); divisi lain terkunci lokasinya.
   const dariKantor = divisi === "kantor";
   const q = dariKantor ? "?branch_id=all" : branchQuery;
-  const { data: rows, isLoading } = useQuery({
+  const { data: rows, isLoading, error } = useQuery({
     queryKey: ["riwayat", q, tanggal],
     queryFn: () =>
       api<RiwayatTransaksiRow[]>(`/penjualan${q ? `${q}&` : "?"}tanggal=${tanggal}`),
@@ -42,8 +42,33 @@ export function RiwayatPage() {
     enabled: !!selectedId,
   });
 
+  // Kembalikan uang per sajian: kasir pun boleh (pembelinya sedang menunggu di
+  // depan kasir), jejaknya tersimpan di server. Peran lain yang bisa membuka
+  // halaman ini — tim & dapur — hanya melihat, sesuai gerbang server.
+  const bisaRefund =
+    auth?.user.role === "owner" || auth?.user.role === "admin" || auth?.user.role === "cashier";
+
   const list = rows ?? [];
   const totalHari = list.reduce((a, r) => a + r.total, 0);
+
+  /**
+   * Uang & stok sama-sama bergerak saat transaksi dihapus ATAU direfund, jadi
+   * daftar, laporan, dan saldo stok sama-sama basi. Disatukan supaya tak ada
+   * kunci yang terlewat di salah satu jalur.
+   */
+  function segarkan(tutup: boolean) {
+    if (tutup) setSelectedId(null);
+    for (const key of [
+      "riwayat",
+      "penjualan",
+      "transaksi-detail",
+      "stok",
+      "laporan",
+      "rekomendasi",
+    ]) {
+      queryClient.invalidateQueries({ queryKey: [key] });
+    }
+  }
 
   return (
     <div className="max-w-2xl">
@@ -75,8 +100,24 @@ export function RiwayatPage() {
         )}
       </div>
 
+      {/*
+        GAGAL MEMUAT ≠ TIDAK ADA TRANSAKSI. Sebelum ini keduanya terlihat sama
+        persis: "Belum ada transaksi pada tanggal ini." Kasir yang ditolak
+        servernya jadi yakin harinya memang sepi, lalu tutup kasir dengan angka
+        yang tak pernah dibandingkan dengan apa pun. Server yang MATI sudah
+        punya overlay sendiri; yang lolos tanpa jejak justru penolakan biasa
+        (mis. hak akses cabang) — dan itu yang ditampilkan di sini.
+      */}
       {isLoading ? (
         <Spinner />
+      ) : error ? (
+        <Card className="p-4">
+          <ErrorText error={error} />
+          <div className="mt-2 text-sm text-stone-500">
+            Daftar transaksi tidak bisa dimuat, jadi yang tampil di bawah <b>bukan</b> berarti
+            kosong. Muat ulang halaman setelah masalahnya beres.
+          </div>
+        </Card>
       ) : list.length === 0 ? (
         <Card className="p-8 text-center text-sm text-stone-400">
           Belum ada transaksi pada tanggal ini.
@@ -153,16 +194,11 @@ export function RiwayatPage() {
           data={detail}
           autoPrintOnOpen={false}
           onClose={() => setSelectedId(null)}
-          onDeleted={
-            isManajemen
-              ? () => {
-                  setSelectedId(null);
-                  for (const key of ["riwayat", "penjualan", "stok", "laporan", "rekomendasi"]) {
-                    queryClient.invalidateQueries({ queryKey: [key] });
-                  }
-                }
-              : undefined
-          }
+          onDeleted={isManajemen ? () => segarkan(true) : undefined}
+          // Refund tidak menutup struk: kasir biasanya langsung mencetak ulang
+          // agar pembeli memegang angka yang benar. Detailnya disegarkan supaya
+          // panel & struk memakai sisa porsi yang baru.
+          onRefunded={bisaRefund ? () => segarkan(false) : undefined}
         />
       )}
     </div>

@@ -4,6 +4,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import {
+  qtyDitagih,
   ringkasPesanan,
   turunkanStatusPesanan,
   urutkanPesanan,
@@ -308,6 +309,9 @@ export const pesananRoutes = new Hono<AppEnv>()
             id: r.id,
             nama: r.nama,
             qty: r.qty,
+            // Bill belum dibayar → belum ada uang yang bisa dikembalikan.
+            // Pembatalan barisnya diungkapkan lewat `status: "batal"`.
+            qty_refund: 0,
             catatan: r.catatan,
             // null = ikut mode transaksi; bill belum dibayar jadi belum ada
             // keputusan final — tampilkan dine-in sebagai bawaan.
@@ -329,6 +333,7 @@ export const pesananRoutes = new Hono<AppEnv>()
             id: saleItems.id,
             nama: saleItems.menuNama,
             qty: saleItems.qty,
+            qtyRefund: saleItems.qtyRefund,
             catatan: saleItems.catatan,
             isDineIn: saleItems.isDineIn,
             status: saleItems.pesananStatus,
@@ -344,7 +349,12 @@ export const pesananRoutes = new Hono<AppEnv>()
           arr.push({
             id: r.id,
             nama: r.nama,
-            qty: r.qty,
+            // PORSI YANG DITAGIH. Sajian yang uangnya sudah dikembalikan tak
+            // jadi dibuat — bahannya habis, itu justru sebab refundnya. Mengirim
+            // `qty` mentah membuat papan menyuruh dapur memasak porsi yang sudah
+            // dibatalkan, dan porsi itu tak pernah dibayar siapa pun.
+            qty: qtyDitagih(r),
+            qty_refund: r.qtyRefund,
             catatan: r.catatan,
             is_dine_in: r.isDineIn,
             status: r.status,

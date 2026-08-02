@@ -1,5 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
+import { qtyDitagih } from "@kakarut/shared";
 import type { MetodeBayar, ReceiptData } from "@kakarut/shared";
 
 const METODE_LABEL: Record<MetodeBayar, string> = {
@@ -12,6 +13,7 @@ import { useAuth } from "../../context/AuthContext";
 import { usePrinter } from "../../context/PrinterContext";
 import { api } from "../../lib/api";
 import { formatRupiah, formatWaktu } from "../../lib/format";
+import { RefundPanel } from "./RefundPanel";
 
 export interface SaleResult {
   sale: {
@@ -31,6 +33,16 @@ export interface SaleResult {
     metodeBayar: MetodeBayar;
     uangDiterima: number | null;
     catatan: string | null;
+    /**
+     * Angka SEBELUM refund apa pun — jangkar tetap agar refund bertahap tak
+     * menggerus diskon dua kali. null = transaksi ini belum pernah direfund,
+     * jadi nilai terkini di atas memang nilai asalnya.
+     */
+    subtotalAsal: number | null;
+    diskonAsal: number | null;
+    pb1Asal: number | null;
+    /** uang yang sudah dikembalikan ke pembeli (kumulatif, Rp) */
+    refundTotal: number;
   };
   items: {
     id: string;
@@ -40,10 +52,28 @@ export interface SaleResult {
     lineTotal: number;
     isDineIn: boolean;
     catatan: string | null;
+    /**
+     * Porsi baris ini yang sudah dikembalikan (kumulatif). `qty` sengaja tidak
+     * dikurangi — berapa yang dipesan dan berapa yang dikembalikan adalah dua
+     * fakta, dan struk asli harus tetap terbaca. Yang DITAGIH = `qty − ini`.
+     */
+    qtyRefund: number;
   }[];
   branch_nama: string;
   /** nama kasir yang melayani (untuk dicetak di nota) */
   kasir?: string | null;
+}
+
+/**
+ * Catatan baris untuk struk: catatan pembeli, plus keterangan porsi yang
+ * uangnya sudah dikembalikan. Tanpa keterangan itu, struk cetak ulang hanya
+ * menampilkan angka yang lebih kecil tanpa sebab — dan pembeli yang memegang
+ * struk lamanya tak punya cara mencocokkannya.
+ */
+function catatanBaris(it: { catatan: string | null; qtyRefund: number }): string | null {
+  if (it.qtyRefund <= 0) return it.catatan;
+  const ket = `↩ ${it.qtyRefund} porsi dikembalikan`;
+  return it.catatan ? `${it.catatan} · ${ket}` : ket;
 }
 
 /** Baris companies dari GET /company (camelCase Drizzle) — field yg dipakai struk */
@@ -70,6 +100,7 @@ export function ReceiptModal({
   onClose,
   autoPrintOnOpen = true,
   onDeleted,
+  onRefunded,
 }: {
   data: SaleResult;
   onClose: () => void;
@@ -77,6 +108,12 @@ export function ReceiptModal({
   autoPrintOnOpen?: boolean;
   /** bila diberi (owner/admin di Riwayat), tampilkan tombol Hapus → Tempat Sampah */
   onDeleted?: () => void;
+  /**
+   * bila diberi, tampilkan tombol kembalikan uang per sajian (bahan habis).
+   * Kasir pun boleh — pembelinya sedang berdiri di depan kasir; jejaknya
+   * tersimpan di server.
+   */
+  onRefunded?: () => void;
 }) {
   const { auth } = useAuth();
   const { settings, isThermal, canAutoPrint, printReceipt } = usePrinter();
@@ -94,6 +131,7 @@ export function ReceiptModal({
   const [printError, setPrintError] = useState<string | null>(null);
   const [printing, setPrinting] = useState(false);
   const [modeHapus, setModeHapus] = useState(false);
+  const [modeRefund, setModeRefund] = useState(false);
   const autoPrintedFor = useRef<string | null>(null);
 
   // SOFT-DELETE ke Tempat Sampah (cukup konfirmasi — bisa dipulihkan)
@@ -132,13 +170,17 @@ export function ReceiptModal({
       mejaLabel: data.sale.mejaLabel,
       customerNama: data.sale.customerNama,
       customerWa: data.sale.customerWa,
+      // Porsi yang DITAGIH, bukan yang dipesan: sajian yang uangnya sudah
+      // dikembalikan tak boleh muncul sebagai tagihan di struk cetak ulang.
+      // Barisnya tetap ada dengan catatan, supaya pembeli bisa mencocokkan
+      // struk lamanya dan melihat mengapa totalnya berbeda.
       items: data.items.map((it) => ({
         nama: it.menuNama,
-        qty: it.qty,
+        qty: qtyDitagih(it),
         hargaSatuan: it.hargaSatuan,
-        lineTotal: it.lineTotal,
+        lineTotal: it.hargaSatuan * qtyDitagih(it),
         tag: it.isDineIn !== data.sale.isDineIn ? (it.isDineIn ? "DI" : "TA") : null,
-        catatan: it.catatan,
+        catatan: catatanBaris(it),
       })),
       subtotal: data.sale.subtotal,
       diskon: data.sale.diskon,
@@ -146,6 +188,7 @@ export function ReceiptModal({
       pb1Amount: data.sale.pb1Amount,
       pb1Rate: company?.pb1Rate ?? null,
       total: data.sale.total,
+      refundTotal: data.sale.refundTotal,
       metodeBayar: data.sale.metodeBayar,
       uangDiterima: data.sale.uangDiterima,
       catatan: data.sale.catatan,
@@ -202,19 +245,29 @@ export function ReceiptModal({
             {data.sale.customerNama && data.sale.mejaLabel && <div>Meja: {data.sale.mejaLabel}</div>}
           </div>
           <hr className="my-2 border-dashed border-stone-400" />
-          {data.items.map((it) => (
-            <div key={it.id} className="mb-1">
-              <div>{it.menuNama}</div>
-              <div className="flex justify-between">
-                <span>
-                  {it.qty} × {formatRupiah(it.hargaSatuan)}
-                  {it.isDineIn !== data.sale.isDineIn && (it.isDineIn ? " (DI)" : " (TA)")}
-                </span>
-                <span>{formatRupiah(it.lineTotal)}</span>
+          {data.items.map((it) => {
+            // Yang ditagih = dipesan − dikembalikan. `qty` sengaja tak dikurangi
+            // di basis data (dua fakta berbeda), jadi pengurangannya di sini.
+            const ditagih = qtyDitagih(it);
+            return (
+              <div key={it.id} className="mb-1">
+                <div className={ditagih === 0 ? "text-stone-400 line-through" : undefined}>
+                  {it.menuNama}
+                </div>
+                <div className="flex justify-between">
+                  <span>
+                    {ditagih} × {formatRupiah(it.hargaSatuan)}
+                    {it.isDineIn !== data.sale.isDineIn && (it.isDineIn ? " (DI)" : " (TA)")}
+                  </span>
+                  <span>{formatRupiah(it.hargaSatuan * ditagih)}</span>
+                </div>
+                {it.qtyRefund > 0 && (
+                  <div className="text-amber-700">↩ {it.qtyRefund} porsi dikembalikan</div>
+                )}
+                {it.catatan && <div className="text-stone-500">* {it.catatan}</div>}
               </div>
-              {it.catatan && <div className="text-stone-500">* {it.catatan}</div>}
-            </div>
-          ))}
+            );
+          })}
           <hr className="my-2 border-dashed border-stone-400" />
           <div className="flex justify-between">
             <span>Subtotal</span>
@@ -236,6 +289,15 @@ export function ReceiptModal({
             <span>TOTAL</span>
             <span>{formatRupiah(data.sale.total)}</span>
           </div>
+          {/* Angka di atas SUDAH bersih dari refund, jadi baris ini keterangan —
+              bukan pengurang. Ia ada supaya struk cetak ulang bisa menjelaskan
+              sendiri kenapa totalnya beda dari struk yang dipegang pembeli. */}
+          {data.sale.refundTotal > 0 && (
+            <div className="flex justify-between text-amber-700">
+              <span>↩ Sudah dikembalikan</span>
+              <span>{formatRupiah(data.sale.refundTotal)}</span>
+            </div>
+          )}
           <div className="mt-1 flex justify-between">
             <span>Metode</span>
             <span>{METODE_LABEL[data.sale.metodeBayar]}</span>
@@ -283,7 +345,29 @@ export function ReceiptModal({
           </button>
         </div>
 
-        {onDeleted && !modeHapus && (
+        {/* Kembalikan uang mendahului Hapus: yang dituju kasir saat bahan
+            ternyata habis adalah mengembalikan SATU sajian, bukan membuang
+            seluruh transaksi. Menaruh Hapus lebih dulu mengundang keliru. */}
+        {onRefunded && !modeRefund && !modeHapus && (
+          <button
+            onClick={() => setModeRefund(true)}
+            className="mt-2 w-full text-center text-xs font-medium text-amber-700 hover:underline print:hidden"
+          >
+            ↩ Kembalikan uang (sajian tak jadi dibuat)
+          </button>
+        )}
+        {onRefunded && modeRefund && (
+          <RefundPanel
+            data={data}
+            onBatal={() => setModeRefund(false)}
+            onSelesai={() => {
+              setModeRefund(false);
+              onRefunded();
+            }}
+          />
+        )}
+
+        {onDeleted && !modeHapus && !modeRefund && (
           <button
             onClick={() => setModeHapus(true)}
             className="mt-2 w-full text-center text-xs font-medium text-red-600 hover:underline print:hidden"

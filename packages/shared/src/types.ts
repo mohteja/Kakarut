@@ -1527,6 +1527,17 @@ export interface OpenBillItemDto {
   /** null = ikut mode transaksi; true/false = override dine-in per baris */
   dine_in_override: boolean | null;
   catatan: string | null;
+  /**
+   * Status pengerjaan dapur baris ini.
+   *
+   * `batal` berarti sajiannya TIDAK JADI DIBUAT — di lapangan sebabnya bahan
+   * ternyata habis. Baris itu tetap ada demi jejak audit (siapa & kapan
+   * membatalkannya) dan WAJIB dikirim balik saat `PUT`, karena penjaga di
+   * server menolak pembaruan yang menghilangkan baris. Tapi ia tidak boleh
+   * ikut ditagih: tanpa penanda ini kasir tak punya cara membedakannya dari
+   * baris biasa, dan pembeli membayar makanan yang tak pernah dibuat.
+   */
+  pesanan_status: PesananStatus;
 }
 
 /** Ringkasan open bill untuk daftar/pemilih bill di kasir. */
@@ -1581,7 +1592,16 @@ export interface PesananItemRow {
   /** id baris (`sale_items.id` / `open_bill_items.id`) — tujuan tombol per baris */
   id: string;
   nama: string;
+  /**
+   * Porsi yang HARUS DIBUAT — sudah dikurangi yang uangnya dikembalikan.
+   *
+   * Papan ini lembar perintah dapur, jadi angkanya harus angka yang ditagih.
+   * Refund lahir justru karena bahannya habis; menampilkan porsi mentahnya akan
+   * menyuruh dapur memasak sesuatu yang sudah dibatalkan dan tidak dibayar.
+   */
   qty: number;
+  /** porsi yang sudah dikembalikan uangnya (0 untuk bill yang belum dibayar) */
+  qty_refund: number;
   /** personalisasi pelanggan, mis. "tanpa sambal" */
   catatan: string | null;
   is_dine_in: boolean;

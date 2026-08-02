@@ -14,7 +14,7 @@ import {
 } from "../../components/ui";
 import { labelCabang, useBranch, useCabangData } from "../../context/BranchContext";
 import { ApiError, api } from "../../lib/api";
-import { formatAngka, formatRupiah } from "../../lib/format";
+import { formatAngka, formatRupiah, hariIniWIB } from "../../lib/format";
 import { useCompanyMode } from "../../lib/useCompanyMode";
 import {
   AKSI_TAHAP,
@@ -33,10 +33,21 @@ interface PilihanBaris {
   exp: string;
 }
 
-/** Hari ini + n hari (YYYY-MM-DD) — aritmetika Date.UTC bebas drift TZ. */
+/**
+ * Hari ini + n hari (YYYY-MM-DD).
+ *
+ * Berjangkar pada `hariIniWIB()`, BUKAN tanggal lokal perangkat. Aritmetika
+ * `Date.UTC` memang bebas drift, tapi titik mulainya tetap harus benar: di
+ * cabang WITA/WIT (atau perangkat yang zonanya keliru) `new Date().getDate()`
+ * bisa menunjuk hari yang berbeda dari hari kerja perusahaan. Angka yang
+ * dihasilkan di sini bukan sekadar tampilan — ia jadi `exp` lot yang tersimpan
+ * di stok, dan meleset sehari membuat peringatan kedaluwarsa berbunyi pada
+ * barang yang sebenarnya masih layak. Seluruh aplikasi memakai satu makna
+ * "hari ini" (zona perusahaan); di sini pun harus sama.
+ */
 function tanggalPlusHari(n: number): string {
-  const now = new Date();
-  const t = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate() + n));
+  const [th, bl, hr] = hariIniWIB().split("-").map(Number);
+  const t = new Date(Date.UTC(th, bl - 1, hr + n));
   const pad = (x: number) => String(x).padStart(2, "0");
   return `${t.getUTCFullYear()}-${pad(t.getUTCMonth() + 1)}-${pad(t.getUTCDate())}`;
 }

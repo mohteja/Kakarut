@@ -13,7 +13,7 @@ import {
   type ShiftTransaksiRow,
 } from "@kakarut/shared";
 import { db } from "../../db/client";
-import { branches, companies, sales, shifts, users } from "../../db/schema";
+import { branches, companies, saleRefunds, sales, shifts, users } from "../../db/schema";
 import { requireRole, resolveBranchId, terikatCabang, type AppEnv } from "../../middleware/auth";
 import { tanggalDi, waktuDi } from "../../lib/time";
 import { sedangHadir } from "../absensi/routes";
@@ -60,7 +60,20 @@ async function shiftTerbuka(companyId: string, branchId: string) {
   return open;
 }
 
-/** Rekap penjualan sebuah shift (tunai vs non-tunai). */
+/**
+ * Rekap penjualan sebuah shift (tunai vs non-tunai).
+ *
+ * REFUND DIHITUNG PADA SHIFT TEMPAT UANGNYA KELUAR LACI, bukan pada shift
+ * transaksi aslinya. Refund menyusutkan `sales.total`, jadi menjumlah kolom itu
+ * apa adanya akan menggeser rekap shift yang SUDAH DITUTUP: uangnya dulu benar
+ * masuk dan sudah dihitung cocok saat tutup kasir, lalu berkurang sendiri
+ * berhari-hari kemudian — sementara shift yang benar-benar mengeluarkan uangnya
+ * tidak mencatat apa pun dan malah terlihat kelebihan kas.
+ *
+ * Maka: kotor dari `total + refund_total` (nilai yang benar-benar ditagih saat
+ * itu), lalu dikurangi refund yang WAKTUNYA jatuh di jendela shift ini. Untuk
+ * refund pada shift yang sama hasilnya persis sama dengan sebelumnya.
+ */
 async function rekapWindow(
   companyId: string,
   branchId: string,
@@ -71,7 +84,7 @@ async function rekapWindow(
   const rows = await db
     .select({
       metode: sales.metodeBayar,
-      total: sum(sales.total),
+      total: sql<number>`COALESCE(SUM(${sales.total} + ${sales.refundTotal}), 0)`,
       jumlah: sql<number>`count(*)::int`,
     })
     .from(sales)
@@ -84,6 +97,23 @@ async function rekapWindow(
       ),
     )
     .groupBy(sales.metodeBayar);
+  // Metode diambil dari penjualannya: uang kembali lewat jalan yang sama dengan
+  // uang masuk — refund transaksi QRIS tidak mengurangi uang tunai di laci.
+  const refundRows = await db
+    .select({ metode: sales.metodeBayar, nominal: sum(saleRefunds.nominal) })
+    .from(saleRefunds)
+    .innerJoin(sales, eq(saleRefunds.saleId, sales.id))
+    .where(
+      and(
+        eq(saleRefunds.companyId, companyId),
+        eq(saleRefunds.branchId, branchId),
+        isNull(sales.deletedAt),
+        gte(saleRefunds.createdAt, openedAt),
+        ...(closedAt ? [lte(saleRefunds.createdAt, closedAt)] : []),
+      ),
+    )
+    .groupBy(sales.metodeBayar);
+
   let tunai = 0;
   let nontunai = 0;
   let jumlah = 0;
@@ -92,6 +122,11 @@ async function rekapWindow(
     if (r.metode === "tunai") tunai += t;
     else nontunai += t;
     jumlah += r.jumlah;
+  }
+  for (const r of refundRows) {
+    const t = Number(r.nominal ?? 0);
+    if (r.metode === "tunai") tunai -= t;
+    else nontunai -= t;
   }
   return { penjualan_tunai: tunai, penjualan_nontunai: nontunai, jumlah_transaksi: jumlah };
 }

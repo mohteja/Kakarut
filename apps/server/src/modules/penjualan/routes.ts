@@ -18,6 +18,7 @@ import {
   clientRefField,
   deviceIdField,
 } from "../sync/idempoten";
+import { refundSajian } from "./refund";
 import { createSale, PenjualanGagal } from "./service";
 
 export const SaleBody = z.object({
@@ -227,4 +228,98 @@ export const penjualanRoutes = new Hono<AppEnv>()
         .returning();
       if (!row) throw new HTTPException(404, { message: "Transaksi tidak ditemukan" });
       return c.json({ ok: true, nomor: row.nomor });
-  });
+  })
+  /**
+   * REFUND SEBAGIAN — sajian yang tak jadi dibuat karena bahannya habis.
+   *
+   * KASIR BOLEH, dan itu disengaja: pembelinya sedang berdiri di depan kasir,
+   * memanggil owner berarti menahan antrean. Wewenangnya ditukar dengan jejak —
+   * `sale_refunds` menyimpan siapa, kapan, berapa, dan alasannya, dan owner
+   * memeriksanya belakangan.
+   *
+   * Peran terikat cabang otomatis terkunci ke cabangnya sendiri lewat
+   * `resolveBranchId`; owner/admin bisa merefund transaksi cabang mana pun.
+   */
+  .post(
+    "/:id/refund",
+    requireRole("owner", "admin", "cashier"),
+    zValidator(
+      "json",
+      z.object({
+        alasan: z.string().nullish(),
+        client_ref: clientRefField,
+        device_id: deviceIdField,
+        items: z
+          .array(
+            z.object({
+              sale_item_id: z.string().uuid(),
+              qty: z.number().positive(),
+            }),
+          )
+          .min(1),
+      }),
+    ),
+    async (c) => {
+      const auth = c.get("auth");
+      const body = c.req.valid("json");
+      const saleId = c.req.param("id");
+      /**
+       * IDEMPOTENSI — sama pentingnya di sini seperti di `POST /penjualan`,
+       * dan akibat salahnya justru lebih buruk: refund yang terkirim dua kali
+       * MENGEMBALIKAN UANG DUA KALI. Validasi "melebihi sisa porsi" tak
+       * menolongnya — selama masih ada porsi tersisa, permintaan kedua sah
+       * secara aturan dan langsung dieksekusi.
+       *
+       * Kejadiannya sama persis: jaringan putus sesudah server menyimpan tapi
+       * sebelum balasannya sampai. Dan itu TIDAK SELALU BUTUH MANUSIA — terukur
+       * di Chromium, browser mengulang sendiri POST yang soketnya ditutup pada
+       * koneksi keep-alive yang dipakai ulang. Klien tanpa `client_ref` bisa
+       * merefund dua kali walau kasirnya menekan tombol sekali.
+       */
+      if (body.client_ref) {
+        const ada = await cariHasilIdempoten(auth.company_id!, body.client_ref);
+        if (ada) return c.json(ada.hasilJson, 200);
+      }
+      // Kasir hanya boleh menyentuh transaksi CABANGNYA. Tanpa ini, id
+      // transaksi cabang lain yang bocor ke tangan kasir cukup untuk
+      // mengembalikan uang di pembukuan yang bukan urusannya.
+      if (terikatCabang(auth.role)) {
+        const [milik] = await db
+          .select({ branchId: sales.branchId })
+          .from(sales)
+          .where(and(eq(sales.id, saleId), eq(sales.companyId, auth.company_id!)));
+        if (!milik || milik.branchId !== auth.branch_id) {
+          throw new HTTPException(404, { message: "Transaksi tidak ditemukan" });
+        }
+      }
+      const hasil = await db.transaction((tx) =>
+        refundSajian(tx, {
+          saleId,
+          companyId: auth.company_id!,
+          userId: auth.sub,
+          alasan: body.alasan,
+          items: body.items.map((i) => ({ saleItemId: i.sale_item_id, qty: i.qty })),
+        }),
+      );
+      const data = {
+        ok: true,
+        nominal: hasil.nominal,
+        total_lama: hasil.totalLama,
+        total_baru: hasil.totalBaru,
+      };
+      // Dicatat SESUDAH transaksinya sukses: kalau refundnya sendiri gagal,
+      // ledger tak boleh menyimpan apa pun — percobaan ulang harus benar-benar
+      // dijalankan, bukan dibalas "sudah beres" untuk sesuatu yang tak terjadi.
+      if (body.client_ref) {
+        await catatHasilIdempoten({
+          companyId: auth.company_id!,
+          clientRef: body.client_ref,
+          userId: auth.sub,
+          deviceId: body.device_id ?? null,
+          tipe: "refund",
+          hasilJson: data,
+        });
+      }
+      return c.json(data);
+    },
+  );

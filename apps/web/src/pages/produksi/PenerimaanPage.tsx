@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { KonfirmasiStatus } from "@kakarut/shared";
 import {
   Card,
@@ -128,8 +128,27 @@ export function PenerimaanPage() {
   const dikirim = grup.filter((g) => g.status === "menunggu");
   const ditolak = grup.filter((g) => g.status === "ditolak");
 
+  /**
+   * Semua yang berubah begitu barang diterima/ditolak — daftarnya harus utuh,
+   * karena kunci yang terlewat tidak memberi tanda apa pun: layarnya cuma diam
+   * menampilkan keadaan lama sampai pengguna memuat ulang.
+   *
+   * - `penerimaan-riwayat` BUKAN turunan `penerimaan`: pencocokan awalan
+   *   TanStack membandingkan elemen pertama utuh, jadi `["penerimaan"]` tak
+   *   pernah mengenai `["penerimaan-riwayat", …]`. Tanpa ini faktur yang baru
+   *   diterima lenyap dari Menunggu tapi tak muncul di Riwayat di bawahnya —
+   *   persis bagian layar yang seharusnya membuktikan penerimaannya tercatat.
+   * - `/produksi` sama pentingnya dengan `/pembelian`: sejak kiriman beralamat
+   *   hanya sah lewat tombol Terima, faktur PRODUKSI pun diselesaikan di sini.
+   */
   function segarkan() {
-    for (const key of ["penerimaan", "/pembelian", "stok"]) {
+    for (const key of [
+      "penerimaan",
+      "penerimaan-riwayat",
+      "/pembelian",
+      "/produksi",
+      "stok",
+    ]) {
       queryClient.invalidateQueries({ queryKey: [key] });
     }
     setSebagianKey(null);
@@ -452,6 +471,26 @@ function RiwayatPenerimaan() {
   const total = data?.total ?? 0;
   const perPage = data?.per_page ?? 20;
   const halamanAkhir = Math.max(Math.ceil(total / perPage), 1);
+  // Ganti cabang mengganti seluruh isi riwayat, tapi `page` bertahan. Kontrol
+  // paginasi hanya dirender saat `halamanAkhir > 1`, jadi pindah ke cabang yang
+  // riwayatnya muat satu halaman akan menampilkan halaman 2 yang kosong SEKALIGUS
+  // menghilangkan tombol untuk kembali — persis pesan "belum ada kiriman yang
+  // pernah diterima" pada cabang yang riwayatnya justru ada.
+  useEffect(() => {
+    setPage(1);
+  }, [branchQuery]);
+  // Jaring pengaman: penerimaan baru menggeser jumlah halaman tanpa sentuhan
+  // filter apa pun.
+  //
+  // Penjagaan `data` WAJIB, jangan dilepas. `page` ikut ke dalam queryKey dan
+  // query ini tak memakai `placeholderData`, jadi begitu berpindah ke halaman
+  // yang belum pernah di-cache, `data` undefined sesaat → `total` jatuh ke 0 →
+  // `halamanAkhir` jadi 1. Tanpa penjagaan ini, klik "halaman berikutnya"
+  // langsung dipental balik ke halaman 1 sebelum datanya sempat tiba — jumlah
+  // halaman hanya bermakna setelah ada data yang menghitungnya.
+  useEffect(() => {
+    if (data && page > halamanAkhir) setPage(halamanAkhir);
+  }, [data, page, halamanAkhir]);
 
   return (
     <>

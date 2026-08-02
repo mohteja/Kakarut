@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { MenuDto } from "@kakarut/shared";
-import { Card, PageTitle, Spinner, btnPrimary, btnSecondary } from "../../components/ui";
+import { Card, ErrorText, PageTitle, Spinner, btnPrimary, btnSecondary } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
@@ -14,6 +14,9 @@ interface Kategori {
 }
 
 const LAIN = "__lain__";
+
+/** Fallback beridentitas tetap — lihat alasannya di pemakaian `kategori`. */
+const KOSONG: Kategori[] = [];
 
 /** Urutan menu id per kategori, dari data server (menu aktif). */
 function bangunUrutan(menus: MenuDto[], kategori: Kategori[]): Record<string, string[]> {
@@ -49,21 +52,40 @@ export function LihatMenuPage() {
     queryKey: ["menu", q],
     queryFn: () => api<MenuDto[]>(`/menu${q}`),
   });
-  const { data: kategori = [] } = useQuery({
+  /**
+   * `data` diambil apa adanya, lalu di-fallback ke KOSONG yang identitasnya
+   * TETAP — jangan kembali ke `data: kategori = []`.
+   *
+   * Default literal di destructuring membuat array BARU tiap render, dan array
+   * itu ikut ke deps `useEffect` di bawah. Selama /kategori belum tiba
+   * sementara /menu sudah (dua request paralel — urutannya tidak dijamin),
+   * efeknya menembak di SETIAP render, `setUrutan` menghasilkan objek baru,
+   * yang memicu render berikutnya, dan seterusnya: perulangan tak berujung
+   * yang berhenti hanya karena React menyerah dengan "Maximum update depth
+   * exceeded". Selama ini tertutupi karena ["kategori"] biasanya sudah ada di
+   * cache dari halaman sebelumnya; muat ulang langsung ke halaman ini yang
+   * membukanya.
+   */
+  const { data: kategoriData, isPending: kategoriPending } = useQuery({
     queryKey: ["kategori"],
     queryFn: () => api<Kategori[]>("/kategori"),
   });
+  const kategori = kategoriData ?? KOSONG;
 
   const [urutan, setUrutan] = useState<Record<string, string[]>>({});
   const [dirty, setDirty] = useState(false);
   const dirtyRef = useRef(false);
 
   // Seed urutan dari server; jangan timpa saat sedang diedit (dirty).
+  // Tunggu /kategori SELESAI (berhasil maupun gagal) — menyemai dengan daftar
+  // kategori kosong menaruh seluruh menu di "Lainnya" sekejap, lalu menatanya
+  // ulang begitu kategori tiba. Saat gagal, `isPending` tetap jadi false, jadi
+  // halaman tetap terisi seperti sebelumnya (semua menu di "Lainnya").
   useEffect(() => {
-    if (!menus) return;
+    if (!menus || kategoriPending) return;
     if (dirtyRef.current) return;
     setUrutan(bangunUrutan(menus, kategori));
-  }, [menus, kategori]);
+  }, [menus, kategori, kategoriPending]);
 
   const byId = useMemo(() => new Map((menus ?? []).map((m) => [m.id, m])), [menus]);
 
@@ -130,6 +152,16 @@ export function LihatMenuPage() {
       <div className="mb-4 text-sm text-stone-500">
         Menu siap jual &amp; harga jualnya. Atur <b>urutan (posisi)</b> menu dengan tombol ▲ / ▼,
         lalu <b>Cetak Daftar Menu</b> untuk mencetak (A4/PDF).
+      </div>
+      {/*
+        Simpan yang gagal memang menyisakan tombol "Simpan Urutan" (karena
+        `dirty` tak pernah dilepas) — tapi itu petunjuk yang harus ditebak
+        sendiri. Tanpa pesannya, urutan yang tampak sudah berpindah di layar
+        akan kembali ke semula saat halaman dimuat ulang, dan tak ada yang tahu
+        sebabnya penolakan server atau jaringan yang putus.
+      */}
+      <div className="mb-4">
+        <ErrorText error={simpan.error} />
       </div>
 
       {kosong ? (

@@ -17,6 +17,7 @@ import {
 import type { Context } from "hono";
 import { resolveBranchId, type AppEnv } from "../../middleware/auth";
 import { tanggalDi } from "../../lib/time";
+import { hppDitagihSql, omzetDitagihSql, sumQtyDitagihSql } from "../../lib/porsi-ditagih";
 import { loadKatalog, toMenuDto } from "../menu/service";
 
 /** Terima hanya tanggal format YYYY-MM-DD; selain itu undefined. */
@@ -74,17 +75,21 @@ export const laporanRoutes = new Hono<AppEnv>()
       .from(sales)
       .where(saleFilter);
 
+    // Porsi & omzet SESUDAH refund. Angka besar di atas (`agg`) datang dari
+    // `sales`, yang memang disusutkan tiap refund; rincian per menu ini dulu
+    // menjumlah `sale_items` mentah, jadi satu layar memuat dua angka yang
+    // berselisih persis sebesar uang yang sudah dikembalikan.
     const itemTerjual = await db
       .select({
         menu_nama: saleItems.menuNama,
-        qty: sum(saleItems.qty),
-        omzet: sum(saleItems.lineTotal),
+        qty: sumQtyDitagihSql,
+        omzet: omzetDitagihSql,
       })
       .from(saleItems)
       .innerJoin(sales, eq(saleItems.saleId, sales.id))
       .where(saleFilter)
       .groupBy(saleItems.menuNama)
-      .orderBy(desc(sum(saleItems.lineTotal)));
+      .orderBy(desc(omzetDitagihSql));
 
     const konsumsi = await db
       .select({
@@ -258,8 +263,10 @@ export const laporanRoutes = new Hono<AppEnv>()
         nama: menus.nama,
         kode: menus.kode,
         kategori: sql<string>`COALESCE(${menuCategories.nama}, '')`,
-        qty: sum(saleItems.qty),
-        omzet: sum(saleItems.lineTotal),
+        // Porsi yang uangnya dikembalikan bukan porsi yang terjual — kalau ikut
+        // dihitung, menu yang bahannya habis justru naik peringkat "terlaris".
+        qty: sumQtyDitagihSql,
+        omzet: omzetDitagihSql,
       })
       .from(saleItems)
       .innerJoin(sales, eq(saleItems.saleId, sales.id))
@@ -267,7 +274,7 @@ export const laporanRoutes = new Hono<AppEnv>()
       .leftJoin(menuCategories, eq(menus.categoryId, menuCategories.id))
       .where(saleFilter)
       .groupBy(saleItems.menuId, menus.nama, menus.kode, menuCategories.nama)
-      .orderBy(desc(sum(saleItems.qty)), desc(sum(saleItems.lineTotal)));
+      .orderBy(desc(sumQtyDitagihSql), desc(omzetDitagihSql));
 
     const items = rows.map((r) => ({
       menu_id: r.menu_id,
@@ -305,9 +312,12 @@ export const laporanRoutes = new Hono<AppEnv>()
 
     const [agg] = await db
       .select({
-        qty: sum(saleItems.qty),
-        omzet: sum(saleItems.lineTotal),
-        hpp: sql<number>`COALESCE(SUM(${saleItems.hppSatuan} * ${saleItems.qty}), 0)`,
+        // BEP membagi omzet & margin dengan jumlah porsi. Memasukkan porsi yang
+        // direfund menggelembungkan penyebut sekaligus pembilangnya, dan
+        // "berapa porsi harus terjual" jadi angka yang tak pernah benar.
+        qty: sumQtyDitagihSql,
+        omzet: omzetDitagihSql,
+        hpp: hppDitagihSql,
       })
       .from(saleItems)
       .innerJoin(sales, eq(saleItems.saleId, sales.id))

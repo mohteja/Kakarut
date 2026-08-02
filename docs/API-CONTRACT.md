@@ -381,6 +381,66 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 - `GET /api/penjualan` — [any] — query: `branch_id?` (atau `all` untuk owner/admin), `tanggal?` (YYYY-MM-DD, default hari ini di TZ perusahaan) — res: array ringkasan sale — error: **400** format tanggal salah
 - `GET /api/penjualan/:id` — [any] — res: `{ sale, items, branch_nama, kasir }` — error: **403** kasir luar cabang, **404**
 - `DELETE /api/penjualan/:id` — [owner/admin] — soft delete → Tempat Sampah — res: `{ ok, nomor }` — error: **404**
+- `POST /api/penjualan/:id/refund` — **[owner/admin/cashier]** — req: `{ alasan?: string|null, client_ref?: uuid, device_id?: string|null, items: [{ sale_item_id: uuid, qty: number(>0) }] (min 1) }` — res: `{ ok, nominal, total_lama, total_baru }` — error: **400** (sajian bukan milik transaksi ini / qty ≤ 0 / melebihi sisa porsi), **404** (transaksi tak ada, sudah di Tempat Sampah, atau bukan cabang kasir ini)
+
+> **`client_ref` SANGAT DIANJURKAN di sini** — lebih penting daripada pada
+> `POST /api/penjualan`, karena refund yang terkirim dua kali **mengembalikan
+> uang dua kali**. Pagar "melebihi sisa porsi" tidak menolong: selama masih ada
+> porsi tersisa, permintaan kedua sah menurut aturan dan langsung dijalankan.
+>
+> Kejadiannya sama seperti pada penjualan — jaringan putus SESUDAH server
+> menyimpan tapi SEBELUM balasannya sampai. **Dan itu tidak selalu butuh
+> manusia:** terukur di Chromium, saat server menutup koneksi keep-alive yang
+> sedang dipakai ulang, browser MENGULANG SENDIRI POST itu tanpa aksi siapa
+> pun. Jadi klien yang tidak mengirim `client_ref` bisa merefund dua kali
+> walau kasirnya hanya menekan tombol sekali. Buat kuncinya SEKALI
+> saat tombol pertama ditekan dan pakai ulang kunci yang sama di tiap percobaan;
+> membuat kunci baru tiap percobaan sama saja dengan tidak mengirimnya. Bila
+> `client_ref` sudah pernah sukses, server membalas **200** dengan hasil yang
+> tersimpan dan TIDAK merefund ulang.
+
+> **REFUND SEBAGIAN PER SAJIAN.** Kasusnya satu: pembeli sudah membayar, lalu
+> ketahuan bahan salah satu sajian habis sehingga sajian itu tak jadi dibuat.
+> Pesanan yang masuk selalu dibuat — pembatalan hanya terjadi karena bahan
+> kosong, dan saat itu uangnya harus kembali.
+>
+> **Kasir boleh melakukannya sendiri.** Pembelinya sedang berdiri di depan
+> kasir; memanggil owner berarti menahan antrean. Wewenang itu ditukar dengan
+> jejak: tiap refund menyimpan siapa, kapan, berapa, dan alasannya. Kasir tetap
+> terkunci ke transaksi cabangnya sendiri (di luar itu **404**, bukan 403 —
+> keberadaan transaksi cabang lain bukan urusannya).
+>
+> **Aritmetikanya proporsional.** Diskon dan PB1 melekat pada transaksi, bukan
+> pada baris. Kalau keduanya dibiarkan utuh, pembeli menerima kembali LEBIH
+> SEDIKIT daripada yang benar-benar ia bayarkan untuk sajian itu. Jadi `nominal`
+> **tidak** sama dengan `harga_satuan × qty` — ia selisih total sebelum &
+> sesudah. Jangan menghitungnya sendiri di klien; pakai `total_lama −
+> total_baru` dari respons, atau `hitungUangSetelahRefund` di
+> `packages/shared/src/refund.ts` bila ingin pratinjau sebelum mengirim.
+>
+> **Yang berubah pada baris `sales` & `sale_items`** (terlihat di `GET
+> /api/penjualan/:id`):
+> - `sale_items.qty_refund` bertambah — **kumulatif**, dan `qty` **tidak**
+>   dikurangi. Berapa yang dipesan dan berapa yang dikembalikan adalah dua fakta
+>   berbeda, dan struk asli harus tetap terbaca. **Klien wajib menampilkan &
+>   menagih `qty − qty_refund`, bukan `qty`.** `line_total` pada baris juga
+>   masih nilai asal — hitung ulang dari `harga_satuan × (qty − qty_refund)`.
+> - `sales.subtotal/diskon/pb1_amount/total` **sudah** disusutkan; seluruh
+>   laporan, rekap kas, dan laba-rugi membacanya apa adanya.
+> - `sales.refund_total` = uang yang sudah dikembalikan (kumulatif).
+> - `sales.subtotal_asal/diskon_asal/pb1_asal` = jangkar sebelum refund pertama;
+>   `null` berarti transaksi ini belum pernah direfund (tidak ada backfill untuk
+>   data lama). Diisi sekali dan tak pernah berubah — kalau ikut berubah, refund
+>   kedua akan menggerus diskon untuk kedua kalinya.
+> - `uang_diterima` ikut turun sebanyak yang dikembalikan pada pembayaran
+>   **tunai**, supaya "kembalian" di struk (`uang_diterima − total`) tetap angka
+>   yang benar-benar terjadi.
+> - HPP & konsumsi bahan dihitung ulang (`hitungUlangBiayaPenjualan`): sajian
+>   yang tak jadi dibuat tak memakai bahan, jadi **stoknya kembali sendiri**.
+>
+> Bisa bertahap: merefund 1 porsi hari ini dan 1 porsi lagi kemudian menghasilkan
+> total pengembalian yang sama persis dengan merefund 2 porsi sekaligus.
+> Melebihi sisa porsi ditolak **400** dengan pesan berisi nama menunya.
 
 ## `/api/produksi` dan `/api/pembelian` — Tambah stok (pabrik) (`modules/produksi/routes.ts`)
 

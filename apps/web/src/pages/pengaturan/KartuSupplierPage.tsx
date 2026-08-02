@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import type { SupplierKartu } from "@kakarut/shared";
-import { Card, PageTitle, Spinner, btnSecondary, tdClass, thClass } from "../../components/ui";
+import { Card, ErrorText, PageTitle, Spinner, btnSecondary, tdClass, thClass } from "../../components/ui";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah, formatWaktu } from "../../lib/format";
 import { STATUS_BELI } from "../produksi/TambahStokPage";
@@ -13,13 +13,23 @@ import { STATUS_BELI } from "../produksi/TambahStokPage";
  */
 export function KartuSupplierPage() {
   const { id } = useParams<{ id: string }>();
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey: ["supplier-kartu", id],
     queryFn: () => api<SupplierKartu>(`/supplier/${id}/kartu`),
     enabled: !!id,
   });
 
-  if (isLoading || !data) return <Spinner />;
+  if (isLoading) return <Spinner />;
+  // Galat DAN "belum ada isi" dulu sama-sama jadi Spinner abadi. Kartu supplier
+  // dipakai untuk menagih & mencocokkan pembelian — layar berputar tanpa sebab
+  // membuat orang menunggu sesuatu yang tak akan pernah datang.
+  if (error || !data) {
+    return (
+      <Card className="m-4 p-4">
+        <ErrorText error={error ?? new Error("Kartu supplier tidak dapat dimuat")} />
+      </Card>
+    );
+  }
   const s = data.supplier;
 
   return (

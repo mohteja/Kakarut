@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import type { ExpLotRow, MenuDto, MenuStokDto, PenyimpananDto, StokRowDto } from "@kakarut/shared";
 import {
   Card,
+  ErrorText,
   PageTitle,
   Spinner,
   StatusBadge,
@@ -47,7 +48,7 @@ export function StokPage() {
     if (tab === "menu" && !bolehStokMenu) setTab("bahan");
   }, [tab, bolehStokMenu]);
 
-  const { data: stok, isLoading } = useQuery({
+  const { data: stok, isLoading, error: stokGagal } = useQuery({
     queryKey: ["stok", branchQuery],
     queryFn: () => api<StokRowDto[]>(`/stok${branchQuery}`),
   });
@@ -403,10 +404,31 @@ export function StokPage() {
         )}
       </div>
 
+      {/*
+        GAGAL MEMUAT ≠ TIDAK ADA BAHAN. Tanpa ini keduanya menghasilkan kalimat
+        yang sama: "Belum ada bahan yang melacak stok di lokasi ini." Halaman
+        inilah tempat peringatan stok menipis dibaca — layar kosong yang
+        sebenarnya galat membuat pemilik menyimpulkan tak ada yang perlu
+        dibeli. Server MATI sudah punya overlay; yang lolos diam-diam adalah
+        penolakan biasa seperti hak akses cabang.
+      */}
+      {stokGagal && (
+        <Card className="mb-3 p-4">
+          <ErrorText error={stokGagal} />
+          <div className="mt-2 text-sm text-stone-500">
+            Saldo stok tidak bisa dimuat — daftar di bawah <b>bukan</b> berarti kosong, dan
+            peringatan stok menipis tidak bisa dipercaya sampai halaman ini berhasil dimuat ulang.
+          </div>
+        </Card>
+      )}
       <TabelResponsif
         data={tampil}
         kunci={(s) => s.ingredient_id}
-        kosong="Belum ada bahan yang melacak stok di lokasi ini."
+        kosong={
+          stokGagal
+            ? "Data tidak dapat dimuat — bukan berarti kosong."
+            : "Belum ada bahan yang melacak stok di lokasi ini."
+        }
         kolom={[
           {
             judul: "Bahan",

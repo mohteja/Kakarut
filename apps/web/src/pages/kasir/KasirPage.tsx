@@ -10,6 +10,7 @@ import type {
   MetodeBayar,
   OpenBillDetail,
   OpenBillRow,
+  PesananStatus,
   Shift,
 } from "@kakarut/shared";
 import {
@@ -26,6 +27,7 @@ import { useCabangData } from "../../context/BranchContext";
 import { CabangDataBar } from "../../components/CabangDataBar";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah } from "../../lib/format";
+import { uuidV4 } from "../../lib/idempoten";
 import { ReceiptModal, type SaleResult } from "./ReceiptModal";
 import {
   KosongkanMejaModal,
@@ -83,11 +85,24 @@ interface CartLine {
    * ditagih, bukan `menu.harga_jual` yang bisa saja sudah berubah.
    */
   hargaKunci?: number;
+  /** status dapur baris bill; `batal` = tak jadi dibuat, tak boleh ditagih */
+  pesananStatus?: PesananStatus;
 }
 
 /** Harga yang benar-benar ditagih untuk satu baris keranjang. */
 function hargaBaris(l: CartLine) {
   return l.hargaKunci ?? l.menu.harga_jual;
+}
+
+/**
+ * Baris yang dibatalkan dapur — sajiannya TIDAK JADI DIBUAT (bahan habis).
+ *
+ * Ia tetap tinggal di keranjang karena `PUT /open-bill/:id` menolak pembaruan
+ * yang menghilangkan baris (jejak siapa & kapan membatalkannya ada di baris
+ * itu), tapi ia TIDAK ikut subtotal dan TIDAK ikut dikirim saat bayar.
+ */
+function dibatalkan(l: CartLine) {
+  return l.pesananStatus === "batal";
 }
 
 interface Kategori {
@@ -479,12 +494,23 @@ export function KasirPage() {
            * tanpa jejak siapa pun: dapur kehilangan pekerjaan yang sudah
            * dikerjakan tanpa ada yang bisa menjelaskan ke mana.
            *
-           * Jadi qty-nya dijaga minimal 1. Membatalkannya lewat Papan Pesanan,
-           * yang menyimpan pelaku & waktunya. Penjagaan ditaruh DI SINI, bukan
-           * cuma di tombolnya, supaya tak ada jalur lain yang melewatinya.
+           * Karena itu qty-nya TIDAK BOLEH TURUN SAMA SEKALI — bukan sekadar
+           * ditahan di 1. Lantai 1 hanya menyelamatkan porsi terakhir: baris
+           * qty 3 yang ketiga porsinya sudah dimasak masih bisa diturunkan ke
+           * 1, dan dua porsi itu hilang dari tagihan persis dengan cara yang
+           * hendak dicegah — tanpa baris `pesanan_logs`, tanpa pelaku, tanpa
+           * waktu, dan tanpa ada yang membayar makanan yang terlanjur dibuat.
+           *
+           * Menambah tetap bebas (itu pesanan baru). Mengurangi lewat Papan
+           * Pesanan, yang menyimpan pelaku & waktunya. Penjagaan ditaruh DI
+           * SINI, bukan cuma di tombolnya, supaya tak ada jalur lain yang
+           * melewatinya.
            */
-          const minQty = l.billItemId ? 1 : 0;
-          return { ...l, qty: Math.max(minQty, l.qty + delta) };
+          if (delta < 0 && l.billItemId) return l;
+          // Sajian yang dibatalkan dapur tak jadi dibuat — menambah qty-nya
+          // tak berarti apa-apa (tetap tak ditagih). Pesan lagi = baris baru.
+          if (dibatalkan(l)) return l;
+          return { ...l, qty: Math.max(0, l.qty + delta) };
         })
         .filter((l) => l.qty > 0),
     );
@@ -500,7 +526,10 @@ export function KasirPage() {
     );
   }
 
-  const subtotal = cart.reduce((a, l) => a + hargaBaris(l) * l.qty, 0);
+  // Baris yang dibatalkan dapur tak jadi dibuat → tak ikut dihitung & tak ikut
+  // dibayar. Ia tetap ada di `cart` supaya `PUT` tidak kehilangan barisnya.
+  const cartTagih = cart.filter((l) => !dibatalkan(l));
+  const subtotal = cartTagih.reduce((a, l) => a + hargaBaris(l) * l.qty, 0);
   // diskon per transaksi (cermin logika server: clamp ke [0, subtotal])
   const diskonNilaiNum = Number(diskonNilai) || 0;
   const diskonRaw =
@@ -523,11 +552,40 @@ export function KasirPage() {
   const uangKurang = metodeBayar === "tunai" && uangNum > 0 && uangNum < total;
   const kembalian = metodeBayar === "tunai" && uangNum > total ? uangNum - total : 0;
 
+  /**
+   * KUNCI IDEMPOTENSI satu pembayaran, bertahan melintasi percobaan ulang.
+   *
+   * Dibuat sekali saat Bayar pertama kali ditekan dan BARU dilepas setelah
+   * transaksinya benar-benar tercatat. Kalau ia dibuat ulang tiap percobaan,
+   * pengaman ini tak ada gunanya: justru percobaan KEDUA-lah yang harus
+   * membawa kunci yang sama, karena di situlah penjualan dobel lahir.
+   */
+  const refPembayaran = useRef<string | null>(null);
+
   const bayar = useMutation({
-    mutationFn: () =>
-      api<SaleResult>("/penjualan", {
+    mutationFn: () => {
+      refPembayaran.current ??= uuidV4();
+      return api<SaleResult>("/penjualan", {
         method: "POST",
         body: {
+          /*
+           * Jaringan yang putus SESUDAH server menyimpan tapi SEBELUM
+           * balasannya sampai membuat kasir melihat galat, lalu menekan Bayar
+           * lagi — ia tak punya cara tahu transaksinya sudah tercatat. Tanpa
+           * `client_ref`, tekanan kedua itu membuat penjualan KEDUA untuk satu
+           * kali pembayaran: omzet, stok, dan HPP terhitung dua kali.
+           *
+           * Server sudah lama menyediakan penangkalnya — `cariHasilIdempoten`
+           * diperiksa paling awal di `POST /penjualan` dan membalas penjualan
+           * yang sudah ada — dan klien Flutter memakainya. Web tidak, sampai
+           * sekarang.
+           *
+           * Catatan yang disengaja: bila kasir mengubah keranjang lalu menekan
+           * Bayar lagi SESUDAH percobaan yang ternyata sudah tersimpan, server
+           * membalas penjualan yang ASLI, bukan keranjang barunya. Itu memang
+           * yang benar — uangnya sudah berpindah untuk transaksi yang itu.
+           */
+          client_ref: refPembayaran.current,
           ...(!isKasir && branchId ? { branch_id: branchId } : {}),
           is_dine_in: dineIn,
           meja_id: mejaId ?? undefined,
@@ -535,10 +593,33 @@ export function KasirPage() {
           ...(konsumenWa.trim() ? { customer_wa: konsumenWa.trim() } : {}),
           metode_bayar: metodeBayar,
           ...(metodeBayar === "tunai" && uangNum > 0 ? { uang_diterima: uangNum } : {}),
-          ...(diskon > 0 ? { diskon_tipe: diskonTipe, diskon_nilai: diskonNilaiNum } : {}),
+          // Yang DIKIRIM harus sama persis dengan yang DITAMPILKAN. `diskon` di
+          // atas sudah dipotong ke jatah maksimal kasir, dan layar resume sudah
+          // menuliskan angka terpotong itu berikut totalnya — uang yang
+          // diterima kasir mengikuti angka itu. Mengirim `diskonNilaiNum`
+          // mentah membuat server menghitung diskon PENUH, mendapati diskon itu
+          // melebihi batas kasir, lalu menolak seluruh transaksi dengan 400 —
+          // padahal layarnya sudah menulis "dibatasi" seolah sudah diurus, dan
+          // kasir tak punya petunjuk bahwa ia harus mengetik ulang diskonnya.
+          //
+          // Saat terpotong, kirim sebagai NOMINAL: persentasenya memang tidak
+          // jadi dipakai, jadi menyimpannya sebagai "persen" akan membuat struk
+          // menulis "Diskon (20%)" di sebelah nilai 10% — angka yang tak pernah
+          // terjadi. Saat tidak terpotong, kirim apa adanya agar persentasenya
+          // tetap tercatat untuk laporan.
+          ...(diskon > 0
+            ? diskonDibatasi
+              ? { diskon_tipe: "nominal" as const, diskon_nilai: diskon }
+              : { diskon_tipe: diskonTipe, diskon_nilai: diskonNilaiNum }
+            : {}),
           // membayar open bill → server menagih harga yang dikunci di bill
           ...(editingBillId ? { open_bill_id: editingBillId } : {}),
-          items: cart.map((l) => ({
+          // `cartTagih`, bukan `cart`: sajian yang dibatalkan dapur (bahan
+          // habis) tak jadi dibuat, jadi tak masuk penjualan — tak ditagih,
+          // tak memotong stok, tak menambah HPP. Servernya menerima ini:
+          // `createSale` hanya memeriksa baris yang MEMBAWA `open_bill_item_id`
+          // dan menutup bill lewat id-nya, bukan dengan mencocokkan barisnya.
+          items: cartTagih.map((l) => ({
             menu_id: l.menu.id,
             qty: l.qty,
             ...(l.dineInOverride !== null ? { is_dine_in: l.dineInOverride } : {}),
@@ -546,8 +627,14 @@ export function KasirPage() {
             ...(editingBillId && l.billItemId ? { open_bill_item_id: l.billItemId } : {}),
           })),
         },
-      }),
+      });
+    },
     onSuccess: (data) => {
+      // Transaksi ini sudah punya rumah. Kunci berikutnya harus BARU — memakai
+      // ulang kunci ini akan membuat server membalas struk yang lama untuk
+      // transaksi berikutnya, dan penjualan yang sesungguhnya tak pernah
+      // tercatat.
+      refPembayaran.current = null;
       setStruk(data);
       setResumeOpen(false);
       // bill ditutup SERVER di dalam transaksi createSale (open_bills.closed_at
@@ -681,6 +768,7 @@ export function KasirPage() {
         catatan: it.catatan ?? "",
         billItemId: it.id,
         hargaKunci: it.harga_satuan,
+        pesananStatus: it.pesanan_status,
       });
     }
     setCart(lines);
@@ -1048,15 +1136,18 @@ export function KasirPage() {
             // memang baru, jadi penandanya tak perlu muncul.
             const sudahKeDapur = editingBillId != null && l.billItemId != null;
             const barisBaru = editingBillId != null && l.billItemId == null;
+            const batal = dibatalkan(l);
             return (
               <div
                 key={l.menu.id}
                 className={`rounded-lg border p-2 ${
-                  sudahKeDapur
-                    ? "border-emerald-200 bg-emerald-50/40"
-                    : barisBaru
-                      ? "border-orange-300 bg-orange-50/40"
-                      : "border-stone-200"
+                  batal
+                    ? "border-stone-200 bg-stone-100 opacity-70"
+                    : sudahKeDapur
+                      ? "border-emerald-200 bg-emerald-50/40"
+                      : barisBaru
+                        ? "border-orange-300 bg-orange-50/40"
+                        : "border-stone-200"
                 }`}
               >
                 <div className="flex items-start justify-between gap-2">
@@ -1076,11 +1167,18 @@ export function KasirPage() {
                         menu sudah tak aktif — tetap ditagih
                       </div>
                     )}
-                    {sudahKeDapur && (
+                    {/* Dibatalkan dapur = tak jadi dibuat (bahan habis). Harus
+                        terbaca jelas: kasir sedang menghadapi pembeli yang
+                        menunggu penjelasan kenapa satu item tak ada di total. */}
+                    {batal ? (
+                      <div className="mt-0.5 inline-flex items-center rounded-full bg-stone-300 px-1.5 py-0.5 text-[11px] font-semibold text-stone-700">
+                        ✕ Dibatalkan dapur — tidak ditagih
+                      </div>
+                    ) : sudahKeDapur ? (
                       <div className="mt-0.5 inline-flex items-center rounded-full bg-emerald-100 px-1.5 py-0.5 text-[11px] font-semibold text-emerald-800">
                         ✓ Sudah masuk pesanan
                       </div>
-                    )}
+                    ) : null}
                     {barisBaru && (
                       <div className="mt-0.5 inline-flex items-center rounded-full bg-orange-100 px-1.5 py-0.5 text-[11px] font-semibold text-orange-800">
                         Baru — belum disimpan
@@ -1098,12 +1196,18 @@ export function KasirPage() {
                     )}
                   </div>
                   <div className="text-sm font-bold text-stone-800">
-                    {formatRupiah(hargaBaris(l) * l.qty)}
+                    {batal ? (
+                      <span className="text-stone-400 line-through">
+                        {formatRupiah(hargaBaris(l) * l.qty)}
+                      </span>
+                    ) : (
+                      formatRupiah(hargaBaris(l) * l.qty)
+                    )}
                   </div>
                 </div>
                 <div className="mt-2 flex items-center justify-between">
                   <button
-                    onClick={() => toggleLineDineIn(l.menu.id)}
+                    onClick={() => { if (!batal) toggleLineDineIn(l.menu.id); }}
                     className={`rounded-full px-2 py-0.5 text-xs font-medium ${
                       efektifDineIn
                         ? "bg-blue-100 text-blue-700"
@@ -1116,9 +1220,9 @@ export function KasirPage() {
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => ubahQty(l.menu.id, -1)}
-                      disabled={sudahKeDapur && l.qty <= 1}
+                      disabled={sudahKeDapur || batal}
                       title={
-                        sudahKeDapur && l.qty <= 1
+                        sudahKeDapur
                           ? "Sudah masuk pesanan — batalkan dari Papan Pesanan supaya ada jejaknya"
                           : "Kurangi jumlah"
                       }
@@ -1129,7 +1233,8 @@ export function KasirPage() {
                     <span className="w-6 text-center text-sm font-semibold">{l.qty}</span>
                     <button
                       onClick={() => ubahQty(l.menu.id, 1)}
-                      className="h-7 w-7 rounded-lg border border-stone-300 text-stone-600 hover:bg-stone-50"
+                      disabled={batal}
+                      className="h-7 w-7 rounded-lg border border-stone-300 text-stone-600 hover:bg-stone-50 disabled:cursor-not-allowed disabled:border-stone-200 disabled:text-stone-300 disabled:hover:bg-transparent"
                     >
                       +
                     </button>
@@ -1138,6 +1243,7 @@ export function KasirPage() {
                 <input
                   value={l.catatan}
                   onChange={(e) => ubahCatatanLine(l.menu.id, e.target.value)}
+                  readOnly={batal}
                   placeholder="Catatan (mis. tanpa gula, tanpa mie)"
                   className="mt-2 w-full rounded-lg border border-stone-200 bg-stone-50 px-2 py-1 text-xs focus:border-orange-400 focus:bg-white focus:outline-none"
                 />
@@ -1188,7 +1294,9 @@ export function KasirPage() {
                 setLangkahBayar("resume");
                 setResumeOpen(true);
               }}
-              disabled={cart.length === 0 || !mejaId}
+              // `cartTagih`: bila SEMUA sajian dibatalkan dapur, tak ada yang
+              // ditagih — jangan buka layar bayar bertotal nol.
+              disabled={cartTagih.length === 0 || !mejaId}
               className={`${btnPrimary} py-3`}
             >
               Lanjut →
@@ -1236,7 +1344,7 @@ export function KasirPage() {
               {" · "}
               {dineIn ? "Dine-in" : "Bawa pulang"}
               {konsumenNama.trim() ? ` · 👤 ${konsumenNama.trim()}` : ""}
-              {` · ${cart.reduce((a, l) => a + l.qty, 0)} item`}
+              {` · ${cartTagih.reduce((a, l) => a + l.qty, 0)} item`}
             </div>
 
             {/* Baca ulang pesanan — hanya di langkah resume. Di langkah bayar,
@@ -1244,7 +1352,10 @@ export function KasirPage() {
                 menutupi angka yang harus ia baca ke tamu. */}
             {langkahBayar === "resume" && (
             <div className="mb-3 divide-y divide-stone-100 rounded-lg border border-stone-200">
-              {cart.map((l) => (
+              {/* Baca-ulang untuk tamu: sebut hanya yang ditagih. Sajian yang
+                  dibatalkan dapur tak boleh muncul di sini — kasir sedang
+                  membacakan daftar yang harus cocok dengan totalnya. */}
+              {cartTagih.map((l) => (
                 <div
                   key={l.menu.id}
                   className="flex items-start justify-between gap-2 px-3 py-2 text-sm"
