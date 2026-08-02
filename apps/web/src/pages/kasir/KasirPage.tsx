@@ -479,12 +479,20 @@ export function KasirPage() {
            * tanpa jejak siapa pun: dapur kehilangan pekerjaan yang sudah
            * dikerjakan tanpa ada yang bisa menjelaskan ke mana.
            *
-           * Jadi qty-nya dijaga minimal 1. Membatalkannya lewat Papan Pesanan,
-           * yang menyimpan pelaku & waktunya. Penjagaan ditaruh DI SINI, bukan
-           * cuma di tombolnya, supaya tak ada jalur lain yang melewatinya.
+           * Karena itu qty-nya TIDAK BOLEH TURUN SAMA SEKALI — bukan sekadar
+           * ditahan di 1. Lantai 1 hanya menyelamatkan porsi terakhir: baris
+           * qty 3 yang ketiga porsinya sudah dimasak masih bisa diturunkan ke
+           * 1, dan dua porsi itu hilang dari tagihan persis dengan cara yang
+           * hendak dicegah — tanpa baris `pesanan_logs`, tanpa pelaku, tanpa
+           * waktu, dan tanpa ada yang membayar makanan yang terlanjur dibuat.
+           *
+           * Menambah tetap bebas (itu pesanan baru). Mengurangi lewat Papan
+           * Pesanan, yang menyimpan pelaku & waktunya. Penjagaan ditaruh DI
+           * SINI, bukan cuma di tombolnya, supaya tak ada jalur lain yang
+           * melewatinya.
            */
-          const minQty = l.billItemId ? 1 : 0;
-          return { ...l, qty: Math.max(minQty, l.qty + delta) };
+          if (delta < 0 && l.billItemId) return l;
+          return { ...l, qty: Math.max(0, l.qty + delta) };
         })
         .filter((l) => l.qty > 0),
     );
@@ -1134,9 +1142,9 @@ export function KasirPage() {
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => ubahQty(l.menu.id, -1)}
-                      disabled={sudahKeDapur && l.qty <= 1}
+                      disabled={sudahKeDapur}
                       title={
-                        sudahKeDapur && l.qty <= 1
+                        sudahKeDapur
                           ? "Sudah masuk pesanan — batalkan dari Papan Pesanan supaya ada jejaknya"
                           : "Kurangi jumlah"
                       }
