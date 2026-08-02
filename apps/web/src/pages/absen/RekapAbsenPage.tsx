@@ -67,7 +67,7 @@ export function RekapAbsenPage() {
   const [detail, setDetail] = useState<{ nama: string; hari: RekapAbsenHari } | null>(null);
   const [tolak, setTolak] = useState<{ id: string; nama: string; alasan: string } | null>(null);
 
-  const { data: rekap, isLoading } = useQuery({
+  const { data: rekap, isLoading, error } = useQuery({
     queryKey: ["rekap-absen", bulan, cabangFilter, status],
     queryFn: () =>
       api<RekapAbsenDto>(
@@ -160,13 +160,24 @@ export function RekapAbsenPage() {
         </div>
       </Card>
 
+      {/*
+        `?? 0` mengubah bacaan yang DITOLAK menjadi angka nol yang terlihat
+        sah — "Total tidak hadir: 0" adalah kabar baik yang dikarang halaman
+        ini justru saat ia tak tahu apa-apa. Saat gagal, ketiga angka yang
+        bersumber dari /absensi/rekap ditulis "—", bukan nol. "Pengajuan
+        menunggu" punya permintaannya sendiri, jadi ia tidak ikut dipadamkan.
+      */}
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <KartuAngka label="Karyawan" value={rekap?.rows.length ?? 0} />
-        <KartuAngka label="Total hadir" value={totalHadir} nada="text-green-600" />
+        <KartuAngka label="Karyawan" value={error ? "—" : (rekap?.rows.length ?? 0)} />
+        <KartuAngka
+          label="Total hadir"
+          value={error ? "—" : totalHadir}
+          nada={error ? undefined : "text-green-600"}
+        />
         <KartuAngka
           label="Total tidak hadir"
-          value={totalAlpa}
-          nada={totalAlpa > 0 ? "text-red-600" : undefined}
+          value={error ? "—" : totalAlpa}
+          nada={!error && totalAlpa > 0 ? "text-red-600" : undefined}
         />
         <KartuAngka
           label="Pengajuan menunggu"
@@ -185,7 +196,18 @@ export function RekapAbsenPage() {
       </div>
 
       {tab === "rekap" ? (
-        isLoading || !rekap ? (
+        // Galat diperiksa LEBIH DULU: `isLoading || !rekap` menyatukan MENUNGGU
+        // dengan GAGAL, jadi permintaan yang ditolak membiarkan halaman berputar
+        // di Spinner selamanya — TanStack sudah berhenti mencoba.
+        error ? (
+          <Card className="p-4">
+            <ErrorText error={error} />
+            <div className="mt-2 text-sm text-stone-500">
+              Rekap absen tidak dapat dimuat, jadi angkanya tidak ditampilkan — <b>bukan</b> berarti
+              nihil kehadiran. Muat ulang halaman setelah masalahnya beres.
+            </div>
+          </Card>
+        ) : isLoading || !rekap ? (
           <Spinner />
         ) : (
           <>
