@@ -1,6 +1,7 @@
 import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import {
+  adaKoreksiSajian,
   ringkasPesanan,
   urutkanPesanan,
   type PesananItemRow,
@@ -219,8 +220,10 @@ function KartuPesanan({
   // lagi, hasilnya "Meja Meja 1".
   const judul = p.nomor ?? p.meja ?? "Pesanan";
   // Penanda penyajian BEDA dari fakta pembukuan (is_dine_in) → tampilkan
-  // keduanya, jangan sembunyikan koreksinya.
-  const diubah = p.dibayar && p.sajian_takeaway === p.is_dine_in;
+  // keduanya, jangan sembunyikan koreksinya. Diperiksa PER BARIS: kartu yang
+  // sebagian dibungkus tetap koreksi, dan pada penjualan lunas uang & stoknya
+  // sudah benar-benar berpindah (lihat `adaKoreksiSajian`).
+  const diubah = adaKoreksiSajian(p);
   // "Belum dibayar" adalah AJAKAN menagih, jadi hanya untuk pesanan yang masih
   // hidup. Pada pesanan batal tak ada yang perlu ditagih — menandainya kuning
   // justru menyuruh kasir mengejar uang yang memang tak akan datang.

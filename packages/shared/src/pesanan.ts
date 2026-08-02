@@ -14,6 +14,30 @@ export function turunkanStatusPesanan(items: { status: PesananStatus }[]): Pesan
   return "dikerjakan";
 }
 
+/**
+ * Apakah penyajian pesanan yang SUDAH DIBAYAR pernah dikoreksi?
+ *
+ * Normalnya tiap baris lahir sebagai kebalikan `is_dine_in` — dine-in →
+ * `sajian_takeaway` false, bawa pulang → true. Baris yang justru SAMA dengan
+ * `is_dine_in` berarti ada yang membaliknya di papan sesudah transaksi ditutup,
+ * dan pada penjualan yang sudah dibayar pembalikan itu bukan kosmetik: server
+ * menghitung ulang HPP dan menulis ulang pemakaian stok kemasan.
+ *
+ * DIPERIKSA PER BARIS, bukan lewat `sajian_takeaway` kartu. Kartu itu
+ * `items.every(…)` — "semua baris bawa pulang" — jadi memakainya sebagai dasar
+ * koreksi menyisakan satu lubang yang tepat mengenai kasus paling lazim:
+ * pesanan dine-in yang SEBAGIAN barisnya dibungkus. Agregatnya tetap false,
+ * `false === true` tidak pernah cocok, dan kartunya diam meski uang dan stok
+ * sudah berpindah. Arah sebaliknya (pesanan bawa pulang yang sebagian
+ * dikembalikan ke tempat) kebetulan tetap tertangkap — ketimpangan itulah yang
+ * membuatnya terbaca benar sekilas.
+ */
+export function adaKoreksiSajian(
+  p: Pick<PesananRow, "dibayar" | "is_dine_in" | "items">,
+): boolean {
+  return p.dibayar && p.items.some((it) => it.sajian_takeaway === p.is_dine_in);
+}
+
 /** Bagian `PesananRow` yang seluruhnya turunan `items`. */
 export type RingkasanPesanan = Pick<
   PesananRow,
