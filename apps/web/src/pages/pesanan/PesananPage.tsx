@@ -101,13 +101,28 @@ function BarisPesanan({
   onStatus: (status: PesananStatus) => void;
   onSajian: (takeaway: boolean) => void;
 }) {
+  /*
+   * `it.qty` SUDAH porsi yang ditagih — server mengurangkan yang direfund.
+   * Yang dicoret di sini adalah baris yang tak menyisakan pekerjaan sama sekali:
+   * dibatalkan dapur, atau seluruh porsinya sudah dikembalikan uangnya. Tanpa
+   * baris keterangan di bawahnya, angka yang menyusut sendiri akan terbaca
+   * seperti kesalahan sistem, bukan seperti keputusan yang memang diambil.
+   */
+  const habisRefund = it.qty_refund > 0 && it.qty <= 0;
   return (
     <li className="rounded-lg border border-stone-100 bg-stone-50/60 px-2 py-1.5">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 text-sm text-stone-700">
-          <span className={it.status === "batal" ? "line-through text-stone-400" : ""}>
+          <span
+            className={it.status === "batal" || habisRefund ? "line-through text-stone-400" : ""}
+          >
             <span className="font-semibold text-stone-800">{it.qty}×</span> {it.nama}
           </span>
+          {it.qty_refund > 0 && (
+            <div className="text-xs font-semibold text-rose-600">
+              ↩ {it.qty_refund} porsi dikembalikan — jangan dibuat
+            </div>
+          )}
           {it.catatan && <div className="text-xs italic text-orange-600">📝 {it.catatan}</div>}
         </div>
         <span

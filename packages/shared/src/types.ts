@@ -1592,7 +1592,16 @@ export interface PesananItemRow {
   /** id baris (`sale_items.id` / `open_bill_items.id`) — tujuan tombol per baris */
   id: string;
   nama: string;
+  /**
+   * Porsi yang HARUS DIBUAT — sudah dikurangi yang uangnya dikembalikan.
+   *
+   * Papan ini lembar perintah dapur, jadi angkanya harus angka yang ditagih.
+   * Refund lahir justru karena bahannya habis; menampilkan porsi mentahnya akan
+   * menyuruh dapur memasak sesuatu yang sudah dibatalkan dan tidak dibayar.
+   */
   qty: number;
+  /** porsi yang sudah dikembalikan uangnya (0 untuk bill yang belum dibayar) */
+  qty_refund: number;
   /** personalisasi pelanggan, mis. "tanpa sambal" */
   catatan: string | null;
   is_dine_in: boolean;

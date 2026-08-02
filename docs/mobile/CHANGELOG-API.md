@@ -80,6 +80,25 @@ sebagai keterangan supaya pembeli bisa mencocokkan dengan struk lamanya.
 Juga: `nominal` **bukan** `harga_satuan × qty` — bagian diskon & PB1 milik porsi
 itu ikut kembali. Jangan menghitungnya sendiri.
 
+### 🔴 WAJIB — papan pesanan: `PesananItemRow.qty` kini porsi yang DITAGIH
+
+`GET /api/pesanan` → tiap `items[]` bertambah **`qty_refund: number`**, dan
+**`qty` sudah dikurangi olehnya** (`qty − qty_refund`, minimal 0). Untuk baris
+open bill `qty_refund` selalu `0` — billnya belum dibayar, jadi belum ada uang
+yang bisa dikembalikan.
+
+Papan ini lembar perintah dapur. Sajian yang uangnya sudah dikembalikan tak
+jadi dibuat — bahannya habis, itu justru sebab refundnya — jadi menampilkan
+porsi mentahnya menyuruh dapur memasak sesuatu yang sudah dibatalkan dan tidak
+dibayar siapa pun.
+
+Yang perlu dikerjakan mobile: **jangan** menghitung ulang `qty` dari sumber
+lain, dan tampilkan keterangan bila `qty_refund > 0` — kalau tidak, angka yang
+menyusut sendiri akan terbaca seperti kesalahan sistem. Web menuliskannya
+`↩ N porsi dikembalikan — jangan dibuat`, dan mencoret baris yang `qty`-nya
+tinggal 0. Status barisnya sengaja TIDAK ikut berubah jadi `batal`: status
+adalah catatan dapur, bukan turunan uang.
+
 ### ⚪️ INFO — laporan & rekap shift kini sadar refund
 
 Tidak ada perubahan bentuk respons; hanya **angkanya** yang kini benar sesudah

@@ -7401,6 +7401,16 @@ cek "Laporan: total item_terjual == omzet — bukan dua angka berbeda" "abs(V) <
 cek "refund pada shift yang SAMA → rekap tinggal +18.000" "abs(V - 18000) < 0.001" \
   "$(python3 -c "print($(rekap160 .penjualan_tunai) - $TUNAI160_0)")"
 
+# Papan pesanan adalah LEMBAR PERINTAH DAPUR. Porsi yang uangnya dikembalikan
+# tak boleh muncul sebagai pekerjaan — refundnya lahir justru karena bahannya
+# habis, jadi menampilkan porsi mentahnya menyuruh dapur memasak sesuatu yang
+# sudah dibatalkan dan tidak dibayar siapa pun.
+papan160() { api "$REISS105" GET "/pesanan?tanggal=$HARI160" | jq -r "[.[]|select(.id==\"$SID160\")][0].items[]|select(.id==\"$IT160\")|.$1"; }
+cek "papan dapur menampilkan 2 porsi (yang ditagih), bukan 3" "abs(V - 2) < 0.001" \
+  "$(papan160 qty)"
+cek "papan menyertakan qty_refund supaya bisa diberi keterangan" "abs(V - 1) < 0.001" \
+  "$(papan160 qty_refund)"
+
 # Tutup lalu buka shift baru: uang refund keluar dari laci SHIFT BARU.
 # Id shift diambil SEBELUM ditutup — jangan bergantung pada urutan daftar.
 SHIFT160L=$(api "$REISS105" GET /shift/aktif | jq -r .id)
