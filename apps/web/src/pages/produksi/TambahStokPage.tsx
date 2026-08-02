@@ -1219,6 +1219,22 @@ function KirimHasilModal({
   const items = daftar
     .filter(([id]) => angkaDari(qty[id]) > 0)
     .map(([id]) => ({ ingredient_id: id, qty: angkaDari(qty[id]) }));
+  /**
+   * Bahan yang kotaknya SUDAH DIISI tapi tidak akan ikut terkirim.
+   *
+   * Tiap kotak di sini sudah terisi sejak awal — hasil produksinya — jadi
+   * mengetiknya adalah mengubah, bukan mengisi dari kosong. NaN gagal
+   * `angkaDari(qty[id]) > 0`, jadi bahannya lenyap dari `items`; selama satu
+   * bahan lain masih benar tombolnya tetap hidup dan kirimannya berangkat
+   * TANPA bahan itu. Barangnya tertinggal di CK sementara cabang tak pernah
+   * tahu ada yang tidak dikirim.
+   *
+   * Nol dan minus ikut terjaring: keduanya terbaca sebagai angka, tapi nasib
+   * barisnya persis sama.
+   */
+  const qtyTerbuang = daftar
+    .filter(([id]) => (qty[id] ?? "").trim() !== "" && !(angkaDari(qty[id]) > 0))
+    .map(([, b]) => b.nama);
   const adaLebihDariSaldo = items.some(
     (it) => saldoCk.has(it.ingredient_id) && it.qty > (saldoCk.get(it.ingredient_id) ?? 0),
   );
@@ -1260,6 +1276,12 @@ function KirimHasilModal({
             Ada jumlah yang melebihi stok CK — kurangi dulu.
           </div>
         )}
+        {qtyTerbuang.length > 0 && (
+          <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+            Jumlah pada <b>{qtyTerbuang.join(", ")}</b> belum terbaca sebagai angka lebih dari 0
+            — tulis seperti <b>3</b> atau <b>1,5</b>. Tanpa itu bahannya tidak ikut terkirim.
+          </div>
+        )}
         <ErrorText error={error} />
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className={btnSecondary}>
@@ -1267,7 +1289,9 @@ function KirimHasilModal({
           </button>
           <button
             onClick={() => onKirim(items)}
-            disabled={items.length === 0 || adaLebihDariSaldo || isPending}
+            disabled={
+              items.length === 0 || qtyTerbuang.length > 0 || adaLebihDariSaldo || isPending
+            }
             className="rounded-lg bg-purple-600 px-4 py-2 text-sm font-bold text-white hover:bg-purple-500 disabled:opacity-60"
           >
             🚚 Kirim ({items.length} bahan)

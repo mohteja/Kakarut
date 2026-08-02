@@ -178,6 +178,25 @@ export function TransferStokPage() {
   };
 
   const barisTerisi = baris.filter((b) => b.ingredient_id && angkaDari(b.qty) > 0);
+  /**
+   * Baris berbahan yang qty-nya SUDAH DIISI tapi tidak akan ikut terkirim.
+   *
+   * Halaman ini sudah cermat menolak apa yang server akan tolak — `adaQtyLebih`
+   * dan `adaSalahKemasan` sengaja mencerminkan aturan server "supaya form tak
+   * pernah menjanjikan sesuatu yang nanti ditolak". Celahnya justru pada yang
+   * TIDAK ditolak server: NaN gagal `angkaDari(b.qty) > 0`, jadi barisnya
+   * dibuang di sisi klien — hilang dari `barisTerisi` sekaligus dari `items`
+   * yang dikirim. Selama satu baris lain benar, `bisaKirim` tetap true dan
+   * transfernya berangkat TANPA bahan itu; asal mengira sudah mengirim, tujuan
+   * tak pernah menerimanya, dan tak ada galat di mana pun.
+   *
+   * Nol dan minus terjaring lewat `!(… > 0)` yang sama: nasib barisnya persis
+   * sama, dibuang diam-diam.
+   */
+  const qtyTerbuang = baris
+    .filter((b) => b.ingredient_id && b.qty.trim() !== "" && !(angkaDari(b.qty) > 0))
+    .map((b) => saldoById.get(b.ingredient_id)?.nama)
+    .filter((n): n is string => !!n);
   const adaQtyLebih = baris.some((b) => {
     const s = saldoById.get(b.ingredient_id);
     return s != null && angkaDari(b.qty) > tersediaDari(s) + 1e-9;
@@ -188,6 +207,7 @@ export function TransferStokPage() {
     !!tujuanId &&
     asalId !== tujuanId &&
     barisTerisi.length > 0 &&
+    qtyTerbuang.length === 0 &&
     !adaQtyLebih &&
     !adaSalahKemasan;
 
@@ -515,6 +535,12 @@ export function TransferStokPage() {
           {adaQtyLebih && (
             <p className="mt-2 text-sm font-medium text-red-600">
               Ada jumlah kirim melebihi stok tersedia — perbaiki dulu.
+            </p>
+          )}
+          {qtyTerbuang.length > 0 && (
+            <p className="mt-2 text-sm font-medium text-red-600">
+              Jumlah pada <b>{qtyTerbuang.join(", ")}</b> belum terbaca sebagai angka lebih dari
+              0 — tulis seperti <b>3</b> atau <b>1,5</b>. Tanpa itu bahannya tidak ikut terkirim.
             </p>
           )}
           <div className="mt-3 flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:gap-3">
