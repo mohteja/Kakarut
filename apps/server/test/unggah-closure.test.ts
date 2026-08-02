@@ -40,13 +40,24 @@ function semuaTsx(dir: string): string[] {
 }
 
 /**
- * `onChange={(x) => setSesuatu({ …` di dalam blok `<ImageUpload …>`.
+ * TANDA CACATNYA, bukan salah satu cara menuliskannya: setter yang menerima
+ * literal objek yang diawali SEBARAN — `setSesuatu({ ...`.
  *
- * Yang dicari adalah setter yang menerima LITERAL OBJEK, bukan fungsi. Bentuk
- * benarnya — `set((prev) => …)` — tak cocok dengan pola ini karena diawali
- * kurung/`prev`, bukan `{`.
+ * Versi pertama penjaga ini mematok `onChange={(x) => setSesuatu({`, dan itu
+ * cuma satu ejaan. Badan blok menulis cacat yang sama persis tanpa tersentuh:
+ *
+ *     onChange={(url) => { setForm({ ...form, foto: url }); }}
+ *
+ * Saya buktikan sendiri: bentuk itu ditanam ke `PengajuanCutiSection` dan
+ * penjaganya tetap HIJAU. Persis lubang yang di `spinner-abadi` menyembunyikan
+ * enam spinner abadi selama beberapa ronde — di sana kebetulan ada korbannya,
+ * di sini kebetulan belum. Yang membedakan cuma keberuntungan, jadi keduanya
+ * ditutup dengan cara yang sama: kunci tanda cacatnya, bukan ejaannya.
+ *
+ * Bentuk benarnya tak pernah cocok: `set((prev) => ({ ... }))` diawali kurung
+ * dan `prev`, bukan `{`.
  */
-const SEBAR_BASI = /onChange=\{\s*\(\w*\)\s*=>\s*set\w+\(\s*\{/;
+const SEBAR_BASI = /\bset\w+\(\s*\{\s*\.\.\./;
 
 describe("ImageUpload: callback unggahan tak boleh menyebar snapshot basi", () => {
   const berkas = semuaTsx(akar).filter((p) =>
