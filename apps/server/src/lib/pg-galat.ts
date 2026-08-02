@@ -29,6 +29,31 @@ export function bentrokUnik(err: unknown): boolean {
 }
 
 /**
+ * Benarkah galat ini "sintaks nilai tak sah" (SQLSTATE 22P02)?
+ *
+ * Yang melahirkannya di sini hampir selalu satu hal: id dari PATH/QUERY masuk
+ * langsung ke pembanding kolom `uuid`. `/customer/abc` membuat Postgres
+ * melempar `invalid input syntax for type uuid`, dan tanpa terjemahan itu
+ * keluar sebagai **500** — padahal murni salah input klien.
+ *
+ * Ada 142 pembacaan `c.req.param()` di modul-modul dan hanya lima berkas yang
+ * memasang saringan uuid sendiri. Menyalin saringan ke 137 tempat sisanya
+ * bukan perbaikan, itu daftar tugas yang tak akan selesai — jadi
+ * terjemahannya dipasang di SATU pintu keluar galat (`app.onError`).
+ *
+ * Sengaja TIDAK membuatnya senyap: 400-nya tetap dicatat ke `error_logs`.
+ * 22P02 bisa juga lahir dari literal cacat yang disusun kode sendiri, dan itu
+ * cacat server sungguhan — yang berubah cuma labelnya, bukan keberadaannya di
+ * panel.
+ */
+export function nilaiTakSah(err: unknown): boolean {
+  const kode =
+    (err as { cause?: { code?: string }; code?: string })?.cause?.code ??
+    (err as { code?: string })?.code;
+  return kode === "22P02";
+}
+
+/**
  * Jalankan tulisan yang bisa menabrak indeks unik, lalu terjemahkan
  * penolakannya jadi 409 berpesan.
  *
