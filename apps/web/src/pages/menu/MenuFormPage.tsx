@@ -377,10 +377,12 @@ export function MenuFormPage() {
               <div className="flex gap-2">
                 <input
                   required
-                  type="number"
-                  min="0"
-                  value={hargaJual}
-                  onChange={(e) => setHargaJual(e.target.value)}
+                  /* Harga jual: angka paling menentukan di aplikasi ini.
+                     `type="number"` menyimpan "15.000" sebagai 15. */
+                  type="text"
+                  inputMode="numeric"
+                  value={hargaJual ? formatAngka(Number(hargaJual), 0) : ""}
+                  onChange={(e) => setHargaJual(e.target.value.replace(/\D/g, ""))}
                   className={inputClass}
                 />
                 <button

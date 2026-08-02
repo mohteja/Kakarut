@@ -1607,11 +1607,12 @@ export function KasirPage() {
               Modal awal (Rp)
             </label>
             <input
-              type="number"
-              min="0"
+              /* Sama seperti "Uang diterima" di halaman ini: digit murni di
+                 state, berkelompok di layar. */
+              type="text"
               inputMode="numeric"
-              value={modalAwalGate}
-              onChange={(e) => setModalAwalGate(e.target.value)}
+              value={modalAwalGate ? formatAngka(Number(modalAwalGate), 0) : ""}
+              onChange={(e) => setModalAwalGate(e.target.value.replace(/\D/g, ""))}
               placeholder="mis. 200000"
               className={inputClass}
             />
