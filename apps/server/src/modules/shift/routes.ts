@@ -15,6 +15,7 @@ import {
 import { db } from "../../db/client";
 import { branches, companies, saleRefunds, sales, shifts, users } from "../../db/schema";
 import { requireRole, resolveBranchId, terikatCabang, type AppEnv } from "../../middleware/auth";
+import { bentrokUnik } from "../../lib/pg-galat";
 import { tanggalDi, waktuDi } from "../../lib/time";
 import { sedangHadir } from "../absensi/routes";
 
@@ -209,17 +210,50 @@ export async function bukaShift(params: {
     const [row] = await baseSelect().where(eq(shifts.id, open.id));
     return { shift: await toDto(row, params.role), sudahTerbuka: true };
   }
-  const [ins] = await db
-    .insert(shifts)
-    .values({
-      companyId: params.companyId,
-      branchId: params.branchId,
-      openedBy: params.userId,
-      modalAwal: params.modalAwal,
-      ...(params.waktu ? { openedAt: params.waktu } : {}),
-    })
-    .returning({ id: shifts.id });
-  const [row] = await baseSelect().where(eq(shifts.id, ins.id));
+  /*
+   * SELECT lalu INSERT tak pernah cukup: selalu ada jeda di antara keduanya.
+   * Yang benar-benar menjaga "satu shift terbuka per cabang" adalah indeks
+   * parsial `shifts_open_per_branch_uq` (migrasi 0023) — dan tanpa penangkap
+   * ini, permintaan yang KALAH balapan menerima 23505 mentah alias 500.
+   *
+   * Dua akibat nyatanya, dan keduanya bertentangan dengan janji di komentar
+   * fungsi ini bahwa kasus "sudah terbuka" BUKAN error:
+   *   - Kasir web: 500 yang bukan galat aplikasi memicu overlay global
+   *     "server sedang diperbarui" — aplikasinya terlihat tumbang, padahal
+   *     kasir cuma membuka laci.
+   *   - Jalur sinkron (`tipe:"shift_buka"`): perintahnya gagal, dan seluruh
+   *     penjualan offline yang bersandar padanya kehilangan tempat berpijak.
+   *
+   * Balapannya kini mendarat di hasil yang SAMA dengan jalur berurutan:
+   * kembalikan shift yang sudah ada, tandai `sudah_terbuka`.
+   */
+  let insId: string;
+  try {
+    const [ins] = await db
+      .insert(shifts)
+      .values({
+        companyId: params.companyId,
+        branchId: params.branchId,
+        openedBy: params.userId,
+        modalAwal: params.modalAwal,
+        ...(params.waktu ? { openedAt: params.waktu } : {}),
+      })
+      .returning({ id: shifts.id });
+    insId = ins.id;
+  } catch (err) {
+    if (!bentrokUnik(err)) throw err;
+    const [lawan] = await db
+      .select({ id: shifts.id })
+      .from(shifts)
+      .where(and(eq(shifts.branchId, params.branchId), isNull(shifts.closedAt)));
+    // Pemenangnya sempat menutup shiftnya lagi di sela ini → tak ada yang bisa
+    // dikembalikan, dan berpura-pura sukses justru menyesatkan. Lempar apa
+    // adanya; kejadian ini jauh lebih jarang daripada balapan membuka.
+    if (!lawan) throw err;
+    const [row] = await baseSelect().where(eq(shifts.id, lawan.id));
+    return { shift: await toDto(row, params.role), sudahTerbuka: true };
+  }
+  const [row] = await baseSelect().where(eq(shifts.id, insId));
   return { shift: await toDto(row, params.role), sudahTerbuka: false };
 }
 
