@@ -42,8 +42,33 @@ export function RiwayatPage() {
     enabled: !!selectedId,
   });
 
+  // Kembalikan uang per sajian: kasir pun boleh (pembelinya sedang menunggu di
+  // depan kasir), jejaknya tersimpan di server. Peran lain yang bisa membuka
+  // halaman ini — tim & dapur — hanya melihat, sesuai gerbang server.
+  const bisaRefund =
+    auth?.user.role === "owner" || auth?.user.role === "admin" || auth?.user.role === "cashier";
+
   const list = rows ?? [];
   const totalHari = list.reduce((a, r) => a + r.total, 0);
+
+  /**
+   * Uang & stok sama-sama bergerak saat transaksi dihapus ATAU direfund, jadi
+   * daftar, laporan, dan saldo stok sama-sama basi. Disatukan supaya tak ada
+   * kunci yang terlewat di salah satu jalur.
+   */
+  function segarkan(tutup: boolean) {
+    if (tutup) setSelectedId(null);
+    for (const key of [
+      "riwayat",
+      "penjualan",
+      "transaksi-detail",
+      "stok",
+      "laporan",
+      "rekomendasi",
+    ]) {
+      queryClient.invalidateQueries({ queryKey: [key] });
+    }
+  }
 
   return (
     <div className="max-w-2xl">
@@ -153,16 +178,11 @@ export function RiwayatPage() {
           data={detail}
           autoPrintOnOpen={false}
           onClose={() => setSelectedId(null)}
-          onDeleted={
-            isManajemen
-              ? () => {
-                  setSelectedId(null);
-                  for (const key of ["riwayat", "penjualan", "stok", "laporan", "rekomendasi"]) {
-                    queryClient.invalidateQueries({ queryKey: [key] });
-                  }
-                }
-              : undefined
-          }
+          onDeleted={isManajemen ? () => segarkan(true) : undefined}
+          // Refund tidak menutup struk: kasir biasanya langsung mencetak ulang
+          // agar pembeli memegang angka yang benar. Detailnya disegarkan supaya
+          // panel & struk memakai sisa porsi yang baru.
+          onRefunded={bisaRefund ? () => segarkan(false) : undefined}
         />
       )}
     </div>
