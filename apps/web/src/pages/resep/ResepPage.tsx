@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import type {
   BahanDto,
@@ -253,6 +253,20 @@ export function ResepPage() {
     hasil: null,
     packing: null,
   });
+  /**
+   * Resep yang SEDANG dibuka, dibaca dari luar closure render.
+   *
+   * `foto` di-reset tiap ganti bahan (efek di bawah), sementara `ImageUpload`
+   * mendarat beberapa detik kemudian. Tanpa pegangan ini, foto yang diunggah
+   * untuk resep A mendarat di form resep B yang sudah terlanjur dibuka — lalu
+   * ikut tersimpan ke sana. Langkah masak sudah kebal karena `_id`-nya tak
+   * pernah dipakai ulang antar resep; `foto` tak punya identitas semacam itu,
+   * jadi pemiliknya dicatat terpisah.
+   */
+  const idResepRef = useRef<string | null>(null);
+  useEffect(() => {
+    idResepRef.current = dipilih?.id ?? null;
+  }, [dipilih]);
   // Persetujuan sadar untuk menimpa harga bahan (lihat catatan di `simpan`).
   // Sengaja kembali false tiap ganti bahan — persetujuan tidak menular.
   const [setujuHarga, setSetujuHarga] = useState(false);
@@ -1208,7 +1222,28 @@ export function ResepPage() {
                           {bolehUbah ? (
                             <ImageUpload
                               value={foto[kunci]}
-                              onChange={(url) => setFoto({ ...foto, [kunci]: url })}
+                              /*
+                                Bentuk fungsional, dan pemiliknya diperiksa —
+                                dua kebocoran berbeda di satu baris.
+
+                                `{ ...foto }` menyebar snapshot saat unggahan
+                                DIMULAI. Dua foto (hasil & packing) memang
+                                dipilih berurutan dalam hitungan detik; yang
+                                mendarat belakangan mengembalikan pasangannya
+                                jadi null. Satu foto hilang tanpa tanda apa pun.
+
+                                Pemeriksaan pemilik menjaga hal kedua: pindah
+                                resep selagi mengunggah membuat fotonya mendarat
+                                di form resep lain — dan ikut tersimpan ke sana.
+                              */
+                              onChange={(url) => {
+                                const milik = dipilih?.id ?? null;
+                                setFoto((prev) =>
+                                  idResepRef.current === milik
+                                    ? { ...prev, [kunci]: url }
+                                    : prev,
+                                );
+                              }}
                               tujuan="resep"
                               placeholder={kunci === "hasil" ? "🍲" : "📦"}
                             />
