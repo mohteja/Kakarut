@@ -1,6 +1,6 @@
 import { angkaDari, teksAngka } from "@kakarut/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ImageUpload } from "../../components/ImageUpload";
 import {
   Card,
@@ -160,8 +160,17 @@ export function PerusahaanPage() {
   const [metodeHpp, setMetodeHpp] = useState<"average" | "fifo">("average");
   const [foodCostMaks, setFoodCostMaks] = useState("40");
 
+  /**
+   * Semai SEKALI. `["company"]` disegarkan ulang saat jendela kembali fokus
+   * (dan langsung saat kartu Mode di atas meng-invalidate-nya sesudah upgrade),
+   * dan tiap penyegaran menimpa apa yang sedang diketik owner — alamat, telepon,
+   * tarif PB1 — tanpa jejak. Sesudah Simpan berhasil, isi form memang sudah
+   * sama dengan server, jadi tak ada yang perlu disemai ulang.
+   */
+  const tersemai = useRef(false);
   useEffect(() => {
-    if (!company) return;
+    if (!company || tersemai.current) return;
+    tersemai.current = true;
     setNama(company.nama);
     setAlamat(company.alamat ?? "");
     setTelepon(company.telepon ?? "");

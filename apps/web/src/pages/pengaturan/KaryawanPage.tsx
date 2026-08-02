@@ -126,9 +126,22 @@ function TempatSOModal({ karyawan, onClose }: { karyawan: Karyawan; onClose: () 
     queryFn: () => api<KaryawanTempatDto>(`/karyawan/${karyawan.user_id}/tempat`),
   });
   const [selected, setSelected] = useState<Set<string> | null>(null);
+  /**
+   * Semai SEKALI (`selected === null` = belum tersemai).
+   *
+   * Tanpa penjagaan itu, tiap `data` baru menimpa centangan yang sedang dipilih.
+   * React Query menyegarkan ulang begitu query basi dan jendela kembali fokus —
+   * `staleTime` kunci ini 10 detik, jadi berpindah aplikasi sebentar (hal biasa
+   * di kasir) sudah cukup: centangan balik ke keadaan server, tombol Simpan
+   * tetap menyimpan, dan yang tersimpan adalah tugas LAMA. Tak ada pesan galat.
+   *
+   * Dua modal saudaranya yang menulis tabel petugas yang sama sudah kebal —
+   * `PetugasModal` menyemai lewat penginisialisasi `useState`, `BahanModal`
+   * lewat `selected ?? data`. Hanya yang ini memakai efek yang menembak ulang.
+   */
   useEffect(() => {
-    if (data) setSelected(new Set(data.assigned));
-  }, [data]);
+    if (data && selected === null) setSelected(new Set(data.assigned));
+  }, [data, selected]);
 
   const simpan = useMutation({
     mutationFn: () =>

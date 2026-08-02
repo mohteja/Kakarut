@@ -224,16 +224,30 @@ export function ResepPage() {
     queryFn: () => api<BahanResepRow[]>(`/bahan/${selectedId}/resep`),
   });
 
-  // Draft editor lokal, di-seed dari resep server tiap kali data/bahan berubah.
+  /**
+   * Draft editor lokal, di-seed dari resep server SEKALI PER RESEP.
+   *
+   * Kuncinya `selectedId`, bukan identitas objek `resepServer`. Dulu efek ini
+   * menyemai ulang tiap kali objek itu berganti — dan React Query menggantinya
+   * tiap penyegaran ulang, yang terjadi begitu query basi dan jendela kembali
+   * fokus (`staleTime` 10 detik). Takaran yang baru diketik lenyap balik ke
+   * angka server tanpa satu pun pesan; yang mengetik baru sadar setelah
+   * menyimpan resep yang tak jadi berubah.
+   *
+   * Berganti resep TETAP menyemai ulang — itu memang yang diinginkan, dan
+   * itulah kenapa penjagaannya menyimpan `selectedId`, bukan sekadar "sudah".
+   */
   const [resep, setResep] = useState<ResepDraft[]>([]);
+  const resepTersemai = useRef<string | null>(null);
   useEffect(() => {
-    if (resepServer) {
-      setResep(
-        resepServer.map((r) => ({ ingredient_id: r.ingredient_id, qty: teksAngka(r.qty) })),
-      );
-    } else {
+    if (!resepServer) {
       setResep([]);
+      resepTersemai.current = null;
+      return;
     }
+    if (resepTersemai.current === selectedId) return;
+    resepTersemai.current = selectedId;
+    setResep(resepServer.map((r) => ({ ingredient_id: r.ingredient_id, qty: teksAngka(r.qty) })));
   }, [resepServer, selectedId]);
 
   // CARA MASAK: langkah berurutan + foto proses per langkah.
@@ -243,8 +257,19 @@ export function ResepPage() {
     queryFn: () => api<BahanLangkahRow[]>(`/bahan/${selectedId}/langkah`),
   });
   const [langkah, setLangkah] = useState<LangkahDraft[]>([]);
+  // Sekali per resep — alasannya sama dengan draft resep di atas. Di sini
+  // taruhannya lebih besar: satu langkah masak bisa beberapa kalimat, dan
+  // menyemai ulang juga memberi `_id` baru sehingga fotonya ikut terlepas.
+  const langkahTersemai = useRef<string | null>(null);
   useEffect(() => {
-    setLangkah((langkahServer ?? []).map((l) => ({ _id: idLangkah(), teks: l.teks, foto_url: l.foto_url })));
+    if (!langkahServer) {
+      setLangkah([]);
+      langkahTersemai.current = null;
+      return;
+    }
+    if (langkahTersemai.current === selectedId) return;
+    langkahTersemai.current = selectedId;
+    setLangkah(langkahServer.map((l) => ({ _id: idLangkah(), teks: l.teks, foto_url: l.foto_url })));
   }, [langkahServer, selectedId]);
 
   // Pengaturan batch & harga + foto hasil/packing, di-seed dari bahan terpilih
@@ -271,7 +296,16 @@ export function ResepPage() {
   // Persetujuan sadar untuk menimpa harga bahan (lihat catatan di `simpan`).
   // Sengaja kembali false tiap ganti bahan — persetujuan tidak menular.
   const [setujuHarga, setSetujuHarga] = useState(false);
+  /**
+   * Sekali per resep. `dipilih` dicari ulang dari daftar `bahan`, jadi objeknya
+   * berganti identitas tiap daftar itu disegarkan — dan efek ini dulu ikut
+   * menembak, mengembalikan isi/overhead/stok minimum yang sedang disunting ke
+   * angka server. Kuncinya `dipilih?.id`, supaya berganti resep tetap menyemai.
+   */
+  const aturTersemai = useRef<string | null>(null);
   useEffect(() => {
+    if (aturTersemai.current === (dipilih?.id ?? null)) return;
+    aturTersemai.current = dipilih?.id ?? null;
     setAtur(
       dipilih
         ? {
@@ -374,7 +408,13 @@ export function ResepPage() {
       queryClient.invalidateQueries({ queryKey: ["stok"] });
     },
     onError: () => {
-      // sebagian rantai bisa saja sudah tersimpan sebelum yang gagal — refresh
+      // Sebagian rantai bisa saja sudah tersimpan sebelum yang gagal — refresh.
+      // Penjaga "semai sekali per resep" SENGAJA dilepas di sini: justru pada
+      // jalur ini draft harus mengikuti server lagi, supaya yang terlihat adalah
+      // apa yang benar-benar tersimpan, bukan ketikan yang sebagian gagal.
+      resepTersemai.current = null;
+      langkahTersemai.current = null;
+      aturTersemai.current = null;
       queryClient.invalidateQueries({ queryKey: ["bahan-resep", selectedId] });
       queryClient.invalidateQueries({ queryKey: ["bahan-langkah", selectedId] });
       queryClient.invalidateQueries({ queryKey: ["bahan"] });
