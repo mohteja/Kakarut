@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { TransferStokFaktur, TransferStokSaldoRow } from "@kakarut/shared";
 import {
   Card,
@@ -72,6 +72,28 @@ export function TransferStokPage() {
   // Cabang ASAL selalu Central Kitchen; manajemen dgn >1 CK boleh memilih.
   const asalDefault = ckSaya?.id ?? "";
   const [asalId, setAsalId] = useState(asalDefault);
+  /**
+   * `asalDefault` diturunkan dari `cabang`, dan `cabang` datang dari useQuery
+   * di BranchContext yang TIDAK menahan render. Saat halaman ini dimuat ulang
+   * langsung (F5/bookmark) dengan chunk-nya sudah hangat di cache, daftar itu
+   * masih kosong ketika komponen mount — dan nilai awal useState hanya dibaca
+   * sekali, jadi `asalId` terkunci "" selamanya.
+   *
+   * Akibatnya halaman TERLIHAT siap: `<select value="">` tak punya opsi yang
+   * cocok, jadi browser menampilkan opsi pertama ("🏭 Dapur Pusat") seolah
+   * terpilih. Tapi state-nya kosong, `enabled: !!asalId` membuat saldo tak
+   * pernah diminta, dan pilihan bahannya kosong tanpa satu pun keterangan.
+   * Yang terkunci di CK lebih buntu lagi: asalnya dirender sebagai teks mati,
+   * jadi tak ada cara memperbaikinya selain memuat ulang dan beruntung.
+   *
+   * Sengaja tidak menimpa pilihan yang SAH — manajemen dengan >1 CK yang sudah
+   * memilih CK kedua tak boleh ditarik balik ke CK pertama tiap render.
+   */
+  const asalSah = daftarCk.some((b) => b.id === asalId);
+  useEffect(() => {
+    if (asalSah || !asalDefault) return;
+    setAsalId(asalDefault);
+  }, [asalSah, asalDefault]);
   const [tujuanId, setTujuanId] = useState("");
   const [catatan, setCatatan] = useState("");
   const [baris, setBaris] = useState<BarisTransfer[]>([{ ingredient_id: "", qty: "" }]);

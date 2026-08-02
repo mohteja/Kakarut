@@ -15,7 +15,7 @@ import { formatRupiah, formatTanggalRingkas, formatWaktu } from "../../lib/forma
 
 export function MemberPage() {
   const qc = useQueryClient();
-  const { data: members, isLoading } = useQuery({
+  const { data: members, isLoading, error: gagalMuat } = useQuery({
     queryKey: ["customer"],
     queryFn: () => api<CustomerDto[]>("/customer"),
   });
@@ -92,7 +92,21 @@ export function MemberPage() {
         className="mb-3 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm focus:border-orange-500 focus:outline-none"
       />
 
-      {tampil.length === 0 ? (
+      {/*
+        GAGAL DIBACA ≠ BELUM ADA MEMBER. `members ?? []` menyamakan keduanya,
+        jadi permintaan yang ditolak berbunyi "Belum ada member" lengkap dengan
+        penjelasan cara membuatnya — kalimat yang meyakinkan pemiliknya bahwa
+        daftar pelanggannya memang kosong.
+      */}
+      {gagalMuat ? (
+        <Card className="p-4">
+          <ErrorText error={gagalMuat} />
+          <div className="mt-2 text-sm text-stone-500">
+            Daftar member tidak dapat dimuat — <b>bukan</b> berarti kosong. Muat ulang halaman
+            setelah masalahnya beres.
+          </div>
+        </Card>
+      ) : tampil.length === 0 ? (
         <Card className="p-8 text-center text-sm text-stone-400">
           {cari ? `Member "${cari}" tidak ditemukan.` : "Belum ada member. Member otomatis dibuat saat kasir mengisi No. WhatsApp konsumen."}
         </Card>
@@ -132,6 +146,7 @@ export function MemberPage() {
             }
           }}
           hapusPending={hapus.isPending}
+          hapusError={hapus.error}
         />
       )}
 
@@ -199,14 +214,16 @@ function MemberDetailModal({
   onEdit,
   onHapus,
   hapusPending,
+  hapusError,
 }: {
   id: string;
   onClose: () => void;
   onEdit: (m: { id: string; nama: string; wa: string; catatan: string | null }) => void;
   onHapus: (id: string) => void;
   hapusPending: boolean;
+  hapusError: unknown;
 }) {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey: ["customer", id],
     queryFn: () => api<CustomerDetail>(`/customer/${id}`),
   });
@@ -217,7 +234,22 @@ function MemberDetailModal({
         className="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-5 shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
-        {isLoading || !data ? (
+        {/*
+          MENUNGGU vs GAGAL. `isLoading || !data` menyatukan keduanya, jadi
+          permintaan yang ditolak membiarkan modal berputar selamanya — tanpa
+          pesan, dan tanpa cara tahu bahwa mencoba lagi tak akan menolong.
+        */}
+        {error ? (
+          <div>
+            <div className="mb-2 flex items-start justify-between gap-2">
+              <h2 className="text-lg font-bold text-stone-800">Detail member</h2>
+              <button onClick={onClose} className="text-stone-400 hover:text-stone-700" aria-label="Tutup">
+                ✕
+              </button>
+            </div>
+            <ErrorText error={error} />
+          </div>
+        ) : isLoading || !data ? (
           <Spinner />
         ) : (
           <>
@@ -284,6 +316,13 @@ function MemberDetailModal({
                 ✏ Ubah
               </button>
             </div>
+            {/*
+              HAPUS YANG GAGAL TANPA JEJAK. `hapus.error` tak pernah dirender:
+              modal tetap terbuka, membernya masih ada, dan tak ada satu pun
+              petunjuk bahwa servernya menolak. Yang menekannya menyimpulkan
+              tombolnya tak berfungsi, lalu menekan berkali-kali.
+            */}
+            <ErrorText error={hapusError} />
           </>
         )}
       </div>
