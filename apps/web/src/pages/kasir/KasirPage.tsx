@@ -10,6 +10,7 @@ import type {
   MetodeBayar,
   OpenBillDetail,
   OpenBillRow,
+  PesananStatus,
   Shift,
 } from "@kakarut/shared";
 import {
@@ -83,11 +84,24 @@ interface CartLine {
    * ditagih, bukan `menu.harga_jual` yang bisa saja sudah berubah.
    */
   hargaKunci?: number;
+  /** status dapur baris bill; `batal` = tak jadi dibuat, tak boleh ditagih */
+  pesananStatus?: PesananStatus;
 }
 
 /** Harga yang benar-benar ditagih untuk satu baris keranjang. */
 function hargaBaris(l: CartLine) {
   return l.hargaKunci ?? l.menu.harga_jual;
+}
+
+/**
+ * Baris yang dibatalkan dapur — sajiannya TIDAK JADI DIBUAT (bahan habis).
+ *
+ * Ia tetap tinggal di keranjang karena `PUT /open-bill/:id` menolak pembaruan
+ * yang menghilangkan baris (jejak siapa & kapan membatalkannya ada di baris
+ * itu), tapi ia TIDAK ikut subtotal dan TIDAK ikut dikirim saat bayar.
+ */
+function dibatalkan(l: CartLine) {
+  return l.pesananStatus === "batal";
 }
 
 interface Kategori {
@@ -492,6 +506,9 @@ export function KasirPage() {
            * melewatinya.
            */
           if (delta < 0 && l.billItemId) return l;
+          // Sajian yang dibatalkan dapur tak jadi dibuat — menambah qty-nya
+          // tak berarti apa-apa (tetap tak ditagih). Pesan lagi = baris baru.
+          if (dibatalkan(l)) return l;
           return { ...l, qty: Math.max(0, l.qty + delta) };
         })
         .filter((l) => l.qty > 0),
@@ -508,7 +525,10 @@ export function KasirPage() {
     );
   }
 
-  const subtotal = cart.reduce((a, l) => a + hargaBaris(l) * l.qty, 0);
+  // Baris yang dibatalkan dapur tak jadi dibuat → tak ikut dihitung & tak ikut
+  // dibayar. Ia tetap ada di `cart` supaya `PUT` tidak kehilangan barisnya.
+  const cartTagih = cart.filter((l) => !dibatalkan(l));
+  const subtotal = cartTagih.reduce((a, l) => a + hargaBaris(l) * l.qty, 0);
   // diskon per transaksi (cermin logika server: clamp ke [0, subtotal])
   const diskonNilaiNum = Number(diskonNilai) || 0;
   const diskonRaw =
@@ -564,7 +584,12 @@ export function KasirPage() {
             : {}),
           // membayar open bill → server menagih harga yang dikunci di bill
           ...(editingBillId ? { open_bill_id: editingBillId } : {}),
-          items: cart.map((l) => ({
+          // `cartTagih`, bukan `cart`: sajian yang dibatalkan dapur (bahan
+          // habis) tak jadi dibuat, jadi tak masuk penjualan — tak ditagih,
+          // tak memotong stok, tak menambah HPP. Servernya menerima ini:
+          // `createSale` hanya memeriksa baris yang MEMBAWA `open_bill_item_id`
+          // dan menutup bill lewat id-nya, bukan dengan mencocokkan barisnya.
+          items: cartTagih.map((l) => ({
             menu_id: l.menu.id,
             qty: l.qty,
             ...(l.dineInOverride !== null ? { is_dine_in: l.dineInOverride } : {}),
@@ -707,6 +732,7 @@ export function KasirPage() {
         catatan: it.catatan ?? "",
         billItemId: it.id,
         hargaKunci: it.harga_satuan,
+        pesananStatus: it.pesanan_status,
       });
     }
     setCart(lines);
@@ -1074,15 +1100,18 @@ export function KasirPage() {
             // memang baru, jadi penandanya tak perlu muncul.
             const sudahKeDapur = editingBillId != null && l.billItemId != null;
             const barisBaru = editingBillId != null && l.billItemId == null;
+            const batal = dibatalkan(l);
             return (
               <div
                 key={l.menu.id}
                 className={`rounded-lg border p-2 ${
-                  sudahKeDapur
-                    ? "border-emerald-200 bg-emerald-50/40"
-                    : barisBaru
-                      ? "border-orange-300 bg-orange-50/40"
-                      : "border-stone-200"
+                  batal
+                    ? "border-stone-200 bg-stone-100 opacity-70"
+                    : sudahKeDapur
+                      ? "border-emerald-200 bg-emerald-50/40"
+                      : barisBaru
+                        ? "border-orange-300 bg-orange-50/40"
+                        : "border-stone-200"
                 }`}
               >
                 <div className="flex items-start justify-between gap-2">
@@ -1102,11 +1131,18 @@ export function KasirPage() {
                         menu sudah tak aktif — tetap ditagih
                       </div>
                     )}
-                    {sudahKeDapur && (
+                    {/* Dibatalkan dapur = tak jadi dibuat (bahan habis). Harus
+                        terbaca jelas: kasir sedang menghadapi pembeli yang
+                        menunggu penjelasan kenapa satu item tak ada di total. */}
+                    {batal ? (
+                      <div className="mt-0.5 inline-flex items-center rounded-full bg-stone-300 px-1.5 py-0.5 text-[11px] font-semibold text-stone-700">
+                        ✕ Dibatalkan dapur — tidak ditagih
+                      </div>
+                    ) : sudahKeDapur ? (
                       <div className="mt-0.5 inline-flex items-center rounded-full bg-emerald-100 px-1.5 py-0.5 text-[11px] font-semibold text-emerald-800">
                         ✓ Sudah masuk pesanan
                       </div>
-                    )}
+                    ) : null}
                     {barisBaru && (
                       <div className="mt-0.5 inline-flex items-center rounded-full bg-orange-100 px-1.5 py-0.5 text-[11px] font-semibold text-orange-800">
                         Baru — belum disimpan
@@ -1124,12 +1160,18 @@ export function KasirPage() {
                     )}
                   </div>
                   <div className="text-sm font-bold text-stone-800">
-                    {formatRupiah(hargaBaris(l) * l.qty)}
+                    {batal ? (
+                      <span className="text-stone-400 line-through">
+                        {formatRupiah(hargaBaris(l) * l.qty)}
+                      </span>
+                    ) : (
+                      formatRupiah(hargaBaris(l) * l.qty)
+                    )}
                   </div>
                 </div>
                 <div className="mt-2 flex items-center justify-between">
                   <button
-                    onClick={() => toggleLineDineIn(l.menu.id)}
+                    onClick={() => { if (!batal) toggleLineDineIn(l.menu.id); }}
                     className={`rounded-full px-2 py-0.5 text-xs font-medium ${
                       efektifDineIn
                         ? "bg-blue-100 text-blue-700"
@@ -1142,7 +1184,7 @@ export function KasirPage() {
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => ubahQty(l.menu.id, -1)}
-                      disabled={sudahKeDapur}
+                      disabled={sudahKeDapur || batal}
                       title={
                         sudahKeDapur
                           ? "Sudah masuk pesanan — batalkan dari Papan Pesanan supaya ada jejaknya"
@@ -1155,7 +1197,8 @@ export function KasirPage() {
                     <span className="w-6 text-center text-sm font-semibold">{l.qty}</span>
                     <button
                       onClick={() => ubahQty(l.menu.id, 1)}
-                      className="h-7 w-7 rounded-lg border border-stone-300 text-stone-600 hover:bg-stone-50"
+                      disabled={batal}
+                      className="h-7 w-7 rounded-lg border border-stone-300 text-stone-600 hover:bg-stone-50 disabled:cursor-not-allowed disabled:border-stone-200 disabled:text-stone-300 disabled:hover:bg-transparent"
                     >
                       +
                     </button>
@@ -1164,6 +1207,7 @@ export function KasirPage() {
                 <input
                   value={l.catatan}
                   onChange={(e) => ubahCatatanLine(l.menu.id, e.target.value)}
+                  readOnly={batal}
                   placeholder="Catatan (mis. tanpa gula, tanpa mie)"
                   className="mt-2 w-full rounded-lg border border-stone-200 bg-stone-50 px-2 py-1 text-xs focus:border-orange-400 focus:bg-white focus:outline-none"
                 />
@@ -1214,7 +1258,9 @@ export function KasirPage() {
                 setLangkahBayar("resume");
                 setResumeOpen(true);
               }}
-              disabled={cart.length === 0 || !mejaId}
+              // `cartTagih`: bila SEMUA sajian dibatalkan dapur, tak ada yang
+              // ditagih — jangan buka layar bayar bertotal nol.
+              disabled={cartTagih.length === 0 || !mejaId}
               className={`${btnPrimary} py-3`}
             >
               Lanjut →
@@ -1262,7 +1308,7 @@ export function KasirPage() {
               {" · "}
               {dineIn ? "Dine-in" : "Bawa pulang"}
               {konsumenNama.trim() ? ` · 👤 ${konsumenNama.trim()}` : ""}
-              {` · ${cart.reduce((a, l) => a + l.qty, 0)} item`}
+              {` · ${cartTagih.reduce((a, l) => a + l.qty, 0)} item`}
             </div>
 
             {/* Baca ulang pesanan — hanya di langkah resume. Di langkah bayar,
@@ -1270,7 +1316,10 @@ export function KasirPage() {
                 menutupi angka yang harus ia baca ke tamu. */}
             {langkahBayar === "resume" && (
             <div className="mb-3 divide-y divide-stone-100 rounded-lg border border-stone-200">
-              {cart.map((l) => (
+              {/* Baca-ulang untuk tamu: sebut hanya yang ditagih. Sajian yang
+                  dibatalkan dapur tak boleh muncul di sini — kasir sedang
+                  membacakan daftar yang harus cocok dengan totalnya. */}
+              {cartTagih.map((l) => (
                 <div
                   key={l.menu.id}
                   className="flex items-start justify-between gap-2 px-3 py-2 text-sm"

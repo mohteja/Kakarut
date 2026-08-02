@@ -133,6 +133,10 @@ async function loadDetail(companyId: string, id: string): Promise<OpenBillDetail
       qty: it.qty,
       dine_in_override: it.dineInOverride,
       catatan: it.catatan,
+      // Baris yang dibatalkan dapur (bahan habis) tetap dikirim — ia wajib ada
+      // saat PUT, dan kasir perlu melihatnya — tapi statusnya ikut supaya
+      // klien tahu baris itu tidak boleh ditagih.
+      pesanan_status: it.pesananStatus,
     })),
   };
 }
