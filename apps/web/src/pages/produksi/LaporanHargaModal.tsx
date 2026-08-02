@@ -32,13 +32,36 @@ export function LaporanHargaModal({
     Object.fromEntries(rows.map((r) => [r.id, r.total_harga != null ? teksAngka(r.total_harga) : ""])),
   );
   const [perbaruiAcuan, setPerbaruiAcuan] = useState(true);
-  const total = rows.reduce(
-    (t, r) => t + ((harga[r.id] ?? "") !== "" ? angkaDari(harga[r.id]) || 0 : 0),
-    0,
+  /**
+   * Harga TERISI yang tak terbaca sebagai angka ≥ 0.
+   *
+   * Sebelum pagar ini, bentuknya `angkaDari(...) || 0` — dan NaN lolos jadi
+   * NOL, bukan galat. Di layar inilah nol paling mahal:
+   *
+   *   1. `total_harga` baris ditimpa 0, padahal itulah harga per lot yang
+   *      dipakai HPP FIFO;
+   *   2. "Perbarui harga acuan" DEFAULTNYA menyala, jadi acuan bahan dihitung
+   *      ulang ke MEDIAN riwayat pembelian — kini memuat satu pembelian Rp 0;
+   *   3. acuan itu, seperti tertulis di kotak centangnya sendiri, dipakai RAB
+   *      belanja berikutnya DAN perhitungan HPP semua menu;
+   *   4. sesudah dilaporkan fakturnya berstatus "Selesai" — kesempatan
+   *      memperbaikinya lewat layar ini tertutup.
+   *
+   * Yang paling menyesatkan: panel dampak di bawah dihitung dari `items` yang
+   * sama, jadi ia MENAMPILKAN jatuhnya harga acuan itu — dengan warna HIJAU,
+   * karena hijau berarti "acuan turun". Satu-satunya panel yang dibuat untuk
+   * menangkap kejutan malah melukiskannya sebagai kabar baik.
+   *
+   * Baris tak terbaca juga dikeluarkan dari `items` supaya pratinjau dampaknya
+   * tidak ikut berbohong selama orangnya masih mengetik.
+   */
+  const salahKetik = rows.filter(
+    (r) => (harga[r.id] ?? "").trim() !== "" && !(angkaDari(harga[r.id]) >= 0),
   );
   const items = rows
-    .filter((r) => (harga[r.id] ?? "") !== "")
-    .map((r) => ({ id: r.id, total_harga: Math.max(0, angkaDari(harga[r.id]) || 0) }));
+    .filter((r) => (harga[r.id] ?? "").trim() !== "" && angkaDari(harga[r.id]) >= 0)
+    .map((r) => ({ id: r.id, total_harga: angkaDari(harga[r.id]) }));
+  const total = items.reduce((t, it) => t + it.total_harga, 0);
 
   // Dampak dihitung dari angka yang SEDANG diketik, jadi ditunda sebentar
   // supaya tiap ketukan tombol tidak memicu satu request.
@@ -180,6 +203,13 @@ export function LaporanHargaModal({
           )}
         </div>
 
+        {salahKetik.length > 0 && (
+          <div className="rounded-lg bg-red-50 px-3 py-1.5 text-xs font-medium text-red-800">
+            Harga tidak terbaca pada <b>{salahKetik.map((r) => r.bahan).join(", ")}</b> — tulis
+            angkanya saja, seperti <b>125000</b> atau <b>125.000</b>. Kosongkan bila baris itu
+            belum mau dilaporkan.
+          </div>
+        )}
         <ErrorText error={simpan.error} />
         <div className="flex justify-end gap-2 pt-1">
           <button onClick={onClose} className={btnSecondary} disabled={simpan.isPending}>
@@ -187,7 +217,7 @@ export function LaporanHargaModal({
           </button>
           <button
             onClick={() => simpan.mutate()}
-            disabled={!adaIsi || simpan.isPending}
+            disabled={!adaIsi || salahKetik.length > 0 || simpan.isPending}
             className={btnPrimary}
           >
             {simpan.isPending ? "Menyimpan…" : "💾 Simpan Laporan Harga"}
