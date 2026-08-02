@@ -203,6 +203,26 @@ function IsiRakModal({
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["penyimpanan"] });
       queryClient.invalidateQueries({ queryKey: ["penyimpanan-bahan", tempat.id] });
+      /**
+       * Daftar MASTER ikut disegarkan — dan justru itu yang paling lama basi.
+       *
+       * Rak yang ditugaskan di sini muncul sebagai chip `rak_lokasi` di daftar
+       * Bahan Baku dan daftar Perlengkapan; server menyusunnya dari
+       * `storage_location_ingredients`, tabel yang PUT di atas inilah yang
+       * menulisnya. Tapi kedua daftar itu berkunci MASTER (`bahan`,
+       * `perlengkapan-master`) yang sengaja ber-`staleTime` 5 menit, jadi tanpa
+       * invalidasi eksplisit chipnya menampilkan rak LAMA selama itu.
+       *
+       * Yang membuatnya menyesatkan: tooltip chip di Bahan Baku berbunyi
+       * "(atur di Tempat Penyimpanan)" — ia menunjuk layar ini, layar yang
+       * barusan dipakai orang itu. Ia kembali untuk memeriksa hasilnya dan
+       * menemukan angka lama, lalu menugaskan ulang.
+       *
+       * `["perlengkapan"]` (daftar stok per cabang) sudah benar sejak dulu dan
+       * tetap dipertahankan — ia memakai `r.rak` untuk pengelompokan opname;
+       * yang kurang justru daftar masternya.
+       */
+      queryClient.invalidateQueries({ queryKey: [isBahan ? "bahan" : "perlengkapan-master"] });
       if (!isBahan) queryClient.invalidateQueries({ queryKey: ["perlengkapan"] });
       onClose();
     },
