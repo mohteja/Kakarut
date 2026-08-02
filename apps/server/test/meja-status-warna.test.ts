@@ -38,6 +38,26 @@ function badanKelasStatus(): string {
   throw new Error("badan kelasStatus tak ketemu");
 }
 
+/**
+ * Nilai yang sungguh-sungguh dikembalikan cabang `!s`.
+ *
+ * Bila cabangnya mengembalikan konstanta bernama, definisinya dilacak di berkas
+ * yang sama. Tanpa ini, penjaga cuma memeriksa ejaan di satu baris — dan warna
+ * yang disembunyikan di balik nama lolos begitu saja.
+ */
+function nilaiCabangTakDiketahui(): string {
+  const badan = badanKelasStatus();
+  const m = /if\s*\(\s*!s\s*\)\s*return\s+([^;]+);/.exec(badan);
+  expect(m, "cabang `if (!s) return …` tak ketemu").not.toBeNull();
+  const ekspr = m![1].trim();
+  if (/^["'`]/.test(ekspr)) return ekspr; // literal langsung
+  const def = new RegExp(
+    `(?:const|let)\\s+${ekspr}\\s*(?::[^=]+)?=\\s*(["'\`][^"'\`]*["'\`])`,
+  ).exec(src);
+  expect(def, `definisi konstanta ${ekspr} tak ketemu di berkas ini`).not.toBeNull();
+  return def![1];
+}
+
 describe("kelasStatus: status tak diketahui ≠ kosong", () => {
   it("`!s` punya cabang sendiri, tidak digabung dengan kosong", () => {
     const badan = badanKelasStatus();
@@ -46,12 +66,16 @@ describe("kelasStatus: status tak diketahui ≠ kosong", () => {
     expect(badan).toMatch(/if\s*\(\s*!s\s*\)\s*return/);
   });
 
-  it("cabang `!s` TIDAK menjawab hijau", () => {
-    const badan = badanKelasStatus();
-    const baris = badan.split("\n").find((b) => /if\s*\(\s*!s\s*\)\s*return/.test(b))!;
-    // Kelasnya boleh diganti; yang tak boleh adalah warnanya jadi hijau —
-    // hijau di layar itu artinya "siap ditempati".
-    expect(baris).not.toContain("green");
+  it("cabang `!s` TIDAK menjawab hijau — konstantanya ikut ditelusuri", () => {
+    // Versi pertama uji ini cuma membaca BARISNYA. Cabang `!s` mengembalikan
+    // konstanta bernama, jadi warnanya tak pernah muncul di baris itu — dan
+    // menghijaukan konstantanya memulihkan bug aslinya UTUH (denah hijau semua
+    // saat status tak diketahui) tanpa penjaga ini berkedip. Saya buktikan
+    // sendiri: konstantanya diganti ke kelas hijau, keempat uji tetap lulus.
+    //
+    // Yang dijaga karena itu nilai yang BENAR-BENAR dikembalikan, bukan teks
+    // yang kebetulan tertulis di baris yang sama.
+    expect(nilaiCabangTakDiketahui()).not.toContain("green");
   });
 
   it("hanya status `kosong` yang berhak hijau", () => {
