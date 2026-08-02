@@ -63,11 +63,17 @@ export function MejaPage() {
     queryKey: ["meja", branchQuery],
     queryFn: () => api<MejaDto[]>(`/meja${branchQuery}`),
   });
-  const { data: statusList = [] } = useMejaStatus(branchQuery);
+  // `error` WAJIB dibaca. Okupansi adalah satu-satunya isi halaman ini yang
+  // tak bisa diperiksa ulang dengan mata dari layar — jumlah meja terlihat,
+  // siapa yang menunggak bayar tidak. Bacaan yang gagal tanpa tanda apa pun
+  // membuat denah tampak menjawab pertanyaannya padahal tidak.
+  const { data: statusList = [], error: statusGagal } = useMejaStatus(branchQuery);
   const statusById = new Map(statusList.map((s) => [s.meja_id, s]));
   const [kosongkanId, setKosongkanId] = useState<string | null>(null);
   const kosongkanTarget = statusList.find((s) => s.meja_id === kosongkanId) ?? null;
-  const jumlahIsi = statusList.filter((s) => s.status === "isi").length;
+  // null = belum diketahui. Angka 0 saat bacaannya gagal adalah klaim "tidak
+  // ada meja terisi", dan itu justru kebalikan dari yang sedang terjadi.
+  const jumlahIsi = statusGagal ? null : statusList.filter((s) => s.status === "isi").length;
 
   const [mode, setMode] = useState<"view" | "edit">("view");
   const [form, setForm] = useState<FormState | null>(null);
@@ -233,8 +239,17 @@ export function MejaPage() {
         }
       >
         Meja ({list.length}
-        {jumlahIsi > 0 ? ` · ${jumlahIsi} terisi` : ""})
+        {jumlahIsi === null ? " · status tak diketahui" : jumlahIsi > 0 ? ` · ${jumlahIsi} terisi` : ""})
       </PageTitle>
+
+      {statusGagal && (
+        <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-800">
+          <b>Status meja gagal dimuat.</b> Denah di bawah menampilkan meja abu-abu karena
+          okupansinya <b>tidak diketahui</b> — jangan dibaca sebagai meja kosong. Muat ulang
+          halaman untuk mencoba lagi.
+          {statusGagal instanceof Error ? ` (${statusGagal.message})` : ""}
+        </div>
+      )}
 
       {editing ? (
         <div className="mb-3 rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-sm text-orange-800">
@@ -245,9 +260,10 @@ export function MejaPage() {
         <div className="mb-3 rounded-lg bg-blue-50 px-4 py-2 text-sm text-blue-800">
           <b className="text-red-700">Merah</b> = ada pesanan belum dibayar ·{" "}
           <b className="text-amber-700">Kuning</b> = sudah bayar tapi tamu masih duduk ·{" "}
-          <b className="text-green-700">Hijau</b> = siap ditempati. Meja tetap terisi setelah
-          dibayar — tekan <b>Kosongkan</b> saat tamunya benar-benar pergi. Meja{" "}
-          <b>Ruang Tunggu</b> untuk bawa pulang, jadi tidak punya status.
+          <b className="text-green-700">Hijau</b> = siap ditempati ·{" "}
+          <b className="text-stone-600">Abu-abu</b> = statusnya belum diketahui (bukan kosong).
+          Meja tetap terisi setelah dibayar — tekan <b>Kosongkan</b> saat tamunya benar-benar
+          pergi. Meja <b>Ruang Tunggu</b> untuk bawa pulang, jadi tidak punya status.
         </div>
       )}
 

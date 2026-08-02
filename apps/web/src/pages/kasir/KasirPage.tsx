@@ -309,7 +309,7 @@ export function KasirPage() {
   // sah jadi tak bisa ditagih) dan — lebih halus — membuat `dineIn` jatuh ke
   // nilai cadangan `true`, sehingga pesanan bawa pulang terbukukan sebagai
   // makan di tempat dengan HPP yang salah. Satu meja dua bill juga sah di sini.
-  const { data: mejaStatus = [] } = useMejaStatus(branchQuery, isKasir);
+  const { data: mejaStatus = [], error: mejaStatusGagal } = useMejaStatus(branchQuery, isKasir);
   const statusMeja = useMemo(
     () => new Map(mejaStatus.map((s) => [s.meja_id, s])),
     [mejaStatus],
@@ -1676,6 +1676,17 @@ export function KasirPage() {
               </div>
             ) : (
               <div className="space-y-3">
+                {/* Bacaan okupansi gagal → daftar di bawah TETAP terpakai (memilih
+                    meja tak butuh statusnya), tapi warnanya, tombol Kosongkan, dan
+                    pertanyaan "tamu yang sama?" semuanya hilang tanpa jejak. Tanpa
+                    baris ini, meja yang menunggak bayar tampak sama persis dengan
+                    meja kosong. */}
+                {mejaStatusGagal && (
+                  <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                    <b>Status terisi/kosong belum termuat.</b> Meja tetap bisa dipilih, tapi
+                    tanda merah/kuning tidak muncul — pastikan langsung ke mejanya.
+                  </div>
+                )}
                 {/* Pencarian: ketik nomor/kata, cocok sebagian (mis. "8" → Meja 8) */}
                 <input
                   autoFocus
