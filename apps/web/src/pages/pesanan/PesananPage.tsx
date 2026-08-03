@@ -357,11 +357,16 @@ export function PesananPage() {
   const kunci = ["pesanan", branchQuery, tanggal];
   const qs = `${branchQuery ? `${branchQuery}&` : "?"}tanggal=${tanggal}`;
   /**
-   * Selama ada tombol status yang belum dijawab server, polling DIMATIKAN.
+   * Selama ada tombol status yang belum dijawab server, polling DIMATIKAN —
+   * supaya tak ada permintaan BARU yang berangkat dan balapan dengan
+   * penyegaran di `onSettled`.
    *
-   * Kalau tidak: jawaban polling yang berangkat sebelum perubahan tersimpan akan
-   * mendarat sesudahnya dan menimpa tampilan optimistis dengan status lama —
-   * badge berkedip balik lalu maju lagi. Itu justru terbaca "lemot", bukan cepat.
+   * Ini TIDAK menutup permintaan yang sudah TERLANJUR di udara saat tombol
+   * ditekan: `refetchInterval: false` hanya menghentikan penjadwalan
+   * berikutnya, dan `adaAksi` baru bernilai true SESUDAH `onMutate` jalan.
+   * Jawaban yang berangkat sebelum ketukan tetap mendarat sesudahnya dan
+   * menimpa tampilan optimistis dengan status lama. Yang membatalkannya adalah
+   * `cancelQueries` di `terapkanOptimistis`.
    */
   const adaAksi = useIsMutating({ mutationKey: ["pesanan-aksi"] }) > 0;
   const { data, isLoading, error } = useQuery({
@@ -381,11 +386,23 @@ export function PesananPage() {
    * di cache diperbarui lebih dulu memakai aturan turunan yang SAMA dengan
    * server (`ringkasPesanan`), jadi kolom, hitungan "2/3 selesai", dan urutan
    * langsung benar. Kalau servernya menolak, `onError` memulihkan apa adanya.
+   *
+   * MEMBATALKAN BACAAN YANG SEDANG DI UDARA lebih dulu, dan itu bukan formalitas
+   * resep. Papan ini memoles ulang tiap 15 detik, jadi hampir selalu ada satu
+   * permintaan yang sudah berangkat saat jari menekan tombol. Jawabannya
+   * membawa keadaan SEBELUM ketukan; mendarat sesudah tulisan optimistis, ia
+   * menimpanya — kartu melompat balik ke kolom asalnya, lalu maju lagi begitu
+   * `onSettled` menyegarkan. Di dapur lompatan itu terbaca "ketukan saya tidak
+   * masuk", dan orang menekan lagi.
+   *
+   * `api()` tak membaca `AbortSignal`, jadi permintaannya memang tetap selesai
+   * di jaringan — yang penting hasilnya tak lagi ditulis ke cache.
    */
-  function terapkanOptimistis(
+  async function terapkanOptimistis(
     p: PesananRow,
     ubahBaris: (it: PesananItemRow) => PesananItemRow,
-  ): { sebelum: PesananRow[] | undefined } {
+  ): Promise<{ sebelum: PesananRow[] | undefined }> {
+    await queryClient.cancelQueries({ queryKey: kunci });
     const sebelum = queryClient.getQueryData<PesananRow[]>(kunci);
     queryClient.setQueryData<PesananRow[]>(kunci, (lama) =>
       lama
