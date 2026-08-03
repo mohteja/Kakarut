@@ -1,5 +1,5 @@
 import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ringkasPesanan,
   sajianBedaDariNota,
@@ -14,7 +14,7 @@ import { Card, ErrorText, Modal, PageTitle, Spinner } from "../../components/ui"
 import { useAuth } from "../../context/AuthContext";
 import { useCabangData } from "../../context/BranchContext";
 import { api } from "../../lib/api";
-import { formatRupiah, formatWaktu, hariIniWIB } from "../../lib/format";
+import { formatRupiah, formatTanggal, formatWaktu, hariIniWIB } from "../../lib/format";
 
 const KOLOM: { status: PesananStatus; judul: string; warna: string }[] = [
   { status: "dikerjakan", judul: "🔥 Dikerjakan", warna: "border-orange-300 bg-orange-50" },
@@ -350,7 +350,34 @@ export function PesananPage() {
   const { query: branchQuery } = useCabangData();
   const queryClient = useQueryClient();
   const { auth } = useAuth();
-  const [tanggal, setTanggal] = useState(hariIniWIB());
+  /**
+   * TANGGAL PAPAN IKUT JAM DINDING, kecuali memang dipilih sendiri.
+   *
+   * Dulu tanggalnya `useState(hariIniWIB())` — dibekukan saat halaman dibuka.
+   * Tablet dapur menyala sepanjang shift, dan banyak rumah makan masih melayani
+   * lewat tengah malam. Begitu tanggal berganti, server mulai membukukan
+   * pesanan pada tanggal BARU sementara papan terus meminta yang LAMA — dengan
+   * sukses, tiap 15 detik, selamanya. Pesanan baru tak pernah muncul dan tak
+   * ada apa pun yang mengatakannya; kartu kemarin tetap terpampang seolah
+   * papannya sehat. Di layar inilah keterlambatan berujung makanan tak dibuat.
+   *
+   * Bukti bahwa ini nyata dan bukan tafsir: badge "Pesanan Masuk" di sidebar
+   * menghitung `hariIniWIB()` setiap render, jadi sesudah tengah malam sidebar
+   * dan papan menyebut angka yang berbeda — dan yang salah justru papan, layar
+   * yang dipakai orang bekerja.
+   *
+   * `null` = ikut hari ini. Tanggal yang DIPILIH orang tetap dihormati, dan
+   * spanduk di bawah yang memberitahu bahwa yang tampil bukan hari ini.
+   */
+  const [hariIni, setHariIni] = useState(hariIniWIB());
+  useEffect(() => {
+    // Menyetel nilai yang sama tidak menyebabkan render ulang, jadi denyut ini
+    // gratis sampai tanggalnya benar-benar berganti.
+    const t = setInterval(() => setHariIni(hariIniWIB()), 60_000);
+    return () => clearInterval(t);
+  }, []);
+  const [tanggalPilihan, setTanggalPilihan] = useState<string | null>(null);
+  const tanggal = tanggalPilihan ?? hariIni;
   const [fokus, setFokus] = useState<PesananStatus>("dikerjakan");
   const [riwayat, setRiwayat] = useState<PesananRow | null>(null);
 
@@ -539,7 +566,8 @@ export function PesananPage() {
         <input
           type="date"
           value={tanggal}
-          onChange={(e) => setTanggal(e.target.value)}
+          // Dikosongkan = kembali mengikuti hari ini, bukan tanggal kosong.
+          onChange={(e) => setTanggalPilihan(e.target.value || null)}
           className="h-11 rounded-lg border border-stone-300 px-3 text-base focus:border-orange-500 focus:outline-none"
           aria-label="Tanggal pesanan"
         />
@@ -547,6 +575,25 @@ export function PesananPage() {
           {rows.length} pesanan · <b>{sajianJalan}</b> sajian masih dikerjakan
         </div>
       </div>
+
+      {/* Papan yang tidak menampilkan hari ini WAJIB mengatakannya. Kotak
+          tanggal terbaca seperti penyaring biasa, dan dapur tak punya cara lain
+          tahu bahwa pesanan baru tidak akan pernah muncul di layar ini. */}
+      {tanggal !== hariIni && (
+        <div className="mb-3 flex flex-wrap items-center gap-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          <span>
+            Papan menampilkan <b>{formatTanggal(tanggal)}</b> — bukan hari ini. Pesanan
+            baru tidak akan muncul di sini.
+          </span>
+          <button
+            type="button"
+            onClick={() => setTanggalPilihan(null)}
+            className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700"
+          >
+            Ke hari ini
+          </button>
+        </div>
+      )}
 
       <ErrorText error={error ?? galat} />
 

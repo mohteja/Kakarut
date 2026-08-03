@@ -75,3 +75,63 @@ describe("resep optimistis lengkap dan berurutan", () => {
     expect(tanpaKomentar).toMatch(/if \(ctx\?\.sebelum\) queryClient\.setQueryData\(kunci, ctx\.sebelum\)/);
   });
 });
+
+/**
+ * Penjaga PAPAN TIDAK MEMBEKU DI TANGGAL KEMARIN.
+ *
+ * Tablet dapur menyala sepanjang shift, dan banyak rumah makan masih melayani
+ * lewat tengah malam. Dengan tanggal yang dibekukan saat halaman dibuka, papan
+ * terus meminta tanggal LAMA — dengan sukses, tiap 15 detik — sementara server
+ * sudah membukukan pesanan pada tanggal BARU. Pesanan baru tak pernah muncul
+ * dan tak ada yang mengatakannya.
+ *
+ * Bahwa ini bukan tafsir: badge "Pesanan Masuk" di `Layout` menghitung
+ * `hariIniWIB()` setiap render, jadi sesudah tengah malam sidebar dan papan
+ * menyebut angka berbeda — dan yang keliru justru papan.
+ */
+describe("tanggal papan mengikuti jam dinding", () => {
+  it("premis: badge sidebar memang menghitung hari ini tiap render", () => {
+    const layout = readFileSync(
+      fileURLToPath(new URL("../../web/src/components/Layout.tsx", import.meta.url)),
+      "utf8",
+    );
+    expect(layout).toMatch(/const hariIniPesanan = hariIniWIB\(\);/);
+  });
+
+  it("tanggalnya tidak lagi dibekukan saat halaman dibuka", () => {
+    expect(tanpaKomentar).not.toMatch(/useState\(hariIniWIB\(\)\)\s*;?\s*\n?\s*const \[fokus/);
+    expect(tanpaKomentar).not.toContain("const [tanggal, setTanggal] = useState(hariIniWIB())");
+  });
+
+  it("ada denyut yang memperbarui 'hari ini'", () => {
+    expect(tanpaKomentar).toMatch(/setInterval\(\(\) => setHariIni\(hariIniWIB\(\)\), 60_000\)/);
+    // Tanpa pembersihan, tiap pemasangan ulang menumpuk denyut baru.
+    expect(tanpaKomentar).toMatch(/return \(\) => clearInterval\(t\)/);
+  });
+
+  it("null = ikut hari ini; tanggal yang DIPILIH tetap dihormati", () => {
+    expect(tanpaKomentar).toContain("const tanggal = tanggalPilihan ?? hariIni;");
+    // Mengosongkan kotak tanggal kembali mengikuti hari ini, bukan mengirim "".
+    expect(tanpaKomentar).toMatch(/setTanggalPilihan\(e\.target\.value \|\| null\)/);
+  });
+
+  it("papan yang bukan hari ini MENGATAKANNYA, bukan cuma menampilkan tanggal", () => {
+    // Kotak `type="date"` terbaca seperti penyaring biasa; dapur tak punya cara
+    // lain tahu bahwa pesanan baru tak akan pernah muncul di layar ini.
+    expect(tanpaKomentar).toMatch(/\{tanggal !== hariIni && \(/);
+    expect(tanpaKomentar).toContain("bukan hari ini");
+    expect(tanpaKomentar).toContain("Ke hari ini");
+    expect(tanpaKomentar).toMatch(/onClick=\{\(\) => setTanggalPilihan\(null\)\}/);
+  });
+
+  it("spanduknya muncul SEBELUM papan, bukan terkubur di bawah kartu", () => {
+    const iSpanduk = tanpaKomentar.indexOf("{tanggal !== hariIni && (");
+    const iKolom = tanpaKomentar.indexOf("KOLOM.map");
+    expect(iSpanduk).toBeGreaterThan(0);
+    expect(iKolom).toBeGreaterThan(iSpanduk);
+  });
+
+  it("tak ada sisa `setTanggal` yang menulis ke keadaan yang sudah hilang", () => {
+    expect(tanpaKomentar).not.toMatch(/\bsetTanggal\(/);
+  });
+});
