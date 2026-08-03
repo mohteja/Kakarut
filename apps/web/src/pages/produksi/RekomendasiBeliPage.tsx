@@ -74,7 +74,7 @@ export function RekomendasiBeliPage() {
     return `/rekomendasi/beli${branchQuery ? `${branchQuery}&` : "?"}${p.toString()}`;
   }
 
-  const { data, isLoading, isFetching } = useQuery({
+  const { data, isLoading, isFetching, error: gagalMuat } = useQuery({
     queryKey: [
       "rekomendasi",
       branchQuery,
@@ -256,8 +256,25 @@ export function RekomendasiBeliPage() {
         </div>
       </Card>
 
+      {/*
+        GAGAL MEMUAT ≠ TIDAK ADA YANG PERLU DIBELI. Cabang `: null` di ujung
+        ternary ini membuat bacaan yang ditolak berakhir sebagai halaman KOSONG
+        tanpa sepatah kata pun — dan diamnya menghasilkan kesimpulan yang sama
+        dengan pesan "tak ada saran": orang berhenti belanja.
+        Sarannya dihitung dari kecepatan jual x sisa stok; keduanya tak terlihat
+        mata, jadi tak ada apa pun di luar layar yang menyanggahnya. Alasannya
+        sama dengan penjagaan di RiwayatPage & AnalisisHargaPage.
+      */}
       {isLoading ? (
         <Spinner />
+      ) : gagalMuat ? (
+        <Card className="p-4">
+          <ErrorText error={gagalMuat} />
+          <div className="mt-2 text-sm text-stone-500">
+            Saran beli tidak bisa dimuat, jadi kosongnya halaman ini <b>bukan</b> berarti
+            tak ada yang perlu dibeli. Muat ulang setelah masalahnya beres.
+          </div>
+        </Card>
       ) : data ? (
         <>
           <div className="mb-3 grid grid-cols-2 gap-3 sm:grid-cols-4">

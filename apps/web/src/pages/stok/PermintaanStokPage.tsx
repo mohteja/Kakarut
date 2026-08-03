@@ -185,7 +185,7 @@ function statusPermintaan(r: PermintaanStokRow): { label: string; cls: string } 
  */
 export function PermintaanStokPage() {
   const queryClient = useQueryClient();
-  const { data: rows, isLoading } = useQuery({
+  const { data: rows, isLoading, error: gagalMuat } = useQuery({
     queryKey: ["permintaan-stok"],
     queryFn: () => api<PermintaanStokRow[]>("/rekomendasi/permintaan"),
   });
@@ -238,8 +238,22 @@ export function PermintaanStokPage() {
       </div>
       <ErrorText error={hapus.error} />
 
+      {/*
+        GAGAL MEMUAT ≠ TIDAK ADA PERMINTAAN. Cabang kosong di bawah mengundang
+        membuat permintaan baru — padahal permintaan cabang yang sudah antre
+        mungkin hanya tak terbaca. Cabang yang menunggu tak punya cara memberi
+        tahu kantor selain lewat daftar ini.
+      */}
       {isLoading ? (
         <Spinner />
+      ) : gagalMuat ? (
+        <Card className="p-4">
+          <ErrorText error={gagalMuat} />
+          <div className="mt-2 text-sm text-stone-500">
+            Daftar permintaan tidak bisa dimuat, jadi kosongnya <b>bukan</b> berarti tak ada
+            cabang yang meminta stok. Muat ulang setelah masalahnya beres.
+          </div>
+        </Card>
       ) : list.length === 0 ? (
         <Card className="p-8 text-center text-sm text-stone-400">
           Belum ada permintaan. Buat lewat “➕ Permintaan baru”.
