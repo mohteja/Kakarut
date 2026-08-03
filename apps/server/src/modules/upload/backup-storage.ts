@@ -1,5 +1,6 @@
 import { mkdir, readFile, readdir, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { jalurDalam } from "./jalur-aman";
 import {
   DeleteObjectCommand,
   GetObjectCommand,
@@ -111,10 +112,8 @@ class LocalCadanganStorage implements CadanganStorage {
   constructor(private baseDir: string) {}
 
   private jalur(key: string): string {
-    // key = nama berkas polos; tolak traversal.
-    const p = path.join(this.baseDir, key);
-    if (!p.startsWith(this.baseDir)) throw new Error("Kunci cadangan tidak valid");
-    return p;
+    // key = nama berkas polos; tolak traversal (lihat `jalurDalam`).
+    return jalurDalam(this.baseDir, key);
   }
 
   async simpan(key: string, body: Buffer): Promise<void> {

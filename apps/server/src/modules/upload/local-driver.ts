@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
-import path from "node:path";
+import { dirname } from "node:path";
 import type { StorageDriver } from "./storage";
+import { jalurDalam } from "./jalur-aman";
 
 /** Fallback development: simpan ke disk lokal, disajikan via /uploads/*. */
 export class LocalDriver implements StorageDriver {
@@ -9,11 +10,8 @@ export class LocalDriver implements StorageDriver {
   constructor(private baseDir: string) {}
 
   async put(key: string, body: Buffer, _contentType: string): Promise<{ url: string }> {
-    const filePath = path.join(this.baseDir, key);
-    if (!filePath.startsWith(this.baseDir)) {
-      throw new Error("Key upload tidak valid");
-    }
-    await mkdir(path.dirname(filePath), { recursive: true });
+    const filePath = jalurDalam(this.baseDir, key);
+    await mkdir(dirname(filePath), { recursive: true });
     await writeFile(filePath, body);
     return { url: `/uploads/${key}` };
   }
