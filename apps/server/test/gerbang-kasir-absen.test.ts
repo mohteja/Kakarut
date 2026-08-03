@@ -108,3 +108,38 @@ describe("bacaan shift di komponen yang sama tetap ketat", () => {
     expect(KODE).toMatch(/onClick=\{\(\) => bukaKasir\.mutate\(\)\}\s*\n\s*disabled=\{bukaKasir\.isPending\}/);
   });
 });
+
+/**
+ * Instansi TERAKHIR dari sapuan "gagal baca jadi pernyataan" (ronde 77):
+ * layar stasiun absen. Bobotnya paling ringan dari empat yang ditemukan —
+ * tak ada aksi yang disesatkannya — tapi kalimatnya tetap sebuah pernyataan
+ * yang dunia nyata bisa membantahnya, dan operator yang membacanya bisa
+ * menyimpulkan stasiunnya rusak padahal cap-capnya ada.
+ */
+describe("stasiun absen: daftar hari ini", () => {
+  const ABSEN = baca("../../web/src/pages/absen/AbsenPage.tsx");
+
+  it("galatnya diambil dari useQuery", () => {
+    expect(ABSEN).toMatch(/data: daftar = \[\], error: gagalDaftar/);
+  });
+
+  it("percabangan gagal mendahului 'belum ada yang absen'", () => {
+    const iGagal = ABSEN.indexOf("{gagalDaftar ? (");
+    const iKosong = ABSEN.indexOf("Belum ada yang absen hari ini.");
+    expect(iGagal, "percabangan gagal tak ditemukan").toBeGreaterThan(0);
+    expect(iKosong).toBeGreaterThan(iGagal);
+  });
+
+  it("kalimat lamanya tetap ada — untuk hari yang MEMANG masih kosong", () => {
+    expect(ABSEN).toContain("Belum ada yang absen hari ini.");
+  });
+
+  it("dan halaman ini TIDAK meramal arah cap — DTO-nya tak sanggup", () => {
+    // `AbsensiRow` agregat: `masuk` = cap masuk PERTAMA, `keluar` = cap keluar
+    // TERAKHIR. Pada urutan masuk–keluar–masuk keduanya terisi padahal cap
+    // berikutnya `keluar`, bukan `masuk`. Menebak dari data ini akan menanam
+    // persis kelas cacat yang berkas uji ini ada untuk mencabutnya.
+    expect(ABSEN).toContain("Sistem menentukan");
+    expect(ABSEN).not.toMatch(/absenTipeBerikutnya/);
+  });
+});

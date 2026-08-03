@@ -139,7 +139,7 @@ export function AbsenPage() {
   const modeRef = useRef<Mode>("idle");
   const hasilTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const { data: daftar = [] } = useQuery({
+  const { data: daftar = [], error: gagalDaftar } = useQuery({
     queryKey: ["absensi", branchQuery],
     queryFn: () => api<AbsensiRow[]>(`/absensi${branchQuery}`),
     refetchInterval: 60_000,
@@ -439,7 +439,21 @@ export function AbsenPage() {
           Absensi hari ini
         </h2>
         <Card className="overflow-x-auto">
-          {daftar.length === 0 ? (
+          {/*
+            "Belum ada yang absen hari ini" adalah PERNYATAAN, dan `= []`
+            membuat layar stasiun ini mengucapkannya justru saat bacaannya
+            ditolak. Operator yang melihatnya menyimpulkan tak seorang pun
+            datang — atau bahwa stasiunnya rusak — padahal cap-cap itu ada.
+            Halaman memoles ulang tiap menit, jadi ia pulih sendiri; yang
+            perlu hanyalah tidak berbohong selama belum pulih.
+          */}
+          {gagalDaftar ? (
+            <div className="p-6 text-center text-sm text-stone-500">
+              <ErrorText error={gagalDaftar} />
+              Daftar absen hari ini <b>tidak terbaca</b> — <b>bukan</b> berarti belum ada yang
+              absen. Layar ini mencoba lagi sendiri tiap menit.
+            </div>
+          ) : daftar.length === 0 ? (
             <div className="p-6 text-center text-sm text-stone-400">Belum ada yang absen hari ini.</div>
           ) : (
             <table className="w-full text-sm">
