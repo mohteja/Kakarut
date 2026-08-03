@@ -25,6 +25,57 @@ tanpa akses repo server.
 
 ---
 
+## Rilis: koreksi panduan — badge "diubah setelah transaksi" salah kaprah
+
+> Belum di-merge ke production. **Tidak ada perubahan API**: tak ada migrasi, tak
+> ada field baru, tak ada perilaku server yang berubah. Yang keliru adalah
+> PANDUAN yang kami tulis di changelog ini sendiri — dan kekeliruan itu sudah
+> melahirkan badge yang menuduh orang di sisi web. Kalau kalian membangun
+> badge-nya dari panduan itu, layar kalian punya cacat yang sama.
+
+### 🟡 PERLU DICEK — `sajian_takeaway == is_dine_in` BUKAN bukti ada yang mengubahnya
+
+Yang dulu kami tulis di entri "`RiwayatTransaksiRow.sajian_takeaway`":
+
+> Penandanya **lahir sesuai pembukuannya** (`sajian_takeaway = !is_dine_in`),
+> sehingga `sajian_takeaway == is_dine_in` berarti memang ada yang mengubahnya —
+> itu sinyal untuk badge "diubah setelah transaksi".
+
+**Premis kalimat itu tidak benar,** dan sudah tidak benar sejak penanda per baris
+dirilis. `POST /api/penjualan` MEWARISI penanda 🥡 dari baris open bill asalnya:
+
+```
+sajian_takeaway = penanda_baris_bill || !is_dine_in
+```
+
+Jadi sebuah baris bisa **LAHIR** dengan `sajian_takeaway == is_dine_in`:
+
+| kejadian | `is_dine_in` | `sajian_takeaway` | ada yang mengubah sesudah dibayar? |
+| --- | --- | --- | --- |
+| dapur menandai 🥡 di bill, kasir menagih tanpa `dine_in_override` | `true` | `true` | **tidak** — begitu lahirnya |
+| papan membalik baris pada penjualan yang sudah dibayar | `true` | `true` | ya |
+
+Kedua baris itu **tidak bisa dibedakan** dari `sale_items`. Baris pertama justru
+alur yang paling sering dipakai, jadi badge "diubah setelah transaksi" menuduh
+transaksi biasa — dan tuduhan yang salah sesering itu ikut menenggelamkan
+tuduhan yang benar.
+
+**Yang perlu dilakukan:** kondisinya boleh tetap dipakai — `sajian_takeaway ==
+is_dine_in` memang berarti nota dan piring bercerita beda, dan pada penjualan
+lunas kemasannya sudah masuk HPP dan keluar dari stok. Yang harus diganti adalah
+**kalimatnya**: jangan menyebut *kapan* bedanya muncul. Web kini memakai
+**"penyajian beda dari nota"**; layar Riwayat Transaksi di web sudah lebih dulu
+memakai bentuk yang jujur (`"disajikan 🥡 bawa pulang"` / `"disajikan 🍽 di
+tempat"`, dan `"N dari M 🥡 dibungkus"` untuk nota campur).
+
+Kalimat lama yang sama juga muncul di entri-entri lawas dokumen ini dan di
+`docs/mobile/HANDOFF-MEJA-DAN-PESANAN.md`. Entri lama sengaja **tidak** kami
+sunting — ia catatan rilis, bukan acuan. Acuan yang berlaku adalah
+`docs/API-CONTRACT.md`, yang blok pisah-porsinya sudah ditulis ulang dan kini
+memuat aturan pewarisan ini lengkap dengan akibat biayanya.
+
+---
+
 ## Rilis: Sajian batal tidak ditagih + refund sebagian per sajian
 
 > Belum di-merge ke production. **Ada migrasi DB** (`0093`, seluruhnya aditif:

@@ -282,3 +282,45 @@ describe("badge-nya tidak mengarang waktu", () => {
     expect(HAL).toContain("penyajian beda dari nota");
   });
 });
+
+/**
+ * Kontrak untuk tim mobile, DUA ARAH.
+ *
+ * Kalimat pisah-porsi di `API-CONTRACT.md` menyatakan hal yang berlawanan dengan
+ * kodenya sejak hari ia ditulis — `git` menunjukkan pewarisannya sudah ada lebih
+ * dulu — dan tak ada apa pun yang menangkapnya sampai penandanya mulai
+ * memindahkan uang. Dokumen yang berbohong ke tim Flutter melahirkan bug
+ * sungguhan di sisi mereka, jadi kedua arah klaimnya dijaga di sini.
+ */
+describe("kontrak mobile cocok dengan kodenya", () => {
+  const bacaAkar = (rel: string) =>
+    readFileSync(fileURLToPath(new URL(`../../../${rel}`, import.meta.url)), "utf8");
+  const KONTRAK = bacaAkar("docs/API-CONTRACT.md");
+
+  it("klaim lama yang salah sudah hilang", () => {
+    expect(KONTRAK).not.toContain("tetap lahir per baris dari");
+  });
+
+  it("pewarisannya dinyatakan, lengkap dengan akibat biayanya", () => {
+    expect(KONTRAK).toContain("penanda_baris_bill || !is_dine_in");
+    expect(KONTRAK).toContain("basis biaya");
+  });
+
+  it("dan klien diberi tahu bahwa sebuah baris bisa LAHIR berbeda", () => {
+    // Persis simpulan yang mematikan badge "diubah setelah transaksi".
+    expect(KONTRAK).toContain("**lahir** dengan `sajian_takeaway == is_dine_in`");
+  });
+
+  it("kontras `pisah_dari` yang dijanjikan kontrak masih benar di kodenya", () => {
+    // Kontrak menjanjikan dua aturan BERLAWANAN: diwarisi saat membayar (id
+    // sama), tidak diwarisi saat memecah baris bill. Kalau suatu saat
+    // `pisah_dari` ikut mewarisi penandanya, kalimat kontras itu jadi bohong —
+    // dan uji inilah yang memaksa dokumennya ditinjau ulang.
+    const src = bacaAkar("apps/server/src/modules/open-bill/routes.ts");
+    const i = src.indexOf("const asal = it.pisah_dari");
+    expect(i, "blok pisah_dari tak ditemukan").toBeGreaterThan(0);
+    const blok = src.slice(i, i + 900);
+    expect(blok).toContain("pesananStatus: asal.pesananStatus");
+    expect(blok).not.toContain("sajianTakeaway: asal.");
+  });
+});
