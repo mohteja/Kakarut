@@ -419,13 +419,34 @@ function MasukModal({
   const [catatan, setCatatan] = useState("");
   // harga default = qty × harga beli item (bisa ditimpa manual)
   const perkiraan = angkaDari(qty) > 0 && item.harga_beli > 0 ? angkaDari(qty) * item.harga_beli : null;
+  /**
+   * Harga yang TERISI tapi tak terbaca sebagai angka ≥ 0.
+   *
+   * Qty sudah dijaga tombol di bawah; kolom harga di sebelahnya tidak — dan di
+   * sini salah ketik bukan sekadar tak tercatat, ia LEBIH BURUK daripada
+   * mengosongkan kotaknya. Kosong mengirim `perkiraan` (qty × harga beli), satu
+   * angka nyata. Salah ketik menghasilkan NaN, `JSON.stringify` mengubahnya jadi
+   * `null`, zod (`total_harga: z.number().min(0).nullish()`) menerimanya, lalu
+   * server menulis `totalHarga: body.total_harga ?? null` apa adanya.
+   *
+   * Hasilnya barang masuk ke stok TANPA biaya sama sekali: saldo naik, uangnya
+   * tak pernah muncul di total belanja perlengkapan. Yang mengetik "50 rb"
+   * justru membukukan nol, sementara yang tak mengetik apa pun membukukan
+   * perkiraan yang benar.
+   *
+   * `trim()` dipakai di kedua sisi supaya spasi belaka tetap berarti "kosong" —
+   * kalau hanya penjaganya yang trim, ketikan " " lolos ke muatan lalu jadi
+   * NaN lagi. Pola & alasannya sama dengan `salahKetik` di StokAwalModal
+   * beberapa puluh baris di atas, dan `hargaSalahKetik` di BeliPerlengkapanPage.
+   */
+  const hargaSalahKetik = totalHarga.trim() !== "" && !(angkaDari(totalHarga) >= 0);
   const kirim = useMutation({
     mutationFn: () =>
       api(`/perlengkapan/${item.id}/masuk${branchQuery}`, {
         method: "POST",
         body: {
           qty: angkaDari(qty),
-          total_harga: totalHarga !== "" ? angkaDari(totalHarga) : perkiraan,
+          total_harga: totalHarga.trim() !== "" ? angkaDari(totalHarga) : perkiraan,
           catatan: catatan.trim() || null,
         },
       }),
@@ -458,12 +479,18 @@ function MasukModal({
           Catatan (opsional)
           <input value={catatan} onChange={(e) => setCatatan(e.target.value)} className={inputClass} placeholder="mis. beli di toko grosir" />
         </label>
+        {hargaSalahKetik && (
+          <p className="text-sm text-red-600">
+            Total harga tidak terbaca sebagai angka — tulis angkanya saja (mis.{" "}
+            <b>50000</b> atau <b>50.000</b>), atau kosongkan untuk memakai perkiraan.
+          </p>
+        )}
         <ErrorText error={kirim.error} />
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className={btnSecondary}>Batal</button>
           <button
             onClick={() => kirim.mutate()}
-            disabled={!(angkaDari(qty) > 0) || kirim.isPending}
+            disabled={!(angkaDari(qty) > 0) || hargaSalahKetik || kirim.isPending}
             className={btnPrimary}
           >
             📦 Simpan
