@@ -74,7 +74,7 @@ export function PengajuanCutiSection() {
    * Batalkan yang memang dituruti server untuk manajemen. Owner yang merasa
    * membatalkan pengajuannya sendiri bisa menghapus pengajuan orang lain.
    */
-  const { data: daftar = [] } = useQuery({
+  const { data: daftar = [], error: gagalDaftar } = useQuery({
     queryKey: ["pengajuan", "saya"],
     queryFn: () => api<PengajuanRow[]>("/pengajuan?saya=1"),
   });
@@ -130,7 +130,30 @@ export function PengajuanCutiSection() {
 
       <ErrorText error={batalkan.error} />
 
-      {daftar.length === 0 ? (
+      {/*
+        BELUM ADA ≠ TIDAK TERBACA, dan di sini bedanya berujung buntu.
+
+        `data: daftar = []` membuat bagian ini berbunyi "Belum ada pengajuan.
+        Tekan Ajukan" justru saat bacaannya ditolak. Yang membacanya menuruti
+        kalimat itu — lalu server menolak 409 "Sudah ada pengajuan Anda pada
+        tanggal yang bertindih — BATALKAN DULU YANG LAMA", sementara satu-satunya
+        layar yang punya tombol Batalkan sedang bersikeras tak ada apa-apa untuk
+        dibatalkan. Perintahnya mustahil dituruti.
+
+        Yang kedua sama pentingnya: `alasan_tolak` cuma muncul di daftar ini.
+        Bacaan yang gagal diam-diam membuat penolakan beserta alasannya lenyap,
+        dan yang mengajukan mengira pengajuannya masih menunggu.
+      */}
+      {gagalDaftar ? (
+        <Card className="border-amber-300 bg-amber-50 p-3">
+          <ErrorText error={gagalDaftar} />
+          <div className="text-sm text-amber-900">
+            Daftar pengajuan Anda <b>tidak terbaca</b> — <b>bukan</b> berarti belum pernah
+            mengajukan. Muat ulang halaman dulu: mengajukan sekarang bisa ditolak karena bertindih
+            dengan pengajuan lama yang belum tampil di sini.
+          </div>
+        </Card>
+      ) : daftar.length === 0 ? (
         <Card className="p-6 text-center text-sm text-stone-400">
           Belum ada pengajuan. Tekan <b>Ajukan</b> untuk mengajukan cuti atau libur.
         </Card>
