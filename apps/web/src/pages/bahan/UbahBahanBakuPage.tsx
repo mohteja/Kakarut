@@ -6,7 +6,7 @@ import { angkaDari, teksAngka } from "@kakarut/shared";
 import { Card, ErrorText, PageTitle, Spinner, btnPrimary, btnSecondary } from "../../components/ui";
 import { KategoriManagerModal } from "../../components/KategoriManagerModal";
 import { api } from "../../lib/api";
-import { BahanEditorGrid, type BahanEditorRow } from "./BahanEditorGrid";
+import { BahanEditorGrid, angkaTakTerbaca, type BahanEditorRow } from "./BahanEditorGrid";
 
 function keBaris(b: BahanDto): BahanEditorRow {
   return {
@@ -70,6 +70,15 @@ export function UbahBahanBakuPage() {
     setRows((r) => (r ? r.map((b, j) => (j === i ? { ...b, ...patch } : b)) : r));
 
   const invalid = (rows ?? []).filter((b) => b.nama.trim() === "" || !(angkaDari(b.isi) > 0));
+  /**
+   * Kolom angka OPSIONAL yang tak terbaca — `isi` sudah ditahan `invalid` di
+   * atas, tapi lima kolom di sebelahnya masih dikirim lewat `angkaDari(x) || 0`
+   * dan jatuh diam-diam ke 0. Dipakai bersama dengan TambahBahanBakuPage lewat
+   * satu penolong di grid, supaya kedua halaman tak lagi berselisih aturan.
+   */
+  const angkaTerbuang = (rows ?? [])
+    .filter((b) => b.nama.trim() !== "")
+    .flatMap((b) => angkaTakTerbaca(b).map((k) => `${b.nama.trim()} — ${k}`));
 
   const simpan = useMutation({
     mutationFn: async () => {
@@ -197,9 +206,16 @@ export function UbahBahanBakuPage() {
 
           <div className="mt-3 flex flex-wrap items-center gap-3">
             <div className="flex-1 text-sm text-stone-500">
-              {invalid.length > 0
-                ? `${invalid.length} baris belum valid (nama wajib, konversi > 0)`
-                : `${rows.length} bahan siap disimpan`}
+              {invalid.length > 0 ? (
+                `${invalid.length} baris belum valid (nama wajib, konversi > 0)`
+              ) : angkaTerbuang.length > 0 ? (
+                <span className="text-red-600">
+                  Angka tidak terbaca pada <b>{angkaTerbuang.join(", ")}</b> — tulis angkanya
+                  saja, tanpa satuan.
+                </span>
+              ) : (
+                `${rows.length} bahan siap disimpan`
+              )}
             </div>
             <button type="button" onClick={() => navigate("/bahan")} className={btnSecondary}>
               Batal
@@ -207,7 +223,12 @@ export function UbahBahanBakuPage() {
             <button
               type="button"
               onClick={() => simpan.mutate()}
-              disabled={rows.length === 0 || invalid.length > 0 || simpan.isPending}
+              disabled={
+                rows.length === 0 ||
+                invalid.length > 0 ||
+                angkaTerbuang.length > 0 ||
+                simpan.isPending
+              }
               className={btnPrimary}
             >
               {simpan.isPending ? "Menyimpan…" : `Simpan semua (${rows.length})`}

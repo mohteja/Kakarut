@@ -6,7 +6,7 @@ import { angkaDari } from "@kakarut/shared";
 import { Card, ErrorText, PageTitle, btnPrimary, btnSecondary } from "../../components/ui";
 import { KategoriManagerModal } from "../../components/KategoriManagerModal";
 import { api } from "../../lib/api";
-import { BahanEditorGrid, type BahanEditorRow } from "./BahanEditorGrid";
+import { BahanEditorGrid, angkaTakTerbaca, type BahanEditorRow } from "./BahanEditorGrid";
 
 function barisKosong(satuan: string): BahanEditorRow {
   return {
@@ -66,6 +66,29 @@ export function TambahBahanBakuPage() {
 
   // baris valid: punya nama & isi > 0 (harga boleh 0)
   const valid = rows.filter((b) => b.nama.trim() !== "" && angkaDari(b.isi) > 0);
+  /**
+   * Baris yang SUDAH DINAMAI tapi konversinya tak terbaca.
+   *
+   * Sebelum ini baris begitu hanya tersaring keluar dari `valid` lalu hilang
+   * tanpa suara: tombolnya tetap hidup selama ada satu baris lain yang benar,
+   * simpan berhasil, halaman langsung `navigate("/bahan")` — dan bahan yang
+   * sudah diketik lengkap ternyata tak pernah dibuat. Yang menulis "1 kg" di
+   * kolom Isi tak punya cara tahu barangnya raib.
+   *
+   * `UbahBahanBakuPage`, yang memakai grid YANG SAMA, sudah menahan barisnya
+   * alih-alih membuangnya sejak awal. Dua perilaku berbeda untuk data yang
+   * sama persis — itulah yang menjadikan ini kelalaian, bukan pilihan.
+   *
+   * Baris yang masih kosong sama sekali tetap diabaikan: ia cuma slot kosong,
+   * bukan pekerjaan yang belum selesai.
+   */
+  const isiTerbuang = rows
+    .filter((b) => b.nama.trim() !== "" && !(angkaDari(b.isi) > 0))
+    .map((b) => b.nama.trim());
+  const angkaTerbuang = rows
+    .filter((b) => b.nama.trim() !== "")
+    .flatMap((b) => angkaTakTerbaca(b).map((k) => `${b.nama.trim()} — ${k}`));
+  const adaTerbuang = isiTerbuang.length > 0 || angkaTerbuang.length > 0;
 
   const simpan = useMutation({
     mutationFn: () =>
@@ -150,12 +173,29 @@ export function TambahBahanBakuPage() {
         <button
           type="button"
           onClick={() => simpan.mutate()}
-          disabled={valid.length === 0 || simpan.isPending}
+          disabled={valid.length === 0 || adaTerbuang || simpan.isPending}
           className={btnPrimary}
         >
           {simpan.isPending ? "Menyimpan…" : `Simpan semua (${valid.length})`}
         </button>
       </div>
+      {adaTerbuang && (
+        <p className="mt-2 text-sm text-red-600">
+          {isiTerbuang.length > 0 && (
+            <>
+              Kolom <b>Isi</b> belum terbaca sebagai angka &gt; 0 pada{" "}
+              <b>{isiTerbuang.join(", ")}</b> — baris itu tidak akan tersimpan.{" "}
+            </>
+          )}
+          {angkaTerbuang.length > 0 && (
+            <>
+              Angka tidak terbaca pada <b>{angkaTerbuang.join(", ")}</b> — akan tersimpan
+              sebagai <b>0</b>.{" "}
+            </>
+          )}
+          Tulis angkanya saja (mis. <b>1000</b> atau <b>1.000</b>), tanpa satuan.
+        </p>
+      )}
       <div className="mt-2">
         <ErrorText error={simpan.error} />
       </div>
