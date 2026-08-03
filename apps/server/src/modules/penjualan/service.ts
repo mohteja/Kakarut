@@ -2,6 +2,7 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import { HTTPException } from "hono/http-exception";
 import {
   hitungPb1,
+  penandaSajian,
   qtyEfektif,
   type SaleItemInput,
   type SebabPenjualanGagal,
@@ -244,10 +245,15 @@ export async function createSale(params: CreateSaleParams) {
       const dineIn = item.is_dine_in ?? isDineIn;
       const waris = item.open_bill_item_id ? warisBill.get(item.open_bill_item_id) : undefined;
       /**
-       * Penanda penyajian. Yang menang adalah sinyal EKSPLISIT: penanda dari
-       * dapur/papan pesanan, atau baris yang memang dibukukan bukan dine-in.
+       * Penanda penyajian. Aturannya tinggal di `@kakarut/shared` karena papan
+       * pesanan menyimpulkan sesuatu DARI aturan ini (lihat
+       * `sajianBedaDariNota`) — dua salinan yang berbeda melahirkan tuduhan
+       * palsu di layar.
        */
-      const sajianTakeaway = (waris?.sajianTakeaway ?? false) || !dineIn;
+      const sajianTakeaway = penandaSajian({
+        warisTakeaway: waris?.sajianTakeaway,
+        dineIn,
+      });
       /**
        * BASIS BIAYA = penyajiannya, bukan pembukuannya.
        *

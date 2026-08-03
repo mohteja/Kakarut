@@ -1,8 +1,8 @@
 import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import {
-  adaKoreksiSajian,
   ringkasPesanan,
+  sajianBedaDariNota,
   urutkanPesanan,
   type PesananItemRow,
   type PesananLogRow,
@@ -219,11 +219,12 @@ function KartuPesanan({
   // label meja SUDAH berbunyi "Meja 1"/"Ruang Tunggu" — jangan diberi awalan
   // lagi, hasilnya "Meja Meja 1".
   const judul = p.nomor ?? p.meja ?? "Pesanan";
-  // Penanda penyajian BEDA dari fakta pembukuan (is_dine_in) → tampilkan
-  // keduanya, jangan sembunyikan koreksinya. Diperiksa PER BARIS: kartu yang
-  // sebagian dibungkus tetap koreksi, dan pada penjualan lunas uang & stoknya
-  // sudah benar-benar berpindah (lihat `adaKoreksiSajian`).
-  const diubah = adaKoreksiSajian(p);
+  // Penanda penyajian BEDA dari fakta pembukuan (is_dine_in) → katakan, jangan
+  // sembunyikan. Diperiksa PER BARIS: kartu yang cuma sebagian dibungkus tetap
+  // berbeda, dan pada penjualan lunas kemasannya sudah masuk HPP & keluar dari
+  // stok. Yang TIDAK boleh dikatakan: kapan bedanya muncul — baris bisa LAHIR
+  // begini (lihat `sajianBedaDariNota`).
+  const bedaDariNota = sajianBedaDariNota(p);
   // "Belum dibayar" adalah AJAKAN menagih, jadi hanya untuk pesanan yang masih
   // hidup. Pada pesanan batal tak ada yang perlu ditagih — menandainya kuning
   // justru menyuruh kasir mengejar uang yang memang tak akan datang.
@@ -274,9 +275,9 @@ function KartuPesanan({
             🥡 Semua bawa pulang
           </span>
         )}
-        {diubah && (
+        {bedaDariNota && (
           <span className="rounded-full bg-purple-100 px-2 py-0.5 text-[11px] font-semibold text-purple-700">
-            diubah setelah transaksi
+            penyajian beda dari nota
           </span>
         )}
       </div>
