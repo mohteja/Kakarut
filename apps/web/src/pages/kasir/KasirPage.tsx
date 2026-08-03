@@ -184,12 +184,17 @@ export function KasirPage() {
   const kasirTutup = isKasir && shiftAktif === null;
   // Absensi hari ini di cabang — untuk cek apakah kasir sudah absen masuk
   // (syarat buka kasir). Cukup diambil saat gerbang muncul.
-  const { data: absensiHariIni = [] } = useQuery({
+  const { data: absensiHariIni = [], error: gagalAbsensi } = useQuery({
     queryKey: ["absensi", branchQuery],
     queryFn: () => api<AbsensiRow[]>(`/absensi${branchQuery}`),
     enabled: kasirTutup,
   });
   // Sudah absen masuk & belum absen keluar hari ini → boleh buka kasir.
+  //
+  // `= []` di sini TIDAK boleh dibaca sebagai "belum absen" — lihat gerbangnya
+  // di bawah. Bandingkan dengan `shiftAktif === null` beberapa baris di atas:
+  // yang itu sengaja ketat supaya bacaan gagal tak mengunci kasir; yang ini
+  // dulu longgar, dan longgarnya mengarang tuduhan.
   const absenSaya = absensiHariIni.find((r) => r.user_id === auth?.user.sub);
   const sudahAbsen = !!(absenSaya?.masuk && !absenSaya?.keluar);
   const [modalAwalGate, setModalAwalGate] = useState("");
@@ -1591,8 +1596,28 @@ export function KasirPage() {
               Transaksi belum bisa dilakukan. Buka kasir dulu untuk mulai berjualan.
             </p>
 
-            {/* Syarat: kasir harus sudah absen masuk hari ini */}
-            {sudahAbsen ? (
+            {/* Syarat: kasir harus sudah absen masuk hari ini.
+                TIGA keadaan, bukan dua. `data: absensiHariIni = []` membuat
+                bacaan yang DITOLAK terbaca sebagai "belum absen" — dan itu
+                bukan sekadar label keliru: kotak amber di bawah menyuruh
+                menekan "Absen Sekarang", sedangkan cap absen BERGANTIAN
+                (`absenTipeBerikutnya`: sesudah `masuk` yang berikutnya
+                `keluar`). Kasir yang SUDAH absen lalu menurut akan mencap
+                KELUAR — dan sejak itu `sedangHadir` benar-benar false, jadi
+                `POST /shift/buka` menolaknya sungguhan dengan pesan yang tadi
+                cuma karangan. Tuduhannya menciptakan syaratnya sendiri. */}
+            {gagalAbsensi ? (
+              <div className="mb-3 rounded-lg border border-stone-300 bg-stone-50 px-3 py-2.5">
+                <div className="text-sm font-semibold text-stone-700">
+                  Status absen tidak terbaca
+                </div>
+                <div className="mt-0.5 text-xs text-stone-600">
+                  <b>Bukan</b> berarti Anda belum absen. Jangan mencap absen lagi untuk
+                  berjaga-jaga — kalau tadi sudah masuk, cap berikutnya justru tercatat{" "}
+                  <b>keluar</b>. Coba langsung Buka Kasir; server yang memutuskan.
+                </div>
+              </div>
+            ) : sudahAbsen ? (
               <div className="mb-3 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm font-medium text-green-700">
                 ✓ Sudah absen masuk hari ini
               </div>
