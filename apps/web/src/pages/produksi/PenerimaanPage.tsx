@@ -19,6 +19,7 @@ import { useCabangData } from "../../context/BranchContext";
 import { useAuth } from "../../context/AuthContext";
 import { CabangDataBar } from "../../components/CabangDataBar";
 import { api } from "../../lib/api";
+import { galatTerbaru } from "../../lib/galat";
 import { KUNCI_ANOMALI, useKirimanMenggantung } from "../../lib/menggantung";
 import { formatAngka, formatRupiah, formatTanggalRingkas, formatWaktu } from "../../lib/format";
 
@@ -237,7 +238,7 @@ export function PenerimaanPage() {
         cek — faktur langsung selesai & stok masuk.
       </div>
 
-      <ErrorText error={terima.error || terimaSebagian.error || tolak.error || batalTolak.error} />
+      <ErrorText error={galatTerbaru(terima, terimaSebagian, tolak, batalTolak)} />
 
       <PanelMenggantung />
 

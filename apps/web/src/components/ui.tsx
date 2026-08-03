@@ -94,6 +94,7 @@ export function ErrorText({ error }: { error: unknown }) {
   return <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{msg}</div>;
 }
 
+
 /**
  * Pengganti `<Spinner />` untuk tempat yang menunggu SATU bacaan: berputar
  * selagi dimuat, tapi berhenti dan menjelaskan begitu bacaannya gagal.
