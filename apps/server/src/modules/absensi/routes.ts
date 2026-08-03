@@ -1,5 +1,5 @@
 import { zValidator } from "@hono/zod-validator";
-import { and, desc, eq, gte, isNotNull, isNull, lt, lte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
@@ -459,24 +459,48 @@ export const absensiRoutes = new Hono<AppEnv>()
         (k.arsip == null || tanggalDi(tz, k.arsip) >= dari),
     );
 
-    // (2) Absensi bulan itu, satu baris per (karyawan, tanggal).
-    const cap = await db
-      .select({
-        user_id: attendances.userId,
-        tanggal: attendances.attendDate,
-        masuk: sql<string | null>`min(${attendances.waktu}) filter (where ${attendances.tipe} = 'masuk')`,
-        keluar: sql<string | null>`max(${attendances.waktu}) filter (where ${attendances.tipe} = 'keluar')`,
-      })
-      .from(attendances)
-      .where(
-        and(
-          eq(attendances.companyId, auth.company_id!),
-          branchId ? eq(attendances.branchId, branchId) : undefined,
-          gte(attendances.attendDate, dari),
-          lte(attendances.attendDate, sampai),
-        ),
-      )
-      .groupBy(attendances.userId, attendances.attendDate);
+    /**
+     * (2) Absensi bulan itu, satu baris per (karyawan, tanggal).
+     *
+     * DISARING PER ORANG, BUKAN PER CABANG. Tiga tabel di rekap ini memakai
+     * makna `branch_id` yang BERBEDA:
+     *   - `memberships.branchId`  — penugasan BERJALAN, bisa diubah kapan saja
+     *                               lewat `PATCH /users/:id` (pindah cabang)
+     *   - `attendances.branchId`  — FAKTA SEJARAH: di mana cap itu terjadi
+     *   - `leaveRequests.branchId`— POTRET saat pengajuan dikirim
+     *
+     * Daftar karyawannya sudah diambil dari yang pertama. Menyaring cap dengan
+     * yang kedua membuat keduanya berselisih persis saat seseorang dipindah
+     * cabang: cap dari sebelum pindah masih bercabang LAMA, jadi ia dibuang —
+     * dan tanggal yang sebenarnya HADIR turun jadi ALPA di rekap cabang baru.
+     * Di rekap cabang lama orangnya bahkan tak muncul sama sekali, jadi
+     * riwayatnya tak bisa dilihat dari mana pun kecuali "Semua cabang".
+     *
+     * Menyaring dengan `idKaryawan` menegakkan sifat yang seharusnya: memilih
+     * cabang hanya mengubah SIAPA yang terdaftar, tidak pernah mengubah angka
+     * siapa pun yang terdaftar.
+     */
+    const idKaryawan = karyawan.map((k) => k.user_id);
+    const cap =
+      idKaryawan.length === 0
+        ? []
+        : await db
+            .select({
+              user_id: attendances.userId,
+              tanggal: attendances.attendDate,
+              masuk: sql<string | null>`min(${attendances.waktu}) filter (where ${attendances.tipe} = 'masuk')`,
+              keluar: sql<string | null>`max(${attendances.waktu}) filter (where ${attendances.tipe} = 'keluar')`,
+            })
+            .from(attendances)
+            .where(
+              and(
+                eq(attendances.companyId, auth.company_id!),
+                inArray(attendances.userId, idKaryawan),
+                gte(attendances.attendDate, dari),
+                lte(attendances.attendDate, sampai),
+              ),
+            )
+            .groupBy(attendances.userId, attendances.attendDate);
 
     const petaCap = new Map<string, { masuk: string | null; keluar: string | null }>();
     for (const r of cap) {
@@ -487,7 +511,15 @@ export const absensiRoutes = new Hono<AppEnv>()
     }
 
     // (3) Cuti/libur DISETUJUI yang bertindih bulan ini → tebar per tanggal.
-    const izin = await pengajuanDisetujuiPadaRentang(auth.company_id!, dari, sampai, branchId);
+    // Per ORANG, dengan alasan yang sama seperti (2): `leaveRequests.branchId`
+    // adalah potret saat mengajukan, jadi cuti yang sudah di-ACC ikut lenyap —
+    // dan jatuh jadi ALPA — begitu pemohonnya dipindah cabang.
+    const izin = await pengajuanDisetujuiPadaRentang(
+      auth.company_id!,
+      dari,
+      sampai,
+      idKaryawan,
+    );
     const petaIzin = new Map<string, { jenis: "cuti" | "libur"; kategori: PengajuanKategori }>();
     for (const p of izin) {
       const mulai = p.mulai < dari ? dari : p.mulai;

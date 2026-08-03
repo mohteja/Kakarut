@@ -1,5 +1,5 @@
 import { zValidator } from "@hono/zod-validator";
-import { aliasedTable, and, desc, eq, gte, inArray, isNull, lte, or, sql } from "drizzle-orm";
+import { aliasedTable, and, desc, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
@@ -320,25 +320,35 @@ export const pengajuanRoutes = new Hono<AppEnv>()
  * Pengajuan DISETUJUI yang bertindih rentang tanggal — dipakai modul absensi
  * untuk menyusun rekap. Ditaruh di sini agar aturan "hanya yang disetujui yang
  * berlaku" hidup di satu tempat.
+ *
+ * DISARING PER ORANG, BUKAN PER CABANG — dan itu disengaja.
+ *
+ * `leaveRequests.branchId` adalah POTRET cabang pemohon pada saat mengajukan;
+ * ia tidak ikut berubah saat orangnya dipindah cabang (`PATCH /users/:id`).
+ * Rekap absen menyusun daftar karyawannya dari `memberships.branchId` yang
+ * BERJALAN. Menyaring cuti dengan cabang potret lalu memasangkannya ke daftar
+ * cabang berjalan membuat cuti yang sudah di-ACC lenyap begitu orangnya pindah
+ * — dan tanggal itu jatuh jadi ALPA, bukan sekadar kosong.
+ *
+ * Pemanggilnya sudah mempersempit daftar karyawan lebih dulu, jadi menyaring
+ * dengan `userIds` menutup cacat itu tanpa melebarkan cakupan.
  */
 export async function pengajuanDisetujuiPadaRentang(
   companyId: string,
   dari: string,
   sampai: string,
-  branchId?: string,
+  userIds?: string[],
 ): Promise<
   { userId: string; jenis: "cuti" | "libur"; kategori: string; mulai: string; selesai: string }[]
 > {
+  if (userIds?.length === 0) return [];
   const syarat = [
     eq(leaveRequests.companyId, companyId),
     eq(leaveRequests.status, "disetujui"),
     lte(leaveRequests.tanggalMulai, sampai),
     gte(leaveRequests.tanggalSelesai, dari),
   ];
-  // Cabang pemohon bisa null (owner/admin) — jangan buang barisnya saat menyaring.
-  if (branchId) {
-    syarat.push(or(eq(leaveRequests.branchId, branchId), isNull(leaveRequests.branchId))!);
-  }
+  if (userIds) syarat.push(inArray(leaveRequests.userId, userIds));
   const rows = await db
     .select({
       userId: leaveRequests.userId,
