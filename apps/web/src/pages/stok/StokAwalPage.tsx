@@ -44,9 +44,44 @@ export function StokAwalPage() {
   const [konfirmasi, setKonfirmasi] = useState(false);
   const [selesai, setSelesai] = useState(false);
 
-  // Isi ulang form dari nilai tersimpan (sekali, saat data tiba) → owner bisa
-  // melihat & mengedit saldo pembuka yang ada beserta tanggalnya.
+  /**
+   * GANTI CABANG saat form sedang terisi: buang ketikannya SEKETIKA.
+   *
+   * Halaman ini hidup di dalam Layout, dan Layout memuat pemilih cabang —
+   * jadi owner bisa berpindah cabang tanpa meninggalkan halaman ini. Kedua
+   * query sudah berkunci `branchQuery`, jadi daftar bahan dan nilai
+   * tersimpannya ikut berganti sendiri. Yang TIDAK ikut adalah `awal` dan
+   * `tanggal`: keduanya state lokal, dan penyemainya di bawah dikunci oleh
+   * `terisiAwal` yang menyala sekali lalu selamanya.
+   *
+   * Tanpa pembersihan ini, angka cabang LAMA tetap duduk di form sementara
+   * judul halaman sudah menampilkan nama cabang BARU — lalu Simpan mengirim
+   * `branch_id` cabang baru bersama qty cabang lama. Kiriman itu tidak
+   * ditolak: `ingredient_id` berlaku se-perusahaan (stok yang per-cabang,
+   * berkunci `[ingredientId, branchId]`), jadi angkanya mendarat di baris
+   * yang nyata.
+   *
+   * Yang ditimpa pun bukan angka biasa — saldo pembuka adalah GARIS DASAR
+   * yang dijadikan jangkar semua hitungan stok sesudahnya (`/stok/fifo`
+   * berjangkar padanya, lihat catatan di `onSuccess` di bawah).
+   *
+   * Pola sama dengan penjaga di `KasirPage` dan `FakturFormPage`, dua halaman
+   * lain yang menyimpan ketikan sambil bergantung pada cabang aktif.
+   */
+  const cabangSebelum = useRef(branchId);
   const terisiAwal = useRef(false);
+  useEffect(() => {
+    if (cabangSebelum.current === branchId) return;
+    cabangSebelum.current = branchId;
+    terisiAwal.current = false;
+    setAwal({});
+    setTanggal(hariIniWIB());
+    setKonfirmasi(false);
+    setSelesai(false);
+  }, [branchId]);
+
+  // Isi ulang form dari nilai tersimpan (sekali per cabang, saat data tiba) →
+  // owner bisa melihat & mengedit saldo pembuka yang ada beserta tanggalnya.
   useEffect(() => {
     if (terisiAwal.current || !tersimpan) return;
     terisiAwal.current = true;

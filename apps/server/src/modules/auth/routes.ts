@@ -322,10 +322,23 @@ export const authRoutes = new Hono<AppEnv>()
             tokenVersion: sql`${users.tokenVersion} + 1`,
           })
           .where(eq(users.id, user.id));
+        /*
+         * SELURUH tautan reset milik akun ini dimatikan, bukan hanya yang
+         * dipakai. Orang yang tak menerima emailnya akan menekan "Lupa
+         * password" berkali-kali, jadi beberapa tautan hidup bersamaan — dan
+         * sesudah password berhasil diganti, sisanya masih bisa menggantinya
+         * lagi selama sisa satu jam. Pada akun yang direset justru karena
+         * dicurigai bocor, itu membiarkan pintu yang baru saja dikunci.
+         */
         await tx
           .update(passwordResetTokens)
           .set({ usedAt: new Date() })
-          .where(eq(passwordResetTokens.id, row.id));
+          .where(
+            and(
+              eq(passwordResetTokens.userId, user.id),
+              isNull(passwordResetTokens.usedAt),
+            ),
+          );
       });
       return c.json({ ok: true });
     },
@@ -364,10 +377,24 @@ export const authRoutes = new Hono<AppEnv>()
           .set({ emailVerifiedAt: user.emailVerifiedAt ?? new Date() })
           .where(eq(users.id, user.id))
           .returning();
+        /*
+         * SELURUH tautan verifikasi milik akun ini dimatikan sekaligus, dan di
+         * sini taruhannya lebih besar daripada di reset password: verifikasi
+         * yang berhasil LANGSUNG memberi sesi (auto-login). Tautan yang belum
+         * terpakai karena user menekan "kirim ulang" beberapa kali karena itu
+         * adalah tautan MASUK yang masih hidup sampai 24 jam — siapa pun yang
+         * memegang salah satu email itu bisa masuk tanpa tahu passwordnya,
+         * bahkan sesudah akunnya terverifikasi.
+         */
         await tx
           .update(emailVerificationTokens)
           .set({ usedAt: new Date() })
-          .where(eq(emailVerificationTokens.id, row.id));
+          .where(
+            and(
+              eq(emailVerificationTokens.userId, user.id),
+              isNull(emailVerificationTokens.usedAt),
+            ),
+          );
         return u;
       });
       return c.json(await buatSesi(terverifikasi));

@@ -75,7 +75,7 @@ export function RekapAbsenPage() {
       ),
   });
 
-  const { data: pengajuan = [] } = useQuery({
+  const { data: pengajuan = [], error: gagalPengajuan } = useQuery({
     queryKey: ["pengajuan", saring, cabangFilter],
     queryFn: () =>
       api<PengajuanRow[]>(
@@ -83,7 +83,7 @@ export function RekapAbsenPage() {
       ),
   });
 
-  const { data: menunggu = [] } = useQuery({
+  const { data: menunggu = [], error: gagalMenunggu } = useQuery({
     queryKey: ["pengajuan", "menunggu"],
     queryFn: () => api<PengajuanRow[]>("/pengajuan?status=menunggu"),
   });
@@ -165,7 +165,11 @@ export function RekapAbsenPage() {
         sah — "Total tidak hadir: 0" adalah kabar baik yang dikarang halaman
         ini justru saat ia tak tahu apa-apa. Saat gagal, ketiga angka yang
         bersumber dari /absensi/rekap ditulis "—", bukan nol. "Pengajuan
-        menunggu" punya permintaannya sendiri, jadi ia tidak ikut dipadamkan.
+        menunggu" punya permintaannya sendiri, jadi ia tidak ikut dipadamkan
+        oleh galat rekap — tapi ia dipadamkan oleh galatnya SENDIRI, dan itu
+        yang paling penting di sini: "Pengajuan menunggu: 0" berarti tak ada
+        yang perlu di-ACC, dan pengajuan yang tak pernah di-ACC dihitung
+        sebagai TIDAK HADIR di rekap yang sama.
       */}
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KartuAngka label="Karyawan" value={error ? "—" : (rekap?.rows.length ?? 0)} />
@@ -181,8 +185,8 @@ export function RekapAbsenPage() {
         />
         <KartuAngka
           label="Pengajuan menunggu"
-          value={menunggu.length}
-          nada={menunggu.length > 0 ? "text-orange-600" : undefined}
+          value={gagalMenunggu ? "—" : menunggu.length}
+          nada={!gagalMenunggu && menunggu.length > 0 ? "text-orange-600" : undefined}
         />
       </div>
 
@@ -191,7 +195,7 @@ export function RekapAbsenPage() {
           Rekap bulanan
         </button>
         <button onClick={() => setTab("pengajuan")} className={chip(tab === "pengajuan")}>
-          Pengajuan {menunggu.length > 0 && `(${menunggu.length})`}
+          Pengajuan {!gagalMenunggu && menunggu.length > 0 && `(${menunggu.length})`}
         </button>
       </div>
 
@@ -323,10 +327,34 @@ export function RekapAbsenPage() {
 
           <ErrorText error={putuskan.error} />
 
+          {/*
+            "Tidak ada pengajuan pada saringan ini" adalah PERNYATAAN, dan
+            `data: pengajuan = []` membuat halaman ini menyatakannya justru saat
+            bacaannya ditolak. Saringan bawaannya "menunggu", jadi kalimat itu
+            berbunyi "tak ada yang perlu di-ACC" — dan cuti yang tak pernah
+            di-ACC dihitung TIDAK HADIR oleh rekap di tab sebelah. Manajemen tak
+            punya cara lain tahu bedanya: tabelnya kosong dengan tenang.
+
+            Diperbaiki di `kosong` (bukan dengan menyembunyikan tabelnya) supaya
+            satu perubahan berlaku untuk dua tampilan — tabel desktop dan kartu
+            HP sama-sama membacanya dari prop ini.
+          */}
+          <ErrorText error={gagalPengajuan} />
+
           <TabelResponsif
             data={pengajuan}
             kunci={(p) => p.id}
-            kosong="Tidak ada pengajuan pada saringan ini."
+            kosong={
+              gagalPengajuan ? (
+                <span className="text-red-700">
+                  Daftar pengajuan <b>tidak terbaca</b> — bukan berarti tak ada yang menunggu
+                  persetujuan. Muat ulang halaman; cuti yang belum di-ACC tetap terhitung tidak
+                  hadir.
+                </span>
+              ) : (
+                "Tidak ada pengajuan pada saringan ini."
+              )
+            }
             kolom={[
               {
                 judul: "Karyawan",

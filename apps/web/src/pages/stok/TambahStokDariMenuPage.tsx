@@ -322,6 +322,24 @@ export function TambahStokDariMenuPage() {
 
   const mintaPerlengkapan = sertakanPerlengkapan && perlengkapanKurang.length > 0;
 
+  /**
+   * Layar yang harus disegarkan sesudah tombol Buat menyentuh server — DIPAKAI
+   * BERSAMA oleh `onSuccess` dan `onError`. Ditulis sekali supaya keduanya tak
+   * bisa berbeda: dua daftar terpisah pasti akan berselisih saat salah satu
+   * ditambahi kunci baru.
+   */
+  const KUNCI_SEGAR = [
+    "stok",
+    "menu-ketersediaan",
+    "/produksi",
+    "/pembelian",
+    "rekomendasi",
+    "permintaan-stok",
+    "perlengkapan",
+    "perlengkapan-kiriman",
+    "penerimaan",
+  ];
+
   const buat = useMutation({
     mutationFn: async (): Promise<{
       menu: RencanaFakturResult | null;
@@ -361,17 +379,7 @@ export function TambahStokDariMenuPage() {
     onSuccess: ({ perlengkapan }) => {
       setKonfirmasi(false);
       setRencana({});
-      for (const key of [
-        "stok",
-        "menu-ketersediaan",
-        "/produksi",
-        "/pembelian",
-        "rekomendasi",
-        "permintaan-stok",
-        "perlengkapan",
-        "perlengkapan-kiriman",
-        "penerimaan",
-      ]) {
+      for (const key of KUNCI_SEGAR) {
         queryClient.invalidateQueries({ queryKey: [key] });
       }
       // bila ada perlengkapan yang diminta, tampilkan ringkasannya dulu
@@ -380,6 +388,34 @@ export function TambahStokDariMenuPage() {
         setHasilPerlengkapan(perlengkapan);
       } else {
         navigate("/permintaan-stok");
+      }
+    },
+    /**
+     * RANTAI DUA PANGGILAN: faktur bahan baku dulu, lalu permintaan
+     * perlengkapan. Yang kedua gagal TIDAK membatalkan yang pertama — fakturnya
+     * sudah benar-benar terbuat di server.
+     *
+     * Tanpa penyegaran di sini, `onSuccess` tak pernah jalan, jadi layarnya
+     * tetap memperlihatkan angka KEKURANGAN yang lama: faktur yang baru saja
+     * lahir tak terlihat, dan tombol Buat masih hidup dengan rencana yang sama.
+     * Menekannya sekali lagi memanggil `/rekomendasi/menu/faktur` untuk kedua
+     * kalinya — dan endpoint itu tak punya penangkal ganda (tanpa
+     * `client_ref`), jadi hasilnya SATU SET FAKTUR PRODUKSI/BELI KEDUA untuk
+     * kekurangan yang sama. Belanja dobel, bukan sekadar layar basi.
+     *
+     * Setelah disegarkan, pratinjau menghitung ulang: yang sudah dibuat tak
+     * lagi terhitung kurang, jadi menekan Buat lagi hanya membuat sisanya.
+     *
+     * Rencana yang diketik SENGAJA tidak dikosongkan dan halaman tidak
+     * berpindah — beda dengan jalur sukses. Yang gagal harus tetap terlihat
+     * beserta pesan galatnya (`ErrorText error={buat.error}` di dialog), supaya
+     * jelas apa yang belum terjadi. Pola ini mengikuti `ResepPage`, satu-satunya
+     * rantai serupa di repo ini, yang sudah lebih dulu memasang `onError`
+     * dengan alasan yang sama.
+     */
+    onError: () => {
+      for (const key of KUNCI_SEGAR) {
+        queryClient.invalidateQueries({ queryKey: [key] });
       }
     },
   });

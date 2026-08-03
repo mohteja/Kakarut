@@ -342,6 +342,29 @@ function ItemModal({
   const [kategori, setKategori] = useState(item?.kategori ?? "");
   const [bolehEceran, setBolehEceran] = useState(item?.boleh_eceran ?? true);
   const [dilacak, setDilacak] = useState(item?.dilacak ?? false);
+  /**
+   * Angka yang TERISI tapi tak terbaca.
+   *
+   * Keduanya memakai `angkaDari(x) || 0`, bentuk yang dilarang docstring
+   * `angkaDari` — dan larangannya berlaku persis di sini karena 0 adalah nilai
+   * yang sah untuk keduanya, jadi salah ketik tak bisa dibedakan darinya.
+   *
+   * `harga_beli` 0 merambat jauh dari halaman ini: ia jadi perkiraan di modal
+   * Stok Masuk (qty × harga beli) dan harga acuan saat beli perlengkapan ke CK.
+   * `stok_minimum` 0 berarti barangnya tak pernah lagi muncul sebagai kurang
+   * stok — peringatan yang berhenti tanpa ada yang mematikannya.
+   *
+   * Kosong tetap berarti 0: kolomnya memang boleh dikosongkan saat menambah
+   * barang yang harganya belum diketahui.
+   */
+  const angkaSalahKetik = (
+    [
+      ["Harga beli", hargaBeli],
+      ["Stok minimum", stokMin],
+    ] as const
+  )
+    .filter(([, v]) => v.trim() !== "" && Number.isNaN(angkaDari(v)))
+    .map(([label]) => label);
   const simpan = useMutation({
     mutationFn: () =>
       api<{ id: string; nama: string }>(item ? `/perlengkapan/${item.id}` : "/perlengkapan", {
@@ -438,12 +461,19 @@ function ItemModal({
             </span>
           </span>
         </label>
+        {angkaSalahKetik.length > 0 && (
+          <p className="text-sm text-red-600">
+            Angka tidak terbaca pada <b>{angkaSalahKetik.join(", ")}</b> — tulis angkanya saja
+            (mis. <b>15000</b> atau <b>15.000</b>). Dibiarkan begitu, nilainya tersimpan sebagai{" "}
+            <b>0</b>.
+          </p>
+        )}
         <ErrorText error={simpan.error} />
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className={btnSecondary}>Batal</button>
           <button
             onClick={() => simpan.mutate()}
-            disabled={!nama.trim() || simpan.isPending}
+            disabled={!nama.trim() || angkaSalahKetik.length > 0 || simpan.isPending}
             className={btnPrimary}
           >
             Simpan
@@ -533,6 +563,26 @@ function AturanForm({
   const [perHari, setPerHari] = useState(aturan ? teksAngka(aturan.per_hari) : "1");
   const [aktif, setAktif] = useState(aturan?.aktif ?? true);
   const [mulai, setMulai] = useState(aturan?.mulai ?? "");
+  /**
+   * "Setiap … hari" yang tak terbaca — dan inilah salah ketik paling mahal di
+   * halaman ini.
+   *
+   * `per_hari` bukan angka tampilan: server memakainya sebagai JARAK antar
+   * potongan terjadwal (`langkah = perHari * HARI_MS` di perlengkapan/service).
+   * Bentuk lamanya `angkaDari(perHari) || 1`, jadi mengetik "30 hari" atau
+   * "30hr" — NaN — mendarat di 1, dan potongan yang dimaksudkan sebulan sekali
+   * berjalan SETIAP HARI. Stok perlengkapan terkuras 30× lebih cepat, terus
+   * menerus, tanpa ada yang menekan tombol apa pun.
+   *
+   * Penggantinya pun bukan sentinel yang mencurigakan: 1 adalah nilai bawaan
+   * dan yang paling lazim dipakai, jadi layarnya terlihat wajar sesudahnya.
+   *
+   * `min`/`max` di kotaknya tidak menolong — atributnya hanya berlaku untuk
+   * `type="number"`, sedangkan kotak ini `type="text"`. Zod server (`.int()
+   * .min(1).max(365)`) juga tak pernah kebagian, sebab `|| 1` sudah menelan
+   * NaN-nya di klien.
+   */
+  const perHariSalahKetik = perHari.trim() !== "" && !(angkaDari(perHari) >= 1);
   const kirim = useMutation({
     mutationFn: () =>
       api(`/perlengkapan/${item.id}/aturan?branch_id=${branchId}`, {
@@ -636,12 +686,22 @@ function AturanForm({
           </label>
         </>
       )}
+      {metode === "otomatis" && perHariSalahKetik && (
+        <p className="text-sm text-red-600">
+          <b>Setiap … hari</b> tidak terbaca sebagai angka ≥ 1 — tulis angkanya saja (mis.{" "}
+          <b>30</b>). Dibiarkan begitu, jadwalnya tersimpan sebagai <b>setiap 1 hari</b>.
+        </p>
+      )}
       <ErrorText error={kirim.error} />
       <div className="flex justify-end gap-2">
         <button onClick={onClose} className={btnSecondary}>Batal</button>
         <button
           onClick={() => kirim.mutate()}
-          disabled={!branchId || (metode === "otomatis" && !(angkaDari(qty) > 0)) || kirim.isPending}
+          disabled={
+            !branchId ||
+            (metode === "otomatis" && (!(angkaDari(qty) > 0) || perHariSalahKetik)) ||
+            kirim.isPending
+          }
           className={btnPrimary}
         >
           Simpan Aturan

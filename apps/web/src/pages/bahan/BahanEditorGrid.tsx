@@ -34,6 +34,36 @@ export interface BahanEditorRow {
   catatan: string;
 }
 
+/**
+ * Kolom angka OPSIONAL yang isian tak terbacanya jatuh diam-diam ke 0.
+ *
+ * Kedua halaman pemakai grid ini mengirim `angkaDari(x) || 0` untuk kolom-kolom
+ * di bawah — bentuk yang dilarang docstring `angkaDari`, dan larangannya
+ * berlaku karena 0 memang nilai yang sah untuk semuanya. Akibatnya diam:
+ * "15 rb" di Harga beli tersimpan sebagai 0, "3 hari" di Lead time jadi 0
+ * (artinya "tak diatur"), dan tak ada apa pun di layar yang berubah.
+ *
+ * `isi` sengaja TIDAK ada di sini: ia wajib > 0 dan kedua halaman sudah punya
+ * aturannya sendiri yang berbeda — Ubah menahan semua baris, Tambah hanya
+ * baris yang sudah dinamai. Menaruhnya di sini akan membuat pesannya dobel.
+ *
+ * Dipakai bersama supaya kedua halaman tak berselisih lagi: perbedaan seperti
+ * itulah yang membuat satu halaman menahan baris rusak sementara yang lain
+ * membuangnya diam-diam.
+ */
+export function angkaTakTerbaca(b: BahanEditorRow): string[] {
+  const kolom: [string, string][] = [
+    ["Harga beli", b.harga_beli],
+    ["Stok minimum", b.stok_minimum],
+    ["Minimal belanja", b.min_beli],
+    ["Masa simpan", b.masa_simpan],
+    ["Lead time", b.lead_time],
+  ];
+  return kolom
+    .filter(([, v]) => v.trim() !== "" && Number.isNaN(angkaDari(v)))
+    .map(([label]) => label);
+}
+
 const cell =
   "rounded-lg border border-stone-300 px-2 py-1.5 text-sm focus:border-orange-500 focus:outline-none";
 const thCell = "px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide text-stone-500";

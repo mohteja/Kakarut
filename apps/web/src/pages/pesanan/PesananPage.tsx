@@ -1,8 +1,8 @@
 import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
-  adaKoreksiSajian,
   ringkasPesanan,
+  sajianBedaDariNota,
   urutkanPesanan,
   type PesananItemRow,
   type PesananLogRow,
@@ -14,7 +14,7 @@ import { Card, ErrorText, Modal, PageTitle, Spinner } from "../../components/ui"
 import { useAuth } from "../../context/AuthContext";
 import { useCabangData } from "../../context/BranchContext";
 import { api } from "../../lib/api";
-import { formatRupiah, formatWaktu, hariIniWIB } from "../../lib/format";
+import { formatRupiah, formatTanggal, formatWaktu, hariIniWIB } from "../../lib/format";
 
 const KOLOM: { status: PesananStatus; judul: string; warna: string }[] = [
   { status: "dikerjakan", judul: "🔥 Dikerjakan", warna: "border-orange-300 bg-orange-50" },
@@ -219,11 +219,12 @@ function KartuPesanan({
   // label meja SUDAH berbunyi "Meja 1"/"Ruang Tunggu" — jangan diberi awalan
   // lagi, hasilnya "Meja Meja 1".
   const judul = p.nomor ?? p.meja ?? "Pesanan";
-  // Penanda penyajian BEDA dari fakta pembukuan (is_dine_in) → tampilkan
-  // keduanya, jangan sembunyikan koreksinya. Diperiksa PER BARIS: kartu yang
-  // sebagian dibungkus tetap koreksi, dan pada penjualan lunas uang & stoknya
-  // sudah benar-benar berpindah (lihat `adaKoreksiSajian`).
-  const diubah = adaKoreksiSajian(p);
+  // Penanda penyajian BEDA dari fakta pembukuan (is_dine_in) → katakan, jangan
+  // sembunyikan. Diperiksa PER BARIS: kartu yang cuma sebagian dibungkus tetap
+  // berbeda, dan pada penjualan lunas kemasannya sudah masuk HPP & keluar dari
+  // stok. Yang TIDAK boleh dikatakan: kapan bedanya muncul — baris bisa LAHIR
+  // begini (lihat `sajianBedaDariNota`).
+  const bedaDariNota = sajianBedaDariNota(p);
   // "Belum dibayar" adalah AJAKAN menagih, jadi hanya untuk pesanan yang masih
   // hidup. Pada pesanan batal tak ada yang perlu ditagih — menandainya kuning
   // justru menyuruh kasir mengejar uang yang memang tak akan datang.
@@ -274,9 +275,9 @@ function KartuPesanan({
             🥡 Semua bawa pulang
           </span>
         )}
-        {diubah && (
+        {bedaDariNota && (
           <span className="rounded-full bg-purple-100 px-2 py-0.5 text-[11px] font-semibold text-purple-700">
-            diubah setelah transaksi
+            penyajian beda dari nota
           </span>
         )}
       </div>
@@ -349,18 +350,50 @@ export function PesananPage() {
   const { query: branchQuery } = useCabangData();
   const queryClient = useQueryClient();
   const { auth } = useAuth();
-  const [tanggal, setTanggal] = useState(hariIniWIB());
+  /**
+   * TANGGAL PAPAN IKUT JAM DINDING, kecuali memang dipilih sendiri.
+   *
+   * Dulu tanggalnya `useState(hariIniWIB())` — dibekukan saat halaman dibuka.
+   * Tablet dapur menyala sepanjang shift, dan banyak rumah makan masih melayani
+   * lewat tengah malam. Begitu tanggal berganti, server mulai membukukan
+   * pesanan pada tanggal BARU sementara papan terus meminta yang LAMA — dengan
+   * sukses, tiap 15 detik, selamanya. Pesanan baru tak pernah muncul dan tak
+   * ada apa pun yang mengatakannya; kartu kemarin tetap terpampang seolah
+   * papannya sehat. Di layar inilah keterlambatan berujung makanan tak dibuat.
+   *
+   * Bukti bahwa ini nyata dan bukan tafsir: badge "Pesanan Masuk" di sidebar
+   * menghitung `hariIniWIB()` setiap render, jadi sesudah tengah malam sidebar
+   * dan papan menyebut angka yang berbeda — dan yang salah justru papan, layar
+   * yang dipakai orang bekerja.
+   *
+   * `null` = ikut hari ini. Tanggal yang DIPILIH orang tetap dihormati, dan
+   * spanduk di bawah yang memberitahu bahwa yang tampil bukan hari ini.
+   */
+  const [hariIni, setHariIni] = useState(hariIniWIB());
+  useEffect(() => {
+    // Menyetel nilai yang sama tidak menyebabkan render ulang, jadi denyut ini
+    // gratis sampai tanggalnya benar-benar berganti.
+    const t = setInterval(() => setHariIni(hariIniWIB()), 60_000);
+    return () => clearInterval(t);
+  }, []);
+  const [tanggalPilihan, setTanggalPilihan] = useState<string | null>(null);
+  const tanggal = tanggalPilihan ?? hariIni;
   const [fokus, setFokus] = useState<PesananStatus>("dikerjakan");
   const [riwayat, setRiwayat] = useState<PesananRow | null>(null);
 
   const kunci = ["pesanan", branchQuery, tanggal];
   const qs = `${branchQuery ? `${branchQuery}&` : "?"}tanggal=${tanggal}`;
   /**
-   * Selama ada tombol status yang belum dijawab server, polling DIMATIKAN.
+   * Selama ada tombol status yang belum dijawab server, polling DIMATIKAN —
+   * supaya tak ada permintaan BARU yang berangkat dan balapan dengan
+   * penyegaran di `onSettled`.
    *
-   * Kalau tidak: jawaban polling yang berangkat sebelum perubahan tersimpan akan
-   * mendarat sesudahnya dan menimpa tampilan optimistis dengan status lama —
-   * badge berkedip balik lalu maju lagi. Itu justru terbaca "lemot", bukan cepat.
+   * Ini TIDAK menutup permintaan yang sudah TERLANJUR di udara saat tombol
+   * ditekan: `refetchInterval: false` hanya menghentikan penjadwalan
+   * berikutnya, dan `adaAksi` baru bernilai true SESUDAH `onMutate` jalan.
+   * Jawaban yang berangkat sebelum ketukan tetap mendarat sesudahnya dan
+   * menimpa tampilan optimistis dengan status lama. Yang membatalkannya adalah
+   * `cancelQueries` di `terapkanOptimistis`.
    */
   const adaAksi = useIsMutating({ mutationKey: ["pesanan-aksi"] }) > 0;
   const { data, isLoading, error } = useQuery({
@@ -380,11 +413,23 @@ export function PesananPage() {
    * di cache diperbarui lebih dulu memakai aturan turunan yang SAMA dengan
    * server (`ringkasPesanan`), jadi kolom, hitungan "2/3 selesai", dan urutan
    * langsung benar. Kalau servernya menolak, `onError` memulihkan apa adanya.
+   *
+   * MEMBATALKAN BACAAN YANG SEDANG DI UDARA lebih dulu, dan itu bukan formalitas
+   * resep. Papan ini memoles ulang tiap 15 detik, jadi hampir selalu ada satu
+   * permintaan yang sudah berangkat saat jari menekan tombol. Jawabannya
+   * membawa keadaan SEBELUM ketukan; mendarat sesudah tulisan optimistis, ia
+   * menimpanya — kartu melompat balik ke kolom asalnya, lalu maju lagi begitu
+   * `onSettled` menyegarkan. Di dapur lompatan itu terbaca "ketukan saya tidak
+   * masuk", dan orang menekan lagi.
+   *
+   * `api()` tak membaca `AbortSignal`, jadi permintaannya memang tetap selesai
+   * di jaringan — yang penting hasilnya tak lagi ditulis ke cache.
    */
-  function terapkanOptimistis(
+  async function terapkanOptimistis(
     p: PesananRow,
     ubahBaris: (it: PesananItemRow) => PesananItemRow,
-  ): { sebelum: PesananRow[] | undefined } {
+  ): Promise<{ sebelum: PesananRow[] | undefined }> {
+    await queryClient.cancelQueries({ queryKey: kunci });
     const sebelum = queryClient.getQueryData<PesananRow[]>(kunci);
     queryClient.setQueryData<PesananRow[]>(kunci, (lama) =>
       lama
@@ -521,7 +566,8 @@ export function PesananPage() {
         <input
           type="date"
           value={tanggal}
-          onChange={(e) => setTanggal(e.target.value)}
+          // Dikosongkan = kembali mengikuti hari ini, bukan tanggal kosong.
+          onChange={(e) => setTanggalPilihan(e.target.value || null)}
           className="h-11 rounded-lg border border-stone-300 px-3 text-base focus:border-orange-500 focus:outline-none"
           aria-label="Tanggal pesanan"
         />
@@ -529,6 +575,25 @@ export function PesananPage() {
           {rows.length} pesanan · <b>{sajianJalan}</b> sajian masih dikerjakan
         </div>
       </div>
+
+      {/* Papan yang tidak menampilkan hari ini WAJIB mengatakannya. Kotak
+          tanggal terbaca seperti penyaring biasa, dan dapur tak punya cara lain
+          tahu bahwa pesanan baru tidak akan pernah muncul di layar ini. */}
+      {tanggal !== hariIni && (
+        <div className="mb-3 flex flex-wrap items-center gap-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          <span>
+            Papan menampilkan <b>{formatTanggal(tanggal)}</b> — bukan hari ini. Pesanan
+            baru tidak akan muncul di sini.
+          </span>
+          <button
+            type="button"
+            onClick={() => setTanggalPilihan(null)}
+            className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700"
+          >
+            Ke hari ini
+          </button>
+        </div>
+      )}
 
       <ErrorText error={error ?? galat} />
 

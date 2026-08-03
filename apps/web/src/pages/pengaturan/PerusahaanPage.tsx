@@ -182,6 +182,41 @@ export function PerusahaanPage() {
     setFoodCostMaks(teksAngka(company.foodCostMaks ?? 40));
   }, [company]);
 
+  /**
+   * Persentase yang TERISI tapi tak terbaca sebagai angka.
+   *
+   * Ketiga kotak di bawah memakai `angkaDari(x) || 0` — bentuk yang dilarang
+   * terang-terangan oleh docstring `angkaDari`: "Sengaja TIDAK memulangkan 0:
+   * 0 adalah angka yang sah dan bermakna, dan menjadikannya nilai kegagalan
+   * membuat salah ketik tak bisa dibedakan dari 'memang nol'." Di sini nol
+   * memang sah untuk ketiganya, jadi larangan itu berlaku persis.
+   *
+   * Ketikan yang sangat wajar di kotak berlabel "%" — "10%", "10 %", "10,5%" —
+   * semuanya NaN, lalu jatuh ke 0 tanpa satu pun tanda. Akibat per kolom:
+   *
+   * - `pb1_rate` yang paling sunyi: `pb1_enabled` tetap menyala, tapi
+   *   `hitungPb1(subtotal, 0)` memulangkan 0, jadi struk tetap mencetak baris
+   *   PB1 sebesar Rp 0 dan pajaknya berhenti dipungut pada SETIAP penjualan
+   *   sesudahnya — sampai ada yang membuka halaman ini lagi dan sadar.
+   * - `diskon_maks_persen` 0 membuat server menolak diskon apa pun di atas
+   *   0,5% (`penjualan/service.ts`), jadi kasir mendadak tak bisa memberi
+   *   diskon sama sekali.
+   * - `food_cost_maks` 0 menandai SEMUA menu merah sekaligus.
+   *
+   * Kotak yang dikosongkan sengaja dibiarkan berarti 0 — mengosongkan sebuah
+   * persentase adalah tindakan yang jelas, dan itu perilaku yang sudah ada.
+   * Yang ditahan hanya kotak yang berisi sesuatu yang tak terbaca.
+   */
+  const persenSalahKetik = (
+    [
+      ["Tarif PB1", pb1Rate],
+      ["Diskon maksimal kasir", diskonMaksPersen],
+      ["Ambang food cost sehat", foodCostMaks],
+    ] as const
+  )
+    .filter(([, v]) => v.trim() !== "" && Number.isNaN(angkaDari(v)))
+    .map(([label]) => label);
+
   const simpan = useMutation({
     mutationFn: () =>
       api("/company", {
@@ -325,8 +360,19 @@ export function PerusahaanPage() {
             lama tidak berubah kalau setelan ini diganti.
           </p>
         </div>
+        {persenSalahKetik.length > 0 && (
+          <p className="text-sm text-red-600">
+            Angka tidak terbaca pada <b>{persenSalahKetik.join(", ")}</b> — tulis angkanya saja
+            tanpa tanda persen (mis. <b>10</b> atau <b>10,5</b>). Dibiarkan begitu, nilainya
+            tersimpan sebagai <b>0</b>.
+          </p>
+        )}
         <ErrorText error={simpan.error} />
-        <button onClick={() => simpan.mutate()} disabled={simpan.isPending} className={btnPrimary}>
+        <button
+          onClick={() => simpan.mutate()}
+          disabled={simpan.isPending || persenSalahKetik.length > 0}
+          className={btnPrimary}
+        >
           {simpan.isPending ? "Menyimpan…" : "Simpan"}
         </button>
         {simpan.isSuccess && <span className="ml-3 text-sm text-green-600">Tersimpan ✓</span>}

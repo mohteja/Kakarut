@@ -17,17 +17,45 @@ export function turunkanStatusPesanan(
 }
 
 /**
- * Apakah penyajian pesanan yang SUDAH DIBAYAR pernah dikoreksi?
+ * Penanda penyajian sebuah baris penjualan SAAT DIBUAT.
  *
- * Saat dibuat, tiap baris SELALU lahir sebagai kebalikan `is_dine_in` BARISNYA
- * sendiri — `sajianDariKasir(override) = !(override ?? true)`, dan `createSale`
- * memakai `item.is_dine_in ?? isDineIn` untuk kolom yang sama. Baris yang
- * justru SAMA dengan `is_dine_in`-nya berarti ada yang membaliknya di papan
- * sesudah transaksi ditutup, dan pada penjualan yang sudah dibayar pembalikan
- * itu bukan kosmetik: server menghitung ulang HPP dan menulis ulang pemakaian
- * stok kemasan.
+ * Dua sumber, dan yang menang adalah sinyal EKSPLISIT mana pun yang ada:
+ * penanda 🥡 yang sudah ditekan dapur pada baris open bill asalnya, atau baris
+ * yang memang dibukukan bukan dine-in. Karena itu OR, bukan salah satunya saja:
+ * tanpa mewarisi tanda dapur, penanda pada bill yang belum dibayar hilang tepat
+ * di titik pembayaran — dus yang sudah diambil dari rak tak pernah masuk HPP
+ * maupun `sale_consumptions`.
  *
- * DUA HAL yang gampang salah, dan keduanya pernah salah di sini:
+ * AKIBAT YANG MUDAH TERLEWAT, dan sudah pernah melahirkan bug: sebuah baris
+ * BISA lahir dengan `sajian_takeaway === is_dine_in`. Dapur menandai 🥡 pada
+ * bill di meja dine-in, kasir menagihnya tanpa `dine_in_override` → baris lahir
+ * `is_dine_in: true` **dan** `sajian_takeaway: true`. Kesamaan itu karena itu
+ * BUKAN bukti ada yang membaliknya sesudah transaksi ditutup — lihat
+ * `sajianBedaDariNota`.
+ */
+export function penandaSajian(p: {
+  /** `sajian_takeaway` baris open bill asalnya — hanya ada bila baris ini dari bill. */
+  warisTakeaway?: boolean | null;
+  /** `is_dine_in` baris ini: fakta pembukuan, bukan cara penyajiannya. */
+  dineIn: boolean;
+}): boolean {
+  return (p.warisTakeaway ?? false) || !p.dineIn;
+}
+
+/**
+ * Apakah ADA baris yang penyajiannya berbeda dari pembukuan barisnya sendiri?
+ *
+ * `is_dine_in` adalah fakta pembukuan (di mana pesanan ini dimakan — dasar
+ * pemisahan omzet dan label meja pada nota). `sajian_takeaway` adalah cara ia
+ * benar-benar disajikan, dan sejak tombol 🥡 memindahkan uang, ia juga BASIS
+ * BIAYA. Baris yang keduanya SAMA berarti nota dan piring bercerita beda:
+ * dine-in yang dibungkus, atau bawa pulang yang berakhir di piring.
+ *
+ * Dibatasi ke pesanan yang SUDAH DIBAYAR bukan karena bedanya baru muncul di
+ * sana, tapi karena di sanalah bedanya sudah jadi angka — kemasannya sudah
+ * masuk HPP dan sudah keluar dari stok.
+ *
+ * TIGA HAL yang gampang salah, dan ketiganya pernah salah di sini:
  *
  * 1. Jangan pakai `sajian_takeaway` KARTU. Itu `items.every(…)` — "semua baris
  *    bawa pulang" — jadi pesanan dine-in yang cuma SEBAGIAN dibungkus tetap
@@ -39,10 +67,17 @@ export function turunkanStatusPesanan(
  *    satu porsi dibungkus di meja yang makan di tempat (`dine_in_override`),
  *    dan baris itu memang lahir `is_dine_in` false di penjualan yang
  *    `is_dine_in`-nya true. Membandingkannya dengan penanda kartu menuduhnya
- *    "diubah setelah transaksi" padahal kasir sendiri yang menetapkannya
- *    sebelum uang diterima.
+ *    berubah padahal kasir sendiri yang menetapkannya sebelum uang diterima.
+ *
+ * 3. JANGAN MENYEBUTNYA "DIUBAH SETELAH TRANSAKSI". Itu nama lama fungsi ini
+ *    dan bunyi lama badge-nya, dan datanya tak pernah bisa membuktikannya:
+ *    `penandaSajian` MEWARISI tanda 🥡 dapur dari baris open bill, jadi baris
+ *    dine-in bisa LAHIR `sajian_takeaway: true` — persis alur yang paling
+ *    sering dipakai. Papan lalu menuduh "diubah setelah transaksi" pada pesanan
+ *    yang tak pernah disentuh sesudah dibayar, dan tuduhan yang salah sesering
+ *    itu ikut menenggelamkan tuduhan yang benar.
  */
-export function adaKoreksiSajian(
+export function sajianBedaDariNota(
   p: Pick<PesananRow, "dibayar" | "items">,
 ): boolean {
   return (

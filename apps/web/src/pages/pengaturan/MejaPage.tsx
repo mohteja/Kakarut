@@ -15,6 +15,7 @@ import { CabangDataBar } from "../../components/CabangDataBar";
 import { useAuth } from "../../context/AuthContext";
 import { useCabangData } from "../../context/BranchContext";
 import { api } from "../../lib/api";
+import { galatTerbaru } from "../../lib/galat";
 import { formatWaktu } from "../../lib/format";
 import {
   KosongkanMejaModal,
@@ -267,7 +268,7 @@ export function MejaPage() {
         </div>
       )}
 
-      <ErrorText error={toggle.error || hapus.error || simpanTataLetak.error} />
+      <ErrorText error={galatTerbaru(toggle, hapus, simpanTataLetak)} />
 
       {/* Desktop: denah (kiri) + daftar (kanan). Mobile: denah atas, daftar bawah. */}
       <div className="flex flex-col gap-3 md:flex-row md:items-start">

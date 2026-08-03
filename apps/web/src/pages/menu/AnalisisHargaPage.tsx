@@ -111,7 +111,7 @@ function Rincian({ row }: { row: AnalisisHargaRow }) {
  */
 export function AnalisisHargaPage() {
   const queryClient = useQueryClient();
-  const { data: rows, isLoading } = useQuery({
+  const { data: rows, isLoading, error: gagalMuat } = useQuery({
     queryKey: ["menu-analisis-harga"],
     queryFn: () => api<AnalisisHargaRow[]>("/menu/analisis-harga"),
   });
@@ -275,7 +275,27 @@ export function AnalisisHargaPage() {
         </div>
       )}
 
-      {tampil.length === 0 ? (
+      {/*
+        GAGAL MEMUAT ≠ SEMUA MENU SEHAT. Tanpa cabang ini, bacaan yang ditolak
+        server berakhir sebagai "Tidak ada menu di atas ambang — 👍": halaman ini
+        MENGUCAPKAN SELAMAT atas keadaan yang tak pernah ia lihat.
+        Dan tak ada apa pun di luar layar yang membantahnya. Di gudang, rak yang
+        penuh langsung menyanggah daftar kiriman yang kosong; food cost tak
+        terlihat, jadi halaman inilah satu-satunya alat ukurnya. Pemilik yang
+        percaya jempolnya tidak menaikkan harga menu yang sebenarnya sudah
+        lewat ambang — dan tak pernah tahu ia melewatkannya.
+        Alasan & bentuknya sama dengan penjagaan di RiwayatPage.
+      */}
+      {gagalMuat ? (
+        <Card className="p-4">
+          <ErrorText error={gagalMuat} />
+          <div className="mt-2 text-sm text-stone-500">
+            Analisis harga tidak bisa dimuat, jadi kosongnya daftar di bawah{" "}
+            <b>bukan</b> berarti semua menu sudah sehat. Muat ulang halaman setelah
+            masalahnya beres.
+          </div>
+        </Card>
+      ) : tampil.length === 0 ? (
         <Card className="p-6 text-center text-sm text-stone-500">
           {disaring
             ? `Tidak ada menu yang cocok${q ? ` dengan "${cari.trim()}"` : ""}${

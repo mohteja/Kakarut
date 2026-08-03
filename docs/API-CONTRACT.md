@@ -355,7 +355,32 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 > ```
 >
 > Keduanya lalu ditagih **harga terkunci** bill dan mewarisi **status dapur yang
-> sama**; `sajian_takeaway` tetap lahir per baris dari `is_dine_in` masing-masing.
+> sama**.
+>
+> **`sajian_takeaway` JUGA diwarisi, dan itu menyentuh uang.** Nilainya
+> `penanda_baris_bill || !is_dine_in`. Jadi bila papan sudah menandai baris bill
+> itu 🥡, **kedua** baris pecahan lahir `sajian_takeaway: true` — termasuk yang
+> kalian kirim `is_dine_in: true`. Mengirim `is_dine_in: true` **tidak**
+> menghapus penanda papan.
+>
+> Itu bukan kosmetik: `sajian_takeaway` adalah **basis biaya** (lihat blok
+> `POST /api/pesanan/…/sajian`), jadi kedua porsi ikut dibebani kemasan dan stok
+> kemasannya berkurang untuk keduanya. Kalau porsi yang di piring memang tidak
+> dibungkus, matikan penandanya dari **papan pesanan** — pada barisnya di bill
+> sebelum dibayar, atau pada baris penjualannya sesudah dibayar (yang otomatis
+> menghitung ulang).
+>
+> ⚠️ **Jangan menyamakannya dengan `pisah_dari`** di `PUT /api/open-bill/:id`: di
+> sana `sajian_takeaway` justru **tidak** diwarisi. Dua jalur pisah porsi, dua
+> aturan berlawanan — pembedanya adalah baris pecahan memakai `open_bill_item_id`
+> yang **sama** (di sini, saat membayar) atau menjadi baris bill **baru** (di
+> sana, saat memperbarui bill).
+>
+> Akibat lanjutan yang perlu diketahui klien: sebuah baris penjualan bisa
+> **lahir** dengan `sajian_takeaway == is_dine_in`. Kesamaan itu karena itu
+> **bukan** bukti ada yang mengubah penyajiannya sesudah transaksi ditutup —
+> jangan memberi label "diubah setelah transaksi" padanya. Yang bisa kalian
+> katakan dengan jujur hanya: penyajiannya berbeda dari notanya.
 >
 > **Jangan menghilangkan `open_bill_item_id` pada baris pecahan.** Dua hal rusak
 > sekaligus, dan keduanya sunyi:
