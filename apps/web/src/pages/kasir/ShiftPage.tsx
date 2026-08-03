@@ -44,12 +44,31 @@ export function ShiftPage() {
   // Shift kas berjalan per cabang — dari Kantor pilih cabang kasnya.
   const { query: branchQuery } = useCabangData();
 
-  const { data: aktif, isLoading } = useQuery({
+  /**
+   * GAGAL DIBACA ≠ BELUM ADA SHIFT — dan di layar ini bedanya menyentuh laci.
+   *
+   * `/shift/aktif` memang boleh memulangkan `null` saat tak ada shift terbuka.
+   * Justru kontrak itu yang menyembunyikan cacatnya: permintaan yang DITOLAK
+   * mendarat sebagai `undefined`, dan setiap ungkapan di bawah memperlakukan
+   * keduanya sama — `!aktif`, `aktif != null`, `aktif?.selisih ?? null`.
+   *
+   * Akibatnya kasir yang shift-nya sedang terbuka dibawa ke satu-satunya aksi
+   * yang MUSTAHIL berhasil ("Buka Kasir" — indeks unik parsial
+   * `shifts_open_per_branch_uq` hanya mengizinkan satu shift terbuka per
+   * cabang), dan dijauhkan dari aksi yang justru ia butuhkan: Tutup & setor.
+   *
+   * `refetchInterval` membuatnya bisa terjadi di TENGAH sesi, bukan cuma saat
+   * halaman dibuka. Dan itu tepat mematahkan alasan `terkunci` dibaca dari
+   * `aktif.uang_fisik` alih-alih state React: kasir yang sudah mengunci
+   * hitungannya mendadak melihat layar kembali ke "Buka Kasir", sementara
+   * nominal terkuncinya hidup di server dan tak lagi terlihat dari sini.
+   */
+  const { data: aktif, isLoading, error: gagalAktif } = useQuery({
     queryKey: ["shift-aktif", branchQuery],
     queryFn: () => api<Shift | null>(`/shift/aktif${branchQuery}`),
     refetchInterval: 30_000,
   });
-  const { data: riwayat = [] } = useQuery({
+  const { data: riwayat = [], error: gagalRiwayat } = useQuery({
     queryKey: ["shift-riwayat", branchQuery],
     queryFn: () => api<Shift[]>(`/shift${branchQuery}`),
   });
@@ -128,7 +147,21 @@ export function ShiftPage() {
         Tutup Kasir
       </PageTitle>
 
-      {!aktif ? (
+      {gagalAktif ? (
+        <Card className="space-y-2 border-amber-300 bg-amber-50 p-5">
+          <ErrorText error={gagalAktif} />
+          <div className="text-sm leading-relaxed text-amber-900">
+            Status shift <b>tidak terbaca</b> — <b>bukan</b> berarti belum ada shift terbuka.
+            Jangan membuka kasir baru dari layar ini: bila shift Anda memang sedang berjalan,
+            membukanya lagi pasti ditolak, dan yang Anda butuhkan justru <b>Tutup &amp; setor</b>.
+            Halaman ini mencoba lagi sendiri tiap 30 detik; tunggu sampai statusnya muncul.
+          </div>
+          <div className="text-xs text-amber-800">
+            Hitungan laci yang sudah dikunci tetap tersimpan di server — ia tidak hilang karena
+            layar ini gagal membacanya.
+          </div>
+        </Card>
+      ) : !aktif ? (
         <Card className="space-y-3 p-5">
           <div className="text-sm text-stone-500">
             Belum ada shift terbuka di cabang ini. Buka kasir dengan mengisi <b>modal awal</b>{" "}
@@ -319,7 +352,14 @@ export function ShiftPage() {
       {/* Riwayat shift */}
       <div className="mt-6">
         <h2 className="mb-2 text-lg font-semibold text-stone-700">Riwayat shift</h2>
-        {riwayat.length === 0 ? (
+        {gagalRiwayat ? (
+          <Card className="p-4">
+            <ErrorText error={gagalRiwayat} />
+            <div className="mt-1 text-sm text-stone-500">
+              Riwayat shift tidak dapat dimuat — <b>bukan</b> berarti belum ada shift ditutup.
+            </div>
+          </Card>
+        ) : riwayat.length === 0 ? (
           <Card className="p-6 text-center text-sm text-stone-400">Belum ada shift ditutup.</Card>
         ) : (
           <div className="space-y-2">
