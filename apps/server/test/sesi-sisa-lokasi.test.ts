@@ -37,6 +37,15 @@ const branch = readFileSync(
 
 const KUNCI = ["kakarut.branch", "kakarut.cabang-data", "kakarut.cabang-data-ck"];
 
+/**
+ * Penghapusannya kini lewat `hapusLokal` (lib/simpanan) — bukan
+ * `localStorage.removeItem` telanjang — karena penyimpanan yang diblokir
+ * dulu melempar dan menggagalkan seluruh logout. Yang dijaga berkas ini tak
+ * berubah sedikit pun: KETIGA kunci itu tetap harus dibuang di tiap batas
+ * sesi. Hanya ejaan pemanggilannya yang berpindah.
+ */
+const buang = (k: string) => `hapusLokal("${k}")`;
+
 /** Badan sebuah `const <nama> = useCallback((…) => { … })`. */
 function badanCallback(src: string, nama: string): string {
   const mulai = src.indexOf(`const ${nama} = useCallback(`);
@@ -55,7 +64,7 @@ describe("pilihan lokasi tak boleh menyeberang sesi", () => {
     it(`${jalur} membuang KETIGA kunci lokasi`, () => {
       const badan = badanCallback(auth, jalur);
       for (const k of KUNCI) {
-        expect(badan, `${jalur} tak membuang ${k}`).toContain(`removeItem("${k}")`);
+        expect(badan, `${jalur} tak membuang ${k}`).toContain(buang(k));
       }
     });
   }
@@ -65,14 +74,14 @@ describe("pilihan lokasi tak boleh menyeberang sesi", () => {
     const mulai = auth.indexOf("if (pindahPeran)");
     expect(mulai).toBeGreaterThan(-1);
     const potong = auth.slice(mulai, mulai + 600);
-    for (const k of KUNCI) expect(potong).toContain(`removeItem("${k}")`);
+    for (const k of KUNCI) expect(potong).toContain(buang(k));
   });
 
   it("kedua pilihan cabang-data divalidasi terhadap daftar cabang", () => {
     // Lapis kedua: sembuh sendiri walau ada batas sesi yang terlewat.
     expect(branch).toMatch(/const sah = \(id: string \| null\)/);
-    expect(branch).toContain('removeItem("kakarut.cabang-data")');
-    expect(branch).toContain('removeItem("kakarut.cabang-data-ck")');
+    expect(branch).toContain(buang("kakarut.cabang-data"));
+    expect(branch).toContain(buang("kakarut.cabang-data-ck"));
     // Yang tak sah dikembalikan ke null, bukan ditebak ke cabang lain —
     // menebak berarti diam-diam menampilkan data cabang yang tak diminta.
     expect(branch).toContain("setDataBranchIdState(null)");

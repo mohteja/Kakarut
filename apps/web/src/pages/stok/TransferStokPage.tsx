@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type { TransferStokFaktur, TransferStokSaldoRow } from "@kakarut/shared";
 import { angkaDari } from "@kakarut/shared";
 import {
@@ -14,6 +14,7 @@ import { useAuth } from "../../context/AuthContext";
 import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatAngka, formatTanggalRingkas, formatWaktu } from "../../lib/format";
+import { uuidV4 } from "../../lib/idempoten";
 
 /** Satu baris bahan pada form transfer (qty sebagai teks agar input bebas). */
 interface BarisTransfer {
@@ -127,6 +128,26 @@ export function TransferStokPage() {
     queryFn: () => api<{ rows: TransferStokFaktur[] }>("/transfer-stok"),
   });
 
+  /**
+   * Kunci idempotensi satu PENGIRIMAN.
+   *
+   * Bukan pengaman dari klik ganda — tombolnya sudah dimatikan selama pending.
+   * Yang dijaga adalah jaringan yang putus SESUDAH server menulis tapi SEBELUM
+   * balasannya sampai. Dan itu tak selalu butuh manusia: terukur di Chromium,
+   * saat server menutup koneksi keep-alive yang sedang dipakai ulang, browser
+   * MENGULANG SENDIRI POST itu (lihat `lib/idempoten.ts`).
+   *
+   * Akibat penggandaan di sini bukan sekadar faktur kembar: stok keluar dari
+   * CK DUA KALI untuk satu pengiriman, dan cabang menerima dua kiriman yang
+   * sama. Persis kelas yang sudah dijaga di penjualan dan opname; transfer
+   * satu-satunya pembuat-baris pemindah-stok yang belum ikut.
+   *
+   * Kuncinya mengikat ISI, bukan umur komponen: dicabut begitu kirimannya
+   * sukses (isi form direset), supaya pengiriman BERIKUTNYA — meski bahan dan
+   * qty-nya kebetulan sama — tak dianggap ulangan dan diam-diam tak terjadi.
+   */
+  const refKirim = useRef<string | null>(null);
+
   const kirim = useMutation({
     mutationFn: () =>
       api<{ ok: true; nomor: string; jumlah_baris: number }>("/transfer-stok", {
@@ -135,12 +156,14 @@ export function TransferStokPage() {
           asal_branch_id: asalId,
           tujuan_branch_id: tujuanId,
           catatan: catatan.trim() || null,
+          client_ref: (refKirim.current ??= uuidV4()),
           items: baris
             .filter((b) => b.ingredient_id && angkaDari(b.qty) > 0)
             .map((b) => ({ ingredient_id: b.ingredient_id, qty: angkaDari(b.qty) })),
         },
       }),
     onSuccess: () => {
+      refKirim.current = null;
       setBaris([{ ingredient_id: "", qty: "" }]);
       setCatatan("");
       queryClient.invalidateQueries({ queryKey: ["transfer-stok"] });

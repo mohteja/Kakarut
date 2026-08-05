@@ -22,6 +22,12 @@ import {
 } from "../../db/schema";
 import { resolveBranchId, type AppEnv } from "../../middleware/auth";
 import { nomorUntukRefs } from "../dokumen/nomor";
+import {
+  cariHasilIdempoten,
+  catatHasilIdempoten,
+  clientRefField,
+  deviceIdField,
+} from "../sync/idempoten";
 import { buatFakturDariRencana, rencanaDariMenu } from "./rencana";
 import { rekomendasiBeli } from "./service";
 
@@ -50,6 +56,8 @@ const RencanaFakturBody = RencanaBody.extend({
   /** work-order: Central Kitchen pelaksana (auto dari pemasok store bila kosong) */
   ck_branch_id: z.string().uuid().nullish(),
   catatan: z.string().nullish(),
+  client_ref: clientRefField,
+  device_id: deviceIdField,
 });
 
 /**
@@ -109,6 +117,22 @@ export const rekomendasiRoutes = new Hono<AppEnv>().get("/beli", async (c) => {
   .post("/menu/faktur", zValidator("json", RencanaFakturBody), async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");
+    // Kiriman ulang TIDAK boleh menerbitkan satu set faktur lagi.
+    //
+    // Halaman "Tambah Stok dari Menu" mengirim DUA permintaan berurutan: faktur
+    // bahan baku di sini, lalu permintaan perlengkapan yang menautkan diri ke
+    // `rencana_id` hasil panggilan ini. Kalau yang KEDUA gagal, yang pertama
+    // sudah terlanjur menerbitkan faktur produksi + beli — dan tombolnya
+    // memantulkan galat seolah tak ada apa pun yang terjadi. Orang menekannya
+    // lagi, dan gudang menerima DUA work-order untuk satu kebutuhan.
+    //
+    // Kuncinya dipegang klien sampai SUKSES, jadi percobaan kedua memutar ulang
+    // hasil yang sama — termasuk `rencana_id`-nya, sehingga permintaan
+    // perlengkapan tetap menaut ke rencana yang benar.
+    if (body.client_ref) {
+      const ada = await cariHasilIdempoten(auth.company_id!, body.client_ref);
+      if (ada) return c.json(ada.hasilJson, 201);
+    }
     // cabang tujuan = store yang butuh stok (default cabang aktif)
     const branchId = body.tujuan_branch_id ?? (await resolveBranchId(c));
     const hasil = await buatFakturDariRencana({
@@ -122,6 +146,16 @@ export const rekomendasiRoutes = new Hono<AppEnv>().get("/beli", async (c) => {
       supplierBeliId: body.supplier_beli_id,
       catatan: body.catatan,
     });
+    if (body.client_ref) {
+      await catatHasilIdempoten({
+        companyId: auth.company_id!,
+        clientRef: body.client_ref,
+        userId: auth.sub,
+        deviceId: body.device_id ?? null,
+        tipe: "rencana_faktur",
+        hasilJson: hasil,
+      });
+    }
     return c.json(hasil, 201);
   })
   // Data Permintaan Stok: daftar permintaan "Tambah Stok dari Menu" — faktur

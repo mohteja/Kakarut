@@ -7757,5 +7757,143 @@ SES163D=$(api "$OWNER" POST /stok/opname \
 cek "tanpa client_ref: tetap membuat sesi (kompatibilitas klien lama)" "V == 1" \
   "$(echo "$SES163D" | jq -r '((.session_id|length)==36)|if . then 1 else 0 end')"
 
+echo "== 164. Transfer stok: kiriman ulang tak memindahkan stok dua kali =="
+# Kelas yang sama dengan §163 (opname) dan penjualan, di endpoint yang MEMBUAT
+# faktur sekaligus MEMINDAHKAN STOK. Yang dijaga bukan klik ganda — tombolnya
+# sudah dimatikan selama pending — melainkan jaringan yang putus SESUDAH server
+# menulis tapi SEBELUM balasannya sampai. Chromium bahkan mengulang POST-nya
+# SENDIRI saat koneksi keep-alive yang dipakai ulang ditutup server.
+#
+# FIKTUR SENDIRI, bukan sisa seksi lain. Percobaan pertama memakai ulang bahan
+# §132 dengan penjaga "lewati kalau stoknya sudah habis" — dan di CI stoknya
+# MEMANG sudah habis, jadi seluruh seksi ini dilewati sambil mencetak tanda
+# centang. Hijau yang tak membuktikan apa pun persis cacat yang sedang
+# diperbaiki sepanjang penyisiran ini, jadi penjaga itu dibuang: bahan dan
+# saldo pembukanya dibuat di sini supaya seksinya selalu benar-benar berjalan.
+CK164=$(api "$OWNER" GET /cabang | jq -r '[.[]|select(.is_active and .tipe=="central_kitchen")][0].id')
+TJ164=$(api "$OWNER" GET /cabang | jq -r --arg a "$CK164" '[.[]|select(.is_active and .tipe=="store" and .id!=$a)][0].id')
+cek "dasar uji §164: ada CK dan cabang store tujuan" "V == 1" \
+  "$([ -n "$CK164" ] && [ -n "$TJ164" ] && [ "$CK164" != "null" ] && [ "$TJ164" != "null" ] && echo 1 || echo 0)"
+# Bahan sendiri: eceran boleh (isi 1) supaya bebas aturan kelipatan kemasan §148.
+ING164=$(api "$OWNER" POST /bahan \
+  '{"nama":"Bahan Transfer 164","satuan":"gr","harga_beli":1000,"isi":1,"track_stok":true,"pengadaan":"beli","boleh_eceran":true}' \
+  | jq -r .id)
+api "$OWNER" POST /stok/awal \
+  "$(jq -nc --arg b "$CK164" --arg i "$ING164" '{branch_id:$b, items:[{ingredient_id:$i, qty:100}]}')" > /dev/null
+TERS164=$(api "$OWNER" GET "/transfer-stok/saldo?branch_id=$CK164" \
+  | jq -r --arg i "$ING164" '[.rows[]|select(.ingredient_id==$i)][0] | ((.saldo // 0) - (.dalam_jalan // 0))')
+cek "dasar uji §164: saldo pembuka 100 siap kirim di CK" "abs(V - 100) < 0.001" "$TERS164"
+
+REF164=$(cat /proc/sys/kernel/random/uuid)
+BODY164=$(jq -nc --arg a "$CK164" --arg t "$TJ164" --arg i "$ING164" --arg r "$REF164" \
+  '{asal_branch_id:$a, tujuan_branch_id:$t, client_ref:$r, catatan:"uji idempotensi 164", items:[{ingredient_id:$i, qty:7}]}')
+N164_AWAL=$(api "$OWNER" GET /transfer-stok | jq '.rows|length')
+DJ164_AWAL=$(api "$OWNER" GET "/transfer-stok/saldo?branch_id=$CK164" \
+  | jq -r --arg i "$ING164" '[.rows[]|select(.ingredient_id==$i)][0].dalam_jalan // 0')
+TF164A=$(api "$OWNER" POST /transfer-stok "$BODY164")
+ID164A=$(echo "$TF164A" | jq -r '.faktur_id // ""')
+cek "transfer pertama tersimpan (faktur_id + nomor TF-)" "V == 1" \
+  "$(echo "$TF164A" | jq -r '(((.faktur_id|length)==36) and ((.nomor // "")|startswith("TF-")))|if . then 1 else 0 end')"
+TF164B=$(api "$OWNER" POST /transfer-stok "$BODY164")
+cek "kiriman ulang memulangkan faktur_id yang SAMA" "V == 1" \
+  "$(echo "$TF164B" | jq -r --arg a "$ID164A" '(.faktur_id==$a)|if . then 1 else 0 end')"
+cek "…dan nomor TF- yang sama (diputar ulang, bukan diterbitkan lagi)" "V == 1" \
+  "$(echo "$TF164B" | jq -r --argjson a "$(echo "$TF164A" | jq -c .nomor)" '(.nomor==$a)|if . then 1 else 0 end')"
+cek "daftar transfer bertambah TEPAT satu, bukan dua" "V == 1" \
+  "$(api "$OWNER" GET /transfer-stok | jq --argjson n "$N164_AWAL" '((.rows|length) - $n) == 1|if . then 1 else 0 end')"
+cek "hanya ADA satu faktur dengan id itu" "V == 1" \
+  "$(api "$OWNER" GET /transfer-stok | jq --arg a "$ID164A" '[.rows[]|select(.faktur_id==$a)]|length')"
+# INI intinya: stok yang dijanjikan keluar dari CK tak boleh terhitung dua kali.
+# Dibandingkan dengan nilai SEBELUM kiriman pertama — bukan dengan dirinya sendiri.
+DJ164_AKHIR=$(api "$OWNER" GET "/transfer-stok/saldo?branch_id=$CK164" \
+  | jq -r --arg i "$ING164" '[.rows[]|select(.ingredient_id==$i)][0].dalam_jalan // 0')
+cek "stok 'dalam jalan' bergerak TEPAT 7 untuk satu pengiriman (bukan 14)" "abs(V - 7) < 0.001" \
+  "$(python3 -c "print($DJ164_AKHIR - $DJ164_AWAL)")"
+cek "sisa siap kirim tinggal 93 (100 − 7), bukan 86" "abs(V - 93) < 0.001" \
+  "$(api "$OWNER" GET "/transfer-stok/saldo?branch_id=$CK164" | jq -r --arg i "$ING164" '[.rows[]|select(.ingredient_id==$i)][0] | ((.saldo // 0) - (.dalam_jalan // 0))')"
+cek "cabang tujuan melihat SATU kiriman untuk faktur itu" "V == 1" \
+  "$(api "$OWNER" GET "/penerimaan?branch_id=$TJ164" | jq --arg a "$ID164A" '[.rows[]|select(.faktur_id==$a)]|length')"
+# Kunci BEDA = pengiriman baru, dan itu memang harus lahir sebagai faktur
+# tersendiri — kalau tidak, mengirim bahan yang sama dua kali jadi mustahil.
+TF164C=$(api "$OWNER" POST /transfer-stok \
+  "$(jq -nc --arg a "$CK164" --arg t "$TJ164" --arg i "$ING164" --arg r "$(cat /proc/sys/kernel/random/uuid)" \
+     '{asal_branch_id:$a, tujuan_branch_id:$t, client_ref:$r, catatan:"uji 164 kedua", items:[{ingredient_id:$i, qty:3}]}')")
+cek "client_ref BEDA → faktur baru (bukan ikut diputar ulang)" "V == 1" \
+  "$(echo "$TF164C" | jq -r --arg a "$ID164A" '((.faktur_id!=$a) and ((.faktur_id|length)==36))|if . then 1 else 0 end')"
+# Klien lama tanpa client_ref tak boleh berubah perilakunya.
+TF164D=$(api "$OWNER" POST /transfer-stok \
+  "$(jq -nc --arg a "$CK164" --arg t "$TJ164" --arg i "$ING164" \
+     '{asal_branch_id:$a, tujuan_branch_id:$t, catatan:"uji 164 tanpa ref", items:[{ingredient_id:$i, qty:2}]}')")
+cek "tanpa client_ref: tetap membuat faktur (kompatibilitas klien lama)" "V == 1" \
+  "$(echo "$TF164D" | jq -r '((.faktur_id|length)==36)|if . then 1 else 0 end')"
+cek "total dalam jalan = 7+3+2 = 12 (tak ada yang tergandakan)" "abs(V - 12) < 0.001" \
+  "$(python3 -c "print($(api "$OWNER" GET "/transfer-stok/saldo?branch_id=$CK164" | jq -r --arg i "$ING164" '[.rows[]|select(.ingredient_id==$i)][0].dalam_jalan // 0') - $DJ164_AWAL)")"
+
+echo "== 165. Tambah Stok dari Menu: rantai dua panggilan tak melahirkan faktur ganda =="
+# Halaman "Tambah Stok dari Menu" mengirim DUA permintaan berurutan dari satu
+# tombol: faktur bahan baku di sini, lalu permintaan perlengkapan yang MENAUT
+# ke `rencana_id` hasilnya. Kalau yang kedua gagal, yang pertama sudah
+# menerbitkan faktur — tapi tombolnya memantulkan galat seolah tak terjadi
+# apa-apa, dan orang menekannya lagi. Tanpa `client_ref`, gudang menerima DUA
+# work-order untuk satu kebutuhan.
+#
+# Fikturnya dibuat sendiri (pelajaran §164): bahan ber-track_stok yang saldonya
+# NOL di cabang tujuan, dipakai satu menu — sehingga selalu ada kekurangan yang
+# benar-benar menerbitkan faktur, tak bergantung sisa seksi lain.
+CB165=$(api "$OWNER" GET /cabang | jq -r '[.[]|select(.is_active and .tipe=="store")][0].id')
+ING165=$(api "$OWNER" POST /bahan \
+  '{"nama":"Bahan Rencana 165","satuan":"gr","harga_beli":500,"isi":1,"track_stok":true,"pengadaan":"beli","boleh_eceran":true}' \
+  | jq -r .id)
+# Bentuk body /menu: `category_id` + `harga_jual` + `tipe`/`mult` — BUKAN
+# `kategori`/`harga`. Percobaan pertama memakai nama field karangan sendiri,
+# POST /menu menjawab 400, dan seluruh §165 ikut 400 karena menunya tak pernah
+# ada. Bentuk di bawah disalin dari §66 yang sudah terbukti jalan.
+KAT165=$(api "$OWNER" GET /kategori | jq -r '.[0].id')
+MENU165=$(api "$OWNER" POST /menu \
+  "$(jq -nc --arg i "$ING165" --arg k "$KAT165" \
+     '{nama:"Menu Rencana 165", category_id:$k, tipe:"regular", mult:2, harga_jual:25000, komponen:[{ingredient_id:$i, qty:10}]}')" \
+  | jq -r .id)
+cek "dasar uji §165: cabang, kategori, bahan, dan menu berresep siap" "V == 1" \
+  "$([ -n "$CB165" ] && [ "$CB165" != "null" ] && [ ${#KAT165} -eq 36 ] && [ ${#ING165} -eq 36 ] && [ ${#MENU165} -eq 36 ] && echo 1 || echo 0)"
+
+REF165=$(cat /proc/sys/kernel/random/uuid)
+BODY165=$(jq -nc --arg m "$MENU165" --arg t "$CB165" --arg r "$REF165" \
+  '{items:[{menu_id:$m, porsi:20}], tujuan_branch_id:$t, client_ref:$r}')
+N165_AWAL=$(api "$OWNER" GET /rekomendasi/permintaan | jq 'length')
+
+R165A=$(api "$OWNER" POST /rekomendasi/menu/faktur "$BODY165")
+RID165=$(echo "$R165A" | jq -r '.rencana_id // ""')
+cek "permintaan pertama terbit (rencana_id + nomor PM-)" "V == 1" \
+  "$(echo "$R165A" | jq -r '(((.rencana_id|length)==36) and ((.nomor_permintaan // "")|startswith("PM-")))|if . then 1 else 0 end')"
+cek "…dan benar-benar menerbitkan faktur beli untuk kekurangannya" "V == 1" \
+  "$(echo "$R165A" | jq -r '((.beli != null) or (.beli_produksi != null) or (.produksi != null))|if . then 1 else 0 end')"
+
+# Inilah percobaan KEDUA: persis yang terjadi saat panggilan perlengkapan gagal
+# dan orang menekan Buat sekali lagi dengan kunci yang sama.
+R165B=$(api "$OWNER" POST /rekomendasi/menu/faktur "$BODY165")
+cek "kiriman ulang memulangkan rencana_id yang SAMA" "V == 1" \
+  "$(echo "$R165B" | jq -r --arg a "$RID165" '(.rencana_id==$a)|if . then 1 else 0 end')"
+cek "…dan nomor PM- yang sama (diputar ulang, bukan diterbitkan lagi)" "V == 1" \
+  "$(echo "$R165B" | jq -r --arg a "$(echo "$R165A" | jq -r '.nomor_permintaan')" '(.nomor_permintaan==$a)|if . then 1 else 0 end')"
+cek "…dan faktur beli yang SAMA (bukan work-order kedua)" "V == 1" \
+  "$(jq -nc --argjson a "$(echo "$R165A" | jq -c '{beli,beli_produksi,produksi,produksi_cabang}')" \
+            --argjson b "$(echo "$R165B" | jq -c '{beli,beli_produksi,produksi,produksi_cabang}')" \
+     '($a == $b)|if . then 1 else 0 end')"
+cek "Data Permintaan Stok bertambah TEPAT satu, bukan dua" "abs(V - 1) < 0.001" \
+  "$(python3 -c "print($(api "$OWNER" GET /rekomendasi/permintaan | jq 'length') - $N165_AWAL)")"
+
+# client_ref BEDA = permintaan yang memang baru.
+REF165C=$(cat /proc/sys/kernel/random/uuid)
+R165C=$(api "$OWNER" POST /rekomendasi/menu/faktur \
+  "$(jq -nc --arg m "$MENU165" --arg t "$CB165" --arg r "$REF165C" \
+     '{items:[{menu_id:$m, porsi:5}], tujuan_branch_id:$t, client_ref:$r}')")
+cek "client_ref BEDA → rencana baru (bukan ikut diputar ulang)" "V == 1" \
+  "$(echo "$R165C" | jq -r --arg a "$RID165" '((.rencana_id!=$a) and ((.rencana_id|length)==36))|if . then 1 else 0 end')"
+# Klien lama tanpa client_ref tak boleh berubah perilakunya.
+R165D=$(api "$OWNER" POST /rekomendasi/menu/faktur \
+  "$(jq -nc --arg m "$MENU165" --arg t "$CB165" '{items:[{menu_id:$m, porsi:3}], tujuan_branch_id:$t}')")
+cek "tanpa client_ref: tetap membuat rencana (kompatibilitas klien lama)" "V == 1" \
+  "$(echo "$R165D" | jq -r '((.rencana_id|length)==36)|if . then 1 else 0 end')"
+
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

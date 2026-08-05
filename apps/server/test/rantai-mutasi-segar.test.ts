@@ -15,10 +15,23 @@ import { fileURLToPath } from "node:url";
  * yang baru lahir tak terlihat, dan tombol Buat masih hidup dengan rencana yang
  * sama.
  *
- * Menekannya sekali lagi memanggil endpoint pertama untuk kedua kalinya. Itu
- * bukan operasi yang aman diulang: tak ada `client_ref`, tak ada pencarian
- * hasil idempoten — hasilnya SATU SET FAKTUR KEDUA untuk kekurangan yang sama.
- * Belanja dobel, bukan sekadar layar basi.
+ * Menekannya sekali lagi memanggil endpoint pertama untuk kedua kalinya.
+ *
+ * SUDAH BERUBAH — dan berkas ini memang dirancang untuk gugur dengan berisik
+ * saat itu terjadi. Dulu di sini tertulis premis "endpoint pertama TIDAK punya
+ * penangkal panggilan ganda", lengkap dengan catatan: *kalau suatu saat
+ * idempotensi ditambahkan, uji ini harus ditinjau ulang*. Idempotensinya kini
+ * ADA (`client_ref` → ledger bersama), jadi premisnya dibalik, bukan dihapus:
+ * yang dijaga sekarang adalah bahwa penangkal itu tetap terpasang.
+ *
+ * Penyegaran `onError` TIDAK ikut dicabut, dan itu disengaja. Keduanya
+ * menjawab hal yang berbeda:
+ *
+ *   - `client_ref` menjawab "tekan lagi jangan menggandakan";
+ *   - `onError` menjawab "perlihatkan apa yang sudah terlanjur terjadi".
+ *
+ * Membuang salah satunya menyisakan separuh masalah. Rincian idempotensinya
+ * dijaga terpisah di `rencana-faktur-idempoten.test.ts`.
  *
  * `ResepPage` — satu-satunya rantai serupa di repo ini — sudah lebih dulu
  * memasang `onError` dengan alasan yang ditulis terang di komentarnya. Uji ini
@@ -43,20 +56,28 @@ describe("premis: langkah pertama nyata dan tak aman diulang", () => {
     expect(blok).toMatch(/perlengkapan\/permintaan-otomatis/);
   });
 
-  it("endpoint pertama TIDAK punya penangkal panggilan ganda", () => {
-    // Kalau suatu saat idempotensi ditambahkan di sini, bahaya "belanja dobel"
-    // hilang dan uji ini harus ditinjau ulang — biar gugur dengan berisik.
+  it("endpoint pertama KINI punya penangkal panggilan ganda", () => {
+    // Premis yang dibalik. Selama penangkal ini ada, tekan-lagi memutar ulang
+    // faktur yang sama — bukan menerbitkan set kedua.
     const i = REKOM.indexOf('"/menu/faktur"');
     expect(i, "rute /menu/faktur tak ditemukan").toBeGreaterThan(0);
     const rute = REKOM.slice(i, i + 1200);
-    expect(rute).not.toMatch(/client_ref|idempoten/i);
+    expect(rute).toMatch(/cariHasilIdempoten/);
+    expect(rute).toMatch(/catatHasilIdempoten/);
   });
 });
 
 describe("gagal di tengah tetap menyegarkan layar", () => {
   it("pembuang komentar tidak memakan kodenya", () => {
     expect(HALAMAN).toContain("onError:");
-    expect(HALAMAN).not.toContain("Belanja dobel");
+    // Frasa yang HANYA hidup di komentar. Patokan lamanya ("Belanja dobel")
+    // ikut terhapus saat komentar halaman itu diperbarui, sehingga uji ini
+    // lolos karena frasanya memang tak ada di mana pun — bukan karena
+    // pembuang komentarnya bekerja. Jadi dipatok ke frasa yang masih ada,
+    // dan keberadaannya di berkas MENTAH ikut diperiksa supaya tak diam-diam
+    // menguap lagi.
+    expect(MENTAH).toContain("Penyegarannya tetap ada dan tetap perlu");
+    expect(HALAMAN).not.toContain("Penyegarannya tetap ada dan tetap perlu");
   });
 
   it("`onError` ada dan meng-invalidate", () => {

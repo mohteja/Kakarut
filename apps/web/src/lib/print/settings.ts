@@ -1,4 +1,5 @@
 import { kolomDefault } from "@kakarut/shared";
+import { bacaLokal, tulisLokal } from "../simpanan";
 import { RENTANG, angkaSetelan } from "./batas";
 
 export type TransportKind =
@@ -82,7 +83,7 @@ function rapikanAngka(s: PrinterDeviceSettings): PrinterDeviceSettings {
 
 export function loadPrinterSettings(): PrinterDeviceSettings {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = bacaLokal(STORAGE_KEY);
     if (!raw) return DEFAULT_PRINTER_SETTINGS;
     const parsed = JSON.parse(raw) as Partial<PrinterDeviceSettings>;
     if (parsed.v !== 1) return DEFAULT_PRINTER_SETTINGS;
@@ -93,7 +94,11 @@ export function loadPrinterSettings(): PrinterDeviceSettings {
 }
 
 export function savePrinterSettings(s: PrinterDeviceSettings) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
+  // Pembacaannya sudah dijaga sejak awal; penulisannya dulu telanjang. Setelan
+  // printer disimpan pada tiap ketikan di halaman Pengaturan Printer, jadi
+  // satu lemparan di sini menjatuhkan seluruh halamannya — bukan sekadar
+  // membuat setelannya tak tersimpan.
+  tulisLokal(STORAGE_KEY, JSON.stringify(s));
 }
 
 export function effectiveCharsPerLine(s: PrinterDeviceSettings): number {
