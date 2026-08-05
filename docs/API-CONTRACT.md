@@ -919,6 +919,24 @@ Aksesnya sengaja **asimetris**: membaca terbuka untuk seluruh peran cabang
 > bill baru — kalau tidak, satu bill batal mengunci mejanya selamanya.
 - `DELETE /api/open-bill/:id` — res: `{ ok: true }` — error: **404**
 
+> ### ♻️ Bill yang dibatalkan bisa hidup lagi — dan bisa kehilangan mejanya
+>
+> Membatalkan bill menandai semua barisnya `batal` + mengisi `closed_at`.
+> Mengembalikan satu baris ke antrean dari papan (`POST
+> /api/pesanan/open_bill/:id/item/:itemId/status`) **membuka bill itu kembali**
+> — disengaja, supaya "dibatalkan lalu ternyata jadi" tidak mustahil ditagih.
+>
+> Tapi sementara bill itu tertutup, mejanya bebas dan bill LAIN boleh dibuka di
+> sana. Kalau saat dibuka kembali mejanya sudah dipegang bill lain, bill yang
+> dibuka **dilepas dari mejanya** (`meja_id`/`meja_label` → `null`) dan
+> pelepasannya dicatat di `GET /api/pesanan/open_bill/:id/log`. Bill-nya tetap
+> hidup dan tetap bisa ditagih; memasang ulang mejanya adalah pekerjaan kasir
+> lewat `PUT /api/open-bill/:id` — yang tetap menolak `meja_sudah_ada_bill`
+> selama meja itu masih terisi.
+>
+> Hanya berlaku untuk meja `dine_in`, hanya pada transisi tertutup → terbuka,
+> dan hanya bila memang ada bentrok. Pembukaan biasa mempertahankan mejanya.
+
 **`DELETE` = MEMBATALKAN, BUKAN MENGHAPUS.** Barisnya tetap ada: `closed_at`
 terisi, **setiap baris item** ditandai `pesanan_status = "batal"`, dan satu baris
 riwayat dicatat atas nama pemanggilnya. Yang terlihat kasir sama seperti dulu

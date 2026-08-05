@@ -7618,5 +7618,59 @@ cek "id pemenang == shift aktif di server (bukan laci kedua)" "V == 1" \
 cek "modal shift aktif == yang dikirim ketiganya (123.000)" "V == 123000" \
   "$(printf '%s' "$AKTIF161" | jq -r '.modal_awal')"
 
+echo
+echo "── §162 Bill dibuka kembali: tak boleh menabrak satu-meja-satu-bill ──"
+# Aturan "satu meja dine-in = satu bill" dijaga sampai `SELECT … FOR UPDATE` di
+# `POST` dan `PUT /open-bill`. Tapi keduanya hanya menghitung bill yang
+# `closed_at`-nya masih kosong, dan ada jalan masuk KETIGA yang tak lewat sana:
+# bill yang sudah DIBATALKAN lalu dihidupkan lagi dari papan. Ketiga langkahnya
+# lewat tombol yang sah dan tak satu pun keliru sendiri-sendiri.
+MEJA162=$(api "$OWNER" POST /meja "{\"nama\":\"Meja Buka Lagi 162\",\"tipe\":\"dine_in\",\"branch_id\":\"$CB154\"}" | jq -r .id)
+OB162A=$(api "$REISS105" POST /open-bill "{\"meja_id\":\"$MEJA162\",\"items\":[{\"menu_id\":\"$M154\",\"qty\":1}]}")
+A162=$(echo "$OB162A" | jq -r .id)
+BR162=$(echo "$OB162A" | jq -r '.items[0].id')
+api "$REISS105" DELETE "/open-bill/$A162" > /dev/null
+cek "bill A dibatalkan → lenyap dari pemilih kasir" "V == 404" \
+  "$(status_code "$REISS105" GET "/open-bill/$A162")"
+# Ini SAH dan bukan bagian yang diperbaiki: mejanya memang sudah bebas.
+B162=$(api "$REISS105" POST /open-bill "{\"meja_id\":\"$MEJA162\",\"items\":[{\"menu_id\":\"$M154\",\"qty\":1}]}" | jq -r '.id // ""')
+cek "tamu baru di meja yang sama → bill B boleh dibuat" "V == 1" \
+  "$(python3 -c "print(1 if len('$B162') == 36 else 0)")"
+# Langkah ketiga: dapur mengembalikan satu baris bill A ke antrean.
+api "$TKIT154" POST "/pesanan/open_bill/$A162/item/$BR162/status" '{"status":"dikerjakan"}' > /dev/null
+cek "bill A hidup lagi — 'dibatalkan lalu ternyata jadi' tetap bisa ditagih" "V == 200" \
+  "$(status_code "$REISS105" GET "/open-bill/$A162")"
+cek "…tapi DILEPAS dari mejanya, bukan menempel jadi bill kedua" "V == 1" \
+  "$(api "$REISS105" GET "/open-bill/$A162" | jq '(.meja_id==null)|if . then 1 else 0 end')"
+cek "meja itu tetap dipegang TEPAT satu bill (yaitu B)" "V == 1" \
+  "$(api "$REISS105" GET /open-bill | jq --arg m "$MEJA162" '[.[]|select(.meja_id==$m)]|length')"
+cek "…dan bill itu memang B" "V == 1" \
+  "$(api "$REISS105" GET /open-bill | jq --arg m "$MEJA162" --arg b "$B162" '[.[]|select(.meja_id==$m and .id==$b)]|length')"
+# Pelepasan yang SUNYI lebih buruk daripada cacatnya: kasir harus tahu kenapa
+# bill-nya lepas dan apa langkah berikutnya.
+cek "pelepasannya tercatat di riwayat papan" "V == 1" \
+  "$(api "$REISS105" GET "/pesanan/open_bill/$A162/log" | jq '[.[]|select(.aksi|test("dilepas dari"))]|length>=1|if . then 1 else 0 end')"
+cek "catatannya menyebut langkah berikutnya (pasang ulang dari kasir)" "V == 1" \
+  "$(api "$REISS105" GET "/pesanan/open_bill/$A162/log" | jq '[.[]|select(.aksi|test("pasang ulang mejanya dari kasir"))]|length>=1|if . then 1 else 0 end')"
+# Jalur pemulihannya sudah ada dan sudah dijaga — memasang ulang ke meja yang
+# masih terisi tetap ditolak dengan kode yang sudah dikenal klien.
+IT162A=$(api "$REISS105" GET "/open-bill/$A162" | jq -c '[.items[]|{id:.id, menu_id:.menu_id, qty:.qty}]')
+cek "pasang ulang A ke meja yang masih dipegang B → 409" "V == 409" \
+  "$(status_code_body "$REISS105" PUT "/open-bill/$A162" "$(jq -nc --arg m "$MEJA162" --argjson it "$IT162A" '{meja_id:$m, items:$it}')")"
+cek "…dengan kode meja_sudah_ada_bill" "V == 1" \
+  "$(api "$REISS105" PUT "/open-bill/$A162" "$(jq -nc --arg m "$MEJA162" --argjson it "$IT162A" '{meja_id:$m, items:$it}')" | jq '(.kode=="meja_sudah_ada_bill")|if . then 1 else 0 end')"
+# Dan sesudah B dibayar, mejanya bebas — A boleh dipasang lagi ke sana.
+api "$REISS105" POST /penjualan "{\"meja_id\":\"$MEJA162\",\"metode_bayar\":\"tunai\",\"open_bill_id\":\"$B162\",\"items\":[{\"menu_id\":\"$M154\",\"qty\":1}]}" > /dev/null
+cek "B dibayar → A boleh dipasang kembali ke meja itu" "V == 1" \
+  "$(api "$REISS105" PUT "/open-bill/$A162" "$(jq -nc --arg m "$MEJA162" --argjson it "$IT162A" '{meja_id:$m, items:$it}')" | jq --arg m "$MEJA162" '(.meja_id==$m)|if . then 1 else 0 end')"
+# PEMBUKAAN BIASA (mejanya tidak sedang dipakai siapa pun) TIDAK melepas apa
+# pun — kalau tidak, tiap penandaan status dari papan akan mencabut bill dari
+# mejanya, kerusakan yang jauh lebih besar daripada yang diperbaiki.
+api "$REISS105" DELETE "/open-bill/$A162" > /dev/null
+api "$TKIT154" POST "/pesanan/open_bill/$A162/item/$BR162/status" '{"status":"dikerjakan"}' > /dev/null
+cek "dibuka kembali ke meja yang KOSONG → mejanya dipertahankan" "V == 1" \
+  "$(api "$REISS105" GET "/open-bill/$A162" | jq --arg m "$MEJA162" '(.meja_id==$m)|if . then 1 else 0 end')"
+api "$REISS105" DELETE "/open-bill/$A162" > /dev/null
+
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

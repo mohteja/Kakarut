@@ -122,6 +122,33 @@ punya cacat ini dan sudah diperbaiki di sisi web pada rilis yang sama.)
 Aturan ini tidak berlaku untuk `POST /api/open-bill` — di sana kunci yang absen
 memang berarti "kosong", karena tak ada nilai lama yang bisa dilestarikan.
 
+### 🟡 PERLU DICEK — bill yang dibuka kembali bisa pulang tanpa meja
+
+Membatalkan bill lalu mengembalikan satu barisnya ke antrean dari papan
+**menghidupkan bill itu lagi** — itu lama dan tetap. Yang baru: kalau sementara
+bill itu tertutup mejanya sudah dipakai bill lain, bill yang dibuka kembali
+sekarang **dilepas dari mejanya** (`meja_id` dan `meja_label` jadi `null`).
+
+Kenapa: `POST /api/open-bill` dan `PUT /api/open-bill/:id` sama-sama mengunci
+baris meja (`SELECT … FOR UPDATE`) untuk menegakkan "satu meja dine-in = satu
+bill", tapi keduanya hanya menghitung bill yang belum tertutup. Pembukaan
+kembali tak lewat sana, jadi meja itu bisa berakhir dengan DUA bill hidup —
+dan risikonya persis yang aturan itu cegah: satu bill tertinggal tak tertagih
+saat tamunya pulang.
+
+**Yang perlu dikerjakan mobile:**
+
+- Layar yang menampilkan bill jangan berasumsi `meja_id` selalu terisi setelah
+  sebuah bill dibuka kembali. Tampilkan "tanpa meja" apa adanya, jangan jatuh
+  ke label meja lama yang di-cache.
+- Alasannya bisa dibaca di `GET /api/pesanan/open_bill/:id/log` — barisnya
+  berbunyi "Dibuka kembali & dilepas dari <meja> …".
+- Memasang ulang mejanya lewat `PUT /api/open-bill/:id`; kalau meja itu masih
+  terisi, jawabannya tetap **409 `meja_sudah_ada_bill`** seperti biasa.
+
+Hanya untuk meja `dine_in`, hanya pada transisi tertutup → terbuka, dan hanya
+bila memang ada bentrok. Pembukaan biasa mempertahankan mejanya seperti dulu.
+
 ---
 
 ## Rilis: koreksi panduan — badge "diubah setelah transaksi" salah kaprah
