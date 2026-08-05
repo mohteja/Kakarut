@@ -53,12 +53,12 @@ export function StokPage() {
     queryFn: () => api<StokRowDto[]>(`/stok${branchQuery}`),
   });
   // Sisa porsi per menu — query key sama dengan kasir agar cache berbagi.
-  const { data: ketersediaan = [] } = useQuery({
+  const { data: ketersediaan = [], error: porsiGagal } = useQuery({
     queryKey: ["menu-ketersediaan", branchQuery],
     queryFn: () => api<MenuStokDto[]>(`/menu/ketersediaan${branchQuery}`),
     enabled: tab === "menu",
   });
-  const { data: menus = [] } = useQuery({
+  const { data: menus = [], error: menuGagal } = useQuery({
     queryKey: ["menu", branchQuery],
     queryFn: () => api<MenuDto[]>(`/menu${branchQuery}`),
     enabled: tab === "menu",
@@ -68,7 +68,7 @@ export function StokPage() {
     queryFn: () => api<PenyimpananDto[]>(`/penyimpanan${branchQuery}`),
   });
   // PERINGATAN EXP: lot hampir/lewat tanggal kedaluwarsa (7 hari ke depan)
-  const { data: expLots = [] } = useQuery({
+  const { data: expLots = [], error: expGagal } = useQuery({
     queryKey: ["stok-exp", branchQuery],
     queryFn: () =>
       api<ExpLotRow[]>(`/stok/exp${branchQuery ? `${branchQuery}&hari=7` : "?hari=7"}`),
@@ -216,10 +216,51 @@ export function StokPage() {
               Sisa porsi dihitung otomatis dari saldo stok bahan (resep per porsi).
             </span>
           </div>
+          {/*
+            Kaidah yang sama dengan tab Bahan di bawah — GAGAL MEMUAT ≠ TIDAK
+            ADA — tapi di sini bentuk bohongnya lebih parah dari sekadar layar
+            kosong. Dua permintaan yang BERBEDA menyusun tabel ini:
+
+              /menu              → daftar menunya
+              /menu/ketersediaan → sisa porsi per menu (agregat mahal)
+
+            Gagal yang kedua saja sudah cukup, dan itu justru yang paling
+            mungkin gagal duluan. Porsi yang tak ketemu jatuh ke `null`, dan
+            `null` di kolom ini SUDAH punya arti lain: "menu ini tak dibatasi
+            bahan apa pun" → dirender "∞" dengan status "tak terbatas". Jadi
+            layar yang tak berhasil membaca stok justru berkata SETIAP menu
+            bisa dijual tanpa batas — bacaan paling menenangkan yang mungkin,
+            tepat ketika ia tak tahu apa-apa.
+          */}
+          {menuGagal && (
+            <Card className="mb-3 p-4">
+              <ErrorText error={menuGagal} />
+              <div className="mt-2 text-sm text-stone-500">
+                Daftar menu tidak bisa dimuat — layar kosong di bawah <b>bukan</b> berarti tak
+                ada menu aktif.
+              </div>
+            </Card>
+          )}
+          {!menuGagal && porsiGagal && (
+            <Card className="mb-3 p-4">
+              <ErrorText error={porsiGagal} />
+              <div className="mt-2 text-sm text-stone-500">
+                Sisa porsi tidak bisa dihitung — kolom <b>Sisa Porsi</b> di bawah ditampilkan
+                <b> "?"</b>, bukan "∞". Menu yang sebenarnya sudah habis bahannya tetap
+                terlihat bisa dijual sampai halaman ini berhasil dimuat ulang.
+              </div>
+            </Card>
+          )}
           <TabelResponsif
             data={menuTampil}
             kunci={({ menu: m }) => m.id}
-            kosong={cari ? `Menu "${cari}" tidak ditemukan.` : "Belum ada menu aktif."}
+            kosong={
+              menuGagal
+                ? "Data tidak dapat dimuat — bukan berarti kosong."
+                : cari
+                  ? `Menu "${cari}" tidak ditemukan.`
+                  : "Belum ada menu aktif."
+            }
             kolom={[
               {
                 judul: "Kode",
@@ -250,9 +291,14 @@ export function StokPage() {
                 kelasSel: "text-lg font-bold",
                 sel: ({ stok: st }) => {
                   const porsi = st?.porsi ?? null;
+                  // "?" saat bacaannya gagal — "∞" berarti "memang tak
+                  // dibatasi bahan", pernyataan yang tak boleh dikarang.
                   return (
-                    <span className="text-lg font-bold">
-                      {porsi == null ? "∞" : formatAngka(porsi)}
+                    <span
+                      className={`text-lg font-bold ${porsiGagal ? "text-stone-400" : ""}`}
+                      title={porsiGagal ? "Sisa porsi tidak terbaca" : undefined}
+                    >
+                      {porsiGagal ? "?" : porsi == null ? "∞" : formatAngka(porsi)}
                     </span>
                   );
                 },
@@ -261,7 +307,9 @@ export function StokPage() {
                 judul: "Bahan Pembatas",
                 kelasSel: "text-stone-600",
                 sel: ({ stok: st }) =>
-                  st?.pembatas ? (
+                  porsiGagal ? (
+                    <span className="text-stone-400">tidak terbaca</span>
+                  ) : st?.pembatas ? (
                     <span
                       title={`${formatAngka(st.pembatas.qty_per_porsi)} ${st.pembatas.satuan}/porsi`}
                     >
@@ -280,6 +328,12 @@ export function StokPage() {
                   const porsi = st?.porsi ?? null;
                   const status =
                     porsi == null ? null : porsi <= 0 ? "habis" : porsi <= 5 ? "menipis" : "aman";
+                  if (porsiGagal)
+                    return (
+                      <span className="rounded-full bg-stone-100 px-2 py-0.5 text-xs font-semibold text-stone-500">
+                        tak terbaca
+                      </span>
+                    );
                   return status ? (
                     <StatusBadge status={status} />
                   ) : (
@@ -304,6 +358,17 @@ export function StokPage() {
         <Spinner />
       ) : (
         <>
+      {/*
+        Peringatan exp yang gagal dimuat MENGHILANG tanpa bekas, dan hilangnya
+        spanduk itu sendiri sebuah pernyataan: "tak ada yang mau kedaluwarsa".
+        Bahan yang lewat tanggal tetap lewat tanggal walau layarnya diam.
+      */}
+      {expGagal && (
+        <div className="mb-3 rounded-lg border border-stone-300 bg-stone-50 px-3 py-2 text-sm text-stone-600">
+          ⏳ Peringatan kedaluwarsa tidak bisa dimuat — <b>bukan</b> berarti tak ada bahan yang
+          mendekati tanggalnya. Periksa lot manual atau muat ulang halaman ini.
+        </div>
+      )}
       {/* PERINGATAN EXP: lot hampir/lewat kedaluwarsa → daftar + Catat waste.
           Aproksimasi: qty = saat lot masuk (ledger agregat, bukan sisa lot). */}
       {expLots.length > 0 && (
