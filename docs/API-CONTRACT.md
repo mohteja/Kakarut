@@ -1372,7 +1372,10 @@ Laporan:
 
 - `GET /api/rekomendasi/beli` — query: `branch_id?`, `target?`, `acuan?` (`7hari`|`rentang`|`minggu_lalu`), `dari?`, `sampai?`, `pakai_dari?`, `pakai_sampai?` — res: hasil rekomendasi
 - `POST /api/rekomendasi/menu` — req: `{ items: [{menu_id:uuid, porsi:int(1..100000)}] (min1), ck_branch_id?:uuid|null }` — res: pratinjau rencana
-- `POST /api/rekomendasi/menu/faktur` — req: `RencanaBody` + `{ worker_id?, supplier_id?, supplier_beli_id?, tujuan_branch_id?, ck_branch_id?, catatan? }` (semua uuid/nullable) — res: **201** hasil faktur
+- `POST /api/rekomendasi/menu/faktur` — req: `RencanaBody` + `{ worker_id?, supplier_id?, supplier_beli_id?, tujuan_branch_id?, ck_branch_id?, catatan?, client_ref?: uuid, device_id?: string|null }` (semua uuid/nullable) — res: **201** hasil faktur
+  - **`client_ref` (opsional) = kunci idempotensi.** Kiriman ulang dengan `client_ref` yang SAMA memulangkan hasil pertama apa adanya — `rencana_id`, `nomor_permintaan`, dan seluruh id faktur identik — tanpa menerbitkan faktur kedua. Kunci `(company_id, client_ref)` memakai ledger yang sama dengan `/api/sync`, `/api/penjualan`, `/api/stok/opname`, dan `/api/transfer-stok`.
+  - **Kenapa endpoint ini butuh.** Layar "Tambah Stok dari Menu" memanggil endpoint ini lalu `POST /api/perlengkapan/permintaan-otomatis?…&rencana_id=…` yang menaut ke hasilnya. Bila panggilan KEDUA gagal, yang pertama sudah menerbitkan faktur produksi/beli — dan percobaan ulang tanpa kunci menerbitkan satu set lagi untuk kebutuhan yang sama. Klien WAJIB memegang `client_ref` yang sama sampai SELURUH rantai sukses, bukan menggantinya tiap panggilan.
+  - Tanpa `client_ref` perilakunya persis seperti sebelumnya (selalu membuat rencana baru), jadi klien lama tak perlu berubah.
 - `GET /api/rekomendasi/permintaan` — res: `PermintaanStokRow[]`
 - `DELETE /api/rekomendasi/permintaan/:rencanaId` — soft delete semua faktur ber-rencana_id sama — res: `{ ok, jumlah_baris }` — error: **404**
 

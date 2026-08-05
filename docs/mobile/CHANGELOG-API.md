@@ -25,6 +25,36 @@ tanpa akses repo server.
 
 ---
 
+## Rilis: `POST /api/rekomendasi/menu/faktur` — kunci idempotensi `client_ref`
+
+> Tidak ada migrasi, tidak ada field wajib baru, dan respons tidak berubah.
+
+🟢 **BARU** — endpoint ini menerima `client_ref` (uuid v4) dan `device_id`
+opsional. Kiriman ulang dengan `client_ref` yang sama memulangkan hasil pertama
+apa adanya — `rencana_id`, `nomor_permintaan`, dan seluruh id faktur identik —
+tanpa menerbitkan satu set faktur produksi/beli kedua.
+
+**Kenapa ini penting khusus di sini.** Layar "Tambah Stok dari Menu" memanggil
+DUA endpoint berurutan dalam satu tombol:
+
+1. `POST /api/rekomendasi/menu/faktur` → faktur produksi + beli
+2. `POST /api/perlengkapan/permintaan-otomatis?branch_id=…&rencana_id=…`
+
+Yang kedua menaut dirinya ke `rencana_id` hasil yang pertama, jadi urutannya tak
+bisa dibalik. Begitu (2) gagal, (1) SUDAH menerbitkan fakturnya — tapi tombolnya
+memantulkan galat seolah tak terjadi apa-apa. Tekan lagi tanpa kunci = gudang
+menerima dua work-order untuk satu kebutuhan.
+
+**Yang harus dilakukan mobile bila membawa layar ini:** buat `client_ref` sekali
+per PENGIRIMAN dan **pegang terus melewati kegagalan**; cabut hanya setelah
+SELURUH rantai (kedua panggilan) sukses. Kunci baru per percobaan justru
+menghidupkan lagi bug yang ditutup.
+
+Tanpa `client_ref` perilakunya persis seperti sebelumnya, jadi klien yang belum
+mengirimkannya tidak berubah — tapi juga tidak terlindungi.
+
+---
+
 ## Rilis: `POST /api/transfer-stok` — kunci idempotensi `client_ref`
 
 > Tidak ada migrasi, tidak ada field wajib baru, dan respons tidak berubah.

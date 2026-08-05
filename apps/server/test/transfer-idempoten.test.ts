@@ -118,6 +118,12 @@ describe("sapuan: pembuat-baris pemindah-stok lain memang tak ada lagi", () => {
     { berkas: "pages/stok/TransferStokPage.tsx", mutasi: "kirim" },
     { berkas: "pages/stok/OpnamePage.tsx", mutasi: "simpan" },
     { berkas: "pages/kasir/RefundPanel.tsx", mutasi: "kirim" },
+    // Ditambahkan setelah sapuan "rantai dua panggilan": halaman ini menerbitkan
+    // faktur produksi + beli, lalu memanggil endpoint KEDUA yang menaut ke
+    // `rencana_id`-nya. Yang kedua gagal = yang pertama sudah terlanjur, dan
+    // tekan-lagi menerbitkan satu set faktur lagi. Lihat
+    // `rencana-faktur-idempoten.test.ts`.
+    { berkas: "pages/stok/TambahStokDariMenuPage.tsx", mutasi: "buat" },
   ];
 
   for (const { berkas, mutasi } of PEMBUAT) {

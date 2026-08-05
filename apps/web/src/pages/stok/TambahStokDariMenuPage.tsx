@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import type {
   MenuDto,
@@ -26,6 +26,7 @@ import {
 import { labelCabang, useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah } from "../../lib/format";
+import { uuidV4 } from "../../lib/idempoten";
 
 interface Karyawan {
   user_id: string;
@@ -189,6 +190,9 @@ export function TambahStokDariMenuPage() {
   const { cabang, branchId } = useBranch();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  // Kunci idempotensi satu PENGIRIMAN (bukan satu komponen): dibuat saat
+  // dipakai, dipegang melewati kegagalan, dicabut hanya setelah rantainya utuh.
+  const refBuat = useRef<string | null>(null);
 
   // Cabang TUJUAN (store yang butuh stok). Dari Kantor bebas pilih; dari store
   // = cabang itu sendiri. Kebutuhan dihitung untuk cabang tujuan ini.
@@ -352,6 +356,12 @@ export function TambahStokDariMenuPage() {
         menu = await api<RencanaFakturResult>(`/rekomendasi/menu/faktur`, {
           method: "POST",
           body: {
+            // Kunci dipegang sampai SELURUH rantai sukses (dicabut di
+            // `onSuccess`), bukan sampai panggilan ini sukses. Justru percobaan
+            // KEDUA yang perlu dikenali server: yang pertama sudah menerbitkan
+            // fakturnya, dan tanpa kunci ini percobaan kedua menerbitkan satu
+            // set lagi.
+            client_ref: (refBuat.current ??= uuidV4()),
             // pakai items LIVE (bukan snapshot debounce) — server menghitung ulang
             items,
             tujuan_branch_id: tujuanId || null,
@@ -377,6 +387,9 @@ export function TambahStokDariMenuPage() {
       return { menu, perlengkapan };
     },
     onSuccess: ({ perlengkapan }) => {
+      // Kunci dicabut hanya di sini: permintaan BERIKUTNYA memang harus jadi
+      // faktur baru, bahkan bila isinya kebetulan sama persis.
+      refBuat.current = null;
       setKonfirmasi(false);
       setRencana({});
       for (const key of KUNCI_SEGAR) {
@@ -398,13 +411,17 @@ export function TambahStokDariMenuPage() {
      * Tanpa penyegaran di sini, `onSuccess` tak pernah jalan, jadi layarnya
      * tetap memperlihatkan angka KEKURANGAN yang lama: faktur yang baru saja
      * lahir tak terlihat, dan tombol Buat masih hidup dengan rencana yang sama.
-     * Menekannya sekali lagi memanggil `/rekomendasi/menu/faktur` untuk kedua
-     * kalinya — dan endpoint itu tak punya penangkal ganda (tanpa
-     * `client_ref`), jadi hasilnya SATU SET FAKTUR PRODUKSI/BELI KEDUA untuk
-     * kekurangan yang sama. Belanja dobel, bukan sekadar layar basi.
      *
-     * Setelah disegarkan, pratinjau menghitung ulang: yang sudah dibuat tak
-     * lagi terhitung kurang, jadi menekan Buat lagi hanya membuat sisanya.
+     * Penggandaannya sendiri kini ditutup di akarnya: `client_ref` di atas
+     * dipegang sampai seluruh rantai sukses, jadi menekan Buat lagi MEMUTAR
+     * ULANG faktur yang sama — bukan menerbitkan set kedua. Itu sekaligus
+     * memperbaiki yang dulu tak tertangani oleh penyegaran saja: permintaan
+     * PERLENGKAPAN yang gagal di panggilan kedua akhirnya benar-benar dicoba
+     * ulang, dengan `rencana_id` yang sama, alih-alih hilang diam-diam karena
+     * pratinjau sudah tak melihat kekurangan apa pun.
+     *
+     * Penyegarannya tetap ada dan tetap perlu: ia yang membuat faktur yang
+     * sudah lahir kelihatan, sehingga orang tahu apa yang sudah terjadi.
      *
      * Rencana yang diketik SENGAJA tidak dikosongkan dan halaman tidak
      * berpindah — beda dengan jalur sukses. Yang gagal harus tetap terlihat
