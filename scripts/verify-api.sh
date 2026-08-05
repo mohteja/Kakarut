@@ -4340,10 +4340,16 @@ cek "upload hilang → 404 tanpa immutable" "V == 1" \
   "$([ "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/uploads/companies/x/menu/tidak-ada-114.png")" = "404" ] && ! echo "$CC114B" | grep -q immutable && echo 1 || echo 0)"
 if [ -n "$ASET111" ]; then
   CC114C=$(header_of "cache-control" "$BASE/assets/tidak-ada-114.js")
-  cek "aset hilang → fallback shell no-cache (bukan immutable)" "V == 1" \
+  cek "aset hilang → no-cache (bukan immutable)" "V == 1" \
     "$(echo "$CC114C" | grep -q no-cache && ! echo "$CC114C" | grep -q immutable && echo 1 || echo 0)"
+  # Dulu jawabannya shell SPA (200 + HTML). Itu tak pernah bisa jadi deep-link
+  # react-router, dan peramban yang memintanya sebagai module script hanya
+  # mengeluh soal MIME — bukan soal berkas yang memang sudah tidak ada.
+  cek "…dan statusnya 404, bukan shell SPA yang menyamar 200" "V == 404" \
+    "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/assets/tidak-ada-114.js")"
 else
-  ok "aset hilang → fallback shell no-cache (dilewati — web dist tak tersedia)"
+  ok "aset hilang → no-cache (dilewati — web dist tak tersedia)"
+  ok "…dan statusnya 404 (dilewati — web dist tak tersedia)"
 fi
 rm -f "$PNG114"
 

@@ -4,7 +4,12 @@ import { Link, useNavigate } from "react-router-dom";
 import type { OpnameRingkasan, PenyimpananDto, StokRowDto } from "@kakarut/shared";
 import { angkaDari, teksAngka } from "@kakarut/shared";
 import { ImageUpload } from "../../components/ImageUpload";
-import { ErrorText, Spinner, btnPrimary, btnSecondary } from "../../components/ui";
+import {
+  ErrorText,
+  SpinnerAtauGalat,
+  btnPrimary,
+  btnSecondary,
+} from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { useBranch, useCabangData } from "../../context/BranchContext";
 import { api } from "../../lib/api";
@@ -35,15 +40,36 @@ export function OpnamePage() {
     auth?.user.role === "kitchen" ||
     auth?.user.role === "bar";
 
-  const { data: stok, isLoading: stokLoading } = useQuery({
+  const { data: stok, isLoading: stokLoading, error: gagalStok } = useQuery({
     queryKey: ["stok", branchQuery],
     queryFn: () => api<StokRowDto[]>(`/stok${branchQuery}`),
   });
-  const { data: tempatList = [], isLoading: tempatLoading } = useQuery({
+  const {
+    data: tempatList = [],
+    isLoading: tempatLoading,
+    error: gagalTempat,
+  } = useQuery({
     queryKey: ["penyimpanan", branchQuery],
     queryFn: () => api<PenyimpananDto[]>(`/penyimpanan${branchQuery}`),
   });
   const memuat = stokLoading || tempatLoading;
+  /**
+   * KOSONG ≠ TAK TERBACA — dan tak ada layar yang lebih buruk untuk keliru
+   * soal ini. Ini layar penghitungan stok fisik.
+   *
+   * Bacaan yang gagal berakhir `isLoading === false` DAN `data === undefined`,
+   * jadi `memuat` bernilai false dan dua kalimat di bawah muncul sebagai
+   * kesimpulan:
+   *
+   *   "Belum ada tempat penyimpanan yang bisa Anda opname."  ← rak tak terbaca
+   *   "Tidak ada bahan di lokasi ini."                       ← stok tak terbaca
+   *
+   * Keduanya menyuruh petugas pulang: tak ada rak yang jadi tanggung jawabnya,
+   * atau raknya memang kosong. Padahal yang gagal cuma bacaannya, dan
+   * hitungan hari itu tak pernah terjadi — tanpa satu pun tanda di layar
+   * maupun di riwayat.
+   */
+  const gagalMuat = gagalStok ?? gagalTempat;
 
   const [langkah, setLangkah] = useState<Langkah>("lokasi");
   const [bucket, setBucket] = useState<string | null>(null);
@@ -282,12 +308,14 @@ export function OpnamePage() {
       </div>
 
       {/* ---------- LANGKAH 1: pilih lokasi ---------- */}
-      {langkah === "lokasi" && memuat && (
-        <div className="flex flex-1 items-center justify-center py-20">
-          <Spinner />
+      {langkah === "lokasi" && (memuat || gagalMuat) && (
+        <div className="flex flex-1 items-center justify-center p-6 py-20">
+          <SpinnerAtauGalat error={gagalMuat} apa="Daftar rak & stok cabang" />
         </div>
       )}
-      {langkah === "lokasi" && !memuat && (
+      {/* Langkah 2 tak perlu penjaga sendiri: satu-satunya jalan ke sana lewat
+          langkah 1, yang kini tertahan selama bacaannya gagal. */}
+      {langkah === "lokasi" && !memuat && !gagalMuat && (
         <main className="flex-1 p-3 pb-8">
           <p className="mb-3 text-sm text-stone-500">
             Pilih dulu tempat penyimpanan yang akan diopname. Anda lalu memilih produk mana

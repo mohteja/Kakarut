@@ -3,6 +3,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import App from "./App";
+import { BatasGalat } from "./components/BatasGalat";
 import { ServerStatusOverlay } from "./components/ServerStatusOverlay";
 import { UpdatePrompt } from "./components/UpdatePrompt";
 import { AuthProvider } from "./context/AuthContext";
@@ -32,9 +33,16 @@ createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-        <BrowserRouter>
-          <App />
-        </BrowserRouter>
+        {/* Batas galat membungkus router SAJA — `ServerStatusOverlay` dan
+            `UpdatePrompt` sengaja di luar, supaya keduanya tetap hidup justru
+            saat isinya jatuh: satu memberi tahu servernya sedang tak terjangkau,
+            satunya menawarkan pembaruan. Keduanya paling dibutuhkan tepat pada
+            saat itu. */}
+        <BatasGalat>
+          <BrowserRouter>
+            <App />
+          </BrowserRouter>
+        </BatasGalat>
         <ServerStatusOverlay />
         <UpdatePrompt />
       </AuthProvider>
