@@ -40,15 +40,23 @@ describe("bentuk kanonik: tiga cara menulis, satu kunci", () => {
     expect(bentukKanonikWa(digits)).toBe(KANONIK);
   });
 
-  it("dan itu berlaku lewat normalizeWa dengan tanda baca apa pun", () => {
+  it("normalizeWa TIDAK mengkanonikkan — ia hanya membuang tanda baca", () => {
+    // Bentuk simpan adalah KONTRAK: ia mengalir ke DTO, halaman Member, dan
+    // autocomplete `member-cari` yang mencocokkan `ilike '%q%'` atas digit
+    // mentah. Mengkanonikkan yang tersimpan membuat kasir yang mengetik
+    // `0812` tak lagi menemukan member yang nomornya diketik `0812…`.
+    expect(normalizeWa("0812-3456-7890")).toBe("081234567890");
+    expect(normalizeWa("+62 812-3456-7890")).toBe("6281234567890");
+    expect(normalizeWa("(+62) 0812-3456-7890")).toBe("62081234567890");
+  });
+
+  it("yang menyatukan ketiganya adalah PENCOCOKANNYA, bukan bentuk simpannya", () => {
     for (const raw of [
       "0812-3456-7890",
-      "0812 3456 7890",
       "+62 812-3456-7890",
-      "+62812 3456 7890",
       "(+62) 0812-3456-7890",
     ]) {
-      expect(normalizeWa(raw), raw).toBe(KANONIK);
+      expect(bentukKanonikWa(normalizeWa(raw)!), raw).toBe(KANONIK);
     }
   });
 
@@ -91,12 +99,24 @@ describe("varian: yang lama tetap ketemu, tanpa migrasi", () => {
     expect(varianWa("15551234567")).toEqual(["15551234567"]);
   });
 
-  it("INTI: apa pun bentuk ketikannya, pencariannya bertemu di himpunan yang sama", () => {
-    const dariLokal = varianWa(normalizeWa("0812-3456-7890")!);
-    const dariIntl = varianWa(normalizeWa("+62 812 3456 7890")!);
-    const dariCampur = varianWa(normalizeWa("+62 0812 3456 7890")!);
-    expect(new Set(dariIntl)).toEqual(new Set(dariLokal));
-    expect(new Set(dariCampur)).toEqual(new Set(dariLokal));
+  it("INTI: apa pun bentuk ketikannya, pencariannya menjangkau ketiga bentuk", () => {
+    // Himpunannya tak harus identik (masing-masing juga memuat bentuk
+    // ketikannya sendiri), tapi ketiganya WAJIB saling menjangkau — itulah
+    // yang membuat tiga cara ketik bertemu di satu member.
+    const bentuk = ["081234567890", "6281234567890", "62081234567890"];
+    for (const dari of bentuk) {
+      const v = varianWa(dari);
+      for (const ke of bentuk) {
+        expect(v, `${dari} harus menjangkau ${ke}`).toContain(ke);
+      }
+    }
+  });
+
+  it("varian selalu memuat bentuk ketikannya sendiri — baris lama pasti ketemu", () => {
+    // Baris yang tersimpan persis seperti diketik harus ditemukan tanpa
+    // bergantung pada kanonikalisasi apa pun.
+    expect(varianWa("081234567890")).toContain("081234567890");
+    expect(varianWa("15551234567")).toContain("15551234567");
   });
 });
 

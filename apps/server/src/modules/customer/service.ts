@@ -30,18 +30,24 @@ export function bentukKanonikWa(digits: string): string {
 }
 
 /**
- * Seluruh bentuk yang MUNGKIN SUDAH TERSIMPAN untuk nomor kanonik ini.
+ * Seluruh bentuk setara dari sebuah nomor — dari bentuk ketikan APA PUN.
  *
- * Dipakai MENCARI member lama, bukan menyimpan. Baris yang lahir sebelum
- * kanonikalisasi ini ada masih memakai bentuk apa adanya, jadi mencari hanya
- * dengan bentuk kanonik akan menganggapnya orang baru — dan justru MENAMBAH
- * satu duplikat lagi pada tamu yang datanya sudah ada. Dengan cara ini tak ada
- * migrasi yang diperlukan: yang lama tetap ditemukan di tempatnya.
+ * Dipakai MENCOCOKKAN, bukan menyimpan. Bedanya penting: yang tersimpan tetap
+ * apa adanya (digit saja, seperti yang diketik), dan hanya PENCARIANNYA yang
+ * melebar ke seluruh bentuk setara.
+ *
+ * Itu disengaja. Bentuk simpan adalah KONTRAK — ia mengalir ke DTO, halaman
+ * Member, autocomplete `member-cari` yang mencocokkan `ilike '%q%'` atas digit
+ * mentah yang diketik kasir, dan aplikasi mobile. Mengkanonikkan yang
+ * tersimpan akan membuat kasir yang mengetik `0812` tak lagi menemukan member
+ * yang nomornya memang diketik `0812…` — memperbaiki dedup dengan merusak
+ * pencarian, dan yang kedua jauh lebih sering dipakai.
  */
-export function varianWa(wa: string): string[] {
-  const set = new Set<string>([wa]);
-  if (wa.startsWith("62")) {
-    const tanpaKode = wa.slice(2);
+export function varianWa(digits: string): string[] {
+  const kanonik = bentukKanonikWa(digits);
+  const set = new Set<string>([digits, kanonik]);
+  if (kanonik.startsWith("62")) {
+    const tanpaKode = kanonik.slice(2);
     set.add(`0${tanpaKode}`);
     set.add(`620${tanpaKode}`);
   }
@@ -49,15 +55,17 @@ export function varianWa(wa: string): string[] {
 }
 
 /**
- * Normalisasi nomor WhatsApp → digit saja, lalu dikanonikkan ke awalan `62`.
- * Dipakai sebagai identitas member per perusahaan (dedup). Mengembalikan null
- * bila kosong / terlalu pendek untuk dianggap valid.
+ * Normalisasi nomor WhatsApp → hanya digit (buang spasi/tanda/+). Dipakai
+ * sebagai identitas member per perusahaan (dedup). Mengembalikan null bila
+ * kosong / terlalu pendek untuk dianggap valid.
+ *
+ * SENGAJA tidak dikanonikkan — lihat `varianWa`. Yang menyatukan `0812…` dan
+ * `+62812…` menjadi satu member adalah pencocokannya, bukan bentuk simpannya.
  */
 export function normalizeWa(raw: string | null | undefined): string | null {
   if (!raw) return null;
   const digits = raw.replace(/\D/g, "");
-  if (digits.length < 6) return null;
-  return bentukKanonikWa(digits);
+  return digits.length >= 6 ? digits : null;
 }
 
 /**
