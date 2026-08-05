@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import type { OpnameRingkasan, PenyimpananDto, StokRowDto } from "@kakarut/shared";
 import { angkaDari, teksAngka } from "@kakarut/shared";
@@ -9,6 +9,7 @@ import { useAuth } from "../../context/AuthContext";
 import { useBranch, useCabangData } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatAngka, formatTanggal, hariIniWIB } from "../../lib/format";
+import { uuidV4 } from "../../lib/idempoten";
 
 /**
  * Stock opname bahan baku — alur bertahap:
@@ -123,6 +124,9 @@ export function OpnamePage() {
       : null;
 
   function bukaBucket(b: string) {
+    // Hitungan BARU = kejadian baru: kuncinya dicabut supaya kiriman berikutnya
+    // tak dianggap ulangan dari sesi sebelumnya (lihat `refSesi`).
+    refSesi.current = null;
     setBucket(b);
     // default: semua produk di lokasi ini tercentang (deselect yang tak perlu)
     const sel: Record<string, boolean> = {};
@@ -153,6 +157,29 @@ export function OpnamePage() {
   // nama bahannya disebut.
   const salahKetik = diisi.filter((s) => Number.isNaN(angkaDari(fisik[s.ingredient_id])));
 
+  /**
+   * Kunci idempotensi SATU SESI penghitungan, bertahan melintasi percobaan
+   * ulang.
+   *
+   * Jaringan yang putus SESUDAH server menyimpan tapi SEBELUM balasannya
+   * sampai membuat mutasi ini gagal — lembar konfirmasinya tetap terbuka
+   * (`onSuccess` tak jalan) dengan tombol Simpan yang hidup lagi, dan yang
+   * menekan ulang tak punya cara tahu hitungannya sudah tercatat. Sesi kedua
+   * lalu lahir dengan angka yang sama persis.
+   *
+   * Nilai stoknya memang tak ikut salah — opname adalah baseline MUTLAK, bukan
+   * selisih, jadi dua baseline identik mendarat di angka yang sama. Yang rusak
+   * jejaknya: Riwayat Opname memuat dua sesi kembar, dan owner harus meng-ACC
+   * dua kali untuk satu penghitungan yang sama. Di layar yang justru dipakai
+   * memeriksa kejujuran stok, riwayat kembar itu sendiri jadi pertanyaan.
+   *
+   * Dibuang saat sesinya benar-benar selesai (`onSuccess`) dan saat petugas
+   * kembali memilih lokasi/produk — hitungan BARU harus jadi kejadian baru.
+   * Bandingkan `RefundPanel`, yang mencabut kuncinya tiap porsi berubah:
+   * aturannya sama — kunci mengikat ISI, bukan umur komponen.
+   */
+  const refSesi = useRef<string | null>(null);
+
   const simpan = useMutation({
     mutationFn: () => {
       const items = produkTerpilih
@@ -172,6 +199,7 @@ export function OpnamePage() {
         method: "POST",
         body: {
           ...(!terikat && branchId ? { branch_id: branchId } : {}),
+          client_ref: (refSesi.current ??= uuidV4()),
           items,
           catatan: `Opname ${bucketNama}`,
         },
@@ -187,6 +215,7 @@ export function OpnamePage() {
       setDipilih({});
       setBucket(null);
       setLangkah("lokasi");
+      refSesi.current = null;
       // Baris BERSELISIH menunggu ACC (belum mengubah saldo), tapi baris yang
       // COCOK masuk langsung `disetujui` — dan itu sudah cukup menggeser
       // keluaran `/stok/fifo` (baris 'opname' baru di rentetan event) maupun

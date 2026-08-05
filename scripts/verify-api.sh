@@ -7672,5 +7672,42 @@ cek "dibuka kembali ke meja yang KOSONG → mejanya dipertahankan" "V == 1" \
   "$(api "$REISS105" GET "/open-bill/$A162" | jq --arg m "$MEJA162" '(.meja_id==$m)|if . then 1 else 0 end')"
 api "$REISS105" DELETE "/open-bill/$A162" > /dev/null
 
+echo
+echo "── §163 Opname: kiriman ulang tak melahirkan sesi kembar ──"
+# Opname adalah baseline MUTLAK, bukan selisih — jadi dua sesi kembar mendarat
+# di angka stok yang sama. Yang rusak jejaknya: Riwayat Opname memuat dua sesi
+# identik dan owner harus meng-ACC dua kali untuk satu penghitungan. Di layar
+# yang justru dipakai memeriksa kejujuran stok, riwayat kembar itu sendiri jadi
+# pertanyaan. Ledger idempotensinya SAMA dengan penjualan/refund/sync.
+BHN163=$(api "$OWNER" POST /bahan "{\"nama\":\"Bahan Opname 163\",\"satuan\":\"gr\",\"harga_beli\":1000,\"isi\":1,\"track_stok\":true,\"pengadaan\":\"beli\"}" | jq -r .id)
+REF163=$(cat /proc/sys/kernel/random/uuid)
+BODY163=$(jq -nc --arg b "$BHN163" --arg r "$REF163" --arg c "$CB154" \
+  '{branch_id:$c, client_ref:$r, catatan:"Opname uji 163", items:[{ingredient_id:$b, qty:7}]}')
+SES163A=$(api "$OWNER" POST /stok/opname "$BODY163")
+ID163A=$(echo "$SES163A" | jq -r '.session_id // ""')
+cek "opname pertama tersimpan (punya session_id)" "V == 1" \
+  "$(python3 -c "print(1 if len('$ID163A') == 36 else 0)")"
+# Kiriman ULANG dengan client_ref yang SAMA — inilah yang dulu melahirkan sesi
+# kedua. Harus memulangkan hasil yang sama persis, bukan sesi baru.
+SES163B=$(api "$OWNER" POST /stok/opname "$BODY163")
+cek "kiriman ulang memulangkan session_id yang SAMA" "V == 1" \
+  "$(echo "$SES163B" | jq -r --arg a "$ID163A" '(.session_id==$a)|if . then 1 else 0 end')"
+cek "…dan ringkasannya juga sama (hasil diputar ulang, bukan dihitung lagi)" "V == 1" \
+  "$(echo "$SES163B" | jq -r --argjson a "$(echo "$SES163A" | jq -c .ringkasan)" '(.ringkasan==$a)|if . then 1 else 0 end')"
+cek "riwayat opname memuat TEPAT satu sesi untuk kunci itu" "V == 1" \
+  "$(api "$OWNER" GET "/stok/opname/riwayat?branch_id=$CB154" | jq --arg a "$ID163A" '[.[]|select(.session_id==$a)]|length')"
+# client_ref BEDA = penghitungan baru, dan itu memang harus lahir sebagai sesi
+# tersendiri — kalau tidak, opname ulang di hari yang sama jadi mustahil.
+SES163C=$(api "$OWNER" POST /stok/opname \
+  "$(jq -nc --arg b "$BHN163" --arg r "$(cat /proc/sys/kernel/random/uuid)" --arg c "$CB154" \
+     '{branch_id:$c, client_ref:$r, catatan:"Opname uji 163 kedua", items:[{ingredient_id:$b, qty:9}]}')")
+cek "client_ref BEDA → sesi baru (bukan ikut diputar ulang)" "V == 1" \
+  "$(echo "$SES163C" | jq -r --arg a "$ID163A" '((.session_id!=$a) and ((.session_id|length)==36))|if . then 1 else 0 end')"
+# Klien lama tanpa client_ref tak boleh berubah perilakunya.
+SES163D=$(api "$OWNER" POST /stok/opname \
+  "$(jq -nc --arg b "$BHN163" --arg c "$CB154" '{branch_id:$c, catatan:"Opname uji 163 tanpa ref", items:[{ingredient_id:$b, qty:5}]}')")
+cek "tanpa client_ref: tetap membuat sesi (kompatibilitas klien lama)" "V == 1" \
+  "$(echo "$SES163D" | jq -r '((.session_id|length)==36)|if . then 1 else 0 end')"
+
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

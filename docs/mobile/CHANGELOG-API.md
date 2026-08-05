@@ -25,6 +25,45 @@ tanpa akses repo server.
 
 ---
 
+## Rilis: `POST /api/stok/opname` menerima `client_ref`
+
+> Belum di-merge ke production. Tidak ada migrasi dan tidak ada field baru pada
+> respons — yang bertambah hanya dua field OPSIONAL pada badan permintaan.
+
+### 🟢 BARU — kirim `client_ref` supaya retry tak melahirkan sesi opname kembar
+
+Ledger idempotensinya SAMA dengan yang sudah kalian pakai di `POST
+/api/penjualan` dan `/api/sync`: kunci `(company_id, client_ref)`. Kiriman ulang
+dengan `client_ref` yang sama memulangkan **hasil pertama apa adanya** —
+`201` dengan `session_id` yang sama — tanpa membuat sesi baru.
+
+```jsonc
+{ "branch_id": "…", "client_ref": "<uuid v4>", "device_id": "…",
+  "items": [{ "ingredient_id": "…", "qty": 7 }] }
+```
+
+Kosong/absen → diabaikan; klien yang belum mengirimnya tak berubah perilakunya.
+
+**Kenapa perlu meski stoknya tak ikut salah:** opname adalah baseline **mutlak**,
+bukan selisih, jadi dua sesi kembar mendarat di angka yang sama. Yang rusak
+jejaknya — Riwayat Opname memuat dua sesi identik, dan owner harus meng-ACC dua
+kali untuk satu penghitungan. Di layar yang justru dipakai memeriksa kejujuran
+stok, riwayat kembar itu sendiri jadi pertanyaan.
+
+**Aturan pemakaiannya — satu `client_ref` = satu penghitungan:**
+
+| Kejadian | Kunci |
+| --- | --- |
+| Simpan pertama | terbitkan UUID v4 baru |
+| Percobaan ulang karena gagal/putus | **kunci yang SAMA** |
+| Simpan berhasil, lalu menghitung lokasi/produk lain | UUID **baru** |
+
+Baris terakhir yang paling gampang terlewat: memakai ulang kunci lama untuk
+penghitungan baru membuat server memulangkan hasil lama, dan hitungan barunya
+hilang tanpa galat.
+
+---
+
 ## Rilis: `PUT /open-bill/:id` menolak bill yang sudah ditutup
 
 > Belum di-merge ke production. **Tidak ada migrasi dan tidak ada field baru** —

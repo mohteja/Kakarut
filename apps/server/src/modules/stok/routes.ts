@@ -4,6 +4,12 @@ import { alias } from "drizzle-orm/pg-core";
 import { and, desc, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
+import {
+  cariHasilIdempoten,
+  catatHasilIdempoten,
+  clientRefField,
+  deviceIdField,
+} from "../sync/idempoten";
 import { z } from "zod";
 import type { OpnameRingkasan, OpnameSesiStatus } from "@kakarut/shared";
 import { db } from "../../db/client";
@@ -24,6 +30,22 @@ import { fifoBahan, hitungSaldoCabang, kartuStok } from "./service";
 const OpnameBody = z.object({
   branch_id: z.string().uuid().optional(),
   catatan: z.string().nullish(),
+  /**
+   * Idempotensi satu SESI opname (UUID v4 dari perangkat), lewat ledger yang
+   * sama dengan penjualan/refund/sync.
+   *
+   * Tanpa ini, jaringan yang putus SESUDAH server menyimpan tapi SEBELUM
+   * balasannya sampai membuat petugas menekan Simpan lagi — dan sesi kedua
+   * lahir dengan hitungan yang sama persis. Nilainya memang tak ikut salah
+   * (opname adalah baseline MUTLAK, bukan selisih, jadi dua baseline identik
+   * mendarat di angka yang sama), tapi riwayatnya jadi dua sesi kembar dan
+   * owner harus meng-ACC dua kali untuk satu penghitungan.
+   *
+   * Sama seperti jalur lain: kosong/absen → diabaikan, jadi klien lama tak
+   * berubah perilakunya.
+   */
+  client_ref: clientRefField,
+  device_id: deviceIdField,
   items: z
     .array(
       z.object({
@@ -336,6 +358,13 @@ export const stokRoutes = new Hono<AppEnv>()
   .post("/opname", requireRole("owner", "admin", "cashier", "tim", "kitchen", "bar"), zValidator("json", OpnameBody), async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");
+    // Diperiksa PALING AWAL — sebelum cabang di-resolve, sebelum penjaga
+    // petugas, sebelum apa pun ditulis. Kiriman ulang harus memulangkan hasil
+    // yang SAMA, bukan menjalani lagi seluruh pemeriksaannya.
+    if (body.client_ref) {
+      const ada = await cariHasilIdempoten(auth.company_id!, body.client_ref);
+      if (ada) return c.json(ada.hasilJson, 201);
+    }
     const branchId = body.branch_id
       ? await pastikanCabang(body.branch_id, auth.company_id!)
       : await resolveBranchId(c);
@@ -476,7 +505,20 @@ export const stokRoutes = new Hono<AppEnv>()
       const nomorTeks = await terbitkanNomor(tx, auth.company_id!, "opname", sessionId);
       return { rows: inserted, nomor: nomorTeks };
     });
-    return c.json({ ok: true, jumlah: rows.length, session_id: sessionId, nomor, ringkasan }, 201);
+    const hasil = { ok: true, jumlah: rows.length, session_id: sessionId, nomor, ringkasan };
+    // Dicatat SESUDAH transaksinya sukses: kalau penyimpanannya sendiri gagal,
+    // tak ada yang boleh membuat kiriman ulang mengira sudah selesai.
+    if (body.client_ref) {
+      await catatHasilIdempoten({
+        companyId: auth.company_id!,
+        clientRef: body.client_ref,
+        userId: auth.sub,
+        deviceId: body.device_id ?? null,
+        tipe: "opname",
+        hasilJson: hasil,
+      });
+    }
+    return c.json(hasil, 201);
   })
   /**
    * Nilai Stok Awal (saldo pembuka) yang tersimpan per bahan + tanggalnya —
