@@ -1,5 +1,5 @@
 import { zValidator } from "@hono/zod-validator";
-import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
@@ -16,6 +16,7 @@ import {
 import { db, type Tx } from "../../db/client";
 import {
   companies,
+  meja,
   openBillItems,
   openBills,
   pesananLogs,
@@ -140,16 +141,94 @@ async function selaraskanTutupBill(
   tx: Tx,
   billId: string,
   sekarang: Date,
+  ctx: { companyId: string; branchId: string; userId: string },
 ): Promise<PesananStatus> {
   const rows = await tx
     .select({ status: openBillItems.pesananStatus })
     .from(openBillItems)
     .where(eq(openBillItems.billId, billId));
   const kartu = turunkanStatus(rows);
+
+  /**
+   * MEMBUKA KEMBALI bill boleh menabrak "satu meja dine-in = satu bill".
+   *
+   * Urutannya wajar dan seluruhnya lewat tombol yang sah:
+   *
+   *   1. Bill A di Meja 5 dibatalkan (tamunya batal / salah input).
+   *   2. Tamu baru duduk di Meja 5, kasir membuka Bill B — DIIZINKAN, karena
+   *      penjaga di `POST /open-bill` hanya melihat bill yang `closed_at`-nya
+   *      masih kosong, dan A sudah tertutup.
+   *   3. Di papan, satu baris Bill A dikembalikan ke antrean — ternyata
+   *      pesanannya jadi. Bill A hidup lagi, MASIH menempel di Meja 5.
+   *
+   * Hasilnya dua bill hidup di satu meja dine-in: persis keadaan yang dijaga
+   * sampai `SELECT … FOR UPDATE` di dua tempat, dan yang risikonya justru satu
+   * bill tertinggal tak tertagih saat tamunya pulang.
+   *
+   * Yang DIPILIH: bill-nya tetap dibuka (itu inti fiturnya — "dibatalkan lalu
+   * ternyata jadi" tak boleh mustahil ditagih), tapi ia dilepas dari mejanya
+   * dan pelepasannya dicatat. Alasannya: menolak pembukaan akan menggagalkan
+   * tombol dapur karena bentrok meja yang dapur tak bisa selesaikan, sementara
+   * memasangnya kembali ke meja adalah pekerjaan kasir — dan jalur itu sudah
+   * ada dan sudah dijaga (`PUT /open-bill/:id` membalas `meja_sudah_ada_bill`
+   * bila mejanya masih terisi).
+   *
+   * Hanya berlaku pada transisi tertutup → terbuka, hanya untuk meja
+   * `dine_in`, dan hanya bila memang ada bill lain yang hidup di sana. Di luar
+   * itu bill tetap memegang mejanya seperti biasa.
+   */
+  const [sebelum] = await tx
+    .select({
+      closedAt: openBills.closedAt,
+      mejaId: openBills.mejaId,
+      mejaLabel: openBills.mejaLabel,
+      branchId: openBills.branchId,
+    })
+    .from(openBills)
+    .where(and(eq(openBills.id, billId), isNull(openBills.saleId)));
+
+  let lepasMeja = false;
+  if (sebelum?.closedAt && kartu !== "batal" && sebelum.mejaId) {
+    const [m] = await tx
+      .select({ tipe: meja.tipe })
+      .from(meja)
+      .where(eq(meja.id, sebelum.mejaId));
+    if (m?.tipe === "dine_in") {
+      const [bentrok] = await tx
+        .select({ id: openBills.id })
+        .from(openBills)
+        .where(
+          and(
+            eq(openBills.companyId, ctx.companyId),
+            eq(openBills.branchId, sebelum.branchId),
+            eq(openBills.mejaId, sebelum.mejaId),
+            isNull(openBills.closedAt),
+            ne(openBills.id, billId),
+          ),
+        )
+        .limit(1);
+      lepasMeja = bentrok != null;
+    }
+  }
+
   await tx
     .update(openBills)
-    .set({ closedAt: kartu === "batal" ? sekarang : null })
+    .set({
+      closedAt: kartu === "batal" ? sekarang : null,
+      ...(lepasMeja ? { mejaId: null, mejaLabel: null } : {}),
+    })
     .where(and(eq(openBills.id, billId), isNull(openBills.saleId)));
+
+  if (lepasMeja) {
+    await tx.insert(pesananLogs).values({
+      companyId: ctx.companyId,
+      branchId: ctx.branchId,
+      openBillId: billId,
+      aksi: `Dibuka kembali & dilepas dari ${sebelum!.mejaLabel ?? "mejanya"} — meja itu sudah dipakai bill lain; pasang ulang mejanya dari kasir`,
+      statusBaru: kartu,
+      userId: ctx.userId,
+    });
+  }
   return kartu;
 }
 
@@ -469,7 +548,13 @@ export const pesananRoutes = new Hono<AppEnv>()
               userId: auth.sub,
             });
           }
-          return { kartu: await selaraskanTutupBill(tx, id, sekarang) };
+          return {
+            kartu: await selaraskanTutupBill(tx, id, sekarang, {
+            companyId: auth.company_id!,
+            branchId,
+            userId: auth.sub,
+          }),
+          };
         });
         return c.json({ ok: true, status, kartu_status: hasil.kartu });
       }
@@ -640,7 +725,11 @@ export const pesananRoutes = new Hono<AppEnv>()
             userId: auth.sub,
           });
         }
-        return await selaraskanTutupBill(tx, id, sekarang);
+        return await selaraskanTutupBill(tx, id, sekarang, {
+          companyId: auth.company_id!,
+          branchId,
+          userId: auth.sub,
+        });
       }
       const ubah = await tx
         .update(saleItems)

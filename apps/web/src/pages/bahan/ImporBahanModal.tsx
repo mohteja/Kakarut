@@ -146,6 +146,28 @@ export function ImporBahanModal({ bahan, onClose }: { bahan: BahanDto[]; onClose
                 .
               </div>
             )}
+            {/*
+              Kolom yang tak ada di berkas TIDAK diisi nilai default — nilainya
+              dibiarkan apa adanya. Itu perilaku yang benar, tapi tetap harus
+              disebut: yang mengira berkasnya mengatur SEMUA kolom perlu tahu
+              kolom mana yang sebenarnya tak ia sentuh.
+            */}
+            {terbaca && terbaca.kolomHilang.length > 0 && (
+              <div className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                ℹ️ Berkas ini tidak punya kolom{" "}
+                <b>{terbaca.kolomHilang.join(", ")}</b>. Nilai kolom itu pada bahan yang sudah
+                ada <b>dibiarkan apa adanya</b> (tidak dikosongkan). Bahan baru memakai nilai
+                bawaan. Ingin mengubahnya juga? Mulai dari <b>template</b> di atas.
+              </div>
+            )}
+            {terbaca && terbaca.isiTakMasukAkal > 0 && (
+              <div className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                ⚠️ <b>{terbaca.isiTakMasukAkal}</b> baris punya <b>isi</b> nol atau negatif. Isi
+                adalah pembagi harga (harga beli ÷ isi), jadi nol tak bisa dipakai — kolom itu
+                dilewati untuk baris tersebut, bukan diisi angka karangan. Bahan lama tetap
+                memakai isinya yang sekarang; bahan baru memakai <b>1</b>.
+              </div>
+            )}
           </div>
 
           {/* Langkah 3: pilih mode */}

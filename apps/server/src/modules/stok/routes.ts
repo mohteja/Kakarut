@@ -4,6 +4,12 @@ import { alias } from "drizzle-orm/pg-core";
 import { and, desc, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
+import {
+  cariHasilIdempoten,
+  catatHasilIdempoten,
+  clientRefField,
+  deviceIdField,
+} from "../sync/idempoten";
 import { z } from "zod";
 import type { OpnameRingkasan, OpnameSesiStatus } from "@kakarut/shared";
 import { db } from "../../db/client";
@@ -24,6 +30,22 @@ import { fifoBahan, hitungSaldoCabang, kartuStok } from "./service";
 const OpnameBody = z.object({
   branch_id: z.string().uuid().optional(),
   catatan: z.string().nullish(),
+  /**
+   * Idempotensi satu SESI opname (UUID v4 dari perangkat), lewat ledger yang
+   * sama dengan penjualan/refund/sync.
+   *
+   * Tanpa ini, jaringan yang putus SESUDAH server menyimpan tapi SEBELUM
+   * balasannya sampai membuat petugas menekan Simpan lagi — dan sesi kedua
+   * lahir dengan hitungan yang sama persis. Nilainya memang tak ikut salah
+   * (opname adalah baseline MUTLAK, bukan selisih, jadi dua baseline identik
+   * mendarat di angka yang sama), tapi riwayatnya jadi dua sesi kembar dan
+   * owner harus meng-ACC dua kali untuk satu penghitungan.
+   *
+   * Sama seperti jalur lain: kosong/absen → diabaikan, jadi klien lama tak
+   * berubah perilakunya.
+   */
+  client_ref: clientRefField,
+  device_id: deviceIdField,
   items: z
     .array(
       z.object({
@@ -47,7 +69,22 @@ const OpnameBody = z.object({
 // fisik: stok awal itu SATU saldo pembuka per bahan yang terkunci pada tanggal
 // tertentu (bukan tumpukan reset di banyak tanggal) — diganti (upsert), bukan
 // ditambah. Ubah nilai / tanggal = simpan ulang di tanggal itu.
-const StokAwalBody = OpnameBody.extend({
+const StokAwalBody = OpnameBody.omit({ client_ref: true, device_id: true }).extend({
+  /**
+   * `client_ref`/`device_id` SENGAJA TIDAK diwarisi dari `OpnameBody`.
+   *
+   * Endpoint ini sudah idempoten SECARA KONSTRUKSI: penulisannya
+   * hapus-lalu-sisip atas kunci `(company, branch, session_id IS NULL,
+   * ingredient_id)`, jadi kiriman yang sama dua kali mendarat di baris yang
+   * sama persis — tak ada sesi kembar yang bisa lahir (sessionId memang null di
+   * sini, jadi ia bahkan tak muncul di Riwayat Opname).
+   *
+   * Mewarisi kuncinya akan membuat skema MENERIMA field yang rutenya abaikan:
+   * klien yang mengirimkannya mengira dilindungi padahal tidak, dan diamnya
+   * jauh lebih buruk daripada tidak menawarkannya sama sekali. Kalau suatu
+   * saat penulisan di sini berubah jadi menambah (bukan mengganti), kuncinya
+   * ditambahkan BERSAMA penanganannya — bukan mendahului.
+   */
   /** tanggal berlaku saldo pembuka (YYYY-MM-DD, zona perusahaan). Default hari ini. */
   tanggal: z
     .string()
@@ -336,6 +373,13 @@ export const stokRoutes = new Hono<AppEnv>()
   .post("/opname", requireRole("owner", "admin", "cashier", "tim", "kitchen", "bar"), zValidator("json", OpnameBody), async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");
+    // Diperiksa PALING AWAL — sebelum cabang di-resolve, sebelum penjaga
+    // petugas, sebelum apa pun ditulis. Kiriman ulang harus memulangkan hasil
+    // yang SAMA, bukan menjalani lagi seluruh pemeriksaannya.
+    if (body.client_ref) {
+      const ada = await cariHasilIdempoten(auth.company_id!, body.client_ref);
+      if (ada) return c.json(ada.hasilJson, 201);
+    }
     const branchId = body.branch_id
       ? await pastikanCabang(body.branch_id, auth.company_id!)
       : await resolveBranchId(c);
@@ -476,7 +520,20 @@ export const stokRoutes = new Hono<AppEnv>()
       const nomorTeks = await terbitkanNomor(tx, auth.company_id!, "opname", sessionId);
       return { rows: inserted, nomor: nomorTeks };
     });
-    return c.json({ ok: true, jumlah: rows.length, session_id: sessionId, nomor, ringkasan }, 201);
+    const hasil = { ok: true, jumlah: rows.length, session_id: sessionId, nomor, ringkasan };
+    // Dicatat SESUDAH transaksinya sukses: kalau penyimpanannya sendiri gagal,
+    // tak ada yang boleh membuat kiriman ulang mengira sudah selesai.
+    if (body.client_ref) {
+      await catatHasilIdempoten({
+        companyId: auth.company_id!,
+        clientRef: body.client_ref,
+        userId: auth.sub,
+        deviceId: body.device_id ?? null,
+        tipe: "opname",
+        hasilJson: hasil,
+      });
+    }
+    return c.json(hasil, 201);
   })
   /**
    * Nilai Stok Awal (saldo pembuka) yang tersimpan per bahan + tanggalnya —

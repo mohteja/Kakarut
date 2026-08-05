@@ -100,7 +100,21 @@ export function RekomendasiBeliPage() {
   const simpanDefault = useMutation({
     mutationFn: () =>
       api("/company", { method: "PATCH", body: { target_penjualan: Number(targetInput) || 0 } }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["rekomendasi"] }),
+    /**
+     * `["company"]` ikut disebut walau hari ini tak ada yang menampilkan
+     * `target_penjualan` dari kunci itu — jadi tak ada gejala yang terlihat
+     * sekarang. Yang ditutup adalah jebakannya: kunci `company` sengaja
+     * ber-`staleTime` 5 menit (lihat KUNCI_MASTER di main.tsx), dan premis
+     * yang membolehkannya ditulis di sana — "setiap mutasi sudah
+     * meng-invalidate kuncinya sendiri". Ini satu-satunya penulis
+     * `PATCH /company` yang melanggarnya; `PerusahaanPage` — pemanggil yang
+     * lain — sudah benar. Siapa pun yang kelak menampilkan target itu di
+     * layar lain akan mewarisi bacaan basi 5 menit tanpa tahu sebabnya.
+     */
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["rekomendasi"] });
+      queryClient.invalidateQueries({ queryKey: ["company"] });
+    },
   });
 
   const hitung = () => setTargetApplied(targetInput);

@@ -111,7 +111,34 @@ export function LaporanPage() {
             <label className="mb-1 block text-xs font-medium text-stone-500">Cabang</label>
             <select
               value={cabangFilter}
-              onChange={(e) => setCabangFilter(e.target.value)}
+              /*
+               * HASIL BEP IKUT DIBUANG saat cabangnya berganti.
+               *
+               * `/laporan/bep` disaring `branchCondLaporan`, jadi jawabannya
+               * BEDA per cabang. Tapi hasilnya tinggal di state biasa, bukan di
+               * useQuery yang kuncinya memuat `cabangFilter` seperti laporan di
+               * atasnya. Tanpa pembuangan ini, mengganti cabang menyegarkan
+               * seluruh laporan sementara kartu BEP tetap memajang angka cabang
+               * SEBELUMNYA — di bawah judul yang sekarang menyebut cabang lain,
+               * tanpa satu pun tanda bahwa keduanya bukan sepasang.
+               *
+               * Yang dipertaruhkan bukan tampilan: BEP dipakai owner untuk
+               * memutuskan harga jual, dan komentar pada kotak biaya tetap di
+               * bawah menyebutnya sendiri — "salah di sini menyesatkan
+               * keputusan". Kartu yang kosong dan menunggu ditekan "Hitung"
+               * jauh lebih baik daripada angka yang benar untuk cabang yang
+               * salah.
+               *
+               * Rentang tanggal SENGAJA tidak ikut membuang: `/laporan/bep`
+               * tak menerima tanggal sama sekali — ia memakai jendela 30 harinya
+               * sendiri di server — jadi mengganti tanggal tidak membuat
+               * hasilnya basi.
+               */
+              onChange={(e) => {
+                setCabangFilter(e.target.value);
+                setBep(null);
+                setBepError(null);
+              }}
               className={inputClass}
             >
               <option value="all">Semua cabang</option>
@@ -274,6 +301,15 @@ export function LaporanPage() {
                 <button onClick={hitungBep} disabled={!biayaTetap} className={btnPrimary}>
                   Hitung
                 </button>
+                {/* Sebab kartunya bisa mendadak kosong — tanpa kalimat ini,
+                    hilangnya angka sesudah ganti cabang terbaca seperti
+                    kerusakan, bukan seperti penolakan menampilkan angka cabang
+                    yang keliru. */}
+                {isManajemen && (
+                  <span className="text-xs text-stone-400">
+                    Mengikuti filter <b>Cabang</b> di atas — ganti cabang, hitung ulang.
+                  </span>
+                )}
               </div>
               <ErrorText error={bepError} />
               {bep && (

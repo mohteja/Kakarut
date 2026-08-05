@@ -8,7 +8,12 @@ import { api } from "../../lib/api";
 import { bluetoothSupported } from "../../lib/print/bluetooth";
 import { NativeBtTransport, isNativeApp, type PerangkatBt } from "../../lib/print/native";
 import { usbSupported } from "../../lib/print/usb";
-import type { TransportKind } from "../../lib/print/settings";
+import { RENTANG, angkaSetelan } from "../../lib/print/batas";
+import {
+  DEFAULT_PRINTER_SETTINGS,
+  type PrinterDeviceSettings,
+  type TransportKind,
+} from "../../lib/print/settings";
 
 /**
  * Struk per CABANG (footer + tampil alamat) — dipindah ke sini "di cabang
@@ -154,9 +159,34 @@ function StatusBadge() {
   );
 }
 
+/** Setelan angka yang nilainya diketik bebas — semuanya dijaga `RENTANG`. */
+type KunciAngka = "feedLines" | "chunkSize" | "chunkDelayMs";
+
 export function PrinterPage() {
   const { settings, updateSettings, status, transport, connect, disconnect, printTest } =
     usePrinter();
+
+  /**
+   * `min`/`max` pada `<input type="number">` hanya mengatur tombol panah dan
+   * status validitas form — angka yang diketik (atau kotak yang dikosongkan)
+   * tetap sampai ke sini dan langsung tersimpan ke localStorage. Jadi:
+   *
+   *  - saat mengetik, nilai bukan-angka ("2e", "-") tidak disimpan sama sekali;
+   *    kotak masih boleh kosong (0) supaya angkanya bisa diketik ulang;
+   *  - saat selesai (blur), yang tersimpan dijepit ke rentangnya sehingga apa
+   *    yang tampil dan apa yang dipakai mencetak selalu sama.
+   *
+   * `batas.ts` menjelaskan kenapa ini penting: `chunkSize` yang bernilai 0
+   * membuat pengiriman ke printer BLE berputar tanpa akhir.
+   */
+  function ketikAngka(k: KunciAngka, teks: string) {
+    const n = Number(teks);
+    if (Number.isFinite(n)) updateSettings({ [k]: n } as Partial<PrinterDeviceSettings>);
+  }
+  function rapikanAngka(k: KunciAngka) {
+    const rapi = angkaSetelan(settings[k], DEFAULT_PRINTER_SETTINGS[k], RENTANG[k]);
+    if (rapi !== settings[k]) updateSettings({ [k]: rapi } as Partial<PrinterDeviceSettings>);
+  }
   const [error, setError] = useState<unknown>(null);
   const [lanjutan, setLanjutan] = useState(false);
   /** daftar printer ter-pair dari plugin aplikasi; null = belum dimuat */
@@ -449,10 +479,11 @@ export function PrinterPage() {
                     <label className="mb-1 block text-xs font-medium">Baris feed akhir</label>
                     <input
                       type="number"
-                      min={0}
-                      max={10}
+                      min={RENTANG.feedLines.min}
+                      max={RENTANG.feedLines.max}
                       value={settings.feedLines}
-                      onChange={(e) => updateSettings({ feedLines: Number(e.target.value) })}
+                      onChange={(e) => ketikAngka("feedLines", e.target.value)}
+                      onBlur={() => rapikanAngka("feedLines")}
                       className={inputClass}
                     />
                   </div>
@@ -462,10 +493,11 @@ export function PrinterPage() {
                     </label>
                     <input
                       type="number"
-                      min={20}
-                      max={512}
+                      min={RENTANG.chunkSize.min}
+                      max={RENTANG.chunkSize.max}
                       value={settings.chunkSize}
-                      onChange={(e) => updateSettings({ chunkSize: Number(e.target.value) })}
+                      onChange={(e) => ketikAngka("chunkSize", e.target.value)}
+                      onBlur={() => rapikanAngka("chunkSize")}
                       className={inputClass}
                     />
                   </div>
@@ -473,12 +505,11 @@ export function PrinterPage() {
                     <label className="mb-1 block text-xs font-medium">Jeda chunk (ms)</label>
                     <input
                       type="number"
-                      min={0}
-                      max={200}
+                      min={RENTANG.chunkDelayMs.min}
+                      max={RENTANG.chunkDelayMs.max}
                       value={settings.chunkDelayMs}
-                      onChange={(e) =>
-                        updateSettings({ chunkDelayMs: Number(e.target.value) })
-                      }
+                      onChange={(e) => ketikAngka("chunkDelayMs", e.target.value)}
+                      onBlur={() => rapikanAngka("chunkDelayMs")}
                       className={inputClass}
                     />
                   </div>

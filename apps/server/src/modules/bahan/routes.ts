@@ -156,24 +156,38 @@ const BahanBulkRow = z.object({
 });
 const BahanBulkBody = z.object({ items: z.array(BahanBulkRow).min(1).max(200) });
 
-/** Satu baris impor CSV (nilai sudah dikoersi di web; default aman bila kosong). */
+/**
+ * Satu baris impor CSV (nilai sudah dikoersi di web).
+ *
+ * Field selain `nama` sengaja `.optional()` TANPA `.default()`: absennya harus
+ * tetap absen sampai ke rutenya, karena di sanalah ia dibedakan dari nilai
+ * yang memang dikirim.
+ *
+ *   - dikirim (termasuk `false`/`0`/`null`) → ditulis; itu perintah yang sah;
+ *   - tidak dikirim → pada bahan LAMA dibiarkan, pada bahan BARU baru dipakai
+ *     default (ditulis eksplisit di jalur insert di bawah).
+ *
+ * Dengan `.default()` keduanya tak bisa dibedakan lagi — zod mengisi nilainya
+ * sebelum rute sempat melihat, dan berkas CSV yang cuma punya kolom
+ * `nama,harga_beli` menimpa seluruh kolom lain milik tiap bahan yang cocok.
+ */
 const BahanImportRowBody = z.object({
   kode: z.string().trim().max(20).nullish(),
   nama: z.string().trim().min(1),
-  kategori: z.string().trim().min(1).max(30).default("lain"),
-  jenis: z.enum(["produksi", "beli"]).default("beli"),
-  harga_beli: z.number().nonnegative().default(0),
-  isi: z.number().positive().default(1),
-  satuan: z.string().trim().min(1).max(20).default("pcs"),
+  kategori: z.string().trim().min(1).max(30).optional(),
+  jenis: z.enum(["produksi", "beli"]).optional(),
+  harga_beli: z.number().nonnegative().optional(),
+  isi: z.number().positive().optional(),
+  satuan: z.string().trim().min(1).max(20).optional(),
   satuan_beli: z.string().trim().max(20).nullish(),
-  stok_minimum: z.number().nonnegative().default(0),
-  min_beli: z.number().nonnegative().default(0),
-  boleh_eceran: z.boolean().default(false),
-  lacak_stok: z.boolean().default(true),
-  kemasan: z.boolean().default(false),
-  complement: z.boolean().default(false),
-  masa_simpan_hari: z.number().int().min(0).max(3650).default(0),
-  lead_time_hari: z.number().int().min(0).max(365).default(0),
+  stok_minimum: z.number().nonnegative().optional(),
+  min_beli: z.number().nonnegative().optional(),
+  boleh_eceran: z.boolean().optional(),
+  lacak_stok: z.boolean().optional(),
+  kemasan: z.boolean().optional(),
+  complement: z.boolean().optional(),
+  masa_simpan_hari: z.number().int().min(0).max(3650).optional(),
+  lead_time_hari: z.number().int().min(0).max(365).optional(),
   catatan: z.string().nullish(),
 });
 const BahanImportBody = z.object({
@@ -682,6 +696,12 @@ export const bahanRoutes = new Hono<AppEnv>()
    * `jenis` (pengadaan) hanya diterapkan pada bahan BARU — mengubah jenis
    * bahan lama lewat impor tak diizinkan agar resep/konsumsi tak yatim.
    * Gagal per baris dilaporkan tanpa menggagalkan seluruh impor.
+   *
+   * "Diperbarui" berarti KOLOM YANG DIKIRIM saja. Field yang tak ada di badan
+   * permintaan dibiarkan apa adanya — lihat `BahanImportRowBody`. Berkas CSV
+   * yang hanya memuat sebagian kolom adalah bentuk yang paling lazim (daftar
+   * harga dari supplier: `nama,harga_beli`), dan menafsirkan kolom yang absen
+   * sebagai "nol/mati" menghapus data yang tak pernah disebut berkas itu.
    */
   .post("/import", requireRole("owner", "admin"), zValidator("json", BahanImportBody), async (c) => {
     const auth = c.get("auth");
@@ -759,24 +779,28 @@ export const bahanRoutes = new Hono<AppEnv>()
 
     for (const u of updateBaris) {
       try {
+        const b = u.item;
         await db
           .update(ingredients)
           .set({
-            nama: u.item.nama,
-            kategori: kanonikKategori(kmap, u.item.kategori),
-            hargaBeli: u.item.harga_beli,
-            isi: u.item.isi,
-            satuan: u.item.satuan,
-            satuanBeli: u.item.satuan_beli ?? null,
-            stokMinimum: u.item.stok_minimum,
-            minBeli: u.item.min_beli,
-            masaSimpanHari: u.item.masa_simpan_hari,
-            leadTimeHari: u.item.lead_time_hari,
-            bolehEceran: u.item.boleh_eceran,
-            trackStok: u.item.lacak_stok,
-            isPackaging: u.item.kemasan,
-            isComplement: u.item.complement,
-            catatan: u.item.catatan ?? null,
+            nama: b.nama,
+            // Hanya kolom yang BENAR-BENAR dikirim yang ditulis. `undefined`
+            // di sini bukan "kosongkan", melainkan "berkas ini tak bicara
+            // soal kolom itu" — lihat komentar `BahanImportRowBody`.
+            ...(b.kategori !== undefined && { kategori: kanonikKategori(kmap, b.kategori) }),
+            ...(b.harga_beli !== undefined && { hargaBeli: b.harga_beli }),
+            ...(b.isi !== undefined && { isi: b.isi }),
+            ...(b.satuan !== undefined && { satuan: b.satuan }),
+            ...(b.satuan_beli !== undefined && { satuanBeli: b.satuan_beli ?? null }),
+            ...(b.stok_minimum !== undefined && { stokMinimum: b.stok_minimum }),
+            ...(b.min_beli !== undefined && { minBeli: b.min_beli }),
+            ...(b.masa_simpan_hari !== undefined && { masaSimpanHari: b.masa_simpan_hari }),
+            ...(b.lead_time_hari !== undefined && { leadTimeHari: b.lead_time_hari }),
+            ...(b.boleh_eceran !== undefined && { bolehEceran: b.boleh_eceran }),
+            ...(b.lacak_stok !== undefined && { trackStok: b.lacak_stok }),
+            ...(b.kemasan !== undefined && { isPackaging: b.kemasan }),
+            ...(b.complement !== undefined && { isComplement: b.complement }),
+            ...(b.catatan !== undefined && { catatan: b.catatan ?? null }),
             // baris pulih: aktifkan kembali dari Tempat Sampah
             ...(u.pulih && { isActive: true }),
             updatedAt: new Date(),
@@ -791,25 +815,28 @@ export const bahanRoutes = new Hono<AppEnv>()
     for (let i = 0; i < insertBaris.length; i++) {
       const { item: b, slug } = insertBaris[i];
       try {
+        // Bahan BARU: di sinilah default dipakai — tak ada nilai lama untuk
+        // dibiarkan. Ditulis eksplisit karena `BahanImportRowBody` sengaja
+        // tak lagi memasangnya lewat `.default()`.
         await db.insert(ingredients).values({
           companyId,
           slug,
           kode: kodes[i],
           nama: b.nama,
-          hargaBeli: b.harga_beli,
-          isi: b.isi,
-          satuan: b.satuan,
+          hargaBeli: b.harga_beli ?? 0,
+          isi: b.isi ?? 1,
+          satuan: b.satuan ?? "pcs",
           satuanBeli: b.satuan_beli ?? null,
-          trackStok: b.lacak_stok,
-          stokMinimum: b.stok_minimum,
-          minBeli: b.min_beli,
-          masaSimpanHari: b.masa_simpan_hari,
-          leadTimeHari: b.lead_time_hari,
-          kategori: kanonikKategori(kmap, b.kategori),
-          pengadaan: b.jenis,
-          bolehEceran: b.boleh_eceran,
-          isPackaging: b.kemasan,
-          isComplement: b.complement,
+          trackStok: b.lacak_stok ?? true,
+          stokMinimum: b.stok_minimum ?? 0,
+          minBeli: b.min_beli ?? 0,
+          masaSimpanHari: b.masa_simpan_hari ?? 0,
+          leadTimeHari: b.lead_time_hari ?? 0,
+          kategori: kanonikKategori(kmap, b.kategori ?? "lain"),
+          pengadaan: b.jenis ?? "beli",
+          bolehEceran: b.boleh_eceran ?? false,
+          isPackaging: b.kemasan ?? false,
+          isComplement: b.complement ?? false,
           catatan: b.catatan ?? null,
         });
         ditambah++;

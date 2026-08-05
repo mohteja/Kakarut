@@ -25,6 +25,208 @@ tanpa akses repo server.
 
 ---
 
+## Rilis: `POST /api/bahan/import` — kolom yang tak dikirim tak lagi ditimpa
+
+> Belum di-merge ke production. Tidak ada migrasi, tidak ada field baru, dan
+> respons tidak berubah. Yang berubah adalah **arti dari field yang absen**.
+
+### 🟡 PERLU DICEK — kirim hanya field yang memang mau diubah
+
+Dulu tiap field yang tak ada di badan permintaan diisi nilai bawaan oleh
+validator, lalu mode `"perbarui"` menuliskannya ke bahan yang cocok. Kiriman
+`{"nama":"Air Mineral","harga_beli":51000}` karena itu **ikut** menimpa
+`isi`→1, `satuan`→`"pcs"`, `kategori`→`"lain"`, `kemasan`→`false`,
+`stok_minimum`→0 pada bahan itu — tanpa pesan apa pun. Bahan yang dibeli per
+dus (`isi: 24`) berubah jadi `isi: 1`, dan HPP tiap menu yang memakainya
+melonjak 24× lipat.
+
+Sekarang:
+
+| Field pada badan permintaan | Bahan LAMA (`perbarui`) | Bahan BARU |
+| --- | --- | --- |
+| dikirim (termasuk `false`, `0`, `null`) | ditulis | ditulis |
+| **tidak** dikirim | **dibiarkan apa adanya** | dipakai nilai bawaan |
+
+Yang perlu dicek bila mobile memakai endpoint ini:
+
+- **Mau MENGOSONGKAN sesuatu?** Kirim nilainya secara eksplisit — `"kemasan":
+  false`, `"stok_minimum": 0`, `"catatan": null`. Menghilangkan kuncinya kini
+  berarti "jangan sentuh", bukan "kosongkan".
+- **Mau memperbarui sebagian?** Sekarang cukup kirim `nama` + field yang
+  berubah. Tak perlu lagi mengirim ulang seluruh field hanya untuk menjaga
+  nilainya.
+- `isi: 0` tetap ditolak **400** (`isi` adalah pembagi harga). Klien yang dulu
+  menjepit nilai tak masuk akal ke angka kecil supaya lolos validasi sebaiknya
+  berhenti — lebih baik gagal terang-terangan daripada harga per satuan yang
+  salah empat digit.
+
+---
+
+## Rilis: `POST /api/stok/opname` menerima `client_ref`
+
+> Belum di-merge ke production. Tidak ada migrasi dan tidak ada field baru pada
+> respons — yang bertambah hanya dua field OPSIONAL pada badan permintaan.
+
+### 🟢 BARU — kirim `client_ref` supaya retry tak melahirkan sesi opname kembar
+
+Ledger idempotensinya SAMA dengan yang sudah kalian pakai di `POST
+/api/penjualan` dan `/api/sync`: kunci `(company_id, client_ref)`. Kiriman ulang
+dengan `client_ref` yang sama memulangkan **hasil pertama apa adanya** —
+`201` dengan `session_id` yang sama — tanpa membuat sesi baru.
+
+```jsonc
+{ "branch_id": "…", "client_ref": "<uuid v4>", "device_id": "…",
+  "items": [{ "ingredient_id": "…", "qty": 7 }] }
+```
+
+Kosong/absen → diabaikan; klien yang belum mengirimnya tak berubah perilakunya.
+
+**Kenapa perlu meski stoknya tak ikut salah:** opname adalah baseline **mutlak**,
+bukan selisih, jadi dua sesi kembar mendarat di angka yang sama. Yang rusak
+jejaknya — Riwayat Opname memuat dua sesi identik, dan owner harus meng-ACC dua
+kali untuk satu penghitungan. Di layar yang justru dipakai memeriksa kejujuran
+stok, riwayat kembar itu sendiri jadi pertanyaan.
+
+**Aturan pemakaiannya — satu `client_ref` = satu penghitungan:**
+
+| Kejadian | Kunci |
+| --- | --- |
+| Simpan pertama | terbitkan UUID v4 baru |
+| Percobaan ulang karena gagal/putus | **kunci yang SAMA** |
+| Simpan berhasil, lalu menghitung lokasi/produk lain | UUID **baru** |
+
+Baris terakhir yang paling gampang terlewat: memakai ulang kunci lama untuk
+penghitungan baru membuat server memulangkan hasil lama, dan hitungan barunya
+hilang tanpa galat.
+
+---
+
+## Rilis: `PUT /open-bill/:id` menolak bill yang sudah ditutup
+
+> Belum di-merge ke production. **Tidak ada migrasi dan tidak ada field baru** —
+> yang bertambah hanya satu kode galat pada satu endpoint. Tapi ini menutup
+> jalur di mana pesanan tamu bisa hilang tanpa satu pun galat muncul di layar.
+
+### 🔴 WAJIB — 409 `bill_sudah_ditutup` harus ditangani, jangan dianggap sukses
+
+Sebuah open bill berakhir dengan dua cara, dan keduanya mengisi `closed_at`:
+
+| Cara | `closed_at` | `sale_id` |
+| --- | --- | --- |
+| Dibayar (`POST /api/penjualan` dengan `open_bill_id`) | terisi | terisi |
+| Dibatalkan (`DELETE /api/open-bill/:id`) | terisi | tetap `null` |
+
+`GET /api/open-bill/:id`, `GET /api/open-bill`, `DELETE`, dan checkout
+semuanya sudah menghormati itu sejak dulu. **`PUT` tidak.** Ia hanya memeriksa
+"bill-nya ada" dan "satu perusahaan", lalu menulis.
+
+Akibatnya, pada bill yang sudah ditutup:
+
+- bill **DIBAYAR** → barisnya sudah tersalin ke `sale_items`, jadi tambahan
+  yang ditulis lewat `PUT` **tak pernah ditagih** dan tak muncul di kartu
+  penjualan mana pun;
+- bill **DIBATALKAN** → baris berstatus hidup masuk ke bill yang tak akan
+  ditagih siapa pun;
+- dan di **kedua** kasus jawabannya **HTTP 200 dengan badan `null`** — karena
+  `loadDetail` menyaring bill tertutup. Untuk tipe yang dideklarasikan
+  `OpenBillDetail`, itu bukan sekadar aneh: klien membacanya sebagai sukses
+  lalu mengosongkan keranjang.
+
+Ini bukan kasus teoretis. Layar kasir memegang bill di memori (`editingBillId`
+di web, padanannya di mobile), jadi perangkat kedua yang membayar atau
+membatalkan bill itu **tidak terlihat** olehnya — tombol "Perbarui Bill" masih
+bisa ditekan.
+
+Sekarang `PUT` menolaknya:
+
+```json
+{
+  "error": "Bill ini sudah dibayar — pesanan tambahan harus dibuat sebagai transaksi baru.",
+  "kode": "bill_sudah_ditutup",
+  "sudah_dibayar": true
+}
+```
+
+**Yang perlu dikerjakan mobile:**
+
+1. Tangani **409** ber-`kode` `bill_sudah_ditutup` pada `PUT /api/open-bill/:id`.
+2. Baca `sudah_dibayar` (boolean), **jangan** menyimpulkannya dari teks `error`
+   — langkah lanjutannya berlawanan: `true` → tamu sudah bayar, pesanan ini
+   harus jadi **transaksi baru**; `false` → bill-nya dibatalkan, pesanan ini
+   harus jadi **bill baru**.
+3. **Jangan mengosongkan keranjang** saat menerima galat ini. Isinya justru
+   satu-satunya salinan pesanan yang tersisa; kosongkan hanya setelah kasir
+   menyimpannya ulang.
+4. Kalau selama ini kalian memakai 200 sebagai penanda sukses tanpa memeriksa
+   badannya, periksa juga di layar lain: `PUT` ini dulu bisa memulangkan
+   `null` untuk tipe non-nullable.
+
+⚪️ **INFO** — 409 dipilih, bukan 404, justru karena bill-nya masih tampil di
+layar kasir. "Tidak ditemukan" akan terbaca seperti kerusakan sistem, padahal
+yang terjadi adalah tamunya sudah selesai.
+
+### 🟡 PERLU DICEK — `PUT /api/open-bill/:id` kini **perbarui-sebagian** untuk metadata
+
+Empat kolom bill — `meja_id`, `customer_nama`, `customer_wa`, `catatan` —
+sekarang mengikuti aturan **kunci yang tidak dikirim tidak disentuh**. `null`
+eksplisit tetap berarti "kosongkan". `items[]` **tidak** ikut aturan ini: ia
+tetap daftar penuh.
+
+Sebelumnya keempatnya ditimpa tanpa syarat, jadi setiap `PUT` menghapus apa pun
+yang tak ikut dikirim — walau klien pengirimnya tak tahu-menahu soal kolom itu:
+
+- **`catatan` bill** tayang di kartu papan dapur, tapi layar kasir web tak
+  pernah mengirimnya. Catatan "tamu alergi udang" yang **kalian** tulis dari
+  mobile lenyap dari layar dapur begitu kasir web menambah satu pesanan lagi.
+- **`meja_id`** yang dihilangkan MELEPAS bill dari mejanya. Mejanya lalu
+  terlihat kosong, orang membuka bill kedua di sana, dan aturan "satu meja
+  dine-in = satu bill" bocor. Bill yang terlepas itu justru yang paling mungkin
+  tertinggal tak tertagih saat tamunya pulang.
+
+**Yang perlu dikerjakan mobile — periksa badan `PUT` kalian:**
+
+| Kolomnya dikelola layar ini? | Kirim |
+| --- | --- |
+| Ya, ada isinya | nilainya |
+| Ya, kasir mengosongkannya | **`null`** — jangan hilangkan kuncinya |
+| Tidak dikelola layar ini | **jangan kirim** |
+
+Yang paling gampang terlewat adalah baris kedua: kalau kalian memakai pola
+"hilangkan saat kosong", menghapus nama tamu tak akan tersimpan lagi. (Web
+punya cacat ini dan sudah diperbaiki di sisi web pada rilis yang sama.)
+
+Aturan ini tidak berlaku untuk `POST /api/open-bill` — di sana kunci yang absen
+memang berarti "kosong", karena tak ada nilai lama yang bisa dilestarikan.
+
+### 🟡 PERLU DICEK — bill yang dibuka kembali bisa pulang tanpa meja
+
+Membatalkan bill lalu mengembalikan satu barisnya ke antrean dari papan
+**menghidupkan bill itu lagi** — itu lama dan tetap. Yang baru: kalau sementara
+bill itu tertutup mejanya sudah dipakai bill lain, bill yang dibuka kembali
+sekarang **dilepas dari mejanya** (`meja_id` dan `meja_label` jadi `null`).
+
+Kenapa: `POST /api/open-bill` dan `PUT /api/open-bill/:id` sama-sama mengunci
+baris meja (`SELECT … FOR UPDATE`) untuk menegakkan "satu meja dine-in = satu
+bill", tapi keduanya hanya menghitung bill yang belum tertutup. Pembukaan
+kembali tak lewat sana, jadi meja itu bisa berakhir dengan DUA bill hidup —
+dan risikonya persis yang aturan itu cegah: satu bill tertinggal tak tertagih
+saat tamunya pulang.
+
+**Yang perlu dikerjakan mobile:**
+
+- Layar yang menampilkan bill jangan berasumsi `meja_id` selalu terisi setelah
+  sebuah bill dibuka kembali. Tampilkan "tanpa meja" apa adanya, jangan jatuh
+  ke label meja lama yang di-cache.
+- Alasannya bisa dibaca di `GET /api/pesanan/open_bill/:id/log` — barisnya
+  berbunyi "Dibuka kembali & dilepas dari <meja> …".
+- Memasang ulang mejanya lewat `PUT /api/open-bill/:id`; kalau meja itu masih
+  terisi, jawabannya tetap **409 `meja_sudah_ada_bill`** seperti biasa.
+
+Hanya untuk meja `dine_in`, hanya pada transisi tertutup → terbuka, dan hanya
+bila memang ada bentrok. Pembukaan biasa mempertahankan mejanya seperti dulu.
+
+---
+
 ## Rilis: koreksi panduan — badge "diubah setelah transaksi" salah kaprah
 
 > Belum di-merge ke production. **Tidak ada perubahan API**: tak ada migrasi, tak

@@ -166,10 +166,27 @@ export function MenuFormPage() {
   }, [komponen, bahanById, tipe, baseMenuId, menus]);
 
   /**
-   * Menu tanpa komponen sama sekali belum punya HPP apa pun — menegurnya soal
+   * Menu tanpa resep sama sekali belum punya HPP apa pun — menegurnya soal
    * kemasan hanya jadi bising. Peringatan baru berlaku begitu resepnya diisi.
+   *
+   * "Resepnya" untuk PAKET tidak berada di `komponen`. Yang diedit di halaman
+   * ini hanya toppingnya; resep menu dasarnya diwarisi, dan `preview` di atas
+   * memang menjumlahkannya (`hpp: baseHpp + ownHpp`). Jadi paket TANPA topping
+   * sekalipun punya HPP penuh — dan justru itu bentuk paket yang paling lazim
+   * ("menu yang sama, harga bundel", tanpa tambahan apa pun).
+   *
+   * Sebelum ini `adaResep` hanya melihat `komponen`, sementara `punyaKemasan`
+   * tepat di atasnya SUDAH melihat menu dasar. Dua paruh dari satu syarat yang
+   * sama tak sepakat di mana resep paket berada, dan yang kalah adalah
+   * peringatannya: paket tanpa topping atas menu dasar tanpa kemasan lolos
+   * simpan tanpa dialog apa pun — persis kasus yang diminta ditanyakan.
    */
-  const adaResep = komponen.some((k) => k.ingredient_id && angkaDari(k.qty) > 0);
+  const resepDasarPaket =
+    tipe === "paket" && baseMenuId
+      ? (menus?.find((m) => m.id === baseMenuId)?.komponen.length ?? 0) > 0
+      : false;
+  const adaResep =
+    komponen.some((k) => k.ingredient_id && angkaDari(k.qty) > 0) || resepDasarPaket;
   const perluKemasan = adaResep && !punyaKemasan;
 
   /**

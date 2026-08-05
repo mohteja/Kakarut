@@ -135,7 +135,34 @@ export async function api<T = unknown>(
     }
     throw new ApiError(res.status, message, badan);
   }
-  // request berhasil menyentuh server → pastikan overlay tertutup
+  /*
+   * Badan dibaca DULU, overlay ditutup SESUDAHNYA.
+   *
+   * `res.ok` cuma berarti statusnya 2xx — belum berarti yang datang adalah
+   * jawaban aplikasi ini. Kasus nyatanya: reverse-proxy yang melayani shell
+   * SPA (`index.html`) untuk path tak dikenal membalas **200 + HTML** saat
+   * `/api/*` salah rute atau sedang re-deploy. Bentuk itu justru yang paling
+   * mirip "server sedang diperbarui".
+   *
+   * Dulu `emitServerDown(false)` dipanggil sebelum `res.json()`, jadi respons
+   * seperti itu MENUTUP overlay "server sedang diperbarui" lebih dulu, lalu
+   * melempar `SyntaxError` mentah ("Unexpected token '<'"). Satu jalur yang
+   * ada persis untuk mengabari pengguna bahwa server sedang tak bisa dipakai,
+   * malah menyatakan semuanya baik-baik saja tepat ketika ia menerima sesuatu
+   * yang tak ia mengerti — dan menggantinya dengan pesan yang tak berarti
+   * apa-apa bagi pemakainya.
+   *
+   * Sekarang gagal-parse diperlakukan sama dengan server tak terjangkau:
+   * overlay dinyalakan, pesannya sama dengan jalur gagal jaringan.
+   */
+  let data: T;
+  try {
+    data = (await res.json()) as T;
+  } catch {
+    emitServerDown(true);
+    throw new ApiError(0, "Tidak dapat terhubung ke server. Mungkin sedang diperbarui.");
+  }
+  // request benar-benar dijawab aplikasi → pastikan overlay tertutup
   emitServerDown(false);
-  return (await res.json()) as T;
+  return data;
 }

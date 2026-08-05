@@ -264,7 +264,7 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 - `GET /api/bahan` — [any] — query: `ringkas?=1` (varian ringan untuk halaman picker/editor: lewati agregasi supplier & rak — `supplier_utama` selalu `null`, `jumlah_supplier` selalu `0`, `rak_lokasi` selalu `[]`; kolom lain termasuk `produksi_branch_ids` tetap terisi) · `arsip?=1` ([owner/admin] daftar bahan TERARSIP/nonaktif — `is_active=false`; bentuk ringkas; dipakai tab 🗄 Arsip halaman Resep — **403** peran lain) — res: `BahanDto[]`
 - `POST /api/bahan` — [owner/admin] — req `BahanBody`: `{ slug?, kode?|null (max20), nama: string, harga_beli: number(≥0), isi: number(>0), satuan: string="pcs" (max20), satuan_beli?|null, track_stok: bool=true, stok_minimum: number(≥0)=0, stok_minimum_toko: number(≥0)=0, overhead_x: number(>0,≤1000)=1, kategori: string="lain" (max30), pengadaan: "produksi"|"beli"="beli", produksi_di?: "ck"|"cabang"="ck" (lokasi produksi bahan jalur produksi: Central Kitchen atau cabang/kitchen toko), produksi_branch_ids?: uuid[]=[] (cabang PRODUSEN saat produksi_di="cabang"; kosong = semua cabang store; wajib cabang store aktif → **400** bila bukan; diabaikan/dikosongkan saat produksi_di="ck"), divisi_produksi?: "kitchen"|"bar"="kitchen" (divisi yang MEMPRODUKSI saat produksi_di="cabang": role kitchen hanya boleh memproduksi resep divisi kitchen, role bar hanya divisi bar — silang divisi ditolak **400**; tak bermakna utk produksi_di="ck"), foto_hasil_url?|null (max500, FOTO BAHAN JADI — URL hasil `POST /upload?tujuan=resep`), foto_packing_url?|null (max500, FOTO CARA PACKING), catatan?|null, is_packaging: bool=false, is_complement: bool=false, boleh_eceran: bool=false, min_beli: number(≥0)=0, masa_simpan_hari: int(0..3650)=0 (umur layak pakai setelah masuk stok — dasar `exp_date` otomatis lot; 0 = tak diatur), lead_time_hari: int(0..365)=0 (beli = lama pesanan datang; produksi = lama proses — dasar "pesan/buat jauh-jauh hari") }` — res: **201** `BahanDto` (atau **200** bila mereaktivasi slug yang di-soft-delete) — error: **409** bahan aktif sudah ada
 - `POST /api/bahan/bulk` — [owner/admin] — req: `{ items: BahanBulkRow[] (1..200) }` (tiap row bahan jalur beli) — res: **201** `{ jumlah, bahan: BahanDto[] }`
-- `POST /api/bahan/import` — [owner/admin] — req: `{ mode: "perbarui"|"tambah", items: BahanImportRow[] (1..1000) }` — res: `{ ditambah, diperbarui, dipulihkan, dilewati, gagal: [{nama,alasan}] }`
+- `POST /api/bahan/import` — [owner/admin] — req: `{ mode: "perbarui"|"tambah", items: BahanImportRow[] (1..1000) }` — res: `{ ditambah, diperbarui, dipulihkan, dilewati, gagal: [{nama,alasan}] }` — **field selain `nama` OPSIONAL dan absennya bermakna**: field yang DIKIRIM ditulis (termasuk `false`/`0`/`null` — itu perintah yang sah), field yang TIDAK dikirim dibiarkan apa adanya pada bahan lama dan baru memakai default pada bahan BARU (`harga_beli=0, isi=1, satuan="pcs", kategori="lain", jenis="beli", satuan_beli=null, stok_minimum=0, min_beli=0, masa_simpan_hari=0, lead_time_hari=0, boleh_eceran=false, lacak_stok=true, kemasan=false, complement=false, catatan=null`). Jadi kiriman `{nama, harga_beli}` memperbarui HARGA saja — bukan menimpa `isi`/`satuan`/`kategori`/`kemasan` bahan itu. Batas nilainya tetap: `harga_beli≥0`, `isi>0` (**400** bila 0), `masa_simpan_hari` 0..3650, `lead_time_hari` 0..365
 - `PUT /api/bahan/:id` — [owner/admin] — req `BahanPatchBody` (semua field opsional, tanpa default; termasuk `foto_hasil_url`/`foto_packing_url`) — res: `BahanDto` — error: **404**, **409** (ubah ke "produksi" saat dipakai resep aktif / ubah `isi` saat produksi berjalan)
 - `GET /api/bahan/:id/supplier` — [any] — res: `BahanSupplierDto[]` — error: **404**
 - `PUT /api/bahan/:id/supplier` — [owner/admin] — req: `{ items: [{supplier_id: uuid, is_utama: bool=false}] (max50) }` — res: `BahanSupplierDto[]` — error: **400** (>1 utama / supplier invalid / bahan tipe produksi), **404**
@@ -768,7 +768,48 @@ Aksesnya sengaja **asimetris**: membaca terbuka untuk seluruh peran cabang
 - `GET /api/open-bill` — query: `branch_id?` — res: `OpenBillRow[]`
 - `GET /api/open-bill/:id` — res: `OpenBillDetail` — error: **404**
 - `POST /api/open-bill` — req `BillBody`: `{ branch_id?: uuid, meja_id?: uuid|null, customer_nama?|null, customer_wa?|null, catatan?|null, items: [{id?:uuid, menu_id:uuid, qty:number(>0), dine_in_override?:bool|null, catatan?}] (min 1) }` — res: **201** `OpenBillDetail` — error: **400** menu invalid/tak tersedia, **403** kasir luar cabang, **404** meja tak ada, **409** `{ kode: "meja_sudah_ada_bill", bill_id }` meja dine-in itu masih punya bill belum dibayar
-- `PUT /api/open-bill/:id` — req: `BillBody` — res: `OpenBillDetail` — error: **400** (baris tak ditemukan / tak cocok menunya / dikirim dua kali / `pisah_dari` tak valid / **`baris_bill_tak_bisa_dihapus`**), **404**, **409** `meja_sudah_ada_bill` bila `meja_id` dipindah ke meja yang sudah punya bill lain
+- `PUT /api/open-bill/:id` — req: `BillBody` — res: `OpenBillDetail` — error: **400** (baris tak ditemukan / tak cocok menunya / dikirim dua kali / `pisah_dari` tak valid / **`baris_bill_tak_bisa_dihapus`**), **404**, **409** `meja_sudah_ada_bill` bila `meja_id` dipindah ke meja yang sudah punya bill lain, **409** `bill_sudah_ditutup` bila bill-nya sudah dibayar atau dibatalkan
+
+> ### ✏️ `PUT` itu **perbarui-sebagian** untuk metadata bill
+>
+> `meja_id`, `customer_nama`, `customer_wa`, dan `catatan`: **kunci yang tidak
+> dikirim tidak disentuh**; `null` eksplisit tetap berarti "kosongkan". (Pola
+> yang sama dengan `PUT /api/menu/:id`.)
+>
+> Sebelumnya keempatnya ditimpa tanpa syarat, jadi `PUT` menghapus apa pun yang
+> tak ikut dikirim — termasuk `catatan` bill yang tayang di kartu papan dapur,
+> dan `meja_id` yang melepas bill dari mejanya (mejanya lalu terlihat kosong dan
+> aturan "satu meja dine-in = satu bill" bocor).
+>
+> **Konsekuensi untuk klien:** kalau layar kalian MENGELOLA sebuah kolom, kirim
+> selalu — pakai `null` untuk mengosongkan, jangan menghilangkan kuncinya.
+> Kalau tidak mengelolanya, jangan kirim sama sekali. `items[]` tidak ikut
+> aturan ini: ia tetap daftar penuh (lihat larangan hapus baris di bawah).
+
+> ### 🔒 `PUT` pada bill yang sudah ditutup → **409 `bill_sudah_ditutup`**
+>
+> Sebuah bill berakhir dengan dua cara: **dibayar** (`closed_at` + `sale_id`
+> terisi) atau **dibatalkan** (`DELETE`, `sale_id` tetap null). Sesudah itu ia
+> tak bisa disunting lagi:
+>
+> ```json
+> {
+>   "error": "Bill ini sudah dibayar — pesanan tambahan harus dibuat sebagai transaksi baru.",
+>   "kode": "bill_sudah_ditutup",
+>   "sudah_dibayar": true
+> }
+> ```
+>
+> `sudah_dibayar` membedakan dua langkah lanjutan yang berbeda: **true** →
+> buat transaksi baru; **false** → buat bill baru. Jangan menyimpulkannya dari
+> teks `error`.
+>
+> Layar kasir memegang bill di memori, jadi perangkat kedua yang membayar atau
+> membatalkannya tidak terlihat. Sebelum penjaga ini, `PUT` tetap menulis ke
+> bill mati lalu menjawab **200 berisi `null`** (karena `loadDetail` menyaring
+> bill tertutup) — klien membacanya sebagai sukses dan mengosongkan keranjang,
+> sementara pesanan tambahannya tak pernah ditagih. **Perlakukan 409 ini
+> sebagai kegagalan yang mempertahankan keranjang**, bukan sebagai bill hilang.
 
 > ### 🚫 `PUT` TIDAK bisa menghapus baris bill
 >
@@ -877,6 +918,24 @@ Aksesnya sengaja **asimetris**: membaca terbuka untuk seluruh peran cabang
 > Setelah bill lama dibayar **atau** dibatalkan, mejanya bebas dan boleh punya
 > bill baru — kalau tidak, satu bill batal mengunci mejanya selamanya.
 - `DELETE /api/open-bill/:id` — res: `{ ok: true }` — error: **404**
+
+> ### ♻️ Bill yang dibatalkan bisa hidup lagi — dan bisa kehilangan mejanya
+>
+> Membatalkan bill menandai semua barisnya `batal` + mengisi `closed_at`.
+> Mengembalikan satu baris ke antrean dari papan (`POST
+> /api/pesanan/open_bill/:id/item/:itemId/status`) **membuka bill itu kembali**
+> — disengaja, supaya "dibatalkan lalu ternyata jadi" tidak mustahil ditagih.
+>
+> Tapi sementara bill itu tertutup, mejanya bebas dan bill LAIN boleh dibuka di
+> sana. Kalau saat dibuka kembali mejanya sudah dipegang bill lain, bill yang
+> dibuka **dilepas dari mejanya** (`meja_id`/`meja_label` → `null`) dan
+> pelepasannya dicatat di `GET /api/pesanan/open_bill/:id/log`. Bill-nya tetap
+> hidup dan tetap bisa ditagih; memasang ulang mejanya adalah pekerjaan kasir
+> lewat `PUT /api/open-bill/:id` — yang tetap menolak `meja_sudah_ada_bill`
+> selama meja itu masih terisi.
+>
+> Hanya berlaku untuk meja `dine_in`, hanya pada transisi tertutup → terbuka,
+> dan hanya bila memang ada bentrok. Pembukaan biasa mempertahankan mejanya.
 
 **`DELETE` = MEMBATALKAN, BUKAN MENGHAPUS.** Barisnya tetap ada: `closed_at`
 terisi, **setiap baris item** ditandai `pesanan_status = "batal"`, dan satu baris
@@ -1221,9 +1280,28 @@ Laporan:
 - `GET /api/stok/fifo/:ingredientId` — [any] — query: `branch_id?` — **KARTU FIFO** satu bahan pada satu cabang: seluruh riwayat masuk/keluar di-walk kronologis, keluar mengonsumsi lot **paling awal masuk** (First-In First-Out). Res: `BahanFifoDto` = lot masuk (qty/harga/terpakai/sisa/exp) + `pemakaian` (terbaru dulu, maks 300; tiap baris membawa `rincian` diambil dari lot mana + `hpp` biaya FIFO) + `saldo` (== saldo ledger) + `defisit` (stok minus tak tertutup lot). Opname disetujui = reset: selisih turun dikonsumsi FIFO, selisih naik jadi lot penyesuaian berharga acuan. — error: **400** stok tak dilacak, **404**
 - `GET /api/stok/exp` — [any] — query: `branch_id?`, `hari?=7` (clamp 0..60) — res: `ExpLotRow[]` (lot masuk stok ber-`exp_date` ≤ hari ini + `hari`, urut exp ASC, maks 300; lot sebelum baseline opname terakhir bahan itu dikecualikan). **APROKSIMASI**: ledger stok agregat tanpa FIFO — `qty_masuk` = qty saat lot masuk, BUKAN sisa lot; `saldo` live bahan disandingkan agar pemakai menilai sendiri. `sisa_hari` = exp − hari ini (negatif = lewat)
 - `POST /api/stok/waste` — [owner/admin/cashier/tim/kitchen/bar] (peran terikat cabang hanya cabangnya) — req: `{ branch_id?: uuid, ingredient_id: uuid, qty: number(>0), foto_url: string (min 1, **bukti foto wajib**), catatan?|null (max300) }` — mencatat WASTE (mis. bahan kedaluwarsa) lewat mekanisme penyesuaian yang ada: menulis SATU sesi `stock_opnames` (fisik = saldo − qty, `penyesuaian_kategori:"waste_bahan"`, status `menunggu`) → tampil di Riwayat SO dan **baru memotong stok setelah di-ACC** owner/admin — res: **201** `{ ok, session_id, nomor }` (SO-xxxx) — error: **400** (bahan invalid/tak dilacak, qty > saldo), **403** luar cabang
-- `POST /api/stok/opname` — [owner/admin/cashier/tim/kitchen/bar] (inline) — req `OpnameBody`: `{ branch_id?: uuid, catatan?|null, items: [{ingredient_id:uuid, qty:number(≥0), foto_url?|null, alasan?|null}] (min 1) }` — res: **201** `{ ok, jumlah, session_id, nomor, ringkasan }` — error: **400** bahan invalid/tak dilacak, **403** (luar cabang / bukan petugas opname rak itu — hanya petugas ANGGOTA AKTIF yang dihitung; penugasan basi diabaikan)
+- `POST /api/stok/opname` — [owner/admin/cashier/tim/kitchen/bar] (inline) — req `OpnameBody`: `{ branch_id?: uuid, catatan?|null, client_ref?: uuid, device_id?|null, items: [{ingredient_id:uuid, qty:number(≥0), foto_url?|null, alasan?|null}] (min 1) }` — res: **201** `{ ok, jumlah, session_id, nomor, ringkasan }` — error: **400** bahan invalid/tak dilacak, **403** (luar cabang / bukan petugas opname rak itu — hanya petugas ANGGOTA AKTIF yang dihitung; penugasan basi diabaikan)
+
+> ### ♻️ `client_ref` pada opname — kiriman ulang tak melahirkan sesi kembar
+>
+> Ledger yang sama dengan `POST /api/penjualan`, `POST /api/penjualan/:id/refund`,
+> dan `/api/sync`: kunci `(company_id, client_ref)`. Kiriman ulang dengan
+> `client_ref` yang sama memulangkan **hasil pertama apa adanya** (`201`,
+> `session_id` yang sama) tanpa membuat sesi baru. Kosong/absen → diabaikan,
+> jadi klien lama tak berubah perilakunya.
+>
+> Kenapa perlu meski nilainya aman: opname adalah baseline **mutlak**, bukan
+> selisih, jadi dua sesi kembar mendarat di angka stok yang sama. Yang rusak
+> jejaknya — Riwayat Opname memuat dua sesi identik dan owner harus meng-ACC dua
+> kali untuk satu penghitungan.
+>
+> **Satu `client_ref` = satu penghitungan.** Mulai menghitung lokasi/produk lain
+> berarti kejadian baru: terbitkan UUID baru, atau server akan memulangkan hasil
+> lama dan hitungan barunya hilang.
 - `GET /api/stok/awal` — [owner/admin] — query: `branch_id?` — res: `{ tanggal, items: [{ingredient_id,qty,tanggal}] }`
-- `POST /api/stok/awal` — [owner/admin] — req: `OpnameBody` + `{ tanggal?: "YYYY-MM-DD" }` (upsert saldo awal) — res: **201** `{ ok, jumlah, tanggal }` — error: **400**
+- `POST /api/stok/awal` — [owner/admin] — req: `OpnameBody` **tanpa `client_ref`/`device_id`** + `{ tanggal?: "YYYY-MM-DD" }` (upsert saldo awal) — res: **201** `{ ok, jumlah, tanggal }` — error: **400**
+
+  > Tak perlu `client_ref`: penulisannya hapus-lalu-sisip atas `(company, branch, session_id IS NULL, ingredient_id)`, jadi kiriman ganda mendarat di baris yang sama persis. Berbeda dari `POST /api/stok/opname`, yang MENAMBAH sesi dan karena itu memakai kunci idempotensi.
 - `GET /api/stok/penyesuaian` — [any] — query: `branch_id?`, `status?` (`belum` | `menunggu_persetujuan`) — res: row penyesuaian
 - `POST /api/stok/penyesuaian/:id/klarifikasi` — [owner/admin] — req: `{ kategori: "waste_bahan"|"waste_matang"|"waste_gagal"|"koreksi_pencatatan"|"lainnya", catatan?|null, foto_url: string (min 1, wajib) }` — res: `{ ok: true }` — error: **400** (tak ada selisih / sudah disetujui), **404**
 - `POST /api/stok/penyesuaian/:id/setujui` — [owner/admin] — res: `{ ok: true }` — error: **400**, **404**

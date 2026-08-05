@@ -286,30 +286,45 @@ export type BahanImportMode = "perbarui" | "tambah";
  * Satu baris impor CSV bahan baku (hasil parse di web → dikirim ke server).
  * Cocok dengan bahan lewat `kode` (bila ada) lalu slug (nama). `jenis`
  * (pengadaan) hanya diterapkan pada bahan BARU.
+ *
+ * SEMUA field selain `nama` OPSIONAL, dan absennya BERARTI SESUATU:
+ *
+ *   - field ADA  → nilainya dipakai (termasuk `false`, `0`, dan `null` — itu
+ *     perintah yang sah: mengosongkan catatan, mematikan `kemasan`, dst);
+ *   - field TIDAK ADA → pada bahan LAMA nilainya DIBIARKAN apa adanya; pada
+ *     bahan BARU barulah default dipakai.
+ *
+ * Bedanya bukan kosmetik. Berkas CSV yang cuma berisi `nama,harga_beli` —
+ * bentuk yang paling lazim dipakai memperbarui harga dari daftar supplier —
+ * dulu menulis default ke SELURUH kolom lain pada tiap bahan yang cocok:
+ * `isi` balik ke 1 (satu dus isi 24 jadi isi 1 → HPP per botol 24× lipat),
+ * `satuan` jadi "pcs", `kategori` jadi "lain", `kemasan`/`complement` mati,
+ * `stok_minimum` nol. Semuanya tanpa satu pun pesan, dengan spanduk hijau
+ * "✅ Impor selesai — 12 diperbarui" di layar.
  */
 export interface BahanImportRow {
-  kode: string | null;
+  kode?: string | null;
   nama: string;
-  kategori: string;
-  jenis: JenisPengadaan;
-  harga_beli: number;
-  isi: number;
-  satuan: string;
-  satuan_beli: string | null;
-  stok_minimum: number;
+  kategori?: string;
+  jenis?: JenisPengadaan;
+  harga_beli?: number;
+  isi?: number;
+  satuan?: string;
+  satuan_beli?: string | null;
+  stok_minimum?: number;
   /** minimal belanja (MOQ); 0 = tanpa minimum */
-  min_beli: number;
-  boleh_eceran: boolean;
-  lacak_stok: boolean;
+  min_beli?: number;
+  boleh_eceran?: boolean;
+  lacak_stok?: boolean;
   /** kemasan take-away (is_packaging) */
-  kemasan: boolean;
+  kemasan?: boolean;
   /** complement (×0.5 dine-in) */
-  complement: boolean;
+  complement?: boolean;
   /** masa simpan (hari); 0 = tak diatur */
-  masa_simpan_hari: number;
+  masa_simpan_hari?: number;
   /** lead time (hari); 0 = tanpa info */
-  lead_time_hari: number;
-  catatan: string | null;
+  lead_time_hari?: number;
+  catatan?: string | null;
 }
 
 /** Ringkasan hasil impor CSV bahan baku. */

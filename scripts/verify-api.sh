@@ -2838,6 +2838,48 @@ api "$OWNER" POST /bahan/import '{"mode":"perbarui","items":[{"nama":"impor full
 IMPF2=$(api "$OWNER" GET /bahan | jq '[.[]|select(.nama=="impor full76")][0]')
 cek "impor perbarui: kemasan/complement dimatikan" "V == 1" \
   "$(echo "$IMPF2" | jq '((.is_packaging==false) and (.is_complement==false) and (.min_beli==0))|if . then 1 else 0 end')"
+# ── kolom yang TIDAK dikirim tak boleh ditimpa ────────────────────────────────
+# Berkas CSV berisi `nama,harga_beli` saja (daftar harga supplier) adalah bentuk
+# yang paling lazim. Dulu tiap kolom yang tak ada di berkas tetap terkirim
+# dengan nilai bawaannya dan mode "perbarui" menuliskannya ke SETIAP bahan yang
+# cocok: isi→1 (HPP per satuan melonjak sebesar isinya), satuan→"pcs",
+# kategori→"lain", kemasan→mati, stok_minimum→0. Semuanya tanpa satu pesan pun.
+api "$OWNER" POST /bahan/import '{"mode":"tambah","items":[{"kode":"UTH76","nama":"utuh uji76","jenis":"beli","kategori":"baso","harga_beli":48000,"isi":24,"satuan":"botol","satuan_beli":"dus","stok_minimum":7,"min_beli":3,"masa_simpan_hari":45,"lead_time_hari":4,"boleh_eceran":true,"lacak_stok":true,"kemasan":true,"complement":true,"catatan":"catatan awal"}]}' > /dev/null
+# hanya nama + harga yang dikirim — persis berkas `nama,harga_beli`
+IMP8=$(api "$OWNER" POST /bahan/import '{"mode":"perbarui","items":[{"nama":"utuh uji76","harga_beli":51000}]}')
+cek "impor sebagian: 1 diperbarui" "V == 1" \
+  "$(echo "$IMP8" | jq '((.diperbarui==1) and (.ditambah==0) and ((.gagal|length)==0))|if . then 1 else 0 end')"
+UTH=$(api "$OWNER" GET /bahan | jq '[.[]|select(.nama=="utuh uji76")][0]')
+cek "impor sebagian: harga yang DIKIRIM tersimpan (51000)" "V == 51000" "$(echo "$UTH" | jq '.harga_beli')"
+cek "impor sebagian: isi TIDAK ditimpa jadi 1" "V == 24" "$(echo "$UTH" | jq '.isi')"
+cek "impor sebagian: satuan TIDAK ditimpa jadi pcs" "V == 1" \
+  "$(echo "$UTH" | jq '((.satuan=="botol") and (.satuan_beli=="dus"))|if . then 1 else 0 end')"
+cek "impor sebagian: kategori TIDAK ditimpa jadi lain" "V == 1" \
+  "$(echo "$UTH" | jq '(.kategori=="baso")|if . then 1 else 0 end')"
+cek "impor sebagian: kemasan & complement TIDAK padam" "V == 1" \
+  "$(echo "$UTH" | jq '((.is_packaging==true) and (.is_complement==true))|if . then 1 else 0 end')"
+cek "impor sebagian: ambang & jadwal TIDAK dinolkan" "V == 1" \
+  "$(echo "$UTH" | jq '((.stok_minimum==7) and (.min_beli==3) and (.masa_simpan_hari==45) and (.lead_time_hari==4))|if . then 1 else 0 end')"
+cek "impor sebagian: boleh_eceran & catatan TIDAK dihapus" "V == 1" \
+  "$(echo "$UTH" | jq '((.boleh_eceran==true) and (.catatan=="catatan awal"))|if . then 1 else 0 end')"
+# harga/unit ikut benar KARENA isi-nya utuh — inti kerusakan lamanya
+cek "impor sebagian: harga per unit 51000/24 (bukan /1)" "V == 1" \
+  "$(echo "$UTH" | jq '((.harga_per_unit*24 - 51000)|fabs < 0.01)|if . then 1 else 0 end')"
+# nilai yang MEMANG dikirim tetap ditulis, termasuk yang falsy
+api "$OWNER" POST /bahan/import '{"mode":"perbarui","items":[{"nama":"utuh uji76","kemasan":false,"stok_minimum":0,"catatan":null}]}' > /dev/null
+UTH2=$(api "$OWNER" GET /bahan | jq '[.[]|select(.nama=="utuh uji76")][0]')
+cek "impor sebagian: false/0/null yang DIKIRIM tetap tersimpan" "V == 1" \
+  "$(echo "$UTH2" | jq '((.is_packaging==false) and (.stok_minimum==0) and ((.catatan==null) or (.catatan=="")))|if . then 1 else 0 end')"
+cek "impor sebagian: yang tak dikirim tetap utuh di kiriman kedua" "V == 1" \
+  "$(echo "$UTH2" | jq '((.isi==24) and (.satuan=="botol") and (.is_complement==true) and (.harga_beli==51000))|if . then 1 else 0 end')"
+# bahan BARU tetap dapat nilai bawaan (tak ada nilai lama untuk dibiarkan)
+api "$OWNER" POST /bahan/import '{"mode":"tambah","items":[{"nama":"minim uji76"}]}' > /dev/null
+MNM=$(api "$OWNER" GET /bahan | jq '[.[]|select(.nama=="minim uji76")][0]')
+cek "bahan baru dari baris minim: default terpasang" "V == 1" \
+  "$(echo "$MNM" | jq '((.isi==1) and (.satuan=="pcs") and (.harga_beli==0) and (.track_stok==true) and (.pengadaan=="beli"))|if . then 1 else 0 end')"
+# isi 0 tetap ditolak validasi — bukan diterima lalu jadi pembagi maut
+cek "impor isi 0 → 400 (bukan diterima)" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/bahan/import" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"mode":"perbarui","items":[{"nama":"utuh uji76","isi":0}]}')"
 # kasir tak boleh impor → 403
 cek "kasir impor CSV → 403" "V == 403" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/bahan/import" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d '{"mode":"tambah","items":[{"nama":"x","jenis":"beli","harga_beli":1,"isi":1,"satuan":"pcs"}]}')"
@@ -5612,7 +5654,30 @@ echo "== 143. Pengajuan cuti/libur + rekap absen bulanan =="
 # skrip memakai UTC sementara rekap memakai WIB — dari jam 00:00–07:00 WIB
 # keduanya berbeda BULAN, dan seluruh blok ini gagal tanpa ada yang rusak.
 BULAN143=$(TZ=Asia/Jakarta date +%Y-%m)
-M143="$BULAN143-05"; S143="$BULAN143-06"
+# Tanggal cuti WAJIB bukan hari ini, dan itu bukan kerewelan.
+#
+# Rekap menilai tiap tanggal berurutan: ada cap absen → HADIR; baru sesudah itu
+# cuti/libur yang disetujui. Cap MENANG, dan itu memang aturannya (orang yang
+# tetap masuk saat punya izin sakit memang hadir). Sementara kasir uji ini
+# WAJIB absen masuk lebih dulu — gerbang buka-kasir menuntutnya — jadi hari ini
+# selalu punya cap absen atas namanya.
+#
+# Dengan tanggal dipatok mati "05/06", blok ini lolos 29 hari sebulan lalu
+# gagal pada tanggal 5: harinya terbaca 'hadir', `cuti` tinggal 1, dan dua
+# asersi di bawah merah tanpa ada satu pun kode yang rusak. Persis itu yang
+# terjadi — lolos 3 Agustus (tanggal 5 masih di masa depan), merah 5 Agustus.
+# Tiga tanggal, dan ketiganya harus SALING EKSKLUSIF — bukan kebetulan:
+# server menolak pengajuan yang bertindih dengan pengajuan hidup milik orang
+# yang sama (409). Libur mingguan di bawah dibuat SESUDAH cuti di atas
+# disetujui, jadi kalau tanggalnya bersinggungan, pembuatannya gagal, `.id`
+# jadi kosong, dan DELETE atas id kosong membalas 400 — bukan 403/200 yang
+# diuji. `L143` karena itu ikut bergeser bersama pasangan cutinya.
+HARI143=$(TZ=Asia/Jakarta date +%d)
+if [ "$HARI143" = "05" ] || [ "$HARI143" = "06" ]; then
+  M143="$BULAN143-20"; S143="$BULAN143-21"; L143="$BULAN143-07"
+else
+  M143="$BULAN143-05"; S143="$BULAN143-06"; L143="$BULAN143-20"
+fi
 
 cek "guard: tanpa token → 401" "V == 401" \
   "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/pengajuan")"
@@ -5671,7 +5736,7 @@ cek "rekap: bulan tak valid → jatuh ke bulan berjalan" "V == 1" \
 
 # Batalkan: pemohon hanya boleh saat masih menunggu; orang lain tak boleh sama sekali.
 P143B=$(api "$REISS105" POST /pengajuan \
-  "{\"kategori\":\"mingguan\",\"tanggal_mulai\":\"$BULAN143-20\",\"tanggal_selesai\":\"$BULAN143-20\"}")
+  "{\"kategori\":\"mingguan\",\"tanggal_mulai\":\"$L143\",\"tanggal_selesai\":\"$L143\"}")
 cek "libur mingguan → jenis 'libur' (diturunkan server)" "V == 1" \
   "$(echo "$P143B" | jq '.jenis=="libur"|if . then 1 else 0 end')"
 PID143B=$(echo "$P143B" | jq -r .id)
@@ -6092,6 +6157,29 @@ cek "baris tambahan pakai harga HARI INI (25000), yang lama tetap 10000" "V == 1
 cek "PUT id milik bill lain → 400" "V == 400" \
   "$(status_code_body "$REISS105" PUT "/open-bill/$OBID147" "{\"meja_id\":\"$MEJA147\",\"items\":[{\"id\":\"00000000-0000-0000-0000-000000000000\",\"menu_id\":\"$M147\",\"qty\":1}]}")"
 
+# KUNCI YANG TAK DIKIRIM = JANGAN SENTUH. Dulu PUT menimpa keempat kolom
+# metadata tanpa syarat, jadi ia menghapus apa pun yang tak ikut dikirim —
+# walau klien itu tak tahu-menahu soal kolomnya. `catatan` bill tayang di kartu
+# papan dapur tapi tak pernah dikirim layar kasir web, dan `meja_id` yang
+# hilang MELEPAS bill dari mejanya: mejanya lalu terlihat kosong, bill kedua
+# dibuka di sana, dan aturan "satu meja dine-in = satu bill" bocor lewat pintu
+# belakang. Bill yang terlepas itu justru yang paling mungkin tak tertagih.
+ITEMS147=$(echo "$OBT147" | jq -c '[.items[]|{id:.id, menu_id:.menu_id, qty:.qty}]')
+api "$REISS105" PUT "/open-bill/$OBID147" \
+  "$(jq -nc --arg m "$MEJA147" --argjson it "$ITEMS147" '{meja_id:$m, catatan:"tamu alergi udang", customer_nama:"Budi", items:$it}')" > /dev/null
+PP147=$(api "$REISS105" PUT "/open-bill/$OBID147" "$(jq -nc --argjson it "$ITEMS147" '{items:$it}')")
+cek "PUT tanpa kunci catatan: catatan bill TIDAK ikut terhapus" "V == 1" \
+  "$(echo "$PP147" | jq '(.catatan=="tamu alergi udang")|if . then 1 else 0 end')"
+cek "PUT tanpa kunci customer_nama: nama tamu juga bertahan" "V == 1" \
+  "$(echo "$PP147" | jq '(.customer_nama=="Budi")|if . then 1 else 0 end')"
+cek "PUT tanpa kunci meja_id: bill TETAP menempel di mejanya" "V == 1" \
+  "$(echo "$PP147" | jq --arg m "$MEJA147" '(.meja_id==$m)|if . then 1 else 0 end')"
+cek "…dan harga terkunci tetap utuh setelah PUT sebagian itu" "V == 1" \
+  "$(echo "$PP147" | jq '([.items[].harga_satuan]|sort) == [10000,25000]|if . then 1 else 0 end')"
+# Yang hilang HANYA penghapusan yang tak diminta — null eksplisit tetap bekerja.
+cek "catatan null EKSPLISIT tetap mengosongkan" "V == 1" \
+  "$(api "$REISS105" PUT "/open-bill/$OBID147" "$(jq -nc --arg m "$MEJA147" --argjson it "$ITEMS147" '{meja_id:$m, catatan:null, customer_nama:null, items:$it}')" | jq '((.catatan==null) and (.customer_nama==null))|if . then 1 else 0 end')"
+
 # BAYAR: yang ditagih adalah harga terkunci, bukan harga menu terbaru
 S147=$(api "$REISS105" POST /penjualan "{\"meja_id\":\"$MEJA147\",\"metode_bayar\":\"tunai\",\"open_bill_id\":\"$OBID147\",\"items\":[{\"menu_id\":\"$M147\",\"qty\":4,\"open_bill_item_id\":\"$ITEM147B\"},{\"menu_id\":\"$M147\",\"qty\":1}]}")
 SID147=$(echo "$S147" | jq -r '.sale.id')
@@ -6128,6 +6216,29 @@ cek "membayar bill yang DIBATALKAN → 409" "V == 409" \
   "$(status_code_body "$REISS105" POST /penjualan "{\"meja_id\":\"$MEJA147\",\"metode_bayar\":\"tunai\",\"open_bill_id\":\"$OBID147X\",\"items\":[{\"menu_id\":\"$M147\",\"qty\":1}]}")"
 cek "…: sebab = bill_dibatalkan (transaksi TIDAK tercatat — jangan dibuang)" "V == 1" \
   "$(api "$REISS105" POST /penjualan "{\"meja_id\":\"$MEJA147\",\"metode_bayar\":\"tunai\",\"open_bill_id\":\"$OBID147X\",\"items\":[{\"menu_id\":\"$M147\",\"qty\":1}]}" | jq '(.sebab=="bill_dibatalkan")|if . then 1 else 0 end')"
+# MENYUNTING bill yang sudah ditutup juga harus ditolak, bukan cuma
+# membayarnya. Layar kasir memegang bill di memori, jadi perangkat kedua yang
+# membayar/membatalkan tak terlihat olehnya — dan tombol "Perbarui Bill" masih
+# bisa ditekan. Dulu PUT hanya memeriksa "ada" + "satu perusahaan", jadi ia
+# menulis ke bill mati: pada bill DIBAYAR tambahannya tak pernah ditagih
+# (barisnya sudah tersalin ke sale_items), pada bill DIBATALKAN baris hidup
+# masuk ke bill yang tak akan ditagih siapa pun. Lalu `loadDetail` menyaring
+# bill tertutup, jadi jawabannya 200 berisi `null` — klien membacanya sebagai
+# sukses dan mengosongkan keranjang. Pesanannya lenyap tanpa satu pun galat.
+cek "PUT bill yang SUDAH DIBAYAR → 409 (bukan 200 berisi null)" "V == 409" \
+  "$(status_code_body "$REISS105" PUT "/open-bill/$OBID147" "{\"meja_id\":\"$MEJA147\",\"items\":[{\"menu_id\":\"$M147\",\"qty\":1}]}")"
+cek "…: kode bill_sudah_ditutup + sudah_dibayar=true" "V == 1" \
+  "$(api "$REISS105" PUT "/open-bill/$OBID147" "{\"meja_id\":\"$MEJA147\",\"items\":[{\"menu_id\":\"$M147\",\"qty\":1}]}" | jq '((.kode=="bill_sudah_ditutup") and (.sudah_dibayar==true))|if . then 1 else 0 end')"
+cek "PUT bill yang DIBATALKAN → 409" "V == 409" \
+  "$(status_code_body "$REISS105" PUT "/open-bill/$OBID147X" "{\"meja_id\":\"$MEJA147\",\"items\":[{\"menu_id\":\"$M147\",\"qty\":1}]}")"
+# Dibedakan, karena langkah kasirnya berbeda: yang sudah dibayar butuh
+# transaksi BARU, yang dibatalkan butuh bill baru.
+cek "…: sudah_dibayar=false untuk bill yang dibatalkan" "V == 1" \
+  "$(api "$REISS105" PUT "/open-bill/$OBID147X" "{\"meja_id\":\"$MEJA147\",\"items\":[{\"menu_id\":\"$M147\",\"qty\":1}]}" | jq '((.kode=="bill_sudah_ditutup") and (.sudah_dibayar==false))|if . then 1 else 0 end')"
+# Penolakan itu tak boleh menyisakan apa pun: penjualan yang sudah terbuku
+# tetap 2 baris (4 porsi terkunci + 1 porsi harga hari ini), tidak bertambah.
+cek "penjualan bill itu TIDAK ikut berubah oleh PUT yang ditolak" "V == 2" \
+  "$(api "$OWNER" GET "/penjualan/$SID147" | jq '.items|length')"
 # Sebab yang sama harus sampai lewat ANTREAN OFFLINE, bukan hanya jalur online.
 SYNC147=$(api "$REISS105" POST /sync "$(jq -nc --arg r "$(cat /proc/sys/kernel/random/uuid)" --arg w "$(date -u +%FT%TZ)" --arg mj "$MEJA147" --arg ob "$OBID147X" --arg m "$M147" '{commands:[{client_ref:$r,tipe:"penjualan",waktu:$w,payload:{meja_id:$mj,metode_bayar:"tunai",open_bill_id:$ob,items:[{menu_id:$m,qty:1}]}}]}')")
 cek "sync: bayar bill dibatalkan → gagal 409 + sebab bill_dibatalkan" "V == 1" \
@@ -7548,6 +7659,97 @@ cek "id pemenang == shift aktif di server (bukan laci kedua)" "V == 1" \
      | grep -qxF "$(printf '%s' "$AKTIF161" | jq -r '.id')" && echo 1 || echo 0)"
 cek "modal shift aktif == yang dikirim ketiganya (123.000)" "V == 123000" \
   "$(printf '%s' "$AKTIF161" | jq -r '.modal_awal')"
+
+echo
+echo "── §162 Bill dibuka kembali: tak boleh menabrak satu-meja-satu-bill ──"
+# Aturan "satu meja dine-in = satu bill" dijaga sampai `SELECT … FOR UPDATE` di
+# `POST` dan `PUT /open-bill`. Tapi keduanya hanya menghitung bill yang
+# `closed_at`-nya masih kosong, dan ada jalan masuk KETIGA yang tak lewat sana:
+# bill yang sudah DIBATALKAN lalu dihidupkan lagi dari papan. Ketiga langkahnya
+# lewat tombol yang sah dan tak satu pun keliru sendiri-sendiri.
+MEJA162=$(api "$OWNER" POST /meja "{\"nama\":\"Meja Buka Lagi 162\",\"tipe\":\"dine_in\",\"branch_id\":\"$CB154\"}" | jq -r .id)
+OB162A=$(api "$REISS105" POST /open-bill "{\"meja_id\":\"$MEJA162\",\"items\":[{\"menu_id\":\"$M154\",\"qty\":1}]}")
+A162=$(echo "$OB162A" | jq -r .id)
+BR162=$(echo "$OB162A" | jq -r '.items[0].id')
+api "$REISS105" DELETE "/open-bill/$A162" > /dev/null
+cek "bill A dibatalkan → lenyap dari pemilih kasir" "V == 404" \
+  "$(status_code "$REISS105" GET "/open-bill/$A162")"
+# Ini SAH dan bukan bagian yang diperbaiki: mejanya memang sudah bebas.
+B162=$(api "$REISS105" POST /open-bill "{\"meja_id\":\"$MEJA162\",\"items\":[{\"menu_id\":\"$M154\",\"qty\":1}]}" | jq -r '.id // ""')
+cek "tamu baru di meja yang sama → bill B boleh dibuat" "V == 1" \
+  "$(python3 -c "print(1 if len('$B162') == 36 else 0)")"
+# Langkah ketiga: dapur mengembalikan satu baris bill A ke antrean.
+api "$TKIT154" POST "/pesanan/open_bill/$A162/item/$BR162/status" '{"status":"dikerjakan"}' > /dev/null
+cek "bill A hidup lagi — 'dibatalkan lalu ternyata jadi' tetap bisa ditagih" "V == 200" \
+  "$(status_code "$REISS105" GET "/open-bill/$A162")"
+cek "…tapi DILEPAS dari mejanya, bukan menempel jadi bill kedua" "V == 1" \
+  "$(api "$REISS105" GET "/open-bill/$A162" | jq '(.meja_id==null)|if . then 1 else 0 end')"
+cek "meja itu tetap dipegang TEPAT satu bill (yaitu B)" "V == 1" \
+  "$(api "$REISS105" GET /open-bill | jq --arg m "$MEJA162" '[.[]|select(.meja_id==$m)]|length')"
+cek "…dan bill itu memang B" "V == 1" \
+  "$(api "$REISS105" GET /open-bill | jq --arg m "$MEJA162" --arg b "$B162" '[.[]|select(.meja_id==$m and .id==$b)]|length')"
+# Pelepasan yang SUNYI lebih buruk daripada cacatnya: kasir harus tahu kenapa
+# bill-nya lepas dan apa langkah berikutnya.
+cek "pelepasannya tercatat di riwayat papan" "V == 1" \
+  "$(api "$REISS105" GET "/pesanan/open_bill/$A162/log" | jq '[.[]|select(.aksi|test("dilepas dari"))]|length>=1|if . then 1 else 0 end')"
+cek "catatannya menyebut langkah berikutnya (pasang ulang dari kasir)" "V == 1" \
+  "$(api "$REISS105" GET "/pesanan/open_bill/$A162/log" | jq '[.[]|select(.aksi|test("pasang ulang mejanya dari kasir"))]|length>=1|if . then 1 else 0 end')"
+# Jalur pemulihannya sudah ada dan sudah dijaga — memasang ulang ke meja yang
+# masih terisi tetap ditolak dengan kode yang sudah dikenal klien.
+IT162A=$(api "$REISS105" GET "/open-bill/$A162" | jq -c '[.items[]|{id:.id, menu_id:.menu_id, qty:.qty}]')
+cek "pasang ulang A ke meja yang masih dipegang B → 409" "V == 409" \
+  "$(status_code_body "$REISS105" PUT "/open-bill/$A162" "$(jq -nc --arg m "$MEJA162" --argjson it "$IT162A" '{meja_id:$m, items:$it}')")"
+cek "…dengan kode meja_sudah_ada_bill" "V == 1" \
+  "$(api "$REISS105" PUT "/open-bill/$A162" "$(jq -nc --arg m "$MEJA162" --argjson it "$IT162A" '{meja_id:$m, items:$it}')" | jq '(.kode=="meja_sudah_ada_bill")|if . then 1 else 0 end')"
+# Dan sesudah B dibayar, mejanya bebas — A boleh dipasang lagi ke sana.
+api "$REISS105" POST /penjualan "{\"meja_id\":\"$MEJA162\",\"metode_bayar\":\"tunai\",\"open_bill_id\":\"$B162\",\"items\":[{\"menu_id\":\"$M154\",\"qty\":1}]}" > /dev/null
+cek "B dibayar → A boleh dipasang kembali ke meja itu" "V == 1" \
+  "$(api "$REISS105" PUT "/open-bill/$A162" "$(jq -nc --arg m "$MEJA162" --argjson it "$IT162A" '{meja_id:$m, items:$it}')" | jq --arg m "$MEJA162" '(.meja_id==$m)|if . then 1 else 0 end')"
+# PEMBUKAAN BIASA (mejanya tidak sedang dipakai siapa pun) TIDAK melepas apa
+# pun — kalau tidak, tiap penandaan status dari papan akan mencabut bill dari
+# mejanya, kerusakan yang jauh lebih besar daripada yang diperbaiki.
+api "$REISS105" DELETE "/open-bill/$A162" > /dev/null
+api "$TKIT154" POST "/pesanan/open_bill/$A162/item/$BR162/status" '{"status":"dikerjakan"}' > /dev/null
+cek "dibuka kembali ke meja yang KOSONG → mejanya dipertahankan" "V == 1" \
+  "$(api "$REISS105" GET "/open-bill/$A162" | jq --arg m "$MEJA162" '(.meja_id==$m)|if . then 1 else 0 end')"
+api "$REISS105" DELETE "/open-bill/$A162" > /dev/null
+
+echo
+echo "── §163 Opname: kiriman ulang tak melahirkan sesi kembar ──"
+# Opname adalah baseline MUTLAK, bukan selisih — jadi dua sesi kembar mendarat
+# di angka stok yang sama. Yang rusak jejaknya: Riwayat Opname memuat dua sesi
+# identik dan owner harus meng-ACC dua kali untuk satu penghitungan. Di layar
+# yang justru dipakai memeriksa kejujuran stok, riwayat kembar itu sendiri jadi
+# pertanyaan. Ledger idempotensinya SAMA dengan penjualan/refund/sync.
+BHN163=$(api "$OWNER" POST /bahan "{\"nama\":\"Bahan Opname 163\",\"satuan\":\"gr\",\"harga_beli\":1000,\"isi\":1,\"track_stok\":true,\"pengadaan\":\"beli\"}" | jq -r .id)
+REF163=$(cat /proc/sys/kernel/random/uuid)
+BODY163=$(jq -nc --arg b "$BHN163" --arg r "$REF163" --arg c "$CB154" \
+  '{branch_id:$c, client_ref:$r, catatan:"Opname uji 163", items:[{ingredient_id:$b, qty:7}]}')
+SES163A=$(api "$OWNER" POST /stok/opname "$BODY163")
+ID163A=$(echo "$SES163A" | jq -r '.session_id // ""')
+cek "opname pertama tersimpan (punya session_id)" "V == 1" \
+  "$(python3 -c "print(1 if len('$ID163A') == 36 else 0)")"
+# Kiriman ULANG dengan client_ref yang SAMA — inilah yang dulu melahirkan sesi
+# kedua. Harus memulangkan hasil yang sama persis, bukan sesi baru.
+SES163B=$(api "$OWNER" POST /stok/opname "$BODY163")
+cek "kiriman ulang memulangkan session_id yang SAMA" "V == 1" \
+  "$(echo "$SES163B" | jq -r --arg a "$ID163A" '(.session_id==$a)|if . then 1 else 0 end')"
+cek "…dan ringkasannya juga sama (hasil diputar ulang, bukan dihitung lagi)" "V == 1" \
+  "$(echo "$SES163B" | jq -r --argjson a "$(echo "$SES163A" | jq -c .ringkasan)" '(.ringkasan==$a)|if . then 1 else 0 end')"
+cek "riwayat opname memuat TEPAT satu sesi untuk kunci itu" "V == 1" \
+  "$(api "$OWNER" GET "/stok/opname/riwayat?branch_id=$CB154" | jq --arg a "$ID163A" '[.[]|select(.session_id==$a)]|length')"
+# client_ref BEDA = penghitungan baru, dan itu memang harus lahir sebagai sesi
+# tersendiri — kalau tidak, opname ulang di hari yang sama jadi mustahil.
+SES163C=$(api "$OWNER" POST /stok/opname \
+  "$(jq -nc --arg b "$BHN163" --arg r "$(cat /proc/sys/kernel/random/uuid)" --arg c "$CB154" \
+     '{branch_id:$c, client_ref:$r, catatan:"Opname uji 163 kedua", items:[{ingredient_id:$b, qty:9}]}')")
+cek "client_ref BEDA → sesi baru (bukan ikut diputar ulang)" "V == 1" \
+  "$(echo "$SES163C" | jq -r --arg a "$ID163A" '((.session_id!=$a) and ((.session_id|length)==36))|if . then 1 else 0 end')"
+# Klien lama tanpa client_ref tak boleh berubah perilakunya.
+SES163D=$(api "$OWNER" POST /stok/opname \
+  "$(jq -nc --arg b "$BHN163" --arg c "$CB154" '{branch_id:$c, catatan:"Opname uji 163 tanpa ref", items:[{ingredient_id:$b, qty:5}]}')")
+cek "tanpa client_ref: tetap membuat sesi (kompatibilitas klien lama)" "V == 1" \
+  "$(echo "$SES163D" | jq -r '((.session_id|length)==36)|if . then 1 else 0 end')"
 
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]
