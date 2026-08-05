@@ -5612,7 +5612,24 @@ echo "== 143. Pengajuan cuti/libur + rekap absen bulanan =="
 # skrip memakai UTC sementara rekap memakai WIB — dari jam 00:00–07:00 WIB
 # keduanya berbeda BULAN, dan seluruh blok ini gagal tanpa ada yang rusak.
 BULAN143=$(TZ=Asia/Jakarta date +%Y-%m)
-M143="$BULAN143-05"; S143="$BULAN143-06"
+# Tanggal cuti WAJIB bukan hari ini, dan itu bukan kerewelan.
+#
+# Rekap menilai tiap tanggal berurutan: ada cap absen → HADIR; baru sesudah itu
+# cuti/libur yang disetujui. Cap MENANG, dan itu memang aturannya (orang yang
+# tetap masuk saat punya izin sakit memang hadir). Sementara kasir uji ini
+# WAJIB absen masuk lebih dulu — gerbang buka-kasir menuntutnya — jadi hari ini
+# selalu punya cap absen atas namanya.
+#
+# Dengan tanggal dipatok mati "05/06", blok ini lolos 29 hari sebulan lalu
+# gagal pada tanggal 5: harinya terbaca 'hadir', `cuti` tinggal 1, dan dua
+# asersi di bawah merah tanpa ada satu pun kode yang rusak. Persis itu yang
+# terjadi — lolos 3 Agustus (tanggal 5 masih di masa depan), merah 5 Agustus.
+HARI143=$(TZ=Asia/Jakarta date +%d)
+if [ "$HARI143" = "05" ] || [ "$HARI143" = "06" ]; then
+  M143="$BULAN143-20"; S143="$BULAN143-21"
+else
+  M143="$BULAN143-05"; S143="$BULAN143-06"
+fi
 
 cek "guard: tanpa token → 401" "V == 401" \
   "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/pengajuan")"
