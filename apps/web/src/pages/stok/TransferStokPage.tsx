@@ -197,10 +197,43 @@ export function TransferStokPage() {
     .filter((b) => b.ingredient_id && b.qty.trim() !== "" && !(angkaDari(b.qty) > 0))
     .map((b) => saldoById.get(b.ingredient_id)?.nama)
     .filter((n): n is string => !!n);
-  const adaQtyLebih = baris.some((b) => {
-    const s = saldoById.get(b.ingredient_id);
-    return s != null && angkaDari(b.qty) > tersediaDari(s) + 1e-9;
-  });
+  /**
+   * Batas qty diperiksa atas JUMLAH per bahan, bukan per baris.
+   *
+   * Server menggabungkan dulu ("Gabungkan baris bahan yang sama (qty dijumlah)
+   * → satu baris per bahan") lalu membandingkan totalnya dengan
+   * `saldo − dalam_jalan`. Pemeriksaan per baris di sini tak melihat itu: dua
+   * baris bahan yang sama, masing-masing 60 dari 100 yang tersedia, LOLOS
+   * sendiri-sendiri padahal berjumlah 120.
+   *
+   * Akibatnya form ini melanggar janjinya sendiri — komentar `salahKemasan` di
+   * atas menyebutnya: aturan server dicermin "supaya form tak pernah
+   * menjanjikan sesuatu yang nanti ditolak POST /transfer-stok". Yang menekan
+   * Kirim akan menerima 400 yang menyebut angka total yang tak sama dengan
+   * baris mana pun di layar, jadi ia tak punya cara tahu baris mana yang
+   * harus dikecilkan.
+   *
+   * Aturan KEMASAN sengaja tetap per baris: kelipatan tertutup terhadap
+   * penjumlahan (dua kelipatan selalu berjumlah kelipatan), jadi tak ada
+   * kasus yang lolos per baris tapi gagal setelah digabung.
+   */
+  const totalPerBahan = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const b of baris) {
+      const q = angkaDari(b.qty);
+      if (!b.ingredient_id || !(q > 0)) continue;
+      m.set(b.ingredient_id, (m.get(b.ingredient_id) ?? 0) + q);
+    }
+    return m;
+  }, [baris]);
+  const bahanQtyLebih = [...totalPerBahan.entries()]
+    .filter(([id, total]) => {
+      const s = saldoById.get(id);
+      return s != null && total > tersediaDari(s) + 1e-9;
+    })
+    .map(([id]) => saldoById.get(id)?.nama)
+    .filter((n): n is string => !!n);
+  const adaQtyLebih = bahanQtyLebih.length > 0;
   const adaSalahKemasan = baris.some((b) => salahKemasan(saldoById.get(b.ingredient_id), b.qty));
   const bisaKirim =
     !!asalId &&
@@ -534,7 +567,11 @@ export function TransferStokPage() {
 
           {adaQtyLebih && (
             <p className="mt-2 text-sm font-medium text-red-600">
-              Ada jumlah kirim melebihi stok tersedia — perbaiki dulu.
+              {/* Bahannya DISEBUT, karena batasnya dihitung atas jumlah semua
+                  baris bahan itu — dengan dua baris untuk bahan yang sama, tak
+                  ada satu pun baris yang kelihatan salah sendirian. */}
+              Jumlah kirim <b>{bahanQtyLebih.join(", ")}</b> melebihi stok tersedia (dihitung
+              dari total semua barisnya) — perbaiki dulu.
             </p>
           )}
           {qtyTerbuang.length > 0 && (
