@@ -7895,5 +7895,61 @@ R165D=$(api "$OWNER" POST /rekomendasi/menu/faktur \
 cek "tanpa client_ref: tetap membuat rencana (kompatibilitas klien lama)" "V == 1" \
   "$(echo "$R165D" | jq -r '((.rencana_id|length)==36)|if . then 1 else 0 end')"
 
+echo "== 166. Resep: takaran batch tersimpan SATU NASIB dengan komponennya =="
+# Biaya per satuan bahan produksi = (biaya resep / isi) x overhead_x. Pembilang
+# dan penyebutnya dulu disimpan lewat DUA permintaan berurutan; yang kedua
+# gagal menyisakan resep BARU dibagi `isi` LAMA — dan HPP tiap menu yang
+# memakai bahan itu ikut keliru bagi SEMUA orang, tanpa tanda apa pun di layar.
+#
+# Yang dibuktikan seksi ini: (a) keduanya mendarat dalam SATU panggilan, dan
+# (b) panggilan yang DITOLAK tak meninggalkan separuh pun — termasuk
+# takarannya. Rollback di TENGAH transaksi (mis. 409 pengadaan berubah) tak
+# bisa dipicu dari skrip secara deterministik; itu dijaga uji statis
+# `resep-takaran-atomik.test.ts`, yang memastikan `tx.update(ingredients)`
+# memang berada di dalam badan transaksi yang sama dengan komponennya.
+ING166=$(api "$OWNER" POST /bahan \
+  '{"nama":"Bahan Mentah 166","satuan":"gr","harga_beli":2000,"isi":1,"track_stok":true,"pengadaan":"beli","boleh_eceran":true}' \
+  | jq -r .id)
+PRD166=$(api "$OWNER" POST /bahan \
+  '{"nama":"Bahan Produksi 166","satuan":"pcs","harga_beli":0,"isi":10,"overhead_x":1,"track_stok":true,"pengadaan":"produksi"}' \
+  | jq -r .id)
+cek "dasar uji §166: bahan mentah + bahan produksi siap" "V == 1" \
+  "$([ ${#ING166} -eq 36 ] && [ ${#PRD166} -eq 36 ] && echo 1 || echo 0)"
+
+# SATU panggilan: komponen baru + takaran baru sekaligus.
+api "$OWNER" PUT "/bahan/$PRD166/resep" \
+  "$(jq -nc --arg i "$ING166" '{komponen:[{ingredient_id:$i, qty:5}], atur:{isi:20, overhead_x:2}}')" \
+  > /dev/null
+B166=$(api "$OWNER" GET /bahan | jq -c --arg p "$PRD166" '[.[]|select(.id==$p)][0]')
+cek "satu panggilan menulis takarannya juga: isi 10 → 20" "abs(V - 20) < 0.001" \
+  "$(echo "$B166" | jq -r '.isi')"
+cek "…dan overhead_x 1 → 2" "abs(V - 2) < 0.001" "$(echo "$B166" | jq -r '.overhead_x')"
+cek "…dan komponennya memang tersimpan (1 baris, qty 5)" "V == 1" \
+  "$(api "$OWNER" GET "/bahan/$PRD166/resep" | jq -r --arg i "$ING166" \
+     '((length==1) and (.[0].ingredient_id==$i) and ((.[0].qty|tonumber)==5))|if . then 1 else 0 end')"
+
+# PANGGILAN YANG DITOLAK tak boleh meninggalkan separuh pun: resep yang memakai
+# dirinya sendiri ditolak 400, dan takarannya HARUS tetap 20/2 — bukan 999/9.
+cek "resep memakai dirinya sendiri → ditolak 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/bahan/$PRD166/resep" \
+     -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' \
+     -d "$(jq -nc --arg p "$PRD166" '{komponen:[{ingredient_id:$p, qty:1}], atur:{isi:999, overhead_x:9}}')")"
+B166B=$(api "$OWNER" GET /bahan | jq -c --arg p "$PRD166" '[.[]|select(.id==$p)][0]')
+cek "ditolak: isi TIDAK ikut berubah (tetap 20, bukan 999)" "abs(V - 20) < 0.001" \
+  "$(echo "$B166B" | jq -r '.isi')"
+cek "ditolak: overhead_x TIDAK ikut berubah (tetap 2, bukan 9)" "abs(V - 2) < 0.001" \
+  "$(echo "$B166B" | jq -r '.overhead_x')"
+cek "ditolak: komponennya juga utuh (masih 1 baris qty 5)" "V == 1" \
+  "$(api "$OWNER" GET "/bahan/$PRD166/resep" | jq -r \
+     '((length==1) and ((.[0].qty|tonumber)==5))|if . then 1 else 0 end')"
+
+# Tanpa `atur`: perilaku klien lama tak berubah — takaran tak tersentuh.
+api "$OWNER" PUT "/bahan/$PRD166/resep" \
+  "$(jq -nc --arg i "$ING166" '{komponen:[{ingredient_id:$i, qty:7}]}')" > /dev/null
+cek "tanpa atur: isi tetap 20 (kompatibilitas klien lama)" "abs(V - 20) < 0.001" \
+  "$(api "$OWNER" GET /bahan | jq -r --arg p "$PRD166" '[.[]|select(.id==$p)][0].isi')"
+cek "tanpa atur: komponennya tetap tersimpan (qty jadi 7)" "abs(V - 7) < 0.001" \
+  "$(api "$OWNER" GET "/bahan/$PRD166/resep" | jq -r '.[0].qty')"
+
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

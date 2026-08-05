@@ -385,20 +385,45 @@ export function ResepPage() {
           komponen: resep
             .filter((r) => r.ingredient_id && angkaDari(r.qty) > 0)
             .map((r) => ({ ingredient_id: r.ingredient_id, qty: angkaDari(r.qty) })),
+          /*
+           * TAKARAN BATCH IKUT DI SINI, bukan di panggilan berikutnya.
+           *
+           * Biaya per satuan lahir dari PASANGAN resep ÷ `isi` × `overhead_x`.
+           * Dulu keduanya terpisah: komponen di panggilan ini, takarannya di
+           * `PUT /bahan/:id` sesudahnya. Panggilan kedua yang gagal menyisakan
+           * resep BARU dibagi `isi` LAMA — dan itu bukan cuma masalah layar
+           * ini: HPP tiap menu yang memakai bahan ini ikut keliru sampai ada
+           * yang menyimpan ulang. Server menulis keduanya dalam satu transaksi.
+           *
+           * `harga_beli` tetap tunduk pada persetujuan yang sama seperti dulu —
+           * hanya dikirim bila user mencentangnya.
+           */
+          ...(atur
+            ? {
+                atur: {
+                  isi: angkaDari(atur.isi) > 0 ? angkaDari(atur.isi) : 1,
+                  overhead_x: overhead,
+                  ...(hargaBerubah && setujuHarga ? { harga_beli: hargaBatch } : {}),
+                },
+              }
+            : {}),
         },
       });
       if (atur) {
         await api(`/bahan/${selectedId}`, {
           method: "PUT",
           body: {
-            isi: angkaDari(atur.isi) > 0 ? angkaDari(atur.isi) : 1,
+            // `isi`, `overhead_x`, dan `harga_beli` SENGAJA tak ada di sini —
+            // ketiganya sudah ditulis bersama komponennya di panggilan atas,
+            // dalam satu transaksi. Mengirimnya lagi di sini tak salah secara
+            // nilai, tapi mengembalikan jendela yang baru saja ditutup: kalau
+            // panggilan ini gagal, tak ada lagi yang bisa membuat takaran dan
+            // resep berselisih.
             satuan: atur.satuan.trim() || "pcs",
-            overhead_x: overhead,
             stok_minimum: angkaDari(atur.stokMin) || 0,
             stok_minimum_toko: angkaDari(atur.stokMinToko) || 0,
             masa_simpan_hari: Math.max(0, Math.trunc(angkaDari(atur.masaSimpan) || 0)),
             lead_time_hari: Math.max(0, Math.trunc(angkaDari(atur.leadTime) || 0)),
-            ...(hargaBerubah && setujuHarga ? { harga_beli: hargaBatch } : {}),
             produksi_di: atur.produksiDi,
             // divisi hanya bermakna untuk produksi cabang — CK kembali ke default
             divisi_produksi: atur.produksiDi === "cabang" ? atur.divisiProduksi : "kitchen",

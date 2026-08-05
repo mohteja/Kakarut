@@ -118,6 +118,29 @@ const ResepBody = z.object({
   komponen: z
     .array(z.object({ ingredient_id: z.string().uuid(), qty: z.number().positive() }))
     .default([]),
+  /**
+   * TAKARAN BATCH — ditulis dalam TRANSAKSI YANG SAMA dengan komponennya.
+   *
+   * Biaya per satuan bahan produksi lahir dari PASANGAN: resepnya (komponen di
+   * atas) dibagi `isi`, dikali `overhead_x`. Selama ini layar Resep menyimpan
+   * keduanya lewat DUA permintaan berurutan — komponen dulu, lalu takarannya
+   * lewat `PUT /bahan/:id`. Kalau yang kedua gagal, yang pertama sudah
+   * mendarat: resep BARU dibagi `isi` LAMA. Angkanya tidak kelihatan salah,
+   * cuma salah — dan bukan hanya bagi si pengedit: HPP setiap menu yang
+   * memakai bahan ini ikut keliru sampai ada yang menyimpan ulang.
+   *
+   * Yang dipindahkan ke sini HANYA yang bisa membuat model biaya bertentangan
+   * dengan dirinya sendiri. Foto, stok minimum, lead time, dan cara masak
+   * tetap lewat endpointnya masing-masing: kegagalannya menyisakan tampilan
+   * yang basi, bukan angka yang bohong.
+   */
+  atur: z
+    .object({
+      isi: z.number().positive().optional(),
+      overhead_x: z.number().positive().max(1000).optional(),
+      harga_beli: z.number().nonnegative().optional(),
+    })
+    .optional(),
 });
 
 /** Langkah cara masak bahan produksi — urutan array = urutan langkah. */
@@ -1243,6 +1266,7 @@ export const bahanRoutes = new Hono<AppEnv>()
           message: "Resep hanya untuk bahan berjenis produksi",
         });
       }
+      const atur = body.atur;
       // gabungkan duplikat (qty dijumlah), tolak referensi diri sendiri
       const qtyByInput = new Map<string, number>();
       for (const k of body.komponen) {
@@ -1336,6 +1360,21 @@ export const bahanRoutes = new Hono<AppEnv>()
               qty,
             })),
           );
+        }
+        // Takaran batch ikut DI DALAM transaksi ini — itu seluruh maksudnya.
+        // Ditulis SESUDAH komponennya supaya keduanya berbagi satu nasib:
+        // kalau baris ini gagal, penghapusan & penulisan komponen di atas ikut
+        // dibatalkan, dan resep lama tetap utuh bersama takaran lamanya.
+        const setAtur = {
+          ...(atur?.isi !== undefined && { isi: atur.isi }),
+          ...(atur?.overhead_x !== undefined && { overheadX: atur.overhead_x }),
+          ...(atur?.harga_beli !== undefined && { hargaBeli: atur.harga_beli }),
+        };
+        if (Object.keys(setAtur).length > 0) {
+          await tx
+            .update(ingredients)
+            .set({ ...setAtur, updatedAt: new Date() })
+            .where(and(eq(ingredients.id, id), eq(ingredients.companyId, auth.company_id!)));
         }
       });
       return c.json({ ok: true, jumlah: inputIds.length });
