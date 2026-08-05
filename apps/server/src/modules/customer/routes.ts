@@ -1,5 +1,5 @@
 import { zValidator } from "@hono/zod-validator";
-import { and, desc, eq, ilike, isNull, ne, or, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, isNull, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
@@ -7,7 +7,7 @@ import type { CustomerDetail, CustomerDto, MemberCariRow } from "@kakarut/shared
 import { db } from "../../db/client";
 import { branches, customers, sales } from "../../db/schema";
 import type { AppEnv } from "../../middleware/auth";
-import { normalizeWa } from "./service";
+import { cariCustomerSetara, normalizeWa } from "./service";
 
 /**
  * Pencarian member ringan untuk autocomplete di keranjang kasir — SEMUA peran
@@ -108,6 +108,15 @@ export const customerRoutes = new Hono<AppEnv>()
     const body = c.req.valid("json");
     const wa = normalizeWa(body.wa);
     if (!wa) throw new HTTPException(400, { message: "Nomor WhatsApp tidak valid" });
+    // Bentrok diperiksa lintas VARIAN, bukan cuma teks persis. Tanpa ini,
+    // member yang tersimpan `0812…` tak terlihat saat orang mengetik
+    // `+62812…`, dan halaman ini dengan tenang membuat orang kedua.
+    const setara = await cariCustomerSetara(db, auth.company_id!, wa);
+    if (setara) {
+      throw new HTTPException(409, {
+        message: `Nomor ini sudah terdaftar atas nama ${setara.nama} (tersimpan sebagai ${setara.wa})`,
+      });
+    }
     const [row] = await db
       .insert(customers)
       .values({
@@ -129,18 +138,13 @@ export const customerRoutes = new Hono<AppEnv>()
     if (body.wa !== undefined) {
       const wa = normalizeWa(body.wa);
       if (!wa) throw new HTTPException(400, { message: "Nomor WhatsApp tidak valid" });
-      // pastikan WA tak dipakai member lain
-      const [bentrok] = await db
-        .select({ id: customers.id })
-        .from(customers)
-        .where(
-          and(
-            eq(customers.companyId, auth.company_id!),
-            eq(customers.wa, wa),
-            ne(customers.id, id),
-          ),
-        );
-      if (bentrok) throw new HTTPException(409, { message: `Nomor WA ${wa} sudah dipakai member lain` });
+      // Pastikan WA tak dipakai member lain — lintas VARIAN, sama seperti POST.
+      const bentrok = await cariCustomerSetara(db, auth.company_id!, wa, id);
+      if (bentrok) {
+        throw new HTTPException(409, {
+          message: `Nomor ini sudah dipakai member lain: ${bentrok.nama} (tersimpan sebagai ${bentrok.wa})`,
+        });
+      }
       waBaru = wa;
     }
     const [row] = await db
