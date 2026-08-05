@@ -6115,6 +6115,29 @@ cek "baris tambahan pakai harga HARI INI (25000), yang lama tetap 10000" "V == 1
 cek "PUT id milik bill lain → 400" "V == 400" \
   "$(status_code_body "$REISS105" PUT "/open-bill/$OBID147" "{\"meja_id\":\"$MEJA147\",\"items\":[{\"id\":\"00000000-0000-0000-0000-000000000000\",\"menu_id\":\"$M147\",\"qty\":1}]}")"
 
+# KUNCI YANG TAK DIKIRIM = JANGAN SENTUH. Dulu PUT menimpa keempat kolom
+# metadata tanpa syarat, jadi ia menghapus apa pun yang tak ikut dikirim —
+# walau klien itu tak tahu-menahu soal kolomnya. `catatan` bill tayang di kartu
+# papan dapur tapi tak pernah dikirim layar kasir web, dan `meja_id` yang
+# hilang MELEPAS bill dari mejanya: mejanya lalu terlihat kosong, bill kedua
+# dibuka di sana, dan aturan "satu meja dine-in = satu bill" bocor lewat pintu
+# belakang. Bill yang terlepas itu justru yang paling mungkin tak tertagih.
+ITEMS147=$(echo "$OBT147" | jq -c '[.items[]|{id:.id, menu_id:.menu_id, qty:.qty}]')
+api "$REISS105" PUT "/open-bill/$OBID147" \
+  "$(jq -nc --arg m "$MEJA147" --argjson it "$ITEMS147" '{meja_id:$m, catatan:"tamu alergi udang", customer_nama:"Budi", items:$it}')" > /dev/null
+PP147=$(api "$REISS105" PUT "/open-bill/$OBID147" "$(jq -nc --argjson it "$ITEMS147" '{items:$it}')")
+cek "PUT tanpa kunci catatan: catatan bill TIDAK ikut terhapus" "V == 1" \
+  "$(echo "$PP147" | jq '(.catatan=="tamu alergi udang")|if . then 1 else 0 end')"
+cek "PUT tanpa kunci customer_nama: nama tamu juga bertahan" "V == 1" \
+  "$(echo "$PP147" | jq '(.customer_nama=="Budi")|if . then 1 else 0 end')"
+cek "PUT tanpa kunci meja_id: bill TETAP menempel di mejanya" "V == 1" \
+  "$(echo "$PP147" | jq --arg m "$MEJA147" '(.meja_id==$m)|if . then 1 else 0 end')"
+cek "…dan harga terkunci tetap utuh setelah PUT sebagian itu" "V == 1" \
+  "$(echo "$PP147" | jq '([.items[].harga_satuan]|sort) == [10000,25000]|if . then 1 else 0 end')"
+# Yang hilang HANYA penghapusan yang tak diminta — null eksplisit tetap bekerja.
+cek "catatan null EKSPLISIT tetap mengosongkan" "V == 1" \
+  "$(api "$REISS105" PUT "/open-bill/$OBID147" "$(jq -nc --arg m "$MEJA147" --argjson it "$ITEMS147" '{meja_id:$m, catatan:null, customer_nama:null, items:$it}')" | jq '((.catatan==null) and (.customer_nama==null))|if . then 1 else 0 end')"
+
 # BAYAR: yang ditagih adalah harga terkunci, bukan harga menu terbaru
 S147=$(api "$REISS105" POST /penjualan "{\"meja_id\":\"$MEJA147\",\"metode_bayar\":\"tunai\",\"open_bill_id\":\"$OBID147\",\"items\":[{\"menu_id\":\"$M147\",\"qty\":4,\"open_bill_item_id\":\"$ITEM147B\"},{\"menu_id\":\"$M147\",\"qty\":1}]}")
 SID147=$(echo "$S147" | jq -r '.sale.id')

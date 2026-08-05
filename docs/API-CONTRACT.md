@@ -770,6 +770,22 @@ Aksesnya sengaja **asimetris**: membaca terbuka untuk seluruh peran cabang
 - `POST /api/open-bill` — req `BillBody`: `{ branch_id?: uuid, meja_id?: uuid|null, customer_nama?|null, customer_wa?|null, catatan?|null, items: [{id?:uuid, menu_id:uuid, qty:number(>0), dine_in_override?:bool|null, catatan?}] (min 1) }` — res: **201** `OpenBillDetail` — error: **400** menu invalid/tak tersedia, **403** kasir luar cabang, **404** meja tak ada, **409** `{ kode: "meja_sudah_ada_bill", bill_id }` meja dine-in itu masih punya bill belum dibayar
 - `PUT /api/open-bill/:id` — req: `BillBody` — res: `OpenBillDetail` — error: **400** (baris tak ditemukan / tak cocok menunya / dikirim dua kali / `pisah_dari` tak valid / **`baris_bill_tak_bisa_dihapus`**), **404**, **409** `meja_sudah_ada_bill` bila `meja_id` dipindah ke meja yang sudah punya bill lain, **409** `bill_sudah_ditutup` bila bill-nya sudah dibayar atau dibatalkan
 
+> ### ✏️ `PUT` itu **perbarui-sebagian** untuk metadata bill
+>
+> `meja_id`, `customer_nama`, `customer_wa`, dan `catatan`: **kunci yang tidak
+> dikirim tidak disentuh**; `null` eksplisit tetap berarti "kosongkan". (Pola
+> yang sama dengan `PUT /api/menu/:id`.)
+>
+> Sebelumnya keempatnya ditimpa tanpa syarat, jadi `PUT` menghapus apa pun yang
+> tak ikut dikirim — termasuk `catatan` bill yang tayang di kartu papan dapur,
+> dan `meja_id` yang melepas bill dari mejanya (mejanya lalu terlihat kosong dan
+> aturan "satu meja dine-in = satu bill" bocor).
+>
+> **Konsekuensi untuk klien:** kalau layar kalian MENGELOLA sebuah kolom, kirim
+> selalu — pakai `null` untuk mengosongkan, jangan menghilangkan kuncinya.
+> Kalau tidak mengelolanya, jangan kirim sama sekali. `items[]` tidak ikut
+> aturan ini: ia tetap daftar penuh (lihat larangan hapus baris di bawah).
+
 > ### 🔒 `PUT` pada bill yang sudah ditutup → **409 `bill_sudah_ditutup`**
 >
 > Sebuah bill berakhir dengan dua cara: **dibayar** (`closed_at` + `sale_id`

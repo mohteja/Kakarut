@@ -713,8 +713,14 @@ export function KasirPage() {
       const body = {
         ...(!isKasir && branchId ? { branch_id: branchId } : {}),
         meja_id: mejaId ?? undefined,
-        ...(konsumenNama.trim() ? { customer_nama: konsumenNama.trim() } : {}),
-        ...(konsumenWa.trim() ? { customer_wa: konsumenWa.trim() } : {}),
+        // Dikirim SELALU, termasuk saat kosong — sebagai `null`, bukan
+        // dihilangkan. `PUT /open-bill/:id` kini memperlakukan kunci yang tak
+        // dikirim sebagai "jangan sentuh", jadi menghilangkannya saat kasir
+        // MENGHAPUS nama tamu justru membuat nama lama bertahan. Yang tidak
+        // dikirim di sini hanya `catatan` bill — layar ini memang tak
+        // mengelolanya, dan diamnya kini berarti membiarkannya utuh.
+        customer_nama: konsumenNama.trim() || null,
+        customer_wa: konsumenWa.trim() || null,
         items: cart.map((l) => ({
           // baris lama dikirim ber-id agar harga terkuncinya dipertahankan;
           // baris tanpa id = tambahan baru → memakai harga hari ini

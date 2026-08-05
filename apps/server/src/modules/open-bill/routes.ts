@@ -452,14 +452,44 @@ export const openBillRoutes = new Hono<AppEnv>()
       );
     }
     await db.transaction(async (tx) => {
+      /**
+       * KUNCI YANG TAK DIKIRIM = JANGAN SENTUH.
+       *
+       * Dulu setiap kolom di atas ditimpa tanpa syarat, jadi `PUT` menghapus
+       * apa pun yang tak ikut dikirim klien — walau klien itu tak tahu-menahu
+       * soal kolomnya. Pola persis yang sudah dicabut dari `PUT /menu/:id`
+       * (yang dulu menghapus resep, foto, dan arsip menu).
+       *
+       * Dua kerugiannya nyata dan sunyi:
+       *
+       *   - `catatan` BILL tayang di kartu papan dapur
+       *     (`pesanan/routes.ts` mengambil `openBills.catatan`), tapi layar
+       *     kasir web tak pernah mengirimnya. Jadi catatan seperti "tamu
+       *     alergi udang" — yang boleh jadi ditulis dari aplikasi mobile —
+       *     lenyap dari layar dapur begitu kasir menambah satu pesanan lagi.
+       *   - `meja_id` yang dihilangkan melepas bill dari mejanya. Mejanya lalu
+       *     terlihat kosong, orang membuka bill kedua di sana, dan aturan
+       *     "satu meja dine-in = satu bill" — yang dijaga ketat sampai
+       *     `SELECT … FOR UPDATE` di dua tempat — bocor lewat pintu belakang.
+       *     Bill yang terlepas itu justru yang paling mungkin tertinggal tak
+       *     tertagih saat tamunya pulang.
+       *
+       * `null` EKSPLISIT tetap berarti "kosongkan" — zod membedakan kunci yang
+       * absen (undefined) dari yang bernilai null, dan JSON tak bisa
+       * mengirimkan undefined. Jadi menghapus nama tamu tetap bisa; yang
+       * hilang hanyalah penghapusan yang tak pernah diminta siapa pun.
+       */
       await tx
         .update(openBills)
         .set({
-          mejaId,
-          mejaLabel,
-          customerNama: body.customer_nama?.trim() || null,
-          customerWa: body.customer_wa?.trim() || null,
-          catatan: body.catatan?.trim() || null,
+          ...(body.meja_id !== undefined && { mejaId, mejaLabel }),
+          ...(body.customer_nama !== undefined && {
+            customerNama: body.customer_nama?.trim() || null,
+          }),
+          ...(body.customer_wa !== undefined && {
+            customerWa: body.customer_wa?.trim() || null,
+          }),
+          ...(body.catatan !== undefined && { catatan: body.catatan?.trim() || null }),
           updatedAt: new Date(),
         })
         .where(eq(openBills.id, id));

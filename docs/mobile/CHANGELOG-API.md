@@ -89,6 +89,39 @@ Sekarang `PUT` menolaknya:
 layar kasir. "Tidak ditemukan" akan terbaca seperti kerusakan sistem, padahal
 yang terjadi adalah tamunya sudah selesai.
 
+### 🟡 PERLU DICEK — `PUT /api/open-bill/:id` kini **perbarui-sebagian** untuk metadata
+
+Empat kolom bill — `meja_id`, `customer_nama`, `customer_wa`, `catatan` —
+sekarang mengikuti aturan **kunci yang tidak dikirim tidak disentuh**. `null`
+eksplisit tetap berarti "kosongkan". `items[]` **tidak** ikut aturan ini: ia
+tetap daftar penuh.
+
+Sebelumnya keempatnya ditimpa tanpa syarat, jadi setiap `PUT` menghapus apa pun
+yang tak ikut dikirim — walau klien pengirimnya tak tahu-menahu soal kolom itu:
+
+- **`catatan` bill** tayang di kartu papan dapur, tapi layar kasir web tak
+  pernah mengirimnya. Catatan "tamu alergi udang" yang **kalian** tulis dari
+  mobile lenyap dari layar dapur begitu kasir web menambah satu pesanan lagi.
+- **`meja_id`** yang dihilangkan MELEPAS bill dari mejanya. Mejanya lalu
+  terlihat kosong, orang membuka bill kedua di sana, dan aturan "satu meja
+  dine-in = satu bill" bocor. Bill yang terlepas itu justru yang paling mungkin
+  tertinggal tak tertagih saat tamunya pulang.
+
+**Yang perlu dikerjakan mobile — periksa badan `PUT` kalian:**
+
+| Kolomnya dikelola layar ini? | Kirim |
+| --- | --- |
+| Ya, ada isinya | nilainya |
+| Ya, kasir mengosongkannya | **`null`** — jangan hilangkan kuncinya |
+| Tidak dikelola layar ini | **jangan kirim** |
+
+Yang paling gampang terlewat adalah baris kedua: kalau kalian memakai pola
+"hilangkan saat kosong", menghapus nama tamu tak akan tersimpan lagi. (Web
+punya cacat ini dan sudah diperbaiki di sisi web pada rilis yang sama.)
+
+Aturan ini tidak berlaku untuk `POST /api/open-bill` — di sana kunci yang absen
+memang berarti "kosong", karena tak ada nilai lama yang bisa dilestarikan.
+
 ---
 
 ## Rilis: koreksi panduan — badge "diubah setelah transaksi" salah kaprah

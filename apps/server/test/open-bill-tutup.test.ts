@@ -108,6 +108,108 @@ describe("PUT /open-bill/:id ikut menolak bill yang sudah ditutup", () => {
 });
 
 /**
+ * Temuan kedua di endpoint yang sama: `PUT` menghapus kolom yang TIDAK dikirim.
+ *
+ * Bentuknya persis yang sudah dicabut dari `PUT /menu/:id` (dulu menghapus
+ * resep, foto, dan arsip menu setiap kali menu disunting dari layar yang tak
+ * mengelola ketiganya). Di sini korbannya dua, dan keduanya sunyi:
+ *
+ *   - `catatan` BILL tayang di kartu papan dapur, tapi `simpanBill` di
+ *     KasirPage tak pernah mengirimnya. Catatan "tamu alergi udang" yang
+ *     ditulis dari mobile lenyap dari layar dapur begitu kasir web menambah
+ *     satu pesanan lagi.
+ *   - `meja_id` yang dihilangkan MELEPAS bill dari mejanya. Mejanya lalu
+ *     terlihat kosong, orang membuka bill kedua di sana, dan aturan "satu meja
+ *     dine-in = satu bill" — yang dijaga sampai `SELECT … FOR UPDATE` di dua
+ *     tempat — bocor lewat pintu belakang.
+ */
+describe("PUT hanya menyentuh kolom yang memang dikirim", () => {
+  const PUT = sejak(OB, '.put("/:id"');
+  const iSet = PUT.indexOf(".update(openBills)");
+  const BLOK = PUT.slice(iSet, PUT.indexOf(".where(eq(openBills.id, id));", iSet));
+
+  it("penulisan tak bersyarat sudah tidak ada lagi", () => {
+    expect(BLOK).not.toMatch(/^\s*mejaId,$/m);
+    expect(BLOK).not.toMatch(/^\s*mejaLabel,$/m);
+    expect(BLOK).not.toContain("catatan: body.catatan?.trim() || null,\n");
+  });
+
+  it("keempat kolom metadata digerbang `!== undefined`", () => {
+    expect(BLOK).toContain("...(body.meja_id !== undefined && { mejaId, mejaLabel })");
+    expect(BLOK).toContain("...(body.customer_nama !== undefined && {");
+    expect(BLOK).toContain("...(body.customer_wa !== undefined && {");
+    expect(BLOK).toContain("...(body.catatan !== undefined && {");
+  });
+
+  it("meja & labelnya bergerak BERSAMA — label itu snapshot mejanya", () => {
+    // Menulis salah satunya saja membuat bill menunjuk meja A dengan label
+    // meja B; daftar bill mencocokkan lewat id, tapi struk & papan memakai
+    // labelnya.
+    expect(BLOK).not.toMatch(/\bmejaId\b(?![^}]*mejaLabel)/);
+  });
+
+  it("`updatedAt` TETAP tanpa syarat — barisnya memang baru saja disunting", () => {
+    // Daftar bill diurutkan `desc(updatedAt)`; menggerbangnya akan membuat
+    // bill yang barisnya berubah tenggelam di bawah bill yang tak disentuh.
+    expect(BLOK).toContain("updatedAt: new Date(),");
+    expect(BLOK).not.toContain("!== undefined && { updatedAt");
+  });
+
+  it("null EKSPLISIT tetap mengosongkan — zod membedakannya dari kunci absen", () => {
+    // `z.string().nullish()` = nullable + optional. JSON tak bisa mengirim
+    // undefined, jadi `!== undefined` tepat berarti "kuncinya ada".
+    expect(OB).toContain("meja_id: z.string().uuid().nullish()");
+    expect(OB).toContain("customer_nama: z.string().nullish()");
+    expect(BLOK).toContain("body.customer_nama?.trim() || null");
+  });
+
+  it("premis: catatan bill memang dibaca papan dapur", () => {
+    const papan = baca("../src/modules/pesanan/routes.ts");
+    expect(papan).toContain("catatan: openBills.catatan,");
+  });
+
+  it("premis: aturan satu-meja-satu-bill memang bersandar pada meja_id", () => {
+    expect(OB).toContain("eq(openBills.mejaId, mejaId)");
+    expect(OB).toContain("FOR UPDATE");
+  });
+});
+
+describe("KasirPage mengirim tegas apa yang memang dikelolanya", () => {
+  const KASIR = baca("../../web/src/pages/kasir/KasirPage.tsx");
+
+  /**
+   * Dibatasi ke blok `simpanBill` saja — BUKAN seluruh berkas. Checkout
+   * (`POST /penjualan`) memakai bentuk "hilangkan saat kosong" yang sama dan
+   * di sana itu benar: ia MEMBUAT baris, tak ada nilai lama yang bisa
+   * dilestarikan secara keliru.
+   */
+  const iSimpan = KASIR.indexOf("const simpanBill = useMutation({");
+  const BODY = KASIR.slice(iSimpan, KASIR.indexOf("return editingBillId", iSimpan));
+
+  it("nama & WA tamu SELALU dikirim — kosong pun, sebagai null", () => {
+    // Kalau dihilangkan saat kosong, aturan "kunci absen = jangan sentuh"
+    // justru membuat nama tamu yang baru DIHAPUS kasir bertahan di server.
+    expect(BODY).toContain("customer_nama: konsumenNama.trim() || null,");
+    expect(BODY).toContain("customer_wa: konsumenWa.trim() || null,");
+    expect(BODY).not.toContain("...(konsumenNama.trim() ? { customer_nama:");
+  });
+
+  it("dan checkout TETAP boleh menghilangkannya — ia membuat, bukan menyunting", () => {
+    expect(KASIR).toContain("...(konsumenNama.trim() ? { customer_nama: konsumenNama.trim() } : {})");
+  });
+
+  it("catatan BILL sengaja tidak dikirim — layar ini tak mengelolanya", () => {
+    // Diamnya kini berarti "biarkan utuh", jadi catatan dari mobile selamat.
+    // (`catatan` per BARIS tetap dikirim — itu memang milik layar ini.)
+    const i = KASIR.indexOf("const simpanBill = useMutation({");
+    const j = KASIR.indexOf("return editingBillId", i);
+    const body = KASIR.slice(i, j);
+    expect(body).not.toMatch(/^\s*catatan:/m);
+    expect(body).toContain("catatan: l.catatan.trim()");
+  });
+});
+
+/**
  * Sisi klien dari kejadian yang sama: kegagalan simpan bill yang tak terbaca.
  *
  * `useMutation` v5 memulangkan objek hasil BARU tiap render
