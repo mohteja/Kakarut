@@ -87,7 +87,7 @@ export function PenerimaanPage() {
   const { query: branchQuery, dariKantor } = useCabangData();
   const queryClient = useQueryClient();
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error: gagalMuat } = useQuery({
     queryKey: ["penerimaan", branchQuery],
     queryFn: () => api<{ rows: PenerimaanRow[] }>(`/penerimaan${branchQuery}`),
   });
@@ -222,6 +222,34 @@ export function PenerimaanPage() {
   });
 
   if (isLoading) return <Spinner />;
+  /*
+    KOSONG ≠ TAK TERBACA. Bacaan yang gagal berakhir `isLoading === false` DAN
+    `data === undefined`, jadi `data?.rows ?? []` membuat halaman ini berbunyi
+    "Tidak ada kiriman yang menunggu penerimaan" — tentang BARANG YANG SUDAH
+    SAMPAI DI PINTU. Petugas menyimpulkan tak ada yang datang dan tak
+    memeriksa; barangnya menganggur tak diterima dan stok cabang tak pernah
+    bertambah. Persis keadaan yang `PanelMenggantung` di bawah dibuat untuk
+    menemukan — hanya saja kali ini tak ada yang bisa menemukannya.
+  */
+  if (gagalMuat) {
+    return (
+      <div className="max-w-4xl">
+        <CabangDataBar />
+        <PageTitle>Penerimaan Barang</PageTitle>
+        <Card className="border-amber-300 bg-amber-50 p-4">
+          <div className="text-sm font-bold text-amber-900">
+            ⚠ Daftar kiriman <b>tidak terbaca</b>
+          </div>
+          <ErrorText error={gagalMuat} />
+          <div className="mt-1 text-sm text-amber-900">
+            Ini <b>bukan</b> berarti tak ada barang yang menunggu diterima. Muat ulang halaman
+            sebelum menyimpulkan tak ada kiriman — barang yang sudah sampai tapi tak diterima
+            membuat stok cabang tak pernah bertambah.
+          </div>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-4xl">
@@ -532,7 +560,7 @@ function RiwayatPenerimaan() {
   const [buka, setBuka] = useState<Set<string>>(new Set());
   const q = branchQuery ? `${branchQuery}&page=${page}` : `?page=${page}`;
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error: gagalRiwayat } = useQuery({
     queryKey: ["penerimaan-riwayat", branchQuery, page],
     queryFn: () =>
       api<{
@@ -576,6 +604,17 @@ function RiwayatPenerimaan() {
       </h2>
       {isLoading ? (
         <Spinner />
+      ) : gagalRiwayat ? (
+        /* Kalimat di bawah pernah muncul keliru sekali (halaman 2 yang kosong
+           sesudah ganti cabang — lihat komentar `setPage(1)` di atas). Bacaan
+           yang gagal adalah cara KEDUA ia jadi bohong, dan yang ini tak
+           sembuh sendiri. */
+        <Card className="border-amber-300 bg-amber-50 p-4">
+          <div className="text-sm font-bold text-amber-900">
+            ⚠ Riwayat penerimaan <b>tidak terbaca</b>
+          </div>
+          <ErrorText error={gagalRiwayat} />
+        </Card>
       ) : rows.length === 0 ? (
         <Card className="p-6 text-center text-sm text-stone-400">
           Belum ada kiriman yang pernah diterima atau ditolak.

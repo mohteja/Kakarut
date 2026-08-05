@@ -61,7 +61,7 @@ export function StokPerlengkapanTab({
   const queryClient = useQueryClient();
   const [modal, setModal] = useState<ModalState>(null);
 
-  const { data: rows, isLoading } = useQuery({
+  const { data: rows, isLoading, error: gagalRows } = useQuery({
     queryKey: ["perlengkapan", branchQuery],
     queryFn: () => api<PerlengkapanRowDto[]>(`/perlengkapan${branchQuery}`),
   });
@@ -170,8 +170,26 @@ export function StokPerlengkapanTab({
         <b>beli lagi</b> (Stok Masuk); di cabang <b>minta ke CK</b> bila stok CK ada.
       </div>
 
+      {/*
+        KOSONG ≠ TAK TERBACA. Bacaan yang gagal berakhir `isLoading === false`
+        DAN `data === undefined`, jadi tabelnya kosong dan barisnya berbunyi
+        "Belum ada perlengkapan — daftarkan item di Manajemen → Perlengkapan":
+        menyatakan cabang ini belum punya perlengkapan sama sekali, lalu
+        menyuruh mendaftarkan ulang yang sudah terdaftar.
+      */}
       {isLoading ? (
         <Spinner />
+      ) : gagalRows ? (
+        <Card className="border-amber-300 bg-amber-50 p-4">
+          <div className="text-sm font-bold text-amber-900">
+            ⚠ Daftar perlengkapan <b>tidak terbaca</b>
+          </div>
+          <ErrorText error={gagalRows} />
+          <div className="mt-1 text-sm text-amber-900">
+            Ini <b>bukan</b> berarti belum ada perlengkapan terdaftar — jangan mendaftarkan
+            ulang sebelum daftarnya terbaca.
+          </div>
+        </Card>
       ) : (
         <Card className="overflow-x-auto">
           <table className="w-full">
