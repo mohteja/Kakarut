@@ -107,6 +107,45 @@ describe("web: kuncinya mengikat satu sesi penghitungan", () => {
   });
 });
 
+/**
+ * Batas cakupannya ikut dipatok: `POST /stok/awal` memakai badan yang MEWARISI
+ * `OpnameBody`, jadi menambahkan kunci di sana tanpa berpikir akan membuat
+ * skemanya MENERIMA field yang rutenya abaikan — klien mengira dilindungi
+ * padahal tidak.
+ *
+ * Dan ia memang tak membutuhkannya: penulisannya hapus-lalu-sisip atas
+ * `(company, branch, session_id IS NULL, ingredient_id)`, jadi kiriman ganda
+ * mendarat di baris yang sama persis. Bedanya dengan `/stok/opname` tegas —
+ * yang itu MENAMBAH sesi, yang ini MENGGANTI baris.
+ */
+describe("stok awal TIDAK ikut mewarisi kuncinya", () => {
+  it("field idempotensinya di-omit dari `StokAwalBody`", () => {
+    expect(RUTE).toContain(
+      "const StokAwalBody = OpnameBody.omit({ client_ref: true, device_id: true }).extend({",
+    );
+  });
+
+  it("dan rutenya memang tak menyentuh `client_ref`", () => {
+    const i = RUTE.indexOf('.post("/awal", requireRole(');
+    const blok = RUTE.slice(i, RUTE.indexOf('.get("/penyesuaian"', i));
+    expect(i).toBeGreaterThan(0);
+    expect(blok).not.toContain("client_ref");
+    expect(blok).not.toContain("cariHasilIdempoten");
+  });
+
+  it("premis: penulisannya memang mengganti, bukan menambah", () => {
+    const i = RUTE.indexOf('.post("/awal", requireRole(');
+    const blok = RUTE.slice(i, RUTE.indexOf('.get("/penyesuaian"', i));
+    expect(blok).toContain("await tx.delete(stockOpnames).where(");
+    expect(blok).toContain("isNull(stockOpnames.sessionId),");
+  });
+
+  it("alasannya ditulis, supaya tak 'dirapikan' jadi seragam nanti", () => {
+    expect(RUTE).toContain("SENGAJA TIDAK diwarisi");
+    expect(RUTE).toContain("idempoten SECARA KONSTRUKSI");
+  });
+});
+
 describe("premis: ledger itu memang bersama, dan sudah dipakai jalur lain", () => {
   it("penjualan memakainya", () => {
     const jual = baca("../src/modules/penjualan/routes.ts");

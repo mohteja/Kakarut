@@ -1299,7 +1299,9 @@ Laporan:
 > berarti kejadian baru: terbitkan UUID baru, atau server akan memulangkan hasil
 > lama dan hitungan barunya hilang.
 - `GET /api/stok/awal` — [owner/admin] — query: `branch_id?` — res: `{ tanggal, items: [{ingredient_id,qty,tanggal}] }`
-- `POST /api/stok/awal` — [owner/admin] — req: `OpnameBody` + `{ tanggal?: "YYYY-MM-DD" }` (upsert saldo awal) — res: **201** `{ ok, jumlah, tanggal }` — error: **400**
+- `POST /api/stok/awal` — [owner/admin] — req: `OpnameBody` **tanpa `client_ref`/`device_id`** + `{ tanggal?: "YYYY-MM-DD" }` (upsert saldo awal) — res: **201** `{ ok, jumlah, tanggal }` — error: **400**
+
+  > Tak perlu `client_ref`: penulisannya hapus-lalu-sisip atas `(company, branch, session_id IS NULL, ingredient_id)`, jadi kiriman ganda mendarat di baris yang sama persis. Berbeda dari `POST /api/stok/opname`, yang MENAMBAH sesi dan karena itu memakai kunci idempotensi.
 - `GET /api/stok/penyesuaian` — [any] — query: `branch_id?`, `status?` (`belum` | `menunggu_persetujuan`) — res: row penyesuaian
 - `POST /api/stok/penyesuaian/:id/klarifikasi` — [owner/admin] — req: `{ kategori: "waste_bahan"|"waste_matang"|"waste_gagal"|"koreksi_pencatatan"|"lainnya", catatan?|null, foto_url: string (min 1, wajib) }` — res: `{ ok: true }` — error: **400** (tak ada selisih / sudah disetujui), **404**
 - `POST /api/stok/penyesuaian/:id/setujui` — [owner/admin] — res: `{ ok: true }` — error: **400**, **404**

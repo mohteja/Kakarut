@@ -69,7 +69,22 @@ const OpnameBody = z.object({
 // fisik: stok awal itu SATU saldo pembuka per bahan yang terkunci pada tanggal
 // tertentu (bukan tumpukan reset di banyak tanggal) — diganti (upsert), bukan
 // ditambah. Ubah nilai / tanggal = simpan ulang di tanggal itu.
-const StokAwalBody = OpnameBody.extend({
+const StokAwalBody = OpnameBody.omit({ client_ref: true, device_id: true }).extend({
+  /**
+   * `client_ref`/`device_id` SENGAJA TIDAK diwarisi dari `OpnameBody`.
+   *
+   * Endpoint ini sudah idempoten SECARA KONSTRUKSI: penulisannya
+   * hapus-lalu-sisip atas kunci `(company, branch, session_id IS NULL,
+   * ingredient_id)`, jadi kiriman yang sama dua kali mendarat di baris yang
+   * sama persis — tak ada sesi kembar yang bisa lahir (sessionId memang null di
+   * sini, jadi ia bahkan tak muncul di Riwayat Opname).
+   *
+   * Mewarisi kuncinya akan membuat skema MENERIMA field yang rutenya abaikan:
+   * klien yang mengirimkannya mengira dilindungi padahal tidak, dan diamnya
+   * jauh lebih buruk daripada tidak menawarkannya sama sekali. Kalau suatu
+   * saat penulisan di sini berubah jadi menambah (bukan mengganti), kuncinya
+   * ditambahkan BERSAMA penanganannya — bukan mendahului.
+   */
   /** tanggal berlaku saldo pembuka (YYYY-MM-DD, zona perusahaan). Default hari ini. */
   tanggal: z
     .string()
