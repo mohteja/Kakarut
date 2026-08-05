@@ -25,6 +25,72 @@ tanpa akses repo server.
 
 ---
 
+## Rilis: `PUT /open-bill/:id` menolak bill yang sudah ditutup
+
+> Belum di-merge ke production. **Tidak ada migrasi dan tidak ada field baru** —
+> yang bertambah hanya satu kode galat pada satu endpoint. Tapi ini menutup
+> jalur di mana pesanan tamu bisa hilang tanpa satu pun galat muncul di layar.
+
+### 🔴 WAJIB — 409 `bill_sudah_ditutup` harus ditangani, jangan dianggap sukses
+
+Sebuah open bill berakhir dengan dua cara, dan keduanya mengisi `closed_at`:
+
+| Cara | `closed_at` | `sale_id` |
+| --- | --- | --- |
+| Dibayar (`POST /api/penjualan` dengan `open_bill_id`) | terisi | terisi |
+| Dibatalkan (`DELETE /api/open-bill/:id`) | terisi | tetap `null` |
+
+`GET /api/open-bill/:id`, `GET /api/open-bill`, `DELETE`, dan checkout
+semuanya sudah menghormati itu sejak dulu. **`PUT` tidak.** Ia hanya memeriksa
+"bill-nya ada" dan "satu perusahaan", lalu menulis.
+
+Akibatnya, pada bill yang sudah ditutup:
+
+- bill **DIBAYAR** → barisnya sudah tersalin ke `sale_items`, jadi tambahan
+  yang ditulis lewat `PUT` **tak pernah ditagih** dan tak muncul di kartu
+  penjualan mana pun;
+- bill **DIBATALKAN** → baris berstatus hidup masuk ke bill yang tak akan
+  ditagih siapa pun;
+- dan di **kedua** kasus jawabannya **HTTP 200 dengan badan `null`** — karena
+  `loadDetail` menyaring bill tertutup. Untuk tipe yang dideklarasikan
+  `OpenBillDetail`, itu bukan sekadar aneh: klien membacanya sebagai sukses
+  lalu mengosongkan keranjang.
+
+Ini bukan kasus teoretis. Layar kasir memegang bill di memori (`editingBillId`
+di web, padanannya di mobile), jadi perangkat kedua yang membayar atau
+membatalkan bill itu **tidak terlihat** olehnya — tombol "Perbarui Bill" masih
+bisa ditekan.
+
+Sekarang `PUT` menolaknya:
+
+```json
+{
+  "error": "Bill ini sudah dibayar — pesanan tambahan harus dibuat sebagai transaksi baru.",
+  "kode": "bill_sudah_ditutup",
+  "sudah_dibayar": true
+}
+```
+
+**Yang perlu dikerjakan mobile:**
+
+1. Tangani **409** ber-`kode` `bill_sudah_ditutup` pada `PUT /api/open-bill/:id`.
+2. Baca `sudah_dibayar` (boolean), **jangan** menyimpulkannya dari teks `error`
+   — langkah lanjutannya berlawanan: `true` → tamu sudah bayar, pesanan ini
+   harus jadi **transaksi baru**; `false` → bill-nya dibatalkan, pesanan ini
+   harus jadi **bill baru**.
+3. **Jangan mengosongkan keranjang** saat menerima galat ini. Isinya justru
+   satu-satunya salinan pesanan yang tersisa; kosongkan hanya setelah kasir
+   menyimpannya ulang.
+4. Kalau selama ini kalian memakai 200 sebagai penanda sukses tanpa memeriksa
+   badannya, periksa juga di layar lain: `PUT` ini dulu bisa memulangkan
+   `null` untuk tipe non-nullable.
+
+⚪️ **INFO** — 409 dipilih, bukan 404, justru karena bill-nya masih tampil di
+layar kasir. "Tidak ditemukan" akan terbaca seperti kerusakan sistem, padahal
+yang terjadi adalah tamunya sudah selesai.
+
+---
+
 ## Rilis: koreksi panduan — badge "diubah setelah transaksi" salah kaprah
 
 > Belum di-merge ke production. **Tidak ada perubahan API**: tak ada migrasi, tak

@@ -1856,8 +1856,21 @@ export function KasirPage() {
             <button
               onClick={async () => {
                 // Pesanan meja LAMA diamankan dulu jadi bill, baru pindah.
-                await simpanBill.mutateAsync().catch(() => null);
-                if (simpanBill.isError) return;
+                //
+                // Kegagalannya ditangkap lewat penanda lokal, BUKAN
+                // `simpanBill.isError`. `useMutation` memulangkan objek hasil
+                // BARU tiap render (`{...result, mutate, mutateAsync}`), jadi
+                // yang tertangkap closure ini adalah potret sebelum mutasi
+                // jalan — `isError` di sini selamanya `false`. Dulu modal ini
+                // tetap tertutup dan pemilih meja tetap terbuka meski simpannya
+                // gagal, padahal galatnya cuma tertulis DI DALAM modal yang
+                // baru saja ditutup: kasir mengira pesanan meja lama sudah
+                // aman, lalu membawanya ke meja baru.
+                let gagal = false;
+                await simpanBill.mutateAsync().catch(() => {
+                  gagal = true;
+                });
+                if (gagal) return;
                 setGantiMejaOpen(false);
                 setMejaModalOpen(true);
               }}

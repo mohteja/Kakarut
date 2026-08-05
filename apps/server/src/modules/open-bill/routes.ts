@@ -319,6 +319,45 @@ export const openBillRoutes = new Hono<AppEnv>()
     if (!existing || existing.companyId !== auth.company_id!) {
       throw new HTTPException(404, { message: "Bill tidak ditemukan" });
     }
+    /**
+     * BILL YANG SUDAH DITUTUP TAK BISA DISUNTING LAGI.
+     *
+     * Setiap jalur lain sudah menjaganya: `GET /open-bill/:id` memulangkan 404
+     * (`loadDetail` menyaring `closedAt`), `DELETE` menyaring `closedAt` di
+     * WHERE-nya, dan `createSale` menolak menagih bill yang sudah tertutup.
+     * Hanya `PUT` yang tak ikut — dan itu jalur yang PALING mungkin dilewati,
+     * karena layar kasir bisa saja masih memegang bill yang baru saja dibayar
+     * atau dibatalkan perangkat lain.
+     *
+     * Akibatnya dua-duanya sunyi:
+     *
+     *   - Bill sudah DIBAYAR: barisnya sudah disalin ke `sale_items`, jadi
+     *     tambahan yang ditulis ke sini tak pernah ditagih dan tak pernah tampil
+     *     di kartu penjualan. Pesanannya hilang, tanpa galat.
+     *   - Bill sudah DIBATALKAN: seluruh barisnya bertanda `batal`, lalu baris
+     *     baru masuk dengan status hidup ke bill yang tak akan ditagih siapa pun.
+     *
+     * Dan di kedua kasus `loadDetail` di akhir handler memulangkan `null` —
+     * jadi klien menerima 200 berisi `null` untuk tipe `OpenBillDetail`, lalu
+     * `onSuccess` mengosongkan keranjang. Kasir melihat "tersimpan"; yang
+     * tersimpan tak ada.
+     *
+     * 409 berkode, bukan 404: bill-nya ADA di layar kasir, jadi "tidak
+     * ditemukan" cuma membingungkan. Dengan galat ini keranjang tak
+     * dikosongkan, sehingga pesanannya masih bisa disimpan sebagai bill baru.
+     */
+    if (existing.closedAt) {
+      return c.json(
+        {
+          error: existing.saleId
+            ? "Bill ini sudah dibayar — pesanan tambahan harus dibuat sebagai transaksi baru."
+            : "Bill ini sudah dibatalkan — buat bill baru untuk pesanan ini.",
+          kode: "bill_sudah_ditutup",
+          sudah_dibayar: existing.saleId !== null,
+        },
+        409,
+      );
+    }
     const katalog = await validateMenus(auth.company_id!, existing.branchId, body.items);
     const { mejaId, mejaLabel, tipe } = await resolveMeja(
       auth.company_id!,

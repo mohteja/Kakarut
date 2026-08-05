@@ -6151,6 +6151,29 @@ cek "membayar bill yang DIBATALKAN → 409" "V == 409" \
   "$(status_code_body "$REISS105" POST /penjualan "{\"meja_id\":\"$MEJA147\",\"metode_bayar\":\"tunai\",\"open_bill_id\":\"$OBID147X\",\"items\":[{\"menu_id\":\"$M147\",\"qty\":1}]}")"
 cek "…: sebab = bill_dibatalkan (transaksi TIDAK tercatat — jangan dibuang)" "V == 1" \
   "$(api "$REISS105" POST /penjualan "{\"meja_id\":\"$MEJA147\",\"metode_bayar\":\"tunai\",\"open_bill_id\":\"$OBID147X\",\"items\":[{\"menu_id\":\"$M147\",\"qty\":1}]}" | jq '(.sebab=="bill_dibatalkan")|if . then 1 else 0 end')"
+# MENYUNTING bill yang sudah ditutup juga harus ditolak, bukan cuma
+# membayarnya. Layar kasir memegang bill di memori, jadi perangkat kedua yang
+# membayar/membatalkan tak terlihat olehnya — dan tombol "Perbarui Bill" masih
+# bisa ditekan. Dulu PUT hanya memeriksa "ada" + "satu perusahaan", jadi ia
+# menulis ke bill mati: pada bill DIBAYAR tambahannya tak pernah ditagih
+# (barisnya sudah tersalin ke sale_items), pada bill DIBATALKAN baris hidup
+# masuk ke bill yang tak akan ditagih siapa pun. Lalu `loadDetail` menyaring
+# bill tertutup, jadi jawabannya 200 berisi `null` — klien membacanya sebagai
+# sukses dan mengosongkan keranjang. Pesanannya lenyap tanpa satu pun galat.
+cek "PUT bill yang SUDAH DIBAYAR → 409 (bukan 200 berisi null)" "V == 409" \
+  "$(status_code_body "$REISS105" PUT "/open-bill/$OBID147" "{\"meja_id\":\"$MEJA147\",\"items\":[{\"menu_id\":\"$M147\",\"qty\":1}]}")"
+cek "…: kode bill_sudah_ditutup + sudah_dibayar=true" "V == 1" \
+  "$(api "$REISS105" PUT "/open-bill/$OBID147" "{\"meja_id\":\"$MEJA147\",\"items\":[{\"menu_id\":\"$M147\",\"qty\":1}]}" | jq '((.kode=="bill_sudah_ditutup") and (.sudah_dibayar==true))|if . then 1 else 0 end')"
+cek "PUT bill yang DIBATALKAN → 409" "V == 409" \
+  "$(status_code_body "$REISS105" PUT "/open-bill/$OBID147X" "{\"meja_id\":\"$MEJA147\",\"items\":[{\"menu_id\":\"$M147\",\"qty\":1}]}")"
+# Dibedakan, karena langkah kasirnya berbeda: yang sudah dibayar butuh
+# transaksi BARU, yang dibatalkan butuh bill baru.
+cek "…: sudah_dibayar=false untuk bill yang dibatalkan" "V == 1" \
+  "$(api "$REISS105" PUT "/open-bill/$OBID147X" "{\"meja_id\":\"$MEJA147\",\"items\":[{\"menu_id\":\"$M147\",\"qty\":1}]}" | jq '((.kode=="bill_sudah_ditutup") and (.sudah_dibayar==false))|if . then 1 else 0 end')"
+# Penolakan itu tak boleh menyisakan apa pun: penjualan yang sudah terbuku
+# tetap 2 baris (4 porsi terkunci + 1 porsi harga hari ini), tidak bertambah.
+cek "penjualan bill itu TIDAK ikut berubah oleh PUT yang ditolak" "V == 2" \
+  "$(api "$OWNER" GET "/penjualan/$SID147" | jq '.items|length')"
 # Sebab yang sama harus sampai lewat ANTREAN OFFLINE, bukan hanya jalur online.
 SYNC147=$(api "$REISS105" POST /sync "$(jq -nc --arg r "$(cat /proc/sys/kernel/random/uuid)" --arg w "$(date -u +%FT%TZ)" --arg mj "$MEJA147" --arg ob "$OBID147X" --arg m "$M147" '{commands:[{client_ref:$r,tipe:"penjualan",waktu:$w,payload:{meja_id:$mj,metode_bayar:"tunai",open_bill_id:$ob,items:[{menu_id:$m,qty:1}]}}]}')")
 cek "sync: bayar bill dibatalkan → gagal 409 + sebab bill_dibatalkan" "V == 1" \
