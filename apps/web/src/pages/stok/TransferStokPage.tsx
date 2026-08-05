@@ -100,7 +100,7 @@ export function TransferStokPage() {
   const [baris, setBaris] = useState<BarisTransfer[]>([{ ingredient_id: "", qty: "" }]);
 
   // Stok READY di cabang asal — sumber pilihan bahan, satuan, dan batas qty.
-  const { data: saldoData, isLoading: saldoLoading } = useQuery({
+  const { data: saldoData, isLoading: saldoLoading, error: gagalSaldo } = useQuery({
     queryKey: ["transfer-saldo", asalId],
     enabled: !!asalId,
     queryFn: () =>
@@ -538,6 +538,27 @@ export function TransferStokPage() {
           {saldoLoading ? (
             <div className="mt-2">
               <Spinner />
+            </div>
+          ) : gagalSaldo ? (
+            /*
+              KOSONG ≠ TAK TERBACA. Dulu bacaan yang gagal jatuh ke kalimat di
+              bawah: "Tidak ada stok siap kirim — isi stok dulu (produksi,
+              pembelian, atau stok awal)". Itu dua kesalahan sekaligus —
+              menyatakan cabang asal tak punya stok, lalu menyuruh
+              memproduksi/membeli barang yang sebenarnya ADA di rak. Sekaligus
+              pemilih bahannya kosong tanpa satu kata pun, jadi tak ada
+              petunjuk bahwa yang salah adalah bacaannya.
+            */
+            <div className="mt-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2">
+              <div className="text-sm font-semibold text-amber-900">
+                ⚠ Stok {namaCabang(asalId)} <b>tidak terbaca</b>
+              </div>
+              <ErrorText error={gagalSaldo} />
+              <div className="text-sm text-amber-900">
+                Ini <b>bukan</b> berarti stoknya kosong. Muat ulang halaman sebelum memutuskan
+                memproduksi atau membeli — daftar bahan di atas ikut kosong karena bacaan ini,
+                bukan karena raknya kosong.
+              </div>
             </div>
           ) : saldoRows.length === 0 ? (
             <p className="mt-2 rounded-lg bg-stone-50 px-3 py-2 text-sm text-stone-500">
