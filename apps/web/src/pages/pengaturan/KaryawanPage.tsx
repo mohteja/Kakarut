@@ -547,6 +547,14 @@ export function KaryawanPage() {
               </div>
             ))}
           </div>
+          {/*
+            "Batalkan" adalah SATU-SATUNYA aksi di kartu ini, dan galatnya dulu
+            tak dirender di mana pun. Gagal membatalkan tak mengubah apa pun:
+            barisnya tetap (daftar hanya di-invalidate `onSuccess`), tombolnya
+            hidup lagi, tanpa satu kata pun — jadi orang menekannya berulang
+            kali sambil mengira undangannya bandel.
+          */}
+          <ErrorText error={batalUndangan.error} />
         </Card>
       )}
 

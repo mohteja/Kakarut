@@ -7,6 +7,7 @@ import { Logo } from "../components/Logo";
 import { ErrorText, SpinnerAtauGalat, btnPrimary, btnSecondary, inputClass } from "../components/ui";
 import { useAuth } from "../context/AuthContext";
 import { api } from "../lib/api";
+import { galatTerbaru } from "../lib/galat";
 
 const LABEL_ROLE: Record<UserRole, string> = {
   owner: "Owner",
@@ -116,7 +117,20 @@ export function OnboardingPage() {
                     </div>
                   ))}
                 </div>
-                <ErrorText error={terima.error} />
+                {/*
+                  DUA tombol, satu tempat galat. `Tolak` dan `Terima` bersebelahan
+                  di dalam kartu undangan yang sama, tapi dulu hanya `terima.error`
+                  yang dirender: menolak undangan yang gagal tak mengubah apa pun
+                  di layar — daftarnya tetap (refetch hanya di `onSuccess`),
+                  tombolnya hidup lagi, dan tak ada satu kata pun.
+                  Di layar ini pengguna belum punya perusahaan, belum punya
+                  navigasi, dan tak punya jalan lain untuk mencoba.
+
+                  `galatTerbaru` memulangkan galat aksi yang PALING BARU ditekan —
+                  bukan yang pertama truthy — jadi menolak lalu berhasil menerima
+                  tidak meninggalkan spanduk merah dari percobaan sebelumnya.
+                */}
+                <ErrorText error={galatTerbaru(terima, tolak)} />
               </div>
             )}
 
