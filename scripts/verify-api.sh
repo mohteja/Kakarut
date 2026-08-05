@@ -5624,11 +5624,17 @@ BULAN143=$(TZ=Asia/Jakarta date +%Y-%m)
 # gagal pada tanggal 5: harinya terbaca 'hadir', `cuti` tinggal 1, dan dua
 # asersi di bawah merah tanpa ada satu pun kode yang rusak. Persis itu yang
 # terjadi — lolos 3 Agustus (tanggal 5 masih di masa depan), merah 5 Agustus.
+# Tiga tanggal, dan ketiganya harus SALING EKSKLUSIF — bukan kebetulan:
+# server menolak pengajuan yang bertindih dengan pengajuan hidup milik orang
+# yang sama (409). Libur mingguan di bawah dibuat SESUDAH cuti di atas
+# disetujui, jadi kalau tanggalnya bersinggungan, pembuatannya gagal, `.id`
+# jadi kosong, dan DELETE atas id kosong membalas 400 — bukan 403/200 yang
+# diuji. `L143` karena itu ikut bergeser bersama pasangan cutinya.
 HARI143=$(TZ=Asia/Jakarta date +%d)
 if [ "$HARI143" = "05" ] || [ "$HARI143" = "06" ]; then
-  M143="$BULAN143-20"; S143="$BULAN143-21"
+  M143="$BULAN143-20"; S143="$BULAN143-21"; L143="$BULAN143-07"
 else
-  M143="$BULAN143-05"; S143="$BULAN143-06"
+  M143="$BULAN143-05"; S143="$BULAN143-06"; L143="$BULAN143-20"
 fi
 
 cek "guard: tanpa token → 401" "V == 401" \
@@ -5688,7 +5694,7 @@ cek "rekap: bulan tak valid → jatuh ke bulan berjalan" "V == 1" \
 
 # Batalkan: pemohon hanya boleh saat masih menunggu; orang lain tak boleh sama sekali.
 P143B=$(api "$REISS105" POST /pengajuan \
-  "{\"kategori\":\"mingguan\",\"tanggal_mulai\":\"$BULAN143-20\",\"tanggal_selesai\":\"$BULAN143-20\"}")
+  "{\"kategori\":\"mingguan\",\"tanggal_mulai\":\"$L143\",\"tanggal_selesai\":\"$L143\"}")
 cek "libur mingguan → jenis 'libur' (diturunkan server)" "V == 1" \
   "$(echo "$P143B" | jq '.jenis=="libur"|if . then 1 else 0 end')"
 PID143B=$(echo "$P143B" | jq -r .id)
