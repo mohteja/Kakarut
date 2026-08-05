@@ -282,8 +282,21 @@ export function KasirPage() {
     queryFn: () => api<OpenBillRow[]>(`/open-bill${branchQuery}`),
   });
 
-  // Sisa porsi tiap menu di cabang aktif (info "sisa 2 lagi" untuk kasir).
-  const { data: ketersediaan = [] } = useQuery({
+  /**
+   * Sisa porsi tiap menu di cabang aktif (info "sisa 2 lagi" untuk kasir).
+   *
+   * Galatnya WAJIB diambil. Peringatan stok di layar ini semuanya berbentuk
+   * "tampil kalau ada masalah": badge `Habis`/`Sisa N` di tiap menu, dan garis
+   * merah "⚠ Stok habis — pesanan 3" di keranjang. Keduanya diam bila
+   * `sisaByMenu` tak menemukan menunya — yang MEMANG benar untuk menu yang tak
+   * melacak stok, tapi jadi bohong saat bacaannya sendiri yang gagal.
+   *
+   * Tanpa `gagalSisa`, satu permintaan gagal membuat SELURUH peringatan lenyap
+   * dan layar kasir jadi tak terbedakan dari "semua aman" — tepat di detik
+   * pesanan diterima. Ketersediaan di aplikasi ini memberi tahu, tidak
+   * melarang; jadi yang ditambahkan cuma keterangan, bukan gerbang.
+   */
+  const { data: ketersediaan = [], error: gagalSisa } = useQuery({
     queryKey: ["menu-ketersediaan", branchQuery],
     queryFn: () => api<MenuStokDto[]>(`/menu/ketersediaan${branchQuery}`),
   });
@@ -876,6 +889,15 @@ export function KasirPage() {
                 {k.nama}
               </button>
             ))}
+          </div>
+        )}
+
+        {/* Tanpa ini, hilangnya badge Habis/Sisa terbaca sebagai "semua aman". */}
+        {!perluPilihMeja && gagalSisa && (
+          <div className="mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            ⚠ Sisa porsi tidak terbaca — badge <b>Habis</b> dan <b>Sisa N</b> tidak muncul di
+            menu mana pun, dan peringatan pesanan melebihi stok tidak akan tampil. Menu yang
+            bahannya sudah habis tetap terlihat normal; tanyakan dapur sebelum menerima pesanan.
           </div>
         )}
 
