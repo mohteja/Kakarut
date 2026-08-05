@@ -366,6 +366,17 @@ export function PenerimaanPage() {
                           Isi jumlah yang benar-benar diterima (0 = baris ditolak).
                         </span>
                       )}
+                      {/* Kolom alasan DITAMPILKAN di sini juga — sebelumnya
+                          nilainya ikut terkirim tanpa pernah terlihat. Server
+                          menuliskannya ke `alasanTolak` baris yang qty-nya 0,
+                          jadi ia memang alasan untuk barang yang TIDAK
+                          diterima, bukan untuk seluruh kirimannya. */}
+                      <input
+                        value={alasan}
+                        onChange={(e) => setAlasan(e.target.value)}
+                        className={`${inputClass} max-w-[14rem]`}
+                        placeholder="alasan baris yang 0 (opsional)"
+                      />
                       <button
                         onClick={() => terimaSebagian.mutate(g)}
                         disabled={terimaSebagian.isPending || qtyTakTerbaca(g).length > 0}
@@ -391,6 +402,27 @@ export function PenerimaanPage() {
                           setSebagianKey(g.key);
                           setTolakKey(null);
                           setQtyDraft({});
+                          /*
+                           * `alasan` DIBUANG juga, dan itu bukan kerapian.
+                           *
+                           * Kolom itu dipakai BERSAMA oleh dua jalur: Tolak
+                           * mengirimnya sebagai alasan penolakan, dan Terima
+                           * Sebagian ikut mengirimnya — server menuliskannya ke
+                           * `alasanTolak` baris yang qty-nya 0. Dulu hanya
+                           * tombol Tolak yang mengosongkannya, jadi:
+                           *
+                           *   1. petugas membuka Tolak, mengetik "barang basah",
+                           *      lalu menekan Batal — `alasan` tetap terisi;
+                           *   2. ia membuka Terima Sebagian, mengisi qty, simpan;
+                           *   3. "barang basah" tercatat sebagai alasan baris
+                           *      yang tak diterima — alasan dari keputusan yang
+                           *      DIBATALKAN, menempel pada keputusan lain.
+                           *
+                           * Yang membuatnya sunyi: di mode ini kolomnya dulu tak
+                           * pernah ditampilkan, jadi tak ada yang bisa melihat
+                           * teks yang ikut terkirim.
+                           */
+                          setAlasan("");
                         }}
                         className="rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-600"
                       >
