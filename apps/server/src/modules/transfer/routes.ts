@@ -33,6 +33,12 @@ import { wajibKelipatanKemasan } from "../../lib/kemasan";
 import { terbitkanNomor } from "../dokumen/nomor";
 import { catatLogFaktur } from "../produksi/log";
 import { hitungSaldoCabang, kunciKirimCabang, qtyDalamJalan } from "../stok/service";
+import {
+  cariHasilIdempoten,
+  catatHasilIdempoten,
+  clientRefField,
+  deviceIdField,
+} from "../sync/idempoten";
 
 const TransferBody = z.object({
   /** cabang ASAL (stok berkurang saat kiriman diterima) */
@@ -40,6 +46,23 @@ const TransferBody = z.object({
   /** cabang TUJUAN (stok bertambah saat diterima di Penerimaan) */
   tujuan_branch_id: z.string().uuid(),
   catatan: z.string().trim().max(300).nullish(),
+  /**
+   * Kunci idempotensi (UUID v4 dari perangkat) — memakai ledger BERSAMA
+   * `(company_id, client_ref)` yang sama dengan penjualan & opname.
+   *
+   * Bukan pengaman dari klik ganda: tombolnya sudah dimatikan selama pending.
+   * Yang dijaga adalah jaringan yang putus SESUDAH server menulis tapi SEBELUM
+   * balasannya sampai — dan itu tak selalu butuh manusia. Terukur di Chromium:
+   * saat server menutup koneksi keep-alive yang sedang dipakai ulang, browser
+   * MENGULANG SENDIRI POST itu tanpa aksi siapa pun (lihat `lib/idempoten.ts`
+   * di web).
+   *
+   * Akibat penggandaan di sini bukan sekadar baris kembar: stok keluar dari CK
+   * DUA KALI untuk satu pengiriman, dan cabang menerima dua kiriman yang sama.
+   * Opsional supaya klien lama tak berubah perilakunya.
+   */
+  client_ref: clientRefField,
+  device_id: deviceIdField,
   items: z
     .array(
       z.object({
@@ -287,6 +310,12 @@ export const transferRoutes = new Hono<AppEnv>()
   .post("/", zValidator("json", TransferBody), async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");
+    // Diperiksa PALING AWAL — sebelum cabang di-resolve dan sebelum apa pun
+    // ditulis. Kiriman ulang harus memulangkan hasil yang SAMA.
+    if (body.client_ref) {
+      const ada = await cariHasilIdempoten(auth.company_id!, body.client_ref);
+      if (ada) return c.json(ada.hasilJson, 201);
+    }
     if (body.asal_branch_id === body.tujuan_branch_id) {
       throw new HTTPException(400, { message: "Cabang asal dan tujuan tidak boleh sama" });
     }
@@ -422,17 +451,27 @@ export const transferRoutes = new Hono<AppEnv>()
       return { nomor };
     });
 
-    return c.json(
-      {
-        ok: true,
-        faktur_id: fakturId,
-        nomor: hasil.nomor,
-        asal: asal.nama,
-        tujuan: tujuan.nama,
-        jumlah_baris: ingIds.length,
-      },
-      201,
-    );
+    const keluaran = {
+      ok: true,
+      faktur_id: fakturId,
+      nomor: hasil.nomor,
+      asal: asal.nama,
+      tujuan: tujuan.nama,
+      jumlah_baris: ingIds.length,
+    };
+    // Dicatat SESUDAH transaksinya sukses: kalau penulisannya sendiri gagal,
+    // tak ada yang boleh membuat kiriman ulang mengira sudah selesai.
+    if (body.client_ref) {
+      await catatHasilIdempoten({
+        companyId: auth.company_id!,
+        clientRef: body.client_ref,
+        userId: auth.sub,
+        deviceId: body.device_id ?? null,
+        tipe: "transfer_stok",
+        hasilJson: keluaran,
+      });
+    }
+    return c.json(keluaran, 201);
   })
   /**
    * BATALKAN transfer yang belum diterima (salah kirim) → baris masuk Tempat

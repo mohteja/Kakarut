@@ -25,6 +25,35 @@ tanpa akses repo server.
 
 ---
 
+## Rilis: `POST /api/transfer-stok` — kunci idempotensi `client_ref`
+
+> Tidak ada migrasi, tidak ada field wajib baru, dan respons tidak berubah.
+> **Tambahan murni** — klien yang tak mengirim `client_ref` berperilaku persis
+> seperti sebelumnya.
+
+### 🟢 AMAN — tapi tim mobile sebaiknya ikut mengirimnya
+
+`POST /api/transfer-stok` kini menerima `client_ref` (UUID v4) dan `device_id`
+opsional, memakai ledger idempotensi **yang sama** dengan `POST /penjualan` dan
+`POST /stok/opname`. Kiriman ulang dengan `client_ref` yang sama memulangkan
+hasil identik (`faktur_id` & `nomor` TF- yang sama, tetap **201**) tanpa
+membuat faktur kedua.
+
+Kenapa ini penting justru di endpoint ini: ia **membuat faktur sekaligus
+memindahkan stok keluar dari Central Kitchen**. Penggandaan bukan sekadar baris
+kembar — stoknya keluar dua kali, dan cabang menerima dua kiriman yang sama.
+Masalahnya bukan klik ganda (tombol sudah dimatikan selama pending) melainkan
+jaringan yang putus SESUDAH server menulis tapi SEBELUM balasannya sampai; di
+Chromium bahkan terukur browser mengulang POST-nya sendiri saat koneksi
+keep-alive yang dipakai ulang ditutup server.
+
+**Aturan pemakaian kuncinya** — sama seperti di penjualan/opname: satu UUID per
+PENGIRIMAN, dibuat saat kiriman pertama dan **dicabut begitu sukses**. Kunci
+yang tak pernah dicabut membuat pengiriman berikutnya dengan bahan & qty yang
+kebetulan sama dianggap ulangan, lalu diam-diam tak terjadi.
+
+---
+
 ## Rilis: `POST /api/bahan/import` — kolom yang tak dikirim tak lagi ditimpa
 
 > Belum di-merge ke production. Tidak ada migrasi, tidak ada field baru, dan
