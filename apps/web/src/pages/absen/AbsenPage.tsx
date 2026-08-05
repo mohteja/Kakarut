@@ -336,6 +336,37 @@ export function AbsenPage() {
         </div>
       )}
 
+      {/*
+        GALAT ABSEN ditaruh di sini, bersebelahan dengan kartu hasil — bukan di
+        dalam salah satu kartu aksi.
+
+        Satu mutasi `absen` melayani DUA jalur: absen sendiri (swafoto) dan
+        stasiun pindai (kode/QR karyawan lain). Sukses sudah dinaikkan ke tempat
+        bersama ini dan menyebut SIAPA yang tercatat (`hasil.nama`). Galatnya
+        dulu tidak: ia dirender di dalam kartu "Absen Sekarang (swafoto)", yang
+        judulnya berbunyi "mencatat kehadiran ANDA SENDIRI".
+
+        Jadi operator yang memindai QR karyawan lain dan ditolak server
+        ("Karyawan tidak ditemukan", "sudah absen pulang", di luar radius)
+        membaca penolakan itu di bawah judul tentang dirinya sendiri —
+        kegagalan yang benar, dilekatkan pada orang yang salah.
+      */}
+      {absen.error != null && (
+        <div className="mb-4 rounded-2xl bg-red-50 p-4 text-center ring-1 ring-red-200">
+          {/*
+            `absen.variables` = argumen kiriman TERAKHIR, jadi jalurnya dikenali
+            tanpa state tambahan yang harus dijaga tetap sinkron. `kode` terisi
+            hanya pada jalur stasiun (pindai/ketik); absen sendiri mengirim null.
+          */}
+          <div className="text-sm font-semibold text-red-800">
+            {absen.variables?.kode
+              ? `Absen kode ${absen.variables.kode} gagal`
+              : "Absen Anda gagal"}
+          </div>
+          <ErrorText error={absen.error} />
+        </div>
+      )}
+
       {/* Preview kamera (self/scan/manual) — <video> selalu ter-mount */}
       <Card className={mode !== "idle" ? "space-y-3 p-5" : "hidden"}>
         <div className="relative overflow-hidden rounded-xl bg-black">
@@ -377,7 +408,9 @@ export function AbsenPage() {
             Tekan untuk mencatat kehadiran Anda sendiri — ambil <b>swafoto</b> + lokasi otomatis
             terkirim. Sistem menentukan <b>masuk</b>/<b>pulang</b> sesuai urutan hari ini.
           </div>
-          <ErrorText error={absen.error} />
+          {/* `absen.error` pindah ke atas (bersama kartu hasil) — lihat sebabnya
+              di sana. `kameraError` TETAP di sini: ia memang soal kamera
+              perangkat ini, bukan soal karyawan yang dipindai. */}
           {kameraError && (
             <div className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
               {kameraError}
