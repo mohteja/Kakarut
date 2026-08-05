@@ -543,6 +543,32 @@ export function PesananPage() {
     (n, r) => n + r.items.filter((i) => i.status === "dikerjakan").length,
     0,
   );
+  /**
+   * GAGAL MEMUAT ≠ TIDAK ADA PESANAN — dan di layar inilah bedanya paling mahal.
+   *
+   * Aturan ini sudah dipatuhi `RiwayatModal` di berkas yang sama, tapi papannya
+   * sendiri belum. Saat bacaan pertama gagal, `data` undefined → `rows` kosong,
+   * dan layar mengucapkan TIGA pernyataan sekaligus: ketiga kolom berbunyi
+   * "Kosong.", penghitungnya menulis "0 pesanan", dan **0** sajian masih
+   * dikerjakan — angka tebal yang dibaca sekilas dari seberang dapur.
+   *
+   * Yang membuatnya berbahaya bukan kalimatnya, melainkan tindakan yang
+   * disimpulkan darinya: papan kosong berarti tak ada yang perlu dimasak.
+   * Dokumentasi halaman ini sendiri menyebut layar ini "satu-satunya layar yang
+   * keterlambatannya berujung makanan tak dibuat".
+   *
+   * Dan bacaan pertama yang gagal bukan kasus langka di sini: kunci query
+   * memuat cabang DAN tanggal, jadi setiap pergantian cabang, setiap pilihan
+   * tanggal, dan — yang paling penting — pergantian hari lewat tengah malam
+   * memulai kunci BARU tanpa cache. Tepat pada momen yang komentar tanggal di
+   * atas ada untuk menyelamatkannya.
+   *
+   * Dibedakan dari galat menyegarkan: bila `data` masih ada, kartunya nyata
+   * (mungkin basi) dan tak boleh disembunyikan — yang dibutuhkan cuma
+   * peringatan bahwa papannya berhenti bergerak.
+   */
+  const gagalTotal = error != null && data === undefined;
+  const gagalSegar = error != null && data !== undefined;
 
   return (
     <div className="max-w-6xl">
@@ -572,7 +598,16 @@ export function PesananPage() {
           aria-label="Tanggal pesanan"
         />
         <div className="text-sm text-stone-500">
-          {rows.length} pesanan · <b>{sajianJalan}</b> sajian masih dikerjakan
+          {/* Angka tebal ini dibaca sekilas dari seberang dapur; "0" yang
+              sebetulnya "tak terbaca" adalah kebohongan yang paling mahal di
+              halaman ini. */}
+          {gagalTotal ? (
+            <span className="text-red-700">jumlah pesanan tidak terbaca</span>
+          ) : (
+            <>
+              {rows.length} pesanan · <b>{sajianJalan}</b> sajian masih dikerjakan
+            </>
+          )}
         </div>
       </div>
 
@@ -597,8 +632,21 @@ export function PesananPage() {
 
       <ErrorText error={error ?? galat} />
 
+      {/* Penyegaran yang gagal sementara kartunya masih ada: kartunya NYATA,
+          jadi jangan disembunyikan — tapi papan ini memoles ulang tiap 15 detik
+          dan diamnya terbaca seperti "tak ada pesanan baru". Yang dibutuhkan
+          cuma pemberitahuan bahwa layarnya berhenti bergerak. */}
+      {gagalSegar && (
+        <div className="mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          Papan <b>berhenti menyegarkan</b> — yang tampil di bawah adalah bacaan
+          terakhir yang berhasil. Pesanan yang masuk setelah itu belum tentu terlihat.
+        </div>
+      )}
+
       {/* Ponsel: satu kolom + chip pemilih; desktop: tiga kolom berdampingan */}
-      <div className="mb-3 flex gap-2 md:hidden">
+      {/* Chip pemilih ikut menyembunyikan diri saat papan tak terbaca: "(0)"
+          pada ketiga chip adalah pernyataan yang sama, cuma lebih kecil. */}
+      <div className={`mb-3 gap-2 md:hidden ${gagalTotal ? "hidden" : "flex"}`}>
         {KOLOM.map((k) => (
           <button
             key={k.status}
@@ -616,6 +664,22 @@ export function PesananPage() {
 
       {isLoading ? (
         <Spinner />
+      ) : gagalTotal ? (
+        /* Tak ada satu pun kartu yang bisa dipercaya, jadi papan TIDAK boleh
+           menggambar tiga kolom "Kosong." — itu pernyataan yang dunia nyata
+           bisa membantahnya, dan yang dibantahnya adalah pesanan yang sedang
+           menunggu dimasak. */
+        <Card className="space-y-2 border-red-300 bg-red-50 p-6 text-center">
+          <div className="text-base font-bold text-red-800">Papan tidak terbaca</div>
+          <p className="text-sm leading-relaxed text-red-700">
+            Daftar pesanan gagal dimuat — ini <b>bukan</b> berarti tidak ada pesanan.
+            Jangan menyimpulkan dapur sedang kosong dari layar ini.
+          </p>
+          <p className="text-sm text-red-700">
+            Papan mencoba lagi sendiri tiap 15 detik. Kalau tak juga muncul,{" "}
+            <b>tanyakan kasir</b> — pesanannya tetap tercatat di sana.
+          </p>
+        </Card>
       ) : (
         <div className="grid gap-3 md:grid-cols-3">
           {KOLOM.map((k) => {
