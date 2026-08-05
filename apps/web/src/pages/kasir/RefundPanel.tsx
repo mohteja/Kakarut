@@ -43,9 +43,46 @@ export function RefundPanel({
     pb1: data.sale.pb1Asal ?? data.sale.pb1Amount,
   };
 
+  /**
+   * Kunci idempotensi satu kejadian refund, bertahan melintasi percobaan ulang.
+   *
+   * Akibat salahnya lebih buruk daripada pada pembayaran: refund yang terkirim
+   * dua kali MENGEMBALIKAN UANG DUA KALI. Pagar "melebihi sisa porsi" tak
+   * menolong — selama masih ada porsi tersisa, permintaan kedua sah menurut
+   * aturan dan langsung dijalankan.
+   *
+   * TAPI kuncinya harus mengikat ISI refundnya, bukan umur panel ini. Server
+   * memutar ulang hasil PERTAMA untuk `client_ref` yang sama — apa pun `items`
+   * yang dibawa permintaan kedua, dan dengan 200 OK. Jadi tanpa penyetelan
+   * ulang di bawah:
+   *
+   *   1. Kasir memilih Nasi Goreng ×1, menekan Kembalikan. Server MENYIMPAN-nya,
+   *      lalu jaringan putus sebelum balasannya sampai → mutasi gagal, panel
+   *      tetap terbuka, dan angkanya masih memajang "sisa 1" (data di panel ini
+   *      belum disegarkan — memang belum bisa: tak ada yang tahu ia berhasil).
+   *   2. Kasir menyimpulkan tak ada yang tersimpan, menambah Es Teh ×1, dan
+   *      menekan lagi.
+   *   3. Kunci yang sama diputar ulang → 200 OK berisi hasil LANGKAH 1. Es Teh
+   *      TIDAK PERNAH dikembalikan, tapi `onSelesai` jalan, panel menutup, dan
+   *      layar terlihat berhasil. Uang Es Teh sudah telanjur diserahkan.
+   *
+   * Karena itu setiap perubahan porsi mencabut kuncinya: mengulang kiriman yang
+   * SAMA tetap idempoten (itu gunanya), sementara pilihan yang BERUBAH menjadi
+   * kejadian yang benar-benar baru. Kalau ternyata langkah 1 memang berhasil,
+   * kiriman kedua ditolak server dengan pesan yang menyebutkan sisanya — jauh
+   * lebih baik daripada sukses palsu.
+   *
+   * `alasan` SENGAJA tidak ikut mencabut: ia catatan, bukan uang. Kalau ikut,
+   * membenahi ejaan alasan di antara dua percobaan akan membuat refund yang
+   * sama terkirim dua kali — persis bahaya yang kunci ini ada untuk mencegahnya.
+   */
+  const refKejadian = useRef<string | null>(null);
+
   function ubah(id: string, delta: number, maks: number) {
     setPilih((p) => {
       const next = Math.min(maks, Math.max(0, (p[id] ?? 0) + delta));
+      if (next === (p[id] ?? 0)) return p;
+      refKejadian.current = null;
       return { ...p, [id]: next };
     });
   }
@@ -62,16 +99,6 @@ export function RefundPanel({
     asal,
   );
   const nominal = nominalRefund({ ...asal, total: data.sale.total }, sesudah);
-
-  /**
-   * Kunci idempotensi satu kejadian refund, bertahan melintasi percobaan ulang.
-   *
-   * Akibat salahnya lebih buruk daripada pada pembayaran: refund yang terkirim
-   * dua kali MENGEMBALIKAN UANG DUA KALI. Pagar "melebihi sisa porsi" tak
-   * menolong — selama masih ada porsi tersisa, permintaan kedua sah menurut
-   * aturan dan langsung dijalankan.
-   */
-  const refKejadian = useRef<string | null>(null);
 
   const kirim = useMutation({
     mutationFn: () => {
