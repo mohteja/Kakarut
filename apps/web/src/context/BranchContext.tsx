@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
+import { bacaLokal, hapusLokal, tulisLokal } from "../lib/simpanan";
 import { useCompanyMode } from "../lib/useCompanyMode";
 import { useAuth } from "./AuthContext";
 
@@ -81,16 +82,16 @@ export function BranchProvider({ children }: { children: ReactNode }) {
         // store/CK sebelum ter-pin ke Kantor.
         isAdmin
         ? null
-        : localStorage.getItem("kakarut.branch") || null,
+        : bacaLokal("kakarut.branch") || null,
   );
   // Cabang yang datanya sedang dikelola DARI kantor (stok/meja/kasir/dll.)
   const [dataBranchId, setDataBranchIdState] = useState<string | null>(
-    () => localStorage.getItem("kakarut.cabang-data") || null,
+    () => bacaLokal("kakarut.cabang-data") || null,
   );
   // Pilihan terpisah untuk halaman produksi/beli (Central Kitchen) agar tak
   // saling menimpa dengan pilihan cabang-data store (stok/kasir/dll.).
   const [dataCkBranchId, setDataCkBranchIdState] = useState<string | null>(
-    () => localStorage.getItem("kakarut.cabang-data-ck") || null,
+    () => bacaLokal("kakarut.cabang-data-ck") || null,
   );
 
   // Daftar cabang dimuat untuk semua peran (label, tipe cabang sendiri, struk);
@@ -121,7 +122,7 @@ export function BranchProvider({ children }: { children: ReactNode }) {
     // (Lite/Pro belum ada kantor) admin ikut jalur default di bawah.
     if (isAdmin && kantor) {
       if (branchId !== kantor.id) {
-        localStorage.setItem("kakarut.branch", kantor.id);
+        tulisLokal("kakarut.branch", kantor.id);
         setBranchId(kantor.id);
       }
       return;
@@ -129,7 +130,7 @@ export function BranchProvider({ children }: { children: ReactNode }) {
     const valid = branchId && cabang.some((b) => b.id === branchId && b.is_active);
     if (!valid) {
       const pertama = kantor ?? cabang.find((b) => b.is_active) ?? cabang[0];
-      localStorage.setItem("kakarut.branch", pertama.id);
+      tulisLokal("kakarut.branch", pertama.id);
       setBranchId(pertama.id);
     }
   }, [cabang, branchId, isKasir, isAdmin]);
@@ -150,11 +151,11 @@ export function BranchProvider({ children }: { children: ReactNode }) {
     if (cabang.length === 0) return;
     const sah = (id: string | null) => !id || cabang.some((b) => b.id === id && b.is_active);
     if (!sah(dataBranchId)) {
-      localStorage.removeItem("kakarut.cabang-data");
+      hapusLokal("kakarut.cabang-data");
       setDataBranchIdState(null);
     }
     if (!sah(dataCkBranchId)) {
-      localStorage.removeItem("kakarut.cabang-data-ck");
+      hapusLokal("kakarut.cabang-data-ck");
       setDataCkBranchIdState(null);
     }
   }, [cabang, dataBranchId, dataCkBranchId]);
@@ -164,15 +165,15 @@ export function BranchProvider({ children }: { children: ReactNode }) {
     // lokasi memang disembunyikan, ini penjaga tambahan. Drill "cabang data"
     // (setDataBranchId/setDataCkBranchId) tidak terpengaruh.
     if (isAdmin) return;
-    localStorage.setItem("kakarut.branch", id);
+    tulisLokal("kakarut.branch", id);
     setBranchId(id);
   };
   const setDataBranchId = (id: string) => {
-    localStorage.setItem("kakarut.cabang-data", id);
+    tulisLokal("kakarut.cabang-data", id);
     setDataBranchIdState(id);
   };
   const setDataCkBranchId = (id: string) => {
-    localStorage.setItem("kakarut.cabang-data-ck", id);
+    tulisLokal("kakarut.cabang-data-ck", id);
     setDataCkBranchIdState(id);
   };
 

@@ -29,6 +29,7 @@ import { CabangDataBar } from "../../components/CabangDataBar";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah } from "../../lib/format";
 import { uuidV4 } from "../../lib/idempoten";
+import { bacaLokal, tulisLokal } from "../../lib/simpanan";
 import { ReceiptModal, type SaleResult } from "./ReceiptModal";
 import {
   KosongkanMejaModal,
@@ -202,13 +203,9 @@ export function KasirPage() {
   const [aktifKategori, setAktifKategori] = useState<string | null>(null);
   const [cariMenu, setCariMenu] = useState("");
   // Mode tampilan katalog: "foto" (kartu thumbnail) / "kode" (ringkas per kategori)
-  const [tampilan, setTampilan] = useState<"foto" | "kode">(() => {
-    try {
-      return localStorage.getItem("kakarut.kasirTampilan") === "kode" ? "kode" : "foto";
-    } catch {
-      return "foto";
-    }
-  });
+  const [tampilan, setTampilan] = useState<"foto" | "kode">(() =>
+    bacaLokal("kakarut.kasirTampilan") === "kode" ? "kode" : "foto",
+  );
   const [cart, setCart] = useState<CartLine[]>([]);
   const [mejaId, setMejaId] = useState<string | null>(null);
   // Modal pilih meja muncul lebih dulu tiap memulai transaksi (sebelum keranjang).
@@ -394,11 +391,7 @@ export function KasirPage() {
 
   // Simpan preferensi tampilan katalog (foto / kode) antar sesi.
   useEffect(() => {
-    try {
-      localStorage.setItem("kakarut.kasirTampilan", tampilan);
-    } catch {
-      /* localStorage tak tersedia */
-    }
+    tulisLokal("kakarut.kasirTampilan", tampilan);
   }, [tampilan]);
 
   function pilihMeja(id: string) {

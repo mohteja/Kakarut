@@ -1,3 +1,5 @@
+import { bacaLokal, hapusLokal, tulisLokal } from "./simpanan";
+
 export interface AuthState {
   token: string;
   user: {
@@ -26,18 +28,36 @@ export interface AuthState {
 export const AUTH_STORAGE_KEY = "kakarut.auth";
 const STORAGE_KEY = AUTH_STORAGE_KEY;
 
+/**
+ * `try`/`catch` di sini SAJA tidak cukup, dan itu sebabnya sesi lewat
+ * `bacaLokal`/`tulisLokal` yang punya cadangan memori.
+ *
+ * `api()` di bawah mengambil tokennya dari `loadAuth()` — jadi PENYIMPANAN,
+ * bukan state React, yang menjadi sumber kebenaran sesi. Pada perangkat yang
+ * `localStorage`-nya diblokir, sekadar menelan galat tulisnya hanya mengubah
+ * bentuk kegagalannya: login berhasil di server, tokennya tak pernah
+ * tersimpan, permintaan berikutnya berangkat tanpa `Authorization`, 401,
+ * dilempar balik ke /login. Kasir berputar di layar login yang menerima
+ * passwordnya dengan benar tiap kali.
+ *
+ * Dengan cadangan memori, sesi tetap hidup selama tab ini terbuka. Ia memang
+ * tak selamat dari muat ulang — itu batas yang jujur dan tak terhindarkan
+ * kalau perangkatnya menolak menyimpan apa pun.
+ */
 export function loadAuth(): AuthState | null {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = bacaLokal(STORAGE_KEY);
     return raw ? (JSON.parse(raw) as AuthState) : null;
   } catch {
+    // Isi rusak/separuh tertulis — bukan kegagalan penyimpanan (itu sudah
+    // ditangani `bacaLokal`), melainkan JSON yang tak bisa diurai.
     return null;
   }
 }
 
 export function saveAuth(state: AuthState | null) {
-  if (state) localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  else localStorage.removeItem(STORAGE_KEY);
+  if (state) tulisLokal(STORAGE_KEY, JSON.stringify(state));
+  else hapusLokal(STORAGE_KEY);
 }
 
 export class ApiError extends Error {

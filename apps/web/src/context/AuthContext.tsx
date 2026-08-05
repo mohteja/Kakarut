@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { api, AUTH_STORAGE_KEY, loadAuth, saveAuth, type AuthState } from "../lib/api";
+import { hapusLokal } from "../lib/simpanan";
 
 /** Hasil daftar / kirim-ulang verifikasi (netral, tanpa sesi). */
 export interface DaftarResult {
@@ -102,9 +103,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAuth({ ...kini, ...baru });
     if (pindahPeran) {
       // Cakupan data ikut berubah → buang cache & pilihan lokasi peran lama.
-      localStorage.removeItem("kakarut.branch");
-      localStorage.removeItem("kakarut.cabang-data");
-      localStorage.removeItem("kakarut.cabang-data-ck");
+      hapusLokal("kakarut.branch");
+      hapusLokal("kakarut.cabang-data");
+      hapusLokal("kakarut.cabang-data-ck");
       queryClient.clear();
     }
   }, [queryClient]);
@@ -130,12 +131,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const setSession = useCallback(
     (data: AuthState) => {
       queryClient.clear();
-      localStorage.removeItem("kakarut.branch");
-      localStorage.removeItem("kakarut.cabang-data");
+      hapusLokal("kakarut.branch");
+      hapusLokal("kakarut.cabang-data");
       // Ketiganya, bukan dua. `cabang-data-ck` dulu cuma dibuang di jalur
       // ganti-peran, jadi ia bertahan melintasi logout DAN login: pemilik
       // warung B mewarisi pilihan CK milik warung A di browser POS yang sama.
-      localStorage.removeItem("kakarut.cabang-data-ck");
+      hapusLokal("kakarut.cabang-data-ck");
       saveAuth(data);
       setAuth(data);
       // Sesi baru = data server paling mutakhir; mulai lagi jendela jedanya
@@ -201,9 +202,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(() => {
     saveAuth(null);
-    localStorage.removeItem("kakarut.branch");
-    localStorage.removeItem("kakarut.cabang-data");
-    localStorage.removeItem("kakarut.cabang-data-ck");
+    hapusLokal("kakarut.branch");
+    hapusLokal("kakarut.cabang-data");
+    hapusLokal("kakarut.cabang-data-ck");
     queryClient.clear();
     setAuth(null);
   }, [queryClient]);
