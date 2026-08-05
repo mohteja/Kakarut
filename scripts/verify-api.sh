@@ -2838,6 +2838,48 @@ api "$OWNER" POST /bahan/import '{"mode":"perbarui","items":[{"nama":"impor full
 IMPF2=$(api "$OWNER" GET /bahan | jq '[.[]|select(.nama=="impor full76")][0]')
 cek "impor perbarui: kemasan/complement dimatikan" "V == 1" \
   "$(echo "$IMPF2" | jq '((.is_packaging==false) and (.is_complement==false) and (.min_beli==0))|if . then 1 else 0 end')"
+# ── kolom yang TIDAK dikirim tak boleh ditimpa ────────────────────────────────
+# Berkas CSV berisi `nama,harga_beli` saja (daftar harga supplier) adalah bentuk
+# yang paling lazim. Dulu tiap kolom yang tak ada di berkas tetap terkirim
+# dengan nilai bawaannya dan mode "perbarui" menuliskannya ke SETIAP bahan yang
+# cocok: isi→1 (HPP per satuan melonjak sebesar isinya), satuan→"pcs",
+# kategori→"lain", kemasan→mati, stok_minimum→0. Semuanya tanpa satu pesan pun.
+api "$OWNER" POST /bahan/import '{"mode":"tambah","items":[{"kode":"UTH76","nama":"utuh uji76","jenis":"beli","kategori":"baso","harga_beli":48000,"isi":24,"satuan":"botol","satuan_beli":"dus","stok_minimum":7,"min_beli":3,"masa_simpan_hari":45,"lead_time_hari":4,"boleh_eceran":true,"lacak_stok":true,"kemasan":true,"complement":true,"catatan":"catatan awal"}]}' > /dev/null
+# hanya nama + harga yang dikirim — persis berkas `nama,harga_beli`
+IMP8=$(api "$OWNER" POST /bahan/import '{"mode":"perbarui","items":[{"nama":"utuh uji76","harga_beli":51000}]}')
+cek "impor sebagian: 1 diperbarui" "V == 1" \
+  "$(echo "$IMP8" | jq '((.diperbarui==1) and (.ditambah==0) and ((.gagal|length)==0))|if . then 1 else 0 end')"
+UTH=$(api "$OWNER" GET /bahan | jq '[.[]|select(.nama=="utuh uji76")][0]')
+cek "impor sebagian: harga yang DIKIRIM tersimpan (51000)" "V == 51000" "$(echo "$UTH" | jq '.harga_beli')"
+cek "impor sebagian: isi TIDAK ditimpa jadi 1" "V == 24" "$(echo "$UTH" | jq '.isi')"
+cek "impor sebagian: satuan TIDAK ditimpa jadi pcs" "V == 1" \
+  "$(echo "$UTH" | jq '((.satuan=="botol") and (.satuan_beli=="dus"))|if . then 1 else 0 end')"
+cek "impor sebagian: kategori TIDAK ditimpa jadi lain" "V == 1" \
+  "$(echo "$UTH" | jq '(.kategori=="baso")|if . then 1 else 0 end')"
+cek "impor sebagian: kemasan & complement TIDAK padam" "V == 1" \
+  "$(echo "$UTH" | jq '((.is_packaging==true) and (.is_complement==true))|if . then 1 else 0 end')"
+cek "impor sebagian: ambang & jadwal TIDAK dinolkan" "V == 1" \
+  "$(echo "$UTH" | jq '((.stok_minimum==7) and (.min_beli==3) and (.masa_simpan_hari==45) and (.lead_time_hari==4))|if . then 1 else 0 end')"
+cek "impor sebagian: boleh_eceran & catatan TIDAK dihapus" "V == 1" \
+  "$(echo "$UTH" | jq '((.boleh_eceran==true) and (.catatan=="catatan awal"))|if . then 1 else 0 end')"
+# harga/unit ikut benar KARENA isi-nya utuh — inti kerusakan lamanya
+cek "impor sebagian: harga per unit 51000/24 (bukan /1)" "V == 1" \
+  "$(echo "$UTH" | jq '((.harga_per_unit*24 - 51000)|fabs < 0.01)|if . then 1 else 0 end')"
+# nilai yang MEMANG dikirim tetap ditulis, termasuk yang falsy
+api "$OWNER" POST /bahan/import '{"mode":"perbarui","items":[{"nama":"utuh uji76","kemasan":false,"stok_minimum":0,"catatan":null}]}' > /dev/null
+UTH2=$(api "$OWNER" GET /bahan | jq '[.[]|select(.nama=="utuh uji76")][0]')
+cek "impor sebagian: false/0/null yang DIKIRIM tetap tersimpan" "V == 1" \
+  "$(echo "$UTH2" | jq '((.is_packaging==false) and (.stok_minimum==0) and ((.catatan==null) or (.catatan=="")))|if . then 1 else 0 end')"
+cek "impor sebagian: yang tak dikirim tetap utuh di kiriman kedua" "V == 1" \
+  "$(echo "$UTH2" | jq '((.isi==24) and (.satuan=="botol") and (.is_complement==true) and (.harga_beli==51000))|if . then 1 else 0 end')"
+# bahan BARU tetap dapat nilai bawaan (tak ada nilai lama untuk dibiarkan)
+api "$OWNER" POST /bahan/import '{"mode":"tambah","items":[{"nama":"minim uji76"}]}' > /dev/null
+MNM=$(api "$OWNER" GET /bahan | jq '[.[]|select(.nama=="minim uji76")][0]')
+cek "bahan baru dari baris minim: default terpasang" "V == 1" \
+  "$(echo "$MNM" | jq '((.isi==1) and (.satuan=="pcs") and (.harga_beli==0) and (.track_stok==true) and (.pengadaan=="beli"))|if . then 1 else 0 end')"
+# isi 0 tetap ditolak validasi — bukan diterima lalu jadi pembagi maut
+cek "impor isi 0 → 400 (bukan diterima)" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/bahan/import" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"mode":"perbarui","items":[{"nama":"utuh uji76","isi":0}]}')"
 # kasir tak boleh impor → 403
 cek "kasir impor CSV → 403" "V == 403" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/bahan/import" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d '{"mode":"tambah","items":[{"nama":"x","jenis":"beli","harga_beli":1,"isi":1,"satuan":"pcs"}]}')"

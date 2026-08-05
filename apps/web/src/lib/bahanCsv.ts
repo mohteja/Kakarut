@@ -185,11 +185,27 @@ function keBool(v: string, fallback: boolean): boolean {
 export interface TerbacaCsv {
   rows: BahanImportRow[];
   dilewatiTanpaNama: number;
+  /**
+   * Kolom `KOLOM_CSV` yang TIDAK ada di header berkas (selain `nama`, yang
+   * ketiadaannya sudah membuat impor berhenti sendiri). Bukan kesalahan —
+   * kolomnya sekadar tak dikelola berkas ini, dan nilainya dibiarkan apa
+   * adanya — tapi WAJIB terlihat, karena itulah yang membedakan "tak disentuh"
+   * dari "diisi nol".
+   */
+  kolomHilang: string[];
+  /**
+   * Baris yang kolom `isi`-nya ADA tapi terbaca ≤ 0 (mis. salah ketik "0").
+   * `isi` adalah pembagi harga (`harga_beli / isi`), jadi nol tak punya arti
+   * yang bisa dipakai; dulu dijepit ke 0,0001 dan diam — yang membuat harga per
+   * satuannya 10.000× lipat, bukan gagal.
+   */
+  isiTakMasukAkal: number;
 }
 
 /** Ubah tabel CSV (baris pertama = header) menjadi baris impor bertipe. */
 export function keRowsImpor(tabel: string[][]): TerbacaCsv {
-  if (tabel.length === 0) return { rows: [], dilewatiTanpaNama: 0 };
+  if (tabel.length === 0)
+    return { rows: [], dilewatiTanpaNama: 0, kolomHilang: [], isiTakMasukAkal: 0 };
   const header = tabel[0].map((h) => h.trim().toLowerCase());
   const idx = (nama: string) => header.indexOf(nama);
   const iKode = idx("kode");
@@ -210,35 +226,51 @@ export function keRowsImpor(tabel: string[][]): TerbacaCsv {
   const iComplement = idx("complement");
   const iCat = idx("catatan");
   const amb = (r: string[], i: number) => (i >= 0 ? (r[i] ?? "").trim() : "");
-
+  /*
+   * Inti perbaikannya ada di rangkaian `if (i >= 0)` di bawah: kolom yang absen
+   * tak boleh punya nilai sama sekali, supaya `JSON.stringify` membuangnya dan
+   * server tahu bedanya "diisi nol" dengan "tidak dikelola berkas ini". Sel
+   * KOSONG pada kolom yang ADA tetap memakai fallback lamanya — itu memang
+   * pernyataan penggunanya, bukan ketiadaan pernyataan.
+   */
   const rows: BahanImportRow[] = [];
   let dilewatiTanpaNama = 0;
+  let isiTakMasukAkal = 0;
   for (const r of tabel.slice(1)) {
     const nama = amb(r, iNama);
     if (!nama) {
       dilewatiTanpaNama++;
       continue;
     }
+    // `isi` = pembagi harga. Nol/negatif bukan nilai yang bisa dipakai, jadi
+    // kolomnya dilepas (bahan lama mempertahankan isinya) dan barisnya dihitung
+    // supaya bisa disebut di layar — bukan dijepit diam-diam ke 0,0001.
+    const isiSel = amb(r, iIsi);
+    const isiAngka = iIsi >= 0 ? keAngka(isiSel, 1) : undefined;
+    const isiSah = isiAngka !== undefined && isiAngka > 0;
+    if (isiAngka !== undefined && !isiSah) isiTakMasukAkal++;
     const jenisRaw = amb(r, iJenis).toLowerCase();
-    rows.push({
-      kode: amb(r, iKode) || null,
-      nama,
-      kategori: amb(r, iKat) || "lain",
-      jenis: jenisRaw.includes("produksi") ? "produksi" : "beli",
-      harga_beli: keAngka(amb(r, iHarga), 0),
-      isi: Math.max(keAngka(amb(r, iIsi), 1), 0.0001),
-      satuan: amb(r, iSatuan) || "pcs",
-      satuan_beli: amb(r, iSatuanBeli) || null,
-      stok_minimum: keAngka(amb(r, iMin), 0),
-      min_beli: keAngka(amb(r, iMinBeli), 0),
-      masa_simpan_hari: Math.max(0, Math.trunc(keAngka(amb(r, iMasaSimpan), 0))),
-      lead_time_hari: Math.max(0, Math.trunc(keAngka(amb(r, iLeadTime), 0))),
-      boleh_eceran: keBool(amb(r, iEceran), false),
-      lacak_stok: keBool(amb(r, iLacak), true),
-      kemasan: keBool(amb(r, iKemasan), false),
-      complement: keBool(amb(r, iComplement), false),
-      catatan: amb(r, iCat) || null,
-    });
+    const row: BahanImportRow = { nama };
+    if (iKode >= 0) row.kode = amb(r, iKode) || null;
+    if (iKat >= 0) row.kategori = amb(r, iKat) || "lain";
+    if (iJenis >= 0) row.jenis = jenisRaw.includes("produksi") ? "produksi" : "beli";
+    if (iHarga >= 0) row.harga_beli = keAngka(amb(r, iHarga), 0);
+    if (isiSah) row.isi = isiAngka;
+    if (iSatuan >= 0) row.satuan = amb(r, iSatuan) || "pcs";
+    if (iSatuanBeli >= 0) row.satuan_beli = amb(r, iSatuanBeli) || null;
+    if (iMin >= 0) row.stok_minimum = keAngka(amb(r, iMin), 0);
+    if (iMinBeli >= 0) row.min_beli = keAngka(amb(r, iMinBeli), 0);
+    if (iMasaSimpan >= 0)
+      row.masa_simpan_hari = Math.max(0, Math.trunc(keAngka(amb(r, iMasaSimpan), 0)));
+    if (iLeadTime >= 0)
+      row.lead_time_hari = Math.max(0, Math.trunc(keAngka(amb(r, iLeadTime), 0)));
+    if (iEceran >= 0) row.boleh_eceran = keBool(amb(r, iEceran), false);
+    if (iLacak >= 0) row.lacak_stok = keBool(amb(r, iLacak), true);
+    if (iKemasan >= 0) row.kemasan = keBool(amb(r, iKemasan), false);
+    if (iComplement >= 0) row.complement = keBool(amb(r, iComplement), false);
+    if (iCat >= 0) row.catatan = amb(r, iCat) || null;
+    rows.push(row);
   }
-  return { rows, dilewatiTanpaNama };
+  const kolomHilang = KOLOM_CSV.filter((k) => k !== "nama" && !header.includes(k));
+  return { rows, dilewatiTanpaNama, kolomHilang, isiTakMasukAkal };
 }

@@ -25,6 +25,43 @@ tanpa akses repo server.
 
 ---
 
+## Rilis: `POST /api/bahan/import` — kolom yang tak dikirim tak lagi ditimpa
+
+> Belum di-merge ke production. Tidak ada migrasi, tidak ada field baru, dan
+> respons tidak berubah. Yang berubah adalah **arti dari field yang absen**.
+
+### 🟡 PERLU DICEK — kirim hanya field yang memang mau diubah
+
+Dulu tiap field yang tak ada di badan permintaan diisi nilai bawaan oleh
+validator, lalu mode `"perbarui"` menuliskannya ke bahan yang cocok. Kiriman
+`{"nama":"Air Mineral","harga_beli":51000}` karena itu **ikut** menimpa
+`isi`→1, `satuan`→`"pcs"`, `kategori`→`"lain"`, `kemasan`→`false`,
+`stok_minimum`→0 pada bahan itu — tanpa pesan apa pun. Bahan yang dibeli per
+dus (`isi: 24`) berubah jadi `isi: 1`, dan HPP tiap menu yang memakainya
+melonjak 24× lipat.
+
+Sekarang:
+
+| Field pada badan permintaan | Bahan LAMA (`perbarui`) | Bahan BARU |
+| --- | --- | --- |
+| dikirim (termasuk `false`, `0`, `null`) | ditulis | ditulis |
+| **tidak** dikirim | **dibiarkan apa adanya** | dipakai nilai bawaan |
+
+Yang perlu dicek bila mobile memakai endpoint ini:
+
+- **Mau MENGOSONGKAN sesuatu?** Kirim nilainya secara eksplisit — `"kemasan":
+  false`, `"stok_minimum": 0`, `"catatan": null`. Menghilangkan kuncinya kini
+  berarti "jangan sentuh", bukan "kosongkan".
+- **Mau memperbarui sebagian?** Sekarang cukup kirim `nama` + field yang
+  berubah. Tak perlu lagi mengirim ulang seluruh field hanya untuk menjaga
+  nilainya.
+- `isi: 0` tetap ditolak **400** (`isi` adalah pembagi harga). Klien yang dulu
+  menjepit nilai tak masuk akal ke angka kecil supaya lolos validasi sebaiknya
+  berhenti — lebih baik gagal terang-terangan daripada harga per satuan yang
+  salah empat digit.
+
+---
+
 ## Rilis: `POST /api/stok/opname` menerima `client_ref`
 
 > Belum di-merge ke production. Tidak ada migrasi dan tidak ada field baru pada
