@@ -225,6 +225,14 @@ if (existsSync(webDist)) {
     // chunk memicu muat ulang sekali, dan shell yang `no-cache` mengambil hash
     // yang baru.
     if (c.req.path.startsWith("/assets/")) {
+      // `no-cache` WAJIB di sini. 404 termasuk status yang boleh di-cache
+      // secara heuristik (RFC 9111) — tanpa arahan, CDN boleh menyimpannya.
+      // Kalau deploy di-rollback, hash lama hidup lagi dan 404 yang tersimpan
+      // akan mematikan aset yang sebenarnya sudah kembali ada.
+      // (`cacheImmutable` sendiri hanya menandai respons 2xx, jadi ia tak
+      // pernah menandai yang ini — tapi diamnya arahan cache bukan pengganti
+      // arahan yang jelas.)
+      c.header("Cache-Control", "no-cache");
       return c.text("Aset tidak ditemukan (kemungkinan chunk dari build lama)", 404);
     }
     return kirimShell(c);

@@ -167,6 +167,23 @@ describe("server: chunk lama dijawab jujur, bukan dengan shell SPA", () => {
     expect(SERVER).toContain("kemungkinan chunk dari build lama");
   });
 
+  it("dan 404-nya `no-cache` — 404 boleh di-cache heuristik", () => {
+    // Ketinggalan di percobaan pertama, dan CI (§114) yang menangkapnya:
+    // `cacheImmutable` memang hanya menandai 2xx sehingga 404 ini tak pernah
+    // jadi immutable, tapi TANPA arahan cache sama sekali, CDN masih boleh
+    // menyimpannya sendiri (RFC 9111 menyebut 404 heuristically cacheable).
+    // Kalau deploy di-rollback, hash lama hidup lagi dan 404 yang tersimpan
+    // akan mematikan aset yang sebenarnya sudah kembali ada.
+    const i = SERVER.indexOf('if (c.req.path.startsWith("/assets/")) {');
+    expect(SERVER.slice(i, i + 700)).toContain('c.header("Cache-Control", "no-cache");');
+  });
+
+  it("`cacheImmutable` memang hanya menandai respons sukses", () => {
+    // Premis dari uji di atas — kalau ini berubah, 404-nya bisa tertanda
+    // immutable dan URL aset lama mati selama setahun.
+    expect(SERVER).toContain('if (c.res.ok && !c.res.headers.get("Cache-Control")) {');
+  });
+
   it("deep-link react-router lain TETAP dapat shell", () => {
     // Pagar arah sebaliknya: kalau ini ikut ter-404, /dashboard yang di-bookmark
     // berhenti bisa dibuka sama sekali.
