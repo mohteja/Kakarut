@@ -6,7 +6,7 @@ import {
   ErrorText,
   Modal,
   PageTitle,
-  Spinner,
+  SpinnerAtauGalat,
   btnPrimary,
   btnSecondary,
   inputClass,
@@ -32,11 +32,34 @@ function selisihInfo(selisih: number | null) {
  * harus dicari tidak akan ketemu.
  */
 function PerluAccPanel({ onDetail }: { onDetail: (id: string) => void }) {
-  const { data = [] } = useQuery({
+  const { data = [], error: gagal } = useQuery({
     queryKey: ["shift-selisih", "menunggu"],
     queryFn: () => api<SelisihKasRow[]>("/shift/selisih?status=menunggu"),
     refetchInterval: 60_000,
   });
+  /*
+    KOSONG ≠ TAK TERBACA, dan di panel ini bedanya paling mahal.
+    Panel ini ada PERSIS supaya selisih yang menunggu tak perlu dicari.
+    Dulu bacaan yang gagal berakhir `data = []` → `return null` → panelnya
+    lenyap tanpa jejak, dan halamannya terlihat bersih. Owner menyimpulkan
+    tak ada yang perlu diputuskan — kesimpulan yang persis dibuat mustahil
+    oleh alasan panel ini dibuat.
+  */
+  if (gagal) {
+    return (
+      <Card className="mb-4 border-amber-300 bg-amber-50 p-4">
+        <div className="text-sm font-bold text-amber-900">
+          ⚠ Daftar selisih kas yang menunggu keputusan <b>tidak terbaca</b>
+        </div>
+        <ErrorText error={gagal} />
+        <div className="mt-1 text-sm text-amber-900">
+          Ini <b>bukan</b> berarti tak ada yang perlu diputuskan. Muat ulang halaman; selama
+          daftarnya belum terbaca, selisih dari shift kemarin bisa saja sedang menunggu tanpa
+          terlihat di sini.
+        </div>
+      </Card>
+    );
+  }
   if (data.length === 0) return null;
   return (
     <Card className="mb-4 border-amber-300 bg-amber-50/60 p-4">
@@ -288,15 +311,19 @@ function RiwayatCabangModal({
   onClose: () => void;
   onDetail: (id: string) => void;
 }) {
-  const { data = [], isLoading } = useQuery({
+  const { data, error: gagal } = useQuery({
     queryKey: ["shift-riwayat", branch?.id],
     queryFn: () => api<Shift[]>(`/shift?branch_id=${branch!.id}`),
     enabled: !!branch,
   });
   return (
     <Modal open={!!branch} onClose={onClose} title={`Riwayat Shift — ${branch?.nama ?? ""}`} lebar="max-w-xl">
-      {isLoading ? (
-        <Spinner />
+      {/* `isLoading` sengaja tidak dipakai: bacaan yang GAGAL berakhir
+          `isLoading === false` DAN `data === undefined`, jadi syarat lama
+          jatuh ke cabang "kosong" dan menyatakan cabang ini tak pernah
+          menutup shift — padahal daftarnya cuma tak terbaca. */}
+      {!data ? (
+        <SpinnerAtauGalat error={gagal} apa="Riwayat shift cabang" />
       ) : data.length === 0 ? (
         <div className="p-4 text-center text-sm text-stone-400">Belum ada shift ditutup di cabang ini.</div>
       ) : (
@@ -350,15 +377,13 @@ function RiwayatCabangModal({
  * tetap dilakukan kasir di cabang.
  */
 export function OperasionalPage() {
-  const { data = [], isLoading } = useQuery({
+  const { data, error: gagalPantau } = useQuery({
     queryKey: ["shift-pantau"],
     queryFn: () => api<ShiftPantauRow[]>("/shift/pantau"),
     refetchInterval: 60_000,
   });
   const [riwayatBranch, setRiwayatBranch] = useState<{ id: string; nama: string } | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
-
-  if (isLoading) return <Spinner />;
 
   return (
     <div className="max-w-4xl">
@@ -371,7 +396,14 @@ export function OperasionalPage() {
 
       <PerluAccPanel onDetail={setDetailId} />
 
-      {data.length === 0 ? (
+      {/* `isLoading` sengaja tidak dipakai: bacaan yang GAGAL berakhir
+          `isLoading === false` DAN `data === undefined`. Dengan `data = []`,
+          syarat lama jatuh ke cabang kosong dan menyuruh owner "Tambahkan
+          cabang di Pengaturan → Cabang" — menyatakan perusahaannya tak punya
+          cabang sama sekali, lalu menyuruh membuat yang sudah ada. */}
+      {!data ? (
+        <SpinnerAtauGalat error={gagalPantau} apa="Pantauan operasional cabang" />
+      ) : data.length === 0 ? (
         <Card className="p-8 text-center text-sm text-stone-400">
           Belum ada cabang store. Tambahkan cabang di Pengaturan → Cabang.
         </Card>
