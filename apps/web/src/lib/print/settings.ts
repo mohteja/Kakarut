@@ -1,4 +1,5 @@
 import { kolomDefault } from "@kakarut/shared";
+import { RENTANG, angkaSetelan } from "./batas";
 
 export type TransportKind =
   | "browser"
@@ -52,13 +53,40 @@ export const DEFAULT_PRINTER_SETTINGS: PrinterDeviceSettings = {
   btAddress: null,
 };
 
+/**
+ * Rapikan angka yang sudah TERLANJUR tersimpan di perangkat.
+ *
+ * Menyaring saat memakai saja tidak cukup: siapa pun yang pernah mengosongkan
+ * kotak "Ukuran chunk BLE" membawa `0` (atau `null`, sisa `NaN` yang dilewatkan
+ * `JSON.stringify`) di localStorage-nya, dan itu bertahan selama perangkatnya
+ * dipakai. Dibersihkan sekali saat dimuat, lalu kotaknya menampilkan angka
+ * yang sudah benar.
+ *
+ * Sengaja TIDAK dilakukan di `savePrinterSettings`: saat mengetik, isi kotak
+ * memang sempat melewati nilai setengah jadi, dan menjepitnya per ketukan
+ * membuat angkanya tak bisa diketik sampai selesai. Perapiannya di halaman
+ * terjadi saat blur.
+ */
+function rapikanAngka(s: PrinterDeviceSettings): PrinterDeviceSettings {
+  return {
+    ...s,
+    chunkSize: angkaSetelan(s.chunkSize, DEFAULT_PRINTER_SETTINGS.chunkSize, RENTANG.chunkSize),
+    chunkDelayMs: angkaSetelan(
+      s.chunkDelayMs,
+      DEFAULT_PRINTER_SETTINGS.chunkDelayMs,
+      RENTANG.chunkDelayMs,
+    ),
+    feedLines: angkaSetelan(s.feedLines, DEFAULT_PRINTER_SETTINGS.feedLines, RENTANG.feedLines),
+  };
+}
+
 export function loadPrinterSettings(): PrinterDeviceSettings {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return DEFAULT_PRINTER_SETTINGS;
     const parsed = JSON.parse(raw) as Partial<PrinterDeviceSettings>;
     if (parsed.v !== 1) return DEFAULT_PRINTER_SETTINGS;
-    return { ...DEFAULT_PRINTER_SETTINGS, ...parsed };
+    return rapikanAngka({ ...DEFAULT_PRINTER_SETTINGS, ...parsed });
   } catch {
     return DEFAULT_PRINTER_SETTINGS;
   }

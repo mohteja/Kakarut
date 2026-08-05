@@ -1,3 +1,4 @@
+import { RENTANG, angkaSetelan, potongBytes } from "./batas";
 import type { PrinterTransport } from "./transport";
 
 /**
@@ -30,15 +31,23 @@ export class BluetoothTransport implements PrinterTransport {
 
   private device: BluetoothDevice | null = null;
   private characteristic: BluetoothRemoteGATTCharacteristic | null = null;
+  private chunkSize: number;
+  private chunkDelayMs: number;
 
-  constructor(
-    private chunkSize: number,
-    private chunkDelayMs: number,
-  ) {}
+  constructor(chunkSize: number, chunkDelayMs: number) {
+    this.chunkSize = RENTANG.chunkSize.min;
+    this.chunkDelayMs = RENTANG.chunkDelayMs.min;
+    this.setChunking(chunkSize, chunkDelayMs);
+  }
 
+  /**
+   * Nilainya datang dari kotak isian bebas di Pengaturan Printer, jadi
+   * disaring di sini — bukan dipercaya begitu saja. Lihat `batas.ts` untuk
+   * apa yang terjadi kalau angka tak masuk akal sampai ke `write()`.
+   */
   setChunking(chunkSize: number, chunkDelayMs: number) {
-    this.chunkSize = chunkSize;
-    this.chunkDelayMs = chunkDelayMs;
+    this.chunkSize = angkaSetelan(chunkSize, RENTANG.chunkSize.min, RENTANG.chunkSize);
+    this.chunkDelayMs = angkaSetelan(chunkDelayMs, RENTANG.chunkDelayMs.min, RENTANG.chunkDelayMs);
   }
 
   async connect(): Promise<{ deviceName: string | null }> {
@@ -111,8 +120,11 @@ export class BluetoothTransport implements PrinterTransport {
   async write(bytes: Uint8Array): Promise<void> {
     const ch = await this.ensureCharacteristic();
     const useWithResponse = ch.properties.write;
-    for (let i = 0; i < bytes.length; i += this.chunkSize) {
-      const chunk = bytes.slice(i, i + this.chunkSize);
+    // Potongannya dihitung DULU jadi daftar: jumlah tulisannya sudah tertentu
+    // sebelum byte pertama dikirim, jadi setelan yang tak masuk akal tak bisa
+    // lagi berarti perulangan tanpa akhir (atau nol byte terkirim tapi
+    // "berhasil"). Lihat `batas.ts`.
+    for (const chunk of potongBytes(bytes, this.chunkSize)) {
       if (useWithResponse) {
         // flow control implisit — tidak perlu delay
         await ch.writeValueWithResponse(chunk);
