@@ -183,7 +183,11 @@ if (existsSync(webDist)) {
     `    <meta name="kakarut-build" content="${buildId}" />\n  </head>`,
   );
   // HTML shell TIDAK di-cache agar setelah re-deploy browser selalu ambil versi
-  // terbaru (referensi aset ber-hash baru) — mencegah 404 chunk lama.
+  // terbaru (referensi aset ber-hash baru).
+  //
+  // Catatan: ini hanya menolong tab yang MEMUAT ULANG. Tab yang sudah terbuka
+  // sejak sebelum deploy tetap memegang nama chunk lama dan akan memintanya
+  // saat pindah rute — lihat `app.notFound` di bawah.
   const kirimShell = (c: Context) => {
     c.header("Cache-Control", "no-cache");
     return c.html(indexHtml);
@@ -208,6 +212,20 @@ if (existsSync(webDist)) {
       // hal yang paling perlu terlihat di log galat.
       void catatGalat(c, 404, new Error(`Endpoint tidak ditemukan: ${c.req.path}`));
       return c.json({ error: "Tidak ditemukan" }, 404);
+    }
+    // `/assets/*` yang tak ada = CHUNK LAMA, dari tab yang dibuka sebelum
+    // deploy terakhir. Ia tak pernah bisa jadi deep-link react-router (tak ada
+    // rute yang berawalan /assets), jadi menjawabnya dengan shell SPA hanya
+    // menyesatkan: peramban menerima **200 + HTML** untuk sebuah module script,
+    // menolak MIME-nya, dan pesan galatnya berbicara soal MIME — bukan soal
+    // berkas yang memang sudah tidak ada.
+    //
+    // 404 adalah jawaban yang jujur, dan ia yang membuat kejadiannya terlihat
+    // di log. Pemulihannya sendiri ada di klien (`BatasGalat`): galat impor
+    // chunk memicu muat ulang sekali, dan shell yang `no-cache` mengambil hash
+    // yang baru.
+    if (c.req.path.startsWith("/assets/")) {
+      return c.text("Aset tidak ditemukan (kemungkinan chunk dari build lama)", 404);
     }
     return kirimShell(c);
   });
