@@ -7844,11 +7844,17 @@ CB165=$(api "$OWNER" GET /cabang | jq -r '[.[]|select(.is_active and .tipe=="sto
 ING165=$(api "$OWNER" POST /bahan \
   '{"nama":"Bahan Rencana 165","satuan":"gr","harga_beli":500,"isi":1,"track_stok":true,"pengadaan":"beli","boleh_eceran":true}' \
   | jq -r .id)
+# Bentuk body /menu: `category_id` + `harga_jual` + `tipe`/`mult` — BUKAN
+# `kategori`/`harga`. Percobaan pertama memakai nama field karangan sendiri,
+# POST /menu menjawab 400, dan seluruh §165 ikut 400 karena menunya tak pernah
+# ada. Bentuk di bawah disalin dari §66 yang sudah terbukti jalan.
+KAT165=$(api "$OWNER" GET /kategori | jq -r '.[0].id')
 MENU165=$(api "$OWNER" POST /menu \
-  "$(jq -nc --arg i "$ING165" '{nama:"Menu Rencana 165", harga:25000, kategori:"Makanan", komponen:[{ingredient_id:$i, qty:10}]}')" \
+  "$(jq -nc --arg i "$ING165" --arg k "$KAT165" \
+     '{nama:"Menu Rencana 165", category_id:$k, tipe:"regular", mult:2, harga_jual:25000, komponen:[{ingredient_id:$i, qty:10}]}')" \
   | jq -r .id)
-cek "dasar uji §165: cabang, bahan, dan menu berresep siap" "V == 1" \
-  "$([ -n "$CB165" ] && [ "$CB165" != "null" ] && [ ${#ING165} -eq 36 ] && [ ${#MENU165} -eq 36 ] && echo 1 || echo 0)"
+cek "dasar uji §165: cabang, kategori, bahan, dan menu berresep siap" "V == 1" \
+  "$([ -n "$CB165" ] && [ "$CB165" != "null" ] && [ ${#KAT165} -eq 36 ] && [ ${#ING165} -eq 36 ] && [ ${#MENU165} -eq 36 ] && echo 1 || echo 0)"
 
 REF165=$(cat /proc/sys/kernel/random/uuid)
 BODY165=$(jq -nc --arg m "$MENU165" --arg t "$CB165" --arg r "$REF165" \
