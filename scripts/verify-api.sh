@@ -568,7 +568,7 @@ OM=$(echo "$REK" | jq '.acuan.omzet')
 ROW=$(echo "$REK" | jq '[.bahan[] | select(.terpakai > 0 and .kebutuhan != null)][0]')
 cek "rekomendasi: kebutuhan == acuan_qty*target/omzet" "abs(V) < 0.5" \
   "$(echo "$ROW" | jq --argjson om "$OM" '.kebutuhan - (.acuan_qty * 20000000 / $om)')"
-cek "rekomendasi: saran_beli == max(0, kebutuhan-sisa)" "abs(V) < 0.5" \
+cek "rekomendasi: saran_beli ~= kekurangan (kebutuhan-sisa, epsilon)" "abs(V) < 0.5" \
   "$(echo "$ROW" | jq '.saran_beli - (if (.kebutuhan - .sisa) > 0 then (.kebutuhan - .sisa) else 0 end)')"
 
 # 17c. Target default tersimpan di company & dipakai bila ?target kosong
@@ -8054,6 +8054,38 @@ cek "tak terpotong → panjang daftar = jumlah_transaksi (dua angka sepakat)" "V
   "$(echo "$D168" | jq '((.transaksi|length) == .jumlah_transaksi) | if . then 1 else 0 end')"
 cek "daftarnya tak pernah melebihi batas 300" "V == 1" \
   "$(echo "$D168" | jq '((.transaksi|length) <= 300) | if . then 1 else 0 end')"
+
+echo "── §169 Rekomendasi beli: sorotan \"perlu dibeli\" selalu punya isi ──"
+# Di layar Rekomendasi Beli, baris disorot oranye bila `saran_beli` truthy,
+# sementara angka yang ditawarkannya datang dari `jumlah_faktur`. Dulu keduanya
+# memakai definisi KEKURANGAN yang berbeda — `Math.max(0, ...)` vs ambang
+# epsilon `kekuranganBahan` — dan bedanya persis di ekor float. Bahan yang
+# stoknya PAS bisa menyisakan ~5e-17: cukup untuk menyalakan sorotan, tak cukup
+# untuk melahirkan faktur. Owner melihat baris oranye, saran "0", biaya Rp 0.
+#
+# Yang dipatok di sini adalah JANJINYA, bukan satu barisnya: untuk SETIAP baris,
+# `saran_beli > 0` harus setara dengan `jumlah_faktur != null`. Sapuan seluruh
+# daftar seperti ini menangkap ketaksepakatan di baris mana pun, termasuk baris
+# yang tak terpikirkan saat menulis uji.
+REK169=$(api "$OWNER" GET "/rekomendasi/beli?acuan=rentang&dari=$TODAY&sampai=$TODAY&target=20000000")
+cek "dasar uji §169: daftarnya tidak kosong" "V >= 1" \
+  "$(echo "$REK169" | jq '.bahan | length')"
+cek "tiap baris: saran_beli > 0  <=>  jumlah_faktur ada" "V == 0" \
+  "$(echo "$REK169" | jq '[.bahan[] | select(((.saran_beli // 0) > 0) != (.jumlah_faktur != null))] | length')"
+cek "tak ada saran_beli mungil sisa ekor float (0 < v < 1e-9)" "V == 0" \
+  "$(echo "$REK169" | jq '[.bahan[] | select((.saran_beli != null) and (.saran_beli > 0) and (.saran_beli < 0.000000001))] | length')"
+cek "saran_beli tak pernah negatif" "V == 0" \
+  "$(echo "$REK169" | jq '[.bahan[] | select((.saran_beli != null) and (.saran_beli < 0))] | length')"
+# `null` TETAP berarti "tak bisa dihitung", bukan "tidak perlu beli". Rentang
+# tanpa omzet acuan memberi baris-baris seperti itu; keberadaannya dipatok lebih
+# dulu supaya asersi sesudahnya tak lulus hanya karena tak ada yang diperiksa.
+REK169N=$(api "$OWNER" GET "/rekomendasi/beli?acuan=rentang&dari=$PAST&sampai=$PAST")
+cek "dasar: ada baris yang kebutuhannya tak bisa dihitung" "V >= 1" \
+  "$(echo "$REK169N" | jq '[.bahan[] | select(.kebutuhan == null)] | length')"
+cek "kebutuhan null => saran_beli null, tak dipaksa jadi 0" "V == 0" \
+  "$(echo "$REK169N" | jq '[.bahan[] | select(.kebutuhan == null and .saran_beli != null)] | length')"
+cek "baris ber-faktur: estimasi biaya ikut terisi (sorotannya berisi)" "V == 0" \
+  "$(echo "$REK169" | jq '[.bahan[] | select(.jumlah_faktur != null and .estimasi_biaya == null)] | length')"
 
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

@@ -25,6 +25,108 @@ tanpa akses repo server.
 
 ---
 
+## Rilis: persen PB1 di struk cetak diturunkan dari nota, bukan dari setelan hari ini
+
+> Tidak ada perubahan API sama sekali — tidak ada medan baru, tidak ada nilai
+> yang berubah. Yang diperbaiki murni **sisi klien**: dari mana angka persen di
+> sebelah nominal PB1 pada struk cetak diambil. Dicatat di sini karena
+> **aplikasi mobile punya bug yang sama persis**, dan perbaikannya harus
+> dikerjakan di repo mobile.
+
+🔴 **WAJIB** — layar struk & cetak ulang (`receipt_page.dart`)
+
+**Sudah dikerjakan di mobile** — `mohteja/kakarut-mobile` PR #6, cabang
+`claude/mobile-pb1-tarif-struk` (masih draft, belum di-merge ke `main`).
+
+**Masalahnya.** Penjualan menyimpan **rupiah** PB1-nya, tidak tarifnya. Tidak
+seperti diskon — `diskon_persen` memang ikut tersimpan per penjualan — PB1
+tidak punya kolom tarif di `sales`. Jadi struk cetak ulang tak punya sumber sah
+untuk persen di sebelah nominalnya, dan satu-satunya angka yang tersedia
+(`company.pb1_rate`, setelan **hari ini**) justru yang paling mudah salah.
+
+Dua jalan meleset, keduanya lewat tombol yang memang ada:
+
+1. Owner mengubah tarif 10% → 11% di Pengaturan Perusahaan, lalu struk lama
+   dicetak ulang dari Riwayat Transaksi. Kertasnya menulis `PB1 11%` di sebelah
+   angka yang 10% dari netnya.
+2. Refund sebagian: PB1-nya **diprorata** dari PB1 asal (`pb1_asal`), bukan
+   dihitung ulang dari tarif — itu memang yang benar, tapi hasilnya tak harus
+   sama dengan tarif mana pun.
+
+Layar tidak pernah kena: struk di layar memang tak menampilkan persen PB1.
+Yang salah hanya **kertas yang dibawa pulang tamu**, dan tak ada seorang pun di
+toko yang melihatnya.
+
+**Di mobile, jalurnya sama:**
+
+```dart
+// lib/features/kasir/receipt_page.dart:118
+      pb1Rate: company?.pb1Rate,
+
+// lib/features/printer/receipt_builder.dart:193
+      'PB1${data.pb1Rate != null && data.pb1Rate! > 0 ? ' ${_angka(data.pb1Rate!)}%' : ''}',
+```
+
+Catatan: `bayar_sheet.dart:684` & `:691` memakai `auth.company?.pb1Rate` untuk
+label PB1 di layar **sebelum bayar** — itu BENAR dan jangan diubah. Pada saat
+itu tarif hari ini memang tarif yang sedang dipakai. Yang salah hanya struk
+yang menampilkan transaksi LAMA.
+
+**Yang dilakukan web** (silakan ditiru): tarifnya diturunkan dari angka struk
+itu sendiri lalu **dibuktikan** — hanya dipakai bila `round(net × tarif/100)`
+menghasilkan nominal yang sama persis; kalau tidak, `null` dan struk mencetak
+`PB1` tanpa persen (sama seperti struk di layar). Fungsinya
+`tarifPb1Struk(subtotal, diskon, pb1)` di `packages/shared/src/hpp.ts`, dan
+kandidat tarifnya dicoba dari yang paling sederhana (bulat → 1 desimal → 2
+desimal, batas 100) supaya yang tercetak adalah tarif yang paling mungkin
+benar-benar disetel owner, bukan pecahan sisa pembagian balik.
+
+---
+
+## Rilis: `GET /api/rekomendasi` — `saran_beli` tak lagi memulangkan ekor float
+
+> Tidak ada migrasi. Tidak ada medan baru. Yang berubah hanya NILAI `saran_beli`
+> pada rentang yang selama ini tak berarti.
+
+🟡 **PERLU DICEK** — layar yang memakai `saran_beli` sebagai penanda
+"perlu dibeli"
+
+**Sudah di-merge ke production.**
+
+`saran_beli` dulu dihitung `Math.max(0, kebutuhan − sisa)`. Karena `kebutuhan`
+dan `sisa` sama-sama jumlahan desimal (0,1 kg tiga kali = 0,30000000000000004),
+bahan yang stoknya PAS bisa memulangkan angka mungil seperti `5.5e-17` — bukan
+nol, tapi juga bukan kekurangan.
+
+Sekarang nilainya memakai ambang epsilon yang sama dengan jalur faktur, jadi
+kasus itu memulangkan **0**.
+
+**Sudah dicek di `kakarut-mobile` — TIDAK ada pekerjaan mobile.** Aplikasi
+memang memakainya sebagai boolean:
+
+```dart
+// lib/features/operasional/operasional_models.dart
+bool get perluBeli => (saranBeli ?? 0) > 0;
+```
+
+dan `perluBeli` menggerakkan **filter default** layar Rekomendasi Beli
+(`_hanyaPerluBeli = true`) serta `estimasiTotal`. Jadi di mobile akibatnya
+lebih tajam daripada di web: baris hantu bukan sekadar tersorot warna, ia
+benar-benar MASUK daftar belanja — dengan jumlah faktur kosong dan estimasi
+Rp 0.
+
+Perbaikannya seluruhnya di server, jadi begitu rilis ini tayang, `perluBeli`
+otomatis konsisten dengan `jumlah_faktur` tanpa satu baris pun diubah di
+mobile. Yang perlu dilakukan hanya memastikan tak ada layar LAIN yang
+menghitung ulang kekurangan sendiri dari `kebutuhan − sisa`.
+
+**Jaminan barunya, boleh diandalkan:** `saran_beli > 0` ⟺ `jumlah_faktur != null`.
+
+`null` TETAP berarti "tak bisa dihitung" (omzet acuan 0), bukan "tidak perlu
+beli" — bedakan keduanya seperti sebelumnya.
+
+---
+
 ## Rilis: `GET /api/shift/:id` — medan baru `transaksi_terpotong`
 
 > Tidak ada migrasi. Medan BARU pada respons; medan lama tak berubah.
@@ -184,7 +286,7 @@ kebetulan sama dianggap ulangan, lalu diam-diam tak terjadi.
 
 ## Rilis: `POST /api/bahan/import` — kolom yang tak dikirim tak lagi ditimpa
 
-> Belum di-merge ke production. Tidak ada migrasi, tidak ada field baru, dan
+> Sudah di-merge ke production. Tidak ada migrasi, tidak ada field baru, dan
 > respons tidak berubah. Yang berubah adalah **arti dari field yang absen**.
 
 ### 🟡 PERLU DICEK — kirim hanya field yang memang mau diubah
@@ -221,7 +323,7 @@ Yang perlu dicek bila mobile memakai endpoint ini:
 
 ## Rilis: `POST /api/stok/opname` menerima `client_ref`
 
-> Belum di-merge ke production. Tidak ada migrasi dan tidak ada field baru pada
+> Sudah di-merge ke production. Tidak ada migrasi dan tidak ada field baru pada
 > respons — yang bertambah hanya dua field OPSIONAL pada badan permintaan.
 
 ### 🟢 BARU — kirim `client_ref` supaya retry tak melahirkan sesi opname kembar
@@ -260,7 +362,7 @@ hilang tanpa galat.
 
 ## Rilis: `PUT /open-bill/:id` menolak bill yang sudah ditutup
 
-> Belum di-merge ke production. **Tidak ada migrasi dan tidak ada field baru** —
+> Sudah di-merge ke production. **Tidak ada migrasi dan tidak ada field baru** —
 > yang bertambah hanya satu kode galat pada satu endpoint. Tapi ini menutup
 > jalur di mana pesanan tamu bisa hilang tanpa satu pun galat muncul di layar.
 
@@ -386,7 +488,7 @@ bila memang ada bentrok. Pembukaan biasa mempertahankan mejanya seperti dulu.
 
 ## Rilis: koreksi panduan — badge "diubah setelah transaksi" salah kaprah
 
-> Belum di-merge ke production. **Tidak ada perubahan API**: tak ada migrasi, tak
+> Sudah di-merge ke production. **Tidak ada perubahan API**: tak ada migrasi, tak
 > ada field baru, tak ada perilaku server yang berubah. Yang keliru adalah
 > PANDUAN yang kami tulis di changelog ini sendiri — dan kekeliruan itu sudah
 > melahirkan badge yang menuduh orang di sisi web. Kalau kalian membangun
@@ -437,7 +539,7 @@ memuat aturan pewarisan ini lengkap dengan akibat biayanya.
 
 ## Rilis: Sajian batal tidak ditagih + refund sebagian per sajian
 
-> Belum di-merge ke production. **Ada migrasi DB** (`0093`, seluruhnya aditif:
+> Sudah di-merge ke production. **Ada migrasi DB** (`0093`, seluruhnya aditif:
 > `sale_refunds`, `sale_items.qty_refund`, `sales.subtotal_asal/diskon_asal/
 > pb1_asal/refund_total`).
 
@@ -548,7 +650,7 @@ dari data mentah, samakan sekarang:
 
 ## Rilis: Terima barang hanya lewat Penerimaan + jejak "diterima oleh siapa"
 
-> Belum di-merge ke production. Tidak ada migrasi DB.
+> Sudah di-merge ke production. Tidak ada migrasi DB.
 
 ### 🔴 WAJIB — `POST /{mod}/tahap` dengan `ke:"dikonfirmasi"` kini **409** untuk kiriman beralamat cabang
 
@@ -597,7 +699,7 @@ lengkap tetap ada di `GET /penerimaan/riwayat`.
 
 ## Rilis: Riwayat penerimaan barang (per faktur)
 
-> Belum di-merge ke production. Tidak ada migrasi DB.
+> Sudah di-merge ke production. Tidak ada migrasi DB.
 
 ### 🟢 BARU — `GET /penerimaan/riwayat`: jejak kiriman yang sudah diterima/ditolak
 

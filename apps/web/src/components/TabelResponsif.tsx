@@ -74,6 +74,7 @@ export function TabelResponsif<T>({
   data,
   kunci,
   kosong = "Belum ada data.",
+  galat,
   kelasBaris,
   minLebar,
   judulKartu,
@@ -82,6 +83,17 @@ export function TabelResponsif<T>({
   data: T[];
   kunci: (baris: T, indeks: number) => string;
   kosong?: ReactNode;
+  /**
+   * Galat pemuatan daftar ini, bila ada — biasanya `error` dari `useQuery`.
+   *
+   * GAGAL MEMUAT ≠ TIDAK ADA. Saat pemuatan gagal, `data` yang di-fallback ke
+   * `[]` membuat tabel ini menampilkan `kosong` — sebuah PERNYATAAN ("Belum
+   * ada supplier", "Belum ada karyawan") yang tidak pernah diperiksa
+   * kebenarannya. Itu lebih buruk daripada layar kosong: pesannya mengajak
+   * menambah data yang mungkin sudah ada, dan duplikatnya baru ketahuan jauh
+   * kemudian. Diberi `galat`, tabel mengaku tidak tahu.
+   */
+  galat?: unknown;
   /** Kelas tambahan per baris/kartu (mis. penanda terpilih). */
   kelasBaris?: (baris: T) => string;
   /** `min-width` tabel desktop, mis. `"min-w-[60rem]"`. */
@@ -95,6 +107,26 @@ export function TabelResponsif<T>({
   const kAksi = kolom.filter((k) => k.hp === "aksi");
   const kPasangan = kolom.filter((k) => !k.hp);
 
+  /**
+   * Isi sel kosong: pengakuan saat gagal memuat, klaim `kosong` hanya saat
+   * daftarnya memang terbaca dan memang nihil. Satu tempat untuk kedua
+   * tampilan (kartu HP & tabel desktop) supaya keduanya tak bisa berselisih.
+   */
+  const isiKosong = galat ? (
+    <>
+      <div className="font-medium text-red-700">Daftar ini gagal dimuat.</div>
+      <div className="mt-1 text-stone-500">
+        {galat instanceof Error ? galat.message : String(galat)}
+      </div>
+      <div className="mt-1 text-stone-500">
+        Kosongnya <b>bukan</b> berarti datanya tidak ada — muat ulang dulu sebelum menambah
+        yang baru.
+      </div>
+    </>
+  ) : (
+    kosong
+  );
+
   return (
     <>
       {/* HP: satu kartu per baris — tak ada kolom yang jatuh di luar layar */}
@@ -102,7 +134,7 @@ export function TabelResponsif<T>({
         {judulKartu}
         {data.length === 0 ? (
           <div className="rounded-xl border border-stone-200 bg-white p-6 text-center text-sm text-stone-400 shadow-sm">
-            {kosong}
+            {isiKosong}
           </div>
         ) : (
           data.map((baris, i) => {
@@ -185,7 +217,7 @@ export function TabelResponsif<T>({
             {data.length === 0 ? (
               <tr>
                 <td colSpan={kolom.length} className="py-8 text-center text-sm text-stone-400">
-                  {kosong}
+                  {isiKosong}
                 </td>
               </tr>
             ) : (

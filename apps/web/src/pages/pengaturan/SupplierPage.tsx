@@ -25,7 +25,7 @@ interface FormState {
 
 export function SupplierPage() {
   const queryClient = useQueryClient();
-  const { data: supplier, isLoading } = useQuery({
+  const { data: supplier, isLoading, error: gagalMuat } = useQuery({
     queryKey: ["supplier"],
     queryFn: () => api<SupplierDto[]>("/supplier"),
   });
@@ -157,6 +157,7 @@ export function SupplierPage() {
             ? "Belum ada supplier — juga bisa ditambah langsung dari form faktur."
             : "Tidak ada supplier yang cocok dengan pencarian/filter."
         }
+        galat={gagalMuat}
         kolom={[
           {
             judul: "Nama",

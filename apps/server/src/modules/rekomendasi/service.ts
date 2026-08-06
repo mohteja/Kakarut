@@ -180,11 +180,21 @@ export async function rekomendasiBeli(
     const harga_per_unit = e && e.isi > 0 ? e.hargaBeli / e.isi : 0;
     const acuan_qty = refCons.get(s.ingredient_id) ?? 0;
     const kebutuhan = omzet > 0 ? acuan_qty * (target / omzet) : null;
-    const saran_beli = kebutuhan != null ? Math.max(0, kebutuhan - s.saldo) : null;
+    // `kekuranganBahan`, BUKAN `Math.max(0, kebutuhan - saldo)`: keduanya beda
+    // tepat di ekor float. `kebutuhan` dan `saldo` sama-sama jumlahan desimal
+    // (0,1 kg tiga kali = 0,30000000000000004), jadi selisih sisa ~5e-17 lumrah
+    // muncul untuk bahan yang stoknya sebenarnya PAS. `Math.max` memulangkan
+    // angka mungil itu apa adanya — dan di layar Rekomendasi Beli barisnya
+    // disorot oranye "perlu dibeli" hanya karena nilainya truthy, sementara
+    // kolom sarannya tetap tertulis 0 dan estimasi biayanya Rp 0. Peringatan
+    // tanpa isi: owner mencari apa yang harus dibeli dan tak menemukan apa pun.
+    //
+    // Satu nilai dipakai berdua supaya keduanya tak bisa berselisih lagi.
+    const saran_beli = kebutuhan != null ? kekuranganBahan(kebutuhan, s.saldo) : null;
     // Saran TERBULATKAN mengikuti kemasan/batch — aturan yang sama dengan
     // faktur otomatis rencana-dari-menu: toko menjual per kemasan `isi`;
-    // bahan boleh_eceran tetap per pcs. Epsilon float via kekuranganBahan.
-    const kurang = kebutuhan != null ? kekuranganBahan(kebutuhan, s.saldo) : 0;
+    // bahan boleh_eceran tetap per pcs.
+    const kurang = saran_beli ?? 0;
     const faktur =
       kurang > 0
         ? jumlahFaktur(kurang, e?.pengadaan ?? "beli", s.isi, e?.bolehEceran ?? false)

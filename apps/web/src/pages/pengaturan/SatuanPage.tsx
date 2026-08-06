@@ -27,7 +27,7 @@ interface FormState {
  */
 export function SatuanPage() {
   const queryClient = useQueryClient();
-  const { data: satuan, isLoading } = useQuery({
+  const { data: satuan, isLoading, error: gagalMuat } = useQuery({
     queryKey: ["satuan"],
     queryFn: () => api<SatuanDto[]>("/satuan"),
   });
@@ -134,7 +134,24 @@ export function SatuanPage() {
             {(satuan ?? []).length === 0 && (
               <tr>
                 <td colSpan={4} className="py-8 text-center text-sm text-stone-400">
-                  Belum ada satuan — tambahkan untuk dipakai di form Bahan Baku.
+                  {/*
+                    GAGAL MEMUAT ≠ BELUM ADA SATUAN. Ajakan "tambahkan" di bawah
+                    adalah PERNYATAAN bahwa masternya kosong — dan kalau ternyata
+                    cuma tak terbaca, owner akan membuat ulang satuan yang sudah
+                    ada. Duplikatnya lalu menempel: satuan yang sudah dipakai
+                    bahan tak bisa dihapus lagi (server menolak dengan 409).
+                  */}
+                  {gagalMuat ? (
+                    <>
+                      <div className="font-medium text-red-700">Daftar satuan gagal dimuat.</div>
+                      <div className="mt-1">
+                        Kosongnya <b>bukan</b> berarti masternya kosong — muat ulang dulu sebelum
+                        menambah, supaya tak jadi ganda.
+                      </div>
+                    </>
+                  ) : (
+                    "Belum ada satuan — tambahkan untuk dipakai di form Bahan Baku."
+                  )}
                 </td>
               </tr>
             )}

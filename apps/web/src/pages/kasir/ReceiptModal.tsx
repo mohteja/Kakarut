@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { qtyDitagih } from "@kakarut/shared";
+import { qtyDitagih, tarifPb1Struk } from "@kakarut/shared";
 import type { MetodeBayar, ReceiptData } from "@kakarut/shared";
 
 const METODE_LABEL: Record<MetodeBayar, string> = {
@@ -186,7 +186,13 @@ export function ReceiptModal({
       diskon: data.sale.diskon,
       diskonPersen: data.sale.diskonPersen,
       pb1Amount: data.sale.pb1Amount,
-      pb1Rate: company?.pb1Rate ?? null,
+      // Diturunkan dari angka struk INI, bukan dari setelan perusahaan hari
+      // ini. Penjualan tak menyimpan tarifnya, jadi setelan itu cuma TAMPAK
+      // seperti jawaban: begitu owner mengubahnya, tiap cetak ulang dari
+      // Riwayat menuliskan persen yang tak menghasilkan nominal di sebelahnya
+      // — dan itu kertas yang dibawa pulang tamu. `null` (tak terbukti)
+      // mencetak "PB1" saja, sama seperti struk di layar.
+      pb1Rate: tarifPb1Struk(data.sale.subtotal, data.sale.diskon, data.sale.pb1Amount),
       total: data.sale.total,
       refundTotal: data.sale.refundTotal,
       metodeBayar: data.sale.metodeBayar,

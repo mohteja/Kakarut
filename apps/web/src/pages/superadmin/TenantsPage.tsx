@@ -33,7 +33,7 @@ interface FormState {
 
 export function TenantsPage() {
   const queryClient = useQueryClient();
-  const { data: tenants, isLoading } = useQuery({
+  const { data: tenants, isLoading, error: gagalMuat } = useQuery({
     queryKey: ["tenants"],
     queryFn: () => api<Tenant[]>("/admin/tenants"),
   });
@@ -105,6 +105,7 @@ export function TenantsPage() {
         data={tenants ?? []}
         kunci={(t) => t.id}
         kosong="Belum ada tenant."
+        galat={gagalMuat}
         kolom={[
           { judul: "Perusahaan", hp: "judul", kelasSel: "font-medium", sel: (t) => t.nama },
           { judul: "Slug", hp: "sub", sel: (t) => t.slug },

@@ -327,7 +327,7 @@ export function PenyimpananPage() {
   // Tempat penyimpanan fisik per cabang — dari Kantor pilih cabangnya.
   const { query: branchQuery, id: branchId } = useCabangData();
   const queryClient = useQueryClient();
-  const { data: tempat, isLoading } = useQuery({
+  const { data: tempat, isLoading, error: gagalMuat } = useQuery({
     queryKey: ["penyimpanan", branchQuery],
     queryFn: () => api<PenyimpananDto[]>(`/penyimpanan${branchQuery}`),
   });
@@ -395,6 +395,7 @@ export function PenyimpananPage() {
         data={tempat ?? []}
         kunci={(t) => t.id}
         kosong="Belum ada tempat penyimpanan di cabang ini."
+        galat={gagalMuat}
         kolom={[
           {
             judul: "Nama",
