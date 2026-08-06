@@ -43,11 +43,24 @@ nol, tapi juga bukan kekurangan.
 Sekarang nilainya memakai ambang epsilon yang sama dengan jalur faktur, jadi
 kasus itu memulangkan **0**.
 
-**Yang perlu dicek di mobile:** kalau ada layar yang memakai `saran_beli`
-sebagai boolean (`if (saranBeli > 0)`, penanda/warna baris, badge "perlu
-dibeli"), perilakunya kini konsisten dengan `jumlah_faktur`. Sebelumnya baris
-seperti itu bisa tampil "perlu dibeli" padahal `jumlah_faktur` null dan
-`estimasi_biaya` 0 — peringatan tanpa isi.
+**Sudah dicek di `kakarut-mobile` — TIDAK ada pekerjaan mobile.** Aplikasi
+memang memakainya sebagai boolean:
+
+```dart
+// lib/features/operasional/operasional_models.dart
+bool get perluBeli => (saranBeli ?? 0) > 0;
+```
+
+dan `perluBeli` menggerakkan **filter default** layar Rekomendasi Beli
+(`_hanyaPerluBeli = true`) serta `estimasiTotal`. Jadi di mobile akibatnya
+lebih tajam daripada di web: baris hantu bukan sekadar tersorot warna, ia
+benar-benar MASUK daftar belanja — dengan jumlah faktur kosong dan estimasi
+Rp 0.
+
+Perbaikannya seluruhnya di server, jadi begitu rilis ini tayang, `perluBeli`
+otomatis konsisten dengan `jumlah_faktur` tanpa satu baris pun diubah di
+mobile. Yang perlu dilakukan hanya memastikan tak ada layar LAIN yang
+menghitung ulang kekurangan sendiri dari `kebutuhan − sisa`.
 
 **Jaminan barunya, boleh diandalkan:** `saran_beli > 0` ⟺ `jumlah_faktur != null`.
 
