@@ -281,3 +281,55 @@ describe("buildTestPrintBytes", () => {
     expect(ruler!.length).toBe(32);
   });
 });
+
+describe("penjaga: lebar ekstrem tak boleh merobohkan struk", () => {
+  /**
+   * Dua jalur di modul ini dulu MELEMPAR, bukan mencetak jelek. Karena struk
+   * dibangun sekali jalan, satu baris yang melempar menggagalkan SELURUH
+   * struk — kasir tak punya apa pun untuk diserahkan ke konsumen.
+   *
+   * TERUS TERANG SOAL KETERJANGKAUANNYA: hari ini tak ada layar yang bisa
+   * memicunya. Semua kolom kanan berupa nominal terformat (≤ ~22 karakter)
+   * atau jam 12 karakter, dan lebar selalu 32/48 dari `kolomDefault`. Yang
+   * dijaga bukan bug yang sedang dialami orang, melainkan tepi tajam pada
+   * PRIMITIF BERSAMA yang diekspor `@kakarut/shared` — pemanggil berikutnya,
+   * termasuk aplikasi mobile, tak wajib menebak batas yang tak tertulis.
+   */
+  it("kolom kanan lebih lebar dari kertas → turun baris, BUKAN melempar", () => {
+    const r = padLine("Item", "x".repeat(40), 32);
+    expect(r).toEqual(["Item", "x".repeat(40)]);
+  });
+
+  it("…dan kirinya tetap ikut tercetak, tidak hilang", () => {
+    // Yang paling buruk bukan barisnya jelek, melainkan barisnya lenyap.
+    const r = padLine("Nasi Goreng Spesial", "x".repeat(40), 32);
+    expect(r.join(" ")).toContain("Nasi Goreng Spesial");
+    expect(r[r.length - 1]).toBe("x".repeat(40));
+  });
+
+  it("kiri kosong + kanan kepanjangan → hanya kanan, tanpa baris hampa", () => {
+    expect(padLine("", "x".repeat(40), 32)).toEqual(["x".repeat(40)]);
+  });
+
+  it("batas PERSIS (kanan == lebar) tak berubah perilakunya", () => {
+    // Perilaku lama di titik ini sudah benar; perbaikan tak boleh menggesernya.
+    expect(padLine("Item", "x".repeat(32), 32)).toEqual(["Item", "x".repeat(32)]);
+  });
+
+  it("baris normal sama sekali tak tersentuh", () => {
+    expect(padLine("Nasi Goreng", "Rp 25.000", 32)).toEqual([
+      "Nasi Goreng            Rp 25.000",
+    ]);
+    expect(padLine("Nasi Goreng", "Rp 25.000", 32)[0]).toHaveLength(32);
+  });
+
+  it("wrapText lebar 0 selesai, tidak menggantung", () => {
+    // Dulu: `rest.slice(0, 0)` memotong nol karakter tiap putaran, jadi
+    // gelungnya tak pernah maju dan lariknya tumbuh sampai runtime menyerah.
+    expect(wrapText("halo dunia", 0)).toEqual(["h", "a", "l", "o", "d", "u", "n", "i", "a"]);
+  });
+
+  it("wrapText lebar negatif juga selesai", () => {
+    expect(wrapText("abc", -5)).toEqual(["a", "b", "c"]);
+  });
+});

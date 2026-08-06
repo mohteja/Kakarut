@@ -72,27 +72,35 @@ export function sanitizeAscii(s: string): string {
   return out;
 }
 
-/** Bungkus teks per kata agar tiap baris ≤ width. */
+/**
+ * Bungkus teks per kata agar tiap baris ≤ width.
+ *
+ * `width` dijepit minimal 1. Bukan kerapian: dengan `width = 0`, gelung
+ * pemotong-paksa di bawah memotong nol karakter tiap putaran dan tak pernah
+ * maju — larik tumbuh sampai runtime menyerah. Menjepitnya membuat fungsi ini
+ * mustahil menggantung, berapa pun lebar yang diberikan pemanggil.
+ */
 export function wrapText(s: string, width: number): string[] {
   const lines: string[] = [];
+  const w = Math.max(1, Math.floor(width));
   for (const paragraph of s.split("\n")) {
     let current = "";
     for (const word of paragraph.split(/\s+/).filter(Boolean)) {
-      if (word.length > width) {
+      if (word.length > w) {
         // kata lebih panjang dari satu baris → potong paksa
         if (current) {
           lines.push(current);
           current = "";
         }
         let rest = word;
-        while (rest.length > width) {
-          lines.push(rest.slice(0, width));
-          rest = rest.slice(width);
+        while (rest.length > w) {
+          lines.push(rest.slice(0, w));
+          rest = rest.slice(w);
         }
         current = rest;
       } else if (!current) {
         current = word;
-      } else if (current.length + 1 + word.length <= width) {
+      } else if (current.length + 1 + word.length <= w) {
         current += ` ${word}`;
       } else {
         lines.push(current);
@@ -110,6 +118,19 @@ export function wrapText(s: string, width: number): string[] {
  * baris terakhir.
  */
 export function padLine(left: string, right: string, width: number): string[] {
+  // Kolom kanan yang TIDAK MUAT di kertas: dulu ini melempar RangeError lewat
+  // `" ".repeat(negatif)`, dan karena struk dibangun sekali jalan, satu baris
+  // seperti itu menggagalkan SELURUH struk — kasir tak punya apa pun untuk
+  // diserahkan. Sekarang kanan turun ke barisnya sendiri apa adanya; printer
+  // yang membungkusnya. Jelek, tapi tercetak.
+  //
+  // Hari ini semua kolom kanan berupa nominal terformat (≤ ~22 karakter) atau
+  // jam 12 karakter, jadi jalur ini belum terjangkau lewat layar mana pun. Ia
+  // dijaga karena `padLine` diekspor dari paket bersama — pemanggil
+  // berikutnya, termasuk aplikasi mobile, tak wajib tahu batas diam-diam ini.
+  if (right.length >= width) {
+    return [...(left ? wrapText(left, width) : []), right];
+  }
   const maxLeft = width - right.length - 1;
   if (left.length <= maxLeft) {
     return [left + " ".repeat(width - left.length - right.length) + right];
