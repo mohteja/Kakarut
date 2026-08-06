@@ -13,7 +13,7 @@ import type {
   PesananStatus,
   Shift,
 } from "@kakarut/shared";
-import { angkaDari } from "@kakarut/shared";
+import { angkaDari, hitungPb1 } from "@kakarut/shared";
 import {
   Card,
   ErrorText,
@@ -561,7 +561,12 @@ export function KasirPage() {
   const diskon = Math.min(diskonRaw, capNominal);
   const diskonDibatasi = diskon < diskonRaw;
   const subtotalNet = subtotal - diskon;
-  const pb1 = pb1Conf?.pb1_enabled ? Math.round(subtotalNet * (pb1Conf.pb1_rate / 100)) : 0;
+  // `hitungPb1`, bukan rumusnya ditulis ulang: angka ini DIJANJIKAN ke tamu
+  // sebelum ia membayar, sementara yang benar-benar ditagih dihitung server
+  // dengan fungsi yang sama. Selama keduanya satu fungsi, keduanya mustahil
+  // berselisih. Menyalin rumusnya membuat selisih itu cuma menunggu seseorang
+  // mengubah pembulatan di satu sisi — dan kasir baru tahu saat tamu protes.
+  const pb1 = pb1Conf?.pb1_enabled ? hitungPb1(subtotalNet, pb1Conf.pb1_rate) : 0;
   const total = subtotalNet + pb1;
   // pembayaran tunai: uang diterima → kembalian; kurang = uang < total
   const uangNum = Number(uangDiterima) || 0;
