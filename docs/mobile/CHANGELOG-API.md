@@ -25,6 +25,45 @@ tanpa akses repo server.
 
 ---
 
+## Rilis: `GET /api/penerimaan/riwayat` — saringan tanggal kini per hari WIB
+
+> Tidak ada migrasi, tidak ada field baru, dan bentuk respons tidak berubah.
+> Yang berubah adalah **baris mana yang masuk** untuk `dari`/`sampai` yang sama.
+
+🟡 **PERLU DICEK** — kalau aplikasi mobile menampilkan riwayat penerimaan
+per tanggal, jumlah barisnya bisa berbeda dari sebelumnya untuk rentang yang
+sama. Yang berubah adalah server; tak ada yang perlu dikirim berbeda.
+
+**Kenapa.** `confirmed_at` disimpan sebagai `timestamptz`, sedangkan `dari`/
+`sampai` adalah tanggal yang dipilih orang — dan tanggal itu selalu berarti
+tanggal di zona perusahaan. Jembatannya dulu tengah malam **UTC**, yang di WIB
+jatuh pukul 07:00. Akibatnya jendela sehari bergeser tujuh jam:
+
+| Kiriman diterima | Dulu muncul di | Sekarang muncul di |
+| --- | --- | --- |
+| 6 Agustus 05:00 WIB | **5 Agustus** | 6 Agustus |
+| 6 Agustus 10:00 WIB | 6 Agustus | 6 Agustus |
+| 7 Agustus 03:00 WIB | **6 Agustus** | 7 Agustus |
+
+Tujuh jam itu bukan jam sepi: sayur dan daging datang subuh, jadi justru
+kiriman yang paling sering ditelusuri orang gudang yang tercatat di hari yang
+salah. Tak ada satu pun tanda di layar bahwa itu terjadi.
+
+**Yang perlu dicek di mobile:** kalau ada layar yang mencocokkan riwayat
+penerimaan dengan laporan lain per tanggal (mis. kartu stok atau rekap
+belanja), angka yang dulu "beda tipis dan dibiarkan" mungkin memang selisih
+ini — sekarang keduanya sepakat. Tidak ada perubahan kode yang wajib.
+
+**Batas atas kini eksklusif di belakang layar.** `sampai` tetap **inklusif**
+dari sisi pemakai (hari itu ikut, sampai detik terakhirnya); server
+menyaringnya sebagai `< awal hari berikutnya`, bukan `<= 23:59:59.999`, supaya
+penerimaan yang jatuh di pecahan detik terakhir tak terbuang.
+
+**Zona diambil dari `companies.timezone`** (bawaan `Asia/Jakarta`) — bukan dari
+jam perangkat dan bukan dari UTC. Mobile tak perlu mengirim zona apa pun.
+
+---
+
 ## Rilis: `PUT /api/bahan/:id/resep` — takaran batch ikut satu transaksi
 
 > Tidak ada migrasi, tidak ada field wajib baru, dan respons tidak berubah.

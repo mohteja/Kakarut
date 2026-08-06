@@ -23,7 +23,7 @@ import {
 } from "../../db/schema";
 import { pastikanCabang, requireRole, resolveBranchId, terikatCabang, type AppEnv } from "../../middleware/auth";
 import { hargaPerUnit } from "@kakarut/shared";
-import { tanggalDi } from "../../lib/time";
+import { awalHariDi, tanggalDi } from "../../lib/time";
 import { nomorUntukRefs, terbitkanNomor } from "../dokumen/nomor";
 import { fifoBahan, hitungSaldoCabang, kartuStok } from "./service";
 
@@ -608,14 +608,18 @@ export const stokRoutes = new Hono<AppEnv>()
       .select({ timezone: companies.timezone })
       .from(companies)
       .where(eq(companies.id, auth.company_id!));
-    const today = tanggalDi(company?.timezone ?? "Asia/Jakarta");
+    const tz = company?.timezone ?? "Asia/Jakarta";
+    const today = tanggalDi(tz);
     const tanggal = body.tanggal ?? today;
-    // Waktu baris: saldo pembuka bertanggal LAMPAU dicatat pada tanggalnya
-    // (00:00 UTC) agar tampil di kartu stok pada tanggal itu & aktivitas
-    // sesudahnya dihitung di atasnya. Tanggal = hari ini (reset) → pakai waktu
-    // kini agar mutasi yang sudah terjadi hari ini tetap dianggap SETELAH
-    // baseline (perilaku reset saldo tak berubah).
-    const createdAt = tanggal < today ? new Date(`${tanggal}T00:00:00Z`) : new Date();
+    // Waktu baris: saldo pembuka bertanggal LAMPAU dicatat pada AWAL hari itu
+    // DI ZONA PERUSAHAAN, agar tampil di kartu stok pada tanggal itu &
+    // aktivitas sesudahnya dihitung di atasnya. Tengah malam UTC hanya
+    // TERLIHAT seperti awal hari: di WIB ia jam 07:00, sehingga mutasi antara
+    // 00:00–07:00 pada tanggal itu jatuh SEBELUM baseline dan hilang dari
+    // saldo — persis jam barang datang. Tanggal = hari ini (reset) → pakai
+    // waktu kini agar mutasi yang sudah terjadi hari ini tetap dianggap
+    // SETELAH baseline (perilaku reset saldo tak berubah).
+    const createdAt = tanggal < today ? awalHariDi(tz, tanggal) : new Date();
 
     // Baris baseline: systemQty/selisih/klarifikasi DIBIARKAN null → bukan
     // penyesuaian; penyesuaian_status 'disetujui' → langsung efektif. sessionId
