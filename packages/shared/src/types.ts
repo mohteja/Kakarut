@@ -970,7 +970,13 @@ export interface RekomendasiBahanRow {
   acuan_qty: number;
   /** kebutuhan untuk mencapai target (null bila omzet acuan 0) */
   kebutuhan: number | null;
-  /** maks(0, kebutuhan − sisa) MENTAH (belum dibulatkan); null bila tak bisa dihitung */
+  /**
+   * Kekurangan MENTAH (belum dibulatkan ke kemasan); null bila tak bisa
+   * dihitung. Memakai ambang epsilon `kekuranganBahan`, jadi selisih ekor float
+   * (~1e-17, lumrah karena `kebutuhan` dan `sisa` sama-sama jumlahan desimal)
+   * dipulangkan sebagai 0 — bukan sebagai kekurangan mungil. Nilai ini SAMA
+   * dengan dasar `jumlah_faktur`: `saran_beli > 0` ⟺ `jumlah_faktur != null`.
+   */
   saran_beli: number | null;
   /** isi per kemasan (beli) / hasil per batch (produksi) */
   isi: number;

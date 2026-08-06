@@ -25,6 +25,37 @@ tanpa akses repo server.
 
 ---
 
+## Rilis: `GET /api/rekomendasi` — `saran_beli` tak lagi memulangkan ekor float
+
+> Tidak ada migrasi. Tidak ada medan baru. Yang berubah hanya NILAI `saran_beli`
+> pada rentang yang selama ini tak berarti.
+
+🟡 **PERLU DICEK** — layar yang memakai `saran_beli` sebagai penanda
+"perlu dibeli"
+
+**Sudah di-merge ke production.**
+
+`saran_beli` dulu dihitung `Math.max(0, kebutuhan − sisa)`. Karena `kebutuhan`
+dan `sisa` sama-sama jumlahan desimal (0,1 kg tiga kali = 0,30000000000000004),
+bahan yang stoknya PAS bisa memulangkan angka mungil seperti `5.5e-17` — bukan
+nol, tapi juga bukan kekurangan.
+
+Sekarang nilainya memakai ambang epsilon yang sama dengan jalur faktur, jadi
+kasus itu memulangkan **0**.
+
+**Yang perlu dicek di mobile:** kalau ada layar yang memakai `saran_beli`
+sebagai boolean (`if (saranBeli > 0)`, penanda/warna baris, badge "perlu
+dibeli"), perilakunya kini konsisten dengan `jumlah_faktur`. Sebelumnya baris
+seperti itu bisa tampil "perlu dibeli" padahal `jumlah_faktur` null dan
+`estimasi_biaya` 0 — peringatan tanpa isi.
+
+**Jaminan barunya, boleh diandalkan:** `saran_beli > 0` ⟺ `jumlah_faktur != null`.
+
+`null` TETAP berarti "tak bisa dihitung" (omzet acuan 0), bukan "tidak perlu
+beli" — bedakan keduanya seperti sebelumnya.
+
+---
+
 ## Rilis: `GET /api/shift/:id` — medan baru `transaksi_terpotong`
 
 > Tidak ada migrasi. Medan BARU pada respons; medan lama tak berubah.
