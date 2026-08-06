@@ -215,8 +215,22 @@ export function ShiftDetailModal({ shiftId, onClose }: { shiftId: string | null;
           {/* Daftar transaksi di jendela shift */}
           <div>
             <div className="mb-1 text-sm font-semibold text-stone-700">
-              Transaksi ({data.transaksi.length})
+              {/*
+                Judulnya menyebut "dari <jumlah_transaksi>" saat dipotong, bukan
+                cuma panjang daftarnya. Baris "Transaksi" di ringkasan atas
+                memakai hitungan sebenarnya, jadi tanpa ini dua angka berbeda
+                berdiri berdampingan tanpa penjelasan — dan selisihnya terbaca
+                sebagai transaksi yang hilang.
+              */}
+              Transaksi ({data.transaksi.length}
+              {data.transaksi_terpotong ? ` dari ${data.jumlah_transaksi}` : ""})
             </div>
+            {data.transaksi_terpotong && (
+              <div className="mb-2 rounded-lg bg-yellow-50 px-3 py-2 text-xs text-yellow-800">
+                Hanya {data.transaksi.length} transaksi terbaru yang ditampilkan. Rekap kas
+                di atas tetap menghitung SEMUA {data.jumlah_transaksi} transaksi shift ini.
+              </div>
+            )}
             {data.transaksi.length === 0 ? (
               <div className="rounded-lg border border-stone-200 p-4 text-center text-sm text-stone-400">
                 Belum ada transaksi pada shift ini.

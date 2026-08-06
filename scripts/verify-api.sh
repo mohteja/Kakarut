@@ -8026,5 +8026,34 @@ cek "batas atas kemarin → hari ini di luar jendela, kosong" "V == 0" \
 cek "rentang kemarin..besok memuatnya tepat sekali" "V == 1" \
   "$(riwayat167 "dari=$KMR167&sampai=$BSK167")"
 
+echo "── §168 Detail shift: daftar transaksi mengaku kalau dipotong ──"
+# Modal detail shift menampilkan `jumlah_transaksi` (hitungan SEBENARNYA, dari
+# agregat tanpa batas) tepat di atas daftar transaksinya, yang dibatasi 300.
+# Pada shift ramai keduanya berbeda, dan tanpa penanda selisih itu terbaca
+# sebagai transaksi yang HILANG — di layar tempat kasir mempertanggungjawabkan
+# uang.
+#
+# BATAS SEKSI INI, supaya tak dikira membuktikan lebih: memicu pemotongan butuh
+# >300 penjualan dalam satu shift — 300+ permintaan HTTP, terlalu mahal untuk
+# CI. Yang dibuktikan di sini adalah sisi yang MURAH DAN SERING SALAH: medannya
+# benar-benar ada di respons, dan pada shift kecil ia JUJUR berkata `false`
+# sambil daftarnya utuh. Perilaku saat benar-benar terpotong dipatok uji statis
+# `pemotongan-terungkap.test.ts` (termasuk penyapu "tiap penanda terpotong di
+# DTO wajib dibaca web").
+SH168=$(api "$OWNER" GET "/shift?per_page=50" | jq -r '(if type=="array" then . else .rows end)[0].id // ""')
+cek "dasar uji §168: ada shift yang bisa diperiksa" "V == 1" \
+  "$([ ${#SH168} -eq 36 ] && echo 1 || echo 0)"
+D168=$(api "$OWNER" GET "/shift/$SH168")
+cek "detail shift membawa medan transaksi_terpotong" "V == 1" \
+  "$(echo "$D168" | jq '(has("transaksi_terpotong")) | if . then 1 else 0 end')"
+cek "medannya boolean sejati, bukan null/teks" "V == 1" \
+  "$(echo "$D168" | jq '((.transaksi_terpotong|type) == "boolean") | if . then 1 else 0 end')"
+cek "shift kecil → TIDAK terpotong (penandanya jujur, bukan selalu true)" "V == 1" \
+  "$(echo "$D168" | jq '(.transaksi_terpotong == false) | if . then 1 else 0 end')"
+cek "tak terpotong → panjang daftar = jumlah_transaksi (dua angka sepakat)" "V == 1" \
+  "$(echo "$D168" | jq '((.transaksi|length) == .jumlah_transaksi) | if . then 1 else 0 end')"
+cek "daftarnya tak pernah melebihi batas 300" "V == 1" \
+  "$(echo "$D168" | jq '((.transaksi|length) <= 300) | if . then 1 else 0 end')"
+
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

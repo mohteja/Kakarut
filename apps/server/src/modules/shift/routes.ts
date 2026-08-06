@@ -132,14 +132,33 @@ async function rekapWindow(
   return { penjualan_tunai: tunai, penjualan_nontunai: nontunai, jumlah_transaksi: jumlah };
 }
 
-/** Daftar transaksi individual sebuah shift (untuk detail). */
+/**
+ * Berapa transaksi shift yang dimuat ke daftar detail. Dibatasi supaya satu
+ * shift ramai tak menarik ribuan baris ke layar, TAPI batasnya harus terlihat:
+ * modal detail menampilkan `jumlah_transaksi` (hitungan sebenarnya, dari
+ * agregat tak terbatas) TEPAT DI ATAS daftar ini. Tanpa penanda, shift
+ * berisi 420 transaksi memperlihatkan "Transaksi 420x" lalu "Transaksi (300)"
+ * berdampingan — dua angka berbeda untuk hal yang sama, di layar tempat kasir
+ * sedang diminta mempertanggungjawabkan uang.
+ */
+const BATAS_TRANSAKSI_SHIFT = 300;
+
+/**
+ * Daftar transaksi individual sebuah shift (untuk detail).
+ *
+ * Mengambil satu baris LEBIH dari batas — itulah cara tahu masih ada sisa,
+ * idiom yang sama dengan kartu stok & kartu perlengkapan (`terpotong`).
+ * Uangnya sendiri TIDAK datang dari daftar ini: `penjualan_tunai`,
+ * `penjualan_nontunai`, dan `jumlah_transaksi` dihitung agregat terpisah
+ * tanpa batas, jadi pemotongan di sini tak pernah menggeser rekap kas.
+ */
 async function transaksiWindow(
   companyId: string,
   branchId: string,
   shiftId: string,
   openedAt: Date,
   closedAt: Date | null,
-): Promise<ShiftTransaksiRow[]> {
+): Promise<{ rows: ShiftTransaksiRow[]; terpotong: boolean }> {
   const rows = await db
     .select({
       id: sales.id,
@@ -160,8 +179,10 @@ async function transaksiWindow(
       ),
     )
     .orderBy(desc(sales.waktu))
-    .limit(300);
-  return rows.map((r) => ({
+    .limit(BATAS_TRANSAKSI_SHIFT + 1);
+  const terpotong = rows.length > BATAS_TRANSAKSI_SHIFT;
+  const dipakai = terpotong ? rows.slice(0, BATAS_TRANSAKSI_SHIFT) : rows;
+  const daftar = dipakai.map((r) => ({
     id: r.id,
     nomor: r.nomor,
     waktu: r.waktu.toISOString(),
@@ -172,6 +193,7 @@ async function transaksiWindow(
     // jendela, jadi kasir perlu tahu baris ini yang menggeser rekap penutupan
     susulan: closedAt != null && r.waktu > closedAt,
   }));
+  return { rows: daftar, terpotong };
 }
 
 /**
@@ -566,8 +588,12 @@ export const shiftRoutes = new Hono<AppEnv>()
       throw new HTTPException(403, { message: "Shift bukan dari cabang Anda" });
     }
     const dto = await toDto(row, auth.role);
-    const transaksi = await transaksiWindow(row.companyId, row.branchId, row.id, row.openedAt, row.closedAt);
-    return c.json({ ...dto, transaksi } satisfies ShiftDetail);
+    const tx = await transaksiWindow(row.companyId, row.branchId, row.id, row.openedAt, row.closedAt);
+    return c.json({
+      ...dto,
+      transaksi: tx.rows,
+      transaksi_terpotong: tx.terpotong,
+    } satisfies ShiftDetail);
   })
   .post(
     "/buka",
