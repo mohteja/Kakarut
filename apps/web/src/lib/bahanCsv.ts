@@ -99,13 +99,62 @@ export function buatCsvBahan(bahan: BahanDto[]): string {
   return [KOLOM_CSV.join(","), ...baris, ...contoh].join("\n");
 }
 
-/** Parser CSV sederhana: dukung sel berkutip, koma & baris baru di dalam kutip. */
-export function parseCsv(teks: string): string[][] {
+/** Pemisah kolom yang mungkin dipakai berkas nyata. Urutan = prioritas saat seri. */
+const KANDIDAT_PEMISAH = [",", ";", "\t"] as const;
+
+/** Nama pemisah untuk pesan ke pemakai. */
+export function namaPemisah(p: string): string {
+  return p === ";" ? "titik koma (;)" : p === "\t" ? "tab" : "koma (,)";
+}
+
+/**
+ * Tebak pemisah kolom dari BARIS PERTAMA berkas.
+ *
+ * Excel menulis CSV memakai "list separator" milik Windows, dan pada Windows
+ * berbahasa Indonesia itu TITIK KOMA — karena pemisah desimalnya koma. Jadi
+ * alur paling lumrah di aplikasi ini (unduh template → buka di Excel → Simpan
+ * Sebagai CSV) menghasilkan berkas ber-titik-koma, bukan berkoma. Dulu berkas
+ * seperti itu terbaca sebagai SATU kolom: `indexOf("nama")` gagal, impor
+ * berhenti, dan pesannya menyuruh pemakai "pastikan ada kolom 'nama'" —
+ * padahal kolom itu jelas-jelas ada di layar mereka. Petunjuk yang menyesatkan
+ * lebih buruk daripada tak ada petunjuk.
+ *
+ * Ditebak dari BARIS PERTAMA saja, dan hanya di LUAR kutip. Itu yang membuatnya
+ * aman: baris data boleh penuh koma desimal ("1,5") tanpa memengaruhi
+ * keputusan, karena header berkas ini selalu nama kolom polos. Seri atau tak
+ * ada satu pun kandidat → koma, jadi berkas yang hari ini terbaca benar tetap
+ * terbaca persis sama.
+ */
+export function deteksiPemisah(teks: string): string {
+  const hitung: Record<string, number> = { ",": 0, ";": 0, "\t": 0 };
+  let inQ = false;
+  for (let i = 0; i < teks.length; i++) {
+    const ch = teks[i];
+    if (inQ) {
+      if (ch === '"') {
+        if (teks[i + 1] === '"') i++;
+        else inQ = false;
+      }
+    } else if (ch === '"') inQ = true;
+    else if (ch === "\n") break;
+    else if (ch in hitung) hitung[ch] += 1;
+  }
+  let pilih: string = ",";
+  for (const c of KANDIDAT_PEMISAH) if (hitung[c] > hitung[pilih]) pilih = c;
+  return pilih;
+}
+
+/**
+ * Parser CSV sederhana: dukung sel berkutip, pemisah & baris baru di dalam
+ * kutip. `pemisah` boleh dipaksa; bila tidak, ditebak dari baris pertama.
+ */
+export function parseCsv(teks: string, pemisah?: string): string[][] {
   const rows: string[][] = [];
   let row: string[] = [];
   let cur = "";
   let inQ = false;
   const t = teks.replace(/\r\n?/g, "\n");
+  const sep = pemisah ?? deteksiPemisah(t);
   for (let i = 0; i < t.length; i++) {
     const ch = t[i];
     if (inQ) {
@@ -116,7 +165,7 @@ export function parseCsv(teks: string): string[][] {
         } else inQ = false;
       } else cur += ch;
     } else if (ch === '"') inQ = true;
-    else if (ch === ",") {
+    else if (ch === sep) {
       row.push(cur);
       cur = "";
     } else if (ch === "\n") {
