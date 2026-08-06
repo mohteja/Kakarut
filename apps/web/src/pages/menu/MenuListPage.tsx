@@ -41,7 +41,7 @@ export function MenuListPage() {
   const queryClient = useQueryClient();
   const { cabang } = useBranch();
   const namaCabang = new Map(cabang.map((b) => [b.id, b.nama]));
-  const { data: menus, isLoading } = useQuery({
+  const { data: menus, isLoading, error: gagalMuat } = useQuery({
     queryKey: ["menu"],
     queryFn: () => api<MenuDto[]>("/menu"),
   });
@@ -180,7 +180,14 @@ export function MenuListPage() {
 
       {tampil.length === 0 && (
         <div className="rounded-lg border border-stone-200 bg-stone-50 px-4 py-10 text-center text-sm text-stone-400">
-          {semua.length === 0
+          {/*
+            GAGAL MEMUAT ≠ BELUM ADA MENU. "Belum ada menu." adalah pernyataan
+            tentang katalog, dan halaman ini pintu utama untuk MENAMBAH menu —
+            menu ganda lalu ikut ke layar kasir sebagai dua tombol yang sama.
+          */}
+          {gagalMuat
+            ? "Daftar menu gagal dimuat — kosongnya bukan berarti katalognya kosong. Muat ulang dulu."
+            : semua.length === 0
             ? "Belum ada menu."
             : `Tidak ada menu yang cocok${q ? ` dengan "${cari.trim()}"` : ""}${
                 filterKat ? ` di kategori "${filterKat}"` : ""

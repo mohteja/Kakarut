@@ -60,7 +60,7 @@ export function MejaPage() {
   /** Membereskan meja = + tim (permintaan owner: "tim ataupun kasir"). */
   const bolehKosongkan = bolehAtur || peran === "tim";
   const queryClient = useQueryClient();
-  const { data: meja, isLoading } = useQuery({
+  const { data: meja, isLoading, error: gagalMeja } = useQuery({
     queryKey: ["meja", branchQuery],
     queryFn: () => api<MejaDto[]>(`/meja${branchQuery}`),
   });
@@ -198,6 +198,21 @@ export function MejaPage() {
   }
 
   if (isLoading) return <Spinner />;
+  // GAGAL MEMUAT ≠ BELUM ADA MEJA. Denah kosong di bawah mengajak menekan
+  // "+ Tambah Meja" — dan meja ganda bukan sekadar baris berlebih: kasir lalu
+  // memilih meja yang salah dari dua yang bernama sama, dan status isi/kosong
+  // di layar tak lagi cocok dengan ruangan.
+  if (gagalMeja) {
+    return (
+      <div className="max-w-5xl">
+        <ErrorText error={gagalMeja} />
+        <div className="mt-2 text-sm text-stone-500">
+          Denah meja tidak bisa dimuat, jadi kosongnya <b>bukan</b> berarti cabang ini belum
+          punya meja. Muat ulang sebelum menambah, supaya tak jadi ganda.
+        </div>
+      </div>
+    );
+  }
 
   const list = meja ?? [];
 

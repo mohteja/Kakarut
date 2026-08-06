@@ -265,7 +265,7 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
 
   // varian LENGKAP (bukan ringkas): supplier_utama + satuan_beli dipakai di
   // pemilih bahan dan ringkasan belanja per supplier (jalur beli)
-  const { data: bahan } = useQuery({
+  const { data: bahan, error: gagalBahan } = useQuery({
     queryKey: ["bahan"],
     queryFn: () => api<BahanDto[]>("/bahan"),
   });
@@ -609,7 +609,26 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
           )}
         </div>
 
-        {bahanJalur.length === 0 ? (
+        {bahanJalur.length === 0 && gagalBahan ? (
+          /*
+            GAGAL MEMUAT ≠ MASTERNYA KOSONG. Blok di bawah bukan sekadar layar
+            kosong: ia MENYIMPULKAN kenapa picker-nya kosong ("belum menambahkan
+            bahan baku apa pun", "ubah jenisnya ke Beli") dan menyodorkan tombol
+            ke master Bahan Baku. Semua kesimpulan itu ditarik dari daftar yang,
+            saat gagal dimuat, tak pernah ada isinya untuk disimpulkan.
+          */
+          <div className="px-4 py-10 text-center">
+            <div className="text-3xl">⚠️</div>
+            <div className="mt-2 text-sm font-semibold text-red-700">
+              Daftar bahan baku gagal dimuat
+            </div>
+            <div className="mx-auto mt-1 max-w-md text-xs leading-relaxed text-stone-500">
+              <ErrorText error={gagalBahan} />
+              Kosongnya <b>bukan</b> berarti masternya kosong. Muat ulang halaman ini sebelum
+              menambah bahan baru.
+            </div>
+          </div>
+        ) : bahanJalur.length === 0 ? (
           // Picker kosong = perusahaan belum punya bahan sesuai jalur ini
           // (server pun menolak bahan non-beli / tak dilacak) — jelaskan &
           // arahkan ke master Bahan Baku alih-alih baris kosong yang bingung.

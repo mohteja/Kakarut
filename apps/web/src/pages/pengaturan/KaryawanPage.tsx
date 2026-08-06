@@ -226,7 +226,7 @@ export function KaryawanPage() {
   // admin agar tak menyisakan Kantor terpilih untuk kasir/tim.
   const storeDefault = cabang.find((b) => b.is_active && b.tipe === "store")?.id ?? "";
   const queryClient = useQueryClient();
-  const { data: karyawan, isLoading } = useQuery({
+  const { data: karyawan, isLoading, error: gagalMuat } = useQuery({
     queryKey: ["karyawan"],
     queryFn: () => api<Karyawan[]>("/karyawan"),
   });
@@ -444,6 +444,7 @@ export function KaryawanPage() {
           data={karyawan ?? []}
           kunci={(k) => k.user_id}
           kosong="Belum ada karyawan."
+          galat={gagalMuat}
           kolom={[
             { judul: "Nama", hp: "judul", kelasSel: "font-medium", sel: (k) => k.nama },
             {

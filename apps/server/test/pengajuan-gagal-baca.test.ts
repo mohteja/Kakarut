@@ -122,8 +122,18 @@ describe("Rekap Absen: daftar & hitungan pengajuan", () => {
   it("perbaikannya lewat prop `kosong` — jadi tabel desktop & kartu HP ikut keduanya", () => {
     // Menyembunyikan <TabelResponsif> hanya akan membetulkan salah satu bila
     // suatu saat percabangannya dipasang di dalam komponen itu.
+    //
+    // Sejak prop `galat` ada (lihat gagal-muat-bukan-kosong.test.ts), `kosong`
+    // tak lagi dirender langsung: ia jadi CADANGAN di dalam `isiKosong`, dan
+    // `isiKosong` itulah yang dipasang di kedua tampilan. Jaminannya persis
+    // sama — apa pun yang dilewatkan halaman ini sampai ke dua-duanya — jadi
+    // patokannya ikut pindah ke simpul barunya, bukan dilonggarkan.
     const t = baca("../../web/src/components/TabelResponsif.tsx");
-    expect(t.match(/\{kosong\}/g) ?? []).toHaveLength(2);
+    expect(t).toContain("const isiKosong = galat ? (");
+    expect(t, "`kosong` harus tetap jadi cadangan saat tak ada galat").toMatch(
+      /\)\s*:\s*\(\s*kosong\s*\);/,
+    );
+    expect(t.match(/\{isiKosong\}/g) ?? []).toHaveLength(2);
   });
 });
 

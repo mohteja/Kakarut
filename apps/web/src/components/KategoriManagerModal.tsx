@@ -32,7 +32,7 @@ export function KategoriManagerModal({
 }) {
   const queryClient = useQueryClient();
   const invalidate = () => queryClient.invalidateQueries({ queryKey: [queryKey] });
-  const { data: rows } = useQuery({
+  const { data: rows, error: gagalMuat } = useQuery({
     queryKey: [queryKey],
     queryFn: () => api<KategoriDto[]>(endpoint),
     enabled: open,
@@ -88,7 +88,25 @@ export function KategoriManagerModal({
           </div>
         ))}
         {(rows ?? []).length === 0 && (
-          <div className="px-3 py-6 text-center text-sm text-stone-400">Belum ada kategori.</div>
+          <div className="px-3 py-6 text-center text-sm text-stone-400">
+            {/*
+              GAGAL MEMUAT ≠ BELUM ADA KATEGORI. Modal ini dibuka justru saat
+              orang hendak MENAMBAH kategori, jadi daftar kosong palsu langsung
+              berbuah duplikat — dan kategori ganda menyebar ke dropdown Menu &
+              Bahan Baku, tempat keduanya terlihat sah.
+            */}
+            {gagalMuat ? (
+              <>
+                <div className="font-medium text-red-700">Daftar kategori gagal dimuat.</div>
+                <div className="mt-1">
+                  Kosongnya <b>bukan</b> berarti belum ada kategori — muat ulang dulu sebelum
+                  menambah.
+                </div>
+              </>
+            ) : (
+              "Belum ada kategori."
+            )}
+          </div>
         )}
       </div>
 
