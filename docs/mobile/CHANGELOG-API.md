@@ -25,6 +25,32 @@ tanpa akses repo server.
 
 ---
 
+## Rilis: `PUT /api/bahan/:id/resep` — takaran batch ikut satu transaksi
+
+> Tidak ada migrasi, tidak ada field wajib baru, dan respons tidak berubah.
+
+🟡 **PERLU DICEK** — endpoint ini menerima `atur` opsional:
+`{ isi?, overhead_x?, harga_beli? }`. Bila dikirim, ketiganya ditulis dalam
+**transaksi yang sama** dengan komponen resepnya.
+
+**Kenapa.** Biaya per satuan bahan produksi lahir dari pasangan
+`(biaya resep ÷ isi) × overhead_x`, dan pembilang/penyebutnya tersimpan di tabel
+berbeda. Menyimpan komponen lewat endpoint ini lalu takarannya lewat
+`PUT /api/bahan/:id` adalah dua permintaan; bila yang kedua gagal, resep BARU
+sudah mendarat dengan `isi` LAMA — dan HPP setiap menu yang memakai bahan itu
+ikut keliru **bagi semua orang**, tanpa tanda apa pun di layar, sampai ada yang
+kebetulan menyimpan ulang.
+
+**Yang perlu dilakukan mobile bila punya layar edit resep:** pindahkan `isi`,
+`overhead_x`, dan `harga_beli` dari panggilan `PUT /api/bahan/:id` ke `atur` di
+sini. Field master lain (satuan, stok minimum, lead time, foto) dan cara masak
+tetap di endpointnya masing-masing — kegagalannya tidak bisa membuat angka
+biaya bertentangan.
+
+Tanpa `atur`, perilakunya persis seperti sebelumnya.
+
+---
+
 ## Rilis: `POST /api/rekomendasi/menu/faktur` — kunci idempotensi `client_ref`
 
 > Tidak ada migrasi, tidak ada field wajib baru, dan respons tidak berubah.
