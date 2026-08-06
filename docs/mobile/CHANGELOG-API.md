@@ -228,7 +228,7 @@ kebetulan sama dianggap ulangan, lalu diam-diam tak terjadi.
 
 ## Rilis: `POST /api/bahan/import` — kolom yang tak dikirim tak lagi ditimpa
 
-> Belum di-merge ke production. Tidak ada migrasi, tidak ada field baru, dan
+> Sudah di-merge ke production. Tidak ada migrasi, tidak ada field baru, dan
 > respons tidak berubah. Yang berubah adalah **arti dari field yang absen**.
 
 ### 🟡 PERLU DICEK — kirim hanya field yang memang mau diubah
@@ -265,7 +265,7 @@ Yang perlu dicek bila mobile memakai endpoint ini:
 
 ## Rilis: `POST /api/stok/opname` menerima `client_ref`
 
-> Belum di-merge ke production. Tidak ada migrasi dan tidak ada field baru pada
+> Sudah di-merge ke production. Tidak ada migrasi dan tidak ada field baru pada
 > respons — yang bertambah hanya dua field OPSIONAL pada badan permintaan.
 
 ### 🟢 BARU — kirim `client_ref` supaya retry tak melahirkan sesi opname kembar
@@ -304,7 +304,7 @@ hilang tanpa galat.
 
 ## Rilis: `PUT /open-bill/:id` menolak bill yang sudah ditutup
 
-> Belum di-merge ke production. **Tidak ada migrasi dan tidak ada field baru** —
+> Sudah di-merge ke production. **Tidak ada migrasi dan tidak ada field baru** —
 > yang bertambah hanya satu kode galat pada satu endpoint. Tapi ini menutup
 > jalur di mana pesanan tamu bisa hilang tanpa satu pun galat muncul di layar.
 
@@ -430,7 +430,7 @@ bila memang ada bentrok. Pembukaan biasa mempertahankan mejanya seperti dulu.
 
 ## Rilis: koreksi panduan — badge "diubah setelah transaksi" salah kaprah
 
-> Belum di-merge ke production. **Tidak ada perubahan API**: tak ada migrasi, tak
+> Sudah di-merge ke production. **Tidak ada perubahan API**: tak ada migrasi, tak
 > ada field baru, tak ada perilaku server yang berubah. Yang keliru adalah
 > PANDUAN yang kami tulis di changelog ini sendiri — dan kekeliruan itu sudah
 > melahirkan badge yang menuduh orang di sisi web. Kalau kalian membangun
@@ -481,7 +481,7 @@ memuat aturan pewarisan ini lengkap dengan akibat biayanya.
 
 ## Rilis: Sajian batal tidak ditagih + refund sebagian per sajian
 
-> Belum di-merge ke production. **Ada migrasi DB** (`0093`, seluruhnya aditif:
+> Sudah di-merge ke production. **Ada migrasi DB** (`0093`, seluruhnya aditif:
 > `sale_refunds`, `sale_items.qty_refund`, `sales.subtotal_asal/diskon_asal/
 > pb1_asal/refund_total`).
 
@@ -592,7 +592,7 @@ dari data mentah, samakan sekarang:
 
 ## Rilis: Terima barang hanya lewat Penerimaan + jejak "diterima oleh siapa"
 
-> Belum di-merge ke production. Tidak ada migrasi DB.
+> Sudah di-merge ke production. Tidak ada migrasi DB.
 
 ### 🔴 WAJIB — `POST /{mod}/tahap` dengan `ke:"dikonfirmasi"` kini **409** untuk kiriman beralamat cabang
 
@@ -641,7 +641,7 @@ lengkap tetap ada di `GET /penerimaan/riwayat`.
 
 ## Rilis: Riwayat penerimaan barang (per faktur)
 
-> Belum di-merge ke production. Tidak ada migrasi DB.
+> Sudah di-merge ke production. Tidak ada migrasi DB.
 
 ### 🟢 BARU — `GET /penerimaan/riwayat`: jejak kiriman yang sudah diterima/ditolak
 
