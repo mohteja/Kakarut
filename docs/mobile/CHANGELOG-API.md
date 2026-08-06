@@ -25,6 +25,63 @@ tanpa akses repo server.
 
 ---
 
+## Rilis: persen PB1 di struk cetak diturunkan dari nota, bukan dari setelan hari ini
+
+> Tidak ada perubahan API sama sekali — tidak ada medan baru, tidak ada nilai
+> yang berubah. Yang diperbaiki murni **sisi klien**: dari mana angka persen di
+> sebelah nominal PB1 pada struk cetak diambil. Dicatat di sini karena
+> **aplikasi mobile punya bug yang sama persis**, dan perbaikannya harus
+> dikerjakan di repo mobile.
+
+🔴 **WAJIB** — layar struk & cetak ulang (`receipt_page.dart`)
+
+**Belum ada di mobile.** (Sisi web sudah diperbaiki; mobile belum.)
+
+**Masalahnya.** Penjualan menyimpan **rupiah** PB1-nya, tidak tarifnya. Tidak
+seperti diskon — `diskon_persen` memang ikut tersimpan per penjualan — PB1
+tidak punya kolom tarif di `sales`. Jadi struk cetak ulang tak punya sumber sah
+untuk persen di sebelah nominalnya, dan satu-satunya angka yang tersedia
+(`company.pb1_rate`, setelan **hari ini**) justru yang paling mudah salah.
+
+Dua jalan meleset, keduanya lewat tombol yang memang ada:
+
+1. Owner mengubah tarif 10% → 11% di Pengaturan Perusahaan, lalu struk lama
+   dicetak ulang dari Riwayat Transaksi. Kertasnya menulis `PB1 11%` di sebelah
+   angka yang 10% dari netnya.
+2. Refund sebagian: PB1-nya **diprorata** dari PB1 asal (`pb1_asal`), bukan
+   dihitung ulang dari tarif — itu memang yang benar, tapi hasilnya tak harus
+   sama dengan tarif mana pun.
+
+Layar tidak pernah kena: struk di layar memang tak menampilkan persen PB1.
+Yang salah hanya **kertas yang dibawa pulang tamu**, dan tak ada seorang pun di
+toko yang melihatnya.
+
+**Di mobile, jalurnya sama:**
+
+```dart
+// lib/features/kasir/receipt_page.dart:118
+      pb1Rate: company?.pb1Rate,
+
+// lib/features/printer/receipt_builder.dart:193
+      'PB1${data.pb1Rate != null && data.pb1Rate! > 0 ? ' ${_angka(data.pb1Rate!)}%' : ''}',
+```
+
+Catatan: `bayar_sheet.dart:684` & `:691` memakai `auth.company?.pb1Rate` untuk
+label PB1 di layar **sebelum bayar** — itu BENAR dan jangan diubah. Pada saat
+itu tarif hari ini memang tarif yang sedang dipakai. Yang salah hanya struk
+yang menampilkan transaksi LAMA.
+
+**Yang dilakukan web** (silakan ditiru): tarifnya diturunkan dari angka struk
+itu sendiri lalu **dibuktikan** — hanya dipakai bila `round(net × tarif/100)`
+menghasilkan nominal yang sama persis; kalau tidak, `null` dan struk mencetak
+`PB1` tanpa persen (sama seperti struk di layar). Fungsinya
+`tarifPb1Struk(subtotal, diskon, pb1)` di `packages/shared/src/hpp.ts`, dan
+kandidat tarifnya dicoba dari yang paling sederhana (bulat → 1 desimal → 2
+desimal, batas 100) supaya yang tercetak adalah tarif yang paling mungkin
+benar-benar disetel owner, bukan pecahan sisa pembagian balik.
+
+---
+
 ## Rilis: `GET /api/rekomendasi` — `saran_beli` tak lagi memulangkan ekor float
 
 > Tidak ada migrasi. Tidak ada medan baru. Yang berubah hanya NILAI `saran_beli`

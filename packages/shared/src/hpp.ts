@@ -102,3 +102,47 @@ export function statusStok(
 export function hitungPb1(subtotal: number, ratePersen: number): number {
   return Math.round(subtotal * (ratePersen / 100));
 }
+
+/**
+ * Tarif PB1 yang BENAR-BENAR menghasilkan nominal pada sebuah struk — atau
+ * `null` bila tak bisa dibuktikan.
+ *
+ * Penjualan menyimpan RUPIAH PB1-nya, tidak tarifnya. Diskon menyimpan
+ * keduanya (`diskon_persen` ikut tersimpan per penjualan), PB1 tidak. Jadi
+ * struk cetak ulang tak punya sumber untuk persen di sebelah nominalnya, dan
+ * satu-satunya angka yang tersedia — setelan perusahaan HARI INI — justru yang
+ * paling mudah salah. Dua jalan meleset, dan keduanya nyata:
+ *
+ *   1. Owner mengubah tarifnya (10% → 11%), lalu struk lama dicetak ulang dari
+ *      Riwayat Transaksi. Kertas yang dipegang tamu menuliskan "PB1 11%" di
+ *      sebelah nominal yang 10% dari netnya.
+ *   2. Refund sebagian. PB1-nya diprorata dari PB1 ASAL (lihat `refund.ts`),
+ *      bukan dihitung ulang dari tarif — memang begitu seharusnya, tapi
+ *      hasilnya bisa tak sama dengan tarif mana pun.
+ *
+ * Maka tarifnya diturunkan dari angka struk ITU SENDIRI lalu DIBUKTIKAN: hanya
+ * dikembalikan bila `hitungPb1` atasnya menghasilkan nominal yang sama persis.
+ * Bila tidak, jawabannya `null` dan struk mencetak "PB1" tanpa persen — persis
+ * seperti struk di layar yang memang sudah tak pernah menampilkan tarif. Tidak
+ * tahu lebih baik daripada menebak: yang ditebak ini dicetak di atas kertas dan
+ * dibawa pulang tamu.
+ */
+export function tarifPb1Struk(subtotal: number, diskon: number, pb1: number): number | null {
+  const net = subtotal - diskon;
+  if (!(net > 0) || !(pb1 > 0)) return null;
+  const kasar = (pb1 / net) * 100;
+  // Yang PALING SEDERHANA dulu: bulat, lalu 1 desimal, lalu 2 (batas
+  // `companies.pb1_rate` numeric(5,2) — tarif yang tak bisa disimpan
+  // perusahaan juga tak boleh muncul di struk). Pembulatan PB1 membuat banyak
+  // tarif menghasilkan nominal yang sama; yang dicetak sebaiknya yang paling
+  // mungkin benar-benar disetel owner, bukan pecahan sisa pembagian balik.
+  for (const skala of [1, 10, 100]) {
+    const tarif = Math.round(kasar * skala) / skala;
+    // Batas atas 100: itu yang bisa disimpan perusahaan (form Pengaturan
+    // menjepitnya ke [0, 100]). Tarif di luar itu tak mungkin pernah disetel
+    // siapa pun, jadi walau ia memproduksi ulang nominalnya, ia bukan
+    // jawabannya — cuma artefak pembagian balik.
+    if (tarif > 0 && tarif <= 100 && hitungPb1(net, tarif) === pb1) return tarif;
+  }
+  return null;
+}
