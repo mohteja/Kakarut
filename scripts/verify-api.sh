@@ -7951,5 +7951,80 @@ cek "tanpa atur: isi tetap 20 (kompatibilitas klien lama)" "abs(V - 20) < 0.001"
 cek "tanpa atur: komponennya tetap tersimpan (qty jadi 7)" "abs(V - 7) < 0.001" \
   "$(api "$OWNER" GET "/bahan/$PRD166/resep" | jq -r '.[0].qty')"
 
+echo "── §167 Riwayat penerimaan: sehari penuh menurut jam dinding cabang ──"
+# `confirmed_at` adalah `timestamptz`; tanggal yang diketik orang berarti
+# tanggal DI ZONA PERUSAHAAN. Dulu jembatannya `new Date(`${dari}T00:00:00Z`)`
+# — yang TERLIHAT seperti awal hari, tapi di WIB jam 07:00. Jendelanya bergeser
+# tujuh jam: kiriman yang diterima subuh (jam sayur datang) tercatat pada HARI
+# SEBELUMNYA, dan hari yang diminta malah kebagian subuh besoknya.
+#
+# PEMBAGIAN KERJA, supaya seksi ini tak dikira membuktikan lebih:
+#   - Pergeseran tujuh jamnya sendiri dipatok uji satuan
+#     `batas-hari-zona.test.ts`, yang bisa menyebut instant persis tanpa
+#     bergantung jam berapa CI kebetulan berjalan.
+#   - Yang dibuktikan DI SINI adalah BENTUK jendelanya lewat API sungguhan:
+#     sehari penuh, menyambung, dan tertutup di kedua sisi luarnya.
+#     Assertion (a)/(b) di bawah ikut menangkap bug aslinya setiap kali CI
+#     berjalan antara 00:00–07:00 WIB — 7 dari 24 jam, bukan nol.
+#
+# TENGAH MALAM DITUNGGU, bukan dilewati (idiom yang sama dengan §137, yang
+# catatannya merekam run CI 23:58 WIB gagal persis begitu). Seksi ini menerima
+# kiriman lalu menyaringnya per tanggal; kalau tanggal WIB berganti di
+# antaranya, semua assertion di bawah merah karena KALENDER, bukan karena
+# produknya — dan merah yang salah sebab jauh lebih mahal daripada tunggu 3
+# menit sekali seribu run.
+JAM167=$(TZ=Asia/Jakarta date +%H%M)
+if [ "$((10#$JAM167))" -ge 2357 ]; then
+  TUNGGU167=$(( $(TZ=Asia/Jakarta date -d 'tomorrow 00:00:10' +%s) - $(date +%s) ))
+  echo "   … §167 menunggu ${TUNGGU167}s melewati tengah malam WIB (seluruh seksi harus satu tanggal)"
+  sleep "$TUNGGU167"
+fi
+CK167=$(api "$OWNER" GET /cabang | jq -r '[.[]|select(.is_active and .tipe=="central_kitchen")][0].id')
+ST167=$(api "$OWNER" GET /cabang | jq -r --arg a "$CK167" '[.[]|select(.is_active and .tipe=="store" and .id!=$a)][0].id')
+# Bahan dibuat sendiri (pelajaran §164): memakai sisa seksi lain membuat seksi
+# ini bisa hijau tanpa pernah benar-benar berjalan.
+ING167=$(api "$OWNER" POST /bahan \
+  '{"nama":"Bahan Subuh 167","satuan":"gr","harga_beli":1500,"isi":1,"track_stok":true,"pengadaan":"beli","boleh_eceran":true}' \
+  | jq -r .id)
+FK167=$(api "$OWNER" POST /pembelian/faktur \
+  "{\"branch_id\":\"$CK167\",\"tujuan_branch_id\":\"$ST167\",\"items\":[{\"ingredient_id\":\"$ING167\",\"mode\":\"pcs\",\"jumlah\":250,\"total_harga\":3750}]}" \
+  | jq -r .faktur_id)
+api "$OWNER" POST "/pembelian/tahap/$FK167" '{"ke":"dikerjakan"}' > /dev/null
+api "$OWNER" POST "/pembelian/tahap/$FK167" '{"ke":"menunggu"}' > /dev/null
+api "$OWNER" POST "/pembelian/kirim/$FK167" '{}' > /dev/null
+api "$OWNER" POST "/penerimaan/$FK167/terima" > /dev/null
+
+HARI167=$(TZ=Asia/Jakarta date +%F)
+KMR167=$(TZ=Asia/Jakarta date -d yesterday +%F 2>/dev/null || TZ=Asia/Jakarta date -v-1d +%F)
+BSK167=$(TZ=Asia/Jakarta date -d tomorrow +%F 2>/dev/null || TZ=Asia/Jakarta date -v+1d +%F)
+riwayat167() { # riwayat167 <query tambahan> → jumlah baris faktur ini
+  api "$OWNER" GET "/penerimaan/riwayat?branch_id=$ST167&$1" \
+    | jq --arg f "$FK167" '[.rows[]|select(.faktur_id==$f)] | length'
+}
+cek "dasar uji §167: kiriman dibuat dan BENAR-BENAR sudah diterima" "V == 1" \
+  "$(riwayat167 "per_page=100")"
+
+# (a) hari ini memuatnya. Inilah yang dulu gagal tiap kali penerimaannya
+#     terjadi antara 00:00–07:00 WIB.
+cek "tersaring di HARI INI (zona cabang), bukan hari lain" "V == 1" \
+  "$(riwayat167 "dari=$HARI167&sampai=$HARI167")"
+# (b) dan tidak bocor ke kemarin — dulu justru ke sinilah ia jatuh.
+cek "TIDAK muncul di kemarin" "V == 0" "$(riwayat167 "dari=$KMR167&sampai=$KMR167")"
+cek "TIDAK muncul di besok" "V == 0" "$(riwayat167 "dari=$BSK167&sampai=$BSK167")"
+
+# Batas bawah sendirian: jendela mulai di AWAL hari ini, bukan di tengahnya.
+cek "batas bawah saja (dari=hari ini) tetap memuatnya" "V == 1" "$(riwayat167 "dari=$HARI167")"
+cek "batas bawah besok → sudah lewat, kosong" "V == 0" "$(riwayat167 "dari=$BSK167")"
+
+# Batas atas sendirian: jendela berakhir di AKHIR hari ini. Kalau batas atasnya
+# keliru dipasang di AWAL hari ini, assertion berikut jadi 0.
+cek "batas atas saja (sampai=hari ini) memuat SELURUH hari ini" "V == 1" \
+  "$(riwayat167 "sampai=$HARI167")"
+cek "batas atas kemarin → hari ini di luar jendela, kosong" "V == 0" \
+  "$(riwayat167 "sampai=$KMR167")"
+
+cek "rentang kemarin..besok memuatnya tepat sekali" "V == 1" \
+  "$(riwayat167 "dari=$KMR167&sampai=$BSK167")"
+
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]

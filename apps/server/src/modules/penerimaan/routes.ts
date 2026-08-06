@@ -1,5 +1,5 @@
 import { zValidator } from "@hono/zod-validator";
-import { and, asc, desc, eq, gte, inArray, isNull, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Hono, type Context } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -8,6 +8,7 @@ import { qtyTeks, type JenisPengadaan } from "@kakarut/shared";
 import { db } from "../../db/client";
 import {
   branches,
+  companies,
   dokumenNomor,
   ingredients,
   productions,
@@ -15,6 +16,7 @@ import {
   suppliers,
   users,
 } from "../../db/schema";
+import { awalHariDi, tambahHari } from "../../lib/time";
 
 /** penerima kiriman — siapa yang menekan Terima/Tolak */
 const penerima = alias(users, "penerima_kiriman");
@@ -219,12 +221,21 @@ export const penerimaanRoutes = new Hono<AppEnv>()
     const branchId = semuaCabang ? null : await resolveBranchId(c);
     const perPage = Math.min(Math.max(Number(c.req.query("per_page")) || 20, 1), 100);
     const page = Math.max(Number(c.req.query("page")) || 1, 1);
-    // Disaring dulu: nilainya dipakai menyusun `new Date(`${dari}T00:00:00Z`)`,
-    // dan teks yang bukan tanggal menghasilkan Invalid Date yang diam-diam
-    // ikut ke pembanding — bukan penolakan yang bisa dibaca pemakainya.
+    // Disaring dulu: nilainya dipakai menyusun batas waktu, dan teks yang
+    // bukan tanggal menghasilkan Invalid Date yang diam-diam ikut ke
+    // pembanding — bukan penolakan yang bisa dibaca pemakainya.
     const tglValid = (v?: string) => (v && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : undefined);
     const dari = tglValid(c.req.query("dari"));
     const sampai = tglValid(c.req.query("sampai"));
+    // Tanggalnya dipilih orang di zona perusahaan, sedangkan `confirmed_at`
+    // adalah `timestamptz`. Membatasinya di tengah malam UTC menggeser
+    // jendelanya tujuh jam di WIB: kiriman yang diterima subuh — jam sibuk
+    // gudang, bukan jam sepi — tercatat pada hari SEBELUMNYA.
+    const [comp] = await db
+      .select({ timezone: companies.timezone })
+      .from(companies)
+      .where(eq(companies.id, auth.company_id!));
+    const tz = comp?.timezone ?? "Asia/Jakarta";
 
     const dasar = and(
       eq(productions.companyId, auth.company_id!),
@@ -236,8 +247,11 @@ export const penerimaanRoutes = new Hono<AppEnv>()
       // Disaring pada SAAT DIPUTUSKAN, bukan `waktu` (waktu barang masuk stok).
       // Orang mencari "penerimaan minggu lalu" berdasarkan kapan mereka
       // menerimanya, bukan kapan fakturnya dibuat.
-      ...(dari ? [gte(productions.confirmedAt, new Date(`${dari}T00:00:00Z`))] : []),
-      ...(sampai ? [lte(productions.confirmedAt, new Date(`${sampai}T23:59:59.999Z`))] : []),
+      ...(dari ? [gte(productions.confirmedAt, awalHariDi(tz, dari))] : []),
+      // Batas atasnya AWAL HARI BERIKUTNYA dengan `lt`, bukan 23:59:59.999
+      // dengan `lte`: penerimaan yang jatuh di milidetik terakhir hari itu
+      // tetap terhitung, tanpa perlu menebak seberapa halus jamnya.
+      ...(sampai ? [lt(productions.confirmedAt, awalHariDi(tz, tambahHari(sampai, 1)))] : []),
       // Baris tanpa jejak keputusan bukan hasil penerimaan — memasukkannya
       // membuat riwayat penuh hal yang tak pernah diterima siapa pun. (Barang
       // yang TIBA DI CK ikut tercatat di sini: auto-konfirmasinya tetap
