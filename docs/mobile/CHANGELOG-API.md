@@ -25,6 +25,39 @@ tanpa akses repo server.
 
 ---
 
+## Rilis: `GET /api/shift/:id` — medan baru `transaksi_terpotong`
+
+> Tidak ada migrasi. Medan BARU pada respons; medan lama tak berubah.
+
+🟡 **PERLU DICEK** — kalau aplikasi mobile menampilkan detail shift, tambahkan
+pengakuan saat daftarnya dipotong.
+
+**Kenapa.** `transaksi[]` dibatasi **300 baris terbaru**, sedangkan
+`jumlah_transaksi` adalah hitungan sebenarnya dari agregat tanpa batas. Pada
+shift ramai keduanya berbeda, dan selisih tanpa penjelasan di layar
+pertanggungjawaban kas terbaca sebagai transaksi yang **hilang**, bukan sebagai
+daftar yang dipotong.
+
+```jsonc
+{
+  "jumlah_transaksi": 420,        // hitungan SEBENARNYA — dipakai rekap kas
+  "transaksi": [ /* 300 baris */ ],
+  "transaksi_terpotong": true     // BARU: sisanya tidak dikirim
+}
+```
+
+**Rekap kas TIDAK terpengaruh.** `penjualan_tunai`, `penjualan_nontunai`, dan
+`jumlah_transaksi` datang dari agregat terpisah yang tak dibatasi, jadi
+pemotongan daftar tak pernah menggeser angka uang. Yang berubah hanya
+kejujuran tampilannya.
+
+**Saran tampilan** (yang dipakai web): judul daftar jadi
+`Transaksi (300 dari 420)` saat terpotong, plus satu baris kecil bahwa rekap
+kas tetap menghitung semuanya. Menyeragamkan kedua angka jadi sama **salah** —
+menurunkan `jumlah_transaksi` ke 300 membuat rekapnya berbohong.
+
+---
+
 ## Rilis: `GET /api/penerimaan/riwayat` — saringan tanggal kini per hari WIB
 
 > Tidak ada migrasi, tidak ada field baru, dan bentuk respons tidak berubah.

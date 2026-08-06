@@ -1846,7 +1846,22 @@ export interface ShiftTransaksiRow {
 
 /** Detail satu shift = ringkasan shift + daftar transaksi di jendela waktunya. */
 export interface ShiftDetail extends Shift {
+  /** maksimal 300 baris, TERBARU dulu — selebihnya `transaksi_terpotong` */
   transaksi: ShiftTransaksiRow[];
+  /**
+   * true bila daftar di atas DIPOTONG — masih ada transaksi lain yang tak ikut
+   * terkirim.
+   *
+   * Wajib ditampilkan: layar detail shift memuat `jumlah_transaksi` (hitungan
+   * sebenarnya, dari agregat tanpa batas) tepat di atas daftar ini. Pada shift
+   * ramai keduanya berbeda — "Transaksi 420x" lalu "Transaksi (300)"
+   * berdampingan — dan tanpa penanda, selisih itu terbaca sebagai transaksi
+   * yang HILANG, di layar tempat kasir sedang mempertanggungjawabkan uang.
+   *
+   * Rekap kasnya sendiri TIDAK terpengaruh: penjualan_tunai/nontunai dan
+   * jumlah_transaksi datang dari agregat terpisah yang tak dibatasi.
+   */
+  transaksi_terpotong: boolean;
 }
 
 /**
