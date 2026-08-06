@@ -35,7 +35,8 @@ tanpa akses repo server.
 
 🔴 **WAJIB** — layar struk & cetak ulang (`receipt_page.dart`)
 
-**Belum ada di mobile.** (Sisi web sudah diperbaiki; mobile belum.)
+**Sudah dikerjakan di mobile** — `mohteja/kakarut-mobile` PR #6, cabang
+`claude/mobile-pb1-tarif-struk` (masih draft, belum di-merge ke `main`).
 
 **Masalahnya.** Penjualan menyimpan **rupiah** PB1-nya, tidak tarifnya. Tidak
 seperti diskon — `diskon_persen` memang ikut tersimpan per penjualan — PB1
