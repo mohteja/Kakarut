@@ -3,7 +3,14 @@ import { useState } from "react";
 import type { BahanDto, BahanImportMode, BahanImportResult } from "@kakarut/shared";
 import { ErrorText, Modal, btnPrimary, btnSecondary } from "../../components/ui";
 import { api } from "../../lib/api";
-import { buatCsvBahan, keRowsImpor, parseCsv, type TerbacaCsv } from "../../lib/bahanCsv";
+import {
+  buatCsvBahan,
+  deteksiPemisah,
+  keRowsImpor,
+  namaPemisah,
+  parseCsv,
+  type TerbacaCsv,
+} from "../../lib/bahanCsv";
 import { unduhCsv } from "../../lib/unduh";
 
 /**
@@ -16,6 +23,8 @@ export function ImporBahanModal({ bahan, onClose }: { bahan: BahanDto[]; onClose
   const [terbaca, setTerbaca] = useState<TerbacaCsv | null>(null);
   const [namaFile, setNamaFile] = useState("");
   const [parseError, setParseError] = useState<string | null>(null);
+  /** pemisah yang BENAR-BENAR dipakai membaca berkas terakhir */
+  const [pemisah, setPemisah] = useState<string>(",");
   const [hasil, setHasil] = useState<BahanImportResult | null>(null);
 
   const impor = useMutation({
@@ -40,10 +49,22 @@ export function ImporBahanModal({ bahan, onClose }: { bahan: BahanDto[]; onClose
     const reader = new FileReader();
     reader.onload = () => {
       try {
-        const tabel = parseCsv(String(reader.result ?? ""));
+        const teks = String(reader.result ?? "");
+        // Ditebak SEKALI lalu dipakai untuk mem-parse DAN untuk diberitakan,
+        // supaya yang ditulis di layar mustahil beda dari yang dipakai membaca.
+        const sep = deteksiPemisah(teks.replace(/\r\n?/g, "\n"));
+        setPemisah(sep);
+        const tabel = parseCsv(teks, sep);
         const t = keRowsImpor(tabel);
         if (t.rows.length === 0) {
-          setParseError("Tidak ada baris bahan terbaca — pastikan ada kolom 'nama' berisi data.");
+          // Sebut pemisah yang terbaca. Pesan lama menyuruh memeriksa kolom
+          // 'nama' yang biasanya JELAS ADA di berkasnya — menyesatkan, dan
+          // pemakainya tak punya langkah berikutnya.
+          setParseError(
+            `Tidak ada baris bahan terbaca. Berkas dibaca dengan pemisah ${namaPemisah(sep)} ` +
+              `dan menghasilkan ${tabel[0]?.length ?? 0} kolom — pastikan baris pertama berisi ` +
+              `nama kolom (termasuk 'nama') yang dipisah tanda itu.`,
+          );
           setTerbaca(null);
         } else {
           setTerbaca(t);
@@ -143,6 +164,16 @@ export function ImporBahanModal({ bahan, onClose }: { bahan: BahanDto[]; onClose
                 {terbaca.dilewatiTanpaNama > 0 && (
                   <> · {terbaca.dilewatiTanpaNama} baris tanpa nama dilewati</>
                 )}
+                {/*
+                  Pemisah disebut HANYA bila bukan koma. Berkas berkoma adalah
+                  yang diharapkan (itu yang diekspor tombol Unduh), jadi
+                  menyebutnya tiap kali cuma jadi bising. Yang perlu terlihat
+                  adalah saat berkasnya TERNYATA lain — mis. hasil Simpan
+                  Sebagai CSV dari Excel berbahasa Indonesia — supaya kalau
+                  angkanya nanti terasa aneh, pemakainya tahu berkasnya dibaca
+                  dengan pemisah apa.
+                */}
+                {pemisah !== "," && <> · dibaca dengan pemisah {namaPemisah(pemisah)}</>}
                 .
               </div>
             )}
