@@ -467,6 +467,40 @@ export const shiftRoutes = new Hono<AppEnv>()
         ),
       )
       .groupBy(shifts.branchId);
+    /**
+     * KAS LACI MILIK SHIFT, BUKAN MILIK HARI INI.
+     *
+     * Angka di atas (`salesRows`) sengaja berjendela HARI INI — kartunya
+     * berjudul "Rekap hari ini" dan memang itu yang dijanjikan. Tapi kas laci
+     * bukan angka harian: `modal_awal` milik shift yang sedang terbuka, jadi
+     * menjumlahkannya dengan tunai SEHARIAN mencampur dua jendela berbeda.
+     *
+     * Yang terjadi pada cabang bershift dua — pagi lalu sore, alur biasa dan
+     * memang diizinkan (`shifts_open_per_branch_uq` hanya melarang dua shift
+     * TERBUKA sekaligus): begitu kasir sore membuka laci, "Kas seharusnya" di
+     * layar owner ikut memuat seluruh tunai shift pagi — uang yang sudah
+     * dihitung, dicocokkan, dan diangkat dari laci saat tutup kasir. Owner
+     * membaca kekurangan sebesar omzet tunai satu shift penuh, pada layar yang
+     * justru dipakai memantau kejujuran kas.
+     *
+     * Dua selisih lain dari sumbu yang sama: refund atas penjualan HARI
+     * SEBELUMNYA mengambil uang dari laci hari ini tanpa terlihat di jendela
+     * `sale_date = hari ini`, dan shift yang melewati tengah malam kehilangan
+     * seluruh penjualan sebelum pukul 00:00.
+     *
+     * Maka kas dihitung lewat `rekapWindow` — fungsi yang sama dengan
+     * `/shift/aktif`, detail shift, `/shift/selisih`, dan yang dibandingkan
+     * `POST /shift/tutup`. Empat layar yang menyebut "Kas seharusnya" kini tak
+     * bisa lagi berselisih.
+     */
+    const tunaiShiftByBranch = new Map(
+      await Promise.all(
+        openRows.map(async (r) => {
+          const rk = await rekapWindow(r.companyId, r.branchId, r.id, r.openedAt, r.closedAt);
+          return [r.branchId, rk.penjualan_tunai] as const;
+        }),
+      ),
+    );
 
     const salesByBranch = new Map<string, { tunai: number; nontunai: number; jumlah: number }>();
     for (const r of salesRows) {
@@ -484,6 +518,10 @@ export const shiftRoutes = new Hono<AppEnv>()
       const s = salesByBranch.get(b.id) ?? { tunai: 0, nontunai: 0, jumlah: 0 };
       const open = openByBranch.get(b.id) ?? null;
       const bukaHariIni = openedToday.has(b.id);
+      // `null` saat kasir tutup, BUKAN 0: tak ada shift berarti tak ada kas
+      // laci untuk dilaporkan, sedangkan nol adalah angka yang sah ("shift ini
+      // belum menerima tunai") yang klien tak punya cara membedakannya.
+      const tunaiShift = open ? (tunaiShiftByBranch.get(b.id) ?? 0) : null;
       return {
         branch_id: b.id,
         branch_nama: b.nama,
@@ -496,7 +534,8 @@ export const shiftRoutes = new Hono<AppEnv>()
         penjualan_tunai: s.tunai,
         penjualan_nontunai: s.nontunai,
         jumlah_transaksi: s.jumlah,
-        kas_sistem: open ? open.modalAwal + s.tunai : 0,
+        penjualan_tunai_shift: tunaiShift,
+        kas_sistem: open ? open.modalAwal + tunaiShift! : 0,
         buka_hari_ini: bukaHariIni,
         telat_buka: Boolean(b.jamBuka) && !open && !bukaHariIni && now > b.jamBuka!,
         lupa_tutup: Boolean(open) && Boolean(b.jamTutup) && now > b.jamTutup!,
