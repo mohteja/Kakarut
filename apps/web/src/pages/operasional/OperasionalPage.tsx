@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import type { SelisihKasRow, Shift, ShiftPantauRow } from "@kakarut/shared";
 import {
   Card,
@@ -103,11 +103,23 @@ function PerluAccPanel({ onDetail }: { onDetail: (id: string) => void }) {
   );
 }
 
-function Stat({ label, value, warna = "text-stone-800" }: { label: string; value: string; warna?: string }) {
+function Stat({
+  label,
+  value,
+  warna = "text-stone-800",
+  catatan,
+}: {
+  label: string;
+  value: string;
+  warna?: string;
+  /** keterangan kecil di bawah angka — dipakai saat angkanya perlu dijelaskan */
+  catatan?: ReactNode;
+}) {
   return (
     <div className="rounded-lg bg-stone-50 p-2.5">
       <div className="text-xs text-stone-500">{label}</div>
       <div className={`mt-0.5 text-sm font-bold ${warna}`}>{value}</div>
+      {catatan && <div className="mt-0.5 text-[11px] leading-tight text-stone-500">{catatan}</div>}
     </div>
   );
 }
@@ -201,10 +213,28 @@ function KartuCabang({
         <Stat label="Transaksi hari ini" value={`${row.jumlah_transaksi}×`} />
         <Stat label="Penjualan tunai" value={formatRupiah(row.penjualan_tunai)} />
         <Stat label="Non-tunai" value={formatRupiah(row.penjualan_nontunai)} />
+        {/*
+          DUA JENDELA DI SATU KARTU. Tiga angka di kiri berjendela HARI INI;
+          kas laci hanya milik shift yang sedang berjalan. Pada cabang bershift
+          dua keduanya memang berbeda — uang shift pagi sudah dihitung dan
+          diangkat saat tutup kasir — dan tanpa keterangan ini selisihnya
+          terbaca sebagai salah hitung, di layar yang justru dipakai memantau
+          kejujuran kas.
+        */}
         <Stat
           label="Kas seharusnya"
           value={buka ? formatRupiah(row.kas_sistem) : "—"}
           warna="text-orange-600"
+          catatan={
+            buka &&
+            row.penjualan_tunai_shift != null &&
+            row.penjualan_tunai_shift !== row.penjualan_tunai ? (
+              <>
+                shift ini {formatRupiah(row.penjualan_tunai_shift)} tunai — sisanya dari shift
+                yang sudah ditutup
+              </>
+            ) : undefined
+          }
         />
       </div>
 

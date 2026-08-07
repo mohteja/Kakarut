@@ -1872,8 +1872,13 @@ export interface ShiftDetail extends Shift {
 
 /**
  * Status operasional satu cabang store untuk pantauan owner/admin
- * (GET /shift/pantau). Penjualan_* = total HARI INI (zona waktu perusahaan);
- * meta shift (dibuka_*) hanya terisi bila ada shift kasir yang sedang terbuka.
+ * (GET /shift/pantau). `penjualan_*` & `jumlah_transaksi` = total HARI INI
+ * (zona waktu perusahaan); meta shift (`dibuka_*`, `modal_awal`,
+ * `penjualan_tunai_shift`, `kas_sistem`) hanya terisi bila ada shift kasir yang
+ * sedang terbuka.
+ *
+ * DUA JENDELA, jangan dicampur: yang berjudul "hari ini" boleh memuat beberapa
+ * shift sekaligus, sedangkan kas laci hanya milik shift yang sedang berjalan.
  */
 export interface ShiftPantauRow {
   branch_id: string;
@@ -1889,7 +1894,21 @@ export interface ShiftPantauRow {
   penjualan_tunai: number;
   penjualan_nontunai: number;
   jumlah_transaksi: number;
-  /** kas seharusnya = modal_awal + penjualan tunai hari ini (0 bila tutup) */
+  /**
+   * Penjualan tunai SHIFT yang sedang terbuka saja (null bila kasir tutup) —
+   * refund yang uangnya keluar pada shift ini sudah dikurangkan.
+   *
+   * Berbeda dari `penjualan_tunai` di atas, yang berjendela SEHARIAN dan bisa
+   * memuat shift-shift yang sudah ditutup. Pada cabang bershift dua angka ini
+   * lebih kecil — dan angka inilah yang benar-benar ada di laci.
+   */
+  penjualan_tunai_shift: number | null;
+  /**
+   * Kas seharusnya di laci = `modal_awal + penjualan_tunai_shift` (0 bila kasir
+   * tutup). SENGAJA bukan tunai harian: uang shift yang sudah ditutup sudah
+   * dihitung dan diangkat. Angka yang sama dengan `/shift/aktif` dan dengan
+   * yang dibandingkan `POST /shift/tutup`.
+   */
   kas_sistem: number;
   /** sudah ada shift dibuka hari ini? */
   buka_hari_ini: boolean;

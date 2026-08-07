@@ -1108,7 +1108,7 @@ lahir sebagai pekerjaan baru yang belum tersentuh.
 ## `/api/shift` — Shift kasir (`modules/shift/routes.ts`) — group guard **[owner/admin/cashier]** (buka/tutup **cashier only**)
 
 - `GET /api/shift/aktif` — [owner/admin/cashier] — query: `branch_id?` — res: `Shift | null` (shift terbuka + rekap live). **HITUNG BUTA:** untuk peran terkunci cabang (kasir/tim) selagi shift masih TERBUKA **dan hitungan belum dikunci**, `hitung_buta: true` dan angka tunai disembunyikan — `kas_sistem`, `penjualan_tunai`, dan `selisih` semuanya `null` (**bukan 0** — nol adalah angka yang sah). `jumlah_transaksi`, non-tunai, dan `modal_awal` tetap tampil. Owner/admin tak pernah dibutakan.
-- `GET /api/shift/pantau` — **[owner/admin]** — res: `ShiftPantauRow[]` — pantau operasional SEMUA cabang store: status kasir + rekap **hari ini** (zona waktu perusahaan) + jam operasional + tanda telat buka/lupa tutup
+- `GET /api/shift/pantau` — **[owner/admin]** — res: `ShiftPantauRow[]` — pantau operasional SEMUA cabang store: status kasir + rekap **hari ini** (zona waktu perusahaan) + jam operasional + tanda telat buka/lupa tutup. **DUA JENDELA, jangan dicampur:** `penjualan_tunai`/`penjualan_nontunai`/`jumlah_transaksi` berjendela **hari ini** (boleh memuat beberapa shift), sedangkan `penjualan_tunai_shift` & `kas_sistem` hanya milik **shift yang sedang terbuka** — `kas_sistem = modal_awal + penjualan_tunai_shift`, angka yang sama dengan `/shift/aktif` dan dengan yang dibandingkan `POST /shift/tutup`. Pada cabang bershift dua, uang shift yang sudah ditutup sudah dihitung dan diangkat dari laci, jadi ia TIDAK boleh ikut di `kas_sistem`.
 - `GET /api/shift` — [owner/admin/cashier] — query: `branch_id?` — res: `Shift[]` (shift tertutup, maks 50)
 - `GET /api/shift/:id` — [owner/admin/cashier; cashier terkunci cabangnya] — res: `ShiftDetail` (= `Shift` + `transaksi: ShiftTransaksiRow[]`, maks 300, urut waktu desc, + `transaksi_terpotong: boolean` — true bila masih ada transaksi lain di luar 300 itu; `jumlah_transaksi` tetap hitungan SEBENARNYA dari agregat tanpa batas, jadi rekap kas tak terpengaruh pemotongan) — error: **403** shift bukan cabang kasir, **404**
 - `POST /api/shift/buka` — **[cashier]** — req: `{ modal_awal: number(≥0)=0 }` — res: **201** `Shift` — error: **400** shift sudah terbuka **atau kasir belum absen masuk hari ini** (pesan: "Absen masuk dulu sebelum buka kasir"), **403** luar cabang
@@ -3282,8 +3282,13 @@ export interface ShiftDetail extends Shift {
 
 /**
  * Status operasional satu cabang store untuk pantauan owner/admin
- * (GET /shift/pantau). Penjualan_* = total HARI INI (zona waktu perusahaan);
- * meta shift (dibuka_*) hanya terisi bila ada shift kasir yang sedang terbuka.
+ * (GET /shift/pantau). `penjualan_*` & `jumlah_transaksi` = total HARI INI
+ * (zona waktu perusahaan); meta shift (`dibuka_*`, `modal_awal`,
+ * `penjualan_tunai_shift`, `kas_sistem`) hanya terisi bila ada shift kasir yang
+ * sedang terbuka.
+ *
+ * DUA JENDELA, jangan dicampur: yang berjudul "hari ini" boleh memuat beberapa
+ * shift sekaligus, sedangkan kas laci hanya milik shift yang sedang berjalan.
  */
 export interface ShiftPantauRow {
   branch_id: string;
@@ -3299,7 +3304,21 @@ export interface ShiftPantauRow {
   penjualan_tunai: number;
   penjualan_nontunai: number;
   jumlah_transaksi: number;
-  /** kas seharusnya = modal_awal + penjualan tunai hari ini (0 bila tutup) */
+  /**
+   * Penjualan tunai SHIFT yang sedang terbuka saja (null bila kasir tutup) —
+   * refund yang uangnya keluar pada shift ini sudah dikurangkan.
+   *
+   * Berbeda dari `penjualan_tunai` di atas, yang berjendela SEHARIAN dan bisa
+   * memuat shift-shift yang sudah ditutup. Pada cabang bershift dua angka ini
+   * lebih kecil — dan angka inilah yang benar-benar ada di laci.
+   */
+  penjualan_tunai_shift: number | null;
+  /**
+   * Kas seharusnya di laci = `modal_awal + penjualan_tunai_shift` (0 bila kasir
+   * tutup). SENGAJA bukan tunai harian: uang shift yang sudah ditutup sudah
+   * dihitung dan diangkat. Angka yang sama dengan `/shift/aktif` dan dengan
+   * yang dibandingkan `POST /shift/tutup`.
+   */
   kas_sistem: number;
   /** sudah ada shift dibuka hari ini? */
   buka_hari_ini: boolean;

@@ -25,6 +25,56 @@ tanpa akses repo server.
 
 ---
 
+## Rilis: "Kas seharusnya" di `/shift/pantau` kini milik SHIFT, bukan milik hari ini
+
+🔴 **WAJIB** — layar Operasional Cabang (`operasional_cabang_page.dart`) dan
+kartu ringkas di beranda (`dashboard_page.dart`), keduanya membaca `kas_sistem`
+dari `GET /api/shift/pantau`.
+
+**Nilai `kas_sistem` BERUBAH** untuk cabang yang menjalankan lebih dari satu
+shift dalam sehari. Tidak ada perubahan bentuk yang merusak — yang ada hanya
+satu medan tambahan — tetapi ANGKANYA berbeda, jadi layar yang menampilkannya
+perlu ditinjau.
+
+**Apa yang salah sebelumnya.** `/shift/pantau` menghitung
+`kas_sistem = modal_awal + penjualan tunai SEHARIAN`. `modal_awal` milik shift
+yang sedang terbuka, sedangkan tunai harian bisa memuat shift-shift yang sudah
+ditutup — dua jendela berbeda dijumlahkan jadi satu angka.
+
+Akibatnya di cabang bershift dua (pagi lalu sore, alur biasa): begitu kasir sore
+membuka laci, "Kas seharusnya" ikut memuat seluruh tunai shift pagi — uang yang
+sudah dihitung, dicocokkan, dan **diangkat dari laci** saat tutup kasir. Owner
+membaca kekurangan sebesar omzet tunai satu shift penuh, di layar yang justru
+dipakai memantau kejujuran kas. Dua selisih lain dari sumbu yang sama: refund
+atas penjualan HARI SEBELUMNYA mengambil uang dari laci hari ini tanpa terlihat,
+dan shift yang melewati tengah malam kehilangan penjualan sebelum pukul 00:00.
+
+**Sesudahnya.** `kas_sistem = modal_awal + penjualan_tunai_shift`, dihitung
+lewat jendela shift yang sama dengan `GET /shift/aktif`, detail shift,
+`GET /shift/selisih`, dan `POST /shift/tutup`. Empat layar yang menyebut "kas
+seharusnya" kini tak bisa lagi berselisih.
+
+**Medan baru di `ShiftPantauRow`:**
+
+```jsonc
+{
+  // penjualan tunai SHIFT yang sedang terbuka saja; null bila kasir tutup.
+  // Refund yang uangnya keluar pada shift ini sudah dikurangkan.
+  "penjualan_tunai_shift": 21000
+}
+```
+
+Dart: `penjualanTunaiShift: j['penjualan_tunai_shift'] as num?` — nullable, dan
+`null` berarti "tidak ada shift terbuka", **bukan** nol.
+
+**Yang TIDAK berubah:** `penjualan_tunai`, `penjualan_nontunai`, dan
+`jumlah_transaksi` tetap berjendela **hari ini** — judul "Rekap hari ini" tetap
+benar. Yang perlu dikerjakan mobile adalah **menerangkan selisihnya**: bila
+`penjualan_tunai_shift != penjualan_tunai`, tampilkan keterangan kecil di bawah
+"Kas seharusnya" (web memakai: "shift ini Rp X tunai — sisanya dari shift yang
+sudah ditutup"). Tanpa itu, kartunya memuat dua angka yang tidak menjumlah dan
+pemakainya akan mengira ada salah hitung.
+
 ## Rilis: persen PB1 di struk cetak diturunkan dari nota, bukan dari setelan hari ini
 
 > Tidak ada perubahan API sama sekali — tidak ada medan baru, tidak ada nilai

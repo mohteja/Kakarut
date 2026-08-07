@@ -8087,5 +8087,123 @@ cek "kebutuhan null => saran_beli null, tak dipaksa jadi 0" "V == 0" \
 cek "baris ber-faktur: estimasi biaya ikut terisi (sorotannya berisi)" "V == 0" \
   "$(echo "$REK169" | jq '[.bahan[] | select(.jumlah_faktur != null and .estimasi_biaya == null)] | length')"
 
+echo "── §170 Kas laci milik SHIFT, bukan milik HARI INI ──"
+# "Kas seharusnya" adalah janji yang sangat spesifik: uang yang HARUS ADA di
+# laci sekarang. Ia dibaca kasir (`/shift/aktif`), owner (kartu Operasional
+# Cabang, `GET /shift/pantau`), dan angka yang sama itu dibandingkan `POST
+# /shift/tutup` untuk melahirkan selisih kas yang harus di-ACC.
+#
+# `/pantau` dulu menyusunnya dari `modal_awal` (milik SHIFT yang sedang
+# terbuka) ditambah tunai SEHARIAN — dua jendela berbeda, dijumlah jadi satu
+# angka. Di cabang bershift dua (pagi lalu sore; alur biasa, dan indeks
+# `shifts_open_per_branch_uq` hanya melarang dua shift TERBUKA sekaligus),
+# begitu kasir sore membuka laci angka itu ikut memuat seluruh tunai shift
+# pagi — uang yang sudah dihitung, dicocokkan, dan diangkat saat tutup kasir.
+# Owner membaca kekurangan sebesar omzet tunai satu shift penuh, di layar yang
+# justru dipakai memantau kejujuran kas.
+#
+# Yang dibuktikan di sini adalah HARI DENGAN DUA SHIFT, ujung ke ujung — dan
+# sekaligus arah baliknya: rekap "hari ini" TIDAK ikut menyempit ke shift.
+CB170=$(api "$REISS105" GET /auth/me | jq -r '.user.branch_id')
+KAT170=$(api "$OWNER" GET /kategori | jq -r '.[0].id')
+# Menu TANPA resep: seksi ini soal uang di laci, bukan stok — menu tanpa bahan
+# tak pernah tertahan pagar ketersediaan, jadi angkanya tak bergantung sisa
+# stok seksi lain (pola `M154B`, yang sudah terbukti laku di cabang ini).
+M170=$(api "$OWNER" POST /menu \
+  "$(jq -nc --arg k "$KAT170" '{nama:"Kas Uji170", category_id:$k, tipe:"regular", mult:2, harga_jual:21000, komponen:[]}')" \
+  | jq -r '.id // ""')
+
+pantau170() { api "$OWNER" GET /shift/pantau | jq --arg id "$CB170" '[.[]|select(.branch_id==$id)][0]'; }
+jual170()   { api "$REISS105" POST /penjualan \
+  "$(jq -nc --arg m "$M170" '{metode_bayar:"tunai", is_dine_in:false, items:[{menu_id:$m, qty:1}]}')"; }
+tutup170() { # tutup shift berjalan TEPAT sebesar kas sistemnya (selalu "pas")
+  local sid det fisik
+  sid=$(api "$REISS105" GET /shift/aktif | jq -r '.id // ""')
+  [ -z "$sid" ] && return 0
+  # Kasir DIBUTAKAN selagi hitungan belum dikunci (§152), jadi angkanya diambil
+  # dari owner. Bila hitungannya SUDAH dikunci, nominal yang berbeda ditolak 409
+  # — tutup tanpa `uang_fisik` supaya yang terkunci itu yang dipakai.
+  det=$(api "$OWNER" GET "/shift/$sid")
+  fisik=$(echo "$det" | jq -r '.uang_fisik // empty')
+  if [ -n "$fisik" ]; then
+    api "$REISS105" POST /shift/tutup '{"catatan":"tutup awal §170"}' > /dev/null
+  else
+    api "$REISS105" POST /shift/tutup "{\"uang_fisik\":$(echo "$det" | jq -r '.kas_sistem')}" > /dev/null
+  fi
+}
+buka170() { # buka170 <modal> → echo id shift ("" bila gagal)
+  local modal="$1" r
+  r=$(api "$REISS105" POST /shift/buka "{\"modal_awal\":$modal}")
+  if [ -z "$(echo "$r" | jq -r '.id // empty')" ]; then
+    # Absen masuk dulu. §167 bisa menunggu melewati tengah malam, dan absen
+    # KEMARIN tak berlaku untuk tanggal bisnis hari ini (`sedangHadir`).
+    # Dipanggil HANYA saat buka gagal: /absensi/saya berselang-seling
+    # masuk/pulang, jadi memanggilnya saat sudah hadir justru meng-absen-pulang.
+    api "$REISS105" POST /absensi/saya '{"foto_url":"https://example.com/absen.jpg"}' > /dev/null
+    r=$(api "$REISS105" POST /shift/buka "{\"modal_awal\":$modal}")
+  fi
+  echo "$r" | jq -r '.id // ""'
+}
+
+tutup170  # titik awal yang pasti: tak ada shift warisan seksi sebelumnya
+SH170A=$(buka170 100000)
+cek "dasar uji §170: menu tanpa resep siap & shift PAGI terbuka (modal 100.000)" "V == 1" \
+  "$([ ${#M170} -eq 36 ] && [ ${#SH170A} -eq 36 ] && echo 1 || echo 0)"
+cek "dasar uji §170: cabang kasir terbaca di /shift/pantau" "V == 1" \
+  "$(pantau170 | jq '(.branch_id != null) | if . then 1 else 0 end')"
+# Jendela HARIAN cabang ini sudah berisi penjualan seksi-seksi sebelumnya, jadi
+# seluruh angka di bawah diperiksa sebagai SELISIH dari garis dasar ini.
+HARI170=$(pantau170 | jq -r '.penjualan_tunai')
+cek "dasar uji §170: penjualan tunai PAGI 21.000 benar-benar tercatat" "V == 1" \
+  "$([ "$(jual170 | jq -r '.id // "" | length')" = "36" ] && echo 1 || echo 0)"
+
+P170A=$(pantau170)
+cek "PAGI: kas laci = modal 100.000 + tunai shift 21.000" "abs(V - 121000) < 0.01" \
+  "$(echo "$P170A" | jq -r '.kas_sistem')"
+cek "PAGI: penjualan_tunai_shift = 21.000" "abs(V - 21000) < 0.01" \
+  "$(echo "$P170A" | jq -r '.penjualan_tunai_shift')"
+cek "PAGI: rekap HARIAN bertambah 21.000 juga (dua jendela masih sepakat)" "abs(V - ($HARI170 + 21000)) < 0.01" \
+  "$(echo "$P170A" | jq -r '.penjualan_tunai')"
+# Dua LAYAR, satu angka. `?branch_id=` dipakai karena owner terkunci di Kantor
+# (§135) — tanpanya `/shift/aktif` menjawab shift cabang lain.
+cek "PAGI: /shift/aktif & /shift/pantau menyebut kas yang SAMA" "abs(V) < 0.01" \
+  "$(python3 -c "print($(api "$OWNER" GET "/shift/aktif?branch_id=$CB170" | jq -r '.kas_sistem') - $(echo "$P170A" | jq -r '.kas_sistem'))")"
+
+# ── Pergantian shift: uang PAGI dihitung, dicocokkan, lalu diangkat dari laci.
+tutup170
+SH170B=$(buka170 50000)
+cek "dasar uji §170: shift SORE terbuka (modal 50.000), beda shift" "V == 1" \
+  "$([ ${#SH170B} -eq 36 ] && [ "$SH170B" != "$SH170A" ] && echo 1 || echo 0)"
+
+P170B=$(pantau170)
+# INTI SEKSI INI. Sebelum perbaikan angkanya 50.000 + seluruh tunai HARIAN
+# cabang — termasuk 21.000 shift pagi yang sudah keluar dari laci.
+cek "SORE: kas laci = modal 50.000 SAJA — bukan ikut memuat tunai shift pagi" "abs(V - 50000) < 0.01" \
+  "$(echo "$P170B" | jq -r '.kas_sistem')"
+cek "SORE: penjualan_tunai_shift = 0 (shift baru, laci belum menerima apa pun)" "abs(V) < 0.01" \
+  "$(echo "$P170B" | jq -r '.penjualan_tunai_shift')"
+cek "SORE: rekap HARIAN TIDAK menyusut — shift pagi tetap terhitung hari ini" "abs(V - ($HARI170 + 21000)) < 0.01" \
+  "$(echo "$P170B" | jq -r '.penjualan_tunai')"
+
+cek "dasar uji §170: penjualan tunai SORE 21.000 tercatat" "V == 1" \
+  "$([ "$(jual170 | jq -r '.id // "" | length')" = "36" ] && echo 1 || echo 0)"
+P170C=$(pantau170)
+cek "SORE: kas laci = 50.000 + 21.000 (hanya tunai shift ini)" "abs(V - 71000) < 0.01" \
+  "$(echo "$P170C" | jq -r '.kas_sistem')"
+cek "SORE: rekap HARIAN memuat KEDUA shift (21.000 + 21.000)" "abs(V - ($HARI170 + 42000)) < 0.01" \
+  "$(echo "$P170C" | jq -r '.penjualan_tunai')"
+cek "SORE: /shift/aktif & /shift/pantau tetap sepakat" "abs(V) < 0.01" \
+  "$(python3 -c "print($(api "$OWNER" GET "/shift/aktif?branch_id=$CB170" | jq -r '.kas_sistem') - $(echo "$P170C" | jq -r '.kas_sistem'))")"
+
+# ── Kasir tutup: tak ada laci untuk dilaporkan, tapi harinya tetap terhitung.
+tutup170
+P170D=$(pantau170)
+cek "kasir TUTUP: kas laci 0 (tak ada laci untuk dilaporkan)" "abs(V) < 0.01" \
+  "$(echo "$P170D" | jq -r '.kas_sistem')"
+cek "kasir TUTUP: penjualan_tunai_shift null — BUKAN 0 (0 itu angka yang sah)" "V == 1" \
+  "$(echo "$P170D" | jq '(.penjualan_tunai_shift == null) | if . then 1 else 0 end')"
+cek "kasir TUTUP: rekap HARIAN tetap utuh, tak ikut dinolkan" "abs(V - ($HARI170 + 42000)) < 0.01" \
+  "$(echo "$P170D" | jq -r '.penjualan_tunai')"
+
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]
