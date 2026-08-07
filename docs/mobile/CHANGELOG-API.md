@@ -25,6 +25,59 @@ tanpa akses repo server.
 
 ---
 
+## Rilis: `POST /sync` mengklaim perintah sebelum mengeksekusinya
+
+🟡 **PERLU DICEK** — antrean sinkron offline (`core/sync_queue.dart`).
+
+**Tidak ada perubahan bentuk permintaan maupun respons.** Yang bertambah hanya
+SATU kemungkinan balasan baru per item, dan mobile sudah menanganinya dengan
+benar tanpa perubahan kode — dijelaskan di bawah supaya tidak dikira galat.
+
+**Apa yang salah sebelumnya.** `/sync` memakai pola SELECT → eksekusi → INSERT
+`onConflictDoNothing`. Yang dijaga hanya BARIS LEDGER-nya, bukan efek sampingnya:
+dua permintaan ber-`client_ref` sama yang datang bersamaan sama-sama melihat
+ledger kosong, sama-sama menjalankan perintahnya, lalu yang kedua kalah di unique
+index dan hasilnya dibuang diam-diam. Ledger tampak rapi satu baris;
+penjualannya dua.
+
+Jendelanya selebar seluruh eksekusi, dan justru paling lebar pada kasus
+pemakaian utamanya: `/sync` menggilas batch secara **berurutan**, aplikasi
+mengirim sampai 100 perintah sekali jalan, dan `receiveTimeout`-nya 30 detik.
+Antrean panjang sesudah lama offline adalah kasus paling lambat sekaligus paling
+sering — klien menyerah, mundur sebentar, lalu mengirim ulang batch yang sama
+selagi server masih menggilas yang pertama.
+
+**Sesudahnya.** Barisnya dipesan lebih dulu dalam satu pernyataan atomik. Yang
+menang mengeksekusi; yang kalah tak pernah menyentuh eksekutornya.
+
+**Balasan baru yang mungkin muncul per item:**
+
+```jsonc
+{
+  "client_ref": "…",
+  "status": "gagal",
+  "kode": 409,
+  "error": "Perintah ini sedang diproses — coba lagi sebentar lagi",
+  "sebab": "sedang_diproses"
+}
+```
+
+**Mobile tidak perlu diubah**: `perintahDianggapSelesai` memperlakukan kode ≥ 400
+sebagai BELUM selesai, jadi item ini tetap di antrean dan terkirim lagi pada tick
+berikutnya — tepat yang diinginkan. Balasan ini juga **sengaja tidak disimpan**
+ke ledger, sehingga percobaan berikutnya tidak membaca "gagal" yang membeku.
+
+Yang perlu ditinjau hanya **teks yang ditampilkan ke pemakai**: jangan tampilkan
+`sebab: "sedang_diproses"` sebagai kegagalan yang menakutkan (mis. ikut dihitung
+sebagai `kMaksItemGagal`) — ia keadaan sementara yang beres sendiri.
+
+> **Batas yang jujur:** yang ditutup adalah jalur `/sync`. Jalur ONLINE
+> (`POST /penjualan` dkk dengan `client_ref`) masih memakai pola cek-lalu-tulis
+> yang sama, dengan jendela yang jauh lebih sempit karena satu permintaan
+> tunggal selesai dalam hitungan milidetik, bukan menggilas 100 perintah.
+
+---
+
 ## Rilis: BEP kini menghitung margin SESUDAH diskon
 
 🟡 **PERLU DICEK** — tab **BEP** di layar Laporan (`laporan_page.dart`, `_TabBep`).

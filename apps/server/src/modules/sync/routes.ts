@@ -1,5 +1,5 @@
 import { zValidator } from "@hono/zod-validator";
-import { and, desc, eq, isNotNull, isNull, lte, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull, isNull, lt, lte, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
@@ -89,6 +89,20 @@ type SyncAuth = {
 };
 type ExecCtx = { auth: SyncAuth; authHeader: string };
 type Eksekutor = (ctx: ExecCtx, payload: unknown, waktu: Date) => Promise<{ kode: number; data: unknown }>;
+
+/**
+ * Status ledger untuk perintah yang SEDANG dieksekusi — baris dipesan sebelum
+ * eksekusi dimulai, lalu ditutup jadi 'ok'/'gagal' setelahnya.
+ */
+const BERJALAN = "berjalan";
+
+/**
+ * Klaim yang lebih tua dari ini dianggap ditinggalkan (proses mati / di-deploy
+ * ulang di tengah jalan) dan boleh diambil alih. Harus JAUH lebih lama daripada
+ * satu batch `/sync` terpanjang — kalau terlalu pendek, retry sah bisa merebut
+ * klaim yang sebenarnya masih berjalan dan justru menggandakan yang dijaga.
+ */
+const KLAIM_BASI_MENIT = 15;
 
 const SyncBody = z.object({
   device_id: z.string().nullish(),
@@ -550,11 +564,13 @@ export const syncRoutes = new Hono<AppEnv>().post("/", batasSync, zValidator("js
 
   for (const cmd of commands) {
     // 1) Idempotency: perintah yang sudah tercatat → balas hasil tersimpan.
+    //    Ini JALUR CEPAT saja; yang benar-benar menjaga dari eksekusi ganda
+    //    adalah klaim atomik di bawah (lihat `KLAIM_BASI_MENIT`).
     const [ada] = await db
       .select({ kode: syncCommands.kode, status: syncCommands.status, hasilJson: syncCommands.hasilJson })
       .from(syncCommands)
       .where(and(eq(syncCommands.companyId, auth.company_id!), eq(syncCommands.clientRef, cmd.client_ref)));
-    if (ada) {
+    if (ada && ada.status !== BERJALAN) {
       if (ada.status === "gagal") {
         // Penolakan tersimpan dibalas UTUH (termasuk sebab & data lanjutan),
         // supaya retry tidak kehilangan konteks yang dipakai mobile menawarkan
@@ -577,6 +593,84 @@ export const syncRoutes = new Hono<AppEnv>().post("/", batasSync, zValidator("js
         });
       }
       continue;
+    }
+
+    /*
+     * 1b) KLAIM ATOMIK — inilah yang menjaga "exactly-once", bukan SELECT di atas.
+     *
+     * SELECT-lalu-eksekusi-lalu-INSERT menyisakan jendela selebar SELURUH
+     * eksekusi: dua permintaan ber-`client_ref` sama yang datang bersamaan
+     * sama-sama melihat ledger kosong, sama-sama menjalankan perintahnya, lalu
+     * yang kedua kalah di unique index dan hasilnya DIBUANG diam-diam oleh
+     * `onConflictDoNothing`. Ledger terlihat rapi satu baris; penjualannya dua.
+     *
+     * Jendela itu bukan teori. `/sync` mengeksekusi batch secara BERURUTAN,
+     * mobile mengirim sampai 100 perintah sekali jalan, dan `receiveTimeout`-nya
+     * 30 detik — antrean panjang sesudah lama offline adalah kasus paling lambat
+     * SEKALIGUS kasus pemakaian utamanya. Klien menyerah, mundur sebentar, lalu
+     * mengirim ulang batch yang sama selagi server masih menggilas batch pertama.
+     *
+     * Maka barisnya DIPESAN LEBIH DULU dalam satu pernyataan atomik. Yang menang
+     * mengeksekusi; yang kalah tak pernah menyentuh `createSale`.
+     */
+    const [klaim] = await db
+      .insert(syncCommands)
+      .values({
+        companyId: auth.company_id!,
+        clientRef: cmd.client_ref,
+        deviceId: device_id ?? null,
+        userId: auth.sub,
+        tipe: cmd.tipe,
+        waktu: new Date(cmd.waktu),
+        status: BERJALAN,
+        kode: 0,
+      })
+      .onConflictDoNothing()
+      .returning({ id: syncCommands.id });
+
+    if (!klaim) {
+      /*
+       * Kalah klaim. Dua kemungkinan, dan keduanya TIDAK boleh dieksekusi:
+       *   - masih dikerjakan permintaan lain → suruh klien coba lagi nanti;
+       *   - proses pengeklaimnya mati sebelum sempat menutup barisnya → setelah
+       *     `KLAIM_BASI_MENIT` boleh diambil alih, lewat UPDATE bersyarat supaya
+       *     dua pengambil-alih pun tetap hanya satu yang lolos.
+       *
+       * Ambil-alih TIDAK memperbesar risiko ganda dibanding sebelumnya: baik
+       * dulu maupun sekarang, proses yang mati SESUDAH commit tapi SEBELUM
+       * menutup ledger akan dieksekusi ulang. Yang hilang cuma jendela
+       * balapannya, bukan jaminan barunya.
+       */
+      const [rebut] = await db
+        .update(syncCommands)
+        .set({ createdAt: new Date() })
+        .where(
+          and(
+            eq(syncCommands.companyId, auth.company_id!),
+            eq(syncCommands.clientRef, cmd.client_ref),
+            eq(syncCommands.status, BERJALAN),
+            lt(syncCommands.createdAt, new Date(sekarang - KLAIM_BASI_MENIT * 60_000)),
+          ),
+        )
+        .returning({ id: syncCommands.id });
+      if (!rebut) {
+        /*
+         * SENGAJA tidak disimpan ke ledger: ini bukan penolakan perintahnya,
+         * cuma "sedang dikerjakan". Menyimpannya sebagai `gagal` akan membekukan
+         * perintah yang sebenarnya sedang sukses. Mobile memperlakukan
+         * kode ≥ 400 sebagai BELUM selesai (`perintahDianggapSelesai`), jadi
+         * item ini tetap di antrean dan terkirim lagi pada tick berikutnya —
+         * tepat yang diinginkan.
+         */
+        hasil.push({
+          client_ref: cmd.client_ref,
+          status: "gagal",
+          kode: 409,
+          error: "Perintah ini sedang diproses — coba lagi sebentar lagi",
+          sebab: "sedang_diproses",
+        });
+        continue;
+      }
     }
 
     const waktu = new Date(cmd.waktu);
@@ -643,21 +737,18 @@ export const syncRoutes = new Hono<AppEnv>().post("/", batasSync, zValidator("js
       simpanHasil = sebab ? { error: pesan, sebab, data } : { error: pesan };
     }
 
-    // 2) Catat hasil ke ledger (exactly-once). onConflictDoNothing melindungi balapan retry.
+    // 2) Tutup baris yang tadi diklaim. Barisnya sudah ADA sejak sebelum
+    //    eksekusi, jadi di sini cukup UPDATE — tak ada lagi INSERT yang bisa
+    //    kalah balapan dan membuang hasilnya diam-diam.
     await db
-      .insert(syncCommands)
-      .values({
-        companyId: auth.company_id!,
-        clientRef: cmd.client_ref,
-        deviceId: device_id ?? null,
-        userId: auth.sub,
-        tipe: cmd.tipe,
-        waktu,
-        status: simpanStatus,
-        kode: simpanKode,
-        hasilJson: simpanHasil as object,
-      })
-      .onConflictDoNothing();
+      .update(syncCommands)
+      .set({ status: simpanStatus, kode: simpanKode, hasilJson: simpanHasil as object })
+      .where(
+        and(
+          eq(syncCommands.companyId, auth.company_id!),
+          eq(syncCommands.clientRef, cmd.client_ref),
+        ),
+      );
     hasil.push(item);
   }
 
