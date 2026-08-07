@@ -17,7 +17,8 @@ import {
 import type { Context } from "hono";
 import { resolveBranchId, type AppEnv } from "../../middleware/auth";
 import { tanggalDi } from "../../lib/time";
-import { hppDitagihSql, omzetDitagihSql, sumQtyDitagihSql } from "../../lib/porsi-ditagih";
+import { omzetDitagihSql, sumQtyDitagihSql } from "../../lib/porsi-ditagih";
+import { rataPerPorsi } from "../../lib/bep";
 import { loadKatalog, toMenuDto } from "../menu/service";
 
 /** Terima hanya tanggal format YYYY-MM-DD; selain itu undefined. */
@@ -325,37 +326,60 @@ export const laporanRoutes = new Hono<AppEnv>()
       tglValid(c.req.query("dari")) ??
       tanggalDi(tz, new Date(Date.now() - 30 * 24 * 3600 * 1000));
 
+    const filterBep = and(
+      eq(sales.companyId, auth.company_id!),
+      branchCond,
+      gte(sales.saleDate, dari),
+      lte(sales.saleDate, sampai),
+      isNull(sales.deletedAt),
+    );
     const [agg] = await db
       .select({
         // BEP membagi omzet & margin dengan jumlah porsi. Memasukkan porsi yang
         // direfund menggelembungkan penyebut sekaligus pembilangnya, dan
         // "berapa porsi harus terjual" jadi angka yang tak pernah benar.
         qty: sumQtyDitagihSql,
-        omzet: omzetDitagihSql,
-        hpp: hppDitagihSql,
       })
       .from(saleItems)
       .innerJoin(sales, eq(saleItems.saleId, sales.id))
-      .where(
-        and(
-          eq(sales.companyId, auth.company_id!),
-          branchCond,
-          gte(sales.saleDate, dari),
-          lte(sales.saleDate, sampai),
-          isNull(sales.deletedAt),
-        ),
-      );
+      .where(filterBep);
+    /*
+     * UANGNYA dari tingkat NOTA, PORSINYA dari tingkat BARIS — dan itu bukan
+     * kelalaian.
+     *
+     * `sales.diskon` hanya ada di tingkat nota: ia potongan atas seluruh
+     * transaksi, tak pernah dibagikan ke barisnya. Menghitung margin dari
+     * `harga_satuan × porsi` (omzet KOTOR baris) berarti mengabaikan potongan
+     * yang benar-benar diberikan — lihat `rataPerPorsi`. Jumlah porsi memang
+     * tak ada di tingkat nota, jadi penyebutnya tetap dari baris.
+     *
+     * Ketiga kolom nota di bawah sudah menyusut sendiri saat refund, sama
+     * seperti `sumQtyDitagihSql` di atas, jadi keduanya sepakat soal "yang
+     * benar-benar ditagih".
+     */
+    const [uang] = await db
+      .select({
+        subtotal: sum(sales.subtotal),
+        diskon: sum(sales.diskon),
+        hpp: sum(sales.totalHpp),
+      })
+      .from(sales)
+      .where(filterBep);
 
     let totalQty = Number(agg?.qty ?? 0);
     let avgHarga: number;
     let avgMargin: number;
     let basis: "penjualan" | "katalog";
 
-    if (totalQty > 0) {
-      const omzet = Number(agg!.omzet ?? 0);
-      const hpp = Number(agg!.hpp ?? 0);
-      avgHarga = omzet / totalQty;
-      avgMargin = (omzet - hpp) / totalQty;
+    const rata = rataPerPorsi({
+      subtotal: Number(uang?.subtotal ?? 0),
+      diskon: Number(uang?.diskon ?? 0),
+      hpp: Number(uang?.hpp ?? 0),
+      qty: totalQty,
+    });
+    if (rata) {
+      avgHarga = rata.harga;
+      avgMargin = rata.margin;
       basis = "penjualan";
     } else {
       const katalog = await loadKatalog(db, auth.company_id!);
