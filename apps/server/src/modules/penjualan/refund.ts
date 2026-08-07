@@ -25,7 +25,7 @@ import { and, eq, isNull, sql } from "drizzle-orm";
 import { HTTPException } from "hono/http-exception";
 import { hitungUangSetelahRefund, nominalRefund, qtyDitagih } from "@kakarut/shared";
 import type { Tx } from "../../db/client";
-import { saleItems, saleRefunds, sales } from "../../db/schema";
+import { saleItems, saleRefunds, sales, shifts } from "../../db/schema";
 import { hitungUlangBiayaPenjualan, TANPA_UBAH_BASIS } from "./rekalkulasi";
 
 export interface PermintaanRefund {
@@ -132,6 +132,30 @@ export async function refundSajian(
   const sesudah = hitungUangSetelahRefund(barisBaru, asal);
   const nominal = nominalRefund({ ...asal, total: sale.total }, sesudah);
 
+  /**
+   * Shift yang MENANGGUNG refund ini — laci tempat uangnya keluar.
+   *
+   * Tanpa penautan ini, rekap mencocokkan refund ke shift MURNI lewat jendela
+   * waktu, dan refund yang dibuat saat tak ada shift terbuka (owner/admin
+   * meninjau di luar jam buka — jalur yang memang disengaja) jatuh di luar
+   * jendela shift mana pun: uang tunai keluar laci tapi kas harapan tak pernah
+   * turun, jadi selisihnya tak pernah terangkat di tutup kasir.
+   *
+   * NULL di sini berarti tegas "tak ada shift terbuka saat itu", dan rekap
+   * menyapunya ke shift BERIKUTNYA yang dibuka di cabang ini.
+   */
+  const [shiftAktif] = await tx
+    .select({ id: shifts.id })
+    .from(shifts)
+    .where(
+      and(
+        eq(shifts.companyId, params.companyId),
+        eq(shifts.branchId, sale.branchId),
+        isNull(shifts.closedAt),
+      ),
+    )
+    .limit(1);
+
   for (const [saleItemId, qty] of tambahan) {
     await tx
       .update(saleItems)
@@ -148,6 +172,7 @@ export async function refundSajian(
       nominal: bagianNominal(nominal, tambahan, byId, saleItemId),
       alasan: params.alasan?.trim() || null,
       userId: params.userId,
+      shiftId: shiftAktif?.id ?? null,
     });
   }
 

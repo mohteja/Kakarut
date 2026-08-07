@@ -659,6 +659,13 @@
       "when": 1785672694059,
       "tag": "0093_low_magneto",
       "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "7",
+      "when": 1786085685393,
+      "tag": "0094_silent_tombstone",
+      "breakpoints": true
     }
   ]
 }

@@ -1373,10 +1373,20 @@ export const saleRefunds = pgTable(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id),
+    /**
+     * Shift yang MENANGGUNG refund ini — sejajar dengan `sales.shift_id`.
+     *
+     * Diisi shift yang sedang terbuka di cabang saat refund dibuat. NULL punya
+     * arti tegas: tak ada shift terbuka saat itu (owner/admin merefund di luar
+     * jam buka). Baris NULL disapu oleh shift BERIKUTNYA yang dibuka di cabang
+     * itu — laci itulah yang uangnya benar-benar keluar.
+     */
+    shiftId: uuid("shift_id").references(() => shifts.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     index("sale_refunds_sale_idx").on(t.saleId),
+    index("sale_refunds_shift_idx").on(t.shiftId),
     // laporan refund per cabang per rentang waktu
     index("sale_refunds_cabang_waktu_idx").on(t.companyId, t.branchId, t.createdAt),
   ],

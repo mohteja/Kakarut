@@ -1,5 +1,5 @@
 import { zValidator } from "@hono/zod-validator";
-import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lte, sql, sum } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, sql, sum } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -42,6 +42,30 @@ function milikShift(shiftId: string, openedAt: Date, closedAt: Date | null) {
   return sql`(${sales.shiftId} = ${shiftId} OR (${sales.shiftId} IS NULL AND ${sales.waktu} >= ${openedAt}${
     closedAt ? sql` AND ${sales.waktu} <= ${closedAt}` : sql``
   }))`;
+}
+
+/**
+ * Refund yang DITANGGUNG sebuah shift — laci tempat uangnya keluar.
+ *
+ * Dua jalur, saling eksklusif seperti `milikShift`:
+ * 1. `shift_id` = shift ini — penautan eksplisit, diisi saat refund dibuat
+ *    selagi shift ini terbuka.
+ * 2. `shift_id IS NULL` = TAK ADA shift terbuka saat refund dibuat (owner/admin
+ *    meninjau di luar jam buka — jalur yang memang disengaja). Baris itu disapu
+ *    oleh shift PERTAMA yang dibuka sesudahnya di cabang ini: laci itulah yang
+ *    uangnya benar-benar keluar. Tanpa penyapuan ini uangnya tidak muncul di
+ *    rekap mana pun — persis kegagalan yang dulu ditutup untuk `sales`.
+ *
+ * Tidak ada risiko hitung ganda: sesudah migrasi 0094 (yang mem-backfill baris
+ * lama memakai aturan jendela), `shift_id IS NULL` HANYA terjadi bila memang
+ * tak ada shift terbuka — jadi baris itu mustahil sekaligus jatuh di dalam
+ * jendela shift lain.
+ */
+function refundShift(shiftId: string, companyId: string, branchId: string, openedAt: Date) {
+  return sql`(${saleRefunds.shiftId} = ${shiftId} OR (${saleRefunds.shiftId} IS NULL AND ${saleRefunds.createdAt} < ${openedAt} AND NOT EXISTS (
+    SELECT 1 FROM ${shifts} s2
+    WHERE s2.company_id = ${companyId} AND s2.branch_id = ${branchId}
+      AND s2.opened_at > ${saleRefunds.createdAt} AND s2.opened_at < ${openedAt})))`;
 }
 
 /** Shift yang sedang terbuka di cabang — 400 bila tak ada. */
@@ -109,8 +133,7 @@ async function rekapWindow(
         eq(saleRefunds.companyId, companyId),
         eq(saleRefunds.branchId, branchId),
         isNull(sales.deletedAt),
-        gte(saleRefunds.createdAt, openedAt),
-        ...(closedAt ? [lte(saleRefunds.createdAt, closedAt)] : []),
+        refundShift(shiftId, companyId, branchId, openedAt),
       ),
     )
     .groupBy(sales.metodeBayar);
