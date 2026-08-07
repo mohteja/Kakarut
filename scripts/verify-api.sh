@@ -16,8 +16,14 @@ SA_EMAIL="${SA_EMAIL:-superadmin@kakarut.id}"
 SA_PASS="${SA_PASS:-SuperAdmin123!}"
 
 PASS=0; FAIL=0
+# Kegagalan dikumpulkan, bukan cuma dicetak di tempat kejadian: skrip ini
+# menembak 2.100+ asersi dan log CI-nya ribuan baris. Satu ✘ di tengah praktis
+# tak terlihat — yang membaca hanya tahu "gagal" tanpa tahu APA. Ringkasannya
+# dicetak lagi di akhir, tepat sebelum baris Hasil, supaya `tail` beberapa
+# puluh baris sudah cukup untuk mendiagnosis.
+GAGAL_RINGKAS=()
 ok()   { PASS=$((PASS+1)); echo "  ✔ $1"; }
-gagal(){ FAIL=$((FAIL+1)); echo "  ✘ $1"; }
+gagal(){ FAIL=$((FAIL+1)); echo "  ✘ $1"; GAGAL_RINGKAS+=("$1"); }
 cek()  { # cek "deskripsi" <ekspresi python bool dengan $V>
   local desc="$1" expr="$2" v="$3"
   if python3 -c "import sys; V=float(sys.argv[1]); sys.exit(0 if ($expr) else 1)" "$v"; then
@@ -8134,11 +8140,14 @@ tutup170() { # tutup shift berjalan TEPAT sebesar kas sistemnya (selalu "pas")
 buka170() { # buka170 <modal> → echo id shift ("" bila gagal)
   local modal="$1" r
   r=$(api "$REISS105" POST /shift/buka "{\"modal_awal\":$modal}")
-  if [ -z "$(echo "$r" | jq -r '.id // empty')" ]; then
-    # Absen masuk dulu. §167 bisa menunggu melewati tengah malam, dan absen
-    # KEMARIN tak berlaku untuk tanggal bisnis hari ini (`sedangHadir`).
-    # Dipanggil HANYA saat buka gagal: /absensi/saya berselang-seling
-    # masuk/pulang, jadi memanggilnya saat sudah hadir justru meng-absen-pulang.
+  # `POST /shift/buka` menjawab 400 untuk DUA sebab yang berbeda: "shift sudah
+  # terbuka" dan "Absen masuk dulu". Yang dibedakan PESANNYA, bukan sekadar
+  # "tak ada id" — sebab `/absensi/saya` berselang-seling masuk/pulang, jadi
+  # memanggilnya saat kasirnya sudah hadir justru meng-absen-PULANG dan
+  # membuat percobaan berikutnya gagal beneran.
+  if echo "$r" | jq -e '((.error // "") | test("Absen masuk"))' > /dev/null; then
+    # §167 bisa menunggu melewati tengah malam, dan absen KEMARIN tak berlaku
+    # untuk tanggal bisnis hari ini (`sedangHadir`).
     api "$REISS105" POST /absensi/saya '{"foto_url":"https://example.com/absen.jpg"}' > /dev/null
     r=$(api "$REISS105" POST /shift/buka "{\"modal_awal\":$modal}")
   fi
@@ -8154,15 +8163,20 @@ cek "dasar uji §170: cabang kasir terbaca di /shift/pantau" "V == 1" \
 # Jendela HARIAN cabang ini sudah berisi penjualan seksi-seksi sebelumnya, jadi
 # seluruh angka di bawah diperiksa sebagai SELISIH dari garis dasar ini.
 HARI170=$(pantau170 | jq -r '.penjualan_tunai')
-cek "dasar uji §170: penjualan tunai PAGI 21.000 benar-benar tercatat" "V == 1" \
-  "$([ "$(jual170 | jq -r '.id // "" | length')" = "36" ] && echo 1 || echo 0)"
+# Nominalnya DIBACA dari notanya, bukan dipatok 21.000. Seksi lain menyalakan
+# lalu mematikan PB1 (§159) dan menggeser batas diskon kasir, dan `sales.total`
+# — yang dijumlah baik oleh rekap harian maupun `rekapWindow` — ikut semua itu.
+# Seksi ini menguji JENDELA MANA yang dipakai, bukan berapa pajaknya.
+S170A=$(jual170)
+TUNAI_A=$(echo "$S170A" | jq -r '.sale.total // 0')
+cek "dasar uji §170: penjualan tunai PAGI tercatat dan nominalnya terbaca" "V > 0" "$TUNAI_A"
 
 P170A=$(pantau170)
-cek "PAGI: kas laci = modal 100.000 + tunai shift 21.000" "abs(V - 121000) < 0.01" \
+cek "PAGI: kas laci = modal 100.000 + tunai shift" "abs(V - (100000 + $TUNAI_A)) < 0.01" \
   "$(echo "$P170A" | jq -r '.kas_sistem')"
-cek "PAGI: penjualan_tunai_shift = 21.000" "abs(V - 21000) < 0.01" \
+cek "PAGI: penjualan_tunai_shift = nota barusan" "abs(V - $TUNAI_A) < 0.01" \
   "$(echo "$P170A" | jq -r '.penjualan_tunai_shift')"
-cek "PAGI: rekap HARIAN bertambah 21.000 juga (dua jendela masih sepakat)" "abs(V - ($HARI170 + 21000)) < 0.01" \
+cek "PAGI: rekap HARIAN bertambah segitu juga (dua jendela masih sepakat)" "abs(V - ($HARI170 + $TUNAI_A)) < 0.01" \
   "$(echo "$P170A" | jq -r '.penjualan_tunai')"
 # Dua LAYAR, satu angka. `?branch_id=` dipakai karena owner terkunci di Kantor
 # (§135) — tanpanya `/shift/aktif` menjawab shift cabang lain.
@@ -8177,20 +8191,23 @@ cek "dasar uji §170: shift SORE terbuka (modal 50.000), beda shift" "V == 1" \
 
 P170B=$(pantau170)
 # INTI SEKSI INI. Sebelum perbaikan angkanya 50.000 + seluruh tunai HARIAN
-# cabang — termasuk 21.000 shift pagi yang sudah keluar dari laci.
+# cabang — termasuk nota shift pagi yang uangnya sudah keluar dari laci.
 cek "SORE: kas laci = modal 50.000 SAJA — bukan ikut memuat tunai shift pagi" "abs(V - 50000) < 0.01" \
   "$(echo "$P170B" | jq -r '.kas_sistem')"
 cek "SORE: penjualan_tunai_shift = 0 (shift baru, laci belum menerima apa pun)" "abs(V) < 0.01" \
   "$(echo "$P170B" | jq -r '.penjualan_tunai_shift')"
-cek "SORE: rekap HARIAN TIDAK menyusut — shift pagi tetap terhitung hari ini" "abs(V - ($HARI170 + 21000)) < 0.01" \
+cek "SORE: rekap HARIAN TIDAK menyusut — shift pagi tetap terhitung hari ini" "abs(V - ($HARI170 + $TUNAI_A)) < 0.01" \
   "$(echo "$P170B" | jq -r '.penjualan_tunai')"
 
-cek "dasar uji §170: penjualan tunai SORE 21.000 tercatat" "V == 1" \
-  "$([ "$(jual170 | jq -r '.id // "" | length')" = "36" ] && echo 1 || echo 0)"
+S170B=$(jual170)
+TUNAI_B=$(echo "$S170B" | jq -r '.sale.total // 0')
+cek "dasar uji §170: penjualan tunai SORE tercatat dan nominalnya terbaca" "V > 0" "$TUNAI_B"
 P170C=$(pantau170)
-cek "SORE: kas laci = 50.000 + 21.000 (hanya tunai shift ini)" "abs(V - 71000) < 0.01" \
+cek "SORE: kas laci = 50.000 + nota sore (hanya tunai shift ini)" "abs(V - (50000 + $TUNAI_B)) < 0.01" \
   "$(echo "$P170C" | jq -r '.kas_sistem')"
-cek "SORE: rekap HARIAN memuat KEDUA shift (21.000 + 21.000)" "abs(V - ($HARI170 + 42000)) < 0.01" \
+cek "SORE: penjualan_tunai_shift = nota sore saja" "abs(V - $TUNAI_B) < 0.01" \
+  "$(echo "$P170C" | jq -r '.penjualan_tunai_shift')"
+cek "SORE: rekap HARIAN memuat KEDUA shift" "abs(V - ($HARI170 + $TUNAI_A + $TUNAI_B)) < 0.01" \
   "$(echo "$P170C" | jq -r '.penjualan_tunai')"
 cek "SORE: /shift/aktif & /shift/pantau tetap sepakat" "abs(V) < 0.01" \
   "$(python3 -c "print($(api "$OWNER" GET "/shift/aktif?branch_id=$CB170" | jq -r '.kas_sistem') - $(echo "$P170C" | jq -r '.kas_sistem'))")"
@@ -8202,8 +8219,14 @@ cek "kasir TUTUP: kas laci 0 (tak ada laci untuk dilaporkan)" "abs(V) < 0.01" \
   "$(echo "$P170D" | jq -r '.kas_sistem')"
 cek "kasir TUTUP: penjualan_tunai_shift null — BUKAN 0 (0 itu angka yang sah)" "V == 1" \
   "$(echo "$P170D" | jq '(.penjualan_tunai_shift == null) | if . then 1 else 0 end')"
-cek "kasir TUTUP: rekap HARIAN tetap utuh, tak ikut dinolkan" "abs(V - ($HARI170 + 42000)) < 0.01" \
+cek "kasir TUTUP: rekap HARIAN tetap utuh, tak ikut dinolkan" "abs(V - ($HARI170 + $TUNAI_A + $TUNAI_B)) < 0.01" \
   "$(echo "$P170D" | jq -r '.penjualan_tunai')"
 
+if [ "$FAIL" -gt 0 ]; then
+  echo
+  echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"
+  for g in "${GAGAL_RINGKAS[@]}"; do echo "  ✘ $g"; done
+  echo
+fi
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]
