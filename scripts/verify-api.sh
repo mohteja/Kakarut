@@ -8281,6 +8281,65 @@ kotor = ($OMZ171 - $HPP171) / $QTY171
 print(1 if math.ceil(10000000 / $M171) > math.ceil(10000000 / kotor) else 0)")"
 tutup170
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# §172 REFUND DI LUAR JAM BUKA TETAP DITANGGUNG SEBUAH SHIFT
+#
+# Rekap dulu mencocokkan refund ke shift MURNI lewat jendela waktu
+# [opened_at, closed_at]. Refund yang dibuat saat TAK ADA shift terbuka —
+# owner/admin meninjau transaksi di luar jam buka, jalur yang memang disengaja
+# ("owner memeriksanya belakangan", dan owner/admin boleh merefund transaksi
+# cabang mana pun) — jatuh di luar jendela shift MANA PUN. Akibatnya uang tunai
+# keluar laci tapi kas harapan tak pernah turun: kasir berikutnya menghitung
+# laci yang lebih tipis lalu memasukkannya sebagai modal awal, dan selisihnya
+# lenyap tanpa pernah terangkat di tutup kasir — persis hal yang seluruh fitur
+# tutup kasir ada untuk menangkapnya.
+#
+# Penjualannya sendiri SUDAH benar (`total + refund_total` = yang benar-benar
+# ditagih saat itu), jadi yang diperiksa di sini khusus: ke mana refundnya
+# dibebankan. Sisi `sales` sudah lama punya dua jalur (`shift_id` ATAU jendela);
+# seksi ini menjaga sisi refund yang sekarang disamakan.
+echo "── §172 refund di luar jam buka ──"
+
+tutup170  # titik awal pasti: tak ada shift terbuka
+SH172A=$(buka170 100000)
+JUAL172=$(jual170)
+SALE172=$(echo "$JUAL172" | jq -r '.id // ""')
+DET172=$(api "$OWNER" GET "/penjualan/$SALE172")
+ITEM172=$(echo "$DET172" | jq -r '.items[0].id // ""')
+cek "dasar §172: shift PAGI terbuka & satu penjualan tunai tercatat" "V == 1" \
+  "$([ ${#SH172A} -eq 36 ] && [ ${#SALE172} -eq 36 ] && [ ${#ITEM172} -eq 36 ] && echo 1 || echo 0)"
+
+# Tutup shift pagi. Sesudah ini TIDAK ADA shift terbuka di cabang.
+tutup170
+cek "§172 tak ada shift terbuka sesudah tutup (prasyarat ujinya)" "V == 1" \
+  "$(api "$REISS105" GET /shift/aktif | jq '(.id // null) == null | if . then 1 else 0 end')"
+
+# Refund DI LUAR jam buka — inilah baris yang dulu jatuh di luar jendela mana pun.
+REF172=$(api "$OWNER" POST "/penjualan/$SALE172/refund" \
+  "$(jq -nc --arg it "$ITEM172" '{alasan:"uji §172 di luar jam", items:[{sale_item_id:$it, qty:1}]}')")
+NOM172=$(echo "$REF172" | jq -r '.nominal // 0')
+cek "§172 refund di luar jam buka BERHASIL (jalurnya memang disengaja terbuka)" "V > 0" \
+  "$NOM172"
+
+# Shift BERIKUTNYA yang dibuka menanggung refund tadi: laci inilah yang uangnya
+# benar-benar keluar. Kas sistemnya = modal − refund, bukan modal bulat-bulat.
+SH172B=$(buka170 100000)
+KAS172=$(api "$OWNER" GET "/shift/$SH172B" | jq -r '.kas_sistem')
+cek "§172 shift berikutnya menanggung refund luar jam (kas = modal − refund)" "abs(V) < 1" \
+  "$(python3 -c "print($KAS172 - (100000 - $NOM172))")"
+# Arah-balik yang menangkap regresi ke perilaku lama: dulu refundnya hilang
+# sama sekali, jadi kas sistem akan PERSIS sama dengan modal awal.
+cek "§172 kas sistem TIDAK sama dengan modal bulat (refundnya benar-benar menggigit)" "V == 1" \
+  "$(python3 -c "print(1 if abs($KAS172 - 100000) > 1 else 0)")"
+
+# Shift pagi yang SUDAH DITUTUP tidak boleh ikut bergeser: uangnya dulu benar
+# masuk dan sudah dihitung cocok saat tutup kasir.
+KASA172=$(api "$OWNER" GET "/shift/$SH172A" | jq -r '.kas_sistem')
+cek "§172 shift yang sudah ditutup TIDAK bergeser oleh refund susulan" "abs(V) < 1" \
+  "$(python3 -c "print($KASA172 - (100000 + 21000))")"
+tutup170
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"
