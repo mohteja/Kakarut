@@ -1367,7 +1367,7 @@ Laporan:
 - `GET /api/laporan` — query: `branch_id?` (atau `all`), `dari?`, `sampai?`, `tanggal?` — res: `LaporanHarian`
 - `GET /api/laporan/pembelian` — query: `branch_id?` (atau `all`), `dari?`, `sampai?` — res: `LaporanPembelian`
 - `GET /api/laporan/menu-laris` — query: `branch_id?` (atau `all`), `dari?`, `sampai?` — res: `MenuLaris`
-- `GET /api/laporan/bep` — query: `biaya_tetap` (wajib, >0), `branch_id?` (atau `all`), `dari?`, `sampai?` — res: perhitungan BEP — error: **400** (biaya_tetap hilang/invalid, margin ≤ 0, tak ada menu)
+- `GET /api/laporan/bep` — query: `biaya_tetap` (wajib, >0), `branch_id?` (atau `all`), `dari?`, `sampai?` — res: perhitungan BEP — error: **400** (biaya_tetap hilang/invalid, margin ≤ 0, tak ada menu). **Margin kontribusi dihitung SESUDAH diskon**: `(Σ subtotal − Σ diskon − Σ total_hpp) ÷ Σ porsi ditagih` — definisi laba yang sama dengan `estimasi_profit` di `GET /laporan`, jadi kedua layar tak bisa berselisih. `rata_harga_jual` juga net diskon (harga yang benar-benar diterima). PB1 tidak dikurangkan: ia titipan pajak, dan `subtotal` memang belum memuatnya. Uangnya dari tingkat nota (diskon hanya ada di sana), porsinya dari tingkat baris; keduanya sudah menyusut sendiri saat refund.
 
 ## `/api/rekomendasi` — Rekomendasi beli & permintaan stok (`modules/rekomendasi/routes.ts`) — group guard **[owner/admin]**
 

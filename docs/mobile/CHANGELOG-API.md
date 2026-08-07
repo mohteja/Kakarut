@@ -25,6 +25,46 @@ tanpa akses repo server.
 
 ---
 
+## Rilis: BEP kini menghitung margin SESUDAH diskon
+
+🟡 **PERLU DICEK** — tab **BEP** di layar Laporan (`laporan_page.dart`, `_TabBep`).
+
+**Tidak ada perubahan bentuk respons** — tak ada medan baru, tak ada medan
+hilang, jadi mobile **tidak perlu perubahan kode**. Yang berubah **ANGKANYA**,
+untuk perusahaan yang memberi diskon.
+
+**Apa yang salah sebelumnya.** `GET /api/laporan/bep` menyusun margin kontribusi
+dari omzet **KOTOR** baris nota (`harga_satuan × porsi`). Potongan yang
+benar-benar diberikan kasir hidup di tingkat **nota** (`sales.diskon`) dan tak
+pernah ikut dihitung.
+
+Arah salahnya yang berbahaya: margin tampak lebih besar → BEP menjawab lebih
+**KECIL**. Layar yang tugasnya menjawab "berapa porsi supaya tidak rugi" justru
+jadi yang paling optimistis. Rumah makan yang rutin memberi diskon 10% dengan
+margin 40% melihat kebutuhan porsinya meleset seperempat.
+
+Ia juga membuat dua layar berselisih atas pertanyaan yang sama: `GET /laporan`
+sudah memakai `omzet − diskon − HPP` untuk `estimasi_profit`, sementara BEP
+memakai `omzet − HPP`.
+
+**Sesudahnya.** Rumusnya disamakan:
+
+```
+rata_margin_kontribusi = (Σ subtotal − Σ diskon − Σ total_hpp) ÷ Σ porsi ditagih
+rata_harga_jual        = (Σ subtotal − Σ diskon) ÷ Σ porsi ditagih
+```
+
+PB1 sengaja **tidak** dikurangkan — ia titipan pajak yang diteruskan ke negara,
+bukan pendapatan, dan `subtotal` memang belum memuatnya.
+
+**Akibat yang terlihat di mobile:** `rata_margin_kontribusi` dan
+`rata_harga_jual` turun, sementara `porsi_untuk_bep`, `omzet_untuk_bep`, dan
+`porsi_per_hari_30` **naik** — untuk perusahaan tanpa diskon, angkanya tidak
+berubah sama sekali. Yang perlu ditinjau hanyalah teks penjelas di layar bila ada
+yang menyebut angka itu "sebelum diskon" atau semacamnya.
+
+---
+
 ## Rilis: "Kas seharusnya" di `/shift/pantau` kini milik SHIFT, bukan milik hari ini
 
 🔴 **WAJIB** — layar Operasional Cabang (`operasional_cabang_page.dart`) dan

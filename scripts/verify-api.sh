@@ -8222,6 +8222,65 @@ cek "kasir TUTUP: penjualan_tunai_shift null — BUKAN 0 (0 itu angka yang sah)"
 cek "kasir TUTUP: rekap HARIAN tetap utuh, tak ikut dinolkan" "abs(V - ($HARI170 + $TUNAI_A + $TUNAI_B)) < 0.01" \
   "$(echo "$P170D" | jq -r '.penjualan_tunai')"
 
+echo "── §171 BEP menghitung margin SESUDAH diskon ──"
+# BEP menjawab "berapa porsi supaya biaya tetap tertutup?" = biaya_tetap ÷
+# margin per porsi. Marginnya dulu disusun dari omzet KOTOR baris nota
+# (`harga_satuan × porsi`), sementara potongan yang benar-benar diberikan kasir
+# hidup di tingkat NOTA (`sales.diskon`) dan tak pernah ikut.
+#
+# Arah salahnya yang berbahaya: margin tampak lebih besar → BEP menjawab lebih
+# KECIL. Layar yang tugasnya menjawab "berapa supaya tidak rugi" justru jadi
+# yang paling optimistis. Sekaligus `GET /laporan` dan `GET /laporan/bep`
+# berselisih soal laba: yang satu memakai `omzet − diskon − HPP`, yang lain
+# `omzet − HPP`.
+#
+# Yang dipatok di sini INVARIAN antar-layar, bukan satu angka hasil: rentang
+# tanggalnya memuat penjualan seksi-seksi lain juga, jadi angka mutlaknya tak
+# bisa ditebak — tapi hubungan keduanya harus tetap persis.
+SH171=$(buka170 0)
+cek "dasar uji §171: shift terbuka & menu §170 masih ada" "V == 1" \
+  "$([ ${#SH171} -eq 36 ] && [ ${#M170} -eq 36 ] && echo 1 || echo 0)"
+# Nota BERDISKON: tanpa ini seluruh invarian di bawah lulus tanpa pernah
+# menyentuh diskon — persis kelas uji hampa yang dihindari di berkas ini.
+S171=$(api "$REISS105" POST /penjualan \
+  "$(jq -nc --arg m "$M170" '{metode_bayar:"tunai", is_dine_in:false, diskon_tipe:"persen", diskon_nilai:20, items:[{menu_id:$m, qty:2}]}')")
+cek "dasar uji §171: nota berdiskon 20% tercatat" "V > 0" "$(echo "$S171" | jq -r '.sale.diskon // 0')"
+
+LAP171=$(api "$OWNER" GET "/laporan?dari=$TODAY&sampai=$TODAY&branch_id=$CB170")
+BEP171=$(api "$OWNER" GET "/laporan/bep?biaya_tetap=10000000&dari=$TODAY&sampai=$TODAY&branch_id=$CB170")
+QTY171=$(echo "$LAP171" | jq '[.item_terjual[].qty] | add // 0')
+cek "dasar uji §171: rentangnya memang memuat potongan" "V > 0" \
+  "$(echo "$LAP171" | jq '.total_diskon')"
+cek "dasar uji §171: ada porsi terjual (penyebutnya bukan nol)" "V > 0" "$QTY171"
+cek "dasar uji §171: BEP memakai basis penjualan, bukan katalog" "V == 1" \
+  "$(echo "$BEP171" | jq '(.basis=="penjualan")|if . then 1 else 0 end')"
+
+# Angka-angkanya ditarik ke variabel dulu — ekspresi python bersarang di dalam
+# $( ) di dalam "..." terlalu mudah salah kutip, dan yang salah kutip di sini
+# menghasilkan asersi yang gagal karena sintaks, bukan karena temuan.
+M171=$(echo "$BEP171" | jq -r '.rata_margin_kontribusi')
+H171=$(echo "$BEP171" | jq -r '.rata_harga_jual')
+OMZ171=$(echo "$LAP171" | jq -r '.omzet')
+DIS171=$(echo "$LAP171" | jq -r '.total_diskon')
+HPP171=$(echo "$LAP171" | jq -r '.total_hpp')
+
+# INTI: dua layar, satu definisi laba. margin×porsi harus = omzet − diskon − HPP.
+cek "margin × porsi = omzet − diskon − HPP (sepakat dengan /laporan)" "abs(V) < 1" \
+  "$(python3 -c "print($M171 * $QTY171 - ($OMZ171 - $DIS171 - $HPP171))")"
+cek "harga rata-rata × porsi = omzet − diskon (yang benar-benar diterima)" "abs(V) < 1" \
+  "$(python3 -c "print($H171 * $QTY171 - ($OMZ171 - $DIS171))")"
+# Arah-balik: kalau diskonnya diam-diam diabaikan lagi, margin akan PERSIS sama
+# dengan versi kotor — dua asersi ini yang menangkapnya, satu dalam rupiah dan
+# satu dalam satuan yang benar-benar dibaca owner: porsi.
+cek "margin LEBIH KECIL daripada versi kotor (diskonnya benar-benar menggigit)" "V == 1" \
+  "$(python3 -c "print(1 if $M171 < ($OMZ171 - $HPP171) / $QTY171 else 0)")"
+cek "porsi untuk BEP jadi lebih BANYAK daripada hitungan kotor" "V == 1" \
+  "$(python3 -c "
+import math
+kotor = ($OMZ171 - $HPP171) / $QTY171
+print(1 if math.ceil(10000000 / $M171) > math.ceil(10000000 / kotor) else 0)")"
+tutup170
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"
