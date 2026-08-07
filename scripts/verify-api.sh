@@ -8304,7 +8304,7 @@ echo "── §172 refund di luar jam buka ──"
 tutup170  # titik awal pasti: tak ada shift terbuka
 SH172A=$(buka170 100000)
 JUAL172=$(jual170)
-SALE172=$(echo "$JUAL172" | jq -r '.id // ""')
+SALE172=$(echo "$JUAL172" | jq -r '.sale.id // ""')
 DET172=$(api "$OWNER" GET "/penjualan/$SALE172")
 ITEM172=$(echo "$DET172" | jq -r '.items[0].id // ""')
 cek "dasar §172: shift PAGI terbuka & satu penjualan tunai tercatat" "V == 1" \
