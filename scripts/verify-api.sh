@@ -8374,19 +8374,23 @@ for f in "$R173A" "$R173B"; do
 done
 wait
 
-KODE173=$(for f in "$R173A" "$R173B"; do tail -n1 "$f"; done | sort | tr '\n' ' ')
-SUKSES173=$(for f in "$R173A" "$R173B"; do tail -n1 "$f"; done | grep -c '^201$' || true)
-LIMA173=$(for f in "$R173A" "$R173B"; do tail -n1 "$f"; done | grep -c '^5' || true)
+# `curl -w '\n%{http_code}'` meninggalkan berkas TANPA newline penutup, jadi
+# `tail -n1` dua berkas berturut-turut MENYAMBUNG jadi satu baris ("201409")
+# dan `grep '^201$'` tak pernah cocok — hitungannya 0 walau servernya benar.
+# `printf '%s\n'` memaksa pemisahnya.
+KODE173=$(for f in "$R173A" "$R173B"; do printf '%s\n' "$(tail -n1 "$f")"; done)
+SUKSES173=$(printf '%s\n' "$KODE173" | grep -c '^201$' || true)
+GAGAL409_173=$(printf '%s\n' "$KODE173" | grep -c '^409$' || true)
+LIMA173=$(printf '%s\n' "$KODE173" | grep -c '^5' || true)
 
 cek "§173 tak ada yang 5xx (penolakannya terkendali, bukan tabrakan)" "V == 0" "$LIMA173"
 # INTI: tepat SATU yang boleh jadi transaksi. Dulu keduanya 201.
 cek "§173 TEPAT SATU yang jadi penjualan (dulu dua → tamu tertagih dua kali)" "V == 1" \
   "$SUKSES173"
-cek "§173 yang kalah ditolak 409, bukan diam-diam sukses" "V == 1" \
-  "$(for f in "$R173A" "$R173B"; do tail -n1 "$f"; done | grep -c '^409$' || true)"
+cek "§173 yang kalah ditolak 409, bukan diam-diam sukses" "V == 1" "$GAGAL409_173"
 # Sebabnya harus yang SUDAH dikenal antrean offline — kiriman kembar aman dibuang.
 cek "§173 penolakannya bersebab bill_sudah_dibayar (dikenal klien offline)" "V == 1" \
-  "$(for f in "$R173A" "$R173B"; do head -n-1 "$f"; done | jq -rs '[.[]?|select(.sebab=="bill_sudah_dibayar")]|length' 2>/dev/null || echo 0)"
+  "$(for f in "$R173A" "$R173B"; do head -n-1 "$f"; printf '\n'; done | jq -rs '[.[]?|select(.sebab=="bill_sudah_dibayar")]|length' 2>/dev/null || echo 0)"
 
 # Bill-nya benar-benar tertutup, bukan cuma "yang kedua kebetulan gagal".
 # Dibaca sebagai KASIR: /open-bill/* dijaga requireRole("cashier"), dan
