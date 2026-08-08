@@ -169,7 +169,27 @@ export async function createSale(params: CreateSaleParams) {
             eq(openBills.companyId, params.companyId),
             eq(openBills.branchId, branch.id),
           ),
-        );
+        )
+        /*
+         * `FOR UPDATE` — alasannya sama persis dengan refund sajian, dan tanpa
+         * ini penjaga `closedAt` di bawah cuma menangkap kasus BERURUTAN.
+         *
+         * Dua kasir menekan "bayar" pada bill yang sama di saat yang sama akan
+         * sama-sama membaca `closed_at` masih kosong (READ COMMITTED tak
+         * memperlihatkan tulisan yang belum di-commit), sama-sama lolos
+         * penjaganya, dan sama-sama MENERBITKAN PENJUALAN. Yang kedua lalu
+         * gagal mengunci bill-nya — tapi diam-diam, sebab `UPDATE … WHERE
+         * closed_at IS NULL` yang tak cocok satu baris pun bukan galat.
+         * Hasilnya: satu bill, dua transaksi, tamu tertagih dua kali.
+         *
+         * Mengunci barisnya membuat yang kedua MENUNGGU, lalu membaca
+         * `closed_at` yang sudah terisi dan ditolak 409 dengan sebab yang benar
+         * — jalur yang memang sudah disiapkan untuk klien offline.
+         *
+         * Idempotensi `client_ref` TIDAK menutup ini: dua kasir (atau dua
+         * perangkat) mengirim `client_ref` yang berbeda untuk bill yang sama.
+         */
+        .for("update");
       if (!bill) throw new HTTPException(404, { message: "Open bill tidak ditemukan" });
       // Bill yang sudah ditutup tak boleh dibayar lagi — tanpa penjaga ini satu
       // bill bisa jadi dua transaksi bila tombol bayar tertekan dua kali atau
@@ -409,10 +429,19 @@ export async function createSale(params: CreateSaleParams) {
      * riwayat status sebelum dibayar) tetap bisa ditelusuri.
      */
     if (params.openBillId) {
-      await tx
+      const kunci = await tx
         .update(openBills)
         .set({ closedAt: new Date(), saleId: sale.id })
-        .where(and(eq(openBills.id, params.openBillId), isNull(openBills.closedAt)));
+        .where(and(eq(openBills.id, params.openBillId), isNull(openBills.closedAt)))
+        .returning({ id: openBills.id });
+      /*
+       * Kunci baris di atas sudah membuat keadaan ini mustahil. Diperiksa juga
+       * di sini supaya kalau kuncinya suatu saat hilang, gagalnya BERSUARA —
+       * bukan menerbitkan penjualan kedua tanpa jejak seperti sebelumnya.
+       */
+      if (kunci.length === 0) {
+        throw new PenjualanGagal(409, "Open bill ini sudah dibayar", "bill_sudah_dibayar");
+      }
     }
 
     const insertedItems = await tx

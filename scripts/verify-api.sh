@@ -8340,6 +8340,73 @@ cek "§172 shift yang sudah ditutup TIDAK bergeser oleh refund susulan" "abs(V) 
   "$(python3 -c "print($KASA172 - (100000 + 21000))")"
 tutup170
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# §173 BAYAR OPEN BILL BERBARENGAN: SATU BILL, SATU TRANSAKSI
+#
+# `createSale` membaca bill-nya, menolak bila `closed_at` sudah terisi, lalu di
+# ujung transaksi menutupnya dengan `UPDATE … WHERE closed_at IS NULL`.
+# Rangkaian itu hanya menangkap kasus BERURUTAN. Dua kasir yang menekan "bayar"
+# pada bill yang sama di saat bersamaan sama-sama membaca `closed_at` masih
+# kosong (READ COMMITTED tak memperlihatkan tulisan yang belum di-commit), jadi
+# keduanya lolos penjaganya dan keduanya MENERBITKAN PENJUALAN. Yang kedua lalu
+# gagal mengunci bill-nya — tapi diam-diam, sebab UPDATE yang tak mencocokkan
+# satu baris pun bukan galat. Satu bill, dua transaksi, tamu tertagih dua kali.
+#
+# Idempotensi `client_ref` tidak menutup ini: dua kasir mengirim ref berbeda.
+echo "── §173 bayar open bill berbarengan ──"
+
+tutup170
+SH173=$(buka170 100000)
+BILL173=$(api "$REISS105" POST /open-bill \
+  "$(jq -nc --arg m "$M170" '{items:[{menu_id:$m, qty:1}]}')" | jq -r '.id // ""')
+cek "dasar §173: shift terbuka & satu open bill siap dibayar" "V == 1" \
+  "$([ ${#SH173} -eq 36 ] && [ ${#BILL173} -eq 36 ] && echo 1 || echo 0)"
+
+# Dua permintaan bayar BERBARENGAN, `client_ref` BERBEDA — persis dua kasir.
+R173A=$(mktemp); R173B=$(mktemp)
+for f in "$R173A" "$R173B"; do
+  curl -s -X POST "$BASE/api/penjualan" -H "Authorization: Bearer $REISS105" \
+    -H 'Content-Type: application/json' \
+    -d "$(jq -nc --arg b "$BILL173" --arg m "$M170" --arg r "$(python3 -c 'import uuid;print(uuid.uuid4())')" \
+        '{open_bill_id:$b, client_ref:$r, metode_bayar:"tunai", is_dine_in:false, items:[{menu_id:$m, qty:1}]}')" \
+    -w '\n%{http_code}' > "$f" &
+done
+wait
+
+# `curl -w '\n%{http_code}'` meninggalkan berkas TANPA newline penutup, jadi
+# `tail -n1` dua berkas berturut-turut MENYAMBUNG jadi satu baris ("201409")
+# dan `grep '^201$'` tak pernah cocok — hitungannya 0 walau servernya benar.
+# `printf '%s\n'` memaksa pemisahnya.
+KODE173=$(for f in "$R173A" "$R173B"; do printf '%s\n' "$(tail -n1 "$f")"; done)
+SUKSES173=$(printf '%s\n' "$KODE173" | grep -c '^201$' || true)
+GAGAL409_173=$(printf '%s\n' "$KODE173" | grep -c '^409$' || true)
+LIMA173=$(printf '%s\n' "$KODE173" | grep -c '^5' || true)
+
+cek "§173 tak ada yang 5xx (penolakannya terkendali, bukan tabrakan)" "V == 0" "$LIMA173"
+# INTI: tepat SATU yang boleh jadi transaksi. Dulu keduanya 201.
+cek "§173 TEPAT SATU yang jadi penjualan (dulu dua → tamu tertagih dua kali)" "V == 1" \
+  "$SUKSES173"
+cek "§173 yang kalah ditolak 409, bukan diam-diam sukses" "V == 1" "$GAGAL409_173"
+# Sebabnya harus yang SUDAH dikenal antrean offline — kiriman kembar aman dibuang.
+cek "§173 penolakannya bersebab bill_sudah_dibayar (dikenal klien offline)" "V == 1" \
+  "$(for f in "$R173A" "$R173B"; do head -n-1 "$f"; printf '\n'; done | jq -rs '[.[]?|select(.sebab=="bill_sudah_dibayar")]|length' 2>/dev/null || echo 0)"
+
+# Bill-nya benar-benar tertutup, bukan cuma "yang kedua kebetulan gagal".
+# Dibaca sebagai KASIR: /open-bill/* dijaga requireRole("cashier"), dan
+# `loadDetail` memulangkan null untuk bill ber-`closed_at` — jadi 404 di sini
+# artinya bill itu memang sudah tak bisa dibayar lagi oleh siapa pun.
+cek "§173 bill itu tertutup — tak muncul lagi sebagai bill yang bisa dibayar" "V == 404" \
+  "$(status_code "$REISS105" GET "/open-bill/$BILL173")"
+# Dan tak ada jalan lain menerbitkan transaksi kedua: percobaan BERURUTAN pun
+# ditolak dengan sebab yang sama, bukan cuma yang berbarengan.
+cek "§173 percobaan bayar BERIKUTNYA juga 409 (bukan hanya balapannya yang dijaga)" "V == 409" \
+  "$(status_code_body "$REISS105" POST /penjualan \
+      "$(jq -nc --arg b "$BILL173" --arg m "$M170" --arg r "$(python3 -c 'import uuid;print(uuid.uuid4())')" \
+        '{open_bill_id:$b, client_ref:$r, metode_bayar:"tunai", is_dine_in:false, items:[{menu_id:$m, qty:1}]}')")"
+rm -f "$R173A" "$R173B"
+tutup170
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"
