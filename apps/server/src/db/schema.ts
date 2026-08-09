@@ -1444,7 +1444,14 @@ export const openBills = pgTable(
      * jejak asal pesanan.
      */
     closedAt: timestamp("closed_at", { withTimezone: true }),
-    saleId: uuid("sale_id").references(() => sales.id),
+    // `set null`, BUKAN default `no action`. Tempat Sampah menghapus KERAS baris
+    // `sales` (`sampah/routes.ts` — "Kosongkan"), dan FK yang menahan bikin
+    // seluruh transaksi itu rollback: sekali ada satu penjualan asal-bill yang
+    // dibatalkan, Tempat Sampah tak pernah bisa dikosongkan lagi. Bill-nya kita
+    // pertahankan (jejak asal pesanan, lihat catatan `closedAt` di atas) —
+    // yang putus cukup tautannya. Sisi sebaliknya, `sales.asal_open_bill_id`,
+    // sengaja dibiarkan TANPA FK untuk alasan yang sama.
+    saleId: uuid("sale_id").references(() => sales.id, { onDelete: "set null" }),
   },
   (t) => [
     index("open_bills_company_branch_idx").on(t.companyId, t.branchId, t.updatedAt),

@@ -8467,6 +8467,53 @@ cek "§174 percobaan terima BERIKUTNYA juga 400 (bukan hanya balapannya dijaga)"
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/perlengkapan/kiriman/$KIR174/terima?branch_id=$CB46_ID" -H "Authorization: Bearer $OWNER")"
 rm -f "$R174A" "$R174B"
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# §175 KOSONGKAN TEMPAT SAMPAH SESUDAH ADA PENJUALAN ASAL OPEN BILL
+#
+# "Kosongkan" menghapus KERAS baris `sales` yang sudah di sampah. Semua FK ke
+# `sales.id` ber-`ON DELETE cascade` — KECUALI satu: `open_bills.sale_id`, yang
+# lahir tanpa klausa `onDelete` sama sekali (jadi `no action`). Begitu ada satu
+# saja penjualan yang berasal dari open bill lalu dibatalkan, DELETE itu ditolak
+# Postgres, dan karena seluruh "Kosongkan" berjalan dalam SATU transaksi,
+# semuanya ikut rollback. Tempat Sampah jadi tak bisa dikosongkan LAGI —
+# permanen, dan tak ada tombol lain untuk membersihkannya.
+#
+# §91 tak pernah menangkapnya: ia berjalan jauh SEBELUM seksi open bill (§147,
+# §162, §173), jadi saat itu tak ada satu pun `open_bills.sale_id` yang terisi.
+# Urutan seksi inilah yang menyembunyikan bug ini, bukan ketiadaan uji.
+echo "── §175 kosongkan Tempat Sampah sesudah penjualan asal open bill ──"
+
+tutup170
+SH175=$(buka170 100000)
+BILL175=$(api "$REISS105" POST /open-bill \
+  "$(jq -nc --arg m "$M170" '{items:[{menu_id:$m, qty:1}]}')" | jq -r '.id // ""')
+SALE175=$(api "$REISS105" POST /penjualan \
+  "$(jq -nc --arg b "$BILL175" --arg m "$M170" --arg r "$(python3 -c 'import uuid;print(uuid.uuid4())')" \
+      '{open_bill_id:$b, client_ref:$r, metode_bayar:"tunai", is_dine_in:false, items:[{menu_id:$m, qty:1}]}')" \
+  | jq -r '.sale.id // ""')
+cek "dasar §175: open bill terbayar → penjualan terbit (jejak sale_id terisi)" "V == 1" \
+  "$([ ${#BILL175} -eq 36 ] && [ ${#SALE175} -eq 36 ] && echo 1 || echo 0)"
+
+# Batalkan penjualan itu → masuk Tempat Sampah, dan `open_bills.sale_id` masih
+# menunjuk ke barisnya. Inilah keadaan yang mengunci "Kosongkan".
+api "$OWNER" DELETE "/penjualan/$SALE175" > /dev/null
+cek "dasar §175: penjualan asal-bill itu ada di Tempat Sampah" "V == 1" \
+  "$(api "$OWNER" GET /sampah | jq --arg id "$SALE175" '([.[] | select(.jenis=="penjualan" and .key==$id)] | length==1) | if . then 1 else 0 end')"
+
+# INTI: dulu 500 — FK `open_bills_sale_id_sales_id_fk` menolak DELETE-nya dan
+# seluruh transaksi rollback. Sekarang `ON DELETE set null`: bill-nya tetap ada
+# sebagai jejak asal pesanan, hanya tautannya yang putus.
+cek "§175 kosongkan → 200, bukan 500 (dulu Tempat Sampah terkunci permanen)" "V == 200" \
+  "$(status_code "$OWNER" POST /sampah/kosongkan)"
+cek "§175 kosongkan → ok:true" "V == 1" \
+  "$(api "$OWNER" POST /sampah/kosongkan | jq '(.ok==true) | if . then 1 else 0 end')"
+# Dan benar-benar terhapus, bukan sekadar tak melempar galat.
+cek "§175 penjualan asal-bill itu lenyap dari Tempat Sampah" "V == 0" \
+  "$(api "$OWNER" GET /sampah | jq --arg id "$SALE175" '[.[] | select(.jenis=="penjualan" and .key==$id)] | length')"
+tutup170
+
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"
