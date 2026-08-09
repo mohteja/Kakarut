@@ -105,8 +105,19 @@ export const onboardingRoutes = new Hono<AppEnv>()
       throw new HTTPException(400, { message: "Undangan sudah tidak berlaku" });
     }
     const companyId = await db.transaction((tx) => terimaUndangan(tx, invId, auth.sub));
+    /*
+     * null = undangannya sudah tidak `pending` saat barisnya berhasil dikunci,
+     * yaitu penerimaan berbarengan yang kalah. Dibalas SAMA PERSIS dengan
+     * pemeriksaan awal di atas, supaya klien tak melihat perilaku baru — dan
+     * bukan dibiarkan lewat, sebab sesi tanpa `companyId` akan memulangkan
+     * orang yang sebenarnya SUDAH jadi anggota ke layar "belum punya
+     * perusahaan".
+     */
+    if (companyId === null) {
+      throw new HTTPException(400, { message: "Undangan sudah tidak berlaku" });
+    }
     const [user] = await db.select().from(users).where(eq(users.id, auth.sub));
-    return c.json(await buatSesi(user, companyId ?? undefined));
+    return c.json(await buatSesi(user, companyId));
   })
   // Tolak undangan (milik email pemanggil).
   .post("/undangan/:id/tolak", async (c) => {

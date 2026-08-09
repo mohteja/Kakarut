@@ -68,7 +68,26 @@ export async function terimaUndangan(
   invId: string,
   userId: string,
 ): Promise<string | null> {
-  const [inv] = await tx.select().from(invitations).where(eq(invitations.id, invId));
+  /*
+   * `FOR UPDATE` — penjaga `status !== "pending"` di bawah ini hanya menangkap
+   * percobaan BERURUTAN tanpa kunci barisnya.
+   *
+   * Dua penerimaan undangan yang SAMA di saat bersamaan sama-sama membaca
+   * `pending` (READ COMMITTED tak memperlihatkan tulisan yang belum di-commit),
+   * sama-sama tak menemukan membership, lalu sama-sama menyisipkannya. Yang
+   * kedua ditolak `memberships_user_company_uq` — jadi DATANYA selamat, indeks
+   * itu yang menyelamatkan — tapi transaksinya rollback dan pemanggil menerima
+   * 500, padahal jalur berurutan sudah lama membalas 400 berpesan.
+   *
+   * Mengunci barisnya membuat yang kedua MENUNGGU, lalu membaca status yang
+   * sudah `accepted` dan memulangkan null — persis jalur "sudah tidak berlaku"
+   * yang sudah ada.
+   */
+  const [inv] = await tx
+    .select()
+    .from(invitations)
+    .where(eq(invitations.id, invId))
+    .for("update");
   if (!inv || inv.status !== "pending") return null;
   const [existing] = await tx
     .select({ id: memberships.id, archivedAt: memberships.archivedAt })
@@ -113,7 +132,16 @@ export async function autoTerimaUndanganEmail(
   const pending = await tx
     .select({ id: invitations.id })
     .from(invitations)
-    .where(and(eq(invitations.email, email), eq(invitations.status, "pending")));
+    .where(and(eq(invitations.email, email), eq(invitations.status, "pending")))
+    /*
+     * URUTAN KUNCI YANG PASTI. Perulangan di bawah mengunci undangannya satu
+     * per satu dan menahannya sampai transaksi selesai. Tanpa urutan yang
+     * tetap, dua login serentak milik orang yang sama bisa mengunci dua
+     * undangan dalam urutan berlawanan dan saling menunggu — Postgres
+     * memutusnya sebagai deadlock, yaitu galat BARU yang justru lahir dari
+     * kunci yang baru dipasang. Mengurutkannya membuat keduanya mengantre.
+     */
+    .orderBy(invitations.id);
   let pertama: string | null = null;
   for (const p of pending) {
     const cid = await terimaUndangan(tx, p.id, userId);
