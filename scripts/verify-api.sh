@@ -8693,6 +8693,69 @@ cek "§178 rekap shift memuat penjualan itu" "V > 0" \
 tutup170
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# §179 DUA PERMINTAAN TAMBAH STOK BERBARENGAN: STOK CK DIJANJIKAN SEKALI
+#
+# `rencanaDariMenu` membaca saldo CK dan barang-dalam-jalan lewat `db` — DI LUAR
+# transaksi yang menuliskan fakturnya, dan tanpa kunci apa pun. Saldo cabang
+# diturunkan dari ledger mutasi, jadi tak ada baris yang bisa dikunci dan
+# `FOR UPDATE` pun tak menolong: dua permintaan yang dikirim bersamaan sama-sama
+# membaca saldo lama, sama-sama menyimpulkan "tinggal kirim dari CK", dan
+# sama-sama menerbitkan faktur kirimnya.
+#
+# Akibatnya baru muncul jauh belakangan: saldo CK jadi MINUS saat kedua kiriman
+# diterima, di dua cabang berbeda, tanpa jejak yang menghubungkan keduanya.
+# Kontraknya sudah tertulis di `qtyDalamJalan` ("pemanggil yang memvalidasi
+# sebelum menulis harus memakai transaksi + kunciKirimCabang") dan
+# `POST /produksi/kirim` sudah mematuhinya — jalur permintaan ini belum.
+echo "── §179 dua permintaan tambah stok berbarengan ──"
+
+# CK punya TEPAT 30 butir siap kirim; cabang kosong. Satu permintaan porsi 20
+# menyerap seluruh 30 itu — jadi dua permintaan berbarengan memperebutkan stok
+# yang hanya cukup untuk SATU.
+api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CK52_UTAMA\",\"items\":[{\"ingredient_id\":\"$BASO66\",\"qty\":30},{\"ingredient_id\":\"$DAG66\",\"qty\":20000},{\"ingredient_id\":\"$TEP66\",\"qty\":5000}]}" > /dev/null
+api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CB46_ID\",\"items\":[{\"ingredient_id\":\"$BASO66\",\"qty\":0}]}" > /dev/null
+cek "dasar §179: preview menjanjikan kirim_ck = 30 dari stok CK" "abs(V - 30) < 0.001" \
+  "$(api "$OWNER" POST "/rekomendasi/menu?branch_id=$CB46_ID" "{\"items\":[{\"menu_id\":\"$MENU66\",\"porsi\":20}],\"ck_branch_id\":\"$CK52_UTAMA\"}" | jq --arg i "$BASO66" '[.bahan[]|select(.ingredient_id==$i)][0].kirim_ck')"
+
+BADAN179="{\"items\":[{\"menu_id\":\"$MENU66\",\"porsi\":20}],\"tujuan_branch_id\":\"$CB46_ID\",\"ck_branch_id\":\"$CK52_UTAMA\"}"
+R179A=$(mktemp); R179B=$(mktemp)
+for f in "$R179A" "$R179B"; do
+  curl -s -X POST "$BASE/api/rekomendasi/menu/faktur" -H "Authorization: Bearer $OWNER" \
+    -H 'Content-Type: application/json' -d "$BADAN179" -w '\n%{http_code}' > "$f" &
+done
+wait
+KODE179=$(for f in "$R179A" "$R179B"; do printf '%s\n' "$(tail -n1 "$f")"; done)
+cek "§179 tak ada yang 5xx (penolakannya terkendali, bukan tabrakan)" "V == 0" \
+  "$(printf '%s\n' "$KODE179" | grep -c '^5' || true)"
+
+# INTI: berapa faktur KIRIM yang lahir. Dulu dua — 60 butir dijanjikan dari
+# stok 30, dan saldo CK baru jadi minus saat keduanya diterima.
+cek "§179 TEPAT SATU faktur kirim lahir (dulu dua → CK menjanjikan 60 dari 30)" "V == 1" \
+  "$(for f in "$R179A" "$R179B"; do head -n-1 "$f"; printf '\n'; done | jq -rs '[.[]?|.kirim?.faktur_id//empty]|unique|length' 2>/dev/null || echo 0)"
+# SENGAJA tidak menuntut "yang kalah pasti 409". Ada dua jalinan yang sama-sama
+# BENAR: bila perencanaan B berjalan sesudah A commit, B sudah membaca stok CK
+# yang tinggal 0 dan lolos apa adanya dengan kirim_ck = 0 — tak ada yang perlu
+# ditolak. Yang harus berlaku di KEDUA jalinan adalah invariannya, dan itu yang
+# diperiksa di atas: stok CK hanya boleh dijanjikan sekali. Menuntut kode 409
+# akan membuat penjaga ini berkedip tanpa ada yang rusak.
+cek "§179 penolakan (bila ada) terkendali: 409, bukan 4xx lain" "V == 0" \
+  "$(printf '%s\n' "$KODE179" | awk '/^4/ && !/^409$/' | wc -l)"
+# Sisi stok, dan inilah bentuk kerugiannya: TOTAL yang dijanjikan keluar dari CK
+# oleh kedua permintaan. Dijumlah dari SEMUA faktur kirim yang lahir, bukan yang
+# pertama saja — kalau cuma yang pertama diperiksa, angkanya tetap 30 walau yang
+# kedua ikut menjanjikan 30 lagi, dan penjaganya hijau untuk alasan yang salah.
+KFID179=$(for f in "$R179A" "$R179B"; do head -n-1 "$f"; printf '\n'; done | jq -rs '[.[]?|.kirim?.faktur_id//empty]|unique|join(",")' 2>/dev/null || echo "")
+cek "§179 TOTAL dijanjikan keluar CK = 30, bukan 60 (stoknya cuma 30)" "abs(V - 30) < 0.001" \
+  "$(api "$OWNER" GET "/produksi?branch_id=$CK52_UTAMA&per_page=500" | jq --arg f "$KFID179" '($f|split(",")) as $ids | [.rows[]|select(.faktur_id as $x | $ids|index($x))]|map(.qty)|add // 0')"
+# Arah balik: jalur BERURUTAN memang selalu benar — stok CK yang sudah
+# dijanjikan sudah dipotong `qtyDalamJalan` sejak di perencanaan. Itulah sebabnya
+# lubangnya cuma terbuka saat berbarengan, dan sebabnya ia lolos selama ini.
+cek "§179 permintaan BERIKUTNYA melihat stok CK sudah habis dijanjikan (kirim_ck 0)" "abs(V) < 0.001" \
+  "$(api "$OWNER" POST "/rekomendasi/menu?branch_id=$CB46_ID" "{\"items\":[{\"menu_id\":\"$MENU66\",\"porsi\":20}],\"ck_branch_id\":\"$CK52_UTAMA\"}" | jq --arg i "$BASO66" '[.bahan[]|select(.ingredient_id==$i)][0].kirim_ck')"
+rm -f "$R179A" "$R179B"
+
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"
