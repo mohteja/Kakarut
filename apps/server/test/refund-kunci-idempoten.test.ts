@@ -31,17 +31,32 @@ const PANEL = baca("../../web/src/pages/kasir/RefundPanel.tsx");
 const RUTE = baca("../src/modules/penjualan/routes.ts");
 
 describe("premis: server memang memutar ulang hasil pertama, tanpa melihat items", () => {
-  it("client_ref yang sama → hasil tersimpan dipulangkan 200", () => {
-    expect(RUTE).toContain("const ada = await cariHasilIdempoten(auth.company_id!, body.client_ref);");
-    expect(RUTE).toContain("if (ada) return c.json(ada.hasilJson, 200);");
+  it("client_ref yang sama → hasil tersimpan dipulangkan, bukan dieksekusi ulang", () => {
+    expect(RUTE).toContain("denganKlaimIdempoten(");
+    const IDEM = baca("../src/modules/sync/idempoten.ts");
+    expect(IDEM).toContain('if (ada?.status === "ok") return { data: ada.hasilJson as T, baru: false };');
   });
 
-  it("dan pemeriksaannya MENDAHULUI segalanya — items tak pernah dilihat", () => {
+  it("dan klaimnya MENDAHULUI segalanya — items tak pernah dilihat", () => {
     const iRefund = RUTE.indexOf('"/:id/refund"');
-    const iIdem = RUTE.indexOf("if (body.client_ref) {", iRefund);
+    const iIdem = RUTE.indexOf("denganKlaimIdempoten(", iRefund);
     const iPakai = RUTE.indexOf("refundSajian(tx, {", iRefund);
     expect(iIdem).toBeGreaterThan(iRefund);
     expect(iPakai).toBeGreaterThan(iIdem);
+  });
+
+  it("dan yang menjaganya KLAIM, bukan sekadar bacaan", () => {
+    // Membaca ledger lalu mengeksekusi lalu menulisnya menyisakan jendela
+    // selebar seluruh eksekusi: dua permintaan ber-ref sama sama-sama melihat
+    // ledger kosong dan sama-sama mengembalikan uang. Di refund itu bukan
+    // teori — `refundSajian` mengunci barisnya dengan `FOR UPDATE`, jadi yang
+    // kedua MENUNGGU lalu membaca sisa porsi yang masih ada. Barisnya harus
+    // DIPESAN sebelum eksekusi, dan dilepas lagi bila eksekusinya gagal.
+    const IDEM = baca("../src/modules/sync/idempoten.ts");
+    expect(IDEM).toContain(".onConflictDoNothing()");
+    expect(IDEM).toContain(".returning({ id: syncCommands.id });");
+    expect(IDEM).toContain("status: BERJALAN,");
+    expect(IDEM).toContain(".delete(syncCommands)");
   });
 
   it("premis kedua: server MEMANG menolak porsi yang melebihi sisa", () => {

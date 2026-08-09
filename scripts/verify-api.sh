@@ -8514,6 +8514,136 @@ cek "§175 penjualan asal-bill itu lenyap dari Tempat Sampah" "V == 0" \
 tutup170
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# §176 DUA PERMINTAAN BER-client_ref SAMA BERBARENGAN: SATU PENJUALAN
+#
+# Ledger idempotensi dulu hanya DIBACA sebelum eksekusi dan DITULIS sesudahnya.
+# Rangkaian itu tak menjaga apa pun terhadap yang berbarengan: dua permintaan
+# ber-`client_ref` sama sama-sama mendapat `null` dari `cariHasilIdempoten`,
+# sama-sama menjalankan `createSale`, lalu yang kedua kalah di unique index dan
+# hasilnya DIBUANG diam-diam oleh `onConflictDoNothing`. Ledger tampak rapi satu
+# baris; penjualannya dua.
+#
+# Bedanya dengan §173: di sana dua kasir mengirim ref BERBEDA (yang dijaga
+# `open_bills.closed_at`). Di sini SATU perangkat mengirim ref yang SAMA — dan
+# itu tak butuh manusia sama sekali: terukur di Chromium, browser mengulang
+# sendiri POST yang soketnya ditutup pada koneksi keep-alive yang dipakai ulang.
+# `/sync` sudah dijaga klaim atomik sejak lama; jalur online belum, sampai kini.
+echo "── §176 dua permintaan ber-client_ref sama berbarengan ──"
+
+tutup170
+SH176=$(buka170 100000)
+REF176=$(python3 -c 'import uuid;print(uuid.uuid4())')
+cek "dasar §176: shift terbuka & satu kunci idempotensi disiapkan" "V == 1" \
+  "$([ ${#SH176} -eq 36 ] && [ ${#REF176} -eq 36 ] && echo 1 || echo 0)"
+
+R176A=$(mktemp); R176B=$(mktemp)
+for f in "$R176A" "$R176B"; do
+  curl -s -X POST "$BASE/api/penjualan" -H "Authorization: Bearer $REISS105" \
+    -H 'Content-Type: application/json' \
+    -d "$(jq -nc --arg m "$M170" --arg r "$REF176" \
+        '{client_ref:$r, metode_bayar:"tunai", is_dine_in:false, items:[{menu_id:$m, qty:1}]}')" \
+    -w '\n%{http_code}' > "$f" &
+done
+wait
+KODE176=$(for f in "$R176A" "$R176B"; do printf '%s\n' "$(tail -n1 "$f")"; done)
+cek "§176 tak ada yang 5xx (penolakannya terkendali, bukan tabrakan)" "V == 0" \
+  "$(printf '%s\n' "$KODE176" | grep -c '^5' || true)"
+
+# INTI: berapa PENJUALAN yang lahir, bukan berapa kode 2xx. Yang kalah klaim
+# boleh dijawab 409 "sedang_diproses" ATAU — bila yang menang keburu selesai —
+# 200 berisi penjualan yang SAMA. Keduanya benar; yang tak boleh adalah dua id
+# berbeda. Dulu tepat itu yang terjadi.
+cek "§176 TEPAT SATU penjualan lahir (dulu dua → omzet & stok terhitung ganda)" "V == 1" \
+  "$(for f in "$R176A" "$R176B"; do head -n-1 "$f"; printf '\n'; done | jq -rs '[.[]?|.sale?.id//empty]|unique|length' 2>/dev/null || echo 0)"
+
+# Dan kuncinya benar-benar tercatat: percobaan BERIKUTNYA memutar ulang
+# penjualan yang sama, bukan menerbitkan yang baru.
+ID176=$(for f in "$R176A" "$R176B"; do head -n-1 "$f"; printf '\n'; done | jq -rs '[.[]?|.sale?.id//empty]|first // ""' 2>/dev/null || echo "")
+ULANG176=$(api "$REISS105" POST /penjualan \
+  "$(jq -nc --arg m "$M170" --arg r "$REF176" \
+      '{client_ref:$r, metode_bayar:"tunai", is_dine_in:false, items:[{menu_id:$m, qty:1}]}')")
+cek "§176 kiriman ulang memutar ulang penjualan yang SAMA, bukan bikin baru" "V == 1" \
+  "$(echo "$ULANG176" | jq --arg id "$ID176" '(.sale.id == $id) | if . then 1 else 0 end')"
+rm -f "$R176A" "$R176B"
+
+# KONTRAK "LEPAS SAAT GAGAL" — risiko regresi dari klaim itu sendiri, dan
+# justru yang paling mudah lolos dari perhatian.
+#
+# Web menahan `client_ref` yang SAMA sampai SUKSES (`refPembayaran.current ??=
+# uuidV4()`, hanya direset di `onSuccess`). Jadi kasir yang ditolak — stok
+# kurang, kasir belum dibuka, diskon lewat batas — menekan Bayar lagi dengan
+# kunci yang sama. Kalau penolakan itu tersimpan di ledger dan diputar ulang,
+# ia akan menerima penolakan lama itu SELAMANYA: satu kali gagal mengunci mati
+# kunci itu, dan tak ada di layar yang memberitahunya harus bagaimana.
+#
+# Maka klaim yang eksekusinya melempar WAJIB dilepas. Diuji ujung ke ujung
+# lewat penolakan yang paling mudah dipulihkan: kasir belum dibuka.
+tutup170
+REFG176=$(python3 -c 'import uuid;print(uuid.uuid4())')
+BADAN176=$(jq -nc --arg m "$M170" --arg r "$REFG176" \
+  '{client_ref:$r, metode_bayar:"tunai", is_dine_in:false, items:[{menu_id:$m, qty:1}]}')
+cek "§176 tanpa shift terbuka, penjualan ber-ref baru ditolak 409" "V == 409" \
+  "$(status_code_body "$REISS105" POST /penjualan "$BADAN176")"
+SH176B=$(buka170 100000)
+cek "dasar §176: kasir dibuka lagi" "V == 1" "$([ ${#SH176B} -eq 36 ] && echo 1 || echo 0)"
+# INTI: kunci yang SAMA, sesudah sebabnya dibereskan → harus benar-benar jadi
+# penjualan. Klaim yang tak dilepas akan menjawab 409 di sini, selamanya.
+cek "§176 ref yang SAMA sesudah kasir dibuka BERHASIL (klaim gagal dilepas)" "V == 201" \
+  "$(status_code_body "$REISS105" POST /penjualan "$BADAN176")"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# §177 DUA REFUND BER-client_ref SAMA BERBARENGAN: UANG KEMBALI SEKALI
+#
+# Lubang yang sama seperti §176, tapi akibatnya langsung uang. Dan di sini
+# penguncian barisnya justru yang membuat urutannya rapi DAN salah:
+# `refundSajian` mengunci `sale_items` dengan `FOR UPDATE`, jadi permintaan
+# kedua tidak ditolak — ia MENUNGGU yang pertama commit, lalu membaca sisa
+# porsi yang memang masih ada (qty 2, baru direfund 1), lalu mengembalikan uang
+# untuk kedua kalinya. Validasi "melebihi sisa porsi" tak pernah menyentuhnya.
+echo "── §177 dua refund ber-client_ref sama berbarengan ──"
+
+SALE177=$(api "$REISS105" POST /penjualan \
+  "$(jq -nc --arg m "$M170" '{metode_bayar:"tunai", is_dine_in:false, items:[{menu_id:$m, qty:2}]}')" \
+  | jq -r '.sale.id // ""')
+ITEM177=$(api "$OWNER" GET "/penjualan/$SALE177" | jq -r '.items[0].id // ""')
+REF177=$(python3 -c 'import uuid;print(uuid.uuid4())')
+# qty 2 DISENGAJA: dua refund qty 1 masing-masing SAH menurut sisa porsi, jadi
+# yang menahannya hanya idempotensi — persis yang diuji.
+cek "dasar §177: penjualan qty 2 tercatat & barisnya terbaca" "V == 1" \
+  "$([ ${#SALE177} -eq 36 ] && [ ${#ITEM177} -eq 36 ] && echo 1 || echo 0)"
+
+R177A=$(mktemp); R177B=$(mktemp)
+for f in "$R177A" "$R177B"; do
+  curl -s -X POST "$BASE/api/penjualan/$SALE177/refund" -H "Authorization: Bearer $OWNER" \
+    -H 'Content-Type: application/json' \
+    -d "$(jq -nc --arg it "$ITEM177" --arg r "$REF177" \
+        '{client_ref:$r, alasan:"uji §177", items:[{sale_item_id:$it, qty:1}]}')" \
+    -w '\n%{http_code}' > "$f" &
+done
+wait
+cek "§177 tak ada yang 5xx (penolakannya terkendali, bukan tabrakan)" "V == 0" \
+  "$(for f in "$R177A" "$R177B"; do printf '%s\n' "$(tail -n1 "$f")"; done | grep -c '^5' || true)"
+
+# INTI: angka di pembukuan, bukan kode HTTP. Dulu qty_refund jadi 2 dan uang
+# keluar dua kali untuk satu kali penekanan tombol.
+DET177=$(api "$OWNER" GET "/penjualan/$SALE177")
+cek "§177 porsi terefund SEKALI: qty_refund 1, bukan 2" "abs(V - 1) < 0.001" \
+  "$(echo "$DET177" | jq --arg it "$ITEM177" '[.items[]|select(.id==$it)][0].qtyRefund')"
+# `subtotal` IKUT TURUN saat refund, jadi sesudah satu dari dua porsi kembali
+# keduanya bernilai satu porsi — `refundTotal == subtotal`, dan sisanya masih
+# di atas nol. Refund ganda menghabiskannya: subtotal 0, refundTotal dua porsi.
+# Dibandingkan satu sama lain, bukan ke angka mati, sebab seksi lain menyalakan
+# lalu mematikan PB1 (§159) dan menggeser batas diskon.
+cek "§177 sisa tagihan masih SATU porsi (refund ganda akan menghabiskannya)" "V > 0" \
+  "$(echo "$DET177" | jq '.sale.subtotal')"
+cek "§177 refund_total = SATU porsi, sama besar dengan sisanya" "V == 1" \
+  "$(echo "$DET177" | jq '(.sale.refundTotal == .sale.subtotal) | if . then 1 else 0 end')"
+rm -f "$R177A" "$R177B"
+tutup170
+
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

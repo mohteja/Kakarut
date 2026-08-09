@@ -149,8 +149,10 @@ describe("stok awal TIDAK ikut mewarisi kuncinya", () => {
 describe("premis: ledger itu memang bersama, dan sudah dipakai jalur lain", () => {
   it("penjualan memakainya", () => {
     const jual = baca("../src/modules/penjualan/routes.ts");
-    expect(jual).toContain("cariHasilIdempoten");
-    expect(jual).toContain("catatHasilIdempoten");
+    // Penjualan DAN refund kini mengambil KLAIM lewat helper bersama, bukan
+    // sekadar membaca ledger lalu mencatatnya belakangan. Dua pemakaian:
+    // `POST /` dan `POST /:id/refund`.
+    expect(jual.split("denganKlaimIdempoten(").length - 1).toBeGreaterThanOrEqual(2);
   });
 
   it("dan kuncinya unik per `(company_id, client_ref)`", () => {
