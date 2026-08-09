@@ -3143,6 +3143,23 @@ SP83=$(api "$OWNER" POST /perlengkapan '{"nama":"Spons Uji","satuan":"pcs"}' | j
 NPL83B=$(api "$OWNER" POST "/perlengkapan/$SP83/masuk" '{"qty":1}' | jq -r .nomor)
 cek "nomor PL bertambah urut ($NPL83 → $NPL83B)" "V == 1" \
   "$(( 10#${NPL83B#PL-} > 10#${NPL83#PL-} ? 1 : 0 ))"
+
+# STOK MASUK TANPA `total_harga` → PERKIRAAN dari harga beli acuan, bukan nol.
+# Tanpa itu barang masuk ke stok tanpa biaya sama sekali: saldo naik, uangnya
+# tak pernah muncul di belanja perlengkapan. Layar web memang sudah mengirim
+# `qty × harga_beli` saat kotaknya dikosongkan — tapi aturan itu hidup di SATU
+# klien; klien lain atau panggilan API langsung membukukan nol diam-diam.
+SH83=$(api "$OWNER" POST /perlengkapan '{"nama":"Sabun Uji Harga","satuan":"pcs","harga_beli":3000}' | jq -r .id)
+api "$OWNER" POST "/perlengkapan/$SH83/masuk" '{"qty":4}' > /dev/null
+cek "masuk tanpa total_harga → belanja terisi perkiraan 4 × 3.000 (dulu 0)" "abs(V - 12000) < 0.001" \
+  "$(api "$OWNER" GET "/perlengkapan/$SH83/kartu" | jq '.total_belanja')"
+# Harga yang DIKIRIM tetap menang — perkiraannya cuma untuk yang tak mengirim.
+api "$OWNER" POST "/perlengkapan/$SH83/masuk" '{"qty":2,"total_harga":1000}' > /dev/null
+cek "masuk DENGAN total_harga: nilai kiriman dipakai apa adanya (12.000 + 1.000)" "abs(V - 13000) < 0.001" \
+  "$(api "$OWNER" GET "/perlengkapan/$SH83/kartu" | jq '.total_belanja')"
+# Item tanpa harga beli acuan tetap nol — perkiraannya bukan harga karangan.
+cek "item tanpa harga acuan tetap nol (perkiraan bukan angka karangan)" "abs(V) < 0.001" \
+  "$(api "$OWNER" GET "/perlengkapan/$SP83/kartu" | jq '.total_belanja')"
 api "$OWNER" PUT "/perlengkapan/$SP83/aturan" "{\"qty\":2,\"per_hari\":1,\"aktif\":true,\"mulai\":\"$KEMARIN83\"}" > /dev/null
 cek "cap habis: auto berhenti di 0 (tidak minus)" "abs(V) < 0.001" \
   "$(api "$OWNER" GET /perlengkapan | jq --arg id "$SP83" '[.[]|select(.id==$id)][0].saldo')"
