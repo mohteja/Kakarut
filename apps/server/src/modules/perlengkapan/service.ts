@@ -1517,11 +1517,38 @@ export async function terimaKirimanPerlengkapan(params: {
   const tanggal = await tanggalPerusahaan(params.companyId);
   const nomorMap = await nomorUntukRefs(db, params.companyId, [t.id]);
   const nomor = nomorMap.get(t.id) ?? "";
+  /*
+   * PENERIMAAN DIKLAIM LEWAT UPDATE BERSYARAT, BUKAN LEWAT PEMERIKSAAN DI ATAS.
+   *
+   * Penjaga `t.status !== "dikirim"` di atas hanya menangkap percobaan
+   * BERURUTAN. Dua orang menekan "Terima" pada kiriman yang sama di saat
+   * bersamaan sama-sama membaca status `dikirim` — READ COMMITTED tak
+   * memperlihatkan tulisan yang belum di-commit — lalu keduanya menulis
+   * SEPASANG MUTASI STOK. Stoknya dikreditkan DUA KALI di cabang tujuan dan
+   * didebit dua kali di cabang asal, permanen, tanpa jejak apa pun: dua baris
+   * mutasi kembar ber-nomor kiriman yang sama.
+   *
+   * Tak ada pengaman lain yang menahannya: indeks unik `supply_mutations_auto_uq`
+   * PARSIAL (`WHERE tipe = 'auto'`), sedangkan baris ini ber-tipe `kirim`/
+   * `terima`; dan mutasinya lahir ber-`status` bawaan `disetujui`, jadi
+   * langsung terhitung di seluruh pembaca saldo.
+   *
+   * Maka status dibalik lewat `UPDATE … WHERE status = 'dikirim'` yang
+   * mengembalikan barisnya — idiom yang sama dengan tahap produksi/beli. Yang
+   * menang menulis mutasinya; yang kalah tak menulis apa pun dan dibalas sama
+   * seperti percobaan berurutan, jadi klien tak melihat perilaku baru.
+   */
+  let kalahBalapan = false;
   await db.transaction(async (tx) => {
-    await tx
+    const klaim = await tx
       .update(supplyTransfers)
       .set({ status: "diterima", diterimaBy: params.userId, diterimaAt: new Date() })
-      .where(eq(supplyTransfers.id, t.id));
+      .where(and(eq(supplyTransfers.id, t.id), eq(supplyTransfers.status, "dikirim")))
+      .returning({ id: supplyTransfers.id });
+    if (klaim.length === 0) {
+      kalahBalapan = true;
+      return;
+    }
     await tx.insert(supplyMutations).values([
       {
         companyId: params.companyId,
@@ -1545,5 +1572,6 @@ export async function terimaKirimanPerlengkapan(params: {
       },
     ]);
   });
+  if (kalahBalapan) return { error: "Kiriman sudah diterima", code: 400 };
   return { ok: true, saldo: await saldoSatuPerlengkapan(t.supplyId, params.branchId) };
 }
