@@ -8407,6 +8407,66 @@ cek "§173 percobaan bayar BERIKUTNYA juga 409 (bukan hanya balapannya yang dija
 rm -f "$R173A" "$R173B"
 tutup170
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# §174 TERIMA KIRIMAN PERLENGKAPAN BERBARENGAN: STOK MASUK SEKALI
+#
+# `terimaKirimanPerlengkapan` memeriksa status kiriman lalu menulis SEPASANG
+# mutasi stok (−qty di asal, +qty di tujuan). Pemeriksaan itu hanya menangkap
+# percobaan BERURUTAN — yang memang sudah dijaga §84 ("terima ulang → 400").
+#
+# Yang tak tertutup: dua orang menekan "Terima" pada kiriman yang sama di saat
+# bersamaan. Keduanya membaca status `dikirim` (READ COMMITTED tak
+# memperlihatkan tulisan yang belum di-commit), keduanya lolos penjaganya, dan
+# keduanya menulis mutasinya. Stok dikreditkan DUA KALI di cabang tujuan dan
+# didebit dua kali di cabang asal — permanen, tanpa jejak selain dua baris
+# mutasi kembar ber-nomor kiriman yang sama.
+#
+# Tak ada pengaman lain yang menahannya: `supply_mutations_auto_uq` PARSIAL
+# (`WHERE tipe = 'auto'`) sedangkan baris ini ber-tipe `kirim`/`terima`, dan
+# mutasinya lahir ber-status bawaan `disetujui` sehingga langsung terhitung.
+echo "── §174 terima kiriman perlengkapan berbarengan ──"
+
+# Item BARU khusus seksi ini — supaya saldo $TU84 milik §84 tidak tergeser.
+S174=$(api "$OWNER" POST /perlengkapan '{"nama":"Sarung Tangan Uji174","satuan":"pasang"}' | jq -r '.id // ""')
+api "$OWNER" POST "/perlengkapan/$S174/masuk?branch_id=$CK52_UTAMA" '{"qty":20,"total_harga":40000}' > /dev/null
+MK174=$(api "$OWNER" POST "/perlengkapan/$S174/minta?branch_id=$CB46_ID" '{"qty":6}')
+KIR174=$(echo "$MK174" | jq -r '.kiriman_id // ""')
+cek "dasar §174: item ber-stok CK 20 & kiriman 6 terbit (status dikirim)" "V == 1" \
+  "$([ ${#S174} -eq 36 ] && [ ${#KIR174} -eq 36 ] && echo 1 || echo 0)"
+cek "dasar §174: sebelum diterima — cabang 0, CK 20" "V == 1" \
+  "$(api "$OWNER" GET "/perlengkapan?branch_id=$CB46_ID" | jq --arg id "$S174" '([.[]|select(.id==$id)][0] | (.saldo == 0) and (.saldo_ck == 20)) | if . then 1 else 0 end')"
+
+# Dua "Terima" BERBARENGAN pada kiriman yang sama — persis dua orang di layar
+# Penerimaan cabang.
+R174A=$(mktemp); R174B=$(mktemp)
+for f in "$R174A" "$R174B"; do
+  curl -s -X POST "$BASE/api/perlengkapan/kiriman/$KIR174/terima?branch_id=$CB46_ID" \
+    -H "Authorization: Bearer $OWNER" -w '\n%{http_code}' > "$f" &
+done
+wait
+# `curl -w '\n%{http_code}'` meninggalkan berkas TANPA newline penutup, jadi
+# `tail -n1` dua berkas berturut-turut akan MENYAMBUNG jadi satu baris bila
+# pemisahnya tak dipaksa (pelajaran §173).
+KODE174=$(for f in "$R174A" "$R174B"; do printf '%s\n' "$(tail -n1 "$f")"; done)
+cek "§174 tak ada yang 5xx (penolakannya terkendali, bukan tabrakan)" "V == 0" \
+  "$(printf '%s\n' "$KODE174" | grep -c '^5' || true)"
+cek "§174 TEPAT SATU yang diterima (dulu dua → stok masuk dua kali)" "V == 1" \
+  "$(printf '%s\n' "$KODE174" | grep -c '^200$' || true)"
+cek "§174 yang kalah ditolak 400, bukan diam-diam sukses" "V == 1" \
+  "$(printf '%s\n' "$KODE174" | grep -c '^400$' || true)"
+
+# INTI SEKSI INI: saldonya. Kode HTTP masih bisa kebetulan benar; angka stok
+# tidak. Dulu cabang jadi 12 dan CK jadi 8.
+cek "§174 saldo cabang bergerak SEKALI: 6, bukan 12" "abs(V - 6) < 0.001" \
+  "$(api "$OWNER" GET "/perlengkapan?branch_id=$CB46_ID" | jq --arg id "$S174" '[.[]|select(.id==$id)][0].saldo')"
+cek "§174 saldo CK berkurang SEKALI: 14, bukan 8" "abs(V - 14) < 0.001" \
+  "$(api "$OWNER" GET "/perlengkapan?branch_id=$CK52_UTAMA" | jq --arg id "$S174" '[.[]|select(.id==$id)][0].saldo')"
+# Sesudah balapan, kiriman itu benar-benar tertutup: percobaan BERURUTAN pun 400.
+cek "§174 percobaan terima BERIKUTNYA juga 400 (bukan hanya balapannya dijaga)" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/perlengkapan/kiriman/$KIR174/terima?branch_id=$CB46_ID" -H "Authorization: Bearer $OWNER")"
+rm -f "$R174A" "$R174B"
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"
