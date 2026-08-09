@@ -8817,6 +8817,94 @@ rm -f "$R180A" "$R180B"
 tutup170
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# §181 SUNTING BILL SELAGI DIBAYAR: PESANANNYA TAK BOLEH HILANG SUNYI
+#
+# `PUT /open-bill/:id` menolak bill yang sudah tertutup — tapi penjaganya
+# memakai `existing`, yang dibaca TANPA kunci dan di LUAR transaksi penulisnya.
+# Di antara pemeriksaan dan penulisan ada `validateMenus`, `resolveMeja`, dan
+# pemeriksaan baris-tak-boleh-dihapus: beberapa query terpisah, dan selama itu
+# bill bisa dibayar perangkat lain. `UPDATE … WHERE id = :id` tak menyaring
+# `closed_at`, jadi tulisannya benar-benar mendarat.
+#
+# Gejalanya persis yang paling sulit dilihat: barisnya sudah disalin ke
+# `sale_items` saat dibayar, jadi tambahan yang menyusul tak pernah ditagih dan
+# tak pernah muncul di kartu penjualan. Dan `loadDetail` di akhir handler
+# memulangkan `null` untuk bill tertutup — jadi klien menerima **200 berisi
+# null**, `onSuccess` mengosongkan keranjang, dan kasir melihat "tersimpan"
+# untuk pesanan yang tak tersimpan di mana pun.
+#
+# Jalur ini yang paling mungkin dilewati: layar kasir bisa saja masih memegang
+# bill yang baru dibayar perangkat lain.
+echo "── §181 sunting bill selagi dibayar ──"
+
+# MENGENAI JENDELANYA butuh dua hal, dan keduanya ditemukan lewat percobaan,
+# bukan ditebak. Dikirim persis bersamaan, `PUT` SELALU menang (20/20 percobaan)
+# — ia jauh lebih ringan daripada `createSale`, yang mengunci cabang, memuat
+# katalog, dan menulis penjualan + baris + konsumsi. Dan bila `PUT` diberi jeda
+# terlalu besar (≥ 50 ms), pembayarannya sudah selesai sebelum `PUT` membaca
+# apa pun, sehingga penjaga lama menangkapnya dengan benar (409).
+#
+# Yang membukanya: `PUT` berisi BANYAK baris — validasi menu dan pemasangan
+# baris jadi lebih lama, sehingga jarak antara "membaca existing" dan "menulis"
+# melebar melewati saat pembayaran commit. Dengan 200 baris + jeda 30 ms,
+# bug-nya muncul 8 dari 8 percobaan.
+#
+# Angka itu ditala di satu mesin, jadi seksi ini diulang beberapa RONDE: kalau
+# satu ronde meleset dari jendelanya, ronde lain masih menggigit. Asersinya
+# sendiri aman di semua jalinan — ia hanya bisa merah kalau bug-nya ada, tak
+# pernah merah karena timing.
+tutup170
+SH181=$(buka170 100000)
+cek "dasar §181: shift terbuka" "V == 1" "$([ ${#SH181} -eq 36 ] && echo 1 || echo 0)"
+BESAR181=$(python3 -c "
+import json,sys
+print(json.dumps({'items':[{'menu_id':sys.argv[1],'qty':1} for _ in range(200)]}))" "$M170")
+
+NULL2XX181=0; SEBAB_SALAH181=0; LIMA181=0; JUAL_GAGAL181=0
+for _ in 1 2 3; do
+  BILL181=$(api "$REISS105" POST /open-bill \
+    "$(jq -nc --arg m "$M170" '{items:[{menu_id:$m, qty:1}]}')" | jq -r '.id // ""')
+  [ ${#BILL181} -ne 36 ] && continue
+  BAYAR181=$(mktemp); SUNTING181=$(mktemp)
+  curl -s -X POST "$BASE/api/penjualan" -H "Authorization: Bearer $REISS105" \
+    -H 'Content-Type: application/json' \
+    -d "$(jq -nc --arg b "$BILL181" --arg m "$M170" --arg r "$(python3 -c 'import uuid;print(uuid.uuid4())')" \
+        '{open_bill_id:$b, client_ref:$r, metode_bayar:"tunai", is_dine_in:false, items:[{menu_id:$m, qty:1}]}')" \
+    -w '\n%{http_code}' > "$BAYAR181" &
+  ( sleep 0.03
+    curl -s -X PUT "$BASE/api/open-bill/$BILL181" -H "Authorization: Bearer $REISS105" \
+      -H 'Content-Type: application/json' -d "$BESAR181" -w '\n%{http_code}' > "$SUNTING181" ) &
+  wait
+  KODE181=$(printf '%s\n' "$(tail -n1 "$SUNTING181")")
+  printf '%s\n' "$KODE181" | grep -q '^5' && LIMA181=$((LIMA181+1))
+  # INTI: sesudah bill tertutup `loadDetail` memulangkan null, jadi 2xx berisi
+  # `null` BERARTI tulisannya mendarat ke bill yang sudah dibayar — dan
+  # pesanan tambahannya lenyap tanpa galat, sementara `onSuccess` di klien
+  # mengosongkan keranjang. Kasir melihat "tersimpan"; yang tersimpan tak ada.
+  if printf '%s\n' "$KODE181" | grep -q '^2'; then
+    head -n-1 "$SUNTING181" | jq -e '.==null' > /dev/null 2>&1 && NULL2XX181=$((NULL2XX181+1))
+  elif [ "$KODE181" = "409" ]; then
+    # Kalau kalah, sebabnya harus yang SUDAH dikenal klien — sebab baru terbaca
+    # asing dan tak menahan pengosongan keranjang.
+    head -n-1 "$SUNTING181" | jq -e '.kode=="bill_sudah_ditutup"' > /dev/null 2>&1 \
+      || SEBAB_SALAH181=$((SEBAB_SALAH181+1))
+  else
+    SEBAB_SALAH181=$((SEBAB_SALAH181+1))
+  fi
+  head -n-1 "$BAYAR181" | jq -e '.sale.id != null' > /dev/null 2>&1 || JUAL_GAGAL181=$((JUAL_GAGAL181+1))
+  rm -f "$BAYAR181" "$SUNTING181"
+done
+
+cek "§181 tak ada yang 5xx (penolakannya terkendali, bukan tabrakan)" "V == 0" "$LIMA181"
+cek "§181 penyuntingan TIDAK pernah dibalas 2xx-berisi-null (kehilangan sunyi)" "V == 0" \
+  "$NULL2XX181"
+cek "§181 penolakannya selalu bersebab bill_sudah_ditutup (dikenal klien)" "V == 0" \
+  "$SEBAB_SALAH181"
+cek "§181 pembayarannya selalu tetap menerbitkan penjualan" "V == 0" "$JUAL_GAGAL181"
+tutup170
+
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

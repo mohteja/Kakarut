@@ -373,34 +373,6 @@ export const openBillRoutes = new Hono<AppEnv>()
      * bill ini sendiri — menyimpan ulang bill di mejanya sendiri harus tetap
      * boleh, itu justru jalur "tambahkan pesanan ke bill yang ada".
      */
-    const bentrokPindah = await db.transaction(async (tx) => {
-      if (!mejaId || tipe !== "dine_in") return null;
-      await tx.execute(sql`SELECT 1 FROM meja WHERE id = ${mejaId} FOR UPDATE`);
-      const [ada] = await tx
-        .select({ id: openBills.id, mejaLabel: openBills.mejaLabel })
-        .from(openBills)
-        .where(
-          and(
-            eq(openBills.companyId, auth.company_id!),
-            eq(openBills.branchId, existing.branchId),
-            eq(openBills.mejaId, mejaId),
-            isNull(openBills.closedAt),
-            ne(openBills.id, id),
-          ),
-        )
-        .limit(1);
-      return ada ?? null;
-    });
-    if (bentrokPindah) {
-      return c.json(
-        {
-          error: `${bentrokPindah.mejaLabel ?? "Meja itu"} masih punya bill yang belum dibayar — gabungkan pesanannya ke bill itu`,
-          kode: "meja_sudah_ada_bill",
-          bill_id: bentrokPindah.id,
-        },
-        409,
-      );
-    }
     /**
      * BARIS BILL TAK BISA DIHAPUS LEWAT `PUT` — diperiksa SEBELUM apa pun
      * ditulis. Mengembalikan galat di tengah transaksi TIDAK me-rollback apa
@@ -451,7 +423,84 @@ export const openBillRoutes = new Hono<AppEnv>()
         400,
       );
     }
-    await db.transaction(async (tx) => {
+    const konflik = await db.transaction(async (tx) => {
+      /*
+       * PEMERIKSAAN ULANG DI DALAM TRANSAKSI, di bawah kunci baris.
+       *
+       * `existing` di atas dibaca TANPA kunci dan di LUAR transaksi ini, jadi
+       * penjaga `closedAt` yang memakainya hanya menangkap bill yang sudah
+       * tertutup SEBELUM permintaan ini masuk. Bill yang dibayar atau
+       * dibatalkan di sela pemeriksaan dan penulisan lolos begitu saja — dan
+       * `UPDATE … WHERE id = :id` di bawah tak menyaring `closed_at`, jadi
+       * tulisannya benar-benar mendarat.
+       *
+       * Jendelanya bukan teori: di antara keduanya ada `validateMenus`,
+       * `resolveMeja`, dan pemeriksaan baris-tak-boleh-dihapus — semuanya
+       * query terpisah. Dan justru inilah jalur yang paling mungkin dilewati,
+       * karena layar kasir bisa saja masih memegang bill yang baru dibayar
+       * perangkat lain.
+       *
+       * `FOR UPDATE` menyerempak dengan `createSale`, yang mengunci bill yang
+       * sama saat menagihnya. Yang kalah menunggu lalu membaca keadaan yang
+       * benar: kalau pembayaran menang, PUT ini membalas 409; kalau PUT
+       * menang, pembayarannya ikut menagih baris yang baru ditambahkan.
+       */
+      const [kini] = await tx
+        .select({ closedAt: openBills.closedAt, saleId: openBills.saleId })
+        .from(openBills)
+        .where(eq(openBills.id, id))
+        .for("update");
+      if (!kini || kini.closedAt) {
+        // Sebab & bentuk badan persis sama dengan penjaga di atas — klien
+        // sudah menanganinya, dan sebab baru justru terbaca asing olehnya.
+        return {
+          error: kini?.saleId
+            ? "Bill ini sudah dibayar — pesanan tambahan harus dibuat sebagai transaksi baru."
+            : "Bill ini sudah dibatalkan — buat bill baru untuk pesanan ini.",
+          kode: "bill_sudah_ditutup",
+          sudah_dibayar: kini?.saleId != null,
+        };
+      }
+
+      /**
+       * PINDAH MEJA ikut dijaga aturan "satu meja dine-in = satu bill".
+       *
+       * Tanpa ini larangan di `POST` cuma menutup pintu depan: kasir tetap bisa
+       * membuat bill di meja lain lalu MEMINDAHKANNYA ke meja yang sudah punya
+       * bill, dan mendarat di keadaan yang justru dilarang. `ne(id)` mengecualikan
+       * bill ini sendiri — menyimpan ulang bill di mejanya sendiri harus tetap
+       * boleh, itu justru jalur "tambahkan pesanan ke bill yang ada".
+       *
+       * Diperiksa DI DALAM transaksi penulisan, bukan di transaksi tersendiri
+       * seperti dulu: kunci meja yang diambil lalu dilepas sebelum menulis tak
+       * menjaga apa pun di antara keduanya — bill lain bisa mendarat di meja
+       * itu tepat di sela tersebut. Sekarang kuncinya bertahan sampai
+       * tulisannya selesai.
+       */
+      if (mejaId && tipe === "dine_in") {
+        await tx.execute(sql`SELECT 1 FROM meja WHERE id = ${mejaId} FOR UPDATE`);
+        const [ada] = await tx
+          .select({ id: openBills.id, mejaLabel: openBills.mejaLabel })
+          .from(openBills)
+          .where(
+            and(
+              eq(openBills.companyId, auth.company_id!),
+              eq(openBills.branchId, existing.branchId),
+              eq(openBills.mejaId, mejaId),
+              isNull(openBills.closedAt),
+              ne(openBills.id, id),
+            ),
+          )
+          .limit(1);
+        if (ada) {
+          return {
+            error: `${ada.mejaLabel ?? "Meja itu"} masih punya bill yang belum dibayar — gabungkan pesanannya ke bill itu`,
+            kode: "meja_sudah_ada_bill",
+            bill_id: ada.id,
+          };
+        }
+      }
+
       /**
        * KUNCI YANG TAK DIKIRIM = JANGAN SENTUH.
        *
@@ -492,7 +541,10 @@ export const openBillRoutes = new Hono<AppEnv>()
           ...(body.catatan !== undefined && { catatan: body.catatan?.trim() || null }),
           updatedAt: new Date(),
         })
-        .where(eq(openBills.id, id));
+        // `isNull(closedAt)` sebagai sabuk kedua di samping kunci di atas:
+        // kalau kelak ada yang memindahkan pemeriksaannya, WHERE ini tetap
+        // menolak menulis ke bill yang sudah ditutup.
+        .where(and(eq(openBills.id, id), isNull(openBills.closedAt)));
 
       // Dulu: hapus-semua lalu sisipkan ulang. Itu membuang harga yang sudah
       // dikunci setiap kali bill disunting — persis bug yang sedang diperbaiki.
@@ -622,7 +674,9 @@ export const openBillRoutes = new Hono<AppEnv>()
           }),
         );
       }
+      return null;
     });
+    if (konflik) return c.json(konflik, 409);
     return c.json(await loadDetail(auth.company_id!, id));
   })
   /**
