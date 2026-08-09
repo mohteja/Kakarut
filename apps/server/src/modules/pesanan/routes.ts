@@ -637,10 +637,20 @@ export const pesananRoutes = new Hono<AppEnv>()
         // Nilai LAMA dibaca dulu: menandai TA sebuah baris yang memang sudah TA
         // bukan perpindahan basis, dan melaporkannya sebagai perpindahan akan
         // menambahkan biaya kemasan untuk kedua kalinya.
+        //
+        // `FOR UPDATE` — tanpa itu perbandingannya hanya menangkap penekanan
+        // BERURUTAN. Dua penekanan 🥡 pada baris yang sama di saat bersamaan
+        // sama-sama membaca `ta` yang lama (READ COMMITTED tak memperlihatkan
+        // tulisan yang belum di-commit), keduanya menyimpulkan "berpindah", dan
+        // biaya kemasannya ditambahkan DUA KALI ke `total_hpp`. Kunci di UPDATE
+        // bawah tak menolong: transaksi kedua tetap memegang snapshot lamanya.
+        // Dengan kunci di sini, yang kedua MENUNGGU lalu membaca nilai yang
+        // sudah berubah — dan melaporkan "tidak berpindah", yang memang benar.
         const [baris] = await tx
           .select({ nama: saleItems.menuNama, ta: saleItems.sajianTakeaway })
           .from(saleItems)
-          .where(and(eq(saleItems.id, itemId), eq(saleItems.saleId, id)));
+          .where(and(eq(saleItems.id, itemId), eq(saleItems.saleId, id)))
+          .for("update");
         if (!baris) throw new HTTPException(404, { message: "Baris pesanan tidak ditemukan" });
         await tx
           .update(saleItems)
@@ -779,10 +789,16 @@ export const pesananRoutes = new Hono<AppEnv>()
       // satu porsi sudah dibungkus kasir, sisanya belum — akan kena biaya
       // kemasan dua kali pada baris yang memang sudah bawa pulang. Yang
       // dilaporkan berpindah hanya baris yang nilainya benar-benar beda.
+      //
+      // `FOR UPDATE` dengan alasan yang sama seperti jalur per-baris di atas:
+      // dua penekanan "semua baris" yang berbarengan sama-sama membaca basis
+      // lama dan sama-sama melaporkan seluruh baris berpindah, jadi biaya
+      // kemasannya masuk dua kali.
       const lama = await tx
         .select({ id: saleItems.id, sajianTakeaway: saleItems.sajianTakeaway })
         .from(saleItems)
-        .where(eq(saleItems.saleId, id));
+        .where(eq(saleItems.saleId, id))
+        .for("update");
       await tx.update(saleItems).set({ sajianTakeaway: takeaway }).where(eq(saleItems.saleId, id));
       return await hitungUlangBiayaPenjualan(
         tx,

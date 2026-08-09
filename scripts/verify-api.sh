@@ -8756,6 +8756,67 @@ cek "§179 permintaan BERIKUTNYA melihat stok CK sudah habis dijanjikan (kirim_c
 rm -f "$R179A" "$R179B"
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# §180 DUA TOMBOL 🥡 BERBARENGAN: BIAYA KEMASAN MASUK SEKALI
+#
+# `/sajian` membaca `sajian_takeaway` yang LAMA, membandingkannya dengan yang
+# diminta, lalu melaporkan "baris ini berpindah basis" ke `hitungUlangBiaya`.
+# Perbandingan itu benar — tapi bacaannya tak dikunci. Dua penekanan pada baris
+# yang sama di saat bersamaan sama-sama membaca `false` (READ COMMITTED tak
+# memperlihatkan tulisan yang belum di-commit), keduanya menyimpulkan
+# "berpindah", dan biaya kemasannya DITAMBAHKAN DUA KALI ke `total_hpp`.
+#
+# Yang TIDAK ikut rusak — dan sengaja tetap diperiksa di bawah supaya batas
+# kerusakannya terdokumentasi, bukan diduga: stok kemasan bergerak dengan
+# benar (turun 2, bukan 4). Jadi kerugiannya murni di pembukuan — HPP
+# menggelembung dan laba dilaporkan lebih kecil dari kenyataan, sementara
+# gudang tetap cocok, sehingga tak ada selisih fisik yang memancing curiga.
+#
+# Kunci pada UPDATE-nya tak menolong: transaksi kedua tetap memegang snapshot
+# lamanya saat keputusan itu dibuat. Yang harus dikunci adalah BACAANNYA.
+#
+# Bukan kasus pinggir: tombol ini ada di papan pesanan dapur, layar yang paling
+# sering disentuh dua orang sekaligus, dan §156 sudah menetapkan angkanya bulat
+# (dus Rp 2.000/porsi) sehingga salahnya kelihatan.
+echo "── §180 dua tombol 🥡 berbarengan ──"
+
+tutup170
+SH180=$(buka170 100000)
+S180=$(api "$REISS105" POST /penjualan \
+  "{\"meja_id\":\"$MEJA156\",\"metode_bayar\":\"tunai\",\"items\":[{\"menu_id\":\"$M156\",\"qty\":2}]}")
+SID180=$(echo "$S180" | jq -r '.sale.id // ""')
+BR180=$(api "$OWNER" GET "/pesanan?branch_id=$CB156" | jq -r --arg id "$SID180" '[.[]|select(.id==$id)][0].items[0].id // ""')
+cek "dasar §180: 2 porsi dine-in, total_hpp = 2 × 1.000 (kemasan belum terpakai)" "V == 2000" \
+  "$(hpp156 "$SID180")"
+cek "dasar §180: baris pesanannya terbaca" "V == 1" \
+  "$([ ${#SID180} -eq 36 ] && [ ${#BR180} -eq 36 ] && echo 1 || echo 0)"
+
+DUS180=$(dus156)
+R180A=$(mktemp); R180B=$(mktemp)
+for f in "$R180A" "$R180B"; do
+  curl -s -X POST "$BASE/api/pesanan/penjualan/$SID180/item/$BR180/sajian" \
+    -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' \
+    -d '{"takeaway":true}' -w '\n%{http_code}' > "$f" &
+done
+wait
+cek "§180 tak ada yang 5xx (penolakannya terkendali, bukan tabrakan)" "V == 0" \
+  "$(for f in "$R180A" "$R180B"; do printf '%s\n' "$(tail -n1 "$f")"; done | grep -c '^5' || true)"
+
+# INTI: 2000 + (2 porsi × Rp 2.000 kemasan) = 6000. Dulu 10000 — kemasannya
+# dihitung untuk kedua penekanan, padahal dusnya cuma dipakai sekali.
+cek "§180 total_hpp naik SEKALI: 6000, bukan 10000" "V == 6000" "$(hpp156 "$SID180")"
+# Stok kemasan SUDAH benar bahkan sebelum perbaikan — diperiksa supaya batas
+# kerusakannya tercatat: yang rusak pembukuannya, bukan gudangnya. Itu pula
+# yang membuatnya sulit ketahuan; tak ada selisih fisik yang memancing curiga.
+cek "§180 stok dus turun 2 pcs (sisi ini memang sudah benar)" "abs(V - 2) < 0.001" \
+  "$(python3 -c "print($DUS180 - $(dus156))")"
+# Dan hasil akhirnya memang tersimpan, bukan sekadar tak dihitung dua kali.
+cek "§180 barisnya benar-benar bertanda bawa pulang" "V == 1" \
+  "$(api "$OWNER" GET "/penjualan/$SID180" | jq --arg b "$BR180" '([.items[]|select(.id==$b)][0].sajianTakeaway==true)|if . then 1 else 0 end')"
+rm -f "$R180A" "$R180B"
+tutup170
+
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"
