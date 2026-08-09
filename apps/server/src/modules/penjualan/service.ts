@@ -52,8 +52,6 @@ export interface CreateSaleParams {
   /** diskon per transaksi: "persen" (nilai 0–100) atau "nominal" (Rp) */
   diskonTipe?: "persen" | "nominal";
   diskonNilai?: number;
-  /** owner/admin boleh melampaui batas diskon maksimal kasir */
-  bypassDiskonLimit?: boolean;
   /** identitas konsumen/member (opsional) — WA jadi kunci member */
   customerNama?: string | null;
   customerWa?: string | null;
@@ -343,10 +341,20 @@ export async function createSale(params: CreateSaleParams) {
     } else if (params.diskonTipe === "nominal" && nilai > 0) {
       diskon = Math.min(subtotal, Math.max(0, Math.round(nilai)));
     }
-    // Batas diskon kasir (owner/admin bypass). +0.5% toleransi pembulatan.
-    if (!params.bypassDiskonLimit && subtotal > 0 && diskon > 0) {
+    /*
+     * Batas diskon kasir. Toleransi 0,5% ada untuk PEMBULATAN — diskon nominal
+     * yang dibagi subtotal jarang jatuh persis di batasnya.
+     *
+     * Tapi batas NOL tidak punya apa pun untuk dibulatkan. `0 + 0.5` membuat
+     * "kasir tak boleh memberi diskon sama sekali" diam-diam berarti "boleh,
+     * asal di bawah setengah persen" — Rp 10.000 pada nota Rp 2 juta, tiap
+     * transaksi, tanpa persetujuan siapa pun dan tanpa jejak selain angka
+     * diskon di nota. Maka pada nol, toleransinya juga nol.
+     */
+    const toleransi = company.diskonMaksPersen === 0 ? 0 : 0.5;
+    if (subtotal > 0 && diskon > 0) {
       const pctEfektif = (diskon / subtotal) * 100;
-      if (pctEfektif > company.diskonMaksPersen + 0.5) {
+      if (pctEfektif > company.diskonMaksPersen + toleransi) {
         throw new HTTPException(400, {
           message: `Diskon melebihi batas maksimal kasir (${company.diskonMaksPersen}%)`,
         });

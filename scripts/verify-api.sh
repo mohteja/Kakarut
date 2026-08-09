@@ -984,9 +984,25 @@ cek "kasir diskon nominal 17000 (=50% > batas) ditolak (400)" "V == 400" \
   "$(jp "$KASIR" "{\"is_dine_in\":false,\"diskon_tipe\":\"nominal\",\"diskon_nilai\":17000,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")"
 cek "kasir diskon 20% (= batas) diterima (201)" "V == 201" \
   "$(jp "$KASIR" "{\"is_dine_in\":false,\"diskon_tipe\":\"persen\",\"diskon_nilai\":20,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")"
+# Toleransi 0,5% ADA untuk pembulatan dan harus TETAP ada di batas bukan-nol:
+# 6.900 dari 34.000 = 20,29%, sedikit di atas batas 20% — diterima. Penjaga
+# arah-balik supaya lantai di bawah tidak dipasang dengan cara mematikan
+# toleransinya di mana-mana.
+cek "batas 20: diskon nominal 6900 (20,29% — dalam toleransi bulat) diterima (201)" "V == 201" \
+  "$(jp "$KASIR" "{\"is_dine_in\":false,\"diskon_tipe\":\"nominal\",\"diskon_nilai\":6900,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")"
 api "$OWNER" PATCH /company '{"diskon_maks_persen":0}' > /dev/null
 cek "batas 0: kasir diskon 5% ditolak (400)" "V == 400" \
   "$(jp "$KASIR" "{\"is_dine_in\":false,\"diskon_tipe\":\"persen\",\"diskon_nilai\":5,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")"
+# INTI: pita di BAWAH toleransi — yang dulu lolos diam-diam. Harga PBA 34.000
+# (dijamin asersi "harga jual bulat PBA = 34000" di §2), jadi 0,5% = 170.
+# Rp 100 = 0,29% dan Rp 170 = tepat 0,5%: keduanya dulu DITERIMA walau batasnya
+# nol, karena toleransi pembulatan ikut dipakai pada batas yang tak punya apa
+# pun untuk dibulatkan. Pada nota Rp 2 juta pita itu bernilai Rp 10.000, tiap
+# transaksi, tanpa persetujuan siapa pun.
+cek "batas 0: diskon nominal 100 (0,29% — di bawah toleransi lama) DITOLAK (400)" "V == 400" \
+  "$(jp "$KASIR" "{\"is_dine_in\":false,\"diskon_tipe\":\"nominal\",\"diskon_nilai\":100,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")"
+cek "batas 0: diskon nominal 170 (tepat 0,5% — batas toleransi lama) DITOLAK (400)" "V == 400" \
+  "$(jp "$KASIR" "{\"is_dine_in\":false,\"diskon_tipe\":\"nominal\",\"diskon_nilai\":170,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")"
 cek "batas 0: kasir tanpa diskon tetap boleh (201)" "V == 201" \
   "$(jp "$KASIR" "{\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")"
 api "$OWNER" PATCH /company '{"diskon_maks_persen":100}' > /dev/null   # reset
