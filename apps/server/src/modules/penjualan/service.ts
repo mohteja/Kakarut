@@ -17,6 +17,7 @@ import {
   saleConsumptions,
   saleItems,
   sales,
+  shifts,
 } from "../../db/schema";
 import { kodeCabang, tanggalDi } from "../../lib/time";
 import { upsertCustomer } from "../customer/service";
@@ -65,10 +66,14 @@ export interface CreateSaleParams {
    */
   waktu?: Date;
   /**
-   * Shift kasir tempat transaksi dibukukan (jalur sinkron offline). Diisi agar
-   * transaksi susulan tetap masuk rekap shift yang benar meski `waktu`-nya
-   * jatuh setelah shift ditutup. Jalur online biasa membiarkannya kosong —
-   * penautan lewat jendela waktu sudah cukup.
+   * Shift kasir tempat transaksi dibukukan. Jalur sinkron offline MENGISINYA
+   * agar transaksi susulan tetap masuk rekap shift yang benar meski `waktu`-nya
+   * jatuh setelah shift ditutup.
+   *
+   * Dibiarkan kosong → shift terbuka cabang ini dicari SENDIRI di dalam
+   * transaksi (lihat `kunciShiftTerbuka`). Dulu jalur online membiarkannya
+   * kosong dan berhenti di situ, sehingga SETIAP penjualan online
+   * ber-`shift_id` NULL dan hanya bisa ditautkan lewat jendela waktu.
    */
   shiftId?: string | null;
   /**
@@ -103,6 +108,41 @@ export async function createSale(params: CreateSaleParams) {
       .from(companies)
       .where(eq(companies.id, params.companyId));
     if (!company) throw new HTTPException(404, { message: "Perusahaan tidak ditemukan" });
+
+    /*
+     * SHIFT PENANGGUNG transaksi ini.
+     *
+     * Jalur sinkron offline mengirimkannya sendiri (transaksi susulan harus
+     * masuk shift yang benar walau waktunya jatuh setelah shift itu ditutup).
+     * Jalur online dulu tidak mengirim apa pun — padahal ia BARU SAJA mencari
+     * shift terbukanya untuk gerbang "Kasir belum dibuka", lalu membuang
+     * hasilnya. Akibatnya `sales.shift_id` NULL di setiap transaksi online, dan
+     * penautan ke shift jatuh seluruhnya ke jendela waktu. Kolom yang ada
+     * justru untuk memperbaiki itu jadi tak pernah terisi di jalur yang paling
+     * ramai.
+     *
+     * Dicari DI DALAM transaksi ini, bukan di pemanggil, karena dua alasan:
+     * pemanggil berikutnya tak bisa lupa memakainya, dan `FOR SHARE` di sini
+     * betul-betul menggigit — `POST /shift/tutup` menutup lewat UPDATE biasa,
+     * yang menunggu kunci ini lepas. Tanpa itu shift bisa tertutup di sela
+     * pencarian dan penyimpanan, dan transaksinya membukukan diri ke shift yang
+     * sudah dihitung dan dicocokkan.
+     */
+    let shiftId = params.shiftId ?? null;
+    if (!shiftId) {
+      const [terbuka] = await tx
+        .select({ id: shifts.id })
+        .from(shifts)
+        .where(
+          and(
+            eq(shifts.companyId, params.companyId),
+            eq(shifts.branchId, branch.id),
+            isNull(shifts.closedAt),
+          ),
+        )
+        .for("share");
+      shiftId = terbuka?.id ?? null;
+    }
 
     // Meja terpilih menentukan mode transaksi: meja "takeaway" (Ruang Tunggu)
     // → seluruh pesanan bawa pulang; meja biasa → dine-in (tiap item masih bisa
@@ -416,7 +456,7 @@ export async function createSale(params: CreateSaleParams) {
         metodeBayar,
         uangDiterima,
         saleDate,
-        shiftId: params.shiftId ?? null,
+        shiftId,
         asalOpenBillId: params.openBillId ?? null,
         ...(params.waktu ? { waktu: params.waktu } : {}),
       })

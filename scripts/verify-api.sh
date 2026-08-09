@@ -8660,6 +8660,39 @@ rm -f "$R177A" "$R177B"
 tutup170
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# §178 PENJUALAN ONLINE DITAUTKAN KE SHIFT-NYA, BUKAN CUMA KE JENDELA WAKTU
+#
+# `sales.shift_id` ada justru supaya rekap tak bergantung pada jendela waktu.
+# Jalur SINKRON mengisinya; jalur ONLINE tidak — padahal ia baru saja mencari
+# shift terbuka untuk gerbang "Kasir belum dibuka", lalu MEMBUANG hasilnya.
+# Akibatnya setiap transaksi online ber-`shift_id` NULL dan seluruh
+# penautannya jatuh ke jendela waktu — persis hal yang kolom itu ada untuk
+# menggantikannya, tak pernah terisi di jalur yang paling ramai.
+#
+# Terlihat langsung di data: sebelum perbaikan, satu-satunya baris ber-shift_id
+# di hari uji adalah yang lahir lewat /sync.
+echo "── §178 penjualan online tertaut ke shift ──"
+
+tutup170
+SH178=$(buka170 100000)
+SALE178=$(jual170 | jq -r '.sale.id // ""')
+cek "dasar §178: shift terbuka & penjualan online tercatat" "V == 1" \
+  "$([ ${#SH178} -eq 36 ] && [ ${#SALE178} -eq 36 ] && echo 1 || echo 0)"
+
+# INTI: dulu null.
+cek "§178 penjualan online ber-shift_id (dulu NULL di semua transaksi online)" "V == 1" \
+  "$(api "$OWNER" GET "/penjualan/$SALE178" | jq '(.sale.shiftId != null) | if . then 1 else 0 end')"
+# Dan bukan sekadar terisi — terisi shift yang BENAR.
+cek "§178 shift_id-nya persis shift yang sedang terbuka" "V == 1" \
+  "$(api "$OWNER" GET "/penjualan/$SALE178" | jq --arg s "$SH178" '(.sale.shiftId == $s) | if . then 1 else 0 end')"
+# Jalur sinkron tetap memegang kendali: shift yang DIKIRIMNYA tak boleh ditimpa
+# oleh shift terbuka saat ini — itulah yang membuat transaksi susulan benar.
+cek "§178 rekap shift memuat penjualan itu" "V > 0" \
+  "$(api "$OWNER" GET "/shift/$SH178" | jq '.kas_sistem')"
+tutup170
+
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"
