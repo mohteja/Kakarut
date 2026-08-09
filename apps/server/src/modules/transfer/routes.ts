@@ -516,20 +516,39 @@ export const transferRoutes = new Hono<AppEnv>()
       });
     }
     const now = new Date();
-    const hapus = await db
-      .update(productions)
-      .set({ deletedAt: now, deletedBy: auth.sub })
-      .where(
-        and(
-          eq(productions.companyId, auth.company_id!),
-          eq(productions.fakturId, fakturId),
-          eq(productions.status, "menunggu"),
-          isNull(productions.deletedAt),
-        ),
-      )
-      .returning({ id: productions.id });
-    if (hapus.length === 0) {
-      throw new HTTPException(409, { message: "Transfer sudah berubah — muat ulang lalu coba lagi" });
-    }
+    /*
+     * SEMUA BARIS ATAU TIDAK SAMA SEKALI.
+     *
+     * Pemeriksaan `some(status !== 'menunggu')` di atas dan UPDATE di bawah ini
+     * adalah dua pernyataan terpisah. Bila cabang tujuan menerima SEBAGIAN
+     * barisnya tepat di selanya, UPDATE-nya hanya mencocokkan sisanya —
+     * `hapus.length > 0`, jadi dulu pembatalannya dilaporkan `ok` padahal yang
+     * terjadi pembatalan SEBAGIAN: sebagian stok kembali ke asal, sebagian
+     * sudah mendarat di tujuan, dan pengirim mengira transfernya batal utuh.
+     *
+     * Menuntut jumlahnya SAMA lalu melempar dari DALAM transaksi membuatnya
+     * dibatalkan seluruhnya — idiom yang sama dengan `terima-sebagian` di modul
+     * penerimaan, yang menghadapi persoalan identik dan menyelesaikannya begini.
+     */
+    const hapus = await db.transaction(async (tx) => {
+      const res = await tx
+        .update(productions)
+        .set({ deletedAt: now, deletedBy: auth.sub })
+        .where(
+          and(
+            eq(productions.companyId, auth.company_id!),
+            eq(productions.fakturId, fakturId),
+            eq(productions.status, "menunggu"),
+            isNull(productions.deletedAt),
+          ),
+        )
+        .returning({ id: productions.id });
+      if (res.length !== baris.length) {
+        throw new HTTPException(409, {
+          message: "Transfer sudah berubah — muat ulang lalu coba lagi",
+        });
+      }
+      return res;
+    });
     return c.json({ ok: true, jumlah_baris: hapus.length });
   });
