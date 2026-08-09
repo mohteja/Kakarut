@@ -276,7 +276,22 @@ export const pengajuanRoutes = new Hono<AppEnv>()
       });
     }
 
-    await db
+    /*
+     * PUTUSAN DIKLAIM LEWAT SYARAT STATUS, BUKAN LEWAT PEMERIKSAAN DI ATAS.
+     *
+     * Pemeriksaan `ada.status !== "menunggu"` hanya menangkap percobaan
+     * BERURUTAN. Dua atasan yang memutus pengajuan yang SAMA di saat bersamaan
+     * — owner menyetujui, admin menolak — sama-sama membaca `menunggu`, lalu
+     * sama-sama menulis. Tanpa syarat di sini, penulis terakhir menang DIAM-
+     * DIAM: keduanya dibalas 200, keduanya mengira putusannya berlaku, dan
+     * `diputus_oleh` hanya merekam salah satunya tanpa petunjuk bahwa yang lain
+     * pernah terjadi. Karyawannya bisa diberi tahu "disetujui" sementara
+     * catatannya berbunyi "ditolak".
+     *
+     * Idiomnya sudah baku di basis kode ini — lihat persetujuan penyesuaian
+     * opname: UPDATE bersyarat status + periksa barisnya + 409/404.
+     */
+    const diputus = await db
       .update(leaveRequests)
       .set({
         status: b.status,
@@ -284,7 +299,19 @@ export const pengajuanRoutes = new Hono<AppEnv>()
         diputusOlehUserId: auth.sub,
         diputusPada: new Date(),
       })
-      .where(eq(leaveRequests.id, id));
+      .where(
+        and(
+          eq(leaveRequests.id, id),
+          eq(leaveRequests.companyId, auth.company_id!),
+          eq(leaveRequests.status, "menunggu"),
+        ),
+      )
+      .returning({ id: leaveRequests.id });
+    if (diputus.length === 0) {
+      throw new HTTPException(409, {
+        message: "Pengajuan sudah diputuskan orang lain — muat ulang lalu periksa hasilnya",
+      });
+    }
     return c.json(await ambilSatu(id, auth.company_id!));
   })
 
@@ -312,7 +339,31 @@ export const pengajuanRoutes = new Hono<AppEnv>()
         });
       }
     }
-    await db.delete(leaveRequests).where(eq(leaveRequests.id, id));
+    /*
+     * Pemohon hanya boleh membatalkan SELAMA masih `menunggu`, dan syarat itu
+     * harus ikut di WHERE-nya — bukan cuma diperiksa di atas. Tanpa itu,
+     * pembatalan yang datang tepat saat atasan menyetujui akan MENANG:
+     * pengajuan yang sudah disetujui lenyap tanpa jejak, sementara atasannya
+     * sudah dibalas 200.
+     *
+     * Manajemen tetap boleh menghapus kapan saja (mis. salah ACC), jadi
+     * syaratnya sengaja hanya dipasang untuk pemohon.
+     */
+    const dihapus = await db
+      .delete(leaveRequests)
+      .where(
+        and(
+          eq(leaveRequests.id, id),
+          eq(leaveRequests.companyId, auth.company_id!),
+          ...(manajemen ? [] : [eq(leaveRequests.status, "menunggu")]),
+        ),
+      )
+      .returning({ id: leaveRequests.id });
+    if (dihapus.length === 0) {
+      throw new HTTPException(409, {
+        message: "Pengajuan yang sudah diputuskan tidak bisa dibatalkan — hubungi atasan",
+      });
+    }
     return c.json({ ok: true });
   });
 
