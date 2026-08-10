@@ -49,3 +49,21 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
+
+# Swarm TIDAK membuat jaringan `default` secara implisit.
+#
+# `docker compose` biasa selalu menyediakan `default` tanpa diminta. Dokploy
+# menjalankan `docker stack deploy` (mode Swarm), dan di sana aturannya berbeda:
+# jaringan hanya dibuat kalau dideklarasikan. Saat menyiapkan rilis, Dokploy
+# menyuntikkan `networks: [dokploy-network, default]` ke service ini — bersama
+# label Traefik dari tab Domains — tapi yang didefinisikannya hanya
+# `dokploy-network`. Rujukan `default` jadi menggantung, dan deploy berhenti di:
+#
+#   failed to create service ..._app-terakasir:
+#   network terakasir-all-service-<id>_default not found
+#
+# Mendefinisikannya di sini membuat jaringan itu benar-benar dibuat. Driver
+# `overlay` wajib: Swarm menolak `bridge` untuk service multi-node.
+networks:
+  default:
+    driver: overlay
