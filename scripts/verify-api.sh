@@ -8922,6 +8922,75 @@ cek "§181 pembayarannya selalu tetap menerbitkan penjualan" "V == 0" "$JUAL_GAG
 tutup170
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# §182 OPNAME DI CK: "SIAP KIRIM" vs "DI JALAN"
+#
+# `status = 'menunggu'` dipakai untuk TIGA keadaan yang berbeda:
+#
+#   - jalur produksi  : "selesai diproduksi"  → barangnya DI RAK cabang ini;
+#   - jalur kirim CK  : "siap dikirim"        → barangnya DI RAK cabang ini;
+#   - sesudah dikirim : "dalam perjalanan"    → barangnya SUDAH TIDAK di rak.
+#
+# `hitungSaldoCabang` sengaja masih memuat ketiganya — pengurangannya baru saat
+# `dikonfirmasi`. Itu benar untuk perencanaan dan supaya barang tak "hilang"
+# dari pembukuan selagi di jalan. Tapi opname membandingkan buku dengan APA YANG
+# ADA DI RAK, dan yang sudah dimuat ke kendaraan tak bisa dihitung petugas.
+#
+# Seksi ini menjaga KEDUA sisinya, sebab memotong yang salah justru merusak:
+# memotong seluruh `qtyDalamJalan` (termasuk "siap kirim") membuat baseline
+# mengecualikan barang yang sebenarnya ada, lalu penerimaannya menguranginya
+# sekali lagi — saldo CK jatuh ke MINUS. Versi pertama perbaikan ini melakukan
+# persis itu dan tertangkap di −10; karena itu kasus (a) di bawah ada.
+echo "── §182 opname CK: siap kirim vs di jalan ──"
+
+# Bersihkan sisa kiriman tertunda §179 supaya CK berangkat dari keadaan yang
+# diketahui — kalau tidak, "yang di jalan" bercampur antara dua seksi.
+if [ ${#KFID179} -eq 36 ]; then
+  api "$OWNER" POST "/produksi/kirim/$KFID179" '{}' > /dev/null 2>&1 || true
+  api "$OWNER" POST "/penerimaan/$KFID179/terima" > /dev/null 2>&1 || true
+fi
+api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CK52_UTAMA\",\"items\":[{\"ingredient_id\":\"$BASO66\",\"qty\":50},{\"ingredient_id\":\"$DAG66\",\"qty\":20000},{\"ingredient_id\":\"$TEP66\",\"qty\":5000}]}" > /dev/null
+api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CB46_ID\",\"items\":[{\"ingredient_id\":\"$BASO66\",\"qty\":0}]}" > /dev/null
+cek "dasar §182: CK berstok 50" "abs(V - 50) < 0.001" \
+  "$(api "$OWNER" GET "/stok?branch_id=$CK52_UTAMA" | jq --arg i "$BASO66" '[.[]|select(.ingredient_id==$i)][0].saldo')"
+
+# Faktur kirim 30 lahir ber-status 'menunggu' — tapi BELUM dikirim: barangnya
+# masih di rak CK, dan `POST /produksi/kirim` belum dipanggil.
+H182=$(api "$OWNER" POST /rekomendasi/menu/faktur \
+  "{\"items\":[{\"menu_id\":\"$MENU66\",\"porsi\":6}],\"tujuan_branch_id\":\"$CB46_ID\",\"ck_branch_id\":\"$CK52_UTAMA\"}")
+KF182=$(echo "$H182" | jq -r '.kirim.faktur_id // ""')
+cek "dasar §182: faktur kirim 30 terbit (siap kirim, belum berangkat)" "V == 1" \
+  "$([ ${#KF182} -eq 36 ] && echo 1 || echo 0)"
+
+# (a) SIAP KIRIM — barangnya MASIH DI RAK. Petugas menghitung 50, dan itu benar.
+#     Inilah kasus yang rusak bila potongannya memakai `qtyDalamJalan`.
+OP182A=$(api "$OWNER" POST /stok/opname \
+  "{\"branch_id\":\"$CK52_UTAMA\",\"items\":[{\"ingredient_id\":\"$BASO66\",\"qty\":50}]}")
+cek "§182a siap-kirim masih dihitung ada: hitung 50 → selisih 0" "abs(V) < 0.001" \
+  "$(echo "$OP182A" | jq '.ringkasan.total_selisih')"
+
+# (b) DI JALAN — sekarang benar-benar dikirim. Barangnya tak lagi di rak, jadi
+#     hitungan fisik yang BENAR tinggal 20.
+api "$OWNER" POST "/produksi/kirim/$KF182" '{}' > /dev/null
+cek "dasar §182: saldo CK tetap 50 (kiriman belum diterima — memang begitu)" "abs(V - 50) < 0.001" \
+  "$(api "$OWNER" GET "/stok?branch_id=$CK52_UTAMA" | jq --arg i "$BASO66" '[.[]|select(.ingredient_id==$i)][0].saldo')"
+OP182B=$(api "$OWNER" POST /stok/opname \
+  "{\"branch_id\":\"$CK52_UTAMA\",\"items\":[{\"ingredient_id\":\"$BASO66\",\"qty\":20}]}")
+# INTI: dulu −30. Petugas benar, sistem menuduh barangnya hilang.
+cek "§182b yang sudah berangkat tak dihitung ada: hitung 20 → selisih 0 (dulu −30)" "abs(V) < 0.001" \
+  "$(echo "$OP182B" | jq '.ringkasan.total_selisih')"
+cek "§182b barisnya tercatat COCOK, bukan kurang" "V == 1" \
+  "$(echo "$OP182B" | jq '(.ringkasan.cocok==1 and .ringkasan.kurang==0) | if . then 1 else 0 end')"
+
+# (c) Sesudah diterima: tak ada pengurangan KEDUA. `kirim_keluar` menyaring
+#     `pr.waktu > baseline`, dan `waktu` tetap waktu baris dibuat.
+api "$OWNER" POST "/penerimaan/$KF182/terima" > /dev/null
+cek "§182c sesudah diterima: cabang +30" "abs(V - 30) < 0.001" \
+  "$(api "$OWNER" GET "/stok?branch_id=$CB46_ID" | jq --arg i "$BASO66" '[.[]|select(.ingredient_id==$i)][0].saldo')"
+cek "§182c sesudah diterima: CK tetap 20, tidak MINUS" "abs(V - 20) < 0.001" \
+  "$(api "$OWNER" GET "/stok?branch_id=$CK52_UTAMA" | jq --arg i "$BASO66" '[.[]|select(.ingredient_id==$i)][0].saldo')"
+
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

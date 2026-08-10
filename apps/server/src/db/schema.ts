@@ -1646,6 +1646,25 @@ export const productions = pgTable(
      * (beda dgn asal_branch_id yang mengurangi stok CK saat transfer diterima).
      */
     dariBranchId: uuid("dari_branch_id").references(() => branches.id),
+    /**
+     * KAPAN BARANGNYA BENAR-BENAR BERANGKAT dari cabang asal (`POST
+     * /produksi/kirim`). Null = belum dikirim.
+     *
+     * Ada karena `status = 'menunggu'` menanggung TIGA arti sekaligus:
+     * "selesai diproduksi" dan "siap dikirim" (barangnya masih di rak) serta
+     * "dalam perjalanan" (sudah tidak di rak). Tanpa penanda ini keduanya tak
+     * bisa dibedakan, dan opname fisik jadi salah untuk salah satunya —
+     * memotong terlalu banyak membuat saldo CK MINUS, memotong terlalu sedikit
+     * membuat kiriman yang sedang berjalan terbaca sebagai barang hilang.
+     *
+     * BUKAN sekadar metadata tampilan (beda dari `dari_branch_id`): ia dipakai
+     * saldo. `kirim_keluar` membandingkannya dengan baseline opname supaya
+     * barang yang sudah berangkat SEBELUM penghitungan tidak dikurangkan lagi
+     * saat tiba — tanpa itu opname yang benar justru menjatuhkan saldo ke minus.
+     * `waktu` tak bisa dipakai untuk itu: ia ditimpa waktu penerimaan saat
+     * baris dikonfirmasi.
+     */
+    dikirimAt: timestamp("dikirim_at", { withTimezone: true }),
     ingredientId: uuid("ingredient_id")
       .notNull()
       .references(() => ingredients.id),

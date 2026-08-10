@@ -673,6 +673,13 @@
       "when": 1786287257380,
       "tag": "0095_mysterious_toad",
       "breakpoints": true
+    },
+    {
+      "idx": 96,
+      "version": "7",
+      "when": 1786321642339,
+      "tag": "0096_military_gideon",
+      "breakpoints": true
     }
   ]
 }

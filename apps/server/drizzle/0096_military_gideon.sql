@@ -1,0 +1,1 @@
+ALTER TABLE "productions" ADD COLUMN "dikirim_at" timestamp with time zone;

@@ -25,7 +25,7 @@ import { pastikanCabang, requireRole, resolveBranchId, terikatCabang, type AppEn
 import { hargaPerUnit } from "@kakarut/shared";
 import { awalHariDi, tanggalDi } from "../../lib/time";
 import { nomorUntukRefs, terbitkanNomor } from "../dokumen/nomor";
-import { fifoBahan, hitungSaldoCabang, kartuStok } from "./service";
+import { fifoBahan, hitungSaldoCabang, kartuStok, qtyDiJalan } from "./service";
 
 const OpnameBody = z.object({
   branch_id: z.string().uuid().optional(),
@@ -423,7 +423,42 @@ export const stokRoutes = new Hono<AppEnv>()
 
     // Snapshot saldo sistem per bahan (sebelum opname mengubahnya)
     const saldoRows = await hitungSaldoCabang(auth.company_id!, branchId);
-    const saldoById = new Map(saldoRows.map((r) => [r.ingredient_id, r.saldo]));
+    /*
+     * BARANG YANG SUDAH BERANGKAT BUKAN BARANG YANG SEHARUSNYA ADA DI RAK.
+     *
+     * `hitungSaldoCabang` sengaja masih memuat kiriman yang belum diterima —
+     * pengurangannya baru terjadi saat statusnya `dikonfirmasi` (subquery
+     * `kirim_keluar`). Itu benar untuk perencanaan dan agar barangnya tak
+     * "hilang" dari pembukuan selagi di jalan. Tapi opname membandingkan buku
+     * dengan APA YANG ADA DI RAK, dan barang yang sudah dimuat ke kendaraan
+     * tak bisa dihitung petugas. Tanpa potongan ini, tiap kiriman yang sedang
+     * berjalan muncul sebagai SELISIH KURANG: petugas menghitung benar, sistem
+     * tetap melaporkan barang hilang, dan selisih hantu itu harus di-ACC owner
+     * sebagai penyusutan — catatan yang menuduh kehilangan.
+     *
+     * YANG DIPOTONG HANYA `qtyDiJalan`, BUKAN `qtyDalamJalan`. Keduanya beda,
+     * dan memakai yang salah justru merusak: `qtyDalamJalan` ikut menghitung
+     * baris "siap dikirim" dan "selesai diproduksi", yang barangnya MASIH DI
+     * RAK. Memotongnya membuat baseline opname mengecualikan barang yang
+     * sebenarnya ada, lalu penerimaannya menguranginya sekali lagi — saldo CK
+     * jatuh ke MINUS. Itu bukan dugaan; versi pertama perbaikan ini
+     * melakukannya persis begitu dan verify-api menangkapnya di −10.
+     *
+     * Tak ada pengurangan ganda di sini: `kirim_keluar` menyaring
+     * `pr.waktu > b.created_at`, sementara `waktu` tetap waktu baris dibuat
+     * (mengirim hanya menyentuh `branch_id`/`updated_at`). Kiriman yang sudah
+     * berangkat sebelum opname karena itu jatuh di luar jendela baseline.
+     *
+     * Cabang toko tak terpengaruh: penyaringnya `asal_branch_id = cabang ini`,
+     * dan toko tak mengirim ke mana-mana.
+     */
+    const diJalanById = await qtyDiJalan(db, auth.company_id!, branchId);
+    const saldoById = new Map(
+      saldoRows.map((r) => [
+        r.ingredient_id,
+        Math.max(0, r.saldo - (diJalanById.get(r.ingredient_id) ?? 0)),
+      ]),
+    );
     const infoById = new Map(saldoRows.map((r) => [r.ingredient_id, r]));
 
     // Batasan petugas: peran terikat cabang (kasir/tim) hanya boleh opname
