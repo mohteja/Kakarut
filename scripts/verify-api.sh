@@ -9037,6 +9037,42 @@ cek "§183 omzet sudah bersih — omzet + refund = omzet sebelum refund" "abs(V)
 tutup170
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# §184 RESEP TAK BOLEH BERUBAH SELAGI PRODUKSINYA BERJALAN
+#
+# `catatKonsumsiProduksi` membaca resep LIVE saat produksi selesai, bukan
+# snapshot saat fakturnya dibuat. `PUT /bahan/:id` sudah menolak perubahan
+# `isi` selagi ada produksi berjalan justru karena itu — tapi resepnya sendiri
+# masih bisa ditulis ulang lewat `PUT /bahan/:id/resep`, dan akibatnya sama
+# persis: faktur yang RAB-nya dihitung dengan satu resep dieksekusi dengan
+# resep yang lain. Bahan yang dikeluarkan berhenti dipotong sama sekali; yang
+# ditambahkan dipotong tanpa pernah masuk perhitungan biaya.
+#
+# Pintu yang sama, sisi yang lain — dan sisi ini yang belum berpalang.
+echo "── §184 resep terkunci selagi produksi berjalan ──"
+
+RESEP184='{"komponen":[{"ingredient_id":"'"$DAG66"'","qty":2000},{"ingredient_id":"'"$TEP66"'","qty":300}]}'
+
+# Bahan produksi BARU yang tak pernah punya faktur: penjaganya tak boleh jadi
+# palang permanen. Sengaja bukan $BASO66 — bahan itu dipakai banyak seksi lain
+# dan hampir selalu punya faktur berjalan pada titik ini, jadi memakainya
+# sebagai garis dasar akan menguji keadaan, bukan penjaganya.
+BR184=$(api "$OWNER" POST /bahan '{"nama":"Bakso Uji184","satuan":"butir","satuan_beli":"batch","isi":100,"harga_beli":0,"pengadaan":"produksi","kategori":"lain"}' | jq -r '.id // ""')
+cek "dasar §184: bahan produksi baru dibuat" "V == 1" \
+  "$([ ${#BR184} -eq 36 ] && echo 1 || echo 0)"
+cek "§184 tanpa produksi berjalan, resep TETAP boleh disimpan (bukan palang permanen)" "V == 200" \
+  "$(status_code_body "$OWNER" PUT "/bahan/$BR184/resep" "$RESEP184")"
+
+# $BASO66 memang punya produksi berjalan dari seksi-seksi sebelumnya — itu
+# justru keadaan yang diuji di sini.
+cek "dasar §184: BASO66 memang punya produksi berjalan" "V == 409" \
+  "$(status_code_body "$OWNER" PUT "/bahan/$BASO66" '{"isi":250}')"
+# INTI: dulu 200 — resepnya tertulis ulang dan konsumsi faktur berjalan ikut
+# berubah, tanpa satu pun baris yang menerangkannya.
+cek "§184 resep DITOLAK selagi produksi berjalan (dulu diterima diam-diam)" "V == 409" \
+  "$(status_code_body "$OWNER" PUT "/bahan/$BASO66/resep" "$RESEP184")"
+
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

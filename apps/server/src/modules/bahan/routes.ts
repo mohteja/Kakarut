@@ -1371,6 +1371,47 @@ export const bahanRoutes = new Hono<AppEnv>()
             message: "Jenis pengadaan bahan berubah — muat ulang lalu coba lagi",
           });
         }
+        /*
+         * PINTU KEDUA ke masalah yang sama seperti `isi`.
+         *
+         * `catatKonsumsiProduksi` membaca resep LIVE saat produksi selesai,
+         * bukan snapshot saat fakturnya dibuat. `PUT /bahan/:id` sudah menolak
+         * perubahan `isi` selagi ada produksi berjalan justru karena itu — tapi
+         * resepnya sendiri masih bisa ditulis ulang lewat sini, dan akibatnya
+         * sama persis: faktur yang RAB-nya dihitung dengan satu resep dieksekusi
+         * dengan resep yang lain. Bahan yang dikeluarkan dari resep berhenti
+         * dipotong sama sekali; yang ditambahkan dipotong tanpa pernah masuk
+         * perhitungan biaya. Stok bahan mentah melenceng tanpa satu pun baris
+         * yang menerangkannya.
+         *
+         * Jendelanya persis sama dengan penjaga `isi`: 'rencana' dan
+         * 'dikerjakan'. Baris yang sudah 'menunggu' konsumsinya SUDAH tercatat
+         * (transisinya yang memanggil `catatKonsumsiProduksi`), jadi resep baru
+         * tak lagi menyentuhnya — dan melarang edit di situ hanya akan
+         * menghalangi tanpa melindungi apa pun.
+         *
+         * Di dalam transaksi & sesudah `FOR UPDATE` di atas: memeriksanya di
+         * luar menyisakan jendela untuk faktur yang lahir di sela pemeriksaan
+         * dan penulisan.
+         */
+        const [produksiBerjalan] = await tx
+          .select({ id: productions.id })
+          .from(productions)
+          .where(
+            and(
+              eq(productions.ingredientId, id),
+              eq(productions.tipe, "produksi"),
+              inArray(productions.status, ["rencana", "dikerjakan"]),
+              isNull(productions.deletedAt),
+            ),
+          )
+          .limit(1);
+        if (produksiBerjalan) {
+          throw new HTTPException(409, {
+            message:
+              "Resep tidak bisa diubah saat masih ada produksi berjalan — selesaikan produksinya dulu",
+          });
+        }
         await tx.delete(ingredientComponents).where(eq(ingredientComponents.ingredientId, id));
         if (inputIds.length > 0) {
           await tx.insert(ingredientComponents).values(
