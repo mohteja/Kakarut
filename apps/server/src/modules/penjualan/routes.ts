@@ -13,9 +13,8 @@ import {
 } from "../../middleware/auth";
 import { tanggalDi } from "../../lib/time";
 import {
-  cariHasilIdempoten,
-  catatHasilIdempoten,
   clientRefField,
+  denganKlaimIdempoten,
   deviceIdField,
 } from "../sync/idempoten";
 import { refundSajian } from "./refund";
@@ -65,66 +64,62 @@ export const penjualanRoutes = new Hono<AppEnv>()
     const auth = c.get("auth");
     const body = c.req.valid("json");
     // Idempotensi lintas jalur: bila client_ref ini SUDAH sukses (online sebelumnya
-    // atau via /sync), balas sale yang ada — JANGAN buat ulang. Dicek PALING AWAL
-    // supaya retry (mis. setelah receiveTimeout) tak gagal hanya karena shift sudah
-    // ditutup / validasi lain berubah.
-    if (body.client_ref) {
-      const ada = await cariHasilIdempoten(auth.company_id!, body.client_ref);
-      if (ada) return c.json(ada.hasilJson, 200);
-    }
-    const branchId = body.branch_id ?? (await resolveBranchId(c));
-    if (terikatCabang(auth.role) && branchId !== auth.branch_id) {
-      throw new HTTPException(403, { message: "Kasir hanya boleh transaksi di cabangnya" });
-    }
-    // Kasir wajib DIBUKA dulu: tanpa shift terbuka di cabang, transaksi ditolak
-    // (409) — frontend menampilkan modal "Buka Kasir".
-    const [shiftAktif] = await db
-      .select({ id: shifts.id })
-      .from(shifts)
-      .where(
-        and(
-          eq(shifts.companyId, auth.company_id!),
-          eq(shifts.branchId, branchId),
-          isNull(shifts.closedAt),
-        ),
-      );
-    if (!shiftAktif) {
-      throw new PenjualanGagal(
-        409,
-        "Kasir belum dibuka — buka kasir dulu sebelum bertransaksi",
-        "kasir_belum_dibuka",
-      );
-    }
-    const result = await createSale({
-      companyId: auth.company_id!,
-      branchId,
-      cashierUserId: auth.sub,
-      isDineIn: body.is_dine_in,
-      mejaId: body.meja_id,
-      catatan: body.catatan,
-      diskonTipe: body.diskon_tipe,
-      diskonNilai: body.diskon_nilai,
-      bypassDiskonLimit: auth.role !== "cashier",
-      customerNama: body.customer_nama,
-      customerWa: body.customer_wa,
-      metodeBayar: body.metode_bayar,
-      uangDiterima: body.uang_diterima,
-      openBillId: body.open_bill_id,
-      items: body.items,
-    });
-    const data = { ...result, kasir: auth.nama };
-    // Catat ke ledger idempotensi bersama (dipakai retry online & /sync).
-    if (body.client_ref) {
-      await catatHasilIdempoten({
+    // atau via /sync), balas sale yang ada — JANGAN buat ulang. Klaimnya diambil
+    // PALING AWAL supaya retry (mis. setelah receiveTimeout) tak gagal hanya karena
+    // shift sudah ditutup / validasi lain berubah — DAN supaya dua permintaan
+    // ber-ref sama yang datang bersamaan tak sama-sama menerbitkan penjualan.
+    const { data, baru } = await denganKlaimIdempoten(
+      {
         companyId: auth.company_id!,
         clientRef: body.client_ref,
         userId: auth.sub,
         deviceId: body.device_id ?? null,
         tipe: "penjualan",
-        hasilJson: data,
-      });
-    }
-    return c.json(data, 201);
+      },
+      async () => {
+        const branchId = body.branch_id ?? (await resolveBranchId(c));
+        if (terikatCabang(auth.role) && branchId !== auth.branch_id) {
+          throw new HTTPException(403, { message: "Kasir hanya boleh transaksi di cabangnya" });
+        }
+        // Kasir wajib DIBUKA dulu: tanpa shift terbuka di cabang, transaksi ditolak
+        // (409) — frontend menampilkan modal "Buka Kasir".
+        const [shiftAktif] = await db
+          .select({ id: shifts.id })
+          .from(shifts)
+          .where(
+            and(
+              eq(shifts.companyId, auth.company_id!),
+              eq(shifts.branchId, branchId),
+              isNull(shifts.closedAt),
+            ),
+          );
+        if (!shiftAktif) {
+          throw new PenjualanGagal(
+            409,
+            "Kasir belum dibuka — buka kasir dulu sebelum bertransaksi",
+            "kasir_belum_dibuka",
+          );
+        }
+        const result = await createSale({
+          companyId: auth.company_id!,
+          branchId,
+          cashierUserId: auth.sub,
+          isDineIn: body.is_dine_in,
+          mejaId: body.meja_id,
+          catatan: body.catatan,
+          diskonTipe: body.diskon_tipe,
+          diskonNilai: body.diskon_nilai,
+          customerNama: body.customer_nama,
+          customerWa: body.customer_wa,
+          metodeBayar: body.metode_bayar,
+          uangDiterima: body.uang_diterima,
+          openBillId: body.open_bill_id,
+          items: body.items,
+        });
+        return { ...result, kasir: auth.nama };
+      },
+    );
+    return c.json(data, baru ? 201 : 200);
   })
   .get("/", async (c) => {
     const auth = c.get("auth");
@@ -276,50 +271,57 @@ export const penjualanRoutes = new Hono<AppEnv>()
        * koneksi keep-alive yang dipakai ulang. Klien tanpa `client_ref` bisa
        * merefund dua kali walau kasirnya menekan tombol sekali.
        */
-      if (body.client_ref) {
-        const ada = await cariHasilIdempoten(auth.company_id!, body.client_ref);
-        if (ada) return c.json(ada.hasilJson, 200);
-      }
-      // Kasir hanya boleh menyentuh transaksi CABANGNYA. Tanpa ini, id
-      // transaksi cabang lain yang bocor ke tangan kasir cukup untuk
-      // mengembalikan uang di pembukuan yang bukan urusannya.
-      if (terikatCabang(auth.role)) {
-        const [milik] = await db
-          .select({ branchId: sales.branchId })
-          .from(sales)
-          .where(and(eq(sales.id, saleId), eq(sales.companyId, auth.company_id!)));
-        if (!milik || milik.branchId !== auth.branch_id) {
-          throw new HTTPException(404, { message: "Transaksi tidak ditemukan" });
-        }
-      }
-      const hasil = await db.transaction((tx) =>
-        refundSajian(tx, {
-          saleId,
-          companyId: auth.company_id!,
-          userId: auth.sub,
-          alasan: body.alasan,
-          items: body.items.map((i) => ({ saleItemId: i.sale_item_id, qty: i.qty })),
-        }),
-      );
-      const data = {
-        ok: true,
-        nominal: hasil.nominal,
-        total_lama: hasil.totalLama,
-        total_baru: hasil.totalBaru,
-      };
-      // Dicatat SESUDAH transaksinya sukses: kalau refundnya sendiri gagal,
-      // ledger tak boleh menyimpan apa pun — percobaan ulang harus benar-benar
-      // dijalankan, bukan dibalas "sudah beres" untuk sesuatu yang tak terjadi.
-      if (body.client_ref) {
-        await catatHasilIdempoten({
+      /*
+       * Klaimnya diambil SEBELUM eksekusi, bukan sekadar diperiksa. Memeriksa
+       * saja tak menutup apa pun di sini: `refundSajian` mengunci barisnya
+       * dengan `FOR UPDATE`, jadi permintaan kedua yang ber-ref sama tidak
+       * ditolak — ia MENUNGGU yang pertama selesai, lalu membaca sisa porsi
+       * yang memang masih ada, lalu mengembalikan uang untuk kedua kalinya.
+       * Penguncian barisnya justru yang membuat urutannya rapi dan salah.
+       *
+       * Bila `refundSajian` melempar, klaimnya DILEPAS (lihat kontraknya di
+       * `denganKlaimIdempoten`) — persis niat yang sudah ditulis di sini
+       * sebelumnya: ledger tak boleh menyimpan apa pun untuk refund yang tak
+       * pernah terjadi, supaya percobaan ulang benar-benar dijalankan.
+       */
+      const { data } = await denganKlaimIdempoten(
+        {
           companyId: auth.company_id!,
           clientRef: body.client_ref,
           userId: auth.sub,
           deviceId: body.device_id ?? null,
           tipe: "refund",
-          hasilJson: data,
-        });
-      }
+        },
+        async () => {
+          // Kasir hanya boleh menyentuh transaksi CABANGNYA. Tanpa ini, id
+          // transaksi cabang lain yang bocor ke tangan kasir cukup untuk
+          // mengembalikan uang di pembukuan yang bukan urusannya.
+          if (terikatCabang(auth.role)) {
+            const [milik] = await db
+              .select({ branchId: sales.branchId })
+              .from(sales)
+              .where(and(eq(sales.id, saleId), eq(sales.companyId, auth.company_id!)));
+            if (!milik || milik.branchId !== auth.branch_id) {
+              throw new HTTPException(404, { message: "Transaksi tidak ditemukan" });
+            }
+          }
+          const hasil = await db.transaction((tx) =>
+            refundSajian(tx, {
+              saleId,
+              companyId: auth.company_id!,
+              userId: auth.sub,
+              alasan: body.alasan,
+              items: body.items.map((i) => ({ saleItemId: i.sale_item_id, qty: i.qty })),
+            }),
+          );
+          return {
+            ok: true,
+            nominal: hasil.nominal,
+            total_lama: hasil.totalLama,
+            total_baru: hasil.totalBaru,
+          };
+        },
+      );
       return c.json(data);
     },
   );

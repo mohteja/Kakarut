@@ -1169,7 +1169,27 @@ export const bahanRoutes = new Hono<AppEnv>()
   .post(
     "/:id/harga",
     requireRole("owner", "admin"),
-    zValidator("json", z.object({ harga_per_unit: z.number().nonnegative() })),
+    zValidator(
+      "json",
+      z.object({
+        /*
+         * Per SATUAN KERJA (gram/ml/pcs), bukan per kemasan — dikalikan `isi`
+         * di bawah. Kontrak itu hanya hidup di satu baris klien
+         * (`RiwayatHargaModal.tsx`, yang membagi dengan `isi` sebelum
+         * mengirim), jadi klien lain yang mengirim harga per KEMASAN akan
+         * menyimpan `harga_beli` 1000× lipat untuk bahan gram/kg — dan HPP
+         * seluruh menu yang memakainya ikut melonjak, diam-diam.
+         *
+         * Batas atas ini pagar, bukan penyembuh: ia menahan salah-satuan yang
+         * ekstrem dan salah ketik, tapi tidak bisa membedakan 15.000/kg dari
+         * 15.000/gram. Yang benar-benar menutupnya adalah field `basis`
+         * eksplisit di badan permintaan — perubahan kontrak API, sengaja
+         * ditinggalkan sebagai pekerjaan tersendiri. Angkanya menyamai batas
+         * rupiah yang sudah dipakai jalur faktur (`produksi/routes.ts`).
+         */
+        harga_per_unit: z.number().nonnegative().max(1_000_000_000_000),
+      }),
+    ),
     async (c) => {
       const auth = c.get("auth");
       const { harga_per_unit } = c.req.valid("json");
@@ -1349,6 +1369,47 @@ export const bahanRoutes = new Hono<AppEnv>()
         if (indukTx?.pengadaan !== "produksi") {
           throw new HTTPException(409, {
             message: "Jenis pengadaan bahan berubah — muat ulang lalu coba lagi",
+          });
+        }
+        /*
+         * PINTU KEDUA ke masalah yang sama seperti `isi`.
+         *
+         * `catatKonsumsiProduksi` membaca resep LIVE saat produksi selesai,
+         * bukan snapshot saat fakturnya dibuat. `PUT /bahan/:id` sudah menolak
+         * perubahan `isi` selagi ada produksi berjalan justru karena itu — tapi
+         * resepnya sendiri masih bisa ditulis ulang lewat sini, dan akibatnya
+         * sama persis: faktur yang RAB-nya dihitung dengan satu resep dieksekusi
+         * dengan resep yang lain. Bahan yang dikeluarkan dari resep berhenti
+         * dipotong sama sekali; yang ditambahkan dipotong tanpa pernah masuk
+         * perhitungan biaya. Stok bahan mentah melenceng tanpa satu pun baris
+         * yang menerangkannya.
+         *
+         * Jendelanya persis sama dengan penjaga `isi`: 'rencana' dan
+         * 'dikerjakan'. Baris yang sudah 'menunggu' konsumsinya SUDAH tercatat
+         * (transisinya yang memanggil `catatKonsumsiProduksi`), jadi resep baru
+         * tak lagi menyentuhnya — dan melarang edit di situ hanya akan
+         * menghalangi tanpa melindungi apa pun.
+         *
+         * Di dalam transaksi & sesudah `FOR UPDATE` di atas: memeriksanya di
+         * luar menyisakan jendela untuk faktur yang lahir di sela pemeriksaan
+         * dan penulisan.
+         */
+        const [produksiBerjalan] = await tx
+          .select({ id: productions.id })
+          .from(productions)
+          .where(
+            and(
+              eq(productions.ingredientId, id),
+              eq(productions.tipe, "produksi"),
+              inArray(productions.status, ["rencana", "dikerjakan"]),
+              isNull(productions.deletedAt),
+            ),
+          )
+          .limit(1);
+        if (produksiBerjalan) {
+          throw new HTTPException(409, {
+            message:
+              "Resep tidak bisa diubah saat masih ada produksi berjalan — selesaikan produksinya dulu",
           });
         }
         await tx.delete(ingredientComponents).where(eq(ingredientComponents.ingredientId, id));

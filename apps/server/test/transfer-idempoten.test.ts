@@ -28,6 +28,10 @@ const SRV = readFileSync(
   fileURLToPath(new URL("../src/modules/transfer/routes.ts", import.meta.url)),
   "utf8",
 );
+const HELPER = readFileSync(
+  fileURLToPath(new URL("../src/modules/sync/idempoten.ts", import.meta.url)),
+  "utf8",
+);
 const WEB = fileURLToPath(new URL("../../web/src", import.meta.url));
 const HAL = readFileSync(join(WEB, "pages/stok/TransferStokPage.tsx"), "utf8");
 
@@ -38,34 +42,36 @@ describe("server: POST /transfer-stok ikut ledger idempotensi", () => {
     expect(SRV).toContain('from "../sync/idempoten";');
   });
 
-  it("diperiksa PALING AWAL — sebelum apa pun ditulis", () => {
-    const iCek = SRV.indexOf("const ada = await cariHasilIdempoten(auth.company_id!, body.client_ref);");
-    const iTulis = SRV.indexOf("const asal = await pastikanCabangStok(");
-    expect(iCek).toBeGreaterThan(0);
-    expect(iTulis).toBeGreaterThan(iCek);
-  });
-
-  it("kiriman ulang memulangkan hasil yang SAMA, bukan menjalani ulang", () => {
-    expect(SRV).toContain("if (ada) return c.json(ada.hasilJson, 201);");
-  });
-
-  it("dicatat SESUDAH transaksinya sukses", () => {
-    // Kalau dicatat lebih dulu lalu penulisannya gagal, kiriman ulang akan
-    // mengira sudah selesai — dan stoknya tak pernah benar-benar pindah.
-    const iTx = SRV.indexOf("      return { nomor };");
-    const iCatat = SRV.indexOf("await catatHasilIdempoten({");
-    expect(iTx).toBeGreaterThan(0);
-    expect(iCatat).toBeGreaterThan(iTx);
+  /*
+   * SELECT-lalu-eksekusi TIDAK CUKUP, dan itulah yang dulu dipakai di sini.
+   * Dua kiriman ber-`client_ref` sama yang datang BERSAMAAN sama-sama melihat
+   * ledger kosong, sama-sama mengeksekusi, lalu yang kedua kalah di unique
+   * index dan hasilnya dibuang diam-diam. Ledger rapi satu baris; stok keluar
+   * dari CK dua kali. Kunci sesungguhnya adalah KLAIM sebelum eksekusi.
+   */
+  it("mengklaim ATOMIK sebelum eksekusi, bukan sekadar memeriksa ledger", () => {
+    expect(SRV).toContain("const { data } = await denganKlaimIdempoten(");
     expect(SRV).toContain('tipe: "transfer_stok",');
+    // Pola lama tak boleh tertinggal di jalur ini.
+    expect(SRV).not.toContain("cariHasilIdempoten");
+    expect(SRV).not.toContain("catatHasilIdempoten");
   });
 
-  it("yang dicatat = yang dibalas (bukan objek yang dirakit dua kali)", () => {
-    expect(SRV).toContain("hasilJson: keluaran,");
-    expect(SRV).toContain("return c.json(keluaran, 201);");
+  it("yang dijaga SELURUH badan handler — termasuk resolve cabang", () => {
+    const iKlaim = SRV.indexOf("const { data } = await denganKlaimIdempoten(");
+    const iTulis = SRV.indexOf("const asal = await pastikanCabangStok(");
+    expect(iKlaim).toBeGreaterThan(0);
+    expect(iTulis).toBeGreaterThan(iKlaim);
   });
 
-  it("opsional — klien lama tak berubah perilakunya", () => {
-    expect(SRV).toContain("if (body.client_ref) {");
+  it("yang diklaim = yang dibalas (bukan objek yang dirakit dua kali)", () => {
+    expect(SRV).toContain("        return keluaran;");
+    expect(SRV).toContain("return c.json(data, 201);");
+  });
+
+  it("opsional — klien lama tanpa client_ref tetap dieksekusi apa adanya", () => {
+    // Dijamin helper-nya: `if (!clientRef) return { data: await jalankan(), baru: true }`.
+    expect(HELPER).toContain("if (!clientRef) return { data: await jalankan(), baru: true };");
   });
 });
 

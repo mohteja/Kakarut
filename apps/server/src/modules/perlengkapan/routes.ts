@@ -969,7 +969,26 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
             supplyId: item.id,
             tipe: "masuk",
             qty: body.qty,
-            totalHarga: body.total_harga ?? null,
+            /*
+             * Tanpa harga → PERKIRAAN dari harga beli acuan, bukan `null`.
+             *
+             * `null` berarti barang masuk ke stok TANPA biaya sama sekali:
+             * saldo naik, uangnya tak pernah muncul di total belanja
+             * perlengkapan. Layar web sudah menghindarinya — kotak harga yang
+             * dikosongkan mengirim `qty × harga_beli`, dan salah ketik ditahan
+             * sebelum terkirim — tapi aturan itu hidup di SATU klien. Klien
+             * lain, atau panggilan API langsung, menulis nol diam-diam.
+             *
+             * Nilainya sama persis dengan yang dikirim web bila kotaknya
+             * dikosongkan, jadi ini mencerminkan perilaku yang sudah ada, bukan
+             * mengarang harga baru. Pola & alasannya sama dengan `hargaDefault`
+             * di jalur faktur produksi.
+             *
+             * `harga_beli` boleh 0 (memang opsional), dan bila begitu hasilnya
+             * 0 — persis seperti sebelumnya. Yang berubah cuma: nol itu kini
+             * karena harganya memang nol, bukan karena tak ada yang mengisi.
+             */
+            totalHarga: body.total_harga ?? Math.round((item.hargaBeli ?? 0) * body.qty),
             tanggal:
               body.tanggal ?? (await tanggalPerusahaan(auth.company_id!)),
             catatan: body.catatan ?? null,

@@ -1580,6 +1580,10 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
             // Jalur ini SUDAH benar sejak awal; disatukan ke helper supaya tak
             // ada lagi tempat kedua yang merakit perpindahan dengan tangan.
             ...kolomPindahCabang(tujuanId),
+            // Penanda KEBERANGKATAN: sejak sini barangnya tak lagi di rak CK,
+            // walau statusnya masih 'menunggu' (yang juga dipakai untuk "siap
+            // dikirim"). Opname fisik & `kirim_keluar` membacanya.
+            dikirimAt: new Date(),
             // tempat penyimpanan CK tidak berlaku di cabang tujuan → set ke
             // pilihan di cabang (bila ada) atau kosongkan (hindari bocor gudang CK)
             storageLocationId: tujuanStorage,

@@ -857,7 +857,7 @@ export const shiftRoutes = new Hono<AppEnv>()
       if (body.status === "ditolak" && !body.alasan_tolak?.trim()) {
         throw new HTTPException(400, { message: "Alasan wajib diisi saat menolak selisih" });
       }
-      await db
+      const diputus = await db
         .update(shifts)
         .set({
           selisihStatus: body.status,
@@ -867,7 +867,25 @@ export const shiftRoutes = new Hono<AppEnv>()
         })
         // Guard balapan: dua owner menekan tombol bersamaan → yang kedua
         // tidak menimpa keputusan pertama.
-        .where(and(eq(shifts.id, row.id), eq(shifts.selisihStatus, "menunggu")));
+        .where(and(eq(shifts.id, row.id), eq(shifts.selisihStatus, "menunggu")))
+        .returning({ id: shifts.id });
+      /*
+       * Hasilnya DIPERIKSA, bukan dibuang. Penjaga di atas sudah mencegah
+       * keputusan kedua menimpa yang pertama, tapi tanpa pemeriksaan ini yang
+       * kalah dibalas 200 berisi keputusan LAWAN — ia menekan "Setujui" lalu
+       * menerima badan berbunyi "ditolak", tanpa satu pun tanda bahwa
+       * tekanannya tak berlaku. Jalur berurutan sudah lama membalas 409
+       * berpesan; yang serentak kini menjawab sama.
+       */
+      if (diputus.length === 0) {
+        const [kini] = await db
+          .select({ selisihStatus: shifts.selisihStatus })
+          .from(shifts)
+          .where(eq(shifts.id, row.id));
+        throw new HTTPException(409, {
+          message: `Selisih shift ini sudah ${kini?.selisihStatus ?? "diputuskan"} — tidak bisa diputuskan lagi`,
+        });
+      }
       const [after] = await baseSelect().where(eq(shifts.id, row.id));
       return c.json(await toDto(after, auth.role));
     },

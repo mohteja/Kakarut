@@ -984,9 +984,25 @@ cek "kasir diskon nominal 17000 (=50% > batas) ditolak (400)" "V == 400" \
   "$(jp "$KASIR" "{\"is_dine_in\":false,\"diskon_tipe\":\"nominal\",\"diskon_nilai\":17000,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")"
 cek "kasir diskon 20% (= batas) diterima (201)" "V == 201" \
   "$(jp "$KASIR" "{\"is_dine_in\":false,\"diskon_tipe\":\"persen\",\"diskon_nilai\":20,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")"
+# Toleransi 0,5% ADA untuk pembulatan dan harus TETAP ada di batas bukan-nol:
+# 6.900 dari 34.000 = 20,29%, sedikit di atas batas 20% — diterima. Penjaga
+# arah-balik supaya lantai di bawah tidak dipasang dengan cara mematikan
+# toleransinya di mana-mana.
+cek "batas 20: diskon nominal 6900 (20,29% — dalam toleransi bulat) diterima (201)" "V == 201" \
+  "$(jp "$KASIR" "{\"is_dine_in\":false,\"diskon_tipe\":\"nominal\",\"diskon_nilai\":6900,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")"
 api "$OWNER" PATCH /company '{"diskon_maks_persen":0}' > /dev/null
 cek "batas 0: kasir diskon 5% ditolak (400)" "V == 400" \
   "$(jp "$KASIR" "{\"is_dine_in\":false,\"diskon_tipe\":\"persen\",\"diskon_nilai\":5,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")"
+# INTI: pita di BAWAH toleransi — yang dulu lolos diam-diam. Harga PBA 34.000
+# (dijamin asersi "harga jual bulat PBA = 34000" di §2), jadi 0,5% = 170.
+# Rp 100 = 0,29% dan Rp 170 = tepat 0,5%: keduanya dulu DITERIMA walau batasnya
+# nol, karena toleransi pembulatan ikut dipakai pada batas yang tak punya apa
+# pun untuk dibulatkan. Pada nota Rp 2 juta pita itu bernilai Rp 10.000, tiap
+# transaksi, tanpa persetujuan siapa pun.
+cek "batas 0: diskon nominal 100 (0,29% — di bawah toleransi lama) DITOLAK (400)" "V == 400" \
+  "$(jp "$KASIR" "{\"is_dine_in\":false,\"diskon_tipe\":\"nominal\",\"diskon_nilai\":100,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")"
+cek "batas 0: diskon nominal 170 (tepat 0,5% — batas toleransi lama) DITOLAK (400)" "V == 400" \
+  "$(jp "$KASIR" "{\"is_dine_in\":false,\"diskon_tipe\":\"nominal\",\"diskon_nilai\":170,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")"
 cek "batas 0: kasir tanpa diskon tetap boleh (201)" "V == 201" \
   "$(jp "$KASIR" "{\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")"
 api "$OWNER" PATCH /company '{"diskon_maks_persen":100}' > /dev/null   # reset
@@ -3127,6 +3143,23 @@ SP83=$(api "$OWNER" POST /perlengkapan '{"nama":"Spons Uji","satuan":"pcs"}' | j
 NPL83B=$(api "$OWNER" POST "/perlengkapan/$SP83/masuk" '{"qty":1}' | jq -r .nomor)
 cek "nomor PL bertambah urut ($NPL83 → $NPL83B)" "V == 1" \
   "$(( 10#${NPL83B#PL-} > 10#${NPL83#PL-} ? 1 : 0 ))"
+
+# STOK MASUK TANPA `total_harga` → PERKIRAAN dari harga beli acuan, bukan nol.
+# Tanpa itu barang masuk ke stok tanpa biaya sama sekali: saldo naik, uangnya
+# tak pernah muncul di belanja perlengkapan. Layar web memang sudah mengirim
+# `qty × harga_beli` saat kotaknya dikosongkan — tapi aturan itu hidup di SATU
+# klien; klien lain atau panggilan API langsung membukukan nol diam-diam.
+SH83=$(api "$OWNER" POST /perlengkapan '{"nama":"Sabun Uji Harga","satuan":"pcs","harga_beli":3000}' | jq -r .id)
+api "$OWNER" POST "/perlengkapan/$SH83/masuk" '{"qty":4}' > /dev/null
+cek "masuk tanpa total_harga → belanja terisi perkiraan 4 × 3.000 (dulu 0)" "abs(V - 12000) < 0.001" \
+  "$(api "$OWNER" GET "/perlengkapan/$SH83/kartu" | jq '.total_belanja')"
+# Harga yang DIKIRIM tetap menang — perkiraannya cuma untuk yang tak mengirim.
+api "$OWNER" POST "/perlengkapan/$SH83/masuk" '{"qty":2,"total_harga":1000}' > /dev/null
+cek "masuk DENGAN total_harga: nilai kiriman dipakai apa adanya (12.000 + 1.000)" "abs(V - 13000) < 0.001" \
+  "$(api "$OWNER" GET "/perlengkapan/$SH83/kartu" | jq '.total_belanja')"
+# Item tanpa harga beli acuan tetap nol — perkiraannya bukan harga karangan.
+cek "item tanpa harga acuan tetap nol (perkiraan bukan angka karangan)" "abs(V) < 0.001" \
+  "$(api "$OWNER" GET "/perlengkapan/$SP83/kartu" | jq '.total_belanja')"
 api "$OWNER" PUT "/perlengkapan/$SP83/aturan" "{\"qty\":2,\"per_hari\":1,\"aktif\":true,\"mulai\":\"$KEMARIN83\"}" > /dev/null
 cek "cap habis: auto berhenti di 0 (tidak minus)" "abs(V) < 0.001" \
   "$(api "$OWNER" GET /perlengkapan | jq --arg id "$SP83" '[.[]|select(.id==$id)][0].saldo')"
@@ -8466,6 +8499,579 @@ cek "§174 saldo CK berkurang SEKALI: 14, bukan 8" "abs(V - 14) < 0.001" \
 cek "§174 percobaan terima BERIKUTNYA juga 400 (bukan hanya balapannya dijaga)" "V == 400" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/perlengkapan/kiriman/$KIR174/terima?branch_id=$CB46_ID" -H "Authorization: Bearer $OWNER")"
 rm -f "$R174A" "$R174B"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# §175 KOSONGKAN TEMPAT SAMPAH SESUDAH ADA PENJUALAN ASAL OPEN BILL
+#
+# "Kosongkan" menghapus KERAS baris `sales` yang sudah di sampah. Semua FK ke
+# `sales.id` ber-`ON DELETE cascade` — KECUALI satu: `open_bills.sale_id`, yang
+# lahir tanpa klausa `onDelete` sama sekali (jadi `no action`). Begitu ada satu
+# saja penjualan yang berasal dari open bill lalu dibatalkan, DELETE itu ditolak
+# Postgres, dan karena seluruh "Kosongkan" berjalan dalam SATU transaksi,
+# semuanya ikut rollback. Tempat Sampah jadi tak bisa dikosongkan LAGI —
+# permanen, dan tak ada tombol lain untuk membersihkannya.
+#
+# §91 tak pernah menangkapnya: ia berjalan jauh SEBELUM seksi open bill (§147,
+# §162, §173), jadi saat itu tak ada satu pun `open_bills.sale_id` yang terisi.
+# Urutan seksi inilah yang menyembunyikan bug ini, bukan ketiadaan uji.
+echo "── §175 kosongkan Tempat Sampah sesudah penjualan asal open bill ──"
+
+tutup170
+SH175=$(buka170 100000)
+BILL175=$(api "$REISS105" POST /open-bill \
+  "$(jq -nc --arg m "$M170" '{items:[{menu_id:$m, qty:1}]}')" | jq -r '.id // ""')
+SALE175=$(api "$REISS105" POST /penjualan \
+  "$(jq -nc --arg b "$BILL175" --arg m "$M170" --arg r "$(python3 -c 'import uuid;print(uuid.uuid4())')" \
+      '{open_bill_id:$b, client_ref:$r, metode_bayar:"tunai", is_dine_in:false, items:[{menu_id:$m, qty:1}]}')" \
+  | jq -r '.sale.id // ""')
+cek "dasar §175: open bill terbayar → penjualan terbit (jejak sale_id terisi)" "V == 1" \
+  "$([ ${#BILL175} -eq 36 ] && [ ${#SALE175} -eq 36 ] && echo 1 || echo 0)"
+
+# Batalkan penjualan itu → masuk Tempat Sampah, dan `open_bills.sale_id` masih
+# menunjuk ke barisnya. Inilah keadaan yang mengunci "Kosongkan".
+api "$OWNER" DELETE "/penjualan/$SALE175" > /dev/null
+cek "dasar §175: penjualan asal-bill itu ada di Tempat Sampah" "V == 1" \
+  "$(api "$OWNER" GET /sampah | jq --arg id "$SALE175" '([.[] | select(.jenis=="penjualan" and .key==$id)] | length==1) | if . then 1 else 0 end')"
+
+# INTI: dulu 500 — FK `open_bills_sale_id_sales_id_fk` menolak DELETE-nya dan
+# seluruh transaksi rollback. Sekarang `ON DELETE set null`: bill-nya tetap ada
+# sebagai jejak asal pesanan, hanya tautannya yang putus.
+cek "§175 kosongkan → 200, bukan 500 (dulu Tempat Sampah terkunci permanen)" "V == 200" \
+  "$(status_code "$OWNER" POST /sampah/kosongkan)"
+cek "§175 kosongkan → ok:true" "V == 1" \
+  "$(api "$OWNER" POST /sampah/kosongkan | jq '(.ok==true) | if . then 1 else 0 end')"
+# Dan benar-benar terhapus, bukan sekadar tak melempar galat.
+cek "§175 penjualan asal-bill itu lenyap dari Tempat Sampah" "V == 0" \
+  "$(api "$OWNER" GET /sampah | jq --arg id "$SALE175" '[.[] | select(.jenis=="penjualan" and .key==$id)] | length')"
+tutup170
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# §176 DUA PERMINTAAN BER-client_ref SAMA BERBARENGAN: SATU PENJUALAN
+#
+# Ledger idempotensi dulu hanya DIBACA sebelum eksekusi dan DITULIS sesudahnya.
+# Rangkaian itu tak menjaga apa pun terhadap yang berbarengan: dua permintaan
+# ber-`client_ref` sama sama-sama mendapat `null` dari `cariHasilIdempoten`,
+# sama-sama menjalankan `createSale`, lalu yang kedua kalah di unique index dan
+# hasilnya DIBUANG diam-diam oleh `onConflictDoNothing`. Ledger tampak rapi satu
+# baris; penjualannya dua.
+#
+# Bedanya dengan §173: di sana dua kasir mengirim ref BERBEDA (yang dijaga
+# `open_bills.closed_at`). Di sini SATU perangkat mengirim ref yang SAMA — dan
+# itu tak butuh manusia sama sekali: terukur di Chromium, browser mengulang
+# sendiri POST yang soketnya ditutup pada koneksi keep-alive yang dipakai ulang.
+# `/sync` sudah dijaga klaim atomik sejak lama; jalur online belum, sampai kini.
+echo "── §176 dua permintaan ber-client_ref sama berbarengan ──"
+
+tutup170
+SH176=$(buka170 100000)
+REF176=$(python3 -c 'import uuid;print(uuid.uuid4())')
+cek "dasar §176: shift terbuka & satu kunci idempotensi disiapkan" "V == 1" \
+  "$([ ${#SH176} -eq 36 ] && [ ${#REF176} -eq 36 ] && echo 1 || echo 0)"
+
+R176A=$(mktemp); R176B=$(mktemp)
+for f in "$R176A" "$R176B"; do
+  curl -s -X POST "$BASE/api/penjualan" -H "Authorization: Bearer $REISS105" \
+    -H 'Content-Type: application/json' \
+    -d "$(jq -nc --arg m "$M170" --arg r "$REF176" \
+        '{client_ref:$r, metode_bayar:"tunai", is_dine_in:false, items:[{menu_id:$m, qty:1}]}')" \
+    -w '\n%{http_code}' > "$f" &
+done
+wait
+KODE176=$(for f in "$R176A" "$R176B"; do printf '%s\n' "$(tail -n1 "$f")"; done)
+cek "§176 tak ada yang 5xx (penolakannya terkendali, bukan tabrakan)" "V == 0" \
+  "$(printf '%s\n' "$KODE176" | grep -c '^5' || true)"
+
+# INTI: berapa PENJUALAN yang lahir, bukan berapa kode 2xx. Yang kalah klaim
+# boleh dijawab 409 "sedang_diproses" ATAU — bila yang menang keburu selesai —
+# 200 berisi penjualan yang SAMA. Keduanya benar; yang tak boleh adalah dua id
+# berbeda. Dulu tepat itu yang terjadi.
+cek "§176 TEPAT SATU penjualan lahir (dulu dua → omzet & stok terhitung ganda)" "V == 1" \
+  "$(for f in "$R176A" "$R176B"; do head -n-1 "$f"; printf '\n'; done | jq -rs '[.[]?|.sale?.id//empty]|unique|length' 2>/dev/null || echo 0)"
+
+# Dan kuncinya benar-benar tercatat: percobaan BERIKUTNYA memutar ulang
+# penjualan yang sama, bukan menerbitkan yang baru.
+ID176=$(for f in "$R176A" "$R176B"; do head -n-1 "$f"; printf '\n'; done | jq -rs '[.[]?|.sale?.id//empty]|first // ""' 2>/dev/null || echo "")
+ULANG176=$(api "$REISS105" POST /penjualan \
+  "$(jq -nc --arg m "$M170" --arg r "$REF176" \
+      '{client_ref:$r, metode_bayar:"tunai", is_dine_in:false, items:[{menu_id:$m, qty:1}]}')")
+cek "§176 kiriman ulang memutar ulang penjualan yang SAMA, bukan bikin baru" "V == 1" \
+  "$(echo "$ULANG176" | jq --arg id "$ID176" '(.sale.id == $id) | if . then 1 else 0 end')"
+rm -f "$R176A" "$R176B"
+
+# KONTRAK "LEPAS SAAT GAGAL" — risiko regresi dari klaim itu sendiri, dan
+# justru yang paling mudah lolos dari perhatian.
+#
+# Web menahan `client_ref` yang SAMA sampai SUKSES (`refPembayaran.current ??=
+# uuidV4()`, hanya direset di `onSuccess`). Jadi kasir yang ditolak — stok
+# kurang, kasir belum dibuka, diskon lewat batas — menekan Bayar lagi dengan
+# kunci yang sama. Kalau penolakan itu tersimpan di ledger dan diputar ulang,
+# ia akan menerima penolakan lama itu SELAMANYA: satu kali gagal mengunci mati
+# kunci itu, dan tak ada di layar yang memberitahunya harus bagaimana.
+#
+# Maka klaim yang eksekusinya melempar WAJIB dilepas. Diuji ujung ke ujung
+# lewat penolakan yang paling mudah dipulihkan: kasir belum dibuka.
+tutup170
+REFG176=$(python3 -c 'import uuid;print(uuid.uuid4())')
+BADAN176=$(jq -nc --arg m "$M170" --arg r "$REFG176" \
+  '{client_ref:$r, metode_bayar:"tunai", is_dine_in:false, items:[{menu_id:$m, qty:1}]}')
+cek "§176 tanpa shift terbuka, penjualan ber-ref baru ditolak 409" "V == 409" \
+  "$(status_code_body "$REISS105" POST /penjualan "$BADAN176")"
+SH176B=$(buka170 100000)
+cek "dasar §176: kasir dibuka lagi" "V == 1" "$([ ${#SH176B} -eq 36 ] && echo 1 || echo 0)"
+# INTI: kunci yang SAMA, sesudah sebabnya dibereskan → harus benar-benar jadi
+# penjualan. Klaim yang tak dilepas akan menjawab 409 di sini, selamanya.
+cek "§176 ref yang SAMA sesudah kasir dibuka BERHASIL (klaim gagal dilepas)" "V == 201" \
+  "$(status_code_body "$REISS105" POST /penjualan "$BADAN176")"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# §177 DUA REFUND BER-client_ref SAMA BERBARENGAN: UANG KEMBALI SEKALI
+#
+# Lubang yang sama seperti §176, tapi akibatnya langsung uang. Dan di sini
+# penguncian barisnya justru yang membuat urutannya rapi DAN salah:
+# `refundSajian` mengunci `sale_items` dengan `FOR UPDATE`, jadi permintaan
+# kedua tidak ditolak — ia MENUNGGU yang pertama commit, lalu membaca sisa
+# porsi yang memang masih ada (qty 2, baru direfund 1), lalu mengembalikan uang
+# untuk kedua kalinya. Validasi "melebihi sisa porsi" tak pernah menyentuhnya.
+echo "── §177 dua refund ber-client_ref sama berbarengan ──"
+
+SALE177=$(api "$REISS105" POST /penjualan \
+  "$(jq -nc --arg m "$M170" '{metode_bayar:"tunai", is_dine_in:false, items:[{menu_id:$m, qty:2}]}')" \
+  | jq -r '.sale.id // ""')
+ITEM177=$(api "$OWNER" GET "/penjualan/$SALE177" | jq -r '.items[0].id // ""')
+REF177=$(python3 -c 'import uuid;print(uuid.uuid4())')
+# qty 2 DISENGAJA: dua refund qty 1 masing-masing SAH menurut sisa porsi, jadi
+# yang menahannya hanya idempotensi — persis yang diuji.
+cek "dasar §177: penjualan qty 2 tercatat & barisnya terbaca" "V == 1" \
+  "$([ ${#SALE177} -eq 36 ] && [ ${#ITEM177} -eq 36 ] && echo 1 || echo 0)"
+
+R177A=$(mktemp); R177B=$(mktemp)
+for f in "$R177A" "$R177B"; do
+  curl -s -X POST "$BASE/api/penjualan/$SALE177/refund" -H "Authorization: Bearer $OWNER" \
+    -H 'Content-Type: application/json' \
+    -d "$(jq -nc --arg it "$ITEM177" --arg r "$REF177" \
+        '{client_ref:$r, alasan:"uji §177", items:[{sale_item_id:$it, qty:1}]}')" \
+    -w '\n%{http_code}' > "$f" &
+done
+wait
+cek "§177 tak ada yang 5xx (penolakannya terkendali, bukan tabrakan)" "V == 0" \
+  "$(for f in "$R177A" "$R177B"; do printf '%s\n' "$(tail -n1 "$f")"; done | grep -c '^5' || true)"
+
+# INTI: angka di pembukuan, bukan kode HTTP. Dulu qty_refund jadi 2 dan uang
+# keluar dua kali untuk satu kali penekanan tombol.
+DET177=$(api "$OWNER" GET "/penjualan/$SALE177")
+cek "§177 porsi terefund SEKALI: qty_refund 1, bukan 2" "abs(V - 1) < 0.001" \
+  "$(echo "$DET177" | jq --arg it "$ITEM177" '[.items[]|select(.id==$it)][0].qtyRefund')"
+# `subtotal` IKUT TURUN saat refund, jadi sesudah satu dari dua porsi kembali
+# keduanya bernilai satu porsi — `refundTotal == subtotal`, dan sisanya masih
+# di atas nol. Refund ganda menghabiskannya: subtotal 0, refundTotal dua porsi.
+# Dibandingkan satu sama lain, bukan ke angka mati, sebab seksi lain menyalakan
+# lalu mematikan PB1 (§159) dan menggeser batas diskon.
+cek "§177 sisa tagihan masih SATU porsi (refund ganda akan menghabiskannya)" "V > 0" \
+  "$(echo "$DET177" | jq '.sale.subtotal')"
+cek "§177 refund_total = SATU porsi, sama besar dengan sisanya" "V == 1" \
+  "$(echo "$DET177" | jq '(.sale.refundTotal == .sale.subtotal) | if . then 1 else 0 end')"
+rm -f "$R177A" "$R177B"
+tutup170
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# §178 PENJUALAN ONLINE DITAUTKAN KE SHIFT-NYA, BUKAN CUMA KE JENDELA WAKTU
+#
+# `sales.shift_id` ada justru supaya rekap tak bergantung pada jendela waktu.
+# Jalur SINKRON mengisinya; jalur ONLINE tidak — padahal ia baru saja mencari
+# shift terbuka untuk gerbang "Kasir belum dibuka", lalu MEMBUANG hasilnya.
+# Akibatnya setiap transaksi online ber-`shift_id` NULL dan seluruh
+# penautannya jatuh ke jendela waktu — persis hal yang kolom itu ada untuk
+# menggantikannya, tak pernah terisi di jalur yang paling ramai.
+#
+# Terlihat langsung di data: sebelum perbaikan, satu-satunya baris ber-shift_id
+# di hari uji adalah yang lahir lewat /sync.
+echo "── §178 penjualan online tertaut ke shift ──"
+
+tutup170
+SH178=$(buka170 100000)
+SALE178=$(jual170 | jq -r '.sale.id // ""')
+cek "dasar §178: shift terbuka & penjualan online tercatat" "V == 1" \
+  "$([ ${#SH178} -eq 36 ] && [ ${#SALE178} -eq 36 ] && echo 1 || echo 0)"
+
+# INTI: dulu null.
+cek "§178 penjualan online ber-shift_id (dulu NULL di semua transaksi online)" "V == 1" \
+  "$(api "$OWNER" GET "/penjualan/$SALE178" | jq '(.sale.shiftId != null) | if . then 1 else 0 end')"
+# Dan bukan sekadar terisi — terisi shift yang BENAR.
+cek "§178 shift_id-nya persis shift yang sedang terbuka" "V == 1" \
+  "$(api "$OWNER" GET "/penjualan/$SALE178" | jq --arg s "$SH178" '(.sale.shiftId == $s) | if . then 1 else 0 end')"
+# Jalur sinkron tetap memegang kendali: shift yang DIKIRIMNYA tak boleh ditimpa
+# oleh shift terbuka saat ini — itulah yang membuat transaksi susulan benar.
+cek "§178 rekap shift memuat penjualan itu" "V > 0" \
+  "$(api "$OWNER" GET "/shift/$SH178" | jq '.kas_sistem')"
+tutup170
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# §179 DUA PERMINTAAN TAMBAH STOK BERBARENGAN: STOK CK DIJANJIKAN SEKALI
+#
+# `rencanaDariMenu` membaca saldo CK dan barang-dalam-jalan lewat `db` — DI LUAR
+# transaksi yang menuliskan fakturnya, dan tanpa kunci apa pun. Saldo cabang
+# diturunkan dari ledger mutasi, jadi tak ada baris yang bisa dikunci dan
+# `FOR UPDATE` pun tak menolong: dua permintaan yang dikirim bersamaan sama-sama
+# membaca saldo lama, sama-sama menyimpulkan "tinggal kirim dari CK", dan
+# sama-sama menerbitkan faktur kirimnya.
+#
+# Akibatnya baru muncul jauh belakangan: saldo CK jadi MINUS saat kedua kiriman
+# diterima, di dua cabang berbeda, tanpa jejak yang menghubungkan keduanya.
+# Kontraknya sudah tertulis di `qtyDalamJalan` ("pemanggil yang memvalidasi
+# sebelum menulis harus memakai transaksi + kunciKirimCabang") dan
+# `POST /produksi/kirim` sudah mematuhinya — jalur permintaan ini belum.
+echo "── §179 dua permintaan tambah stok berbarengan ──"
+
+# CK punya TEPAT 30 butir siap kirim; cabang kosong. Satu permintaan porsi 20
+# menyerap seluruh 30 itu — jadi dua permintaan berbarengan memperebutkan stok
+# yang hanya cukup untuk SATU.
+api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CK52_UTAMA\",\"items\":[{\"ingredient_id\":\"$BASO66\",\"qty\":30},{\"ingredient_id\":\"$DAG66\",\"qty\":20000},{\"ingredient_id\":\"$TEP66\",\"qty\":5000}]}" > /dev/null
+api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CB46_ID\",\"items\":[{\"ingredient_id\":\"$BASO66\",\"qty\":0}]}" > /dev/null
+cek "dasar §179: preview menjanjikan kirim_ck = 30 dari stok CK" "abs(V - 30) < 0.001" \
+  "$(api "$OWNER" POST "/rekomendasi/menu?branch_id=$CB46_ID" "{\"items\":[{\"menu_id\":\"$MENU66\",\"porsi\":20}],\"ck_branch_id\":\"$CK52_UTAMA\"}" | jq --arg i "$BASO66" '[.bahan[]|select(.ingredient_id==$i)][0].kirim_ck')"
+
+BADAN179="{\"items\":[{\"menu_id\":\"$MENU66\",\"porsi\":20}],\"tujuan_branch_id\":\"$CB46_ID\",\"ck_branch_id\":\"$CK52_UTAMA\"}"
+R179A=$(mktemp); R179B=$(mktemp)
+for f in "$R179A" "$R179B"; do
+  curl -s -X POST "$BASE/api/rekomendasi/menu/faktur" -H "Authorization: Bearer $OWNER" \
+    -H 'Content-Type: application/json' -d "$BADAN179" -w '\n%{http_code}' > "$f" &
+done
+wait
+KODE179=$(for f in "$R179A" "$R179B"; do printf '%s\n' "$(tail -n1 "$f")"; done)
+cek "§179 tak ada yang 5xx (penolakannya terkendali, bukan tabrakan)" "V == 0" \
+  "$(printf '%s\n' "$KODE179" | grep -c '^5' || true)"
+
+# INTI: berapa faktur KIRIM yang lahir. Dulu dua — 60 butir dijanjikan dari
+# stok 30, dan saldo CK baru jadi minus saat keduanya diterima.
+cek "§179 TEPAT SATU faktur kirim lahir (dulu dua → CK menjanjikan 60 dari 30)" "V == 1" \
+  "$(for f in "$R179A" "$R179B"; do head -n-1 "$f"; printf '\n'; done | jq -rs '[.[]?|.kirim?.faktur_id//empty]|unique|length' 2>/dev/null || echo 0)"
+# SENGAJA tidak menuntut "yang kalah pasti 409". Ada dua jalinan yang sama-sama
+# BENAR: bila perencanaan B berjalan sesudah A commit, B sudah membaca stok CK
+# yang tinggal 0 dan lolos apa adanya dengan kirim_ck = 0 — tak ada yang perlu
+# ditolak. Yang harus berlaku di KEDUA jalinan adalah invariannya, dan itu yang
+# diperiksa di atas: stok CK hanya boleh dijanjikan sekali. Menuntut kode 409
+# akan membuat penjaga ini berkedip tanpa ada yang rusak.
+cek "§179 penolakan (bila ada) terkendali: 409, bukan 4xx lain" "V == 0" \
+  "$(printf '%s\n' "$KODE179" | awk '/^4/ && !/^409$/' | wc -l)"
+# Sisi stok, dan inilah bentuk kerugiannya: TOTAL yang dijanjikan keluar dari CK
+# oleh kedua permintaan. Dijumlah dari SEMUA faktur kirim yang lahir, bukan yang
+# pertama saja — kalau cuma yang pertama diperiksa, angkanya tetap 30 walau yang
+# kedua ikut menjanjikan 30 lagi, dan penjaganya hijau untuk alasan yang salah.
+KFID179=$(for f in "$R179A" "$R179B"; do head -n-1 "$f"; printf '\n'; done | jq -rs '[.[]?|.kirim?.faktur_id//empty]|unique|join(",")' 2>/dev/null || echo "")
+cek "§179 TOTAL dijanjikan keluar CK = 30, bukan 60 (stoknya cuma 30)" "abs(V - 30) < 0.001" \
+  "$(api "$OWNER" GET "/produksi?branch_id=$CK52_UTAMA&per_page=500" | jq --arg f "$KFID179" '($f|split(",")) as $ids | [.rows[]|select(.faktur_id as $x | $ids|index($x))]|map(.qty)|add // 0')"
+# Arah balik: jalur BERURUTAN memang selalu benar — stok CK yang sudah
+# dijanjikan sudah dipotong `qtyDalamJalan` sejak di perencanaan. Itulah sebabnya
+# lubangnya cuma terbuka saat berbarengan, dan sebabnya ia lolos selama ini.
+cek "§179 permintaan BERIKUTNYA melihat stok CK sudah habis dijanjikan (kirim_ck 0)" "abs(V) < 0.001" \
+  "$(api "$OWNER" POST "/rekomendasi/menu?branch_id=$CB46_ID" "{\"items\":[{\"menu_id\":\"$MENU66\",\"porsi\":20}],\"ck_branch_id\":\"$CK52_UTAMA\"}" | jq --arg i "$BASO66" '[.bahan[]|select(.ingredient_id==$i)][0].kirim_ck')"
+rm -f "$R179A" "$R179B"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# §180 DUA TOMBOL 🥡 BERBARENGAN: BIAYA KEMASAN MASUK SEKALI
+#
+# `/sajian` membaca `sajian_takeaway` yang LAMA, membandingkannya dengan yang
+# diminta, lalu melaporkan "baris ini berpindah basis" ke `hitungUlangBiaya`.
+# Perbandingan itu benar — tapi bacaannya tak dikunci. Dua penekanan pada baris
+# yang sama di saat bersamaan sama-sama membaca `false` (READ COMMITTED tak
+# memperlihatkan tulisan yang belum di-commit), keduanya menyimpulkan
+# "berpindah", dan biaya kemasannya DITAMBAHKAN DUA KALI ke `total_hpp`.
+#
+# Yang TIDAK ikut rusak — dan sengaja tetap diperiksa di bawah supaya batas
+# kerusakannya terdokumentasi, bukan diduga: stok kemasan bergerak dengan
+# benar (turun 2, bukan 4). Jadi kerugiannya murni di pembukuan — HPP
+# menggelembung dan laba dilaporkan lebih kecil dari kenyataan, sementara
+# gudang tetap cocok, sehingga tak ada selisih fisik yang memancing curiga.
+#
+# Kunci pada UPDATE-nya tak menolong: transaksi kedua tetap memegang snapshot
+# lamanya saat keputusan itu dibuat. Yang harus dikunci adalah BACAANNYA.
+#
+# Bukan kasus pinggir: tombol ini ada di papan pesanan dapur, layar yang paling
+# sering disentuh dua orang sekaligus, dan §156 sudah menetapkan angkanya bulat
+# (dus Rp 2.000/porsi) sehingga salahnya kelihatan.
+echo "── §180 dua tombol 🥡 berbarengan ──"
+
+tutup170
+SH180=$(buka170 100000)
+S180=$(api "$REISS105" POST /penjualan \
+  "{\"meja_id\":\"$MEJA156\",\"metode_bayar\":\"tunai\",\"items\":[{\"menu_id\":\"$M156\",\"qty\":2}]}")
+SID180=$(echo "$S180" | jq -r '.sale.id // ""')
+BR180=$(api "$OWNER" GET "/pesanan?branch_id=$CB156" | jq -r --arg id "$SID180" '[.[]|select(.id==$id)][0].items[0].id // ""')
+cek "dasar §180: 2 porsi dine-in, total_hpp = 2 × 1.000 (kemasan belum terpakai)" "V == 2000" \
+  "$(hpp156 "$SID180")"
+cek "dasar §180: baris pesanannya terbaca" "V == 1" \
+  "$([ ${#SID180} -eq 36 ] && [ ${#BR180} -eq 36 ] && echo 1 || echo 0)"
+
+DUS180=$(dus156)
+R180A=$(mktemp); R180B=$(mktemp)
+for f in "$R180A" "$R180B"; do
+  curl -s -X POST "$BASE/api/pesanan/penjualan/$SID180/item/$BR180/sajian" \
+    -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' \
+    -d '{"takeaway":true}' -w '\n%{http_code}' > "$f" &
+done
+wait
+cek "§180 tak ada yang 5xx (penolakannya terkendali, bukan tabrakan)" "V == 0" \
+  "$(for f in "$R180A" "$R180B"; do printf '%s\n' "$(tail -n1 "$f")"; done | grep -c '^5' || true)"
+
+# INTI: 2000 + (2 porsi × Rp 2.000 kemasan) = 6000. Dulu 10000 — kemasannya
+# dihitung untuk kedua penekanan, padahal dusnya cuma dipakai sekali.
+cek "§180 total_hpp naik SEKALI: 6000, bukan 10000" "V == 6000" "$(hpp156 "$SID180")"
+# Stok kemasan SUDAH benar bahkan sebelum perbaikan — diperiksa supaya batas
+# kerusakannya tercatat: yang rusak pembukuannya, bukan gudangnya. Itu pula
+# yang membuatnya sulit ketahuan; tak ada selisih fisik yang memancing curiga.
+cek "§180 stok dus turun 2 pcs (sisi ini memang sudah benar)" "abs(V - 2) < 0.001" \
+  "$(python3 -c "print($DUS180 - $(dus156))")"
+# Dan hasil akhirnya memang tersimpan, bukan sekadar tak dihitung dua kali.
+cek "§180 barisnya benar-benar bertanda bawa pulang" "V == 1" \
+  "$(api "$OWNER" GET "/penjualan/$SID180" | jq --arg b "$BR180" '([.items[]|select(.id==$b)][0].sajianTakeaway==true)|if . then 1 else 0 end')"
+rm -f "$R180A" "$R180B"
+tutup170
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# §181 SUNTING BILL SELAGI DIBAYAR: PESANANNYA TAK BOLEH HILANG SUNYI
+#
+# `PUT /open-bill/:id` menolak bill yang sudah tertutup — tapi penjaganya
+# memakai `existing`, yang dibaca TANPA kunci dan di LUAR transaksi penulisnya.
+# Di antara pemeriksaan dan penulisan ada `validateMenus`, `resolveMeja`, dan
+# pemeriksaan baris-tak-boleh-dihapus: beberapa query terpisah, dan selama itu
+# bill bisa dibayar perangkat lain. `UPDATE … WHERE id = :id` tak menyaring
+# `closed_at`, jadi tulisannya benar-benar mendarat.
+#
+# Gejalanya persis yang paling sulit dilihat: barisnya sudah disalin ke
+# `sale_items` saat dibayar, jadi tambahan yang menyusul tak pernah ditagih dan
+# tak pernah muncul di kartu penjualan. Dan `loadDetail` di akhir handler
+# memulangkan `null` untuk bill tertutup — jadi klien menerima **200 berisi
+# null**, `onSuccess` mengosongkan keranjang, dan kasir melihat "tersimpan"
+# untuk pesanan yang tak tersimpan di mana pun.
+#
+# Jalur ini yang paling mungkin dilewati: layar kasir bisa saja masih memegang
+# bill yang baru dibayar perangkat lain.
+echo "── §181 sunting bill selagi dibayar ──"
+
+# MENGENAI JENDELANYA butuh dua hal, dan keduanya ditemukan lewat percobaan,
+# bukan ditebak. Dikirim persis bersamaan, `PUT` SELALU menang (20/20 percobaan)
+# — ia jauh lebih ringan daripada `createSale`, yang mengunci cabang, memuat
+# katalog, dan menulis penjualan + baris + konsumsi. Dan bila `PUT` diberi jeda
+# terlalu besar (≥ 50 ms), pembayarannya sudah selesai sebelum `PUT` membaca
+# apa pun, sehingga penjaga lama menangkapnya dengan benar (409).
+#
+# Yang membukanya: `PUT` berisi BANYAK baris — validasi menu dan pemasangan
+# baris jadi lebih lama, sehingga jarak antara "membaca existing" dan "menulis"
+# melebar melewati saat pembayaran commit. Dengan 200 baris + jeda 30 ms,
+# bug-nya muncul 8 dari 8 percobaan.
+#
+# Angka itu ditala di satu mesin, jadi seksi ini diulang beberapa RONDE: kalau
+# satu ronde meleset dari jendelanya, ronde lain masih menggigit. Asersinya
+# sendiri aman di semua jalinan — ia hanya bisa merah kalau bug-nya ada, tak
+# pernah merah karena timing.
+tutup170
+SH181=$(buka170 100000)
+cek "dasar §181: shift terbuka" "V == 1" "$([ ${#SH181} -eq 36 ] && echo 1 || echo 0)"
+BESAR181=$(python3 -c "
+import json,sys
+print(json.dumps({'items':[{'menu_id':sys.argv[1],'qty':1} for _ in range(200)]}))" "$M170")
+
+NULL2XX181=0; SEBAB_SALAH181=0; LIMA181=0; JUAL_GAGAL181=0
+for _ in 1 2 3; do
+  BILL181=$(api "$REISS105" POST /open-bill \
+    "$(jq -nc --arg m "$M170" '{items:[{menu_id:$m, qty:1}]}')" | jq -r '.id // ""')
+  [ ${#BILL181} -ne 36 ] && continue
+  BAYAR181=$(mktemp); SUNTING181=$(mktemp)
+  curl -s -X POST "$BASE/api/penjualan" -H "Authorization: Bearer $REISS105" \
+    -H 'Content-Type: application/json' \
+    -d "$(jq -nc --arg b "$BILL181" --arg m "$M170" --arg r "$(python3 -c 'import uuid;print(uuid.uuid4())')" \
+        '{open_bill_id:$b, client_ref:$r, metode_bayar:"tunai", is_dine_in:false, items:[{menu_id:$m, qty:1}]}')" \
+    -w '\n%{http_code}' > "$BAYAR181" &
+  ( sleep 0.03
+    curl -s -X PUT "$BASE/api/open-bill/$BILL181" -H "Authorization: Bearer $REISS105" \
+      -H 'Content-Type: application/json' -d "$BESAR181" -w '\n%{http_code}' > "$SUNTING181" ) &
+  wait
+  KODE181=$(printf '%s\n' "$(tail -n1 "$SUNTING181")")
+  printf '%s\n' "$KODE181" | grep -q '^5' && LIMA181=$((LIMA181+1))
+  # INTI: sesudah bill tertutup `loadDetail` memulangkan null, jadi 2xx berisi
+  # `null` BERARTI tulisannya mendarat ke bill yang sudah dibayar — dan
+  # pesanan tambahannya lenyap tanpa galat, sementara `onSuccess` di klien
+  # mengosongkan keranjang. Kasir melihat "tersimpan"; yang tersimpan tak ada.
+  if printf '%s\n' "$KODE181" | grep -q '^2'; then
+    head -n-1 "$SUNTING181" | jq -e '.==null' > /dev/null 2>&1 && NULL2XX181=$((NULL2XX181+1))
+  elif [ "$KODE181" = "409" ]; then
+    # Kalau kalah, sebabnya harus yang SUDAH dikenal klien — sebab baru terbaca
+    # asing dan tak menahan pengosongan keranjang.
+    head -n-1 "$SUNTING181" | jq -e '.kode=="bill_sudah_ditutup"' > /dev/null 2>&1 \
+      || SEBAB_SALAH181=$((SEBAB_SALAH181+1))
+  else
+    SEBAB_SALAH181=$((SEBAB_SALAH181+1))
+  fi
+  head -n-1 "$BAYAR181" | jq -e '.sale.id != null' > /dev/null 2>&1 || JUAL_GAGAL181=$((JUAL_GAGAL181+1))
+  rm -f "$BAYAR181" "$SUNTING181"
+done
+
+cek "§181 tak ada yang 5xx (penolakannya terkendali, bukan tabrakan)" "V == 0" "$LIMA181"
+cek "§181 penyuntingan TIDAK pernah dibalas 2xx-berisi-null (kehilangan sunyi)" "V == 0" \
+  "$NULL2XX181"
+cek "§181 penolakannya selalu bersebab bill_sudah_ditutup (dikenal klien)" "V == 0" \
+  "$SEBAB_SALAH181"
+cek "§181 pembayarannya selalu tetap menerbitkan penjualan" "V == 0" "$JUAL_GAGAL181"
+tutup170
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# §182 OPNAME DI CK: "SIAP KIRIM" vs "DI JALAN"
+#
+# `status = 'menunggu'` dipakai untuk TIGA keadaan yang berbeda:
+#
+#   - jalur produksi  : "selesai diproduksi"  → barangnya DI RAK cabang ini;
+#   - jalur kirim CK  : "siap dikirim"        → barangnya DI RAK cabang ini;
+#   - sesudah dikirim : "dalam perjalanan"    → barangnya SUDAH TIDAK di rak.
+#
+# `hitungSaldoCabang` sengaja masih memuat ketiganya — pengurangannya baru saat
+# `dikonfirmasi`. Itu benar untuk perencanaan dan supaya barang tak "hilang"
+# dari pembukuan selagi di jalan. Tapi opname membandingkan buku dengan APA YANG
+# ADA DI RAK, dan yang sudah dimuat ke kendaraan tak bisa dihitung petugas.
+#
+# Seksi ini menjaga KEDUA sisinya, sebab memotong yang salah justru merusak:
+# memotong seluruh `qtyDalamJalan` (termasuk "siap kirim") membuat baseline
+# mengecualikan barang yang sebenarnya ada, lalu penerimaannya menguranginya
+# sekali lagi — saldo CK jatuh ke MINUS. Versi pertama perbaikan ini melakukan
+# persis itu dan tertangkap di −10; karena itu kasus (a) di bawah ada.
+echo "── §182 opname CK: siap kirim vs di jalan ──"
+
+# Bersihkan sisa kiriman tertunda §179 supaya CK berangkat dari keadaan yang
+# diketahui — kalau tidak, "yang di jalan" bercampur antara dua seksi.
+if [ ${#KFID179} -eq 36 ]; then
+  api "$OWNER" POST "/produksi/kirim/$KFID179" '{}' > /dev/null 2>&1 || true
+  api "$OWNER" POST "/penerimaan/$KFID179/terima" > /dev/null 2>&1 || true
+fi
+api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CK52_UTAMA\",\"items\":[{\"ingredient_id\":\"$BASO66\",\"qty\":50},{\"ingredient_id\":\"$DAG66\",\"qty\":20000},{\"ingredient_id\":\"$TEP66\",\"qty\":5000}]}" > /dev/null
+api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CB46_ID\",\"items\":[{\"ingredient_id\":\"$BASO66\",\"qty\":0}]}" > /dev/null
+cek "dasar §182: CK berstok 50" "abs(V - 50) < 0.001" \
+  "$(api "$OWNER" GET "/stok?branch_id=$CK52_UTAMA" | jq --arg i "$BASO66" '[.[]|select(.ingredient_id==$i)][0].saldo')"
+
+# Faktur kirim 30 lahir ber-status 'menunggu' — tapi BELUM dikirim: barangnya
+# masih di rak CK, dan `POST /produksi/kirim` belum dipanggil.
+H182=$(api "$OWNER" POST /rekomendasi/menu/faktur \
+  "{\"items\":[{\"menu_id\":\"$MENU66\",\"porsi\":6}],\"tujuan_branch_id\":\"$CB46_ID\",\"ck_branch_id\":\"$CK52_UTAMA\"}")
+KF182=$(echo "$H182" | jq -r '.kirim.faktur_id // ""')
+cek "dasar §182: faktur kirim 30 terbit (siap kirim, belum berangkat)" "V == 1" \
+  "$([ ${#KF182} -eq 36 ] && echo 1 || echo 0)"
+
+# (a) SIAP KIRIM — barangnya MASIH DI RAK. Petugas menghitung 50, dan itu benar.
+#     Inilah kasus yang rusak bila potongannya memakai `qtyDalamJalan`.
+OP182A=$(api "$OWNER" POST /stok/opname \
+  "{\"branch_id\":\"$CK52_UTAMA\",\"items\":[{\"ingredient_id\":\"$BASO66\",\"qty\":50}]}")
+cek "§182a siap-kirim masih dihitung ada: hitung 50 → selisih 0" "abs(V) < 0.001" \
+  "$(echo "$OP182A" | jq '.ringkasan.total_selisih')"
+
+# (b) DI JALAN — sekarang benar-benar dikirim. Barangnya tak lagi di rak, jadi
+#     hitungan fisik yang BENAR tinggal 20.
+api "$OWNER" POST "/produksi/kirim/$KF182" '{}' > /dev/null
+cek "dasar §182: saldo CK tetap 50 (kiriman belum diterima — memang begitu)" "abs(V - 50) < 0.001" \
+  "$(api "$OWNER" GET "/stok?branch_id=$CK52_UTAMA" | jq --arg i "$BASO66" '[.[]|select(.ingredient_id==$i)][0].saldo')"
+OP182B=$(api "$OWNER" POST /stok/opname \
+  "{\"branch_id\":\"$CK52_UTAMA\",\"items\":[{\"ingredient_id\":\"$BASO66\",\"qty\":20}]}")
+# INTI: dulu −30. Petugas benar, sistem menuduh barangnya hilang.
+cek "§182b yang sudah berangkat tak dihitung ada: hitung 20 → selisih 0 (dulu −30)" "abs(V) < 0.001" \
+  "$(echo "$OP182B" | jq '.ringkasan.total_selisih')"
+cek "§182b barisnya tercatat COCOK, bukan kurang" "V == 1" \
+  "$(echo "$OP182B" | jq '(.ringkasan.cocok==1 and .ringkasan.kurang==0) | if . then 1 else 0 end')"
+
+# (c) Sesudah diterima: tak ada pengurangan KEDUA. `kirim_keluar` menyaring
+#     `pr.waktu > baseline`, dan `waktu` tetap waktu baris dibuat.
+api "$OWNER" POST "/penerimaan/$KF182/terima" > /dev/null
+cek "§182c sesudah diterima: cabang +30" "abs(V - 30) < 0.001" \
+  "$(api "$OWNER" GET "/stok?branch_id=$CB46_ID" | jq --arg i "$BASO66" '[.[]|select(.ingredient_id==$i)][0].saldo')"
+cek "§182c sesudah diterima: CK tetap 20, tidak MINUS" "abs(V - 20) < 0.001" \
+  "$(api "$OWNER" GET "/stok?branch_id=$CK52_UTAMA" | jq --arg i "$BASO66" '[.[]|select(.ingredient_id==$i)][0].saldo')"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# §183 REFUND DIBUKUKAN AKRUAL, DAN LAPORANNYA MENJELASKANNYA
+#
+# `sales.subtotal` DISUSUTKAN tiap refund, jadi laporan periode transaksi
+# aslinya memang ikut mengecil — itu pembukuan akrual, dan itu yang dipilih.
+# Yang hilang selama ini keterangannya: tak ada satu pun baris yang menyebut
+# kenapa omzet periode lampau tidak lagi sama dengan yang diingat orang. Tak
+# ada yang salah di layar; angkanya saja yang berubah diam-diam.
+#
+# Baris "Refund" menutup itu — dan ia PENJELAS, bukan potongan kedua:
+# omzet sudah bersih, jadi omzet kotornya = omzet + refund.
+echo "── §183 refund akrual & baris penjelasnya ──"
+
+tutup170
+SH183=$(buka170 100000)
+LAP183_0=$(api "$OWNER" GET /laporan)
+REF183_0=$(echo "$LAP183_0" | jq -r '.total_refund // 0')
+CNT183_0=$(echo "$LAP183_0" | jq -r '.jumlah_refund // 0')
+cek "dasar §183: laporan memuat baris refund (bukan field yang hilang)" "V == 1" \
+  "$(echo "$LAP183_0" | jq '((.total_refund|type)=="number" and (.jumlah_refund|type)=="number") | if . then 1 else 0 end')"
+
+S183=$(api "$REISS105" POST /penjualan \
+  "$(jq -nc --arg m "$M170" '{metode_bayar:"tunai", is_dine_in:false, items:[{menu_id:$m, qty:2}]}')")
+SID183=$(echo "$S183" | jq -r '.sale.id // ""')
+IT183=$(api "$OWNER" GET "/penjualan/$SID183" | jq -r '.items[0].id // ""')
+OMZ183_1=$(api "$OWNER" GET /laporan | jq -r '.omzet')
+cek "dasar §183: penjualan qty 2 tercatat & barisnya terbaca" "V == 1" \
+  "$([ ${#SID183} -eq 36 ] && [ ${#IT183} -eq 36 ] && echo 1 || echo 0)"
+
+N183=$(api "$OWNER" POST "/penjualan/$SID183/refund" \
+  "$(jq -nc --arg it "$IT183" '{alasan:"uji §183", items:[{sale_item_id:$it, qty:1}]}')" | jq -r '.nominal // 0')
+cek "dasar §183: refund satu porsi berhasil" "V > 0" "$N183"
+
+LAP183_2=$(api "$OWNER" GET /laporan)
+# INTI: refundnya MUNCUL, dan besarnya persis yang dikembalikan.
+cek "§183 baris refund bertambah persis sebesar uang yang dikembalikan" "abs(V) < 1" \
+  "$(python3 -c "print(($(echo "$LAP183_2" | jq -r '.total_refund // 0')) - $REF183_0 - $N183)")"
+cek "§183 cacah kejadian refund bertambah satu" "V == 1" \
+  "$(python3 -c "print(int($(echo "$LAP183_2" | jq -r '.jumlah_refund // 0') - $CNT183_0))")"
+# Dan ia PENJELAS, bukan potongan kedua: omzet sudah bersih, jadi
+# omzet_sesudah + refund = omzet_sebelum.
+cek "§183 omzet sudah bersih — omzet + refund = omzet sebelum refund" "abs(V) < 1" \
+  "$(python3 -c "print(($(echo "$LAP183_2" | jq -r '.omzet // 0')) + $N183 - $OMZ183_1)")"
+tutup170
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# §184 RESEP TAK BOLEH BERUBAH SELAGI PRODUKSINYA BERJALAN
+#
+# `catatKonsumsiProduksi` membaca resep LIVE saat produksi selesai, bukan
+# snapshot saat fakturnya dibuat. `PUT /bahan/:id` sudah menolak perubahan
+# `isi` selagi ada produksi berjalan justru karena itu — tapi resepnya sendiri
+# masih bisa ditulis ulang lewat `PUT /bahan/:id/resep`, dan akibatnya sama
+# persis: faktur yang RAB-nya dihitung dengan satu resep dieksekusi dengan
+# resep yang lain. Bahan yang dikeluarkan berhenti dipotong sama sekali; yang
+# ditambahkan dipotong tanpa pernah masuk perhitungan biaya.
+#
+# Pintu yang sama, sisi yang lain — dan sisi ini yang belum berpalang.
+echo "── §184 resep terkunci selagi produksi berjalan ──"
+
+RESEP184='{"komponen":[{"ingredient_id":"'"$DAG66"'","qty":2000},{"ingredient_id":"'"$TEP66"'","qty":300}]}'
+
+# Bahan produksi BARU yang tak pernah punya faktur: penjaganya tak boleh jadi
+# palang permanen. Sengaja bukan $BASO66 — bahan itu dipakai banyak seksi lain
+# dan hampir selalu punya faktur berjalan pada titik ini, jadi memakainya
+# sebagai garis dasar akan menguji keadaan, bukan penjaganya.
+BR184=$(api "$OWNER" POST /bahan '{"nama":"Bakso Uji184","satuan":"butir","satuan_beli":"batch","isi":100,"harga_beli":0,"pengadaan":"produksi","kategori":"lain"}' | jq -r '.id // ""')
+cek "dasar §184: bahan produksi baru dibuat" "V == 1" \
+  "$([ ${#BR184} -eq 36 ] && echo 1 || echo 0)"
+cek "§184 tanpa produksi berjalan, resep TETAP boleh disimpan (bukan palang permanen)" "V == 200" \
+  "$(status_code_body "$OWNER" PUT "/bahan/$BR184/resep" "$RESEP184")"
+
+# $BASO66 memang punya produksi berjalan dari seksi-seksi sebelumnya — itu
+# justru keadaan yang diuji di sini.
+cek "dasar §184: BASO66 memang punya produksi berjalan" "V == 409" \
+  "$(status_code_body "$OWNER" PUT "/bahan/$BASO66" '{"isi":250}')"
+# INTI: dulu 200 — resepnya tertulis ulang dan konsumsi faktur berjalan ikut
+# berubah, tanpa satu pun baris yang menerangkannya.
+cek "§184 resep DITOLAK selagi produksi berjalan (dulu diterima diam-diam)" "V == 409" \
+  "$(status_code_body "$OWNER" PUT "/bahan/$BASO66/resep" "$RESEP184")"
+
 
 if [ "$FAIL" -gt 0 ]; then
   echo

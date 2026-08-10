@@ -11,6 +11,7 @@ import {
   productions,
   saleConsumptions,
   saleItems,
+  saleRefunds,
   sales,
   suppliers,
 } from "../../db/schema";
@@ -76,6 +77,27 @@ export const laporanRoutes = new Hono<AppEnv>()
       .from(sales)
       .where(saleFilter);
 
+    /*
+     * REFUND, DIBUKUKAN AKRUAL: ditautkan ke tanggal PENJUALAN aslinya lewat
+     * `saleFilter` (yang menyaring `sales.sale_date`), bukan ke tanggal uangnya
+     * keluar laci. Refund hari ini atas nota bulan lalu karena itu muncul di
+     * laporan BULAN LALU — periode yang omzetnya memang ikut menyusut.
+     *
+     * Angkanya PENJELAS, bukan potongan kedua: `agg.omzet` di atas sudah bersih
+     * (`sales.subtotal` disusutkan tiap refund). Tanpa baris ini laporan periode
+     * lampau bisa mengecil sendiri tanpa satu pun keterangan — dan itu persis
+     * bentuk kesalahan yang paling sulit dilacak, sebab tak ada yang salah di
+     * layar, cuma angkanya beda dari yang diingat orang.
+     */
+    const [aggRefund] = await db
+      .select({
+        nominal: sum(saleRefunds.nominal),
+        jumlah: sql<number>`count(*)::int`,
+      })
+      .from(saleRefunds)
+      .innerJoin(sales, eq(saleRefunds.saleId, sales.id))
+      .where(saleFilter);
+
     // Porsi & omzet SESUDAH refund. Angka besar di atas (`agg`) datang dari
     // `sales`, yang memang disusutkan tiap refund; rincian per menu ini dulu
     // menjumlah `sale_items` mentah, jadi satu layar memuat dua angka yang
@@ -131,6 +153,8 @@ export const laporanRoutes = new Hono<AppEnv>()
         total: Number(r.total ?? 0),
       })),
       total_diskon: totalDiskon,
+      total_refund: Number(aggRefund?.nominal ?? 0),
+      jumlah_refund: aggRefund?.jumlah ?? 0,
       pb1_terkumpul: Number(agg?.pb1 ?? 0),
       total_hpp: totalHpp,
       // laba mundur oleh diskon yang diberikan: omzet(kotor) − diskon − HPP

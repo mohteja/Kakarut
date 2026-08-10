@@ -353,7 +353,6 @@ const execPenjualan: Eksekutor = async ({ auth }, payload, waktu) => {
     catatan: p.catatan,
     diskonTipe: p.diskon_tipe,
     diskonNilai: p.diskon_nilai,
-    bypassDiskonLimit: false,
     customerNama: p.customer_nama,
     customerWa: p.customer_wa,
     metodeBayar: p.metode_bayar,

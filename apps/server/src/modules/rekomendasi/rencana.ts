@@ -33,7 +33,7 @@ import { tanggalDi } from "../../lib/time";
 import { terbitkanNomor } from "../dokumen/nomor";
 import { komponenEfektif, loadKatalog, tampilDiCabang } from "../menu/service";
 import { catatLogFaktur } from "../produksi/log";
-import { hitungSaldoCabang, qtyDalamJalan } from "../stok/service";
+import { hitungSaldoCabang, kunciKirimCabang, qtyDalamJalan } from "../stok/service";
 
 /**
  * Hitung preview rencana: kebutuhan per bahan = Σ porsi × qty per porsi
@@ -618,6 +618,50 @@ export async function buatFakturDariRencana(
   );
   let nomorPermintaan: string | null = null;
   await db.transaction(async (tx) => {
+    /*
+     * STOK CK DIPERIKSA ULANG DI DALAM TRANSAKSI, di bawah kunci per cabang.
+     *
+     * Angka `kirim_ck` di atas berasal dari `rencanaDariMenu`, yang membaca
+     * saldo CK dan barang-dalam-jalan lewat `db` — di LUAR transaksi ini, dan
+     * tanpa kunci apa pun. Saldo cabang diturunkan dari ledger mutasi, jadi tak
+     * ada baris yang bisa dikunci dan `FOR UPDATE` pun tak menolong: dua
+     * permintaan yang dikirim bersamaan sama-sama membaca saldo lama,
+     * sama-sama menyimpulkan "tinggal kirim dari CK", dan sama-sama menerbitkan
+     * faktur kirimnya. Saldo CK baru jadi minus saat kedua kiriman diterima —
+     * jauh belakangan, di cabang yang berbeda, tanpa jejak yang menghubungkan
+     * keduanya.
+     *
+     * Kontraknya sudah tertulis di `qtyDalamJalan`: pemanggil yang memvalidasi
+     * sebelum menulis WAJIB memakai transaksi + `kunciKirimCabang`. `POST
+     * /produksi/kirim` sudah mematuhinya; jalur permintaan tambah stok ini
+     * belum. Pemeriksaannya sengaja ditaruh sebagai perintah PERTAMA di
+     * transaksi, sebelum satu baris pun ditulis, supaya penolakannya
+     * semua-atau-tidak.
+     */
+    if (kirimRows.length > 0 && ck) {
+      await kunciKirimCabang(tx, params.companyId, ck.id);
+      const saldoCk = new Map(
+        (await hitungSaldoCabang(params.companyId, ck.id)).map((r) => [r.ingredient_id, r]),
+      );
+      const jalanCk = await qtyDalamJalan(
+        tx,
+        params.companyId,
+        ck.id,
+        kirimRows.map((b) => b.ingredient_id),
+      );
+      for (const b of kirimRows) {
+        const s = saldoCk.get(b.ingredient_id);
+        const diJalan = jalanCk.get(b.ingredient_id) ?? 0;
+        const tersedia = (s?.saldo ?? 0) - diJalan;
+        if (b.kirim_ck > tersedia + 1e-9) {
+          const catatanJalan =
+            diJalan > 0 ? `, ${diJalan} masih dalam perjalanan ke cabang lain` : "";
+          throw new HTTPException(409, {
+            message: `Stok ${ck.nama} sudah berubah untuk ${b.nama} (tersedia ${Math.max(0, tersedia)} ${b.satuan}${catatanJalan}) — muat ulang lalu buat permintaannya lagi`,
+          });
+        }
+      }
+    }
     // Nomor dokumen PERMINTAAN (PM-) — identitas satu submit, dipakai badge
     // di kartu faktur & Data Permintaan Stok. Hanya bila ada faktur lahir.
     if (adaFakturLahir) {

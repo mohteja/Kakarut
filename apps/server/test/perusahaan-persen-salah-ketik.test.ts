@@ -53,8 +53,16 @@ describe("premis: ketikan wajar jatuh ke nol, dan nol itu bermakna", () => {
     expect(hitungPb1(100_000, 0)).toBe(0);
   });
 
-  it("diskon maksimal 0 menolak diskon apa pun di atas 0,5%", () => {
-    expect(JUAL).toMatch(/pctEfektif > company\.diskonMaksPersen \+ 0\.5/);
+  it("diskon maksimal 0 menolak diskon APA PUN — toleransinya ikut nol", () => {
+    // Uji ini dulu mengunci `+ 0.5` sebagai yang benar. Niatnya betul ("0
+    // berarti 0, bukan tanpa batas") tapi batasnya bocor: toleransi 0,5% ada
+    // untuk PEMBULATAN, dan nol tak punya apa pun untuk dibulatkan. Dengan
+    // `0 + 0.5`, "kasir tak boleh memberi diskon sama sekali" diam-diam
+    // berarti "boleh, asal di bawah setengah persen" — Rp 10.000 pada nota
+    // Rp 2 juta, tiap transaksi. Perilakunya dibuktikan verify-api §178;
+    // yang dijaga di sini cuma lantainya jangan hilang lagi.
+    expect(JUAL).toMatch(/const toleransi = company\.diskonMaksPersen === 0 \? 0 : 0\.5;/);
+    expect(JUAL).toMatch(/pctEfektif > company\.diskonMaksPersen \+ toleransi/);
   });
 });
 

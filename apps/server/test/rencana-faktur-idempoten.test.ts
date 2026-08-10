@@ -34,6 +34,10 @@ const SRV = readFileSync(
   "utf8",
 );
 const WEB = fileURLToPath(new URL("../../web/src", import.meta.url));
+const HELPER = readFileSync(
+  fileURLToPath(new URL("../src/modules/sync/idempoten.ts", import.meta.url)),
+  "utf8",
+);
 const HAL = readFileSync(join(WEB, "pages/stok/TambahStokDariMenuPage.tsx"), "utf8");
 
 describe("server: POST /rekomendasi/menu/faktur ikut ledger idempotensi", () => {
@@ -43,36 +47,33 @@ describe("server: POST /rekomendasi/menu/faktur ikut ledger idempotensi", () => 
     expect(SRV).toContain('from "../sync/idempoten";');
   });
 
-  it("diperiksa SEBELUM faktur apa pun diterbitkan", () => {
-    const iCek = SRV.indexOf(
-      "const ada = await cariHasilIdempoten(auth.company_id!, body.client_ref);",
-    );
+  /*
+   * SELECT-lalu-eksekusi hanya jalur cepat, bukan penjaga: dua tekanan tombol
+   * ber-`client_ref` sama yang datang bersamaan sama-sama melihat ledger
+   * kosong dan sama-sama MENERBITKAN faktur. Yang kedua kalah di unique index
+   * dan hasilnya dibuang diam-diam — gudang tetap menerima dua work-order
+   * untuk satu kebutuhan, persis yang endpoint ini seharusnya cegah.
+   */
+  it("mengklaim ATOMIK sebelum faktur apa pun diterbitkan", () => {
+    const iKlaim = SRV.indexOf("const { data } = await denganKlaimIdempoten(");
     const iTerbit = SRV.indexOf("const hasil = await buatFakturDariRencana({");
-    expect(iCek).toBeGreaterThan(0);
-    expect(iTerbit).toBeGreaterThan(iCek);
+    expect(iKlaim).toBeGreaterThan(0);
+    expect(iTerbit).toBeGreaterThan(iKlaim);
+    expect(SRV).toContain('tipe: "rencana_faktur",');
+    expect(SRV).not.toContain("cariHasilIdempoten");
+    expect(SRV).not.toContain("catatHasilIdempoten");
   });
 
   it("kiriman ulang memulangkan hasil yang SAMA (termasuk rencana_id-nya)", () => {
-    expect(SRV).toContain("if (ada) return c.json(ada.hasilJson, 201);");
+    expect(SRV).toContain("return c.json(data, 201);");
   });
 
-  it("dicatat SESUDAH fakturnya benar-benar terbit", () => {
-    // Dicatat lebih dulu lalu penerbitannya gagal = kiriman ulang mengira
-    // sudah selesai, dan fakturnya tak pernah ada.
-    const iTerbit = SRV.indexOf("const hasil = await buatFakturDariRencana({");
-    const iCatat = SRV.indexOf("await catatHasilIdempoten({");
-    expect(iTerbit).toBeGreaterThan(0);
-    expect(iCatat).toBeGreaterThan(iTerbit);
-    expect(SRV).toContain('tipe: "rencana_faktur",');
-  });
-
-  it("yang dicatat = yang dibalas", () => {
-    expect(SRV).toContain("hasilJson: hasil,");
-    expect(SRV).toContain("return c.json(hasil, 201);");
+  it("yang diklaim = yang dibalas", () => {
+    expect(SRV).toContain("        return hasil;");
   });
 
   it("opsional — klien lama tak berubah perilakunya", () => {
-    expect(SRV).toContain("if (body.client_ref) {");
+    expect(HELPER).toContain("if (!clientRef) return { data: await jalankan(), baru: true };");
   });
 });
 

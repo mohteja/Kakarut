@@ -1504,6 +1504,19 @@ export interface LaporanHarian {
   per_metode: { metode: MetodeBayar; jumlah: number; total: number }[];
   /** total potongan/diskon yang diberikan pada rentang (Rp) */
   total_diskon: number;
+  /**
+   * Uang yang dikembalikan atas penjualan RENTANG INI (Rp), berapa pun refundnya
+   * dilakukan — akrual: refund milik periode transaksi aslinya, bukan periode
+   * saat uangnya keluar laci.
+   *
+   * `omzet` di atas SUDAH bersih dari angka ini (`sales.subtotal` disusutkan tiap
+   * refund), jadi baris ini bukan potongan kedua — ia PENJELAS. Tanpanya laporan
+   * periode lampau bisa mengecil sendiri tanpa satu pun baris yang menerangkan
+   * kenapa: omzet kotornya = `omzet + total_refund`.
+   */
+  total_refund: number;
+  /** banyaknya kejadian refund yang menyusutkan rentang ini */
+  jumlah_refund: number;
   pb1_terkumpul: number;
   total_hpp: number;
   estimasi_profit: number;

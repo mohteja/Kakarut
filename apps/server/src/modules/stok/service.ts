@@ -99,7 +99,14 @@ export async function hitungSaldoCabang(
       FROM productions pr
       WHERE pr.asal_branch_id = ${branchId} AND pr.ingredient_id = i.id
         AND pr.status = 'dikonfirmasi' AND pr.deleted_at IS NULL
-        AND (b.created_at IS NULL OR pr.waktu > b.created_at)
+        -- WAKTU BERANGKAT, bukan waktu tiba. Kolom waktu ditimpa waktu
+        -- penerimaan saat baris dikonfirmasi, jadi memakainya membuat SETIAP
+        -- kiriman terhitung sesudah baseline -- termasuk yang sudah berangkat
+        -- sebelum petugas menghitung, dan yang karena itu memang sudah tak
+        -- masuk hitungan fisiknya. Itu mengurangi barang yang sama dua kali
+        -- dan menjatuhkan saldo ke MINUS. COALESCE menjaga baris lama yang
+        -- lahir sebelum kolom dikirim_at ada.
+        AND (b.created_at IS NULL OR COALESCE(pr.dikirim_at, pr.waktu) > b.created_at)
     ) k ON TRUE
     LEFT JOIN LATERAL (
       -- tempat penyimpanan dari entri masuk terkonfirmasi terakhir (fallback)
@@ -701,6 +708,49 @@ export async function fifoBahan(params: {
  * menulis harus memakai transaksi + `kunciKirimCabang` agar pemeriksaannya
  * tidak balapan dengan pengiriman lain dari cabang yang sama.
  */
+/**
+ * Qty yang BENAR-BENAR SUDAH BERANGKAT dari cabang ini: sudah dikirim, belum
+ * diterima tujuan. Bagian dari `qtyDalamJalan`, bukan penggantinya.
+ *
+ * BEDANYA, dan kenapa dua fungsi ini harus terpisah: `status = 'menunggu'`
+ * dipakai untuk TIGA keadaan yang berbeda —
+ *
+ *   - jalur produksi  : "selesai diproduksi"  → barangnya di rak cabang ini;
+ *   - jalur kirim CK  : "siap dikirim"        → barangnya di rak cabang ini;
+ *   - sesudah dikirim : "dalam perjalanan"    → barangnya SUDAH tidak di rak.
+ *
+ * `qtyDalamJalan` sengaja menjumlah ketiganya, sebab pertanyaannya "berapa yang
+ * sudah dijanjikan keluar" — untuk perencanaan, barang yang siap kirim sama
+ * tak-tersedianya dengan yang sudah di jalan. Fungsi ini menjawab pertanyaan
+ * yang LAIN: "berapa yang sudah tidak ada di rak" — dan hanya itu yang boleh
+ * dipotong dari hitungan opname fisik.
+ *
+ * Pembedanya `branch_id = tujuan_branch_id`, persis penanda yang sudah dipakai
+ * `POST /produksi/kirim` untuk memilih baris yang "MASIH di CK"
+ * (`b.branchId !== b.tujuanBranchId`): mengirim memindahkan barisnya ke cabang
+ * tujuan lewat `kolomPindahCabang`. SENGAJA bukan `dari_branch_id`, yang
+ * skemanya menyebut dirinya "murni metadata tampilan/visibilitas — TIDAK
+ * dipakai saldo".
+ */
+export async function qtyDiJalan(
+  exec: Pick<typeof db, "execute">,
+  companyId: string,
+  branchId: string,
+): Promise<Map<string, number>> {
+  const res = await exec.execute(sql`
+    SELECT pr.ingredient_id AS ingredient_id, SUM(pr.qty) AS qty
+    FROM productions pr
+    WHERE pr.company_id = ${companyId}
+      AND pr.asal_branch_id = ${branchId}
+      AND pr.status = 'menunggu'
+      AND pr.dikirim_at IS NOT NULL
+      AND pr.deleted_at IS NULL
+    GROUP BY pr.ingredient_id
+  `);
+  const rows = (res as unknown as { rows?: Record<string, unknown>[] }).rows ?? [];
+  return new Map(rows.map((r) => [String(r.ingredient_id), Number(r.qty) || 0]));
+}
+
 export async function qtyDalamJalan(
   exec: Pick<typeof db, "execute">,
   companyId: string,

@@ -26,6 +26,7 @@ const baca = (rel: string) =>
   readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
 
 const RUTE = baca("../src/modules/stok/routes.ts");
+const HELPER = baca("../src/modules/sync/idempoten.ts");
 const HAL = baca("../../web/src/pages/stok/OpnamePage.tsx");
 
 /** Potongan rute `POST /opname` saja. */
@@ -40,47 +41,49 @@ describe("server: memakai ledger yang sama dengan jalur lain", () => {
 
   it("helpernya diimpor dari modul sync, bukan disalin ulang", () => {
     expect(RUTE).toContain('} from "../sync/idempoten";');
-    expect(RUTE).toContain("cariHasilIdempoten,");
-    expect(RUTE).toContain("catatHasilIdempoten,");
+    expect(RUTE).toContain("denganKlaimIdempoten,");
   });
 
-  it("diperiksa PALING AWAL — sebelum cabang di-resolve & sebelum penjaga petugas", () => {
-    // Kiriman ulang harus memulangkan hasil yang SAMA, bukan menjalani lagi
-    // seluruh pemeriksaannya (yang bisa saja kini menolak, mis. petugas rak
-    // berubah sesudah sesi pertama tersimpan).
-    const iIdem = OPNAME.indexOf("if (body.client_ref) {");
+  /*
+   * Dulu jalur ini memakai SELECT-lalu-eksekusi-lalu-INSERT. Itu jalur cepat,
+   * BUKAN penjaga: dua opname ber-`client_ref` sama yang datang bersamaan
+   * sama-sama melihat ledger kosong, sama-sama menulis sesi, lalu yang kedua
+   * kalah di unique index dan hasilnya dibuang diam-diam. Ledger rapi satu
+   * baris; sesi opnamenya dua, dan stok tercatat dua kali.
+   */
+  it("mengklaim ATOMIK sebelum eksekusi, bukan sekadar memeriksa ledger", () => {
+    expect(OPNAME).toContain("const { data } = await denganKlaimIdempoten(");
+    expect(OPNAME).toContain('tipe: "opname",');
+    expect(RUTE).not.toContain("cariHasilIdempoten");
+    expect(RUTE).not.toContain("catatHasilIdempoten");
+  });
+
+  it("diklaim PALING AWAL — sebelum cabang di-resolve & sebelum penjaga petugas", () => {
+    // Yang dijaga SELURUH badan handler, bukan cuma penulisannya: percobaan
+    // kedua tak boleh menjalani lagi pemeriksaan yang bisa saja kini menolak
+    // (mis. petugas rak berubah sesudah sesi pertama tersimpan).
+    const iIdem = OPNAME.indexOf("const { data } = await denganKlaimIdempoten(");
     const iCabang = OPNAME.indexOf("const branchId = body.branch_id");
     const iPetugas = OPNAME.indexOf("bukan petugas opname tempat");
-    expect(iIdem, "pemeriksaan idempotensi tak ditemukan").toBeGreaterThan(0);
+    expect(iIdem, "klaim idempotensi tak ditemukan").toBeGreaterThan(0);
     expect(iCabang).toBeGreaterThan(iIdem);
     expect(iPetugas).toBeGreaterThan(iIdem);
   });
 
   it("hasil yang diputar ulang dipulangkan 201, sama dengan jalur normalnya", () => {
-    expect(OPNAME).toContain("if (ada) return c.json(ada.hasilJson, 201);");
+    expect(OPNAME).toContain("return c.json(data, 201);");
   });
 
-  it("dicatat SESUDAH transaksinya sukses", () => {
-    // Kalau penyimpanannya sendiri gagal, tak ada yang boleh membuat kiriman
-    // ulang mengira sudah selesai.
-    const iInsert = OPNAME.indexOf("await tx.insert(stockOpnames)");
-    const iCatat = OPNAME.indexOf("await catatHasilIdempoten({");
-    expect(iInsert).toBeGreaterThan(0);
-    expect(iCatat).toBeGreaterThan(iInsert);
-  });
-
-  it("yang dicatat PERSIS yang dipulangkan — bukan disusun ulang", () => {
+  it("yang diklaim PERSIS yang dipulangkan — bukan disusun ulang", () => {
     expect(OPNAME).toContain(
       "const hasil = { ok: true, jumlah: rows.length, session_id: sessionId, nomor, ringkasan };",
     );
-    expect(OPNAME).toContain("hasilJson: hasil,");
-    expect(OPNAME).toContain("return c.json(hasil, 201);");
+    expect(OPNAME).toContain("        return hasil;");
   });
 
   it("tanpa `client_ref` perilakunya tak berubah — klien lama aman", () => {
-    // Kedua sisinya digerbang `if (body.client_ref)`, jadi absen = jalur lama.
-    expect(OPNAME).toContain("if (body.client_ref) {");
-    expect(OPNAME).toContain("tipe: \"opname\",");
+    // Dijamin helper-nya, bukan gerbang `if` di tiap pemanggil.
+    expect(HELPER).toContain("if (!clientRef) return { data: await jalankan(), baru: true };");
   });
 });
 
@@ -149,8 +152,10 @@ describe("stok awal TIDAK ikut mewarisi kuncinya", () => {
 describe("premis: ledger itu memang bersama, dan sudah dipakai jalur lain", () => {
   it("penjualan memakainya", () => {
     const jual = baca("../src/modules/penjualan/routes.ts");
-    expect(jual).toContain("cariHasilIdempoten");
-    expect(jual).toContain("catatHasilIdempoten");
+    // Penjualan DAN refund kini mengambil KLAIM lewat helper bersama, bukan
+    // sekadar membaca ledger lalu mencatatnya belakangan. Dua pemakaian:
+    // `POST /` dan `POST /:id/refund`.
+    expect(jual.split("denganKlaimIdempoten(").length - 1).toBeGreaterThanOrEqual(2);
   });
 
   it("dan kuncinya unik per `(company_id, client_ref)`", () => {

@@ -1,10 +1,19 @@
-name: Build & Deploy (production)
+name: Deploy manual (darurat)
 
-# Build image saat push ke branch production, push ke GHCR, lalu (opsional)
-# picu redeploy di Dokploy lewat webhook.
+# JALUR DARURAT SAJA — sengaja TANPA gerbang CI.
+#
+# Deploy produksi yang NORMAL hidup di `ci.yml`, sebagai job `deploy` yang
+# ber-`needs: [quality, verify-api]`. Berkas ini dulu memicu dirinya sendiri
+# lewat `on: push: branches: [production]`, sehingga berjalan BERSAMAAN dengan
+# CI, bukan sesudahnya: image ter-build dan Dokploy ter-picu selagi
+# typecheck/unit test/verify-api masih berjalan — dan tetap ter-deploy walau
+# ketiganya kemudian merah.
+#
+# Pemicu push itu DIHAPUS. Yang tersisa hanya tombol manual, untuk keadaan
+# ketika produksi harus diperbaiki lebih cepat daripada satu putaran CI penuh.
+# Memakainya berarti sengaja melewati verifikasi — itu keputusan sadar, bukan
+# bawaan yang tak sengaja.
 on:
-  push:
-    branches: [production]
   workflow_dispatch:
 
 concurrency:
@@ -19,6 +28,10 @@ jobs:
   build-and-push:
     runs-on: ubuntu-latest
     steps:
+      - name: Peringatan jalur darurat
+        run: |
+          echo "::warning::Deploy manual TANPA gerbang CI. Jalur normal (ci.yml → job deploy) menunggu typecheck, unit test, dan verify-api hijau."
+
       - name: Checkout
         uses: actions/checkout@v4
 

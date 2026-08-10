@@ -23,9 +23,8 @@ import {
   tanggalDalamRentang,
 } from "../pengajuan/routes";
 import {
-  cariHasilIdempoten,
-  catatHasilIdempoten,
   clientRefField,
+  denganKlaimIdempoten,
   deviceIdField,
 } from "../sync/idempoten";
 
@@ -200,113 +199,111 @@ export const absensiRoutes = new Hono<AppEnv>()
   .post("/", requireRole("owner", "admin", "cashier"), zValidator("json", ClockBody), async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");
-    if (body.client_ref) {
-      const ada = await cariHasilIdempoten(auth.company_id!, body.client_ref);
-      if (ada) return c.json(ada.hasilJson, 200);
-    }
-    const branchId = await resolveBranchId(c);
-    const { lat, lng, foto_url } = body;
-    const kode = body.kode.trim();
-    const { jarakM, namaCabang } = await cekRadius(branchId, lat, lng);
-
-    // Resolusi karyawan lewat kode (case-insensitive) dalam perusahaan pemanggil.
-    // Karyawan terarsip diperlakukan seperti tidak ditemukan (sudah keluar).
-    const [m] = await db
-      .select({
-        userId: memberships.userId,
-        kode: memberships.employeeCode,
-        nama: users.nama,
-        isActive: users.isActive,
-      })
-      .from(memberships)
-      .innerJoin(users, eq(memberships.userId, users.id))
-      .where(
-        and(
-          eq(memberships.companyId, auth.company_id!),
-          sql`upper(${memberships.employeeCode}) = upper(${kode})`,
-          isNull(memberships.archivedAt),
-        ),
-      );
-    if (!m) throw new HTTPException(404, { message: `Kode karyawan "${kode}" tidak ditemukan` });
-    if (!m.isActive) throw new HTTPException(400, { message: `${m.nama} berstatus nonaktif` });
-
-    const result = await catatAbsen({
-      companyId: auth.company_id!,
-      branchId,
-      userId: m.userId,
-      employeeCode: m.kode ?? kode,
-      nama: m.nama,
-      namaCabang,
-      fotoUrl: foto_url,
-      jarakM,
-    });
-    if (body.client_ref) {
-      await catatHasilIdempoten({
+    const { data, baru } = await denganKlaimIdempoten(
+      {
         companyId: auth.company_id!,
         clientRef: body.client_ref,
         userId: auth.sub,
         deviceId: body.device_id ?? null,
         tipe: "absen_stasiun",
-        hasilJson: result,
-      });
-    }
-    return c.json(result, 201);
+      },
+      async () => {
+        const branchId = await resolveBranchId(c);
+        const { lat, lng, foto_url } = body;
+        const kode = body.kode.trim();
+        const { jarakM, namaCabang } = await cekRadius(branchId, lat, lng);
+
+        // Resolusi karyawan lewat kode (case-insensitive) dalam perusahaan pemanggil.
+        // Karyawan terarsip diperlakukan seperti tidak ditemukan (sudah keluar).
+        const [m] = await db
+          .select({
+            userId: memberships.userId,
+            kode: memberships.employeeCode,
+            nama: users.nama,
+            isActive: users.isActive,
+          })
+          .from(memberships)
+          .innerJoin(users, eq(memberships.userId, users.id))
+          .where(
+            and(
+              eq(memberships.companyId, auth.company_id!),
+              sql`upper(${memberships.employeeCode}) = upper(${kode})`,
+              isNull(memberships.archivedAt),
+            ),
+          );
+        if (!m) throw new HTTPException(404, { message: `Kode karyawan "${kode}" tidak ditemukan` });
+        if (!m.isActive) throw new HTTPException(400, { message: `${m.nama} berstatus nonaktif` });
+
+        return await catatAbsen({
+          companyId: auth.company_id!,
+          branchId,
+          userId: m.userId,
+          employeeCode: m.kode ?? kode,
+          nama: m.nama,
+          namaCabang,
+          fotoUrl: foto_url,
+          jarakM,
+        });
+      },
+    );
+    return c.json(data, baru ? 201 : 200);
   })
   // Absen SENDIRI — atas nama pemanggil (auth.sub). Aman untuk peran tim: tak
   // ada kode yang bisa dititipkan; server memakai keanggotaan pemanggil.
   .post("/saya", zValidator("json", SelfBody), async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");
-    if (body.client_ref) {
-      const ada = await cariHasilIdempoten(auth.company_id!, body.client_ref);
-      if (ada) return c.json(ada.hasilJson, 200);
-    }
-    const branchId = await resolveBranchId(c);
-    const { lat, lng, foto_url } = body;
-    const { jarakM, namaCabang } = await cekRadius(branchId, lat, lng);
-
-    const [m] = await db
-      .select({
-        kode: memberships.employeeCode,
-        nama: users.nama,
-        isActive: users.isActive,
-      })
-      .from(memberships)
-      .innerJoin(users, eq(memberships.userId, users.id))
-      .where(
-        and(
-          eq(memberships.companyId, auth.company_id!),
-          eq(memberships.userId, auth.sub),
-          isNull(memberships.archivedAt),
-        ),
-      );
-    if (!m) throw new HTTPException(403, { message: "Akun Anda bukan karyawan aktif cabang ini" });
-    if (!m.kode) {
-      throw new HTTPException(400, { message: "Kode karyawan Anda belum diatur — hubungi admin" });
-    }
-    if (!m.isActive) throw new HTTPException(400, { message: "Akun Anda berstatus nonaktif" });
-
-    const result = await catatAbsen({
-      companyId: auth.company_id!,
-      branchId,
-      userId: auth.sub,
-      employeeCode: m.kode,
-      nama: m.nama,
-      namaCabang,
-      fotoUrl: foto_url,
-      jarakM,
-    });
-    if (body.client_ref) {
-      await catatHasilIdempoten({
+    const { data, baru } = await denganKlaimIdempoten(
+      {
         companyId: auth.company_id!,
         clientRef: body.client_ref,
         userId: auth.sub,
         deviceId: body.device_id ?? null,
         tipe: "absen_saya",
-        hasilJson: result,
-      });
-    }
-    return c.json(result, 201);
+      },
+      async () => {
+        const branchId = await resolveBranchId(c);
+        const { lat, lng, foto_url } = body;
+        const { jarakM, namaCabang } = await cekRadius(branchId, lat, lng);
+
+        const [m] = await db
+          .select({
+            kode: memberships.employeeCode,
+            nama: users.nama,
+            isActive: users.isActive,
+          })
+          .from(memberships)
+          .innerJoin(users, eq(memberships.userId, users.id))
+          .where(
+            and(
+              eq(memberships.companyId, auth.company_id!),
+              eq(memberships.userId, auth.sub),
+              isNull(memberships.archivedAt),
+            ),
+          );
+        if (!m) {
+          throw new HTTPException(403, { message: "Akun Anda bukan karyawan aktif cabang ini" });
+        }
+        if (!m.kode) {
+          throw new HTTPException(400, {
+            message: "Kode karyawan Anda belum diatur — hubungi admin",
+          });
+        }
+        if (!m.isActive) throw new HTTPException(400, { message: "Akun Anda berstatus nonaktif" });
+
+        return await catatAbsen({
+          companyId: auth.company_id!,
+          branchId,
+          userId: auth.sub,
+          employeeCode: m.kode,
+          nama: m.nama,
+          namaCabang,
+          fotoUrl: foto_url,
+          jarakM,
+        });
+      },
+    );
+    return c.json(data, baru ? 201 : 200);
   })
   // Ringkasan absensi hari ini (atau ?tanggal=YYYY-MM-DD) di cabang: jam masuk
   // pertama & jam keluar terakhir per karyawan.

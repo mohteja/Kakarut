@@ -130,8 +130,24 @@ export const onboardingRoutes = new Hono<AppEnv>()
     if (!inv || inv.email !== auth.email) {
       throw new HTTPException(404, { message: "Undangan tidak ditemukan" });
     }
+    /*
+     * Syarat `pending` ikut di WHERE, bukan cuma diperiksa di atas.
+     *
+     * Sejak penerimaan undangan mengunci barisnya (`FOR UPDATE`), penolakan
+     * yang datang bersamaan akan MENUNGGU kunci itu — lalu, tanpa syarat di
+     * sini, menimpa status yang baru saja jadi `accepted`. Hasilnya jejak yang
+     * saling bertentangan: membership-nya sah terbentuk, tapi undangannya
+     * tercatat `revoked`.
+     *
+     * Dengan syaratnya, penolakan yang kalah mencocokkan NOL baris dan menjadi
+     * no-op — yang memang perilaku benar: undangan yang sudah diterima tak bisa
+     * ditolak lagi, dan pemanggil tetap dibalas ok seperti sebelumnya.
+     */
     if (inv.status === "pending") {
-      await db.update(invitations).set({ status: "revoked" }).where(eq(invitations.id, invId));
+      await db
+        .update(invitations)
+        .set({ status: "revoked" })
+        .where(and(eq(invitations.id, invId), eq(invitations.status, "pending")));
     }
     return c.json({ ok: true });
   })
