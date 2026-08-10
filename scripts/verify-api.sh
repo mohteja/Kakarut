@@ -8991,6 +8991,52 @@ cek "§182c sesudah diterima: CK tetap 20, tidak MINUS" "abs(V - 20) < 0.001" \
   "$(api "$OWNER" GET "/stok?branch_id=$CK52_UTAMA" | jq --arg i "$BASO66" '[.[]|select(.ingredient_id==$i)][0].saldo')"
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# §183 REFUND DIBUKUKAN AKRUAL, DAN LAPORANNYA MENJELASKANNYA
+#
+# `sales.subtotal` DISUSUTKAN tiap refund, jadi laporan periode transaksi
+# aslinya memang ikut mengecil — itu pembukuan akrual, dan itu yang dipilih.
+# Yang hilang selama ini keterangannya: tak ada satu pun baris yang menyebut
+# kenapa omzet periode lampau tidak lagi sama dengan yang diingat orang. Tak
+# ada yang salah di layar; angkanya saja yang berubah diam-diam.
+#
+# Baris "Refund" menutup itu — dan ia PENJELAS, bukan potongan kedua:
+# omzet sudah bersih, jadi omzet kotornya = omzet + refund.
+echo "── §183 refund akrual & baris penjelasnya ──"
+
+tutup170
+SH183=$(buka170 100000)
+LAP183_0=$(api "$OWNER" GET /laporan)
+REF183_0=$(echo "$LAP183_0" | jq -r '.total_refund // 0')
+CNT183_0=$(echo "$LAP183_0" | jq -r '.jumlah_refund // 0')
+cek "dasar §183: laporan memuat baris refund (bukan field yang hilang)" "V == 1" \
+  "$(echo "$LAP183_0" | jq '((.total_refund|type)=="number" and (.jumlah_refund|type)=="number") | if . then 1 else 0 end')"
+
+S183=$(api "$REISS105" POST /penjualan \
+  "$(jq -nc --arg m "$M170" '{metode_bayar:"tunai", is_dine_in:false, items:[{menu_id:$m, qty:2}]}')")
+SID183=$(echo "$S183" | jq -r '.sale.id // ""')
+IT183=$(api "$OWNER" GET "/penjualan/$SID183" | jq -r '.items[0].id // ""')
+OMZ183_1=$(api "$OWNER" GET /laporan | jq -r '.omzet')
+cek "dasar §183: penjualan qty 2 tercatat & barisnya terbaca" "V == 1" \
+  "$([ ${#SID183} -eq 36 ] && [ ${#IT183} -eq 36 ] && echo 1 || echo 0)"
+
+N183=$(api "$OWNER" POST "/penjualan/$SID183/refund" \
+  "$(jq -nc --arg it "$IT183" '{alasan:"uji §183", items:[{sale_item_id:$it, qty:1}]}')" | jq -r '.nominal // 0')
+cek "dasar §183: refund satu porsi berhasil" "V > 0" "$N183"
+
+LAP183_2=$(api "$OWNER" GET /laporan)
+# INTI: refundnya MUNCUL, dan besarnya persis yang dikembalikan.
+cek "§183 baris refund bertambah persis sebesar uang yang dikembalikan" "abs(V) < 1" \
+  "$(python3 -c "print(($(echo "$LAP183_2" | jq -r '.total_refund // 0')) - $REF183_0 - $N183)")"
+cek "§183 cacah kejadian refund bertambah satu" "V == 1" \
+  "$(python3 -c "print(int($(echo "$LAP183_2" | jq -r '.jumlah_refund // 0') - $CNT183_0))")"
+# Dan ia PENJELAS, bukan potongan kedua: omzet sudah bersih, jadi
+# omzet_sesudah + refund = omzet_sebelum.
+cek "§183 omzet sudah bersih — omzet + refund = omzet sebelum refund" "abs(V) < 1" \
+  "$(python3 -c "print(($(echo "$LAP183_2" | jq -r '.omzet // 0')) + $N183 - $OMZ183_1)")"
+tutup170
+
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

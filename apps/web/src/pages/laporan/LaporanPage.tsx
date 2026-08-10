@@ -179,6 +179,11 @@ export function LaporanPage() {
               value={formatRupiah(lap.total_diskon)}
               warna={lap.total_diskon > 0 ? "text-red-600" : "text-stone-800"}
             />
+            <StatCard
+              label="Refund"
+              value={formatRupiah(lap.total_refund)}
+              warna={lap.total_refund > 0 ? "text-red-600" : "text-stone-800"}
+            />
             <StatCard label="HPP Terpakai" value={formatRupiah(lap.total_hpp)} />
             <StatCard
               label="Estimasi Profit"
@@ -194,6 +199,18 @@ export function LaporanPage() {
             pembayaran, dihitung dari <b>resep menu × harga acuan bahan</b> saat itu — bukan dari
             harga lot stok, dan tidak terpengaruh setelan Metode biaya persediaan.
           </p>
+          {/* Refund dibukukan AKRUAL: ia milik periode transaksi aslinya, bukan
+              periode saat uangnya keluar laci. Tanpa keterangan ini omzet periode
+              lampau bisa terlihat mengecil sendiri — tak ada yang salah di layar,
+              cuma angkanya beda dari yang diingat orang. */}
+          {lap.total_refund > 0 && (
+            <p className="-mt-4 mb-6 text-xs text-stone-500">
+              <b>Refund</b> {formatRupiah(lap.total_refund)} dari {lap.jumlah_refund} kejadian
+              adalah uang yang dikembalikan atas transaksi <b>periode ini</b>, kapan pun
+              pengembaliannya dilakukan. <b>Omzet</b> di atas sudah bersih darinya — sebelum
+              refund, omzetnya {formatRupiah(lap.omzet + lap.total_refund)}.
+            </p>
+          )}
 
           {lap.per_metode.length > 0 && (
             <div className="mb-6">
