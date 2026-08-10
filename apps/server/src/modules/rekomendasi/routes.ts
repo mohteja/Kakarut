@@ -23,9 +23,8 @@ import {
 import { resolveBranchId, type AppEnv } from "../../middleware/auth";
 import { nomorUntukRefs } from "../dokumen/nomor";
 import {
-  cariHasilIdempoten,
-  catatHasilIdempoten,
   clientRefField,
+  denganKlaimIdempoten,
   deviceIdField,
 } from "../sync/idempoten";
 import { buatFakturDariRencana, rencanaDariMenu } from "./rencana";
@@ -129,34 +128,32 @@ export const rekomendasiRoutes = new Hono<AppEnv>().get("/beli", async (c) => {
     // Kuncinya dipegang klien sampai SUKSES, jadi percobaan kedua memutar ulang
     // hasil yang sama — termasuk `rencana_id`-nya, sehingga permintaan
     // perlengkapan tetap menaut ke rencana yang benar.
-    if (body.client_ref) {
-      const ada = await cariHasilIdempoten(auth.company_id!, body.client_ref);
-      if (ada) return c.json(ada.hasilJson, 201);
-    }
-    // cabang tujuan = store yang butuh stok (default cabang aktif)
-    const branchId = body.tujuan_branch_id ?? (await resolveBranchId(c));
-    const hasil = await buatFakturDariRencana({
-      companyId: auth.company_id!,
-      branchId,
-      ckBranchId: body.ck_branch_id,
-      userId: auth.sub,
-      items: body.items,
-      workerId: body.worker_id,
-      supplierId: body.supplier_id,
-      supplierBeliId: body.supplier_beli_id,
-      catatan: body.catatan,
-    });
-    if (body.client_ref) {
-      await catatHasilIdempoten({
+    const { data } = await denganKlaimIdempoten(
+      {
         companyId: auth.company_id!,
         clientRef: body.client_ref,
         userId: auth.sub,
         deviceId: body.device_id ?? null,
         tipe: "rencana_faktur",
-        hasilJson: hasil,
-      });
-    }
-    return c.json(hasil, 201);
+      },
+      async () => {
+        // cabang tujuan = store yang butuh stok (default cabang aktif)
+        const branchId = body.tujuan_branch_id ?? (await resolveBranchId(c));
+        const hasil = await buatFakturDariRencana({
+          companyId: auth.company_id!,
+          branchId,
+          ckBranchId: body.ck_branch_id,
+          userId: auth.sub,
+          items: body.items,
+          workerId: body.worker_id,
+          supplierId: body.supplier_id,
+          supplierBeliId: body.supplier_beli_id,
+          catatan: body.catatan,
+        });
+        return hasil;
+      },
+    );
+    return c.json(data, 201);
   })
   // Data Permintaan Stok: daftar permintaan "Tambah Stok dari Menu" — faktur
   // produksi + beli satu submit digabung lewat rencana_id. Company-scoped

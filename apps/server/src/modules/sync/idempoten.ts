@@ -114,11 +114,16 @@ export class SedangDiproses extends HTTPException {
  * lalu yang kedua kalah di unique index dan hasilnya DIBUANG diam-diam oleh
  * `onConflictDoNothing`. Ledger terlihat rapi satu baris; penjualannya dua.
  *
- * `/sync` sudah dijaga begini sejak lama. Enam endpoint ONLINE — penjualan,
- * refund, absensi (×2), opname, transfer, rencana — masih memakai pola
- * SELECT-lalu-eksekusi-lalu-INSERT itu, jadi lubangnya tetap terbuka di sana.
- * Fungsi inilah yang menutupnya, dan alasannya dibagi (bukan disalin) supaya
- * jalur KETUJUH yang muncul kelak tidak bisa lagi lupa memakainya.
+ * `/sync` sudah dijaga begini sejak lama. TUJUH jalur ONLINE memakai pola
+ * SELECT-lalu-eksekusi-lalu-INSERT itu — penjualan, refund, absensi (×2),
+ * opname, transfer, rencana — jadi lubangnya terbuka di ketujuhnya. Semuanya
+ * kini lewat fungsi ini, dan alasannya dibagi (bukan disalin) supaya jalur
+ * KEDELAPAN yang muncul kelak tidak bisa lagi lupa memakainya.
+ *
+ * `cariHasilIdempoten`/`catatHasilIdempoten` sengaja DIPERTAHANKAN sebagai
+ * ekspor: `/sync` masih memakainya untuk membaca ledger dan menyimpan
+ * penolakan sebagai 'gagal' — kontrak yang memang berbeda (lihat di bawah).
+ * Yang tak boleh lagi adalah memakai keduanya sebagai penjaga jalur online.
  *
  * Kontrak "lepas saat gagal" DISENGAJA dan berbeda dari `/sync`:
  * `/sync` menyimpan penolakan sebagai 'gagal' agar mobile mendapat sebab yang

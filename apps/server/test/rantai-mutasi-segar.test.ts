@@ -62,8 +62,7 @@ describe("premis: langkah pertama nyata dan tak aman diulang", () => {
     const i = REKOM.indexOf('"/menu/faktur"');
     expect(i, "rute /menu/faktur tak ditemukan").toBeGreaterThan(0);
     const rute = REKOM.slice(i, i + 1200);
-    expect(rute).toMatch(/cariHasilIdempoten/);
-    expect(rute).toMatch(/catatHasilIdempoten/);
+    expect(rute).toMatch(/denganKlaimIdempoten/);
   });
 });
 

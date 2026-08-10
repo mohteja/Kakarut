@@ -34,9 +34,8 @@ import { terbitkanNomor } from "../dokumen/nomor";
 import { catatLogFaktur } from "../produksi/log";
 import { hitungSaldoCabang, kunciKirimCabang, qtyDalamJalan } from "../stok/service";
 import {
-  cariHasilIdempoten,
-  catatHasilIdempoten,
   clientRefField,
+  denganKlaimIdempoten,
   deviceIdField,
 } from "../sync/idempoten";
 
@@ -310,168 +309,167 @@ export const transferRoutes = new Hono<AppEnv>()
   .post("/", zValidator("json", TransferBody), async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");
-    // Diperiksa PALING AWAL — sebelum cabang di-resolve dan sebelum apa pun
-    // ditulis. Kiriman ulang harus memulangkan hasil yang SAMA.
-    if (body.client_ref) {
-      const ada = await cariHasilIdempoten(auth.company_id!, body.client_ref);
-      if (ada) return c.json(ada.hasilJson, 201);
-    }
-    if (body.asal_branch_id === body.tujuan_branch_id) {
-      throw new HTTPException(400, { message: "Cabang asal dan tujuan tidak boleh sama" });
-    }
-    // Peran terkunci cabang hanya boleh mengirim DARI cabangnya sendiri.
-    if (terikatCabang(auth.role) && auth.branch_id !== body.asal_branch_id) {
-      throw new HTTPException(403, {
-        message: "Hanya boleh transfer dari cabang Anda sendiri",
-      });
-    }
-    const asal = await pastikanCabangStok(auth.company_id!, body.asal_branch_id, "Asal");
-    const tujuan = await pastikanCabangStok(auth.company_id!, body.tujuan_branch_id, "Tujuan");
-    // PENGIRIM HANYA CENTRAL KITCHEN. Cabang (termasuk divisi kitchen/bar) cuma
-    // MELIHAT kiriman yang menuju ke sana — arah stok satu pintu supaya asal
-    // barang selalu bisa ditelusuri ke CK. Dicek pada ASAL, bukan pada peran,
-    // agar owner/admin pun tak bisa mengirim antar-toko lewat jalur ini.
-    if (asal.tipe !== "central_kitchen") {
-      throw new HTTPException(403, {
-        message: `Transfer stok hanya bisa dikirim DARI Central Kitchen — "${asal.nama}" bukan Central Kitchen`,
-      });
-    }
-
-    // Gabungkan baris bahan yang sama (qty dijumlah) → satu baris per bahan.
-    const qtyByIng = new Map<string, number>();
-    for (const it of body.items) {
-      qtyByIng.set(it.ingredient_id, (qtyByIng.get(it.ingredient_id) ?? 0) + it.qty);
-    }
-    const ingIds = [...qtyByIng.keys()];
-    const bahan = await db
-      .select({
-        id: ingredients.id,
-        nama: ingredients.nama,
-        satuan: ingredients.satuan,
-        trackStok: ingredients.trackStok,
-        // aturan kemasan: barang yang hanya bisa DIBELI per kemasan juga
-        // hanya boleh DIKIRIM per kemasan (lihat cekKirimKemasan di bawah)
-        isi: ingredients.isi,
-        satuanBeli: ingredients.satuanBeli,
-        pengadaan: ingredients.pengadaan,
-        bolehEceran: ingredients.bolehEceran,
-      })
-      .from(ingredients)
-      .where(
-        and(
-          eq(ingredients.companyId, auth.company_id!),
-          eq(ingredients.isActive, true),
-          inArray(ingredients.id, ingIds),
-        ),
-      );
-    if (bahan.length !== ingIds.length) {
-      throw new HTTPException(400, { message: "Ada bahan yang tidak valid atau tidak aktif" });
-    }
-    const takLacak = bahan.find((b) => !b.trackStok);
-    if (takLacak) {
-      throw new HTTPException(400, {
-        message: `"${takLacak.nama}" tidak melacak stok — tidak bisa ditransfer`,
-      });
-    }
-
-    const [company] = await db
-      .select({ timezone: companies.timezone })
-      .from(companies)
-      .where(eq(companies.id, auth.company_id!));
-    const prodDate = tanggalDi(company?.timezone ?? "Asia/Jakarta");
-    const fakturId = randomUUID();
-
-    const hasil = await db.transaction(async (tx) => {
-      // Saldo diturunkan dari ledger (tak ada baris stok yang bisa dikunci),
-      // jadi transfer dari SATU cabang asal diserialkan lewat advisory lock:
-      // pemeriksaan "cukup atau tidak" di bawah baru berjalan setelah transfer
-      // lain dari cabang yang sama selesai commit.
-      await kunciKirimCabang(tx, auth.company_id!, asal.id);
-      const saldoAsal = new Map(
-        (await hitungSaldoCabang(auth.company_id!, asal.id)).map((r) => [r.ingredient_id, r]),
-      );
-      // saldo mentah masih memuat barang yang sedang di jalan → potong dulu
-      const jalan = await qtyDalamJalan(tx, auth.company_id!, asal.id, ingIds);
-      for (const [ingId, qty] of qtyByIng) {
-        const s = saldoAsal.get(ingId);
-        const b = bahan.find((x) => x.id === ingId);
-        const nama = b?.nama ?? "bahan";
-        const diJalan = jalan.get(ingId) ?? 0;
-        const tersedia = (s?.saldo ?? 0) - diJalan;
-        if (!s || qty > tersedia + 1e-9) {
-          const catatanJalan =
-            diJalan > 0 ? `, ${diJalan} masih dalam perjalanan ke cabang lain` : "";
-          throw new HTTPException(400, {
-            message: `Stok ${asal.nama} tidak cukup untuk ${nama} (tersedia ${Math.max(0, tersedia)} ${s?.satuan ?? ""}${catatanJalan}) — kurangi jumlah transfer`,
-          });
-        }
-        // Kelipatan kemasan diperiksa SETELAH kecukupan stok: "stok kurang"
-        // masalah yang lebih mendasar dan pesannya lebih berguna duluan.
-        if (b) wajibKelipatanKemasan(b, qty, Math.max(0, tersedia));
-      }
-      await tx.insert(productions).values(
-        [...qtyByIng.entries()].map(([ingredientId, qty]) => ({
-          companyId: auth.company_id!,
-          // tujuan = pemilik baris (stok masuk saat diterima)
-          branchId: tujuan.id,
-          asalBranchId: asal.id,
-          dariBranchId: asal.id,
-          tujuanBranchId: tujuan.id,
-          ingredientId,
-          qty,
-          tipe: "produksi" as const,
-          totalHarga: 0, // pemindahan stok yang sudah ada — tanpa biaya baru
-          fakturId,
-          rencanaId: null,
-          noFaktur: null,
-          supplierId: null,
-          // rak simpan diisi otomatis (rak default bahan) saat diterima
-          storageLocationId: null,
-          status: "menunggu" as const,
-          isBatch: false,
-          catatan: body.catatan?.trim() || null,
-          userId: auth.sub,
-          workerId: null,
-          prodDate,
-        })),
-      );
-      const nomor = await terbitkanNomor(tx, auth.company_id!, "transfer", fakturId);
-      const ringkas = [...qtyByIng.entries()]
-        .map(([id, q]) => `${bahan.find((b) => b.id === id)?.nama ?? "?"} ${q}`)
-        .join(", ");
-      await catatLogFaktur(tx, {
-        companyId: auth.company_id!,
-        branchId: asal.id,
-        fakturId,
-        jalur: "produksi",
-        aksi: "Transfer stok",
-        detail: `${asal.nama} → ${tujuan.nama} · ${ringkas}`,
-        userId: auth.sub,
-      });
-      return { nomor };
-    });
-
-    const keluaran = {
-      ok: true,
-      faktur_id: fakturId,
-      nomor: hasil.nomor,
-      asal: asal.nama,
-      tujuan: tujuan.nama,
-      jumlah_baris: ingIds.length,
-    };
-    // Dicatat SESUDAH transaksinya sukses: kalau penulisannya sendiri gagal,
-    // tak ada yang boleh membuat kiriman ulang mengira sudah selesai.
-    if (body.client_ref) {
-      await catatHasilIdempoten({
+    /*
+     * KLAIM ATOMIK sebelum apa pun ditulis — bukan sekadar "periksa dulu".
+     * Cabang belum di-resolve di sini dan itu disengaja: yang dijaga adalah
+     * SELURUH badan handler, termasuk pemeriksaan yang bisa melempar.
+     */
+    const { data } = await denganKlaimIdempoten(
+      {
         companyId: auth.company_id!,
         clientRef: body.client_ref,
         userId: auth.sub,
         deviceId: body.device_id ?? null,
         tipe: "transfer_stok",
-        hasilJson: keluaran,
-      });
-    }
-    return c.json(keluaran, 201);
+      },
+      async () => {
+        if (body.asal_branch_id === body.tujuan_branch_id) {
+          throw new HTTPException(400, { message: "Cabang asal dan tujuan tidak boleh sama" });
+        }
+        // Peran terkunci cabang hanya boleh mengirim DARI cabangnya sendiri.
+        if (terikatCabang(auth.role) && auth.branch_id !== body.asal_branch_id) {
+          throw new HTTPException(403, {
+            message: "Hanya boleh transfer dari cabang Anda sendiri",
+          });
+        }
+        const asal = await pastikanCabangStok(auth.company_id!, body.asal_branch_id, "Asal");
+        const tujuan = await pastikanCabangStok(auth.company_id!, body.tujuan_branch_id, "Tujuan");
+        // PENGIRIM HANYA CENTRAL KITCHEN. Cabang (termasuk divisi kitchen/bar) cuma
+        // MELIHAT kiriman yang menuju ke sana — arah stok satu pintu supaya asal
+        // barang selalu bisa ditelusuri ke CK. Dicek pada ASAL, bukan pada peran,
+        // agar owner/admin pun tak bisa mengirim antar-toko lewat jalur ini.
+        if (asal.tipe !== "central_kitchen") {
+          throw new HTTPException(403, {
+            message: `Transfer stok hanya bisa dikirim DARI Central Kitchen — "${asal.nama}" bukan Central Kitchen`,
+          });
+        }
+
+        // Gabungkan baris bahan yang sama (qty dijumlah) → satu baris per bahan.
+        const qtyByIng = new Map<string, number>();
+        for (const it of body.items) {
+          qtyByIng.set(it.ingredient_id, (qtyByIng.get(it.ingredient_id) ?? 0) + it.qty);
+        }
+        const ingIds = [...qtyByIng.keys()];
+        const bahan = await db
+          .select({
+            id: ingredients.id,
+            nama: ingredients.nama,
+            satuan: ingredients.satuan,
+            trackStok: ingredients.trackStok,
+            // aturan kemasan: barang yang hanya bisa DIBELI per kemasan juga
+            // hanya boleh DIKIRIM per kemasan (lihat cekKirimKemasan di bawah)
+            isi: ingredients.isi,
+            satuanBeli: ingredients.satuanBeli,
+            pengadaan: ingredients.pengadaan,
+            bolehEceran: ingredients.bolehEceran,
+          })
+          .from(ingredients)
+          .where(
+            and(
+              eq(ingredients.companyId, auth.company_id!),
+              eq(ingredients.isActive, true),
+              inArray(ingredients.id, ingIds),
+            ),
+          );
+        if (bahan.length !== ingIds.length) {
+          throw new HTTPException(400, { message: "Ada bahan yang tidak valid atau tidak aktif" });
+        }
+        const takLacak = bahan.find((b) => !b.trackStok);
+        if (takLacak) {
+          throw new HTTPException(400, {
+            message: `"${takLacak.nama}" tidak melacak stok — tidak bisa ditransfer`,
+          });
+        }
+
+        const [company] = await db
+          .select({ timezone: companies.timezone })
+          .from(companies)
+          .where(eq(companies.id, auth.company_id!));
+        const prodDate = tanggalDi(company?.timezone ?? "Asia/Jakarta");
+        const fakturId = randomUUID();
+
+        const hasil = await db.transaction(async (tx) => {
+          // Saldo diturunkan dari ledger (tak ada baris stok yang bisa dikunci),
+          // jadi transfer dari SATU cabang asal diserialkan lewat advisory lock:
+          // pemeriksaan "cukup atau tidak" di bawah baru berjalan setelah transfer
+          // lain dari cabang yang sama selesai commit.
+          await kunciKirimCabang(tx, auth.company_id!, asal.id);
+          const saldoAsal = new Map(
+            (await hitungSaldoCabang(auth.company_id!, asal.id)).map((r) => [r.ingredient_id, r]),
+          );
+          // saldo mentah masih memuat barang yang sedang di jalan → potong dulu
+          const jalan = await qtyDalamJalan(tx, auth.company_id!, asal.id, ingIds);
+          for (const [ingId, qty] of qtyByIng) {
+            const s = saldoAsal.get(ingId);
+            const b = bahan.find((x) => x.id === ingId);
+            const nama = b?.nama ?? "bahan";
+            const diJalan = jalan.get(ingId) ?? 0;
+            const tersedia = (s?.saldo ?? 0) - diJalan;
+            if (!s || qty > tersedia + 1e-9) {
+              const catatanJalan =
+                diJalan > 0 ? `, ${diJalan} masih dalam perjalanan ke cabang lain` : "";
+              throw new HTTPException(400, {
+                message: `Stok ${asal.nama} tidak cukup untuk ${nama} (tersedia ${Math.max(0, tersedia)} ${s?.satuan ?? ""}${catatanJalan}) — kurangi jumlah transfer`,
+              });
+            }
+            // Kelipatan kemasan diperiksa SETELAH kecukupan stok: "stok kurang"
+            // masalah yang lebih mendasar dan pesannya lebih berguna duluan.
+            if (b) wajibKelipatanKemasan(b, qty, Math.max(0, tersedia));
+          }
+          await tx.insert(productions).values(
+            [...qtyByIng.entries()].map(([ingredientId, qty]) => ({
+              companyId: auth.company_id!,
+              // tujuan = pemilik baris (stok masuk saat diterima)
+              branchId: tujuan.id,
+              asalBranchId: asal.id,
+              dariBranchId: asal.id,
+              tujuanBranchId: tujuan.id,
+              ingredientId,
+              qty,
+              tipe: "produksi" as const,
+              totalHarga: 0, // pemindahan stok yang sudah ada — tanpa biaya baru
+              fakturId,
+              rencanaId: null,
+              noFaktur: null,
+              supplierId: null,
+              // rak simpan diisi otomatis (rak default bahan) saat diterima
+              storageLocationId: null,
+              status: "menunggu" as const,
+              isBatch: false,
+              catatan: body.catatan?.trim() || null,
+              userId: auth.sub,
+              workerId: null,
+              prodDate,
+            })),
+          );
+          const nomor = await terbitkanNomor(tx, auth.company_id!, "transfer", fakturId);
+          const ringkas = [...qtyByIng.entries()]
+            .map(([id, q]) => `${bahan.find((b) => b.id === id)?.nama ?? "?"} ${q}`)
+            .join(", ");
+          await catatLogFaktur(tx, {
+            companyId: auth.company_id!,
+            branchId: asal.id,
+            fakturId,
+            jalur: "produksi",
+            aksi: "Transfer stok",
+            detail: `${asal.nama} → ${tujuan.nama} · ${ringkas}`,
+            userId: auth.sub,
+          });
+          return { nomor };
+        });
+
+        const keluaran = {
+          ok: true,
+          faktur_id: fakturId,
+          nomor: hasil.nomor,
+          asal: asal.nama,
+          tujuan: tujuan.nama,
+          jumlah_baris: ingIds.length,
+        };
+        return keluaran;
+      },
+    );
+    return c.json(data, 201);
   })
   /**
    * BATALKAN transfer yang belum diterima (salah kirim) → baris masuk Tempat

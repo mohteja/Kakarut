@@ -5,9 +5,8 @@ import { and, desc, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm"
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import {
-  cariHasilIdempoten,
-  catatHasilIdempoten,
   clientRefField,
+  denganKlaimIdempoten,
   deviceIdField,
 } from "../sync/idempoten";
 import { z } from "zod";
@@ -373,202 +372,200 @@ export const stokRoutes = new Hono<AppEnv>()
   .post("/opname", requireRole("owner", "admin", "cashier", "tim", "kitchen", "bar"), zValidator("json", OpnameBody), async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");
-    // Diperiksa PALING AWAL — sebelum cabang di-resolve, sebelum penjaga
-    // petugas, sebelum apa pun ditulis. Kiriman ulang harus memulangkan hasil
-    // yang SAMA, bukan menjalani lagi seluruh pemeriksaannya.
-    if (body.client_ref) {
-      const ada = await cariHasilIdempoten(auth.company_id!, body.client_ref);
-      if (ada) return c.json(ada.hasilJson, 201);
-    }
-    const branchId = body.branch_id
-      ? await pastikanCabang(body.branch_id, auth.company_id!)
-      : await resolveBranchId(c);
-    if (terikatCabang(auth.role) && branchId !== auth.branch_id) {
-      throw new HTTPException(403, { message: "Anda hanya boleh opname di cabang Anda" });
-    }
-
-    // Gabungkan duplikat (entri terakhir menang)
-    const qtyByIngredient = new Map<string, number>();
-    // Bukti foto + alasan selisih per bahan (dilampirkan saat pengecekan)
-    const fotoByIngredient = new Map<string, string | null>();
-    const alasanByIngredient = new Map<string, string | null>();
-    for (const item of body.items) {
-      qtyByIngredient.set(item.ingredient_id, item.qty);
-      fotoByIngredient.set(item.ingredient_id, item.foto_url?.trim() || null);
-      alasanByIngredient.set(item.ingredient_id, item.alasan?.trim() || null);
-    }
-
-    const ids = [...qtyByIngredient.keys()];
-    const valid = await db
-      .select({ id: ingredients.id })
-      .from(ingredients)
-      .where(
-        and(
-          eq(ingredients.companyId, auth.company_id!),
-          eq(ingredients.trackStok, true),
-          inArray(ingredients.id, ids),
-        ),
-      );
-    if (valid.length !== ids.length) {
-      throw new HTTPException(400, {
-        message: "Ada bahan yang tidak valid atau stoknya tidak dilacak",
-      });
-    }
-
-    const [company] = await db
-      .select({ timezone: companies.timezone })
-      .from(companies)
-      .where(eq(companies.id, auth.company_id!));
-    const today = tanggalDi(company?.timezone ?? "Asia/Jakarta");
-
-    // Snapshot saldo sistem per bahan (sebelum opname mengubahnya)
-    const saldoRows = await hitungSaldoCabang(auth.company_id!, branchId);
     /*
-     * BARANG YANG SUDAH BERANGKAT BUKAN BARANG YANG SEHARUSNYA ADA DI RAK.
-     *
-     * `hitungSaldoCabang` sengaja masih memuat kiriman yang belum diterima —
-     * pengurangannya baru terjadi saat statusnya `dikonfirmasi` (subquery
-     * `kirim_keluar`). Itu benar untuk perencanaan dan agar barangnya tak
-     * "hilang" dari pembukuan selagi di jalan. Tapi opname membandingkan buku
-     * dengan APA YANG ADA DI RAK, dan barang yang sudah dimuat ke kendaraan
-     * tak bisa dihitung petugas. Tanpa potongan ini, tiap kiriman yang sedang
-     * berjalan muncul sebagai SELISIH KURANG: petugas menghitung benar, sistem
-     * tetap melaporkan barang hilang, dan selisih hantu itu harus di-ACC owner
-     * sebagai penyusutan — catatan yang menuduh kehilangan.
-     *
-     * YANG DIPOTONG HANYA `qtyDiJalan`, BUKAN `qtyDalamJalan`. Keduanya beda,
-     * dan memakai yang salah justru merusak: `qtyDalamJalan` ikut menghitung
-     * baris "siap dikirim" dan "selesai diproduksi", yang barangnya MASIH DI
-     * RAK. Memotongnya membuat baseline opname mengecualikan barang yang
-     * sebenarnya ada, lalu penerimaannya menguranginya sekali lagi — saldo CK
-     * jatuh ke MINUS. Itu bukan dugaan; versi pertama perbaikan ini
-     * melakukannya persis begitu dan verify-api menangkapnya di −10.
-     *
-     * Tak ada pengurangan ganda di sini: `kirim_keluar` menyaring
-     * `pr.waktu > b.created_at`, sementara `waktu` tetap waktu baris dibuat
-     * (mengirim hanya menyentuh `branch_id`/`updated_at`). Kiriman yang sudah
-     * berangkat sebelum opname karena itu jatuh di luar jendela baseline.
-     *
-     * Cabang toko tak terpengaruh: penyaringnya `asal_branch_id = cabang ini`,
-     * dan toko tak mengirim ke mana-mana.
+     * KLAIM ATOMIK sebelum eksekusi — cabang belum di-resolve dan penjaga
+     * petugas belum jalan di sini, dan itu disengaja: yang dijaga SELURUH
+     * badan handler, termasuk pemeriksaan yang bisa melempar.
      */
-    const diJalanById = await qtyDiJalan(db, auth.company_id!, branchId);
-    const saldoById = new Map(
-      saldoRows.map((r) => [
-        r.ingredient_id,
-        Math.max(0, r.saldo - (diJalanById.get(r.ingredient_id) ?? 0)),
-      ]),
-    );
-    const infoById = new Map(saldoRows.map((r) => [r.ingredient_id, r]));
-
-    // Batasan petugas: peran terikat cabang (kasir/tim) hanya boleh opname
-    // bahan di tempat yang terbuka (belum ada petugas) atau tempat yang
-    // ditugaskan padanya. Bahan tanpa tempat boleh siapa saja. Owner/admin
-    // selalu boleh. HANYA petugas yang masih ANGGOTA AKTIF yang dihitung —
-    // penugasan basi (akun dihapus/nonaktif/diarsip/dibuat ulang) tidak boleh
-    // mengunci rak diam-diam untuk semua orang.
-    if (terikatCabang(auth.role)) {
-      const petugasRows = await db
-        .select({
-          locId: storageLocationPetugas.storageLocationId,
-          userId: storageLocationPetugas.userId,
-        })
-        .from(storageLocationPetugas)
-        .innerJoin(
-          users,
-          and(
-            eq(storageLocationPetugas.userId, users.id),
-            eq(users.isActive, true),
-            isNull(users.deletedAt),
-          ),
-        )
-        .innerJoin(
-          memberships,
-          and(
-            eq(memberships.userId, users.id),
-            eq(memberships.companyId, auth.company_id!),
-            isNull(memberships.archivedAt),
-          ),
-        )
-        .where(eq(storageLocationPetugas.companyId, auth.company_id!));
-      const lockedSet = new Set(petugasRows.map((r) => r.locId));
-      const mineSet = new Set(
-        petugasRows.filter((r) => r.userId === auth.sub).map((r) => r.locId),
-      );
-      for (const ingredientId of ids) {
-        const info = infoById.get(ingredientId);
-        const tempatId = info?.tempat_id ?? null;
-        if (tempatId && lockedSet.has(tempatId) && !mineSet.has(tempatId)) {
-          throw new HTTPException(403, {
-            message: `Anda bukan petugas opname tempat "${info?.tempat ?? "?"}" (bahan ${info?.nama ?? ""})`,
-          });
-        }
-      }
-    }
-
-    const sessionId = randomUUID();
-    const ringkasan: OpnameRingkasan = {
-      dihitung: qtyByIngredient.size,
-      cocok: 0,
-      lebih: 0,
-      kurang: 0,
-      total_selisih: 0,
-    };
-    const nowTs = new Date();
-    const values = [...qtyByIngredient].map(([ingredientId, fisik]) => {
-      const sistem = saldoById.get(ingredientId) ?? 0;
-      const selisih = fisik - sistem;
-      const adaSelisih = Math.abs(selisih) > 1e-9;
-      if (!adaSelisih) ringkasan.cocok++;
-      else if (selisih > 0) ringkasan.lebih++;
-      else ringkasan.kurang++;
-      ringkasan.total_selisih += selisih;
-      // Bukti foto + alasan hanya bermakna untuk baris berselisih. Bila foto
-      // dilampirkan saat pengecekan → baris langsung "sudah" (siap di-ACC);
-      // tanpa foto → "belum" (jalur klarifikasi terpisah, kompatibel lama).
-      const foto = adaSelisih ? (fotoByIngredient.get(ingredientId) ?? null) : null;
-      const alasan = adaSelisih ? (alasanByIngredient.get(ingredientId) ?? null) : null;
-      return {
-        companyId: auth.company_id!,
-        branchId,
-        ingredientId,
-        qty: fisik,
-        opnameDate: today,
-        catatan: body.catatan ?? null,
-        sessionId,
-        systemQty: sistem,
-        selisih,
-        // selisih ≠ 0 → wajib diklarifikasi; foto inline menuntaskannya langsung.
-        klarifikasiStatus: adaSelisih ? (foto ? ("sudah" as const) : ("belum" as const)) : null,
-        klarifikasiCatatan: alasan,
-        klarifikasiFotoUrl: foto,
-        ...(foto ? { klarifikasiBy: auth.sub, klarifikasiAt: nowTs } : {}),
-        // selisih ≠ 0 → menunggu persetujuan owner/admin sebelum jadi baseline
-        // saldo (stok belum berubah); selisih = 0 langsung efektif (no-op).
-        penyesuaianStatus: adaSelisih ? ("menunggu" as const) : ("disetujui" as const),
-        userId: auth.sub,
-      };
-    });
-
-    const { rows, nomor } = await db.transaction(async (tx) => {
-      const inserted = await tx.insert(stockOpnames).values(values).returning();
-      const nomorTeks = await terbitkanNomor(tx, auth.company_id!, "opname", sessionId);
-      return { rows: inserted, nomor: nomorTeks };
-    });
-    const hasil = { ok: true, jumlah: rows.length, session_id: sessionId, nomor, ringkasan };
-    // Dicatat SESUDAH transaksinya sukses: kalau penyimpanannya sendiri gagal,
-    // tak ada yang boleh membuat kiriman ulang mengira sudah selesai.
-    if (body.client_ref) {
-      await catatHasilIdempoten({
+    const { data } = await denganKlaimIdempoten(
+      {
         companyId: auth.company_id!,
         clientRef: body.client_ref,
         userId: auth.sub,
         deviceId: body.device_id ?? null,
         tipe: "opname",
-        hasilJson: hasil,
-      });
-    }
-    return c.json(hasil, 201);
+      },
+      async () => {
+        const branchId = body.branch_id
+          ? await pastikanCabang(body.branch_id, auth.company_id!)
+          : await resolveBranchId(c);
+        if (terikatCabang(auth.role) && branchId !== auth.branch_id) {
+          throw new HTTPException(403, { message: "Anda hanya boleh opname di cabang Anda" });
+        }
+
+        // Gabungkan duplikat (entri terakhir menang)
+        const qtyByIngredient = new Map<string, number>();
+        // Bukti foto + alasan selisih per bahan (dilampirkan saat pengecekan)
+        const fotoByIngredient = new Map<string, string | null>();
+        const alasanByIngredient = new Map<string, string | null>();
+        for (const item of body.items) {
+          qtyByIngredient.set(item.ingredient_id, item.qty);
+          fotoByIngredient.set(item.ingredient_id, item.foto_url?.trim() || null);
+          alasanByIngredient.set(item.ingredient_id, item.alasan?.trim() || null);
+        }
+
+        const ids = [...qtyByIngredient.keys()];
+        const valid = await db
+          .select({ id: ingredients.id })
+          .from(ingredients)
+          .where(
+            and(
+              eq(ingredients.companyId, auth.company_id!),
+              eq(ingredients.trackStok, true),
+              inArray(ingredients.id, ids),
+            ),
+          );
+        if (valid.length !== ids.length) {
+          throw new HTTPException(400, {
+            message: "Ada bahan yang tidak valid atau stoknya tidak dilacak",
+          });
+        }
+
+        const [company] = await db
+          .select({ timezone: companies.timezone })
+          .from(companies)
+          .where(eq(companies.id, auth.company_id!));
+        const today = tanggalDi(company?.timezone ?? "Asia/Jakarta");
+
+        // Snapshot saldo sistem per bahan (sebelum opname mengubahnya)
+        const saldoRows = await hitungSaldoCabang(auth.company_id!, branchId);
+        /*
+         * BARANG YANG SUDAH BERANGKAT BUKAN BARANG YANG SEHARUSNYA ADA DI RAK.
+         *
+         * `hitungSaldoCabang` sengaja masih memuat kiriman yang belum diterima —
+         * pengurangannya baru terjadi saat statusnya `dikonfirmasi` (subquery
+         * `kirim_keluar`). Itu benar untuk perencanaan dan agar barangnya tak
+         * "hilang" dari pembukuan selagi di jalan. Tapi opname membandingkan buku
+         * dengan APA YANG ADA DI RAK, dan barang yang sudah dimuat ke kendaraan
+         * tak bisa dihitung petugas. Tanpa potongan ini, tiap kiriman yang sedang
+         * berjalan muncul sebagai SELISIH KURANG: petugas menghitung benar, sistem
+         * tetap melaporkan barang hilang, dan selisih hantu itu harus di-ACC owner
+         * sebagai penyusutan — catatan yang menuduh kehilangan.
+         *
+         * YANG DIPOTONG HANYA `qtyDiJalan`, BUKAN `qtyDalamJalan`. Keduanya beda,
+         * dan memakai yang salah justru merusak: `qtyDalamJalan` ikut menghitung
+         * baris "siap dikirim" dan "selesai diproduksi", yang barangnya MASIH DI
+         * RAK. Memotongnya membuat baseline opname mengecualikan barang yang
+         * sebenarnya ada, lalu penerimaannya menguranginya sekali lagi — saldo CK
+         * jatuh ke MINUS. Itu bukan dugaan; versi pertama perbaikan ini
+         * melakukannya persis begitu dan verify-api menangkapnya di −10.
+         *
+         * Tak ada pengurangan ganda di sini: `kirim_keluar` menyaring
+         * `pr.waktu > b.created_at`, sementara `waktu` tetap waktu baris dibuat
+         * (mengirim hanya menyentuh `branch_id`/`updated_at`). Kiriman yang sudah
+         * berangkat sebelum opname karena itu jatuh di luar jendela baseline.
+         *
+         * Cabang toko tak terpengaruh: penyaringnya `asal_branch_id = cabang ini`,
+         * dan toko tak mengirim ke mana-mana.
+         */
+        const diJalanById = await qtyDiJalan(db, auth.company_id!, branchId);
+        const saldoById = new Map(
+          saldoRows.map((r) => [
+            r.ingredient_id,
+            Math.max(0, r.saldo - (diJalanById.get(r.ingredient_id) ?? 0)),
+          ]),
+        );
+        const infoById = new Map(saldoRows.map((r) => [r.ingredient_id, r]));
+
+        // Batasan petugas: peran terikat cabang (kasir/tim) hanya boleh opname
+        // bahan di tempat yang terbuka (belum ada petugas) atau tempat yang
+        // ditugaskan padanya. Bahan tanpa tempat boleh siapa saja. Owner/admin
+        // selalu boleh. HANYA petugas yang masih ANGGOTA AKTIF yang dihitung —
+        // penugasan basi (akun dihapus/nonaktif/diarsip/dibuat ulang) tidak boleh
+        // mengunci rak diam-diam untuk semua orang.
+        if (terikatCabang(auth.role)) {
+          const petugasRows = await db
+            .select({
+              locId: storageLocationPetugas.storageLocationId,
+              userId: storageLocationPetugas.userId,
+            })
+            .from(storageLocationPetugas)
+            .innerJoin(
+              users,
+              and(
+                eq(storageLocationPetugas.userId, users.id),
+                eq(users.isActive, true),
+                isNull(users.deletedAt),
+              ),
+            )
+            .innerJoin(
+              memberships,
+              and(
+                eq(memberships.userId, users.id),
+                eq(memberships.companyId, auth.company_id!),
+                isNull(memberships.archivedAt),
+              ),
+            )
+            .where(eq(storageLocationPetugas.companyId, auth.company_id!));
+          const lockedSet = new Set(petugasRows.map((r) => r.locId));
+          const mineSet = new Set(
+            petugasRows.filter((r) => r.userId === auth.sub).map((r) => r.locId),
+          );
+          for (const ingredientId of ids) {
+            const info = infoById.get(ingredientId);
+            const tempatId = info?.tempat_id ?? null;
+            if (tempatId && lockedSet.has(tempatId) && !mineSet.has(tempatId)) {
+              throw new HTTPException(403, {
+                message: `Anda bukan petugas opname tempat "${info?.tempat ?? "?"}" (bahan ${info?.nama ?? ""})`,
+              });
+            }
+          }
+        }
+
+        const sessionId = randomUUID();
+        const ringkasan: OpnameRingkasan = {
+          dihitung: qtyByIngredient.size,
+          cocok: 0,
+          lebih: 0,
+          kurang: 0,
+          total_selisih: 0,
+        };
+        const nowTs = new Date();
+        const values = [...qtyByIngredient].map(([ingredientId, fisik]) => {
+          const sistem = saldoById.get(ingredientId) ?? 0;
+          const selisih = fisik - sistem;
+          const adaSelisih = Math.abs(selisih) > 1e-9;
+          if (!adaSelisih) ringkasan.cocok++;
+          else if (selisih > 0) ringkasan.lebih++;
+          else ringkasan.kurang++;
+          ringkasan.total_selisih += selisih;
+          // Bukti foto + alasan hanya bermakna untuk baris berselisih. Bila foto
+          // dilampirkan saat pengecekan → baris langsung "sudah" (siap di-ACC);
+          // tanpa foto → "belum" (jalur klarifikasi terpisah, kompatibel lama).
+          const foto = adaSelisih ? (fotoByIngredient.get(ingredientId) ?? null) : null;
+          const alasan = adaSelisih ? (alasanByIngredient.get(ingredientId) ?? null) : null;
+          return {
+            companyId: auth.company_id!,
+            branchId,
+            ingredientId,
+            qty: fisik,
+            opnameDate: today,
+            catatan: body.catatan ?? null,
+            sessionId,
+            systemQty: sistem,
+            selisih,
+            // selisih ≠ 0 → wajib diklarifikasi; foto inline menuntaskannya langsung.
+            klarifikasiStatus: adaSelisih ? (foto ? ("sudah" as const) : ("belum" as const)) : null,
+            klarifikasiCatatan: alasan,
+            klarifikasiFotoUrl: foto,
+            ...(foto ? { klarifikasiBy: auth.sub, klarifikasiAt: nowTs } : {}),
+            // selisih ≠ 0 → menunggu persetujuan owner/admin sebelum jadi baseline
+            // saldo (stok belum berubah); selisih = 0 langsung efektif (no-op).
+            penyesuaianStatus: adaSelisih ? ("menunggu" as const) : ("disetujui" as const),
+            userId: auth.sub,
+          };
+        });
+
+        const { rows, nomor } = await db.transaction(async (tx) => {
+          const inserted = await tx.insert(stockOpnames).values(values).returning();
+          const nomorTeks = await terbitkanNomor(tx, auth.company_id!, "opname", sessionId);
+          return { rows: inserted, nomor: nomorTeks };
+        });
+        const hasil = { ok: true, jumlah: rows.length, session_id: sessionId, nomor, ringkasan };
+        return hasil;
+      },
+    );
+    return c.json(data, 201);
   })
   /**
    * Nilai Stok Awal (saldo pembuka) yang tersimpan per bahan + tanggalnya —
