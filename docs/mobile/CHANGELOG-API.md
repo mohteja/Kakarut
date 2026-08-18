@@ -25,9 +25,97 @@ tanpa akses repo server.
 
 ---
 
+## Rilis: Endpoint ONLINE ikut mengklaim perintah — 409 `sedang_diproses`
+
+> Tidak ada migrasi. Tidak ada medan baru pada permintaan maupun respons sukses.
+> Yang bertambah: SATU kemungkinan balasan galat baru.
+
+🔴 **WAJIB** — layar bayar (`kasir/bayar_sheet.dart`), dan tinjau layar lain
+yang mengirim `client_ref`.
+
+**Sudah di-merge ke production.**
+
+Tujuh jalur ONLINE — `POST /penjualan`, refund, absensi (×2), `POST /stok/opname`,
+`POST /transfer-stok`, `POST /rekomendasi/menu/faktur` — sebelumnya memakai pola
+SELECT-lalu-eksekusi-lalu-INSERT. Yang dijaga cuma baris ledgernya, bukan efek
+sampingnya: dua permintaan ber-`client_ref` sama yang datang bersamaan sama-sama
+mengeksekusi, dan yang kedua dibuang diam-diam. Ketujuhnya kini memakai klaim
+atomik yang sama dengan `/sync`.
+
+**Balasan baru yang mungkin muncul:**
+
+```jsonc
+{
+  "error": "Perintah ini sedang diproses — coba lagi sebentar lagi",
+  "sebab": "sedang_diproses"
+}
+```
+
+dengan kode **409**.
+
+### 🔴 Kenapa ini WAJIB, bukan sekadar perlu dicek
+
+Kode 409 pada `POST /penjualan` DULU hanya bisa berarti satu hal: **shift ditutup
+dari perangkat lain**. Aplikasi yang menganggapnya begitu akan menutup lembar
+bayar dan melempar kasir ke gerbang Buka Kasir — padahal `sedang_diproses`
+berarti penjualannya justru **sedang sukses**.
+
+Akibatnya kasir mengulang seluruh pesanan, dan **di situlah transaksi dobel
+lahir** — persis yang kunci idempotensi ada untuk mencegah.
+
+**Yang harus dilakukan:** bedakan lewat `sebab`, bukan teks pesan (teksnya boleh
+berubah; `sebab` kontraknya). Untuk `sedang_diproses`: pertahankan layarnya,
+jangan sentuh shift, **jangan buang `client_ref`-nya**, dan minta pemakai mencoba
+lagi sebentar kemudian. Kunci yang sama membuat server memutar ulang hasil yang
+sudah ada.
+
+> **Prasyarat yang mudah terlewat:** ini hanya bekerja bila `client_ref`
+> DITAHAN sampai sukses. Kunci yang dibuat ulang tiap tekan tombol membuat
+> seluruh pengaman ini mati tanpa satu pun galat.
+
+---
+
+## Rilis: `GET /api/laporan` — medan baru `total_refund` & `jumlah_refund`
+
+> Tidak ada migrasi. Dua medan aditif; klien lama tetap jalan.
+
+🟡 **PERLU DICEK** — layar Laporan (`operasional/laporan_page.dart`).
+
+**Sudah di-merge ke production.**
+
+```jsonc
+{
+  "omzet": 955000,
+  "total_refund": 45000,   // uang yang dikembalikan atas transaksi PERIODE INI
+  "jumlah_refund": 3       // cacah kejadian refund
+}
+```
+
+**Kenapa ada.** `sales.subtotal` disusutkan setiap refund, jadi refund hari ini
+mengurangi omzet **hari transaksinya**, bukan hari uangnya keluar laci. Itu
+akrual, dan itu yang dipilih. Konsekuensinya laporan periode LAMPAU bisa terlihat
+mengecil sendiri — tak ada yang salah di layar, cuma angkanya beda dari yang
+diingat orang. Kedua medan ini keterangannya.
+
+### ⚠️ `omzet` SUDAH bersih — jangan dikurangi lagi
+
+Ini kesalahan yang lebih mahal daripada tidak menampilkannya sama sekali.
+Mengurangi `total_refund` dari `omzet` di klien akan memotong **dua kali** untuk
+satu pengembalian.
+
+Omzet kotor dirakit dengan **menambah**: `omzet + total_refund`.
+
+**Catatan tipe:** `jumlah_refund` berasal dari `COUNT` dan bisa tiba sebagai
+angka pecahan lewat driver. Urai sebagai `num` lalu `.toInt()`; `as int` polos
+akan melempar di runtime dan mematikan seluruh halaman laporan.
+
+---
+
 ## Rilis: `POST /sync` mengklaim perintah sebelum mengeksekusinya
 
 🟡 **PERLU DICEK** — antrean sinkron offline (`core/sync_queue.dart`).
+
+**Sudah di-merge ke production.**
 
 **Tidak ada perubahan bentuk permintaan maupun respons.** Yang bertambah hanya
 SATU kemungkinan balasan baru per item, dan mobile sudah menanganinya dengan
@@ -71,10 +159,10 @@ Yang perlu ditinjau hanya **teks yang ditampilkan ke pemakai**: jangan tampilkan
 `sebab: "sedang_diproses"` sebagai kegagalan yang menakutkan (mis. ikut dihitung
 sebagai `kMaksItemGagal`) — ia keadaan sementara yang beres sendiri.
 
-> **Batas yang jujur:** yang ditutup adalah jalur `/sync`. Jalur ONLINE
-> (`POST /penjualan` dkk dengan `client_ref`) masih memakai pola cek-lalu-tulis
-> yang sama, dengan jendela yang jauh lebih sempit karena satu permintaan
-> tunggal selesai dalam hitungan milidetik, bukan menggilas 100 perintah.
+> **Pembaruan:** batas itu sudah tidak berlaku. Jalur ONLINE
+> (`POST /penjualan` dkk) kini memakai klaim atomik yang sama — lihat entri
+> **"Endpoint ONLINE ikut mengklaim…"** di atas, yang berisi 🔴 WAJIB untuk
+> layar bayar.
 
 ---
 
