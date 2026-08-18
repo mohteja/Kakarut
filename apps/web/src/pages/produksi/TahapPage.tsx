@@ -228,11 +228,30 @@ function TahapForm({
     },
   });
 
-  // Bahan baku kurang = PERINGATAN (server 409), boleh tetap proses.
-  const bahanKurang =
+  /*
+   * `/tahap` menolak dengan 409 untuk TIGA hal yang sangat berbeda, dan hanya
+   * SATU di antaranya boleh dilanjutkan:
+   *
+   *   - `bahan_kurang`      → peringatan; tombol "tetap proses" (`paksa`) sah;
+   *   - `status_berubah`    → faktur diubah orang lain; yang benar MUAT ULANG,
+   *                           dan `paksa` tak akan menolong (server tetap CAS);
+   *   - `wajib_penerimaan`  → barang harus diterima di cabang tujuan; tak ada
+   *                           jalan dari layar ini sama sekali.
+   *
+   * Dulu SEMUA 409 ditampilkan sebagai "bahan kurang" lengkap dengan tombol
+   * lanjut — jadi pada konflik status, kasir ditawari tombol yang tak mungkin
+   * berhasil, sementara instruksi sebenarnya terkubur di teks pesan.
+   *
+   * Dicocokkan lewat `sebab`, bukan teks: teksnya boleh berubah kapan saja.
+   */
+  const sebab409 =
     simpan.error instanceof ApiError && simpan.error.status === 409
-      ? simpan.error.message
-      : null;
+      ? (simpan.error.data?.sebab as string | undefined)
+      : undefined;
+  const bahanKurang =
+    sebab409 === "bahan_kurang" ? (simpan.error as ApiError).message : null;
+  // Sebab 409 yang LAIN jatuh ke `<ErrorText>` di bawah — galat biasa, tanpa
+  // tombol "tetap proses" yang tak mungkin berhasil.
 
   function ubah(r: { id: string }, patch: Partial<PilihanBaris>) {
     setPilih((prev) => ({ ...prev, [r.id]: { ...prev[r.id], ...patch } }));
