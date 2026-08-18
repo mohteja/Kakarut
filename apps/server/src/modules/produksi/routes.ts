@@ -1452,39 +1452,63 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
               );
           }
         }
+        /*
+         * Penjaga "tak ada baris yang maju" DI DALAM transaksi, bukan sesudahnya.
+         * Melempar di sini me-rollback, dan itu justru yang benar: kalau tak satu
+         * pun baris berpindah tahap, tak ada uang yang boleh ikut tercatat.
+         */
+        if (diperbarui.length === 0) {
+          const [ada] = await tx
+            .select({ status: productions.status })
+            .from(productions)
+            .where(and(...conds))
+            .limit(1);
+          if (!ada) throw new HTTPException(404, { message: "Faktur tidak ditemukan" });
+          throw new HTTPException(400, {
+            message: `Tahap tidak berurutan: faktur berstatus "${ada.status}" — hanya bisa "${dari}" → "${ke}"`,
+          });
+        }
+        /*
+         * UANG MENYATU DENGAN PERPINDAHAN TAHAP — satu transaksi, bukan dua.
+         *
+         * Dulu kedua penulisan ini memakai `db` dan berjalan SESUDAH transaksinya
+         * commit. Bila salah satunya gagal (koneksi putus, timeout, constraint),
+         * fakturnya sudah terlanjur maju tahap sementara pencairannya tak tercatat
+         * sama sekali — dan itu TAK BISA diulang: percobaan kedua ditolak
+         * "Tahap tidak berurutan" karena statusnya sudah pindah. Uang yang
+         * benar-benar keluar lenyap dari pembukuan, hanya bisa dibetulkan lewat
+         * entri manual, kalau ada yang menyadarinya.
+         *
+         * Jalur maju-sebagian di atas sudah menulis `fakturDana` dengan `tx` sejak
+         * awal. Asimetri antara dua jalur di berkas yang sama itulah bugnya;
+         * sekarang keduanya menganut aturan yang sama.
+         *
+         * Log jejak SENGAJA tetap di luar transaksi (lihat sesudah blok ini):
+         * gagal mencatat log tidak boleh membatalkan perpindahan tahap dan
+         * pencairan yang sudah sah.
+         */
+        if (dana_cair != null) {
+          await tx.insert(fakturDana).values({
+            companyId: auth.company_id!,
+            branchId: diperbarui[0].branchId,
+            fakturId: c.req.param("fakturId"),
+            nominal: dana_cair,
+            userId: auth.sub,
+          });
+        }
+        if (realisasi != null) {
+          await catatRealisasiDana(tx, {
+            companyId: auth.company_id!,
+            branchId: diperbarui[0].branchId,
+            fakturId: c.req.param("fakturId"),
+            userId: auth.sub,
+            realisasi,
+            catatan: selisih_catatan,
+          });
+        }
         return diperbarui;
       });
 
-      if (rows.length === 0) {
-        const [ada] = await db
-          .select({ status: productions.status })
-          .from(productions)
-          .where(and(...conds))
-          .limit(1);
-        if (!ada) throw new HTTPException(404, { message: "Faktur tidak ditemukan" });
-        throw new HTTPException(400, {
-          message: `Tahap tidak berurutan: faktur berstatus "${ada.status}" — hanya bisa "${dari}" → "${ke}"`,
-        });
-      }
-      if (dana_cair != null) {
-        await db.insert(fakturDana).values({
-          companyId: auth.company_id!,
-          branchId: rows[0].branchId,
-          fakturId: c.req.param("fakturId"),
-          nominal: dana_cair,
-          userId: auth.sub,
-        });
-      }
-      if (realisasi != null) {
-        await catatRealisasiDana(db, {
-          companyId: auth.company_id!,
-          branchId: rows[0].branchId,
-          fakturId: c.req.param("fakturId"),
-          userId: auth.sub,
-          realisasi,
-          catatan: selisih_catatan,
-        });
-      }
       {
         const potongan = [`${rows.length} baris`];
         if (dana_cair != null) potongan.push(`dana cair ${rpLog(dana_cair)}`);
