@@ -25,9 +25,97 @@ tanpa akses repo server.
 
 ---
 
+## Rilis: Endpoint ONLINE ikut mengklaim perintah — 409 `sedang_diproses`
+
+> Tidak ada migrasi. Tidak ada medan baru pada permintaan maupun respons sukses.
+> Yang bertambah: SATU kemungkinan balasan galat baru.
+
+🔴 **WAJIB** — layar bayar (`kasir/bayar_sheet.dart`), dan tinjau layar lain
+yang mengirim `client_ref`.
+
+**Sudah di-merge ke production.**
+
+Tujuh jalur ONLINE — `POST /penjualan`, refund, absensi (×2), `POST /stok/opname`,
+`POST /transfer-stok`, `POST /rekomendasi/menu/faktur` — sebelumnya memakai pola
+SELECT-lalu-eksekusi-lalu-INSERT. Yang dijaga cuma baris ledgernya, bukan efek
+sampingnya: dua permintaan ber-`client_ref` sama yang datang bersamaan sama-sama
+mengeksekusi, dan yang kedua dibuang diam-diam. Ketujuhnya kini memakai klaim
+atomik yang sama dengan `/sync`.
+
+**Balasan baru yang mungkin muncul:**
+
+```jsonc
+{
+  "error": "Perintah ini sedang diproses — coba lagi sebentar lagi",
+  "sebab": "sedang_diproses"
+}
+```
+
+dengan kode **409**.
+
+### 🔴 Kenapa ini WAJIB, bukan sekadar perlu dicek
+
+Kode 409 pada `POST /penjualan` DULU hanya bisa berarti satu hal: **shift ditutup
+dari perangkat lain**. Aplikasi yang menganggapnya begitu akan menutup lembar
+bayar dan melempar kasir ke gerbang Buka Kasir — padahal `sedang_diproses`
+berarti penjualannya justru **sedang sukses**.
+
+Akibatnya kasir mengulang seluruh pesanan, dan **di situlah transaksi dobel
+lahir** — persis yang kunci idempotensi ada untuk mencegah.
+
+**Yang harus dilakukan:** bedakan lewat `sebab`, bukan teks pesan (teksnya boleh
+berubah; `sebab` kontraknya). Untuk `sedang_diproses`: pertahankan layarnya,
+jangan sentuh shift, **jangan buang `client_ref`-nya**, dan minta pemakai mencoba
+lagi sebentar kemudian. Kunci yang sama membuat server memutar ulang hasil yang
+sudah ada.
+
+> **Prasyarat yang mudah terlewat:** ini hanya bekerja bila `client_ref`
+> DITAHAN sampai sukses. Kunci yang dibuat ulang tiap tekan tombol membuat
+> seluruh pengaman ini mati tanpa satu pun galat.
+
+---
+
+## Rilis: `GET /api/laporan` — medan baru `total_refund` & `jumlah_refund`
+
+> Tidak ada migrasi. Dua medan aditif; klien lama tetap jalan.
+
+🟡 **PERLU DICEK** — layar Laporan (`operasional/laporan_page.dart`).
+
+**Sudah di-merge ke production.**
+
+```jsonc
+{
+  "omzet": 955000,
+  "total_refund": 45000,   // uang yang dikembalikan atas transaksi PERIODE INI
+  "jumlah_refund": 3       // cacah kejadian refund
+}
+```
+
+**Kenapa ada.** `sales.subtotal` disusutkan setiap refund, jadi refund hari ini
+mengurangi omzet **hari transaksinya**, bukan hari uangnya keluar laci. Itu
+akrual, dan itu yang dipilih. Konsekuensinya laporan periode LAMPAU bisa terlihat
+mengecil sendiri — tak ada yang salah di layar, cuma angkanya beda dari yang
+diingat orang. Kedua medan ini keterangannya.
+
+### ⚠️ `omzet` SUDAH bersih — jangan dikurangi lagi
+
+Ini kesalahan yang lebih mahal daripada tidak menampilkannya sama sekali.
+Mengurangi `total_refund` dari `omzet` di klien akan memotong **dua kali** untuk
+satu pengembalian.
+
+Omzet kotor dirakit dengan **menambah**: `omzet + total_refund`.
+
+**Catatan tipe:** `jumlah_refund` berasal dari `COUNT` dan bisa tiba sebagai
+angka pecahan lewat driver. Urai sebagai `num` lalu `.toInt()`; `as int` polos
+akan melempar di runtime dan mematikan seluruh halaman laporan.
+
+---
+
 ## Rilis: `POST /sync` mengklaim perintah sebelum mengeksekusinya
 
 🟡 **PERLU DICEK** — antrean sinkron offline (`core/sync_queue.dart`).
+
+**Sudah di-merge ke production.**
 
 **Tidak ada perubahan bentuk permintaan maupun respons.** Yang bertambah hanya
 SATU kemungkinan balasan baru per item, dan mobile sudah menanganinya dengan
@@ -62,25 +150,42 @@ menang mengeksekusi; yang kalah tak pernah menyentuh eksekutornya.
 }
 ```
 
-**Mobile tidak perlu diubah**: `perintahDianggapSelesai` memperlakukan kode ≥ 400
-sebagai BELUM selesai, jadi item ini tetap di antrean dan terkirim lagi pada tick
-berikutnya — tepat yang diinginkan. Balasan ini juga **sengaja tidak disimpan**
-ke ledger, sehingga percobaan berikutnya tidak membaca "gagal" yang membeku.
+> 🔴 **KOREKSI (penting).** Entri ini semula menyatakan *"mobile tidak perlu
+> diubah"*. **Itu keliru, dan akibatnya berat.**
+>
+> Benar bahwa `perintahDianggapSelesai` menggolongkannya BELUM selesai, jadi
+> itemnya tetap di antrean. Yang terlewat: item itu ditandai **`gagal`**, dan
+> hanya item berstatus `pending` yang ikut batch berikutnya. Perintahnya
+> **tidak pernah dicoba lagi** — kasir melihat kegagalan permanen yang berbunyi
+> "coba lagi sebentar lagi".
+>
+> Pemicunya justru kasus pemakaian utamanya: antrean panjang sesudah lama
+> offline membuat klien menyerah pada `receiveTimeout`, mundur, lalu mengirim
+> ulang batch yang sama selagi server masih menggilas yang pertama.
+>
+> **Yang harus dilakukan:** perlakukan `409` + `sebab: "sedang_diproses"`
+> sebagai MASIH BERJALAN — biarkan itemnya `pending`, jangan ditandai gagal,
+> jangan distempel waktu gagal. Diperbaiki di kakarut-mobile#9.
+
+Balasan ini **sengaja tidak disimpan** ke ledger, sehingga percobaan berikutnya
+tidak membaca "gagal" yang membeku.
 
 Yang perlu ditinjau hanya **teks yang ditampilkan ke pemakai**: jangan tampilkan
 `sebab: "sedang_diproses"` sebagai kegagalan yang menakutkan (mis. ikut dihitung
 sebagai `kMaksItemGagal`) — ia keadaan sementara yang beres sendiri.
 
-> **Batas yang jujur:** yang ditutup adalah jalur `/sync`. Jalur ONLINE
-> (`POST /penjualan` dkk dengan `client_ref`) masih memakai pola cek-lalu-tulis
-> yang sama, dengan jendela yang jauh lebih sempit karena satu permintaan
-> tunggal selesai dalam hitungan milidetik, bukan menggilas 100 perintah.
+> **Pembaruan:** batas itu sudah tidak berlaku. Jalur ONLINE
+> (`POST /penjualan` dkk) kini memakai klaim atomik yang sama — lihat entri
+> **"Endpoint ONLINE ikut mengklaim…"** di atas, yang berisi 🔴 WAJIB untuk
+> layar bayar.
 
 ---
 
 ## Rilis: BEP kini menghitung margin SESUDAH diskon
 
 🟡 **PERLU DICEK** — tab **BEP** di layar Laporan (`laporan_page.dart`, `_TabBep`).
+
+**Sudah di-merge ke production.**
 
 **Tidak ada perubahan bentuk respons** — tak ada medan baru, tak ada medan
 hilang, jadi mobile **tidak perlu perubahan kode**. Yang berubah **ANGKANYA**,
@@ -123,6 +228,8 @@ yang menyebut angka itu "sebelum diskon" atau semacamnya.
 🔴 **WAJIB** — layar Operasional Cabang (`operasional_cabang_page.dart`) dan
 kartu ringkas di beranda (`dashboard_page.dart`), keduanya membaca `kas_sistem`
 dari `GET /api/shift/pantau`.
+
+**Sudah di-merge ke production.**
 
 **Nilai `kas_sistem` BERUBAH** untuk cabang yang menjalankan lebih dari satu
 shift dalam sehari. Tidak ada perubahan bentuk yang merusak — yang ada hanya
@@ -177,6 +284,8 @@ pemakainya akan mengira ada salah hitung.
 > dikerjakan di repo mobile.
 
 🔴 **WAJIB** — layar struk & cetak ulang (`receipt_page.dart`)
+
+**Sudah di-merge ke production.**
 
 **Sudah dikerjakan di mobile** — `mohteja/kakarut-mobile` PR #6, cabang
 `claude/mobile-pb1-tarif-struk` (masih draft, belum di-merge ke `main`).
@@ -277,6 +386,8 @@ beli" — bedakan keduanya seperti sebelumnya.
 🟡 **PERLU DICEK** — kalau aplikasi mobile menampilkan detail shift, tambahkan
 pengakuan saat daftarnya dipotong.
 
+**Sudah di-merge ke production.**
+
 **Kenapa.** `transaksi[]` dibatasi **300 baris terbaru**, sedangkan
 `jumlah_transaksi` adalah hitungan sebenarnya dari agregat tanpa batas. Pada
 shift ramai keduanya berbeda, dan selisih tanpa penjelasan di layar
@@ -311,6 +422,8 @@ menurunkan `jumlah_transaksi` ke 300 membuat rekapnya berbohong.
 🟡 **PERLU DICEK** — kalau aplikasi mobile menampilkan riwayat penerimaan
 per tanggal, jumlah barisnya bisa berbeda dari sebelumnya untuk rentang yang
 sama. Yang berubah adalah server; tak ada yang perlu dikirim berbeda.
+
+**Sudah di-merge ke production.**
 
 **Kenapa.** `confirmed_at` disimpan sebagai `timestamptz`, sedangkan `dari`/
 `sampai` adalah tanggal yang dipilih orang — dan tanggal itu selalu berarti
@@ -350,6 +463,8 @@ jam perangkat dan bukan dari UTC. Mobile tak perlu mengirim zona apa pun.
 `{ isi?, overhead_x?, harga_beli? }`. Bila dikirim, ketiganya ditulis dalam
 **transaksi yang sama** dengan komponen resepnya.
 
+**Sudah di-merge ke production.**
+
 **Kenapa.** Biaya per satuan bahan produksi lahir dari pasangan
 `(biaya resep ÷ isi) × overhead_x`, dan pembilang/penyebutnya tersimpan di tabel
 berbeda. Menyimpan komponen lewat endpoint ini lalu takarannya lewat
@@ -377,6 +492,8 @@ opsional. Kiriman ulang dengan `client_ref` yang sama memulangkan hasil pertama
 apa adanya — `rencana_id`, `nomor_permintaan`, dan seluruh id faktur identik —
 tanpa menerbitkan satu set faktur produksi/beli kedua.
 
+**Sudah di-merge ke production.**
+
 **Kenapa ini penting khusus di sini.** Layar "Tambah Stok dari Menu" memanggil
 DUA endpoint berurutan dalam satu tombol:
 
@@ -399,6 +516,8 @@ mengirimkannya tidak berubah — tapi juga tidak terlindungi.
 ---
 
 ## Rilis: `POST /api/transfer-stok` — kunci idempotensi `client_ref`
+
+**Sudah di-merge ke production.**
 
 > Tidak ada migrasi, tidak ada field wajib baru, dan respons tidak berubah.
 > **Tambahan murni** — klien yang tak mengirim `client_ref` berperilaku persis
@@ -2446,6 +2565,8 @@ sudah dikoreksi — samakan bila layar mobile menyalin kalimat lamanya.
 
 ## Rilis: Harga menu berubah sendiri — lacak, setop, perbaiki
 
+**Sudah di-merge ke production.**
+
 > Migrasi DB **0084** (`companies.food_cost_maks`, `productions.harga_tebakan`,
 > tabel `menu_price_logs`). **Tidak ada endpoint lama yang berubah kontraknya.**
 > Satu perubahan **perilaku** di `POST /api/pembelian/laporan-harga/:fakturId` —
@@ -2749,6 +2870,8 @@ otorisasi server ikut peran baru **seketika**, dan klien menyusul lewat
 
 ## Rilis: Transfer stok hanya dari Central Kitchen
 
+**Sudah di-merge ke production.**
+
 > **Sudah di production.** Tidak ada migrasi DB.
 
 ### 🔴 WAJIB — `POST /api/transfer-stok` kini **403** bila asal bukan Central Kitchen
@@ -2813,6 +2936,8 @@ dikerjakan di sisi klien memakai `produksi_di` + `divisi_produksi` pada
 ---
 
 ## Rilis: Penjualan offline yang tak menemukan shift cocok
+
+**Sudah di-merge ke production.**
 
 > **Sudah di production.** Penahan rilis aplikasi mobile untuk bagian ini sudah
 > lepas.
