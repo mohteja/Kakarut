@@ -5094,6 +5094,40 @@ cek "§185 kunci yang DITOLAK tidak membeku — percobaan berikutnya dieksekusi"
   "$(status_code_body "$OWNER" POST /transfer-stok "{\"asal_branch_id\":\"$ASAL132\",\"tujuan_branch_id\":\"$TUJUAN132\",\"items\":[{\"ingredient_id\":\"$ING132\",\"qty\":1}],\"client_ref\":\"$REF186\"}")"
 rm -rf "$T185"
 
+# ── §187 dua transfer yang BERSAMA-SAMA melebihi saldo ──
+#
+# Bukan soal idempotensi: kedua permintaan memang niat yang BERBEDA (client_ref
+# berlainan), dan masing-masing muat sendiri-sendiri. Yang diuji apakah penjaga
+# "stok CK tidak cukup" tetap mengikat ketika keduanya berpapasan — sebab ia
+# MEMBACA saldo lalu menulis, dan pembacaan yang tak terkunci membuat keduanya
+# sama-sama melihat saldo penuh.
+#
+# Kalau bocor, akibatnya bukan baris kembar melainkan stok CK yang MINUS: barang
+# dijanjikan ke dua cabang sekaligus, dan yang kedua baru ketahuan saat rak
+# kosong.
+SISA187=$(api "$OWNER" GET "/transfer-stok/saldo?branch_id=$ASAL132" \
+  | jq --arg i "$ING132" '[.rows[]|select(.ingredient_id==$i)][0] | (.saldo - .dalam_jalan) // 0')
+Q187=$(python3 -c "import math;print(max(1, math.ceil($SISA187 * 0.6)))")
+cek "dasar §187: ada sisa untuk diuji" "V >= 2" "$SISA187"
+T187=$(mktemp -d)
+for i in 1 2; do
+  curl -s -o /dev/null -w "%{http_code}\n" -X POST "$BASE/api/transfer-stok" \
+    -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' \
+    -d "{\"asal_branch_id\":\"$ASAL132\",\"tujuan_branch_id\":\"$TUJUAN132\",\"items\":[{\"ingredient_id\":\"$ING132\",\"qty\":$Q187}],\"client_ref\":\"$(cat /proc/sys/kernel/random/uuid)\"}" \
+    > "$T187/k$i" &
+done
+wait
+# 2 × 60% > 100%, jadi tepat satu yang boleh lolos. Kode yang kalah tidak
+# dikunci: 400 (stok kurang) bila ia membaca sesudah yang pertama menulis.
+cek "§187 tepat SATU transfer yang lolos" "V == 1" \
+  "$(cat "$T187/k1" "$T187/k2" | grep -c '^201$')"
+# INTI: sisa tak boleh negatif. Inilah kerusakan yang sesungguhnya —
+# baris kembar masih bisa dihapus, stok minus sudah terlanjur dijanjikan.
+cek "§187 sisa CK tidak negatif sesudah keduanya" "V >= 0" \
+  "$(api "$OWNER" GET "/transfer-stok/saldo?branch_id=$ASAL132" \
+     | jq --arg i "$ING132" '[.rows[]|select(.ingredient_id==$i)][0] | (.saldo - .dalam_jalan) // 0')"
+rm -rf "$T187"
+
 cek "batalkan transfer yang sudah diterima → 409" "V == 409" \
   "$(status_code_body "$OWNER" POST "/transfer-stok/$TFID132/batal" '{}')"
 # batal transfer yang masih di jalan → hilang dari daftar & dari Penerimaan
