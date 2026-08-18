@@ -185,6 +185,8 @@ sebagai `kMaksItemGagal`) — ia keadaan sementara yang beres sendiri.
 
 🟡 **PERLU DICEK** — tab **BEP** di layar Laporan (`laporan_page.dart`, `_TabBep`).
 
+**Sudah di-merge ke production.**
+
 **Tidak ada perubahan bentuk respons** — tak ada medan baru, tak ada medan
 hilang, jadi mobile **tidak perlu perubahan kode**. Yang berubah **ANGKANYA**,
 untuk perusahaan yang memberi diskon.
@@ -226,6 +228,8 @@ yang menyebut angka itu "sebelum diskon" atau semacamnya.
 🔴 **WAJIB** — layar Operasional Cabang (`operasional_cabang_page.dart`) dan
 kartu ringkas di beranda (`dashboard_page.dart`), keduanya membaca `kas_sistem`
 dari `GET /api/shift/pantau`.
+
+**Sudah di-merge ke production.**
 
 **Nilai `kas_sistem` BERUBAH** untuk cabang yang menjalankan lebih dari satu
 shift dalam sehari. Tidak ada perubahan bentuk yang merusak — yang ada hanya
@@ -280,6 +284,8 @@ pemakainya akan mengira ada salah hitung.
 > dikerjakan di repo mobile.
 
 🔴 **WAJIB** — layar struk & cetak ulang (`receipt_page.dart`)
+
+**Sudah di-merge ke production.**
 
 **Sudah dikerjakan di mobile** — `mohteja/kakarut-mobile` PR #6, cabang
 `claude/mobile-pb1-tarif-struk` (masih draft, belum di-merge ke `main`).
@@ -380,6 +386,8 @@ beli" — bedakan keduanya seperti sebelumnya.
 🟡 **PERLU DICEK** — kalau aplikasi mobile menampilkan detail shift, tambahkan
 pengakuan saat daftarnya dipotong.
 
+**Sudah di-merge ke production.**
+
 **Kenapa.** `transaksi[]` dibatasi **300 baris terbaru**, sedangkan
 `jumlah_transaksi` adalah hitungan sebenarnya dari agregat tanpa batas. Pada
 shift ramai keduanya berbeda, dan selisih tanpa penjelasan di layar
@@ -414,6 +422,8 @@ menurunkan `jumlah_transaksi` ke 300 membuat rekapnya berbohong.
 🟡 **PERLU DICEK** — kalau aplikasi mobile menampilkan riwayat penerimaan
 per tanggal, jumlah barisnya bisa berbeda dari sebelumnya untuk rentang yang
 sama. Yang berubah adalah server; tak ada yang perlu dikirim berbeda.
+
+**Sudah di-merge ke production.**
 
 **Kenapa.** `confirmed_at` disimpan sebagai `timestamptz`, sedangkan `dari`/
 `sampai` adalah tanggal yang dipilih orang — dan tanggal itu selalu berarti
@@ -453,6 +463,8 @@ jam perangkat dan bukan dari UTC. Mobile tak perlu mengirim zona apa pun.
 `{ isi?, overhead_x?, harga_beli? }`. Bila dikirim, ketiganya ditulis dalam
 **transaksi yang sama** dengan komponen resepnya.
 
+**Sudah di-merge ke production.**
+
 **Kenapa.** Biaya per satuan bahan produksi lahir dari pasangan
 `(biaya resep ÷ isi) × overhead_x`, dan pembilang/penyebutnya tersimpan di tabel
 berbeda. Menyimpan komponen lewat endpoint ini lalu takarannya lewat
@@ -480,6 +492,8 @@ opsional. Kiriman ulang dengan `client_ref` yang sama memulangkan hasil pertama
 apa adanya — `rencana_id`, `nomor_permintaan`, dan seluruh id faktur identik —
 tanpa menerbitkan satu set faktur produksi/beli kedua.
 
+**Sudah di-merge ke production.**
+
 **Kenapa ini penting khusus di sini.** Layar "Tambah Stok dari Menu" memanggil
 DUA endpoint berurutan dalam satu tombol:
 
@@ -502,6 +516,8 @@ mengirimkannya tidak berubah — tapi juga tidak terlindungi.
 ---
 
 ## Rilis: `POST /api/transfer-stok` — kunci idempotensi `client_ref`
+
+**Sudah di-merge ke production.**
 
 > Tidak ada migrasi, tidak ada field wajib baru, dan respons tidak berubah.
 > **Tambahan murni** — klien yang tak mengirim `client_ref` berperilaku persis
@@ -2549,6 +2565,8 @@ sudah dikoreksi — samakan bila layar mobile menyalin kalimat lamanya.
 
 ## Rilis: Harga menu berubah sendiri — lacak, setop, perbaiki
 
+**Sudah di-merge ke production.**
+
 > Migrasi DB **0084** (`companies.food_cost_maks`, `productions.harga_tebakan`,
 > tabel `menu_price_logs`). **Tidak ada endpoint lama yang berubah kontraknya.**
 > Satu perubahan **perilaku** di `POST /api/pembelian/laporan-harga/:fakturId` —
@@ -2852,6 +2870,8 @@ otorisasi server ikut peran baru **seketika**, dan klien menyusul lewat
 
 ## Rilis: Transfer stok hanya dari Central Kitchen
 
+**Sudah di-merge ke production.**
+
 > **Sudah di production.** Tidak ada migrasi DB.
 
 ### 🔴 WAJIB — `POST /api/transfer-stok` kini **403** bila asal bukan Central Kitchen
@@ -2916,6 +2936,8 @@ dikerjakan di sisi klien memakai `produksi_di` + `divisi_produksi` pada
 ---
 
 ## Rilis: Penjualan offline yang tak menemukan shift cocok
+
+**Sudah di-merge ke production.**
 
 > **Sudah di production.** Penahan rilis aplikasi mobile untuk bagian ini sudah
 > lepas.
