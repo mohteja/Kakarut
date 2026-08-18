@@ -150,10 +150,25 @@ menang mengeksekusi; yang kalah tak pernah menyentuh eksekutornya.
 }
 ```
 
-**Mobile tidak perlu diubah**: `perintahDianggapSelesai` memperlakukan kode ≥ 400
-sebagai BELUM selesai, jadi item ini tetap di antrean dan terkirim lagi pada tick
-berikutnya — tepat yang diinginkan. Balasan ini juga **sengaja tidak disimpan**
-ke ledger, sehingga percobaan berikutnya tidak membaca "gagal" yang membeku.
+> 🔴 **KOREKSI (penting).** Entri ini semula menyatakan *"mobile tidak perlu
+> diubah"*. **Itu keliru, dan akibatnya berat.**
+>
+> Benar bahwa `perintahDianggapSelesai` menggolongkannya BELUM selesai, jadi
+> itemnya tetap di antrean. Yang terlewat: item itu ditandai **`gagal`**, dan
+> hanya item berstatus `pending` yang ikut batch berikutnya. Perintahnya
+> **tidak pernah dicoba lagi** — kasir melihat kegagalan permanen yang berbunyi
+> "coba lagi sebentar lagi".
+>
+> Pemicunya justru kasus pemakaian utamanya: antrean panjang sesudah lama
+> offline membuat klien menyerah pada `receiveTimeout`, mundur, lalu mengirim
+> ulang batch yang sama selagi server masih menggilas yang pertama.
+>
+> **Yang harus dilakukan:** perlakukan `409` + `sebab: "sedang_diproses"`
+> sebagai MASIH BERJALAN — biarkan itemnya `pending`, jangan ditandai gagal,
+> jangan distempel waktu gagal. Diperbaiki di kakarut-mobile#9.
+
+Balasan ini **sengaja tidak disimpan** ke ledger, sehingga percobaan berikutnya
+tidak membaca "gagal" yang membeku.
 
 Yang perlu ditinjau hanya **teks yang ditampilkan ke pemakai**: jangan tampilkan
 `sebab: "sedang_diproses"` sebagai kegagalan yang menakutkan (mis. ikut dihitung
