@@ -9215,13 +9215,17 @@ cek "§184 resep DITOLAK selagi produksi berjalan (dulu diterima diam-diam)" "V 
 #
 # Ini juga jalur tulis yang PALING sering dieksekusi di seluruh produk, dan
 # sampai seksi ini tak satu pun asersi pernah menjalankannya dua kali sekaligus.
-AKTIF188=$(api "$KASIR" GET /shift/aktif | jq -r '.id // "null"')
+# Token: §105 mengganti password kasir, jadi `$KASIR` sudah MATI di titik ini
+# (token_version naik → 401). Penggantinya `$REISS105`, hasil login ulang di
+# §105 — dijaga `verify-api-token.test.ts`, yang menangkap seksi ini saat
+# pertama ditulis.
+AKTIF188=$(api "$REISS105" GET /shift/aktif | jq -r '.id // "null"')
 if [ "$AKTIF188" = "null" ]; then
   # Mandiri: seksi ini duduk di ekor skrip, jadi ia tak boleh mengandaikan
   # keadaan yang ditinggalkan ribuan baris di atasnya.
-  api "$KASIR" POST /absensi/saya '{"foto_url":"https://example.com/absen188.jpg"}' >/dev/null 2>&1
-  api "$KASIR" POST /shift/buka '{"modal_awal":100000}' >/dev/null 2>&1
-  AKTIF188=$(api "$KASIR" GET /shift/aktif | jq -r '.id // "null"')
+  api "$REISS105" POST /absensi/saya '{"foto_url":"https://example.com/absen188.jpg"}' >/dev/null 2>&1
+  api "$REISS105" POST /shift/buka '{"modal_awal":100000}' >/dev/null 2>&1
+  AKTIF188=$(api "$REISS105" GET /shift/aktif | jq -r '.id // "null"')
 fi
 # Diperiksa sebagai UUID, bukan sekadar "bukan kata null": balasan KOSONG (server
 # mati, jaringan putus) membuat `jq` memulangkan string kosong, dan `!= "null"`
@@ -9231,7 +9235,7 @@ cek "dasar §188: kasir punya kasir terbuka" "V == 1" \
 T188=$(mktemp -d)
 for i in 1 2 3 4 5 6; do
   curl -s -X POST "$BASE/api/penjualan" \
-    -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' \
+    -H "Authorization: Bearer $REISS105" -H 'Content-Type: application/json' \
     -o "$T188/b$i" -w "%{http_code}\n" \
     -d "{\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}" > "$T188/k$i" &
 done

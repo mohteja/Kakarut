@@ -58,6 +58,28 @@ function berkasTs(dir: string, akar: string, keluar: string[] = []): string[] {
 
 const AKAR = fileURLToPath(new URL("../src", import.meta.url));
 
+/**
+ * Penanda yang benar-benar DITANDAI pada `.set()` — bukan yang dibersihkan.
+ *
+ * `archivedAt: null` (mis. mengaktifkan kembali keanggotaan yang diarsip) juga
+ * menyentuh kolom penanda, tapi arahnya kebalikan dari yang dijaga aturan ini:
+ * ia MENGHAPUS tanda, bukan menuliskannya. Menandainya sebagai pelanggaran
+ * memaksa orang menulis `WHERE archived_at IS NOT NULL` pada operasi yang justru
+ * harus idempoten — dan pengecualian yang salah arah begitu biasanya diselesaikan
+ * dengan mematikan penjaganya.
+ *
+ * Dipersempit setelah penjaga ini salah menuduh `seed/guest.ts`, yang memang
+ * membersihkan `archivedAt` saat memulihkan kasir tamu.
+ */
+function penandaDitulis(bagianSet: string): string | null {
+  for (const m of bagianSet.matchAll(new RegExp(PENANDA.source, "g"))) {
+    const sesudah = bagianSet.slice(m.index! + m[0].length, m.index! + m[0].length + 24);
+    if (/^\s*:\s*null\b/.test(sesudah)) continue; // dibersihkan, bukan ditandai
+    return m[0];
+  }
+  return null;
+}
+
 /** Setiap `.update(x)` beserta bagian `.set()` dan `.where()`-nya. */
 function updateTanpaPenjaga(rel: string) {
   const isi = readFileSync(join(AKAR, rel), "utf8");
@@ -68,7 +90,7 @@ function updateTanpaPenjaga(rel: string) {
     if (w < 0) continue;
     const bagianSet = blok.slice(0, w);
     const bagianWhere = blok.slice(w, w + 900);
-    const p = bagianSet.match(PENANDA);
+    const p = penandaDitulis(bagianSet);
     if (!p) continue;
     if (PENANDA.test(bagianWhere) || PENJAGA.test(bagianWhere)) continue;
     temuan.push({
