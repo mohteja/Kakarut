@@ -28,7 +28,16 @@ const baca = (rel: string) =>
 
 const RUTE = baca("../src/modules/produksi/routes.ts");
 const APP = baca("../src/app.ts");
-const WEB = baca("../../web/src/pages/produksi/TahapPage.tsx");
+/**
+ * DUA layar web memanggil `/tahap`, dan keduanya dulu salah dengan cara yang
+ * sama. Menambal satu saja meninggalkan bug yang identik di layar sebelahnya —
+ * itu persis yang terjadi pada percobaan pertama perbaikan ini.
+ */
+const WEB_HALAMAN = [
+  "../../web/src/pages/produksi/TahapPage.tsx",
+  "../../web/src/pages/produksi/TambahStokPage.tsx",
+] as const;
+const WEB = baca(WEB_HALAMAN[0]);
 
 describe("server: 409 /tahap membawa sebab terstruktur", () => {
   it("ketiga sebabnya terdefinisi sebagai tipe, bukan string lepas", () => {
@@ -71,8 +80,19 @@ describe("server: 409 /tahap membawa sebab terstruktur", () => {
 });
 
 describe("web: hanya `bahan_kurang` yang menawarkan Tetap Proses", () => {
-  it("dicocokkan lewat sebab, bukan status 409 telanjang", () => {
-    expect(WEB).toContain('sebab409 === "bahan_kurang"');
+  it.each(WEB_HALAMAN)("%s mencocokkan sebab, bukan 409 telanjang", (rel) => {
+    const isi = baca(rel);
+    expect(isi).toContain('=== "bahan_kurang"');
+    // Bentuk lama: 409 apa pun dianggap bahan kurang.
+    expect(isi).not.toMatch(
+      /status === 409\s*\n?\s*\?\s*\w+\.error\.message/,
+    );
+  });
+
+  it("kedua halaman memakai `data?.sebab`, bukan mencocokkan teks pesan", () => {
+    for (const rel of WEB_HALAMAN) {
+      expect(baca(rel), rel).toContain("data?.sebab");
+    }
   });
 
   it("`paksa` hanya dikirim untuk bahan kurang", () => {
