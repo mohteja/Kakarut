@@ -2,6 +2,7 @@ import { getConnInfo } from "@hono/node-server/conninfo";
 import { sql } from "drizzle-orm";
 import type { Context, MiddlewareHandler } from "hono";
 import { HTTPException } from "hono/http-exception";
+import { env } from "../config/env";
 import { db } from "../db/client";
 import type { AppEnv } from "./auth";
 
@@ -128,24 +129,53 @@ export async function bersihkanRateLimitKedaluwarsa(): Promise<number> {
 export const lewatiRateLimit: MiddlewareHandler<AppEnv> = (_c, next) => next();
 
 /**
- * IP klien untuk keperluan pembatasan laju. Di belakang proxy tepercaya,
- * X-Forwarded-For / X-Real-IP diisi proxy; jika tidak ada, pakai alamat koneksi
- * sebenarnya. Bila keduanya tak tersedia (mis. saat unit test tanpa server
- * Node), jatuh ke "unknown".
+ * IP klien untuk keperluan pembatasan laju.
+ *
+ * DIBACA DARI KANAN, BUKAN DARI KIRI — dan itu seluruh inti fungsi ini.
+ *
+ * `X-Forwarded-For` tumbuh dari kiri ke kanan: tiap proxy MENAMBAHKAN alamat
+ * rekan bicaranya di belakang rantai, tanpa menyentuh yang sudah ada. Maka
+ * entri paling KIRI adalah yang dikirim klien sendiri, dan siapa pun bebas
+ * mengisinya. Yang benar-benar diamati proxy tepercaya kita justru ada di
+ * KANAN.
+ *
+ * Dulu fungsi ini memulangkan entri paling kiri. Akibatnya seluruh pembatas
+ * laju pra-autentikasi — login, daftar, tamu, lupa & reset password, verifikasi
+ * email — bisa dimatikan dengan MENGGANTI SATU HEADER tiap permintaan: kuncinya
+ * ikut berubah, embernya selalu kosong. Terukur: 14 percobaan login gagal
+ * beruntun dengan XFF diputar tak pernah menyentuh 429, sementara XFF tetap
+ * mentok di percobaan ke-11.
+ *
+ * `TRUST_PROXY_HOPS` menyatakan berapa proxy yang benar-benar ada di depan
+ * aplikasi. Yang dipakai adalah entri sejauh itu dari ujung kanan. Rantai yang
+ * lebih PENDEK dari yang dijanjikan berarti permintaannya tak melewati proxy
+ * yang seharusnya — maka XFF diabaikan dan alamat koneksi yang dipakai, bukan
+ * ditebak dari sisa rantai yang tak jelas asalnya.
+ *
+ * `X-Real-Ip` hanya dipercaya bila memang ada proxy di depan: header itu pun
+ * dikirim klien kalau tak ada yang menimpanya.
  */
 export function ipKlien(c: Context<AppEnv>): string {
-  const xff = c.req.header("x-forwarded-for");
-  if (xff) {
-    const first = xff.split(",")[0]?.trim();
-    if (first) return first;
-  }
-  const xr = c.req.header("x-real-ip");
-  if (xr) return xr.trim();
-  try {
-    return getConnInfo(c).remote.address ?? "unknown";
-  } catch {
-    return "unknown";
-  }
+  const alamatKoneksi = () => {
+    try {
+      return getConnInfo(c).remote.address ?? "unknown";
+    } catch {
+      // Unit test tanpa server Node sungguhan tak punya info koneksi.
+      return "unknown";
+    }
+  };
+  const hop = env.TRUST_PROXY_HOPS;
+  if (hop <= 0) return alamatKoneksi();
+
+  const rantai = (c.req.header("x-forwarded-for") ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (rantai.length >= hop) return rantai[rantai.length - hop];
+
+  const xr = c.req.header("x-real-ip")?.trim();
+  if (xr) return xr;
+  return alamatKoneksi();
 }
 
 /** Ambil email dari body JSON secara best-effort (tak menggagalkan bila kosong/invalid). */

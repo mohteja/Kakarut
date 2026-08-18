@@ -21,6 +21,23 @@ const EnvSchema = z.object({
     .default("true")
     .transform((v) => v !== "false" && v !== "0"),
 
+  /**
+   * BERAPA PROXY DI DEPAN APLIKASI INI — dan karena itu, berapa entri
+   * `X-Forwarded-For` di ujung KANAN yang boleh dipercaya.
+   *
+   * XFF ditambahi dari kiri ke kanan: tiap proxy MENAMBAHKAN alamat rekan
+   * bicaranya di belakang rantai. Jadi entri paling KIRI adalah yang dikirim
+   * klien sendiri — bebas diisi apa saja — sementara entri yang ditambahkan
+   * proxy tepercaya kita ada di KANAN. Membaca yang kiri berarti mempercayai
+   * penyerang untuk menyebutkan identitasnya sendiri.
+   *
+   * Nilai 1 (bawaan) cocok dengan penyebaran yang dikirim repo ini: satu
+   * Traefik/Dokploy di depan aplikasi. Tambah jadi 2 bila ada CDN di depan
+   * Traefik. Setel 0 bila aplikasi diekspos LANGSUNG tanpa proxy — dengan 0,
+   * XFF diabaikan sepenuhnya dan yang dipakai alamat koneksi sebenarnya.
+   */
+  TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(10).default(1),
+
   /** jalankan migrasi database otomatis saat server start (default: aktif) */
   AUTO_MIGRATE: z
     .string()
