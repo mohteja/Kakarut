@@ -5005,6 +5005,62 @@ cek "setelah diterima: stok ASAL turun -1" "abs(V + 1) < 0.001" \
   "$(python3 -c "print($(api "$OWNER" GET "/stok?branch_id=$ASAL132" | jq --arg i "$ING132" '[.[]|select(.ingredient_id==$i)][0].saldo // 0') - $SA132_AWAL)")"
 cek "status faktur transfer jadi dikonfirmasi" "V == 1" \
   "$(api "$OWNER" GET /transfer-stok | jq --arg f "$TFID132" '[.rows[]|select(.faktur_id==$f)][0].status=="dikonfirmasi"|if . then 1 else 0 end')"
+
+
+# ── §185 idempotensi di bawah PERMINTAAN BERSAMAAN ──
+#
+# Seluruh berkas ini berurutan, dan itu justru yang TIDAK bisa menguji kelas bug
+# terpenting dari klaim idempotensi: dua permintaan ber-`client_ref` sama yang
+# datang BERSAMAAN. Pola lama (SELECT → eksekusi → INSERT onConflictDoNothing)
+# lolos setiap uji berurutan dengan mulus — dua permintaan bergiliran memang
+# aman. Yang bocor hanya saat keduanya berpapasan, dan itu tak akan pernah
+# terlihat dari skrip yang menunggu balasan sebelum mengirim berikutnya.
+#
+# `curl &` + `wait` cukup untuk memunculkannya, jadi tak ada alasan celah ini
+# tetap terbuka.
+echo "── §185 idempotensi saat dua permintaan berpapasan ──"
+
+REF185=$(cat /proc/sys/kernel/random/uuid)
+BODY185="{\"asal_branch_id\":\"$ASAL132\",\"tujuan_branch_id\":\"$TUJUAN132\",\"items\":[{\"ingredient_id\":\"$ING132\",\"qty\":1}],\"client_ref\":\"$REF185\"}"
+T185=$(mktemp -d)
+for i in 1 2; do
+  curl -s -o "$T185/b$i" -X POST "$BASE/api/transfer-stok" \
+    -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' \
+    -d "$BODY185" &
+done
+wait
+
+# Dua hasil sama-sama SAH, dan mana yang muncul bergantung timing:
+#   - satu 201 + satu 409 `sedang_diproses` (yang kedua kalah klaim), atau
+#   - dua 201 dengan faktur_id IDENTIK (yang kedua datang sesudah yang pertama
+#     selesai, lalu diputar ulang dari ledger).
+# Yang HARAM cuma satu: dua faktur_id berbeda. Karena itu yang diuji jumlah
+# faktur DISTINCT — bukan kode statusnya, yang akan membuat uji ini goyah.
+cek "§185 dua transfer berpapasan → hanya SATU faktur lahir" "V == 1" \
+  "$(jq -s '[.[] | .faktur_id // empty] | unique | length' "$T185/b1" "$T185/b2")"
+# Penjaga arah sebaliknya: kalau KEDUANYA 409, tak ada faktur sama sekali dan
+# uji di atas akan memulangkan 0 — bukan lolos diam-diam.
+cek "§185 setidaknya satu permintaan benar-benar berhasil" "V >= 1" \
+  "$(jq -s '[.[] | select(.ok == true)] | length' "$T185/b1" "$T185/b2")"
+
+# Kiriman ulang BERURUTAN atas ref yang sudah sukses: hasilnya diputar ulang
+# apa adanya, bukan transfer kedua.
+FID185=$(jq -rs '[.[] | .faktur_id // empty][0]' "$T185/b1" "$T185/b2")
+ULANG185=$(api "$OWNER" POST /transfer-stok "$BODY185")
+cek "§185 ref yang sukses memulangkan faktur yang SAMA, bukan membuat kedua" "V == 1" \
+  "$(python3 -c "import sys,json;print(1 if json.loads(sys.stdin.read()).get('faktur_id')==sys.argv[1] else 0)" "$FID185" <<<"$ULANG185")"
+
+# Kontrak "LEPAS SAAT GAGAL" — sengaja berbeda dari /sync, lihat idempoten.ts.
+# Percobaan yang DITOLAK tak boleh membekukan kuncinya: web menahan `client_ref`
+# yang sama sampai sukses, jadi kunci beku berarti kasir yang ditolak karena
+# stok kurang lalu memperbaiki keranjangnya mendapat penolakan lama SELAMANYA.
+REF186=$(cat /proc/sys/kernel/random/uuid)
+cek "§185 dasar: qty berlebih ditolak" "V == 400" \
+  "$(status_code_body "$OWNER" POST /transfer-stok "{\"asal_branch_id\":\"$ASAL132\",\"tujuan_branch_id\":\"$TUJUAN132\",\"items\":[{\"ingredient_id\":\"$ING132\",\"qty\":999999}],\"client_ref\":\"$REF186\"}")"
+cek "§185 kunci yang DITOLAK tidak membeku — percobaan berikutnya dieksekusi" "V == 201" \
+  "$(status_code_body "$OWNER" POST /transfer-stok "{\"asal_branch_id\":\"$ASAL132\",\"tujuan_branch_id\":\"$TUJUAN132\",\"items\":[{\"ingredient_id\":\"$ING132\",\"qty\":1}],\"client_ref\":\"$REF186\"}")"
+rm -rf "$T185"
+
 cek "batalkan transfer yang sudah diterima → 409" "V == 409" \
   "$(status_code_body "$OWNER" POST "/transfer-stok/$TFID132/batal" '{}')"
 # batal transfer yang masih di jalan → hilang dari daftar & dari Penerimaan
