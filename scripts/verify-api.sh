@@ -9196,6 +9196,61 @@ cek "§184 resep DITOLAK selagi produksi berjalan (dulu diterima diam-diam)" "V 
   "$(status_code_body "$OWNER" PUT "/bahan/$BASO66/resep" "$RESEP184")"
 
 
+# ── §188 enam penjualan yang berpapasan di SATU cabang ──
+#
+# Nomor struk dibuat dengan MEMBACA nomor terbesar hari itu lalu menambah satu:
+#
+#   SELECT nomor … ORDER BY nomor DESC LIMIT 1   →   seq = …+1   →   INSERT
+#
+# Pola baca-lalu-tulis itu biasanya bocor. Di sini TIDAK, dan yang menahannya
+# satu baris di awal `createSale`: baris cabangnya dikunci `FOR UPDATE`, jadi
+# seluruh penjualan di satu cabang antre. Kuncinya sengaja diambil paling awal —
+# sebelum apa pun dibaca — supaya tak ada celah antara membaca dan menulis.
+#
+# Yang membuatnya layak diuji: kalau kunci itu suatu hari dilonggarkan demi
+# throughput (godaan yang masuk akal — ia menyerialkan SELURUH penjualan cabang),
+# akibatnya bukan nomor kembar melainkan `sales_branch_nomor_uq` yang menolak,
+# alias 500 mentah ke tangan kasir yang sedang berdiri di depan pelanggan.
+# Nota yang hilang itu tak meninggalkan jejak apa pun untuk dilacak.
+#
+# Ini juga jalur tulis yang PALING sering dieksekusi di seluruh produk, dan
+# sampai seksi ini tak satu pun asersi pernah menjalankannya dua kali sekaligus.
+AKTIF188=$(api "$KASIR" GET /shift/aktif | jq -r '.id // "null"')
+if [ "$AKTIF188" = "null" ]; then
+  # Mandiri: seksi ini duduk di ekor skrip, jadi ia tak boleh mengandaikan
+  # keadaan yang ditinggalkan ribuan baris di atasnya.
+  api "$KASIR" POST /absensi/saya '{"foto_url":"https://example.com/absen188.jpg"}' >/dev/null 2>&1
+  api "$KASIR" POST /shift/buka '{"modal_awal":100000}' >/dev/null 2>&1
+  AKTIF188=$(api "$KASIR" GET /shift/aktif | jq -r '.id // "null"')
+fi
+# Diperiksa sebagai UUID, bukan sekadar "bukan kata null": balasan KOSONG (server
+# mati, jaringan putus) membuat `jq` memulangkan string kosong, dan `!= "null"`
+# menganggapnya sah. Penjaga yang hijau tanpa server tidak menjaga apa pun.
+cek "dasar §188: kasir punya kasir terbuka" "V == 1" \
+  "$(printf '%s' "$AKTIF188" | grep -cE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')"
+T188=$(mktemp -d)
+for i in 1 2 3 4 5 6; do
+  curl -s -X POST "$BASE/api/penjualan" \
+    -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' \
+    -o "$T188/b$i" -w "%{http_code}\n" \
+    -d "{\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}" > "$T188/k$i" &
+done
+wait
+LOLOS188=$(cat "$T188"/k* | grep -c '^201$')
+# Tanpa ini seluruh seksi bisa hijau karena keenamnya sama-sama GAGAL (mis. stok
+# habis) — nol nota tak punya nomor kembar, dan itu bukan bukti apa pun.
+cek "dasar §188: penjualannya memang berjalan" "V >= 2" "$LOLOS188"
+# INTI: tiap nota yang lahir bernomor sendiri. Satu nomor untuk dua nota mustahil
+# (indeks uniknya menolak), jadi kebocoran kunci muncul sebagai nota yang HILANG.
+cek "§188 tiap nota yang lahir bernomor unik" "V == $LOLOS188" \
+  "$(for i in 1 2 3 4 5 6; do jq -r '.sale.nomor // empty' "$T188/b$i" 2>/dev/null; done | sort -u | wc -l)"
+# Sisi lain dari kerusakan yang sama: tabrakan `sales_branch_nomor_uq` keluar
+# sebagai 500, bukan galat yang bisa dimengerti kasir.
+cek "§188 tak ada yang gagal keras (5xx)" "V == 0" \
+  "$(cat "$T188"/k* | grep -c '^5')"
+rm -rf "$T188"
+
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"
