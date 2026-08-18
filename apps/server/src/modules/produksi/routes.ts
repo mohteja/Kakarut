@@ -224,6 +224,29 @@ async function catatRealisasiDana(
     userId: arg.userId,
   });
 }
+/**
+ * Penolakan 409 dari `/tahap` yang MEMBAWA sebab terstruktur.
+ *
+ * Endpoint ini menolak dengan 409 untuk TIGA hal yang sangat berbeda: bahan
+ * baku kurang (peringatan — boleh dilanjut dengan `paksa`), faktur berubah di
+ * bawah tangan (harus muat ulang), dan kiriman beralamat yang wajib lewat
+ * Penerimaan (tak ada jalan lain dari sini). Tanpa sebab, klien hanya melihat
+ * angka 409 dan terpaksa menebak — atau mencocokkan teks pesan, yang rapuh
+ * karena teksnya boleh berubah kapan saja.
+ *
+ * `sebab` dipasang sebagai PROPERTI, bukan `cause`: `app.onError` membacanya
+ * lewat `(err as { sebab?: string }).sebab` dan hanya properti itu yang sampai
+ * ke badan respons — pola yang sama dengan `SedangDiproses`.
+ */
+class TahapDitolak extends HTTPException {
+  constructor(
+    readonly sebab: "bahan_kurang" | "status_berubah" | "wajib_penerimaan",
+    message: string,
+  ) {
+    super(409, { message });
+  }
+}
+
 /** transisi tahap produksi wajib berurutan: rencana → dikerjakan → menunggu (lalu /konfirmasi) */
 const TAHAP_SEBELUM = { dikerjakan: "rencana", menunggu: "dikerjakan" } as const;
 /** urutan pipeline untuk aturan "hanya boleh maju" pada tahap sebagian */
@@ -870,10 +893,10 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
           const kena = items ? baris.filter((b) => items.some((it) => it.id === b.id)) : baris;
           const beralamat = kena.find((b) => (tujuan_branch_id ?? b.tujuanBranchId) != null);
           if (beralamat) {
-            throw new HTTPException(409, {
-              message:
-                "Kiriman beralamat ke cabang tidak bisa dikonfirmasi dari sini — barangnya harus DITERIMA di menu Penerimaan Barang oleh orang di cabang tujuan",
-            });
+            throw new TahapDitolak(
+              "wajib_penerimaan",
+              "Kiriman beralamat ke cabang tidak bisa dikonfirmasi dari sini — barangnya harus DITERIMA di menu Penerimaan Barang oleh orang di cabang tujuan",
+            );
           }
         }
 
@@ -949,7 +972,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
           // "tetap proses" (paksa), balikan 409 dgn daftar bahan kurang — UI
           // menampilkannya lalu memberi opsi lanjut. paksa=true → lewati.
           if (kurang.length > 0 && !paksa) {
-            throw new HTTPException(409, { message: pesanBahanKurang(kurang) });
+            throw new TahapDitolak("bahan_kurang", pesanBahanKurang(kurang));
           }
         }
 
@@ -1216,9 +1239,10 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
                 .where(kunci)
                 .returning({ id: productions.id });
               if (res.length === 0) {
-                throw new HTTPException(409, {
-                  message: "Status faktur berubah — muat ulang halaman lalu coba lagi",
-                });
+                throw new TahapDitolak(
+                  "status_berubah",
+                  "Status faktur berubah — muat ulang halaman lalu coba lagi",
+                );
               }
               if (selesaiTahapIni(b)) {
                 selesaiProduksi.push({
@@ -1250,9 +1274,10 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
                 .where(kunci)
                 .returning({ id: productions.id });
               if (res.length === 0) {
-                throw new HTTPException(409, {
-                  message: "Status faktur berubah — muat ulang halaman lalu coba lagi",
-                });
+                throw new TahapDitolak(
+                  "status_berubah",
+                  "Status faktur berubah — muat ulang halaman lalu coba lagi",
+                );
               }
               const [barisMaju] = await tx
                 .insert(productions)
@@ -1367,7 +1392,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         const kurang = await bahanKurangUntukProduksi(auth.company_id!, barisRencana);
         // Peringatan (bukan blokir) — lihat jalur items di atas. paksa=true lewati.
         if (kurang.length > 0 && !paksa) {
-          throw new HTTPException(409, { message: pesanBahanKurang(kurang) });
+          throw new TahapDitolak("bahan_kurang", pesanBahanKurang(kurang));
         }
       }
 

@@ -412,10 +412,23 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
       setKonfirmProses(null);
     },
   });
-  // Bahan baku kurang = PERINGATAN (server balas 409), bukan error keras: boleh
-  // tetap proses. Pesan detail bahan kurang ada di message-nya.
+  /*
+   * Bahan baku kurang = PERINGATAN, boleh tetap proses. Tapi `/tahap` menolak
+   * dengan 409 untuk lebih dari satu hal — lihat `TahapDitolak` di server.
+   * Yang bisa mendarat di sini: `bahan_kurang` dan `status_berubah` (CAS kalah
+   * karena orang lain sudah memulai faktur ini).
+   *
+   * Pada `status_berubah`, `paksa` TIDAK menolong: ia hanya melewati
+   * pemeriksaan bahan baku, sementara servernya tetap CAS. Menampilkannya
+   * sebagai "bahan kurang" berarti menawarkan tombol yang tak mungkin
+   * berhasil, dan menyembunyikan satu-satunya tindakan yang benar — muat ulang.
+   *
+   * Dicocokkan lewat `sebab`, bukan teks pesan.
+   */
   const bahanKurang =
-    mulaiProduksi.error instanceof ApiError && mulaiProduksi.error.status === 409
+    mulaiProduksi.error instanceof ApiError &&
+    mulaiProduksi.error.status === 409 &&
+    mulaiProduksi.error.data?.sebab === "bahan_kurang"
       ? mulaiProduksi.error.message
       : null;
   const bukaUbahTahap = (g: FakturGroup, ke: TahapTujuan) => {
