@@ -1,5 +1,5 @@
 import bcrypt from "bcryptjs";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db, type Db, type Tx } from "../db/client";
 import {
   branches,
@@ -187,14 +187,60 @@ async function pastikanKeanggotaan(
     .insert(memberships)
     .values({ userId: ownerId, companyId, role: "owner" })
     .onConflictDoUpdate({ target: [memberships.userId, memberships.companyId], set: { role: "owner", archivedAt: null } });
+  /*
+   * Kasir WAJIB bercabang — `memberships_cashier_branch_ck`:
+   *   role IN ('owner','admin') OR branch_id IS NOT NULL
+   *
+   * `branchId` hanya diketahui saat provisi BARU. Pada boot berikutnya ia null
+   * karena perusahaannya sudah ada, dan niat aslinya benar: jangan menimpa
+   * cabang yang mungkin sudah disetel orang.
+   *
+   * Tapi UPSERT tidak bisa menyatakan niat itu. Postgres mengevaluasi CHECK
+   * pada baris USULAN — sebelum ON CONFLICT sempat mengalihkannya ke UPDATE.
+   * Jadi walau barisnya sudah ada dan cabangnya sudah benar, menyusun kandidat
+   * ber-`branch_id` NULL tetap meledakkan SELURUH provisi tamu:
+   *
+   *   ERROR: new row for relation "memberships" violates check constraint
+   *          "memberships_cashier_branch_ck"
+   *
+   * Dan galatnya cuma `console.warn` di `index.ts`, jadi akun demo diam-diam
+   * berhenti diperbarui setiap boot tanpa ada yang menyadarinya.
+   *
+   * Karena itu dipisah menjadi dua jalur yang masing-masing menyatakan
+   * niatnya sendiri: yang SUDAH ADA di-UPDATE (cabangnya tak disentuh bila tak
+   * diketahui), yang BELUM ADA di-INSERT dengan cabang yang dicari lebih dulu.
+   */
+  const [adaKasir] = await tx
+    .select({ id: memberships.id })
+    .from(memberships)
+    .where(and(eq(memberships.userId, kasirId), eq(memberships.companyId, companyId)));
+  if (adaKasir) {
+    await tx
+      .update(memberships)
+      .set({ role: "cashier", archivedAt: null, ...(branchId ? { branchId } : {}) })
+      .where(eq(memberships.id, adaKasir.id));
+    return;
+  }
   const kode = await resolveKodeKaryawan(tx, companyId);
-  // branchId hanya diketahui saat provisi baru; saat idempoten, jangan menimpa
-  // cabang yang mungkin sudah benar (biarkan set yang ada).
-  await tx
-    .insert(memberships)
-    .values({ userId: kasirId, companyId, role: "cashier", branchId: branchId ?? undefined, employeeCode: kode })
-    .onConflictDoUpdate({
-      target: [memberships.userId, memberships.companyId],
-      set: { role: "cashier", archivedAt: null, ...(branchId ? { branchId } : {}) },
-    });
+  // Provisi baru tanpa branchId eksplisit → pakai cabang perusahaan demo yang
+  // ada. Tanpa ini INSERT-nya melanggar CHECK yang sama.
+  const cabangKasir =
+    branchId ??
+    (
+      await tx
+        .select({ id: branches.id })
+        .from(branches)
+        .where(eq(branches.companyId, companyId))
+        .limit(1)
+    )[0]?.id;
+  if (!cabangKasir) {
+    throw new Error("Perusahaan demo tak punya cabang — kasir tamu tak bisa dibuat");
+  }
+  await tx.insert(memberships).values({
+    userId: kasirId,
+    companyId,
+    role: "cashier",
+    branchId: cabangKasir,
+    employeeCode: kode,
+  });
 }
