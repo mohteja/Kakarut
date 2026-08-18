@@ -1119,6 +1119,39 @@ cek "tutup shift: selisih 0 (uang fisik = kas)" "V == 1" "$(echo "$TU" | jq '(.s
 cek "tutup shift: ditutup terisi" "V == 1" "$(echo "$TU" | jq '(.ditutup_pada != null) | if . then 1 else 0 end')"
 cek "setelah tutup: tak ada shift aktif" "V == 1" "$(api "$KASIR" GET /shift/aktif | jq '(. == null) | if . then 1 else 0 end')"
 cek "riwayat shift: ada shift tertutup" "V >= 1" "$(api "$KASIR" GET /shift | jq 'length')"
+# ── §186 dua penutupan kasir yang berpapasan ──
+#
+# `shiftTerbuka()` hanya MEMBACA. Dua penutupan yang berpapasan sama-sama
+# menemukan shift yang sama masih terbuka, sama-sama lolos penjaga "hitungan
+# sudah dikunci" (keduanya membaca uang_fisik = null), lalu sama-sama menulis.
+# Tanpa `closed_at IS NULL` di WHERE, yang kedua MENIMPA yang pertama dan
+# keduanya dibalas 200.
+#
+# Terukur sebelum diperbaiki: nominal 150.000 dan 999.000 dilepas bersamaan →
+# DUA-DUANYA 200, dua-duanya berbunyi 999.000. Kasir yang menghitung 150.000
+# melihat layar sukses berisi angka orang lain, dan shift tercatat berselisih
+# 899.000 alih-alih 50.000 — di layar yang justru dipakai mempertanggungjawabkan
+# isi laci.
+api "$KASIR" POST /shift/buka '{"modal_awal":100000}' > /dev/null
+T186=$(mktemp -d)
+for pasangan in "1 150000" "2 999000"; do
+  set -- $pasangan
+  curl -s -o /dev/null -w "%{http_code}\n" -X POST "$BASE/api/shift/tutup" \
+    -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' \
+    -d "{\"uang_fisik\":$2}" > "$T186/k$1" &
+done
+wait
+# Invarian yang TIDAK bergantung timing: berapa pun urutannya, tepat SATU
+# penutupan boleh berhasil. Kode galat yang kalah sengaja tidak dikunci — bila
+# yang kedua datang sesudah yang pertama benar-benar selesai, ia gagal karena
+# tak ada shift terbuka, bukan karena kalah balapan. Yang haram cuma satu:
+# dua-duanya sukses.
+cek "§186 tepat SATU penutupan kasir yang berhasil" "V == 1" \
+  "$(cat "$T186/k1" "$T186/k2" | grep -c '^200$')"
+cek "§186 yang kalah TIDAK dibalas sukses" "V == 1" \
+  "$(cat "$T186/k1" "$T186/k2" | awk '$1 >= 400' | wc -l)"
+rm -rf "$T186"
+
 # Buka lagi shift agar transaksi kasir di seksi berikutnya (§37+) tetap bisa jalan.
 api "$KASIR" POST /shift/buka '{"modal_awal":200000}' > /dev/null
 cek "shift dibuka lagi untuk lanjutan" "V == 1" \
@@ -5005,6 +5038,96 @@ cek "setelah diterima: stok ASAL turun -1" "abs(V + 1) < 0.001" \
   "$(python3 -c "print($(api "$OWNER" GET "/stok?branch_id=$ASAL132" | jq --arg i "$ING132" '[.[]|select(.ingredient_id==$i)][0].saldo // 0') - $SA132_AWAL)")"
 cek "status faktur transfer jadi dikonfirmasi" "V == 1" \
   "$(api "$OWNER" GET /transfer-stok | jq --arg f "$TFID132" '[.rows[]|select(.faktur_id==$f)][0].status=="dikonfirmasi"|if . then 1 else 0 end')"
+
+
+# ── §185 idempotensi di bawah PERMINTAAN BERSAMAAN ──
+#
+# Seluruh berkas ini berurutan, dan itu justru yang TIDAK bisa menguji kelas bug
+# terpenting dari klaim idempotensi: dua permintaan ber-`client_ref` sama yang
+# datang BERSAMAAN. Pola lama (SELECT → eksekusi → INSERT onConflictDoNothing)
+# lolos setiap uji berurutan dengan mulus — dua permintaan bergiliran memang
+# aman. Yang bocor hanya saat keduanya berpapasan, dan itu tak akan pernah
+# terlihat dari skrip yang menunggu balasan sebelum mengirim berikutnya.
+#
+# `curl &` + `wait` cukup untuk memunculkannya, jadi tak ada alasan celah ini
+# tetap terbuka.
+echo "── §185 idempotensi saat dua permintaan berpapasan ──"
+
+REF185=$(cat /proc/sys/kernel/random/uuid)
+BODY185="{\"asal_branch_id\":\"$ASAL132\",\"tujuan_branch_id\":\"$TUJUAN132\",\"items\":[{\"ingredient_id\":\"$ING132\",\"qty\":1}],\"client_ref\":\"$REF185\"}"
+T185=$(mktemp -d)
+for i in 1 2; do
+  curl -s -o "$T185/b$i" -X POST "$BASE/api/transfer-stok" \
+    -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' \
+    -d "$BODY185" &
+done
+wait
+
+# Dua hasil sama-sama SAH, dan mana yang muncul bergantung timing:
+#   - satu 201 + satu 409 `sedang_diproses` (yang kedua kalah klaim), atau
+#   - dua 201 dengan faktur_id IDENTIK (yang kedua datang sesudah yang pertama
+#     selesai, lalu diputar ulang dari ledger).
+# Yang HARAM cuma satu: dua faktur_id berbeda. Karena itu yang diuji jumlah
+# faktur DISTINCT — bukan kode statusnya, yang akan membuat uji ini goyah.
+cek "§185 dua transfer berpapasan → hanya SATU faktur lahir" "V == 1" \
+  "$(jq -s '[.[] | .faktur_id // empty] | unique | length' "$T185/b1" "$T185/b2")"
+# Penjaga arah sebaliknya: kalau KEDUANYA 409, tak ada faktur sama sekali dan
+# uji di atas akan memulangkan 0 — bukan lolos diam-diam.
+cek "§185 setidaknya satu permintaan benar-benar berhasil" "V >= 1" \
+  "$(jq -s '[.[] | select(.ok == true)] | length' "$T185/b1" "$T185/b2")"
+
+# Kiriman ulang BERURUTAN atas ref yang sudah sukses: hasilnya diputar ulang
+# apa adanya, bukan transfer kedua.
+FID185=$(jq -rs '[.[] | .faktur_id // empty][0]' "$T185/b1" "$T185/b2")
+ULANG185=$(api "$OWNER" POST /transfer-stok "$BODY185")
+cek "§185 ref yang sukses memulangkan faktur yang SAMA, bukan membuat kedua" "V == 1" \
+  "$(python3 -c "import sys,json;print(1 if json.loads(sys.stdin.read()).get('faktur_id')==sys.argv[1] else 0)" "$FID185" <<<"$ULANG185")"
+
+# Kontrak "LEPAS SAAT GAGAL" — sengaja berbeda dari /sync, lihat idempoten.ts.
+# Percobaan yang DITOLAK tak boleh membekukan kuncinya: web menahan `client_ref`
+# yang sama sampai sukses, jadi kunci beku berarti kasir yang ditolak karena
+# stok kurang lalu memperbaiki keranjangnya mendapat penolakan lama SELAMANYA.
+REF186=$(cat /proc/sys/kernel/random/uuid)
+cek "§185 dasar: qty berlebih ditolak" "V == 400" \
+  "$(status_code_body "$OWNER" POST /transfer-stok "{\"asal_branch_id\":\"$ASAL132\",\"tujuan_branch_id\":\"$TUJUAN132\",\"items\":[{\"ingredient_id\":\"$ING132\",\"qty\":999999}],\"client_ref\":\"$REF186\"}")"
+cek "§185 kunci yang DITOLAK tidak membeku — percobaan berikutnya dieksekusi" "V == 201" \
+  "$(status_code_body "$OWNER" POST /transfer-stok "{\"asal_branch_id\":\"$ASAL132\",\"tujuan_branch_id\":\"$TUJUAN132\",\"items\":[{\"ingredient_id\":\"$ING132\",\"qty\":1}],\"client_ref\":\"$REF186\"}")"
+rm -rf "$T185"
+
+# ── §187 dua transfer yang BERSAMA-SAMA melebihi saldo ──
+#
+# Bukan soal idempotensi: kedua permintaan memang niat yang BERBEDA (client_ref
+# berlainan), dan masing-masing muat sendiri-sendiri. Yang diuji apakah penjaga
+# "stok CK tidak cukup" tetap mengikat ketika keduanya berpapasan — sebab ia
+# MEMBACA saldo lalu menulis, dan pembacaan yang tak terkunci membuat keduanya
+# sama-sama melihat saldo penuh.
+#
+# Kalau bocor, akibatnya bukan baris kembar melainkan stok CK yang MINUS: barang
+# dijanjikan ke dua cabang sekaligus, dan yang kedua baru ketahuan saat rak
+# kosong.
+SISA187=$(api "$OWNER" GET "/transfer-stok/saldo?branch_id=$ASAL132" \
+  | jq --arg i "$ING132" '[.rows[]|select(.ingredient_id==$i)][0] | (.saldo - .dalam_jalan) // 0')
+Q187=$(python3 -c "import math;print(max(1, math.ceil($SISA187 * 0.6)))")
+cek "dasar §187: ada sisa untuk diuji" "V >= 2" "$SISA187"
+T187=$(mktemp -d)
+for i in 1 2; do
+  curl -s -o /dev/null -w "%{http_code}\n" -X POST "$BASE/api/transfer-stok" \
+    -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' \
+    -d "{\"asal_branch_id\":\"$ASAL132\",\"tujuan_branch_id\":\"$TUJUAN132\",\"items\":[{\"ingredient_id\":\"$ING132\",\"qty\":$Q187}],\"client_ref\":\"$(cat /proc/sys/kernel/random/uuid)\"}" \
+    > "$T187/k$i" &
+done
+wait
+# 2 × 60% > 100%, jadi tepat satu yang boleh lolos. Kode yang kalah tidak
+# dikunci: 400 (stok kurang) bila ia membaca sesudah yang pertama menulis.
+cek "§187 tepat SATU transfer yang lolos" "V == 1" \
+  "$(cat "$T187/k1" "$T187/k2" | grep -c '^201$')"
+# INTI: sisa tak boleh negatif. Inilah kerusakan yang sesungguhnya —
+# baris kembar masih bisa dihapus, stok minus sudah terlanjur dijanjikan.
+cek "§187 sisa CK tidak negatif sesudah keduanya" "V >= 0" \
+  "$(api "$OWNER" GET "/transfer-stok/saldo?branch_id=$ASAL132" \
+     | jq --arg i "$ING132" '[.rows[]|select(.ingredient_id==$i)][0] | (.saldo - .dalam_jalan) // 0')"
+rm -rf "$T187"
+
 cek "batalkan transfer yang sudah diterima → 409" "V == 409" \
   "$(status_code_body "$OWNER" POST "/transfer-stok/$TFID132/batal" '{}')"
 # batal transfer yang masih di jalan → hilang dari daftar & dari Penerimaan
@@ -9071,6 +9194,65 @@ cek "dasar §184: BASO66 memang punya produksi berjalan" "V == 409" \
 # berubah, tanpa satu pun baris yang menerangkannya.
 cek "§184 resep DITOLAK selagi produksi berjalan (dulu diterima diam-diam)" "V == 409" \
   "$(status_code_body "$OWNER" PUT "/bahan/$BASO66/resep" "$RESEP184")"
+
+
+# ── §188 enam penjualan yang berpapasan di SATU cabang ──
+#
+# Nomor struk dibuat dengan MEMBACA nomor terbesar hari itu lalu menambah satu:
+#
+#   SELECT nomor … ORDER BY nomor DESC LIMIT 1   →   seq = …+1   →   INSERT
+#
+# Pola baca-lalu-tulis itu biasanya bocor. Di sini TIDAK, dan yang menahannya
+# satu baris di awal `createSale`: baris cabangnya dikunci `FOR UPDATE`, jadi
+# seluruh penjualan di satu cabang antre. Kuncinya sengaja diambil paling awal —
+# sebelum apa pun dibaca — supaya tak ada celah antara membaca dan menulis.
+#
+# Yang membuatnya layak diuji: kalau kunci itu suatu hari dilonggarkan demi
+# throughput (godaan yang masuk akal — ia menyerialkan SELURUH penjualan cabang),
+# akibatnya bukan nomor kembar melainkan `sales_branch_nomor_uq` yang menolak,
+# alias 500 mentah ke tangan kasir yang sedang berdiri di depan pelanggan.
+# Nota yang hilang itu tak meninggalkan jejak apa pun untuk dilacak.
+#
+# Ini juga jalur tulis yang PALING sering dieksekusi di seluruh produk, dan
+# sampai seksi ini tak satu pun asersi pernah menjalankannya dua kali sekaligus.
+# Token: §105 mengganti password kasir, jadi `$KASIR` sudah MATI di titik ini
+# (token_version naik → 401). Penggantinya `$REISS105`, hasil login ulang di
+# §105 — dijaga `verify-api-token.test.ts`, yang menangkap seksi ini saat
+# pertama ditulis.
+AKTIF188=$(api "$REISS105" GET /shift/aktif | jq -r '.id // "null"')
+if [ "$AKTIF188" = "null" ]; then
+  # Mandiri: seksi ini duduk di ekor skrip, jadi ia tak boleh mengandaikan
+  # keadaan yang ditinggalkan ribuan baris di atasnya.
+  api "$REISS105" POST /absensi/saya '{"foto_url":"https://example.com/absen188.jpg"}' >/dev/null 2>&1
+  api "$REISS105" POST /shift/buka '{"modal_awal":100000}' >/dev/null 2>&1
+  AKTIF188=$(api "$REISS105" GET /shift/aktif | jq -r '.id // "null"')
+fi
+# Diperiksa sebagai UUID, bukan sekadar "bukan kata null": balasan KOSONG (server
+# mati, jaringan putus) membuat `jq` memulangkan string kosong, dan `!= "null"`
+# menganggapnya sah. Penjaga yang hijau tanpa server tidak menjaga apa pun.
+cek "dasar §188: kasir punya kasir terbuka" "V == 1" \
+  "$(printf '%s' "$AKTIF188" | grep -cE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')"
+T188=$(mktemp -d)
+for i in 1 2 3 4 5 6; do
+  curl -s -X POST "$BASE/api/penjualan" \
+    -H "Authorization: Bearer $REISS105" -H 'Content-Type: application/json' \
+    -o "$T188/b$i" -w "%{http_code}\n" \
+    -d "{\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}" > "$T188/k$i" &
+done
+wait
+LOLOS188=$(cat "$T188"/k* | grep -c '^201$')
+# Tanpa ini seluruh seksi bisa hijau karena keenamnya sama-sama GAGAL (mis. stok
+# habis) — nol nota tak punya nomor kembar, dan itu bukan bukti apa pun.
+cek "dasar §188: penjualannya memang berjalan" "V >= 2" "$LOLOS188"
+# INTI: tiap nota yang lahir bernomor sendiri. Satu nomor untuk dua nota mustahil
+# (indeks uniknya menolak), jadi kebocoran kunci muncul sebagai nota yang HILANG.
+cek "§188 tiap nota yang lahir bernomor unik" "V == $LOLOS188" \
+  "$(for i in 1 2 3 4 5 6; do jq -r '.sale.nomor // empty' "$T188/b$i" 2>/dev/null; done | sort -u | wc -l)"
+# Sisi lain dari kerusakan yang sama: tabrakan `sales_branch_nomor_uq` keluar
+# sebagai 500, bukan galat yang bisa dimengerti kasir.
+cek "§188 tak ada yang gagal keras (5xx)" "V == 0" \
+  "$(cat "$T188"/k* | grep -c '^5')"
+rm -rf "$T188"
 
 
 if [ "$FAIL" -gt 0 ]; then

@@ -794,7 +794,25 @@ export const shiftRoutes = new Hono<AppEnv>()
       const rekap = await rekapWindow(auth.company_id!, branchId, open.id, open.openedAt, null);
       const selisih = uangFisik - (open.modalAwal + rekap.penjualan_tunai);
       const perluAcc = Math.abs(selisih) > EPS_KAS;
-      await db
+      /*
+       * `isNull(closedAt)` WAJIB ada di WHERE — bukan sekadar kerapian.
+       *
+       * `shiftTerbuka()` di atas hanya MEMBACA. Dua penutupan yang berpapasan
+       * sama-sama menemukan shift yang sama masih terbuka, sama-sama lolos
+       * penjaga "hitungan sudah dikunci" (keduanya membaca `uangFisik = null`),
+       * lalu sama-sama menulis. Tanpa syarat ini yang kedua MENIMPA yang
+       * pertama, dan keduanya dibalas 200.
+       *
+       * Terukur: dua penutupan bersamaan dengan nominal 150.000 dan 999.000
+       * sama-sama dibalas 200 berbunyi 999.000. Kasir yang menghitung 150.000
+       * melihat layar sukses berisi angka orang lain, dan shift tercatat
+       * berselisih 899.000 alih-alih 50.000 — di layar yang justru dipakai
+       * mempertanggungjawabkan isi laci.
+       *
+       * Bentuknya sama persis dengan penjaga di `/selisih/putuskan`: yang kalah
+       * balapan harus TAHU bahwa ia kalah, bukan dibalas keputusan lawan.
+       */
+      const ditutup = await db
         .update(shifts)
         .set({
           closedBy: auth.sub,
@@ -809,8 +827,22 @@ export const shiftRoutes = new Hono<AppEnv>()
             ? (body.selisih_alasan?.trim() || body.catatan?.trim() || null)
             : null,
         })
-        .where(eq(shifts.id, open.id));
+        .where(and(eq(shifts.id, open.id), isNull(shifts.closedAt)))
+        .returning({ id: shifts.id });
       const [row] = await baseSelect().where(eq(shifts.id, open.id));
+      if (ditutup.length === 0) {
+        // Kalah balapan: perangkat lain menutup shift ini di sela baca-tulis.
+        // Bentuk badan & kode SENGAJA sama dengan penjaga "hitungan sudah
+        // dikunci" di atas — klien sudah menanganinya, dan sebab baru justru
+        // terbaca asing olehnya.
+        return c.json(
+          {
+            error: `Kasir sudah ditutup dengan hitungan ${rupiah(row.uangFisik ?? 0)} — hitungan Anda tidak dipakai`,
+            uang_fisik: row.uangFisik,
+          },
+          409,
+        );
+      }
       return c.json(await toDto(row, auth.role));
     },
   )
