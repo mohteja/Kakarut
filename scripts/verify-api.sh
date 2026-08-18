@@ -1119,6 +1119,39 @@ cek "tutup shift: selisih 0 (uang fisik = kas)" "V == 1" "$(echo "$TU" | jq '(.s
 cek "tutup shift: ditutup terisi" "V == 1" "$(echo "$TU" | jq '(.ditutup_pada != null) | if . then 1 else 0 end')"
 cek "setelah tutup: tak ada shift aktif" "V == 1" "$(api "$KASIR" GET /shift/aktif | jq '(. == null) | if . then 1 else 0 end')"
 cek "riwayat shift: ada shift tertutup" "V >= 1" "$(api "$KASIR" GET /shift | jq 'length')"
+# ── §186 dua penutupan kasir yang berpapasan ──
+#
+# `shiftTerbuka()` hanya MEMBACA. Dua penutupan yang berpapasan sama-sama
+# menemukan shift yang sama masih terbuka, sama-sama lolos penjaga "hitungan
+# sudah dikunci" (keduanya membaca uang_fisik = null), lalu sama-sama menulis.
+# Tanpa `closed_at IS NULL` di WHERE, yang kedua MENIMPA yang pertama dan
+# keduanya dibalas 200.
+#
+# Terukur sebelum diperbaiki: nominal 150.000 dan 999.000 dilepas bersamaan →
+# DUA-DUANYA 200, dua-duanya berbunyi 999.000. Kasir yang menghitung 150.000
+# melihat layar sukses berisi angka orang lain, dan shift tercatat berselisih
+# 899.000 alih-alih 50.000 — di layar yang justru dipakai mempertanggungjawabkan
+# isi laci.
+api "$KASIR" POST /shift/buka '{"modal_awal":100000}' > /dev/null
+T186=$(mktemp -d)
+for pasangan in "1 150000" "2 999000"; do
+  set -- $pasangan
+  curl -s -o /dev/null -w "%{http_code}\n" -X POST "$BASE/api/shift/tutup" \
+    -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' \
+    -d "{\"uang_fisik\":$2}" > "$T186/k$1" &
+done
+wait
+# Invarian yang TIDAK bergantung timing: berapa pun urutannya, tepat SATU
+# penutupan boleh berhasil. Kode galat yang kalah sengaja tidak dikunci — bila
+# yang kedua datang sesudah yang pertama benar-benar selesai, ia gagal karena
+# tak ada shift terbuka, bukan karena kalah balapan. Yang haram cuma satu:
+# dua-duanya sukses.
+cek "§186 tepat SATU penutupan kasir yang berhasil" "V == 1" \
+  "$(cat "$T186/k1" "$T186/k2" | grep -c '^200$')"
+cek "§186 yang kalah TIDAK dibalas sukses" "V == 1" \
+  "$(cat "$T186/k1" "$T186/k2" | awk '$1 >= 400' | wc -l)"
+rm -rf "$T186"
+
 # Buka lagi shift agar transaksi kasir di seksi berikutnya (§37+) tetap bisa jalan.
 api "$KASIR" POST /shift/buka '{"modal_awal":200000}' > /dev/null
 cek "shift dibuka lagi untuk lanjutan" "V == 1" \
