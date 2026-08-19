@@ -400,7 +400,19 @@ export const laporanRoutes = new Hono<AppEnv>()
       // menghilangkan barisnya sendiri lebih buruk daripada riwayat tanpa nama.
       .leftJoin(users, eq(saleItems.pesananStatusOleh, users.id))
       .where(filter)
-      .orderBy(desc(saleItems.pesananStatusAt))
+      /*
+       * PEMUTUS SERI WAJIB, dan di sini serinya bukan kebetulan melainkan
+       * BAWAAN: aksi "selesaikan semua" di papan pesanan menulis SATU timestamp
+       * yang sama ke seluruh baris kartu dalam satu UPDATE. Tiap kali dipakai,
+       * lahir sekelompok baris berwaktu identik.
+       *
+       * Tanpa pemutus, urutan di dalam kelompok itu tak ditentukan — dan karena
+       * daftarnya dipotong di 200, baris MANA yang lolos berubah-ubah antar
+       * muat. Layarnya terlihat "sering berubah sendiri" tanpa ada yang
+       * mengubah apa pun, dan itu bentuk kesalahan yang paling sulit dilacak
+       * karena tak pernah salah dengan cara yang sama dua kali.
+       */
+      .orderBy(desc(saleItems.pesananStatusAt), desc(saleItems.id))
       .limit(200);
 
     const per_menu = perMenu.map((r) => ({
