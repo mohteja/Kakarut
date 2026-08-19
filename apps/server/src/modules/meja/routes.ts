@@ -8,6 +8,7 @@ import { db } from "../../db/client";
 import { meja, mejaKosongLogs, users } from "../../db/schema";
 import { tanpaBentrok } from "../../lib/pg-galat";
 import {
+  branchUntukTulis,
   pastikanCabang,
   requireRole,
   resolveBranchId,
@@ -302,14 +303,11 @@ export const mejaRoutes = new Hono<AppEnv>()
   .post("/", bolehAturMeja, zValidator("json", MejaBody), async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");
-    const branchId = body.branch_id
-      ? await pastikanCabang(body.branch_id, auth.company_id!)
-      : await resolveBranchId(c);
-    if (terikatCabang(auth.role) && branchId !== auth.branch_id) {
-      throw new HTTPException(403, {
-        message: "Hanya boleh menambah meja di cabang sendiri",
-      });
-    }
+    const branchId = await branchUntukTulis(
+      c,
+      body.branch_id,
+      "Hanya boleh menambah meja di cabang sendiri",
+    );
     const [row] = await db
       .insert(meja)
       .values({

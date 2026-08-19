@@ -9,7 +9,8 @@ import { fileURLToPath } from "node:url";
  * bukan oleh satu gerbang melainkan oleh beberapa penolong yang berbeda:
  *
  *   `resolveBranchId`          — abaikan `?branch_id=` milik pemanggil terkunci
- *   `resolveBranchUntukTulis`  — 403 bila menulis ke cabang selain miliknya
+ *   `branchUntukTulis`         — validasi milik perusahaan + 403 bila menulis
+ *                                ke cabang selain miliknya
  *   `hanyaMilikSendiri`        — persempit daftar ke baris miliknya sendiri
  *   `terikatCabang` / `auth.branch_id` — pemeriksaan langsung
  *
@@ -73,7 +74,7 @@ const BERKAS: string[] = [
 
 const PENOLONG = [
   "resolveBranchId",
-  "resolveBranchUntukTulis",
+  "branchUntukTulis",
   "hanyaMilikSendiri",
   "terikatCabang",
   "auth.branch_id",
@@ -169,12 +170,40 @@ describe("penolongnya sendiri masih menegakkan batasnya", () => {
     expect(blok).toContain("return auth.branch_id;");
   });
 
-  it("resolveBranchUntukTulis MENOLAK 403 menulis ke cabang orang lain", () => {
-    const PROD = src("modules/produksi/routes.ts");
-    const i = PROD.indexOf("async function resolveBranchUntukTulis");
-    const blok = PROD.slice(i, i + 600);
+  it("branchUntukTulis: validasi milik perusahaan DAN 403 lintas cabang", () => {
+    /*
+     * Aturan ini dulu tertulis ulang di TUJUH handler, dan salinannya tak
+     * seragam: dua di antaranya memakai `body.branch_id ?? …` tanpa
+     * `pastikanCabang`, jadi aman HANYA karena gerbang perannya menuntut
+     * `cashier`. Sekarang satu penolong di `middleware/auth.ts`, di sebelah
+     * `pastikanCabang` dan `resolveBranchId` yang dipakainya.
+     */
+    const AUTH = src("middleware/auth.ts");
+    const i = AUTH.indexOf("export async function branchUntukTulis");
+    expect(i, "penolongnya tak ditemukan — jangkarnya usang").toBeGreaterThan(0);
+    const blok = AUTH.slice(i, i + 700);
+    // DUA-DUANYA, bukan salah satu: validasi kepemilikan tanpa penjaga lintas
+    // cabang membiarkan kasir menulis di cabang tetangga; penjaga lintas
+    // cabang tanpa validasi membiarkan owner menunjuk cabang tenant lain.
+    expect(blok).toContain("await pastikanCabang(bodyBranchId, auth.company_id!)");
     expect(blok).toContain("terikatCabang(auth.role) && branchId !== auth.branch_id");
     expect(blok).toContain("HTTPException(403");
+  });
+
+  it("tak ada lagi salinan penjaga itu di luar `middleware/auth.ts`", () => {
+    /*
+     * Yang dijaga: aturannya tinggal satu tempat. Salinan baru yang muncul
+     * kelak akan seragam hari ini dan bergeser besok — persis riwayat yang
+     * membuat dua di antara tujuh salinan lama kehilangan `pastikanCabang`.
+     */
+    const POLA = "terikatCabang(auth.role) && branchId !== auth.branch_id";
+    const salinan = BERKAS.concat([
+      "modules/penjualan/routes.ts",
+      "modules/penyimpanan/routes.ts",
+      "modules/meja/routes.ts",
+      "modules/stok/routes.ts",
+    ]).filter((f) => src(f).includes(POLA));
+    expect(salinan, "pakai `branchUntukTulis`, jangan salin penjaganya").toEqual([]);
   });
 
   it("hanyaMilikSendiri menutup peran terkunci TANPA bergantung query", () => {

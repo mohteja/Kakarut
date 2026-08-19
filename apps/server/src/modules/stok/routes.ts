@@ -20,7 +20,14 @@ import {
   storageLocationPetugas,
   users,
 } from "../../db/schema";
-import { pastikanCabang, requireRole, resolveBranchId, terikatCabang, type AppEnv } from "../../middleware/auth";
+import {
+  branchUntukTulis,
+  pastikanCabang,
+  requireRole,
+  resolveBranchId,
+  terikatCabang,
+  type AppEnv,
+} from "../../middleware/auth";
 import { hargaPerUnit } from "@kakarut/shared";
 import { awalHariDi, tanggalDi } from "../../lib/time";
 import { nomorUntukRefs, terbitkanNomor } from "../dokumen/nomor";
@@ -305,12 +312,11 @@ export const stokRoutes = new Hono<AppEnv>()
     async (c) => {
       const auth = c.get("auth");
       const body = c.req.valid("json");
-      const branchId = body.branch_id
-        ? await pastikanCabang(body.branch_id, auth.company_id!)
-        : await resolveBranchId(c);
-      if (terikatCabang(auth.role) && branchId !== auth.branch_id) {
-        throw new HTTPException(403, { message: "Anda hanya boleh mencatat waste di cabang Anda" });
-      }
+      const branchId = await branchUntukTulis(
+        c,
+        body.branch_id,
+        "Anda hanya boleh mencatat waste di cabang Anda",
+      );
 
       const [ing] = await db
         .select({ id: ingredients.id, nama: ingredients.nama, trackStok: ingredients.trackStok })
@@ -386,12 +392,11 @@ export const stokRoutes = new Hono<AppEnv>()
         tipe: "opname",
       },
       async () => {
-        const branchId = body.branch_id
-          ? await pastikanCabang(body.branch_id, auth.company_id!)
-          : await resolveBranchId(c);
-        if (terikatCabang(auth.role) && branchId !== auth.branch_id) {
-          throw new HTTPException(403, { message: "Anda hanya boleh opname di cabang Anda" });
-        }
+        const branchId = await branchUntukTulis(
+          c,
+          body.branch_id,
+          "Anda hanya boleh opname di cabang Anda",
+        );
 
         // Gabungkan duplikat (entri terakhir menang)
         const qtyByIngredient = new Map<string, number>();

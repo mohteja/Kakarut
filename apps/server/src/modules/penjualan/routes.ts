@@ -6,6 +6,7 @@ import { z } from "zod";
 import { db } from "../../db/client";
 import { branches, companies, saleItems, sales, shifts, users } from "../../db/schema";
 import {
+  branchUntukTulis,
   requireRole,
   resolveBranchId,
   terikatCabang,
@@ -77,10 +78,11 @@ export const penjualanRoutes = new Hono<AppEnv>()
         tipe: "penjualan",
       },
       async () => {
-        const branchId = body.branch_id ?? (await resolveBranchId(c));
-        if (terikatCabang(auth.role) && branchId !== auth.branch_id) {
-          throw new HTTPException(403, { message: "Kasir hanya boleh transaksi di cabangnya" });
-        }
+        const branchId = await branchUntukTulis(
+          c,
+          body.branch_id,
+          "Kasir hanya boleh transaksi di cabangnya",
+        );
         // Kasir wajib DIBUKA dulu: tanpa shift terbuka di cabang, transaksi ditolak
         // (409) — frontend menampilkan modal "Buka Kasir".
         const [shiftAktif] = await db
