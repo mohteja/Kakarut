@@ -190,3 +190,42 @@ export async function resolveBranchId(c: Context<AppEnv>): Promise<string> {
   if (!first) throw new HTTPException(404, { message: "Perusahaan belum punya cabang" });
   return first.id;
 }
+
+/**
+ * CABANG TUJUAN SATU PENULISAN — satu-satunya pintu untuk `branch_id` di BADAN
+ * permintaan.
+ *
+ * Dua hal sekaligus, dan keduanya harus terjadi bersama:
+ *
+ * 1. `branch_id` kiriman klien DIVALIDASI milik perusahaan ini
+ *    (`pastikanCabang`), bukan dipakai apa adanya;
+ * 2. peran yang terikat cabang DITOLAK bila menunjuk cabang lain.
+ *
+ * Aturan ini sebelumnya ditulis ulang di TUJUH handler, dan salinannya tidak
+ * seragam: dua di antaranya (`/penjualan`, `/open-bill`) memakai
+ * `body.branch_id ?? …` tanpa validasi, sehingga aman HANYA karena gerbang
+ * perannya menuntut `cashier` — dan kasir kebetulan selalu terikat cabang.
+ * Aman yang bergantung pada gerbang di berkas lain adalah aman yang bisa
+ * hilang tanpa ada yang menyadarinya: menambahkan `"owner"` ke `requireRole`
+ * di salah satu rute itu cukup untuk membukanya, dan tak ada satu pun uji yang
+ * akan berubah warna.
+ *
+ * `pesanTolak` dioper karena pesannya memang berbeda per pintu ("hanya boleh
+ * transaksi di cabangnya", "…menambah meja…", "…opname…"). Yang disatukan
+ * ATURANNYA, bukan kalimatnya — kalimat yang diseragamkan justru membuat yang
+ * ditolak menebak pintu mana yang menolaknya.
+ */
+export async function branchUntukTulis(
+  c: Context<AppEnv>,
+  bodyBranchId: string | undefined,
+  pesanTolak: string,
+): Promise<string> {
+  const auth = c.get("auth");
+  const branchId = bodyBranchId
+    ? await pastikanCabang(bodyBranchId, auth.company_id!)
+    : await resolveBranchId(c);
+  if (terikatCabang(auth.role) && branchId !== auth.branch_id) {
+    throw new HTTPException(403, { message: pesanTolak });
+  }
+  return branchId;
+}

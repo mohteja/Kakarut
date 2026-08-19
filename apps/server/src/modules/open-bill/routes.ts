@@ -13,7 +13,12 @@ import {
   openBills,
   pesananLogs,
 } from "../../db/schema";
-import { resolveBranchId, terikatCabang, type AppEnv } from "../../middleware/auth";
+import {
+  branchUntukTulis,
+  resolveBranchId,
+  terikatCabang,
+  type AppEnv,
+} from "../../middleware/auth";
 
 const BillBody = z.object({
   branch_id: z.string().uuid().optional(),
@@ -221,10 +226,11 @@ export const openBillRoutes = new Hono<AppEnv>()
   .post("/", zValidator("json", BillBody), async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");
-    const branchId = body.branch_id ?? (await resolveBranchId(c));
-    if (terikatCabang(auth.role) && branchId !== auth.branch_id) {
-      throw new HTTPException(403, { message: "Kasir hanya boleh bill di cabangnya" });
-    }
+    const branchId = await branchUntukTulis(
+      c,
+      body.branch_id,
+      "Kasir hanya boleh bill di cabangnya",
+    );
     if (body.items.some((i) => i.pisah_dari)) {
       // Bill baru belum punya baris apa pun untuk diwarisi — mengizinkannya
       // hanya akan diam-diam memakai harga hari ini, jadi lebih jujur ditolak.

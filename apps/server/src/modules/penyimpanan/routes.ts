@@ -16,6 +16,7 @@ import {
   users,
 } from "../../db/schema";
 import {
+  branchUntukTulis,
   pastikanCabang,
   requireRole,
   resolveBranchId,
@@ -151,14 +152,11 @@ export const penyimpananRoutes = new Hono<AppEnv>()
   .post("/", zValidator("json", PenyimpananBody), async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");
-    const branchId = body.branch_id
-      ? await pastikanCabang(body.branch_id, auth.company_id!)
-      : await resolveBranchId(c);
-    if (terikatCabang(auth.role) && branchId !== auth.branch_id) {
-      throw new HTTPException(403, {
-        message: "Kasir hanya boleh menambah di cabangnya",
-      });
-    }
+    const branchId = await branchUntukTulis(
+      c,
+      body.branch_id,
+      "Kasir hanya boleh menambah di cabangnya",
+    );
     const [row] = await db
       .insert(storageLocations)
       .values({

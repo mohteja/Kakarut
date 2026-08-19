@@ -9406,6 +9406,51 @@ cek "client_ref BARU tetap dieksekusi → saldo +2 lagi" "abs(V - 5) < 0.001" \
   "$(echo "$(saldo_bahan "$ING190") - $S190_0" | bc -l)"
 
 
+echo "== 191. Kasir tak bisa menulis ke cabang lain lewat branch_id =="
+# Penjaganya SATU aturan — "peran terikat cabang hanya boleh menulis di
+# cabangnya" — tapi ditulis ulang di tujuh handler. Seksi ini memakunya dari
+# LUAR: apa pun bentuk kodenya di dalam, jawabannya harus 403 di tiap pintu.
+#
+# Dua di antaranya (penjualan, open-bill) memakai `body.branch_id ?? …` tanpa
+# `pastikanCabang`, jadi aman HANYA karena gerbang perannya menuntut kasir —
+# dan kasir selalu terikat cabang. Aman yang bergantung pada gerbang di berkas
+# LAIN adalah aman yang bisa hilang tanpa ada yang menyadarinya.
+#
+# Login SENDIRI, tak menumpang $KASIR: token itu sudah mati di §97 (reset
+# password), dan asersi yang gagal karena 401 tak menguji penjaga cabang sama
+# sekali — ia cuma tampak merah di tempat yang salah.
+K191=$(login "kasir46@basooopa.id" "Kasir46Pass!")
+MENU191=$(api "$OWNER" GET /menu | jq -r '[.[]|select(.tipe=="regular" and .is_active)][0].id')
+# Cabang ASING = store mana pun yang BUKAN cabangnya kasir46.
+ASING191=$(api "$OWNER" GET /cabang | jq -r --arg x "$CB46_ID" '[.[]|select(.id!=$x and .tipe=="store" and .is_active)][0].id')
+cek "dasar §191: kasir46 login, menu & cabang asing ada" "V == 1" \
+  "$(printf '%s' "$K191$MENU191$ASING191" | grep -Eq '^.{100,}$' && echo 1 || echo 0)"
+cek "dasar §191: cabang asing memang BUKAN cabang kasir46" "V == 1" \
+  "$([ "$ASING191" != "$CB46_ID" ] && echo 1 || echo 0)"
+
+# Tiap pintu diuji BERPASANGAN: cabang asing ditolak, cabang sendiri tidak.
+# Tanpa pasangannya, penjaga yang menolak SEMUA permintaan juga hijau — dan
+# pintu yang terkunci untuk semua orang bukan penjaga.
+cek "kasir → POST /penjualan cabang lain = 403" "V == 403" \
+  "$(status_code_body "$K191" POST /penjualan "{\"branch_id\":\"$ASING191\",\"is_dine_in\":false,\"metode_bayar\":\"tunai\",\"items\":[{\"menu_id\":\"$MENU191\",\"qty\":1}]}")"
+cek "kasir → POST /open-bill cabang lain = 403" "V == 403" \
+  "$(status_code_body "$K191" POST /open-bill "{\"branch_id\":\"$ASING191\",\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$MENU191\",\"qty\":1}]}")"
+cek "kasir → POST /open-bill cabang SENDIRI bukan 403" "V == 0" \
+  "$([ "$(status_code_body "$K191" POST /open-bill "{\"branch_id\":\"$CB46_ID\",\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$MENU191\",\"qty\":1}]}")" = "403" ] && echo 1 || echo 0)"
+cek "kasir → POST /meja cabang lain = 403" "V == 403" \
+  "$(status_code_body "$K191" POST /meja "{\"branch_id\":\"$ASING191\",\"nama\":\"M191\"}")"
+cek "kasir → POST /meja cabang SENDIRI tetap boleh" "V == 1" \
+  "$(api "$K191" POST /meja "{\"branch_id\":\"$CB46_ID\",\"nama\":\"M191-OK\"}" | jq '(.id != null)|if . then 1 else 0 end')"
+cek "kasir → POST /penyimpanan cabang lain = 403" "V == 403" \
+  "$(status_code_body "$K191" POST /penyimpanan "{\"branch_id\":\"$ASING191\",\"nama\":\"Rak 191\"}")"
+cek "kasir → POST /penyimpanan cabang SENDIRI tetap boleh" "V == 1" \
+  "$(api "$K191" POST /penyimpanan "{\"branch_id\":\"$CB46_ID\",\"nama\":\"Rak 191 OK\"}" | jq '(.id != null)|if . then 1 else 0 end')"
+# /stok/waste & /stok/opname SENGAJA tidak ikut: keduanya punya gerbang lain
+# (petugas rak, sesi opname) yang juga membalas 403, jadi hijaunya belum tentu
+# berasal dari penjaga cabang — dan asersi yang hijau karena sebab lain lebih
+# buruk daripada tak ada asersi.
+
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

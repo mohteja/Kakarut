@@ -14,7 +14,13 @@ import {
 } from "@kakarut/shared";
 import { db } from "../../db/client";
 import { branches, companies, saleRefunds, sales, shifts, users } from "../../db/schema";
-import { requireRole, resolveBranchId, terikatCabang, type AppEnv } from "../../middleware/auth";
+import {
+  branchUntukTulis,
+  requireRole,
+  resolveBranchId,
+  terikatCabang,
+  type AppEnv,
+} from "../../middleware/auth";
 import { bentrokUnik } from "../../lib/pg-galat";
 import { tanggalDi, waktuDi } from "../../lib/time";
 import { sedangHadir } from "../absensi/routes";
@@ -663,10 +669,11 @@ export const shiftRoutes = new Hono<AppEnv>()
     zValidator("json", z.object({ modal_awal: z.number().nonnegative().default(0) })),
     async (c) => {
       const auth = c.get("auth");
-      const branchId = await resolveBranchId(c);
-      if (terikatCabang(auth.role) && branchId !== auth.branch_id) {
-        throw new HTTPException(403, { message: "Kasir hanya boleh membuka shift di cabangnya" });
-      }
+      const branchId = await branchUntukTulis(
+        c,
+        undefined,
+        "Kasir hanya boleh membuka shift di cabangnya",
+      );
       const { shift, sudahTerbuka } = await bukaShift({
         companyId: auth.company_id!,
         branchId,

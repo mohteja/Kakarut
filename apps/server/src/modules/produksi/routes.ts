@@ -60,6 +60,7 @@ import { AKSI_TAHAP_LOG, catatLogFaktur, rpLog } from "./log";
 import { kolomBarisPindah, kolomPindahCabang } from "./pindah";
 import { nomorUntukRefs, terbitkanNomor } from "../dokumen/nomor";
 import {
+  branchUntukTulis,
   pastikanCabang,
   resolveBranchId,
   terikatCabang,
@@ -328,19 +329,6 @@ const LABEL: Record<JenisPengadaan, { jalur: string }> = {
   beli: { jalur: "Beli Bahan Baku" },
 };
 
-async function resolveBranchUntukTulis(
-  c: Context<AppEnv>,
-  bodyBranchId: string | undefined,
-) {
-  const auth = c.get("auth");
-  const branchId = bodyBranchId
-    ? await pastikanCabang(bodyBranchId, auth.company_id!)
-    : await resolveBranchId(c);
-  if (terikatCabang(auth.role) && branchId !== auth.branch_id) {
-    throw new HTTPException(403, { message: "Kasir hanya boleh input di cabangnya" });
-  }
-  return branchId;
-}
 
 /** Bahan harus milik perusahaan DAN jenis pengadaannya sesuai jalur. */
 function pastikanJalur(
@@ -1326,7 +1314,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
     .post("/faktur", zValidator("json", FakturBody), async (c) => {
       const auth = c.get("auth");
       const body = c.req.valid("json");
-      const branchId = await resolveBranchUntukTulis(c, body.branch_id);
+      const branchId = await branchUntukTulis(c, body.branch_id, "Kasir hanya boleh input di cabangnya");
 
       // Muat & validasi semua referensi milik perusahaan/cabang
       const ingIds = [...new Set(body.items.map((i) => i.ingredient_id))];
@@ -2341,7 +2329,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
     .post("/", zValidator("json", TambahStokBody), async (c) => {
       const auth = c.get("auth");
       const body = c.req.valid("json");
-      const branchId = await resolveBranchUntukTulis(c, body.branch_id);
+      const branchId = await branchUntukTulis(c, body.branch_id, "Kasir hanya boleh input di cabangnya");
 
       const [ingRow] = await db
         .select()
