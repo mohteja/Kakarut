@@ -19,6 +19,7 @@ import {
   zonaWaktuCadangan,
 } from "../../lib/backup";
 import { keadaanCadangan, peringatanTerakhir } from "../../lib/backup-peringatan";
+import { periksaSetelan } from "../../lib/pemeriksaan-setelan";
 import { getSmtpRow, kirimEmail, penyediaEmail, ujiKoneksiSmtp, type SmtpRow } from "../mail/service";
 import type { AppEnv } from "../../middleware/auth";
 
@@ -79,6 +80,10 @@ export const adminSystemRoutes = new Hono<AppEnv>()
       storage_mode: getStorage().mode,
       node_version: process.version,
       migrations: await migrationStatus(),
+      // Temuan yang sama dengan yang dicetak ke log boot. Log boot dibaca
+      // sekali, oleh orang yang sedang menunggu deploy selesai; ini tempat
+      // orang benar-benar melihatnya.
+      pemeriksaan: await periksaSetelan().catch(() => []),
     });
   })
   .post("/migrate", async (c) => {

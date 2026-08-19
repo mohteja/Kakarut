@@ -4806,6 +4806,23 @@ cek "kosongkan kategori (null) → tanpa kategori" "V == 1" \
 echo "== 127. Pencadangan database (super admin) =="
 cek "guard: owner GET /admin/sistem/backup → 403" "V == 403" \
   "$(status_code "$OWNER" GET /admin/sistem/backup)"
+
+# PEMERIKSAAN SETELAN. Semua yang diperiksa berbentuk sama: setelannya SAH,
+# servernya menyala tanpa keluhan, dan salahnya baru ketahuan berbulan-bulan
+# kemudian. Hasilnya dipulangkan di sini karena log boot dibaca sekali saja.
+SIS127=$(api "$SA" GET /admin/sistem)
+cek "pemeriksaan setelan: berupa daftar & tiap temuan lengkap" "V == 1" \
+  "$(echo "$SIS127" | jq '(.pemeriksaan|type=="array") and (.pemeriksaan|all((.kode|length)>0 and (.judul|length)>0 and (.rincian|length)>0 and (.tindakan|length)>0 and (.tingkat=="kritis" or .tingkat=="peringatan"))) | if . then 1 else 0 end')"
+# DB segar ini di-seed dengan SEED_SUPERADMIN_PASSWORD bawaan, jadi temuannya
+# HARUS ada. Ini yang membuktikan pemeriksanya benar-benar membandingkan hash
+# di database, bukan sekadar memulangkan daftar kosong.
+cek "pemeriksaan: password super admin bawaan terdeteksi" "V == 1" \
+  "$(echo "$SIS127" | jq '[.pemeriksaan[]|select(.kode=="superadmin_password_bawaan" and .tingkat=="kritis")]|length')"
+# ...dan sebaliknya: CI MEMASANG JWT_SECRET, jadi temuan itu tak boleh muncul.
+# Pemeriksa yang tak pernah diam akan diabaikan, dan sesudah itu ia tak menjaga
+# apa pun — termasuk saat temuannya benar.
+cek "pemeriksaan: DIAM untuk yang memang sudah benar (JWT_SECRET)" "V == 0" \
+  "$(echo "$SIS127" | jq '[.pemeriksaan[]|select(.kode=="jwt_bawaan")]|length')"
 # Backup manual: bila kebetulan bertepatan dgn cadangan otomatis penjadwal
 # (advisory lock → 409), ulangi beberapa kali.
 BKP=""

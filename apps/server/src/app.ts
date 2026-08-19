@@ -10,6 +10,7 @@ import { db } from "./db/client";
 import { branches } from "./db/schema";
 import { getBuildId } from "./lib/build";
 import { nilaiTakSah } from "./lib/pg-galat";
+import { amatiProxy } from "./lib/pengamatan-proxy";
 import {
   requireAuth,
   requireCompany,
@@ -104,6 +105,22 @@ export function createApp() {
     // Pagar ukuran badan — dipasang PALING AWAL supaya berlaku sebelum
     // autentikasi, parsing zod, maupun rute mana pun sempat menyentuhnya.
     .use("*", batasBadan)
+    // Cacah bentuk lalu lintas yang benar-benar datang, untuk diadu dengan
+    // TRUST_PROXY_HOPS di pemeriksaan setelan. `/health` DIKECUALIKAN: health
+    // check kontainer memukul server langsung tanpa lewat proxy, dan saat
+    // outlet tutup ia bisa jadi satu-satunya lalu lintas yang ada — cukup untuk
+    // membuat pengamatan menyimpulkan "tak ada proxy" pada penyebaran yang
+    // proxy-nya baik-baik saja.
+    //
+    // Jalurnya dicocokkan sebagai `/api/health`, BUKAN `/health`: middleware
+    // ini terpasang pada sub-app yang di-mount di `/api`, dan `c.req.path`
+    // memulangkan jalur PENUH permintaan. Versi pertama membandingkannya
+    // dengan `/health` dan diam-diam tak mengecualikan apa pun — terbukti saat
+    // 60 permintaan health check tetap terhitung dan melahirkan temuan palsu.
+    .use("*", async (c, next) => {
+      if (!/^\/(api\/)?health$/.test(c.req.path)) amatiProxy(c.req.header("x-forwarded-for"));
+      await next();
+    })
     // Tandai tiap respons API dengan build id frontend saat ini → klien tahu
     // ada versi baru (build server ≠ build tab yang dimuat) tanpa polling khusus.
     .use("*", async (c, next) => {

@@ -119,6 +119,25 @@ export interface BackupStatusDto {
 }
 
 /**
+ * Satu temuan pemeriksaan setelan (GET /admin/sistem).
+ *
+ * Semua yang dilaporkan lewat sini punya bentuk yang sama: setelannya SAH,
+ * servernya menyala tanpa keluhan, dan yang salah baru ketahuan berbulan-bulan
+ * kemudian. `tindakan` selalu diisi — temuan yang tak menyebutkan apa yang
+ * harus dilakukan hanya memindahkan pekerjaan menebak ke pembacanya.
+ */
+export interface TemuanSetelanDto {
+  /** pengenal stabil, mis. "superadmin_password_bawaan" */
+  kode: string;
+  /** kritis = kehilangan data atau lubang keamanan; peringatan = merosot diam-diam */
+  tingkat: "kritis" | "peringatan";
+  judul: string;
+  rincian: string;
+  /** langkah konkret yang menutup temuan ini */
+  tindakan: string;
+}
+
+/**
  * Peringatan cadangan basi — DAN kesiapan saluran yang mengabarkannya.
  *
  * Dua-duanya dilaporkan karena kegagalan yang paling mahal bukan "cadangan
