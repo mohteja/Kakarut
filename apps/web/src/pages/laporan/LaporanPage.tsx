@@ -1,16 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import type { LaporanHarian } from "@kakarut/shared";
-import {
-  Card,
-  ErrorText,
-  PageTitle,
-  Spinner,
-  btnPrimary,
-  inputClass,
-  tdClass,
-  thClass,
-} from "../../components/ui";
+import { Card, ErrorText, PageTitle, Spinner, StatCard, btnPrimary, inputClass, tdClass, thClass } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
@@ -31,15 +22,6 @@ interface BepResult {
   porsi_untuk_bep: number;
   omzet_untuk_bep: number;
   porsi_per_hari_30: number;
-}
-
-function StatCard({ label, value, warna = "text-stone-800" }: { label: string; value: string; warna?: string }) {
-  return (
-    <Card className="p-4">
-      <div className="text-xs font-semibold uppercase tracking-wide text-stone-500">{label}</div>
-      <div className={`mt-1 text-xl font-bold ${warna}`}>{value}</div>
-    </Card>
-  );
 }
 
 export function LaporanPage() {

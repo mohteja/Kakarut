@@ -1,21 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import type { LaporanPembelian } from "@kakarut/shared";
-import { Card, ErrorText, PageTitle, Spinner, inputClass, tdClass, thClass } from "../../components/ui";
+import { Card, ErrorText, PageTitle, Spinner, StatCard, inputClass, tdClass, thClass } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah, formatTanggal, hariIniWIB } from "../../lib/format";
 import { LaporanTabs } from "./LaporanTabs";
-
-function StatCard({ label, value, warna = "text-stone-800" }: { label: string; value: string; warna?: string }) {
-  return (
-    <Card className="p-4">
-      <div className="text-xs font-semibold uppercase tracking-wide text-stone-500">{label}</div>
-      <div className={`mt-1 text-xl font-bold ${warna}`}>{value}</div>
-    </Card>
-  );
-}
 
 /** Laporan pengeluaran pembelian bahan baku (faktur beli terkonfirmasi). */
 export function LaporanPembelianPage() {
