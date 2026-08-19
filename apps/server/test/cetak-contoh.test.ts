@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { contohFakturBelanja, contohStruk } from "../../web/src/lib/contoh-cetak";
+import { contohFakturBelanja, contohStruk } from "@kakarut/shared";
 
 /**
  * CETAK CONTOH.
