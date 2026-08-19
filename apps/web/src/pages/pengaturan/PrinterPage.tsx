@@ -2,8 +2,12 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { CabangDataBar } from "../../components/CabangDataBar";
 import { Card, ErrorText, PageTitle, btnPrimary, btnSecondary, inputClass } from "../../components/ui";
+import { useAuth } from "../../context/AuthContext";
 import { useBranch, useCabangData } from "../../context/BranchContext";
 import { usePrinter } from "../../context/PrinterContext";
+import { ReceiptModal } from "../kasir/ReceiptModal";
+import { DokumenBelanjaModal } from "../produksi/DokumenBelanjaModal";
+import { contohFakturBelanja, contohStruk } from "../../lib/contoh-cetak";
 import { api } from "../../lib/api";
 import { bluetoothSupported } from "../../lib/print/bluetooth";
 import { NativeBtTransport, isNativeApp, type PerangkatBt } from "../../lib/print/native";
@@ -14,6 +18,80 @@ import {
   type PrinterDeviceSettings,
   type TransportKind,
 } from "../../lib/print/settings";
+
+/**
+ * CETAK CONTOH — melihat hasil cetak tanpa menjual apa pun.
+ *
+ * "Cetak Tes" di bawah mencetak penggaris kolom lewat ESC/POS: berguna untuk
+ * memastikan printer TERSAMBUNG, tapi ia tak menjawab pertanyaan yang
+ * sebenarnya ditanya orang — apakah footer cabangnya benar, apakah nama menu
+ * yang panjang terpotong, apakah kertas 58 mm cukup. Untuk itu, satu-satunya
+ * cara sebelum ini adalah MELAKUKAN TRANSAKSI SUNGGUHAN lalu membatalkannya —
+ * dan pembatalan itu masuk laporan.
+ *
+ * Yang digambar di bawah adalah komponen yang SAMA PERSIS dengan yang dipakai
+ * kasir; cuma datanya yang contoh. Pratinjau yang punya kode gambarnya sendiri
+ * akan bergeser dari aslinya, dan pratinjau yang bergeser lebih buruk daripada
+ * tak ada — ia mengatakan tata letaknya beres justru ketika tidak.
+ */
+function CetakContohSection() {
+  const { auth } = useAuth();
+  const { cabang } = useBranch();
+  const { id: branchId } = useCabangData();
+  const [buka, setBuka] = useState<"struk" | "belanja" | null>(null);
+  /*
+   * Cabangnya dari KONTEKS HALAMAN, bukan `auth.branch`.
+   *
+   * Owner & admin tidak terikat cabang mana pun (`auth.branch === null`) —
+   * padahal justru merekalah yang mengatur printer. Versi pertama menonaktifkan
+   * tombolnya untuk mereka, yang berarti fiturnya tak tersedia bagi orang yang
+   * paling mungkin memakainya. Sumber yang benar adalah pilihan cabang halaman
+   * ini juga: dengan begitu struk contoh memakai footer cabang yang SEDANG
+   * disunting tepat di atasnya.
+   */
+  const branch = cabang.find((b) => b.id === branchId) ?? cabang.find((b) => b.is_active) ?? null;
+
+  return (
+    <Card className="mb-4 space-y-3 p-5">
+      <div>
+        <div className="text-sm font-semibold text-stone-700">Cetak contoh</div>
+        <div className="mt-1 text-xs text-stone-500">
+          Melihat hasil cetak tanpa membuat transaksi. Isinya data contoh — bertanda
+          &ldquo;CONTOH&rdquo; supaya kertasnya tak bisa disangka nota sungguhan.
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <button onClick={() => setBuka("struk")} className={btnSecondary} disabled={!branch}>
+          🧾 Struk contoh
+        </button>
+        <button onClick={() => setBuka("belanja")} className={btnSecondary}>
+          🧺 Dokumen belanja contoh
+        </button>
+      </div>
+      {!branch && (
+        <div className="text-xs text-stone-500">
+          Struk contoh butuh cabang aktif — footer &amp; alamat struk diambil per cabang.
+        </div>
+      )}
+
+      {buka === "struk" && branch && (
+        <ReceiptModal
+          data={contohStruk({ branchId: branch.id, branchNama: branch.nama, kasir: auth?.user.nama })}
+          onClose={() => setBuka(null)}
+          // Contoh TIDAK auto-print: yang membukanya sedang memeriksa, belum
+          // tentu siap membuang kertas.
+          autoPrintOnOpen={false}
+        />
+      )}
+      {buka === "belanja" && (
+        <DokumenBelanjaModal
+          grup={contohFakturBelanja({ cabang: branch?.nama ?? null })}
+          onClose={() => setBuka(null)}
+        />
+      )}
+    </Card>
+  );
+}
 
 /**
  * Struk per CABANG (footer + tampil alamat) — dipindah ke sini "di cabang
@@ -218,6 +296,8 @@ export function PrinterPage() {
 
       {/* Struk per cabang (server) — di atas, karena berlaku untuk semua kasir cabang */}
       <StrukCabangSection />
+
+      <CetakContohSection />
 
       <div className="mb-4 rounded-lg bg-blue-50 px-4 py-2 text-sm text-blue-800">
         Pengaturan printer di bawah tersimpan di <b>perangkat ini saja</b> — atur di setiap
