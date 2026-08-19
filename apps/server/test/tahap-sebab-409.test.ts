@@ -55,12 +55,12 @@ describe("server: 409 /tahap membawa sebab terstruktur", () => {
   });
 
   it("CAS kalah → `status_berubah`, bukan disamakan dengan bahan kurang", () => {
-    const n = RUTE.split('new TahapDitolak(\n                  "status_berubah"').length - 1;
+    const n = RUTE.split('new TahapDitolak(\n                    "status_berubah"').length - 1;
     expect(n).toBe(2);
   });
 
   it("kiriman beralamat → `wajib_penerimaan`", () => {
-    expect(RUTE).toContain('new TahapDitolak(\n              "wajib_penerimaan"');
+    expect(RUTE).toContain('new TahapDitolak(\n                "wajib_penerimaan"');
   });
 
   it("tak ada lagi 409 telanjang tanpa sebab di jalur /tahap", () => {

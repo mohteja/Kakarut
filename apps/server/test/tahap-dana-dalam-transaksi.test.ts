@@ -54,7 +54,7 @@ describe("produksi /tahap: pencairan dana ikut transaksi tahapnya", () => {
      * uang bisa tertulis untuk faktur yang tak bergerak.
      */
     const iJaga = RUTE.indexOf("if (diperbarui.length === 0) {");
-    const iTutup = RUTE.indexOf("        return diperbarui;\n      });");
+    const iTutup = RUTE.indexOf("          return diperbarui;\n        });");
     expect(iJaga, "penjaga tak ditemukan").toBeGreaterThan(0);
     expect(iTutup, "penutup transaksi tak ditemukan").toBeGreaterThan(0);
     expect(iJaga).toBeLessThan(iTutup);

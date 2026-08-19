@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import type { JenisPengadaan, KonfirmasiStatus, StokRowDto } from "@kakarut/shared";
 import { angkaDari, teksAngka } from "@kakarut/shared";
@@ -20,6 +20,7 @@ import { useBranch, useCabangData } from "../../context/BranchContext";
 import { CabangDataBar } from "../../components/CabangDataBar";
 import { ApiError, api } from "../../lib/api";
 import { formatAngka, formatRupiah, formatTanggalRingkas, formatWaktu } from "../../lib/format";
+import { uuidV4 } from "../../lib/idempoten";
 import { useKirimanMenggantung } from "../../lib/menggantung";
 
 interface StokMasukPage {
@@ -393,11 +394,35 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
   // Produksi mulai dikerjakan tak punya input apa pun (tak belanja → tak ada
   // uang cair) → cukup konfirmasi modal, tak perlu halaman penuh.
   const [konfirmProses, setKonfirmProses] = useState<FakturGroup | null>(null);
+  /*
+   * IDENTITAS PERMINTAAN per FAKTUR — bukan satu ref untuk seluruh halaman.
+   *
+   * Daftar ini memulai faktur mana pun yang barisnya dipilih, jadi satu ref
+   * bersama akan membuat faktur KEDUA memulangkan hasil faktur pertama tanpa
+   * mengeksekusi apa pun. Kuncinya karena itu `fakturId`, dan entrinya dibuang
+   * begitu fakturnya sukses.
+   *
+   * Kenapa perlu sama sekali: `/tahap` tak bisa idempoten dari isinya sendiri
+   * (lihat TahapPage), dan tombol ini justru yang paling mudah tertekan dua
+   * kali — modal konfirmasi, lalu percobaan `paksa` sesudah peringatan bahan
+   * kurang.
+   */
+  const refTahap = useRef(new Map<string, string>());
+  const refUntuk = (fakturId: string | null) => {
+    const k = fakturId ?? "";
+    const ada = refTahap.current.get(k);
+    if (ada) return ada;
+    const baru = uuidV4();
+    refTahap.current.set(k, baru);
+    return baru;
+  };
+
   const mulaiProduksi = useMutation({
     mutationFn: ({ g, paksa }: { g: FakturGroup; paksa?: boolean }) =>
       api(`${t.endpoint}/tahap/${g.fakturId}`, {
         method: "POST",
         body: {
+          client_ref: refUntuk(g.fakturId),
           ke: "dikerjakan",
           items: g.rows
             .filter((r) => r.status === "rencana")
@@ -405,7 +430,9 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
           paksa,
         },
       }),
-    onSuccess: () => {
+    onSuccess: (_hasil, { g }) => {
+      // Sukses → tekanan berikutnya pada faktur ini adalah permintaan BARU.
+      refTahap.current.delete(g.fakturId ?? "");
       for (const key of [t.endpoint, "stok", "laporan", "rekomendasi"]) {
         queryClient.invalidateQueries({ queryKey: [key] });
       }
