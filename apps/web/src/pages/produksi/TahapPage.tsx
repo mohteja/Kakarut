@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import type { JenisPengadaan, PenyimpananDto } from "@kakarut/shared";
-import { angkaDari, teksAngka } from "@kakarut/shared";
+import { angkaDari, hargaBagian, teksAngka } from "@kakarut/shared";
 import {
   Card,
   ErrorText,
@@ -192,8 +192,13 @@ function TahapForm({
     if (!Number.isFinite(q) || q <= 0 || r.total_harga == null) return t;
     // Diskalakan mengikuti qty yang benar-benar diambil — termasuk saat LEBIH
     // dari rencana (beli per kemasan), supaya dana yang disarankan cukup.
-    // Rumusnya sama dengan yang dipakai server saat menulis baris.
-    return t + Math.round((r.total_harga * q) / r.qty);
+    //
+    // Fungsi yang SAMA dengan yang dipakai server saat menulis baris. Dulu
+    // rumusnya disalin ke sini dengan komentar yang mengakuinya — dan salinan
+    // yang sudah diberi catatan begitu adalah salinan yang menunggu bergeser.
+    // Kalau bergeser, gejalanya bukan galat melainkan angka: layar menjanjikan
+    // Rp 15.000, server menulis Rp 15.001.
+    return t + hargaBagian(r.total_harga, q, r.qty);
   }, 0);
   // Dana cair hanya untuk BELI — produksi tak belanja apa pun, jadi tak ada
   // uang yang dicairkan.

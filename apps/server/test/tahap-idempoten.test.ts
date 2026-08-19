@@ -51,23 +51,32 @@ describe("server: /tahap memakai klaim idempoten bersama", () => {
     expect(RUTE).toContain("await denganKlaimIdempoten(");
   });
 
-  it("klaim membungkus SELURUH badan handler, bukan sebagian", () => {
+  it("KEDUA jalur hanya bisa dimasuki lewat klaim", () => {
     /*
-     * Klaim yang dipasang di tengah handler menjaga separuh: pemeriksaan yang
-     * berjalan sebelumnya (bahan kurang, kiriman beralamat, CAS) sudah
-     * mengeksekusi query dan melempar di luar lindungannya.
+     * Klaim yang dipasang di tengah handler cuma menjaga separuh: apa pun yang
+     * berjalan sebelumnya sudah mengeksekusi query dan melempar di luar
+     * lindungannya.
      *
-     * Diperiksa dengan URUTAN posisi: klaimnya harus datang SEBELUM query
-     * pertama handler ini, dan `return c.json(data)` harus jadi keluarnya.
+     * Sesudah handler dipecah, yang menjaganya bukan lagi urutan terhadap
+     * "query pertama" — handler ini tak lagi memuat query sama sekali — tapi
+     * urutan terhadap PEMANGGILAN kedua jalurnya. Sekalian dijaga bahwa tak
+     * ada pemanggil ketiga di berkas ini: jalur yang dipanggil dari tempat
+     * lain akan melewati klaimnya diam-diam.
      */
     const iPost = RUTE.indexOf('.post("/tahap/:fakturId"');
     expect(iPost).toBeGreaterThan(0);
     const blok = RUTE.slice(iPost, RUTE.indexOf("\n    })", iPost));
     const iKlaim = blok.indexOf("await denganKlaimIdempoten(");
-    const iQuery = blok.indexOf("await db");
-    expect(iKlaim).toBeGreaterThan(0);
-    expect(iQuery).toBeGreaterThan(0);
-    expect(iKlaim, "klaim harus mendahului query pertama handler").toBeLessThan(iQuery);
+    expect(iKlaim, "klaim tak ditemukan di handler").toBeGreaterThan(0);
+
+    for (const fn of ["tahapSebagian(", "tahapSeluruhFaktur("]) {
+      const iPanggil = blok.indexOf(fn);
+      expect(iPanggil, `${fn} tak dipanggil dari handler`).toBeGreaterThan(0);
+      expect(iPanggil, `${fn} dipanggil DI LUAR klaim`).toBeGreaterThan(iKlaim);
+      // Tepat dua kemunculan di seluruh berkas: definisinya + satu panggilan.
+      const n = RUTE.split(fn).length - 1;
+      expect(n, `${fn} punya pemanggil lain di luar handler`).toBe(2);
+    }
     expect(blok).toContain("return c.json(data);");
   });
 

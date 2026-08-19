@@ -54,7 +54,15 @@ describe("produksi /tahap: pencairan dana ikut transaksi tahapnya", () => {
      * uang bisa tertulis untuk faktur yang tak bergerak.
      */
     const iJaga = RUTE.indexOf("if (diperbarui.length === 0) {");
-    const iTutup = RUTE.indexOf("          return diperbarui;\n        });");
+    /*
+     * Dijangkarkan pada TEKS-nya saja, bukan indentasinya. Versi sebelumnya
+     * memuat spasi awal baris, dan gugur dua kali hanya karena blok ini
+     * berpindah tingkat — sekali saat handler dibungkus klaim idempoten,
+     * sekali lagi saat ia dipecah jadi fungsi sendiri. Yang dijaga uji ini
+     * urutan penjaga terhadap penutup transaksi, bukan seberapa dalam
+     * barisnya menjorok.
+     */
+    const iTutup = RUTE.search(/return diperbarui;\s*\n\s*\}\);/);
     expect(iJaga, "penjaga tak ditemukan").toBeGreaterThan(0);
     expect(iTutup, "penutup transaksi tak ditemukan").toBeGreaterThan(0);
     expect(iJaga).toBeLessThan(iTutup);
