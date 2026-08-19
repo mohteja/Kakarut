@@ -3,6 +3,7 @@ import { lt, sql } from "drizzle-orm";
 import type { Context } from "hono";
 import { db } from "../db/client";
 import { errorLogs } from "../db/schema";
+import { ipKlien } from "../middleware/rateLimit";
 
 /** Simpan galat berapa hari (baris lebih tua dibuang penjadwal). */
 const RETENSI_HARI = 30;
@@ -98,10 +99,11 @@ export async function catatGalat(c: Context, status: number, err: unknown): Prom
       userId,
       companyId,
       peran,
-      ip: potong(
-        c.req.header("x-forwarded-for")?.split(",")[0]?.trim() || c.req.header("x-real-ip") || "",
-        100,
-      ) || null,
+      // Lewat `ipKlien`, bukan membaca XFF sendiri. Entri paling kiri dikirim
+      // klien: mencatatnya berarti catatan galat ini menuliskan alamat KARANGAN
+      // penyerang — dan justru catatan inilah yang dibaca orang saat menyelidiki
+      // penyalahgunaan.
+      ip: potong(ipKlien(c), 100) || null,
       userAgent: potong(c.req.header("user-agent") ?? "", 300) || null,
     });
   } catch (e) {
