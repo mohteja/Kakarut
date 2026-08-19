@@ -79,26 +79,11 @@ describe("cetak: menu vs kertas pesanan", () => {
     expect(BLOK.slice(Math.max(0, i - 300), i)).toContain('cetak === "menu"');
   });
 
-  it("area cetak diportal ke `document.body`", () => {
-    // Tanpa ini `#root { display: none }` di bawah akan ikut menghapus area
-    // cetaknya sendiri, dan yang tercetak jadi halaman kosong semua.
-    expect(HAL).toContain("createPortal(");
-    expect(HAL).toContain("document.body,");
-  });
-
-  it("`#root` benar-benar DILEPAS ruangnya saat mencetak, bukan disembunyikan", () => {
-    // `visibility: hidden` menyisakan ruang — itu akar 3 halaman kosong.
-    expect(CSS).toMatch(/body:has\(>\s*#menu-print\)\s*#root\s*\{\s*display:\s*none/);
-  });
-
-  it("aturannya DIPAGARI `:has` — jalur cetak lain tak boleh ikut terhapus", () => {
-    // Struk, QR, dan dokumen belanja masih memakai mekanisme `visibility` dan
-    // TIDAK diportal. `#root { display: none }` tanpa pagar akan membuat
-    // ketiganya mencetak halaman kosong.
-    for (const lain of ["#struk-print", "#qr-print", "#dokumen-print"]) {
-      expect(CSS, lain).toContain(lain);
-    }
-    expect(CSS).not.toMatch(/^\s*#root\s*\{\s*display:\s*none/m);
+  it("area cetak dipasang lewat `AreaCetak`, bukan div biasa", () => {
+    // `AreaCetak` yang memportalnya ke `body` DAN memasang `data-cetak-akar`
+    // yang dipakai selektor CSS. Div biasa akan tetap di dalam `#root` — yang
+    // dilepas ruangnya saat mencetak — jadi yang keluar halaman kosong semua.
+    expect(HAL).toContain("<AreaCetak id=\"menu-print\"");
   });
 
   it("kertas pesanan lebih banyak kolom daripada menu", () => {

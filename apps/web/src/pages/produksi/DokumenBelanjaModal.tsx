@@ -3,6 +3,7 @@ import { Modal, btnPrimary, btnSecondary } from "../../components/ui";
 import { formatAngka, formatRupiah, formatTanggalRingkas, formatWaktu } from "../../lib/format";
 import { unduhPdf } from "../../lib/pdf";
 import { badgeFaktur, labelTahapRingkas, type FakturGroup, type StokMasukRow } from "./TambahStokPage";
+import { AreaCetak } from "../../components/AreaCetak";
 
 /** Stylesheet dokumen — DI-SCOPE ke `.dok` agar aman dipakai saat buat PDF. */
 const DOK_CSS = `.dok{font-family:system-ui,-apple-system,Arial,sans-serif;color:#111;max-width:640px;margin:0 auto;padding:0 4px;font-size:13px;line-height:1.45;background:#fff}
@@ -308,7 +309,7 @@ export function DokumenBelanjaModal({
         </div>
       </Modal>
       {/* Kontainer khusus cetak — hanya dokumen yang tampil saat window.print() */}
-      <div id="dokumen-print" className="hidden print:block">
+      <AreaCetak id="dokumen-print">
         {isi(true)}
         <div className="mt-6 flex justify-between gap-4 text-xs">
           <div className="text-center">
@@ -320,7 +321,7 @@ export function DokumenBelanjaModal({
             <div className="mt-10 border-t border-black px-8">( ………… )</div>
           </div>
         </div>
-      </div>
+      </AreaCetak>
     </>
   );
 }

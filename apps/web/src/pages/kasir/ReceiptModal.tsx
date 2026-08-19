@@ -14,6 +14,7 @@ import { usePrinter } from "../../context/PrinterContext";
 import { api } from "../../lib/api";
 import { formatRupiah, formatWaktu } from "../../lib/format";
 import { RefundPanel } from "./RefundPanel";
+import { AreaCetak } from "../../components/AreaCetak";
 
 export interface SaleResult {
   sale: {
@@ -225,105 +226,123 @@ export function ReceiptModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data.sale.id, settings.autoPrint, canAutoPrint, company]);
 
+  /*
+   * Isi struk dipakai DUA KALI: pratinjau di layar, dan area cetak yang
+   * diportal ke `body`. Disimpan sebagai satu variabel, bukan disalin —
+   * dua salinan markup struk akan menyimpang, dan yang menyimpang justru
+   * yang tercetak dan diserahkan ke pembeli.
+   */
+  const isiStruk = (
+    <>
+            <div className="text-center">
+              <div className="text-base font-bold">
+                {company?.nama ?? auth?.company?.nama ?? "Terakasir"}
+              </div>
+              {showAlamat && alamatStruk && <div>{alamatStruk}</div>}
+              {showAlamat && teleponStruk && <div>Telp: {teleponStruk}</div>}
+              <div>Cabang {data.branch_nama}</div>
+              <div className="mt-1">{data.sale.nomor}</div>
+              <div>
+                {formatWaktu(data.sale.waktu)} · {data.sale.isDineIn ? "Dine-in" : "Bawa pulang"}
+              </div>
+              {antrian != null && <div className="mt-1 text-xl font-bold">Antrian {antrian}</div>}
+              {(data.sale.customerNama || data.sale.mejaLabel) && (
+                <div className="font-bold">{data.sale.customerNama || data.sale.mejaLabel}</div>
+              )}
+              {data.sale.customerNama && data.sale.mejaLabel && <div>Meja: {data.sale.mejaLabel}</div>}
+            </div>
+            <hr className="my-2 border-dashed border-stone-400" />
+            {data.items.map((it) => {
+              // Yang ditagih = dipesan − dikembalikan. `qty` sengaja tak dikurangi
+              // di basis data (dua fakta berbeda), jadi pengurangannya di sini.
+              const ditagih = qtyDitagih(it);
+              return (
+                <div key={it.id} className="mb-1">
+                  <div className={ditagih === 0 ? "text-stone-400 line-through" : undefined}>
+                    {it.menuNama}
+                  </div>
+                  <div className="flex justify-between">
+                    <span>
+                      {ditagih} × {formatRupiah(it.hargaSatuan)}
+                      {it.isDineIn !== data.sale.isDineIn && (it.isDineIn ? " (DI)" : " (TA)")}
+                    </span>
+                    <span>{formatRupiah(it.hargaSatuan * ditagih)}</span>
+                  </div>
+                  {it.qtyRefund > 0 && (
+                    <div className="text-amber-700">↩ {it.qtyRefund} porsi dikembalikan</div>
+                  )}
+                  {it.catatan && <div className="text-stone-500">* {it.catatan}</div>}
+                </div>
+              );
+            })}
+            <hr className="my-2 border-dashed border-stone-400" />
+            <div className="flex justify-between">
+              <span>Subtotal</span>
+              <span>{formatRupiah(data.sale.subtotal)}</span>
+            </div>
+            {data.sale.diskon > 0 && (
+              <div className="flex justify-between">
+                <span>Diskon{data.sale.diskonPersen ? ` ${data.sale.diskonPersen}%` : ""}</span>
+                <span>−{formatRupiah(data.sale.diskon)}</span>
+              </div>
+            )}
+            {data.sale.pb1Amount > 0 && (
+              <div className="flex justify-between">
+                <span>PB1</span>
+                <span>{formatRupiah(data.sale.pb1Amount)}</span>
+              </div>
+            )}
+            <div className="flex justify-between text-sm font-bold">
+              <span>TOTAL</span>
+              <span>{formatRupiah(data.sale.total)}</span>
+            </div>
+            {/* Angka di atas SUDAH bersih dari refund, jadi baris ini keterangan —
+                bukan pengurang. Ia ada supaya struk cetak ulang bisa menjelaskan
+                sendiri kenapa totalnya beda dari struk yang dipegang pembeli. */}
+            {data.sale.refundTotal > 0 && (
+              <div className="flex justify-between text-amber-700">
+                <span>↩ Sudah dikembalikan</span>
+                <span>{formatRupiah(data.sale.refundTotal)}</span>
+              </div>
+            )}
+            <div className="mt-1 flex justify-between">
+              <span>Metode</span>
+              <span>{METODE_LABEL[data.sale.metodeBayar]}</span>
+            </div>
+            {data.sale.metodeBayar === "tunai" && data.sale.uangDiterima != null && (
+              <>
+                <div className="flex justify-between">
+                  <span>Tunai</span>
+                  <span>{formatRupiah(data.sale.uangDiterima)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Kembali</span>
+                  <span>{formatRupiah(Math.max(0, data.sale.uangDiterima - data.sale.total))}</span>
+                </div>
+              </>
+            )}
+            {data.sale.catatan && <div className="mt-2">Catatan: {data.sale.catatan}</div>}
+            {data.kasir && <div className="mt-2">Kasir: {data.kasir}</div>}
+            <div className="mt-3 text-center">{footer}</div>
+    </>
+  );
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div className="w-full max-w-xs rounded-xl bg-white p-5 shadow-xl">
-        <div
-          id="struk-print"
-          data-paper={settings.paperWidth}
-          className="font-mono text-xs text-stone-800"
-        >
-          <div className="text-center">
-            <div className="text-base font-bold">
-              {company?.nama ?? auth?.company?.nama ?? "Terakasir"}
-            </div>
-            {showAlamat && alamatStruk && <div>{alamatStruk}</div>}
-            {showAlamat && teleponStruk && <div>Telp: {teleponStruk}</div>}
-            <div>Cabang {data.branch_nama}</div>
-            <div className="mt-1">{data.sale.nomor}</div>
-            <div>
-              {formatWaktu(data.sale.waktu)} · {data.sale.isDineIn ? "Dine-in" : "Bawa pulang"}
-            </div>
-            {antrian != null && <div className="mt-1 text-xl font-bold">Antrian {antrian}</div>}
-            {(data.sale.customerNama || data.sale.mejaLabel) && (
-              <div className="font-bold">{data.sale.customerNama || data.sale.mejaLabel}</div>
-            )}
-            {data.sale.customerNama && data.sale.mejaLabel && <div>Meja: {data.sale.mejaLabel}</div>}
-          </div>
-          <hr className="my-2 border-dashed border-stone-400" />
-          {data.items.map((it) => {
-            // Yang ditagih = dipesan − dikembalikan. `qty` sengaja tak dikurangi
-            // di basis data (dua fakta berbeda), jadi pengurangannya di sini.
-            const ditagih = qtyDitagih(it);
-            return (
-              <div key={it.id} className="mb-1">
-                <div className={ditagih === 0 ? "text-stone-400 line-through" : undefined}>
-                  {it.menuNama}
-                </div>
-                <div className="flex justify-between">
-                  <span>
-                    {ditagih} × {formatRupiah(it.hargaSatuan)}
-                    {it.isDineIn !== data.sale.isDineIn && (it.isDineIn ? " (DI)" : " (TA)")}
-                  </span>
-                  <span>{formatRupiah(it.hargaSatuan * ditagih)}</span>
-                </div>
-                {it.qtyRefund > 0 && (
-                  <div className="text-amber-700">↩ {it.qtyRefund} porsi dikembalikan</div>
-                )}
-                {it.catatan && <div className="text-stone-500">* {it.catatan}</div>}
-              </div>
-            );
-          })}
-          <hr className="my-2 border-dashed border-stone-400" />
-          <div className="flex justify-between">
-            <span>Subtotal</span>
-            <span>{formatRupiah(data.sale.subtotal)}</span>
-          </div>
-          {data.sale.diskon > 0 && (
-            <div className="flex justify-between">
-              <span>Diskon{data.sale.diskonPersen ? ` ${data.sale.diskonPersen}%` : ""}</span>
-              <span>−{formatRupiah(data.sale.diskon)}</span>
-            </div>
-          )}
-          {data.sale.pb1Amount > 0 && (
-            <div className="flex justify-between">
-              <span>PB1</span>
-              <span>{formatRupiah(data.sale.pb1Amount)}</span>
-            </div>
-          )}
-          <div className="flex justify-between text-sm font-bold">
-            <span>TOTAL</span>
-            <span>{formatRupiah(data.sale.total)}</span>
-          </div>
-          {/* Angka di atas SUDAH bersih dari refund, jadi baris ini keterangan —
-              bukan pengurang. Ia ada supaya struk cetak ulang bisa menjelaskan
-              sendiri kenapa totalnya beda dari struk yang dipegang pembeli. */}
-          {data.sale.refundTotal > 0 && (
-            <div className="flex justify-between text-amber-700">
-              <span>↩ Sudah dikembalikan</span>
-              <span>{formatRupiah(data.sale.refundTotal)}</span>
-            </div>
-          )}
-          <div className="mt-1 flex justify-between">
-            <span>Metode</span>
-            <span>{METODE_LABEL[data.sale.metodeBayar]}</span>
-          </div>
-          {data.sale.metodeBayar === "tunai" && data.sale.uangDiterima != null && (
-            <>
-              <div className="flex justify-between">
-                <span>Tunai</span>
-                <span>{formatRupiah(data.sale.uangDiterima)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Kembali</span>
-                <span>{formatRupiah(Math.max(0, data.sale.uangDiterima - data.sale.total))}</span>
-              </div>
-            </>
-          )}
-          {data.sale.catatan && <div className="mt-2">Catatan: {data.sale.catatan}</div>}
-          {data.kasir && <div className="mt-2">Kasir: {data.kasir}</div>}
-          <div className="mt-3 text-center">{footer}</div>
+        <div id="struk-pratinjau" className="font-mono text-xs text-stone-800">
+          {isiStruk}
         </div>
+
+        {/*
+          AREA CETAK terportal — pratinjau di atas TIDAK dicetak (ia di dalam
+          `#root`, yang dilepas ruangnya saat mencetak). Tanpa pemisahan ini,
+          tinggi shell Riwayat (1.961mm) yang menentukan panjang cetakan: satu
+          struk 79mm keluar jadi 8 halaman kertas 58mm, 7 di antaranya kosong.
+        */}
+        <AreaCetak id="struk-print" data-paper={settings.paperWidth} className="font-mono text-xs text-stone-800">
+          {isiStruk}
+        </AreaCetak>
 
         {printError && (
           <div className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 print:hidden">

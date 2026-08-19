@@ -2,6 +2,7 @@ import type { JenisPengadaan } from "@kakarut/shared";
 import { Modal, btnPrimary, btnSecondary } from "../../components/ui";
 import { formatAngka, formatRupiah, formatTanggalRingkas, formatWaktu } from "../../lib/format";
 import type { FakturGroup, StokMasukRow } from "./TambahStokPage";
+import { AreaCetak } from "../../components/AreaCetak";
 
 /** qty kemasan (satuan beli): qty ÷ isi — hanya info, tak dibulatkan. */
 function kemasan(r: StokMasukRow) {
@@ -114,7 +115,7 @@ export function DokumenKirimModal({
         </div>
       </Modal>
       {/* Kontainer khusus cetak — hanya dokumen yang tampil saat window.print() */}
-      <div id="dokumen-print" className="hidden print:block">
+      <AreaCetak id="dokumen-print">
         {isi(true)}
         <div className="mt-6 flex justify-between gap-4 text-xs">
           <div className="text-center">
@@ -130,7 +131,7 @@ export function DokumenKirimModal({
             <div className="mt-10 border-t border-black px-8">( ………… )</div>
           </div>
         </div>
-      </div>
+      </AreaCetak>
     </>
   );
 }

@@ -52,7 +52,21 @@
    * memang memportalnya sedang terbuka — jalur cetak lain (struk, QR, dokumen)
    * masih memakai mekanisme `visibility` dan tak boleh ikut terhapus.
    */
-  body:has(> #menu-print) #root {
+  /*
+   * Shell aplikasi DILEPAS ruangnya, bukan sekadar disembunyikan.
+   *
+   * `visibility: hidden` di atas menyembunyikan tanpa melepas ruang, jadi
+   * tinggi dokumen mengikuti tinggi HALAMAN YANG SEDANG DIBUKA. Terukur pada
+   * struk: isi 79mm, shell Riwayat 1.961mm, hasilnya 8 halaman kertas 58mm
+   * dengan 7 di antaranya kosong — sekitar dua meter kertas termal per struk.
+   *
+   * Selektornya memakai ATRIBUT, bukan daftar id: area cetak baru yang dibuat
+   * lewat `<AreaCetak>` otomatis ikut terlindungi, tanpa ada yang perlu ingat
+   * menambahkannya ke sini. Dipagari `:has(> …)` supaya hanya berlaku saat
+   * memang ada area cetak yang terportal — halaman lain tak boleh ikut
+   * dikosongkan.
+   */
+  body:has(> [data-cetak-akar]) #root {
     display: none;
   }
   #menu-print {

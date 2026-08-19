@@ -17,6 +17,7 @@ import { labelCabang, useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatTanggalRingkas, formatWaktu } from "../../lib/format";
 import { useCompanyMode } from "../../lib/useCompanyMode";
+import { AreaCetak } from "../../components/AreaCetak";
 
 interface Karyawan {
   user_id: string;
@@ -905,13 +906,13 @@ export function KaryawanPage() {
 
       {/* Kontainer khusus cetak — hanya QR + identitas yang tampil saat window.print() */}
       {qrFor && qrUrl && (
-        <div id="qr-print" className="hidden print:block">
+        <AreaCetak id="qr-print">
           <div className="text-center">
             <img src={qrUrl} alt="" className="mx-auto" style={{ width: "60mm", height: "60mm" }} />
             <div className="mt-2 text-xl font-bold">{qrFor.nama}</div>
             <div className="font-mono text-2xl font-bold tracking-widest">{qrFor.employee_code}</div>
           </div>
-        </div>
+        </AreaCetak>
       )}
     </div>
   );

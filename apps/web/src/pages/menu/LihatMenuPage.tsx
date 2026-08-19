@@ -1,12 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import type { MenuDto } from "@kakarut/shared";
 import { Card, ErrorText, PageTitle, Spinner, btnPrimary, btnSecondary } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatRupiah, formatTanggal, hariIniWIB } from "../../lib/format";
+import { AreaCetak } from "../../components/AreaCetak";
 
 interface Kategori {
   id: string;
@@ -293,8 +293,7 @@ export function LihatMenuPage() {
         Sebagai anak langsung `body`, ia bisa dipasangkan `#root { display:none }`
         di media cetak (lihat `index.css`) yang benar-benar MELEPAS ruang itu.
       */}
-      {createPortal(
-        <div id="menu-print" className="hidden text-black print:block" data-mode={cetak}>
+      <AreaCetak id="menu-print" className="text-black" data-mode={cetak}>
           <div className="mb-1.5 flex items-baseline justify-between gap-2 border-b border-black pb-1">
             <span className="text-base font-bold leading-tight">{namaPerusahaan}</span>
             <span className="text-[10px] font-semibold tracking-wide">
@@ -358,9 +357,7 @@ export function LihatMenuPage() {
               </div>
             ))}
           </div>
-        </div>,
-        document.body,
-      )}
+      </AreaCetak>
     </div>
   );
 }
