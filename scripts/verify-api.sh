@@ -9223,7 +9223,24 @@ AKTIF188=$(api "$REISS105" GET /shift/aktif | jq -r '.id // "null"')
 if [ "$AKTIF188" = "null" ]; then
   # Mandiri: seksi ini duduk di ekor skrip, jadi ia tak boleh mengandaikan
   # keadaan yang ditinggalkan ribuan baris di atasnya.
-  api "$REISS105" POST /absensi/saya '{"foto_url":"https://example.com/absen188.jpg"}' >/dev/null 2>&1
+  # `/absensi/saya` itu TOGGLE, bukan "pastikan masuk": ia mencatat kebalikan
+  # dari cap terakhir hari itu. Kasir sudah absen masuk jauh di atas (§2), jadi
+  # memanggilnya di sini justru MEMULANGKANNYA — lalu `/shift/buka` ditolak
+  # dengan "absen masuk dulu", dan seksi ini gagal di penjaga pertamanya.
+  #
+  # Itu bukan dugaan: pada jalan yang gagal, cap terakhir kasir adalah `keluar`
+  # dengan stempel waktu tepat di detik seksi ini berjalan.
+  #
+  # Karena itu hasilnya DIPERIKSA, bukan diasumsikan: bila yang tercatat
+  # `keluar`, dibalik sekali lagi supaya berakhir pada `masuk`. Cara ini benar
+  # dari keadaan awal mana pun — sudah masuk, sudah pulang, atau belum absen
+  # sama sekali.
+  TIPE188=$(api "$REISS105" POST /absensi/saya \
+    '{"foto_url":"https://example.com/absen188.jpg"}' | jq -r '.tipe // ""')
+  if [ "$TIPE188" = "keluar" ]; then
+    api "$REISS105" POST /absensi/saya \
+      '{"foto_url":"https://example.com/absen188.jpg"}' >/dev/null 2>&1
+  fi
   api "$REISS105" POST /shift/buka '{"modal_awal":100000}' >/dev/null 2>&1
   AKTIF188=$(api "$REISS105" GET /shift/aktif | jq -r '.id // "null"')
 fi
