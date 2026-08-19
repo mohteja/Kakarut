@@ -124,6 +124,33 @@ export function LaporanDurasiPesananPage() {
             </Card>
           </div>
 
+          {/*
+            Rata-rata sendirian tak bisa ditindaklanjuti: ia menjawab "berapa
+            lama", bukan "apakah itu terlalu lama". Yang menjawabnya adalah
+            target — dan target hanya ada untuk menu yang memang ditetapkan.
+            Kartu ini karena itu punya dua bentuk: mengabarkan hasil bila ada
+            target, dan mengajak menetapkannya bila belum ada satu pun.
+          */}
+          {lap.bertarget === 0 ? (
+            <div className="mb-5 rounded-lg bg-stone-50 px-4 py-3 text-sm text-stone-600">
+              Belum ada menu yang punya <b>target waktu penyajian</b>, jadi laporan ini baru bisa
+              melaporkan — belum bisa menilai. Isi targetnya di form menu masing-masing, lalu
+              halaman ini akan menandai menu yang biasanya lewat.
+            </div>
+          ) : lap.lewat_target > 0 ? (
+            <div className="mb-5 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-800">
+              <b>
+                {lap.lewat_target} dari {lap.bertarget} menu bertarget biasanya lewat target.
+              </b>{" "}
+              Dasarnya median, bukan rata-rata — jadi ini bukan satu-dua pesanan yang tercecer,
+              melainkan hari yang memang begitu.
+            </div>
+          ) : (
+            <div className="mb-5 rounded-lg bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+              Seluruh <b>{lap.bertarget} menu bertarget</b> memenuhi targetnya pada rentang ini.
+            </div>
+          )}
+
           <Card className="mb-5 p-0">
             <div className="border-b border-stone-200 px-4 py-3">
               <h2 className="font-semibold text-stone-800">Per menu</h2>
@@ -142,6 +169,7 @@ export function LaporanDurasiPesananPage() {
                     <th className="px-4 py-2 text-right font-medium">Porsi</th>
                     <th className="px-4 py-2 text-right font-medium">Rata-rata</th>
                     <th className="px-4 py-2 text-right font-medium">Median</th>
+                    <th className="px-4 py-2 text-right font-medium">Target</th>
                     <th className="px-4 py-2 text-right font-medium">Tercepat</th>
                     <th className="px-4 py-2 text-right font-medium">Terlama</th>
                   </tr>
@@ -156,8 +184,31 @@ export function LaporanDurasiPesananPage() {
                       <td className="px-4 py-2 text-right font-semibold tabular-nums text-stone-800">
                         {formatDurasi(m.rata_detik)}
                       </td>
-                      <td className="px-4 py-2 text-right tabular-nums text-stone-600">
+                      <td
+                        className={`px-4 py-2 text-right tabular-nums ${
+                          m.lewat_target ? "font-semibold text-red-700" : "text-stone-600"
+                        }`}
+                      >
                         {formatDurasi(m.median_detik)}
+                        {m.lewat_target && " ⚠"}
+                      </td>
+                      <td className="px-4 py-2 text-right tabular-nums text-stone-500">
+                        {m.target_detik == null ? (
+                          "—"
+                        ) : (
+                          <>
+                            {formatDurasi(m.target_detik)}
+                            {/* Porsi yang lewat ditampilkan walau mediannya masih
+                                di bawah target: menu yang seperempat porsinya
+                                terlambat punya masalah yang tak terlihat dari
+                                median saja. */}
+                            {m.lewat_jumlah > 0 && (
+                              <div className="text-xs text-orange-600">
+                                {m.lewat_jumlah}/{m.jumlah} porsi lewat
+                              </div>
+                            )}
+                          </>
+                        )}
                       </td>
                       <td className="px-4 py-2 text-right tabular-nums text-emerald-700">
                         {formatDurasi(m.tercepat_detik)}

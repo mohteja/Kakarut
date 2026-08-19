@@ -61,6 +61,7 @@ function menuDariBarisBill(it: OpenBillDetail["items"][number]): MenuDto {
     base_mult: null,
     harga_jual: it.harga_satuan,
     image_url: null,
+    target_durasi_detik: null,
     is_active: false,
     sort_order: 0,
     branch_ids: [],
