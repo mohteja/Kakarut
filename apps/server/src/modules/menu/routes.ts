@@ -175,6 +175,48 @@ async function validateRefs(
         message: "Menu dasar harus menu reguler milik perusahaan Anda",
       });
     }
+    /*
+     * SISI SEBALIKNYA DARI ATURAN YANG SAMA — dan sisi inilah yang dulu bolong.
+     *
+     * "Menu dasar harus reguler" dijaga pada menu yang SEDANG disunting, tapi
+     * tidak pada menu-menu yang MENUNJUK ke sana. Jadi rantai dua tingkat bisa
+     * dibuat dari arah lain: buat paket P berdasar A (A masih reguler → lolos),
+     * lalu ubah A sendiri jadi paket berdasar B (yang diperiksa cuma B, dan B
+     * reguler → lolos juga). Hasilnya P → A → B.
+     *
+     * Yang membuatnya mahal: perhitungan paket SATU TINGKAT. `komponenEfektif`
+     * memulangkan komponen sendiri + komponen dasarnya, berhenti di situ. Jadi
+     * P kehilangan seluruh resep B — DIAM-DIAM, di dua tempat sekaligus:
+     *
+     *   HPP  : terukur 6.250 padahal dasarnya sudah 10.139 (38% terlalu rendah)
+     *   STOK : bahan resep B tak pernah dikonsumsi saat P terjual
+     *
+     * Tak ada galat di titik mana pun; yang terjadi cuma stok yang terlihat
+     * lebih banyak daripada isi rak, dan laba yang terlihat lebih besar
+     * daripada yang benar-benar didapat.
+     *
+     * Pilihan perbaikannya menolak transisinya, bukan membuat perhitungannya
+     * rekursif: satu tingkat itu keputusan yang disengaja (lihat
+     * `komponenEfektif`), dan yang bolong hanya penegakannya.
+     */
+  }
+  if (selfId && body.tipe === "paket") {
+    const [dipakai] = await db
+      .select({ nama: menus.nama })
+      .from(menus)
+      .where(
+        and(
+          eq(menus.companyId, companyId),
+          eq(menus.baseMenuId, selfId),
+          eq(menus.tipe, "paket"),
+        ),
+      )
+      .limit(1);
+    if (dipakai) {
+      throw new HTTPException(400, {
+        message: `Menu ini dipakai sebagai menu dasar paket "${dipakai.nama}" — ubah paket itu dulu sebelum menjadikan menu ini paket`,
+      });
+    }
   }
 }
 
