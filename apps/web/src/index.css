@@ -46,7 +46,76 @@
     left: 0;
     top: 0;
     width: 100%;
-    padding: 8mm;
+  }
+  /*
+   * DUA KARTU PER LEMBAR A4, tinggal dipotong tengah.
+   *
+   * `min-height` separuh A4 (297mm ÷ 2), BUKAN `height`. Bedanya menentukan
+   * apa yang terjadi pada menu panjang:
+   *
+   *   height + overflow  → menu yang tak muat DIPOTONG diam-diam. Kartu terlihat
+   *                        rapi dan lengkap, padahal beberapa menu hilang — dan
+   *                        yang menyadarinya tamu yang memesan sesuatu yang
+   *                        tidak tercetak.
+   *   min-height         → menu pendek (kasus normal) berhenti tepat di
+   *                        lipatan, jadi garis potongnya jatuh di tengah;
+   *                        menu panjang tumbuh melewatinya dan mengalir ke
+   *                        lembar berikutnya. Tak ada yang hilang.
+   *
+   * Jadi garis potong di tengah adalah HASIL, bukan paksaan.
+   */
+  #menu-print .kartu-menu {
+    box-sizing: border-box;
+    padding: 7mm 8mm;
+  }
+  /* Kotak jumlah ikut mengecil supaya baris tak dipaksa tinggi olehnya. */
+  #menu-print .kotak-jumlah {
+    height: 4.5mm;
+    width: 9mm;
+  }
+  /* Mode "kartu": tinggi separuh A4 supaya lipatannya jatuh di tengah. */
+  #menu-print[data-tata="kartu"] .kartu-menu {
+    min-height: 148.5mm;
+  }
+  /* Garis potong. Kartu kedua tak berpasangan garis — ia ujung lembar. */
+  #menu-print[data-tata="kartu"] .kartu-menu:first-child {
+    border-bottom: 1px dashed #999;
+  }
+  /*
+   * Mode "kolom": daftarnya mengalir di DUA kolom pada satu lembar penuh.
+   *
+   * `columns`, bukan grid/flex: hanya multi-kolom CSS yang membiarkan isinya
+   * mengalir sendiri ke kolom berikutnya lalu ke halaman berikutnya. Grid
+   * menuntut pembagian ditentukan di muka, dan pembagian yang ditebak di muka
+   * akan salah begitu ada menu ditambah.
+   */
+  /*
+   * Judul kategori tak boleh jadi baris TERAKHIR sebuah kolom — pembacanya
+   * akan mengira kategori itu kosong, lalu mencari menunya di tempat yang salah.
+   * Yang dijaga hanya judulnya; blok kategorinya sendiri BOLEH terbelah.
+   *
+   * Dulu seluruh blok kategori ber-`break-inside-avoid`. Untuk kategori berisi
+   * 17 item, itu memaksa tinggi kolom mengikuti kategori terpanjang — daftar
+   * yang sebenarnya muat satu lembar jadi melimpah ke lembar kedua.
+   */
+  #menu-print .judul-kategori {
+    break-after: avoid;
+  }
+  #menu-print[data-tata="kolom"] .daftar-menu {
+    columns: 2;
+    column-gap: 8mm;
+    /* Garis pemisah kolom — penanda lipat/potong bila lembarnya mau dibagi. */
+    column-rule: 1px dashed #bbb;
+  }
+  /* Kotak isian jumlah: harus tetap berbingkai walau browser mematikan
+     latar/warna saat mencetak (bawaan "Background graphics: off"). Border
+     dicetak; background belum tentu. */
+  #menu-print .kotak-jumlah {
+    display: inline-block;
+    width: 11mm;
+    height: 6mm;
+    border: 1px solid #555;
+    border-radius: 1mm;
   }
   /* lebar kertas thermal saat mencetak lewat driver printer */
   #struk-print[data-paper="58"] {
