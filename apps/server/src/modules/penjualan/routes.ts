@@ -159,6 +159,39 @@ export const penjualanRoutes = new Hono<AppEnv>()
         metode: sales.metodeBayar,
         cabang: branches.nama,
         jumlah_item: sql<number>`(SELECT COUNT(*)::int FROM sale_items si WHERE si.sale_id = ${sales.id})`,
+        /*
+         * LAMA PESANAN RAMPUNG — "berapa lama tamu menunggu sampai semuanya
+         * keluar", bukan jumlah waktu tiap sajian. Dapur mengerjakan beberapa
+         * sajian sekaligus; menjumlahkannya melaporkan penantian yang tak
+         * pernah terjadi.
+         *
+         * `FILTER (WHERE ... <> 'batal')` di kedua sisi: baris batal tak
+         * menahan pesanan jadi rampung dan tak ikut menentukan kapan mulai atau
+         * selesai. `NULL` bila masih ada yang dikerjakan, bila seluruh barisnya
+         * batal, atau bila dapur tak pernah menandai apa pun — dan NULL itu
+         * disengaja. Nol berarti "keluar seketika", yang justru membuat
+         * transaksi lama yang tak pernah dicatat terlihat paling cepat.
+         *
+         * `GREATEST(..., 0)` menjaga jam server yang pernah mundur tak
+         * melahirkan durasi negatif.
+         */
+        pesanan_durasi_detik: sql<number | null>`(
+          SELECT GREATEST(0, EXTRACT(EPOCH FROM (
+                   MAX(si.pesanan_status_at) - MIN(si.pesanan_masuk_at)))::int)
+          FROM sale_items si
+          WHERE si.sale_id = ${sales.id} AND si.pesanan_status <> 'batal'
+          HAVING COUNT(*) > 0
+             AND COUNT(*) FILTER (WHERE si.pesanan_status <> 'selesai') = 0
+             AND COUNT(*) FILTER (WHERE si.pesanan_status_at IS NULL) = 0
+        )`,
+        pesanan_selesai_pada: sql<string | null>`(
+          SELECT MAX(si.pesanan_status_at)
+          FROM sale_items si
+          WHERE si.sale_id = ${sales.id} AND si.pesanan_status <> 'batal'
+          HAVING COUNT(*) > 0
+             AND COUNT(*) FILTER (WHERE si.pesanan_status <> 'selesai') = 0
+             AND COUNT(*) FILTER (WHERE si.pesanan_status_at IS NULL) = 0
+        )`,
       })
       .from(sales)
       .leftJoin(users, eq(sales.cashierUserId, users.id))
@@ -172,7 +205,26 @@ export const penjualanRoutes = new Hono<AppEnv>()
         ),
       )
       .orderBy(desc(sales.waktu));
-    return c.json(rows);
+    return c.json(
+      rows.map((r) => ({
+        ...r,
+        /*
+         * Dinormalkan ke ISO. Kolom Drizzle (`waktu` di baris yang sama) sudah
+         * berupa `Date` dan ikut jadi ISO sendiri, tapi medan ini lahir dari
+         * `sql<...>` mentah sehingga driver memulangkannya apa adanya:
+         * "2026-08-18 23:59:59.467+00" — spasi, bukan "T". `Date.parse` di
+         * Safari menolak bentuk itu, jadi satu baris riwayat bisa tampil
+         * "Invalid Date" hanya di sebagian perangkat.
+         */
+        pesanan_selesai_pada: r.pesanan_selesai_pada
+          ? new Date(r.pesanan_selesai_pada).toISOString()
+          : null,
+        // Driver memulangkan agregat numerik sebagai string pada sebagian tipe;
+        // DTO-nya menjanjikan number.
+        pesanan_durasi_detik:
+          r.pesanan_durasi_detik == null ? null : Number(r.pesanan_durasi_detik),
+      })),
+    );
   })
   .get("/:id", async (c) => {
     const auth = c.get("auth");

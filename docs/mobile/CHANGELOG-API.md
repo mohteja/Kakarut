@@ -25,6 +25,72 @@ tanpa akses repo server.
 
 ---
 
+
+## Rilis: Lama pengerjaan pesanan — per sajian, per transaksi, dan rekapnya
+
+🟢 **BARU** — papan pesanan (`pesanan_page.dart`), riwayat transaksi, dan tab
+Laporan bila mobile menampilkannya.
+
+**Sudah di-merge ke production.**
+
+Tiga medan baru, semuanya ADITIF — tak ada medan yang hilang atau berganti arti,
+jadi klien lama tetap jalan tanpa perubahan.
+
+### 🟢 BARU — `PesananItemRow.masuk_pada` & `durasi_detik`
+
+`masuk_pada` (ISO) adalah kapan **baris itu** masuk dapur, bukan kapan kartunya
+dibuat. Bedanya penting untuk open bill: satu bill hidup berjam-jam dan
+pesanannya datang bergelombang, jadi ronde kedua pukul 21.00 pada bill yang
+dibuka pukul 19.00 dihitung sejak 21.00.
+
+`durasi_detik` adalah lama pengerjaan baris itu, **`null` selama belum ada
+hasilnya** — masih dikerjakan, batal, atau selesai tanpa waktu (data lama).
+Jangan menampilkannya sebagai `0`: nol berarti "keluar seketika", dan itu justru
+membuat sajian yang lupa ditandai terlihat paling cepat.
+
+Dihitung SERVER, bukan klien. Papan dapur terbuka di beberapa perangkat yang
+jamnya bisa berbeda; angka yang sama harus terbaca sama di semua layar.
+
+### 🟢 BARU — `PesananRow.durasi_detik` (per kartu)
+
+Lama SELURUH pesanan rampung. **Bukan jumlah durasi tiap baris** — dapur
+mengerjakan beberapa sajian sekaligus, dan menjumlahkannya melaporkan penantian
+yang tak pernah terjadi. Yang benar: baris paling awal masuk → baris paling
+akhir keluar.
+
+Baris `batal` diabaikan sepenuhnya: ia tak menahan kartu jadi rampung dan tak
+ikut menentukan kapan mulai atau selesai. Kartu yang SELURUH barisnya batal
+bernilai `null`.
+
+Aturannya ada di `@kakarut/shared` (`durasiPesananDetik`, `ringkasPesanan`) dan
+dipakai server maupun web. Kalau mobile menghitungnya sendiri, salinan itulah
+yang kelak menyimpang.
+
+### 🟢 BARU — `RiwayatTransaksiRow.pesanan_durasi_detik` & `pesanan_selesai_pada`
+
+Lama seluruh pesanan satu transaksi rampung, dan kapan sajian terakhir ditandai
+selesai (ISO). Keduanya `null` bila masih ada baris yang dikerjakan, bila
+seluruh barisnya batal, atau bila dapur tak pernah menandai apa pun.
+
+### 🟢 BARU — `GET /api/laporan/durasi-pesanan` (owner/admin)
+
+Parameter `?dari=&sampai=&branch_id=` sama seperti laporan lain. Memulangkan
+`LaporanDurasiPesanan`: rata-rata seluruh sajian, rincian per menu (rata-rata,
+**median**, tercepat, terlama), dan 200 penyelesaian terakhir lengkap dengan
+**siapa yang menandai selesai**.
+
+Median ikut dibawa karena rata-rata sendirian menyesatkan di dapur: satu sajian
+yang lupa ditandai sampai tutup toko menarik rata-rata naik berjam-jam,
+sementara median tetap menggambarkan hari yang sebenarnya. Tampilkan keduanya
+berdampingan — bila berjauhan, yang salah biasanya pencatatannya, bukan dapurnya.
+
+### ⚪️ INFO — migrasi `0097`, aditif
+
+Menambah `pesanan_masuk_at` pada `sale_items` & `open_bill_items`. Baris lama
+diisi dari induknya (waktu nota / waktu bill dibuka) supaya durasinya masuk akal
+dan tak pernah negatif. Ketelitiannya terbatas untuk ronde kedua pada bill lama
+— datanya memang tak pernah direkam.
+
 ## Rilis: Endpoint ONLINE ikut mengklaim perintah — 409 `sedang_diproses`
 
 > Tidak ada migrasi. Tidak ada medan baru pada permintaan maupun respons sukses.

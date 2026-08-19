@@ -37,6 +37,7 @@ const PesananPage = lazy(() => import("./pages/pesanan/PesananPage").then((m) =>
 const ShiftPage = lazy(() => import("./pages/kasir/ShiftPage").then((m) => ({ default: m.ShiftPage })));
 const LaporanPage = lazy(() => import("./pages/laporan/LaporanPage").then((m) => ({ default: m.LaporanPage })));
 const LaporanMenuLarisPage = lazy(() => import("./pages/laporan/LaporanMenuLarisPage").then((m) => ({ default: m.LaporanMenuLarisPage })));
+const LaporanDurasiPesananPage = lazy(() => import("./pages/laporan/LaporanDurasiPesananPage").then((m) => ({ default: m.LaporanDurasiPesananPage })));
 const LaporanPembelianPage = lazy(() => import("./pages/laporan/LaporanPembelianPage").then((m) => ({ default: m.LaporanPembelianPage })));
 const DashboardPage = lazy(() => import("./pages/DashboardPage").then((m) => ({ default: m.DashboardPage })));
 const SmtpPage = lazy(() => import("./pages/superadmin/SmtpPage").then((m) => ({ default: m.SmtpPage })));
@@ -257,6 +258,7 @@ export default function App() {
                   <Route path="/laporan" element={<LaporanPage />} />
                   <Route path="/laporan/pembelian" element={<LaporanPembelianPage />} />
                   <Route path="/laporan/menu-laris" element={<LaporanMenuLarisPage />} />
+                  <Route path="/laporan/durasi-pesanan" element={<LaporanDurasiPesananPage />} />
                   <Route path="/sampah" element={<TempatSampahPage />} />
                   <Route path="/member" element={<MemberPage />} />
                   <Route path="/menu" element={<MenuListPage />} />

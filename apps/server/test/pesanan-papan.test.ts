@@ -19,6 +19,10 @@ function baris(p: Partial<PesananItemRow> & { id: string }): PesananItemRow {
     sajian_takeaway: false,
     status_oleh: null,
     status_pada: null,
+    // Waktu masuk wajib ada — bawaan tetap supaya uji penurunan status di
+    // bawah tak ikut bergantung pada jam berjalan.
+    masuk_pada: "2026-01-01T10:00:00.000Z",
+    durasi_detik: null,
     ...p,
   };
 }

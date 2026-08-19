@@ -64,6 +64,8 @@ function baris(p: {
     sajian_takeaway: p.sajianTakeaway,
     status_oleh: null,
     status_pada: null,
+    masuk_pada: "2026-01-01T10:00:00.000Z",
+    durasi_detik: null,
   };
 }
 

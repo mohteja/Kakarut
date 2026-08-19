@@ -4,6 +4,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import {
+  durasiPesananDetik,
   qtyDitagih,
   ringkasPesanan,
   turunkanStatusPesanan,
@@ -26,6 +27,25 @@ import {
 } from "../../db/schema";
 import { resolveBranchId, type AppEnv } from "../../middleware/auth";
 import { tanggalDi } from "../../lib/time";
+
+/**
+ * Durasi satu baris dari bentuk BARIS DB (kolom `Date`), memakai aturan yang
+ * sama dengan web lewat `durasiPesananDetik`. Menghitungnya sendiri di sini
+ * akan melahirkan salinan kedua dari aturan "batal & belum selesai tak punya
+ * angka" — dan salinan kedua itulah yang kelak menyimpang.
+ */
+function durasiBaris(r: {
+  status: PesananStatus;
+  masukPada: Date;
+  statusPada: Date | null;
+}): number | null {
+  return durasiPesananDetik({
+    status: r.status,
+    masuk_pada: r.masukPada.toISOString(),
+    status_pada: r.statusPada ? r.statusPada.toISOString() : null,
+  });
+}
+
 import {
   barisBerpindah,
   hitungUlangBiayaPenjualan,
@@ -379,6 +399,7 @@ export const pesananRoutes = new Hono<AppEnv>()
             sajianTakeaway: openBillItems.sajianTakeaway,
             statusPada: openBillItems.pesananStatusAt,
             statusOleh: users.nama,
+            masukPada: openBillItems.pesananMasukAt,
           })
           .from(openBillItems)
           .leftJoin(users, eq(openBillItems.pesananStatusOleh, users.id))
@@ -400,6 +421,8 @@ export const pesananRoutes = new Hono<AppEnv>()
             sajian_takeaway: r.sajianTakeaway,
             status_oleh: r.statusOleh ?? null,
             status_pada: r.statusPada ? r.statusPada.toISOString() : null,
+            masuk_pada: r.masukPada.toISOString(),
+            durasi_detik: durasiBaris(r),
           });
           itemBill.set(r.billId, arr);
           totalBill.set(r.billId, (totalBill.get(r.billId) ?? 0) + r.harga * r.qty);
@@ -420,6 +443,7 @@ export const pesananRoutes = new Hono<AppEnv>()
             sajianTakeaway: saleItems.sajianTakeaway,
             statusPada: saleItems.pesananStatusAt,
             statusOleh: users.nama,
+            masukPada: saleItems.pesananMasukAt,
           })
           .from(saleItems)
           .leftJoin(users, eq(saleItems.pesananStatusOleh, users.id))
@@ -441,6 +465,8 @@ export const pesananRoutes = new Hono<AppEnv>()
             sajian_takeaway: r.sajianTakeaway,
             status_oleh: r.statusOleh ?? null,
             status_pada: r.statusPada ? r.statusPada.toISOString() : null,
+            masuk_pada: r.masukPada.toISOString(),
+            durasi_detik: durasiBaris(r),
           });
           itemSale.set(r.saleId, arr);
         }

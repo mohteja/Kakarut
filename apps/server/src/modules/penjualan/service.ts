@@ -189,6 +189,7 @@ export async function createSale(params: CreateSaleParams) {
         pesananStatus: "dikerjakan" | "selesai" | "batal";
         pesananStatusAt: Date | null;
         pesananStatusOleh: string | null;
+        pesananMasukAt: Date;
         sajianTakeaway: boolean;
       }
     >();
@@ -251,6 +252,7 @@ export async function createSale(params: CreateSaleParams) {
           pesananStatus: openBillItems.pesananStatus,
           pesananStatusAt: openBillItems.pesananStatusAt,
           pesananStatusOleh: openBillItems.pesananStatusOleh,
+          pesananMasukAt: openBillItems.pesananMasukAt,
           sajianTakeaway: openBillItems.sajianTakeaway,
         })
         .from(openBillItems)
@@ -269,6 +271,10 @@ export async function createSale(params: CreateSaleParams) {
           pesananStatus: baris.pesananStatus,
           pesananStatusAt: baris.pesananStatusAt,
           pesananStatusOleh: baris.pesananStatusOleh,
+          // Jam dapur ikut pindah. Tanpa ini `defaultNow()` menyetelnya ke
+          // detik PEMBAYARAN, jadi baris yang sudah dimasak sejak sejam lalu
+          // tercatat selesai sebelum ia masuk — durasinya negatif.
+          pesananMasukAt: baris.pesananMasukAt,
           sajianTakeaway: baris.sajianTakeaway,
         });
       }
@@ -352,6 +358,9 @@ export async function createSale(params: CreateSaleParams) {
         pesananStatus: waris?.pesananStatus ?? "dikerjakan",
         pesananStatusAt: waris?.pesananStatusAt ?? null,
         pesananStatusOleh: waris?.pesananStatusOleh ?? null,
+        // Jam masuk dapur ikut pindah. Penjualan langsung (tanpa bill) memulai
+        // jamnya sekarang — itulah detik pesanannya benar-benar masuk.
+        pesananMasukAt: waris?.pesananMasukAt ?? new Date(),
         sajianTakeaway,
       });
 

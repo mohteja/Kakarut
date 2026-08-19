@@ -1,7 +1,12 @@
-import { and, desc, eq, gte, isNull, lte, sql, sum } from "drizzle-orm";
+import { and, desc, eq, gte, isNotNull, isNull, lte, sql, sum } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-import type { LaporanHarian, LaporanPembelian, MenuLaris } from "@kakarut/shared";
+import type {
+  LaporanDurasiPesanan,
+  LaporanHarian,
+  LaporanPembelian,
+  MenuLaris,
+} from "@kakarut/shared";
 import { db } from "../../db/client";
 import {
   companies,
@@ -14,6 +19,7 @@ import {
   saleRefunds,
   sales,
   suppliers,
+  users,
 } from "../../db/schema";
 import type { Context } from "hono";
 import { resolveBranchId, type AppEnv } from "../../middleware/auth";
@@ -315,6 +321,113 @@ export const laporanRoutes = new Hono<AppEnv>()
       total_qty: items.reduce((a, r) => a + r.qty, 0),
       total_omzet: items.reduce((a, r) => a + r.omzet, 0),
       items,
+    };
+    return c.json(laporan);
+  })
+  /**
+   * LAMA PENGERJAAN PESANAN pada rentang — rata-rata per menu + riwayat
+   * penyelesaiannya.
+   *
+   * Hanya baris yang BENAR-BENAR selesai yang dihitung: `pesanan_status =
+   * 'selesai'` DAN berwaktu. Baris batal, baris yang masih dikerjakan, dan
+   * baris lama yang tak pernah ditandai tidak ikut — menghitungnya sebagai 0
+   * akan membuat dapur yang lalai mencatat terlihat paling cepat, yaitu arah
+   * salah yang paling merugikan.
+   *
+   * Rentangnya menyaring `sales.sale_date` (tanggal NOTA), sama seperti seluruh
+   * laporan lain di berkas ini, supaya satu layar tak mencampur dua definisi
+   * periode.
+   */
+  .get("/durasi-pesanan", async (c) => {
+    const auth = c.get("auth");
+    const branchCond = await branchCondLaporan(c);
+    const [company] = await db
+      .select({ timezone: companies.timezone })
+      .from(companies)
+      .where(eq(companies.id, auth.company_id!));
+    const today = tanggalDi(company?.timezone ?? "Asia/Jakarta");
+    const sampai = tglValid(c.req.query("sampai")) ?? today;
+    const dari = tglValid(c.req.query("dari")) ?? sampai;
+
+    const filter = and(
+      eq(sales.companyId, auth.company_id!),
+      branchCond,
+      gte(sales.saleDate, dari),
+      lte(sales.saleDate, sampai),
+      isNull(sales.deletedAt),
+      eq(saleItems.pesananStatus, "selesai"),
+      isNotNull(saleItems.pesananStatusAt),
+    );
+    /*
+     * Dijepit di bawah pada 0: jam server yang pernah mundur, atau baris
+     * warisan yang waktunya tak konsisten, tak boleh melahirkan durasi negatif
+     * yang menarik turun rata-rata tanpa ada yang menyadarinya.
+     */
+    const detik = sql<number>`GREATEST(0, EXTRACT(EPOCH FROM (${saleItems.pesananStatusAt} - ${saleItems.pesananMasukAt})))`;
+
+    const perMenu = await db
+      .select({
+        menu_nama: saleItems.menuNama,
+        jumlah: sql<number>`COUNT(*)::int`,
+        rata: sql<number>`ROUND(AVG(${detik}))::int`,
+        // Median ikut dibawa karena rata-rata sendirian menyesatkan di dapur:
+        // satu pesanan yang lupa ditandai sampai tutup toko menarik rata-rata
+        // naik berjam-jam, sementara median tetap menggambarkan hari yang
+        // sebenarnya. Keduanya berdampingan membuat pencilan itu TERLIHAT.
+        median: sql<number>`ROUND(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY ${detik}))::int`,
+        tercepat: sql<number>`MIN(${detik})::int`,
+        terlama: sql<number>`MAX(${detik})::int`,
+      })
+      .from(saleItems)
+      .innerJoin(sales, eq(saleItems.saleId, sales.id))
+      .where(filter)
+      .groupBy(saleItems.menuNama)
+      .orderBy(desc(sql`AVG(${detik})`));
+
+    const riwayat = await db
+      .select({
+        nomor: sales.nomor,
+        menu_nama: saleItems.menuNama,
+        oleh: users.nama,
+        selesai_pada: saleItems.pesananStatusAt,
+        durasi: sql<number>`${detik}::int`,
+      })
+      .from(saleItems)
+      .innerJoin(sales, eq(saleItems.saleId, sales.id))
+      // LEFT, bukan INNER: baris yang penyelesainya tak tercatat (data sebelum
+      // fitur ini, atau akun yang sudah dihapus) tetap harus muncul dengan
+      // `oleh: null`. INNER akan menghilangkannya diam-diam, dan riwayat yang
+      // menghilangkan barisnya sendiri lebih buruk daripada riwayat tanpa nama.
+      .leftJoin(users, eq(saleItems.pesananStatusOleh, users.id))
+      .where(filter)
+      .orderBy(desc(saleItems.pesananStatusAt))
+      .limit(200);
+
+    const per_menu = perMenu.map((r) => ({
+      menu_nama: r.menu_nama,
+      jumlah: Number(r.jumlah ?? 0),
+      rata_detik: Number(r.rata ?? 0),
+      median_detik: Number(r.median ?? 0),
+      tercepat_detik: Number(r.tercepat ?? 0),
+      terlama_detik: Number(r.terlama ?? 0),
+    }));
+    const jumlah = per_menu.reduce((a, r) => a + r.jumlah, 0);
+    const laporan: LaporanDurasiPesanan = {
+      dari,
+      sampai,
+      jumlah,
+      // Rata-rata SELURUH baris, bukan rata-rata dari rata-rata per menu:
+      // menu yang terjual 200 porsi dan menu yang terjual 1 porsi tak boleh
+      // sama beratnya.
+      rata_detik: jumlah === 0 ? 0 : Math.round(per_menu.reduce((a, r) => a + r.rata_detik * r.jumlah, 0) / jumlah),
+      per_menu,
+      riwayat: riwayat.map((r) => ({
+        nomor: r.nomor,
+        menu_nama: r.menu_nama,
+        oleh: r.oleh ?? null,
+        selesai_pada: r.selesai_pada!.toISOString(),
+        durasi_detik: Number(r.durasi ?? 0),
+      })),
     };
     return c.json(laporan);
   })

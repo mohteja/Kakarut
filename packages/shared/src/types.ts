@@ -1449,6 +1449,18 @@ export interface RiwayatTransaksiRow {
   metode: MetodeBayar;
   /** nama cabang transaksi — terisi utk tampilan lintas cabang (?branch_id=all) */
   cabang: string | null;
+  /**
+   * Lama seluruh pesanan ini rampung, dalam DETIK — `null` bila masih ada baris
+   * yang dikerjakan, atau bila seluruh barisnya batal.
+   *
+   * Diukur dari baris paling awal masuk sampai baris paling akhir selesai:
+   * "berapa lama tamu menunggu sampai semuanya keluar". Transaksi lama yang
+   * dapurnya tak pernah menandai selesai bernilai `null`, bukan 0 — nol berarti
+   * "keluar seketika", dan itu kebohongan yang rapi.
+   */
+  pesanan_durasi_detik: number | null;
+  /** kapan baris terakhir ditandai selesai (ISO); `null` bila belum rampung */
+  pesanan_selesai_pada: string | null;
 }
 
 /** Member/pelanggan pada daftar member area (dengan agregat transaksi). */
@@ -1522,6 +1534,55 @@ export interface LaporanHarian {
   estimasi_profit: number;
   item_terjual: { menu_nama: string; qty: number; omzet: number }[];
   konsumsi_bahan: { nama: string; slug: string; qty: number }[];
+}
+
+/**
+ * Lama pengerjaan satu menu pada rentang — rata-rata & sebarannya.
+ *
+ * `median` ikut dibawa karena rata-rata sendirian menyesatkan di dapur: satu
+ * pesanan yang lupa ditandai selesai sampai tutup toko menarik rata-rata naik
+ * berjam-jam, sementara median tetap menggambarkan hari yang sebenarnya.
+ * Menampilkan keduanya membuat pencilan itu terlihat, bukan tersembunyi.
+ */
+export interface DurasiMenuRow {
+  menu_nama: string;
+  /** banyaknya porsi/baris selesai yang terhitung */
+  jumlah: number;
+  rata_detik: number;
+  median_detik: number;
+  tercepat_detik: number;
+  terlama_detik: number;
+}
+
+/** Satu penyelesaian pesanan — siapa menandai apa, kapan, dan berapa lama. */
+export interface DurasiRiwayatRow {
+  /** nomor struk; null bila baris ini selesai selagi masih open bill */
+  nomor: string | null;
+  menu_nama: string;
+  /** nama orang yang menandai selesai; null bila tak tercatat (data lama) */
+  oleh: string | null;
+  /** kapan ditandai selesai (ISO) */
+  selesai_pada: string;
+  durasi_detik: number;
+}
+
+/**
+ * Laporan lama pengerjaan pesanan pada rentang tanggal.
+ *
+ * Hanya baris yang BENAR-BENAR selesai yang dihitung — baris `batal` dan baris
+ * yang tak pernah ditandai tidak ikut. Menghitungnya sebagai 0 akan membuat
+ * dapur yang lalai mencatat terlihat paling cepat.
+ */
+export interface LaporanDurasiPesanan {
+  dari: string;
+  sampai: string;
+  /** banyaknya baris selesai yang terhitung di seluruh rentang */
+  jumlah: number;
+  /** rata-rata seluruh baris (detik); 0 bila tak ada yang terhitung */
+  rata_detik: number;
+  per_menu: DurasiMenuRow[];
+  /** penyelesaian terbaru lebih dulu — dibatasi agar layar tak kebanjiran */
+  riwayat: DurasiRiwayatRow[];
 }
 
 /** Satu baris ranking menu terlaris. */
@@ -1651,6 +1712,22 @@ export interface PesananItemRow {
   /** siapa & kapan status baris ini terakhir diubah; null = belum disentuh */
   status_oleh: string | null;
   status_pada: string | null;
+  /**
+   * Kapan baris INI masuk dapur (ISO) — pangkal hitungan lama pengerjaan.
+   *
+   * Per baris, bukan per kartu: satu bill hidup berjam-jam dan pesanannya
+   * datang bergelombang. Ronde kedua pukul 21.00 pada bill yang dibuka pukul
+   * 19.00 dihitung sejak 21.00.
+   */
+  masuk_pada: string;
+  /**
+   * Lama pengerjaan dalam DETIK, `null` selama baris belum selesai.
+   *
+   * Dihitung server, bukan klien: papan pesanan terbuka di beberapa perangkat
+   * yang jamnya bisa berbeda, dan angka yang sama harus terbaca sama di semua
+   * layar. Baris `batal` juga `null` — tak ada pekerjaan yang diselesaikan.
+   */
+  durasi_detik: number | null;
 }
 
 /** Satu kartu di papan pesanan. */
@@ -1683,6 +1760,19 @@ export interface PesananRow {
   /** perubahan status baris terakhir pada kartu ini; null = belum ada */
   status_oleh: string | null;
   status_pada: string | null;
+  /**
+   * Lama SELURUH pesanan ini rampung, dalam detik — `null` selama masih ada
+   * baris yang dikerjakan.
+   *
+   * Dihitung dari baris paling AWAL masuk sampai baris paling AKHIR selesai,
+   * jadi ia menjawab "berapa lama tamu menunggu sampai semuanya keluar",
+   * bukan menjumlahkan waktu tiap sajian.
+   *
+   * Baris `batal` tak ikut menghitung dan tak menahan: pesanan yang sebagian
+   * dibatalkan tetap bisa rampung. Kartu yang SELURUH barisnya batal bernilai
+   * `null` — tak ada yang pernah dikerjakan.
+   */
+  durasi_detik: number | null;
 }
 
 /** Satu baris riwayat perubahan status sebuah pesanan. */

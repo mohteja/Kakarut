@@ -85,6 +85,30 @@ export function sajianBedaDariNota(
   );
 }
 
+/**
+ * Lama pengerjaan SATU baris, dalam detik — `null` bila belum ada hasilnya.
+ *
+ * `null`, bukan 0, untuk tiga keadaan yang berbeda tapi sama-sama "tak ada
+ * angkanya": baris masih dikerjakan, baris dibatalkan (tak ada pekerjaan yang
+ * rampung), dan baris yang statusnya `selesai` tapi tak berwaktu (data dari
+ * sebelum fitur ini ada). Nol berarti "keluar seketika" dan akan menarik turun
+ * setiap rata-rata yang menyentuhnya.
+ *
+ * Dijepit di bawah pada 0: jam server yang pernah mundur tak boleh melahirkan
+ * durasi negatif di laporan.
+ */
+export function durasiPesananDetik(b: {
+  status: PesananStatus;
+  masuk_pada: string;
+  status_pada: string | null;
+}): number | null {
+  if (b.status !== "selesai" || !b.status_pada) return null;
+  const mulai = Date.parse(b.masuk_pada);
+  const selesai = Date.parse(b.status_pada);
+  if (!Number.isFinite(mulai) || !Number.isFinite(selesai)) return null;
+  return Math.max(0, Math.round((selesai - mulai) / 1000));
+}
+
 /** Bagian `PesananRow` yang seluruhnya turunan `items`. */
 export type RingkasanPesanan = Pick<
   PesananRow,
@@ -94,6 +118,7 @@ export type RingkasanPesanan = Pick<
   | "item_batal"
   | "status_oleh"
   | "status_pada"
+  | "durasi_detik"
 >;
 
 /**
@@ -124,7 +149,36 @@ export function ringkasPesanan(items: PesananItemRow[]): RingkasanPesanan {
     item_batal: items.filter((i) => i.status === "batal").length,
     status_oleh: statusOleh,
     status_pada: statusPada,
+    durasi_detik: durasiKartu(items),
   };
+}
+
+/**
+ * Lama SELURUH kartu rampung, dalam detik — `null` selama belum rampung.
+ *
+ * Diukur dari baris paling AWAL masuk sampai baris paling AKHIR selesai, jadi
+ * ia menjawab "berapa lama tamu menunggu sampai semuanya keluar". Bukan jumlah
+ * durasi tiap baris: dapur mengerjakan beberapa sajian sekaligus, dan
+ * menjumlahkannya melaporkan penantian yang tak pernah terjadi.
+ *
+ * Baris `batal` diabaikan sepenuhnya — ia tak menahan kartu jadi rampung, dan
+ * tak ikut menentukan kapan mulai atau selesai. Kartu yang SELURUH barisnya
+ * batal bernilai `null`: tak ada yang pernah dikerjakan.
+ */
+function durasiKartu(items: PesananItemRow[]): number | null {
+  const hidup = items.filter((i) => i.status !== "batal");
+  if (hidup.length === 0) return null;
+  if (!hidup.every((i) => i.status === "selesai" && i.status_pada)) return null;
+  let mulai = Infinity;
+  let selesai = -Infinity;
+  for (const i of hidup) {
+    const m = Date.parse(i.masuk_pada);
+    const s = Date.parse(i.status_pada!);
+    if (!Number.isFinite(m) || !Number.isFinite(s)) return null;
+    if (m < mulai) mulai = m;
+    if (s > selesai) selesai = s;
+  }
+  return Math.max(0, Math.round((selesai - mulai) / 1000));
 }
 
 /**
