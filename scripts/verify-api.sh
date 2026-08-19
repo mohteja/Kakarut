@@ -5105,6 +5105,22 @@ rm -rf "$T185"
 # Kalau bocor, akibatnya bukan baris kembar melainkan stok CK yang MINUS: barang
 # dijanjikan ke dua cabang sekaligus, dan yang kedua baru ketahuan saat rak
 # kosong.
+# STOKNYA DISIAPKAN SENDIRI, bukan menumpang sisa §132.
+#
+# `ING132` dipilih di §132 sebagai bahan PERTAMA yang saldonya >= 2 — dan
+# urutan baris dari API tidak dijamin, jadi bahan yang terpilih berbeda antar
+# jalan. Bila yang terpilih kebetulan bersaldo pas-pasan, §132/§185/§186 sudah
+# menguras habis sebelum seksi ini sempat menguji apa pun.
+#
+# Terukur: pada jalan yang sama persis, lokal memulai dengan sisa 1537 dan CI
+# dengan sisa 1 — lalu penjaganya gugur beserta dua asersi di bawahnya. Yang
+# goyah fikstur berbaginya, bukan kodenya.
+#
+# `stok/awal` MENETAPKAN saldo (bukan menambah), jadi angkanya pasti berapa pun
+# keadaan sebelumnya — dan seksi sesudah ini ikut berdiri di atas tanah yang
+# sama.
+api "$OWNER" POST /stok/awal \
+  "{\"branch_id\":\"$ASAL132\",\"items\":[{\"ingredient_id\":\"$ING132\",\"qty\":100}]}" >/dev/null
 SISA187=$(api "$OWNER" GET "/transfer-stok/saldo?branch_id=$ASAL132" \
   | jq --arg i "$ING132" '[.rows[]|select(.ingredient_id==$i)][0] | (.saldo - .dalam_jalan) // 0')
 Q187=$(python3 -c "import math;print(max(1, math.ceil($SISA187 * 0.6)))")
