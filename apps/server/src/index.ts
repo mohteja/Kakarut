@@ -12,6 +12,7 @@ import { computeBuildId, setBuildId } from "./lib/build";
 import { bersihkanRateLimitKedaluwarsa } from "./middleware/rateLimit";
 import { jadwalkanBackupOtomatis } from "./lib/backup";
 import { jadwalkanPeringatanCadangan } from "./lib/backup-peringatan";
+import { jadwalkanPemeriksaanSetelan } from "./lib/pemeriksaan-setelan";
 import { catatGalat, jadwalkanPangkasErrorLog } from "./lib/error-log";
 import { runMigrations } from "./db/migrate";
 import { backfillKodeMenu } from "./modules/menu/service";
@@ -260,6 +261,10 @@ jadwalkanBackupOtomatis();
 // panelnya, dan halaman itu justru dibuka SETELAH cadangan dibutuhkan. Ini arah
 // sebaliknya — sistem yang mendatangi super admin lewat email.
 jadwalkanPeringatanCadangan();
+
+// Pemeriksaan setelan: hal-hal yang SAH menurut skema env, servernya menyala
+// tanpa keluhan, dan salahnya baru ketahuan berbulan-bulan kemudian.
+jadwalkanPemeriksaanSetelan();
 
 // Log galat platform (panel super admin): buang yang kedaluwarsa + kelebihan
 // kuota. Tanpa ini satu klien yang ngambek bisa menulis ratusan ribu baris.
