@@ -1,4 +1,5 @@
 export * from "./absensi";
+export * from "./cadangan";
 export * from "./constants";
 export * from "./escpos";
 export * from "./hpp";

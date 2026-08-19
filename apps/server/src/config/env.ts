@@ -91,6 +91,17 @@ const EnvSchema = z.object({
   /** Retensi: jumlah cadangan sukses terakhir yang disimpan. Default 14. */
   BACKUP_KEEP: z.coerce.number().min(1).default(14),
   /**
+   * Berapa HARI tanpa cadangan sukses sebelum super admin diemail. Default 2.
+   *
+   * Kenapa 2 dan bukan 1: penjadwal sudah punya jaring pengaman 26 jam, jadi
+   * satu jadwal yang terlewat akan mengejar sendiri. Lewat dua hari artinya
+   * jaring pengaman ITU SENDIRI yang tak jalan — dan itu tak akan pernah
+   * memperbaiki diri sendiri.
+   *
+   * `0` mematikan peringatan (panel tetap menampilkan status).
+   */
+  BACKUP_ALERT_DAYS: z.coerce.number().int().min(0).default(2),
+  /**
    * Folder cadangan saat mode penyimpanan LOKAL (R2 belum diatur). Default
    * `<uploads>/../backups`. Di kontainer, arahkan ke volume ter-mount agar
    * tidak hilang saat re-deploy.
