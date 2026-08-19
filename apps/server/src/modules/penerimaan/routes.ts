@@ -270,7 +270,18 @@ export const penerimaanRoutes = new Hono<AppEnv>()
       .from(productions)
       .where(dasar)
       .groupBy(productions.fakturId)
-      .orderBy(desc(sql`MAX(${productions.confirmedAt})`))
+      /*
+       * PEMUTUS SERI WAJIB pada daftar BERPAGINASI, dan taruhannya lebih besar
+       * daripada sekadar urutan yang goyah: dengan LIMIT/OFFSET, dua faktur
+       * yang waktunya seri bisa sama-sama muncul di halaman 1 dan halaman 2 —
+       * sementara faktur ketiga TAK MUNCUL DI HALAMAN MANA PUN.
+       *
+       * Serinya lahir bila dua penerimaan rampung di milidetik yang sama (dua
+       * cabang sekaligus, terlihat bersamaan saat `?branch_id=all`). Jarang,
+       * tapi yang hilang adalah baris di jejak penerimaan barang — dan
+       * hilangnya tanpa gejala apa pun.
+       */
+      .orderBy(desc(sql`MAX(${productions.confirmedAt})`), desc(productions.fakturId))
       .limit(perPage)
       .offset((page - 1) * perPage);
 
