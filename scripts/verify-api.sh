@@ -9368,6 +9368,43 @@ api "$OWNER" PUT "/menu/$M189" '{"nama":"Menu Uji154"}' > /dev/null
 cek "hapus target (null) → menu tak dinilai lagi" "V == 1" \
   "$(api "$OWNER" PUT "/menu/$N189" '{"target_durasi_detik":null}' | jq '.target_durasi_detik==null|if . then 1 else 0 end')"
 
+echo "== 190. /tahap: kiriman ulang tak boleh memajukan dua kali =="
+# `/tahap` TAK BISA idempoten dari isinya sendiri. Cabang SPLIT cuma MENGURANGI
+# qty baris induk tanpa menyentuh statusnya, jadi CAS `(id,status,qty)` yang
+# menjaga jalur "maju penuh" tak menjaga apa pun: kiriman kedua membaca qty yang
+# sudah berkurang, cocok lagi, lalu memotong lagi. Barang yang tak pernah datang
+# tercatat datang — dan Σqty faktur tetap utuh, jadi tak ada angka yang terlihat
+# janggal.
+ING190=$(api "$OWNER" GET /bahan | jq -r '[.[] | select(.pengadaan=="beli" and .track_stok==true)][0].id')
+S190_0=$(saldo_bahan "$ING190")
+FK190=$(api "$OWNER" POST /pembelian/faktur "{\"items\":[{\"ingredient_id\":\"$ING190\",\"mode\":\"pcs\",\"jumlah\":8,\"total_harga\":40000}]}")
+FK190_ID=$(echo "$FK190" | jq -r .faktur_id)
+R190=$(api "$OWNER" GET "/pembelian?per_page=500" | jq -r --arg f "$FK190_ID" '[.rows[]|select(.faktur_id==$f)][0].id')
+cek "dasar §190: baris fakturnya ketemu, qty 8" "abs(V - 8) < 0.001" \
+  "$(api "$OWNER" GET "/pembelian?per_page=500" | jq -r --arg f "$FK190_ID" '[.rows[]|select(.faktur_id==$f)][0].qty')"
+REF190="9e1b7c40-3a2d-4f18-9c55-7d20a4e61b33"
+BODY190="{\"ke\":\"menunggu\",\"items\":[{\"id\":\"$R190\",\"qty\":3}],\"client_ref\":\"$REF190\"}"
+api "$OWNER" POST "/pembelian/tahap/$FK190_ID" "$BODY190" > /dev/null
+S190_1=$(saldo_bahan "$ING190")
+cek "terima 3 dari 8 → saldo +3" "abs(V - 3) < 0.001" "$(echo "$S190_1 - $S190_0" | bc -l)"
+# KIRIMAN ULANG PERSIS SAMA. Inilah yang dulu memotong lagi.
+api "$OWNER" POST "/pembelian/tahap/$FK190_ID" "$BODY190" > /dev/null
+cek "kiriman ULANG tak menambah stok lagi" "abs(V - 3) < 0.001" \
+  "$(echo "$(saldo_bahan "$ING190") - $S190_0" | bc -l)"
+B190=$(api "$OWNER" GET "/pembelian?per_page=500" | jq --arg f "$FK190_ID" '[.rows[]|select(.faktur_id==$f)]')
+cek "kiriman ULANG tak melahirkan baris ketiga" "V == 2" "$(echo "$B190" | jq 'length')"
+# Sisa tugas belanja adalah korban KEDUA bug ini, dan yang paling sunyi: yang
+# masih harus dibeli tercatat lebih sedikit daripada yang sebenarnya.
+cek "sisa tugas belanja tetap 5, bukan menyusut jadi 2" "abs(V - 5) < 0.001" \
+  "$(echo "$B190" | jq '[.[]|select(.status=="rencana")][0].qty // 0')"
+cek "Σqty faktur tetap 8" "abs(V - 8) < 0.001" "$(echo "$B190" | jq '[.[].qty]|add')"
+# `client_ref` BARU = permintaan baru yang sah → boleh dieksekusi sungguhan.
+# Tanpa ini idempotensinya terlalu ketat: maju bertahap jadi mustahil.
+BODY190B="{\"ke\":\"menunggu\",\"items\":[{\"id\":\"$(echo "$B190" | jq -r '[.[]|select(.status=="rencana")][0].id')\",\"qty\":2}],\"client_ref\":\"3c9f5a11-88b2-4d67-b0e4-2f6a1c9d7e50\"}"
+api "$OWNER" POST "/pembelian/tahap/$FK190_ID" "$BODY190B" > /dev/null
+cek "client_ref BARU tetap dieksekusi → saldo +2 lagi" "abs(V - 5) < 0.001" \
+  "$(echo "$(saldo_bahan "$ING190") - $S190_0" | bc -l)"
+
 
 if [ "$FAIL" -gt 0 ]; then
   echo
