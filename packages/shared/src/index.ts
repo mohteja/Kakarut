@@ -1,6 +1,7 @@
 export * from "./absensi";
 export * from "./cadangan";
 export * from "./constants";
+export * from "./contoh-cetak";
 export * from "./escpos";
 export * from "./hpp";
 export * from "./isi-menu";
