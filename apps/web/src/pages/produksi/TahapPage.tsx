@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import type { JenisPengadaan, PenyimpananDto } from "@kakarut/shared";
 import { angkaDari, teksAngka } from "@kakarut/shared";
@@ -17,6 +17,7 @@ import { labelCabang, useBranch, useCabangData } from "../../context/BranchConte
 import { ApiError, api } from "../../lib/api";
 import { formatAngka, formatRupiah, hariIniWIB } from "../../lib/format";
 import { useCompanyMode } from "../../lib/useCompanyMode";
+import { uuidV4 } from "../../lib/idempoten";
 import {
   AKSI_TAHAP,
   URUTAN_TAHAP,
@@ -201,11 +202,34 @@ function TahapForm({
   const danaInvalid =
     tanyaDana && danaManual && (!Number.isFinite(danaCair) || danaCair! < 0);
 
+  /*
+   * IDENTITAS PERMINTAAN, dipegang sampai sukses.
+   *
+   * `/tahap` tidak bisa dibuat idempoten dari isinya sendiri: "majukan 3 dari
+   * baris ini" membaca qty baris apa adanya, dan sesudah pemotongan pertama
+   * qty-nya memang sudah berkurang — kiriman kedua cocok lagi lalu memotong
+   * lagi. Terukur pada faktur 8 pcs: "terima 3" yang terkirim dua kali menaruh
+   * 6 pcs di stok dan menyusutkan sisa tugas belanja dari 5 jadi 2.
+   *
+   * Jaringan yang putus SESUDAH server menyimpan tapi SEBELUM balasannya
+   * sampai adalah cara paling wajar hal itu terjadi: yang menekan tombol
+   * melihat galat, lalu menekan lagi.
+   *
+   * `??=` — ref yang SAMA dipakai ulang untuk percobaan `paksa` sesudah
+   * peringatan "bahan kurang". Itu benar: percobaan yang ditolak melepaskan
+   * klaimnya di server (transaksinya rollback), jadi percobaan berikutnya
+   * benar-benar dieksekusi; tapi bila yang pertama ternyata SUKSES dan cuma
+   * balasannya yang hilang, yang kedua memulangkan hasil pertama alih-alih
+   * mengeksekusi ulang.
+   */
+  const refTahap = useRef<string | null>(null);
+
   const simpan = useMutation({
     mutationFn: (opts?: { paksa?: boolean }) =>
       api(`${endpoint}/tahap/${grup.fakturId}`, {
         method: "POST",
         body: {
+          client_ref: (refTahap.current ??= uuidV4()),
           ke,
           items,
           ...(opts?.paksa ? { paksa: true } : {}),
@@ -219,6 +243,8 @@ function TahapForm({
         },
       }),
     onSuccess: () => {
+      // Sukses → permintaan berikutnya adalah permintaan BARU, bukan ulangan.
+      refTahap.current = null;
       for (const key of [endpoint, "stok", "laporan", "rekomendasi"]) {
         queryClient.invalidateQueries({ queryKey: [key] });
       }
