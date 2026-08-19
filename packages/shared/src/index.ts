@@ -7,6 +7,7 @@ export * from "./hpp";
 export * from "./isi-menu";
 export * from "./ketersediaan";
 export * from "./pesanan";
+export * from "./prorata";
 export * from "./receipt";
 export * from "./refund";
 export * from "./satuan";

@@ -4,7 +4,7 @@ import { alias } from "drizzle-orm/pg-core";
 import { Hono, type Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import { qtyTeks, type JenisPengadaan } from "@kakarut/shared";
+import { hargaBagian, qtyTeks, type JenisPengadaan } from "@kakarut/shared";
 import { db } from "../../db/client";
 import {
   branches,
@@ -648,7 +648,7 @@ export const penerimaanRoutes = new Hono<AppEnv>()
                   qty: diterima,
                   // prorata harga sesuai porsi yang diterima
                   totalHarga:
-                    b.totalHarga != null ? Math.round((b.totalHarga * diterima) / b.qty) : null,
+                    b.totalHarga != null ? hargaBagian(b.totalHarga, diterima, b.qty) : null,
                   status: "dikonfirmasi",
                   confirmedBy: auth.sub,
                   confirmedAt: now,

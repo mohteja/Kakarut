@@ -13,6 +13,7 @@ import {
   notInArray,
   or,
   sql,
+  type SQL,
 } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Hono, type Context } from "hono";
@@ -26,6 +27,7 @@ import {
   type DampakBahan,
   type DampakLaporanHarga,
   type DampakMenu,
+  type AuthUser,
   type JenisPengadaan,
 } from "@kakarut/shared";
 import { acuanDariLot } from "../../lib/harga-stats";
@@ -78,6 +80,7 @@ import {
   denganKlaimIdempoten,
   deviceIdField,
 } from "../sync/idempoten";
+import { hargaBagian, majuPenuh, pisahHarga, qtyMelebihi } from "@kakarut/shared";
 
 const pembuat = alias(users, "pembuat_prod");
 const pengubah = alias(users, "pengubah_prod");
@@ -574,6 +577,750 @@ async function hitungAcuanBaru(
  * POST / lama (satu item, langsung dikonfirmasi) dipertahankan untuk
  * kompatibilitas.
  */
+/**
+ * KONTEKS satu permintaan `/tahap` — dioper utuh ke kedua jalurnya.
+ *
+ * Sebuah objek, bukan dua belas parameter: kedua jalur memakai nyaris seluruh
+ * badan permintaan, dan daftar parameter sepanjang itu justru menyembunyikan
+ * yang mana yang berbeda di antara keduanya.
+ */
+interface KonteksTahap {
+  auth: AuthUser;
+  fakturId: string;
+  tipe: JenisPengadaan;
+  conds: (SQL | undefined)[];
+  body: z.infer<typeof TahapBody>;
+}
+
+/**
+ * JALUR MAJU SEBAGIAN — hanya baris terpilih yang naik tahap; qty yang kurang
+ * dari qty baris MEMECAH barisnya (bagian yang maju jadi baris baru, sisanya
+ * tetap jadi tugas).
+ *
+ * Dipisah dari jalur seluruh-faktur karena keduanya memang dua perintah yang
+ * berbeda, bukan satu perintah dengan sakelar. Selama keduanya tinggal dalam
+ * satu fungsi 749 baris, ketimpangan di antara keduanya tak terlihat: CAS
+ * `(id, status, qty)` menjaga jalur maju-PENUH di sini tapi TIDAK menjaga
+ * jalur SPLIT, dan keduanya berjarak enam puluh baris di dalam blok yang sama.
+ * Lubang itu hidup di produksi sampai ada yang menekan tombolnya dua kali.
+ */
+async function tahapSebagian(k: KonteksTahap) {
+  const { auth, tipe, conds, fakturId } = k;
+  const {
+    ke,
+    items,
+    dana_cair,
+    realisasi,
+    selisih_catatan,
+    tujuan_branch_id,
+    tujuan_storage_id,
+    paksa,
+  } = k.body;
+  // Penyempit tipe, bukan penjaga runtime: pemanggilnya sudah memilih jalur
+  // berdasarkan ada-tidaknya `items`.
+  if (!items) throw new Error("tahapSebagian dipanggil tanpa items");
+  const target = URUTAN_TAHAP[ke];
+  // Siapa yang MULAI mengerjakan/memproses menugaskan dirinya (isi
+  // worker_id yang masih kosong) — berlaku kedua jalur: produksi
+  // (pelaksana work-order CK) maupun beli (pemroses belanja tercatat).
+  const selfAssign = ke === "dikerjakan";
+  const baris = await db
+    .select()
+    .from(productions)
+    .where(and(...conds));
+  if (baris.length === 0) {
+    throw new HTTPException(404, { message: "Faktur tidak ditemukan" });
+  }
+  const byId = new Map(baris.map((b) => [b.id, b]));
+
+  /**
+   * SATU PINTU: barang BERALAMAT hanya sah diterima lewat Penerimaan.
+   *
+   * `/tahap` bisa melompatkan faktur langsung ke "dikonfirmasi", dan itu
+   * memasukkan stok TANPA ada orang di cabang yang menekan Terima —
+   * padahal merekalah yang memegang barangnya. Akibatnya stok bertambah
+   * atas nama orang yang tak pernah melihat barangnya, dan bila kirimannya
+   * ternyata kurang/rusak tak ada satu pun jejak siapa yang menerimanya.
+   *
+   * Aturannya dibuat SAMA PERSIS dengan `/konfirmasi` (lihat blok di
+   * sana): punya `tujuan_branch_id` = kiriman = wajib lewat Penerimaan.
+   * Dua pintu dengan aturan berbeda hanya akan jadi lubang berikutnya.
+   *
+   * Tujuan diambil EFEKTIF — termasuk `tujuan_branch_id` yang baru dikirim
+   * di permintaan ini, supaya "pindahkan sekaligus konfirmasi" dalam satu
+   * panggilan tidak menyelinap lewat.
+   */
+  if (ke === "dikonfirmasi") {
+    const kena = items ? baris.filter((b) => items.some((it) => it.id === b.id)) : baris;
+    const beralamat = kena.find((b) => (tujuan_branch_id ?? b.tujuanBranchId) != null);
+    if (beralamat) {
+      throw new TahapDitolak(
+        "wajib_penerimaan",
+        "Kiriman beralamat ke cabang tidak bisa dikonfirmasi dari sini — barangnya harus DITERIMA di menu Penerimaan Barang oleh orang di cabang tujuan",
+      );
+    }
+  }
+
+  // BELI mulai DIPROSES: transaksi tercatat ke supplier UTAMA bahan
+  // (baris tanpa supplier diisi otomatis) — dasar kartu supplier.
+  const utamaByIng = new Map<string, string>();
+  if (tipe === "beli" && selfAssign) {
+    const utamaRows = await db
+      .select({
+        ingredientId: ingredientSuppliers.ingredientId,
+        supplierId: ingredientSuppliers.supplierId,
+      })
+      .from(ingredientSuppliers)
+      .where(
+        and(
+          eq(ingredientSuppliers.companyId, auth.company_id!),
+          eq(ingredientSuppliers.isUtama, true),
+          inArray(ingredientSuppliers.ingredientId, [
+            ...new Set(baris.map((b) => b.ingredientId)),
+          ]),
+        ),
+      );
+    for (const r of utamaRows) utamaByIng.set(r.ingredientId, r.supplierId);
+  }
+  const supplierBaris = (b: (typeof baris)[number]) =>
+    b.supplierId ?? (b.tipe === "beli" ? (utamaByIng.get(b.ingredientId) ?? null) : null);
+
+  // Validasi seluruh permintaan dulu — semua-atau-tidak-sama-sekali.
+  const terpakai = new Set<string>();
+  for (const item of items) {
+    if (terpakai.has(item.id)) {
+      throw new HTTPException(400, { message: "Baris yang sama dikirim dua kali" });
+    }
+    terpakai.add(item.id);
+    const b = byId.get(item.id);
+    if (!b) {
+      throw new HTTPException(400, { message: "Ada baris yang bukan milik faktur ini" });
+    }
+    if (b.status === "ditolak" || URUTAN_TAHAP[b.status] >= target) {
+      throw new HTTPException(400, {
+        message: `Baris berstatus "${b.status}" tidak bisa dipindah ke "${ke}" — tahap hanya bisa maju`,
+      });
+    }
+    // (Barang bertujuan cabang sudah ditolak lebih awal oleh pengaman
+    // SATU PINTU di atas — lihat blok "ke === dikonfirmasi" sebelum loop
+    // ini. Sengaja tidak diulang di sini: dua pemeriksaan untuk satu
+    // aturan hanya menunggu untuk saling menyimpang.)
+    // Qty maju SENGAJA boleh melebihi qty baris: RAB itu RENCANA, bukan
+    // pagu. Sayur direncanakan 900 gr tapi hanya dijual per kilo → yang
+    // benar-benar dibeli 1.000 gr, dan angka itulah yang harus tercatat.
+    // Hal yang sama berlaku pada produksi (hasil sering lebih/kurang dari
+    // target). Yang dibatasi hanya qty ≤ 0, dijaga skema Zod.
+  }
+
+  // PENGAMAN BAHAN BAKU (produksi): sebelum baris rencana MULAI dikerjakan
+  // (target ≥ dikerjakan), pastikan bahan mentah resepnya cukup di cabang
+  // pelaksana — jangan mulai produksi bila bahannya belum ada/diterima.
+  if (tipe === "produksi" && target >= URUTAN_TAHAP.dikerjakan) {
+    const cekRows = items
+      .map((it) => ({ b: byId.get(it.id)!, qty: it.qty }))
+      .filter(
+        ({ b }) =>
+          URUTAN_TAHAP[b.status as keyof typeof URUTAN_TAHAP] < URUTAN_TAHAP.dikerjakan,
+      )
+      .map(({ b, qty }) => ({
+        id: b.id,
+        branchId: b.branchId,
+        ingredientId: b.ingredientId,
+        qty,
+      }));
+    const kurang = await bahanKurangUntukProduksi(auth.company_id!, cekRows);
+    // Peringatan (bukan blokir): bila bahan kurang & user belum menekan
+    // "tetap proses" (paksa), balikan 409 dgn daftar bahan kurang — UI
+    // menampilkannya lalu memberi opsi lanjut. paksa=true → lewati.
+    if (kurang.length > 0 && !paksa) {
+      throw new TahapDitolak("bahan_kurang", pesanBahanKurang(kurang));
+    }
+  }
+
+  // Tujuan kirim (opsional): baris yang maju pindah cabang dan/atau
+  // tempat penyimpanan — stok terhitung di cabang tujuan saat konfirmasi.
+  let tujuanBranch: string | null = null;
+  let tujuanNama: string | null = null;
+  if (tujuan_branch_id) {
+    const [cb] = await db
+      .select({
+        id: branches.id,
+        nama: branches.nama,
+        tipe: branches.tipe,
+        centralKitchenId: branches.centralKitchenId,
+      })
+      .from(branches)
+      .where(
+        and(eq(branches.id, tujuan_branch_id), eq(branches.companyId, auth.company_id!)),
+      );
+    if (!cb) throw new HTTPException(400, { message: "Cabang tujuan tidak valid" });
+    if (cb.tipe === "kantor") {
+      throw new HTTPException(400, {
+        message: "Kantor bukan tujuan kirim barang — pilih cabang store",
+      });
+    }
+    // Store terhubung ke SATU CK pemasok: CK lain tidak boleh mengirim
+    // ke store itu. Baris yang maju bisa lintas cabang → cek per pengirim.
+    if (cb.tipe === "store" && cb.centralKitchenId) {
+      const pengirimIds = [
+        ...new Set(items.map((it) => byId.get(it.id)!.branchId)),
+      ].filter((idCabang) => idCabang !== cb.id);
+      if (pengirimIds.length > 0) {
+        const pengirim = await db
+          .select({ id: branches.id, tipe: branches.tipe })
+          .from(branches)
+          .where(inArray(branches.id, pengirimIds));
+        const ckLain = pengirim.find(
+          (p) => p.tipe === "central_kitchen" && p.id !== cb.centralKitchenId,
+        );
+        if (ckLain) {
+          throw new HTTPException(400, {
+            message: `Cabang "${cb.nama}" terhubung ke Central Kitchen lain — kirim hanya dari CK pemasoknya`,
+          });
+        }
+      }
+    }
+    tujuanBranch = cb.id;
+    tujuanNama = cb.nama;
+    // Khusus kasir, kitchen & bar: tak boleh lintas cabang. Karyawan CK
+    // (tim) justru tugasnya MENGIRIM ke store — validasi CK↔store di
+    // atas. Kitchen/bar memproduksi LOKAL untuk cabangnya sendiri.
+    if (
+      (auth.role === "cashier" || auth.role === "kitchen" || auth.role === "bar") &&
+      auth.branch_id &&
+      tujuanBranch !== auth.branch_id
+    ) {
+      throw new HTTPException(403, {
+        message: "Kasir/Kitchen/Bar tidak boleh mengirim ke cabang lain",
+      });
+    }
+  }
+  let tujuanStorage: string | null = null;
+  if (tujuan_storage_id) {
+    const [lok] = await db
+      .select({ id: storageLocations.id })
+      .from(storageLocations)
+      .where(
+        and(
+          eq(storageLocations.id, tujuan_storage_id),
+          eq(storageLocations.companyId, auth.company_id!),
+          eq(storageLocations.branchId, tujuanBranch ?? baris[0].branchId),
+        ),
+      );
+    if (!lok) {
+      throw new HTTPException(400, {
+        message: "Tempat penyimpanan tidak valid untuk cabang tujuan",
+      });
+    }
+    tujuanStorage = tujuan_storage_id;
+  }
+  // Pindah cabang hanya berlaku saat barang benar-benar dikirim
+  // (>= menunggu). Pindah dini (mis. ke 'dikerjakan') membuat konsumsi
+  // bahan resep tercatat di cabang yang salah — abaikan tujuannya.
+  const bolehPindah = target >= URUTAN_TAHAP.menunggu;
+  /**
+   * Lewat `kolomPindahCabang`, JANGAN dirakit di sini.
+   *
+   * Dulu blok ini hanya mengisi `branchId` + `dariBranchId` dan LUPA
+   * `tujuanBranchId`. Akibatnya barang berpindah ke cabang tapi
+   * alamatnya tertinggal (kosong untuk produksi, cabang lain untuk
+   * beli), sehingga gerbang Penerimaan tak pernah mengenalinya:
+   * faktur berbunyi "Dikirim" tapi tak ada layar mana pun yang bisa
+   * menerimanya, dan stok cabang tak pernah bertambah.
+   */
+  const pindah = bolehPindah && tujuanBranch ? kolomPindahCabang(tujuanBranch) : {};
+
+  // RAK DEFAULT per bahan PER CABANG: saat barang TIBA/DISIMPAN
+  // (>= menunggu) di cabang tujuan, otomatis diletakkan di rak yang
+  // ditugaskan untuk bahan itu DI CABANG TUJUAN (diatur di Tempat
+  // Penyimpanan). Belanja pilih rak manual (tujuan_storage) jadi cadangan;
+  // tanpa keduanya → tanpa tempat (null). Penyimpanan terkelompok per rak
+  // otomatis, konsisten dgn penerimaan kiriman di cabang store.
+  const rakDefault = new Map<string, string>(); // `${ingredientId}|${branchId}` → rakId
+  {
+    const ingIds = [...new Set(baris.map((b) => b.ingredientId))];
+    const asg = await db
+      .select({
+        ingredientId: storageLocationIngredients.ingredientId,
+        rakId: storageLocationIngredients.storageLocationId,
+        rakBranch: storageLocations.branchId,
+      })
+      .from(storageLocationIngredients)
+      .innerJoin(
+        storageLocations,
+        eq(storageLocations.id, storageLocationIngredients.storageLocationId),
+      )
+      .where(
+        and(
+          eq(storageLocationIngredients.companyId, auth.company_id!),
+          inArray(storageLocationIngredients.ingredientId, ingIds),
+        ),
+      );
+    for (const r of asg) rakDefault.set(`${r.ingredientId}|${r.rakBranch}`, r.rakId);
+  }
+  /** rak simpan untuk baris yang maju (>= menunggu): rak manual (bila
+   * dipilih) menang, lalu rak default bahan DI CABANG SENDIRI (barang
+   * tiba/disimpan lokal, mis. CK-local). Kiriman LINTAS-CABANG tidak
+   * di-auto-file di sini — rak default cabang tujuan diterapkan saat
+   * DITERIMA di cabang (autoFileRakCabang), bukan saat dikirim; sampai
+   * itu tetap tanpa tempat (barang masih transit). */
+  const rakBaris = (b: (typeof baris)[number]) => {
+    if (tujuanStorage) return tujuanStorage;
+    if (tujuanBranch && tujuanBranch !== b.branchId) return b.storageLocationId;
+    return rakDefault.get(`${b.ingredientId}|${b.branchId}`) ?? b.storageLocationId;
+  };
+
+  // EXP LOT: saat baris MASUK STOK (>= menunggu: beli Tiba / produksi
+  // Selesai), exp otomatis = tanggal masuk + masa simpan bahan (master),
+  // bisa di-override per baris (items[].exp). Baris yang sudah ber-exp
+  // dipertahankan (mis. menunggu → dikonfirmasi tidak menggeser exp).
+  const masukStok = target >= URUTAN_TAHAP.menunggu;
+  const masaSimpanByIng = new Map<string, number>();
+  let hariMasuk = "";
+  if (masukStok) {
+    const [comp] = await db
+      .select({ timezone: companies.timezone })
+      .from(companies)
+      .where(eq(companies.id, auth.company_id!));
+    hariMasuk = tanggalDi(comp?.timezone ?? "Asia/Jakarta");
+    const msRows = await db
+      .select({ id: ingredients.id, masaSimpan: ingredients.masaSimpanHari })
+      .from(ingredients)
+      .where(
+        and(
+          eq(ingredients.companyId, auth.company_id!),
+          inArray(ingredients.id, [...new Set(baris.map((b) => b.ingredientId))]),
+        ),
+      );
+    for (const r of msRows) masaSimpanByIng.set(r.id, r.masaSimpan);
+  }
+  const expBaris = (b: (typeof baris)[number], override?: string | null) => {
+    if (!masukStok) return b.expDate;
+    if (override) return override;
+    if (b.expDate) return b.expDate;
+    const ms = masaSimpanByIng.get(b.ingredientId) ?? 0;
+    return ms > 0 ? tambahHari(hariMasuk, ms) : null;
+  };
+
+  const now = new Date();
+  // Baris yang TIBA/SELESAI di cabang sendiri (tujuan kosong & tak dikirim
+  // ke cabang lain) LANGSUNG dikonfirmasi begitu mencapai "menunggu" → stok
+  // masuk di CK tanpa perlu penerimaan/konfirmasi terpisah (orang CK yang
+  // beli & produksi, jadi tak perlu konfirmasi lagi). Baris bertujuan cabang
+  // tetap "menunggu" → dikirim lalu diterima lewat Penerimaan cabang.
+  // "waktu" di-set saat konfirmasi (bukan saat RAB) agar stok masuk relatif
+  // ke opname terakhir.
+  const langsungMasuk = (b: (typeof baris)[number]) =>
+    ke === "menunggu" &&
+    // CK-lokal = tujuan kosong ATAU = cabang sendiri (invariant sama dengan
+    // saldo & penerimaan) — keduanya "tetap di cabang sendiri", tak dikirim.
+    (b.tujuanBranchId == null || b.tujuanBranchId === b.branchId) &&
+    (tujuanBranch == null || tujuanBranch === b.branchId);
+  const naikBaris = (b: (typeof baris)[number]) =>
+    ke === "dikonfirmasi" || langsungMasuk(b)
+      ? ({ status: "dikonfirmasi", confirmedBy: auth.sub, confirmedAt: now, waktu: now } as const)
+      : ({ status: ke, updatedBy: auth.sub, updatedAt: now } as const);
+
+  await db.transaction(async (tx) => {
+    if (dana_cair != null) {
+      await tx.insert(fakturDana).values({
+        companyId: auth.company_id!,
+        branchId: baris[0].branchId,
+        fakturId: fakturId,
+        nominal: dana_cair,
+        userId: auth.sub,
+      });
+    }
+    // Baris PRODUKSI yang baru SELESAI dikerjakan pada transisi ini
+    // (melewati 'menunggu') → bahan mentah resep dikonsumsi dari stok
+    // cabang PELAKSANA (branch snapshot, sebelum pindah/kirim). Pada
+    // split, id = baris BARU yang maju (baris sisa mengonsumsi sendiri
+    // saat gilirannya maju nanti).
+    const selesaiProduksi: BarisProduksiSelesai[] = [];
+    const selesaiTahapIni = (b: (typeof baris)[number]) =>
+      b.tipe === "produksi" &&
+      URUTAN_TAHAP[b.status as keyof typeof URUTAN_TAHAP] < URUTAN_TAHAP.menunggu &&
+      target >= URUTAN_TAHAP.menunggu;
+    for (const item of items) {
+      const b = byId.get(item.id)!;
+      // BELI bertujuan cabang: "menunggu" = barang TIBA DI CK (semua
+      // belanjaan kumpul di CK dulu) — pengiriman ke cabang lewat
+      // tombol Kirim (POST /kirim) TERPISAH, dengan dokumen kirim.
+      // WHERE menuntut status DAN qty persis seperti saat dibaca: bila
+      // berubah oleh proses lain, update 0 baris → transaksi batal.
+      // qty ikut dikunci karena split TIDAK mengubah status baris asli —
+      // tanpa ini dua request paralel sama-sama lolos (qty menggelembung
+      // + konsumsi bahan dobel).
+      const kunci = and(
+        eq(productions.id, b.id),
+        eq(productions.status, b.status),
+        eq(productions.qty, b.qty),
+        isNull(productions.deletedAt),
+      );
+      // Qty realisasi ≥ rencana → SELURUH baris maju, tak ada sisa tugas.
+      // Bila lebih (beli 1.000 gr padahal RAB 900), qty baris diperbarui
+      // ke angka yang benar-benar terjadi.
+      if (majuPenuh(item.qty, b.qty)) {
+        const lebih = qtyMelebihi(item.qty, b.qty);
+        // Tanpa harga riil, harga RAB diskalakan mengikuti qty baru supaya
+        // harga per satuan tetap masuk akal. Angka hasil skala itu TAK
+        // PERNAH DILIHAT MANUSIA — walau harga awalnya diketik orang —
+        // jadi ia ditandai `harga_tebakan` agar tak ikut jadi bahan median
+        // harga acuan (invarian yang sama dengan perbaikan lingkaran umpan
+        // balik harga).
+        const hargaSkala =
+          lebih && b.totalHarga != null
+            ? hargaBagian(b.totalHarga, item.qty, b.qty)
+            : null;
+        const res = await tx
+          .update(productions)
+          .set({
+            ...naikBaris(b),
+            ...pindah,
+            ...(lebih ? { qty: item.qty } : {}),
+            ...(hargaSkala != null && item.harga == null
+              ? { totalHarga: hargaSkala, hargaTebakan: true }
+              : {}),
+            // rak simpan otomatis (home rak per bahan) saat barang tiba/disimpan
+            ...(bolehPindah ? { storageLocationId: rakBaris(b) } : {}),
+            // self-assign pelaksana (isi hanya bila masih kosong)
+            ...(selfAssign
+              ? { workerId: sql`COALESCE(${productions.workerId}, ${auth.sub}::uuid)` }
+              : {}),
+            // beli diproses: catat transaksi ke supplier utama bahan
+            ...(selfAssign && b.supplierId == null && supplierBaris(b) != null
+              ? { supplierId: supplierBaris(b) }
+              : {}),
+            // harga riil menggantikan estimasi RAB (harga pasar berubah)
+            // — angka yang dilihat manusia, jadi bukan tebakan lagi
+            ...(item.harga != null ? { totalHarga: item.harga, hargaTebakan: false } : {}),
+            // exp lot saat masuk stok (otomatis dari masa simpan / override)
+            ...(masukStok ? { expDate: expBaris(b, item.exp) } : {}),
+          })
+          .where(kunci)
+          .returning({ id: productions.id });
+        if (res.length === 0) {
+          throw new TahapDitolak(
+            "status_berubah",
+            "Status faktur berubah — muat ulang halaman lalu coba lagi",
+          );
+        }
+        if (selesaiTahapIni(b)) {
+          selesaiProduksi.push({
+            id: b.id,
+            branchId: b.branchId,
+            ingredientId: b.ingredientId,
+            qty: item.qty,
+          });
+        }
+      } else {
+        // Split: bagian yang maju jadi baris BARU; baris asli menyimpan
+        // sisa qty di tahap lama dengan prorata RAB-nya. Bagian yang maju
+        // memakai harga RIIL bila dikirim (harga pasar berubah), selain
+        // itu prorata — sehingga tanpa harga riil jumlah keduanya tetap
+        // = harga awal (tidak ada rupiah yang hilang/berlipat).
+        const { bagian: hargaMaju, sisa: hargaSisa } = pisahHarga(
+          b.totalHarga,
+          item.qty,
+          b.qty,
+        );
+        const hargaBaris = item.harga ?? hargaMaju;
+        const res = await tx
+          .update(productions)
+          .set({
+            qty: b.qty - item.qty,
+            ...(hargaSisa != null ? { totalHarga: hargaSisa } : {}),
+            updatedBy: auth.sub,
+            updatedAt: now,
+          })
+          .where(kunci)
+          .returning({ id: productions.id });
+        if (res.length === 0) {
+          throw new TahapDitolak(
+            "status_berubah",
+            "Status faktur berubah — muat ulang halaman lalu coba lagi",
+          );
+        }
+        const [barisMaju] = await tx
+          .insert(productions)
+          .values({
+          companyId: b.companyId,
+          ingredientId: b.ingredientId,
+          qty: item.qty,
+          tipe: b.tipe,
+          totalHarga: hargaBaris,
+          // harga riil → bukan tebakan; prorata mewarisi sifat induknya
+          hargaTebakan: item.harga != null ? false : b.hargaTebakan,
+          fakturId: b.fakturId,
+          // pertahankan penanda permintaan agar baris hasil tahap (split)
+          // tetap tergabung di "Data Permintaan Stok"
+          rencanaId: b.rencanaId,
+          noFaktur: b.noFaktur,
+          supplierId: selfAssign ? supplierBaris(b) : b.supplierId,
+          // rak simpan otomatis (home rak) saat maju ke tiba/disimpan; selain itu tetap
+          storageLocationId: bolehPindah ? rakBaris(b) : b.storageLocationId,
+          isBatch: b.isBatch,
+          catatan: b.catatan,
+          userId: b.userId,
+          /**
+           * Baris hasil "maju sebagian" adalah baris BARU, jadi seluruh
+           * penanda induknya harus ikut disalin. Empat di antaranya dulu
+           * tertinggal, masing-masing dengan akibatnya sendiri:
+           *
+           * - `untukBranchId` → tombol "Kirim hasil ke cabang" hilang,
+           *   sisa barang jadi mengendap selamanya di CK;
+           * - `asalBranchId`  → baris pecahan sebuah transfer BERHENTI
+           *   mengurangi saldo CK (kebocoran saldo yang senyap);
+           * - `bahanProduksi` → belanja bahan mentah tercampur dengan
+           *   belanja produk jadi;
+           * - `dariBranchId`  → pendeteksi kiriman menggantung jadi buta.
+           */
+          untukBranchId: b.untukBranchId,
+          asalBranchId: b.asalBranchId,
+          bahanProduksi: b.bahanProduksi,
+          // Pindah cabang: alamat WAJIB ikut lokasi (lihat pindah.ts).
+          // Tanpa tujuan/tak boleh pindah → tetap di cabangnya sendiri.
+          ...(bolehPindah && tujuanBranch
+            ? kolomBarisPindah(tujuanBranch, b.branchId)
+            : { branchId: b.branchId, tujuanBranchId: b.tujuanBranchId, dariBranchId: b.dariBranchId }),
+          workerId: b.workerId ?? (selfAssign ? auth.sub : null),
+          prodDate: b.prodDate,
+          // exp lot bagian yang maju; sisa split tetap exp lama (belum masuk)
+          expDate: expBaris(b, item.exp),
+          ...naikBaris(b),
+        })
+          .returning({ id: productions.id });
+        if (selesaiTahapIni(b)) {
+          selesaiProduksi.push({
+            id: barisMaju.id,
+            branchId: b.branchId,
+            ingredientId: b.ingredientId,
+            qty: item.qty,
+          });
+        }
+      }
+    }
+    await catatKonsumsiProduksi(tx, auth.company_id!, selesaiProduksi);
+    if (realisasi != null) {
+      await catatRealisasiDana(tx, {
+        companyId: auth.company_id!,
+        branchId: baris[0].branchId,
+        fakturId: fakturId,
+        userId: auth.sub,
+        realisasi,
+        catatan: selisih_catatan,
+      });
+    }
+    // jejak kegiatan: siapa mengubah tahap ini + uang/tujuan yang menyertai
+    const potongan = [`${items.length} baris`];
+    if (selfAssign) potongan.push(`oleh ${auth.nama}`);
+    if (dana_cair != null) potongan.push(`dana cair ${rpLog(dana_cair)}`);
+    if (realisasi != null) potongan.push(`realisasi ${rpLog(realisasi)}`);
+    if (tujuanNama) potongan.push(`tujuan: ${tujuanNama}`);
+    await catatLogFaktur(tx, {
+      companyId: auth.company_id!,
+      branchId: baris[0].branchId,
+      fakturId: fakturId,
+      jalur: tipe,
+      aksi: AKSI_TAHAP_LOG[tipe][ke],
+      detail: potongan.join(" · "),
+      userId: auth.sub,
+    });
+  });
+  return { ok: true, status: ke, jumlah_baris: items.length };
+}
+
+/**
+ * JALUR SELURUH FAKTUR — semua baris naik SATU langkah, wajib berurutan.
+ * Perilaku lama, masih dipakai tombol yang memang memindahkan faktur utuh.
+ */
+async function tahapSeluruhFaktur(k: KonteksTahap) {
+  const { auth, tipe, conds, fakturId } = k;
+  const { ke, dana_cair, realisasi, selisih_catatan, paksa } = k.body;
+  // ===== Perilaku lama: seluruh faktur, wajib berurutan satu langkah =====
+  if (ke === "dikonfirmasi") {
+    throw new HTTPException(400, {
+      message: 'Sertakan "items" (baris terpilih) atau pakai endpoint /konfirmasi',
+    });
+  }
+  const dari = TAHAP_SEBELUM[ke];
+
+  // PENGAMAN BAHAN BAKU (produksi): seluruh faktur MULAI dikerjakan →
+  // pastikan bahan mentah resep tiap baris rencana cukup di cabang
+  // pelaksana sebelum produksi dimulai.
+  if (tipe === "produksi" && ke === "dikerjakan") {
+    const barisRencana = await db
+      .select({
+        id: productions.id,
+        branchId: productions.branchId,
+        ingredientId: productions.ingredientId,
+        qty: productions.qty,
+      })
+      .from(productions)
+      .where(and(...conds, eq(productions.status, dari)));
+    const kurang = await bahanKurangUntukProduksi(auth.company_id!, barisRencana);
+    // Peringatan (bukan blokir) — lihat jalur items di atas. paksa=true lewati.
+    if (kurang.length > 0 && !paksa) {
+      throw new TahapDitolak("bahan_kurang", pesanBahanKurang(kurang));
+    }
+  }
+
+  // EXP LOT (jalur non-items): saat seluruh faktur TIBA/SELESAI
+  // (ke="menunggu"), isi exp otomatis = hari ini + masa simpan bahan bila
+  // belum ada. Auto-confirm dua-langkah di bawah tidak menyentuh expDate.
+  const [compTz] = await db
+    .select({ timezone: companies.timezone })
+    .from(companies)
+    .where(eq(companies.id, auth.company_id!));
+  const hariMasukPenuh = tanggalDi(compTz?.timezone ?? "Asia/Jakarta");
+
+  const rows = await db.transaction(async (tx) => {
+    const diperbarui = await tx
+      .update(productions)
+      .set({
+        status: ke,
+        updatedBy: auth.sub,
+        updatedAt: new Date(),
+        // yang MULAI mengerjakan/memproses menugaskan dirinya — produksi
+        // (pelaksana) maupun beli (pemroses belanja tercatat)
+        ...(ke === "dikerjakan"
+          ? { workerId: sql`COALESCE(${productions.workerId}, ${auth.sub}::uuid)` }
+          : {}),
+        // beli mulai DIPROSES: transaksi tercatat ke supplier UTAMA bahan
+        // (hanya baris yang belum menyebut supplier) — dasar kartu supplier
+        ...(tipe === "beli" && ke === "dikerjakan"
+          ? {
+              supplierId: sql`COALESCE(${productions.supplierId}, (SELECT isup.supplier_id FROM ingredient_suppliers isup WHERE isup.ingredient_id = ${productions.ingredientId} AND isup.is_utama LIMIT 1))`,
+            }
+          : {}),
+        // masuk stok: exp otomatis dari masa simpan bahan (PG: date + int)
+        ...(ke === "menunggu"
+          ? {
+              expDate: sql`COALESCE(${productions.expDate}, (SELECT CASE WHEN i.masa_simpan_hari > 0 THEN ${hariMasukPenuh}::date + i.masa_simpan_hari END FROM ingredients i WHERE i.id = ${productions.ingredientId}))`,
+            }
+          : {}),
+        // masuk stok: rak simpan otomatis dari rak default bahan di cabang
+        // baris (Tempat Penyimpanan) — paritas dgn jalur items (rakBaris).
+        // Baris bertujuan cabang LAIN tetap tanpa rak (transit; di-auto-file
+        // saat diterima di cabang), rak yang sudah dipilih dipertahankan.
+        ...(ke === "menunggu"
+          ? {
+              storageLocationId: sql`COALESCE(${productions.storageLocationId}, CASE WHEN (${productions.tujuanBranchId} IS NULL OR ${productions.tujuanBranchId} = ${productions.branchId}) THEN (SELECT sli.storage_location_id FROM storage_location_ingredients sli JOIN storage_locations sl ON sl.id = sli.storage_location_id WHERE sli.ingredient_id = ${productions.ingredientId} AND sli.company_id = ${auth.company_id!} AND sl.branch_id = ${productions.branchId} LIMIT 1) END)`,
+            }
+          : {}),
+        // BELI bertujuan cabang: "menunggu" = barang TIBA DI CK — baris
+        // TETAP di CK; pengiriman ke cabang lewat POST /kirim terpisah
+        // (dengan dokumen kirim), baru muncul di Penerimaan cabang.
+      })
+      .where(and(...conds, eq(productions.status, dari)))
+      .returning({
+        id: productions.id,
+        branchId: productions.branchId,
+        ingredientId: productions.ingredientId,
+        qty: productions.qty,
+        tujuanBranchId: productions.tujuanBranchId,
+      });
+    // dikerjakan → menunggu = produksi SELESAI → konsumsi bahan mentah resep
+    if (tipe === "produksi" && ke === "menunggu") {
+      await catatKonsumsiProduksi(tx, auth.company_id!, diperbarui);
+    }
+    // CK-lokal (tujuan kosong ATAU = cabang sendiri) yang baru "menunggu" →
+    // LANGSUNG dikonfirmasi (stok masuk di CK), tanpa penerimaan/konfirmasi
+    // terpisah. Baris bertujuan cabang LAIN tetap "menunggu" → dikirim lalu
+    // diterima di cabang. (Invariant sama dengan saldo & penerimaan.)
+    if (ke === "menunggu") {
+      const lokal = diperbarui
+        .filter((r) => r.tujuanBranchId == null || r.tujuanBranchId === r.branchId)
+        .map((r) => r.id);
+      if (lokal.length > 0) {
+        const kini = new Date();
+        await tx
+          .update(productions)
+          .set({ status: "dikonfirmasi", confirmedBy: auth.sub, confirmedAt: kini, waktu: kini })
+          .where(
+            and(
+              inArray(productions.id, lokal),
+              eq(productions.status, "menunggu"),
+              isNull(productions.deletedAt),
+            ),
+          );
+      }
+    }
+    /*
+     * Penjaga "tak ada baris yang maju" DI DALAM transaksi, bukan sesudahnya.
+     * Melempar di sini me-rollback, dan itu justru yang benar: kalau tak satu
+     * pun baris berpindah tahap, tak ada uang yang boleh ikut tercatat.
+     */
+    if (diperbarui.length === 0) {
+      const [ada] = await tx
+        .select({ status: productions.status })
+        .from(productions)
+        .where(and(...conds))
+        .limit(1);
+      if (!ada) throw new HTTPException(404, { message: "Faktur tidak ditemukan" });
+      throw new HTTPException(400, {
+        message: `Tahap tidak berurutan: faktur berstatus "${ada.status}" — hanya bisa "${dari}" → "${ke}"`,
+      });
+    }
+    /*
+     * UANG MENYATU DENGAN PERPINDAHAN TAHAP — satu transaksi, bukan dua.
+     *
+     * Dulu kedua penulisan ini memakai `db` dan berjalan SESUDAH transaksinya
+     * commit. Bila salah satunya gagal (koneksi putus, timeout, constraint),
+     * fakturnya sudah terlanjur maju tahap sementara pencairannya tak tercatat
+     * sama sekali — dan itu TAK BISA diulang: percobaan kedua ditolak
+     * "Tahap tidak berurutan" karena statusnya sudah pindah. Uang yang
+     * benar-benar keluar lenyap dari pembukuan, hanya bisa dibetulkan lewat
+     * entri manual, kalau ada yang menyadarinya.
+     *
+     * Jalur maju-sebagian di atas sudah menulis `fakturDana` dengan `tx` sejak
+     * awal. Asimetri antara dua jalur di berkas yang sama itulah bugnya;
+     * sekarang keduanya menganut aturan yang sama.
+     *
+     * Log jejak SENGAJA tetap di luar transaksi (lihat sesudah blok ini):
+     * gagal mencatat log tidak boleh membatalkan perpindahan tahap dan
+     * pencairan yang sudah sah.
+     */
+    if (dana_cair != null) {
+      await tx.insert(fakturDana).values({
+        companyId: auth.company_id!,
+        branchId: diperbarui[0].branchId,
+        fakturId: fakturId,
+        nominal: dana_cair,
+        userId: auth.sub,
+      });
+    }
+    if (realisasi != null) {
+      await catatRealisasiDana(tx, {
+        companyId: auth.company_id!,
+        branchId: diperbarui[0].branchId,
+        fakturId: fakturId,
+        userId: auth.sub,
+        realisasi,
+        catatan: selisih_catatan,
+      });
+    }
+    return diperbarui;
+  });
+
+  {
+    const potongan = [`${rows.length} baris`];
+    if (dana_cair != null) potongan.push(`dana cair ${rpLog(dana_cair)}`);
+    if (realisasi != null) potongan.push(`realisasi ${rpLog(realisasi)}`);
+    await catatLogFaktur(db, {
+      companyId: auth.company_id!,
+      branchId: rows[0].branchId,
+      fakturId: fakturId,
+      jalur: tipe,
+      aksi: AKSI_TAHAP_LOG[tipe][ke],
+      detail: potongan.join(" · "),
+      userId: auth.sub,
+    });
+  }
+  return { ok: true, status: ke, jumlah_baris: rows.length };
+}
+
+
 function buatRuteTambahStok(tipe: JenisPengadaan) {
   return new Hono<AppEnv>()
     .post("/faktur", zValidator("json", FakturBody), async (c) => {
@@ -855,8 +1602,9 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
      */
     .post("/tahap/:fakturId", zValidator("json", TahapBody), async (c) => {
       const auth = c.get("auth");
-      const { ke, items, dana_cair, realisasi, selisih_catatan, tujuan_branch_id, tujuan_storage_id, paksa, client_ref, device_id } =
-        c.req.valid("json");
+      // Handler ini hanya butuh tiga: mana jalurnya (`items`) dan identitas
+      // permintaannya. Selebihnya dibaca masing-masing jalur dari `body`.
+      const { items, client_ref, device_id } = c.req.valid("json");
       /*
        * KLAIM ATOMIK sebelum eksekusi — endpoint ini TIDAK idempoten sendiri.
        *
@@ -887,710 +1635,19 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
           tipe: `tahap_${tipe}`,
         },
         async () => {
-
-        const conds = [
-          eq(productions.companyId, auth.company_id!),
-          eq(productions.fakturId, c.req.param("fakturId")),
-          eq(productions.tipe, tipe),
-          isNull(productions.deletedAt),
-        ];
-        if (terikatCabang(auth.role) && auth.branch_id) {
-          conds.push(eq(productions.branchId, auth.branch_id));
-        }
-
-        // ===== Maju sebagian (dropdown + penyesuaian per baris) =====
-        if (items) {
-          const target = URUTAN_TAHAP[ke];
-          // Siapa yang MULAI mengerjakan/memproses menugaskan dirinya (isi
-          // worker_id yang masih kosong) — berlaku kedua jalur: produksi
-          // (pelaksana work-order CK) maupun beli (pemroses belanja tercatat).
-          const selfAssign = ke === "dikerjakan";
-          const baris = await db
-            .select()
-            .from(productions)
-            .where(and(...conds));
-          if (baris.length === 0) {
-            throw new HTTPException(404, { message: "Faktur tidak ditemukan" });
+          const fakturId = c.req.param("fakturId");
+          const conds = [
+            eq(productions.companyId, auth.company_id!),
+            eq(productions.fakturId, fakturId),
+            eq(productions.tipe, tipe),
+            isNull(productions.deletedAt),
+          ];
+          if (terikatCabang(auth.role) && auth.branch_id) {
+            conds.push(eq(productions.branchId, auth.branch_id));
           }
-          const byId = new Map(baris.map((b) => [b.id, b]));
-
-          /**
-           * SATU PINTU: barang BERALAMAT hanya sah diterima lewat Penerimaan.
-           *
-           * `/tahap` bisa melompatkan faktur langsung ke "dikonfirmasi", dan itu
-           * memasukkan stok TANPA ada orang di cabang yang menekan Terima —
-           * padahal merekalah yang memegang barangnya. Akibatnya stok bertambah
-           * atas nama orang yang tak pernah melihat barangnya, dan bila kirimannya
-           * ternyata kurang/rusak tak ada satu pun jejak siapa yang menerimanya.
-           *
-           * Aturannya dibuat SAMA PERSIS dengan `/konfirmasi` (lihat blok di
-           * sana): punya `tujuan_branch_id` = kiriman = wajib lewat Penerimaan.
-           * Dua pintu dengan aturan berbeda hanya akan jadi lubang berikutnya.
-           *
-           * Tujuan diambil EFEKTIF — termasuk `tujuan_branch_id` yang baru dikirim
-           * di permintaan ini, supaya "pindahkan sekaligus konfirmasi" dalam satu
-           * panggilan tidak menyelinap lewat.
-           */
-          if (ke === "dikonfirmasi") {
-            const kena = items ? baris.filter((b) => items.some((it) => it.id === b.id)) : baris;
-            const beralamat = kena.find((b) => (tujuan_branch_id ?? b.tujuanBranchId) != null);
-            if (beralamat) {
-              throw new TahapDitolak(
-                "wajib_penerimaan",
-                "Kiriman beralamat ke cabang tidak bisa dikonfirmasi dari sini — barangnya harus DITERIMA di menu Penerimaan Barang oleh orang di cabang tujuan",
-              );
-            }
-          }
-
-          // BELI mulai DIPROSES: transaksi tercatat ke supplier UTAMA bahan
-          // (baris tanpa supplier diisi otomatis) — dasar kartu supplier.
-          const utamaByIng = new Map<string, string>();
-          if (tipe === "beli" && selfAssign) {
-            const utamaRows = await db
-              .select({
-                ingredientId: ingredientSuppliers.ingredientId,
-                supplierId: ingredientSuppliers.supplierId,
-              })
-              .from(ingredientSuppliers)
-              .where(
-                and(
-                  eq(ingredientSuppliers.companyId, auth.company_id!),
-                  eq(ingredientSuppliers.isUtama, true),
-                  inArray(ingredientSuppliers.ingredientId, [
-                    ...new Set(baris.map((b) => b.ingredientId)),
-                  ]),
-                ),
-              );
-            for (const r of utamaRows) utamaByIng.set(r.ingredientId, r.supplierId);
-          }
-          const supplierBaris = (b: (typeof baris)[number]) =>
-            b.supplierId ?? (b.tipe === "beli" ? (utamaByIng.get(b.ingredientId) ?? null) : null);
-
-          // Validasi seluruh permintaan dulu — semua-atau-tidak-sama-sekali.
-          const terpakai = new Set<string>();
-          for (const item of items) {
-            if (terpakai.has(item.id)) {
-              throw new HTTPException(400, { message: "Baris yang sama dikirim dua kali" });
-            }
-            terpakai.add(item.id);
-            const b = byId.get(item.id);
-            if (!b) {
-              throw new HTTPException(400, { message: "Ada baris yang bukan milik faktur ini" });
-            }
-            if (b.status === "ditolak" || URUTAN_TAHAP[b.status] >= target) {
-              throw new HTTPException(400, {
-                message: `Baris berstatus "${b.status}" tidak bisa dipindah ke "${ke}" — tahap hanya bisa maju`,
-              });
-            }
-            // (Barang bertujuan cabang sudah ditolak lebih awal oleh pengaman
-            // SATU PINTU di atas — lihat blok "ke === dikonfirmasi" sebelum loop
-            // ini. Sengaja tidak diulang di sini: dua pemeriksaan untuk satu
-            // aturan hanya menunggu untuk saling menyimpang.)
-            // Qty maju SENGAJA boleh melebihi qty baris: RAB itu RENCANA, bukan
-            // pagu. Sayur direncanakan 900 gr tapi hanya dijual per kilo → yang
-            // benar-benar dibeli 1.000 gr, dan angka itulah yang harus tercatat.
-            // Hal yang sama berlaku pada produksi (hasil sering lebih/kurang dari
-            // target). Yang dibatasi hanya qty ≤ 0, dijaga skema Zod.
-          }
-
-          // PENGAMAN BAHAN BAKU (produksi): sebelum baris rencana MULAI dikerjakan
-          // (target ≥ dikerjakan), pastikan bahan mentah resepnya cukup di cabang
-          // pelaksana — jangan mulai produksi bila bahannya belum ada/diterima.
-          if (tipe === "produksi" && target >= URUTAN_TAHAP.dikerjakan) {
-            const cekRows = items
-              .map((it) => ({ b: byId.get(it.id)!, qty: it.qty }))
-              .filter(
-                ({ b }) =>
-                  URUTAN_TAHAP[b.status as keyof typeof URUTAN_TAHAP] < URUTAN_TAHAP.dikerjakan,
-              )
-              .map(({ b, qty }) => ({
-                id: b.id,
-                branchId: b.branchId,
-                ingredientId: b.ingredientId,
-                qty,
-              }));
-            const kurang = await bahanKurangUntukProduksi(auth.company_id!, cekRows);
-            // Peringatan (bukan blokir): bila bahan kurang & user belum menekan
-            // "tetap proses" (paksa), balikan 409 dgn daftar bahan kurang — UI
-            // menampilkannya lalu memberi opsi lanjut. paksa=true → lewati.
-            if (kurang.length > 0 && !paksa) {
-              throw new TahapDitolak("bahan_kurang", pesanBahanKurang(kurang));
-            }
-          }
-
-          // Tujuan kirim (opsional): baris yang maju pindah cabang dan/atau
-          // tempat penyimpanan — stok terhitung di cabang tujuan saat konfirmasi.
-          let tujuanBranch: string | null = null;
-          let tujuanNama: string | null = null;
-          if (tujuan_branch_id) {
-            const [cb] = await db
-              .select({
-                id: branches.id,
-                nama: branches.nama,
-                tipe: branches.tipe,
-                centralKitchenId: branches.centralKitchenId,
-              })
-              .from(branches)
-              .where(
-                and(eq(branches.id, tujuan_branch_id), eq(branches.companyId, auth.company_id!)),
-              );
-            if (!cb) throw new HTTPException(400, { message: "Cabang tujuan tidak valid" });
-            if (cb.tipe === "kantor") {
-              throw new HTTPException(400, {
-                message: "Kantor bukan tujuan kirim barang — pilih cabang store",
-              });
-            }
-            // Store terhubung ke SATU CK pemasok: CK lain tidak boleh mengirim
-            // ke store itu. Baris yang maju bisa lintas cabang → cek per pengirim.
-            if (cb.tipe === "store" && cb.centralKitchenId) {
-              const pengirimIds = [
-                ...new Set(items.map((it) => byId.get(it.id)!.branchId)),
-              ].filter((idCabang) => idCabang !== cb.id);
-              if (pengirimIds.length > 0) {
-                const pengirim = await db
-                  .select({ id: branches.id, tipe: branches.tipe })
-                  .from(branches)
-                  .where(inArray(branches.id, pengirimIds));
-                const ckLain = pengirim.find(
-                  (p) => p.tipe === "central_kitchen" && p.id !== cb.centralKitchenId,
-                );
-                if (ckLain) {
-                  throw new HTTPException(400, {
-                    message: `Cabang "${cb.nama}" terhubung ke Central Kitchen lain — kirim hanya dari CK pemasoknya`,
-                  });
-                }
-              }
-            }
-            tujuanBranch = cb.id;
-            tujuanNama = cb.nama;
-            // Khusus kasir, kitchen & bar: tak boleh lintas cabang. Karyawan CK
-            // (tim) justru tugasnya MENGIRIM ke store — validasi CK↔store di
-            // atas. Kitchen/bar memproduksi LOKAL untuk cabangnya sendiri.
-            if (
-              (auth.role === "cashier" || auth.role === "kitchen" || auth.role === "bar") &&
-              auth.branch_id &&
-              tujuanBranch !== auth.branch_id
-            ) {
-              throw new HTTPException(403, {
-                message: "Kasir/Kitchen/Bar tidak boleh mengirim ke cabang lain",
-              });
-            }
-          }
-          let tujuanStorage: string | null = null;
-          if (tujuan_storage_id) {
-            const [lok] = await db
-              .select({ id: storageLocations.id })
-              .from(storageLocations)
-              .where(
-                and(
-                  eq(storageLocations.id, tujuan_storage_id),
-                  eq(storageLocations.companyId, auth.company_id!),
-                  eq(storageLocations.branchId, tujuanBranch ?? baris[0].branchId),
-                ),
-              );
-            if (!lok) {
-              throw new HTTPException(400, {
-                message: "Tempat penyimpanan tidak valid untuk cabang tujuan",
-              });
-            }
-            tujuanStorage = tujuan_storage_id;
-          }
-          // Pindah cabang hanya berlaku saat barang benar-benar dikirim
-          // (>= menunggu). Pindah dini (mis. ke 'dikerjakan') membuat konsumsi
-          // bahan resep tercatat di cabang yang salah — abaikan tujuannya.
-          const bolehPindah = target >= URUTAN_TAHAP.menunggu;
-          /**
-           * Lewat `kolomPindahCabang`, JANGAN dirakit di sini.
-           *
-           * Dulu blok ini hanya mengisi `branchId` + `dariBranchId` dan LUPA
-           * `tujuanBranchId`. Akibatnya barang berpindah ke cabang tapi
-           * alamatnya tertinggal (kosong untuk produksi, cabang lain untuk
-           * beli), sehingga gerbang Penerimaan tak pernah mengenalinya:
-           * faktur berbunyi "Dikirim" tapi tak ada layar mana pun yang bisa
-           * menerimanya, dan stok cabang tak pernah bertambah.
-           */
-          const pindah = bolehPindah && tujuanBranch ? kolomPindahCabang(tujuanBranch) : {};
-
-          // RAK DEFAULT per bahan PER CABANG: saat barang TIBA/DISIMPAN
-          // (>= menunggu) di cabang tujuan, otomatis diletakkan di rak yang
-          // ditugaskan untuk bahan itu DI CABANG TUJUAN (diatur di Tempat
-          // Penyimpanan). Belanja pilih rak manual (tujuan_storage) jadi cadangan;
-          // tanpa keduanya → tanpa tempat (null). Penyimpanan terkelompok per rak
-          // otomatis, konsisten dgn penerimaan kiriman di cabang store.
-          const rakDefault = new Map<string, string>(); // `${ingredientId}|${branchId}` → rakId
-          {
-            const ingIds = [...new Set(baris.map((b) => b.ingredientId))];
-            const asg = await db
-              .select({
-                ingredientId: storageLocationIngredients.ingredientId,
-                rakId: storageLocationIngredients.storageLocationId,
-                rakBranch: storageLocations.branchId,
-              })
-              .from(storageLocationIngredients)
-              .innerJoin(
-                storageLocations,
-                eq(storageLocations.id, storageLocationIngredients.storageLocationId),
-              )
-              .where(
-                and(
-                  eq(storageLocationIngredients.companyId, auth.company_id!),
-                  inArray(storageLocationIngredients.ingredientId, ingIds),
-                ),
-              );
-            for (const r of asg) rakDefault.set(`${r.ingredientId}|${r.rakBranch}`, r.rakId);
-          }
-          /** rak simpan untuk baris yang maju (>= menunggu): rak manual (bila
-           * dipilih) menang, lalu rak default bahan DI CABANG SENDIRI (barang
-           * tiba/disimpan lokal, mis. CK-local). Kiriman LINTAS-CABANG tidak
-           * di-auto-file di sini — rak default cabang tujuan diterapkan saat
-           * DITERIMA di cabang (autoFileRakCabang), bukan saat dikirim; sampai
-           * itu tetap tanpa tempat (barang masih transit). */
-          const rakBaris = (b: (typeof baris)[number]) => {
-            if (tujuanStorage) return tujuanStorage;
-            if (tujuanBranch && tujuanBranch !== b.branchId) return b.storageLocationId;
-            return rakDefault.get(`${b.ingredientId}|${b.branchId}`) ?? b.storageLocationId;
-          };
-
-          // EXP LOT: saat baris MASUK STOK (>= menunggu: beli Tiba / produksi
-          // Selesai), exp otomatis = tanggal masuk + masa simpan bahan (master),
-          // bisa di-override per baris (items[].exp). Baris yang sudah ber-exp
-          // dipertahankan (mis. menunggu → dikonfirmasi tidak menggeser exp).
-          const masukStok = target >= URUTAN_TAHAP.menunggu;
-          const masaSimpanByIng = new Map<string, number>();
-          let hariMasuk = "";
-          if (masukStok) {
-            const [comp] = await db
-              .select({ timezone: companies.timezone })
-              .from(companies)
-              .where(eq(companies.id, auth.company_id!));
-            hariMasuk = tanggalDi(comp?.timezone ?? "Asia/Jakarta");
-            const msRows = await db
-              .select({ id: ingredients.id, masaSimpan: ingredients.masaSimpanHari })
-              .from(ingredients)
-              .where(
-                and(
-                  eq(ingredients.companyId, auth.company_id!),
-                  inArray(ingredients.id, [...new Set(baris.map((b) => b.ingredientId))]),
-                ),
-              );
-            for (const r of msRows) masaSimpanByIng.set(r.id, r.masaSimpan);
-          }
-          const expBaris = (b: (typeof baris)[number], override?: string | null) => {
-            if (!masukStok) return b.expDate;
-            if (override) return override;
-            if (b.expDate) return b.expDate;
-            const ms = masaSimpanByIng.get(b.ingredientId) ?? 0;
-            return ms > 0 ? tambahHari(hariMasuk, ms) : null;
-          };
-
-          const now = new Date();
-          // Baris yang TIBA/SELESAI di cabang sendiri (tujuan kosong & tak dikirim
-          // ke cabang lain) LANGSUNG dikonfirmasi begitu mencapai "menunggu" → stok
-          // masuk di CK tanpa perlu penerimaan/konfirmasi terpisah (orang CK yang
-          // beli & produksi, jadi tak perlu konfirmasi lagi). Baris bertujuan cabang
-          // tetap "menunggu" → dikirim lalu diterima lewat Penerimaan cabang.
-          // "waktu" di-set saat konfirmasi (bukan saat RAB) agar stok masuk relatif
-          // ke opname terakhir.
-          const langsungMasuk = (b: (typeof baris)[number]) =>
-            ke === "menunggu" &&
-            // CK-lokal = tujuan kosong ATAU = cabang sendiri (invariant sama dengan
-            // saldo & penerimaan) — keduanya "tetap di cabang sendiri", tak dikirim.
-            (b.tujuanBranchId == null || b.tujuanBranchId === b.branchId) &&
-            (tujuanBranch == null || tujuanBranch === b.branchId);
-          const naikBaris = (b: (typeof baris)[number]) =>
-            ke === "dikonfirmasi" || langsungMasuk(b)
-              ? ({ status: "dikonfirmasi", confirmedBy: auth.sub, confirmedAt: now, waktu: now } as const)
-              : ({ status: ke, updatedBy: auth.sub, updatedAt: now } as const);
-
-          await db.transaction(async (tx) => {
-            if (dana_cair != null) {
-              await tx.insert(fakturDana).values({
-                companyId: auth.company_id!,
-                branchId: baris[0].branchId,
-                fakturId: c.req.param("fakturId"),
-                nominal: dana_cair,
-                userId: auth.sub,
-              });
-            }
-            // Baris PRODUKSI yang baru SELESAI dikerjakan pada transisi ini
-            // (melewati 'menunggu') → bahan mentah resep dikonsumsi dari stok
-            // cabang PELAKSANA (branch snapshot, sebelum pindah/kirim). Pada
-            // split, id = baris BARU yang maju (baris sisa mengonsumsi sendiri
-            // saat gilirannya maju nanti).
-            const selesaiProduksi: BarisProduksiSelesai[] = [];
-            const selesaiTahapIni = (b: (typeof baris)[number]) =>
-              b.tipe === "produksi" &&
-              URUTAN_TAHAP[b.status as keyof typeof URUTAN_TAHAP] < URUTAN_TAHAP.menunggu &&
-              target >= URUTAN_TAHAP.menunggu;
-            for (const item of items) {
-              const b = byId.get(item.id)!;
-              // BELI bertujuan cabang: "menunggu" = barang TIBA DI CK (semua
-              // belanjaan kumpul di CK dulu) — pengiriman ke cabang lewat
-              // tombol Kirim (POST /kirim) TERPISAH, dengan dokumen kirim.
-              // WHERE menuntut status DAN qty persis seperti saat dibaca: bila
-              // berubah oleh proses lain, update 0 baris → transaksi batal.
-              // qty ikut dikunci karena split TIDAK mengubah status baris asli —
-              // tanpa ini dua request paralel sama-sama lolos (qty menggelembung
-              // + konsumsi bahan dobel).
-              const kunci = and(
-                eq(productions.id, b.id),
-                eq(productions.status, b.status),
-                eq(productions.qty, b.qty),
-                isNull(productions.deletedAt),
-              );
-              // Qty realisasi ≥ rencana → SELURUH baris maju, tak ada sisa tugas.
-              // Bila lebih (beli 1.000 gr padahal RAB 900), qty baris diperbarui
-              // ke angka yang benar-benar terjadi.
-              if (item.qty >= b.qty - 1e-9) {
-                const lebih = item.qty > b.qty + 1e-9;
-                // Tanpa harga riil, harga RAB diskalakan mengikuti qty baru supaya
-                // harga per satuan tetap masuk akal. Angka hasil skala itu TAK
-                // PERNAH DILIHAT MANUSIA — walau harga awalnya diketik orang —
-                // jadi ia ditandai `harga_tebakan` agar tak ikut jadi bahan median
-                // harga acuan (invarian yang sama dengan perbaikan lingkaran umpan
-                // balik harga).
-                const hargaSkala =
-                  lebih && b.totalHarga != null
-                    ? Math.round((b.totalHarga * item.qty) / b.qty)
-                    : null;
-                const res = await tx
-                  .update(productions)
-                  .set({
-                    ...naikBaris(b),
-                    ...pindah,
-                    ...(lebih ? { qty: item.qty } : {}),
-                    ...(hargaSkala != null && item.harga == null
-                      ? { totalHarga: hargaSkala, hargaTebakan: true }
-                      : {}),
-                    // rak simpan otomatis (home rak per bahan) saat barang tiba/disimpan
-                    ...(bolehPindah ? { storageLocationId: rakBaris(b) } : {}),
-                    // self-assign pelaksana (isi hanya bila masih kosong)
-                    ...(selfAssign
-                      ? { workerId: sql`COALESCE(${productions.workerId}, ${auth.sub}::uuid)` }
-                      : {}),
-                    // beli diproses: catat transaksi ke supplier utama bahan
-                    ...(selfAssign && b.supplierId == null && supplierBaris(b) != null
-                      ? { supplierId: supplierBaris(b) }
-                      : {}),
-                    // harga riil menggantikan estimasi RAB (harga pasar berubah)
-                    // — angka yang dilihat manusia, jadi bukan tebakan lagi
-                    ...(item.harga != null ? { totalHarga: item.harga, hargaTebakan: false } : {}),
-                    // exp lot saat masuk stok (otomatis dari masa simpan / override)
-                    ...(masukStok ? { expDate: expBaris(b, item.exp) } : {}),
-                  })
-                  .where(kunci)
-                  .returning({ id: productions.id });
-                if (res.length === 0) {
-                  throw new TahapDitolak(
-                    "status_berubah",
-                    "Status faktur berubah — muat ulang halaman lalu coba lagi",
-                  );
-                }
-                if (selesaiTahapIni(b)) {
-                  selesaiProduksi.push({
-                    id: b.id,
-                    branchId: b.branchId,
-                    ingredientId: b.ingredientId,
-                    qty: item.qty,
-                  });
-                }
-              } else {
-                // Split: bagian yang maju jadi baris BARU; baris asli menyimpan
-                // sisa qty di tahap lama dengan prorata RAB-nya. Bagian yang maju
-                // memakai harga RIIL bila dikirim (harga pasar berubah), selain
-                // itu prorata — sehingga tanpa harga riil jumlah keduanya tetap
-                // = harga awal (tidak ada rupiah yang hilang/berlipat).
-                const hargaMaju =
-                  b.totalHarga != null ? Math.round((b.totalHarga * item.qty) / b.qty) : null;
-                const hargaBaris = item.harga ?? hargaMaju;
-                const res = await tx
-                  .update(productions)
-                  .set({
-                    qty: b.qty - item.qty,
-                    ...(b.totalHarga != null
-                      ? { totalHarga: b.totalHarga - (hargaMaju ?? 0) }
-                      : {}),
-                    updatedBy: auth.sub,
-                    updatedAt: now,
-                  })
-                  .where(kunci)
-                  .returning({ id: productions.id });
-                if (res.length === 0) {
-                  throw new TahapDitolak(
-                    "status_berubah",
-                    "Status faktur berubah — muat ulang halaman lalu coba lagi",
-                  );
-                }
-                const [barisMaju] = await tx
-                  .insert(productions)
-                  .values({
-                  companyId: b.companyId,
-                  ingredientId: b.ingredientId,
-                  qty: item.qty,
-                  tipe: b.tipe,
-                  totalHarga: hargaBaris,
-                  // harga riil → bukan tebakan; prorata mewarisi sifat induknya
-                  hargaTebakan: item.harga != null ? false : b.hargaTebakan,
-                  fakturId: b.fakturId,
-                  // pertahankan penanda permintaan agar baris hasil tahap (split)
-                  // tetap tergabung di "Data Permintaan Stok"
-                  rencanaId: b.rencanaId,
-                  noFaktur: b.noFaktur,
-                  supplierId: selfAssign ? supplierBaris(b) : b.supplierId,
-                  // rak simpan otomatis (home rak) saat maju ke tiba/disimpan; selain itu tetap
-                  storageLocationId: bolehPindah ? rakBaris(b) : b.storageLocationId,
-                  isBatch: b.isBatch,
-                  catatan: b.catatan,
-                  userId: b.userId,
-                  /**
-                   * Baris hasil "maju sebagian" adalah baris BARU, jadi seluruh
-                   * penanda induknya harus ikut disalin. Empat di antaranya dulu
-                   * tertinggal, masing-masing dengan akibatnya sendiri:
-                   *
-                   * - `untukBranchId` → tombol "Kirim hasil ke cabang" hilang,
-                   *   sisa barang jadi mengendap selamanya di CK;
-                   * - `asalBranchId`  → baris pecahan sebuah transfer BERHENTI
-                   *   mengurangi saldo CK (kebocoran saldo yang senyap);
-                   * - `bahanProduksi` → belanja bahan mentah tercampur dengan
-                   *   belanja produk jadi;
-                   * - `dariBranchId`  → pendeteksi kiriman menggantung jadi buta.
-                   */
-                  untukBranchId: b.untukBranchId,
-                  asalBranchId: b.asalBranchId,
-                  bahanProduksi: b.bahanProduksi,
-                  // Pindah cabang: alamat WAJIB ikut lokasi (lihat pindah.ts).
-                  // Tanpa tujuan/tak boleh pindah → tetap di cabangnya sendiri.
-                  ...(bolehPindah && tujuanBranch
-                    ? kolomBarisPindah(tujuanBranch, b.branchId)
-                    : { branchId: b.branchId, tujuanBranchId: b.tujuanBranchId, dariBranchId: b.dariBranchId }),
-                  workerId: b.workerId ?? (selfAssign ? auth.sub : null),
-                  prodDate: b.prodDate,
-                  // exp lot bagian yang maju; sisa split tetap exp lama (belum masuk)
-                  expDate: expBaris(b, item.exp),
-                  ...naikBaris(b),
-                })
-                  .returning({ id: productions.id });
-                if (selesaiTahapIni(b)) {
-                  selesaiProduksi.push({
-                    id: barisMaju.id,
-                    branchId: b.branchId,
-                    ingredientId: b.ingredientId,
-                    qty: item.qty,
-                  });
-                }
-              }
-            }
-            await catatKonsumsiProduksi(tx, auth.company_id!, selesaiProduksi);
-            if (realisasi != null) {
-              await catatRealisasiDana(tx, {
-                companyId: auth.company_id!,
-                branchId: baris[0].branchId,
-                fakturId: c.req.param("fakturId"),
-                userId: auth.sub,
-                realisasi,
-                catatan: selisih_catatan,
-              });
-            }
-            // jejak kegiatan: siapa mengubah tahap ini + uang/tujuan yang menyertai
-            const potongan = [`${items.length} baris`];
-            if (selfAssign) potongan.push(`oleh ${auth.nama}`);
-            if (dana_cair != null) potongan.push(`dana cair ${rpLog(dana_cair)}`);
-            if (realisasi != null) potongan.push(`realisasi ${rpLog(realisasi)}`);
-            if (tujuanNama) potongan.push(`tujuan: ${tujuanNama}`);
-            await catatLogFaktur(tx, {
-              companyId: auth.company_id!,
-              branchId: baris[0].branchId,
-              fakturId: c.req.param("fakturId"),
-              jalur: tipe,
-              aksi: AKSI_TAHAP_LOG[tipe][ke],
-              detail: potongan.join(" · "),
-              userId: auth.sub,
-            });
-          });
-          return { ok: true, status: ke, jumlah_baris: items.length };
-        }
-
-        // ===== Perilaku lama: seluruh faktur, wajib berurutan satu langkah =====
-        if (ke === "dikonfirmasi") {
-          throw new HTTPException(400, {
-            message: 'Sertakan "items" (baris terpilih) atau pakai endpoint /konfirmasi',
-          });
-        }
-        const dari = TAHAP_SEBELUM[ke];
-
-        // PENGAMAN BAHAN BAKU (produksi): seluruh faktur MULAI dikerjakan →
-        // pastikan bahan mentah resep tiap baris rencana cukup di cabang
-        // pelaksana sebelum produksi dimulai.
-        if (tipe === "produksi" && ke === "dikerjakan") {
-          const barisRencana = await db
-            .select({
-              id: productions.id,
-              branchId: productions.branchId,
-              ingredientId: productions.ingredientId,
-              qty: productions.qty,
-            })
-            .from(productions)
-            .where(and(...conds, eq(productions.status, dari)));
-          const kurang = await bahanKurangUntukProduksi(auth.company_id!, barisRencana);
-          // Peringatan (bukan blokir) — lihat jalur items di atas. paksa=true lewati.
-          if (kurang.length > 0 && !paksa) {
-            throw new TahapDitolak("bahan_kurang", pesanBahanKurang(kurang));
-          }
-        }
-
-        // EXP LOT (jalur non-items): saat seluruh faktur TIBA/SELESAI
-        // (ke="menunggu"), isi exp otomatis = hari ini + masa simpan bahan bila
-        // belum ada. Auto-confirm dua-langkah di bawah tidak menyentuh expDate.
-        const [compTz] = await db
-          .select({ timezone: companies.timezone })
-          .from(companies)
-          .where(eq(companies.id, auth.company_id!));
-        const hariMasukPenuh = tanggalDi(compTz?.timezone ?? "Asia/Jakarta");
-
-        const rows = await db.transaction(async (tx) => {
-          const diperbarui = await tx
-            .update(productions)
-            .set({
-              status: ke,
-              updatedBy: auth.sub,
-              updatedAt: new Date(),
-              // yang MULAI mengerjakan/memproses menugaskan dirinya — produksi
-              // (pelaksana) maupun beli (pemroses belanja tercatat)
-              ...(ke === "dikerjakan"
-                ? { workerId: sql`COALESCE(${productions.workerId}, ${auth.sub}::uuid)` }
-                : {}),
-              // beli mulai DIPROSES: transaksi tercatat ke supplier UTAMA bahan
-              // (hanya baris yang belum menyebut supplier) — dasar kartu supplier
-              ...(tipe === "beli" && ke === "dikerjakan"
-                ? {
-                    supplierId: sql`COALESCE(${productions.supplierId}, (SELECT isup.supplier_id FROM ingredient_suppliers isup WHERE isup.ingredient_id = ${productions.ingredientId} AND isup.is_utama LIMIT 1))`,
-                  }
-                : {}),
-              // masuk stok: exp otomatis dari masa simpan bahan (PG: date + int)
-              ...(ke === "menunggu"
-                ? {
-                    expDate: sql`COALESCE(${productions.expDate}, (SELECT CASE WHEN i.masa_simpan_hari > 0 THEN ${hariMasukPenuh}::date + i.masa_simpan_hari END FROM ingredients i WHERE i.id = ${productions.ingredientId}))`,
-                  }
-                : {}),
-              // masuk stok: rak simpan otomatis dari rak default bahan di cabang
-              // baris (Tempat Penyimpanan) — paritas dgn jalur items (rakBaris).
-              // Baris bertujuan cabang LAIN tetap tanpa rak (transit; di-auto-file
-              // saat diterima di cabang), rak yang sudah dipilih dipertahankan.
-              ...(ke === "menunggu"
-                ? {
-                    storageLocationId: sql`COALESCE(${productions.storageLocationId}, CASE WHEN (${productions.tujuanBranchId} IS NULL OR ${productions.tujuanBranchId} = ${productions.branchId}) THEN (SELECT sli.storage_location_id FROM storage_location_ingredients sli JOIN storage_locations sl ON sl.id = sli.storage_location_id WHERE sli.ingredient_id = ${productions.ingredientId} AND sli.company_id = ${auth.company_id!} AND sl.branch_id = ${productions.branchId} LIMIT 1) END)`,
-                  }
-                : {}),
-              // BELI bertujuan cabang: "menunggu" = barang TIBA DI CK — baris
-              // TETAP di CK; pengiriman ke cabang lewat POST /kirim terpisah
-              // (dengan dokumen kirim), baru muncul di Penerimaan cabang.
-            })
-            .where(and(...conds, eq(productions.status, dari)))
-            .returning({
-              id: productions.id,
-              branchId: productions.branchId,
-              ingredientId: productions.ingredientId,
-              qty: productions.qty,
-              tujuanBranchId: productions.tujuanBranchId,
-            });
-          // dikerjakan → menunggu = produksi SELESAI → konsumsi bahan mentah resep
-          if (tipe === "produksi" && ke === "menunggu") {
-            await catatKonsumsiProduksi(tx, auth.company_id!, diperbarui);
-          }
-          // CK-lokal (tujuan kosong ATAU = cabang sendiri) yang baru "menunggu" →
-          // LANGSUNG dikonfirmasi (stok masuk di CK), tanpa penerimaan/konfirmasi
-          // terpisah. Baris bertujuan cabang LAIN tetap "menunggu" → dikirim lalu
-          // diterima di cabang. (Invariant sama dengan saldo & penerimaan.)
-          if (ke === "menunggu") {
-            const lokal = diperbarui
-              .filter((r) => r.tujuanBranchId == null || r.tujuanBranchId === r.branchId)
-              .map((r) => r.id);
-            if (lokal.length > 0) {
-              const kini = new Date();
-              await tx
-                .update(productions)
-                .set({ status: "dikonfirmasi", confirmedBy: auth.sub, confirmedAt: kini, waktu: kini })
-                .where(
-                  and(
-                    inArray(productions.id, lokal),
-                    eq(productions.status, "menunggu"),
-                    isNull(productions.deletedAt),
-                  ),
-                );
-            }
-          }
-          /*
-           * Penjaga "tak ada baris yang maju" DI DALAM transaksi, bukan sesudahnya.
-           * Melempar di sini me-rollback, dan itu justru yang benar: kalau tak satu
-           * pun baris berpindah tahap, tak ada uang yang boleh ikut tercatat.
-           */
-          if (diperbarui.length === 0) {
-            const [ada] = await tx
-              .select({ status: productions.status })
-              .from(productions)
-              .where(and(...conds))
-              .limit(1);
-            if (!ada) throw new HTTPException(404, { message: "Faktur tidak ditemukan" });
-            throw new HTTPException(400, {
-              message: `Tahap tidak berurutan: faktur berstatus "${ada.status}" — hanya bisa "${dari}" → "${ke}"`,
-            });
-          }
-          /*
-           * UANG MENYATU DENGAN PERPINDAHAN TAHAP — satu transaksi, bukan dua.
-           *
-           * Dulu kedua penulisan ini memakai `db` dan berjalan SESUDAH transaksinya
-           * commit. Bila salah satunya gagal (koneksi putus, timeout, constraint),
-           * fakturnya sudah terlanjur maju tahap sementara pencairannya tak tercatat
-           * sama sekali — dan itu TAK BISA diulang: percobaan kedua ditolak
-           * "Tahap tidak berurutan" karena statusnya sudah pindah. Uang yang
-           * benar-benar keluar lenyap dari pembukuan, hanya bisa dibetulkan lewat
-           * entri manual, kalau ada yang menyadarinya.
-           *
-           * Jalur maju-sebagian di atas sudah menulis `fakturDana` dengan `tx` sejak
-           * awal. Asimetri antara dua jalur di berkas yang sama itulah bugnya;
-           * sekarang keduanya menganut aturan yang sama.
-           *
-           * Log jejak SENGAJA tetap di luar transaksi (lihat sesudah blok ini):
-           * gagal mencatat log tidak boleh membatalkan perpindahan tahap dan
-           * pencairan yang sudah sah.
-           */
-          if (dana_cair != null) {
-            await tx.insert(fakturDana).values({
-              companyId: auth.company_id!,
-              branchId: diperbarui[0].branchId,
-              fakturId: c.req.param("fakturId"),
-              nominal: dana_cair,
-              userId: auth.sub,
-            });
-          }
-          if (realisasi != null) {
-            await catatRealisasiDana(tx, {
-              companyId: auth.company_id!,
-              branchId: diperbarui[0].branchId,
-              fakturId: c.req.param("fakturId"),
-              userId: auth.sub,
-              realisasi,
-              catatan: selisih_catatan,
-            });
-          }
-          return diperbarui;
-        });
-
-        {
-          const potongan = [`${rows.length} baris`];
-          if (dana_cair != null) potongan.push(`dana cair ${rpLog(dana_cair)}`);
-          if (realisasi != null) potongan.push(`realisasi ${rpLog(realisasi)}`);
-          await catatLogFaktur(db, {
-            companyId: auth.company_id!,
-            branchId: rows[0].branchId,
-            fakturId: c.req.param("fakturId"),
-            jalur: tipe,
-            aksi: AKSI_TAHAP_LOG[tipe][ke],
-            detail: potongan.join(" · "),
-            userId: auth.sub,
-          });
-        }
-        return { ok: true, status: ke, jumlah_baris: rows.length };
+          // Dua PERINTAH yang berbeda, bukan satu perintah dengan sakelar.
+          const konteks: KonteksTahap = { auth, fakturId, tipe, conds, body: c.req.valid("json") };
+          return items ? tahapSebagian(konteks) : tahapSeluruhFaktur(konteks);
         },
       );
       return c.json(data);
