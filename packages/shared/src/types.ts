@@ -112,8 +112,36 @@ export interface BackupStatusDto {
   storage_mode: "r2" | "local";
   /** waktu cadangan sukses terakhir (ISO) atau null */
   terakhir_sukses: string | null;
+  /** peringatan "sudah terlalu lama tanpa cadangan" + kesiapan salurannya */
+  peringatan: PeringatanCadanganDto;
   /** riwayat 50 cadangan terakhir (terbaru dulu) */
   riwayat: BackupRunDto[];
+}
+
+/**
+ * Peringatan cadangan basi — DAN kesiapan saluran yang mengabarkannya.
+ *
+ * Dua-duanya dilaporkan karena kegagalan yang paling mahal bukan "cadangan
+ * tak jalan", melainkan "cadangan tak jalan DAN tak ada yang memberi tahu".
+ * Panel yang hanya menampilkan kartu merah mengandaikan ada yang membukanya;
+ * `email_siap`/`penerima` menjawab pertanyaan yang tak pernah sempat ditanya:
+ * kalau nanti gawat, ini sampai ke siapa?
+ */
+export interface PeringatanCadanganDto {
+  /** kondisi gawat sedang berlangsung */
+  gawat: boolean;
+  /** ambang hari tanpa cadangan sukses sebelum dianggap gawat; 0 = mati */
+  ambang_hari: number;
+  /** umur cadangan sukses terakhir dalam jam; null bila belum pernah sukses */
+  umur_jam: number | null;
+  /** sejak kapan sistem punya data (tenant pertama, ISO); acuan bila belum pernah sukses */
+  sejak: string | null;
+  /** waktu email peringatan terakhir dikirim (ISO); null bila tak ada peringatan aktif */
+  terakhir_dikirim: string | null;
+  /** penyedia email (SMTP/Resend) sudah terkonfigurasi */
+  email_siap: boolean;
+  /** jumlah super admin yang akan menerima email peringatan */
+  penerima: number;
 }
 
 /**

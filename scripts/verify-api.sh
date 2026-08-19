@@ -4826,6 +4826,22 @@ cek "status backup: jadwal harian jam 02 waktu tenant" "V == 1" \
   "$(echo "$STAT" | jq '(.jam_lokal==2) and ((.zona_waktu|length)>0) and (.berikutnya!=null) | if . then 1 else 0 end')"
 cek "status backup: jadwal berikutnya di masa depan & < 24 jam lagi" "V == 1" \
   "$(echo "$STAT" | jq --argjson now "$(date +%s)" '((.berikutnya|sub("\\.[0-9]+Z$";"Z")|fromdateiso8601) as $b | ($b > $now) and ($b - $now < 86400)) | if . then 1 else 0 end')"
+# PERINGATAN CADANGAN. Panel sudah lama memerah saat cadangan basi, tapi kartu
+# merah cuma bekerja pada orang yang MEMBUKA halamannya — dan halaman cadangan
+# adalah halaman yang dibuka orang ketika ia sudah butuh cadangannya. Sekarang
+# ada penjaga yang mengirim email; blok ini memastikan ambang yang dipakai panel
+# datang DARI SERVER, satu sumber dengan yang dipakai penjaga itu.
+cek "status backup: blok peringatan lengkap & ambangnya dari server" "V == 1" \
+  "$(echo "$STAT" | jq '(.peringatan|type=="object") and (.peringatan.ambang_hari>=1) and (.peringatan.sejak!=null) and (.peringatan|has("umur_jam")) and (.peringatan|has("email_siap")) | if . then 1 else 0 end')"
+# Baru saja dicadangkan → belum boleh gawat, dan tak boleh ada penanda kirim.
+cek "peringatan: cadangan segar → tidak gawat, tanpa email terkirim" "V == 1" \
+  "$(echo "$STAT" | jq '(.peringatan.gawat==false) and (.peringatan.umur_jam!=null) and (.peringatan.umur_jam<2) and (.peringatan.terakhir_dikirim==null) | if . then 1 else 0 end')"
+# Kesiapan SALURAN dilaporkan apa adanya. Peringatan yang tak punya jalan keluar
+# bukan peringatan — dan itu satu-satunya keadaan yang tak bisa diketahui dari
+# peringatan itu sendiri. Di CI belum ada SMTP, jadi email_siap=false; yang
+# diperiksa: super admin-nya terhitung sebagai penerima.
+cek "peringatan: super admin terhitung sebagai penerima" "V == 1" \
+  "$(echo "$STAT" | jq '.peringatan.penerima>=1 | if . then 1 else 0 end')"
 BK_TMP=$(mktemp /tmp/kakarut-bk.XXXXXX.gz)
 curl -s -H "Authorization: Bearer $SA" "$BASE/api/admin/sistem/backup/$BK_ID/unduh" -o "$BK_TMP"
 cek "unduh cadangan = gzip valid (magic 1f8b)" "V == 1" \

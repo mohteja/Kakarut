@@ -2281,6 +2281,27 @@ export const bootFlags = pgTable("boot_flags", {
 });
 
 /**
+ * Penanda "peringatan sudah dikirim" — satu baris per JENIS peringatan.
+ *
+ * Pemeriksanya berjalan tiap 5 menit; tanpa penanda ini, satu keadaan gawat
+ * yang berlangsung seminggu akan mengirim dua ribu email, dan yang menerimanya
+ * berhenti membaca email peringatan sebelum hari kedua.
+ *
+ * Sengaja di DATABASE, bukan di memori proses: keadaan gawat yang bertahan
+ * justru sering ditemani proses yang restart berkali-kali (deploy, crash-loop),
+ * dan penanda di memori ikut hilang tiap kali — mengembalikan persis banjir
+ * email yang hendak dicegah. Di database juga membuatnya benar saat lebih dari
+ * satu instance berjalan: klaimnya satu baris, jadi hanya satu yang menang.
+ *
+ * Barisnya DIHAPUS begitu keadaannya pulih, sehingga penanda yang ada selalu
+ * berarti "peringatan yang SEDANG berlangsung sudah dikabarkan".
+ */
+export const peringatanTerkirim = pgTable("peringatan_terkirim", {
+  key: text("key").primaryKey(),
+  terakhirAt: timestamp("terakhir_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
  * Buku besar idempotency untuk sinkron offline mobile (POST /api/sync).
  * Setiap perintah offline punya `client_ref` unik per perusahaan; hasil
  * eksekusi (sukses/gagal) disimpan agar retry dari perangkat aman

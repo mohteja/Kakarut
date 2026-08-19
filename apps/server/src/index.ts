@@ -11,6 +11,7 @@ import { sekaliSaja } from "./lib/boot-flags";
 import { computeBuildId, setBuildId } from "./lib/build";
 import { bersihkanRateLimitKedaluwarsa } from "./middleware/rateLimit";
 import { jadwalkanBackupOtomatis } from "./lib/backup";
+import { jadwalkanPeringatanCadangan } from "./lib/backup-peringatan";
 import { catatGalat, jadwalkanPangkasErrorLog } from "./lib/error-log";
 import { runMigrations } from "./db/migrate";
 import { backfillKodeMenu } from "./modules/menu/service";
@@ -254,6 +255,11 @@ setInterval(() => void bersihkanRateLimitKedaluwarsa(), 15 * 60_000).unref();
 // Pencadangan database otomatis ke storage (R2/lokal) — penjadwal berkala
 // (unref, advisory-lock; aman multi-instance). Nonaktifkan: BACKUP_ENABLED=false.
 jadwalkanBackupOtomatis();
+
+// Penjaga cadangan: kartu merah di panel hanya bekerja pada orang yang membuka
+// panelnya, dan halaman itu justru dibuka SETELAH cadangan dibutuhkan. Ini arah
+// sebaliknya — sistem yang mendatangi super admin lewat email.
+jadwalkanPeringatanCadangan();
 
 // Log galat platform (panel super admin): buang yang kedaluwarsa + kelebihan
 // kuota. Tanpa ini satu klien yang ngambek bisa menulis ratusan ribu baris.
