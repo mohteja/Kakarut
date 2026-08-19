@@ -386,6 +386,7 @@ export function toMenuDto(menu: MenuRow, katalog: KatalogMenu): MenuDto {
     base_mult: menu.baseMult,
     harga_jual: menu.hargaJual,
     image_url: menu.imageUrl,
+    target_durasi_detik: menu.targetDurasiDetik,
     is_active: menu.isActive,
     sort_order: menu.sortOrder,
     branch_ids: katalog.branchIdsByMenu.get(menu.id) ?? [],

@@ -77,6 +77,15 @@ export function MenuFormPage() {
   const [baseMenuId, setBaseMenuId] = useState("");
   const [baseMult, setBaseMult] = useState("2");
   const [hargaJual, setHargaJual] = useState("");
+  /*
+   * Target penyajian diketik dalam MENIT, disimpan dalam DETIK.
+   *
+   * Yang mengisinya memikirkan "sepuluh menit", bukan "600 detik"; kotak yang
+   * meminta detik akan diisi "10" oleh separuh orang dan target sepuluh detik
+   * membuat seluruh laporan berkata menu ini selalu terlambat. Kosong = tak
+   * ditetapkan, dan menu tanpa target tidak dinilai laporan durasi.
+   */
+  const [targetMenit, setTargetMenit] = useState("");
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [isActive, setIsActive] = useState(true);
   const [komponen, setKomponen] = useState<KomponenForm[]>([]);
@@ -100,6 +109,9 @@ export function MenuFormPage() {
     setBaseMenuId(m.base_menu_id ?? "");
     setBaseMult(teksAngka(m.base_mult ?? 2));
     setHargaJual(teksAngka(m.harga_jual));
+    setTargetMenit(
+      m.target_durasi_detik == null ? "" : teksAngka(Math.round(m.target_durasi_detik / 60)),
+    );
     setImageUrl(m.image_url);
     setIsActive(m.is_active);
     setKomponen(
@@ -250,6 +262,9 @@ export function MenuFormPage() {
         base_mult: tipe === "paket" ? angkaDari(baseMult) : null,
         harga_jual: angkaDari(hargaJual),
         image_url: imageUrl,
+        // Kosong → null (hapus target), bukan 0: server menolak 0 dan target
+        // nol tak punya arti apa pun.
+        target_durasi_detik: targetMenit.trim() ? angkaDari(targetMenit) * 60 : null,
         is_active: isActive,
         komponen: komponen
           .filter((k) => k.ingredient_id && angkaDari(k.qty) > 0)
@@ -441,6 +456,23 @@ export function MenuFormPage() {
                 >
                   Pakai saran
                 </button>
+              </div>
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium">
+                Target waktu penyajian (menit)
+              </label>
+              <input
+                type="text"
+                inputMode="numeric"
+                placeholder="kosongkan bila tak ditargetkan"
+                value={targetMenit}
+                onChange={(e) => setTargetMenit(e.target.value.replace(/\D/g, ""))}
+                className={inputClass}
+              />
+              <div className="mt-1 text-xs text-stone-500">
+                Dipakai Laporan Durasi Pesanan untuk menandai menu yang biasanya lewat.
+                Kosongkan bila menu ini tak perlu dinilai.
               </div>
             </div>
             <div>

@@ -204,3 +204,25 @@ export function urutkanPesanan<
     kunciUrutPesanan(b).localeCompare(kunciUrutPesanan(a)),
   );
 }
+
+/**
+ * Apakah menu ini BIASANYA melewati targetnya.
+ *
+ * Dasarnya MEDIAN, bukan rata-rata, dan itu keputusan yang menentukan berguna
+ * atau tidaknya seluruh bendera ini. Satu sajian yang lupa ditandai sampai
+ * tutup toko menarik rata-rata naik berjam-jam; bendera berbasis rata-rata
+ * akan menyala untuk menu yang sebenarnya baik-baik saja, dan bendera yang
+ * sering salah dimatikan orang — lalu tak menjaga apa pun saat benar.
+ *
+ * Pembandingnya `>` dan bukan `>=`: sajian yang selesai TEPAT pada targetnya
+ * memenuhi targetnya. Bendera yang menyala di angka yang persis dijanjikan
+ * membuat target mana pun mustahil dipenuhi.
+ *
+ * Target null/0 = belum ditetapkan → tak pernah menyala. Menuduh terlambat
+ * terhadap angka yang tak pernah dipilih siapa-siapa cuma melatih orang
+ * mengabaikan laporannya.
+ */
+export function lewatTargetDurasi(medianDetik: number, targetDetik: number | null): boolean {
+  if (targetDetik == null || targetDetik <= 0) return false;
+  return medianDetik > targetDetik;
+}

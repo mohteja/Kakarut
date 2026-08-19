@@ -50,6 +50,13 @@ const MenuCreateBody = z.object({
   base_mult: z.number().nonnegative().nullish(),
   harga_jual: z.number().nonnegative(),
   image_url: z.string().nullish(),
+  /**
+   * Target waktu penyajian (DETIK). null = tak ditetapkan → laporan durasi
+   * tak menilai menu ini. Batas atasnya 24 jam: target yang lebih panjang
+   * dari sehari pasti salah satuan, dan salah satuan di sini menghasilkan
+   * laporan yang selamanya berkata "aman".
+   */
+  target_durasi_detik: z.number().int().min(1).max(86_400).nullish(),
   komponen: z.array(KomponenBody).default([]),
   is_active: z.boolean().default(true),
   /** pembatasan lokasi (mode Pro) — null/[] = tampil di semua cabang */
@@ -84,6 +91,8 @@ const MenuUpdateBody = z.object({
   harga_jual: z.number().nonnegative().optional(),
   /** undefined = foto lama tetap; null = hapus foto */
   image_url: z.string().nullish(),
+  /** undefined = target lama tetap; null = hapus target */
+  target_durasi_detik: z.number().int().min(1).max(86_400).nullish(),
   /** undefined = resep lama tetap; [] = kosongkan resep */
   komponen: z.array(KomponenBody).optional(),
   is_active: z.boolean().optional(),
@@ -473,6 +482,7 @@ export const menuRoutes = new Hono<AppEnv>()
           baseMult: body.tipe === "paket" ? body.base_mult : null,
           hargaJual: body.harga_jual,
           imageUrl: body.image_url ?? null,
+          targetDurasiDetik: body.target_durasi_detik ?? null,
           isActive: body.is_active,
         })
         .onConflictDoNothing()
@@ -521,6 +531,7 @@ export const menuRoutes = new Hono<AppEnv>()
             baseMenuId: menus.baseMenuId,
             baseMult: menus.baseMult,
             imageUrl: menus.imageUrl,
+            targetDurasiDetik: menus.targetDurasiDetik,
             isActive: menus.isActive,
           })
           .from(menus)
@@ -540,6 +551,10 @@ export const menuRoutes = new Hono<AppEnv>()
           base_mult: body.base_mult === undefined ? lama.baseMult : body.base_mult,
           harga_jual: body.harga_jual ?? lama.hargaJual,
           image_url: body.image_url === undefined ? lama.imageUrl : body.image_url,
+          target_durasi_detik:
+            body.target_durasi_detik === undefined
+              ? lama.targetDurasiDetik
+              : body.target_durasi_detik,
           // hanya resep yang dikirim yang perlu divalidasi; resep lama sudah
           // tervalidasi saat disimpan dan tidak ikut ditulis ulang di bawah
           komponen: body.komponen ?? [],
@@ -564,6 +579,7 @@ export const menuRoutes = new Hono<AppEnv>()
             baseMult: efektif.tipe === "paket" ? efektif.base_mult : null,
             hargaJual: efektif.harga_jual,
             imageUrl: efektif.image_url ?? null,
+            targetDurasiDetik: efektif.target_durasi_detik ?? null,
             isActive: efektif.is_active,
             updatedAt: new Date(),
           })

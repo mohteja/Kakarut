@@ -1,6 +1,7 @@
 import { and, desc, eq, gte, isNotNull, isNull, lte, sql, sum } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
+import { lewatTargetDurasi } from "@kakarut/shared";
 import type {
   LaporanDurasiPesanan,
   LaporanHarian,
@@ -365,9 +366,21 @@ export const laporanRoutes = new Hono<AppEnv>()
      */
     const detik = sql<number>`GREATEST(0, EXTRACT(EPOCH FROM (${saleItems.pesananStatusAt} - ${saleItems.pesananMasukAt})))`;
 
+    /*
+     * TARGET per menu diambil lewat `menu_id`, bukan dicocokkan dari nama.
+     *
+     * Pengelompokan laporan ini memakai `menu_nama` (snapshot per baris jual)
+     * supaya angka historisnya tetap seperti saat transaksinya terjadi. Tapi
+     * TARGET adalah setelan HARI INI, dan menu yang pernah diganti namanya
+     * tak akan pernah cocok bila dicari dari nama snapshot itu — targetnya
+     * diam-diam terbaca null, dan menu yang paling sering disetel justru yang
+     * paling mungkin pernah diganti namanya.
+     */
     const perMenu = await db
       .select({
         menu_nama: saleItems.menuNama,
+        target: sql<number | null>`MAX(${menus.targetDurasiDetik})`,
+        lewat: sql<number>`COUNT(*) FILTER (WHERE ${menus.targetDurasiDetik} IS NOT NULL AND ${detik} > ${menus.targetDurasiDetik})::int`,
         jumlah: sql<number>`COUNT(*)::int`,
         rata: sql<number>`ROUND(AVG(${detik}))::int`,
         // Median ikut dibawa karena rata-rata sendirian menyesatkan di dapur:
@@ -380,6 +393,10 @@ export const laporanRoutes = new Hono<AppEnv>()
       })
       .from(saleItems)
       .innerJoin(sales, eq(saleItems.saleId, sales.id))
+      // LEFT: menu yang sudah dihapus dari katalog tetap punya riwayat durasi,
+      // dan riwayat yang menghilangkan barisnya sendiri lebih buruk daripada
+      // riwayat tanpa target.
+      .leftJoin(menus, eq(saleItems.menuId, menus.id))
       .where(filter)
       .groupBy(saleItems.menuNama)
       .orderBy(desc(sql`AVG(${detik})`));
@@ -415,14 +432,24 @@ export const laporanRoutes = new Hono<AppEnv>()
       .orderBy(desc(saleItems.pesananStatusAt), desc(saleItems.id))
       .limit(200);
 
-    const per_menu = perMenu.map((r) => ({
-      menu_nama: r.menu_nama,
-      jumlah: Number(r.jumlah ?? 0),
-      rata_detik: Number(r.rata ?? 0),
-      median_detik: Number(r.median ?? 0),
-      tercepat_detik: Number(r.tercepat ?? 0),
-      terlama_detik: Number(r.terlama ?? 0),
-    }));
+    const per_menu = perMenu.map((r) => {
+      const target = r.target == null ? null : Number(r.target);
+      const median = Number(r.median ?? 0);
+      return {
+        menu_nama: r.menu_nama,
+        jumlah: Number(r.jumlah ?? 0),
+        rata_detik: Number(r.rata ?? 0),
+        median_detik: median,
+        tercepat_detik: Number(r.tercepat ?? 0),
+        terlama_detik: Number(r.terlama ?? 0),
+        target_detik: target,
+        lewat_jumlah: Number(r.lewat ?? 0),
+        // Aturannya di @kakarut/shared supaya bisa DIJALANKAN ujinya — dan
+        // supaya kalau nanti layar dapur ikut menandai, ia memakai aturan yang
+        // sama persis, bukan salinan yang bergeser sendiri.
+        lewat_target: lewatTargetDurasi(median, target),
+      };
+    });
     const jumlah = per_menu.reduce((a, r) => a + r.jumlah, 0);
     const laporan: LaporanDurasiPesanan = {
       dari,
@@ -432,6 +459,8 @@ export const laporanRoutes = new Hono<AppEnv>()
       // menu yang terjual 200 porsi dan menu yang terjual 1 porsi tak boleh
       // sama beratnya.
       rata_detik: jumlah === 0 ? 0 : Math.round(per_menu.reduce((a, r) => a + r.rata_detik * r.jumlah, 0) / jumlah),
+      bertarget: per_menu.filter((r) => r.target_detik != null).length,
+      lewat_target: per_menu.filter((r) => r.lewat_target).length,
       per_menu,
       riwayat: riwayat.map((r) => ({
         nomor: r.nomor,

@@ -9321,6 +9321,54 @@ cek "§188 tak ada yang gagal keras (5xx)" "V == 0" \
 rm -rf "$T188"
 
 
+echo "== 189. Target waktu penyajian per menu =="
+# Laporan durasi sebelumnya cuma bisa berkata "rata-rata 7 menit". Angka itu tak
+# bisa ditindaklanjuti: ia menjawab "berapa lama", bukan "apakah itu terlalu
+# lama". Yang menjawabnya cuma target — dan target hanya masuk akal per MENU;
+# kopi dan iga bakar tak punya kesamaan apa pun soal ini.
+M189=$(api "$OWNER" GET /menu | jq -r '[.[]|select(.nama=="Menu Uji154")][0].id')
+N189=$(api "$OWNER" GET /menu | jq -r '[.[]|select(.nama=="Minum Uji154")][0].id')
+cek "dasar §189: menu §154 ketemu" "V == 1" \
+  "$(printf '%s' "$M189" | grep -Eqc '^[0-9a-f-]{36}$' && echo 1 || echo 0)"
+cek "menu baru default TANPA target" "V == 1" \
+  "$(api "$OWNER" GET /menu | jq --arg i "$M189" '[.[]|select(.id==$i)][0].target_durasi_detik==null|if . then 1 else 0 end')"
+cek "set target 300 detik → tersimpan" "V == 300" \
+  "$(api "$OWNER" PUT "/menu/$M189" '{"target_durasi_detik":300}' | jq -r '.target_durasi_detik')"
+# Batas atas 24 jam & minimum 1 detik: target yang lebih panjang dari sehari
+# pasti salah satuan, dan salah satuan menghasilkan laporan yang selamanya
+# berkata "aman".
+cek "target 0 ditolak" "V == 400" \
+  "$(status_code_body "$OWNER" PUT "/menu/$M189" '{"target_durasi_detik":0}')"
+cek "target 90000 (>24 jam) ditolak" "V == 400" \
+  "$(status_code_body "$OWNER" PUT "/menu/$M189" '{"target_durasi_detik":90000}')"
+# PUT di repo ini PARSIAL. Target yang hilang karena klien lain menyimpan harga
+# adalah kegagalan sunyi: laporannya cuma berhenti menilai, tanpa berubah rupa.
+api "$OWNER" PUT "/menu/$M189" '{"harga_jual":12000}' > /dev/null
+cek "PUT parsial tak menghapus target" "V == 300" \
+  "$(api "$OWNER" GET /menu | jq -r --arg i "$M189" '[.[]|select(.id==$i)][0].target_durasi_detik')"
+LAP189=$(api "$OWNER" GET "/laporan/durasi-pesanan?dari=2020-01-01&sampai=2030-01-01")
+cek "laporan membawa target menu yang ditetapkan" "V == 1" \
+  "$(echo "$LAP189" | jq '[.per_menu[]|select(.menu_nama=="Menu Uji154" and .target_detik==300)]|length')"
+cek "menu tanpa target dilaporkan null, bukan 0" "V == 1" \
+  "$(echo "$LAP189" | jq '[.per_menu[]|select(.target_detik==null)]|all(.lewat_target==false and .lewat_jumlah==0)|if . then 1 else 0 end')"
+cek "ringkasan: bertarget terhitung" "V == 1" \
+  "$(echo "$LAP189" | jq '(.bertarget>=1) and (.bertarget==([.per_menu[]|select(.target_detik!=null)]|length))|if . then 1 else 0 end')"
+# Sajian yang selesai seketika (uji ini) jauh di bawah 300 detik → tak boleh
+# ditandai lewat. Bendera yang menyala untuk yang memenuhi targetnya akan
+# dimatikan orang, lalu tak menjaga apa pun saat benar.
+cek "menu cepat TIDAK ditandai lewat target" "V == 1" \
+  "$(echo "$LAP189" | jq '[.per_menu[]|select(.menu_nama=="Menu Uji154")][0].lewat_target==false|if . then 1 else 0 end')"
+# Target dicari lewat menu_id, bukan dicocokkan dari NAMA: laporan mengelompok
+# per nama snapshot, dan menu yang pernah diganti namanya tak akan pernah cocok
+# bila dicari dari nama itu — targetnya diam-diam terbaca null.
+api "$OWNER" PUT "/menu/$M189" '{"nama":"Menu Uji154 Ganti"}' > /dev/null
+cek "target bertahan sesudah menu diganti nama" "V == 1" \
+  "$(api "$OWNER" GET "/laporan/durasi-pesanan?dari=2020-01-01&sampai=2030-01-01" | jq '[.per_menu[]|select(.menu_nama=="Menu Uji154" and .target_detik==300)]|length')"
+api "$OWNER" PUT "/menu/$M189" '{"nama":"Menu Uji154"}' > /dev/null
+cek "hapus target (null) → menu tak dinilai lagi" "V == 1" \
+  "$(api "$OWNER" PUT "/menu/$N189" '{"target_durasi_detik":null}' | jq '.target_durasi_detik==null|if . then 1 else 0 end')"
+
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"
