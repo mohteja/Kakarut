@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { MenuDto } from "@kakarut/shared";
 import { Card, ErrorText, PageTitle, Spinner, btnPrimary, btnSecondary } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
@@ -44,10 +45,34 @@ export function LihatMenuPage() {
   const { branchQuery, divisi } = useBranch();
   const queryClient = useQueryClient();
   /**
-   * Tata letak cetak. Bawaannya "kolom" karena itu yang MUAT untuk menu
-   * berukuran normal — lihat alasan lengkapnya di area cetak di bawah.
+   * APA yang sedang dicetak — dua keperluan berbeda, bukan dua gaya.
+   *
+   *   "menu"    dibaca TAMU sebelum memesan: butuh deskripsi & harga, dan harus
+   *             enak dibaca. Kepadatan mengalah pada keterbacaan.
+   *   "pesanan" diisi TAMU lalu diserahkan ke kasir: butuh kotak jumlah, dan
+   *             harus muat SATU lembar supaya tak ada yang tercecer. Deskripsi
+   *             tidak dibawa — tamu sudah membacanya di menu, dan justru
+   *             deskripsilah yang membuat lembar ini meluber.
+   *
+   * Disatukan dalam satu tombol, keduanya saling menarik ke arah berlawanan:
+   * yang satu jadi terlalu padat untuk dibaca, yang lain terlalu longgar untuk
+   * muat.
    */
-  const [tataLetak, setTataLetak] = useState<"kolom" | "kartu">("kolom");
+  const [cetak, setCetak] = useState<"menu" | "pesanan">("menu");
+  /**
+   * Mencetak SESUDAH React menggambar mode yang dipilih.
+   *
+   * `setCetak(...)` lalu `window.print()` berurutan akan mencetak mode yang
+   * LAMA: `window.print()` memblokir sebelum React sempat menggambar ulang, dan
+   * bugnya sunyi — yang keluar dari printer terlihat sah, cuma bukan yang
+   * diminta.
+   */
+  const [mintaCetak, setMintaCetak] = useState(false);
+  useEffect(() => {
+    if (!mintaCetak) return;
+    setMintaCetak(false);
+    window.print();
+  }, [mintaCetak]);
   const namaPerusahaan = auth?.company?.nama ?? "Terakasir";
 
   // Menu per lokasi: tampilkan hanya menu yang tersedia di cabang aktif.
@@ -141,17 +166,23 @@ export function LihatMenuPage() {
       <PageTitle
         aksi={
           <div className="flex flex-wrap gap-2">
-            <select
-              value={tataLetak}
-              onChange={(e) => setTataLetak(e.target.value as "kolom" | "kartu")}
-              className="rounded-lg border border-stone-300 px-2 py-2 text-sm text-stone-700"
-              aria-label="Tata letak cetak"
+            <button
+              onClick={() => {
+                setCetak("menu");
+                setMintaCetak(true);
+              }}
+              className={btnSecondary}
             >
-              <option value="kolom">1 lembar · 2 kolom</option>
-              <option value="kartu">2 kartu per lembar (potong tengah)</option>
-            </select>
-            <button onClick={() => window.print()} className={btnSecondary}>
-              🖨 Cetak Lembar Pesanan
+              🖨 Cetak Menu
+            </button>
+            <button
+              onClick={() => {
+                setCetak("pesanan");
+                setMintaCetak(true);
+              }}
+              className={btnSecondary}
+            >
+              📝 Cetak Kertas Pesanan
             </button>
             {dirty && (
               <button onClick={simpanUrutan} disabled={simpan.isPending} className={btnPrimary}>
@@ -165,13 +196,12 @@ export function LihatMenuPage() {
       </PageTitle>
       <div className="mb-4 text-sm text-stone-500">
         Menu siap jual &amp; harga jualnya. Atur <b>urutan (posisi)</b> menu dengan tombol ▲ / ▼,
-        lalu <b>Cetak Lembar Pesanan</b>. Tiap menu punya kotak jumlah untuk diisi tamu.
+        lalu cetak.
         <br />
         <span className="text-xs text-stone-400">
-          <b>1 lembar · 2 kolom</b> — daftarnya mengalir di dua kolom, muat untuk menu panjang.{" "}
-          <b>2 kartu per lembar</b> — satu A4 berisi dua lembar pesanan yang sama, tinggal dipotong
-          di garis putus-putus; cocok bila menunya pendek. Menu yang tak muat tidak akan terpotong,
-          ia mengalir ke lembar berikutnya.
+          <b>Cetak Menu</b> — daftar untuk DIBACA tamu: dua kolom, lengkap dengan deskripsi.{" "}
+          <b>Cetak Kertas Pesanan</b> — lembar untuk DIISI tamu: tiga kolom rapat berkotak jumlah,
+          tanpa deskripsi supaya muat satu lembar.
         </span>
       </div>
       {/*
@@ -252,93 +282,85 @@ export function LihatMenuPage() {
       )}
 
       {/*
-        Area cetak (A4/PDF) — hanya tampil saat mencetak.
+        Area cetak — DIPORTAL KE `document.body`, di luar shell aplikasi.
 
-        DUA TATA LETAK, dan pilihannya bukan selera:
+        Alasannya terukur, bukan gaya. CSS cetak memakai
+        `body * { visibility: hidden }`, dan `visibility` menyembunyikan TANPA
+        melepas ruangnya: shell aplikasi tetap setinggi 1.285mm, jadi dokumen
+        yang tercetak ikut setinggi itu — 5 halaman A4 untuk isi yang cuma
+        631mm. Halaman 3 sampai 5 kosong, dan tak ada yang tahu dari mana.
 
-        - "kolom": SATU lembar per salinan, daftarnya mengalir di dua kolom.
-        - "kartu": DUA kartu identik per lembar A4, tinggal dipotong tengah.
-
-        Yang menentukan panjang menunya. Menu 60-an item + kategorinya butuh
-        sekitar 76 baris; dijejalkan ke separuh A4 tingginya jatuh di bawah 3mm
-        per baris — terbaca hanya oleh yang sudah hafal. Di satu lembar penuh
-        dua kolom, baris yang sama dapat ~7mm dan nyaman dibaca tamu.
-
-        Karena itu bawaannya "kolom", dan "kartu" disediakan untuk menu pendek
-        yang memang muat — bukan sebaliknya.
-
-        Salinan pada mode "kartu" dirender DUA KALI, bukan disalin dengan CSS
-        transform: hanya render ulang yang menjamin isi keduanya identik saat
-        menunya mengalir ke halaman berikutnya, dan kartu yang isinya beda dari
-        pasangannya adalah kesalahan yang baru ketahuan sesudah tercetak dan
-        dibagikan.
+        Sebagai anak langsung `body`, ia bisa dipasangkan `#root { display:none }`
+        di media cetak (lihat `index.css`) yang benar-benar MELEPAS ruang itu.
       */}
-      <div id="menu-print" className="hidden text-black print:block" data-tata={tataLetak}>
-        {(tataLetak === "kartu" ? [0, 1] : [0]).map((salinan) => (
-          <section key={salinan} className="kartu-menu">
-            {/* Kepala satu baris: tiap milimeter di sini menggeser daftarnya
-                ke lembar kedua, dan lembar kedua yang isinya cuma beberapa menu
-                adalah kertas yang terbuang tiap kali dicetak. */}
-            <div className="mb-1.5 flex items-baseline justify-between gap-2 border-b border-black pb-1">
-              <span className="text-base font-bold leading-tight">{namaPerusahaan}</span>
-              <span className="text-[10px] font-semibold tracking-wide">
-                DAFTAR PESANAN · {formatTanggal(hariIniWIB())}
-              </span>
-            </div>
-            {/*
-              Baris identitas: tanpa ini lembar yang sudah diisi tamu tak bisa
-              dikembalikan ke mejanya. Garisnya border, bukan deretan titik —
-              titik ikut hilang bila browser merapatkan spasi.
-            */}
+      {createPortal(
+        <div id="menu-print" className="hidden text-black print:block" data-mode={cetak}>
+          <div className="mb-1.5 flex items-baseline justify-between gap-2 border-b border-black pb-1">
+            <span className="text-base font-bold leading-tight">{namaPerusahaan}</span>
+            <span className="text-[10px] font-semibold tracking-wide">
+              {cetak === "pesanan" ? "DAFTAR PESANAN" : "DAFTAR MENU"} ·{" "}
+              {formatTanggal(hariIniWIB())}
+            </span>
+          </div>
+          {/*
+            Baris identitas hanya pada KERTAS PESANAN: lembar yang diisi tamu
+            harus bisa dikembalikan ke mejanya. Menu tak diisi siapa pun, jadi di
+            sana baris ini cuma memakan tempat.
+          */}
+          {cetak === "pesanan" && (
             <div className="mb-2 flex gap-4 text-[10px]">
               <div className="flex-1 border-b border-neutral-500 pb-1.5">Nama</div>
               <div className="w-24 border-b border-neutral-500 pb-1.5">Meja</div>
             </div>
-            {/*
-              Kategori TIDAK boleh terbelah antar-kolom (`break-inside-avoid`).
-              Sempat kucoba membiarkannya terbelah demi memadatkan (1,28 → 1,05
-              halaman), tapi kolom berikutnya lalu dimulai oleh menu tanpa judul
-              di atasnya — pembacanya kehilangan konteks, dan ini lembar yang
-              dibaca TAMU. Padatnya pun tak berbuah: keduanya sama-sama butuh 2
-              lembar untuk menu berisi 60-an item.
-            */}
-            <div className="daftar-menu">
-              {grup.map((g) => (
-                <div key={g.id} className="mb-2 break-inside-avoid">
-                  <div className="judul-kategori mb-0.5 border-b border-black pb-px text-xs font-bold">
-                    {g.nama}
-                  </div>
-                  {(urutan[g.id] ?? []).map((id) => {
-                    const m = byId.get(id);
-                    if (!m) return null;
-                    return (
-                      // break-inside-avoid: isi menu tak boleh terpotong ke
-                      // kolom/halaman berikutnya, terpisah dari nama & harganya.
-                      <div key={id} className="break-inside-avoid py-[1.5px] text-[11px]">
-                        <div className="flex items-baseline gap-2">
-                          <span className="flex-1">{m.nama}</span>
-                          <span className="font-semibold whitespace-nowrap">
-                            {formatRupiah(m.harga_jual)}
-                          </span>
-                          {/* Kotak isian jumlah — inilah yang menggantikan tulis
-                              tangan. Paling kanan supaya seluruh kotak sejajar
-                              dan mudah dijumlah kasir. */}
+          )}
+          {/*
+            Kategori TIDAK boleh terbelah antar-kolom. Sempat kubiarkan terbelah
+            demi memadatkan, dan hasilnya terlihat langsung: kolom berikutnya
+            dimulai oleh menu tanpa judul di atasnya, jadi pembacanya kehilangan
+            konteks. Ini lembar yang dibaca TAMU.
+          */}
+          <div className="daftar-menu">
+            {grup.map((g) => (
+              <div key={g.id} className="mb-2 break-inside-avoid">
+                <div className="judul-kategori mb-0.5 border-b border-black pb-px text-xs font-bold">
+                  {g.nama}
+                </div>
+                {(urutan[g.id] ?? []).map((id) => {
+                  const m = byId.get(id);
+                  if (!m) return null;
+                  return (
+                    // break-inside-avoid: satu baris menu tak boleh terpisah
+                    // dari harganya, antar-kolom maupun antar-halaman.
+                    <div key={id} className="baris-menu break-inside-avoid text-xs">
+                      <div className="flex items-baseline gap-2">
+                        <span className="flex-1">{m.nama}</span>
+                        <span className="font-semibold whitespace-nowrap">
+                          {formatRupiah(m.harga_jual)}
+                        </span>
+                        {/* Kotak jumlah HANYA di kertas pesanan — inilah yang
+                            menggantikan tulis tangan. */}
+                        {cetak === "pesanan" && (
                           <span className="kotak-jumlah shrink-0" aria-hidden />
-                        </div>
-                        {m.deskripsi && (
-                          <div className="pr-[13mm] pl-3 text-[10px] leading-snug text-neutral-600">
-                            {m.deskripsi}
-                          </div>
                         )}
                       </div>
-                    );
-                  })}
-                </div>
-              ))}
-            </div>
-          </section>
-        ))}
-      </div>
+                      {/* Deskripsi HANYA di menu. Di kertas pesanan ia tak
+                          dibaca siapa pun (tamu sudah memilih) tapi memakan
+                          lebih dari separuh tinggi barisnya — dan itulah yang
+                          membuat lembar pesanan meluber ke halaman kedua. */}
+                      {cetak === "menu" && m.deskripsi && (
+                        <div className="pl-3 text-[10px] leading-snug text-neutral-600">
+                          {m.deskripsi}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        </div>,
+        document.body,
+      )}
     </div>
   );
 }
