@@ -829,6 +829,20 @@ export const menus = pgTable(
     baseMult: numeric("base_mult", { precision: 7, scale: 3, mode: "number" }),
     hargaJual: numeric("harga_jual", { precision: 12, scale: 2, mode: "number" }).notNull(),
     imageUrl: text("image_url"),
+    /**
+     * TARGET waktu penyajian (detik) — berapa lama menu ini SEHARUSNYA selesai,
+     * dihitung sejak pesanan masuk sampai ditandai selesai.
+     *
+     * NULL = belum ditetapkan, dan itu bawaan yang disengaja: laporan durasi
+     * tak boleh menuduh menu apa pun terlambat terhadap angka yang tak pernah
+     * dipilih siapa-siapa. Tanpa target, laporan cuma melaporkan; dengan
+     * target, ia bisa berkata "menu ini biasanya lewat".
+     *
+     * Kenapa per MENU dan bukan satu angka untuk seluruh dapur: kopi dan iga
+     * bakar tak punya kesamaan apa pun soal ini, dan target tunggal akan salah
+     * untuk keduanya sekaligus.
+     */
+    targetDurasiDetik: integer("target_durasi_detik"),
     isActive: boolean("is_active").notNull().default(true),
     sortOrder: integer("sort_order").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

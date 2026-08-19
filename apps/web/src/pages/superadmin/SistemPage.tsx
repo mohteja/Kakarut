@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { TemuanSetelanDto } from "@kakarut/shared";
 import { Card, ErrorText, PageTitle, Spinner, SpinnerAtauGalat, btnPrimary } from "../../components/ui";
 import { TabelResponsif } from "../../components/TabelResponsif";
 import { api } from "../../lib/api";
@@ -20,6 +21,7 @@ interface SistemStatus {
     terakhir_diterapkan: string | null;
     daftar: MigrationEntry[];
   };
+  pemeriksaan: TemuanSetelanDto[];
 }
 
 function InfoCard({ label, value, ok }: { label: string; value: string; ok?: boolean }) {
@@ -52,10 +54,38 @@ export function SistemPage() {
   if (!sistem) return <SpinnerAtauGalat error={error} apa="Status sistem" />;
 
   const m = sistem.migrations;
+  const temuan = sistem.pemeriksaan ?? [];
 
   return (
     <div className="max-w-3xl">
       <PageTitle>Sistem &amp; Migrasi Database</PageTitle>
+
+      {/*
+        Temuan ditaruh PALING ATAS, sebelum kartu status.
+        Semuanya berbentuk sama: setelannya sah, servernya menyala tanpa
+        keluhan, dan salahnya baru ketahuan berbulan-bulan kemudian. Yang
+        seperti itu tak boleh diletakkan di bawah tabel migrasi.
+      */}
+      {temuan.length > 0 && (
+        <div className="mb-5 space-y-2">
+          {temuan.map((t) => (
+            <div
+              key={t.kode}
+              className={`rounded-lg px-4 py-3 text-sm ${
+                t.tingkat === "kritis"
+                  ? "bg-red-50 text-red-800"
+                  : "bg-yellow-50 text-yellow-800"
+              }`}
+            >
+              <div className="font-bold">
+                {t.tingkat === "kritis" ? "⛔" : "⚠️"} {t.judul}
+              </div>
+              <div className="mt-1">{t.rincian}</div>
+              <div className="mt-1 font-semibold">→ {t.tindakan}</div>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <InfoCard

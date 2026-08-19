@@ -119,6 +119,25 @@ export interface BackupStatusDto {
 }
 
 /**
+ * Satu temuan pemeriksaan setelan (GET /admin/sistem).
+ *
+ * Semua yang dilaporkan lewat sini punya bentuk yang sama: setelannya SAH,
+ * servernya menyala tanpa keluhan, dan yang salah baru ketahuan berbulan-bulan
+ * kemudian. `tindakan` selalu diisi — temuan yang tak menyebutkan apa yang
+ * harus dilakukan hanya memindahkan pekerjaan menebak ke pembacanya.
+ */
+export interface TemuanSetelanDto {
+  /** pengenal stabil, mis. "superadmin_password_bawaan" */
+  kode: string;
+  /** kritis = kehilangan data atau lubang keamanan; peringatan = merosot diam-diam */
+  tingkat: "kritis" | "peringatan";
+  judul: string;
+  rincian: string;
+  /** langkah konkret yang menutup temuan ini */
+  tindakan: string;
+}
+
+/**
  * Peringatan cadangan basi — DAN kesiapan saluran yang mengabarkannya.
  *
  * Dua-duanya dilaporkan karena kegagalan yang paling mahal bukan "cadangan
@@ -481,6 +500,13 @@ export interface MenuDto {
   base_mult: number | null;
   harga_jual: number;
   image_url: string | null;
+  /**
+   * Target waktu penyajian (DETIK) — berapa lama menu ini seharusnya selesai
+   * sejak pesanan masuk. null = belum ditetapkan, dan laporan durasi tidak
+   * menilai menu tanpa target: menuduh terlambat terhadap angka yang tak
+   * pernah dipilih siapa-siapa cuma melatih orang mengabaikan laporannya.
+   */
+  target_durasi_detik: number | null;
   is_active: boolean;
   sort_order: number;
   /** pembatasan lokasi (mode Pro) — [] = tampil di semua cabang */
@@ -1580,6 +1606,24 @@ export interface DurasiMenuRow {
   median_detik: number;
   tercepat_detik: number;
   terlama_detik: number;
+  /** target penyajian menu ini (detik); null = belum ditetapkan */
+  target_detik: number | null;
+  /**
+   * Berapa porsi yang MELEWATI target. 0 bila tak ada target.
+   *
+   * Dilaporkan berdampingan dengan `lewat_target` karena keduanya menjawab
+   * pertanyaan berbeda: menu yang mediannya di bawah target tapi seperempat
+   * porsinya lewat punya masalah yang tak terlihat dari median saja.
+   */
+  lewat_jumlah: number;
+  /**
+   * Menu ini BIASANYA lewat target — dasarnya MEDIAN, bukan rata-rata.
+   *
+   * Satu pesanan yang lupa ditandai sampai tutup toko menarik rata-rata naik
+   * berjam-jam; bendera yang memakai rata-rata akan menyala untuk menu yang
+   * sebenarnya baik-baik saja, dan bendera yang sering salah akan diabaikan.
+   */
+  lewat_target: boolean;
 }
 
 /** Satu penyelesaian pesanan — siapa menandai apa, kapan, dan berapa lama. */
@@ -1608,6 +1652,10 @@ export interface LaporanDurasiPesanan {
   jumlah: number;
   /** rata-rata seluruh baris (detik); 0 bila tak ada yang terhitung */
   rata_detik: number;
+  /** banyaknya menu yang PUNYA target pada rentang ini */
+  bertarget: number;
+  /** banyaknya menu yang biasanya melewati targetnya (median > target) */
+  lewat_target: number;
   per_menu: DurasiMenuRow[];
   /** penyelesaian terbaru lebih dulu — dibatasi agar layar tak kebanjiran */
   riwayat: DurasiRiwayatRow[];
