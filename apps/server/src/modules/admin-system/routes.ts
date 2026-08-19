@@ -1,12 +1,12 @@
 import { zValidator } from "@hono/zod-validator";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { sql } from "drizzle-orm";
 import { z } from "zod";
-import type { BackupRunDto, BackupStatusDto, SmtpSettingsDto } from "@kakarut/shared";
+import { periksaCadangan, type BackupRunDto, type BackupStatusDto, type SmtpSettingsDto } from "@kakarut/shared";
 import { db } from "../../db/client";
-import { backupRuns, smtpSettings } from "../../db/schema";
+import { backupRuns, smtpSettings, users } from "../../db/schema";
 import { env } from "../../config/env";
 import { migrationStatus, runMigrations } from "../../db/migrate";
 import { getStorage } from "../upload/storage";
@@ -18,6 +18,7 @@ import {
   terapkanRetensi,
   zonaWaktuCadangan,
 } from "../../lib/backup";
+import { keadaanCadangan, peringatanTerakhir } from "../../lib/backup-peringatan";
 import { getSmtpRow, kirimEmail, penyediaEmail, ujiKoneksiSmtp, type SmtpRow } from "../mail/service";
 import type { AppEnv } from "../../middleware/auth";
 
@@ -101,6 +102,20 @@ export const adminSystemRoutes = new Hono<AppEnv>()
       .limit(50);
     const terakhir = await backupSuksesTerakhir();
     const zona = await zonaWaktuCadangan();
+    // Peringatan dihitung dengan aturan YANG SAMA dengan penjaga yang mengirim
+    // email (`periksaCadangan` di @kakarut/shared) — panel dan email tak boleh
+    // bisa berbeda pendapat soal kapan keadaan disebut gawat.
+    const keadaan = await keadaanCadangan();
+    const periksa = periksaCadangan(keadaan, Date.now());
+    const [smtp, penerima, dikirim] = await Promise.all([
+      getSmtpRow(),
+      db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(users)
+        .where(and(eq(users.isSuperAdmin, true), eq(users.isActive, true), isNull(users.deletedAt)))
+        .then((r) => r[0]?.n ?? 0),
+      peringatanTerakhir(),
+    ]);
     const status: BackupStatusDto = {
       aktif: env.BACKUP_ENABLED,
       jam_lokal: env.BACKUP_HOUR,
@@ -111,6 +126,15 @@ export const adminSystemRoutes = new Hono<AppEnv>()
       simpan: env.BACKUP_KEEP,
       storage_mode: getCadanganStorage().mode,
       terakhir_sukses: terakhir ? terakhir.toISOString() : null,
+      peringatan: {
+        gawat: periksa.gawat,
+        ambang_hari: keadaan.ambang_hari,
+        umur_jam: periksa.umur_jam,
+        sejak: keadaan.sejak,
+        terakhir_dikirim: dikirim ? dikirim.toISOString() : null,
+        email_siap: penyediaEmail(smtp) !== "none",
+        penerima,
+      },
       riwayat: rows.map(backupDto),
     };
     return c.json(status);

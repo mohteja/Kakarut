@@ -108,10 +108,21 @@ export function BackupPage() {
   const jam = `${String(data.jam_lokal).padStart(2, "0")}:00`;
   const gagalTerakhir = data.riwayat.find((b) => b.status === "gagal");
   const suksesTerakhir = data.riwayat.find((b) => b.status === "sukses");
-  // Cadangan terakhir yang lebih tua dari ~2 hari = jadwalnya tak jalan.
-  const basi =
-    !data.terakhir_sukses ||
-    Date.now() - new Date(data.terakhir_sukses).getTime() > 48 * 3_600_000;
+  /*
+   * Ambangnya DARI SERVER, bukan dihitung ulang di sini.
+   *
+   * Halaman ini dulu memakai "> 48 jam" tertulis tangan, sementara server tak
+   * punya pendapat apa pun karena belum ada yang mengirim peringatan. Sekarang
+   * ada penjaga yang mengirim email pada ambang `BACKUP_ALERT_DAYS`, dan dua
+   * angka yang ditulis di dua tempat pasti bergeser: panel hijau sementara
+   * email berbunyi (atau sebaliknya) adalah keadaan yang mustahil ditebak
+   * penyebabnya oleh yang melihatnya.
+   */
+  const p = data.peringatan;
+  const basi = p.gawat;
+  // Peringatan yang tak punya jalan keluar = tak ada peringatan. Ini yang
+  // membedakan "sudah dikabari" dari "mengira sudah dikabari".
+  const saluranMati = p.ambang_hari > 0 && (!p.email_siap || p.penerima === 0);
 
   return (
     <div className="max-w-4xl">
@@ -157,9 +168,31 @@ export function BackupPage() {
 
       {basi && (
         <div className="mb-3 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-800">
-          <b>Belum ada cadangan yang segar.</b> Cadangan sukses terakhir lebih dari 2 hari lalu
-          (atau belum pernah ada). Klik <b>Backup sekarang</b> dan periksa penyebabnya di daftar
-          di bawah.
+          <b>Belum ada cadangan yang segar.</b>{" "}
+          {p.umur_jam === null
+            ? "Sistem belum pernah punya cadangan sukses."
+            : `Cadangan sukses terakhir ${
+                p.umur_jam < 48 ? `${p.umur_jam} jam` : `${Math.floor(p.umur_jam / 24)} hari`
+              } lalu`}{" "}
+          (ambang: {p.ambang_hari} hari). Klik <b>Backup sekarang</b> dan periksa penyebabnya di
+          daftar di bawah.
+          {p.terakhir_dikirim && (
+            <>
+              {" "}
+              Email peringatan terakhir dikirim {fmtWaktu(p.terakhir_dikirim, data.zona_waktu)}.
+            </>
+          )}
+        </div>
+      )}
+
+      {saluranMati && (
+        <div className="mb-3 rounded-lg bg-yellow-50 px-4 py-3 text-sm text-yellow-800">
+          <b>Peringatan cadangan tak akan sampai ke siapa pun.</b>{" "}
+          {!p.email_siap
+            ? "Email belum dikonfigurasi (SMTP kosong & tanpa Resend)."
+            : "Tidak ada super admin aktif sebagai penerima."}{" "}
+          Halaman ini cuma bekerja pada yang membukanya — dan halaman cadangan biasanya dibuka
+          justru setelah cadangan dibutuhkan.
         </div>
       )}
 
