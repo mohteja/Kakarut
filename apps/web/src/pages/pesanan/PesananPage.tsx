@@ -1,6 +1,7 @@
 import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import {
+  durasiPesananDetik,
   ringkasPesanan,
   sajianBedaDariNota,
   urutkanPesanan,
@@ -14,7 +15,13 @@ import { Card, ErrorText, Modal, PageTitle, Spinner } from "../../components/ui"
 import { useAuth } from "../../context/AuthContext";
 import { useCabangData } from "../../context/BranchContext";
 import { api } from "../../lib/api";
-import { formatRupiah, formatTanggal, formatWaktu, hariIniWIB } from "../../lib/format";
+import {
+  formatDurasi,
+  formatRupiah,
+  formatTanggal,
+  formatWaktu,
+  hariIniWIB,
+} from "../../lib/format";
 
 const KOLOM: { status: PesananStatus; judul: string; warna: string }[] = [
   { status: "dikerjakan", judul: "🔥 Dikerjakan", warna: "border-orange-300 bg-orange-50" },
@@ -194,11 +201,30 @@ function BarisPesanan({
           {it.sajian_takeaway ? "🥡 Bawa pulang" : "🍽 Di tempat"}
         </button>
       </div>
-      {it.status_oleh && it.status_pada && (
-        <div className="mt-0.5 text-[10px] text-stone-400">
-          {it.status_oleh} · {formatWaktu(it.status_pada)}
-        </div>
-      )}
+      <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-[10px] text-stone-400">
+        {/*
+          Baris SELESAI menampilkan lama pengerjaannya; baris yang masih
+          dikerjakan menampilkan jam masuknya. Sengaja bukan penghitung yang
+          berdetak: papan ini menyala sepanjang shift, dan angka yang bergerak
+          terus menarik mata ke pesanan paling lama — padahal yang butuh
+          perhatian belum tentu itu.
+        */}
+        {it.durasi_detik != null ? (
+          <span
+            className="font-semibold text-stone-500"
+            title={`Masuk ${formatWaktu(it.masuk_pada)}`}
+          >
+            ⏱ {formatDurasi(it.durasi_detik)}
+          </span>
+        ) : (
+          it.status === "dikerjakan" && <span>masuk {formatWaktu(it.masuk_pada)}</span>
+        )}
+        {it.status_oleh && it.status_pada && (
+          <span>
+            {it.status_oleh} · {formatWaktu(it.status_pada)}
+          </span>
+        )}
+      </div>
     </li>
   );
 }
@@ -326,6 +352,11 @@ function KartuPesanan({
           Riwayat
         </button>
       </div>
+      {p.durasi_detik != null && (
+        <div className="mt-1.5 text-[11px] font-semibold text-emerald-700">
+          ⏱ Rampung dalam {formatDurasi(p.durasi_detik)}
+        </div>
+      )}
       {p.status_oleh && p.status_pada && (
         <div className="mt-1.5 text-[11px] text-stone-400">
           Terakhir: {p.status_oleh} · {formatWaktu(p.status_pada)}
@@ -480,6 +511,19 @@ export function PesananPage() {
     status_oleh: auth?.user.nama ?? null,
     status_pada: new Date().toISOString(),
   });
+  /**
+   * Baris yang baru ditandai, LENGKAP dengan durasinya.
+   *
+   * Tanpa menghitungnya di sini, baris yang baru diketuk tampil tanpa angka
+   * sampai refetch berikutnya — persis lompatan yang `terapkanOptimistis` di
+   * atas dibuat untuk mencegah. Rumusnya diambil dari `@kakarut/shared`, yang
+   * itu juga dipakai server: dua salinan akan melahirkan dua angka yang
+   * berselisih beberapa detik di layar yang sama.
+   */
+  const tandai = (it: PesananItemRow, status: PesananStatus): PesananItemRow => {
+    const baru = { ...it, status, ...jejak() };
+    return { ...baru, durasi_detik: durasiPesananDetik(baru) };
+  };
 
   const statusItem = useMutation({
     mutationKey: ["pesanan-aksi"],
@@ -490,7 +534,7 @@ export function PesananPage() {
       }),
     onMutate: (v) =>
       terapkanOptimistis(v.p, (it) =>
-        it.id === v.itemId ? { ...it, status: v.status, ...jejak() } : it,
+        it.id === v.itemId ? tandai(it, v.status) : it,
       ),
     onError: (_e, _v, ctx) => pulihkan(ctx),
     onSettled: segarkan,
@@ -530,7 +574,7 @@ export function PesananPage() {
       }),
     onMutate: (v) =>
       terapkanOptimistis(v.p, (it) =>
-        it.status === "dikerjakan" ? { ...it, status: "selesai", ...jejak() } : it,
+        it.status === "dikerjakan" ? tandai(it, "selesai") : it,
       ),
     onError: (_e, _v, ctx) => pulihkan(ctx),
     onSettled: segarkan,

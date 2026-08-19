@@ -1299,6 +1299,22 @@ export const saleItems = pgTable(
     pesananStatusAt: timestamp("pesanan_status_at", { withTimezone: true }),
     pesananStatusOleh: uuid("pesanan_status_oleh").references(() => users.id),
     /**
+     * KAPAN BARIS INI MASUK DAPUR — pangkal hitungan lama pengerjaan.
+     *
+     * Sengaja PER BARIS, bukan diambil dari `sales.waktu`. Baris yang lahir dari
+     * open bill membawa waktu aslinya (lihat `pesananMasukAt` di
+     * `open_bill_items`): pelanggan memesan ronde kedua pukul 21.00 pada bill
+     * yang dibuka pukul 19.00, dan menghitungnya sejak bill dibuka akan
+     * melaporkan dapur bekerja dua jam untuk satu gelas es teh.
+     *
+     * Bukan `defaultNow()` di tingkat kolom saja: `createSale` MENGOPER nilai
+     * ini dari baris bill asalnya, supaya membayar di tengah jalan tidak
+     * mengulang jamnya dari nol.
+     */
+    pesananMasukAt: timestamp("pesanan_masuk_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    /**
      * PENYAJIAN "bawa pulang" — SENGAJA terpisah dari `is_dine_in`.
      *
      * Keduanya menjawab pertanyaan berbeda dan tidak boleh disatukan:
@@ -1593,6 +1609,23 @@ export const openBillItems = pgTable(
     pesananStatus: pesananStatusEnum("pesanan_status").notNull().default("dikerjakan"),
     pesananStatusAt: timestamp("pesanan_status_at", { withTimezone: true }),
     pesananStatusOleh: uuid("pesanan_status_oleh").references(() => users.id),
+    /**
+     * KAPAN BARIS INI MASUK DAPUR — pangkal hitungan lama pengerjaan, dan
+     * inilah alasan kolomnya ada di sini alih-alih memakai `open_bills.created_at`.
+     *
+     * Satu bill hidup berjam-jam dan pesanannya datang bergelombang. Ronde
+     * kedua yang dipesan pukul 21.00 pada bill yang dibuka pukul 19.00 harus
+     * dihitung sejak 21.00; memakai waktu bill akan melaporkan dapur bekerja
+     * dua jam untuk satu gelas es teh, dan rata-rata per menu di laporan ikut
+     * tercemar.
+     *
+     * Diwarisi baris penjualan saat bill dibayar (`open_bill_item_id`), sama
+     * seperti `pesananStatus` — membayar di tengah jalan tak boleh mengulang
+     * jamnya dari nol.
+     */
+    pesananMasukAt: timestamp("pesanan_masuk_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
     /**
      * Penyajian "bawa pulang" per baris — ikut diwarisi baris penjualan saat
      * dibayar, dan di sanalah ia menjadi BASIS BIAYA (kemasan take away masuk

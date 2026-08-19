@@ -83,3 +83,25 @@ export function formatTanggalRingkas(iso: string): string {
     timeZone: "Asia/Jakarta",
   }).format(new Date(iso));
 }
+
+/**
+ * Lama pengerjaan yang enak dibaca orang dapur, bukan angka detik mentah.
+ *
+ * Ambangnya dipilih dari cara orang benar-benar menyebut waktu di outlet:
+ * di bawah semenit disebut detik, di bawah sejam disebut menit (detiknya tak
+ * menambah keputusan apa pun), sejam ke atas barulah jam. "4200 dtk" memaksa
+ * pembacanya berhitung; "1j 10m" tidak.
+ *
+ * `null` → "—", bukan "0 dtk". Nol berarti "keluar seketika", dan pesanan yang
+ * belum selesai atau tak pernah ditandai bukan pesanan yang seketika.
+ */
+export function formatDurasi(detik: number | null | undefined): string {
+  if (detik == null) return "—";
+  const d = Math.max(0, Math.round(detik));
+  if (d < 60) return `${d} dtk`;
+  const menit = Math.floor(d / 60);
+  if (menit < 60) return `${menit} mnt`;
+  const jam = Math.floor(menit / 60);
+  const sisa = menit % 60;
+  return sisa === 0 ? `${jam} jam` : `${jam}j ${sisa}m`;
+}

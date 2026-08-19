@@ -20,6 +20,9 @@ export function LaporanTabs() {
       <NavLink to="/laporan/menu-laris" className={tab}>
         🔥 Menu Terlaris
       </NavLink>
+      <NavLink to="/laporan/durasi-pesanan" className={tab}>
+        ⏱ Lama Pesanan
+      </NavLink>
     </div>
   );
 }

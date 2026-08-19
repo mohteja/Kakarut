@@ -6,7 +6,7 @@ import { Card, ErrorText, PageTitle, Spinner, btnSecondary, inputClass } from ".
 import { useAuth } from "../../context/AuthContext";
 import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
-import { formatRupiah, formatWaktu, hariIniWIB } from "../../lib/format";
+import { formatDurasi, formatRupiah, formatWaktu, hariIniWIB } from "../../lib/format";
 import { ReceiptModal, type SaleResult } from "./ReceiptModal";
 
 const METODE_LABEL: Record<string, string> = {
@@ -134,6 +134,25 @@ export function RiwayatPage() {
                 </div>
                 {r.konsumen && (
                   <div className="truncate text-xs font-medium text-orange-600">👤 {r.konsumen}</div>
+                )}
+                {/*
+                  Lama SELURUH pesanan rampung — dari sajian pertama masuk
+                  sampai yang terakhir keluar. Hanya muncul bila memang sudah
+                  rampung: transaksi yang dapurnya tak pernah menandai selesai
+                  TIDAK menampilkan "0 mnt", sebab nol berarti keluar seketika
+                  dan itu justru memuji kelalaian mencatat.
+                */}
+                {r.pesanan_durasi_detik != null && (
+                  <div
+                    className="truncate text-xs text-emerald-700"
+                    title={
+                      r.pesanan_selesai_pada
+                        ? `Semua sajian keluar ${formatWaktu(r.pesanan_selesai_pada)}`
+                        : undefined
+                    }
+                  >
+                    ⏱ rampung {formatDurasi(r.pesanan_durasi_detik)}
+                  </div>
                 )}
               </div>
               <div className="flex shrink-0 items-center gap-2">
