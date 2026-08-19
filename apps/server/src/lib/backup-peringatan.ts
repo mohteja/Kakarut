@@ -4,6 +4,9 @@ import { db } from "../db/client";
 import { backupRuns, companies, peringatanTerkirim, users } from "../db/schema";
 import { env } from "../config/env";
 import { getCadanganStorage } from "../modules/upload/backup-storage";
+// Arah impor SATU ARAH: `backup.ts` tak boleh mengimpor berkas ini. Penjaganya
+// dinyalakan dari `index.ts`, bukan dari dalam penjadwal cadangan.
+import { zonaWaktuCadangan } from "./backup";
 import { kirimEmail, penyediaEmail, getSmtpRow } from "../modules/mail/service";
 
 /**
@@ -99,10 +102,24 @@ async function klaimKirim(sekarang: Date): Promise<boolean> {
   return (res.rows?.length ?? 0) > 0;
 }
 
-function fmtUmur(umurJam: number | null, ambangHari: number): string {
-  if (umurJam === null) return `belum pernah ada cadangan sukses (lebih dari ${ambangHari} hari)`;
-  if (umurJam < 48) return `${umurJam} jam lalu`;
-  return `${Math.floor(umurJam / 24)} hari lalu`;
+/** "5 hari lalu" / "30 jam lalu" — di bawah 2 hari, jam lebih informatif. */
+function fraseUmur(umurJam: number): string {
+  return umurJam < 48 ? `${umurJam} jam lalu` : `${Math.floor(umurJam / 24)} hari lalu`;
+}
+
+/**
+ * Waktu dalam zona TENANT, bukan UTC.
+ *
+ * Yang membaca email ini akan membandingkannya dengan jam di dinding tokonya
+ * untuk menebak kapan hal itu mulai. "2026-08-14T10:28:42.910Z" memaksanya
+ * menghitung selisih zona lebih dulu — persis pada saat ia sedang panik.
+ */
+function fmtWaktu(d: Date, zona: string): string {
+  return new Intl.DateTimeFormat("id-ID", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: zona,
+  }).format(d);
 }
 
 function badanEmail(o: {
@@ -111,28 +128,42 @@ function badanEmail(o: {
   terakhirSukses: string | null;
   gagalTerakhir: { waktu: Date; error: string | null } | null;
   storageMode: string;
+  zona: string;
 }): { subject: string; html: string; text: string } {
-  const umur = fmtUmur(o.umurJam, o.ambangHari);
+  const pokok =
+    o.umurJam === null
+      ? "sistem ini BELUM PERNAH punya cadangan yang berhasil"
+      : `cadangan terakhir yang berhasil dibuat ${fraseUmur(o.umurJam)}`;
+  const ringkas =
+    o.umurJam === null
+      ? "belum pernah ada cadangan"
+      : `${fraseUmur(o.umurJam).replace(" lalu", "")} tanpa cadangan`;
+  const tujuan = o.storageMode === "r2" ? "Cloudflare R2" : "disk lokal";
   const tautan = env.APP_BASE_URL ? `${env.APP_BASE_URL.replace(/\/$/, "")}/superadmin/backup` : null;
   const barisGagal = o.gagalTerakhir
-    ? `Percobaan terakhir yang gagal: ${o.gagalTerakhir.waktu.toISOString()} — ${o.gagalTerakhir.error ?? "tanpa keterangan"}`
-    : "Tidak ada percobaan yang tercatat gagal — kemungkinan penjadwalnya sendiri tak berjalan.";
+    ? `Percobaan terakhir yang gagal: ${fmtWaktu(o.gagalTerakhir.waktu, o.zona)} — ${o.gagalTerakhir.error ?? "tanpa keterangan"}`
+    : "Tidak ada percobaan yang tercatat gagal — kemungkinan penjadwalnya sendiri yang tak berjalan.";
+  // Hanya ditulis bila ada isinya: saat belum pernah sukses, kalimat "belum ada
+  // satu pun cadangan" cuma mengulang kalimat pertama dengan kata lain.
+  const barisSukses = o.terakhirSukses
+    ? `Cadangan berhasil terakhir: ${fmtWaktu(new Date(o.terakhirSukses), o.zona)} (${o.zona}).`
+    : "";
   const text = [
-    `Cadangan database Terakasir: ${umur}.`,
-    o.terakhirSukses ? `Cadangan sukses terakhir: ${o.terakhirSukses}` : "Belum pernah ada cadangan sukses.",
+    `Cadangan database Terakasir tidak jalan — ${pokok}.`,
+    ...(barisSukses ? [barisSukses] : []),
     barisGagal,
-    `Tujuan penyimpanan: ${o.storageMode === "r2" ? "Cloudflare R2" : "disk lokal"}.`,
+    `Tujuan penyimpanan: ${tujuan}.`,
     "",
     "Selama ini berlangsung, data yang masuk tidak punya salinan mana pun.",
     tautan ? `Panel: ${tautan}` : "Buka panel super admin → Pencadangan Database.",
   ].join("\n");
   return {
-    subject: `⚠️ Cadangan database Terakasir tidak jalan (${umur})`,
+    subject: `⚠️ Cadangan database Terakasir tidak jalan — ${ringkas}`,
     html:
-      `<p><b>Cadangan database Terakasir ${umur}.</b></p>` +
-      `<p>${o.terakhirSukses ? `Cadangan sukses terakhir: <b>${o.terakhirSukses}</b>.` : "Sistem <b>belum pernah</b> punya cadangan sukses."}</p>` +
+      `<p><b>Cadangan database Terakasir tidak jalan</b> — ${pokok}.</p>` +
+      (barisSukses ? `<p>${barisSukses}</p>` : "") +
       `<p>${barisGagal}</p>` +
-      `<p>Tujuan penyimpanan: <b>${o.storageMode === "r2" ? "Cloudflare R2" : "disk lokal"}</b>.</p>` +
+      `<p>Tujuan penyimpanan: <b>${tujuan}</b>.</p>` +
       `<p>Selama ini berlangsung, data yang masuk <b>tidak punya salinan mana pun</b>.</p>` +
       (tautan
         ? `<p><a href="${tautan}">Buka panel pencadangan</a></p>`
@@ -160,7 +191,7 @@ export async function periksaPeringatanCadangan(sekarang = new Date()): Promise<
 
   if (!(await klaimKirim(sekarang))) return "sudah";
 
-  const [penerima, smtp, gagal] = await Promise.all([
+  const [penerima, smtp, gagal, zona] = await Promise.all([
     penerimaPeringatan(),
     getSmtpRow(),
     db
@@ -170,6 +201,7 @@ export async function periksaPeringatanCadangan(sekarang = new Date()): Promise<
       .orderBy(desc(backupRuns.waktu))
       .limit(1)
       .then((r) => r[0] ?? null),
+    zonaWaktuCadangan(),
   ]);
 
   const pesan = badanEmail({
@@ -178,6 +210,7 @@ export async function periksaPeringatanCadangan(sekarang = new Date()): Promise<
     terakhirSukses: keadaan.terakhir_sukses,
     gagalTerakhir: gagal,
     storageMode: getCadanganStorage().mode,
+    zona,
   });
 
   /*

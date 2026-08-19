@@ -146,7 +146,13 @@ describe("peringatan cadangan: terpasang & tak dihitung dua kali", () => {
   it("penjaganya dinyalakan saat boot", () => {
     // Fungsi yang benar tapi tak pernah dipanggil adalah bentuk kegagalan yang
     // paling sulit terlihat: seluruh ujinya hijau, dan tak ada yang berbunyi.
-    expect(baca("index.ts")).toContain("jadwalkanPeringatanCadangan()");
+    //
+    // Dijangkarkan ke AWAL BARIS. Versi pertama uji ini memakai `toContain`
+    // biasa, dan saat kubuktikan merah ternyata ia tetap hijau terhadap
+    // `// jadwalkanPeringatanCadangan();` — persis bentuk kecelakaan yang
+    // paling mungkin terjadi (dimatikan sebentar saat menelusuri sesuatu, lalu
+    // lupa dihidupkan lagi).
+    expect(baca("index.ts")).toMatch(/^jadwalkanPeringatanCadangan\(\);/m);
   });
 
   it("panel memakai keputusan SERVER, bukan ambang tulisan tangan", () => {
