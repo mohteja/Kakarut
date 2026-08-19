@@ -16,6 +16,7 @@ import { useAuth } from "../../context/AuthContext";
 import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah, formatWaktu } from "../../lib/format";
+import { AreaCetak } from "../../components/AreaCetak";
 
 /**
  * Satu FAKTUR beli perlengkapan (BP-) = kumpulan baris satu submit — tampilan
@@ -573,7 +574,7 @@ function DokumenRabPerlengkapanModal({
         </div>
       </Modal>
       {/* Kontainer khusus cetak — hanya dokumen yang tampil saat window.print() */}
-      <div id="dokumen-print" className="hidden print:block">
+      <AreaCetak id="dokumen-print">
         {isi(true)}
         <div className="mt-6 flex justify-between gap-4 text-xs">
           <div className="text-center">
@@ -585,7 +586,7 @@ function DokumenRabPerlengkapanModal({
             <div className="mt-10 border-t border-black px-8">( ………… )</div>
           </div>
         </div>
-      </div>
+      </AreaCetak>
     </>
   );
 }
