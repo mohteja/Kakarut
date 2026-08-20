@@ -10852,8 +10852,85 @@ cek "tanpa branch_id di payload → tetap jatuh ke cabang pertama (perilaku lama
   "$(sync208 "$OWNER" "{\"supply_id\":\"$SP208\",\"qty\":1}" > /dev/null; s208 "$CB208_1")"
 
 
+echo "== 210. Harga TEBAKAN tak boleh menentukan harga acuan =="
+# Faktur beli yang dibuat TANPA harga diisi qty × harga acuan saat itu dan
+# ditandai `harga_tebakan`. Kartu Riwayat Harga menghitung terendah, tertinggi,
+# median, dan rata-rata tertimbang — dan keempatnya dulu memasukkan tebakan.
+#
+# Kenapa itu berbahaya, dengan kalimat layarnya sendiri: "Median jadi harga
+# acuan RAB belanja — disinkron otomatis tiap Laporan Harga. Harga acuan itulah
+# dasar HPP resep & laba-rugi." Jadi angka yang ditampilkan adalah angka yang
+# pemilik salin jadi acuan, dan acuan itu yang menurunkan tebakan berikutnya:
+# acuan → tebakan → median → acuan.
+#
+# Terukur lewat API ini juga, sebelum perbaikan: satu pembelian nyata 20.000,
+# sisanya belanja tanpa harga → layar melaporkan Terendah 10.000 · Median
+# 15.000 · Rata 15.000. 10.000 tak pernah dibayar siapa pun — itu acuan lama
+# yang dikutip balik sistem seolah-olah sebuah pembelian. Menurutinya mengunci
+# acuan 25% di bawah satu-satunya harga yang nyata, permanen.
+B210=$(api "$OWNER" POST /bahan '{"nama":"Bahan Tebakan Uji 210","harga_beli":10000,"isi":1,"satuan":"pcs","pengadaan":"beli","track_stok":true}' | jq -r .id)
+beli210() { # beli210 <jumlah> [total_harga] → faktur_id, sudah dikonfirmasi
+  local F item="{\"ingredient_id\":\"$B210\",\"mode\":\"pcs\",\"jumlah\":$1"
+  # tanpa total_harga = persis jalan yang melahirkan tebakan
+  if [ -n "${2:-}" ]; then item="$item,\"total_harga\":$2"; fi
+  F=$(api "$OWNER" POST /pembelian/faktur "{\"items\":[$item}]}" | jq -r .faktur_id)
+  api "$OWNER" POST "/pembelian/tahap/$F" '{"ke":"dikerjakan"}' > /dev/null
+  api "$OWNER" POST "/pembelian/tahap/$F" '{"ke":"menunggu"}' > /dev/null
+  api "$OWNER" POST "/pembelian/konfirmasi/$F" > /dev/null
+  echo "$F"
+}
+F210A=$(beli210 10 200000)   # NYATA 20.000/pcs — satu-satunya harga yang dilihat orang
+beli210 10 > /dev/null       # tanpa harga → tebakan dari acuan (10.000/pcs)
+beli210 10 > /dev/null       # tanpa harga → tebakan lagi
+RH210=$(api "$OWNER" GET "/bahan/$B210/pembelian")
+
+cek "dasar §210: 3 lot tercatat, 2 di antaranya berharga TEBAKAN" "V == 1" \
+  "$(echo "$RH210" | jq '((.jumlah_pembelian==3) and ([.lots[]|select(.harga_tebakan)]|length==2))|if . then 1 else 0 end')"
+cek "lot tebakan TETAP ditampilkan (10.000/pcs), tidak disembunyikan" "V == 2" \
+  "$(echo "$RH210" | jq '[.lots[]|select(.harga_tebakan and .harga_satuan==10000)]|length')"
+cek "INTI: median = 20.000 — satu-satunya harga yang pernah dilihat orang" "V == 20000" \
+  "$(echo "$RH210" | jq '.harga_median')"
+cek "INTI: terendah BUKAN 10.000 — harga itu tak pernah dibayar siapa pun" "V == 20000" \
+  "$(echo "$RH210" | jq '.harga_terendah.harga')"
+cek "INTI: tertinggi 20.000" "V == 20000" "$(echo "$RH210" | jq '.harga_tertinggi.harga')"
+cek "INTI: rata-rata tertimbang 20.000 (salinan kedua yang juga lupa)" "V == 20000" \
+  "$(echo "$RH210" | jq '.harga_rata')"
+cek "statistiknya mengaku dari berapa harga: 1 dari 3 lot" "V == 1" \
+  "$(echo "$RH210" | jq '.jumlah_harga_nyata')"
+
+# ── PASANGAN: saringannya TIDAK menelan harga yang memang nyata ───────────
+# Arah sebaliknya, dan ia yang membuat asersi di atas berarti: saringan yang
+# terlalu rakus membuat statistiknya kosong selamanya — kegagalan yang jauh
+# lebih sunyi, sebab layar cuma menampilkan "—".
+beli210 10 300000 > /dev/null   # NYATA 30.000/pcs
+RH210B=$(api "$OWNER" GET "/bahan/$B210/pembelian")
+cek "PASANGAN: pembelian nyata kedua tetap menggerakkan statistiknya" "V == 1" \
+  "$(echo "$RH210B" | jq '((.harga_median==25000) and (.harga_tertinggi.harga==30000) and (.jumlah_harga_nyata==2))|if . then 1 else 0 end')"
+cek "PASANGAN: rata-rata tertimbang ikut naik ke 25.000" "V == 25000" \
+  "$(echo "$RH210B" | jq '.harga_rata')"
+
+# ── JANJI LAYARNYA, diuji sebagai janji ──────────────────────────────────
+# Layar menjanjikan median yang DITAMPILKAN itulah yang disinkron jadi acuan
+# saat Laporan Harga. Sebelum perbaikan keduanya beda: satu memakai kolam
+# bertebakan, satu tidak.
+MED210=$(echo "$RH210B" | jq -r '.harga_median')
+ROW210=$(api "$OWNER" GET "/pembelian?per_page=500" | jq -r --arg f "$F210A" '[.rows[]|select(.faktur_id==$f)][0].id')
+api "$OWNER" POST "/pembelian/laporan-harga/$F210A" "{\"items\":[{\"id\":\"$ROW210\",\"total_harga\":200000}]}" > /dev/null
+cek "JANJI LAYAR: acuan sesudah Laporan Harga = median yang ditampilkan" "V == 1" \
+  "$(api "$OWNER" GET /bahan | jq --arg id "$B210" --argjson m "$MED210" '([.[]|select(.id==$id)][0].harga_beli|round)==($m|round)|if . then 1 else 0 end')"
+
+# ── Perlengkapan tak punya jalur tebakan — statistiknya tak boleh berubah ──
+P210=$(api "$OWNER" POST /perlengkapan '{"nama":"Perlengkapan Uji 210","satuan":"pcs","harga_beli":500}' | jq -r .id)
+api "$OWNER" POST "/perlengkapan/$P210/masuk" '{"qty":10,"total_harga":10000}' > /dev/null
+api "$OWNER" POST "/perlengkapan/$P210/masuk" '{"qty":10,"total_harga":30000}' > /dev/null
+cek "perlengkapan: semua lot ditandai BUKAN tebakan & statistiknya utuh" "V == 1" \
+  "$(api "$OWNER" GET "/perlengkapan/$P210/pembelian" | jq '(([.lots[]|select(.harga_tebakan)]|length==0) and (.harga_median==2000) and (.harga_rata==2000) and (.jumlah_harga_nyata==2))|if . then 1 else 0 end')"
+
+
 echo
 echo "── §209 Rute mati: verify-api tak boleh memanggil endpoint yang TIDAK ADA ──"
+# Duduk PALING AKHIR di berkas ini walau nomornya bukan yang terbesar: ia baru
+# boleh menghakimi sesudah semua seksi lain menembakkan panggilannya.
 # Seksi ini mengadili berkas yang diisi `catat_rute_mati` (lihat catatan panjang
 # di dekat definisi `api`). Ia duduk di ekor skrip karena baru boleh menghakimi
 # sesudah semua seksi lain menembakkan panggilannya.

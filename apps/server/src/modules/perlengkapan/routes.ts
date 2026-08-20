@@ -143,15 +143,11 @@ async function riwayatHargaPerlengkapan(
     supplier: null,
     no_faktur: null,
     nomor: r.nomor,
+    // `supply_mutations` tak punya jalur harga tebakan — tak ada padanan
+    // `hargaDefault()` di sini, jadi tiap harga yang ada memang diketik orang.
+    // Yang kosong tetap dilewati `statistikHargaLots` seperti sebelumnya.
+    harga_tebakan: false,
   }));
-  let sumHarga = 0;
-  let sumQty = 0;
-  for (const r of rows) {
-    if (r.totalHarga != null && r.qty > 0) {
-      sumHarga += r.totalHarga;
-      sumQty += r.qty;
-    }
-  }
   return {
     // perlengkapan tak berkemasan: isi 1, harga per satuan = harga beli
     item: {
@@ -162,7 +158,6 @@ async function riwayatHargaPerlengkapan(
       satuan_beli: null,
     },
     harga_terkini: item.hargaBeli,
-    harga_rata: sumQty > 0 ? Math.round((sumHarga / sumQty) * 100) / 100 : null,
     ...statistikHargaLots(lots),
     jumlah_pembelian: lots.length,
     lots,

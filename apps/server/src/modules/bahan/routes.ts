@@ -453,6 +453,7 @@ async function riwayatHargaBahan(
       tanggal: productions.prodDate,
       qty: productions.qty,
       totalHarga: productions.totalHarga,
+      hargaTebakan: productions.hargaTebakan,
       supplier: suppliers.nama,
       noFaktur: productions.noFaktur,
       nomor: dokumenNomor.nomorTeks,
@@ -486,16 +487,8 @@ async function riwayatHargaBahan(
     supplier: r.supplier,
     no_faktur: r.noFaktur,
     nomor: r.nomor,
+    harga_tebakan: r.hargaTebakan,
   }));
-  // rata-rata TERTIMBANG per satuan dari lot yang harganya sudah dilaporkan
-  let sumHarga = 0;
-  let sumQty = 0;
-  for (const r of rows) {
-    if (r.totalHarga != null && r.qty > 0) {
-      sumHarga += r.totalHarga;
-      sumQty += r.qty;
-    }
-  }
   return {
     item: {
       id: ing.id,
@@ -505,7 +498,10 @@ async function riwayatHargaBahan(
       satuan_beli: ing.satuanBeli,
     },
     harga_terkini: hargaPerUnit(ing.hargaBeli, ing.isi),
-    harga_rata: sumQty > 0 ? Math.round((sumHarga / sumQty) * 100) / 100 : null,
+    // Keempat angka statistik (termasuk rata-rata tertimbang) datang dari SATU
+    // tempat, dan tempat itu yang mengeluarkan lot tebakan — lihat catatan di
+    // `statistikHargaLots`. Menghitung salah satunya di sini lagi persis
+    // kesalahan yang baru saja dicabut.
     ...statistikHargaLots(lots),
     jumlah_pembelian: lots.length,
     lots,
