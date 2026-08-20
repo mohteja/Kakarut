@@ -48,7 +48,7 @@ import {
   permintaanOtomatisPerlengkapan,
   riwayatOpnamePerlengkapan,
   saldoPerlengkapan,
-  qtyPerlengkapanDalamJalan,
+  saldoDiRakPerlengkapan,
   saldoSatuPerlengkapan,
   sebaranPerlengkapan,
   setStatusOpnamePerlengkapan,
@@ -294,13 +294,11 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
          * "stok awal itu angka buku": angka buku yang disetel 0 pun tak boleh
          * turun lagi oleh kiriman yang sudah ikut dihitung di dalamnya.
          */
-        const dalamJalan = await qtyPerlengkapanDalamJalan(tx, auth.company_id!, branchId, [
+        const rak = await saldoDiRakPerlengkapan(tx, auth.company_id!, branchId, [
           ...target.keys(),
         ]);
         for (const [supplyId, qty] of target) {
-          const saldo =
-            (await saldoSatuPerlengkapan(supplyId, branchId, tx)) - (dalamJalan.get(supplyId) ?? 0);
-          const selisih = qty - saldo;
+          const selisih = qty - (rak.get(supplyId) ?? 0);
           if (selisih === 0) continue;
           await tx.insert(supplyMutations).values({
             companyId: auth.company_id!,
@@ -1065,7 +1063,10 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
           message: "Perlengkapan tidak ditemukan",
         });
       await terapkanKonsumsiOtomatis(auth.company_id!, branchId);
-      const saldo = await saldoSatuPerlengkapan(item.id, branchId);
+      // Angka RAK, bukan angka buku — pintu ketiga yang menanyakan hal yang
+      // sama. Lihat `saldoDiRakPerlengkapan`.
+      const saldo =
+        (await saldoDiRakPerlengkapan(db, auth.company_id!, branchId, [item.id])).get(item.id) ?? 0;
       const selisih = body.qty_fisik - saldo;
       if (selisih !== 0) {
         await db.insert(supplyMutations).values({

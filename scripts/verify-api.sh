@@ -10417,6 +10417,31 @@ api "$OWNER" POST "/perlengkapan/stok-awal?branch_id=$CK203" \
 cek "pasangan: stok awal tetap bekerja normal tanpa barang di jalan" "V == 25" \
   "$(saldo203 "$CK203" "$SPD203")"
 
+# ── PINTU KETIGA: koreksi fisik satu item ──────────────────────────────────
+# Ditemukan dengan menyapu SEMUA pemanggil saldo perlengkapan sesudah dua pintu
+# pertama diperbaiki — dan ia rusak identik. Ketiganya kini lewat
+# `saldoDiRakPerlengkapan`, satu fungsi bernama konsepnya, supaya pintu keempat
+# tak bisa lupa.
+SPE203=$(sp203 Koreksi)
+api "$OWNER" POST "/perlengkapan/stok-awal?branch_id=$CK203" \
+  "{\"items\":[{\"supply_id\":\"$SPE203\",\"qty\":10}]}" > /dev/null
+api "$OWNER" POST "/perlengkapan/$SPE203/minta?branch_id=$TK203" '{"qty":10,"catatan":"uji 203"}' > /dev/null
+cek "dasar: 10 berangkat, rak CK kosong" "V == 10" "$(jalan203 "$CK203" "$SPE203")"
+KOR203=$(api "$OWNER" POST "/perlengkapan/$SPE203/koreksi?branch_id=$CK203" \
+  '{"qty_fisik":0,"catatan":"rak kosong"}')
+cek "INTI: koreksi fisik 0 atas rak kosong → selisih 0" "V == 0" \
+  "$(echo "$KOR203" | jq '.selisih // 999')"
+cek "INTI: saldo CK tak tersentuh koreksi" "V == 10" "$(saldo203 "$CK203" "$SPE203")"
+KID203C=$(api "$OWNER" GET "/perlengkapan/kiriman?branch_id=$TK203" | jq -r '[.[]|select(.status=="dikirim")][0].id // empty')
+api "$OWNER" POST "/perlengkapan/kiriman/$KID203C/terima?branch_id=$TK203" > /dev/null
+cek "INTI: sesudah Terima, saldo CK 0 — BUKAN −10" "V == 0" "$(saldo203 "$CK203" "$SPE203")"
+cek "INTI: kekekalan — CK + Toko = 10" "V == 10" \
+  "$(python3 -c "print($(saldo203 "$CK203" "$SPE203") + $(saldo203 "$TK203" "$SPE203"))")"
+# Pasangan: koreksi tetap mengoreksi saat memang ada selisih.
+cek "pasangan: koreksi fisik 3 dari 0 → selisih +3" "V == 3" \
+  "$(api "$OWNER" POST "/perlengkapan/$SPE203/koreksi?branch_id=$CK203" '{"qty_fisik":3}' | jq '.selisih // 0')"
+cek "pasangan: saldonya benar-benar jadi 3" "V == 3" "$(saldo203 "$CK203" "$SPE203")"
+
 
 if [ "$FAIL" -gt 0 ]; then
   echo

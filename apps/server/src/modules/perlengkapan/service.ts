@@ -659,21 +659,10 @@ export async function buatOpnamePerlengkapan(params: {
   let jumlahSelisih = 0;
   let nomor: string | null = null;
   await db.transaction(async (tx) => {
-    const dalamJalan = await qtyPerlengkapanDalamJalan(tx, params.companyId, params.branchId, ids);
+    const rak = await saldoDiRakPerlengkapan(tx, params.companyId, params.branchId, ids);
     for (const it of params.items) {
       if (!adaId.has(it.supply_id)) continue;
-      const [{ saldo }] = await tx
-        .select({ saldo: sql<number>`COALESCE(SUM(${supplyMutations.qty}), 0)::float8` })
-        .from(supplyMutations)
-        .where(
-          and(
-            eq(supplyMutations.supplyId, it.supply_id),
-            eq(supplyMutations.branchId, params.branchId),
-            eq(supplyMutations.status, "disetujui"),
-          ),
-        );
-      // Yang seharusnya ada DI RAK: ledger dikurangi yang sudah berangkat.
-      const diRak = saldo - (dalamJalan.get(it.supply_id) ?? 0);
+      const diRak = rak.get(it.supply_id) ?? 0;
       const selisih = it.qty_fisik - diRak;
       if (Math.abs(selisih) < 1e-9) continue;
       await tx.insert(supplyMutations).values({
@@ -829,6 +818,55 @@ export async function qtyPerlengkapanDalamJalan(
     )
     .groupBy(supplyTransfers.supplyId);
   return new Map(rows.map((r) => [r.supplyId, Number(r.qty) || 0]));
+}
+
+/**
+ * Saldo yang SEHARUSNYA ADA DI RAK, per supply: ledger dikurangi barang yang
+ * sudah berangkat dari cabang ini dan belum ditekan Terima di tujuannya.
+ *
+ * SETIAP tempat yang membandingkan hitungan fisik dengan saldo WAJIB memakai
+ * ini, dan fungsinya ada supaya tak ada lagi yang lupa. Ledger perlengkapan
+ * bergerak terlambat — baru saat diterima — jadi tiap pembanding yang membaca
+ * saldo mentah akan "menemukan" kekurangan yang cuma barang di jalan, lalu
+ * mengoreksinya; debit kirimannya kemudian mendarat di atas koreksi itu dan
+ * barang yang sama dipotong dua kali.
+ *
+ * Terukur di TIGA pintu berbeda sebelum ini, semuanya dengan hasil yang sama
+ * (CK 10 pcs yang seluruhnya sudah dikirim, petugas menghitung rak = 0):
+ *
+ *   POST /perlengkapan/opname        → CK −10, total 0 dari 10
+ *   POST /perlengkapan/stok-awal     → CK −10, total 0 dari 10
+ *   POST /perlengkapan/:id/koreksi   → CK −10, total 0 dari 10
+ *
+ * Ketiganya menanyakan hal yang sama kepada orang yang sama di halaman yang
+ * sama. Menambalnya satu per satu hanya menunda pintu keempat.
+ */
+export async function saldoDiRakPerlengkapan(
+  exec: Pick<typeof db, "select">,
+  companyId: string,
+  branchId: string,
+  supplyIds: string[],
+): Promise<Map<string, number>> {
+  if (supplyIds.length === 0) return new Map();
+  const saldo = await exec
+    .select({
+      supplyId: supplyMutations.supplyId,
+      qty: sql<number>`COALESCE(SUM(${supplyMutations.qty}), 0)::float8`,
+    })
+    .from(supplyMutations)
+    .where(
+      and(
+        eq(supplyMutations.branchId, branchId),
+        eq(supplyMutations.status, "disetujui"),
+        inArray(supplyMutations.supplyId, supplyIds),
+      ),
+    )
+    .groupBy(supplyMutations.supplyId);
+  const dalamJalan = await qtyPerlengkapanDalamJalan(exec, companyId, branchId, supplyIds);
+  const peta = new Map<string, number>();
+  for (const id of supplyIds) peta.set(id, -(dalamJalan.get(id) ?? 0));
+  for (const r of saldo) peta.set(r.supplyId, (peta.get(r.supplyId) ?? 0) + (Number(r.qty) || 0));
+  return peta;
 }
 
 /**

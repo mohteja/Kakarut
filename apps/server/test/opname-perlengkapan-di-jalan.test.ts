@@ -40,15 +40,17 @@ const OPNAME = (() => {
 })();
 
 describe("server membandingkan angka RAK, bukan angka buku", () => {
-  it("barang di jalan diambil sekali untuk seluruh item sesi", () => {
-    expect(OPNAME).toMatch(/const dalamJalan = await qtyPerlengkapanDalamJalan\(tx,/);
-  });
-
-  it("pembandingnya saldo DIKURANGI yang di jalan", () => {
-    expect(OPNAME).toMatch(/const diRak = saldo - \(dalamJalan\.get\(it\.supply_id\) \?\? 0\);/);
+  it("pembandingnya diambil dari `saldoDiRakPerlengkapan`, sekali untuk seluruh sesi", () => {
+    expect(OPNAME).toMatch(/const rak = await saldoDiRakPerlengkapan\(tx,/);
     expect(OPNAME).toMatch(/const selisih = it\.qty_fisik - diRak;/);
     // Bentuk lama, dilarang di dalam fungsi ini saja.
     expect(OPNAME).not.toMatch(/const selisih = it\.qty_fisik - saldo;/);
+  });
+
+  it("dan helper itu memang mengurangi barang di jalan", () => {
+    const fn = SERVICE.slice(SERVICE.indexOf("export async function saldoDiRakPerlengkapan"));
+    expect(fn).toMatch(/await qtyPerlengkapanDalamJalan\(exec, companyId, branchId, supplyIds\)/);
+    expect(fn).toMatch(/peta\.set\(id, -\(dalamJalan\.get\(id\) \?\? 0\)\)/);
   });
 
   it("arsip opname merekam angka pembanding itu, bukan ledger mentah", () => {
@@ -62,16 +64,31 @@ describe("server membandingkan angka RAK, bukan angka buku", () => {
     expect(SERVICE).toMatch(/dalam_jalan: dalamJalan\.get\(r\.id\) \?\? 0,/);
   });
 
-  it("endpoint SEBELAH — POST /stok-awal — memakai pembanding yang sama", () => {
-    // Aritmetika yang sama di halaman yang sama; buta yang sama pula sebelum
-    // ini. Terukur: stok awal 0 atas rak kosong → CK −10 sesudah Terima.
+  it("KETIGA pintu memakai helper yang sama — bukan tiga salinan aritmetika", () => {
+    /*
+     * Inilah sifat yang sebenarnya dijaga. Tiga endpoint menanyakan hal yang
+     * sama kepada orang yang sama di halaman yang sama, dan ketiganya dulu
+     * salah dengan cara yang identik:
+     *
+     *   POST /perlengkapan/opname        → CK −10, total 0 dari 10
+     *   POST /perlengkapan/stok-awal     → CK −10, total 0 dari 10
+     *   POST /perlengkapan/:id/koreksi   → CK −10, total 0 dari 10
+     *
+     * Menambalnya satu per satu hanya menunda pintu keempat. Yang dipatok di
+     * sini: tak satu pun dari mereka menghitung pengurangannya sendiri.
+     */
     const RUTE = baca("../src/modules/perlengkapan/routes.ts");
-    const i = RUTE.indexOf('"/stok-awal"');
-    expect(i, "handler /stok-awal tak ditemukan").toBeGreaterThan(0);
-    const blok = RUTE.slice(i, RUTE.indexOf('"/opname"', i));
-    expect(blok).toMatch(/await qtyPerlengkapanDalamJalan\(tx,/);
-    expect(blok).toMatch(/- \(dalamJalan\.get\(supplyId\) \?\? 0\)/);
-    expect(blok).not.toMatch(/const saldo = await saldoSatuPerlengkapan\(supplyId, branchId\);/);
+    const pintu = [
+      RUTE.slice(RUTE.indexOf('"/stok-awal"'), RUTE.indexOf('"/opname"')),
+      RUTE.slice(RUTE.indexOf('"/:id/koreksi"'), RUTE.indexOf('"/:id/koreksi"') + 1800),
+      OPNAME,
+    ];
+    for (const blok of pintu) {
+      expect(blok.length, "blok pintu tak ditemukan").toBeGreaterThan(100);
+      expect(blok).toMatch(/saldoDiRakPerlengkapan\(/);
+      // Tak ada yang boleh mengurangi sendiri — itu salinan keempat aturannya.
+      expect(blok).not.toMatch(/dalamJalan\.get\(/);
+    }
   });
 });
 
