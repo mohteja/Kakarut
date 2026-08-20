@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { angkaDari, teksAngka } from "@kakarut/shared";
+import { angkaDari, teksAngka, saldoDiRak, adaDiJalan } from "@kakarut/shared";
 import { useState } from "react";
 import type {
   BelanjaPerlengkapanDto,
@@ -389,8 +389,8 @@ function StokAwalModal({
                       akan menyuruh orang "mengoreksi" barang yang cuma sedang
                       di jalan — dan koreksinya memotongnya untuk kedua kali. */}
                   <td className={`${tdClass} text-right`}>
-                    {formatAngka(r.saldo - r.dalam_jalan)}
-                    {r.dalam_jalan > 0 && (
+                    {formatAngka(saldoDiRak(r))}
+                    {adaDiJalan(r) && (
                       <div className="text-xs text-stone-400">
                         {formatAngka(r.dalam_jalan)} di jalan
                       </div>
