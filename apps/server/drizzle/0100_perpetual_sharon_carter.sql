@@ -1,0 +1,1 @@
+ALTER TABLE "companies" ADD COLUMN "blokir_jual_minus" boolean DEFAULT false NOT NULL;

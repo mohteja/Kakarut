@@ -167,6 +167,15 @@ export const companies = pgTable("companies", {
   diskonMaksPersen: numeric("diskon_maks_persen", { precision: 5, scale: 2, mode: "number" })
     .notNull()
     .default(100),
+  /**
+   * TOLAK PESANAN YANG MELEBIHI STOK.
+   *
+   * Bawaannya MATI, dan itu disengaja: menyalakannya untuk tenant yang sudah
+   * berjalan akan menghentikan penjualan menu mana pun yang bahannya terlanjur
+   * bersaldo minus — keadaan yang lazim justru pada data lama. Menyalakannya
+   * harus jadi keputusan sadar pemiliknya, bukan efek samping pembaruan.
+   */
+  blokirJualMinus: boolean("blokir_jual_minus").notNull().default(false),
   /** target penjualan (Rp) default untuk rekomendasi kebutuhan bahan baku */
   targetPenjualan: numeric("target_penjualan", { precision: 14, scale: 2, mode: "number" }),
   /**

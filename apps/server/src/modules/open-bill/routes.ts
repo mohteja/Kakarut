@@ -5,7 +5,11 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import type { OpenBillDetail, OpenBillRow } from "@kakarut/shared";
 import { db } from "../../db/client";
+import { formatAngkaId } from "@kakarut/shared";
+import { loadKatalog, tambahKebutuhanBahan } from "../menu/service";
+import { bahanKurang } from "../stok/service";
 import {
+  companies,
   meja,
   menuBranches,
   menus,
@@ -163,6 +167,52 @@ function sajianDariKasir(dineInOverride: boolean | null | undefined): boolean {
   return !(dineInOverride ?? true);
 }
 
+/**
+ * GERBANG "TOLAK PESANAN MELEBIHI STOK" pada titik MEMESAN.
+ *
+ * Setelan `companies.blokir_jual_minus` (bawaan MATI). Diperiksa di sini —
+ * saat baris masuk bill — dan BUKAN saat bill dibayar: begitu bill disimpan
+ * ia tayang di papan dapur dan masakannya dikerjakan. Menolak di kasir
+ * berarti tamu yang sudah makan tak bisa membayar; menolak di sini berarti
+ * pesanannya tak pernah masuk dapur, dan itu yang bisa ditindaklanjuti.
+ *
+ * `dineIn` per baris memakai basis yang sama dengan `createSale`: penanda
+ * take-away baris (bila ada) mengalahkan tipe transaksi, sebab kemasan hanya
+ * terpakai pada porsi yang benar-benar dibungkus.
+ */
+async function pastikanStokCukup(
+  companyId: string,
+  branchId: string,
+  items: { menu_id: string; qty: number; dine_in_override?: boolean | null }[],
+  billDineIn: boolean,
+): Promise<void> {
+  if (items.length === 0) return;
+  const [company] = await db
+    .select({ blokir: companies.blokirJualMinus })
+    .from(companies)
+    .where(eq(companies.id, companyId));
+  if (!company?.blokir) return;
+  const katalog = await loadKatalog(db, companyId);
+  const menuById = new Map(katalog.rows.map((m) => [m.id, m]));
+  const butuh = new Map<string, number>();
+  for (const it of items) {
+    const menu = menuById.get(it.menu_id);
+    if (!menu) continue;
+    // `dine_in_override` per baris mengalahkan tipe bill — persis dasar biaya
+    // yang dipakai `createSale` saat bill ini kelak dibayar.
+    const dineIn = it.dine_in_override ?? billDineIn;
+    tambahKebutuhanBahan(butuh, katalog, menu, it.qty, dineIn);
+  }
+  const kurang = await bahanKurang(db, companyId, branchId, butuh);
+  if (kurang.length > 0) {
+    throw new HTTPException(400, {
+      message: `Stok tidak cukup: ${kurang
+        .map((k) => `${k.nama} (sisa ${formatAngkaId(k.saldo)} ${k.satuan}, butuh ${formatAngkaId(k.butuh)})`)
+        .join("; ")}`,
+    });
+  }
+}
+
 /** Baris BARU: nama + harga di-snapshot dari katalog saat ini. */
 function barisBaru(billId: string, it: BillItemInput, katalog: KatalogHarga) {
   const m = katalog.get(it.menu_id)!;
@@ -238,6 +288,9 @@ export const openBillRoutes = new Hono<AppEnv>()
     }
     const katalog = await validateMenus(auth.company_id!, branchId, body.items);
     const { mejaId, mejaLabel, tipe } = await resolveMeja(auth.company_id!, branchId, body.meja_id);
+    // Sesudah `resolveMeja`: tipe meja yang menentukan dine-in bill, dan
+    // dine-in menentukan apakah bahan kemasan ikut terpakai.
+    await pastikanStokCukup(auth.company_id!, branchId, body.items, tipe === "dine_in");
     /**
      * SATU MEJA DINE-IN = SATU BILL BERJALAN.
      *
@@ -414,6 +467,21 @@ export const openBillRoutes = new Hono<AppEnv>()
       const cocok = sisaCek.get(it.menu_id)?.shift();
       if (cocok) terpakaiCek.add(cocok);
     }
+    /*
+     * Gerbang stok pada PUT hanya menimbang baris yang BENAR-BENAR BARU.
+     *
+     * Baris ber-`id` adalah baris lama yang dipertahankan, dan `pisah_dari`
+     * adalah porsi yang dipecah dari baris yang sudah ada — dua-duanya sudah
+     * masuk dapur saat dipesan dulu. Menghitungnya ulang di sini akan menolak
+     * penyimpanan ulang bill yang tak menambah pesanan apa pun, hanya karena
+     * stoknya sudah menipis sejak tadi.
+     */
+    await pastikanStokCukup(
+      auth.company_id!,
+      existing.branchId,
+      body.items.filter((it) => !it.id && !it.pisah_dari),
+      tipe === "dine_in",
+    );
     const akanTerhapus = lamaCek.filter((r) => !terpakaiCek.has(r.id));
     if (akanTerhapus.length > 0) {
       // Pesan ditulis untuk KASIR, bukan developer: klien menampilkan `error`

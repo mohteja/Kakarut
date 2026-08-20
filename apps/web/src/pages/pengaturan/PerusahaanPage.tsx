@@ -24,6 +24,7 @@ interface Company {
   pb1Enabled: boolean;
   pb1Rate: number;
   diskonMaksPersen: number;
+  blokirJualMinus: boolean;
   plan: string;
   mode: "lite" | "pro";
   receiptFooter: string | null;
@@ -157,6 +158,7 @@ export function PerusahaanPage() {
   const [pb1Enabled, setPb1Enabled] = useState(false);
   const [pb1Rate, setPb1Rate] = useState("10");
   const [diskonMaksPersen, setDiskonMaksPersen] = useState("100");
+  const [blokirJualMinus, setBlokirJualMinus] = useState(false);
   const [metodeHpp, setMetodeHpp] = useState<"average" | "fifo">("average");
   const [foodCostMaks, setFoodCostMaks] = useState("40");
 
@@ -178,6 +180,7 @@ export function PerusahaanPage() {
     setPb1Enabled(company.pb1Enabled);
     setPb1Rate(teksAngka(company.pb1Rate));
     setDiskonMaksPersen(teksAngka(company.diskonMaksPersen));
+    setBlokirJualMinus(company.blokirJualMinus ?? false);
     setMetodeHpp(company.metodeHpp ?? "average");
     setFoodCostMaks(teksAngka(company.foodCostMaks ?? 40));
   }, [company]);
@@ -229,6 +232,7 @@ export function PerusahaanPage() {
           pb1_enabled: pb1Enabled,
           pb1_rate: Math.min(100, Math.max(0, angkaDari(pb1Rate) || 0)),
           diskon_maks_persen: Math.min(100, Math.max(0, angkaDari(diskonMaksPersen) || 0)),
+          blokir_jual_minus: blokirJualMinus,
           metode_hpp: metodeHpp,
           food_cost_maks: Math.min(100, Math.max(0, angkaDari(foodCostMaks) || 0)),
         },
@@ -314,6 +318,37 @@ export function PerusahaanPage() {
           <p className="mt-1 text-xs text-stone-500">
             Diskon terbesar yang boleh diberikan <b>kasir</b> per transaksi. <b>100</b> = bebas,
             <b> 0</b> = kasir tak boleh memberi diskon. Owner &amp; admin selalu bebas.
+          </p>
+        </div>
+
+        <div className="rounded-lg border border-stone-200 p-3">
+          <label className="flex items-start gap-2 text-sm font-medium">
+            <input
+              type="checkbox"
+              checked={blokirJualMinus}
+              onChange={(e) => setBlokirJualMinus(e.target.checked)}
+              className="mt-0.5"
+            />
+            <span>Tolak pesanan yang melebihi stok</span>
+          </label>
+          <p className="mt-1 text-xs text-stone-500">
+            Bawaannya <b>mati</b>: pesanan tetap diterima walau bahannya kurang, dan saldo stok
+            boleh minus. Menyalakannya membuat pesanan ditolak saat bahannya tak cukup, dengan
+            menyebut bahan mana dan berapa kurangnya.
+          </p>
+          {/*
+            Diberi tahu SEBELUM dinyalakan, bukan sesudah kasir tertahan di
+            depan tamu. Bahan bersaldo minus itu keadaan lazim pada data lama,
+            dan menu yang memakainya akan langsung berhenti bisa dijual.
+          */}
+          <p className="mt-1 text-xs text-amber-700">
+            ⚠ Bahan yang saldonya <b>sudah minus</b> ikut ditolak. Beresi dulu lewat Stock Opname
+            atau Penerimaan Barang sebelum menyalakan ini.
+          </p>
+          <p className="mt-1 text-xs text-stone-400">
+            Yang diperiksa adalah saat <b>memesan</b> — penjualan langsung dan penambahan item ke
+            Open Bill. Membayar bill yang sudah dipesan tetap boleh (makanannya sudah dimasak), dan
+            transaksi offline yang baru tersinkron tetap diterima (sudah terjadi di lapangan).
           </p>
         </div>
 

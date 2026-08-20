@@ -9635,6 +9635,98 @@ cek "menu biasa masih AKTIF → tetap 409 (jalur lama tak berubah)" "V == 409" \
   "$(status_code "$OWNER" DELETE "/bahan/$BD")"
 
 
+echo "== 198. Setelan \"tolak pesanan melebihi stok\" (bawaan MATI) =="
+# Diminta pemakainya setelah keluhan stok minus: "menjual melebihi stok bisa
+# di on off kan di menu". Bawaannya MATI dan itu disengaja — menyalakannya
+# untuk tenant berjalan akan menghentikan penjualan menu mana pun yang
+# bahannya terlanjur bersaldo minus, keadaan yang lazim pada data lama.
+KAT198=$(api "$OWNER" GET /kategori | jq -r '.[0].id')
+CB198=$(api "$OWNER" GET /cabang | jq -r '[.[]|select(.tipe=="store")][0].id')
+B198=$(api "$OWNER" POST /bahan '{"nama":"Bahan Gerbang 198","harga_beli":1000,"isi":1,"satuan":"pcs","track_stok":true}' | jq -r .id)
+M198=$(api "$OWNER" POST /menu "{\"nama\":\"Menu Gerbang 198\",\"category_id\":\"$KAT198\",\"harga_jual\":20000,\"mult\":2,\"komponen\":[{\"ingredient_id\":\"$B198\",\"qty\":2}]}" | jq -r .id)
+cek "dasar §198: bahan, menu, & cabang uji ada" "V == 1" \
+  "$(printf '%s%s%s' "$B198" "$M198" "$CB198" | grep -Eqc '^[0-9a-f-]{108}$' && echo 1 || echo 0)"
+api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CB198\",\"items\":[{\"ingredient_id\":\"$B198\",\"qty\":10}]}" > /dev/null
+
+# Kasir baru + gerbang wajibnya (absen → buka kasir), supaya §198 tak
+# bergantung pada keadaan shift yang ditinggalkan seksi lain.
+api "$OWNER" POST /karyawan "{\"nama\":\"Kasir 198\",\"email\":\"kasir198@basooopa.id\",\"password\":\"Kasir198Pass!\",\"role\":\"cashier\",\"branch_id\":\"$CB198\"}" > /dev/null
+K198=$(login "kasir198@basooopa.id" "Kasir198Pass!")
+api "$K198" POST /absensi/saya '{"foto_url":"https://example.com/absen.jpg"}' > /dev/null
+api "$K198" POST /shift/buka '{"modal_awal":100000}' > /dev/null
+jual198() { status_code_body "$K198" POST /penjualan "{\"branch_id\":\"$CB198\",\"is_dine_in\":false,\"metode_bayar\":\"tunai\",\"items\":[{\"menu_id\":\"$M198\",\"qty\":$1}]}"; }
+saldo198() { api "$OWNER" GET "/stok?branch_id=$CB198" | jq --arg i "$B198" '[.[]|select(.ingredient_id==$i)][0].saldo // 0'; }
+
+# ── MATI (bawaan): perilaku lama tak boleh berubah sedikit pun ──────────────
+# GET /company memulangkan baris mentah — kuncinya camelCase, sementara
+# PATCH-nya menerima snake_case. Bukan kekeliruan seksi ini; begitulah
+# kontraknya, dan web membacanya persis begitu (`company.diskonMaksPersen`).
+cek "bawaan: setelan MATI" "V == 1" \
+  "$(api "$OWNER" GET /company | jq '(.blokirJualMinus == false)|if . then 1 else 0 end')"
+cek "MATI: jual 10 porsi dari stok 10 (butuh 20) tetap 201" "V == 201" "$(jual198 10)"
+cek "MATI: saldo boleh minus" "V == -10" "$(saldo198)"
+
+# ── NYALA ──────────────────────────────────────────────────────────────────
+api "$OWNER" PATCH /company '{"blokir_jual_minus":true}' > /dev/null
+cek "setelan tersimpan NYALA" "V == 1" \
+  "$(api "$OWNER" GET /company | jq '(.blokirJualMinus == true)|if . then 1 else 0 end')"
+# Saldo sudah −10. Keputusan pemiliknya: saldo yang SUDAH minus tetap ditolak.
+cek "NYALA: bahan yang sudah minus TETAP ditolak (400)" "V == 400" "$(jual198 1)"
+cek "NYALA: penolakan tak menulis apa pun — saldo tetap −10" "V == -10" "$(saldo198)"
+PESAN198=$(api "$K198" POST /penjualan "{\"branch_id\":\"$CB198\",\"is_dine_in\":false,\"metode_bayar\":\"tunai\",\"items\":[{\"menu_id\":\"$M198\",\"qty\":1}]}" | jq -r '.error // .message')
+# Pesan untuk KASIR yang berdiri di depan tamu: sebut bahannya & angkanya,
+# bukan "stok tidak cukup" yang tak bisa ditindaklanjuti siapa pun.
+cek "pesan tolak menyebut nama bahan & angkanya" "V == 1" \
+  "$(printf '%s' "$PESAN198" | grep -qc 'Bahan Gerbang 198' && printf '%s' "$PESAN198" | grep -Eqc 'sisa .*butuh' && echo 1 || echo 0)"
+
+# Stok dicukupkan → transaksi yang sama harus LOLOS. Penjaga yang menolak
+# semua bukan penjaga.
+api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CB198\",\"items\":[{\"ingredient_id\":\"$B198\",\"qty\":100}]}" > /dev/null
+cek "NYALA: stok cukup → 201" "V == 201" "$(jual198 10)"
+cek "NYALA: saldo terpotong wajar 100−20" "V == 80" "$(saldo198)"
+# Batas persis: 80 tersisa = tepat 40 porsi. Satu porsi lebih harus ditolak.
+cek "NYALA: tepat sebanyak stok → boleh" "V == 201" "$(jual198 40)"
+cek "NYALA: satu porsi melewati batas → 400" "V == 400" "$(jual198 1)"
+cek "NYALA: saldo mendarat tepat 0, tak pernah minus" "V == 0" "$(saldo198)"
+
+# ── Jalur yang SENGAJA dilewati ─────────────────────────────────────────────
+# Sinkron offline: transaksinya sudah terjadi di lapangan. Menolaknya tak
+# mencegah apa pun — antrean klien menandai perintah yang ditolak sebagai
+# `gagal` dan tak pernah mengirimnya lagi, jadi penjualan sungguhan HILANG.
+JUAL198_SEBELUM=$(api "$OWNER" GET /penjualan | jq 'if type=="array" then length else (.rows|length) end')
+REF198=$(python3 -c "import uuid;print(uuid.uuid4())")
+WKT198=$(python3 -c "import datetime;print((datetime.datetime.now(datetime.timezone.utc)-datetime.timedelta(hours=2)).strftime('%Y-%m-%dT%H:%M:%SZ'))")
+SY198=$(api "$K198" POST /sync "{\"device_id\":\"dev198\",\"commands\":[{\"client_ref\":\"$REF198\",\"tipe\":\"penjualan\",\"waktu\":\"$WKT198\",\"payload\":{\"is_dine_in\":false,\"metode_bayar\":\"tunai\",\"items\":[{\"menu_id\":\"$M198\",\"qty\":5}]}}]}")
+cek "sinkron offline TETAP diterima walau stok 0" "V == 1" \
+  "$(echo "$SY198" | jq '[.hasil[]|select(.kode >= 200 and .kode < 300)]|length')"
+# Saldonya SENGAJA tidak bergeser: konsumsi bertanggal 2 jam lalu jatuh
+# SEBELUM baseline opname yang baru dibuat `stok/awal` di atas, jadi ia di
+# luar jendela baseline. Itu justru aturan yang benar — hitungan fisik saat
+# opname sudah memuat pemakaian itu. Yang dipatok di sini: penjualannya
+# BENAR-BENAR tercatat, bukan diam-diam ditolak gerbang.
+JUAL198_SESUDAH=$(api "$OWNER" GET /penjualan | jq 'if type=="array" then length else (.rows|length) end')
+cek "…dan penjualannya benar-benar tercatat (bukan ditolak diam-diam)" "V == 1" \
+  "$([ "$JUAL198_SESUDAH" -gt "$JUAL198_SEBELUM" ] && echo 1 || echo 0)"
+
+# Membayar OPEN BILL yang sudah dipesan: makanannya sudah dimasak. Menolak di
+# kasir berarti tamu yang sudah makan tak bisa membayar.
+api "$OWNER" PATCH /company '{"blokir_jual_minus":false}' > /dev/null
+BILL198=$(api "$K198" POST /open-bill "{\"branch_id\":\"$CB198\",\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$M198\",\"qty\":3}]}" | jq -r '.id')
+cek "dasar §198: bill dibuat saat setelan masih mati" "V == 1" \
+  "$(printf '%s' "$BILL198" | grep -Eqc '^[0-9a-f-]{36}$' && echo 1 || echo 0)"
+api "$OWNER" PATCH /company '{"blokir_jual_minus":true}' > /dev/null
+IT198=$(api "$K198" GET "/open-bill/$BILL198" | jq -c '[.items[]|{menu_id,qty,open_bill_item_id:.id}]')
+cek "membayar bill yang sudah dipesan TETAP boleh" "V == 201" \
+  "$(status_code_body "$K198" POST /penjualan "{\"branch_id\":\"$CB198\",\"is_dine_in\":false,\"metode_bayar\":\"tunai\",\"open_bill_id\":\"$BILL198\",\"items\":$IT198}")"
+# Tapi MEMESAN bill baru saat stok kurang harus ditolak — itu titik yang
+# masih bisa ditindaklanjuti, sebelum masakannya dikerjakan.
+cek "MEMESAN bill baru saat stok kurang → 400" "V == 400" \
+  "$(status_code_body "$K198" POST /open-bill "{\"branch_id\":\"$CB198\",\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$M198\",\"qty\":5}]}")"
+api "$OWNER" PATCH /company '{"blokir_jual_minus":false}' > /dev/null
+cek "dikembalikan MATI supaya seksi sesudahnya tak terpengaruh" "V == 1" \
+  "$(api "$OWNER" GET /company | jq '(.blokirJualMinus == false)|if . then 1 else 0 end')"
+
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

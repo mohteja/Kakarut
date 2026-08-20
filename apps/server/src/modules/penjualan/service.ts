@@ -1,6 +1,7 @@
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { HTTPException } from "hono/http-exception";
 import {
+  formatAngkaId,
   hitungPb1,
   penandaSajian,
   qtyEfektif,
@@ -21,7 +22,14 @@ import {
 } from "../../db/schema";
 import { kodeCabang, tanggalDi } from "../../lib/time";
 import { upsertCustomer } from "../customer/service";
-import { hitungHargaMenu, komponenEfektif, loadKatalog, tampilDiCabang } from "../menu/service";
+import {
+  hitungHargaMenu,
+  komponenEfektif,
+  loadKatalog,
+  tambahKebutuhanBahan,
+  tampilDiCabang,
+} from "../menu/service";
+import { bahanKurang } from "../stok/service";
 
 /**
  * Penolakan penjualan yang membawa SEBAB terstruktur, bukan cuma teks.
@@ -81,6 +89,16 @@ export interface CreateSaleParams {
    * ditagih memakai harga yang dikunci di bill saat dipesan.
    */
   openBillId?: string | null;
+  /**
+   * Transaksi SUSULAN — sudah terjadi di lapangan, baru sampai ke server
+   * sekarang (sinkron offline). Gerbang "tolak melebihi stok" TIDAK berlaku
+   * untuknya: makanannya sudah disajikan dan uangnya sudah diterima, jadi
+   * menolaknya bukan mencegah apa pun — ia hanya menghapus penjualan
+   * sungguhan dari pembukuan, permanen, karena antrean klien menandai
+   * perintah yang ditolak server sebagai gagal dan tak pernah mengirimnya
+   * lagi.
+   */
+  transaksiSusulan?: boolean;
   items: SaleItemInput[];
 }
 
@@ -364,17 +382,45 @@ export async function createSale(params: CreateSaleParams) {
         sajianTakeaway,
       });
 
-      for (const k of komponenEfektif(katalog, menu)) {
-        // bahan yang tidak dilacak stoknya: tetap masuk HPP, tapi tidak
-        // menghasilkan catatan konsumsi
-        if (!k.track_stok) continue;
-        const qty =
-          qtyEfektif(
-            { qty: k.qty, isPackaging: k.is_packaging, isComplement: k.is_complement },
-            dasarDineIn,
-          ) * item.qty;
-        if (qty <= 0) continue;
-        konsumsi.set(k.ingredient_id, (konsumsi.get(k.ingredient_id) ?? 0) + qty);
+      // Aturan "resep → bahan yang dipotong" hidup di SATU tempat, dipakai
+      // bersama gerbang kecukupan stok di Open Bill — supaya yang memeriksa
+      // dan yang mencatat tak pernah berbeda pendapat.
+      tambahKebutuhanBahan(konsumsi, katalog, menu, item.qty, dasarDineIn);
+    }
+
+    /**
+     * GERBANG "TOLAK PESANAN MELEBIHI STOK" (setelan perusahaan, bawaan MATI).
+     *
+     * Diperiksa di sini karena `konsumsi` baru lengkap sesudah seluruh baris
+     * diuraikan jadi bahan — termasuk aturan dine-in (kemasan tak terpakai,
+     * complement setengah) dan komponen menu dasar paket. Memeriksa "sisa
+     * porsi menu" di layar tak setara: dua menu berbeda bisa memperebutkan
+     * bahan yang sama dalam satu struk, dan hanya jumlah inilah yang tahu.
+     *
+     * DUA jalur sengaja DILEWATI, dan keduanya karena alasan yang sama —
+     * pesanannya sudah terjadi, jadi menolaknya tak mencegah apa pun:
+     *
+     *   · `openBillId` — bill yang sedang DIBAYAR. Barangnya dipesan (dan
+     *     dimasak) saat bill dibuat; gerbangnya berlaku di sana. Menolak di
+     *     kasir berarti tamu yang sudah makan tak bisa membayar.
+     *   · `transaksiSusulan` — sinkron offline. Menolaknya menghapus
+     *     penjualan sungguhan dari pembukuan (lihat catatan di parameternya).
+     *
+     * Saldo dibaca dengan `tx`, bukan `db`: keputusan ini menentukan sebuah
+     * penulisan, dan saldo dari luar transaksi adalah saldo dunia lain.
+     */
+    if (company.blokirJualMinus && !params.openBillId && !params.transaksiSusulan) {
+      const kurang = await bahanKurang(tx, params.companyId, params.branchId, konsumsi);
+      if (kurang.length > 0) {
+        // Ditulis untuk KASIR yang sedang berdiri di depan tamu: sebut
+        // bahannya, sisanya, dan berapa yang kurang — bukan "stok tidak
+        // cukup" yang tak bisa ditindaklanjuti siapa pun.
+        throw new HTTPException(400, {
+          message:
+            `Stok tidak cukup: ${kurang
+              .map((k) => `${k.nama} (sisa ${formatAngkaId(k.saldo)} ${k.satuan}, butuh ${formatAngkaId(k.butuh)})`)
+              .join("; ")}`,
+        });
       }
     }
 
