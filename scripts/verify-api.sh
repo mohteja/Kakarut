@@ -9683,6 +9683,59 @@ cek "bahan isi=1 (tanpa kemasan) → saldo_setara null" "V == 1" \
   "$(api "$OWNER" GET "/stok?branch_id=$CB196" | jq --arg i "$BE196" '[.[]|select(.ingredient_id==$i)][0].saldo_setara == null|if . then 1 else 0 end')"
 
 
+echo "== 197. Opname CK selagi barang di jalan: tak boleh dipotong dua kali =="
+# Dilaporkan pemakainya: "pengurangan stock tidak betul hingga ada stock minus".
+#
+# `dikirim_at` adalah penanda KEBERANGKATAN, dan DUA hal bertumpu padanya:
+#   1. `qtyDiJalan` — memotong barang yang sudah berangkat dari stok buku saat
+#      opname, supaya hitungan petugas cocok. Mensyaratkan dikirim_at NOT NULL.
+#   2. `kirim_keluar` — menyaring COALESCE(dikirim_at, waktu) > baseline opname.
+#      Tanpa dikirim_at ia jatuh ke `waktu`, yang DITIMPA waktu penerimaan saat
+#      baris dikonfirmasi — jadi kiriman yang berangkat SEBELUM opname tetap
+#      terhitung keluar SESUDAHNYA.
+#
+# `POST /transfer-stok` dulu tak menstempelnya (jalur work-order sudah, sejak
+# awal). Akibatnya terukur: CK 100 → kirim 40 → opname fisik 60 → tujuan
+# menerima → saldo CK 20, bukan 60. Barang yang sama dipotong dua kali, dan
+# petugas yang menghitung benar dituduh kehilangan 40.
+CK197="$ASAL132"; ST197="$TUJUAN132"
+B197=$(api "$OWNER" POST /bahan '{"nama":"Bahan Transit 197","harga_beli":1000,"isi":1,"satuan":"pcs","track_stok":true}' | jq -r .id)
+cek "dasar §197: CK, cabang tujuan, & bahan uji ada" "V == 1" \
+  "$(printf '%s%s%s' "$CK197" "$ST197" "$B197" | grep -Eqc '^[0-9a-f-]{108}$' && echo 1 || echo 0)"
+api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CK197\",\"items\":[{\"ingredient_id\":\"$B197\",\"qty\":100}]}" > /dev/null
+saldo197() { api "$OWNER" GET "/stok?branch_id=$1" | jq --arg i "$B197" '[.[]|select(.ingredient_id==$i)][0].saldo // 0'; }
+cek "dasar §197: CK bermula 100" "V == 100" "$(saldo197 "$CK197")"
+
+# Berangkat 40 — di jalur ini membuat transfer BERARTI mengirimkannya.
+api "$OWNER" POST /transfer-stok "{\"asal_branch_id\":\"$CK197\",\"tujuan_branch_id\":\"$ST197\",\"items\":[{\"ingredient_id\":\"$B197\",\"qty\":40}]}" > /dev/null
+cek "sudah berangkat, belum diterima → saldo CK masih 100" "V == 100" "$(saldo197 "$CK197")"
+
+# INTI 1: petugas menghitung 60 (fisik di rak). Sistem harus SETUJU — selisih 0.
+# Tanpa stempel keberangkatan, sistem menuliskan 100 dan melaporkan −40:
+# kehilangan yang harus di-ACC owner, padahal tak ada yang hilang.
+OP197=$(api "$OWNER" POST "/stok/opname?branch_id=$CK197" "{\"catatan\":\"transit 197\",\"items\":[{\"ingredient_id\":\"$B197\",\"qty\":60}]}")
+cek "INTI: petugas hitung 60 saat 40 di jalan → selisih NOL" "abs(V) < 0.001" \
+  "$(echo "$OP197" | jq '.ringkasan.total_selisih')"
+SESI197=$(echo "$OP197" | jq -r '.session_id')
+api "$OWNER" POST "/stok/opname/sesi/$SESI197/acc" > /dev/null
+cek "baseline opname CK jadi 60" "V == 60" "$(saldo197 "$CK197")"
+
+# INTI 2: tujuan menerima. Barang yang SAMA tak boleh dipotong lagi dari CK.
+FK197=$(api "$OWNER" GET "/penerimaan?branch_id=$ST197" | jq -r --arg i "$B197" '[.rows[]?|select(.ingredient_id==$i)][0].faktur_id // empty')
+cek "dasar §197: faktur kiriman muncul di Penerimaan tujuan" "V == 1" \
+  "$(printf '%s' "$FK197" | grep -Eqc '^[0-9a-f-]{36}$' && echo 1 || echo 0)"
+api "$OWNER" POST "/penerimaan/$FK197/terima?branch_id=$ST197" > /dev/null
+cek "INTI: CK TETAP 60 sesudah diterima (bukan 20)" "V == 60" "$(saldo197 "$CK197")"
+cek "tujuan bertambah 40" "V == 40" "$(saldo197 "$ST197")"
+
+# Pasangan anti-hijau-palsu: kiriman yang berangkat SESUDAH opname MEMANG harus
+# memotong saldo. Penjaga yang tak pernah memotong bukan penjaga.
+api "$OWNER" POST /transfer-stok "{\"asal_branch_id\":\"$CK197\",\"tujuan_branch_id\":\"$ST197\",\"items\":[{\"ingredient_id\":\"$B197\",\"qty\":10}]}" > /dev/null
+FK197B=$(api "$OWNER" GET "/penerimaan?branch_id=$ST197" | jq -r --arg i "$B197" '[.rows[]?|select(.ingredient_id==$i)][0].faktur_id // empty')
+api "$OWNER" POST "/penerimaan/$FK197B/terima?branch_id=$ST197" > /dev/null
+cek "kiriman SESUDAH opname tetap memotong: 60−10" "V == 50" "$(saldo197 "$CK197")"
+
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

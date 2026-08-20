@@ -435,6 +435,44 @@ export const transferRoutes = new Hono<AppEnv>()
               // rak simpan diisi otomatis (rak default bahan) saat diterima
               storageLocationId: null,
               status: "menunggu" as const,
+              /**
+               * PENANDA KEBERANGKATAN — barangnya sudah tak di rak asal.
+               *
+               * Di jalur ini membuat transfer BERARTI mengirimkannya: tak ada
+               * langkah "kirim" terpisah, tujuannya langsung melihatnya di
+               * Penerimaan Barang, dan pemeriksaan kecukupan stok beberapa
+               * baris di atas sudah memotong `qtyDalamJalan` dari stok asal.
+               * Jadi detik baris ini lahir, barangnya sudah berangkat.
+               *
+               * Tanpa stempel ini DUA hal rusak sekaligus, dan keduanya
+               * terukur — bukan dugaan:
+               *
+               *   1. LAYAR OPNAME CK. `qtyDiJalan` (yang memotong barang di
+               *      jalan dari stok buku, supaya hitungan petugas cocok)
+               *      mensyaratkan `dikirim_at IS NOT NULL`. Kiriman lewat
+               *      jalur ini karena itu tak terlihat sedang di jalan: 40 pcs
+               *      benar-benar berangkat, `qtyDiJalan` melaporkan 0. Petugas
+               *      menghitung 60, sistem menuliskan 100, dan selisih 40 itu
+               *      muncul sebagai KEHILANGAN yang harus di-ACC owner —
+               *      catatan yang menuduh orang tanpa ada yang hilang.
+               *
+               *   2. SALDO CK. `kirim_keluar` menyaring
+               *      `COALESCE(dikirim_at, waktu) > baseline_opname`. Dengan
+               *      `dikirim_at` kosong ia jatuh ke `waktu` — yang DITIMPA
+               *      waktu penerimaan saat baris dikonfirmasi. Kiriman yang
+               *      berangkat SEBELUM opname karena itu tetap terhitung
+               *      keluar SESUDAHNYA, padahal opname fisik sudah tak
+               *      memuatnya. Barang yang sama dipotong dua kali.
+               *
+               * Terukur: CK 100 pcs → kirim 40 → opname fisik 60 → tujuan
+               * menerima → saldo CK jatuh ke 20, bukan 60.
+               *
+               * Jalur work-order (`produksi/routes.ts`, "kirim ke cabang")
+               * sudah menstempel ini sejak awal dengan alasan yang sama
+               * persis. Ada DUA pintu menuju "barang sudah berangkat", dan
+               * hanya satu yang menutup pintunya.
+               */
+              dikirimAt: new Date(),
               isBatch: false,
               catatan: body.catatan?.trim() || null,
               userId: auth.sub,
