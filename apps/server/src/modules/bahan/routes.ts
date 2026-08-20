@@ -1,5 +1,5 @@
 import { zValidator } from "@hono/zod-validator";
-import { and, asc, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -1530,16 +1530,74 @@ export const bahanRoutes = new Hono<AppEnv>()
       .from(ingredients)
       .where(and(eq(ingredients.id, id), eq(ingredients.companyId, auth.company_id!)));
     if (!milik) throw new HTTPException(404, { message: "Bahan tidak ditemukan" });
-    // Blokir bila masih dipakai menu aktif
+    /**
+     * BLOKIR BILA MENJUAL MENU AKTIF MANA PUN MASIH MEMAKAN BAHAN INI.
+     *
+     * "Dipakai" harus berarti hal yang sama di sini dan di kasir. Penjaga ini
+     * dulu hanya melihat menu yang komponennya memuat bahan ini DAN aktif
+     * sendiri — sementara `komponenEfektif` (yang benar-benar memotong stok
+     * saat menjual) memulangkan komponen menu ITU SENDIRI **ditambah** komponen
+     * MENU DASARNYA bila ia paket. Satu tingkat yang tak ikut terlihat, dan
+     * tepat di situ lubangnya:
+     *
+     *   paket P (aktif) → menu dasar A (DIARSIPKAN) → bahan B
+     *
+     * A diarsipkan tidak merusak apa pun — `loadKatalog` sengaja memuat menu
+     * nonaktif justru supaya paket tetap utuh, dan itu terbukti: sesudah A
+     * diarsip, HPP P tetap dan sisa porsinya tetap terhitung dari saldo B.
+     * Yang merusak adalah langkah BERIKUTNYA: karena A tak lagi aktif,
+     * penjaga ini meloloskan penghapusan B.
+     *
+     * Sesudah itu tak ada satu pun galat, dan tiga hal salah sekaligus:
+     *
+     *   1. B lenyap dari SETIAP layar stok (`hitungSaldoCabang` menyaring
+     *      `is_active`) — tak bisa dilihat, tak bisa di-opname, tak bisa
+     *      dibelanjakan.
+     *   2. Sisa porsi P berubah dari angka menjadi `null`. `bahanPembatas`
+     *      sengaja melewati bahan tanpa saldo ("nonaktif … diabaikan"), dan
+     *      bila B satu-satunya pembatas, P jadi tak punya pembatas sama
+     *      sekali — layar membacanya "tidak dibatasi bahan", yaitu boleh
+     *      dijual sebanyak apa pun.
+     *   3. Menjual P TETAP mengonsumsi B, karena jalur penjualan memang tak
+     *      menyaring bahan nonaktif.
+     *
+     * Terukur: stok 100 pcs, kasir menjual 60 paket (butuh 120) — LOLOS, dan
+     * saldo B mendarat di −20 yang tak muncul di mana pun.
+     *
+     * Maka syaratnya disamakan dengan kenyataan penjualan: menu yang memuat
+     * bahan ini menghalangi penghapusan bila ia aktif ATAU ia menjadi dasar
+     * sebuah paket yang aktif.
+     */
+    const paket = alias(menus, "paket_aktif");
     const used = await db
-      .select({ nama: menus.nama })
+      .select({ nama: menus.nama, aktif: menus.isActive, paket: paket.nama })
       .from(menuComponents)
       .innerJoin(menus, eq(menuComponents.menuId, menus.id))
-      .where(and(eq(menuComponents.ingredientId, id), eq(menus.isActive, true)))
+      .leftJoin(
+        paket,
+        and(
+          eq(paket.baseMenuId, menus.id),
+          eq(paket.tipe, "paket"),
+          eq(paket.isActive, true),
+        ),
+      )
+      .where(
+        and(
+          eq(menuComponents.ingredientId, id),
+          or(eq(menus.isActive, true), isNotNull(paket.id)),
+        ),
+      )
       .limit(5);
     if (used.length > 0) {
+      // Yang disebut adalah menu yang benar-benar HIDUP. Menyebut menu dasar
+      // yang sudah diarsipkan membuat penolakan ini terbaca mustahil: yang
+      // membacanya membuka daftar menu, tak menemukannya, lalu menyimpulkan
+      // sistemnya salah.
+      const dipakai = used.map((u) =>
+        !u.aktif && u.paket ? `${u.paket} (lewat menu dasarnya "${u.nama}")` : u.nama,
+      );
       throw new HTTPException(409, {
-        message: `Bahan masih dipakai menu aktif: ${used.map((u) => u.nama).join(", ")}`,
+        message: `Bahan masih dipakai menu aktif: ${[...new Set(dipakai)].join(", ")}`,
       });
     }
     // Blokir bila masih dipakai resep produksi bahan lain yang aktif
