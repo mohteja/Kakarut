@@ -8,6 +8,7 @@ import {
   hargaSaranPaket,
   hitungHpp,
   qtyBahanPerPorsi,
+  qtyEfektif,
   type KomponenDto,
   type MenuDto,
   type MenuStokDto,
@@ -44,6 +45,39 @@ export function komponenEfektif(katalog: KatalogMenu, menu: MenuRow): KomponenDt
       ? katalog.komponenByMenu.get(menu.baseMenuId) ?? []
       : []),
   ];
+}
+
+/**
+ * Kebutuhan bahan TERLACAK untuk sejumlah porsi satu menu, ditambahkan ke
+ * `keranjang`. Satu-satunya tempat aturan "resep → bahan yang dipotong stok"
+ * ditulis, dipakai baik saat MENCATAT konsumsi (createSale) maupun saat
+ * MEMERIKSA kecukupan stok sebelum pesanan diterima (open bill & penjualan).
+ *
+ * Kalau pemeriksaan memakai aturan yang berbeda dari pencatatan, gerbangnya
+ * akan menolak pesanan yang sebenarnya cukup — atau meloloskan yang tidak —
+ * dan tak ada yang bisa menjelaskan sebabnya kepada kasir.
+ *
+ * `dineIn` di sini adalah BASIS BIAYA baris itu (bukan tempat makannya):
+ * kemasan take-away tak terpakai saat dine-in, complement dipakai setengah.
+ */
+export function tambahKebutuhanBahan(
+  keranjang: Map<string, number>,
+  katalog: KatalogMenu,
+  menu: MenuRow,
+  porsi: number,
+  dineIn: boolean,
+): Map<string, number> {
+  for (const k of komponenEfektif(katalog, menu)) {
+    // bahan yang tidak dilacak stoknya: tetap masuk HPP, tapi tidak
+    // menghasilkan catatan konsumsi
+    if (!k.track_stok) continue;
+    const qty =
+      qtyEfektif({ qty: k.qty, isPackaging: k.is_packaging, isComplement: k.is_complement }, dineIn) *
+      porsi;
+    if (qty <= 0) continue;
+    keranjang.set(k.ingredient_id, (keranjang.get(k.ingredient_id) ?? 0) + qty);
+  }
+  return keranjang;
 }
 
 /** Apakah menu tampil di cabang ini? (tanpa pembatasan = semua cabang) */

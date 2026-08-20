@@ -438,6 +438,7 @@ export const authRoutes = new Hono<AppEnv>()
           pb1_enabled: co.pb1Enabled,
           pb1_rate: co.pb1Rate,
           diskon_maks_persen: co.diskonMaksPersen,
+          blokir_jual_minus: co.blokirJualMinus,
           timezone: co.timezone,
         };
       }

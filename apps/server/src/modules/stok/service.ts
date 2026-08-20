@@ -23,18 +23,27 @@ import { jalankanFifo, type FifoEvent } from "../../lib/fifo";
 export async function hitungSaldoCabang(
   companyId: string,
   branchId: string,
+  /**
+   * Executor. Dibiarkan kosong = `db` global (perilaku lama, tak berubah).
+   *
+   * Pemanggil yang memvalidasi SEBELUM MENULIS wajib mengoper `tx`-nya:
+   * saldo yang dibaca di luar transaksi penulisan adalah saldo dari dunia
+   * lain, dan keputusan yang dibuat atasnya tak dijamin masih benar saat
+   * tulisannya mendarat. Bentuknya menyalin `qtyDalamJalan` di berkas ini.
+   */
+  exec: Pick<typeof db, "select" | "execute"> = db,
 ): Promise<StokRowDto[]> {
   // Ambang "menipis" per tipe cabang: TOKO memakai stok_minimum_toko bila
   // diisi (>0); bila 0, jatuh kembali ke stok_minimum sehingga bahan lama
   // tanpa ambang toko berperilaku persis seperti sebelumnya. CK/kantor
   // selalu memakai stok_minimum.
-  const [cabang] = await db
+  const [cabang] = await exec
     .select({ tipe: branches.tipe })
     .from(branches)
     .where(eq(branches.id, branchId));
   const pakaiAmbangToko = cabang?.tipe === "store";
 
-  const result = await db.execute(sql`
+  const result = await exec.execute(sql`
     SELECT
       i.id          AS ingredient_id,
       i.slug        AS slug,
@@ -241,6 +250,53 @@ export async function hitungSaldoCabang(
           : null,
     };
   });
+}
+
+/**
+ * Bahan yang TAK CUKUP untuk sebuah kebutuhan — dasar gerbang "tolak pesanan
+ * melebihi stok" (setelan `companies.blokir_jual_minus`).
+ *
+ * Memakai `hitungSaldoCabang`, bukan query saldo sendiri: aturan saldo di
+ * sistem ini panjang (baseline opname, kiriman masuk, konsumsi penjualan &
+ * produksi, kirim keluar, barang di jalan) dan salinan kedua darinya akan
+ * bergeser diam-diam. Gerbang yang memakai aturan saldo BERBEDA dari yang
+ * dipakai layar Stok adalah gerbang yang menolak transaksi tanpa bisa
+ * dijelaskan kepada kasirnya.
+ *
+ * Saldo yang SUDAH minus tetap dihitung tak cukup. Itu keputusan sadar: kalau
+ * setelannya menyala, "stok tak cukup" berarti tak boleh dijual — tanpa
+ * pengecualian yang justru membebaskan bahan yang paling bermasalah.
+ *
+ * `exec` WAJIB diisi `tx` oleh pemanggil yang menulis sesudahnya.
+ */
+export async function bahanKurang(
+  exec: Pick<typeof db, "select" | "execute">,
+  companyId: string,
+  branchId: string,
+  butuh: Map<string, number>,
+): Promise<{ ingredient_id: string; nama: string; satuan: string; saldo: number; butuh: number }[]> {
+  if (butuh.size === 0) return [];
+  const saldo = await hitungSaldoCabang(companyId, branchId, exec);
+  const byId = new Map(saldo.map((r) => [r.ingredient_id, r]));
+  const kurang: { ingredient_id: string; nama: string; satuan: string; saldo: number; butuh: number }[] = [];
+  for (const [ingredientId, perlu] of butuh) {
+    const r = byId.get(ingredientId);
+    // Bahan yang tak ada di daftar saldo = tak melacak stok / tak aktif.
+    // Menganggapnya kurang akan menolak menu yang memang tak dibatasi bahan.
+    if (!r) continue;
+    // EPS: qty boleh pecahan hasil konversi satuan, dan selisih 1e-16 bukan
+    // kekurangan — ia cuma sisa aritmetika floating point.
+    if (r.saldo < perlu - 1e-9) {
+      kurang.push({
+        ingredient_id: ingredientId,
+        nama: r.nama,
+        satuan: r.satuan,
+        saldo: r.saldo,
+        butuh: perlu,
+      });
+    }
+  }
+  return kurang;
 }
 
 const BATAS_MUTASI = 500;

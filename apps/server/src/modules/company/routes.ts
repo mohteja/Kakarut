@@ -25,6 +25,8 @@ const PatchBody = z.object({
   target_penjualan: z.number().min(0).nullish(),
   /** batas maks diskon kasir (%) — 0..100 */
   diskon_maks_persen: z.number().min(0).max(100).optional(),
+  /** tolak pesanan yang melebihi stok (bawaan mati) */
+  blokir_jual_minus: z.boolean().optional(),
   /** metode HPP untuk laba-rugi */
   metode_hpp: z.enum(["average", "fifo"]).optional(),
   /** ambang food cost sehat (%) — menu di atasnya ditandai di daftar menu */
@@ -145,6 +147,9 @@ export const companyRoutes = new Hono<AppEnv>()
         ...(body.food_cost_maks !== undefined && { foodCostMaks: body.food_cost_maks }),
         ...(body.target_penjualan !== undefined && {
           targetPenjualan: body.target_penjualan,
+        }),
+        ...(body.blokir_jual_minus !== undefined && {
+          blokirJualMinus: body.blokir_jual_minus,
         }),
         ...(body.diskon_maks_persen !== undefined && {
           diskonMaksPersen: body.diskon_maks_persen,

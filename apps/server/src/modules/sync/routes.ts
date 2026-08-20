@@ -360,6 +360,11 @@ const execPenjualan: Eksekutor = async ({ auth }, payload, waktu) => {
     waktu,
     shiftId: shift.id,
     openBillId: p.open_bill_id,
+    // Sudah terjadi di lapangan. Gerbang "tolak melebihi stok" tak berlaku:
+    // menolak di sini tak mencegah apa pun, ia hanya menghapus penjualan
+    // sungguhan — antrean klien menandai perintah yang ditolak server sebagai
+    // `gagal` dan tak pernah mengirimnya lagi.
+    transaksiSusulan: true,
     items: p.items,
   });
   return {

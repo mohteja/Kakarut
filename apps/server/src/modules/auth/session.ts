@@ -17,6 +17,9 @@ function companyDto(co: CompanyRow) {
     pb1_enabled: co.pb1Enabled,
     pb1_rate: co.pb1Rate,
     diskon_maks_persen: co.diskonMaksPersen,
+    // Kasir perlu tahu setelan ini untuk MEMPERINGATKAN sebelum tombol
+    // Bayar ditekan; penegakannya tetap di server.
+    blokir_jual_minus: co.blokirJualMinus,
     timezone: co.timezone,
   };
 }
