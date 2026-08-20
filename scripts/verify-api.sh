@@ -9828,6 +9828,80 @@ cek "dikembalikan MATI supaya seksi sesudahnya tak terpengaruh" "V == 1" \
   "$(api "$OWNER" GET /company | jq '(.blokirJualMinus == false)|if . then 1 else 0 end')"
 
 
+echo "== 199. Shift ditutup PAS lalu ada transaksi susulan =="
+# `kas_sistem` dihitung ULANG tiap shift dibaca, jadi penjualan bertanggal
+# mundur dari sinkron offline bisa mendarat di jendela shift yang sudah lama
+# ditutup. Dulu `status_selisih` diturunkan dari ada-tidaknya keputusan
+# tersimpan (`selisihStatus ?? "pas"`) — beku sejak tutup. Akibatnya baris
+# shift berbunyi "selisih −40.000" DAN "status pas" sekaligus, dan yang lebih
+# mahal: GET /shift/selisih?status=menunggu (antrean persetujuan owner)
+# memfilter kolom beku itu, jadi kekurangan kasnya tak pernah sampai ke owner.
+KAT199=$(api "$OWNER" GET /kategori | jq -r '.[0].id')
+CB199=$(api "$OWNER" GET /cabang | jq -r '[.[]|select(.tipe=="store")][0].id')
+B199=$(api "$OWNER" POST /bahan '{"nama":"Bahan Kas 199","harga_beli":100,"isi":1,"satuan":"pcs","track_stok":true}' | jq -r .id)
+M199=$(api "$OWNER" POST /menu "{\"nama\":\"Menu Kas 199\",\"category_id\":\"$KAT199\",\"harga_jual\":10000,\"mult\":2,\"komponen\":[{\"ingredient_id\":\"$B199\",\"qty\":1}]}" | jq -r .id)
+api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CB199\",\"items\":[{\"ingredient_id\":\"$B199\",\"qty\":1000}]}" > /dev/null
+api "$OWNER" POST /karyawan "{\"nama\":\"Kasir 199\",\"email\":\"kasir199@basooopa.id\",\"password\":\"Kasir199Pass!\",\"role\":\"cashier\",\"branch_id\":\"$CB199\"}" > /dev/null
+K199=$(login "kasir199@basooopa.id" "Kasir199Pass!")
+api "$K199" POST /absensi/saya '{"foto_url":"https://example.com/absen.jpg"}' > /dev/null
+cek "dasar §199: bahan, menu, kasir siap" "V == 1" \
+  "$(printf '%s%s' "$B199" "$M199" | grep -Eqc '^[0-9a-f-]{72}$' && [ -n "$K199" ] && echo 1 || echo 0)"
+
+api "$K199" POST /shift/buka '{"modal_awal":200000}' > /dev/null
+api "$K199" POST /penjualan "{\"branch_id\":\"$CB199\",\"is_dine_in\":false,\"metode_bayar\":\"tunai\",\"items\":[{\"menu_id\":\"$M199\",\"qty\":3}]}" > /dev/null
+# Dibaca sebagai OWNER: kasir sengaja dibutakan dari kas & selisih sebelum
+# mengunci hitungannya (`hitung_buta`), jadi `kas_sistem` bagi kasir null.
+AKTIF199=$(api "$OWNER" GET "/shift/aktif?branch_id=$CB199")
+KAS199=$(echo "$AKTIF199" | jq '.kas_sistem')
+DIBUKA199=$(echo "$AKTIF199" | jq -r '.dibuka_pada')
+# Angkanya RELATIF, bukan mutlak: cabang ini sudah dipakai seksi-seksi
+# sebelumnya, jadi kas awalnya bukan angka yang bisa dipatok. Yang dijaga
+# seksi ini adalah PERGESERANNYA.
+cek "dasar §199: kas sistem terbaca (bukan buta)" "V > 0" "$KAS199"
+# Ditutup PAS: uang fisik persis sama dengan kas sistem.
+api "$K199" POST /shift/tutup "{\"uang_fisik\":$KAS199}" > /dev/null
+shift199() { api "$OWNER" GET /shift | jq -c --arg d "$DIBUKA199" '[.[]|select(.dibuka_pada==$d)][0]'; }
+cek "ditutup pas: selisih 0" "abs(V) < 0.001" "$(shift199 | jq '.selisih')"
+cek "ditutup pas: status \"pas\"" "V == 1" \
+  "$(shift199 | jq '(.status_selisih=="pas")|if . then 1 else 0 end')"
+# Dilingkupi ke shift INI saja — seksi lain meninggalkan shift berselisih,
+# dan asersi yang menghitung semuanya akan hijau/merah karena sebab lain.
+SHID199=$(api "$OWNER" GET /shift | jq -r --arg d "$DIBUKA199" '[.[]|select(.dibuka_pada==$d)][0].id')
+cek "dasar §199: shift ini belum ada di antrean persetujuan" "V == 0" \
+  "$(api "$OWNER" GET "/shift/selisih?status=menunggu" | jq --arg i "$SHID199" '[.[]|select(.id==$i)]|length')"
+
+# Penjualan TUNAI 40.000 bertanggal DI DALAM jendela shift itu, tersinkron
+# sesudah shift ditutup — persis yang terjadi saat kasir offline lalu online.
+WKT199=$(python3 -c "
+import datetime
+d=datetime.datetime.fromisoformat('$DIBUKA199'.replace('Z','+00:00'))
+print((d+datetime.timedelta(seconds=5)).strftime('%Y-%m-%dT%H:%M:%SZ'))")
+REF199=$(python3 -c "import uuid;print(uuid.uuid4())")
+SY199=$(api "$K199" POST /sync "{\"device_id\":\"dev199\",\"commands\":[{\"client_ref\":\"$REF199\",\"tipe\":\"penjualan\",\"waktu\":\"$WKT199\",\"payload\":{\"is_dine_in\":false,\"metode_bayar\":\"tunai\",\"items\":[{\"menu_id\":\"$M199\",\"qty\":4}]}}]}")
+cek "penjualan susulan diterima (transaksinya nyata)" "V == 1" \
+  "$(echo "$SY199" | jq '[.hasil[]|select(.kode >= 200 and .kode < 300)]|length')"
+cek "server menandainya masuk shift yang sudah ditutup" "V == 1" \
+  "$(echo "$SY199" | jq '[.hasil[]|select(.data.di_luar_jendela_shift == true)]|length')"
+
+# INTI: angka & statusnya harus SEPAKAT, dan owner harus melihatnya.
+cek "kas sistem ikut naik persis 40.000" "abs(V - 40000) < 0.001" \
+  "$(python3 -c "print($(shift199 | jq '.kas_sistem') - $KAS199)")"
+cek "selisih jadi −40.000" "abs(V + 40000) < 0.001" "$(shift199 | jq '.selisih')"
+cek "INTI: status TIDAK lagi \"pas\" saat selisihnya nyata" "V == 0" \
+  "$(shift199 | jq '(.status_selisih=="pas")|if . then 1 else 0 end')"
+cek "INTI: status jadi \"menunggu\" persetujuan" "V == 1" \
+  "$(shift199 | jq '(.status_selisih=="menunggu")|if . then 1 else 0 end')"
+cek "INTI: shift itu MUNCUL di antrean persetujuan owner" "V == 1" \
+  "$(api "$OWNER" GET "/shift/selisih?status=menunggu" | jq --arg i "$SHID199" '[.[]|select(.id==$i)]|length')"
+cek "…dan TIDAK lagi duduk di keranjang \"pas\"" "V == 0" \
+  "$(api "$OWNER" GET "/shift/selisih?status=pas" | jq --arg i "$SHID199" '[.[]|select(.id==$i)]|length')"
+# Pasangan anti-hijau-palsu: shift yang benar-benar pas harus TETAP "pas".
+cek "shift yang memang pas tetap berstatus pas" "V >= 0" \
+  "$(api "$OWNER" GET "/shift/selisih?status=pas" | jq '[.[]|select(.selisih == 0)]|length')"
+cek "tak ada baris \"pas\" yang selisihnya bukan nol" "V == 0" \
+  "$(api "$OWNER" GET "/shift/selisih?status=pas" | jq '[.[]|select(.selisih != 0)]|length')"
+
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"
