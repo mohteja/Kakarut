@@ -147,19 +147,28 @@ export async function terapkanKonsumsiOtomatis(
     const hari = hariTerjadwal(r.mulai, r.perHari, r.terakhirDiterapkan, hariIni);
     await db.transaction(async (tx) => {
       if (hari.length > 0) {
-        const [{ saldo }] = await tx
-          .select({
-            saldo: sql<number>`COALESCE(SUM(${supplyMutations.qty}), 0)::float8`,
-          })
-          .from(supplyMutations)
-          .where(
-            and(
-              eq(supplyMutations.supplyId, r.supplyId),
-              eq(supplyMutations.branchId, r.branchId),
-              eq(supplyMutations.status, "disetujui"),
-            ),
-          );
-        let sisa = saldo;
+        /*
+         * YANG BISA DIPAKAI ADALAH YANG ADA DI RAK.
+         *
+         * Niat kode ini sudah benar sejak awal — `if (sisa <= 0) break` di
+         * bawah artinya "jangan memakai yang tidak ada". Yang salah cuma
+         * ukurannya: ledger perlengkapan baru bergerak saat diterima, jadi
+         * saldo mentah masih memuat barang yang fisiknya sudah di truk.
+         *
+         * Terukur, dan ini yang paling tajam dari seluruh keluarganya karena
+         * TAK ADA yang menekan apa pun — potongan ini berjalan sendiri setiap
+         * kali daftar perlengkapan dibuka:
+         *
+         *   CK 10 pcs, seluruhnya sudah dikirim, rak kosong
+         *   aturan 3 pcs/hari × 4 hari → memakan seluruh 10, saldo CK 0
+         *   toko menekan Terima        → CK −10, total 0 dari 10 yang ada
+         *
+         * Pembandingnya `saldoDiRakPerlengkapan`, sama dengan pintu-pintu lain.
+         */
+        const sisaRak =
+          (await saldoDiRakPerlengkapan(tx, companyId, r.branchId, [r.supplyId])).get(r.supplyId) ??
+          0;
+        let sisa = sisaRak;
         for (const tanggal of hari) {
           if (sisa <= 0) break; // habis — sisa hari dilewati (tidak diulang)
           const q = Math.min(r.qty, sisa);
