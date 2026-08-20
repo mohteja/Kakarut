@@ -9888,15 +9888,47 @@ cek "NYALA: saldo mendarat tepat 0, tak pernah minus" "V == 0" "$(saldo198)"
 # `gagal` dan tak pernah mengirimnya lagi, jadi penjualan sungguhan HILANG.
 JUAL198_SEBELUM=$(api "$OWNER" GET /penjualan | jq 'if type=="array" then length else (.rows|length) end')
 REF198=$(python3 -c "import uuid;print(uuid.uuid4())")
-WKT198=$(python3 -c "import datetime;print((datetime.datetime.now(datetime.timezone.utc)-datetime.timedelta(hours=2)).strftime('%Y-%m-%dT%H:%M:%SZ'))")
+# WAKTU KEJADIAN DITURUNKAN DARI DATA, BUKAN DARI JAM DINDING.
+#
+# Dulu barisnya `now - 2 jam`, dan itu membuat §198 gagal empat kali sehari.
+# Sebabnya bukan tanggal bisnis melainkan gerbang pencocokan shift di
+# `sync/routes.ts`: tahap 1 menuntut `opened_at <= waktu + SKEW_MENIT` (5
+# menit). Shift yang dipakai §198 dibuka SAAT RUN BERJALAN, jadi `now - 2 jam`
+# jatuh dua jam SEBELUM shift itu ada — tak ada shift yang mencakupnya, 409
+# `shift_tidak_cocok`. Bahwa ia pernah lulus sama sekali hanya karena seksi
+# lain kebetulan meninggalkan shift bertanggal mundur yang menaunginya.
+#
+# Kelas cacat yang SAMA PERSIS sudah dicabut sekali di §138 — komentarnya
+# bahkan menyebut run 17:05 UTC (= 00:05 WIB) dan menghitung jendela rusaknya
+# "empat jam penuh setiap hari". Pelajarannya tak pernah dibawa ke saudaranya.
+#
+# §138 memperbaikinya dengan aritmetika menit-WIB. Di sini dipakai cara yang
+# lebih kuat: waktunya diambil dari shift yang MEMANG ADA, jadi tak ada jam
+# dinding yang bisa menggeser apa pun. Satu detik sesudah shift dibuka
+# memenuhi keduanya sekaligus — di dalam jendela shift, dan tetap SEBELUM
+# baseline `stok/awal` di atas (shift dibuka lebih dulu dari baseline itu).
+BUKA198=$(api "$K198" GET /shift/aktif | jq -r '.dibuka_pada')
+WKT198=$(python3 -c "
+import datetime, sys
+t = datetime.datetime.fromisoformat(sys.argv[1].replace('Z', '+00:00'))
+print((t + datetime.timedelta(seconds=1)).astimezone(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'))
+" "$BUKA198")
+# Premis setupnya DIPATOK, bukan diandaikan: kalau salah satunya meleset,
+# asersi di bawah akan lulus/gagal karena alasan yang bukan produknya.
+cek "dasar §198: waktu kejadian sesudah shift dibuka & masih di masa lalu" "V == 1" \
+  "$(python3 -c "
+import sys
+buka, wkt, kini = sys.argv[1:4]
+print(1 if buka <= wkt < kini else 0)
+" "$BUKA198" "$WKT198" "$(date -u +%Y-%m-%dT%H:%M:%SZ)")"
 SY198=$(api "$K198" POST /sync "{\"device_id\":\"dev198\",\"commands\":[{\"client_ref\":\"$REF198\",\"tipe\":\"penjualan\",\"waktu\":\"$WKT198\",\"payload\":{\"is_dine_in\":false,\"metode_bayar\":\"tunai\",\"items\":[{\"menu_id\":\"$M198\",\"qty\":5}]}}]}")
 cek "sinkron offline TETAP diterima walau stok 0" "V == 1" \
   "$(echo "$SY198" | jq '[.hasil[]|select(.kode >= 200 and .kode < 300)]|length')"
-# Saldonya SENGAJA tidak bergeser: konsumsi bertanggal 2 jam lalu jatuh
-# SEBELUM baseline opname yang baru dibuat `stok/awal` di atas, jadi ia di
-# luar jendela baseline. Itu justru aturan yang benar — hitungan fisik saat
-# opname sudah memuat pemakaian itu. Yang dipatok di sini: penjualannya
-# BENAR-BENAR tercatat, bukan diam-diam ditolak gerbang.
+# Saldonya SENGAJA tidak bergeser: konsumsinya bertanggal SEBELUM baseline
+# opname yang baru dibuat `stok/awal` di atas, jadi ia di luar jendela
+# baseline. Itu justru aturan yang benar — hitungan fisik saat opname sudah
+# memuat pemakaian itu. Yang dipatok di sini: penjualannya BENAR-BENAR
+# tercatat, bukan diam-diam ditolak gerbang.
 JUAL198_SESUDAH=$(api "$OWNER" GET /penjualan | jq 'if type=="array" then length else (.rows|length) end')
 cek "…dan penjualannya benar-benar tercatat (bukan ditolak diam-diam)" "V == 1" \
   "$([ "$JUAL198_SESUDAH" -gt "$JUAL198_SEBELUM" ] && echo 1 || echo 0)"
