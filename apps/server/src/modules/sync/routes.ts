@@ -165,7 +165,41 @@ async function panggilInternal(
   body: unknown,
 ): Promise<{ kode: number; data: unknown }> {
   if (!appRef) throw new HTTPException(500, { message: "Sinkron belum siap (app belum disuntik)" });
-  const req = new Request(`http://sync.internal/api${path}`, {
+  /*
+   * `branch_id` DIANGKAT KE QUERY, bukan hanya ditinggal di badan.
+   *
+   * Handler menentukan cabangnya lewat `resolveBranchId(c)`, yang membaca
+   * `?branch_id=`. Panggilan internal ini dulu tak pernah menyusun query sama
+   * sekali — seluruh payload masuk badan — sehingga cabang yang diminta
+   * perangkat TAK PERNAH SAMPAI. Untuk peran tak terikat cabang (owner/admin)
+   * `resolveBranchId` lalu jatuh ke CABANG PERTAMA perusahaan, diam-diam.
+   *
+   * Terukur: owner menyinkronkan "pakai 7 pcs di Cabang Sync" → dibalas
+   * status "ok" kode 200, saldo Cabang Sync tetap 100, dan yang terpotong
+   * justru cabang Pusat (100 → 93). Dua cabang salah sekaligus — satu
+   * kelebihan, satu kekurangan — tanpa satu pun galat, dan perangkatnya
+   * menganggap perintahnya sudah beres.
+   *
+   * Diangkat DI SINI, bukan di tiap eksekutor: ketiga belas perintah mendarat
+   * di modul yang memakai `resolveBranchId`, dan satu eksekutor yang lupa akan
+   * mengulang bug yang sama tanpa suara.
+   *
+   * Nilainya TETAP ditinggal di badan: sebagian handler (`/penjualan`,
+   * `/open-bill`) membacanya dari sana lewat `branchUntukTulis`.
+   *
+   * Tidak melonggarkan otorisasi. `resolveBranchId` MENGABAIKAN query untuk
+   * peran yang terikat cabang — kasir tetap tak bisa menulis ke cabang lain —
+   * dan untuk peran tak terikat, `pastikanCabang` menolak id milik perusahaan
+   * lain.
+   */
+  const cabang =
+    body && typeof body === "object" && typeof (body as Record<string, unknown>).branch_id === "string"
+      ? ((body as Record<string, unknown>).branch_id as string)
+      : null;
+  const url = cabang
+    ? `http://sync.internal/api${path}${path.includes("?") ? "&" : "?"}branch_id=${encodeURIComponent(cabang)}`
+    : `http://sync.internal/api${path}`;
+  const req = new Request(url, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: authHeader },
     body: JSON.stringify(body ?? {}),
