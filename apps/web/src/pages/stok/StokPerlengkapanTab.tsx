@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { angkaDari, teksAngka, saldoDiRak, adaDiJalan } from "@kakarut/shared";
+import { angkaDari, teksAngka, saldoDiRak, adaDiJalan, kekuranganKeMinimum } from "@kakarut/shared";
 import { useState } from "react";
 import type {
   BelanjaPerlengkapanDto,
@@ -544,8 +544,11 @@ function MintaModal({
   onClose: () => void;
   onSukses: () => void;
 }) {
-  // saran: cukupi sampai stok minimum (minimal 1)
-  const saran = Math.max(1, Math.ceil(item.stok_minimum - item.saldo));
+  // Saran: cukupi sampai stok minimum, minimal 1. Kekurangannya dari
+  // `kekuranganKeMinimum` — fungsi yang sama dengan yang dipakai permintaan
+  // otomatis di server; `max(1, …)` di sini murni keputusan tampilan (kotak
+  // isian tak boleh menyarankan 0), bukan bagian dari hitungannya.
+  const saran = Math.max(1, kekuranganKeMinimum(item));
   const [qty, setQty] = useState(teksAngka(Math.min(saran, item.saldo_ck ?? saran)));
   const [catatan, setCatatan] = useState("");
   const kirim = useMutation({

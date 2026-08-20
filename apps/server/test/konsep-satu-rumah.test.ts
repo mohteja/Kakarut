@@ -85,19 +85,14 @@ const DASAR: Record<string, { berkas: number; alasan: string }> = {
   },
 
   // ── UTANG YANG DIAKUI: duplikasi nyata, belum dibereskan ──────────────────
-  // Dibiarkan di sini SUPAYA TERLIHAT, bukan supaya dilupakan. Keduanya
-  // ditemukan justru saat menulis daftar ini — menuntut alasan untuk tiap entri
-  // memaksa memeriksanya satu per satu, dan dua ini tak punya alasan yang baik.
-  "stok_minimum - saldo": {
-    berkas: 2,
-    alasan:
-      "UTANG: 'berapa yang perlu dipesan' dihitung dua kali, DAN keduanya sudah " +
-      "berbeda — server memakai `Math.ceil(x - y - 1e-9)` (berpenjaga galat " +
-      "pembulatan float), layar memakai `Math.max(1, Math.ceil(x - y))` tanpa " +
-      "penjaga itu. Untuk saldo 10.0000000001 dengan minimum 10, server bilang " +
-      "0 dan layar bilang 1. Selisihnya kecil dan tak ada yang rugi uang, tapi " +
-      "ini persis awal dari bentuk yang lima kali menyakiti stok",
-  },
+  // Dibiarkan di sini SUPAYA TERLIHAT, bukan supaya dilupakan. Ditemukan justru
+  // saat menulis daftar ini — menuntut alasan untuk tiap entri memaksa
+  // memeriksanya satu per satu, dan yang ini tak punya alasan yang baik.
+  //
+  // Sebelumnya ada dua. `stok_minimum - saldo` sudah LUNAS: aturannya kini
+  // tinggal di `kekuranganKeMinimum` (@kakarut/shared), dan uji "DASAR tidak
+  // menyimpan entri yang sudah tak berlaku" di bawahlah yang memaksa entrinya
+  // dihapus dari sini — persis kerja yang diharapkan darinya.
   "subtotal - diskon": {
     berkas: 2,
     alasan:

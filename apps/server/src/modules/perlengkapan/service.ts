@@ -16,6 +16,7 @@ import type {
   RakLokasi,
   StokStatus,
 } from "@kakarut/shared";
+import { kekuranganKeMinimum } from "@kakarut/shared";
 import { db } from "../../db/client";
 import {
   branches,
@@ -1135,9 +1136,10 @@ export async function permintaanOtomatisPerlengkapan(params: {
   // item beli dikumpulkan dulu → SATU faktur BP untuk seluruh permintaan
   const beliItems: { supplyId: string; nama: string; satuan: string; qty: number }[] = [];
   for (const r of rows) {
-    if (!(r.stok_minimum > 0) || r.saldo >= r.stok_minimum) continue;
-    // butuh dibulatkan ke atas agar tak minta pecahan yang mustahil dikirim
-    const kekurangan = Math.ceil(r.stok_minimum - r.saldo - 1e-9);
+    // Rumahnya di @kakarut/shared — layar memakai fungsi yang SAMA. Dulu
+    // aturannya tersalin dan epsilonnya hanya ada di sini, sehingga permintaan
+    // otomatis meminta 1 sementara dialog manual mengisi 2 untuk item yang sama.
+    const kekurangan = kekuranganKeMinimum(r);
     if (kekurangan <= 0) continue;
     // cabang tak terhubung CK → tak bisa minta; catat sebagai info
     if (!cab.ckId) {
