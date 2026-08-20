@@ -9872,16 +9872,36 @@ cek "dasar §199: shift ini belum ada di antrean persetujuan" "V == 0" \
 
 # Penjualan TUNAI 40.000 bertanggal DI DALAM jendela shift itu, tersinkron
 # sesudah shift ditutup — persis yang terjadi saat kasir offline lalu online.
+#
+# WAKTUNYA DITURUNKAN DARI JAM TUTUP YANG SESUNGGUHNYA, bukan dari "buka + 5
+# detik". Yang lama bergantung pada berapa lama blok ini berjalan: bila §199
+# selesai dalam kurang dari 5 detik, capnya mendarat SESUDAH shift ditutup —
+# di LUAR jendela, kebalikan dari yang kalimat di atas katakan. Pada database
+# yang sudah besar, seksi ini memakan 6,4 detik dan capnya jatuh di dalam
+# jendela, jadi asersi di bawahnya berubah jawaban tanpa satu baris kode pun
+# berubah. Titik tengah antara buka dan tutup selalu di dalam jendela, seberapa
+# pun cepat atau lambat mesinnya.
+DITUTUP199=$(shift199 | jq -r '.ditutup_pada')
 WKT199=$(python3 -c "
 import datetime
-d=datetime.datetime.fromisoformat('$DIBUKA199'.replace('Z','+00:00'))
-print((d+datetime.timedelta(seconds=5)).strftime('%Y-%m-%dT%H:%M:%SZ'))")
+b=datetime.datetime.fromisoformat('$DIBUKA199'.replace('Z','+00:00'))
+t=datetime.datetime.fromisoformat('$DITUTUP199'.replace('Z','+00:00'))
+print((b + (t - b) / 2).strftime('%Y-%m-%dT%H:%M:%SZ'))")
+cek "dasar §199: cap penjualan benar-benar di dalam jendela shift" "V == 1" \
+  "$(python3 -c "print(1 if '$DIBUKA199'[:19] <= '$WKT199'[:19] <= '$DITUTUP199'[:19] else 0)")"
 REF199=$(python3 -c "import uuid;print(uuid.uuid4())")
 SY199=$(api "$K199" POST /sync "{\"device_id\":\"dev199\",\"commands\":[{\"client_ref\":\"$REF199\",\"tipe\":\"penjualan\",\"waktu\":\"$WKT199\",\"payload\":{\"is_dine_in\":false,\"metode_bayar\":\"tunai\",\"items\":[{\"menu_id\":\"$M199\",\"qty\":4}]}}]}")
 cek "penjualan susulan diterima (transaksinya nyata)" "V == 1" \
   "$(echo "$SY199" | jq '[.hasil[]|select(.kode >= 200 and .kode < 300)]|length')"
-cek "server menandainya masuk shift yang sudah ditutup" "V == 1" \
+# `di_luar_jendela_shift` menandai penjualan yang dibukukan lewat jalur CADANGAN
+# — shift yang jendelanya tak memuat capnya sama sekali. Cap ini justru di
+# DALAM jendela, jadi ia lewat jalur biasa dan penandanya memang false. Yang
+# membuat seksi ini bernilai bukan penanda itu, melainkan bahwa shift-nya sudah
+# TERTUTUP saat penjualannya tiba — dan itulah yang diuji asersi di bawah.
+cek "cap di dalam jendela → BUKAN jalur susulan (penandanya false)" "V == 0" \
   "$(echo "$SY199" | jq '[.hasil[]|select(.data.di_luar_jendela_shift == true)]|length')"
+cek "dasar §199: shift-nya memang sudah tertutup saat penjualan tiba" "V == 1" \
+  "$(shift199 | jq '(.ditutup_pada != null)|if . then 1 else 0 end')"
 
 # INTI: angka & statusnya harus SEPAKAT, dan owner harus melihatnya.
 cek "kas sistem ikut naik persis 40.000" "abs(V - 40000) < 0.001" \
