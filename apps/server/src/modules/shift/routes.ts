@@ -1,5 +1,5 @@
 import { zValidator } from "@hono/zod-validator";
-import { and, asc, desc, eq, inArray, isNotNull, isNull, sql, sum } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, or, sql, sum } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -377,6 +377,44 @@ function butaUntuk(role: string | null, closedAt: Date | null, uangFisik: number
   return closedAt == null && uangFisik == null && terikatCabang(role);
 }
 
+/**
+ * STATUS SELISIH KAS — diturunkan dari selisih yang HIDUP, bukan dari ada
+ * tidaknya keputusan tersimpan.
+ *
+ * Kolom DB hanya menyimpan KEPUTUSAN (menunggu/disetujui/ditolak). Dulu "pas"
+ * diturunkan dari ketiadaan keputusan itu: `selisihStatus ?? "pas"`. Itu benar
+ * selama angka shift berhenti bergerak saat ditutup — dan angka shift TIDAK
+ * berhenti bergerak.
+ *
+ * `kas_sistem` dihitung ulang tiap kali shift dibaca (`rekapWindow`), dan
+ * penjualan bertanggal mundur dari sinkron offline bisa mendarat di jendela
+ * shift yang sudah lama ditutup. Kasir memang diperingatkan saat itu terjadi
+ * ("masuk ke shift yang sudah ditutup — periksa selisih kas shift itu"), tapi
+ * sisi server tak pernah ikut berubah pikiran.
+ *
+ * Terukur: shift ditutup pas (uang fisik 230.000 = kas sistem 230.000, status
+ * "pas", tak butuh persetujuan). Satu penjualan tunai 40.000 tersinkron
+ * belakangan ke jendelanya → kas sistem jadi 270.000 dan selisih jadi −40.000,
+ * TAPI statusnya tetap "pas". Baris itu lalu berbunyi "selisih −40.000, status
+ * pas" sekaligus, dan yang lebih mahal: `GET /shift/selisih?status=menunggu`
+ * — antrean persetujuan owner — memfilter kolom beku itu, jadi kekurangan
+ * 40.000 tak pernah muncul untuk ditinjau siapa pun.
+ *
+ * Maka: keputusan yang SUDAH diambil tetap menang (owner sudah menilai), dan
+ * bila belum ada keputusan, statusnya mengikuti angka hari ini.
+ */
+export function statusSelisih(
+  closedAt: Date | null,
+  tersimpan: "menunggu" | "disetujui" | "ditolak" | null,
+  selisih: number,
+): "pas" | "menunggu" | "disetujui" | "ditolak" | null {
+  // `null` (masih terbuka) sengaja dipisah dari `"pas"` (sudah ditutup, tak
+  // ada selisih) — lihat catatan tipe `StatusSelisih`.
+  if (closedAt == null) return null;
+  if (tersimpan) return tersimpan;
+  return Math.abs(selisih) < EPS_KAS ? "pas" : "menunggu";
+}
+
 async function toDto(r: ShiftJoinRow, role?: string | null): Promise<Shift> {
   const rekap = await rekapWindow(r.companyId, r.branchId, r.id, r.openedAt, r.closedAt);
   const kasAsli = r.modalAwal + rekap.penjualan_tunai;
@@ -406,7 +444,7 @@ async function toDto(r: ShiftJoinRow, role?: string | null): Promise<Shift> {
     // `null` (masih terbuka) sengaja dipisah dari `"pas"` (sudah ditutup, tak
     // ada selisih). Kolom DB hanya menyimpan KEPUTUSAN, jadi "pas" diturunkan
     // di sini — tak ada status kelima yang perlu disimpan.
-    status_selisih: r.closedAt == null ? null : (r.selisihStatus ?? "pas"),
+    status_selisih: statusSelisih(r.closedAt, r.selisihStatus, (r.uangFisik ?? 0) - kasAsli),
     selisih_alasan: r.selisihAlasan,
     selisih_disetujui_oleh: r.penyetuju,
     selisih_diputus_pada: r.disetujuiAt ? r.disetujuiAt.toISOString() : null,
@@ -610,20 +648,40 @@ export const shiftRoutes = new Hono<AppEnv>()
     async (c) => {
       const auth = c.get("auth");
       const q = c.req.valid("query");
+      /*
+       * "pas" dan "menunggu" TAK BISA dipisahkan di SQL.
+       *
+       * Keduanya sama-sama berkolom `selisih_status` NULL bila belum ada
+       * keputusan; yang membedakan adalah SELISIHNYA — dan selisih itu
+       * dihitung ulang dari penjualan shift tiap kali dibaca, bukan disimpan.
+       * Dulu "pas" difilter sebagai `IS NULL`, jadi shift yang selisihnya
+       * berubah SESUDAH ditutup (penjualan bertanggal mundur dari sinkron
+       * offline) tetap duduk di keranjang "tak perlu ditinjau" — kekurangan
+       * kasnya tak pernah sampai ke owner.
+       *
+       * Jadi kedua status itu diambil bersama dari SQL lalu dipisah di sini
+       * memakai `statusSelisih`, aturan yang sama dengan yang dipakai layar
+       * shift. `disetujui`/`ditolak` tetap difilter langsung — keputusan yang
+       * sudah diambil memang tersimpan.
+       */
+      const perluHitung = q.status === "pas" || q.status === "menunggu";
       const rows = await baseSelect()
         .where(
           and(
             eq(shifts.companyId, auth.company_id!),
             isNotNull(shifts.closedAt),
             q.branch_id ? eq(shifts.branchId, q.branch_id) : undefined,
-            // "pas" tak tersimpan di DB (lihat toDto) — itu justru baris yang
-            // TIDAK punya keputusan tapi sudah tertutup.
-            q.status === "pas" ? isNull(shifts.selisihStatus) : eq(shifts.selisihStatus, q.status),
+            q.status === "pas" || q.status === "menunggu"
+              ? or(isNull(shifts.selisihStatus), eq(shifts.selisihStatus, "menunggu"))
+              : eq(shifts.selisihStatus, q.status),
           ),
         )
         .orderBy(desc(shifts.closedAt))
-        .limit(50);
-      const hasil: SelisihKasRow[] = await Promise.all(
+        // Ambil lebih banyak saat statusnya harus dihitung: penyaringan terjadi
+        // SESUDAH query, jadi memotong di 50 lebih dulu bisa membuang baris
+        // yang justru diminta. Dipangkas kembali ke 50 di bawah.
+        .limit(perluHitung ? 200 : 50);
+      const semua: SelisihKasRow[] = await Promise.all(
         rows.map(async (r) => {
           const rekap = await rekapWindow(r.companyId, r.branchId, r.id, r.openedAt, r.closedAt);
           const kas = r.modalAwal + rekap.penjualan_tunai;
@@ -638,10 +696,20 @@ export const shiftRoutes = new Hono<AppEnv>()
             // keterangan selisih lebih berguna daripada catatan umum, tapi
             // klien lama hanya mengisi `catatan` — pakai yang ada.
             catatan: r.selisihAlasan ?? r.catatan,
-            status_selisih: r.selisihStatus ?? "pas",
+            // Aturan yang SAMA dengan layar shift — dua tempat yang menurunkan
+            // status ini dengan cara berbeda adalah dua tempat yang akan
+            // berselisih pendapat soal shift yang sama.
+            status_selisih: statusSelisih(
+              r.closedAt,
+              r.selisihStatus,
+              (r.uangFisik ?? 0) - kas,
+            )!,
           };
         }),
       );
+      const hasil = perluHitung
+        ? semua.filter((x) => x.status_selisih === q.status).slice(0, 50)
+        : semua;
       return c.json(hasil);
     },
   )
