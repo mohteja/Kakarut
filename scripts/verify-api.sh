@@ -9572,6 +9572,68 @@ cek "harga_beli dikembalikan ke nilai asalnya" "abs(V - $HB194_ASAL/$ISI194) < 1
   "$(api "$OWNER" GET /stok | jq --arg i "$B194" '[.[]|select(.ingredient_id==$i)][0].harga_per_unit')"
 
 
+echo "== 195. Bahan yang masih dimakan paket aktif tak bisa diarsipkan =="
+# "Dipakai" harus berarti hal yang sama di penjaga hapus-bahan dan di kasir.
+# Penjaga itu dulu cuma melihat menu yang memuat bahan ini DAN aktif sendiri,
+# sementara `komponenEfektif` — yang benar-benar memotong stok saat menjual —
+# memulangkan komponen menu itu sendiri DITAMBAH komponen MENU DASARNYA bila ia
+# paket. Satu tingkat yang tak ikut terlihat:
+#
+#   paket P (aktif) → menu dasar A (diarsipkan) → bahan B
+#
+# Terukur sebelum perbaikan: stok B 100 pcs, kasir menjual 60 paket (butuh 120)
+# — LOLOS, saldo B mendarat di −20, dan B sudah lenyap dari SETIAP layar stok
+# (`hitungSaldoCabang` menyaring is_active). Sisa porsi paketnya pun berubah
+# dari angka menjadi "tidak dibatasi bahan apa pun".
+KAT195=$(api "$OWNER" GET /kategori | jq -r '.[0].id')
+CB195=$(api "$OWNER" GET /cabang | jq -r '[.[]|select(.tipe=="store")][0].id')
+cek "dasar §195: kategori & cabang store ada" "V == 1" \
+  "$(printf '%s%s' "$KAT195" "$CB195" | grep -Eqc '^[0-9a-f-]{72}$' && echo 1 || echo 0)"
+
+# Satu bahan BARU per kasus: bahan yang dipakai menu lain akan tertahan oleh
+# sebab yang berbeda, dan asersi yang hijau karena sebab lain lebih buruk
+# daripada tak ada asersi.
+bahan195() { api "$OWNER" POST /bahan "{\"nama\":\"Bahan 195 $1\",\"harga_beli\":1000,\"isi\":1,\"satuan\":\"pcs\",\"track_stok\":true}" | jq -r .id; }
+dasar195() { api "$OWNER" POST /menu "{\"nama\":\"Dasar 195 $1\",\"category_id\":\"$KAT195\",\"harga_jual\":10000,\"mult\":2,\"komponen\":[{\"ingredient_id\":\"$2\",\"qty\":2}]}" | jq -r .id; }
+paket195() { api "$OWNER" POST /menu "{\"nama\":\"Paket 195 $1\",\"category_id\":\"$KAT195\",\"harga_jual\":30000,\"tipe\":\"paket\",\"base_menu_id\":\"$2\",\"base_mult\":2,\"komponen\":[]}" | jq -r .id; }
+
+# ── Kasus BUG: dasar diarsipkan, paketnya masih aktif ───────────────────────
+BA=$(bahan195 A); MA=$(dasar195 A "$BA"); PA=$(paket195 A "$MA")
+api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CB195\",\"items\":[{\"ingredient_id\":\"$BA\",\"qty\":100}]}" > /dev/null
+# Dasar dulu: sisa porsi paket memang terhitung dari saldo bahan itu. Tanpa
+# asersi ini, "null" sesudahnya tak bisa dibedakan dari menu yang dari awal
+# memang tak punya pembatas.
+cek "dasar §195: sisa porsi paket = 50 (100 stok ÷ 2 per porsi)" "V == 50" \
+  "$(api "$OWNER" GET "/menu/ketersediaan?branch_id=$CB195" | jq --arg i "$PA" '[.[]|select(.menu_id==$i)][0].porsi')"
+api "$OWNER" DELETE "/menu/$MA" > /dev/null
+# Mengarsipkan menu dasar SENDIRI tidak merusak apa pun — `loadKatalog` sengaja
+# memuat menu nonaktif supaya paket tetap utuh. Dipatok supaya perbaikan ini
+# tak salah menutup pintu yang memang harus terbuka.
+cek "menu dasar diarsipkan: paket TETAP terbatas 50 porsi" "V == 50" \
+  "$(api "$OWNER" GET "/menu/ketersediaan?branch_id=$CB195" | jq --arg i "$PA" '[.[]|select(.menu_id==$i)][0].porsi')"
+cek "INTI: hapus bahan yang masih dimakan paket aktif = 409" "V == 409" \
+  "$(status_code "$OWNER" DELETE "/bahan/$BA")"
+cek "pesan tolak menyebut PAKET-nya, bukan menu dasar yang diarsip" "V == 1" \
+  "$(api "$OWNER" DELETE "/bahan/$BA" | jq '((.message // .error) | test("Paket 195 A"))|if . then 1 else 0 end')"
+cek "bahan itu MASIH tampil di daftar stok" "V == 1" \
+  "$(api "$OWNER" GET "/stok?branch_id=$CB195" | jq --arg i "$BA" '[.[]|select(.ingredient_id==$i)]|length')"
+
+# ── Pasangan anti-hijau-palsu: penjaga yang menolak SEMUA bukan penjaga ─────
+BB=$(bahan195 B); MB=$(dasar195 B "$BB")
+api "$OWNER" DELETE "/menu/$MB" > /dev/null
+cek "dasar diarsip & TAK ada paket → boleh dihapus" "V == 200" \
+  "$(status_code "$OWNER" DELETE "/bahan/$BB")"
+
+BC=$(bahan195 C); MC=$(dasar195 C "$BC"); PC=$(paket195 C "$MC")
+api "$OWNER" DELETE "/menu/$MC" > /dev/null
+api "$OWNER" DELETE "/menu/$PC" > /dev/null
+cek "dasar & PAKETNYA sama-sama diarsip → boleh dihapus" "V == 200" \
+  "$(status_code "$OWNER" DELETE "/bahan/$BC")"
+
+BD=$(bahan195 D); dasar195 D "$BD" > /dev/null
+cek "menu biasa masih AKTIF → tetap 409 (jalur lama tak berubah)" "V == 409" \
+  "$(status_code "$OWNER" DELETE "/bahan/$BD")"
+
 echo "== 196. Padanan kemasan saldo dikirim JADI (untuk klien non-TS) =="
 # Web memanggil `qtyTeks` sendiri; mobile ditulis Flutter dan tak bisa
 # mengimpor `@kakarut/shared`. Menyerahkan aturannya ke tiap klien berarti
