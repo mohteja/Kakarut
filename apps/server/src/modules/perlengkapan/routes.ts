@@ -1031,7 +1031,22 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
       throw new HTTPException(404, { message: "Perlengkapan tidak ditemukan" });
     // jatah otomatis hari ini dipotong dulu agar saldo yang divalidasi jujur
     await terapkanKonsumsiOtomatis(auth.company_id!, branchId);
-    const saldo = await saldoSatuPerlengkapan(item.id, branchId);
+    /*
+     * YANG BOLEH DIPAKAI ADALAH YANG ADA DI RAK.
+     *
+     * Ledger perlengkapan baru bergerak saat diterima, jadi barang yang sudah
+     * berangkat ke cabang masih utuh di saldo CK — dan memvalidasi pemakaian
+     * terhadap saldo mentah mengizinkan CK "memakai" barang yang fisiknya sudah
+     * tidak ada di sana. Terukur: CK 10 pcs yang seluruhnya sudah dikirim,
+     * `pakai 10` DITERIMA → saldo 0, lalu toko menekan Terima → CK −10, total 0
+     * dari 10 yang ada.
+     *
+     * Pembandingnya `saldoDiRakPerlengkapan`, sama dengan yang dipakai opname,
+     * stok awal, dan koreksi fisik. Bedanya cuma pertanyaannya: yang itu
+     * "berapa yang ada", yang ini "boleh dipakai berapa" — jawabannya satu.
+     */
+    const saldo =
+      (await saldoDiRakPerlengkapan(db, auth.company_id!, branchId, [item.id])).get(item.id) ?? 0;
     if (body.qty > saldo) {
       throw new HTTPException(400, {
         message: `Stok tidak cukup (saldo ${saldo} ${item.satuan})`,
