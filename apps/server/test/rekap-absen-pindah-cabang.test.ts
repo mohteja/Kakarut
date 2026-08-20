@@ -134,8 +134,15 @@ describe("penjagaan tetangga tetap utuh", () => {
   it("jendela hitung per karyawan masih dipotong bergabung & arsip", () => {
     expect(ABSENSI_KODE).toMatch(/const mulaiHitung = \(\) => \{|const mulaiHitung = \(\(\) =>/);
     expect(ABSENSI_KODE).toContain("const akhirHitung");
-    // Hanya ALPA yang tunduk pada jendela — hadir/cuti tetap ditampilkan.
-    expect(ABSENSI_KODE).toMatch(/if \(dalamJendela\) \{\s*alpa\+\+/);
+    // Kalimat di sini dulu berbunyi "hanya ALPA yang tunduk pada jendela —
+    // hadir/cuti tetap ditampilkan", dan itulah bugnya, tertulis. Cuti yang
+    // di-ACC melewati tanggal seseorang KELUAR tetap terhitung: 3 hari cuti
+    // berbayar untuk orang yang sudah tidak bekerja di sana. Aturannya kini
+    // `nilaiHariRekap`, dan dijalankan langsung di rekap-jendela-izin.test.ts —
+    // yang tersisa di sini cuma penanda bahwa rekapnya memakai aturan itu,
+    // bukan salinan sendiri.
+    expect(ABSENSI_KODE).toMatch(/const hari = nilaiHariRekap\(/);
+    expect(ABSENSI_KODE).not.toMatch(/if \(dalamJendela\) \{\s*alpa\+\+/);
   });
 
   it("bulan wajib 01–12 — pola longgar melahirkan tanggal mustahil lalu 500", () => {
