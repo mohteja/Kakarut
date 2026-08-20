@@ -10614,6 +10614,94 @@ cek "INTI: dan tak pernah jatuh di bawah jumlah yang di jalan (6)" "V == 1" \
   "$(python3 -c "print(1 if $(saldo206 "$CK206" "$SPC206") >= 6 else 0)")"
 
 
+echo "== 207. SIFAT: saldo CK tak pernah jatuh di bawah barang yang di jalan =="
+# Penutup keluarga §203–§206. Lima bug terpisah, satu sifat yang dilanggar
+# kelimanya — dan lima kali berturut-turut aku salah menebak di mana pintu
+# berikutnya. Jadi yang diuji di sini SIFATNYA, bukan pintunya.
+#
+# Sapuan seluruh penulis mutasi perlengkapan memberi enam jalur yang bisa
+# MENGURANGI saldo cabang: stok-awal, opname, koreksi fisik, pakai, potongan
+# otomatis, dan debit saat Terima. Seksi ini menjalankan kelimanya yang bisa
+# dipicu langsung, berselang-seling dengan kiriman yang sedang berjalan, dan
+# memeriksa sifat yang sama sesudah SETIAP langkah:
+#
+#   saldo CK >= barang yang sedang di jalan dari CK
+#
+# Kalau pintu KEENAM lahir suatu hari, ia akan merah di sini tanpa perlu ada
+# yang menebak lebih dulu bahwa ia ada.
+CK207=$(api "$OWNER" POST /cabang '{"nama":"CK 207","tipe":"central_kitchen"}' | jq -r '.id // empty')
+TB207=$(api "$OWNER" POST /cabang "{\"nama\":\"Toko B 207\",\"central_kitchen_id\":\"$CK207\"}" | jq -r '.id // empty')
+TC207=$(api "$OWNER" POST /cabang "{\"nama\":\"Toko C 207\",\"central_kitchen_id\":\"$CK207\"}" | jq -r '.id // empty')
+SP207=$(api "$OWNER" POST /perlengkapan \
+  "{\"nama\":\"Serbet 207 $RANDOM\",\"satuan\":\"pcs\",\"harga_beli\":1500,\"stok_minimum\":0}" | jq -r '.id // empty')
+cek "dasar §207: CK + dua toko + item" "V == 1" \
+  "$([ -n "$CK207" ] && [ -n "$TB207" ] && [ -n "$TC207" ] && [ -n "$SP207" ] && echo 1 || echo 0)"
+
+# Satu panggilan mengambil saldo DAN dalam_jalan sekaligus — sifatnya harus
+# diperiksa pada potret yang sama, bukan dua potret berjarak.
+sifat207() { # sifat207 <label> — 1 bila saldo >= dalam_jalan DAN saldo >= 0
+  local row
+  row=$(api "$OWNER" GET "/perlengkapan?branch_id=$CK207" | jq -c --arg i "$SP207" '[.[]|select(.id==$i)][0]')
+  python3 -c "
+import json,sys
+r = json.loads('''$row''') if '''$row''' not in ('', 'null') else {}
+s = r.get('saldo', 0); j = r.get('dalam_jalan', 0)
+print(1 if (s >= j - 1e-9 and s >= -1e-9) else 0)
+"
+}
+langkah207() { cek "sifat sesudah: $1" "V == 1" "$(sifat207)"; }
+
+MULAI207=$(python3 -c "import datetime;print((datetime.date.today()-datetime.timedelta(days=3)).isoformat())")
+
+# URUTANNYA DIRANCANG SUPAYA RAK BENAR-BENAR KOSONG saat tiap operasi dicoba.
+# Percobaan pertama seksi ini gagal menangkap apa pun: waktu itu raknya masih
+# berisi cukup di tiap langkah, jadi pintu yang rusak tak pernah tertekan sampai
+# melanggar sifatnya — uji sifat yang tak pernah bisa gagal. Sekarang hampir
+# seluruh stok dikirim LEBIH DULU, sisanya dihabiskan potongan otomatis, lalu
+# tiap operasi perusak dicoba di depan rak kosong dengan ledger yang masih besar.
+api "$OWNER" POST "/perlengkapan/stok-awal?branch_id=$CK207" \
+  "{\"items\":[{\"supply_id\":\"$SP207\",\"qty\":20}]}" > /dev/null
+langkah207 "stok awal 20"
+
+api "$OWNER" POST "/perlengkapan/$SP207/minta?branch_id=$TB207" '{"qty":18}' > /dev/null
+langkah207 "18 dari 20 berangkat ke Toko B (rak tinggal 2, ledger masih 20)"
+
+# Aturan 5/hari jauh melebihi isi rak — potongannya harus berhenti di 2, bukan 20.
+api "$OWNER" PUT "/perlengkapan/$SP207/aturan?branch_id=$CK207" \
+  "{\"metode\":\"otomatis\",\"qty\":5,\"per_hari\":1,\"aktif\":true,\"mulai\":\"$MULAI207\"}" > /dev/null
+langkah207 "potongan otomatis 5/hari menghabiskan sisa rak"
+
+# Mulai di sini raknya KOSONG sementara ledger masih memuat 18 yang di jalan.
+# Setiap operasi di bawah adalah percobaan mengambil dari rak kosong.
+api "$OWNER" POST "/perlengkapan/$SP207/pakai?branch_id=$CK207" '{"qty":5}' > /dev/null
+langkah207 "CK mencoba memakai 5 di depan rak kosong"
+
+api "$OWNER" POST "/perlengkapan/$SP207/koreksi?branch_id=$CK207" '{"qty_fisik":0}' > /dev/null
+langkah207 "koreksi fisik: rak dihitung 0"
+
+SES207=$(api "$OWNER" POST "/perlengkapan/opname?branch_id=$CK207" \
+  "{\"items\":[{\"supply_id\":\"$SP207\",\"qty_fisik\":0}]}" | jq -r '.session_id // empty')
+[ -n "$SES207" ] && api "$OWNER" POST "/perlengkapan/opname/sesi/$SES207/acc" > /dev/null
+langkah207 "opname: rak dihitung 0, di-ACC"
+
+api "$OWNER" POST "/perlengkapan/stok-awal?branch_id=$CK207" \
+  "{\"items\":[{\"supply_id\":\"$SP207\",\"qty\":0}]}" > /dev/null
+langkah207 "stok awal disetel 0 di depan rak kosong"
+
+KB207=$(api "$OWNER" GET "/perlengkapan/kiriman?branch_id=$TB207" | jq -r '[.[]|select(.status=="dikirim")][0].id // empty')
+[ -n "$KB207" ] && api "$OWNER" POST "/perlengkapan/kiriman/$KB207/terima?branch_id=$TB207" > /dev/null
+langkah207 "Toko B menerima 18"
+
+
+# Sesudah semua mendarat: tak ada lagi yang di jalan, dan CK tak minus.
+cek "INTI: tak ada sisa di jalan sesudah semua diterima" "V == 0" \
+  "$(api "$OWNER" GET "/perlengkapan?branch_id=$CK207" | jq --arg i "$SP207" '[.[]|select(.id==$i)][0].dalam_jalan // 0')"
+cek "INTI: saldo CK tidak minus" "V == 1" \
+  "$(python3 -c "print(1 if $(api "$OWNER" GET "/perlengkapan?branch_id=$CK207" | jq --arg i "$SP207" '[.[]|select(.id==$i)][0].saldo // 0') >= -1e-9 else 0)")"
+cek "INTI: Toko B benar-benar menerima 18-nya" "V == 18" \
+  "$(api "$OWNER" GET "/perlengkapan?branch_id=$TB207" | jq --arg i "$SP207" '[.[]|select(.id==$i)][0].saldo // 0')"
+
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"
