@@ -1,10 +1,11 @@
 import { zValidator } from "@hono/zod-validator";
-import { and, desc, eq, isNull, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, ne, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import type { OnboardingStatus, UndanganDto } from "@kakarut/shared";
 import { db } from "../../db/client";
+import { kunciAntrean } from "../../lib/kunci";
 import { branches, companies, invitations, memberships, users } from "../../db/schema";
 import { requireAuth, verifikasiPassword, type AppEnv } from "../../middleware/auth";
 import { buatSesi } from "../auth/session";
@@ -160,40 +161,57 @@ export const onboardingRoutes = new Hono<AppEnv>()
     }
     await verifikasiPassword(auth.sub, c.req.valid("json").password);
 
-    // Owner terakhir? Cari perusahaan tempat pemanggil owner AKTIF; bila ada yang
-    // tak punya owner aktif lain → blokir dengan menyebut nama perusahaannya.
-    const ownerDi = await db
-      .select({ companyId: memberships.companyId, nama: companies.nama })
-      .from(memberships)
-      .innerJoin(companies, eq(memberships.companyId, companies.id))
-      .where(
-        and(
-          eq(memberships.userId, auth.sub),
-          eq(memberships.role, "owner"),
-          isNull(memberships.archivedAt),
-          eq(companies.isActive, true),
-        ),
-      );
-    for (const co of ownerDi) {
-      const [{ lain }] = await db
-        .select({ lain: sql<number>`count(*)::int` })
+    await db.transaction(async (tx) => {
+      /*
+       * OWNER TERAKHIR? Diperiksa DI DALAM transaksi ini, di belakang kunci.
+       *
+       * Bentuk lamanya memeriksa di luar, tanpa kunci. Dua owner perusahaan yang
+       * sama menghapus akunnya masing-masing pada saat bersamaan sama-sama
+       * melihat "masih ada owner lain", lalu keduanya menulis — perusahaan
+       * berakhir tanpa owner sama sekali, dan tak ada jalan keluar dari dalam
+       * aplikasi (mengangkat owner baru sendiri ber-`requireRole("owner")`).
+       * Kelas yang sama, dan kunci yang sama, dengan penjaga arsip di
+       * `karyawan/:userId` — lihat catatan panjang di sana untuk angkanya.
+       *
+       * DIURUTKAN BERDASARKAN companyId sebelum dikunci. Seorang bisa jadi owner
+       * di beberapa perusahaan; dua penghapusan yang mengunci perusahaan yang
+       * sama dengan URUTAN berbeda akan saling menunggu — deadlock yang
+       * dipulangkan Postgres sebagai 500. Urutan yang tetap menghapus
+       * kemungkinan itu seluruhnya.
+       */
+      const ownerDi = await tx
+        .select({ companyId: memberships.companyId, nama: companies.nama })
         .from(memberships)
+        .innerJoin(companies, eq(memberships.companyId, companies.id))
         .where(
           and(
-            eq(memberships.companyId, co.companyId),
+            eq(memberships.userId, auth.sub),
             eq(memberships.role, "owner"),
             isNull(memberships.archivedAt),
-            ne(memberships.userId, auth.sub),
+            eq(companies.isActive, true),
           ),
-        );
-      if (lain === 0) {
-        throw new HTTPException(400, {
-          message: `Anda owner terakhir "${co.nama}". Serahkan kepemilikan ke owner lain atau hapus perusahaan dulu sebelum menghapus akun.`,
-        });
+        )
+        .orderBy(asc(memberships.companyId));
+      for (const co of ownerDi) {
+        await kunciAntrean(tx, "owner", co.companyId);
+        const [{ lain }] = await tx
+          .select({ lain: sql<number>`count(*)::int` })
+          .from(memberships)
+          .where(
+            and(
+              eq(memberships.companyId, co.companyId),
+              eq(memberships.role, "owner"),
+              isNull(memberships.archivedAt),
+              ne(memberships.userId, auth.sub),
+            ),
+          );
+        if (lain === 0) {
+          throw new HTTPException(400, {
+            message: `Anda owner terakhir "${co.nama}". Serahkan kepemilikan ke owner lain atau hapus perusahaan dulu sebelum menghapus akun.`,
+          });
+        }
       }
-    }
 
-    await db.transaction(async (tx) => {
       // arsipkan semua keanggotaan (keluar dari perusahaan, riwayat tetap)
       await tx
         .update(memberships)

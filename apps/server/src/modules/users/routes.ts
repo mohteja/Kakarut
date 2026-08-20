@@ -7,6 +7,7 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import type { UndanganKaryawanRow } from "@kakarut/shared";
 import { appBaseUrl } from "../../lib/base-url";
+import { kunciAntrean } from "../../lib/kunci";
 import { bentrokUnikPada, tanpaBentrok } from "../../lib/pg-galat";
 import { db } from "../../db/client";
 import {
@@ -520,26 +521,6 @@ export const karyawanRoutes = new Hono<AppEnv>()
         message: "Tidak bisa menonaktifkan/mengarsipkan akun sendiri",
       });
     }
-    // Perusahaan tidak boleh kehilangan owner terakhir yang masih berjalan.
-    if (arsipEfektif === true && member.role === "owner") {
-      const ownerLain = await db
-        .select({ id: memberships.id })
-        .from(memberships)
-        .where(
-          and(
-            eq(memberships.companyId, auth.company_id!),
-            eq(memberships.role, "owner"),
-            isNull(memberships.archivedAt),
-            ne(memberships.userId, userId),
-          ),
-        );
-      if (ownerLain.length === 0) {
-        throw new HTTPException(400, {
-          message: "Tidak bisa mengarsipkan owner terakhir perusahaan",
-        });
-      }
-    }
-
     const targetRole = body.role ?? member.role;
     const targetBranch =
       body.branch_id !== undefined ? body.branch_id : member.branchId;
@@ -563,6 +544,66 @@ export const karyawanRoutes = new Hono<AppEnv>()
     }
 
     await db.transaction(async (tx) => {
+      /*
+       * PERUSAHAAN TIDAK BOLEH KEHILANGAN OWNER TERAKHIR — dan pemeriksaannya
+       * harus DI DALAM transaksi ini, di belakang kunci.
+       *
+       * Bentuk lamanya memeriksa di luar transaksi, tanpa kunci apa pun. Dua
+       * owner yang saling mengarsipkan pada saat yang sama sama-sama melihat
+       * "masih ada owner lain" — sebab masing-masing melihat LAWANNYA masih
+       * aktif — lalu keduanya menulis. TERUKUR: enam ronde, enam-enamnya
+       * berakhir dengan NOL owner aktif; kedua permintaan dibalas 200.
+       *
+       * Akibatnya perusahaan terkunci dari fungsi ber-`requireRole("owner")` —
+       * termasuk MENGANGKAT OWNER BARU. Tak ada jalan keluar dari dalam
+       * aplikasi; hanya super admin yang bisa memulihkannya.
+       *
+       * Jalur berurutan memang sudah aman (yang kedua dibalas 401 karena
+       * sesinya dicabut), jadi cacat ini TIDAK terlihat dari uji yang menunggu
+       * balasan sebelum mengirim berikutnya — persis alasan §214 menembakkan
+       * keduanya bersamaan.
+       *
+       * Kuncinya per PERUSAHAAN, bukan per baris: yang dijaga jumlah owner
+       * seluruh perusahaan, dan `FOR UPDATE` atas baris lawan justru mengundang
+       * deadlock (A memegang baris B sambil menunggu baris A, dan sebaliknya).
+       */
+      /*
+       * DUA PINTU KE INVARIAN YANG SAMA, dan yang lama cuma menjaga satu.
+       *
+       * Mengarsipkan owner memang menghilangkan satu owner — tapi MENURUNKAN
+       * PERANNYA juga. Penjaga lama hanya melihat `arsip`, jadi owner terakhir
+       * bisa mengubah perannya sendiri jadi `admin` dan lolos: 200, dan
+       * perusahaan berakhir tanpa owner. Tak butuh balapan sama sekali, cukup
+       * satu klik — terukur berurutan: owner 2 → turunkan satu → 1 → turunkan
+       * diri sendiri → 0.
+       *
+       * Yang dijaga karena itu bukan "apakah ini pengarsipan", melainkan
+       * "apakah perubahan ini MENGHAPUS owner terakhir".
+       */
+      const kehilanganOwner =
+        member.role === "owner" && (arsipEfektif === true || targetRole !== "owner");
+      if (kehilanganOwner) {
+        await kunciAntrean(tx, "owner", auth.company_id!);
+        const ownerLain = await tx
+          .select({ id: memberships.id })
+          .from(memberships)
+          .where(
+            and(
+              eq(memberships.companyId, auth.company_id!),
+              eq(memberships.role, "owner"),
+              isNull(memberships.archivedAt),
+              ne(memberships.userId, userId),
+            ),
+          );
+        if (ownerLain.length === 0) {
+          throw new HTTPException(400, {
+            message:
+              arsipEfektif === true
+                ? "Tidak bisa mengarsipkan owner terakhir perusahaan"
+                : "Tidak bisa menurunkan peran owner terakhir perusahaan",
+          });
+        }
+      }
       if (body.role !== undefined || body.branch_id !== undefined || arsipEfektif !== undefined) {
         await tx
           .update(memberships)

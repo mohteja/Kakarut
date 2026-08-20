@@ -11223,6 +11223,89 @@ cek "PASANGAN: email BARU tetap boleh dibuat → 201" "V == 201" \
      "{\"nama\":\"Balap 213c\",\"email\":\"baru213.$RANDOM@basooopa.id\",\"password\":\"Balap213Pass!\",\"role\":\"cashier\",\"branch_id\":\"$CB213\"}")"
 
 
+echo "== 214. Perusahaan tak boleh kehilangan owner TERAKHIRNYA =="
+# Penjaganya sudah ada dan tertulis niatnya — "Perusahaan tidak boleh kehilangan
+# owner terakhir yang masih berjalan" — tapi ia memeriksa DI LUAR transaksi,
+# tanpa kunci, dan hanya melihat satu dari dua pintu.
+#
+# Perusahaan tanpa owner terkunci dari seluruh fungsi ber-`requireRole("owner")`,
+# TERMASUK mengangkat owner baru. Tak ada jalan keluar dari dalam aplikasi;
+# hanya super admin yang bisa memulihkannya.
+P214='Owner214Pass!'
+buatDuaOwner214(){ # buatDuaOwner214 <label> → "T1 T2 U1 U2 CID"
+  local e1="o214a.$1.$RANDOM@contoh.id" e2="o214b.$1.$RANDOM@contoh.id" t1 t2 u1 u2
+  api "$SA" POST /admin/tenants \
+    "{\"nama\":\"Warung 214 $1 $RANDOM\",\"owner_nama\":\"O1\",\"owner_email\":\"$e1\",\"owner_password\":\"$P214\",\"cabang_nama\":\"Pusat\"}" > /dev/null
+  t1=$(login "$e1" "$P214")
+  api "$t1" POST /karyawan "{\"nama\":\"O2\",\"email\":\"$e2\",\"password\":\"$P214\",\"role\":\"owner\"}" > /dev/null
+  t2=$(login "$e2" "$P214")
+  u1=$(api "$t1" GET /auth/me | jq -r '.user.sub')
+  u2=$(api "$t1" GET /karyawan | jq -r --arg e "$e2" '[.[]|select(.email==$e)][0].user_id')
+  echo "$t1 $t2 $u1 $u2"
+}
+# Jumlah owner AKTIF dibaca lewat API sebagai owner yang masih hidup — kalau
+# keduanya jatuh, tak ada token yang bisa membacanya, dan ITU justru
+# kegagalannya: dibaca 0 dan asersinya merah.
+ownerAktif214(){ # ownerAktif214 <token-a> <token-b> → jumlah owner aktif
+  local n
+  n=$(api "$1" GET /karyawan | jq '[.[]|select(.role=="owner")]|length' 2>/dev/null)
+  case "$n" in (''|*[!0-9]*) n=$(api "$2" GET /karyawan | jq '[.[]|select(.role=="owner")]|length' 2>/dev/null) ;; esac
+  case "$n" in (''|*[!0-9]*) n=0 ;; esac
+  echo "$n"
+}
+
+# ── PINTU 1: dua owner saling mengarsipkan BERSAMAAN ───────────────────────
+# Berurutan jalur ini memang aman (yang kedua dibalas 401 karena sesinya
+# dicabut), jadi cacatnya TAK PERNAH terlihat dari uji yang menunggu balasan
+# sebelum mengirim berikutnya. Terukur sebelum perbaikan: enam ronde,
+# enam-enamnya berakhir NOL owner, kedua permintaan dibalas 200.
+read -r TA214 TB214 UA214 UB214 <<< "$(buatDuaOwner214 arsip)"
+cek "dasar §214: perusahaan uji punya 2 owner" "V == 2" "$(ownerAktif214 "$TA214" "$TB214")"
+D214=$(mktemp -d)
+curl -s -o /dev/null -w '%{http_code}\n' -X PATCH "$BASE/api/karyawan/$UB214" \
+  -H "Authorization: Bearer $TA214" -H 'Content-Type: application/json' -d '{"arsip":true}' > "$D214/a" &
+curl -s -o /dev/null -w '%{http_code}\n' -X PATCH "$BASE/api/karyawan/$UA214" \
+  -H "Authorization: Bearer $TB214" -H 'Content-Type: application/json' -d '{"arsip":true}' > "$D214/b" &
+wait
+cek "INTI: dua owner saling arsip BERSAMAAN → tepat SATU yang tersisa" "V == 1" \
+  "$(ownerAktif214 "$TA214" "$TB214")"
+cek "…dan yang kalah ditolak 400, bukan diloloskan atau 500" "V == 1" \
+  "$(cat "$D214"/a "$D214"/b | grep -c '^400' || true)"
+
+# ── PINTU 2: MENURUNKAN PERAN owner terakhir (tanpa balapan sama sekali) ────
+# Penjaga lama cuma melihat `arsip`, jadi pintu ini terbuka lebar: owner
+# terakhir mengubah perannya sendiri jadi admin → 200, perusahaan tanpa owner.
+read -r TC214 TD214 UC214 UD214 <<< "$(buatDuaOwner214 turun)"
+cek "PINTU 2: menurunkan owner yang BUKAN terakhir → boleh (200)" "V == 200" \
+  "$(status_code_body "$TC214" PATCH "/karyawan/$UD214" '{"role":"admin"}')"
+cek "…sisa satu owner" "V == 1" "$(ownerAktif214 "$TC214" "$TC214")"
+cek "INTI: menurunkan peran owner TERAKHIR → ditolak 400" "V == 400" \
+  "$(status_code_body "$TC214" PATCH "/karyawan/$UC214" '{"role":"admin"}')"
+cek "…dan owner terakhirnya masih owner" "V == 1" "$(ownerAktif214 "$TC214" "$TC214")"
+
+# ── PASANGAN: penjaganya tak boleh membekukan suntingan yang wajar ─────────
+# Penjaga yang menolak terlalu banyak sama merugikannya: owner terakhir tetap
+# harus bisa mengganti namanya sendiri.
+cek "PASANGAN: mengubah NAMA owner terakhir tetap boleh (200)" "V == 200" \
+  "$(status_code_body "$TC214" PATCH "/karyawan/$UC214" '{"nama":"Owner Ganti Nama"}')"
+cek "PASANGAN: owner terakhir tetap ada sesudahnya" "V == 1" "$(ownerAktif214 "$TC214" "$TC214")"
+
+# ── SAUDARANYA: hapus-akun-sendiri lewat jalur onboarding ──────────────────
+# Penjaga "Anda owner terakhir" di sana bentuknya sama persis, dan dulu juga
+# memeriksa di luar transaksi tanpa kunci.
+read -r TE214 TF214 UE214 UF214 <<< "$(buatDuaOwner214 hapus)"
+DH214=$(mktemp -d)
+for tok in "$TE214" "$TF214"; do
+  curl -s -o /dev/null -w '%{http_code}\n' -X DELETE "$BASE/api/onboarding/akun" \
+    -H "Authorization: Bearer $tok" -H 'Content-Type: application/json' \
+    -d "{\"password\":\"$P214\"}" > "$DH214/$(echo "$tok" | tail -c 10)" &
+done
+wait
+cek "INTI: dua owner hapus akun BERSAMAAN → tepat SATU yang tersisa" "V == 1" \
+  "$(ownerAktif214 "$TE214" "$TF214")"
+cek "…dan yang kalah ditolak 400" "V == 1" "$(cat "$DH214"/* | grep -c '^400' || true)"
+
+
 echo
 echo "── §209 Rute mati: verify-api tak boleh memanggil endpoint yang TIDAK ADA ──"
 # Duduk PALING AKHIR di berkas ini walau nomornya bukan yang terbesar: ia baru
