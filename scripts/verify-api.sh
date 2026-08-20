@@ -10443,6 +10443,57 @@ cek "pasangan: koreksi fisik 3 dari 0 → selisih +3" "V == 3" \
 cek "pasangan: saldonya benar-benar jadi 3" "V == 3" "$(saldo203 "$CK203" "$SPE203")"
 
 
+echo "== 204. Perlengkapan yang sudah berangkat tak bisa 'dipakai' lagi di CK =="
+# Keluarga kedua dari cacat yang sama. §203 membetulkan yang bertanya "berapa
+# yang ADA di rak" (opname, stok awal, koreksi); yang ini bertanya "boleh
+# DIPAKAI berapa" — dan ia pun memvalidasi terhadap saldo mentah.
+#
+# Ledger perlengkapan baru bergerak saat diterima, jadi barang yang sudah
+# berangkat masih utuh di saldo CK. Terukur: CK 10 pcs yang seluruhnya sudah
+# dikirim, `pakai 10` DITERIMA → saldo 0, lalu toko menekan Terima → CK −10,
+# total 0 dari 10 yang ada.
+#
+# Akibatnya merembet: saldo CK yang jatuh di bawah jumlah barang di jalan
+# membuat `siap kirim` negatif, dan penolakan pengiriman otomatis yang ditelan
+# `tibaBeliPerlengkapan` jadi terjangkau. Menutup pintu ini menutup pemicunya.
+CK204=$(api "$OWNER" POST /cabang '{"nama":"CK 204","tipe":"central_kitchen"}' | jq -r '.id // empty')
+TK204=$(api "$OWNER" POST /cabang "{\"nama\":\"Toko 204\",\"central_kitchen_id\":\"$CK204\"}" | jq -r '.id // empty')
+SP204=$(api "$OWNER" POST /perlengkapan \
+  "{\"nama\":\"Sabun 204 $RANDOM\",\"satuan\":\"pcs\",\"harga_beli\":3000,\"stok_minimum\":0}" | jq -r '.id // empty')
+cek "dasar §204: CK, toko, dan itemnya siap" "V == 1" \
+  "$([ -n "$CK204" ] && [ -n "$TK204" ] && [ -n "$SP204" ] && echo 1 || echo 0)"
+saldo204() { api "$OWNER" GET "/perlengkapan?branch_id=$1" | jq --arg i "$SP204" '[.[]|select(.id==$i)][0].saldo // 0'; }
+api "$OWNER" POST "/perlengkapan/stok-awal?branch_id=$CK204" \
+  "{\"items\":[{\"supply_id\":\"$SP204\",\"qty\":10}]}" > /dev/null
+
+# ── Pasangan lebih dulu: sebelum apa pun berangkat, pakai HARUS boleh ───────
+# Tanpa ini, perbaikan yang menolak SEMUA pemakaian akan terlihat sama hijaunya.
+cek "pasangan: rak penuh → pakai 4 diterima" "V == 200" \
+  "$(status_code_body "$OWNER" POST "/perlengkapan/$SP204/pakai?branch_id=$CK204" '{"qty":4}')"
+cek "pasangan: saldonya benar-benar turun jadi 6" "V == 6" "$(saldo204 "$CK204")"
+
+# ── INTI: sisa 6 dikirim seluruhnya, lalu CK mencoba memakainya ────────────
+api "$OWNER" POST "/perlengkapan/$SP204/minta?branch_id=$TK204" '{"qty":6,"catatan":"uji 204"}' > /dev/null
+cek "dasar: 6 berangkat, rak CK kosong" "V == 6" \
+  "$(api "$OWNER" GET "/perlengkapan?branch_id=$CK204" | jq --arg i "$SP204" '[.[]|select(.id==$i)][0].dalam_jalan // 0')"
+cek "INTI: pakai 6 DITOLAK — barangnya sudah di jalan" "V == 400" \
+  "$(status_code_body "$OWNER" POST "/perlengkapan/$SP204/pakai?branch_id=$CK204" '{"qty":6}')"
+cek "INTI: penolakannya menyebut saldo RAK (0), bukan saldo buku (6)" "V == 1" \
+  "$(api "$OWNER" POST "/perlengkapan/$SP204/pakai?branch_id=$CK204" '{"qty":6}' \
+      | jq '((.message // .error // "")|test("saldo 0"))|if . then 1 else 0 end')"
+cek "INTI: saldo CK tak tersentuh percobaan itu" "V == 6" "$(saldo204 "$CK204")"
+
+KID204=$(api "$OWNER" GET "/perlengkapan/kiriman?branch_id=$TK204" | jq -r '[.[]|select(.status=="dikirim")][0].id // empty')
+api "$OWNER" POST "/perlengkapan/kiriman/$KID204/terima?branch_id=$TK204" > /dev/null
+cek "INTI: sesudah Terima, saldo CK 0 — BUKAN −6" "V == 0" "$(saldo204 "$CK204")"
+cek "INTI: kekekalan — CK + Toko = 6 (sesudah 4 dipakai dari 10)" "V == 6" \
+  "$(python3 -c "print($(saldo204 "$CK204") + $(saldo204 "$TK204"))")"
+# …dan sesudah barangnya benar-benar sampai, toko boleh memakainya.
+cek "pasangan: toko yang MENERIMA boleh memakainya" "V == 200" \
+  "$(status_code_body "$OWNER" POST "/perlengkapan/$SP204/pakai?branch_id=$TK204" '{"qty":6}')"
+cek "pasangan: saldo toko jadi 0" "V == 0" "$(saldo204 "$TK204")"
+
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"
