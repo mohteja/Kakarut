@@ -14,6 +14,7 @@ import {
 import { db } from "../../db/client";
 import { branches } from "../../db/schema";
 import { jalankanFifo, type FifoEvent } from "../../lib/fifo";
+import { kunciAntrean } from "../../lib/kunci";
 
 /**
  * Saldo stok per bahan untuk satu cabang, diturunkan (bukan disimpan):
@@ -879,5 +880,10 @@ export async function kunciKirimCabang(
   branchId: string,
   ruang = "kirim",
 ): Promise<void> {
-  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`${ruang}:${companyId}:${branchId}`}))`);
+  // Primitifnya tinggal di `lib/kunci.ts`: aturan "tak boleh ada baris baru
+  // yang bertabrakan" muncul juga di luar stok (mis. pengajuan cuti yang
+  // bertindih), dan salinan keempat dari satu baris `pg_advisory_xact_lock`
+  // persis bentuk yang gerbang `konsep-satu-rumah` ada untuk mencegah.
+  // Kuncinya tetap `ruang:companyId:branchId` — identik dengan sebelumnya.
+  await kunciAntrean(tx, ruang, companyId, branchId);
 }

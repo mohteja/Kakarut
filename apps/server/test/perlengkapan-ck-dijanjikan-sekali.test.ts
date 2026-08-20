@@ -28,6 +28,7 @@ import { fileURLToPath } from "node:url";
 const baca = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
 const SERVICE = baca("../src/modules/perlengkapan/service.ts");
 const STOK = baca("../src/modules/stok/service.ts");
+const KUNCI = baca("../src/lib/kunci.ts");
 
 /** Badan `buatKirimanPerlengkapan` saja — larangan di bawah tak boleh bocor ke fungsi lain. */
 const BUAT = (() => {
@@ -68,10 +69,22 @@ describe("keputusan kirim diambil DI DALAM transaksi, di belakang kunci", () => 
 
 describe("ruang kunci terpisah dari bahan baku", () => {
   it("bawaan `kunciKirimCabang` menghasilkan kunci yang PERSIS sama seperti dulu", () => {
-    // Kalau bawaannya bergeser, seluruh pemanggil lama diam-diam pindah antrean
-    // dan penjagaan bahan baku yang sudah dibayar mahal ikut lepas.
+    /*
+     * Kalau bawaannya bergeser, seluruh pemanggil lama diam-diam pindah antrean
+     * dan penjagaan bahan baku yang sudah dibayar mahal ikut lepas.
+     *
+     * Sejak primitifnya pindah ke `lib/kunci.ts` (dipakai juga oleh larangan
+     * pengajuan cuti yang bertindih), kuncinya dirakit di DUA berkas. Ketiga
+     * asersi di bawah menyusun ulang rakitan itu — dan hasilnya lebih kuat
+     * dari bentuk lamanya, sebab pemisah ":" kini ikut dipatok; dulu ia cuma
+     * diandaikan oleh satu literal panjang.
+     */
     expect(STOK).toMatch(/ruang = "kirim",/);
-    expect(STOK).toMatch(/hashtext\(\$\{`\$\{ruang\}:\$\{companyId\}:\$\{branchId\}`\}\)/);
+    // URUTAN argumennya yang menentukan: tertukar sedikit → kunci lain sama sekali.
+    expect(STOK).toMatch(/kunciAntrean\(tx, ruang, companyId, branchId\)/);
+    expect(KUNCI).toMatch(/hashtext\(\$\{bagian\.join\(":"\)\}\)/);
+    // …dan tetap `_xact_` — kunci sesi takkan pernah dilepas saat rollback.
+    expect(KUNCI).toMatch(/pg_advisory_xact_lock/);
   });
 
   it("perlengkapan memakai ruangnya sendiri", () => {

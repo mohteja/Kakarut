@@ -11062,6 +11062,90 @@ cek "PASANGAN: jalur di luar produksi/pembelian → ditolak 400" "V == 1" \
 
 
 echo
+# §212 — LARANGAN BERTINDIH TAK BISA DITITIPKAN KE INDEKS.
+#
+# Aturannya "rentang tanggal bertindih", bukan "kolom sama", jadi tak ada indeks
+# unik yang bisa menegakkannya; dan barisnya belum ada saat diperiksa, jadi tak
+# ada apa pun untuk dipegang `FOR UPDATE`. Sebelum perbaikan, periksa-lalu-tulis
+# berdiri tanpa kunci sama sekali.
+#
+# Terukur pada kode lama: 24 permintaan serentak dari satu kasir, lima ronde —
+# DUA ronde meninggalkan dua baris hidup yang bertindih. Ketukan ganda di ponsel
+# dan kiriman ulang antrean offline persis sebentuk itu.
+#
+# Akibatnya di hilir bukan sekadar baris kembar: `absensi/routes.ts` menyusun
+# rekap lewat `petaIzin.set("<user>|<tanggal>", …)` atas kueri TANPA ORDER BY,
+# jadi dari dua baris yang bertindih yang menang cuma yang kebetulan terbaca
+# belakangan — satu tanggal bisa terbaca "Sakit" hari ini dan "Cuti Tahunan"
+# besok tanpa ada yang mengubah data.
+#
+# Idiomnya sama dengan §185: yang diuji INVARIANNYA (berapa baris hidup),
+# bukan kode statusnya — sebaran 201/409 di antara 8 permintaan memang
+# bergantung timing dan akan membuat uji ini goyah.
+echo "── §212 dua pengajuan cuti berpapasan → hanya SATU yang hidup ──"
+CB212=$(api "$OWNER" GET /cabang | jq -r '[.[]|select(.tipe=="store" and .is_active)][0].id')
+buatKar212(){ # <label> → token
+  local e="cuti212$1.$RANDOM@basooopa.id"
+  api "$OWNER" POST /karyawan "{\"nama\":\"Cuti 212$1\",\"email\":\"$e\",\"password\":\"Cuti212Pass!\",\"role\":\"cashier\",\"branch_id\":\"$CB212\"}" > /dev/null
+  login "$e" "Cuti212Pass!"
+}
+KA212=$(buatKar212 A)
+KB212=$(buatKar212 B)
+cek "dasar §212: dua karyawan uji bisa login" "V == 1" \
+  "$([ -n "$KA212" ] && [ -n "$KB212" ] && echo 1 || echo 0)"
+
+hidup212(){ # hidup212 <token> <dari> <sampai> → jumlah baris HIDUP yang bertindih
+  # `// error(...)` supaya respons yang BUKAN larik (mis. galat) tak terbaca 0.
+  # Nol yang palsu membuat asersi di bawah merah karena alasan yang salah, dan
+  # itu jenis kegagalan yang paling mahal dibaca orang.
+  api "$1" GET "/pengajuan?saya=1&dari=$2&sampai=$3" \
+    | jq 'if type=="array" then [.[]|select(.status=="menunggu" or .status=="disetujui")]|length
+          else error("GET /pengajuan bukan larik: \(.)") end'
+}
+
+# LIMA LEDAKAN, bukan satu — dan angkanya DIUKUR, bukan ditebak.
+# Balapan ini probabilistik. Terhadap kode tanpa kunci: satu ledakan 8
+# permintaan menangkapnya 3 dari 5 kali, tiga ledakan 4 dari 5. Penjaga yang
+# meleset seperlima waktu mengajari orang mengabaikannya, jadi rentangnya
+# dijadikan lima. Ongkosnya 40 permintaan — sepele bagi suite ini.
+TOT212=0
+T212=$(mktemp -d)
+for bln in 03 04 05 06 07; do
+  BODY212="{\"kategori\":\"tahunan\",\"tanggal_mulai\":\"2027-$bln-10\",\"tanggal_selesai\":\"2027-$bln-12\",\"alasan\":\"berpapasan\"}"
+  for i in $(seq 1 8); do
+    curl -s -o "$T212/b$bln-$i" -X POST "$BASE/api/pengajuan" \
+      -H "Authorization: Bearer $KA212" -H 'Content-Type: application/json' -d "$BODY212" &
+  done
+  wait
+  N212=$(hidup212 "$KA212" "2027-$bln-10" "2027-$bln-12")
+  # Hitungan yang gagal jangan menjelma jadi galat sintaks shell — ia harus
+  # muncul sebagai angka mustahil yang menuding rentangnya.
+  case "$N212" in (''|*[!0-9]*) gagal "§212: hitung baris hidup 2027-$bln gagal (jawaban: '$N212')"; N212=99 ;; esac
+  TOT212=$(( TOT212 + N212 ))
+done
+cek "INTI: 5×8 pengajuan berpapasan → tepat SATU baris hidup per rentang" "V == 5" "$TOT212"
+cek "…dan setidaknya SATU benar-benar berhasil per rentang (bukan semua ditolak)" "V >= 5" \
+  "$(jq -s '[.[]|select(.id != null)]|length' "$T212"/b*)"
+
+# PASANGAN 1: kuncinya tak boleh membekukan tanggal yang memang tak bertindih.
+cek "PASANGAN: tanggal LAIN yang tak bertindih tetap boleh → 201" "V == 201" \
+  "$(status_code_body "$KA212" POST /pengajuan '{"kategori":"tahunan","tanggal_mulai":"2027-09-10","tanggal_selesai":"2027-09-12"}')"
+
+# PASANGAN 2: kuncinya PER ORANG. Kunci se-perusahaan akan membuat pengajuan
+# karyawan lain ikut mengantre — benar hasilnya, tapi salah ongkosnya, dan
+# tanggal yang sama untuk dua orang memang sah.
+T212B=$(mktemp -d)
+for tok in "$KA212" "$KB212"; do
+  curl -s -o "$T212B/$(echo "$tok" | tail -c 12)" -X POST "$BASE/api/pengajuan" \
+    -H "Authorization: Bearer $tok" -H 'Content-Type: application/json' \
+    -d '{"kategori":"tahunan","tanggal_mulai":"2027-11-10","tanggal_selesai":"2027-11-12"}' &
+done
+wait
+cek "PASANGAN: DUA ORANG berbeda pada tanggal sama → dua-duanya sah" "V == 2" \
+  "$(python3 -c "print($(hidup212 "$KA212" 2027-11-10 2027-11-12) + $(hidup212 "$KB212" 2027-11-10 2027-11-12))")"
+
+
+echo
 echo "── §209 Rute mati: verify-api tak boleh memanggil endpoint yang TIDAK ADA ──"
 # Duduk PALING AKHIR di berkas ini walau nomornya bukan yang terbesar: ia baru
 # boleh menghakimi sesudah semua seksi lain menembakkan panggilannya.
