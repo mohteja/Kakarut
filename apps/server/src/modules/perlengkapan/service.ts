@@ -263,6 +263,10 @@ export async function saldoPerlengkapan(
     )
     .where(and(eq(supplies.companyId, companyId), eq(supplies.isActive, true)))
     .orderBy(asc(supplies.nama));
+  // Yang sudah berangkat dari cabang INI tapi belum diterima — raknya sudah
+  // kosong sementara ledgernya belum bergerak. Dipakai layar opname supaya yang
+  // dibandingkan angka rak, bukan angka buku.
+  const dalamJalan = await qtyPerlengkapanDalamJalan(db, companyId, branchId);
   return rows.map((r) => ({
     id: r.id,
     nama: r.nama,
@@ -271,6 +275,7 @@ export async function saldoPerlengkapan(
     stok_minimum: r.stokMinimum,
     catatan: r.catatan,
     saldo: r.saldo,
+    dalam_jalan: dalamJalan.get(r.id) ?? 0,
     status: statusPerlengkapan(r.saldo, r.stokMinimum),
     rak: rakBySupply.get(r.id) ?? null,
     aturan:
@@ -604,6 +609,31 @@ export async function muatSupplyAktif(companyId: string, supplyId: string) {
  * Simpan hasil hitung fisik satu sesi: item dengan selisih ≠ 0 menjadi baris
  * 'koreksi' berstatus MENUNGGU (belum menyentuh saldo) sampai di-ACC.
  * Return null bila semua item sesuai sistem (tanpa selisih — tak ada sesi).
+ *
+ * YANG DIBANDINGKAN ADALAH ANGKA RAK, BUKAN ANGKA BUKU.
+ *
+ * Ledger perlengkapan baru bergerak SAAT DITERIMA. Jadi barang yang sudah
+ * berangkat ke cabang sudah tidak ada di rak CK, tapi masih utuh di ledgernya.
+ * Membandingkan hitungan fisik dengan ledger mentah membuat petugas "menemukan"
+ * kekurangan yang sebenarnya cuma barang di jalan — lalu debit kirimannya
+ * mendarat DI ATAS koreksi itu dan barang yang sama dipotong dua kali.
+ *
+ * Terukur pada server sungguhan, CK berisi 10 pcs yang seluruhnya sudah
+ * dikirim:
+ *
+ *   opname di-ACC (rak memang kosong) → koreksi −10
+ *   toko menekan Terima               → debit   −10
+ *   CK = −10, Toko = 10, total = 0 dari 10 yang ada
+ *
+ * Sepuluh unit menguap dari pembukuan dan saldo CK jatuh minus — persis
+ * keluhan yang membuat seluruh sapuan stok ini dimulai.
+ *
+ * Maka pembandingnya `saldo − dalam_jalan`: yang MEMANG seharusnya ada di rak.
+ * Pada contoh di atas selisihnya jadi nol, tak ada koreksi yang lahir, dan
+ * sesudah Terima saldo CK mendarat di 0 dengan benar.
+ *
+ * `systemQty` ikut merekam angka pembanding itu — bukan ledger mentahnya —
+ * supaya arsip opname-nya menceritakan perbandingan yang benar-benar terjadi.
  */
 export async function buatOpnamePerlengkapan(params: {
   companyId: string;
@@ -629,19 +659,11 @@ export async function buatOpnamePerlengkapan(params: {
   let jumlahSelisih = 0;
   let nomor: string | null = null;
   await db.transaction(async (tx) => {
+    const rak = await saldoDiRakPerlengkapan(tx, params.companyId, params.branchId, ids);
     for (const it of params.items) {
       if (!adaId.has(it.supply_id)) continue;
-      const [{ saldo }] = await tx
-        .select({ saldo: sql<number>`COALESCE(SUM(${supplyMutations.qty}), 0)::float8` })
-        .from(supplyMutations)
-        .where(
-          and(
-            eq(supplyMutations.supplyId, it.supply_id),
-            eq(supplyMutations.branchId, params.branchId),
-            eq(supplyMutations.status, "disetujui"),
-          ),
-        );
-      const selisih = it.qty_fisik - saldo;
+      const diRak = rak.get(it.supply_id) ?? 0;
+      const selisih = it.qty_fisik - diRak;
       if (Math.abs(selisih) < 1e-9) continue;
       await tx.insert(supplyMutations).values({
         companyId: params.companyId,
@@ -654,7 +676,7 @@ export async function buatOpnamePerlengkapan(params: {
         userId: params.userId,
         status: "menunggu",
         sessionId,
-        systemQty: saldo,
+        systemQty: diRak,
         qtyFisik: it.qty_fisik,
       });
       jumlahSelisih++;
@@ -796,6 +818,55 @@ export async function qtyPerlengkapanDalamJalan(
     )
     .groupBy(supplyTransfers.supplyId);
   return new Map(rows.map((r) => [r.supplyId, Number(r.qty) || 0]));
+}
+
+/**
+ * Saldo yang SEHARUSNYA ADA DI RAK, per supply: ledger dikurangi barang yang
+ * sudah berangkat dari cabang ini dan belum ditekan Terima di tujuannya.
+ *
+ * SETIAP tempat yang membandingkan hitungan fisik dengan saldo WAJIB memakai
+ * ini, dan fungsinya ada supaya tak ada lagi yang lupa. Ledger perlengkapan
+ * bergerak terlambat — baru saat diterima — jadi tiap pembanding yang membaca
+ * saldo mentah akan "menemukan" kekurangan yang cuma barang di jalan, lalu
+ * mengoreksinya; debit kirimannya kemudian mendarat di atas koreksi itu dan
+ * barang yang sama dipotong dua kali.
+ *
+ * Terukur di TIGA pintu berbeda sebelum ini, semuanya dengan hasil yang sama
+ * (CK 10 pcs yang seluruhnya sudah dikirim, petugas menghitung rak = 0):
+ *
+ *   POST /perlengkapan/opname        → CK −10, total 0 dari 10
+ *   POST /perlengkapan/stok-awal     → CK −10, total 0 dari 10
+ *   POST /perlengkapan/:id/koreksi   → CK −10, total 0 dari 10
+ *
+ * Ketiganya menanyakan hal yang sama kepada orang yang sama di halaman yang
+ * sama. Menambalnya satu per satu hanya menunda pintu keempat.
+ */
+export async function saldoDiRakPerlengkapan(
+  exec: Pick<typeof db, "select">,
+  companyId: string,
+  branchId: string,
+  supplyIds: string[],
+): Promise<Map<string, number>> {
+  if (supplyIds.length === 0) return new Map();
+  const saldo = await exec
+    .select({
+      supplyId: supplyMutations.supplyId,
+      qty: sql<number>`COALESCE(SUM(${supplyMutations.qty}), 0)::float8`,
+    })
+    .from(supplyMutations)
+    .where(
+      and(
+        eq(supplyMutations.branchId, branchId),
+        eq(supplyMutations.status, "disetujui"),
+        inArray(supplyMutations.supplyId, supplyIds),
+      ),
+    )
+    .groupBy(supplyMutations.supplyId);
+  const dalamJalan = await qtyPerlengkapanDalamJalan(exec, companyId, branchId, supplyIds);
+  const peta = new Map<string, number>();
+  for (const id of supplyIds) peta.set(id, -(dalamJalan.get(id) ?? 0));
+  for (const r of saldo) peta.set(r.supplyId, (peta.get(r.supplyId) ?? 0) + (Number(r.qty) || 0));
+  return peta;
 }
 
 /**

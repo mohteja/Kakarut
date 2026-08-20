@@ -382,7 +382,20 @@ function StokAwalModal({
                   <td className={tdClass}>
                     {r.nama} <span className="text-xs text-stone-400">({r.satuan})</span>
                   </td>
-                  <td className={`${tdClass} text-right`}>{formatAngka(r.saldo)}</td>
+                  {/* Angka RAK, bukan angka buku: barang yang sudah berangkat ke
+                      cabang masih ada di `saldo` tapi raknya sudah kosong.
+                      Server membandingkan angka yang sama (lihat POST
+                      /perlengkapan/stok-awal); menampilkan saldo penuh di sini
+                      akan menyuruh orang "mengoreksi" barang yang cuma sedang
+                      di jalan — dan koreksinya memotongnya untuk kedua kali. */}
+                  <td className={`${tdClass} text-right`}>
+                    {formatAngka(r.saldo - r.dalam_jalan)}
+                    {r.dalam_jalan > 0 && (
+                      <div className="text-xs text-stone-400">
+                        {formatAngka(r.dalam_jalan)} di jalan
+                      </div>
+                    )}
+                  </td>
                   <td className={tdClass}>
                     <input
                       type="text"

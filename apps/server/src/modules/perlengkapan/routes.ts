@@ -48,6 +48,7 @@ import {
   permintaanOtomatisPerlengkapan,
   riwayatOpnamePerlengkapan,
   saldoPerlengkapan,
+  saldoDiRakPerlengkapan,
   saldoSatuPerlengkapan,
   sebaranPerlengkapan,
   setStatusOpnamePerlengkapan,
@@ -278,9 +279,26 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
       const tanggal = await tanggalPerusahaan(auth.company_id!);
       let diubah = 0;
       await db.transaction(async (tx) => {
+        /*
+         * PEMBANDINGNYA ANGKA RAK, SAMA SEPERTI OPNAME.
+         *
+         * Layar ini duduk di halaman Stok yang sama dengan stock opname dan
+         * menanyakan hal yang sama: berapa yang ada. Barang yang sudah berangkat
+         * ke cabang tak ada di rak tapi masih utuh di ledger, jadi
+         * membandingkannya dengan ledger mentah membuat koreksi "Stok awal"
+         * memotongnya sekali — lalu debit kirimannya memotongnya lagi.
+         *
+         * Terukur: CK 10 pcs yang seluruhnya sudah dikirim, owner menyetel stok
+         * awal 0 → saldo CK 0, lalu toko menekan Terima → CK −10, total 0 dari
+         * 10 yang ada. Tak ada tafsir yang membuat −10 benar, termasuk tafsir
+         * "stok awal itu angka buku": angka buku yang disetel 0 pun tak boleh
+         * turun lagi oleh kiriman yang sudah ikut dihitung di dalamnya.
+         */
+        const rak = await saldoDiRakPerlengkapan(tx, auth.company_id!, branchId, [
+          ...target.keys(),
+        ]);
         for (const [supplyId, qty] of target) {
-          const saldo = await saldoSatuPerlengkapan(supplyId, branchId);
-          const selisih = qty - saldo;
+          const selisih = qty - (rak.get(supplyId) ?? 0);
           if (selisih === 0) continue;
           await tx.insert(supplyMutations).values({
             companyId: auth.company_id!,
@@ -1045,7 +1063,10 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
           message: "Perlengkapan tidak ditemukan",
         });
       await terapkanKonsumsiOtomatis(auth.company_id!, branchId);
-      const saldo = await saldoSatuPerlengkapan(item.id, branchId);
+      // Angka RAK, bukan angka buku — pintu ketiga yang menanyakan hal yang
+      // sama. Lihat `saldoDiRakPerlengkapan`.
+      const saldo =
+        (await saldoDiRakPerlengkapan(db, auth.company_id!, branchId, [item.id])).get(item.id) ?? 0;
       const selisih = body.qty_fisik - saldo;
       if (selisih !== 0) {
         await db.insert(supplyMutations).values({
