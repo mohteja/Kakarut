@@ -11145,6 +11145,84 @@ cek "PASANGAN: DUA ORANG berbeda pada tanggal sama → dua-duanya sah" "V == 2" 
   "$(python3 -c "print($(hidup212 "$KA212" 2027-11-10 2027-11-12) + $(hidup212 "$KB212" 2027-11-10 2027-11-12))")"
 
 
+echo "== 213. Balapan pembuatan: yang kalah dapat 409 berpesan, bukan 500 =="
+# Pra-cek "sudah terdaftar?" selalu punya jeda sebelum tulisannya. Yang
+# benar-benar menjaga keunikan adalah INDEKSNYA — dan tanpa terjemahan, yang
+# KALAH balapan menerima 23505 mentah alias 500. Satu situasi, tiga jawaban
+# berbeda tergantung timing (terukur: 201, 409, dan 500 pada tiga permintaan
+# serentak beremail sama).
+#
+# 500 bukan cuma pesan yang salah: ia tercatat sebagai galat SERVER di panel,
+# dan di web memicu overlay "server sedang diperbarui" — aplikasi terlihat
+# tumbang gara-gara dua admin menambahkan karyawan yang sama.
+CB213=$(api "$OWNER" GET /cabang | jq -r '[.[]|select(.tipe=="store" and .is_active)][0].id')
+
+balap213(){ # balap213 <n> <token> <path> <body> → direktori berisi c* (kode) & b* (badan)
+  local n="$1" t="$2" path="$3" body="$4" d i
+  d=$(mktemp -d)
+  for i in $(seq 1 "$n"); do
+    # `\n` WAJIB: `%{http_code}` tak meninggalkan newline penutup, jadi `cat`
+    # atas beberapa berkas MENYAMBUNG kodenya jadi satu baris ("409409201409")
+    # — dan penghitung `grep -c '^5'` di bawah lalu buta terhadap 5xx yang tak
+    # kebetulan berdiri paling depan. Perangkap yang sama sudah tercatat di
+    # repo ini, dan ia tetap menggigit sekali lagi saat seksi ini ditulis.
+    curl -s -o "$d/b$i" -w '%{http_code}\n' -X POST "$BASE/api$path" \
+      -H "Authorization: Bearer $t" -H 'Content-Type: application/json' -d "$body" > "$d/c$i" &
+  done
+  wait
+  echo "$d"
+}
+lima213(){ cat "$1"/c* | grep -c '^5' || true; }   # berapa jawaban 5xx
+kode213(){ cat "$1"/c* | grep -c "^$2" || true; }  # berapa jawaban berawalan <2>
+
+# ── POST /karyawan (users_email_unique) ────────────────────────────────────
+E213="balap213.$RANDOM@basooopa.id"
+D213=$(balap213 4 "$OWNER" /karyawan \
+  "{\"nama\":\"Balap 213\",\"email\":\"$E213\",\"password\":\"Balap213Pass!\",\"role\":\"cashier\",\"branch_id\":\"$CB213\"}")
+cek "INTI: 4 pembuatan karyawan beremail sama → TAK ADA 5xx" "V == 0" "$(lima213 "$D213")"
+cek "…tepat SATU yang lahir (201), sisanya 409" "V == 1" "$(kode213 "$D213" 201)"
+cek "…dan hanya satu baris karyawan beremail itu" "V == 1" \
+  "$(api "$OWNER" GET /karyawan | jq --arg e "$E213" '[.[]|select(.email==$e)]|length')"
+cek "…pesan penolakannya sama dgn jalur berurutan (bukan pesan generik)" "V == 1" \
+  "$(cat "$D213"/b* | jq -s --arg e "$E213" '[.[]|select(.error != null)]|all(.[]; .error | test("sudah terdaftar"))|if . then 1 else 0 end')"
+
+# ── POST /karyawan/undang (invitations_company_email_pending_uq) ───────────
+U213="undang213.$RANDOM@basooopa.id"
+DU213=$(balap213 4 "$OWNER" /karyawan/undang "{\"email\":\"$U213\",\"role\":\"cashier\",\"branch_id\":\"$CB213\"}")
+cek "INTI: 4 undangan beremail sama → TAK ADA 5xx" "V == 0" "$(lima213 "$DU213")"
+cek "…tepat SATU undangan lahir" "V == 1" "$(kode213 "$DU213" 201)"
+
+# ── POST /admin/tenants (companies_slug_unique + users_email_unique) ───────
+T213="tenant213.$RANDOM@contoh.id"
+DT213=$(balap213 3 "$SA" /admin/tenants \
+  "{\"nama\":\"Warung 213 $RANDOM\",\"owner_nama\":\"O\",\"owner_email\":\"$T213\",\"owner_password\":\"Balap213Pass!\",\"cabang_nama\":\"Pusat\"}")
+cek "INTI: 3 pembuatan tenant kembar → TAK ADA 5xx" "V == 0" "$(lima213 "$DT213")"
+cek "…tepat SATU tenant lahir" "V == 1" "$(kode213 "$DT213" 201)"
+
+# ── POST /auth/register — DI SINI 409 JUSTRU SALAH ─────────────────────────
+# Endpoint ini sengaja membalas NETRAL & IDENTIK untuk email baru maupun yang
+# sudah terdaftar, supaya tak ada cara menebak akun mana yang ada. Membalas 409
+# pada jalur balapan akan membuka kembali celah enumerasi itu: penyerang cukup
+# mengirim dua permintaan sekaligus lalu membaca bedanya. Yang benar: balapan
+# yang kalah diperlakukan seperti "ternyata sudah ada" — jawaban yang sama.
+R213="daftar213.$RANDOM@contoh.id"
+DR213=$(balap213 3 "" /auth/register "{\"nama\":\"Daftar 213\",\"email\":\"$R213\",\"password\":\"Daftar213Pass!\"}")
+cek "INTI: 3 pendaftaran beremail sama → TAK ADA 5xx" "V == 0" "$(lima213 "$DR213")"
+cek "INTI: semuanya 200 — tak ada 409 yang membocorkan email mana yang ada" "V == 3" \
+  "$(kode213 "$DR213" 200)"
+cek "…dan pesannya IDENTIK di ketiganya (kontrak anti-enumerasi)" "V == 1" \
+  "$(cat "$DR213"/b* | jq -s '[.[]|.message]|unique|length')"
+
+# ── PASANGAN: jalur BERURUTAN tak berubah perilakunya ──────────────────────
+# Terjemahan galat tak boleh menggeser jawaban yang selama ini benar.
+cek "PASANGAN: pembuatan berurutan beremail sama tetap 409" "V == 409" \
+  "$(status_code_body "$OWNER" POST /karyawan \
+     "{\"nama\":\"Balap 213b\",\"email\":\"$E213\",\"password\":\"Balap213Pass!\",\"role\":\"cashier\",\"branch_id\":\"$CB213\"}")"
+cek "PASANGAN: email BARU tetap boleh dibuat → 201" "V == 201" \
+  "$(status_code_body "$OWNER" POST /karyawan \
+     "{\"nama\":\"Balap 213c\",\"email\":\"baru213.$RANDOM@basooopa.id\",\"password\":\"Balap213Pass!\",\"role\":\"cashier\",\"branch_id\":\"$CB213\"}")"
+
+
 echo
 echo "── §209 Rute mati: verify-api tak boleh memanggil endpoint yang TIDAK ADA ──"
 # Duduk PALING AKHIR di berkas ini walau nomornya bukan yang terbesar: ia baru

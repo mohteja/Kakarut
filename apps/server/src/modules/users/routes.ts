@@ -7,6 +7,7 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import type { UndanganKaryawanRow } from "@kakarut/shared";
 import { appBaseUrl } from "../../lib/base-url";
+import { bentrokUnikPada, tanpaBentrok } from "../../lib/pg-galat";
 import { db } from "../../db/client";
 import {
   branches,
@@ -154,6 +155,25 @@ export const karyawanRoutes = new Hono<AppEnv>()
         break;
       } catch (e) {
         if (attempt < 2 && isKodeKaryawanConflict(e)) continue;
+        /*
+         * Email kembar yang LOLOS pra-cek karena balapan.
+         *
+         * Pra-cek di atas selalu punya jeda sebelum tulisannya; yang benar-benar
+         * menjaga keunikan email adalah `users_email_unique`. Tanpa terjemahan
+         * ini, yang KALAH balapan menerima 23505 mentah alias 500 — satu
+         * situasi, tiga jawaban berbeda tergantung timing. Terukur dengan tiga
+         * permintaan serentak beremail sama: 201, 409, dan 500.
+         *
+         * 500 bukan cuma pesan yang salah. Ia tercatat sebagai galat SERVER di
+         * panel, dan di web memicu overlay "server sedang diperbarui" — aplikasi
+         * terlihat tumbang gara-gara dua admin menambahkan karyawan yang sama.
+         *
+         * Pesannya SAMA PERSIS dengan pra-ceknya, supaya klien tak perlu tahu
+         * jalur mana yang menolaknya.
+         */
+        if (bentrokUnikPada(e, "users_email_unique")) {
+          throw new HTTPException(409, { message: `Email ${body.email} sudah terdaftar` });
+        }
         throw e;
       }
     }
@@ -206,17 +226,26 @@ export const karyawanRoutes = new Hono<AppEnv>()
     if (pending) {
       throw new HTTPException(409, { message: `${body.email} sudah diundang (menunggu diterima)` });
     }
-    const [inv] = await db
-      .insert(invitations)
-      .values({
-        companyId: auth.company_id!,
-        email: body.email,
-        role: body.role,
-        branchId: WAJIB_CABANG.has(body.role) ? body.branch_id : (body.branch_id ?? null),
-        token: randomBytes(24).toString("hex"),
-        invitedBy: auth.sub,
-      })
-      .returning({ id: invitations.id });
+    // Pra-cek di atas punya jeda sebelum tulisannya; yang benar-benar menjaga
+    // "satu undangan pending per email per perusahaan" adalah indeks parsial
+    // `invitations_company_email_pending_uq`. Yang KALAH balapan dulu menerima
+    // 23505 mentah alias 500 — pesannya kini sama persis dengan pra-ceknya.
+    const [inv] = await tanpaBentrok(
+      `${body.email} sudah diundang (menunggu diterima)`,
+      () =>
+        db
+          .insert(invitations)
+          .values({
+            companyId: auth.company_id!,
+            email: body.email,
+            role: body.role,
+            branchId: WAJIB_CABANG.has(body.role) ? body.branch_id : (body.branch_id ?? null),
+            token: randomBytes(24).toString("hex"),
+            invitedBy: auth.sub,
+          })
+          .returning({ id: invitations.id }),
+      "invitations_company_email_pending_uq",
+    );
     // Email undangan (best-effort — jangan gagalkan bila email belum diatur).
     try {
       const [co] = await db

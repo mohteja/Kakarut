@@ -29,6 +29,31 @@ export function bentrokUnik(err: unknown): boolean {
 }
 
 /**
+ * Bentrok unik pada indeks TERTENTU — dikenali dari nama constraint-nya.
+ *
+ * KENAPA PERLU YANG SPESIFIK, padahal `bentrokUnik` sudah ada.
+ *
+ * Satu penulisan sering berdiri di belakang BEBERAPA indeks unik sekaligus,
+ * dan masing-masing berarti hal yang berbeda bagi pemanggilnya. Pembuatan
+ * karyawan menabrak `users_email_unique` ("email itu sudah dipakai orang lain",
+ * 409 dan berhenti) maupun `memberships_company_kode_uq` ("kode karyawan acak
+ * yang barusan dipilih kebetulan sudah ada", coba lagi). Menerjemahkan
+ * keduanya sebagai satu hal membuat retry kode karyawan berubah jadi penolakan
+ * yang salah — atau sebaliknya, email kembar terus diulang tiga kali sebelum
+ * gagal.
+ *
+ * Nama constraint dicocokkan dengan `includes`, bukan sama-persis: Postgres
+ * memulangkannya apa adanya, tetapi jalur galat yang dibungkus driver sesekali
+ * menyisipkan awalan skema.
+ */
+export function bentrokUnikPada(err: unknown, ...namaConstraint: string[]): boolean {
+  if (!bentrokUnik(err)) return false;
+  const e = err as { constraint?: string; cause?: { constraint?: string } };
+  const nama = e?.constraint ?? e?.cause?.constraint ?? "";
+  return namaConstraint.some((n) => nama.includes(n));
+}
+
+/**
  * Benarkah galat ini "sintaks nilai tak sah" (SQLSTATE 22P02)?
  *
  * Yang melahirkannya di sini hampir selalu satu hal: id dari PATH/QUERY masuk
@@ -72,11 +97,26 @@ export function nilaiTakSah(err: unknown): boolean {
 export async function tanpaBentrok<T>(
   pesan: string,
   jalankan: () => Promise<T>,
+  /**
+   * Batasi terjemahannya ke indeks yang DISEBUT. Kosong = indeks unik mana pun,
+   * perilaku asli helper ini.
+   *
+   * Diperlukan begitu satu penulisan berdiri di belakang lebih dari satu indeks:
+   * `invitations` misalnya dijaga `..._email_pending_uq` (yang memang berarti
+   * "sudah diundang") DAN `invitations_token_unique` (token acak yang kebetulan
+   * kembar — hal lain sama sekali, dan menyebutnya "sudah diundang" membuat
+   * pengundang berhenti padahal cukup mencoba lagi).
+   */
+  ...hanyaConstraint: string[]
 ): Promise<T> {
   try {
     return await jalankan();
   } catch (err) {
-    if (bentrokUnik(err)) throw new HTTPException(409, { message: pesan });
+    const cocok =
+      hanyaConstraint.length === 0
+        ? bentrokUnik(err)
+        : bentrokUnikPada(err, ...hanyaConstraint);
+    if (cocok) throw new HTTPException(409, { message: pesan });
     throw err;
   }
 }
