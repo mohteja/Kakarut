@@ -789,11 +789,18 @@ export async function qtyDalamJalan(
  * Serialkan pengiriman keluar dari SATU cabang. Saldo diturunkan dari ledger
  * (tak ada baris stok yang bisa dikunci), jadi tanpa kunci ini dua permintaan
  * bersamaan sama-sama membaca saldo lama dan sama-sama lolos.
+ *
+ * `ruang` memisahkan antrean per jenis persediaan. Bahan baku dan perlengkapan
+ * dua ledger yang berbeda dan tak pernah saling mengurangi, jadi menaruhnya di
+ * kunci yang sama hanya membuat kiriman perlengkapan menunggu kiriman bahan
+ * baku tanpa alasan. Bawaannya sengaja menghasilkan kunci yang PERSIS sama
+ * dengan sebelumnya — pemanggil lama tak berubah perilakunya sedikit pun.
  */
 export async function kunciKirimCabang(
   tx: Pick<typeof db, "execute">,
   companyId: string,
   branchId: string,
+  ruang = "kirim",
 ): Promise<void> {
-  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`kirim:${companyId}:${branchId}`}))`);
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`${ruang}:${companyId}:${branchId}`}))`);
 }
