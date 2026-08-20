@@ -9445,6 +9445,37 @@ cek "kasir → POST /penyimpanan cabang lain = 403" "V == 403" \
   "$(status_code_body "$K191" POST /penyimpanan "{\"branch_id\":\"$ASING191\",\"nama\":\"Rak 191\"}")"
 cek "kasir → POST /penyimpanan cabang SENDIRI tetap boleh" "V == 1" \
   "$(api "$K191" POST /penyimpanan "{\"branch_id\":\"$CB46_ID\",\"nama\":\"Rak 191 OK\"}" | jq '(.id != null)|if . then 1 else 0 end')"
+
+echo "== 192. Paket berlapis: menu dasar tak boleh diubah jadi paket =="
+# Perhitungan paket SATU TINGKAT — `komponenEfektif` memulangkan komponen
+# sendiri + komponen dasarnya, berhenti di situ. "Menu dasar harus reguler"
+# dijaga pada menu yang SEDANG disunting, tapi dulu TIDAK pada menu-menu yang
+# menunjuk ke sana, jadi rantai dua tingkat bisa dibuat dari arah sebaliknya.
+#
+# Terukur sebelum perbaikan: paket P → A → B membuat HPP P tercatat 6.250
+# padahal dasarnya sudah 10.139, dan menjual P sama sekali TIDAK mengonsumsi
+# bahan resep B. Dua-duanya sunyi.
+KAT192=$(api "$OWNER" GET /kategori | jq -r '.[0].id')
+BHN192=$(api "$OWNER" GET /bahan | jq -r '[.[]|select(.track_stok==true)][0].id')
+B192=$(api "$OWNER" POST /menu "{\"nama\":\"Uji192 Dasar\",\"category_id\":\"$KAT192\",\"harga_jual\":10000,\"mult\":2,\"komponen\":[{\"ingredient_id\":\"$BHN192\",\"qty\":5}]}" | jq -r .id)
+A192=$(api "$OWNER" POST /menu "{\"nama\":\"Uji192 Tengah\",\"category_id\":\"$KAT192\",\"harga_jual\":20000,\"mult\":2,\"komponen\":[]}" | jq -r .id)
+P192=$(api "$OWNER" POST /menu "{\"nama\":\"Uji192 Paket\",\"category_id\":\"$KAT192\",\"harga_jual\":30000,\"tipe\":\"paket\",\"base_menu_id\":\"$A192\",\"base_mult\":2,\"komponen\":[]}" | jq -r .id)
+cek "dasar §192: paket P dibuat di atas menu reguler A" "V == 1" \
+  "$(api "$OWNER" GET /menu | jq --arg i "$P192" --arg a "$A192" '[.[]|select(.id==$i and .tipe=="paket" and .base_menu_id==$a)]|length')"
+# INTI: A adalah dasar sebuah paket, jadi A sendiri tak boleh jadi paket.
+cek "menu dasar sebuah paket → ditolak jadi paket (400)" "V == 400" \
+  "$(status_code_body "$OWNER" PUT "/menu/$A192" "{\"tipe\":\"paket\",\"base_menu_id\":\"$B192\",\"base_mult\":2}")"
+cek "A tetap reguler sesudah ditolak" "V == 1" \
+  "$(api "$OWNER" GET /menu | jq --arg i "$A192" '[.[]|select(.id==$i and .tipe=="regular")]|length')"
+# Sisi sebaliknya: penjaga yang menolak SEMUA perubahan bukan penjaga. Menu
+# yang BUKAN dasar paket mana pun tetap boleh dijadikan paket.
+C192=$(api "$OWNER" POST /menu "{\"nama\":\"Uji192 Bebas\",\"category_id\":\"$KAT192\",\"harga_jual\":9000,\"mult\":2,\"komponen\":[]}" | jq -r .id)
+cek "menu biasa TETAP boleh dijadikan paket" "V == 1" \
+  "$(api "$OWNER" PUT "/menu/$C192" "{\"tipe\":\"paket\",\"base_menu_id\":\"$B192\",\"base_mult\":2}" | jq '(.tipe=="paket")|if . then 1 else 0 end')"
+# Dan menu dasar tetap boleh disunting untuk hal LAIN — yang ditolak cuma
+# perubahan yang melanggar batas satu tingkat.
+cek "menu dasar tetap boleh ganti harga" "V == 1" \
+  "$(api "$OWNER" PUT "/menu/$A192" '{"harga_jual":21000}' | jq '(.harga_jual==21000)|if . then 1 else 0 end')"
 # /stok/waste & /stok/opname SENGAJA tidak ikut: keduanya punya gerbang lain
 # (petugas rak, sesi opname) yang juga membalas 403, jadi hijaunya belum tentu
 # berasal dari penjaga cabang — dan asersi yang hijau karena sebab lain lebih
