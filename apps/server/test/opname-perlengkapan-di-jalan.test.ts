@@ -61,6 +61,18 @@ describe("server membandingkan angka RAK, bukan angka buku", () => {
   it("dan angkanya memang tersedia di DTO yang dibaca layar", () => {
     expect(SERVICE).toMatch(/dalam_jalan: dalamJalan\.get\(r\.id\) \?\? 0,/);
   });
+
+  it("endpoint SEBELAH — POST /stok-awal — memakai pembanding yang sama", () => {
+    // Aritmetika yang sama di halaman yang sama; buta yang sama pula sebelum
+    // ini. Terukur: stok awal 0 atas rak kosong → CK −10 sesudah Terima.
+    const RUTE = baca("../src/modules/perlengkapan/routes.ts");
+    const i = RUTE.indexOf('"/stok-awal"');
+    expect(i, "handler /stok-awal tak ditemukan").toBeGreaterThan(0);
+    const blok = RUTE.slice(i, RUTE.indexOf('"/opname"', i));
+    expect(blok).toMatch(/await qtyPerlengkapanDalamJalan\(tx,/);
+    expect(blok).toMatch(/- \(dalamJalan\.get\(supplyId\) \?\? 0\)/);
+    expect(blok).not.toMatch(/const saldo = await saldoSatuPerlengkapan\(supplyId, branchId\);/);
+  });
 });
 
 describe("layar menampilkan angka yang SAMA dengan yang dibandingkan server", () => {
@@ -78,6 +90,14 @@ describe("layar menampilkan angka yang SAMA dengan yang dibandingkan server", ()
     // petugas menekannya untuk bilang "sesuai", lalu justru menaikkan stok.
     expect(LAYAR).toMatch(/teksAngka\(diRak\(r\)\)/);
     expect(LAYAR).not.toMatch(/teksAngka\(r\.saldo\)/);
+  });
+
+  it("layar Stok Awal — endpoint sebelah — menampilkan angka rak juga", () => {
+    // Ia menanyakan hal yang sama di halaman yang sama, dan aritmetikanya sama.
+    // Membetulkan opname sendirian membuat perbaikannya benar separuh.
+    const TAB = baca("../../web/src/pages/stok/StokPerlengkapanTab.tsx");
+    expect(TAB).toContain("formatAngka(r.saldo - r.dalam_jalan)");
+    expect(TAB).toMatch(/r\.dalam_jalan > 0 &&/);
   });
 
   it("dan barang di jalan disebutkan, bukan disembunyikan", () => {

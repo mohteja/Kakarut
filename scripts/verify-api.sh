@@ -10389,6 +10389,34 @@ cek "INTI: hitung rak = 1 → selisih NYATA tetap tertangkap" "V == 1" \
 cek "…dan besarnya −3 (dari 4 yang seharusnya ada), bukan −9" "V == 7" \
   "$(saldo203 "$CK203" "$SPC203")"
 
+# ── SAUDARANYA: "Stok Awal" menanyakan hal yang sama, di halaman yang sama ──
+# Endpoint sebelah, aritmetika yang sama, dan dulu buta yang sama persis:
+# terukur CK 10 pcs yang seluruhnya sudah dikirim, owner menyetel stok awal 0 →
+# saldo CK 0, lalu toko menekan Terima → CK −10, total 0 dari 10 yang ada.
+# Memperbaiki opname sendirian akan membuat klaimnya benar separuh.
+SPD203=$(sp203 StokAwal)
+api "$OWNER" POST "/perlengkapan/stok-awal?branch_id=$CK203" \
+  "{\"items\":[{\"supply_id\":\"$SPD203\",\"qty\":10}]}" > /dev/null
+cek "dasar: stok awal 10 tersetel saat tak ada yang di jalan" "V == 10" \
+  "$(saldo203 "$CK203" "$SPD203")"
+api "$OWNER" POST "/perlengkapan/$SPD203/minta?branch_id=$TK203" '{"qty":10,"catatan":"uji 203"}' > /dev/null
+cek "dasar: 10 berangkat, rak CK kosong" "V == 10" "$(jalan203 "$CK203" "$SPD203")"
+# Rak kosong → owner menyetel stok awal 0. Itu jawaban yang JUJUR.
+api "$OWNER" POST "/perlengkapan/stok-awal?branch_id=$CK203" \
+  "{\"items\":[{\"supply_id\":\"$SPD203\",\"qty\":0}]}" > /dev/null
+cek "INTI: stok awal 0 atas rak kosong TIDAK memotong barang di jalan" "V == 10" \
+  "$(saldo203 "$CK203" "$SPD203")"
+KID203B=$(api "$OWNER" GET "/perlengkapan/kiriman?branch_id=$TK203" | jq -r '[.[]|select(.status=="dikirim")][0].id // empty')
+api "$OWNER" POST "/perlengkapan/kiriman/$KID203B/terima?branch_id=$TK203" > /dev/null
+cek "INTI: sesudah Terima, saldo CK 0 — BUKAN −10" "V == 0" "$(saldo203 "$CK203" "$SPD203")"
+cek "INTI: kekekalan — CK + Toko = 10" "V == 10" \
+  "$(python3 -c "print($(saldo203 "$CK203" "$SPD203") + $(saldo203 "$TK203" "$SPD203"))")"
+# Pasangan: tanpa barang di jalan, stok awal tetap menyetel apa adanya.
+api "$OWNER" POST "/perlengkapan/stok-awal?branch_id=$CK203" \
+  "{\"items\":[{\"supply_id\":\"$SPD203\",\"qty\":25}]}" > /dev/null
+cek "pasangan: stok awal tetap bekerja normal tanpa barang di jalan" "V == 25" \
+  "$(saldo203 "$CK203" "$SPD203")"
+
 
 if [ "$FAIL" -gt 0 ]; then
   echo
