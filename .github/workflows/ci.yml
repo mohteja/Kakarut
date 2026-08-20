@@ -1,12 +1,35 @@
 name: CI
 
-# Jaring pengaman tiap PR (dan push ke production): typecheck + unit test +
-# build web, lalu verifikasi API end-to-end (scripts/verify-api.sh) terhadap
-# database Postgres segar. Menangkap regresi sebelum merge.
+# Typecheck + unit test + build web, lalu verifikasi API end-to-end
+# (scripts/verify-api.sh) terhadap database Postgres segar.
+#
+# HANYA push ke `production` — pemicu `pull_request` sengaja dilepas atas
+# permintaan pemilik repo untuk menekan pemakaian menit Actions.
+#
+# KONSEKUENSINYA HARUS DIKETAHUI SIAPA PUN YANG MENYENTUH BERKAS INI: job
+# `deploy` di bawah digerbangi `needs: [quality, verify-api]` DI DALAM run yang
+# sama, jadi commit yang merah tetap tidak akan ter-deploy. Yang hilang bukan
+# gerbang deploy-nya, melainkan peringatan DINI: kegagalan kini baru terlihat
+# SESUDAH commit mendarat di `production`, bukan sebelum merge.
+#
+# Itu bukan risiko teoretis di repo ini. Delapan PR yang masing-masing hijau
+# pernah menghasilkan satu kegagalan saat digabung — yang menangkapnya justru
+# pemeriksaan sebelum merge. Tanpa pemicu `pull_request`, kasus seperti itu
+# harus ditangkap dengan menjalankan suite lokal pada hasil MERGE-nya sebelum
+# mendorong ke `production`:
+#
+#   git checkout production && git merge --no-ff <cabang>
+#   npm run typecheck && npm test && npm run build -w @kakarut/web
+#   bash scripts/dev-db.sh && npm run db:migrate && npm run seed
+#   npm run start -w @kakarut/server &   # lalu:
+#   bash scripts/verify-api.sh
+#
+# `workflow_dispatch` disediakan supaya suite ini masih bisa dijalankan atas
+# permintaan pada cabang mana pun tanpa harus mendorongnya ke `production`.
 on:
-  pull_request:
   push:
     branches: [production]
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
