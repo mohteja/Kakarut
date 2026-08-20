@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import type { PerlengkapanRowDto } from "@kakarut/shared";
-import { angkaDari, teksAngka } from "@kakarut/shared";
+import { adaDiJalan, angkaDari, saldoDiRak, teksAngka } from "@kakarut/shared";
 import { ErrorText, Spinner, btnPrimary, btnSecondary } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { useBranch, useCabangData } from "../../context/BranchContext";
@@ -161,25 +161,16 @@ export function OpnamePerlengkapanPage() {
     },
   });
 
-  /**
-   * Angka yang MEMANG seharusnya ada di rak: saldo buku dikurangi barang yang
-   * sudah berangkat ke cabang lain dan belum ditekan Terima di sana.
-   *
-   * Ledger perlengkapan baru bergerak saat diterima, jadi `saldo` masih memuat
-   * barang yang raknya sudah kosong. Menyodorkan angka itu sebagai "Sistem"
-   * membuat petugas menghitung rak kosong lalu "menemukan" kekurangan yang
-   * sebenarnya cuma barang di jalan — dan koreksinya memotong barang yang sama
-   * untuk kedua kalinya. Server membandingkan angka yang sama (lihat
-   * `buatOpnamePerlengkapan`); layar ini hanya wajib menampilkan yang sama.
+  /*
+   * `saldoDiRak` datang dari @kakarut/shared — rumah yang sama dengan yang
+   * dipakai StokPerlengkapanTab dan sepadan dengan `saldoDiRakPerlengkapan`
+   * di server. Dulu aturan ini disalin sebaris di sini; lihat catatan di
+   * `perlengkapan-rak.ts` untuk kenapa itu berbahaya.
    */
-  function diRak(r: PerlengkapanRowDto): number {
-    return r.saldo - r.dalam_jalan;
-  }
-
   function selisihDari(r: PerlengkapanRowDto): number | null {
     const v = fisik[r.id];
     if (v === undefined || v === "") return null;
-    return angkaDari(v) - diRak(r);
+    return angkaDari(v) - saldoDiRak(r);
   }
 
   function kembali() {
@@ -363,9 +354,9 @@ export function OpnamePerlengkapanPage() {
                         <div className="text-sm text-stone-500">
                           Sistem:{" "}
                           <b className="text-stone-700">
-                            {formatAngka(diRak(r))} {r.satuan}
+                            {formatAngka(saldoDiRak(r))} {r.satuan}
                           </b>
-                          {r.dalam_jalan > 0 && (
+                          {adaDiJalan(r) && (
                             <span className="text-stone-400">
                               {" "}
                               · {formatAngka(r.dalam_jalan)} di jalan (tak ikut dihitung)
@@ -400,7 +391,7 @@ export function OpnamePerlengkapanPage() {
                         className="h-12 flex-1 rounded-lg border border-stone-300 px-3 text-lg font-semibold focus:border-orange-500 focus:outline-none"
                       />
                       <button
-                        onClick={() => setFisik({ ...fisik, [r.id]: teksAngka(diRak(r)) })}
+                        onClick={() => setFisik({ ...fisik, [r.id]: teksAngka(saldoDiRak(r)) })}
                         className="h-12 shrink-0 rounded-lg border border-stone-300 px-3 text-sm font-medium text-stone-600"
                         title="Isi sama dengan sistem"
                       >
@@ -467,7 +458,7 @@ export function OpnamePerlengkapanPage() {
                               : "text-red-600"
                         }
                       >
-                        {formatAngka(diRak(r))} → {formatAngka(angkaDari(fisik[r.id]))}
+                        {formatAngka(saldoDiRak(r))} → {formatAngka(angkaDari(fisik[r.id]))}
                         {Math.abs(sel) >= 1e-9 && ` (${sel > 0 ? "+" : ""}${formatAngka(sel)})`}
                       </span>
                     </div>

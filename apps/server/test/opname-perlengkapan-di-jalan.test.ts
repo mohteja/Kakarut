@@ -93,34 +93,61 @@ describe("server membandingkan angka RAK, bukan angka buku", () => {
 });
 
 describe("layar menampilkan angka yang SAMA dengan yang dibandingkan server", () => {
-  it("layar punya satu tempat yang menghitungnya", () => {
-    expect(LAYAR).toMatch(/function diRak\(r: PerlengkapanRowDto\): number \{\s*return r\.saldo - r\.dalam_jalan;/);
+  /*
+   * Bentuk uji ini BERUBAH, dan sebabnya layak dicatat.
+   *
+   * Versi sebelumnya memakukan dua ekspresi terpisah — `r.saldo - r.dalam_jalan`
+   * di satu berkas dan `diRak(r)` di berkas lain — yang justru BUKTI bahwa
+   * aturannya disalin. Sisi server sudah dipusatkan jadi
+   * `saldoDiRakPerlengkapan`, tapi dua salinan sebaris tertinggal di klien, di
+   * perubahan yang justru berargumen menentang penyalinan itu.
+   *
+   * Sekarang keduanya lewat `saldoDiRak` dari @kakarut/shared, dan yang dipatok
+   * adalah SIFATNYA: tak satu pun layar boleh menghitung pengurangannya
+   * sendiri. Salinan ketiga akan merah sebelum lahir.
+   */
+  const LAYAR_PERLENGKAPAN = [
+    ["OpnamePerlengkapanPage", LAYAR],
+    ["StokPerlengkapanTab", baca("../../web/src/pages/stok/StokPerlengkapanTab.tsx")],
+  ] as const;
+
+  it("tak satu pun layar menghitung `saldo - dalam_jalan` sendiri", () => {
+    for (const [nama, isi] of LAYAR_PERLENGKAPAN) {
+      expect(isi, nama).toMatch(/saldoDiRak\(/);
+      expect(isi, nama).not.toMatch(/\.saldo\s*-\s*\w*\.?dalam_jalan/);
+    }
   });
 
-  it("selisih di layar dihitung dari angka rak", () => {
-    expect(LAYAR).toMatch(/return angkaDari\(v\) - diRak\(r\);/);
+  it("dan keduanya mengambilnya dari rumah yang sama", () => {
+    for (const [nama, isi] of LAYAR_PERLENGKAPAN) {
+      expect(isi, nama).toMatch(/import \{[^}]*saldoDiRak[^}]*\} from "@kakarut\/shared"/);
+    }
+  });
+
+  it("helper bersamanya memang mengurangi barang di jalan", () => {
+    const H = baca("../../../packages/shared/src/perlengkapan-rak.ts");
+    expect(H).toMatch(/return r\.saldo - r\.dalam_jalan;/);
+    expect(H).toMatch(/export function adaDiJalan/);
+  });
+
+  it("selisih di layar opname dihitung dari angka rak", () => {
+    expect(LAYAR).toMatch(/return angkaDari\(v\) - saldoDiRak\(r\);/);
     expect(LAYAR).not.toMatch(/return angkaDari\(v\) - r\.saldo;/);
   });
 
   it("tombol \"= sistem\" mengisi angka rak, bukan saldo buku", () => {
     // Tombol yang mengisi saldo buku akan MEMBUAT selisih palsu sendiri —
     // petugas menekannya untuk bilang "sesuai", lalu justru menaikkan stok.
-    expect(LAYAR).toMatch(/teksAngka\(diRak\(r\)\)/);
+    expect(LAYAR).toMatch(/teksAngka\(saldoDiRak\(r\)\)/);
     expect(LAYAR).not.toMatch(/teksAngka\(r\.saldo\)/);
-  });
-
-  it("layar Stok Awal — endpoint sebelah — menampilkan angka rak juga", () => {
-    // Ia menanyakan hal yang sama di halaman yang sama, dan aritmetikanya sama.
-    // Membetulkan opname sendirian membuat perbaikannya benar separuh.
-    const TAB = baca("../../web/src/pages/stok/StokPerlengkapanTab.tsx");
-    expect(TAB).toContain("formatAngka(r.saldo - r.dalam_jalan)");
-    expect(TAB).toMatch(/r\.dalam_jalan > 0 &&/);
   });
 
   it("dan barang di jalan disebutkan, bukan disembunyikan", () => {
     // Angka "Sistem" yang lebih kecil dari saldo tanpa keterangan akan terbaca
     // sebagai stok yang hilang. Sebabnya harus ada di layar yang sama.
     expect(LAYAR).toContain("di jalan (tak ikut dihitung)");
-    expect(LAYAR).toMatch(/r\.dalam_jalan > 0 &&/);
+    for (const [nama, isi] of LAYAR_PERLENGKAPAN) {
+      expect(isi, nama).toMatch(/adaDiJalan\(r\)/);
+    }
   });
 });
