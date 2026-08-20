@@ -10702,6 +10702,75 @@ cek "INTI: Toko B benar-benar menerima 18-nya" "V == 18" \
   "$(api "$OWNER" GET "/perlengkapan?branch_id=$TB207" | jq --arg i "$SP207" '[.[]|select(.id==$i)][0].saldo // 0')"
 
 
+echo "== 208. Sinkron offline mendarat di cabang yang DIMAKSUD =="
+# `panggilInternal` dulu menyusun URL tanpa query sama sekali — seluruh payload
+# masuk badan. Handler menentukan cabangnya lewat `resolveBranchId(c)` yang
+# membaca `?branch_id=`, jadi cabang yang diminta perangkat TAK PERNAH SAMPAI,
+# dan untuk peran tak terikat cabang ia jatuh ke CABANG PERTAMA perusahaan.
+#
+# Terukur: owner menyinkronkan "pakai 7 pcs di Cabang B" → dibalas status "ok"
+# kode 200, saldo Cabang B tetap 100, dan yang terpotong justru cabang pertama
+# (100 → 93). Dua cabang salah sekaligus, tanpa satu pun galat.
+#
+# Ditemukan lewat pengukuran cakupan: 5 dari 13 perintah sync tak punya satu pun
+# asersi, dan semuanya memindahkan stok.
+CK208=$(api "$OWNER" POST /cabang '{"nama":"CK 208","tipe":"central_kitchen"}' | jq -r '.id // empty')
+CB208A=$(api "$OWNER" POST /cabang "{\"nama\":\"Cabang 208 A\",\"central_kitchen_id\":\"$CK208\"}" | jq -r '.id // empty')
+CB208B=$(api "$OWNER" POST /cabang "{\"nama\":\"Cabang 208 B\",\"central_kitchen_id\":\"$CK208\"}" | jq -r '.id // empty')
+SP208=$(api "$OWNER" POST /perlengkapan \
+  "{\"nama\":\"Sabun 208 $RANDOM\",\"satuan\":\"pcs\",\"harga_beli\":1000,\"stok_minimum\":0}" | jq -r '.id // empty')
+cek "dasar §208: dua cabang + item" "V == 1" \
+  "$([ -n "$CB208A" ] && [ -n "$CB208B" ] && [ -n "$SP208" ] && echo 1 || echo 0)"
+s208() { api "$OWNER" GET "/perlengkapan?branch_id=$1" | jq --arg i "$SP208" '[.[]|select(.id==$i)][0].saldo // 0'; }
+for b in "$CB208A" "$CB208B"; do
+  api "$OWNER" POST "/perlengkapan/stok-awal?branch_id=$b" \
+    "{\"items\":[{\"supply_id\":\"$SP208\",\"qty\":100}]}" > /dev/null
+done
+# Cabang PERTAMA perusahaan — tujuan cadangan yang dulu keliru dipakai.
+CB208_1=$(api "$OWNER" GET /cabang | jq -r 'sort_by(.created_at) | .[0].id')
+api "$OWNER" POST "/perlengkapan/stok-awal?branch_id=$CB208_1" \
+  "{\"items\":[{\"supply_id\":\"$SP208\",\"qty\":100}]}" > /dev/null
+
+sync208() { # sync208 <token> <json-payload> → balasan hasil[0]
+  api "$1" POST /sync "{\"device_id\":\"$(cat /proc/sys/kernel/random/uuid)\",\"commands\":[{\"client_ref\":\"$(cat /proc/sys/kernel/random/uuid)\",\"tipe\":\"perlengkapan_pakai\",\"waktu\":\"$(date -u +%FT%TZ)\",\"payload\":$2}]}" \
+    | jq -c '.hasil[0] // {}'
+}
+
+# ── INTI: owner menyinkronkan pekerjaan di cabang B ───────────────────────
+H208=$(sync208 "$OWNER" "{\"supply_id\":\"$SP208\",\"branch_id\":\"$CB208B\",\"qty\":7}")
+cek "INTI: perintahnya diterima" "V == 1" \
+  "$(echo "$H208" | jq '(.status=="ok")|if . then 1 else 0 end')"
+cek "INTI: yang terpotong cabang B — cabang yang DIMAKSUD" "V == 93" "$(s208 "$CB208B")"
+cek "INTI: cabang A tak tersentuh" "V == 100" "$(s208 "$CB208A")"
+cek "INTI: cabang PERTAMA perusahaan tak tersentuh (dulu ke sini)" "V == 100" \
+  "$(s208 "$CB208_1")"
+
+# ── Otorisasi TIDAK dilonggarkan oleh perbaikan ini ──────────────────────
+# Ini pasangan yang wajib: mengangkat branch_id ke query bisa saja membuka
+# jalan bagi kasir menulis ke cabang lain. `resolveBranchId` MENGABAIKAN query
+# untuk peran terikat cabang — dan itu harus tetap benar sesudah perubahan.
+EK208="kasir208.$RANDOM@basooopa.id"
+api "$OWNER" POST /karyawan \
+  "{\"nama\":\"Kasir 208\",\"email\":\"$EK208\",\"password\":\"Kasir208!\",\"role\":\"cashier\",\"branch_id\":\"$CB208A\"}" > /dev/null
+KS208=$(login "$EK208" "Kasir208!")
+cek "dasar: kasir cabang A bisa login" "V == 1" "$([ -n "$KS208" ] && echo 1 || echo 0)"
+HK208=$(sync208 "$KS208" "{\"supply_id\":\"$SP208\",\"branch_id\":\"$CB208B\",\"qty\":5}")
+cek "PASANGAN: kasir menunjuk cabang B → tetap mengenai cabangnya SENDIRI (A)" "V == 95" \
+  "$(s208 "$CB208A")"
+cek "PASANGAN: cabang B tak tersentuh oleh kasir cabang lain" "V == 93" "$(s208 "$CB208B")"
+
+# ── Cabang milik perusahaan LAIN ditolak, bukan dipakai diam-diam ────────
+cek "PASANGAN: branch_id acak (bukan milik perusahaan ini) ditolak" "V == 1" \
+  "$(sync208 "$OWNER" "{\"supply_id\":\"$SP208\",\"branch_id\":\"00000000-0000-4000-8000-000000000000\",\"qty\":1}" \
+      | jq '(.status=="gagal" and (.kode==404 or .kode==403))|if . then 1 else 0 end')"
+cek "PASANGAN: dan tak ada cabang mana pun yang berubah karenanya" "V == 1" \
+  "$(python3 -c "print(1 if $(s208 "$CB208A") == 95 and $(s208 "$CB208B") == 93 and $(s208 "$CB208_1") == 100 else 0)")"
+
+# ── Tanpa branch_id: perilaku lama dipertahankan (cadangan cabang pertama) ─
+cek "tanpa branch_id di payload → tetap jatuh ke cabang pertama (perilaku lama)" "V == 99" \
+  "$(sync208 "$OWNER" "{\"supply_id\":\"$SP208\",\"qty\":1}" > /dev/null; s208 "$CB208_1")"
+
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"
