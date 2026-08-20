@@ -3235,8 +3235,16 @@ MK84=$(api "$OWNER" POST "/perlengkapan/$TU84/minta?branch_id=$CB46_ID" '{"qty":
 KIR84=$(echo "$MK84" | jq -r .kiriman_id)
 NKP84=$(echo "$MK84" | jq -r .nomor)
 echo "$NKP84" | grep -Eq '^KP-[0-9]{4,}$' && ok "kiriman perlengkapan bernomor ($NKP84)" || gagal "nomor KP = $NKP84"
-cek "belum diterima: saldo CK masih 8, cabang masih 0" "V == 1" \
-  "$(api "$OWNER" GET "/perlengkapan?branch_id=$CB46_ID" | jq --arg id "$TU84" '([.[]|select(.id==$id)][0] | (.saldo == 0) and (.saldo_ck == 8)) | if . then 1 else 0 end')"
+# Dua sifat berbeda yang dulu tergabung dalam satu asersi lewat `saldo_ck`.
+# LEDGER CK belum bergerak — itu inti rancangannya, dan dibaca dari sudut
+# pandang CK sendiri (`saldo`), sumber yang jujur untuk pertanyaan itu.
+cek "belum diterima: ledger CK masih 8, cabang masih 0" "V == 1" \
+  "$(python3 -c "print(1 if $(api "$OWNER" GET "/perlengkapan?branch_id=$CK52_UTAMA" | jq --arg id "$TU84" '[.[]|select(.id==$id)][0].saldo') == 8 and $(api "$OWNER" GET "/perlengkapan?branch_id=$CB46_ID" | jq --arg id "$TU84" '[.[]|select(.id==$id)][0].saldo') == 0 else 0)")"
+# JANJI ke cabang sudah berkurang: 4 dari 8 itu sudah punya tuan. `saldo_ck`
+# menjawab "berapa yang masih bisa diminta", bukan "berapa isi buku CK" — lihat
+# §205 dan catatan di `saldoPerlengkapan`.
+cek "…tapi yang DIJANJIKAN ke cabang tinggal 4 (4 sudah punya tuan)" "abs(V - 4) < 0.001" \
+  "$(api "$OWNER" GET "/perlengkapan?branch_id=$CB46_ID" | jq --arg id "$TU84" '[.[]|select(.id==$id)][0].saldo_ck')"
 cek "kiriman tampil (status dikirim, tujuan cabang)" "V == 1" \
   "$(api "$OWNER" GET "/perlengkapan/kiriman?branch_id=$CB46_ID" | jq --arg k "$KIR84" --arg b "$CB46_ID" '([.[]|select(.id==$k)] | (length==1) and (.[0].status=="dikirim") and (.[0].ke_branch_id==$b)) | if . then 1 else 0 end')"
 cek "terima di cabang → saldo cabang 4" "abs(V - 4) < 0.001" \
@@ -8639,8 +8647,11 @@ MK174=$(api "$OWNER" POST "/perlengkapan/$S174/minta?branch_id=$CB46_ID" '{"qty"
 KIR174=$(echo "$MK174" | jq -r '.kiriman_id // ""')
 cek "dasar §174: item ber-stok CK 20 & kiriman 6 terbit (status dikirim)" "V == 1" \
   "$([ ${#S174} -eq 36 ] && [ ${#KIR174} -eq 36 ] && echo 1 || echo 0)"
-cek "dasar §174: sebelum diterima — cabang 0, CK 20" "V == 1" \
-  "$(api "$OWNER" GET "/perlengkapan?branch_id=$CB46_ID" | jq --arg id "$S174" '([.[]|select(.id==$id)][0] | (.saldo == 0) and (.saldo_ck == 20)) | if . then 1 else 0 end')"
+# Sama seperti §84: ledger dibaca dari sudut CK sendiri, janji dari sudut cabang.
+cek "dasar §174: sebelum diterima — cabang 0, ledger CK 20" "V == 1" \
+  "$(python3 -c "print(1 if $(api "$OWNER" GET "/perlengkapan?branch_id=$CK52_UTAMA" | jq --arg id "$S174" '[.[]|select(.id==$id)][0].saldo') == 20 and $(api "$OWNER" GET "/perlengkapan?branch_id=$CB46_ID" | jq --arg id "$S174" '[.[]|select(.id==$id)][0].saldo') == 0 else 0)")"
+cek "dasar §174: yang dijanjikan tinggal 14 (6 sudah punya tuan)" "abs(V - 14) < 0.001" \
+  "$(api "$OWNER" GET "/perlengkapan?branch_id=$CB46_ID" | jq --arg id "$S174" '[.[]|select(.id==$id)][0].saldo_ck')"
 
 # Dua "Terima" BERBARENGAN pada kiriman yang sama — persis dua orang di layar
 # Penerimaan cabang.
@@ -10492,6 +10503,50 @@ cek "INTI: kekekalan — CK + Toko = 6 (sesudah 4 dipakai dari 10)" "V == 6" \
 cek "pasangan: toko yang MENERIMA boleh memakainya" "V == 200" \
   "$(status_code_body "$OWNER" POST "/perlengkapan/$SP204/pakai?branch_id=$TK204" '{"qty":6}')"
 cek "pasangan: saldo toko jadi 0" "V == 0" "$(saldo204 "$TK204")"
+
+
+echo "== 205. Layar cabang tak menjanjikan stok CK yang sudah punya tuan =="
+# `saldo_ck` punya satu pekerjaan: menyalakan tombol "Minta ke CK", mengisi
+# qty-nya, dan memberitahu cabang berapa yang bisa diminta. Ledger CK masih
+# memuat barang yang sudah berangkat ke cabang LAIN, jadi ledger mentah
+# menjanjikan barang yang sudah punya tuan.
+#
+# Terukur: CK 10 pcs seluruhnya sudah dikirim ke Toko B; Toko C melihat "Stok
+# Central Kitchen: 10", tombolnya menyala, qty-nya terisi 10 — lalu server
+# menolak dengan "siap kirim 0 dari saldo 10". Penjaga sisi tulisnya sudah benar
+# sejak #201; yang salah tinggal janjinya.
+CK205=$(api "$OWNER" POST /cabang '{"nama":"CK 205","tipe":"central_kitchen"}' | jq -r '.id // empty')
+TB205=$(api "$OWNER" POST /cabang "{\"nama\":\"Toko B 205\",\"central_kitchen_id\":\"$CK205\"}" | jq -r '.id // empty')
+TC205=$(api "$OWNER" POST /cabang "{\"nama\":\"Toko C 205\",\"central_kitchen_id\":\"$CK205\"}" | jq -r '.id // empty')
+SP205=$(api "$OWNER" POST /perlengkapan \
+  "{\"nama\":\"Spons 205 $RANDOM\",\"satuan\":\"pcs\",\"harga_beli\":2000,\"stok_minimum\":50}" | jq -r '.id // empty')
+cek "dasar §205: CK + dua toko yang menggantung padanya" "V == 1" \
+  "$([ -n "$CK205" ] && [ -n "$TB205" ] && [ -n "$TC205" ] && [ -n "$SP205" ] && echo 1 || echo 0)"
+ck205() { api "$OWNER" GET "/perlengkapan?branch_id=$1" | jq --arg i "$SP205" '[.[]|select(.id==$i)][0].saldo_ck'; }
+api "$OWNER" POST "/perlengkapan/stok-awal?branch_id=$CK205" \
+  "{\"items\":[{\"supply_id\":\"$SP205\",\"qty\":10}]}" > /dev/null
+
+cek "dasar: sebelum apa pun berangkat, Toko C melihat 10" "V == 10" "$(ck205 "$TC205")"
+cek "cabang yang MEMANG CK-nya tetap melihat null" "V == 1" \
+  "$(api "$OWNER" GET "/perlengkapan?branch_id=$CK205" | jq --arg i "$SP205" '[.[]|select(.id==$i)][0].saldo_ck==null|if . then 1 else 0 end')"
+
+# ── INTI: seluruh stok CK berangkat ke Toko B ─────────────────────────────
+api "$OWNER" POST "/perlengkapan/$SP205/minta?branch_id=$TB205" '{"qty":10}' > /dev/null
+cek "INTI: Toko C tak lagi dijanjikan 10 — barangnya milik Toko B" "V == 0" "$(ck205 "$TC205")"
+# Janji dan penolakan harus SEPAKAT: layar 0, server pun menolak.
+cek "INTI: dan permintaan Toko C memang ditolak server" "V == 400" \
+  "$(status_code_body "$OWNER" POST "/perlengkapan/$SP205/minta?branch_id=$TC205" '{"qty":10}')"
+
+# ── Pasangan anti-hijau-palsu: perbaikan yang selalu 0 harus MERAH ────────
+# Stok awal kini berarti "RAK berisi N" (§203), jadi menyetel 7 membuat ledger
+# CK 17 dengan 10 di jalan — dan yang boleh dijanjikan tepat 7.
+api "$OWNER" POST "/perlengkapan/stok-awal?branch_id=$CK205" \
+  "{\"items\":[{\"supply_id\":\"$SP205\",\"qty\":7}]}" > /dev/null
+cek "pasangan: rak CK diisi 7 (10 masih di jalan) → Toko C melihat 7" "V == 7" \
+  "$(ck205 "$TC205")"
+cek "pasangan: dan permintaan 7 itu BERHASIL" "V == 201" \
+  "$(status_code_body "$OWNER" POST "/perlengkapan/$SP205/minta?branch_id=$TC205" '{"qty":7}')"
+cek "pasangan: sesudah itu tak ada sisa yang dijanjikan" "V == 0" "$(ck205 "$TC205")"
 
 
 if [ "$FAIL" -gt 0 ]; then

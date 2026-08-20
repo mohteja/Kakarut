@@ -267,6 +267,24 @@ export async function saldoPerlengkapan(
   // kosong sementara ledgernya belum bergerak. Dipakai layar opname supaya yang
   // dibandingkan angka rak, bukan angka buku.
   const dalamJalan = await qtyPerlengkapanDalamJalan(db, companyId, branchId);
+  /*
+   * `saldo_ck` HARUS bersih dari barang di jalan.
+   *
+   * Angka ini punya satu pekerjaan: menyalakan tombol "Minta ke CK", mengisi
+   * qty-nya, dan memberitahu cabang berapa yang bisa diminta. Ledger CK masih
+   * memuat barang yang sudah berangkat ke cabang LAIN, jadi ledger mentah
+   * menjanjikan barang yang sudah punya tuan.
+   *
+   * Terukur: CK 10 pcs yang seluruhnya sudah dikirim ke Toko B; Toko C melihat
+   * "Stok Central Kitchen: 10", tombolnya menyala, qty-nya terisi 10 — dan
+   * server menolak dengan "siap kirim 0 dari saldo 10". Cabangnya melakukan
+   * perjalanan yang dijamin gagal, lalu menyalahkan sistem yang benar.
+   *
+   * Penjaga sisi tulisnya sudah benar sejak #201; yang salah tinggal janjinya.
+   */
+  const dalamJalanDariCk = ckId
+    ? await qtyPerlengkapanDalamJalan(db, companyId, ckId)
+    : new Map<string, number>();
   return rows.map((r) => ({
     id: r.id,
     nama: r.nama,
@@ -288,7 +306,7 @@ export async function saldoPerlengkapan(
             mulai: r.aturanMulai!,
           }
         : null,
-    saldo_ck: r.saldoCk,
+    saldo_ck: r.saldoCk == null ? null : r.saldoCk - (dalamJalanDariCk.get(r.id) ?? 0),
   }));
 }
 
