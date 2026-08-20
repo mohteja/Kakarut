@@ -840,6 +840,17 @@ export interface StokRowDto {
    * tanpa jejak apa pun di layar.
    */
   harga_per_unit: number;
+  /**
+   * Saldo dalam SATUAN KEMASAN, mis. "\u2248 6,67 dus" \u2014 null bila bahan ini tak
+   * dibeli per kemasan (`isi \u2264 1` atau `satuan_beli` kosong), atau saat saldonya
+   * nol (padanan "0 dus" cuma mengulang nol).
+   *
+   * Dikirim jadi, bukan bahan mentah, khusus untuk klien yang tak bisa
+   * mengimpor `qtyTeks` \u2014 mobile ditulis Flutter. Aturan yang sama dengan
+   * baris kiriman (`qty_setara`): satu-satunya cara memastikan web dan mobile
+   * tak pernah menulis satuan yang berbeda untuk angka yang sama.
+   */
+  saldo_setara: string | null;
   /** tempat penyimpanan dari entri masuk terkonfirmasi terakhir */
   tempat: string | null;
   tempat_id: string | null;

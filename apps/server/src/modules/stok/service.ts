@@ -1,6 +1,7 @@
 import { eq, sql } from "drizzle-orm";
 import {
   hargaPerUnit,
+  qtyTeks,
   saldoStok,
   statusStok,
   type BahanFifoDto,
@@ -199,6 +200,26 @@ export async function hitungSaldoCabang(
       // kerja, jadi mengirim harga kemasan apa adanya membuat setiap perkalian
       // di layar meleset sebesar `isi` — 1000× untuk bahan gram/kg.
       harga_per_unit: hargaPerUnit(Number(row.harga_beli), Number(row.isi)),
+      // Padanan kemasan DIHITUNG SERVER, bukan diserahkan ke tiap klien.
+      // Mobile ditulis Flutter dan tak bisa mengimpor `@kakarut/shared`, jadi
+      // menyerahkannya berarti aturan `qtyTeks` punya salinan kedua dalam Dart
+      // — persis bentuk yang dulu melahirkan "900 gr" di web vs "900 kg" di
+      // mobile pada faktur yang sama. Web tetap memanggil `qtyTeks` sendiri,
+      // tapi fungsinya SAMA, jadi keduanya mustahil berbeda.
+      //
+      // Saldo NOL memulangkan null, bukan "0 dus". `qtyTeks` benar secara
+      // aritmetika di situ, tapi di layar ia cuma baris kedua yang mengulang
+      // nol. Aturannya ditaruh di sini supaya tiap klien tak perlu
+      // mengetahuinya sendiri — itu satu aturan lagi yang bisa berbeda.
+      saldo_setara:
+        saldoStok(stokAwal, produksi, terpakai) === 0
+          ? null
+          : qtyTeks({
+              qty: saldoStok(stokAwal, produksi, terpakai),
+              satuan: String(row.satuan),
+              isi: Number(row.isi),
+              satuanBeli: row.satuan_beli != null ? String(row.satuan_beli) : null,
+            }).setara,
       tempat: row.tempat != null ? String(row.tempat) : null,
       tempat_id: row.tempat_id != null ? String(row.tempat_id) : null,
       stok_awal: stokAwal,

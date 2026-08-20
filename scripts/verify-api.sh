@@ -9572,6 +9572,55 @@ cek "harga_beli dikembalikan ke nilai asalnya" "abs(V - $HB194_ASAL/$ISI194) < 1
   "$(api "$OWNER" GET /stok | jq --arg i "$B194" '[.[]|select(.ingredient_id==$i)][0].harga_per_unit')"
 
 
+echo "== 196. Padanan kemasan saldo dikirim JADI (untuk klien non-TS) =="
+# Web memanggil `qtyTeks` sendiri; mobile ditulis Flutter dan tak bisa
+# mengimpor `@kakarut/shared`. Menyerahkan aturannya ke tiap klien berarti
+# `qtyTeks` punya salinan kedua dalam Dart — persis bentuk yang dulu melahirkan
+# "Sayur 900 gr" di web vs "Sayur 900 kg" di mobile pada faktur yang SAMA
+# (beda 1000×, angkanya benar, labelnya yang salah). Karena itu servernya yang
+# menghitung, sama seperti `qty_setara` pada baris kiriman.
+B196=$(api "$OWNER" GET /bahan | jq -r '[.[]|select(.track_stok==true and .isi>1)][0].id')
+ISI196=$(api "$OWNER" GET /bahan | jq --arg i "$B196" '[.[]|select(.id==$i)][0].isi')
+CB196=$(api "$OWNER" GET /cabang | jq -r '[.[]|select(.tipe=="store")][0].id')
+cek "dasar §196: bahan berkemasan & cabang store ada" "V == 1" \
+  "$(printf '%s%s' "$B196" "$CB196" | grep -Eqc '^[0-9a-f-]{72}$' && echo 1 || echo 0)"
+cek "tiap baris membawa kunci saldo_setara (boleh null)" "V == 1" \
+  "$(api "$OWNER" GET "/stok?branch_id=$CB196" | jq '[.[]|select(has("saldo_setara")|not)]|length==0|if . then 1 else 0 end')"
+
+# Disetel lewat API lalu dicocokkan dengan hitungan mandiri di shell — bukan
+# sekadar "ada isinya".
+api "$OWNER" PUT "/bahan/$B196" '{"satuan_beli":"dus"}' > /dev/null
+api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CB196\",\"items\":[{\"ingredient_id\":\"$B196\",\"qty\":$(python3 -c "print(int($ISI196)*3)")}]}" > /dev/null
+cek "saldo pas 3 kemasan → tanpa '≈' (angkanya memang persis)" "V == 1" \
+  "$(api "$OWNER" GET "/stok?branch_id=$CB196" | jq --arg i "$B196" '[.[]|select(.ingredient_id==$i)][0].saldo_setara == "3 dus"|if . then 1 else 0 end')"
+# Sisa yang tak habis dibagi WAJIB ditandai "≈" — tanpa itu angka bulat palsu
+# ("3 dus" untuk 3,02 dus) dibaca sebagai stok yang pas, dan belanja
+# berikutnya dihitung dari angka yang tak pernah benar.
+api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CB196\",\"items\":[{\"ingredient_id\":\"$B196\",\"qty\":$(python3 -c "print(int($ISI196)*3+1)")}]}" > /dev/null
+cek "saldo lebih sedikit → diawali '≈'" "V == 1" \
+  "$(api "$OWNER" GET "/stok?branch_id=$CB196" | jq --arg i "$B196" '[.[]|select(.ingredient_id==$i)][0].saldo_setara|startswith("≈ ")|if . then 1 else 0 end')"
+# Satuan KEMASAN, bukan satuan kerja. Inilah asersi yang menangkap "900 kg".
+# Diperiksa atas SELURUH baris berpadanan, bukan satu baris uji: bug "900 kg"
+# lahir dari satu bahan yang satuannya tertukar, dan bahan mana pun bisa jadi
+# bahan itu.
+cek "SEMUA padanan memakai satuan KEMASAN, bukan satuan kerja" "V == 1" \
+  "$(api "$OWNER" GET "/stok?branch_id=$CB196" | jq '[.[]|select(.saldo_setara != null)]|map(. as $r|($r.saldo_setara|contains($r.satuan_beli)) and (($r.saldo_setara|contains(" \($r.satuan)"))|not))|all|if . then 1 else 0 end')"
+cek "dasar: ada baris berpadanan untuk diperiksa" "V >= 1" \
+  "$(api "$OWNER" GET "/stok?branch_id=$CB196" | jq '[.[]|select(.saldo_setara != null)]|length')"
+
+# Saldo NOL → null, bukan "0 dus": padanan yang cuma mengulang nol.
+api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CB196\",\"items\":[{\"ingredient_id\":\"$B196\",\"qty\":0}]}" > /dev/null
+cek "saldo NOL → saldo_setara null (bukan \"0 dus\")" "V == 1" \
+  "$(api "$OWNER" GET "/stok?branch_id=$CB196" | jq --arg i "$B196" '[.[]|select(.ingredient_id==$i)][0].saldo_setara == null|if . then 1 else 0 end')"
+
+# Bahan TANPA kemasan tak punya padanan — pasangan anti-hijau-palsu: bila
+# server mengarang padanan untuk bahan eceran, ia akan mengarang satuan juga.
+BE196=$(api "$OWNER" POST /bahan '{"nama":"Bahan Eceran 196","harga_beli":500,"isi":1,"satuan":"pcs","track_stok":true}' | jq -r .id)
+api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CB196\",\"items\":[{\"ingredient_id\":\"$BE196\",\"qty\":7}]}" > /dev/null
+cek "bahan isi=1 (tanpa kemasan) → saldo_setara null" "V == 1" \
+  "$(api "$OWNER" GET "/stok?branch_id=$CB196" | jq --arg i "$BE196" '[.[]|select(.ingredient_id==$i)][0].saldo_setara == null|if . then 1 else 0 end')"
+
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"
