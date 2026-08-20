@@ -2430,6 +2430,16 @@ export interface PerlengkapanRowDto {
    * INI Central Kitchen-nya
    */
   saldo_ck: number | null;
+  /**
+   * Sudah BERANGKAT dari cabang ini tapi belum ditekan Terima di tujuannya.
+   *
+   * Ledger perlengkapan baru bergerak saat diterima, jadi `saldo` di atas masih
+   * memuat barang yang raknya sudah kosong. Yang benar-benar ada di rak adalah
+   * `saldo - dalam_jalan`, dan ITU yang harus dibandingkan stock opname —
+   * lihat catatan di `buatOpnamePerlengkapan`. Selalu 0 untuk cabang toko:
+   * hanya CK yang mengirim.
+   */
+  dalam_jalan: number;
 }
 
 /** Satu lokasi (cabang) tempat perlengkapan berada + aturan konsumsinya. */

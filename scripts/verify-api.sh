@@ -10303,6 +10303,93 @@ cek "pasangan: kekekalan tetap — total 20 sesudah diisi 10 lagi" "V == 20" \
   "$(python3 -c "print($(saldo202 "$CK202") + $(saldo202 "$A202") + $(saldo202 "$B202"))")"
 
 
+echo "== 203. Opname perlengkapan di CK: barang di jalan tak boleh dipotong dua kali =="
+# Ledger perlengkapan baru bergerak SAAT DITERIMA. Jadi barang yang sudah
+# berangkat ke cabang sudah tidak ada di rak CK, tapi masih utuh di ledgernya —
+# dan layar opname menyodorkan angka ledger itu sebagai "Sistem".
+#
+# Terukur pada server sungguhan, CK berisi 10 pcs yang seluruhnya sudah dikirim:
+#
+#   petugas menghitung rak → 0 (memang kosong)
+#   opname di-ACC          → koreksi −10
+#   toko menekan Terima    → debit   −10
+#   CK = −10, Toko = 10, total = 0 dari 10 yang ada
+#
+# Sepuluh unit menguap dari pembukuan dan saldo CK jatuh minus. Bentuk yang
+# sama persis dengan §197 di sisi bahan baku, muncul lagi di sistem saudaranya.
+api "$OWNER" POST /company/mode '{"mode":"pro"}' > /dev/null
+CK203=$(api "$OWNER" POST /cabang '{"nama":"CK 203","tipe":"central_kitchen"}' | jq -r '.id // empty')
+TK203=$(api "$OWNER" POST /cabang "{\"nama\":\"Toko 203\",\"central_kitchen_id\":\"$CK203\"}" | jq -r '.id // empty')
+cek "dasar §203: CK + toko yang menggantung padanya" "V == 1" \
+  "$([ -n "$CK203" ] && [ -n "$TK203" ] && echo 1 || echo 0)"
+
+sp203() { api "$OWNER" POST /perlengkapan \
+  "{\"nama\":\"$1 203 $RANDOM\",\"satuan\":\"pcs\",\"harga_beli\":2000,\"stok_minimum\":0}" | jq -r '.id // empty'; }
+saldo203() { # saldo203 <branch_id> <supply_id>
+  api "$OWNER" GET "/perlengkapan?branch_id=$1" | jq --arg i "$2" '[.[]|select(.id==$i)][0].saldo // 0'
+}
+jalan203() { # jalan203 <branch_id> <supply_id>
+  api "$OWNER" GET "/perlengkapan?branch_id=$1" | jq --arg i "$2" '[.[]|select(.id==$i)][0].dalam_jalan // 0'
+}
+opname203() { # opname203 <branch_id> <supply_id> <qty_fisik> → jumlah_selisih (ACC bila ada)
+  local res ses
+  res=$(api "$OWNER" POST "/perlengkapan/opname?branch_id=$1" \
+    "{\"items\":[{\"supply_id\":\"$2\",\"qty_fisik\":$3}],\"catatan\":\"uji 203\"}")
+  ses=$(echo "$res" | jq -r '.session_id // empty')
+  [ -n "$ses" ] && api "$OWNER" POST "/perlengkapan/opname/sesi/$ses/acc" > /dev/null
+  echo "$res" | jq '.jumlah_selisih // 0'
+}
+
+# ── Jalur lama: tanpa barang di jalan, opname bekerja seperti sebelumnya ────
+# Pasangan anti-hijau-palsu. Tanpa ini, perbaikan yang mematikan opname sama
+# sekali akan terlihat sama hijaunya dengan perbaikan yang benar.
+SPA203=$(sp203 Biasa)
+api "$OWNER" POST "/perlengkapan/stok-awal?branch_id=$CK203" \
+  "{\"items\":[{\"supply_id\":\"$SPA203\",\"qty\":10}]}" > /dev/null
+cek "dasar §203: saldo CK 10, tak ada yang di jalan" "V == 1" \
+  "$([ "$(saldo203 "$CK203" "$SPA203")" = "10" ] && [ "$(jalan203 "$CK203" "$SPA203")" = "0" ] && echo 1 || echo 0)"
+cek "pasangan: hitung 7 dari 10 → opname tetap mencatat selisih" "V == 1" \
+  "$(opname203 "$CK203" "$SPA203" 7)"
+cek "pasangan: saldonya benar-benar turun jadi 7" "V == 7" "$(saldo203 "$CK203" "$SPA203")"
+
+# ── INTI: seluruh stok sudah berangkat, rak memang kosong ──────────────────
+SPB203=$(sp203 Jalan)
+api "$OWNER" POST "/perlengkapan/stok-awal?branch_id=$CK203" \
+  "{\"items\":[{\"supply_id\":\"$SPB203\",\"qty\":10}]}" > /dev/null
+cek "dasar §203: kiriman 10 pcs dibuat" "V == 201" \
+  "$(status_code_body "$OWNER" POST "/perlengkapan/$SPB203/minta?branch_id=$TK203" '{"qty":10,"catatan":"uji 203"}')"
+cek "saldo CK BELUM bergerak (ledger menunggu Terima)" "V == 10" "$(saldo203 "$CK203" "$SPB203")"
+cek "INTI: DTO memberitahu 10 sedang di jalan" "V == 10" "$(jalan203 "$CK203" "$SPB203")"
+# Inilah keputusan yang salah dulu: rak kosong dibaca sebagai kekurangan 10.
+cek "INTI: hitung rak = 0 → TIDAK ada selisih (10 itu di jalan, bukan hilang)" "V == 0" \
+  "$(opname203 "$CK203" "$SPB203" 0)"
+cek "INTI: saldo CK tak tersentuh opname" "V == 10" "$(saldo203 "$CK203" "$SPB203")"
+
+KID203=$(api "$OWNER" GET "/perlengkapan/kiriman?branch_id=$TK203" | jq -r '[.[]|select(.status=="dikirim")][0].id // empty')
+cek "dasar §203: kirimannya ada untuk diterima" "V == 1" "$([ -n "$KID203" ] && echo 1 || echo 0)"
+api "$OWNER" POST "/perlengkapan/kiriman/$KID203/terima?branch_id=$TK203" > /dev/null
+cek "INTI: sesudah Terima, saldo CK mendarat di 0 — BUKAN −10" "V == 0" \
+  "$(saldo203 "$CK203" "$SPB203")"
+cek "toko menerima 10" "V == 10" "$(saldo203 "$TK203" "$SPB203")"
+cek "INTI: kekekalan — CK + Toko = 10 seperti semula" "V == 10" \
+  "$(python3 -c "print($(saldo203 "$CK203" "$SPB203") + $(saldo203 "$TK203" "$SPB203"))")"
+cek "sesudah diterima, tak ada lagi yang di jalan" "V == 0" "$(jalan203 "$CK203" "$SPB203")"
+
+# ── Selisih SUNGGUHAN tetap tertangkap walau ada barang di jalan ───────────
+# Ini yang membedakan "membandingkan angka rak" dari "mematikan opname".
+SPC203=$(sp203 Campur)
+api "$OWNER" POST "/perlengkapan/stok-awal?branch_id=$CK203" \
+  "{\"items\":[{\"supply_id\":\"$SPC203\",\"qty\":10}]}" > /dev/null
+api "$OWNER" POST "/perlengkapan/$SPC203/minta?branch_id=$TK203" '{"qty":6,"catatan":"uji 203"}' > /dev/null
+cek "dasar: 6 di jalan, jadi yang seharusnya di rak = 4" "V == 6" "$(jalan203 "$CK203" "$SPC203")"
+cek "INTI: hitung rak = 4 → tak ada selisih (bukan 10 − 4 = 6)" "V == 0" \
+  "$(opname203 "$CK203" "$SPC203" 4)"
+cek "INTI: hitung rak = 1 → selisih NYATA tetap tertangkap" "V == 1" \
+  "$(opname203 "$CK203" "$SPC203" 1)"
+cek "…dan besarnya −3 (dari 4 yang seharusnya ada), bukan −9" "V == 7" \
+  "$(saldo203 "$CK203" "$SPC203")"
+
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"
