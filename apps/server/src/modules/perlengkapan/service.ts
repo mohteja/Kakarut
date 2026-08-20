@@ -35,6 +35,7 @@ import {
 } from "../../db/schema";
 import { tanggalDi } from "../../lib/time";
 import { nomorUntukRefs, terbitkanNomor } from "../dokumen/nomor";
+import { kunciKirimCabang } from "../stok/service";
 
 /** Tanggal lokal hari ini pada zona waktu perusahaan. */
 export async function tanggalPerusahaan(companyId: string): Promise<string> {
@@ -428,8 +429,13 @@ export async function sebaranPerlengkapan(companyId: string): Promise<Perlengkap
 }
 
 /** Saldo satu item di satu cabang (untuk validasi pakai/koreksi & respons). */
-export async function saldoSatuPerlengkapan(supplyId: string, branchId: string): Promise<number> {
-  const [{ saldo }] = await db
+export async function saldoSatuPerlengkapan(
+  supplyId: string,
+  branchId: string,
+  /** transaksi pemanggil, bila saldonya dipakai untuk memutuskan sebelum menulis */
+  exec: Pick<typeof db, "select"> = db,
+): Promise<number> {
+  const [{ saldo }] = await exec
     .select({ saldo: sql<number>`COALESCE(SUM(${supplyMutations.qty}), 0)::float8` })
     .from(supplyMutations)
     .where(
@@ -755,8 +761,67 @@ export async function setStatusOpnamePerlengkapan(
 /* ===== KIRIMAN PERLENGKAPAN CK → CABANG (permintaan stok minimum) ===== */
 
 /**
+ * Perlengkapan yang SUDAH BERANGKAT dari sebuah cabang tapi belum ditekan
+ * "Terima" di tujuannya, per supply.
+ *
+ * Ledger perlengkapan baru bergerak SAAT DITERIMA — kedua mutasi (debit asal,
+ * kredit tujuan) ditulis sekaligus di `terimaKirimanPerlengkapan`. Selama
+ * barang di jalan, saldo CK karena itu masih memuatnya utuh. Siapa pun yang
+ * memakai saldo itu untuk memutuskan "boleh kirim berapa" harus menguranginya
+ * dulu dengan angka ini, kalau tidak stok yang sama dijanjikan berkali-kali.
+ *
+ * Bentuknya sengaja meniru `qtyDalamJalan` di modul stok bahan baku, yang
+ * menjawab pertanyaan yang sama untuk ledger sebelah.
+ */
+export async function qtyPerlengkapanDalamJalan(
+  exec: Pick<typeof db, "select">,
+  companyId: string,
+  dariBranchId: string,
+  supplyIds?: string[],
+): Promise<Map<string, number>> {
+  if (supplyIds && supplyIds.length === 0) return new Map();
+  const rows = await exec
+    .select({
+      supplyId: supplyTransfers.supplyId,
+      qty: sql<number>`COALESCE(SUM(${supplyTransfers.qty}), 0)::float8`,
+    })
+    .from(supplyTransfers)
+    .where(
+      and(
+        eq(supplyTransfers.companyId, companyId),
+        eq(supplyTransfers.dariBranchId, dariBranchId),
+        eq(supplyTransfers.status, "dikirim"),
+        ...(supplyIds ? [inArray(supplyTransfers.supplyId, supplyIds)] : []),
+      ),
+    )
+    .groupBy(supplyTransfers.supplyId);
+  return new Map(rows.map((r) => [r.supplyId, Number(r.qty) || 0]));
+}
+
+/**
  * Cabang minta ke CK: buat faktur kiriman (KP-) bila CK punya stok cukup.
  * Saldo BELUM pindah — menunggu cabang menekan Terima.
+ *
+ * STOK CK HANYA BOLEH DIJANJIKAN SEKALI.
+ *
+ * Justru karena saldo belum pindah, ledger CK masih memuat barang yang sudah
+ * berangkat. Pemeriksaan "stok CK cukup" yang membaca ledger apa adanya karena
+ * itu meluluskan kiriman kedua atas barang yang sama — dan ini BUKAN balapan,
+ * cukup dua permintaan berurutan. Terukur pada server sungguhan, CK berisi 10:
+ *
+ *   Toko A minta → KP-0026, 10 pcs   (saldo CK terbaca 10)
+ *   Toko B minta → KP-0032, 10 pcs   (saldo CK MASIH terbaca 10)
+ *   keduanya diterima → CK = −10, A = 10, B = 10
+ *
+ * Dua puluh keluar dari sepuluh. Dan `tak_bisa_kirim` kosong, jadi tak seorang
+ * pun diberi tahu: kekurangannya baru terlihat saat saldo CK sudah minus, dan
+ * faktur beli yang seharusnya terbit untuk menutup kekurangan itu tak pernah
+ * dibuat.
+ *
+ * Maka pemeriksaannya dipindah KE DALAM transaksi, di belakang kunci kirim
+ * (ledger tak punya baris yang bisa dikunci), dan yang dibandingkan adalah
+ * saldo DIKURANGI barang yang masih di jalan. Idiomnya sama persis dengan
+ * jalur bahan baku di `produksi/routes.ts`.
  */
 export async function buatKirimanPerlengkapan(params: {
   companyId: string;
@@ -775,16 +840,28 @@ export async function buatKirimanPerlengkapan(params: {
     return { error: "Cabang ini Central Kitchen — belanja langsung lewat Stok Masuk" };
   }
   if (!cab.ckId) return { error: "Cabang belum terhubung ke Central Kitchen" };
-  const saldoCk = await saldoSatuPerlengkapan(params.supplyId, cab.ckId);
-  if (params.qty > saldoCk) {
-    return { error: `Stok CK tidak cukup (saldo CK ${saldoCk}) — beli dulu di CK` };
-  }
+  const ckId = cab.ckId;
   return db.transaction(async (tx) => {
+    await kunciKirimCabang(tx, params.companyId, ckId, "kirim-perlengkapan");
+    const saldoCk = await saldoSatuPerlengkapan(params.supplyId, ckId, tx);
+    const dalamJalan =
+      (await qtyPerlengkapanDalamJalan(tx, params.companyId, ckId, [params.supplyId])).get(
+        params.supplyId,
+      ) ?? 0;
+    const siapKirim = saldoCk - dalamJalan;
+    if (params.qty > siapKirim) {
+      return {
+        error:
+          dalamJalan > 0
+            ? `Stok CK tidak cukup (siap kirim ${siapKirim} dari saldo ${saldoCk}; ${dalamJalan} sudah dikirim & menunggu diterima) — beli dulu di CK`
+            : `Stok CK tidak cukup (saldo CK ${saldoCk}) — beli dulu di CK`,
+      };
+    }
     const [row] = await tx
       .insert(supplyTransfers)
       .values({
         companyId: params.companyId,
-        dariBranchId: cab.ckId!,
+        dariBranchId: ckId,
         keBranchId: params.cabangId,
         supplyId: params.supplyId,
         qty: params.qty,
@@ -949,6 +1026,11 @@ export async function permintaanOtomatisPerlengkapan(params: {
   // saldo dijujurkan dulu (jatah otomatis) sebelum dibandingkan minimum
   await terapkanKonsumsiOtomatis(params.companyId, params.cabangId);
   const rows = await saldoPerlengkapan(params.companyId, params.cabangId);
+  // Barang CK yang sudah berangkat ke cabang mana pun & belum diterima. Diambil
+  // sekali di luar loop: satu kueri untuk seluruh item, bukan satu per item.
+  const dalamJalan = cab.ckId
+    ? await qtyPerlengkapanDalamJalan(db, params.companyId, cab.ckId)
+    : new Map<string, number>();
   const dibuat: PermintaanPerlengkapanOtomatisHasil["dibuat"] = [];
   const beliDibuat: PermintaanPerlengkapanOtomatisHasil["beli_dibuat"] = [];
   const takBisa: PermintaanPerlengkapanOtomatisHasil["tak_bisa_kirim"] = [];
@@ -964,8 +1046,16 @@ export async function permintaanOtomatisPerlengkapan(params: {
       takBisa.push({ supply_id: r.id, nama: r.nama, satuan: r.satuan, qty: kekurangan });
       continue;
     }
-    const ckSaldo = Math.max(0, Math.floor((r.saldo_ck ?? 0) + 1e-9));
-    const kirim = Math.min(kekurangan, ckSaldo);
+    /*
+     * Yang bisa dikirim adalah saldo CK DIKURANGI yang sudah berangkat ke
+     * cabang lain dan belum ditekan Terima — ledger perlengkapan baru bergerak
+     * saat diterima, jadi `saldo_ck` apa adanya masih memuat barang di jalan.
+     * Tanpa pengurangan ini, cabang kedua yang meminta hal yang sama dijanjikan
+     * stok yang sudah menjadi milik cabang pertama.
+     */
+    const dalamJalanCk = dalamJalan.get(r.id) ?? 0;
+    const ckSaldo = Math.max(0, Math.floor((r.saldo_ck ?? 0) - dalamJalanCk + 1e-9));
+    let kirim = Math.min(kekurangan, ckSaldo);
     if (kirim > 0) {
       const hasil = await buatKirimanPerlengkapan({
         companyId: params.companyId,
@@ -975,7 +1065,17 @@ export async function permintaanOtomatisPerlengkapan(params: {
         userId: params.userId,
         catatan: "Permintaan otomatis (stok ≤ minimum)",
       });
-      if (!("error" in hasil)) {
+      if ("error" in hasil) {
+        /*
+         * Penolakan TIDAK BOLEH ditelan diam-diam. Sebelumnya cabang yang
+         * ditolak di sini tak dapat kiriman, tak dapat faktur beli, dan tak
+         * muncul di `tak_bisa_kirim` — permintaannya lenyap tanpa satu pun
+         * jejak di layar. `kirim` dinolkan supaya SELURUH kekurangannya jatuh
+         * ke faktur beli di bawah, jalan yang memang disediakan untuk stok CK
+         * yang kurang.
+         */
+        kirim = 0;
+      } else {
         dibuat.push({
           supply_id: r.id,
           nama: r.nama,

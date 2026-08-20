@@ -10193,6 +10193,96 @@ cek "…dan tidak dihitung dua kali (hadir=1, cuti=0)" "V == 1" \
   "$(echo "$B201D" | jq '((.hadir==1) and (.cuti==0))|if . then 1 else 0 end')"
 
 
+echo "== 202. Stok CK perlengkapan hanya boleh dijanjikan SEKALI =="
+# Ledger perlengkapan baru bergerak SAAT DITERIMA: `terimaKirimanPerlengkapan`
+# menulis debit CK dan kredit cabang sekaligus. Selama barang di jalan, saldo CK
+# karena itu masih memuatnya utuh — dan pemeriksaan "stok CK cukup" membaca
+# saldo itu apa adanya.
+#
+# Terukur pada server sungguhan, CK berisi 10 pcs, dua toko sama-sama di bawah
+# minimum. BUKAN balapan — dua permintaan berurutan:
+#
+#   Toko A minta → KP-0026, 10 pcs   (saldo CK terbaca 10)
+#   Toko B minta → KP-0032, 10 pcs   (saldo CK MASIH terbaca 10)
+#   keduanya menekan Terima → CK = −10, A = 10, B = 10
+#
+# Dua puluh keluar dari sepuluh. Dan `tak_bisa_kirim` KOSONG, jadi tak seorang
+# pun diberi tahu: kekurangannya baru terlihat saat saldo CK sudah minus, dan
+# faktur beli yang seharusnya menutupinya tak pernah terbit.
+api "$OWNER" POST /company/mode '{"mode":"pro"}' > /dev/null
+CK202=$(api "$OWNER" POST /cabang '{"nama":"CK 202","tipe":"central_kitchen"}' | jq -r '.id // empty')
+A202=$(api "$OWNER" POST /cabang "{\"nama\":\"Toko A 202\",\"central_kitchen_id\":\"$CK202\"}" | jq -r '.id // empty')
+B202=$(api "$OWNER" POST /cabang "{\"nama\":\"Toko B 202\",\"central_kitchen_id\":\"$CK202\"}" | jq -r '.id // empty')
+cek "dasar §202: CK + dua toko yang menggantung padanya" "V == 1" \
+  "$([ -n "$CK202" ] && [ -n "$A202" ] && [ -n "$B202" ] && echo 1 || echo 0)"
+
+# Satu perlengkapan BARU khusus seksi ini: item yang sudah dipakai seksi lain
+# membawa saldo & kiriman sendiri, dan angka yang hijau karena sebab lain lebih
+# buruk daripada tak ada asersi. Minimum 10 → kedua toko (saldo 0) kekurangan 10.
+SP202=$(api "$OWNER" POST /perlengkapan \
+  "{\"nama\":\"Spons 202 $RANDOM\",\"satuan\":\"pcs\",\"harga_beli\":5000,\"stok_minimum\":10}" | jq -r '.id // empty')
+cek "dasar §202: perlengkapan uji dibuat" "V == 1" "$([ -n "$SP202" ] && echo 1 || echo 0)"
+# CK diisi 10 — cukup untuk SATU toko, tidak untuk dua.
+api "$OWNER" POST "/perlengkapan/stok-awal?branch_id=$CK202" \
+  "{\"items\":[{\"supply_id\":\"$SP202\",\"qty\":10}]}" > /dev/null
+saldo202() { # saldo202 <branch_id>
+  api "$OWNER" GET "/perlengkapan?branch_id=$1" | jq --arg i "$SP202" '[.[]|select(.id==$i)][0].saldo // 0'
+}
+cek "dasar §202: saldo CK 10, kedua toko 0" "V == 1" \
+  "$([ "$(saldo202 "$CK202")" = "10" ] && [ "$(saldo202 "$A202")" = "0" ] && [ "$(saldo202 "$B202")" = "0" ] && echo 1 || echo 0)"
+
+# ── Toko A minta lebih dulu ────────────────────────────────────────────────
+RA202=$(api "$OWNER" POST "/perlengkapan/permintaan-otomatis?branch_id=$A202")
+cek "toko A dapat kiriman 10 pcs" "V == 10" \
+  "$(echo "$RA202" | jq --arg i "$SP202" '[.dibuat[]?|select(.supply_id==$i)][0].qty // 0')"
+# Justru inilah yang membuat cacatnya mungkin — dipatok supaya tetap terlihat.
+cek "saldo CK BELUM berkurang (ledger bergerak saat diterima)" "V == 10" "$(saldo202 "$CK202")"
+
+# ── Toko B minta hal yang sama, BERURUTAN ──────────────────────────────────
+RB202=$(api "$OWNER" POST "/perlengkapan/permintaan-otomatis?branch_id=$B202")
+cek "INTI: toko B TIDAK dijanjikan stok yang sama" "V == 0" \
+  "$(echo "$RB202" | jq --arg i "$SP202" '[.dibuat[]?|select(.supply_id==$i)]|length')"
+# Permintaannya tak boleh lenyap begitu saja: kekurangan yang tak tertutup stok
+# CK adalah persis kasus yang faktur beli BP- disediakan untuknya.
+cek "INTI: kekurangannya jadi baris faktur beli, bukan hilang" "V == 10" \
+  "$(echo "$RB202" | jq --arg i "$SP202" '[.beli_dibuat[]?|select(.supply_id==$i)][0].qty // 0')"
+cek "faktur beli BP- benar-benar terbit" "V == 1" \
+  "$(echo "$RB202" | jq '((.beli_faktur != null) and ((.beli_faktur.nomor|length) > 0))|if . then 1 else 0 end')"
+
+# ── Keduanya menekan Terima ────────────────────────────────────────────────
+terima202() { # terima202 <branch_id> → jumlah kiriman yang diterima
+  local n=0 id
+  for id in $(api "$OWNER" GET "/perlengkapan/kiriman?branch_id=$1" | jq -r '.[]|select(.status=="dikirim")|.id'); do
+    api "$OWNER" POST "/perlengkapan/kiriman/$id/terima?branch_id=$1" > /dev/null
+    n=$((n + 1))
+  done
+  printf '%s' "$n"
+}
+cek "toko A menerima tepat 1 kiriman" "V == 1" "$(terima202 "$A202")"
+cek "toko B tak punya kiriman untuk diterima" "V == 0" "$(terima202 "$B202")"
+cek "INTI: saldo CK mendarat di 0, BUKAN minus" "V == 0" "$(saldo202 "$CK202")"
+cek "toko A menerima 10" "V == 10" "$(saldo202 "$A202")"
+cek "toko B tetap 0 (barangnya memang belum ada)" "V == 0" "$(saldo202 "$B202")"
+# Yang paling penting dari semuanya: jumlahnya kekal. Sepuluh masuk, sepuluh
+# tersebar. Asersi ini yang akan merah untuk SETIAP cara stok CK bocor, bukan
+# hanya cara yang kebetulan sudah terpikirkan.
+cek "INTI: kekekalan — CK + A + B = 10 seperti semula" "V == 10" \
+  "$(python3 -c "print($(saldo202 "$CK202") + $(saldo202 "$A202") + $(saldo202 "$B202"))")"
+
+# ── Pasangan anti-hijau-palsu: penjaga yang menolak SEMUA bukan penjaga ────
+# Sesudah barang A benar-benar diterima, tak ada lagi yang di jalan — jadi CK
+# yang diisi ulang harus bisa mengirim lagi seperti biasa.
+api "$OWNER" POST "/perlengkapan/stok-awal?branch_id=$CK202" \
+  "{\"items\":[{\"supply_id\":\"$SP202\",\"qty\":10}]}" > /dev/null
+cek "dasar: CK diisi ulang jadi 10" "V == 10" "$(saldo202 "$CK202")"
+RB202B=$(api "$OWNER" POST "/perlengkapan/permintaan-otomatis?branch_id=$B202")
+cek "pasangan: sesudah stok ada, toko B DAPAT kiriman 10" "V == 10" \
+  "$(echo "$RB202B" | jq --arg i "$SP202" '[.dibuat[]?|select(.supply_id==$i)][0].qty // 0')"
+cek "pasangan: toko B menerimanya" "V == 1" "$(terima202 "$B202")"
+cek "pasangan: kekekalan tetap — total 20 sesudah diisi 10 lagi" "V == 20" \
+  "$(python3 -c "print($(saldo202 "$CK202") + $(saldo202 "$A202") + $(saldo202 "$B202"))")"
+
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"
