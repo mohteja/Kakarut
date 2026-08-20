@@ -10959,6 +10959,108 @@ cek "perlengkapan: semua lot ditandai BUKAN tebakan & statistiknya utuh" "V == 1
   "$(api "$OWNER" GET "/perlengkapan/$P210/pembelian" | jq '(([.lots[]|select(.harga_tebakan)]|length==0) and (.harga_median==2000) and (.harga_rata==2000) and (.jumlah_harga_nyata==2))|if . then 1 else 0 end')"
 
 
+echo "== 211. Empat perintah sinkron yang selama ini NOL asersi =="
+CK211=$(api "$OWNER" POST /cabang '{"nama":"CK Uji 211","tipe":"central_kitchen"}' | jq -r .id)
+ST211=$(api "$OWNER" POST /cabang "{\"nama\":\"Store Uji 211\",\"central_kitchen_id\":\"$CK211\"}" | jq -r .id)
+B211=$(api "$OWNER" POST /bahan '{"nama":"Bahan Uji 211","harga_beli":1000,"isi":1,"satuan":"pcs","pengadaan":"beli","track_stok":true}' | jq -r .id)
+cek "dasar §211: CK, store, & bahan uji ada" "V == 1" \
+  "$(printf '%s%s%s' "$CK211" "$ST211" "$B211" | grep -Eqc '^[0-9a-f-]{108}$' && echo 1 || echo 0)"
+
+uuid211(){ cat /proc/sys/kernel/random/uuid; }
+# sinkron satu perintah; REF dipakai ulang pemanggil untuk menguji idempotensi
+sync211(){ # sync211 <ref> <tipe> <payload-json> → hasil[0]
+  api "$OWNER" POST /sync "$(jq -nc --arg r "$1" --arg t "$2" \
+    --arg w "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson p "$3" \
+    '{device_id:"dev211",commands:[{client_ref:$r,tipe:$t,waktu:$w,payload:$p}]}')" | jq -c '.hasil[0]'
+}
+saldo211(){ api "$OWNER" GET "/stok?branch_id=$1" | jq --arg i "$B211" '[.[]|select(.ingredient_id==$i)][0].saldo // 0'; }
+kirim211(){ # kirim211 <qty> → faktur_id di status 'menunggu' (siap berangkat)
+  local F
+  F=$(api "$OWNER" POST /pembelian/faktur \
+    "{\"branch_id\":\"$CK211\",\"tujuan_branch_id\":\"$ST211\",\"items\":[{\"ingredient_id\":\"$B211\",\"mode\":\"pcs\",\"jumlah\":$1,\"total_harga\":$(( $1 * 1000 ))}]}" | jq -r .faktur_id)
+  api "$OWNER" POST "/pembelian/tahap/$F" '{"ke":"dikerjakan"}' > /dev/null
+  api "$OWNER" POST "/pembelian/tahap/$F" '{"ke":"menunggu"}' > /dev/null
+  echo "$F"
+}
+
+# ── 1. faktur_kirim ────────────────────────────────────────────────────────
+F211=$(kirim211 20)
+H211=$(sync211 "$(uuid211)" faktur_kirim "$(jq -nc --arg f "$F211" '{jalur:"pembelian",faktur_id:$f}')")
+cek "faktur_kirim: perintah diterima" "V == 1" \
+  "$(echo "$H211" | jq '(.status=="ok" and (.data.jumlah_baris//0)==1)|if . then 1 else 0 end')"
+cek "faktur_kirim: kirimannya MUNCUL di Penerimaan cabang tujuan (menunggu)" "V == 1" \
+  "$(api "$OWNER" GET "/penerimaan?branch_id=$ST211" | jq --arg f "$F211" '[.rows[]|select(.faktur_id==$f and .status=="menunggu")]|length')"
+cek "faktur_kirim: stok tujuan BELUM bertambah (pindah saat diterima)" "V == 0" "$(saldo211 "$ST211")"
+
+# ── 2. penerimaan_terima_sebagian ──────────────────────────────────────────
+ROW211=$(api "$OWNER" GET "/penerimaan?branch_id=$ST211" | jq -r --arg f "$F211" '[.rows[]|select(.faktur_id==$f)][0].id')
+REF211=$(uuid211)
+sync211 "$REF211" penerimaan_terima_sebagian "$(jq -nc --arg f "$F211" --arg id "$ROW211" '{faktur_id:$f,items:[{id:$id,qty_diterima:12}]}')" > /dev/null
+cek "terima_sebagian: stok tujuan bertambah SEBANYAK YANG DITERIMA (12 dari 20)" "V == 12" \
+  "$(saldo211 "$ST211")"
+cek "terima_sebagian: qty_dipesan 20 tersimpan (jejak barang kurang)" "V == 1" \
+  "$(api "$OWNER" GET "/pembelian?branch_id=$ST211&per_page=500" | jq --arg f "$F211" '[.rows[]|select(.faktur_id==$f and .qty_dipesan==20 and .qty==12)]|length')"
+# ── INTI ANTREAN OFFLINE: respons yang HILANG lalu dikirim ulang ──────────
+# Perangkat yang kehilangan respons di jalan akan mengirim ulang perintah yang
+# SUDAH berhasil. Jawabannya harus "sudah beres", bukan "gagal" — antrean klien
+# menandai yang gagal sebagai mati dan tak pernah mencobanya lagi, jadi
+# penerimaan yang sungguhan terjadi hilang dari pandangan penggunanya.
+#
+# ASERSI INI SEMPAT TIDAK BISA GAGAL, dan itu layak dicatat. Bentuk pertamanya
+# hanya memeriksa "stok tak bertambah dua kali" — padahal itu sudah dijaga
+# status barisnya sendiri ('menunggu' → 'dikonfirmasi'), sehingga ia tetap
+# hijau bahkan seandainya klaim client_ref dicabut seluruhnya. Yang
+# membuktikan mekanismenya justru SELISIH dua jawaban di bawah.
+ULANG211=$(sync211 "$REF211" penerimaan_terima_sebagian "$(jq -nc --arg f "$F211" --arg id "$ROW211" '{faktur_id:$f,items:[{id:$id,qty_diterima:12}]}')")
+cek "INTI: ulang dgn ref SAMA → 'sudah_ada' 200, klien tahu penerimaannya beres" "V == 1" \
+  "$(echo "$ULANG211" | jq '(.status=="sudah_ada" and .kode==200 and (.data.ok==true))|if . then 1 else 0 end')"
+BEDA211=$(sync211 "$(uuid211)" penerimaan_terima_sebagian "$(jq -nc --arg f "$F211" --arg id "$ROW211" '{faktur_id:$f,items:[{id:$id,qty_diterima:12}]}')")
+cek "PEMBANDING: ref BEDA → gagal 404 — jadi yang menjawab memang klaim ref-nya" "V == 1" \
+  "$(echo "$BEDA211" | jq '(.status=="gagal" and .kode==404)|if . then 1 else 0 end')"
+cek "…dan sesudah dua pengulangan itu stok tetap sekali tambah" "V == 12" \
+  "$(saldo211 "$ST211")"
+
+# ── 3. penerimaan_tolak ────────────────────────────────────────────────────
+F211B=$(kirim211 7)
+sync211 "$(uuid211)" faktur_kirim "$(jq -nc --arg f "$F211B" '{jalur:"pembelian",faktur_id:$f}')" > /dev/null
+sync211 "$(uuid211)" penerimaan_tolak "$(jq -nc --arg f "$F211B" '{faktur_id:$f,alasan:"barang rusak di jalan"}')" > /dev/null
+cek "tolak: status 'ditolak' + alasannya tersimpan" "V == 1" \
+  "$(api "$OWNER" GET "/pembelian?branch_id=$ST211&per_page=500" | jq --arg f "$F211B" '[.rows[]|select(.faktur_id==$f and .status=="ditolak" and .alasan_tolak=="barang rusak di jalan")]|length')"
+cek "tolak: stok tujuan TIDAK bertambah (tetap 12)" "V == 12" "$(saldo211 "$ST211")"
+
+# ── 4. produksi_kirim_hasil ────────────────────────────────────────────────
+MEN211=$(api "$OWNER" POST /bahan '{"nama":"Mentah Uji 211","harga_beli":500,"isi":1,"satuan":"gr","pengadaan":"beli","track_stok":true}' | jq -r .id)
+JADI211=$(api "$OWNER" POST /bahan '{"nama":"Jadi Uji 211","harga_beli":0,"isi":10,"satuan":"pcs","pengadaan":"produksi","track_stok":true}' | jq -r .id)
+api "$OWNER" PUT "/bahan/$JADI211/resep" "{\"komponen\":[{\"ingredient_id\":\"$MEN211\",\"qty\":5}]}" > /dev/null
+KAT211=$(api "$OWNER" GET /kategori | jq -r '.[0].id')
+MENU211=$(api "$OWNER" POST /menu "{\"nama\":\"Menu Uji 211\",\"category_id\":\"$KAT211\",\"harga_jual\":15000,\"mult\":2,\"komponen\":[{\"ingredient_id\":\"$JADI211\",\"qty\":1}]}" | jq -r .id)
+api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CK211\",\"items\":[{\"ingredient_id\":\"$MEN211\",\"qty\":5000},{\"ingredient_id\":\"$JADI211\",\"qty\":0}]}" > /dev/null
+api "$OWNER" POST /stok/awal "{\"branch_id\":\"$ST211\",\"items\":[{\"ingredient_id\":\"$JADI211\",\"qty\":0}]}" > /dev/null
+# `untuk_branch_id` HANYA lahir dari jalur permintaan tambah stok — faktur
+# produksi biasa mengabaikan field itu, dan kirim-hasil menolak 400.
+PF211=$(api "$OWNER" POST /rekomendasi/menu/faktur "{\"items\":[{\"menu_id\":\"$MENU211\",\"porsi\":20}],\"tujuan_branch_id\":\"$ST211\",\"ck_branch_id\":\"$CK211\"}" | jq -r '.produksi.faktur_id')
+api "$OWNER" POST "/produksi/tahap/$PF211" '{"ke":"dikerjakan"}' > /dev/null
+api "$OWNER" POST "/produksi/tahap/$PF211" '{"ke":"menunggu"}' > /dev/null
+cek "dasar §211: work-order selesai & menunggu dikirim (untuk_branch_id terisi)" "V == 1" \
+  "$(api "$OWNER" GET "/produksi?branch_id=$CK211&per_page=500" | jq --arg f "$PF211" --arg b "$ST211" '([.rows[]|select(.faktur_id==$f)]|(length>0) and all(.[]; .untuk_branch_id==$b and .status=="dikonfirmasi"))|if . then 1 else 0 end')"
+KH211=$(sync211 "$(uuid211)" produksi_kirim_hasil "$(jq -nc --arg f "$PF211" '{faktur_id:$f}')")
+cek "kirim_hasil: perintah diterima & melahirkan faktur kiriman bernomor" "V == 1" \
+  "$(echo "$KH211" | jq '(.status=="ok" and (.data.faktur_id!=null) and ((.data.nomor//"")|test("^PR-[0-9]{4,}$")))|if . then 1 else 0 end')"
+KHF211=$(echo "$KH211" | jq -r '.data.faktur_id')
+cek "kirim_hasil: kiriman muncul di Penerimaan cabang peminta" "V == 1" \
+  "$(api "$OWNER" GET "/penerimaan?branch_id=$ST211" | jq --arg f "$KHF211" '[.rows[]|select(.faktur_id==$f and .status=="menunggu")]|length')"
+cek "kirim_hasil: pengingat untuk_branch_id di sumbernya DIKOSONGKAN" "V == 1" \
+  "$(api "$OWNER" GET "/produksi?branch_id=$CK211&per_page=500" | jq --arg f "$PF211" '([.rows[]|select(.faktur_id==$f)]|(length>0) and all(.[]; .untuk_branch_id==null))|if . then 1 else 0 end')"
+
+# ── PASANGAN: penjaga param jalur sub-request internal masih hidup ─────────
+# `faktur_id` di-interpolasi ke URL sub-request internal. Tanpa penjaga UUID,
+# nilai ber-`/` atau `..` bisa mengubah jalur yang dituju.
+cek "PASANGAN: faktur_id bukan UUID → ditolak 400, bukan dijalankan" "V == 1" \
+  "$(sync211 "$(uuid211)" penerimaan_tolak '{"faktur_id":"../../shift/buka"}' | jq '(.status=="gagal" and .kode==400)|if . then 1 else 0 end')"
+cek "PASANGAN: jalur di luar produksi/pembelian → ditolak 400" "V == 1" \
+  "$(sync211 "$(uuid211)" faktur_kirim "$(jq -nc --arg f "$F211" '{jalur:"../admin",faktur_id:$f}')" | jq '(.status=="gagal" and .kode==400)|if . then 1 else 0 end')"
+
+
 echo
 echo "── §209 Rute mati: verify-api tak boleh memanggil endpoint yang TIDAK ADA ──"
 # Duduk PALING AKHIR di berkas ini walau nomornya bukan yang terbesar: ia baru
