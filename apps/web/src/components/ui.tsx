@@ -31,6 +31,44 @@ export function Card({
   );
 }
 
+/**
+ * KARTU RINGKASAN satu angka: label kecil di atas, angka besar di bawah.
+ *
+ * Bentuk ini sudah disalin EMPAT kali sebelum berkas ini memilikinya —
+ * Dashboard, Laporan, Laporan Pembelian, Kartu Stok — dan salinannya sudah
+ * mulai berbeda: dua memakai `text-xl`, satu `text-2xl`, dan baris kecil di
+ * bawah angka dinamai `sub` di satu tempat dan `rincian` di tempat lain. Yang
+ * kelima (ringkasan nilai stok) yang membuat ini tak lagi bisa dibiarkan:
+ * lima kartu yang mestinya seragam di lima halaman tak akan pernah seragam
+ * kalau tiap halaman memegang definisinya sendiri.
+ *
+ * `besar` mempertahankan ukuran angka Dashboard, yang memang berdiri sendiri
+ * sebagai layar ringkasan; halaman lain memakai ukuran yang lebih kecil karena
+ * kartunya duduk di atas tabel yang jadi isi utamanya.
+ */
+export function StatCard({
+  label,
+  value,
+  sub,
+  warna = "text-stone-800",
+  besar = false,
+}: {
+  label: string;
+  value: string;
+  /** baris kecil di bawah angka — dari mana angkanya, atau apa yang tak ikut */
+  sub?: ReactNode;
+  warna?: string;
+  besar?: boolean;
+}) {
+  return (
+    <Card className="p-4">
+      <div className="text-xs font-semibold uppercase tracking-wide text-stone-500">{label}</div>
+      <div className={`mt-1 font-bold ${besar ? "text-2xl" : "text-xl"} ${warna}`}>{value}</div>
+      {sub && <div className="mt-0.5 text-xs text-stone-500">{sub}</div>}
+    </Card>
+  );
+}
+
 export function StatusBadge({ status }: { status: StokStatus }) {
   const styles: Record<StokStatus, string> = {
     aman: "bg-green-100 text-green-800",

@@ -1,13 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { qtyTeks } from "@kakarut/shared";
+import { qtyTeks, ringkasNilaiStok } from "@kakarut/shared";
 import type { ExpLotRow, MenuDto, MenuStokDto, PenyimpananDto, StokRowDto } from "@kakarut/shared";
 import {
   Card,
   ErrorText,
   PageTitle,
   Spinner,
+  StatCard,
   StatusBadge,
   btnPrimary,
   btnSecondary,
@@ -97,6 +98,15 @@ export function StokPage() {
           ? s.tempat_id === null
           : s.tempat_id === filterTempat,
     );
+
+  // NILAI RUPIAH STOK — dihitung atas baris yang SEDANG TAMPIL, bukan seluruh
+  // daftar, supaya angkanya selalu bisa dicocokkan sendiri dengan tabel di
+  // bawahnya. Filter yang aktif disebutkan eksplisit di kartunya (lihat
+  // `terfilter`); ringkasan yang diam-diam ikut menyempit adalah ringkasan yang
+  // salah dibaca sebagai total.
+  const terfilter = cari.trim() !== "" || filterTempat !== "semua";
+  const nilai = ringkasNilaiStok(tampil);
+  const nilaiSemua = ringkasNilaiStok(stok ?? []);
 
   // Stok Menu: gabungkan katalog menu aktif dengan sisa porsi + bahan pembatas
   const porsiByMenu = new Map(ketersediaan.map((k) => [k.menu_id, k]));
@@ -359,6 +369,59 @@ export function StokPage() {
         <Spinner />
       ) : (
         <>
+      {/*
+        RINGKASAN NILAI STOK — modal yang mengendap di rak, dalam rupiah.
+        Tabel di bawah punya puluhan baris qty dan tak satu pun angka rupiah,
+        jadi sebelum ini "berapa nilai stok saya" cuma bisa dijawab dengan
+        mengalikan sendiri baris demi baris.
+
+        TIDAK dirender saat `stokGagal`: `tampil` kosong karena bacaannya gagal,
+        dan kartu yang tetap muncul akan menuliskan "Rp 0" — pernyataan yang
+        jauh lebih percaya diri daripada tabel kosong di bawahnya, dan salah.
+
+        Kartu kedua & ketiga hanya muncul bila memang ada perkaranya. Keduanya
+        menyebut apa yang TIDAK ikut dijumlahkan; tanpa itu totalnya tampak
+        lengkap padahal ia sengaja melewatkan sesuatu.
+      */}
+      {!stokGagal && (stok?.length ?? 0) > 0 && (
+        <div className="mb-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <StatCard
+            label={terfilter ? "Nilai Stok (terfilter)" : "Nilai Stok"}
+            value={formatRupiah(nilai.nilai)}
+            warna="text-orange-600"
+            sub={
+              <>
+                {nilai.bahan_bernilai} bahan · dinilai dengan harga beli terkini
+                {terfilter && (
+                  <> · seluruh bahan {formatRupiah(nilaiSemua.nilai)}</>
+                )}
+              </>
+            }
+          />
+          {nilai.minus_bahan > 0 && (
+            <StatCard
+              label="Saldo Minus"
+              value={`${nilai.minus_bahan} bahan`}
+              warna="text-red-600"
+              sub={
+                <>
+                  tidak ikut dinilai — barangnya kemungkinan ada, penerimaannya yang
+                  belum tercatat (setara {formatRupiah(nilai.minus_nilai)})
+                </>
+              }
+            />
+          )}
+          {nilai.tanpa_harga_bahan > 0 && (
+            <StatCard
+              label="Belum Berharga"
+              value={`${nilai.tanpa_harga_bahan} bahan`}
+              warna="text-stone-600"
+              sub="harga belinya masih 0 — nilainya belum masuk total di sebelah"
+            />
+          )}
+        </div>
+      )}
+
       {/*
         Peringatan exp yang gagal dimuat MENGHILANG tanpa bekas, dan hilangnya
         spanduk itu sendiri sebuah pernyataan: "tak ada yang mau kedaluwarsa".

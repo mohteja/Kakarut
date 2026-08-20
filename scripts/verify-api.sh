@@ -9506,6 +9506,72 @@ cek "satuan_beli yang disetel muncul di daftar stok" "V == 1" \
   "$(api "$OWNER" GET /stok | jq --arg i "$B193" '[.[]|select(.ingredient_id==$i and .satuan_beli=="dus")]|length')"
 
 
+echo "== 194. Daftar stok membawa harga per SATUAN KERJA =="
+# Halaman Stok kini meringkas nilai rupiah stok (Σ saldo × harga). Ringkasan
+# itu hanya sebenar harga yang dikirim server, dan di sinilah letak jebakannya:
+# `harga_beli` disimpan per KEMASAN (Rp 120.000 per dus) sedangkan `saldo`
+# disimpan per SATUAN KERJA (pcs/gram). Mengirim `harga_beli` apa adanya
+# membuat SETIAP baris di layar meleset sebesar `isi` — 1000× untuk bahan
+# gram/kg — dan hasilnya tetap berupa angka rupiah yang tampak masuk akal.
+B194=$(api "$OWNER" GET /bahan | jq -r '[.[]|select(.track_stok==true and .isi>1)][0].id')
+cek "dasar §194: ada bahan berkemasan (isi>1) untuk diuji" "V == 1" \
+  "$(printf '%s' "$B194" | grep -Eqc '^[0-9a-f-]{36}$' && echo 1 || echo 0)"
+ISI194=$(api "$OWNER" GET /bahan | jq --arg i "$B194" '[.[]|select(.id==$i)][0].isi')
+HB194_ASAL=$(api "$OWNER" GET /bahan | jq --arg i "$B194" '[.[]|select(.id==$i)][0].harga_beli')
+cek "dasar §194: isi bahan uji memang > 1" "V > 1" "$ISI194"
+
+# Kuncinya WAJIB ada di tiap baris. Kunci yang hilang membuat `undefined`
+# masuk perkalian di layar → NaN, dan kartu ringkasan menuliskan "—" tanpa
+# menyebut bahan mana penyebabnya.
+STK194=$(api "$OWNER" GET /stok)
+# Dasar untuk dua asersi "tiap baris" di bawah: keduanya berbentuk
+# "tak ada baris yang melanggar", dan daftar KOSONG memenuhinya tanpa
+# memeriksa apa pun.
+cek "dasar §194: daftar stok tidak kosong" "V >= 5" "$(echo "$STK194" | jq 'length')"
+cek "tiap baris membawa kunci harga_per_unit" "V == 1" \
+  "$(echo "$STK194" | jq '[.[]|select(has("harga_per_unit")|not)]|length==0|if . then 1 else 0 end')"
+cek "harga_per_unit selalu bilangan tak-negatif" "V == 1" \
+  "$(echo "$STK194" | jq '[.[]|select((.harga_per_unit|type)!="number" or .harga_per_unit<0)]|length==0|if . then 1 else 0 end')"
+
+# Disetel LEWAT API, bukan mengandalkan angka seed yang kebetulan.
+api "$OWNER" PUT "/bahan/$B194" '{"harga_beli":120000}' > /dev/null
+HPU194=$(api "$OWNER" GET /stok | jq --arg i "$B194" '[.[]|select(.ingredient_id==$i)][0].harga_per_unit')
+cek "harga_per_unit = harga_beli / isi (120000 per kemasan)" "abs(V - 120000/$ISI194) < 1e-6" "$HPU194"
+# Pasangan anti-hijau-palsu: bahan berkemasan HARUS lebih murah per satuan
+# kerjanya daripada per kemasannya. Tanpa ini, server yang mengirim harga
+# kemasan apa adanya tetap lolos asersi mana pun yang cuma memeriksa "angka".
+cek "harga per satuan kerja LEBIH KECIL dari harga kemasan" "V == 1" \
+  "$(python3 -c "print(1 if $HPU194 < 120000 else 0)")"
+
+# Diubah lagi: kalau angkanya konstanta atau tersalin dari kolom lain, ia tak
+# akan ikut berubah — dan asersi di atas sendirian tak bisa membedakannya.
+api "$OWNER" PUT "/bahan/$B194" '{"harga_beli":60000}' > /dev/null
+HPU194B=$(api "$OWNER" GET /stok | jq --arg i "$B194" '[.[]|select(.ingredient_id==$i)][0].harga_per_unit')
+cek "harga_beli dipotong separuh → harga_per_unit ikut separuh" "abs(V - $HPU194/2) < 1e-6" "$HPU194B"
+
+# Nilai baris ini harus bisa dicocokkan dari DUA endpoint yang berbeda:
+# saldo dari /stok, harga_beli & isi dari /bahan. Kartu ringkasan mengalikan
+# keduanya, jadi kesepakatan di antara keduanya yang jadi syaratnya.
+SALDO194=$(api "$OWNER" GET /stok | jq --arg i "$B194" '[.[]|select(.ingredient_id==$i)][0].saldo')
+NILAI194=$(python3 -c "print($SALDO194 * $HPU194B)")
+cek "nilai baris = saldo × (harga_beli/isi) dari /bahan" "abs(V - $NILAI194) < 1e-6" \
+  "$(python3 -c "print($SALDO194 * 60000 / $ISI194)")"
+
+# Harga NOL tetap berupa angka 0, BUKAN null. Bedanya menentukan: halaman
+# mencacah bahan tak berharga supaya totalnya tak diam-diam kekurangan, dan
+# null yang lolos ke perkalian menghasilkan NaN alih-alih cacahan.
+api "$OWNER" PUT "/bahan/$B194" '{"harga_beli":0}' > /dev/null
+cek "harga_beli 0 → harga_per_unit 0 (bukan null)" "V == 1" \
+  "$(api "$OWNER" GET /stok | jq --arg i "$B194" '[.[]|select(.ingredient_id==$i)][0].harga_per_unit == 0|if . then 1 else 0 end')"
+
+# Dikembalikan ke harga asalnya: seksi ini menyentuh HPP setiap menu yang
+# memakai bahan ini, dan seksi yang ditambahkan kelak sesudahnya tak punya
+# cara tahu angkanya sudah digeser.
+api "$OWNER" PUT "/bahan/$B194" "{\"harga_beli\":$HB194_ASAL}" > /dev/null
+cek "harga_beli dikembalikan ke nilai asalnya" "abs(V - $HB194_ASAL/$ISI194) < 1e-6" \
+  "$(api "$OWNER" GET /stok | jq --arg i "$B194" '[.[]|select(.ingredient_id==$i)][0].harga_per_unit')"
+
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

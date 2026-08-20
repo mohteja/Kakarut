@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import type { KartuStokDto, MutasiJenis } from "@kakarut/shared";
-import { Card, PageTitle, Spinner, inputClass, tdClass, thClass } from "../../components/ui";
+import { Card, PageTitle, Spinner, StatCard, inputClass, tdClass, thClass } from "../../components/ui";
 import { api } from "../../lib/api";
 import {
   formatAngka,
@@ -26,28 +26,6 @@ const JENIS_BADGE: Record<MutasiJenis, { label: string; cls: string }> = {
 function tanggal30HariLalu(): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta" }).format(
     new Date(Date.now() - 29 * 24 * 3600 * 1000),
-  );
-}
-
-function StatCard({
-  label,
-  value,
-  warna = "text-stone-800",
-  rincian,
-}: {
-  label: string;
-  value: string;
-  warna?: string;
-  /** baris kecil di bawah angka — dipakai kartu Saldo Awal utk memperlihatkan
-   *  dari mana angkanya, supaya penjumlahan di layar bisa dicocokkan sendiri */
-  rincian?: string;
-}) {
-  return (
-    <Card className="p-4">
-      <div className="text-xs font-semibold uppercase tracking-wide text-stone-500">{label}</div>
-      <div className={`mt-1 text-xl font-bold ${warna}`}>{value}</div>
-      {rincian && <div className="mt-0.5 text-xs text-stone-500">{rincian}</div>}
-    </Card>
   );
 }
 
@@ -198,7 +176,7 @@ function IsiKartu({ kartu }: { kartu: KartuStokDto }) {
         <StatCard
           label={adaSetelan ? "Saldo Awal + Stok Awal" : "Saldo Awal"}
           value={fmt(adaSetelan ? dasarAwal : kartu.saldo_awal)}
-          rincian={
+          sub={
             adaSetelan
               ? `${fmt(kartu.saldo_awal)} lalu disetel Stok Awal ${dasarOpname > 0 ? "+" : "−"}${fmt(Math.abs(dasarOpname))}`
               : undefined

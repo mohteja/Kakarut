@@ -2,21 +2,11 @@ import { useQueries, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import type { LaporanHarian, LaporanPembelian, MenuLaris, StokRowDto } from "@kakarut/shared";
-import { Card, ErrorText, PageTitle, Spinner, StatusBadge, tdClass, thClass } from "../components/ui";
+import { Card, ErrorText, PageTitle, Spinner, StatCard, StatusBadge, tdClass, thClass } from "../components/ui";
 import { useAuth } from "../context/AuthContext";
 import { labelCabang, useBranch } from "../context/BranchContext";
 import { api } from "../lib/api";
 import { formatAngka, formatRupiah, formatTanggal, hariIniWIB } from "../lib/format";
-
-function StatCard({ label, value, sub, warna = "text-stone-800" }: { label: string; value: string; sub?: string; warna?: string }) {
-  return (
-    <Card className="p-4">
-      <div className="text-xs font-semibold uppercase tracking-wide text-stone-500">{label}</div>
-      <div className={`mt-1 text-2xl font-bold ${warna}`}>{value}</div>
-      {sub && <div className="mt-0.5 text-xs text-stone-400">{sub}</div>}
-    </Card>
-  );
-}
 
 /**
  * Kartu "perlu perhatian": jumlah + tautan ke halaman terkait; menyala bila
@@ -196,20 +186,20 @@ export function DashboardPage() {
           <div>
             <h2 className="mb-2 text-lg font-semibold text-stone-700">Hari ini</h2>
             <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-              <StatCard
+              <StatCard besar
                 label="Penjualan"
                 value={formatRupiah(jual.omzet)}
                 sub={`${jual.jumlah_transaksi} transaksi`}
                 warna="text-orange-600"
               />
-              <StatCard label="Belanja bahan" value={formatRupiah(beli.total_pengeluaran)} />
-              <StatCard
+              <StatCard besar label="Belanja bahan" value={formatRupiah(beli.total_pengeluaran)} />
+              <StatCard besar
                 label="Laba kotor (est.)"
                 value={formatRupiah(jual.estimasi_profit)}
                 sub="omzet − HPP terpakai"
                 warna={jual.estimasi_profit >= 0 ? "text-green-600" : "text-red-600"}
               />
-              <StatCard label="HPP terpakai" value={formatRupiah(jual.total_hpp)} />
+              <StatCard besar label="HPP terpakai" value={formatRupiah(jual.total_hpp)} />
             </div>
           </div>
 

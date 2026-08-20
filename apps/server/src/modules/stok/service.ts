@@ -1,5 +1,6 @@
 import { eq, sql } from "drizzle-orm";
 import {
+  hargaPerUnit,
   saldoStok,
   statusStok,
   type BahanFifoDto,
@@ -41,6 +42,7 @@ export async function hitungSaldoCabang(
       i.isi         AS isi,
       i.satuan      AS satuan,
       i.satuan_beli AS satuan_beli,
+      i.harga_beli  AS harga_beli,
       i.stok_minimum AS stok_minimum,
       i.stok_minimum_toko AS stok_minimum_toko,
       -- Tempat penyimpanan bahan: utamakan RAK YANG DI-ASSIGN (Tempat
@@ -193,6 +195,10 @@ export async function hitungSaldoCabang(
       isi: Number(row.isi),
       satuan: String(row.satuan),
       satuan_beli: row.satuan_beli != null ? String(row.satuan_beli) : null,
+      // Harga per SATUAN KERJA, bukan per kemasan: saldo disimpan dalam satuan
+      // kerja, jadi mengirim harga kemasan apa adanya membuat setiap perkalian
+      // di layar meleset sebesar `isi` — 1000× untuk bahan gram/kg.
+      harga_per_unit: hargaPerUnit(Number(row.harga_beli), Number(row.isi)),
       tempat: row.tempat != null ? String(row.tempat) : null,
       tempat_id: row.tempat_id != null ? String(row.tempat_id) : null,
       stok_awal: stokAwal,

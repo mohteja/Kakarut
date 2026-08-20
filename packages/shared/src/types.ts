@@ -830,6 +830,16 @@ export interface StokRowDto {
    * ribu apa — apalagi menghubungkannya dengan yang ia beli kemarin.
    */
   satuan_beli: string | null;
+  /**
+   * Harga beli TERKINI per satuan kerja (`harga_beli / isi`) — dasar penilaian
+   * rupiah stok di ringkasan halaman Stok.
+   *
+   * 0 berarti bahan ini belum punya harga beli, bukan berarti gratis. Bedanya
+   * penting: yang meringkas harus bisa MENCACAH bahan tak berharga, sebab
+   * mengalikannya diam-diam menghasilkan nol dan membuat total kekurangan
+   * tanpa jejak apa pun di layar.
+   */
+  harga_per_unit: number;
   /** tempat penyimpanan dari entri masuk terkonfirmasi terakhir */
   tempat: string | null;
   tempat_id: string | null;

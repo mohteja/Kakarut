@@ -6,6 +6,7 @@ export * from "./escpos";
 export * from "./hpp";
 export * from "./isi-menu";
 export * from "./ketersediaan";
+export * from "./nilai-stok";
 export * from "./pesanan";
 export * from "./prorata";
 export * from "./receipt";
