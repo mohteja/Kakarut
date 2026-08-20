@@ -9635,6 +9635,168 @@ cek "menu biasa masih AKTIF → tetap 409 (jalur lama tak berubah)" "V == 409" \
   "$(status_code "$OWNER" DELETE "/bahan/$BD")"
 
 
+echo "== 200. Shift yang melewati tengah malam: satu sesi, bukan dua hari =="
+# Alternasi masuk↔keluar dulu dikurung di dalam satu tanggal kalender. Sesi
+# hadirnya tidak. Terukur pada server sungguhan untuk satu shift tutup
+# (masuk 22:00 WIB, pulang 02:00 WIB), SEBELUM perbaikan:
+#
+#   cap 22:00 → masuk  (attend_date = hari-1)
+#   cap 02:00 → masuk  (attend_date = hari-0)   ← cap PULANG tercatat MASUK
+#   rekap: hadir=2, dua-duanya tanpa jam pulang
+#
+# dan sisi sebaliknya, pukul 00:30 saat orangnya masih di tengah shift:
+#
+#   POST /sync shift_buka → 400 "Absen masuk dulu sebelum buka kasir"
+#
+# Kasir yang sedang berdiri di kasirnya ditolak membuka laci. Kalau ia menurut
+# dan menekan "Absen Sekarang", capnya justru MENUTUP sesi yang sedang
+# berjalan — tuduhan yang menciptakan syaratnya sendiri, kelas cacat yang sama
+# dengan yang dicabut `gerbang-kasir-absen.test.ts` lewat pintu lain.
+uuid200() { cat /proc/sys/kernel/random/uuid; }
+TZ200=$(api "$OWNER" GET /company | jq -r '.timezone // "Asia/Jakarta"')
+CB200=$(api "$OWNER" GET /cabang | jq -r '[.[]|select(.tipe=="store")][0].id')
+
+# Tengah malam yang DIPAKAI: yang terakhir lewat, dan SELURUH cap seksi ini
+# sudah benar-benar di masa lalu. Cap terjauh ke depan adalah +10 jam (blok
+# "hari biasa" di bawah), jadi 11 jam yang jadi syaratnya — bukan 2 jam yang
+# hanya menampung cap pulang. Run yang jatuh pagi hari mundur satu hari;
+# batas umur sinkron 7 hari tetap aman.
+NOW200=$(date +%s)
+MID200=$(TZ="$TZ200" date -d 'today 00:00' +%s)
+if [ $((NOW200 - MID200)) -lt $((11 * 3600)) ]; then MID200=$((MID200 - 86400)); fi
+W200_MASUK=$(date -u -d "@$((MID200 - 2 * 3600))" +%Y-%m-%dT%H:%M:%SZ)   # 22:00 hari-1
+W200_TENGAH=$(date -u -d "@$((MID200 + 1800))" +%Y-%m-%dT%H:%M:%SZ)      # 00:30 hari-0
+W200_PULANG=$(date -u -d "@$((MID200 + 2 * 3600))" +%Y-%m-%dT%H:%M:%SZ)  # 02:00 hari-0
+HARI200_MASUK=$(TZ="$TZ200" date -d "@$((MID200 - 2 * 3600))" +%Y-%m-%d)
+HARI200_PULANG=$(TZ="$TZ200" date -d "@$((MID200 + 2 * 3600))" +%Y-%m-%d)
+cek "dasar §200: kedua cap memang jatuh di TANGGAL yang berbeda" "V == 1" \
+  "$([ "$HARI200_MASUK" != "$HARI200_PULANG" ] && echo 1 || echo 0)"
+cek "dasar §200: cap terjauh ke depan pun sudah lewat" "V == 1" \
+  "$([ $((MID200 + 10 * 3600)) -lt "$NOW200" ] && echo 1 || echo 0)"
+
+# Kasir baru khusus seksi ini: karyawan yang sudah dipakai seksi lain sudah
+# punya cap hari ini, dan cap itulah yang justru dilewati aturan lintas-hari.
+E200="malam200.$RANDOM@basooopa.id"
+api "$OWNER" POST /karyawan \
+  "{\"nama\":\"Kasir Malam 200\",\"email\":\"$E200\",\"password\":\"Malam200!\",\"role\":\"cashier\",\"branch_id\":\"$CB200\"}" > /dev/null
+K200=$(login "$E200" "Malam200!")
+cek "dasar §200: kasir malam bisa masuk" "V == 1" \
+  "$([ -n "$K200" ] && echo 1 || echo 0)"
+sync200() { # sync200 <tipe> <waktu> <payload-json>
+  api "$K200" POST /sync \
+    "$(jq -nc --arg r "$(uuid200)" --arg t "$1" --arg w "$2" --argjson p "$3" \
+        '{commands:[{client_ref:$r,tipe:$t,waktu:$w,payload:$p}]}')"
+}
+absen200() { sync200 absen_saya "$1" '{"foto_url":"https://example.com/malam.jpg"}'; }
+
+# ── Cap masuk 22:00: jalur lama, tak boleh bergeser ────────────────────────
+R200A=$(absen200 "$W200_MASUK")
+cek "cap 22:00 hari-1 → masuk" "V == 1" \
+  "$(echo "$R200A" | jq '(.hasil[0].status=="ok" and .hasil[0].data.tipe=="masuk")|if . then 1 else 0 end')"
+
+# ── INTI-1: gerbang buka kasir pukul 00:30, masih di tengah shift ──────────
+R200B=$(sync200 shift_buka "$W200_TENGAH" '{"modal_awal":100000}')
+cek "INTI: 00:30 masih di tengah shift → buka kasir DITERIMA" "V == 1" \
+  "$(echo "$R200B" | jq '(.hasil[0].status=="ok")|if . then 1 else 0 end')"
+# Anti-hijau-palsu: kalau gerbangnya memang jalan, ia harus MENOLAK orang yang
+# belum absen sama sekali. Tanpa pasangan ini, "diterima" di atas bisa berarti
+# gerbangnya mati, bukan gerbangnya benar.
+E200B="belum200.$RANDOM@basooopa.id"
+api "$OWNER" POST /karyawan \
+  "{\"nama\":\"Kasir Belum 200\",\"email\":\"$E200B\",\"password\":\"Belum200!\",\"role\":\"cashier\",\"branch_id\":\"$CB200\"}" > /dev/null
+K200B=$(login "$E200B" "Belum200!")
+R200BB=$(api "$K200B" POST /sync \
+  "$(jq -nc --arg r "$(uuid200)" --arg w "$W200_TENGAH" \
+      '{commands:[{client_ref:$r,tipe:"shift_buka",waktu:$w,payload:{modal_awal:100000}}]}')")
+cek "pasangan: kasir yang BELUM absen sama sekali tetap ditolak" "V == 1" \
+  "$(echo "$R200BB" | jq '(.hasil[0].status=="gagal" and ((.hasil[0].error // "")|test("Absen masuk dulu")))|if . then 1 else 0 end')"
+
+# ── INTI-2: cap pulang 02:00 di tanggal berikutnya ─────────────────────────
+R200C=$(absen200 "$W200_PULANG")
+cek "INTI: cap 02:00 hari-0 → KELUAR, bukan masuk kedua" "V == 1" \
+  "$(echo "$R200C" | jq '(.hasil[0].status=="ok" and .hasil[0].data.tipe=="keluar")|if . then 1 else 0 end')"
+
+# ── INTI-3: rekap — satu shift = satu baris, dengan jam pulangnya ──────────
+BLN200=$(TZ="$TZ200" date -d "@$((MID200 - 2 * 3600))" +%Y-%m)
+REKAP200=$(api "$OWNER" GET "/absensi/rekap?bulan=$BLN200&branch_id=$CB200")
+BARIS200=$(echo "$REKAP200" | jq --arg n "Kasir Malam 200" '[.rows[]|select(.nama==$n)][0]')
+cek "dasar §200: baris kasir malam ada di rekap" "V == 1" \
+  "$(echo "$BARIS200" | jq 'if .==null then 0 else 1 end')"
+cek "INTI: hadir = 1 (satu shift, bukan dua hari)" "V == 1" \
+  "$(echo "$BARIS200" | jq '.hadir')"
+cek "hari masuknya berstatus hadir" "V == 1" \
+  "$(echo "$BARIS200" | jq --arg d "$HARI200_MASUK" '[.harian[]|select(.tanggal==$d)][0].status=="hadir"|if . then 1 else 0 end')"
+cek "INTI: baris itu punya jam masuk DAN jam pulang" "V == 1" \
+  "$(echo "$BARIS200" | jq --arg d "$HARI200_MASUK" '[.harian[]|select(.tanggal==$d)][0]|((.masuk!=null) and (.keluar!=null))|if . then 1 else 0 end')"
+cek "jam pulangnya memang cap 02:00 itu" "V == 1" \
+  "$(echo "$BARIS200" | jq --arg d "$HARI200_MASUK" --arg w "$W200_PULANG" \
+      '[.harian[]|select(.tanggal==$d)][0].keluar as $k | ($k|sub("\\.000Z$";"Z"))==$w|if . then 1 else 0 end')"
+# Tanggal berikutnya TIDAK ikut terhitung hadir — orangnya tak memulai shift di
+# hari itu. Ini pergeseran yang disengaja, jadi dipatok eksplisit: sebelum
+# perbaikan hari ini berstatus "hadir" berkat cap pulang yang salah tipe.
+# `// {}`: bila blok ini mundur satu hari dan tanggal pulangnya jatuh di bulan
+# berikutnya, ia memang tak ada di rekap bulan ini — dan "tak ada" juga bukan
+# hadir. Tanpa itu jq galat dan asersinya gagal karena kalender.
+cek "INTI: tanggal berikutnya BUKAN hadir" "V == 1" \
+  "$(echo "$BARIS200" | jq --arg d "$HARI200_PULANG" '(([.harian[]|select(.tanggal==$d)][0]) // {}).status!="hadir"|if . then 1 else 0 end')"
+
+# ── Status hadir: satu sumber untuk layar dan untuk gerbang ────────────────
+cek "GET /absensi/status: sesudah cap pulang, TIDAK hadir lagi" "V == 1" \
+  "$(api "$K200" GET "/absensi/status?branch_id=$CB200" | jq '.hadir==false|if . then 1 else 0 end')"
+cek "daftar absensi hari cap masuk memuat kedua capnya" "V == 1" \
+  "$(api "$OWNER" GET "/absensi?branch_id=$CB200&tanggal=$HARI200_MASUK" \
+      | jq --arg n "Kasir Malam 200" '[.[]|select(.nama==$n)][0]|((.masuk!=null) and (.keluar!=null))|if . then 1 else 0 end')"
+
+# ── Batas: masuk yang lupa ditutup TIDAK boleh menelan cap besok pagi ──────
+# Kalau batas 12 jam ini hilang, cap masuk pagi hari orang yang kemarin lupa
+# absen pulang akan berubah jadi cap PULANG — orang yang baru datang tercatat
+# baru saja pulang, dan gerbang kasirnya langsung terkunci.
+E200C="lupa200.$RANDOM@basooopa.id"
+api "$OWNER" POST /karyawan \
+  "{\"nama\":\"Kasir Lupa 200\",\"email\":\"$E200C\",\"password\":\"Lupa200!\",\"role\":\"cashier\",\"branch_id\":\"$CB200\"}" > /dev/null
+K200C=$(login "$E200C" "Lupa200!")
+W200_LUPA=$(date -u -d "@$((MID200 - 10 * 3600))" +%Y-%m-%dT%H:%M:%SZ)   # 14:00 hari-1
+W200_PAGI=$(date -u -d "@$((MID200 + 7 * 3600))" +%Y-%m-%dT%H:%M:%SZ)    # 07:00 hari-0
+cek "dasar: jarak dua cap yang BENAR-BENAR dikirim > 12 jam" "V > 43200" \
+  "$(($(date -u -d "$W200_PAGI" +%s) - $(date -u -d "$W200_LUPA" +%s)))"
+cek "dasar: cap masuk kemarin siang tercatat" "V == 1" \
+  "$(api "$K200C" POST /sync \
+      "$(jq -nc --arg r "$(uuid200)" --arg w "$W200_LUPA" \
+          '{commands:[{client_ref:$r,tipe:"absen_saya",waktu:$w,payload:{foto_url:"https://example.com/lupa.jpg"}}]}')" \
+      | jq '(.hasil[0].data.tipe=="masuk")|if . then 1 else 0 end')"
+cek "INTI: cap pagi 17 jam kemudian tetap MASUK, bukan pulang" "V == 1" \
+  "$(api "$K200C" POST /sync \
+      "$(jq -nc --arg r "$(uuid200)" --arg w "$W200_PAGI" \
+          '{commands:[{client_ref:$r,tipe:"absen_saya",waktu:$w,payload:{foto_url:"https://example.com/pagi.jpg"}}]}')" \
+      | jq '(.hasil[0].data.tipe=="masuk")|if . then 1 else 0 end')"
+# …dan cap kemarin TIDAK ikut dirapikan diam-diam: hari yang lupa ditutup tetap
+# tampil tanpa jam pulang. Perbaikan ini menentukan tipe cap BARU, bukan menulis
+# ulang riwayat — kalau ia sampai memasangkan keduanya, jam kerja kemarin
+# berubah jadi 17 jam tanpa ada yang menyentuh apa pun.
+cek "…dan hari kemarin tetap tanpa jam pulang (riwayat tak ditulis ulang)" "V == 1" \
+  "$(api "$OWNER" GET "/absensi/rekap?bulan=$BLN200&branch_id=$CB200" \
+      | jq --arg n "Kasir Lupa 200" --arg d "$HARI200_MASUK" \
+        '[.rows[]|select(.nama==$n)][0].harian|[.[]|select(.tanggal==$d)][0]|((.status=="hadir") and (.masuk!=null) and (.keluar==null))|if . then 1 else 0 end')"
+
+# ── Batas: dua cap di HARI yang sama tetap berselang-seling ────────────────
+E200D="siang200.$RANDOM@basooopa.id"
+api "$OWNER" POST /karyawan \
+  "{\"nama\":\"Kasir Siang 200\",\"email\":\"$E200D\",\"password\":\"Siang200!\",\"role\":\"cashier\",\"branch_id\":\"$CB200\"}" > /dev/null
+K200D=$(login "$E200D" "Siang200!")
+siang200() { # siang200 <offset-detik-dari-tengah-malam>
+  api "$K200D" POST /sync \
+    "$(jq -nc --arg r "$(uuid200)" --arg w "$(date -u -d "@$((MID200 + $1))" +%Y-%m-%dT%H:%M:%SZ)" \
+        '{commands:[{client_ref:$r,tipe:"absen_saya",waktu:$w,payload:{foto_url:"https://example.com/siang.jpg"}}]}')" \
+    | jq -r '.hasil[0].data.tipe // .hasil[0].error'
+}
+cek "hari biasa: cap pertama masuk" "V == 1" \
+  "$([ "$(siang200 $((8 * 3600)))" = "masuk" ] && echo 1 || echo 0)"
+cek "hari biasa: cap kedua keluar" "V == 1" \
+  "$([ "$(siang200 $((9 * 3600)))" = "keluar" ] && echo 1 || echo 0)"
+cek "hari biasa: cap ketiga masuk lagi (re-entry, jalur lama utuh)" "V == 1" \
+  "$([ "$(siang200 $((10 * 3600)))" = "masuk" ] && echo 1 || echo 0)"
+
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

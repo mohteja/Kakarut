@@ -2,7 +2,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type {
-  AbsensiRow,
   MejaDto,
   MemberCariRow,
   MenuDto,
@@ -12,6 +11,7 @@ import type {
   OpenBillRow,
   PesananStatus,
   Shift,
+  StatusHadirDto,
 } from "@kakarut/shared";
 import { angkaDari, hitungPb1 } from "@kakarut/shared";
 import {
@@ -184,21 +184,26 @@ export function KasirPage() {
     refetchInterval: 30_000,
   });
   const kasirTutup = isKasir && shiftAktif === null;
-  // Absensi hari ini di cabang — untuk cek apakah kasir sudah absen masuk
-  // (syarat buka kasir). Cukup diambil saat gerbang muncul.
-  const { data: absensiHariIni = [], error: gagalAbsensi } = useQuery({
-    queryKey: ["absensi", branchQuery],
-    queryFn: () => api<AbsensiRow[]>(`/absensi${branchQuery}`),
+  // Sudah absen masuk & belum absen pulang → boleh buka kasir. Cukup diambil
+  // saat gerbang muncul.
+  //
+  // Ditanyakan ke `/absensi/status`, BUKAN disimpulkan dari daftar absensi
+  // harian. Daftar itu dikurung satu tanggal kalender; sesi hadir tidak. Kasir
+  // shift malam pada pukul 00:30 tak punya baris di daftar hari ini — cap
+  // masuknya bertanggal kemarin — jadi menyimpulkannya dari sana melahirkan
+  // "belum absen" untuk orang yang sedang berdiri di kasirnya, lalu menyodorkan
+  // tombol yang mencatatkan cap KELUAR. Server punya jawabannya lewat aturan
+  // yang sama dengan gerbangnya sendiri; tanyakan itu saja.
+  const { data: statusAbsen, error: gagalAbsensi } = useQuery({
+    queryKey: ["absensi-status", branchQuery],
+    queryFn: () => api<StatusHadirDto>(`/absensi/status${branchQuery}`),
     enabled: kasirTutup,
   });
-  // Sudah absen masuk & belum absen keluar hari ini → boleh buka kasir.
-  //
-  // `= []` di sini TIDAK boleh dibaca sebagai "belum absen" — lihat gerbangnya
-  // di bawah. Bandingkan dengan `shiftAktif === null` beberapa baris di atas:
-  // yang itu sengaja ketat supaya bacaan gagal tak mengunci kasir; yang ini
-  // dulu longgar, dan longgarnya mengarang tuduhan.
-  const absenSaya = absensiHariIni.find((r) => r.user_id === auth?.user.sub);
-  const sudahAbsen = !!(absenSaya?.masuk && !absenSaya?.keluar);
+  // Bacaan yang GAGAL tidak boleh terbaca "belum absen" — lihat gerbangnya di
+  // bawah. Bandingkan dengan `shiftAktif === null` beberapa baris di atas: yang
+  // itu sengaja ketat supaya bacaan gagal tak mengunci kasir; yang ini dulu
+  // longgar, dan longgarnya mengarang tuduhan.
+  const sudahAbsen = statusAbsen?.hadir === true;
   const [modalAwalGate, setModalAwalGate] = useState("");
 
   const [aktifKategori, setAktifKategori] = useState<string | null>(null);
@@ -1623,16 +1628,22 @@ export function KasirPage() {
               Transaksi belum bisa dilakukan. Buka kasir dulu untuk mulai berjualan.
             </p>
 
-            {/* Syarat: kasir harus sudah absen masuk hari ini.
-                TIGA keadaan, bukan dua. `data: absensiHariIni = []` membuat
-                bacaan yang DITOLAK terbaca sebagai "belum absen" — dan itu
-                bukan sekadar label keliru: kotak amber di bawah menyuruh
-                menekan "Absen Sekarang", sedangkan cap absen BERGANTIAN
-                (`absenTipeBerikutnya`: sesudah `masuk` yang berikutnya
-                `keluar`). Kasir yang SUDAH absen lalu menurut akan mencap
-                KELUAR — dan sejak itu `sedangHadir` benar-benar false, jadi
-                `POST /shift/buka` menolaknya sungguhan dengan pesan yang tadi
-                cuma karangan. Tuduhannya menciptakan syaratnya sendiri. */}
+            {/* Syarat: kasir harus sudah absen masuk.
+                TIGA keadaan, bukan dua — dan yang ketiga bukan kemewahan.
+                Kotak amber di bawah menyuruh menekan "Absen Sekarang",
+                sedangkan cap absen BERGANTIAN (`absenTipeBerikutnya`: sesudah
+                `masuk` yang berikutnya `keluar`). Kasir yang SUDAH absen lalu
+                menurut akan mencap KELUAR — dan sejak itu `sedangHadir`
+                benar-benar false, jadi `POST /shift/buka` menolaknya sungguhan
+                dengan pesan yang tadi cuma karangan. Tuduhannya menciptakan
+                syaratnya sendiri.
+
+                Karena itu tuduhan ini hanya boleh muncul dari JAWABAN, bukan
+                dari ketiadaan data. Dulu ia disimpulkan dari daftar absensi
+                hari ini (`= []` → "belum absen"), yang keliru untuk dua sebab
+                berbeda: bacaan yang ditolak, dan kasir shift malam yang cap
+                masuknya bertanggal kemarin. Sekarang `/absensi/status` yang
+                menjawab, memakai aturan yang sama dengan gerbangnya. */}
             {gagalAbsensi ? (
               <div className="mb-3 rounded-lg border border-stone-300 bg-stone-50 px-3 py-2.5">
                 <div className="text-sm font-semibold text-stone-700">

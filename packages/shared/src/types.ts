@@ -2142,6 +2142,16 @@ export interface AbsenResult {
   foto_url: string | null;
 }
 
+/**
+ * Jawaban `GET /absensi/status` — apakah PEMANGGIL sedang hadir di cabangnya
+ * (sudah cap masuk, belum cap pulang). Sengaja terpisah dari `AbsensiRow`:
+ * daftar itu dikurung satu tanggal kalender, sedangkan sesi hadir bisa
+ * melewati tengah malam. Ini sumber yang sama dengan gerbang buka-kasir.
+ */
+export interface StatusHadirDto {
+  hadir: boolean;
+}
+
 /** Ringkasan absensi seorang karyawan pada satu hari (daftar di halaman Absen). */
 export interface AbsensiRow {
   user_id: string;
