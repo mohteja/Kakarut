@@ -10064,6 +10064,135 @@ cek "hari biasa: cap ketiga masuk lagi (re-entry, jalur lama utuh)" "V == 1" \
   "$([ "$(siang200 $((10 * 3600)))" = "masuk" ] && echo 1 || echo 0)"
 
 
+echo "== 201. Jendela hitung rekap berlaku untuk cuti/libur juga, bukan cuma alpa =="
+# Layar rekap sudah mencetak kontraknya untuk pembacanya: "Tanggal yang belum
+# lewat, sebelum karyawan bergabung, dan setelah ia keluar TIDAK PERNAH
+# DIHITUNG." Dulu hanya cabang `alpa` yang menurutinya; cabang izin dilewati
+# sebelum jendelanya sempat diperiksa, jadi janji itu dilanggar di ketiga
+# arahnya sekaligus.
+#
+# Terukur pada server sungguhan — bergabung 08-08, cuti 08-12..08-17 disetujui,
+# lalu KELUAR 08-14:
+#
+#   alpa = 4   → berhenti di hari kerja terakhirnya (benar)
+#   cuti = 6   → termasuk 08-15, 08-16, 08-17
+#
+# Tiga hari cuti berbayar untuk orang yang sudah tidak bekerja di sana, di baris
+# yang justru dibaca pemilik untuk menghitung gaji.
+#
+# ARAH "SESUDAH KELUAR" TIDAK BISA DIUJI DI SINI, dan itu perlu dikatakan
+# terang-terangan: `PATCH /karyawan/:id {"arsip":true}` selalu menstempel SAAT
+# INI, sedangkan tanggal sesudah saat ini sudah tersaring `batasHitung` — jadi
+# lewat HTTP kedua sebabnya tak bisa dibedakan. Arah itu butuh jam berjalan
+# (diarsipkan tanggal 14, dibaca tanggal 20), dan dijaga `rekap-jendela-izin.test.ts`
+# yang menjalankan aturannya langsung. Dua arah lain di bawah memakai gerbang
+# yang SAMA PERSIS, jadi keduanya merah bila gerbang itu dilepas.
+TZ201=$(api "$OWNER" GET /company | jq -r '.timezone // "Asia/Jakarta"')
+CB201=$(api "$OWNER" GET /cabang | jq -r '[.[]|select(.tipe=="store")][0].id')
+HARI201=$(TZ="$TZ201" date +%Y-%m-%d)
+BLN201=$(TZ="$TZ201" date +%Y-%m)
+AWAL201="$BLN201-01"
+AKHIR201=$(TZ="$TZ201" date -d "$AWAL201 +1 month -1 day" +%Y-%m-%d)
+
+E201="jendela201.$RANDOM@basooopa.id"
+N201="Jendela Izin 201"
+api "$OWNER" POST /karyawan \
+  "{\"nama\":\"$N201\",\"email\":\"$E201\",\"password\":\"Jendela201!\",\"role\":\"tim\",\"branch_id\":\"$CB201\"}" > /dev/null
+K201=$(login "$E201" "Jendela201!")
+cek "dasar §201: karyawan baru (bergabung HARI INI) bisa masuk" "V == 1" \
+  "$([ -n "$K201" ] && echo 1 || echo 0)"
+
+baris201() {
+  api "$OWNER" GET "/absensi/rekap?bulan=$BLN201&branch_id=$CB201" \
+    | jq --arg n "$N201" '[.rows[]|select(.nama==$n)][0]'
+}
+status201() { # status201 <baris-json> <tanggal>
+  echo "$1" | jq -r --arg d "$2" '(([.harian[]|select(.tanggal==$d)][0]) // {}).status // "TIDAK-ADA"'
+}
+acc201() { # acc201 <kategori> <mulai> <selesai> → id, langsung disetujui
+  local id
+  id=$(api "$K201" POST /pengajuan \
+    "{\"kategori\":\"$1\",\"tanggal_mulai\":\"$2\",\"tanggal_selesai\":\"$3\"}" | jq -r '.id // empty')
+  [ -n "$id" ] && api "$OWNER" PATCH "/pengajuan/$id" '{"status":"disetujui"}' > /dev/null
+  printf '%s' "$id"
+}
+
+# ── Kendali: cuti pada hari yang MEMANG di dalam jendela tetap terhitung ────
+# Tanpa pasangan ini, "kosong" di bawah bisa berarti cutinya tak pernah tersimpan
+# — perbaikan yang menghapus semua cuti akan terlihat sama hijaunya.
+ID201A=$(acc201 tahunan "$HARI201" "$HARI201")
+cek "dasar §201: pengajuan hari ini dibuat & disetujui" "V == 1" \
+  "$([ -n "$ID201A" ] && echo 1 || echo 0)"
+B201=$(baris201)
+cek "kendali: cuti HARI INI (di dalam jendela) terhitung" "V == 1" \
+  "$(echo "$B201" | jq '.cuti')"
+cek "kendali: hari ini berstatus cuti" "V == 1" \
+  "$([ "$(status201 "$B201" "$HARI201")" = "cuti" ] && echo 1 || echo 0)"
+
+# ── Arah 1: cuti untuk tanggal SEBELUM ia bergabung ────────────────────────
+ARAH201=0
+if [ "$HARI201" \> "$AWAL201" ]; then
+  ARAH201=$((ARAH201 + 1))
+  SEB201=$(TZ="$TZ201" date -d "$HARI201 -1 day" +%Y-%m-%d)
+  MUL201=$(TZ="$TZ201" date -d "$HARI201 -3 days" +%Y-%m-%d)
+  [ "$MUL201" \< "$AWAL201" ] && MUL201="$AWAL201"
+  ID201B=$(acc201 sakit "$MUL201" "$SEB201")
+  cek "dasar: pengajuan tanggal lampau diterima server" "V == 1" \
+    "$([ -n "$ID201B" ] && echo 1 || echo 0)"
+  B201=$(baris201)
+  cek "INTI: cuti SEBELUM ia bergabung → kosong, bukan cuti" "V == 1" \
+    "$([ "$(status201 "$B201" "$SEB201")" = "kosong" ] && echo 1 || echo 0)"
+  cek "INTI: dan tidak menambah penghitung cuti (tetap 1)" "V == 1" \
+    "$(echo "$B201" | jq '.cuti')"
+fi
+
+# ── Arah 2: libur untuk tanggal yang BELUM LEWAT ───────────────────────────
+if [ "$HARI201" \< "$AKHIR201" ]; then
+  ARAH201=$((ARAH201 + 1))
+  BSK201=$(TZ="$TZ201" date -d "$HARI201 +1 day" +%Y-%m-%d)
+  ID201C=$(acc201 mingguan "$BSK201" "$BSK201")
+  cek "dasar: pengajuan libur besok diterima & jenisnya 'libur'" "V == 1" \
+    "$([ -n "$ID201C" ] && echo 1 || echo 0)"
+  B201=$(baris201)
+  cek "INTI: libur yang BELUM LEWAT → kosong, bukan libur" "V == 1" \
+    "$([ "$(status201 "$B201" "$BSK201")" = "kosong" ] && echo 1 || echo 0)"
+  cek "INTI: penghitung libur tetap 0" "V == 0" "$(echo "$B201" | jq '.libur')"
+fi
+
+cek "dasar §201: setidaknya satu arah benar-benar diuji hari ini" "V >= 1" "$ARAH201"
+
+# ── Penghitung wajib sama dengan hariannya — itu yang membuat angkanya bisa
+#    diperiksa sendiri oleh pembacanya. ───────────────────────────────────────
+B201=$(baris201)
+cek "penghitung cuti = jumlah hari bercap cuti" "V == 1" \
+  "$(echo "$B201" | jq '(.cuti == ([.harian[]|select(.status=="cuti")]|length))|if . then 1 else 0 end')"
+cek "penghitung libur = jumlah hari bercap libur" "V == 1" \
+  "$(echo "$B201" | jq '(.libur == ([.harian[]|select(.status=="libur")]|length))|if . then 1 else 0 end')"
+cek "penghitung alpa = jumlah hari bercap alpa" "V == 1" \
+  "$(echo "$B201" | jq '(.tidak_hadir == ([.harian[]|select(.status=="alpa")]|length))|if . then 1 else 0 end')"
+cek "penghitung hadir = jumlah hari bercap hadir" "V == 1" \
+  "$(echo "$B201" | jq '(.hadir == ([.harian[]|select(.status=="hadir")]|length))|if . then 1 else 0 end')"
+
+# ── Jalur lama utuh: cap absen MENANG atas cuti pada hari yang sama ─────────
+# Perbaikan ini menyisipkan gerbang tepat sebelum cabang izin; kalau urutannya
+# ikut bergeser, hari yang benar-benar bekerja bisa berubah jadi cuti.
+E201D="hadircuti201.$RANDOM@basooopa.id"
+N201D="Hadir Tapi Cuti 201"
+api "$OWNER" POST /karyawan \
+  "{\"nama\":\"$N201D\",\"email\":\"$E201D\",\"password\":\"HadirCuti201!\",\"role\":\"tim\",\"branch_id\":\"$CB201\"}" > /dev/null
+K201D=$(login "$E201D" "HadirCuti201!")
+api "$K201D" POST /absensi/saya '{"foto_url":"https://example.com/201.jpg"}' > /dev/null
+ID201D=$(api "$K201D" POST /pengajuan \
+  "{\"kategori\":\"sakit\",\"tanggal_mulai\":\"$HARI201\",\"tanggal_selesai\":\"$HARI201\"}" | jq -r '.id // empty')
+api "$OWNER" PATCH "/pengajuan/$ID201D" '{"status":"disetujui"}' > /dev/null
+B201D=$(api "$OWNER" GET "/absensi/rekap?bulan=$BLN201&branch_id=$CB201" \
+  | jq --arg n "$N201D" '[.rows[]|select(.nama==$n)][0]')
+cek "sudah absen + cuti disetujui hari yang sama → tetap HADIR" "V == 1" \
+  "$(echo "$B201D" | jq --arg d "$HARI201" '[.harian[]|select(.tanggal==$d)][0].status=="hadir"|if . then 1 else 0 end')"
+cek "…dan tidak dihitung dua kali (hadir=1, cuti=0)" "V == 1" \
+  "$(echo "$B201D" | jq '((.hadir==1) and (.cuti==0))|if . then 1 else 0 end')"
+
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

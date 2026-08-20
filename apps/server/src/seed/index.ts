@@ -121,6 +121,23 @@ const tanggalHariIni = (tz: string) =>
   new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(new Date());
 
 /**
+ * Sejak kapan karyawan demo dianggap bergabung.
+ *
+ * Bawaan `memberships.created_at` adalah SAAT INI, jadi database yang baru
+ * di-seed berisi perusahaan yang seluruh stafnya "bergabung hari ini". Rekap
+ * absen menghitung tiap orang hanya sejak tanggal bergabungnya, jadi seluruh
+ * layar Rekap Absen memuat tepat SATU hari yang bisa dinilai — sisanya
+ * titik-titik — dan cuti yang di-ACC untuk tanggal mana pun sebelum hari ini
+ * jatuh di luar jendela hitung mereka. Buruk sebagai demo, dan sebagai fikstur
+ * uji ia membuat asersi rekap hijau/merah karena kalender, bukan karena kode.
+ *
+ * 90 hari cukup untuk menutupi bulan berjalan beserta dua bulan sebelumnya —
+ * rentang yang bisa dipilih pemilih bulan di layar rekap.
+ */
+const HARI_BERGABUNG_DEMO = 90;
+const bergabungDemo = () => new Date(Date.now() - HARI_BERGABUNG_DEMO * 86_400_000);
+
+/**
  * Satuan isi/gramasi per bahan (klasifikasi awal, bisa diedit per bahan):
  * butir = item baso; porsi = racikan per-porsi; ml/gr = cairan/berat;
  * sisanya pcs.
@@ -261,7 +278,7 @@ async function main() {
       .returning();
     await tx
       .insert(memberships)
-      .values({ userId: owner.id, companyId: company.id, role: "owner" })
+      .values({ userId: owner.id, companyId: company.id, role: "owner", createdAt: bergabungDemo() })
       .onConflictDoUpdate({
         target: [memberships.userId, memberships.companyId],
         set: { role: "owner" },
@@ -289,6 +306,7 @@ async function main() {
         companyId: company.id,
         role: "cashier",
         branchId: branch.id,
+        createdAt: bergabungDemo(),
       })
       .onConflictDoUpdate({
         target: [memberships.userId, memberships.companyId],

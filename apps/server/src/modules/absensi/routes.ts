@@ -272,6 +272,57 @@ export async function sedangHadir(
 }
 
 /**
+ * Nilai SATU tanggal pada rekap seorang karyawan.
+ *
+ * `jendela` adalah rentang yang boleh dihitung untuk orang itu: sejak ia
+ * bergabung sampai ia keluar, dan tidak pernah melewati hari yang sudah lewat.
+ * `akhir` null = bulannya belum dimulai sama sekali.
+ *
+ * JENDELA ITU BERLAKU UNTUK CUTI/LIBUR JUGA, bukan cuma alpa.
+ *
+ * Layar rekap sudah mencetak kontraknya untuk pembacanya: "Tanggal yang belum
+ * lewat, sebelum karyawan bergabung, dan setelah ia keluar TIDAK PERNAH
+ * DIHITUNG." Dulu hanya cabang `alpa` yang menurutinya; cabang izin dilewati
+ * sebelum jendelanya sempat diperiksa, jadi janji itu dilanggar di ketiga
+ * arahnya sekaligus.
+ *
+ * Terukur pada server sungguhan — bergabung 08-08, cuti 08-12..08-17 disetujui,
+ * lalu KELUAR 08-14:
+ *
+ *   alpa = 4   → berhenti di hari kerja terakhirnya (benar)
+ *   cuti = 6   → termasuk 08-15, 08-16, 08-17
+ *
+ * Tiga hari cuti berbayar untuk orang yang sudah tidak bekerja di sana, di baris
+ * yang justru dibaca pemilik untuk menghitung gaji — dan barisnya memanjang
+ * melewati tanggal keluarnya, jadi ia terlihat seperti masih karyawan. Sisi
+ * sebaliknya sama: cuti yang di-ACC untuk tanggal SEBELUM ia bergabung ikut
+ * terhitung.
+ *
+ * Cap absen sengaja TIDAK ikut dijendelai: ia fakta sejarah — kalau capnya ada,
+ * orangnya memang di sana. Membuangnya akan menyembunyikan kehadiran yang
+ * sungguh terjadi, bukan merapikan hitungan.
+ */
+export function nilaiHariRekap(
+  tanggal: string,
+  cap: { masuk: string | null; keluar: string | null } | undefined,
+  izin: { jenis: "cuti" | "libur"; kategori: PengajuanKategori } | undefined,
+  jendela: { mulai: string; akhir: string | null },
+): RekapAbsenHari {
+  if (cap) {
+    return { tanggal, status: "hadir", kategori: null, masuk: cap.masuk, keluar: cap.keluar };
+  }
+  const dalamJendela =
+    jendela.akhir !== null && tanggal >= jendela.mulai && tanggal <= jendela.akhir;
+  if (!dalamJendela) {
+    return { tanggal, status: "kosong", kategori: null, masuk: null, keluar: null };
+  }
+  if (izin) {
+    return { tanggal, status: izin.jenis, kategori: izin.kategori, masuk: null, keluar: null };
+  }
+  return { tanggal, status: "alpa", kategori: null, masuk: null, keluar: null };
+}
+
+/**
  * Absensi karyawan. Dua jalur:
  *  - POST /       : STASIUN pindai — admin/kasir memindai QR / ketik kode
  *    karyawan; baris dicatat atas nama pemilik kode, bukan operator.
@@ -652,30 +703,15 @@ export const absensiRoutes = new Hono<AppEnv>()
       let libur = 0;
       const harian: RekapAbsenHari[] = semuaTanggal.map((tanggal) => {
         const kunci = `${k.user_id}|${tanggal}`;
-        const c1 = petaCap.get(kunci);
-        if (c1) {
-          hadir++;
-          return { tanggal, status: "hadir", kategori: null, masuk: c1.masuk, keluar: c1.keluar };
-        }
-        const i1 = petaIzin.get(kunci);
-        if (i1) {
-          if (i1.jenis === "cuti") cuti++;
-          else libur++;
-          return {
-            tanggal,
-            status: i1.jenis,
-            kategori: i1.kategori,
-            masuk: null,
-            keluar: null,
-          };
-        }
-        const dalamJendela =
-          akhirHitung !== null && tanggal >= mulaiHitung && tanggal <= akhirHitung;
-        if (dalamJendela) {
-          alpa++;
-          return { tanggal, status: "alpa", kategori: null, masuk: null, keluar: null };
-        }
-        return { tanggal, status: "kosong", kategori: null, masuk: null, keluar: null };
+        const hari = nilaiHariRekap(tanggal, petaCap.get(kunci), petaIzin.get(kunci), {
+          mulai: mulaiHitung,
+          akhir: akhirHitung,
+        });
+        if (hari.status === "hadir") hadir++;
+        else if (hari.status === "cuti") cuti++;
+        else if (hari.status === "libur") libur++;
+        else if (hari.status === "alpa") alpa++;
+        return hari;
       });
 
       return {
