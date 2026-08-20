@@ -74,4 +74,21 @@ describe("empat pintu, dua keluarga, satu fungsi", () => {
     const opname = SERVICE.slice(i, SERVICE.indexOf("\nexport ", i + 10));
     expect(opname).toMatch(/saldoDiRakPerlengkapan\(tx,/);
   });
+
+  it("pintu KELIMA (potongan otomatis) — yang berjalan tanpa ada yang menekan", () => {
+    /*
+     * Yang paling tajam dari keluarganya: `terapkanKonsumsiOtomatis` berjalan
+     * sendiri setiap kali daftar perlengkapan dibuka. Niat kodenya sudah benar
+     * (`if (sisa <= 0) break` = "jangan memakai yang tidak ada"); yang dijaga
+     * di sini cuma bahwa ukurannya angka RAK.
+     */
+    const SERVICE = baca("../src/modules/perlengkapan/service.ts");
+    const i = SERVICE.indexOf("export async function terapkanKonsumsiOtomatis");
+    expect(i, "terapkanKonsumsiOtomatis tak ditemukan").toBeGreaterThan(0);
+    const auto = SERVICE.slice(i, SERVICE.indexOf("\nexport ", i + 10));
+    expect(auto).toMatch(/saldoDiRakPerlengkapan\(tx, companyId, r\.branchId, \[r\.supplyId\]\)/);
+    expect(auto).toMatch(/let sisa = sisaRak;/);
+    // Penjaganya harus TETAP ada — ini pengetatan, bukan pelonggaran.
+    expect(auto).toMatch(/if \(sisa <= 0\) break;/);
+  });
 });

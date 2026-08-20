@@ -10549,6 +10549,71 @@ cek "pasangan: dan permintaan 7 itu BERHASIL" "V == 201" \
 cek "pasangan: sesudah itu tak ada sisa yang dijanjikan" "V == 0" "$(ck205 "$TC205")"
 
 
+echo "== 206. Pemakaian OTOMATIS tak memakan barang yang sudah berangkat =="
+# Pintu kelima, dan yang paling tajam dari seluruh keluarganya: TAK ADA yang
+# menekan apa pun. `terapkanKonsumsiOtomatis` berjalan sendiri setiap kali
+# daftar perlengkapan dibuka, dan ia memotong dari ledger MENTAH.
+#
+# Niat kodenya sudah benar sejak awal — `if (sisa <= 0) break` artinya "jangan
+# memakai yang tidak ada". Yang salah cuma ukurannya. Terukur:
+#
+#   CK 10 pcs, seluruhnya sudah dikirim, rak kosong
+#   aturan 3 pcs/hari × 4 hari → memakan seluruh 10, saldo CK 0
+#   toko menekan Terima        → CK −10, total 0 dari 10 yang ada
+#
+# Ini juga membantah dugaanku di #203 bahwa `pakai` satu-satunya pemicu yang
+# bisa menjatuhkan saldo CK di bawah jumlah barang di jalan.
+CK206=$(api "$OWNER" POST /cabang '{"nama":"CK 206","tipe":"central_kitchen"}' | jq -r '.id // empty')
+TK206=$(api "$OWNER" POST /cabang "{\"nama\":\"Toko 206\",\"central_kitchen_id\":\"$CK206\"}" | jq -r '.id // empty')
+MULAI206=$(python3 -c "import datetime;print((datetime.date.today()-datetime.timedelta(days=4)).isoformat())")
+sp206() { api "$OWNER" POST /perlengkapan \
+  "{\"nama\":\"$1 206 $RANDOM\",\"satuan\":\"pcs\",\"harga_beli\":1000,\"stok_minimum\":0}" | jq -r '.id // empty'; }
+saldo206() { api "$OWNER" GET "/perlengkapan?branch_id=$1" | jq --arg i "$2" '[.[]|select(.id==$i)][0].saldo // 0'; }
+cek "dasar §206: CK + toko" "V == 1" \
+  "$([ -n "$CK206" ] && [ -n "$TK206" ] && echo 1 || echo 0)"
+
+# ── Pasangan LEBIH DULU: tanpa barang di jalan, potongan otomatis harus JALAN ──
+# Tanpa ini, perbaikan yang mematikan seluruh potongan otomatis akan terlihat
+# sama hijaunya — dan itu diam-diam merusak fitur yang dipakai tiap hari.
+SPA206=$(sp206 Rutin)
+api "$OWNER" POST "/perlengkapan/stok-awal?branch_id=$CK206" \
+  "{\"items\":[{\"supply_id\":\"$SPA206\",\"qty\":10}]}" > /dev/null
+api "$OWNER" PUT "/perlengkapan/$SPA206/aturan?branch_id=$CK206" \
+  "{\"metode\":\"otomatis\",\"qty\":3,\"per_hari\":1,\"aktif\":true,\"mulai\":\"$MULAI206\"}" > /dev/null
+cek "pasangan: rak penuh → potongan otomatis tetap memotong" "V == 1" \
+  "$(python3 -c "print(1 if $(saldo206 "$CK206" "$SPA206") < 10 else 0)")"
+
+# ── INTI: seluruh stok berangkat lebih dulu ───────────────────────────────
+SPB206=$(sp206 Jalan)
+api "$OWNER" POST "/perlengkapan/stok-awal?branch_id=$CK206" \
+  "{\"items\":[{\"supply_id\":\"$SPB206\",\"qty\":10}]}" > /dev/null
+api "$OWNER" POST "/perlengkapan/$SPB206/minta?branch_id=$TK206" '{"qty":10}' > /dev/null
+api "$OWNER" PUT "/perlengkapan/$SPB206/aturan?branch_id=$CK206" \
+  "{\"metode\":\"otomatis\",\"qty\":3,\"per_hari\":1,\"aktif\":true,\"mulai\":\"$MULAI206\"}" > /dev/null
+# Membaca daftarnya MEMICU potongan otomatis — itulah cara bug ini dulu kambuh.
+cek "INTI: potongan otomatis tak menyentuh barang di jalan" "V == 10" \
+  "$(saldo206 "$CK206" "$SPB206")"
+KID206=$(api "$OWNER" GET "/perlengkapan/kiriman?branch_id=$TK206" | jq -r '[.[]|select(.status=="dikirim")][0].id // empty')
+api "$OWNER" POST "/perlengkapan/kiriman/$KID206/terima?branch_id=$TK206" > /dev/null
+cek "INTI: sesudah Terima, saldo CK 0 — BUKAN −10" "V == 0" "$(saldo206 "$CK206" "$SPB206")"
+cek "INTI: kekekalan — CK + Toko = 10" "V == 10" \
+  "$(python3 -c "print($(saldo206 "$CK206" "$SPB206") + $(saldo206 "$TK206" "$SPB206"))")"
+
+# ── Campuran: sebagian di rak, sebagian di jalan ──────────────────────────
+# Yang membedakan "mengukur rak" dari "mematikan potongan saat ada kiriman".
+SPC206=$(sp206 Campur)
+api "$OWNER" POST "/perlengkapan/stok-awal?branch_id=$CK206" \
+  "{\"items\":[{\"supply_id\":\"$SPC206\",\"qty\":10}]}" > /dev/null
+api "$OWNER" POST "/perlengkapan/$SPC206/minta?branch_id=$TK206" '{"qty":6}' > /dev/null
+api "$OWNER" PUT "/perlengkapan/$SPC206/aturan?branch_id=$CK206" \
+  "{\"metode\":\"otomatis\",\"qty\":1,\"per_hari\":1,\"aktif\":true,\"mulai\":\"$MULAI206\"}" > /dev/null
+# Rak berisi 4; aturan 1/hari selama 4 hari boleh memakan sampai 4, tak lebih.
+cek "INTI: potongan berhenti di batas RAK (4), tak menembus ke 10" "V == 1" \
+  "$(python3 -c "s=$(saldo206 "$CK206" "$SPC206"); print(1 if 6 <= s <= 10 else 0)")"
+cek "INTI: dan tak pernah jatuh di bawah jumlah yang di jalan (6)" "V == 1" \
+  "$(python3 -c "print(1 if $(saldo206 "$CK206" "$SPC206") >= 6 else 0)")"
+
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"
