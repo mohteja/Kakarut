@@ -49,23 +49,104 @@ daftar_verif() { # <email> <password> <nama>
     -d "{\"token\":\"$vt\"}" | jq -r '.token // ""'
 }
 
-api() { # api <token> <method> <path> [json-body]
-  local token="$1" method="$2" path="$3" body="${4:-}"
-  if [ -n "$body" ]; then
-    curl -s -X "$method" "$BASE/api$path" -H "Authorization: Bearer $token" \
-      -H 'Content-Type: application/json' -d "$body"
-  else
-    curl -s -X "$method" "$BASE/api$path" -H "Authorization: Bearer $token"
-  fi
+# ── PENJAGA RUTE MATI ──────────────────────────────────────────────────────
+#
+# Panggilan ke endpoint yang TIDAK ADA dicatat ke BERKAS, lalu diadili di §209.
+#
+# KENAPA ADA. Skrip ini memanggil `POST /absensi/masuk` di lima tempat — rute
+# yang tak pernah ada di server ini (yang ada `/absensi/` dan `/absensi/saya`).
+# Tiap panggilannya ditulis `api … > /dev/null 2>&1 || true`, jadi galatnya
+# ditelan tiga lapis sekaligus: stdout, stderr, dan status keluar. Lima blok
+# "siapkan absen" itu sebetulnya tak menyiapkan apa pun; seksi-seksinya lulus
+# hanya karena kasirnya kebetulan masih tercatat hadir dari §104, 2.700 baris
+# di atasnya. Yang menemukannya bukan mata, melainkan tabel `error_logs`
+# sesudah satu jalan penuh — jadi penjaganya dipasang di sini supaya jalan
+# berikutnya tak perlu ditemukan lagi.
+#
+# KENAPA KE BERKAS, BUKAN KE LAYAR. Justru karena pemanggilnya menelan output.
+# Berkas lolos dari ketiga lapis itu; `echo` tidak. Dan karena `api` sering
+# dipanggil di dalam `$( )` — subkulit sendiri — menaikkan penghitung `FAIL`
+# di sini pun tak akan sampai ke induknya.
+#
+# KENAPA DETEKSINYA TEPAT. `app.notFound` menjawab persis
+# `{"error":"Tidak ditemukan"}`, dan badan itu tak dipakai handler lain mana
+# pun (`grep '"Tidak ditemukan"' apps/server/src` → hanya index.ts). 404 yang
+# SAH — "bahan tidak ditemukan", "kode karyawan … tidak ditemukan" — selalu
+# membawa pesannya sendiri, jadi tak ada yang salah tuduh.
+#
+# BATASNYA, supaya tak dikira lebih: hanya rute yang benar-benar DITEMBAK yang
+# ketahuan. Rute mati di cabang `if` yang tak pernah jalan tetap lolos.
+RUTE_MATI="${TMPDIR:-/tmp}/verify-api-rute-mati.$$"
+: > "$RUTE_MATI"
+trap 'rm -f "$RUTE_MATI"' EXIT
+
+catat_rute_mati() { # catat_rute_mati <method> <path> <badan-respons>
+  case "$3" in
+    *'"error":"Tidak ditemukan"'*) printf '%s %s\n' "$1" "${2%%\?*}" >> "$RUTE_MATI" ;;
+  esac
 }
 
+api() { # api <token> <method> <path> [json-body]
+  local token="$1" method="$2" path="$3" body="${4:-}" out
+  if [ -n "$body" ]; then
+    out=$(curl -s -X "$method" "$BASE/api$path" -H "Authorization: Bearer $token" \
+      -H 'Content-Type: application/json' -d "$body")
+  else
+    out=$(curl -s -X "$method" "$BASE/api$path" -H "Authorization: Bearer $token")
+  fi
+  catat_rute_mati "$method" "$path" "$out"
+  printf '%s\n' "$out"
+}
+
+# `status_code*` membuang badan responsnya (`-o /dev/null`), jadi dulu ia buta
+# terhadap rute mati. Badannya kini ditangkap dan diperiksa lebih dulu; yang
+# dicetak tetap kode statusnya saja, persis seperti sebelumnya.
 status_code() { # status_code <token> <method> <path>
-  curl -s -o /dev/null -w '%{http_code}' -X "$2" "$BASE/api$3" -H "Authorization: Bearer $1"
+  local out
+  out=$(curl -s -w '\n%{http_code}' -X "$2" "$BASE/api$3" -H "Authorization: Bearer $1")
+  catat_rute_mati "$2" "$3" "${out%$'\n'*}"
+  printf '%s' "${out##*$'\n'}"
 }
 
 status_code_body() { # status_code_body <token> <method> <path> <json-body>
-  curl -s -o /dev/null -w '%{http_code}' -X "$2" "$BASE/api$3" -H "Authorization: Bearer $1" \
-    -H 'Content-Type: application/json' -d "$4"
+  local out
+  out=$(curl -s -w '\n%{http_code}' -X "$2" "$BASE/api$3" -H "Authorization: Bearer $1" \
+    -H 'Content-Type: application/json' -d "$4")
+  catat_rute_mati "$2" "$3" "${out%$'\n'*}"
+  printf '%s' "${out##*$'\n'}"
+}
+
+# pastikanHadir <token> [keterangan] — pastikan pemegang token TERCATAT HADIR
+# di cabangnya, dari keadaan awal MANA PUN.
+#
+# Ini pengganti lima blok `POST /absensi/masuk` yang tak pernah ada rutenya.
+#
+# `POST /absensi/saya` itu TOGGLE, bukan "pastikan masuk": ia mencatat kebalikan
+# dari cap terakhir. Memanggilnya pada orang yang sudah hadir justru MEMULANG-
+# KANNYA, dan `/shift/buka` sesudahnya ditolak "Absen masuk dulu". Repo ini
+# sudah pernah kena persis itu (lihat §188), jadi keadaannya DIBACA dulu.
+#
+# Yang dibaca `GET /absensi/status`, bukan `.tipe` dari toggle-nya: status itu
+# memanggil `sedangHadir` — fungsi yang SAMA PERSIS dengan gerbang
+# `POST /shift/buka`. Selama keduanya satu sumber, jawabannya tak bisa
+# menyimpang. `.tipe` cuma mendekati; ia tak tahu soal sesi lintas tengah malam
+# yang kedaluwarsa (`BATAS_LINTAS_HARI_JAM`).
+#
+# Tanpa argumen cabang, dan itu disengaja: `/absensi/status` dan `/shift/buka`
+# sama-sama memakai cabang milik pemanggil untuk peran yang terikat cabang.
+# Cabang yang dioper terpisah adalah cabang yang bisa salah — dan memang salah
+# di kode lama, yang mengabsenkan `$OWNER` untuk shift milik kasir.
+hadir_sekarang() { # hadir_sekarang <token> → "true" / "false"
+  api "$1" GET /absensi/status | jq -r '.hadir // false'
+}
+pastikanHadir() { # pastikanHadir <token> [keterangan]
+  local tok="$1" ket="${2:-}"
+  if [ "$(hadir_sekarang "$tok")" = "true" ]; then return 0; fi
+  api "$tok" POST /absensi/saya '{"foto_url":"https://example.com/pastikan-hadir.jpg"}' > /dev/null
+  if [ "$(hadir_sekarang "$tok")" = "true" ]; then return 0; fi
+  # Dilaporkan, bukan dilempar: skrip diteruskan supaya kegagalan seksi
+  # berikutnya ikut terlihat — tapi SEBABNYA sudah tercatat di ringkasan.
+  gagal "pastikanHadir gagal${ket:+ ($ket)} — /shift/buka sesudah ini pasti ditolak"
 }
 
 echo "== 1. Login =="
@@ -6743,7 +6824,7 @@ cek "sudah diputuskan → hilang dari daftar menunggu" "V == 0" \
   "$(api "$OWNER" GET "/shift/selisih?status=menunggu" | jq --arg id "$SID152B" '[.[]|select(.id==$id)]|length')"
 
 # shift yang PAS tak butuh persetujuan sama sekali
-api "$OWNER" POST "/absensi/masuk" "{\"branch_id\":\"$CB152\"}" > /dev/null 2>&1 || true
+pastikanHadir "$REISS105" "§152"
 BUKA152=$(api "$REISS105" POST /shift/buka '{"modal_awal":100000}')
 SID152C=$(echo "$BUKA152" | jq -r '.id // .shift.id')
 KAS152C=$(api "$OWNER" GET "/shift/$SID152C" | jq -r '.kas_sistem')
@@ -6762,7 +6843,7 @@ cek "shift PAS masuk daftar status=pas" "V == 1" \
 # nama pemutus terisi walau DITOLAK (namanya "disetujui_oleh", isinya pemutus),
 # `catatan` saja (tanpa selisih_alasan) tetap sampai ke owner, dan riwayat
 # `GET /shift` membawa putusannya supaya kasir tahu nasib selisihnya sendiri.
-api "$OWNER" POST "/absensi/masuk" "{\"branch_id\":\"$CB152\"}" > /dev/null 2>&1 || true
+pastikanHadir "$REISS105" "§152"
 BUKA152D=$(api "$REISS105" POST /shift/buka '{"modal_awal":75000}')
 SID152D=$(echo "$BUKA152D" | jq -r '.id // .shift.id')
 KAS152D=$(api "$OWNER" GET "/shift/$SID152D" | jq -r '.kas_sistem')
@@ -6825,7 +6906,7 @@ kartu154() { api "$1" GET "/pesanan?branch_id=$CB154" | jq --arg id "$2" '[.[]|s
 # is_dine_in, jadi transaksinya harus benar-benar lahir sebagai dine-in
 MEJA154=$(api "$REISS105" GET /meja | jq -r '[.[]|select(.is_active and .tipe=="dine_in")][0].id')
 if [ -z "$(api "$REISS105" GET /shift/aktif | jq -r '.id // empty')" ]; then
-  api "$OWNER" POST "/absensi/masuk" "{\"branch_id\":\"$CB154\"}" > /dev/null 2>&1 || true
+  pastikanHadir "$REISS105" "§154"
   api "$REISS105" POST /shift/buka '{"modal_awal":0}' > /dev/null 2>&1 || true
 fi
 
@@ -7215,7 +7296,7 @@ M155=$(api "$OWNER" POST /menu "{\"nama\":\"Menu Uji155\",\"category_id\":\"$CAT
 MEJA155=$(api "$OWNER" POST /meja "{\"nama\":\"Meja Uji155\",\"tipe\":\"dine_in\",\"branch_id\":\"$CB155\"}" | jq -r .id)
 TA155=$(api "$REISS105" GET /meja | jq -r '[.[]|select(.tipe=="takeaway")][0].id')
 if [ -z "$(api "$REISS105" GET /shift/aktif | jq -r '.id // empty')" ]; then
-  api "$OWNER" POST "/absensi/masuk" "{\"branch_id\":\"$CB155\"}" > /dev/null 2>&1 || true
+  pastikanHadir "$REISS105" "§155"
   api "$REISS105" POST /shift/buka '{"modal_awal":0}' > /dev/null 2>&1 || true
 fi
 stat155() { api "$1" GET "/meja/status?branch_id=$CB155" | jq --arg id "$MEJA155" '[.[]|select(.meja_id==$id)][0]'; }
@@ -7428,7 +7509,7 @@ isi156() { api "$OWNER" GET "/stok?branch_id=$CB156" | jq -r --arg i "$ISI156" '
 hpp156() { api "$OWNER" GET "/penjualan/$1" | jq -r '.sale.totalHpp'; }
 MEJA156=$(api "$REISS105" GET /meja | jq -r '[.[]|select(.is_active and .tipe=="dine_in")][0].id')
 if [ -z "$(api "$REISS105" GET /shift/aktif | jq -r '.id // empty')" ]; then
-  api "$OWNER" POST "/absensi/masuk" "{\"branch_id\":\"$CB156\"}" > /dev/null 2>&1 || true
+  pastikanHadir "$REISS105" "§156"
   api "$REISS105" POST /shift/buka '{"modal_awal":0}' > /dev/null 2>&1 || true
 fi
 
@@ -10769,6 +10850,49 @@ cek "PASANGAN: dan tak ada cabang mana pun yang berubah karenanya" "V == 1" \
 # ── Tanpa branch_id: perilaku lama dipertahankan (cadangan cabang pertama) ─
 cek "tanpa branch_id di payload → tetap jatuh ke cabang pertama (perilaku lama)" "V == 99" \
   "$(sync208 "$OWNER" "{\"supply_id\":\"$SP208\",\"qty\":1}" > /dev/null; s208 "$CB208_1")"
+
+
+echo
+echo "── §209 Rute mati: verify-api tak boleh memanggil endpoint yang TIDAK ADA ──"
+# Seksi ini mengadili berkas yang diisi `catat_rute_mati` (lihat catatan panjang
+# di dekat definisi `api`). Ia duduk di ekor skrip karena baru boleh menghakimi
+# sesudah semua seksi lain menembakkan panggilannya.
+#
+# Pemicunya nyata: lima blok `POST /absensi/masuk` — rute yang tak pernah ada —
+# hidup di skrip ini sampai satu jalan penuh dibaca ulang lewat `error_logs`.
+# Ketiganya (stdout, stderr, status keluar) ditelan di tempat kejadian, jadi
+# tak satu pun dari 2.400+ asersi berubah warna. Yang menyembunyikannya bukan
+# kelalaian satu orang; itu bentuk penulisan yang memang tak bisa gagal.
+
+# ── Dulu penjaga ini DIBUKTIKAN MENGGIGIT, baru boleh dipercaya ────────────
+# Ditembakkan dengan tiga lapis penelan yang SAMA PERSIS dengan yang menutupi
+# bug aslinya. Kalau deteksinya rusak — badan `notFound` berubah, `api` berhenti
+# menangkap — asersi inilah yang jatuh, bukan diam-diam meloloskan semuanya.
+api "$OWNER" GET "/rute-mati-uji-diri-209" > /dev/null 2>&1 || true
+cek "penjaga menggigit rute fiktif MESKIPUN galatnya ditelan tiga lapis" "V == 1" \
+  "$(grep -cx 'GET /rute-mati-uji-diri-209' "$RUTE_MATI" || true)"
+# Bukti kedua, dari seksi lain dan lewat pemanggil lain: §142 sengaja menembak
+# rute fiktif untuk menguji pencatatan galat. Ia harus ikut tertangkap — kalau
+# tidak, penjaganya cuma mengenali kalimatnya sendiri.
+cek "…dan panggilan sengaja di §142 pun tercatat" "V == 1" \
+  "$(grep -cx 'GET /endpoint-yang-tidak-ada-142' "$RUTE_MATI" || true)"
+
+# ── Sisanya: rute mati yang TIDAK disengaja ───────────────────────────────
+# Kedua entri di atas dikeluarkan SATU-SATU dan disebut namanya, bukan disaring
+# dengan pola samar seperti "*uji*" — pola begitu kelak menelan rute mati
+# sungguhan yang kebetulan namanya mirip.
+SISA209=$(sort -u "$RUTE_MATI" \
+  | grep -vx 'GET /rute-mati-uji-diri-209' \
+  | grep -vx 'GET /endpoint-yang-tidak-ada-142' || true)
+if [ -n "$SISA209" ]; then
+  while IFS= read -r r209; do
+    # `gagal`, bukan satu `cek` berisi hitungan: yang membaca log butuh NAMA
+    # rutenya di ringkasan ekor, bukan angka "3".
+    gagal "verify-api memanggil rute yang TIDAK ADA: $r209"
+  done <<< "$SISA209"
+else
+  ok "tak ada panggilan ke rute yang tidak ada"
+fi
 
 
 if [ "$FAIL" -gt 0 ]; then
