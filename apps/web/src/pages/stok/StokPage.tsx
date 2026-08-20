@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { qtyTeks } from "@kakarut/shared";
 import type { ExpLotRow, MenuDto, MenuStokDto, PenyimpananDto, StokRowDto } from "@kakarut/shared";
 import {
   Card,
@@ -559,9 +560,49 @@ export function StokPage() {
             ),
           },
           {
+            /*
+             * SATUAN DITEMPELKAN DI SALDO — sekali per baris, bukan di keempat
+             * kolom angkanya.
+             *
+             * Keempat kolom (Stok Awal, Masuk, Terpakai, Saldo) memakai satuan
+             * yang SAMA, jadi menuliskannya empat kali cuma menggandakan
+             * kebisingan tanpa menambah keterangan. Ditempelkan di Saldo karena
+             * itu angka yang menjawab pertanyaannya: berapa yang saya punya.
+             *
+             * Polanya menyalin tab PERLENGKAPAN di halaman yang sama, yang
+             * sudah begini sejak awal — tab Stok Bahan yang tertinggal, dan
+             * bedanya cukup untuk membuat yang membacanya bertanya "ini
+             * satuannya apa".
+             */
             judul: "Saldo",
             kanan: true,
-            sel: (s) => <span className="font-bold">{formatAngka(s.saldo)}</span>,
+            sel: (s) => {
+              const q = qtyTeks({
+                qty: s.saldo,
+                satuan: s.satuan,
+                isi: s.isi,
+                satuanBeli: s.satuan_beli,
+              });
+              return (
+                <span>
+                  <span className="whitespace-nowrap">
+                    <span className="font-bold">{formatAngka(s.saldo)}</span>{" "}
+                    <span className="font-normal text-stone-500">{s.satuan}</span>
+                  </span>
+                  {/*
+                    Padanan kemasan hanya muncul bila bahan ini memang dibeli
+                    per kemasan (`isi > 1` + satuan beli terisi). Itu yang
+                    menjembatani dua satuan yang selama ini tak pernah bertemu
+                    di satu layar: belanja memakai "dus", stok memakai "pcs".
+                  */}
+                  {q.setara && s.saldo !== 0 && (
+                    <div className="whitespace-nowrap text-xs font-normal text-stone-400">
+                      {q.setara}
+                    </div>
+                  )}
+                </span>
+              );
+            },
           },
           { judul: "Status", sel: (s) => <StatusBadge status={s.status} /> },
           {

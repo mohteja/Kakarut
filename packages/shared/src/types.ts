@@ -820,6 +820,16 @@ export interface StokRowDto {
   kategori: BahanKategori;
   isi: number;
   satuan: string;
+  /**
+   * Satuan KEMASAN saat membeli (mis. "dus", "kg") — null bila bahan ini
+   * memang dibeli langsung dalam satuan kerjanya.
+   *
+   * Dibawa supaya halaman stok bisa menyebut PADANANNYA. Saldo disimpan dalam
+   * satuan kerja (gr, ml, pcs) sedangkan belanja terjadi dalam kemasan, dan
+   * yang membaca "20.113" tanpa keduanya tak punya cara tahu itu dua puluh
+   * ribu apa — apalagi menghubungkannya dengan yang ia beli kemarin.
+   */
+  satuan_beli: string | null;
   /** tempat penyimpanan dari entri masuk terkonfirmasi terakhir */
   tempat: string | null;
   tempat_id: string | null;

@@ -9446,6 +9446,11 @@ cek "kasir → POST /penyimpanan cabang lain = 403" "V == 403" \
 cek "kasir → POST /penyimpanan cabang SENDIRI tetap boleh" "V == 1" \
   "$(api "$K191" POST /penyimpanan "{\"branch_id\":\"$CB46_ID\",\"nama\":\"Rak 191 OK\"}" | jq '(.id != null)|if . then 1 else 0 end')"
 
+# /stok/waste & /stok/opname SENGAJA tidak ikut: keduanya punya gerbang lain
+# (petugas rak, sesi opname) yang juga membalas 403, jadi hijaunya belum tentu
+# berasal dari penjaga cabang — dan asersi yang hijau karena sebab lain lebih
+# buruk daripada tak ada asersi.
+
 echo "== 192. Paket berlapis: menu dasar tak boleh diubah jadi paket =="
 # Perhitungan paket SATU TINGKAT — `komponenEfektif` memulangkan komponen
 # sendiri + komponen dasarnya, berhenti di situ. "Menu dasar harus reguler"
@@ -9476,10 +9481,29 @@ cek "menu biasa TETAP boleh dijadikan paket" "V == 1" \
 # perubahan yang melanggar batas satu tingkat.
 cek "menu dasar tetap boleh ganti harga" "V == 1" \
   "$(api "$OWNER" PUT "/menu/$A192" '{"harga_jual":21000}' | jq '(.harga_jual==21000)|if . then 1 else 0 end')"
-# /stok/waste & /stok/opname SENGAJA tidak ikut: keduanya punya gerbang lain
-# (petugas rak, sesi opname) yang juga membalas 403, jadi hijaunya belum tentu
-# berasal dari penjaga cabang — dan asersi yang hijau karena sebab lain lebih
-# buruk daripada tak ada asersi.
+
+echo "== 193. Daftar stok membawa satuannya =="
+# Empat kolom angka di daftar stok (Stok Awal, Masuk, Terpakai, Saldo) tak
+# pernah menyebut satuannya, dan yang membacanya melihat "−54" tanpa cara tahu
+# itu 54 apa. Dilaporkan langsung pemakainya: "bingung ini satuannya apa,
+# padahal ketika beli ada satuannya" — dan kalimat terakhir itu intinya:
+# belanja memakai KEMASAN (dus/kg), saldo memakai SATUAN KERJA (pcs/gr).
+STK193=$(api "$OWNER" GET /stok)
+cek "dasar §193: daftar stok tidak kosong" "V >= 5" "$(echo "$STK193" | jq 'length')"
+cek "tiap baris membawa satuan yang terisi" "V == 1" \
+  "$(echo "$STK193" | jq '[.[]|select((.satuan|type)!="string" or (.satuan|length)==0)]|length==0|if . then 1 else 0 end')"
+# `satuan_beli` boleh null (bahan yang dibeli langsung dalam satuan kerjanya),
+# tapi KUNCINYA wajib ada — tanpa itu halaman tak punya cara tahu bahan ini
+# dibeli per dus, dan padanan kemasannya diam-diam tak pernah muncul.
+cek "tiap baris membawa kunci satuan_beli (boleh null)" "V == 1" \
+  "$(echo "$STK193" | jq '[.[]|select(has("satuan_beli")|not)]|length==0|if . then 1 else 0 end')"
+# Diuji dengan MENYETELNYA lewat API, bukan mengandalkan data seed kebetulan.
+B193=$(api "$OWNER" GET /bahan | jq -r '[.[]|select(.track_stok==true and .isi>1)][0].id')
+cek "dasar §193: ada bahan berkemasan untuk diuji" "V == 1" \
+  "$(printf '%s' "$B193" | grep -Eqc '^[0-9a-f-]{36}$' && echo 1 || echo 0)"
+api "$OWNER" PUT "/bahan/$B193" '{"satuan_beli":"dus"}' > /dev/null
+cek "satuan_beli yang disetel muncul di daftar stok" "V == 1" \
+  "$(api "$OWNER" GET /stok | jq --arg i "$B193" '[.[]|select(.ingredient_id==$i and .satuan_beli=="dus")]|length')"
 
 
 if [ "$FAIL" -gt 0 ]; then
