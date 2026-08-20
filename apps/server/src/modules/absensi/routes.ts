@@ -4,12 +4,15 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import {
-  absenTipeBerikutnya,
+  capAbsenBerikutnya,
   jarakMeter,
+  sesiHadirTerbuka,
   type AbsenResult,
+  type CapAbsen,
   type AbsensiRow,
   type PengajuanKategori,
   type RekapAbsenDto,
+  type StatusHadirDto,
   type RekapAbsenHari,
   type RekapAbsenRow,
 } from "@kakarut/shared";
@@ -96,6 +99,69 @@ export async function cekRadius(
 }
 
 /**
+ * SHIFT YANG MELEWATI TENGAH MALAM.
+ *
+ * Alternasi masuk↔keluar dulu dicari HANYA di tanggal cap itu sendiri. Untuk
+ * shift tutup — masuk 22:00, pulang 02:00 — cap pulangnya jatuh di tanggal
+ * BERIKUTNYA, yang belum punya cap apa pun. Tak ada cap sebelumnya berarti
+ * "masuk", jadi cap pulang itu tercatat sebagai MASUK KEDUA.
+ *
+ * Terukur pada server sungguhan, satu shift malam (22:00 → 02:00 WIB):
+ *
+ *   19 Agu · hadir · masuk 22:00 · keluar —
+ *   20 Agu · hadir · masuk 02:00 · keluar —
+ *   hadir = 2
+ *
+ * Satu shift jadi DUA hari hadir, dua-duanya tanpa cap pulang. Sisi sebaliknya
+ * juga terukur: pada 00:30 — masih di tengah shift, belum pulang —
+ * `sedangHadir` menjawab TIDAK (tanggal 20 Agu belum punya cap), jadi kasir
+ * yang sedang berdiri di kasirnya ditolak membuka laci dengan "Absen masuk
+ * dulu sebelum buka kasir".
+ *
+ * Keduanya satu sebab: alternasi dikurung di dalam satu tanggal kalender,
+ * padahal sesi hadirnya tidak. `sesiHadirTerbuka` di @kakarut/shared yang kini
+ * memutuskan — satu aturan, dipakai kedua jalur.
+ *
+ * Kedua kueri "cap terakhir di tanggal sebelumnya" dibatasi `lt(waktu, acuan)`:
+ * karena cap pulang MEWARISI tanggal masuknya, sebuah cap bertanggal kemarin
+ * bisa saja berwaktu sesudah saat yang sedang dinilai (mis. saat sinkron
+ * susulan menilai ulang pukul 00:30).
+ */
+
+/**
+ * Cap terakhir milik seorang karyawan di cabang ini pada TANGGAL SEBELUM
+ * `tanggal`, dan sebelum waktu `acuan`. Dipakai kedua jalur di atas untuk
+ * menemukan sesi yang dibuka di hari sebelumnya.
+ */
+async function capHariSebelumnya(
+  companyId: string,
+  branchId: string,
+  userId: string,
+  tanggal: string,
+  acuan: Date,
+): Promise<CapAbsen | null> {
+  const [row] = await db
+    .select({
+      tipe: attendances.tipe,
+      waktu: attendances.waktu,
+      attendDate: attendances.attendDate,
+    })
+    .from(attendances)
+    .where(
+      and(
+        eq(attendances.companyId, companyId),
+        eq(attendances.branchId, branchId),
+        eq(attendances.userId, userId),
+        lt(attendances.attendDate, tanggal),
+        lt(attendances.waktu, acuan),
+      ),
+    )
+    .orderBy(desc(attendances.waktu))
+    .limit(1);
+  return row ? { tipe: row.tipe, waktu_ms: row.waktu.getTime(), tanggal: row.attendDate } : null;
+}
+
+/**
  * Catat cap masuk/keluar untuk seorang karyawan di cabang: tentukan tipe dari
  * cap terakhir HARI INI di cabang itu (branch-scoped, konsisten dgn ringkasan
  * GET), lalu sisipkan baris absensi. Mengembalikan AbsenResult.
@@ -113,8 +179,9 @@ export async function catatAbsen(opts: {
   waktu?: Date;
 }): Promise<AbsenResult> {
   const tanggal = tanggalDi(await timezoneOf(opts.companyId), opts.waktu);
+  const acuan = opts.waktu ?? new Date();
   const [last] = await db
-    .select({ tipe: attendances.tipe })
+    .select({ tipe: attendances.tipe, waktu: attendances.waktu })
     .from(attendances)
     .where(
       and(
@@ -129,7 +196,13 @@ export async function catatAbsen(opts: {
     )
     .orderBy(desc(attendances.waktu))
     .limit(1);
-  const tipe = absenTipeBerikutnya(last?.tipe ?? null);
+  const { tipe, tanggal_sesi } = capAbsenBerikutnya(
+    last ? { tipe: last.tipe, waktu_ms: last.waktu.getTime(), tanggal } : null,
+    last
+      ? null
+      : await capHariSebelumnya(opts.companyId, opts.branchId, opts.userId, tanggal, acuan),
+    acuan.getTime(),
+  );
   const [ins] = await db
     .insert(attendances)
     .values({
@@ -137,7 +210,7 @@ export async function catatAbsen(opts: {
       branchId: opts.branchId,
       userId: opts.userId,
       tipe,
-      attendDate: tanggal,
+      attendDate: tanggal_sesi ?? tanggal,
       fotoUrl: opts.fotoUrl,
       ...(opts.waktu ? { waktu: opts.waktu } : {}),
     })
@@ -155,9 +228,15 @@ export async function catatAbsen(opts: {
 }
 
 /**
- * Apakah karyawan SEDANG HADIR (sudah absen masuk & belum absen keluar) hari
- * ini di cabang tsb — dipakai gerbang buka-shift kasir: kasir wajib absen dulu.
- * Cap absen terakhir hari ini = 'masuk' → hadir; 'keluar' atau belum ada → tidak.
+ * Apakah karyawan SEDANG HADIR (sudah absen masuk & belum absen keluar) di
+ * cabang tsb — dipakai gerbang buka-shift kasir: kasir wajib absen dulu.
+ * Cap absen terakhir = 'masuk' → hadir; 'keluar' atau belum ada → tidak.
+ *
+ * Sesi hadir tidak selalu duduk di satu tanggal kalender, jadi bila tanggal
+ * `pada` belum punya cap sama sekali, cap terakhir kemarin ikut dilihat lewat
+ * `sesiHadirTerbuka` — aturan yang sama persis dengan yang dipakai `catatAbsen`.
+ * Tanpa itu kasir shift malam ditolak membuka laci sesudah lewat tengah malam,
+ * padahal ia sudah absen masuk dan belum pulang.
  */
 export async function sedangHadir(
   companyId: string,
@@ -172,7 +251,7 @@ export async function sedangHadir(
 ): Promise<boolean> {
   const tanggal = tanggalDi(await timezoneOf(companyId), pada);
   const [last] = await db
-    .select({ tipe: attendances.tipe })
+    .select({ tipe: attendances.tipe, waktu: attendances.waktu })
     .from(attendances)
     .where(
       and(
@@ -184,7 +263,12 @@ export async function sedangHadir(
     )
     .orderBy(desc(attendances.waktu))
     .limit(1);
-  return last?.tipe === "masuk";
+  const buka = sesiHadirTerbuka(
+    last ? { tipe: last.tipe, waktu_ms: last.waktu.getTime(), tanggal } : null,
+    last ? null : await capHariSebelumnya(companyId, branchId, userId, tanggal, pada),
+    pada.getTime(),
+  );
+  return buka !== null;
 }
 
 /**
@@ -304,6 +388,25 @@ export const absensiRoutes = new Hono<AppEnv>()
       },
     );
     return c.json(data, baru ? 201 : 200);
+  })
+  /**
+   * STATUS HADIR SAYA di cabang ini — jawaban yang sama persis dengan yang
+   * dipakai gerbang `POST /shift/buka` (`sedangHadir`).
+   *
+   * Ada karena `GET /absensi` dikurung satu tanggal kalender, sedangkan sesi
+   * hadir tidak. Kasir shift malam pada pukul 00:30 tidak punya baris di daftar
+   * HARI INI — cap masuknya bertanggal kemarin — jadi layar menyimpulkan "belum
+   * absen" dan menyodorkan tombol Absen Sekarang. Menekannya justru mencatat
+   * KELUAR (cap bergantian) dan MENUTUP sesi yang sedang berjalan; sejak itu
+   * gerbangnya menolak sungguhan. Persis kelas cacat yang dicabut ronde
+   * sebelumnya di berkas yang sama, lewat pintu lain.
+   */
+  .get("/status", async (c) => {
+    const auth = c.get("auth");
+    const branchId = await resolveBranchId(c);
+    const hadir = await sedangHadir(auth.company_id!, branchId, auth.sub);
+    const dto: StatusHadirDto = { hadir };
+    return c.json(dto);
   })
   // Ringkasan absensi hari ini (atau ?tanggal=YYYY-MM-DD) di cabang: jam masuk
   // pertama & jam keluar terakhir per karyawan.

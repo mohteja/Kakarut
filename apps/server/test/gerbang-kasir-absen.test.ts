@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { absenTipeBerikutnya } from "@kakarut/shared";
+import { absenTipeBerikutnya, sesiHadirTerbuka } from "@kakarut/shared";
 
 /**
  * Penjaga GERBANG BUKA KASIR — tuduhan yang menciptakan syaratnya sendiri.
@@ -50,16 +50,38 @@ describe("premis: inilah yang membuat 'absen lagi' berbahaya", () => {
     expect(shift).toContain("Absen masuk dulu sebelum buka kasir");
   });
 
-  it("`sedangHadir` menilai dari cap TERAKHIR hari itu", () => {
-    // Karena itulah satu cap keluar cukup membalik keadaannya.
+  it("`sedangHadir` menilai dari cap TERAKHIR — satu cap keluar membalik keadaannya", () => {
+    // Aturannya kini `sesiHadirTerbuka` di @kakarut/shared (dipakai bersama
+    // `catatAbsen`, supaya shift lewat tengah malam dinilai sama di kedua
+    // jalur — lihat absen-lintas-tengah-malam.test.ts). Yang dijaga di sini
+    // tetap premisnya: cap keluar mematikan keadaan hadir.
+    const t = Date.parse("2026-08-20T04:00:00Z");
+    const cap = (tipe: "masuk" | "keluar") => ({
+      tipe,
+      waktu_ms: Date.parse("2026-08-20T01:00:00Z"),
+      tanggal: "2026-08-20",
+    });
+    expect(sesiHadirTerbuka(cap("masuk"), null, t)).not.toBeNull();
+    expect(sesiHadirTerbuka(cap("keluar"), null, t)).toBeNull();
+    // …dan rutenya memang memakai aturan itu, bukan salinan sendiri.
     const absensi = baca("../src/modules/absensi/routes.ts");
-    expect(absensi).toMatch(/return last\?\.tipe === "masuk";/);
+    expect(absensi).toMatch(/const buka = sesiHadirTerbuka\(/);
   });
 });
 
 describe("gerbang: tiga keadaan, bukan dua", () => {
   it("galat absensi diambil dari useQuery", () => {
-    expect(KODE).toMatch(/data: absensiHariIni = \[\], error: gagalAbsensi/);
+    expect(KODE).toMatch(/data: statusAbsen, error: gagalAbsensi/);
+  });
+
+  it("dan 'sudah absen' adalah JAWABAN server, bukan kesimpulan dari daftar harian", () => {
+    // Daftar `/absensi` dikurung satu tanggal kalender; sesi hadir tidak.
+    // Menyimpulkan dari sana menuduh kasir shift malam pada pukul 00:30 —
+    // cap masuknya bertanggal kemarin — lalu menyodorkan tombol yang justru
+    // MENUTUP sesinya. Lihat absen-lintas-tengah-malam.test.ts.
+    expect(KODE).toContain('api<StatusHadirDto>(`/absensi/status${branchQuery}`)');
+    expect(KODE).toContain("const sudahAbsen = statusAbsen?.hadir === true;");
+    expect(KODE).not.toContain("absensiHariIni.find(");
   });
 
   it("percabangan gagal MENDAHULUI 'sudah absen' dan 'belum absen'", () => {
