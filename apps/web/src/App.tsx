@@ -1,7 +1,8 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { Layout } from "./components/Layout";
 import { Spinner } from "./components/ui";
+import { judulDokumen } from "./lib/judul-halaman";
 import { useAuth } from "./context/AuthContext";
 import { BranchProvider } from "./context/BranchContext";
 import { PrinterProvider } from "./context/PrinterContext";
@@ -92,6 +93,14 @@ function PageLoading() {
 export default function App() {
   const { auth } = useAuth();
   const { pathname } = useLocation();
+
+  // Judul tab mengikuti halaman yang sedang dibuka ("Laporan | Basooopa"),
+  // bukan nama aplikasi yang sama di semua tab. DI ATAS seluruh `return` awal
+  // di bawah — halaman publik pun keluar lewat jalan pintasnya sendiri, dan
+  // hook tak boleh dilewati secara bersyarat.
+  useEffect(() => {
+    document.title = judulDokumen(pathname, auth?.company?.nama);
+  }, [pathname, auth?.company?.nama]);
 
   // Halaman publik (tanpa login) — dapat diakses siapa pun, termasuk reviewer
   // App Store/Play Store & pengunjung umum. Didahulukan sebelum gerbang auth.
