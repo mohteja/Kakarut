@@ -5,8 +5,8 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import type { OpenBillDetail, OpenBillRow } from "@kakarut/shared";
 import { db } from "../../db/client";
-import { formatAngkaId, waktuKertas } from "@kakarut/shared";
-import { opsiSlipDariQuery, responsSlip } from "../print/slip";
+import { formatAngkaId, hitungPb1, waktuKertas } from "@kakarut/shared";
+import { opsiKertasDariQuery, responsBon, responsSlip } from "../print/kertas";
 import { loadKatalog, tambahKebutuhanBahan } from "../menu/service";
 import { bahanKurang } from "../stok/service";
 import {
@@ -340,7 +340,106 @@ export const openBillRoutes = new Hono<AppEnv>()
           catatan: detail.catatan,
           kasir: null,
         },
-        opsiSlipDariQuery(c),
+        opsiKertasDariQuery(c),
+      ),
+    );
+  })
+  /**
+   * BON TAGIHAN bill ini — berharga, tapi BUKAN bukti pembayaran.
+   *
+   * Kertas yang diminta tamu saat selesai makan, untuk memeriksa pesanannya dan
+   * tahu berapa yang harus disiapkan. Sesudah membayar ia menerima STRUK.
+   *
+   * HANYA ADA DI OPEN BILL, dan itu disengaja. Penjualan yang sudah tercatat
+   * berarti uangnya sudah diterima; "bon tagihan" untuknya adalah kertas yang
+   * menagih sesuatu yang sudah lunas. Yang dibutuhkan di sana cetak ulang
+   * struk, yang memang sudah ada.
+   *
+   * Cakupan & 404 mengikuti `GET /:id` lewat `loadDetail` yang sama — termasuk
+   * aturan bahwa bill yang sudah ditutup diperlakukan hilang.
+   */
+  .get("/:id/bon", async (c) => {
+    const auth = c.get("auth");
+    const detail = await loadDetail(auth.company_id!, c.req.param("id"));
+    if (!detail) throw new HTTPException(404, { message: "Bill tidak ditemukan" });
+
+    const [comp] = await db
+      .select({
+        nama: companies.nama,
+        timezone: companies.timezone,
+        pb1Enabled: companies.pb1Enabled,
+        pb1Rate: companies.pb1Rate,
+      })
+      .from(companies)
+      .where(eq(companies.id, auth.company_id!));
+    const branchId = await resolveBranchId(c);
+    const [branch] = await db
+      .select({ nama: branches.nama })
+      .from(branches)
+      .where(eq(branches.id, branchId));
+    // Dine-in ditentukan TIPE MEJANYA, sama seperti di layar kasir dan di slip.
+    const [m] = detail.meja_id
+      ? await db.select({ tipe: meja.tipe }).from(meja).where(eq(meja.id, detail.meja_id))
+      : [undefined];
+    const dineIn = m ? m.tipe === "dine_in" : true;
+
+    /*
+     * Baris yang DIBATALKAN dapur tidak ikut — dan di sini alasannya lebih
+     * keras daripada di slip pesanan.
+     *
+     * Di slip, membawa baris batal berarti menyuruh dapur memasaknya lagi. Di
+     * sini artinya MENAGIH TAMU untuk makanan yang tak pernah datang. Pembatalan
+     * biasanya terjadi karena bahannya habis, jadi tamunya justru orang yang
+     * sudah dikecewakan sekali.
+     */
+    const items = detail.items
+      .filter((it) => it.pesanan_status !== "batal")
+      .map((it) => ({
+        nama: it.menu_nama,
+        qty: it.qty,
+        hargaSatuan: it.harga_satuan,
+        lineTotal: it.harga_satuan * it.qty,
+        tag:
+          it.dine_in_override !== null && it.dine_in_override !== dineIn
+            ? it.dine_in_override
+              ? "DI"
+              : "TA"
+            : null,
+        catatan: it.catatan,
+      }));
+
+    /*
+     * Uangnya dihitung dengan rumus yang SAMA dengan `createSale` — `hitungPb1`
+     * dari paket shared, bukan perkalian yang ditulis ulang di sini. Bon yang
+     * angkanya lahir dari rumus kedua akan berselisih dengan struknya beberapa
+     * rupiah karena pembulatan, dan tamu yang membandingkan dua kertas itulah
+     * yang menemukannya.
+     *
+     * DISKON sengaja tidak ada: potongan baru diputuskan saat pembayaran, jadi
+     * bon ini memang angka sebelum diskon — dan kertasnya mengatakan itu
+     * sendiri di kakinya.
+     */
+    const subtotal = items.reduce((a, it) => a + it.lineTotal, 0);
+    const pb1Amount = comp?.pb1Enabled ? hitungPb1(subtotal, comp.pb1Rate) : 0;
+
+    return c.json(
+      responsBon(
+        {
+          companyNama: comp?.nama ?? "",
+          branchNama: branch?.nama ?? "",
+          waktu: waktuKertas(new Date(), comp?.timezone ?? "Asia/Jakarta"),
+          isDineIn: dineIn,
+          mejaLabel: detail.meja_label,
+          customerNama: detail.customer_nama,
+          items,
+          subtotal,
+          pb1Amount,
+          pb1Rate: comp?.pb1Enabled ? comp.pb1Rate : null,
+          total: subtotal + pb1Amount,
+          catatan: detail.catatan,
+          kasir: null,
+        },
+        opsiKertasDariQuery(c),
       ),
     );
   })

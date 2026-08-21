@@ -6,7 +6,7 @@ import { z } from "zod";
 import { db } from "../../db/client";
 import { branches, companies, saleItems, sales, shifts, users } from "../../db/schema";
 import { qtyDitagih, waktuKertas } from "@kakarut/shared";
-import { opsiSlipDariQuery, responsSlip } from "../print/slip";
+import { opsiKertasDariQuery, responsSlip } from "../print/kertas";
 import {
   branchUntukTulis,
   requireRole,
@@ -320,7 +320,7 @@ export const penjualanRoutes = new Hono<AppEnv>()
           catatan: sale.catatan,
           kasir: kasirUser?.nama ?? null,
         },
-        opsiSlipDariQuery(c),
+        opsiKertasDariQuery(c),
       ),
     );
   })

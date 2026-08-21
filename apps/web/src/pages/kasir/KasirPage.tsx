@@ -145,7 +145,7 @@ function StokBadge({ stok, size = "md" }: { stok: MenuStokDto | undefined; size?
 
 export function KasirPage() {
   const { auth } = useAuth();
-  const { isThermal, printOrderSlip } = usePrinter();
+  const { isThermal, printOrderSlip, printBon } = usePrinter();
   // Kasir butuh satu cabang konkret (menu, meja, shift, open bill) — dari
   // Kantor berjualan atas nama cabang yang dipilih di CabangDataBar.
   const { query: branchQuery, id: branchId } = useCabangData();
@@ -791,6 +791,65 @@ export function KasirPage() {
     }
   }
 
+  /**
+   * BON TAGIHAN dari isi KERANJANG — berharga, tapi BUKAN bukti pembayaran.
+   *
+   * Kertas yang diminta tamu saat selesai makan: ia memeriksa pesanannya dan
+   * tahu berapa yang harus disiapkan, lalu membayar. Yang diterimanya sesudah
+   * membayar adalah STRUK.
+   *
+   * Angkanya diambil dari NILAI YANG SAMA dengan yang tampil di layar kasir —
+   * `subtotal`, `diskon`, `pb1`, `total` — bukan dihitung ulang di sini. Kalau
+   * dihitung ulang, kertas di tangan tamu dan angka di layar kasir bisa
+   * berselisih beberapa rupiah karena pembulatan, dan yang menemukannya adalah
+   * tamu yang sedang memegang uangnya.
+   *
+   * `cartTagih`, bukan `cart`: sajian yang dibatalkan dapur tak boleh ditagih.
+   */
+  const [bonError, setBonError] = useState<string | null>(null);
+  const [bonPending, setBonPending] = useState(false);
+  async function cetakBonTagihan() {
+    setBonError(null);
+    setBonPending(true);
+    try {
+      await printBon({
+        companyNama: company?.nama ?? "",
+        branchNama: cabangIni?.nama ?? "",
+        waktu: waktuKertasWIB(new Date()),
+        isDineIn: dineIn,
+        mejaLabel: mejaTerpilih?.nama ?? null,
+        customerNama: konsumenNama.trim() || null,
+        items: cartTagih.map((l) => ({
+          nama: l.menu.nama,
+          qty: l.qty,
+          hargaSatuan: hargaBaris(l),
+          lineTotal: hargaBaris(l) * l.qty,
+          tag:
+            l.dineInOverride !== null && l.dineInOverride !== dineIn
+              ? l.dineInOverride
+                ? "DI"
+                : "TA"
+              : null,
+          catatan: l.catatan.trim() || null,
+        })),
+        subtotal,
+        diskon,
+        diskonPersen: diskonTipe === "persen" && diskon > 0 ? diskonNilaiNum : null,
+        pb1Amount: pb1,
+        pb1Rate: pb1Conf?.pb1_enabled ? pb1Conf.pb1_rate : null,
+        total,
+        // Layar kasir tak mengelola catatan bill (lihat `simpanBill`), jadi
+        // tak ada yang bisa dikirim dari sini. `GET /open-bill/:id/bon` di
+        // server memang membawanya — itu jalur mobile.
+        kasir: auth?.user.nama ?? null,
+      });
+    } catch (e) {
+      setBonError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBonPending(false);
+    }
+  }
+
   const simpanBill = useMutation({
     mutationFn: () => {
       const body = {
@@ -1405,6 +1464,31 @@ export function KasirPage() {
             >
               {slipPending ? "Mencetak…" : "🍽 Cetak Pesanan (tanpa harga)"}
             </button>
+          )}
+          {/*
+            BON TAGIHAN — berharga, tapi BUKAN bukti pembayaran. Diserahkan ke
+            tamu saat ia minta tagihannya, sebelum membayar.
+
+            Di BAWAH slip pesanan dan di ATAS Open Bill/Lanjut, sebab itu urutan
+            waktunya di lapangan: pesanan ke dapur dulu, bon saat tamu selesai
+            makan, pembayaran terakhir.
+
+            `cartTagih`, bukan `cart`: bila SEMUA sajian dibatalkan dapur tak ada
+            yang bisa ditagih, dan bon bertotal nol cuma membingungkan. Syarat
+            yang sama dipakai tombol Lanjut.
+          */}
+          {isThermal && cartTagih.length > 0 && (
+            <button
+              onClick={() => void cetakBonTagihan()}
+              disabled={bonPending}
+              className={`${btnSecondary} w-full py-3`}
+              title="Tagihan berharga untuk diperiksa tamu — bukan bukti pembayaran"
+            >
+              {bonPending ? "Mencetak…" : "🧾 Cetak Bon Tagihan (belum dibayar)"}
+            </button>
+          )}
+          {bonError && (
+            <p className="text-xs text-red-600">Gagal mencetak bon: {bonError}</p>
           )}
           {/* Setelah meja & menu: pilih simpan Open Bill atau Lanjut ke pembayaran */}
           <div className="grid grid-cols-2 gap-2">

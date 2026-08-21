@@ -12,6 +12,7 @@ export * from "./pesanan";
 export * from "./prorata";
 export * from "./receipt";
 export * from "./order-slip";
+export * from "./bon-tagihan";
 export * from "./refund";
 export * from "./satuan";
 export * from "./types";

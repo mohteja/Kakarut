@@ -12391,6 +12391,114 @@ cek "slip open bill id asing → 404" "V == 404" \
   "$(printf '%s\n' "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/open-bill/00000000-0000-0000-0000-000000000000/slip" -H "Authorization: Bearer $REISS105")")"
 
 echo
+echo "── §229 Bon tagihan: berharga, tapi BUKAN bukti pembayaran ──"
+#
+# Kertas KETIGA di kasir. Bentuknya hampir identik dengan struk — rupiah,
+# Subtotal, TOTAL — dan itu memang disengaja supaya tamu bisa membandingkan
+# keduanya. Yang memisahkan keduanya karena itu KATA-KATANYA, dan kesalahan
+# yang paling mahal di sini bukan salah angka melainkan salah BACA: selembar
+# kertas bertuliskan TOTAL yang dikira tanda lunas.
+#
+# Dipakai bill dari §228 yang sudah ada isinya (2 porsi + catatan baris).
+BON229=$(api "$REISS105" GET "/open-bill/$BID228/bon?paper=58")
+T229=$(echo "$BON229" | jq -r '.teks // ""')
+cek "dasar §229: bon terbentuk & byte-nya tidak kosong" "V == 1" \
+  "$(echo "$BON229" | jq '((.data|length) > 50) | if . then 1 else 0 end')"
+
+# INTI 1 — peringatannya ada DUA kali: sebelum angkanya dibaca dan sesudahnya.
+# Yang dibawa pulang orang dari selembar kertas adalah baris terakhir yang
+# dibacanya; pada struk baris itu berbunyi "Terima kasih!".
+cek "INTI: 'BELUM DIBAYAR' muncul dua kali" "V == 2" \
+  "$(printf '%s' "$T229" | grep -o 'BELUM DIBAYAR' | wc -l | tr -d ' ')"
+cek "INTI: menyatakan bukan bukti pembayaran" "V == 1" \
+  "$(printf '%s' "$T229" | grep -q 'Bukan bukti pembayaran' && echo 1 || echo 0)"
+cek "judulnya BON TAGIHAN, bukan nota" "V == 1" \
+  "$(printf '%s' "$T229" | grep -q 'BON TAGIHAN' && echo 1 || echo 0)"
+
+# INTI 2 — tak ada satu pun baris pembayaran. Ini ditegakkan struktural di
+# `BonData` (tak berkolom metodeBayar/uangDiterima/footer), dan diperiksa lagi
+# di sini pada byte yang benar-benar keluar dari server.
+cek "INTI: tak ada baris pembayaran/kembalian/terima kasih" "V == 0" \
+  "$(printf '%s' "$T229" | grep -cE 'Metode|Kembali|Terima kasih|Tunai' | tr -d ' ')"
+cek "INTI: tak ada nomor antrian (nomor nota belum ada)" "V == 0" \
+  "$(printf '%s' "$T229" | grep -cE 'Antrian|NaN' | tr -d ' ')"
+
+# PASANGAN untuk kedua INTI di atas: bon ini memang KERTAS BERHARGA. Tanpa
+# pasangan ini, "tak memuat Metode/Kembali" juga hijau seandainya bonnya kosong
+# atau gagal dimuat — yaitu kerusakan, bukan keberhasilan.
+cek "PASANGAN: bon MEMUAT rupiah, Subtotal, dan TOTAL" "V == 1" \
+  "$(printf '%s' "$T229" | grep -q 'Rp' && printf '%s' "$T229" | grep -q 'Subtotal' \
+     && printf '%s' "$T229" | grep -q 'TOTAL' && echo 1 || echo 0)"
+cek "PASANGAN: barisnya memuat menu, jumlah, dan catatan barisnya" "V == 1" \
+  "$(printf '%s' "$T229" | grep -q '2 x ' && printf '%s' "$T229" | grep -q 'tanpa cabai' && echo 1 || echo 0)"
+
+# Laci TAK BOLEH terbuka — diperiksa pada BYTE-nya, bukan pada opsinya.
+# Membuka laci saat bon diminta membuat tamu mengira pembayarannya tercatat.
+cek "INTI: byte-nya tak memuat perintah buka laci" "V == 1" \
+  "$(echo "$BON229" | jq -r '.data' | python3 -c "
+import sys, base64
+b = base64.b64decode(sys.stdin.read().strip())
+print(0 if bytes([0x1b, 0x70]) in b else 1)")"
+
+# UANGNYA harus cocok dengan yang dihitung server sendiri, bukan sekadar 'ada
+# angka'. Bill 2 porsi → subtotal = 2 x harga menu; TOTAL = subtotal + PB1.
+HRG229=$(api "$REISS105" GET /menu | jq -r --arg m "$MENU228" '[.[]|select(.id==$m)][0].harga_jual')
+SUB229=$(python3 -c "print(int(float('$HRG229')) * 2)")
+cek "subtotal bon = 2 x harga menu" "V == 1" \
+  "$(printf '%s' "$T229" | grep -q "Rp$(python3 -c "
+print(f'{$SUB229:,}'.replace(',', '.'))")" && echo 1 || echo 0)"
+
+# ── BARIS YANG DIBATALKAN DAPUR TIDAK BOLEH DITAGIH ────────────────────────
+#
+# Alasannya lebih keras daripada di slip pesanan: di sana membawa baris batal
+# berarti menyuruh dapur memasaknya lagi; di SINI artinya menagih tamu untuk
+# makanan yang tak pernah datang. Pembatalan biasanya terjadi karena bahannya
+# habis, jadi tamunya justru orang yang sudah dikecewakan sekali.
+#
+# Meja lain: "satu meja satu bill" menolak bill kedua di meja yang sama —
+# percobaan pertama seksi ini justru tersandung aturan itu.
+MEJA229=$(api "$REISS105" GET /meja | jq -r --arg m "$MEJA228" '[.[]|select(.tipe=="dine_in" and .id!=$m)][0].id')
+MENU229B=$(api "$REISS105" GET /menu | jq -r --arg m "$MENU228" '[.[]|select(.harga_jual>0 and .is_active and .id!=$m)][0].id')
+BILL229=$(api "$REISS105" POST /open-bill \
+  "{\"meja_id\":\"$MEJA229\",\"customer_nama\":\"Uji 229\",\"items\":[{\"menu_id\":\"$MENU228\",\"qty\":1},{\"menu_id\":\"$MENU229B\",\"qty\":1}]}")
+BID229=$(echo "$BILL229" | jq -r '.id // empty')
+cek "dasar §229: bill dua baris terbentuk di meja lain" "V == 1" \
+  "$([ -n "$BID229" ] && echo 1 || echo 0)"
+
+# Total SEBELUM pembatalan — premisnya: kedua baris memang ditagih.
+TOT229A=$(api "$REISS105" GET "/open-bill/$BID229/bon" | jq -r '.teks' \
+  | grep -o 'TOTAL *Rp[0-9.]*' | grep -o '[0-9.]*$' | tr -d '.')
+HRG229B=$(api "$REISS105" GET /menu | jq -r --arg m "$MENU229B" '[.[]|select(.id==$m)][0].harga_jual')
+cek "premis: bon dua baris menagih KEDUANYA" "V == 1" \
+  "$(python3 -c "
+a = int('${TOT229A:-0}' or 0)
+print(1 if a >= int(float('$HRG229')) + int(float('$HRG229B')) else 0)")"
+
+# Dapur membatalkan SATU barisnya (bahan habis).
+IT229=$(api "$REISS105" GET "/open-bill/$BID229" | jq -r --arg m "$MENU229B" '[.items[]|select(.menu_id==$m)][0].id')
+api "$TKIT154" POST "/pesanan/open_bill/$BID229/item/$IT229/status" '{"status":"batal"}' > /dev/null
+cek "dasar §229: barisnya benar-benar berstatus batal" "V == 1" \
+  "$(api "$REISS105" GET "/open-bill/$BID229" | jq --arg i "$IT229" '[.items[]|select(.id==$i and .pesanan_status=="batal")]|length')"
+
+TOT229B=$(api "$REISS105" GET "/open-bill/$BID229/bon" | jq -r '.teks' \
+  | grep -o 'TOTAL *Rp[0-9.]*' | grep -o '[0-9.]*$' | tr -d '.')
+cek "INTI: bon TURUN persis sebesar baris yang dibatalkan" "V == 1" \
+  "$(python3 -c "
+a, b = int('${TOT229A:-0}' or 0), int('${TOT229B:-0}' or 0)
+print(1 if a > b > 0 else 0)")"
+# …dan yang tersisa memang baris yang TIDAK dibatalkan, bukan bon kosong.
+cek "INTI: bonnya masih menagih baris yang sah" "V == 1" \
+  "$(python3 -c "print(1 if int('${TOT229B:-0}' or 0) >= int(float('$HRG229')) else 0)")"
+
+# Cakupan: id asing ditolak, bukan memulangkan bon kosong.
+cek "bon id asing → 404" "V == 404" \
+  "$(printf '%s\n' "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/open-bill/00000000-0000-0000-0000-000000000000/bon" -H "Authorization: Bearer $REISS105")")"
+# Penjualan yang SUDAH dibayar sengaja tak punya /bon — yang dibutuhkan di sana
+# cetak ulang struk. Rute yang tak ada harus 404, bukan diam-diam melayani.
+cek "penjualan tak punya /bon (yang lunas dicetak ulang struknya)" "V == 404" \
+  "$(printf '%s\n' "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/penjualan/$SID228/bon" -H "Authorization: Bearer $REISS105")")"
+
+echo
 echo "── §221 Akun seed harus ditinggalkan seperti semula ──"
 # Duduk di ekor bersama §209/§215, dan karena alasan yang sama: ia menghakimi
 # sesudah semua seksi selesai mengutak-atik.

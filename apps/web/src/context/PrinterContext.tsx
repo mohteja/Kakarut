@@ -7,9 +7,11 @@ import {
   type ReactNode,
 } from "react";
 import {
+  buildBonBytes,
   buildOrderSlipBytes,
   buildReceiptBytes,
   buildTestPrintBytes,
+  type BonData,
   type OrderSlipData,
   type ReceiptData,
   type ReceiptOptions,
@@ -88,6 +90,8 @@ interface PrinterContextValue {
   printReceipt: (data: ReceiptData) => Promise<void>;
   /** slip pesanan (menu & jumlah saja, tanpa harga) — dapur & meja tamu */
   printOrderSlip: (data: OrderSlipData) => Promise<void>;
+  /** bon tagihan (berharga, BUKAN bukti bayar) — diserahkan sebelum membayar */
+  printBon: (data: BonData) => Promise<void>;
   printTest: () => Promise<void>;
   /** true bila transport thermal terpilih (bukan cetak browser) */
   isThermal: boolean;
@@ -167,6 +171,10 @@ export function PrinterProvider({ children }: { children: ReactNode }) {
     (data: OrderSlipData) => printBytes(buildOrderSlipBytes(data, opts())),
     [printBytes, opts],
   );
+  const printBon = useCallback(
+    (data: BonData) => printBytes(buildBonBytes(data, opts())),
+    [printBytes, opts],
+  );
   const printTest = useCallback(
     () => printBytes(buildTestPrintBytes(opts())),
     [printBytes, opts],
@@ -189,6 +197,7 @@ export function PrinterProvider({ children }: { children: ReactNode }) {
         disconnect,
         printReceipt,
         printOrderSlip,
+        printBon,
         printTest,
         isThermal,
         canAutoPrint,
