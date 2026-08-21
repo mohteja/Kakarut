@@ -4215,9 +4215,18 @@ cek "password kasir dipulihkan ke semula → 200" "V == 200" \
 PULIH105=$(login "$KASIR_EMAIL" "$KASIR_PASS")
 cek "login kasir dgn password SEMULA berhasil lagi" "V == 1" \
   "$([ -n "$PULIH105" ] && [ "$PULIH105" != "null" ] && echo 1 || echo 0)"
-# Token global kasir ikut diperbarui: reset password menaikkan `token_version`,
-# jadi $KASIR yang lama sudah 401 untuk seluruh seksi di bawah.
+# KEDUA token kasir ikut diperbarui, dan yang kedua itu yang penting.
+#
+# Reset password menaikkan `token_version`, jadi SEMUA token kasir sebelumnya
+# jadi 401 — termasuk `$REISS105`, token hasil re-issue di atas. Dan
+# `$REISS105`-lah yang dipakai ~60 asersi di seksi-seksi bawah sebagai "token
+# kasir" (§137 bahkan menjelaskannya dalam komentar: "$KASIR sudah 401 sejak
+# §105"). Memulihkan password tanpa memperbaruinya membuat §137 mati dengan
+# `jq: Cannot index object with number` — badan 401 yang diindeks seperti
+# larik, 1.300 baris dari sebabnya. Persis itu yang terjadi pada percobaan
+# pertama pemulihan ini.
 KASIR="$PULIH105"
+REISS105="$PULIH105"
 
 echo "== 106. Verifikasi email wajib saat daftar (anti-enumerasi + blokir login) =="
 # (email sudah dikosongkan lagi di akhir §97 → mode dev: dev_verify_url tersedia)
