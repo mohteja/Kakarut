@@ -11747,6 +11747,84 @@ cek "PASANGAN: potongan tetap PENUH — 21 terpakai dari 100 (sisa 79)" "V == 79
   "$(saldo218 "$P218B")"
 
 
+echo "== 219. Penjaga kuantitas yang dibaca DI LUAR kunci =="
+# Dua pintu, satu bentuk: baca saldo → putuskan → tulis, dengan bacanya memakai
+# `db` dan tulisannya pernyataan TERPISAH. Kontraknya bahkan sudah tertulis di
+# `hitungSaldoCabang`: "pemanggil yang memvalidasi SEBELUM MENULIS wajib
+# mengoper `tx`-nya" — dan kedua pintu ini tidak.
+#
+#   POST /:id/pakai   penjaganya "qty > saldo → 400". Isinya benar; yang bocor
+#                     penegakannya. Terukur: saldo 10, enam `pakai 10` serentak
+#                     → TIGA dibalas 200, saldo −20 (dua dari tiga ronde).
+#                     Sebagian permintaan tetap ditolak, jadi dari layar tampak
+#                     berfungsi — yang lolos itulah yang menarik stok ke minus.
+#
+#   POST /:id/koreksi menulis SELISIH (`qty_fisik − saldo`), jadi dua koreksi
+#                     bersamaan menerapkannya dua kali. Berurutan ia idempoten
+#                     (koreksi kedua berselisih 0) — dan justru itu yang membuat
+#                     klik ganda tampak aman. Terukur: "rak berisi 5" atas saldo
+#                     10, empat kali serentak, tiga ronde → saldo 0, 10, 10.
+#                     TAK SEKALI PUN 5. Berurutan selalu 5.
+#
+# Asersinya pada SALDO, bukan pada kode status: `koreksi` membalas 200 pada
+# keempat permintaan bahkan saat hasilnya salah, jadi uji yang membaca kode
+# status akan lulus di atas bug ini.
+CB219=$(api "$OWNER" GET /cabang | jq -r '[.[]|select(.tipe=="store" and .is_active)][0].id')
+buatStok219(){ # buatStok219 <qty> → id perlengkapan berstok segitu
+  local p
+  p=$(api "$OWNER" POST /perlengkapan \
+    "{\"nama\":\"Kuantitas 219 $RANDOM$RANDOM\",\"satuan\":\"pcs\",\"harga_beli\":100,\"dilacak\":true}" | jq -r .id)
+  api "$OWNER" POST "/perlengkapan/$p/masuk?branch_id=$CB219" "{\"qty\":$1,\"total_harga\":100}" > /dev/null
+  echo "$p"
+}
+saldo219(){ api "$OWNER" GET "/perlengkapan?branch_id=$CB219" | jq -r --arg p "$1" '[.[]|select(.id==$p)][0].saldo // 999'; }
+serentak219(){ # serentak219 <n> <path> <body> → jumlah jawaban 2xx
+  local n="$1" path="$2" body="$3" d i
+  d=$(mktemp -d)
+  for i in $(seq 1 "$n"); do
+    curl -s -o /dev/null -w '%{http_code}\n' -X POST "$BASE/api$path" \
+      -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "$body" > "$d/c$i" &
+  done
+  wait
+  grep -hcE '^2' "$d"/c* 2>/dev/null | paste -sd+ | bc
+  rm -rf "$d"
+}
+
+# ── PAKAI: tiga ronde, tiap ronde item baru berstok 10 ────────────────────
+LOLOS219=0; MINUS219=0
+for r in 1 2 3; do
+  P=$(buatStok219 10)
+  L=$(serentak219 6 "/perlengkapan/$P/pakai?branch_id=$CB219" '{"qty":10}')
+  LOLOS219=$((LOLOS219 + L))
+  S=$(saldo219 "$P")
+  case "$S" in (-*) MINUS219=$((MINUS219 + 1)) ;; esac
+done
+cek "INTI: saldo tak pernah MINUS setelah pemakaian serentak (3 ronde)" "V == 0" "$MINUS219"
+cek "INTI: dari 6 pemakaian serentak, tepat SATU lolos tiap ronde" "V == 3" "$LOLOS219"
+
+# ── KOREKSI: hasilnya harus PERSIS yang dihitung petugas ──────────────────
+SALAH219=0
+for r in 1 2 3; do
+  P=$(buatStok219 10)
+  serentak219 4 "/perlengkapan/$P/koreksi?branch_id=$CB219" '{"qty_fisik":5}' > /dev/null
+  [ "$(saldo219 "$P")" = "5" ] || SALAH219=$((SALAH219 + 1))
+done
+cek "INTI: koreksi fisik serentak mendarat di angka yang DIHITUNG (5), 3 ronde" "V == 0" "$SALAH219"
+
+# ── PASANGAN: kuncinya tak boleh mematikan jalur normalnya ────────────────
+# "Saldo tak minus" juga tercapai kalau pemakaian ditolak seluruhnya, dan
+# "koreksi benar" juga tercapai kalau koreksi berhenti menulis apa pun.
+P219A=$(buatStok219 10)
+cek "PASANGAN: pemakaian tunggal yang WAJAR tetap diterima" "V == 200" \
+  "$(status_code_body "$OWNER" POST "/perlengkapan/$P219A/pakai?branch_id=$CB219" '{"qty":4}')"
+cek "PASANGAN: …dan saldonya benar-benar berkurang (10 → 6)" "V == 6" "$(saldo219 "$P219A")"
+cek "PASANGAN: pemakaian melebihi saldo tetap DITOLAK 400" "V == 400" \
+  "$(status_code_body "$OWNER" POST "/perlengkapan/$P219A/pakai?branch_id=$CB219" '{"qty":99}')"
+P219B=$(buatStok219 10)
+cek "PASANGAN: koreksi tunggal tetap menulis selisihnya (10 → 3)" "V == 3" \
+  "$(api "$OWNER" POST "/perlengkapan/$P219B/koreksi?branch_id=$CB219" '{"qty_fisik":3}' > /dev/null; saldo219 "$P219B")"
+
+
 echo
 echo "── §215 Kuota pendaftaran: skrip ini tak boleh diam saat 429 ──"
 # Duduk di ekor bersama §209, dan karena alasan yang sama: ia mengadili berkas
