@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { zValidator } from "@hono/zod-validator";
+import { zValidator } from "../../lib/validator";
 import bcrypt from "bcryptjs";
 import { and, eq, gt, isNull, sql } from "drizzle-orm";
 import { Hono } from "hono";

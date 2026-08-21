@@ -11877,7 +11877,15 @@ echo "== 220. Kekekalan uang refund, DI DALAM basis data =="
 # diskon persen & nominal 0–100, tiga bentuk keranjang) → NOL pelanggaran.
 # Yang dipasang di sini bagian murahnya, dengan tarif PB1 PECAHAN (12,5%) yang
 # paling mungkin melahirkan setengah rupiah.
-PB1_220=$(api "$OWNER" GET /company | jq -r '{e:.pb1_enabled,r:.pb1_rate,d:.diskon_maks_persen}|@base64')
+# GET /company memulangkan camelCase (baris drizzle apa adanya), sedangkan
+# PATCH menerima snake_case. Versi pertama baris ini memakai snake_case untuk
+# MEMBACA — jadi ketiganya `null`, pemulihannya mengirim null (ditolak zod, dan
+# responsnya dibuang ke /dev/null), lalu asersi pemulihan di ekor seksi
+# membandingkan null dengan null dan SELALU hijau. Setelan 12,5% yang seksi ini
+# berjanji dikembalikan sebenarnya diwariskan ke seluruh seksi sesudahnya.
+PB1_220=$(api "$OWNER" GET /company | jq -r '{e:.pb1Enabled,r:.pb1Rate,d:.diskonMaksPersen}|@base64')
+cek "dasar §220: setelan PB1 asal terbaca (bukan null)" "V == 1" \
+  "$(echo "$PB1_220" | base64 -d | jq '((.e != null) and (.r != null) and (.d != null)) | if . then 1 else 0 end')"
 api "$OWNER" PATCH /company '{"pb1_enabled":true,"pb1_rate":12.5,"diskon_maks_persen":100}' > /dev/null
 PBA220=$(api "$OWNER" GET /menu | jq -r '[.[]|select(.nama|startswith("Premium Basooopa A"))][0].id')
 PBB220=$(api "$OWNER" GET /menu | jq -r '[.[]|select(.nama|startswith("Premium Basooopa B"))][0].id')
@@ -11938,7 +11946,9 @@ cek "PASANGAN: …dan notanya masih menyisakan tagihan" "V == 1" \
 api "$OWNER" PATCH /company "$(echo "$PB1_220" | base64 -d | jq -c '{pb1_enabled:.e,pb1_rate:.r,diskon_maks_persen:.d}')" > /dev/null
 cek "setelan PB1 perusahaan dikembalikan seperti semula" "V == 1" \
   "$(api "$OWNER" GET /company | jq --argjson a "$(echo "$PB1_220" | base64 -d)" \
-     '(.pb1_enabled==$a.e and .pb1_rate==$a.r and .diskon_maks_persen==$a.d)|if . then 1 else 0 end')"
+     '(.pb1Enabled==$a.e and .pb1Rate==$a.r and .diskonMaksPersen==$a.d)|if . then 1 else 0 end')"
+cek "PASANGAN: …dan tarifnya memang BUKAN 12,5% lagi" "V == 1" \
+  "$(api "$OWNER" GET /company | jq '(.pb1Rate != 12.5) | if . then 1 else 0 end')"
 
 
 echo
@@ -12241,6 +12251,58 @@ cek "PASANGAN: …dan modenya kembali naik" "V == 1" \
   "$([ "$(mode226)" = "pro" ] && echo 1 || echo 0)"
 cek "tenant ditinggalkan ber-mode pro seperti semula" "V == 1" \
   "$([ "$(mode226)" = "$MODE226" ] && echo 1 || echo 0)"
+
+echo
+echo "── §227 Galat validasi harus kalimat, bukan gumpalan objek ──"
+# `@hono/zod-validator` bawaan MEMULANGKAN SENDIRI 400 berisi objek ZodError
+# mentah: {"success":false,"error":{"name":"ZodError","message":"[\n {…"}}.
+#
+# Seluruh API ini berjanji { error: "<kalimat>" }, dan apps/web/src/lib/api.ts
+# menyalin `data.error` ke pesan galat — bertipe string menurut deklarasinya.
+# Untuk galat zod isinya OBJEK, dan `new Error(objek)` merangkainya jadi
+# "[object Object]". TERUKUR: menjalankan baris 138-156 api.ts atas badan itu
+# menghasilkan e.message === "[object Object]". Itulah yang tampil di layar —
+# kasir yang salah mengetik satu angka tak punya jalan tahu angka mana.
+#
+# Akibat keduanya lebih sunyi: respons itu DIPULANGKAN, bukan DILEMPAR, jadi ia
+# melewati app.onError sama sekali — termasuk pencatatannya ke error_logs.
+val227() { # val227 <method> <path> <json> → echo badan responsnya
+  curl -s -X "$1" "$BASE/api$2" -H "Authorization: Bearer $OWNER" \
+    -H 'Content-Type: application/json' -d "$3"
+}
+PB1_ASAL227=$(api "$OWNER" GET /company | jq -r .pb1Rate)   # camelCase: lihat catatan §220
+B227=$(val227 PATCH /company '{"pb1_rate":150}')
+cek "dasar §227: badan cacat memang DITOLAK (validasinya masih hidup)" "V == 400" \
+  "$(printf '%s\n' "$(curl -s -o /dev/null -w '%{http_code}' -X PATCH "$BASE/api/company" \
+     -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"pb1_rate":150}')")"
+cek "INTI: kolom error bertipe STRING, bukan objek" "V == 1" \
+  "$(echo "$B227" | jq '(.error | type == "string") | if . then 1 else 0 end')"
+cek "INTI: kalimatnya menyebut ISIAN dan BATASNYA" "V == 1" \
+  "$([ "$(echo "$B227" | jq -r .error)" = "pb1_rate: maksimal 100" ] && echo 1 || echo 0)"
+cek "INTI: bukan gumpalan JSON/ZodError" "V == 1" \
+  "$(printf '%s' "$(echo "$B227" | jq -r .error)" | grep -qiE 'ZodError|"code"|\[object Object\]|^\s*\[' && echo 0 || echo 1)"
+
+# Kunci yang TIDAK dikirim berbunyi "wajib diisi", bukan "harus berupa string" —
+# bagi pengirimnya kunci yang absen memang bukan soal tipe.
+cek "kunci yang absen berbunyi 'wajib diisi'" "V == 1" \
+  "$(printf '%s' "$(val227 POST /bahan '{"harga_beli":100}' | jq -r .error)" | grep -q 'nama: wajib diisi' && echo 1 || echo 0)"
+cek "tipe salah menyebut tipe yang diharapkan" "V == 1" \
+  "$(printf '%s' "$(val227 POST /bahan '{"nama":"Uji 227","harga_beli":"seratus"}' | jq -r .error)" | grep -q 'harus berupa number' && echo 1 || echo 0)"
+
+# PASANGAN: pembungkusnya tak boleh MEMATIKAN validasinya. Tanpa asersi ini,
+# hook yang diam-diam meloloskan semua badan juga membuat asersi di atas hijau
+# (tak ada galat → tak ada gumpalan objek).
+cek "PASANGAN: badan yang SAH tetap diterima" "V == 200" \
+  "$(printf '%s\n' "$(curl -s -o /dev/null -w '%{http_code}' -X PATCH "$BASE/api/company" \
+     -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"pb1_rate":10}')")"
+cek "PASANGAN: …dan nilainya benar-benar tersimpan" "V == 1" \
+  "$([ "$(api "$OWNER" GET /company | jq -r .pb1Rate)" = "10" ] && echo 1 || echo 0)"
+
+# Setelan dikembalikan seperti semula — seksi ini menumpang setelan perusahaan
+# untuk mengujinya, dan tak boleh meninggalkannya berubah.
+api "$OWNER" PATCH /company "{\"pb1_rate\":$PB1_ASAL227}" > /dev/null
+cek "setelan PB1 dikembalikan seperti semula" "V == 1" \
+  "$([ "$(api "$OWNER" GET /company | jq -r .pb1Rate)" = "$PB1_ASAL227" ] && echo 1 || echo 0)"
 
 echo
 echo "── §221 Akun seed harus ditinggalkan seperti semula ──"

@@ -1,4 +1,4 @@
-import { zValidator } from "@hono/zod-validator";
+import { zValidator } from "../../lib/validator";
 import { aliasedTable, and, asc, desc, eq, gte, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { Hono } from "hono";

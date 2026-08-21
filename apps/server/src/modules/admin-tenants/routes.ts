@@ -1,4 +1,4 @@
-import { zValidator } from "@hono/zod-validator";
+import { zValidator } from "../../lib/validator";
 import bcrypt from "bcryptjs";
 import { desc, eq, sql } from "drizzle-orm";
 import { Hono } from "hono";

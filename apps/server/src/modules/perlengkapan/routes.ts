@@ -5,7 +5,7 @@
  * Semua peran boleh lihat & mencatat pemakaian (kasir/tim terkunci cabang);
  * owner/admin mengelola item, stok masuk, koreksi, aturan, dan belanja.
  */
-import { zValidator } from "@hono/zod-validator";
+import { zValidator } from "../../lib/validator";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";

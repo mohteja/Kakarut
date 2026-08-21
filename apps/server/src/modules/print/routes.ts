@@ -1,6 +1,6 @@
 import dns from "node:dns/promises";
 import net from "node:net";
-import { zValidator } from "@hono/zod-validator";
+import { zValidator } from "../../lib/validator";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
