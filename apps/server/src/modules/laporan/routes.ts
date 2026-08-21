@@ -253,7 +253,7 @@ export const laporanRoutes = new Hono<AppEnv>()
     );
     // 1 faktur = beberapa baris ber-faktur_id sama (baris lama tanpa faktur = id-nya sendiri)
     const keyFaktur = sql<string>`COALESCE(${productions.fakturId}::text, ${productions.id}::text)`;
-    const totalExpr = sql<number>`COALESCE(SUM(${productions.totalHarga}), 0)`;
+    const totalExpr = sql<number>`COALESCE(SUM(${productions.totalHarga}), 0)::float8`;
 
     const [agg] = await db
       .select({
@@ -281,7 +281,7 @@ export const laporanRoutes = new Hono<AppEnv>()
         nama: ingredients.nama,
         slug: ingredients.slug,
         satuan: ingredients.satuan,
-        qty: sql<number>`COALESCE(SUM(${productions.qty}), 0)`,
+        qty: sql<number>`COALESCE(SUM(${productions.qty}), 0)::float8`,
         total: totalExpr,
       })
       .from(productions)
@@ -425,7 +425,7 @@ export const laporanRoutes = new Hono<AppEnv>()
     const perMenu = await db
       .select({
         menu_nama: saleItems.menuNama,
-        target: sql<number | null>`MAX(${menus.targetDurasiDetik})`,
+        target: sql<number | null>`MAX(${menus.targetDurasiDetik})::int`,
         lewat: sql<number>`COUNT(*) FILTER (WHERE ${menus.targetDurasiDetik} IS NOT NULL AND ${detik} > ${menus.targetDurasiDetik})::int`,
         jumlah: sql<number>`COUNT(*)::int`,
         rata: sql<number>`ROUND(AVG(${detik}))::int`,

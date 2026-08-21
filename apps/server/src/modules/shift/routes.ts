@@ -115,7 +115,7 @@ async function rekapWindow(
   const rows = await db
     .select({
       metode: sales.metodeBayar,
-      total: sql<number>`COALESCE(SUM(${sales.total} + ${sales.refundTotal}), 0)`,
+      total: sql<number>`COALESCE(SUM(${sales.total} + ${sales.refundTotal}), 0)::float8`,
       jumlah: sql<number>`count(*)::int`,
     })
     .from(sales)

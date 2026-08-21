@@ -3154,7 +3154,12 @@ FB80C=$(api "$OWNER" GET "/pembelian?branch_id=$CK52_UTAMA&per_page=500" | jq -r
 RID80C=$(api "$OWNER" GET "/pembelian?branch_id=$CK52_UTAMA&per_page=500" | jq -r --arg f "$FB80C" '[.rows[]|select(.faktur_id==$f)][0].id')
 api "$OWNER" POST "/pembelian/tahap/$FB80C" "{\"ke\":\"dikerjakan\",\"items\":[{\"id\":\"$RID80C\",\"qty\":3}]}" > /dev/null
 api "$OWNER" POST "/pembelian/tahap/$FB80C" "{\"ke\":\"menunggu\",\"items\":[{\"id\":\"$RID80C\",\"qty\":3}]}" > /dev/null
-DARI80=$(date -d yesterday +%F); SAMPAI80=$(date -d tomorrow +%F)
+# Zona perusahaan, sama seperti seluruh perhitungan tanggal-saja lainnya.
+# Yang ini KEBETULAN tak pernah gagal — jendelanya tiga hari lebar sehingga
+# geseran satu hari tetap memuat mutasi yang dicari — tapi ia tetap tanggal
+# UTC/kontainer yang diadu dengan tanggal bisnis, dan "kebetulan cukup lebar"
+# bukan alasan yang bertahan saat rentangnya kelak dipersempit.
+DARI80=$(TZ=Asia/Jakarta date -d yesterday +%F); SAMPAI80=$(TZ=Asia/Jakarta date -d tomorrow +%F)
 cek "kartu stok: mutasi beli memuat nomor PB di keterangan" "V >= 1" \
   "$(api "$OWNER" GET "/stok/kartu/$BH80?branch_id=$CK52_UTAMA&dari=$DARI80&sampai=$SAMPAI80" | jq --arg n "$NOM80C" '[.mutasi[]|select(.jenis=="beli" and (.keterangan//""|contains($n)))]|length')"
 # ACC opname → mutasi opname di kartu memuat nomor SO
@@ -11741,7 +11746,23 @@ echo "== 218. Potongan otomatis tak boleh memakai stok yang tidak ada =="
 # yang pertama commit, jadi jendelanya terbuka persis seperti pagi hari.
 # Terukur di atas kode cacat: −9 pada tiga ronde berturut-turut.
 CB218=$(api "$OWNER" GET /cabang | jq -r '[.[]|select(.tipe=="store" and .is_active)][0].id')
-MULAI218=$(date -u -d '6 days ago' +%F)
+# TANGGAL BISNIS (Asia/Jakarta), bukan tanggal UTC kontainer.
+#
+# Tunggakan dihitung server dari `mulai` sampai HARI INI menurut zona
+# perusahaan. Baris ini dulu memakai `date -u`, dan di antara pukul 17.00–24.00
+# UTC — saat Jakarta sudah berganti hari — "6 hari lalu" versi UTC berjarak
+# TUJUH hari dari hari ini versi WIB. Tunggakannya jadi 8×3=24, bukan 7×3=21,
+# dan §218 gagal dengan "sisa 76, harusnya 79".
+#
+# Bukan hipotesis: itulah yang terjadi saat skrip ini dijalankan pukul 23.18
+# UTC. Artinya gerbang ini merah selama TUJUH JAM setiap hari — dan gerbang
+# yang merah tanpa sebab mengajari orang mengabaikannya.
+#
+# Delapan belas dari dua puluh perhitungan tanggal-saja di skrip ini sudah
+# memakai `TZ=Asia/Jakarta`; dua di antaranya bahkan menuliskan alasannya
+# ("kontainer bisa UTC", "tanggal bisnis, bukan tanggal UTC server"). Yang ini
+# terlewat.
+MULAI218=$(TZ=Asia/Jakarta date -d '6 days ago' +%F)
 
 # stokAwal218 <qty> → id perlengkapan baru dengan stok segitu di cabang uji
 stokAwal218(){

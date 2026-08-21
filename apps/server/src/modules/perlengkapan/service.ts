@@ -301,7 +301,7 @@ export async function saldoPerlengkapan(
       saldo: sql<number>`COALESCE((SELECT SUM(${supplyMutations.qty}) FROM ${supplyMutations} WHERE ${supplyMutations.supplyId} = ${supplies.id} AND ${supplyMutations.branchId} = ${branchId} AND ${supplyMutations.status} = 'disetujui'), 0)::float8`,
       saldoCk: ckId
         ? sql<number>`COALESCE((SELECT SUM(${supplyMutations.qty}) FROM ${supplyMutations} WHERE ${supplyMutations.supplyId} = ${supplies.id} AND ${supplyMutations.branchId} = ${ckId} AND ${supplyMutations.status} = 'disetujui'), 0)::float8`
-        : sql<number | null>`NULL`,
+        : sql<number | null>`NULL::float8`,
       aturanMetode: supplyRules.metode,
       aturanQty: supplyRules.qty,
       aturanPerHari: supplyRules.perHari,

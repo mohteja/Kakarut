@@ -2480,7 +2480,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
       const [ringkas] = await db
         .select({
           total: sql<number>`COUNT(DISTINCT ${keyExpr})::int`,
-          total_pengeluaran: sql<number>`COALESCE(SUM(${productions.totalHarga}) FILTER (WHERE ${productions.status} = 'dikonfirmasi'), 0)`,
+          total_pengeluaran: sql<number>`COALESCE(SUM(${productions.totalHarga}) FILTER (WHERE ${productions.status} = 'dikonfirmasi'), 0)::float8`,
         })
         .from(productions)
         .where(and(...conds));

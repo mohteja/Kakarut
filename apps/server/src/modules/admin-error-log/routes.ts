@@ -57,7 +57,7 @@ async function ambilKelompok(sejak: Date, saring?: "4xx" | "5xx", cari?: string)
       terakhir_pada: sql<string>`max(${errorLogs.waktu})`,
       jumlah_user: sql<number>`count(distinct ${errorLogs.userId})::int`,
       jumlah_perusahaan: sql<number>`count(distinct ${errorLogs.companyId})::int`,
-      status: sql<number>`(array_agg(${errorLogs.status} ORDER BY ${errorLogs.waktu} DESC))[1]`,
+      status: sql<number>`(array_agg(${errorLogs.status} ORDER BY ${errorLogs.waktu} DESC))[1]::int`,
       metode: sql<string>`(array_agg(${errorLogs.metode} ORDER BY ${errorLogs.waktu} DESC))[1]`,
       jalur_pola: sql<string>`(array_agg(${errorLogs.jalurPola} ORDER BY ${errorLogs.waktu} DESC))[1]`,
       pesan: sql<string>`(array_agg(${errorLogs.pesan} ORDER BY ${errorLogs.waktu} DESC))[1]`,

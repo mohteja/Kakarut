@@ -27,8 +27,32 @@ const sqlOf = (frag: Parameters<PgDialect["sqlToQuery"]>[0]) =>
 describe("SQL porsi ditagih", () => {
   it("qty ditagih = qty − qty_refund, dijepit di nol", () => {
     expect(sqlOf(qtyDitagihSql)).toBe(
-      "GREATEST(sale_items.qty - sale_items.qty_refund, 0)",
+      "GREATEST(sale_items.qty - sale_items.qty_refund, 0)::float8",
     );
+  });
+
+  it("SEMUANYA berakhir ::float8 — `sql<number>` yang tak dicast itu string", () => {
+    /*
+     * Driver `pg` memulangkan `numeric` — termasuk hasil SUM-nya — sebagai
+     * STRING, sementara `sql<number>` membuat TypeScript yakin ia `number`.
+     * Kompilernya justru menjamin sesuatu yang tak benar, dan `a + b` merangkai
+     * alih-alih menjumlah. Cast-nya tak mengubah satu angka pun: `x::float8`
+     * menghasilkan float64 yang bit-per-bit sama dengan `Number("x")`.
+     *
+     * Dipaku di sini SELAIN di `sql-number-bukan-janji.test.ts` karena keempat
+     * fragmen inilah yang paling banyak dipakai jalur uang — dan penjaga yang
+     * memindai seluruh repo bisa saja kelak dilonggarkan daftarnya.
+     */
+    for (const [nama, frag] of [
+      ["qtyDitagihSql", qtyDitagihSql],
+      ["omzetDitagihSql", omzetDitagihSql],
+      ["sumQtyDitagihSql", sumQtyDitagihSql],
+      ["hppDitagihSql", hppDitagihSql],
+    ] as const) {
+      expect(sqlOf(frag), `${nama} tanpa cast — ia akan tiba sebagai string`).toMatch(
+        /::float8$/,
+      );
+    }
   });
 
   it("omzet memakai harga_satuan × porsi ditagih, bukan line_total", () => {
