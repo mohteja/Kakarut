@@ -34,6 +34,7 @@ import {
   supplyTransfers,
   users,
 } from "../../db/schema";
+import { kunciAntrean } from "../../lib/kunci";
 import { tanggalDi } from "../../lib/time";
 import { nomorUntukRefs, terbitkanNomor } from "../dokumen/nomor";
 import { kunciKirimCabang } from "../stok/service";
@@ -145,8 +146,49 @@ export async function terapkanKonsumsiOtomatis(
   let total = 0;
   for (const r of rules) {
     if (r.terakhirDiterapkan === hariIni) continue; // sudah dihitung hari ini
-    const hari = hariTerjadwal(r.mulai, r.perHari, r.terakhirDiterapkan, hariIni);
     await db.transaction(async (tx) => {
+      /*
+       * SATU ATURAN DITERAPKAN OLEH SATU PROSES SAJA, dan ini bukan kehati-hatian
+       * berlebih — tanpa kunci ini saldo perlengkapan JATUH MINUS.
+       *
+       * Yang membuatnya berbahaya: potongan ini berjalan SENDIRI setiap kali
+       * daftar perlengkapan dibuka. Tak ada yang menekan apa pun. Beberapa
+       * tablet yang memuat layar Perlengkapan bersamaan di pagi hari — saat
+       * kursor semua aturan masih kemarin dan tunggakannya beberapa hari —
+       * sudah cukup.
+       *
+       * Bagaimana ia bocor, padahal `supply_mutations_auto_uq` memaksa satu
+       * baris auto per item/cabang/hari dan `onConflictDoNothing` sudah dipakai:
+       * indeks itu menjaga TIDAK ADA HARI YANG DIPOTONG DUA KALI, dan ia
+       * memang menepatinya. Yang tak dijaganya adalah BERAPA TOTALNYA.
+       *
+       *   proses A: sisaRak=10 → isi hari 1..4 (3+3+3+1), stok habis, hari 5..7
+       *             DITINGGALKAN karena `sisa <= 0`
+       *   proses B: sudah membaca sisaRak=10 SEBELUM A commit → hari 1..4
+       *             bentrok (dilewati, benar), lalu hari 5..7 MASIH KOSONG
+       *             sehingga terisi 3+3+3
+       *
+       * Hasilnya 19 terpakai dari 10 yang ada. Terukur pada 8 item dengan 6 GET
+       * serentak: 7 dari 8 item jatuh ke saldo −9, nol baris ganda. Indeksnya
+       * hijau, bukunya salah.
+       *
+       * Kuncinya per-ATURAN, jadi aturan lain tetap berjalan berdampingan.
+       * `sisaRak` dibaca DI DALAM kunci — itu intinya: yang membuat B salah
+       * bukan tulisannya melainkan bacaannya yang sudah basi.
+       */
+      await kunciAntrean(tx, "konsumsi-auto", r.id);
+      /*
+       * Kursornya juga dibaca ulang di dalam kunci. Daftar `rules` di atas
+       * diambil sebelum kunci ini didapat, jadi proses lain bisa sudah
+       * menerapkan aturan ini seluruhnya di sela itu — dan mengulanginya cuma
+       * membuang kueri.
+       */
+      const [segar] = await tx
+        .select({ terakhirDiterapkan: supplyRules.terakhirDiterapkan })
+        .from(supplyRules)
+        .where(eq(supplyRules.id, r.id));
+      if (!segar || segar.terakhirDiterapkan === hariIni) return;
+      const hari = hariTerjadwal(r.mulai, r.perHari, segar.terakhirDiterapkan, hariIni);
       if (hari.length > 0) {
         /*
          * YANG BISA DIPAKAI ADALAH YANG ADA DI RAK.
