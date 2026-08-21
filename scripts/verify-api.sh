@@ -11175,6 +11175,42 @@ balap213(){ # balap213 <n> <token> <path> <body> → direktori berisi c* (kode) 
 lima213(){ cat "$1"/c* | grep -c '^5' || true; }   # berapa jawaban 5xx
 kode213(){ cat "$1"/c* | grep -c "^$2" || true; }  # berapa jawaban berawalan <2>
 
+# balapUlang213 — BEBERAPA burst, tiap burst bernama beda. Kenapa perlu, dan
+# kenapa satu burst tidak cukup:
+#
+# Balapan adalah detektor PROBABILISTIK. Ia hanya menuduh bila dua permintaan
+# kebetulan berpapasan tepat di dalam jendela antara pra-cek dan tulisannya,
+# dan lebar jendela itu berbeda tiap endpoint — makin banyak kerja sebelum
+# INSERT, makin sempit peluangnya. Asersi yang "pernah merah sekali" karena
+# itu belum tentu asersi yang menjaga: di CI ia ditembak SEKALI.
+#
+# Jadi kekuatannya DIUKUR, bukan ditebak. Bug-nya disuntikkan kembali lalu
+# tiap bentuk dijalankan 8 ronde (server & basis data segar):
+#
+#   /bahan          1 burst × 4 serentak → 8/8 … tapi 5/6 pada pengukuran lain
+#   /perlengkapan   1 burst × 4 serentak → 5/8   ← LOLOS tiga dari delapan kali
+#   /bahan          3 burst × 6 serentak → 8/8
+#   /perlengkapan   3 burst × 6 serentak → 8/8
+#
+# Angka 5/8 itu bukan hipotesis: bentuk 1×4 memang MELOLOSKAN bug yang sudah
+# terbukti ada — persis yang terjadi saat seksi ini pertama dijalankan, semua
+# asersi /bahan hijau di atas kode yang cacat.
+balapUlang213(){ # balapUlang213 <ronde> <n> <token> <path> <tmpl ber-%NAMA%> <awalan>
+  local ronde="$1" n="$2" t="$3" path="$4" tmpl="$5" awalan="$6" d r i nm
+  d=$(mktemp -d)
+  for r in $(seq 1 "$ronde"); do
+    nm="$awalan $RANDOM$RANDOM"
+    printf '%s\n' "$nm" >> "$d/nama"
+    for i in $(seq 1 "$n"); do
+      curl -s -o "$d/b$r-$i" -w '%{http_code}\n' -X POST "$BASE/api$path" \
+        -H "Authorization: Bearer $t" -H 'Content-Type: application/json' \
+        -d "${tmpl//%NAMA%/$nm}" > "$d/c$r-$i" &
+    done
+    wait
+  done
+  echo "$d"
+}
+
 # ── POST /karyawan (users_email_unique) ────────────────────────────────────
 E213="balap213.$RANDOM@basooopa.id"
 D213=$(balap213 4 "$OWNER" /karyawan \
@@ -11259,31 +11295,38 @@ cek "…dan slugnya dibedakan otomatis, bukan ditolak" "V == 3" \
 # Terukur sebelum perbaikan, empat permintaan serentak bernama sama:
 #   /perlengkapan → 201 409 409 500
 #   /bahan        → 201 409 409 500
-NB213="Balap Bahan 213 $RANDOM"
-DB213=$(balap213 4 "$OWNER" /bahan \
-  "{\"nama\":\"$NB213\",\"satuan\":\"pcs\",\"isi\":1,\"harga_beli\":1000,\"pengadaan\":\"beli\",\"kategori\":\"lain\"}")
-cek "INTI: 4 pembuatan bahan bernama sama → TAK ADA 5xx" "V == 0" "$(lima213 "$DB213")"
-cek "…tepat SATU bahan lahir (201), sisanya 409" "V == 1" "$(kode213 "$DB213" 201)"
-cek "…dan hanya satu baris bahan bernama itu" "V == 1" \
-  "$(api "$OWNER" GET /bahan | jq --arg n "$NB213" '[.[]|select(.nama==$n)]|length')"
+TB213='{"nama":"%NAMA%","satuan":"pcs","isi":1,"harga_beli":1000,"pengadaan":"beli","kategori":"lain"}'
+DB213=$(balapUlang213 3 6 "$OWNER" /bahan "$TB213" "Balap Bahan 213")
+cek "INTI: 3×6 pembuatan bahan bernama sama → TAK ADA 5xx" "V == 0" "$(lima213 "$DB213")"
+cek "…tepat SATU bahan lahir per nama (3 × 201), sisanya 409" "V == 3" "$(kode213 "$DB213" 201)"
+# Jumlah baris untuk KETIGA nama yang diperebutkan. Ditulis sebagai gelung,
+# bukan satu jq pintar: baris jq yang tak pernah dijalankan atas data tiruan
+# adalah cara paling mudah membuat asersi yang selalu hijau.
+barisPerNama213(){ # barisPerNama213 <path> <berkas-nama> → total baris
+  local path="$1" jml=0 n
+  local semua; semua=$(api "$OWNER" GET "$path")
+  while IFS= read -r n; do
+    jml=$((jml + $(printf '%s' "$semua" | jq --arg n "$n" '[.[]|select(.nama==$n)]|length')))
+  done < "$2"
+  echo "$jml"
+}
+cek "…dan hanya satu baris untuk tiap nama yang diperebutkan" "V == 3" \
+  "$(barisPerNama213 /bahan "$DB213/nama")"
 
-NP213="Balap Perlengkapan 213 $RANDOM"
-DP213=$(balap213 4 "$OWNER" /perlengkapan \
-  "{\"nama\":\"$NP213\",\"satuan\":\"pcs\",\"harga_beli\":500}")
-cek "INTI: 4 pembuatan perlengkapan bernama sama → TAK ADA 5xx" "V == 0" "$(lima213 "$DP213")"
-cek "…tepat SATU perlengkapan lahir (201), sisanya 409" "V == 1" "$(kode213 "$DP213" 201)"
+TP213='{"nama":"%NAMA%","satuan":"pcs","harga_beli":500}'
+DP213=$(balapUlang213 3 6 "$OWNER" /perlengkapan "$TP213" "Balap Perlengkapan 213")
+cek "INTI: 3×6 pembuatan perlengkapan bernama sama → TAK ADA 5xx" "V == 0" "$(lima213 "$DP213")"
+cek "…tepat SATU perlengkapan lahir per nama (3 × 201)" "V == 3" "$(kode213 "$DP213" 201)"
 
 # PASANGAN: penolakannya tak boleh menelan yang SAH. Nama baru tetap 201, dan
 # nama kembar tetap ditolak 409 lewat jalur berurutan — bukan cuma di balapan.
+NB213=$(head -1 "$DB213/nama")
 cek "PASANGAN: bahan bernama BARU tetap 201" "V == 201" \
-  "$(status_code_body "$OWNER" POST /bahan \
-     "{\"nama\":\"Baru 213 $RANDOM\",\"satuan\":\"pcs\",\"isi\":1,\"harga_beli\":1000,\"pengadaan\":\"beli\",\"kategori\":\"lain\"}")"
+  "$(status_code_body "$OWNER" POST /bahan "${TB213//%NAMA%/Baru 213 $RANDOM}")"
 cek "PASANGAN: bahan bernama sama berurutan tetap 409" "V == 409" \
-  "$(status_code_body "$OWNER" POST /bahan \
-     "{\"nama\":\"$NB213\",\"satuan\":\"pcs\",\"isi\":1,\"harga_beli\":1000,\"pengadaan\":\"beli\",\"kategori\":\"lain\"}")"
+  "$(status_code_body "$OWNER" POST /bahan "${TB213//%NAMA%/$NB213}")"
 cek "PASANGAN: perlengkapan bernama BARU tetap 201" "V == 201" \
-  "$(status_code_body "$OWNER" POST /perlengkapan \
-     "{\"nama\":\"Baru 213 $RANDOM\",\"satuan\":\"pcs\",\"harga_beli\":500}")"
+  "$(status_code_body "$OWNER" POST /perlengkapan "${TP213//%NAMA%/Baru 213 $RANDOM}")"
 
 # ── PINTU KETUJUH: IMPOR MASSAL — di sini 409 pun jawaban yang SALAH ───────
 # `slugUnik` di `/bahan/bulk` bukan pemeriksa melainkan PENGALOKASI: ia membaca
@@ -11292,16 +11335,30 @@ cek "PASANGAN: perlengkapan bernama BARU tetap 201" "V == 201" \
 # Yang terjadi sebelum perbaikan: 201, 201, 500, 500 — di TIGA ronde berturut,
 # jadi dua impor yang sah gagal seluruhnya. Ini bukan kode status yang salah,
 # ini pekerjaan yang hilang.
-NBK213="Balap Bulk 213 $RANDOM"
-BODYBK213=$(jq -nc --arg n "$NBK213" '{items:[{nama:$n,satuan:"pcs",isi:1,harga_beli:1000,
-  track_stok:true,stok_minimum:0,kategori:"lain",boleh_eceran:false,min_beli:1,
-  masa_simpan_hari:0,lead_time_hari:0,is_packaging:false,is_complement:false}]}')
-DBK213=$(balap213 4 "$OWNER" /bahan/bulk "$BODYBK213")
-cek "INTI: 4 impor massal bernama sama → TAK ADA 5xx" "V == 0" "$(lima213 "$DBK213")"
-cek "INTI: KEEMPATNYA jadi (201) — pengalokasi tak boleh menolak" "V == 4" \
+TBK213='{"items":[{"nama":"%NAMA%","satuan":"pcs","isi":1,"harga_beli":1000,
+  "track_stok":true,"stok_minimum":0,"kategori":"lain","boleh_eceran":false,
+  "min_beli":1,"masa_simpan_hari":0,"lead_time_hari":0,"is_packaging":false,
+  "is_complement":false}]}'
+DBK213=$(balapUlang213 3 4 "$OWNER" /bahan/bulk "$TBK213" "Balap Bulk 213")
+cek "INTI: 3×4 impor massal bernama sama → TAK ADA 5xx" "V == 0" "$(lima213 "$DBK213")"
+cek "INTI: SEMUANYA jadi (12 × 201) — pengalokasi tak boleh menolak" "V == 12" \
   "$(kode213 "$DBK213" 201)"
-cek "…empat baris lahir, slugnya dibedakan otomatis" "V == 4" \
-  "$(api "$OWNER" GET /bahan | jq --arg n "$NBK213" '[.[]|select(.nama==$n)]|map(.slug)|unique|length')"
+cek "…12 baris lahir (4 per nama), slugnya dibedakan otomatis" "V == 12" \
+  "$(barisPerNama213 /bahan "$DBK213/nama")"
+# Dicocokkan ke nama RONDE INI, bukan ke awalan "Balap Bulk 213 ": versi
+# berawalan menghitung 24 saat skrip ini dijalankan dua kali atas basis data
+# yang sama — hijau/merahnya jadi bergantung pada riwayat basis data, bukan
+# pada perilaku kode. (Terjadi sungguhan saat seksi ini ditulis.)
+slugBedaPerNama213(){ # slugBedaPerNama213 <path> <berkas-nama> → total slug unik
+  local path="$1" jml=0 n semua
+  semua=$(api "$OWNER" GET "$path")
+  while IFS= read -r n; do
+    jml=$((jml + $(printf '%s' "$semua" | jq --arg n "$n" '[.[]|select(.nama==$n)]|map(.slug)|unique|length')))
+  done < "$2"
+  echo "$jml"
+}
+cek "…dan tiap slug memang BERBEDA, bukan 12 baris berslug sama" "V == 12" \
+  "$(slugBedaPerNama213 /bahan "$DBK213/nama")"
 
 
 echo "== 214. Perusahaan tak boleh kehilangan owner TERAKHIRNYA =="
