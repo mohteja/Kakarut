@@ -11857,8 +11857,87 @@ cek "PASANGAN: koreksi tunggal tetap menulis selisihnya (10 → 3)" "V == 3" \
   "$(api "$OWNER" POST "/perlengkapan/$P219B/koreksi?branch_id=$CB219" '{"qty_fisik":3}' > /dev/null; saldo219 "$P219B")"
 
 
+echo "== 220. Kekekalan uang refund, DI DALAM basis data =="
+# `refund-uang-kekal.test.ts` sudah membuktikan sifat ini untuk FUNGSInya:
+# 100.000 kombinasi, jumlah refund bertahap selalu sama dengan yang dibayar.
+# Yang TIDAK dibuktikan siapa pun: bahwa baris yang benar-benar TERSIMPAN ikut
+# menepatinya. Di antara fungsi dan tabel ada pembulatan kolom `numeric`,
+# penyusutan `sales.subtotal` tiap refund, dan `nominal` yang dikembalikan API
+# — tiga tempat yang bisa menggeser satu rupiah tanpa menyentuh fungsinya.
+#
+# Uang yang hilang di sela itu tak terlihat dari satu nota. Yang terlihat cuma
+# kas yang tak pernah cocok.
+#
+# Diukur lebih dulu di luar skrip ini: 240 kombinasi (tarif PB1 0/7/10/11/12,5%,
+# diskon persen & nominal 0–100, tiga bentuk keranjang) → NOL pelanggaran.
+# Yang dipasang di sini bagian murahnya, dengan tarif PB1 PECAHAN (12,5%) yang
+# paling mungkin melahirkan setengah rupiah.
+PB1_220=$(api "$OWNER" GET /company | jq -r '{e:.pb1_enabled,r:.pb1_rate,d:.diskon_maks_persen}|@base64')
+api "$OWNER" PATCH /company '{"pb1_enabled":true,"pb1_rate":12.5,"diskon_maks_persen":100}' > /dev/null
+PBA220=$(api "$OWNER" GET /menu | jq -r '[.[]|select(.nama|startswith("Premium Basooopa A"))][0].id')
+PBB220=$(api "$OWNER" GET /menu | jq -r '[.[]|select(.nama|startswith("Premium Basooopa B"))][0].id')
+cek "dasar §220: dua menu uji ada" "V == 2" \
+  "$(printf '%s\n' "$PBA220" "$PBB220" | grep -c '^[0-9a-f-]\{36\}$' || true)"
+
+# kembalikanSemua220 <qtyA> <qtyB> <tipe> <nilai> → "dibayar Σrefund sisa"
+kembalikanSemua220(){
+  local qa="$1" qb="$2" tp="$3" nl="$4" S SID DIBAYAR ITEMS JUMLAH=0 SISA baris iid r
+  S=$(api "$KASIR" POST /penjualan \
+    "{\"is_dine_in\":false,\"diskon_tipe\":\"$tp\",\"diskon_nilai\":$nl,\"items\":[{\"menu_id\":\"$PBA220\",\"qty\":$qa},{\"menu_id\":\"$PBB220\",\"qty\":$qb}]}")
+  SID=$(echo "$S" | jq -r '.sale.id // empty')
+  [ -z "$SID" ] && { echo "0 0 -1"; return; }
+  DIBAYAR=$(echo "$S" | jq -r '.sale.total')
+  ITEMS=$(api "$OWNER" GET "/penjualan/$SID" | jq -c '[(.items // .sale.items)[] | {id, qty}]')
+  while :; do
+    baris=$(echo "$ITEMS" | jq -r 'map(select(.qty>0))[0] // empty'); [ -z "$baris" ] && break
+    iid=$(echo "$baris" | jq -r .id)
+    r=$(api "$KASIR" POST "/penjualan/$SID/refund" \
+      "{\"items\":[{\"sale_item_id\":\"$iid\",\"qty\":1}],\"client_ref\":\"$(cat /proc/sys/kernel/random/uuid)\"}")
+    JUMLAH=$((JUMLAH + $(echo "$r" | jq -r '.nominal // 0')))
+    ITEMS=$(echo "$ITEMS" | jq --arg i "$iid" 'map(if .id==$i then .qty=(.qty-1) else . end)')
+  done
+  SISA=$(api "$OWNER" GET "/penjualan/$SID" | jq -r '(.sale.total // .total)')
+  echo "$DIBAYAR $JUMLAH $SISA"
+}
+
+MELESET220=0; SISA220=0; DICOBA220=0
+for kombo in "1 1 nominal 0" "2 3 nominal 7777" "3 2 persen 33" "1 2 persen 99" "2 2 nominal 1" "3 1 persen 7"; do
+  # shellcheck disable=SC2086
+  set -- $kombo
+  hasil=$(kembalikanSemua220 "$1" "$2" "$3" "$4")
+  bayar=${hasil%% *}; sisanya=${hasil##* }; jml=$(echo "$hasil" | cut -d' ' -f2)
+  DICOBA220=$((DICOBA220+1))
+  [ "$jml" != "$bayar" ] && MELESET220=$((MELESET220+1))
+  [ "$sisanya" != "0" ] && SISA220=$((SISA220+1))
+done
+cek "dasar §220: enam nota uji benar-benar dibuat" "V == 6" "$DICOBA220"
+cek "INTI: Σ refund bertahap = yang DIBAYAR, di semua nota" "V == 0" "$MELESET220"
+cek "INTI: nota yang seluruh porsinya dikembalikan bersisa NOL" "V == 0" "$SISA220"
+
+# ── PASANGAN: kesetaraan di atas tidak boleh benar secara sepele ──────────
+# Kalau `nominal` selalu memulangkan total nota, kedua asersi di atas juga
+# hijau. Yang membedakan: refund SEBAGIAN harus lebih kecil dari yang dibayar.
+S220=$(api "$KASIR" POST /penjualan \
+  "{\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$PBA220\",\"qty\":4}]}")
+SID220=$(echo "$S220" | jq -r '.sale.id')
+BAYAR220=$(echo "$S220" | jq -r '.sale.total')
+IT220=$(api "$OWNER" GET "/penjualan/$SID220" | jq -r '(.items // .sale.items)[0].id')
+NOM220=$(api "$KASIR" POST "/penjualan/$SID220/refund" \
+  "{\"items\":[{\"sale_item_id\":\"$IT220\",\"qty\":1}],\"client_ref\":\"$(cat /proc/sys/kernel/random/uuid)\"}" | jq -r '.nominal // 0')
+cek "PASANGAN: refund SEBAGIAN (1 dari 4) lebih kecil dari yang dibayar" "V == 1" \
+  "$([ "$NOM220" -gt 0 ] && [ "$NOM220" -lt "$BAYAR220" ] && echo 1 || echo 0)"
+cek "PASANGAN: …dan notanya masih menyisakan tagihan" "V == 1" \
+  "$([ "$(api "$OWNER" GET "/penjualan/$SID220" | jq -r '(.sale.total // .total)')" -gt 0 ] && echo 1 || echo 0)"
+
+# Setelan perusahaan DIKEMBALIKAN — seksi di bawah tak boleh mewarisi PB1 12,5%.
+api "$OWNER" PATCH /company "$(echo "$PB1_220" | base64 -d | jq -c '{pb1_enabled:.e,pb1_rate:.r,diskon_maks_persen:.d}')" > /dev/null
+cek "setelan PB1 perusahaan dikembalikan seperti semula" "V == 1" \
+  "$(api "$OWNER" GET /company | jq --argjson a "$(echo "$PB1_220" | base64 -d)" \
+     '(.pb1_enabled==$a.e and .pb1_rate==$a.r and .diskon_maks_persen==$a.d)|if . then 1 else 0 end')"
+
+
 echo
-echo "── §216 Akun seed harus ditinggalkan seperti semula ──"
+echo "── §221 Akun seed harus ditinggalkan seperti semula ──"
 # Duduk di ekor bersama §209/§215, dan karena alasan yang sama: ia menghakimi
 # sesudah semua seksi selesai mengutak-atik.
 #
