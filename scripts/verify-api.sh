@@ -11680,6 +11680,73 @@ DMN217=$(balapPut217 2 4 "/menu/$MN217" \
 cek "PASANGAN: PUT /menu/:id (komponen) tetap bebas 5xx" "V == 0" "$(lima213 "$DMN217")"
 
 
+echo "== 218. Potongan otomatis tak boleh memakai stok yang tidak ada =="
+# Seksi ini menjaga jalur yang TAK ADA TOMBOLNYA: potongan otomatis berjalan
+# sendiri setiap kali daftar perlengkapan dibuka. Beberapa tablet yang memuat
+# layar itu bersamaan di pagi hari — saat kursor aturan masih kemarin dan
+# tunggakannya beberapa hari — sudah cukup membuat saldo JATUH MINUS.
+#
+# KENAPA INDEKS UNIKNYA TAK MENANGKAPNYA, dan kenapa itu yang penting di sini:
+# `supply_mutations_auto_uq` + `onConflictDoNothing` menjaga TIDAK ADA HARI
+# YANG DIPOTONG DUA KALI, dan ia menepatinya — nol baris ganda, bahkan pada
+# kode yang cacat. Yang tak dijaganya BERAPA TOTALNYA.
+#
+#   proses A: sisaRak=10 → isi hari 1..4 (3+3+3+1), stok habis, hari 5..7
+#             ditinggalkan karena `sisa <= 0`
+#   proses B: membaca sisaRak=10 SEBELUM A commit → hari 1..4 bentrok
+#             (dilewati, benar), lalu hari 5..7 masih kosong sehingga terisi
+#
+# 19 terpakai dari 10 yang ada. Indeksnya hijau, bukunya salah — jadi asersi
+# yang benar di sini bukan "tak ada baris ganda" melainkan SALDONYA.
+#
+# Balapannya dipicu lewat HTTP saja: enam `PUT /aturan` serentak, masing-masing
+# membuat/mengubah aturan LALU menerapkannya. Kursornya masih kosong sampai
+# yang pertama commit, jadi jendelanya terbuka persis seperti pagi hari.
+# Terukur di atas kode cacat: −9 pada tiga ronde berturut-turut.
+CB218=$(api "$OWNER" GET /cabang | jq -r '[.[]|select(.tipe=="store" and .is_active)][0].id')
+MULAI218=$(date -u -d '6 days ago' +%F)
+
+# stokAwal218 <qty> → id perlengkapan baru dengan stok segitu di cabang uji
+stokAwal218(){
+  local p
+  p=$(api "$OWNER" POST /perlengkapan \
+    "{\"nama\":\"Auto 218 $RANDOM$RANDOM\",\"satuan\":\"pcs\",\"harga_beli\":100,\"dilacak\":true}" | jq -r .id)
+  api "$OWNER" POST "/perlengkapan/$p/masuk?branch_id=$CB218" "{\"qty\":$1,\"total_harga\":100}" > /dev/null
+  echo "$p"
+}
+# balapAturan218 <supply_id> — 6 PUT /aturan serentak (3/hari sejak 6 hari lalu)
+balapAturan218(){
+  local p="$1" i d; d=$(mktemp -d)
+  for i in $(seq 1 6); do
+    curl -s -o /dev/null -w '%{http_code}\n' -X PUT "$BASE/api/perlengkapan/$p/aturan?branch_id=$CB218" \
+      -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' \
+      -d "{\"metode\":\"otomatis\",\"qty\":3,\"per_hari\":1,\"aktif\":true,\"mulai\":\"$MULAI218\"}" > "$d/c$i" &
+  done
+  wait
+  cat "$d"/c* | grep -c '^5' || true
+  rm -rf "$d"
+}
+saldo218(){ api "$OWNER" GET "/perlengkapan?branch_id=$CB218" | jq -r --arg p "$1" '[.[]|select(.id==$p)][0].saldo // 999'; }
+
+# ── INTI: stok 10, tunggakan 7 hari × 3 = 21 → boleh habis, TAK BOLEH minus ──
+P218A=$(stokAwal218 10)
+cek "dasar §218: item uji punya stok 10" "V == 10" "$(saldo218 "$P218A")"
+cek "…enam PUT /aturan serentak tak ada yang 5xx" "V == 0" "$(balapAturan218 "$P218A")"
+cek "INTI: saldo TAK JATUH MINUS meski tunggakan (21) melebihi stok (10)" "V >= 0" \
+  "$(saldo218 "$P218A")"
+cek "INTI: …dan berhenti PERSIS di nol, bukan menyisakan stok hantu" "V == 0" \
+  "$(saldo218 "$P218A")"
+
+# ── PASANGAN: kuncinya tak boleh diam-diam MEMATIKAN potongannya ─────────
+# "Saldo tak minus" juga tercapai kalau potongan otomatis berhenti bekerja
+# sama sekali. Dengan stok berlimpah, tunggakan yang sama harus terpotong PENUH.
+P218B=$(stokAwal218 100)
+cek "PASANGAN: item kedua punya stok 100" "V == 100" "$(saldo218 "$P218B")"
+cek "PASANGAN: …enam PUT serentak, nol 5xx" "V == 0" "$(balapAturan218 "$P218B")"
+cek "PASANGAN: potongan tetap PENUH — 21 terpakai dari 100 (sisa 79)" "V == 79" \
+  "$(saldo218 "$P218B")"
+
+
 echo
 echo "── §215 Kuota pendaftaran: skrip ini tak boleh diam saat 429 ──"
 # Duduk di ekor bersama §209, dan karena alasan yang sama: ia mengadili berkas
