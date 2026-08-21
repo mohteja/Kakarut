@@ -78,6 +78,63 @@ export function nilaiTakSah(err: unknown): boolean {
   return kode === "22P02";
 }
 
+/** SQLSTATE galat ini, dari mana pun driver menaruhnya. */
+function sqlstate(err: unknown): string | undefined {
+  return (
+    (err as { cause?: { code?: string }; code?: string })?.cause?.code ??
+    (err as { code?: string })?.code
+  );
+}
+
+/**
+ * Alasan gagal SATU BARIS, dalam bahasa yang bisa dibaca pengirimnya — dan
+ * yang TAK PERNAH memulangkan teks mentah dari driver.
+ *
+ * KENAPA ADA. Jalur massal (impor CSV, unggah daftar) tidak menggagalkan
+ * seluruh permintaan saat satu baris bermasalah; ia melaporkan baris itu dan
+ * meneruskan sisanya. Yang mudah terlewat: "melaporkan barisnya" sempat
+ * berarti `(e as Error).message` apa adanya — dan pesan Drizzle memuat SELURUH
+ * kueri yang gagal beserta parameternya.
+ *
+ * TERUKUR, bukan dikhawatirkan. Mengimpor satu bahan berharga 1e15 (kolomnya
+ * `numeric(14,2)`) memulangkan ke klien: seluruh perintah INSERT lengkap dengan
+ * ke-30 nama kolomnya, ditambah daftar parameternya — termasuk UUID perusahaan.
+ * Pemiliknya cuma salah mengetik nol; yang ia lihat dump SQL.
+ *
+ * Dua kerugian sekaligus, dan yang kedua yang lebih dalam:
+ *   · bocornya bentuk dalam basis data & pengenal internal ke pihak yang cukup
+ *     punya hak mengimpor bahan;
+ *   · pesan yang tak bisa ditindaklanjuti siapa pun. "Failed query: insert
+ *     into…" tidak memberi tahu bahwa yang salah adalah ANGKA HARGANYA.
+ *
+ * Galat yang kita lempar sendiri (`HTTPException`) diteruskan apa adanya —
+ * itu memang kalimat untuk dibaca orang, dan sudah kita tulis.
+ */
+export function alasanGagalBaris(err: unknown, bawaan: string): string {
+  if (err instanceof HTTPException) return err.message || bawaan;
+  switch (sqlstate(err)) {
+    case "23505":
+      return "Sudah ada baris lain dengan nama/kode yang sama";
+    case "22003":
+      return "Angkanya terlalu besar untuk disimpan";
+    case "22001":
+      return "Teksnya terlalu panjang";
+    case "23502":
+      return "Ada kolom wajib yang kosong";
+    case "23503":
+      return "Acuannya tidak ditemukan (kategori/satuan/supplier)";
+    case "23514":
+      return "Nilainya tidak memenuhi aturan yang berlaku";
+    case "22P02":
+      return "Format nilainya tidak sah";
+    default:
+      // SENGAJA tidak menyertakan pesan aslinya. Galat yang belum dikenali
+      // tetap tercatat lengkap di `error_logs` untuk yang berhak melihatnya;
+      // yang tak boleh cuma mengirimkannya ke pengirim permintaan.
+      return bawaan;
+  }
+}
+
 /**
  * Jalankan tulisan yang bisa menabrak indeks unik, lalu terjemahkan
  * penolakannya jadi 409 berpesan.

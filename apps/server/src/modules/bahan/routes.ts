@@ -16,7 +16,7 @@ import {
   type RiwayatHargaLot,
 } from "@kakarut/shared";
 import { kunciAntrean } from "../../lib/kunci";
-import { bentrokUnikPada, tanpaBentrok } from "../../lib/pg-galat";
+import { alasanGagalBaris, bentrokUnikPada, tanpaBentrok } from "../../lib/pg-galat";
 import { db } from "../../db/client";
 import {
   branches,
@@ -889,7 +889,7 @@ export const bahanRoutes = new Hono<AppEnv>()
         if (u.pulih) dipulihkan++;
         else diperbarui++;
       } catch (e) {
-        gagal.push({ nama: u.item.nama, alasan: (e as Error)?.message ?? "gagal diperbarui" });
+        gagal.push({ nama: u.item.nama, alasan: alasanGagalBaris(e, "gagal diperbarui") });
       }
     }
     for (let i = 0; i < insertBaris.length; i++) {
@@ -931,6 +931,14 @@ export const bahanRoutes = new Hono<AppEnv>()
          * INSERT beserta daftar kolomnya, dikirim apa adanya ke klien. Yang
          * mengimpor daftar harga supplier melihat dump SQL, bukan "sudah ada".
          *
+         * CATATAN untuk pembaca berikutnya: perbaikan itu dulu hanya menutup
+         * cabang 23505 di bawah — TIGA jalur galat lain di blok ini masih
+         * membuang pesan mentah, dan komentar ini sempat membuatnya tampak
+         * seperti sudah beres. Kebocorannya baru benar-benar tertutup sejak
+         * semuanya lewat `alasanGagalBaris`, yang tak pernah memulangkan teks
+         * driver. Terukur: `harga_beli: 1e15` pada kolom `numeric(14,2)`
+         * memulangkan INSERT lengkap 30 kolom + uuid perusahaan ke klien.
+         *
          * Yang benar bukan melaporkan gagal, melainkan mengklasifikasi ULANG
          * baris itu dengan data yang kini benar — persis yang akan terjadi
          * seandainya kedua impor berjalan berurutan:
@@ -955,12 +963,12 @@ export const bahanRoutes = new Hono<AppEnv>()
               else dipulihkan++;
               continue;
             } catch (e2) {
-              gagal.push({ nama: b.nama, alasan: (e2 as Error)?.message ?? "gagal diperbarui" });
+              gagal.push({ nama: b.nama, alasan: alasanGagalBaris(e2, "gagal diperbarui") });
               continue;
             }
           }
         }
-        gagal.push({ nama: b.nama, alasan: (e as Error)?.message ?? "gagal ditambah" });
+        gagal.push({ nama: b.nama, alasan: alasanGagalBaris(e, "gagal ditambah") });
       }
     }
     return c.json({ ditambah, diperbarui, dipulihkan, dilewati, gagal });

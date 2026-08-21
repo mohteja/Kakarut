@@ -12146,6 +12146,57 @@ cek "PASANGAN: …dan kartu transaksinya memang nol" "V == 0" \
   "$(echo "$LAP224K" | jq '.jumlah_transaksi')"
 
 echo
+echo "── §225 Impor bahan: pesan gagal tak boleh membawa kueri mentah ──"
+# Jalur impor tidak menggagalkan seluruh permintaan saat satu baris bermasalah;
+# ia melaporkan baris itu lalu meneruskan sisanya. Yang sempat terlewat:
+# "melaporkan barisnya" berarti `(e as Error).message` apa adanya — dan pesan
+# Drizzle memuat SELURUH kueri yang gagal beserta parameternya.
+#
+# TERUKUR sebelum diperbaiki: `harga_beli: 1e15` pada kolom `numeric(14,2)`
+# memulangkan ke klien seluruh INSERT lengkap ke-30 nama kolomnya DITAMBAH
+# daftar parameternya — termasuk uuid perusahaan. Pemiliknya cuma salah
+# mengetik nol; yang ia lihat dump SQL.
+#
+# Komentar di `bahan/routes.ts` sudah menyebut cacat ini dan menyatakannya
+# diperbaiki, tapi perbaikan itu hanya menutup cabang 23505; TIGA jalur galat
+# lain di berkas yang sama tetap membuangnya mentah.
+MELUAP225='1000000000000000'   # numeric(14,2) → maksimum di bawah 1e12
+G225=$(api "$OWNER" POST /bahan/import \
+  "{\"mode\":\"tambah\",\"items\":[{\"nama\":\"Bocor Uji 225\",\"harga_beli\":$MELUAP225}]}")
+cek "dasar §225: barisnya memang GAGAL (bukan diam-diam tersimpan)" "V == 1" \
+  "$(echo "$G225" | jq '((.gagal|length) == 1) and (.ditambah == 0) | if . then 1 else 0 end')"
+
+ALASAN225=$(echo "$G225" | jq -r '.gagal[0].alasan')
+cek "INTI: pesannya tak memuat teks kueri" "V == 1" \
+  "$(printf '%s' "$ALASAN225" | grep -qiE 'failed query|insert into|update .*set|params:' && echo 0 || echo 1)"
+cek "INTI: pesannya tak memuat nama kolom basis data" "V == 1" \
+  "$(printf '%s' "$ALASAN225" | grep -qE 'company_id|harga_beli|is_active|created_at' && echo 0 || echo 1)"
+cek "INTI: pesannya tak membocorkan uuid" "V == 1" \
+  "$(printf '%s' "$ALASAN225" | grep -qiE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' && echo 0 || echo 1)"
+cek "INTI: dan pesannya MENERANGKAN sebabnya, bukan cuma 'gagal'" "V == 1" \
+  "$([ "$ALASAN225" = "Angkanya terlalu besar untuk disimpan" ] && echo 1 || echo 0)"
+
+# Jalur PERBARUI adalah pintu saudaranya — ia tak pernah ikut diperbaiki dulu.
+ADA225=$(api "$OWNER" GET /bahan | jq -r '.[0].nama')
+U225=$(api "$OWNER" POST /bahan/import \
+  "{\"mode\":\"perbarui\",\"items\":[{\"nama\":\"$ADA225\",\"harga_beli\":$MELUAP225}]}")
+cek "INTI: jalur PERBARUI pun tak membocorkan kueri" "V == 1" \
+  "$(printf '%s' "$(echo "$U225" | jq -r '.gagal[0].alasan // ""')" | grep -qiE 'failed query|update .*set|params:' && echo 0 || echo 1)"
+
+# PASANGAN: pengetatan ini tak boleh menelan impor yang SAH, dan tak boleh
+# menelan keterangannya. Tanpa asersi ini, "selalu balas kalimat bawaan" juga
+# membuat keempat asersi INTI di atas hijau.
+N225=$(api "$OWNER" GET /bahan | jq 'length')
+OK225=$(api "$OWNER" POST /bahan/import \
+  '{"mode":"tambah","items":[{"nama":"Bahan Waras 225","harga_beli":12500,"isi":1,"satuan":"pcs"}]}')
+cek "PASANGAN: impor yang sah tetap tersimpan" "V == 1" \
+  "$(echo "$OK225" | jq '((.ditambah == 1) and ((.gagal|length) == 0)) | if . then 1 else 0 end')"
+cek "PASANGAN: …dan daftar bahan bertambah tepat satu" "V == 1" \
+  "$(api "$OWNER" GET /bahan | jq --argjson n "$N225" '((length - $n) == 1) | if . then 1 else 0 end')"
+cek "PASANGAN: baris yang meluap TIDAK ikut tersimpan" "V == 0" \
+  "$(api "$OWNER" GET /bahan | jq '[.[] | select(.nama == "Bocor Uji 225")] | length')"
+
+echo
 echo "── §221 Akun seed harus ditinggalkan seperti semula ──"
 # Duduk di ekor bersama §209/§215, dan karena alasan yang sama: ia menghakimi
 # sesudah semua seksi selesai mengutak-atik.
