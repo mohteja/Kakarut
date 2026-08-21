@@ -37,6 +37,23 @@ Kertas KEDUA di kasir, untuk dua hal yang sama-sama bukan bukti pembayaran:
 lembar yang dibawa ke dapur/bar, dan lembar yang ditinggalkan di meja tamu.
 Aditif — tak ada medan yang hilang atau berganti arti.
 
+> **⚠️ MOBILE SUDAH PUNYA PADANANNYA — periksa dulu sebelum mengerjakan.**
+> `lib/features/kasir/tiket_dapur.dart` + `buildTicketBytes` sudah mencetak
+> menu & jumlah tanpa satu pun angka uang, DAN merutekannya per stasiun
+> (dapur/bar) menurut kategori menu — kemampuan yang justru belum ada di web.
+> Dipasang di dua tempat: otomatis saat open bill disimpan
+> (`kasir_page.dart:2540`, hanya baris yang belum pernah ke dapur), dan sebagai
+> tombol **"Cetak Dapur & Bar"** di layar struk sesudah bayar langsung
+> (`receipt_page.dart:202`).
+>
+> **Yang benar-benar berbeda cuma satu, dan itu bukan soal kontrak API:** kedua
+> jalur mobile itu dijaga `adaPrinterTiket` — printer harus bercentang peran
+> **tiket**. Warung berprinter TUNGGAL yang perannya hanya struk tidak bisa
+> mencetak slip ini sama sekali, dan tak ada pesan yang menjelaskan kenapa.
+> Web tak punya syarat itu: ia mencetak ke printer mana pun yang tersambung.
+> Kalau ada yang perlu dikerjakan di mobile, itu — bukan menyusun ulang
+> layoutnya.
+
 ### 🟢 BARU — `GET /api/penjualan/:id/slip` & `GET /api/open-bill/:id/slip`
 
 Query: `paper?: 58|80` (default 58), `chars_per_line?: int(16..96)`,
@@ -67,6 +84,62 @@ Yang perlu diketahui saat memakainya:
   sudah direfund tak perlu dimasak lagi.
 - Cakupan: 404 untuk id yang bukan milik perusahaan/sudah terhapus (atau bill
   yang sudah ditutup); 403 bila kasir meminta slip transaksi cabang lain.
+
+
+## Rilis: Sebaran transaksi per jam di laporan penjualan
+
+🟢 **BARU** — tab Laporan → Penjualan.
+
+*(Belum di-merge ke production.)*
+
+**Sudah dikerjakan di mobile:** `mohteja/kakarut-mobile` PR #12 (`SebaranJam` +
+`GrafikTransaksiPerJam` di `lib/features/operasional/grafik_per_jam.dart`).
+Entri ini tetap ditulis sebagai acuan kontraknya.
+
+### 🟢 BARU — `per_jam` pada `GET /api/laporan`
+
+```jsonc
+"per_jam": [
+  { "jam": 11, "jumlah": 8,  "omzet": 240000 },
+  { "jam": 12, "jumlah": 12, "omzet": 360000 },
+  { "jam": 13, "jumlah": 0,  "omzet": 0      },  // ← jeda, dan ia SENGAJA ada
+  { "jam": 14, "jumlah": 5,  "omzet": 150000 }
+]
+```
+
+Aditif — tak ada medan yang hilang atau berganti arti. Klien lama tetap jalan.
+
+**Empat hal yang menentukan benar/salahnya saat dipakai:**
+
+- **Jam kosong DI TENGAH ikut, bernilai nol — jangan disaring.** Naluri "buat
+  apa menggambar batang kosong" merusak grafiknya: warung yang ramai jam 12
+  lalu sepi sampai jam 17 akan tergambar dua batang bersebelahan, dan bentuk
+  harinya berbohong. Jam kosong di kedua UJUNG sudah dipangkas server, jadi
+  deret ini memang mulai dari jam transaksi pertama dan berhenti di yang
+  terakhir.
+
+- **`jam` sudah dihitung di ZONA PERUSAHAAN** (`companies.timezone`, bawaan
+  `Asia/Jakarta`) — bukan UTC dan bukan zona perangkat. Jangan menggesernya
+  lagi di klien: server berjalan UTC, dan menambahkan tujuh jam di sisi mobile
+  akan menggeser seluruh grafik untuk kedua kalinya.
+
+- **`omzet` itu `SUM(sales.subtotal)`, jadi sudah BERSIH dari refund** — sama
+  seperti `omzet` di tingkat laporan. Jangan menguranginya lagi dengan
+  `total_refund`.
+
+- **`jumlah` memakai saringan yang sama dengan kartu "Transaksi"**, jadi
+  jumlah seluruh batang dijamin sama dengan `jumlah_transaksi`. Kalau di layar
+  keduanya berbeda, itu bug klien, bukan bug data.
+
+**Nilai kosong punya DUA arti yang sama-sama berarti "jangan gambar":** server
+lama yang belum mengirim medannya, dan rentang tanggal tanpa transaksi sama
+sekali. Keduanya `[]`.
+
+⚠️ **Bila digambar sebagai grafik:** cacah transaksi yang jadi batangnya,
+bukan omzet. Satu nota Rp 2 juta tidak membuat jam 14 jadi "jam sibuk", dan
+pemilik yang mengatur jadwal karyawan menghitung orang yang datang. Omzet per
+jam tetap berguna, tapi sebagai keterangan — bukan sumbu kedua di grafik yang
+sama, sebab dua skala berbeda yang ditumpuk akan dibaca seolah sebanding.
 
 
 ## Rilis: Lama pengerjaan pesanan — per sajian, per transaksi, dan rekapnya

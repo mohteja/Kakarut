@@ -36,13 +36,23 @@ const MD = readFileSync(
 /**
  * Blok level-2 yang SENGAJA tak berstempel, dengan alasannya.
  *
- * Keduanya bukan rilis, jadi "sudah tayang atau belum" tak berlaku untuknya:
- * yang pertama meralat keterangan pada rilis-rilis sebelumnya, yang kedua
- * petunjuk pemeliharaan berkas ini sendiri.
+ * Dua sebab yang berbeda, dan keduanya sah:
+ *
+ *   · BUKAN RILIS. "Sudah tayang atau belum" tak berlaku untuknya — yang satu
+ *     meralat keterangan pada rilis-rilis sebelumnya, yang lain petunjuk
+ *     pemeliharaan berkas ini sendiri.
+ *   · RILIS YANG MEMANG BELUM TAYANG. Masih di cabang kerja, belum di-merge ke
+ *     `production`. Begitu merge-nya terjadi, stempelnya dipasang DAN barisnya
+ *     dihapus dari sini — uji "daftar pengecualiannya masih ADA" di bawah
+ *     memastikan judul yang tak lagi cocok tak bisa menggantung diam-diam.
  */
 const BELUM_TAYANG = new Set([
+  // bukan rilis
   "## Koreksi kontrak: satuan baris faktur (`qty` vs `satuan_beli` vs `is_batch`)",
   "## Cara memelihara berkas ini",
+  // rilis yang masih di cabang `claude`, belum di-merge ke production
+  "## Rilis: Slip pesanan — cetak menu & jumlah, TANPA harga",
+  "## Rilis: Sebaran transaksi per jam di laporan penjualan",
 ]);
 
 /** Dua bentuk stempel yang sah — baris mandiri (baru) dan blockquote (lama). */

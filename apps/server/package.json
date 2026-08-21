@@ -10,6 +10,7 @@
     "db:migrate": "tsx src/db/migrate-cli.ts",
     "db:restore": "tsx src/scripts/restore-backup.ts",
     "seed": "tsx src/seed/index.ts",
+    "sinkron:lampiran": "tsx src/scripts/sinkron-lampiran-dto.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
