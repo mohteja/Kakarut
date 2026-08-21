@@ -68,13 +68,30 @@ test("kasir: POS → tambah menu → dine-in → checkout → struk", async ({ p
   await expect(page.locator("#struk-print")).toContainText("Meja 1");
   await expect(page.locator("#struk-print")).toContainText("tanpa gula");
 
+  /*
+   * Nomor struknya DICATAT, lalu dipakai untuk mencari transaksi yang SAMA di
+   * Riwayat.
+   *
+   * Versi sebelumnya menekan `.first()` — diam-diam beranggapan transaksi
+   * terbaru pasti milik uji ini. Itu benar hanya di basis data yang nyaris
+   * kosong. Dijalankan sesudah verify-api (persis urutannya di CI), yang
+   * teratas adalah penjualan milik verify-api, dan asersinya gagal menuntut
+   * "tanpa gula" pada struk orang lain — merah yang tak mengatakan apa pun
+   * tentang kode yang diuji.
+   */
+  const nomorStruk = (await page.locator("#struk-print").innerText()).match(
+    /PUSAT-\d{8}-\d{4}/,
+  )?.[0];
+  expect(nomorStruk, "nomor struk tak terbaca dari area cetak").toBeTruthy();
+
   await page.getByRole("button", { name: "Transaksi Baru" }).click();
   await expect(page.locator("#struk-print")).toHaveCount(0);
 
   // cetak ulang dari Riwayat harus tetap memuat catatan per baris
   await page.goto("/kasir/riwayat");
-  await page.getByRole("button", { name: /PUSAT-\d{8}-\d{4}/ }).first().click();
+  await page.getByRole("button", { name: new RegExp(nomorStruk!) }).first().click();
   await expect(page.locator("#struk-print")).toHaveCount(1);
+  await expect(page.locator("#struk-print")).toContainText(nomorStruk!);
   await expect(page.locator("#struk-print")).toContainText("tanpa gula");
 });
 
