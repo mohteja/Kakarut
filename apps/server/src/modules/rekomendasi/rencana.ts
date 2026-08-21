@@ -640,8 +640,10 @@ export async function buatFakturDariRencana(
      */
     if (kirimRows.length > 0 && ck) {
       await kunciKirimCabang(tx, params.companyId, ck.id);
+      // `tx`, bukan `db` — pintu ketiga dari keluarga yang sama; lihat
+      // `test/koneksi-bersarang.test.ts`.
       const saldoCk = new Map(
-        (await hitungSaldoCabang(params.companyId, ck.id)).map((r) => [r.ingredient_id, r]),
+        (await hitungSaldoCabang(params.companyId, ck.id, tx)).map((r) => [r.ingredient_id, r]),
       );
       const jalanCk = await qtyDalamJalan(
         tx,

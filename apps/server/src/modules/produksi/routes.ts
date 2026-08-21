@@ -1870,8 +1870,13 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         // dari ledger (tak ada baris yang bisa dikunci), jadi tanpa ini dua
         // pengiriman bersamaan sama-sama membaca saldo lama dan lolos.
         await kunciKirimCabang(tx, auth.company_id!, ckId);
+        // `tx`, bukan `db`: lewat `db` pembacaan ini menyewa koneksi KEDUA dari
+        // kolam yang sama sementara transaksi ini masih memegang yang pertama —
+        // 10 pengiriman serentak cukup untuk memacetkan seluruh proses. Ia juga
+        // membuat `saldo` dan `dalam_jalan` di bawah datang dari dua snapshot
+        // berbeda. Lihat `test/koneksi-bersarang.test.ts`.
         const saldoCk = new Map(
-          (await hitungSaldoCabang(auth.company_id!, ckId)).map((r) => [r.ingredient_id, r]),
+          (await hitungSaldoCabang(auth.company_id!, ckId, tx)).map((r) => [r.ingredient_id, r]),
         );
         // Saldo CK masih memuat barang yang SUDAH dikirim tapi belum diterima
         // cabang tujuan — harus dipotong dulu, kalau tidak stok yang sama bisa

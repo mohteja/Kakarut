@@ -394,8 +394,14 @@ export const transferRoutes = new Hono<AppEnv>()
           // pemeriksaan "cukup atau tidak" di bawah baru berjalan setelah transfer
           // lain dari cabang yang sama selesai commit.
           await kunciKirimCabang(tx, auth.company_id!, asal.id);
+          // `tx`, bukan `db` — alasannya sama dengan jalur kiriman CK:
+          // menyewa koneksi kedua di dalam transaksi, dan `saldo` di sini vs
+          // `jalan` di bawah jadi dua snapshot. Lihat `test/koneksi-bersarang.test.ts`.
           const saldoAsal = new Map(
-            (await hitungSaldoCabang(auth.company_id!, asal.id)).map((r) => [r.ingredient_id, r]),
+            (await hitungSaldoCabang(auth.company_id!, asal.id, tx)).map((r) => [
+              r.ingredient_id,
+              r,
+            ]),
           );
           // saldo mentah masih memuat barang yang sedang di jalan → potong dulu
           const jalan = await qtyDalamJalan(tx, auth.company_id!, asal.id, ingIds);
