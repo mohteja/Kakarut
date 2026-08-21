@@ -31,6 +31,30 @@ export function hariIniWIB(timeZone = "Asia/Jakarta"): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone }).format(new Date());
 }
 
+/**
+ * Waktu untuk KERTAS: "21/08 14.30" — tanggal & jam, zona WIB.
+ *
+ * Dipakai struk pembayaran DAN slip pesanan. Satu rumah, sebab keduanya kertas
+ * yang beredar berdampingan di meja yang sama: dua rumusan yang menyimpang
+ * sedikit saja membuat dua kertas untuk satu pesanan berbunyi jam berbeda, dan
+ * yang membacanya tak punya cara tahu mana yang benar.
+ *
+ * WIB dipatok di sini, bukan di tiap pemanggil — lihat
+ * `zona-waktu-satu-suara.test.ts`: selama web mematok WIB, `companies.timezone`
+ * harus tetap tak bisa diubah, dan daftar tempat yang mematoknya adalah daftar
+ * kerja yang harus dibereskan lebih dulu. Menambah pemanggil baru tak
+ * memperpanjang daftar itu; menambah rumusan baru memperpanjangnya.
+ */
+export function waktuKertasWIB(d: Date): string {
+  return new Intl.DateTimeFormat("id-ID", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Asia/Jakarta",
+  }).format(d);
+}
+
 export function formatTanggal(tanggal: string): string {
   return new Intl.DateTimeFormat("id-ID", {
     dateStyle: "full",

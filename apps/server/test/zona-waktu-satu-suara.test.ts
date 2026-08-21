@@ -67,10 +67,21 @@ describe("zona waktu: server & web tak boleh berselisih diam-diam", () => {
       .filter((p) => readFileSync(p, "utf8").includes(ZONA_WEB))
       .map((p) => p.slice(WEB.length))
       .sort();
+    /*
+     * Daftar ini MENYUSUT saat slip pesanan lahir, bukan bertambah.
+     *
+     * Slip itu butuh waktu berformat sama dengan struk, dan menyalin
+     * `Intl.DateTimeFormat(... "Asia/Jakarta")` ke pemanggil kedua akan
+     * memperpanjang daftar kerja ini. Rumusannya dipindahkan ke satu rumah
+     * (`lib/format.ts` → `waktuKertasWIB`), yang memang sudah ada di daftar —
+     * jadi `ReceiptModal` KELUAR dan `KasirPage` tak pernah masuk.
+     *
+     * Yang harus dipegang pembaca berikutnya: menambah PEMANGGIL tak
+     * memperpanjang daftar ini; menambah RUMUSAN memperpanjangnya.
+     */
     expect(dipatok, "daftar berkas web yang memaku zona waktu").toEqual([
       "lib/format.ts",
       "pages/bahan/DetailBahanPage.tsx",
-      "pages/kasir/ReceiptModal.tsx",
       "pages/stok/KartuStokPage.tsx",
       "pages/superadmin/BackupPage.tsx",
       "pages/superadmin/ErrorLogPage.tsx",

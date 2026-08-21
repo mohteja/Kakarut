@@ -1,7 +1,7 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { qtyDitagih, tarifPb1Struk } from "@kakarut/shared";
-import type { MetodeBayar, ReceiptData } from "@kakarut/shared";
+import type { MetodeBayar, OrderSlipData, ReceiptData } from "@kakarut/shared";
 
 const METODE_LABEL: Record<MetodeBayar, string> = {
   tunai: "Tunai",
@@ -12,7 +12,7 @@ import { ErrorText, btnPrimary, btnSecondary } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { usePrinter } from "../../context/PrinterContext";
 import { api } from "../../lib/api";
-import { formatRupiah, formatWaktu } from "../../lib/format";
+import { formatRupiah, formatWaktu, waktuKertasWIB } from "../../lib/format";
 import { RefundPanel } from "./RefundPanel";
 import { AreaCetak } from "../../components/AreaCetak";
 
@@ -117,7 +117,7 @@ export function ReceiptModal({
   onRefunded?: () => void;
 }) {
   const { auth } = useAuth();
-  const { settings, isThermal, canAutoPrint, printReceipt } = usePrinter();
+  const { settings, isThermal, canAutoPrint, printReceipt, printOrderSlip } = usePrinter();
   const { data: company } = useQuery({
     queryKey: ["company"],
     queryFn: () => api<CompanyStruk>("/company"),
@@ -144,13 +144,7 @@ export function ReceiptModal({
   // Nomor antrian (urutan hari ini) — dari sekuens akhir nomor struk
   const antrian = Number(data.sale.nomor.slice(-4)) || null;
 
-  const waktuStr = new Intl.DateTimeFormat("id-ID", {
-    day: "2-digit",
-    month: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    timeZone: "Asia/Jakarta",
-  }).format(new Date(data.sale.waktu));
+  const waktuStr = waktuKertasWIB(new Date(data.sale.waktu));
 
   const showAlamat = cabangStruk?.receipt_show_alamat ?? company?.receiptShowAlamat ?? true;
   const footerRaw = cabangStruk?.receipt_footer ?? company?.receiptFooter ?? null;
@@ -209,6 +203,48 @@ export function ReceiptModal({
     setPrinting(true);
     try {
       await printReceipt(toReceiptData());
+    } catch (e) {
+      setPrintError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPrinting(false);
+    }
+  }
+
+  /**
+   * SLIP PESANAN — menu & jumlah saja, tanpa harga. Untuk dibawa ke dapur atau
+   * ditinggalkan di meja tamu.
+   *
+   * Dibangun dari `OrderSlipData` yang memang tak punya kolom harga, jadi
+   * bukan struk yang "harganya disembunyikan": tak ada angka rupiah yang bisa
+   * ikut, bahkan bila kelak ada yang menambah baris di pembangunnya.
+   */
+  function toOrderSlipData(): OrderSlipData {
+    return {
+      companyNama: company?.nama ?? "",
+      branchNama: data.branch_nama,
+      nomor: data.sale.nomor,
+      waktu: waktuStr,
+      isDineIn: data.sale.isDineIn,
+      mejaLabel: data.sale.mejaLabel,
+      customerNama: data.sale.customerNama,
+      items: data.items.map((it) => ({
+        nama: it.menuNama,
+        // Porsi yang DITAGIH, sama dengan struk: sajian yang sudah
+        // dikembalikan tak perlu dimasak lagi.
+        qty: qtyDitagih(it),
+        tag: it.isDineIn !== data.sale.isDineIn ? (it.isDineIn ? "DI" : "TA") : null,
+        catatan: catatanBaris(it),
+      })),
+      catatan: data.sale.catatan,
+      kasir: data.kasir ?? null,
+    };
+  }
+
+  async function cetakSlipPesanan() {
+    setPrintError(null);
+    setPrinting(true);
+    try {
+      await printOrderSlip(toOrderSlipData());
     } catch (e) {
       setPrintError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -357,6 +393,16 @@ export function ReceiptModal({
               className={`${btnPrimary} flex-1`}
             >
               {printing ? "Mencetak…" : "🧾 Cetak Thermal"}
+            </button>
+          )}
+          {isThermal && (
+            <button
+              onClick={() => void cetakSlipPesanan()}
+              disabled={printing}
+              className={`${btnSecondary} flex-1`}
+              title="Menu & jumlah saja, tanpa harga — untuk dapur atau meja tamu"
+            >
+              {printing ? "Mencetak…" : "🍽 Cetak Pesanan"}
             </button>
           )}
           <button onClick={() => window.print()} className={`${btnSecondary} flex-1`}>
