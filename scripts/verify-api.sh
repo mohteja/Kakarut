@@ -12197,6 +12197,52 @@ cek "PASANGAN: baris yang meluap TIDAK ikut tersimpan" "V == 0" \
   "$(api "$OWNER" GET /bahan | jq '[.[] | select(.nama == "Bocor Uji 225")] | length')"
 
 echo
+echo "── §226 Nilai plan tenant harus terbatas — salah ketik bukan penurunan ──"
+# `modeDariPlan` memutuskan mode tenant dari satu perbandingan ketat
+# (`plan === "pro"`); apa pun selain itu berarti LITE. Perbandingan itu benar.
+# Yang dulu salah: pintu masuknya menerima `z.string()` bebas, jadi satu huruf
+# besar cukup menurunkan pelanggan yang membayar tanpa satu pun peringatan.
+#
+# TERUKUR sebelum diperbaiki: tenant dengan 28 cabang aktif dikirimi
+# {"plan":"Pro"} → dibalas 200, dan GET /company seketika berbunyi mode "lite".
+# `isPro` menggerbangi PEMILIH CABANG di layar, jadi pemiliknya mendadak cuma
+# bisa menjangkau satu dari 28 cabangnya.
+#
+# Jalur OWNER (POST /company/mode) sejak dulu dijaga ketat — ia menolak turun ke
+# Lite selama masih ada lebih dari satu cabang aktif. Pintu super admin, yang
+# justru dipakai untuk penagihan, tak punya penjaga apa pun.
+CID226=$(api "$OWNER" GET /company | jq -r .id)
+MODE226=$(api "$OWNER" GET /company | jq -r .mode)
+cek "dasar §226: tenant uji terbaca & ber-mode pro" "V == 1" \
+  "$([ -n "$CID226" ] && [ "$MODE226" = "pro" ] && echo 1 || echo 0)"
+
+plan226() { # plan226 <nilai> → echo kode status
+  printf '%s\n' "$(curl -s -o /dev/null -w '%{http_code}' -X PATCH "$BASE/api/admin/tenants/$CID226" \
+    -H "Authorization: Bearer $SA" -H 'Content-Type: application/json' -d "{\"plan\":$1}")"
+}
+mode226() { api "$OWNER" GET /company | jq -r .mode; }
+
+cek "INTI: plan \"Pro\" (huruf besar) DITOLAK" "V == 400" "$(plan226 '"Pro"')"
+cek "INTI: plan \"PRO\" ditolak" "V == 400" "$(plan226 '"PRO"')"
+cek "INTI: plan \"pro \" (spasi ekor) ditolak" "V == 400" "$(plan226 '"pro "')"
+cek "INTI: plan tak dikenal (\"professional\") ditolak" "V == 400" "$(plan226 '"professional"')"
+cek "INTI: plan kosong ditolak" "V == 400" "$(plan226 '""')"
+cek "INTI: sesudah semua penolakan itu, modenya TETAP pro" "V == 1" \
+  "$([ "$(mode226)" = "pro" ] && echo 1 || echo 0)"
+
+# PASANGAN: pengetatan ini tak boleh mematikan alat penagihannya. Penurunan
+# yang DISENGAJA harus tetap bisa — tanpa asersi ini, "tolak semua plan" juga
+# membuat keenam asersi INTI di atas hijau.
+cek "PASANGAN: plan \"lite\" diterima" "V == 200" "$(plan226 '"lite"')"
+cek "PASANGAN: …dan modenya benar-benar turun" "V == 1" \
+  "$([ "$(mode226)" = "lite" ] && echo 1 || echo 0)"
+cek "PASANGAN: plan \"pro\" diterima" "V == 200" "$(plan226 '"pro"')"
+cek "PASANGAN: …dan modenya kembali naik" "V == 1" \
+  "$([ "$(mode226)" = "pro" ] && echo 1 || echo 0)"
+cek "tenant ditinggalkan ber-mode pro seperti semula" "V == 1" \
+  "$([ "$(mode226)" = "$MODE226" ] && echo 1 || echo 0)"
+
+echo
 echo "── §221 Akun seed harus ditinggalkan seperti semula ──"
 # Duduk di ekor bersama §209/§215, dan karena alasan yang sama: ia menghakimi
 # sesudah semua seksi selesai mengutak-atik.
