@@ -11538,6 +11538,53 @@ cek "…dan yang kalah ditolak 400" "V == 1" "$(cat "$DH214"/* | grep -c '^400' 
 
 
 echo
+echo "== 216. Petugas tempat SO ditulis dari DUA arah yang tegak lurus =="
+# `storage_location_petugas` diganti seluruhnya dari dua sisi:
+#   · PUT /penyimpanan/:id/petugas   → hapus WHERE tempat = L, sisipkan (L, u…)
+#   · PUT /karyawan/:userId/tempat   → hapus WHERE user  = U, sisipkan (t…, U)
+#
+# Keduanya sudah bertransaksi, dan masing-masing benar SENDIRIAN. Yang tak
+# dijaga: himpunan baris yang mereka kunci tidak beririsan, jadi tak satu pun
+# menahan yang lain — lalu keduanya menyisipkan pasangan (L, U) yang SAMA.
+# Terukur sebelum perbaikan, tiga ronde berturut-turut: tempat→200,
+# karyawan→500, tiap ronde.
+#
+# Bahwa pintu saudaranya diketahui penulisnya terlihat dari komentar di
+# `users/routes.ts`: "Menulis ke tabel yang sama dengan PUT
+# /penyimpanan/:id/petugas → konsisten dua arah." Tahu ada dua pintu tidak
+# sama dengan memasang penjaga di keduanya — itu justru bentuk yang dijaga
+# `penjaga-semua-pintu.test.ts`, dan pintu inilah yang ditunjuknya.
+CB216=$(api "$OWNER" GET /cabang | jq -r '[.[]|select(.tipe=="store" and .is_active)][0].id')
+E216="petugas216.$RANDOM@basooopa.id"
+U216=$(api "$OWNER" POST /karyawan \
+  "{\"nama\":\"Petugas 216\",\"email\":\"$E216\",\"password\":\"Petugas216Pass!\",\"role\":\"cashier\",\"branch_id\":\"$CB216\"}" \
+  | jq -r '.id // .user_id // empty')
+L216=$(api "$OWNER" POST /penyimpanan "{\"nama\":\"Rak 216 $RANDOM\",\"branch_id\":\"$CB216\"}" | jq -r .id)
+cek "dasar §216: karyawan & tempat uji siap" "V == 2" \
+  "$(( $([ -n "$U216" ] && echo 1 || echo 0) + $([ -n "$L216" ] && echo 1 || echo 0) ))"
+
+# Tiga ronde: satu ronde saja meleset sesekali — dua sisi harus benar-benar
+# berpapasan di jendela antara hapus dan sisip.
+D216=$(mktemp -d)
+for r in 1 2 3; do
+  curl -s -o "$D216/bA$r" -w '%{http_code}\n' -X PUT "$BASE/api/penyimpanan/$L216/petugas" \
+    -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' \
+    -d "{\"user_ids\":[\"$U216\"]}" > "$D216/cA$r" &
+  curl -s -o "$D216/bB$r" -w '%{http_code}\n' -X PUT "$BASE/api/karyawan/$U216/tempat" \
+    -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' \
+    -d "{\"tempat_ids\":[\"$L216\"]}" > "$D216/cB$r" &
+  wait
+done
+cek "INTI: menugaskan dari kedua arah serentak → TAK ADA 5xx" "V == 0" \
+  "$(cat "$D216"/c* | grep -c '^5' || true)"
+cek "…keenam permintaan dibalas 200" "V == 6" "$(cat "$D216"/c* | grep -c '^200' || true)"
+# PASANGAN: "tak ada 5xx" juga tercapai kalau penugasannya diam-diam dibuang.
+cek "PASANGAN: penugasannya BENAR-BENAR tersimpan (sisi tempat)" "V == 1" \
+  "$(api "$OWNER" GET /penyimpanan | jq -r --arg l "$L216" '[.[]|select(.id==$l)][0].petugas|length')"
+cek "PASANGAN: dan terbaca sama dari sisi karyawan" "V == 1" \
+  "$(api "$OWNER" GET "/karyawan/$U216/tempat" | jq -r '.assigned|length')"
+
+echo
 echo "── §215 Kuota pendaftaran: skrip ini tak boleh diam saat 429 ──"
 # Duduk di ekor bersama §209, dan karena alasan yang sama: ia mengadili berkas
 # yang baru terisi setelah semua seksi menembakkan pendaftarannya.

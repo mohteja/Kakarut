@@ -415,6 +415,10 @@ export const karyawanRoutes = new Hono<AppEnv>()
         }
       }
       await db.transaction(async (tx) => {
+        // Sisi KARYAWAN dari tabel yang sama; sisi TEMPAT ada di
+        // `PUT /penyimpanan/:id/petugas`. Kuncinya HARUS sama persis di kedua
+        // sisi — alasan lengkapnya ditulis di sana.
+        await kunciAntrean(tx, "petugas-tempat", auth.company_id!);
         if (idCabang.size > 0) {
           await tx
             .delete(storageLocationPetugas)

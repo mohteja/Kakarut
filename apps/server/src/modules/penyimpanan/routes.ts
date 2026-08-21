@@ -5,6 +5,7 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import type { PenyimpananDto, PetugasRingkas } from "@kakarut/shared";
 import { db } from "../../db/client";
+import { kunciAntrean } from "../../lib/kunci";
 import { tanpaBentrok } from "../../lib/pg-galat";
 import {
   ingredients,
@@ -253,6 +254,30 @@ export const penyimpananRoutes = new Hono<AppEnv>()
       }
 
       await db.transaction(async (tx) => {
+        /*
+         * KUNCI SE-PERUSAHAAN, dan kenapa tak ada kunci yang lebih sempit.
+         *
+         * Tabel ini ditulis dari DUA arah yang saling tegak lurus: dari sisi
+         * TEMPAT di sini (hapus WHERE tempat = L), dan dari sisi KARYAWAN di
+         * `PUT /karyawan/:userId/tempat` (hapus WHERE user = U). Keduanya
+         * "ganti seluruh daftar" dan keduanya sudah bertransaksi — tapi
+         * himpunan baris yang mereka kunci TIDAK BERIRISAN, jadi tak satu pun
+         * menahan yang lain. Keduanya lalu menyisipkan pasangan (L, U) yang
+         * sama, dan yang kalah menabrak `storage_location_petugas_uq`: 23505
+         * mentah alias 500. Terukur, tiga ronde berturut-turut, satu 500 tiap
+         * ronde.
+         *
+         * Tak ada kunci baris yang bisa dipakai bersama — satu sisi tahu L,
+         * sisi lain tahu U, dan barisnya belum ada saat diperiksa. Yang bisa
+         * dipegang keduanya cuma NAMA ATURANNYA. Penugasan petugas adalah
+         * pengaturan yang jarang disentuh, jadi menyerialkannya se-perusahaan
+         * tak menghalangi siapa pun.
+         *
+         * Yang kalah MENUNGGU lalu menulis di atas hasil yang menang — bukan
+         * ditolak 409. Itu memang arti "ganti seluruh daftar": penekan tombol
+         * terakhir yang menentukan.
+         */
+        await kunciAntrean(tx, "petugas-tempat", auth.company_id!);
         await tx
           .delete(storageLocationPetugas)
           .where(
