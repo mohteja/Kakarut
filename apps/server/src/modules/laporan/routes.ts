@@ -9,6 +9,7 @@ import type {
   MenuLaris,
 } from "@kakarut/shared";
 import { db } from "../../db/client";
+import { rapatkanJam } from "./per-jam";
 import {
   companies,
   ingredients,
@@ -146,6 +147,50 @@ export const laporanRoutes = new Hono<AppEnv>()
       .groupBy(sales.metodeBayar)
       .orderBy(desc(sum(sales.total)));
 
+    /*
+     * SEBARAN PER JAM. Ember jamnya dihitung di ZONA PERUSAHAAN, bukan UTC:
+     * server berjalan UTC, jadi `EXTRACT(HOUR FROM waktu)` akan menggeser
+     * seluruh grafik tujuh jam di WIB — penjualan jam 19 tampil di jam 12, dan
+     * "jam ramai" yang dibaca pemilik warung jadi jam yang salah.
+     *
+     * Disaring `saleFilter` yang sama dengan agregat di atas, jadi cacah di
+     * grafik ini dijamin berjumlah sama dengan kartu "Transaksi".
+     */
+    const tzPerusahaan = company?.timezone ?? "Asia/Jakarta";
+    const jamExpr = sql<number>`EXTRACT(HOUR FROM (${sales.waktu} AT TIME ZONE ${tzPerusahaan}))::int`;
+    const perJamRows = await db
+      .select({
+        jam: jamExpr,
+        jumlah: sql<number>`count(*)::int`,
+        omzet: sql<number>`COALESCE(SUM(${sales.subtotal}), 0)::float8`,
+      })
+      .from(sales)
+      .where(saleFilter)
+      /*
+       * `GROUP BY 1`, bukan mengulang ekspresinya.
+       *
+       * Drizzle merender kolom yang sama dengan cara BERBEDA di dua tempat:
+       * di daftar SELECT ia keluar `"waktu"` (tanpa nama tabel), di GROUP BY
+       * ia keluar `"sales"."waktu"`. Bagi Postgres itu dua ekspresi yang tak
+       * sama, dan hasilnya 42803 — "column sales.waktu must appear in the
+       * GROUP BY clause" — pada kueri yang JELAS sudah punya GROUP BY.
+       *
+       * Ordinal menunjuk kolom keluaran pertama apa pun bentuk renderannya,
+       * jadi kedua sisi tak mungkin lagi berbeda. Ditemukan dengan membuka
+       * halamannya, bukan dari typecheck: bentuknya sah di TypeScript.
+       */
+      .groupBy(sql`1`)
+      .orderBy(sql`1`);
+
+    // Perapatannya di `per-jam.ts` supaya bisa diuji tanpa Postgres.
+    const perJam = rapatkanJam(
+      perJamRows.map((r) => ({
+        jam: Number(r.jam),
+        jumlah: Number(r.jumlah ?? 0),
+        omzet: Number(r.omzet ?? 0),
+      })),
+    );
+
     const omzet = Number(agg?.omzet ?? 0);
     const totalDiskon = Number(agg?.diskon ?? 0);
     const totalHpp = Number(agg?.totalHpp ?? 0);
@@ -176,6 +221,7 @@ export const laporanRoutes = new Hono<AppEnv>()
         slug: r.slug,
         qty: Number(r.qty ?? 0),
       })),
+      per_jam: perJam,
     };
     return c.json(laporan);
   })

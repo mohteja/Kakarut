@@ -6,6 +6,7 @@ import { useAuth } from "../../context/AuthContext";
 import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah, formatTanggal, hariIniWIB } from "../../lib/format";
+import { GrafikTransaksiPerJam } from "./GrafikTransaksiPerJam";
 import { LaporanTabs } from "./LaporanTabs";
 
 const METODE_LABEL: Record<string, string> = {
@@ -193,6 +194,8 @@ export function LaporanPage() {
               refund, omzetnya {formatRupiah(lap.omzet + lap.total_refund)}.
             </p>
           )}
+
+          <GrafikTransaksiPerJam data={lap.per_jam} />
 
           {lap.per_metode.length > 0 && (
             <div className="mb-6">

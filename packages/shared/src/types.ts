@@ -1619,6 +1619,23 @@ export interface LaporanHarian {
   estimasi_profit: number;
   item_terjual: { menu_nama: string; qty: number; omzet: number }[];
   konsumsi_bahan: { nama: string; slug: string; qty: number }[];
+  /**
+   * Sebaran transaksi per JAM pada rentang, di zona waktu perusahaan.
+   *
+   * Hanya memuat jam dari transaksi PERTAMA sampai TERAKHIR — bukan 00–23.
+   * Warung yang buka jam 10 dan tutup jam 21 tak perlu memandangi sepuluh
+   * kolom kosong untuk menemukan jam ramainya; yang dicari orang di grafik ini
+   * adalah bentuk harinya, dan kolom kosong di kedua ujung justru meratakannya.
+   *
+   * Jam KOSONG DI TENGAH tetap ada dan bernilai 0 — itu jeda sungguhan
+   * (jam sepi selepas makan siang), dan menghapusnya akan memampatkan sumbu
+   * waktu sehingga dua jam yang berjauhan terlihat bersebelahan.
+   *
+   * Untuk rentang lebih dari satu hari, angkanya adalah TOTAL per jam-hari
+   * sepanjang rentang itu (mis. "jam 12" = seluruh transaksi jam 12 pada semua
+   * hari terpilih), bukan rata-rata.
+   */
+  per_jam: { jam: number; jumlah: number; omzet: number }[];
 }
 
 /**

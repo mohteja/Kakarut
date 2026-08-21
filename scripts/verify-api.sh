@@ -12111,6 +12111,41 @@ cek "PASANGAN: …kategori barunya tersimpan & alasan penolakan dibersihkan" "V 
   "$([ "$(BARIS223B kategori)" = "koreksi_pencatatan" ] && [ "$(BARIS223B tolak_alasan)" = "null" ] && echo 1 || echo 0)"
 
 echo
+echo "── §224 Grafik transaksi per jam: sumbunya tak boleh berbohong ──"
+# Grafik ini menjawab "kapan warung ramai". Yang membuatnya bisa dipercaya satu
+# sifat: batang-batangnya HARUS berjumlah sama dengan kartu "Transaksi" dan
+# "Omzet" di halaman yang sama. Keduanya dihitung dari kueri yang berbeda, jadi
+# kesamaannya bukan tautologi — ia yang membuktikan saringannya memang sama.
+#
+# Ember jamnya dihitung di ZONA PERUSAHAAN. Tanpa `AT TIME ZONE`, kueri tetap
+# SAH dan tetap memulangkan angka — cuma tergeser tujuh jam di WIB, sehingga
+# jam ramai yang dibaca pemilik warung jadi jam yang salah tanpa satu pun galat.
+HARI224=$(TZ=Asia/Jakarta date +%F)   # tanggal bisnis, bukan tanggal UTC server
+LAP224=$(api "$OWNER" GET "/laporan?dari=$HARI224&sampai=$HARI224&branch_id=all")
+cek "dasar §224: laporan hari ini terbaca & memuat per_jam" "V == 1" \
+  "$(echo "$LAP224" | jq '((.per_jam|type) == "array") | if . then 1 else 0 end')"
+cek "INTI: cacah batang = kartu Transaksi" "V == 1" \
+  "$(echo "$LAP224" | jq '(([.per_jam[].jumlah] | add // 0) == .jumlah_transaksi) | if . then 1 else 0 end')"
+cek "INTI: omzet batang = kartu Omzet" "V == 1" \
+  "$(echo "$LAP224" | jq '((([.per_jam[].omzet] | add // 0) - .omzet) | fabs < 0.01) | if . then 1 else 0 end')"
+cek "deret jamnya BERSAMBUNG (jeda di tengah ikut, bernilai nol)" "V == 1" \
+  "$(echo "$LAP224" | jq '([.per_jam[].jam] | (length == 0) or (. == ([range(.[0]; .[-1]+1)]))) | if . then 1 else 0 end')"
+cek "kedua UJUNGNYA berisi — jam tutup tidak digambar" "V == 1" \
+  "$(echo "$LAP224" | jq '(.per_jam | (length == 0) or ((.[0].jumlah > 0) and (.[-1].jumlah > 0))) | if . then 1 else 0 end')"
+cek "jamnya masuk akal (0–23)" "V == 1" \
+  "$(echo "$LAP224" | jq '([.per_jam[].jam] | all(. >= 0 and . <= 23)) | if . then 1 else 0 end')"
+
+# PASANGAN: tanggal tanpa penjualan harus memulangkan deret KOSONG, bukan 24
+# batang nol — dan bukan pula menyalin angka hari ini. Tanpa asersi ini,
+# `per_jam` yang selalu berisi data hari ini akan membuat semua asersi di atas
+# hijau untuk alasan yang salah.
+LAP224K=$(api "$OWNER" GET "/laporan?dari=2000-01-03&sampai=2000-01-03&branch_id=all")
+cek "PASANGAN: tanggal tanpa penjualan → per_jam kosong" "V == 0" \
+  "$(echo "$LAP224K" | jq '.per_jam | length')"
+cek "PASANGAN: …dan kartu transaksinya memang nol" "V == 0" \
+  "$(echo "$LAP224K" | jq '.jumlah_transaksi')"
+
+echo
 echo "── §221 Akun seed harus ditinggalkan seperti semula ──"
 # Duduk di ekor bersama §209/§215, dan karena alasan yang sama: ia menghakimi
 # sesudah semua seksi selesai mengutak-atik.
