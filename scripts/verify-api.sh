@@ -11252,6 +11252,57 @@ cek "INTI: ketiganya jadi (201) — nama kembar memang boleh" "V == 3" \
 cek "…dan slugnya dibedakan otomatis, bukan ditolak" "V == 3" \
   "$(api "$SA" GET /admin/tenants | jq --arg n "$NAMA213" '[.[]|select(.nama==$n)]|map(.slug)|unique|length')"
 
+# ── PINTU KELIMA & KEENAM: master data yang PALING SERING diketik ──────────
+# Keduanya lolos dari sapuan mekanis versi pertama — daftar tabelnya baru
+# memuat `users|invitations|companies`. Yang menemukannya: menembak KESEPULUH
+# endpoint pembuatan bernama unik sekaligus dan membaca kolom 5xx-nya.
+# Terukur sebelum perbaikan, empat permintaan serentak bernama sama:
+#   /perlengkapan → 201 409 409 500
+#   /bahan        → 201 409 409 500
+NB213="Balap Bahan 213 $RANDOM"
+DB213=$(balap213 4 "$OWNER" /bahan \
+  "{\"nama\":\"$NB213\",\"satuan\":\"pcs\",\"isi\":1,\"harga_beli\":1000,\"pengadaan\":\"beli\",\"kategori\":\"lain\"}")
+cek "INTI: 4 pembuatan bahan bernama sama → TAK ADA 5xx" "V == 0" "$(lima213 "$DB213")"
+cek "…tepat SATU bahan lahir (201), sisanya 409" "V == 1" "$(kode213 "$DB213" 201)"
+cek "…dan hanya satu baris bahan bernama itu" "V == 1" \
+  "$(api "$OWNER" GET /bahan | jq --arg n "$NB213" '[.[]|select(.nama==$n)]|length')"
+
+NP213="Balap Perlengkapan 213 $RANDOM"
+DP213=$(balap213 4 "$OWNER" /perlengkapan \
+  "{\"nama\":\"$NP213\",\"satuan\":\"pcs\",\"harga_beli\":500}")
+cek "INTI: 4 pembuatan perlengkapan bernama sama → TAK ADA 5xx" "V == 0" "$(lima213 "$DP213")"
+cek "…tepat SATU perlengkapan lahir (201), sisanya 409" "V == 1" "$(kode213 "$DP213" 201)"
+
+# PASANGAN: penolakannya tak boleh menelan yang SAH. Nama baru tetap 201, dan
+# nama kembar tetap ditolak 409 lewat jalur berurutan — bukan cuma di balapan.
+cek "PASANGAN: bahan bernama BARU tetap 201" "V == 201" \
+  "$(status_code_body "$OWNER" POST /bahan \
+     "{\"nama\":\"Baru 213 $RANDOM\",\"satuan\":\"pcs\",\"isi\":1,\"harga_beli\":1000,\"pengadaan\":\"beli\",\"kategori\":\"lain\"}")"
+cek "PASANGAN: bahan bernama sama berurutan tetap 409" "V == 409" \
+  "$(status_code_body "$OWNER" POST /bahan \
+     "{\"nama\":\"$NB213\",\"satuan\":\"pcs\",\"isi\":1,\"harga_beli\":1000,\"pengadaan\":\"beli\",\"kategori\":\"lain\"}")"
+cek "PASANGAN: perlengkapan bernama BARU tetap 201" "V == 201" \
+  "$(status_code_body "$OWNER" POST /perlengkapan \
+     "{\"nama\":\"Baru 213 $RANDOM\",\"satuan\":\"pcs\",\"harga_beli\":500}")"
+
+# ── PINTU KETUJUH: IMPOR MASSAL — di sini 409 pun jawaban yang SALAH ───────
+# `slugUnik` di `/bahan/bulk` bukan pemeriksa melainkan PENGALOKASI: ia membaca
+# slug yang terpakai lalu memilih yang berikutnya bebas. Empat impor serentak
+# bernama sama SEHARUSNYA menghasilkan empat bahan — "x", "x 2", "x 3", "x 4".
+# Yang terjadi sebelum perbaikan: 201, 201, 500, 500 — di TIGA ronde berturut,
+# jadi dua impor yang sah gagal seluruhnya. Ini bukan kode status yang salah,
+# ini pekerjaan yang hilang.
+NBK213="Balap Bulk 213 $RANDOM"
+BODYBK213=$(jq -nc --arg n "$NBK213" '{items:[{nama:$n,satuan:"pcs",isi:1,harga_beli:1000,
+  track_stok:true,stok_minimum:0,kategori:"lain",boleh_eceran:false,min_beli:1,
+  masa_simpan_hari:0,lead_time_hari:0,is_packaging:false,is_complement:false}]}')
+DBK213=$(balap213 4 "$OWNER" /bahan/bulk "$BODYBK213")
+cek "INTI: 4 impor massal bernama sama → TAK ADA 5xx" "V == 0" "$(lima213 "$DBK213")"
+cek "INTI: KEEMPATNYA jadi (201) — pengalokasi tak boleh menolak" "V == 4" \
+  "$(kode213 "$DBK213" 201)"
+cek "…empat baris lahir, slugnya dibedakan otomatis" "V == 4" \
+  "$(api "$OWNER" GET /bahan | jq --arg n "$NBK213" '[.[]|select(.nama==$n)]|map(.slug)|unique|length')"
+
 
 echo "== 214. Perusahaan tak boleh kehilangan owner TERAKHIRNYA =="
 # Penjaganya sudah ada dan tertulis niatnya — "Perusahaan tidak boleh kehilangan

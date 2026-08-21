@@ -15,6 +15,7 @@ import {
   type RiwayatHargaDto,
   type RiwayatHargaLot,
 } from "@kakarut/shared";
+import { kunciAntrean } from "../../lib/kunci";
 import { tanpaBentrok } from "../../lib/pg-galat";
 import { db } from "../../db/client";
 import {
@@ -682,47 +683,74 @@ export const bahanRoutes = new Hono<AppEnv>()
   .post("/bulk", requireRole("owner", "admin"), zValidator("json", BahanBulkBody), async (c) => {
     const auth = c.get("auth");
     const { items } = c.req.valid("json");
-    const existing = await db
-      .select({ slug: ingredients.slug })
-      .from(ingredients)
-      .where(eq(ingredients.companyId, auth.company_id!));
-    const slugDipakai = new Set(existing.map((r) => r.slug.toLowerCase()));
-    const slugUnik = (nama: string): string => {
-      const base = nama.toLowerCase().trim().replace(/\s+/g, " ") || "bahan";
-      let s = base;
-      let n = 2;
-      while (slugDipakai.has(s.toLowerCase())) s = `${base} ${n++}`;
-      slugDipakai.add(s.toLowerCase());
-      return s;
-    };
-    const kodes = await resolveKodeBahanBatch(db, auth.company_id!, items);
-    const kmap = await kategoriKanonikMap(db, auth.company_id!);
-    const rows = await db
-      .insert(ingredients)
-      .values(
-        items.map((b, i) => ({
-          companyId: auth.company_id!,
-          slug: slugUnik(b.nama),
-          kode: kodes[i],
-          nama: b.nama,
-          hargaBeli: b.harga_beli,
-          isi: b.isi,
-          satuan: b.satuan,
-          satuanBeli: b.satuan_beli ?? null,
-          trackStok: b.track_stok,
-          stokMinimum: b.stok_minimum,
-          kategori: kanonikKategori(kmap, b.kategori),
-          pengadaan: "beli" as const,
-          bolehEceran: b.boleh_eceran,
-          minBeli: b.min_beli,
-          masaSimpanHari: b.masa_simpan_hari,
-          leadTimeHari: b.lead_time_hari,
-          isPackaging: b.is_packaging,
-          isComplement: b.is_complement,
-          catatan: b.catatan ?? null,
-        })),
-      )
-      .returning();
+    const companyId = auth.company_id!;
+    /*
+     * SELURUHNYA di dalam satu transaksi, dan KUNCI diambil lebih dulu.
+     *
+     * `slugUnik` bukan pemeriksa, melainkan PENGALOKASI: ia membaca slug yang
+     * terpakai lalu memilih yang berikutnya bebas ("kecap manis" dipakai →
+     * "kecap manis 2"). Membaca-lalu-mengalokasi hanya benar bila tak ada yang
+     * menyisip di antaranya — dan sebelum ini tak ada yang mencegah itu.
+     *
+     * Dua impor massal serentak yang memuat nama sama sama-sama membaca
+     * "belum terpakai", sama-sama memilih slug yang sama, lalu yang kalah
+     * menabrak `ingredients_company_slug_uq`. Terukur, empat permintaan
+     * serentak: 201, 201, 500, 500 — sama di tiga ronde berturut-turut.
+     *
+     * Kerugiannya bukan cuma kode status. Berurutan, keempatnya SEHARUSNYA
+     * berhasil dengan slug "x", "x 2", "x 3", "x 4"; yang terjadi dua impor
+     * gagal seluruhnya. Menerjemahkan 23505 jadi 409 tak menolong di sini —
+     * jawaban yang benar bukan "sudah ada", melainkan nama berikutnya.
+     *
+     * Karena itu kuncinya diambil atas NAMA aturan ("alokasi slug bahan milik
+     * perusahaan ini"), bukan atas nama baris: baris yang diperebutkan belum
+     * ada saat dibaca, jadi tak ada yang bisa dipegang `FOR UPDATE`.
+     * INSERT-nya satu pernyataan, jadi transaksinya tetap pendek.
+     */
+    const rows = await db.transaction(async (tx) => {
+      await kunciAntrean(tx, "bahan-slug", companyId);
+      const existing = await tx
+        .select({ slug: ingredients.slug })
+        .from(ingredients)
+        .where(eq(ingredients.companyId, companyId));
+      const slugDipakai = new Set(existing.map((r) => r.slug.toLowerCase()));
+      const slugUnik = (nama: string): string => {
+        const base = nama.toLowerCase().trim().replace(/\s+/g, " ") || "bahan";
+        let s = base;
+        let n = 2;
+        while (slugDipakai.has(s.toLowerCase())) s = `${base} ${n++}`;
+        slugDipakai.add(s.toLowerCase());
+        return s;
+      };
+      const kodes = await resolveKodeBahanBatch(tx, companyId, items);
+      const kmap = await kategoriKanonikMap(tx, companyId);
+      return tx
+        .insert(ingredients)
+        .values(
+          items.map((b, i) => ({
+            companyId,
+            slug: slugUnik(b.nama),
+            kode: kodes[i],
+            nama: b.nama,
+            hargaBeli: b.harga_beli,
+            isi: b.isi,
+            satuan: b.satuan,
+            satuanBeli: b.satuan_beli ?? null,
+            trackStok: b.track_stok,
+            stokMinimum: b.stok_minimum,
+            kategori: kanonikKategori(kmap, b.kategori),
+            pengadaan: "beli" as const,
+            bolehEceran: b.boleh_eceran,
+            minBeli: b.min_beli,
+            masaSimpanHari: b.masa_simpan_hari,
+            leadTimeHari: b.lead_time_hari,
+            isPackaging: b.is_packaging,
+            isComplement: b.is_complement,
+            catatan: b.catatan ?? null,
+          })),
+        )
+        .returning();
+    });
     return c.json({ jumlah: rows.length, bahan: rows.map((r) => toDto(r)) }, 201);
   })
   /**
