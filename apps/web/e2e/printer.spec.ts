@@ -78,6 +78,26 @@ test("checkout dengan auto-print merekam byte ESC/POS (init + TOTAL)", async ({ 
   const text = capture.map((b) => (b >= 0x20 && b <= 0x7e ? String.fromCharCode(b) : "")).join("");
   expect(text).toContain("TOTAL");
   expect(text).toMatch(/PUSAT-\d{8}-\d{4}/);
+
+  /*
+   * NOMINALNYA ikut diperiksa, bukan cuma kata "TOTAL".
+   *
+   * Struk adalah catatan yang dibawa pulang tamu, dan yang tercetak dibangun
+   * dari `toReceiptData()` — pemetaan tangan dari baris penjualan ke medan
+   * struk. Asersi yang hanya mencari kata "TOTAL" tetap hijau kalau pemetaan
+   * itu menaruh subtotal, atau angka transaksi lain, di tempat total.
+   *
+   * Pembandingnya diambil dari LAYAR (#struk-print), jadi yang dijaga adalah
+   * kesetaraan dua jalur yang menghitung sendiri-sendiri: yang dilihat kasir
+   * dan yang keluar dari printer. Keduanya harus menyebut angka yang sama.
+   */
+  const totalLayar = (await page.locator("#struk-print").innerText()).match(
+    /TOTAL\s*Rp\s?([\d.]+)/,
+  )?.[1];
+  expect(totalLayar, "total tak terbaca dari struk layar").toBeTruthy();
+  expect(text, `nominal cetak harus sama dengan layar (Rp${totalLayar})`).toContain(
+    `Rp${totalLayar}`,
+  );
 });
 
 test("halaman pengaturan printer render dan Cetak Tes merekam byte", async ({ page, request }) => {
