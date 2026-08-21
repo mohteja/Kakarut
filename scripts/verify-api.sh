@@ -4215,7 +4215,7 @@ cek "password kasir dipulihkan ke semula → 200" "V == 200" \
 PULIH105=$(login "$KASIR_EMAIL" "$KASIR_PASS")
 cek "login kasir dgn password SEMULA berhasil lagi" "V == 1" \
   "$([ -n "$PULIH105" ] && [ "$PULIH105" != "null" ] && echo 1 || echo 0)"
-# KEDUA token kasir ikut diperbarui, dan yang kedua itu yang penting.
+# `$REISS105` diperbarui — dan HANYA itu, dengan sengaja.
 #
 # Reset password menaikkan `token_version`, jadi SEMUA token kasir sebelumnya
 # jadi 401 — termasuk `$REISS105`, token hasil re-issue di atas. Dan
@@ -4225,7 +4225,12 @@ cek "login kasir dgn password SEMULA berhasil lagi" "V == 1" \
 # `jq: Cannot index object with number` — badan 401 yang diindeks seperti
 # larik, 1.300 baris dari sebabnya. Persis itu yang terjadi pada percobaan
 # pertama pemulihan ini.
-KASIR="$PULIH105"
+#
+# `$KASIR` sengaja DIBIARKAN MATI meski passwordnya sudah pulih: penjaga
+# `verify-api-token.test.ts` melarang variabel itu muncul lagi sesudah §105,
+# dan larangannya berharga — dua ronde CI pernah habis mengejar 401 yang
+# menyamar jadi bug produk. Satu nama untuk "token kasir sesudah §105", dan
+# nama itu `$REISS105`.
 REISS105="$PULIH105"
 
 echo "== 106. Verifikasi email wajib saat daftar (anti-enumerasi + blokir login) =="
@@ -11882,7 +11887,7 @@ cek "dasar §220: dua menu uji ada" "V == 2" \
 # kembalikanSemua220 <qtyA> <qtyB> <tipe> <nilai> → "dibayar Σrefund sisa"
 kembalikanSemua220(){
   local qa="$1" qb="$2" tp="$3" nl="$4" S SID DIBAYAR ITEMS JUMLAH=0 SISA baris iid r
-  S=$(api "$KASIR" POST /penjualan \
+  S=$(api "$REISS105" POST /penjualan \
     "{\"is_dine_in\":false,\"diskon_tipe\":\"$tp\",\"diskon_nilai\":$nl,\"items\":[{\"menu_id\":\"$PBA220\",\"qty\":$qa},{\"menu_id\":\"$PBB220\",\"qty\":$qb}]}")
   SID=$(echo "$S" | jq -r '.sale.id // empty')
   [ -z "$SID" ] && { echo "0 0 -1"; return; }
@@ -11891,7 +11896,7 @@ kembalikanSemua220(){
   while :; do
     baris=$(echo "$ITEMS" | jq -r 'map(select(.qty>0))[0] // empty'); [ -z "$baris" ] && break
     iid=$(echo "$baris" | jq -r .id)
-    r=$(api "$KASIR" POST "/penjualan/$SID/refund" \
+    r=$(api "$REISS105" POST "/penjualan/$SID/refund" \
       "{\"items\":[{\"sale_item_id\":\"$iid\",\"qty\":1}],\"client_ref\":\"$(cat /proc/sys/kernel/random/uuid)\"}")
     JUMLAH=$((JUMLAH + $(echo "$r" | jq -r '.nominal // 0')))
     ITEMS=$(echo "$ITEMS" | jq --arg i "$iid" 'map(if .id==$i then .qty=(.qty-1) else . end)')
@@ -11917,12 +11922,12 @@ cek "INTI: nota yang seluruh porsinya dikembalikan bersisa NOL" "V == 0" "$SISA2
 # ── PASANGAN: kesetaraan di atas tidak boleh benar secara sepele ──────────
 # Kalau `nominal` selalu memulangkan total nota, kedua asersi di atas juga
 # hijau. Yang membedakan: refund SEBAGIAN harus lebih kecil dari yang dibayar.
-S220=$(api "$KASIR" POST /penjualan \
+S220=$(api "$REISS105" POST /penjualan \
   "{\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$PBA220\",\"qty\":4}]}")
 SID220=$(echo "$S220" | jq -r '.sale.id')
 BAYAR220=$(echo "$S220" | jq -r '.sale.total')
 IT220=$(api "$OWNER" GET "/penjualan/$SID220" | jq -r '(.items // .sale.items)[0].id')
-NOM220=$(api "$KASIR" POST "/penjualan/$SID220/refund" \
+NOM220=$(api "$REISS105" POST "/penjualan/$SID220/refund" \
   "{\"items\":[{\"sale_item_id\":\"$IT220\",\"qty\":1}],\"client_ref\":\"$(cat /proc/sys/kernel/random/uuid)\"}" | jq -r '.nominal // 0')
 cek "PASANGAN: refund SEBAGIAN (1 dari 4) lebih kecil dari yang dibayar" "V == 1" \
   "$([ "$NOM220" -gt 0 ] && [ "$NOM220" -lt "$BAYAR220" ] && echo 1 || echo 0)"

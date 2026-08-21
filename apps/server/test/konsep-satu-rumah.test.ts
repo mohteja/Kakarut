@@ -96,16 +96,21 @@ const DASAR: Record<string, { berkas: number; alasan: string }> = {
   "subtotal - diskon": {
     berkas: 2,
     alasan:
-      "UTANG: 'nilai bersih sebelum pajak' — dasar perhitungan PB1 — dihitung " +
-      "terpisah di modules/penjualan/service.ts (saat penjualan dibuat) dan " +
-      "packages/shared/refund.ts (saat diprorata). Rumus PB1-nya memang SENGAJA " +
-      "berbeda — refund menurunkannya dari PB1 ASAL, bukan dari tarif hari ini, " +
-      "sebab tarifnya bisa sudah berubah — jadi yang kembar cuma `net`-nya. " +
-      "Kekekalan uangnya sudah diukur: 100.000 kombinasi bertahap, nol " +
-      "pelanggaran, dan kini dijaga `refund-uang-kekal.test.ts`. Yang tersisa " +
-      "risiko ke depan: begitu ada jenis potongan baru (diskon per baris, biaya " +
-      "layanan), yang menambahkannya di satu tempat tak akan diingatkan tentang " +
-      "yang lain",
+      "UTANG: 'nilai bersih sebelum pajak'. Yang TERTANGKAP sapuan ini dua — " +
+      "`lib/bep.ts` (`p.subtotal - p.diskon`, dasar margin kontribusi) dan " +
+      "`packages/shared/refund.ts` (`asal.subtotal - asal.diskon`, saat " +
+      "diprorata). Tapi konsepnya sebenarnya hidup di TIGA tempat: " +
+      "`modules/penjualan/service.ts:458` menghitungnya juga, sebagai " +
+      "`subtotal - diskon` atas variabel lokal TANPA titik — dan detektor di " +
+      "berkas ini hanya melihat bentuk `a.x - b.y`. Itu bukan kelalaian " +
+      "melainkan batas yang memang tertulis di kepala berkas; dicatat di sini " +
+      "supaya yang membaca entri ini tahu angka 2 bukan berarti dua. " +
+      "Kekekalan uangnya sendiri sudah diukur dua lapis: 100.000 kombinasi " +
+      "pada fungsinya (`refund-uang-kekal.test.ts`) dan 240 kombinasi lewat " +
+      "API sungguhan (§220 verify-api), nol pelanggaran. Yang tersisa risiko " +
+      "ke depan: begitu ada jenis potongan baru (diskon per baris, biaya " +
+      "layanan), yang menambahkannya di satu tempat tak akan diingatkan " +
+      "tentang dua yang lain",
   },
 };
 
