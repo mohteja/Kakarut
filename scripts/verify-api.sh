@@ -11942,6 +11942,95 @@ cek "setelan PB1 perusahaan dikembalikan seperti semula" "V == 1" \
 
 
 echo
+echo "── §222 Batal-tolak tak boleh menghidupkan baris yang SENGAJA ditolak ──"
+# Penerimaan sebagian menolak baris dengan qty 0: barangnya memang TIDAK datang.
+# `/batal-tolak` ada untuk kasus lain — kasir salah cek lalu menolak SATU faktur
+# PENUH — jadi ia wajib menolak faktur yang sudah diterima sebagian, kalau tidak
+# qty & harga PENUH yang tak pernah tiba ikut masuk stok & buku belanja.
+#
+# Dulu penjaganya pra-cek `SELECT` lalu `UPDATE` — dua pernyataan tanpa
+# transaksi. `/terima-sebagian` yang commit di antaranya lolos begitu saja.
+# TERUKUR sebelum diperbaiki: 14 putaran dengan tekanan kolam koneksi → 2 kali
+# baris yang ditolak berubah jadi diterima, saldo tujuan naik 8 lalu 16 untuk
+# barang yang tak pernah datang; sesudah dikunci, 0 dari 28.
+#
+# Yang diperiksa di sini PERILAKU BERURUTANNYA — deterministik, jadi ia berarti
+# di tiap jalan CI. Balapannya sendiri tidak dijadikan asersi: pada 14% per
+# putaran ia butuh puluhan putaran + beban kolam untuk berbunyi sekali, dan
+# detektor selemah itu di CI lebih sering berbohong "aman" daripada menangkap.
+SRC222=$(api "$OWNER" GET /cabang | jq -r '[.[] | select(.tipe=="store")][0].id')
+DST222=$(api "$OWNER" GET /cabang | jq -r '[.[] | select(.tipe=="store")][1].id')
+# Cabang tujuan belum tentu punya tempat penyimpanan (di jalan ini "Cabang 2"
+# memang kosong) — kiriman butuh gudang tujuan, jadi disiapkan bila belum ada.
+GD222=$(api "$OWNER" GET "/penyimpanan?branch_id=$DST222" | jq -r '.[0].id // empty')
+if [ -z "$GD222" ]; then
+  GD222=$(api "$OWNER" POST /penyimpanan "{\"nama\":\"Gudang 222\",\"branch_id\":\"$DST222\"}" | jq -r '.id // empty')
+fi
+cek "dasar §222: dua cabang toko + gudang tujuan siap" "V == 1" \
+  "$([ -n "$SRC222" ] && [ -n "$DST222" ] && [ "$SRC222" != "$DST222" ] && [ -n "$GD222" ] && echo 1 || echo 0)"
+
+# Nama diberi akhiran acak: bahan BARU selalu bersaldo 0, jadi asersi "+10"
+# di bawah tetap bermakna meski seksi ini dijalankan dua kali atas DB yang sama.
+# (Tanpa itu, POST kedua kena 409 nama kembar → id kosong → seluruh §222 gagal
+# di tempat yang jauh dari sebabnya.)
+bahan222() { api "$OWNER" POST /bahan "{\"nama\":\"$1 $(cat /proc/sys/kernel/random/uuid | cut -c1-8)\",\"kategori\":\"lain\",\"harga_beli\":1000,\"isi\":1,\"satuan\":\"pcs\"}" | jq -r '.id // empty'; }
+saldo222() { api "$OWNER" GET "/stok?branch_id=$DST222" | jq --arg i "$1" '([.[] | select(.ingredient_id==$i)][0].saldo) // 0'; }
+status222() { api "$OWNER" GET "/pembelian?branch_id=$DST222&per_page=500" \
+  | jq -r --arg f "$1" --arg i "$2" '[.rows[] | select(.faktur_id==$f and .ingredient_id==$i)][0].status'; }
+
+# Satu faktur dua baris, dikirim ke cabang tujuan → keduanya 'menunggu' di sana.
+kirim222() { # kirim222 <bahanA> <bahanB> → echo faktur_id
+  local fk
+  fk=$(api "$OWNER" POST /pembelian/faktur \
+    "{\"branch_id\":\"$SRC222\",\"items\":[{\"ingredient_id\":\"$1\",\"mode\":\"pcs\",\"jumlah\":10,\"total_harga\":50000},{\"ingredient_id\":\"$2\",\"mode\":\"pcs\",\"jumlah\":8,\"total_harga\":40000}]}" | jq -r .faktur_id)
+  api "$OWNER" POST "/pembelian/tahap/$fk" '{"ke":"dikerjakan","dana_cair":90000}' > /dev/null
+  local ra rb
+  ra=$(api "$OWNER" GET "/pembelian?branch_id=$SRC222&per_page=500" | jq -r --arg f "$fk" --arg i "$1" '[.rows[]|select(.faktur_id==$f and .ingredient_id==$i)][0].id')
+  rb=$(api "$OWNER" GET "/pembelian?branch_id=$SRC222&per_page=500" | jq -r --arg f "$fk" --arg i "$2" '[.rows[]|select(.faktur_id==$f and .ingredient_id==$i)][0].id')
+  api "$OWNER" POST "/pembelian/tahap/$fk" \
+    "{\"ke\":\"menunggu\",\"items\":[{\"id\":\"$ra\",\"qty\":10},{\"id\":\"$rb\",\"qty\":8}],\"tujuan_branch_id\":\"$DST222\",\"tujuan_storage_id\":\"$GD222\"}" > /dev/null
+  printf '%s\n' "$fk"
+}
+
+A222=$(bahan222 "Uji 222 A"); B222=$(bahan222 "Uji 222 B")
+cek "dasar §222: dua bahan uji benar-benar dibuat" "V == 1" \
+  "$([ -n "$A222" ] && [ -n "$B222" ] && [ "$A222" != "$B222" ] && echo 1 || echo 0)"
+FK222=$(kirim222 "$A222" "$B222")
+DA222=$(api "$OWNER" GET "/pembelian?branch_id=$DST222&per_page=500" | jq -r --arg f "$FK222" --arg i "$A222" '[.rows[]|select(.faktur_id==$f and .ingredient_id==$i)][0].id')
+DB222=$(api "$OWNER" GET "/pembelian?branch_id=$DST222&per_page=500" | jq -r --arg f "$FK222" --arg i "$B222" '[.rows[]|select(.faktur_id==$f and .ingredient_id==$i)][0].id')
+cek "dasar §222: dua baris kiriman tiba di cabang tujuan" "V == 1" \
+  "$([ -n "$DA222" ] && [ -n "$DB222" ] && [ "$DA222" != "$DB222" ] && echo 1 || echo 0)"
+
+# A diterima penuh, B ditolak (qty 0 = barang tidak datang).
+api "$OWNER" POST "/penerimaan/$FK222/terima-sebagian" \
+  "{\"items\":[{\"id\":\"$DA222\",\"qty_diterima\":10},{\"id\":\"$DB222\",\"qty_diterima\":0}],\"alasan\":\"uji 222\"}" > /dev/null
+cek "terima sebagian: baris yang datang jadi 'dikonfirmasi'" "V == 1" \
+  "$([ "$(status222 "$FK222" "$A222")" = "dikonfirmasi" ] && echo 1 || echo 0)"
+cek "terima sebagian: baris yang TIDAK datang jadi 'ditolak'" "V == 1" \
+  "$([ "$(status222 "$FK222" "$B222")" = "ditolak" ] && echo 1 || echo 0)"
+cek "PASANGAN: barang yang benar-benar datang MASUK stok (+10)" "abs(V - 10) < 0.001" "$(saldo222 "$A222")"
+cek "INTI: barang yang tak datang TIDAK masuk stok (0)" "abs(V) < 0.001" "$(saldo222 "$B222")"
+
+# Inilah penjaganya: faktur yang sudah diterima sebagian tak boleh di-batal-tolak.
+cek "INTI: batal-tolak atas faktur yang diterima sebagian → 400" "V == 400" \
+  "$(printf '%s\n' "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/penerimaan/$FK222/batal-tolak" -H "Authorization: Bearer $OWNER")")"
+cek "INTI: sesudah ditolak permintaannya, baris B TETAP 'ditolak'" "V == 1" \
+  "$([ "$(status222 "$FK222" "$B222")" = "ditolak" ] && echo 1 || echo 0)"
+cek "INTI: …dan saldonya TETAP nol — tak ada barang hantu" "abs(V) < 0.001" "$(saldo222 "$B222")"
+
+# PASANGAN: jalur sah batal-tolak harus TETAP bekerja. Tanpa ini, "selalu 400"
+# juga membuat ketiga asersi di atas hijau — pengetatan yang mematikan fiturnya.
+A222B=$(bahan222 "Uji 222 C"); B222B=$(bahan222 "Uji 222 D")
+FK222B=$(kirim222 "$A222B" "$B222B")
+api "$OWNER" POST "/penerimaan/$FK222B/tolak" '{"alasan":"kasir salah cek"}' > /dev/null
+cek "PASANGAN: tolak satu faktur penuh → kedua baris 'ditolak'" "V == 1" \
+  "$([ "$(status222 "$FK222B" "$A222B")" = "ditolak" ] && [ "$(status222 "$FK222B" "$B222B")" = "ditolak" ] && echo 1 || echo 0)"
+cek "PASANGAN: batal-tolak atas penolakan PENUH → 200" "V == 200" \
+  "$(printf '%s\n' "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/penerimaan/$FK222B/batal-tolak" -H "Authorization: Bearer $OWNER")")"
+cek "PASANGAN: …dan barangnya benar-benar masuk stok (+10 dan +8)" "V == 1" \
+  "$([ "$(python3 -c "print(1 if abs($(saldo222 "$A222B") - 10) < 0.001 else 0)")" = "1" ] && [ "$(python3 -c "print(1 if abs($(saldo222 "$B222B") - 8) < 0.001 else 0)")" = "1" ] && echo 1 || echo 0)"
+
+echo
 echo "── §221 Akun seed harus ditinggalkan seperti semula ──"
 # Duduk di ekor bersama §209/§215, dan karena alasan yang sama: ia menghakimi
 # sesudah semua seksi selesai mengutak-atik.

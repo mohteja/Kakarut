@@ -16,6 +16,7 @@ import {
   suppliers,
   users,
 } from "../../db/schema";
+import { kunciAntrean } from "../../lib/kunci";
 import { awalHariDi, tambahHari } from "../../lib/time";
 
 /** penerima kiriman — siapa yang menekan Terima/Tolak */
@@ -562,34 +563,42 @@ export const penerimaanRoutes = new Hono<AppEnv>()
   /** Terima SEMUA barang kiriman → masuk stok. */
   .post("/:fakturId/terima", async (c) => {
     const auth = c.get("auth");
+    const fakturId = c.req.param("fakturId");
     // waktu = saat diterima (bukan saat RAB dibuat) agar stok masuk terhitung
     // relatif ke opname terakhir, bukan tanggal faktur dibuat.
     const now = new Date();
-    const rows = await db
-      .update(productions)
-      .set({ status: "dikonfirmasi", confirmedBy: auth.sub, confirmedAt: now, waktu: now })
-      .where(
-        and(...kondisiFaktur(c, c.req.param("fakturId")), eq(productions.status, "menunggu")),
-      )
-      .returning({
-        id: productions.id,
-        branchId: productions.branchId,
-        tipe: productions.tipe,
+    const rows = await db.transaction(async (tx) => {
+      await kunciAntrean(tx, "penerimaan-faktur", auth.company_id!, fakturId);
+      const r = await tx
+        .update(productions)
+        .set({ status: "dikonfirmasi", confirmedBy: auth.sub, confirmedAt: now, waktu: now })
+        .where(and(...kondisiFaktur(c, fakturId), eq(productions.status, "menunggu")))
+        .returning({
+          id: productions.id,
+          branchId: productions.branchId,
+          tipe: productions.tipe,
+        });
+      if (r.length === 0) {
+        throw new HTTPException(404, {
+          message: "Kiriman tidak ditemukan atau bukan status dikirim",
+        });
+      }
+      await catatLogFaktur(tx, {
+        companyId: auth.company_id!,
+        branchId: r[0].branchId,
+        fakturId,
+        jalur: r[0].tipe as JenisPengadaan,
+        aksi: "Diterima semua (toko) — stok masuk",
+        detail: `${r.length} baris`,
+        userId: auth.sub,
       });
-    if (rows.length === 0) {
-      throw new HTTPException(404, { message: "Kiriman tidak ditemukan atau bukan status dikirim" });
-    }
-    // barang tiba di cabang → otomatis diletakkan di rak default bahannya
-    await autoFileRakCabang(auth.company_id!, rows.map((r) => r.id));
-    await catatLogFaktur(db, {
-      companyId: auth.company_id!,
-      branchId: rows[0].branchId,
-      fakturId: c.req.param("fakturId"),
-      jalur: rows[0].tipe as JenisPengadaan,
-      aksi: "Diterima semua (toko) — stok masuk",
-      detail: `${rows.length} baris`,
-      userId: auth.sub,
+      return r;
     });
+    // Barang tiba di cabang → otomatis diletakkan di rak default bahannya.
+    // SENGAJA di luar transaksi: `autoFileRakCabang` membaca lewat `db` global,
+    // jadi memanggilnya dari dalam sini akan menyewa koneksi kedua dari kolam
+    // yang sama — lihat `test/koneksi-bersarang.test.ts`.
+    await autoFileRakCabang(auth.company_id!, rows.map((r) => r.id));
     return c.json({ ok: true, jumlah_baris: rows.length });
   })
   /**
@@ -602,39 +611,41 @@ export const penerimaanRoutes = new Hono<AppEnv>()
     const body = c.req.valid("json");
     const fakturId = c.req.param("fakturId");
 
-    const baris = await db
-      .select({
-        id: productions.id,
-        qty: productions.qty,
-        totalHarga: productions.totalHarga,
-        branchId: productions.branchId,
-        tipe: productions.tipe,
-      })
-      .from(productions)
-      .where(and(...kondisiFaktur(c, fakturId), eq(productions.status, "menunggu")));
-    if (baris.length === 0) {
-      throw new HTTPException(404, { message: "Kiriman tidak ditemukan atau bukan status dikirim" });
-    }
-    const terimaById = new Map(body.items.map((i) => [i.id, i.qty_diterima]));
-    const belum = baris.filter((b) => !terimaById.has(b.id));
-    if (belum.length > 0) {
-      throw new HTTPException(400, {
-        message: "Semua baris kiriman harus diisi qty diterimanya (0 bila tidak diterima)",
-      });
-    }
-    // Qty diterima tak boleh melebihi qty yang dikirim — barang tidak mungkin
-    // datang lebih dari yang dikirim; tanpa batas ini stok & pengeluaran bisa
-    // digelembungkan sewenang-wenang.
-    const kelebihan = baris.find((b) => terimaById.get(b.id)! > b.qty);
-    if (kelebihan) {
-      throw new HTTPException(400, {
-        message: "Qty diterima tidak boleh melebihi qty yang dikirim",
-      });
-    }
-
     // waktu = saat diterima (bukan saat RAB), lihat catatan di endpoint /terima.
     const now = new Date();
-    await db.transaction(async (tx) => {
+    const terimaById = new Map(body.items.map((i) => [i.id, i.qty_diterima]));
+    const baris = await db.transaction(async (tx) => {
+      await kunciAntrean(tx, "penerimaan-faktur", auth.company_id!, fakturId);
+      const baris = await tx
+        .select({
+          id: productions.id,
+          qty: productions.qty,
+          totalHarga: productions.totalHarga,
+          branchId: productions.branchId,
+          tipe: productions.tipe,
+        })
+        .from(productions)
+        .where(and(...kondisiFaktur(c, fakturId), eq(productions.status, "menunggu")));
+      if (baris.length === 0) {
+        throw new HTTPException(404, {
+          message: "Kiriman tidak ditemukan atau bukan status dikirim",
+        });
+      }
+      const belum = baris.filter((b) => !terimaById.has(b.id));
+      if (belum.length > 0) {
+        throw new HTTPException(400, {
+          message: "Semua baris kiriman harus diisi qty diterimanya (0 bila tidak diterima)",
+        });
+      }
+      // Qty diterima tak boleh melebihi qty yang dikirim — barang tidak mungkin
+      // datang lebih dari yang dikirim; tanpa batas ini stok & pengeluaran bisa
+      // digelembungkan sewenang-wenang.
+      const kelebihan = baris.find((b) => terimaById.get(b.id)! > b.qty);
+      if (kelebihan) {
+        throw new HTTPException(400, {
+          message: "Qty diterima tidak boleh melebihi qty yang dikirim",
+        });
+      }
       for (const b of baris) {
         const diterima = terimaById.get(b.id)!;
         // WHERE tetap menuntut status 'menunggu' + belum dihapus: bila baris
@@ -696,8 +707,10 @@ export const penerimaanRoutes = new Hono<AppEnv>()
           (body.alasan ? ` · ${body.alasan}` : ""),
         userId: auth.sub,
       });
+      return baris;
     });
-    // baris yang diterima → auto-file ke rak default bahannya di cabang
+    // baris yang diterima → auto-file ke rak default bahannya di cabang.
+    // Di LUAR transaksi dengan sengaja — lihat catatan di `/terima`.
     await autoFileRakCabang(
       auth.company_id!,
       baris.filter((b) => terimaById.get(b.id)! > 0).map((b) => b.id),
@@ -708,33 +721,38 @@ export const penerimaanRoutes = new Hono<AppEnv>()
   .post("/:fakturId/tolak", zValidator("json", TolakBody), async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");
-    const rows = await db
-      .update(productions)
-      .set({
-        status: "ditolak",
-        alasanTolak: body.alasan ?? null,
-        updatedBy: auth.sub,
-        updatedAt: new Date(),
-      })
-      .where(
-        and(...kondisiFaktur(c, c.req.param("fakturId")), eq(productions.status, "menunggu")),
-      )
-      .returning({
-        id: productions.id,
-        branchId: productions.branchId,
-        tipe: productions.tipe,
+    const fakturId = c.req.param("fakturId");
+    const rows = await db.transaction(async (tx) => {
+      await kunciAntrean(tx, "penerimaan-faktur", auth.company_id!, fakturId);
+      const r = await tx
+        .update(productions)
+        .set({
+          status: "ditolak",
+          alasanTolak: body.alasan ?? null,
+          updatedBy: auth.sub,
+          updatedAt: new Date(),
+        })
+        .where(and(...kondisiFaktur(c, fakturId), eq(productions.status, "menunggu")))
+        .returning({
+          id: productions.id,
+          branchId: productions.branchId,
+          tipe: productions.tipe,
+        });
+      if (r.length === 0) {
+        throw new HTTPException(404, {
+          message: "Kiriman tidak ditemukan atau bukan status dikirim",
+        });
+      }
+      await catatLogFaktur(tx, {
+        companyId: auth.company_id!,
+        branchId: r[0].branchId,
+        fakturId,
+        jalur: r[0].tipe as JenisPengadaan,
+        aksi: "Kiriman ditolak",
+        detail: body.alasan ?? null,
+        userId: auth.sub,
       });
-    if (rows.length === 0) {
-      throw new HTTPException(404, { message: "Kiriman tidak ditemukan atau bukan status dikirim" });
-    }
-    await catatLogFaktur(db, {
-      companyId: auth.company_id!,
-      branchId: rows[0].branchId,
-      fakturId: c.req.param("fakturId"),
-      jalur: rows[0].tipe as JenisPengadaan,
-      aksi: "Kiriman ditolak",
-      detail: body.alasan ?? null,
-      userId: auth.sub,
+      return r;
     });
     return c.json({ ok: true, jumlah_baris: rows.length });
   })
@@ -745,48 +763,65 @@ export const penerimaanRoutes = new Hono<AppEnv>()
   .post("/:fakturId/batal-tolak", async (c) => {
     const auth = c.get("auth");
     const fakturId = c.req.param("fakturId");
-    // Bila faktur sudah diterima SEBAGIAN (ada baris dikonfirmasi), baris yang
-    // ditolak tadi memang sengaja tak diterima (qty 0) — membatalkannya akan
-    // memasukkan qty & harga PENUH yang salah. Batal-tolak hanya untuk
-    // penolakan satu faktur penuh (semua baris ditolak).
-    const [adaDiterima] = await db
-      .select({ id: productions.id })
-      .from(productions)
-      .where(and(...kondisiFaktur(c, fakturId), eq(productions.status, "dikonfirmasi")))
-      .limit(1);
-    if (adaDiterima) {
-      throw new HTTPException(400, {
-        message:
-          "Faktur ini sudah diterima sebagian — baris yang ditolak tidak bisa dibatalkan (barang memang tidak diterima)",
-      });
-    }
     const now = new Date();
-    const rows = await db
-      .update(productions)
-      .set({
-        status: "dikonfirmasi",
-        alasanTolak: null,
-        confirmedBy: auth.sub,
-        confirmedAt: now,
-        waktu: now,
-      })
-      .where(and(...kondisiFaktur(c, fakturId), eq(productions.status, "ditolak")))
-      .returning({
-        id: productions.id,
-        branchId: productions.branchId,
-        tipe: productions.tipe,
+    const rows = await db.transaction(async (tx) => {
+      /*
+       * KUNCINYA YANG MENJAGA, BUKAN PRA-CEK DI BAWAH.
+       *
+       * Pra-ceknya `SELECT` dan penerapannya `UPDATE` — dua pernyataan. Tanpa
+       * antrean ini, `/terima-sebagian` yang commit DI ANTARA keduanya lolos:
+       * pra-cek membaca "belum ada yang dikonfirmasi" (benar saat itu), lalu
+       * UPDATE menemukan baris yang BARU SAJA ditolak dan ikut menaikkannya
+       * jadi 'dikonfirmasi' — dengan qty & harga PENUH yang tak pernah datang.
+       *
+       * Terukur: 14 putaran dengan tekanan kolam koneksi → 2 kali baris yang
+       * ditolak berubah jadi diterima, saldo cabang tujuan naik 8 lalu 16 untuk
+       * barang yang tak pernah tiba.
+       */
+      await kunciAntrean(tx, "penerimaan-faktur", auth.company_id!, fakturId);
+      // Bila faktur sudah diterima SEBAGIAN (ada baris dikonfirmasi), baris yang
+      // ditolak tadi memang sengaja tak diterima (qty 0) — membatalkannya akan
+      // memasukkan qty & harga PENUH yang salah. Batal-tolak hanya untuk
+      // penolakan satu faktur penuh (semua baris ditolak).
+      const [adaDiterima] = await tx
+        .select({ id: productions.id })
+        .from(productions)
+        .where(and(...kondisiFaktur(c, fakturId), eq(productions.status, "dikonfirmasi")))
+        .limit(1);
+      if (adaDiterima) {
+        throw new HTTPException(400, {
+          message:
+            "Faktur ini sudah diterima sebagian — baris yang ditolak tidak bisa dibatalkan (barang memang tidak diterima)",
+        });
+      }
+      const r = await tx
+        .update(productions)
+        .set({
+          status: "dikonfirmasi",
+          alasanTolak: null,
+          confirmedBy: auth.sub,
+          confirmedAt: now,
+          waktu: now,
+        })
+        .where(and(...kondisiFaktur(c, fakturId), eq(productions.status, "ditolak")))
+        .returning({
+          id: productions.id,
+          branchId: productions.branchId,
+          tipe: productions.tipe,
+        });
+      if (r.length === 0) {
+        throw new HTTPException(404, { message: "Tidak ada baris ditolak pada kiriman ini" });
+      }
+      await catatLogFaktur(tx, {
+        companyId: auth.company_id!,
+        branchId: r[0].branchId,
+        fakturId,
+        jalur: r[0].tipe as JenisPengadaan,
+        aksi: "Penolakan dibatalkan — stok masuk",
+        detail: `${r.length} baris`,
+        userId: auth.sub,
       });
-    if (rows.length === 0) {
-      throw new HTTPException(404, { message: "Tidak ada baris ditolak pada kiriman ini" });
-    }
-    await catatLogFaktur(db, {
-      companyId: auth.company_id!,
-      branchId: rows[0].branchId,
-      fakturId,
-      jalur: rows[0].tipe as JenisPengadaan,
-      aksi: "Penolakan dibatalkan — stok masuk",
-      detail: `${rows.length} baris`,
-      userId: auth.sub,
+      return r;
     });
     return c.json({ ok: true, jumlah_baris: rows.length });
   });
