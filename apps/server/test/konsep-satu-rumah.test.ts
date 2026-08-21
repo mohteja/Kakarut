@@ -97,11 +97,15 @@ const DASAR: Record<string, { berkas: number; alasan: string }> = {
     berkas: 2,
     alasan:
       "UTANG: 'nilai bersih sebelum pajak' — dasar perhitungan PB1 — dihitung " +
-      "di lib/bep.ts dan packages/shared/refund.ts secara terpisah. Hari ini " +
-      "keduanya sepakat. Begitu ada jenis potongan baru (mis. diskon per baris " +
-      "atau biaya layanan), yang menambahkannya di satu tempat tak akan " +
-      "diingatkan tentang yang lain, dan angkanya menyimpang di dokumen yang " +
-      "dibawa pulang tamu",
+      "terpisah di modules/penjualan/service.ts (saat penjualan dibuat) dan " +
+      "packages/shared/refund.ts (saat diprorata). Rumus PB1-nya memang SENGAJA " +
+      "berbeda — refund menurunkannya dari PB1 ASAL, bukan dari tarif hari ini, " +
+      "sebab tarifnya bisa sudah berubah — jadi yang kembar cuma `net`-nya. " +
+      "Kekekalan uangnya sudah diukur: 100.000 kombinasi bertahap, nol " +
+      "pelanggaran, dan kini dijaga `refund-uang-kekal.test.ts`. Yang tersisa " +
+      "risiko ke depan: begitu ada jenis potongan baru (diskon per baris, biaya " +
+      "layanan), yang menambahkannya di satu tempat tak akan diingatkan tentang " +
+      "yang lain",
   },
 };
 
