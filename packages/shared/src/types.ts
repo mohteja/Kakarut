@@ -2735,6 +2735,20 @@ export interface RiwayatHargaLot {
   no_faktur: string | null;
   /** nomor dokumen otomatis (PB-/PL-) */
   nomor: string | null;
+  /**
+   * true = harganya TEBAKAN, bukan angka yang pernah dilihat manusia: faktur
+   * dibuat tanpa harga, jadi diisi qty × harga acuan SAAT ITU.
+   *
+   * Wajib ada di DTO, bukan cuma di server: lot begini TIDAK boleh ikut
+   * menentukan terendah/tertinggi/median/rata-rata (lihat `statistikHargaLots`),
+   * dan barisnya tetap ditampilkan — sehingga layar butuh cara membedakannya.
+   * Tanpa penanda ini, daftar lot memuat harga yang tak pernah terjadi tanpa
+   * satu pun keterangan.
+   *
+   * Perlengkapan selalu `false`: `supply_mutations` tak punya jalur tebakan,
+   * semua harganya diketik manusia (atau kosong, dan yang kosong dilewati).
+   */
+  harga_tebakan: boolean;
 }
 
 /** Titik harga ekstrem riwayat pembelian: nilainya berapa & kapan terjadi. */
@@ -2776,5 +2790,15 @@ export interface RiwayatHargaDto {
   harga_median: number | null;
   /** jumlah lot pembelian tercatat */
   jumlah_pembelian: number;
+  /**
+   * Berapa lot yang benar-benar MENENTUKAN keempat angka statistik di atas —
+   * yaitu lot berharga yang bukan tebakan.
+   *
+   * Selalu ≤ `jumlah_pembelian`, dan selisihnya bukan kesalahan: layar
+   * memakainya untuk menjelaskan kenapa "7 lot tercatat" bisa punya median
+   * dari 1 harga. Tanpa angka ini, statistik yang benar justru terbaca seperti
+   * angka yang rusak.
+   */
+  jumlah_harga_nyata: number;
   lots: RiwayatHargaLot[];
 }

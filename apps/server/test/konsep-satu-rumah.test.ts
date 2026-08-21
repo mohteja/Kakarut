@@ -85,28 +85,32 @@ const DASAR: Record<string, { berkas: number; alasan: string }> = {
   },
 
   // ── UTANG YANG DIAKUI: duplikasi nyata, belum dibereskan ──────────────────
-  // Dibiarkan di sini SUPAYA TERLIHAT, bukan supaya dilupakan. Keduanya
-  // ditemukan justru saat menulis daftar ini — menuntut alasan untuk tiap entri
-  // memaksa memeriksanya satu per satu, dan dua ini tak punya alasan yang baik.
-  "stok_minimum - saldo": {
-    berkas: 2,
-    alasan:
-      "UTANG: 'berapa yang perlu dipesan' dihitung dua kali, DAN keduanya sudah " +
-      "berbeda — server memakai `Math.ceil(x - y - 1e-9)` (berpenjaga galat " +
-      "pembulatan float), layar memakai `Math.max(1, Math.ceil(x - y))` tanpa " +
-      "penjaga itu. Untuk saldo 10.0000000001 dengan minimum 10, server bilang " +
-      "0 dan layar bilang 1. Selisihnya kecil dan tak ada yang rugi uang, tapi " +
-      "ini persis awal dari bentuk yang lima kali menyakiti stok",
-  },
+  // Dibiarkan di sini SUPAYA TERLIHAT, bukan supaya dilupakan. Ditemukan justru
+  // saat menulis daftar ini — menuntut alasan untuk tiap entri memaksa
+  // memeriksanya satu per satu, dan yang ini tak punya alasan yang baik.
+  //
+  // Sebelumnya ada dua. `stok_minimum - saldo` sudah LUNAS: aturannya kini
+  // tinggal di `kekuranganKeMinimum` (@kakarut/shared), dan uji "DASAR tidak
+  // menyimpan entri yang sudah tak berlaku" di bawahlah yang memaksa entrinya
+  // dihapus dari sini — persis kerja yang diharapkan darinya.
   "subtotal - diskon": {
     berkas: 2,
     alasan:
-      "UTANG: 'nilai bersih sebelum pajak' — dasar perhitungan PB1 — dihitung " +
-      "di lib/bep.ts dan packages/shared/refund.ts secara terpisah. Hari ini " +
-      "keduanya sepakat. Begitu ada jenis potongan baru (mis. diskon per baris " +
-      "atau biaya layanan), yang menambahkannya di satu tempat tak akan " +
-      "diingatkan tentang yang lain, dan angkanya menyimpang di dokumen yang " +
-      "dibawa pulang tamu",
+      "UTANG: 'nilai bersih sebelum pajak'. Yang TERTANGKAP sapuan ini dua — " +
+      "`lib/bep.ts` (`p.subtotal - p.diskon`, dasar margin kontribusi) dan " +
+      "`packages/shared/refund.ts` (`asal.subtotal - asal.diskon`, saat " +
+      "diprorata). Tapi konsepnya sebenarnya hidup di TIGA tempat: " +
+      "`modules/penjualan/service.ts:458` menghitungnya juga, sebagai " +
+      "`subtotal - diskon` atas variabel lokal TANPA titik — dan detektor di " +
+      "berkas ini hanya melihat bentuk `a.x - b.y`. Itu bukan kelalaian " +
+      "melainkan batas yang memang tertulis di kepala berkas; dicatat di sini " +
+      "supaya yang membaca entri ini tahu angka 2 bukan berarti dua. " +
+      "Kekekalan uangnya sendiri sudah diukur dua lapis: 100.000 kombinasi " +
+      "pada fungsinya (`refund-uang-kekal.test.ts`) dan 240 kombinasi lewat " +
+      "API sungguhan (§220 verify-api), nol pelanggaran. Yang tersisa risiko " +
+      "ke depan: begitu ada jenis potongan baru (diskon per baris, biaya " +
+      "layanan), yang menambahkannya di satu tempat tak akan diingatkan " +
+      "tentang dua yang lain",
   },
 };
 

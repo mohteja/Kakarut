@@ -5,6 +5,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { db } from "../../db/client";
+import { bentrokUnikPada } from "../../lib/pg-galat";
 import { branches, companies, memberships, users } from "../../db/schema";
 import type { AppEnv } from "../../middleware/auth";
 import { seedMejaDefault } from "../meja/defaults";
@@ -56,7 +57,8 @@ export const adminTenantsRoutes = new Hono<AppEnv>()
     const slug =
       body.slug ?? body.nama.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
-    const result = await db.transaction(async (tx) => {
+    const jalankan = () =>
+      db.transaction(async (tx) => {
       const [existingCompany] = await tx
         .select({ id: companies.id })
         .from(companies)
@@ -104,6 +106,25 @@ export const adminTenantsRoutes = new Hono<AppEnv>()
         .values({ userId: owner.id, companyId: company.id, role: "owner", employeeCode });
 
       return { company, branch, owner: { id: owner.id, email: owner.email } };
+    });
+    /*
+     * Dua pra-cek di dalam transaksi itu (slug & email) sama-sama punya jeda
+     * sebelum tulisannya; yang benar-benar menjaga keduanya adalah
+     * `companies_slug_unique` dan `users_email_unique`. Yang KALAH balapan dulu
+     * menerima 23505 mentah alias 500.
+     *
+     * Diterjemahkan PER INDEKS, bukan lewat satu pesan seragam: "slug sudah
+     * dipakai" dan "email sudah terdaftar" menuntun ke perbaikan yang berbeda,
+     * dan super admin yang membuat tenant baru tak punya cara lain menebaknya.
+     */
+    const result = await jalankan().catch((e: unknown) => {
+      if (bentrokUnikPada(e, "companies_slug_unique")) {
+        throw new HTTPException(409, { message: `Slug "${slug}" sudah dipakai` });
+      }
+      if (bentrokUnikPada(e, "users_email_unique")) {
+        throw new HTTPException(409, { message: `Email ${body.owner_email} sudah terdaftar` });
+      }
+      throw e;
     });
     return c.json(result, 201);
   })

@@ -34,8 +34,38 @@ describe("pemakaian divalidasi terhadap angka rak", () => {
   const PAKAI = blok('"/:id/pakai"', '"/:id/koreksi"');
 
   it("pembandingnya `saldoDiRakPerlengkapan`, bukan ledger mentah", () => {
-    expect(PAKAI).toMatch(/saldoDiRakPerlengkapan\(db, auth\.company_id!, branchId, \[item\.id\]\)/);
+    expect(PAKAI).toMatch(/saldoDiRakPerlengkapan\(tx, auth\.company_id!, branchId, \[item\.id\]\)/);
     expect(PAKAI).not.toMatch(/await saldoSatuPerlengkapan\(item\.id, branchId\)/);
+  });
+
+  it("dibaca dengan `tx`, bukan `db` — dan itu bukan soal gaya", () => {
+    /*
+     * Versi pertama uji ini justru MEMATOK `(db, …)` — ia mengabadikan bug-nya.
+     * Padahal dua pintu sekerabat di berkas yang sama sudah dipatok `(tx, …)`
+     * di bawah (opname & konsumsi otomatis), jadi yang ganjil memang dua ini.
+     *
+     * Yang dijaga: saldo yang dibaca di luar transaksi penulisan adalah saldo
+     * dari dunia lain, dan keputusan yang dibuat atasnya tak dijamin masih
+     * benar saat tulisannya mendarat. Terukur pada kode lama: enam `pakai 10`
+     * serentak atas saldo 10 → tiga lolos, saldo −20; empat koreksi "rak berisi
+     * 5" atas saldo 10 → saldo 0/10/10, tak sekali pun 5.
+     *
+     * Kontraknya sudah tertulis di `hitungSaldoCabang`: "pemanggil yang
+     * memvalidasi SEBELUM MENULIS wajib mengoper `tx`-nya".
+     */
+    const KOREKSI = blok('"/:id/koreksi"', ".put(");
+    for (const [nama, isi] of Object.entries({ pakai: PAKAI, koreksi: KOREKSI })) {
+      expect(isi, `${nama}: pembacaan saldo harus memakai tx`).not.toMatch(
+        /saldoDiRakPerlengkapan\(\s*db\s*,/,
+      );
+      expect(isi, `${nama}: baca+tulis harus satu transaksi`).toMatch(/db\.transaction\(/);
+      expect(isi, `${nama}: transaksinya harus berkunci`).toMatch(
+        /kunciAntrean\([^)]*"stok-perlengkapan"/,
+      );
+      expect(isi, `${nama}: tulisannya harus lewat tx, bukan db`).not.toMatch(
+        /await db\.insert\(supplyMutations\)/,
+      );
+    }
   });
 
   it("penjaganya masih ada — ini bukan pelonggaran", () => {

@@ -39,33 +39,141 @@ login() { curl -sf -X POST "$BASE/api/auth/login" -H 'Content-Type: application/
 # Daftar + verifikasi email (jalur dev) → echo token sesi. Register tak lagi
 # auto-login: harus verifikasi email dulu. Hanya bekerja saat email BELUM
 # dikonfigurasi (register mengembalikan dev_verify_url).
+#
+# KUOTA: `POST /auth/register` dibatasi 20 per IP per JAM (`batasRegister` di
+# auth/routes.ts). Skrip ini memanggilnya sekitar 20 kali, jadi ia berjalan
+# TEPAT DI TEPI kuota itu — menambah satu pendaftaran saja bisa membuat
+# seksi-seksi terakhir gagal karena alasan yang sama sekali bukan kode.
+#
+# Tanpa penjaga di bawah, kegagalannya menyamar: 429 tak punya
+# `dev_verify_url`, `vt` jadi kosong, fungsi ini `return 0` DIAM-DIAM, dan
+# pemanggilnya menerima token kosong. Yang terlihat kemudian cuma asersi
+# turunan yang aneh ("tiga akun baru siap membuat usaha — nilai: 0") beberapa
+# ratus baris jauhnya. Itu pola yang sudah pernah menggigit repo ini (lihat
+# PENJAGA RUTE MATI di bawah): galat yang ditelan lalu muncul sebagai
+# kebingungan di tempat lain.
+#
+# Dicatat ke BERKAS, bukan lewat `gagal`, dan alasannya bukan gaya: setiap
+# pemanggil memakainya sebagai `T=$(daftar_verif …)` — SUBKULIT. Di dalam
+# subkulit, `FAIL` yang dinaikkan `gagal` hilang saat subkulitnya tutup, dan
+# yang lebih buruk, baris "✘ …" yang dicetaknya ikut TERTANGKAP jadi isi `$T`.
+# Penjaganya akan merusak token yang dijaganya sendiri lalu diam. Versi
+# pertama penjaga ini persis begitu; yang menemukannya uji-diri di §215.
+KUOTA_HABIS="${TMPDIR:-/tmp}/verify-api-kuota-habis.$$"
+: > "$KUOTA_HABIS"
 daftar_verif() { # <email> <password> <nama>
   local email="$1" pass="$2" nama="${3:-Uji}" reg vt
   reg=$(curl -s -X POST "$BASE/api/auth/register" -H 'Content-Type: application/json' \
     -d "{\"nama\":\"$nama\",\"email\":\"$email\",\"password\":\"$pass\"}")
+  if printf '%s' "$reg" | grep -q 'Terlalu banyak pendaftaran'; then
+    printf '%s\n' "$email" >> "$KUOTA_HABIS"
+    echo "  ⚠ kuota pendaftaran habis: $email" >&2
+    return 0
+  fi
   vt=$(echo "$reg" | jq -r '.dev_verify_url // ""' | sed -n 's/.*token=//p')
   [ -z "$vt" ] && return 0
   curl -s -X POST "$BASE/api/auth/verify-email" -H 'Content-Type: application/json' \
     -d "{\"token\":\"$vt\"}" | jq -r '.token // ""'
 }
 
-api() { # api <token> <method> <path> [json-body]
-  local token="$1" method="$2" path="$3" body="${4:-}"
-  if [ -n "$body" ]; then
-    curl -s -X "$method" "$BASE/api$path" -H "Authorization: Bearer $token" \
-      -H 'Content-Type: application/json' -d "$body"
-  else
-    curl -s -X "$method" "$BASE/api$path" -H "Authorization: Bearer $token"
-  fi
+# ── PENJAGA RUTE MATI ──────────────────────────────────────────────────────
+#
+# Panggilan ke endpoint yang TIDAK ADA dicatat ke BERKAS, lalu diadili di §209.
+#
+# KENAPA ADA. Skrip ini memanggil `POST /absensi/masuk` di lima tempat — rute
+# yang tak pernah ada di server ini (yang ada `/absensi/` dan `/absensi/saya`).
+# Tiap panggilannya ditulis `api … > /dev/null 2>&1 || true`, jadi galatnya
+# ditelan tiga lapis sekaligus: stdout, stderr, dan status keluar. Lima blok
+# "siapkan absen" itu sebetulnya tak menyiapkan apa pun; seksi-seksinya lulus
+# hanya karena kasirnya kebetulan masih tercatat hadir dari §104, 2.700 baris
+# di atasnya. Yang menemukannya bukan mata, melainkan tabel `error_logs`
+# sesudah satu jalan penuh — jadi penjaganya dipasang di sini supaya jalan
+# berikutnya tak perlu ditemukan lagi.
+#
+# KENAPA KE BERKAS, BUKAN KE LAYAR. Justru karena pemanggilnya menelan output.
+# Berkas lolos dari ketiga lapis itu; `echo` tidak. Dan karena `api` sering
+# dipanggil di dalam `$( )` — subkulit sendiri — menaikkan penghitung `FAIL`
+# di sini pun tak akan sampai ke induknya.
+#
+# KENAPA DETEKSINYA TEPAT. `app.notFound` menjawab persis
+# `{"error":"Tidak ditemukan"}`, dan badan itu tak dipakai handler lain mana
+# pun (`grep '"Tidak ditemukan"' apps/server/src` → hanya index.ts). 404 yang
+# SAH — "bahan tidak ditemukan", "kode karyawan … tidak ditemukan" — selalu
+# membawa pesannya sendiri, jadi tak ada yang salah tuduh.
+#
+# BATASNYA, supaya tak dikira lebih: hanya rute yang benar-benar DITEMBAK yang
+# ketahuan. Rute mati di cabang `if` yang tak pernah jalan tetap lolos.
+RUTE_MATI="${TMPDIR:-/tmp}/verify-api-rute-mati.$$"
+: > "$RUTE_MATI"
+trap 'rm -f "$RUTE_MATI" "$KUOTA_HABIS"' EXIT
+
+catat_rute_mati() { # catat_rute_mati <method> <path> <badan-respons>
+  case "$3" in
+    *'"error":"Tidak ditemukan"'*) printf '%s %s\n' "$1" "${2%%\?*}" >> "$RUTE_MATI" ;;
+  esac
 }
 
+api() { # api <token> <method> <path> [json-body]
+  local token="$1" method="$2" path="$3" body="${4:-}" out
+  if [ -n "$body" ]; then
+    out=$(curl -s -X "$method" "$BASE/api$path" -H "Authorization: Bearer $token" \
+      -H 'Content-Type: application/json' -d "$body")
+  else
+    out=$(curl -s -X "$method" "$BASE/api$path" -H "Authorization: Bearer $token")
+  fi
+  catat_rute_mati "$method" "$path" "$out"
+  printf '%s\n' "$out"
+}
+
+# `status_code*` membuang badan responsnya (`-o /dev/null`), jadi dulu ia buta
+# terhadap rute mati. Badannya kini ditangkap dan diperiksa lebih dulu; yang
+# dicetak tetap kode statusnya saja, persis seperti sebelumnya.
 status_code() { # status_code <token> <method> <path>
-  curl -s -o /dev/null -w '%{http_code}' -X "$2" "$BASE/api$3" -H "Authorization: Bearer $1"
+  local out
+  out=$(curl -s -w '\n%{http_code}' -X "$2" "$BASE/api$3" -H "Authorization: Bearer $1")
+  catat_rute_mati "$2" "$3" "${out%$'\n'*}"
+  printf '%s' "${out##*$'\n'}"
 }
 
 status_code_body() { # status_code_body <token> <method> <path> <json-body>
-  curl -s -o /dev/null -w '%{http_code}' -X "$2" "$BASE/api$3" -H "Authorization: Bearer $1" \
-    -H 'Content-Type: application/json' -d "$4"
+  local out
+  out=$(curl -s -w '\n%{http_code}' -X "$2" "$BASE/api$3" -H "Authorization: Bearer $1" \
+    -H 'Content-Type: application/json' -d "$4")
+  catat_rute_mati "$2" "$3" "${out%$'\n'*}"
+  printf '%s' "${out##*$'\n'}"
+}
+
+# pastikanHadir <token> [keterangan] — pastikan pemegang token TERCATAT HADIR
+# di cabangnya, dari keadaan awal MANA PUN.
+#
+# Ini pengganti lima blok `POST /absensi/masuk` yang tak pernah ada rutenya.
+#
+# `POST /absensi/saya` itu TOGGLE, bukan "pastikan masuk": ia mencatat kebalikan
+# dari cap terakhir. Memanggilnya pada orang yang sudah hadir justru MEMULANG-
+# KANNYA, dan `/shift/buka` sesudahnya ditolak "Absen masuk dulu". Repo ini
+# sudah pernah kena persis itu (lihat §188), jadi keadaannya DIBACA dulu.
+#
+# Yang dibaca `GET /absensi/status`, bukan `.tipe` dari toggle-nya: status itu
+# memanggil `sedangHadir` — fungsi yang SAMA PERSIS dengan gerbang
+# `POST /shift/buka`. Selama keduanya satu sumber, jawabannya tak bisa
+# menyimpang. `.tipe` cuma mendekati; ia tak tahu soal sesi lintas tengah malam
+# yang kedaluwarsa (`BATAS_LINTAS_HARI_JAM`).
+#
+# Tanpa argumen cabang, dan itu disengaja: `/absensi/status` dan `/shift/buka`
+# sama-sama memakai cabang milik pemanggil untuk peran yang terikat cabang.
+# Cabang yang dioper terpisah adalah cabang yang bisa salah — dan memang salah
+# di kode lama, yang mengabsenkan `$OWNER` untuk shift milik kasir.
+hadir_sekarang() { # hadir_sekarang <token> → "true" / "false"
+  api "$1" GET /absensi/status | jq -r '.hadir // false'
+}
+pastikanHadir() { # pastikanHadir <token> [keterangan]
+  local tok="$1" ket="${2:-}"
+  if [ "$(hadir_sekarang "$tok")" = "true" ]; then return 0; fi
+  api "$tok" POST /absensi/saya '{"foto_url":"https://example.com/pastikan-hadir.jpg"}' > /dev/null
+  if [ "$(hadir_sekarang "$tok")" = "true" ]; then return 0; fi
+  # Dilaporkan, bukan dilempar: skrip diteruskan supaya kegagalan seksi
+  # berikutnya ikut terlihat — tapi SEBABNYA sudah tercatat di ringkasan.
+  gagal "pastikanHadir gagal${ket:+ ($ket)} — /shift/buka sesudah ini pasti ditolak"
 }
 
 echo "== 1. Login =="
@@ -4088,6 +4196,43 @@ cek "token sebelum-ganti → 401 setelah ganti password sendiri" "V == 401" \
 cek "token re-issue valid (GET /auth/me → 200)" "V == 200" \
   "$(status_code "$REISS105" GET /auth/me)"
 
+# ── DIKEMBALIKAN SEPERTI SEMULA ───────────────────────────────────────────
+# Seksi ini mengganti password kasir DUA KALI dan dulu membiarkannya begitu.
+# Catatan di kepalanya menyandarkan keamanannya pada penempatan ("letakkan
+# PALING AKHIR") — dan penempatan itu sudah tak berlaku sejak lama: ada ~115
+# seksi di bawah ini sekarang.
+#
+# Yang lebih penting, sandaran itu hanya melindungi SKRIP INI. Apa pun yang
+# berjalan SESUDAH verify-api terhadap basis data yang sama — suite e2e web di
+# CI, misalnya — akan mencoba login kasir dengan password seed dan ditolak.
+# Persis itu yang terjadi saat Playwright dipasang di job yang sama: dua spec
+# merah, dan sebabnya berjarak 4.000 baris dari gejalanya.
+#
+# Maka passwordnya dipulihkan di sini, dan pemulihannya ikut DIUJI — kalau
+# reset-nya gagal, yang merah seksi ini, bukan suite orang lain.
+cek "password kasir dipulihkan ke semula → 200" "V == 200" \
+  "$(status_code_body "$OWNER" PATCH "/karyawan/$UIDK105" "{\"password\":\"$KASIR_PASS\"}")"
+PULIH105=$(login "$KASIR_EMAIL" "$KASIR_PASS")
+cek "login kasir dgn password SEMULA berhasil lagi" "V == 1" \
+  "$([ -n "$PULIH105" ] && [ "$PULIH105" != "null" ] && echo 1 || echo 0)"
+# `$REISS105` diperbarui — dan HANYA itu, dengan sengaja.
+#
+# Reset password menaikkan `token_version`, jadi SEMUA token kasir sebelumnya
+# jadi 401 — termasuk `$REISS105`, token hasil re-issue di atas. Dan
+# `$REISS105`-lah yang dipakai ~60 asersi di seksi-seksi bawah sebagai "token
+# kasir" (§137 bahkan menjelaskannya dalam komentar: "$KASIR sudah 401 sejak
+# §105"). Memulihkan password tanpa memperbaruinya membuat §137 mati dengan
+# `jq: Cannot index object with number` — badan 401 yang diindeks seperti
+# larik, 1.300 baris dari sebabnya. Persis itu yang terjadi pada percobaan
+# pertama pemulihan ini.
+#
+# `$KASIR` sengaja DIBIARKAN MATI meski passwordnya sudah pulih: penjaga
+# `verify-api-token.test.ts` melarang variabel itu muncul lagi sesudah §105,
+# dan larangannya berharga — dua ronde CI pernah habis mengejar 401 yang
+# menyamar jadi bug produk. Satu nama untuk "token kasir sesudah §105", dan
+# nama itu `$REISS105`.
+REISS105="$PULIH105"
+
 echo "== 106. Verifikasi email wajib saat daftar (anti-enumerasi + blokir login) =="
 # (email sudah dikosongkan lagi di akhir §97 → mode dev: dev_verify_url tersedia)
 # (a) Daftar email BARU → respons netral + tautan verifikasi; belum bisa login.
@@ -6743,7 +6888,7 @@ cek "sudah diputuskan → hilang dari daftar menunggu" "V == 0" \
   "$(api "$OWNER" GET "/shift/selisih?status=menunggu" | jq --arg id "$SID152B" '[.[]|select(.id==$id)]|length')"
 
 # shift yang PAS tak butuh persetujuan sama sekali
-api "$OWNER" POST "/absensi/masuk" "{\"branch_id\":\"$CB152\"}" > /dev/null 2>&1 || true
+pastikanHadir "$REISS105" "§152"
 BUKA152=$(api "$REISS105" POST /shift/buka '{"modal_awal":100000}')
 SID152C=$(echo "$BUKA152" | jq -r '.id // .shift.id')
 KAS152C=$(api "$OWNER" GET "/shift/$SID152C" | jq -r '.kas_sistem')
@@ -6762,7 +6907,7 @@ cek "shift PAS masuk daftar status=pas" "V == 1" \
 # nama pemutus terisi walau DITOLAK (namanya "disetujui_oleh", isinya pemutus),
 # `catatan` saja (tanpa selisih_alasan) tetap sampai ke owner, dan riwayat
 # `GET /shift` membawa putusannya supaya kasir tahu nasib selisihnya sendiri.
-api "$OWNER" POST "/absensi/masuk" "{\"branch_id\":\"$CB152\"}" > /dev/null 2>&1 || true
+pastikanHadir "$REISS105" "§152"
 BUKA152D=$(api "$REISS105" POST /shift/buka '{"modal_awal":75000}')
 SID152D=$(echo "$BUKA152D" | jq -r '.id // .shift.id')
 KAS152D=$(api "$OWNER" GET "/shift/$SID152D" | jq -r '.kas_sistem')
@@ -6825,7 +6970,7 @@ kartu154() { api "$1" GET "/pesanan?branch_id=$CB154" | jq --arg id "$2" '[.[]|s
 # is_dine_in, jadi transaksinya harus benar-benar lahir sebagai dine-in
 MEJA154=$(api "$REISS105" GET /meja | jq -r '[.[]|select(.is_active and .tipe=="dine_in")][0].id')
 if [ -z "$(api "$REISS105" GET /shift/aktif | jq -r '.id // empty')" ]; then
-  api "$OWNER" POST "/absensi/masuk" "{\"branch_id\":\"$CB154\"}" > /dev/null 2>&1 || true
+  pastikanHadir "$REISS105" "§154"
   api "$REISS105" POST /shift/buka '{"modal_awal":0}' > /dev/null 2>&1 || true
 fi
 
@@ -7215,7 +7360,7 @@ M155=$(api "$OWNER" POST /menu "{\"nama\":\"Menu Uji155\",\"category_id\":\"$CAT
 MEJA155=$(api "$OWNER" POST /meja "{\"nama\":\"Meja Uji155\",\"tipe\":\"dine_in\",\"branch_id\":\"$CB155\"}" | jq -r .id)
 TA155=$(api "$REISS105" GET /meja | jq -r '[.[]|select(.tipe=="takeaway")][0].id')
 if [ -z "$(api "$REISS105" GET /shift/aktif | jq -r '.id // empty')" ]; then
-  api "$OWNER" POST "/absensi/masuk" "{\"branch_id\":\"$CB155\"}" > /dev/null 2>&1 || true
+  pastikanHadir "$REISS105" "§155"
   api "$REISS105" POST /shift/buka '{"modal_awal":0}' > /dev/null 2>&1 || true
 fi
 stat155() { api "$1" GET "/meja/status?branch_id=$CB155" | jq --arg id "$MEJA155" '[.[]|select(.meja_id==$id)][0]'; }
@@ -7428,7 +7573,7 @@ isi156() { api "$OWNER" GET "/stok?branch_id=$CB156" | jq -r --arg i "$ISI156" '
 hpp156() { api "$OWNER" GET "/penjualan/$1" | jq -r '.sale.totalHpp'; }
 MEJA156=$(api "$REISS105" GET /meja | jq -r '[.[]|select(.is_active and .tipe=="dine_in")][0].id')
 if [ -z "$(api "$REISS105" GET /shift/aktif | jq -r '.id // empty')" ]; then
-  api "$OWNER" POST "/absensi/masuk" "{\"branch_id\":\"$CB156\"}" > /dev/null 2>&1 || true
+  pastikanHadir "$REISS105" "§156"
   api "$REISS105" POST /shift/buka '{"modal_awal":0}' > /dev/null 2>&1 || true
 fi
 
@@ -9807,15 +9952,47 @@ cek "NYALA: saldo mendarat tepat 0, tak pernah minus" "V == 0" "$(saldo198)"
 # `gagal` dan tak pernah mengirimnya lagi, jadi penjualan sungguhan HILANG.
 JUAL198_SEBELUM=$(api "$OWNER" GET /penjualan | jq 'if type=="array" then length else (.rows|length) end')
 REF198=$(python3 -c "import uuid;print(uuid.uuid4())")
-WKT198=$(python3 -c "import datetime;print((datetime.datetime.now(datetime.timezone.utc)-datetime.timedelta(hours=2)).strftime('%Y-%m-%dT%H:%M:%SZ'))")
+# WAKTU KEJADIAN DITURUNKAN DARI DATA, BUKAN DARI JAM DINDING.
+#
+# Dulu barisnya `now - 2 jam`, dan itu membuat §198 gagal empat kali sehari.
+# Sebabnya bukan tanggal bisnis melainkan gerbang pencocokan shift di
+# `sync/routes.ts`: tahap 1 menuntut `opened_at <= waktu + SKEW_MENIT` (5
+# menit). Shift yang dipakai §198 dibuka SAAT RUN BERJALAN, jadi `now - 2 jam`
+# jatuh dua jam SEBELUM shift itu ada — tak ada shift yang mencakupnya, 409
+# `shift_tidak_cocok`. Bahwa ia pernah lulus sama sekali hanya karena seksi
+# lain kebetulan meninggalkan shift bertanggal mundur yang menaunginya.
+#
+# Kelas cacat yang SAMA PERSIS sudah dicabut sekali di §138 — komentarnya
+# bahkan menyebut run 17:05 UTC (= 00:05 WIB) dan menghitung jendela rusaknya
+# "empat jam penuh setiap hari". Pelajarannya tak pernah dibawa ke saudaranya.
+#
+# §138 memperbaikinya dengan aritmetika menit-WIB. Di sini dipakai cara yang
+# lebih kuat: waktunya diambil dari shift yang MEMANG ADA, jadi tak ada jam
+# dinding yang bisa menggeser apa pun. Satu detik sesudah shift dibuka
+# memenuhi keduanya sekaligus — di dalam jendela shift, dan tetap SEBELUM
+# baseline `stok/awal` di atas (shift dibuka lebih dulu dari baseline itu).
+BUKA198=$(api "$K198" GET /shift/aktif | jq -r '.dibuka_pada')
+WKT198=$(python3 -c "
+import datetime, sys
+t = datetime.datetime.fromisoformat(sys.argv[1].replace('Z', '+00:00'))
+print((t + datetime.timedelta(seconds=1)).astimezone(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'))
+" "$BUKA198")
+# Premis setupnya DIPATOK, bukan diandaikan: kalau salah satunya meleset,
+# asersi di bawah akan lulus/gagal karena alasan yang bukan produknya.
+cek "dasar §198: waktu kejadian sesudah shift dibuka & masih di masa lalu" "V == 1" \
+  "$(python3 -c "
+import sys
+buka, wkt, kini = sys.argv[1:4]
+print(1 if buka <= wkt < kini else 0)
+" "$BUKA198" "$WKT198" "$(date -u +%Y-%m-%dT%H:%M:%SZ)")"
 SY198=$(api "$K198" POST /sync "{\"device_id\":\"dev198\",\"commands\":[{\"client_ref\":\"$REF198\",\"tipe\":\"penjualan\",\"waktu\":\"$WKT198\",\"payload\":{\"is_dine_in\":false,\"metode_bayar\":\"tunai\",\"items\":[{\"menu_id\":\"$M198\",\"qty\":5}]}}]}")
 cek "sinkron offline TETAP diterima walau stok 0" "V == 1" \
   "$(echo "$SY198" | jq '[.hasil[]|select(.kode >= 200 and .kode < 300)]|length')"
-# Saldonya SENGAJA tidak bergeser: konsumsi bertanggal 2 jam lalu jatuh
-# SEBELUM baseline opname yang baru dibuat `stok/awal` di atas, jadi ia di
-# luar jendela baseline. Itu justru aturan yang benar — hitungan fisik saat
-# opname sudah memuat pemakaian itu. Yang dipatok di sini: penjualannya
-# BENAR-BENAR tercatat, bukan diam-diam ditolak gerbang.
+# Saldonya SENGAJA tidak bergeser: konsumsinya bertanggal SEBELUM baseline
+# opname yang baru dibuat `stok/awal` di atas, jadi ia di luar jendela
+# baseline. Itu justru aturan yang benar — hitungan fisik saat opname sudah
+# memuat pemakaian itu. Yang dipatok di sini: penjualannya BENAR-BENAR
+# tercatat, bukan diam-diam ditolak gerbang.
 JUAL198_SESUDAH=$(api "$OWNER" GET /penjualan | jq 'if type=="array" then length else (.rows|length) end')
 cek "…dan penjualannya benar-benar tercatat (bukan ditolak diam-diam)" "V == 1" \
   "$([ "$JUAL198_SESUDAH" -gt "$JUAL198_SEBELUM" ] && echo 1 || echo 0)"
@@ -10769,6 +10946,1095 @@ cek "PASANGAN: dan tak ada cabang mana pun yang berubah karenanya" "V == 1" \
 # ── Tanpa branch_id: perilaku lama dipertahankan (cadangan cabang pertama) ─
 cek "tanpa branch_id di payload → tetap jatuh ke cabang pertama (perilaku lama)" "V == 99" \
   "$(sync208 "$OWNER" "{\"supply_id\":\"$SP208\",\"qty\":1}" > /dev/null; s208 "$CB208_1")"
+
+
+echo "== 210. Harga TEBAKAN tak boleh menentukan harga acuan =="
+# Faktur beli yang dibuat TANPA harga diisi qty × harga acuan saat itu dan
+# ditandai `harga_tebakan`. Kartu Riwayat Harga menghitung terendah, tertinggi,
+# median, dan rata-rata tertimbang — dan keempatnya dulu memasukkan tebakan.
+#
+# Kenapa itu berbahaya, dengan kalimat layarnya sendiri: "Median jadi harga
+# acuan RAB belanja — disinkron otomatis tiap Laporan Harga. Harga acuan itulah
+# dasar HPP resep & laba-rugi." Jadi angka yang ditampilkan adalah angka yang
+# pemilik salin jadi acuan, dan acuan itu yang menurunkan tebakan berikutnya:
+# acuan → tebakan → median → acuan.
+#
+# Terukur lewat API ini juga, sebelum perbaikan: satu pembelian nyata 20.000,
+# sisanya belanja tanpa harga → layar melaporkan Terendah 10.000 · Median
+# 15.000 · Rata 15.000. 10.000 tak pernah dibayar siapa pun — itu acuan lama
+# yang dikutip balik sistem seolah-olah sebuah pembelian. Menurutinya mengunci
+# acuan 25% di bawah satu-satunya harga yang nyata, permanen.
+B210=$(api "$OWNER" POST /bahan '{"nama":"Bahan Tebakan Uji 210","harga_beli":10000,"isi":1,"satuan":"pcs","pengadaan":"beli","track_stok":true}' | jq -r .id)
+beli210() { # beli210 <jumlah> [total_harga] → faktur_id, sudah dikonfirmasi
+  local F item="{\"ingredient_id\":\"$B210\",\"mode\":\"pcs\",\"jumlah\":$1"
+  # tanpa total_harga = persis jalan yang melahirkan tebakan
+  if [ -n "${2:-}" ]; then item="$item,\"total_harga\":$2"; fi
+  F=$(api "$OWNER" POST /pembelian/faktur "{\"items\":[$item}]}" | jq -r .faktur_id)
+  api "$OWNER" POST "/pembelian/tahap/$F" '{"ke":"dikerjakan"}' > /dev/null
+  api "$OWNER" POST "/pembelian/tahap/$F" '{"ke":"menunggu"}' > /dev/null
+  api "$OWNER" POST "/pembelian/konfirmasi/$F" > /dev/null
+  echo "$F"
+}
+F210A=$(beli210 10 200000)   # NYATA 20.000/pcs — satu-satunya harga yang dilihat orang
+beli210 10 > /dev/null       # tanpa harga → tebakan dari acuan (10.000/pcs)
+beli210 10 > /dev/null       # tanpa harga → tebakan lagi
+RH210=$(api "$OWNER" GET "/bahan/$B210/pembelian")
+
+cek "dasar §210: 3 lot tercatat, 2 di antaranya berharga TEBAKAN" "V == 1" \
+  "$(echo "$RH210" | jq '((.jumlah_pembelian==3) and ([.lots[]|select(.harga_tebakan)]|length==2))|if . then 1 else 0 end')"
+cek "lot tebakan TETAP ditampilkan (10.000/pcs), tidak disembunyikan" "V == 2" \
+  "$(echo "$RH210" | jq '[.lots[]|select(.harga_tebakan and .harga_satuan==10000)]|length')"
+cek "INTI: median = 20.000 — satu-satunya harga yang pernah dilihat orang" "V == 20000" \
+  "$(echo "$RH210" | jq '.harga_median')"
+cek "INTI: terendah BUKAN 10.000 — harga itu tak pernah dibayar siapa pun" "V == 20000" \
+  "$(echo "$RH210" | jq '.harga_terendah.harga')"
+cek "INTI: tertinggi 20.000" "V == 20000" "$(echo "$RH210" | jq '.harga_tertinggi.harga')"
+cek "INTI: rata-rata tertimbang 20.000 (salinan kedua yang juga lupa)" "V == 20000" \
+  "$(echo "$RH210" | jq '.harga_rata')"
+cek "statistiknya mengaku dari berapa harga: 1 dari 3 lot" "V == 1" \
+  "$(echo "$RH210" | jq '.jumlah_harga_nyata')"
+
+# ── PASANGAN: saringannya TIDAK menelan harga yang memang nyata ───────────
+# Arah sebaliknya, dan ia yang membuat asersi di atas berarti: saringan yang
+# terlalu rakus membuat statistiknya kosong selamanya — kegagalan yang jauh
+# lebih sunyi, sebab layar cuma menampilkan "—".
+beli210 10 300000 > /dev/null   # NYATA 30.000/pcs
+RH210B=$(api "$OWNER" GET "/bahan/$B210/pembelian")
+cek "PASANGAN: pembelian nyata kedua tetap menggerakkan statistiknya" "V == 1" \
+  "$(echo "$RH210B" | jq '((.harga_median==25000) and (.harga_tertinggi.harga==30000) and (.jumlah_harga_nyata==2))|if . then 1 else 0 end')"
+cek "PASANGAN: rata-rata tertimbang ikut naik ke 25.000" "V == 25000" \
+  "$(echo "$RH210B" | jq '.harga_rata')"
+
+# ── JANJI LAYARNYA, diuji sebagai janji ──────────────────────────────────
+# Layar menjanjikan median yang DITAMPILKAN itulah yang disinkron jadi acuan
+# saat Laporan Harga. Sebelum perbaikan keduanya beda: satu memakai kolam
+# bertebakan, satu tidak.
+MED210=$(echo "$RH210B" | jq -r '.harga_median')
+ROW210=$(api "$OWNER" GET "/pembelian?per_page=500" | jq -r --arg f "$F210A" '[.rows[]|select(.faktur_id==$f)][0].id')
+api "$OWNER" POST "/pembelian/laporan-harga/$F210A" "{\"items\":[{\"id\":\"$ROW210\",\"total_harga\":200000}]}" > /dev/null
+cek "JANJI LAYAR: acuan sesudah Laporan Harga = median yang ditampilkan" "V == 1" \
+  "$(api "$OWNER" GET /bahan | jq --arg id "$B210" --argjson m "$MED210" '([.[]|select(.id==$id)][0].harga_beli|round)==($m|round)|if . then 1 else 0 end')"
+
+# ── Perlengkapan tak punya jalur tebakan — statistiknya tak boleh berubah ──
+P210=$(api "$OWNER" POST /perlengkapan '{"nama":"Perlengkapan Uji 210","satuan":"pcs","harga_beli":500}' | jq -r .id)
+api "$OWNER" POST "/perlengkapan/$P210/masuk" '{"qty":10,"total_harga":10000}' > /dev/null
+api "$OWNER" POST "/perlengkapan/$P210/masuk" '{"qty":10,"total_harga":30000}' > /dev/null
+cek "perlengkapan: semua lot ditandai BUKAN tebakan & statistiknya utuh" "V == 1" \
+  "$(api "$OWNER" GET "/perlengkapan/$P210/pembelian" | jq '(([.lots[]|select(.harga_tebakan)]|length==0) and (.harga_median==2000) and (.harga_rata==2000) and (.jumlah_harga_nyata==2))|if . then 1 else 0 end')"
+
+
+echo "== 211. Empat perintah sinkron yang selama ini NOL asersi =="
+CK211=$(api "$OWNER" POST /cabang '{"nama":"CK Uji 211","tipe":"central_kitchen"}' | jq -r .id)
+ST211=$(api "$OWNER" POST /cabang "{\"nama\":\"Store Uji 211\",\"central_kitchen_id\":\"$CK211\"}" | jq -r .id)
+B211=$(api "$OWNER" POST /bahan '{"nama":"Bahan Uji 211","harga_beli":1000,"isi":1,"satuan":"pcs","pengadaan":"beli","track_stok":true}' | jq -r .id)
+cek "dasar §211: CK, store, & bahan uji ada" "V == 1" \
+  "$(printf '%s%s%s' "$CK211" "$ST211" "$B211" | grep -Eqc '^[0-9a-f-]{108}$' && echo 1 || echo 0)"
+
+uuid211(){ cat /proc/sys/kernel/random/uuid; }
+# sinkron satu perintah; REF dipakai ulang pemanggil untuk menguji idempotensi
+sync211(){ # sync211 <ref> <tipe> <payload-json> → hasil[0]
+  api "$OWNER" POST /sync "$(jq -nc --arg r "$1" --arg t "$2" \
+    --arg w "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson p "$3" \
+    '{device_id:"dev211",commands:[{client_ref:$r,tipe:$t,waktu:$w,payload:$p}]}')" | jq -c '.hasil[0]'
+}
+saldo211(){ api "$OWNER" GET "/stok?branch_id=$1" | jq --arg i "$B211" '[.[]|select(.ingredient_id==$i)][0].saldo // 0'; }
+kirim211(){ # kirim211 <qty> → faktur_id di status 'menunggu' (siap berangkat)
+  local F
+  F=$(api "$OWNER" POST /pembelian/faktur \
+    "{\"branch_id\":\"$CK211\",\"tujuan_branch_id\":\"$ST211\",\"items\":[{\"ingredient_id\":\"$B211\",\"mode\":\"pcs\",\"jumlah\":$1,\"total_harga\":$(( $1 * 1000 ))}]}" | jq -r .faktur_id)
+  api "$OWNER" POST "/pembelian/tahap/$F" '{"ke":"dikerjakan"}' > /dev/null
+  api "$OWNER" POST "/pembelian/tahap/$F" '{"ke":"menunggu"}' > /dev/null
+  echo "$F"
+}
+
+# ── 1. faktur_kirim ────────────────────────────────────────────────────────
+F211=$(kirim211 20)
+H211=$(sync211 "$(uuid211)" faktur_kirim "$(jq -nc --arg f "$F211" '{jalur:"pembelian",faktur_id:$f}')")
+cek "faktur_kirim: perintah diterima" "V == 1" \
+  "$(echo "$H211" | jq '(.status=="ok" and (.data.jumlah_baris//0)==1)|if . then 1 else 0 end')"
+cek "faktur_kirim: kirimannya MUNCUL di Penerimaan cabang tujuan (menunggu)" "V == 1" \
+  "$(api "$OWNER" GET "/penerimaan?branch_id=$ST211" | jq --arg f "$F211" '[.rows[]|select(.faktur_id==$f and .status=="menunggu")]|length')"
+cek "faktur_kirim: stok tujuan BELUM bertambah (pindah saat diterima)" "V == 0" "$(saldo211 "$ST211")"
+
+# ── 2. penerimaan_terima_sebagian ──────────────────────────────────────────
+ROW211=$(api "$OWNER" GET "/penerimaan?branch_id=$ST211" | jq -r --arg f "$F211" '[.rows[]|select(.faktur_id==$f)][0].id')
+REF211=$(uuid211)
+sync211 "$REF211" penerimaan_terima_sebagian "$(jq -nc --arg f "$F211" --arg id "$ROW211" '{faktur_id:$f,items:[{id:$id,qty_diterima:12}]}')" > /dev/null
+cek "terima_sebagian: stok tujuan bertambah SEBANYAK YANG DITERIMA (12 dari 20)" "V == 12" \
+  "$(saldo211 "$ST211")"
+cek "terima_sebagian: qty_dipesan 20 tersimpan (jejak barang kurang)" "V == 1" \
+  "$(api "$OWNER" GET "/pembelian?branch_id=$ST211&per_page=500" | jq --arg f "$F211" '[.rows[]|select(.faktur_id==$f and .qty_dipesan==20 and .qty==12)]|length')"
+# ── INTI ANTREAN OFFLINE: respons yang HILANG lalu dikirim ulang ──────────
+# Perangkat yang kehilangan respons di jalan akan mengirim ulang perintah yang
+# SUDAH berhasil. Jawabannya harus "sudah beres", bukan "gagal" — antrean klien
+# menandai yang gagal sebagai mati dan tak pernah mencobanya lagi, jadi
+# penerimaan yang sungguhan terjadi hilang dari pandangan penggunanya.
+#
+# ASERSI INI SEMPAT TIDAK BISA GAGAL, dan itu layak dicatat. Bentuk pertamanya
+# hanya memeriksa "stok tak bertambah dua kali" — padahal itu sudah dijaga
+# status barisnya sendiri ('menunggu' → 'dikonfirmasi'), sehingga ia tetap
+# hijau bahkan seandainya klaim client_ref dicabut seluruhnya. Yang
+# membuktikan mekanismenya justru SELISIH dua jawaban di bawah.
+ULANG211=$(sync211 "$REF211" penerimaan_terima_sebagian "$(jq -nc --arg f "$F211" --arg id "$ROW211" '{faktur_id:$f,items:[{id:$id,qty_diterima:12}]}')")
+cek "INTI: ulang dgn ref SAMA → 'sudah_ada' 200, klien tahu penerimaannya beres" "V == 1" \
+  "$(echo "$ULANG211" | jq '(.status=="sudah_ada" and .kode==200 and (.data.ok==true))|if . then 1 else 0 end')"
+BEDA211=$(sync211 "$(uuid211)" penerimaan_terima_sebagian "$(jq -nc --arg f "$F211" --arg id "$ROW211" '{faktur_id:$f,items:[{id:$id,qty_diterima:12}]}')")
+cek "PEMBANDING: ref BEDA → gagal 404 — jadi yang menjawab memang klaim ref-nya" "V == 1" \
+  "$(echo "$BEDA211" | jq '(.status=="gagal" and .kode==404)|if . then 1 else 0 end')"
+cek "…dan sesudah dua pengulangan itu stok tetap sekali tambah" "V == 12" \
+  "$(saldo211 "$ST211")"
+
+# ── 3. penerimaan_tolak ────────────────────────────────────────────────────
+F211B=$(kirim211 7)
+sync211 "$(uuid211)" faktur_kirim "$(jq -nc --arg f "$F211B" '{jalur:"pembelian",faktur_id:$f}')" > /dev/null
+sync211 "$(uuid211)" penerimaan_tolak "$(jq -nc --arg f "$F211B" '{faktur_id:$f,alasan:"barang rusak di jalan"}')" > /dev/null
+cek "tolak: status 'ditolak' + alasannya tersimpan" "V == 1" \
+  "$(api "$OWNER" GET "/pembelian?branch_id=$ST211&per_page=500" | jq --arg f "$F211B" '[.rows[]|select(.faktur_id==$f and .status=="ditolak" and .alasan_tolak=="barang rusak di jalan")]|length')"
+cek "tolak: stok tujuan TIDAK bertambah (tetap 12)" "V == 12" "$(saldo211 "$ST211")"
+
+# ── 4. produksi_kirim_hasil ────────────────────────────────────────────────
+MEN211=$(api "$OWNER" POST /bahan '{"nama":"Mentah Uji 211","harga_beli":500,"isi":1,"satuan":"gr","pengadaan":"beli","track_stok":true}' | jq -r .id)
+JADI211=$(api "$OWNER" POST /bahan '{"nama":"Jadi Uji 211","harga_beli":0,"isi":10,"satuan":"pcs","pengadaan":"produksi","track_stok":true}' | jq -r .id)
+api "$OWNER" PUT "/bahan/$JADI211/resep" "{\"komponen\":[{\"ingredient_id\":\"$MEN211\",\"qty\":5}]}" > /dev/null
+KAT211=$(api "$OWNER" GET /kategori | jq -r '.[0].id')
+MENU211=$(api "$OWNER" POST /menu "{\"nama\":\"Menu Uji 211\",\"category_id\":\"$KAT211\",\"harga_jual\":15000,\"mult\":2,\"komponen\":[{\"ingredient_id\":\"$JADI211\",\"qty\":1}]}" | jq -r .id)
+api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CK211\",\"items\":[{\"ingredient_id\":\"$MEN211\",\"qty\":5000},{\"ingredient_id\":\"$JADI211\",\"qty\":0}]}" > /dev/null
+api "$OWNER" POST /stok/awal "{\"branch_id\":\"$ST211\",\"items\":[{\"ingredient_id\":\"$JADI211\",\"qty\":0}]}" > /dev/null
+# `untuk_branch_id` HANYA lahir dari jalur permintaan tambah stok — faktur
+# produksi biasa mengabaikan field itu, dan kirim-hasil menolak 400.
+PF211=$(api "$OWNER" POST /rekomendasi/menu/faktur "{\"items\":[{\"menu_id\":\"$MENU211\",\"porsi\":20}],\"tujuan_branch_id\":\"$ST211\",\"ck_branch_id\":\"$CK211\"}" | jq -r '.produksi.faktur_id')
+api "$OWNER" POST "/produksi/tahap/$PF211" '{"ke":"dikerjakan"}' > /dev/null
+api "$OWNER" POST "/produksi/tahap/$PF211" '{"ke":"menunggu"}' > /dev/null
+cek "dasar §211: work-order selesai & menunggu dikirim (untuk_branch_id terisi)" "V == 1" \
+  "$(api "$OWNER" GET "/produksi?branch_id=$CK211&per_page=500" | jq --arg f "$PF211" --arg b "$ST211" '([.rows[]|select(.faktur_id==$f)]|(length>0) and all(.[]; .untuk_branch_id==$b and .status=="dikonfirmasi"))|if . then 1 else 0 end')"
+KH211=$(sync211 "$(uuid211)" produksi_kirim_hasil "$(jq -nc --arg f "$PF211" '{faktur_id:$f}')")
+cek "kirim_hasil: perintah diterima & melahirkan faktur kiriman bernomor" "V == 1" \
+  "$(echo "$KH211" | jq '(.status=="ok" and (.data.faktur_id!=null) and ((.data.nomor//"")|test("^PR-[0-9]{4,}$")))|if . then 1 else 0 end')"
+KHF211=$(echo "$KH211" | jq -r '.data.faktur_id')
+cek "kirim_hasil: kiriman muncul di Penerimaan cabang peminta" "V == 1" \
+  "$(api "$OWNER" GET "/penerimaan?branch_id=$ST211" | jq --arg f "$KHF211" '[.rows[]|select(.faktur_id==$f and .status=="menunggu")]|length')"
+cek "kirim_hasil: pengingat untuk_branch_id di sumbernya DIKOSONGKAN" "V == 1" \
+  "$(api "$OWNER" GET "/produksi?branch_id=$CK211&per_page=500" | jq --arg f "$PF211" '([.rows[]|select(.faktur_id==$f)]|(length>0) and all(.[]; .untuk_branch_id==null))|if . then 1 else 0 end')"
+
+# ── PASANGAN: penjaga param jalur sub-request internal masih hidup ─────────
+# `faktur_id` di-interpolasi ke URL sub-request internal. Tanpa penjaga UUID,
+# nilai ber-`/` atau `..` bisa mengubah jalur yang dituju.
+cek "PASANGAN: faktur_id bukan UUID → ditolak 400, bukan dijalankan" "V == 1" \
+  "$(sync211 "$(uuid211)" penerimaan_tolak '{"faktur_id":"../../shift/buka"}' | jq '(.status=="gagal" and .kode==400)|if . then 1 else 0 end')"
+cek "PASANGAN: jalur di luar produksi/pembelian → ditolak 400" "V == 1" \
+  "$(sync211 "$(uuid211)" faktur_kirim "$(jq -nc --arg f "$F211" '{jalur:"../admin",faktur_id:$f}')" | jq '(.status=="gagal" and .kode==400)|if . then 1 else 0 end')"
+
+
+echo
+# §212 — LARANGAN BERTINDIH TAK BISA DITITIPKAN KE INDEKS.
+#
+# Aturannya "rentang tanggal bertindih", bukan "kolom sama", jadi tak ada indeks
+# unik yang bisa menegakkannya; dan barisnya belum ada saat diperiksa, jadi tak
+# ada apa pun untuk dipegang `FOR UPDATE`. Sebelum perbaikan, periksa-lalu-tulis
+# berdiri tanpa kunci sama sekali.
+#
+# Terukur pada kode lama: 24 permintaan serentak dari satu kasir, lima ronde —
+# DUA ronde meninggalkan dua baris hidup yang bertindih. Ketukan ganda di ponsel
+# dan kiriman ulang antrean offline persis sebentuk itu.
+#
+# Akibatnya di hilir bukan sekadar baris kembar: `absensi/routes.ts` menyusun
+# rekap lewat `petaIzin.set("<user>|<tanggal>", …)` atas kueri TANPA ORDER BY,
+# jadi dari dua baris yang bertindih yang menang cuma yang kebetulan terbaca
+# belakangan — satu tanggal bisa terbaca "Sakit" hari ini dan "Cuti Tahunan"
+# besok tanpa ada yang mengubah data.
+#
+# Idiomnya sama dengan §185: yang diuji INVARIANNYA (berapa baris hidup),
+# bukan kode statusnya — sebaran 201/409 di antara 8 permintaan memang
+# bergantung timing dan akan membuat uji ini goyah.
+echo "── §212 dua pengajuan cuti berpapasan → hanya SATU yang hidup ──"
+CB212=$(api "$OWNER" GET /cabang | jq -r '[.[]|select(.tipe=="store" and .is_active)][0].id')
+buatKar212(){ # <label> → token
+  local e="cuti212$1.$RANDOM@basooopa.id"
+  api "$OWNER" POST /karyawan "{\"nama\":\"Cuti 212$1\",\"email\":\"$e\",\"password\":\"Cuti212Pass!\",\"role\":\"cashier\",\"branch_id\":\"$CB212\"}" > /dev/null
+  login "$e" "Cuti212Pass!"
+}
+KA212=$(buatKar212 A)
+KB212=$(buatKar212 B)
+cek "dasar §212: dua karyawan uji bisa login" "V == 1" \
+  "$([ -n "$KA212" ] && [ -n "$KB212" ] && echo 1 || echo 0)"
+
+hidup212(){ # hidup212 <token> <dari> <sampai> → jumlah baris HIDUP yang bertindih
+  # `// error(...)` supaya respons yang BUKAN larik (mis. galat) tak terbaca 0.
+  # Nol yang palsu membuat asersi di bawah merah karena alasan yang salah, dan
+  # itu jenis kegagalan yang paling mahal dibaca orang.
+  api "$1" GET "/pengajuan?saya=1&dari=$2&sampai=$3" \
+    | jq 'if type=="array" then [.[]|select(.status=="menunggu" or .status=="disetujui")]|length
+          else error("GET /pengajuan bukan larik: \(.)") end'
+}
+
+# LIMA LEDAKAN, bukan satu — dan angkanya DIUKUR, bukan ditebak.
+# Balapan ini probabilistik. Terhadap kode tanpa kunci: satu ledakan 8
+# permintaan menangkapnya 3 dari 5 kali, tiga ledakan 4 dari 5. Penjaga yang
+# meleset seperlima waktu mengajari orang mengabaikannya, jadi rentangnya
+# dijadikan lima. Ongkosnya 40 permintaan — sepele bagi suite ini.
+TOT212=0
+T212=$(mktemp -d)
+for bln in 03 04 05 06 07; do
+  BODY212="{\"kategori\":\"tahunan\",\"tanggal_mulai\":\"2027-$bln-10\",\"tanggal_selesai\":\"2027-$bln-12\",\"alasan\":\"berpapasan\"}"
+  for i in $(seq 1 8); do
+    curl -s -o "$T212/b$bln-$i" -X POST "$BASE/api/pengajuan" \
+      -H "Authorization: Bearer $KA212" -H 'Content-Type: application/json' -d "$BODY212" &
+  done
+  wait
+  N212=$(hidup212 "$KA212" "2027-$bln-10" "2027-$bln-12")
+  # Hitungan yang gagal jangan menjelma jadi galat sintaks shell — ia harus
+  # muncul sebagai angka mustahil yang menuding rentangnya.
+  case "$N212" in (''|*[!0-9]*) gagal "§212: hitung baris hidup 2027-$bln gagal (jawaban: '$N212')"; N212=99 ;; esac
+  TOT212=$(( TOT212 + N212 ))
+done
+cek "INTI: 5×8 pengajuan berpapasan → tepat SATU baris hidup per rentang" "V == 5" "$TOT212"
+cek "…dan setidaknya SATU benar-benar berhasil per rentang (bukan semua ditolak)" "V >= 5" \
+  "$(jq -s '[.[]|select(.id != null)]|length' "$T212"/b*)"
+
+# PASANGAN 1: kuncinya tak boleh membekukan tanggal yang memang tak bertindih.
+cek "PASANGAN: tanggal LAIN yang tak bertindih tetap boleh → 201" "V == 201" \
+  "$(status_code_body "$KA212" POST /pengajuan '{"kategori":"tahunan","tanggal_mulai":"2027-09-10","tanggal_selesai":"2027-09-12"}')"
+
+# PASANGAN 2: kuncinya PER ORANG. Kunci se-perusahaan akan membuat pengajuan
+# karyawan lain ikut mengantre — benar hasilnya, tapi salah ongkosnya, dan
+# tanggal yang sama untuk dua orang memang sah.
+T212B=$(mktemp -d)
+for tok in "$KA212" "$KB212"; do
+  curl -s -o "$T212B/$(echo "$tok" | tail -c 12)" -X POST "$BASE/api/pengajuan" \
+    -H "Authorization: Bearer $tok" -H 'Content-Type: application/json' \
+    -d '{"kategori":"tahunan","tanggal_mulai":"2027-11-10","tanggal_selesai":"2027-11-12"}' &
+done
+wait
+cek "PASANGAN: DUA ORANG berbeda pada tanggal sama → dua-duanya sah" "V == 2" \
+  "$(python3 -c "print($(hidup212 "$KA212" 2027-11-10 2027-11-12) + $(hidup212 "$KB212" 2027-11-10 2027-11-12))")"
+
+
+echo "== 213. Balapan pembuatan: yang kalah dapat 409 berpesan, bukan 500 =="
+# Pra-cek "sudah terdaftar?" selalu punya jeda sebelum tulisannya. Yang
+# benar-benar menjaga keunikan adalah INDEKSNYA — dan tanpa terjemahan, yang
+# KALAH balapan menerima 23505 mentah alias 500. Satu situasi, tiga jawaban
+# berbeda tergantung timing (terukur: 201, 409, dan 500 pada tiga permintaan
+# serentak beremail sama).
+#
+# 500 bukan cuma pesan yang salah: ia tercatat sebagai galat SERVER di panel,
+# dan di web memicu overlay "server sedang diperbarui" — aplikasi terlihat
+# tumbang gara-gara dua admin menambahkan karyawan yang sama.
+CB213=$(api "$OWNER" GET /cabang | jq -r '[.[]|select(.tipe=="store" and .is_active)][0].id')
+
+balap213(){ # balap213 <n> <token> <path> <body> → direktori berisi c* (kode) & b* (badan)
+  local n="$1" t="$2" path="$3" body="$4" d i
+  d=$(mktemp -d)
+  for i in $(seq 1 "$n"); do
+    # `\n` WAJIB: `%{http_code}` tak meninggalkan newline penutup, jadi `cat`
+    # atas beberapa berkas MENYAMBUNG kodenya jadi satu baris ("409409201409")
+    # — dan penghitung `grep -c '^5'` di bawah lalu buta terhadap 5xx yang tak
+    # kebetulan berdiri paling depan. Perangkap yang sama sudah tercatat di
+    # repo ini, dan ia tetap menggigit sekali lagi saat seksi ini ditulis.
+    curl -s -o "$d/b$i" -w '%{http_code}\n' -X POST "$BASE/api$path" \
+      -H "Authorization: Bearer $t" -H 'Content-Type: application/json' -d "$body" > "$d/c$i" &
+  done
+  wait
+  echo "$d"
+}
+lima213(){ cat "$1"/c* | grep -c '^5' || true; }   # berapa jawaban 5xx
+kode213(){ cat "$1"/c* | grep -c "^$2" || true; }  # berapa jawaban berawalan <2>
+
+# balapUlang213 — BEBERAPA burst, tiap burst bernama beda. Kenapa perlu, dan
+# kenapa satu burst tidak cukup:
+#
+# Balapan adalah detektor PROBABILISTIK. Ia hanya menuduh bila dua permintaan
+# kebetulan berpapasan tepat di dalam jendela antara pra-cek dan tulisannya,
+# dan lebar jendela itu berbeda tiap endpoint — makin banyak kerja sebelum
+# INSERT, makin sempit peluangnya. Asersi yang "pernah merah sekali" karena
+# itu belum tentu asersi yang menjaga: di CI ia ditembak SEKALI.
+#
+# Jadi kekuatannya DIUKUR, bukan ditebak. Bug-nya disuntikkan kembali lalu
+# tiap bentuk dijalankan 8 ronde (server & basis data segar):
+#
+#   /bahan          1 burst × 4 serentak → 8/8 … tapi 5/6 pada pengukuran lain
+#   /perlengkapan   1 burst × 4 serentak → 5/8   ← LOLOS tiga dari delapan kali
+#   /bahan          3 burst × 6 serentak → 8/8
+#   /perlengkapan   3 burst × 6 serentak → 8/8
+#
+# Angka 5/8 itu bukan hipotesis: bentuk 1×4 memang MELOLOSKAN bug yang sudah
+# terbukti ada — persis yang terjadi saat seksi ini pertama dijalankan, semua
+# asersi /bahan hijau di atas kode yang cacat.
+# `awalan` disambung TANPA pemisah — pemanggil yang menentukan. Nama bahan
+# mau spasi ("Balap Bahan 213 "), tapi alamat surel tidak boleh punya satu pun.
+balapUlang213(){ # balapUlang213 <ronde> <n> <token> <path> <tmpl ber-%NAMA%> <awalan>
+  local ronde="$1" n="$2" t="$3" path="$4" tmpl="$5" awalan="$6" d r i nm
+  d=$(mktemp -d)
+  for r in $(seq 1 "$ronde"); do
+    nm="$awalan$RANDOM$RANDOM"
+    printf '%s\n' "$nm" >> "$d/nama"
+    for i in $(seq 1 "$n"); do
+      curl -s -o "$d/b$r-$i" -w '%{http_code}\n' -X POST "$BASE/api$path" \
+        -H "Authorization: Bearer $t" -H 'Content-Type: application/json' \
+        -d "${tmpl//%NAMA%/$nm}" > "$d/c$r-$i" &
+    done
+    wait
+  done
+  echo "$d"
+}
+
+# ── POST /karyawan (users_email_unique) ────────────────────────────────────
+E213="balap213.$RANDOM@basooopa.id"
+D213=$(balap213 4 "$OWNER" /karyawan \
+  "{\"nama\":\"Balap 213\",\"email\":\"$E213\",\"password\":\"Balap213Pass!\",\"role\":\"cashier\",\"branch_id\":\"$CB213\"}")
+cek "INTI: 4 pembuatan karyawan beremail sama → TAK ADA 5xx" "V == 0" "$(lima213 "$D213")"
+cek "…tepat SATU yang lahir (201), sisanya 409" "V == 1" "$(kode213 "$D213" 201)"
+cek "…dan hanya satu baris karyawan beremail itu" "V == 1" \
+  "$(api "$OWNER" GET /karyawan | jq --arg e "$E213" '[.[]|select(.email==$e)]|length')"
+cek "…pesan penolakannya sama dgn jalur berurutan (bukan pesan generik)" "V == 1" \
+  "$(cat "$D213"/b* | jq -s --arg e "$E213" '[.[]|select(.error != null)]|all(.[]; .error | test("sudah terdaftar"))|if . then 1 else 0 end')"
+
+# ── POST /karyawan/undang (invitations_company_email_pending_uq) ───────────
+# Diukur atas bug yang disuntikkan kembali: 1 burst × 4 hanya menuduh 6/8
+# ronde — dua dari delapan kali ia meloloskan bug yang sudah terbukti ada.
+# 3 burst × 4 → 8/8. (Menaikkan serentaknya justru MEMPERBURUK: 1 × 6 → 3/8;
+# lihat catatan pada `balapUlang213` tentang kenapa.)
+DU213=$(balapUlang213 3 4 "$OWNER" /karyawan/undang \
+  '{"email":"undang213.%NAMA%@basooopa.id","role":"cashier","branch_id":"'"$CB213"'"}' "u")
+cek "INTI: 3×4 undangan beremail sama → TAK ADA 5xx" "V == 0" "$(lima213 "$DU213")"
+cek "…tepat SATU undangan lahir per email (3 × 201)" "V == 3" "$(kode213 "$DU213" 201)"
+
+# ── POST /admin/tenants (companies_slug_unique + users_email_unique) ───────
+T213="tenant213.$RANDOM@contoh.id"
+DT213=$(balap213 3 "$SA" /admin/tenants \
+  "{\"nama\":\"Warung 213 $RANDOM\",\"owner_nama\":\"O\",\"owner_email\":\"$T213\",\"owner_password\":\"Balap213Pass!\",\"cabang_nama\":\"Pusat\"}")
+cek "INTI: 3 pembuatan tenant kembar → TAK ADA 5xx" "V == 0" "$(lima213 "$DT213")"
+cek "…tepat SATU tenant lahir" "V == 1" "$(kode213 "$DT213" 201)"
+
+# ── POST /auth/register — DI SINI 409 JUSTRU SALAH ─────────────────────────
+# Endpoint ini sengaja membalas NETRAL & IDENTIK untuk email baru maupun yang
+# sudah terdaftar, supaya tak ada cara menebak akun mana yang ada. Membalas 409
+# pada jalur balapan akan membuka kembali celah enumerasi itu: penyerang cukup
+# mengirim dua permintaan sekaligus lalu membaca bedanya. Yang benar: balapan
+# yang kalah diperlakukan seperti "ternyata sudah ada" — jawaban yang sama.
+#
+# BATAS YANG DIAKUI, karena yang di atasnya tidak bisa dipakai di sini.
+# Diukur atas bug yang disuntikkan kembali, 8 ronde masing-masing:
+#
+#   1 burst × 3  → 7/8   ← yang dipakai; satu dari delapan kali ia meleset
+#   1 burst × 6  → 0/8   ← lebih serentak justru BUTA TOTAL
+#   3 burst × 3  → 0/8   ← begitu pula menambah burst
+#
+# Dua sebab, dan keduanya membuat jalur ini TAK BISA dikuatkan seperti yang
+# lain. Pertama, `/auth/register` menjalankan bcrypt — mahal dan terikat CPU,
+# jadi permintaan yang menumpuk malah BERBARIS, dan yang kedua baru menulis
+# setelah yang pertama commit: jendela balapannya tertutup sendiri. Kedua,
+# endpoint ini berkuota 20 per IP per jam, dan skrip ini sudah memakai hampir
+# semuanya — angka 0/8 di atas justru terukur saat kuotanya HABIS dan semua
+# jawaban jadi 429 (itulah asal-usul penjaga kuota pada `daftar_verif`).
+#
+# Jadi 7/8 dicatat apa adanya, bukan dibulatkan jadi "dijaga". Yang membuatnya
+# tetap berguna: tiga asersi di bawah menuduh dari tiga arah berbeda atas
+# balapan yang SAMA, dan asersi anti-enumerasi ("pesannya identik") juga akan
+# merah bila kuota habis — bukan hijau.
+R213="daftar213.$RANDOM@contoh.id"
+DR213=$(balap213 3 "" /auth/register "{\"nama\":\"Daftar 213\",\"email\":\"$R213\",\"password\":\"Daftar213Pass!\"}")
+cek "INTI: 3 pendaftaran beremail sama → TAK ADA 5xx" "V == 0" "$(lima213 "$DR213")"
+cek "INTI: semuanya 200 — tak ada 409 yang membocorkan email mana yang ada" "V == 3" \
+  "$(kode213 "$DR213" 200)"
+cek "…dan pesannya IDENTIK di ketiganya (kontrak anti-enumerasi)" "V == 1" \
+  "$(cat "$DR213"/b* | jq -s '[.[]|.message]|unique|length')"
+
+# ── PASANGAN: jalur BERURUTAN tak berubah perilakunya ──────────────────────
+# Terjemahan galat tak boleh menggeser jawaban yang selama ini benar.
+cek "PASANGAN: pembuatan berurutan beremail sama tetap 409" "V == 409" \
+  "$(status_code_body "$OWNER" POST /karyawan \
+     "{\"nama\":\"Balap 213b\",\"email\":\"$E213\",\"password\":\"Balap213Pass!\",\"role\":\"cashier\",\"branch_id\":\"$CB213\"}")"
+cek "PASANGAN: email BARU tetap boleh dibuat → 201" "V == 201" \
+  "$(status_code_body "$OWNER" POST /karyawan \
+     "{\"nama\":\"Balap 213c\",\"email\":\"baru213.$RANDOM@basooopa.id\",\"password\":\"Balap213Pass!\",\"role\":\"cashier\",\"branch_id\":\"$CB213\"}")"
+
+# ── PINTU KEEMPAT: buat perusahaan sendiri, dua orang bernama usaha SAMA ───
+# Ditemukan sapuan mekanis `penjaga-semua-pintu`, bukan mata: tiga pintu di
+# atas sudah dibereskan dengan tangan, dan yang ini terlewat.
+#
+# Di sini jawabannya BEDA dari ketiganya — COBA ULANG, bukan 409. `slugUnik`
+# sudah menjanjikan akhiran acak untuk nama yang kembar; menolak justru
+# mengingkari janji itu, dan yang menerima penolakannya orang yang BARU
+# MENDAFTAR, pada tindakan pertamanya. "Warung Makan" bukan nama yang jarang.
+# Terukur sebelum perbaikan: 201, 500, 500.
+NAMA213="Warung Kembar 213 $RANDOM"
+D4_213=$(mktemp -d)
+for i in 1 2 3; do
+  T=$(daftar_verif "usaha213.$i.$RANDOM@contoh.id" "Usaha213Pass!" "Usaha 213")
+  printf '%s' "$T" > "$D4_213/t$i"
+done
+cek "dasar §213: tiga akun baru siap membuat usaha" "V == 3" \
+  "$(grep -lc . "$D4_213"/t1 "$D4_213"/t2 "$D4_213"/t3 2>/dev/null | wc -l)"
+for i in 1 2 3; do
+  curl -s -o "$D4_213/b$i" -w '%{http_code}\n' -X POST "$BASE/api/onboarding/perusahaan" \
+    -H "Authorization: Bearer $(cat "$D4_213/t$i")" -H 'Content-Type: application/json' \
+    -d "{\"nama\":\"$NAMA213\"}" > "$D4_213/c$i" &
+done
+wait
+cek "INTI: tiga usaha BERNAMA SAMA dibuat serentak → TAK ADA 5xx" "V == 0" \
+  "$(cat "$D4_213"/c* | grep -c '^5' || true)"
+cek "INTI: ketiganya jadi (201) — nama kembar memang boleh" "V == 3" \
+  "$(cat "$D4_213"/c* | grep -c '^201' || true)"
+cek "…dan slugnya dibedakan otomatis, bukan ditolak" "V == 3" \
+  "$(api "$SA" GET /admin/tenants | jq --arg n "$NAMA213" '[.[]|select(.nama==$n)]|map(.slug)|unique|length')"
+
+# ── PINTU KELIMA & KEENAM: master data yang PALING SERING diketik ──────────
+# Keduanya lolos dari sapuan mekanis versi pertama — daftar tabelnya baru
+# memuat `users|invitations|companies`. Yang menemukannya: menembak KESEPULUH
+# endpoint pembuatan bernama unik sekaligus dan membaca kolom 5xx-nya.
+# Terukur sebelum perbaikan, empat permintaan serentak bernama sama:
+#   /perlengkapan → 201 409 409 500
+#   /bahan        → 201 409 409 500
+TB213='{"nama":"%NAMA%","satuan":"pcs","isi":1,"harga_beli":1000,"pengadaan":"beli","kategori":"lain"}'
+DB213=$(balapUlang213 3 6 "$OWNER" /bahan "$TB213" "Balap Bahan 213 ")
+cek "INTI: 3×6 pembuatan bahan bernama sama → TAK ADA 5xx" "V == 0" "$(lima213 "$DB213")"
+cek "…tepat SATU bahan lahir per nama (3 × 201), sisanya 409" "V == 3" "$(kode213 "$DB213" 201)"
+# Jumlah baris untuk KETIGA nama yang diperebutkan. Ditulis sebagai gelung,
+# bukan satu jq pintar: baris jq yang tak pernah dijalankan atas data tiruan
+# adalah cara paling mudah membuat asersi yang selalu hijau.
+barisPerNama213(){ # barisPerNama213 <path> <berkas-nama> → total baris
+  local path="$1" jml=0 n
+  local semua; semua=$(api "$OWNER" GET "$path")
+  while IFS= read -r n; do
+    jml=$((jml + $(printf '%s' "$semua" | jq --arg n "$n" '[.[]|select(.nama==$n)]|length')))
+  done < "$2"
+  echo "$jml"
+}
+cek "…dan hanya satu baris untuk tiap nama yang diperebutkan" "V == 3" \
+  "$(barisPerNama213 /bahan "$DB213/nama")"
+
+TP213='{"nama":"%NAMA%","satuan":"pcs","harga_beli":500}'
+DP213=$(balapUlang213 3 6 "$OWNER" /perlengkapan "$TP213" "Balap Perlengkapan 213 ")
+cek "INTI: 3×6 pembuatan perlengkapan bernama sama → TAK ADA 5xx" "V == 0" "$(lima213 "$DP213")"
+cek "…tepat SATU perlengkapan lahir per nama (3 × 201)" "V == 3" "$(kode213 "$DP213" 201)"
+
+# PASANGAN: penolakannya tak boleh menelan yang SAH. Nama baru tetap 201, dan
+# nama kembar tetap ditolak 409 lewat jalur berurutan — bukan cuma di balapan.
+NB213=$(head -1 "$DB213/nama")
+cek "PASANGAN: bahan bernama BARU tetap 201" "V == 201" \
+  "$(status_code_body "$OWNER" POST /bahan "${TB213//%NAMA%/Baru 213 $RANDOM}")"
+cek "PASANGAN: bahan bernama sama berurutan tetap 409" "V == 409" \
+  "$(status_code_body "$OWNER" POST /bahan "${TB213//%NAMA%/$NB213}")"
+cek "PASANGAN: perlengkapan bernama BARU tetap 201" "V == 201" \
+  "$(status_code_body "$OWNER" POST /perlengkapan "${TP213//%NAMA%/Baru 213 $RANDOM}")"
+
+# ── PINTU KETUJUH: IMPOR MASSAL — di sini 409 pun jawaban yang SALAH ───────
+# `slugUnik` di `/bahan/bulk` bukan pemeriksa melainkan PENGALOKASI: ia membaca
+# slug yang terpakai lalu memilih yang berikutnya bebas. Empat impor serentak
+# bernama sama SEHARUSNYA menghasilkan empat bahan — "x", "x 2", "x 3", "x 4".
+# Yang terjadi sebelum perbaikan: 201, 201, 500, 500 — di TIGA ronde berturut,
+# jadi dua impor yang sah gagal seluruhnya. Ini bukan kode status yang salah,
+# ini pekerjaan yang hilang.
+TBK213='{"items":[{"nama":"%NAMA%","satuan":"pcs","isi":1,"harga_beli":1000,
+  "track_stok":true,"stok_minimum":0,"kategori":"lain","boleh_eceran":false,
+  "min_beli":1,"masa_simpan_hari":0,"lead_time_hari":0,"is_packaging":false,
+  "is_complement":false}]}'
+DBK213=$(balapUlang213 3 4 "$OWNER" /bahan/bulk "$TBK213" "Balap Bulk 213 ")
+cek "INTI: 3×4 impor massal bernama sama → TAK ADA 5xx" "V == 0" "$(lima213 "$DBK213")"
+cek "INTI: SEMUANYA jadi (12 × 201) — pengalokasi tak boleh menolak" "V == 12" \
+  "$(kode213 "$DBK213" 201)"
+cek "…12 baris lahir (4 per nama), slugnya dibedakan otomatis" "V == 12" \
+  "$(barisPerNama213 /bahan "$DBK213/nama")"
+# Dicocokkan ke nama RONDE INI, bukan ke awalan "Balap Bulk 213 ": versi
+# berawalan menghitung 24 saat skrip ini dijalankan dua kali atas basis data
+# yang sama — hijau/merahnya jadi bergantung pada riwayat basis data, bukan
+# pada perilaku kode. (Terjadi sungguhan saat seksi ini ditulis.)
+slugBedaPerNama213(){ # slugBedaPerNama213 <path> <berkas-nama> → total slug unik
+  local path="$1" jml=0 n semua
+  semua=$(api "$OWNER" GET "$path")
+  while IFS= read -r n; do
+    jml=$((jml + $(printf '%s' "$semua" | jq --arg n "$n" '[.[]|select(.nama==$n)]|map(.slug)|unique|length')))
+  done < "$2"
+  echo "$jml"
+}
+cek "…dan tiap slug memang BERBEDA, bukan 12 baris berslug sama" "V == 12" \
+  "$(slugBedaPerNama213 /bahan "$DBK213/nama")"
+
+# ── PINTU KEDELAPAN: IMPOR CSV — pintu yang gagalnya TAK BERWARNA MERAH ────
+# `/bahan/import` melaporkan kegagalan PER BARIS lalu membalas 200, jadi
+# balapannya tak pernah muncul sebagai 5xx dan tak satu pun asersi "TAK ADA
+# 5xx" bisa melihatnya. Yang keluar sebelum perbaikan: satu entri `gagal`
+# berisi `(e as Error).message` MENTAH dari driver — seluruh teks kueri INSERT
+# beserta daftar kolomnya, dikirim apa adanya ke klien.
+#
+# Karena itu yang diperiksa di sini BUKAN kode statusnya melainkan cacahnya:
+# berurutan, empat impor "tambah" bernama sama menghasilkan 1 ditambah +
+# 3 dilewati dan NOL gagal. Sebelum perbaikan, sebagian dari yang 3 itu jatuh
+# ke `gagal`.
+jmlField213(){ # jmlField213 <dir> <field> → jumlah field itu di semua badan
+  jq -s --arg f "$2" '[.[][$f] // 0]|add' "$1"/b* 2>/dev/null || echo 99
+}
+TIM213='{"mode":"tambah","items":[{"nama":"%NAMA%","harga_beli":7777}]}'
+DIM213=$(balapUlang213 3 4 "$OWNER" /bahan/import "$TIM213" "Impor 213 ")
+cek "INTI: 3×4 impor CSV bernama sama → NOL baris gagal" "V == 0" \
+  "$(jq -s '[.[].gagal[]?]|length' "$DIM213"/b* 2>/dev/null || echo 99)"
+cek "…tepat satu bahan lahir per nama (3 ditambah)" "V == 3" "$(jmlField213 "$DIM213" ditambah)"
+cek "…sisanya DILEWATI, bukan hilang (9 dilewati)" "V == 9" "$(jmlField213 "$DIM213" dilewati)"
+cek "…dan hanya satu baris tersimpan per nama" "V == 3" \
+  "$(barisPerNama213 /bahan "$DIM213/nama")"
+
+# PASANGAN: mode "perbarui" harus benar-benar MENERAPKAN nilainya, bukan cuma
+# tak-gagal. Tanpa ini, "0 gagal" juga tercapai dengan membuang baris diam-diam.
+NPB213="Impor Perbarui 213 $RANDOM"
+BPB213="{\"mode\":\"perbarui\",\"items\":[{\"nama\":\"$NPB213\",\"harga_beli\":7777}]}"
+DPB213=$(mktemp -d)
+for i in 1 2 3 4; do
+  curl -s -o "$DPB213/b$i" -w '%{http_code}\n' -X POST "$BASE/api/bahan/import" \
+    -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "$BPB213" > "$DPB213/c$i" &
+done
+wait
+cek "PASANGAN: mode perbarui → nol gagal" "V == 0" \
+  "$(jq -s '[.[].gagal[]?]|length' "$DPB213"/b* 2>/dev/null || echo 99)"
+cek "PASANGAN: yang kalah MEMPERBARUI, bukan dilewati (1 tambah + 3 perbarui)" "V == 3" \
+  "$(jmlField213 "$DPB213" diperbarui)"
+cek "PASANGAN: harga dari CSV benar-benar tersimpan" "V == 7777" \
+  "$(api "$OWNER" GET /bahan | jq -r --arg n "$NPB213" '[.[]|select(.nama==$n)][0].harga_beli // 0')"
+
+
+echo "== 214. Perusahaan tak boleh kehilangan owner TERAKHIRNYA =="
+# Penjaganya sudah ada dan tertulis niatnya — "Perusahaan tidak boleh kehilangan
+# owner terakhir yang masih berjalan" — tapi ia memeriksa DI LUAR transaksi,
+# tanpa kunci, dan hanya melihat satu dari dua pintu.
+#
+# Perusahaan tanpa owner terkunci dari seluruh fungsi ber-`requireRole("owner")`,
+# TERMASUK mengangkat owner baru. Tak ada jalan keluar dari dalam aplikasi;
+# hanya super admin yang bisa memulihkannya.
+P214='Owner214Pass!'
+buatDuaOwner214(){ # buatDuaOwner214 <label> → "T1 T2 U1 U2 CID"
+  local e1="o214a.$1.$RANDOM@contoh.id" e2="o214b.$1.$RANDOM@contoh.id" t1 t2 u1 u2
+  api "$SA" POST /admin/tenants \
+    "{\"nama\":\"Warung 214 $1 $RANDOM\",\"owner_nama\":\"O1\",\"owner_email\":\"$e1\",\"owner_password\":\"$P214\",\"cabang_nama\":\"Pusat\"}" > /dev/null
+  t1=$(login "$e1" "$P214")
+  api "$t1" POST /karyawan "{\"nama\":\"O2\",\"email\":\"$e2\",\"password\":\"$P214\",\"role\":\"owner\"}" > /dev/null
+  t2=$(login "$e2" "$P214")
+  u1=$(api "$t1" GET /auth/me | jq -r '.user.sub')
+  u2=$(api "$t1" GET /karyawan | jq -r --arg e "$e2" '[.[]|select(.email==$e)][0].user_id')
+  echo "$t1 $t2 $u1 $u2"
+}
+# Jumlah owner AKTIF dibaca lewat API sebagai owner yang masih hidup — kalau
+# keduanya jatuh, tak ada token yang bisa membacanya, dan ITU justru
+# kegagalannya: dibaca 0 dan asersinya merah.
+ownerAktif214(){ # ownerAktif214 <token-a> <token-b> → jumlah owner aktif
+  local n
+  n=$(api "$1" GET /karyawan | jq '[.[]|select(.role=="owner")]|length' 2>/dev/null)
+  case "$n" in (''|*[!0-9]*) n=$(api "$2" GET /karyawan | jq '[.[]|select(.role=="owner")]|length' 2>/dev/null) ;; esac
+  case "$n" in (''|*[!0-9]*) n=0 ;; esac
+  echo "$n"
+}
+
+# ── PINTU 1: dua owner saling mengarsipkan BERSAMAAN ───────────────────────
+# Berurutan jalur ini memang aman (yang kedua dibalas 401 karena sesinya
+# dicabut), jadi cacatnya TAK PERNAH terlihat dari uji yang menunggu balasan
+# sebelum mengirim berikutnya. Terukur sebelum perbaikan: enam ronde,
+# enam-enamnya berakhir NOL owner, kedua permintaan dibalas 200.
+read -r TA214 TB214 UA214 UB214 <<< "$(buatDuaOwner214 arsip)"
+cek "dasar §214: perusahaan uji punya 2 owner" "V == 2" "$(ownerAktif214 "$TA214" "$TB214")"
+D214=$(mktemp -d)
+curl -s -o /dev/null -w '%{http_code}\n' -X PATCH "$BASE/api/karyawan/$UB214" \
+  -H "Authorization: Bearer $TA214" -H 'Content-Type: application/json' -d '{"arsip":true}' > "$D214/a" &
+curl -s -o /dev/null -w '%{http_code}\n' -X PATCH "$BASE/api/karyawan/$UA214" \
+  -H "Authorization: Bearer $TB214" -H 'Content-Type: application/json' -d '{"arsip":true}' > "$D214/b" &
+wait
+cek "INTI: dua owner saling arsip BERSAMAAN → tepat SATU yang tersisa" "V == 1" \
+  "$(ownerAktif214 "$TA214" "$TB214")"
+cek "…dan yang kalah ditolak 400, bukan diloloskan atau 500" "V == 1" \
+  "$(cat "$D214"/a "$D214"/b | grep -c '^400' || true)"
+
+# ── PINTU 2: MENURUNKAN PERAN owner terakhir (tanpa balapan sama sekali) ────
+# Penjaga lama cuma melihat `arsip`, jadi pintu ini terbuka lebar: owner
+# terakhir mengubah perannya sendiri jadi admin → 200, perusahaan tanpa owner.
+read -r TC214 TD214 UC214 UD214 <<< "$(buatDuaOwner214 turun)"
+cek "PINTU 2: menurunkan owner yang BUKAN terakhir → boleh (200)" "V == 200" \
+  "$(status_code_body "$TC214" PATCH "/karyawan/$UD214" '{"role":"admin"}')"
+cek "…sisa satu owner" "V == 1" "$(ownerAktif214 "$TC214" "$TC214")"
+cek "INTI: menurunkan peran owner TERAKHIR → ditolak 400" "V == 400" \
+  "$(status_code_body "$TC214" PATCH "/karyawan/$UC214" '{"role":"admin"}')"
+cek "…dan owner terakhirnya masih owner" "V == 1" "$(ownerAktif214 "$TC214" "$TC214")"
+
+# ── PASANGAN: penjaganya tak boleh membekukan suntingan yang wajar ─────────
+# Penjaga yang menolak terlalu banyak sama merugikannya: owner terakhir tetap
+# harus bisa mengganti namanya sendiri.
+cek "PASANGAN: mengubah NAMA owner terakhir tetap boleh (200)" "V == 200" \
+  "$(status_code_body "$TC214" PATCH "/karyawan/$UC214" '{"nama":"Owner Ganti Nama"}')"
+cek "PASANGAN: owner terakhir tetap ada sesudahnya" "V == 1" "$(ownerAktif214 "$TC214" "$TC214")"
+
+# ── SAUDARANYA: hapus-akun-sendiri lewat jalur onboarding ──────────────────
+# Penjaga "Anda owner terakhir" di sana bentuknya sama persis, dan dulu juga
+# memeriksa di luar transaksi tanpa kunci.
+read -r TE214 TF214 UE214 UF214 <<< "$(buatDuaOwner214 hapus)"
+DH214=$(mktemp -d)
+for tok in "$TE214" "$TF214"; do
+  curl -s -o /dev/null -w '%{http_code}\n' -X DELETE "$BASE/api/onboarding/akun" \
+    -H "Authorization: Bearer $tok" -H 'Content-Type: application/json' \
+    -d "{\"password\":\"$P214\"}" > "$DH214/$(echo "$tok" | tail -c 10)" &
+done
+wait
+cek "INTI: dua owner hapus akun BERSAMAAN → tepat SATU yang tersisa" "V == 1" \
+  "$(ownerAktif214 "$TE214" "$TF214")"
+cek "…dan yang kalah ditolak 400" "V == 1" "$(cat "$DH214"/* | grep -c '^400' || true)"
+
+
+echo
+echo "== 216. Petugas tempat SO ditulis dari DUA arah yang tegak lurus =="
+# `storage_location_petugas` diganti seluruhnya dari dua sisi:
+#   · PUT /penyimpanan/:id/petugas   → hapus WHERE tempat = L, sisipkan (L, u…)
+#   · PUT /karyawan/:userId/tempat   → hapus WHERE user  = U, sisipkan (t…, U)
+#
+# Keduanya sudah bertransaksi, dan masing-masing benar SENDIRIAN. Yang tak
+# dijaga: himpunan baris yang mereka kunci tidak beririsan, jadi tak satu pun
+# menahan yang lain — lalu keduanya menyisipkan pasangan (L, U) yang SAMA.
+# Terukur sebelum perbaikan, tiga ronde berturut-turut: tempat→200,
+# karyawan→500, tiap ronde.
+#
+# Bahwa pintu saudaranya diketahui penulisnya terlihat dari komentar di
+# `users/routes.ts`: "Menulis ke tabel yang sama dengan PUT
+# /penyimpanan/:id/petugas → konsisten dua arah." Tahu ada dua pintu tidak
+# sama dengan memasang penjaga di keduanya — itu justru bentuk yang dijaga
+# `penjaga-semua-pintu.test.ts`, dan pintu inilah yang ditunjuknya.
+CB216=$(api "$OWNER" GET /cabang | jq -r '[.[]|select(.tipe=="store" and .is_active)][0].id')
+E216="petugas216.$RANDOM@basooopa.id"
+U216=$(api "$OWNER" POST /karyawan \
+  "{\"nama\":\"Petugas 216\",\"email\":\"$E216\",\"password\":\"Petugas216Pass!\",\"role\":\"cashier\",\"branch_id\":\"$CB216\"}" \
+  | jq -r '.id // .user_id // empty')
+L216=$(api "$OWNER" POST /penyimpanan "{\"nama\":\"Rak 216 $RANDOM\",\"branch_id\":\"$CB216\"}" | jq -r .id)
+cek "dasar §216: karyawan & tempat uji siap" "V == 2" \
+  "$(( $([ -n "$U216" ] && echo 1 || echo 0) + $([ -n "$L216" ] && echo 1 || echo 0) ))"
+
+# Tiga ronde: satu ronde saja meleset sesekali — dua sisi harus benar-benar
+# berpapasan di jendela antara hapus dan sisip.
+D216=$(mktemp -d)
+for r in 1 2 3; do
+  curl -s -o "$D216/bA$r" -w '%{http_code}\n' -X PUT "$BASE/api/penyimpanan/$L216/petugas" \
+    -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' \
+    -d "{\"user_ids\":[\"$U216\"]}" > "$D216/cA$r" &
+  curl -s -o "$D216/bB$r" -w '%{http_code}\n' -X PUT "$BASE/api/karyawan/$U216/tempat" \
+    -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' \
+    -d "{\"tempat_ids\":[\"$L216\"]}" > "$D216/cB$r" &
+  wait
+done
+cek "INTI: menugaskan dari kedua arah serentak → TAK ADA 5xx" "V == 0" \
+  "$(cat "$D216"/c* | grep -c '^5' || true)"
+cek "…keenam permintaan dibalas 200" "V == 6" "$(cat "$D216"/c* | grep -c '^200' || true)"
+# PASANGAN: "tak ada 5xx" juga tercapai kalau penugasannya diam-diam dibuang.
+cek "PASANGAN: penugasannya BENAR-BENAR tersimpan (sisi tempat)" "V == 1" \
+  "$(api "$OWNER" GET /penyimpanan | jq -r --arg l "$L216" '[.[]|select(.id==$l)][0].petugas|length')"
+cek "PASANGAN: dan terbaca sama dari sisi karyawan" "V == 1" \
+  "$(api "$OWNER" GET "/karyawan/$U216/tempat" | jq -r '.assigned|length')"
+
+echo "== 217. \"Ganti seluruh daftar\" yang diklik DUA KALI =="
+# HAPUS-lalu-SISIP hanya menyerialkan diri sendiri kalau ada yang bisa dipegang
+# HAPUS-nya. Saat daftarnya masih KOSONG, ia tak memegang baris apa pun — dua
+# permintaan bersamaan sama-sama lolos ke SISIP dan menabrak indeks pasangan.
+#
+# Yang membuat kelas ini beda dari §213: permintaannya IDEMPOTEN. Badan yang
+# sama persis, dikirim dua kali. Yang memicunya di lapangan bukan dua admin,
+# cukup SATU KLIK GANDA pada tombol Simpan — dan yang diterima pengguna adalah
+# overlay "server sedang diperbarui".
+#
+# Terukur sebelum perbaikan, empat PUT serentak berbadan sama, tiga ronde
+# berturut-turut, identik tiap ronde:
+#   PUT /bahan/:id/supplier         200 200 500 500
+#   PUT /perlengkapan/:id/supplier  200 200 500 500
+#   PUT /penyimpanan/:id/bahan      200 500 500 500
+#
+# KENAPA DUA JAWABAN BERBEDA untuk kelas yang sama:
+#   · `/:id/supplier` punya baris INDUK yang nyata → `FOR UPDATE` per bahan,
+#     tak menghalangi bahan lain. Idiom ini sudah dipakai `PUT /bahan/:id/resep`
+#     di berkas yang sama — sekali lagi dipasang di satu pintu, bukan saudaranya.
+#   · `/penyimpanan/:id/bahan` menegakkan "satu barang di SATU rak", jadi ia
+#     ikut menghapus dari rak LAIN. Dua permintaan ke rak BERBEDA tetap
+#     berpapasan, dan induk yang mereka bagi cuma perusahaannya → kunci antrean.
+#
+# Dua PUT yang TIDAK cacat sudah diperiksa juga: `PUT /menu/:id` dan
+# `PUT /bahan/:id` (resep) bersih 3/3 ronde — keduanya meng-UPDATE baris induk
+# lebih dulu di transaksi yang sama, jadi kunci barisnya menyerialkan mereka
+# tanpa sengaja. Itu yang menunjukkan idiom mana yang benar.
+S217A=$(api "$OWNER" POST /supplier "{\"nama\":\"Sup 217A $RANDOM\"}" | jq -r .id)
+S217B=$(api "$OWNER" POST /supplier "{\"nama\":\"Sup 217B $RANDOM\"}" | jq -r .id)
+BH217=$(api "$OWNER" POST /bahan \
+  "{\"nama\":\"Bahan 217 $RANDOM\",\"satuan\":\"pcs\",\"isi\":1,\"harga_beli\":1000,\"pengadaan\":\"beli\",\"kategori\":\"lain\"}" | jq -r .id)
+PL217=$(api "$OWNER" POST /perlengkapan "{\"nama\":\"Perl 217 $RANDOM\",\"satuan\":\"pcs\",\"harga_beli\":500}" | jq -r .id)
+CB217=$(api "$OWNER" GET /cabang | jq -r '[.[]|select(.tipe=="store" and .is_active)][0].id')
+LOC217=$(api "$OWNER" POST /penyimpanan "{\"nama\":\"Rak 217 $RANDOM\",\"branch_id\":\"$CB217\"}" | jq -r .id)
+cek "dasar §217: lima objek uji siap" "V == 5" \
+  "$(printf '%s\n' "$S217A" "$S217B" "$BH217" "$PL217" "$LOC217" | grep -c '^[0-9a-f-]\{36\}$' || true)"
+
+# `balapUlang213` menembak POST; di sini metodenya PUT dan badannya SAMA di
+# tiap tembakan (justru itu intinya), jadi dipakai gelung sendiri.
+balapPut217(){ # balapPut217 <ronde> <n> <path> <body> → dir
+  local ronde="$1" n="$2" path="$3" body="$4" d r i
+  d=$(mktemp -d)
+  for r in $(seq 1 "$ronde"); do
+    for i in $(seq 1 "$n"); do
+      curl -s -o "$d/b$r-$i" -w '%{http_code}\n' -X PUT "$BASE/api$path" \
+        -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "$body" > "$d/c$r-$i" &
+    done
+    wait
+  done
+  echo "$d"
+}
+ITEMS217="[{\"supplier_id\":\"$S217A\",\"is_utama\":true},{\"supplier_id\":\"$S217B\",\"is_utama\":false}]"
+
+DBS217=$(balapPut217 2 4 "/bahan/$BH217/supplier" "{\"items\":$ITEMS217}")
+cek "INTI: 2×4 PUT /bahan/:id/supplier berbadan sama → TAK ADA 5xx" "V == 0" "$(lima213 "$DBS217")"
+cek "…kedelapannya 200" "V == 8" "$(kode213 "$DBS217" 200)"
+
+DPS217=$(balapPut217 2 4 "/perlengkapan/$PL217/supplier" "{\"items\":$ITEMS217}")
+cek "INTI: 2×4 PUT /perlengkapan/:id/supplier berbadan sama → TAK ADA 5xx" "V == 0" "$(lima213 "$DPS217")"
+cek "…kedelapannya 200" "V == 8" "$(kode213 "$DPS217" 200)"
+
+DRK217=$(balapPut217 2 4 "/penyimpanan/$LOC217/bahan" \
+  "{\"ingredient_ids\":[\"$BH217\"],\"supply_ids\":[\"$PL217\"]}")
+cek "INTI: 2×4 PUT /penyimpanan/:id/bahan berbadan sama → TAK ADA 5xx" "V == 0" "$(lima213 "$DRK217")"
+cek "…kedelapannya 200" "V == 8" "$(kode213 "$DRK217" 200)"
+
+# ── PASANGAN: hasilnya harus PERSIS yang dikirim ──────────────────────────
+# "Tak ada 5xx" juga tercapai kalau penulisannya diam-diam dibuang, atau kalau
+# barisnya berlipat. Keduanya diperiksa, termasuk indeks utama yang cuma boleh
+# meloloskan SATU supplier utama.
+cek "PASANGAN: bahan punya tepat 2 supplier, tak berlipat" "V == 2" \
+  "$(api "$OWNER" GET "/bahan/$BH217/supplier" | jq -r 'length')"
+cek "PASANGAN: …dan tepat SATU di antaranya utama" "V == 1" \
+  "$(api "$OWNER" GET "/bahan/$BH217/supplier" | jq -r '[.[]|select(.is_utama)]|length')"
+cek "PASANGAN: perlengkapan punya tepat 2 supplier" "V == 2" \
+  "$(api "$OWNER" GET "/perlengkapan/$PL217/supplier" | jq -r 'length')"
+cek "PASANGAN: …dan tepat SATU di antaranya utama" "V == 1" \
+  "$(api "$OWNER" GET "/perlengkapan/$PL217/supplier" | jq -r '[.[]|select(.is_utama)]|length')"
+cek "PASANGAN: rak berisi tepat 1 bahan" "V == 1" \
+  "$(api "$OWNER" GET /penyimpanan | jq -r --arg l "$LOC217" '[.[]|select(.id==$l)][0].jumlah_bahan // 0')"
+cek "PASANGAN: rak berisi tepat 1 perlengkapan" "V == 1" \
+  "$(api "$OWNER" GET /penyimpanan | jq -r --arg l "$LOC217" '[.[]|select(.id==$l)][0].jumlah_perlengkapan // 0')"
+
+# ── PASANGAN: jalur yang MEMANG bersih harus tetap bersih ─────────────────
+# Kalau kelak ada yang "merapikan" dengan menyerialkan semuanya se-perusahaan,
+# asersi ini tak akan menangkapnya — tapi ia menangkap kebalikannya: kunci
+# induk yang dilepas dari PUT /menu/:id, yang selama ini menjaganya diam-diam.
+KAT217=$(api "$OWNER" GET /kategori | jq -r '.[0].id')
+MN217=$(api "$OWNER" POST /menu \
+  "{\"nama\":\"Menu 217 $RANDOM\",\"category_id\":\"$KAT217\",\"harga_jual\":10000,\"mult\":2,\"komponen\":[]}" | jq -r .id)
+DMN217=$(balapPut217 2 4 "/menu/$MN217" \
+  "{\"nama\":\"Menu 217\",\"category_id\":\"$KAT217\",\"harga_jual\":10000,\"mult\":2,\"komponen\":[{\"ingredient_id\":\"$BH217\",\"qty\":10}]}")
+cek "PASANGAN: PUT /menu/:id (komponen) tetap bebas 5xx" "V == 0" "$(lima213 "$DMN217")"
+
+
+echo "== 218. Potongan otomatis tak boleh memakai stok yang tidak ada =="
+# Seksi ini menjaga jalur yang TAK ADA TOMBOLNYA: potongan otomatis berjalan
+# sendiri setiap kali daftar perlengkapan dibuka. Beberapa tablet yang memuat
+# layar itu bersamaan di pagi hari — saat kursor aturan masih kemarin dan
+# tunggakannya beberapa hari — sudah cukup membuat saldo JATUH MINUS.
+#
+# KENAPA INDEKS UNIKNYA TAK MENANGKAPNYA, dan kenapa itu yang penting di sini:
+# `supply_mutations_auto_uq` + `onConflictDoNothing` menjaga TIDAK ADA HARI
+# YANG DIPOTONG DUA KALI, dan ia menepatinya — nol baris ganda, bahkan pada
+# kode yang cacat. Yang tak dijaganya BERAPA TOTALNYA.
+#
+#   proses A: sisaRak=10 → isi hari 1..4 (3+3+3+1), stok habis, hari 5..7
+#             ditinggalkan karena `sisa <= 0`
+#   proses B: membaca sisaRak=10 SEBELUM A commit → hari 1..4 bentrok
+#             (dilewati, benar), lalu hari 5..7 masih kosong sehingga terisi
+#
+# 19 terpakai dari 10 yang ada. Indeksnya hijau, bukunya salah — jadi asersi
+# yang benar di sini bukan "tak ada baris ganda" melainkan SALDONYA.
+#
+# Balapannya dipicu lewat HTTP saja: enam `PUT /aturan` serentak, masing-masing
+# membuat/mengubah aturan LALU menerapkannya. Kursornya masih kosong sampai
+# yang pertama commit, jadi jendelanya terbuka persis seperti pagi hari.
+# Terukur di atas kode cacat: −9 pada tiga ronde berturut-turut.
+CB218=$(api "$OWNER" GET /cabang | jq -r '[.[]|select(.tipe=="store" and .is_active)][0].id')
+MULAI218=$(date -u -d '6 days ago' +%F)
+
+# stokAwal218 <qty> → id perlengkapan baru dengan stok segitu di cabang uji
+stokAwal218(){
+  local p
+  p=$(api "$OWNER" POST /perlengkapan \
+    "{\"nama\":\"Auto 218 $RANDOM$RANDOM\",\"satuan\":\"pcs\",\"harga_beli\":100,\"dilacak\":true}" | jq -r .id)
+  api "$OWNER" POST "/perlengkapan/$p/masuk?branch_id=$CB218" "{\"qty\":$1,\"total_harga\":100}" > /dev/null
+  echo "$p"
+}
+# balapAturan218 <supply_id> — 6 PUT /aturan serentak (3/hari sejak 6 hari lalu)
+balapAturan218(){
+  local p="$1" i d; d=$(mktemp -d)
+  for i in $(seq 1 6); do
+    curl -s -o /dev/null -w '%{http_code}\n' -X PUT "$BASE/api/perlengkapan/$p/aturan?branch_id=$CB218" \
+      -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' \
+      -d "{\"metode\":\"otomatis\",\"qty\":3,\"per_hari\":1,\"aktif\":true,\"mulai\":\"$MULAI218\"}" > "$d/c$i" &
+  done
+  wait
+  cat "$d"/c* | grep -c '^5' || true
+  rm -rf "$d"
+}
+saldo218(){ api "$OWNER" GET "/perlengkapan?branch_id=$CB218" | jq -r --arg p "$1" '[.[]|select(.id==$p)][0].saldo // 999'; }
+
+# ── INTI: stok 10, tunggakan 7 hari × 3 = 21 → boleh habis, TAK BOLEH minus ──
+P218A=$(stokAwal218 10)
+cek "dasar §218: item uji punya stok 10" "V == 10" "$(saldo218 "$P218A")"
+cek "…enam PUT /aturan serentak tak ada yang 5xx" "V == 0" "$(balapAturan218 "$P218A")"
+cek "INTI: saldo TAK JATUH MINUS meski tunggakan (21) melebihi stok (10)" "V >= 0" \
+  "$(saldo218 "$P218A")"
+cek "INTI: …dan berhenti PERSIS di nol, bukan menyisakan stok hantu" "V == 0" \
+  "$(saldo218 "$P218A")"
+
+# ── PASANGAN: kuncinya tak boleh diam-diam MEMATIKAN potongannya ─────────
+# "Saldo tak minus" juga tercapai kalau potongan otomatis berhenti bekerja
+# sama sekali. Dengan stok berlimpah, tunggakan yang sama harus terpotong PENUH.
+P218B=$(stokAwal218 100)
+cek "PASANGAN: item kedua punya stok 100" "V == 100" "$(saldo218 "$P218B")"
+cek "PASANGAN: …enam PUT serentak, nol 5xx" "V == 0" "$(balapAturan218 "$P218B")"
+cek "PASANGAN: potongan tetap PENUH — 21 terpakai dari 100 (sisa 79)" "V == 79" \
+  "$(saldo218 "$P218B")"
+
+
+echo "== 219. Penjaga kuantitas yang dibaca DI LUAR kunci =="
+# Dua pintu, satu bentuk: baca saldo → putuskan → tulis, dengan bacanya memakai
+# `db` dan tulisannya pernyataan TERPISAH. Kontraknya bahkan sudah tertulis di
+# `hitungSaldoCabang`: "pemanggil yang memvalidasi SEBELUM MENULIS wajib
+# mengoper `tx`-nya" — dan kedua pintu ini tidak.
+#
+#   POST /:id/pakai   penjaganya "qty > saldo → 400". Isinya benar; yang bocor
+#                     penegakannya. Terukur: saldo 10, enam `pakai 10` serentak
+#                     → TIGA dibalas 200, saldo −20 (dua dari tiga ronde).
+#                     Sebagian permintaan tetap ditolak, jadi dari layar tampak
+#                     berfungsi — yang lolos itulah yang menarik stok ke minus.
+#
+#   POST /:id/koreksi menulis SELISIH (`qty_fisik − saldo`), jadi dua koreksi
+#                     bersamaan menerapkannya dua kali. Berurutan ia idempoten
+#                     (koreksi kedua berselisih 0) — dan justru itu yang membuat
+#                     klik ganda tampak aman. Terukur: "rak berisi 5" atas saldo
+#                     10, empat kali serentak, tiga ronde → saldo 0, 10, 10.
+#                     TAK SEKALI PUN 5. Berurutan selalu 5.
+#
+# Asersinya pada SALDO, bukan pada kode status: `koreksi` membalas 200 pada
+# keempat permintaan bahkan saat hasilnya salah, jadi uji yang membaca kode
+# status akan lulus di atas bug ini.
+CB219=$(api "$OWNER" GET /cabang | jq -r '[.[]|select(.tipe=="store" and .is_active)][0].id')
+buatStok219(){ # buatStok219 <qty> → id perlengkapan berstok segitu
+  local p
+  p=$(api "$OWNER" POST /perlengkapan \
+    "{\"nama\":\"Kuantitas 219 $RANDOM$RANDOM\",\"satuan\":\"pcs\",\"harga_beli\":100,\"dilacak\":true}" | jq -r .id)
+  api "$OWNER" POST "/perlengkapan/$p/masuk?branch_id=$CB219" "{\"qty\":$1,\"total_harga\":100}" > /dev/null
+  echo "$p"
+}
+saldo219(){ api "$OWNER" GET "/perlengkapan?branch_id=$CB219" | jq -r --arg p "$1" '[.[]|select(.id==$p)][0].saldo // 999'; }
+serentak219(){ # serentak219 <n> <path> <body> → jumlah jawaban 2xx
+  local n="$1" path="$2" body="$3" d i
+  d=$(mktemp -d)
+  for i in $(seq 1 "$n"); do
+    curl -s -o /dev/null -w '%{http_code}\n' -X POST "$BASE/api$path" \
+      -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "$body" > "$d/c$i" &
+  done
+  wait
+  grep -hcE '^2' "$d"/c* 2>/dev/null | paste -sd+ | bc
+  rm -rf "$d"
+}
+
+# ── PAKAI: tiga ronde, tiap ronde item baru berstok 10 ────────────────────
+LOLOS219=0; MINUS219=0
+for r in 1 2 3; do
+  P=$(buatStok219 10)
+  L=$(serentak219 6 "/perlengkapan/$P/pakai?branch_id=$CB219" '{"qty":10}')
+  LOLOS219=$((LOLOS219 + L))
+  S=$(saldo219 "$P")
+  case "$S" in (-*) MINUS219=$((MINUS219 + 1)) ;; esac
+done
+cek "INTI: saldo tak pernah MINUS setelah pemakaian serentak (3 ronde)" "V == 0" "$MINUS219"
+cek "INTI: dari 6 pemakaian serentak, tepat SATU lolos tiap ronde" "V == 3" "$LOLOS219"
+
+# ── KOREKSI: hasilnya harus PERSIS yang dihitung petugas ──────────────────
+SALAH219=0
+for r in 1 2 3; do
+  P=$(buatStok219 10)
+  serentak219 4 "/perlengkapan/$P/koreksi?branch_id=$CB219" '{"qty_fisik":5}' > /dev/null
+  [ "$(saldo219 "$P")" = "5" ] || SALAH219=$((SALAH219 + 1))
+done
+cek "INTI: koreksi fisik serentak mendarat di angka yang DIHITUNG (5), 3 ronde" "V == 0" "$SALAH219"
+
+# ── PASANGAN: kuncinya tak boleh mematikan jalur normalnya ────────────────
+# "Saldo tak minus" juga tercapai kalau pemakaian ditolak seluruhnya, dan
+# "koreksi benar" juga tercapai kalau koreksi berhenti menulis apa pun.
+P219A=$(buatStok219 10)
+cek "PASANGAN: pemakaian tunggal yang WAJAR tetap diterima" "V == 200" \
+  "$(status_code_body "$OWNER" POST "/perlengkapan/$P219A/pakai?branch_id=$CB219" '{"qty":4}')"
+cek "PASANGAN: …dan saldonya benar-benar berkurang (10 → 6)" "V == 6" "$(saldo219 "$P219A")"
+cek "PASANGAN: pemakaian melebihi saldo tetap DITOLAK 400" "V == 400" \
+  "$(status_code_body "$OWNER" POST "/perlengkapan/$P219A/pakai?branch_id=$CB219" '{"qty":99}')"
+P219B=$(buatStok219 10)
+cek "PASANGAN: koreksi tunggal tetap menulis selisihnya (10 → 3)" "V == 3" \
+  "$(api "$OWNER" POST "/perlengkapan/$P219B/koreksi?branch_id=$CB219" '{"qty_fisik":3}' > /dev/null; saldo219 "$P219B")"
+
+
+echo "== 220. Kekekalan uang refund, DI DALAM basis data =="
+# `refund-uang-kekal.test.ts` sudah membuktikan sifat ini untuk FUNGSInya:
+# 100.000 kombinasi, jumlah refund bertahap selalu sama dengan yang dibayar.
+# Yang TIDAK dibuktikan siapa pun: bahwa baris yang benar-benar TERSIMPAN ikut
+# menepatinya. Di antara fungsi dan tabel ada pembulatan kolom `numeric`,
+# penyusutan `sales.subtotal` tiap refund, dan `nominal` yang dikembalikan API
+# — tiga tempat yang bisa menggeser satu rupiah tanpa menyentuh fungsinya.
+#
+# Uang yang hilang di sela itu tak terlihat dari satu nota. Yang terlihat cuma
+# kas yang tak pernah cocok.
+#
+# Diukur lebih dulu di luar skrip ini: 240 kombinasi (tarif PB1 0/7/10/11/12,5%,
+# diskon persen & nominal 0–100, tiga bentuk keranjang) → NOL pelanggaran.
+# Yang dipasang di sini bagian murahnya, dengan tarif PB1 PECAHAN (12,5%) yang
+# paling mungkin melahirkan setengah rupiah.
+PB1_220=$(api "$OWNER" GET /company | jq -r '{e:.pb1_enabled,r:.pb1_rate,d:.diskon_maks_persen}|@base64')
+api "$OWNER" PATCH /company '{"pb1_enabled":true,"pb1_rate":12.5,"diskon_maks_persen":100}' > /dev/null
+PBA220=$(api "$OWNER" GET /menu | jq -r '[.[]|select(.nama|startswith("Premium Basooopa A"))][0].id')
+PBB220=$(api "$OWNER" GET /menu | jq -r '[.[]|select(.nama|startswith("Premium Basooopa B"))][0].id')
+cek "dasar §220: dua menu uji ada" "V == 2" \
+  "$(printf '%s\n' "$PBA220" "$PBB220" | grep -c '^[0-9a-f-]\{36\}$' || true)"
+
+# kembalikanSemua220 <qtyA> <qtyB> <tipe> <nilai> → "dibayar Σrefund sisa"
+kembalikanSemua220(){
+  local qa="$1" qb="$2" tp="$3" nl="$4" S SID DIBAYAR ITEMS JUMLAH=0 SISA baris iid r
+  S=$(api "$REISS105" POST /penjualan \
+    "{\"is_dine_in\":false,\"diskon_tipe\":\"$tp\",\"diskon_nilai\":$nl,\"items\":[{\"menu_id\":\"$PBA220\",\"qty\":$qa},{\"menu_id\":\"$PBB220\",\"qty\":$qb}]}")
+  SID=$(echo "$S" | jq -r '.sale.id // empty')
+  [ -z "$SID" ] && { echo "0 0 -1"; return; }
+  DIBAYAR=$(echo "$S" | jq -r '.sale.total')
+  ITEMS=$(api "$OWNER" GET "/penjualan/$SID" | jq -c '[(.items // .sale.items)[] | {id, qty}]')
+  while :; do
+    baris=$(echo "$ITEMS" | jq -r 'map(select(.qty>0))[0] // empty'); [ -z "$baris" ] && break
+    iid=$(echo "$baris" | jq -r .id)
+    r=$(api "$REISS105" POST "/penjualan/$SID/refund" \
+      "{\"items\":[{\"sale_item_id\":\"$iid\",\"qty\":1}],\"client_ref\":\"$(cat /proc/sys/kernel/random/uuid)\"}")
+    JUMLAH=$((JUMLAH + $(echo "$r" | jq -r '.nominal // 0')))
+    ITEMS=$(echo "$ITEMS" | jq --arg i "$iid" 'map(if .id==$i then .qty=(.qty-1) else . end)')
+  done
+  SISA=$(api "$OWNER" GET "/penjualan/$SID" | jq -r '(.sale.total // .total)')
+  echo "$DIBAYAR $JUMLAH $SISA"
+}
+
+MELESET220=0; SISA220=0; DICOBA220=0
+for kombo in "1 1 nominal 0" "2 3 nominal 7777" "3 2 persen 33" "1 2 persen 99" "2 2 nominal 1" "3 1 persen 7"; do
+  # shellcheck disable=SC2086
+  set -- $kombo
+  hasil=$(kembalikanSemua220 "$1" "$2" "$3" "$4")
+  bayar=${hasil%% *}; sisanya=${hasil##* }; jml=$(echo "$hasil" | cut -d' ' -f2)
+  DICOBA220=$((DICOBA220+1))
+  [ "$jml" != "$bayar" ] && MELESET220=$((MELESET220+1))
+  [ "$sisanya" != "0" ] && SISA220=$((SISA220+1))
+done
+cek "dasar §220: enam nota uji benar-benar dibuat" "V == 6" "$DICOBA220"
+cek "INTI: Σ refund bertahap = yang DIBAYAR, di semua nota" "V == 0" "$MELESET220"
+cek "INTI: nota yang seluruh porsinya dikembalikan bersisa NOL" "V == 0" "$SISA220"
+
+# ── PASANGAN: kesetaraan di atas tidak boleh benar secara sepele ──────────
+# Kalau `nominal` selalu memulangkan total nota, kedua asersi di atas juga
+# hijau. Yang membedakan: refund SEBAGIAN harus lebih kecil dari yang dibayar.
+S220=$(api "$REISS105" POST /penjualan \
+  "{\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$PBA220\",\"qty\":4}]}")
+SID220=$(echo "$S220" | jq -r '.sale.id')
+BAYAR220=$(echo "$S220" | jq -r '.sale.total')
+IT220=$(api "$OWNER" GET "/penjualan/$SID220" | jq -r '(.items // .sale.items)[0].id')
+NOM220=$(api "$REISS105" POST "/penjualan/$SID220/refund" \
+  "{\"items\":[{\"sale_item_id\":\"$IT220\",\"qty\":1}],\"client_ref\":\"$(cat /proc/sys/kernel/random/uuid)\"}" | jq -r '.nominal // 0')
+cek "PASANGAN: refund SEBAGIAN (1 dari 4) lebih kecil dari yang dibayar" "V == 1" \
+  "$([ "$NOM220" -gt 0 ] && [ "$NOM220" -lt "$BAYAR220" ] && echo 1 || echo 0)"
+cek "PASANGAN: …dan notanya masih menyisakan tagihan" "V == 1" \
+  "$([ "$(api "$OWNER" GET "/penjualan/$SID220" | jq -r '(.sale.total // .total)')" -gt 0 ] && echo 1 || echo 0)"
+
+# Setelan perusahaan DIKEMBALIKAN — seksi di bawah tak boleh mewarisi PB1 12,5%.
+api "$OWNER" PATCH /company "$(echo "$PB1_220" | base64 -d | jq -c '{pb1_enabled:.e,pb1_rate:.r,diskon_maks_persen:.d}')" > /dev/null
+cek "setelan PB1 perusahaan dikembalikan seperti semula" "V == 1" \
+  "$(api "$OWNER" GET /company | jq --argjson a "$(echo "$PB1_220" | base64 -d)" \
+     '(.pb1_enabled==$a.e and .pb1_rate==$a.r and .diskon_maks_persen==$a.d)|if . then 1 else 0 end')"
+
+
+echo
+echo "── §221 Akun seed harus ditinggalkan seperti semula ──"
+# Duduk di ekor bersama §209/§215, dan karena alasan yang sama: ia menghakimi
+# sesudah semua seksi selesai mengutak-atik.
+#
+# KENAPA ADA. §105 mengganti password kasir DUA KALI untuk menguji
+# `token_version`, dan dulu membiarkannya begitu — catatannya menyandarkan
+# keamanan pada penempatan ("letakkan PALING AKHIR"), padahal kini ada ~115
+# seksi di bawahnya. Sandaran itu juga hanya melindungi SKRIP INI: apa pun yang
+# berjalan sesudahnya terhadap basis data yang sama akan login dengan password
+# seed dan ditolak.
+#
+# Itu bukan hipotesis. Saat suite e2e web dipasang di job CI yang sama, dua
+# spec merah dengan `login API (status 401)` — dan sebabnya berjarak 4.000
+# baris dari gejalanya. Asersi di bawah membuat sebab dan gejalanya bertemu.
+for pasangan in "owner:$OWNER_EMAIL:$OWNER_PASS" "kasir:$KASIR_EMAIL:$KASIR_PASS" "superadmin:$SA_EMAIL:$SA_PASS"; do
+  peran="${pasangan%%:*}"; sisa="${pasangan#*:}"
+  surel="${sisa%%:*}"; sandi="${sisa#*:}"
+  cek "kredensial seed $peran masih berlaku di akhir skrip" "V == 1" \
+    "$([ -n "$(login "$surel" "$sandi")" ] && echo 1 || echo 0)"
+done
+
+echo
+echo "── §215 Kuota pendaftaran: skrip ini tak boleh diam saat 429 ──"
+# Duduk di ekor bersama §209, dan karena alasan yang sama: ia mengadili berkas
+# yang baru terisi setelah semua seksi menembakkan pendaftarannya.
+#
+# `POST /auth/register` berkuota 20 per IP per JAM, dan skrip ini memanggilnya
+# sekitar 20 kali — TEPAT DI TEPI. Sekali terlampaui, `daftar_verif` dulu
+# memulangkan token kosong tanpa sepatah kata, dan yang terlihat cuma asersi
+# turunan yang membingungkan ratusan baris jauhnya.
+#
+# ── Dibuktikan MENGGIGIT lebih dulu, seperti §209 ──────────────────────────
+# Tanpa ini, "berkasnya kosong" cuma membuktikan bahwa tak ada yang pernah
+# menulis ke sana — termasuk bila deteksinya rusak sama sekali.
+printf 'uji-diri-215@contoh.id\n' >> "$KUOTA_HABIS"
+cek "penjaga kuota bisa MENUDUH (uji-diri)" "V == 1" \
+  "$(grep -cx 'uji-diri-215@contoh.id' "$KUOTA_HABIS" || true)"
+sed -i '/^uji-diri-215@contoh.id$/d' "$KUOTA_HABIS"
+cek "…dan tuduhan uji-diri itu bisa dicabut lagi" "V == 0" \
+  "$(grep -cx 'uji-diri-215@contoh.id' "$KUOTA_HABIS" || true)"
+
+cek "INTI: tak ada pendaftaran yang kena 429 sepanjang jalan ini" "V == 0" \
+  "$(grep -c . "$KUOTA_HABIS" || true)"
+if [ -s "$KUOTA_HABIS" ]; then
+  echo "     Kuota 20/IP/jam terlampaui. INI BUKAN BUG KODE — hasil seksi yang"
+  echo "     memakai akun baru jadi tak bermakna. Tunggu satu jam, atau kurangi"
+  echo "     pendaftaran di skrip ini. Yang kena:"
+  sed 's/^/       /' "$KUOTA_HABIS"
+fi
+
+echo
+echo "── §209 Rute mati: verify-api tak boleh memanggil endpoint yang TIDAK ADA ──"
+# Duduk PALING AKHIR di berkas ini walau nomornya bukan yang terbesar: ia baru
+# boleh menghakimi sesudah semua seksi lain menembakkan panggilannya.
+# Seksi ini mengadili berkas yang diisi `catat_rute_mati` (lihat catatan panjang
+# di dekat definisi `api`). Ia duduk di ekor skrip karena baru boleh menghakimi
+# sesudah semua seksi lain menembakkan panggilannya.
+#
+# Pemicunya nyata: lima blok `POST /absensi/masuk` — rute yang tak pernah ada —
+# hidup di skrip ini sampai satu jalan penuh dibaca ulang lewat `error_logs`.
+# Ketiganya (stdout, stderr, status keluar) ditelan di tempat kejadian, jadi
+# tak satu pun dari 2.400+ asersi berubah warna. Yang menyembunyikannya bukan
+# kelalaian satu orang; itu bentuk penulisan yang memang tak bisa gagal.
+
+# ── Dulu penjaga ini DIBUKTIKAN MENGGIGIT, baru boleh dipercaya ────────────
+# Ditembakkan dengan tiga lapis penelan yang SAMA PERSIS dengan yang menutupi
+# bug aslinya. Kalau deteksinya rusak — badan `notFound` berubah, `api` berhenti
+# menangkap — asersi inilah yang jatuh, bukan diam-diam meloloskan semuanya.
+api "$OWNER" GET "/rute-mati-uji-diri-209" > /dev/null 2>&1 || true
+cek "penjaga menggigit rute fiktif MESKIPUN galatnya ditelan tiga lapis" "V == 1" \
+  "$(grep -cx 'GET /rute-mati-uji-diri-209' "$RUTE_MATI" || true)"
+# Bukti kedua, dari seksi lain dan lewat pemanggil lain: §142 sengaja menembak
+# rute fiktif untuk menguji pencatatan galat. Ia harus ikut tertangkap — kalau
+# tidak, penjaganya cuma mengenali kalimatnya sendiri.
+cek "…dan panggilan sengaja di §142 pun tercatat" "V == 1" \
+  "$(grep -cx 'GET /endpoint-yang-tidak-ada-142' "$RUTE_MATI" || true)"
+
+# ── Sisanya: rute mati yang TIDAK disengaja ───────────────────────────────
+# Kedua entri di atas dikeluarkan SATU-SATU dan disebut namanya, bukan disaring
+# dengan pola samar seperti "*uji*" — pola begitu kelak menelan rute mati
+# sungguhan yang kebetulan namanya mirip.
+SISA209=$(sort -u "$RUTE_MATI" \
+  | grep -vx 'GET /rute-mati-uji-diri-209' \
+  | grep -vx 'GET /endpoint-yang-tidak-ada-142' || true)
+if [ -n "$SISA209" ]; then
+  while IFS= read -r r209; do
+    # `gagal`, bukan satu `cek` berisi hitungan: yang membaca log butuh NAMA
+    # rutenya di ringkasan ekor, bukan angka "3".
+    gagal "verify-api memanggil rute yang TIDAK ADA: $r209"
+  done <<< "$SISA209"
+else
+  ok "tak ada panggilan ke rute yang tidak ada"
+fi
 
 
 if [ "$FAIL" -gt 0 ]; then

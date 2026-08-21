@@ -11,6 +11,7 @@ import {
 } from "@kakarut/shared";
 import { db } from "../../db/client";
 import { branches, leaveRequests, memberships, users } from "../../db/schema";
+import { kunciAntrean } from "../../lib/kunci";
 import { tambahHari } from "../../lib/time";
 import { requireRole, terikatCabang, type AppEnv } from "../../middleware/auth";
 
@@ -218,41 +219,69 @@ export const pengajuanRoutes = new Hono<AppEnv>()
         ),
       );
 
-    // Tolak yang bertindih dengan pengajuan sendiri yang masih hidup: dua baris
-    // untuk hari yang sama membuat rekap ambigu (mana yang dipakai?).
-    const [bentrok] = await db
-      .select({ id: leaveRequests.id, mulai: leaveRequests.tanggalMulai })
-      .from(leaveRequests)
-      .where(
-        and(
-          eq(leaveRequests.companyId, auth.company_id!),
-          eq(leaveRequests.userId, auth.sub),
-          inArray(leaveRequests.status, ["menunggu", "disetujui"]),
-          lte(leaveRequests.tanggalMulai, b.tanggal_selesai),
-          gte(leaveRequests.tanggalSelesai, b.tanggal_mulai),
-        ),
-      )
-      .limit(1);
-    if (bentrok) {
-      throw new HTTPException(409, {
-        message: "Sudah ada pengajuan Anda pada tanggal yang bertindih — batalkan dulu yang lama",
-      });
-    }
-
-    const [baru] = await db
-      .insert(leaveRequests)
-      .values({
-        companyId: auth.company_id!,
-        userId: auth.sub,
-        branchId: m?.branchId ?? null,
-        jenis: jenisKategori(b.kategori),
-        kategori: b.kategori,
-        tanggalMulai: b.tanggal_mulai,
-        tanggalSelesai: b.tanggal_selesai,
-        alasan: b.alasan?.trim() || null,
-        lampiranUrl: b.lampiran_url?.trim() || null,
-      })
-      .returning({ id: leaveRequests.id });
+    /*
+     * Tolak yang bertindih dengan pengajuan sendiri yang masih hidup: dua baris
+     * untuk hari yang sama membuat rekap ambigu (mana yang dipakai?).
+     *
+     * PERIKSA DAN TULIS DALAM SATU TRANSAKSI BERKUNCI, sebab larangan ini tak
+     * bisa dititipkan ke indeks.
+     *
+     * Aturannya "rentang tanggal bertindih", bukan "kolom sama", jadi tak ada
+     * indeks unik yang bisa menegakkannya — dan barisnya belum ada saat
+     * diperiksa, jadi tak ada apa pun untuk dipegang `FOR UPDATE`. Yang
+     * tersisa: mengunci atas nama ATURANNYA.
+     *
+     * Tanpa kunci ini dua permintaan bersamaan sama-sama membaca "belum ada"
+     * lalu sama-sama menyisipkan. TERUKUR di sini juga: 24 permintaan serentak
+     * dari satu kasir, lima ronde — dua di antaranya meninggalkan DUA baris
+     * hidup yang bertindih. Bukan kasus teoretis; ketukan ganda di ponsel dan
+     * kiriman ulang antrean offline persis sebentuk itu.
+     *
+     * Akibatnya di hilir bukan sekadar baris kembar. `absensi/routes.ts`
+     * menyusun rekapnya dengan `petaIzin.set(`${userId}|${tanggal}`, …)` atas
+     * kueri TANPA `ORDER BY`: dari dua baris yang bertindih, yang menang cuma
+     * yang kebetulan terbaca belakangan. Satu tanggal bisa terbaca "Sakit"
+     * hari ini dan "Cuti Tahunan" besok tanpa ada yang mengubah data — dan
+     * bila `jenis`-nya berbeda (cuti vs libur), hitungan harinya ikut berubah.
+     */
+    const baru = await db.transaction(async (tx) => {
+      await kunciAntrean(tx, "pengajuan", auth.company_id!, auth.sub);
+      const [bentrok] = await tx
+        .select({ id: leaveRequests.id, mulai: leaveRequests.tanggalMulai })
+        .from(leaveRequests)
+        .where(
+          and(
+            eq(leaveRequests.companyId, auth.company_id!),
+            eq(leaveRequests.userId, auth.sub),
+            inArray(leaveRequests.status, ["menunggu", "disetujui"]),
+            lte(leaveRequests.tanggalMulai, b.tanggal_selesai),
+            gte(leaveRequests.tanggalSelesai, b.tanggal_mulai),
+          ),
+        )
+        .limit(1);
+      if (bentrok) {
+        // Dilempar DARI DALAM transaksi: penolakan membatalkan seluruhnya, jadi
+        // tak ada baris separuh jadi, dan kuncinya lepas begitu rollback.
+        throw new HTTPException(409, {
+          message: "Sudah ada pengajuan Anda pada tanggal yang bertindih — batalkan dulu yang lama",
+        });
+      }
+      const [row] = await tx
+        .insert(leaveRequests)
+        .values({
+          companyId: auth.company_id!,
+          userId: auth.sub,
+          branchId: m?.branchId ?? null,
+          jenis: jenisKategori(b.kategori),
+          kategori: b.kategori,
+          tanggalMulai: b.tanggal_mulai,
+          tanggalSelesai: b.tanggal_selesai,
+          alasan: b.alasan?.trim() || null,
+          lampiranUrl: b.lampiran_url?.trim() || null,
+        })
+        .returning({ id: leaveRequests.id });
+      return row;
+    });
     return c.json(await ambilSatu(baru.id, auth.company_id!), 201);
   })
 

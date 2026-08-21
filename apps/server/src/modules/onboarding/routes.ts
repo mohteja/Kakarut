@@ -1,10 +1,12 @@
 import { zValidator } from "@hono/zod-validator";
-import { and, desc, eq, isNull, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, ne, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import type { OnboardingStatus, UndanganDto } from "@kakarut/shared";
 import { db } from "../../db/client";
+import { kunciAntrean } from "../../lib/kunci";
+import { bentrokUnikPada } from "../../lib/pg-galat";
 import { branches, companies, invitations, memberships, users } from "../../db/schema";
 import { requireAuth, verifikasiPassword, type AppEnv } from "../../middleware/auth";
 import { buatSesi } from "../auth/session";
@@ -82,11 +84,45 @@ export const onboardingRoutes = new Hono<AppEnv>()
       if (auth.is_super_admin) {
         throw new HTTPException(403, { message: "Super admin tidak membuat perusahaan sendiri" });
       }
-      const companyId = await db.transaction((tx) =>
-        buatPerusahaanUntuk(tx, { nama: c.req.valid("json").nama, userId: auth.sub }),
-      );
+      /*
+       * COBA ULANG bila slugnya keburu dipakai orang lain.
+       *
+       * `slugUnik` memilih slug dengan memeriksa dulu ("warung-kopi" bebas?"),
+       * dan pemeriksaan itu punya jeda sebelum tulisannya. Dua orang yang
+       * mendaftarkan usaha BERNAMA SAMA pada saat bersamaan sama-sama memilih
+       * slug dasar yang sama, lalu yang kalah menabrak `companies_slug_unique`.
+       * Terukur: tiga pendaftaran serentak bernama sama → 201, 500, 500.
+       *
+       * Yang benar di sini COBA ULANG, bukan 409 seperti `/admin/tenants`.
+       * Bedanya bukan gaya: di sana slug DIKETIK super admin, jadi bentrok
+       * adalah keputusan yang harus dia perbaiki. Di sini slugnya DIPILIHKAN
+       * sistem dan namanya sendiri memang boleh kembar — `slugUnik` sudah
+       * menjanjikan akhiran acak untuk itu. Menolak dengan 409 justru
+       * mengingkari janji itu, dan yang menerimanya orang yang BARU MENDAFTAR,
+       * pada tindakan pertamanya di aplikasi ini. "Warung Makan" bukan nama
+       * yang jarang.
+       *
+       * Percobaan kedua memanggil `slugUnik` lagi dari awal: slug dasarnya kini
+       * sudah terpakai oleh pemenang, jadi ia langsung turun ke akhiran acak.
+       *
+       * DITEMUKAN SAPUAN, BUKAN MATA: tiga pintu sekelas sudah dibereskan
+       * dengan tangan lebih dulu, dan yang ini terlewat sampai
+       * `penjaga-semua-pintu` menunjukkannya.
+       */
+      let companyId: string | undefined;
+      for (let percobaan = 0; percobaan < 3; percobaan += 1) {
+        try {
+          companyId = await db.transaction((tx) =>
+            buatPerusahaanUntuk(tx, { nama: c.req.valid("json").nama, userId: auth.sub }),
+          );
+          break;
+        } catch (e) {
+          if (percobaan < 2 && bentrokUnikPada(e, "companies_slug_unique")) continue;
+          throw e;
+        }
+      }
       const [user] = await db.select().from(users).where(eq(users.id, auth.sub));
-      return c.json(await buatSesi(user, companyId), 201);
+      return c.json(await buatSesi(user, companyId!), 201);
     },
   )
   // Terima undangan → jadi anggota perusahaan itu → sesi baru diarahkan ke sana.
@@ -160,40 +196,57 @@ export const onboardingRoutes = new Hono<AppEnv>()
     }
     await verifikasiPassword(auth.sub, c.req.valid("json").password);
 
-    // Owner terakhir? Cari perusahaan tempat pemanggil owner AKTIF; bila ada yang
-    // tak punya owner aktif lain → blokir dengan menyebut nama perusahaannya.
-    const ownerDi = await db
-      .select({ companyId: memberships.companyId, nama: companies.nama })
-      .from(memberships)
-      .innerJoin(companies, eq(memberships.companyId, companies.id))
-      .where(
-        and(
-          eq(memberships.userId, auth.sub),
-          eq(memberships.role, "owner"),
-          isNull(memberships.archivedAt),
-          eq(companies.isActive, true),
-        ),
-      );
-    for (const co of ownerDi) {
-      const [{ lain }] = await db
-        .select({ lain: sql<number>`count(*)::int` })
+    await db.transaction(async (tx) => {
+      /*
+       * OWNER TERAKHIR? Diperiksa DI DALAM transaksi ini, di belakang kunci.
+       *
+       * Bentuk lamanya memeriksa di luar, tanpa kunci. Dua owner perusahaan yang
+       * sama menghapus akunnya masing-masing pada saat bersamaan sama-sama
+       * melihat "masih ada owner lain", lalu keduanya menulis — perusahaan
+       * berakhir tanpa owner sama sekali, dan tak ada jalan keluar dari dalam
+       * aplikasi (mengangkat owner baru sendiri ber-`requireRole("owner")`).
+       * Kelas yang sama, dan kunci yang sama, dengan penjaga arsip di
+       * `karyawan/:userId` — lihat catatan panjang di sana untuk angkanya.
+       *
+       * DIURUTKAN BERDASARKAN companyId sebelum dikunci. Seorang bisa jadi owner
+       * di beberapa perusahaan; dua penghapusan yang mengunci perusahaan yang
+       * sama dengan URUTAN berbeda akan saling menunggu — deadlock yang
+       * dipulangkan Postgres sebagai 500. Urutan yang tetap menghapus
+       * kemungkinan itu seluruhnya.
+       */
+      const ownerDi = await tx
+        .select({ companyId: memberships.companyId, nama: companies.nama })
         .from(memberships)
+        .innerJoin(companies, eq(memberships.companyId, companies.id))
         .where(
           and(
-            eq(memberships.companyId, co.companyId),
+            eq(memberships.userId, auth.sub),
             eq(memberships.role, "owner"),
             isNull(memberships.archivedAt),
-            ne(memberships.userId, auth.sub),
+            eq(companies.isActive, true),
           ),
-        );
-      if (lain === 0) {
-        throw new HTTPException(400, {
-          message: `Anda owner terakhir "${co.nama}". Serahkan kepemilikan ke owner lain atau hapus perusahaan dulu sebelum menghapus akun.`,
-        });
+        )
+        .orderBy(asc(memberships.companyId));
+      for (const co of ownerDi) {
+        await kunciAntrean(tx, "owner", co.companyId);
+        const [{ lain }] = await tx
+          .select({ lain: sql<number>`count(*)::int` })
+          .from(memberships)
+          .where(
+            and(
+              eq(memberships.companyId, co.companyId),
+              eq(memberships.role, "owner"),
+              isNull(memberships.archivedAt),
+              ne(memberships.userId, auth.sub),
+            ),
+          );
+        if (lain === 0) {
+          throw new HTTPException(400, {
+            message: `Anda owner terakhir "${co.nama}". Serahkan kepemilikan ke owner lain atau hapus perusahaan dulu sebelum menghapus akun.`,
+          });
+        }
       }
-    }
 
-    await db.transaction(async (tx) => {
       // arsipkan semua keanggotaan (keluar dari perusahaan, riwayat tetap)
       await tx
         .update(memberships)

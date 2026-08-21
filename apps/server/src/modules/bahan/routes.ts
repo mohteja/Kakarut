@@ -15,6 +15,8 @@ import {
   type RiwayatHargaDto,
   type RiwayatHargaLot,
 } from "@kakarut/shared";
+import { kunciAntrean } from "../../lib/kunci";
+import { bentrokUnikPada, tanpaBentrok } from "../../lib/pg-galat";
 import { db } from "../../db/client";
 import {
   branches,
@@ -453,6 +455,7 @@ async function riwayatHargaBahan(
       tanggal: productions.prodDate,
       qty: productions.qty,
       totalHarga: productions.totalHarga,
+      hargaTebakan: productions.hargaTebakan,
       supplier: suppliers.nama,
       noFaktur: productions.noFaktur,
       nomor: dokumenNomor.nomorTeks,
@@ -486,16 +489,8 @@ async function riwayatHargaBahan(
     supplier: r.supplier,
     no_faktur: r.noFaktur,
     nomor: r.nomor,
+    harga_tebakan: r.hargaTebakan,
   }));
-  // rata-rata TERTIMBANG per satuan dari lot yang harganya sudah dilaporkan
-  let sumHarga = 0;
-  let sumQty = 0;
-  for (const r of rows) {
-    if (r.totalHarga != null && r.qty > 0) {
-      sumHarga += r.totalHarga;
-      sumQty += r.qty;
-    }
-  }
   return {
     item: {
       id: ing.id,
@@ -505,7 +500,10 @@ async function riwayatHargaBahan(
       satuan_beli: ing.satuanBeli,
     },
     harga_terkini: hargaPerUnit(ing.hargaBeli, ing.isi),
-    harga_rata: sumQty > 0 ? Math.round((sumHarga / sumQty) * 100) / 100 : null,
+    // Keempat angka statistik (termasuk rata-rata tertimbang) datang dari SATU
+    // tempat, dan tempat itu yang mengeluarkan lot tebakan — lihat catatan di
+    // `statistikHargaLots`. Menghitung salah satunya di sini lagi persis
+    // kesalahan yang baru saja dicabut.
     ...statistikHargaLots(lots),
     jumlah_pembelian: lots.length,
     lots,
@@ -626,36 +624,54 @@ export const bahanRoutes = new Hono<AppEnv>()
       return c.json(toDto(row, undefined, [], produsenIds), 200);
     }
     const kode = await resolveKodeBahan(db, auth.company_id!, body.kode, body.nama);
-    const [row] = await db
-      .insert(ingredients)
-      .values({
-        companyId: auth.company_id!,
-        slug,
-        kode,
-        nama: body.nama,
-        hargaBeli: body.harga_beli,
-        isi: body.isi,
-        satuan: body.satuan,
-        satuanBeli: body.satuan_beli ?? null,
-        trackStok: body.track_stok,
-        stokMinimum: body.stok_minimum,
-        stokMinimumToko: body.stok_minimum_toko,
-        overheadX: body.overhead_x,
-        kategori: kanonikKategori(kmap, body.kategori),
-        pengadaan: body.pengadaan,
-        produksiDi: body.produksi_di,
-        divisiProduksi: body.divisi_produksi,
-        catatan: body.catatan ?? null,
-        isPackaging: body.is_packaging,
-        isComplement: body.is_complement,
-        bolehEceran: body.boleh_eceran,
-        minBeli: body.min_beli,
-        masaSimpanHari: body.masa_simpan_hari,
-        leadTimeHari: body.lead_time_hari,
-        fotoHasilUrl: body.foto_hasil_url ?? null,
-        fotoPackingUrl: body.foto_packing_url ?? null,
-      })
-      .returning();
+    /*
+     * Pra-cek slug di atas punya jeda sebelum tulisannya; yang benar-benar
+     * menjaga keunikan `ingredients_company_slug_uq`. Dua owner yang menambahkan
+     * bahan bernama sama pada saat bersamaan membuat yang KALAH menabrak indeks
+     * itu — 23505 mentah alias 500. Terukur, empat permintaan serentak:
+     * 201, 409, 409, dan 500.
+     *
+     * Pesannya sengaja TANPA petunjuk lokasi `(ada di daftar Bahan Baku)` yang
+     * dipakai jalur berurutan: petunjuk itu diturunkan dari `existing.pengadaan`,
+     * dan di jalur balapan barisnya baru saja ditulis proses lain — membacanya
+     * ulang hanya untuk memperindah pesan menambah kueri pada jalur galat tanpa
+     * mengubah apa yang harus dilakukan pemakainya (pilih nama lain).
+     */
+    const [row] = await tanpaBentrok(
+      `Bahan "${body.nama}" sudah ada`,
+      () =>
+        db
+          .insert(ingredients)
+          .values({
+            companyId: auth.company_id!,
+            slug,
+            kode,
+            nama: body.nama,
+            hargaBeli: body.harga_beli,
+            isi: body.isi,
+            satuan: body.satuan,
+            satuanBeli: body.satuan_beli ?? null,
+            trackStok: body.track_stok,
+            stokMinimum: body.stok_minimum,
+            stokMinimumToko: body.stok_minimum_toko,
+            overheadX: body.overhead_x,
+            kategori: kanonikKategori(kmap, body.kategori),
+            pengadaan: body.pengadaan,
+            produksiDi: body.produksi_di,
+            divisiProduksi: body.divisi_produksi,
+            catatan: body.catatan ?? null,
+            isPackaging: body.is_packaging,
+            isComplement: body.is_complement,
+            bolehEceran: body.boleh_eceran,
+            minBeli: body.min_beli,
+            masaSimpanHari: body.masa_simpan_hari,
+            leadTimeHari: body.lead_time_hari,
+            fotoHasilUrl: body.foto_hasil_url ?? null,
+            fotoPackingUrl: body.foto_packing_url ?? null,
+          })
+          .returning(),
+      "ingredients_company_slug_uq",
+    );
     await simpanCabangProdusen(row.id, produsenIds);
     return c.json(toDto(row, undefined, [], produsenIds), 201);
   })
@@ -667,47 +683,74 @@ export const bahanRoutes = new Hono<AppEnv>()
   .post("/bulk", requireRole("owner", "admin"), zValidator("json", BahanBulkBody), async (c) => {
     const auth = c.get("auth");
     const { items } = c.req.valid("json");
-    const existing = await db
-      .select({ slug: ingredients.slug })
-      .from(ingredients)
-      .where(eq(ingredients.companyId, auth.company_id!));
-    const slugDipakai = new Set(existing.map((r) => r.slug.toLowerCase()));
-    const slugUnik = (nama: string): string => {
-      const base = nama.toLowerCase().trim().replace(/\s+/g, " ") || "bahan";
-      let s = base;
-      let n = 2;
-      while (slugDipakai.has(s.toLowerCase())) s = `${base} ${n++}`;
-      slugDipakai.add(s.toLowerCase());
-      return s;
-    };
-    const kodes = await resolveKodeBahanBatch(db, auth.company_id!, items);
-    const kmap = await kategoriKanonikMap(db, auth.company_id!);
-    const rows = await db
-      .insert(ingredients)
-      .values(
-        items.map((b, i) => ({
-          companyId: auth.company_id!,
-          slug: slugUnik(b.nama),
-          kode: kodes[i],
-          nama: b.nama,
-          hargaBeli: b.harga_beli,
-          isi: b.isi,
-          satuan: b.satuan,
-          satuanBeli: b.satuan_beli ?? null,
-          trackStok: b.track_stok,
-          stokMinimum: b.stok_minimum,
-          kategori: kanonikKategori(kmap, b.kategori),
-          pengadaan: "beli" as const,
-          bolehEceran: b.boleh_eceran,
-          minBeli: b.min_beli,
-          masaSimpanHari: b.masa_simpan_hari,
-          leadTimeHari: b.lead_time_hari,
-          isPackaging: b.is_packaging,
-          isComplement: b.is_complement,
-          catatan: b.catatan ?? null,
-        })),
-      )
-      .returning();
+    const companyId = auth.company_id!;
+    /*
+     * SELURUHNYA di dalam satu transaksi, dan KUNCI diambil lebih dulu.
+     *
+     * `slugUnik` bukan pemeriksa, melainkan PENGALOKASI: ia membaca slug yang
+     * terpakai lalu memilih yang berikutnya bebas ("kecap manis" dipakai →
+     * "kecap manis 2"). Membaca-lalu-mengalokasi hanya benar bila tak ada yang
+     * menyisip di antaranya — dan sebelum ini tak ada yang mencegah itu.
+     *
+     * Dua impor massal serentak yang memuat nama sama sama-sama membaca
+     * "belum terpakai", sama-sama memilih slug yang sama, lalu yang kalah
+     * menabrak `ingredients_company_slug_uq`. Terukur, empat permintaan
+     * serentak: 201, 201, 500, 500 — sama di tiga ronde berturut-turut.
+     *
+     * Kerugiannya bukan cuma kode status. Berurutan, keempatnya SEHARUSNYA
+     * berhasil dengan slug "x", "x 2", "x 3", "x 4"; yang terjadi dua impor
+     * gagal seluruhnya. Menerjemahkan 23505 jadi 409 tak menolong di sini —
+     * jawaban yang benar bukan "sudah ada", melainkan nama berikutnya.
+     *
+     * Karena itu kuncinya diambil atas NAMA aturan ("alokasi slug bahan milik
+     * perusahaan ini"), bukan atas nama baris: baris yang diperebutkan belum
+     * ada saat dibaca, jadi tak ada yang bisa dipegang `FOR UPDATE`.
+     * INSERT-nya satu pernyataan, jadi transaksinya tetap pendek.
+     */
+    const rows = await db.transaction(async (tx) => {
+      await kunciAntrean(tx, "bahan-slug", companyId);
+      const existing = await tx
+        .select({ slug: ingredients.slug })
+        .from(ingredients)
+        .where(eq(ingredients.companyId, companyId));
+      const slugDipakai = new Set(existing.map((r) => r.slug.toLowerCase()));
+      const slugUnik = (nama: string): string => {
+        const base = nama.toLowerCase().trim().replace(/\s+/g, " ") || "bahan";
+        let s = base;
+        let n = 2;
+        while (slugDipakai.has(s.toLowerCase())) s = `${base} ${n++}`;
+        slugDipakai.add(s.toLowerCase());
+        return s;
+      };
+      const kodes = await resolveKodeBahanBatch(tx, companyId, items);
+      const kmap = await kategoriKanonikMap(tx, companyId);
+      return tx
+        .insert(ingredients)
+        .values(
+          items.map((b, i) => ({
+            companyId,
+            slug: slugUnik(b.nama),
+            kode: kodes[i],
+            nama: b.nama,
+            hargaBeli: b.harga_beli,
+            isi: b.isi,
+            satuan: b.satuan,
+            satuanBeli: b.satuan_beli ?? null,
+            trackStok: b.track_stok,
+            stokMinimum: b.stok_minimum,
+            kategori: kanonikKategori(kmap, b.kategori),
+            pengadaan: "beli" as const,
+            bolehEceran: b.boleh_eceran,
+            minBeli: b.min_beli,
+            masaSimpanHari: b.masa_simpan_hari,
+            leadTimeHari: b.lead_time_hari,
+            isPackaging: b.is_packaging,
+            isComplement: b.is_complement,
+            catatan: b.catatan ?? null,
+          })),
+        )
+        .returning();
+    });
     return c.json({ jumlah: rows.length, bahan: rows.map((r) => toDto(r)) }, 201);
   })
   /**
@@ -800,35 +843,49 @@ export const bahanRoutes = new Hono<AppEnv>()
       insertBaris.map((x) => ({ nama: x.item.nama, kode: x.item.kode })),
     );
 
+    /*
+     * Satu rumah untuk "terapkan baris CSV ke bahan yang SUDAH ada". Dipakai
+     * dua kali: oleh gelung perbarui/pulihkan di bawah, dan oleh jalur balapan
+     * di gelung sisip — baris yang ternyata sudah diciptakan proses lain.
+     * Disatukan supaya kolom yang kelak ditambahkan ke impor tak bisa terpasang
+     * di satu jalur saja.
+     */
+    const terapkanKeBarisAda = async (
+      id: string,
+      b: (typeof items)[number],
+      pulih: boolean,
+    ): Promise<void> => {
+      await db
+        .update(ingredients)
+        .set({
+          nama: b.nama,
+          // Hanya kolom yang BENAR-BENAR dikirim yang ditulis. `undefined`
+          // di sini bukan "kosongkan", melainkan "berkas ini tak bicara
+          // soal kolom itu" — lihat komentar `BahanImportRowBody`.
+          ...(b.kategori !== undefined && { kategori: kanonikKategori(kmap, b.kategori) }),
+          ...(b.harga_beli !== undefined && { hargaBeli: b.harga_beli }),
+          ...(b.isi !== undefined && { isi: b.isi }),
+          ...(b.satuan !== undefined && { satuan: b.satuan }),
+          ...(b.satuan_beli !== undefined && { satuanBeli: b.satuan_beli ?? null }),
+          ...(b.stok_minimum !== undefined && { stokMinimum: b.stok_minimum }),
+          ...(b.min_beli !== undefined && { minBeli: b.min_beli }),
+          ...(b.masa_simpan_hari !== undefined && { masaSimpanHari: b.masa_simpan_hari }),
+          ...(b.lead_time_hari !== undefined && { leadTimeHari: b.lead_time_hari }),
+          ...(b.boleh_eceran !== undefined && { bolehEceran: b.boleh_eceran }),
+          ...(b.lacak_stok !== undefined && { trackStok: b.lacak_stok }),
+          ...(b.kemasan !== undefined && { isPackaging: b.kemasan }),
+          ...(b.complement !== undefined && { isComplement: b.complement }),
+          ...(b.catatan !== undefined && { catatan: b.catatan ?? null }),
+          // baris pulih: aktifkan kembali dari Tempat Sampah
+          ...(pulih && { isActive: true }),
+          updatedAt: new Date(),
+        })
+        .where(and(eq(ingredients.id, id), eq(ingredients.companyId, companyId)));
+    };
+
     for (const u of updateBaris) {
       try {
-        const b = u.item;
-        await db
-          .update(ingredients)
-          .set({
-            nama: b.nama,
-            // Hanya kolom yang BENAR-BENAR dikirim yang ditulis. `undefined`
-            // di sini bukan "kosongkan", melainkan "berkas ini tak bicara
-            // soal kolom itu" — lihat komentar `BahanImportRowBody`.
-            ...(b.kategori !== undefined && { kategori: kanonikKategori(kmap, b.kategori) }),
-            ...(b.harga_beli !== undefined && { hargaBeli: b.harga_beli }),
-            ...(b.isi !== undefined && { isi: b.isi }),
-            ...(b.satuan !== undefined && { satuan: b.satuan }),
-            ...(b.satuan_beli !== undefined && { satuanBeli: b.satuan_beli ?? null }),
-            ...(b.stok_minimum !== undefined && { stokMinimum: b.stok_minimum }),
-            ...(b.min_beli !== undefined && { minBeli: b.min_beli }),
-            ...(b.masa_simpan_hari !== undefined && { masaSimpanHari: b.masa_simpan_hari }),
-            ...(b.lead_time_hari !== undefined && { leadTimeHari: b.lead_time_hari }),
-            ...(b.boleh_eceran !== undefined && { bolehEceran: b.boleh_eceran }),
-            ...(b.lacak_stok !== undefined && { trackStok: b.lacak_stok }),
-            ...(b.kemasan !== undefined && { isPackaging: b.kemasan }),
-            ...(b.complement !== undefined && { isComplement: b.complement }),
-            ...(b.catatan !== undefined && { catatan: b.catatan ?? null }),
-            // baris pulih: aktifkan kembali dari Tempat Sampah
-            ...(u.pulih && { isActive: true }),
-            updatedAt: new Date(),
-          })
-          .where(and(eq(ingredients.id, u.id), eq(ingredients.companyId, companyId)));
+        await terapkanKeBarisAda(u.id, u.item, u.pulih);
         if (u.pulih) dipulihkan++;
         else diperbarui++;
       } catch (e) {
@@ -864,6 +921,45 @@ export const bahanRoutes = new Hono<AppEnv>()
         });
         ditambah++;
       } catch (e) {
+        /*
+         * Klasifikasi di atas ("baris ini belum ada → sisipkan") dibaca sebelum
+         * gelung ini menulis, jadi ia bisa BASI: impor lain yang berjalan
+         * bersamaan sudah menciptakan slug yang sama di sela itu.
+         *
+         * Sebelum ini, akibatnya dilaporkan sebagai KEGAGALAN — dan pesannya
+         * `(e as Error).message` mentah dari driver, yaitu seluruh teks kueri
+         * INSERT beserta daftar kolomnya, dikirim apa adanya ke klien. Yang
+         * mengimpor daftar harga supplier melihat dump SQL, bukan "sudah ada".
+         *
+         * Yang benar bukan melaporkan gagal, melainkan mengklasifikasi ULANG
+         * baris itu dengan data yang kini benar — persis yang akan terjadi
+         * seandainya kedua impor berjalan berurutan:
+         *   · mode "tambah"   → baris yang sudah ada memang DILEWATI;
+         *   · mode "perbarui" → nilainya diterapkan ke baris yang sudah ada.
+         * Tanpa cabang kedua itu, satu baris CSV hilang tanpa jejak di mode
+         * yang justru dipakai untuk memperbarui harga.
+         */
+        if (bentrokUnikPada(e, "ingredients_company_slug_uq")) {
+          const [kini] = await db
+            .select({ id: ingredients.id, isActive: ingredients.isActive })
+            .from(ingredients)
+            .where(and(eq(ingredients.companyId, companyId), eq(ingredients.slug, slug)));
+          if (kini) {
+            if (mode === "tambah") {
+              dilewati++;
+              continue;
+            }
+            try {
+              await terapkanKeBarisAda(kini.id, b, !kini.isActive);
+              if (kini.isActive) diperbarui++;
+              else dipulihkan++;
+              continue;
+            } catch (e2) {
+              gagal.push({ nama: b.nama, alasan: (e2 as Error)?.message ?? "gagal diperbarui" });
+              continue;
+            }
+          }
+        }
         gagal.push({ nama: b.nama, alasan: (e as Error)?.message ?? "gagal ditambah" });
       }
     }
@@ -1091,6 +1187,41 @@ export const bahanRoutes = new Hono<AppEnv>()
         if (utama === 0) byId.set(supplierIds[0], true);
       }
       await db.transaction(async (tx) => {
+        /*
+         * KUNCI BARIS INDUKNYA, dan itu yang menyerialkan penulisan ini.
+         *
+         * "Ganti seluruh daftar" = HAPUS lalu SISIP. Saat daftarnya masih
+         * kosong, HAPUS tak memegang baris apa pun — jadi dua permintaan
+         * bersamaan sama-sama lolos ke SISIP dan menabrak
+         * `ingredient_suppliers_pair_uq` (juga `..._utama_uq`). Yang kalah
+         * menerima 23505 mentah alias 500. Terukur, empat PUT serentak
+         * BERBADAN SAMA: 200, 200, 500, 500 — tiga ronde berturut-turut.
+         *
+         * Perhatikan permintaannya IDEMPOTEN: badan yang sama persis. Yang
+         * memicunya di lapangan bukan dua admin, cukup satu klik ganda pada
+         * tombol Simpan.
+         *
+         * Kenapa `FOR UPDATE` dan bukan kunci antrean: di sini ADA baris induk
+         * yang nyata untuk dipegang, dan mengunci per-bahan tak menghalangi
+         * bahan lain. (Bandingkan `petugas-tempat`, yang ditulis dari dua arah
+         * tegak lurus sehingga tak punya induk bersama.) Ini juga idiom yang
+         * sudah dipakai `PUT /bahan/:id/resep` di berkas yang sama.
+         *
+         * Sekalian menutup TOCTOU-nya: `pengadaan` diperiksa di luar transaksi,
+         * dan `PUT /bahan/:id` bisa membaliknya ke "produksi" di sela itu —
+         * meninggalkan baris supplier pada bahan yang tak boleh punya supplier.
+         * Pemeriksaan yang sama di jalur resep memakai arah sebaliknya.
+         */
+        const [indukTx] = await tx
+          .select({ pengadaan: ingredients.pengadaan })
+          .from(ingredients)
+          .where(and(eq(ingredients.id, id), eq(ingredients.companyId, auth.company_id!)))
+          .for("update");
+        if (indukTx?.pengadaan === "produksi") {
+          throw new HTTPException(409, {
+            message: "Jenis pengadaan bahan berubah — muat ulang lalu coba lagi",
+          });
+        }
         await tx
           .delete(ingredientSuppliers)
           .where(

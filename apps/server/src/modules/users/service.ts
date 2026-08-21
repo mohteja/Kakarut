@@ -2,6 +2,7 @@ import { randomInt } from "node:crypto";
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { Db, Tx } from "../../db/client";
 import { memberships, users } from "../../db/schema";
+import { bentrokUnikPada } from "../../lib/pg-galat";
 
 /** Kode karyawan = 8 digit acak (numerik). Mudah diketik di numpad saat absen & unik per perusahaan. */
 const FORMAT_KODE_KARYAWAN = /^\d{8}$/;
@@ -94,8 +95,5 @@ export async function arsipkanMembershipNonaktif(dbx: Db | Tx): Promise<number> 
 
 /** Deteksi bentrok unik kode karyawan (untuk retry pembuatan karyawan). */
 export function isKodeKaryawanConflict(e: unknown): boolean {
-  const err = e as { code?: string; constraint?: string; cause?: { code?: string; constraint?: string } };
-  const code = err?.code ?? err?.cause?.code;
-  const constraint = err?.constraint ?? err?.cause?.constraint ?? "";
-  return code === "23505" && constraint.includes("memberships_company_kode_uq");
+  return bentrokUnikPada(e, "memberships_company_kode_uq");
 }

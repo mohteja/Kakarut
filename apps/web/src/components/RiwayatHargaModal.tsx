@@ -44,6 +44,11 @@ export function RiwayatHargaPanel({
     data != null && (isi !== 1 || (data.item.satuan_beli?.trim() ?? "") !== "");
   const perIsi = (harga: number) => `${formatRupiah(Math.round(harga * isi))} / ${kemasan}`;
   const pakaiBasisIsi = basisIsi ?? adaKemasan;
+  // Lot berharga PERKIRAAN: faktur dibuat tanpa harga, server mengisinya dari
+  // harga acuan saat itu. Server sudah mengeluarkannya dari statistik; layar
+  // yang bertugas membuatnya terlihat, sebab barisnya tetap ditampilkan.
+  const jumlahNyata = data?.jumlah_harga_nyata ?? 0;
+  const adaTebakan = (data?.lots ?? []).some((l) => l.harga_tebakan);
 
   const simpan = useMutation({
     mutationFn: () =>
@@ -148,6 +153,20 @@ export function RiwayatHargaPanel({
         Harga</b>. Harga acuan itulah dasar HPP resep &amp; laba-rugi. Harga riil tiap
         pembelian tetap tercatat per lot dan dipakai kartu persediaan bahan.
       </p>
+      {/*
+        Keempat angka di atas dihitung HANYA dari harga yang pernah dilihat
+        orang. Jumlahnya disebutkan supaya selisihnya dengan "lot tercatat"
+        punya penjelasan di layar — tanpa ini, 7 lot dengan statistik dari 1
+        harga terbaca seperti angka yang salah.
+      */}
+      {adaTebakan && (
+        <p className="text-xs text-amber-700">
+          {data.jumlah_pembelian - jumlahNyata} lot berharga <b>perkiraan</b> (faktur dibuat
+          tanpa harga, diisi dari harga acuan saat itu) — ditandai <b>≈</b> di daftar dan
+          TIDAK ikut menghitung statistik di atas. Statistiknya dari {jumlahNyata} harga yang
+          benar-benar dilaporkan. Isi harga aslinya lewat <b>Laporan Harga</b>.
+        </p>
+      )}
 
       {data.lots.length === 0 ? (
         <div className="rounded-lg bg-stone-50 px-3 py-6 text-center text-sm text-stone-400">
@@ -177,8 +196,19 @@ export function RiwayatHargaPanel({
                   <td className="px-2 py-1.5 text-right text-stone-600">
                     {formatAngka(l.qty)}
                   </td>
-                  <td className="px-2 py-1.5 text-right font-medium text-stone-800">
-                    {l.harga_satuan != null ? formatRupiah(l.harga_satuan) : "—"}
+                  <td
+                    className={`px-2 py-1.5 text-right font-medium ${
+                      l.harga_tebakan ? "text-amber-700" : "text-stone-800"
+                    }`}
+                  >
+                    {l.harga_satuan != null ? (
+                      <span title={l.harga_tebakan ? "Harga perkiraan — belum dilaporkan" : undefined}>
+                        {l.harga_tebakan && "≈ "}
+                        {formatRupiah(l.harga_satuan)}
+                      </span>
+                    ) : (
+                      "—"
+                    )}
                     {adaKemasan && l.harga_satuan != null && (
                       <div className="text-[10px] font-normal text-stone-500">
                         {perIsi(l.harga_satuan)}

@@ -7,6 +7,7 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { env } from "../../config/env";
 import { appBaseUrl } from "../../lib/base-url";
+import { bentrokUnikPada } from "../../lib/pg-galat";
 import { db } from "../../db/client";
 import {
   branches,
@@ -221,14 +222,35 @@ export const authRoutes = new Hono<AppEnv>()
     let devUrl: string | undefined;
     if (!existing) {
       const passwordHash = bcrypt.hashSync(password, 10);
-      const user = await db.transaction(async (tx) => {
-        const [u] = await tx.insert(users).values({ email, passwordHash, nama }).returning();
-        // Auto-join bila ada undangan pending untuk email ini (keanggotaan aktif
-        // begitu email diverifikasi & user login).
-        await autoTerimaUndanganEmail(tx, u.id, email);
-        return u;
-      });
-      devUrl = await kirimTautanVerifikasi(user.id, email, nama, appBaseUrl(c));
+      /*
+       * Balapan pendaftaran: dua permintaan beremail sama sama-sama melihat
+       * "belum ada", lalu yang kalah menabrak `users_email_unique`.
+       *
+       * DI SINI TERJEMAHANNYA BUKAN 409 — dan itu justru intinya. Endpoint ini
+       * sengaja membalas NETRAL & IDENTIK untuk email baru maupun yang sudah
+       * terdaftar (lihat catatan di bawah), supaya tak ada cara menebak akun
+       * mana yang ada. Membalas 409 di jalur balapan akan membuka kembali
+       * celah enumerasi yang ditutup dengan susah payah: penyerang tinggal
+       * mengirim dua permintaan sekaligus dan membaca bedanya.
+       *
+       * Sebelum ini jawabannya 500 — yang juga membocorkan hal yang sama, cuma
+       * dengan angka lain. Yang benar: perlakukan seperti "ternyata sudah ada",
+       * yaitu persis cabang `existing` di atas — tak menulis apa pun, tak
+       * mengirim email, dan membalas kalimat yang sama.
+       */
+      const user = await db
+        .transaction(async (tx) => {
+          const [u] = await tx.insert(users).values({ email, passwordHash, nama }).returning();
+          // Auto-join bila ada undangan pending untuk email ini (keanggotaan aktif
+          // begitu email diverifikasi & user login).
+          await autoTerimaUndanganEmail(tx, u.id, email);
+          return u;
+        })
+        .catch((e: unknown) => {
+          if (bentrokUnikPada(e, "users_email_unique")) return null;
+          throw e;
+        });
+      if (user) devUrl = await kirimTautanVerifikasi(user.id, email, nama, appBaseUrl(c));
     }
     // Respons NETRAL & IDENTIK untuk email baru maupun yang sudah terdaftar →
     // menutup total celah enumerasi akun (di produksi dev_verify_url tak pernah

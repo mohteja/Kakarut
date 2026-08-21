@@ -58,7 +58,7 @@ jobs:
         run: npm run build -w @kakarut/web
 
   verify-api:
-    name: Verify API end-to-end (DB segar)
+    name: Verify API + E2E web (DB segar)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     services:
@@ -105,6 +105,32 @@ jobs:
           curl -sf http://localhost:3000/api/health
           npm run seed
           bash scripts/verify-api.sh
+      # ─────────────────────────────────────────────────────────────────────
+      # E2E WEB — di job yang SAMA, dan itu disengaja.
+      #
+      # Suite Playwright butuh persis lingkungan yang sudah berdiri di sini:
+      # server hidup + database ter-seed + SPA ter-build. Job sendiri berarti
+      # Postgres kedua, `npm ci` kedua, dan build web kedua — biaya menit
+      # Actions yang justru ditekan di berkas ini (lihat catatan di kepala).
+      #
+      # SESUDAH verify-api, bukan sebelum: verify-api menuntut cacah yang
+      # PERSIS (mis. "jumlah menu = 57", saldo stok tertentu), jadi menjalankan
+      # e2e lebih dulu — yang membuat dua penjualan sungguhan — akan
+      # menggesernya. Sebaliknya tidak: spec e2e sudah dibuat tahan terhadap
+      # keadaan sisa (mejanya dikosongkan sendiri, shift dibuka hanya bila
+      # belum terbuka).
+      #
+      # KENAPA BARU SEKARANG: suite ini sudah ada di repo tapi TAK PERNAH
+      # dijalankan CI, dan karena itu membusuk tanpa ada yang tahu — 4 dari 5
+      # spec merah karena layarnya berubah (kasir kini wajib absen + buka
+      # shift, checkout jadi dua langkah, struk dirender portal cetak).
+      # Uji yang tak pernah dijalankan bukan jaring pengaman, cuma berkas.
+      - name: Pasang Chromium untuk Playwright
+        run: npx playwright install --with-deps chromium
+        working-directory: apps/web
+      - name: E2E web (Playwright)
+        run: npx playwright test
+        working-directory: apps/web
       - name: Log server bila gagal
         if: failure()
         run: tail -n 200 /tmp/server.log || true

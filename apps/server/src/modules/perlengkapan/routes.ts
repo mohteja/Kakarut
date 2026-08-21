@@ -27,6 +27,7 @@ import {
   terikatCabang,
   type AppEnv,
 } from "../../middleware/auth";
+import { kunciAntrean } from "../../lib/kunci";
 import { tanpaBentrok } from "../../lib/pg-galat";
 import { terbitkanNomor } from "../dokumen/nomor";
 import {
@@ -143,15 +144,11 @@ async function riwayatHargaPerlengkapan(
     supplier: null,
     no_faktur: null,
     nomor: r.nomor,
+    // `supply_mutations` tak punya jalur harga tebakan — tak ada padanan
+    // `hargaDefault()` di sini, jadi tiap harga yang ada memang diketik orang.
+    // Yang kosong tetap dilewati `statistikHargaLots` seperti sebelumnya.
+    harga_tebakan: false,
   }));
-  let sumHarga = 0;
-  let sumQty = 0;
-  for (const r of rows) {
-    if (r.totalHarga != null && r.qty > 0) {
-      sumHarga += r.totalHarga;
-      sumQty += r.qty;
-    }
-  }
   return {
     // perlengkapan tak berkemasan: isi 1, harga per satuan = harga beli
     item: {
@@ -162,7 +159,6 @@ async function riwayatHargaPerlengkapan(
       satuan_beli: null,
     },
     harga_terkini: item.hargaBeli,
-    harga_rata: sumQty > 0 ? Math.round((sumHarga / sumQty) * 100) / 100 : null,
     ...statistikHargaLots(lots),
     jumlah_pembelian: lots.length,
     lots,
@@ -741,20 +737,38 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
           .returning();
         return c.json({ id: row.id, nama: row.nama, dipulihkan: true }, 201);
       }
-      const [row] = await db
-        .insert(supplies)
-        .values({
-          companyId: auth.company_id!,
-          nama: body.nama,
-          satuan: body.satuan,
-          hargaBeli: body.harga_beli,
-          stokMinimum: body.stok_minimum,
-          catatan: body.catatan ?? null,
-          kategori: body.kategori ?? null,
-          bolehEceran: body.boleh_eceran,
-          dilacak: body.dilacak,
-        })
-        .returning();
+      /*
+       * Pra-cek nama di atas punya jeda sebelum tulisannya; yang benar-benar
+       * menjaga keunikan `supplies_company_nama_uq`. Dua owner yang menambahkan
+       * perlengkapan bernama sama pada saat bersamaan membuat yang KALAH
+       * menabrak indeks itu — 23505 mentah alias 500. Terukur, empat permintaan
+       * serentak: 201, 409, 409, dan 500.
+       *
+       * Pesannya memakai `body.nama` apa adanya, sedangkan jalur berurutan
+       * menyebut nama dengan HURUF yang tersimpan (`ada.nama`) — pencocokannya
+       * case-insensitive, jadi keduanya bisa berbeda besar-kecilnya. Bedanya
+       * dibiarkan: menyamakannya menuntut satu SELECT lagi pada jalur galat,
+       * dan yang harus dilakukan pemakainya sama saja (pilih nama lain).
+       */
+      const [row] = await tanpaBentrok(
+        `Perlengkapan "${body.nama}" sudah ada`,
+        () =>
+          db
+            .insert(supplies)
+            .values({
+              companyId: auth.company_id!,
+              nama: body.nama,
+              satuan: body.satuan,
+              hargaBeli: body.harga_beli,
+              stokMinimum: body.stok_minimum,
+              catatan: body.catatan ?? null,
+              kategori: body.kategori ?? null,
+              bolehEceran: body.boleh_eceran,
+              dilacak: body.dilacak,
+            })
+            .returning(),
+        "supplies_company_nama_uq",
+      );
       return c.json({ id: row.id, nama: row.nama, dipulihkan: false }, 201);
     },
   )
@@ -884,6 +898,17 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
         if (utama === 0) byId.set(supplierIds[0], true);
       }
       await db.transaction(async (tx) => {
+        // Kunci baris induknya lebih dulu. "Ganti seluruh daftar" = HAPUS lalu
+        // SISIP, dan saat daftarnya masih kosong HAPUS tak memegang baris apa
+        // pun — dua permintaan bersamaan sama-sama lolos ke SISIP dan menabrak
+        // `supply_suppliers_pair_uq`. Terukur, empat PUT BERBADAN SAMA:
+        // 200, 200, 500, 500 (tiga ronde). Cukup satu klik ganda pada tombol
+        // Simpan. Alasan lengkapnya di jalur kembarnya, `PUT /bahan/:id/supplier`.
+        await tx
+          .select({ id: supplies.id })
+          .from(supplies)
+          .where(and(eq(supplies.id, item.id), eq(supplies.companyId, auth.company_id!)))
+          .for("update");
         await tx
           .delete(supplySuppliers)
           .where(
@@ -1045,24 +1070,45 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
      * stok awal, dan koreksi fisik. Bedanya cuma pertanyaannya: yang itu
      * "berapa yang ada", yang ini "boleh dipakai berapa" — jawabannya satu.
      */
-    const saldo =
-      (await saldoDiRakPerlengkapan(db, auth.company_id!, branchId, [item.id])).get(item.id) ?? 0;
-    if (body.qty > saldo) {
-      throw new HTTPException(400, {
-        message: `Stok tidak cukup (saldo ${saldo} ${item.satuan})`,
+    /*
+     * BACA DAN TULIS DALAM SATU TRANSAKSI BERKUNCI.
+     *
+     * Penjaga di bawah ("qty > saldo → 400") sudah benar isinya; yang bocor
+     * penegakannya. Bacanya memakai `db` dan tulisannya pernyataan TERPISAH,
+     * jadi dua pemakaian bersamaan sama-sama membaca saldo yang sama, sama-sama
+     * lolos, lalu sama-sama menulis.
+     *
+     * Terukur: saldo 10, enam `pakai 10` serentak → TIGA dibalas 200 dan saldo
+     * jatuh ke −20 (dua dari tiga ronde; ronde ketiga kebetulan berurutan).
+     * Yang menerima "Stok tidak cukup" justru sebagian permintaan, jadi dari
+     * layar tampak berfungsi — yang lolos itulah yang menarik stok ke minus.
+     *
+     * Kuncinya per (perusahaan, cabang, item): dua item berbeda tak saling
+     * menunggu, dan cabang berbeda pun tidak.
+     */
+    const tanggal = await tanggalPerusahaan(auth.company_id!);
+    const sisa = await db.transaction(async (tx) => {
+      await kunciAntrean(tx, "stok-perlengkapan", auth.company_id!, branchId, item.id);
+      const saldo =
+        (await saldoDiRakPerlengkapan(tx, auth.company_id!, branchId, [item.id])).get(item.id) ?? 0;
+      if (body.qty > saldo) {
+        throw new HTTPException(400, {
+          message: `Stok tidak cukup (saldo ${saldo} ${item.satuan})`,
+        });
+      }
+      await tx.insert(supplyMutations).values({
+        companyId: auth.company_id!,
+        branchId,
+        supplyId: item.id,
+        tipe: "pakai",
+        qty: -body.qty,
+        tanggal,
+        catatan: body.catatan ?? null,
+        userId: auth.sub,
       });
-    }
-    await db.insert(supplyMutations).values({
-      companyId: auth.company_id!,
-      branchId,
-      supplyId: item.id,
-      tipe: "pakai",
-      qty: -body.qty,
-      tanggal: await tanggalPerusahaan(auth.company_id!),
-      catatan: body.catatan ?? null,
-      userId: auth.sub,
+      return saldo - body.qty;
     });
-    return c.json({ ok: true, saldo: saldo - body.qty });
+    return c.json({ ok: true, saldo: sisa });
   })
   .post(
     "/:id/koreksi",
@@ -1078,23 +1124,43 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
           message: "Perlengkapan tidak ditemukan",
         });
       await terapkanKonsumsiOtomatis(auth.company_id!, branchId);
-      // Angka RAK, bukan angka buku — pintu ketiga yang menanyakan hal yang
-      // sama. Lihat `saldoDiRakPerlengkapan`.
-      const saldo =
-        (await saldoDiRakPerlengkapan(db, auth.company_id!, branchId, [item.id])).get(item.id) ?? 0;
-      const selisih = body.qty_fisik - saldo;
-      if (selisih !== 0) {
-        await db.insert(supplyMutations).values({
-          companyId: auth.company_id!,
-          branchId,
-          supplyId: item.id,
-          tipe: "koreksi",
-          qty: selisih,
-          tanggal: await tanggalPerusahaan(auth.company_id!),
-          catatan: body.catatan ?? "Koreksi fisik",
-          userId: auth.sub,
-        });
-      }
+      /*
+       * SATU TRANSAKSI BERKUNCI, sama seperti `/:id/pakai`, dan di sini
+       * akibatnya bahkan lebih halus karena tak ada yang dibalas galat.
+       *
+       * Yang ditulis SELISIH (`qty_fisik − saldo`), jadi dua koreksi bersamaan
+       * yang membaca saldo sama akan menerapkan selisih itu DUA KALI. Berurutan
+       * ia idempoten — koreksi kedua menghitung selisih 0 — dan justru itu yang
+       * membuat klik ganda tampak aman.
+       *
+       * Terukur, "rak berisi 5" atas saldo 10, empat kali serentak, tiga ronde:
+       * saldo akhir 0, 10, dan 10 — TAK SEKALI PUN 5. Berurutan selalu 5.
+       * Hasilnya bukan cuma salah, melainkan berbeda-beda tiap kali: petugas
+       * yang menghitung rak melaporkan 5 dan buku mencatat angka lain.
+       */
+      const tanggal = await tanggalPerusahaan(auth.company_id!);
+      const selisih = await db.transaction(async (tx) => {
+        await kunciAntrean(tx, "stok-perlengkapan", auth.company_id!, branchId, item.id);
+        // Angka RAK, bukan angka buku — pintu ketiga yang menanyakan hal yang
+        // sama. Lihat `saldoDiRakPerlengkapan`.
+        const saldo =
+          (await saldoDiRakPerlengkapan(tx, auth.company_id!, branchId, [item.id])).get(item.id) ??
+          0;
+        const beda = body.qty_fisik - saldo;
+        if (beda !== 0) {
+          await tx.insert(supplyMutations).values({
+            companyId: auth.company_id!,
+            branchId,
+            supplyId: item.id,
+            tipe: "koreksi",
+            qty: beda,
+            tanggal,
+            catatan: body.catatan ?? "Koreksi fisik",
+            userId: auth.sub,
+          });
+        }
+        return beda;
+      });
       return c.json({ selisih, saldo: body.qty_fisik });
     },
   )

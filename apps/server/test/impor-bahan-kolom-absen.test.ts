@@ -129,7 +129,37 @@ describe("update: hanya menulis kolom yang benar-benar dikirim", () => {
   });
 
   it("pulih dari Tempat Sampah tak ikut terganggu", () => {
-    expect(IMPOR).toContain("...(u.pulih && { isActive: true }),");
+    expect(IMPOR).toContain("...(pulih && { isActive: true }),");
+  });
+
+  it("penerapannya punya SATU rumah, dan kedua jalur memakainya", () => {
+    /*
+     * Dulu blok `.set({…})` ini cuma ada di gelung perbarui/pulihkan. Sejak
+     * jalur balapan ikut menerapkannya — baris yang ternyata sudah diciptakan
+     * proses lain di sela baca-dan-tulis — ia dipakai DUA kali.
+     *
+     * Yang dijaga di sini bukan gayanya melainkan akibat menyalinnya: kolom
+     * impor yang kelak ditambahkan ke salah satu salinan saja akan tersimpan
+     * pada impor biasa dan hilang pada impor yang berpapasan — beda hasil
+     * untuk berkas CSV yang sama, tergantung siapa yang menekan tombol
+     * bersamaan. Persis bentuk bug yang dijaga `konsep-satu-rumah.test.ts`.
+     */
+    expect(IMPOR).toContain("const terapkanKeBarisAda = async (");
+    // tepat satu definisi `.set({` di seluruh blok impor
+    expect(IMPOR.split(".set({").length - 1).toBe(1);
+    // dan tepat DUA pemanggilan: gelung perbarui + jalur balapan. (Definisinya
+    // tak ikut terhitung — ia ditulis `terapkanKeBarisAda = async (`, tanpa
+    // kurung yang menempel pada namanya.)
+    expect(IMPOR.split("terapkanKeBarisAda(").length - 1).toBe(2);
+  });
+
+  it("balapan slug diklasifikasi ULANG, bukan dilaporkan gagal", () => {
+    // Sebelum ini, yang kalah balapan masuk ke `gagal` dengan pesan
+    // `(e as Error).message` MENTAH dari driver — seluruh teks kueri INSERT
+    // beserta daftar kolomnya, dikirim apa adanya ke klien.
+    expect(IMPOR).toContain('bentrokUnikPada(e, "ingredients_company_slug_uq")');
+    expect(IMPOR).toContain('if (mode === "tambah") {');
+    expect(IMPOR).toContain("dilewati++;");
   });
 });
 

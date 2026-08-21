@@ -76,21 +76,37 @@ describe("acuanDariLot", () => {
 });
 
 describe("statistikHargaLots", () => {
+  /** Lot nyata (harganya diketik orang) — ringkas supaya kasusnya terbaca. */
+  const lot = (harga_satuan: number | null, tanggal: string, qty = 1) => ({
+    harga_satuan,
+    tanggal,
+    qty,
+    total_harga: harga_satuan == null ? null : harga_satuan * qty,
+    harga_tebakan: false,
+  });
+  /** Lot TEBAKAN: harganya diturunkan dari harga acuan, tak pernah dilihat orang. */
+  const tebakan = (harga_satuan: number, tanggal: string, qty = 1) => ({
+    ...lot(harga_satuan, tanggal, qty),
+    harga_tebakan: true,
+  });
+
   it("tanpa lot berharga → semuanya null", () => {
-    expect(statistikHargaLots([{ harga_satuan: null, tanggal: "2026-07-01" }])).toEqual({
+    expect(statistikHargaLots([lot(null, "2026-07-01")])).toEqual({
       harga_terendah: null,
       harga_tertinggi: null,
       harga_median: null,
+      harga_rata: null,
+      jumlah_harga_nyata: 0,
     });
   });
 
   it("terendah/tertinggi bawa tanggal kejadiannya; lot tanpa harga dilewati", () => {
     // lot urut TERBARU dulu (sama seperti keluaran riwayat harga)
     const s = statistikHargaLots([
-      { harga_satuan: 2000, tanggal: "2026-07-20" },
-      { harga_satuan: null, tanggal: "2026-07-15" },
-      { harga_satuan: 3000, tanggal: "2026-07-10" },
-      { harga_satuan: 1000, tanggal: "2026-07-01" },
+      lot(2000, "2026-07-20"),
+      lot(null, "2026-07-15"),
+      lot(3000, "2026-07-10"),
+      lot(1000, "2026-07-01"),
     ]);
     expect(s.harga_terendah).toEqual({ harga: 1000, tanggal: "2026-07-01" });
     expect(s.harga_tertinggi).toEqual({ harga: 3000, tanggal: "2026-07-10" });
@@ -98,11 +114,65 @@ describe("statistikHargaLots", () => {
   });
 
   it("harga seri → tanggal paling baru yang dipakai", () => {
-    const s = statistikHargaLots([
-      { harga_satuan: 1000, tanggal: "2026-07-20" },
-      { harga_satuan: 1000, tanggal: "2026-07-01" },
-    ]);
+    const s = statistikHargaLots([lot(1000, "2026-07-20"), lot(1000, "2026-07-01")]);
     expect(s.harga_terendah).toEqual({ harga: 1000, tanggal: "2026-07-20" });
     expect(s.harga_tertinggi).toEqual({ harga: 1000, tanggal: "2026-07-20" });
+  });
+
+  it("rata-rata TERTIMBANG per qty, bukan rata-rata harga satuan", () => {
+    // 1 satuan @1.000 + 9 satuan @3.000 = 28.000 / 10 = 2.800.
+    // Rata-rata polos (1000+3000)/2 = 2.000 — beda 40%, dan yang tertimbang
+    // yang benar untuk pembelian.
+    const s = statistikHargaLots([lot(3000, "2026-07-20", 9), lot(1000, "2026-07-01", 1)]);
+    expect(s.harga_rata).toBe(2800);
+  });
+
+  it("INTI: lot TEBAKAN tak menyentuh satu pun dari keempat angkanya", () => {
+    /*
+     * Kasus yang terukur di API sungguhan: satu pembelian nyata 20.000/kg,
+     * sisanya belanja tanpa harga yang diisi dari harga acuan lama (10.000).
+     *
+     * Sebelum perbaikan layar melaporkan Terendah 10.000 · Median 15.000 ·
+     * Rata 15.000 — padahal 10.000 tak pernah dibayar siapa pun. Menuruti
+     * median itu (dan layarnya menuliskan "Median jadi harga acuan RAB")
+     * mengunci acuan 25% di bawah satu-satunya harga yang nyata, dan HPP tiap
+     * menu yang memakai bahan ini ikut turun sebesar itu.
+     */
+    const s = statistikHargaLots([
+      tebakan(10000, "2026-07-20"),
+      tebakan(10000, "2026-07-15"),
+      lot(20000, "2026-07-01"),
+    ]);
+    expect(s.harga_terendah).toEqual({ harga: 20000, tanggal: "2026-07-01" });
+    expect(s.harga_tertinggi).toEqual({ harga: 20000, tanggal: "2026-07-01" });
+    expect(s.harga_median).toBe(20000);
+    expect(s.harga_rata).toBe(20000);
+    expect(s.jumlah_harga_nyata).toBe(1);
+  });
+
+  it("…dan PASANGANNYA: harga yang memang nyata tetap dihitung penuh", () => {
+    /*
+     * Arah sebaliknya, dan ia yang membuat asersi di atas berarti: saringan
+     * yang terlalu rakus membuat statistiknya kosong selamanya — kegagalan
+     * yang lebih sunyi, sebab layar cuma menampilkan "—" dan tak ada yang
+     * tahu angkanya hilang. Semua lot di sini nyata; tak satu pun boleh jatuh.
+     */
+    const s = statistikHargaLots([
+      lot(3000, "2026-07-20"),
+      lot(2000, "2026-07-10"),
+      lot(1000, "2026-07-01"),
+    ]);
+    expect(s.harga_median).toBe(2000);
+    expect(s.harga_rata).toBe(2000);
+    expect(s.jumlah_harga_nyata).toBe(3);
+  });
+
+  it("semua lot tebakan → statistiknya KOSONG, bukan angka karangan", () => {
+    // Tak ada harga yang pernah dilihat orang = tak ada yang bisa dikatakan.
+    // Memulangkan median tebakan di sini akan menutup lingkarannya kembali.
+    const s = statistikHargaLots([tebakan(9000, "2026-07-20"), tebakan(9000, "2026-07-01")]);
+    expect(s.harga_median).toBeNull();
+    expect(s.harga_rata).toBeNull();
+    expect(s.jumlah_harga_nyata).toBe(0);
   });
 });

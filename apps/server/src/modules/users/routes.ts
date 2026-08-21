@@ -7,6 +7,8 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import type { UndanganKaryawanRow } from "@kakarut/shared";
 import { appBaseUrl } from "../../lib/base-url";
+import { kunciAntrean } from "../../lib/kunci";
+import { bentrokUnikPada, tanpaBentrok } from "../../lib/pg-galat";
 import { db } from "../../db/client";
 import {
   branches,
@@ -154,6 +156,25 @@ export const karyawanRoutes = new Hono<AppEnv>()
         break;
       } catch (e) {
         if (attempt < 2 && isKodeKaryawanConflict(e)) continue;
+        /*
+         * Email kembar yang LOLOS pra-cek karena balapan.
+         *
+         * Pra-cek di atas selalu punya jeda sebelum tulisannya; yang benar-benar
+         * menjaga keunikan email adalah `users_email_unique`. Tanpa terjemahan
+         * ini, yang KALAH balapan menerima 23505 mentah alias 500 — satu
+         * situasi, tiga jawaban berbeda tergantung timing. Terukur dengan tiga
+         * permintaan serentak beremail sama: 201, 409, dan 500.
+         *
+         * 500 bukan cuma pesan yang salah. Ia tercatat sebagai galat SERVER di
+         * panel, dan di web memicu overlay "server sedang diperbarui" — aplikasi
+         * terlihat tumbang gara-gara dua admin menambahkan karyawan yang sama.
+         *
+         * Pesannya SAMA PERSIS dengan pra-ceknya, supaya klien tak perlu tahu
+         * jalur mana yang menolaknya.
+         */
+        if (bentrokUnikPada(e, "users_email_unique")) {
+          throw new HTTPException(409, { message: `Email ${body.email} sudah terdaftar` });
+        }
         throw e;
       }
     }
@@ -206,17 +227,26 @@ export const karyawanRoutes = new Hono<AppEnv>()
     if (pending) {
       throw new HTTPException(409, { message: `${body.email} sudah diundang (menunggu diterima)` });
     }
-    const [inv] = await db
-      .insert(invitations)
-      .values({
-        companyId: auth.company_id!,
-        email: body.email,
-        role: body.role,
-        branchId: WAJIB_CABANG.has(body.role) ? body.branch_id : (body.branch_id ?? null),
-        token: randomBytes(24).toString("hex"),
-        invitedBy: auth.sub,
-      })
-      .returning({ id: invitations.id });
+    // Pra-cek di atas punya jeda sebelum tulisannya; yang benar-benar menjaga
+    // "satu undangan pending per email per perusahaan" adalah indeks parsial
+    // `invitations_company_email_pending_uq`. Yang KALAH balapan dulu menerima
+    // 23505 mentah alias 500 — pesannya kini sama persis dengan pra-ceknya.
+    const [inv] = await tanpaBentrok(
+      `${body.email} sudah diundang (menunggu diterima)`,
+      () =>
+        db
+          .insert(invitations)
+          .values({
+            companyId: auth.company_id!,
+            email: body.email,
+            role: body.role,
+            branchId: WAJIB_CABANG.has(body.role) ? body.branch_id : (body.branch_id ?? null),
+            token: randomBytes(24).toString("hex"),
+            invitedBy: auth.sub,
+          })
+          .returning({ id: invitations.id }),
+      "invitations_company_email_pending_uq",
+    );
     // Email undangan (best-effort — jangan gagalkan bila email belum diatur).
     try {
       const [co] = await db
@@ -385,6 +415,10 @@ export const karyawanRoutes = new Hono<AppEnv>()
         }
       }
       await db.transaction(async (tx) => {
+        // Sisi KARYAWAN dari tabel yang sama; sisi TEMPAT ada di
+        // `PUT /penyimpanan/:id/petugas`. Kuncinya HARUS sama persis di kedua
+        // sisi — alasan lengkapnya ditulis di sana.
+        await kunciAntrean(tx, "petugas-tempat", auth.company_id!);
         if (idCabang.size > 0) {
           await tx
             .delete(storageLocationPetugas)
@@ -491,26 +525,6 @@ export const karyawanRoutes = new Hono<AppEnv>()
         message: "Tidak bisa menonaktifkan/mengarsipkan akun sendiri",
       });
     }
-    // Perusahaan tidak boleh kehilangan owner terakhir yang masih berjalan.
-    if (arsipEfektif === true && member.role === "owner") {
-      const ownerLain = await db
-        .select({ id: memberships.id })
-        .from(memberships)
-        .where(
-          and(
-            eq(memberships.companyId, auth.company_id!),
-            eq(memberships.role, "owner"),
-            isNull(memberships.archivedAt),
-            ne(memberships.userId, userId),
-          ),
-        );
-      if (ownerLain.length === 0) {
-        throw new HTTPException(400, {
-          message: "Tidak bisa mengarsipkan owner terakhir perusahaan",
-        });
-      }
-    }
-
     const targetRole = body.role ?? member.role;
     const targetBranch =
       body.branch_id !== undefined ? body.branch_id : member.branchId;
@@ -534,6 +548,66 @@ export const karyawanRoutes = new Hono<AppEnv>()
     }
 
     await db.transaction(async (tx) => {
+      /*
+       * PERUSAHAAN TIDAK BOLEH KEHILANGAN OWNER TERAKHIR — dan pemeriksaannya
+       * harus DI DALAM transaksi ini, di belakang kunci.
+       *
+       * Bentuk lamanya memeriksa di luar transaksi, tanpa kunci apa pun. Dua
+       * owner yang saling mengarsipkan pada saat yang sama sama-sama melihat
+       * "masih ada owner lain" — sebab masing-masing melihat LAWANNYA masih
+       * aktif — lalu keduanya menulis. TERUKUR: enam ronde, enam-enamnya
+       * berakhir dengan NOL owner aktif; kedua permintaan dibalas 200.
+       *
+       * Akibatnya perusahaan terkunci dari fungsi ber-`requireRole("owner")` —
+       * termasuk MENGANGKAT OWNER BARU. Tak ada jalan keluar dari dalam
+       * aplikasi; hanya super admin yang bisa memulihkannya.
+       *
+       * Jalur berurutan memang sudah aman (yang kedua dibalas 401 karena
+       * sesinya dicabut), jadi cacat ini TIDAK terlihat dari uji yang menunggu
+       * balasan sebelum mengirim berikutnya — persis alasan §214 menembakkan
+       * keduanya bersamaan.
+       *
+       * Kuncinya per PERUSAHAAN, bukan per baris: yang dijaga jumlah owner
+       * seluruh perusahaan, dan `FOR UPDATE` atas baris lawan justru mengundang
+       * deadlock (A memegang baris B sambil menunggu baris A, dan sebaliknya).
+       */
+      /*
+       * DUA PINTU KE INVARIAN YANG SAMA, dan yang lama cuma menjaga satu.
+       *
+       * Mengarsipkan owner memang menghilangkan satu owner — tapi MENURUNKAN
+       * PERANNYA juga. Penjaga lama hanya melihat `arsip`, jadi owner terakhir
+       * bisa mengubah perannya sendiri jadi `admin` dan lolos: 200, dan
+       * perusahaan berakhir tanpa owner. Tak butuh balapan sama sekali, cukup
+       * satu klik — terukur berurutan: owner 2 → turunkan satu → 1 → turunkan
+       * diri sendiri → 0.
+       *
+       * Yang dijaga karena itu bukan "apakah ini pengarsipan", melainkan
+       * "apakah perubahan ini MENGHAPUS owner terakhir".
+       */
+      const kehilanganOwner =
+        member.role === "owner" && (arsipEfektif === true || targetRole !== "owner");
+      if (kehilanganOwner) {
+        await kunciAntrean(tx, "owner", auth.company_id!);
+        const ownerLain = await tx
+          .select({ id: memberships.id })
+          .from(memberships)
+          .where(
+            and(
+              eq(memberships.companyId, auth.company_id!),
+              eq(memberships.role, "owner"),
+              isNull(memberships.archivedAt),
+              ne(memberships.userId, userId),
+            ),
+          );
+        if (ownerLain.length === 0) {
+          throw new HTTPException(400, {
+            message:
+              arsipEfektif === true
+                ? "Tidak bisa mengarsipkan owner terakhir perusahaan"
+                : "Tidak bisa menurunkan peran owner terakhir perusahaan",
+          });
+        }
+      }
       if (body.role !== undefined || body.branch_id !== undefined || arsipEfektif !== undefined) {
         await tx
           .update(memberships)
