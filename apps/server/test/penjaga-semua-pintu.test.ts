@@ -345,6 +345,59 @@ describe.each(ATURAN)("penjaga di semua pintu — $nama", (a) => {
   });
 });
 
+/**
+ * ATURAN YANG BENTUKNYA BEDA: bukan "adakah penjaga di badan yang sama",
+ * melainkan "penulisannya sendiri sudah salah bentuk".
+ *
+ * Menulis ke tabel LEDGER lewat `db` global berarti tulisan itu berdiri
+ * sendiri — tak ada transaksi, jadi tak ada yang bisa dikunci dan tak ada
+ * yang bisa di-rollback. Untuk ledger stok itu tak pernah benar: keputusan
+ * yang mendahuluinya (cukup/tidak, selisihnya berapa) dibuat atas bacaan yang
+ * sudah bisa basi saat tulisannya mendarat.
+ *
+ * Kelas ini bukan hipotesis. Dua pintu terakhir yang berbentuk begini —
+ * `POST /perlengkapan/:id/pakai` dan `/:id/koreksi` — masing-masing terukur:
+ * saldo jatuh ke −20, dan hitungan fisik mendarat di 0/10/10 padahal petugas
+ * menghitung 5.
+ *
+ * Tak ada `dasar` di sini, dan memang tak boleh ada: berbeda dari aturan
+ * berpenjaga di atas, tak terpikirkan alasan sah untuk menulis ledger stok di
+ * luar transaksi. Kalau kelak ada, ia layak diperdebatkan di review — bukan
+ * didiamkan lewat entri daftar.
+ */
+describe("ledger stok tak pernah ditulis di luar transaksi", () => {
+  const LEDGER = "(?:supplyMutations|stockOpnames|saleConsumptions|productionConsumptions)";
+  const LANGSUNG = new RegExp(`await db\\.(?:insert|update)\\(\\s*${LEDGER}\\s*\\)`);
+
+  it("tak ada satu pun penulisan ledger lewat `db` global", () => {
+    const temuan: string[] = [];
+    for (const f of berkasSumber(AKAR)) {
+      const src = readFileSync(f, "utf8");
+      for (const b of badan(src)) {
+        if (LANGSUNG.test(b.teks)) temuan.push(`${relative(AKAR, f).replaceAll("\\", "/")}:${b.baris}`);
+      }
+    }
+    expect(
+      temuan,
+      temuan.length === 0
+        ? ""
+        : `Penulisan ledger stok DI LUAR transaksi:\n\n${temuan.join("\n")}\n\n` +
+          "Bungkus baca+putus+tulis dalam satu `db.transaction`, dan ambil " +
+          "`kunciAntrean` bila keputusannya bergantung pada saldo yang baru dibaca.",
+    ).toEqual([]);
+  });
+
+  it("PASANGAN: detektornya mengenali bentuk yang SUNGGUHAN pernah ada", () => {
+    // Tanpa ini, "nol temuan" cuma membuktikan regexnya tak pernah cocok.
+    // Kedua contoh disalin dari kode sebelum diperbaiki.
+    expect(LANGSUNG.test("await db.insert(supplyMutations).values({ tipe: 'pakai' });")).toBe(true);
+    expect(LANGSUNG.test("await db.insert(stockOpnames).values({ qty });")).toBe(true);
+    // …dan tidak menuduh bentuk yang benar:
+    expect(LANGSUNG.test("await tx.insert(supplyMutations).values({ tipe: 'pakai' });")).toBe(false);
+    expect(LANGSUNG.test("await db.insert(supplies).values({ nama });")).toBe(false);
+  });
+});
+
 describe("detektornya benar-benar mengenali bentuknya", () => {
   /*
    * Pasangan yang wajib ada: pola yang salah ketik membuat SELURUH gerbang di
