@@ -5,6 +5,8 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { db } from "../../db/client";
 import { branches, companies, saleItems, sales, shifts, users } from "../../db/schema";
+import { qtyDitagih, waktuKertas } from "@kakarut/shared";
+import { opsiSlipDariQuery, responsSlip } from "../print/slip";
 import {
   branchUntukTulis,
   requireRole,
@@ -255,6 +257,72 @@ export const penjualanRoutes = new Hono<AppEnv>()
       .from(users)
       .where(eq(users.id, sale.cashierUserId));
     return c.json({ sale, items, branch_nama: branch?.nama ?? "", kasir: kasirUser?.nama ?? null });
+  })
+  /**
+   * SLIP PESANAN penjualan ini — menu & jumlah saja, TANPA HARGA.
+   *
+   * Untuk klien yang tak bisa memakai `@kakarut/shared` (mobile Flutter): byte
+   * ESC/POS-nya dirender server dan dipulangkan base64, siap dikirim ke printer.
+   * Web menyusunnya sendiri dari paket shared.
+   *
+   * Memakai pemuat & gerbang yang SAMA dengan `GET /:id` di atas — termasuk
+   * kunci cabang bagi kasir. Endpoint yang memuat datanya sendiri akan jadi
+   * salinan kedua dari aturan "boleh melihat transaksi mana".
+   */
+  .get("/:id/slip", async (c) => {
+    const auth = c.get("auth");
+    const [sale] = await db
+      .select()
+      .from(sales)
+      .where(
+        and(
+          eq(sales.id, c.req.param("id")),
+          eq(sales.companyId, auth.company_id!),
+          isNull(sales.deletedAt),
+        ),
+      );
+    if (!sale) throw new HTTPException(404, { message: "Transaksi tidak ditemukan" });
+    if (terikatCabang(auth.role) && sale.branchId !== auth.branch_id) {
+      throw new HTTPException(403, { message: "Kasir hanya boleh melihat transaksi cabangnya" });
+    }
+    const items = await db.select().from(saleItems).where(eq(saleItems.saleId, sale.id));
+    const [branch] = await db
+      .select({ nama: branches.nama })
+      .from(branches)
+      .where(eq(branches.id, sale.branchId));
+    const [comp] = await db
+      .select({ nama: companies.nama, timezone: companies.timezone })
+      .from(companies)
+      .where(eq(companies.id, auth.company_id!));
+    const [kasirUser] = await db
+      .select({ nama: users.nama })
+      .from(users)
+      .where(eq(users.id, sale.cashierUserId));
+
+    return c.json(
+      responsSlip(
+        {
+          companyNama: comp?.nama ?? "",
+          branchNama: branch?.nama ?? "",
+          nomor: sale.nomor,
+          waktu: waktuKertas(sale.waktu, comp?.timezone ?? "Asia/Jakarta"),
+          isDineIn: sale.isDineIn,
+          mejaLabel: sale.mejaLabel,
+          customerNama: sale.customerNama,
+          items: items.map((it) => ({
+            nama: it.menuNama,
+            // Porsi yang DITAGIH: sajian yang sudah dikembalikan tak perlu
+            // dimasak lagi, dan slip ini dibaca dapur.
+            qty: qtyDitagih(it),
+            tag: it.isDineIn !== sale.isDineIn ? (it.isDineIn ? "DI" : "TA") : null,
+            catatan: it.catatan,
+          })),
+          catatan: sale.catatan,
+          kasir: kasirUser?.nama ?? null,
+        },
+        opsiSlipDariQuery(c),
+      ),
+    );
   })
   .delete(
     "/:id",

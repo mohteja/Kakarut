@@ -26,6 +26,49 @@ tanpa akses repo server.
 ---
 
 
+## Rilis: Slip pesanan — cetak menu & jumlah, TANPA harga
+
+🟢 **BARU** — layar kasir (bayar langsung) dan open bill, bila fiturnya mau
+dibawa ke mobile.
+
+*(Belum di-merge ke production.)*
+
+Kertas KEDUA di kasir, untuk dua hal yang sama-sama bukan bukti pembayaran:
+lembar yang dibawa ke dapur/bar, dan lembar yang ditinggalkan di meja tamu.
+Aditif — tak ada medan yang hilang atau berganti arti.
+
+### 🟢 BARU — `GET /api/penjualan/:id/slip` & `GET /api/open-bill/:id/slip`
+
+Query: `paper?: 58|80` (default 58), `chars_per_line?: int(16..96)`,
+`cut?: "1"`, `feed?: int(0..10)`.
+Balasan: `{ data: base64 ESC/POS, teks: pratinjau, chars_per_line: int }`.
+
+**Byte-nya dirender SERVER — ini pengecualian dari aturan "klien menyusun byte
+sendiri".** Alasannya sama dengan `qty_teks`: satu-satunya janji slip ini
+adalah **tanpa harga**, dan menyusun ulang layoutnya di Dart membuat janji itu
+hidup di dua tempat lalu menyimpang diam-diam. Cukup `base64Decode(data)` lalu
+kirim ke printer — tak ada layout yang perlu ditulis di sisi mobile.
+
+`teks` adalah byte yang sama tanpa perintah kontrol; pakai untuk memperlihatkan
+pratinjau sebelum kertas keluar, atau memeriksa hasil tanpa printer.
+
+Yang perlu diketahui saat memakainya:
+
+- **Tak ada angka uang sama sekali** — tak ada harga satuan, subtotal, diskon,
+  PB1, maupun total. `Total porsi` di bawah adalah CACAH, bukan rupiah.
+- **Laci tak pernah terbuka.** Slip ini bukan pembayaran; `ESC p` tak ada di
+  byte-nya dan tak bisa diminta lewat query.
+- **Open bill belum bernomor** → tak ada baris "Antrian"; identitasnya MEJA.
+  Penjualan yang sudah lunas punya nomor nota dan nomor antriannya.
+- **Baris yang dibatalkan dapur tidak ikut** pada slip open bill
+  (`pesanan_status = "batal"`) — mencetaknya lagi menyuruh dapur membuat
+  ulang yang sudah dibatalkan.
+- **Penjualan memakai porsi yang DITAGIH** (`qty − qty_refund`): sajian yang
+  sudah direfund tak perlu dimasak lagi.
+- Cakupan: 404 untuk id yang bukan milik perusahaan/sudah terhapus (atau bill
+  yang sudah ditutup); 403 bila kasir meminta slip transaksi cabang lain.
+
+
 ## Rilis: Lama pengerjaan pesanan — per sajian, per transaksi, dan rekapnya
 
 🟢 **BARU** — papan pesanan (`pesanan_page.dart`), riwayat transaksi, dan tab

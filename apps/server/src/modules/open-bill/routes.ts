@@ -5,10 +5,12 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import type { OpenBillDetail, OpenBillRow } from "@kakarut/shared";
 import { db } from "../../db/client";
-import { formatAngkaId } from "@kakarut/shared";
+import { formatAngkaId, waktuKertas } from "@kakarut/shared";
+import { opsiSlipDariQuery, responsSlip } from "../print/slip";
 import { loadKatalog, tambahKebutuhanBahan } from "../menu/service";
 import { bahanKurang } from "../stok/service";
 import {
+  branches,
   companies,
   meja,
   menuBranches,
@@ -272,6 +274,75 @@ export const openBillRoutes = new Hono<AppEnv>()
     const detail = await loadDetail(auth.company_id!, c.req.param("id"));
     if (!detail) throw new HTTPException(404, { message: "Bill tidak ditemukan" });
     return c.json(detail);
+  })
+  /**
+   * SLIP PESANAN bill ini — menu & jumlah saja, TANPA HARGA.
+   *
+   * Untuk klien yang tak bisa memakai `@kakarut/shared` (mobile Flutter): byte
+   * ESC/POS-nya dirender server dan dipulangkan base64, siap dikirim ke printer.
+   * Web menyusunnya sendiri dari paket shared.
+   *
+   * Memakai `loadDetail` yang sama dengan `GET /:id` — termasuk aturan bahwa
+   * bill yang sudah ditutup diperlakukan hilang. Bill yang sudah dibayar punya
+   * nomor nota, dan slipnya diambil dari `GET /penjualan/:id/slip`.
+   */
+  .get("/:id/slip", async (c) => {
+    const auth = c.get("auth");
+    const detail = await loadDetail(auth.company_id!, c.req.param("id"));
+    if (!detail) throw new HTTPException(404, { message: "Bill tidak ditemukan" });
+
+    const [comp] = await db
+      .select({ nama: companies.nama, timezone: companies.timezone })
+      .from(companies)
+      .where(eq(companies.id, auth.company_id!));
+    const branchId = await resolveBranchId(c);
+    const [branch] = await db
+      .select({ nama: branches.nama })
+      .from(branches)
+      .where(eq(branches.id, branchId));
+    // Dine-in ditentukan TIPE MEJANYA, sama seperti di layar kasir — bill tak
+    // menyimpan penandanya sendiri.
+    const [m] = detail.meja_id
+      ? await db.select({ tipe: meja.tipe }).from(meja).where(eq(meja.id, detail.meja_id))
+      : [undefined];
+    const dineIn = m ? m.tipe === "dine_in" : true;
+
+    return c.json(
+      responsSlip(
+        {
+          companyNama: comp?.nama ?? "",
+          branchNama: branch?.nama ?? "",
+          // Open bill belum bernomor — mejanya yang jadi identitas antar.
+          nomor: null,
+          waktu: waktuKertas(new Date(), comp?.timezone ?? "Asia/Jakarta"),
+          isDineIn: dineIn,
+          mejaLabel: detail.meja_label,
+          customerNama: detail.customer_nama,
+          /*
+           * Baris yang DIBATALKAN dapur tidak ikut. Slip ini perintah memasak,
+           * bukan daftar tagihan: mencetak ulang baris yang sudah dibatalkan
+           * (bahan habis) menyuruh dapur membuatnya lagi — persis yang
+           * pembatalannya hendak cegah.
+           */
+          items: detail.items
+            .filter((it) => it.pesanan_status !== "batal")
+            .map((it) => ({
+              nama: it.menu_nama,
+              qty: it.qty,
+              tag:
+                it.dine_in_override !== null && it.dine_in_override !== dineIn
+                  ? it.dine_in_override
+                    ? "DI"
+                    : "TA"
+                  : null,
+              catatan: it.catatan,
+            })),
+          catatan: detail.catatan,
+          kasir: null,
+        },
+        opsiSlipDariQuery(c),
+      ),
+    );
   })
   .post("/", zValidator("json", BillBody), async (c) => {
     const auth = c.get("auth");

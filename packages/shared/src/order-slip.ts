@@ -47,6 +47,25 @@ export interface OrderSlipData {
   kasir?: string | null;
 }
 
+/**
+ * Waktu untuk KERTAS: "21/08, 14.30" — tanggal & jam pada zona yang diminta.
+ *
+ * Di sini, bukan di masing-masing klien: struk dan slip beredar berdampingan di
+ * meja yang sama, dan dua rumusan yang menyimpang sedikit saja membuat dua
+ * kertas untuk satu pesanan berbunyi jam berbeda — tanpa cara bagi yang
+ * membacanya untuk tahu mana yang benar. Web membungkusnya di `lib/format.ts`
+ * (yang memang memaku WIB); server mengoper zona perusahaan.
+ */
+export function waktuKertas(d: Date, timeZone: string): string {
+  return new Intl.DateTimeFormat("id-ID", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone,
+  }).format(d);
+}
+
 /** Jumlah porsi di slip — cacah, bukan rupiah. */
 export function totalPorsi(items: OrderSlipItem[]): number {
   return items.reduce((a, it) => a + it.qty, 0);

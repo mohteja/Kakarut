@@ -12305,6 +12305,71 @@ cek "setelan PB1 dikembalikan seperti semula" "V == 1" \
   "$([ "$(api "$OWNER" GET /company | jq -r .pb1Rate)" = "$PB1_ASAL227" ] && echo 1 || echo 0)"
 
 echo
+echo "── §228 Slip pesanan dirender server: menu & jumlah, TANPA harga ──"
+# Web menyusun byte ESC/POS-nya sendiri (ia mengimpor @kakarut/shared). Mobile
+# ditulis Flutter dan tak bisa, jadi ia mengambil byte yang sudah jadi dari
+# sini. Aturan yang sama dengan `qty_teks`: saat klien tak bisa berbagi kode,
+# SERVER yang menuliskannya — menebak sendiri sudah pernah melahirkan "900 kg"
+# untuk barang yang sebenarnya 900 gr.
+#
+# Di sini taruhannya lebih tajam: satu-satunya janji slip ini adalah TANPA
+# HARGA. Kalau layoutnya disusun ulang di Dart, janji itu hidup di dua tempat
+# dan bisa menyimpang diam-diam.
+SID228=$(api "$REISS105" GET "/penjualan?per_page=1" | jq -r '.[0].id')
+cek "dasar §228: ada penjualan untuk diambil slipnya" "V == 1" \
+  "$([ -n "$SID228" ] && [ "$SID228" != "null" ] && echo 1 || echo 0)"
+SLIP228=$(api "$REISS105" GET "/penjualan/$SID228/slip?paper=58")
+T228=$(echo "$SLIP228" | jq -r '.teks // ""')
+
+cek "INTI: slip penjualan tak memuat rupiah" "V == 1" \
+  "$(printf '%s' "$T228" | grep -q 'Rp' && echo 0 || echo 1)"
+cek "INTI: …dan tak memuat baris uang" "V == 1" \
+  "$(printf '%s' "$T228" | grep -qE 'TOTAL|Subtotal|PB1|Diskon|Kembali' && echo 0 || echo 1)"
+cek "slip menyebut dirinya PESANAN, bukan struk" "V == 1" \
+  "$(printf '%s' "$T228" | grep -q 'PESANAN' && echo 1 || echo 0)"
+cek "slip memuat cacah porsi" "V == 1" \
+  "$(printf '%s' "$T228" | grep -q 'Total porsi' && echo 1 || echo 0)"
+cek "byte ESC/POS dipulangkan base64 & tidak kosong" "V == 1" \
+  "$(echo "$SLIP228" | jq '((.data|length) > 50) | if . then 1 else 0 end')"
+cek "lebar kolom mengikuti kertas 58mm" "V == 32" "$(echo "$SLIP228" | jq -r '.chars_per_line')"
+
+# LACI TAK BOLEH TERBUKA — slip ini bukan pembayaran. Diperiksa pada BYTE-nya,
+# bukan pada opsinya: ESC p (0x1B 0x70) adalah perintah buka laci.
+cek "INTI: byte-nya tak memuat perintah buka laci" "V == 1" \
+  "$(echo "$SLIP228" | jq -r '.data' | python3 -c "
+import sys, base64
+b = base64.b64decode(sys.stdin.read().strip())
+print(0 if bytes([0x1b, 0x70]) in b else 1)")"
+
+# PASANGAN: struk SUNGGUHAN penjualan yang sama tetap memuat rupiahnya. Tanpa
+# ini, seluruh asersi 'tak memuat' di atas juga hijau seandainya slipnya kosong
+# atau datanya gagal dimuat.
+cek "PASANGAN: nota yang sama memang punya angka uang" "V == 1" \
+  "$(api "$REISS105" GET "/penjualan/$SID228" | jq '((.sale.total > 0) and ((.items|length) > 0)) | if . then 1 else 0 end')"
+
+# OPEN BILL — jalur kedua yang diminta. Belum bernomor, jadi identitasnya meja.
+MEJA228=$(api "$REISS105" GET /meja | jq -r '[.[]|select(.tipe=="dine_in")][0].id')
+MENU228=$(api "$REISS105" GET /menu | jq -r '[.[]|select(.harga_jual>0 and .is_active)][0].id')
+BILL228=$(api "$REISS105" POST /open-bill \
+  "{\"meja_id\":\"$MEJA228\",\"customer_nama\":\"Uji 228\",\"items\":[{\"menu_id\":\"$MENU228\",\"qty\":2,\"catatan\":\"tanpa cabai\"}]}")
+BID228=$(echo "$BILL228" | jq -r '.id // empty')
+cek "dasar §228: open bill uji terbentuk" "V == 1" \
+  "$([ -n "$BID228" ] && echo 1 || echo 0)"
+TB228=$(api "$REISS105" GET "/open-bill/$BID228/slip?paper=58" | jq -r '.teks // ""')
+cek "INTI: slip open bill tak memuat rupiah" "V == 1" \
+  "$(printf '%s' "$TB228" | grep -q 'Rp' && echo 0 || echo 1)"
+cek "slip open bill memuat menu, jumlah, dan catatan barisnya" "V == 1" \
+  "$(printf '%s' "$TB228" | grep -q '2x ' && printf '%s' "$TB228" | grep -q 'tanpa cabai' && echo 1 || echo 0)"
+cek "open bill tanpa nomor: tak ada 'Antrian NaN'" "V == 1" \
+  "$(printf '%s' "$TB228" | grep -qE 'NaN|Antrian' && echo 0 || echo 1)"
+
+# Cakupan: id asing ditolak, bukan memulangkan slip kosong.
+cek "slip penjualan id asing → 404" "V == 404" \
+  "$(printf '%s\n' "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/penjualan/00000000-0000-0000-0000-000000000000/slip" -H "Authorization: Bearer $REISS105")")"
+cek "slip open bill id asing → 404" "V == 404" \
+  "$(printf '%s\n' "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/open-bill/00000000-0000-0000-0000-000000000000/slip" -H "Authorization: Bearer $REISS105")")"
+
+echo
 echo "── §221 Akun seed harus ditinggalkan seperti semula ──"
 # Duduk di ekor bersama §209/§215, dan karena alasan yang sama: ia menghakimi
 # sesudah semua seksi selesai mengutak-atik.

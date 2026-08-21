@@ -1,3 +1,4 @@
+import { waktuKertas } from "@kakarut/shared";
 const rupiah = new Intl.NumberFormat("id-ID", {
   style: "currency",
   currency: "IDR",
@@ -46,13 +47,7 @@ export function hariIniWIB(timeZone = "Asia/Jakarta"): string {
  * memperpanjang daftar itu; menambah rumusan baru memperpanjangnya.
  */
 export function waktuKertasWIB(d: Date): string {
-  return new Intl.DateTimeFormat("id-ID", {
-    day: "2-digit",
-    month: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    timeZone: "Asia/Jakarta",
-  }).format(d);
+  return waktuKertas(d, "Asia/Jakarta");
 }
 
 export function formatTanggal(tanggal: string): string {

@@ -1,8 +1,7 @@
 # 📱 Terakasir — Kontrak API (untuk Tim Mobile Flutter)
 
 Halo tim mobile. Dokumen ini adalah **acuan lengkap API server Terakasir** untuk
-membangun aplikasi Flutter (native) yang bicara **langsung ke API**, bukan
-membungkus web di WebView.
+membangun aplikasi Flutter (native) yang bicara **langsung ke API**.
 
 > **Sumber kebenaran:** semua endpoint di bawah dibaca langsung dari kode
 > `apps/server/src` (Hono + TypeScript + Drizzle). Entry server:
@@ -469,6 +468,27 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 > Bisa bertahap: merefund 1 porsi hari ini dan 1 porsi lagi kemudian menghasilkan
 > total pengembalian yang sama persis dengan merefund 2 porsi sekaligus.
 > Melebihi sisa porsi ditolak **400** dengan pesan berisi nama menunya.
+
+### Slip pesanan (menu & jumlah, TANPA harga)
+
+- `GET /api/penjualan/:id/slip` — [owner/admin/cashier; kasir terkunci cabangnya] — query: `paper?: 58|80` (default 58), `chars_per_line?: int(16..96)` (override), `cut?: "1"` (default tidak memotong), `feed?: int(0..10)` (default 3) — res: `{ data: string (base64 ESC/POS, kirim apa adanya ke printer), teks: string (pratinjau, byte yang sama tanpa perintah kontrol), chars_per_line: int }` — error: **404** (tak ditemukan/terhapus), **403** (kasir cabang lain)
+- `GET /api/open-bill/:id/slip` — [cashier] — query & res sama — error: **404** (tak ditemukan atau sudah ditutup)
+
+> **Isinya sengaja tak memuat angka uang sama sekali** — tak ada harga satuan,
+> subtotal, diskon, PB1, maupun total. Yang dicetak: judul `PESANAN`, nama
+> perusahaan & cabang, nomor nota + antrian (penjualan) atau meja (open bill),
+> penanda dine-in/bawa pulang, lalu `2x Nama Menu` per baris beserta catatan
+> barisnya, ditutup `Total porsi` (CACAH, bukan rupiah).
+>
+> **Laci tidak dibuka.** Slip ini bukan pembayaran; `drawerKick` tak bisa
+> diminta lewat query dan perintah `ESC p` tak pernah ada di byte-nya.
+>
+> Baris open bill yang **dibatalkan dapur** (`pesanan_status = "batal"`) tidak
+> ikut: slip ini perintah memasak, dan mencetak ulang baris yang dibatalkan
+> menyuruh dapur membuatnya lagi.
+>
+> Penjualan memakai **porsi yang ditagih** (`qty − qty_refund`) — sajian yang
+> sudah dikembalikan tak perlu dimasak lagi.
 
 ## `/api/produksi` dan `/api/pembelian` — Tambah stok (pabrik) (`modules/produksi/routes.ts`)
 
@@ -1392,9 +1412,16 @@ Laporan:
 
 - `POST /api/print/lan` — req: `{ host: string (1..255), port: int(1..65535), data: string (base64 ESC/POS, 1..400000) }` — res: `{ ok: true }` — error: **400** (host terlarang/internal, data kosong), **502** printer tak terjangkau
 
-> Untuk cetak Bluetooth thermal di aplikasi Flutter, byte ESC/POS dibangun di
-> sisi klien; endpoint ini hanya relay TCP untuk printer LAN. Printer Bluetooth
-> ditangani native di aplikasi (di luar API).
+> Untuk cetak Bluetooth thermal di aplikasi Flutter, byte ESC/POS **struk
+> pembayaran** dibangun di sisi klien; endpoint ini hanya relay TCP untuk
+> printer LAN. Printer Bluetooth ditangani native di aplikasi (di luar API).
+>
+> **Pengecualian: SLIP PESANAN.** Byte-nya dirender SERVER dan diambil lewat
+> `GET /api/penjualan/:id/slip` atau `GET /api/open-bill/:id/slip` (lihat modul
+> masing-masing). Alasannya sama dengan `qty_teks`: satu-satunya janji slip itu
+> adalah **tanpa harga**, dan menyusun ulang layoutnya di Dart membuat janji itu
+> hidup di dua tempat lalu menyimpang diam-diam. Klien cukup base64-decode
+> `data` lalu mengirimnya ke printer.
 
 ## `/api/upload` — Unggah file (`modules/upload/routes.ts`) — [any]
 
