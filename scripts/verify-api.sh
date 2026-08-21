@@ -11222,6 +11222,36 @@ cek "PASANGAN: email BARU tetap boleh dibuat → 201" "V == 201" \
   "$(status_code_body "$OWNER" POST /karyawan \
      "{\"nama\":\"Balap 213c\",\"email\":\"baru213.$RANDOM@basooopa.id\",\"password\":\"Balap213Pass!\",\"role\":\"cashier\",\"branch_id\":\"$CB213\"}")"
 
+# ── PINTU KEEMPAT: buat perusahaan sendiri, dua orang bernama usaha SAMA ───
+# Ditemukan sapuan mekanis `penjaga-semua-pintu`, bukan mata: tiga pintu di
+# atas sudah dibereskan dengan tangan, dan yang ini terlewat.
+#
+# Di sini jawabannya BEDA dari ketiganya — COBA ULANG, bukan 409. `slugUnik`
+# sudah menjanjikan akhiran acak untuk nama yang kembar; menolak justru
+# mengingkari janji itu, dan yang menerima penolakannya orang yang BARU
+# MENDAFTAR, pada tindakan pertamanya. "Warung Makan" bukan nama yang jarang.
+# Terukur sebelum perbaikan: 201, 500, 500.
+NAMA213="Warung Kembar 213 $RANDOM"
+D4_213=$(mktemp -d)
+for i in 1 2 3; do
+  T=$(daftar_verif "usaha213.$i.$RANDOM@contoh.id" "Usaha213Pass!" "Usaha 213")
+  printf '%s' "$T" > "$D4_213/t$i"
+done
+cek "dasar §213: tiga akun baru siap membuat usaha" "V == 3" \
+  "$(grep -lc . "$D4_213"/t1 "$D4_213"/t2 "$D4_213"/t3 2>/dev/null | wc -l)"
+for i in 1 2 3; do
+  curl -s -o "$D4_213/b$i" -w '%{http_code}\n' -X POST "$BASE/api/onboarding/perusahaan" \
+    -H "Authorization: Bearer $(cat "$D4_213/t$i")" -H 'Content-Type: application/json' \
+    -d "{\"nama\":\"$NAMA213\"}" > "$D4_213/c$i" &
+done
+wait
+cek "INTI: tiga usaha BERNAMA SAMA dibuat serentak → TAK ADA 5xx" "V == 0" \
+  "$(cat "$D4_213"/c* | grep -c '^5' || true)"
+cek "INTI: ketiganya jadi (201) — nama kembar memang boleh" "V == 3" \
+  "$(cat "$D4_213"/c* | grep -c '^201' || true)"
+cek "…dan slugnya dibedakan otomatis, bukan ditolak" "V == 3" \
+  "$(api "$SA" GET /admin/tenants | jq --arg n "$NAMA213" '[.[]|select(.nama==$n)]|map(.slug)|unique|length')"
+
 
 echo "== 214. Perusahaan tak boleh kehilangan owner TERAKHIRNYA =="
 # Penjaganya sudah ada dan tertulis niatnya — "Perusahaan tidak boleh kehilangan

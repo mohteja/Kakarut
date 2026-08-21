@@ -6,6 +6,7 @@ import { z } from "zod";
 import type { OnboardingStatus, UndanganDto } from "@kakarut/shared";
 import { db } from "../../db/client";
 import { kunciAntrean } from "../../lib/kunci";
+import { bentrokUnikPada } from "../../lib/pg-galat";
 import { branches, companies, invitations, memberships, users } from "../../db/schema";
 import { requireAuth, verifikasiPassword, type AppEnv } from "../../middleware/auth";
 import { buatSesi } from "../auth/session";
@@ -83,11 +84,45 @@ export const onboardingRoutes = new Hono<AppEnv>()
       if (auth.is_super_admin) {
         throw new HTTPException(403, { message: "Super admin tidak membuat perusahaan sendiri" });
       }
-      const companyId = await db.transaction((tx) =>
-        buatPerusahaanUntuk(tx, { nama: c.req.valid("json").nama, userId: auth.sub }),
-      );
+      /*
+       * COBA ULANG bila slugnya keburu dipakai orang lain.
+       *
+       * `slugUnik` memilih slug dengan memeriksa dulu ("warung-kopi" bebas?"),
+       * dan pemeriksaan itu punya jeda sebelum tulisannya. Dua orang yang
+       * mendaftarkan usaha BERNAMA SAMA pada saat bersamaan sama-sama memilih
+       * slug dasar yang sama, lalu yang kalah menabrak `companies_slug_unique`.
+       * Terukur: tiga pendaftaran serentak bernama sama → 201, 500, 500.
+       *
+       * Yang benar di sini COBA ULANG, bukan 409 seperti `/admin/tenants`.
+       * Bedanya bukan gaya: di sana slug DIKETIK super admin, jadi bentrok
+       * adalah keputusan yang harus dia perbaiki. Di sini slugnya DIPILIHKAN
+       * sistem dan namanya sendiri memang boleh kembar — `slugUnik` sudah
+       * menjanjikan akhiran acak untuk itu. Menolak dengan 409 justru
+       * mengingkari janji itu, dan yang menerimanya orang yang BARU MENDAFTAR,
+       * pada tindakan pertamanya di aplikasi ini. "Warung Makan" bukan nama
+       * yang jarang.
+       *
+       * Percobaan kedua memanggil `slugUnik` lagi dari awal: slug dasarnya kini
+       * sudah terpakai oleh pemenang, jadi ia langsung turun ke akhiran acak.
+       *
+       * DITEMUKAN SAPUAN, BUKAN MATA: tiga pintu sekelas sudah dibereskan
+       * dengan tangan lebih dulu, dan yang ini terlewat sampai
+       * `penjaga-semua-pintu` menunjukkannya.
+       */
+      let companyId: string | undefined;
+      for (let percobaan = 0; percobaan < 3; percobaan += 1) {
+        try {
+          companyId = await db.transaction((tx) =>
+            buatPerusahaanUntuk(tx, { nama: c.req.valid("json").nama, userId: auth.sub }),
+          );
+          break;
+        } catch (e) {
+          if (percobaan < 2 && bentrokUnikPada(e, "companies_slug_unique")) continue;
+          throw e;
+        }
+      }
       const [user] = await db.select().from(users).where(eq(users.id, auth.sub));
-      return c.json(await buatSesi(user, companyId), 201);
+      return c.json(await buatSesi(user, companyId!), 201);
     },
   )
   // Terima undangan → jadi anggota perusahaan itu → sesi baru diarahkan ke sana.
