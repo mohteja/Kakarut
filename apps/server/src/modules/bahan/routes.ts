@@ -15,6 +15,7 @@ import {
   type RiwayatHargaDto,
   type RiwayatHargaLot,
 } from "@kakarut/shared";
+import { tanpaBentrok } from "../../lib/pg-galat";
 import { db } from "../../db/client";
 import {
   branches,
@@ -622,36 +623,54 @@ export const bahanRoutes = new Hono<AppEnv>()
       return c.json(toDto(row, undefined, [], produsenIds), 200);
     }
     const kode = await resolveKodeBahan(db, auth.company_id!, body.kode, body.nama);
-    const [row] = await db
-      .insert(ingredients)
-      .values({
-        companyId: auth.company_id!,
-        slug,
-        kode,
-        nama: body.nama,
-        hargaBeli: body.harga_beli,
-        isi: body.isi,
-        satuan: body.satuan,
-        satuanBeli: body.satuan_beli ?? null,
-        trackStok: body.track_stok,
-        stokMinimum: body.stok_minimum,
-        stokMinimumToko: body.stok_minimum_toko,
-        overheadX: body.overhead_x,
-        kategori: kanonikKategori(kmap, body.kategori),
-        pengadaan: body.pengadaan,
-        produksiDi: body.produksi_di,
-        divisiProduksi: body.divisi_produksi,
-        catatan: body.catatan ?? null,
-        isPackaging: body.is_packaging,
-        isComplement: body.is_complement,
-        bolehEceran: body.boleh_eceran,
-        minBeli: body.min_beli,
-        masaSimpanHari: body.masa_simpan_hari,
-        leadTimeHari: body.lead_time_hari,
-        fotoHasilUrl: body.foto_hasil_url ?? null,
-        fotoPackingUrl: body.foto_packing_url ?? null,
-      })
-      .returning();
+    /*
+     * Pra-cek slug di atas punya jeda sebelum tulisannya; yang benar-benar
+     * menjaga keunikan `ingredients_company_slug_uq`. Dua owner yang menambahkan
+     * bahan bernama sama pada saat bersamaan membuat yang KALAH menabrak indeks
+     * itu — 23505 mentah alias 500. Terukur, empat permintaan serentak:
+     * 201, 409, 409, dan 500.
+     *
+     * Pesannya sengaja TANPA petunjuk lokasi `(ada di daftar Bahan Baku)` yang
+     * dipakai jalur berurutan: petunjuk itu diturunkan dari `existing.pengadaan`,
+     * dan di jalur balapan barisnya baru saja ditulis proses lain — membacanya
+     * ulang hanya untuk memperindah pesan menambah kueri pada jalur galat tanpa
+     * mengubah apa yang harus dilakukan pemakainya (pilih nama lain).
+     */
+    const [row] = await tanpaBentrok(
+      `Bahan "${body.nama}" sudah ada`,
+      () =>
+        db
+          .insert(ingredients)
+          .values({
+            companyId: auth.company_id!,
+            slug,
+            kode,
+            nama: body.nama,
+            hargaBeli: body.harga_beli,
+            isi: body.isi,
+            satuan: body.satuan,
+            satuanBeli: body.satuan_beli ?? null,
+            trackStok: body.track_stok,
+            stokMinimum: body.stok_minimum,
+            stokMinimumToko: body.stok_minimum_toko,
+            overheadX: body.overhead_x,
+            kategori: kanonikKategori(kmap, body.kategori),
+            pengadaan: body.pengadaan,
+            produksiDi: body.produksi_di,
+            divisiProduksi: body.divisi_produksi,
+            catatan: body.catatan ?? null,
+            isPackaging: body.is_packaging,
+            isComplement: body.is_complement,
+            bolehEceran: body.boleh_eceran,
+            minBeli: body.min_beli,
+            masaSimpanHari: body.masa_simpan_hari,
+            leadTimeHari: body.lead_time_hari,
+            fotoHasilUrl: body.foto_hasil_url ?? null,
+            fotoPackingUrl: body.foto_packing_url ?? null,
+          })
+          .returning(),
+      "ingredients_company_slug_uq",
+    );
     await simpanCabangProdusen(row.id, produsenIds);
     return c.json(toDto(row, undefined, [], produsenIds), 201);
   })

@@ -736,20 +736,38 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
           .returning();
         return c.json({ id: row.id, nama: row.nama, dipulihkan: true }, 201);
       }
-      const [row] = await db
-        .insert(supplies)
-        .values({
-          companyId: auth.company_id!,
-          nama: body.nama,
-          satuan: body.satuan,
-          hargaBeli: body.harga_beli,
-          stokMinimum: body.stok_minimum,
-          catatan: body.catatan ?? null,
-          kategori: body.kategori ?? null,
-          bolehEceran: body.boleh_eceran,
-          dilacak: body.dilacak,
-        })
-        .returning();
+      /*
+       * Pra-cek nama di atas punya jeda sebelum tulisannya; yang benar-benar
+       * menjaga keunikan `supplies_company_nama_uq`. Dua owner yang menambahkan
+       * perlengkapan bernama sama pada saat bersamaan membuat yang KALAH
+       * menabrak indeks itu — 23505 mentah alias 500. Terukur, empat permintaan
+       * serentak: 201, 409, 409, dan 500.
+       *
+       * Pesannya memakai `body.nama` apa adanya, sedangkan jalur berurutan
+       * menyebut nama dengan HURUF yang tersimpan (`ada.nama`) — pencocokannya
+       * case-insensitive, jadi keduanya bisa berbeda besar-kecilnya. Bedanya
+       * dibiarkan: menyamakannya menuntut satu SELECT lagi pada jalur galat,
+       * dan yang harus dilakukan pemakainya sama saja (pilih nama lain).
+       */
+      const [row] = await tanpaBentrok(
+        `Perlengkapan "${body.nama}" sudah ada`,
+        () =>
+          db
+            .insert(supplies)
+            .values({
+              companyId: auth.company_id!,
+              nama: body.nama,
+              satuan: body.satuan,
+              hargaBeli: body.harga_beli,
+              stokMinimum: body.stok_minimum,
+              catatan: body.catatan ?? null,
+              kategori: body.kategori ?? null,
+              bolehEceran: body.boleh_eceran,
+              dilacak: body.dilacak,
+            })
+            .returning(),
+        "supplies_company_nama_uq",
+      );
       return c.json({ id: row.id, nama: row.nama, dipulihkan: false }, 201);
     },
   )
