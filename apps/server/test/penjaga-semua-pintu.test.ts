@@ -18,6 +18,12 @@
  *     tidak di jalur MEMBACA, yang menampilkan keempat statistiknya.
  *   · aritmetika waktu yang aman dipasang di §138 — tidak di §198, yang kena
  *     persis sama sepuluh bulan kemudian.
+ *   · kunci baris induk dipasang di `PUT /menu/:id` dan `PUT /bahan/:id/resep` —
+ *     tidak di TIGA jalur "ganti seluruh daftar" sekerabat, yang semuanya 500.
+ *     Salah satunya, `PUT /karyawan/:userId/tempat`, bahkan MENYEBUT pintu
+ *     saudaranya dengan nama di komentarnya sendiri: "Menulis ke tabel yang
+ *     sama dengan PUT /penyimpanan/:id/petugas → konsisten dua arah." Tahu ada
+ *     dua pintu ternyata tidak sama dengan memasang penjaga di keduanya.
  *
  * Membaca modul satu per satu tidak menemukan bentuk ini; yang menemukannya
  * selalu sapuan mekanis. Uji ini memasang sapuan itu jadi gerbang.
@@ -176,8 +182,15 @@ const ATURAN: Aturan[] = [
      * menghasilkan tuduhan palsu: `kebersihan` memakai `bentrokUnik(err)` di
      * catch, `seed/guest.ts` memakai `onConflictDoUpdate`. `kunciAntrean` juga
      * penjaga yang sah di sini: ia MENCEGAH bentroknya, bukan menerjemahkannya.
+     *
+     * KOSAKATA PENJAGA INI SUDAH SALAH TIGA KALI, dan tiap kali akibatnya sama:
+     * sapuan menuduh kode yang BENAR, lalu tuduhan palsu itu mengajari orang
+     * mengisi `dasar` — persis cara sebuah gerbang berhenti menjaga. Jadi siapa
+     * pun yang memakai BENTUK PENJAGA BARU wajib menambahkannya ke sini DAN ke
+     * uji-diri di bawah. `.for("update")` masuk pada ronde ketiga, setelah ia
+     * menuduh dua perbaikan supplier yang baru saja dipasang.
      */
-    penjaga: /bentrokUnik|tanpaBentrok|onConflict|kunciAntrean/,
+    penjaga: /bentrokUnik|tanpaBentrok|onConflict|kunciAntrean|\.for\("(?:update|share)"\)/,
     dasar: {
       "modules/auth/superadmin.ts": {
         pintu: 1,
@@ -206,6 +219,45 @@ const ATURAN: Aturan[] = [
       // `companies`, `branches`, dan `storageLocations` TANPA penjaga, dan
       // ketiganya kini TAK TERLIHAT sapuan ini — satu penjaga di awal badan
       // menutupi seluruh sisanya. Lihat catatan BATASNYA di kepala berkas.
+    },
+  },
+  {
+    nama: "ganti-daftar",
+    kenapa:
+      "\"Ganti seluruh daftar\" = HAPUS lalu SISIP. Saat daftarnya masih KOSONG, " +
+      "HAPUS tak memegang baris apa pun — dua permintaan bersamaan sama-sama " +
+      "lolos ke SISIP dan menabrak indeks pasangannya. Permintaannya IDEMPOTEN, " +
+      "jadi pemicunya bukan dua admin: cukup SATU KLIK GANDA pada tombol Simpan.",
+    /*
+     * ATURAN KEDUA untuk tabel PASANGAN, dan ia ada karena `bentrok-unik` di
+     * atas TIDAK menutupinya. Aturan itu menyasar keunikan NAMA; kelas ini
+     * keunikan PASANGAN (induk, anak), dengan cara gagal dan penjaga yang
+     * berbeda. Empat bug ditemukan di kelas ini — petugas rak, supplier bahan,
+     * supplier perlengkapan, isi rak — dan sapuan ini tak akan melihat satu pun
+     * seandainya daftar tabelnya cuma dilebarkan, sebab tabel-tabel ini memang
+     * bukan tabel bernama.
+     */
+    tulis:
+      /\.insert\(\s*(?:ingredientSuppliers|supplySuppliers|storageLocationIngredients|storageLocationPetugas|menuComponents|ingredientComponents|productionConsumptions)\s*\)/,
+    /*
+     * `FOR UPDATE` ikut dihitung penjaga, dan justru di sinilah ia paling
+     * penting: mengunci baris INDUK adalah jawaban yang benar bila induknya
+     * nyata (`PUT /bahan/:id/supplier`), sedangkan `kunciAntrean` dipakai bila
+     * penulisannya menyeberang beberapa induk (`isi-rak`, `petugas-tempat`).
+     */
+    penjaga: /kunciAntrean|\.for\("(?:update|share)"\)|onConflict|tanpaBentrok|bentrokUnik/,
+    dasar: {
+      "modules/menu/routes.ts": {
+        pintu: 1,
+        alasan:
+          "`replaceKomponen` MEMANG dijaga, tapi penjaganya di PEMANGGIL: " +
+          "`PUT /menu/:id` meng-UPDATE baris `menus` lebih dulu di transaksi " +
+          "yang sama, jadi kunci baris induknya menyerialkan penulisan ini. " +
+          "Bukan dugaan — diukur: empat PUT serentak berbadan sama, tiga ronde, " +
+          "nol 5xx, sementara ketiga jalur sekerabat yang TIDAK menyentuh " +
+          "induknya jatuh di ronde yang sama. Sapuan ini bergranularitas badan, " +
+          "jadi ia tak bisa melihat ke pemanggil",
+      },
     },
   },
   {
@@ -356,6 +408,20 @@ describe("detektornya benar-benar mengenali bentuknya", () => {
     expect(unik.penjaga.test(".onConflictDoNothing()")).toBe(true);
     expect(unik.penjaga.test('await kunciAntrean(tx, "bahan-slug", companyId);')).toBe(true); // bulk
     expect(unik.penjaga.test('await tanpaBentrok("x", () => db.insert(y))')).toBe(true);
+    expect(unik.penjaga.test('.where(eq(ingredients.id, id))\n  .for("update");')).toBe(true);
+
+    const daftar = ATURAN.find((a) => a.nama === "ganti-daftar")!;
+    // Empat bug kelas ini, disalin dari bentuk aslinya sebelum diperbaiki.
+    expect(daftar.tulis.test("await tx.insert(storageLocationPetugas).values(uniqueIds.map(")).toBe(true);
+    expect(daftar.tulis.test("await tx.insert(ingredientSuppliers).values(")).toBe(true);
+    expect(daftar.tulis.test("await tx.insert(supplySuppliers).values(")).toBe(true);
+    expect(daftar.tulis.test("await tx.insert(storageLocationIngredients).values(")).toBe(true);
+    // …dan yang bukan tabel pasangan tak boleh tertuduh oleh aturan INI.
+    expect(daftar.tulis.test("await tx.insert(ingredients).values({ slug })")).toBe(false);
+    // Kedua bentuk penjaga yang sah untuk kelas ini, keduanya sungguhan dipakai.
+    expect(daftar.penjaga.test('await kunciAntrean(tx, "isi-rak", companyId);')).toBe(true);
+    expect(daftar.penjaga.test('.where(eq(supplies.id, item.id))\n  .for("update");')).toBe(true);
+    expect(daftar.penjaga.test("await tx.delete(x); await tx.insert(y).values(z);")).toBe(false);
   });
 
   it("BATAS tak memotong pembantu kecil DI DALAM handler", () => {
