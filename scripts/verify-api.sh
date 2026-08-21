@@ -12031,6 +12031,86 @@ cek "PASANGAN: …dan barangnya benar-benar masuk stok (+10 dan +8)" "V == 1" \
   "$([ "$(python3 -c "print(1 if abs($(saldo222 "$A222B") - 10) < 0.001 else 0)")" = "1" ] && [ "$(python3 -c "print(1 if abs($(saldo222 "$B222B") - 8) < 0.001 else 0)")" = "1" ] && echo 1 || echo 0)"
 
 echo
+echo "── §223 Penyesuaian yang sudah DISETUJUI benar-benar terkunci ──"
+# Selisih opname diputuskan lewat alur: kasir menghitung → owner MENGKLARIFIKASI
+# (kategori + catatan + FOTO WAJIB) → owner MENYETUJUI. Sesudah disetujui,
+# barisnya jadi baseline saldo dan klarifikasinya dikunci — kodenya sendiri
+# menuliskan "klarifikasi terkunci".
+#
+# Dulu kuncinya cuma PRA-CEK: SELECT status, lempar 400, lalu UPDATE ber-WHERE
+# `id` saja. Persetujuan yang commit di antaranya lolos — dan yang tertimpa
+# bukan angka stoknya melainkan BUKTINYA: kategori, catatan, foto, dan siapa
+# yang mengklarifikasi, pada baris yang sudah ditandatangani.
+#
+# TERUKUR sesudah pagarnya dipasang: 2 dari 46 putaran balapan dibalas 409 —
+# tiap 409 itu satu penulisan yang, pada kode lama, mendarat diam-diam di baris
+# yang sudah disetujui. Yang diperiksa di sini perilaku BERURUTANNYA, yang
+# deterministik; balapannya sendiri terlalu jarang untuk jadi asersi CI.
+ING223=$(api "$OWNER" GET /stok | jq -r '[.[] | select(.saldo > 20)][0].ingredient_id')
+cek "dasar §223: ada bahan berstok untuk diopname" "V == 1" \
+  "$([ -n "$ING223" ] && [ "$ING223" != "null" ] && echo 1 || echo 0)"
+FOTO223="data:image/png;base64,iVBORw0KGgo="
+
+# Satu baris opname berselisih → 'menunggu'.
+SIS223=$(api "$OWNER" GET /stok | jq --arg i "$ING223" '[.[]|select(.ingredient_id==$i)][0].saldo')
+api "$OWNER" POST /stok/opname \
+  "{\"catatan\":\"opname 223\",\"items\":[{\"ingredient_id\":\"$ING223\",\"qty\":$(python3 -c "print($SIS223 - 2)")}]}" > /dev/null
+# Daftarnya urut desc(created_at), jadi `first` = yang BARU SAJA dibuat.
+# `last` akan mengambil baris tertua yang masih menggantung dari seksi lain —
+# dan seluruh §223 lalu menguji baris yang bukan miliknya.
+NAMA223=$(api "$OWNER" GET /bahan | jq -r --arg i "$ING223" '[.[]|select(.id==$i)][0].nama')
+PID223=$(api "$OWNER" GET "/stok/penyesuaian?status=belum" | jq -r --arg n "$NAMA223" '[.[] | select(.bahan==$n and .penyesuaian_status=="menunggu")] | first | .id')
+cek "dasar §223: baris penyesuaian 'menunggu' terbentuk" "V == 1" \
+  "$([ -n "$PID223" ] && [ "$PID223" != "null" ] && echo 1 || echo 0)"
+
+kat223() { api "$OWNER" GET "/stok/penyesuaian?status=semua" | jq -r --arg p "$PID223" '[.[]|select(.id==$p)][0].kategori'; }
+stat223() { api "$OWNER" GET "/stok/penyesuaian?status=semua" | jq -r --arg p "$PID223" '[.[]|select(.id==$p)][0].penyesuaian_status'; }
+klar223() { # klar223 <id> <kategori> → echo kode status
+  printf '%s\n' "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/stok/penyesuaian/$1/klarifikasi" \
+    -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' \
+    -d "{\"kategori\":\"$2\",\"catatan\":\"bukti $2\",\"foto_url\":\"$FOTO223\"}")"
+}
+
+cek "klarifikasi pertama (masih 'menunggu') → 200" "V == 200" "$(klar223 "$PID223" waste_bahan)"
+cek "…kategorinya tersimpan" "V == 1" "$([ "$(kat223)" = "waste_bahan" ] && echo 1 || echo 0)"
+cek "setujui → 200" "V == 200" \
+  "$(printf '%s\n' "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/stok/penyesuaian/$PID223/setujui" -H "Authorization: Bearer $OWNER")")"
+cek "…statusnya jadi 'disetujui'" "V == 1" "$([ "$(stat223)" = "disetujui" ] && echo 1 || echo 0)"
+
+# INTI: sesudah disetujui, buktinya tak boleh bisa ditulis ulang.
+cek "INTI: klarifikasi atas baris DISETUJUI ditolak" "V == 400 or V == 409" \
+  "$(klar223 "$PID223" koreksi_pencatatan)"
+cek "INTI: …dan kategorinya TETAP yang disetujui, bukan yang baru" "V == 1" \
+  "$([ "$(kat223)" = "waste_bahan" ] && echo 1 || echo 0)"
+
+# PASANGAN: pengetatannya tak boleh mematikan jalur klarifikasi ULANG atas baris
+# yang DITOLAK — itu sebabnya pagarnya `ne(disetujui)`, bukan `eq(menunggu)`.
+# Tanpa asersi ini, `eq(menunggu)` juga membuat kedua asersi INTI di atas hijau.
+SIS223B=$(api "$OWNER" GET /stok | jq --arg i "$ING223" '[.[]|select(.ingredient_id==$i)][0].saldo')
+api "$OWNER" POST /stok/opname \
+  "{\"catatan\":\"opname 223b\",\"items\":[{\"ingredient_id\":\"$ING223\",\"qty\":$(python3 -c "print($SIS223B - 3)")}]}" > /dev/null
+PID223B=$(api "$OWNER" GET "/stok/penyesuaian?status=belum" | jq -r --arg n "$NAMA223" '[.[] | select(.bahan==$n and .penyesuaian_status=="menunggu")] | first | .id')
+cek "dasar §223: baris kedua untuk uji penolakan siap" "V == 1" \
+  "$([ -n "$PID223B" ] && [ "$PID223B" != "null" ] && [ "$PID223B" != "$PID223" ] && echo 1 || echo 0)"
+api "$OWNER" POST "/stok/penyesuaian/$PID223B/klarifikasi" \
+  "{\"kategori\":\"waste_bahan\",\"catatan\":\"bukti awal\",\"foto_url\":\"$FOTO223\"}" > /dev/null
+api "$OWNER" POST "/stok/penyesuaian/$PID223B/tolak" '{"alasan":"hitungan meragukan"}' > /dev/null
+# `/penyesuaian/:id/tolak` menolak KLARIFIKASINYA, bukan penyesuaiannya:
+# barisnya dikembalikan ke 'belum' beserta alasannya, dan tetap 'menunggu'
+# sampai ada klarifikasi yang lebih baik. (Yang membuat penyesuaian jadi
+# 'ditolak' adalah penolakan se-SESI.) Dicatat di sini karena asersi pertama
+# versi ini salah menebak semantiknya — dan ujinya yang membetulkan.
+BARIS223B() { api "$OWNER" GET "/stok/penyesuaian?status=semua" | jq -r --arg p "$PID223B" "[.[]|select(.id==\$p)][0].$1"; }
+cek "PASANGAN: klarifikasi ditolak → kembali ke 'belum', bukan 'ditolak'" "V == 1" \
+  "$([ "$(BARIS223B klarifikasi_status)" = "belum" ] && [ "$(BARIS223B penyesuaian_status)" = "menunggu" ] && echo 1 || echo 0)"
+cek "PASANGAN: …dan alasan penolakannya tercatat" "V == 1" \
+  "$([ "$(BARIS223B tolak_alasan)" = "hitungan meragukan" ] && echo 1 || echo 0)"
+cek "PASANGAN: klarifikasi ULANG sesudah ditolak tetap boleh (200)" "V == 200" \
+  "$(klar223 "$PID223B" koreksi_pencatatan)"
+cek "PASANGAN: …kategori barunya tersimpan & alasan penolakan dibersihkan" "V == 1" \
+  "$([ "$(BARIS223B kategori)" = "koreksi_pencatatan" ] && [ "$(BARIS223B tolak_alasan)" = "null" ] && echo 1 || echo 0)"
+
+echo
 echo "── §221 Akun seed harus ditinggalkan seperti semula ──"
 # Duduk di ekor bersama §209/§215, dan karena alasan yang sama: ia menghakimi
 # sesudah semua seksi selesai mengutak-atik.

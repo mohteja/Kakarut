@@ -800,7 +800,24 @@ export const stokRoutes = new Hono<AppEnv>()
         });
       }
 
-      await db
+      /*
+       * PAGARNYA DI SINI, BUKAN DI PRA-CEK DI ATAS.
+       *
+       * Pra-cek `SELECT` dan penulisan `UPDATE` adalah dua pernyataan;
+       * persetujuan yang commit di antaranya tak terlihat oleh keputusan yang
+       * sudah diambil. Yang tertimpa bukan angka stoknya melainkan BUKTINYA —
+       * kategori, catatan, foto, dan siapa yang mengklarifikasi — pada baris
+       * yang sudah disetujui. Penyetujunya menyetujui bukti A; catatannya
+       * berakhir berbunyi B, tanpa jejak bahwa itu pernah berubah.
+       *
+       * `ne(…, "disetujui")` dan bukan `eq(…, "menunggu")`: baris yang DITOLAK
+       * memang dimaksudkan untuk diklarifikasi ulang — itu sebabnya
+       * `tolakAlasan` dibersihkan di bawah.
+       *
+       * Lima dari enam penulisan ke tabel ini sudah memagari dirinya di WHERE;
+       * yang ini pintu yang terlewat. Dijaga `test/penyesuaian-terkunci.test.ts`.
+       */
+      const ubah = await db
         .update(stockOpnames)
         .set({
           klarifikasiStatus: "sudah",
@@ -812,7 +829,22 @@ export const stokRoutes = new Hono<AppEnv>()
           // klarifikasi baru → bersihkan alasan penolakan sebelumnya
           tolakAlasan: null,
         })
-        .where(eq(stockOpnames.id, c.req.param("id")));
+        .where(
+          and(
+            eq(stockOpnames.id, c.req.param("id")),
+            eq(stockOpnames.companyId, auth.company_id!),
+            ne(stockOpnames.penyesuaianStatus, "disetujui"),
+          ),
+        )
+        .returning({ id: stockOpnames.id });
+      if (ubah.length === 0) {
+        // Kalah balapan dengan persetujuan. Pesannya SENGAJA sama dengan
+        // pra-cek di atas — bagi pengirimnya kejadiannya memang satu hal yang
+        // sama, dan sebab baru justru terbaca asing.
+        throw new HTTPException(409, {
+          message: "Penyesuaian sudah disetujui — klarifikasi terkunci",
+        });
+      }
       return c.json({ ok: true });
     },
   )
