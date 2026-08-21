@@ -39,8 +39,15 @@ const DIR_UJI = fileURLToPath(new URL("./", import.meta.url));
 const AKAR = fileURLToPath(new URL("../../../", import.meta.url));
 const BERKAS_INI = "jangkar-iris.test.ts";
 
-/** Akhiran berkas yang mungkin dibaca sebagai teks oleh sebuah uji. */
-const EKSTENSI = [".ts", ".tsx", ".md", ".sh", ".html", ".json", ".css"];
+/**
+ * Akhiran berkas yang mungkin dibaca sebagai teks oleh sebuah uji.
+ *
+ * `.yml`/`.yaml` masuk sejak ada penjaga yang membaca `.github/workflows/ci.yml`
+ * (lihat `ci-menjalankan-semua-suite.test.ts`). Tanpa keduanya, jangkar yang
+ * menunjuk ke langkah workflow tak bisa diverifikasi — persis kelas kegagalan
+ * senyap yang berkas ini ada untuk mencegahnya.
+ */
+const EKSTENSI = [".ts", ".tsx", ".md", ".sh", ".html", ".json", ".css", ".yml", ".yaml"];
 
 function semuaBerkas(dir: string): string[] {
   const hasil: string[] = [];
@@ -53,7 +60,15 @@ function semuaBerkas(dir: string): string[] {
   return hasil;
 }
 
-const SEMUA_SUMBER = ["apps/server/src/", "apps/web/src/", "packages/shared/src/", "scripts/", "docs/"]
+const SEMUA_SUMBER = [
+  "apps/server/src/",
+  "apps/web/src/",
+  "packages/shared/src/",
+  "scripts/",
+  "docs/",
+  // Berkas workflow ikut jadi "sumber" sejak ada penjaga yang mengiris ci.yml.
+  ".github/workflows/",
+]
   .flatMap((r) => semuaBerkas(AKAR + r))
   .filter((p) => !p.includes("/test/"));
 
@@ -89,7 +104,7 @@ function sumberYangDibaca(isiUji: string): string[] {
     const isiDir = SEMUA_SUMBER.filter((s) => s.includes("/" + bersih));
     if (isiDir.length > 0) for (const p of isiDir) ketemu.add(p);
   }
-  for (const m of isiUji.matchAll(/[`"']([^`"'\n]*?\.(?:tsx?|md|sh|html|json|css))[`"']/g)) {
+  for (const m of isiUji.matchAll(/[`"']([^`"'\n]*?\.(?:tsx?|md|sh|html|json|css|ya?ml))[`"']/g)) {
     const frag = m[1];
     const langsung = DIR_UJI + frag.replace(/^\.\//, "");
     const rapi = langsung.includes("..") ? null : langsung;

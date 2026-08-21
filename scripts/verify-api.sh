@@ -4196,6 +4196,29 @@ cek "token sebelum-ganti → 401 setelah ganti password sendiri" "V == 401" \
 cek "token re-issue valid (GET /auth/me → 200)" "V == 200" \
   "$(status_code "$REISS105" GET /auth/me)"
 
+# ── DIKEMBALIKAN SEPERTI SEMULA ───────────────────────────────────────────
+# Seksi ini mengganti password kasir DUA KALI dan dulu membiarkannya begitu.
+# Catatan di kepalanya menyandarkan keamanannya pada penempatan ("letakkan
+# PALING AKHIR") — dan penempatan itu sudah tak berlaku sejak lama: ada ~115
+# seksi di bawah ini sekarang.
+#
+# Yang lebih penting, sandaran itu hanya melindungi SKRIP INI. Apa pun yang
+# berjalan SESUDAH verify-api terhadap basis data yang sama — suite e2e web di
+# CI, misalnya — akan mencoba login kasir dengan password seed dan ditolak.
+# Persis itu yang terjadi saat Playwright dipasang di job yang sama: dua spec
+# merah, dan sebabnya berjarak 4.000 baris dari gejalanya.
+#
+# Maka passwordnya dipulihkan di sini, dan pemulihannya ikut DIUJI — kalau
+# reset-nya gagal, yang merah seksi ini, bukan suite orang lain.
+cek "password kasir dipulihkan ke semula → 200" "V == 200" \
+  "$(status_code_body "$OWNER" PATCH "/karyawan/$UIDK105" "{\"password\":\"$KASIR_PASS\"}")"
+PULIH105=$(login "$KASIR_EMAIL" "$KASIR_PASS")
+cek "login kasir dgn password SEMULA berhasil lagi" "V == 1" \
+  "$([ -n "$PULIH105" ] && [ "$PULIH105" != "null" ] && echo 1 || echo 0)"
+# Token global kasir ikut diperbarui: reset password menaikkan `token_version`,
+# jadi $KASIR yang lama sudah 401 untuk seluruh seksi di bawah.
+KASIR="$PULIH105"
+
 echo "== 106. Verifikasi email wajib saat daftar (anti-enumerasi + blokir login) =="
 # (email sudah dikosongkan lagi di akhir §97 → mode dev: dev_verify_url tersedia)
 # (a) Daftar email BARU → respons netral + tautan verifikasi; belum bisa login.
@@ -11824,6 +11847,28 @@ P219B=$(buatStok219 10)
 cek "PASANGAN: koreksi tunggal tetap menulis selisihnya (10 → 3)" "V == 3" \
   "$(api "$OWNER" POST "/perlengkapan/$P219B/koreksi?branch_id=$CB219" '{"qty_fisik":3}' > /dev/null; saldo219 "$P219B")"
 
+
+echo
+echo "── §216 Akun seed harus ditinggalkan seperti semula ──"
+# Duduk di ekor bersama §209/§215, dan karena alasan yang sama: ia menghakimi
+# sesudah semua seksi selesai mengutak-atik.
+#
+# KENAPA ADA. §105 mengganti password kasir DUA KALI untuk menguji
+# `token_version`, dan dulu membiarkannya begitu — catatannya menyandarkan
+# keamanan pada penempatan ("letakkan PALING AKHIR"), padahal kini ada ~115
+# seksi di bawahnya. Sandaran itu juga hanya melindungi SKRIP INI: apa pun yang
+# berjalan sesudahnya terhadap basis data yang sama akan login dengan password
+# seed dan ditolak.
+#
+# Itu bukan hipotesis. Saat suite e2e web dipasang di job CI yang sama, dua
+# spec merah dengan `login API (status 401)` — dan sebabnya berjarak 4.000
+# baris dari gejalanya. Asersi di bawah membuat sebab dan gejalanya bertemu.
+for pasangan in "owner:$OWNER_EMAIL:$OWNER_PASS" "kasir:$KASIR_EMAIL:$KASIR_PASS" "superadmin:$SA_EMAIL:$SA_PASS"; do
+  peran="${pasangan%%:*}"; sisa="${pasangan#*:}"
+  surel="${sisa%%:*}"; sandi="${sisa#*:}"
+  cek "kredensial seed $peran masih berlaku di akhir skrip" "V == 1" \
+    "$([ -n "$(login "$surel" "$sandi")" ] && echo 1 || echo 0)"
+done
 
 echo
 echo "── §215 Kuota pendaftaran: skrip ini tak boleh diam saat 429 ──"

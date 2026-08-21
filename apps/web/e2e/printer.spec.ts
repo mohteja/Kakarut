@@ -4,11 +4,10 @@
  * pengaturan printer render dan Cetak Tes berfungsi.
  */
 import { expect, test } from "@playwright/test";
-
-const KASIR_EMAIL = process.env.E2E_KASIR_EMAIL ?? "kasir@basooopa.id";
-const KASIR_PASS = process.env.E2E_KASIR_PASS ?? "Kasir123!";
-const OWNER_EMAIL = process.env.E2E_OWNER_EMAIL ?? "terahokiindonesia@gmail.com";
-const OWNER_PASS = process.env.E2E_OWNER_PASS ?? "Basooopa123!";
+import {
+  KASIR_EMAIL, KASIR_PASS, OWNER_EMAIL, OWNER_PASS,
+  absenMasuk, kosongkanMeja, masukLewatSesi, pastikanShiftTerbuka, pilihMeja,
+} from "./util";
 
 const MOCK_SETTINGS = {
   v: 1,
@@ -36,23 +35,34 @@ test.beforeEach(async ({ page }) => {
   }, MOCK_SETTINGS);
 });
 
-async function login(page: import("@playwright/test").Page, email: string, pass: string) {
-  await page.goto("/login");
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(pass);
-  await page.getByRole("button", { name: "Masuk" }).click();
-}
-
-test("checkout dengan auto-print merekam byte ESC/POS (init + TOTAL)", async ({ page }) => {
-  await login(page, KASIR_EMAIL, KASIR_PASS);
+test("checkout dengan auto-print merekam byte ESC/POS (init + TOTAL)", async ({ page, request }) => {
+  const token = await absenMasuk(request, KASIR_EMAIL, KASIR_PASS);
+  // Meja 2, BUKAN Meja 1: `pos.spec.ts` memakai Meja 1 dan berjalan lebih dulu.
+  // Dua spec yang berbagi satu meja saling menjatuhkan lewat keadaan yang
+  // ditinggalkan — dan merahnya muncul di spec yang tidak bersalah.
+  await kosongkanMeja(request, token, "Meja 2");
+  // Sesi ditanam, bukan lewat layar login: spec ini menguji CETAK, bukan login,
+  // dan jatah `/auth/login` (10 per 5 menit) terlalu sempit untuk dihabiskan
+  // oleh spec yang cuma menumpang lewat. Lihat `masukLewatSesi`.
+  await masukLewatSesi(page, request, KASIR_EMAIL, KASIR_PASS);
+  await page.goto("/kasir");
   await expect(page).toHaveURL(/\/kasir/);
 
-  // modal pilih meja muncul dulu → cari & pilih meja
-  await page.getByPlaceholder(/Cari meja/).fill("1");
-  await page.getByRole("button", { name: /Meja 1/ }).click();
+  await pastikanShiftTerbuka(page);
+  await pilihMeja(page, "Meja 2");
+  // Kategorinya dibuka LEBIH DULU, bukan mengandalkan menu itu kebetulan
+  // tampil: di basis data yang baru di-seed ia tidak tampil, dan uji ini lulus
+  // hanya di basis data yang sudah dipakai — hijau yang bergantung pada riwayat.
+  await page.getByRole("button", { name: "Paket Premium" }).click();
   await page.getByRole("button", { name: /Premium Basooopa A/ }).click();
-  await page.getByRole("button", { name: /Bayar & Cetak Struk/ }).click();
-  await expect(page.locator("#struk-print")).toBeVisible();
+
+  // checkout DUA langkah: Resume Order lalu panel pembayaran
+  await page.getByRole("button", { name: /Lanjut →/ }).click();
+  await page.getByRole("button", { name: /Lanjut ke Pembayaran/ }).click();
+  await page.getByRole("button", { name: /Uang pas/ }).click();
+  await page.getByRole("button", { name: /Simpan & Cetak/ }).click();
+  // struk dirender portal `hidden print:block` — diperiksa dari ISInya
+  await expect(page.locator("#struk-print")).toHaveCount(1);
 
   // tombol Cetak Thermal tampil (transport ≠ browser)
   await expect(page.getByRole("button", { name: /Cetak Thermal/ })).toBeVisible();
@@ -70,13 +80,15 @@ test("checkout dengan auto-print merekam byte ESC/POS (init + TOTAL)", async ({ 
   expect(text).toMatch(/PUSAT-\d{8}-\d{4}/);
 });
 
-test("halaman pengaturan printer render dan Cetak Tes merekam byte", async ({ page }) => {
-  await login(page, OWNER_EMAIL, OWNER_PASS);
-  await expect(page).toHaveURL(/\/kasir/);
+test("halaman pengaturan printer render dan Cetak Tes merekam byte", async ({ page, request }) => {
+  await masukLewatSesi(page, request, OWNER_EMAIL, OWNER_PASS);
+  // Owner mendarat di /dashboard (lihat catatan di pos.spec.ts).
+  await expect(page).toHaveURL(/\/dashboard/);
 
   await page.getByRole("link", { name: /Printer/ }).click();
   await expect(page).toHaveURL(/\/pengaturan\/printer/);
-  await expect(page.getByText("Pengaturan Printer")).toBeVisible();
+  // dua elemen memuat teks ini (judul halaman + judul kartu) → ambil yang pertama
+  await expect(page.getByText("Pengaturan Printer").first()).toBeVisible();
   await expect(page.getByText("Metode cetak")).toBeVisible();
   await expect(page.getByText("Bluetooth (BLE)")).toBeVisible();
 

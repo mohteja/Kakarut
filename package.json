@@ -16,7 +16,8 @@
     "build": "npm run build -w @kakarut/web",
     "start": "npm run start -w @kakarut/server",
     "test": "npm run test -w @kakarut/server",
-    "typecheck": "npm run typecheck --workspaces --if-present"
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test:e2e": "npm run e2e -w @kakarut/web"
   },
   "engines": {
     "node": ">=20"
