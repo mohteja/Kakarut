@@ -16,7 +16,7 @@ import {
   type RiwayatHargaLot,
 } from "@kakarut/shared";
 import { kunciAntrean } from "../../lib/kunci";
-import { tanpaBentrok } from "../../lib/pg-galat";
+import { bentrokUnikPada, tanpaBentrok } from "../../lib/pg-galat";
 import { db } from "../../db/client";
 import {
   branches,
@@ -843,35 +843,49 @@ export const bahanRoutes = new Hono<AppEnv>()
       insertBaris.map((x) => ({ nama: x.item.nama, kode: x.item.kode })),
     );
 
+    /*
+     * Satu rumah untuk "terapkan baris CSV ke bahan yang SUDAH ada". Dipakai
+     * dua kali: oleh gelung perbarui/pulihkan di bawah, dan oleh jalur balapan
+     * di gelung sisip — baris yang ternyata sudah diciptakan proses lain.
+     * Disatukan supaya kolom yang kelak ditambahkan ke impor tak bisa terpasang
+     * di satu jalur saja.
+     */
+    const terapkanKeBarisAda = async (
+      id: string,
+      b: (typeof items)[number],
+      pulih: boolean,
+    ): Promise<void> => {
+      await db
+        .update(ingredients)
+        .set({
+          nama: b.nama,
+          // Hanya kolom yang BENAR-BENAR dikirim yang ditulis. `undefined`
+          // di sini bukan "kosongkan", melainkan "berkas ini tak bicara
+          // soal kolom itu" — lihat komentar `BahanImportRowBody`.
+          ...(b.kategori !== undefined && { kategori: kanonikKategori(kmap, b.kategori) }),
+          ...(b.harga_beli !== undefined && { hargaBeli: b.harga_beli }),
+          ...(b.isi !== undefined && { isi: b.isi }),
+          ...(b.satuan !== undefined && { satuan: b.satuan }),
+          ...(b.satuan_beli !== undefined && { satuanBeli: b.satuan_beli ?? null }),
+          ...(b.stok_minimum !== undefined && { stokMinimum: b.stok_minimum }),
+          ...(b.min_beli !== undefined && { minBeli: b.min_beli }),
+          ...(b.masa_simpan_hari !== undefined && { masaSimpanHari: b.masa_simpan_hari }),
+          ...(b.lead_time_hari !== undefined && { leadTimeHari: b.lead_time_hari }),
+          ...(b.boleh_eceran !== undefined && { bolehEceran: b.boleh_eceran }),
+          ...(b.lacak_stok !== undefined && { trackStok: b.lacak_stok }),
+          ...(b.kemasan !== undefined && { isPackaging: b.kemasan }),
+          ...(b.complement !== undefined && { isComplement: b.complement }),
+          ...(b.catatan !== undefined && { catatan: b.catatan ?? null }),
+          // baris pulih: aktifkan kembali dari Tempat Sampah
+          ...(pulih && { isActive: true }),
+          updatedAt: new Date(),
+        })
+        .where(and(eq(ingredients.id, id), eq(ingredients.companyId, companyId)));
+    };
+
     for (const u of updateBaris) {
       try {
-        const b = u.item;
-        await db
-          .update(ingredients)
-          .set({
-            nama: b.nama,
-            // Hanya kolom yang BENAR-BENAR dikirim yang ditulis. `undefined`
-            // di sini bukan "kosongkan", melainkan "berkas ini tak bicara
-            // soal kolom itu" — lihat komentar `BahanImportRowBody`.
-            ...(b.kategori !== undefined && { kategori: kanonikKategori(kmap, b.kategori) }),
-            ...(b.harga_beli !== undefined && { hargaBeli: b.harga_beli }),
-            ...(b.isi !== undefined && { isi: b.isi }),
-            ...(b.satuan !== undefined && { satuan: b.satuan }),
-            ...(b.satuan_beli !== undefined && { satuanBeli: b.satuan_beli ?? null }),
-            ...(b.stok_minimum !== undefined && { stokMinimum: b.stok_minimum }),
-            ...(b.min_beli !== undefined && { minBeli: b.min_beli }),
-            ...(b.masa_simpan_hari !== undefined && { masaSimpanHari: b.masa_simpan_hari }),
-            ...(b.lead_time_hari !== undefined && { leadTimeHari: b.lead_time_hari }),
-            ...(b.boleh_eceran !== undefined && { bolehEceran: b.boleh_eceran }),
-            ...(b.lacak_stok !== undefined && { trackStok: b.lacak_stok }),
-            ...(b.kemasan !== undefined && { isPackaging: b.kemasan }),
-            ...(b.complement !== undefined && { isComplement: b.complement }),
-            ...(b.catatan !== undefined && { catatan: b.catatan ?? null }),
-            // baris pulih: aktifkan kembali dari Tempat Sampah
-            ...(u.pulih && { isActive: true }),
-            updatedAt: new Date(),
-          })
-          .where(and(eq(ingredients.id, u.id), eq(ingredients.companyId, companyId)));
+        await terapkanKeBarisAda(u.id, u.item, u.pulih);
         if (u.pulih) dipulihkan++;
         else diperbarui++;
       } catch (e) {
@@ -907,6 +921,45 @@ export const bahanRoutes = new Hono<AppEnv>()
         });
         ditambah++;
       } catch (e) {
+        /*
+         * Klasifikasi di atas ("baris ini belum ada → sisipkan") dibaca sebelum
+         * gelung ini menulis, jadi ia bisa BASI: impor lain yang berjalan
+         * bersamaan sudah menciptakan slug yang sama di sela itu.
+         *
+         * Sebelum ini, akibatnya dilaporkan sebagai KEGAGALAN — dan pesannya
+         * `(e as Error).message` mentah dari driver, yaitu seluruh teks kueri
+         * INSERT beserta daftar kolomnya, dikirim apa adanya ke klien. Yang
+         * mengimpor daftar harga supplier melihat dump SQL, bukan "sudah ada".
+         *
+         * Yang benar bukan melaporkan gagal, melainkan mengklasifikasi ULANG
+         * baris itu dengan data yang kini benar — persis yang akan terjadi
+         * seandainya kedua impor berjalan berurutan:
+         *   · mode "tambah"   → baris yang sudah ada memang DILEWATI;
+         *   · mode "perbarui" → nilainya diterapkan ke baris yang sudah ada.
+         * Tanpa cabang kedua itu, satu baris CSV hilang tanpa jejak di mode
+         * yang justru dipakai untuk memperbarui harga.
+         */
+        if (bentrokUnikPada(e, "ingredients_company_slug_uq")) {
+          const [kini] = await db
+            .select({ id: ingredients.id, isActive: ingredients.isActive })
+            .from(ingredients)
+            .where(and(eq(ingredients.companyId, companyId), eq(ingredients.slug, slug)));
+          if (kini) {
+            if (mode === "tambah") {
+              dilewati++;
+              continue;
+            }
+            try {
+              await terapkanKeBarisAda(kini.id, b, !kini.isActive);
+              if (kini.isActive) diperbarui++;
+              else dipulihkan++;
+              continue;
+            } catch (e2) {
+              gagal.push({ nama: b.nama, alasan: (e2 as Error)?.message ?? "gagal diperbarui" });
+              continue;
+            }
+          }
+        }
         gagal.push({ nama: b.nama, alasan: (e as Error)?.message ?? "gagal ditambah" });
       }
     }

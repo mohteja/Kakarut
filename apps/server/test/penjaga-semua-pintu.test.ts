@@ -35,7 +35,18 @@
  * BATASNYA, supaya tak dikira lebih dari yang sebenarnya:
  *  · granularitasnya BADAN, jadi penjaga yang sah tapi tinggal di PEMANGGIL
  *    tetap terbaca "tanpa penjaga" (lihat entri `buatPerusahaanUntuk`);
+ *  · dan ke arah sebaliknya — yang LEBIH BERBAHAYA — satu penjaga di mana pun
+ *    dalam satu badan membuat SELURUH tulisan di badan itu lolos. `provisionGuest`
+ *    (seed/guest.ts) adalah contoh nyatanya: `onConflictDoUpdate` di insert
+ *    `users` paling atas menutupi insert `companies`, `branches`, dan
+ *    `storageLocations` di bawahnya yang tak berpenjaga sama sekali. Badan yang
+ *    panjang karena itu titik butanya, bukan titik kuatnya;
  *  · ia hanya melihat bentuk yang ditulis di TypeScript, bukan SQL mentah;
+ *  · daftar tabel tiap aturan adalah pilihan, bukan kelengkapan. Untuk
+ *    `bentrok-unik`: ada 32 tabel berindeks unik di skema ini, dan menyapu
+ *    semuanya memunculkan 20 pintu terbuka. Yang didaftarkan hanya kelas yang
+ *    sudah terbukti menyakiti — indeks unik atas nama YANG DIKETIK ORANG.
+ *    Sisanya utang yang diukur, bukan wilayah yang dinyatakan bersih;
  *  · dan ia hanya tahu aturan yang didaftarkan di bawah. Ia tak menemukan
  *    aturan baru — ia menjaga yang sudah dibayar mahal supaya tak bocor lagi.
  */
@@ -49,9 +60,17 @@ const AKAR = fileURLToPath(new URL("../src", import.meta.url));
 /**
  * Potong berkas jadi "badan" seukuran handler: dari pendaftaran rute atau
  * deklarasi fungsi sampai yang berikutnya.
+ *
+ * `const` hanya memotong bila ia di KOLOM NOL — deklarasi tingkat berkas.
+ * Versi pertama memotong pada `const` mana pun, termasuk pembantu kecil DI
+ * DALAM handler (`const slugUnik = (nama) => {`). Akibatnya satu handler
+ * terbelah dan penjaganya tertinggal di potongan sebelah: sapuan ini menuduh
+ * `POST /bahan/bulk` "tanpa penjaga" padahal `kunciAntrean`-nya ada enam baris
+ * di atas, di badan yang sama menurut siapa pun yang membacanya. Tuduhan palsu
+ * lebih merusak gerbang daripada diam: ia mengajari orang mengisi `dasar`.
  */
 const BATAS =
-  /^\s*\.(?:post|get|put|patch|delete)\(\s*"|^\s*(?:export\s+)?(?:async\s+)?function\s+\w+|^\s*(?:export\s+)?const\s+\w+\s*(?::[^=]+)?=\s*(?:async\s*)?\(/gm;
+  /^\s*\.(?:post|get|put|patch|delete)\(\s*"|^\s*(?:export\s+)?(?:async\s+)?function\s+\w+|^(?:export\s+)?const\s+\w+\s*(?::[^=]+)?=\s*(?:async\s*)?\(/gm;
 
 function badan(src: string): { baris: number; teks: string }[] {
   const batas = [...src.matchAll(BATAS)].map((m) => m.index!);
@@ -134,8 +153,31 @@ const ATURAN: Aturan[] = [
       "keunikan adalah INDEKSNYA. Tanpa terjemahan, yang kalah balapan menerima " +
       "23505 mentah alias 500 — dan di web itu memicu overlay 'server sedang " +
       "diperbarui'.",
-    tulis: /\.insert\(\s*(?:users|invitations|companies)\s*\)/,
-    penjaga: /bentrokUnikPada|tanpaBentrok|onConflictDoNothing/,
+    /*
+     * DAFTAR TABELNYA: yang indeks uniknya berdiri di atas nama YANG DIKETIK
+     * ORANG. Versi pertama cuma `users|invitations|companies` — tiga tabel yang
+     * kebetulan sudah dibereskan dengan tangan — dan karena itu ia MELEWATKAN
+     * `/bahan` dan `/perlengkapan`, dua pintu master-data paling ramai di POS
+     * ini, yang keduanya membalas 500. Yang menemukannya bukan sapuan ini
+     * melainkan menembak kesepuluh endpoint pembuatan sekaligus; daftarnya lalu
+     * dilebarkan supaya pintu berikutnya tak perlu ditemukan dengan cara itu.
+     *
+     * Kenapa berhenti di sini dan tidak memakai SELURUH tabel berindeks unik
+     * (ada 32): diukur, itu memunculkan 20 pintu terbuka, dan mendaftarkan 20
+     * entri `dasar` tanpa benar-benar memeriksa satu per satu justru melanggar
+     * doktrin berkas ini sendiri. Sisanya sengaja ditinggalkan sebagai utang
+     * yang DIUKUR, bukan dinyatakan bersih.
+     */
+    tulis:
+      /\.insert\(\s*(?:users|invitations|companies|branches|suppliers|storageLocations|meja|ingredients|units|menuCategories|ingredientCategories|menus|customers|supplies)\s*\)/,
+    /*
+     * `bentrokUnik` (bukan cuma `…Pada`) dan `onConflict` (bukan cuma
+     * `…DoNothing`) — versi pertama meleset pada keduanya, dan keduanya
+     * menghasilkan tuduhan palsu: `kebersihan` memakai `bentrokUnik(err)` di
+     * catch, `seed/guest.ts` memakai `onConflictDoUpdate`. `kunciAntrean` juga
+     * penjaga yang sah di sini: ia MENCEGAH bentroknya, bukan menerjemahkannya.
+     */
+    penjaga: /bentrokUnik|tanpaBentrok|onConflict|kunciAntrean/,
     dasar: {
       "modules/auth/superadmin.ts": {
         pintu: 1,
@@ -154,12 +196,16 @@ const ATURAN: Aturan[] = [
           "(akhiran acak) dan bukan diketik orang. Sapuan ini bergranularitas " +
           "badan, jadi ia tak bisa melihat ke pemanggil",
       },
-      "seed/guest.ts": {
-        pintu: 1,
-        alasan:
-          "penyemai akun demo — dipanggil saat provisioning dengan gerbangnya " +
-          "sendiri, bukan dari permintaan HTTP mana pun",
-      },
+      // `seed/guest.ts` DIHAPUS dari daftar ini, dan bukan karena pintunya
+      // ditutup: `provisionGuest` memang memakai `onConflictDoUpdate` pada
+      // insert `users`-nya, jadi dulu ia tertuduh hanya karena pola penjaganya
+      // cuma mengenal `onConflictDoNothing`. Yang memaksa penghapusannya uji
+      // "`dasar` tak menyimpan entri yang sudah tak berlaku" di bawah.
+      //
+      // Yang perlu diketahui penerusnya: `provisionGuest` juga menyisipkan
+      // `companies`, `branches`, dan `storageLocations` TANPA penjaga, dan
+      // ketiganya kini TAK TERLIHAT sapuan ini — satu penjaga di awal badan
+      // menutupi seluruh sisanya. Lihat catatan BATASNYA di kepala berkas.
     },
   },
   {
@@ -271,9 +317,23 @@ describe("detektornya benar-benar mengenali bentuknya", () => {
       true,
     ],
     ["cuti-bertindih", 'const [row] = await tx.insert(leaveRequests).values({ companyId }).returning();', true],
+    // Dua pintu yang dulu LOLOS karena daftar tabelnya cuma memuat tiga nama —
+    // dan keduanya membalas 500 di produksi sampai ditembak balapan.
+    [
+      "bentrok-unik",
+      'const [row] = await db.insert(ingredients).values({ companyId, slug, kode, nama: body.nama }).returning();',
+      true,
+    ],
+    [
+      "bentrok-unik",
+      'const [row] = await db.insert(supplies).values({ companyId, nama: body.nama, satuan: body.satuan }).returning();',
+      true,
+    ],
     // …dan yang TIDAK boleh tertuduh:
     ["owner-terakhir", 'await tx.update(memberships).set({ employeeCode: kode }).where(eq(x));', false],
     ["bentrok-unik", 'await tx.insert(memberships).values({ userId, companyId });', false],
+    // `saleItems` bukan `sales`; batas kata harus memisahkannya
+    ["bentrok-unik", 'await tx.insert(menuComponents).values({ menuId, ingredientId });', false],
   ];
 
   it.each(contoh)("%s mengenali: %s → %s", (nama, kode, harus) => {
@@ -288,5 +348,33 @@ describe("detektornya benar-benar mengenali bentuknya", () => {
     const unik = ATURAN.find((a) => a.nama === "bentrok-unik")!;
     expect(unik.penjaga.test('if (bentrokUnikPada(e, "users_email_unique")) {')).toBe(true);
     expect(unik.penjaga.test("const x = 1;")).toBe(false);
+    // Keempat bentuk penjaga yang SUNGGUHAN dipakai di repo ini. Tiga di antara
+    // ini dulu tak dikenali, dan ketiganya menghasilkan tuduhan PALSU — yang
+    // merusak gerbang persis sama parahnya dengan melewatkan pintu.
+    expect(unik.penjaga.test("if (bentrokUnik(err)) {")).toBe(true); // kebersihan
+    expect(unik.penjaga.test(".onConflictDoUpdate({ target: users.email })")).toBe(true); // seed/guest
+    expect(unik.penjaga.test(".onConflictDoNothing()")).toBe(true);
+    expect(unik.penjaga.test('await kunciAntrean(tx, "bahan-slug", companyId);')).toBe(true); // bulk
+    expect(unik.penjaga.test('await tanpaBentrok("x", () => db.insert(y))')).toBe(true);
+  });
+
+  it("BATAS tak memotong pembantu kecil DI DALAM handler", () => {
+    // Regresi langsung: potongan pada `const slugUnik = (` memisahkan
+    // `kunciAntrean` dari INSERT yang dijaganya, dan sapuan ini lalu menuduh
+    // perbaikan yang benar. Badan di bawah harus tetap SATU.
+    const contoh = [
+      '  .post("/bulk", requireRole("owner"), async (c) => {',
+      "    const rows = await db.transaction(async (tx) => {",
+      '      await kunciAntrean(tx, "bahan-slug", companyId);',
+      "      const slugUnik = (nama: string): string => nama.toLowerCase();",
+      "      return tx.insert(ingredients).values(items.map((b) => ({ slug: slugUnik(b.nama) })));",
+      "    });",
+      "  })",
+    ].join("\n");
+    const potong = badan(contoh);
+    expect(potong).toHaveLength(1);
+    const unik = ATURAN.find((a) => a.nama === "bentrok-unik")!;
+    expect(unik.tulis.test(potong[0].teks)).toBe(true);
+    expect(unik.penjaga.test(potong[0].teks)).toBe(true);
   });
 });

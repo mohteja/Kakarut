@@ -39,10 +39,37 @@ login() { curl -sf -X POST "$BASE/api/auth/login" -H 'Content-Type: application/
 # Daftar + verifikasi email (jalur dev) → echo token sesi. Register tak lagi
 # auto-login: harus verifikasi email dulu. Hanya bekerja saat email BELUM
 # dikonfigurasi (register mengembalikan dev_verify_url).
+#
+# KUOTA: `POST /auth/register` dibatasi 20 per IP per JAM (`batasRegister` di
+# auth/routes.ts). Skrip ini memanggilnya sekitar 20 kali, jadi ia berjalan
+# TEPAT DI TEPI kuota itu — menambah satu pendaftaran saja bisa membuat
+# seksi-seksi terakhir gagal karena alasan yang sama sekali bukan kode.
+#
+# Tanpa penjaga di bawah, kegagalannya menyamar: 429 tak punya
+# `dev_verify_url`, `vt` jadi kosong, fungsi ini `return 0` DIAM-DIAM, dan
+# pemanggilnya menerima token kosong. Yang terlihat kemudian cuma asersi
+# turunan yang aneh ("tiga akun baru siap membuat usaha — nilai: 0") beberapa
+# ratus baris jauhnya. Itu pola yang sudah pernah menggigit repo ini (lihat
+# PENJAGA RUTE MATI di bawah): galat yang ditelan lalu muncul sebagai
+# kebingungan di tempat lain.
+#
+# Dicatat ke BERKAS, bukan lewat `gagal`, dan alasannya bukan gaya: setiap
+# pemanggil memakainya sebagai `T=$(daftar_verif …)` — SUBKULIT. Di dalam
+# subkulit, `FAIL` yang dinaikkan `gagal` hilang saat subkulitnya tutup, dan
+# yang lebih buruk, baris "✘ …" yang dicetaknya ikut TERTANGKAP jadi isi `$T`.
+# Penjaganya akan merusak token yang dijaganya sendiri lalu diam. Versi
+# pertama penjaga ini persis begitu; yang menemukannya uji-diri di §215.
+KUOTA_HABIS="${TMPDIR:-/tmp}/verify-api-kuota-habis.$$"
+: > "$KUOTA_HABIS"
 daftar_verif() { # <email> <password> <nama>
   local email="$1" pass="$2" nama="${3:-Uji}" reg vt
   reg=$(curl -s -X POST "$BASE/api/auth/register" -H 'Content-Type: application/json' \
     -d "{\"nama\":\"$nama\",\"email\":\"$email\",\"password\":\"$pass\"}")
+  if printf '%s' "$reg" | grep -q 'Terlalu banyak pendaftaran'; then
+    printf '%s\n' "$email" >> "$KUOTA_HABIS"
+    echo "  ⚠ kuota pendaftaran habis: $email" >&2
+    return 0
+  fi
   vt=$(echo "$reg" | jq -r '.dev_verify_url // ""' | sed -n 's/.*token=//p')
   [ -z "$vt" ] && return 0
   curl -s -X POST "$BASE/api/auth/verify-email" -H 'Content-Type: application/json' \
@@ -78,7 +105,7 @@ daftar_verif() { # <email> <password> <nama>
 # ketahuan. Rute mati di cabang `if` yang tak pernah jalan tetap lolos.
 RUTE_MATI="${TMPDIR:-/tmp}/verify-api-rute-mati.$$"
 : > "$RUTE_MATI"
-trap 'rm -f "$RUTE_MATI"' EXIT
+trap 'rm -f "$RUTE_MATI" "$KUOTA_HABIS"' EXIT
 
 catat_rute_mati() { # catat_rute_mati <method> <path> <badan-respons>
   case "$3" in
@@ -11195,11 +11222,13 @@ kode213(){ cat "$1"/c* | grep -c "^$2" || true; }  # berapa jawaban berawalan <2
 # Angka 5/8 itu bukan hipotesis: bentuk 1×4 memang MELOLOSKAN bug yang sudah
 # terbukti ada — persis yang terjadi saat seksi ini pertama dijalankan, semua
 # asersi /bahan hijau di atas kode yang cacat.
+# `awalan` disambung TANPA pemisah — pemanggil yang menentukan. Nama bahan
+# mau spasi ("Balap Bahan 213 "), tapi alamat surel tidak boleh punya satu pun.
 balapUlang213(){ # balapUlang213 <ronde> <n> <token> <path> <tmpl ber-%NAMA%> <awalan>
   local ronde="$1" n="$2" t="$3" path="$4" tmpl="$5" awalan="$6" d r i nm
   d=$(mktemp -d)
   for r in $(seq 1 "$ronde"); do
-    nm="$awalan $RANDOM$RANDOM"
+    nm="$awalan$RANDOM$RANDOM"
     printf '%s\n' "$nm" >> "$d/nama"
     for i in $(seq 1 "$n"); do
       curl -s -o "$d/b$r-$i" -w '%{http_code}\n' -X POST "$BASE/api$path" \
@@ -11223,10 +11252,14 @@ cek "…pesan penolakannya sama dgn jalur berurutan (bukan pesan generik)" "V ==
   "$(cat "$D213"/b* | jq -s --arg e "$E213" '[.[]|select(.error != null)]|all(.[]; .error | test("sudah terdaftar"))|if . then 1 else 0 end')"
 
 # ── POST /karyawan/undang (invitations_company_email_pending_uq) ───────────
-U213="undang213.$RANDOM@basooopa.id"
-DU213=$(balap213 4 "$OWNER" /karyawan/undang "{\"email\":\"$U213\",\"role\":\"cashier\",\"branch_id\":\"$CB213\"}")
-cek "INTI: 4 undangan beremail sama → TAK ADA 5xx" "V == 0" "$(lima213 "$DU213")"
-cek "…tepat SATU undangan lahir" "V == 1" "$(kode213 "$DU213" 201)"
+# Diukur atas bug yang disuntikkan kembali: 1 burst × 4 hanya menuduh 6/8
+# ronde — dua dari delapan kali ia meloloskan bug yang sudah terbukti ada.
+# 3 burst × 4 → 8/8. (Menaikkan serentaknya justru MEMPERBURUK: 1 × 6 → 3/8;
+# lihat catatan pada `balapUlang213` tentang kenapa.)
+DU213=$(balapUlang213 3 4 "$OWNER" /karyawan/undang \
+  '{"email":"undang213.%NAMA%@basooopa.id","role":"cashier","branch_id":"'"$CB213"'"}' "u")
+cek "INTI: 3×4 undangan beremail sama → TAK ADA 5xx" "V == 0" "$(lima213 "$DU213")"
+cek "…tepat SATU undangan lahir per email (3 × 201)" "V == 3" "$(kode213 "$DU213" 201)"
 
 # ── POST /admin/tenants (companies_slug_unique + users_email_unique) ───────
 T213="tenant213.$RANDOM@contoh.id"
@@ -11241,6 +11274,26 @@ cek "…tepat SATU tenant lahir" "V == 1" "$(kode213 "$DT213" 201)"
 # pada jalur balapan akan membuka kembali celah enumerasi itu: penyerang cukup
 # mengirim dua permintaan sekaligus lalu membaca bedanya. Yang benar: balapan
 # yang kalah diperlakukan seperti "ternyata sudah ada" — jawaban yang sama.
+#
+# BATAS YANG DIAKUI, karena yang di atasnya tidak bisa dipakai di sini.
+# Diukur atas bug yang disuntikkan kembali, 8 ronde masing-masing:
+#
+#   1 burst × 3  → 7/8   ← yang dipakai; satu dari delapan kali ia meleset
+#   1 burst × 6  → 0/8   ← lebih serentak justru BUTA TOTAL
+#   3 burst × 3  → 0/8   ← begitu pula menambah burst
+#
+# Dua sebab, dan keduanya membuat jalur ini TAK BISA dikuatkan seperti yang
+# lain. Pertama, `/auth/register` menjalankan bcrypt — mahal dan terikat CPU,
+# jadi permintaan yang menumpuk malah BERBARIS, dan yang kedua baru menulis
+# setelah yang pertama commit: jendela balapannya tertutup sendiri. Kedua,
+# endpoint ini berkuota 20 per IP per jam, dan skrip ini sudah memakai hampir
+# semuanya — angka 0/8 di atas justru terukur saat kuotanya HABIS dan semua
+# jawaban jadi 429 (itulah asal-usul penjaga kuota pada `daftar_verif`).
+#
+# Jadi 7/8 dicatat apa adanya, bukan dibulatkan jadi "dijaga". Yang membuatnya
+# tetap berguna: tiga asersi di bawah menuduh dari tiga arah berbeda atas
+# balapan yang SAMA, dan asersi anti-enumerasi ("pesannya identik") juga akan
+# merah bila kuota habis — bukan hijau.
 R213="daftar213.$RANDOM@contoh.id"
 DR213=$(balap213 3 "" /auth/register "{\"nama\":\"Daftar 213\",\"email\":\"$R213\",\"password\":\"Daftar213Pass!\"}")
 cek "INTI: 3 pendaftaran beremail sama → TAK ADA 5xx" "V == 0" "$(lima213 "$DR213")"
@@ -11296,7 +11349,7 @@ cek "…dan slugnya dibedakan otomatis, bukan ditolak" "V == 3" \
 #   /perlengkapan → 201 409 409 500
 #   /bahan        → 201 409 409 500
 TB213='{"nama":"%NAMA%","satuan":"pcs","isi":1,"harga_beli":1000,"pengadaan":"beli","kategori":"lain"}'
-DB213=$(balapUlang213 3 6 "$OWNER" /bahan "$TB213" "Balap Bahan 213")
+DB213=$(balapUlang213 3 6 "$OWNER" /bahan "$TB213" "Balap Bahan 213 ")
 cek "INTI: 3×6 pembuatan bahan bernama sama → TAK ADA 5xx" "V == 0" "$(lima213 "$DB213")"
 cek "…tepat SATU bahan lahir per nama (3 × 201), sisanya 409" "V == 3" "$(kode213 "$DB213" 201)"
 # Jumlah baris untuk KETIGA nama yang diperebutkan. Ditulis sebagai gelung,
@@ -11314,7 +11367,7 @@ cek "…dan hanya satu baris untuk tiap nama yang diperebutkan" "V == 3" \
   "$(barisPerNama213 /bahan "$DB213/nama")"
 
 TP213='{"nama":"%NAMA%","satuan":"pcs","harga_beli":500}'
-DP213=$(balapUlang213 3 6 "$OWNER" /perlengkapan "$TP213" "Balap Perlengkapan 213")
+DP213=$(balapUlang213 3 6 "$OWNER" /perlengkapan "$TP213" "Balap Perlengkapan 213 ")
 cek "INTI: 3×6 pembuatan perlengkapan bernama sama → TAK ADA 5xx" "V == 0" "$(lima213 "$DP213")"
 cek "…tepat SATU perlengkapan lahir per nama (3 × 201)" "V == 3" "$(kode213 "$DP213" 201)"
 
@@ -11339,7 +11392,7 @@ TBK213='{"items":[{"nama":"%NAMA%","satuan":"pcs","isi":1,"harga_beli":1000,
   "track_stok":true,"stok_minimum":0,"kategori":"lain","boleh_eceran":false,
   "min_beli":1,"masa_simpan_hari":0,"lead_time_hari":0,"is_packaging":false,
   "is_complement":false}]}'
-DBK213=$(balapUlang213 3 4 "$OWNER" /bahan/bulk "$TBK213" "Balap Bulk 213")
+DBK213=$(balapUlang213 3 4 "$OWNER" /bahan/bulk "$TBK213" "Balap Bulk 213 ")
 cek "INTI: 3×4 impor massal bernama sama → TAK ADA 5xx" "V == 0" "$(lima213 "$DBK213")"
 cek "INTI: SEMUANYA jadi (12 × 201) — pengalokasi tak boleh menolak" "V == 12" \
   "$(kode213 "$DBK213" 201)"
@@ -11359,6 +11412,46 @@ slugBedaPerNama213(){ # slugBedaPerNama213 <path> <berkas-nama> → total slug u
 }
 cek "…dan tiap slug memang BERBEDA, bukan 12 baris berslug sama" "V == 12" \
   "$(slugBedaPerNama213 /bahan "$DBK213/nama")"
+
+# ── PINTU KEDELAPAN: IMPOR CSV — pintu yang gagalnya TAK BERWARNA MERAH ────
+# `/bahan/import` melaporkan kegagalan PER BARIS lalu membalas 200, jadi
+# balapannya tak pernah muncul sebagai 5xx dan tak satu pun asersi "TAK ADA
+# 5xx" bisa melihatnya. Yang keluar sebelum perbaikan: satu entri `gagal`
+# berisi `(e as Error).message` MENTAH dari driver — seluruh teks kueri INSERT
+# beserta daftar kolomnya, dikirim apa adanya ke klien.
+#
+# Karena itu yang diperiksa di sini BUKAN kode statusnya melainkan cacahnya:
+# berurutan, empat impor "tambah" bernama sama menghasilkan 1 ditambah +
+# 3 dilewati dan NOL gagal. Sebelum perbaikan, sebagian dari yang 3 itu jatuh
+# ke `gagal`.
+jmlField213(){ # jmlField213 <dir> <field> → jumlah field itu di semua badan
+  jq -s --arg f "$2" '[.[][$f] // 0]|add' "$1"/b* 2>/dev/null || echo 99
+}
+TIM213='{"mode":"tambah","items":[{"nama":"%NAMA%","harga_beli":7777}]}'
+DIM213=$(balapUlang213 3 4 "$OWNER" /bahan/import "$TIM213" "Impor 213 ")
+cek "INTI: 3×4 impor CSV bernama sama → NOL baris gagal" "V == 0" \
+  "$(jq -s '[.[].gagal[]?]|length' "$DIM213"/b* 2>/dev/null || echo 99)"
+cek "…tepat satu bahan lahir per nama (3 ditambah)" "V == 3" "$(jmlField213 "$DIM213" ditambah)"
+cek "…sisanya DILEWATI, bukan hilang (9 dilewati)" "V == 9" "$(jmlField213 "$DIM213" dilewati)"
+cek "…dan hanya satu baris tersimpan per nama" "V == 3" \
+  "$(barisPerNama213 /bahan "$DIM213/nama")"
+
+# PASANGAN: mode "perbarui" harus benar-benar MENERAPKAN nilainya, bukan cuma
+# tak-gagal. Tanpa ini, "0 gagal" juga tercapai dengan membuang baris diam-diam.
+NPB213="Impor Perbarui 213 $RANDOM"
+BPB213="{\"mode\":\"perbarui\",\"items\":[{\"nama\":\"$NPB213\",\"harga_beli\":7777}]}"
+DPB213=$(mktemp -d)
+for i in 1 2 3 4; do
+  curl -s -o "$DPB213/b$i" -w '%{http_code}\n' -X POST "$BASE/api/bahan/import" \
+    -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "$BPB213" > "$DPB213/c$i" &
+done
+wait
+cek "PASANGAN: mode perbarui → nol gagal" "V == 0" \
+  "$(jq -s '[.[].gagal[]?]|length' "$DPB213"/b* 2>/dev/null || echo 99)"
+cek "PASANGAN: yang kalah MEMPERBARUI, bukan dilewati (1 tambah + 3 perbarui)" "V == 3" \
+  "$(jmlField213 "$DPB213" diperbarui)"
+cek "PASANGAN: harga dari CSV benar-benar tersimpan" "V == 7777" \
+  "$(api "$OWNER" GET /bahan | jq -r --arg n "$NPB213" '[.[]|select(.nama==$n)][0].harga_beli // 0')"
 
 
 echo "== 214. Perusahaan tak boleh kehilangan owner TERAKHIRNYA =="
@@ -11443,6 +11536,35 @@ cek "INTI: dua owner hapus akun BERSAMAAN → tepat SATU yang tersisa" "V == 1" 
   "$(ownerAktif214 "$TE214" "$TF214")"
 cek "…dan yang kalah ditolak 400" "V == 1" "$(cat "$DH214"/* | grep -c '^400' || true)"
 
+
+echo
+echo "── §215 Kuota pendaftaran: skrip ini tak boleh diam saat 429 ──"
+# Duduk di ekor bersama §209, dan karena alasan yang sama: ia mengadili berkas
+# yang baru terisi setelah semua seksi menembakkan pendaftarannya.
+#
+# `POST /auth/register` berkuota 20 per IP per JAM, dan skrip ini memanggilnya
+# sekitar 20 kali — TEPAT DI TEPI. Sekali terlampaui, `daftar_verif` dulu
+# memulangkan token kosong tanpa sepatah kata, dan yang terlihat cuma asersi
+# turunan yang membingungkan ratusan baris jauhnya.
+#
+# ── Dibuktikan MENGGIGIT lebih dulu, seperti §209 ──────────────────────────
+# Tanpa ini, "berkasnya kosong" cuma membuktikan bahwa tak ada yang pernah
+# menulis ke sana — termasuk bila deteksinya rusak sama sekali.
+printf 'uji-diri-215@contoh.id\n' >> "$KUOTA_HABIS"
+cek "penjaga kuota bisa MENUDUH (uji-diri)" "V == 1" \
+  "$(grep -cx 'uji-diri-215@contoh.id' "$KUOTA_HABIS" || true)"
+sed -i '/^uji-diri-215@contoh.id$/d' "$KUOTA_HABIS"
+cek "…dan tuduhan uji-diri itu bisa dicabut lagi" "V == 0" \
+  "$(grep -cx 'uji-diri-215@contoh.id' "$KUOTA_HABIS" || true)"
+
+cek "INTI: tak ada pendaftaran yang kena 429 sepanjang jalan ini" "V == 0" \
+  "$(grep -c . "$KUOTA_HABIS" || true)"
+if [ -s "$KUOTA_HABIS" ]; then
+  echo "     Kuota 20/IP/jam terlampaui. INI BUKAN BUG KODE — hasil seksi yang"
+  echo "     memakai akun baru jadi tak bermakna. Tunggu satu jam, atau kurangi"
+  echo "     pendaftaran di skrip ini. Yang kena:"
+  sed 's/^/       /' "$KUOTA_HABIS"
+fi
 
 echo
 echo "── §209 Rute mati: verify-api tak boleh memanggil endpoint yang TIDAK ADA ──"
