@@ -1187,6 +1187,41 @@ export const bahanRoutes = new Hono<AppEnv>()
         if (utama === 0) byId.set(supplierIds[0], true);
       }
       await db.transaction(async (tx) => {
+        /*
+         * KUNCI BARIS INDUKNYA, dan itu yang menyerialkan penulisan ini.
+         *
+         * "Ganti seluruh daftar" = HAPUS lalu SISIP. Saat daftarnya masih
+         * kosong, HAPUS tak memegang baris apa pun — jadi dua permintaan
+         * bersamaan sama-sama lolos ke SISIP dan menabrak
+         * `ingredient_suppliers_pair_uq` (juga `..._utama_uq`). Yang kalah
+         * menerima 23505 mentah alias 500. Terukur, empat PUT serentak
+         * BERBADAN SAMA: 200, 200, 500, 500 — tiga ronde berturut-turut.
+         *
+         * Perhatikan permintaannya IDEMPOTEN: badan yang sama persis. Yang
+         * memicunya di lapangan bukan dua admin, cukup satu klik ganda pada
+         * tombol Simpan.
+         *
+         * Kenapa `FOR UPDATE` dan bukan kunci antrean: di sini ADA baris induk
+         * yang nyata untuk dipegang, dan mengunci per-bahan tak menghalangi
+         * bahan lain. (Bandingkan `petugas-tempat`, yang ditulis dari dua arah
+         * tegak lurus sehingga tak punya induk bersama.) Ini juga idiom yang
+         * sudah dipakai `PUT /bahan/:id/resep` di berkas yang sama.
+         *
+         * Sekalian menutup TOCTOU-nya: `pengadaan` diperiksa di luar transaksi,
+         * dan `PUT /bahan/:id` bisa membaliknya ke "produksi" di sela itu —
+         * meninggalkan baris supplier pada bahan yang tak boleh punya supplier.
+         * Pemeriksaan yang sama di jalur resep memakai arah sebaliknya.
+         */
+        const [indukTx] = await tx
+          .select({ pengadaan: ingredients.pengadaan })
+          .from(ingredients)
+          .where(and(eq(ingredients.id, id), eq(ingredients.companyId, auth.company_id!)))
+          .for("update");
+        if (indukTx?.pengadaan === "produksi") {
+          throw new HTTPException(409, {
+            message: "Jenis pengadaan bahan berubah — muat ulang lalu coba lagi",
+          });
+        }
         await tx
           .delete(ingredientSuppliers)
           .where(

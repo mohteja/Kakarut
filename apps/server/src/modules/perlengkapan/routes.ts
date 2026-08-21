@@ -897,6 +897,17 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
         if (utama === 0) byId.set(supplierIds[0], true);
       }
       await db.transaction(async (tx) => {
+        // Kunci baris induknya lebih dulu. "Ganti seluruh daftar" = HAPUS lalu
+        // SISIP, dan saat daftarnya masih kosong HAPUS tak memegang baris apa
+        // pun — dua permintaan bersamaan sama-sama lolos ke SISIP dan menabrak
+        // `supply_suppliers_pair_uq`. Terukur, empat PUT BERBADAN SAMA:
+        // 200, 200, 500, 500 (tiga ronde). Cukup satu klik ganda pada tombol
+        // Simpan. Alasan lengkapnya di jalur kembarnya, `PUT /bahan/:id/supplier`.
+        await tx
+          .select({ id: supplies.id })
+          .from(supplies)
+          .where(and(eq(supplies.id, item.id), eq(supplies.companyId, auth.company_id!)))
+          .for("update");
         await tx
           .delete(supplySuppliers)
           .where(

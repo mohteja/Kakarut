@@ -11584,6 +11584,102 @@ cek "PASANGAN: penugasannya BENAR-BENAR tersimpan (sisi tempat)" "V == 1" \
 cek "PASANGAN: dan terbaca sama dari sisi karyawan" "V == 1" \
   "$(api "$OWNER" GET "/karyawan/$U216/tempat" | jq -r '.assigned|length')"
 
+echo "== 217. \"Ganti seluruh daftar\" yang diklik DUA KALI =="
+# HAPUS-lalu-SISIP hanya menyerialkan diri sendiri kalau ada yang bisa dipegang
+# HAPUS-nya. Saat daftarnya masih KOSONG, ia tak memegang baris apa pun — dua
+# permintaan bersamaan sama-sama lolos ke SISIP dan menabrak indeks pasangan.
+#
+# Yang membuat kelas ini beda dari §213: permintaannya IDEMPOTEN. Badan yang
+# sama persis, dikirim dua kali. Yang memicunya di lapangan bukan dua admin,
+# cukup SATU KLIK GANDA pada tombol Simpan — dan yang diterima pengguna adalah
+# overlay "server sedang diperbarui".
+#
+# Terukur sebelum perbaikan, empat PUT serentak berbadan sama, tiga ronde
+# berturut-turut, identik tiap ronde:
+#   PUT /bahan/:id/supplier         200 200 500 500
+#   PUT /perlengkapan/:id/supplier  200 200 500 500
+#   PUT /penyimpanan/:id/bahan      200 500 500 500
+#
+# KENAPA DUA JAWABAN BERBEDA untuk kelas yang sama:
+#   · `/:id/supplier` punya baris INDUK yang nyata → `FOR UPDATE` per bahan,
+#     tak menghalangi bahan lain. Idiom ini sudah dipakai `PUT /bahan/:id/resep`
+#     di berkas yang sama — sekali lagi dipasang di satu pintu, bukan saudaranya.
+#   · `/penyimpanan/:id/bahan` menegakkan "satu barang di SATU rak", jadi ia
+#     ikut menghapus dari rak LAIN. Dua permintaan ke rak BERBEDA tetap
+#     berpapasan, dan induk yang mereka bagi cuma perusahaannya → kunci antrean.
+#
+# Dua PUT yang TIDAK cacat sudah diperiksa juga: `PUT /menu/:id` dan
+# `PUT /bahan/:id` (resep) bersih 3/3 ronde — keduanya meng-UPDATE baris induk
+# lebih dulu di transaksi yang sama, jadi kunci barisnya menyerialkan mereka
+# tanpa sengaja. Itu yang menunjukkan idiom mana yang benar.
+S217A=$(api "$OWNER" POST /supplier "{\"nama\":\"Sup 217A $RANDOM\"}" | jq -r .id)
+S217B=$(api "$OWNER" POST /supplier "{\"nama\":\"Sup 217B $RANDOM\"}" | jq -r .id)
+BH217=$(api "$OWNER" POST /bahan \
+  "{\"nama\":\"Bahan 217 $RANDOM\",\"satuan\":\"pcs\",\"isi\":1,\"harga_beli\":1000,\"pengadaan\":\"beli\",\"kategori\":\"lain\"}" | jq -r .id)
+PL217=$(api "$OWNER" POST /perlengkapan "{\"nama\":\"Perl 217 $RANDOM\",\"satuan\":\"pcs\",\"harga_beli\":500}" | jq -r .id)
+CB217=$(api "$OWNER" GET /cabang | jq -r '[.[]|select(.tipe=="store" and .is_active)][0].id')
+LOC217=$(api "$OWNER" POST /penyimpanan "{\"nama\":\"Rak 217 $RANDOM\",\"branch_id\":\"$CB217\"}" | jq -r .id)
+cek "dasar §217: lima objek uji siap" "V == 5" \
+  "$(printf '%s\n' "$S217A" "$S217B" "$BH217" "$PL217" "$LOC217" | grep -c '^[0-9a-f-]\{36\}$' || true)"
+
+# `balapUlang213` menembak POST; di sini metodenya PUT dan badannya SAMA di
+# tiap tembakan (justru itu intinya), jadi dipakai gelung sendiri.
+balapPut217(){ # balapPut217 <ronde> <n> <path> <body> → dir
+  local ronde="$1" n="$2" path="$3" body="$4" d r i
+  d=$(mktemp -d)
+  for r in $(seq 1 "$ronde"); do
+    for i in $(seq 1 "$n"); do
+      curl -s -o "$d/b$r-$i" -w '%{http_code}\n' -X PUT "$BASE/api$path" \
+        -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "$body" > "$d/c$r-$i" &
+    done
+    wait
+  done
+  echo "$d"
+}
+ITEMS217="[{\"supplier_id\":\"$S217A\",\"is_utama\":true},{\"supplier_id\":\"$S217B\",\"is_utama\":false}]"
+
+DBS217=$(balapPut217 2 4 "/bahan/$BH217/supplier" "{\"items\":$ITEMS217}")
+cek "INTI: 2×4 PUT /bahan/:id/supplier berbadan sama → TAK ADA 5xx" "V == 0" "$(lima213 "$DBS217")"
+cek "…kedelapannya 200" "V == 8" "$(kode213 "$DBS217" 200)"
+
+DPS217=$(balapPut217 2 4 "/perlengkapan/$PL217/supplier" "{\"items\":$ITEMS217}")
+cek "INTI: 2×4 PUT /perlengkapan/:id/supplier berbadan sama → TAK ADA 5xx" "V == 0" "$(lima213 "$DPS217")"
+cek "…kedelapannya 200" "V == 8" "$(kode213 "$DPS217" 200)"
+
+DRK217=$(balapPut217 2 4 "/penyimpanan/$LOC217/bahan" \
+  "{\"ingredient_ids\":[\"$BH217\"],\"supply_ids\":[\"$PL217\"]}")
+cek "INTI: 2×4 PUT /penyimpanan/:id/bahan berbadan sama → TAK ADA 5xx" "V == 0" "$(lima213 "$DRK217")"
+cek "…kedelapannya 200" "V == 8" "$(kode213 "$DRK217" 200)"
+
+# ── PASANGAN: hasilnya harus PERSIS yang dikirim ──────────────────────────
+# "Tak ada 5xx" juga tercapai kalau penulisannya diam-diam dibuang, atau kalau
+# barisnya berlipat. Keduanya diperiksa, termasuk indeks utama yang cuma boleh
+# meloloskan SATU supplier utama.
+cek "PASANGAN: bahan punya tepat 2 supplier, tak berlipat" "V == 2" \
+  "$(api "$OWNER" GET "/bahan/$BH217/supplier" | jq -r 'length')"
+cek "PASANGAN: …dan tepat SATU di antaranya utama" "V == 1" \
+  "$(api "$OWNER" GET "/bahan/$BH217/supplier" | jq -r '[.[]|select(.is_utama)]|length')"
+cek "PASANGAN: perlengkapan punya tepat 2 supplier" "V == 2" \
+  "$(api "$OWNER" GET "/perlengkapan/$PL217/supplier" | jq -r 'length')"
+cek "PASANGAN: …dan tepat SATU di antaranya utama" "V == 1" \
+  "$(api "$OWNER" GET "/perlengkapan/$PL217/supplier" | jq -r '[.[]|select(.is_utama)]|length')"
+cek "PASANGAN: rak berisi tepat 1 bahan" "V == 1" \
+  "$(api "$OWNER" GET /penyimpanan | jq -r --arg l "$LOC217" '[.[]|select(.id==$l)][0].jumlah_bahan // 0')"
+cek "PASANGAN: rak berisi tepat 1 perlengkapan" "V == 1" \
+  "$(api "$OWNER" GET /penyimpanan | jq -r --arg l "$LOC217" '[.[]|select(.id==$l)][0].jumlah_perlengkapan // 0')"
+
+# ── PASANGAN: jalur yang MEMANG bersih harus tetap bersih ─────────────────
+# Kalau kelak ada yang "merapikan" dengan menyerialkan semuanya se-perusahaan,
+# asersi ini tak akan menangkapnya — tapi ia menangkap kebalikannya: kunci
+# induk yang dilepas dari PUT /menu/:id, yang selama ini menjaganya diam-diam.
+KAT217=$(api "$OWNER" GET /kategori | jq -r '.[0].id')
+MN217=$(api "$OWNER" POST /menu \
+  "{\"nama\":\"Menu 217 $RANDOM\",\"category_id\":\"$KAT217\",\"harga_jual\":10000,\"mult\":2,\"komponen\":[]}" | jq -r .id)
+DMN217=$(balapPut217 2 4 "/menu/$MN217" \
+  "{\"nama\":\"Menu 217\",\"category_id\":\"$KAT217\",\"harga_jual\":10000,\"mult\":2,\"komponen\":[{\"ingredient_id\":\"$BH217\",\"qty\":10}]}")
+cek "PASANGAN: PUT /menu/:id (komponen) tetap bebas 5xx" "V == 0" "$(lima213 "$DMN217")"
+
+
 echo
 echo "── §215 Kuota pendaftaran: skrip ini tak boleh diam saat 429 ──"
 # Duduk di ekor bersama §209, dan karena alasan yang sama: ia mengadili berkas

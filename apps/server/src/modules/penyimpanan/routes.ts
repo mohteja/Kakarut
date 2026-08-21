@@ -460,6 +460,24 @@ export const penyimpananRoutes = new Hono<AppEnv>()
         .filter((id) => id !== locId);
 
       await db.transaction(async (tx) => {
+        /*
+         * KUNCI SE-PERUSAHAAN, bukan per-rak, dan itu bukan kemalasan.
+         *
+         * "Ganti isi rak" = HAPUS lalu SISIP; saat raknya masih kosong, HAPUS
+         * tak memegang baris apa pun, jadi dua permintaan bersamaan sama-sama
+         * lolos ke SISIP dan menabrak `storage_location_ingredients_uq`.
+         * Terukur, empat PUT BERBADAN SAMA: 200, 500, 500, 500 — tiga ronde
+         * berturut-turut. Cukup satu klik ganda pada tombol Simpan.
+         *
+         * Kenapa kunci baris raknya sendiri TIDAK CUKUP di sini, padahal cukup
+         * untuk `/:id/supplier`: penulisan ini menegakkan "satu barang tinggal
+         * di SATU rak", jadi ia ikut MENGHAPUS barang itu dari rak-rak LAIN
+         * (`rakLainIds`). Dua permintaan ke rak BERBEDA yang sama-sama mengklaim
+         * bahan yang sama karena itu tetap berpapasan, dan induk yang mereka
+         * bagi cuma perusahaannya. Mengatur isi rak adalah pengaturan yang
+         * jarang disentuh, jadi menyerialkannya tak menghalangi siapa pun.
+         */
+        await kunciAntrean(tx, "isi-rak", companyId);
         if (bahanIds) {
           // ganti isi BAHAN rak ini (baris supply dibiarkan)
           await tx
