@@ -12738,6 +12738,62 @@ if [ -s "$KUOTA_HABIS" ]; then
   sed 's/^/       /' "$KUOTA_HABIS"
 fi
 
+echo "── §237 Unggahan: yang DIKLAIM harus cocok dengan byte-nya ──"
+#
+# `file.type` pada multipart datang dari header yang DITULIS KLIEN. Sebelum
+# diperbaiki, TERUKUR lewat HTTP:
+#
+#   POST /upload  «<svg><script>alert(1)</script></svg>» sebagai image/png
+#   → 201, tersimpan .png, dilayani Content-Type: image/png
+#
+# Tak ada skrip yang berjalan — dan alasannya bukan pemeriksaan isi (tak ada),
+# melainkan dua penjagaan di HILIR: `image/svg+xml` tak ada di daftar terima,
+# dan `secureHeaders` memasang `nosniff` pada `/uploads/*`. Keduanya diperiksa
+# di sini juga, sebab merekalah yang menahan akibatnya.
+SAH237=/tmp/verify-237-sah.png
+python3 - "$SAH237" <<'PYEOF'
+import sys, zlib, struct
+def ch(t, d):
+    return struct.pack('>I', len(d)) + t + d + struct.pack('>I', zlib.crc32(t + d) & 0xffffffff)
+raw = b''.join(b'\x00' + bytes([i % 256] * 8) for i in range(8))
+png = (b'\x89PNG\r\n\x1a\n'
+       + ch(b'IHDR', struct.pack('>IIBBBBB', 8, 8, 8, 0, 0, 0, 0))
+       + ch(b'IDAT', zlib.compress(raw))
+       + ch(b'IEND', b''))
+open(sys.argv[1], 'wb').write(png)
+PYEOF
+JAHAT237=/tmp/verify-237-jahat.png
+printf '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>' > "$JAHAT237"
+JPG237=/tmp/verify-237.jpg
+printf '\xff\xd8\xff\xe0\x00\x10JFIF' > "$JPG237"
+
+kirim237() { # <berkas> <tipe> → kode
+  curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/upload?tujuan=menu" \
+    -H "Authorization: Bearer $OWNER" -F "file=@$1;type=$2"
+}
+
+# PASANGAN LEBIH DULU: gambar yang SAH harus tetap masuk. Tanpa ini, "menolak
+# yang bukan gambar" juga hijau seandainya SELURUH unggahan ditolak.
+cek "PASANGAN: PNG sah tetap diterima" "V == 201" "$(kirim237 "$SAH237" image/png)"
+cek "PASANGAN: JPEG sah tetap diterima" "V == 201" "$(kirim237 "$JPG237" image/jpeg)"
+
+cek "INTI: SVG berskrip yang mengaku PNG ditolak 400" "V == 400" "$(kirim237 "$JAHAT237" image/png)"
+cek "INTI: JPEG yang mengaku PNG ditolak 400" "V == 400" "$(kirim237 "$JPG237" image/png)"
+cek "…dan pesannya menerangkan sebabnya" "V == 1" \
+  "$(curl -s -X POST "$BASE/api/upload?tujuan=menu" -H "Authorization: Bearer $OWNER" \
+      -F "file=@$JAHAT237;type=image/png" | jq '(.error | test("[Ii]si berkas")) | if . then 1 else 0 end')"
+
+# ── Penjagaan HILIR yang menahan akibatnya ───────────────────────────────
+URL237=$(curl -s -X POST "$BASE/api/upload?tujuan=menu" -H "Authorization: Bearer $OWNER" \
+  -F "file=@$SAH237;type=image/png" | jq -r '.url // empty')
+cek "premis: berkas sah memang tersimpan & punya url" "V == 1" \
+  "$( [ -n "$URL237" ] && echo 1 || echo 0 )"
+cek "berkas unggahan dilayani dengan nosniff" "V == 1" \
+  "$(curl -s -D - -o /dev/null "$BASE$URL237" | grep -qi 'x-content-type-options: *nosniff' && echo 1 || echo 0)"
+cek "…dan tipenya image/png, bukan sesuatu yang bisa dieksekusi" "V == 1" \
+  "$(curl -s -D - -o /dev/null "$BASE$URL237" | grep -qi 'content-type: *image/png' && echo 1 || echo 0)"
+rm -f "$SAH237" "$JAHAT237" "$JPG237"
+
 echo "── §236 Unggahan berbatas laju: 5 MB per berkas TAK menjaga banyak berkas ──"
 #
 # `MAX_SIZE` di `upload/routes.ts` menjaga SATU permintaan. Yang tak dijaga

@@ -615,6 +615,51 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
   termasuk yang menuntut KEDUA ember terpasang; §236 verify-api (8 asersi,
   tiap penolakan berpasangan dengan yang sah)
 
+## Isi berkas unggahan tak pernah diperiksa — server — 2026-08-22
+
+- **Populasi**: **2** keputusan di seluruh `apps/server/src` yang bersandar pada
+  tipe yang DIDEKLARASIKAN pengirim — keduanya di `upload/routes.ts`: memilih
+  ekstensi berkas, dan menetapkan `ContentType` yang disimpan ke R2
+- **Metode**: `scratchpad/tipe-diklaim.py` (`file.type`, header `content-type`,
+  ekstensi dari nama berkas)
+- **Detektor**: DIBUKTIKAN — empat suntikan, masing-masing di-assert mendarat:
+  mencabut pemeriksaan tanda tangan, menambahkan `image/svg+xml` ke daftar
+  terima, memindahkan `secureHeaders` ke sub-app `/api` saja, dan melonggarkan
+  tanda tangan PNG. Keempatnya tertuduh
+- **Hasil**: **TEMUAN — tapi bukan yang kukira, dan itu bagian pentingnya.**
+  Terukur lewat HTTP: `<svg><script>alert(1)</script></svg>` dideklarasikan
+  `image/png` → **201**, tersimpan `.png`, dilayani `Content-Type: image/png`.
+  Lalu kuperiksa apakah ia benar-benar berbahaya, dan **tidak**:
+
+  | penjagaan | terukur |
+  |---|---|
+  | `image/svg+xml` tak ada di daftar terima | SVG satu-satunya format gambar yang bisa memuat `<script>` |
+  | `secureHeaders` dipasang `app.use("*")` | respons `/uploads/*` memulangkan `X-Content-Type-Options: nosniff` |
+
+  Jadi tak ada skrip yang berjalan. Yang menahannya **dua penjagaan di HILIR**,
+  dan **tak satu pun dijaga uji** sebelum vena ini. Yang pertama bahkan berupa
+  KETIADAAN satu baris — dan ketiadaan tak meninggalkan jejak yang bisa dibaca
+  orang berikutnya. Menambahkan satu entri SVG (perubahan yang kelihatan
+  sepele dan mudah diminta) langsung menjadikannya XSS tersimpan
+- **Yang benar-benar terbuka**: penyimpanannya menerima byte apa pun. Terukur:
+  200 byte acak dan 5 MB byte acak sama-sama tersimpan sebagai `.png`, terbukti
+  dengan `file(1)`. Bukan lubang eksekusi, tapi "hanya gambar" bukan pernyataan
+  yang ditegakkan — dan bersama vena sebelumnya (unggahan tanpa batas laju) itu
+  kanal menaruh data sembarang
+- **Diperiksa & bersih**: tak ada satu pun tempat di server yang MEMBACA KEMBALI
+  berkas unggahan (tak ada pengolah gambar, tak ada penyematan ke PDF sisi
+  server), jadi tak ada pengurai yang bisa disodori berkas cacat
+- **Batas**: yang diperiksa cuma beberapa byte pertama. Itu bukan pengurai
+  gambar dan tak berpura-pura: berkas yang kepalanya benar tapi badannya rusak
+  tetap lolos. Yang ditegakkan lebih sederhana — tipe yang DIKLAIM harus cocok
+  dengan yang TERTULIS di byte-nya. Uji penjaganya juga menjalankan SALINAN
+  aturannya, bukan kode rutenya; ada asersi terpisah yang menuntut salinan itu
+  tak menyimpang
+- **Tindak**: `cocokTandaTangan()` di `upload/routes.ts` (PNG/JPEG/WebP);
+  gerbang `unggahan-hanya-gambar.test.ts` (6 uji) yang **juga menahan kedua
+  penjagaan hilir** tetap di tempatnya; §237 verify-api (8 asersi, pasangan
+  "gambar sah tetap diterima" ditembakkan LEBIH DULU)
+
 ---
 
 ## Antrean vena — belum tergarap
@@ -641,8 +686,8 @@ berlaku di situ).
 - [x] ~~**Batas laju di luar email**~~ — TEMUAN, lihat entri di atas. Laporan
       agregat ternyata murah (0,035 dtk atas 50.111 penjualan); yang terbuka
       `POST /upload` — 432 GB/jam dari satu akun kasir
-- [ ] **Isi berkas unggahan tak pernah diperiksa** — hanya `file.type` yang
-      dideklarasikan pengirim (sisa vena di atas)
+- [x] ~~**Isi berkas unggahan tak pernah diperiksa**~~ — TEMUAN, lihat entri di
+      atas. Akibatnya tertahan dua penjagaan hilir yang belum dijaga uji
 
 ### Basis data & migrasi
 - [ ] **Kebijakan `ON DELETE`** tiap FK vs yang dilakukan kode saat induknya

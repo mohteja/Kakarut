@@ -60,11 +60,60 @@ const batasUnggahPerusahaan = rlUnggah(
     message: "Terlalu banyak unggahan dari perusahaan ini — coba lagi beberapa menit lagi.",
   }),
 );
+/**
+ * Tipe yang diterima — dan `image/svg+xml` SENGAJA TIDAK ADA DI SINI.
+ *
+ * SVG satu-satunya format gambar yang bisa memuat `<script>`, dan berkas
+ * unggahan disajikan dari origin yang SAMA dengan aplikasinya (`/uploads/*`).
+ * Menambahkannya ke daftar ini berarti tiap pemegang token — termasuk kasir —
+ * bisa menaruh skrip yang berjalan di sesi orang lain. Ketiga tipe di bawah
+ * raster: browser tak pernah mengeksekusinya.
+ *
+ * Ada uji yang menjaga daftar ini tetap begitu (`unggahan-hanya-gambar`), sebab
+ * hari ini keamanannya bersandar pada ketiadaan satu baris — dan ketiadaan tak
+ * meninggalkan jejak yang bisa dibaca orang berikutnya.
+ */
 const ALLOWED: Record<string, string> = {
   "image/jpeg": "jpg",
   "image/png": "png",
   "image/webp": "webp",
 };
+
+/**
+ * TANDA TANGAN BYTE, bukan tipe yang diklaim pengirim.
+ *
+ * `file.type` pada multipart datang dari header yang DITULIS KLIEN. Sebelum
+ * pemeriksaan ini, 5 MB byte acak — atau `<svg><script>alert(1)</script></svg>`
+ * — tersimpan sebagai `.png` dan dilayani `Content-Type: image/png`; terbukti
+ * dengan `file(1)` dan dengan menembak rutenya.
+ *
+ * Yang MENAHAN akibatnya hari ini dua hal lain: SVG tak ada di `ALLOWED`, dan
+ * `secureHeaders` memasang `X-Content-Type-Options: nosniff` pada `/uploads/*`
+ * (terukur). Jadi tak ada skrip yang berjalan. Tapi keduanya penjagaan di
+ * HILIR; yang di hulu — "isinya memang gambar" — tak pernah diperiksa sama
+ * sekali, dan penyimpanannya jadi kanal menaruh data sembarang.
+ *
+ * Yang diperiksa cuma beberapa byte pertama. Itu memang bukan pengurai gambar,
+ * dan tak berpura-pura: berkas yang kepalanya benar tapi badannya rusak tetap
+ * lolos. Yang ditegakkan lebih sederhana dan bisa diandalkan — **tipe yang
+ * DIKLAIM harus cocok dengan yang TERTULIS di byte-nya**.
+ */
+function cocokTandaTangan(tipe: string, b: Buffer): boolean {
+  if (tipe === "image/png") {
+    return b.length >= 8 && b.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+  }
+  if (tipe === "image/jpeg") {
+    return b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff;
+  }
+  if (tipe === "image/webp") {
+    return (
+      b.length >= 12 &&
+      b.subarray(0, 4).toString("latin1") === "RIFF" &&
+      b.subarray(8, 12).toString("latin1") === "WEBP"
+    );
+  }
+  return false;
+}
 
 export const uploadRoutes = new Hono<AppEnv>().post(
   "/",
@@ -89,8 +138,17 @@ export const uploadRoutes = new Hono<AppEnv>().post(
       throw new HTTPException(400, { message: "Ukuran maksimal 5 MB" });
     }
 
-    const key = `companies/${auth.company_id}/${tujuan}/${randomUUID()}.${ext}`;
     const buffer = Buffer.from(await file.arrayBuffer());
+    // Tipe yang DIKLAIM harus cocok dengan yang TERTULIS di byte-nya. Tanpa ini
+    // `file.type` cuma keterangan dari pengirim, dan `.png` di nama berkasnya
+    // tak menyatakan apa pun tentang isinya.
+    if (!cocokTandaTangan(file.type, buffer)) {
+      throw new HTTPException(400, {
+        message: "Isi berkas bukan gambar JPEG/PNG/WebP yang sah",
+      });
+    }
+
+    const key = `companies/${auth.company_id}/${tujuan}/${randomUUID()}.${ext}`;
     const { url } = await getStorage().put(key, buffer, file.type);
     return c.json({ url }, 201);
   },
