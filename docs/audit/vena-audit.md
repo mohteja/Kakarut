@@ -660,6 +660,53 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
   penjagaan hilir** tetap di tempatnya; §237 verify-api (8 asersi, pasangan
   "gambar sah tetap diterima" ditembakkan LEBIH DULU)
 
+## Kebijakan `ON DELETE` tiap FK — basis data — 2026-08-22
+
+- **Populasi**: **166 foreign key**, dibaca dari **katalog Postgres sungguhan**
+  (`pg_constraint`), bukan dari migrasi: **80 cascade · 18 set null · 68 NO
+  ACTION**. `schema.ts` sepakat — 99 `onDelete` eksplisit (81 cascade + 18 set
+  null), sisanya bawaan `NO ACTION`
+- **Metode**: `scratchpad/on-delete.py` — katalog FK disilangkan dengan tabel
+  yang benar-benar DIHAPUS kode
+- **Detektor**: DIBUKTIKAN — tiga suntikan, masing-masing di-assert mendarat:
+  menambahkan `DELETE branches`, mencabut pra-cek 409 kategori, dan mengubah
+  `menus.category_id` jadi cascade. Ketiganya tertuduh
+- **Hasil**: **BERSIH.** 68 FK NO ACTION bersandar pada **9** induk berbeda;
+  `users` (28 anak) dan `branches` (26) yang terbanyak — dan **keduanya tak
+  pernah dihapus kode sama sekali**. Satu-satunya induk NO ACTION yang dihapus
+  `menu_categories`, dan penghapusannya dijaga pra-cek. Terukur lewat HTTP:
+
+  | | terukur |
+  |---|---|
+  | `DELETE /kategori/:id` yang masih dipakai | **409 "Kategori masih dipakai 33 menu"** |
+  | Kosongkan Tempat Sampah, penjualan sungguhan | **200**, induk hilang, `sale_items` & `sale_consumptions` ikut tersapu cascade |
+
+  Kelas yang dulu membuat Tempat Sampah gagal dikosongkan tak lagi punya jalan
+  masuk: `sales` dan `productions` — dua tabel yang dihapus permanen di sana —
+  **nol** anak NO ACTION
+- **Tiga kali detektorku salah, dan ketiganya kuukur bukan kuduga**:
+  1. Sapuan pertama hanya melihat `.delete(tabel)` drizzle → **buta terhadap
+     SQL mentah**, yaitu justru `sampah/routes.ts` — jalur yang dulu RUSAK
+     karena kelas ini. Cakupan 27 → 35 tabel.
+  2. Ia menuduh `DELETE /kategori/:id` yang JUSTRU BENAR, sebab pra-cek yang
+     menolak dianggap bukan penjagaan. Ditambahkan sebagai cabang sah.
+  3. Jendelanya ±4.000 aksara, dan itu **menyeberang ke handler tetangga**:
+     mencabut pra-cek kategori tetap hijau karena 409 "nama sudah dipakai"
+     milik `POST /kategori` ikut terhitung. Dipersempit ke handler-nya sendiri.
+     Bukti merah baru mendarat sesudah perbaikan ketiga ini
+- **Batas**: yang dijaga uji barunya STRUKTUR (`schema.ts` + situs `DELETE` di
+  kode), bukan katalog basis data. Migrasi yang mengubah kebijakan FK tanpa
+  menyentuh `schema.ts` tak terlihat — yang menjaga celah itu gerbang
+  `drift schema vs migrasi` yang sudah ada. Kebijakan `SET NULL` (18) tak
+  diperiksa sama sekali di sini: akibatnya bukan kebuntuan melainkan medan yang
+  diam-diam jadi null, dan itu vena yang berbeda
+- **Tindak**: tak ada perubahan kode — vena bersih. Gerbang
+  `hapus-induk-tak-buntu.test.ts` (5 uji) menahan keadaannya: `users`/`branches`
+  tetap tak pernah dihapus, tiap induk NO ACTION yang dihapus wajib punya jalan
+  keluar tertulis, dan pra-cek kategori tetap menghitung menunya. Sisi
+  perilakunya sudah dijaga verify-api yang ada — §65 (409) dan §91
+  (kosongkan sampah; 500 akibat FK akan menjatuhkan `ok:true`-nya)
+
 ---
 
 ## Antrean vena — belum tergarap
@@ -690,8 +737,10 @@ berlaku di situ).
       atas. Akibatnya tertahan dua penjagaan hilir yang belum dijaga uji
 
 ### Basis data & migrasi
-- [ ] **Kebijakan `ON DELETE`** tiap FK vs yang dilakukan kode saat induknya
-      dihapus
+- [x] ~~**Kebijakan `ON DELETE`**~~ — BERSIH, lihat entri di atas. 68 FK NO
+      ACTION, 9 induk; `users`/`branches` tak pernah dihapus kode
+- [ ] **Kebijakan `SET NULL` (18 FK)** — akibatnya bukan kebuntuan melainkan
+      medan yang diam-diam jadi null (sisa vena di atas)
 - [ ] **CHECK yang hilang** untuk invarian yang diandaikan kode
 - [ ] **Indeks vs WHERE yang benar-benar dipakai**
 
