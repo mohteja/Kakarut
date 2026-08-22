@@ -826,6 +826,64 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
   verify-api; gerbang `audit-invarian-terpasang.test.ts` (6 uji) yang menahan
   urutan langkah CI dan jumlah invariannya; perbaikan resolver `jangkar-iris`
 
+## Fitur lama pengerjaan pesanan (belum diurai mobile) — mobile — 2026-08-22
+
+- **Populasi**: **8 medan kontrak** yang menyangkut fitur ini di
+  `packages/shared/src/types.ts` (`durasi_detik` di tiga tipe, `masuk_pada`,
+  `status_oleh`, `status_pada`, `pesanan_durasi_detik`, `target_durasi_detik`,
+  `target_detik`, `lewat_target`, `bertarget`), plus satu rute laporan
+  (`/laporan/durasi-pesanan`) dan satu pembantu (`durasiPesananDetik`)
+- **Sapuan**: tiap kunci JSON dicari di `lib/` — hasilnya berangka:
+
+  | kunci | dibaca Dart |
+  |---|---|
+  | `status_oleh`, `status_pada` | **2** masing-masing |
+  | `durasi_detik` | **0** |
+  | `masuk_pada` | **0** |
+  | `pesanan_durasi_detik` | **0** |
+  | `target_durasi_detik`, `target_detik`, `lewat_target`, `bertarget` | **0** |
+  | rute `/laporan/durasi-pesanan` | tak pernah dipanggil |
+
+- **Terukur, bukan dibaca**: satu bill dibuat lewat HTTP sungguhan, satu sajian
+  ditandai selesai dua detik kemudian. `GET /pesanan` membalas
+  `{"durasi_detik": 2, "status_oleh": "Kasir Cabang 2", "status_pada":
+  "2026-08-22T14:54:46.065Z", "items":[{"durasi_detik": 2, …}]}` — ponsel
+  membaca dua yang terakhir dan **membuang `durasi_detik`** pada kartu maupun
+  barisnya
+- **Bentuk diamnya**: `fromJson` yang melewatkan satu kunci tak melempar apa
+  pun, dan `flutter analyze` tetap hijau karena parameternya opsional
+- **KESALAHANKU, DI VENA YANG SEDANG MEMBURU KESALAHAN ITU**: saat menulis
+  perbaikannya, `PesananKartu.fromJson` **sempat tidak ikut diperbaiki** —
+  `analyze` hijau, dan yang menangkapnya asersi kartu di uji baru. Bukti
+  merahnya menyuntikkan kembali persis keadaan itu
+- **Yang TIDAK disalin, dan alasannya**: durasi tidak dihitung ulang di ponsel
+  walau `masuk_pada` dan `status_pada` dua-duanya sudah ada. Aturannya (jepit di
+  nol, abaikan baris batal, abaikan yang tak berwaktu) tinggal di
+  `durasiPesananDetik` milik `@kakarut/shared`; salinan Dart-nya akan jadi rumus
+  kedua yang bisa menyimpang diam-diam — kelas yang sudah sekali menggigit repo
+  ini pada PB1. `formatDurasi` memang disalin: ia murni tampilan, jadi
+  menyimpangnya berarti kata yang beda di layar, bukan angka yang beda di
+  pembukuan. Kedelapan batasnya dipatok uji
+- **PINTU SAUDARA yang ikut ketemu, dan diperbaiki di commit terpisah**:
+  `ringkasPesanan` memilih "terakhir disentuh" dengan `String.compareTo` atas
+  `status_pada` — kelas yang sama dengan vena sebelumnya, tapi di sini kedua
+  sumbernya **bercampur**: stempel server selalu berpecahan 3 digit
+  (`toISOString()` JavaScript), stempel optimistis ponsel 3 **atau** 6.
+  Dua sentuhan dalam milidetik yang sama diurutkan terbalik, dan kartu
+  menampilkan nama orang **sebelumnya**. `bandingStempel` dipindah ke
+  `lib/core/waktu_stempel.dart` supaya kedua pintu memakai satu rumah
+- **Batas / tersisa, dicatat bukan didiamkan**: `target_durasi_detik` per menu
+  (badge "lewat target") dan laporan `/laporan/durasi-pesanan` belum ada di
+  ponsel. Keduanya **layar baru**, bukan medan yang tak terurai — beda kelas
+  dari vena ini, dan lebih jujur diusulkan sebagai pekerjaan tersendiri
+- **Tindak**: `durasi_detik` + `masuk_pada` diurai di baris & kartu, ditampilkan
+  cermin papan web (baris selesai "⏱ 2 dtk", baris jalan "masuk 21.54", kartu
+  "⏱ Rampung dalam …"), `formatDurasi` di `core/format.dart`, uji
+  `test/lama_pengerjaan_test.dart` (7 uji) + `test/urutan_antrean_test.dart`
+  bertambah uji pintu saudara. Mobile: commit `ccd433e` & `42820f4`, PR #12
+
+---
+
 ## Urutan pemutaran ulang antrean offline — mobile — 2026-08-22
 
 - **Populasi**: **14 tipe perintah** yang boleh diantre (`SyncBody.tipe`
@@ -1264,6 +1322,30 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## ANTREAN HABIS — 2026-08-22
+
+Kedua puluh satu vena di antrean awal sudah digarap. Yang tersisa di bawah
+adalah **usulan baru**, lahir dari celah yang tercatat di entri-entri di atas —
+bukan dari daftar awal.
+
+### Usulan, diurut menurut apa yang sudah TERBUKTI menggigit
+
+1. **Stempel waktu dibandingkan sebagai teks — sapuan menyeluruh.** Kelas ini
+   sudah menggigit DUA KALI dalam satu hari (urutan antrean offline, lalu
+   `ringkasPesanan`), dan keduanya ditemukan tak sengaja. Populasi: tiap
+   `compareTo`/`localeCompare`/`sort` atas medan bertipe waktu di ketiga
+   permukaan. Sudah ada `bandingStempel`; yang belum ada penjaganya.
+2. **Rute yang memilih sendiri cabangnya, arah `auth.branch_id`.** Vena #25
+   menyapu `resolveBranchId` (56 rute) dan menulis batasnya sendiri: rute yang
+   memakai `auth.branch_id` LANGSUNG tak ikut tersapu.
+3. **`api()` yang URL-nya dirakit di variabel.** 22 panggilan tak terbaca
+   sapuan #25; keduanya sekarang punya alat penelusur turunan yang bisa dipakai
+   ulang.
+4. **Layar baru: target durasi per menu & laporan `/laporan/durasi-pesanan` di
+   ponsel.** Bukan medan yang tak terurai — fitur yang belum dibuat.
+5. **Server menerima `branch_id` di badan `/meja/tata-letak` lalu membuangnya.**
+   Zod `.strict()` akan mengubah kegagalan sunyi jadi berbunyi.
+
 ## Antrean vena — belum tergarap
 
 Diurut kasar menurut (kerusakan bila terjadi) × (peluang pola "pintu saudara"
@@ -1324,4 +1406,7 @@ berlaku di situ).
       di atas. Stempel ISO dibandingkan sebagai TEKS, dan `toIso8601String()`
       menulis 3 digit pecahan bila mikrodetiknya nol / 6 bila tidak →
       `shift_buka` bisa mendahului `absen_saya` (terukur: 400 vs 201)
-- [ ] **Fitur lama pengerjaan pesanan** — sudah tayang, belum diurai
+- [x] ~~**Fitur lama pengerjaan pesanan**~~ — TEMUAN, lihat entri di atas.
+      `durasi_detik` & `masuk_pada` dibuang mentah-mentah (terukur: server
+      kirim 2 detik, ponsel tak menampilkan apa pun). Tersisa: target per
+      menu & laporan durasi — keduanya LAYAR BARU, bukan medan tak terurai
