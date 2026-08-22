@@ -338,6 +338,68 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
   `memberCariRoutes`; ratchet `daftar-tanpa-langit-langit.test.ts` (DASAR 63);
   §232 verify-api (14 asersi); `MemberPage.tsx` menampilkan kedua penanda
 
+## Agregat dihitung di JavaScript atas daftar tak berbatas — server — 2026-08-22
+
+- **Populasi**: 63 bacaan daftar tanpa batas atas tabel yang tumbuh (dari
+  vena sebelumnya). Ditelusuri variabel penerimanya, lalu diperiksa apakah
+  larik itu DIAGREGAT di JS (`.reduce(`, `.length`, `for..of`,
+  `.filter().length`, `.forEach(`): **24 ya**, 32 tidak, 7 variabelnya tak
+  terlacak
+- **Metode**: `scratchpad/agregat-js.py`
+- **Detektor**: DIBUKTIKAN — `rows.reduce((n, r) => n + r.qty, 0)` disuntikkan
+  tepat sesudah kueri `rekomendasi/routes.ts:183` (suntikannya di-assert
+  mendarat DUA kali: sebelum & sesudah tulis) → bentuknya berubah dari
+  `for..of` jadi `.reduce(, for..of`; dicabut → pulih.
+  Versi pertamanya melewatkan suntikan itu: jendela pelacak variabelnya
+  dipatok ke `.from(`, padahal blok `.select({…})` bisa dua puluh baris,
+  sehingga jendelanya mulai SESUDAH deklarasi variabelnya. Dipatok ulang ke
+  `.select(` → yang tak terlacak turun **15 → 7**, yang tertangkap naik
+  **19 → 24**
+- **Hasil**: **TEMUAN**. Dari 24, dua puluh terikat sesuatu yang tak ikut
+  tumbuh (baris satu faktur, item satu struk, jendela satu shift, sesi opname,
+  `inArray` dari daftar induk). Yang tersisa: **kartu Riwayat Harga**, dua
+  pintu ke ruangan yang sama (`bahan/routes.ts`, `perlengkapan/routes.ts`).
+  Terukur pada satu bahan dengan 12.018 lot:
+
+  | | sebelum | sesudah |
+  |---|---|---|
+  | `GET /bahan/:id/pembelian` | 2,098 MB · 0,092 dtk | **0,053 MB · 0,061 dtk** |
+
+  Yang membuatnya lebih berbahaya daripada ukurannya: `harga_median` di kartu
+  ini **JADI harga acuan RAB belanja** (disinkron tiap Laporan Harga), dan
+  harga acuan itu dasar HPP setiap menu yang memakai bahannya. Median dari
+  "300 lot terbaru" menggeser HPP seluruh menu tanpa satu pun galat muncul.
+  Pasangannya diukur: ketujuh angka (`jumlah_pembelian`, `jumlah_harga_nyata`,
+  `harga_rata`, `harga_median`, `harga_terkini`, `harga_terendah`,
+  `harga_tertinggi`) **identik** sebelum dan sesudah pemotongan
+- **Ikut ketemu**: rumus harga per satuan
+  (`Math.round((total / qty) * 100) / 100`) hidup dalam **empat** salinan —
+  `harga-stats.ts` ×2, `bahan/routes.ts`, `perlengkapan/routes.ts`, dan
+  `stok/service.ts` (kartu FIFO). Pembulatannya bagian dari jawabannya:
+  median/terendah/tertinggi dihitung DARI angka yang sudah dibulatkan itu.
+  Komentar di `harga-stats.ts` sendiri sudah menulis bahwa rata-rata tertimbang
+  pernah "disalin utuh di dua berkas rute — dan kedua salinan sama-sama lupa"
+- **Kesalahanku, tertangkap penjagaku sendiri**: pemindai vena sebelumnya
+  memotong ekor pernyataan di `;` saja. Dua kueri di dalam `Promise.all([a, b])`
+  tak pernah turun ke kedalaman nol sampai `]);`, jadi ekor kueri PERTAMA
+  menelan kueri kedua dan `.limit()` milik yang kedua **memaafkan** yang
+  pertama — bentuk yang baru saja kutambahkan sendiri. Gerbangnya menghitung
+  61, bukan 63. Diperbaiki (berhenti juga di `,` kedalaman nol) dan diperiksa
+  ke belakang: pada `HEAD` sebelumnya kedua versi sama-sama 63, jadi kebutaan
+  itu tak pernah menyembunyikan apa pun di masa lalu
+- **Batas**: pelacakan variabel hanya mengenali `const X = await db|dbx|exec|tx`
+  dalam 400 aksara sebelum `.select(` — 7 situs masih tak terlacak dan
+  diperiksa mata. Bentuk agregat yang dicari lima macam; `.map()` yang
+  menjumlahkan di dalam pemanggilnya tak terlihat
+- **Tindak**: kedua kartu dipecah jadi dua kueri — statistik dari kueri SEMPIT
+  tanpa batas (empat kolom, tanpa join), daftar `lots` berbatas 300 +
+  `lots_terpotong`; `hargaPerSatuanLot` jadi satu-satunya rumus (empat salinan
+  → satu); pemindai gerbang diperbaiki + asersi `Promise.all`; 4 asersi baru di
+  `daftar-tanpa-langit-langit.test.ts`; §233 verify-api (13 asersi, premisnya
+  memilih bahan yang BENAR-BENAR punya lot); `RiwayatHargaModal.tsx`
+  menampilkan pemotongan dan menyimpulkan "ada lot tebakan" dari angka
+  populasi, bukan dari larik yang dipotong
+
 ---
 
 ## Antrean vena — belum tergarap
@@ -353,8 +415,8 @@ berlaku di situ).
       lihat entri di atas. 1,47 dtk → 0,012 dtk
 - [x] ~~**Balasan tanpa LIMIT**~~ — TEMUAN, lihat entri di atas.
       1,53 MB → 0,046 MB dan 2,83 MB → 0,042 MB
-- [ ] **Riwayat harga per-item sepanjang masa** — enam situs yang agregatnya
-      dihitung di JS dari daftar tanpa batas (sisa vena di atas)
+- [x] ~~**Riwayat harga per-item sepanjang masa**~~ — TEMUAN, lihat entri di
+      atas. 2,098 MB → 0,053 MB, ketujuh angka statistiknya identik
 - [ ] **Zod tanpa batas atas** — tiap `z.number()` uang/qty tanpa `.max()`
 - [ ] **`e.message` sampai ke klien** — sisa kelas kebocoran SQL mentah
 - [ ] **Uang ditulis di luar pembantu bersama** — `sales.subtotal/total/

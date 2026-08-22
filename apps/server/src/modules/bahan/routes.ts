@@ -34,7 +34,7 @@ import {
   storageLocations,
   suppliers,
 } from "../../db/schema";
-import { statistikHargaLots } from "../../lib/harga-stats";
+import { statistikHargaLots, hargaPerSatuanLot, lotStatistik, BATAS_LOT_RIWAYAT } from "../../lib/harga-stats";
 import { requireRole, type AppEnv } from "../../middleware/auth";
 import { saldoBahanPerCabang } from "../stok/service";
 import { kanonikKategori, kategoriKanonikMap } from "../kategori-bahan/service";
@@ -450,43 +450,73 @@ async function riwayatHargaBahan(
   companyId: string,
   ing: typeof ingredients.$inferSelect,
 ): Promise<RiwayatHargaDto> {
-  const rows = await db
-    .select({
-      id: productions.id,
-      tanggal: productions.prodDate,
-      qty: productions.qty,
-      totalHarga: productions.totalHarga,
-      hargaTebakan: productions.hargaTebakan,
-      supplier: suppliers.nama,
-      noFaktur: productions.noFaktur,
-      nomor: dokumenNomor.nomorTeks,
-    })
-    .from(productions)
-    .leftJoin(suppliers, eq(productions.supplierId, suppliers.id))
-    .leftJoin(
-      dokumenNomor,
-      and(
-        eq(dokumenNomor.companyId, productions.companyId),
-        eq(dokumenNomor.refId, productions.fakturId),
-      ),
-    )
-    .where(
-      and(
-        eq(productions.companyId, companyId),
-        eq(productions.ingredientId, ing.id),
-        eq(productions.tipe, "beli"),
-        eq(productions.status, "dikonfirmasi"),
-        isNull(productions.deletedAt),
-      ),
-    )
-    .orderBy(desc(productions.prodDate), desc(productions.waktu));
+  const milikBahan = and(
+    eq(productions.companyId, companyId),
+    eq(productions.ingredientId, ing.id),
+    eq(productions.tipe, "beli"),
+    eq(productions.status, "dikonfirmasi"),
+    isNull(productions.deletedAt),
+  );
+  const urutan = [desc(productions.prodDate), desc(productions.waktu)] as const;
+  /*
+    DUA KUERI, DAN ITU YANG MEMBUAT PEMOTONGANNYA AMAN.
+
+    Kartu ini dulu menarik SELURUH pembelian sebuah bahan — lengkap dengan dua
+    leftJoin — lalu menghitung kelima angkanya dari larik yang sama yang
+    dikirimnya. Terukur pada satu bahan dengan 12.018 lot: balasannya
+    **2,10 MB**.
+
+    Memotong lariknya begitu saja bukan pilihan: `harga_median` di kartu ini
+    JADI harga acuan RAB belanja (disinkron tiap Laporan Harga), dan harga
+    acuan itu dasar HPP setiap menu yang memakai bahannya. Median dari "300 lot
+    terbaru" menggeser HPP seluruh menu tanpa satu pun galat muncul.
+
+    Karena itu statistiknya dihitung dari kueri SEMPIT tanpa batas — empat
+    kolom, tanpa join sama sekali — dan `statistikHargaLots` tetap satu-satunya
+    yang menghitungnya. Yang dibatasi hanya daftar yang benar-benar dikirim.
+  */
+  const [semuaLot, rows] = await Promise.all([
+    db
+      .select({
+        tanggal: productions.prodDate,
+        qty: productions.qty,
+        totalHarga: productions.totalHarga,
+        hargaTebakan: productions.hargaTebakan,
+      })
+      .from(productions)
+      .where(milikBahan)
+      .orderBy(...urutan),
+    db
+      .select({
+        id: productions.id,
+        tanggal: productions.prodDate,
+        qty: productions.qty,
+        totalHarga: productions.totalHarga,
+        hargaTebakan: productions.hargaTebakan,
+        supplier: suppliers.nama,
+        noFaktur: productions.noFaktur,
+        nomor: dokumenNomor.nomorTeks,
+      })
+      .from(productions)
+      .leftJoin(suppliers, eq(productions.supplierId, suppliers.id))
+      .leftJoin(
+        dokumenNomor,
+        and(
+          eq(dokumenNomor.companyId, productions.companyId),
+          eq(dokumenNomor.refId, productions.fakturId),
+        ),
+      )
+      .where(milikBahan)
+      .orderBy(...urutan)
+      .limit(BATAS_LOT_RIWAYAT + 1),
+  ]);
+  const terpotong = rows.length > BATAS_LOT_RIWAYAT;
   const lots: RiwayatHargaLot[] = rows.map((r) => ({
     id: r.id,
     tanggal: r.tanggal,
     qty: r.qty,
     total_harga: r.totalHarga,
-    harga_satuan:
-      r.totalHarga != null && r.qty > 0 ? Math.round((r.totalHarga / r.qty) * 100) / 100 : null,
+    harga_satuan: hargaPerSatuanLot(r.totalHarga, r.qty),
     supplier: r.supplier,
     no_faktur: r.noFaktur,
     nomor: r.nomor,
@@ -505,9 +535,12 @@ async function riwayatHargaBahan(
     // tempat, dan tempat itu yang mengeluarkan lot tebakan — lihat catatan di
     // `statistikHargaLots`. Menghitung salah satunya di sini lagi persis
     // kesalahan yang baru saja dicabut.
-    ...statistikHargaLots(lots),
-    jumlah_pembelian: lots.length,
-    lots,
+    // Keempat angka statistik + jumlah_pembelian datang dari SELURUH lot
+    // (`semuaLot`), bukan dari `lots` yang sudah dipotong.
+    ...statistikHargaLots(lotStatistik(semuaLot)),
+    jumlah_pembelian: semuaLot.length,
+    lots: terpotong ? lots.slice(0, BATAS_LOT_RIWAYAT) : lots,
+    lots_terpotong: terpotong,
   };
 }
 

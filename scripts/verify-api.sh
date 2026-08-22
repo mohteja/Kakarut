@@ -12738,6 +12738,88 @@ if [ -s "$KUOTA_HABIS" ]; then
   sed 's/^/       /' "$KUOTA_HABIS"
 fi
 
+echo "── §233 Kartu Riwayat Harga: daftar berbatas, statistiknya dari SELURUH lot ──"
+#
+# Kartu ini dulu mengirim SETIAP pembelian sebuah bahan, lengkap dengan dua
+# leftJoin, lalu menghitung kelima angkanya dari larik yang sama. Terukur pada
+# satu bahan dengan 12.018 lot: **2,10 MB** → sesudah dibatasi **0,053 MB**.
+#
+# Yang membuat pemotongan berbahaya di sini BUKAN ukurannya: `harga_median` di
+# kartu ini JADI harga acuan RAB belanja (disinkron tiap Laporan Harga), dan
+# harga acuan itu dasar HPP setiap menu yang memakai bahannya. Median dari
+# "300 lot terbaru" menggeser HPP seluruh menu tanpa satu pun galat muncul.
+# Karena itu yang diuji di sini bukan cuma panjang lariknya, melainkan bahwa
+# kelima angkanya TETAP menghitung seluruh lot.
+# BAHAN YANG BENAR-BENAR PUNYA LOT, bukan sekadar bahan pertama.
+# Bahan tanpa pembelian membuat seluruh perbandingan di bawah membandingkan
+# daftar kosong dengan daftar kosong — lolos tanpa menguji apa pun. Itu persis
+# bentuk asersi hampa yang sudah sekali lolos di skrip ini (§220).
+ING233=""; RIW233=""
+for cal233 in $(api "$OWNER" GET /bahan | jq -r '.[0:12][].id'); do
+  R233=$(api "$OWNER" GET "/bahan/$cal233/pembelian")
+  if [ "$(echo "$R233" | jq '.lots | length')" -gt 0 ]; then
+    ING233="$cal233"; RIW233="$R233"; break
+  fi
+done
+cek "premis: ada bahan yang PUNYA lot pembelian (bukan daftar kosong)" "V == 1" \
+  "$( [ -n "$ING233" ] && echo 1 || echo 0 )"
+cek "premis: lot-nya memang tercacah" "V >= 1" \
+  "$(echo "${RIW233:-{\}}" | jq '.lots | length // 0')"
+cek "kartu riwayat menyertakan penanda pemotongan" "V == 1" \
+  "$(echo "$RIW233" | jq 'has("lots_terpotong") | if . then 1 else 0 end')"
+cek "daftar lot tak melebihi 300" "V <= 300" "$(echo "$RIW233" | jq '.lots | length')"
+# jumlah_pembelian adalah hitungan POPULASI. Selama lot < 300 keduanya sama;
+# yang diuji di sini bahwa ia tidak diam-diam berubah jadi panjang larik.
+cek "jumlah_pembelian >= jumlah lot yang terkirim" "V == 1" \
+  "$(echo "$RIW233" | jq '(.jumlah_pembelian >= (.lots | length)) | if . then 1 else 0 end')"
+cek "jumlah_harga_nyata <= jumlah_pembelian" "V == 1" \
+  "$(echo "$RIW233" | jq '(.jumlah_harga_nyata <= .jumlah_pembelian) | if . then 1 else 0 end')"
+
+# ── Statistiknya konsisten dengan lot yang terlihat ───────────────────────
+# Selama daftarnya BELUM terpotong, median/terendah/tertinggi wajib cocok
+# dengan yang bisa dihitung ulang dari `lots` — kalau tidak, "statistik dari
+# seluruh lot" cuma klaim. Begitu terpotong, perbandingan ini tak berlaku dan
+# sengaja dilewati alih-alih dilonggarkan diam-diam.
+if [ "$(echo "$RIW233" | jq -r '.lots_terpotong')" = "false" ]; then
+  cek "terendah == min(harga_satuan lot nyata)" "V == 1" \
+    "$(echo "$RIW233" | jq '
+      ([.lots[] | select(.harga_tebakan == false and .harga_satuan != null) | .harga_satuan] | min) as $m
+      | if ($m == null) then (.harga_terendah == null) else (.harga_terendah.harga == $m) end
+      | if . then 1 else 0 end')"
+  cek "tertinggi == max(harga_satuan lot nyata)" "V == 1" \
+    "$(echo "$RIW233" | jq '
+      ([.lots[] | select(.harga_tebakan == false and .harga_satuan != null) | .harga_satuan] | max) as $m
+      | if ($m == null) then (.harga_tertinggi == null) else (.harga_tertinggi.harga == $m) end
+      | if . then 1 else 0 end')"
+  cek "jumlah_harga_nyata == cacah lot berharga bukan tebakan" "V == 1" \
+    "$(echo "$RIW233" | jq '
+      ([.lots[] | select(.harga_tebakan == false and .harga_satuan != null)] | length) as $n
+      | (.jumlah_harga_nyata == $n) | if . then 1 else 0 end')"
+else
+  ok "daftar lot terpotong — perbandingan ulang statistik sengaja dilewati"
+fi
+
+# ── Pintu saudaranya: perlengkapan, bentuk yang sama ──────────────────────
+SUP233=""; PRW233=""
+for cal233 in $(api "$OWNER" GET /perlengkapan | jq -r '.[0:12][].id'); do
+  P233=$(api "$OWNER" GET "/perlengkapan/$cal233/pembelian")
+  if [ "$(echo "$P233" | jq '.lots | length')" -gt 0 ]; then
+    SUP233="$cal233"; PRW233="$P233"; break
+  fi
+done
+if [ -n "$SUP233" ]; then
+  cek "perlengkapan: kartu riwayat juga berpenanda pemotongan" "V == 1" \
+    "$(echo "$PRW233" | jq 'has("lots_terpotong") | if . then 1 else 0 end')"
+  cek "perlengkapan: daftar lot tak melebihi 300" "V <= 300" \
+    "$(echo "$PRW233" | jq '.lots | length')"
+  cek "perlengkapan: jumlah_pembelian >= jumlah lot terkirim" "V == 1" \
+    "$(echo "$PRW233" | jq '(.jumlah_pembelian >= (.lots | length)) | if . then 1 else 0 end')"
+  cek "perlengkapan: premis — lot-nya memang ada" "V >= 1" \
+    "$(echo "$PRW233" | jq '.lots | length')"
+else
+  gagal "premis §233: tak ada perlengkapan ber-lot — pintu saudaranya tak teruji"
+fi
+
 echo "── §232 Daftar member: berbatas, agregatnya tetap utuh, dan bisa dicari ──"
 #
 # Kedua pintu `/customer` dulu mengirim SEMUANYA. Terukur terhadap Postgres

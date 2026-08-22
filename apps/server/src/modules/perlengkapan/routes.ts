@@ -11,7 +11,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import type { RiwayatHargaDto, RiwayatHargaLot } from "@kakarut/shared";
-import { statistikHargaLots } from "../../lib/harga-stats";
+import { statistikHargaLots, hargaPerSatuanLot, lotStatistik, BATAS_LOT_RIWAYAT } from "../../lib/harga-stats";
 import { db } from "../../db/client";
 import {
   dokumenNomor,
@@ -107,40 +107,54 @@ async function riwayatHargaPerlengkapan(
   companyId: string,
   item: typeof supplies.$inferSelect,
 ): Promise<RiwayatHargaDto> {
-  const rows = await db
-    .select({
-      id: supplyMutations.id,
-      tanggal: supplyMutations.tanggal,
-      qty: supplyMutations.qty,
-      totalHarga: supplyMutations.totalHarga,
-      nomor: dokumenNomor.nomorTeks,
-    })
-    .from(supplyMutations)
-    .leftJoin(
-      dokumenNomor,
-      and(
-        eq(dokumenNomor.companyId, supplyMutations.companyId),
-        eq(dokumenNomor.refId, supplyMutations.id),
-      ),
-    )
-    .where(
-      and(
-        eq(supplyMutations.companyId, companyId),
-        eq(supplyMutations.supplyId, item.id),
-        eq(supplyMutations.tipe, "masuk"),
-        eq(supplyMutations.status, "disetujui"),
-      ),
-    )
-    .orderBy(desc(supplyMutations.tanggal), desc(supplyMutations.waktu));
+  const milikItem = and(
+    eq(supplyMutations.companyId, companyId),
+    eq(supplyMutations.supplyId, item.id),
+    eq(supplyMutations.tipe, "masuk"),
+    eq(supplyMutations.status, "disetujui"),
+  );
+  const urutan = [desc(supplyMutations.tanggal), desc(supplyMutations.waktu)] as const;
+  // Dua kueri, alasan yang sama persis dengan kartu Riwayat Harga bahan:
+  // statistiknya harus dari SELURUH lot (kueri sempit, tanpa join, tanpa
+  // batas), sementara daftar yang dikirim dibatasi. Lihat catatan panjang di
+  // `riwayatHargaBahan`.
+  const [semuaLot, rows] = await Promise.all([
+    db
+      .select({
+        tanggal: supplyMutations.tanggal,
+        qty: supplyMutations.qty,
+        totalHarga: supplyMutations.totalHarga,
+      })
+      .from(supplyMutations)
+      .where(milikItem)
+      .orderBy(...urutan),
+    db
+      .select({
+        id: supplyMutations.id,
+        tanggal: supplyMutations.tanggal,
+        qty: supplyMutations.qty,
+        totalHarga: supplyMutations.totalHarga,
+        nomor: dokumenNomor.nomorTeks,
+      })
+      .from(supplyMutations)
+      .leftJoin(
+        dokumenNomor,
+        and(
+          eq(dokumenNomor.companyId, supplyMutations.companyId),
+          eq(dokumenNomor.refId, supplyMutations.id),
+        ),
+      )
+      .where(milikItem)
+      .orderBy(...urutan)
+      .limit(BATAS_LOT_RIWAYAT + 1),
+  ]);
+  const terpotong = rows.length > BATAS_LOT_RIWAYAT;
   const lots: RiwayatHargaLot[] = rows.map((r) => ({
     id: r.id,
     tanggal: r.tanggal,
     qty: r.qty,
     total_harga: r.totalHarga,
-    harga_satuan:
-      r.totalHarga != null && r.qty > 0
-        ? Math.round((r.totalHarga / r.qty) * 100) / 100
-        : null,
+    harga_satuan: hargaPerSatuanLot(r.totalHarga, r.qty),
     supplier: null,
     no_faktur: null,
     nomor: r.nomor,
@@ -159,9 +173,15 @@ async function riwayatHargaPerlengkapan(
       satuan_beli: null,
     },
     harga_terkini: item.hargaBeli,
-    ...statistikHargaLots(lots),
-    jumlah_pembelian: lots.length,
-    lots,
+    // Dari SELURUH lot, bukan dari `lots` yang dipotong. `supply_mutations`
+    // tak punya jalur harga tebakan, jadi `hargaTebakan: false` di sini bukan
+    // penyederhanaan — itu memang keadaannya (lihat catatan di bawah).
+    ...statistikHargaLots(
+      lotStatistik(semuaLot.map((r) => ({ ...r, hargaTebakan: false }))),
+    ),
+    jumlah_pembelian: semuaLot.length,
+    lots: terpotong ? lots.slice(0, BATAS_LOT_RIWAYAT) : lots,
+    lots_terpotong: terpotong,
   };
 }
 

@@ -26,6 +26,44 @@ tanpa akses repo server.
 ---
 
 
+## Rilis: Kartu Riwayat Harga berbatas — medan baru `lots_terpotong`
+
+⚪️ **INFO untuk mobile** — mobile belum memakai kartu Riwayat Harga
+(`GET /bahan/:id/pembelian`, `GET /perlengkapan/:id/pembelian`). Dicatat karena
+bentuk kontraknya berubah.
+
+*(Belum di-merge ke production.)*
+
+### 🔴 `lots` dibatasi 300, medan baru `lots_terpotong`
+
+Terukur pada satu bahan dengan 12.018 lot pembelian: balasannya **2,10 MB**.
+Sesudah dibatasi: **0,053 MB**.
+
+```diff
+  RiwayatHargaDto {
+    …
++   lots: RiwayatHargaLot[]      // maksimal 300, TERBARU dulu
++   lots_terpotong: boolean
+  }
+```
+
+**Kelima angka statistik tidak berubah nilainya.** `harga_terendah`,
+`harga_tertinggi`, `harga_median`, `harga_rata` dan `jumlah_pembelian` kini
+dihitung dari kueri terpisah yang tak dibatasi — bukan dari `lots`. Diukur
+sebelum dan sesudah pada data yang sama: ketujuh angkanya identik.
+
+Itu bukan kerapian melainkan syarat. `harga_median` di kartu ini **jadi harga
+acuan RAB belanja** (disinkron tiap Laporan Harga), dan harga acuan itu dasar
+HPP setiap menu yang memakai bahannya. Median dari "300 lot terbaru" akan
+menggeser HPP seluruh menu tanpa satu pun galat muncul.
+
+Klien yang menampilkan `jumlah_pembelian` di dekat daftar `lots` **wajib**
+menampilkan `lots_terpotong` juga — dan klien yang menyimpulkan "ada lot
+tebakan" dengan memindai `lots` harus beralih ke
+`jumlah_pembelian > jumlah_harga_nyata`, sebab lot tebakan bisa seluruhnya
+berada di luar 300 yang terkirim.
+
+
 ## Rilis: Daftar member berbatas — `GET /customer` berganti bentuk balasan
 
 ⚪️ **INFO untuk mobile** — mobile tidak memakai `/customer` maupun

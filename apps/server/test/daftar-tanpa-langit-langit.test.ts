@@ -99,7 +99,27 @@ function berkasTs(dir: string): string[] {
   return keluar;
 }
 
-/** Rantai sesudah `.from(...)` sampai `;` pada kedalaman kurung nol. */
+/**
+ * Rantai sesudah `.from(...)` sampai ujung pernyataannya.
+ *
+ * BERHENTI DI `,` KEDALAMAN NOL, BUKAN CUMA DI `;`.
+ *
+ * Dua kueri berdampingan di dalam `Promise.all([a, b])` tak pernah menurunkan
+ * kedalaman kurung ke nol sampai `]);` di ujungnya. Tanpa berhenti di koma
+ * pemisahnya, ekor kueri PERTAMA menelan seluruh kueri kedua — dan `.limit()`
+ * milik yang kedua memaafkan yang pertama.
+ *
+ * Bukan kemungkinan teoretis: bentuk itulah yang dipakai kartu Riwayat Harga
+ * (kueri sempit tanpa batas + kueri daftar berbatas), dan versi pertama
+ * penjaga ini menghitungnya 61 — DUA LEBIH SEDIKIT dari yang sebenarnya, tepat
+ * pada dua kueri tanpa batas yang baru ditambahkan. Diperiksa juga ke
+ * belakang: pada `HEAD` sebelum perubahan itu, kedua versi sama-sama
+ * menghitung 63, jadi kebutaan ini tak pernah menyembunyikan apa pun di masa
+ * lalu — ia hanya akan menyembunyikan yang baru.
+ *
+ * Koma di dalam `and(a, b)` atau `.select({ x: 1, y: 2 })` selalu berada di
+ * kedalaman > 0, jadi tak ikut memotong.
+ */
 function ekorPernyataan(s: string, mulai: number): string {
   let ekor = "";
   let dalam = 0;
@@ -107,7 +127,7 @@ function ekorPernyataan(s: string, mulai: number): string {
     const c = s[j];
     if (c === "(") dalam += 1;
     else if (c === ")") dalam -= 1;
-    else if (c === ";" && dalam <= 0) break;
+    else if ((c === ";" || c === ",") && dalam <= 0) break;
     ekor += c;
   }
   return ekor;
@@ -175,6 +195,50 @@ describe("bacaan daftar tanpa langit-langit tak boleh bertambah", () => {
     );
   });
 
+  it("kartu Riwayat Harga: daftar berbatas, statistiknya dari SELURUH lot", () => {
+    // `harga_median` di kartu ini JADI harga acuan RAB belanja (disinkron tiap
+    // Laporan Harga), dan harga acuan itu dasar HPP setiap menu yang memakai
+    // bahannya. Menghitungnya dari 300 lot terbaru menggeser HPP seluruh menu
+    // tanpa satu pun galat muncul.
+    for (const f of ["modules/bahan/routes.ts", "modules/perlengkapan/routes.ts"] as const) {
+      const isi = readFileSync(join(SRC, f), "utf8");
+      expect(isi, `${f}: daftar lot kehilangan batasnya`).toContain("BATAS_LOT_RIWAYAT + 1");
+      expect(isi, `${f}: statistik tak boleh dihitung dari larik yang dipotong`).not.toMatch(
+        /statistikHargaLots\(\s*lots\s*\)/,
+      );
+      expect(
+        isi,
+        `${f}: jumlah_pembelian harus hitungan populasi, bukan panjang larik yang dikirim`,
+      ).not.toContain("jumlah_pembelian: lots.length");
+    }
+
+    // Rumus harga per satuan pernah hidup dalam EMPAT salinan, dan
+    // pembulatannya bagian dari jawabannya: dua salinan yang membulatkan
+    // berbeda menghasilkan harga acuan yang berbeda untuk data yang sama.
+    //
+    // Yang dijaga "tepat SATU salinan", bukan "nol" — salinan yang satu itu
+    // badan `hargaPerSatuanLot` sendiri. Versi pertama uji ini menuntut nol dan
+    // langsung menuduh definisi yang benar; penjaga yang salah tuduh mengajari
+    // orang mengabaikan warna merahnya.
+    const RUMUS = /Math\.round\(\s*\(\s*[\w.]+\s*\/\s*[\w.]+\s*\)\s*\*\s*100\s*\)\s*\/\s*100/g;
+    const salinan: string[] = [];
+    for (const p of berkasTs(SRC)) {
+      const isi = readFileSync(p, "utf8");
+      for (const _ of isi.matchAll(RUMUS)) salinan.push(p.slice(SRC.length + 1));
+    }
+    expect(
+      salinan,
+      "rumus harga per satuan disalin lagi alih-alih memakai hargaPerSatuanLot",
+    ).toEqual(["lib/harga-stats.ts"]);
+    const stats = readFileSync(join(SRC, "lib/harga-stats.ts"), "utf8");
+    expect(stats).toContain("export function hargaPerSatuanLot");
+    // …dan salinan yang satu itu memang badan helper-nya, bukan tempat lain.
+    expect(
+      stats.slice(stats.indexOf("export function hargaPerSatuanLot")),
+      "salinan satu-satunya harus berada DI DALAM hargaPerSatuanLot",
+    ).toMatch(RUMUS);
+  });
+
   it("PASANGAN: pemindainya bisa MENUDUH, dan tak menuduh yang sudah berbatas", () => {
     const buat = (isi: string) => situs([{ nama: "uji.ts", isi }]);
     const telanjang = `const r = await db.select({ id: sales.id }).from(sales).where(f).orderBy(x);`;
@@ -192,6 +256,17 @@ describe("bacaan daftar tanpa langit-langit tak boleh bertambah", () => {
     expect(
       buat("await db.select({ n: sql`COUNT(*)::int` }).from(sales).where(f).groupBy(sales.id);"),
       "agregat ber-groupBy tumbuh seiring jumlah kelompok — harus tertuduh",
+    ).toHaveLength(1);
+    // DUA KUERI DI DALAM `Promise.all([a, b])`: `.limit()` milik yang kedua
+    // tak boleh memaafkan yang pertama.
+    expect(
+      buat(
+        "const [a, b] = await Promise.all([\n" +
+          "  db.select({ x: sales.id }).from(sales).where(f).orderBy(u),\n" +
+          "  db.select({ y: sales.id }).from(sales).where(f).orderBy(u).limit(300),\n" +
+          "]);",
+      ),
+      "kueri tanpa batas di dalam Promise.all harus tetap tertuduh walau tetangganya berbatas",
     ).toHaveLength(1);
     // Tabel master tak ikut dijaga: jumlahnya kira-kira tetap.
     expect(

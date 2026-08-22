@@ -55,6 +55,7 @@ const BELUM_TAYANG = new Set([
   "## Rilis: Sebaran transaksi per jam di laporan penjualan",
   "## Rilis: Bon tagihan — kertas berharga yang BUKAN bukti pembayaran",
   "## Rilis: Daftar member berbatas — `GET /customer` berganti bentuk balasan",
+  "## Rilis: Kartu Riwayat Harga berbatas — medan baru `lots_terpotong`",
 ]);
 
 /** Dua bentuk stempel yang sah — baris mandiri (baru) dan blockquote (lama). */

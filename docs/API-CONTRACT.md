@@ -4414,6 +4414,21 @@ export interface RiwayatHargaDto {
    * angka yang rusak.
    */
   jumlah_harga_nyata: number;
+  /** maksimal 300 lot, TERBARU dulu — selebihnya `lots_terpotong` */
   lots: RiwayatHargaLot[];
+  /**
+   * true bila daftar lot di atas DIPOTONG — masih ada pembelian lain yang tak
+   * ikut terkirim.
+   *
+   * Kelima angka di atas (`harga_terendah`, `harga_tertinggi`, `harga_median`,
+   * `harga_rata`, `jumlah_pembelian`) TIDAK terpengaruh: semuanya dihitung dari
+   * SELURUH lot lewat kueri terpisah yang tak dibatasi, bukan dari daftar ini.
+   *
+   * Itu bagian pentingnya. Median di kartu ini jadi HARGA ACUAN RAB belanja,
+   * dan harga acuan itu dasar HPP setiap menu yang memakai bahannya —
+   * menghitungnya dari 300 lot terbaru saja akan menggeser HPP seluruh menu
+   * tanpa satu pun galat muncul.
+   */
+  lots_terpotong: boolean;
 }
 ```

@@ -1,4 +1,5 @@
 import { eq, sql } from "drizzle-orm";
+import { hargaPerSatuanLot } from "../../lib/harga-stats";
 import {
   hargaPerUnit,
   qtyTeks,
@@ -730,9 +731,12 @@ export async function fifoBahan(params: {
         qty,
         // harga menempel di lot hanya bila faktur berharga; transfer tak
         // membawa harga (biayanya milik lot asal di CK) → null
+        // Penjaganya tetap di sini (transfer tak berharga, lot bernilai nol
+        // bukan "gratis" melainkan tak berharga); yang didelegasikan cuma
+        // PEMBULATANNYA — rumus yang sama pernah hidup dalam empat salinan.
         hargaSatuan:
-          jenis !== "transfer" && total != null && total > 0 && qty > 0
-            ? Math.round((total / qty) * 100) / 100
+          jenis !== "transfer" && total != null && total > 0
+            ? hargaPerSatuanLot(total, qty)
             : null,
         expDate: r.exp_date != null ? String(r.exp_date) : null,
       };
