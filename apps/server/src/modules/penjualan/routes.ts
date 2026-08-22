@@ -1,4 +1,5 @@
 import { zValidator } from "../../lib/validator";
+import { BATAS_QTY_BARIS, BATAS_UANG } from "../../lib/batas-angka";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -30,13 +31,13 @@ export const SaleBody = z.object({
   catatan: z.string().nullish(),
   /** diskon per transaksi (opsional) */
   diskon_tipe: z.enum(["persen", "nominal"]).optional(),
-  diskon_nilai: z.number().nonnegative().optional(),
+  diskon_nilai: z.number().nonnegative().max(BATAS_UANG).optional(),
   /** identitas konsumen/member (opsional) */
   customer_nama: z.string().nullish(),
   customer_wa: z.string().nullish(),
   /** pembayaran */
   metode_bayar: z.enum(["tunai", "qris", "transfer"]).optional(),
-  uang_diterima: z.number().nonnegative().optional(),
+  uang_diterima: z.number().nonnegative().max(BATAS_UANG).optional(),
   /** idempotensi antarjalur (online ↔ /sync) — UUID v4 dari perangkat, opsional */
   client_ref: clientRefField,
   device_id: deviceIdField,
@@ -50,7 +51,7 @@ export const SaleBody = z.object({
     .array(
       z.object({
         menu_id: z.string().uuid(),
-        qty: z.number().positive(),
+        qty: z.number().positive().max(BATAS_QTY_BARIS),
         is_dine_in: z.boolean().optional(),
         catatan: z.string().nullish(),
         /** baris asal di open bill — pembawa harga terkunci */
@@ -371,7 +372,7 @@ export const penjualanRoutes = new Hono<AppEnv>()
           .array(
             z.object({
               sale_item_id: z.string().uuid(),
-              qty: z.number().positive(),
+              qty: z.number().positive().max(BATAS_QTY_BARIS),
             }),
           )
           .min(1)

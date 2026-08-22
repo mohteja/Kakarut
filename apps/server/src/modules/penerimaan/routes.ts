@@ -1,4 +1,5 @@
 import { zValidator } from "../../lib/validator";
+import { BATAS_QTY_STOK } from "../../lib/batas-angka";
 import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Hono, type Context } from "hono";
@@ -95,7 +96,7 @@ const TutupAnomaliBody = z.object({
 const TerimaSebagianBody = z.object({
   /** qty yang benar-benar diterima per baris; 0 = baris itu ditolak */
   items: z
-    .array(z.object({ id: z.string().uuid(), qty_diterima: z.number().nonnegative() }))
+    .array(z.object({ id: z.string().uuid(), qty_diterima: z.number().nonnegative().max(BATAS_QTY_STOK) }))
     .min(1)
     .max(500),
   alasan: z.string().trim().max(300).nullish(),

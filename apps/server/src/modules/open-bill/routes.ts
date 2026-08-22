@@ -1,4 +1,5 @@
 import { zValidator } from "../../lib/validator";
+import { BATAS_QTY_BARIS } from "../../lib/batas-angka";
 import { and, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -58,7 +59,7 @@ const BillBody = z.object({
          */
         pisah_dari: z.string().uuid().nullish(),
         menu_id: z.string().uuid(),
-        qty: z.number().positive(),
+        qty: z.number().positive().max(BATAS_QTY_BARIS),
         dine_in_override: z.boolean().nullish(),
         catatan: z.string().nullish(),
       }),

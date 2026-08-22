@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { BATAS_QTY_STOK } from "../../lib/batas-angka";
 import { zValidator } from "../../lib/validator";
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
@@ -66,7 +67,7 @@ const TransferBody = z.object({
     .array(
       z.object({
         ingredient_id: z.string().uuid(),
-        qty: z.number().positive(),
+        qty: z.number().positive().max(BATAS_QTY_STOK),
       }),
     )
     .min(1)

@@ -1,4 +1,5 @@
 import { zValidator } from "../../lib/validator";
+import { BATAS_ISI, BATAS_QTY_STOK, BATAS_UANG } from "../../lib/batas-angka";
 import { and, asc, desc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Hono } from "hono";
@@ -45,17 +46,17 @@ const BahanBody = z.object({
   /** kode produk (kosong → generate otomatis dari nama) */
   kode: z.string().trim().max(20).nullish(),
   nama: z.string().trim().min(1),
-  harga_beli: z.number().nonnegative(),
-  isi: z.number().positive(),
+  harga_beli: z.number().nonnegative().max(BATAS_UANG),
+  isi: z.number().positive().max(BATAS_ISI),
   satuan: z.string().trim().min(1).max(20).default("pcs"),
   /** satuan beli (mis. "dus"); 1 satuan_beli = isi satuan */
   satuan_beli: z.string().trim().max(20).nullish(),
   /** lacak stok saat membeli & menjual */
   track_stok: z.boolean().default(true),
   /** ambang batas stok minimum: saldo ≤ nilai ini → "menipis" (0 = rasio default) */
-  stok_minimum: z.number().nonnegative().default(0),
+  stok_minimum: z.number().nonnegative().max(BATAS_QTY_STOK).default(0),
   /** ambang stok minimum khusus cabang toko (0 = rasio default) */
-  stok_minimum_toko: z.number().nonnegative().default(0),
+  stok_minimum_toko: z.number().nonnegative().max(BATAS_QTY_STOK).default(0),
   /** pengali biaya resep → harga per batch bahan produksi (1 = mengikuti resep) */
   overhead_x: z.number().positive().max(1000).default(1),
   kategori: z.string().trim().min(1).max(30).default("lain"),
@@ -73,7 +74,7 @@ const BahanBody = z.object({
   /** boleh dibeli eceran per pcs; false = pembulatan per kemasan `isi` (jalur beli) */
   boleh_eceran: z.boolean().default(false),
   /** minimal belanja (MOQ) saat belanja otomatis; 0 = tanpa minimum */
-  min_beli: z.number().nonnegative().default(0),
+  min_beli: z.number().nonnegative().max(BATAS_QTY_STOK).default(0),
   /** masa simpan (hari) setelah masuk stok — dasar exp otomatis lot; 0 = tak diatur */
   masa_simpan_hari: z.number().int().min(0).max(3650).default(0),
   /** lead time (hari): beli = lama pesanan datang; produksi = lama proses; 0 = tanpa info */
@@ -92,13 +93,13 @@ const BahanPatchBody = z.object({
   slug: z.string().trim().min(1).optional(),
   kode: z.string().trim().max(20).nullish(),
   nama: z.string().trim().min(1).optional(),
-  harga_beli: z.number().nonnegative().optional(),
-  isi: z.number().positive().optional(),
+  harga_beli: z.number().nonnegative().max(BATAS_UANG).optional(),
+  isi: z.number().positive().max(BATAS_ISI).optional(),
   satuan: z.string().trim().min(1).max(20).optional(),
   satuan_beli: z.string().trim().max(20).nullish(),
   track_stok: z.boolean().optional(),
-  stok_minimum: z.number().nonnegative().optional(),
-  stok_minimum_toko: z.number().nonnegative().optional(),
+  stok_minimum: z.number().nonnegative().max(BATAS_QTY_STOK).optional(),
+  stok_minimum_toko: z.number().nonnegative().max(BATAS_QTY_STOK).optional(),
   overhead_x: z.number().positive().max(1000).optional(),
   kategori: z.string().trim().min(1).max(30).optional(),
   pengadaan: z.enum(["produksi", "beli"]).optional(),
@@ -109,7 +110,7 @@ const BahanPatchBody = z.object({
   is_packaging: z.boolean().optional(),
   is_complement: z.boolean().optional(),
   boleh_eceran: z.boolean().optional(),
-  min_beli: z.number().nonnegative().optional(),
+  min_beli: z.number().nonnegative().max(BATAS_QTY_STOK).optional(),
   masa_simpan_hari: z.number().int().min(0).max(3650).optional(),
   lead_time_hari: z.number().int().min(0).max(365).optional(),
   foto_hasil_url: z.string().trim().max(500).nullish(),
@@ -118,7 +119,7 @@ const BahanPatchBody = z.object({
 
 const ResepBody = z.object({
   komponen: z
-    .array(z.object({ ingredient_id: z.string().uuid(), qty: z.number().positive() }))
+    .array(z.object({ ingredient_id: z.string().uuid(), qty: z.number().positive().max(BATAS_QTY_STOK) }))
       .max(200)
     .default([]),
   /**
@@ -139,9 +140,9 @@ const ResepBody = z.object({
    */
   atur: z
     .object({
-      isi: z.number().positive().optional(),
+      isi: z.number().positive().max(BATAS_ISI).optional(),
       overhead_x: z.number().positive().max(1000).optional(),
-      harga_beli: z.number().nonnegative().optional(),
+      harga_beli: z.number().nonnegative().max(BATAS_UANG).optional(),
     })
     .optional(),
 });
@@ -165,15 +166,15 @@ const LangkahBody = z.object({
 const BahanBulkRow = z.object({
   kode: z.string().trim().max(20).nullish(),
   nama: z.string().trim().min(1),
-  harga_beli: z.number().nonnegative(),
-  isi: z.number().positive(),
+  harga_beli: z.number().nonnegative().max(BATAS_UANG),
+  isi: z.number().positive().max(BATAS_ISI),
   satuan: z.string().trim().min(1).max(20).default("pcs"),
   satuan_beli: z.string().trim().max(20).nullish(),
   kategori: z.string().trim().min(1).max(30).default("lain"),
   track_stok: z.boolean().default(true),
-  stok_minimum: z.number().nonnegative().default(0),
+  stok_minimum: z.number().nonnegative().max(BATAS_QTY_STOK).default(0),
   boleh_eceran: z.boolean().default(false),
-  min_beli: z.number().nonnegative().default(0),
+  min_beli: z.number().nonnegative().max(BATAS_QTY_STOK).default(0),
   masa_simpan_hari: z.number().int().min(0).max(3650).default(0),
   lead_time_hari: z.number().int().min(0).max(365).default(0),
   is_packaging: z.boolean().default(false),
@@ -197,6 +198,22 @@ const BahanBulkBody = z.object({ items: z.array(BahanBulkRow).min(1).max(200) })
  * sebelum rute sempat melihat, dan berkas CSV yang cuma punya kolom
  * `nama,harga_beli` menimpa seluruh kolom lain milik tiap bahan yang cocok.
  */
+/*
+  SENGAJA TANPA `.max()` — satu-satunya skema angka di repo ini yang begitu,
+  dan alasannya perilaku yang memang dirancang.
+
+  Rute impor TIDAK menggagalkan seluruh permintaan saat satu baris bermasalah:
+  ia melaporkan baris itu di `gagal[]` lalu meneruskan sisanya. Memasang
+  `.max()` di sini memindahkan kegagalan ke Zod, yang menolak SELURUH badan —
+  satu sel salah ketik di baris ke-500 membatalkan 999 baris lain yang benar.
+
+  Angka yang meluap tetap tak lolos ke basis data: jalur impor menangkapnya
+  per baris dan membalas "Angkanya terlalu besar untuk disimpan" — tanpa kueri
+  mentah, tanpa nama kolom, tanpa uuid (dijaga §225 verify-api).
+
+  Pengecualian ini disebut namanya di `angka-berbatas-atas.test.ts`; ia tak
+  bisa melebar diam-diam ke skema lain.
+*/
 const BahanImportRowBody = z.object({
   kode: z.string().trim().max(20).nullish(),
   nama: z.string().trim().min(1),
@@ -1360,7 +1377,7 @@ export const bahanRoutes = new Hono<AppEnv>()
          * ditinggalkan sebagai pekerjaan tersendiri. Angkanya menyamai batas
          * rupiah yang sudah dipakai jalur faktur (`produksi/routes.ts`).
          */
-        harga_per_unit: z.number().nonnegative().max(1_000_000_000_000),
+        harga_per_unit: z.number().nonnegative().max(BATAS_UANG),
       }),
     ),
     async (c) => {

@@ -56,6 +56,7 @@ const BELUM_TAYANG = new Set([
   "## Rilis: Bon tagihan — kertas berharga yang BUKAN bukti pembayaran",
   "## Rilis: Daftar member berbatas — `GET /customer` berganti bentuk balasan",
   "## Rilis: Kartu Riwayat Harga berbatas — medan baru `lots_terpotong`",
+  "## Rilis: Angka masukan berbatas atas — 500 berubah jadi 400 bernama",
 ]);
 
 /** Dua bentuk stempel yang sah — baris mandiri (baru) dan blockquote (lama). */

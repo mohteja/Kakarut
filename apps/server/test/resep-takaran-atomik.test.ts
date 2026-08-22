@@ -56,9 +56,11 @@ function badanTransaksiResep(): string {
 describe("server: takaran batch ditulis DI DALAM transaksi komponennya", () => {
   it("body /resep menerima `atur` (isi, overhead_x, harga_beli)", () => {
     expect(SRV).toContain("  atur: z");
-    expect(SRV).toContain("      isi: z.number().positive().optional(),");
+    expect(SRV).toContain("      isi: z.number().positive().max(BATAS_ISI).optional(),");
     expect(SRV).toContain("      overhead_x: z.number().positive().max(1000).optional(),");
-    expect(SRV).toContain("      harga_beli: z.number().nonnegative().optional(),");
+    expect(SRV).toContain(
+      "      harga_beli: z.number().nonnegative().max(BATAS_UANG).optional(),",
+    );
   });
 
   it("ketiganya ditulis di dalam transaksi yang sama — bukan sesudahnya", () => {

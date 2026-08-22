@@ -26,6 +26,39 @@ tanpa akses repo server.
 ---
 
 
+## Rilis: Angka masukan berbatas atas — 500 berubah jadi 400 bernama
+
+🟡 **PERLU DICEK** — mobile mengirim `qty`, `harga_beli`, `total_harga`,
+`uang_diterima` dan sejenisnya. Tak ada medan baru dan tak ada yang dihapus;
+yang berubah **kode galatnya**.
+
+*(Belum di-merge ke production.)*
+
+### 🟡 Nilai di atas kapasitas kolom kini ditolak **400**, bukan jatuh **500**
+
+`z.number()` menerima apa pun sampai `Number.MAX_VALUE` (1,8e308). Kolom yang
+menampungnya tidak: `numeric(p, s)` cuma memuat `p − s` digit di depan koma.
+Terukur lewat HTTP, sebelum diperbaiki:
+
+| kirim | dulu | sekarang |
+|---|---|---|
+| `PUT /menu/:id` `mult = 10000` | **500** | `400 "mult: maksimal 9999"` |
+| `POST /penjualan` `qty = 1e8` | **500** | `400 "items[0].qty: maksimal 99999999"` |
+| `POST /bahan` `harga_beli = 1e12` | **500** | `400 "harga_beli: maksimal 999999999999"` |
+
+Nilai sah **tepat di batasnya** tetap diterima: `mult = 9999` → 200,
+`qty = 99.999.999` → 201, `harga_beli = 999.999.999.999` → 201.
+
+Yang perlu dicek di mobile: layar yang selama ini memperlakukan galat sebagai
+"server bermasalah, coba lagi" kini menerima pesan yang **bisa ditampilkan apa
+adanya** dan menyebut nama medannya. Antrean offline yang mengulang perintah
+gagal juga berubah perilakunya — 400 tak akan pernah berhasil kalau diulang,
+berbeda dari 500.
+
+Batas-batasnya diturunkan dari kolomnya, bukan dari tebakan bisnis, dan
+tercatat satu per satu di `apps/server/src/lib/batas-angka.ts`.
+
+
 ## Rilis: Kartu Riwayat Harga berbatas — medan baru `lots_terpotong`
 
 ⚪️ **INFO untuk mobile** — mobile belum memakai kartu Riwayat Harga

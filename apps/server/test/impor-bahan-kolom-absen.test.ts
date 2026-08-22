@@ -85,6 +85,9 @@ describe("zod: absen tetap absen sampai ke rutenya", () => {
 
   it("batas nilainya tak ikut longgar saat default dilepas", () => {
     // Melepas `.default()` sempat menggoda untuk sekalian melepas penjaganya.
+    // TANPA `.max()`, dan itu disengaja: rute impor melaporkan kegagalan PER
+    // BARIS lalu meneruskan sisanya, sedangkan Zod menolak SELURUH badan.
+    // Pengecualiannya disebut namanya di `angka-berbatas-atas.test.ts`.
     expect(BODY).toContain("harga_beli: z.number().nonnegative().optional(),");
     expect(BODY).toContain("isi: z.number().positive().optional(),");
     expect(BODY).toContain("masa_simpan_hari: z.number().int().min(0).max(3650).optional(),");

@@ -1,4 +1,5 @@
 import { zValidator } from "../../lib/validator";
+import { BATAS_UANG } from "../../lib/batas-angka";
 import { and, desc, eq, isNotNull, isNull, lt, lte, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -273,7 +274,7 @@ const execShiftBuka: Eksekutor = async ({ auth }, payload, waktu) => {
     throw new HTTPException(403, { message: "Hanya kasir yang boleh membuka shift" });
   }
   const p = z
-    .object({ branch_id: z.string().uuid().nullish(), modal_awal: z.number().nonnegative().default(0) })
+    .object({ branch_id: z.string().uuid().nullish(), modal_awal: z.number().nonnegative().max(BATAS_UANG).default(0) })
     .parse(payload ?? {});
   const branchId = await resolveCabangSync(auth, p.branch_id);
   const { shift, sudahTerbuka } = await bukaShift({

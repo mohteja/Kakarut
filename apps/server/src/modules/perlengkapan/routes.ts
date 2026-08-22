@@ -6,6 +6,7 @@
  * owner/admin mengelola item, stok masuk, koreksi, aturan, dan belanja.
  */
 import { zValidator } from "../../lib/validator";
+import { BATAS_QTY_STOK, BATAS_UANG } from "../../lib/batas-angka";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -65,8 +66,8 @@ const TANGGAL_RE = /^\d{4}-\d{2}-\d{2}$/;
 const ItemBody = z.object({
   nama: z.string().trim().min(1).max(60),
   satuan: z.string().trim().min(1).max(20).default("pcs"),
-  harga_beli: z.number().min(0).default(0),
-  stok_minimum: z.number().min(0).default(0),
+  harga_beli: z.number().min(0).max(BATAS_UANG).default(0),
+  stok_minimum: z.number().min(0).max(BATAS_QTY_STOK).default(0),
   catatan: z.string().max(300).nullish(),
   kategori: z.string().trim().min(1).max(60).nullish(),
   boleh_eceran: z.boolean().default(true),
@@ -77,8 +78,8 @@ const ItemBody = z.object({
 const ItemPatchBody = z.object({
   nama: z.string().trim().min(1).max(60).optional(),
   satuan: z.string().trim().min(1).max(20).optional(),
-  harga_beli: z.number().min(0).optional(),
-  stok_minimum: z.number().min(0).optional(),
+  harga_beli: z.number().min(0).max(BATAS_UANG).optional(),
+  stok_minimum: z.number().min(0).max(BATAS_QTY_STOK).optional(),
   catatan: z.string().max(300).nullish(),
   kategori: z.string().trim().min(1).max(60).nullish(),
   boleh_eceran: z.boolean().optional(),
@@ -186,19 +187,19 @@ async function riwayatHargaPerlengkapan(
 }
 
 const MasukBody = z.object({
-  qty: z.number().positive(),
-  total_harga: z.number().min(0).nullish(),
+  qty: z.number().positive().max(BATAS_QTY_STOK),
+  total_harga: z.number().min(0).max(BATAS_UANG).nullish(),
   catatan: z.string().max(300).nullish(),
   tanggal: z.string().regex(TANGGAL_RE).optional(),
 });
 
 const PakaiBody = z.object({
-  qty: z.number().positive(),
+  qty: z.number().positive().max(BATAS_QTY_STOK),
   catatan: z.string().max(300).nullish(),
 });
 
 const KoreksiBody = z.object({
-  qty_fisik: z.number().min(0),
+  qty_fisik: z.number().min(0).max(BATAS_QTY_STOK),
   catatan: z.string().max(300).nullish(),
 });
 
@@ -206,7 +207,7 @@ const AturanBody = z.object({
   /** "otomatis" = potongan terjadwal; "manual" = pemakaian via stock opname */
   metode: z.enum(["otomatis", "manual"]).default("otomatis"),
   // qty wajib > 0 hanya untuk metode otomatis (divalidasi di handler)
-  qty: z.number().min(0).default(0),
+  qty: z.number().min(0).max(BATAS_QTY_STOK).default(0),
   per_hari: z.number().int().min(1).max(365).default(1),
   aktif: z.boolean().default(true),
   mulai: z.string().regex(TANGGAL_RE).optional(),
@@ -215,7 +216,7 @@ const AturanBody = z.object({
 const OpnameBody = z.object({
   items: z
     .array(
-      z.object({ supply_id: z.string().uuid(), qty_fisik: z.number().min(0) }),
+      z.object({ supply_id: z.string().uuid(), qty_fisik: z.number().min(0).max(BATAS_QTY_STOK) }),
     )
     .min(1)
     .max(1000),
@@ -224,13 +225,13 @@ const OpnameBody = z.object({
 
 const StokAwalBody = z.object({
   items: z
-    .array(z.object({ supply_id: z.string().uuid(), qty: z.number().min(0) }))
+    .array(z.object({ supply_id: z.string().uuid(), qty: z.number().min(0).max(BATAS_QTY_STOK) }))
     .min(1)
     .max(500),
 });
 
 const MintaBody = z.object({
-  qty: z.number().positive(),
+  qty: z.number().positive().max(BATAS_QTY_STOK),
   catatan: z.string().max(300).nullish(),
 });
 
@@ -492,8 +493,8 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
           .array(
             z.object({
               supply_id: z.string().uuid(),
-              qty: z.number().positive(),
-              total_harga: z.number().min(0).nullish(),
+              qty: z.number().positive().max(BATAS_QTY_STOK),
+              total_harga: z.number().min(0).max(BATAS_UANG).nullish(),
             }),
           )
           .min(1)
@@ -501,8 +502,8 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
           .optional(),
         // bentuk lama (satu item) — dipakai bila `items` tidak dikirim
         supply_id: z.string().uuid().optional(),
-        qty: z.number().positive().optional(),
-        total_harga: z.number().min(0).nullish(),
+        qty: z.number().positive().max(BATAS_QTY_STOK).optional(),
+        total_harga: z.number().min(0).max(BATAS_UANG).nullish(),
         ck_branch_id: z.string().uuid().nullish(),
         tujuan_branch_id: z.string().uuid().nullish(),
         catatan: z.string().nullish(),
@@ -562,8 +563,8 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
           .array(
             z.object({
               id: z.string().uuid(),
-              qty: z.number().positive().optional(),
-              total_harga: z.number().min(0).nullish(),
+              qty: z.number().positive().max(BATAS_QTY_STOK).optional(),
+              total_harga: z.number().min(0).max(BATAS_UANG).nullish(),
             }),
           )
           .max(100)
@@ -668,8 +669,8 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
     zValidator(
       "json",
       z.object({
-        qty: z.number().positive().optional(),
-        total_harga: z.number().min(0).nullish(),
+        qty: z.number().positive().max(BATAS_QTY_STOK).optional(),
+        total_harga: z.number().min(0).max(BATAS_UANG).nullish(),
       }),
     ),
     async (c) => {
@@ -971,7 +972,7 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
   .post(
     "/:id/harga",
     requireRole("owner", "admin"),
-    zValidator("json", z.object({ harga_per_unit: z.number().min(0) })),
+    zValidator("json", z.object({ harga_per_unit: z.number().min(0).max(BATAS_UANG) })),
     async (c) => {
       const auth = c.get("auth");
       const { harga_per_unit } = c.req.valid("json");

@@ -12738,6 +12738,53 @@ if [ -s "$KUOTA_HABIS" ]; then
   sed 's/^/       /' "$KUOTA_HABIS"
 fi
 
+echo "── §234 Angka masukan berbatas atas: 400 bernama, bukan 500 ──"
+#
+# `z.number()` menerima apa pun sampai 1,8e308; `numeric(p,s)` cuma memuat p−s
+# digit di depan koma. TERUKUR sebelum diperbaiki, lewat HTTP:
+#
+#   PUT  /menu/:id   mult = 10.000        → 500   (numeric(7,3))
+#   POST /bahan      harga_beli = 1e12    → 500   (numeric(14,2))
+#   POST /penjualan  qty = 1e8            → 500   (numeric(10,2))
+#
+# Dan yang lebih sunyi: `qty = 10.000.000` dibalas 201, tersimpan, ikut tiap
+# SUM — omzet hari itu terbaca Rp 11.003.936.250 dari satu ketikan.
+#
+# Tiap penolakan DIPASANGKAN dengan nilai sah tepat di batasnya. Penjaga yang
+# menolak data sah lebih merusak daripada bug yang dijaganya, dan pasangan itu
+# satu-satunya yang membedakan "berbatas" dari "rusak".
+MENU234=$(api "$OWNER" GET /menu | jq -r '.[0].id')
+cek "premis: ada menu untuk diuji" "V == 1" "$( [ -n "$MENU234" ] && [ "$MENU234" != "null" ] && echo 1 || echo 0 )"
+
+# ── mult: numeric(7,3) → muat sampai 9.999,999 ───────────────────────────
+cek "mult = 9.999 (tepat di batas) DITERIMA" "V == 200" \
+  "$(status_code_body "$OWNER" PUT "/menu/$MENU234" '{"mult":9999}')"
+cek "mult = 10.000 ditolak 400, bukan 500" "V == 400" \
+  "$(status_code_body "$OWNER" PUT "/menu/$MENU234" '{"mult":10000}')"
+cek "…dan pesannya menyebut medannya" "V == 1" \
+  "$(api "$OWNER" PUT "/menu/$MENU234" '{"mult":10000}' | jq '(.error | test("mult")) | if . then 1 else 0 end')"
+
+# ── qty baris penjualan: numeric(10,2) → muat sampai 99.999.999,99 ───────
+BODY234="{\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$MENU234\",\"qty\":99999999}]}"
+cek "qty = 99.999.999 (tepat di batas) DITERIMA" "V == 201" \
+  "$(status_code_body "$REISS105" POST /penjualan "$BODY234")"
+BODY234B="{\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$MENU234\",\"qty\":100000000}]}"
+cek "qty = 1e8 ditolak 400, bukan 500" "V == 400" \
+  "$(status_code_body "$REISS105" POST /penjualan "$BODY234B")"
+BODY234C="{\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$MENU234\",\"qty\":1e308}]}"
+cek "qty = 1e308 ditolak 400, bukan 500" "V == 400" \
+  "$(status_code_body "$REISS105" POST /penjualan "$BODY234C")"
+
+# ── uang: numeric(14,2) → muat sampai 999.999.999.999,99 ─────────────────
+SAT234=$(api "$OWNER" GET /satuan | jq -r '.[0].nama')
+BH234() { echo "{\"nama\":\"Uji234 $1\",\"satuan\":\"$SAT234\",\"harga_beli\":$2,\"isi\":1}"; }
+cek "harga_beli = 999.999.999.999 (tepat di batas) DITERIMA" "V == 201" \
+  "$(status_code_body "$OWNER" POST /bahan "$(BH234 a 999999999999)")"
+cek "harga_beli = 1e12 ditolak 400 — INILAH nilai yang dulu diloloskan penjaga lama" "V == 400" \
+  "$(status_code_body "$OWNER" POST /bahan "$(BH234 b 1000000000000)")"
+cek "harga_beli = 1e308 ditolak 400, bukan 500" "V == 400" \
+  "$(status_code_body "$OWNER" POST /bahan "$(BH234 c 1e308)")"
+
 echo "── §233 Kartu Riwayat Harga: daftar berbatas, statistiknya dari SELURUH lot ──"
 #
 # Kartu ini dulu mengirim SETIAP pembelian sebuah bahan, lengkap dengan dua

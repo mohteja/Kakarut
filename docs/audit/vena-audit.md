@@ -400,6 +400,63 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
   menampilkan pemotongan dan menyimpulkan "ada lot tebakan" dari angka
   populasi, bukan dari larik yang dipotong
 
+## `z.number()` tanpa batas atas — server — 2026-08-22
+
+- **Populasi**: **109** `z.number()` di `apps/server/src` + `packages/shared/src`.
+  32 sudah ber-`.max()`, **77 telanjang**
+- **Metode**: `scratchpad/znumber.py`; polanya `z\s*\.\s*number\s*\(` supaya
+  bentuk prettier (`harga: z\n  .number()`) ikut terlihat — pelajaran dari
+  gerbang larik yang dulu buta 54%
+- **Detektor**: DIBUKTIKAN — `.max(1_000_000_000_000)` dicabut dari
+  `produksi/routes.ts:153` (suntikan di-assert mendarat) → tertuduh;
+  dikembalikan → hilang. Pasangannya: ketiga bentuk penulisan
+  (`z.number()`, multi-baris, berspasi) diperiksa cocok
+- **Hasil**: **TEMUAN**. `numeric(p, s)` cuma memuat `p − s` digit di depan
+  koma; `z.number()` menerima sampai 1,8e308. Terukur lewat HTTP:
+
+  | kirim | sebelum | sesudah |
+  |---|---|---|
+  | `PUT /menu/:id` `mult = 9.999` | 200 | 200 |
+  | `PUT /menu/:id` `mult = 10.000` | **HTTP 500** | `400 "mult: maksimal 9999"` |
+  | `POST /penjualan` `qty = 99.999.999` | 201 | 201 |
+  | `POST /penjualan` `qty = 1e8` | **HTTP 500** | `400 "items[0].qty: maksimal 99999999"` |
+  | `POST /bahan` `harga_beli = 999.999.999.999` | 201 | 201 |
+  | `POST /bahan` `harga_beli = 1e12` | **HTTP 500** | `400 "harga_beli: maksimal 999999999999"` |
+
+  Dan yang lebih sunyi daripada 500: **apa yang lolos**. `qty = 10.000.000`
+  dibalas **201**, tersimpan, lalu ikut tiap SUM — omzet hari itu terbaca
+  **Rp 11.003.936.250** dari satu ketikan. Tak ada galat, tak ada peringatan
+- **Pola**: aturannya SUDAH ditegakkan di empat pintu (`harga_per_unit`,
+  `harga`, `dana_cair`, `realisasi`) dan tujuh puluh tujuh saudaranya
+  dibiarkan. Lebih dari itu — **batas yang sudah ada pun salah**: keempatnya
+  memakai `1_000_000_000_000`, satu lebih BESAR dari yang muat di
+  `numeric(14,2)`. Terukur: 1e12 lolos Zod lalu jatuh 500; 1e12+1 ditolak 400.
+  Pintu yang "sudah dijaga" meloloskan tepat satu nilai yang meledak
+- **Batas**: gerbangnya menuntut ADANYA `.max()`, bukan bahwa angkanya cocok
+  dengan kolom tujuannya — pemetaan medan → kolom tak ada di kode, jadi
+  `.max()` yang kebesaran tetap lolos. Yang menjaganya `batas-angka.ts`, tempat
+  tiap konstanta menyebut kolomnya. Batasnya juga TIDAK menghalangi nilai yang
+  absurd-tapi-muat: `qty = 99.999.999` tetap diterima. Batas bisnis sengaja tak
+  dikarang — penjaga yang menolak data sah lebih merusak daripada bug yang
+  dijaganya
+- **Satu pengecualian, disebut namanya**: `BahanImportRowBody`. Rute impor
+  melaporkan kegagalan PER BARIS lalu meneruskan sisanya; `.max()` di situ
+  memindahkan penolakan ke Zod yang membatalkan SELURUH badan — satu sel salah
+  ketik di baris ke-500 membuang 999 baris yang benar. Ditemukan karena §225
+  verify-api berubah merah, bukan karena kupikirkan lebih dulu. Angkanya tetap
+  tak lolos ke basis data (dijaga §225). Pengecualiannya dibatasi ke DALAM
+  skema itu saja, dengan uji yang membuktikan medan bernama sama di skema lain
+  pada berkas yang sama tetap tertuduh
+- **Kesalahanku**: uji "batas `}` menghentikan rantai" kutulis seolah terbukti;
+  suntikan yang mencabutnya ternyata tetap hijau — yang menahan di situ `)`
+  penutup, bukan `}`. Klaimnya diralat di komentarnya alih-alih dibiarkan
+  terbaca sebagai bukti
+- **Tindak**: `lib/batas-angka.ts` (7 konstanta, tiap satu menyebut kolomnya);
+  77 medan diberi batas; 4 batas 1e12 yang kelebihan satu diperbaiki; gerbang
+  `angka-berbatas-atas.test.ts` (5 uji, penyaring komentar supaya tak menuduh
+  prosanya sendiri); §234 verify-api (10 asersi, tiap penolakan dipasangkan
+  nilai sah tepat di batasnya); 4 source-pin lama disesuaikan
+
 ---
 
 ## Antrean vena — belum tergarap
@@ -417,7 +474,8 @@ berlaku di situ).
       1,53 MB → 0,046 MB dan 2,83 MB → 0,042 MB
 - [x] ~~**Riwayat harga per-item sepanjang masa**~~ — TEMUAN, lihat entri di
       atas. 2,098 MB → 0,053 MB, ketujuh angka statistiknya identik
-- [ ] **Zod tanpa batas atas** — tiap `z.number()` uang/qty tanpa `.max()`
+- [x] ~~**Zod tanpa batas atas**~~ — TEMUAN, lihat entri di atas. 77 dari 109
+      telanjang; 500 → 400 bernama, dan batas lama 1e12 ternyata kelebihan satu
 - [ ] **`e.message` sampai ke klien** — sisa kelas kebocoran SQL mentah
 - [ ] **Uang ditulis di luar pembantu bersama** — `sales.subtotal/total/
       pb1_amount` yang tak lewat `createSale`/`hitungUangSetelahRefund`

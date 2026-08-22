@@ -1,4 +1,5 @@
 import { zValidator } from "../../lib/validator";
+import { BATAS_UANG } from "../../lib/batas-angka";
 import { and, asc, desc, eq, inArray, isNotNull, isNull, or, sql, sum } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Hono } from "hono";
@@ -734,7 +735,7 @@ export const shiftRoutes = new Hono<AppEnv>()
   .post(
     "/buka",
     requireRole("cashier"),
-    zValidator("json", z.object({ modal_awal: z.number().nonnegative().default(0) })),
+    zValidator("json", z.object({ modal_awal: z.number().nonnegative().max(BATAS_UANG).default(0) })),
     async (c) => {
       const auth = c.get("auth");
       const branchId = await branchUntukTulis(
@@ -781,7 +782,7 @@ export const shiftRoutes = new Hono<AppEnv>()
   .post(
     "/kunci-hitungan",
     requireRole("cashier"),
-    zValidator("json", z.object({ uang_fisik: z.number().nonnegative() })),
+    zValidator("json", z.object({ uang_fisik: z.number().nonnegative().max(BATAS_UANG) })),
     async (c) => {
       const auth = c.get("auth");
       const branchId = await resolveBranchId(c);
@@ -836,7 +837,7 @@ export const shiftRoutes = new Hono<AppEnv>()
       "json",
       z.object({
         /** boleh kosong bila hitungan sudah dikunci lebih dulu */
-        uang_fisik: z.number().nonnegative().nullish(),
+        uang_fisik: z.number().nonnegative().max(BATAS_UANG).nullish(),
         catatan: z.string().nullish(),
         /** keterangan kasir bila hitungannya tak pas (mis. "kembalian kurang") */
         selisih_alasan: z.string().trim().max(300).nullish(),

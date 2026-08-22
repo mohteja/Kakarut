@@ -1,4 +1,5 @@
 import { zValidator } from "../../lib/validator";
+import { BATAS_FAKTOR, BATAS_HARGA, BATAS_QTY_STOK, BATAS_URUTAN } from "../../lib/batas-angka";
 import { and, desc, eq, inArray, isNotNull, isNull, max, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -35,7 +36,7 @@ import {
 
 const KomponenBody = z.object({
   ingredient_id: z.string().uuid(),
-  qty: z.number().positive(),
+  qty: z.number().positive().max(BATAS_QTY_STOK),
 });
 
 const MenuCreateBody = z.object({
@@ -45,10 +46,10 @@ const MenuCreateBody = z.object({
   deskripsi: z.string().trim().max(500).nullish(),
   category_id: z.string().uuid(),
   tipe: z.enum(["regular", "paket"]).default("regular"),
-  mult: z.number().nonnegative().nullish(),
+  mult: z.number().nonnegative().max(BATAS_FAKTOR).nullish(),
   base_menu_id: z.string().uuid().nullish(),
-  base_mult: z.number().nonnegative().nullish(),
-  harga_jual: z.number().nonnegative(),
+  base_mult: z.number().nonnegative().max(BATAS_FAKTOR).nullish(),
+  harga_jual: z.number().nonnegative().max(BATAS_HARGA),
   image_url: z.string().nullish(),
   /**
    * Target waktu penyajian (DETIK). null = tak ditetapkan → laporan durasi
@@ -85,10 +86,10 @@ const MenuUpdateBody = z.object({
   deskripsi: z.string().trim().max(500).nullish(),
   category_id: z.string().uuid().optional(),
   tipe: z.enum(["regular", "paket"]).optional(),
-  mult: z.number().nonnegative().nullish(),
+  mult: z.number().nonnegative().max(BATAS_FAKTOR).nullish(),
   base_menu_id: z.string().uuid().nullish(),
-  base_mult: z.number().nonnegative().nullish(),
-  harga_jual: z.number().nonnegative().optional(),
+  base_mult: z.number().nonnegative().max(BATAS_FAKTOR).nullish(),
+  harga_jual: z.number().nonnegative().max(BATAS_HARGA).optional(),
   /** undefined = foto lama tetap; null = hapus foto */
   image_url: z.string().nullish(),
   /** undefined = target lama tetap; null = hapus target */
@@ -104,7 +105,7 @@ const MenuUpdateBody = z.object({
 type MenuEfektif = z.infer<typeof MenuCreateBody>;
 
 const UrutanBody = z.object({
-  items: z.array(z.object({ id: z.string().uuid(), sort_order: z.number().int() })).max(2000),
+  items: z.array(z.object({ id: z.string().uuid(), sort_order: z.number().int().max(BATAS_URUTAN) })).max(2000),
 });
 
 /**

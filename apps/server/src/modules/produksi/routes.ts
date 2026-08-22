@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { BATAS_QTY_STOK, BATAS_UANG } from "../../lib/batas-angka";
 import { zValidator } from "../../lib/validator";
 import {
   and,
@@ -128,7 +129,7 @@ const KirimBody = z.object({ tujuan_storage_id: z.string().uuid().nullish() });
  */
 const KirimHasilBody = KirimBody.extend({
   items: z
-    .array(z.object({ ingredient_id: z.string().uuid(), qty: z.number().positive() }))
+    .array(z.object({ ingredient_id: z.string().uuid(), qty: z.number().positive().max(BATAS_QTY_STOK) }))
     .min(1)
     .max(500)
     .optional(),
@@ -145,12 +146,12 @@ const TahapBody = z.object({
     .array(
       z.object({
         id: z.string().uuid(),
-        qty: z.number().positive(),
+        qty: z.number().positive().max(BATAS_QTY_STOK),
         /**
          * Harga riil baris saat maju (harga pasar naik/turun) — menggantikan
          * estimasi RAB pada bagian yang maju; sisa split tetap prorata RAB.
          */
-        harga: z.number().nonnegative().max(1_000_000_000_000).nullish(),
+        harga: z.number().nonnegative().max(BATAS_UANG).nullish(),
         /**
          * Override tanggal EXP lot saat baris MASUK STOK (beli Tiba /
          * produksi Selesai, target ≥ "menunggu"). Kosong = otomatis dari
@@ -170,13 +171,13 @@ const TahapBody = z.object({
    * Dana yang benar-benar cair saat faktur meninggalkan tahap RAB — penuh
    * sesuai RAB atau sebagian. Dicatat sebagai entri faktur_dana (akumulatif).
    */
-  dana_cair: z.number().nonnegative().max(1_000_000_000_000).nullish(),
+  dana_cair: z.number().nonnegative().max(BATAS_UANG).nullish(),
   /**
    * Realisasi biaya saat proses → selesai. Dibandingkan dengan total dana
    * faktur: kurang → entri 'tambahan' (catatan: dari mana uangnya); lebih →
    * entri 'kembali' (catatan: di siapa sisa uangnya); pas → tanpa entri.
    */
-  realisasi: z.number().nonnegative().max(1_000_000_000_000).nullish(),
+  realisasi: z.number().nonnegative().max(BATAS_UANG).nullish(),
   /** keterangan selisih realisasi: sumber dana tambahan / pemegang sisa dana */
   selisih_catatan: z.string().trim().max(300).nullish(),
   /**
@@ -285,11 +286,11 @@ const TambahStokBody = z
   .object({
     branch_id: z.string().uuid().optional(),
     ingredient_id: z.string().uuid(),
-    qty: z.number().positive().optional(),
+    qty: z.number().positive().max(BATAS_QTY_STOK).optional(),
     /** true = 1 batch/1 pembelian → qty otomatis = isi bahan saat ini */
     batch: z.boolean().default(false),
     /** khusus jalur beli: total harga pembelian (catatan pengeluaran) */
-    total_harga: z.number().nonnegative().nullish(),
+    total_harga: z.number().nonnegative().max(BATAS_UANG).nullish(),
     catatan: z.string().nullish(),
   })
   .refine((v) => v.batch || v.qty != null, {
@@ -318,9 +319,9 @@ const FakturBody = z.object({
         ingredient_id: z.string().uuid(),
         /** jumlah dalam pcs, atau dalam batch (dikali isi bahan) */
         mode: z.enum(["pcs", "batch"]),
-        jumlah: z.number().positive(),
+        jumlah: z.number().positive().max(BATAS_QTY_STOK),
         storage_location_id: z.string().uuid().nullish(),
-        total_harga: z.number().nonnegative().nullish(),
+        total_harga: z.number().nonnegative().max(BATAS_UANG).nullish(),
       }),
     )
     .min(1)
@@ -454,7 +455,7 @@ interface BarisHarga {
 
 /** Baris harga yang dilaporkan — dipakai endpoint laporan harga & pratinjaunya. */
 const LaporanHargaItems = z
-  .array(z.object({ id: z.string().uuid(), total_harga: z.number().min(0) }))
+  .array(z.object({ id: z.string().uuid(), total_harga: z.number().min(0).max(BATAS_UANG) }))
   .min(1)
   .max(500);
 

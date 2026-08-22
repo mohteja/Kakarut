@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { BATAS_QTY_STOK } from "../../lib/batas-angka";
 import { zValidator } from "../../lib/validator";
 import { alias } from "drizzle-orm/pg-core";
 import { and, desc, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
@@ -56,7 +57,7 @@ const OpnameBody = z.object({
     .array(
       z.object({
         ingredient_id: z.string().uuid(),
-        qty: z.number().min(0),
+        qty: z.number().min(0).max(BATAS_QTY_STOK),
         /**
          * Bukti foto + alasan selisih dilampirkan LANGSUNG saat pengecekan
          * (bukan lewat langkah klarifikasi terpisah). Hanya dipakai untuk baris
@@ -305,7 +306,7 @@ export const stokRoutes = new Hono<AppEnv>()
       z.object({
         branch_id: z.string().uuid().optional(),
         ingredient_id: z.string().uuid(),
-        qty: z.number().positive(),
+        qty: z.number().positive().max(BATAS_QTY_STOK),
         foto_url: z.string().trim().min(1, "Bukti foto wajib dilampirkan"),
         catatan: z.string().trim().max(300).nullish(),
       }),

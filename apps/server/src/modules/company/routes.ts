@@ -1,4 +1,5 @@
 import { zValidator } from "../../lib/validator";
+import { BATAS_UANG } from "../../lib/batas-angka";
 import { and, eq, isNull } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -22,7 +23,7 @@ const PatchBody = z.object({
   pb1_rate: z.number().min(0).max(100).optional(),
   receipt_footer: z.string().trim().max(200).nullish(),
   receipt_show_alamat: z.boolean().optional(),
-  target_penjualan: z.number().min(0).nullish(),
+  target_penjualan: z.number().min(0).max(BATAS_UANG).nullish(),
   /** batas maks diskon kasir (%) — 0..100 */
   diskon_maks_persen: z.number().min(0).max(100).optional(),
   /** tolak pesanan yang melebihi stok (bawaan mati) */

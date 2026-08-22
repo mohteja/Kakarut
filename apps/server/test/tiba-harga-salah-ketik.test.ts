@@ -49,7 +49,7 @@ describe("premis: rantai NaN → null → harga rencana benar-benar utuh", () =>
   });
 
   it("zod server MENERIMA null untuk total_harga (jadi tak ada galat)", () => {
-    expect(ROUTES).toMatch(/total_harga: z\.number\(\)\.min\(0\)\.nullish\(\)/);
+    expect(ROUTES).toMatch(/total_harga: z\.number\(\)\.min\(0\)\.max\(BATAS_UANG\)\.nullish\(\)/);
   });
 
   it("null di server berarti 'pakai harga rencana', bukan 'tanpa harga'", () => {
