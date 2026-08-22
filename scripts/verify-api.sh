@@ -12499,6 +12499,70 @@ cek "penjualan tak punya /bon (yang lunas dicetak ulang struknya)" "V == 404" \
   "$(printf '%s\n' "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/penjualan/$SID228/bon" -H "Authorization: Bearer $REISS105")")"
 
 echo
+echo "── §230 Undangan karyawan tak boleh jadi relai bom email ──"
+#
+# `POST /karyawan/undang` mengirim surat ke alamat yang DITENTUKAN PEMANGGIL —
+# pintu ketiga yang begitu, sesudah `/auth/forgot-password` dan
+# `/auth/kirim-ulang-verifikasi`. Kedua pintu itu sudah lama berpenjaga, dengan
+# alasan yang ditulis di komentarnya sendiri: "cegah bom email ke korban".
+# Yang ketiga dulu tidak.
+#
+# TERUKUR sebelum diperbaiki: putaran undang → batalkan → undang terhadap
+# korban yang SAMA menghasilkan 20 dari 20 surat terkirim tanpa satu pun 429.
+# Pra-cek "sudah ada undangan pending" tak menutupnya — DELETE mencabutnya lagi.
+#
+# YANG DIUJI DI SINI cuma ember PER-KORBAN. Ember kedua (per perusahaan, 30 per
+# 15 menit) sengaja TIDAK ditembak dari sini: membuktikannya butuh 30+
+# permintaan, dan jatah itu dipakai bersama §96 & §103 yang juga mengundang
+# lewat perusahaan seed. Ia dijaga uji unit dengan store memori — di situ
+# jendelanya milik ujinya sendiri.
+KORBAN230="korban230-$(date +%s)@example.com"
+
+# Premis: undangan PERTAMA ke alamat segar memang berhasil. Tanpa ini, seluruh
+# asersi 429 di bawah juga hijau seandainya endpointnya rusak total.
+INV230=$(api "$OWNER" POST /karyawan/undang "{\"email\":\"$KORBAN230\",\"role\":\"cashier\",\"branch_id\":\"$PUSAT96\"}")
+cek "premis: undangan pertama ke alamat segar berhasil" "V == 1" \
+  "$(echo "$INV230" | jq --arg e "$KORBAN230" '(.email == $e) | if . then 1 else 0 end')"
+ID230=$(echo "$INV230" | jq -r '.id // empty')
+api "$OWNER" DELETE "/karyawan/undangan/$ID230" > /dev/null
+
+# INTI: putaran undang → batalkan → undang harus MENTOK. Batasnya 6 per 15
+# menit, sama persis dengan `batasLupa` — bahayanya memang sama.
+LOLOS230=0; TOLAK230=0
+for _ in $(seq 1 12); do
+  KODE=$(status_code_body "$OWNER" POST /karyawan/undang \
+    "{\"email\":\"$KORBAN230\",\"role\":\"cashier\",\"branch_id\":\"$PUSAT96\"}")
+  if [ "$KODE" = "201" ]; then
+    LOLOS230=$((LOLOS230 + 1))
+    IDX=$(api "$OWNER" GET /karyawan/undangan | jq -r --arg e "$KORBAN230" '[.[]|select(.email==$e)][0].id // empty')
+    [ -n "$IDX" ] && api "$OWNER" DELETE "/karyawan/undangan/$IDX" > /dev/null
+  elif [ "$KODE" = "429" ]; then
+    TOLAK230=$((TOLAK230 + 1))
+  fi
+done
+cek "INTI: putaran undang→batalkan MENTOK, tak lagi tak terbatas" "V >= 1" "$TOLAK230"
+cek "INTI: yang lolos tak melebihi batas 6 per jendela" "V <= 6" "$LOLOS230"
+
+# PASANGAN 1: embernya per ALAMAT, bukan sakelar mati untuk seluruh fitur.
+# Tanpa ini, "ada 429" juga hijau seandainya undangan diblokir sama sekali —
+# yaitu fitur yang mati, bukan penjaga yang bekerja.
+LAIN230="lain230-$(date +%s)@example.com"
+cek "PASANGAN: alamat LAIN tetap bisa diundang sesudah korban diblokir" "V == 201" \
+  "$(status_code_body "$OWNER" POST /karyawan/undang \
+     "{\"email\":\"$LAIN230\",\"role\":\"cashier\",\"branch_id\":\"$PUSAT96\"}")"
+
+# PASANGAN 2: pintu saudaranya memang sudah berpenjaga sejak dulu, dan angkanya
+# sama. Kalau suatu saat `batasLupa` ikut dicabut, asersi ini yang merah lebih
+# dulu — bukan diam-diam menjadikan §230 satu-satunya yang menjaga kelas ini.
+LOLOSL=0
+for _ in $(seq 1 9); do
+  K=$(printf '%s\n' "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/auth/forgot-password" \
+      -H 'Content-Type: application/json' -d "{\"email\":\"tetangga230@example.com\"}")")
+  [ "$K" = "200" ] && LOLOSL=$((LOLOSL + 1))
+done
+cek "PASANGAN: /auth/forgot-password memang berhenti di 6 juga" "V == 6" "$LOLOSL"
+
+echo
 echo "── §221 Akun seed harus ditinggalkan seperti semula ──"
 # Duduk di ekor bersama §209/§215, dan karena alasan yang sama: ia menghakimi
 # sesudah semua seksi selesai mengutak-atik.

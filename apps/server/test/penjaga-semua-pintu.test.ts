@@ -270,6 +270,63 @@ const ATURAN: Aturan[] = [
     penjaga: /kunciAntrean\([^)]*"pengajuan"/,
     dasar: {},
   },
+  {
+    nama: "email-berbatas",
+    kenapa:
+      "Endpoint yang mengirim surat ke alamat yang DITENTUKAN PEMANGGIL adalah " +
+      "relai email. Tanpa batas laju ia bisa membanjiri korban — dan suratnya " +
+      "keluar lewat SMTP perusahaan sendiri, jadi penyalahgunaan dari SATU akun " +
+      "bisa membuat domain pengirimnya masuk daftar hitam. Yang ikut mati " +
+      "sesudah itu adalah email reset password & verifikasi SELURUH tenant.",
+    /*
+     * Aturannya sudah tertulis dua kali di `auth/routes.ts` — `batasLupa`
+     * ("cegah bom email ke korban") dan `batasVerifikasiKirim` ("cegah bom
+     * email") — lalu pintu ketiga, `POST /karyawan/undang`, dibiarkan terbuka.
+     *
+     * TERUKUR sebelum diperbaiki: putaran undang → batalkan → undang terhadap
+     * korban yang sama menghasilkan 20 dari 20 surat terkirim tanpa satu pun
+     * 429, sementara `/auth/forgot-password` pada server yang sama berhenti di
+     * 6. Pra-cek "sudah ada undangan pending" tak menutupnya, sebab
+     * `DELETE /karyawan/undangan/:id` mencabutnya lagi.
+     *
+     * `await kirimEmail(`, bukan `kirimEmail(` polos: yang terakhir ikut
+     * menuduh DEKLARASI fungsinya sendiri di `mail/service.ts`.
+     */
+    tulis: /await\s+kirimEmail\(/,
+    penjaga: /rateLimit\(|\bbatas[A-Z]\w*/,
+    dasar: {
+      "lib/backup-peringatan.ts": {
+        pintu: 1,
+        alasan:
+          "peringatan cadangan basi — dikirim PENJADWAL, bukan atas permintaan " +
+          "siapa pun, dan tujuannya datang dari setelan platform bukan dari " +
+          "badan permintaan. Bukan relai: tak ada pemanggil yang bisa memilih " +
+          "alamatnya, jadi tak ada yang bisa dibanjiri",
+      },
+      "modules/auth/routes.ts": {
+        pintu: 1,
+        alasan:
+          "`kirimTautanVerifikasi` adalah PEMBANTU, dan penjaganya ada di kedua " +
+          "pemanggilnya: `POST /register` (`batasRegister`) dan `POST " +
+          "/kirim-ulang-verifikasi` (`batasVerifikasiKirim`). Ini persis titik " +
+          "buta yang ditulis di kepala berkas ini — granularitasnya BADAN, jadi " +
+          "penjaga yang sah tapi tinggal di pemanggil terbaca 'tanpa penjaga'. " +
+          "Diperiksa dengan tangan, bukan diasumsikan",
+      },
+      "modules/admin-system/routes.ts": {
+        pintu: 1,
+        alasan:
+          "kirim email UJI dari panel super admin (`/admin/sistem/email-uji`) — " +
+          "digerbang `requireSuperAdmin`, yaitu satu-dua akun operator platform " +
+          "ini sendiri, bukan pemilik warung. Ia juga satu-satunya pemakai yang " +
+          "TUJUANNYA memang mengirim satu surat untuk memastikan SMTP-nya hidup, " +
+          "sehingga batas laju di situ akan menghalangi persis pekerjaan yang " +
+          "sedang dilakukan orangnya. Diukur sebagai utang, bukan dinyatakan " +
+          "aman: bila kelak panel itu dibuka ke peran lain, ia harus ikut " +
+          "dibatasi",
+      },
+    },
+  },
 ];
 
 /** → path relatif → jumlah pintu tanpa penjaga */
