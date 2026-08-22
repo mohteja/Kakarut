@@ -96,7 +96,8 @@ const TerimaSebagianBody = z.object({
   /** qty yang benar-benar diterima per baris; 0 = baris itu ditolak */
   items: z
     .array(z.object({ id: z.string().uuid(), qty_diterima: z.number().nonnegative() }))
-    .min(1),
+    .min(1)
+    .max(500),
   alasan: z.string().trim().max(300).nullish(),
 });
 

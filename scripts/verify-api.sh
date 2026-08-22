@@ -12616,6 +12616,30 @@ rm -f "$F231" "$F231.out"
 KRY231=$(api "$OWNER" GET /karyawan | jq -r '.[0].user_id // .[0].id // empty')
 cek "premis: ada karyawan untuk diuji pintu saudaranya" "V == 1" \
   "$([ -n "$KRY231" ] && echo 1 || echo 0)"
+# ── JALUR NOTA: tanpa batas, larik besar jadi 500 BUKAN 400 ───────────────
+#
+# `insert into sale_items` memakai 14 parameter ikat PER BARIS, dan Postgres
+# membatasi 65.535 → ambangnya 4.681 baris. Diukur sebelum batasnya dipasang:
+# N=4.500 → 201, N=5.000 → 500 "Terjadi kesalahan pada server", dan galatnya
+# mendarat di error_logs sebagai DrizzleQueryError berisi SQL penuh.
+#
+# Yang diperbaiki batas ini karena itu bukan cuma beban — melainkan BENTUK
+# jawabannya: galat server yang tak bisa ditindaklanjuti berubah jadi kalimat
+# yang menyebut batasnya.
+H231="${TMPDIR:-/tmp}/verify-api-231c.$$"
+python3 -c "
+import json, sys
+print(json.dumps({'is_dine_in': False, 'metode_bayar': 'tunai',
+                  'items': [{'menu_id': sys.argv[1], 'qty': 1} for _ in range(5000)]}))" \
+  "$MENU228" > "$H231"
+cek "INTI: 5.000 item nota ditolak 400, BUKAN 500" "V == 400" \
+  "$(curl -s -o "$H231.out" -w '%{http_code}' -X POST "$BASE/api/penjualan" \
+     -H "Authorization: Bearer $REISS105" -H 'Content-Type: application/json' \
+     --data-binary @"$H231")"
+cek "…dan pesannya menyebut batasnya" "V == 1" \
+  "$(jq -r '.error // ""' "$H231.out" | grep -qi 'maksimal 500' && echo 1 || echo 0)"
+rm -f "$H231" "$H231.out"
+
 G231="${TMPDIR:-/tmp}/verify-api-231b.$$"
 python3 -c "
 import json, uuid

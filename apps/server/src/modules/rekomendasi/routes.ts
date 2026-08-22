@@ -39,7 +39,8 @@ const RencanaBody = z.object({
         porsi: z.number().int().positive().max(100_000),
       }),
     )
-    .min(1),
+    .min(1)
+    .max(500),
   /** CK pelaksana (opsional) — kekurangan bahan mentah resep dihitung di sini */
   ck_branch_id: z.string().uuid().nullish(),
 });

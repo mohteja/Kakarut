@@ -68,7 +68,8 @@ const OpnameBody = z.object({
         alasan: z.string().nullish(),
       }),
     )
-    .min(1),
+    .min(1)
+    .max(1000),
 });
 
 // Stok Awal (saldo pembuka) = OpnameBody + tanggal berlaku. Berbeda dari opname

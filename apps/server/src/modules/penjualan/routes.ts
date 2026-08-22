@@ -57,7 +57,8 @@ export const SaleBody = z.object({
         open_bill_item_id: z.string().uuid().nullish(),
       }),
     )
-    .min(1),
+    .min(1)
+    .max(500),
 });
 
 export const penjualanRoutes = new Hono<AppEnv>()
@@ -373,7 +374,8 @@ export const penjualanRoutes = new Hono<AppEnv>()
               qty: z.number().positive(),
             }),
           )
-          .min(1),
+          .min(1)
+          .max(500),
       }),
     ),
     async (c) => {

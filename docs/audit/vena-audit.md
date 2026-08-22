@@ -31,8 +31,52 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 3. **Temuan memuat ukurannya**, sebelum dan sesudah.
 4. **Batas detektornya ditulis jujur.** Vena yang bersih *dalam batas tertentu*
    bukan vena yang bersih.
+5. **CAKUPAN disebut, bukan cuma kemampuan menuduh.** Bukti merah menjawab
+   "bisakah detektornya menuduh?" — ia TIDAK menjawab "berapa banyak yang
+   dilihatnya?". Sudah terjadi: gerbang larik dibuktikan bisa menuduh, lalu
+   dikirim dengan regex yang hanya melihat 18 dari 39. Tiap entri karena itu
+   menyebut populasinya, dan sedapat mungkin membandingkannya dengan cara
+   hitung kedua.
 
 ---
+
+## Larik permintaan (LANJUTAN) — gerbangnya sendiri buta 54% — server — 2026-08-22
+
+- **KOREKSI entri di bawahnya.** Entri "Larik badan permintaan tanpa batas
+  atas" menyatakan populasinya **18** dan semuanya beres. Populasinya
+  sebenarnya **39**. Regex gerbangnya menuntut `z` dan `.array(` bersebelahan,
+  sementara prettier memformat skema panjang sebagai `items: z\n  .array(` —
+  dan bentuk itu tak terlihat sama sekali. Yang luput 21 larik, termasuk
+  SELURUH larik di `penjualan`, `produksi`, `sync`, dan `transfer`
+- **Metode**: regex diperlebar jadi `z\s*\.\s*array\s*\(`, lalu populasinya
+  dihitung ulang dari nol
+- **Detektor**: DIBUKTIKAN bisa menuduh, DUA arah —
+  (a) pola sempit dikembalikan → uji "melihat SELURUH populasi" merah dengan
+  angkanya sendiri ("expected 18 to be greater than 18");
+  (b) `.max(500)` dicabut dari `penjualan/routes.ts` → tertuduh di baris 49
+- **Hasil**: **TEMUAN**, 13 larik masih telanjang sesudah putaran sebelumnya
+- **Ukuran** (`POST /penjualan`, yang terburuk): `insert into sale_items`
+  memakai **14 parameter ikat per baris**, dan Postgres membatasi 65.535 →
+  ambang **4.681 baris**. Terukur:
+
+  | N | sebelum | sesudah |
+  |---|---|---|
+  | 4.500 | 201 | 201 |
+  | 5.000 | **500** "Terjadi kesalahan pada server" | **400** "items: maksimal 500" |
+  | 30.000 | 500 | 400 |
+
+  Galatnya mendarat di `error_logs` sebagai `DrizzleQueryError` berisi SQL
+  penuh. Yang diperbaiki batas ini karena itu bukan cuma bebannya melainkan
+  BENTUK jawabannya
+- **Tindak**: 13 larik diberi `.max()` (500 baris transaksi, 1000 baris opname,
+  200 komponen); regex gerbang diperlebar; uji baru "PASANGAN: pemindainya
+  melihat SELURUH populasi" memaku perbandingan dengan pola sempitnya supaya
+  kebutaan itu tak bisa kembali diam-diam; §231 diperluas
+- **Pelajaran yang dicatat, bukan disembunyikan**: detektor yang dibuktikan
+  bisa menuduh SATU kasus belum tentu MELIHAT seluruh populasinya. Bukti merah
+  menjawab "bisakah ia menuduh?"; ia tak menjawab "berapa yang dilihatnya?".
+  Sejak sekarang tiap sapuan wajib menyebut CAKUPAN, bukan cuma kemampuan
+  menuduh
 
 ## Larik badan permintaan tanpa batas atas — server — 2026-08-22
 

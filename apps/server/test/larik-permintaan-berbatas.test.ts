@@ -41,6 +41,29 @@ import { fileURLToPath } from "node:url";
  */
 const SRC = fileURLToPath(new URL("../src", import.meta.url));
 
+/**
+ * `z` dan `.array(` boleh dipisah SPASI ATAU BARIS BARU.
+ *
+ * Versi pertama uji ini memakai `/z\.array\s*\(/` — `z` dan titiknya harus
+ * bersebelahan. Prettier memformat skema yang panjang sebagai:
+ *
+ *     items: z
+ *       .array(
+ *         z.object({ … }),
+ *       )
+ *
+ * …dan bentuk itu TAK TERLIHAT sama sekali. Diukur saat lubangnya ketemu:
+ * gerbangnya membaca **18** larik sementara populasi sebenarnya **39** — buta
+ * terhadap 21, termasuk seluruh larik di `penjualan`, `produksi`, `sync`, dan
+ * `transfer`, yaitu jalur tulis tersibuk di server ini.
+ *
+ * Itu kelas kegagalan yang lebih buruk daripada bug yang dijaganya: gerbang
+ * yang menyatakan "semua sudah berbatas" atas 46% populasinya membuat orang
+ * berhenti mencari. Uji "PASANGAN: pemindainya melihat SELURUH populasi" di
+ * bawah memaku angkanya supaya kebutaan itu tak bisa kembali diam-diam.
+ */
+const POLA_ARRAY = /z\s*\.\s*array\s*\(/g;
+
 function berkasTs(dir: string): string[] {
   const keluar: string[] = [];
   for (const nama of readdirSync(dir)) {
@@ -74,7 +97,7 @@ function semuaLarik(): Larik[] {
   const keluar: Larik[] = [];
   for (const p of berkasTs(SRC)) {
     const s = readFileSync(p, "utf8");
-    for (const m of s.matchAll(/z\.array\s*\(/g)) {
+    for (const m of s.matchAll(POLA_ARRAY)) {
       const { tutup } = seimbang(s, m.index! + m[0].length - 1);
       // rantai method sesudah z.array(...) — .min(1).max(500).optional() dst
       const rantai = /^((?:\s*\.\w+\([^()]*\))*)/.exec(s.slice(tutup + 1, tutup + 120))![1];
@@ -103,6 +126,27 @@ describe("larik badan permintaan selalu berbatas atas", () => {
     // memeriksa satu larik pun.
     expect(larik.length).toBeGreaterThan(10);
     expect(larik.some((l) => l.rantai.includes(".max("))).toBe(true);
+  });
+
+  it("PASANGAN: pemindainya melihat SELURUH populasi, bukan sebagiannya", () => {
+    /*
+     * Angka ini dipatok karena kebutaan sudah pernah terjadi: regex yang
+     * menuntut `z` dan `.array(` bersebelahan hanya melihat 18 dari 39, dan
+     * gerbangnya lalu menyatakan "semua berbatas" atas 46% populasinya.
+     *
+     * Perbandingan dengan pola SEMPIT-nya itulah yang menjaga — bukan angka
+     * mutlaknya, yang memang akan tumbuh seiring skema baru. Yang tak boleh
+     * kembali: pemindai yang melewatkan bentuk multi-baris.
+     */
+    const sempit = /z\.array\s*\(/g;
+    let n = 0;
+    for (const p of berkasTs(SRC)) n += (readFileSync(p, "utf8").match(sempit) ?? []).length;
+    expect(
+      larik.length,
+      "pemindainya kembali buta terhadap bentuk `z\\n  .array(` yang dipakai " +
+        "prettier untuk skema panjang — persis kebutaan yang membuatnya dulu " +
+        "hanya melihat 18 dari 39",
+    ).toBeGreaterThan(n);
   });
 
   it("INTI: tiap z.array punya .max(), kecuali yang disebut namanya", () => {

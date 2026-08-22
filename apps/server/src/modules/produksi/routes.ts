@@ -130,6 +130,7 @@ const KirimHasilBody = KirimBody.extend({
   items: z
     .array(z.object({ ingredient_id: z.string().uuid(), qty: z.number().positive() }))
     .min(1)
+    .max(500)
     .optional(),
 });
 
@@ -163,6 +164,7 @@ const TahapBody = z.object({
       }),
     )
     .min(1)
+    .max(500)
     .optional(),
   /**
    * Dana yang benar-benar cair saat faktur meninggalkan tahap RAB — penuh
@@ -321,7 +323,8 @@ const FakturBody = z.object({
         total_harga: z.number().nonnegative().nullish(),
       }),
     )
-    .min(1),
+    .min(1)
+    .max(500),
 });
 
 const LABEL: Record<JenisPengadaan, { jalur: string }> = {
@@ -452,7 +455,8 @@ interface BarisHarga {
 /** Baris harga yang dilaporkan — dipakai endpoint laporan harga & pratinjaunya. */
 const LaporanHargaItems = z
   .array(z.object({ id: z.string().uuid(), total_harga: z.number().min(0) }))
-  .min(1);
+  .min(1)
+  .max(500);
 
 /**
  * Muat baris faktur belanja + pastikan semua id yang dilaporkan memang milik

@@ -197,14 +197,16 @@ const OpnameBody = z.object({
     .array(
       z.object({ supply_id: z.string().uuid(), qty_fisik: z.number().min(0) }),
     )
-    .min(1),
+    .min(1)
+    .max(1000),
   catatan: z.string().max(300).nullish(),
 });
 
 const StokAwalBody = z.object({
   items: z
     .array(z.object({ supply_id: z.string().uuid(), qty: z.number().min(0) }))
-    .min(1),
+    .min(1)
+    .max(500),
 });
 
 const MintaBody = z.object({

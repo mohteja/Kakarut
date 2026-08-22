@@ -63,7 +63,8 @@ const BillBody = z.object({
         catatan: z.string().nullish(),
       }),
     )
-    .min(1),
+    .min(1)
+    .max(500),
 });
 
 /**

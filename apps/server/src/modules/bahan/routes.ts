@@ -119,6 +119,7 @@ const BahanPatchBody = z.object({
 const ResepBody = z.object({
   komponen: z
     .array(z.object({ ingredient_id: z.string().uuid(), qty: z.number().positive() }))
+      .max(200)
     .default([]),
   /**
    * TAKARAN BATCH — ditulis dalam TRANSAKSI YANG SAMA dengan komponennya.
