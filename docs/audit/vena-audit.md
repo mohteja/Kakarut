@@ -565,6 +565,56 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
   server/web plus asal-usul fiksturnya. Mobile: `mohteja/kakarut-mobile`
   commit `5fc0251`, PR #12
 
+## Batas laju di luar email — server — 2026-08-22
+
+- **Populasi**: **469 rute HTTP** dienumerasi mekanis dari `app.ts` + tiap
+  modul; **12** berbatas laju (8 auth, 1 undangan, 1 sinkron, 2 tuduhan palsu
+  dari nama variabel `batas…`). Sisanya 457
+- **Metode**: `scratchpad/rute-mahal.py`, lalu tiap GET tanpa parameter jalur
+  (100 jalur) DITEMBAK dan diukur
+- **"Mahal" DIUKUR, bukan diduga**: 100 GET ditembak dua kali — terhadap seed
+  (111 penjualan) dan terhadap **50.111 penjualan + 50.137 baris item sepanjang
+  setahun**. Yang terlambat tetap **0,035 dtk**. Laporan agregat memang murah:
+  agregasinya di SQL dan berindeks. Dugaan awal rencana ("ekspor, laporan
+  agregat, unggah") **salah dua-pertiganya**
+- **Detektor**: DIBUKTIKAN — aturan sapuan `unggah-berbatas` di
+  `penjaga-semua-pintu`, tiga suntikan (cabut dua ember, cabut satu ember,
+  cabut batas ukuran) masing-masing di-assert mendarat; ketiganya tertuduh
+- **Hasil**: **TEMUAN**, satu pintu: `POST /upload`. Terukur sebagai **kasir** —
+  peran paling rendah yang punya token:
+
+  | | sebelum | sesudah |
+  |---|---|---|
+  | 20 unggahan 5 MB berturut-turut | 100 MB dalam **0,81 dtk** | — |
+  | laju | **123 MB/dtk ≈ 432 GB/jam** | berhenti di 300 MB / 15 mnt |
+  | 80 percobaan | 20/20 diterima, **nol 429** | 60 diterima, **20 × 429** |
+
+  Bentuknya sama dengan vena `z.number()`: batas per SATUAN sudah ada
+  (`MAX_SIZE` 5 MB, dan `BATAS_UNGGAH` 8 MB di `app.ts`), batas LAJUNYA tidak.
+  Tak ada kuota per perusahaan dan tak ada pembersihan berkas yatim, jadi
+  lajunya satu-satunya pengendali yang tersedia
+- **Ikut ketemu, TIDAK dikerjakan**: isi berkas tak pernah diperiksa — hanya
+  `file.type` yang DIDEKLARASIKAN pengirim. 5 MB byte acak tersimpan sebagai
+  `.png`, terbukti dengan `file(1)`. Bukan lubang eksekusi (berkasnya disajikan
+  statis, bukan dijalankan), tapi berarti "hanya gambar" bukan pernyataan yang
+  ditegakkan. Masuk antrean sebagai vena tersendiri
+- **Kesalahanku**: aturan sapuannya mula-mula memakai pola yang sama dengan
+  `email-berbatas` (`rateLimit\(|\bbatas[A-Z]\w*`). **Bukti merahnya gagal**:
+  mencabut kedua ember dari `.post()` membiarkan definisinya utuh di berkas yang
+  sama, dan sapuannya tetap hijau. Diganti ke bentuk PEMAKAIAN
+  (`^\s{2,}batasUnggah\w*,$`). Itu pun masih hijau bila SATU ember tersisa,
+  jadi ada uji terpisah yang menuntut keduanya
+- **Batas**: sapuan latensi hanya menembak **GET tanpa parameter jalur** (100
+  dari 469 rute). Rute ber-`:id` dan seluruh POST/PUT tak diukur — yang mahal di
+  sana bisa saja ada, dan tak ada yang menyatakan sebaliknya. Enumerasi rutenya
+  juga menghasilkan beberapa jalur artefak (`/xxxauth`) dari modul yang
+  dipasang di dua prefix
+- **Tindak**: dua ember di `upload/routes.ts` (60/15mnt per pengguna,
+  300/15mnt per perusahaan) mengikuti bentuk `POST /karyawan/undang`; aturan
+  `unggah-berbatas` di `penjaga-semua-pintu`; 4 uji di `rate-limit.test.ts`
+  termasuk yang menuntut KEDUA ember terpasang; §236 verify-api (8 asersi,
+  tiap penolakan berpasangan dengan yang sah)
+
 ---
 
 ## Antrean vena — belum tergarap
@@ -588,7 +638,11 @@ berlaku di situ).
       453; 4 digerbang super admin (terukur 403), 1 bisa dicapai kasir
 - [x] ~~**Uang ditulis di luar pembantu bersama**~~ — TEMUAN, lihat entri di
       atas. Server & web bersih; mobile menyimpang Rp1 pada lembar pembayaran
-- [ ] **Batas laju di luar email** — ekspor, laporan agregat, unggah
+- [x] ~~**Batas laju di luar email**~~ — TEMUAN, lihat entri di atas. Laporan
+      agregat ternyata murah (0,035 dtk atas 50.111 penjualan); yang terbuka
+      `POST /upload` — 432 GB/jam dari satu akun kasir
+- [ ] **Isi berkas unggahan tak pernah diperiksa** — hanya `file.type` yang
+      dideklarasikan pengirim (sisa vena di atas)
 
 ### Basis data & migrasi
 - [ ] **Kebijakan `ON DELETE`** tiap FK vs yang dilakukan kode saat induknya

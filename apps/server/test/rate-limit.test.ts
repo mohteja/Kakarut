@@ -182,3 +182,78 @@ describe("batas undangan: dua ember, dua bentuk penyalahgunaan", () => {
     expect(angka(auth, "batasLupa").max).toBe("6");
   });
 });
+
+describe("batas unggahan: dua ember, dan keduanya benar-benar terpasang", () => {
+  /*
+   * `MAX_SIZE` di `upload/routes.ts` menjaga SATU berkas. Yang tak dijaga
+   * siapa pun sebelumnya: BERAPA BANYAK berkas. Terukur terhadap server
+   * sungguhan, sebagai KASIR — peran paling rendah yang punya token:
+   *
+   *     20 unggahan 5 MB berturut-turut → 100 MB dalam 0,81 detik
+   *     123 MB/detik ≈ 432 GB/jam dari SATU akun, dan NOL 429
+   *
+   * Sesudah dua ember dipasang: 80 percobaan → 60 diterima, 20 × 429,
+   * berhenti di 300 MB.
+   *
+   * Tak ada kuota per perusahaan dan tak ada pembersihan berkas yatim, jadi
+   * lajunya satu-satunya pengendali yang tersedia.
+   */
+  const emberPengguna = (sub: () => string) =>
+    rateLimit({ windowMs: 15 * 60_000, max: 60, key: () => `unggah:${sub()}` }, memoryStore());
+  const emberPerusahaan = (co: () => string) =>
+    rateLimit({ windowMs: 15 * 60_000, max: 300, key: () => `unggah-co:${co()}` }, memoryStore());
+
+  it("ember pengguna: satu akun mentok di 60", async () => {
+    const mw = emberPengguna(() => "user-1");
+    const c = ctx();
+    for (let i = 0; i < 60; i += 1) await mw(c, next);
+    await expect(mw(c, next)).rejects.toMatchObject({ status: 429 });
+  });
+
+  it("PASANGAN: akun lain tetap bisa mengunggah — bukan sakelar mati", async () => {
+    // Tanpa ini, "ada 429" juga hijau seandainya unggahan diblokir sama sekali.
+    let sub = "user-1";
+    const mw = emberPengguna(() => sub);
+    const c = ctx();
+    for (let i = 0; i < 60; i += 1) await mw(c, next);
+    await expect(mw(c, next)).rejects.toMatchObject({ status: 429 });
+    sub = "user-2";
+    await expect(mw(c, next)).resolves.toBeUndefined();
+  });
+
+  it("ember perusahaan: banyak akun tak boleh menjumlahkan jatahnya", async () => {
+    // Inilah alasan ember KEDUA ada: tanpa ia, sepuluh akun dalam satu tenant
+    // memberi 600 unggahan per 15 menit — pipa yang sama besar, cuma dibagi.
+    const mw = emberPerusahaan(() => "co-1");
+    const c = ctx();
+    for (let i = 0; i < 300; i += 1) await mw(c, next);
+    await expect(mw(c, next)).rejects.toMatchObject({ status: 429 });
+  });
+
+  it("KEDUANYA terpasang di rutenya — bukan cuma didefinisikan", () => {
+    /*
+     * Sapuan `penjaga-semua-pintu` mula-mula mencari `rateLimit(` di badan yang
+     * sama, dan itu TAK CUKUP: mencabut kedua ember dari `.post()` membiarkan
+     * definisinya utuh, dan sapuannya tetap hijau. Bukti merahnya gagal pada
+     * percobaan pertama.
+     *
+     * Sapuannya kini mencari bentuk PEMAKAIAN, tapi ia hijau bila SATU ember
+     * saja yang tersisa. Uji inilah yang menuntut keduanya — dan keduanya
+     * menjaga hal yang berbeda: satu akun yang jadi pipa, versus banyak akun
+     * dalam satu tenant yang menjumlahkan jatahnya.
+     */
+    const src = readFileSync(
+      fileURLToPath(new URL("../src/modules/upload/routes.ts", import.meta.url)),
+      "utf8",
+    );
+    const pasang = src.slice(src.indexOf("uploadRoutes = "), src.indexOf("async (c) =>"));
+    expect(pasang, "ember per-PENGGUNA tak terpasang di rutenya").toContain(
+      "batasUnggahPengguna,",
+    );
+    expect(pasang, "ember per-PERUSAHAAN tak terpasang di rutenya").toContain(
+      "batasUnggahPerusahaan,",
+    );
+    // …dan batas per berkas tak boleh ikut hilang saat lajunya dibatasi.
+    expect(src, "batas ukuran per berkas hilang").toContain("file.size > MAX_SIZE");
+  });
+});

@@ -271,6 +271,44 @@ const ATURAN: Aturan[] = [
     dasar: {},
   },
   {
+    nama: "unggah-berbatas",
+    kenapa:
+      "Endpoint yang MENULIS BERKAS ke penyimpanan menumbuhkan biaya yang tak " +
+      "pernah menyusut sendiri: tak ada kuota per perusahaan, tak ada " +
+      "pembersihan yatim. Batas per BERKAS tidak menjaga apa pun terhadap " +
+      "BANYAK berkas. Di R2 akibatnya tagihan yang tumbuh diam-diam; di " +
+      "penyimpanan lokal ia volume yang penuh — dan saat volumenya penuh, yang " +
+      "berhenti bukan cuma unggahan melainkan basis datanya.",
+    /*
+     * TERUKUR sebelum diperbaiki, sebagai KASIR — peran paling rendah yang
+     * punya token:
+     *
+     *     20 unggahan 5 MB berturut-turut → 100 MB dalam 0,81 detik
+     *     123 MB/detik ≈ 432 GB/jam dari SATU akun, nol 429
+     *
+     * Sesudah dua ember dipasang: 80 percobaan → 60 diterima, 20 × 429,
+     * berhenti di 300 MB.
+     *
+     * `MAX_SIZE` yang sudah ada di rutenya menjaga satu permintaan; ia tak
+     * pernah menjaga berapa banyak permintaan. Bentuk yang sama dengan
+     * `email-berbatas` di bawah: batas per satuan ada, batas lajunya tidak.
+     */
+    tulis: /getStorage\(\)\.put\(/,
+    /*
+     * Yang dicari bentuk PEMAKAIAN, bukan bentuk DEFINISI.
+     *
+     * `rateLimit(|\bbatas[A-Z]\w*` — pola yang dipakai aturan `email-berbatas`
+     * di bawah — tak cukup di sini, dan itu terbukti: mencabut kedua ember dari
+     * `.post()` membiarkan definisinya utuh di berkas yang sama, dan sapuannya
+     * tetap HIJAU. Bukti merah untuk aturan ini gagal pada percobaan pertama.
+     *
+     * `^\s{2,}batasUnggah\w*,$` hanya cocok pada baris ARGUMEN middleware —
+     * yaitu ember yang benar-benar terpasang di rutenya.
+     */
+    penjaga: /^\s{2,}batasUnggah\w*,$/m,
+    dasar: {},
+  },
+  {
     nama: "email-berbatas",
     kenapa:
       "Endpoint yang mengirim surat ke alamat yang DITENTUKAN PEMANGGIL adalah " +

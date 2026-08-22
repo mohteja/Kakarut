@@ -12738,6 +12738,63 @@ if [ -s "$KUOTA_HABIS" ]; then
   sed 's/^/       /' "$KUOTA_HABIS"
 fi
 
+echo "── §236 Unggahan berbatas laju: 5 MB per berkas TAK menjaga banyak berkas ──"
+#
+# `MAX_SIZE` di `upload/routes.ts` menjaga SATU permintaan. Yang tak dijaga
+# siapa pun: BERAPA BANYAK permintaan. TERUKUR sebagai KASIR — peran paling
+# rendah yang punya token:
+#
+#   20 unggahan 5 MB berturut-turut → 100 MB dalam 0,81 detik
+#   123 MB/detik ≈ 432 GB/jam dari SATU akun, dan NOL 429
+#
+# Tak ada kuota per perusahaan dan tak ada pembersihan berkas yatim, jadi
+# lajunya satu-satunya pengendali yang tersedia. Di R2 akibatnya tagihan yang
+# tumbuh diam-diam; di penyimpanan lokal ia volume yang penuh — dan saat
+# volumenya penuh, yang berhenti bukan cuma unggahan melainkan basis datanya.
+#
+# Yang ditembakkan di sini berkas KECIL: yang diuji batasnya, bukan
+# kemampuannya menelan disk. Memenuhi disk di CI adalah cara menemukan bug
+# lewat merusak mesinnya sendiri.
+PNG236=/tmp/verify-236.png
+printf '\x89PNG\r\n\x1a\n' > "$PNG236"
+head -c 2048 /dev/zero >> "$PNG236"
+
+unggah236() { # <token> → kode status
+  curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/upload?tujuan=menu" \
+    -H "Authorization: Bearer $1" -F "file=@$PNG236;type=image/png"
+}
+
+cek "premis: unggahan pertama memang DITERIMA (kalau tidak, seksi ini hampa)" "V == 201" \
+  "$(unggah236 "$REISS105")"
+
+# Ember per-PENGGUNA: 60 per 15 menit. Ditembak sampai lewat batasnya.
+OK236=0; TOLAK236=0
+for _ in $(seq 1 70); do
+  C236=$(unggah236 "$REISS105")
+  if [ "$C236" = "201" ]; then OK236=$((OK236+1)); else TOLAK236=$((TOLAK236+1)); fi
+done
+cek "INTI: unggahan berlebih ditolak — bukan diterima semua" "V >= 1" "$TOLAK236"
+cek "…dan yang ditolak berkode 429, bukan 500" "V == 429" "$(unggah236 "$REISS105")"
+cek "…pesannya bisa dibaca orang, bukan 'kesalahan server'" "V == 1" \
+  "$(curl -s -X POST "$BASE/api/upload?tujuan=menu" -H "Authorization: Bearer $REISS105" \
+      -F "file=@$PNG236;type=image/png" | jq '(.error | test("[Tt]erlalu banyak")) | if . then 1 else 0 end')"
+
+# PASANGAN: batasnya milik AKUN, bukan sakelar mati untuk semua orang.
+# Tanpa asersi ini, "unggahan diblokir sama sekali" juga membuat INTI hijau.
+cek "PASANGAN: akun LAIN tetap bisa mengunggah" "V == 201" "$(unggah236 "$OWNER")"
+
+# PASANGAN: batas per BERKAS tak boleh ikut hilang saat lajunya dibatasi.
+BESAR236=/tmp/verify-236-besar.png
+printf '\x89PNG\r\n\x1a\n' > "$BESAR236"
+head -c 6291456 /dev/zero >> "$BESAR236"   # 6 MB > MAX_SIZE 5 MB
+cek "PASANGAN: berkas > 5 MB tetap ditolak 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/upload?tujuan=menu" \
+      -H "Authorization: Bearer $OWNER" -F "file=@$BESAR236;type=image/png")"
+cek "PASANGAN: format non-gambar tetap ditolak 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/upload?tujuan=menu" \
+      -H "Authorization: Bearer $OWNER" -F "file=@$PNG236;type=text/plain")"
+rm -f "$PNG236" "$BESAR236"
+
 echo "── §235 Pesan galat ke penyewa ditulis kita, bukan oleh pustaka ──"
 #
 # `onError` global sudah rapi: galat tak tertangani jadi "Terjadi kesalahan
