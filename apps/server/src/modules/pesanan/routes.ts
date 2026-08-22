@@ -347,7 +347,13 @@ export const pesananRoutes = new Hono<AppEnv>()
           and(
             eq(openBills.companyId, auth.company_id!),
             eq(openBills.branchId, branchId),
-            // sudah jadi penjualan → diwakili kartu penjualannya, bukan dua kartu
+            // Sudah jadi penjualan → diwakili kartu penjualannya, bukan dua
+            // kartu. Diperiksa lewat FAKTA-nya, bukan lewat `saleId`: penjualan
+            // yang dihapus permanen menihilkan `saleId` (FK `ON DELETE SET
+            // NULL`), dan bill yang sudah dibayar muncul lagi di layar kasir
+            // sebagai pesanan aktif — terukur, dan pemicunya cuma "kosongkan
+            // Tempat Sampah".
+            eq(openBills.pernahJadiPenjualan, false),
             isNull(openBills.saleId),
             or(
               isNull(openBills.closedAt),

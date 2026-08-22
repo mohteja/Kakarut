@@ -707,6 +707,56 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
   perilakunya sudah dijaga verify-api yang ada — §65 (409) dan §91
   (kosongkan sampah; 500 akibat FK akan menjatuhkan `ok:true`-nya)
 
+## Kebijakan `SET NULL`: fakta yang disimpan sebagai penunjuk — basis data — 2026-08-22
+
+- **Populasi**: **18 FK `ON DELETE SET NULL`** dari katalog Postgres, bersandar
+  pada **9 induk**. Disilangkan dengan induk yang BENAR-BENAR dihapus kode:
+  hanya **4** yang hidup — `meja`, `sales`, `customers`, `cleaning_areas`.
+  `users` (7 anak SET NULL), `storage_locations`, `branches`, `shifts`,
+  `companies` tak pernah dihapus
+- **Detektor**: DIBUKTIKAN — empat suntikan, masing-masing di-assert mendarat:
+  alasan 409 dikembalikan bersandar `saleId` saja, filter pesanan
+  dikembalikan, penandaan di `createSale` dicabut, dan isi-ulang migrasi
+  dihapus. Keempatnya tertuduh
+- **Hasil**: **TEMUAN.** `open_bills.sale_id` dipakai bukan sebagai PENUNJUK
+  melainkan sebagai **BUKTI PERISTIWA** — "bill ini sudah jadi penjualan".
+  FK-nya `SET NULL`, jadi begitu penjualannya dihapus permanen, Postgres
+  menghapus penunjuknya dan **faktanya ikut hilang**. Pemicunya tindakan
+  pemilik yang biasa saja: mengosongkan Tempat Sampah.
+
+  Terukur ujung ke ujung lewat HTTP:
+
+  | | sebelum | sesudah |
+  |---|---|---|
+  | `sale_id` sesudah sampah dikosongkan | **NULL** (`closed_at` tetap terisi) | NULL, tapi `pernah_jadi_penjualan` = true |
+  | bill di `GET /pesanan` | **muncul lagi sebagai pesanan aktif** | tidak muncul |
+  | bayar ulang | **`bill_dibatalkan`** | `bill_sudah_dibayar` |
+
+  Yang kedua bukan salah kata, dan kodenya sendiri yang menuliskan bedanya:
+  `bill_sudah_dibayar` = kiriman kembar, aman dibuang dari antrean;
+  `bill_dibatalkan` = "membuang perintahnya berarti kehilangan satu transaksi
+  sungguhan". Jadi klien offline **menahan perintah yang tak akan pernah
+  berhasil**
+- **Bentuknya, dan kenapa ia layak jadi kelas tersendiri**: sebuah medan boleh
+  jadi null **tanpa satu baris kode pun memintanya**. Semua penjaga yang
+  dipasang di jalur tulis — validasi, transaksi, kunci baris — tak menyentuh
+  jalur ini sama sekali; yang menulis basis datanya sendiri
+- **Batas**: gerbangnya menjaga dua pemakai yang SUDAH diketahui, bukan menyapu
+  seluruh kode mencari FK-nullable yang dibaca sebagai bukti — sapuan begitu
+  butuh tahu FK mana yang `SET NULL`, dan itu ada di katalog, bukan di kode.
+  Yang bisa dijaga statis: **jumlah 18** tak bertambah tanpa ditinjau. Tiga
+  induk hidup lainnya (`meja`, `customers`, `cleaning_areas`) diperiksa tangan
+  dan medannya memang dipakai sebagai tautan, bukan bukti — `sales.customer_id`
+  bahkan sudah punya kalimat konfirmasinya sendiri di web ("Transaksi lamanya
+  tetap tersimpan (tanpa link member)")
+- **Tindak**: kolom `open_bills.pernah_jadi_penjualan` (migrasi `0101`
+  **beserta isi ulang baris lama** — tanpa itu deploy-nya sendiri yang memicu
+  cacatnya); `createSale` menandainya saat menutup bill; alasan 409 dan filter
+  `GET /pesanan` diturunkan dari faktanya (dengan `saleId` dipertahankan
+  sebagai jaring pengaman); gerbang `fakta-bukan-penunjuk.test.ts` (8 uji);
+  §238 verify-api (7 asersi, termasuk pasangan "bill yang DIBATALKAN tetap
+  terbaca dibatalkan"); entri CHANGELOG untuk mobile
+
 ---
 
 ## Antrean vena — belum tergarap
@@ -739,8 +789,9 @@ berlaku di situ).
 ### Basis data & migrasi
 - [x] ~~**Kebijakan `ON DELETE`**~~ — BERSIH, lihat entri di atas. 68 FK NO
       ACTION, 9 induk; `users`/`branches` tak pernah dihapus kode
-- [ ] **Kebijakan `SET NULL` (18 FK)** — akibatnya bukan kebuntuan melainkan
-      medan yang diam-diam jadi null (sisa vena di atas)
+- [x] ~~**Kebijakan `SET NULL` (18 FK)**~~ — TEMUAN, lihat entri di atas. Bill
+      yang sudah dibayar muncul lagi sebagai pesanan aktif sesudah sampah
+      dikosongkan
 - [ ] **CHECK yang hilang** untuk invarian yang diandaikan kode
 - [ ] **Indeks vs WHERE yang benar-benar dipakai**
 

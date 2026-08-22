@@ -57,6 +57,7 @@ const BELUM_TAYANG = new Set([
   "## Rilis: Daftar member berbatas — `GET /customer` berganti bentuk balasan",
   "## Rilis: Kartu Riwayat Harga berbatas — medan baru `lots_terpotong`",
   "## Rilis: Angka masukan berbatas atas — 500 berubah jadi 400 bernama",
+  "## Rilis: `bill_dibatalkan` tak lagi muncul untuk bill yang sebenarnya DIBAYAR",
 ]);
 
 /** Dua bentuk stempel yang sah — baris mandiri (baru) dan blockquote (lama). */

@@ -218,6 +218,7 @@ export async function createSale(params: CreateSaleParams) {
           branchId: openBills.branchId,
           closedAt: openBills.closedAt,
           saleId: openBills.saleId,
+          pernahJadiPenjualan: openBills.pernahJadiPenjualan,
         })
         .from(openBills)
         .where(
@@ -258,7 +259,14 @@ export async function createSale(params: CreateSaleParams) {
       // = bill DIBATALKAN tanpa pernah jadi penjualan, jadi membuang
       // perintahnya berarti kehilangan satu transaksi sungguhan.
       if (bill.closedAt) {
-        throw bill.saleId
+        // `pernahJadiPenjualan`, BUKAN `saleId`. Penjualan yang sudah dihapus
+        // permanen menihilkan `saleId` (FK `ON DELETE SET NULL`) — dan sejak
+        // itu bill yang DIBAYAR terbaca DIBATALKAN. Bedanya bukan kosmetik:
+        // menurut catatan di bawah, `bill_dibatalkan` menyuruh klien offline
+        // MENAHAN perintahnya, jadi ia menahan perintah yang tak akan pernah
+        // berhasil. `saleId` tetap dilihat sebagai jaring pengaman untuk baris
+        // lama yang belum sempat terisi ulang migrasi.
+        throw bill.pernahJadiPenjualan || bill.saleId
           ? new PenjualanGagal(409, "Open bill ini sudah dibayar", "bill_sudah_dibayar")
           : new PenjualanGagal(409, "Open bill ini sudah dibatalkan", "bill_dibatalkan");
       }
@@ -534,7 +542,14 @@ export async function createSale(params: CreateSaleParams) {
     if (params.openBillId) {
       const kunci = await tx
         .update(openBills)
-        .set({ closedAt: new Date(), saleId: sale.id })
+        .set({
+          closedAt: new Date(),
+          saleId: sale.id,
+          // FAKTA, bukan penunjuk. `saleId` ber-`ON DELETE SET NULL`, jadi ia
+          // hilang begitu penjualannya dihapus permanen — dan bersamanya arti
+          // bill ini berubah dari "dibayar" jadi "dibatalkan".
+          pernahJadiPenjualan: true,
+        })
         .where(and(eq(openBills.id, params.openBillId), isNull(openBills.closedAt)))
         .returning({ id: openBills.id });
       /*

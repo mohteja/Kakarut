@@ -1483,6 +1483,33 @@ export const openBills = pgTable(
      * jejak asal pesanan.
      */
     closedAt: timestamp("closed_at", { withTimezone: true }),
+    /**
+     * BILL INI PERNAH JADI PENJUALAN — fakta, bukan penunjuk.
+     *
+     * `sale_id` sudah menyatakan hal yang sama, tapi ia FK ber-`ON DELETE SET
+     * NULL`: begitu penjualannya dihapus permanen (Tempat Sampah dikosongkan),
+     * Postgres menghapus penunjuknya dan faktanya ikut hilang. Terukur, dan
+     * pemicunya tindakan pemilik yang biasa saja:
+     *
+     *   bill dibayar → sale_id terisi, closed_at terisi
+     *   penjualannya dihapus → sampah dikosongkan
+     *   → sale_id = NULL, closed_at TETAP terisi
+     *
+     * Dua akibatnya terukur lewat HTTP:
+     *
+     *   1. Bill yang SUDAH DIBAYAR muncul lagi sebagai kartu pesanan aktif di
+     *      layar kasir/dapur — `GET /pesanan` menyaring dengan
+     *      `sale_id IS NULL`.
+     *   2. Percobaan bayar ulang dibalas `bill_dibatalkan`, bukan
+     *      `bill_sudah_dibayar`. Catatan di `penjualan/service.ts` menulis
+     *      sendiri bedanya: `bill_dibatalkan` berarti "membuang perintahnya
+     *      berarti kehilangan satu transaksi sungguhan", jadi klien offline
+     *      MENAHAN perintah yang tak akan pernah berhasil.
+     *
+     * Kolom ini menyimpan faktanya terpisah dari penunjuknya, jadi penghapusan
+     * penjualan tak bisa lagi mengubah arti sebuah bill.
+     */
+    pernahJadiPenjualan: boolean("pernah_jadi_penjualan").notNull().default(false),
     // `set null`, BUKAN default `no action`. Tempat Sampah menghapus KERAS baris
     // `sales` (`sampah/routes.ts` — "Kosongkan"), dan FK yang menahan bikin
     // seluruh transaksi itu rollback: sekali ada satu penjualan asal-bill yang

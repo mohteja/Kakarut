@@ -3554,6 +3554,64 @@ cek "setelah kosongkan: Tempat Sampah KOSONG" "V == 0" "$(api "$OWNER" GET /samp
 cek "kosongkan lagi (idempoten) → 0 dihapus" "V == 0" \
   "$(api "$OWNER" POST /sampah/kosongkan | jq '(.penjualan + .faktur)')"
 
+echo "── §238 Bill yang sudah dibayar tetap terbaca dibayar sesudah sampah dikosongkan ──"
+#
+# `open_bills.sale_id` FK ber-`ON DELETE SET NULL`, dan ia dipakai bukan sebagai
+# penunjuk melainkan sebagai BUKTI PERISTIWA: "bill ini sudah jadi penjualan".
+# Begitu penjualannya dihapus permanen, Postgres menihilkan penunjuknya dan
+# buktinya ikut hilang.
+#
+# TERUKUR sebelum diperbaiki, ujung ke ujung:
+#   bill dibayar → sale_id terisi · penjualan dihapus → sampah dikosongkan
+#   → sale_id NULL, closed_at TETAP terisi
+#   → GET /pesanan memunculkan bill yang SUDAH DIBAYAR sebagai pesanan aktif
+#   → bayar ulang dibalas `bill_dibatalkan`, bukan `bill_sudah_dibayar`
+#
+# Yang kedua bukan salah kata: menurut catatan di `penjualan/service.ts`,
+# `bill_dibatalkan` menyuruh klien offline MENAHAN perintahnya — jadi ia
+# menahan perintah yang tak akan pernah berhasil.
+#
+# Seksi ini duduk SESUDAH §91 yang sudah mengosongkan Tempat Sampah, dan
+# membuat sampahnya sendiri — jadi ia tak mengganggu asersi §91 di atasnya.
+BILL238=$(api "$KASIR" POST /open-bill \
+  "{\"customer_nama\":\"Uji 238\",\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}" | jq -r '.id')
+cek "premis: open bill terbuat" "V == 1" "$( [ -n "$BILL238" ] && [ "$BILL238" != "null" ] && echo 1 || echo 0 )"
+SALE238=$(api "$KASIR" POST /penjualan \
+  "{\"is_dine_in\":true,\"open_bill_id\":\"$BILL238\",\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}" \
+  | jq -r '.sale.id')
+cek "premis: bill jadi penjualan" "V == 1" "$( [ -n "$SALE238" ] && [ "$SALE238" != "null" ] && echo 1 || echo 0 )"
+
+# Bill yang sudah dibayar TIDAK boleh muncul sebagai pesanan aktif — bahkan
+# sebelum apa pun dihapus. Ini dasarnya; kalau ini saja gagal, asersi di bawah
+# tak menyatakan apa-apa tentang penghapusan.
+PES238=$(api "$KASIR" GET "/pesanan?branch_id=$BR&tanggal=$(TZ=Asia/Jakarta date +%F)")
+cek "dasar: bill yang sudah dibayar tak muncul sebagai pesanan aktif" "V == 0" \
+  "$(echo "$PES238" | jq --arg b "$BILL238" '[.. | objects | select(.id? == $b)] | length')"
+
+# ── Hapus penjualannya, lalu kosongkan sampah → FK menihilkan sale_id ────
+api "$KASIR" DELETE "/penjualan/$SALE238" > /dev/null
+cek "kosongkan sampah berhasil" "V == 1" \
+  "$(api "$OWNER" POST /sampah/kosongkan | jq '(.ok==true) | if . then 1 else 0 end')"
+
+PES238B=$(api "$KASIR" GET "/pesanan?branch_id=$BR&tanggal=$(TZ=Asia/Jakarta date +%F)")
+cek "INTI: bill TETAP tak muncul sesudah penjualannya dihapus permanen" "V == 0" \
+  "$(echo "$PES238B" | jq --arg b "$BILL238" '[.. | objects | select(.id? == $b)] | length')"
+cek "INTI: bayar ulang tetap dibalas bill_sudah_dibayar" "V == 1" \
+  "$(api "$KASIR" POST /penjualan \
+      "{\"is_dine_in\":true,\"open_bill_id\":\"$BILL238\",\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}" \
+      | jq '(.sebab == "bill_sudah_dibayar") | if . then 1 else 0 end')"
+
+# PASANGAN: bill yang DIBATALKAN (tak pernah jadi penjualan) tetap terbaca
+# dibatalkan. Tanpa ini, "selalu jawab sudah dibayar" juga membuat asersi INTI
+# hijau — dan klien offline akan MEMBUANG perintah yang seharusnya ditahan.
+BATAL238=$(api "$KASIR" POST /open-bill \
+  "{\"customer_nama\":\"Uji 238 batal\",\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}" | jq -r '.id')
+api "$KASIR" DELETE "/open-bill/$BATAL238" > /dev/null
+cek "PASANGAN: bill yang DIBATALKAN tetap dibalas bill_dibatalkan" "V == 1" \
+  "$(api "$KASIR" POST /penjualan \
+      "{\"is_dine_in\":true,\"open_bill_id\":\"$BATAL238\",\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}" \
+      | jq '(.sebab == "bill_dibatalkan") | if . then 1 else 0 end')"
+
 echo "== 92. Opname: bukti foto + alasan selisih inline (siap ACC admin) =="
 FOTO92="/uploads/companies/x/bukti/opname92.jpg"
 SALDO92=$(stok_of "$(api "$OWNER" GET /stok)" "plastik take away")

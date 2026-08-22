@@ -26,6 +26,43 @@ tanpa akses repo server.
 ---
 
 
+## Rilis: `bill_dibatalkan` tak lagi muncul untuk bill yang sebenarnya DIBAYAR
+
+🔴 **WAJIB DICEK** — antrean offline mobile membaca `sebab` untuk memutuskan
+apakah sebuah perintah dibuang atau ditahan. Tak ada medan baru; yang berubah
+**nilai `sebab` pada satu keadaan yang selama ini salah**.
+
+*(Belum di-merge ke production.)*
+
+### 🔴 `POST /penjualan` atas bill yang sudah dibayar
+
+`open_bills.sale_id` adalah foreign key ber-`ON DELETE SET NULL`. Server
+memakainya sebagai bukti "bill ini sudah jadi penjualan" — dan begitu
+penjualannya dihapus permanen (pemilik mengosongkan Tempat Sampah), Postgres
+menihilkan penunjuknya, sehingga buktinya ikut hilang.
+
+Terukur ujung ke ujung:
+
+| | sebelum | sesudah |
+|---|---|---|
+| bayar ulang bill yang sudah dibayar, sesudah penjualannya dihapus | `bill_dibatalkan` | **`bill_sudah_dibayar`** |
+| bill itu di `GET /pesanan` | muncul lagi sebagai **pesanan aktif** | tidak muncul |
+
+Bedanya bukan kosmetik, dan kontrak ini sudah menuliskannya sejak awal:
+
+- `bill_sudah_dibayar` → kiriman ulangnya kembar, **aman dibuang** dari antrean;
+- `bill_dibatalkan` → bill dibatalkan tanpa pernah jadi penjualan, jadi
+  **membuang perintahnya berarti kehilangan satu transaksi sungguhan**.
+
+Artinya klien offline selama ini **menahan** perintah yang tak akan pernah
+berhasil, untuk bill yang sebenarnya sudah dibayar.
+
+**Yang perlu dicek di mobile:** tak ada perubahan kode yang diwajibkan — nilai
+`sebab` sekarang menjadi benar, dan penanganan yang sudah ada untuk kedua nilai
+itu tetap berlaku. Yang berubah: `bill_dibatalkan` kini benar-benar hanya
+muncul untuk bill yang memang dibatalkan.
+
+
 ## Rilis: Angka masukan berbatas atas — 500 berubah jadi 400 bernama
 
 🟡 **PERLU DICEK** — mobile mengirim `qty`, `harga_beli`, `total_harga`,
