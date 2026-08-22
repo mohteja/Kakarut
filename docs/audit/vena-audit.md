@@ -826,6 +826,64 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
   verify-api; gerbang `audit-invarian-terpasang.test.ts` (6 uji) yang menahan
   urutan langkah CI dan jumlah invariannya; perbaikan resolver `jangkar-iris`
 
+## Urutan pemutaran ulang antrean offline — mobile — 2026-08-22
+
+- **Populasi**: **14 tipe perintah** yang boleh diantre (`SyncBody.tipe`
+  `z.enum`), **satu** jalur penyetempelan (`SyncQueue.tambah` → `waktuServer()
+  .toUtc().toIso8601String()`), **dua** tempat pengurutan di
+  `pangkasAntrean` (urutan kirim + pemangkasan item gagal)
+- **Kenapa urutan itu penting, DIUKUR bukan diasumsikan**: server memproses satu
+  batch `/sync` berurutan (`for (const cmd of commands)`). Satu batch dua
+  perintah, kasir baru yang belum absen:
+
+  | urutan batch | `shift_buka` | `absen_saya` |
+  |---|---|---|
+  | `[shift_buka, absen_saya]` | **400** "Absen masuk dulu sebelum buka kasir" | 201 |
+  | `[absen_saya, shift_buka]` | **201** | 201 |
+
+- **Hasil**: **TEMUAN.** Urutannya dibandingkan sebagai **TEKS**
+  (`a.waktu.compareTo(b.waktu)`), padahal `DateTime.toIso8601String()` menulis
+  **tiga** digit pecahan bila mikrodetiknya nol dan **enam** bila tidak:
+
+      2026-08-22T05:26:23.239Z        ← mikrodetik 0
+      2026-08-22T05:26:23.239001Z     ← satu mikrodetik SESUDAHNYA
+
+  `'0'` (48) < `'Z'` (90), jadi yang **belakangan dinyatakan lebih dulu**.
+  Diukur langsung: dari 12 pasangan stempel yang diuji, **4** urutannya berbeda
+  antara `compareTo` teks dan `compareTo` waktu
+- **Yang membuatnya lebih dari sekadar sepele**: pemutus seri `prioritas()` —
+  yang mendahulukan `absen_saya` di atas `shift_buka` — hanya berjalan saat
+  kedua teksnya **sama persis**. Dengan panjang pecahan yang berbeda, teksnya
+  tak pernah sama, jadi **pemutus seri yang ditulis khusus untuk kasus "waktunya
+  seri" tidak pernah jalan di kasus itu**. Komentarnya sendiri sudah menyebut
+  bahayanya (*"urutan dalam satu batch menentukan hasilnya"*) — yang meleset
+  alat ukurnya, bukan pemikirannya
+- **Akibatnya di lapangan**: kasir yang absen masuk lalu membuka laci saat
+  offline bisa mendapati lacinya **tetap tertutup** sesudah jaringan pulih —
+  tanpa satu pun galat yang menunjuk sebabnya, karena absennya sendiri berhasil
+- **Detektor**: DIBUKTIKAN bisa menuduh dua kali, tiap suntikan di-assert
+  mendarat — sort utama dikembalikan ke `compareTo` teks → uji INTI merah dengan
+  urutan **terbalik persis**; sort pemangkasan dikembalikan → uji pasangannya
+  merah
+- **Sisi TypeScript diperiksa, bukan diduga**: JS `toISOString()` **selalu**
+  menulis 3 digit pecahan (dijalankan, bukan diingat), dan keempat situs
+  `localeCompare` atas `waktu` di server/web mengurutkan string yang **server
+  sendiri** serialisasi dari kolom `timestamp`. Pembalikan itu mustahil di sana
+- **Batas detektor**: yang diperiksa urutan yang DIHASILKAN `pangkasAntrean`.
+  Urutan di dalam satu tipe perintah yang bergantung satu sama lain (mis. dua
+  penjualan atas bill yang sama) tak diuji — server memakai `client_ref` untuk
+  idempotensi, bukan urutan, jadi kelas itu tak punya bentuk kegagalan yang sama
+- **Tindak**: `bandingStempel()` mengurai kedua stempel jadi `DateTime` lebih
+  dulu, dengan jatuh-balik ke perbandingan teks untuk stempel yang tak bisa
+  diurai (antrean versi lama) — mempertahankan urutan yang ada lebih baik
+  daripada melemparkannya ke ujung daftar. Dipakai di KEDUA tempat pengurutan.
+  Gerbang `test/urutan_antrean_test.dart` (7 uji), termasuk uji PREMIS yang
+  memastikan kedua stempel contohnya memang berbeda panjang pecahan — kalau
+  Dart suatu hari menyeragamkannya, diamnya ketahuan di situ, bukan di produksi.
+  Mobile: `mohteja/kakarut-mobile` commit `061c473`, PR #12
+
+---
+
 ## Enum status dibandingkan sebagai teks — mobile — 2026-08-22
 
 - **Populasi**: **122** berkas Dart, **156** perbandingan teks ke medan yang
@@ -1262,5 +1320,8 @@ berlaku di situ).
 - [x] ~~**Enum status dibandingkan sebagai teks**~~ — BERSIH dua arah, lihat
       entri di atas. 156 perbandingan / 41 nilai diadu dengan 297 baris
       kontrak server; artefaknya tautan mekanis yang selama ini tak ada
-- [ ] **Urutan pemutaran ulang antrean offline**
+- [x] ~~**Urutan pemutaran ulang antrean offline**~~ — TEMUAN, lihat entri
+      di atas. Stempel ISO dibandingkan sebagai TEKS, dan `toIso8601String()`
+      menulis 3 digit pecahan bila mikrodetiknya nol / 6 bila tidak →
+      `shift_buka` bisa mendahului `absen_saya` (terukur: 400 vs 201)
 - [ ] **Fitur lama pengerjaan pesanan** — sudah tayang, belum diurai
