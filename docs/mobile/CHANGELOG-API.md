@@ -26,6 +26,64 @@ tanpa akses repo server.
 ---
 
 
+## Rilis: Bon tagihan — kertas berharga yang BUKAN bukti pembayaran
+
+🟢 **BARU** — layar kasir, saat Open Bill sedang dibuka.
+
+*(Belum di-merge ke production.)*
+
+**Sudah dikerjakan di mobile:** `mohteja/kakarut-mobile` PR #12
+(`KasirRepository.bonTagihan` + `PrinterController.cetakBon`, tombol di lembar
+keranjang). Entri ini tetap ditulis sebagai acuan kontraknya.
+
+### 🟢 BARU — `GET /api/open-bill/:id/bon`
+
+Query & bentuk balasan **identik** dengan `/slip`: `paper?: 58|80`,
+`chars_per_line?: int(16..96)`, `cut?: "1"`, `feed?: int(0..10)` →
+`{ data: base64 ESC/POS, teks: pratinjau, chars_per_line: int }`.
+
+Kertas KETIGA di kasir, menyusul struk dan slip pesanan:
+
+| kertas | rupiah? | bukti bayar? |
+| --- | --- | --- |
+| struk | ✅ | ✅ |
+| slip pesanan | ❌ | ❌ |
+| **bon tagihan** | ✅ | ❌ |
+
+Tamu memintanya saat selesai makan untuk memeriksa pesanannya dan tahu berapa
+yang harus disiapkan. Sesudah membayar ia menerima **struk**.
+
+**Byte-nya dirender SERVER**, sama seperti slip — cukup `base64Decode(data)`
+lalu kirim ke printer. Untuk kertas ini alasannya lebih tajam daripada slip:
+satu-satunya janjinya adalah "berharga tapi bukan bukti bayar", dan menyusun
+ulang layoutnya di Dart membuat janji itu hidup di dua tempat lalu menyimpang
+diam-diam — satu baris "Kembali" yang terselip, dan tamu menerima kertas yang
+terbaca seperti nota lunas.
+
+Yang perlu diketahui saat memakainya:
+
+- **HANYA di Open Bill.** `GET /api/penjualan/:id/bon` tidak ada (404):
+  penjualan yang sudah tercatat berarti uangnya sudah diterima, dan yang
+  dibutuhkan di sana cetak ulang struk.
+- **Kirimkan `chars_per_line` printernya.** Tanpa itu server memakai bawaan 32,
+  dan kolom kanan bon di kertas 80mm berhenti di tengah — angka rupiah yang tak
+  sejajar pada kertas yang justru dipakai orang menghitung uang.
+- **Salurkan ke printer STRUK, bukan printer tiket.** Bon diserahkan ke TAMU;
+  printer tiket ada di dapur. Konsekuensinya justru menguntungkan: warung
+  berprinter TUNGGAL tetap bisa memakainya, tak seperti tiket dapur yang
+  menuntut peran tiket.
+- **Tolak balasan tanpa `data`.** Kertas kosong yang keluar diam-diam lebih
+  buruk daripada pesan galat — kasir menyerahkannya ke tamu tanpa melihat.
+- **Angkanya PRA-DISKON** dan kertasnya mengatakan itu sendiri. Bill tak
+  menyimpan potongan; diskon diputuskan di layar pembayaran. PB1 dihitung
+  rumus yang sama dengan `createSale`, jadi bon dan struk tak bisa berselisih
+  karena pembulatan.
+- Baris yang **dibatalkan dapur** tidak ikut ditagih.
+- **Laci tak pernah terbuka**, dan tak ada baris metode bayar/kembalian/"Terima
+  kasih" — ditegakkan struktural oleh tipe `BonData` yang memang tak berkolom
+  itu.
+
+
 ## Rilis: Slip pesanan — cetak menu & jumlah, TANPA harga
 
 🟢 **BARU** — layar kasir (bayar langsung) dan open bill, bila fiturnya mau

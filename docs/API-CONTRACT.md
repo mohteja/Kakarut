@@ -490,6 +490,47 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 > Penjualan memakai **porsi yang ditagih** (`qty − qty_refund`) — sajian yang
 > sudah dikembalikan tak perlu dimasak lagi.
 
+### Bon tagihan (berharga, BUKAN bukti pembayaran)
+
+- `GET /api/open-bill/:id/bon` — [cashier] — query sama dengan `/slip` (`paper?`, `chars_per_line?`, `cut?`, `feed?`) — res: `{ data: string (base64 ESC/POS), teks: string (pratinjau), chars_per_line: int }` — error: **404** (tak ditemukan atau sudah ditutup)
+
+> **HANYA ADA DI OPEN BILL.** Penjualan yang sudah tercatat berarti uangnya
+> sudah diterima; "bon tagihan" untuknya adalah kertas yang menagih sesuatu
+> yang sudah lunas. `GET /api/penjualan/:id/bon` **tidak ada** (404) — yang
+> dibutuhkan di sana cetak ulang struk.
+>
+> Kertas yang diminta tamu saat selesai makan, untuk memeriksa pesanannya dan
+> tahu berapa yang harus disiapkan. Sesudah membayar ia menerima **struk**.
+>
+> **Isinya memuat rupiah, tapi TIDAK PERNAH menyatakan sudah dibayar.** Yang
+> dicetak: judul `BON TAGIHAN`, `BELUM DIBAYAR`, perusahaan & cabang, waktu,
+> dine-in/bawa pulang, meja & nama tamu, baris item berikut harga satuan dan
+> total baris, lalu `Subtotal` / `PB1` / `TOTAL` / `Total porsi`. Ditutup
+> `*** BELUM DIBAYAR ***` + `Bukan bukti pembayaran` — peringatannya muncul
+> **dua kali**, sebab yang dibawa pulang orang dari selembar kertas adalah
+> baris terakhir yang dibacanya.
+>
+> **Tak ada baris pembayaran sama sekali** — tak ada metode bayar, tunai
+> diterima, kembalian, maupun "Terima kasih!". Ditegakkan struktural: tipe
+> `BonData` di `packages/shared` memang tak punya kolom-kolom itu.
+>
+> **Tak ada nomor nota dan tak ada nomor antrian** — keduanya lahir saat
+> penjualan tercatat, dan bon ini justru ada sebelum itu.
+>
+> **Laci tidak dibuka**, dengan alasan yang lebih tajam daripada di slip:
+> membuka laci saat bon diminta membuat tamu mengira pembayarannya sudah
+> tercatat.
+>
+> Baris yang **dibatalkan dapur** tidak ikut ditagih — di sini artinya menagih
+> tamu untuk makanan yang tak pernah datang.
+>
+> **Angkanya PRA-DISKON.** Bill tak menyimpan potongan; diskon diputuskan di
+> layar pembayaran. Karena itu kertasnya sendiri menutup dengan "Diskon (bila
+> ada) dihitung saat pembayaran" — kalimat itu **hilang** bila klien mengirim
+> diskon yang sudah diputuskan (hanya web bisa; endpoint ini selalu 0). PB1
+> dihitung `hitungPb1` yang sama dengan `createSale`, jadi bon dan struk tak
+> bisa berselisih karena pembulatan.
+
 ## `/api/produksi` dan `/api/pembelian` — Tambah stok (pabrik) (`modules/produksi/routes.ts`)
 
 > Kedua mount dibuat oleh factory yang sama `buatRuteTambahStok(tipe)` (`produksi`

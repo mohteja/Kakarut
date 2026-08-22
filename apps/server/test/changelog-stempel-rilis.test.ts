@@ -53,6 +53,7 @@ const BELUM_TAYANG = new Set([
   // rilis yang masih di cabang `claude`, belum di-merge ke production
   "## Rilis: Slip pesanan — cetak menu & jumlah, TANPA harga",
   "## Rilis: Sebaran transaksi per jam di laporan penjualan",
+  "## Rilis: Bon tagihan — kertas berharga yang BUKAN bukti pembayaran",
 ]);
 
 /** Dua bentuk stempel yang sah — baris mandiri (baru) dan blockquote (lama). */
