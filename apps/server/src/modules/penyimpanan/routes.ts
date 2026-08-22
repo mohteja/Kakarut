@@ -215,7 +215,7 @@ export const penyimpananRoutes = new Hono<AppEnv>()
   .put(
     "/:id/petugas",
     requireRole("owner", "admin"),
-    zValidator("json", z.object({ user_ids: z.array(z.string().uuid()) })),
+    zValidator("json", z.object({ user_ids: z.array(z.string().uuid()).max(2000) })),
     async (c) => {
       const auth = c.get("auth");
       const body = c.req.valid("json");

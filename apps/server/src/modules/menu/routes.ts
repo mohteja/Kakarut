@@ -57,10 +57,10 @@ const MenuCreateBody = z.object({
    * laporan yang selamanya berkata "aman".
    */
   target_durasi_detik: z.number().int().min(1).max(86_400).nullish(),
-  komponen: z.array(KomponenBody).default([]),
+  komponen: z.array(KomponenBody).max(200).default([]),
   is_active: z.boolean().default(true),
   /** pembatasan lokasi (mode Pro) — null/[] = tampil di semua cabang */
-  branch_ids: z.array(z.string().uuid()).nullish(),
+  branch_ids: z.array(z.string().uuid()).max(100).nullish(),
 });
 
 /**
@@ -94,17 +94,17 @@ const MenuUpdateBody = z.object({
   /** undefined = target lama tetap; null = hapus target */
   target_durasi_detik: z.number().int().min(1).max(86_400).nullish(),
   /** undefined = resep lama tetap; [] = kosongkan resep */
-  komponen: z.array(KomponenBody).optional(),
+  komponen: z.array(KomponenBody).max(200).optional(),
   is_active: z.boolean().optional(),
   /** undefined = pembatasan lama tetap; null/[] = tampil di semua cabang */
-  branch_ids: z.array(z.string().uuid()).nullish(),
+  branch_ids: z.array(z.string().uuid()).max(100).nullish(),
 });
 
 /** Nilai menu setelah body PUT digabung dengan baris lama (POST: body apa adanya). */
 type MenuEfektif = z.infer<typeof MenuCreateBody>;
 
 const UrutanBody = z.object({
-  items: z.array(z.object({ id: z.string().uuid(), sort_order: z.number().int() })),
+  items: z.array(z.object({ id: z.string().uuid(), sort_order: z.number().int() })).max(2000),
 });
 
 /**

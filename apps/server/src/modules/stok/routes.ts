@@ -1131,7 +1131,7 @@ export const stokRoutes = new Hono<AppEnv>()
       "json",
       z.object({
         alasan: z.string().nullish(),
-        ids: z.array(z.string().uuid()).optional(),
+        ids: z.array(z.string().uuid()).max(500).optional(),
       }),
     ),
     async (c) => {

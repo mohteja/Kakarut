@@ -34,6 +34,46 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Larik badan permintaan tanpa batas atas — server — 2026-08-22
+
+- **Populasi**: 18 `z.array(...)` di skema badan permintaan `apps/server/src`
+- **Metode**: `larik-tanpa-batas.py` — tiap `z.array(...)`, baca rantai method
+  sesudahnya, pilah yang memuat `.max(` dari yang tidak
+- **Detektor**: DIBUKTIKAN bisa menuduh — `.max(2000)` dicabut dari
+  `penyimpanan/routes.ts` → hitungan berbatas turun 10→9 dan lariknya muncul
+  di daftar telanjang; dipulihkan → 10 lagi
+- **Hasil**: **TEMUAN**. 10 dari 18 sudah berbatas — termasuk DUA yang tinggal
+  di berkas yang SAMA dengan larik telanjangnya. Delapan sisanya tidak
+- **Ukuran** (`PUT /menu/urutan`, satu UPDATE per baris di dalam transaksi;
+  rutanya "boleh diakses SEMUA PERAN termasuk kasir"):
+
+  | N | lama satu permintaan |
+  |---|---|
+  | 1 | 13 ms |
+  | 1.000 | 242 ms |
+  | 20.000 | 2,94 dtk |
+  | 28.000 (langit batas badan 2 MB) | ~4,4 dtk |
+
+  Dan yang benar-benar merusak bukan permintaan itu sendiri melainkan SEMUA
+  yang lain — `db` adalah pg.Pool max 10:
+
+  | keadaan | `GET /menu` |
+  |---|---|
+  | senggang | 0,009 dtk |
+  | 10 × `PUT /menu/urutan` N=28.000 | **20,07 dtk** (2.200×) |
+  | sesudah semuanya usai | 0,009 dtk |
+  | 10 × N=2.000 (batas baru) | **1,47 dtk** |
+
+- **Tindak**: kedelapan larik diberi `.max()` dengan angka yang SUDAH mapan di
+  repo (2000 daftar uuid panjang, 500 daftar id, 200 baris komponen, 100
+  daftar cabang); gerbang `test/larik-permintaan-berbatas.test.ts`; §231
+  verify-api. Pengurutan sah 81 menu sungguhan tetap 200 dalam 35 ms
+- **Utang yang DIUKUR, bukan dinyatakan beres**: batasnya mengecilkan
+  kerusakan 14× tapi TIDAK menghapus mekanismenya — `PUT /menu/urutan` masih
+  melakukan N round-trip di dalam satu transaksi. Menggantinya dengan satu
+  `UPDATE … FROM (VALUES …)` akan membuatnya satu round-trip berapa pun N-nya.
+  Itu vena tersendiri, sudah masuk antrean di bawah
+
 ## I/O jaringan di dalam `db.transaction` — server — 2026-08-22
 
 - **Populasi**: 72 badan `db.transaction(...)` di `apps/server/src`
@@ -166,10 +206,13 @@ berlaku di situ).
 
 ### Server
 - [x] ~~**I/O jaringan di dalam `db.transaction`**~~ — BERSIH, lihat entri di atas
-- [ ] **Loop tak berbatas di dalam `db.transaction`** — bahaya yang SAMA
-      (menahan 1 dari 10 koneksi) tanpa jaringan: diukur ada **17** loop
-      ber-`await tx.` di dalam badan transaksi. Yang perlu diperiksa: mana yang
-      panjangnya ditentukan MASUKAN pemanggil dan tak berbatas atas
+- [x] ~~**Loop tak berbatas di dalam `db.transaction`**~~ — TEMUAN, lihat entri
+      "Larik badan permintaan tanpa batas atas" di atas
+- [ ] **N round-trip di dalam transaksi, walau sudah berbatas** — `PUT
+      /menu/urutan` masih satu UPDATE per baris; 10×N=2.000 serentak masih
+      membuat `GET /menu` 1,47 dtk (dari 0,009). Satu `UPDATE … FROM (VALUES …)`
+      menjadikannya satu round-trip berapa pun N-nya. Ukur juga 16 loop
+      `await tx.` lain di dalam transaksi dengan cara yang sama
 - [ ] **Balasan tanpa LIMIT** — `.select()` tanpa `.limit()` pada tabel yang
       tumbuh (`sales`, `sale_items`, kartu stok)
 - [ ] **Zod tanpa batas atas** — tiap `z.number()` uang/qty tanpa `.max()`

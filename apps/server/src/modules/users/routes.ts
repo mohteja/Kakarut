@@ -450,7 +450,7 @@ export const karyawanRoutes = new Hono<AppEnv>()
    */
   .put(
     "/:userId/tempat",
-    zValidator("json", z.object({ tempat_ids: z.array(z.string().uuid()) })),
+    zValidator("json", z.object({ tempat_ids: z.array(z.string().uuid()).max(2000) })),
     async (c) => {
       const auth = c.get("auth");
       const userId = c.req.param("userId");

@@ -12563,6 +12563,70 @@ done
 cek "PASANGAN: /auth/forgot-password memang berhenti di 6 juga" "V == 6" "$LOLOSL"
 
 echo
+echo "── §231 Larik badan permintaan harus berbatas atas ──"
+#
+# `db` adalah pg.Pool bawaan: 10 koneksi, penunggu antre SELAMANYA.
+# `PUT /menu/urutan` menjalankan satu UPDATE PER BARIS di dalam transaksi, jadi
+# panjang lariknya — yang ditentukan PENGIRIM — menentukan berapa lama koneksi
+# itu ditahan. Rutenya, menurut komentarnya sendiri, boleh diakses SEMUA PERAN
+# termasuk kasir.
+#
+# TERUKUR sebelum batasnya dipasang, terhadap server sungguhan:
+#   N=1 13ms · N=1.000 242ms · N=20.000 2,94dtk · N=28.000 ~4,4dtk (langit 2 MB)
+# dan sepuluh permintaan serentak membuat GET /menu melompat dari 0,009 dtk
+# jadi 20,07 dtk — 2.200× — lalu pulih sesudah semuanya usai.
+#
+# Yang diuji di sini BATASNYA, bukan balapannya: membuktikan kemacetan lewat
+# HTTP berarti memacetkan CI, dan detektor semacam itu lebih sering berbohong
+# daripada menangkap.
+MENU231=$(api "$OWNER" GET /menu | jq -c '[.[] | .id]')
+JML231=$(echo "$MENU231" | jq 'length')
+cek "premis: perusahaan seed memang punya menu untuk diurutkan" "V >= 10" "$JML231"
+
+# PASANGAN LEBIH DULU: pengurutan yang SAH harus tetap jalan. Tanpa ini,
+# asersi 400 di bawah juga hijau seandainya endpointnya diblokir sama sekali —
+# yaitu fitur yang mati, bukan pagar yang bekerja.
+SAH231=$(echo "$MENU231" | jq -c '{items: [range(0; length) as $i | {id: .[$i], sort_order: $i}]}')
+cek "PASANGAN: mengurutkan SELURUH menu sungguhan tetap 200" "V == 200" \
+  "$(status_code_body "$OWNER" PUT /menu/urutan "$SAH231")"
+
+# INTI: larik di atas batas ditolak 400 — bukan diterima lalu menahan koneksi.
+#
+# Lewat BERKAS, bukan argumen: badan 2.100 baris ~145 KB, dan itu melampaui
+# MAX_ARG_STRLEN (128 KB) sehingga curl gagal "Argument list too long" sebelum
+# permintaannya sempat berangkat. Percobaan pertama seksi ini persis begitu —
+# asersinya bukan gagal karena servernya salah, melainkan karena tembakannya
+# tak pernah dilepaskan.
+F231="${TMPDIR:-/tmp}/verify-api-231.$$"
+python3 -c "
+import json, uuid
+print(json.dumps({'items': [{'id': str(uuid.uuid4()), 'sort_order': i} for i in range(2100)]}))" \
+  > "$F231"
+cek "INTI: 2.100 baris (di atas batas 2.000) ditolak 400" "V == 400" \
+  "$(curl -s -o "$F231.out" -w '%{http_code}' -X PUT "$BASE/api/menu/urutan" \
+     -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' \
+     --data-binary @"$F231")"
+# …dan pesannya menyebut BATASNYA, bukan gumpalan JSON — buah `lib/validator.ts`.
+cek "pesannya menyebut batasnya, bisa ditindaklanjuti" "V == 1" \
+  "$(jq -r '.error // ""' "$F231.out" | grep -qi 'maksimal 2000' && echo 1 || echo 0)"
+rm -f "$F231" "$F231.out"
+
+# Pintu saudara yang ikut dibereskan pada putaran yang sama — dipatok di sini
+# supaya batasnya tak bisa dicabut diam-diam dari satu pintu saja.
+KRY231=$(api "$OWNER" GET /karyawan | jq -r '.[0].user_id // .[0].id // empty')
+cek "premis: ada karyawan untuk diuji pintu saudaranya" "V == 1" \
+  "$([ -n "$KRY231" ] && echo 1 || echo 0)"
+G231="${TMPDIR:-/tmp}/verify-api-231b.$$"
+python3 -c "
+import json, uuid
+print(json.dumps({'tempat_ids': [str(uuid.uuid4()) for _ in range(2100)]}))" > "$G231"
+cek "saudara: /karyawan/:id/tempat menolak larik di atas 2.000" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/karyawan/$KRY231/tempat" \
+     -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' \
+     --data-binary @"$G231")"
+rm -f "$G231"
+
+echo
 echo "── §221 Akun seed harus ditinggalkan seperti semula ──"
 # Duduk di ekor bersama §209/§215, dan karena alasan yang sama: ia menghakimi
 # sesudah semua seksi selesai mengutak-atik.
