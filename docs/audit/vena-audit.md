@@ -38,6 +38,16 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
    menyebut populasinya, dan sedapat mungkin membandingkannya dengan cara
    hitung kedua.
 
+6. **DATA SUNTIKAN WAJIB DIBUKTIKAN TERBACA.** Mengukur di atas data uji hanya
+   sah bila kuerinya benar-benar MELIHAT data itu — dan yang membuktikannya
+   angka dari balasan rutenya sendiri, bukan `SELECT count(*)` di basis data.
+   Sudah terjadi, dan menghasilkan kesimpulan yang salah masuk ledger: 50.111
+   penjualan yang kusuntikkan mendarat di PERUSAHAAN LAIN, sementara tokennya
+   milik perusahaan yang punya 98. Kuerinya tak pernah melihat satu pun baris
+   itu, dan "laporan agregat ternyata murah (0,035 dtk)" tercatat sebagai
+   temuan terukur. Diukur ulang dengan tenant yang benar: **0,212 dtk**.
+   `scripts/ukur-latensi.sh` menolak berjalan sampai premis itu terbukti.
+
 ---
 
 ## N round-trip per baris di dalam transaksi — server — 2026-08-22
@@ -573,10 +583,16 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 - **Metode**: `scratchpad/rute-mahal.py`, lalu tiap GET tanpa parameter jalur
   (100 jalur) DITEMBAK dan diukur
 - **"Mahal" DIUKUR, bukan diduga**: 100 GET ditembak dua kali — terhadap seed
-  (111 penjualan) dan terhadap **50.111 penjualan + 50.137 baris item sepanjang
-  setahun**. Yang terlambat tetap **0,035 dtk**. Laporan agregat memang murah:
-  agregasinya di SQL dan berindeks. Dugaan awal rencana ("ekspor, laporan
-  agregat, unggah") **salah dua-pertiganya**
+  (111 penjualan) dan terhadap 50.111 penjualan sepanjang setahun. Yang
+  terlambat tetap 0,035 dtk.
+
+  > ⚠️ **ANGKA ITU SALAH, dan diralat oleh vena "Indeks vs WHERE" di bawah.**
+  > 50.111 baris suntikannya mendarat di PERUSAHAAN LAIN; token yang dipakai
+  > mengukur milik perusahaan yang cuma punya 98 penjualan, jadi kuerinya tak
+  > pernah melihat satu pun baris itu. Diukur ulang dengan tenant yang benar:
+  > `GET /laporan` **0,212 dtk** pada 50 ribu dan **0,526 dtk** pada 500 ribu.
+  > Temuan `POST /upload` di entri ini tetap berdiri — ia diukur lewat
+  > penyimpanan, bukan lewat kueri tenant. Aturan ke-6 lahir dari sini.
 - **Detektor**: DIBUKTIKAN — aturan sapuan `unggah-berbatas` di
   `penjaga-semua-pintu`, tiga suntikan (cabut dua ember, cabut satu ember,
   cabut batas ukuran) masing-masing di-assert mendarat; ketiganya tertuduh
@@ -810,6 +826,51 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
   verify-api; gerbang `audit-invarian-terpasang.test.ts` (6 uji) yang menahan
   urutan langkah CI dan jumlah invariannya; perbaikan resolver `jangkar-iris`
 
+## Indeks vs WHERE yang benar-benar dipakai — basis data — 2026-08-22
+
+- **Populasi**: **157 indeks** di katalog. Diukur empiris, bukan dibaca:
+  statistik direset, **68 rute GET** ditembak, lalu `pg_stat_user_tables`
+  ditanya tabel mana yang di-seq-scan dan berapa baris terbaca
+- **Volume**: disuntikkan bertahap sampai **500.098 penjualan + 500.138 baris
+  jual** (≈7 tahun warung ramai), `ANALYZE` sesudah tiap tahap
+- **Hasil**: **BERSIH — tak ada indeks yang hilang.** Dari 68 rute, tepat SATU
+  tabel besar di-seq-scan penuh (`sales`, lewat `/laporan/durasi-pesanan`), dan
+  `EXPLAIN (ANALYZE)` menunjukkan planner-nya BENAR: filternya memilih ~100%
+  baris dalam rentang yang diminta, jadi indeks tak bisa menolong. Postgres
+  sudah memparalelkannya sendiri (`Parallel Seq Scan` + `Parallel Hash Join`)
+
+  | rute | 50 ribu | 500 ribu |
+  |---|---|---|
+  | `GET /laporan` | 0,212 dtk | 0,526 dtk |
+  | `GET /laporan/menu-laris` | 0,099 dtk | 0,604 dtk |
+  | `GET /laporan/durasi-pesanan` | 0,130 dtk | 0,273 dtk |
+  | rute baca lainnya (8) | — | ≤ 0,087 dtk |
+
+- **KESALAHAN YANG DITEMUKAN, dan ia ada di ledger ini sendiri**: vena "Batas
+  laju di luar email" mencatat "laporan agregat ternyata murah (0,035 dtk atas
+  50.111 penjualan)". **Angka itu hasil pengukuran yang datanya tak pernah
+  dilihat kuerinya**: 50.111 baris suntikannya mendarat di perusahaan LAIN,
+  sementara token pengukurnya milik perusahaan dengan 98 penjualan. Kesimpulan
+  itu diralat di entrinya, dan **aturan ke-6** lahir dari sini. Temuan
+  `POST /upload` di entri itu tetap berdiri — ia diukur lewat penyimpanan,
+  bukan lewat kueri tenant
+- **Ikut terukur**: 10 laporan rentang-penuh SERENTAK membuat `GET /menu`
+  melompat **0,010 → 2,073 dtk**, lalu pulih. Bentuknya sama dengan vena
+  N-round-trip, tapi **tak kuperlakukan sebagai temuan**: seluruh rute laporan
+  digerbang owner/admin — terukur **403 untuk kasir pada kelimanya** — jadi ini
+  ciri kapasitas pada tenant yang sepuluh pemiliknya menarik laporan tujuh
+  tahun bersamaan, bukan permukaan serangan. Memasang batas laju di situ tak
+  menyentuh mekanismenya dan cuma akan terlihat seperti penjagaan
+- **Batas**: yang diukur RUTE BACA tanpa parameter jalur (68 dari 469). Jalur
+  tulis dan rute ber-`:id` tak diukur. Volume disuntikkan pada satu tenant
+  besar; distribusi banyak-tenant (yang membuat `company_id` selektif) tak
+  diuji, dan justru di sanalah indeks ber-prefix `company_id` paling berguna
+- **Tindak**: tak ada perubahan kode — tak ada indeks yang hilang.
+  `scripts/ukur-latensi.sh` dibuat sebagai penawar kesalahan di atas: ia
+  **menolak berjalan** (exit 2) sampai membuktikan API benar-benar melihat data
+  yang diukur, dan buktinya diambil dari balasan rutenya sendiri, bukan dari
+  `SELECT count(*)`
+
 ---
 
 ## Antrean vena — belum tergarap
@@ -848,7 +909,8 @@ berlaku di situ).
 - [x] ~~**CHECK yang hilang**~~ — BERSIH pada datanya, lihat entri di atas.
       Artefaknya `npm run audit:invarian` (26 invarian) yang CI jalankan
       SESUDAH verify-api
-- [ ] **Indeks vs WHERE yang benar-benar dipakai**
+- [x] ~~**Indeks vs WHERE yang benar-benar dipakai**~~ — BERSIH, lihat entri di
+      atas. Ikut meralat angka laporan pada vena "Batas laju di luar email"
 
 ### Web
 - [ ] **Kunci React Query tanpa `branch_id`**
