@@ -14,6 +14,7 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "acuan:uang-mobile": "tsx src/scripts/acuan-uang-mobile.ts",
+    "acuan:status-mobile": "tsx src/scripts/acuan-status-mobile.ts",
     "audit:invarian": "tsx src/scripts/audit-invarian.ts"
   },
   "dependencies": {

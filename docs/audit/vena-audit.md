@@ -826,6 +826,72 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
   verify-api; gerbang `audit-invarian-terpasang.test.ts` (6 uji) yang menahan
   urutan langkah CI dan jumlah invariannya; perbaikan resolver `jangkar-iris`
 
+## Enum status dibandingkan sebagai teks — mobile — 2026-08-22
+
+- **Populasi**: **122** berkas Dart, **156** perbandingan teks ke medan yang
+  namanya menyebut enum (`status|tipe|role|jenis|metode|kategori|sesi|sebab|
+  divisi|pengadaan|peran`), **41** nilai berbeda — diadu dengan **297 baris
+  kontrak server** dari TIGA sumber: 27 `pgEnum` (92 baris), `z.enum` +
+  `kode`/`sebab` di rute (64 + 17), dan union literal bernama di
+  `packages/shared` (124)
+- **Detektor**: DIBUKTIKAN bisa menuduh tiga kali, tiap suntikan di-assert
+  mendarat — (1) `r.status == 'dikonfirmasi'` → `'dikonfirmasii'` di
+  `pengadaan_page.dart` → tertuduh di baris yang tepat; (2) fikstur dikosongkan
+  → uji PREMIS merah, bukan INTI hijau dengan populasi nol; (3) pengupas
+  komentar pembangkitnya dilumpuhkan → merah
+- **EMPAT KALI DETEKTORKU SALAH**, dan tiap kali ia menuduh kode yang benar:
+  1. semestanya cuma `pgEnum` (78 nilai) → **12 tuduhan palsu**. `"persen"`/
+     `"nominal"` (tipe diskon), `"open_bill"` (jenis pesanan), `"gagal"`
+     (status antrean) memang tak pernah jadi enum Postgres. Diperlebar ke
+     seluruh kontrak: 173 nilai
+  2. `sebab:` tak ikut dipungut → menuduh `'sedang_diproses'`, yang justru
+     dipakai benar di dua tempat dengan komentar yang menjelaskannya
+  3. komentar di dalam badan `pgEnum` ikut terbaca: `paritas tahap "diproses"`
+     masuk sebagai nilai enum KELIMA yang tak pernah ada di Postgres mana pun
+  4. arah B versi pertama mencocokkan nilai LINTAS KONTEKS → `'beli'`,
+     `'opname'`, `'produksi'` di peta label kartu stok dikira `dokumen_jenis`
+- **ASERSI HAMPA YANG KURALAT SENDIRI**: uji "komentar tak ikut jadi nilai enum"
+  versi pertama menghitung nilai `supply_beli_status` — dan tetap **HIJAU** saat
+  pengupasnya dicabut, karena nilai yang dikutip komentarnya (`"diproses"`)
+  kebetulan juga nilai yang sah, jadi `Set` melipatnya. Diukur: keluaran
+  dengan dan tanpa pengupas **identik, 0 beda**. Asersinya tak bisa gagal.
+  Diganti uji sifat langsung atas masukan yang memang memancingnya (komentar
+  yang mengutip nilai yang TIDAK ada di lariknya), lalu bukti merahnya diulang
+  dan kali ini mendarat
+- **Hasil**: **BERSIH, dua arah.**
+  - **Arah A** (literal Dart di luar kontrak): **2** dari 41 — `'bt'` dan
+    `'lepas'`, keduanya jenis transport printer yang tak pernah menyeberang ke
+    server
+  - **Arah B** (nilai kontrak yang tak ditangani Dart): dari **34** union
+    literal bernama di `packages/shared`, **3** tak lengkap — dan ketiganya
+    benar secara struktural:
+    · `MetodeHpp` — dipakai sebagai boolean biner (`== 'average'`), jadi
+      `fifo` tertangani oleh konstruksi;
+    · `InvitationStatus` — hanya `pending` yang dikirim ke layar onboarding;
+    · `SebabPenjualanGagal` — **DAFTAR PUTIH yang disengaja**. `sync_queue.dart`
+      hanya menyebut `bill_sudah_dibayar` sebagai "sudah tercatat"; komentarnya
+      menuliskan alasannya: *"sebab baru dari server otomatis diperlakukan
+      sebagai gagal dan terlihat kasir, bukan diam-diam dibuang"*. Menuntut
+      keempat nilainya disebut justru akan mengubah daftar putih jadi daftar
+      hitam — dan itu kebalikan dari yang aman
+- **Yang sudah dijaga sebelum vena ini**: `offline_queue_test.dart` sudah
+  memuat perilaku daftar putih itu (`bill_dibatalkan` → tidak selesai; sebab
+  tak dikenal → tidak selesai). Tak ada uji baru yang ditambahkan di situ —
+  menambah salinan uji yang sudah ada bukan penjagaan, cuma angka
+- **Batas detektor**: hanya melihat perbandingan `==`/`!=`/`case` ke medan yang
+  NAMANYA menyebut enum. Status yang mengalir lewat variabel bernama netral
+  (`v`, `x`) tak terlihat. Nilai yang dipakai sebagai kunci peta atau argumen
+  fungsi juga di luar sapuan
+- **Tindak**: tak ada perubahan kode — tak ada yang salah. Artefaknya TAUTAN
+  MEKANIS yang selama ini tak ada: `npm run acuan:status-mobile` melahirkan
+  `test/fikstur/status-kontrak-server.txt` (297 baris) di repo mobile,
+  `status_cermin_server_test.dart` (5 uji) mengadu tiap literal status dengan
+  fikstur itu, dan `status-satu-kontrak.test.ts` (5 uji) menjaga pembangkitnya
+  supaya fikstur tak menyusut diam-diam. Mesin yang sama dengan vena uang —
+  fikstur DIHASILKAN, bukan diketik ulang
+
+---
+
 ## Invalidasi sesudah mutasi — web — 2026-08-22
 
 - **Sudah ada penjaganya, dan batasnya ditulis sendiri.** `invalidate-kunci.test.ts`
@@ -1193,6 +1259,8 @@ berlaku di situ).
       riwayat 3 → 4 baris di server, panelnya tetap 3
 
 ### Mobile
-- [ ] **Enum status dibandingkan sebagai teks**
+- [x] ~~**Enum status dibandingkan sebagai teks**~~ — BERSIH dua arah, lihat
+      entri di atas. 156 perbandingan / 41 nilai diadu dengan 297 baris
+      kontrak server; artefaknya tautan mekanis yang selama ini tak ada
 - [ ] **Urutan pemutaran ulang antrean offline**
 - [ ] **Fitur lama pengerjaan pesanan** — sudah tayang, belum diurai
