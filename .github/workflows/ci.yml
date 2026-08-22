@@ -106,6 +106,19 @@ jobs:
           npm run seed
           bash scripts/verify-api.sh
       # ─────────────────────────────────────────────────────────────────────
+      # AUDIT INVARIAN — SESUDAH verify-api, dan itu seluruh alasannya.
+      #
+      # Basis data ini cuma punya delapan `CHECK` untuk 59 tabel; selebihnya
+      # invarian hidup di kode. Uji satuan memeriksa PENJAGANYA; audit ini
+      # memeriksa DATANYA — dan datanya baru bermakna sesudah 2.700+ asersi
+      # melewatinya lewat rute sungguhan: penjualan, refund, transfer, opname,
+      # produksi, sinkron offline, kosongkan sampah.
+      #
+      # Menjalankannya di basis data yang baru di-seed tak menyatakan apa-apa.
+      # ─────────────────────────────────────────────────────────────────────
+      - name: Audit invarian basis data (sesudah semua rute dilewati)
+        run: npm run --silent audit:invarian -w @kakarut/server
+      # ─────────────────────────────────────────────────────────────────────
       # E2E WEB — di job yang SAMA, dan itu disengaja.
       #
       # Suite Playwright butuh persis lingkungan yang sudah berdiri di sini:

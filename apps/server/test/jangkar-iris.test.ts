@@ -99,7 +99,7 @@ function lepasEscape(s: string): string {
 function sumberYangDibaca(isiUji: string): string[] {
   const ketemu = new Set<string>();
   for (const m of isiUji.matchAll(/[`"']([^`"'\n]*?\/)[`"']/g)) {
-    const bersih = m[1].replace(/^[./]+/, "");
+    const bersih = m[1].replace(/^(?:\.\.?\/)+/, "");
     if (!bersih) continue;
     const isiDir = SEMUA_SUMBER.filter((s) => s.includes("/" + bersih));
     if (isiDir.length > 0) for (const p of isiDir) ketemu.add(p);
@@ -112,7 +112,15 @@ function sumberYangDibaca(isiUji: string): string[] {
       ketemu.add(rapi);
       continue;
     }
-    const bersih = frag.replace(/^[./]+/, "");
+    /*
+     * Hanya awalan RELATIF (`./`, `../`) yang dibuang — bukan tiap titik di
+     * depan. `replace(/^[./]+/, "")` ikut memakan titik milik `.github`, jadi
+     * `../../../.github/workflows/ci.yml` jadi `github/workflows/ci.yml` dan
+     * tak cocok dengan berkas mana pun. Akibatnya jangkar yang menunjuk ke
+     * langkah workflow tak bisa ditelusuri sama sekali — padahal `.yml`
+     * dimasukkan ke `EKSTENSI` justru supaya bisa.
+     */
+    const bersih = frag.replace(/^(?:\.\.?\/)+/, "");
     const cocok = SEMUA_SUMBER.filter((s) => s.endsWith("/" + bersih));
     if (cocok.length === 1) ketemu.add(cocok[0]);
   }

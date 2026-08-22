@@ -13,7 +13,8 @@
     "sinkron:lampiran": "tsx src/scripts/sinkron-lampiran-dto.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "acuan:uang-mobile": "tsx src/scripts/acuan-uang-mobile.ts"
+    "acuan:uang-mobile": "tsx src/scripts/acuan-uang-mobile.ts",
+    "audit:invarian": "tsx src/scripts/audit-invarian.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1083.0",

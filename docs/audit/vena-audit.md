@@ -757,6 +757,59 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
   §238 verify-api (7 asersi, termasuk pasangan "bill yang DIBATALKAN tetap
   terbaca dibatalkan"); entri CHANGELOG untuk mobile
 
+## CHECK yang hilang — basis data — 2026-08-22
+
+- **Populasi**: **8 `CHECK`** untuk **59 tabel** (katalog Postgres). 32 kolom
+  numeric pada tabel yang tumbuh, **tak satu pun** ber-CHECK. Sisi kode: 34
+  `z.enum`, dan **27 enum Postgres asli** — jadi status memang sudah ditegakkan
+  basis data; hanya 2 kolom `status` bertipe `text`, keduanya ditulis server
+  sendiri
+- **Detektor**: DIBUKTIKAN — empat suntikan ke DATA sungguhan (identitas uang
+  digeser Rp 500, `qty_refund` dinaikkan melebihi `qty`, mutasi `pakai`
+  dibalik tandanya, bill ber-`sale_id` dicabut tandanya); keempatnya tertuduh
+  dan skripnya keluar dengan status 1. Ditambah tiga suntikan ke gerbang
+  pemasangannya
+- **Hasil**: **BERSIH pada datanya, dengan satu artefak baru.** Tiap invarian
+  yang diandaikan kode kuprobe lewat rute sungguhan:
+
+  | probe | hasil |
+  |---|---|
+  | refund 5 porsi dari 2 yang terjual | **400** "hanya bisa dikembalikan 2 porsi lagi" |
+  | **dua refund penuh SERENTAK** | **200 + 400**, `qty_refund = 2 = qty` — kunci `FOR UPDATE` pada baris `sales` menahan yang kedua |
+  | `diskon_nilai` 99.999.999 atas subtotal 1.000 | tersimpan `diskon = 0`, `total = 1.000` |
+  | penulis `qty_refund`/`refund_total` | **satu pintu saja** (`refund.ts`), dan terkunci |
+
+- **KESALAHANKU, dan ia yang paling perlu ditulis**: invarian pertamaku
+  `supply_mutations.qty >= 0` menuduh **58 baris**. Kuperiksa dulu sebelum
+  melaporkannya, dan ternyata **TANDA-nya yang membawa arah** — `masuk`/`terima`
+  positif, `pakai`/`auto`/`kirim` negatif. Datanya benar; invariannya yang
+  salah. Kalau kupercaya angka 58 itu, vena ini akan melahirkan "temuan" yang
+  justru merusak semantik yang benar. Yang masuk audit akhirnya kecocokan tanda
+  dengan `tipe` — dan ia lolos 0 pelanggaran
+- **Artefak**: `npm run audit:invarian` — **26 invarian** dijalankan sebagai
+  kueri terhadap datanya, dan CI menjalankannya **SESUDAH `verify-api.sh`**.
+  Urutan itu seluruh nilainya: pada basis data yang baru di-seed audit ini
+  hijau tanpa menyatakan apa pun. Terukur sesudah 2.785 asersi melewatinya
+  (112 penjualan, 138 baris, 122 mutasi, 236 produksi): **26 sehat, 0
+  dilanggar**
+- **Kenapa bukan `CHECK` saja**: sebagian memang bisa (`qty > 0`), dan yang
+  begitu sebaiknya begitu. Tapi yang paling berharga justru yang tak bisa —
+  identitas `total = subtotal − diskon + pb1` menyilang empat kolom, dan
+  kecocokan tanda bergantung pada enum di kolom lain. `CHECK` menolak baris
+  saat DITULIS; audit ini menjawab pertanyaan yang berbeda: "sesudah semua rute
+  dijalankan, adakah yang tersisa salah?"
+- **Ikut diperbaiki**: penjaga `jangkar-iris` tak bisa menelusuri jangkar yang
+  menunjuk `ci.yml` — `replace(/^[./]+/, "")` ikut memakan titik milik
+  `.github`. Padahal `.yml` dimasukkan ke daftar ekstensinya JUSTRU supaya bisa.
+  Ketahuan karena uji baru ini yang pertama memakai `indexOf` atasnya
+- **Batas**: audit ini memeriksa apa yang tersisa di data, **bukan** apakah
+  suatu jalur bisa menulis pelanggaran lalu memperbaikinya sendiri. Ia juga
+  hanya melihat 26 invarian yang ditulis tangan — bukan seluruh invarian yang
+  diandaikan kode
+- **Tindak**: `scripts/audit-invarian.ts` + npm script + langkah CI sesudah
+  verify-api; gerbang `audit-invarian-terpasang.test.ts` (6 uji) yang menahan
+  urutan langkah CI dan jumlah invariannya; perbaikan resolver `jangkar-iris`
+
 ---
 
 ## Antrean vena — belum tergarap
@@ -792,7 +845,9 @@ berlaku di situ).
 - [x] ~~**Kebijakan `SET NULL` (18 FK)**~~ — TEMUAN, lihat entri di atas. Bill
       yang sudah dibayar muncul lagi sebagai pesanan aktif sesudah sampah
       dikosongkan
-- [ ] **CHECK yang hilang** untuk invarian yang diandaikan kode
+- [x] ~~**CHECK yang hilang**~~ — BERSIH pada datanya, lihat entri di atas.
+      Artefaknya `npm run audit:invarian` (26 invarian) yang CI jalankan
+      SESUDAH verify-api
 - [ ] **Indeks vs WHERE yang benar-benar dipakai**
 
 ### Web
