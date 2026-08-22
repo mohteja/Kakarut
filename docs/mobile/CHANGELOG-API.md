@@ -26,6 +26,59 @@ tanpa akses repo server.
 ---
 
 
+## Rilis: Daftar member berbatas — `GET /customer` berganti bentuk balasan
+
+⚪️ **INFO untuk mobile** — mobile tidak memakai `/customer` maupun
+`/customer/:id`; keduanya hanya dipakai halaman Member di web. Yang dipakai
+mobile adalah `GET /member-cari?q=` dan itu **tidak berubah sama sekali**.
+Entri ini ditulis karena bentuk balasannya berubah, dan aturan berkas ini
+adalah setiap perubahan kontrak dicatat — bukan hanya yang menyentuh mobile.
+
+*(Belum di-merge ke production.)*
+
+### 🔴 Bentuk balasan `GET /api/customer` berubah
+
+Terukur pada Postgres berisi 10.002 member: balasannya **1,53 MB**. Satu
+`GET /api/customer/:id` atas member dengan 20.001 transaksi: **2,83 MB**.
+Keduanya tak berbatas dan tumbuh seumur warung buka.
+
+```diff
+- CustomerDto[]                       // seluruh member, tanpa batas
++ { items: CustomerDto[],             // maksimal 300, terbaru bertransaksi dulu
++   terpotong: boolean,               // true bila masih ada member lain
++   total: number }                   // hitungan sebenarnya (COUNT tanpa batas)
+```
+
+Menerima parameter baru `?q=` — mencocokkan nama **atau** nomor WA, penyaring
+yang sama persis dengan `GET /member-cari`. Ini bukan tambahan opsional: tanpa
+pencarian di server, member ke-301 tak sekadar tak terlihat, ia **tak bisa
+ditemukan sama sekali** oleh klien yang menyaring daftar di sisinya sendiri.
+
+Sesudah dibatasi: **0,046 MB / 0,031 dtk** untuk daftar, **0,042 MB /
+0,017 dtk** untuk detail.
+
+### 🔴 `GET /api/customer/:id` — medan baru `transaksi_terpotong`
+
+```diff
+  CustomerDetail {
+    …
++   transaksi: CustomerTransaksi[]    // maksimal 300, TERBARU dulu
++   transaksi_terpotong: boolean
+  }
+```
+
+`jumlah_transaksi`, `total_belanja` dan `terakhir` **tidak berubah nilainya**
+dan tetap menghitung seluruh transaksi member. Ketiganya dipindah dari
+penjumlahan JavaScript atas larik `transaksi` ke agregat SQL tanpa batas —
+justru supaya daftarnya boleh dipotong. Kalau tidak, "Total belanja" seorang
+member akan turun diam-diam begitu transaksinya melewati baris ke-300.
+
+Klien yang menampilkan `jumlah_transaksi` di dekat daftar `transaksi` **wajib**
+menampilkan `transaksi_terpotong` juga: berdampingan tanpa penjelasan,
+"20.001x" di atas daftar berisi 300 baris terbaca sebagai transaksi yang
+hilang.
+
+
 ## Rilis: Bon tagihan — kertas berharga yang BUKAN bukti pembayaran
 
 🟢 **BARU** — layar kasir, saat Open Bill sedang dibuka.

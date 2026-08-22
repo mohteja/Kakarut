@@ -1572,7 +1572,43 @@ export interface CustomerTransaksi {
 
 /** Detail member: profil + riwayat transaksinya. */
 export interface CustomerDetail extends CustomerDto {
+  /** maksimal 300 baris, TERBARU dulu — selebihnya `transaksi_terpotong` */
   transaksi: CustomerTransaksi[];
+  /**
+   * true bila daftar di atas DIPOTONG — member ini punya transaksi lain yang
+   * tak ikut terkirim.
+   *
+   * `jumlah_transaksi`, `total_belanja` dan `terakhir` yang diwarisi dari
+   * `CustomerDto` TIDAK terpengaruh: ketiganya datang dari agregat SQL yang
+   * tak dibatasi, bukan dari menjumlahkan `transaksi` di atas. Itu bagian
+   * pentingnya — memotong daftar tanpa memindahkan agregatnya lebih dulu akan
+   * membuat "Total belanja" seorang member turun diam-diam begitu transaksinya
+   * melewati baris ke-300.
+   */
+  transaksi_terpotong: boolean;
+}
+
+/**
+ * Balasan `GET /customer` — daftar member BERBATAS, bukan seluruhnya.
+ *
+ * Dulu berupa `CustomerDto[]` tanpa batas: satu warung dengan 10.000 member
+ * mengirim 1,61 MB tiap kali halaman Member dibuka, dan pencariannya
+ * dikerjakan di browser atas seluruh larik itu. Sekarang server yang mencari
+ * (`?q=`), server pula yang membatasi.
+ */
+export interface CustomerListDto {
+  /** maksimal 300 member; terbaru bertransaksi dulu */
+  items: CustomerDto[];
+  /**
+   * true bila masih ada member lain di luar daftar ini.
+   *
+   * WAJIB ditampilkan bersama ajakan memakai pencarian: tanpa itu, member
+   * ke-301 tak sekadar tak terlihat — ia tak bisa ditemukan sama sekali, dan
+   * layarnya berbunyi "Belum ada member" untuk orang yang jelas-jelas ada.
+   */
+  terpotong: boolean;
+  /** jumlah member sebenarnya (agregat tanpa batas), untuk judul halaman */
+  total: number;
 }
 
 /** Baris di Tempat Sampah: transaksi yang di-soft-delete (hanya catatan, tak bisa dikembalikan). */

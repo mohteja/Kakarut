@@ -285,6 +285,59 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 - **Tindak**: dua ember di `users/routes.ts`; aturan `email-berbatas` di
   `penjaga-semua-pintu`; §230 verify-api
 
+## Balasan daftar tanpa langit-langit — server — 2026-08-22
+
+- **Populasi**: 147 `.select().from(tabel-yang-tumbuh)` di `apps/server/src`.
+  41 sudah ber-`.limit()`, 29 by-id, sisanya 75 bacaan daftar penuh. Dipilah
+  tangan: 24 terikat induk tunggal (baris satu faktur, item satu struk), 3
+  terikat rentang tanggal, **48 tak terikat apa pun** — tumbuh seumur warung
+- **Metode**: `scratchpad/tanpa-limit{,2,3,4}.py`
+- **Detektor**: DIBUKTIKAN — `.limit(BATAS_TRANSAKSI_SHIFT + 1)` dicabut dari
+  `shift/routes.ts` (suntikannya di-assert mendarat lebih dulu) → sapuan
+  menuduh `modules/shift/routes.ts:200`; dikembalikan → hilang lagi.
+  Diperiksa pula ke arah sebaliknya: hasil jendela 1.500 aksara dibandingkan
+  dengan 20.000 → **0 tuduhan palsu**
+- **Hasil**: **TEMUAN**, dua pintu ke ruangan yang sama di
+  `modules/customer/routes.ts`. Terukur pada Postgres berisi 10.002 member dan
+  satu member dengan 20.001 transaksi:
+
+  | | sebelum | sesudah |
+  |---|---|---|
+  | `GET /customer` | 1,53 MB · 0,072 dtk | **0,046 MB · 0,031 dtk** |
+  | `GET /customer/:id` | 2,83 MB · 0,109 dtk | **0,042 MB · 0,017 dtk** |
+
+  Yang membuat vena ini tak selesai dengan menempelkan `.limit()`:
+
+  1. **Agregatnya dihitung dari larik yang dikirim.** `total_belanja` dan
+     `jumlah_transaksi` dijumlahkan di JavaScript atas seluruh baris, jadi
+     `.limit(300)` polos akan menjawab "Total belanja Rp 3 juta" untuk member
+     yang sudah belanja Rp 600 juta. Dipindah ke agregat SQL tanpa batas LEBIH
+     DULU; pasangannya terukur: 20.001 dan 600.030.000 **identik** sebelum dan
+     sesudah pemotongan
+  2. **Halaman Member menyaring di browser** (`useMemo` atas seluruh larik).
+     Memotong 300 tanpa pencarian sisi server tidak sekadar menyembunyikan
+     member ke-301 — ia membuatnya **mustahil ditemukan**. Terbukti terukur:
+     `Member Uji 2137` tak ada di 300 yang terkirim, ketemu lewat `?q=`
+- **Pola**: pintu saudaranya ada di berkas yang SAMA. `memberCariRoutes`
+  sepuluh baris di atasnya sudah mencari di server dan sudah ber-`.limit(8)`
+  sejak awal
+- **Batas**: sapuan hanya melihat bentuk drizzle `.select().from()` — SQL
+  mentah lewat `db.execute` tak terlihat. Daftar tabelnya DITULIS TANGAN, dan
+  `customers` tak ada di dalamnya: balasan 1,61 MB itu **tak pernah tertuduh**,
+  ia ditemukan dengan tangan. Versi pertama juga hanya melihat rantai SESUDAH
+  `.from()` — padahal daftar SELECT ada sebelumnya, jadi hampir semua agregat
+  luput dan hitungannya 78, bukan 63
+- **Sisa yang tercatat, bukan dikerjakan**: enam riwayat harga per-item
+  sepanjang masa (`perlengkapan/routes.ts:118`, `perlengkapan/service.ts:515`
+  & `:544`, `bahan/routes.ts:464`, `produksi/routes.ts:536`,
+  `rekomendasi/routes.ts:183`). Bentuknya sama — daftar tanpa batas yang
+  agregatnya dihitung di JS — tapi tumbuhnya jauh lebih lambat (satu baris per
+  pembelian item itu). Masuk antrean sebagai vena tersendiri
+- **Tindak**: kedua pintu dibatasi 300 + penanda `terpotong` /
+  `transaksi_terpotong`; `?q=` sisi server memakai penyaring yang sama dengan
+  `memberCariRoutes`; ratchet `daftar-tanpa-langit-langit.test.ts` (DASAR 63);
+  §232 verify-api (14 asersi); `MemberPage.tsx` menampilkan kedua penanda
+
 ---
 
 ## Antrean vena — belum tergarap
@@ -298,8 +351,10 @@ berlaku di situ).
       "Larik badan permintaan tanpa batas atas" di atas
 - [x] ~~**N round-trip di dalam transaksi, walau sudah berbatas**~~ — TEMUAN,
       lihat entri di atas. 1,47 dtk → 0,012 dtk
-- [ ] **Balasan tanpa LIMIT** — `.select()` tanpa `.limit()` pada tabel yang
-      tumbuh (`sales`, `sale_items`, kartu stok)
+- [x] ~~**Balasan tanpa LIMIT**~~ — TEMUAN, lihat entri di atas.
+      1,53 MB → 0,046 MB dan 2,83 MB → 0,042 MB
+- [ ] **Riwayat harga per-item sepanjang masa** — enam situs yang agregatnya
+      dihitung di JS dari daftar tanpa batas (sisa vena di atas)
 - [ ] **Zod tanpa batas atas** — tiap `z.number()` uang/qty tanpa `.max()`
 - [ ] **`e.message` sampai ke klien** — sisa kelas kebocoran SQL mentah
 - [ ] **Uang ditulis di luar pembantu bersama** — `sales.subtotal/total/

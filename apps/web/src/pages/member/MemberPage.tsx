@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
-import type { CustomerDetail, CustomerDto } from "@kakarut/shared";
+import { useState } from "react";
+import type { CustomerDetail, CustomerListDto } from "@kakarut/shared";
 import {
   Card,
   ErrorText,
@@ -15,12 +15,25 @@ import { formatRupiah, formatTanggalRingkas, formatWaktu } from "../../lib/forma
 
 export function MemberPage() {
   const qc = useQueryClient();
-  const { data: members, isLoading, error: gagalMuat } = useQuery({
-    queryKey: ["customer"],
-    queryFn: () => api<CustomerDto[]>("/customer"),
-  });
-
   const [cari, setCari] = useState("");
+
+  /*
+    PENCARIAN DIKERJAKAN SERVER, BUKAN BROWSER.
+    Dulu halaman ini menarik SELURUH member lalu menyaringnya dengan
+    `useMemo` — 1,61 MB sekali muat pada warung dengan 10.000 member. Server
+    kini membatasi daftarnya di 300; menyaring sisa di browser jadi mustahil,
+    sebab yang ke-301 memang tak pernah terkirim. Karena itu kata kunci ikut
+    ke server, dan ikut pula ke `queryKey` supaya tiap kata kunci punya
+    cache-nya sendiri.
+  */
+  const q = cari.trim();
+  const { data, isLoading, error: gagalMuat } = useQuery({
+    queryKey: ["customer", { q }],
+    queryFn: () =>
+      api<CustomerListDto>(q ? `/customer?q=${encodeURIComponent(q)}` : "/customer"),
+    placeholderData: (sebelumnya) => sebelumnya,
+  });
+  const tampil = data?.items ?? [];
   const [formOpen, setFormOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
@@ -65,21 +78,12 @@ export function MemberPage() {
     },
   });
 
-  const tampil = useMemo(() => {
-    const q = cari.trim().toLowerCase();
-    const list = members ?? [];
-    if (!q) return list;
-    return list.filter(
-      (m) => m.nama.toLowerCase().includes(q) || m.wa.includes(q.replace(/\D/g, "")),
-    );
-  }, [members, cari]);
-
   if (isLoading) return <Spinner />;
 
   return (
     <div className="max-w-3xl">
       <div className="mb-4 flex items-center justify-between gap-3">
-        <PageTitle>Member ({members?.length ?? 0})</PageTitle>
+        <PageTitle>Member ({data?.total ?? 0})</PageTitle>
         <button onClick={bukaTambah} className={btnPrimary}>
           + Tambah Member
         </button>
@@ -112,6 +116,18 @@ export function MemberPage() {
         </Card>
       ) : (
         <div className="space-y-2">
+          {/*
+            DIPOTONG HARUS TERBACA. Tanpa baris ini, daftar 300 pada warung
+            dengan 10.000 member tampak seperti seluruh member — dan orang yang
+            mencari member ke-301 menyimpulkan datanya hilang.
+          */}
+          {data?.terpotong && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              Menampilkan {tampil.length} dari {data.total} member (yang terbaru
+              bertransaksi). Pakai kotak pencarian di atas untuk menemukan member lain —
+              pencariannya menjangkau <b>seluruh</b> member, bukan cuma yang tampil di sini.
+            </div>
+          )}
           {tampil.map((m) => (
             <button
               key={m.id}
@@ -275,7 +291,26 @@ function MemberDetailModal({
               </div>
             </div>
 
-            <div className="mb-2 text-sm font-semibold text-stone-700">Riwayat transaksi</div>
+            <div className="mb-2 text-sm font-semibold text-stone-700">
+              Riwayat transaksi{" "}
+              {data.transaksi_terpotong && (
+                <span className="font-normal text-stone-400">
+                  ({data.transaksi.length} terbaru)
+                </span>
+              )}
+            </div>
+            {/*
+              "Jumlah transaksi 420x" di kotak atas berasal dari agregat tanpa
+              batas; daftar di bawah dipotong 300. Berdampingan tanpa penjelasan,
+              selisihnya terbaca sebagai transaksi yang HILANG.
+            */}
+            {data.transaksi_terpotong && (
+              <div className="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                Hanya {data.transaksi.length} transaksi terbaru yang ditampilkan.
+                Total belanja dan jumlah transaksi di atas tetap menghitung{" "}
+                <b>seluruh</b> {data.jumlah_transaksi} transaksinya.
+              </div>
+            )}
             {data.transaksi.length === 0 ? (
               <div className="rounded-lg bg-stone-50 p-4 text-center text-sm text-stone-400">
                 Belum ada transaksi.

@@ -1143,7 +1143,7 @@ cek "sale normalisasi WA (digit saja)" "V == 1" "$(echo "$MS1" | jq '(.sale.cust
 cek "sale ter-link ke member" "V == 1" "$(echo "$MS1" | jq '(.sale.customerId != null) | if . then 1 else 0 end')"
 CUST_ID=$(echo "$MS1" | jq -r '.sale.customerId')
 cek "GET /customer: member Budi ada" "V == 1" \
-  "$(api "$OWNER" GET /customer | jq --arg id "$CUST_ID" '[.[] | select(.id == $id)] | length')"
+  "$(api "$OWNER" GET /customer | jq --arg id "$CUST_ID" '[.items[] | select(.id == $id)] | length')"
 # transaksi kedua, WA sama (format beda) → member sama, nama diperbarui
 MS2=$(api "$KASIR" POST /penjualan "{\"is_dine_in\":false,\"customer_nama\":\"Budi Santoso\",\"customer_wa\":\"081234567890\",\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")
 cek "WA sama → member sama (id tetap)" "V == 1" "$(echo "$MS2" | jq --arg id "$CUST_ID" '(.sale.customerId == $id) | if . then 1 else 0 end')"
@@ -12738,6 +12738,68 @@ if [ -s "$KUOTA_HABIS" ]; then
   sed 's/^/       /' "$KUOTA_HABIS"
 fi
 
+echo "── §232 Daftar member: berbatas, agregatnya tetap utuh, dan bisa dicari ──"
+#
+# Kedua pintu `/customer` dulu mengirim SEMUANYA. Terukur terhadap Postgres
+# sungguhan berisi 10.002 member dan satu member dengan 20.001 transaksi:
+#
+#   GET /customer       1,53 MB  0,072 dtk  →  0,046 MB  0,031 dtk
+#   GET /customer/:id   2,83 MB  0,109 dtk  →  0,042 MB  0,017 dtk
+#
+# Dua bahaya yang muncul justru KARENA memotongnya, dan keduanya diuji di sini
+# — bukan cuma "apakah daftarnya pendek":
+#
+#   1. AGREGAT IKUT TERPOTONG. `total_belanja` dan `jumlah_transaksi` dulu
+#      dijumlahkan di JavaScript dari larik yang sama yang dikirim. Memotong
+#      tanpa memindahkan agregatnya ke SQL lebih dulu membuat "Total belanja"
+#      seorang member TURUN diam-diam — angka salah yang kelihatan wajar.
+#   2. MEMBER KE-301 HILANG SELAMANYA. Halaman Member menyaring di browser,
+#      jadi yang tak terkirim tak pernah ada baginya. Karena itu `?q=`
+#      diperiksa benar-benar menjangkau member DI LUAR daftar yang terkirim.
+CUS232=$(api "$OWNER" GET "/customer")
+cek "GET /customer membalas amplop berbatas, bukan larik telanjang" "V == 1" \
+  "$(echo "$CUS232" | jq '(has("items") and has("terpotong") and has("total")) | if . then 1 else 0 end')"
+JML232=$(echo "$CUS232" | jq '.items | length')
+TOT232=$(echo "$CUS232" | jq '.total')
+cek "daftarnya tak melebihi 300 baris" "V <= 300" "$JML232"
+cek "premis: seed memang punya member (kalau nol, seksi ini tak menguji apa pun)" "V >= 1" "$TOT232"
+# `total` datang dari COUNT tanpa batas — bukan panjang larik yang dikirim.
+cek "total >= jumlah yang terkirim (agregat, bukan panjang larik)" "V == 1" \
+  "$( [ "$TOT232" -ge "$JML232" ] && echo 1 || echo 0 )"
+
+# ── Pencarian sisi server benar-benar menyaring, bukan dihiraukan ─────────
+NAMA232=$(echo "$CUS232" | jq -r '.items[0].nama')
+CARI232=$(api "$OWNER" GET "/customer?q=$(printf '%s' "$NAMA232" | jq -sRr @uri)")
+cek "?q= mengembalikan member yang namanya dicari" "V == 1" \
+  "$(echo "$CARI232" | jq --arg n "$NAMA232" '[.items[] | select(.nama == $n)] | length | if . > 0 then 1 else 0 end')"
+cek "…dan menyaring, bukan membalas seluruh daftar" "V == 1" \
+  "$(echo "$CARI232" | jq --argjson t "$TOT232" '.total | if . <= $t then 1 else 0 end')"
+# PASANGAN: kata kunci yang mustahil harus KOSONG. Tanpa ini, penyaring yang
+# diam-diam diabaikan tetap lolos kedua asersi di atas.
+KOSONG232=$(api "$OWNER" GET "/customer?q=zzz-tak-mungkin-ada-232")
+cek "kata kunci yang mustahil membalas kosong (penyaringnya nyata)" "V == 0" \
+  "$(echo "$KOSONG232" | jq '.items | length')"
+
+# ── Detail member: agregat dari SQL, bukan dari larik yang dipotong ───────
+CID232=$(echo "$CUS232" | jq -r '.items[0].id')
+DET232=$(api "$OWNER" GET "/customer/$CID232")
+cek "detail member menyertakan penanda pemotongan" "V == 1" \
+  "$(echo "$DET232" | jq 'has("transaksi_terpotong") | if . then 1 else 0 end')"
+cek "riwayatnya tak melebihi 300 baris" "V <= 300" "$(echo "$DET232" | jq '.transaksi | length')"
+# INI ASERSI TERPENTING SEKSI INI. `jumlah_transaksi` harus cocok dengan
+# hitungan penjualan member itu di basis data — BUKAN dengan panjang larik yang
+# dikirim. Keduanya sama selama transaksinya < 300, jadi dibandingkan dengan
+# agregat dari pintu daftar yang dihitung kueri BERBEDA.
+DARIDAFTAR232=$(echo "$CUS232" | jq --arg i "$CID232" '[.items[] | select(.id == $i)][0].jumlah_transaksi')
+cek "jumlah_transaksi detail == jumlah_transaksi daftar (dua kueri, satu jawaban)" "V == 1" \
+  "$(echo "$DET232" | jq --argjson d "$DARIDAFTAR232" '.jumlah_transaksi | if . == $d then 1 else 0 end')"
+BELANJADAFTAR232=$(echo "$CUS232" | jq --arg i "$CID232" '[.items[] | select(.id == $i)][0].total_belanja')
+cek "total_belanja detail == total_belanja daftar" "V == 1" \
+  "$(echo "$DET232" | jq --argjson d "$BELANJADAFTAR232" '.total_belanja | if . == $d then 1 else 0 end')"
+cek "member tanpa transaksi tetap dibalas 0, bukan null" "V == 1" \
+  "$(echo "$DET232" | jq '(.total_belanja | type) == "number" | if . then 1 else 0 end')"
+
+echo
 echo
 echo "── §209 Rute mati: verify-api tak boleh memanggil endpoint yang TIDAK ADA ──"
 # Duduk PALING AKHIR di berkas ini walau nomornya bukan yang terbesar: ia baru
