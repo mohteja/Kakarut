@@ -506,6 +506,65 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
   membuat pengecualiannya ikut merah; §235 verify-api (7 asersi). Mobile tak
   terpengaruh: ia mencetak lewat Bluetooth, `/print/lan` hanya dipakai web
 
+## Uang ditulis di luar pembantu bersama — server + web + mobile — 2026-08-22
+
+- **Populasi**: dua lapis.
+  (a) **Penulisan kolom uang `sales`**: 5 `insert/update(sales)` di
+  `apps/server/src`, **3** menyentuh kolom uang — semuanya di jalur kanonik
+  (`createSale`, `hitungUangSetelahRefund`, rekalkulasi HPP).
+  (b) **Rumusnya sendiri**, disapu lintas TIGA permukaan (server, web, mobile):
+  `PB1 = round(net × tarif/100)` → 3 kemunculan; `TOTAL = subtotal − diskon`
+  → 9 kemunculan
+- **Metode**: `scratchpad/uang-liar.py`, `scratchpad/rumus-uang.py`
+- **Detektor**: DIBUKTIKAN dua kali — penulisan uang disuntikkan ke
+  `sampah/routes.ts` (di-assert mendarat) → tertuduh, dicabut → hilang; dan
+  penjaga rumusnya diuji dengan bentuk yang sah maupun yang salah
+- **Kebutaan detektor, ditemukan lewat silang-periksa dengan `grep`**: sapuan
+  pertama menghitung **1** penulisan, padahal ada **5**. Dua sebab: pola
+  `medan:` tak melihat shorthand `{ totalHpp }`, dan `.values(x)` non-literal
+  dilewati diam-diam. Diperbaiki → 3 yang menyentuh uang, 0 tak terbaca
+- **Hasil**: **TEMUAN — dan seluruhnya di mobile.** Sisi server & web bersih:
+  web mengimpor `hitungPb1` dan komentarnya menuliskan alasannya
+  ("`hitungPb1`, bukan rumusnya ditulis ulang"), penulisan `sales` semuanya
+  lewat jalur kanonik. Dart tak bisa mengimpor `@kakarut/shared`, jadi mobile
+  punya tiga salinan. Diadu dengan aslinya lewat **697 baris fikstur yang
+  DIHASILKAN implementasi TypeScript-nya sendiri** (bukan diketik ulang):
+  `tarifPb1Struk` dan `hitungUangSetelahRefund` **cocok sempurna**;
+  `bayar_sheet.dart` menyimpang.
+
+  Terukur, sapuan tarif 1,00%–15,00% × net 1…2.000.000 (**26.185.000
+  pasangan**) dijalankan di JavaScript DAN di Dart — keduanya memberi pasangan
+  yang sama persis:
+
+  | net Rp 25.000, tarif 1,13% | hasil |
+  |---|---|
+  | `net × (tarif ÷ 100)` — server, struk | **Rp 283** |
+  | `net × tarif ÷ 100` — lembar pembayaran | **Rp 282** |
+
+  Selisihnya satu rupiah; tempatnya yang penting — layar tempat kasir membaca
+  total sebelum menekan Bayar dan menghitung kembalian, dan lembar itu berbeda
+  dari struk yang dicetak untuk transaksi yang sama
+- **Pola**: aturannya tertulis **dua kali** — di komentar `receipt_builder.dart`
+  ("urutan operasinya SENGAJA sama persis… dua urutan itu bisa berbeda di bit
+  terakhir") dan di komentar `KasirPage.tsx`. Pintu pembayarannya yang tak
+  mengikuti
+- **Kesalahanku**: penjaga "rumusnya cuma satu salinan" versi pertama
+  mencocokkan bentuk ekspresi dengan `\w*`, dan `company!.pb1Rate` memuat `!`
+  dan `.` — bukan `\w`. **Bukti merah yang menyuntikkan kembali bug aslinya
+  tetap HIJAU.** Diganti jadi `* … / 100` apa pun isinya + barisnya harus
+  menyebut pb1/tarif, dengan pasangan uji yang membuktikan `maksPersen / 100`
+  milik batas diskon tetap bebas
+- **Batas**: fikstur cerminnya menguji tiga fungsi, bukan seluruh aritmetika
+  uang. `TOTAL = subtotal − diskon + pb1` sendiri tak ikut diadu baris demi
+  baris — ia terlalu sederhana untuk menyimpang, tapi itu penilaian, bukan
+  pengukuran. Penjaga rumusnya juga hanya melihat PB1
+- **Tindak**: mobile — `lib/core/uang.dart` jadi satu rumah, dua pemakainya
+  memanggilnya, uji cermin 697 baris + penjaga salinan (7 uji, 3 bukti merah);
+  server — `npm run acuan:uang-mobile` yang MELAHIRKAN fikstur itu, dan
+  `uang-satu-rumah.test.ts` (6 uji, 3 bukti merah) yang menjaga sisi
+  server/web plus asal-usul fiksturnya. Mobile: `mohteja/kakarut-mobile`
+  commit `5fc0251`, PR #12
+
 ---
 
 ## Antrean vena — belum tergarap
@@ -527,8 +586,8 @@ berlaku di situ).
       telanjang; 500 → 400 bernama, dan batas lama 1e12 ternyata kelebihan satu
 - [x] ~~**`e.message` sampai ke klien**~~ — TEMUAN, lihat entri di atas. 5 dari
       453; 4 digerbang super admin (terukur 403), 1 bisa dicapai kasir
-- [ ] **Uang ditulis di luar pembantu bersama** — `sales.subtotal/total/
-      pb1_amount` yang tak lewat `createSale`/`hitungUangSetelahRefund`
+- [x] ~~**Uang ditulis di luar pembantu bersama**~~ — TEMUAN, lihat entri di
+      atas. Server & web bersih; mobile menyimpang Rp1 pada lembar pembayaran
 - [ ] **Batas laju di luar email** — ekspor, laporan agregat, unggah
 
 ### Basis data & migrasi

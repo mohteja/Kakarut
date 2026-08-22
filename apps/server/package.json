@@ -12,7 +12,8 @@
     "seed": "tsx src/seed/index.ts",
     "sinkron:lampiran": "tsx src/scripts/sinkron-lampiran-dto.ts",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "acuan:uang-mobile": "tsx src/scripts/acuan-uang-mobile.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1083.0",
