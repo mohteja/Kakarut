@@ -457,6 +457,55 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
   prosanya sendiri); §234 verify-api (10 asersi, tiap penolakan dipasangkan
   nilai sah tepat di batasnya); 4 source-pin lama disesuaikan
 
+## Pesan galat sistem sampai ke penyewa — server — 2026-08-22
+
+- **Populasi**: mula-mula kusapu 28 blok `catch` (17 membaca pesan galatnya).
+  Itu populasi yang SALAH. `onError` global sudah rapi — galat tak tertangani
+  jadi "Terjadi kesalahan pada server" — jadi satu-satunya teks yang lolos apa
+  adanya `message` milik `HTTPException`. Populasi sebenarnya: **453
+  `new HTTPException`** di `apps/server/src`; **88** pesannya menyisipkan nilai;
+  **5** membawa teks galat sistem
+- **Metode**: `scratchpad/pesan-galat{,2,3,4}.py`
+- **Detektor**: DIBUKTIKAN — kebocoran baru disuntikkan ke `menu/routes.ts`
+  (di-assert mendarat) → tertuduh di baris yang tepat; dicabut → hilang
+- **Hasil**: **TEMUAN**, satu pintu. Empat dari lima ada di
+  `admin-system/routes.ts` yang digerbang super admin — TERUKUR lewat HTTP, tak
+  disimpulkan dari membaca: kelima rutenya membalas **403 untuk owner MAUPUN
+  kasir**. Yang kelima `print/routes.ts`, dan itu satu-satunya yang bisa dicapai
+  kasir. Terukur sebagai kasir:
+
+  ```
+  POST /print/lan {host:"192.0.2.2", port:9100}
+  → "Gagal mencetak ke 192.0.2.2:9100 — connect ECONNREFUSED 192.0.2.2:9100."
+  → sesudah: "… — koneksi ditolak (port tertutup atau printer mati)."
+  ```
+
+  Yang berubah **bukan** seberapa banyak yang diketahui pemanggil: ketiga
+  keadaan (menjawab / menolak / diam) memang harus bisa dibedakan, dan tetap
+  bisa — juga lewat waktu tunggu. Yang berubah, teksnya kini milik kita. Pesan
+  pustaka bisa berganti isi kapan saja dan apa pun isinya dulu ikut keluar
+- **Kebutaan detektor, ditemukan tangan bukan oleh sapuannya**: sapuan ketiga
+  hanya melihat ekspresi yang disisipkan (`${e.message}`) dan karena itu buta
+  terhadap `const pesan = e.message; … ${pesan}` — bentuk yang dipakai
+  `print/routes.ts`, yaitu satu-satunya temuan vena ini. Sapuan keempat
+  melacak variabelnya; penjaganya memakai bentuk keempat
+- **Ikut diperiksa & BERSIH**: `resolveHostPrinter` menolak alamat internal
+  SEBELUM menyentuh soket dan mem-pin IP hasil resolve (anti DNS-rebinding).
+  Terukur sebagai kasir: `127.0.0.1`, `localhost`, `169.254.169.254`, `::1`
+  → 400 "tidak diizinkan (internal)". LAN privat (`10/8`, `192.168/16`,
+  `172.16/12`) memang SENGAJA diizinkan — printer LAN tinggal di sana, dan
+  komentarnya menyebutnya
+- **Batas**: penjaganya hanya melihat `new HTTPException`. Medan galat yang
+  dibalas lewat `c.json` biasa — mis. `alasan` per baris pada impor bahan —
+  tak terlihat sama sekali; yang menjaganya §225. Ia juga tak mengukur
+  seberapa banyak yang bocor, cuma apakah teksnya milik kita
+- **Tindak**: `sebabGagalCetak()` menerjemahkan `code` soket ke kalimat kita;
+  gerbang `pesan-galat-milik-kita.test.ts` (5 uji) dengan pengecualian
+  `admin-system` yang TIDAK dipercaya begitu saja — ada uji yang menuntut
+  `requireSuperAdmin` masih terpasang di `/admin/*`, jadi melepas gerbangnya
+  membuat pengecualiannya ikut merah; §235 verify-api (7 asersi). Mobile tak
+  terpengaruh: ia mencetak lewat Bluetooth, `/print/lan` hanya dipakai web
+
 ---
 
 ## Antrean vena — belum tergarap
@@ -476,7 +525,8 @@ berlaku di situ).
       atas. 2,098 MB → 0,053 MB, ketujuh angka statistiknya identik
 - [x] ~~**Zod tanpa batas atas**~~ — TEMUAN, lihat entri di atas. 77 dari 109
       telanjang; 500 → 400 bernama, dan batas lama 1e12 ternyata kelebihan satu
-- [ ] **`e.message` sampai ke klien** — sisa kelas kebocoran SQL mentah
+- [x] ~~**`e.message` sampai ke klien**~~ — TEMUAN, lihat entri di atas. 5 dari
+      453; 4 digerbang super admin (terukur 403), 1 bisa dicapai kasir
 - [ ] **Uang ditulis di luar pembantu bersama** — `sales.subtotal/total/
       pb1_amount` yang tak lewat `createSale`/`hitungUangSetelahRefund`
 - [ ] **Batas laju di luar email** — ekspor, laporan agregat, unggah

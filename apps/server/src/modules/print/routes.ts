@@ -75,6 +75,36 @@ export async function resolveHostPrinter(host: string): Promise<string> {
   return addrs[0].address;
 }
 
+/**
+ * Sebab gagal cetak, DENGAN KATA-KATA KITA SENDIRI.
+ *
+ * Rute ini dulu meneruskan `e.message` apa adanya — dan terukur, yang sampai ke
+ * layar kasir persis teks mentah Node:
+ *
+ *     Gagal mencetak ke 192.0.2.2:9100 — connect ECONNREFUSED 192.0.2.2:9100.
+ *
+ * Ia satu-satunya pintu yang bisa dicapai penyewa dan masih membawa teks galat
+ * sistem apa adanya; empat sisanya (`admin-system`) digerbang super admin —
+ * terukur 403 untuk owner MAUPUN kasir.
+ *
+ * Yang berubah bukan seberapa banyak yang diketahui pemanggil. Ketiga keadaan
+ * (menjawab / menolak / diam) memang HARUS bisa dibedakan — tanpa itu orang tak
+ * bisa tahu printernya mati atau alamatnya salah, dan mereka tetap terbedakan
+ * lewat waktu tunggu. Yang berubah: teksnya kini MILIK KITA. Pesan pustaka bisa
+ * berganti isi kapan saja (jalur, versi, nama host dalam, jejak TLS) dan
+ * apa pun isinya dulu ikut keluar lewat pintu ini.
+ */
+export function sebabGagalCetak(e: unknown): string {
+  const kode = (e as { code?: string } | null)?.code;
+  if (kode === "ECONNREFUSED") return "koneksi ditolak (port tertutup atau printer mati)";
+  if (kode === "EHOSTUNREACH" || kode === "ENETUNREACH") return "alamat tak terjangkau dari server";
+  if (kode === "ECONNRESET" || kode === "EPIPE") return "koneksi terputus di tengah pengiriman";
+  if (kode === "ETIMEDOUT") return "printer tidak merespons (timeout)";
+  // Timeout kita sendiri dilempar sebagai Error biasa tanpa `code`.
+  if (e instanceof Error && e.message.includes("timeout")) return "printer tidak merespons (timeout)";
+  return "printer tidak bisa dihubungi";
+}
+
 const CONNECT_TIMEOUT_MS = 6000;
 
 /** Teruskan byte ESC/POS ke printer jaringan lewat TCP (mis. port 9100). */
@@ -128,9 +158,8 @@ export const printRoutes = new Hono<AppEnv>().post(
     try {
       await kirimKePrinter(ip, port, bytes);
     } catch (e) {
-      const pesan = e instanceof Error ? e.message : String(e);
       throw new HTTPException(502, {
-        message: `Gagal mencetak ke ${host}:${port} — ${pesan}. Pastikan server bisa menjangkau IP printer.`,
+        message: `Gagal mencetak ke ${host}:${port} — ${sebabGagalCetak(e)}. Pastikan server bisa menjangkau IP printer.`,
       });
     }
     return c.json({ ok: true });

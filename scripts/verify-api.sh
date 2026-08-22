@@ -12738,6 +12738,46 @@ if [ -s "$KUOTA_HABIS" ]; then
   sed 's/^/       /' "$KUOTA_HABIS"
 fi
 
+echo "── §235 Pesan galat ke penyewa ditulis kita, bukan oleh pustaka ──"
+#
+# `onError` global sudah rapi: galat tak tertangani jadi "Terjadi kesalahan
+# pada server". Yang lolos apa adanya cuma `message` milik `HTTPException` —
+# teks yang KITA karang. Dari 453 `new HTTPException`, 88 pesannya menyisipkan
+# nilai dan LIMA membawa teks galat sistem; empat digerbang super admin, satu
+# (`/print/lan`) bisa dicapai kasir.
+#
+# TERUKUR sebelum diperbaiki, sebagai kasir:
+#   POST /print/lan {host:192.0.2.2, port:9100}
+#   → "Gagal mencetak ke 192.0.2.2:9100 — connect ECONNREFUSED 192.0.2.2:9100."
+#
+# Teks itu milik Node. Yang keluar hari ini kebetulan tak berbahaya; yang
+# menentukan isinya besok bukan kami.
+cek "kasir memang boleh memakai /print/lan (kalau tidak, seksi ini hampa)" "V != 403" \
+  "$(status_code_body "$REISS105" POST /print/lan '{"host":"192.0.2.2","port":9100,"data":"SGk="}')"
+
+# Port tertutup pada host yang hidup → galat CEPAT dengan `code` ECONNREFUSED.
+TOLAK235=$(api "$REISS105" POST /print/lan '{"host":"192.0.2.2","port":9100,"data":"SGk="}')
+cek "INTI: balasannya tak memuat teks galat Node" "V == 1" \
+  "$(printf '%s' "$TOLAK235" | grep -qE 'ECONNREFUSED|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|ECONNRESET|EPIPE|Error:' && echo 0 || echo 1)"
+# PASANGAN: pengetatan ini tak boleh menelan keterangannya. Balasan yang cuma
+# berkata "gagal" membuat asersi INTI di atas hijau juga — dan membuat orang
+# yang printernya mati tak punya satu pun petunjuk.
+cek "PASANGAN: pesannya tetap MENERANGKAN sebabnya" "V == 1" \
+  "$(printf '%s' "$TOLAK235" | grep -qE 'koneksi ditolak|tidak merespons|tak terjangkau|terputus|tidak bisa dihubungi' && echo 1 || echo 0)"
+cek "PASANGAN: dan tetap menyebut alamat yang dicoba" "V == 1" \
+  "$(printf '%s' "$TOLAK235" | grep -q '192.0.2.2:9100' && echo 1 || echo 0)"
+
+# Alamat internal tetap ditolak LEBIH DULU — pengetatan pesan tak boleh
+# menggeser urutan penjagaan.
+cek "alamat internal tetap ditolak 400 sebelum menyentuh soket" "V == 400" \
+  "$(status_code_body "$REISS105" POST /print/lan '{"host":"127.0.0.1","port":9100,"data":"SGk="}')"
+
+# ── Pintu super admin: gerbangnya yang membuat pengecualiannya sah ────────
+for R235 in /admin/sistem /admin/sistem/backup; do
+  cek "owner ditolak 403 di $R235 (dasar pengecualian admin-system)" "V == 403" \
+    "$(status_code "$OWNER" GET "$R235")"
+done
+
 echo "── §234 Angka masukan berbatas atas: 400 bernama, bukan 500 ──"
 #
 # `z.number()` menerima apa pun sampai 1,8e308; `numeric(p,s)` cuma memuat p−s
