@@ -826,6 +826,94 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
   verify-api; gerbang `audit-invarian-terpasang.test.ts` (6 uji) yang menahan
   urutan langkah CI dan jumlah invariannya; perbaikan resolver `jangkar-iris`
 
+## Kunci React Query & cabang di URL — web + mobile — 2026-08-22
+
+- **Populasi**: **166** `useQuery`/`useQueries`/`useInfiniteQuery` di
+  `apps/web/src`, dan **56 rute** yang badan handler-nya memanggil
+  `resolveBranchId(c)` (32 di antaranya GET) di `apps/server/src`
+- **Metode**: dua arah, karena keadaan yang dijaga ("cabang mana yang sedang
+  dibicarakan layar ini") punya dua pintu:
+
+  **Arah A — kunci vs URL.** Untuk tiap `useQuery`, kumpulkan pengenal yang ikut
+  membentuk URL-nya, telusuri turunan `const` lokal secara transitif, lalu
+  tuntut semuanya muncul di `queryKey`. **BUKAN daftar nama variabel** —
+  versi pertama sapuan ini memakai daftar nama dan menuduh empat pemanggilan
+  yang benar (`cabangFilter`, `asalId`, `storageBranch`, `branchSel` tak ada di
+  daftarku). Hasil arah A: **13 selisih, KETIGA BELASNYA turunan lokal yang sah**
+  (`branchParam` dari `cabangFilter`, `qs` dari `branchQuery`, `qsPengadaan`
+  dari `scopePengadaan`, …). **Arah A BERSIH — semua 166 kunci membawa apa pun
+  yang dibawa URL-nya.**
+
+  **Arah B — URL vs server.** `resolveBranchId` untuk owner/admin berbunyi:
+  `?branch_id=` bila ada, **kalau tidak cabang aktif PERTAMA**. Jadi rute
+  begitu yang dipanggil tanpa `branch_id` diam-diam berbicara tentang cabang
+  pertama. **Di sinilah temuannya.**
+- **Detektor**: DIBUKTIKAN bisa menuduh — tiga kali, tiap suntikan diperiksa
+  benar-benar mendarat lebih dulu. (1) `branchQuery` dicabut dari
+  `/kosongkan` → gerbang menuduh `MejaStatusPanel.tsx:122`; (2) dicabut dari
+  `PUT /meja/tata-letak` → menuduh `MejaPage.tsx:162`; (3) `branchQuery`
+  dicabut dari `queryKey` (URL tetap benar) → pasangan kunci-cache merah.
+  Di mobile: cabang dikembalikan ke BADAN pada `simpanTataLetak` → merah;
+  satu aksi papan berhenti mengoper cabang → merah (5 → 4)
+- **KESALAHAN GERBANGKU SENDIRI, ditemukan oleh bukti merahnya**: asersi
+  source-pin `expect(meja).toContain("/kosongkan${branchQuery}")` tetap **HIJAU**
+  saat bug aslinya kusuntikkan kembali — yang dibacanya **prosaku sendiri**,
+  komentar yang mengutip bentuk benar untuk menjelaskan kenapa ia benar. Uji
+  yang dijaga komentarnya sendiri adalah uji yang tak bisa gagal. Diperbaiki
+  dengan `tanpaKomentar()`, lalu bukti merahnya diulang
+- **Hasil**: **TEMUAN — 7 pintu di web, 6 di mobile.** Terukur terhadap Postgres
+  sungguhan; meja & bill milik cabang KEDUA, token pemilik:
+
+  | pintu | tanpa `branch_id` | dengan |
+  |---|---|---|
+  | `GET /meja/:id/log` | **404** | 200 |
+  | `POST /meja/:id/kosongkan` | **404** | 200 |
+  | `GET /pesanan/:jenis/:id/log` | **404** | 200 |
+  | `POST /pesanan/:jenis/:id/status` | **404** | 200 |
+  | `POST /pesanan/…/item/:it/status` | **404** | 200 |
+  | `POST /pesanan/…/item/:it/sajian` | **404** | 200 |
+  | `PUT /meja/tata-letak` | **200 — dan tak ada yang pindah** | 200, pindah |
+
+  Yang terakhir jauh lebih sunyi dari 404: memindahkan meja cabang kedua ke
+  (7,9) tanpa `branch_id` membalas **HTTP 200** berisi **7 meja cabang LAIN**,
+  dan mejanya tetap di (0,0). Halaman menggambar denah cabang yang salah
+  sebagai denah yang barusan "tersimpan"
+- **Bentuknya, lagi**: setiap pintu di atas punya **kembaran di layar yang sama
+  yang mengirimkannya dengan benar**. `KasirPage` menulis
+  `/meja/${id}/kosongkan${branchQuery}` sejak awal; modal yang dipakai bersama
+  di `MejaStatusPanel` tidak — padahal ia MENERIMA `branchQuery` sebagai prop
+  dan memakainya dua baris di bawah untuk `invalidateQueries`. Papan pesanan
+  memuat kartunya dengan `branch_id`, lalu menolak setiap ketukan di atasnya
+- **Mobile — bentuk paling sunyi dari semuanya**: `simpanTataLetak` MENGIRIM
+  cabangnya, di **badan**. `TataLetakBody` di server hanya berisi `items`, jadi
+  Zod membuangnya tanpa sepatah kata dan handler-nya jatuh ke cabang pertama.
+  Terukur: `branch_id` di badan → **HTTP 200**, 7 meja cabang lain, mejanya tak
+  bergerak. Komentar di repositori itu **sudah menuliskan aturannya** ("[branchId]
+  wajib bagi owner/admin agar server tahu denah cabang mana yang ditulis") —
+  yang salah cuma tempat menaruhnya
+- **Cakupan (aturan ke-5)**: dari 20 pemanggilan web yang tercocokkan ke rute
+  `resolveBranchId`, **9 membawa cabang, 11 tidak**; dari 11 itu **7 temuan, 4
+  sah** (2 layar peran terikat cabang, 1 `branch_id` bersyarat dari URL halaman,
+  1 mengirimnya di badan sebagai `tujuan_branch_id` yang memang dibaca server).
+  Keempatnya masuk `DIKECUALIKAN` berikut alasannya, dan gerbangnya menolak
+  pengecualian basi
+- **Batas detektor**: hanya melihat `api(...)` yang argumen pertamanya literal —
+  **22 panggilan** URL-nya dirakit di variabel dan tak terbaca. Rute yang
+  memilih cabang lewat `auth.branch_id` langsung (tanpa `resolveBranchId`) juga
+  di luar sapuan; ia bagian populasi yang lebih luas dan belum disapu
+- **Tindak**: 7 pintu web + 6 pintu mobile menempelkan cabangnya; kunci cache
+  `meja-log` & `pesanan-log` ikut membawanya; `ApiClient.put` di mobile menerima
+  `query`. Gerbang `apps/server/test/cabang-ikut-di-url.test.ts` (6 uji) dan
+  `test/cabang_ikut_di_query_test.dart` (9 uji). Pasangan anti-hijau-palsu:
+  kasir cabang 2 tanpa `branch_id` tetap **200** di keempat pintu yang diukur —
+  perbaikannya tak menyentuh peran yang terikat cabang
+- **Belum dikerjakan, tercatat**: server MENERIMA `branch_id` di badan
+  `/meja/tata-letak` lalu membuangnya diam-diam. Menolaknya (`.strict()`) atau
+  membacanya akan mengubah kegagalan sunyi itu jadi berbunyi — di luar lingkup
+  vena ini
+
+---
+
 ## Indeks vs WHERE yang benar-benar dipakai — basis data — 2026-08-22
 
 - **Populasi**: **157 indeks** di katalog. Diukur empiris, bukan dibaca:
@@ -913,7 +1001,10 @@ berlaku di situ).
       atas. Ikut meralat angka laporan pada vena "Batas laju di luar email"
 
 ### Web
-- [ ] **Kunci React Query tanpa `branch_id`**
+- [x] ~~**Kunci React Query tanpa `branch_id`**~~ — kuncinya BERSIH (166/166),
+      tapi arah sebelahnya TEMUAN: 7 pintu web + 6 mobile memanggil rute
+      ber-`resolveBranchId` tanpa `branch_id` → 404, dan satu di antaranya
+      **200 yang tak memindahkan apa pun**
 - [ ] **Uang dihitung ulang di klien**, bukan lewat `@kakarut/shared`
 - [ ] **Invalidasi sesudah mutasi**
 
