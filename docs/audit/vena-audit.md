@@ -40,6 +40,50 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## N round-trip per baris di dalam transaksi — server — 2026-08-22
+
+- **Populasi**: 33 situs perulangan ber-`await tx.<kueri>` di dalam 72 badan
+  `db.transaction`
+- **Cakupan (aturan ke-5, diterapkan sejak awal kali ini)**: sapuan sempit
+  `for (const x of y)` hanya melihat **16 dari 33 — 48%**. Sapuan lebar (for /
+  for await / while / forEach / map(async)) yang dipakai
+- **Detektor**: DIBUKTIKAN bisa menuduh — satu loop ber-`await tx.select()`
+  disuntikkan ke badan transaksi sungguhan di `company/routes.ts` → ratchet
+  merah; dicabut → hijau. Dan DIBUKTIKAN tak salah menuduh: `(?<![.\w])`
+  wajib di depan `for`/`while`, sebab tanpa itu `.for("update")` — kunci baris
+  drizzle, bukan perulangan — ikut tertangkap dan "menemukan" tiga loop di
+  dalam `createSale` yang sama sekali tak ada
+- **Hasil**: **TEMUAN** pada 2 situs yang N-nya ditentukan pengirim
+- **Ukuran**, `PUT /menu/urutan`, sepuluh permintaan serentak:
+
+  | keadaan | `GET /menu` |
+  |---|---|
+  | senggang | 0,012 dtk |
+  | N=28.000, sebelum dibatasi | **20,07 dtk** |
+  | N=2.000, sesudah dibatasi | 1,47 dtk |
+  | N=2.000, sesudah SATU pernyataan | **0,012 dtk** — tak terbedakan dari senggang |
+
+  Pada tingkat kuerinya, 2.000 baris terhadap Postgres yang sama: **289 ms
+  berurutan vs 11 ms** satu pernyataan `unnest` (26×), dengan hanya 3 parameter
+  ikat berapa pun N-nya
+- **Tindak**: `PUT /menu/urutan` dan `PUT /meja/tata-letak` ditulis ulang jadi
+  satu `UPDATE … FROM (SELECT unnest(…))`; transaksinya dibuang (satu
+  pernyataan sudah atomik sendiri); ratchet `test/round-trip-per-baris.test.ts`
+  dengan DASAR 31; §231 memeriksa HASILNYA — 81 menu diurutkan terbalik lalu
+  dibaca lagi, dan id asing tak menyentuh baris mana pun
+- **Yang hampir merusak**: versi pertama membalas **500 "cannot cast type
+  record to uuid[]"** — drizzle memecah larik JS jadi TUPLE `($1, $2, …)`,
+  bentuk yang berguna untuk `IN (…)` tapi mustahil dicast ke `uuid[]`.
+  `sql.param(...)` wajib membungkusnya. Probe `pg` mentah LOLOS, sebab di sana
+  lariknya memang satu parameter — hanya tembakan lewat HTTP yang
+  menemukannya
+- **Kenapa ratchet dan bukan nol**: dari 33 situs, hanya 2 yang N-nya
+  ditentukan pengirim; sisanya berputar atas data internal yang sudah terbatas
+  sendiri (jumlah cabang, hari tertunggak, baris satu faktur). Menuntut nol
+  berarti menulis ulang tiga puluh tempat demi bahaya yang tak ada di
+  kebanyakan darinya — dan uji yang menuntut pekerjaan tanpa alasan akan
+  dilonggarkan orang, bukan dipatuhi
+
 ## Larik permintaan (LANJUTAN) — gerbangnya sendiri buta 54% — server — 2026-08-22
 
 - **KOREKSI entri di bawahnya.** Entri "Larik badan permintaan tanpa batas
@@ -252,11 +296,8 @@ berlaku di situ).
 - [x] ~~**I/O jaringan di dalam `db.transaction`**~~ — BERSIH, lihat entri di atas
 - [x] ~~**Loop tak berbatas di dalam `db.transaction`**~~ — TEMUAN, lihat entri
       "Larik badan permintaan tanpa batas atas" di atas
-- [ ] **N round-trip di dalam transaksi, walau sudah berbatas** — `PUT
-      /menu/urutan` masih satu UPDATE per baris; 10×N=2.000 serentak masih
-      membuat `GET /menu` 1,47 dtk (dari 0,009). Satu `UPDATE … FROM (VALUES …)`
-      menjadikannya satu round-trip berapa pun N-nya. Ukur juga 16 loop
-      `await tx.` lain di dalam transaksi dengan cara yang sama
+- [x] ~~**N round-trip di dalam transaksi, walau sudah berbatas**~~ — TEMUAN,
+      lihat entri di atas. 1,47 dtk → 0,012 dtk
 - [ ] **Balasan tanpa LIMIT** — `.select()` tanpa `.limit()` pada tabel yang
       tumbuh (`sales`, `sale_items`, kartu stok)
 - [ ] **Zod tanpa batas atas** — tiap `z.number()` uang/qty tanpa `.max()`

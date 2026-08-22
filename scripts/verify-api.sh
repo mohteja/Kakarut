@@ -12590,6 +12590,43 @@ SAH231=$(echo "$MENU231" | jq -c '{items: [range(0; length) as $i | {id: .[$i], 
 cek "PASANGAN: mengurutkan SELURUH menu sungguhan tetap 200" "V == 200" \
   "$(status_code_body "$OWNER" PUT /menu/urutan "$SAH231")"
 
+# BENAR, bukan cuma cepat. `PUT /menu/urutan` kini SATU pernyataan
+# `UPDATE … FROM (SELECT unnest(…))` alih-alih satu UPDATE per baris di dalam
+# transaksi — 289 ms → 11 ms untuk 2.000 baris, dan `GET /menu` di bawah
+# sepuluh permintaan serentak turun dari 1,47 dtk ke 0,012 dtk.
+#
+# Penulisan ulang semacam itu tak berguna kalau hasilnya berubah, jadi yang
+# diperiksa di sini HASILNYA: urutkan seluruh menu TERBALIK, lalu baca lagi.
+URUT231=$(echo "$MENU231" | jq -c '{items: [range(0; length) as $i | {id: .[$i], sort_order: (length - $i)}]}')
+api "$OWNER" PUT /menu/urutan "$URUT231" > /dev/null
+cek "INTI: urutan terbalik benar-benar tersimpan untuk SEMUA menu" "V == 0" \
+  "$(api "$OWNER" GET /menu | jq --argjson m "$MENU231" '
+      [ range(0; ($m|length)) as $i
+        | ($m[$i]) as $id
+        | (map(select(.id==$id))[0].sort_order) as $nyata
+        | select($nyata != (($m|length) - $i)) ] | length')"
+
+# …dan pengurungan perusahaan TETAP menyaring sesudah ditulis ulang. Ini yang
+# paling mudah hilang saat pindah ke SQL mentah, dan paling sunyi akibatnya.
+api "$OWNER" PUT /menu/urutan \
+  '{"items":[{"id":"00000000-0000-0000-0000-000000000000","sort_order":9999}]}' > /dev/null
+cek "INTI: id asing tak menyentuh baris mana pun" "V == 0" \
+  "$(api "$OWNER" GET /menu | jq '[.[]|select(.sort_order==9999)]|length')"
+
+# Denah meja ditulis ulang dengan bentuk yang sama — diperiksa dengan cara sama.
+CBB231=$(api "$OWNER" GET /cabang | jq -r '[.[]|select(.tipe=="store" and .is_active)][0].id')
+MJ231=$(api "$OWNER" GET "/meja?branch_id=$CBB231" | jq -c '[.[]|.id]')
+if [ "$(echo "$MJ231" | jq 'length')" -gt 0 ]; then
+  TL231=$(echo "$MJ231" | jq -c '{items: [range(0; length) as $i | {id: .[$i], pos_x: (($i*3)%100), pos_y: (($i*7)%100)}]}')
+  api "$OWNER" PUT "/meja/tata-letak?branch_id=$CBB231" "$TL231" > /dev/null
+  cek "denah meja: posisi tiap meja tersimpan persis" "V == 0" \
+    "$(api "$OWNER" GET "/meja?branch_id=$CBB231" | jq --argjson m "$MJ231" '
+        [ range(0; ($m|length)) as $i
+          | ($m[$i]) as $id
+          | (map(select(.id==$id))[0]) as $r
+          | select($r.pos_x != (($i*3)%100) or $r.pos_y != (($i*7)%100)) ] | length')"
+fi
+
 # INTI: larik di atas batas ditolak 400 — bukan diterima lalu menahan koneksi.
 #
 # Lewat BERKAS, bukan argumen: badan 2.100 baris ~145 KB, dan itu melampaui

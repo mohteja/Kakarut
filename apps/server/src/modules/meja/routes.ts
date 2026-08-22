@@ -334,20 +334,34 @@ export const mejaRoutes = new Hono<AppEnv>()
       const auth = c.get("auth");
       const body = c.req.valid("json");
       const branchId = await resolveBranchId(c);
-      await db.transaction(async (tx) => {
-        for (const it of body.items) {
-          await tx
-            .update(meja)
-            .set({ posX: it.pos_x, posY: it.pos_y })
-            .where(
-              and(
-                eq(meja.id, it.id),
-                eq(meja.companyId, auth.company_id!),
-                eq(meja.branchId, branchId),
-              ),
-            );
-        }
-      });
+      /*
+       * SATU pernyataan, bukan satu UPDATE per baris — bentuk yang sama dengan
+       * `PUT /menu/urutan`, dan alasannya sama: loop di dalam transaksi menahan
+       * satu dari sepuluh koneksi kolam selama N round-trip berurutan, dan N
+       * ditentukan pengirim. Diukur pada 2.000 baris terhadap Postgres yang
+       * sama: 289 ms berurutan vs 11 ms satu pernyataan.
+       *
+       * `sql.param(...)` WAJIB di sekeliling lariknya: tanpa itu drizzle
+       * memecah larik JS jadi TUPLE `($1, $2, …)` dan Postgres membalas
+       * "cannot cast type record to uuid[]".
+       *
+       * Transaksinya ikut dibuang — satu pernyataan sudah atomik sendiri.
+       * Pengurungan perusahaan DAN cabang tetap di WHERE.
+       */
+      if (body.items.length > 0) {
+        await db.execute(sql`
+          UPDATE ${meja}
+          SET pos_x = v.x, pos_y = v.y
+          FROM (
+            SELECT unnest(${sql.param(body.items.map((i) => i.id))}::uuid[]) AS id,
+                   unnest(${sql.param(body.items.map((i) => i.pos_x))}::int[]) AS x,
+                   unnest(${sql.param(body.items.map((i) => i.pos_y))}::int[]) AS y
+          ) AS v
+          WHERE ${meja.id} = v.id
+            AND ${meja.companyId} = ${auth.company_id!}
+            AND ${meja.branchId} = ${branchId}
+        `);
+      }
       const rows = await db
         .select()
         .from(meja)

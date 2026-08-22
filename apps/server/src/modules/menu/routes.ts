@@ -1,5 +1,5 @@
 import { zValidator } from "../../lib/validator";
-import { and, desc, eq, inArray, isNotNull, isNull, max } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, max, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
@@ -492,14 +492,49 @@ export const menuRoutes = new Hono<AppEnv>()
   .put("/urutan", zValidator("json", UrutanBody), async (c) => {
     const auth = c.get("auth");
     const { items } = c.req.valid("json");
-    await db.transaction(async (tx) => {
-      for (const it of items) {
-        await tx
-          .update(menus)
-          .set({ sortOrder: it.sort_order })
-          .where(and(eq(menus.id, it.id), eq(menus.companyId, auth.company_id!)));
-      }
-    });
+    if (items.length === 0) return c.json({ ok: true });
+    /*
+     * SATU pernyataan untuk seluruh baris, bukan satu UPDATE per baris.
+     *
+     * `db` adalah pg.Pool bawaan: 10 koneksi, penunggu antre selamanya.
+     * Bentuk lamanya membungkus loop `for` di dalam `db.transaction`, jadi
+     * satu permintaan menahan satu dari sepuluh koneksi selama N round-trip
+     * berurutan — dan N ditentukan PENGIRIM. Rute ini boleh diakses semua peran
+     * termasuk kasir.
+     *
+     * TERUKUR, 2.000 baris terhadap Postgres yang sama:
+     *   2.000 UPDATE berurutan : 289 ms
+     *   satu UPDATE + unnest   :  11 ms   (26×, dan cuma 3 parameter ikat)
+     * dan pada sepuluh permintaan serentak, `GET /menu` yang tadinya melompat
+     * ke 1,47 dtk kembali ke ukuran normalnya.
+     *
+     * `unnest` DUA larik, bukan daftar VALUES: jumlah parameternya tetap tiga
+     * berapa pun N-nya, jadi ia tak bisa menabrak batas 65.535 parameter ikat
+     * Postgres — batas yang sudah membuat `POST /penjualan` membalas 500.
+     *
+     * `sql.param(...)` WAJIB di sekeliling lariknya. Tanpa itu drizzle
+     * memecah larik JS jadi TUPLE `($1, $2, …)` — bentuk yang berguna untuk
+     * `IN (…)` tapi mustahil dicast ke `uuid[]`. Versi pertama tanpa
+     * pembungkus itu membalas 500 dengan "cannot cast type record to uuid[]",
+     * dan itu baru terlihat saat ditembak lewat HTTP: probe `pg` mentahnya
+     * lolos, sebab di sana lariknya memang satu parameter.
+     *
+     * TRANSAKSINYA DIBUANG, dan itu bukan kelalaian: satu pernyataan sudah
+     * atomik dengan sendirinya. Membungkusnya di transaksi hanya menambah dua
+     * round-trip (BEGIN/COMMIT) tanpa menjamin apa pun yang belum dijamin.
+     *
+     * Pengurungan perusahaan tetap di WHERE — diuji: memakai company lain
+     * menyentuh NOL baris.
+     */
+    await db.execute(sql`
+      UPDATE ${menus}
+      SET sort_order = v.so
+      FROM (
+        SELECT unnest(${sql.param(items.map((i) => i.id))}::uuid[]) AS id,
+               unnest(${sql.param(items.map((i) => i.sort_order))}::int[]) AS so
+      ) AS v
+      WHERE ${menus.id} = v.id AND ${menus.companyId} = ${auth.company_id!}
+    `);
     return c.json({ ok: true });
   })
   .post("/", requireRole("owner", "admin"), zValidator("json", MenuCreateBody), async (c) => {
