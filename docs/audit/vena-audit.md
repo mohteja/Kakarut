@@ -826,6 +826,102 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
   verify-api; gerbang `audit-invarian-terpasang.test.ts` (6 uji) yang menahan
   urutan langkah CI dan jumlah invariannya; perbaikan resolver `jangkar-iris`
 
+## Uang dihitung ulang di klien — web + mobile — 2026-08-22
+
+- **Bukan pengulangan** vena "Uang ditulis di luar pembantu bersama": entri itu
+  menyapu DUA rumus (`PB1`, `TOTAL = subtotal − diskon`) dan batasnya sendiri
+  menuliskan sisanya. Yang disapu di sini SELURUH rupiah yang lahir di layar
+- **Populasi, TIGA cara hitung** (satu cara saja pasti buta):
+
+  | arah | apa yang dihitung | web | mobile |
+  |---|---|---|---|
+  | A | `formatRupiah(<ekspresi>)` — dihitung di dalam kurung render | **13** | **5** |
+  | B | `formatRupiah(x)` yang `x`-nya `const` ber-aritmetika di berkas yang sama | **20** | — |
+  | C | `Rp {…}` tanpa `formatRupiah` | **1** (dari 4) | — |
+  | | **jumlah rupiah yang lahir di layar** | **34** | **5** |
+  | | `formatRupiah` seluruhnya (pembagi) | **203** | **165** |
+
+  Jadi **169 dari 203** render web adalah medan server apa adanya. Arah B wajib
+  ada: `kembalian` (`KasirPage:597`) tak terlihat oleh arah A sama sekali
+- **Detektor**: DIBUKTIKAN bisa menuduh, tiga kali, tiap suntikan di-assert
+  mendarat lebih dulu — (1) `formatRupiah(totalAlpa * 25000 - 500)` → tertuduh
+  di baris yang TEPAT; (2) bentuk arah B (`const dendaPalsu = …` lalu
+  `formatRupiah(dendaPalsu)`) → tertuduh; (3) nama fungsi yang disapu dibuat
+  tak ada → uji PREMIS-nya merah, bukan INTI-nya hijau dengan hitungan nol.
+  Di mobile: satu `formatRupiah` berhitung disisipkan → 5 → 6, tertuduh
+- **KESALAHAN DETEKTORKU, ditemukan oleh bukti merahnya sendiri**: arah B versi
+  pertama memakai DAFTAR NAMA (`total|diskon|harga|pb1|…`) dan **melewatkan
+  `upahPalsu`** — suntikan yang dibuat justru untuk mengujinya. Daftar nama
+  adalah detektor yang selalu tertinggal satu kata, dan ia sudah menuduh empat
+  pemanggilan yang benar pada vena sebelumnya. Diganti jadi bebas nama: apa pun
+  yang dirender `formatRupiah` ADALAH rupiah menurut kodenya sendiri; tinggal
+  ditanya apakah `x` datang dari server atau lahir di sini
+- **Kesalahan kedua**: penghapus komentar versi pertama MEMENDEKKAN teksnya,
+  jadi nomor barisnya meleset — dilaporkan `ResepPage:1012` untuk baris yang
+  sebenarnya **1110**. Penghapusnya diganti yang mempertahankan posisi (komentar
+  jadi spasi, `\n` dijaga), dan ada uji yang menjaga sifat itu
+- **Hasil**: **BERSIH — dan diukur, bukan dibaca.** Rantai uang layar kasir
+  (subtotal → diskon → batas diskon kasir → PB1 → total) disalin apa adanya dari
+  `KasirPage.tsx:566–593` lalu DIADU dengan yang benar-benar dicatat server
+  lewat `POST /penjualan` sungguhan, pada perusahaan ber-PB1 **11,13%** dan
+  batas diskon kasir **10%**:
+
+  | kasus | total klien | total server |
+  |---|---|---|
+  | polos 1 baris | 12.224 | 12.224 |
+  | polos 3 baris ganjil | 128.911 | 128.911 |
+  | diskon 7% (di bawah batas) | 35.139 | 35.139 |
+  | diskon 10% (PAS di batas) | 34.006 | 34.006 |
+  | diskon 25% (DI ATAS batas) | 34.006 | 34.006 |
+  | diskon 7,5% | 114.103 | 114.103 |
+  | nominal Rp 1.000 | 74.457 | 74.457 |
+  | nominal Rp 50.000 (di atas batas) | 68.012 | 68.012 |
+  | diskon 100% | 11.002 | 11.002 |
+  | qty 7 | 113.186 | 113.186 |
+
+  **10 kasus, 0 selisih** — subtotal, diskon, PB1, dan total keempatnya sama
+  persis. Yang membuatnya begitu: layar kasir memanggil `hitungPb1` dari
+  `@kakarut/shared` alih-alih menulis ulang rumusnya, dan komentarnya sendiri
+  menuliskan alasannya
+- **Yang HAMPIR kutuduh, dan kenapa tidak** (pagar ke-3):
+  - `ResepPage:1110` `hargaBatch / isiBatch` menulis ulang `hargaPerUnit`, dan
+    penjaganya justru **terbalik** — `isiBatch = isi > 0 ? isi : 0`, yaitu nol,
+    persis nilai yang meledakkan pembagiannya. Tapi rendernya dikurung
+    `{isiBatch > 0 && …}`. **Tak terjangkau.**
+  - `RiwayatHargaModal:295` `angkaDari(hargaBaru) / isi` — `isi` sudah dinormalkan
+    ke **1** di baris 41. Aman.
+  - `FakturFormPage:396` `(qtyPcs / b.isi) * b.harga_beli` — `isi` bertipe
+    `z.number().positive()` di SETIAP jalur tulis; nol tak bisa masuk basis data
+  - `BeliPerlengkapanPage:454` `r.qty * r.harga_beli` — perlengkapan **tak punya
+    `isi`**; `harga_beli` memang per satuan. Bukan `hargaPerUnit` yang disalin
+  - `LaporanPage:194` `lap.omzet + lap.total_refund` — rumusnya tertulis di
+    komentar DTO servernya sendiri: *"omzet kotornya = `omzet + total_refund`"*
+- **`kembalian` punya EMPAT salinan** (`receipt.ts:150`, `ReceiptModal:356`,
+  `KasirPage:597`, `bayar_sheet.dart:481`) dan tak punya rumah. Ketiganya
+  `Math.max(0, diterima − total)`, yang keempat `diterima − total` tanpa jepitan
+  tapi dikurung di titik render. **Diperiksa satu per satu: keempatnya sepakat
+  untuk semua masukan.** Dicatat sebagai duplikasi TANPA penyimpangan — bukan
+  temuan, karena tak ada angka yang salah. "Sepertinya berisiko" bukan temuan
+- **Batas detektor**: hanya melihat yang dirender lewat `formatRupiah` (atau
+  literal `Rp {…}`). Rupiah yang dihitung lalu DIKIRIM ke server tanpa pernah
+  tampil di layar tak terlihat — satu-satunya yang begitu, `total_harga` di
+  `StokPerlengkapanTab:452`, diperiksa tangan (`qty × harga_beli`, dan
+  perlengkapan tak punya `isi`). Arah B hanya menelusuri SATU lapis `const` di
+  berkas yang sama; rantai dua lapis lintas berkas tak terlihat
+- **Tindak**: tak ada perubahan kode — tak ada yang salah. Artefaknya dua ratchet
+  kembar: `apps/server/test/uang-dihitung-klien.test.ts` (DASAR **34**, 5 uji) dan
+  `kakarut-mobile/test/uang_dihitung_layar_test.dart` (dasar **5**, 5 uji).
+  **Dipasang di KEDUA repo dengan sengaja**: memasangnya hanya di web akan jadi
+  contoh berikutnya dari pola yang diburu peta ini — penjaga di satu pintu,
+  pintu saudaranya dibiarkan terbuka — dan permukaan ponsel itulah yang sudah
+  sekali menggigit (Rp 282 vs Rp 283)
+- **Ikut diperbaiki**: `jangkar-iris` merah oleh berkas uji baru ini — ia memakai
+  `.indexOf("…")` tapi literal direktorinya tak berakhir "/" sehingga tak bisa
+  ditelusuri. Diberi garis miring, bukan dikecualikan: gerbang yang menyapu
+  dirinya sendiri ke bawah karpet berhenti menyatakan apa pun
+
+---
+
 ## Kunci React Query & cabang di URL — web + mobile — 2026-08-22
 
 - **Populasi**: **166** `useQuery`/`useQueries`/`useInfiniteQuery` di
@@ -1005,7 +1101,9 @@ berlaku di situ).
       tapi arah sebelahnya TEMUAN: 7 pintu web + 6 mobile memanggil rute
       ber-`resolveBranchId` tanpa `branch_id` → 404, dan satu di antaranya
       **200 yang tak memindahkan apa pun**
-- [ ] **Uang dihitung ulang di klien**, bukan lewat `@kakarut/shared`
+- [x] ~~**Uang dihitung ulang di klien**~~ — BERSIH, lihat entri di atas.
+      34 dari 203 render rupiah web lahir di layar; rantai uang kasir
+      diadu dengan server lewat 10 penjualan sungguhan — 0 selisih
 - [ ] **Invalidasi sesudah mutasi**
 
 ### Mobile
