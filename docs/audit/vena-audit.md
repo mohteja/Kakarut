@@ -826,6 +826,89 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
   verify-api; gerbang `audit-invarian-terpasang.test.ts` (6 uji) yang menahan
   urutan langkah CI dan jumlah invariannya; perbaikan resolver `jangkar-iris`
 
+## Invalidasi sesudah mutasi — web — 2026-08-22
+
+- **Sudah ada penjaganya, dan batasnya ditulis sendiri.** `invalidate-kunci.test.ts`
+  menjaga arah SEBALIKNYA — tiap kunci yang di-invalidate benar-benar dipakai
+  suatu query (tak ada baris mati). Komentarnya: *"Ini TIDAK menjamin cakupannya
+  lengkap"*. Vena ini menggarap batas itu
+- **Populasi**: **124** `useMutation` di `apps/web` (64 berkas), **110** yang
+  penulisannya terurai; **185** panggilan `invalidateQueries`; **89** kunci
+  query berbeda
+- **EMPAT KALI DETEKTORKU SALAH, dan tiap kali ia menuduh kode yang benar.**
+  Dicatat satu per satu karena polanya sendiri yang berharga — setiap kesalahan
+  berbentuk "menebak dari BENTUK alih-alih menelusuri":
+  1. tak mengikuti pembantu lokal → menuduh `ShiftPage` (`invalidate()`) dan
+     `PesananPage` (`onSettled: segarkan`). 20 → 11
+  2. hanya mengenali badan panah BERKURUNG → melewatkan
+     `const segarkan = () => queryClient.invalidateQueries(…)`, menuduh tiga
+     mutasi `AreaKebersihanModal`. 11 → 8
+  3. `re.search` memungut definisi PERTAMA di berkas → `OpnameRiwayatPage`
+     punya DUA komponen yang sama-sama punya pembantu bernama `invalidate`,
+     satu untuk bahan satu untuk perlengkapan; keduanya tertuduh, keduanya
+     benar. Diganti "definisi terdekat SEBELUM mutasinya"
+  4. tak mengikuti panggilan balik lewat PROP (`onSukses()` di anak,
+     `onSukses={segarkan}` di induk) → menuduh `StokPerlengkapanTab`, yang
+     penyegarannya justru paling lengkap di repo ini. Sesudahnya: **nol** mutasi
+     tanpa penyegaran sama sekali
+- **Aturan pertama juga salah, dan itu keputusan bukan bug**: "segarkan SEMUA
+  pembaca sumber daya ini" menuduh **70** mutasi, hampir semuanya benar —
+  mengganti nama meja memang tak perlu menyegarkan riwayat pengosongan meja.
+  Dipersempit ke yang tak ambigu: **berkas yang SAMA membaca apa yang baru saja
+  ditulisnya**. 70 → 19
+- **Detektor**: DIBUKTIKAN bisa menuduh — invalidasi `["meja"]` dicabut dari
+  `MejaPage.toggle` (di-assert mendarat) → tertuduh di baris yang tepat, 11 → 12;
+  dikembalikan → hilang. Untuk gerbangnya: bug aslinya disuntikkan kembali →
+  INTI merah menyebut `AnalisisHargaPage`; pengecualian karangan ditambahkan →
+  uji "pengecualian basi" merah
+- **Hasil**: **TEMUAN — satu, lewat arah ketiga yang tak terpikir di awal.**
+  Sapuan "cakupan" hanya melahirkan kandidat yang semuanya sah. Yang menemukan
+  bugnya justru sapuan **ILUSI AWALAN**: pencocokan TanStack membandingkan
+  elemen secara UTUH, jadi `["A"]` TIDAK pernah mengenai `["A-…"]`. Ada **31
+  pasangan** kunci yang tampak induk-anak padahal bukan (`stok`/`stok-fifo`,
+  `perlengkapan`/`perlengkapan-master`, `menu`/`menu-riwayat-harga`, …), dan
+  **5 berkas** meng-invalidate `A` sambil membaca `A-…`
+- **Yang bugnya**: `AnalisisHargaPage` — tombol **"Terapkan saran"**
+  MENERBITKAN baris riwayat harga (`catatHargaMenu(…, sebab:
+  "terapkan_saran")`), panel yang menampilkannya ada di halaman yang sama dan
+  sedang terbuka tepat di bawah baris yang ditekan, dan invalidasinya menyebut
+  `["menu"]` + `["menu-analisis-harga"]` — tak satu pun mengenai
+  `["menu-riwayat-harga", id]`.
+
+  | | sebelum | sesudah |
+  |---|---|---|
+  | riwayat harga di server | 3 baris | **4 baris** (`harga_lama 34.000 → harga_baru 300.000`, `sebab: terapkan_saran`) |
+  | yang tampil di panelnya | 3 baris | **3 baris** — tak berubah |
+
+  Berkas itu bahkan sudah punya labelnya: `SEBAB_LABEL.terapkan_saran =
+  "terapkan harga saran"`. **Ia tahu tombol ini menerbitkan baris riwayat, dan
+  tetap tak menyegarkan daftar yang menampilkannya**
+- **Bentuknya, lagi**: aturan ini sudah ditulis repo ini **DUA KALI**,
+  panjang-panjang — di `StokPerlengkapanTab` dan `OpnameRiwayatPage`, untuk
+  `perlengkapan` vs `perlengkapan-master`, lengkap dengan alasan mengapa
+  `staleTime` 5 menit membuatnya lebih parah. Pintu ketiganya tetap terbuka.
+  Catatan bukan penjaga
+- **Empat sisa yang TIDAK diperbaiki, berikut alasannya** (masuk `DIKECUALIKAN`
+  di gerbangnya): `DetailBahanPage` ×2 — `onSuccess` memanggil `navigate()`,
+  halamannya lepas sebelum kuerinya dibaca lagi; `KaryawanPage` —
+  `karyawan-aktivitas` itu JEJAK AUDIT, bukan turunan datanya; `ErrorLogPage` —
+  modal dimuat saat dibuka. Gerbangnya menolak pengecualian yang basi
+- **Batas detektor**: hanya melihat `queryKey`/`invalidateQueries` yang elemen
+  pertamanya LITERAL; kunci yang dirakit dari variabel tak terbaca (penjaga
+  tetangganya sudah mencatat enam di antaranya). Penelusuran pembantu berhenti
+  di dua lapis dan di dalam satu berkas — invalidasi yang dilakukan komponen
+  induk di BERKAS LAIN tak terlihat
+- **Mobile: kelas bug ini MUSTAHIL di sana, dan itu diperiksa bukan diduga.**
+  241 `ref.invalidate(...)` di `lib/`, **nol** yang berbasis string — Riverpod
+  membatalkan lewat OBJEK provider, jadi tak ada awalan untuk salah dikira
+  induk. Tak ada perubahan mobile untuk vena ini
+- **Tindak**: satu baris di `AnalisisHargaPage` + gerbang
+  `apps/server/test/invalidasi-ilusi-awalan.test.ts` (5 uji) yang mengkodekan
+  aturan yang sudah dua kali ditulis itu — termasuk uji PREMIS yang menjalankan
+  aturan pencocokan TanStack-nya sendiri, supaya klaimnya diuji bukan dipercaya
+
+---
+
 ## Uang dihitung ulang di klien — web + mobile — 2026-08-22
 
 - **Bukan pengulangan** vena "Uang ditulis di luar pembantu bersama": entri itu
@@ -1104,7 +1187,10 @@ berlaku di situ).
 - [x] ~~**Uang dihitung ulang di klien**~~ — BERSIH, lihat entri di atas.
       34 dari 203 render rupiah web lahir di layar; rantai uang kasir
       diadu dengan server lewat 10 penjualan sungguhan — 0 selisih
-- [ ] **Invalidasi sesudah mutasi**
+- [x] ~~**Invalidasi sesudah mutasi**~~ — TEMUAN, lihat entri di atas.
+      Bukan lewat cakupan (70 tuduhan, semuanya sah) melainkan lewat ILUSI
+      AWALAN: `["menu"]` tak pernah mengenai `["menu-riwayat-harga"]` —
+      riwayat 3 → 4 baris di server, panelnya tetap 3
 
 ### Mobile
 - [ ] **Enum status dibandingkan sebagai teks**
