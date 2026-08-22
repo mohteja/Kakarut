@@ -34,6 +34,33 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## I/O jaringan di dalam `db.transaction` — server — 2026-08-22
+
+- **Populasi**: 72 badan `db.transaction(...)` di `apps/server/src`
+- **Metode**: dua sapuan bertingkat.
+  (a) `io-dalam-tx.py` — panggilan berat yang HARFIAH di dalam badan transaksi:
+  `kirimEmail`, `PutObjectCommand`/S3, `fetch`, `bcrypt.hash/compare` async,
+  `fs.*`;
+  (b) `io-dalam-tx2.py` — SATU lapis indireksi: 354 fungsi tingkat berkas
+  diindeks, 33 nama yang benar-benar dipanggil dari dalam badan transaksi
+  ditelusuri ke definisinya, lalu badannya diperiksa dengan pola yang sama
+- **Detektor**: DIBUKTIKAN bisa menuduh, KEDUANYA.
+  (a) `await kirimEmail(...)` palsu disisipkan ke badan transaksi sungguhan di
+  `users/routes.ts` → tertuduh di baris 204; dicabut → nol lagi.
+  (b) `await fetch(...)` palsu disisipkan ke `resolveKodeKaryawan` — fungsi
+  yang MEMANG dipanggil dari dalam transaksi → 2 tersangka muncul
+  (`users/routes.ts`, `admin-tenants/routes.ts`); dicabut → nol lagi
+- **Hasil**: **BERSIH**. Nol I/O jaringan di dalam transaksi, langsung maupun
+  satu lapis di bawah
+- **Konteks**: repo ini memang sudah sadar kelasnya — `autoFileRakCabang`
+  SENGAJA ditinggal di luar transaksi penerimaan, dengan komentar yang
+  menyebut alasannya
+- **Batas**: (1) hanya SATU lapis indireksi — fungsi yang memanggil fungsi
+  yang ber-I/O tak terlihat; (2) hanya `await <ident>(`, jadi panggilan metode
+  `await obj.method(` tak ditelusuri; (3) daftar "berat"-nya pilihan, bukan
+  kelengkapan
+- **Tindak**: —
+
 ## Isolasi tenant pada PENULISAN — server — 2026-08-22
 
 - **Populasi**: 162 `UPDATE`/`DELETE` di `apps/server/src`
@@ -138,9 +165,11 @@ Diurut kasar menurut (kerusakan bila terjadi) × (peluang pola "pintu saudara"
 berlaku di situ).
 
 ### Server
-- [ ] **I/O jaringan di dalam `db.transaction`** — kerabat langsung bug kolam
-      koneksi: `kirimEmail`/unggah S3 di dalam transaksi menahan satu dari 10
-      koneksi selama latensi jaringan
+- [x] ~~**I/O jaringan di dalam `db.transaction`**~~ — BERSIH, lihat entri di atas
+- [ ] **Loop tak berbatas di dalam `db.transaction`** — bahaya yang SAMA
+      (menahan 1 dari 10 koneksi) tanpa jaringan: diukur ada **17** loop
+      ber-`await tx.` di dalam badan transaksi. Yang perlu diperiksa: mana yang
+      panjangnya ditentukan MASUKAN pemanggil dan tak berbatas atas
 - [ ] **Balasan tanpa LIMIT** — `.select()` tanpa `.limit()` pada tabel yang
       tumbuh (`sales`, `sale_items`, kartu stok)
 - [ ] **Zod tanpa batas atas** — tiap `z.number()` uang/qty tanpa `.max()`
