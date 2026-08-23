@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { butaKomentar } from "../src/scripts/buta-komentar";
 
 /**
  * STEMPEL WAKTU DARI KLIEN WAJIB DIURAI, TAK PERNAH DIBANDINGKAN SEBAGAI TEKS.
@@ -40,25 +41,8 @@ function berkasTs(dir: string): string[] {
   return keluar;
 }
 
-/** Buang isi komentar TANPA menggeser posisi. */
-export function butaKomentar(s: string): string {
-  const out = s.split("");
-  let i = 0;
-  while (i < s.length) {
-    if (s.startsWith("/*", i)) {
-      let j = s.indexOf("*/", i + 2);
-      j = j < 0 ? s.length : j + 2;
-      for (let k = i; k < j; k += 1) if (out[k] !== "\n") out[k] = " ";
-      i = j;
-    } else if (s.startsWith("//", i)) {
-      let j = s.indexOf("\n", i);
-      j = j < 0 ? s.length : j;
-      for (let k = i; k < j; k += 1) out[k] = " ";
-      i = j;
-    } else i += 1;
-  }
-  return out.join("");
-}
+/** Dipakai ulang dari rumah tunggalnya; alasannya di `buta-komentar.ts`. */
+export { butaKomentar };
 
 /**
  * Rentang tiap template `` sql`…` `` — di dalamnya Postgres yang membandingkan

@@ -30,33 +30,16 @@ const SRC = fileURLToPath(new URL("..", import.meta.url));
 const SHARED = fileURLToPath(new URL("../../../../packages/shared/src", import.meta.url));
 
 /**
- * Buang isi komentar, pertahankan posisi baris.
+ * Pengupas komentar dipakai ulang dari rumah tunggalnya, dan DIEKSPOR ULANG
+ * supaya `status-satu-kontrak.test.ts` tetap bisa mengujinya lewat berkas ini.
  *
- * DIEKSPOR supaya bisa diuji sungguhan. Versi pertama penjaga pembangkit ini
- * mencoba membuktikan pengupas ini perlu dengan menghitung nilai
- * `supply_beli_status` — dan tetap HIJAU saat pengupasnya dicabut, karena
- * nilai yang dikutip komentarnya kebetulan juga nilai yang sah, jadi `Set`
- * melipatnya. Asersi itu tak bisa gagal. Yang sekarang diuji sifatnya
- * langsung, dengan masukan yang memang memancingnya.
+ * Dulu berkas ini punya salinannya sendiri — salah satu dari tujuh salinan yang
+ * semuanya membaca `/*` di dalam string literal sebagai pembuka komentar.
+ * Alasannya ditulis lengkap di `buta-komentar.ts`.
  */
-export function butaKomentar(s: string): string {
-  const out = s.split("");
-  let i = 0;
-  while (i < s.length) {
-    if (s.startsWith("/*", i)) {
-      let j = s.indexOf("*/", i + 2);
-      j = j < 0 ? s.length : j + 2;
-      for (let k = i; k < j; k += 1) if (out[k] !== "\n") out[k] = " ";
-      i = j;
-    } else if (s.startsWith("//", i)) {
-      let j = s.indexOf("\n", i);
-      j = j < 0 ? s.length : j;
-      for (let k = i; k < j; k += 1) out[k] = " ";
-      i = j;
-    } else i += 1;
-  }
-  return out.join("");
-}
+import { butaKomentar } from "./buta-komentar";
+
+export { butaKomentar };
 
 function berkasTs(dir: string): string[] {
   const keluar: string[] = [];
