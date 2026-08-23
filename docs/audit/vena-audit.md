@@ -1685,6 +1685,102 @@ dijalankan ulang — tak ada rute server yang disentuh, hanya berkas uji.
 
 ---
 
+## Laporan Lama Pesanan di ponsel — mobile — 2026-08-23
+
+Usulan #4, dan ia bukan perburuan bug melainkan **celah yang sudah tercatat**:
+vena "fitur lama pengerjaan pesanan" memperbaiki medan yang tak terurai lalu
+menuliskan sisanya sebagai batas yang jujur — *"`target_durasi_detik` per menu
+dan laporan `/laporan/durasi-pesanan` belum ada di ponsel. Keduanya layar baru,
+bukan medan yang tak terurai."*
+
+- **Populasi**: **20 kunci kontrak** — `LaporanDurasiPesanan` (6),
+  `DurasiMenuRow` (9), `DurasiRiwayatRow` (5). Dibaca `kakarut-mobile/lib`
+  sebelum putaran ini: **0**. Pemanggilan `/laporan/durasi-pesanan` dari
+  ponsel: **0**. Tab di `LaporanPage` ponsel: **4 → 5**.
+
+- **DIKERJAKAN SEPARUH, DAN ITU KEPUTUSAN SADAR.** Usulan aslinya menyebut dua
+  hal: laporannya DAN penyetel target per menu. Yang kedua **sengaja tidak
+  dikerjakan**: `MenuHppPage` di ponsel menulis batasnya sendiri — *"Tambah/ubah
+  menu tetap di web"* — dan menyeberanginya untuk satu medan akan membuat batas
+  itu berhenti berarti apa-apa. Target tetap disetel dari `MenuFormPage` di web;
+  ponsel membacanya saja, lengkap dengan kolom target dan penanda "lewat
+  target". Ini dicatat sebagai keputusan, bukan sebagai pekerjaan yang lupa.
+
+- **Fiksturnya HASIL SERVER, bukan karanganku.** Data dibuat lewat HTTP
+  sungguhan: satu bill dua sajian di `POST /open-bill`, ditandai selesai
+  berjarak **18** dan **27** detik lewat
+  `POST /pesanan/open_bill/:id/item/:it/status`, dibayar lewat `POST /penjualan`,
+  lalu menunya diberi `target_durasi_detik: 20` lewat `PUT /menu/:id` — yang
+  badannya memang PARSIAL (`undefined` = jangan sentuh), jadi kirimannya cuma
+  satu medan. Balasan `GET /laporan/durasi-pesanan` disimpan apa adanya sebagai
+  `test/fikstur/laporan-durasi-server.json`:
+
+  | | angka |
+  |---|---|
+  | `jumlah` · `rata_detik` | 8 · 6 |
+  | `bertarget` · `lewat_target` | 2 · 1 |
+  | baris "Kerupuk Pangsit" | rata 23 · median 23 · 18–27 · target 20 · 1 lewat · `lewat_target: true` |
+
+  Fiksturnya memuat **ketiga** keadaan target sekaligus (tanpa target,
+  bertarget-lewat, bertarget-tidak-lewat), dan itu diasersi sendiri — tanpa
+  itu cabang yang tak pernah dilewati tak diuji.
+
+- **Detektor DIBUKTIKAN bisa menuduh, dan bentuknya MEKANIS bukan sekali
+  suntik.** Untuk **tiap** dari 20 kunci, fiksturnya diurai dua kali — utuh dan
+  tanpa kunci itu — lalu hasilnya wajib BERBEDA. Parser yang diam-diam
+  mengabaikan sebuah kunci memulangkan nilai yang sama pada kedua kali, dan
+  ujinya merah. Diverifikasi dengan mencabut `median_detik` dari `fromJson`
+  (suntikan di-assert mendarat): tepat uji `per_menu.median_detik` yang merah.
+  Ini menutup kelas yang **nyaris terkirim** di vena #30 — `fromJson` yang
+  melewatkan satu kunci tak melempar apa pun, `?? 0` memulangkan nol dengan
+  tenang, dan `flutter analyze` tetap hijau.
+
+- **PENJAGANYA SENDIRI HAMPA PADA PERCOBAAN PERTAMA, dan itu ketahuan karena
+  disuntik.** Aturan "biasanya lewat target" tidak boleh dihitung ulang di Dart
+  (server sudah mengirim `lewat_target`; aturannya milik `lewatTargetDurasi` di
+  `@kakarut/shared`). Penjaga versi pertama memakai
+  `median\w*\s*[<>]=?\s*\w*[Tt]arget` — menuntut kedua nama BERSEBELAHAN. Saat
+  bentuk yang sungguhan disuntikkan (`m.medianDetik > (m.targetDetik ?? …)` —
+  ada `m.`, ada kurung, ada `??`), penjaganya **diam** dan 32 uji tetap hijau.
+  Diperlebar jadi `[^;\n]{0,40}` di antara keduanya; suntikan yang sama langsung
+  merah. Penjaga yang tak menangkap bentuk yang benar-benar ditulis orang bukan
+  penjaga.
+
+- **Dirender, bukan cuma diurai.** Vena #30 sudah membuktikan membaca kode saja
+  tak cukup — dua cacat tampilan grafik per jam ketemu dengan MERENDER dan
+  keduanya lolos `analyze`. `BarisMenuDurasi` karena itu dibuat publik dan
+  di-`pumpWidget`: angka sampai ke layar, penanda "lewat target" muncul HANYA
+  saat server bilang begitu, dan menu tanpa target tak menampilkan kata
+  "target" sama sekali.
+
+- **Yang TIDAK disalin**: aturan `lewat_target` (dijaga uji di atas) dan
+  perhitungan durasinya sendiri. Yang boleh disalin cuma `formatDurasi` — ia
+  murni tampilan, dan komentarnya di `core/format.dart` sudah menyatakan itu
+  sejak vena #30.
+
+- **Satu layar, satu rentang, satu cabang**: tab kelima menonton
+  `laporanRentangProvider` + `laporanCabangProvider` yang sama dengan keempat
+  tab lain, bukan pemilihnya sendiri. Tab yang membawa pemilihnya sendiri
+  membuat dua angka di layar yang sama diam-diam berbicara tentang periode yang
+  berbeda.
+
+- **Batas, jujur**: `nomor: null` (selesai selagi bill masih terbuka) dan
+  `oleh: null` (data sebelum fitur ini) **tak muncul** di data hidup, jadi
+  keduanya diuji dari map yang disusun tangan — dan disebut begitu di berkas
+  ujinya, bukan disamarkan sebagai fikstur server.
+
+- **Hasil**: **20 dari 20 kunci kini diurai dan tampil.** Tak ada perubahan
+  server maupun web.
+- **Gerbang**: `flutter analyze` bersih · `flutter test` **503 lolos** (dari
+  467) pada 3.44.7. `verify-api` tidak dijalankan ulang — tak ada rute yang
+  disentuh, dan itu disebutkan alih-alih didiamkan.
+- **Tindak**: `LaporanDurasi` + `DurasiMenuRow` + `DurasiRiwayatRow` di
+  `operasional_models.dart`, `getLaporanDurasi` + `laporanDurasiProvider` di
+  `operasional_repository.dart`, tab `⏱ Lama Pesanan` di `laporan_page.dart`,
+  `test/laporan_durasi_test.dart` (36 uji) + fikstur server. Mobile: PR #12
+
+---
+
 ## ANTREAN HABIS — 2026-08-22
 
 Kedua puluh satu vena di antrean awal sudah digarap. Yang tersisa di bawah
@@ -1708,8 +1804,11 @@ bukan dari daftar awal.
    TEMUAN justru gerbangnya: ia menilai **13** dari 322 panggilan `api(`, dan
    pemetanya mengarang 4 jalur hantu sambil kehilangan 31 rute. Sesudah
    diperbaiki: **75** pemanggil dinilai, nol temuan perilaku.
-4. **Layar baru: target durasi per menu & laporan `/laporan/durasi-pesanan` di
-   ponsel.** Bukan medan yang tak terurai — fitur yang belum dibuat.
+4. ~~**Layar baru: target durasi per menu & laporan `/laporan/durasi-pesanan`
+   di ponsel.**~~ — **TERGARAP SEPARUH**, lihat entri di atas. Laporannya
+   dikerjakan (20 dari 20 kunci kontrak kini diurai, tab kelima di Laporan);
+   penyetel target per menu **sengaja tidak** — `MenuHppPage` menulis batasnya
+   sendiri ("Tambah/ubah menu tetap di web"), dan batas itu dipertahankan.
 5. **Server menerima `branch_id` di badan `/meja/tata-letak` lalu membuangnya.**
    Zod `.strict()` akan mengubah kegagalan sunyi jadi berbunyi.
 
