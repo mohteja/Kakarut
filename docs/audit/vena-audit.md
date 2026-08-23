@@ -1322,6 +1322,70 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Stempel waktu dibandingkan sebagai teks — mobile + server — 2026-08-22
+
+Vena pertama dari **usulan lanjutan** (antrean awal habis). Dipilih karena satu
+alasan yang bisa ditunjuk: kelas ini sudah menggigit **dua kali**, dan
+**keduanya ketemu tak sengaja**. Alatnya sudah ada; penjaganya belum.
+
+- **Populasi**:
+
+  | permukaan | angka |
+  |---|---|
+  | Dart · `.compareTo(` di `lib/` | **12** |
+  | Dart · `.sort(` | **14** |
+  | TS · kandidat mentah | **19** |
+  | TS · di dalam `` sql`…` `` — **Postgres, bukan JS** | **8** |
+  | TS · JS sungguhan | **11** |
+  | TS · medan stempel **dari klien** (`z.string().datetime(`) | **2** |
+
+- **Hasil**: **TEMUAN — yang ketiga, dan ia ketemu saat menulis penjaganya.**
+  Terukur pada `urutkanPesanan`: dua kartu, B berstempel server
+  `10:00:01.000Z`, A baru ditandai di ponsel sehingga berstempel optimistis
+  `10:00:01.000123Z` (**lebih baru**). Urutan papannya `[B, A]` — persis
+  kebalikan dari yang ditulis dokumen fungsinya sendiri (*"tanpa mengurut ulang
+  dengan kunci yang sama, kartu yang baru ditandai diam di tempatnya"*)
+- **DUA KALI PENJAGANYA GAGAL PADA BUKTI MERAHNYA SENDIRI**, dan keduanya
+  ditulis apa adanya:
+  1. Versi pertama hanya melihat **penerima** `compareTo`. Bug yang jadi alasan
+     berkas itu ada — `t.compareTo(p.waktu)` — penerimanya bernama `t`, jadi
+     sapuannya **melewatkannya**. Diperbaiki jadi memeriksa KEDUA sisi; sesudah
+     diperlebar ia langsung menemukan dua situs lagi yang belum pernah dilihat
+  2. `urutkanPesanan` menyortir `kunciUrutPesanan(b).compareTo(kunciUrutPesanan(a))`
+     — seluruhnya tentang stempel, tanpa satu kata pun yang menyebut waktu.
+     Sapuan berbasis nama **tak bisa** melihatnya. Batas itu **ditulis dan
+     dijaga source-pin**, bukan disamarkan dengan menambah kata ke daftar nama
+- **Dua tuduhan yang ternyata BENAR**: `rekap_kebersihan_page` dan
+  `rekap_absen_page` membandingkan bulan `'YYYY-MM'` — **berlebar tetap**, jadi
+  urutan teks = urutan waktu. Masuk `dikecualikan` berikut alasannya. Justru
+  kelas ini yang membuat aturannya tak bisa "semua perbandingan waktu wajib
+  lewat pembantu"
+- **Sisi TypeScript: BERSIH, dan alasannya diukur bukan diandaikan.**
+  `Date.prototype.toISOString()` **selalu** menulis tiga digit pecahan
+  (dijalankan di uji, bukan diingat), dan kesebelas situs JS membandingkan
+  stempel yang server/web sendiri hasilkan. Kedua medan stempel dari klien
+  (`sync.waktu`, `admin-tenants.plan_expires_at`) sudah diurai `new Date(...)`
+  di batasnya
+- **Gerbangnya TIPIS di sisi TS, dan itu keputusan**: ia hanya melarang
+  perbandingan teks atas stempel **yang datang dari klien**. Gerbang yang
+  menuntut seluruh perbandingan stempel lewat pembantu akan menuntut pekerjaan
+  pada kode yang hari ini benar — dan penjaga semacam itu dilonggarkan orang,
+  bukan dipatuhi
+- **Batas detektor**: sapuan Dart berbasis NAMA medan, jadi buta terhadap
+  pembantu yang namanya tak menyebut waktu (dibuktikan, lalu ditutup
+  source-pin). Sapuan TS hanya melihat medan ber-`z.string().datetime(`;
+  stempel klien yang masuk lewat `z.string()` polos tak terlihat
+- **Tindak**: 4 situs Dart → `bandingStempel`; catatan **asimetri** ditulis di
+  `packages/shared/src/pesanan.ts` (kenapa versi TS-nya aman sementara
+  cerminan Dart-nya wajib memakai pembantu) supaya tak ada yang
+  "menyederhanakan" sisi Dart kembali. Gerbang:
+  `kakarut-mobile/test/stempel_satu_banding_test.dart` (6 uji) dan
+  `apps/server/test/stempel-klien-diurai.test.ts` (5 uji, termasuk uji pasangan
+  yang **menjalankan** premis `toISOString()`-nya dan yang membuktikan
+  pemindainya melewati `` sql`…` ``). Mobile: commit `426ae6a`, PR #12
+
+---
+
 ## ANTREAN HABIS — 2026-08-22
 
 Kedua puluh satu vena di antrean awal sudah digarap. Yang tersisa di bawah
@@ -1330,11 +1394,10 @@ bukan dari daftar awal.
 
 ### Usulan, diurut menurut apa yang sudah TERBUKTI menggigit
 
-1. **Stempel waktu dibandingkan sebagai teks — sapuan menyeluruh.** Kelas ini
-   sudah menggigit DUA KALI dalam satu hari (urutan antrean offline, lalu
-   `ringkasPesanan`), dan keduanya ditemukan tak sengaja. Populasi: tiap
-   `compareTo`/`localeCompare`/`sort` atas medan bertipe waktu di ketiga
-   permukaan. Sudah ada `bandingStempel`; yang belum ada penjaganya.
+1. ~~**Stempel waktu dibandingkan sebagai teks — sapuan menyeluruh.**~~ —
+   **TERGARAP**, lihat entri di atas. Yang KETIGA ketemu saat menulis
+   penjaganya (urutan papan terbalik, terukur), dan penjaganya sendiri gagal
+   pada bukti merahnya dua kali sebelum benar.
 2. **Rute yang memilih sendiri cabangnya, arah `auth.branch_id`.** Vena #25
    menyapu `resolveBranchId` (56 rute) dan menulis batasnya sendiri: rute yang
    memakai `auth.branch_id` LANGSUNG tak ikut tersapu.
