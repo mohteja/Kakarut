@@ -1551,6 +1551,140 @@ entri ini punya dua bagian, dan urutannya penting.
 
 ---
 
+## `api()` yang URL-nya dirakit di variabel — web + server — 2026-08-23
+
+Vena ketiga dari usulan lanjutan (usulan #3), dan ia berakhir dengan bentuk
+yang sama seperti putaran lalu: **alatnya TEMUAN, venanya BERSIH.**
+
+Usulan aslinya berbunyi "22 panggilan `api()` tak terbaca sapuan #25". Angka itu
+**cocok persis**. Yang tidak diduga: dua kebutaan LAIN di gerbang yang sama,
+keduanya lebih besar.
+
+### Populasi
+
+| ukuran | gerbang #25 | sesudah |
+|---|---|---|
+| panggilan `api(` yang TERLIHAT di `apps/web/src` | **303** | **322** |
+| · URL literal diawali `/` | 300 | 300 |
+| · URL dirakit di variabel | dilewati (**22**) | diresolusi |
+| rute terpetakan | **247** | **273** |
+| · ber-`resolveBranchId` | **56** | **58** |
+| jalur **HANTU** yang dikarang pemeta | **4** | **0** |
+| **pemanggil yang benar-benar DINILAI** | **13** | **75** |
+| Dart · panggilan HTTP `lib/` literal / variabel | 165 / **3** | — |
+
+**Tiga belas.** Gerbang yang entri #25 tulis sebagai "tujuh pintu diukur"
+sesungguhnya menilai 13 dari 322 panggilan `api(` — bukan karena 13 yang
+relevan, melainkan karena tiga kebutaan bertumpuk.
+
+### Tiga sebabnya, masing-masing bisa ditunjuk barisnya
+
+1. **Peta rute memakai `export const X = new Hono` PERTAMA untuk seluruh
+   berkas.** `modules/customer/routes.ts` mengekspor dua Hono yang keduanya
+   terpasang (`memberCariRoutes` → `/member-cari`, lalu `customerRoutes` →
+   `/customer`), jadi sepuluh rute `/customer/*` tercatat sebagai HANTU
+   `/member-cari/*`. Kelas yang sama dengan `re.search` yang memungut pembantu
+   senama pertama di vena #18 — dan jalur hantu lebih buruk daripada jalur yang
+   hilang: pemanggil bisa dicocokkan ke rute yang tak pernah ada.
+2. **Modul yang lahir dari PABRIK tak terlihat sama sekali.**
+   `export const produksiRoutes = buatRuteTambahStok("produksi")` (dan
+   `pembelianRoutes = …("beli")`) tak pernah cocok dengan pola `= new Hono`,
+   jadi **13 rute × 2 prefiks = 26 jalur** hilang, dua di antaranya memilih
+   cabang (`GET /produksi`, `GET /pembelian`).
+3. **Regex pemindai patah pada `;` di argumen tipe.**
+   `api\s*(?:<[^;]{0,200}?>)?\s*\(` tak mengenali
+   `api<{ ok: true; jumlah: number; tanggal: string }>("/stok/awal", …)` —
+   **23 dari 322** panggilan tak pernah ada baginya.
+
+Dan satu lagi yang ketemu SAAT MEMPERBAIKI, bukan saat mengintai:
+normalisasi jalur mengubah `` `/meja/tata-letak${branchQuery}` `` jadi
+`/meja/tata-letak:x`, yang tak cocok ke rute mana pun — jadi tiap pemanggil
+yang menempelkan query lewat interpolasi ikut dilewati. Itu penyumbang terbesar
+dari 13 → 75.
+
+### Detektor DIBUKTIKAN bisa menuduh — dan buktinya berpasangan
+
+Bukti merah yang paling menentukan, karena ia memisahkan gerbang lama dari yang
+baru pada bug yang SAMA. `RekomendasiBeliPage.buildUrl()` dicabut
+`branchQuery`-nya (suntikan di-assert mendarat lebih dulu):
+
+| | pemanggil dinilai | hasil |
+|---|---|---|
+| pipa **lama** | 13 → **13** | **HIJAU** — `api(buildUrl())` dilewati, bugnya tak terlihat |
+| gerbang **baru** | 75 | **MERAH** di `pages/produksi/RekomendasiBeliPage.tsx:89` |
+
+Suntikan kedua (`MejaPage` kehilangan `${branchQuery}`) juga tertuduh di berkas
+& baris yang tepat — **dan pipa lama pun menangkapnya** (13 → 14). Itu ditulis
+apa adanya: untuk idiom "ekor `${branchQuery}`", kebutaan normalisasinya
+**saling meniadakan** — URL yang membawa cabang tak terlihat, yang kehilangan
+cabang jadi terlihat. Jadi kebutaan itu nyata sebagai cakupan, bukan sebagai
+lubang untuk idiom itu sendiri.
+
+Sebelas uji sintetis menjaga tiap bagian penelusurnya, tiap-tiap berpasangan
+dengan bentuk lama yang digantikannya (`REGEX_LAMA` disimpan di dalam berkas
+ujinya sebagai alat ukur, seperti `butaNaif` putaran lalu).
+
+### Empat kali penelusurnya menuduh kode yang benar, dan semuanya diperbaiki
+
+Tak satu pun dikirim; masing-masing ketemu karena tuduhannya diperiksa tangan.
+
+1. `PerlengkapanPage:370` tertuduh atas `GET /perlengkapan` — panggilannya
+   `method: item ? "PUT" : "POST"`, dan pembaca metodenya hanya mengenali
+   `method: "PUT"`, jadi terbaca GET.
+2. `KategoriManagerModal:37` tertuduh atas `GET /perlengkapan` — pencarian prop
+   menyapu **tiap** `endpoint=` di seluruh `apps/web`, jadi ia mewarisi nilai
+   milik `RiwayatHargaModal`. Diperbaiki: hanya tag komponen yang
+   DIDEFINISIKAN di berkas itu.
+3. `ShiftDetailModal:49` & `RiwayatPage:41` tertuduh atas `/shift` & `/penjualan` —
+   ekor `${id}` yang merupakan RUAS jalur ikut dilucuti, jadi pemanggil DETAIL
+   dicocokkan ke rute DAFTAR. Diperbaiki: ekor hanya dilucuti bila ia menempel
+   pada ruas (`…tata-letak${q}`), bukan bila ia ruas tersendiri (`/penjualan/${id}`).
+4. Penelusur versi pertama memungut literal template dengan regex, dan berhenti
+   di backtick BERSARANG — `` `/rekomendasi/beli${branchQuery ? `…` : "?"}…` ``
+   terpotong jadi `/rekomendasi/beli${branchQuery ? `. Akibatnya penelusurnya
+   **tampak** bekerja (bukti merahnya menuduh, karena bentuk suntikannya
+   sederhana) padahal pada kode sehat ia menyumbang **NOL** pemanggil. Ketahuan
+   karena angka `telusur` dicetak dan ternyata 0 — bukan karena ada uji merah.
+
+### Hasil: BERSIH
+
+Dengan 75 pemanggil dinilai (dari 13), **nol** temuan perilaku. Ketujuh
+tuduhan yang tersisa ditelusuri satu per satu dan semuanya sah; tiga di
+antaranya BARU terlihat dan mendapat baris `DIKECUALIKAN` sendiri:
+
+| baru terlihat | kenapa benar |
+|---|---|
+| `TimBerandaPage` → `GET /produksi`, `GET /pembelian` | `/beranda` hanya dirutekan untuk tim/kitchen/bar (`App.tsx:200`) — peran terikat cabang; sebelumnya tak terlihat karena modul pabrik |
+| `StokAwalPage:129` → `POST /stok/awal` | cabang dikirim di BADAN, dan server memilihnya lebih dulu (`stok/routes.ts:621`); sebelumnya tak terlihat karena `;` di argumen tipe |
+
+Keempat URL variabel yang bermuara ke rute pemilih cabang membawa cabangnya:
+`RekomendasiBeliPage.buildUrl()` dan `TambahStokPage:358` sama-sama
+menempelkan `branchQuery`.
+
+**Mobile: 3 panggilan berjalur variabel, ketiganya diperiksa tangan, semuanya
+benar** — `operasional_repository:148` mengirim `branch_id: 'all'`,
+`perlengkapan_repository:199` menempelkan `?branch_id=` bersyarat, dan
+`kasir_repository:241` (`setStrukCabang`) belum punya pemanggil layar sama
+sekali. Tak ada gerbang baru dipasang untuk populasi 3 yang sudah bersih.
+
+### Batas detektor, jujur
+
+- Penelusur nilai berhenti di **dua lompatan**. Nilai yang berpindah lebih jauh
+  dari itu (prop → prop → keadaan router → prop) tak akan teresolusi — dan
+  yang tak teresolusi **disebut namanya** di uji PREMIS, bukan dilewati.
+- Ia melihat nilai LITERAL. Endpoint yang dirakit dari potongan
+  (`"/pro" + jenis`) tak terbaca.
+- Ia menilai apakah cabang ada di URL, bukan apa yang dilakukan server dengan
+  nilainya. Dua pemanggil yang mengirim cabang di BADAN tetap butuh baris
+  pengecualian, dan itu memang benar: badan bukan URL.
+
+### Gerbang
+
+typecheck bersih · `npm test` **2.161 lolos / 177 berkas**. `verify-api` tak
+dijalankan ulang — tak ada rute server yang disentuh, hanya berkas uji.
+
+---
+
 ## ANTREAN HABIS — 2026-08-22
 
 Kedua puluh satu vena di antrean awal sudah digarap. Yang tersisa di bawah
@@ -1569,9 +1703,11 @@ bukan dari daftar awal.
    15 pembacaan `?branch_id=` menyusun saringan sendiri tanpa memeriksa
    kepemilikan — termasuk operasi massal yang melaporkan sukses atas cabang yang
    tak ada. Ditemukan lebih dulu: pengupas komentarku sendiri buta di 7 salinan.
-3. **`api()` yang URL-nya dirakit di variabel.** 22 panggilan tak terbaca
-   sapuan #25; keduanya sekarang punya alat penelusur turunan yang bisa dipakai
-   ulang.
+3. ~~**`api()` yang URL-nya dirakit di variabel.**~~ — **TERGARAP**, lihat
+   entri di atas. Angka 22-nya cocok persis, tapi venanya BERSIH dan yang
+   TEMUAN justru gerbangnya: ia menilai **13** dari 322 panggilan `api(`, dan
+   pemetanya mengarang 4 jalur hantu sambil kehilangan 31 rute. Sesudah
+   diperbaiki: **75** pemanggil dinilai, nol temuan perilaku.
 4. **Layar baru: target durasi per menu & laporan `/laporan/durasi-pesanan` di
    ponsel.** Bukan medan yang tak terurai — fitur yang belum dibuat.
 5. **Server menerima `branch_id` di badan `/meja/tata-letak` lalu membuangnya.**
