@@ -24,7 +24,7 @@ import {
   productions,
   users,
 } from "../../db/schema";
-import { requireRole, resolveBranchId, terikatCabang, type AppEnv } from "../../middleware/auth";
+import { requireRole, resolveBranchId, terikatCabang, type AppEnv, cabangDariQuery} from "../../middleware/auth";
 import {
   ketersediaanMenu,
   komponenEfektif,
@@ -284,8 +284,9 @@ export const menuRoutes = new Hono<AppEnv>()
     const includeInactive = c.req.query("semua") === "true";
     // Kasir SELALU dibatasi menu cabangnya; owner/admin bisa memfilter via
     // ?branch_id= (tanpa param = katalog penuh untuk halaman manajemen).
-    const branchFilter =
-      terikatCabang(c.get("auth").role) ? auth.branch_id : c.req.query("branch_id") || null;
+    const branchFilter = terikatCabang(auth.role)
+      ? auth.branch_id
+      : await cabangDariQuery(c);
     const dtos = katalog.rows
       .filter((r) => (includeInactive ? true : r.isActive))
       .filter((r) => (kategoriFilter ? r.categoryId === kategoriFilter : true))

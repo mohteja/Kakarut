@@ -27,6 +27,7 @@ import {
   resolveBranchId,
   terikatCabang,
   type AppEnv,
+  cabangDariQuery,
 } from "../../middleware/auth";
 import { kunciAntrean } from "../../lib/kunci";
 import { tanpaBentrok } from "../../lib/pg-galat";
@@ -475,7 +476,7 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
     const auth = c.get("auth");
     let ckFilter: string | undefined;
     if (terikatCabang(auth.role)) ckFilter = auth.branch_id ?? undefined;
-    else ckFilter = c.req.query("branch_id") || undefined;
+    else ckFilter = (await cabangDariQuery(c)) ?? undefined;
     return c.json(await daftarBeliPerlengkapan(auth.company_id!, ckFilter));
   })
   /**
@@ -616,7 +617,7 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
    */
   .post("/beli/batal-semua", requireRole("owner", "admin"), async (c) => {
     const auth = c.get("auth");
-    const ckId = c.req.query("branch_id") || undefined;
+    const ckId = (await cabangDariQuery(c)) ?? undefined;
     return c.json(await batalSemuaBeliPerlengkapan(auth.company_id!, ckId));
   })
   /** Batalkan semua baris 'menunggu' satu faktur beli perlengkapan. owner/admin. */

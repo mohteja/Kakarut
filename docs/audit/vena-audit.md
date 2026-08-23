@@ -1386,6 +1386,171 @@ alasan yang bisa ditunjuk: kelas ini sudah menggigit **dua kali**, dan
 
 ---
 
+## Cabang dari query dipilih di luar `resolveBranchId` — server — 2026-08-23
+
+Vena kedua dari usulan lanjutan (usulan #2). Yang ditemukan lebih dulu bukan
+venanya, melainkan **cacat di alat yang kupakai untuk mengukurnya** — jadi
+entri ini punya dua bagian, dan urutannya penting.
+
+### Bagian A — pengupas komentar buta, dan sapuannya tetap melapor
+
+- **Gejala**: sapuan pertama vena ini mengurai **19 rute dari 40 berkas rute**,
+  lalu melaporkan angkanya seperti biasa. Instrumentasi menunjukkan tabel
+  `.route(...)` di `app.ts` tak pernah terbaca.
+- **Sebabnya satu baris**, `apps/server/src/app.ts:144`:
+
+  ```ts
+  .use("/admin/*", requireAuth, requireSuperAdmin)
+  ```
+
+  `/*` **di dalam string literal**. Pengupas komentar naif menilai `/` tanpa
+  tahu ia ada di mana, membacanya sebagai pembuka komentar blok, dan menelan
+  **12.363 aksara** sisa berkas.
+- **Salinannya ada TUJUH** — empat TS, tiga Dart — semuanya versi naif yang
+  sama. Kelas "aturan ditulis sekali, disalin, lalu menyimpang" ternyata berlaku
+  pada perkakas auditnya sendiri.
+- **Kebutaan terukur** (pengupas naif vs pengupas leksikal, aksara yang
+  hasilnya BERBEDA):
+
+  | akar | berkas | terdampak | aksara |
+  |---|---|---|---|
+  | `apps/server/src` | 106 | 9 | **6.307** (4.167 di `app.ts` saja) |
+  | `apps/web/src` | 133 | 2 | **104** |
+  | `packages/shared/src` | 21 | 0 | 0 |
+  | `kakarut-mobile/lib` | 123 | 3 | **157** (semuanya `//` di dalam `https://…`) |
+
+- **Dampak pada gerbang yang SUDAH terkirim: nol, dan itu diukur bukan
+  diandaikan.** `formatRupiah` 203/203 · `queryKey:` 346/346 ·
+  `z.string().datetime(` 2/2 · `terikatCabang(` 35/35 · `resolveBranchId(`
+  61/61. Yang berubah hanya tabel rute `app.ts` (261 → 263), dan
+  `cabang-ikut-di-url.test.ts` membaca berkas itu **mentah**, jadi ia tak pernah
+  terkena. Tak ada temuan lama yang perlu ditarik.
+- **Versi antara pun masih salah, dengan cara lain.** Pengupas yang cuma
+  melewati string literal terpeleset di `/[",\n]/` — sebuah **regex** yang
+  memuat kutip ganda; kutip itu membuka string palsu yang menelan komentar
+  dokumentasi di bawahnya (`apps/web/src/lib/bahanCsv.ts:36`). Kebutaan berubah
+  jadi tuduhan palsu, dan itu pertukaran yang lebih buruk (pagar #3).
+- **Tindak**: satu rumah per repo —
+  `apps/server/src/scripts/buta-komentar.ts` dan
+  `kakarut-mobile/test/util/buta_komentar.dart`; tujuh salinan dihapus, enam
+  pemakai mengimpor. Pemindainya melewati string, template `${…}` (yang
+  isinya kode lagi), literal regex (TS) serta string mentah/tiga-kutip dan
+  komentar blok **bersarang** (Dart) sebelum menilai pembuka komentar. Kutip
+  ganjil dibatasi berhenti di `\n`, jadi kerusakan terburuknya satu baris.
+- **Detektor DIBUKTIKAN bisa menuduh — dan buktinya permanen**: `butaNaif`
+  disimpan **di dalam** kedua berkas uji sebagai alat ukur. Tiap sifat diuji
+  berpasangan: sekali menuntut versi baru benar, sekali menuntut versi naif
+  memang gagal di situ (`expect(butaNaif(app)).not.toContain('.route("/admin/tenants"')`,
+  dan selisihnya > 4.000 aksara). Uji yang cuma menyatakan pengupasnya ada,
+  tanpa pasangan itu, tak membuktikan ia perlu.
+- **Kesetaraan port diverifikasi**: implementasi TS diadu dengan referensi
+  Python atas **260 berkas** — sama persis; 12 berkas yang tampak berbeda
+  ternyata cuma artefak indeks UTF-16 vs titik-kode (semuanya memuat emoji),
+  dan setara lagi sesudah emoji dinetralkan.
+
+### Bagian B — venanya, dengan pengurai yang benar
+
+- **Populasi** (sapuan ulang, seluruh `apps/server/src`):
+
+  | ukuran | angka |
+  |---|---|
+  | deklarasi rute berjalur literal | **263** |
+  | pemanggilan `resolveBranchId(` | **61** |
+  | pemakaian `terikatCabang(` | **35** di 13 berkas |
+  | pembacaan `c.req.query("branch_id")` | **15** |
+
+  Angka "511/515 rute" dari sapuan pertamaku **salah dan dikoreksi di sini**:
+  pola `.get("…"` ikut menangkap `c.get("auth")`.
+
+- **Rumusan mentah usulan #2 ternyata BERSIH, dan itu dikatakan begitu.** Dari
+  39 pembacaan `auth.branch_id` di handler tanpa `resolveBranchId`, **34** ada
+  di dalam cabang `terikatCabang(...)` dan **5** dicapai owner/admin — kelimanya
+  benar: `GET /auth/me` ×2 memang melaporkan cabang penggunanya sendiri, dan
+  tiga sisanya di middleware izin `izinkanManajemenAtauKaryawanCk` /
+  `izinkanProduksi` (`app.ts:161,165,181`), tempat `auth.branch_id` dipakai
+  sebagai **identitas**, bukan pilihan.
+
+- **Yang tidak bersih ada satu lapis di bawahnya**: dari 15 pembacaan
+  `c.req.query("branch_id")`, satu di rumahnya dan enam adalah penanda
+  pelebaran `=== "all"` yang selalu berpasangan dengan `resolveBranchId`.
+  **Delapan sisanya menyusun saringan cabang sendiri, dan tak satu pun
+  memeriksa cabang itu milik perusahaan ini.**
+
+- **Hasil: TEMUAN.** Terukur lewat HTTP sungguhan, owner Basooopa,
+  `?branch_id=` satu UUID cabang perusahaan **lain**:
+
+  | rute | pemilihnya | sebelum | sesudah |
+  |---|---|---|---|
+  | `GET /meja` | `resolveBranchId` | **404** ← aturannya | 404 |
+  | `GET /menu` | tulisan tangan | 200, **80 dari 81** menu | **404** |
+  | `GET /perlengkapan/beli` | tulisan tangan | 200, **0 dari 53** baris | **404** |
+  | `GET /kebersihan/area` | `saringCabang` (bentuk saja) | 200, **2 dari 3** area | **404** |
+  | `GET /kebersihan` | `saringCabang` | 200, 0 baris | **404** |
+  | `GET /pengajuan` | tulisan tangan | 200, 0 baris | **404** |
+  | `GET /absensi/rekap` | tulisan tangan | 200, 0 baris | **404** |
+  | `POST /perlengkapan/beli/batal-semua` | tulisan tangan | 200 `{"ok":true,"jumlah":0}` | **404** |
+
+  Yang terakhir intinya: **operasi massal melaporkan sukses atas cabang yang tak
+  ada**. Operatornya mengira sudah membersihkan; tak ada satu baris pun
+  tersentuh.
+
+- **Bukan kebocoran lintas-perusahaan, dan itu ditulis apa adanya.**
+  `company_id` selalu ikut di WHERE, jadi tak ada data perusahaan lain yang
+  terlihat. Yang diperbaiki **letak aturannya**, bukan lubang data — aman yang
+  datang dari konjungsi di kueri lain adalah aman yang bisa hilang tanpa ada
+  yang menyadarinya. Kalimat itu bukan karanganku: komentar
+  `cabangTujuanPenulisan` di berkas yang **sama** sudah menuliskannya, untuk
+  paruh badan-permintaan dari aturan yang sama.
+
+- **Dua rute malah baru SEMBUH.** Sebelum perbaikan
+  `GET /perlengkapan/beli?branch_id=all` → **400** (nilai `"all"` masuk ke
+  perbandingan kolom uuid) dan `GET /menu?branch_id=all` → katalog kosong —
+  padahal `all` adalah nilai yang dipakai setiap daftar lain. Sesudahnya
+  keduanya 200 dengan isi penuh (53 dan 81).
+
+- **Tindak**: satu pintu baru bersebelahan dengan `pastikanCabang` —
+  `cabangDariQuery(c)` di `apps/server/src/middleware/auth.ts`: tak dikirim /
+  `all` → `null` (tak menyaring); bukan UUID → 400 bernama; UUID → 
+  `pastikanCabang` → 404 bila bukan milik perusahaan ini. Delapan situs
+  memakainya; `saringCabang` lokal di `kebersihan/routes.ts` dihapus karena
+  aturannya pindah utuh.
+
+- **Gerbang + bukti merah**: `apps/server/test/cabang-satu-pemilih.test.ts`
+  (12 uji). Detektornya dipisah jadi fungsi murni supaya bukti merahnya bisa
+  dijalankan atas masukan **sintetis** — kelima bentuk mentah yang dipakai
+  kedelapan rute sebelum perbaikan diadukan satu per satu, dan ketiga bentuk
+  `=== "all"` yang sah dipastikan **tidak** tertuduh. Lalu bukti merah atas
+  pohon sungguhan: `menu/routes.ts` dikembalikan ke bentuk lamanya (suntikan
+  di-assert mendarat lebih dulu), sapuan menuduh `modules/menu/routes.ts:289`
+  — berkas dan baris yang tepat.
+- **Perilakunya dijaga terpisah dari bentuknya**: `verify-api.sh` §239, 25
+  asersi — kedelapan rute 404 untuk cabang asing, plus pasangan
+  anti-hijau-palsu (cabang sendiri tetap 200, `all` tetap 200, `/menu` tanpa
+  param tetap penuh, nilai sampah 400 bernama). Bentuk yang benar dengan hasil
+  yang salah tetap bug, jadi keduanya perlu.
+- **Anti-hijau-palsu untuk penyaringnya sendiri**: satu menu dibatasi ke cabang
+  Pusat lewat `menu_branches`, lalu `?branch_id=` cabang LAIN **milik
+  perusahaan yang sama** → 80 dari 81 (menunya hilang, benar), `?branch_id=`
+  Pusat → 81. Jadi yang ditolak hanya cabang asing; penyaringan sahnya utuh.
+- **Batas detektor, jujur**: gerbangnya melihat **bentuk pembacaan query**,
+  bukan apa yang terjadi pada nilainya sesudah itu. Rute yang memanggil
+  `cabangDariQuery` lalu mengabaikan hasilnya tetap hijau. Ia juga tak melihat
+  `branch_id` yang datang lewat **badan** permintaan (itu wilayah
+  `cabangTujuanPenulisan`) maupun lewat parameter jalur.
+- **Gerbang**: typecheck bersih · `npm test` **2.147 lolos / 177 berkas** ·
+  `verify-api.sh` **2.810 lolos, 0 gagal** (DB segar) · `audit:invarian` 26/0 ·
+  build web bersih · `flutter analyze` bersih · `flutter test` **467**.
+
+### Aturan 7 untuk ledger ini
+
+> **ALAT UKURNYA IKUT DIUJI.** Sapuan yang tak dibuktikan membaca apa yang
+> seharusnya dibacanya membuat setiap "BERSIH" di atasnya berarti "tidak
+> terbaca", bukan "aman" — dan tak ada satu uji pun yang berubah warna saat itu
+> terjadi. Aturan 1 menuntut detektornya bisa MENUDUH; aturan 7 menuntut ia
+> juga bisa MELIHAT.
+
+---
+
 ## ANTREAN HABIS — 2026-08-22
 
 Kedua puluh satu vena di antrean awal sudah digarap. Yang tersisa di bawah
@@ -1398,9 +1563,12 @@ bukan dari daftar awal.
    **TERGARAP**, lihat entri di atas. Yang KETIGA ketemu saat menulis
    penjaganya (urutan papan terbalik, terukur), dan penjaganya sendiri gagal
    pada bukti merahnya dua kali sebelum benar.
-2. **Rute yang memilih sendiri cabangnya, arah `auth.branch_id`.** Vena #25
-   menyapu `resolveBranchId` (56 rute) dan menulis batasnya sendiri: rute yang
-   memakai `auth.branch_id` LANGSUNG tak ikut tersapu.
+2. ~~**Rute yang memilih sendiri cabangnya, arah `auth.branch_id`.**~~ —
+   **TERGARAP**, lihat entri di atas. Rumusan mentahnya BERSIH (39 pembacaan:
+   34 di dalam `terikatCabang`, 5 benar). Temuannya satu lapis di bawah: 8 dari
+   15 pembacaan `?branch_id=` menyusun saringan sendiri tanpa memeriksa
+   kepemilikan — termasuk operasi massal yang melaporkan sukses atas cabang yang
+   tak ada. Ditemukan lebih dulu: pengupas komentarku sendiri buta di 7 salinan.
 3. **`api()` yang URL-nya dirakit di variabel.** 22 panggilan tak terbaca
    sapuan #25; keduanya sekarang punya alat penelusur turunan yang bisa dipakai
    ulang.

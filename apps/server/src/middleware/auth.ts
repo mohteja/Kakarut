@@ -160,6 +160,52 @@ export async function pastikanCabang(branchId: string, companyId: string): Promi
   return b.id;
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * CABANG PILIHAN DARI QUERY — satu-satunya pintu untuk `?branch_id=` pada rute
+ * yang artinya "tanpa param = semua cabang".
+ *
+ * Bedanya dengan `resolveBranchId`: di sana tak menyebut cabang berarti "cabang
+ * aktif pertama", jadi selalu ada SATU cabang. Di sini tak menyebut cabang (dan
+ * `all`) berarti TAK menyaring sama sekali. Dua arti yang sah, dua pintu — yang
+ * tidak boleh berbeda adalah apa yang terjadi pada nilai yang DISEBUT.
+ *
+ * Dulu berbeda, dan terukur. Delapan rute menyusun sendiri saringannya dari
+ * `c.req.query("branch_id")`, dan tak satu pun memeriksa cabangnya milik
+ * perusahaan ini. Dengan owner Basooopa dan `?branch_id=` sebuah UUID cabang
+ * perusahaan LAIN (2026-08-23, HTTP sungguhan):
+ *
+ *     GET  /meja                        → 404 "Cabang tidak ditemukan"   ← aturannya
+ *     GET  /menu                        → 200, 80 dari 81 menu (satu hilang diam-diam)
+ *     GET  /perlengkapan/beli           → 200, 0 dari 53 baris
+ *     GET  /kebersihan/area             → 200, 2 dari 3 area
+ *     GET  /pengajuan                   → 200, 0 baris
+ *     GET  /absensi/rekap               → 200, 0 baris
+ *     POST /perlengkapan/beli/batal-semua → 200 {"ok":true,"jumlah":0}
+ *
+ * Yang terakhir itu intinya: operasi MASSAL yang melaporkan sukses atas cabang
+ * yang tak ada. Tak ada kebocoran lintas-perusahaan — `company_id` selalu ikut
+ * di WHERE — tapi amannya datang dari konjungsi lain, bukan dari aturannya. Itu
+ * persis yang sudah ditulis komentar `cabangTujuanPenulisan` di bawah: aman
+ * yang bergantung pada gerbang di tempat lain adalah aman yang bisa hilang
+ * tanpa ada yang menyadarinya.
+ *
+ * Bentuk UUID diperiksa lebih dulu supaya nilai sampah jadi 400 yang bisa
+ * ditindaklanjuti, bukan 22P02 dari Postgres yang diterjemahkan belakangan
+ * (dan ikut mengotori panel galat).
+ *
+ * Memulangkan `null` bila tak menyaring.
+ */
+export async function cabangDariQuery(c: Context<AppEnv>): Promise<string | null> {
+  const v = c.req.query("branch_id");
+  if (!v || v === "all") return null;
+  if (!UUID_RE.test(v)) {
+    throw new HTTPException(400, { message: "branch_id bukan UUID yang sah" });
+  }
+  return pastikanCabang(v, c.get("auth").company_id!);
+}
+
 /**
  * Peran yang TERIKAT ke satu cabang (kasir, tim, kitchen & bar) — selalu
  * terkunci ke cabangnya sendiri; owner/admin bebas lintas cabang.

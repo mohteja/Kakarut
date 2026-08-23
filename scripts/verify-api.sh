@@ -13141,6 +13141,68 @@ cek "member tanpa transaksi tetap dibalas 0, bukan null" "V == 1" \
 
 echo
 echo
+echo "── §239 Cabang dari query: SATU pintu, satu jawaban ──"
+#
+# `?branch_id=` yang menunjuk cabang BUKAN milik perusahaan ini harus dijawab
+# sama di mana pun: 404. Aturannya sudah ada sejak lama di `resolveBranchId` →
+# `pastikanCabang`, dipakai 61 kali — tapi DELAPAN rute menyusun sendiri
+# saringannya dari `c.req.query("branch_id")` dan tak satu pun memeriksa
+# kepemilikannya. Terukur sebelum perbaikan, owner, satu UUID cabang perusahaan
+# lain:
+#
+#   GET  /meja                          404   ← aturannya
+#   GET  /menu                          200, 80 dari 81 menu (satu hilang diam-diam)
+#   GET  /perlengkapan/beli             200, 0 dari 53 baris
+#   GET  /kebersihan/area               200, 2 dari 3 area
+#   GET  /kebersihan                    200, 0 baris
+#   GET  /pengajuan                     200, 0 baris
+#   GET  /absensi/rekap                 200, 0 baris
+#   POST /perlengkapan/beli/batal-semua 200 {"ok":true,"jumlah":0}
+#
+# Yang terakhir itu intinya: operasi MASSAL melaporkan sukses atas cabang yang
+# tak ada. Tak ada kebocoran lintas-perusahaan — `company_id` selalu ikut di
+# WHERE — jadi yang diperbaiki LETAK aturannya, bukan lubang data. Aman yang
+# datang dari konjungsi lain adalah aman yang bisa hilang tanpa ada yang tahu.
+#
+# Uji gerbang `cabang-satu-pemilih.test.ts` menjaga BENTUKNYA di sumber; seksi
+# ini menjaga PERILAKUNYA lewat HTTP. Keduanya perlu: bentuk yang benar dengan
+# hasil yang salah tetap bug.
+ASING239=00000000-0000-4000-8000-000000000000
+CAB239=$(api "$OWNER" GET /cabang | jq -r '.[0].id')
+cek "premis: cabang perusahaan ini terbaca (kalau tidak, seksi ini hampa)" "V == 1" \
+  "$(printf '%s' "$CAB239" | grep -cE '^[0-9a-f-]{36}$' || true)"
+cek "premis: cabang asing memang BUKAN milik perusahaan ini" "V == 0" \
+  "$(api "$OWNER" GET /cabang | jq --arg x "$ASING239" '[.[] | select(.id == $x)] | length')"
+
+# Pembanding — jawaban yang BENAR, dari rute yang sudah memakai resolveBranchId.
+cek "acuan: GET /meja?branch_id=<asing> → 404" "V == 404" \
+  "$(status_code "$OWNER" GET "/meja?branch_id=$ASING239")"
+
+for R239 in "/menu" "/perlengkapan/beli" "/kebersihan/area" "/kebersihan" "/pengajuan" "/absensi/rekap"; do
+  cek "GET $R239?branch_id=<asing> → 404, sama seperti /meja" "V == 404" \
+    "$(status_code "$OWNER" GET "$R239?branch_id=$ASING239")"
+done
+cek "POST /perlengkapan/beli/batal-semua?branch_id=<asing> → 404, bukan {ok:true}" "V == 404" \
+  "$(status_code "$OWNER" POST "/perlengkapan/beli/batal-semua?branch_id=$ASING239")"
+
+# ── Pasangan anti-hijau-palsu: yang SAH harus tetap hidup ──────────────────
+# Tanpa blok ini, "semua 404" bisa dicapai dengan merusak rutenya. Yang diuji
+# di sini justru bahwa penyaringan sahnya tak ikut mati.
+for R239 in "/menu" "/perlengkapan/beli" "/kebersihan/area" "/kebersihan" "/pengajuan" "/absensi/rekap"; do
+  cek "GET $R239?branch_id=<cabang sendiri> tetap 200" "V == 200" \
+    "$(status_code "$OWNER" GET "$R239?branch_id=$CAB239")"
+  cek "GET $R239?branch_id=all tetap 200" "V == 200" \
+    "$(status_code "$OWNER" GET "$R239?branch_id=all")"
+done
+cek "GET /menu tanpa branch_id tetap 200 (katalog penuh)" "V == 200" \
+  "$(status_code "$OWNER" GET "/menu")"
+cek "nilai sampah dijawab 400 yang bisa dibaca, bukan 500" "V == 400" \
+  "$(status_code "$OWNER" GET "/menu?branch_id=bukan-uuid")"
+cek "…pesannya menyebut branch_id, bukan 'kesalahan server'" "V == 1" \
+  "$(api "$OWNER" GET "/menu?branch_id=bukan-uuid" | jq '((.message // .error) | test("branch_id")) | if . then 1 else 0 end')"
+
+echo
+echo
 echo "── §209 Rute mati: verify-api tak boleh memanggil endpoint yang TIDAK ADA ──"
 # Duduk PALING AKHIR di berkas ini walau nomornya bukan yang terbesar: ia baru
 # boleh menghakimi sesudah semua seksi lain menembakkan panggilannya.

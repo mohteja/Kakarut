@@ -19,7 +19,7 @@ import {
 import { db } from "../../db/client";
 import { attendances, branches, companies, memberships, users } from "../../db/schema";
 import { tanggalDi } from "../../lib/time";
-import { requireRole, resolveBranchId, type AppEnv } from "../../middleware/auth";
+import { requireRole, resolveBranchId, type AppEnv, cabangDariQuery} from "../../middleware/auth";
 import {
   jumlahHari,
   pengajuanDisetujuiPadaRentang,
@@ -544,8 +544,7 @@ export const absensiRoutes = new Hono<AppEnv>()
     // Batas kanan jendela: hari ini bila bulan berjalan, akhir bulan bila sudah lewat.
     const batasHitung = hariIni < dari ? null : hariIni < sampai ? hariIni : sampai;
 
-    const branchQ = c.req.query("branch_id");
-    const branchId = branchQ && branchQ !== "all" ? branchQ : undefined;
+    const branchId = (await cabangDariQuery(c)) ?? undefined;
 
     // (1) Karyawan mana yang masuk daftar — `?status=`:
     //   aktif (bawaan) : keanggotaan belum diarsipkan — daftar kerja sehari-hari

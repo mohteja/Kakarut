@@ -13,7 +13,7 @@ import { db } from "../../db/client";
 import { branches, leaveRequests, memberships, users } from "../../db/schema";
 import { kunciAntrean } from "../../lib/kunci";
 import { tambahHari } from "../../lib/time";
-import { requireRole, terikatCabang, type AppEnv } from "../../middleware/auth";
+import { requireRole, terikatCabang, type AppEnv, cabangDariQuery} from "../../middleware/auth";
 
 /**
  * PENGAJUAN CUTI & LIBUR. Semua peran boleh MENGAJUKAN (gerbang grup di app.ts
@@ -154,10 +154,8 @@ export const pengajuanRoutes = new Hono<AppEnv>()
     if (hanyaMilikSendiri(auth.role, c.req.query("saya"))) {
       syarat.push(eq(leaveRequests.userId, auth.sub));
     } else {
-      const branchId = c.req.query("branch_id");
-      if (branchId && branchId !== "all") {
-        syarat.push(eq(leaveRequests.branchId, branchId));
-      }
+      const branchId = await cabangDariQuery(c);
+      if (branchId) syarat.push(eq(leaveRequests.branchId, branchId));
     }
 
     const status = c.req.query("status");
