@@ -1,5 +1,5 @@
 import { zValidator } from "../../lib/validator";
-import { BATAS_FAKTOR, BATAS_HARGA, BATAS_QTY_STOK, BATAS_URUTAN } from "../../lib/batas-angka";
+import { BATAS_FAKTOR, BATAS_HARGA, BATAS_QTY_RESEP, BATAS_QTY_STOK, BATAS_URUTAN } from "../../lib/batas-angka";
 import { and, desc, eq, inArray, isNotNull, isNull, max, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -36,7 +36,9 @@ import {
 
 const KomponenBody = z.object({
   ingredient_id: z.string().uuid(),
-  qty: z.number().positive().max(BATAS_QTY_STOK),
+  // Kolomnya `menu_components.qty` = numeric(12,4), BUKAN numeric(16,6) milik
+  // stok. Batas stok di sini meloloskan nilai yang mustahil disimpan.
+  qty: z.number().positive().max(BATAS_QTY_RESEP),
 });
 
 const MenuCreateBody = z.object({

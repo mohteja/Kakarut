@@ -26,6 +26,31 @@ tanpa akses repo server.
 ---
 
 
+## Rilis: Takaran resep berbatas 99.999.999 (dulu 9.999.999.999 lalu 500)
+
+> Tidak ada migrasi, tidak ada medan baru, tidak ada bentuk balasan yang berubah.
+
+⚪️ **INFO** — ponsel tidak menulis resep sama sekali (tambah/ubah menu & resep
+tetap di web), jadi tak ada yang perlu dikerjakan. Dicatat karena ia perubahan
+kontrak: rentang nilai yang diterima menyempit.
+
+**Belum tayang.**
+
+`komponen[].qty` pada `POST/PUT /menu` dan `PUT /bahan/:id/resep` dibatasi
+`BATAS_QTY_STOK` (9.999.999.999) — batas kolom **stok** `numeric(16,6)`.
+Kolomnya sendiri `numeric(12,4)`, seratus kali lebih sempit. Terukur:
+
+| permintaan | sebelum | sesudah |
+| --- | --- | --- |
+| `komponen[].qty = 99.999.999` | 201 / 200 | **tetap** 201 / 200 |
+| `komponen[].qty = 100.000.000` | **HTTP 500** | **400** `komponen[0].qty: maksimal 99999999` |
+
+Sembilan setengah miliar nilai lolos validasi lalu ditolak Postgres sebagai
+galat tak tertangani. Yang berubah hanya bentuk penolakannya: 500 tanpa
+keterangan menjadi 400 yang menyebut medan dan batasnya.
+
+---
+
 ## Rilis: Tempat Sampah & anomali kiriman BERLANGIT-LANGIT
 
 > Tidak ada migrasi. Bentuk balasan `GET /sampah` **tidak berubah** — sengaja.

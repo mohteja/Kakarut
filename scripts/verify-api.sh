@@ -13378,6 +13378,67 @@ cek "anomali: tiap faktur pada rows ada di faktur_ids" "V == 0" \
   "$(echo "$AN241" | jq '[.rows[].faktur_id | select(. != null)] - .faktur_ids | length')"
 
 
+echo "── §242 Batas angka ikut PRESISI KOLOMNYA, bukan sekadar ada ──"
+#
+# §234 membuktikan tiap `z.number()` punya `.max()`. Yang tak dibuktikannya:
+# bahwa ANGKANYA cocok dengan kolom tujuannya. Kedua pintu resep memakai
+# `BATAS_QTY_STOK` (9.999.999.999 — batas `numeric(16,6)` milik stok) untuk
+# kolom yang sebenarnya `numeric(12,4)`, seratus kali lebih sempit.
+#
+# TERUKUR sebelum diperbaiki, lewat HTTP terhadap Postgres sungguhan:
+#
+#   POST /menu             komponen[].qty =  99.999.999  → 201
+#   POST /menu             komponen[].qty = 100.000.000  → **500**
+#   PUT  /bahan/:id/resep  komponen[].qty =  99.999.999  → 200
+#   PUT  /bahan/:id/resep  komponen[].qty = 100.000.000  → **500**
+#
+# Sembilan setengah miliar nilai lolos gerbang yang KELIHATANNYA menjaga.
+#
+# Tiap penolakan dipasangkan dengan nilai sah tepat di batasnya — sama seperti
+# §234, dan alasannya sama: penjaga yang menolak data sah lebih merusak
+# daripada bug yang dijaganya.
+KAT242=$(api "$OWNER" GET /kategori | jq -r '.[0].id')
+ING242=$(api "$OWNER" GET /bahan | jq -r '[.[] | select(.pengadaan=="beli")][0].id')
+cek "premis: ada kategori & bahan untuk diuji" "V == 1" \
+  "$( [ -n "$KAT242" ] && [ "$KAT242" != "null" ] && [ -n "$ING242" ] && [ "$ING242" != "null" ] && echo 1 || echo 0 )"
+
+# ── menu_components.qty: numeric(12,4) → muat sampai 99.999.999,9999 ─────
+MK242() { echo "{\"nama\":\"Uji242 $1\",\"category_id\":\"$KAT242\",\"harga_jual\":1000,\"mult\":2,\"komponen\":[{\"ingredient_id\":\"$ING242\",\"qty\":$2}]}"; }
+cek "resep menu: qty = 99.999.999 (tepat di batas) DITERIMA" "V == 201" \
+  "$(status_code_body "$OWNER" POST /menu "$(MK242 a 99999999)")"
+cek "resep menu: qty = 1e8 ditolak 400, BUKAN 500" "V == 400" \
+  "$(status_code_body "$OWNER" POST /menu "$(MK242 b 100000000)")"
+cek "…dan pesannya menyebut medan DAN batas kolomnya" "V == 1" \
+  "$(api "$OWNER" POST /menu "$(MK242 c 100000000)" | jq '(.error | test("qty") and test("99999999")) | if . then 1 else 0 end')"
+# Nilai yang DULU diloloskan batas stok — inilah tepatnya yang meledak.
+cek "resep menu: qty = batas STOK (9.999.999.999) kini ditolak 400" "V == 400" \
+  "$(status_code_body "$OWNER" POST /menu "$(MK242 d 9999999999)")"
+
+# ── ingredient_components.qty: numeric(12,4), pintu saudaranya ───────────
+BP242=$(api "$OWNER" POST /bahan "{\"nama\":\"Induk Resep 242\",\"pengadaan\":\"produksi\",\"harga_beli\":1000,\"isi\":1,\"satuan\":\"pcs\"}" | jq -r '.id')
+cek "premis: bahan produksi baru terbuat" "V == 1" \
+  "$( [ -n "$BP242" ] && [ "$BP242" != "null" ] && echo 1 || echo 0 )"
+RS242() { echo "{\"komponen\":[{\"ingredient_id\":\"$ING242\",\"qty\":$1}]}"; }
+cek "resep bahan: qty = 99.999.999 (tepat di batas) DITERIMA" "V == 200" \
+  "$(status_code_body "$OWNER" PUT "/bahan/$BP242/resep" "$(RS242 99999999)")"
+cek "resep bahan: qty = 1e8 ditolak 400, BUKAN 500" "V == 400" \
+  "$(status_code_body "$OWNER" PUT "/bahan/$BP242/resep" "$(RS242 100000000)")"
+cek "resep bahan: qty = batas STOK kini ditolak 400" "V == 400" \
+  "$(status_code_body "$OWNER" PUT "/bahan/$BP242/resep" "$(RS242 9999999999)")"
+
+# ── PASANGAN: batas STOK yang sah tak boleh ikut diperketat ──────────────
+# Pengetatan yang bocor ke pintu tetangga adalah cara tercepat mengubah
+# perbaikan jadi kerusakan. `ingredients.stok_minimum` memang numeric(16,6),
+# jadi angka yang baru saja ditolak di resep harus TETAP diterima di sini.
+cek "PASANGAN: stok_minimum = 9.999.999.999 tetap DITERIMA (numeric(16,6))" "V == 201" \
+  "$(status_code_body "$OWNER" POST /bahan '{"nama":"Uji242 batas stok","satuan":"pcs","harga_beli":1000,"isi":1,"stok_minimum":9999999999}')"
+# …dan yang ditolak di jalur stok ditolak karena ALASAN LAIN, bukan karena
+# kebesaran. Tanpa memeriksa kalimatnya, "400" saja tak membedakan keduanya —
+# waste memang ditolak bila melebihi saldo, dan itu bukan urusan vena ini.
+cek "PASANGAN: waste yang ditolak BUKAN ditolak sebagai kebesaran" "V == 0" \
+  "$(api "$OWNER" POST /stok/waste "{\"ingredient_id\":\"$ING242\",\"qty\":9999999999,\"foto_url\":\"https://contoh/f.jpg\"}" | jq '(.error // "" | test("maksimal")) | if . then 1 else 0 end')"
+
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

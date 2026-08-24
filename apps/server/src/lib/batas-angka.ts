@@ -50,5 +50,28 @@ export const BATAS_FAKTOR = 9_999;
 /** `numeric(12,4)` — ingredients.isi (isi per kemasan) */
 export const BATAS_ISI = 99_999_999;
 
+/**
+ * `numeric(12,4)` — menu_components.qty, ingredient_components.qty (takaran resep)
+ *
+ * ANGKANYA SAMA DENGAN `BATAS_ISI`, DAN SENGAJA TIDAK DIGABUNG. Keduanya
+ * kebetulan `numeric(12,4)` hari ini; yang satu isi per kemasan, yang satu
+ * takaran resep. Menyatukannya berarti presisi salah satu kolom yang berubah
+ * ikut menyeret kolom yang tak ada hubungannya — persis bentuk yang membuat
+ * berkas ini ada.
+ *
+ * TERUKUR, sebelum konstanta ini ada: kedua pintu resep memakai
+ * `BATAS_QTY_STOK` (9.999.999.999 — batas `numeric(16,6)`), **seratus kali
+ * lebih besar dari kolomnya**:
+ *
+ *   POST /menu           komponen[].qty = 99.999.999   → 201
+ *   POST /menu           komponen[].qty = 100.000.000  → **HTTP 500**
+ *   PUT  /bahan/:id/resep  komponen[].qty = 99.999.999   → 200
+ *   PUT  /bahan/:id/resep  komponen[].qty = 100.000.000  → **HTTP 500**
+ *
+ * Sembilan setengah miliar nilai lolos gerbang yang kelihatannya sudah
+ * menjaga, lalu meledak di Postgres.
+ */
+export const BATAS_QTY_RESEP = 99_999_999;
+
 /** kolom `integer` — sort_order, urutan tampil. Batasnya int32, bukan numeric. */
 export const BATAS_URUTAN = 1_000_000;

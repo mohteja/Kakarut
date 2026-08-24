@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { butaKomentar } from "../src/scripts/buta-komentar";
 
 /**
  * TIAP `z.number()` WAJIB BERBATAS ATAS.
@@ -35,9 +36,13 @@ import { fileURLToPath } from "node:url";
  *
  * BATAS PENJAGA INI, ditulis supaya "hijau" tak terbaca lebih luas dari yang
  * benar: ia menuntut ADANYA `.max()`, bukan bahwa angkanya cocok dengan kolom
- * tujuannya. Pemetaan medan → kolom tak ada di kode, jadi `.max()` yang
- * kebesaran tetap lolos di sini — yang menjaganya `batas-angka.ts`, tempat tiap
- * konstanta menyebut kolomnya.
+ * tujuannya.
+ *
+ * Celah itu MENGGIGIT, dan sekarang ada penjaganya: dua pintu resep memakai
+ * batas `numeric(16,6)` untuk kolom `numeric(12,4)` — 100× kolomnya — dan
+ * `komponen[].qty = 100.000.000` dibalas **HTTP 500** sementara 99.999.999
+ * dibalas 201. Pemetaan medan → kolom kini hidup di
+ * `batas-ikut-presisi-kolom.test.ts`, diturunkan dari `schema.ts`.
  */
 const AKAR = [
   fileURLToPath(new URL("../src", import.meta.url)),
@@ -62,9 +67,7 @@ function berkasTs(dir: string): string[] {
  * sudah terjadi sekali di repo ini (`sql-number-bukan-janji`); ia mengajari
  * orang mengabaikan warna merahnya.
  */
-export function tanpaKomentar(s: string): string {
-  return s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
-}
+export const tanpaKomentar = butaKomentar;
 
 /**
  * Medan yang SENGAJA tanpa batas atas, disebut satu per satu berikut alasannya.

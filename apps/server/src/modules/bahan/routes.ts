@@ -1,5 +1,5 @@
 import { zValidator } from "../../lib/validator";
-import { BATAS_ISI, BATAS_QTY_STOK, BATAS_UANG } from "../../lib/batas-angka";
+import { BATAS_ISI, BATAS_QTY_RESEP, BATAS_QTY_STOK, BATAS_UANG } from "../../lib/batas-angka";
 import { and, asc, desc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Hono } from "hono";
@@ -119,7 +119,9 @@ const BahanPatchBody = z.object({
 
 const ResepBody = z.object({
   komponen: z
-    .array(z.object({ ingredient_id: z.string().uuid(), qty: z.number().positive().max(BATAS_QTY_STOK) }))
+    // Kolomnya `ingredient_components.qty` = numeric(12,4), BUKAN numeric(16,6)
+    // milik stok — lihat BATAS_QTY_RESEP.
+    .array(z.object({ ingredient_id: z.string().uuid(), qty: z.number().positive().max(BATAS_QTY_RESEP) }))
       .max(200)
     .default([]),
   /**
