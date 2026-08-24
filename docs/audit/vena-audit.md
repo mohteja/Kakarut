@@ -50,6 +50,33 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Utang "20 pintu terbuka" bentrok-unik dibayar — server — 2026-08-24
+
+- **Kenapa**: aturan `bentrok-unik` menulis utangnya sendiri — daftar tabelnya
+  berhenti di 14 dari 32 karena sisanya "20 pintu terbuka" yang belum pernah
+  diperiksa satu per satu
+- **Adjudikasi**: angka "20" **kedaluwarsa** — sapuan hari ini (jendela
+  per-pernyataan + kosakata penjaga aturan itu + `pg_advisory`) menyisakan
+  **8**, dan kedelapannya terjaga oleh bentuk yang kosakata aturan tak bisa
+  lihat: indeks **parsial** (`auto_uq` — kelima insert `supply_mutations`
+  bertipe lain), `FOR UPDATE` jauh di atas jendela (`createSale` — terukur 50
+  satu-tick → 50×201 di vena A), dedup `Map` (`replaceKomponen`), dan keunikan
+  atas `sha256(randomBytes(32))` (dua tabel token — bentrok mustahil praktis)
+- **Tindak**: daftar tabel aturan **14 → 32**; 4 berkas / 8 pintu masuk
+  `dasar` **beralasan**; dua baris uji-diri berpindah false → true dengan
+  komentarnya; prosa "kenapa berhenti di 14" diganti kisah adjudikasinya.
+  **Granularitas badan gerbang terbukti lebih pintar dari jendela ±2500-ku**:
+  `createSale` tak tertuduh karena badannya memuat kuncinya
+- **Detektor**: DIBUKTIKAN — `insert(syncCommands)` telanjang disuntik ke
+  berkas netral (di-assert) → tertuduh berkas & barisnya; dicabut → hijau
+- **Batas, tetap tertulis di prosa aturan**: granularitas badan — penjaga sah
+  di pemanggil tetap terbaca telanjang, dan satu penjaga di badan panjang
+  tetap menutupi tulisan lain di bawahnya
+- Gerbang: typecheck bersih · `npm test` **2.208** · hanya berkas uji
+  tersentuh (verify-api tak diulang, disebutkan)
+
+---
+
 ## `pastikanMuat` bernama untuk jalur non-penjualan — server — 2026-08-24
 
 - **Kenapa**: batas #39, dua kali ditulis — jalur non-penjualan hanya
