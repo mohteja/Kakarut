@@ -50,6 +50,40 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## 73 kunci "belum dibaca" dipilah: lima hilang, 68 beralasan — mobile — 2026-08-24
+
+- **Kenapa**: daftar ratchet gerbang kunci-kontrak (**73** kunci) belum pernah
+  **dipilah** — sengaja vs hilang; kelas `durasi_detik` yang dulu ketemu tak
+  sengaja
+- **Hasil**: **LIMA "hilang"** (layar ponselnya sudah ada, kuncinya dibuang),
+  diimplementasi + ditampilkan:
+
+  | kunci | layar |
+  |---|---|
+  | `pesanan_durasi_detik` + `pesanan_selesai_pada` | chip ⏱ di Riwayat Transaksi (formatDurasi yang ada; null tetap null) |
+  | `penjualan_tunai_shift` | stat "Tunai shift" di kartu pantau — payload sungguhan membuktikan dua jendelanya beda & `kas_sistem = modal + tunai SHIFT` |
+  | `lots_terpotong` | baris "menampilkan 300 dari 30.018" di Riwayat Harga |
+  | `faktur_ids` | tanda "barang tidak sampai" di kartu faktur Pengadaan — himpunan populasi penuh, BUKAN diturunkan dari rows (pelajaran vena #36) |
+
+  **68 sisanya beralasan per kelompok** (panel super admin — ponsel tak punya
+  perannya; manajemen menu tetap web per keputusan #34; impor CSV; penugasan
+  tempat SO) — pembaca snapshot kini melewati `#` supaya alasannya hidup di
+  berkas
+- **Detektor**: `kunci_baru_terbaca_test.dart` — tiap kunci diasersi payload
+  utuh **vs** payload dicabut, wajib berbeda; payload dari server sungguhan
+  (durasi 480 menggantikan 0 asli SUPAYA bisa dibedakan dari bentuk diam, dan
+  itu ditulis). Bukti merah mendarat: parse dicabut → dua uji merah
+- **Kesalahanku tercatat**: anchor `required this.rows` cocok di kelas LAIN
+  lebih dulu — `fakturIds` sempat terpasang di kelas yang salah; `flutter
+  analyze` menangkapnya sebelum satu uji pun jalan
+- **Batas**: "ditampilkan" = satu titik render per kunci; kualitas UX-nya
+  bukan urusan gerbang ini. 68 yang beralasan tetap ratchet — kunci baru tanpa
+  keputusan tetap merah
+- Gerbang: `flutter analyze` bersih · `flutter test` **517** (3.44.7) ·
+  commit `e677737` di PR #12
+
+---
+
 ## Arah GANTI-NAMA: 500 di alur harian, telanjang di sebelah saudaranya — server — 2026-08-24
 
 - **Kenapa**: entri klik-ganda menulis *"balapan ganti-nama … berpenjaga
