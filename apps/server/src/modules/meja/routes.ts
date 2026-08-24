@@ -22,8 +22,27 @@ const MejaBody = z.object({
   nama: z.string().trim().min(1),
   tipe: z.enum(["dine_in", "takeaway"]).optional(),
   is_active: z.boolean().optional(),
-});
+}).strict();
 
+/*
+ * SENGAJA TIDAK `.strict()`, dan ini pengecualian BERTANGGAL.
+ *
+ * Ketujuh build ponsel yang pernah rilis (1.0.0+3 … +10) mengirim `branch_id`
+ * di BADAN sini — termasuk build yang terpasang hari ini, karena
+ * perbaikannya (`4e02a0b`, cabang dipindah ke query) belum tayang. Repo ini
+ * tak punya gerbang versi klien, jadi `.strict()` di sini berarti setiap
+ * ponsel lama menerima 400 saat menyimpan denah meja: fitur yang sekarang
+ * jalan, mati pada saat deploy, tanpa peringatan bagi siapa pun.
+ *
+ * Diamnya sendiri sudah pernah menggigit — `branch_id` yang dibuang di sini
+ * membuat `PUT /meja/tata-letak` membalas 200 berisi meja cabang LAIN. Yang
+ * menutup lubang itu bukan skema ini melainkan pemanggilnya, dan penjaga
+ * `cabang-ikut-di-url` yang menjaganya tetap begitu.
+ *
+ * SYARAT CABUT: sesudah build ber-`4e02a0b` tayang DAN build lama habis dari
+ * lapangan. Pengecualian tanpa syarat cabut adalah pengecualian permanen yang
+ * menyamar.
+ */
 const TataLetakBody = z.object({
   items: z
     .array(
@@ -173,7 +192,7 @@ export const mejaRoutes = new Hono<AppEnv>()
   .post(
     "/:id/kosongkan",
     bolehKosongkanMeja,
-    zValidator("json", z.object({ paksa: z.boolean().optional() }).optional()),
+    zValidator("json", z.object({ paksa: z.boolean().optional() }).strict().optional()),
     async (c) => {
       const auth = c.get("auth");
       const branchId = await resolveBranchId(c);

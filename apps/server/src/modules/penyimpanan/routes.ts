@@ -30,7 +30,7 @@ const PenyimpananBody = z.object({
   nama: z.string().trim().min(1),
   catatan: z.string().nullish(),
   is_active: z.boolean().optional(),
-});
+}).strict();
 
 type IsiRak = { bahan: number; perlengkapan: number };
 
@@ -215,7 +215,7 @@ export const penyimpananRoutes = new Hono<AppEnv>()
   .put(
     "/:id/petugas",
     requireRole("owner", "admin"),
-    zValidator("json", z.object({ user_ids: z.array(z.string().uuid()).max(2000) })),
+    zValidator("json", z.object({ user_ids: z.array(z.string().uuid()).max(2000) }).strict()),
     async (c) => {
       const auth = c.get("auth");
       const body = c.req.valid("json");
@@ -381,7 +381,7 @@ export const penyimpananRoutes = new Hono<AppEnv>()
       z.object({
         ingredient_ids: z.array(z.string().uuid()).max(2000).optional(),
         supply_ids: z.array(z.string().uuid()).max(2000).optional(),
-      }),
+      }).strict(),
     ),
     async (c) => {
       const auth = c.get("auth");

@@ -11,7 +11,7 @@ import type { AppEnv } from "../../middleware/auth";
 const PulihkanBody = z.object({
   jenis: z.enum(["penjualan", "pembelian", "produksi"]),
   key: z.string(),
-});
+}).strict();
 
 /**
  * Tempat Sampah — transaksi yang di-SOFT-DELETE (penjualan + pembelian +

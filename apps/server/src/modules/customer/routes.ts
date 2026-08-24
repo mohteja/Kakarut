@@ -67,7 +67,7 @@ const CustomerBody = z.object({
   nama: z.string().trim().min(1),
   wa: z.string().trim().min(1),
   catatan: z.string().nullish(),
-});
+}).strict();
 
 export const customerRoutes = new Hono<AppEnv>()
   .get("/", async (c) => {

@@ -65,17 +65,17 @@ const LaporanBody = z.object({
   sesi: z.enum(KODE_SESI_KEBERSIHAN),
   catatan: z.string().trim().max(500).nullish(),
   items: z.array(ItemBody).min(1, "Checklist tidak boleh kosong").max(MAKS_ITEM),
-});
+}).strict();
 
 /** PATCH hanya mengganti isi; sesi & tanggal tetap seperti saat dibuat. */
 const UbahBody = z.object({
   catatan: z.string().trim().max(500).nullish(),
   items: z.array(ItemBody).min(1, "Checklist tidak boleh kosong").max(MAKS_ITEM),
-});
+}).strict();
 
 const CatatanBody = z.object({
   catatan_owner: z.string().trim().max(1000).nullish(),
-});
+}).strict();
 
 const AreaBody = z.object({
   nama: z.string().trim().min(1, "Nama area wajib diisi").max(120),
@@ -83,7 +83,7 @@ const AreaBody = z.object({
   branch_id: z.string().uuid().nullish(),
   urutan: z.number().int().min(0).max(9999).optional(),
   is_active: z.boolean().optional(),
-});
+}).strict();
 
 const UbahAreaBody = AreaBody.partial();
 

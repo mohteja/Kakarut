@@ -117,10 +117,10 @@ const FakturEditBody = z.object({
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/)
     .optional(),
-});
+}).strict();
 
 /** Kirim work-order produksi CK → cabang tujuan (opsional pilih tempat di cabang). */
-const KirimBody = z.object({ tujuan_storage_id: z.string().uuid().nullish() });
+const KirimBody = z.object({ tujuan_storage_id: z.string().uuid().nullish() }).strict();
 
 /**
  * Kirim hasil produksi: qty per bahan BISA DIATUR — boleh lebih sedikit dari
@@ -200,7 +200,7 @@ const TahapBody = z.object({
    * proses" di UI setelah melihat daftar bahan yang kurang.
    */
   paksa: z.boolean().optional(),
-});
+}).strict();
 
 /** Total dana efektif satu faktur: cair + tambahan − kembali. */
 const DANA_EFEKTIF = sql<number>`COALESCE(SUM(CASE WHEN ${fakturDana.tipe} = 'kembali' THEN -${fakturDana.nominal} ELSE ${fakturDana.nominal} END)::float8, 0)`;
@@ -292,7 +292,7 @@ const TambahStokBody = z
     /** khusus jalur beli: total harga pembelian (catatan pengeluaran) */
     total_harga: z.number().nonnegative().max(BATAS_UANG).nullish(),
     catatan: z.string().nullish(),
-  })
+  }).strict()
   .refine((v) => v.batch || v.qty != null, {
     message: "Isi qty, atau set batch=true",
   });
@@ -326,7 +326,7 @@ const FakturBody = z.object({
     )
     .min(1)
     .max(500),
-});
+}).strict();
 
 const LABEL: Record<JenisPengadaan, { jalur: string }> = {
   produksi: { jalur: "Produksi Bahan Baku" },
@@ -2163,7 +2163,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
      */
     .post(
       "/laporan-harga/:fakturId/dampak",
-      zValidator("json", z.object({ items: LaporanHargaItems })),
+      zValidator("json", z.object({ items: LaporanHargaItems }).strict()),
       async (c) => {
         if (tipe !== "beli") {
           throw new HTTPException(400, {
@@ -2278,7 +2278,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
       "/laporan-harga/:fakturId",
       zValidator(
         "json",
-        z.object({ items: LaporanHargaItems, perbarui_acuan: z.boolean().optional() }),
+        z.object({ items: LaporanHargaItems, perbarui_acuan: z.boolean().optional() }).strict(),
       ),
       async (c) => {
         if (tipe !== "beli") {

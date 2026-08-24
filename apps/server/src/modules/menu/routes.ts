@@ -62,7 +62,7 @@ const MenuCreateBody = z.object({
   is_active: z.boolean().default(true),
   /** pembatasan lokasi (mode Pro) — null/[] = tampil di semua cabang */
   branch_ids: z.array(z.string().uuid()).max(100).nullish(),
-});
+}).strict();
 
 /**
  * PUT = PERBARUI SEBAGIAN. Field yang tidak dikirim DIPERTAHANKAN apa adanya.
@@ -99,14 +99,14 @@ const MenuUpdateBody = z.object({
   is_active: z.boolean().optional(),
   /** undefined = pembatasan lama tetap; null/[] = tampil di semua cabang */
   branch_ids: z.array(z.string().uuid()).max(100).nullish(),
-});
+}).strict();
 
 /** Nilai menu setelah body PUT digabung dengan baris lama (POST: body apa adanya). */
 type MenuEfektif = z.infer<typeof MenuCreateBody>;
 
 const UrutanBody = z.object({
   items: z.array(z.object({ id: z.string().uuid(), sort_order: z.number().int().max(BATAS_URUTAN) })).max(2000),
-});
+}).strict();
 
 /**
  * Teks opsional → null bila kosong. Tanpa ini, klien yang mengirim `""` untuk
@@ -400,7 +400,7 @@ export const menuRoutes = new Hono<AppEnv>()
   .post(
     "/terapkan-saran",
     requireRole("owner", "admin"),
-    zValidator("json", z.object({ ids: z.array(z.string().uuid()).min(1).max(500) })),
+    zValidator("json", z.object({ ids: z.array(z.string().uuid()).min(1).max(500) }).strict()),
     async (c) => {
       const auth = c.get("auth");
       const { ids } = c.req.valid("json");

@@ -32,9 +32,9 @@ const PatchBody = z.object({
   metode_hpp: z.enum(["average", "fifo"]).optional(),
   /** ambang food cost sehat (%) — menu di atasnya ditandai di daftar menu */
   food_cost_maks: z.number().min(0).max(100).optional(),
-});
+}).strict();
 
-const ModeBody = z.object({ mode: z.enum(["lite", "pro"]) });
+const ModeBody = z.object({ mode: z.enum(["lite", "pro"]) }).strict();
 
 export const companyRoutes = new Hono<AppEnv>()
   .get("/", async (c) => {

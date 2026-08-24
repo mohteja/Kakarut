@@ -11,7 +11,7 @@ import { buatSesi } from "../auth/session";
 const GantiPasswordBody = z.object({
   password_lama: z.string(),
   password_baru: z.string().min(8, "password baru minimal 8 karakter"),
-});
+}).strict();
 
 /**
  * Profil akun SENDIRI — dapat diakses semua peran (termasuk kasir): identitas,

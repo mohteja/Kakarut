@@ -43,7 +43,7 @@ const RencanaBody = z.object({
     .max(500),
   /** CK pelaksana (opsional) — kekurangan bahan mentah resep dihitung di sini */
   ck_branch_id: z.string().uuid().nullish(),
-});
+}).strict();
 
 const RencanaFakturBody = RencanaBody.extend({
   worker_id: z.string().uuid().nullish(),

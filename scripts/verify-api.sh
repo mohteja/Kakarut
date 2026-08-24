@@ -4402,12 +4402,24 @@ echo "== 108. Rencana dari menu sadar lokasi produksi (produksi_di=cabang) =="
 # porsi BESAR agar kebutuhan melampaui sisa stok CK (§62) → pasti ada baris
 # produksi baru (bukan hanya kirim-dari-stok)
 B108="{\"items\":[{\"menu_id\":\"$PBA_ID\",\"porsi\":2000}],\"tujuan_branch_id\":\"$CB46_ID\",\"ck_branch_id\":\"$CK52_UTAMA\"}"
-PRE108=$(api "$OWNER" POST /rekomendasi/menu "$B108")
+# PREVIEW punya badan sendiri, dan itu bukan kerapian.
+#
+# `RencanaBody` (pratinjau) hanya menerima `items` + `ck_branch_id`;
+# `tujuan_branch_id` milik `RencanaFakturBody` (penerbit faktur). Selama skema
+# badan belum `.strict()`, mengirim satu badan ke DUA rute membuat pratinjau
+# diam-diam membuang `tujuan_branch_id` lalu jatuh ke `resolveBranchId(c)` —
+# yakni CABANG AKTIF PERTAMA, bukan CB46 yang dituju fakturnya. Asersi
+# pratinjau di bawah karena itu selama ini mengukur cabang yang BERBEDA dari
+# faktur yang diterbitkannya, dan lulus hanya karena kebetulan keduanya
+# tak bergantung cabang. Cabangnya kini disebut di URL, tempat rute ini
+# memang membacanya.
+BPRE108="{\"items\":[{\"menu_id\":\"$PBA_ID\",\"porsi\":2000}],\"ck_branch_id\":\"$CK52_UTAMA\"}"
+PRE108=$(api "$OWNER" POST "/rekomendasi/menu?branch_id=$CB46_ID" "$BPRE108")
 IP108=$(echo "$PRE108" | jq -r '[.bahan[]|select(.pengadaan=="produksi" and .qty_faktur!=null)][0].ingredient_id')
 cek "dasar uji: ada bahan produksi kurang di rencana" "V == 1" \
   "$([ -n "$IP108" ] && [ "$IP108" != "null" ] && echo 1 || echo 0)"
 api "$OWNER" PUT "/bahan/$IP108" '{"produksi_di":"cabang"}' > /dev/null
-PRE108B=$(api "$OWNER" POST /rekomendasi/menu "$B108")
+PRE108B=$(api "$OWNER" POST "/rekomendasi/menu?branch_id=$CB46_ID" "$BPRE108")
 cek "preview: baris bahan bertanda produksi_di=cabang" "V == 1" \
   "$(echo "$PRE108B" | jq --arg i "$IP108" '[.bahan[]|select(.ingredient_id==$i)][0].produksi_di=="cabang"|if . then 1 else 0 end')"
 cek "preview: kirim_ck bahan cabang = 0 (tak ditutup stok CK)" "V == 0" \
@@ -4467,11 +4479,11 @@ cek "cabang masuk daftar produsen → kitchen boleh produksi" "V == 1" \
 # (c) Planner: cabang tujuan di LUAR daftar produsen jatuh ke jalur CK.
 api "$OWNER" PUT "/bahan/$IP108" "{\"produksi_di\":\"cabang\",\"produksi_branch_ids\":[\"$ST52_ID\"]}" > /dev/null
 cek "preview: tujuan CB46 non-produsen → bahan dihitung jalur CK" "V == 1" \
-  "$(api "$OWNER" POST /rekomendasi/menu "$B108" | jq --arg i "$IP108" '[.bahan[]|select(.ingredient_id==$i)][0].produksi_di=="ck"|if . then 1 else 0 end')"
+  "$(api "$OWNER" POST "/rekomendasi/menu?branch_id=$CB46_ID" "$BPRE108" | jq --arg i "$IP108" '[.bahan[]|select(.ingredient_id==$i)][0].produksi_di=="ck"|if . then 1 else 0 end')"
 # (d) Daftar kosong = SEMUA cabang (perilaku lama).
 api "$OWNER" PUT "/bahan/$IP108" '{"produksi_branch_ids":[]}' > /dev/null
 cek "preview: daftar kosong → kembali produksi_di=cabang" "V == 1" \
-  "$(api "$OWNER" POST /rekomendasi/menu "$B108" | jq --arg i "$IP108" '[.bahan[]|select(.ingredient_id==$i)][0].produksi_di=="cabang"|if . then 1 else 0 end')"
+  "$(api "$OWNER" POST "/rekomendasi/menu?branch_id=$CB46_ID" "$BPRE108" | jq --arg i "$IP108" '[.bahan[]|select(.ingredient_id==$i)][0].produksi_di=="cabang"|if . then 1 else 0 end')"
 # (e) produksi_di kembali "ck" → daftar produsen ikut dibersihkan otomatis.
 cek "PUT produksi_di=ck → daftar produsen dikosongkan" "V == 1" \
   "$(api "$OWNER" PUT "/bahan/$IPRODA" '{"produksi_di":"ck"}' | jq '.produksi_branch_ids==[]|if . then 1 else 0 end')"
@@ -6236,13 +6248,25 @@ cek "checklist kosong → 400" "V == 400" \
 cek "pakai area khusus CK dari store → 400" "V == 400" \
   "$(status_code_body "$TKIT" POST /kebersihan "{\"sesi\":\"pagi\",\"items\":[{\"area_id\":\"$AR144_CK\",\"bersih\":true,\"foto_url\":\"/uploads/bukti-144.jpg\"}]}")"
 
-# `tanggal` dikirim ngawur oleh klien — server WAJIB mengabaikannya.
-BODY144="{\"sesi\":\"pagi\",\"tanggal\":\"2020-01-01\",\"catatan\":\"sabun habis\",\"items\":[{\"area_id\":\"$AR144_UMUM\",\"bersih\":true,\"foto_url\":\"/uploads/bukti-144a.jpg\"},{\"area_id\":\"$AR144_STORE\",\"bersih\":false,\"catatan\":\"masih bau\"}]}"
+# `tanggal` DITOLAK, bukan diabaikan — dan perubahan itu disengaja.
+#
+# `LaporanBody` sudah menulis aturannya sejak awal: "`tanggal` SENGAJA tidak
+# diterima — server yang menurunkannya." Sebelum badan ini `.strict()`, klien
+# yang mengirimnya tetap 201 dan tanggalnya dibuang tanpa sepatah kata; kiriman
+# yang salah dan kiriman yang benar menghasilkan balasan yang sama persis.
+# Sekarang ia 400 yang MENYEBUT kuncinya. Aman untuk ponsel: ketujuh build yang
+# pernah rilis mengirim `{sesi, catatan, items}` saja — disapu, bukan dikira.
+BODY144_NGAWUR="{\"sesi\":\"pagi\",\"tanggal\":\"2020-01-01\",\"items\":[{\"area_id\":\"$AR144_UMUM\",\"bersih\":true,\"foto_url\":\"/uploads/bukti-144a.jpg\"}]}"
+cek "kirim \`tanggal\` → 400, bukan 201 yang membuangnya diam-diam" "V == 400" \
+  "$(status_code_body "$TKIT" POST /kebersihan "$BODY144_NGAWUR")"
+cek "…dan pesannya MENYEBUT kunci yang ditolak" "V == 1" \
+  "$(api "$TKIT" POST /kebersihan "$BODY144_NGAWUR" | jq '(.error | test("tanggal")) | if . then 1 else 0 end')"
+BODY144="{\"sesi\":\"pagi\",\"catatan\":\"sabun habis\",\"items\":[{\"area_id\":\"$AR144_UMUM\",\"bersih\":true,\"foto_url\":\"/uploads/bukti-144a.jpg\"},{\"area_id\":\"$AR144_STORE\",\"bersih\":false,\"catatan\":\"masih bau\"}]}"
 LAP144=$(api "$TKIT" POST /kebersihan "$BODY144")
 LID144=$(echo "$LAP144" | jq -r '.id // ""')
 cek "laporan sesi pagi dengan foto → tersimpan" "V == 1" \
   "$([ -n "$LID144" ] && echo 1 || echo 0)"
-cek "tanggal diturunkan server (abaikan kiriman klien)" "V == 1" \
+cek "tanggal diturunkan server (klien tak perlu — dan tak boleh — mengirimnya)" "V == 1" \
   "$(echo "$LAP144" | jq --arg t "$(TZ=Asia/Jakarta date +%F)" '.tanggal==$t|if . then 1 else 0 end')"
 cek "hitungan area: 2 total, 1 bersih, 1 kotor, 1 foto" "V == 1" \
   "$(echo "$LAP144" | jq '((.total_area==2) and (.area_bersih==1) and (.area_kotor==1) and (.jumlah_foto==1))|if . then 1 else 0 end')"
@@ -9653,9 +9677,9 @@ cek "dasar §191: cabang asing memang BUKAN cabang kasir46" "V == 1" \
 cek "kasir → POST /penjualan cabang lain = 403" "V == 403" \
   "$(status_code_body "$K191" POST /penjualan "{\"branch_id\":\"$ASING191\",\"is_dine_in\":false,\"metode_bayar\":\"tunai\",\"items\":[{\"menu_id\":\"$MENU191\",\"qty\":1}]}")"
 cek "kasir → POST /open-bill cabang lain = 403" "V == 403" \
-  "$(status_code_body "$K191" POST /open-bill "{\"branch_id\":\"$ASING191\",\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$MENU191\",\"qty\":1}]}")"
+  "$(status_code_body "$K191" POST /open-bill "{\"branch_id\":\"$ASING191\",\"items\":[{\"menu_id\":\"$MENU191\",\"qty\":1}]}")"
 cek "kasir → POST /open-bill cabang SENDIRI bukan 403" "V == 0" \
-  "$([ "$(status_code_body "$K191" POST /open-bill "{\"branch_id\":\"$CB46_ID\",\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$MENU191\",\"qty\":1}]}")" = "403" ] && echo 1 || echo 0)"
+  "$([ "$(status_code_body "$K191" POST /open-bill "{\"branch_id\":\"$CB46_ID\",\"items\":[{\"menu_id\":\"$MENU191\",\"qty\":1}]}")" = "403" ] && echo 1 || echo 0)"
 cek "kasir → POST /meja cabang lain = 403" "V == 403" \
   "$(status_code_body "$K191" POST /meja "{\"branch_id\":\"$ASING191\",\"nama\":\"M191\"}")"
 cek "kasir → POST /meja cabang SENDIRI tetap boleh" "V == 1" \
@@ -10063,7 +10087,7 @@ cek "…dan penjualannya benar-benar tercatat (bukan ditolak diam-diam)" "V == 1
 # Membayar OPEN BILL yang sudah dipesan: makanannya sudah dimasak. Menolak di
 # kasir berarti tamu yang sudah makan tak bisa membayar.
 api "$OWNER" PATCH /company '{"blokir_jual_minus":false}' > /dev/null
-BILL198=$(api "$K198" POST /open-bill "{\"branch_id\":\"$CB198\",\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$M198\",\"qty\":3}]}" | jq -r '.id')
+BILL198=$(api "$K198" POST /open-bill "{\"branch_id\":\"$CB198\",\"items\":[{\"menu_id\":\"$M198\",\"qty\":3}]}" | jq -r '.id')
 cek "dasar §198: bill dibuat saat setelan masih mati" "V == 1" \
   "$(printf '%s' "$BILL198" | grep -Eqc '^[0-9a-f-]{36}$' && echo 1 || echo 0)"
 api "$OWNER" PATCH /company '{"blokir_jual_minus":true}' > /dev/null
@@ -10073,7 +10097,7 @@ cek "membayar bill yang sudah dipesan TETAP boleh" "V == 201" \
 # Tapi MEMESAN bill baru saat stok kurang harus ditolak — itu titik yang
 # masih bisa ditindaklanjuti, sebelum masakannya dikerjakan.
 cek "MEMESAN bill baru saat stok kurang → 400" "V == 400" \
-  "$(status_code_body "$K198" POST /open-bill "{\"branch_id\":\"$CB198\",\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$M198\",\"qty\":5}]}")"
+  "$(status_code_body "$K198" POST /open-bill "{\"branch_id\":\"$CB198\",\"items\":[{\"menu_id\":\"$M198\",\"qty\":5}]}")"
 api "$OWNER" PATCH /company '{"blokir_jual_minus":false}' > /dev/null
 cek "dikembalikan MATI supaya seksi sesudahnya tak terpengaruh" "V == 1" \
   "$(api "$OWNER" GET /company | jq '(.blokirJualMinus == false)|if . then 1 else 0 end')"
@@ -13200,6 +13224,46 @@ cek "nilai sampah dijawab 400 yang bisa dibaca, bukan 500" "V == 400" \
   "$(status_code "$OWNER" GET "/menu?branch_id=bukan-uuid")"
 cek "…pesannya menyebut branch_id, bukan 'kesalahan server'" "V == 1" \
   "$(api "$OWNER" GET "/menu?branch_id=bukan-uuid" | jq '((.message // .error) | test("branch_id")) | if . then 1 else 0 end')"
+
+echo
+echo
+echo "── §240 Badan permintaan menolak kunci yang tak dikenal ──"
+#
+# Zod membuang kunci tak dikenal DIAM-DIAM kecuali skemanya `.strict()`. Sebelum
+# rilis ini, NOL dari 114 badan JSON di server ini strict — dan diamnya sudah
+# menggigit: `PUT /meja/tata-letak` menerima `branch_id` di badan, membuangnya,
+# lalu jatuh ke cabang aktif PERTAMA. Terukur waktu itu: HTTP 200, balasannya 7
+# meja cabang LAIN, dan mejanya tetap di tempat semula.
+#
+# Pengetatannya menemukan LIMA ketidakcocokan nyata, dan yang menemukannya
+# bukan pengurai teks melainkan berkas INI beserta 2.161 uji satuan.
+# Empat di antaranya diperbaiki di skrip ini sendiri (pratinjau rekomendasi,
+# 4× open-bill ber-`is_dine_in`, `tanggal` di §144); yang kelima di jembatan
+# `/sync`.
+#
+# Uji gerbang `badan-tak-menerima-kunci-asing.test.ts` menjaga BENTUKNYA di
+# sumber; seksi ini menjaga PERILAKUNYA lewat HTTP. Bentuk yang benar dengan
+# hasil yang salah tetap bug.
+cek "kunci asing ke rute strict → 400, bukan 201 yang membuangnya" "V == 400" \
+  "$(status_code_body "$OWNER" POST /kategori '{"nama":"Kategori Strict 240","kunci_ngawur":1}')"
+cek "…dan pesannya MENYEBUT kunci yang ditolak" "V == 1" \
+  "$(api "$OWNER" POST /kategori '{"nama":"Kategori Strict 240b","kunci_ngawur":1}' | jq '(.error | test("kunci_ngawur")) | if . then 1 else 0 end')"
+# PASANGAN anti-hijau-palsu: gerbang yang menolak SEMUA badan juga hijau di atas.
+cek "PASANGAN: badan yang SAH tetap diterima" "V == 201" \
+  "$(status_code_body "$OWNER" POST /kategori '{"nama":"Kategori Sah 240"}')"
+
+# ── Pengecualian diuji sebagai PERILAKU, bukan cuma sebagai komentar ────────
+# Ketujuh build ponsel yang pernah rilis (1.0.0+3 … +10) mengirim `branch_id` di
+# BADAN denah meja — termasuk yang terpasang hari ini, karena perbaikannya
+# belum tayang, dan repo ini tak punya gerbang versi klien. `.strict()` di sana
+# berarti ponsel lama menerima 400 saat menyimpan denah: fitur yang sekarang
+# jalan, mati pada saat deploy.
+CAB240=$(api "$OWNER" GET /cabang | jq -r '.[0].id')
+MEJA240=$(api "$OWNER" GET "/meja?branch_id=$CAB240" | jq -r '.[0].id // empty')
+cek "dasar §240: ada cabang & meja untuk diuji" "V == 1" \
+  "$([ -n "$CAB240" ] && [ -n "$MEJA240" ] && echo 1 || echo 0)"
+cek "PENGECUALIAN: build lama kirim branch_id di BADAN denah → tetap 200" "V == 200" \
+  "$(status_code_body "$OWNER" PUT "/meja/tata-letak?branch_id=$CAB240" "{\"branch_id\":\"$CAB240\",\"items\":[{\"id\":\"$MEJA240\",\"pos_x\":5,\"pos_y\":6}]}")"
 
 echo
 echo

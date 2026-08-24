@@ -132,7 +132,7 @@ const SyncBody = z.object({
     )
     .min(1)
     .max(MAKS_PERINTAH),
-});
+}).strict();
 
 /** Cabang efektif utk perintah sinkron (peran terikat → cabangnya). */
 async function resolveCabangSync(auth: SyncAuth, payloadBranchId?: string | null): Promise<string> {
@@ -164,6 +164,16 @@ async function panggilInternal(
   authHeader: string,
   path: string,
   body: unknown,
+  /**
+   * Cabang untuk query, bila pemanggilnya sudah MENCABUT `branch_id` dari badan.
+   *
+   * Dibutuhkan sejak badan JSON `.strict()`: rute yang tak mendeklarasikan
+   * `branch_id` kini menolak 400 bila ia ikut terkirim, padahal cabangnya tetap
+   * harus sampai — lewat query. Tanpa parameter ini pemanggilnya harus memilih
+   * antara "kirim kunci yang ditolak" atau "kehilangan cabangnya", dan yang
+   * kedua persis bug yang §208 ada untuk mencegah.
+   */
+  cabangEksplisit?: string | null,
 ): Promise<{ kode: number; data: unknown }> {
   if (!appRef) throw new HTTPException(500, { message: "Sinkron belum siap (app belum disuntik)" });
   /*
@@ -194,9 +204,10 @@ async function panggilInternal(
    * lain.
    */
   const cabang =
-    body && typeof body === "object" && typeof (body as Record<string, unknown>).branch_id === "string"
+    cabangEksplisit ??
+    (body && typeof body === "object" && typeof (body as Record<string, unknown>).branch_id === "string"
       ? ((body as Record<string, unknown>).branch_id as string)
-      : null;
+      : null);
   const url = cabang
     ? `http://sync.internal/api${path}${path.includes("?") ? "&" : "?"}branch_id=${encodeURIComponent(cabang)}`
     : `http://sync.internal/api${path}`;
@@ -521,7 +532,24 @@ const execPerlengkapanOpname: Eksekutor = ({ authHeader }, payload) =>
 
 const execPerlengkapanPakai: Eksekutor = ({ authHeader }, payload) => {
   const { params, body } = pisahParam(payload, ["supply_id"]);
-  return panggilInternal(authHeader, `/perlengkapan/${params.supply_id}/pakai`, body);
+  /*
+   * `branch_id` DIBUANG dari badan di sini — ia sudah diangkat ke query oleh
+   * `panggilInternal`, dan `PakaiBody` tak menerimanya.
+   *
+   * Selama badan JSON belum `.strict()`, kunci berlebih ini lolos tanpa suara.
+   * Sesudah `.strict()` ia 400, dan itu benar: rute ini memilih cabangnya lewat
+   * `resolveBranchId(c)` (query), jadi `branch_id` di badan memang tak pernah
+   * dibaca. Yang salah bukan pengetatannya melainkan kiriman kita sendiri —
+   * kelas yang persis sama dengan `PUT /meja/tata-letak` yang membuat vena ini
+   * ada.
+   *
+   * Rute lain yang MEMBACA cabang dari badan (`branchUntukTulis`: /penjualan,
+   * /open-bill, /stok/opname, /shift/buka, /penyimpanan) mendeklarasikannya di
+   * skemanya, jadi bagi mereka kunci ini sah dan tetap dikirim.
+   */
+  const cabang = typeof body.branch_id === "string" ? body.branch_id : null;
+  delete body.branch_id;
+  return panggilInternal(authHeader, `/perlengkapan/${params.supply_id}/pakai`, body, cabang);
 };
 
 const execFakturTahap: Eksekutor = ({ authHeader }, payload) => {

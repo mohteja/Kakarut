@@ -72,7 +72,7 @@ const TransferBody = z.object({
     )
     .min(1)
     .max(100),
-});
+}).strict();
 
 const pembuat = alias(users, "pembuat_transfer");
 const cabangAsal = alias(branches, "cabang_asal");

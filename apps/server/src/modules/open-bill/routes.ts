@@ -66,7 +66,7 @@ const BillBody = z.object({
     )
     .min(1)
     .max(500),
-});
+}).strict();
 
 /**
  * Pastikan semua menu milik perusahaan pemanggil & tersedia di cabang bill,

@@ -12,13 +12,13 @@ import { tanpaBentrok } from "../../lib/pg-galat";
 const SatuanBody = z.object({
   nama: z.string().trim().min(1).max(20),
   sort_order: z.number().int().max(BATAS_URUTAN).default(0),
-});
+}).strict();
 
 // PATCH parsial tanpa .default() — lihat catatan BahanPatchBody (zod v4).
 const SatuanPatchBody = z.object({
   nama: z.string().trim().min(1).max(20).optional(),
   sort_order: z.number().int().max(BATAS_URUTAN).optional(),
-});
+}).strict();
 
 /**
  * Master Satuan (units) per company: sumber pilihan dropdown satuan bahan.

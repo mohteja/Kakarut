@@ -64,7 +64,7 @@ const SmtpBody = z.object({
   encryption: z.enum(["none", "ssl", "starttls"]).optional(),
   sender_name: z.string().trim().nullish(),
   sender_email: z.string().trim().email().nullish(),
-});
+}).strict();
 
 /** Panel sistem super-admin: status DB & migrasi + pengaturan email (SMTP). */
 export const adminSystemRoutes = new Hono<AppEnv>()
@@ -253,7 +253,7 @@ export const adminSystemRoutes = new Hono<AppEnv>()
         to: z.string().trim().email().optional(),
         subject: z.string().trim().optional(),
         html: z.string().optional(),
-      }),
+      }).strict(),
     ),
     async (c) => {
       const auth = c.get("auth");

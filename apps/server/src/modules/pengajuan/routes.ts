@@ -46,13 +46,13 @@ const BuatBody = z.object({
   tanggal_selesai: z.string().refine(tanggalValid, "Tanggal selesai tidak valid"),
   alasan: z.string().trim().max(500).nullish(),
   lampiran_url: z.string().trim().max(500).nullish(),
-});
+}).strict();
 
 const PutusBody = z
   .object({
     status: z.enum(["disetujui", "ditolak"]),
     alasan_tolak: z.string().trim().max(500).nullish(),
-  })
+  }).strict()
   .refine((b) => b.status !== "ditolak" || !!b.alasan_tolak?.trim(), {
     message: "Alasan penolakan wajib diisi",
     path: ["alasan_tolak"],

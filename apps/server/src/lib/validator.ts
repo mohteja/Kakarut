@@ -54,8 +54,25 @@ function alasanIssue(issue: $ZodIssue): string {
     minimum?: unknown;
     expected?: unknown;
     values?: unknown[];
+    keys?: unknown[];
   };
   switch (issue.code) {
+    case "unrecognized_keys":
+      /*
+       * Lahir bersama `.strict()`. Tanpa kasus ini pesannya jatuh ke bawaan
+       * zod — `Unrecognized key: "branch_id"`, bahasa Inggris — dan karena
+       * `path`-nya KOSONG, `labelJalur` memulangkan "Isian" yang tak menunjuk
+       * apa pun: "Isian: Unrecognized key: …". Berkas ini ada justru karena
+       * pesan validasi pernah tampil "[object Object]"; menambah kelas galat
+       * tanpa kalimatnya akan mengulang kesalahan yang sama satu tingkat lebih
+       * kecil.
+       *
+       * Kuncinya DISEBUT: pesan "ada isian yang tak dikenal" tak bisa
+       * ditindaklanjuti oleh orang yang tak tahu isian mana.
+       */
+      return i.keys && i.keys.length > 0
+        ? `isian tak dikenal: ${i.keys.map(String).join(", ")}`
+        : "ada isian yang tidak dikenal";
     case "invalid_type":
       /*
        * Kunci yang TAK DIKIRIM dan kunci yang tipenya SALAH sama-sama

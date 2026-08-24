@@ -11,7 +11,7 @@ const LanBody = z.object({
   port: z.number().int().min(1).max(65535),
   /** byte ESC/POS dalam base64 */
   data: z.string().min(1).max(400_000),
-});
+}).strict();
 
 /** Normalisasi IPv4-mapped IPv6 (::ffff:127.0.0.1 → 127.0.0.1) + lowercase. */
 export function normalisasiIp(ip: string): string {

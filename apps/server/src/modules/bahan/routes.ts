@@ -82,7 +82,7 @@ const BahanBody = z.object({
   /** foto bahan jadi & foto cara packing (URL hasil POST /upload?tujuan=resep) */
   foto_hasil_url: z.string().trim().max(500).nullish(),
   foto_packing_url: z.string().trim().max(500).nullish(),
-});
+}).strict();
 
 /**
  * Body PUT parsial TANPA .default(): di zod v4, .partial() atas field
@@ -115,7 +115,7 @@ const BahanPatchBody = z.object({
   lead_time_hari: z.number().int().min(0).max(365).optional(),
   foto_hasil_url: z.string().trim().max(500).nullish(),
   foto_packing_url: z.string().trim().max(500).nullish(),
-});
+}).strict();
 
 const ResepBody = z.object({
   komponen: z
@@ -145,7 +145,7 @@ const ResepBody = z.object({
       harga_beli: z.number().nonnegative().max(BATAS_UANG).optional(),
     })
     .optional(),
-});
+}).strict();
 
 /** Langkah cara masak bahan produksi — urutan array = urutan langkah. */
 const LangkahBody = z.object({
@@ -158,7 +158,7 @@ const LangkahBody = z.object({
     )
     .max(30)
     .default([]),
-});
+}).strict();
 
 /** Satu baris "tambah bahan baku" (bulk) — selalu jalur beli. Field set penuh
  * (sama dengan form Ubah): min_beli, kemasan/complement, catatan. Rak simpan
@@ -181,7 +181,7 @@ const BahanBulkRow = z.object({
   is_complement: z.boolean().default(false),
   catatan: z.string().nullish(),
 });
-const BahanBulkBody = z.object({ items: z.array(BahanBulkRow).min(1).max(200) });
+const BahanBulkBody = z.object({ items: z.array(BahanBulkRow).min(1).max(200) }).strict();
 
 /**
  * Satu baris impor CSV (nilai sudah dikoersi di web).
@@ -236,7 +236,7 @@ const BahanImportRowBody = z.object({
 const BahanImportBody = z.object({
   mode: z.enum(["perbarui", "tambah"]),
   items: z.array(BahanImportRowBody).min(1).max(1000),
-});
+}).strict();
 
 const BahanSupplierBody = z.object({
   items: z
@@ -248,7 +248,7 @@ const BahanSupplierBody = z.object({
     )
     .max(50)
     .default([]),
-});
+}).strict();
 
 /** Ringkasan supplier per bahan: nama supplier utama + jumlah terdaftar. */
 async function infoSupplier(
@@ -1378,7 +1378,7 @@ export const bahanRoutes = new Hono<AppEnv>()
          * rupiah yang sudah dipakai jalur faktur (`produksi/routes.ts`).
          */
         harga_per_unit: z.number().nonnegative().max(BATAS_UANG),
-      }),
+      }).strict(),
     ),
     async (c) => {
       const auth = c.get("auth");

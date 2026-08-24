@@ -71,7 +71,7 @@ const OpnameBody = z.object({
     )
     .min(1)
     .max(1000),
-});
+}).strict();
 
 // Stok Awal (saldo pembuka) = OpnameBody + tanggal berlaku. Berbeda dari opname
 // fisik: stok awal itu SATU saldo pembuka per bahan yang terkunci pada tanggal
@@ -309,7 +309,7 @@ export const stokRoutes = new Hono<AppEnv>()
         qty: z.number().positive().max(BATAS_QTY_STOK),
         foto_url: z.string().trim().min(1, "Bukti foto wajib dilampirkan"),
         catatan: z.string().trim().max(300).nullish(),
-      }),
+      }).strict(),
     ),
     async (c) => {
       const auth = c.get("auth");
@@ -773,7 +773,7 @@ export const stokRoutes = new Hono<AppEnv>()
         catatan: z.string().nullish(),
         /** bukti foto WAJIB */
         foto_url: z.string().min(1, "Bukti foto wajib dilampirkan"),
-      }),
+      }).strict(),
     ),
     async (c) => {
       const auth = c.get("auth");
@@ -896,7 +896,7 @@ export const stokRoutes = new Hono<AppEnv>()
   .post(
     "/penyesuaian/:id/tolak",
     requireRole("owner", "admin"),
-    zValidator("json", z.object({ alasan: z.string().min(1, "Alasan penolakan wajib diisi") })),
+    zValidator("json", z.object({ alasan: z.string().min(1, "Alasan penolakan wajib diisi") }).strict()),
     async (c) => {
       const auth = c.get("auth");
       const body = c.req.valid("json");
@@ -1134,7 +1134,7 @@ export const stokRoutes = new Hono<AppEnv>()
       z.object({
         alasan: z.string().nullish(),
         ids: z.array(z.string().uuid()).max(500).optional(),
-      }),
+      }).strict(),
     ),
     async (c) => {
       const auth = c.get("auth");

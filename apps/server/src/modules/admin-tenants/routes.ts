@@ -43,14 +43,14 @@ const CreateTenantBody = z.object({
   owner_email: z.string().trim().toLowerCase(),
   owner_password: z.string().min(8, "password minimal 8 karakter"),
   plan: PLAN.default("lite"),
-});
+}).strict();
 
 const PatchTenantBody = z.object({
   nama: z.string().trim().min(1).optional(),
   plan: PLAN.optional(),
   plan_expires_at: z.string().datetime().nullish(),
   is_active: z.boolean().optional(),
-});
+}).strict();
 
 export const adminTenantsRoutes = new Hono<AppEnv>()
   .get("/", async (c) => {

@@ -1781,6 +1781,109 @@ bukan medan yang tak terurai."*
 
 ---
 
+## Badan permintaan yang membuang kunci diam-diam — server — 2026-08-24
+
+Usulan #5, dan ia lahir dari bug yang **sudah menggigit**: `PUT /meja/tata-letak`
+menerima `branch_id` di badan, Zod membuangnya tanpa sepatah kata, dan
+akibatnya HTTP **200** yang memindahkan denah cabang LAIN (vena #25). Yang
+diperbaiki waktu itu pemanggilnya. Kelasnya tidak.
+
+- **Populasi**:
+
+  | ukuran | angka |
+  |---|---|
+  | rute terpetakan | **273** |
+  | ber-`zValidator("json", …)` | **114** |
+  | **`.strict()` sebelum putaran ini** | **0** |
+  | sesudah | **112 strict, 2 dikecualikan** |
+  | pemanggil web berbadan literal, disapu | 48 (+9 ber-`...spread`) |
+  | pemanggil mobile berbadan literal, disapu | 49 (+1 spread) |
+  | build ponsel yang pernah rilis, disapu semuanya | **7** (1.0.0+3 … +10) |
+
+- **DETEKTORNYA BUKAN PENGURAI TEKS, dan itu keputusan yang dibayar.** Pembaca
+  skema berbasis teks yang kubangun untuk pengintaian **menuduh enam kali, dan
+  keenamnya cacatnya sendiri**: `:` terner dibaca sebagai pemisah kunci (2),
+  spread objek di dalam `z.object({ …, ...KoordinatBody })`, `z.object(X)`
+  ber-identifier telanjang, rantai `OpnameBody.omit({…}).extend({…})`, dan
+  **tabrakan nama skema antar modul** (`SupplierBody` ada di dua modul; peta
+  datarku menimpanya). Sesudah empat tuduhan palsu di usulan #3, alat pengukur
+  vena ini diganti: **suite yang sudah ada** — 2.161 uji satuan + 2.810 asersi
+  `verify-api.sh` lewat HTTP sungguhan — dijalankan terhadap build yang sudah
+  strict. Apa pun yang merah adalah ketidakcocokan NYATA.
+
+- **Fakta Zod DIJALANKAN, bukan diingat** (zod 4.4.3 terpasang): `.strict()`
+  menurun lewat `.extend()`, `.partial()`, dan `.omit()`; kodenya
+  `unrecognized_keys`. Keduanya dipaku uji, jadi zod yang berubah membuat
+  ujinya merah alih-alih diam-diam salah menyimpulkan.
+
+- **Hasil: TEMUAN — LIMA ketidakcocokan, semuanya ditemukan oleh suite:**
+
+  1. `POST /rekomendasi/menu` (pratinjau) menerima `tujuan_branch_id` yang tak
+     pernah ada di `RencanaBody`. Akibat yang lebih dalam: karena kuncinya
+     dibuang, pratinjaunya jatuh ke `resolveBranchId(c)` → **cabang aktif
+     pertama**, sementara faktur yang diterbitkan sesudahnya memakai
+     `tujuan_branch_id`. Asersi §108 selama ini **mengukur cabang yang berbeda
+     dari faktur yang dibuatnya**, dan lulus hanya karena kebetulan keduanya
+     tak bergantung cabang.
+  2. `POST /open-bill` — **4 panggilan** mengirim `is_dine_in`, medan milik
+     `SaleBody`, bukan `BillBody`.
+  3. `POST /kebersihan` menerima `tanggal` yang komentar skemanya sendiri sudah
+     menyatakan *"SENGAJA tidak diterima — server yang menurunkannya"*. Kini 400
+     yang menyebut kuncinya; ketujuh build ponsel disapu lebih dulu dan tak satu
+     pun mengirimnya.
+  4. Jembatan `/sync` meneruskan `branch_id` ke `/perlengkapan/:id/pakai` — rute
+     yang membaca cabangnya dari QUERY dan tak pernah membaca kunci itu.
+  5. `POST /shift/tutup` — bukan cacat melainkan **keputusan yang sudah
+     tertulis**; jadi pengecualian, lihat di bawah.
+
+- **KESALAHANKU, dan suite yang menangkapnya**: perbaikan pertama untuk (4)
+  mencabut `branch_id` dari badan **sebelum** `panggilInternal` sempat
+  mengangkatnya ke query. Perintahnya jadi diterima, tapi potongannya mendarat
+  di cabang PERTAMA — persis bug yang §208 ada untuk mencegah, dibuat ulang
+  oleh perbaikanku sendiri. §208 langsung merah. Bentuk akhirnya: cabangnya
+  dioper eksplisit ke `panggilInternal`, kuncinya dicabut dari badan.
+
+- **Dua pengecualian, bernama, dan yang satu BERTANGGAL**:
+
+  | pintu | alasan |
+  |---|---|
+  | `TataLetakBody` (`PUT /meja/tata-letak`) | Ketujuh build rilis (1.0.0+3 … +10) mengirim `branch_id` di badan sini — **termasuk yang terpasang hari ini**, karena perbaikannya (`4e02a0b`) belum tayang, dan repo ini **tak punya gerbang versi klien**. `.strict()` berarti ponsel lama menerima 400 saat menyimpan denah: fitur yang sekarang jalan, mati saat deploy. **Syarat cabut ditulis di kodenya.** |
+  | `POST /shift/tutup` (inline) | Aturannya sudah ditulis `verify-api` §152: *"klien yang mengirim field tak dikenal tak boleh gagal menutup shift — itu terjadi tepat saat kasir mau pulang."* |
+
+- **Pesan galatnya diberi kalimat sendiri**: tanpa kasus `unrecognized_keys`,
+  pesannya jatuh ke bawaan zod (bahasa Inggris) dan `labelJalur([])` cuma
+  memulangkan "Isian". `validator.ts` ada justru karena pesan validasi pernah
+  tampil `[object Object]`; menambah kelas galat tanpa kalimatnya akan
+  mengulang kesalahan yang sama satu tingkat lebih kecil. Terukur lewat HTTP:
+  `{"error":"Isian: isian tak dikenal: kunci_ngawur"}`, kode 400.
+
+- **Gerbang + bukti merah**:
+  `apps/server/test/badan-tak-menerima-kunci-asing.test.ts` (7 uji) menjaga
+  BENTUKNYA — tiap skema `zValidator("json", …)` wajib strict, dengan
+  `DIKECUALIKAN` bernama, uji pasangan yang menolak pengecualian basi, dan uji
+  yang menolak gerbang-yang-dipenuhi-pengecualian. Ia **sengaja tidak membaca
+  himpunan kunci** — justru bagian itu yang salah enam kali.
+  Bukti merah dua lapis: mencabut `.strict()` dari `SajianBody` (suntikan
+  di-assert mendarat) → gerbang menuduh `modules/pesanan/routes.ts:648` dan
+  `:803`; dan lewat HTTP, kunci asing → **400 bernama**, badan sah → **201**,
+  serta pengecualian denah meja → tetap **200**. `verify-api.sh` §240 memaku
+  ketiganya sebagai perilaku.
+
+- **Batas detektor, jujur**: suite ini menguji jalur yang DILEWATI 2.817 asersi.
+  Rute yang tak punya asersi badan sama sekali tetap strict, tapi
+  ketidakcocokannya baru ketahuan saat dipakai — dan itu justru bentuk yang
+  diinginkan: 400 bernama, bukan 200 yang diam.
+- **Gerbang**: typecheck bersih · `npm test` **2.169 lolos / 177 berkas** ·
+  `verify-api.sh` **2.817 lolos, 0 gagal** (DB segar) · `audit:invarian` 26/0 ·
+  build web bersih. Mobile tak tersentuh — 49 badan yang dikirim `lib/` hari ini
+  sudah bersih, disapu bukan dikira.
+- **Tindak**: `.strict()` di 112 badan (33 berkas), kasus `unrecognized_keys` di
+  `lib/validator.ts`, `branch_id` dicabut dari badan di jembatan `/sync`, empat
+  perbaikan di `verify-api.sh` sendiri, §240 baru, dan entri
+  `docs/mobile/CHANGELOG-API.md` bertanda 🔴 WAJIB.
+
+---
+
 ## ANTREAN HABIS — 2026-08-22
 
 Kedua puluh satu vena di antrean awal sudah digarap. Yang tersisa di bawah
@@ -1809,8 +1912,11 @@ bukan dari daftar awal.
    dikerjakan (20 dari 20 kunci kontrak kini diurai, tab kelima di Laporan);
    penyetel target per menu **sengaja tidak** — `MenuHppPage` menulis batasnya
    sendiri ("Tambah/ubah menu tetap di web"), dan batas itu dipertahankan.
-5. **Server menerima `branch_id` di badan `/meja/tata-letak` lalu membuangnya.**
-   Zod `.strict()` akan mengubah kegagalan sunyi jadi berbunyi.
+5. ~~**Server menerima `branch_id` di badan `/meja/tata-letak` lalu
+   membuangnya.**~~ — **TERGARAP**, lihat entri di atas. 0 → **112 dari 114**
+   badan JSON kini strict (2 dikecualikan, satu bertanggal). Suite yang sudah
+   ada — bukan pengurai teks — menemukan **lima** ketidakcocokan nyata, dan
+   pengurai teksku sendiri menuduh **enam** kali dengan salah.
 
 ## Antrean vena — belum tergarap
 

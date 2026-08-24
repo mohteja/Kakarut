@@ -17,7 +17,7 @@ import { seedMejaDefault } from "../meja/defaults";
 const StrukBody = z.object({
   receipt_footer: z.string().trim().max(200).nullish(),
   receipt_show_alamat: z.boolean().optional(),
-});
+}).strict();
 
 const CabangBody = z.object({
   nama: z.string().trim().min(1),
@@ -49,7 +49,7 @@ const CabangBody = z.object({
     .regex(/^(([01]\d|2[0-3]):[0-5]\d)?$/, "Format jam harus HH:MM")
     .nullish(),
   is_active: z.boolean().optional(),
-});
+}).strict();
 
 /**
  * Tentukan CK pemasok sebuah cabang. Aturan: hanya store yang terhubung ke CK

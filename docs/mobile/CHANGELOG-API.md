@@ -26,6 +26,42 @@ tanpa akses repo server.
 ---
 
 
+## Rilis: Badan permintaan MENOLAK kunci yang tak dikenal (400, bukan dibuang)
+
+> Tidak ada migrasi. Tidak ada medan baru. Yang berubah: **satu kelas balasan
+> galat baru**, dan sebuah kebiasaan lama yang berhenti berlaku.
+
+🔴 **WAJIB** — tinjau setiap `body:` yang dikirim repositori mobile.
+
+**Belum tayang.**
+
+Sebelumnya, kunci yang tak dikenal di badan JSON **dibuang diam-diam**: kiriman
+yang salah dan kiriman yang benar menghasilkan balasan yang sama persis. Itu
+sudah menggigit sekali — `PUT /meja/tata-letak` menerima `branch_id` di badan,
+membuangnya, lalu memakai cabang aktif **pertama**: HTTP 200, balasannya meja
+cabang lain, dan denah yang diminta tak pernah tersimpan.
+
+Kini **112 dari 114** badan JSON menolaknya:
+
+```jsonc
+{ "error": "Isian: isian tak dikenal: kunci_ngawur" }
+```
+
+dengan kode **400**.
+
+**Dua pintu SENGAJA tetap longgar:**
+
+| pintu | kenapa |
+| --- | --- |
+| `PUT /meja/tata-letak` | Ketujuh build yang pernah rilis (1.0.0+3 … +10) mengirim `branch_id` di badan sini. Pengecualian ini **bertanggal**: ia dicabut sesudah build yang mengirim cabang lewat query tayang dan build lama habis. **Kirim cabang di query** (`?branch_id=`) mulai sekarang. |
+| `POST /shift/tutup` | Menutup shift tak boleh gagal karena satu kunci tak dikenal — itu terjadi tepat saat kasir mau pulang. |
+
+**Yang perlu dicek di mobile:** seluruh badan yang dikirim `lib/**` sudah
+disapu terhadap kontrak hari ini dan **bersih** — 49 badan literal, nol kunci
+asing. Yang harus dijaga adalah kiriman BARU: kunci yang salah nama atau salah
+huruf kini gagal berbunyi, bukan lolos diam-diam.
+
+
 ## Rilis: `bill_dibatalkan` tak lagi muncul untuk bill yang sebenarnya DIBAYAR
 
 🔴 **WAJIB DICEK** — antrean offline mobile membaca `sebab` untuk memutuskan

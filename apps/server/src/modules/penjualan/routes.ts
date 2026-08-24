@@ -60,7 +60,7 @@ export const SaleBody = z.object({
     )
     .min(1)
     .max(500),
-});
+}).strict();
 
 export const penjualanRoutes = new Hono<AppEnv>()
   // Transaksi POS HANYA peran kasir (owner/admin/tim tak boleh menjual —
@@ -377,7 +377,7 @@ export const penjualanRoutes = new Hono<AppEnv>()
           )
           .min(1)
           .max(500),
-      }),
+      }).strict(),
     ),
     async (c) => {
       const auth = c.get("auth");

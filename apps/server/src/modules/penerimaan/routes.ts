@@ -86,12 +86,12 @@ const MENGGANTUNG = sql`g.lolos_gerbang = false
         AND g.asal_faktur IS NOT NULL
         AND g.asal_faktur <> g.branch_id`;
 
-const TolakBody = z.object({ alasan: z.string().trim().max(300).nullish() });
+const TolakBody = z.object({ alasan: z.string().trim().max(300).nullish() }).strict();
 
 const TutupAnomaliBody = z.object({
   ids: z.array(z.string().uuid()).min(1).max(500),
   alasan: z.string().trim().max(300).nullish(),
-});
+}).strict();
 
 const TerimaSebagianBody = z.object({
   /** qty yang benar-benar diterima per baris; 0 = baris itu ditolak */
@@ -100,7 +100,7 @@ const TerimaSebagianBody = z.object({
     .min(1)
     .max(500),
   alasan: z.string().trim().max(300).nullish(),
-});
+}).strict();
 
 /** Kondisi dasar satu faktur kiriman milik perusahaan; kasir terkunci cabangnya. */
 function kondisiFaktur(c: Context<AppEnv>, fakturId: string) {

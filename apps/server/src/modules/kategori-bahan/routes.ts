@@ -12,13 +12,13 @@ import { tanpaBentrok } from "../../lib/pg-galat";
 const KategoriBody = z.object({
   nama: z.string().trim().min(1).max(30),
   sort_order: z.number().int().max(BATAS_URUTAN).default(0),
-});
+}).strict();
 
 // PATCH parsial tanpa .default() — lihat catatan BahanPatchBody (zod v4).
 const KategoriPatchBody = z.object({
   nama: z.string().trim().min(1).max(30).optional(),
   sort_order: z.number().int().max(BATAS_URUTAN).optional(),
-});
+}).strict();
 
 /**
  * Master Kategori Bahan (ingredient_categories) per company: sumber pilihan

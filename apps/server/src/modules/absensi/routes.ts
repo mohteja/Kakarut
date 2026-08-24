@@ -42,9 +42,9 @@ const KoordinatBody = {
   device_id: deviceIdField,
 };
 /** Absen operator (pindai QR / ketik kode karyawan). */
-export const ClockBody = z.object({ kode: z.string().trim().min(1), ...KoordinatBody });
+export const ClockBody = z.object({ kode: z.string().trim().min(1), ...KoordinatBody }).strict();
 /** Absen SENDIRI (tombol absen di aplikasi) — tanpa kode, atas nama pemanggil. */
-export const SelfBody = z.object(KoordinatBody);
+export const SelfBody = z.object(KoordinatBody).strict();
 
 /** Validasi tanggal YYYY-MM-DD yang benar (menolak bulan/hari di luar rentang). */
 function tanggalValid(s: string): boolean {

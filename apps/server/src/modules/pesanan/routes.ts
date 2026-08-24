@@ -82,8 +82,8 @@ const LABEL_STATUS: Record<PesananStatus, string> = {
 };
 
 const JenisParam = z.enum(["open_bill", "penjualan"]);
-const StatusBody = z.object({ status: z.enum(["dikerjakan", "selesai", "batal"]) });
-const SajianBody = z.object({ takeaway: z.boolean() });
+const StatusBody = z.object({ status: z.enum(["dikerjakan", "selesai", "batal"]) }).strict();
+const SajianBody = z.object({ takeaway: z.boolean() }).strict();
 
 /**
  * Jejak perpindahan biaya untuk baris riwayat — mengubah penyajian sebuah

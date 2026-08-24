@@ -95,7 +95,7 @@ const KaryawanBody = z.object({
   password: z.string().min(8, "password minimal 8 karakter"),
   role: z.enum(["owner", "admin", "cashier", "tim", "kitchen", "bar"]),
   branch_id: z.string().uuid().nullish(),
-});
+}).strict();
 
 /** kasir, tim, kitchen & bar terikat ke satu cabang — wajib punya lokasi kerja */
 const WAJIB_CABANG = new Set(["cashier", "tim", "kitchen", "bar"]);
@@ -105,7 +105,7 @@ const UndangBody = z.object({
   email: z.string().trim().toLowerCase().email("Email tidak valid"),
   role: z.enum(["owner", "admin", "cashier", "tim", "kitchen", "bar"]),
   branch_id: z.string().uuid().nullish(),
-});
+}).strict();
 
 const PatchKaryawanBody = z.object({
   nama: z.string().trim().min(1).optional(),
@@ -116,7 +116,7 @@ const PatchKaryawanBody = z.object({
   password: z.string().min(8).optional(),
   /** true = arsipkan (keluar dari daftar, riwayat tetap); false = pulihkan */
   arsip: z.boolean().optional(),
-});
+}).strict();
 
 async function pastikanCabangMilikPerusahaan(branchId: string, companyId: string) {
   const [b] = await db
@@ -450,7 +450,7 @@ export const karyawanRoutes = new Hono<AppEnv>()
    */
   .put(
     "/:userId/tempat",
-    zValidator("json", z.object({ tempat_ids: z.array(z.string().uuid()).max(2000) })),
+    zValidator("json", z.object({ tempat_ids: z.array(z.string().uuid()).max(2000) }).strict()),
     async (c) => {
       const auth = c.get("auth");
       const userId = c.req.param("userId");
