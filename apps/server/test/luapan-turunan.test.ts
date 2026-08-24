@@ -175,6 +175,49 @@ describe("luapan turunan: angka yang lahir di server", () => {
     expect(app.split("galatDataKlien(err)")[1] ?? "").toContain("catatGalat(c, 400, err)");
   });
 
+  it("22001 SENGAJA tak diterjemahkan — dan kini terukur kenapa: MUSTAHIL", () => {
+    /*
+     * Saat 22003 diterjemahkan, saudaranya 22001 ("teks terlalu panjang")
+     * ditahan dengan alasan "keterjangkauannya belum diukur". Sekarang sudah:
+     *
+     *   · schema.ts: NOL kolom `varchar(n)` / `char(n)` — seluruh 127 kolom
+     *     teks bertipe `text`, yang di Postgres tak berbatas panjang dan tak
+     *     pernah melempar 22001;
+     *   · NOL cast `::varchar(n)` / `::char(n)` di SQL mentah mana pun.
+     *
+     * Jadi 22001 mustahil secara struktural, dan menerjemahkannya berarti
+     * mengubah 500 jadi 400 untuk jalur yang TIDAK ADA — menyembunyikan cacat
+     * server sungguhan (mis. literal cacat buatan kode sendiri) di balik
+     * kalimat sopan. Uji ini memaku keduanya: fakta skemanya DAN keputusannya.
+     * Kolom varchar pertama yang lahir membuat paku ini merah dan menagih
+     * keputusan baru — persis seperti kolom numeric baru menagih di atas.
+     */
+    const sk = readFileSync(join(SRC, "db/schema.ts"), "utf8");
+    expect(sk, "kolom varchar berbatas pertama lahir — ukur ulang keterjangkauan 22001").not.toMatch(
+      /varchar\(/,
+    );
+    expect(galatDataKlien({ cause: { code: "22001" } }), "22001 harus tetap null selama mustahil").toBeNull();
+  });
+
+  it("jalur NON-penjualan yang meluap tertangkap lapis pertama — terukur", () => {
+    /*
+     * Diukur lewat HTTP terhadap Postgres sungguhan (2026-08-24): bahan
+     * produksi bertakaran resep 99.999.999 diproduksi qty 1.000 → konsumsi
+     * 1e11, kolomnya `production_consumptions.qty` numeric(16,6) maks 9,99e9:
+     *
+     *     POST /produksi qty=1000      → 400 "Angkanya terlalu besar untuk disimpan"
+     *     POST /produksi qty=1000000   → 400 (bukan 500)
+     *
+     * Tak ada 5xx yang tersisa di kelas ini. Batasnya tetap ditulis: balasan
+     * lapis pertama TIDAK menyebut medannya — hanya jalur penjualan yang punya
+     * `pastikanMuat` bernama, karena di sanalah kasir berdiri di depan tamu.
+     * Yang dipaku di sini: terjemahannya tetap terpasang di app.onError, sebab
+     * tanpa itu pengukuran di atas kembali jadi 500.
+     */
+    const app = baca("app.ts");
+    expect(app).toContain("galatDataKlien(err)");
+  });
+
   it("PASANGAN: `pastikanMuat` menolak yang meluap DAN meloloskan yang tepat di batas", () => {
     // Penjaga yang menolak data sah lebih merusak daripada bug yang dijaganya.
     expect(() => pastikanMuat(BATAS_UANG, BATAS_UANG, "Total")).not.toThrow();
