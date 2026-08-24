@@ -50,6 +50,100 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Peta medan → kolom: batasnya ADA tapi angkanya milik kolom lain — server — 2026-08-24
+
+- **Kenapa vena ini ada**: gerbang `angka-berbatas-atas` menulis batasnya
+  sendiri — *"ia menuntut ADANYA `.max()`, bukan bahwa angkanya cocok dengan
+  kolom tujuannya. Pemetaan medan → kolom tak ada di kode."* Ledger putaran lalu
+  mencatatnya sebagai negatif bersih ("ketiga belas konstanta cocok hari ini"),
+  dan **negatif bersih itu meleset**: yang diperiksa waktu itu konstantanya,
+  bukan pemakaiannya
+- **Populasi**:
+
+  | ukuran | angka |
+  |---|---|
+  | kolom `numeric(p,s)` di `schema.ts` | **62** (11 presisi berbeda) |
+  | `z.number()` di server + shared | **109** |
+  | · ber-`.max()` | **105** — 77 lewat konstanta `BATAS_*`, 28 literal |
+  | pasangan (berkas, medan) yang namanya kolom numeric | **32** |
+  | nama medan yang BUKAN nama kolom mana pun | **20** (35 situs) |
+  | konstanta di `lib/batas-angka.ts` | **7** → 8 |
+
+  Angka ledger lama **"13 konstanta" diralat jadi 7**; 13 adalah jumlah kolom
+  yang disebut komentarnya, bukan jumlah konstantanya
+- **Metode**: kapasitas tiap kolom dihitung dari `schema.ts` sebagai
+  `10^(p−s) − 1` (BigInt — `10 ** 16` sudah tak tepat di float64), lalu
+  diadu dengan `.max()` tiap medan lewat peta (berkas, medan) → `tabel.kolom`
+- **Detektor pertamaku SALAH, dan itu bagian hasilnya**: penjodohan otomatis
+  berdasar NAMA medan menuduh **17, lima belas di antaranya keliru**. `qty` ada
+  di **tiga belas** tabel dengan tiga presisi berbeda (10,2 · 12,4 · 16,3 ·
+  16,6), jadi penjodoh nama selalu memilih yang tersempit (`sale_items` 10,2)
+  dan menuduh setiap `qty` perlengkapan/produksi yang sah. Detektor yang dipakai
+  karena itu **peta eksplisit + uji KELENGKAPAN**, bukan penjodoh nama —
+  petanya tulisan tangan, tapi medan baru tak bisa lolos diam-diam
+- **Detektor**: DIBUKTIKAN bisa menuduh, dua lapis, keduanya dengan suntikan
+  yang **di-assert mendarat**: mengembalikan pintu resep ke `BATAS_QTY_STOK` →
+  tertuduh `modules/menu/routes.ts:41` **dengan kolom & presisinya disebut**;
+  mempersempit `menus.mult` jadi `numeric(6,3)` di `schema.ts` → `BATAS_FAKTOR`
+  langsung merah ("harus sama dengan kapasitas menus.mult numeric(6,3)")
+- **Hasil**: **DUA TEMUAN**, keduanya kolom `numeric(12,4)` yang dijaga batas
+  `numeric(16,6)` — **seratus kali kolomnya**. Terukur lewat HTTP terhadap
+  Postgres sungguhan:
+
+  | pintu | sebelum | sesudah |
+  |---|---|---|
+  | `POST /menu` `komponen[].qty` = 99.999.999 | **201** | 201 |
+  | `POST /menu` `komponen[].qty` = 100.000.000 | **HTTP 500** | **400** "komponen[0].qty: maksimal 99999999" |
+  | `PUT /bahan/:id/resep` `komponen[].qty` = 99.999.999 | **200** | 200 |
+  | `PUT /bahan/:id/resep` `komponen[].qty` = 100.000.000 | **HTTP 500** | **400** bernama |
+
+  Sembilan setengah miliar nilai lolos gerbang yang KELIHATANNYA menjaga.
+  Pasangan anti-hijau-palsu ikut diukur: `stok_minimum = 9.999.999.999` tetap
+  **201** di jalur stok (`numeric(16,6)`) — pengetatannya tidak bocor ke pintu
+  tetangga
+- **`BATAS_QTY_RESEP` sengaja tidak digabung dengan `BATAS_ISI`** walau angkanya
+  sama: keduanya kebetulan `numeric(12,4)` hari ini, satu isi per kemasan dan
+  satu takaran resep. Menyatukannya berarti presisi salah satu kolom yang
+  berubah menyeret kolom yang tak ada hubungannya — persis bentuk yang membuat
+  `batas-angka.ts` ada
+- **Alatnya ikut dibereskan, dan ia TUMBUH KEMBALI**: pengupas komentar naif
+  ternyata punya **empat** salinan baru di berkas uji, sesudah vena sebelumnya
+  menyatukan tujuh. Terukur atas berkas yang mereka baca sendiri
+  (`AnalisisHargaPage`, `RiwayatPage`, `BahanEditorGrid`), ketiganya membuang
+  **2–3 aksara lebih banyak** dari yang seharusnya; atas `apps/web` +
+  `apps/server` (239 berkas), **74** dan **82** berkas berbeda (2.119 dan 2.576
+  aksara). Atas populasi `angka-berbatas-atas` sendiri (server + shared, 127
+  berkas) bedanya **satu berkas — `buta-komentar.ts` itu sendiri**, jadi tak ada
+  angka gerbang terkirim yang berubah. Keempatnya kini memakai `butaKomentar`
+- **Batas detektornya, ditulis jujur**
+  - petanya berkunci **(berkas, medan)**, bukan nomor baris: peta yang basi tiap
+    minggu akan dihapus orang. Konsekuensinya satu nama medan yang bermuara ke
+    dua kolom berbeda **di berkas yang sama** akan dinilai dengan kolom yang
+    terdaftar saja — hari ini tak ada yang begitu, dan uji KELENGKAPAN tak bisa
+    melihatnya
+  - **20 nama medan tak bernama-kolom** (`jumlah` → productions.qty, `harga` →
+    total_harga, `porsi` → qty hasil kali, `harga_per_unit`, `dana_cair`, …)
+    dinilai dari daftar putusan, bukan dari penelusuran nilai. Yang dijamin cuma
+    daftarnya tak bertambah tanpa keputusan
+  - **kelas LUAPAN TURUNAN tak disentuh sama sekali**: `porsi × takaran`,
+    `jumlah batch × isi`, `harga_per_unit × qty` semuanya bisa melampaui kolom
+    hasilnya walau tiap masukannya sah. 13 dari 62 kolom numeric memang diisi
+    hasil hitungan server (`sales.total_hpp`, `sale_items.line_total`,
+    `stock_opnames.selisih`, …) dan tak satu pun punya penjaga. Itu vena
+    tersendiri, bukan bagian yang ini
+  - kapasitas yang dipakai bilangan bulat (`10^(p−s) − 1`), bukan kapasitas
+    sebenarnya (`… − 10^(−s)`): seluruh konstanta memang bulat, dan batas
+    pecahan membuat pesan galatnya tak terbaca orang
+- **Tindak**: `BATAS_QTY_RESEP` di `lib/batas-angka.ts` + dua pintu resep
+  diperbaiki · gerbang `batas-ikut-presisi-kolom.test.ts` (7 uji) · `verify-api`
+  §242 (11 asersi) · empat salinan pengupas komentar disatukan · entri
+  `CHANGELOG-API` ⚪️ INFO (ponsel **tidak** menulis resep — tambah/ubah menu &
+  resep tetap di web, jadi tak ada perubahan sisi ponsel; dicatat, bukan
+  didiamkan). Gerbang: typecheck bersih · `npm test` **2.181** · `verify-api`
+  **2.840** terhadap Postgres segar · `audit:invarian` 26/26
+
+---
+
 ## SQL mentah: populasi yang tak pernah disapu aturan mana pun — server — 2026-08-24
 
 - **Kenapa vena ini ada**: tiga aturan yang sudah terkirim menulis batas yang
