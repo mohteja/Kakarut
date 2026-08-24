@@ -50,6 +50,39 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Jalur tulis KEDUA dibayar: rekalkulasi HPP — server — 2026-08-24
+
+- **Kenapa**: batas gerbang luapan-turunan — *"jalur tulis KEDUA ke kolom
+  yang sama takkan terlihat"* — dengan instansi yang ditunjuk usulannya:
+  `rekalkulasi.ts` menulis ulang `hpp_satuan` + `total_hpp` saat dapur
+  mengubah penyajian, dan arahnya bisa **naik** (kemasan takeaway)
+- **Diukur di langit-langit**: bahan 999.999.999.999 + kemasan 5.000 → jual
+  dine-in **201** (HPP tepat muat) → dapur menekan 🥡:
+
+  | | balasan |
+  |---|---|
+  | SEBELUM | 400 **generik** — di TOMBOL SAJIAN, tanpa petunjuk baris mana |
+  | SESUDAH | 400 **`HPP satuan "Menu Langit C2" terlalu besar…`** |
+  | PASANGAN flip biasa | **200** |
+
+- **Temuan sampingan tertangkap probe-ku sendiri**: segmen jalur `jenis`
+  salah (`/pesanan/sale/…`) → **500 dari ZodError mentah** —
+  `JenisParam.parse()` telanjang di **lima** situs. Kelima diganti
+  `jenisDariJalur()` (safeParse → **400** "Jenis pesanan pada alamat tidak
+  dikenal") — murni salah alamat klien, sekelas 22P02
+- **Tindak**: `pastikanMuat` di rekalkulasi (bernama-menu + totalHpp) · entri
+  PUTUSAN menyebut kedua jalur · pin + bukti merah mendarat · verify-api
+  **§249** (6 asersi)
+- **Batas**: dua jalur tulis kini dijaga (create + rekalkulasi); penelusuran
+  ekspresi menyeluruh tetap bukan bentuk gerbangnya — yang dijaga tiap jalur
+  yang DITEMUKAN dan diukur
+- Gerbang: typecheck bersih · `npm test` 2.209 · `verify-api` **2.961** ·
+  `audit:invarian` 26/26 · cakupan 271 identik — dan **keempat kalinya** cek
+  cakupan pertamaku dari cwd salah; polanya konsisten (compound command yang
+  berpindah direktori), dicatat supaya penerus tak mengulanginya
+
+---
+
 ## Pintu FIFO pada 30 rb event: 0,056 dtk — server — 2026-08-24
 
 - **Kenapa**: satu-satunya pintu detail tanpa angka — `GET /stok/fifo/:id`
