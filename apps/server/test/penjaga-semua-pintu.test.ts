@@ -43,10 +43,14 @@
  *    tetap terbaca "tanpa penjaga" (lihat entri `buatPerusahaanUntuk`);
  *  · dan ke arah sebaliknya — yang LEBIH BERBAHAYA — satu penjaga di mana pun
  *    dalam satu badan membuat SELURUH tulisan di badan itu lolos. `provisionGuest`
- *    (seed/guest.ts) adalah contoh nyatanya: `onConflictDoUpdate` di insert
- *    `users` paling atas menutupi insert `companies`, `branches`, dan
- *    `storageLocations` di bawahnya yang tak berpenjaga sama sekali. Badan yang
- *    panjang karena itu titik butanya, bukan titik kuatnya;
+ *    (seed/guest.ts) adalah contoh nyatanya, dan contoh itu kemudian DIUKUR:
+ *    dua boot dilepas serentak pada DB tanpa perusahaan demo, dan yang kalah
+ *    melempar `Failed query: insert into "companies" …` mentah — selamat hanya
+ *    karena catch pembungkus di index.ts. Insert `companies`-nya kini memakai
+ *    `onConflictDoNothing` + jalur kalah yang idempoten (terukur: menang=true,
+ *    kalah=false, keadaan sehat), tapi GRANULARITAS SAPUAN INI TETAP BADAN —
+ *    ia tetap tak akan melihat insert tak berpenjaga yang menumpang badan
+ *    panjang. Badan yang panjang tetap titik butanya, bukan titik kuatnya;
  *  · ia hanya melihat bentuk yang ditulis di TypeScript, bukan SQL mentah;
  *  · daftar tabel tiap aturan adalah pilihan, bukan kelengkapan. Untuk
  *    `bentrok-unik`: ada 32 tabel berindeks unik di skema ini, dan menyapu
@@ -215,10 +219,14 @@ const ATURAN: Aturan[] = [
       // cuma mengenal `onConflictDoNothing`. Yang memaksa penghapusannya uji
       // "`dasar` tak menyimpan entri yang sudah tak berlaku" di bawah.
       //
-      // Yang perlu diketahui penerusnya: `provisionGuest` juga menyisipkan
-      // `companies`, `branches`, dan `storageLocations` TANPA penjaga, dan
-      // ketiganya kini TAK TERLIHAT sapuan ini — satu penjaga di awal badan
-      // menutupi seluruh sisanya. Lihat catatan BATASNYA di kepala berkas.
+      // Yang perlu diketahui penerusnya: utang yang dulu ditulis di sini —
+      // insert `companies` tanpa penjaga yang tertutupi `onConflictDoUpdate`
+      // di awal badan — sudah DIUKUR (balapan dua boot: yang kalah melempar
+      // kueri mentah) lalu DIBAYAR: insert-nya kini `onConflictDoNothing`
+      // dengan jalur kalah idempoten, dijaga `provisi-tamu-balapan.test.ts`. `branches`
+      // dan `storageLocations` di bawahnya terkurung transaksi yang gerbangnya
+      // insert perusahaan itu, jadi tak bisa balapan sendiri. Granularitas
+      // sapuan ini tetap badan — lihat BATASNYA di kepala berkas.
     },
   },
   {

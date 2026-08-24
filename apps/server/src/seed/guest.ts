@@ -73,11 +73,23 @@ export async function provisionGuest(dbc: Db = db): Promise<boolean> {
   }
 
   // 3) Provisi baru + data dummy dalam satu transaksi.
+  //
+  // `onConflictDoNothing` pada insert perusahaan adalah GERBANG BALAPANNYA.
+  // Dua boot serentak (deploy yang tumpang tindih) sama-sama lolos cek
+  // "sudah ada?" di atas — jeda pra-cek→tulis persis kelas bentrok-unik.
+  // TERUKUR (dua provisionGuest dilepas Promise.all pada DB tanpa demo):
+  // yang kalah dulu MELEMPAR `Failed query: insert into "companies" …` mentah
+  // — di boot nyata tertangkap catch pembungkus dan hanya jadi warn, tapi
+  // aman-karena-catch adalah aman yang bisa hilang tanpa ada yang sadar.
+  // Sekarang yang kalah memulangkan null, jatuh ke jalur idempoten di bawah,
+  // dan tetap memastikan keanggotaannya sendiri.
   const hasil = await dbc.transaction(async (tx) => {
     const [company] = await tx
       .insert(companies)
       .values({ nama: "Terakasir Demo", slug: GUEST.slug, plan: "lite" })
+      .onConflictDoNothing()
       .returning();
+    if (!company) return null;
     // Cabang tanpa lat/lng → geofence absen mati (absen bebas dari mana pun).
     const [branch] = await tx
       .insert(branches)
@@ -133,6 +145,18 @@ export async function provisionGuest(dbc: Db = db): Promise<boolean> {
     );
     return { companyId: company.id, branchId: branch.id, hargaByMenuId };
   });
+
+  // Kalah balapan: pemenang sedang (atau sudah) menyelesaikan provisinya.
+  // Baca ulang perusahaannya, pastikan keanggotaan KITA tetap terpasang, lalu
+  // pulang lewat jalur idempoten yang sama dengan cek "sudah ada?" di atas.
+  if (!hasil) {
+    const [menang] = await dbc
+      .select({ id: companies.id })
+      .from(companies)
+      .where(eq(companies.slug, GUEST.slug));
+    if (menang) await pastikanKeanggotaan(dbc, menang.id, owner.id, kasir.id, null);
+    return false;
+  }
 
   // 4) Transaksi dummy (di luar tx — createSale mengelola transaksinya sendiri):
   //    ~14 struk tersebar 7 hari terakhir agar dashboard & laporan terisi.
