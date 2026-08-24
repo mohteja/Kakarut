@@ -50,6 +50,65 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Lima belas pintu yang tak pernah diketuk — server — 2026-08-24
+
+- **Kenapa vena ini ada**: gerbang cakupan putaran lalu mengukur 274 rute
+  konkret, 256 diketuk, dan menuliskan **15 pintu sebagai UTANG YANG DIUKUR** —
+  empat `DELETE` dan sembilan jalur tulis lain yang bisa 500 sejak berbulan-bulan
+  tanpa satu uji berubah warna
+- **Populasi**: **15** pintu utang + 3 di luar jangkauan, dari **274**
+- **Metode**: §244 di `verify-api.sh` (**41 asersi**) mengetuk kelima belasnya
+  lewat HTTP sungguhan memakai fikstur yang sudah hidup di aliran skrip — tiap
+  ketukan memeriksa status + satu fakta dari badannya + pasangan
+  anti-hijau-palsu (404 untuk id asing, penolakan peran, idempotensi)
+- **Hasil**:
+
+  | | sebelum | sesudah |
+  |---|---|---|
+  | rute diketuk | **256** (93,4 %) | **271** (**98,9 %**) |
+  | jalur TULIS diketuk | 155/168 | **165/168** |
+  | UTANG | **15** | **0** |
+
+  **Tak satu pun pintu membalas 5xx** — venanya bersih secara perilaku, diukur
+  bukan diduga. Tiga yang tersisa memang di luar jangkauan: migrasi sungguhan,
+  email sungguhan, retensi cadangan mesin
+- **Dua dari lima belas ternyata PINTU HANTU — ralat atas penyebut cakupanku
+  sendiri**: `buatRuteTambahStok` dipasang di dua prefiks dan dua handler-nya
+  menolak separuh dirinya di baris pertama (`kirim-hasil`: `tipe !==
+  "produksi"` → mount `/pembelian` **selalu 404**; `dampak`: `tipe !== "beli"`
+  → mount `/produksi` **selalu 400**). Bukan utang melainkan **artefak
+  pabrik**. Kini terdaftar `HANTU_PABRIK` dengan sebab strukturalnya, diuji
+  **tetap mustahil** lewat HTTP, dan source-pin menahan penjaga `tipe`-nya —
+  hantu yang tiba-tiba berhasil berarti mengirim hasil produksi lewat pintu
+  belanja
+- **Kandidat perilaku diukur lalu DITOLAK, dengan alasannya**:
+  `setujui-massal` tak punya syarat `selisih ≠ 0` yang pintu tunggalnya punya —
+  tapi baris nol-selisih lahir berstatus `disetujui`, jadi predikat `menunggu`
+  tak pernah memungutnya. **Aman karena konjungsi lain**; yang diasersi
+  perilakunya (idempoten — panggilan kedua menyetujui **NOL**)
+- **Dua kesalahanku saat menulis §244, keduanya tertangkap alat yang ada**:
+  1. pintu hantu kutembak `{"items":[]}` dan dapat 400 — `zValidator` berjalan
+     **sebelum** handler, jadi cabang `tipe` tak pernah tercapai. Badannya
+     harus sah dulu supaya hantunya benar-benar teruji;
+  2. pasangan kasir kupakai `$KASIR` yang mati sejak §105 → 401 alih-alih 403.
+     Yang menemukannya `verify-api-token.test.ts` — penjaga yang dipasang untuk
+     kesalahan persis ini, bekerja persis seperti niatnya
+- **Detektor**: bukti merah mendarat — satu baris dicabut dari
+  `rute-diketuk.txt` (suntikan di-assert) → dua uji merah menyebut
+  `PATCH /api/satuan/:id`. Ratchet diperketat: `UTANG` maks **0**, jalur tulis
+  diketuk ≥ **165**
+- **Batas**: "diketuk" tetap bukan "diuji" — tiap pintu dilewati sekali dengan
+  badan sah; cabang-cabang dalamnya tidak disapu. Cabang `revoked` di
+  `undangan/:id/tolak` tak tertembak (butuh akun terdaftar baru; kuota register
+  20/jam sudah terpakai ~18 oleh skrip) — yang ditembak cabang penjaganya
+  (404 untuk undangan orang lain + pending tetap utuh)
+- **Tindak**: §244 (41 asersi) · `rute-diketuk.txt` 256 → 271 · gerbang
+  `cakupan-rute.test.ts` 5 → 6 uji (+`HANTU_PABRIK` + source-pin). Gerbang:
+  typecheck bersih · `npm test` **2.195** · `verify-api` **2.890** terhadap
+  Postgres segar · `audit:invarian` 26/26
+
+---
+
 ## Kunci JSON ponsel yang dibaca lewat VARIABEL — mobile — 2026-08-24
 
 - **Kenapa vena ini ada**: ledger vena "medan yang tak diurai" menulis batasnya
