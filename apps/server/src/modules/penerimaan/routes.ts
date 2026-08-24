@@ -81,6 +81,19 @@ function cteMenggantung(companyId: string) {
   `;
 }
 
+/**
+ * Langit-langit daftar anomali. Nilai benarnya NOL, jadi seratus baris sudah
+ * jauh lebih dari cukup untuk memutuskan; yang dipakai halaman untuk mengukur
+ * BESARNYA masalah adalah `jumlah`, yang dihitung SQL atas populasi penuh.
+ */
+const BATAS_ANOMALI = 100;
+
+/**
+ * Langit-langit daftar FAKTUR bertanda. Lebih longgar dari `BATAS_ANOMALI`
+ * karena isinya cuma UUID (±38 byte) dan satu faktur mewakili banyak baris.
+ */
+const BATAS_FAKTUR_ANOMALI = 2000;
+
 /** Predikat pendampingnya — dipakai di WHERE atas CTE `g` di atas. */
 const MENGGANTUNG = sql`g.lolos_gerbang = false
         AND g.asal_faktur IS NOT NULL
@@ -444,6 +457,26 @@ export const penerimaanRoutes = new Hono<AppEnv>()
       terikatCabang(auth.role) && auth.branch_id
         ? sql`AND (g.branch_id = ${auth.branch_id} OR g.asal_faktur = ${auth.branch_id})`
         : sql``;
+    /*
+     * BERLANGIT-LANGIT, DAN AGREGATNYA TETAP ATAS POPULASI PENUH.
+     *
+     * Terukur sebelum batas ini ada, Postgres nyata, 10.000 baris menggantung:
+     * balasannya 2.760.043 byte dan **4,17 detik** — selama itu satu dari
+     * sepuluh koneksi kolam ditahan, dan tak ada galat apa pun yang muncul.
+     *
+     * `COUNT(*) OVER ()` / `SUM(qty) OVER ()`, BUKAN `daftar.reduce(...)` di
+     * JavaScript. Fungsi window dihitung Postgres SEBELUM `LIMIT`, jadi kedua
+     * angka itu tetap menghitung SELURUH baris menggantung walau yang dikirim
+     * cuma seratus pertama. Menjumlahkannya dari larik yang sudah dipotong
+     * adalah cara paling sunyi untuk merusak halaman ini: badge "barang tidak
+     * sampai" akan menyusut persis ketika masalahnya paling besar. Aturan yang
+     * sama sudah dijaga untuk `GET /customer` di
+     * `test/daftar-tanpa-langit-langit.test.ts`.
+     *
+     * Yang ditampilkan yang PALING TUA (`ORDER BY g.waktu ASC`): kiriman yang
+     * menggantung paling lama adalah yang paling mungkin sudah dikompensasi
+     * manual, dan itu yang perlu diputuskan lebih dulu.
+     */
     const rows = await db.execute(sql`
       ${cteMenggantung(auth.company_id!)}
       SELECT g.id, g.faktur_id, g.tipe, g.status, g.qty, g.waktu,
@@ -451,7 +484,9 @@ export const penerimaanRoutes = new Hono<AppEnv>()
              bp.nama AS posisi_sekarang,
              ba.nama AS dikirim_dari,
              dn.nomor_teks AS nomor,
-             EXTRACT(DAY FROM now() - g.waktu)::int AS umur_hari
+             EXTRACT(DAY FROM now() - g.waktu)::int AS umur_hari,
+             COUNT(*) OVER ()          AS total_baris,
+             SUM(g.qty) OVER ()        AS total_qty
       FROM g
       JOIN ingredients i ON i.id = g.ingredient_id
       LEFT JOIN branches bp ON bp.id = g.branch_id
@@ -463,12 +498,37 @@ export const penerimaanRoutes = new Hono<AppEnv>()
       WHERE ${MENGGANTUNG}
         ${kunciCabang}
       ORDER BY g.waktu ASC
+      LIMIT ${BATAS_ANOMALI}
+    `);
+    /*
+     * Faktur bertanda diambil TERPISAH, atas populasi penuh.
+     *
+     * Satu faktur punya banyak baris, jadi daftar id-nya jauh lebih kecil dari
+     * `rows` — dan tanpa kueri kedua ini, tanda "barang tidak sampai" di kartu
+     * Beli & Produksi hilang untuk faktur yang barisnya di luar `LIMIT` di
+     * atas. Batasnya sendiri tetap ada: daftar ini pun tak boleh tumbuh tanpa
+     * langit-langit.
+     */
+    const faktur = await db.execute(sql`
+      ${cteMenggantung(auth.company_id!)}
+      SELECT DISTINCT g.faktur_id
+      FROM g
+      WHERE ${MENGGANTUNG}
+        ${kunciCabang}
+      LIMIT ${BATAS_FAKTUR_ANOMALI}
     `);
     const daftar = rows.rows as Record<string, unknown>[];
+    const jumlah = Number(daftar[0]?.total_baris ?? 0);
     return c.json({
-      jumlah: daftar.length,
-      qty_total: daftar.reduce((t, r) => t + Number(r.qty ?? 0), 0),
-      rows: daftar,
+      faktur_ids: (faktur.rows as { faktur_id: string | null }[])
+        .map((r) => r.faktur_id)
+        .filter((x): x is string => x != null),
+      jumlah,
+      qty_total: Number(daftar[0]?.total_qty ?? 0),
+      // Medan bantu window tak ikut keluar — ia jawaban atas populasi, bukan
+      // milik barisnya.
+      rows: daftar.map(({ total_baris: _a, total_qty: _b, ...r }) => r),
+      terpotong: jumlah > daftar.length,
     });
   })
   /**

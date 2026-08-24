@@ -26,6 +26,71 @@ tanpa akses repo server.
 ---
 
 
+## Rilis: Tempat Sampah & anomali kiriman BERLANGIT-LANGIT
+
+> Tidak ada migrasi. Bentuk balasan `GET /sampah` **tidak berubah** — sengaja.
+
+🟡 **PERLU DICEK** — dua layar: Tempat Sampah dan Kiriman Menggantung.
+
+**Belum tayang.**
+
+Dua pintu memulangkan **seluruh** barisnya tanpa batas. Terukur terhadap
+Postgres sungguhan dengan 10.000 baris disuntikkan:
+
+| pintu | sebelum | sesudah |
+| --- | --- | --- |
+| `GET /sampah` | 10.000 baris · **2.438.895 byte** · 78 ms | 300 baris · 72.793 byte · 23 ms |
+| `GET /penerimaan/anomali` | 10.000 baris · **2.760.043 byte** · **4.170 ms** | 100 baris · 27.676 byte · 1.522 ms |
+
+### `GET /sampah` — bentuknya TETAP larik, penandanya di HEADER
+
+Balasannya **tetap** `SampahRow[]`. Ini keputusan sadar: ketujuh build yang
+pernah rilis membacanya `as List`, dan `{ items, terpotong }` seperti
+`GET /customer` akan **melempar** di aplikasi yang hari ini terpasang.
+
+Batasnya **300 terbaru** (urut `dihapus_pada` menurun) dan berlaku untuk semua
+klien. Bila dipotong, respons membawa header:
+
+```
+X-Kakarut-Terpotong: 300
+```
+
+Build lama mengabaikannya dan tetap jalan — mereka menerima 300 terbaru tanpa
+spanduk. Yang perlu dikerjakan mobile:
+
+1. **Baca headernya** dan tampilkan "menampilkan 300 terbaru" bila ada.
+2. **Berhenti memakai `rows.length` sebagai JUMLAH ISI tempat sampah.** Dialog
+   "N catatan akan dihapus PERMANEN" akan menyebut 300 untuk 10.000 — angka
+   salah pada satu-satunya layar yang tak bisa dibatalkan. Sudah dikerjakan di
+   `sampah_page.dart` pada rilis ini.
+
+### `GET /penerimaan/anomali` — dua medan BARU, tak ada yang hilang
+
+```jsonc
+{
+  "jumlah": 10000,        // SELURUH baris menggantung — dari SQL, bukan rows.length
+  "qty_total": 30000,     // idem
+  "rows": [ /* 100 PALING TUA */ ],
+  "faktur_ids": ["…"],    // BARU — faktur mana saja yang punya baris menggantung
+  "terpotong": true       // BARU — rows dipotong; `jumlah` tetap utuh
+}
+```
+
+`jumlah` dan `qty_total` **tidak berubah artinya**: keduanya tetap menghitung
+seluruh populasi (`COUNT(*) OVER ()` / `SUM(qty) OVER ()`, yang Postgres hitung
+sebelum `LIMIT`). Yang berlangit-langit hanya `rows`.
+
+**`faktur_ids` ada justru karena `rows` dipotong.** Tanda "barang tidak sampai"
+di kartu Beli & Produksi diturunkan dari daftar faktur ini, bukan dari `rows` —
+terukur: 500 faktur punya baris menggantung sementara `rows` hanya
+memperlihatkan **100** di antaranya. Menurunkannya dari `rows` berarti 400
+faktur kehilangan tandanya diam-diam, tepat saat masalahnya paling besar.
+
+Medan lama tak ada yang dihapus, jadi build yang tak diperbarui tetap bekerja —
+kecuali tandanya yang kini kurang lengkap bila anomalinya melebihi 100 baris.
+
+---
+
 ## Rilis: Badan permintaan MENOLAK kunci yang tak dikenal (400, bukan dibuang)
 
 > Tidak ada migrasi. Tidak ada medan baru. Yang berubah: **satu kelas balasan

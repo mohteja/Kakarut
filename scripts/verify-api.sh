@@ -13311,6 +13311,73 @@ else
 fi
 
 
+echo "── §241 Balasan daftar berlangit-langit: SQL mentah ikut dijaga ──"
+#
+# Tiga aturan sudah terkirim di repo ini — pengurungan tenant, langit-langit
+# daftar, dan cast `sql<number>` — dan ketiganya menulis batas yang sama tentang
+# dirinya sendiri: "hanya melihat bentuk TypeScript, bukan SQL mentah". Dua
+# pintu lolos lewat celah itu, dan keduanya diukur terhadap Postgres sungguhan
+# dengan 10.000 baris disuntikkan:
+#
+#     GET /sampah              10.000 baris  2.438.895 byte    78 ms
+#     GET /penerimaan/anomali  10.000 baris  2.760.043 byte  4.170 ms
+#
+# Sesudah dibatasi: 300 baris / 72.793 byte / 23 ms, dan 100 baris / 27.676
+# byte / 1.522 ms — sementara `jumlah` dan `qty_total` TETAP 10.000 dan 30.000,
+# karena keduanya pindah ke `COUNT(*) OVER ()` / `SUM(qty) OVER ()` yang
+# Postgres hitung SEBELUM `LIMIT`.
+#
+# BATAS SEKSI INI, ditulis supaya hijaunya tak terbaca lebih luas: keadaan
+# TERPOTONG tak diuji di sini — membuatnya butuh 301 penjualan yang dihapus
+# satu per satu lewat HTTP, dan itu ±600 permintaan untuk satu asersi. Yang
+# dijaga di sini justru sisi yang paling mudah rusak tanpa disadari: bahwa
+# pembatasan itu TIDAK mengubah apa pun pada pemakaian normal. Keadaan
+# terpotongnya dijaga uji sumber (`daftar-tanpa-langit-langit.test.ts`) dan uji
+# ponsel (`sampah_terpotong_test.dart`), keduanya dengan bukti merah.
+MENU_241=$(api "$REISS105" GET /menu | jq -r '[.[] | select(.tipe=="regular")][0].id')
+MJ_241=$(api "$REISS105" GET /meja | jq -r '[.[] | select(.tipe=="dine_in" and .is_active)][0].id')
+SL241=$(api "$REISS105" POST /penjualan "{\"meja_id\":\"$MJ_241\",\"items\":[{\"menu_id\":\"$MENU_241\",\"qty\":1}]}" | jq -r '.sale.id')
+api "$OWNER" DELETE "/penjualan/$SL241" > /dev/null
+# Bentuknya WAJIB tetap larik: ketujuh build ponsel yang pernah rilis membacanya
+# `as List`, dan `{items, terpotong}` akan MELEMPAR di aplikasi yang hari ini
+# terpasang. Itu sebabnya penandanya di header, bukan di badan.
+cek "GET /sampah tetap LARIK telanjang (build terpasang tak boleh pecah)" "V == 1" \
+  "$(api "$OWNER" GET /sampah | jq '(type=="array") | if . then 1 else 0 end')"
+cek "penjualan yang baru dihapus ada di daftar" "V == 1" \
+  "$(api "$OWNER" GET /sampah | jq --arg id "$SL241" '([.[] | select(.key==$id)] | length==1) | if . then 1 else 0 end')"
+# PASANGAN anti-hijau-palsu: penanda pemotongan tak boleh muncul saat isinya
+# sedikit. Gerbang yang selalu berteriak "terpotong" juga hijau tanpa ini.
+cek "sampah kecil: tak ada header X-Kakarut-Terpotong" "V == 1" \
+  "$(test -z "$(header_of "x-kakarut-terpotong" -H "Authorization: Bearer $OWNER" "$BASE/api/sampah")" && echo 1 || echo 0)"
+cek "daftar sampah masih di bawah batas 300" "V < 300" \
+  "$(api "$OWNER" GET /sampah | jq 'length')"
+# Fitur sahnya masih hidup sesudah pengetatan.
+cek "pulihkan dari daftar yang berlangit-langit tetap bekerja" "V == 1" \
+  "$(api "$OWNER" POST /sampah/pulihkan "{\"jenis\":\"penjualan\",\"key\":\"$SL241\"}" | jq '(.jumlah_baris==1) | if . then 1 else 0 end')"
+cek "sesudah dipulihkan, ia hilang dari Tempat Sampah" "V == 0" \
+  "$(api "$OWNER" GET /sampah | jq --arg id "$SL241" '[.[] | select(.key==$id)] | length')"
+api "$OWNER" DELETE "/penjualan/$SL241" > /dev/null
+
+# ── Anomali: agregatnya SQL, bukan panjang larik yang sudah dipotong ────────
+AN241=$(api "$OWNER" GET /penerimaan/anomali)
+cek "anomali: rows berlangit-langit (≤ 100)" "V <= 100" "$(echo "$AN241" | jq '.rows | length')"
+cek "anomali: medan bantu window tak bocor ke rows" "V == 0" \
+  "$(echo "$AN241" | jq '[.rows[] | select(has("total_baris") or has("total_qty"))] | length')"
+# Saat TIDAK terpotong, angka dari SQL wajib sepakat dengan larik yang dikirim.
+# Kalau `COUNT(*) OVER ()` rusak, di sinilah ia berbeda.
+cek "anomali: jumlah dari SQL == baris yang dikirim (belum terpotong)" "V == 1" \
+  "$(echo "$AN241" | jq '((.terpotong==false) and (.jumlah == (.rows|length))) | if . then 1 else 0 end')"
+cek "anomali: qty_total == jumlah qty barisnya (belum terpotong)" "V == 1" \
+  "$(echo "$AN241" | jq '(.qty_total == ([.rows[].qty | tonumber] | add // 0)) | if . then 1 else 0 end')"
+# Tanda "barang tidak sampai" di kartu Beli & Produksi diturunkan dari medan
+# INI, bukan dari `rows` yang dipotong — terukur: 500 faktur punya baris
+# menggantung sementara `rows` hanya memperlihatkan 100 di antaranya.
+cek "anomali: faktur_ids adalah larik tersendiri" "V == 1" \
+  "$(echo "$AN241" | jq '(.faktur_ids | type == "array") | if . then 1 else 0 end')"
+cek "anomali: tiap faktur pada rows ada di faktur_ids" "V == 0" \
+  "$(echo "$AN241" | jq '[.rows[].faktur_id | select(. != null)] - .faktur_ids | length')"
+
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

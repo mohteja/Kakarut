@@ -104,7 +104,21 @@ export function periksaBuildServer(buildServer: string | null | undefined): void
 
 export async function api<T = unknown>(
   path: string,
-  opts: { method?: string; body?: unknown; formData?: FormData } = {},
+  opts: {
+    method?: string;
+    body?: unknown;
+    formData?: FormData;
+    /**
+     * Dipanggil dengan header respons pada jawaban yang berhasil.
+     *
+     * Ada karena `GET /sampah` memulangkan LARIK TELANJANG yang kini
+     * berlangit-langit: bentuknya tak boleh berubah (build ponsel lama
+     * membacanya `as List`), jadi penanda pemotongannya tinggal di header
+     * `X-Kakarut-Terpotong`. Yang butuh tahu memintanya; yang tidak, tak
+     * berubah sama sekali.
+     */
+    bacaHeader?: (h: Headers) => void;
+  } = {},
 ): Promise<T> {
   const auth = loadAuth();
   const headers: Record<string, string> = {};
@@ -184,5 +198,6 @@ export async function api<T = unknown>(
   }
   // request benar-benar dijawab aplikasi → pastikan overlay tertutup
   emitServerDown(false);
+  opts.bacaHeader?.(res.headers);
   return data;
 }

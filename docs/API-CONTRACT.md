@@ -4239,9 +4239,24 @@ export interface RiwayatPenerimaanFaktur {
 
 /** Ringkasan pendeteksi kiriman menggantung; `jumlah: 0` = sehat. */
 export interface AnomaliKiriman {
+  /** JUMLAH SELURUH baris menggantung — dihitung SQL, bukan `rows.length`. */
   jumlah: number;
+  /** total qty SELURUH baris menggantung — juga dari SQL, bukan dari `rows`. */
   qty_total: number;
+  /** baris yang ditampilkan: yang PALING TUA, berlangit-langit. */
   rows: KirimanMenggantung[];
+  /**
+   * Faktur mana saja yang punya baris menggantung — dasar tanda "barang tidak
+   * sampai" di kartu Beli & Produksi.
+   *
+   * Medan tersendiri, dan itu bukan kemewahan: sejak `rows` berlangit-langit,
+   * menurunkan tandanya dari `rows` membuat faktur ke-101 kehilangan tandanya
+   * diam-diam — kerusakan yang lahir dari perbaikan, tepat saat masalahnya
+   * paling besar.
+   */
+  faktur_ids: string[];
+  /** `rows` dipotong (`jumlah` > yang dikirim). `jumlah` tetap utuh. */
+  terpotong: boolean;
 }
 
 /** Hasil penghapusan kiriman menggantung (id yang tak menggantung dilewati). */

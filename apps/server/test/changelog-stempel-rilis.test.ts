@@ -51,6 +51,7 @@ const BELUM_TAYANG = new Set([
   "## Koreksi kontrak: satuan baris faktur (`qty` vs `satuan_beli` vs `is_batch`)",
   "## Cara memelihara berkas ini",
   // rilis yang masih di cabang `claude`, belum di-merge ke production
+  "## Rilis: Tempat Sampah & anomali kiriman BERLANGIT-LANGIT",
   "## Rilis: Badan permintaan MENOLAK kunci yang tak dikenal (400, bukan dibuang)",
   "## Rilis: Slip pesanan — cetak menu & jumlah, TANPA harga",
   "## Rilis: Sebaran transaksi per jam di laporan penjualan",
