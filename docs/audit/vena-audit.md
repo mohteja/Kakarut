@@ -50,6 +50,82 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Kunci kontrak ↔ Dart: sapuan sekali-jalan jadi gerbang berdiri — server+mobile — 2026-08-24
+
+- **Kenapa vena ini ada**: `durasi_detik` dikirim server berbulan-bulan dan
+  dibaca ponsel NOL kali — dan yang menemukannya **sapuan sekali jalan**, bukan
+  gerbang. Sesudah sapuan itu selesai, tak ada apa pun yang menagih kunci
+  kontrak berikutnya
+- **Populasi** (diukur, pembangkitnya `acuan-kunci-mobile.ts`):
+
+  | ukuran | angka |
+  |---|---|
+  | baris `Interface\|kunci` dari `types.ts` | **1.127** |
+  | kunci unik | **463** |
+  | disentuh Dart (baca `['k']` maupun tulis `{'k': v}`) | **390** |
+  | tercatat BELUM, dengan nama | **73** |
+
+- **Bentuknya pola cermin yang sudah terbukti dua kali** (`acuan-status-mobile`,
+  `acuan-uang-mobile`): pembangkit di server → fikstur di repo mobile → uji
+  cermin Dart menagih tiap kunci **diputuskan** — dibaca, atau tercatat di
+  `kunci-belum-dibaca.txt`. Ratchet-nya MENYUSUT dua arah: kunci yang mulai
+  dibaca wajib dihapus dari catatan (uji merah menyebutnya), kunci yang hilang
+  dari kontrak juga
+- **Sentinel historis**: kelima kunci vena #30/#34 (`durasi_detik`,
+  `masuk_pada`, `lewat_target`, `target_detik`, `bertarget`) diasersi tetap
+  disentuh — lenyapnya salah satu adalah persis regresi bug aslinya
+- **Detektor**: bukti merah DUA lapis di mobile (kunci karangan → merah
+  bernama; kunci terbaca yang dicatat "belum" → ratchet merah) + pasangan
+  sintetis di server. **Dua kali detektorku sendiri salah saat membangunnya**:
+  (1) regex pembangkit buta terhadap `export type X = {` — di `types.ts` hari
+  ini kebetulan nol (139 kontrak semuanya interface), tapi kontrak pertama
+  berbentuk type-alias akan lenyap tanpa suara; ketahuan oleh uji pasangan
+  sintetis; (2) masukan sintetisku sendiri dirakit `replace` satu-baris
+  sehingga medan keduanya tak pernah berpindah baris — ujinya menuduh
+  pembangkit yang benar
+- **Batas, ditulis di kedua berkasnya**: "disentuh" ≠ "diurai benar" — literal
+  yang kebetulan sama ikut memuaskan sapuan; yang menjaga arah "diurai benar"
+  uji parser per fitur. Fikstur diperbarui manual; kesegarannya dijaga
+  `kunci-satu-kontrak.test.ts` hanya di mesin yang memuat kedua repo (CI
+  masing-masing repo tak saling checkout), dan itu disebut apa adanya
+- **Tindak**: `acuan-kunci-mobile.ts` + npm script · `kunci-satu-kontrak.test.ts`
+  (4 uji, server) · `kunci_kontrak_server_test.dart` (5 uji, mobile) + dua
+  fikstur. Gerbang: typecheck bersih · `npm test` **2.199** · `flutter analyze`
+  bersih · `flutter test` **512** (3.44.7)
+
+---
+
+## `22001` dan jalur non-penjualan luapan turunan — server — 2026-08-24
+
+- **Kenapa vena ini ada**: dua celah yang kutulis sendiri sebagai batas vena
+  luapan-turunan — `22001` ditahan karena *"keterjangkauannya belum kuukur"*,
+  dan jalur non-penjualan hanya dilindungi lapis pertama
+- **Hasil 1 — `22001` terukur MUSTAHIL**: `schema.ts` punya **NOL** kolom
+  `varchar(n)`/`char(n)` — seluruh **127** kolom teks bertipe `text` yang tak
+  berbatas panjang dan tak pernah melempar 22001 — dan **NOL** cast
+  `::varchar` di SQL mentah. Menerjemahkannya berarti mengubah 500 jadi 400
+  untuk jalur yang TIDAK ADA. Keputusannya **dipaku**: `galatDataKlien` tetap
+  `null` untuk 22001, dan kolom varchar PERTAMA yang lahir membuat paku merah
+  dan menagih pengukuran ulang. Bukti merah mendarat (varchar suntikan →
+  tertuduh → dicabut)
+- **Hasil 2 — jalur non-penjualan diukur lewat HTTP**: bahan produksi
+  bertakaran resep 99.999.999 diproduksi qty 1.000 → konsumsi **1e11** atas
+  `production_consumptions.qty` `numeric(16,6)` (maks 9,99e9):
+
+  | permintaan | balasan |
+  |---|---|
+  | `POST /produksi` qty=1.000 | **400** "Angkanya terlalu besar untuk disimpan" |
+  | `POST /produksi` qty=1.000.000 | **400**, bukan 500 |
+
+  Kelas 5xx-nya tertutup pintu keluar bersama. Yang tersisa **hanya ketiadaan
+  nama medan**, dan itu batas yang dipilih sadar: `pastikanMuat` bernama milik
+  jalur penjualan, tempat kasir berdiri di depan tamu
+- **Tindak**: `luapan-turunan.test.ts` 5 → **7** uji (paku 22001 + pin
+  pengukuran non-penjualan). Tak ada kode server tersentuh. Gerbang: typecheck
+  bersih · `npm test` **2.201**
+
+---
+
 ## Latensi di bawah KONKURENSI — server — 2026-08-24
 
 - **Kenapa vena ini ada**: pengukuran cakupan menilai VOLUME (200.101
