@@ -3,6 +3,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { HTTPException } from "hono/http-exception";
 import { alasanGagalBaris } from "../src/lib/pg-galat";
+import { butaKomentar } from "../src/scripts/buta-komentar";
 
 /**
  * PESAN GAGAL PER BARIS TAK BOLEH MEMBAWA KUERI MENTAH.
@@ -97,7 +98,9 @@ describe("tak ada lagi pesan galat mentah yang dikirim ke klien", () => {
    */
   const BOLEH = [
     "modules/admin-system/routes.ts", // migrasi/cadangan/SMTP — panel super admin
-    "lib/", // penulisan log & peringatan, bukan badan respons
+    "lib/error-log.ts", // menulis ke error_logs, bukan ke badan respons
+    "lib/backup.ts", // status cadangan; pembacanya HANYA super admin (lihat di bawah)
+    "lib/backup-peringatan.ts", // isi peringatan ke super admin
     "modules/print/routes.ts", // galat pencetak diteruskan ke layar kasir apa adanya
     "modules/sync/routes.ts", // pesan SyncGagal yang memang kita susun sendiri
   ];
@@ -119,6 +122,109 @@ describe("tak ada lagi pesan galat mentah yang dikirim ke klien", () => {
       pelanggar,
       "pesan mentah driver memuat seluruh kueri + parameternya — pakai `alasanGagalBaris`",
     ).toEqual([]);
+  });
+
+  /**
+   * SAPUAN KEDUA: bentuk galat mentah yang pola di atas TAK LIHAT.
+   *
+   * Pola pertama menuntut tulisan harfiah `(e as Error).message`. Kelasnya
+   * lebih luas dari satu bentuk itu, dan bentuk yang paling sering dipakai di
+   * repo ini justru bukan yang itu:
+   *
+   *     const pesan = e instanceof Error ? e.message : String(e);   // lib/backup.ts
+   *     String(e)          `${e}`          err.message
+   *
+   * Sapuan ini menilai BADAN `catch` yang mengikat galatnya: bila nilai
+   * mentahnya dipakai (`.message`, `String(x)`, atau interpolasi) DAN badan
+   * yang sama menyusun sesuatu yang dikirim (`c.json`, `return {`, `push({`,
+   * `.set({`), situsnya dilaporkan.
+   *
+   * Ia membaca kode TANPA KOMENTAR, dan itu bukan kehati-hatian berlebih:
+   * versi pertama sapuan ini menuduh `modules/bahan/routes.ts:976` — sebuah
+   * KOMENTAR yang menjelaskan cacat ini dan mengutip bentuk yang salah.
+   * Penjaga yang menuduh prosanya sendiri sudah terjadi di repo ini
+   * (`sql-number-bukan-janji`), dan ia mengajari orang mengabaikan merahnya.
+   *
+   * DAN INILAH ALASAN `BOLEH` DIPERSEMPIT DI ATAS. Sebelumnya seluruh `lib/`
+   * dikecualikan dengan alasan "penulisan log & peringatan, bukan badan
+   * respons". Alasan itu TIDAK BENAR untuk seluruh `lib/`: `lib/backup.ts:157`
+   * memulangkan `error: pesan` di dalam objek yang dikirim. Ia tetap sah —
+   * seluruh rute cadangan ada di balik `/admin/*` + `requireSuperAdmin`, dan
+   * pesan asli itulah isi diagnosis operatornya — tapi sekarang ia
+   * dikecualikan DENGAN NAMA, bukan lewat awalan direktori yang kebetulan
+   * memuatnya.
+   *
+   * TERUKUR pada putaran ini: 48 medan bernama-galat, 45 blok `catch` (28
+   * mengikat galatnya), dan **satu** situs tempat galat mentah sampai ke nilai
+   * yang dikirim — yaitu `lib/backup.ts` itu.
+   */
+  function seimbangKurawal(s: string, i: number): string {
+    let d = 0;
+    for (let j = i; j < s.length; j += 1) {
+      if (s[j] === "{") d += 1;
+      else if (s[j] === "}") {
+        d -= 1;
+        if (d === 0) return s.slice(i, j + 1);
+      }
+    }
+    return s.slice(i, i + 4000);
+  }
+
+  const situsMentah = (kode?: { nama: string; isi: string }[]): string[] => {
+    const berkas =
+      kode ?? semuaTs(SRC).map((p) => ({ nama: p.slice(SRC.length + 1), isi: readFileSync(p, "utf8") }));
+    const keluar: string[] = [];
+    for (const { nama, isi: mentah } of berkas) {
+      if (BOLEH.some((b) => nama.startsWith(b))) continue;
+      const s = butaKomentar(mentah);
+      for (const m of s.matchAll(/\bcatch\s*\(\s*(\w+)[^)]*\)\s*\{/g)) {
+        const v = m[1];
+        const badan = seimbangKurawal(s, s.indexOf("{", m.index! + m[0].length - 1));
+        const dikirim = /c\.json\(|return\s*\{|push\(\s*\{|\.set\(\s*\{/.test(badan);
+        const mentahDipakai = new RegExp(
+          `${v}\\s*\\.\\s*message|String\\(\\s*${v}\\s*\\)|\\$\\{\\s*${v}\\b`,
+        ).test(badan);
+        if (dikirim && mentahDipakai) keluar.push(`${nama}:${s.slice(0, m.index!).split("\n").length}`);
+      }
+    }
+    return keluar;
+  };
+
+  it("SAPUAN KEDUA: galat mentah tak sampai ke nilai yang dikirim", () => {
+    expect(
+      situsMentah(),
+      "galat mentah driver/sistem sampai ke sesuatu yang dikirim — pakai `alasanGagalBaris`, " +
+        "atau kecualikan berkasnya DENGAN NAMA dan alasannya",
+    ).toEqual([]);
+  });
+
+  it("PASANGAN: sapuan kedua bisa MENUDUH bentuk yang pola pertama lewatkan", () => {
+    const pola1 = /\((?:e|e2|err)\s+as\s+Error\)\??\.message/;
+    const kasus = [
+      'try { a(); } catch (e) { const pesan = e instanceof Error ? e.message : String(e); return { error: pesan }; }',
+      'try { a(); } catch (err) { return { error: String(err) }; }',
+      'try { a(); } catch (e) { gagal.push({ alasan: `gagal: ${e}` }); }',
+    ];
+    for (const isi of kasus) {
+      // pola LAMA buta terhadap ketiganya…
+      expect(pola1.test(isi), `pola lama seharusnya buta: ${isi.slice(0, 40)}`).toBe(false);
+      // …sapuan kedua menuduhnya.
+      expect(situsMentah([{ nama: "uji.ts", isi }]), isi.slice(0, 40)).toHaveLength(1);
+    }
+    // Dan ia TIDAK menuduh yang sudah benar, maupun prosa yang mengutip bentuk salah.
+    expect(
+      situsMentah([
+        { nama: "uji.ts", isi: 'try { a(); } catch (e) { gagal.push({ alasan: alasanGagalBaris(e, "gagal") }); }' },
+      ]),
+    ).toHaveLength(0);
+    expect(
+      situsMentah([{ nama: "uji.ts", isi: '/* contoh buruk: catch (e) { return { error: String(e) }; } */' }]),
+      "komentar tak boleh tertuduh",
+    ).toHaveLength(0);
+    // …dan galat yang ditangkap tanpa dikirim ke mana pun juga bukan urusannya.
+    expect(
+      situsMentah([{ nama: "uji.ts", isi: 'try { a(); } catch (e) { console.error(String(e)); }' }]),
+    ).toHaveLength(0);
   });
 
   it("PASANGAN: sapuannya bisa MENUDUH, dan tak menuduh yang sudah benar", () => {
