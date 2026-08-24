@@ -99,7 +99,24 @@ echo "  20 TERLAMBAT:"
 sort -rn /tmp/ukur-latensi.txt | head -20 | awk -F'\t' '{printf "  %-34s %7.3f dtk\n", $2, $1}'
 
 echo
-echo "KONTENSI KOLAM (10 laporan serentak; \`db\` adalah pg.Pool bawaan = 10 koneksi):"
+echo "KONTENSI KOLAM (\`db\` adalah pg.Pool bawaan = 10 koneksi)"
+#
+# Blok volume di atas mengukur SATU permintaan pada satu waktu. Kelas kerusakan
+# yang justru pernah menggigit repo ini adalah KONKURENSI: GET /menu 0,009 →
+# 20,07 dtk saat PUT /menu/urutan berjalan (vena #12). Blok ini mengukur empat
+# keadaan itu, dan angka acuannya (200.101 transaksi, mesin CI 2026-08-24):
+#
+#   dasar: GET /menu 0,013 · POST /penjualan 0,018 dtk
+#   10 laporan serentak → GET /menu 0,160 · POST /penjualan 0,165 (201)
+#   10 penjualan serentak → GET /menu 0,015 · penjualan ke-11 0,085 (201)
+#   5 PUT /menu/urutan serentak → GET /menu 0,018 dtk (kelas #12 tetap sembuh)
+#   30 laporan (3× kolam) → p50 1,631 · maks 1,930 · GET /menu 0,675 dtk
+#   50 penjualan serentak → p50 0,395 · p95 0,656 · maks 0,677 · 50× 201
+#
+# Bacaan atas angka itu, supaya pemakai berikutnya tak menebak: penurunan di
+# bawah beban adalah ANTREAN KOLAM — linier terhadap kedalaman antrean, pulih
+# sendiri, tanpa 5xx. /laporan sengaja TAK berbatas laju (vena "batas laju di
+# luar email" mengukurnya murah); yang membatasinya kolam itu sendiri.
 SENGGANG=$(curl -sf -o /dev/null -w '%{time_total}' -H "Authorization: Bearer $TOKEN" "$BASE/api/menu")
 for _ in $(seq 1 10); do
   curl -sf -o /dev/null -H "Authorization: Bearer $TOKEN" --max-time 120 "$BASE/api/laporan/menu-laris$Q" &
@@ -111,3 +128,30 @@ PULIH=$(curl -sf -o /dev/null -w '%{time_total}' -H "Authorization: Bearer $TOKE
 printf "  GET /menu senggang : %7.3f dtk\n" "$SENGGANG"
 printf "  GET /menu SIBUK    : %7.3f dtk\n" "$SIBUK"
 printf "  GET /menu pulih    : %7.3f dtk\n" "$PULIH"
+
+# ── Kontensi JALUR TULIS — butuh menu & token kasir; dilewati bila tak ada ──
+KASIR_EMAIL="${KASIR_EMAIL:-kasir@basooopa.id}"
+KASIR_PASS="${KASIR_PASS:-Kasir123!}"
+KTOK=$(login "$KASIR_EMAIL" "$KASIR_PASS" 2>/dev/null || true)
+MENU1=$(api "/menu" | jq -r '.[0].id // ""')
+if [ -n "$KTOK" ] && [ "$KTOK" != "null" ] && [ -n "$MENU1" ]; then
+  BODYK="{\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$MENU1\",\"qty\":1}]}"
+  UJI=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/penjualan" -H "Authorization: Bearer $KTOK" -H 'Content-Type: application/json' -d "$BODYK")
+  if [ "$UJI" = "201" ]; then
+    echo
+    echo "  10 PENJUALAN serentak (tiap satu = transaksi menulis):"
+    for _ in $(seq 1 10); do
+      curl -s -o /dev/null -X POST "$BASE/api/penjualan" -H "Authorization: Bearer $KTOK" -H 'Content-Type: application/json' -d "$BODYK" --max-time 120 &
+    done
+    sleep 0.1
+    WBACA=$(curl -s -o /dev/null -w '%{time_total}' -H "Authorization: Bearer $TOKEN" --max-time 120 "$BASE/api/menu")
+    WTULIS=$(curl -s -o /dev/null -w '%{time_total}' -X POST "$BASE/api/penjualan" -H "Authorization: Bearer $KTOK" -H 'Content-Type: application/json' -d "$BODYK" --max-time 120)
+    wait
+    printf "    GET /menu di tengahnya      : %7.3f dtk\n" "$WBACA"
+    printf "    POST /penjualan ke-11       : %7.3f dtk\n" "$WTULIS"
+  else
+    echo "  (kontensi tulis dilewati: penjualan uji dibalas $UJI — mungkin stok/shift; bukan kegagalan pengukuran)"
+  fi
+else
+  echo "  (kontensi tulis dilewati: tak ada token kasir/menu — set KASIR_EMAIL/KASIR_PASS)"
+fi
