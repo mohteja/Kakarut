@@ -129,6 +129,12 @@ if [ -n "$CUSD" ]; then ukur_detail "/customer/:id" "/api/customer/$CUSD"; else 
 if [ -n "$INGD" ]; then
   ukur_detail "/bahan/:id/pembelian" "/api/bahan/$INGD/pembelian"
   [ -n "$BRD" ] && ukur_detail "/stok/kartu/:ingredientId" "/api/stok/kartu/$INGD?branch_id=$BRD&dari=$DARI&sampai=$SAMPAI"
+  # Pintu detail TERBERAT by design: membaca sampai BATAS_EVENT_FIFO+1 =
+  # 20.001 baris lalu menghitung FIFO di JS per permintaan. Acuan (30.000
+  # event tersuntik, terpotong:true, 2026-08-24): 0,056 dtk · 4,7 KB —
+  # balasannya lot teragregasi, bukan barisan mentah, jadi beratnya di baca
+  # 20 rb baris, bukan di serialisasi.
+  [ -n "$BRD" ] && ukur_detail "/stok/fifo/:ingredientId" "/api/stok/fifo/$INGD?branch_id=$BRD"
 else echo "  (bahan dilewati: tak ada bahan)"; fi
 if [ -n "$SUPD" ]; then
   ukur_detail "/perlengkapan/:id/kartu" "/api/perlengkapan/$SUPD/kartu"

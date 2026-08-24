@@ -50,6 +50,24 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Pintu FIFO pada 30 rb event: 0,056 dtk — server — 2026-08-24
+
+- **Kenapa**: satu-satunya pintu detail tanpa angka — `GET /stok/fifo/:id`
+  by design membaca sampai `BATAS_EVENT_FIFO + 1` = **20.001 baris** lalu
+  menghitung FIFO **di JS** per permintaan
+- **Diukur** (30.000 event tersuntik pada satu bahan satu cabang — 15 rb
+  pembelian + 15 rb konsumsi; **dibuktikan terbaca**: `terpotong: true` di
+  balasannya): **0,056 dtk · 4.682 byte**
+- **Hasil: BERSIH berangka.** Beratnya di pembacaan 20 rb baris, bukan
+  serialisasi — balasannya lot TERAGREGASI, dan pemotongan 20.001-nya bekerja
+  persis seperti komentarnya (`terpotong: true` saat populasi melebihi)
+- **Tindak**: baris `/stok/fifo/:ingredientId` masuk blok PINTU DETAIL
+  `ukur-latensi.sh` dengan angka acuannya. Tak ada kode server tersentuh
+- **Batas**: diukur satu bahan-cabang; FIFO lintas ribuan bahan sekaligus
+  (laporan nilai stok) adalah jalur lain yang sudah punya gerbangnya sendiri
+
+---
+
 ## Sebelas pintu "aman lewat baca" ditembak semua — server — 2026-08-24
 
 - **Kenapa**: batas entri A′ — *"28 situs `.update()` lain dinyatakan aman
