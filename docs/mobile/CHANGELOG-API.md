@@ -26,6 +26,39 @@ tanpa akses repo server.
 ---
 
 
+## Rilis: Angka yang meluap dibalas 400 bernama, bukan 500
+
+> Tidak ada migrasi, tidak ada medan baru, tidak ada bentuk balasan yang berubah.
+
+🟡 **PERLU DILIHAT** — bukan karena ponsel harus berubah, melainkan karena
+sebuah **kelas galat berpindah dari 5xx ke 4xx**. Klien yang mencoba-ulang
+otomatis pada 5xx (antrean offline) sebelumnya akan mengulang permintaan yang
+takkan pernah berhasil; sekarang ia menerima 400 dan berhenti — itu perbaikan,
+tapi perilakunya berbeda dan pantas diperiksa sekali.
+
+**Belum tayang.**
+
+Angka yang **lahir di server** (hasil perkalian/penjumlahan) tak bisa dijaga
+`z.number().max()` mana pun. **32 dari 62** kolom `numeric` berbentuk begitu.
+Terukur lewat HTTP:
+
+| permintaan | sebelum | sesudah |
+| --- | --- | --- |
+| `POST /penjualan` menu Rp 10.000 × qty 99.999.999 | 201 | **tetap** 201 |
+| `POST /penjualan` menu Rp 20.000 × qty 99.999.999 | **HTTP 500** | **400** `Total baris "…" terlalu besar untuk disimpan (maksimal 999.999.999.999)` |
+| `POST /penjualan` **tiga baris yang masing-masing MUAT** | **HTTP 500** | **400** `Subtotal terlalu besar untuk disimpan (…)` |
+
+Dua lapis, dan keduanya diukur sendiri-sendiri:
+
+- **pintu keluar bersama** — SQLSTATE `22003` (luapan numerik) kini
+  diterjemahkan di `app.onError` jadi `400 {"error":"Angkanya terlalu besar
+  untuk disimpan"}` **di setiap rute sekaligus**, bukan cuma di jalur yang
+  sudah diperbaiki. Tetap dicatat ke `error_logs` sebagai 400;
+- **penjaga di tempat angkanya lahir** — menyebut medan (dan nama menunya),
+  karena pintu keluar bersama tak pernah tahu angka yang mana.
+
+---
+
 ## Rilis: Takaran resep berbatas 99.999.999 (dulu 9.999.999.999 lalu 500)
 
 > Tidak ada migrasi, tidak ada medan baru, tidak ada bentuk balasan yang berubah.

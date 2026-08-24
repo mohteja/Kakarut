@@ -13439,6 +13439,70 @@ cek "PASANGAN: waste yang ditolak BUKAN ditolak sebagai kebesaran" "V == 0" \
   "$(api "$OWNER" POST /stok/waste "{\"ingredient_id\":\"$ING242\",\"qty\":9999999999,\"foto_url\":\"https://contoh/f.jpg\"}" | jq '(.error // "" | test("maksimal")) | if . then 1 else 0 end')"
 
 
+echo "── §243 Angka yang LAHIR di server: 400 bernama, bukan 500 ──"
+#
+# §234 dan §242 menjaga MASUKAN. Yang tak bisa dijaga masukan: angka yang lahir
+# dari perkalian/penjumlahan di server. Tiga puluh dua dari 62 kolom numeric
+# berbentuk begitu.
+#
+# TERUKUR sebelum diperbaiki, lewat HTTP terhadap Postgres sungguhan:
+#
+#   POST /penjualan  menu Rp 10.000 × qty 99.999.999     → 201
+#   POST /penjualan  menu Rp 20.000 × qty 99.999.999     → **500**
+#   POST /penjualan  TIGA baris yang masing-masing MUAT  → **500**
+#
+# Baris ketiga itu intinya: tiap medan sah, tiap baris muat di kolomnya, dan
+# penjualannya tetap jatuh 500 karena JUMLAHNYA tidak. Tak ada `z.number().max()`
+# yang bisa mencegahnya.
+KAT243=$(api "$OWNER" GET /kategori | jq -r '.[0].id')
+MN243() { api "$OWNER" POST /menu "{\"nama\":\"Luap243 $1\",\"category_id\":\"$KAT243\",\"harga_jual\":$2,\"mult\":2}" | jq -r '.id // ""'; }
+M243A=$(MN243 a 10000)
+M243B=$(MN243 b 20000)
+cek "premis: dua menu uji terbuat" "V == 1" \
+  "$( [ -n "$M243A" ] && [ "$M243A" != "null" ] && [ -n "$M243B" ] && [ "$M243B" != "null" ] && echo 1 || echo 0 )"
+JUAL243() { echo "{\"is_dine_in\":false,\"items\":$1}"; }
+
+# ── satu baris: harga × qty, kolom sale_items.line_total numeric(14,2) ───
+cek "Rp 10.000 × 99.999.999 = 999.999.990.000 (muat) DITERIMA" "V == 201" \
+  "$(status_code_body "$REISS105" POST /penjualan "$(JUAL243 "[{\"menu_id\":\"$M243A\",\"qty\":99999999}]")")"
+cek "Rp 20.000 × 99.999.999 ditolak 400, BUKAN 500" "V == 400" \
+  "$(status_code_body "$REISS105" POST /penjualan "$(JUAL243 "[{\"menu_id\":\"$M243B\",\"qty\":99999999}]")")"
+cek "…dan pesannya menyebut BARIS MANA yang salah" "V == 1" \
+  "$(api "$REISS105" POST /penjualan "$(JUAL243 "[{\"menu_id\":\"$M243B\",\"qty\":99999999}]")" | jq '(.error | test("Total baris") and test("Luap243 b")) | if . then 1 else 0 end')"
+
+# ── menumpuk LINTAS BARIS: tiap baris muat, jumlahnya tidak ──────────────
+# Inilah kasus yang membuktikan batas masukan tak akan pernah cukup.
+TIGA243="[{\"menu_id\":\"$M243A\",\"qty\":99999999},{\"menu_id\":\"$M243A\",\"qty\":99999999},{\"menu_id\":\"$M243A\",\"qty\":99999999}]"
+cek "tiga baris yang MASING-MASING muat ditolak 400, bukan 500" "V == 400" \
+  "$(status_code_body "$REISS105" POST /penjualan "$(JUAL243 "$TIGA243")")"
+cek "…dan pesannya menyebut SUBTOTAL, bukan barisnya" "V == 1" \
+  "$(api "$REISS105" POST /penjualan "$(JUAL243 "$TIGA243")" | jq '(.error | test("Subtotal")) | if . then 1 else 0 end')"
+
+# ── PASANGAN: penjualan wajar tak boleh ikut tertolak ────────────────────
+# Pengetatan yang menolak transaksi sah lebih merusak daripada bug yang
+# dijaganya — dan di sini "sah" berarti nota Rp 20 juta, angka yang nyata.
+cek "PASANGAN: nota Rp 20.000.000 (1.000 × Rp 20.000) tetap DITERIMA" "V == 201" \
+  "$(status_code_body "$REISS105" POST /penjualan "$(JUAL243 "[{\"menu_id\":\"$M243B\",\"qty\":1000}]")")"
+cek "PASANGAN: tiga baris wajar dalam satu nota tetap DITERIMA" "V == 201" \
+  "$(status_code_body "$REISS105" POST /penjualan "$(JUAL243 "[{\"menu_id\":\"$M243A\",\"qty\":2},{\"menu_id\":\"$M243B\",\"qty\":3},{\"menu_id\":\"$M243A\",\"qty\":1}]")")"
+
+# ── pintu keluar bersama: 22003 dari rute MANA PUN kini 400, bukan 500 ───
+# Penjaga lokal cuma ada di jalur penjualan. Yang menutup sisanya terjemahan
+# terpusat di `app.onError` — diuji di `luapan-turunan.test.ts` dengan seluruh
+# penjaga lokal dicabut (balasannya jadi 400 "Angkanya terlalu besar untuk
+# disimpan", bukan 500). Di sini yang dijaga: tak ada 500 yang tersisa di
+# jalur yang sudah diperbaiki.
+cek "tak ada 5xx tersisa pada keempat permintaan luapan di atas" "V == 0" \
+  "$(for B in "[{\"menu_id\":\"$M243B\",\"qty\":99999999}]" "$TIGA243"; do
+       # `status_code_body` sengaja tak menutup barisnya (pemanggil lain
+       # memakainya di dalam `$( )`), jadi newline-nya ditambahkan DI SINI —
+       # tanpa itu "400" dan "400" menyatu jadi "400400" dan penjaga ini
+       # melaporkan 5xx yang tak pernah ada. Kesalahan itu benar-benar terjadi
+       # pada versi pertama seksi ini.
+       printf '%s\n' "$(status_code_body "$REISS105" POST /penjualan "$(JUAL243 "$B")")"
+     done | awk '$1 >= 500' | wc -l)"
+
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

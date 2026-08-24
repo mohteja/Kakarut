@@ -71,6 +71,38 @@ export function bentrokUnikPada(err: unknown, ...namaConstraint: string[]): bool
  * cacat server sungguhan — yang berubah cuma labelnya, bukan keberadaannya di
  * panel.
  */
+/**
+ * Galat yang jelas-jelas milik DATA KLIEN, bukan cacat aplikasi — beserta
+ * kalimatnya. `null` berarti "bukan kelas ini, biarkan 500".
+ *
+ * KENAPA DI PINTU KELUAR BERSAMA, dan kenapa baru sekarang. Argumennya sudah
+ * ditulis di berkas ini untuk `22P02` beberapa baris di atas: menyalin
+ * saringan ke ratusan tempat bukan perbaikan, itu daftar tugas yang tak akan
+ * selesai. Argumen itu disepakati dan dijalankan — **untuk satu kode saja**.
+ * Saudaranya `22003` sudah punya kalimat di `alasanGagalBaris` di bawah, tapi
+ * kalimat itu cuma terpasang di SATU modul (`bahan/routes.ts`, impor per
+ * baris). Di semua pintu lain luapan numerik keluar sebagai
+ * `500 {"error":"Terjadi kesalahan pada server"}`.
+ *
+ * TERUKUR lewat HTTP terhadap Postgres sungguhan, sebelum ini ada:
+ *
+ *   POST /penjualan  menu Rp 20.000 × qty 99.999.999      → **500**
+ *   POST /penjualan  TIGA baris yang masing-masing MUAT    → **500**
+ *   POST /menu       komponen[].qty = 100.000.000          → **500**
+ *
+ * Tetap DICATAT sebagai 400, sama seperti perlakuan `22P02`: yang berubah
+ * labelnya, bukan keberadaannya di panel galat.
+ *
+ * SENGAJA HANYA `22003` untuk sekarang. Saudaranya `22001` ("teks terlalu
+ * panjang") sekelas dan sudah punya kalimatnya, tapi keterjangkauannya belum
+ * kuukur — menerjemahkan yang belum diukur berarti mengubah 500 jadi 400 untuk
+ * jalur yang mungkin tak pernah ada, dan itu menyembunyikan cacat server
+ * sungguhan alih-alih menjelaskan salah ketik pengguna.
+ */
+export function galatDataKlien(err: unknown): string | null {
+  return sqlstate(err) === "22003" ? "Angkanya terlalu besar untuk disimpan" : null;
+}
+
 export function nilaiTakSah(err: unknown): boolean {
   const kode =
     (err as { cause?: { code?: string }; code?: string })?.cause?.code ??

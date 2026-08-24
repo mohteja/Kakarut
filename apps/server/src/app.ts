@@ -9,7 +9,7 @@ import { secureHeaders } from "hono/secure-headers";
 import { db } from "./db/client";
 import { branches } from "./db/schema";
 import { getBuildId } from "./lib/build";
-import { nilaiTakSah } from "./lib/pg-galat";
+import { galatDataKlien, nilaiTakSah } from "./lib/pg-galat";
 import { amatiProxy } from "./lib/pengamatan-proxy";
 import {
   requireAuth,
@@ -394,6 +394,17 @@ export function createApp() {
     if (nilaiTakSah(err)) {
       void catatGalat(c, 400, err);
       return c.json({ error: "Id atau nilai pada alamat tidak valid" }, 400);
+    }
+    // Angka yang tak muat di kolomnya (22003) juga salah data klien — dan
+    // sampai ini ada, ia keluar sebagai 500 di SETIAP pintu kecuali impor
+    // bahan. Terukur: `POST /penjualan` dengan tiga baris yang masing-masing
+    // MUAT di kolomnya tetap 500, karena yang meluap jumlahnya. Alasannya
+    // sama persis dengan 22P02 di atas, dan penanganannya juga: 400 yang bisa
+    // dibaca, tetap dicatat.
+    const alasanKlien = galatDataKlien(err);
+    if (alasanKlien) {
+      void catatGalat(c, 400, err);
+      return c.json({ error: alasanKlien }, 400);
     }
     console.error(err);
     void catatGalat(c, 500, err);

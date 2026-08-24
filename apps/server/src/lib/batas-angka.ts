@@ -1,3 +1,6 @@
+import { HTTPException } from "hono/http-exception";
+import { formatAngkaId } from "@kakarut/shared";
+
 /**
  * LANGIT-LANGIT ANGKA MASUKAN — DITURUNKAN DARI KOLOMNYA, BUKAN DIKARANG.
  *
@@ -73,5 +76,42 @@ export const BATAS_ISI = 99_999_999;
  */
 export const BATAS_QTY_RESEP = 99_999_999;
 
+/**
+ * `numeric(16,4)` — sales.total_hpp, sale_items.hpp_satuan
+ *
+ * TAK ADA MEDAN PERMINTAAN YANG MENGISINYA. HPP lahir dari resep × qty ×
+ * harga bahan, jadi tak ada `.max()` di mana pun yang bisa menjaganya — batas
+ * ini dipakai `pastikanMuat` di tempat angkanya dihitung.
+ */
+export const BATAS_HPP = 999_999_999_999;
+
 /** kolom `integer` — sort_order, urutan tampil. Batasnya int32, bukan numeric. */
 export const BATAS_URUTAN = 1_000_000;
+
+/**
+ * ANGKA YANG LAHIR DI SERVER — di sini `.max()` tak bisa menolong siapa pun.
+ *
+ * Tiga puluh dua dari 62 kolom `numeric` di skema ini TIDAK diisi medan
+ * permintaan: ia hasil perkalian, penjumlahan, atau selisih. Batas masukan yang
+ * sempurna pun tak menjaganya, karena yang meluap bukan masukannya melainkan
+ * hasilnya. TERUKUR lewat HTTP terhadap Postgres sungguhan:
+ *
+ *   POST /penjualan  menu Rp 10.000 × qty 99.999.999   → 201
+ *   POST /penjualan  menu Rp 20.000 × qty 99.999.999   → **HTTP 500**
+ *   POST /penjualan  TIGA baris yang masing-masing MUAT → **HTTP 500**
+ *
+ * Baris ketiga itu intinya: tiap medan sah, tiap baris muat di kolomnya, dan
+ * penjualannya tetap jatuh 500. Tak ada `z.number().max()` yang bisa
+ * mencegahnya — hanya penjaga di tempat angkanya lahir.
+ *
+ * KENAPA MENYEBUT MEDANNYA. Terjemahan terpusat di `app.onError` membuat
+ * balasannya sopan (400 "Angkanya terlalu besar untuk disimpan") tapi ia tak
+ * pernah tahu angka YANG MANA. Kasir yang berdiri di depan tamu perlu tahu
+ * baris mana yang harus diperbaiki, bukan bahwa "ada angka yang kebesaran".
+ */
+export function pastikanMuat(nilai: number, batas: number, medan: string): void {
+  if (Number.isFinite(nilai) && Math.abs(nilai) <= batas) return;
+  throw new HTTPException(400, {
+    message: `${medan} terlalu besar untuk disimpan (maksimal ${formatAngkaId(batas)})`,
+  });
+}

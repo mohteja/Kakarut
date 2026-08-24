@@ -20,6 +20,7 @@ import {
   sales,
   shifts,
 } from "../../db/schema";
+import { BATAS_HPP, BATAS_QTY_STOK, BATAS_UANG, pastikanMuat } from "../../lib/batas-angka";
 import { kodeCabang, tanggalDi } from "../../lib/time";
 import { upsertCustomer } from "../customer/service";
 import {
@@ -366,6 +367,15 @@ export async function createSale(params: CreateSaleParams) {
         ? hargaBill.get(item.open_bill_item_id) ?? menu.hargaJual
         : menu.hargaJual;
       const lineTotal = hargaSatuan * item.qty;
+      // Harga dan qty masing-masing SAH — `menus.harga_jual` sampai
+      // 9.999.999.999 dan `sale_items.qty` sampai 99.999.999 — tapi hasil
+      // kalinya sampai 1e18 sementara kolomnya `numeric(14,2)` (1e12).
+      // Tanpa penjaga di sini, Postgres yang menolaknya, dan kasir menerima
+      // 500 tanpa tahu baris mana yang salah.
+      pastikanMuat(lineTotal, BATAS_UANG, `Total baris "${menu.nama}"`);
+      // `hpp_satuan` punya kolomnya SENDIRI dan disimpan per baris. Pada qty
+      // pecahan (0,5 porsi) jumlahnya bisa muat sementara satuannya tidak.
+      pastikanMuat(hppSatuan, BATAS_HPP, `HPP satuan "${menu.nama}"`);
 
       subtotal += lineTotal;
       totalHpp += hppSatuan * item.qty;
@@ -394,6 +404,25 @@ export async function createSale(params: CreateSaleParams) {
       // bersama gerbang kecukupan stok di Open Bill — supaya yang memeriksa
       // dan yang mencatat tak pernah berbeda pendapat.
       tambahKebutuhanBahan(konsumsi, katalog, menu, item.qty, dasarDineIn);
+    }
+
+    /*
+     * …dan yang menumpuk LINTAS BARIS. Tiap baris bisa muat di kolomnya dan
+     * jumlahnya tetap tidak: tiga baris @ Rp 999.999.990.000 terukur 500
+     * sebelum penjaga ini ada. `total_hpp` punya kolomnya sendiri
+     * (`numeric(16,4)`), dan konsumsi bahan punya kolomnya sendiri lagi
+     * (`numeric(16,6)`) — resep × qty bisa melewatinya walau keduanya sah.
+     */
+    pastikanMuat(subtotal, BATAS_UANG, "Subtotal");
+    pastikanMuat(totalHpp, BATAS_HPP, "Total HPP");
+    if (konsumsi.size > 0) {
+      const namaBahan = new Map<string, string>();
+      for (const komponen of katalog.komponenByMenu.values()) {
+        for (const k of komponen) namaBahan.set(k.ingredient_id, k.nama);
+      }
+      for (const [ingredientId, qty] of konsumsi) {
+        pastikanMuat(qty, BATAS_QTY_STOK, `Pemakaian bahan "${namaBahan.get(ingredientId) ?? ingredientId}"`);
+      }
     }
 
     /**
@@ -466,6 +495,9 @@ export async function createSale(params: CreateSaleParams) {
     const subtotalNet = subtotal - diskon;
     const pb1Amount = company.pb1Enabled ? hitungPb1(subtotalNet, company.pb1Rate) : 0;
     const total = subtotalNet + pb1Amount;
+    // PB1 ditambahkan DI ATAS subtotal yang sudah lolos batasnya, jadi total
+    // bisa melewatinya justru karena pajaknya.
+    pastikanMuat(total, BATAS_UANG, "Total");
     // Tanggal bisnis dihitung dari waktu kejadian (offline) bila diberikan.
     const saleDate = tanggalDi(company.timezone, params.waktu);
 
