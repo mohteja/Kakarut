@@ -34,10 +34,13 @@ import { ruteKonkret } from "../src/scripts/cakupan-rute";
  *
  * BATAS UJI INI, ditulis supaya "hijau" tak terbaca lebih luas dari yang benar:
  *
- *   · `rute-diketuk.txt` adalah REKAMAN, bukan pengukuran ulang. Ia dibekukan
- *     dari satu jalannya verify-api; kalau suatu saat sebuah rute berhenti
- *     diketuk tanpa berkasnya diperbarui, uji ini tetap hijau. Yang dijaganya:
- *     rute BARU tak bisa lahir tanpa keputusan. Perbaruinya:
+ *   · `rute-diketuk.txt` dulunya REKAMAN yang dipercaya. Sejak langkah
+ *     "Cakupan rute" di `ci.yml`, ia DIUKUR ULANG tiap CI: server verify-api
+ *     berjalan dengan `JEJAK_RUTE`, jejaknya dibandingkan dengan berkas ini,
+ *     dan selisih apa pun (rute berhenti diketuk ATAU rute baru diketuk)
+ *     membuat CI merah menyebut barisnya. Uji ini menjaga sisi strukturnya
+ *     (rute baru wajib diputuskan); langkah CI menjaga kesegarannya.
+ *     Perbaruinya:
  *     `npx tsx src/scripts/cakupan-rute.ts <jejak> > docs/audit/rute-diketuk.txt`
  *   · "diketuk" BUKAN "diuji". Rute yang ditembak sekali dengan badan paling
  *     sederhana tetap terhitung tercakup di sini.
@@ -131,6 +134,18 @@ describe("cakupan rute: pintu yang tak pernah diketuk", () => {
       Object.keys(DILUAR_JANGKAUAN).filter((r) => DIKETUK.has(r) || utang.has(r)),
       "DILUAR_JANGKAUAN tumpang tindih",
     ).toEqual([]);
+  });
+
+  it("langkah CI yang mengukur ulang rekaman ini benar-benar terpasang", () => {
+    // Aturan 7: alat ukurnya ikut diuji. Tanpa jangkar ini, langkah "Cakupan
+    // rute" bisa dicabut dari ci.yml dan berkas ini kembali jadi rekaman yang
+    // dipercaya — persis batas yang baru saja ditutup.
+    const ci = readFileSync(`${AKAR}.github/workflows/ci.yml`, "utf8");
+    expect(ci, "JEJAK_RUTE tak lagi dinyalakan di langkah verify-api").toContain("JEJAK_RUTE=");
+    expect(ci, "langkah pembanding cakupan hilang dari ci.yml").toContain("cakupan-rute.ts");
+    expect(ci, "pembandingnya harus diff terhadap rekaman yang di-commit").toContain(
+      "diff -u docs/audit/rute-diketuk.txt",
+    );
   });
 
   it("PINTU HANTU tetap mustahil — penjaganya masih di baris pertama handler", () => {
