@@ -50,6 +50,103 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Luapan TURUNAN: angka yang lahir di server, tempat `.max()` tak menolong — server — 2026-08-24
+
+- **Kenapa vena ini ada**: entri di bawah menutup celah "batas ada tapi angkanya
+  milik kolom lain", lalu menulis batasnya sendiri — *"kelas luapan turunan tak
+  disentuh sama sekali … dan tak satu pun punya penjaga"*. Ia dikerjakan
+  mendahului #8–#10 karena kerusakannya **500 di layar pembayaran** dan
+  keterjangkauannya **aritmetika, bukan dugaan**
+- **Populasi**:
+
+  | ukuran | angka |
+  |---|---|
+  | kolom `numeric(p,s)` di `schema.ts` | **62** |
+  | · diisi LANGSUNG medan permintaan tervalidasi | **30** |
+  | · **lahir dari hitungan server** | **32** |
+  | SQLSTATE yang `alasanGagalBaris` sudah bisa terjemahkan | **7** |
+  | modul yang memakainya | **1** (`bahan/routes.ts`) |
+  | SQLSTATE yang diterjemahkan `app.onError` | **1** (`22P02`) → **2** |
+
+  **Ralat atas angkaku sendiri**: entri di bawah menulis *"13 dari 62 kolom
+  diisi hitungan server"*. Tiga belas adalah besar daftar `TAK_DIKLAIM` di
+  berkas ujinya — himpunan yang berbeda. Yang benar **32**, dihitung sebagai
+  komplemen `PETA` terhadap seluruh kolom numeric
+- **Metode**: komplemen `PETA` (peta medan→kolom dari vena sebelumnya) terhadap
+  kapasitas kolom yang dibaca `schema.ts`; tiap kolom turunan dipilah tangan
+  jadi DIJAGA atau BERALASAN, lalu tiap kandidat **diukur lewat HTTP**
+- **Detektor**: DIBUKTIKAN bisa menuduh, **tiga lapis**, tiap suntikan
+  **di-assert mendarat**: (1) mencabut satu `pastikanMuat` → source-pin merah
+  menyebut penjaganya; (2) mencabut terjemahan `22003` → uji pintu keluar
+  merah; (3) menambahkan kolom `numeric` baru ke `schema.ts` → KELENGKAPAN
+  merah menyebut `sales.uji_luap_baru`
+- **Hasil**: **TEMUAN.** Terukur lewat HTTP terhadap Postgres sungguhan:
+
+  | permintaan | sebelum | sesudah |
+  |---|---|---|
+  | menu Rp 10.000 × qty 99.999.999 (= 999.999.990.000) | **201** | 201 |
+  | menu Rp 20.000 × qty 99.999.999 | **HTTP 500** | **400** `Total baris "…" terlalu besar untuk disimpan (maksimal 999.999.999.999)` |
+  | menu Rp 1 jt × qty 1.000.000 | **HTTP 500** | **400** bernama |
+  | **TIGA baris yang masing-masing MUAT** | **HTTP 500** | **400** `Subtotal terlalu besar…` |
+  | menu ber-resep takaran 1000 × qty 9.999.999 | **HTTP 500** | **400** `Total HPP terlalu besar…` |
+
+  Baris keempat itu inti venanya: **tiap medan sah, tiap baris muat di
+  kolomnya, dan penjualannya tetap 500 karena jumlahnya tidak.** Tak ada
+  `z.number().max()` di mana pun yang bisa mencegahnya. Pasangan
+  anti-hijau-palsu ikut diukur lewat verify-api: nota Rp 20 juta dan nota tiga
+  baris wajar tetap **201**
+- **Bentuknya persis tanda tangan sesi ini, sampai ke kalimat pembelaannya.**
+  `lib/pg-galat.ts` sudah tahu arti luapan numerik dan sudah punya kalimatnya
+  (`case "22003": "Angkanya terlalu besar untuk disimpan"`), dan berkas yang
+  **sama** sudah menuliskan argumen untuk memasangnya di pintu keluar bersama —
+  untuk saudaranya `22P02`: *"menyalin saringan ke 137 tempat sisanya bukan
+  perbaikan, itu daftar tugas yang tak akan selesai — jadi terjemahannya
+  dipasang di SATU pintu keluar galat."* Argumen itu ditulis, disepakati, dan
+  dijalankan — **untuk satu kode SQLSTATE saja**
+- **Perbaikannya DUA LAPIS, dan keduanya perlu — dibuktikan sendiri-sendiri**:
+  1. **pintu keluar bersama** (`app.onError` → `galatDataKlien`): dengan
+     **seluruh** penjaga lokal dicabut (suntikan di-assert: 6 panggilan → sisa
+     0), permintaan yang sama dibalas **400 "Angkanya terlalu besar untuk
+     disimpan"**, bukan 500. Ini menutup kelasnya di **setiap** rute sekaligus.
+     Tetap dicatat sebagai 400, sama seperti perlakuan `22P02`;
+  2. **`pastikanMuat()` di tempat angkanya lahir**: menyebut **medannya** dan
+     nama menunya. Pintu keluar bersama tak pernah tahu angka yang MANA, dan
+     kasir yang berdiri di depan tamu perlu tahu baris mana yang diperbaiki
+- **Sengaja hanya `22003`**: saudaranya `22001` ("teks terlalu panjang")
+  sekelas dan sudah punya kalimatnya, tapi **keterjangkauannya belum diukur** —
+  menerjemahkan yang belum diukur berarti mengubah 500 jadi 400 untuk jalur
+  yang mungkin tak pernah ada, dan itu menyembunyikan cacat server sungguhan
+- **Asersi verify-api-ku sendiri sempat melaporkan 5xx yang tak pernah ada**:
+  `status_code_body` sengaja tak menutup barisnya, jadi `"400"` dan `"400"`
+  menyatu jadi `"400400"` dan `awk '$1 >= 500'` menghitungnya satu. Diperbaiki
+  dengan newline eksplisit, dan sebabnya ditulis di tempatnya
+- **Batas detektornya, ditulis jujur**
+  - ia menilai **kolom**, bukan menelusuri tiap ekspresi. Sebuah kolom yang
+    "DIJAGA" dijaga di jalur yang kuperiksa — kalau kelak ada jalur tulis KEDUA
+    ke kolom yang sama, gerbang ini tak melihatnya. Yang dijaganya: tak ada
+    kolom turunan **baru** yang lahir tanpa keputusan
+  - **`production_consumptions.qty` belum diukur lewat HTTP.** Jalur produksi
+    memakai qty yang sudah ber-`BATAS_QTY_STOK` dan kolomnya `numeric(16,6)`
+    yang sama, jadi secara aritmetika ia terkurung — tapi itu penalaran, bukan
+    pengukuran, dan ditulis begitu di `PUTUSAN`
+  - **jalur non-penjualan hanya dilindungi lapis pertama**: balasannya 400 yang
+    bisa dibaca, tapi tanpa sebutan medan. Menambahkan `pastikanMuat` ke tiap
+    jalur adalah daftar tugas yang sama dengan yang ditolak `pg-galat.ts`;
+    yang dikerjakan lebih dulu jalur yang **terukur** menggigit
+  - `22001` tak diukur sama sekali putaran ini
+- **Tindak**: `galatDataKlien` + wiring `app.onError` · `pastikanMuat()` &
+  `BATAS_HPP` di `lib/batas-angka.ts` · **enam** titik penjaga di `createSale` ·
+  gerbang `luapan-turunan.test.ts` (5 uji) · `verify-api` §243 (9 asersi) ·
+  pemetaan kolom dipindah ke `test/util/kolom-numerik.ts` (mengimpor berkas
+  `.test.ts` membuat describe-nya berjalan dua kali) · entri `CHANGELOG-API`
+  🟡 PERLU DILIHAT — ponsel tak berubah, tapi **satu kelas galat berpindah dari
+  5xx ke 4xx**, dan klien yang mencoba-ulang otomatis pada 5xx sebelumnya
+  mengulang permintaan yang takkan pernah berhasil. Gerbang: typecheck bersih ·
+  `npm test` **2.186** · `verify-api` **2.849** terhadap Postgres segar ·
+  `audit:invarian` 26/26
+
+---
+
 ## Peta medan → kolom: batasnya ADA tapi angkanya milik kolom lain — server — 2026-08-24
 
 - **Kenapa vena ini ada**: gerbang `angka-berbatas-atas` menulis batasnya
