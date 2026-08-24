@@ -126,6 +126,69 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Cabang niat di /sync: empat pintu membuangnya, satu temuan sampingan mem-500-kan kasir — server+mobile — 2026-08-24
+
+- **Populasi**: 13 tipe perintah `EKSEKUTOR` · **10 situs enqueue** ponsel ×
+  **7 build tayang** (+3…+10, dari 6 commit kenaikan versi) — kunci payload
+  per (situs, build) diekstrak `git show` + pemindai kurung berimbang
+  sadar-spread (`...{`) dan sadar-kedalaman
+- **Detektor DIBUKTIKAN menuduh** — masukan sintetis: kunci asing tertuduh,
+  kunci dalam spread dinilai milik induk, kunci item bersarang terbaca,
+  payload lewat variabel teresolusi. **Satu tuduhan palsu tertangkap**:
+  `'nominal'` — lengan TERNER (`hasil.dibatasi ? 'nominal' : x`) terbaca
+  sebagai kunci; kelas yang sudah dua kali tercatat. Aturan "kunci tak pernah
+  didahului `?`" dipasang dan jadi kasus sintetis detektornya
+- **Arah kunci-LEBIH: BERSIH** — 10 situs × 7 build, semua ⊆ skema strict
+  tujuannya (SaleBody/SelfBody/ClockBody/OpnameBody×2/PakaiBody/TahapBody/
+  KirimBody/KirimHasilBody; kunci params dicabut `pisahParam`)
+- **Arah kunci-KURANG: TEMUAN** — 4 pintu tak pernah membawa `branch_id` di
+  build mana pun (`perlengkapan_pakai`, `perlengkapan_opname`, `absen_saya`,
+  `absen_stasiun`) padahal jalur online-nya mengirim `branchId:` (query).
+  Terukur lewat POST /sync sungguhan (dua cabang, saldo 100/100):
+  - SEBELUM: pakai niat "Cabang Dua" → **PUSAT 100→93, balasan "ok"** ·
+    opname niat Dua → sesi + koreksi −38 lahir di PUSAT · absen admin →
+    masuk tercatat di PUSAT. Fallback "cabang pertama" peran tak terikat —
+    dua cabang salah sekaligus tanpa satu galat pun (kelas §208, di pintu
+    yang komentarnya sendiri menulis "satu eksekutor yang lupa akan
+    mengulang bug yang sama tanpa suara")
+  - Fix: `angkatCabangNiat()` di 4 eksekutor + ponsel mengirim
+    `'branch_id': ?branchIdQueryProvider` (null untuk peran terikat)
+  - SESUDAH (keadaan sama): pakai → Dua 100→95 · koreksi −5 di Dua (selisih
+    dihitung atas saldo Dua) · absen masuk di Dua · payload TANPA branch_id
+    tetap ok dengan fallback tak berubah · kasir terikat + niat cabang lain
+    → item 403
+- **TEMUAN SAMPINGAN** (dari fikstur §249 baru): **ganti nama cabang
+  mem-500-kan SEMUA penjualan sisa hari itu**. Nomor struk lama = `ORDER BY
+  nomor DESC` (teks) + `slice(-4)+1`; prefiks campuran pasca-rename → max
+  tekstual memilih prefiks lama (`PUSAT-…-0106` > `CABANGG248-…-0107`) → seq
+  0107 → 23505 → 500 **deterministik sampai ganti tanggal bisnis**. Terukur:
+  101 nota `PUSAT-` + 1 nota `CABANGG248-` di satu cabang → tiap penjualan
+  500; SESUDAH `MAX(RIGHT(nomor,4)::int)` → 0108, 0109 sukses berurutan.
+  (Ini juga sebab sesungguhnya pasangan §249 merah "404" — bukan urutan
+  menu; pemungut "menu pertama" diganti fikstur buatan sendiri)
+- **Penjaga + bukti merah** (semua suntikan di-assert mendarat):
+  `sync-cabang-niat.test.ts` (suntik `resolveCabangSync(auth, null)` →
+  menuduh nama eksekutornya) · `nomor-struk-lintas-prefiks.test.ts` (suntik
+  bentuk tekstual → merah) · mobile `sync_payload_cabang_test.dart` (cabut
+  `branch_id` → menuduh dengan kalimat kerusakannya) · verify-api **§250**
+  (18 asersi perilaku; §249 pasangan kini deterministik)
+- **Batas, jujur**: build lama tak bisa diperbaiki dari sini — owner/admin
+  offline di build ≤+10 tetap jatuh ke cabang pertama (fallback DIPAKU §250
+  supaya tak berubah diam-diam); pintu fase-2 memakai `resolveBranchId` yang
+  MENGABAIKAN (bukan menolak) niat cabang lain milik peran terikat — 403
+  hanya di jalur fase-1; detektor membaca NAMA kunci, nilai tak ditelusuri
+  melampaui pin `branchIdQueryProvider`. Dan dua kesalahan proses tercatat:
+  `git checkout --` menghapus fix yang belum di-commit (pagar lama dilanggar
+  lagi — dipasang ulang dari konteks), dan dua kali server lama yang masih
+  memegang port melayani pengukuran (EADDRINUSE di log server baru; sejak
+  itu pid pemegang port diverifikasi sebelum suite jalan)
+- Gerbang: typecheck bersih · `npm test` **2.220** (185 berkas) · verify-api
+  **2.979/0** vs Postgres segar · cakupan rute identik · `audit:invarian`
+  26/26 · `flutter analyze` bersih · `flutter test` **522**
+- Commit: server `6c74010` · mobile `20a28c6`
+
+---
+
 ## ANTREAN KETUJUH — usulan dari celah yang tercatat di ledger — 2026-08-24
 
 Antrean keenam (A″–C″) tuntas. Dua usulan; populasinya diukur baca-saja hari
