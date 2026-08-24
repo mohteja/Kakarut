@@ -73,7 +73,8 @@ function kolomTurunan(): string[] {
 const PUTUSAN: Record<string, string> = {
   // ── dijaga `pastikanMuat` di tempat angkanya lahir ──────────────────────
   "sale_items.line_total": "DIJAGA pastikanMuat(lineTotal, BATAS_UANG)",
-  "sale_items.hpp_satuan": "DIJAGA pastikanMuat(hppSatuan, BATAS_HPP)",
+  "sale_items.hpp_satuan":
+    "DIJAGA pastikanMuat(hppSatuan, BATAS_HPP) — di createSale DAN di jalur tulis KEDUANYA, rekalkulasi.ts",
   "sales.subtotal": "DIJAGA pastikanMuat(subtotal, BATAS_UANG)",
   "sales.total": "DIJAGA pastikanMuat(total, BATAS_UANG)",
   "sales.total_hpp": "DIJAGA pastikanMuat(totalHpp, BATAS_HPP)",
@@ -139,6 +140,18 @@ describe("luapan turunan: angka yang lahir di server", () => {
       Object.keys(PUTUSAN).filter((k) => !hidup.has(k)),
       "entri PUTUSAN basi — kolomnya sudah tak ada, atau sudah diisi medan badan",
     ).toEqual([]);
+  });
+
+  it("`rekalkulasiHpp` (jalur tulis KEDUA) memanggil penjaganya — dan menyebut menunya", () => {
+    // Batas berkas ini sendiri — "jalur tulis kedua ke kolom yang sama takkan
+    // terlihat" — dibayar di sini. Terukur: HPP tepat di langit-langit lolos
+    // createSale, dapur menekan 🥡 (basis + kemasan), rekalkulasi menulis
+    // nilai yang tak muat → dulu 400 GENERIK pada tombol sajian; kini
+    // `HPP satuan "Menu Langit C2" terlalu besar…`, dan flip murah tetap 200.
+    const s = baca("modules/penjualan/rekalkulasi.ts");
+    expect(s).toMatch(/pastikanMuat\(hppSatuan, BATAS_HPP/);
+    expect(s, "pesannya harus menyebut nama menunya").toContain("menu.nama");
+    expect(s).toMatch(/pastikanMuat\(totalHpp, BATAS_HPP/);
   });
 
   it("`catatKonsumsiProduksi` memanggil penjaganya — dan menyebut bahannya", () => {

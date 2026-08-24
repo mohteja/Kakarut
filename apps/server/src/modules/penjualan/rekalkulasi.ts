@@ -19,6 +19,7 @@
  * penyajian, atas baris yang basisnya memang berubah (`basisBerubah`). Lihat
  * `hppSatuanBaru`; sifat idempotennya tetap terjaga.
  */
+import { BATAS_HPP, pastikanMuat } from "../../lib/batas-angka";
 import { and, eq, isNull } from "drizzle-orm";
 import { qtyDitagih, qtyEfektif } from "@kakarut/shared";
 import type { Tx } from "../../db/client";
@@ -189,6 +190,17 @@ export async function hitungUlangBiayaPenjualan(
      * pokok satu porsi, dan itu tidak berubah karena sebagian dikembalikan.
      */
     const qtyBayar = qtyDitagih(b);
+    /*
+     * JALUR TULIS KEDUA ke kolom yang di `createSale` dijaga `pastikanMuat` —
+     * persis batas yang ditulis gerbang luapan-turunan tentang dirinya
+     * ("menilai kolom, bukan menelusuri tiap ekspresi"). Dan arah jalur ini
+     * bisa NAIK: basis takeaway menambah biaya kemasan. TERUKUR lewat HTTP:
+     * penjualan ber-HPP tepat di langit-langit (999.999.999.999, lolos
+     * createSale) lalu dapur menekan 🥡 → rekalkulasi menulis nilai yang tak
+     * muat → 400 GENERIK "Angkanya terlalu besar" pada tombol sajian, tanpa
+     * satu petunjuk pun bahwa yang meluap HPP baris itu.
+     */
+    pastikanMuat(hppSatuan, BATAS_HPP, `HPP satuan "${menu.nama}"`);
     totalHpp += hppSatuan * qtyBayar;
     if (hppSatuan !== b.hppSatuan) {
       await tx.update(saleItems).set({ hppSatuan }).where(eq(saleItems.id, b.id));
@@ -215,6 +227,7 @@ export async function hitungUlangBiayaPenjualan(
   }
 
   if (totalHpp !== sale.totalHpp) {
+  pastikanMuat(totalHpp, BATAS_HPP, "Total HPP");
     await tx.update(sales).set({ totalHpp }).where(eq(sales.id, saleId));
   }
 

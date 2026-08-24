@@ -13854,6 +13854,39 @@ cek "bahan kembar: tepat SATU slug yang lahir" "V == 1" \
 klik248 "perlengkapan (create)" /perlengkapan '{"nama":"Perlengkapan Kembar 248","satuan":"pcs","harga_beli":5000}'
 
 
+echo "── §249 Jalur tulis KEDUA: rekalkulasi HPP menyebut menunya; enum jalur salah = 400 ──"
+#
+# Gerbang luapan-turunan menulis batasnya: "menilai kolom, bukan menelusuri
+# tiap ekspresi — jalur tulis KEDUA ke kolom yang sama takkan terlihat".
+# Instansinya rekalkulasi.ts: dapur menekan takeaway → basis biaya berubah →
+# hpp_satuan & total_hpp DITULIS ULANG, dan arahnya bisa NAIK (kemasan).
+# Terukur SEBELUM: HPP tepat di langit-langit lolos createSale, flip takeaway
+# → 400 GENERIK "Angkanya terlalu besar" di tombol sajian. Plus temuan
+# sampingan: jenis jalur salah ("sale") → ZodError mentah → 500.
+KAT249=$(api "$OWNER" GET /kategori | jq -r '.[0].id')
+BM249=$(api "$OWNER" POST /bahan '{"nama":"Bahan Langit 249","harga_beli":999999999999,"isi":1,"satuan":"pcs"}' | jq -r '.id // ""')
+BK249=$(api "$OWNER" POST /bahan '{"nama":"Kemasan 249","harga_beli":5000,"isi":1,"satuan":"pcs","is_packaging":true}' | jq -r '.id // ""')
+MN249=$(api "$OWNER" POST /menu "{\"nama\":\"Menu Langit 249\",\"category_id\":\"$KAT249\",\"harga_jual\":9999999999,\"mult\":1,\"komponen\":[{\"ingredient_id\":\"$BM249\",\"qty\":1},{\"ingredient_id\":\"$BK249\",\"qty\":1}]}" | jq -r '.id // ""')
+cek "premis: fikstur langit-langit §249 terbuat" "V == 1" \
+  "$( [ -n "$BM249" ] && [ -n "$MN249" ] && [ "$MN249" != "null" ] && echo 1 || echo 0 )"
+JUAL249=$(api "$REISS105" POST /penjualan "{\"is_dine_in\":true,\"items\":[{\"menu_id\":\"$MN249\",\"qty\":1}]}")
+SID249=$(echo "$JUAL249" | jq -r '.sale.id // ""')
+cek "premis: penjualan dine-in ber-HPP TEPAT di langit-langit → 201" "V == 1" \
+  "$( [ -n "$SID249" ] && [ "$SID249" != "null" ] && echo 1 || echo 0 )"
+IT249=$(api "$OWNER" GET /pesanan | jq -r --arg s "$SID249" '[.[]|select(.id==$s)][0].items[0].id // ""')
+cek "premis: barisnya terlihat di papan" "V == 1" "$( [ -n "$IT249" ] && [ "$IT249" != "null" ] && echo 1 || echo 0 )"
+cek "flip 🥡 di langit-langit → 400 MENYEBUT MENUNYA, bukan generik/500" "V == 1" \
+  "$(api "$OWNER" POST "/pesanan/penjualan/$SID249/item/$IT249/sajian" '{"takeaway":true}' | jq '(.error | test("HPP satuan") and test("Menu Langit 249")) | if . then 1 else 0 end')"
+cek "jenis jalur salah (\"sale\") → 400, BUKAN 500 ZodError mentah" "V == 400" \
+  "$(status_code_body "$OWNER" POST "/pesanan/sale/$SID249/item/$IT249/sajian" '{"takeaway":true}')"
+# PASANGAN: flip pada penjualan biasa tetap bekerja
+MEN249=$(api "$OWNER" GET /menu | jq -r '[.[]|select(.nama!="Menu Langit 249")][0].id')
+J2249=$(api "$REISS105" POST /penjualan "{\"is_dine_in\":true,\"items\":[{\"menu_id\":\"$MEN249\",\"qty\":1}]}" | jq -r '.sale.id // ""')
+IT2249=$(api "$OWNER" GET /pesanan | jq -r --arg s "$J2249" '[.[]|select(.id==$s)][0].items[0].id // ""')
+cek "PASANGAN: flip 🥡 penjualan biasa tetap 200" "V == 200" \
+  "$(status_code_body "$OWNER" POST "/pesanan/penjualan/$J2249/item/$IT2249/sajian" '{"takeaway":true}')"
+
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

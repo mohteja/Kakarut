@@ -82,6 +82,22 @@ const LABEL_STATUS: Record<PesananStatus, string> = {
 };
 
 const JenisParam = z.enum(["open_bill", "penjualan"]);
+
+/**
+ * `jenis` datang dari SEGMEN JALUR, bukan badan — `zValidator` tak
+ * menjaganya, dan `JenisParam.parse()` telanjang melempar ZodError mentah
+ * yang lolos sampai `app.onError` sebagai **500**. Terukur:
+ * `POST /pesanan/sale/:id/item/:itemId/sajian` (nilai salah "sale") dibalas
+ * 500 "Terjadi kesalahan pada server" — padahal itu murni salah alamat
+ * klien, sekelas 22P02 yang sudah lama diterjemahkan jadi 400.
+ */
+function jenisDariJalur(c: { req: { param: (k: "jenis") => string } }) {
+  const hasil = JenisParam.safeParse(c.req.param("jenis"));
+  if (!hasil.success) {
+    throw new HTTPException(400, { message: "Jenis pesanan pada alamat tidak dikenal" });
+  }
+  return hasil.data;
+}
 const StatusBody = z.object({ status: z.enum(["dikerjakan", "selesai", "batal"]) }).strict();
 const SajianBody = z.object({ takeaway: z.boolean() }).strict();
 
@@ -538,7 +554,7 @@ export const pesananRoutes = new Hono<AppEnv>()
     async (c) => {
       const auth = c.get("auth");
       const branchId = await resolveBranchId(c);
-      const jenis = JenisParam.parse(c.req.param("jenis"));
+      const jenis = jenisDariJalur(c);
       const id = c.req.param("id");
       const itemId = c.req.param("itemId");
       const status = c.req.valid("json").status;
@@ -649,7 +665,7 @@ export const pesananRoutes = new Hono<AppEnv>()
     async (c) => {
       const auth = c.get("auth");
       const branchId = await resolveBranchId(c);
-      const jenis = JenisParam.parse(c.req.param("jenis"));
+      const jenis = jenisDariJalur(c);
       const id = c.req.param("id");
       const itemId = c.req.param("itemId");
       const takeaway = c.req.valid("json").takeaway;
@@ -734,7 +750,7 @@ export const pesananRoutes = new Hono<AppEnv>()
   .post("/:jenis/:id/status", zValidator("json", StatusBody), async (c) => {
     const auth = c.get("auth");
     const branchId = await resolveBranchId(c);
-    const jenis = JenisParam.parse(c.req.param("jenis"));
+    const jenis = jenisDariJalur(c);
     const id = c.req.param("id");
     const status = c.req.valid("json").status;
     const sekarang = new Date();
@@ -803,7 +819,7 @@ export const pesananRoutes = new Hono<AppEnv>()
   .post("/:jenis/:id/sajian", zValidator("json", SajianBody), async (c) => {
     const auth = c.get("auth");
     const branchId = await resolveBranchId(c);
-    const jenis = JenisParam.parse(c.req.param("jenis"));
+    const jenis = jenisDariJalur(c);
     const id = c.req.param("id");
     const takeaway = c.req.valid("json").takeaway;
     const aksi = takeaway ? "Diubah jadi bawa pulang" : "Dikembalikan jadi makan di tempat";
@@ -859,7 +875,7 @@ export const pesananRoutes = new Hono<AppEnv>()
   .get("/:jenis/:id/log", async (c) => {
     const auth = c.get("auth");
     const branchId = await resolveBranchId(c);
-    const jenis = JenisParam.parse(c.req.param("jenis"));
+    const jenis = jenisDariJalur(c);
     const id = c.req.param("id");
     await pastikanKartu(jenis, id, auth.company_id!, branchId, { untukUbah: false });
 
