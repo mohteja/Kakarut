@@ -50,6 +50,31 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Sebelas pintu "aman lewat baca" ditembak semua — server — 2026-08-24
+
+- **Kenapa**: batas entri A′ — *"28 situs `.update()` lain dinyatakan aman
+  lewat pilahan BACA, bukan lewat tembakan"* — dan tiga pilahan baca sesi ini
+  sudah terbukti salah (dua arah)
+- **Ditembak lewat HTTP**: **8** pintu PATCH ganti-nama ber-`tanpaBentrok`
+  (kategori · satuan · supplier · meja · penyimpanan · kategori-bahan ·
+  cabang · perlengkapan) — duplikat **berurutan** → 409 berkalimat, sah → 200,
+  **empat serentak** → nol 5xx; **2** pintu BUAT yang §245 lewati — bahan
+  (alokator `slugUnik`: empat serentak bernama sama → **tepat satu slug
+  lahir**, sisanya 409) dan perlengkapan (`{201:1, 409:3}`). `POST /undang`
+  tak diulang — §213 sudah menembaknya
+- **Hasil: BERSIH — kesebelasnya memegang**, dan kini terpaku **perilaku**
+  (§248, 37 asersi) alih-alih prosa
+- **Detektor**: DIBUKTIKAN — `tanpaBentrok` di-shadow jadi passthrough pada
+  `PATCH /satuan/:id` (suntikan di-assert) → duplikat terukur **HTTP 500**;
+  dikembalikan → 409
+- **Batas**: cabang memakai dua entitas yang sudah ada (buat cabang terbentur
+  kuota plan) — seksi sengaja di ujung skrip; "empat serentak" curl paralel
+  (bentuk yang terbukti cukup di §245: tanpa penjaga → `201 500 500 500`)
+- Gerbang: typecheck bersih · `npm test` 2.208 · `verify-api` **2.955**
+  terhadap Postgres segar · `audit:invarian` 26/26 · cakupan 271 identik
+
+---
+
 ## ANTREAN KEENAM — usulan dari celah yang tercatat di ledger — 2026-08-24
 
 Antrean kelima (A′–D′) tuntas. Tiga usulan; populasinya diukur baca-saja
