@@ -172,14 +172,21 @@ const ATURAN: Aturan[] = [
      * melainkan menembak kesepuluh endpoint pembuatan sekaligus; daftarnya lalu
      * dilebarkan supaya pintu berikutnya tak perlu ditemukan dengan cara itu.
      *
-     * Kenapa berhenti di sini dan tidak memakai SELURUH tabel berindeks unik
-     * (ada 32): diukur, itu memunculkan 20 pintu terbuka, dan mendaftarkan 20
-     * entri `dasar` tanpa benar-benar memeriksa satu per satu justru melanggar
-     * doktrin berkas ini sendiri. Sisanya sengaja ditinggalkan sebagai utang
-     * yang DIUKUR, bukan dinyatakan bersih.
+     * Daftarnya kini SELURUH 32 tabel berindeks unik. Catatan lama di sini
+     * berhenti di 14 tabel karena menyapu semuanya "memunculkan 20 pintu
+     * terbuka" yang belum diperiksa satu per satu — utang itu DIBAYAR
+     * 2026-08-24: tiap pintu yang tersisa diadjudikasi tangan (dan sebagian
+     * diukur lewat HTTP dengan pelepasan serentak — lihat vena "bentrok unik
+     * di bawah klik ganda" & "arah ganti-nama" di ledger), lalu masuk `dasar`
+     * DENGAN alasannya. Angka "20" sendiri sudah kedaluwarsa: sapuan hari ini
+     * atas populasi penuh menyisakan 8, dan kedelapannya terjaga oleh bentuk
+     * yang kosakata aturan ini memang tak bisa lihat — indeks PARSIAL
+     * (`auto_uq` hanya `WHERE tipe='auto'`), kunci `FOR UPDATE` yang tinggal
+     * jauh di atas jendela, dedup `Map` sebelum insert, dan keunikan atas
+     * nilai ACAK 256-bit yang mustahil bentrok.
      */
     tulis:
-      /\.insert\(\s*(?:users|invitations|companies|branches|suppliers|storageLocations|meja|ingredients|units|menuCategories|ingredientCategories|menus|customers|supplies)\s*\)/,
+      /\.insert\(\s*(?:users|invitations|companies|branches|suppliers|storageLocations|meja|ingredients|units|menuCategories|ingredientCategories|menus|customers|supplies|cleaningReportItems|cleaningReports|dokumenNomor|ingredientComponents|ingredientSuppliers|memberships|menuComponents|productionConsumptions|sales|shifts|storageLocationIngredients|storageLocationPetugas|supplyMutations|supplyRules|supplySuppliers|syncCommands|emailVerificationTokens|passwordResetTokens)\s*\)/,
     /*
      * `bentrokUnik` (bukan cuma `…Pada`) dan `onConflict` (bukan cuma
      * `…DoNothing`) — versi pertama meleset pada keduanya, dan keduanya
@@ -196,6 +203,37 @@ const ATURAN: Aturan[] = [
      */
     penjaga: /bentrokUnik|tanpaBentrok|onConflict|kunciAntrean|\.for\("(?:update|share)"\)/,
     dasar: {
+      // ── Adjudikasi 2026-08-24 (daftar tabel dilebarkan 14 → 32) ──────────
+      "modules/auth/routes.ts": {
+        pintu: 2,
+        alasan:
+          "kedua insert token (verifikasi email & reset password) unik atas " +
+          "`tokenHash` = sha256(randomBytes(32)) — keunikan di atas nilai acak " +
+          "256-bit; bentroknya mustahil secara praktis, dan menerjemahkannya " +
+          "berarti menyiapkan kalimat untuk kejadian yang tak akan terjadi",
+      },
+      "modules/menu/routes.ts": {
+        pintu: 1,
+        alasan:
+          "`replaceKomponen`: pasangan (menu, ingredient) di-dedup lewat Map " +
+          "SEBELUM insert, dan barisnya baru saja di-DELETE di transaksi yang " +
+          "sama — indeks pasangannya tak bisa tertabrak dari satu permintaan; " +
+          "lintas permintaan dikunci baris induk menu (lihat vena ganti-nama)",
+      },
+      "modules/perlengkapan/routes.ts": {
+        pintu: 2,
+        alasan:
+          "`supply_mutations_auto_uq` adalah indeks PARSIAL — `WHERE tipe = " +
+          "'auto'`. Kedua insert di sini bertipe koreksi/masuk, jadi indeksnya " +
+          "tak berlaku untuk baris yang mereka tulis (diadjudikasi vena " +
+          "bentrok-unik 2026-08-24)",
+      },
+      "modules/perlengkapan/service.ts": {
+        pintu: 3,
+        alasan:
+          "sama dengan routes-nya: ketiga insert bertipe koreksi/masuk/kirim, " +
+          "di luar cakupan indeks parsial `auto_uq`",
+      },
       "modules/auth/superadmin.ts": {
         pintu: 1,
         alasan:
@@ -539,9 +577,12 @@ describe("detektornya benar-benar mengenali bentuknya", () => {
     ],
     // …dan yang TIDAK boleh tertuduh:
     ["owner-terakhir", 'await tx.update(memberships).set({ employeeCode: kode }).where(eq(x));', false],
-    ["bentrok-unik", 'await tx.insert(memberships).values({ userId, companyId });', false],
+    ["bentrok-unik", 'await tx.insert(memberships).values({ userId, companyId });', true],
     // `saleItems` bukan `sales`; batas kata harus memisahkannya
-    ["bentrok-unik", 'await tx.insert(menuComponents).values({ menuId, ingredientId });', false],
+    // Sejak daftar dilebarkan ke seluruh 32 tabel unik (2026-08-24), kedua
+    // bentuk ini DIKENALI — dan pintunya yang nyata dibayar lewat `dasar`
+    // beralasan, bukan dengan menyempitkan kosakata sapuannya.
+    ["bentrok-unik", 'await tx.insert(menuComponents).values({ menuId, ingredientId });', true],
   ];
 
   it.each(contoh)("%s mengenali: %s → %s", (nama, kode, harus) => {
