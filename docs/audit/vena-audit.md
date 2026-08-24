@@ -50,6 +50,51 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Latensi di bawah KONKURENSI — server — 2026-08-24
+
+- **Kenapa vena ini ada**: pengukuran cakupan menilai VOLUME (200.101
+  transaksi, satu permintaan pada satu waktu) dan menulis batasnya sendiri —
+  *"jalur tulis diukur … tapi tidak di bawah konkurensi — kelas yang justru
+  melahirkan vena #12"* (`GET /menu` 0,009 → **20,07 dtk** saat
+  `PUT /menu/urutan` berjalan)
+- **Populasi**: enam keadaan konkurensi atas kolam **10 koneksi** (pg.Pool
+  bawaan), pada **200.101 transaksi** yang **dibuktikan terbaca API** lewat
+  `jumlah_transaksi` balasan rutenya (aturan 6)
+- **Hasil — BERSIH, dengan bacaan yang ditulis**:
+
+  | keadaan | terukur |
+  |---|---|
+  | dasar | `GET /menu` 0,013 · `POST /penjualan` 0,018 dtk |
+  | 10 laporan serentak | `GET /menu` **0,160** · `POST /penjualan` 0,165 (201) |
+  | 10 penjualan serentak | `GET /menu` 0,015 · penjualan ke-11 **0,085** (201) |
+  | **5 `PUT /menu/urutan` serentak** | `GET /menu` **0,018 dtk** — kelas #12, dulu **20,07** |
+  | 30 laporan (3× kolam) | p50 **1,631** · maks 1,930 · `GET /menu` **0,675** dtk |
+  | 50 penjualan serentak | p50 0,395 · p95 **0,656** · maks 0,677 · **50× 201** |
+
+  Penurunan di bawah beban adalah **antrean kolam** — linier terhadap kedalaman
+  antrean, pulih sendiri, **tanpa 5xx**, tanpa kelaparan tak berbatas. Baris
+  keempat yang terpenting: perbaikan vena #12 **memegang di bawah beban yang
+  sama yang dulu membunuhnya**, dan sekarang ada angkanya
+- **Bacaan atas 30-serentak, supaya tak dibaca lebih buruk dari faktanya**:
+  `/laporan` **sengaja** tak berbatas laju — vena "batas laju di luar email"
+  mengukurnya murah (0,225 dtk @ 200 rb) dan memutuskan begitu. Yang
+  membatasinya kolam itu sendiri: 30 permintaan serentak menaikkan bacaan lain
+  ke 0,675 dtk lalu pulih. p50 1,63 dtk ≈ 2,4× hitungan antrean murni
+  (0,225 × 3 gelombang) — sisanya kontensi CPU serialisasi JSON, bukan kueri
+- **Tindak**: blok KONTENSI KOLAM di `scripts/ukur-latensi.sh` dipermanenkan
+  mengukur jalur TULIS juga (10 penjualan serentak + baca & tulis di
+  tengahnya), angka acuan tertanam sebagai komentar, dan blok tulisnya
+  **melewatkan diri dengan pesan jujur** bila token kasir/menu tak tersedia —
+  bukan diam. Tak ada kode server tersentuh; `verify-api` tak dijalankan ulang
+  untuk commit ini dan itu disebutkan. Gerbang: `npm test` **2.195**
+- **Batas**: mesin CI satu kotak — klien dan server berbagi CPU, jadi angka
+  serentaknya konservatif (kontensi klien ikut terhitung); konkurensinya
+  sebatas 50 (kasir sungguhan per tenant jauh di bawah itu); dan `FOR UPDATE`
+  meja/advisory lock tak diukur terpisah — jalurnya sudah dijaga uji perilaku
+  (`§161`, `bill-dikunci-saat-dibayar`), yang belum ada angka latensinya
+
+---
+
 ## Lima belas pintu yang tak pernah diketuk — server — 2026-08-24
 
 - **Kenapa vena ini ada**: gerbang cakupan putaran lalu mengukur 274 rute
