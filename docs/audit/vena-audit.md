@@ -50,6 +50,33 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Rekaman cakupan diukur ulang tiap CI — server — 2026-08-24
+
+- **Kenapa vena ini ada**: gerbang cakupan menulis batasnya sendiri —
+  *"`rute-diketuk.txt` adalah REKAMAN, bukan pengukuran ulang."* Terukur:
+  `ci.yml` **sudah** menjalankan verify-api tiap push, **tanpa** `JEJAK_RUTE` —
+  98,9 % itu diukur sekali di satu mesin lalu dipercaya
+- **Tindak**: dua perubahan kecil di `ci.yml` — `JEJAK_RUTE` dinyalakan pada
+  langkah verify-api, dan langkah baru men-diff jejak run itu terhadap
+  rekamannya: rute yang **berhenti** diketuk maupun rute **baru** membuat CI
+  merah menyebut barisnya + perintah pembaruan sadar
+- **Diverifikasi pada kenyataan, bukan niat**: jejak verify-api penuh (run
+  §245, 2.905 asersi) → **271 rute, IDENTIK** dengan rekaman; simulasi merah
+  (satu baris dicabut) → diff menyebut barisnya
+- **Aturan 7**: `cakupan-rute.test.ts` dapat jangkar untuk langkah CI-nya
+  sendiri (`JEJAK_RUTE=`, `cakupan-rute.ts`, `diff -u …`). **Suntikan bukti
+  merah PERTAMAKU GAGAL MENDARAT** — frasa "Cakupan rute" juga hidup di
+  komentar langkah server, jadi cek keberadaannya harus pada baris `- name:` —
+  dan yang menangkapnya assert pendaratan itu sendiri, persis alasan aturannya
+  ada
+- **Batas**: pembandingnya menuntut kesamaan PERSIS, jadi verify-api yang
+  nondeterministik (seksi yang kadang melewati diri) akan membuat CI merah
+  palsu — hari ini nol seksi begitu pada dua run berturut (271 = 271), dan
+  bila kelak ada, pesan gagalnya menunjuk barisnya
+- Gerbang: typecheck bersih · `npm test` **2.202** · YAML tervalidasi
+
+---
+
 ## Bentrok unik di bawah klik ganda SERENTAK — server — 2026-08-24
 
 - **Kenapa vena ini ada**: `penjaga-semua-pintu` menulis utangnya sendiri —
