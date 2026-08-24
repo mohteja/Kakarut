@@ -50,6 +50,97 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Cakupan rute: pintu yang tak pernah diketuk — server — 2026-08-24
+
+- **Kenapa vena ini ada**: ledger menulis batas alat ukur latensi — *"yang
+  diukur RUTE BACA tanpa parameter jalur (68 dari 469). Jalur tulis dan rute
+  ber-`:id` tak diukur."*
+- **RALAT atas angka ledger itu**: `scripts/ukur-latensi.sh` mengukur
+  **SEBELAS** jalur yang ditulis tangan di satu baris `for`, semuanya `GET`.
+  Bukan 68. Dan penyebutnya **274** rute konkret, bukan 469
+- **Temuan pengintaian yang menentukan bentuk putaran ini**: angka cakupan
+  **tak bisa didapat secara statis**. Kucocokkan jalur yang disebut
+  `verify-api.sh` dengan deklarasi rute di `src` — hasilnya **2 dari 163**,
+  karena hampir setiap jalur di skrip itu dirakit dari variabel shell
+  (`/bahan/$BP242/resep`). Yang dibutuhkan **pola** rutenya
+  (`/api/bahan/:id/resep`), dan hanya server yang mengetahuinya
+- **Populasi**:
+
+  | ukuran | angka |
+  |---|---|
+  | rute konkret terdaftar di tabel rute Hono | **274** |
+  | · jalur **TULIS** | **168** |
+  | jalur yang `ukur-latensi.sh` ukur sebelumnya | **11**, semuanya `GET` |
+  | jalur TULIS yang pernah punya angka | **0** |
+  | permintaan tercatat saat `verify-api.sh` berjalan | **4.324** |
+
+- **Metode**: middleware ber-env `JEJAK_RUTE` di `app.ts` mencatat
+  `metode · c.req.routePath · status · ms`. **Diukur, bukan diandaikan**:
+  `routePath` memulangkan pola LENGKAP dengan prefiks mount
+  (`/api/customer/:id`, `/api/menu/:id`). Daftar rutenya dari `app.routes`
+  Hono sendiri — pemeta teks di repo ini sudah salah berkali-kali, dan di sini
+  aplikasinya bisa ditanya langsung
+- **Detektor**: DIBUKTIKAN bisa menuduh — satu rute baru disisipkan ke `app.ts`
+  (suntikan **di-assert mendarat**), gerbang menuduhnya dengan nama
+  (`GET /api/pintu-yang-tak-pernah-diketuk`), lalu dicabut
+- **Hasil — peta cakupan pertama yang pernah ada di repo ini**:
+
+  | | angka |
+  |---|---|
+  | rute konkret terdaftar | **274** |
+  | **diketuk** verify-api | **256** (**93,4 %**) |
+  | **TAK PERNAH diketuk** | **18** — **13** di antaranya jalur TULIS |
+  | jalur tulis | **168** terdaftar, **155** diketuk |
+
+  Tiga memang di luar jangkauan suite dan alasannya bisa diperiksa: menjalankan
+  migrasi sungguhan, mengirim email sungguhan, mengubah retensi cadangan mesin
+  yang menjalankannya. **Lima belas sisanya UTANG YANG DIUKUR** — ditulis apa
+  adanya, bukan disamarkan jadi "di luar jangkauan": empat `DELETE` dan sembilan
+  jalur tulis lain yang bisa 500 sejak berbulan-bulan tanpa satu uji berubah
+  warna
+- **Venanya sendiri BERSIH secara perilaku, dan itu diukur**: pada **200.101
+  transaksi** yang **dibuktikan terbaca API** (lewat `jumlah_transaksi` balasan
+  rutenya, bukan `SELECT count(*)` — kesalahan yang pernah kubuat dan yang
+  melahirkan gerbang premis skrip itu), **71** rute baca terukur otomatis:
+
+  | | terukur |
+  |---|---|
+  | terlambat: `GET /laporan` | **0,119 dtk** |
+  | `POST /penjualan` | **0,020 dtk** |
+  | `POST /stok/opname` | **0,036 dtk** |
+  | `PUT /menu/:id` | **0,018 dtk** |
+  | kontensi kolam `GET /menu` senggang → sibuk → pulih | **0,015 → 0,012 → 0,016 dtk** |
+
+  Kontensi yang dulu **0,009 → 2,11 dtk** kini rata. Perbaikan vena #12/#14/#15/
+  #16/#36 memang memegang — dan sekarang ada angkanya, bukan keyakinan
+- **Batas gerbangnya, ditulis jujur**
+  - `docs/audit/rute-diketuk.txt` adalah **rekaman**, bukan pengukuran ulang.
+    Bila suatu saat sebuah rute berhenti diketuk tanpa berkasnya diperbarui,
+    gerbangnya tetap hijau. Yang dijaganya: rute **baru** tak bisa lahir tanpa
+    keputusan
+  - **"diketuk" bukan "diuji"**: rute yang ditembak sekali dengan badan paling
+    sederhana tetap terhitung tercakup
+  - rute ber-`:param` tak ikut diukur `ukur-latensi.sh` (butuh id yang sah);
+    latensinya hanya terlihat lewat jejak saat verify-api berjalan, pada volume
+    seed
+  - jalur tulis diukur pada volume seed dan pada 200 ribu transaksi, tapi tidak
+    di bawah **konkurensi** — kelas yang justru melahirkan vena #12
+- **Tindak**: middleware jejak ber-env di `app.ts` (mati secara bawaan; isinya
+  hanya metode, pola, status, ms — tak ada UUID, badan, atau token) ·
+  `src/scripts/cakupan-rute.ts` · gerbang `cakupan-rute.test.ts` (5 uji) ·
+  `ukur-latensi.sh` memakai tabel rute Hono (11 → **71** rute baca), gerbang
+  premisnya utuh · `docs/audit/rute-diketuk.txt`. Gerbang: typecheck bersih ·
+  `npm test` **2.191** · `verify-api` **2.849** terhadap Postgres segar ·
+  `audit:invarian` 26/26
+- **Catatan alat**: `buta-komentar.test.ts` turun **4.167 → 3.348** aksara, dan
+  sebabnya ditulis di tempatnya — kerusakan pengupas naif berbentuk **RANTAI**:
+  satu komentar blok baru di mana pun memasangkan ulang seluruh `/*`…`*/`
+  sesudahnya dan menggeser angkanya **ke dua arah**. Ambangnya karena itu
+  dipasang pada besaran, dan yang tak boleh mundur asersi
+  `.route("/admin/tenants"` di atasnya — itu propertinya; angka itu ukurannya
+
+---
+
 ## Luapan TURUNAN: angka yang lahir di server, tempat `.max()` tak menolong — server — 2026-08-24
 
 - **Kenapa vena ini ada**: entri di bawah menutup celah "batas ada tapi angkanya
