@@ -60,18 +60,43 @@ if [ "${JUMLAH:-0}" -lt 1000 ] && [ "${TRANSAKSI:-0}" -lt 1000 ]; then
 fi
 
 echo
-echo "LATENSI RUTE BACA (3 tembakan, yang tercepat dilaporkan):"
+echo "LATENSI SELURUH RUTE BACA TANPA PARAMETER JALUR (2 tembakan, tercepat):"
+#
+# Versi pertama berkas ini mengukur SEBELAS jalur yang ditulis tangan di satu
+# baris `for`, semuanya GET. Ledger menyebutnya "68 dari 469" — angka itu
+# DIRALAT di sini: yang benar 11 dari 274 rute konkret, dan NOL jalur tulis.
+#
+# Daftarnya sekarang diambil dari TABEL RUTE HONO sendiri, jadi rute baca baru
+# ikut terukur tanpa ada yang perlu ingat menambahkannya. Rute ber-`:param`
+# tetap di luar (butuh id yang sah); latensinya terukur lewat jejak
+# `JEJAK_RUTE` saat `verify-api.sh` berjalan.
 : > /tmp/ukur-latensi.txt
-for J in /laporan /laporan/menu-laris /laporan/durasi-pesanan /laporan/bep \
-         /laporan/pembelian /penjualan /stok /menu /bahan /customer /pesanan; do
+DAFTAR=$(cd "$(dirname "$0")/../apps/server" && npx tsx -e '
+import { createApp } from "./src/app";
+const app = createApp();
+const r = (app as unknown as { routes: { method: string; path: string }[] }).routes;
+const s = new Set<string>();
+for (const x of r) if (x.method === "GET" && !x.path.includes("*") && !x.path.includes(":")) s.add(x.path);
+for (const p of [...s].sort()) console.log(p);
+' 2>/dev/null)
+JML=$(printf '%s\n' "$DAFTAR" | grep -c . || true)
+if [ "${JML:-0}" -lt 40 ]; then
+  echo "BERHENTI: tabel rute cuma memulangkan $JML jalur baca — pemindainya rusak,"
+  echo "dan angka latensi di bawahnya tak akan menyatakan apa pun."
+  exit 2
+fi
+echo "  (${JML} rute baca dari tabel rute Hono, bukan daftar tulisan tangan)"
+for J in $DAFTAR; do
   BEST=999
-  for _ in 1 2 3; do
+  for _ in 1 2; do
     T=$(curl -sf -o /dev/null -w '%{time_total}' -H "Authorization: Bearer $TOKEN" \
-        --max-time 120 "$BASE/api$J$Q" || echo 999)
+        --max-time 120 "$BASE$J$Q" || echo 999)
     BEST=$(python3 -c "print(min($BEST, $T))")
   done
-  printf "  %-28s %7.3f dtk\n" "$J" "$BEST" | tee -a /tmp/ukur-latensi.txt
+  printf "%s\t%s\n" "$BEST" "$J" >> /tmp/ukur-latensi.txt
 done
+echo "  20 TERLAMBAT:"
+sort -rn /tmp/ukur-latensi.txt | head -20 | awk -F'\t' '{printf "  %-34s %7.3f dtk\n", $2, $1}'
 
 echo
 echo "KONTENSI KOLAM (10 laporan serentak; \`db\` adalah pg.Pool bawaan = 10 koneksi):"

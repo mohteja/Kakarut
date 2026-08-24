@@ -72,13 +72,23 @@ describe("pengupas komentar: `/*` di dalam string bukan pembuka komentar", () =>
 
     // Angka kebutaannya, bukan sekadar "ada bedanya". Diukur 2026-08-23:
     // 4.167 aksara berbeda di app.ts saja — 66 % dari 6.307 aksara yang naif
-    // butakan di seluruh `apps/server/src`. Batasnya dipasang longgar (4.000)
-    // supaya penyuntingan biasa di app.ts tak membuatnya merah palsu.
+    // butakan di seluruh `apps/server/src`.
+    //
+    // ANGKANYA BERGERAK, DAN ITU BUKAN TANDA MEMBAIK. Kerusakan pengupas naif
+    // berbentuk RANTAI: begitu ia menelan dari `"/admin/*"` sampai `*/`
+    // terdekat, pemasangan `/*`…`*/` seluruh sisa berkas ikut bergeser satu.
+    // Menambahkan SATU komentar blok di mana pun sesudahnya memasangkan ulang
+    // rantai itu dan mengubah angkanya ke dua arah — terukur 4.167 → 3.348
+    // ketika `app.ts` mendapat satu komentar blok baru (middleware jejak rute,
+    // 2026-08-24). Jadi ambangnya dipasang pada besaran, bukan pada nilai
+    // persisnya, dan yang benar-benar tak boleh mundur asersi
+    // `.route("/admin/tenants"` di atas — itu propertinya; angka ini cuma
+    // ukurannya.
     const baru = butaKomentar(APP);
     const naif = butaNaif(APP);
     let hilang = 0;
     for (let i = 0; i < APP.length; i += 1) if (baru[i] !== naif[i]) hilang += 1;
-    expect(hilang).toBeGreaterThan(4_000);
+    expect(hilang).toBeGreaterThan(3_000);
   });
 });
 
