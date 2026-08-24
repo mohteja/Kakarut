@@ -1918,6 +1918,46 @@ bukan dari daftar awal.
    ada — bukan pengurai teks — menemukan **lima** ketidakcocokan nyata, dan
    pengurai teksku sendiri menuduh **enam** kali dengan salah.
 
+### Antrean kedua — usulan #6–#10, dari celah yang ditulis entri di atas — 2026-08-24
+
+Kelima usulan pertama tergarap. Antrean ini **tidak dikarang**: tiap entri di
+berkas ini diwajibkan menulis batas detektornya sendiri (aturan 4), dan
+baris-baris "Batas:" itulah bahannya. Angka di bawah **sudah diukur baca-saja**.
+
+6. **SQL mentah — populasi yang belum pernah disapu satu kali pun.**
+   Dua entri menuliskannya sebagai batas, dan pada satu di antaranya sebuah
+   temuan **1,61 MB lolos karena itu** (*"Daftar tabelnya DITULIS TANGAN, dan
+   `customers` tak ada di dalamnya"*). Populasi: **247** template `` sql`…` ``,
+   **62** kueri lengkap, **19** situs `db.execute`, **29** tanpa sebutan
+   `company_id`, **21** SELECT baris tanpa `LIMIT`.
+   Kandidat hidup sudah bernama: `GET /penerimaan/anomali`
+   (`penerimaan/routes.ts:447`) memulangkan SELURUH baris menggantung tanpa
+   `LIMIT` lalu me-`reduce`-nya di JS — kelas yang vena "Balasan daftar tanpa
+   langit-langit" tegakkan atas 147 select drizzle, tak terlihat olehnya karena
+   raw SQL. Saudaranya `stok/service.ts:694` **sudah** berbatas, jadi aturannya
+   ada; yang terbuka satu pintu. Kandidat kedua:
+   `open-bill/backfill.ts:23` — `UPDATE` tanpa pengurungan `company_id`.
+7. **Peta medan → kolom yang tak pernah ada.** *"Gerbangnya menuntut ADANYA
+   `.max()`, bukan bahwa angkanya cocok dengan kolom tujuannya."* 13 konstanta
+   di `batas-angka.ts` menyebut kolomnya **di komentar saja**; ~20 presisi
+   `numeric(p,s)` berbeda di `schema.ts`. Ketiga belasnya cocok hari ini
+   (diperiksa) — yang diusulkan **memakukannya**, memakai penelusur nilai dari
+   usulan #3 untuk mengikuti `body.X` → `.values({ kolom: body.X })`.
+   Kerusakannya sudah terukur sebelumnya: 1e12 lolos Zod lalu **500**.
+8. **Rute yang tak pernah diukur latensinya — 401 dari 469.** *"Yang diukur
+   RUTE BACA tanpa parameter jalur (68 dari 469)."* Alatnya sudah ada
+   (`scripts/ukur-latensi.sh`, yang menolak mengukur sampai premisnya terbukti);
+   yang kecil cakupannya. Jalur TULIS justru yang paling mahal, dan nol yang
+   pernah diukur.
+9. **Galat yang dibalas DI DALAM respons sukses.** Arah `c.json({error}, 4xx)`
+   sudah kuukur dan **BERSIH**: 4 kemunculan, semuanya di penangan galat pusat,
+   berbanding 454 `new HTTPException`. Yang terbuka arah sebelahnya — teks galat
+   di dalam balasan **200** (`alasan`/`sebab` per baris), permukaan yang sudah
+   terbukti membocorkan SQL mentah & UUID.
+10. **Kunci JSON yang dibaca lewat variabel di ponsel** (`j[k]`). **Separuhnya
+    baru tertutup**: arah badan-permintaan kini dijaga server (112 dari 114
+    badan menolak kunci tak dikenal), jadi yang tersisa arah BACA saja.
+
 ## Antrean vena — belum tergarap
 
 Diurut kasar menurut (kerusakan bila terjadi) × (peluang pola "pintu saudara"
