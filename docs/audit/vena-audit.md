@@ -50,6 +50,52 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Bentrok unik di bawah klik ganda SERENTAK — server — 2026-08-24
+
+- **Kenapa vena ini ada**: `penjaga-semua-pintu` menulis utangnya sendiri —
+  *"32 tabel berindeks unik… menyapu semuanya memunculkan 20 pintu terbuka…
+  sisanya utang yang diukur."* Kelasnya sudah menggigit: 23505 mentah = 500,
+  overlay "server sedang diperbarui", pemicunya satu klik ganda
+- **Populasi**: **71** situs `.insert()` ke **32** tabel unik; **8** pintu
+  buat-dengan-nama diukur perilakunya; **50** penjualan dilepas satu tick
+- **Hasil: BERSIH secara perilaku — dan tiga lapis kesalahanku tercatat**:
+  1. sapuanku menuduh **22**, EMPAT BELAS cacat jendelaku sendiri (`rfind` −1
+     di kepala berkas → konteks kosong → `onConflict` tiga baris di bawah tak
+     terlihat) → **8**, dan kedelapannya dipilah tangan **semuanya terjaga**:
+     `auto_uq` indeks **parsial** (`WHERE tipe='auto'`; kelima insert bertipe
+     lain), `supplySuppliers` dikunci `FOR UPDATE` induk (jendelaku tak kenal
+     bentuk drizzle `.for("update")`), `menuComponents` dedup `Map`;
+  2. **kandidat teratas usulanku GUGUR OLEH PENGUKURAN**: kutulis
+     "`sales.nomor` baca-maks+1 TANPA kunci" — salah; baris PERTAMA transaksi
+     `createSale` adalah `FOR UPDATE` baris cabang, seratus baris di atas
+     komentar `FOR SHARE` yang kubaca. Terukur: 5 ronde × 10 penjualan dilepas
+     **satu tick** (Promise.all) → **50× 201**;
+  3. sasaran bukti merah pertamaku salah: mencabut `tanpaBentrok` dari
+     `POST /supplier` tetap `{201, 409×3}` — penjaga pintu BUAT-nya
+     `onConflictDoNothing` di insert; wrapper itu milik PATCH rename
+- **Terukur, pelepasan serentak sungguhan, 8 pintu**: supplier · kategori ·
+  satuan · customer(WA) · meja · cabang · penyimpanan · kategori-bahan →
+  semuanya `{201:1, 409:3}`, **nol 5xx**
+- **Detektor**: DIBUKTIKAN — `onConflictDoNothing` dicabut (suntikan
+  di-assert) → **201 500 500 500**; dikembalikan → `409 409 409 409`
+- **Yang belum pernah ada sampai putaran ini**: satu pun uji yang menembakkan
+  duplikat **serentak** — semua asersi 409 menembak berurutan, jadi jalur
+  balapan (23505 dari indeks, bukan pra-cek) tak pernah dilewati. **§245**
+  (15 asersi) memakukannya: 4 curl paralel per pintu, nol 5xx, tepat satu 201,
+  yang kalah dibalas kalimat
+- **Batas**: 8 pintu yang dipaku adalah kelas buat-dengan-nama; balapan
+  ganti-nama (PATCH bertabrakan) dan tabel token/idempotensi tak ikut dipaku —
+  yang pertama berpenjaga `tanpaBentrok` per situs, yang kedua justru
+  MENGANDALKAN 23505 sebagai mekanisme (menerjemahkannya akan merusak makna).
+  `POST /cabang` membalas 400×4 di probe (validasi tipe/kuota) — pintunya tak
+  sampai ke insert, dicatat bukan diabaikan
+- **Tindak**: verify-api §245. Angka "20 pintu terbuka" di kepala
+  `penjaga-semua-pintu` adalah sapuan TEKSTUAL aturan itu; kebenaran
+  perilakunya hari ini nol pintu. Gerbang: typecheck bersih · `npm test`
+  **2.201** · `verify-api` **2.905** terhadap Postgres segar
+
+---
+
 ## ANTREAN KEEMPAT — usulan dari celah yang ditulis ledger sendiri — 2026-08-24
 
 Antrean 1→3→2→4 tuntas. Yang di bawah **diukur baca-saja hari ini**, bukan
