@@ -50,6 +50,63 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## ANTREAN KELIMA — usulan dari celah yang tercatat di ledger — 2026-08-24
+
+Antrean keempat tuntas. Yang di bawah **diukur baca-saja hari ini**; tiap
+usulan menunjuk baris "Batas" yang melahirkannya.
+
+### Usulan A′ — arah GANTI-NAMA tak pernah disapu
+
+**Sumbernya**: entri klik-ganda menulis — *"balapan ganti-nama tak ikut dipaku
+— berpenjaga `tanpaBentrok` per situs."* Kalimat "berpenjaga per situs" itu
+**keyakinan yang belum pernah disapu**: vena A hanya menghitung `.insert()`;
+arah `.update()` belum pernah dihitung sekali pun.
+
+**Diukur**: **37** situs `.update()` ke tabel berindeks unik, **9** menulis
+kolom uniknya tanpa penjaga di jendela. Dipilah sebagian: dua tuduhan palsu
+jendela, satu **terkonfirmasi telanjang — dan bentuknya persis tanda tangan
+sesi ini, di berkas yang sama**: `POST /menu` (`menu/routes.ts:553`) dijaga
+`onConflictDoNothing` + 409 "Menu sudah ada"; `PUT /menu/:id` (`:651`),
+delapan puluh baris di bawahnya, menulis `nama` **tanpa apa pun** dengan
+`menus_company_nama_uq` menunggu. Dan ini **tak butuh balapan**: ganti nama
+menu B menjadi nama menu A — dua permintaan berurutan, alur manajemen harian —
+diperkirakan 23505 mentah → 500 → overlay "server sedang diperbarui".
+Kandidat lain untuk dipilah: `menu:424`, `menu/service.ts:335`,
+`bahan/kode.ts:92`, `users:684` & `onboarding:252` (memberships.kode).
+Bentuk kerja: pilah 9, ukur HTTP (berurutan dulu, baru serentak), perbaiki
+dengan `tanpaBentrok`, §246 + bukti merah seperti §245.
+
+### Usulan B′ — 73 kunci kontrak yang tercatat belum dibaca Dart: dipilah
+
+Gerbang kunci-kontrak mengukur 463 kunci, 390 disentuh, **73 tercatat belum**.
+Yang belum pernah terjadi: ke-73 itu dipilah jadi "sengaja tidak" (beralasan)
+vs "hilang" (kelas `durasi_detik` yang dulu ketemu tak sengaja). Kerja mobile;
+tiap yang "hilang" diurai + bukti merah mekanis, fikstur server sungguhan.
+
+### Usulan C′ — `pastikanMuat` bernama untuk jalur non-penjualan
+
+Batas #39, dua kali ditulis: jalur non-penjualan hanya dilindungi lapis
+pertama — 400 terbaca, tanpa sebutan medan. Ukur dulu lewat HTTP pintu mana
+yang bisa meluap dari masukan sah (`harga_per_unit × qty`, RAB per tahap),
+baru pasang penjaga bernama di yang terukur.
+
+### Usulan D′ — granularitas `penjaga-semua-pintu`: badan → pernyataan
+
+Batas yang tetap tertulis, plus **20 pintu tekstual** bentrok-unik yang belum
+pernah di-adjudikasi. Peringkat terakhir dengan sengaja: sapuan berjendela
+sudah menuduh salah 14 kali di vena A — kelas ini paling rawan tuduhan palsu,
+dan separuh nilainya sudah dibayar A′.
+
+### Diperiksa dan TIDAK diusulkan
+
+Tiga pintu host super admin (batas permanen beralasan) · antrean kolam
+(terukur pulih sendiri, tuning tanpa bug) · tumpukan `BELUM_TAYANG` (menunggu
+rilis ponsel, bukan kerja kode).
+
+**Rekomendasi: A′ → B′ → C′ → D′.**
+
+---
+
 ## Pintu detail ber-`:param` pada volume per-entitas — server — 2026-08-24
 
 - **Kenapa**: batas tertulis dua entri — rute ber-`:param` tak ikut
