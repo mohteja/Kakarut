@@ -50,6 +50,102 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## ANTREAN KEEMPAT — usulan dari celah yang ditulis ledger sendiri — 2026-08-24
+
+Antrean 1→3→2→4 tuntas. Yang di bawah **diukur baca-saja hari ini**, bukan
+didaftar dari ingatan; tiap usulan menunjuk baris "Batas" ledger yang
+melahirkannya.
+
+### Usulan A — bentrok unik yang tak diterjemahkan: utang yang gerbangnya sendiri tulis
+
+**Sumbernya**: `penjaga-semua-pintu.test.ts` menulis di kepalanya sendiri —
+*"ada **32 tabel berindeks unik** di skema ini, dan menyapu semuanya
+memunculkan **20 pintu terbuka**. Yang didaftarkan hanya kelas yang sudah
+terbukti menyakiti… Sisanya **utang yang diukur**, bukan wilayah yang
+dinyatakan bersih."* Kelasnya sudah menggigit: yang kalah balapan menerima
+23505 mentah alias **500**, dan di web itu memicu overlay "server sedang
+diperbarui". Pemicunya *"cukup SATU KLIK GANDA"*.
+
+**Populasi diukur ulang hari ini**: **71** situs `.insert()` ke tabel-tabel
+unik itu. Sapuanku sendiri salah dua generasi — versi pertama menuduh **22**,
+dan **14 di antaranya cacat jendelaku sendiri** (`rfind` yang memulangkan −1
+untuk situs di kepala berkas memotong konteksnya jadi kosong, jadi
+`onConflictDoNothing` tiga baris di bawahnya tak terlihat). Sesudah diperbaiki:
+**8** situs tanpa penjaga di jendelanya, dan dua yang kupilah tangan **sudah
+bersih** (`menuComponents` — dedup `Map` sebelum insert; itu bukan kata kunci
+penjaga, tapi ia penjaga).
+
+**Kandidat hidup yang paling mahal**: `penjualan/service.ts` menyusun
+`sales.nomor` lewat **baca-maks+1 tanpa kunci** (`orderBy desc limit 1` → +1),
+dengan `sales_branch_nomor_uq` menunggu di ujungnya. `FOR SHARE` di baris
+shift adalah kunci BERBAGI — dua penjualan serentak sama-sama memegangnya
+tanpa saling menunggu. 50 penjualan serentak di putaran konkurensi lolos
+semua, tapi curl yang di-spawn berurutan praktis terserialisasi; balapan
+sesungguhnya butuh pelepasan serentak. **Kalau terukur: 500 di layar
+pembayaran saat dua kasir menagih pada detik yang sama** — pintu paling mahal
+di produk ini. Kandidat lain: `supplyMutations` ×5 (indeks `auto_uq`),
+`supplySuppliers:945`.
+
+**Bentuk kerjanya**: pilah tangan ke-8 (+ sapu bentuk `update` juga), ukur
+balapan lewat HTTP dengan pelepasan serentak sungguhan, lalu putuskan per
+kelas: `onConflict`/`tanpaBentrok` di situsnya, atau — sekarang pintu ini ada —
+`23505` masuk `galatDataKlien`. Yang terakhir TIDAK otomatis benar:
+`sync_commands_company_ref_uq` adalah **idempotensi**, dan menerjemahkannya
+jadi 409 "sudah ada" akan mengubah makna balasan /sync. Tiap indeks diputuskan,
+bukan disamaratakan.
+
+### Usulan B — rekaman cakupan yang bisa membusuk diam-diam
+
+**Sumbernya**: gerbang cakupan menulis batasnya — *"`rute-diketuk.txt` adalah
+REKAMAN, bukan pengukuran ulang. Bila suatu saat sebuah rute berhenti diketuk
+tanpa berkasnya diperbarui, gerbangnya tetap hijau."*
+
+**Terukur hari ini**: `ci.yml` **sudah** menjalankan verify-api terhadap
+Postgres segar tiap push — tapi **tanpa `JEJAK_RUTE`**, jadi 98,9% itu diukur
+sekali di mesinku dan sesudahnya cuma dipercaya. Bentuk kerjanya kecil dan
+struktural: nyalakan `JEJAK_RUTE` di langkah verify-api CI, tambah langkah
+pembanding (`cakupan-rute.ts` sudah ada) yang gagal bila rekaman ≠ kenyataan.
+Rekaman jadi pengukuran ulang **setiap CI jalan**, dan §244 tak bisa dicabut
+diam-diam.
+
+### Usulan C — 1.261 permintaan ber-`:param` di jejak, tak satu pun diukur pada volume
+
+**Sumbernya**: dua entri — *"rute ber-`:param` tak ikut diukur `ukur-latensi.sh`
+(butuh id yang sah); latensinya hanya terlihat lewat jejak saat verify-api
+berjalan, **pada volume seed**"*. Detail per-id (`/customer/:id` dengan ribuan
+transaksi, `/bahan/:id/kartu` dengan puluhan ribu mutasi) adalah kelas
+`GET /customer/:id` 2,97 MB dulu. Bentuk kerjanya: pungut id sungguhan lewat
+API, ukur N rute detail terpanas pada 200 rb transaksi dengan mesin yang sudah
+ada.
+
+### Usulan D — badan panjang `penjaga-semua-pintu`: penjaga satu insert memaafkan tiga insert di bawahnya
+
+**Sumbernya**: gerbang itu menulis — *"satu penjaga di mana pun dalam satu
+badan membuat SELURUH tulisan di badan itu lolos. `provisionGuest` adalah
+contoh nyatanya: `onConflictDoUpdate` di insert `users` paling atas menutupi
+insert `companies`, `branches`, `storageLocations` di bawahnya yang tak
+berpenjaga sama sekali."* Keterjangkauannya rendah (boot + cek "sudah ada"),
+jadi peringkatnya terakhir — tapi granularitas badan itu juga yang membuat
+sapuan A perlu jendela per-PERNYATAAN, dan keduanya bisa dibayar sekali.
+
+### Diperiksa dan TIDAK diusulkan
+
+- **Cabang `revoked` undangan** — jalur sidestep kuota lewat XFF hanya hidup
+  bila `TRUST_PROXY_HOPS > 0`; CI tak menyetelnya. Menembaknya berarti
+  menaikkan kuota register untuk uji — biaya kontrak demi satu cabang kecil.
+- **`sales.nomor` di 50-serentak putaran lalu** — TIDAK dihitung bukti aman:
+  spawn berurutan ≈ serialisasi. Justru masuk usulan A sebagai kandidat utama.
+- **Fikstur uang "tiga fungsi, bukan seluruh aritmetika"** — sisa rumusnya
+  sudah tersapu vena #26 (34 render dihitung, 0 selisih); tak ada populasi
+  baru.
+
+**Rekomendasi: A dulu** — satu-satunya yang kelasnya sudah terbukti menggigit
+(empat 500 sebelumnya), utangnya ditulis gerbangnya sendiri, dan kandidat
+teratasnya duduk di jalur pembayaran. Lalu **B** (kecil, menutup batas tertulis
+gerbang cakupan), **C**, **D**.
+
+---
+
 ## Kunci kontrak ↔ Dart: sapuan sekali-jalan jadi gerbang berdiri — server+mobile — 2026-08-24
 
 - **Kenapa vena ini ada**: `durasi_detik` dikirim server berbulan-bulan dan
