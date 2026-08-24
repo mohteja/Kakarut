@@ -26,6 +26,30 @@ tanpa akses repo server.
 ---
 
 
+## Rilis: Perintah sinkron offline membawa CABANG NIAT (`branch_id` di payload)
+
+> Tidak ada migrasi. Aditif: kunci `branch_id` kini DITERIMA (dan dihormati)
+> pada payload `/sync` untuk `perlengkapan_pakai`, `perlengkapan_opname`,
+> `absen_saya`, `absen_stasiun`. Payload lama tanpa kunci itu tetap sah.
+
+🟡 **PERLU DILIHAT** — build lama tidak rusak, tapi kehilangan fitur yang
+build baru punya. Terukur pada build lama (semua build +3…+10): owner/admin
+yang beroperasi di cabang kedua lalu offline — pemakaian perlengkapan
+terpotong di **cabang pertama** (100→93, balasan "ok"), sesi opname lahir di
+cabang pertama, absen tercatat di cabang pertama. Server tak bisa membaca niat
+yang tak pernah dikirim, jadi fallback lama itu tetap berlaku untuk payload
+tanpa `branch_id` (dipaku di verify-api §250).
+
+Sisi ponsel di cabang `claude` kini mengirim
+`'branch_id': ?ref.read(branchIdQueryProvider)` pada keempat payload — nilai
+yang sama dengan query jalur online. Peran terikat cabang (kasir/tim) tetap
+mengirim kosong dan tetap benar lewat cabang JWT; mengirim cabang LAIN untuk
+peran terikat kini ditolak per-item 403 di jalur fase-1 (bukan diam-diam
+pindah cabang).
+
+---
+
+
 ## Rilis: Angka yang meluap dibalas 400 bernama, bukan 500
 
 > Tidak ada migrasi, tidak ada medan baru, tidak ada bentuk balasan yang berubah.

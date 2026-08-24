@@ -13879,13 +13879,100 @@ cek "flip 🥡 di langit-langit → 400 MENYEBUT MENUNYA, bukan generik/500" "V 
   "$(api "$OWNER" POST "/pesanan/penjualan/$SID249/item/$IT249/sajian" '{"takeaway":true}' | jq '(.error | test("HPP satuan") and test("Menu Langit 249")) | if . then 1 else 0 end')"
 cek "jenis jalur salah (\"sale\") → 400, BUKAN 500 ZodError mentah" "V == 400" \
   "$(status_code_body "$OWNER" POST "/pesanan/sale/$SID249/item/$IT249/sajian" '{"takeaway":true}')"
-# PASANGAN: flip pada penjualan biasa tetap bekerja
-MEN249=$(api "$OWNER" GET /menu | jq -r '[.[]|select(.nama!="Menu Langit 249")][0].id')
+# PASANGAN: flip pada penjualan biasa tetap bekerja. Menunya DIBUAT di sini —
+# "menu pertama yang bukan Langit" pernah memungut menu warisan seksi balapan
+# (§245/§248) yang isinya beda antar-run, dan pasangannya jadi 404 sekali-sekali.
+BN249B=$(api "$OWNER" POST /bahan '{"nama":"Bahan Biasa 249","harga_beli":1000,"isi":1,"satuan":"pcs"}' | jq -r '.id // ""')
+MEN249=$(api "$OWNER" POST /menu "{\"nama\":\"Menu Biasa 249\",\"category_id\":\"$KAT249\",\"harga_jual\":5000,\"mult\":1,\"komponen\":[{\"ingredient_id\":\"$BN249B\",\"qty\":1}]}" | jq -r '.id // ""')
 J2249=$(api "$REISS105" POST /penjualan "{\"is_dine_in\":true,\"items\":[{\"menu_id\":\"$MEN249\",\"qty\":1}]}" | jq -r '.sale.id // ""')
 IT2249=$(api "$OWNER" GET /pesanan | jq -r --arg s "$J2249" '[.[]|select(.id==$s)][0].items[0].id // ""')
 cek "PASANGAN: flip 🥡 penjualan biasa tetap 200" "V == 200" \
   "$(status_code_body "$OWNER" POST "/pesanan/penjualan/$J2249/item/$IT2249/sajian" '{"takeaway":true}')"
 
+echo "── §250 Cabang NIAT pada perintah sinkron offline ──"
+#
+# `panggilInternal` mengangkat `body.branch_id` ke query — tapi hanya untuk
+# payload yang MEMBAWA kunci itu, dan sapuan 10 situs × 7 build menunjukkan
+# empat pintu yang tak pernah membawanya: perlengkapan_pakai/opname,
+# absen_saya/stasiun. Terukur SEBELUM (2026-08-24): pakai niat "Cabang Dua"
+# memotong PUSAT 100→93 dengan balasan "ok"; sesi opname niat Dua lahir di
+# Pusat; absen admin tercatat masuk di Pusat. Fallback "cabang pertama" untuk
+# peran tak terikat — dua cabang salah sekaligus tanpa satu galat pun.
+# Perbaikan: `angkatCabangNiat` di keempat eksekutor + ponsel mengirim niatnya.
+#
+# Cabang segar sebagai TARGET NIAT. Dua jebakan yang sudah menggigit run
+# pertama seksi ini: (1) perusahaan ber-CK banyak mewajibkan
+# `central_kitchen_id` saat membuat cabang — tanpanya POST /cabang 400 dan
+# SEMUA asersi diam-diam membaca cabang bawaan; (2) "cabang bawaan" untuk
+# owner BUKAN `GET /cabang | .[0]` (urutan daftar ≠ aturan resolveBranchId),
+# jadi cabang bawaan di sini tak pernah ditebak — pembacaan TANPA query
+# `branch_id` memakai aturan yang persis sama dengan tulisan tanpa niat.
+CK250=$(api "$OWNER" GET /cabang | jq -r '[.[]|select(.tipe=="central_kitchen")][0].id // ""')
+CB250=$(api "$OWNER" POST /cabang "{\"nama\":\"Cabang Sync250\"$( [ -n "$CK250" ] && echo ", \"central_kitchen_id\": \"$CK250\"" || true )}" | jq -r '.id // ""')
+SUP250=$(api "$OWNER" POST /perlengkapan '{"nama":"Lap Sync250","satuan":"pcs"}' | jq -r '.id // ""')
+cek "premis: cabang niat §250 + perlengkapan terbuat" "V == 1" \
+  "$( [ -n "$CB250" ] && [ "$CB250" != "null" ] && [ -n "$SUP250" ] && echo 1 || echo 0 )"
+# Saldo 100 di cabang NIAT; 50 di cabang BAWAAN (tanpa query — aturan yang
+# sama dengan jatuhnya perintah tanpa niat, apa pun cabangnya).
+api "$OWNER" POST "/perlengkapan/stok-awal?branch_id=$CB250" "{\"items\":[{\"supply_id\":\"$SUP250\",\"qty\":100}]}" > /dev/null
+api "$OWNER" POST "/perlengkapan/stok-awal" "{\"items\":[{\"supply_id\":\"$SUP250\",\"qty\":50}]}" > /dev/null
+saldoNiat250() { api "$OWNER" GET "/perlengkapan?branch_id=$CB250" | jq --arg id "$SUP250" '[.[]|select(.id==$id)][0].saldo'; }
+saldoBawaan250() { api "$OWNER" GET "/perlengkapan" | jq --arg id "$SUP250" '[.[]|select(.id==$id)][0].saldo'; }
+cek "premis: fikstur terbaca (niat 100, bawaan 50)" "V == 1" \
+  "$( [ "$(saldoNiat250)" = "100" ] && [ "$(saldoBawaan250)" = "50" ] && echo 1 || echo 0 )"
+sync250() { # sync250 <token> <tipe> <payload-json> → balasan penuh
+  api "$1" POST /sync "$(jq -nc --arg r "$(python3 -c 'import uuid;print(uuid.uuid4())')" \
+    --arg t "$2" --argjson p "$3" \
+    '{device_id:"dev-250",commands:[{client_ref:$r,tipe:$t,waktu:(now|todate),payload:$p}]}')"
+}
+# pakai DENGAN cabang niat → potongan jatuh di cabang niat, bukan cabang bawaan
+cek "pakai + branch_id niat → ok" "V == 200" \
+  "$(sync250 "$OWNER" perlengkapan_pakai "{\"branch_id\":\"$CB250\",\"supply_id\":\"$SUP250\",\"qty\":7}" | jq '.hasil[0].kode')"
+cek "…potongan di cabang NIAT (Sync250: 100→93)" "V == 93" "$(saldoNiat250)"
+cek "…cabang bawaan TAK tersentuh (tetap 50)" "V == 50" "$(saldoBawaan250)"
+# bentuk build LAMA (tanpa branch_id) — fallback cabang bawaan DIPAKU agar tak
+# berubah diam-diam: build terpasang tak bisa diperbaiki dari sini
+cek "pakai TANPA branch_id (build lama) → tetap ok" "V == 200" \
+  "$(sync250 "$OWNER" perlengkapan_pakai "{\"supply_id\":\"$SUP250\",\"qty\":1}" | jq '.hasil[0].kode')"
+cek "…fallback build lama tetap cabang bawaan (50→49)" "V == 49" "$(saldoBawaan250)"
+cek "…dan cabang niat tak ikut terpotong (tetap 93)" "V == 93" "$(saldoNiat250)"
+# opname: sesi lahir di cabang niat (koreksinya menunggu ACC — atribusi
+# cabangnya yang diuji, bukan saldo)
+RB250=$(api "$OWNER" GET "/perlengkapan/opname/riwayat" | jq 'length')
+cek "opname + branch_id niat → ok" "V == 201" \
+  "$(sync250 "$OWNER" perlengkapan_opname "{\"branch_id\":\"$CB250\",\"catatan\":\"SO 250\",\"items\":[{\"supply_id\":\"$SUP250\",\"qty_fisik\":90}]}" | jq '.hasil[0].kode')"
+cek "…sesi opname lahir di cabang NIAT (cabang segar: tepat 1)" "V == 1" \
+  "$(api "$OWNER" GET "/perlengkapan/opname/riwayat?branch_id=$CB250" | jq 'length')"
+cek "…riwayat cabang bawaan tak bertambah" "V == $RB250" \
+  "$(api "$OWNER" GET "/perlengkapan/opname/riwayat" | jq 'length')"
+# absen: admin (peran TAK terikat cabang — kelas yang terukur salah) absen
+# offline dengan niat Cabang Sync250
+ADM250=$(api "$OWNER" POST /karyawan '{"nama":"Admin Sync250","email":"admin250@basooopa.id","password":"Admin250Pass!","role":"admin"}')
+KODE250=$(echo "$ADM250" | jq -r '.employee_code // ""')
+TADM250=$(login "admin250@basooopa.id" "Admin250Pass!")
+cek "premis: admin §250 hidup berkode" "V == 1" \
+  "$( [ -n "$KODE250" ] && [ -n "$TADM250" ] && echo 1 || echo 0 )"
+cek "absen_saya + branch_id niat → 201" "V == 201" \
+  "$(sync250 "$TADM250" absen_saya "{\"branch_id\":\"$CB250\",\"foto_url\":\"/u/b250.jpg\"}" | jq '.hasil[0].kode')"
+cek "…tercatat di cabang NIAT" "V == 1" \
+  "$(api "$OWNER" GET "/absensi?branch_id=$CB250" | jq '[.[]|select(.nama=="Admin Sync250")] | length')"
+cek "…tidak di cabang bawaan" "V == 0" \
+  "$(api "$OWNER" GET "/absensi" | jq '[.[]|select(.nama=="Admin Sync250")] | length')"
+# stasiun: operator owner memindai kode admin — cabang niat ikut payload
+cek "absen_stasiun + branch_id niat → 201 (cap kedua = keluar)" "V == 201" \
+  "$(sync250 "$OWNER" absen_stasiun "{\"branch_id\":\"$CB250\",\"kode\":\"$KODE250\",\"foto_url\":\"/u/b250b.jpg\"}" | jq '.hasil[0].kode')"
+cek "…rekap cabang bawaan tetap kosong untuk namanya" "V == 0" \
+  "$(api "$OWNER" GET "/absensi" | jq '[.[]|select(.nama=="Admin Sync250")] | length')"
+# PASANGAN otorisasi: peran TERIKAT cabang tak bisa menitip niat cabang lain —
+# `resolveCabangSync` menolak per-item 403, bukan diam-diam pindah cabang.
+# Pintunya absen_stasiun (fase-1): pintu fase-2 memakai `resolveBranchId` yang
+# MENGABAIKAN query untuk peran terikat (aman ke arah lain — tetap cabangnya
+# sendiri), jadi 403-nya memang hanya milik jalur fase-1.
+CBLAIN250=$(api "$OWNER" GET /cabang | jq -r --arg c "$CB250" '[.[]|select(.id != $c)][0].id')
+KSR250=$(api "$OWNER" POST /karyawan "{\"nama\":\"Kasir Sync250\",\"email\":\"kasir250@basooopa.id\",\"password\":\"Kasir250Pass!\",\"role\":\"cashier\",\"branch_id\":\"$CBLAIN250\"}" | jq -r '.user_id // ""')
+TKSR250=$(login "kasir250@basooopa.id" "Kasir250Pass!")
+cek "PASANGAN: kasir terikat + niat cabang lain → item gagal 403" "V == 403" \
+  "$(sync250 "$TKSR250" absen_stasiun "{\"branch_id\":\"$CB250\",\"kode\":\"$KODE250\",\"foto_url\":\"/u/b250c.jpg\"}" | jq '.hasil[0].kode')"
 
 if [ "$FAIL" -gt 0 ]; then
   echo

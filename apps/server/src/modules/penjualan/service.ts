@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { HTTPException } from "hono/http-exception";
 import {
   formatAngkaId,
@@ -512,15 +512,26 @@ export async function createSale(params: CreateSaleParams) {
       }
     }
 
-    // Urutan diambil dari nomor TERBESAR hari itu (bukan count) supaya void
-    // (hard delete) di tengah hari tidak membuat nomor bekas terpakai lagi.
+    /*
+     * Urutan diambil dari SEQ terbesar hari itu (bukan count, supaya void di
+     * tengah hari tidak memakai ulang nomor bekas) — dan maksimumnya dihitung
+     * NUMERIK atas 4 digit terakhir, BUKAN teks atas nomor utuh.
+     *
+     * Versi teks (`ORDER BY nomor DESC` lalu `slice(-4)`) mengandaikan prefiks
+     * cabang tak pernah berubah. Ganti nama cabang mematahkannya, terukur
+     * (2026-08-24): cabang "Pusat" (101 nota `PUSAT-…-0106`) berganti nama →
+     * satu nota `CABANGG248-…-0107` lahir → max TEKSTUAL memilih `PUSAT-…`
+     * ('P' > 'C'), seq berikutnya dihitung 0106+1 = 0107 → 23505 → 500 — dan
+     * karena bacaannya deterministik, SETIAP penjualan berikutnya di cabang
+     * itu 500 sampai ganti tanggal bisnis. Max numerik lintas prefiks memberi
+     * seq yang lebih besar dari semua baris hari itu, prefiks apa pun.
+     */
     const [last] = await tx
-      .select({ nomor: sales.nomor })
+      .select({ seq: sql<number>`COALESCE(MAX(RIGHT(${sales.nomor}, 4)::int), 0)::int` })
       .from(sales)
       .where(and(eq(sales.branchId, branch.id), eq(sales.saleDate, saleDate)))
-      .orderBy(desc(sales.nomor))
       .limit(1);
-    const seq = last ? parseInt(last.nomor.slice(-4), 10) + 1 : 1;
+    const seq = (last?.seq ?? 0) + 1;
     const nomor = `${kodeCabang(branch.nama)}-${saleDate.replaceAll("-", "")}-${String(seq).padStart(4, "0")}`;
 
     // Member/pelanggan: bila WA diisi → cari-atau-buat member (dedup per WA) &

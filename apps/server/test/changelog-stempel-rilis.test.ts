@@ -51,6 +51,7 @@ const BELUM_TAYANG = new Set([
   "## Koreksi kontrak: satuan baris faktur (`qty` vs `satuan_beli` vs `is_batch`)",
   "## Cara memelihara berkas ini",
   // rilis yang masih di cabang `claude`, belum di-merge ke production
+  "## Rilis: Perintah sinkron offline membawa CABANG NIAT (`branch_id` di payload)",
   "## Rilis: Angka yang meluap dibalas 400 bernama, bukan 500",
   "## Rilis: Takaran resep berbatas 99.999.999 (dulu 9.999.999.999 lalu 500)",
   "## Rilis: Tempat Sampah & anomali kiriman BERLANGIT-LANGIT",

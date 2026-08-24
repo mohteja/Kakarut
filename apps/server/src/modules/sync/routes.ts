@@ -258,6 +258,40 @@ function pisahParam<T extends string>(
   return { params, body };
 }
 
+/**
+ * Angkat `branch_id` NIAT dari payload perintah: pulangkan cabangnya dan badan
+ * TANPA kunci itu.
+ *
+ * Payload antrean offline membawa cabang yang SEDANG dilihat operator
+ * (`branchIdQueryProvider` di ponsel — null untuk peran terikat cabang) —
+ * persis nilai yang jalur ONLINE kirim sebagai `?branch_id=`. Skema tujuan
+ * yang tak mendeklarasikan kunci ini (`PakaiBody`, `OpnameBody` perlengkapan,
+ * `SelfBody`, `ClockBody` — semuanya `.strict()`) menolaknya di badan, jadi ia
+ * diangkat DI SINI lalu berjalan lewat jalur cabang masing-masing (query
+ * sub-request internal / `resolveCabangSync`).
+ *
+ * Terukur SEBELUM pengangkat ini dipakai keempat pintunya (2026-08-24):
+ * `perlengkapan_pakai` niat "Cabang Dua" memotong PUSAT 100→93 dengan balasan
+ * "ok"; `perlengkapan_opname` niat "Cabang Dua" menulis koreksi −38 di PUSAT;
+ * `absen_saya` admin tercatat masuk di PUSAT. Semuanya jatuh ke fallback
+ * "cabang aktif pertama" untuk peran tak terikat — dua cabang salah sekaligus
+ * tanpa satu galat pun, kelas yang sama dengan pengukuran §208 yang membuat
+ * `panggilInternal` mengangkat cabang ke query. Pengangkatan itu membaca
+ * `body.branch_id` — dan tak pernah bekerja untuk pintu yang payload-nya tak
+ * membawa kunci itu.
+ *
+ * Build lama tetap tak mengirim `branch_id` → perilakunya tak berubah (peran
+ * terikat benar lewat cabang JWT; owner/admin jatuh ke cabang pertama seperti
+ * sebelumnya). Yang berubah hanya build yang MENGIRIM niatnya.
+ */
+function angkatCabangNiat(payload: unknown): { cabang: string | null; body: Record<string, unknown> } {
+  const p = (payload ?? {}) as Record<string, unknown>;
+  const body = { ...p };
+  const cabang = typeof p.branch_id === "string" && p.branch_id ? p.branch_id : null;
+  delete body.branch_id;
+  return { cabang, body };
+}
+
 // ---------------------------------------------------------------------------
 // FASE 1 — eksekusi langsung lewat service (waktu = timestamp kejadian)
 // ---------------------------------------------------------------------------
@@ -440,8 +474,13 @@ function ringkasShift(s: { id: string; openedAt: Date; closedAt: Date | null }) 
 
 /** absen_saya — cap atas nama pemanggil sendiri (semua peran). */
 const execAbsenSaya: Eksekutor = async ({ auth }, payload, waktu) => {
-  const p = SelfBody.parse(payload);
-  const branchId = await resolveCabangSync(auth, null);
+  // Cabang niat diangkat sebelum parse: `SelfBody` `.strict()` menolaknya di
+  // badan, dan `null` di sini dulu berarti "cabang pertama" bagi owner/admin —
+  // terukur: absen offline admin selalu tercatat di Pusat (lihat
+  // `angkatCabangNiat`). Jalur online-nya memakai `resolveBranchId` (query).
+  const { cabang, body } = angkatCabangNiat(payload);
+  const p = SelfBody.parse(body);
+  const branchId = await resolveCabangSync(auth, cabang);
   const { jarakM, namaCabang } = await cekRadius(branchId, p.lat, p.lng);
   const [m] = await db
     .select({ kode: memberships.employeeCode, nama: users.nama, isActive: users.isActive })
@@ -476,8 +515,10 @@ const execAbsenStasiun: Eksekutor = async ({ auth }, payload, waktu) => {
   if (auth.role !== "owner" && auth.role !== "admin" && auth.role !== "cashier") {
     throw new HTTPException(403, { message: "Peran Anda tidak boleh memakai stasiun absen" });
   }
-  const p = ClockBody.parse(payload);
-  const branchId = await resolveCabangSync(auth, null);
+  // Kembaran `execAbsenSaya`: cabang niat lewat payload, bukan fallback.
+  const { cabang, body } = angkatCabangNiat(payload);
+  const p = ClockBody.parse(body);
+  const branchId = await resolveCabangSync(auth, cabang);
   const { jarakM, namaCabang } = await cekRadius(branchId, p.lat, p.lng);
   const kode = p.kode.trim();
   const [m] = await db
@@ -527,31 +568,24 @@ function cekJalur(j: string): "produksi" | "pembelian" {
 const execStokOpname: Eksekutor = ({ authHeader }, payload) =>
   panggilInternal(authHeader, "/stok/opname", payload);
 
-const execPerlengkapanOpname: Eksekutor = ({ authHeader }, payload) =>
-  panggilInternal(authHeader, "/perlengkapan/opname", payload);
+const execPerlengkapanOpname: Eksekutor = ({ authHeader }, payload) => {
+  const { cabang, body } = angkatCabangNiat(payload);
+  return panggilInternal(authHeader, "/perlengkapan/opname", body, cabang);
+};
 
 const execPerlengkapanPakai: Eksekutor = ({ authHeader }, payload) => {
   const { params, body } = pisahParam(payload, ["supply_id"]);
   /*
-   * `branch_id` DIBUANG dari badan di sini — ia sudah diangkat ke query oleh
-   * `panggilInternal`, dan `PakaiBody` tak menerimanya.
-   *
-   * Selama badan JSON belum `.strict()`, kunci berlebih ini lolos tanpa suara.
-   * Sesudah `.strict()` ia 400, dan itu benar: rute ini memilih cabangnya lewat
-   * `resolveBranchId(c)` (query), jadi `branch_id` di badan memang tak pernah
-   * dibaca. Yang salah bukan pengetatannya melainkan kiriman kita sendiri —
-   * kelas yang persis sama dengan `PUT /meja/tata-letak` yang membuat vena ini
-   * ada.
+   * `branch_id` diangkat dari badan (lihat `angkatCabangNiat`) — `PakaiBody`
+   * `.strict()` tak menerimanya di badan; cabangnya berjalan lewat query.
    *
    * Rute lain yang MEMBACA cabang dari badan (`branchUntukTulis`: /penjualan,
    * /open-bill, /stok/opname, /shift/buka, /penyimpanan) mendeklarasikannya di
-   * skemanya, jadi bagi mereka kunci ini sah dan tetap dikirim.
+   * skemanya, jadi bagi mereka kunci ini sah dan tetap dikirim apa adanya.
    */
-  const cabang = typeof body.branch_id === "string" ? body.branch_id : null;
-  delete body.branch_id;
-  return panggilInternal(authHeader, `/perlengkapan/${params.supply_id}/pakai`, body, cabang);
+  const { cabang, body: badan } = angkatCabangNiat(body);
+  return panggilInternal(authHeader, `/perlengkapan/${params.supply_id}/pakai`, badan, cabang);
 };
-
 const execFakturTahap: Eksekutor = ({ authHeader }, payload) => {
   const { params, body } = pisahParam(payload, ["jalur", "faktur_id"]);
   return panggilInternal(authHeader, `/${cekJalur(params.jalur)}/tahap/${params.faktur_id}`, body);
