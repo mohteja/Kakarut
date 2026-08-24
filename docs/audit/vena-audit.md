@@ -50,6 +50,108 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Kunci JSON ponsel yang dibaca lewat VARIABEL — mobile — 2026-08-24
+
+- **Kenapa vena ini ada**: ledger vena "medan yang tak diurai" menulis batasnya
+  — *"regex `x['kunci']` tak melihat kunci yang lewat variabel (`j[k]`) maupun
+  kunci pada badan PERMINTAAN."* Separuhnya sudah tertutup: usulan #5 membuat
+  **112 dari 114** badan permintaan menolak kunci tak dikenal, jadi kunci yang
+  salah nama berbunyi 400 alih-alih hilang. Yang tersisa arah BACA
+- **Populasi** (disapu **tanpa komentar** — lihat di bawah):
+
+  | ukuran | angka |
+  |---|---|
+  | akses kunci LITERAL `x['kunci']` di `kakarut-mobile/lib` | **1.213** |
+  | akses lewat **variabel** `x[k]` (di luar indeks gelung) | **32** |
+  | di antaranya membaca **payload JSON server** | **1** |
+
+- **Sapuan pertamaku salah, dan salahnya dua macam sekaligus**: ia melaporkan
+  **187** situs. Sesudah komentar dikupas dan indeks gelung (`list[i]`,
+  `rows[i]`) dikeluarkan, angkanya **32**. Yang 155 itu prosa (`// lihat
+  [sajianTakeaway]`, `// pakai [perbarui]` — tanda kurung siku di kalimat
+  Indonesia) dan pengindeksan larik biasa. Menuduh keduanya adalah cara
+  tercepat membuat gerbangnya diabaikan
+- **Hasil**: **BERSIH.** Ketiga puluh satu sisanya peta LOKAL, bukan payload:
+  cache `api_client` (`_cacheEtag[key]`, `_cacheWaktu[key]`, `_cacheGet[key]`),
+  keadaan per-id (`_foto[areaId]`, `status[id]`, `_porsi[menuId]`), tabel
+  karakter pencetak (`_charMap[ch]`), dan label peran. Satu-satunya yang
+  membaca payload server `features/manajemen/manajemen_models.dart:307`:
+
+  ```dart
+  HargaEkstrem? ekstrem(String key) {
+    final v = j[key];
+    return v is Map<String, dynamic> ? HargaEkstrem.fromJson(v) : null;
+  }
+  ```
+
+  …dan **kedua pemanggilnya memakai literal** — `ekstrem('harga_terendah')`,
+  `ekstrem('harga_tertinggi')`. Sapuan kunci-per-nama mana pun tetap
+  menemukannya; hanya sapuan yang bersikeras pada bentuk kurung
+  `j['harga_terendah']` yang akan luput
+- **Tindak: tidak ada, dan itu keputusan.** Populasi satu yang sudah tercakup
+  tak menjustifikasi gerbang baru — bentuk keputusan yang sama dipakai vena
+  #33 untuk tiga panggilan URL-variabel di ponsel. Menambah gerbang untuk
+  populasi satu adalah menambah biaya perawatan tanpa menambah penjagaan
+- **Batas & celah yang tersisa** (bahan antrean berikutnya): sapuan
+  "kunci kontrak server vs kunci yang dibaca Dart" (425 vs 804 pada vena
+  sebelumnya) **tak pernah jadi gerbang berdiri** — ia skrip sekali jalan.
+  Kunci kontrak baru karena itu masih bisa lahir tanpa ada yang menagih sisi
+  ponselnya, persis seperti `durasi_detik` dulu
+
+---
+
+## Teks galat DI DALAM balasan sukses — server — 2026-08-24
+
+- **Kenapa vena ini ada**: ledger menulis *"penjaganya hanya melihat
+  `new HTTPException`. Medan galat yang dibalas lewat `c.json` biasa — mis.
+  `alasan` per baris pada impor bahan — tak terlihat sama sekali."*
+- **Populasi** (disapu **tanpa komentar**):
+
+  | ukuran | angka |
+  |---|---|
+  | medan bernama-galat (`alasan`/`sebab`/`pesan`/`keterangan`) | **48** |
+  | blok `catch` di `apps/server/src` | **45** |
+  | · yang MENGIKAT galatnya | **28** |
+  | · galat MENTAH sampai ke nilai yang DIKIRIM | **1** |
+
+- **Hasil perilakunya: BERSIH.** Satu-satunya situs `lib/backup.ts:157`
+  (`e instanceof Error ? e.message : String(e)` → `error: pesan`), dan ia
+  **sah**: seluruh rute cadangan ada di balik `/admin/*` + `requireSuperAdmin`,
+  dan pesan asli itulah isi diagnosis operatornya. Dua situs `alasan:` pada
+  impor bahan keduanya lewat `alasanGagalBaris`; `sebab` di `/sync` kode
+  terstruktur, bukan pesan
+- **Yang TIDAK bersih penjaganya, dan itu dua hal terukur**:
+  1. **polanya satu bentuk, kelasnya lebih luas.** Ia menuntut tulisan harfiah
+     `(e as Error).message`. Tiga bentuk yang lebih sering dipakai repo ini
+     **dibuktikan lolos** pola lama dan tertuduh sapuan baru:
+     `e instanceof Error ? e.message : String(e)`, `String(e)`, `` `${e}` ``;
+  2. **pengecualiannya lebih luas dari alasannya.** `BOLEH` mengecualikan
+     **seluruh `lib/`** dengan alasan *"penulisan log & peringatan, bukan badan
+     respons"* — dan alasan itu tidak benar untuk seluruh `lib/`, karena
+     `lib/backup.ts` justru memulangkan `error: pesan` di dalam objek yang
+     dikirim. Kini tiga berkas `lib/` dikecualikan **dengan nama**, masing-masing
+     dengan sebabnya
+- **Detektor**: DIBUKTIKAN bisa menuduh, dua lapis. Sintetis: ketiga bentuk di
+  atas tertuduh sementara pola lama diam (uji berpasangan di berkas yang sama).
+  Pohon sungguhan: menyisipkan `e instanceof Error ? e.message : String(e)` ke
+  `modules/kebersihan/routes.ts` — **suntikan di-assert mendarat** — tertuduh di
+  berkas & baris yang tepat, lalu dicabut
+- **Versi pertama sapuannya menuduh KOMENTAR**: `modules/bahan/routes.ts:976`,
+  yaitu prosa yang MENJELASKAN cacat ini dan mengutip bentuk yang salah.
+  Dibaca tanpa komentar sesudahnya. Penjaga yang menuduh tulisannya sendiri
+  sudah terjadi sekali di repo ini (`sql-number-bukan-janji`)
+- **Batas**: sapuan ini menilai badan `catch` sepanjang satu blok. Galat yang
+  disimpan ke variabel di luar `catch` lalu dikirim jauh di bawahnya tak
+  terlihat; begitu pula pesan yang dirakit di modul lain dan diteruskan. Yang
+  dijamin: bentuk yang paling sering ditulis tak bisa lagi masuk diam-diam
+- **Tindak**: `alasan-gagal-tanpa-bocor.test.ts` bertambah sapuan kedua + uji
+  berpasangan (7 → **13** uji); `BOLEH` dipersempit dari awalan direktori jadi
+  berkas bernama. Tak ada kode server yang tersentuh — hanya berkas uji — jadi
+  `verify-api` tidak dijalankan ulang, dan itu **disebutkan** bukan didiamkan.
+  Gerbang: typecheck bersih · `npm test` **2.194**
+
+---
+
 ## Cakupan rute: pintu yang tak pernah diketuk — server — 2026-08-24
 
 - **Kenapa vena ini ada**: ledger menulis batas alat ukur latensi — *"yang
