@@ -99,6 +99,44 @@ echo "  20 TERLAMBAT:"
 sort -rn /tmp/ukur-latensi.txt | head -20 | awk -F'\t' '{printf "  %-34s %7.3f dtk\n", $2, $1}'
 
 echo
+echo "PINTU DETAIL BER-:param (id dipungut lewat API; 2 tembakan, tercepat):"
+#
+# Rute ber-:param tak bisa masuk daftar otomatis di atas (butuh id yang sah),
+# dan justru di kelas inilah balasan 2,97 MB /customer/:id dulu ditemukan.
+# Id-nya dipungut dari rute daftar masing-masing — bukan ditulis tangan —
+# supaya blok ini tetap hidup di basis data mana pun.
+#
+# Angka acuan (30.000 baris PER ENTITAS, 2026-08-24): /customer/:id 0,024 dtk
+# 39 KB · /bahan/:id/pembelian 0,077 dtk 56 KB (jumlah_pembelian tetap 30.018 —
+# hitungan populasi dari SQL, bukan panjang larik terpotong) ·
+# /stok/kartu/:id 0,039 dtk 54 KB (terpotong=true) · /perlengkapan/:id/kartu
+# 0,018 dtk 111 KB. Langit-langit vena #15/#16 memegang di dimensi per-id.
+CUSD=$(api "/customer" | jq -r '(.items // .)[0].id // ""')
+INGD=$(api "/bahan" | jq -r '.[0].id // ""')
+SUPD=$(api "/perlengkapan/master" | jq -r '.[0].id // ""')
+MEND=$(api "/menu" | jq -r '.[0].id // ""')
+BRD=$(api "/cabang" | jq -r '.[0].id // ""')
+ukur_detail() { # <label> <path>
+  local BEST=999 T BYTE
+  for _ in 1 2; do
+    T=$(curl -sf -o /dev/null -w '%{time_total}' -H "Authorization: Bearer $TOKEN" --max-time 120 "$BASE$2" || echo 999)
+    BEST=$(python3 -c "print(min($BEST, $T))")
+  done
+  BYTE=$(curl -sf -o /dev/null -w '%{size_download}' -H "Authorization: Bearer $TOKEN" --max-time 120 "$BASE$2" || echo 0)
+  printf "  %-40s %7.3f dtk  %9s byte\n" "$1" "$BEST" "$BYTE"
+}
+if [ -n "$CUSD" ]; then ukur_detail "/customer/:id" "/api/customer/$CUSD"; else echo "  (customer dilewati: tak ada member)"; fi
+if [ -n "$INGD" ]; then
+  ukur_detail "/bahan/:id/pembelian" "/api/bahan/$INGD/pembelian"
+  [ -n "$BRD" ] && ukur_detail "/stok/kartu/:ingredientId" "/api/stok/kartu/$INGD?branch_id=$BRD&dari=$DARI&sampai=$SAMPAI"
+else echo "  (bahan dilewati: tak ada bahan)"; fi
+if [ -n "$SUPD" ]; then
+  ukur_detail "/perlengkapan/:id/kartu" "/api/perlengkapan/$SUPD/kartu"
+  ukur_detail "/perlengkapan/:id/pembelian" "/api/perlengkapan/$SUPD/pembelian"
+else echo "  (perlengkapan dilewati)"; fi
+[ -n "$MEND" ] && ukur_detail "/menu/:id/riwayat-harga" "/api/menu/$MEND/riwayat-harga"
+
+echo
 echo "KONTENSI KOLAM (\`db\` adalah pg.Pool bawaan = 10 koneksi)"
 #
 # Blok volume di atas mengukur SATU permintaan pada satu waktu. Kelas kerusakan
