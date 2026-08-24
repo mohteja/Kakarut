@@ -50,6 +50,39 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## `pastikanMuat` bernama untuk jalur non-penjualan — server — 2026-08-24
+
+- **Kenapa**: batas #39, dua kali ditulis — jalur non-penjualan hanya
+  dilindungi lapis pertama: 400 terbaca, **tanpa sebutan medan**
+- **Kandidatnya baris `PUTUSAN` gerbangku sendiri**, dan pengukurannya
+  **membantah klaimnya**: `production_consumptions.qty` tercatat *"terkurung
+  secara aritmetika — belum diukur"*. Terukur: takaran resep **99.999.999**
+  (sah) × qty produksi **1.000** (sah) = **1e11** — sepuluh kali kolomnya
+  `numeric(16,6)`:
+
+  | | balasan |
+  |---|---|
+  | SEBELUM | 400 **generik** "Angkanya terlalu besar untuk disimpan" (diselamatkan pintu bersama §243) |
+  | SESUDAH | 400 **`Pemakaian bahan "Air Mineral 330 ml" terlalu besar untuk disimpan (maksimal 9.999.999.999)`** |
+  | PASANGAN qty 50 | **201** |
+
+- **Tindak**: `pastikanMuat` di tempat angkanya lahir
+  (`produksi/konsumsi.ts`, + `inputNama` di select) · entri `PUTUSAN`
+  diperbarui **dengan ralatnya ditulis di tempat** · pin baru di
+  `luapan-turunan.test.ts` (bukti merah mendarat) · verify-api **§247**
+  (5 asersi, fikstur dibuat lewat API di seksinya sendiri)
+- **Sapuan sisa**: perkalian → kolom numeric di luar penjualan tinggal
+  **satu** situs lain (`open-bill:403 lineTotal`) — DTO bon **cetak**, tidak
+  disimpan (`open_bill_items` tak punya kolom `line_total`); bukan kandidat
+  luapan simpan
+- **Batas**: penjaga bernama kini di penjualan + konsumsi produksi; jalur
+  masukan-langsung lain tetap dilindungi lapis pertama saja — dan itu memadai
+  selama masukannya `.max()` presisi-kolom (vena #38)
+- Gerbang: typecheck bersih · `npm test` **2.208** · `verify-api` **2.918**
+  terhadap Postgres segar · `audit:invarian` 26/26 · cakupan 271 identik
+
+---
+
 ## 73 kunci "belum dibaca" dipilah: lima hilang, 68 beralasan — mobile — 2026-08-24
 
 - **Kenapa**: daftar ratchet gerbang kunci-kontrak (**73** kunci) belum pernah
