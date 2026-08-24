@@ -50,6 +50,56 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## ANTREAN KEENAM — usulan dari celah yang tercatat di ledger — 2026-08-24
+
+Antrean kelima (A′–D′) tuntas. Tiga usulan; populasinya diukur baca-saja
+hari ini, dan yang teratas menunjuk pola yang antrean kelima sendiri buktikan
+tiga kali.
+
+### Usulan A″ — tembak yang dinyatakan aman LEWAT BACA
+
+Entri A′ menulis batasnya: *"28 situs `.update()` lain dinyatakan aman lewat
+pilahan BACA, bukan lewat tembakan."* Sesi ini baru membuktikan tiga kali
+berturut bahwa pilahan baca bisa salah dua arah: klaim "`sales.nomor` tanpa
+kunci" gugur oleh 50 tembakan satu-tick; klaim PUTUSAN "terkurung aritmetika"
+terbantah oleh 1e11; angka "20 pintu terbuka" ternyata 8. **Populasi**: **11**
+pintu PATCH/PUT ber-`tanpaBentrok` di luar menu/customer yang belum pernah
+ditembak duplikat — berurutan maupun serentak — plus 28 situs pilahan-baca A′.
+Bentuk kerja: **§248** per pintu — duplikat berurutan → 409 berkalimat, sah →
+200, empat serentak → nol 5xx + tepat satu pemegang; yang 500 = temuan; yang
+bersih = terpaku perilaku, bukan prosa. Bukti merah pola §245.
+
+### Usulan B″ — pintu FIFO: 20.001 baris per permintaan, belum pernah diukur
+
+Putaran pintu-detail mengukur `/stok/kartu` (berbatas 500+1) tapi bukan
+`GET /stok/fifo/:ingredientId` — yang by design membaca sampai
+`BATAS_EVENT_FIFO + 1` = **20.001 baris** lalu menghitung FIFO **di JS** per
+permintaan. Pintu detail terberat di repo ini, satu-satunya tanpa angka.
+Suntik 30 rb mutasi satu bahan (data dibuktikan terbaca), ukur byte + ms;
+berat → temuan; ringan → angka acuan masuk blok PINTU DETAIL.
+
+### Usulan C″ — jalur tulis KEDUA ke kolom yang dijaga
+
+Batas gerbang luapan-turunan: *"jalur tulis KEDUA ke kolom yang sama takkan
+terlihat."* Instansinya nyata: `penjualan/rekalkulasi.ts` menghitung ULANG
+`hppSatuan` (basis biaya berubah saat dapur membungkus) dan menulis
+`sale_items.hpp_satuan` + `sales.total_hpp` — dijaga `pastikanMuat` di
+`createSale`, **di jalur ini tidak**, dan arahnya bisa NAIK (kemasan takeaway
+menambah HPP). Ukur keterjangkauan lampauannya lewat HTTP; pasang penjaganya
+apa pun hasilnya (pintu saudara); pin di gerbang.
+
+### Diperiksa dan TIDAK diusulkan
+
+Refund menulis `sales.subtotal/total/pb1` — jalur kedua juga, tapi arahnya
+MENURUN dari nilai yang sudah lolos penjaga · tiga pintu host super admin
+(permanen beralasan) · kesegaran fikstur lintas-repo di CI ponsel (CI ponsel
+tak bisa membaca repo server; dijaga di mesin bermuat-keduanya) · web (tak
+ada batas terukur tersisa di entri-entrinya).
+
+**Rekomendasi: A″ → B″ → C″.**
+
+---
+
 ## Utang "20 pintu terbuka" bentrok-unik dibayar — server — 2026-08-24
 
 - **Kenapa**: aturan `bentrok-unik` menulis utangnya sendiri — daftar tabelnya
