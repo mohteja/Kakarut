@@ -13654,6 +13654,54 @@ cek "HANTU: laporan-harga dampak di mount /produksi selalu 400" "V == 400" \
   "$(status_code_body "$OWNER" POST "/produksi/laporan-harga/$FKP244/dampak" '{"items":[]}')"
 
 
+echo "── §245 Klik ganda pada pintu buat-dengan-nama: satu 201, sisanya 409, NOL 5xx ──"
+#
+# Kelasnya sudah menggigit: pra-cek "sudah ada?" selalu punya jeda sebelum
+# tulisannya, yang menjaga keunikan INDEKSNYA, dan yang kalah balapan dulu
+# menerima 23505 mentah alias 500 — di web itu memicu overlay "server sedang
+# diperbarui". Empat jalur MEMBUAT pernah 500 karena ini, lalu diberi
+# `tanpaBentrok`; vena pasangan-unik menemukan empat lagi (terukur "empat PUT
+# berbadan sama: 200,200,500,500").
+#
+# Yang belum pernah ada sampai seksi ini: SATU PUN uji yang benar-benar
+# menembakkan duplikat SERENTAK. Semua asersi 409 yang ada menembak berurutan —
+# baris kedua ditolak pra-cek, dan jalur balapannya (23505 dari indeks) tak
+# pernah dilewati. Diukur dengan pelepasan serentak sungguhan (Node
+# Promise.all, 2026-08-24): kedelapan pintu membalas {201:1, 409:3}, nol 5xx.
+# Seksi ini memakukan perilaku itu dengan empat curl paralel — bentuk yang
+# terbukti cukup serentak untuk menangkap bug pasangan-unik dulu.
+klikganda245() { # <path> <json-body> → cetak "kode kode kode kode" tersortir
+  local out="${TMPDIR:-/tmp}/kg245.$$"
+  : > "$out"
+  for _ in 1 2 3 4; do
+    { curl -s -o /dev/null -w '%{http_code}\n' -X POST "$BASE/api$1" \
+        -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' \
+        -d "$2" >> "$out"; } &
+  done
+  wait
+  sort "$out" | tr '\n' ' '
+  rm -f "$out"
+}
+cek245() { # <nama> <path> <body>
+  local hasil lima satu
+  hasil=$(klikganda245 "$2" "$3")
+  lima=$(printf '%s\n' $hasil | awk '$1 >= 500' | wc -l)
+  satu=$(printf '%s\n' $hasil | grep -c '^201$' || true)
+  cek "$1: nol 5xx dari 4 tembakan serentak" "V == 0" "$lima"
+  cek "$1: TEPAT SATU yang menang (201)" "V == 1" "$satu"
+}
+cek245 "POST /supplier"       /supplier       '{"nama":"Supplier KlikGanda 245"}'
+cek245 "POST /kategori"       /kategori       '{"nama":"Kategori KlikGanda 245"}'
+cek245 "POST /satuan"         /satuan         '{"nama":"satuan klikganda 245"}'
+cek245 "POST /customer"       /customer       '{"nama":"Member KlikGanda 245","wa":"0812999888772"}'
+cek245 "POST /meja"           /meja           '{"nama":"Meja KlikGanda 245"}'
+cek245 "POST /penyimpanan"    /penyimpanan    '{"nama":"Rak KlikGanda 245"}'
+cek245 "POST /kategori-bahan" /kategori-bahan '{"nama":"KatBahan KlikGanda 245"}'
+# …dan yang kalah balapan menerima kalimat, bukan kode mentah.
+cek "yang kalah dibalas kalimat 'sudah', bukan 23505 mentah" "V == 1" \
+  "$(api "$OWNER" POST /supplier '{"nama":"Supplier KlikGanda 245"}' | jq '(.error | test("sudah")) | if . then 1 else 0 end')"
+
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"
