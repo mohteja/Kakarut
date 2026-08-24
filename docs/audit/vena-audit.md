@@ -50,6 +50,41 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Arah GANTI-NAMA: 500 di alur harian, telanjang di sebelah saudaranya — server — 2026-08-24
+
+- **Kenapa**: entri klik-ganda menulis *"balapan ganti-nama … berpenjaga
+  `tanpaBentrok` per situs"* — keyakinan yang **belum pernah disapu**: vena
+  sebelumnya hanya menghitung `.insert()`; arah `.update()` tak pernah dihitung
+- **Populasi**: **37** situs `.update()` ke tabel unik · **9** tertuduh jendela
+  · dipilah tangan: **7 tuduhan palsu** (medan struk, deaktivasi, backfill
+  ber-uniquifier, memberships menulis role/arsip) · **1 telanjang** — persis
+  tanda tangan sesi ini, **di berkas yang sama**: `POST /menu` dijaga
+  `onConflictDoNothing`+409; `PUT /menu/:id` **80 baris di bawahnya** menulis
+  `nama` tanpa apa pun
+- **Terukur lewat HTTP — TAK BUTUH BALAPAN**:
+
+  | | sebelum | sesudah |
+  |---|---|---|
+  | ganti nama menu B → nama menu A (**berurutan**) | **HTTP 500** | **409** `Menu "…" sudah ada` |
+  | ganti-nama sah | 200 | 200 |
+  | 4 ganti-nama serentak ke SATU nama | — | `200 200 409 409`, nol 5xx, **tepat satu** pemegang nama |
+
+  Alur manajemen menu harian, bukan kasus tepi
+- **Kembaran** `PUT /customer/:id` (WA): berurutan dijaga pra-cek (409 menyebut
+  pemiliknya), jeda pra-cek→tulis kini juga dibungkus `tanpaBentrok`
+- **Detektor**: DIBUKTIKAN — pembungkus dicabut (di-assert) → 500 terukur
+  kembali; dikembalikan → 409
+- **Tindak**: `tanpaBentrok` di kedua pintu · verify-api **§246** (8 asersi)
+- **Batas**: yang dipaku dua pintu yang terukur; 28 situs `.update()` lain
+  dinyatakan aman lewat pilahan baca (kolom non-unik / uniquifier / penjaga
+  per situs), bukan lewat tembakan. Dan **dua kali** kubaca "cakupan BEDA
+  271→0" yang ternyata **cwd-ku sendiri salah** (stderr tertelan `/dev/null`)
+  — regenerasi dari cwd benar: identik
+- Gerbang: typecheck bersih · `npm test` **2.207** · `verify-api` **2.913**
+  terhadap Postgres segar · `audit:invarian` 26/26 · cakupan 271 identik
+
+---
+
 ## ANTREAN KELIMA — usulan dari celah yang tercatat di ledger — 2026-08-24
 
 Antrean keempat tuntas. Yang di bawah **diukur baca-saja hari ini**; tiap
