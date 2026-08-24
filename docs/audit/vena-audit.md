@@ -126,6 +126,78 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## ANTREAN KETUJUH — usulan dari celah yang tercatat di ledger — 2026-08-24
+
+Antrean keenam (A″–C″) tuntas. Dua usulan; populasinya diukur baca-saja hari
+ini, dan keduanya menunjuk kelas yang sudah pernah menggigit di repo ini.
+
+### Usulan A‴ — antrean offline build lama vs skema strict di `/sync`
+
+Vena #36 membuat 112 badan `.strict()`, dan pengecualian yang ditulisnya saat
+itu (`TataLetakBody`) lahir dari satu fakta: **build ponsel yang sudah tayang
+tak bisa diperbaiki**. Jalur yang belum pernah disapu dengan fakta itu:
+`POST /sync` — payload antrean offline di-parse MENTAH terhadap skema yang
+kini strict (`sync/routes.ts:324` `SaleBody.parse`, `:443` `SelfBody.parse`,
+`:479` `ClockBody.parse`; 9 tipe lain dispatch ke endpoint asli ber-skema
+strict). Kelas ini **sudah menggigit sekali di jalur ini sendiri**:
+`execPerlengkapanPakai` membuang `branch_id` dengan tangan, dan komentarnya
+menuliskan persis sebab-akibatnya.
+
+**Model kerusakannya diukur hari ini di `sync_queue.dart`**: hasil per-item
+400 → `status: 'gagal'` **permanen** — tak pernah diulang, terpangkas 14 hari
+setelah ditolak; item pending penjualan tak boleh dihapus manual. Artinya:
+transaksi/kehadiran NYATA (uang sudah diterima kasir) ditolak selamanya saat
+sinkron, lama setelah layar ditutup.
+
+**Populasi**: **13** tipe perintah di `EKSEKUTOR`; **10** situs enqueue di
+ponsel hari ini; **7** build tayang (1.0.0+3 … +10). Sudah diukur hari ini:
+`penjualan` — ketujuh build kuncinya ⊆ `SaleBody` (bersih); `absen_saya` /
+`absen_stasiun` — build tertua & sekarang ⊆ skema (`foto_url` disuntik
+`sync_queue` dan memang ada di `KoordinatBody`); `shift_buka` — skema inline
+TIDAK strict (longgar = aman untuk build lama). **Belum disapu: 6 situs
+fase-2** (stok_opname, perlengkapan_opname/pakai, faktur_tahap/kirim,
+produksi_kirim_hasil) × 7 build vs skema strict endpoint tujuannya — kunci
+`params` (`jalur`, `faktur_id`, `supply_id`) dicabut `pisahParam`, sisanya
+harus muat di skema tujuan. Bentuk kerja: ekstraksi mekanis kunci payload per
+(situs, build) lewat `git show`; banding vs himpunan kunci skema tujuan; yang
+tak cocok DIUKUR lewat `/sync` sungguhan dengan payload build lama diputar
+ulang; perbaikan menurut sifatnya (terima-dan-abaikan berdokumen bersyarat
+cabut, atau dicabut di dispatcher seperti `perlengkapan_pakai`); gerbang
+lintas-repo memakai mesin kunci-kontrak yang sudah ada.
+
+### Usulan B‴ — pencadangan pada volume: seluruh DB di memori + `gzipSync`
+
+`lib/backup.ts` memuat **seluruh baris semua tabel** ke memori JS sekaligus
+(loop `SELECT to_jsonb(x) FROM <t>` tanpa batas, ditumpuk ke satu larik
+string), lalu `potongan.join("\n")` menggandakan memorinya, lalu
+**`gzipSync`** — kompresi SINKRON atas seluruh DB yang **memblokir event
+loop**: selama itu berjalan, SEMUA permintaan lain berhenti. Kelas yang sama
+dengan `GET /menu` 0,009→20,07 dtk (#12), di pintu yang belum pernah diukur
+pada volume. Mesin ukurnya sudah ada (suntikan 200 rb transaksi, data
+dibuktikan terbaca): jalankan `POST /admin/sistem/backup` pada volume itu,
+ukur durasi + puncak memori + **latensi GET serentak selama backup berjalan**
+(itulah angka yang menentukan). Berat → perbaikan terukur (baca per-batch +
+gzip async/stream, hasil tetap byte-identik dipulihkan `restore-backup.ts`);
+ringan → angka acuan tercatat. Backup memang ekspor penuh — `LIMIT` bukan
+perbaikannya; yang diukur *bagaimana* ia memuat & memampat.
+
+### Diperiksa dan TIDAK diusulkan
+
+Sapuan `.parse(` telanjang atas `apps/server/src`: **5** situs — pesanan
+sudah dibayar (jenisDariJalur, C″); tiga di `sync/routes.ts` ditangkap
+dispatcher per-perintah (`z.ZodError` → item 400, bukan 500 — dan justru
+populasi A‴); `config/env.ts` memang harus mati saat boot bila env cacat ·
+kunci pemotongan (`lots_terpotong`/`terpotong`/`transaksi_terpotong`) dibaca
+web DAN ponsel pada tingkat nama — bersih · FIFO lintas-bahan (laporan nilai
+stok) sudah punya gerbang sendiri (batas entri B″ menyebutnya).
+
+**Rekomendasi: A‴ → B‴.** A‴ teratas karena kelasnya sudah menggigit di jalur
+yang sama (`perlengkapan_pakai`), model kerusakannya terukur paling mahal
+(uang nyata tertolak permanen), dan separuh populasinya sudah terukur hari
+ini — tinggal 6 situs × 7 build yang belum.
+
+---
+
 ## ANTREAN KEENAM — usulan dari celah yang tercatat di ledger — 2026-08-24
 
 Antrean kelima (A′–D′) tuntas. Tiga usulan; populasinya diukur baca-saja
