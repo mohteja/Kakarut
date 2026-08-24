@@ -13702,6 +13702,52 @@ cek "yang kalah dibalas kalimat 'sudah', bukan 23505 mentah" "V == 1" \
   "$(api "$OWNER" POST /supplier '{"nama":"Supplier KlikGanda 245"}' | jq '(.error | test("sudah")) | if . then 1 else 0 end')"
 
 
+echo "── §246 Ganti-nama duplikat: 409 berkalimat, bukan 500 — berurutan DAN serentak ──"
+#
+# §245 memaku pintu BUAT-dengan-nama. Arah GANTI-NAMA tak pernah disapu
+# sekali pun, dan pintu pertamanya ketahuan telanjang persis di sebelah
+# saudaranya yang dijaga: POST /menu punya onConflictDoNothing + 409 "Menu
+# sudah ada"; PUT /menu/:id delapan puluh baris di bawahnya menulis `nama`
+# tanpa apa pun. Terukur SEBELUM diperbaiki, dua permintaan BERURUTAN tanpa
+# balapan: ganti nama menu B menjadi nama menu A → 500 "Terjadi kesalahan
+# pada server". Alur manajemen menu harian, bukan kasus tepi.
+KAT246=$(api "$OWNER" GET /kategori | jq -r '.[0].id')
+MN246() { api "$OWNER" POST /menu "{\"nama\":\"$1\",\"category_id\":\"$KAT246\",\"harga_jual\":9000,\"mult\":2}" | jq -r '.id // ""'; }
+MA246=$(MN246 "Menu Ganti 246A"); MB246=$(MN246 "Menu Ganti 246B")
+cek "premis: dua menu §246 terbuat" "V == 1" \
+  "$( [ -n "$MA246" ] && [ "$MA246" != "null" ] && [ -n "$MB246" ] && [ "$MB246" != "null" ] && echo 1 || echo 0 )"
+cek "ganti nama B → nama A (berurutan) ditolak 409, BUKAN 500" "V == 409" \
+  "$(status_code_body "$OWNER" PUT "/menu/$MB246" '{"nama":"Menu Ganti 246A"}')"
+cek "…dan kalimatnya menyebut menunya" "V == 1" \
+  "$(api "$OWNER" PUT "/menu/$MB246" '{"nama":"Menu Ganti 246A"}' | jq '(.error | test("246A") and test("sudah ada")) | if . then 1 else 0 end')"
+cek "PASANGAN: ganti-nama SAH tetap 200" "V == 200" \
+  "$(status_code_body "$OWNER" PUT "/menu/$MB246" '{"nama":"Menu Ganti 246B v2"}')"
+# ── serentak: dua menu direbutkan ke SATU nama baru ──────────────────────
+REB246="${TMPDIR:-/tmp}/reb246.$$"
+: > "$REB246"
+for ID in "$MA246" "$MB246" "$MA246" "$MB246"; do
+  { curl -s -o /dev/null -w '%{http_code}\n' -X PUT "$BASE/api/menu/$ID" \
+      -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' \
+      -d '{"nama":"Menu Rebutan 246"}' >> "$REB246"; } &
+done
+wait
+cek "4 ganti-nama serentak ke SATU nama: nol 5xx" "V == 0" \
+  "$(sort "$REB246" | awk '$1 >= 500' | wc -l)"
+cek "…dan TEPAT SATU menu memegang nama itu" "V == 1" \
+  "$(api "$OWNER" GET '/menu?semua=true' | jq '[.[]|select(.nama=="Menu Rebutan 246")]|length')"
+rm -f "$REB246"
+# ── kembaran yang jalur berurutannya dijaga PRA-CEK: PUT /customer WA ────
+# Pra-cek menjaga urutan (terukur 409 menyebut member pemiliknya); jeda
+# pra-cek→tulis kini juga diterjemahkan di UPDATE-nya, jadi yang kalah
+# balapan tak lagi menerima 23505 mentah.
+CW246A=$(api "$OWNER" POST /customer '{"nama":"M246 A","wa":"0812246111222"}' | jq -r '.id // ""')
+CW246B=$(api "$OWNER" POST /customer '{"nama":"M246 B","wa":"0812246111333"}' | jq -r '.id // ""')
+cek "premis: dua member §246 terbuat" "V == 1" \
+  "$( [ -n "$CW246A" ] && [ "$CW246A" != "null" ] && [ -n "$CW246B" ] && echo 1 || echo 0 )"
+cek "ganti WA ke milik member lain (berurutan) → 409 menyebut pemiliknya" "V == 1" \
+  "$(api "$OWNER" PUT "/customer/$CW246B" '{"wa":"0812246111222"}' | jq '(.error | test("M246 A")) | if . then 1 else 0 end')"
+
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

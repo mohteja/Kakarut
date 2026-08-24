@@ -10,6 +10,7 @@ import type {
   MemberCariRow,
 } from "@kakarut/shared";
 import { db } from "../../db/client";
+import { tanpaBentrok } from "../../lib/pg-galat";
 import { branches, customers, sales } from "../../db/schema";
 import type { AppEnv } from "../../middleware/auth";
 import { cariCustomerSetara, normalizeWa } from "./service";
@@ -217,16 +218,22 @@ export const customerRoutes = new Hono<AppEnv>()
       }
       waBaru = wa;
     }
-    const [row] = await db
-      .update(customers)
-      .set({
-        ...(body.nama !== undefined && { nama: body.nama }),
-        ...(waBaru !== undefined && { wa: waBaru }),
-        ...(body.catatan !== undefined && { catatan: body.catatan ?? null }),
-        updatedAt: new Date(),
-      })
-      .where(and(eq(customers.id, id), eq(customers.companyId, auth.company_id!)))
-      .returning();
+    // Pra-cek `cariCustomerSetara` di atas menjaga jalur BERURUTAN (terukur:
+    // 409 yang menyebut member pemiliknya). Jeda pra-cek→tulis tetap terbuka
+    // untuk dua permintaan serentak — `customers_company_wa_uq` yang menjaga
+    // keunikannya, dan tanpa terjemahan ini yang kalah menerima 23505 mentah.
+    const [row] = await tanpaBentrok("Nomor ini sudah dipakai member lain", () =>
+      db
+        .update(customers)
+        .set({
+          ...(body.nama !== undefined && { nama: body.nama }),
+          ...(waBaru !== undefined && { wa: waBaru }),
+          ...(body.catatan !== undefined && { catatan: body.catatan ?? null }),
+          updatedAt: new Date(),
+        })
+        .where(and(eq(customers.id, id), eq(customers.companyId, auth.company_id!)))
+        .returning(),
+    );
     if (!row) throw new HTTPException(404, { message: "Member tidak ditemukan" });
     return c.json(row);
   })

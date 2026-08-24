@@ -1,4 +1,5 @@
 import { zValidator } from "../../lib/validator";
+import { tanpaBentrok } from "../../lib/pg-galat";
 import { BATAS_FAKTOR, BATAS_HARGA, BATAS_QTY_RESEP, BATAS_QTY_STOK, BATAS_URUTAN } from "../../lib/batas-angka";
 import { and, desc, eq, inArray, isNotNull, isNull, max, sql } from "drizzle-orm";
 import { Hono } from "hono";
@@ -647,7 +648,13 @@ export const menuRoutes = new Hono<AppEnv>()
 
         // kode: manual bila diisi; kosong → generate otomatis dari nama (unik)
         const kode = await resolveKode(tx, auth.company_id!, efektif.kode, efektif.nama, id);
-        const [menu] = await tx
+        // Pintu SAUDARANYA (POST /, delapan puluh baris di atas) sudah dijaga
+        // `onConflictDoNothing` + 409 "Menu sudah ada" — pintu ganti-nama ini
+        // tidak. Terukur lewat HTTP: mengganti nama menu B menjadi nama menu A
+        // — dua permintaan BERURUTAN, tanpa balapan — dibalas 500 "Terjadi
+        // kesalahan pada server" dari 23505 `menus_company_nama_uq`.
+        const [menu] = await tanpaBentrok(`Menu "${efektif.nama}" sudah ada`, () =>
+          tx
           .update(menus)
           .set({
             categoryId: efektif.category_id,
@@ -665,7 +672,8 @@ export const menuRoutes = new Hono<AppEnv>()
             updatedAt: new Date(),
           })
           .where(and(eq(menus.id, id), eq(menus.companyId, auth.company_id!)))
-          .returning();
+          .returning(),
+        );
         if (!menu) throw new HTTPException(404, { message: "Menu tidak ditemukan" });
         if (lama.hargaJual !== menu.hargaJual || multEfektif(lama) !== multEfektif(menu)) {
           await catatHargaMenu(tx, {
