@@ -13773,6 +13773,87 @@ cek "PASANGAN: qty 50 (konsumsi muat) tetap DITERIMA" "V == 201" \
   "$(status_code_body "$OWNER" POST /produksi "{\"ingredient_id\":\"$BLC247\",\"qty\":50}")"
 
 
+echo "── §248 Ganti-nama di SEMUA pintu ber-tanpaBentrok: ditembak, bukan dibaca ──"
+#
+# Vena arah-ganti-nama menembak DUA pintu (menu, customer) dan menyatakan
+# sisanya aman lewat pilahan BACA. Sesi ini membuktikan tiga kali berturut
+# bahwa pilahan baca bisa salah dua arah (sales.nomor "tanpa kunci" ternyata
+# terkunci; PUTUSAN "terkurung aritmetika" ternyata 1e11; "20 pintu terbuka"
+# ternyata 8). Seksi ini menembak KEDELAPAN pintu PATCH ganti-nama yang
+# tersisa — berurutan DAN serentak — plus dua pintu BUAT yang §245 lewati.
+# `POST /karyawan/undang` sengaja tak di sini: §213 sudah menembaknya
+# (3×4 undangan beremail sama → nol 5xx, tepat satu per email).
+ganti248() { # <label> <path-id-B> <body-dup-json> <body-sah-json> <body-rebutan-json> <path-id-A>
+  local dup sah
+  dup=$(status_code_body "$OWNER" PATCH "$2" "$3")
+  cek "$1: ganti-nama DUPLIKAT (berurutan) → 409, bukan 500" "V == 409" "$dup"
+  cek "$1: …berkalimat 'sudah', bukan 23505 mentah" "V == 1" \
+    "$(api "$OWNER" PATCH "$2" "$3" | jq '(.error | test("sudah")) | if . then 1 else 0 end')"
+  sah=$(status_code_body "$OWNER" PATCH "$2" "$4")
+  cek "$1: ganti-nama SAH tetap 200" "V == 200" "$sah"
+  # empat serentak: dua entitas direbutkan ke SATU nama baru
+  local out="${TMPDIR:-/tmp}/g248.$$"
+  : > "$out"
+  for P in "$2" "$6" "$2" "$6"; do
+    { curl -s -o /dev/null -w '%{http_code}\n' -X PATCH "$BASE/api$P" \
+        -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' \
+        -d "$5" >> "$out"; } &
+  done
+  wait
+  cek "$1: 4 ganti-nama serentak ke satu nama → nol 5xx" "V == 0" \
+    "$(sort "$out" | awk '$1 >= 500' | wc -l)"
+  rm -f "$out"
+}
+# ── fikstur per pintu, dibuat di sini ────────────────────────────────────
+KG248A=$(api "$OWNER" POST /kategori '{"nama":"Kat G248A"}' | jq -r .id)
+KG248B=$(api "$OWNER" POST /kategori '{"nama":"Kat G248B"}' | jq -r .id)
+ganti248 "kategori" "/kategori/$KG248B" '{"nama":"Kat G248A"}' '{"nama":"Kat G248B v2"}' '{"nama":"Kat G248 Rebutan"}' "/kategori/$KG248A"
+SG248A=$(api "$OWNER" POST /satuan '{"nama":"sat g248a"}' | jq -r .id)
+SG248B=$(api "$OWNER" POST /satuan '{"nama":"sat g248b"}' | jq -r .id)
+ganti248 "satuan" "/satuan/$SG248B" '{"nama":"sat g248a"}' '{"nama":"sat g248b v2"}' '{"nama":"sat g248 rebutan"}' "/satuan/$SG248A"
+SPG248A=$(api "$OWNER" POST /supplier '{"nama":"Sup G248A"}' | jq -r .id)
+SPG248B=$(api "$OWNER" POST /supplier '{"nama":"Sup G248B"}' | jq -r .id)
+ganti248 "supplier" "/supplier/$SPG248B" '{"nama":"Sup G248A"}' '{"nama":"Sup G248B v2"}' '{"nama":"Sup G248 Rebutan"}' "/supplier/$SPG248A"
+MG248A=$(api "$OWNER" POST /meja '{"nama":"Meja G248A"}' | jq -r .id)
+MG248B=$(api "$OWNER" POST /meja '{"nama":"Meja G248B"}' | jq -r .id)
+ganti248 "meja" "/meja/$MG248B" '{"nama":"Meja G248A"}' '{"nama":"Meja G248B v2"}' '{"nama":"Meja G248 Rebutan"}' "/meja/$MG248A"
+PG248A=$(api "$OWNER" POST /penyimpanan '{"nama":"Rak G248A"}' | jq -r .id)
+PG248B=$(api "$OWNER" POST /penyimpanan '{"nama":"Rak G248B"}' | jq -r .id)
+ganti248 "penyimpanan" "/penyimpanan/$PG248B" '{"nama":"Rak G248A"}' '{"nama":"Rak G248B v2"}' '{"nama":"Rak G248 Rebutan"}' "/penyimpanan/$PG248A"
+KBG248A=$(api "$OWNER" POST /kategori-bahan '{"nama":"KB G248A"}' | jq -r .id)
+KBG248B=$(api "$OWNER" POST /kategori-bahan '{"nama":"KB G248B"}' | jq -r .id)
+ganti248 "kategori-bahan" "/kategori-bahan/$KBG248B" '{"nama":"KB G248A"}' '{"nama":"KB G248B v2"}' '{"nama":"KB G248 Rebutan"}' "/kategori-bahan/$KBG248A"
+# cabang: dua yang SUDAH ada (membuat cabang terbentur kuota plan) — dijalankan
+# paling akhir skrip, tak ada seksi lain yang bergantung pada namanya.
+CBG248A=$(api "$OWNER" GET /cabang | jq -r '.[0].id'); CBG248AN=$(api "$OWNER" GET /cabang | jq -r '.[0].nama')
+CBG248B=$(api "$OWNER" GET /cabang | jq -r '.[1].id')
+ganti248 "cabang" "/cabang/$CBG248B" "{\"nama\":\"$CBG248AN\"}" '{"nama":"Cabang G248B v2"}' '{"nama":"Cabang G248 Rebutan"}' "/cabang/$CBG248A"
+PLG248A=$(api "$OWNER" POST /perlengkapan '{"nama":"Perlengkapan G248A","satuan":"pcs","harga_beli":5000}' | jq -r .id)
+PLG248B=$(api "$OWNER" POST /perlengkapan '{"nama":"Perlengkapan G248B","satuan":"pcs","harga_beli":5000}' | jq -r .id)
+ganti248 "perlengkapan" "/perlengkapan/$PLG248B" '{"nama":"Perlengkapan G248A"}' '{"nama":"Perlengkapan G248B v2"}' '{"nama":"Perlengkapan G248 Rebutan"}' "/perlengkapan/$PLG248A"
+# ── dua pintu BUAT yang §245 lewati ──────────────────────────────────────
+# bahan: keunikannya company+SLUG dan slug dialokasikan `slugUnik`; empat buat
+# serentak bernama sama → tepat SATU lahir, sisanya 409 berkalimat, nol slug
+# kembar (terukur: satu slug "bahan kembar 248").
+klik248() { # <label> <path> <body> — 4 serentak, nol 5xx + TEPAT SATU 201
+  local out="${TMPDIR:-/tmp}/k248.$$"
+  : > "$out"
+  for _ in 1 2 3 4; do
+    { curl -s -o /dev/null -w '%{http_code}\n' -X POST "$BASE/api$2" \
+        -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' \
+        -d "$3" >> "$out"; } &
+  done
+  wait
+  cek "$1: 4 buat serentak → nol 5xx" "V == 0" "$(sort "$out" | awk '$1 >= 500' | wc -l)"
+  cek "$1: TEPAT SATU yang lahir (201)" "V == 1" "$(grep -c '^201$' "$out" || true)"
+  rm -f "$out"
+}
+klik248 "bahan (slug allocator)" /bahan '{"nama":"Bahan Kembar 248","harga_beli":1000,"isi":1,"satuan":"pcs"}'
+cek "bahan kembar: tepat SATU slug yang lahir" "V == 1" \
+  "$(api "$OWNER" GET /bahan | jq '[.[]|select(.nama=="Bahan Kembar 248")]|length')"
+klik248 "perlengkapan (create)" /perlengkapan '{"nama":"Perlengkapan Kembar 248","satuan":"pcs","harga_beli":5000}'
+
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"
