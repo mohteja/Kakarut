@@ -105,8 +105,13 @@ const PUTUSAN: Record<string, string> = {
   "supply_purchases.total_harga": "dari medan total_harga ber-BATAS_UANG — presisi sama",
   "supply_rules.qty": "dari medan qty ber-BATAS_QTY_STOK ke numeric(16,3) yang lebih lebar",
   "supply_transfers.qty": "dari medan qty ber-BATAS_QTY_STOK ke numeric(16,3) yang lebih lebar",
-  "production_consumptions.qty":
-    "resep × qty produksi; jalur produksi memakai qty yang sudah ber-BATAS_QTY_STOK dan kolomnya numeric(16,6) yang sama — BELUM diukur lewat HTTP, dan itu ditulis apa adanya di ledger",
+  // Klaim lama entri ini — "terkurung secara aritmetika, belum diukur" —
+  // TERBANTAH oleh pengukuran 2026-08-24: takaran resep 99.999.999 (sah,
+  // BATAS_QTY_RESEP) × qty produksi 1.000 (sah, BATAS_QTY_STOK) = 1e11,
+  // sepuluh kali kolomnya. Sebelum dijaga ia dibalas 400 "Angkanya terlalu
+  // besar untuk disimpan" oleh pintu keluar bersama — selamat, tapi tanpa
+  // menyebut angka yang mana.
+  "production_consumptions.qty": "DIJAGA pastikanMuat(qtyKonsumsi, BATAS_QTY_STOK) di produksi/konsumsi.ts",
 };
 
 describe("luapan turunan: angka yang lahir di server", () => {
@@ -134,6 +139,17 @@ describe("luapan turunan: angka yang lahir di server", () => {
       Object.keys(PUTUSAN).filter((k) => !hidup.has(k)),
       "entri PUTUSAN basi — kolomnya sudah tak ada, atau sudah diisi medan badan",
     ).toEqual([]);
+  });
+
+  it("`catatKonsumsiProduksi` memanggil penjaganya — dan menyebut bahannya", () => {
+    // Sumber pin untuk entri PUTUSAN production_consumptions.qty di atas.
+    // Terukur: 1e11 tanpa penjaga ini = 400 generik dari pintu bersama;
+    // dengan penjaga = 400 `Pemakaian bahan "Air Mineral 330 ml" terlalu
+    // besar untuk disimpan (maksimal 9.999.999.999)` — kasir/petugas tahu
+    // bahan mana yang takarannya salah ketik.
+    const s = baca("modules/produksi/konsumsi.ts");
+    expect(s).toMatch(/pastikanMuat\(qtyKonsumsi, BATAS_QTY_STOK/);
+    expect(s, "pesannya harus menyebut nama bahannya").toContain('k.inputNama');
   });
 
   it("`createSale` benar-benar memanggil penjaganya di keenam titik", () => {

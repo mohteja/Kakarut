@@ -13748,6 +13748,31 @@ cek "ganti WA ke milik member lain (berurutan) → 409 menyebut pemiliknya" "V =
   "$(api "$OWNER" PUT "/customer/$CW246B" '{"wa":"0812246111222"}' | jq '(.error | test("M246 A")) | if . then 1 else 0 end')"
 
 
+echo "── §247 Konsumsi resep yang meluap: 400 MENYEBUT BAHANNYA, bukan generik ──"
+#
+# Takaran resep dan qty produksi MASING-MASING sah (99.999.999 dan
+# 9.999.999.999), tapi hasil kalinya melampaui kolomnya sendiri —
+# production_consumptions.qty numeric(16,6), maks 9.999.999.999.
+#
+# TERUKUR sebelum penjaganya ada: takaran 99.999.999 × qty 1.000 = 1e11
+# dibalas 400 "Angkanya terlalu besar untuk disimpan" oleh pintu keluar
+# bersama (§243) — selamat, tapi TANPA menyebut angka yang mana. Catatan
+# PUTUSAN gerbang luapan-turunan sempat menulis kolom ini "terkurung secara
+# aritmetika"; pengukuran ini yang membantahnya.
+BLC247=$(api "$OWNER" POST /bahan '{"nama":"Bahan Luap 247","pengadaan":"produksi","harga_beli":1000,"isi":1,"satuan":"pcs"}' | jq -r '.id // ""')
+KOMP247=$(api "$OWNER" GET /bahan | jq -r '[.[] | select(.pengadaan=="beli")][0].id // ""')
+cek "premis: bahan produksi + komponen §247 ada" "V == 1" \
+  "$( [ -n "$BLC247" ] && [ "$BLC247" != "null" ] && [ -n "$KOMP247" ] && echo 1 || echo 0 )"
+cek "premis: resep takaran MAKSIMUM yang sah tersimpan" "V == 200" \
+  "$(status_code_body "$OWNER" PUT "/bahan/$BLC247/resep" "{\"komponen\":[{\"ingredient_id\":\"$KOMP247\",\"qty\":99999999}]}")"
+cek "takaran maks × qty 1.000 ditolak 400, bukan 500" "V == 400" \
+  "$(status_code_body "$OWNER" POST /produksi "{\"ingredient_id\":\"$BLC247\",\"qty\":1000}")"
+cek "…dan pesannya MENYEBUT NAMA BAHANNYA, bukan generik" "V == 1" \
+  "$(api "$OWNER" POST /produksi "{\"ingredient_id\":\"$BLC247\",\"qty\":1000}" | jq '(.error | test("Pemakaian bahan") and test("terlalu besar")) | if . then 1 else 0 end')"
+cek "PASANGAN: qty 50 (konsumsi muat) tetap DITERIMA" "V == 201" \
+  "$(status_code_body "$OWNER" POST /produksi "{\"ingredient_id\":\"$BLC247\",\"qty\":50}")"
+
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"
