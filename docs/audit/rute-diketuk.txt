@@ -14,7 +14,10 @@ DELETE /api/open-bill/:id
 DELETE /api/pembelian/faktur/:key
 DELETE /api/pengajuan/:id
 DELETE /api/penjualan/:id
+DELETE /api/perlengkapan/:id
+DELETE /api/perlengkapan/beli/:id
 DELETE /api/perlengkapan/beli/faktur/:fakturId
+DELETE /api/perlengkapan/opname/sesi/:sessionId
 DELETE /api/produksi/faktur/:key
 DELETE /api/rekomendasi/permintaan/:rencanaId
 DELETE /api/satuan/:id
@@ -29,6 +32,7 @@ GET /api/admin/sistem/backup
 GET /api/admin/sistem/backup/:id/unduh
 GET /api/admin/sistem/smtp
 GET /api/admin/tenants
+GET /api/admin/tenants/:id
 GET /api/auth/me
 GET /api/bahan
 GET /api/bahan/:id/detail
@@ -67,6 +71,7 @@ GET /api/menu/:id
 GET /api/menu/:id/riwayat-harga
 GET /api/menu/analisis-harga
 GET /api/menu/ketersediaan
+GET /api/menu/panduan-markup
 GET /api/onboarding/status
 GET /api/open-bill
 GET /api/open-bill/:id
@@ -93,9 +98,11 @@ GET /api/perlengkapan/beli
 GET /api/perlengkapan/kiriman
 GET /api/perlengkapan/master
 GET /api/perlengkapan/opname/riwayat
+GET /api/perlengkapan/opname/sesi/:sessionId
 GET /api/pesanan
 GET /api/pesanan/:jenis/:id/log
 GET /api/produksi
+GET /api/produksi/dana/:fakturId
 GET /api/produksi/log/:fakturId
 GET /api/profil
 GET /api/profil/aktivitas
@@ -113,6 +120,7 @@ GET /api/stok/awal
 GET /api/stok/exp
 GET /api/stok/fifo/:ingredientId
 GET /api/stok/kartu/:ingredientId
+GET /api/stok/opname
 GET /api/stok/opname/riwayat
 GET /api/stok/opname/sesi/:sessionId
 GET /api/stok/penyesuaian
@@ -134,6 +142,8 @@ PATCH /api/pembelian/faktur/:key
 PATCH /api/pengajuan/:id
 PATCH /api/penyimpanan/:id
 PATCH /api/perlengkapan/:id
+PATCH /api/produksi/faktur/:key
+PATCH /api/satuan/:id
 PATCH /api/supplier/:id
 POST /api/absensi
 POST /api/absensi/saya
@@ -168,9 +178,11 @@ POST /api/menu
 POST /api/menu/terapkan-saran
 POST /api/onboarding/perusahaan
 POST /api/onboarding/undangan/:id/terima
+POST /api/onboarding/undangan/:id/tolak
 POST /api/open-bill
 POST /api/pembelian
 POST /api/pembelian/faktur
+POST /api/pembelian/kirim-hasil/:fakturId
 POST /api/pembelian/kirim/:fakturId
 POST /api/pembelian/konfirmasi/:fakturId
 POST /api/pembelian/laporan-harga/:fakturId
@@ -215,6 +227,7 @@ POST /api/produksi/kirim-hasil/:fakturId
 POST /api/produksi/kirim/:fakturId
 POST /api/produksi/konfirmasi/:fakturId
 POST /api/produksi/laporan-harga/:fakturId
+POST /api/produksi/laporan-harga/:fakturId/dampak
 POST /api/produksi/tahap/:fakturId
 POST /api/profil/password
 POST /api/rekomendasi/menu
@@ -233,6 +246,7 @@ POST /api/stok/opname/sesi/:sessionId/tolak
 POST /api/stok/penyesuaian/:id/klarifikasi
 POST /api/stok/penyesuaian/:id/setujui
 POST /api/stok/penyesuaian/:id/tolak
+POST /api/stok/penyesuaian/setujui-massal
 POST /api/stok/waste
 POST /api/supplier
 POST /api/sync
@@ -245,6 +259,7 @@ PUT /api/bahan/:id/langkah
 PUT /api/bahan/:id/resep
 PUT /api/bahan/:id/supplier
 PUT /api/cabang/struk
+PUT /api/customer/:id
 PUT /api/karyawan/:userId/tempat
 PUT /api/meja/tata-letak
 PUT /api/menu/:id

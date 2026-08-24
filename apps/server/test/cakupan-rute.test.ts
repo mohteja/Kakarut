@@ -25,8 +25,12 @@ import { ruteKonkret } from "../src/scripts/cakupan-rute";
  * TERUKUR pada putaran ini:
  *
  *     rute konkret terdaftar     274
- *     diketuk verify-api         256   (93,4%)
- *     TAK PERNAH diketuk          18   — 13 di antaranya jalur TULIS
+ *     diketuk verify-api         271   (98,9%)   — dulu 256 (93,4%)
+ *     TAK PERNAH diketuk           3   — ketiganya operasi host super admin
+ *     jalur TULIS                168 terdaftar, 165 diketuk (dulu 155)
+ *
+ * Lima belas pintu yang dulu utang kini diketuk §244, dan TAK SATU PUN
+ * membalas 5xx — vena itu bersih secara perilaku, dan itu diukur.
  *
  * BATAS UJI INI, ditulis supaya "hijau" tak terbaca lebih luas dari yang benar:
  *
@@ -61,27 +65,29 @@ const DILUAR_JANGKAUAN: Record<string, string> = {
 /**
  * UTANG YANG DIUKUR — pintu yang belum tertembak, TANPA alasan prinsipil.
  *
- * Ditulis apa adanya dan bukan disamarkan jadi "di luar jangkauan": tiga belas
- * dari lima belas ini jalur TULIS, empat di antaranya DELETE. Daftar ini boleh
- * MENYUSUT dan tak boleh bertambah.
+ * KOSONG SEJAK §244. Lima belas pintu yang dulu di sini — empat `DELETE` dan
+ * sembilan jalur tulis lain — kini diketuk lewat HTTP sungguhan, dan tak satu
+ * pun membalas 5xx. Daftar ini boleh terisi lagi (dengan sadar), tapi
+ * ratchet di bawah menahan agar tak terisi diam-diam.
  */
-const UTANG = [
-  "DELETE /api/perlengkapan/:id",
-  "DELETE /api/perlengkapan/beli/:id",
-  "DELETE /api/perlengkapan/opname/sesi/:sessionId",
-  "GET /api/admin/tenants/:id",
-  "GET /api/menu/panduan-markup",
-  "GET /api/perlengkapan/opname/sesi/:sessionId",
-  "GET /api/produksi/dana/:fakturId",
-  "GET /api/stok/opname",
-  "PATCH /api/produksi/faktur/:key",
-  "PATCH /api/satuan/:id",
-  "POST /api/onboarding/undangan/:id/tolak",
-  "POST /api/pembelian/kirim-hasil/:fakturId",
-  "POST /api/produksi/laporan-harga/:fakturId/dampak",
-  "POST /api/stok/penyesuaian/setujui-massal",
-  "PUT /api/customer/:id",
-];
+const UTANG: string[] = [];
+
+/**
+ * PINTU HANTU — ada hanya karena satu pabrik dipasang di DUA prefiks, dan
+ * separuhnya menolak dirinya sendiri di baris pertama handler-nya:
+ *
+ *     kirim-hasil : if (tipe !== "produksi") throw 404
+ *     dampak      : if (tipe !== "beli")     throw 400
+ *
+ * Mereka DIKETUK (§244 memastikan mereka tetap 404/400), tapi mereka tak
+ * pernah bisa sukses. Dicatat karena penyebut "274 rute" memuat pintu yang
+ * mustahil, dan angka cakupan yang tak menyebutkan itu terbaca lebih bagus
+ * dari yang sebenarnya.
+ */
+const HANTU_PABRIK: Record<string, string> = {
+  "POST /api/pembelian/kirim-hasil/:fakturId": 'tipe !== "produksi" → 404',
+  "POST /api/produksi/laporan-harga/:fakturId/dampak": 'tipe !== "beli" → 400',
+};
 
 describe("cakupan rute: pintu yang tak pernah diketuk", () => {
   const semua = ruteKonkret();
@@ -127,17 +133,31 @@ describe("cakupan rute: pintu yang tak pernah diketuk", () => {
     ).toEqual([]);
   });
 
+  it("PINTU HANTU tetap mustahil — penjaganya masih di baris pertama handler", () => {
+    // Kalau suatu saat `if (tipe !== …)` dicabut, kedua pintu ini berhenti jadi
+    // hantu dan mulai MENGERJAKAN sesuatu di prefiks yang salah — mengirim
+    // hasil produksi lewat pintu belanja, atau menghitung dampak harga pada
+    // faktur produksi. Yang menahannya di sisi perilaku §244; ini menahan
+    // sumbernya.
+    const src = readFileSync(fileURLToPath(new URL("../src/modules/produksi/routes.ts", import.meta.url)), "utf8");
+    expect(src, "penjaga kirim-hasil hilang").toMatch(/tipe\s*!==\s*"produksi"/);
+    expect(src, "penjaga laporan-harga/dampak hilang").toMatch(/tipe\s*!==\s*"beli"/);
+    for (const h of Object.keys(HANTU_PABRIK)) {
+      expect(DIKETUK.has(h), `${h}: pintu hantu pun wajib diketuk`).toBe(true);
+    }
+  });
+
   it("RATCHET: utangnya tak boleh bertambah, dan jalur TULIS-nya dihitung", () => {
-    expect(UTANG.length, "utang cakupan bertambah").toBeLessThanOrEqual(15);
+    expect(UTANG.length, "utang cakupan bertambah").toBeLessThanOrEqual(0);
     // Yang paling mahal bila salah bukan bacaan melainkan tulisan: DELETE dan
     // POST yang tak pernah ditembak sekali pun bisa 500 tanpa satu uji berubah.
     const tulis = UTANG.filter((r) => !r.startsWith("GET "));
-    expect(tulis.length, "utang jalur TULIS bertambah").toBeLessThanOrEqual(10);
+    expect(tulis.length, "utang jalur TULIS bertambah").toBeLessThanOrEqual(0);
     const tulisSemua = semua.filter((r) => !r.startsWith("GET "));
     const tulisDiketuk = tulisSemua.filter((r) => DIKETUK.has(r));
     expect(
       tulisDiketuk.length,
       `cakupan jalur TULIS turun (${tulisDiketuk.length}/${tulisSemua.length})`,
-    ).toBeGreaterThanOrEqual(155);
+    ).toBeGreaterThanOrEqual(165);
   });
 });

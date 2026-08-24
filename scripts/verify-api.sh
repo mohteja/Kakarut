@@ -13503,6 +13503,157 @@ cek "tak ada 5xx tersisa pada keempat permintaan luapan di atas" "V == 0" \
      done | awk '$1 >= 500' | wc -l)"
 
 
+echo "── §244 Pintu yang tak pernah diketuk — lima belas dari 274 ──"
+#
+# Alat ukur cakupan (middleware `JEJAK_RUTE` + tabel rute Hono) memberi angka
+# yang belum pernah ada di repo ini: 274 rute konkret, 256 diketuk 4.324
+# permintaan skrip ini, 18 TIDAK. Tiga memang di luar jangkauan (migrasi
+# sungguhan, email sungguhan, retensi cadangan mesin). Lima belas sisanya
+# ditulis sebagai UTANG YANG DIUKUR — empat DELETE dan sembilan jalur tulis
+# lain yang bisa 500 sejak berbulan-bulan tanpa satu uji berubah warna.
+#
+# Seksi ini mengetuk pintu-pintu itu. DITARUH DI UJUNG SKRIP dengan sengaja:
+# empat di antaranya menghapus data, dan seksi lain tak boleh mewarisi
+# akibatnya.
+#
+# "Diketuk" BUKAN "diuji", dan itu ditulis apa adanya: yang dijanjikan seksi
+# ini tiap pintu pernah dilewati sekali dengan badan yang sah, statusnya
+# diperiksa, dan satu fakta dari badannya diasersi. Bukan cakupan cabang.
+
+# ── 1. GET /menu/panduan-markup — konstanta panduan, tanpa prasyarat ─────
+PM244=$(api "$OWNER" GET /menu/panduan-markup)
+cek "panduan markup dibalas 200" "V == 200" "$(status_code "$OWNER" GET /menu/panduan-markup)"
+cek "…dan isinya bukan objek kosong" "V >= 1" "$(echo "$PM244" | jq 'if type=="array" then length else (keys|length) end')"
+
+# ── 2. GET /admin/tenants/:id — panel super admin ────────────────────────
+TEN244=$(api "$SA" GET /admin/tenants | jq -r '(if type=="array" then .[0] else .items[0] end).id // ""')
+cek "premis: ada tenant untuk dibuka" "V == 1" "$( [ -n "$TEN244" ] && echo 1 || echo 0 )"
+cek "detail tenant dibalas 200" "V == 200" "$(status_code "$SA" GET "/admin/tenants/$TEN244")"
+cek "…detailnya memuat company + cabang + anggota" "V == 1" \
+  "$(api "$SA" GET "/admin/tenants/$TEN244" | jq --arg i "$TEN244" '(.company.id==$i and (.cabang|type)=="array" and (.anggota|type)=="array") | if . then 1 else 0 end')"
+# Pintu super admin tetap tertutup untuk owner biasa.
+cek "PASANGAN: owner biasa ditolak di detail tenant" "V >= 401" "$(status_code "$OWNER" GET "/admin/tenants/$TEN244")"
+
+# ── 3. PUT /customer/:id — ubah member ───────────────────────────────────
+CUS244=$(api "$OWNER" GET /customer | jq -r '(if type=="array" then .[0] else .items[0] end).id // ""')
+cek "premis: ada member untuk diubah" "V == 1" "$( [ -n "$CUS244" ] && echo 1 || echo 0 )"
+cek "ubah nama member dibalas 200" "V == 200" \
+  "$(status_code_body "$OWNER" PUT "/customer/$CUS244" '{"nama":"Member Uji 244"}')"
+cek "…namanya benar-benar berubah" "V == 1" \
+  "$(api "$OWNER" GET "/customer/$CUS244" | jq '((.nama // .member.nama)=="Member Uji 244") | if . then 1 else 0 end')"
+cek "PASANGAN: id yang tak ada → 404, bukan 500" "V == 404" \
+  "$(status_code_body "$OWNER" PUT "/customer/11111111-1111-4111-8111-111111111111" '{"nama":"X"}')"
+
+# ── 4. PATCH /satuan/:id — ubah satuan ───────────────────────────────────
+SAT244=$(api "$OWNER" POST /satuan '{"nama":"satuan uji 244","sort_order":90}' | jq -r '.id // ""')
+cek "premis: satuan uji terbuat" "V == 1" "$( [ -n "$SAT244" ] && [ "$SAT244" != "null" ] && echo 1 || echo 0 )"
+cek "ubah satuan dibalas 200" "V == 200" \
+  "$(status_code_body "$OWNER" PATCH "/satuan/$SAT244" '{"nama":"satuan uji 244b","sort_order":91}')"
+cek "…nama barunya terbaca di daftar" "V == 1" \
+  "$(api "$OWNER" GET /satuan | jq '[.[]|select(.nama=="satuan uji 244b")]|length')"
+
+# ── 5. GET /stok/opname — daftar opname bahan ────────────────────────────
+cek "daftar opname bahan dibalas 200" "V == 200" "$(status_code "$OWNER" GET /stok/opname)"
+cek "…bentuknya larik/objek berisi, bukan null" "V == 1" \
+  "$(api "$OWNER" GET /stok/opname | jq '(type=="array" or type=="object") | if . then 1 else 0 end')"
+
+# ── 6. POST /stok/penyesuaian/setujui-massal ─────────────────────────────
+# Pintu saudaranya (`/penyesuaian/:id/setujui`) MENOLAK 400 baris tanpa
+# selisih; yang massal tak punya syarat itu sama sekali. Hari ini ia aman
+# karena baris nol-selisih lahir berstatus `disetujui` sehingga predikat
+# `menunggu` tak pernah memungutnya — aman karena konjungsi lain, bukan
+# karena aturannya diterapkan. Yang diasersi di sini PERILAKUNYA.
+MASS244=$(api "$OWNER" POST /stok/penyesuaian/setujui-massal)
+cek "setujui massal dibalas 200" "V == 200" "$(status_code "$OWNER" POST /stok/penyesuaian/setujui-massal)"
+cek "…badannya menyebut jumlah yang disetujui" "V == 1" \
+  "$(echo "$MASS244" | jq '(.ok==true and (.jumlah|type)=="number") | if . then 1 else 0 end')"
+cek "…dan idempoten: panggilan kedua menyetujui NOL" "V == 0" \
+  "$(api "$OWNER" POST /stok/penyesuaian/setujui-massal | jq '.jumlah')"
+# `$REISS105`, BUKAN `$KASIR`: §105 mengganti password kasir sehingga token
+# lamanya mati dan tiap pemakaiannya dibalas 401 — kegagalan yang MENYAMAR jadi
+# bug produk. Versi pertama seksi ini memakai `$KASIR`, dapat 401 alih-alih 403,
+# dan yang menemukannya `verify-api-token.test.ts` — penjaga yang memang dipasang
+# untuk kesalahan ini, bekerja persis seperti niatnya.
+cek "PASANGAN: kasir ditolak di pintu massal (403, bukan 401)" "V == 403" \
+  "$(status_code "$REISS105" POST /stok/penyesuaian/setujui-massal)"
+
+# ── 7. GET /produksi/dana/:fakturId ──────────────────────────────────────
+FKP244=$(api "$OWNER" GET /produksi | jq -r '[(.rows // .)[]|select(.faktur_id!=null)][0].faktur_id // ""')
+cek "premis: ada faktur produksi" "V == 1" "$( [ -n "$FKP244" ] && echo 1 || echo 0 )"
+cek "dana faktur produksi dibalas 200" "V == 200" "$(status_code "$OWNER" GET "/produksi/dana/$FKP244")"
+cek "…bentuknya larik" "V == 1" \
+  "$(api "$OWNER" GET "/produksi/dana/$FKP244" | jq '(type=="array" or (.rows|type)=="array") | if . then 1 else 0 end')"
+cek "PASANGAN: faktur yang bukan miliknya → 404" "V == 404" \
+  "$(status_code "$OWNER" GET "/produksi/dana/11111111-1111-4111-8111-111111111111")"
+
+# ── 8. PATCH /produksi/faktur/:key — kembaran /pembelian yang sudah diuji ─
+# Kode-nya satu pabrik, tapi cabang `tipe` di dalamnya berbeda, dan mount
+# `/produksi`-nya belum pernah dilewati sekali pun.
+cek "ubah faktur produksi (password benar) dibalas 200" "V == 200" \
+  "$(status_code_body "$OWNER" PATCH "/produksi/faktur/$FKP244" "{\"password\":\"$OWNER_PASS\",\"catatan\":\"disunting §244\"}")"
+cek "PASANGAN: password salah → 401/403, bukan 500" "V >= 401" \
+  "$(status_code_body "$OWNER" PATCH "/produksi/faktur/$FKP244" '{"password":"salahXX123","catatan":"x"}')"
+
+# ── 9. POST /onboarding/undangan/:id/tolak ───────────────────────────────
+# Cabang yang diketuk PENJAGANYA: undangan yang bukan milik pemanggil wajib
+# 404, bukan bocor jadi penolakan yang berhasil. Cabang `revoked`-nya TIDAK
+# tertembak di sini dan itu ditulis apa adanya di ledger — ia butuh akun
+# terdaftar yang BELUM jadi anggota, sementara `POST /auth/register` dibatasi
+# 20/jam per IP dan skrip ini sudah memakai ~18.
+INV244=$(api "$OWNER" POST /karyawan/undang "{\"email\":\"tolak244@example.com\",\"role\":\"cashier\",\"branch_id\":\"$PUSAT96\"}" | jq -r '.id // ""')
+cek "premis: undangan §244 terbuat" "V == 1" "$( [ -n "$INV244" ] && [ "$INV244" != "null" ] && echo 1 || echo 0 )"
+cek "menolak undangan ORANG LAIN → 404" "V == 404" \
+  "$(status_code "$TOKU103" POST "/onboarding/undangan/$INV244/tolak")"
+cek "…dan undangannya TETAP pending sesudah penolakan yang ditolak" "V == 1" \
+  "$(api "$OWNER" GET /karyawan/undangan | jq '[.[]|select(.email=="tolak244@example.com")]|length')"
+
+# ── 10-13. Perlengkapan: sesi opname, hapus sesi, hapus pembelian, hapus master
+SUP244=$(api "$OWNER" GET /perlengkapan/master | jq -r '(if type=="array" then .[0] else .items[0] end).id // ""')
+cek "premis: ada perlengkapan" "V == 1" "$( [ -n "$SUP244" ] && echo 1 || echo 0 )"
+OPN244=$(api "$OWNER" POST /perlengkapan/opname "{\"items\":[{\"supply_id\":\"$SUP244\",\"qty_fisik\":3}],\"catatan\":\"uji 244\"}")
+SES244=$(echo "$OPN244" | jq -r '.session_id // .sessionId // ""')
+[ -z "$SES244" ] && SES244=$(api "$OWNER" GET /perlengkapan/opname/riwayat | jq -r '(if type=="array" then .[0] else .items[0] end).session_id // ""')
+cek "premis: sesi opname perlengkapan ada" "V == 1" "$( [ -n "$SES244" ] && echo 1 || echo 0 )"
+cek "detail sesi opname dibalas 200" "V == 200" "$(status_code "$OWNER" GET "/perlengkapan/opname/sesi/$SES244")"
+cek "…detailnya memuat baris" "V >= 1" \
+  "$(api "$OWNER" GET "/perlengkapan/opname/sesi/$SES244" | jq 'if type=="array" then length else ((.items // .rows // [])|length) end')"
+cek "hapus sesi opname dibalas 200" "V == 200" "$(status_code "$OWNER" DELETE "/perlengkapan/opname/sesi/$SES244")"
+cek "…sesudah dihapus, detailnya 404" "V == 404" "$(status_code "$OWNER" GET "/perlengkapan/opname/sesi/$SES244")"
+cek "PASANGAN: menghapus sesi yang sama lagi → 404, bukan 500" "V == 404" \
+  "$(status_code "$OWNER" DELETE "/perlengkapan/opname/sesi/$SES244")"
+
+BEL244=$(api "$OWNER" GET /perlengkapan/beli | jq -r '(if type=="array" then .[0] else (.items // .rows)[0] end).id // ""')
+if [ -n "$BEL244" ] && [ "$BEL244" != "null" ]; then
+  cek "hapus pembelian perlengkapan dibalas 200" "V == 200" "$(status_code "$OWNER" DELETE "/perlengkapan/beli/$BEL244")"
+  cek "PASANGAN: menghapusnya lagi → 404, bukan 500" "V == 404" "$(status_code "$OWNER" DELETE "/perlengkapan/beli/$BEL244")"
+else
+  gagal "premis §244: tak ada pembelian perlengkapan untuk dihapus"
+fi
+
+cek "hapus perlengkapan master dibalas 2xx/4xx bernama, bukan 500" "V < 500" \
+  "$(status_code "$OWNER" DELETE "/perlengkapan/$SUP244")"
+
+# ── 14-15. PINTU HANTU: separuh pabrik yang mustahil berhasil ────────────
+# `buatRuteTambahStok` dipasang di DUA prefiks, dan dua handler-nya menolak
+# separuhnya di baris pertama:
+#     kirim-hasil : if (tipe !== "produksi") throw 404
+#     dampak      : if (tipe !== "beli")     throw 400
+# Jadi `POST /pembelian/kirim-hasil/:id` dan `POST /produksi/laporan-harga/:id/dampak`
+# TAK PERNAH bisa sukses. Mereka bukan utang cakupan melainkan artefak pabrik —
+# dan yang diasersi di sini justru bahwa mereka TETAP mustahil.
+# Badannya HARUS sah dulu: `zValidator` berjalan SEBELUM handler, jadi
+# `{"items":[]}` dibalas 400 oleh validator (`min(1)`) dan cabang `tipe`-nya tak
+# pernah tercapai. Versi pertama asersi ini tertipu justru oleh itu — dan itu
+# sendiri fakta yang layak dicatat: pintu hantu ini bahkan tak bisa dicapai
+# tanpa badan yang sah. `items` opsional, jadi `{}` cukup.
+cek "HANTU: kirim-hasil di mount /pembelian selalu 404" "V == 404" \
+  "$(status_code_body "$OWNER" POST "/pembelian/kirim-hasil/$FKP244" '{}')"
+cek "…dan badan tak sah ditolak validator lebih dulu (400)" "V == 400" \
+  "$(status_code_body "$OWNER" POST "/pembelian/kirim-hasil/$FKP244" '{"items":[]}')"
+cek "HANTU: laporan-harga dampak di mount /produksi selalu 400" "V == 400" \
+  "$(status_code_body "$OWNER" POST "/produksi/laporan-harga/$FKP244/dampak" '{"items":[]}')"
+
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"
