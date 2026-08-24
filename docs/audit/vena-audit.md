@@ -50,6 +50,118 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## SQL mentah: populasi yang tak pernah disapu aturan mana pun — server — 2026-08-24
+
+- **Kenapa vena ini ada**: tiga aturan yang sudah terkirim menulis batas yang
+  SAMA tentang dirinya sendiri — *"hanya melihat bentuk TypeScript, bukan SQL
+  mentah"*. Celah itu **sudah sekali memakan temuan**: `GET /customer` yang
+  1,61 MB tak pernah tertuduh sapuannya sendiri dan ditemukan dengan tangan
+- **Populasi** (pemindai template berimbang, menghormati `${}` bersarang;
+  definisinya ikut ditulis karena angka tanpa definisi tak bisa ditinjau):
+
+  | ukuran | angka |
+  |---|---|
+  | template `` sql`…` `` polos di `apps/server/src` | **140** (134 terluar, 6 bersarang) |
+  | template `` sql<T>`…` `` — potongan ekspresi ber-cast | **110** |
+  | · total | **250** |
+  | polos yang memuat pernyataan lengkap | **50** |
+  | situs `.execute(` berargumen `` sql`…` `` | **42** dari 43 |
+  | kueri lengkap tanpa sebutan `company_id` | **20** |
+  | kueri ber-SELECT tanpa `LIMIT` | **29** (22 non-agregat) |
+
+  Angka pengintaian awal (247 / 62 / 19 / 29 / 21) **diralat di sini**: regex
+  versi itu tak memuat bentuk `sql<T>` dan menghitung situs `.execute` dua kali
+- **Metode**: ketiga aturan yang sudah terkirim dijalankan ulang atas populasi
+  itu — langit-langit daftar, pengurungan tenant, dan cast `sql<number>`
+- **Detektor**: DIBUKTIKAN bisa menuduh, dua lapis. Sintetis: sebelas masukan
+  lewat `situsSql([{nama, isi}])` (telanjang tertuduh · ber-`LIMIT` tidak ·
+  agregat skalar berbungkus `COALESCE` tidak · ber-`GROUP BY` ya · `SELECT 1 …
+  FOR UPDATE` tidak · `SELECT (subkueri), (subkueri)` tidak · tabel di dalam
+  CTE pembantu TETAP terlihat · `LIMIT` milik subkueri pembantu tak memaafkan
+  induknya). Pohon sungguhan: mencabut `LIMIT` dari `/sampah` — **suntikan
+  di-assert mendarat** (2 → 1) — menuduh `sampah/routes.ts:67` dan menaikkan
+  hitungan 9 → 10; mengembalikan `daftar.reduce()` membuat penjaga agregat
+  merah. Keduanya hijau lagi sesudah dikembalikan
+- **Hasil**: **DUA TEMUAN.** Keduanya membaca tabel yang **sudah ada** di
+  daftar `TUMBUH` milik gerbang drizzle — aturan yang sama, tabel yang sama,
+  bentuk handler yang sama; satu dijaga dan satu tidak, semata karena cara
+  menulisnya berbeda. Diukur lewat HTTP terhadap Postgres nyata, 10.000 baris
+  disuntikkan; **suntikannya dibuktikan terbaca lebih dulu** (10.000/10.000
+  baris ber-prefiks `UJI-VOL-` muncul di balasan):
+
+  | pintu | sebelum | sesudah |
+  |---|---|---|
+  | `GET /sampah` | 10.000 baris · **2.438.895 byte** · 78 ms | 300 · 72.793 byte · 23 ms |
+  | `GET /penerimaan/anomali` | 10.000 baris · **2.760.043 byte** · **4.170 ms** | 100 · 27.676 byte · 1.522 ms |
+
+  Pasangan anti-hijau-palsu: `jumlah` **tetap 10.000** dan `qty_total` **tetap
+  30.000** sesudah dipotong — keduanya pindah ke `COUNT(*) OVER ()` /
+  `SUM(qty) OVER ()`, yang Postgres hitung SEBELUM `LIMIT`. Memotong daftar
+  tanpa memindahkan agregatnya ke SQL adalah menukar satu bug dengan bug yang
+  lebih sunyi
+- **Perbaikannya sendiri hampir melahirkan kerusakan baru, dan itu terukur**:
+  tanda "barang tidak sampai" di kartu Beli & Produksi diturunkan dari `rows`.
+  Dengan baris menggantung tersebar ke **500 faktur**, `rows` yang dipotong
+  hanya memperlihatkan **100** di antaranya — 400 faktur kehilangan tandanya
+  diam-diam, tepat saat masalahnya paling besar. `faktur_ids` karena itu jadi
+  medan tersendiri, dihitung atas populasi penuh (2.000 UUID, ±76 KB terburuk)
+- **Bentuk balasan `/sampah` SENGAJA tidak diubah**: ketujuh build ponsel yang
+  pernah rilis membacanya `as List`, dan `{items, terpotong}` seperti
+  `/customer` akan MELEMPAR di aplikasi yang hari ini terpasang. Batasnya tetap
+  berlaku untuk semua; penandanya di header `X-Kakarut-Terpotong`, yang build
+  lama abaikan tanpa akibat. Preseden headernya sudah ada di kedua sisi
+  (`X-Kakarut-Build` di web, `etag`/`retry-after` di ponsel) dan tak ada
+  middleware CORS yang perlu diurus
+- **Dua arah lain: negatif bersih BERANGKA, bukan kekosongan**
+  1. **Pengurungan tenant.** Ke-20 kueri tanpa `company_id` dipilah tangan dan
+     semuanya sah — `SELECT 1`, advisory lock, subkueri berkorelasi, tabel
+     global, dan yang terkurung transitif lewat `branch_id` (yang sudah dipilih
+     `resolveBranchId`). Satu-satunya penulisan global sungguhan,
+     `open-bill/backfill.ts:23`, memang lintas-tenant seperti migrasi
+  2. **Cast `sql<number>` atas SQL mentah.** Padanannya bukan `sql<T>`
+     melainkan `.rows as { … number }[]` — janji tulisan tangan yang sama
+     persis, dan gerbang `sql-number-bukan-janji` buta total terhadapnya.
+     Populasi **9**, satu menjanjikan `number` (`sampah/routes.ts:154`, atas
+     `COUNT(*)` yang pg pulangkan sebagai **string**), dan itu sudah dibungkus
+     `Number()`. Populasi 1 tak memberi gerbang baru
+- **Batas detektornya, ditulis jujur**
+  - hanya template yang jadi argumen LANGSUNG `.execute(`; potongan yang
+    dirakit di tempat lain dinilai di situs pemakainya. Tanpa batas itu,
+    `const fakturTerhapus = sql`(SELECT …)`` tertuduh padahal ia bagian DELETE
+  - `${pembantu(...)}` ditelusuri **satu tingkat** saja. Tanpa penelusuran itu
+    `GET /penerimaan/anomali` — yang `FROM`-nya `g`, CTE di dalam
+    `cteMenggantung()` — luput dari sapuan yang justru dibuat untuknya
+  - `LIMIT` dinilai pada kueri LUAR: `cteMenggantung` memuat dua subkueri
+    berkorelasi ber-`LIMIT 1`, dan menilai teks mentah membuat kueri terbesarnya
+    dimaafkan oleh langit-langit milik subkuerinya
+  - agregat dinilai pada daftar SELECT tingkat teratas. Versi pertama menilai
+    teks yang sudah dikosongkan, jadi `COALESCE(SUM(qty) FILTER (…), 0)`
+    menaruh `SUM(` di kedalaman 1 dan tak terlihat — ia **menuduh
+    `stok/service.ts:431`**, kueri yang selalu memulangkan tepat satu baris
+  - langit-langitnya membatasi BALASAN, bukan pemindaian: `/penerimaan/anomali`
+    turun 4,17 → 1,52 dtk, tidak ke nol, karena `COUNT(*) OVER ()` memang
+    menuntut satu lintasan penuh. Angka benarnya yang dibayar, dan itu disengaja
+  - daftar tabelnya tetap turunan `TUMBUH` yang ditulis tangan — kini
+    diturunkan MEKANIS ke snake_case, bukan diketik kedua kalinya, karena
+    daftar tangan yang tak memuat `customers` adalah sebab balasan 1,61 MB itu
+    tak pernah tertuduh
+  - keadaan TERPOTONG tak diuji verify-api: membuatnya butuh 301 penjualan yang
+    dihapus satu per satu lewat HTTP (±600 permintaan untuk satu asersi). Yang
+    dijaga §241 justru sisi yang paling mudah rusak tanpa disadari — bahwa
+    pembatasannya TIDAK mengubah apa pun pada pemakaian normal
+- **Tindak**: `situsSql()` di `daftar-tanpa-langit-langit.test.ts` (ratchet
+  `DASAR_SQL = 9`, +5 uji), `verify-api.sh` §241 (12 asersi),
+  `sampah_terpotong_test.dart` di ponsel (4 uji, bukti merah sendiri).
+  Kesembilan situs yang tersisa dipilah tangan dan tak satu pun tumbuh seumur
+  pemakaian: backfill boot ×3 (`dokumen/nomor.ts`), satu baris per meja
+  (`okupansi.ts:81`), per bahan (`stok/routes.ts:590`, `service.ts:48`,
+  `:830`, `:857`), per cabang (`service.ts:547`). Gerbang: typecheck bersih ·
+  `npm test` **2.174** · `verify-api` **2.829** terhadap Postgres segar ·
+  `audit:invarian` 26/26 · `flutter analyze` bersih · `flutter test` **507**
+  pada 3.44.7
+
+---
+
 ## N round-trip per baris di dalam transaksi — server — 2026-08-22
 
 - **Populasi**: 33 situs perulangan ber-`await tx.<kueri>` di dalam 72 badan
