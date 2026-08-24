@@ -50,6 +50,66 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Pintu detail ber-`:param` pada volume per-entitas — server — 2026-08-24
+
+- **Kenapa**: batas tertulis dua entri — rute ber-`:param` tak ikut
+  `ukur-latensi.sh`, dan jejaknya hanya pada volume seed; kelas inilah tempat
+  balasan 2,97 MB `/customer/:id` dulu ditemukan
+- **Metode**: volume ditempelkan pada SATU entitas per pintu (30.000 transaksi
+  satu member · 30.000 lot satu bahan · 30.000 mutasi satu perlengkapan), dan
+  tiap suntikan **dibuktikan terbaca lewat rutenya sendiri** (aturan 6):
+  `jumlah_transaksi` 30.000 · `jumlah_pembelian` 30.018 · `terpotong: true`
+- **Hasil — BERSIH dengan angka**:
+
+  | pintu | terukur |
+  |---|---|
+  | `/customer/:id` | **0,024 dtk · 39 KB** |
+  | `/bahan/:id/pembelian` | 0,077 dtk · 56 KB — `jumlah_pembelian` tetap **30.018** (hitungan populasi SQL, bukan larik terpotong) |
+  | `/stok/kartu/:ingredientId` | 0,039 dtk · 54 KB — `terpotong: true` |
+  | `/perlengkapan/:id/kartu` | 0,018 dtk · 111 KB |
+  | `/perlengkapan/:id/pembelian` | 0,056 dtk · 56 KB |
+
+  Langit-langit vena #15/#16 **memegang di dimensi per-id**
+- **Aturan 6 menangkap pengukuranku sendiri**: tembakan pertama ke
+  `/bahan/:id/kartu` memulangkan 0,004 dtk / **27 byte** — itu **404** (rute
+  yang benar `/stok/kartu/:ingredientId`). Angka tercepat yang pernah kuukur
+  adalah angka pintu yang salah alamat
+- **Tindak**: blok "PINTU DETAIL" permanen di `ukur-latensi.sh` — id dipungut
+  lewat API, melewati diri dengan pesan bila entitas tak ada, angka acuan
+  tertanam. Gerbang: `npm test` 2.202
+
+---
+
+## Balapan dua boot `provisionGuest` — server — 2026-08-24
+
+- **Kenapa**: utang yang ditulis `penjaga-semua-pintu` sendiri — satu
+  `onConflictDoUpdate` di awal badan menutupi insert `companies` yang tak
+  berpenjaga; *"badan yang panjang adalah titik butanya"*
+- **Diukur** (dua `provisionGuest` dilepas `Promise.all` pada DB tanpa demo;
+  demo mustahil di-`DELETE` — FK NO ACTION `sale_consumptions`, konsisten
+  audit ON DELETE, jadi jalannya `TRUNCATE` pada DB buangan):
+
+  | | boot 1 | boot 2 |
+  |---|---|---|
+  | SEBELUM | selesai (true) | **melempar `Failed query: insert into "companies" …` mentah** |
+  | SESUDAH | true | **false** — jalur kalah idempoten |
+
+  Ronde kedua false/false; 1 perusahaan; keanggotaan utuh. Yang kalah dulu
+  selamat **hanya karena catch pembungkus** di `index.ts` — aman-karena-catch
+  adalah aman yang bisa hilang tanpa ada yang sadar
+- **Tindak**: `onConflictDoNothing` pada insert perusahaan (gerbang balapan) +
+  jalur kalah yang memastikan keanggotaannya sendiri → `false`. Gerbang
+  `provisi-tamu-balapan.test.ts` (2 uji source-pin; bukti merah mendarat).
+  Prosa `penjaga-semua-pintu` diperbarui: utang tercatat DIBAYAR, granularitas
+  badan tetap batas
+- **Batas**: pin-nya struktur, bukan balapan hidup (butuh Postgres+TRUNCATE —
+  terlalu mahal untuk suite unit; pengukurannya yang jadi buktinya). `branches`
+  & `storageLocations` terkurung transaksi yang gerbangnya insert perusahaan
+- Gerbang: typecheck bersih · `npm test` **2.207** · `verify-api` **2.905**
+  terhadap Postgres segar · `audit:invarian` 26/26 · cakupan **271 identik**
+
+---
+
 ## Rekaman cakupan diukur ulang tiap CI — server — 2026-08-24
 
 - **Kenapa vena ini ada**: gerbang cakupan menulis batasnya sendiri —
