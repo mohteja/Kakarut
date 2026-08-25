@@ -14187,6 +14187,44 @@ api "$OWNER" POST /stok/awal "{\"items\":[{\"ingredient_id\":\"$B256C\",\"qty\":
 cek "PASANGAN: saldo 1e-6 tetap terlihat, tak ditelan pembulatan" "V == 1" \
   "$(api "$OWNER" GET /stok | jq --arg b "$B256C" '[.[]|select(.ingredient_id==$b)|.saldo == 0.000001]|first | if . then 1 else 0 end')"
 
+echo "── §257 Uang yang DIADILI sama dengan uang yang dicetak ──"
+#
+# `sales.subtotal`/`total` numeric(14,2): Postgres MEMBULATKAN saat menulis, JS
+# tidak. Yang bertengkar bukan angka yang disimpan (balasan rute pun dibaca
+# ulang lewat `.returning()`) melainkan angka JS yang MENGADILI sesuatu sebelum
+# ditulis — di sini gerbang "uang diterima cukup?".
+#
+# `qty` baris penjualan `z.number().positive()` TANPA `.int()`, jadi pecahan
+# memang sah lewat pintu ini.
+#
+#   SEBELUM  menu Rp 0,01 × qty 0,4 → nota tersimpan subtotal 0 / total 0,
+#            tapi bayar tunai Rp 0 → 400 "Uang diterima kurang dari total"
+#   SESUDAH  201, dan kurang bayar tetap 400
+KAT257=$(api "$OWNER" GET /kategori | jq -r '.[0].id')
+MR257=$(api "$OWNER" POST /menu "{\"nama\":\"Menu Recehan 257\",\"category_id\":\"$KAT257\",\"tipe\":\"regular\",\"mult\":2,\"harga_jual\":0.01,\"komponen\":[]}" | jq -r .id)
+MW257=$(api "$OWNER" POST /menu "{\"nama\":\"Menu Wajar 257\",\"category_id\":\"$KAT257\",\"tipe\":\"regular\",\"mult\":2,\"harga_jual\":12000,\"komponen\":[]}" | jq -r .id)
+# Token yang dipakai §255 tepat di atas — kasir yang absen & shift-nya sudah
+# terbuka di sana. `pastikanHadir "$KASIR"` di titik ini GAGAL (absen adalah
+# toggle dan keadaannya sudah berubah jauh sebelum sini), dan seluruh seksi
+# ikut merah karena penjualannya ditolak gerbang kasir — terukur saat seksi ini
+# pertama dijalankan.
+# `$KASIR` TIDAK boleh dipakai di sini: §105 me-reset passwordnya, jadi token
+# lamanya 401 — dan itu dijaga `verify-api-token.test.ts`, yang langsung
+# menuduh cadangan `${REISS105:-$KASIR}` yang sempat kutulis. Tanpa cadangan:
+# kalau re-issue-nya gagal, seksi ini merah dengan berisik, bukan diam.
+JUAL257="$REISS105"
+J257=$(api "$JUAL257" POST /penjualan "{\"is_dine_in\":true,\"metode_bayar\":\"tunai\",\"uang_diterima\":0,\"items\":[{\"menu_id\":\"$MR257\",\"qty\":0.4}]}")
+# premis (aturan 6): notanya benar-benar lahir dan totalnya memang 0
+cek "premis §257: nota recehan lahir dengan total 0" "V == 1" \
+  "$(echo "$J257" | jq '((.sale.id != null) and (.sale.total == 0)) | if . then 1 else 0 end')"
+cek "bayar Rp 0 untuk nota Rp 0 DITERIMA (dulu 400)" "V == 1" \
+  "$(echo "$J257" | jq '((.error // "") | test("kurang dari total")) | if . then 0 else 1 end')"
+# PASANGAN anti-hijau-palsu: kekurangan NYATA tetap ditolak, bayar pas diterima
+cek "PASANGAN: bayar PAS 12.000 diterima" "V == 1" \
+  "$(api "$JUAL257" POST /penjualan "{\"is_dine_in\":true,\"metode_bayar\":\"tunai\",\"uang_diterima\":12000,\"items\":[{\"menu_id\":\"$MW257\",\"qty\":1}]}" | jq '(.sale.total == 12000) | if . then 1 else 0 end')"
+cek "PASANGAN: KURANG bayar 11.999 tetap 400" "V == 1" \
+  "$(api "$JUAL257" POST /penjualan "{\"is_dine_in\":true,\"metode_bayar\":\"tunai\",\"uang_diterima\":11999,\"items\":[{\"menu_id\":\"$MW257\",\"qty\":1}]}" | jq '((.error // "") | test("kurang dari total")) | if . then 1 else 0 end')"
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

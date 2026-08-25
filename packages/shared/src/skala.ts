@@ -27,3 +27,9 @@ export function keSkalaKolom(nilai: number, skala: number): number {
   const f = 10 ** skala;
   return Math.round(nilai * f) / f;
 }
+
+/** Skala desimal kolom UANG (`sales.subtotal`/`total`, `sale_items.line_total` — `numeric(…,2)`). */
+export const SKALA_UANG_KOLOM = 2;
+
+/** Skala desimal kolom HPP tersimpan (`sales.total_hpp`, `sale_items.hpp_satuan` — `numeric(…,4)`). */
+export const SKALA_HPP_KOLOM = 4;

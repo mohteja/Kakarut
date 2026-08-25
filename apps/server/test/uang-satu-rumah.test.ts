@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { hitungPb1 } from "@kakarut/shared";
+import { hitungPb1, keSkalaKolom, SKALA_UANG_KOLOM, SKALA_HPP_KOLOM } from "@kakarut/shared";
+import { butaKomentar } from "../src/scripts/buta-komentar";
 
 /**
  * ARITMETIKA UANG PENJUALAN PUNYA SATU RUMAH.
@@ -125,5 +126,67 @@ describe("aritmetika uang penjualan punya satu rumah", () => {
     expect(buat("const maksDiskon = subtotal * maksPersen / 100;"), "batas diskon bukan PB1").toHaveLength(0);
     expect(buat("const pb1 = hitungPb1(subtotalNet, rate);"), "memanggil pembantunya justru yang diminta").toHaveLength(0);
     expect(buat("// pb1 = net * tarif / 100"), "komentar bukan kode").toHaveLength(0);
+  });
+});
+
+/**
+ * ANGKA YANG DIADILI HARUS SAMA DENGAN ANGKA YANG DICETAK.
+ *
+ * `sales.subtotal`/`total` `numeric(14,2)` dan `total_hpp` `numeric(16,4)`:
+ * Postgres MEMBULATKAN saat menulis, JS tidak. Selama angka JS-nya cuma
+ * disimpan, keduanya tak pernah bertengkar — balasan rutenya pun dibaca ulang
+ * lewat `.returning()`. Yang bertengkar: angka JS yang dipakai MENGADILI
+ * sesuatu sebelum ditulis.
+ *
+ * Terukur lewat HTTP (2026-08-25, menu Rp 0,01 × qty 0,4 — `qty` baris
+ * penjualan `z.number().positive()` TANPA `.int()`, jadi pecahan memang sah):
+ *
+ *   SEBELUM  nota tersimpan & dibalas rute → subtotal 0, total 0
+ *            bayar tunai Rp 0 → 400 "Uang diterima kurang dari total belanja"
+ *   SESUDAH  bayar tunai Rp 0 → 201, dan kurang bayar 11.999 atas 12.000
+ *            TETAP 400
+ *
+ * Gerbangnya mengadili `total = 0.004` — angka yang tak pernah bisa dilihat
+ * siapa pun. Kelas yang sama dengan "stok yang PERSIS cukup ditolak", di jalur
+ * uang.
+ */
+describe("uang yang disusun di JS dikembalikan ke skala kolomnya", () => {
+  it("DETEKTOR TERBUKTI: hasil kali pecahan memang tak muat di kolom uang", () => {
+    // Kalau premis ini tak bisa gagal, seluruh vena ini tak menyatakan apa pun.
+    expect(0.01 * 0.4).not.toBe(0);
+    expect(keSkalaKolom(0.01 * 0.4, SKALA_UANG_KOLOM)).toBe(0);
+    expect(SKALA_UANG_KOLOM).toBe(2); // sales.subtotal/total numeric(…,2)
+    expect(SKALA_HPP_KOLOM).toBe(4); // sales.total_hpp numeric(…,4)
+  });
+
+  it("PASANGAN: selisih SATU unit kolom (Rp 0,01) tetap terlihat", () => {
+    // Pembulatan yang menelan selisih nyata adalah kerusakan yang lebih sunyi
+    // daripada yang diperbaiki.
+    expect(keSkalaKolom(0.01, SKALA_UANG_KOLOM)).toBe(0.01);
+    expect(keSkalaKolom(12000 - 0.01, SKALA_UANG_KOLOM)).toBe(11999.99);
+    expect(keSkalaKolom(0.0001, SKALA_HPP_KOLOM)).toBe(0.0001);
+  });
+
+  it("createSale menyusun subtotal/total/HPP pada skala kolomnya", () => {
+    const SVC = butaKomentar(
+      readFileSync(join(SRC, "modules/penjualan/service.ts"), "utf8"),
+    );
+    expect(SVC, "subtotal kembali mentah").toContain(
+      "subtotal = keSkalaKolom(subtotal + lineTotal, SKALA_UANG_KOLOM)",
+    );
+    expect(SVC, "total_hpp kembali mentah").toContain(
+      "totalHpp = keSkalaKolom(totalHpp + hppSatuan * item.qty, SKALA_HPP_KOLOM)",
+    );
+    expect(SVC, "total yang DIADILI kembali mentah").toMatch(
+      /const total = keSkalaKolom\(subtotalNet \+ pb1Amount, SKALA_UANG_KOLOM\)/,
+    );
+    expect(SVC, "baris penjualan kembali mentah").toMatch(
+      /const lineTotal = keSkalaKolom\(hargaSatuan \* item\.qty, SKALA_UANG_KOLOM\)/,
+    );
+  });
+
+  it("PASANGAN: EPS_KAS tidak ikut diseragamkan — sudah benar & kelasnya sendiri", () => {
+    const shift = butaKomentar(readFileSync(join(SRC, "modules/shift/routes.ts"), "utf8"));
+    expect(shift).toContain("EPS_KAS = 0.005");
   });
 });

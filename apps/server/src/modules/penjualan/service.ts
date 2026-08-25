@@ -20,7 +20,15 @@ import {
   sales,
   shifts,
 } from "../../db/schema";
-import { BATAS_HPP, BATAS_QTY_STOK, BATAS_UANG, pastikanMuat } from "../../lib/batas-angka";
+import {
+  BATAS_HPP,
+  BATAS_QTY_STOK,
+  BATAS_UANG,
+  keSkalaKolom,
+  pastikanMuat,
+  SKALA_HPP_KOLOM,
+  SKALA_UANG_KOLOM,
+} from "../../lib/batas-angka";
 import { kodeCabang, tanggalDi } from "../../lib/time";
 import { upsertCustomer } from "../customer/service";
 import {
@@ -366,7 +374,7 @@ export async function createSale(params: CreateSaleParams) {
       const hargaSatuan = item.open_bill_item_id
         ? hargaBill.get(item.open_bill_item_id) ?? menu.hargaJual
         : menu.hargaJual;
-      const lineTotal = hargaSatuan * item.qty;
+      const lineTotal = keSkalaKolom(hargaSatuan * item.qty, SKALA_UANG_KOLOM);
       // Harga dan qty masing-masing SAH — `menus.harga_jual` sampai
       // 9.999.999.999 dan `sale_items.qty` sampai 99.999.999 — tapi hasil
       // kalinya sampai 1e18 sementara kolomnya `numeric(14,2)` (1e12).
@@ -377,8 +385,27 @@ export async function createSale(params: CreateSaleParams) {
       // pecahan (0,5 porsi) jumlahnya bisa muat sementara satuannya tidak.
       pastikanMuat(hppSatuan, BATAS_HPP, `HPP satuan "${menu.nama}"`);
 
-      subtotal += lineTotal;
-      totalHpp += hppSatuan * item.qty;
+      /*
+       * DIKEMBALIKAN KE SKALA KOLOM DI TIAP LANGKAH.
+       *
+       * `sales.subtotal`/`total` `numeric(14,2)` dan `sales.total_hpp`
+       * `numeric(16,4)`: Postgres MEMBULATKAN saat menulis, JS tidak. Selama
+       * angka JS-nya cuma disimpan, keduanya tak pernah bertengkar — balasan
+       * rute pun dibaca ulang lewat `.returning()`. Yang bertengkar: angka JS
+       * yang dipakai MENGADILI sesuatu sebelum ditulis.
+       *
+       * Terukur lewat HTTP (2026-08-25, menu Rp 0,01 × qty 0,4):
+       *
+       *   nota yang tersimpan & dibalas rute → subtotal 0, total 0
+       *   bayar tunai Rp 0                   → 400 "Uang diterima kurang dari
+       *                                        total belanja"
+       *
+       * Gerbangnya mengadili `total = 0.004` — angka yang tak pernah bisa
+       * dilihat siapa pun, sebab yang tercetak dan tersimpan Rp 0,00. Kelas
+       * yang sama dengan "stok yang PERSIS cukup ditolak", di jalur uang.
+       */
+      subtotal = keSkalaKolom(subtotal + lineTotal, SKALA_UANG_KOLOM);
+      totalHpp = keSkalaKolom(totalHpp + hppSatuan * item.qty, SKALA_HPP_KOLOM);
       itemRows.push({
         menuId: menu.id,
         menuNama: menu.nama,
@@ -492,9 +519,10 @@ export async function createSale(params: CreateSaleParams) {
         });
       }
     }
-    const subtotalNet = subtotal - diskon;
+    const subtotalNet = keSkalaKolom(subtotal - diskon, SKALA_UANG_KOLOM);
     const pb1Amount = company.pb1Enabled ? hitungPb1(subtotalNet, company.pb1Rate) : 0;
-    const total = subtotalNet + pb1Amount;
+    // Total yang DIADILI harus sama dengan total yang ditulis & dicetak.
+    const total = keSkalaKolom(subtotalNet + pb1Amount, SKALA_UANG_KOLOM);
     // PB1 ditambahkan DI ATAS subtotal yang sudah lolos batasnya, jadi total
     // bisa melewatinya justru karena pajaknya.
     pastikanMuat(total, BATAS_UANG, "Total");

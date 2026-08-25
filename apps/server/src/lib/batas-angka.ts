@@ -152,7 +152,7 @@ export const SKALA_QTY_PERLENGKAPAN = 3;
  * `1e-9`/`1e-6` karena yang mereka bandingkan adalah KEBUTUHAN yang dihitung
  * JS (resep × batch, konversi satuan) — kelas yang berbeda, dan tetap benar.
  */
-export { keSkalaKolom, SKALA_QTY_STOK_KOLOM } from "@kakarut/shared";
+export { keSkalaKolom, SKALA_QTY_STOK_KOLOM, SKALA_UANG_KOLOM, SKALA_HPP_KOLOM } from "@kakarut/shared";
 
 /**
  * Toleransi pembanding untuk angka yang DIHITUNG DI JS lalu diadu dengan
