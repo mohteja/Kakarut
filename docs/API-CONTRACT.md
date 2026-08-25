@@ -1,8 +1,7 @@
 # 📱 Terakasir — Kontrak API (untuk Tim Mobile Flutter)
 
 Halo tim mobile. Dokumen ini adalah **acuan lengkap API server Terakasir** untuk
-membangun aplikasi Flutter (native) yang bicara **langsung ke API**, bukan
-membungkus web di WebView.
+membangun aplikasi Flutter (native) yang bicara **langsung ke API**.
 
 > **Sumber kebenaran:** semua endpoint di bawah dibaca langsung dari kode
 > `apps/server/src` (Hono + TypeScript + Drizzle). Entry server:
@@ -469,6 +468,68 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 > Bisa bertahap: merefund 1 porsi hari ini dan 1 porsi lagi kemudian menghasilkan
 > total pengembalian yang sama persis dengan merefund 2 porsi sekaligus.
 > Melebihi sisa porsi ditolak **400** dengan pesan berisi nama menunya.
+
+### Slip pesanan (menu & jumlah, TANPA harga)
+
+- `GET /api/penjualan/:id/slip` — [owner/admin/cashier; kasir terkunci cabangnya] — query: `paper?: 58|80` (default 58), `chars_per_line?: int(16..96)` (override), `cut?: "1"` (default tidak memotong), `feed?: int(0..10)` (default 3) — res: `{ data: string (base64 ESC/POS, kirim apa adanya ke printer), teks: string (pratinjau, byte yang sama tanpa perintah kontrol), chars_per_line: int }` — error: **404** (tak ditemukan/terhapus), **403** (kasir cabang lain)
+- `GET /api/open-bill/:id/slip` — [cashier] — query & res sama — error: **404** (tak ditemukan atau sudah ditutup)
+
+> **Isinya sengaja tak memuat angka uang sama sekali** — tak ada harga satuan,
+> subtotal, diskon, PB1, maupun total. Yang dicetak: judul `PESANAN`, nama
+> perusahaan & cabang, nomor nota + antrian (penjualan) atau meja (open bill),
+> penanda dine-in/bawa pulang, lalu `2x Nama Menu` per baris beserta catatan
+> barisnya, ditutup `Total porsi` (CACAH, bukan rupiah).
+>
+> **Laci tidak dibuka.** Slip ini bukan pembayaran; `drawerKick` tak bisa
+> diminta lewat query dan perintah `ESC p` tak pernah ada di byte-nya.
+>
+> Baris open bill yang **dibatalkan dapur** (`pesanan_status = "batal"`) tidak
+> ikut: slip ini perintah memasak, dan mencetak ulang baris yang dibatalkan
+> menyuruh dapur membuatnya lagi.
+>
+> Penjualan memakai **porsi yang ditagih** (`qty − qty_refund`) — sajian yang
+> sudah dikembalikan tak perlu dimasak lagi.
+
+### Bon tagihan (berharga, BUKAN bukti pembayaran)
+
+- `GET /api/open-bill/:id/bon` — [cashier] — query sama dengan `/slip` (`paper?`, `chars_per_line?`, `cut?`, `feed?`) — res: `{ data: string (base64 ESC/POS), teks: string (pratinjau), chars_per_line: int }` — error: **404** (tak ditemukan atau sudah ditutup)
+
+> **HANYA ADA DI OPEN BILL.** Penjualan yang sudah tercatat berarti uangnya
+> sudah diterima; "bon tagihan" untuknya adalah kertas yang menagih sesuatu
+> yang sudah lunas. `GET /api/penjualan/:id/bon` **tidak ada** (404) — yang
+> dibutuhkan di sana cetak ulang struk.
+>
+> Kertas yang diminta tamu saat selesai makan, untuk memeriksa pesanannya dan
+> tahu berapa yang harus disiapkan. Sesudah membayar ia menerima **struk**.
+>
+> **Isinya memuat rupiah, tapi TIDAK PERNAH menyatakan sudah dibayar.** Yang
+> dicetak: judul `BON TAGIHAN`, `BELUM DIBAYAR`, perusahaan & cabang, waktu,
+> dine-in/bawa pulang, meja & nama tamu, baris item berikut harga satuan dan
+> total baris, lalu `Subtotal` / `PB1` / `TOTAL` / `Total porsi`. Ditutup
+> `*** BELUM DIBAYAR ***` + `Bukan bukti pembayaran` — peringatannya muncul
+> **dua kali**, sebab yang dibawa pulang orang dari selembar kertas adalah
+> baris terakhir yang dibacanya.
+>
+> **Tak ada baris pembayaran sama sekali** — tak ada metode bayar, tunai
+> diterima, kembalian, maupun "Terima kasih!". Ditegakkan struktural: tipe
+> `BonData` di `packages/shared` memang tak punya kolom-kolom itu.
+>
+> **Tak ada nomor nota dan tak ada nomor antrian** — keduanya lahir saat
+> penjualan tercatat, dan bon ini justru ada sebelum itu.
+>
+> **Laci tidak dibuka**, dengan alasan yang lebih tajam daripada di slip:
+> membuka laci saat bon diminta membuat tamu mengira pembayarannya sudah
+> tercatat.
+>
+> Baris yang **dibatalkan dapur** tidak ikut ditagih — di sini artinya menagih
+> tamu untuk makanan yang tak pernah datang.
+>
+> **Angkanya PRA-DISKON.** Bill tak menyimpan potongan; diskon diputuskan di
+> layar pembayaran. Karena itu kertasnya sendiri menutup dengan "Diskon (bila
+> ada) dihitung saat pembayaran" — kalimat itu **hilang** bila klien mengirim
+> diskon yang sudah diputuskan (hanya web bisa; endpoint ini selalu 0). PB1
+> dihitung `hitungPb1` yang sama dengan `createSale`, jadi bon dan struk tak
+> bisa berselisih karena pembulatan.
 
 ## `/api/produksi` dan `/api/pembelian` — Tambah stok (pabrik) (`modules/produksi/routes.ts`)
 
@@ -1365,6 +1426,9 @@ Laporan:
 ## 8. `/api/laporan` — Laporan (`modules/laporan/routes.ts`) — group guard **[owner/admin]**
 
 - `GET /api/laporan` — query: `branch_id?` (atau `all`), `dari?`, `sampai?`, `tanggal?` — res: `LaporanHarian`
+  - **`per_jam: { jam, jumlah, omzet }[]` — sebaran transaksi per jam.** Deretnya sudah BERSAMBUNG dan sudah DIPANGKAS ujungnya: mulai dari jam transaksi pertama, berhenti di yang terakhir. **Jam kosong DI TENGAH ikut, bernilai nol, dan jangan disaring klien** — itu jeda sungguhan, dan membuangnya membuat jam 12 dan jam 17 tergambar bersebelahan sehingga bentuk harinya berbohong. `[]` berarti tak ada transaksi pada rentangnya.
+  - **`jam` dihitung di ZONA PERUSAHAAN** (`companies.timezone`, bawaan `Asia/Jakarta`) — bukan UTC dan bukan zona perangkat, jadi klien tidak boleh menggesernya lagi. Server berjalan UTC: tanpa konversi ini seluruh grafik meleset tujuh jam di WIB, dan "jam ramai" yang dibaca pemilik warung jadi jam yang salah.
+  - **`jumlah` memakai saringan yang sama dengan `jumlah_transaksi`**, jadi jumlah seluruh ember dijamin sama dengan kartu "Transaksi". `omzet` per ember adalah `SUM(sales.subtotal)` — sudah bersih dari refund, sama seperti `omzet` di tingkat laporan; jangan menguranginya lagi dengan `total_refund`.
 - `GET /api/laporan/pembelian` — query: `branch_id?` (atau `all`), `dari?`, `sampai?` — res: `LaporanPembelian`
 - `GET /api/laporan/menu-laris` — query: `branch_id?` (atau `all`), `dari?`, `sampai?` — res: `MenuLaris`
 - `GET /api/laporan/bep` — query: `biaya_tetap` (wajib, >0), `branch_id?` (atau `all`), `dari?`, `sampai?` — res: perhitungan BEP — error: **400** (biaya_tetap hilang/invalid, margin ≤ 0, tak ada menu). **Margin kontribusi dihitung SESUDAH diskon**: `(Σ subtotal − Σ diskon − Σ total_hpp) ÷ Σ porsi ditagih` — definisi laba yang sama dengan `estimasi_profit` di `GET /laporan`, jadi kedua layar tak bisa berselisih. `rata_harga_jual` juga net diskon (harga yang benar-benar diterima). PB1 tidak dikurangkan: ia titipan pajak, dan `subtotal` memang belum memuatnya. Uangnya dari tingkat nota (diskon hanya ada di sana), porsinya dari tingkat baris; keduanya sudah menyusut sendiri saat refund.
@@ -1392,9 +1456,16 @@ Laporan:
 
 - `POST /api/print/lan` — req: `{ host: string (1..255), port: int(1..65535), data: string (base64 ESC/POS, 1..400000) }` — res: `{ ok: true }` — error: **400** (host terlarang/internal, data kosong), **502** printer tak terjangkau
 
-> Untuk cetak Bluetooth thermal di aplikasi Flutter, byte ESC/POS dibangun di
-> sisi klien; endpoint ini hanya relay TCP untuk printer LAN. Printer Bluetooth
-> ditangani native di aplikasi (di luar API).
+> Untuk cetak Bluetooth thermal di aplikasi Flutter, byte ESC/POS **struk
+> pembayaran** dibangun di sisi klien; endpoint ini hanya relay TCP untuk
+> printer LAN. Printer Bluetooth ditangani native di aplikasi (di luar API).
+>
+> **Pengecualian: SLIP PESANAN.** Byte-nya dirender SERVER dan diambil lewat
+> `GET /api/penjualan/:id/slip` atau `GET /api/open-bill/:id/slip` (lihat modul
+> masing-masing). Alasannya sama dengan `qty_teks`: satu-satunya janji slip itu
+> adalah **tanpa harga**, dan menyusun ulang layoutnya di Dart membuat janji itu
+> hidup di dua tempat lalu menyimpang diam-diam. Klien cukup base64-decode
+> `data` lalu mengirimnya ke printer.
 
 ## `/api/upload` — Unggah file (`modules/upload/routes.ts`) — [any]
 
@@ -1602,8 +1673,55 @@ export interface BackupStatusDto {
   storage_mode: "r2" | "local";
   /** waktu cadangan sukses terakhir (ISO) atau null */
   terakhir_sukses: string | null;
+  /** peringatan "sudah terlalu lama tanpa cadangan" + kesiapan salurannya */
+  peringatan: PeringatanCadanganDto;
   /** riwayat 50 cadangan terakhir (terbaru dulu) */
   riwayat: BackupRunDto[];
+}
+
+/**
+ * Satu temuan pemeriksaan setelan (GET /admin/sistem).
+ *
+ * Semua yang dilaporkan lewat sini punya bentuk yang sama: setelannya SAH,
+ * servernya menyala tanpa keluhan, dan yang salah baru ketahuan berbulan-bulan
+ * kemudian. `tindakan` selalu diisi — temuan yang tak menyebutkan apa yang
+ * harus dilakukan hanya memindahkan pekerjaan menebak ke pembacanya.
+ */
+export interface TemuanSetelanDto {
+  /** pengenal stabil, mis. "superadmin_password_bawaan" */
+  kode: string;
+  /** kritis = kehilangan data atau lubang keamanan; peringatan = merosot diam-diam */
+  tingkat: "kritis" | "peringatan";
+  judul: string;
+  rincian: string;
+  /** langkah konkret yang menutup temuan ini */
+  tindakan: string;
+}
+
+/**
+ * Peringatan cadangan basi — DAN kesiapan saluran yang mengabarkannya.
+ *
+ * Dua-duanya dilaporkan karena kegagalan yang paling mahal bukan "cadangan
+ * tak jalan", melainkan "cadangan tak jalan DAN tak ada yang memberi tahu".
+ * Panel yang hanya menampilkan kartu merah mengandaikan ada yang membukanya;
+ * `email_siap`/`penerima` menjawab pertanyaan yang tak pernah sempat ditanya:
+ * kalau nanti gawat, ini sampai ke siapa?
+ */
+export interface PeringatanCadanganDto {
+  /** kondisi gawat sedang berlangsung */
+  gawat: boolean;
+  /** ambang hari tanpa cadangan sukses sebelum dianggap gawat; 0 = mati */
+  ambang_hari: number;
+  /** umur cadangan sukses terakhir dalam jam; null bila belum pernah sukses */
+  umur_jam: number | null;
+  /** sejak kapan sistem punya data (tenant pertama, ISO); acuan bila belum pernah sukses */
+  sejak: string | null;
+  /** waktu email peringatan terakhir dikirim (ISO); null bila tak ada peringatan aktif */
+  terakhir_dikirim: string | null;
+  /** penyedia email (SMTP/Resend) sudah terkonfigurasi */
+  email_siap: boolean;
+  /** jumlah super admin yang akan menerima email peringatan */
+  penerima: number;
 }
 
 /**
@@ -1776,30 +1894,45 @@ export type BahanImportMode = "perbarui" | "tambah";
  * Satu baris impor CSV bahan baku (hasil parse di web → dikirim ke server).
  * Cocok dengan bahan lewat `kode` (bila ada) lalu slug (nama). `jenis`
  * (pengadaan) hanya diterapkan pada bahan BARU.
+ *
+ * SEMUA field selain `nama` OPSIONAL, dan absennya BERARTI SESUATU:
+ *
+ *   - field ADA  → nilainya dipakai (termasuk `false`, `0`, dan `null` — itu
+ *     perintah yang sah: mengosongkan catatan, mematikan `kemasan`, dst);
+ *   - field TIDAK ADA → pada bahan LAMA nilainya DIBIARKAN apa adanya; pada
+ *     bahan BARU barulah default dipakai.
+ *
+ * Bedanya bukan kosmetik. Berkas CSV yang cuma berisi `nama,harga_beli` —
+ * bentuk yang paling lazim dipakai memperbarui harga dari daftar supplier —
+ * dulu menulis default ke SELURUH kolom lain pada tiap bahan yang cocok:
+ * `isi` balik ke 1 (satu dus isi 24 jadi isi 1 → HPP per botol 24× lipat),
+ * `satuan` jadi "pcs", `kategori` jadi "lain", `kemasan`/`complement` mati,
+ * `stok_minimum` nol. Semuanya tanpa satu pun pesan, dengan spanduk hijau
+ * "✅ Impor selesai — 12 diperbarui" di layar.
  */
 export interface BahanImportRow {
-  kode: string | null;
+  kode?: string | null;
   nama: string;
-  kategori: string;
-  jenis: JenisPengadaan;
-  harga_beli: number;
-  isi: number;
-  satuan: string;
-  satuan_beli: string | null;
-  stok_minimum: number;
+  kategori?: string;
+  jenis?: JenisPengadaan;
+  harga_beli?: number;
+  isi?: number;
+  satuan?: string;
+  satuan_beli?: string | null;
+  stok_minimum?: number;
   /** minimal belanja (MOQ); 0 = tanpa minimum */
-  min_beli: number;
-  boleh_eceran: boolean;
-  lacak_stok: boolean;
+  min_beli?: number;
+  boleh_eceran?: boolean;
+  lacak_stok?: boolean;
   /** kemasan take-away (is_packaging) */
-  kemasan: boolean;
+  kemasan?: boolean;
   /** complement (×0.5 dine-in) */
-  complement: boolean;
+  complement?: boolean;
   /** masa simpan (hari); 0 = tak diatur */
-  masa_simpan_hari: number;
+  masa_simpan_hari?: number;
   /** lead time (hari); 0 = tanpa info */
-  lead_time_hari: number;
-  catatan: string | null;
+  lead_time_hari?: number;
+  catatan?: string | null;
 }
 
 /** Ringkasan hasil impor CSV bahan baku. */
@@ -1928,6 +2061,13 @@ export interface MenuDto {
   base_mult: number | null;
   harga_jual: number;
   image_url: string | null;
+  /**
+   * Target waktu penyajian (DETIK) — berapa lama menu ini seharusnya selesai
+   * sejak pesanan masuk. null = belum ditetapkan, dan laporan durasi tidak
+   * menilai menu tanpa target: menuduh terlambat terhadap angka yang tak
+   * pernah dipilih siapa-siapa cuma melatih orang mengabaikan laporannya.
+   */
+  target_durasi_detik: number | null;
   is_active: boolean;
   sort_order: number;
   /** pembatasan lokasi (mode Pro) — [] = tampil di semua cabang */
@@ -2241,6 +2381,37 @@ export interface StokRowDto {
   kategori: BahanKategori;
   isi: number;
   satuan: string;
+  /**
+   * Satuan KEMASAN saat membeli (mis. "dus", "kg") — null bila bahan ini
+   * memang dibeli langsung dalam satuan kerjanya.
+   *
+   * Dibawa supaya halaman stok bisa menyebut PADANANNYA. Saldo disimpan dalam
+   * satuan kerja (gr, ml, pcs) sedangkan belanja terjadi dalam kemasan, dan
+   * yang membaca "20.113" tanpa keduanya tak punya cara tahu itu dua puluh
+   * ribu apa — apalagi menghubungkannya dengan yang ia beli kemarin.
+   */
+  satuan_beli: string | null;
+  /**
+   * Harga beli TERKINI per satuan kerja (`harga_beli / isi`) — dasar penilaian
+   * rupiah stok di ringkasan halaman Stok.
+   *
+   * 0 berarti bahan ini belum punya harga beli, bukan berarti gratis. Bedanya
+   * penting: yang meringkas harus bisa MENCACAH bahan tak berharga, sebab
+   * mengalikannya diam-diam menghasilkan nol dan membuat total kekurangan
+   * tanpa jejak apa pun di layar.
+   */
+  harga_per_unit: number;
+  /**
+   * Saldo dalam SATUAN KEMASAN, mis. "\u2248 6,67 dus" \u2014 null bila bahan ini tak
+   * dibeli per kemasan (`isi \u2264 1` atau `satuan_beli` kosong), atau saat saldonya
+   * nol (padanan "0 dus" cuma mengulang nol).
+   *
+   * Dikirim jadi, bukan bahan mentah, khusus untuk klien yang tak bisa
+   * mengimpor `qtyTeks` \u2014 mobile ditulis Flutter. Aturan yang sama dengan
+   * baris kiriman (`qty_setara`): satu-satunya cara memastikan web dan mobile
+   * tak pernah menulis satuan yang berbeda untuk angka yang sama.
+   */
+  saldo_setara: string | null;
   /** tempat penyimpanan dari entri masuk terkonfirmasi terakhir */
   tempat: string | null;
   tempat_id: string | null;
@@ -2858,6 +3029,31 @@ export interface SaleItemInput {
   open_bill_item_id?: string | null;
 }
 
+/**
+ * SEBAB terstruktur penolakan `POST /api/penjualan` — juga muncul sebagai
+ * `sebab` pada perintah `penjualan` yang gagal di `POST /api/sync`.
+ *
+ * Ini ADA supaya klien offline bisa memutuskan nasib perintah di antreannya
+ * tanpa menebak dari teks pesan. Yang menentukan hanya satu pertanyaan:
+ * **transaksinya sudah tercatat di server atau belum?**
+ *
+ * - `bill_sudah_dibayar` — bill sudah punya penjualan. Transaksi ini kembar
+ *   dari yang sudah berhasil, jadi perintahnya AMAN dibuang dari antrean.
+ * - `bill_dibatalkan` — bill ditutup lewat pembatalan, TANPA penjualan.
+ *   Transaksi ini **tidak pernah tercatat**; membuangnya berarti kehilangan
+ *   satu transaksi. Tampilkan ke kasir.
+ * - `kasir_belum_dibuka` — tak ada shift terbuka di cabang (jalur online).
+ * - `shift_tidak_cocok` — tak ada shift yang mencakup waktu transaksi (jalur
+ *   `/api/sync`); membawa `data.shift_terdekat` sebagai konteks.
+ *
+ * Ketiga yang terakhir berarti transaksinya TIDAK tercatat.
+ */
+export type SebabPenjualanGagal =
+  | "bill_sudah_dibayar"
+  | "bill_dibatalkan"
+  | "kasir_belum_dibuka"
+  | "shift_tidak_cocok";
+
 /** Baris riwayat transaksi kasir (untuk cek pesanan / cetak ulang struk). */
 export interface RiwayatTransaksiRow {
   id: string;
@@ -2866,9 +3062,12 @@ export interface RiwayatTransaksiRow {
   total: number;
   is_dine_in: boolean;
   /**
-   * Penanda PENYAJIAN dari Papan Pesanan Masuk — dapur bisa mengubahnya jadi
-   * bawa pulang setelah transaksi tercatat. Sengaja TERPISAH dari `is_dine_in`
-   * (fakta pembukuan yang sudah dipakai menghitung konsumsi bahan & HPP).
+   * PENYAJIAN dari Papan Pesanan Masuk — dapur bisa mengubahnya jadi bawa
+   * pulang setelah transaksi tercatat. Sengaja TERPISAH dari `is_dine_in`:
+   * yang terakhir itu fakta pembukuan (di mana pesanan dimakan), sedangkan
+   * INI adalah basis biaya — `hpp_satuan`, `total_hpp`, dan pemakaian bahan
+   * dihitung darinya. Mengubahnya pada transaksi yang sudah dibayar MEMICU
+   * hitung-ulang biaya transaksi tersebut, termasuk stok kemasan take away.
    *
    * DITURUNKAN dari baris: true hanya bila SELURUH baris transaksi ditandai
    * bawa pulang. Penandanya sendiri disimpan per baris (`sale_items`).
@@ -2896,6 +3095,18 @@ export interface RiwayatTransaksiRow {
   metode: MetodeBayar;
   /** nama cabang transaksi — terisi utk tampilan lintas cabang (?branch_id=all) */
   cabang: string | null;
+  /**
+   * Lama seluruh pesanan ini rampung, dalam DETIK — `null` bila masih ada baris
+   * yang dikerjakan, atau bila seluruh barisnya batal.
+   *
+   * Diukur dari baris paling awal masuk sampai baris paling akhir selesai:
+   * "berapa lama tamu menunggu sampai semuanya keluar". Transaksi lama yang
+   * dapurnya tak pernah menandai selesai bernilai `null`, bukan 0 — nol berarti
+   * "keluar seketika", dan itu kebohongan yang rapi.
+   */
+  pesanan_durasi_detik: number | null;
+  /** kapan baris terakhir ditandai selesai (ISO); `null` bila belum rampung */
+  pesanan_selesai_pada: string | null;
 }
 
 /** Member/pelanggan pada daftar member area (dengan agregat transaksi). */
@@ -2922,7 +3133,43 @@ export interface CustomerTransaksi {
 
 /** Detail member: profil + riwayat transaksinya. */
 export interface CustomerDetail extends CustomerDto {
+  /** maksimal 300 baris, TERBARU dulu — selebihnya `transaksi_terpotong` */
   transaksi: CustomerTransaksi[];
+  /**
+   * true bila daftar di atas DIPOTONG — member ini punya transaksi lain yang
+   * tak ikut terkirim.
+   *
+   * `jumlah_transaksi`, `total_belanja` dan `terakhir` yang diwarisi dari
+   * `CustomerDto` TIDAK terpengaruh: ketiganya datang dari agregat SQL yang
+   * tak dibatasi, bukan dari menjumlahkan `transaksi` di atas. Itu bagian
+   * pentingnya — memotong daftar tanpa memindahkan agregatnya lebih dulu akan
+   * membuat "Total belanja" seorang member turun diam-diam begitu transaksinya
+   * melewati baris ke-300.
+   */
+  transaksi_terpotong: boolean;
+}
+
+/**
+ * Balasan `GET /customer` — daftar member BERBATAS, bukan seluruhnya.
+ *
+ * Dulu berupa `CustomerDto[]` tanpa batas: satu warung dengan 10.000 member
+ * mengirim 1,61 MB tiap kali halaman Member dibuka, dan pencariannya
+ * dikerjakan di browser atas seluruh larik itu. Sekarang server yang mencari
+ * (`?q=`), server pula yang membatasi.
+ */
+export interface CustomerListDto {
+  /** maksimal 300 member; terbaru bertransaksi dulu */
+  items: CustomerDto[];
+  /**
+   * true bila masih ada member lain di luar daftar ini.
+   *
+   * WAJIB ditampilkan bersama ajakan memakai pencarian: tanpa itu, member
+   * ke-301 tak sekadar tak terlihat — ia tak bisa ditemukan sama sekali, dan
+   * layarnya berbunyi "Belum ada member" untuk orang yang jelas-jelas ada.
+   */
+  terpotong: boolean;
+  /** jumlah member sebenarnya (agregat tanpa batas), untuk judul halaman */
+  total: number;
 }
 
 /** Baris di Tempat Sampah: transaksi yang di-soft-delete (hanya catatan, tak bisa dikembalikan). */
@@ -2951,11 +3198,112 @@ export interface LaporanHarian {
   per_metode: { metode: MetodeBayar; jumlah: number; total: number }[];
   /** total potongan/diskon yang diberikan pada rentang (Rp) */
   total_diskon: number;
+  /**
+   * Uang yang dikembalikan atas penjualan RENTANG INI (Rp), berapa pun refundnya
+   * dilakukan — akrual: refund milik periode transaksi aslinya, bukan periode
+   * saat uangnya keluar laci.
+   *
+   * `omzet` di atas SUDAH bersih dari angka ini (`sales.subtotal` disusutkan tiap
+   * refund), jadi baris ini bukan potongan kedua — ia PENJELAS. Tanpanya laporan
+   * periode lampau bisa mengecil sendiri tanpa satu pun baris yang menerangkan
+   * kenapa: omzet kotornya = `omzet + total_refund`.
+   */
+  total_refund: number;
+  /** banyaknya kejadian refund yang menyusutkan rentang ini */
+  jumlah_refund: number;
   pb1_terkumpul: number;
   total_hpp: number;
   estimasi_profit: number;
   item_terjual: { menu_nama: string; qty: number; omzet: number }[];
   konsumsi_bahan: { nama: string; slug: string; qty: number }[];
+  /**
+   * Sebaran transaksi per JAM pada rentang, di zona waktu perusahaan.
+   *
+   * Hanya memuat jam dari transaksi PERTAMA sampai TERAKHIR — bukan 00–23.
+   * Warung yang buka jam 10 dan tutup jam 21 tak perlu memandangi sepuluh
+   * kolom kosong untuk menemukan jam ramainya; yang dicari orang di grafik ini
+   * adalah bentuk harinya, dan kolom kosong di kedua ujung justru meratakannya.
+   *
+   * Jam KOSONG DI TENGAH tetap ada dan bernilai 0 — itu jeda sungguhan
+   * (jam sepi selepas makan siang), dan menghapusnya akan memampatkan sumbu
+   * waktu sehingga dua jam yang berjauhan terlihat bersebelahan.
+   *
+   * Untuk rentang lebih dari satu hari, angkanya adalah TOTAL per jam-hari
+   * sepanjang rentang itu (mis. "jam 12" = seluruh transaksi jam 12 pada semua
+   * hari terpilih), bukan rata-rata.
+   */
+  per_jam: { jam: number; jumlah: number; omzet: number }[];
+}
+
+/**
+ * Lama pengerjaan satu menu pada rentang — rata-rata & sebarannya.
+ *
+ * `median` ikut dibawa karena rata-rata sendirian menyesatkan di dapur: satu
+ * pesanan yang lupa ditandai selesai sampai tutup toko menarik rata-rata naik
+ * berjam-jam, sementara median tetap menggambarkan hari yang sebenarnya.
+ * Menampilkan keduanya membuat pencilan itu terlihat, bukan tersembunyi.
+ */
+export interface DurasiMenuRow {
+  menu_nama: string;
+  /** banyaknya porsi/baris selesai yang terhitung */
+  jumlah: number;
+  rata_detik: number;
+  median_detik: number;
+  tercepat_detik: number;
+  terlama_detik: number;
+  /** target penyajian menu ini (detik); null = belum ditetapkan */
+  target_detik: number | null;
+  /**
+   * Berapa porsi yang MELEWATI target. 0 bila tak ada target.
+   *
+   * Dilaporkan berdampingan dengan `lewat_target` karena keduanya menjawab
+   * pertanyaan berbeda: menu yang mediannya di bawah target tapi seperempat
+   * porsinya lewat punya masalah yang tak terlihat dari median saja.
+   */
+  lewat_jumlah: number;
+  /**
+   * Menu ini BIASANYA lewat target — dasarnya MEDIAN, bukan rata-rata.
+   *
+   * Satu pesanan yang lupa ditandai sampai tutup toko menarik rata-rata naik
+   * berjam-jam; bendera yang memakai rata-rata akan menyala untuk menu yang
+   * sebenarnya baik-baik saja, dan bendera yang sering salah akan diabaikan.
+   */
+  lewat_target: boolean;
+}
+
+/** Satu penyelesaian pesanan — siapa menandai apa, kapan, dan berapa lama. */
+export interface DurasiRiwayatRow {
+  /** nomor struk; null bila baris ini selesai selagi masih open bill */
+  nomor: string | null;
+  menu_nama: string;
+  /** nama orang yang menandai selesai; null bila tak tercatat (data lama) */
+  oleh: string | null;
+  /** kapan ditandai selesai (ISO) */
+  selesai_pada: string;
+  durasi_detik: number;
+}
+
+/**
+ * Laporan lama pengerjaan pesanan pada rentang tanggal.
+ *
+ * Hanya baris yang BENAR-BENAR selesai yang dihitung — baris `batal` dan baris
+ * yang tak pernah ditandai tidak ikut. Menghitungnya sebagai 0 akan membuat
+ * dapur yang lalai mencatat terlihat paling cepat.
+ */
+export interface LaporanDurasiPesanan {
+  dari: string;
+  sampai: string;
+  /** banyaknya baris selesai yang terhitung di seluruh rentang */
+  jumlah: number;
+  /** rata-rata seluruh baris (detik); 0 bila tak ada yang terhitung */
+  rata_detik: number;
+  /** banyaknya menu yang PUNYA target pada rentang ini */
+  bertarget: number;
+  /** banyaknya menu yang biasanya melewati targetnya (median > target) */
+  lewat_target: number;
+  per_menu: DurasiMenuRow[];
+  /** penyelesaian terbaru lebih dulu — dibatasi agar layar tak kebanjiran */
+  riwayat: DurasiRiwayatRow[];
 }
 
 /** Satu baris ranking menu terlaris. */
@@ -2995,6 +3343,17 @@ export interface OpenBillItemDto {
   /** null = ikut mode transaksi; true/false = override dine-in per baris */
   dine_in_override: boolean | null;
   catatan: string | null;
+  /**
+   * Status pengerjaan dapur baris ini.
+   *
+   * `batal` berarti sajiannya TIDAK JADI DIBUAT — di lapangan sebabnya bahan
+   * ternyata habis. Baris itu tetap ada demi jejak audit (siapa & kapan
+   * membatalkannya) dan WAJIB dikirim balik saat `PUT`, karena penjaga di
+   * server menolak pembaruan yang menghilangkan baris. Tapi ia tidak boleh
+   * ikut ditagih: tanpa penanda ini kasir tak punya cara membedakannya dari
+   * baris biasa, dan pembeli membayar makanan yang tak pernah dibuat.
+   */
+  pesanan_status: PesananStatus;
 }
 
 /** Ringkasan open bill untuk daftar/pemilih bill di kasir. */
@@ -3049,20 +3408,47 @@ export interface PesananItemRow {
   /** id baris (`sale_items.id` / `open_bill_items.id`) — tujuan tombol per baris */
   id: string;
   nama: string;
+  /**
+   * Porsi yang HARUS DIBUAT — sudah dikurangi yang uangnya dikembalikan.
+   *
+   * Papan ini lembar perintah dapur, jadi angkanya harus angka yang ditagih.
+   * Refund lahir justru karena bahannya habis; menampilkan porsi mentahnya akan
+   * menyuruh dapur memasak sesuatu yang sudah dibatalkan dan tidak dibayar.
+   */
   qty: number;
+  /** porsi yang sudah dikembalikan uangnya (0 untuk bill yang belum dibayar) */
+  qty_refund: number;
   /** personalisasi pelanggan, mis. "tanpa sambal" */
   catatan: string | null;
   is_dine_in: boolean;
   status: PesananStatus;
   /**
-   * Penanda penyajian "bawa pulang" per baris. SENGAJA terpisah dari
-   * `is_dine_in`: yang terakhir itu fakta pembukuan yang sudah dipakai
-   * menghitung pemakaian bahan & HPP, dan tidak diubah oleh papan.
+   * Penyajian "bawa pulang" per baris. SENGAJA terpisah dari `is_dine_in`:
+   * yang terakhir itu fakta pembukuan (di mana pesanan dimakan) dan TIDAK
+   * diubah oleh papan; yang INI adalah basis biaya — pemakaian bahan & HPP
+   * baris ini dihitung darinya, jadi menandainya bawa pulang membuat kemasan
+   * take away benar-benar terpakai dan stoknya berkurang.
    */
   sajian_takeaway: boolean;
   /** siapa & kapan status baris ini terakhir diubah; null = belum disentuh */
   status_oleh: string | null;
   status_pada: string | null;
+  /**
+   * Kapan baris INI masuk dapur (ISO) — pangkal hitungan lama pengerjaan.
+   *
+   * Per baris, bukan per kartu: satu bill hidup berjam-jam dan pesanannya
+   * datang bergelombang. Ronde kedua pukul 21.00 pada bill yang dibuka pukul
+   * 19.00 dihitung sejak 21.00.
+   */
+  masuk_pada: string;
+  /**
+   * Lama pengerjaan dalam DETIK, `null` selama baris belum selesai.
+   *
+   * Dihitung server, bukan klien: papan pesanan terbuka di beberapa perangkat
+   * yang jamnya bisa berbeda, dan angka yang sama harus terbaca sama di semua
+   * layar. Baris `batal` juga `null` — tak ada pekerjaan yang diselesaikan.
+   */
+  durasi_detik: number | null;
 }
 
 /** Satu kartu di papan pesanan. */
@@ -3095,6 +3481,19 @@ export interface PesananRow {
   /** perubahan status baris terakhir pada kartu ini; null = belum ada */
   status_oleh: string | null;
   status_pada: string | null;
+  /**
+   * Lama SELURUH pesanan ini rampung, dalam detik — `null` selama masih ada
+   * baris yang dikerjakan.
+   *
+   * Dihitung dari baris paling AWAL masuk sampai baris paling AKHIR selesai,
+   * jadi ia menjawab "berapa lama tamu menunggu sampai semuanya keluar",
+   * bukan menjumlahkan waktu tiap sajian.
+   *
+   * Baris `batal` tak ikut menghitung dan tak menahan: pesanan yang sebagian
+   * dibatalkan tetap bisa rampung. Kartu yang SELURUH barisnya batal bernilai
+   * `null` — tak ada yang pernah dikerjakan.
+   */
+  durasi_detik: number | null;
 }
 
 /** Satu baris riwayat perubahan status sebuah pesanan. */
@@ -3277,7 +3676,22 @@ export interface ShiftTransaksiRow {
 
 /** Detail satu shift = ringkasan shift + daftar transaksi di jendela waktunya. */
 export interface ShiftDetail extends Shift {
+  /** maksimal 300 baris, TERBARU dulu — selebihnya `transaksi_terpotong` */
   transaksi: ShiftTransaksiRow[];
+  /**
+   * true bila daftar di atas DIPOTONG — masih ada transaksi lain yang tak ikut
+   * terkirim.
+   *
+   * Wajib ditampilkan: layar detail shift memuat `jumlah_transaksi` (hitungan
+   * sebenarnya, dari agregat tanpa batas) tepat di atas daftar ini. Pada shift
+   * ramai keduanya berbeda — "Transaksi 420x" lalu "Transaksi (300)"
+   * berdampingan — dan tanpa penanda, selisih itu terbaca sebagai transaksi
+   * yang HILANG, di layar tempat kasir sedang mempertanggungjawabkan uang.
+   *
+   * Rekap kasnya sendiri TIDAK terpengaruh: penjualan_tunai/nontunai dan
+   * jumlah_transaksi datang dari agregat terpisah yang tak dibatasi.
+   */
+  transaksi_terpotong: boolean;
 }
 
 /**
@@ -3351,6 +3765,16 @@ export interface AbsenResult {
   jarak_m?: number | null;
   /** foto swafoto bukti absen (URL) */
   foto_url: string | null;
+}
+
+/**
+ * Jawaban `GET /absensi/status` — apakah PEMANGGIL sedang hadir di cabangnya
+ * (sudah cap masuk, belum cap pulang). Sengaja terpisah dari `AbsensiRow`:
+ * daftar itu dikurung satu tanggal kalender, sedangkan sesi hadir bisa
+ * melewati tengah malam. Ini sumber yang sama dengan gerbang buka-kasir.
+ */
+export interface StatusHadirDto {
+  hadir: boolean;
 }
 
 /** Ringkasan absensi seorang karyawan pada satu hari (daftar di halaman Absen). */
@@ -3620,6 +4044,16 @@ export interface PerlengkapanRowDto {
    * INI Central Kitchen-nya
    */
   saldo_ck: number | null;
+  /**
+   * Sudah BERANGKAT dari cabang ini tapi belum ditekan Terima di tujuannya.
+   *
+   * Ledger perlengkapan baru bergerak saat diterima, jadi `saldo` di atas masih
+   * memuat barang yang raknya sudah kosong. Yang benar-benar ada di rak adalah
+   * `saldo - dalam_jalan`, dan ITU yang harus dibandingkan stock opname —
+   * lihat catatan di `buatOpnamePerlengkapan`. Selalu 0 untuk cabang toko:
+   * hanya CK yang mengirim.
+   */
+  dalam_jalan: number;
 }
 
 /** Satu lokasi (cabang) tempat perlengkapan berada + aturan konsumsinya. */
@@ -3735,6 +4169,102 @@ export interface BeliPerlengkapanRow {
   permintaan_aktif: boolean;
 }
 
+/**
+ * KIRIMAN MENGGANTUNG — barang yang sudah berpindah cabang tapi tak bisa
+ * diterima siapa pun: tak ada tombol Terima, stok tak pernah bertambah, dan
+ * tak ada satu pun layar yang menampilkannya. Fakturnya berbunyi "Dikirim"
+ * padahal barangnya hilang dari pembukuan.
+ *
+ * Jumlah yang BENAR adalah NOL. Apa pun di atas nol berarti ada barang yang
+ * perlu ditangani manusia — bukan sekadar angka untuk dipajang.
+ */
+export interface KirimanMenggantung {
+  id: string;
+  faktur_id: string;
+  /** nomor faktur (PB-/PR-) supaya bisa dicocokkan dgn kartu Beli/Produksi */
+  nomor: string | null;
+  tipe: JenisPengadaan;
+  status: KonfirmasiStatus;
+  qty: number;
+  waktu: string;
+  bahan: string;
+  satuan: string;
+  /** cabang tempat barangnya tercatat sekarang */
+  posisi_sekarang: string | null;
+  /** cabang yang mengirimnya */
+  dikirim_dari: string | null;
+  /** sudah berapa hari menggantung — makin tua makin gawat */
+  umur_hari: number;
+}
+
+/** Satu barang di dalam satu kiriman yang sudah diterima/ditolak. */
+export interface RiwayatPenerimaanItem {
+  id: string;
+  bahan: string;
+  satuan: string;
+  /** qty yang BENAR-BENAR diterima */
+  qty: number;
+  qty_teks: string;
+  /** qty yang dikirim — hanya terisi bila dipakai Terima Sebagian */
+  qty_dipesan: number | null;
+  qty_dipesan_teks: string | null;
+  status: KonfirmasiStatus;
+  tempat: string | null;
+  total_harga: number | null;
+}
+
+/**
+ * RIWAYAT PENERIMAAN, satu entri = SATU FAKTUR (satu surat jalan) — satuan
+ * yang sama dengan daftar "Menunggu penerimaan", supaya orang gudang tak perlu
+ * berpindah cara pandang saat mencocokkan.
+ */
+export interface RiwayatPenerimaanFaktur {
+  faktur_id: string;
+  /** nomor dokumen (PB-/PR-/TF-) */
+  nomor: string | null;
+  no_faktur: string | null;
+  jalur: JenisPengadaan;
+  cabang: string | null;
+  supplier: string | null;
+  /** waktu keputusan TERAKHIR — satu faktur bisa diterima bertahap */
+  waktu: string | null;
+  /** siapa yang menerima/menolak */
+  oleh: string | null;
+  alasan_tolak: string | null;
+  /** diterima = utuh, sebagian = ada yang kurang/ditolak, ditolak = tak ada yang masuk */
+  hasil: "diterima" | "sebagian" | "ditolak";
+  jumlah_item: number;
+  items: RiwayatPenerimaanItem[];
+}
+
+/** Ringkasan pendeteksi kiriman menggantung; `jumlah: 0` = sehat. */
+export interface AnomaliKiriman {
+  /** JUMLAH SELURUH baris menggantung — dihitung SQL, bukan `rows.length`. */
+  jumlah: number;
+  /** total qty SELURUH baris menggantung — juga dari SQL, bukan dari `rows`. */
+  qty_total: number;
+  /** baris yang ditampilkan: yang PALING TUA, berlangit-langit. */
+  rows: KirimanMenggantung[];
+  /**
+   * Faktur mana saja yang punya baris menggantung — dasar tanda "barang tidak
+   * sampai" di kartu Beli & Produksi.
+   *
+   * Medan tersendiri, dan itu bukan kemewahan: sejak `rows` berlangit-langit,
+   * menurunkan tandanya dari `rows` membuat faktur ke-101 kehilangan tandanya
+   * diam-diam — kerusakan yang lahir dari perbaikan, tepat saat masalahnya
+   * paling besar.
+   */
+  faktur_ids: string[];
+  /** `rows` dipotong (`jumlah` > yang dikirim). `jumlah` tetap utuh. */
+  terpotong: boolean;
+}
+
+/** Hasil penghapusan kiriman menggantung (id yang tak menggantung dilewati). */
+export interface TutupAnomaliHasil {
+  ditutup: number;
+  dilewati: number;
+}
+
 /** Kiriman perlengkapan CK → cabang (stok pindah saat cabang menerima). */
 export interface KirimanPerlengkapanDto {
   id: string;
@@ -3834,6 +4364,20 @@ export interface RiwayatHargaLot {
   no_faktur: string | null;
   /** nomor dokumen otomatis (PB-/PL-) */
   nomor: string | null;
+  /**
+   * true = harganya TEBAKAN, bukan angka yang pernah dilihat manusia: faktur
+   * dibuat tanpa harga, jadi diisi qty × harga acuan SAAT ITU.
+   *
+   * Wajib ada di DTO, bukan cuma di server: lot begini TIDAK boleh ikut
+   * menentukan terendah/tertinggi/median/rata-rata (lihat `statistikHargaLots`),
+   * dan barisnya tetap ditampilkan — sehingga layar butuh cara membedakannya.
+   * Tanpa penanda ini, daftar lot memuat harga yang tak pernah terjadi tanpa
+   * satu pun keterangan.
+   *
+   * Perlengkapan selalu `false`: `supply_mutations` tak punya jalur tebakan,
+   * semua harganya diketik manusia (atau kosong, dan yang kosong dilewati).
+   */
+  harga_tebakan: boolean;
 }
 
 /** Titik harga ekstrem riwayat pembelian: nilainya berapa & kapan terjadi. */
@@ -3875,6 +4419,31 @@ export interface RiwayatHargaDto {
   harga_median: number | null;
   /** jumlah lot pembelian tercatat */
   jumlah_pembelian: number;
+  /**
+   * Berapa lot yang benar-benar MENENTUKAN keempat angka statistik di atas —
+   * yaitu lot berharga yang bukan tebakan.
+   *
+   * Selalu ≤ `jumlah_pembelian`, dan selisihnya bukan kesalahan: layar
+   * memakainya untuk menjelaskan kenapa "7 lot tercatat" bisa punya median
+   * dari 1 harga. Tanpa angka ini, statistik yang benar justru terbaca seperti
+   * angka yang rusak.
+   */
+  jumlah_harga_nyata: number;
+  /** maksimal 300 lot, TERBARU dulu — selebihnya `lots_terpotong` */
   lots: RiwayatHargaLot[];
+  /**
+   * true bila daftar lot di atas DIPOTONG — masih ada pembelian lain yang tak
+   * ikut terkirim.
+   *
+   * Kelima angka di atas (`harga_terendah`, `harga_tertinggi`, `harga_median`,
+   * `harga_rata`, `jumlah_pembelian`) TIDAK terpengaruh: semuanya dihitung dari
+   * SELURUH lot lewat kueri terpisah yang tak dibatasi, bukan dari daftar ini.
+   *
+   * Itu bagian pentingnya. Median di kartu ini jadi HARGA ACUAN RAB belanja,
+   * dan harga acuan itu dasar HPP setiap menu yang memakai bahannya —
+   * menghitungnya dari 300 lot terbaru saja akan menggeser HPP seluruh menu
+   * tanpa satu pun galat muncul.
+   */
+  lots_terpotong: boolean;
 }
 ```

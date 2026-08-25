@@ -48,7 +48,16 @@ export function RiwayatHargaPanel({
   // harga acuan saat itu. Server sudah mengeluarkannya dari statistik; layar
   // yang bertugas membuatnya terlihat, sebab barisnya tetap ditampilkan.
   const jumlahNyata = data?.jumlah_harga_nyata ?? 0;
-  const adaTebakan = (data?.lots ?? []).some((l) => l.harga_tebakan);
+  /*
+    DIHITUNG DARI ANGKA POPULASI, BUKAN DARI `lots`.
+
+    `lots` kini dipotong 300 baris. Menyimpulkan "ada lot tebakan" dengan
+    memindai larik yang dipotong berarti penjelasan kuningnya HILANG persis
+    pada bahan yang riwayatnya paling panjang — sementara "12.018 lot" dan
+    "statistik dari 4 harga" tetap berdampingan di layar tanpa satu kalimat
+    pun yang menerangkan selisihnya.
+  */
+  const adaTebakan = data != null && data.jumlah_pembelian > jumlahNyata;
 
   const simpan = useMutation({
     mutationFn: () =>
@@ -165,6 +174,19 @@ export function RiwayatHargaPanel({
           tanpa harga, diisi dari harga acuan saat itu) — ditandai <b>≈</b> di daftar dan
           TIDAK ikut menghitung statistik di atas. Statistiknya dari {jumlahNyata} harga yang
           benar-benar dilaporkan. Isi harga aslinya lewat <b>Laporan Harga</b>.
+        </p>
+      )}
+
+      {/*
+        DIPOTONG HARUS TERBACA. "12.018 lot tercatat" tepat di atas daftar
+        berisi 300 baris terbaca sebagai pembelian yang hilang — di kartu tempat
+        orang memutuskan harga acuan belanjanya.
+      */}
+      {data.lots_terpotong && (
+        <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          Menampilkan <b>{data.lots.length}</b> pembelian terbaru dari{" "}
+          <b>{data.jumlah_pembelian}</b> yang tercatat. Keempat angka statistik di atas
+          tetap dihitung dari <b>seluruh</b> pembelian, bukan cuma yang tampil di sini.
         </p>
       )}
 

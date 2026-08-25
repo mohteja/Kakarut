@@ -1,4 +1,4 @@
-import { zValidator } from "@hono/zod-validator";
+import { zValidator } from "../../lib/validator";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -18,6 +18,7 @@ import {
   terapkanRetensi,
   zonaWaktuCadangan,
 } from "../../lib/backup";
+import { sapuUnggahanYatim } from "../../lib/sapu-unggahan";
 import { keadaanCadangan, peringatanTerakhir } from "../../lib/backup-peringatan";
 import { periksaSetelan } from "../../lib/pemeriksaan-setelan";
 import { getSmtpRow, kirimEmail, penyediaEmail, ujiKoneksiSmtp, type SmtpRow } from "../mail/service";
@@ -64,7 +65,7 @@ const SmtpBody = z.object({
   encryption: z.enum(["none", "ssl", "starttls"]).optional(),
   sender_name: z.string().trim().nullish(),
   sender_email: z.string().trim().email().nullish(),
-});
+}).strict();
 
 /** Panel sistem super-admin: status DB & migrasi + pengaturan email (SMTP). */
 export const adminSystemRoutes = new Hono<AppEnv>()
@@ -207,6 +208,18 @@ export const adminSystemRoutes = new Hono<AppEnv>()
     const dibuang = await terapkanRetensi();
     return c.json({ ok: true, dibuang });
   })
+  // Sapu berkas unggahan yatim sekarang. ?hitung=1 = mode ukur (tanpa hapus).
+  .post("/sapu-unggahan", async (c) => {
+    try {
+      const h = await sapuUnggahanYatim({ hanyaHitung: c.req.query("hitung") === "1" });
+      return c.json({ ok: true, ...h });
+    } catch (e) {
+      // mis. advisory lock (sapuan lain sedang berjalan)
+      throw new HTTPException(409, {
+        message: e instanceof Error ? e.message : "Sapuan gagal",
+      });
+    }
+  })
   // Pengaturan email (SMTP) tingkat platform — dipakai reset password & undangan.
   .get("/smtp", async (c) => {
     return c.json(smtpDto(await getSmtpRow()));
@@ -253,7 +266,7 @@ export const adminSystemRoutes = new Hono<AppEnv>()
         to: z.string().trim().email().optional(),
         subject: z.string().trim().optional(),
         html: z.string().optional(),
-      }),
+      }).strict(),
     ),
     async (c) => {
       const auth = c.get("auth");

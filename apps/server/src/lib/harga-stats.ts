@@ -15,6 +15,21 @@ export function median(nilai: number[]): number | null {
   return Math.round(m * 100) / 100;
 }
 
+/**
+ * Harga per satuan sebuah lot — SATU tempat, karena rumus yang sama pernah
+ * hidup di tiga berkas sekaligus (`acuanDariLot` di sini, kartu Riwayat Harga
+ * bahan, kartu Riwayat Harga perlengkapan).
+ *
+ * Pembulatannya bagian dari jawabannya, bukan kosmetik: median, terendah dan
+ * tertinggi dihitung DARI angka yang sudah dibulatkan ini. Dua salinan yang
+ * membulatkan berbeda akan menghasilkan harga acuan yang berbeda untuk data
+ * yang sama — dan harga acuan itu dasar HPP setiap menu yang memakai bahannya.
+ */
+export function hargaPerSatuanLot(totalHarga: number | null, qty: number): number | null {
+  if (totalHarga == null || qty <= 0) return null;
+  return Math.round((totalHarga / qty) * 100) / 100;
+}
+
 /** Satu lot pembelian yang ikut menentukan harga acuan. */
 export interface LotAcuan {
   id: string;
@@ -40,16 +55,54 @@ export function acuanDariLot(
   dilaporkan: Array<{ id: string; qty: number; totalHarga: number }>,
   fallback: number | null,
 ): number | null {
-  const perSatuan = (totalHarga: number, qty: number) =>
-    Math.round((totalHarga / qty) * 100) / 100;
   const sedangDilaporkan = new Set(dilaporkan.map((d) => d.id));
   const hargaSatuan = lots
     .filter((l) => !sedangDilaporkan.has(l.id) && l.totalHarga != null && l.qty > 0)
-    .map((l) => perSatuan(l.totalHarga!, l.qty));
+    .map((l) => hargaPerSatuanLot(l.totalHarga, l.qty)!);
   for (const d of dilaporkan) {
-    if (d.qty > 0) hargaSatuan.push(perSatuan(d.totalHarga, d.qty));
+    if (d.qty > 0) hargaSatuan.push(hargaPerSatuanLot(d.totalHarga, d.qty)!);
   }
   return median(hargaSatuan) ?? fallback;
+}
+
+/**
+ * Berapa lot yang ikut TERKIRIM di kartu Riwayat Harga.
+ *
+ * Bukan berapa yang ikut DIHITUNG — statistiknya selalu dari seluruh lot.
+ * Kartu ini hanya memperlihatkan riwayat terbaru; yang lebih lama diambil lewat
+ * laporan, bukan dengan membesarkan satu balasan tanpa langit-langit.
+ */
+export const BATAS_LOT_RIWAYAT = 300;
+
+/**
+ * Baris lot sempit dari basis data → bentuk yang dibaca `statistikHargaLots`.
+ *
+ * Perantara ini ada supaya kueri statistik boleh SEMPIT (empat kolom, tanpa
+ * join) sementara kueri daftar tetap lengkap dan berbatas. Keduanya melewati
+ * `hargaPerSatuanLot` yang sama, jadi angka yang dihitung dan angka yang
+ * ditampilkan mustahil membulatkan berbeda.
+ */
+export function lotStatistik(
+  rows: Array<{
+    tanggal: string;
+    qty: number;
+    totalHarga: number | null;
+    hargaTebakan: boolean;
+  }>,
+): Array<{
+  harga_satuan: number | null;
+  tanggal: string;
+  qty: number;
+  total_harga: number | null;
+  harga_tebakan: boolean;
+}> {
+  return rows.map((r) => ({
+    harga_satuan: hargaPerSatuanLot(r.totalHarga, r.qty),
+    tanggal: r.tanggal,
+    qty: r.qty,
+    total_harga: r.totalHarga,
+    harga_tebakan: r.hargaTebakan,
+  }));
 }
 
 export interface StatistikHarga {
@@ -131,7 +184,9 @@ export function statistikHargaLots(
     harga_terendah: terendah,
     harga_tertinggi: tertinggi,
     harga_median: median(berharga),
-    harga_rata: sumQty > 0 ? Math.round((sumHarga / sumQty) * 100) / 100 : null,
+    // Rata-rata TERTIMBANG = harga per satuan dari seluruh kolam (Σtotal ÷
+    // Σqty), jadi pembulatannya harus rumus yang sama — bukan salinan keempat.
+    harga_rata: hargaPerSatuanLot(sumHarga, sumQty),
     jumlah_harga_nyata: berharga.length,
   };
 }

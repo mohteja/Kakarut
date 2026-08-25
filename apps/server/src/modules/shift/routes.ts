@@ -1,4 +1,5 @@
-import { zValidator } from "@hono/zod-validator";
+import { zValidator } from "../../lib/validator";
+import { BATAS_UANG } from "../../lib/batas-angka";
 import { and, asc, desc, eq, inArray, isNotNull, isNull, or, sql, sum } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Hono } from "hono";
@@ -115,7 +116,7 @@ async function rekapWindow(
   const rows = await db
     .select({
       metode: sales.metodeBayar,
-      total: sql<number>`COALESCE(SUM(${sales.total} + ${sales.refundTotal}), 0)`,
+      total: sql<number>`COALESCE(SUM(${sales.total} + ${sales.refundTotal}), 0)::float8`,
       jumlah: sql<number>`count(*)::int`,
     })
     .from(sales)
@@ -734,7 +735,7 @@ export const shiftRoutes = new Hono<AppEnv>()
   .post(
     "/buka",
     requireRole("cashier"),
-    zValidator("json", z.object({ modal_awal: z.number().nonnegative().default(0) })),
+    zValidator("json", z.object({ modal_awal: z.number().nonnegative().max(BATAS_UANG).default(0) }).strict()),
     async (c) => {
       const auth = c.get("auth");
       const branchId = await branchUntukTulis(
@@ -781,7 +782,7 @@ export const shiftRoutes = new Hono<AppEnv>()
   .post(
     "/kunci-hitungan",
     requireRole("cashier"),
-    zValidator("json", z.object({ uang_fisik: z.number().nonnegative() })),
+    zValidator("json", z.object({ uang_fisik: z.number().nonnegative().max(BATAS_UANG) }).strict()),
     async (c) => {
       const auth = c.get("auth");
       const branchId = await resolveBranchId(c);
@@ -832,11 +833,24 @@ export const shiftRoutes = new Hono<AppEnv>()
   .post(
     "/tutup",
     requireRole("cashier"),
+    /*
+     * SENGAJA TIDAK `.strict()` — satu-satunya badan JSON di server ini yang
+     * TETAP menerima kunci asing, dan alasannya sudah ditulis lebih dulu di
+     * `verify-api.sh` §152:
+     *
+     *   "klien yang mengirim field tak dikenal tak boleh gagal menutup shift —
+     *    itu terjadi tepat saat kasir mau pulang."
+     *
+     * Menutup shift adalah pintu paling tak boleh buntu di seluruh aplikasi:
+     * kasir berdiri di depan laci terbuka, dan 400 karena satu kunci yang tak
+     * dikenal berarti laci itu tak bisa ditutup malam ini. Kelonggarannya
+     * dibayar dengan pengetatan di 112 badan lain, bukan diberikan gratis.
+     */
     zValidator(
       "json",
       z.object({
         /** boleh kosong bila hitungan sudah dikunci lebih dulu */
-        uang_fisik: z.number().nonnegative().nullish(),
+        uang_fisik: z.number().nonnegative().max(BATAS_UANG).nullish(),
         catatan: z.string().nullish(),
         /** keterangan kasir bila hitungannya tak pas (mis. "kembalian kurang") */
         selisih_alasan: z.string().trim().max(300).nullish(),
@@ -937,7 +951,7 @@ export const shiftRoutes = new Hono<AppEnv>()
       z.object({
         status: z.enum(["disetujui", "ditolak"]),
         alasan_tolak: z.string().trim().max(300).nullish(),
-      }),
+      }).strict(),
     ),
     async (c) => {
       const auth = c.get("auth");

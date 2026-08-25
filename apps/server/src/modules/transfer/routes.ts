@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { zValidator } from "@hono/zod-validator";
+import { BATAS_QTY_STOK } from "../../lib/batas-angka";
+import { zValidator } from "../../lib/validator";
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Hono } from "hono";
@@ -66,12 +67,12 @@ const TransferBody = z.object({
     .array(
       z.object({
         ingredient_id: z.string().uuid(),
-        qty: z.number().positive(),
+        qty: z.number().positive().max(BATAS_QTY_STOK),
       }),
     )
     .min(1)
     .max(100),
-});
+}).strict();
 
 const pembuat = alias(users, "pembuat_transfer");
 const cabangAsal = alias(branches, "cabang_asal");
@@ -394,8 +395,14 @@ export const transferRoutes = new Hono<AppEnv>()
           // pemeriksaan "cukup atau tidak" di bawah baru berjalan setelah transfer
           // lain dari cabang yang sama selesai commit.
           await kunciKirimCabang(tx, auth.company_id!, asal.id);
+          // `tx`, bukan `db` — alasannya sama dengan jalur kiriman CK:
+          // menyewa koneksi kedua di dalam transaksi, dan `saldo` di sini vs
+          // `jalan` di bawah jadi dua snapshot. Lihat `test/koneksi-bersarang.test.ts`.
           const saldoAsal = new Map(
-            (await hitungSaldoCabang(auth.company_id!, asal.id)).map((r) => [r.ingredient_id, r]),
+            (await hitungSaldoCabang(auth.company_id!, asal.id, tx)).map((r) => [
+              r.ingredient_id,
+              r,
+            ]),
           );
           // saldo mentah masih memuat barang yang sedang di jalan → potong dulu
           const jalan = await qtyDalamJalan(tx, auth.company_id!, asal.id, ingIds);

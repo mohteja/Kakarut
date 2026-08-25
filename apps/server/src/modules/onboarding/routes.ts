@@ -1,4 +1,4 @@
-import { zValidator } from "@hono/zod-validator";
+import { zValidator } from "../../lib/validator";
 import { and, asc, desc, eq, isNull, ne, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -78,7 +78,7 @@ export const onboardingRoutes = new Hono<AppEnv>()
   // Buat perusahaan sendiri → jadi OWNER → sesi baru diarahkan ke perusahaan itu.
   .post(
     "/perusahaan",
-    zValidator("json", z.object({ nama: z.string().trim().min(1, "Nama usaha wajib diisi") })),
+    zValidator("json", z.object({ nama: z.string().trim().min(1, "Nama usaha wajib diisi") }).strict()),
     async (c) => {
       const auth = c.get("auth");
       if (auth.is_super_admin) {
@@ -189,7 +189,7 @@ export const onboardingRoutes = new Hono<AppEnv>()
   })
   // Hapus akun sendiri (SOFT delete): butuh konfirmasi password. Diblokir bila
   // pemanggil adalah OWNER terakhir sebuah perusahaan (harus serahkan/hapus dulu).
-  .delete("/akun", zValidator("json", z.object({ password: z.string() })), async (c) => {
+  .delete("/akun", zValidator("json", z.object({ password: z.string() }).strict()), async (c) => {
     const auth = c.get("auth");
     if (auth.is_super_admin) {
       throw new HTTPException(400, { message: "Akun super admin tidak bisa dihapus dari sini" });

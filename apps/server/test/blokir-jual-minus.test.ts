@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { SKALA_QTY_STOK_KOLOM, toleransiBanding } from "../src/lib/batas-angka";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
@@ -113,11 +114,26 @@ describe("saldo dibaca di dalam transaksi penulisan", () => {
     // Pengecualian untuk saldo minus akan membebaskan justru bahan yang paling
     // bermasalah. Keputusan sadar pemiliknya; dipatok supaya tak diperlunak
     // diam-diam saat ada yang mengeluh.
+    //
+    // Yang dipatok PERILAKUNYA, bukan ejaan toleransinya: vena B⁷ mengganti
+    // `1e-9` (angka firasat yang terukur berhenti berarti pada besaran ≥ 10⁷)
+    // dengan `toleransiBanding` yang diturunkan dari skala kolom + lantai
+    // derau float. Saldo minus tetap jatuh sebagai kurang di kedua bentuk —
+    // dan itu diuji langsung di bawah, bukan disimpulkan dari teksnya.
     const svc = baca("modules/stok/service.ts");
     const i = svc.indexOf("export async function bahanKurang(");
     expect(i).toBeGreaterThan(0);
     const blok = svc.slice(i, svc.indexOf("\n}", i));
-    expect(blok).toContain("if (r.saldo < perlu - 1e-9) {");
+    expect(blok).toMatch(/if \(r\.saldo < perlu - toleransiBanding\(/);
+    // PERILAKU: saldo minus dengan kebutuhan wajar tetap "kurang", pada
+    // besaran kecil MAUPUN besar (tempat toleransi lama sudah tak berarti).
+    for (const [saldo, perlu] of [
+      [-1, 0.5],
+      [-0.000001, 1],
+      [-5, 12_345_678],
+    ] as const) {
+      expect(saldo < perlu - toleransiBanding(perlu, SKALA_QTY_STOK_KOLOM)).toBe(true);
+    }
     expect(blok).not.toMatch(/r\.saldo\s*>\s*0\s*&&/);
   });
 });

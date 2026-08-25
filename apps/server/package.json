@@ -10,8 +10,13 @@
     "db:migrate": "tsx src/db/migrate-cli.ts",
     "db:restore": "tsx src/scripts/restore-backup.ts",
     "seed": "tsx src/seed/index.ts",
+    "sinkron:lampiran": "tsx src/scripts/sinkron-lampiran-dto.ts",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "acuan:uang-mobile": "tsx src/scripts/acuan-uang-mobile.ts",
+    "acuan:status-mobile": "tsx src/scripts/acuan-status-mobile.ts",
+    "audit:invarian": "tsx src/scripts/audit-invarian.ts",
+    "acuan:kunci-mobile": "tsx src/scripts/acuan-kunci-mobile.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1083.0",

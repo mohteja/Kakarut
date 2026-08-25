@@ -14,6 +14,8 @@ import { jadwalkanBackupOtomatis } from "./lib/backup";
 import { jadwalkanPeringatanCadangan } from "./lib/backup-peringatan";
 import { jadwalkanPemeriksaanSetelan } from "./lib/pemeriksaan-setelan";
 import { catatGalat, jadwalkanPangkasErrorLog } from "./lib/error-log";
+import { jadwalkanSapuUnggahan } from "./lib/sapu-unggahan";
+import { jadwalkanPangkasToken } from "./lib/pangkas-token";
 import { runMigrations } from "./db/migrate";
 import { backfillKodeMenu } from "./modules/menu/service";
 import { backfillKodeBahan } from "./modules/bahan/kode";
@@ -261,6 +263,15 @@ jadwalkanBackupOtomatis();
 // panelnya, dan halaman itu justru dibuka SETELAH cadangan dibutuhkan. Ini arah
 // sebaliknya — sistem yang mendatangi super admin lewat email.
 jadwalkanPeringatanCadangan();
+
+// Sapuan berkas unggahan yatim — sekali sehari, sejam sesudah jam cadangan
+// (jamnya UTC; yang penting "sekali sehari di jam sepi", bukan jam persisnya).
+// Advisory lock di dalamnya membuatnya aman multi-instance.
+jadwalkanSapuUnggahan((env.BACKUP_HOUR + 1) % 24);
+
+// Pemangkas token mati (reset/verifikasi kedaluwarsa, undangan yang sudah
+// selesai) — jam berikutnya lagi supaya tak menumpuk dengan sapuan di atas.
+jadwalkanPangkasToken((env.BACKUP_HOUR + 2) % 24);
 
 // Pemeriksaan setelan: hal-hal yang SAH menurut skema env, servernya menyala
 // tanpa keluhan, dan salahnya baru ketahuan berbulan-bulan kemudian.

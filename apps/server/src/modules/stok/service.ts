@@ -1,4 +1,6 @@
+import { toleransiBanding, SKALA_QTY_STOK_KOLOM } from "../../lib/batas-angka";
 import { eq, sql } from "drizzle-orm";
+import { hargaPerSatuanLot } from "../../lib/harga-stats";
 import {
   hargaPerUnit,
   qtyTeks,
@@ -285,9 +287,12 @@ export async function bahanKurang(
     // Bahan yang tak ada di daftar saldo = tak melacak stok / tak aktif.
     // Menganggapnya kurang akan menolak menu yang memang tak dibatasi bahan.
     if (!r) continue;
-    // EPS: qty boleh pecahan hasil konversi satuan, dan selisih 1e-16 bukan
-    // kekurangan — ia cuma sisa aritmetika floating point.
-    if (r.saldo < perlu - 1e-9) {
+    // Toleransi DITURUNKAN dari skala kolom + lantai derau float pada
+    // besaran itu (lihat `toleransiBanding`), bukan angka firasat: `1e-9`
+    // yang dulu di sini LEBIH KECIL daripada ULP double begitu besarannya
+    // ≥ 10⁷, dan terukur menolak penjualan yang stoknya persis cukup
+    // ("sisa 245.785 gr, butuh 245.785").
+    if (r.saldo < perlu - toleransiBanding(perlu, SKALA_QTY_STOK_KOLOM)) {
       kurang.push({
         ingredient_id: ingredientId,
         nama: r.nama,
@@ -730,9 +735,12 @@ export async function fifoBahan(params: {
         qty,
         // harga menempel di lot hanya bila faktur berharga; transfer tak
         // membawa harga (biayanya milik lot asal di CK) → null
+        // Penjaganya tetap di sini (transfer tak berharga, lot bernilai nol
+        // bukan "gratis" melainkan tak berharga); yang didelegasikan cuma
+        // PEMBULATANNYA — rumus yang sama pernah hidup dalam empat salinan.
         hargaSatuan:
-          jenis !== "transfer" && total != null && total > 0 && qty > 0
-            ? Math.round((total / qty) * 100) / 100
+          jenis !== "transfer" && total != null && total > 0
+            ? hargaPerSatuanLot(total, qty)
             : null,
         expDate: r.exp_date != null ? String(r.exp_date) : null,
       };

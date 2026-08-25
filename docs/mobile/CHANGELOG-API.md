@@ -26,6 +26,576 @@ tanpa akses repo server.
 ---
 
 
+## Rilis: Kunci idempotensi dibagi antara percobaan online dan antrean offline
+
+> Tidak ada migrasi. Aditif: `client_ref` (+ `device_id`) kini DITERIMA pada
+> `POST /perlengkapan/:id/pakai`, `POST /perlengkapan/opname`,
+> `POST /{jalur}/kirim/:fakturId`, dan `POST /produksi/kirim-hasil/:fakturId`
+> (pintu `/tahap` sudah menerimanya sejak dulu). Badan lama tanpa kunci tetap
+> sah dan berperilaku sama.
+
+🟡 **PERLU DILIHAT** — perilaku build lama tidak berubah, tapi lubangnya nyata
+dan terukur: percobaan online yang **commit di server** lalu balasannya hilang
+di jaringan diantre ulang dengan ref BARU, dan sinkron mengeksekusinya lagi —
+pemakaian perlengkapan terpotong **dua kali** (saldo 100→93→86, balasan "ok"),
+satu niat opname melahirkan **dua sesi kembar**, dan ubah-tahap dibalas 400
+"Tahap tidak berurutan" yang tampak gagal untuk aksi yang sebenarnya sukses.
+
+**Sudah di-merge ke production.**
+
+Ponsel di cabang `claude` kini mencetak `clientRef` SEBELUM percobaan online
+dan mengirim ref yang sama ke badan online (`client_ref`) dan ke antrean
+offline (envelope `/sync`) — server mengenalinya lewat ledger bersama dan
+membalas `sudah_ada` alih-alih mengeksekusi ulang. Enam situs: pakai/opname
+perlengkapan, tahap/kirim/kirim-hasil faktur (pola yang sudah dipakai
+penjualan, opname stok, dan absen). `shift_buka` sengaja tidak: terukur
+toleran (replay dibalas ok + `sudah_terbuka`, shift tetap satu).
+
+---
+
+
+## Rilis: Perintah sinkron offline membawa CABANG NIAT (`branch_id` di payload)
+
+> Tidak ada migrasi. Aditif: kunci `branch_id` kini DITERIMA (dan dihormati)
+> pada payload `/sync` untuk `perlengkapan_pakai`, `perlengkapan_opname`,
+> `absen_saya`, `absen_stasiun`. Payload lama tanpa kunci itu tetap sah.
+
+🟡 **PERLU DILIHAT** — build lama tidak rusak, tapi kehilangan fitur yang
+build baru punya. Terukur pada build lama (semua build +3…+10): owner/admin
+yang beroperasi di cabang kedua lalu offline — pemakaian perlengkapan
+terpotong di **cabang pertama** (100→93, balasan "ok"), sesi opname lahir di
+cabang pertama, absen tercatat di cabang pertama. Server tak bisa membaca niat
+yang tak pernah dikirim, jadi fallback lama itu tetap berlaku untuk payload
+tanpa `branch_id` (dipaku di verify-api §250).
+
+**Sudah di-merge ke production.**
+
+Sisi ponsel di cabang `claude` kini mengirim
+`'branch_id': ?ref.read(branchIdQueryProvider)` pada keempat payload — nilai
+yang sama dengan query jalur online. Peran terikat cabang (kasir/tim) tetap
+mengirim kosong dan tetap benar lewat cabang JWT; mengirim cabang LAIN untuk
+peran terikat kini ditolak per-item 403 di jalur fase-1 (bukan diam-diam
+pindah cabang).
+
+---
+
+
+## Rilis: Angka yang meluap dibalas 400 bernama, bukan 500
+
+> Tidak ada migrasi, tidak ada medan baru, tidak ada bentuk balasan yang berubah.
+
+🟡 **PERLU DILIHAT** — bukan karena ponsel harus berubah, melainkan karena
+sebuah **kelas galat berpindah dari 5xx ke 4xx**. Klien yang mencoba-ulang
+otomatis pada 5xx (antrean offline) sebelumnya akan mengulang permintaan yang
+takkan pernah berhasil; sekarang ia menerima 400 dan berhenti — itu perbaikan,
+tapi perilakunya berbeda dan pantas diperiksa sekali.
+
+**Sudah di-merge ke production.**
+
+**Belum tayang.**
+
+Angka yang **lahir di server** (hasil perkalian/penjumlahan) tak bisa dijaga
+`z.number().max()` mana pun. **32 dari 62** kolom `numeric` berbentuk begitu.
+Terukur lewat HTTP:
+
+| permintaan | sebelum | sesudah |
+| --- | --- | --- |
+| `POST /penjualan` menu Rp 10.000 × qty 99.999.999 | 201 | **tetap** 201 |
+| `POST /penjualan` menu Rp 20.000 × qty 99.999.999 | **HTTP 500** | **400** `Total baris "…" terlalu besar untuk disimpan (maksimal 999.999.999.999)` |
+| `POST /penjualan` **tiga baris yang masing-masing MUAT** | **HTTP 500** | **400** `Subtotal terlalu besar untuk disimpan (…)` |
+
+Dua lapis, dan keduanya diukur sendiri-sendiri:
+
+- **pintu keluar bersama** — SQLSTATE `22003` (luapan numerik) kini
+  diterjemahkan di `app.onError` jadi `400 {"error":"Angkanya terlalu besar
+  untuk disimpan"}` **di setiap rute sekaligus**, bukan cuma di jalur yang
+  sudah diperbaiki. Tetap dicatat ke `error_logs` sebagai 400;
+- **penjaga di tempat angkanya lahir** — menyebut medan (dan nama menunya),
+  karena pintu keluar bersama tak pernah tahu angka yang mana.
+
+---
+
+## Rilis: Takaran resep berbatas 99.999.999 (dulu 9.999.999.999 lalu 500)
+
+> Tidak ada migrasi, tidak ada medan baru, tidak ada bentuk balasan yang berubah.
+
+⚪️ **INFO** — ponsel tidak menulis resep sama sekali (tambah/ubah menu & resep
+tetap di web), jadi tak ada yang perlu dikerjakan. Dicatat karena ia perubahan
+kontrak: rentang nilai yang diterima menyempit.
+
+**Sudah di-merge ke production.**
+
+**Belum tayang.**
+
+`komponen[].qty` pada `POST/PUT /menu` dan `PUT /bahan/:id/resep` dibatasi
+`BATAS_QTY_STOK` (9.999.999.999) — batas kolom **stok** `numeric(16,6)`.
+Kolomnya sendiri `numeric(12,4)`, seratus kali lebih sempit. Terukur:
+
+| permintaan | sebelum | sesudah |
+| --- | --- | --- |
+| `komponen[].qty = 99.999.999` | 201 / 200 | **tetap** 201 / 200 |
+| `komponen[].qty = 100.000.000` | **HTTP 500** | **400** `komponen[0].qty: maksimal 99999999` |
+
+Sembilan setengah miliar nilai lolos validasi lalu ditolak Postgres sebagai
+galat tak tertangani. Yang berubah hanya bentuk penolakannya: 500 tanpa
+keterangan menjadi 400 yang menyebut medan dan batasnya.
+
+---
+
+## Rilis: Tempat Sampah & anomali kiriman BERLANGIT-LANGIT
+
+> Tidak ada migrasi. Bentuk balasan `GET /sampah` **tidak berubah** — sengaja.
+
+🟡 **PERLU DICEK** — dua layar: Tempat Sampah dan Kiriman Menggantung.
+
+**Sudah di-merge ke production.**
+
+**Belum tayang.**
+
+Dua pintu memulangkan **seluruh** barisnya tanpa batas. Terukur terhadap
+Postgres sungguhan dengan 10.000 baris disuntikkan:
+
+| pintu | sebelum | sesudah |
+| --- | --- | --- |
+| `GET /sampah` | 10.000 baris · **2.438.895 byte** · 78 ms | 300 baris · 72.793 byte · 23 ms |
+| `GET /penerimaan/anomali` | 10.000 baris · **2.760.043 byte** · **4.170 ms** | 100 baris · 27.676 byte · 1.522 ms |
+
+### `GET /sampah` — bentuknya TETAP larik, penandanya di HEADER
+
+Balasannya **tetap** `SampahRow[]`. Ini keputusan sadar: ketujuh build yang
+pernah rilis membacanya `as List`, dan `{ items, terpotong }` seperti
+`GET /customer` akan **melempar** di aplikasi yang hari ini terpasang.
+
+Batasnya **300 terbaru** (urut `dihapus_pada` menurun) dan berlaku untuk semua
+klien. Bila dipotong, respons membawa header:
+
+```
+X-Kakarut-Terpotong: 300
+```
+
+Build lama mengabaikannya dan tetap jalan — mereka menerima 300 terbaru tanpa
+spanduk. Yang perlu dikerjakan mobile:
+
+1. **Baca headernya** dan tampilkan "menampilkan 300 terbaru" bila ada.
+2. **Berhenti memakai `rows.length` sebagai JUMLAH ISI tempat sampah.** Dialog
+   "N catatan akan dihapus PERMANEN" akan menyebut 300 untuk 10.000 — angka
+   salah pada satu-satunya layar yang tak bisa dibatalkan. Sudah dikerjakan di
+   `sampah_page.dart` pada rilis ini.
+
+### `GET /penerimaan/anomali` — dua medan BARU, tak ada yang hilang
+
+```jsonc
+{
+  "jumlah": 10000,        // SELURUH baris menggantung — dari SQL, bukan rows.length
+  "qty_total": 30000,     // idem
+  "rows": [ /* 100 PALING TUA */ ],
+  "faktur_ids": ["…"],    // BARU — faktur mana saja yang punya baris menggantung
+  "terpotong": true       // BARU — rows dipotong; `jumlah` tetap utuh
+}
+```
+
+`jumlah` dan `qty_total` **tidak berubah artinya**: keduanya tetap menghitung
+seluruh populasi (`COUNT(*) OVER ()` / `SUM(qty) OVER ()`, yang Postgres hitung
+sebelum `LIMIT`). Yang berlangit-langit hanya `rows`.
+
+**`faktur_ids` ada justru karena `rows` dipotong.** Tanda "barang tidak sampai"
+di kartu Beli & Produksi diturunkan dari daftar faktur ini, bukan dari `rows` —
+terukur: 500 faktur punya baris menggantung sementara `rows` hanya
+memperlihatkan **100** di antaranya. Menurunkannya dari `rows` berarti 400
+faktur kehilangan tandanya diam-diam, tepat saat masalahnya paling besar.
+
+Medan lama tak ada yang dihapus, jadi build yang tak diperbarui tetap bekerja —
+kecuali tandanya yang kini kurang lengkap bila anomalinya melebihi 100 baris.
+
+---
+
+## Rilis: Badan permintaan MENOLAK kunci yang tak dikenal (400, bukan dibuang)
+
+> Tidak ada migrasi. Tidak ada medan baru. Yang berubah: **satu kelas balasan
+> galat baru**, dan sebuah kebiasaan lama yang berhenti berlaku.
+
+🔴 **WAJIB** — tinjau setiap `body:` yang dikirim repositori mobile.
+
+**Sudah di-merge ke production.**
+
+**Belum tayang.**
+
+Sebelumnya, kunci yang tak dikenal di badan JSON **dibuang diam-diam**: kiriman
+yang salah dan kiriman yang benar menghasilkan balasan yang sama persis. Itu
+sudah menggigit sekali — `PUT /meja/tata-letak` menerima `branch_id` di badan,
+membuangnya, lalu memakai cabang aktif **pertama**: HTTP 200, balasannya meja
+cabang lain, dan denah yang diminta tak pernah tersimpan.
+
+Kini **112 dari 114** badan JSON menolaknya:
+
+```jsonc
+{ "error": "Isian: isian tak dikenal: kunci_ngawur" }
+```
+
+dengan kode **400**.
+
+**Dua pintu SENGAJA tetap longgar:**
+
+| pintu | kenapa |
+| --- | --- |
+| `PUT /meja/tata-letak` | Ketujuh build yang pernah rilis (1.0.0+3 … +10) mengirim `branch_id` di badan sini. Pengecualian ini **bertanggal**: ia dicabut sesudah build yang mengirim cabang lewat query tayang dan build lama habis. **Kirim cabang di query** (`?branch_id=`) mulai sekarang. |
+| `POST /shift/tutup` | Menutup shift tak boleh gagal karena satu kunci tak dikenal — itu terjadi tepat saat kasir mau pulang. |
+
+**Yang perlu dicek di mobile:** seluruh badan yang dikirim `lib/**` sudah
+disapu terhadap kontrak hari ini dan **bersih** — 49 badan literal, nol kunci
+asing. Yang harus dijaga adalah kiriman BARU: kunci yang salah nama atau salah
+huruf kini gagal berbunyi, bukan lolos diam-diam.
+
+
+## Rilis: `bill_dibatalkan` tak lagi muncul untuk bill yang sebenarnya DIBAYAR
+
+🔴 **WAJIB DICEK** — antrean offline mobile membaca `sebab` untuk memutuskan
+apakah sebuah perintah dibuang atau ditahan. Tak ada medan baru; yang berubah
+**nilai `sebab` pada satu keadaan yang selama ini salah**.
+
+**Sudah di-merge ke production.**
+
+*(Belum di-merge ke production.)*
+
+### 🔴 `POST /penjualan` atas bill yang sudah dibayar
+
+`open_bills.sale_id` adalah foreign key ber-`ON DELETE SET NULL`. Server
+memakainya sebagai bukti "bill ini sudah jadi penjualan" — dan begitu
+penjualannya dihapus permanen (pemilik mengosongkan Tempat Sampah), Postgres
+menihilkan penunjuknya, sehingga buktinya ikut hilang.
+
+Terukur ujung ke ujung:
+
+| | sebelum | sesudah |
+|---|---|---|
+| bayar ulang bill yang sudah dibayar, sesudah penjualannya dihapus | `bill_dibatalkan` | **`bill_sudah_dibayar`** |
+| bill itu di `GET /pesanan` | muncul lagi sebagai **pesanan aktif** | tidak muncul |
+
+Bedanya bukan kosmetik, dan kontrak ini sudah menuliskannya sejak awal:
+
+- `bill_sudah_dibayar` → kiriman ulangnya kembar, **aman dibuang** dari antrean;
+- `bill_dibatalkan` → bill dibatalkan tanpa pernah jadi penjualan, jadi
+  **membuang perintahnya berarti kehilangan satu transaksi sungguhan**.
+
+Artinya klien offline selama ini **menahan** perintah yang tak akan pernah
+berhasil, untuk bill yang sebenarnya sudah dibayar.
+
+**Yang perlu dicek di mobile:** tak ada perubahan kode yang diwajibkan — nilai
+`sebab` sekarang menjadi benar, dan penanganan yang sudah ada untuk kedua nilai
+itu tetap berlaku. Yang berubah: `bill_dibatalkan` kini benar-benar hanya
+muncul untuk bill yang memang dibatalkan.
+
+
+## Rilis: Angka masukan berbatas atas — 500 berubah jadi 400 bernama
+
+🟡 **PERLU DICEK** — mobile mengirim `qty`, `harga_beli`, `total_harga`,
+`uang_diterima` dan sejenisnya. Tak ada medan baru dan tak ada yang dihapus;
+yang berubah **kode galatnya**.
+
+**Sudah di-merge ke production.**
+
+*(Belum di-merge ke production.)*
+
+### 🟡 Nilai di atas kapasitas kolom kini ditolak **400**, bukan jatuh **500**
+
+`z.number()` menerima apa pun sampai `Number.MAX_VALUE` (1,8e308). Kolom yang
+menampungnya tidak: `numeric(p, s)` cuma memuat `p − s` digit di depan koma.
+Terukur lewat HTTP, sebelum diperbaiki:
+
+| kirim | dulu | sekarang |
+|---|---|---|
+| `PUT /menu/:id` `mult = 10000` | **500** | `400 "mult: maksimal 9999"` |
+| `POST /penjualan` `qty = 1e8` | **500** | `400 "items[0].qty: maksimal 99999999"` |
+| `POST /bahan` `harga_beli = 1e12` | **500** | `400 "harga_beli: maksimal 999999999999"` |
+
+Nilai sah **tepat di batasnya** tetap diterima: `mult = 9999` → 200,
+`qty = 99.999.999` → 201, `harga_beli = 999.999.999.999` → 201.
+
+Yang perlu dicek di mobile: layar yang selama ini memperlakukan galat sebagai
+"server bermasalah, coba lagi" kini menerima pesan yang **bisa ditampilkan apa
+adanya** dan menyebut nama medannya. Antrean offline yang mengulang perintah
+gagal juga berubah perilakunya — 400 tak akan pernah berhasil kalau diulang,
+berbeda dari 500.
+
+Batas-batasnya diturunkan dari kolomnya, bukan dari tebakan bisnis, dan
+tercatat satu per satu di `apps/server/src/lib/batas-angka.ts`.
+
+
+## Rilis: Kartu Riwayat Harga berbatas — medan baru `lots_terpotong`
+
+⚪️ **INFO untuk mobile** — mobile belum memakai kartu Riwayat Harga
+(`GET /bahan/:id/pembelian`, `GET /perlengkapan/:id/pembelian`). Dicatat karena
+bentuk kontraknya berubah.
+
+**Sudah di-merge ke production.**
+
+*(Belum di-merge ke production.)*
+
+### 🔴 `lots` dibatasi 300, medan baru `lots_terpotong`
+
+Terukur pada satu bahan dengan 12.018 lot pembelian: balasannya **2,10 MB**.
+Sesudah dibatasi: **0,053 MB**.
+
+```diff
+  RiwayatHargaDto {
+    …
++   lots: RiwayatHargaLot[]      // maksimal 300, TERBARU dulu
++   lots_terpotong: boolean
+  }
+```
+
+**Kelima angka statistik tidak berubah nilainya.** `harga_terendah`,
+`harga_tertinggi`, `harga_median`, `harga_rata` dan `jumlah_pembelian` kini
+dihitung dari kueri terpisah yang tak dibatasi — bukan dari `lots`. Diukur
+sebelum dan sesudah pada data yang sama: ketujuh angkanya identik.
+
+Itu bukan kerapian melainkan syarat. `harga_median` di kartu ini **jadi harga
+acuan RAB belanja** (disinkron tiap Laporan Harga), dan harga acuan itu dasar
+HPP setiap menu yang memakai bahannya. Median dari "300 lot terbaru" akan
+menggeser HPP seluruh menu tanpa satu pun galat muncul.
+
+Klien yang menampilkan `jumlah_pembelian` di dekat daftar `lots` **wajib**
+menampilkan `lots_terpotong` juga — dan klien yang menyimpulkan "ada lot
+tebakan" dengan memindai `lots` harus beralih ke
+`jumlah_pembelian > jumlah_harga_nyata`, sebab lot tebakan bisa seluruhnya
+berada di luar 300 yang terkirim.
+
+
+## Rilis: Daftar member berbatas — `GET /customer` berganti bentuk balasan
+
+⚪️ **INFO untuk mobile** — mobile tidak memakai `/customer` maupun
+`/customer/:id`; keduanya hanya dipakai halaman Member di web. Yang dipakai
+mobile adalah `GET /member-cari?q=` dan itu **tidak berubah sama sekali**.
+Entri ini ditulis karena bentuk balasannya berubah, dan aturan berkas ini
+adalah setiap perubahan kontrak dicatat — bukan hanya yang menyentuh mobile.
+
+**Sudah di-merge ke production.**
+
+*(Belum di-merge ke production.)*
+
+### 🔴 Bentuk balasan `GET /api/customer` berubah
+
+Terukur pada Postgres berisi 10.002 member: balasannya **1,53 MB**. Satu
+`GET /api/customer/:id` atas member dengan 20.001 transaksi: **2,83 MB**.
+Keduanya tak berbatas dan tumbuh seumur warung buka.
+
+```diff
+- CustomerDto[]                       // seluruh member, tanpa batas
++ { items: CustomerDto[],             // maksimal 300, terbaru bertransaksi dulu
++   terpotong: boolean,               // true bila masih ada member lain
++   total: number }                   // hitungan sebenarnya (COUNT tanpa batas)
+```
+
+Menerima parameter baru `?q=` — mencocokkan nama **atau** nomor WA, penyaring
+yang sama persis dengan `GET /member-cari`. Ini bukan tambahan opsional: tanpa
+pencarian di server, member ke-301 tak sekadar tak terlihat, ia **tak bisa
+ditemukan sama sekali** oleh klien yang menyaring daftar di sisinya sendiri.
+
+Sesudah dibatasi: **0,046 MB / 0,031 dtk** untuk daftar, **0,042 MB /
+0,017 dtk** untuk detail.
+
+### 🔴 `GET /api/customer/:id` — medan baru `transaksi_terpotong`
+
+```diff
+  CustomerDetail {
+    …
++   transaksi: CustomerTransaksi[]    // maksimal 300, TERBARU dulu
++   transaksi_terpotong: boolean
+  }
+```
+
+`jumlah_transaksi`, `total_belanja` dan `terakhir` **tidak berubah nilainya**
+dan tetap menghitung seluruh transaksi member. Ketiganya dipindah dari
+penjumlahan JavaScript atas larik `transaksi` ke agregat SQL tanpa batas —
+justru supaya daftarnya boleh dipotong. Kalau tidak, "Total belanja" seorang
+member akan turun diam-diam begitu transaksinya melewati baris ke-300.
+
+Klien yang menampilkan `jumlah_transaksi` di dekat daftar `transaksi` **wajib**
+menampilkan `transaksi_terpotong` juga: berdampingan tanpa penjelasan,
+"20.001x" di atas daftar berisi 300 baris terbaca sebagai transaksi yang
+hilang.
+
+
+## Rilis: Bon tagihan — kertas berharga yang BUKAN bukti pembayaran
+
+🟢 **BARU** — layar kasir, saat Open Bill sedang dibuka.
+
+**Sudah di-merge ke production.**
+
+*(Belum di-merge ke production.)*
+
+**Sudah dikerjakan di mobile:** `mohteja/kakarut-mobile` PR #12
+(`KasirRepository.bonTagihan` + `PrinterController.cetakBon`, tombol di lembar
+keranjang). Entri ini tetap ditulis sebagai acuan kontraknya.
+
+### 🟢 BARU — `GET /api/open-bill/:id/bon`
+
+Query & bentuk balasan **identik** dengan `/slip`: `paper?: 58|80`,
+`chars_per_line?: int(16..96)`, `cut?: "1"`, `feed?: int(0..10)` →
+`{ data: base64 ESC/POS, teks: pratinjau, chars_per_line: int }`.
+
+Kertas KETIGA di kasir, menyusul struk dan slip pesanan:
+
+| kertas | rupiah? | bukti bayar? |
+| --- | --- | --- |
+| struk | ✅ | ✅ |
+| slip pesanan | ❌ | ❌ |
+| **bon tagihan** | ✅ | ❌ |
+
+Tamu memintanya saat selesai makan untuk memeriksa pesanannya dan tahu berapa
+yang harus disiapkan. Sesudah membayar ia menerima **struk**.
+
+**Byte-nya dirender SERVER**, sama seperti slip — cukup `base64Decode(data)`
+lalu kirim ke printer. Untuk kertas ini alasannya lebih tajam daripada slip:
+satu-satunya janjinya adalah "berharga tapi bukan bukti bayar", dan menyusun
+ulang layoutnya di Dart membuat janji itu hidup di dua tempat lalu menyimpang
+diam-diam — satu baris "Kembali" yang terselip, dan tamu menerima kertas yang
+terbaca seperti nota lunas.
+
+Yang perlu diketahui saat memakainya:
+
+- **HANYA di Open Bill.** `GET /api/penjualan/:id/bon` tidak ada (404):
+  penjualan yang sudah tercatat berarti uangnya sudah diterima, dan yang
+  dibutuhkan di sana cetak ulang struk.
+- **Kirimkan `chars_per_line` printernya.** Tanpa itu server memakai bawaan 32,
+  dan kolom kanan bon di kertas 80mm berhenti di tengah — angka rupiah yang tak
+  sejajar pada kertas yang justru dipakai orang menghitung uang.
+- **Salurkan ke printer STRUK, bukan printer tiket.** Bon diserahkan ke TAMU;
+  printer tiket ada di dapur. Konsekuensinya justru menguntungkan: warung
+  berprinter TUNGGAL tetap bisa memakainya, tak seperti tiket dapur yang
+  menuntut peran tiket.
+- **Tolak balasan tanpa `data`.** Kertas kosong yang keluar diam-diam lebih
+  buruk daripada pesan galat — kasir menyerahkannya ke tamu tanpa melihat.
+- **Angkanya PRA-DISKON** dan kertasnya mengatakan itu sendiri. Bill tak
+  menyimpan potongan; diskon diputuskan di layar pembayaran. PB1 dihitung
+  rumus yang sama dengan `createSale`, jadi bon dan struk tak bisa berselisih
+  karena pembulatan.
+- Baris yang **dibatalkan dapur** tidak ikut ditagih.
+- **Laci tak pernah terbuka**, dan tak ada baris metode bayar/kembalian/"Terima
+  kasih" — ditegakkan struktural oleh tipe `BonData` yang memang tak berkolom
+  itu.
+
+
+## Rilis: Slip pesanan — cetak menu & jumlah, TANPA harga
+
+🟢 **BARU** — layar kasir (bayar langsung) dan open bill, bila fiturnya mau
+dibawa ke mobile.
+
+**Sudah di-merge ke production.**
+
+*(Belum di-merge ke production.)*
+
+Kertas KEDUA di kasir, untuk dua hal yang sama-sama bukan bukti pembayaran:
+lembar yang dibawa ke dapur/bar, dan lembar yang ditinggalkan di meja tamu.
+Aditif — tak ada medan yang hilang atau berganti arti.
+
+> **⚠️ MOBILE SUDAH PUNYA PADANANNYA — periksa dulu sebelum mengerjakan.**
+> `lib/features/kasir/tiket_dapur.dart` + `buildTicketBytes` sudah mencetak
+> menu & jumlah tanpa satu pun angka uang, DAN merutekannya per stasiun
+> (dapur/bar) menurut kategori menu — kemampuan yang justru belum ada di web.
+> Dipasang di dua tempat: otomatis saat open bill disimpan
+> (`kasir_page.dart:2540`, hanya baris yang belum pernah ke dapur), dan sebagai
+> tombol **"Cetak Dapur & Bar"** di layar struk sesudah bayar langsung
+> (`receipt_page.dart:202`).
+>
+> **Yang benar-benar berbeda cuma satu, dan itu bukan soal kontrak API:** kedua
+> jalur mobile itu dijaga `adaPrinterTiket` — printer harus bercentang peran
+> **tiket**. Warung berprinter TUNGGAL yang perannya hanya struk tidak bisa
+> mencetak slip ini sama sekali, dan tak ada pesan yang menjelaskan kenapa.
+> Web tak punya syarat itu: ia mencetak ke printer mana pun yang tersambung.
+> Kalau ada yang perlu dikerjakan di mobile, itu — bukan menyusun ulang
+> layoutnya.
+
+### 🟢 BARU — `GET /api/penjualan/:id/slip` & `GET /api/open-bill/:id/slip`
+
+Query: `paper?: 58|80` (default 58), `chars_per_line?: int(16..96)`,
+`cut?: "1"`, `feed?: int(0..10)`.
+Balasan: `{ data: base64 ESC/POS, teks: pratinjau, chars_per_line: int }`.
+
+**Byte-nya dirender SERVER — ini pengecualian dari aturan "klien menyusun byte
+sendiri".** Alasannya sama dengan `qty_teks`: satu-satunya janji slip ini
+adalah **tanpa harga**, dan menyusun ulang layoutnya di Dart membuat janji itu
+hidup di dua tempat lalu menyimpang diam-diam. Cukup `base64Decode(data)` lalu
+kirim ke printer — tak ada layout yang perlu ditulis di sisi mobile.
+
+`teks` adalah byte yang sama tanpa perintah kontrol; pakai untuk memperlihatkan
+pratinjau sebelum kertas keluar, atau memeriksa hasil tanpa printer.
+
+Yang perlu diketahui saat memakainya:
+
+- **Tak ada angka uang sama sekali** — tak ada harga satuan, subtotal, diskon,
+  PB1, maupun total. `Total porsi` di bawah adalah CACAH, bukan rupiah.
+- **Laci tak pernah terbuka.** Slip ini bukan pembayaran; `ESC p` tak ada di
+  byte-nya dan tak bisa diminta lewat query.
+- **Open bill belum bernomor** → tak ada baris "Antrian"; identitasnya MEJA.
+  Penjualan yang sudah lunas punya nomor nota dan nomor antriannya.
+- **Baris yang dibatalkan dapur tidak ikut** pada slip open bill
+  (`pesanan_status = "batal"`) — mencetaknya lagi menyuruh dapur membuat
+  ulang yang sudah dibatalkan.
+- **Penjualan memakai porsi yang DITAGIH** (`qty − qty_refund`): sajian yang
+  sudah direfund tak perlu dimasak lagi.
+- Cakupan: 404 untuk id yang bukan milik perusahaan/sudah terhapus (atau bill
+  yang sudah ditutup); 403 bila kasir meminta slip transaksi cabang lain.
+
+
+## Rilis: Sebaran transaksi per jam di laporan penjualan
+
+🟢 **BARU** — tab Laporan → Penjualan.
+
+**Sudah di-merge ke production.**
+
+*(Belum di-merge ke production.)*
+
+**Sudah dikerjakan di mobile:** `mohteja/kakarut-mobile` PR #12 (`SebaranJam` +
+`GrafikTransaksiPerJam` di `lib/features/operasional/grafik_per_jam.dart`).
+Entri ini tetap ditulis sebagai acuan kontraknya.
+
+### 🟢 BARU — `per_jam` pada `GET /api/laporan`
+
+```jsonc
+"per_jam": [
+  { "jam": 11, "jumlah": 8,  "omzet": 240000 },
+  { "jam": 12, "jumlah": 12, "omzet": 360000 },
+  { "jam": 13, "jumlah": 0,  "omzet": 0      },  // ← jeda, dan ia SENGAJA ada
+  { "jam": 14, "jumlah": 5,  "omzet": 150000 }
+]
+```
+
+Aditif — tak ada medan yang hilang atau berganti arti. Klien lama tetap jalan.
+
+**Empat hal yang menentukan benar/salahnya saat dipakai:**
+
+- **Jam kosong DI TENGAH ikut, bernilai nol — jangan disaring.** Naluri "buat
+  apa menggambar batang kosong" merusak grafiknya: warung yang ramai jam 12
+  lalu sepi sampai jam 17 akan tergambar dua batang bersebelahan, dan bentuk
+  harinya berbohong. Jam kosong di kedua UJUNG sudah dipangkas server, jadi
+  deret ini memang mulai dari jam transaksi pertama dan berhenti di yang
+  terakhir.
+
+- **`jam` sudah dihitung di ZONA PERUSAHAAN** (`companies.timezone`, bawaan
+  `Asia/Jakarta`) — bukan UTC dan bukan zona perangkat. Jangan menggesernya
+  lagi di klien: server berjalan UTC, dan menambahkan tujuh jam di sisi mobile
+  akan menggeser seluruh grafik untuk kedua kalinya.
+
+- **`omzet` itu `SUM(sales.subtotal)`, jadi sudah BERSIH dari refund** — sama
+  seperti `omzet` di tingkat laporan. Jangan menguranginya lagi dengan
+  `total_refund`.
+
+- **`jumlah` memakai saringan yang sama dengan kartu "Transaksi"**, jadi
+  jumlah seluruh batang dijamin sama dengan `jumlah_transaksi`. Kalau di layar
+  keduanya berbeda, itu bug klien, bukan bug data.
+
+**Nilai kosong punya DUA arti yang sama-sama berarti "jangan gambar":** server
+lama yang belum mengirim medannya, dan rentang tanggal tanpa transaksi sama
+sekali. Keduanya `[]`.
+
+⚠️ **Bila digambar sebagai grafik:** cacah transaksi yang jadi batangnya,
+bukan omzet. Satu nota Rp 2 juta tidak membuat jam 14 jadi "jam sibuk", dan
+pemilik yang mengatur jadwal karyawan menghitung orang yang datang. Omzet per
+jam tetap berguna, tapi sebagai keterangan — bukan sumbu kedua di grafik yang
+sama, sebab dua skala berbeda yang ditumpuk akan dibaca seolah sebanding.
+
+
 ## Rilis: Lama pengerjaan pesanan — per sajian, per transaksi, dan rekapnya
 
 🟢 **BARU** — papan pesanan (`pesanan_page.dart`), riwayat transaksi, dan tab

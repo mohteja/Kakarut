@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { zValidator } from "@hono/zod-validator";
+import { zValidator } from "../../lib/validator";
 import bcrypt from "bcryptjs";
 import { and, eq, gt, isNull, sql } from "drizzle-orm";
 import { Hono } from "hono";
@@ -34,13 +34,13 @@ const hashToken = (t: string) => createHash("sha256").update(t).digest("hex");
 const LoginSchema = z.object({
   email: z.string().trim().toLowerCase(),
   password: z.string().min(1),
-});
+}).strict();
 
 const RegisterSchema = z.object({
   nama: z.string().trim().min(1, "Nama wajib diisi"),
   email: z.string().trim().toLowerCase().email("Email tidak valid"),
   password: z.string().min(8, "Password minimal 8 karakter"),
-});
+}).strict();
 
 // ---------------------------------------------------------------------------
 // Rate limiting endpoint publik (anti brute-force / abuse). Batas dipilih longgar
@@ -202,7 +202,7 @@ export const authRoutes = new Hono<AppEnv>()
   .post(
     "/guest",
     batasTamu,
-    zValidator("json", z.object({ peran: z.enum(["owner", "kasir"]) })),
+    zValidator("json", z.object({ peran: z.enum(["owner", "kasir"]) }).strict()),
     async (c) => {
       const { peran } = c.req.valid("json");
       const email = peran === "owner" ? GUEST.ownerEmail : GUEST.kasirEmail;
@@ -270,7 +270,7 @@ export const authRoutes = new Hono<AppEnv>()
   .post(
     "/forgot-password",
     batasLupa,
-    zValidator("json", z.object({ email: z.string().trim().toLowerCase().email() })),
+    zValidator("json", z.object({ email: z.string().trim().toLowerCase().email() }).strict()),
     async (c) => {
       const { email } = c.req.valid("json");
       const [user] = await db.select().from(users).where(eq(users.email, email));
@@ -313,7 +313,7 @@ export const authRoutes = new Hono<AppEnv>()
       z.object({
         token: z.string().min(1),
         password: z.string().min(8, "Password minimal 8 karakter"),
-      }),
+      }).strict(),
     ),
     async (c) => {
       const { token, password } = c.req.valid("json");
@@ -371,7 +371,7 @@ export const authRoutes = new Hono<AppEnv>()
   .post(
     "/verify-email",
     batasVerifikasiCek,
-    zValidator("json", z.object({ token: z.string().min(1) })),
+    zValidator("json", z.object({ token: z.string().min(1) }).strict()),
     async (c) => {
       const { token } = c.req.valid("json");
       const [row] = await db
@@ -427,7 +427,7 @@ export const authRoutes = new Hono<AppEnv>()
   .post(
     "/resend-verification",
     batasVerifikasiKirim,
-    zValidator("json", z.object({ email: z.string().trim().toLowerCase().email() })),
+    zValidator("json", z.object({ email: z.string().trim().toLowerCase().email() }).strict()),
     async (c) => {
       const { email } = c.req.valid("json");
       const [user] = await db.select().from(users).where(eq(users.email, email));

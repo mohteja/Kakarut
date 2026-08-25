@@ -24,10 +24,11 @@ import {
   inputClass,
 } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
+import { usePrinter } from "../../context/PrinterContext";
 import { useCabangData } from "../../context/BranchContext";
 import { CabangDataBar } from "../../components/CabangDataBar";
 import { api } from "../../lib/api";
-import { formatAngka, formatRupiah } from "../../lib/format";
+import { formatAngka, formatRupiah, waktuKertasWIB } from "../../lib/format";
 import { uuidV4 } from "../../lib/idempoten";
 import { bacaLokal, tulisLokal } from "../../lib/simpanan";
 import { ReceiptModal, type SaleResult } from "./ReceiptModal";
@@ -144,6 +145,7 @@ function StokBadge({ stok, size = "md" }: { stok: MenuStokDto | undefined; size?
 
 export function KasirPage() {
   const { auth } = useAuth();
+  const { isThermal, printOrderSlip, printBon } = usePrinter();
   // Kasir butuh satu cabang konkret (menu, meja, shift, open bill) — dari
   // Kantor berjualan atas nama cabang yang dipilih di CabangDataBar.
   const { query: branchQuery, id: branchId } = useCabangData();
@@ -166,6 +168,21 @@ export function KasirPage() {
   });
   // Setelan PB1 terbaru dari server (snapshot login bisa basi bila
   // pengaturan perusahaan diubah saat sesi kasir masih terbuka)
+  // Nama perusahaan & cabang untuk kepala slip pesanan. Kunci query-nya SAMA
+  // dengan yang dipakai ReceiptModal & PerusahaanPage, jadi tak ada permintaan
+  // tambahan — react-query memakai cache yang sama.
+  const { data: company } = useQuery({
+    queryKey: ["company"],
+    queryFn: () => api<{ nama: string }>("/company"),
+    staleTime: 60_000,
+  });
+  const { data: daftarCabangSlip } = useQuery({
+    queryKey: ["cabang"],
+    queryFn: () => api<{ id: string; nama: string }[]>("/cabang"),
+    staleTime: 60_000,
+  });
+  const cabangIni = daftarCabangSlip?.find((b) => b.id === branchId) ?? null;
+
   const { data: me } = useQuery({
     queryKey: ["me"],
     queryFn: () =>
@@ -725,6 +742,114 @@ export function KasirPage() {
   });
 
   // Simpan keranjang sebagai open bill (belum dibayar) — buat baru / perbarui.
+  /**
+   * SLIP PESANAN dari isi KERANJANG — menu & jumlah saja, tanpa harga.
+   *
+   * Dibangun dari keranjang, bukan dari bill yang tersimpan, dan itu disengaja:
+   * `simpanBill` memanggil `resetTransaksi()` saat sukses, jadi sesudah disimpan
+   * tak ada lagi yang bisa dicetak. Mencetak dari keranjang juga membuatnya
+   * berguna SEBELUM disimpan — dapur biasanya menerima pesanan begitu dicatat,
+   * bukan menunggu tamunya membayar.
+   *
+   * Tipenya `OrderSlipData` yang memang tak punya kolom harga, jadi ini bukan
+   * struk yang harganya disembunyikan: tak ada angka rupiah yang bisa ikut.
+   */
+  const [slipError, setSlipError] = useState<string | null>(null);
+  const [slipPending, setSlipPending] = useState(false);
+  async function cetakSlipPesanan() {
+    setSlipError(null);
+    setSlipPending(true);
+    try {
+      await printOrderSlip({
+        companyNama: company?.nama ?? "",
+        branchNama: cabangIni?.nama ?? "",
+        // Open Bill belum bernomor — mejanya yang jadi identitas antar.
+        nomor: null,
+        waktu: waktuKertasWIB(new Date()),
+        isDineIn: dineIn,
+        mejaLabel: mejaTerpilih?.nama ?? null,
+        customerNama: konsumenNama.trim() || null,
+        items: cart.map((l) => ({
+          nama: l.menu.nama,
+          qty: l.qty,
+          // Penanda hanya saat sajian baris BEDA dari transaksinya — itu yang
+          // mengubah cara menyajikan, dan cuma itu yang perlu dibaca dapur.
+          tag:
+            l.dineInOverride !== null && l.dineInOverride !== dineIn
+              ? l.dineInOverride
+                ? "DI"
+                : "TA"
+              : null,
+          catatan: l.catatan.trim() || null,
+        })),
+        kasir: auth?.user.nama ?? null,
+      });
+    } catch (e) {
+      setSlipError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSlipPending(false);
+    }
+  }
+
+  /**
+   * BON TAGIHAN dari isi KERANJANG — berharga, tapi BUKAN bukti pembayaran.
+   *
+   * Kertas yang diminta tamu saat selesai makan: ia memeriksa pesanannya dan
+   * tahu berapa yang harus disiapkan, lalu membayar. Yang diterimanya sesudah
+   * membayar adalah STRUK.
+   *
+   * Angkanya diambil dari NILAI YANG SAMA dengan yang tampil di layar kasir —
+   * `subtotal`, `diskon`, `pb1`, `total` — bukan dihitung ulang di sini. Kalau
+   * dihitung ulang, kertas di tangan tamu dan angka di layar kasir bisa
+   * berselisih beberapa rupiah karena pembulatan, dan yang menemukannya adalah
+   * tamu yang sedang memegang uangnya.
+   *
+   * `cartTagih`, bukan `cart`: sajian yang dibatalkan dapur tak boleh ditagih.
+   */
+  const [bonError, setBonError] = useState<string | null>(null);
+  const [bonPending, setBonPending] = useState(false);
+  async function cetakBonTagihan() {
+    setBonError(null);
+    setBonPending(true);
+    try {
+      await printBon({
+        companyNama: company?.nama ?? "",
+        branchNama: cabangIni?.nama ?? "",
+        waktu: waktuKertasWIB(new Date()),
+        isDineIn: dineIn,
+        mejaLabel: mejaTerpilih?.nama ?? null,
+        customerNama: konsumenNama.trim() || null,
+        items: cartTagih.map((l) => ({
+          nama: l.menu.nama,
+          qty: l.qty,
+          hargaSatuan: hargaBaris(l),
+          lineTotal: hargaBaris(l) * l.qty,
+          tag:
+            l.dineInOverride !== null && l.dineInOverride !== dineIn
+              ? l.dineInOverride
+                ? "DI"
+                : "TA"
+              : null,
+          catatan: l.catatan.trim() || null,
+        })),
+        subtotal,
+        diskon,
+        diskonPersen: diskonTipe === "persen" && diskon > 0 ? diskonNilaiNum : null,
+        pb1Amount: pb1,
+        pb1Rate: pb1Conf?.pb1_enabled ? pb1Conf.pb1_rate : null,
+        total,
+        // Layar kasir tak mengelola catatan bill (lihat `simpanBill`), jadi
+        // tak ada yang bisa dikirim dari sini. `GET /open-bill/:id/bon` di
+        // server memang membawanya — itu jalur mobile.
+        kasir: auth?.user.nama ?? null,
+      });
+    } catch (e) {
+      setBonError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBonPending(false);
+    }
+  }
+
   const simpanBill = useMutation({
     mutationFn: () => {
       const body = {
@@ -1312,10 +1437,58 @@ export function KasirPage() {
             <span>{formatRupiah(subtotal)}</span>
           </div>
           <ErrorText error={simpanBill.error} />
+          {slipError && (
+            <div className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">
+              Gagal mencetak pesanan: {slipError}
+            </div>
+          )}
           {cart.length > 0 && !mejaId && (
             <div className="text-center text-xs font-medium text-amber-600">
               Pilih meja dulu untuk melanjutkan.
             </div>
+          )}
+          {/*
+            SLIP PESANAN — menu & jumlah saja, tanpa harga. Sengaja di ATAS
+            pasangan tombol Open Bill / Lanjut, sebab urutannya memang begitu di
+            lapangan: pesanan dikirim ke dapur lebih dulu, disimpan atau dibayar
+            belakangan. Tak memerlukan meja — pesanan bawa pulang pun dimasak.
+            Hanya muncul saat printer thermal terpilih; "Cetak Browser" mencetak
+            struk lengkap dan bukan itu yang diminta di sini.
+          */}
+          {isThermal && cart.length > 0 && (
+            <button
+              onClick={() => void cetakSlipPesanan()}
+              disabled={slipPending}
+              className={`${btnSecondary} w-full py-3`}
+              title="Menu & jumlah saja, tanpa harga — untuk dapur atau meja tamu"
+            >
+              {slipPending ? "Mencetak…" : "🍽 Cetak Pesanan (tanpa harga)"}
+            </button>
+          )}
+          {/*
+            BON TAGIHAN — berharga, tapi BUKAN bukti pembayaran. Diserahkan ke
+            tamu saat ia minta tagihannya, sebelum membayar.
+
+            Di BAWAH slip pesanan dan di ATAS Open Bill/Lanjut, sebab itu urutan
+            waktunya di lapangan: pesanan ke dapur dulu, bon saat tamu selesai
+            makan, pembayaran terakhir.
+
+            `cartTagih`, bukan `cart`: bila SEMUA sajian dibatalkan dapur tak ada
+            yang bisa ditagih, dan bon bertotal nol cuma membingungkan. Syarat
+            yang sama dipakai tombol Lanjut.
+          */}
+          {isThermal && cartTagih.length > 0 && (
+            <button
+              onClick={() => void cetakBonTagihan()}
+              disabled={bonPending}
+              className={`${btnSecondary} w-full py-3`}
+              title="Tagihan berharga untuk diperiksa tamu — bukan bukti pembayaran"
+            >
+              {bonPending ? "Mencetak…" : "🧾 Cetak Bon Tagihan (belum dibayar)"}
+            </button>
+          )}
+          {bonError && (
+            <p className="text-xs text-red-600">Gagal mencetak bon: {bonError}</p>
           )}
           {/* Setelah meja & menu: pilih simpan Open Bill atau Lanjut ke pembayaran */}
           <div className="grid grid-cols-2 gap-2">

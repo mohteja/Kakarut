@@ -1,3 +1,4 @@
+import { BATAS_QTY_STOK, SKALA_QTY_STOK_KOLOM, pastikanMuat, toleransiBanding } from "../../lib/batas-angka";
 import { and, eq, inArray } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { companies, ingredientComponents, ingredients, productionConsumptions } from "../../db/schema";
@@ -37,6 +38,7 @@ export async function catatKonsumsiProduksi(
       inputId: ingredientComponents.inputIngredientId,
       qty: ingredientComponents.qty,
       inputTrack: input.trackStok,
+      inputNama: input.nama,
     })
     .from(ingredientComponents)
     .innerJoin(ingredients, eq(ingredients.id, ingredientComponents.ingredientId))
@@ -73,12 +75,21 @@ export async function catatKonsumsiProduksi(
     const batch = isi > 0 ? row.qty / isi : 0;
     if (batch <= 0) continue;
     for (const k of resep) {
+      const qtyKonsumsi = k.qty * batch;
+      // Takaran resep dan qty produksi MASING-MASING sah (BATAS_QTY_RESEP,
+      // BATAS_QTY_STOK), tapi hasil kalinya melampaui kolomnya sendiri —
+      // `production_consumptions.qty` numeric(16,6). TERUKUR lewat HTTP:
+      // takaran 99.999.999 × qty 1.000 = 1e11 dibalas 400 "Angkanya terlalu
+      // besar untuk disimpan" oleh pintu keluar bersama (22003) — selamat,
+      // tapi TANPA menyebut angka yang mana. Catatan PUTUSAN lama menulis
+      // kolom ini "terkurung secara aritmetika"; pengukuran itu membantahnya.
+      pastikanMuat(qtyKonsumsi, BATAS_QTY_STOK, `Pemakaian bahan "${k.inputNama}"`);
       values.push({
         productionId: row.id,
         companyId,
         branchId: row.branchId,
         ingredientId: k.inputId,
-        qty: k.qty * batch,
+        qty: qtyKonsumsi,
         tanggal,
       });
     }
@@ -173,7 +184,8 @@ export async function bahanKurangUntukProduksi(
     const saldoByIng = new Map(saldo.map((s) => [s.ingredient_id, s.saldo]));
     for (const [inputId, req] of perCabang) {
       const tersedia = saldoByIng.get(inputId) ?? 0;
-      if (req.butuh - tersedia > 1e-6) {
+      // Toleransi berbasis skala kolom + besaran — lihat `toleransiBanding`.
+      if (req.butuh - tersedia > toleransiBanding(req.butuh, SKALA_QTY_STOK_KOLOM)) {
         kurang.push({
           ingredientId: inputId,
           nama: req.nama,

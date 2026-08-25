@@ -1,4 +1,4 @@
-import { zValidator } from "@hono/zod-validator";
+import { zValidator } from "../../lib/validator";
 import { and, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Hono } from "hono";
@@ -39,10 +39,11 @@ const RencanaBody = z.object({
         porsi: z.number().int().positive().max(100_000),
       }),
     )
-    .min(1),
+    .min(1)
+    .max(500),
   /** CK pelaksana (opsional) — kekurangan bahan mentah resep dihitung di sini */
   ck_branch_id: z.string().uuid().nullish(),
-});
+}).strict();
 
 const RencanaFakturBody = RencanaBody.extend({
   worker_id: z.string().uuid().nullish(),

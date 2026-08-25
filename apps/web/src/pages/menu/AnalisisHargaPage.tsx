@@ -130,6 +130,24 @@ export function AnalisisHargaPage() {
       setPilih(new Set());
       queryClient.invalidateQueries({ queryKey: ["menu-analisis-harga"] });
       queryClient.invalidateQueries({ queryKey: ["menu"] });
+      /*
+       * `["menu-riwayat-harga"]` HARUS disebut sendiri, dan itu bukan
+       * kelebihan hati-hati.
+       *
+       * Pencocokan awalan TanStack Query membandingkan elemen secara UTUH:
+       * `["menu"]` tidak pernah mengenai `["menu-riwayat-harga", id]` — itu
+       * kunci lain, bukan anak. Repo ini sudah menuliskan aturan yang persis
+       * sama dua kali (di `StokPerlengkapanTab` dan `OpnameRiwayatPage`, untuk
+       * `perlengkapan` vs `perlengkapan-master`), dan pintu ini tetap terbuka.
+       *
+       * Yang basi bukan angka sembarangan: tombol ini MENERBITKAN baris
+       * riwayat — `catatHargaMenu(…, sebab: "terapkan_saran")` — dan panel yang
+       * menampilkannya ada di halaman yang sama, terbuka, tepat di bawah baris
+       * yang barusan ditekan. Berkas ini bahkan sudah punya labelnya
+       * (`SEBAB_LABEL.terapkan_saran`). Terukur lewat HTTP sungguhan: riwayat
+       * 3 → 4 baris di server, dan panelnya tetap menampilkan 3.
+       */
+      queryClient.invalidateQueries({ queryKey: ["menu-riwayat-harga"] });
     },
   });
 

@@ -1,6 +1,11 @@
-import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import {
+  DeleteObjectCommand,
+  ListObjectsV2Command,
+  PutObjectCommand,
+  S3Client,
+} from "@aws-sdk/client-s3";
 import { env } from "../../config/env";
-import type { StorageDriver } from "./storage";
+import type { ObjekUnggahan, StorageDriver } from "./storage";
 
 /** Cloudflare R2 lewat API kompatibel S3. */
 export class R2Driver implements StorageDriver {
@@ -29,5 +34,30 @@ export class R2Driver implements StorageDriver {
     );
     const base = env.R2_PUBLIC_URL?.replace(/\/$/, "");
     return { url: base ? `${base}/${key}` : `/uploads/${key}` };
+  }
+
+  // Cermin pola ListObjectsV2 + DeleteObject milik backup-storage.
+  async list(prefix: string): Promise<ObjekUnggahan[]> {
+    const out: ObjekUnggahan[] = [];
+    let token: string | undefined;
+    do {
+      const res = await this.client.send(
+        new ListObjectsV2Command({
+          Bucket: env.R2_BUCKET!,
+          Prefix: prefix,
+          ContinuationToken: token,
+        }),
+      );
+      for (const o of res.Contents ?? []) {
+        if (!o.Key) continue;
+        out.push({ key: o.Key, waktu: o.LastModified ?? null });
+      }
+      token = res.IsTruncated ? res.NextContinuationToken : undefined;
+    } while (token);
+    return out;
+  }
+
+  async hapus(key: string): Promise<void> {
+    await this.client.send(new DeleteObjectCommand({ Bucket: env.R2_BUCKET!, Key: key }));
   }
 }

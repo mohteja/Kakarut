@@ -1,4 +1,5 @@
-import { zValidator } from "@hono/zod-validator";
+import { zValidator } from "../../lib/validator";
+import { BATAS_UANG } from "../../lib/batas-angka";
 import { and, desc, eq, isNotNull, isNull, lt, lte, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -12,6 +13,7 @@ import { pastikanCabang, terikatCabang, type AppEnv } from "../../middleware/aut
 import { lewatiRateLimit, rateLimit } from "../../middleware/rateLimit";
 import { createSale } from "../penjualan/service";
 import { bukaShift } from "../shift/routes";
+import { pangkasLedgerSync } from "./idempoten";
 import { SaleBody } from "../penjualan/routes";
 import { catatAbsen, cekRadius, ClockBody, SelfBody } from "../absensi/routes";
 
@@ -131,7 +133,7 @@ const SyncBody = z.object({
     )
     .min(1)
     .max(MAKS_PERINTAH),
-});
+}).strict();
 
 /** Cabang efektif utk perintah sinkron (peran terikat → cabangnya). */
 async function resolveCabangSync(auth: SyncAuth, payloadBranchId?: string | null): Promise<string> {
@@ -163,6 +165,16 @@ async function panggilInternal(
   authHeader: string,
   path: string,
   body: unknown,
+  /**
+   * Cabang untuk query, bila pemanggilnya sudah MENCABUT `branch_id` dari badan.
+   *
+   * Dibutuhkan sejak badan JSON `.strict()`: rute yang tak mendeklarasikan
+   * `branch_id` kini menolak 400 bila ia ikut terkirim, padahal cabangnya tetap
+   * harus sampai — lewat query. Tanpa parameter ini pemanggilnya harus memilih
+   * antara "kirim kunci yang ditolak" atau "kehilangan cabangnya", dan yang
+   * kedua persis bug yang §208 ada untuk mencegah.
+   */
+  cabangEksplisit?: string | null,
 ): Promise<{ kode: number; data: unknown }> {
   if (!appRef) throw new HTTPException(500, { message: "Sinkron belum siap (app belum disuntik)" });
   /*
@@ -193,9 +205,10 @@ async function panggilInternal(
    * lain.
    */
   const cabang =
-    body && typeof body === "object" && typeof (body as Record<string, unknown>).branch_id === "string"
+    cabangEksplisit ??
+    (body && typeof body === "object" && typeof (body as Record<string, unknown>).branch_id === "string"
       ? ((body as Record<string, unknown>).branch_id as string)
-      : null;
+      : null);
   const url = cabang
     ? `http://sync.internal/api${path}${path.includes("?") ? "&" : "?"}branch_id=${encodeURIComponent(cabang)}`
     : `http://sync.internal/api${path}`;
@@ -246,6 +259,40 @@ function pisahParam<T extends string>(
   return { params, body };
 }
 
+/**
+ * Angkat `branch_id` NIAT dari payload perintah: pulangkan cabangnya dan badan
+ * TANPA kunci itu.
+ *
+ * Payload antrean offline membawa cabang yang SEDANG dilihat operator
+ * (`branchIdQueryProvider` di ponsel — null untuk peran terikat cabang) —
+ * persis nilai yang jalur ONLINE kirim sebagai `?branch_id=`. Skema tujuan
+ * yang tak mendeklarasikan kunci ini (`PakaiBody`, `OpnameBody` perlengkapan,
+ * `SelfBody`, `ClockBody` — semuanya `.strict()`) menolaknya di badan, jadi ia
+ * diangkat DI SINI lalu berjalan lewat jalur cabang masing-masing (query
+ * sub-request internal / `resolveCabangSync`).
+ *
+ * Terukur SEBELUM pengangkat ini dipakai keempat pintunya (2026-08-24):
+ * `perlengkapan_pakai` niat "Cabang Dua" memotong PUSAT 100→93 dengan balasan
+ * "ok"; `perlengkapan_opname` niat "Cabang Dua" menulis koreksi −38 di PUSAT;
+ * `absen_saya` admin tercatat masuk di PUSAT. Semuanya jatuh ke fallback
+ * "cabang aktif pertama" untuk peran tak terikat — dua cabang salah sekaligus
+ * tanpa satu galat pun, kelas yang sama dengan pengukuran §208 yang membuat
+ * `panggilInternal` mengangkat cabang ke query. Pengangkatan itu membaca
+ * `body.branch_id` — dan tak pernah bekerja untuk pintu yang payload-nya tak
+ * membawa kunci itu.
+ *
+ * Build lama tetap tak mengirim `branch_id` → perilakunya tak berubah (peran
+ * terikat benar lewat cabang JWT; owner/admin jatuh ke cabang pertama seperti
+ * sebelumnya). Yang berubah hanya build yang MENGIRIM niatnya.
+ */
+function angkatCabangNiat(payload: unknown): { cabang: string | null; body: Record<string, unknown> } {
+  const p = (payload ?? {}) as Record<string, unknown>;
+  const body = { ...p };
+  const cabang = typeof p.branch_id === "string" && p.branch_id ? p.branch_id : null;
+  delete body.branch_id;
+  return { cabang, body };
+}
+
 // ---------------------------------------------------------------------------
 // FASE 1 — eksekusi langsung lewat service (waktu = timestamp kejadian)
 // ---------------------------------------------------------------------------
@@ -273,7 +320,7 @@ const execShiftBuka: Eksekutor = async ({ auth }, payload, waktu) => {
     throw new HTTPException(403, { message: "Hanya kasir yang boleh membuka shift" });
   }
   const p = z
-    .object({ branch_id: z.string().uuid().nullish(), modal_awal: z.number().nonnegative().default(0) })
+    .object({ branch_id: z.string().uuid().nullish(), modal_awal: z.number().nonnegative().max(BATAS_UANG).default(0) })
     .parse(payload ?? {});
   const branchId = await resolveCabangSync(auth, p.branch_id);
   const { shift, sudahTerbuka } = await bukaShift({
@@ -428,8 +475,13 @@ function ringkasShift(s: { id: string; openedAt: Date; closedAt: Date | null }) 
 
 /** absen_saya — cap atas nama pemanggil sendiri (semua peran). */
 const execAbsenSaya: Eksekutor = async ({ auth }, payload, waktu) => {
-  const p = SelfBody.parse(payload);
-  const branchId = await resolveCabangSync(auth, null);
+  // Cabang niat diangkat sebelum parse: `SelfBody` `.strict()` menolaknya di
+  // badan, dan `null` di sini dulu berarti "cabang pertama" bagi owner/admin —
+  // terukur: absen offline admin selalu tercatat di Pusat (lihat
+  // `angkatCabangNiat`). Jalur online-nya memakai `resolveBranchId` (query).
+  const { cabang, body } = angkatCabangNiat(payload);
+  const p = SelfBody.parse(body);
+  const branchId = await resolveCabangSync(auth, cabang);
   const { jarakM, namaCabang } = await cekRadius(branchId, p.lat, p.lng);
   const [m] = await db
     .select({ kode: memberships.employeeCode, nama: users.nama, isActive: users.isActive })
@@ -464,8 +516,10 @@ const execAbsenStasiun: Eksekutor = async ({ auth }, payload, waktu) => {
   if (auth.role !== "owner" && auth.role !== "admin" && auth.role !== "cashier") {
     throw new HTTPException(403, { message: "Peran Anda tidak boleh memakai stasiun absen" });
   }
-  const p = ClockBody.parse(payload);
-  const branchId = await resolveCabangSync(auth, null);
+  // Kembaran `execAbsenSaya`: cabang niat lewat payload, bukan fallback.
+  const { cabang, body } = angkatCabangNiat(payload);
+  const p = ClockBody.parse(body);
+  const branchId = await resolveCabangSync(auth, cabang);
   const { jarakM, namaCabang } = await cekRadius(branchId, p.lat, p.lng);
   const kode = p.kode.trim();
   const [m] = await db
@@ -515,14 +569,24 @@ function cekJalur(j: string): "produksi" | "pembelian" {
 const execStokOpname: Eksekutor = ({ authHeader }, payload) =>
   panggilInternal(authHeader, "/stok/opname", payload);
 
-const execPerlengkapanOpname: Eksekutor = ({ authHeader }, payload) =>
-  panggilInternal(authHeader, "/perlengkapan/opname", payload);
+const execPerlengkapanOpname: Eksekutor = ({ authHeader }, payload) => {
+  const { cabang, body } = angkatCabangNiat(payload);
+  return panggilInternal(authHeader, "/perlengkapan/opname", body, cabang);
+};
 
 const execPerlengkapanPakai: Eksekutor = ({ authHeader }, payload) => {
   const { params, body } = pisahParam(payload, ["supply_id"]);
-  return panggilInternal(authHeader, `/perlengkapan/${params.supply_id}/pakai`, body);
+  /*
+   * `branch_id` diangkat dari badan (lihat `angkatCabangNiat`) — `PakaiBody`
+   * `.strict()` tak menerimanya di badan; cabangnya berjalan lewat query.
+   *
+   * Rute lain yang MEMBACA cabang dari badan (`branchUntukTulis`: /penjualan,
+   * /open-bill, /stok/opname, /shift/buka, /penyimpanan) mendeklarasikannya di
+   * skemanya, jadi bagi mereka kunci ini sah dan tetap dikirim apa adanya.
+   */
+  const { cabang, body: badan } = angkatCabangNiat(body);
+  return panggilInternal(authHeader, `/perlengkapan/${params.supply_id}/pakai`, badan, cabang);
 };
-
 const execFakturTahap: Eksekutor = ({ authHeader }, payload) => {
   const { params, body } = pisahParam(payload, ["jalur", "faktur_id"]);
   return panggilInternal(authHeader, `/${cekJalur(params.jalur)}/tahap/${params.faktur_id}`, body);
@@ -789,6 +853,10 @@ export const syncRoutes = new Hono<AppEnv>().post("/", batasSync, zValidator("js
       );
     hasil.push(item);
   }
+
+  // Retensi ledger menumpang pada penulisnya (pola `pangkasErrorLog`):
+  // lepas-tangan, kegagalannya tak boleh menyentuh balasan sinkron.
+  void pangkasLedgerSync().catch(() => {});
 
   return c.json({ hasil } satisfies SyncResponse);
 });

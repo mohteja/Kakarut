@@ -1,14 +1,17 @@
-import { zValidator } from "@hono/zod-validator";
+import { zValidator } from "../../lib/validator";
+import { BATAS_QTY_BARIS } from "../../lib/batas-angka";
 import { and, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import type { OpenBillDetail, OpenBillRow } from "@kakarut/shared";
 import { db } from "../../db/client";
-import { formatAngkaId } from "@kakarut/shared";
+import { formatAngkaId, hitungPb1, waktuKertas } from "@kakarut/shared";
+import { opsiKertasDariQuery, responsBon, responsSlip } from "../print/kertas";
 import { loadKatalog, tambahKebutuhanBahan } from "../menu/service";
 import { bahanKurang } from "../stok/service";
 import {
+  branches,
   companies,
   meja,
   menuBranches,
@@ -56,13 +59,14 @@ const BillBody = z.object({
          */
         pisah_dari: z.string().uuid().nullish(),
         menu_id: z.string().uuid(),
-        qty: z.number().positive(),
+        qty: z.number().positive().max(BATAS_QTY_BARIS),
         dine_in_override: z.boolean().nullish(),
         catatan: z.string().nullish(),
       }),
     )
-    .min(1),
-});
+    .min(1)
+    .max(500),
+}).strict();
 
 /**
  * Pastikan semua menu milik perusahaan pemanggil & tersedia di cabang bill,
@@ -272,6 +276,174 @@ export const openBillRoutes = new Hono<AppEnv>()
     const detail = await loadDetail(auth.company_id!, c.req.param("id"));
     if (!detail) throw new HTTPException(404, { message: "Bill tidak ditemukan" });
     return c.json(detail);
+  })
+  /**
+   * SLIP PESANAN bill ini — menu & jumlah saja, TANPA HARGA.
+   *
+   * Untuk klien yang tak bisa memakai `@kakarut/shared` (mobile Flutter): byte
+   * ESC/POS-nya dirender server dan dipulangkan base64, siap dikirim ke printer.
+   * Web menyusunnya sendiri dari paket shared.
+   *
+   * Memakai `loadDetail` yang sama dengan `GET /:id` — termasuk aturan bahwa
+   * bill yang sudah ditutup diperlakukan hilang. Bill yang sudah dibayar punya
+   * nomor nota, dan slipnya diambil dari `GET /penjualan/:id/slip`.
+   */
+  .get("/:id/slip", async (c) => {
+    const auth = c.get("auth");
+    const detail = await loadDetail(auth.company_id!, c.req.param("id"));
+    if (!detail) throw new HTTPException(404, { message: "Bill tidak ditemukan" });
+
+    const [comp] = await db
+      .select({ nama: companies.nama, timezone: companies.timezone })
+      .from(companies)
+      .where(eq(companies.id, auth.company_id!));
+    const branchId = await resolveBranchId(c);
+    const [branch] = await db
+      .select({ nama: branches.nama })
+      .from(branches)
+      .where(eq(branches.id, branchId));
+    // Dine-in ditentukan TIPE MEJANYA, sama seperti di layar kasir — bill tak
+    // menyimpan penandanya sendiri.
+    const [m] = detail.meja_id
+      ? await db.select({ tipe: meja.tipe }).from(meja).where(eq(meja.id, detail.meja_id))
+      : [undefined];
+    const dineIn = m ? m.tipe === "dine_in" : true;
+
+    return c.json(
+      responsSlip(
+        {
+          companyNama: comp?.nama ?? "",
+          branchNama: branch?.nama ?? "",
+          // Open bill belum bernomor — mejanya yang jadi identitas antar.
+          nomor: null,
+          waktu: waktuKertas(new Date(), comp?.timezone ?? "Asia/Jakarta"),
+          isDineIn: dineIn,
+          mejaLabel: detail.meja_label,
+          customerNama: detail.customer_nama,
+          /*
+           * Baris yang DIBATALKAN dapur tidak ikut. Slip ini perintah memasak,
+           * bukan daftar tagihan: mencetak ulang baris yang sudah dibatalkan
+           * (bahan habis) menyuruh dapur membuatnya lagi — persis yang
+           * pembatalannya hendak cegah.
+           */
+          items: detail.items
+            .filter((it) => it.pesanan_status !== "batal")
+            .map((it) => ({
+              nama: it.menu_nama,
+              qty: it.qty,
+              tag:
+                it.dine_in_override !== null && it.dine_in_override !== dineIn
+                  ? it.dine_in_override
+                    ? "DI"
+                    : "TA"
+                  : null,
+              catatan: it.catatan,
+            })),
+          catatan: detail.catatan,
+          kasir: null,
+        },
+        opsiKertasDariQuery(c),
+      ),
+    );
+  })
+  /**
+   * BON TAGIHAN bill ini — berharga, tapi BUKAN bukti pembayaran.
+   *
+   * Kertas yang diminta tamu saat selesai makan, untuk memeriksa pesanannya dan
+   * tahu berapa yang harus disiapkan. Sesudah membayar ia menerima STRUK.
+   *
+   * HANYA ADA DI OPEN BILL, dan itu disengaja. Penjualan yang sudah tercatat
+   * berarti uangnya sudah diterima; "bon tagihan" untuknya adalah kertas yang
+   * menagih sesuatu yang sudah lunas. Yang dibutuhkan di sana cetak ulang
+   * struk, yang memang sudah ada.
+   *
+   * Cakupan & 404 mengikuti `GET /:id` lewat `loadDetail` yang sama — termasuk
+   * aturan bahwa bill yang sudah ditutup diperlakukan hilang.
+   */
+  .get("/:id/bon", async (c) => {
+    const auth = c.get("auth");
+    const detail = await loadDetail(auth.company_id!, c.req.param("id"));
+    if (!detail) throw new HTTPException(404, { message: "Bill tidak ditemukan" });
+
+    const [comp] = await db
+      .select({
+        nama: companies.nama,
+        timezone: companies.timezone,
+        pb1Enabled: companies.pb1Enabled,
+        pb1Rate: companies.pb1Rate,
+      })
+      .from(companies)
+      .where(eq(companies.id, auth.company_id!));
+    const branchId = await resolveBranchId(c);
+    const [branch] = await db
+      .select({ nama: branches.nama })
+      .from(branches)
+      .where(eq(branches.id, branchId));
+    // Dine-in ditentukan TIPE MEJANYA, sama seperti di layar kasir dan di slip.
+    const [m] = detail.meja_id
+      ? await db.select({ tipe: meja.tipe }).from(meja).where(eq(meja.id, detail.meja_id))
+      : [undefined];
+    const dineIn = m ? m.tipe === "dine_in" : true;
+
+    /*
+     * Baris yang DIBATALKAN dapur tidak ikut — dan di sini alasannya lebih
+     * keras daripada di slip pesanan.
+     *
+     * Di slip, membawa baris batal berarti menyuruh dapur memasaknya lagi. Di
+     * sini artinya MENAGIH TAMU untuk makanan yang tak pernah datang. Pembatalan
+     * biasanya terjadi karena bahannya habis, jadi tamunya justru orang yang
+     * sudah dikecewakan sekali.
+     */
+    const items = detail.items
+      .filter((it) => it.pesanan_status !== "batal")
+      .map((it) => ({
+        nama: it.menu_nama,
+        qty: it.qty,
+        hargaSatuan: it.harga_satuan,
+        lineTotal: it.harga_satuan * it.qty,
+        tag:
+          it.dine_in_override !== null && it.dine_in_override !== dineIn
+            ? it.dine_in_override
+              ? "DI"
+              : "TA"
+            : null,
+        catatan: it.catatan,
+      }));
+
+    /*
+     * Uangnya dihitung dengan rumus yang SAMA dengan `createSale` — `hitungPb1`
+     * dari paket shared, bukan perkalian yang ditulis ulang di sini. Bon yang
+     * angkanya lahir dari rumus kedua akan berselisih dengan struknya beberapa
+     * rupiah karena pembulatan, dan tamu yang membandingkan dua kertas itulah
+     * yang menemukannya.
+     *
+     * DISKON sengaja tidak ada: potongan baru diputuskan saat pembayaran, jadi
+     * bon ini memang angka sebelum diskon — dan kertasnya mengatakan itu
+     * sendiri di kakinya.
+     */
+    const subtotal = items.reduce((a, it) => a + it.lineTotal, 0);
+    const pb1Amount = comp?.pb1Enabled ? hitungPb1(subtotal, comp.pb1Rate) : 0;
+
+    return c.json(
+      responsBon(
+        {
+          companyNama: comp?.nama ?? "",
+          branchNama: branch?.nama ?? "",
+          waktu: waktuKertas(new Date(), comp?.timezone ?? "Asia/Jakarta"),
+          isDineIn: dineIn,
+          mejaLabel: detail.meja_label,
+          customerNama: detail.customer_nama,
+          items,
+          subtotal,
+          pb1Amount,
+          pb1Rate: comp?.pb1Enabled ? comp.pb1Rate : null,
+          total: subtotal + pb1Amount,
+          catatan: detail.catatan,
+          kasir: null,
+        },
+        opsiKertasDariQuery(c),
+      ),
+    );
   })
   .post("/", zValidator("json", BillBody), async (c) => {
     const auth = c.get("auth");

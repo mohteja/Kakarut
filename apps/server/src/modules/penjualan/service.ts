@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { HTTPException } from "hono/http-exception";
 import {
   formatAngkaId,
@@ -20,6 +20,7 @@ import {
   sales,
   shifts,
 } from "../../db/schema";
+import { BATAS_HPP, BATAS_QTY_STOK, BATAS_UANG, pastikanMuat } from "../../lib/batas-angka";
 import { kodeCabang, tanggalDi } from "../../lib/time";
 import { upsertCustomer } from "../customer/service";
 import {
@@ -218,6 +219,7 @@ export async function createSale(params: CreateSaleParams) {
           branchId: openBills.branchId,
           closedAt: openBills.closedAt,
           saleId: openBills.saleId,
+          pernahJadiPenjualan: openBills.pernahJadiPenjualan,
         })
         .from(openBills)
         .where(
@@ -258,7 +260,14 @@ export async function createSale(params: CreateSaleParams) {
       // = bill DIBATALKAN tanpa pernah jadi penjualan, jadi membuang
       // perintahnya berarti kehilangan satu transaksi sungguhan.
       if (bill.closedAt) {
-        throw bill.saleId
+        // `pernahJadiPenjualan`, BUKAN `saleId`. Penjualan yang sudah dihapus
+        // permanen menihilkan `saleId` (FK `ON DELETE SET NULL`) — dan sejak
+        // itu bill yang DIBAYAR terbaca DIBATALKAN. Bedanya bukan kosmetik:
+        // menurut catatan di bawah, `bill_dibatalkan` menyuruh klien offline
+        // MENAHAN perintahnya, jadi ia menahan perintah yang tak akan pernah
+        // berhasil. `saleId` tetap dilihat sebagai jaring pengaman untuk baris
+        // lama yang belum sempat terisi ulang migrasi.
+        throw bill.pernahJadiPenjualan || bill.saleId
           ? new PenjualanGagal(409, "Open bill ini sudah dibayar", "bill_sudah_dibayar")
           : new PenjualanGagal(409, "Open bill ini sudah dibatalkan", "bill_dibatalkan");
       }
@@ -358,6 +367,15 @@ export async function createSale(params: CreateSaleParams) {
         ? hargaBill.get(item.open_bill_item_id) ?? menu.hargaJual
         : menu.hargaJual;
       const lineTotal = hargaSatuan * item.qty;
+      // Harga dan qty masing-masing SAH — `menus.harga_jual` sampai
+      // 9.999.999.999 dan `sale_items.qty` sampai 99.999.999 — tapi hasil
+      // kalinya sampai 1e18 sementara kolomnya `numeric(14,2)` (1e12).
+      // Tanpa penjaga di sini, Postgres yang menolaknya, dan kasir menerima
+      // 500 tanpa tahu baris mana yang salah.
+      pastikanMuat(lineTotal, BATAS_UANG, `Total baris "${menu.nama}"`);
+      // `hpp_satuan` punya kolomnya SENDIRI dan disimpan per baris. Pada qty
+      // pecahan (0,5 porsi) jumlahnya bisa muat sementara satuannya tidak.
+      pastikanMuat(hppSatuan, BATAS_HPP, `HPP satuan "${menu.nama}"`);
 
       subtotal += lineTotal;
       totalHpp += hppSatuan * item.qty;
@@ -386,6 +404,25 @@ export async function createSale(params: CreateSaleParams) {
       // bersama gerbang kecukupan stok di Open Bill — supaya yang memeriksa
       // dan yang mencatat tak pernah berbeda pendapat.
       tambahKebutuhanBahan(konsumsi, katalog, menu, item.qty, dasarDineIn);
+    }
+
+    /*
+     * …dan yang menumpuk LINTAS BARIS. Tiap baris bisa muat di kolomnya dan
+     * jumlahnya tetap tidak: tiga baris @ Rp 999.999.990.000 terukur 500
+     * sebelum penjaga ini ada. `total_hpp` punya kolomnya sendiri
+     * (`numeric(16,4)`), dan konsumsi bahan punya kolomnya sendiri lagi
+     * (`numeric(16,6)`) — resep × qty bisa melewatinya walau keduanya sah.
+     */
+    pastikanMuat(subtotal, BATAS_UANG, "Subtotal");
+    pastikanMuat(totalHpp, BATAS_HPP, "Total HPP");
+    if (konsumsi.size > 0) {
+      const namaBahan = new Map<string, string>();
+      for (const komponen of katalog.komponenByMenu.values()) {
+        for (const k of komponen) namaBahan.set(k.ingredient_id, k.nama);
+      }
+      for (const [ingredientId, qty] of konsumsi) {
+        pastikanMuat(qty, BATAS_QTY_STOK, `Pemakaian bahan "${namaBahan.get(ingredientId) ?? ingredientId}"`);
+      }
     }
 
     /**
@@ -458,6 +495,9 @@ export async function createSale(params: CreateSaleParams) {
     const subtotalNet = subtotal - diskon;
     const pb1Amount = company.pb1Enabled ? hitungPb1(subtotalNet, company.pb1Rate) : 0;
     const total = subtotalNet + pb1Amount;
+    // PB1 ditambahkan DI ATAS subtotal yang sudah lolos batasnya, jadi total
+    // bisa melewatinya justru karena pajaknya.
+    pastikanMuat(total, BATAS_UANG, "Total");
     // Tanggal bisnis dihitung dari waktu kejadian (offline) bila diberikan.
     const saleDate = tanggalDi(company.timezone, params.waktu);
 
@@ -472,15 +512,26 @@ export async function createSale(params: CreateSaleParams) {
       }
     }
 
-    // Urutan diambil dari nomor TERBESAR hari itu (bukan count) supaya void
-    // (hard delete) di tengah hari tidak membuat nomor bekas terpakai lagi.
+    /*
+     * Urutan diambil dari SEQ terbesar hari itu (bukan count, supaya void di
+     * tengah hari tidak memakai ulang nomor bekas) — dan maksimumnya dihitung
+     * NUMERIK atas 4 digit terakhir, BUKAN teks atas nomor utuh.
+     *
+     * Versi teks (`ORDER BY nomor DESC` lalu `slice(-4)`) mengandaikan prefiks
+     * cabang tak pernah berubah. Ganti nama cabang mematahkannya, terukur
+     * (2026-08-24): cabang "Pusat" (101 nota `PUSAT-…-0106`) berganti nama →
+     * satu nota `CABANGG248-…-0107` lahir → max TEKSTUAL memilih `PUSAT-…`
+     * ('P' > 'C'), seq berikutnya dihitung 0106+1 = 0107 → 23505 → 500 — dan
+     * karena bacaannya deterministik, SETIAP penjualan berikutnya di cabang
+     * itu 500 sampai ganti tanggal bisnis. Max numerik lintas prefiks memberi
+     * seq yang lebih besar dari semua baris hari itu, prefiks apa pun.
+     */
     const [last] = await tx
-      .select({ nomor: sales.nomor })
+      .select({ seq: sql<number>`COALESCE(MAX(RIGHT(${sales.nomor}, 4)::int), 0)::int` })
       .from(sales)
       .where(and(eq(sales.branchId, branch.id), eq(sales.saleDate, saleDate)))
-      .orderBy(desc(sales.nomor))
       .limit(1);
-    const seq = last ? parseInt(last.nomor.slice(-4), 10) + 1 : 1;
+    const seq = (last?.seq ?? 0) + 1;
     const nomor = `${kodeCabang(branch.nama)}-${saleDate.replaceAll("-", "")}-${String(seq).padStart(4, "0")}`;
 
     // Member/pelanggan: bila WA diisi → cari-atau-buat member (dedup per WA) &
@@ -534,7 +585,14 @@ export async function createSale(params: CreateSaleParams) {
     if (params.openBillId) {
       const kunci = await tx
         .update(openBills)
-        .set({ closedAt: new Date(), saleId: sale.id })
+        .set({
+          closedAt: new Date(),
+          saleId: sale.id,
+          // FAKTA, bukan penunjuk. `saleId` ber-`ON DELETE SET NULL`, jadi ia
+          // hilang begitu penjualannya dihapus permanen — dan bersamanya arti
+          // bill ini berubah dari "dibayar" jadi "dibatalkan".
+          pernahJadiPenjualan: true,
+        })
         .where(and(eq(openBills.id, params.openBillId), isNull(openBills.closedAt)))
         .returning({ id: openBills.id });
       /*

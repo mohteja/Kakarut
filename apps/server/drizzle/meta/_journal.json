@@ -708,6 +708,13 @@
       "when": 1787198989445,
       "tag": "0100_perpetual_sharon_carter",
       "breakpoints": true
+    },
+    {
+      "idx": 101,
+      "version": "7",
+      "when": 1787372695676,
+      "tag": "0101_quick_jubilee",
+      "breakpoints": true
     }
   ]
 }

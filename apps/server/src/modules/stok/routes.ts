@@ -1,5 +1,7 @@
+import { toleransiBanding, SKALA_QTY_STOK_KOLOM } from "../../lib/batas-angka";
 import { randomUUID } from "node:crypto";
-import { zValidator } from "@hono/zod-validator";
+import { BATAS_QTY_STOK } from "../../lib/batas-angka";
+import { zValidator } from "../../lib/validator";
 import { alias } from "drizzle-orm/pg-core";
 import { and, desc, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { Hono } from "hono";
@@ -56,7 +58,7 @@ const OpnameBody = z.object({
     .array(
       z.object({
         ingredient_id: z.string().uuid(),
-        qty: z.number().min(0),
+        qty: z.number().min(0).max(BATAS_QTY_STOK),
         /**
          * Bukti foto + alasan selisih dilampirkan LANGSUNG saat pengecekan
          * (bukan lewat langkah klarifikasi terpisah). Hanya dipakai untuk baris
@@ -68,8 +70,9 @@ const OpnameBody = z.object({
         alasan: z.string().nullish(),
       }),
     )
-    .min(1),
-});
+    .min(1)
+    .max(1000),
+}).strict();
 
 // Stok Awal (saldo pembuka) = OpnameBody + tanggal berlaku. Berbeda dari opname
 // fisik: stok awal itu SATU saldo pembuka per bahan yang terkunci pada tanggal
@@ -304,10 +307,10 @@ export const stokRoutes = new Hono<AppEnv>()
       z.object({
         branch_id: z.string().uuid().optional(),
         ingredient_id: z.string().uuid(),
-        qty: z.number().positive(),
+        qty: z.number().positive().max(BATAS_QTY_STOK),
         foto_url: z.string().trim().min(1, "Bukti foto wajib dilampirkan"),
         catatan: z.string().trim().max(300).nullish(),
-      }),
+      }).strict(),
     ),
     async (c) => {
       const auth = c.get("auth");
@@ -330,7 +333,8 @@ export const stokRoutes = new Hono<AppEnv>()
 
       const saldoRows = await hitungSaldoCabang(auth.company_id!, branchId);
       const saldo = saldoRows.find((r) => r.ingredient_id === ing.id)?.saldo ?? 0;
-      if (body.qty > saldo + 1e-9) {
+      // Toleransi berbasis skala kolom + besaran — lihat `toleransiBanding`.
+      if (body.qty > saldo + toleransiBanding(body.qty, SKALA_QTY_STOK_KOLOM)) {
         throw new HTTPException(400, {
           message: `Qty waste melebihi saldo (${saldo}) — periksa lagi jumlahnya`,
         });
@@ -771,7 +775,7 @@ export const stokRoutes = new Hono<AppEnv>()
         catatan: z.string().nullish(),
         /** bukti foto WAJIB */
         foto_url: z.string().min(1, "Bukti foto wajib dilampirkan"),
-      }),
+      }).strict(),
     ),
     async (c) => {
       const auth = c.get("auth");
@@ -800,7 +804,24 @@ export const stokRoutes = new Hono<AppEnv>()
         });
       }
 
-      await db
+      /*
+       * PAGARNYA DI SINI, BUKAN DI PRA-CEK DI ATAS.
+       *
+       * Pra-cek `SELECT` dan penulisan `UPDATE` adalah dua pernyataan;
+       * persetujuan yang commit di antaranya tak terlihat oleh keputusan yang
+       * sudah diambil. Yang tertimpa bukan angka stoknya melainkan BUKTINYA —
+       * kategori, catatan, foto, dan siapa yang mengklarifikasi — pada baris
+       * yang sudah disetujui. Penyetujunya menyetujui bukti A; catatannya
+       * berakhir berbunyi B, tanpa jejak bahwa itu pernah berubah.
+       *
+       * `ne(…, "disetujui")` dan bukan `eq(…, "menunggu")`: baris yang DITOLAK
+       * memang dimaksudkan untuk diklarifikasi ulang — itu sebabnya
+       * `tolakAlasan` dibersihkan di bawah.
+       *
+       * Lima dari enam penulisan ke tabel ini sudah memagari dirinya di WHERE;
+       * yang ini pintu yang terlewat. Dijaga `test/penyesuaian-terkunci.test.ts`.
+       */
+      const ubah = await db
         .update(stockOpnames)
         .set({
           klarifikasiStatus: "sudah",
@@ -812,7 +833,22 @@ export const stokRoutes = new Hono<AppEnv>()
           // klarifikasi baru → bersihkan alasan penolakan sebelumnya
           tolakAlasan: null,
         })
-        .where(eq(stockOpnames.id, c.req.param("id")));
+        .where(
+          and(
+            eq(stockOpnames.id, c.req.param("id")),
+            eq(stockOpnames.companyId, auth.company_id!),
+            ne(stockOpnames.penyesuaianStatus, "disetujui"),
+          ),
+        )
+        .returning({ id: stockOpnames.id });
+      if (ubah.length === 0) {
+        // Kalah balapan dengan persetujuan. Pesannya SENGAJA sama dengan
+        // pra-cek di atas — bagi pengirimnya kejadiannya memang satu hal yang
+        // sama, dan sebab baru justru terbaca asing.
+        throw new HTTPException(409, {
+          message: "Penyesuaian sudah disetujui — klarifikasi terkunci",
+        });
+      }
       return c.json({ ok: true });
     },
   )
@@ -862,7 +898,7 @@ export const stokRoutes = new Hono<AppEnv>()
   .post(
     "/penyesuaian/:id/tolak",
     requireRole("owner", "admin"),
-    zValidator("json", z.object({ alasan: z.string().min(1, "Alasan penolakan wajib diisi") })),
+    zValidator("json", z.object({ alasan: z.string().min(1, "Alasan penolakan wajib diisi") }).strict()),
     async (c) => {
       const auth = c.get("auth");
       const body = c.req.valid("json");
@@ -1099,8 +1135,8 @@ export const stokRoutes = new Hono<AppEnv>()
       "json",
       z.object({
         alasan: z.string().nullish(),
-        ids: z.array(z.string().uuid()).optional(),
-      }),
+        ids: z.array(z.string().uuid()).max(500).optional(),
+      }).strict(),
     ),
     async (c) => {
       const auth = c.get("auth");

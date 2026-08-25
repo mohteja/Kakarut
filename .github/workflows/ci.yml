@@ -94,7 +94,10 @@ jobs:
         run: |
           set -euo pipefail
           # Server boot menjalankan migrasi otomatis (AUTO_MIGRATE default aktif).
-          npm run start -w @kakarut/server > /tmp/server.log 2>&1 &
+          # JEJAK_RUTE: tiap permintaan dicatat (metode, POLA rute, status, ms)
+          # supaya langkah "Cakupan rute" di bawah bisa MENGUKUR ULANG
+          # docs/audit/rute-diketuk.txt alih-alih mempercayainya.
+          JEJAK_RUTE=/tmp/jejak-rute.tsv npm run start -w @kakarut/server > /tmp/server.log 2>&1 &
           echo "$!" > /tmp/server.pid
           for i in $(seq 1 60); do
             if curl -sf http://localhost:3000/api/health >/dev/null 2>&1; then
@@ -105,6 +108,46 @@ jobs:
           curl -sf http://localhost:3000/api/health
           npm run seed
           bash scripts/verify-api.sh
+      # ─────────────────────────────────────────────────────────────────────
+      # AUDIT INVARIAN — SESUDAH verify-api, dan itu seluruh alasannya.
+      #
+      # Basis data ini cuma punya delapan `CHECK` untuk 59 tabel; selebihnya
+      # invarian hidup di kode. Uji satuan memeriksa PENJAGANYA; audit ini
+      # memeriksa DATANYA — dan datanya baru bermakna sesudah 2.700+ asersi
+      # melewatinya lewat rute sungguhan: penjualan, refund, transfer, opname,
+      # produksi, sinkron offline, kosongkan sampah.
+      #
+      # Menjalankannya di basis data yang baru di-seed tak menyatakan apa-apa.
+      # ─────────────────────────────────────────────────────────────────────
+      # ─────────────────────────────────────────────────────────────────────
+      # CAKUPAN RUTE — rekamannya diukur ulang, bukan dipercaya.
+      #
+      # `docs/audit/rute-diketuk.txt` menuliskan rute mana yang benar-benar
+      # diketuk verify-api (271 dari 274 saat ditulis). Gerbang
+      # `cakupan-rute.test.ts` menjaganya, tapi ia menulis batasnya sendiri:
+      # "rute-diketuk.txt adalah REKAMAN, bukan pengukuran ulang — bila sebuah
+      # rute berhenti diketuk tanpa berkasnya diperbarui, gerbangnya tetap
+      # hijau." Langkah ini menutup batas itu: jejak run INI dibandingkan
+      # dengan rekamannya, jadi §244 (atau seksi mana pun) tak bisa dicabut
+      # diam-diam tanpa CI merah.
+      # ─────────────────────────────────────────────────────────────────────
+      - name: Cakupan rute — jejak run ini vs rekaman yang di-commit
+        run: |
+          set -euo pipefail
+          npx tsx apps/server/src/scripts/cakupan-rute.ts /tmp/jejak-rute.tsv > /tmp/rute-diketuk-ci.txt
+          if ! diff -u docs/audit/rute-diketuk.txt /tmp/rute-diketuk-ci.txt; then
+            echo
+            echo "Rekaman cakupan tak lagi cocok dengan kenyataan run ini."
+            echo "Baris '-' = rute yang BERHENTI diketuk (seksi verify-api-nya"
+            echo "dicabut/berubah); baris '+' = rute baru yang kini diketuk."
+            echo "Perbarui rekamannya DENGAN SADAR:"
+            echo "  npx tsx apps/server/src/scripts/cakupan-rute.ts <jejak> > docs/audit/rute-diketuk.txt"
+            exit 1
+          fi
+          echo "Cakupan cocok: $(wc -l < /tmp/rute-diketuk-ci.txt) rute diketuk, sama dengan rekaman."
+
+      - name: Audit invarian basis data (sesudah semua rute dilewati)
+        run: npm run --silent audit:invarian -w @kakarut/server
       # ─────────────────────────────────────────────────────────────────────
       # E2E WEB — di job yang SAMA, dan itu disengaja.
       #

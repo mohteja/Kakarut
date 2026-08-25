@@ -53,10 +53,36 @@ function lamaMenunggu(iso: string): string {
  * Riwayat "siapa menandai apa" untuk satu pesanan. Dimuat saat dibuka saja —
  * papan bisa menampung puluhan kartu dan riwayat hampir tak pernah dibaca.
  */
-function RiwayatModal({ pesanan, onClose }: { pesanan: PesananRow; onClose: () => void }) {
+function RiwayatModal({
+  pesanan,
+  branchQuery,
+  onClose,
+}: {
+  pesanan: PesananRow;
+  /**
+   * Cabang papan ini, dioper dari `PesananPage` — sama seperti
+   * `KosongkanMejaModal` menerimanya. Bukan pilihan gaya: keempat pintu
+   * `/pesanan/…` di berkas ini memanggil `resolveBranchId(c)` di server, yang
+   * untuk owner/admin jatuh ke **cabang aktif pertama** bila `?branch_id=` tak
+   * dikirim — dan lalu menuntut pesanannya ada di cabang itu.
+   *
+   * Terukur pada bill milik cabang kedua, dengan token pemilik:
+   *   GET  /pesanan/:jenis/:id/log                tanpa → 404, dengan → 200
+   *   POST /pesanan/:jenis/:id/status             tanpa → 404, dengan → 200
+   *   POST /pesanan/:jenis/:id/item/:it/status    tanpa → 404, dengan → 200
+   *   POST /pesanan/:jenis/:id/item/:it/sajian    tanpa → 404, dengan → 200
+   *
+   * Daftar papannya sendiri SUDAH mengirim cabang sejak awal; yang tertinggal
+   * hanya tombol-tombolnya. Papan yang memuat kartunya dengan benar lalu
+   * menolak setiap ketukan di atasnya persis bentuk "penjaga di satu pintu".
+   */
+  branchQuery: string;
+  onClose: () => void;
+}) {
   const { data, isLoading, error } = useQuery({
-    queryKey: ["pesanan-log", pesanan.jenis, pesanan.id],
-    queryFn: () => api<PesananLogRow[]>(`/pesanan/${pesanan.jenis}/${pesanan.id}/log`),
+    queryKey: ["pesanan-log", pesanan.jenis, pesanan.id, branchQuery],
+    queryFn: () =>
+      api<PesananLogRow[]>(`/pesanan/${pesanan.jenis}/${pesanan.id}/log${branchQuery}`),
   });
   return (
     <Modal open onClose={onClose} title="Riwayat perubahan">
@@ -528,7 +554,7 @@ export function PesananPage() {
   const statusItem = useMutation({
     mutationKey: ["pesanan-aksi"],
     mutationFn: (v: { p: PesananRow; itemId: string; status: PesananStatus }) =>
-      api(`/pesanan/${v.p.jenis}/${v.p.id}/item/${v.itemId}/status`, {
+      api(`/pesanan/${v.p.jenis}/${v.p.id}/item/${v.itemId}/status${branchQuery}`, {
         method: "POST",
         body: { status: v.status },
       }),
@@ -542,7 +568,7 @@ export function PesananPage() {
   const sajianItem = useMutation({
     mutationKey: ["pesanan-aksi"],
     mutationFn: (v: { p: PesananRow; itemId: string; takeaway: boolean }) =>
-      api(`/pesanan/${v.p.jenis}/${v.p.id}/item/${v.itemId}/sajian`, {
+      api(`/pesanan/${v.p.jenis}/${v.p.id}/item/${v.itemId}/sajian${branchQuery}`, {
         method: "POST",
         body: { takeaway: v.takeaway },
       }),
@@ -568,7 +594,7 @@ export function PesananPage() {
   const pindahSelesai = useMutation({
     mutationKey: ["pesanan-aksi"],
     mutationFn: (v: { p: PesananRow }) =>
-      api(`/pesanan/${v.p.jenis}/${v.p.id}/status`, {
+      api(`/pesanan/${v.p.jenis}/${v.p.id}/status${branchQuery}`, {
         method: "POST",
         body: { status: "selesai" },
       }),
@@ -757,7 +783,13 @@ export function PesananPage() {
         </div>
       )}
 
-      {riwayat && <RiwayatModal pesanan={riwayat} onClose={() => setRiwayat(null)} />}
+      {riwayat && (
+        <RiwayatModal
+          pesanan={riwayat}
+          branchQuery={branchQuery}
+          onClose={() => setRiwayat(null)}
+        />
+      )}
     </div>
   );
 }

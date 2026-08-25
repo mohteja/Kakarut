@@ -1,3 +1,4 @@
+import { waktuKertas } from "@kakarut/shared";
 const rupiah = new Intl.NumberFormat("id-ID", {
   style: "currency",
   currency: "IDR",
@@ -29,6 +30,24 @@ export function formatAngka(n: number, maxDecimals = 2): string {
 
 export function hariIniWIB(timeZone = "Asia/Jakarta"): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone }).format(new Date());
+}
+
+/**
+ * Waktu untuk KERTAS: "21/08 14.30" — tanggal & jam, zona WIB.
+ *
+ * Dipakai struk pembayaran DAN slip pesanan. Satu rumah, sebab keduanya kertas
+ * yang beredar berdampingan di meja yang sama: dua rumusan yang menyimpang
+ * sedikit saja membuat dua kertas untuk satu pesanan berbunyi jam berbeda, dan
+ * yang membacanya tak punya cara tahu mana yang benar.
+ *
+ * WIB dipatok di sini, bukan di tiap pemanggil — lihat
+ * `zona-waktu-satu-suara.test.ts`: selama web mematok WIB, `companies.timezone`
+ * harus tetap tak bisa diubah, dan daftar tempat yang mematoknya adalah daftar
+ * kerja yang harus dibereskan lebih dulu. Menambah pemanggil baru tak
+ * memperpanjang daftar itu; menambah rumusan baru memperpanjangnya.
+ */
+export function waktuKertasWIB(d: Date): string {
+  return waktuKertas(d, "Asia/Jakarta");
 }
 
 export function formatTanggal(tanggal: string): string {

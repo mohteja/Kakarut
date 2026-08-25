@@ -1,5 +1,5 @@
 import bcrypt from "bcryptjs";
-import { zValidator } from "@hono/zod-validator";
+import { zValidator } from "../../lib/validator";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -11,7 +11,7 @@ import { buatSesi } from "../auth/session";
 const GantiPasswordBody = z.object({
   password_lama: z.string(),
   password_baru: z.string().min(8, "password baru minimal 8 karakter"),
-});
+}).strict();
 
 /**
  * Profil akun SENDIRI — dapat diakses semua peran (termasuk kasir): identitas,

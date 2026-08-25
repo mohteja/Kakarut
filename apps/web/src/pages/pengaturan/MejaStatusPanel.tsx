@@ -86,22 +86,44 @@ export function KosongkanMejaModal({
   const [galat, setGalat] = useState<string | null>(null);
   const [lihatRiwayat, setLihatRiwayat] = useState(false);
 
+  /*
+   * `branchQuery` WAJIB ikut di kedua pintu di bawah, dan bukan demi kerapian.
+   *
+   * `GET /meja/:id/log` dan `POST /meja/:id/kosongkan` sama-sama memanggil
+   * `resolveBranchId(c)`, yang untuk owner/admin berbunyi: "`?branch_id=` bila
+   * ada, kalau tidak **cabang aktif PERTAMA**". Keduanya lalu menuntut mejanya
+   * berada di cabang itu. Jadi permintaan tanpa `branch_id` dari halaman Meja
+   * yang sedang menampilkan cabang lain menanyakan meja yang benar kepada
+   * cabang yang salah.
+   *
+   * Terukur terhadap Postgres sungguhan, meja milik cabang kedua:
+   *   GET  /meja/:id/log            tanpa branch_id → 404   dengan → 200
+   *   POST /meja/:id/kosongkan      tanpa branch_id → 404   dengan → 200
+   *
+   * Nilainya sudah ada di berkas ini sejak awal — dipakai `invalidateQueries`
+   * beberapa baris di bawah, dan dikirim dengan benar oleh pemanggil kembar di
+   * `KasirPage` (`/meja/${id}/kosongkan${branchQuery}`). Yang hilang cuma
+   * salinannya di dua pintu ini.
+   */
   const {
     data: riwayat,
     isLoading: riwayatMuat,
     error: riwayatGagal,
   } = useQuery({
-    queryKey: ["meja-log", meja.meja_id],
-    queryFn: () => api<MejaKosongLogRow[]>(`/meja/${meja.meja_id}/log`),
+    // Kuncinya ikut membawa cabang karena URL-nya membawa cabang: dua
+    // permintaan yang berbeda tak boleh berbagi satu tempat di cache.
+    queryKey: ["meja-log", meja.meja_id, branchQuery],
+    queryFn: () => api<MejaKosongLogRow[]>(`/meja/${meja.meja_id}/log${branchQuery}`),
     enabled: lihatRiwayat,
   });
 
   const kosongkan = useMutation({
     mutationFn: (paksa: boolean) =>
-      api(`/meja/${meja.meja_id}/kosongkan`, { method: "POST", body: { paksa } }),
+      api(`/meja/${meja.meja_id}/kosongkan${branchQuery}`, { method: "POST", body: { paksa } }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["meja-status"] });
       queryClient.invalidateQueries({ queryKey: ["meja-log", meja.meja_id] });
+      // (prefiks, jadi ia tetap mencakup kunci yang kini berakhiran cabang)
       onClose();
     },
     onError: (e) => {

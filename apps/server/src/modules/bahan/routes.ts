@@ -1,4 +1,5 @@
-import { zValidator } from "@hono/zod-validator";
+import { zValidator } from "../../lib/validator";
+import { BATAS_ISI, BATAS_QTY_RESEP, BATAS_QTY_STOK, BATAS_UANG } from "../../lib/batas-angka";
 import { and, asc, desc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Hono } from "hono";
@@ -16,7 +17,7 @@ import {
   type RiwayatHargaLot,
 } from "@kakarut/shared";
 import { kunciAntrean } from "../../lib/kunci";
-import { bentrokUnikPada, tanpaBentrok } from "../../lib/pg-galat";
+import { alasanGagalBaris, bentrokUnikPada, tanpaBentrok } from "../../lib/pg-galat";
 import { db } from "../../db/client";
 import {
   branches,
@@ -34,7 +35,7 @@ import {
   storageLocations,
   suppliers,
 } from "../../db/schema";
-import { statistikHargaLots } from "../../lib/harga-stats";
+import { statistikHargaLots, hargaPerSatuanLot, lotStatistik, BATAS_LOT_RIWAYAT } from "../../lib/harga-stats";
 import { requireRole, type AppEnv } from "../../middleware/auth";
 import { saldoBahanPerCabang } from "../stok/service";
 import { kanonikKategori, kategoriKanonikMap } from "../kategori-bahan/service";
@@ -45,17 +46,17 @@ const BahanBody = z.object({
   /** kode produk (kosong → generate otomatis dari nama) */
   kode: z.string().trim().max(20).nullish(),
   nama: z.string().trim().min(1),
-  harga_beli: z.number().nonnegative(),
-  isi: z.number().positive(),
+  harga_beli: z.number().nonnegative().max(BATAS_UANG),
+  isi: z.number().positive().max(BATAS_ISI),
   satuan: z.string().trim().min(1).max(20).default("pcs"),
   /** satuan beli (mis. "dus"); 1 satuan_beli = isi satuan */
   satuan_beli: z.string().trim().max(20).nullish(),
   /** lacak stok saat membeli & menjual */
   track_stok: z.boolean().default(true),
   /** ambang batas stok minimum: saldo ≤ nilai ini → "menipis" (0 = rasio default) */
-  stok_minimum: z.number().nonnegative().default(0),
+  stok_minimum: z.number().nonnegative().max(BATAS_QTY_STOK).default(0),
   /** ambang stok minimum khusus cabang toko (0 = rasio default) */
-  stok_minimum_toko: z.number().nonnegative().default(0),
+  stok_minimum_toko: z.number().nonnegative().max(BATAS_QTY_STOK).default(0),
   /** pengali biaya resep → harga per batch bahan produksi (1 = mengikuti resep) */
   overhead_x: z.number().positive().max(1000).default(1),
   kategori: z.string().trim().min(1).max(30).default("lain"),
@@ -73,7 +74,7 @@ const BahanBody = z.object({
   /** boleh dibeli eceran per pcs; false = pembulatan per kemasan `isi` (jalur beli) */
   boleh_eceran: z.boolean().default(false),
   /** minimal belanja (MOQ) saat belanja otomatis; 0 = tanpa minimum */
-  min_beli: z.number().nonnegative().default(0),
+  min_beli: z.number().nonnegative().max(BATAS_QTY_STOK).default(0),
   /** masa simpan (hari) setelah masuk stok — dasar exp otomatis lot; 0 = tak diatur */
   masa_simpan_hari: z.number().int().min(0).max(3650).default(0),
   /** lead time (hari): beli = lama pesanan datang; produksi = lama proses; 0 = tanpa info */
@@ -81,7 +82,7 @@ const BahanBody = z.object({
   /** foto bahan jadi & foto cara packing (URL hasil POST /upload?tujuan=resep) */
   foto_hasil_url: z.string().trim().max(500).nullish(),
   foto_packing_url: z.string().trim().max(500).nullish(),
-});
+}).strict();
 
 /**
  * Body PUT parsial TANPA .default(): di zod v4, .partial() atas field
@@ -92,13 +93,13 @@ const BahanPatchBody = z.object({
   slug: z.string().trim().min(1).optional(),
   kode: z.string().trim().max(20).nullish(),
   nama: z.string().trim().min(1).optional(),
-  harga_beli: z.number().nonnegative().optional(),
-  isi: z.number().positive().optional(),
+  harga_beli: z.number().nonnegative().max(BATAS_UANG).optional(),
+  isi: z.number().positive().max(BATAS_ISI).optional(),
   satuan: z.string().trim().min(1).max(20).optional(),
   satuan_beli: z.string().trim().max(20).nullish(),
   track_stok: z.boolean().optional(),
-  stok_minimum: z.number().nonnegative().optional(),
-  stok_minimum_toko: z.number().nonnegative().optional(),
+  stok_minimum: z.number().nonnegative().max(BATAS_QTY_STOK).optional(),
+  stok_minimum_toko: z.number().nonnegative().max(BATAS_QTY_STOK).optional(),
   overhead_x: z.number().positive().max(1000).optional(),
   kategori: z.string().trim().min(1).max(30).optional(),
   pengadaan: z.enum(["produksi", "beli"]).optional(),
@@ -109,16 +110,19 @@ const BahanPatchBody = z.object({
   is_packaging: z.boolean().optional(),
   is_complement: z.boolean().optional(),
   boleh_eceran: z.boolean().optional(),
-  min_beli: z.number().nonnegative().optional(),
+  min_beli: z.number().nonnegative().max(BATAS_QTY_STOK).optional(),
   masa_simpan_hari: z.number().int().min(0).max(3650).optional(),
   lead_time_hari: z.number().int().min(0).max(365).optional(),
   foto_hasil_url: z.string().trim().max(500).nullish(),
   foto_packing_url: z.string().trim().max(500).nullish(),
-});
+}).strict();
 
 const ResepBody = z.object({
   komponen: z
-    .array(z.object({ ingredient_id: z.string().uuid(), qty: z.number().positive() }))
+    // Kolomnya `ingredient_components.qty` = numeric(12,4), BUKAN numeric(16,6)
+    // milik stok — lihat BATAS_QTY_RESEP.
+    .array(z.object({ ingredient_id: z.string().uuid(), qty: z.number().positive().max(BATAS_QTY_RESEP) }))
+      .max(200)
     .default([]),
   /**
    * TAKARAN BATCH — ditulis dalam TRANSAKSI YANG SAMA dengan komponennya.
@@ -138,12 +142,12 @@ const ResepBody = z.object({
    */
   atur: z
     .object({
-      isi: z.number().positive().optional(),
+      isi: z.number().positive().max(BATAS_ISI).optional(),
       overhead_x: z.number().positive().max(1000).optional(),
-      harga_beli: z.number().nonnegative().optional(),
+      harga_beli: z.number().nonnegative().max(BATAS_UANG).optional(),
     })
     .optional(),
-});
+}).strict();
 
 /** Langkah cara masak bahan produksi — urutan array = urutan langkah. */
 const LangkahBody = z.object({
@@ -156,7 +160,7 @@ const LangkahBody = z.object({
     )
     .max(30)
     .default([]),
-});
+}).strict();
 
 /** Satu baris "tambah bahan baku" (bulk) — selalu jalur beli. Field set penuh
  * (sama dengan form Ubah): min_beli, kemasan/complement, catatan. Rak simpan
@@ -164,22 +168,22 @@ const LangkahBody = z.object({
 const BahanBulkRow = z.object({
   kode: z.string().trim().max(20).nullish(),
   nama: z.string().trim().min(1),
-  harga_beli: z.number().nonnegative(),
-  isi: z.number().positive(),
+  harga_beli: z.number().nonnegative().max(BATAS_UANG),
+  isi: z.number().positive().max(BATAS_ISI),
   satuan: z.string().trim().min(1).max(20).default("pcs"),
   satuan_beli: z.string().trim().max(20).nullish(),
   kategori: z.string().trim().min(1).max(30).default("lain"),
   track_stok: z.boolean().default(true),
-  stok_minimum: z.number().nonnegative().default(0),
+  stok_minimum: z.number().nonnegative().max(BATAS_QTY_STOK).default(0),
   boleh_eceran: z.boolean().default(false),
-  min_beli: z.number().nonnegative().default(0),
+  min_beli: z.number().nonnegative().max(BATAS_QTY_STOK).default(0),
   masa_simpan_hari: z.number().int().min(0).max(3650).default(0),
   lead_time_hari: z.number().int().min(0).max(365).default(0),
   is_packaging: z.boolean().default(false),
   is_complement: z.boolean().default(false),
   catatan: z.string().nullish(),
 });
-const BahanBulkBody = z.object({ items: z.array(BahanBulkRow).min(1).max(200) });
+const BahanBulkBody = z.object({ items: z.array(BahanBulkRow).min(1).max(200) }).strict();
 
 /**
  * Satu baris impor CSV (nilai sudah dikoersi di web).
@@ -196,6 +200,22 @@ const BahanBulkBody = z.object({ items: z.array(BahanBulkRow).min(1).max(200) })
  * sebelum rute sempat melihat, dan berkas CSV yang cuma punya kolom
  * `nama,harga_beli` menimpa seluruh kolom lain milik tiap bahan yang cocok.
  */
+/*
+  SENGAJA TANPA `.max()` — satu-satunya skema angka di repo ini yang begitu,
+  dan alasannya perilaku yang memang dirancang.
+
+  Rute impor TIDAK menggagalkan seluruh permintaan saat satu baris bermasalah:
+  ia melaporkan baris itu di `gagal[]` lalu meneruskan sisanya. Memasang
+  `.max()` di sini memindahkan kegagalan ke Zod, yang menolak SELURUH badan —
+  satu sel salah ketik di baris ke-500 membatalkan 999 baris lain yang benar.
+
+  Angka yang meluap tetap tak lolos ke basis data: jalur impor menangkapnya
+  per baris dan membalas "Angkanya terlalu besar untuk disimpan" — tanpa kueri
+  mentah, tanpa nama kolom, tanpa uuid (dijaga §225 verify-api).
+
+  Pengecualian ini disebut namanya di `angka-berbatas-atas.test.ts`; ia tak
+  bisa melebar diam-diam ke skema lain.
+*/
 const BahanImportRowBody = z.object({
   kode: z.string().trim().max(20).nullish(),
   nama: z.string().trim().min(1),
@@ -218,7 +238,7 @@ const BahanImportRowBody = z.object({
 const BahanImportBody = z.object({
   mode: z.enum(["perbarui", "tambah"]),
   items: z.array(BahanImportRowBody).min(1).max(1000),
-});
+}).strict();
 
 const BahanSupplierBody = z.object({
   items: z
@@ -230,7 +250,7 @@ const BahanSupplierBody = z.object({
     )
     .max(50)
     .default([]),
-});
+}).strict();
 
 /** Ringkasan supplier per bahan: nama supplier utama + jumlah terdaftar. */
 async function infoSupplier(
@@ -449,43 +469,73 @@ async function riwayatHargaBahan(
   companyId: string,
   ing: typeof ingredients.$inferSelect,
 ): Promise<RiwayatHargaDto> {
-  const rows = await db
-    .select({
-      id: productions.id,
-      tanggal: productions.prodDate,
-      qty: productions.qty,
-      totalHarga: productions.totalHarga,
-      hargaTebakan: productions.hargaTebakan,
-      supplier: suppliers.nama,
-      noFaktur: productions.noFaktur,
-      nomor: dokumenNomor.nomorTeks,
-    })
-    .from(productions)
-    .leftJoin(suppliers, eq(productions.supplierId, suppliers.id))
-    .leftJoin(
-      dokumenNomor,
-      and(
-        eq(dokumenNomor.companyId, productions.companyId),
-        eq(dokumenNomor.refId, productions.fakturId),
-      ),
-    )
-    .where(
-      and(
-        eq(productions.companyId, companyId),
-        eq(productions.ingredientId, ing.id),
-        eq(productions.tipe, "beli"),
-        eq(productions.status, "dikonfirmasi"),
-        isNull(productions.deletedAt),
-      ),
-    )
-    .orderBy(desc(productions.prodDate), desc(productions.waktu));
+  const milikBahan = and(
+    eq(productions.companyId, companyId),
+    eq(productions.ingredientId, ing.id),
+    eq(productions.tipe, "beli"),
+    eq(productions.status, "dikonfirmasi"),
+    isNull(productions.deletedAt),
+  );
+  const urutan = [desc(productions.prodDate), desc(productions.waktu)] as const;
+  /*
+    DUA KUERI, DAN ITU YANG MEMBUAT PEMOTONGANNYA AMAN.
+
+    Kartu ini dulu menarik SELURUH pembelian sebuah bahan — lengkap dengan dua
+    leftJoin — lalu menghitung kelima angkanya dari larik yang sama yang
+    dikirimnya. Terukur pada satu bahan dengan 12.018 lot: balasannya
+    **2,10 MB**.
+
+    Memotong lariknya begitu saja bukan pilihan: `harga_median` di kartu ini
+    JADI harga acuan RAB belanja (disinkron tiap Laporan Harga), dan harga
+    acuan itu dasar HPP setiap menu yang memakai bahannya. Median dari "300 lot
+    terbaru" menggeser HPP seluruh menu tanpa satu pun galat muncul.
+
+    Karena itu statistiknya dihitung dari kueri SEMPIT tanpa batas — empat
+    kolom, tanpa join sama sekali — dan `statistikHargaLots` tetap satu-satunya
+    yang menghitungnya. Yang dibatasi hanya daftar yang benar-benar dikirim.
+  */
+  const [semuaLot, rows] = await Promise.all([
+    db
+      .select({
+        tanggal: productions.prodDate,
+        qty: productions.qty,
+        totalHarga: productions.totalHarga,
+        hargaTebakan: productions.hargaTebakan,
+      })
+      .from(productions)
+      .where(milikBahan)
+      .orderBy(...urutan),
+    db
+      .select({
+        id: productions.id,
+        tanggal: productions.prodDate,
+        qty: productions.qty,
+        totalHarga: productions.totalHarga,
+        hargaTebakan: productions.hargaTebakan,
+        supplier: suppliers.nama,
+        noFaktur: productions.noFaktur,
+        nomor: dokumenNomor.nomorTeks,
+      })
+      .from(productions)
+      .leftJoin(suppliers, eq(productions.supplierId, suppliers.id))
+      .leftJoin(
+        dokumenNomor,
+        and(
+          eq(dokumenNomor.companyId, productions.companyId),
+          eq(dokumenNomor.refId, productions.fakturId),
+        ),
+      )
+      .where(milikBahan)
+      .orderBy(...urutan)
+      .limit(BATAS_LOT_RIWAYAT + 1),
+  ]);
+  const terpotong = rows.length > BATAS_LOT_RIWAYAT;
   const lots: RiwayatHargaLot[] = rows.map((r) => ({
     id: r.id,
     tanggal: r.tanggal,
     qty: r.qty,
     total_harga: r.totalHarga,
-    harga_satuan:
-      r.totalHarga != null && r.qty > 0 ? Math.round((r.totalHarga / r.qty) * 100) / 100 : null,
+    harga_satuan: hargaPerSatuanLot(r.totalHarga, r.qty),
     supplier: r.supplier,
     no_faktur: r.noFaktur,
     nomor: r.nomor,
@@ -504,9 +554,12 @@ async function riwayatHargaBahan(
     // tempat, dan tempat itu yang mengeluarkan lot tebakan — lihat catatan di
     // `statistikHargaLots`. Menghitung salah satunya di sini lagi persis
     // kesalahan yang baru saja dicabut.
-    ...statistikHargaLots(lots),
-    jumlah_pembelian: lots.length,
-    lots,
+    // Keempat angka statistik + jumlah_pembelian datang dari SELURUH lot
+    // (`semuaLot`), bukan dari `lots` yang sudah dipotong.
+    ...statistikHargaLots(lotStatistik(semuaLot)),
+    jumlah_pembelian: semuaLot.length,
+    lots: terpotong ? lots.slice(0, BATAS_LOT_RIWAYAT) : lots,
+    lots_terpotong: terpotong,
   };
 }
 
@@ -889,7 +942,7 @@ export const bahanRoutes = new Hono<AppEnv>()
         if (u.pulih) dipulihkan++;
         else diperbarui++;
       } catch (e) {
-        gagal.push({ nama: u.item.nama, alasan: (e as Error)?.message ?? "gagal diperbarui" });
+        gagal.push({ nama: u.item.nama, alasan: alasanGagalBaris(e, "gagal diperbarui") });
       }
     }
     for (let i = 0; i < insertBaris.length; i++) {
@@ -931,6 +984,14 @@ export const bahanRoutes = new Hono<AppEnv>()
          * INSERT beserta daftar kolomnya, dikirim apa adanya ke klien. Yang
          * mengimpor daftar harga supplier melihat dump SQL, bukan "sudah ada".
          *
+         * CATATAN untuk pembaca berikutnya: perbaikan itu dulu hanya menutup
+         * cabang 23505 di bawah — TIGA jalur galat lain di blok ini masih
+         * membuang pesan mentah, dan komentar ini sempat membuatnya tampak
+         * seperti sudah beres. Kebocorannya baru benar-benar tertutup sejak
+         * semuanya lewat `alasanGagalBaris`, yang tak pernah memulangkan teks
+         * driver. Terukur: `harga_beli: 1e15` pada kolom `numeric(14,2)`
+         * memulangkan INSERT lengkap 30 kolom + uuid perusahaan ke klien.
+         *
          * Yang benar bukan melaporkan gagal, melainkan mengklasifikasi ULANG
          * baris itu dengan data yang kini benar — persis yang akan terjadi
          * seandainya kedua impor berjalan berurutan:
@@ -955,12 +1016,12 @@ export const bahanRoutes = new Hono<AppEnv>()
               else dipulihkan++;
               continue;
             } catch (e2) {
-              gagal.push({ nama: b.nama, alasan: (e2 as Error)?.message ?? "gagal diperbarui" });
+              gagal.push({ nama: b.nama, alasan: alasanGagalBaris(e2, "gagal diperbarui") });
               continue;
             }
           }
         }
-        gagal.push({ nama: b.nama, alasan: (e as Error)?.message ?? "gagal ditambah" });
+        gagal.push({ nama: b.nama, alasan: alasanGagalBaris(e, "gagal ditambah") });
       }
     }
     return c.json({ ditambah, diperbarui, dipulihkan, dilewati, gagal });
@@ -1318,8 +1379,8 @@ export const bahanRoutes = new Hono<AppEnv>()
          * ditinggalkan sebagai pekerjaan tersendiri. Angkanya menyamai batas
          * rupiah yang sudah dipakai jalur faktur (`produksi/routes.ts`).
          */
-        harga_per_unit: z.number().nonnegative().max(1_000_000_000_000),
-      }),
+        harga_per_unit: z.number().nonnegative().max(BATAS_UANG),
+      }).strict(),
     ),
     async (c) => {
       const auth = c.get("auth");

@@ -1,4 +1,4 @@
-import { zValidator } from "@hono/zod-validator";
+import { zValidator } from "../../lib/validator";
 import bcrypt from "bcryptjs";
 import { desc, eq, sql } from "drizzle-orm";
 import { Hono } from "hono";
@@ -13,6 +13,24 @@ import { seedUnitsPerusahaan } from "../satuan/service";
 import { seedKategoriBahanPerusahaan } from "../kategori-bahan/service";
 import { resolveKodeKaryawan } from "../users/service";
 
+/**
+ * Nilai `plan` yang SAH — dan daftarnya harus tetap sama persis dengan yang
+ * dikenali `modeDariPlan`, yang memutuskan mode tenant dari satu perbandingan
+ * ketat (`plan === "pro"`). Apa pun di luar daftar ini berarti LITE.
+ *
+ * Dulu kolom ini menerima `z.string()` bebas, dan itu cukup untuk menurunkan
+ * pelanggan yang membayar tanpa satu pun peringatan. TERUKUR: tenant dengan
+ * 28 cabang aktif dikirimi `{"plan":"Pro"}` (huruf besar) → dibalas 200, dan
+ * `GET /company` seketika berbunyi `mode: "lite"`. `isPro` menggerbangi
+ * PEMILIH CABANG di layar, jadi pemiliknya mendadak cuma bisa menjangkau satu
+ * dari 28 cabangnya — karena sebuah string tak cocok.
+ *
+ * Penurunan yang DISENGAJA tetap boleh (ini alat penagihan; memblokirnya
+ * membuat tenant menunggak tak bisa ditertibkan). Yang ditutup cuma bedanya
+ * antara "sengaja diturunkan" dan "salah ketik".
+ */
+const PLAN = z.enum(["lite", "pro"]);
+
 const CreateTenantBody = z.object({
   nama: z.string().trim().min(1),
   slug: z
@@ -24,15 +42,15 @@ const CreateTenantBody = z.object({
   owner_nama: z.string().trim().min(1),
   owner_email: z.string().trim().toLowerCase(),
   owner_password: z.string().min(8, "password minimal 8 karakter"),
-  plan: z.string().default("lite"),
-});
+  plan: PLAN.default("lite"),
+}).strict();
 
 const PatchTenantBody = z.object({
   nama: z.string().trim().min(1).optional(),
-  plan: z.string().optional(),
+  plan: PLAN.optional(),
   plan_expires_at: z.string().datetime().nullish(),
   is_active: z.boolean().optional(),
-});
+}).strict();
 
 export const adminTenantsRoutes = new Hono<AppEnv>()
   .get("/", async (c) => {

@@ -43,10 +43,29 @@
  *    tetap terbaca "tanpa penjaga" (lihat entri `buatPerusahaanUntuk`);
  *  · dan ke arah sebaliknya — yang LEBIH BERBAHAYA — satu penjaga di mana pun
  *    dalam satu badan membuat SELURUH tulisan di badan itu lolos. `provisionGuest`
- *    (seed/guest.ts) adalah contoh nyatanya: `onConflictDoUpdate` di insert
- *    `users` paling atas menutupi insert `companies`, `branches`, dan
- *    `storageLocations` di bawahnya yang tak berpenjaga sama sekali. Badan yang
- *    panjang karena itu titik butanya, bukan titik kuatnya;
+ *    (seed/guest.ts) adalah contoh nyatanya, dan contoh itu kemudian DIUKUR:
+ *    dua boot dilepas serentak pada DB tanpa perusahaan demo, dan yang kalah
+ *    melempar `Failed query: insert into "companies" …` mentah — selamat hanya
+ *    karena catch pembungkus di index.ts. Insert `companies`-nya kini memakai
+ *    `onConflictDoNothing` + jalur kalah yang idempoten (terukur: menang=true,
+ *    kalah=false, keadaan sehat), tapi GRANULARITAS SAPUAN INI TETAP BADAN —
+ *    ia tetap tak akan melihat insert tak berpenjaga yang menumpang badan
+ *    panjang. Badan yang panjang tetap titik butanya, bukan titik kuatnya.
+ *    UTANG INI KEMUDIAN DIADJUDIKASI untuk KEENAM aturan (2026-08-25;
+ *    `bentrok-unik` sudah lebih dulu per-pernyataan atas 32 tabel): kelima
+ *    aturan sisa dijalankan ulang per-TULISAN dengan syarat penjaga hadir
+ *    SEBELUM tiap tulisan di badannya — hasilnya NOL temuan hidup. Kelima
+ *    tuduhannya sudah tertimbang di `dasar`; satu-satunya baris "penjaga
+ *    sesudah tulisan" (konsumsi.ts) adalah cacat jendela pengukurnya sendiri
+ *    (penjaganya DIRANTAI pada pernyataan yang sama:
+ *    `.insert(…).values(…).onConflictDoNothing()`). Untuk dua aturan gaya
+ *    PINTU (unggah/email-berbatas), granularitas badan memang benar secara
+ *    konstruksi — penjaganya middleware pada pendaftaran rute — dan pola
+ *    longgar `\bbatas[A-Z]` diperiksa per nama: yang terpungut hari ini
+ *    semuanya pembatas laju sungguhan (batasUndang*, batasLupa). Batasnya
+ *    yang tersisa: adjudikasi ini SEKALI JALAN — badan baru yang menaruh
+ *    tulisan sebelum penjaganya baru tertangkap adjudikasi berikutnya,
+ *    bukan oleh sapuan badan ini;
  *  · ia hanya melihat bentuk yang ditulis di TypeScript, bukan SQL mentah;
  *  · daftar tabel tiap aturan adalah pilihan, bukan kelengkapan. Untuk
  *    `bentrok-unik`: ada 32 tabel berindeks unik di skema ini, dan menyapu
@@ -168,14 +187,21 @@ const ATURAN: Aturan[] = [
      * melainkan menembak kesepuluh endpoint pembuatan sekaligus; daftarnya lalu
      * dilebarkan supaya pintu berikutnya tak perlu ditemukan dengan cara itu.
      *
-     * Kenapa berhenti di sini dan tidak memakai SELURUH tabel berindeks unik
-     * (ada 32): diukur, itu memunculkan 20 pintu terbuka, dan mendaftarkan 20
-     * entri `dasar` tanpa benar-benar memeriksa satu per satu justru melanggar
-     * doktrin berkas ini sendiri. Sisanya sengaja ditinggalkan sebagai utang
-     * yang DIUKUR, bukan dinyatakan bersih.
+     * Daftarnya kini SELURUH 32 tabel berindeks unik. Catatan lama di sini
+     * berhenti di 14 tabel karena menyapu semuanya "memunculkan 20 pintu
+     * terbuka" yang belum diperiksa satu per satu — utang itu DIBAYAR
+     * 2026-08-24: tiap pintu yang tersisa diadjudikasi tangan (dan sebagian
+     * diukur lewat HTTP dengan pelepasan serentak — lihat vena "bentrok unik
+     * di bawah klik ganda" & "arah ganti-nama" di ledger), lalu masuk `dasar`
+     * DENGAN alasannya. Angka "20" sendiri sudah kedaluwarsa: sapuan hari ini
+     * atas populasi penuh menyisakan 8, dan kedelapannya terjaga oleh bentuk
+     * yang kosakata aturan ini memang tak bisa lihat — indeks PARSIAL
+     * (`auto_uq` hanya `WHERE tipe='auto'`), kunci `FOR UPDATE` yang tinggal
+     * jauh di atas jendela, dedup `Map` sebelum insert, dan keunikan atas
+     * nilai ACAK 256-bit yang mustahil bentrok.
      */
     tulis:
-      /\.insert\(\s*(?:users|invitations|companies|branches|suppliers|storageLocations|meja|ingredients|units|menuCategories|ingredientCategories|menus|customers|supplies)\s*\)/,
+      /\.insert\(\s*(?:users|invitations|companies|branches|suppliers|storageLocations|meja|ingredients|units|menuCategories|ingredientCategories|menus|customers|supplies|cleaningReportItems|cleaningReports|dokumenNomor|ingredientComponents|ingredientSuppliers|memberships|menuComponents|productionConsumptions|sales|shifts|storageLocationIngredients|storageLocationPetugas|supplyMutations|supplyRules|supplySuppliers|syncCommands|emailVerificationTokens|passwordResetTokens)\s*\)/,
     /*
      * `bentrokUnik` (bukan cuma `…Pada`) dan `onConflict` (bukan cuma
      * `…DoNothing`) — versi pertama meleset pada keduanya, dan keduanya
@@ -192,6 +218,37 @@ const ATURAN: Aturan[] = [
      */
     penjaga: /bentrokUnik|tanpaBentrok|onConflict|kunciAntrean|\.for\("(?:update|share)"\)/,
     dasar: {
+      // ── Adjudikasi 2026-08-24 (daftar tabel dilebarkan 14 → 32) ──────────
+      "modules/auth/routes.ts": {
+        pintu: 2,
+        alasan:
+          "kedua insert token (verifikasi email & reset password) unik atas " +
+          "`tokenHash` = sha256(randomBytes(32)) — keunikan di atas nilai acak " +
+          "256-bit; bentroknya mustahil secara praktis, dan menerjemahkannya " +
+          "berarti menyiapkan kalimat untuk kejadian yang tak akan terjadi",
+      },
+      "modules/menu/routes.ts": {
+        pintu: 1,
+        alasan:
+          "`replaceKomponen`: pasangan (menu, ingredient) di-dedup lewat Map " +
+          "SEBELUM insert, dan barisnya baru saja di-DELETE di transaksi yang " +
+          "sama — indeks pasangannya tak bisa tertabrak dari satu permintaan; " +
+          "lintas permintaan dikunci baris induk menu (lihat vena ganti-nama)",
+      },
+      "modules/perlengkapan/routes.ts": {
+        pintu: 2,
+        alasan:
+          "`supply_mutations_auto_uq` adalah indeks PARSIAL — `WHERE tipe = " +
+          "'auto'`. Kedua insert di sini bertipe koreksi/masuk, jadi indeksnya " +
+          "tak berlaku untuk baris yang mereka tulis (diadjudikasi vena " +
+          "bentrok-unik 2026-08-24)",
+      },
+      "modules/perlengkapan/service.ts": {
+        pintu: 3,
+        alasan:
+          "sama dengan routes-nya: ketiga insert bertipe koreksi/masuk/kirim, " +
+          "di luar cakupan indeks parsial `auto_uq`",
+      },
       "modules/auth/superadmin.ts": {
         pintu: 1,
         alasan:
@@ -215,10 +272,14 @@ const ATURAN: Aturan[] = [
       // cuma mengenal `onConflictDoNothing`. Yang memaksa penghapusannya uji
       // "`dasar` tak menyimpan entri yang sudah tak berlaku" di bawah.
       //
-      // Yang perlu diketahui penerusnya: `provisionGuest` juga menyisipkan
-      // `companies`, `branches`, dan `storageLocations` TANPA penjaga, dan
-      // ketiganya kini TAK TERLIHAT sapuan ini — satu penjaga di awal badan
-      // menutupi seluruh sisanya. Lihat catatan BATASNYA di kepala berkas.
+      // Yang perlu diketahui penerusnya: utang yang dulu ditulis di sini —
+      // insert `companies` tanpa penjaga yang tertutupi `onConflictDoUpdate`
+      // di awal badan — sudah DIUKUR (balapan dua boot: yang kalah melempar
+      // kueri mentah) lalu DIBAYAR: insert-nya kini `onConflictDoNothing`
+      // dengan jalur kalah idempoten, dijaga `provisi-tamu-balapan.test.ts`. `branches`
+      // dan `storageLocations` di bawahnya terkurung transaksi yang gerbangnya
+      // insert perusahaan itu, jadi tak bisa balapan sendiri. Granularitas
+      // sapuan ini tetap badan — lihat BATASNYA di kepala berkas.
     },
   },
   {
@@ -269,6 +330,101 @@ const ATURAN: Aturan[] = [
     tulis: /\.insert\(\s*leaveRequests\s*\)/,
     penjaga: /kunciAntrean\([^)]*"pengajuan"/,
     dasar: {},
+  },
+  {
+    nama: "unggah-berbatas",
+    kenapa:
+      "Endpoint yang MENULIS BERKAS ke penyimpanan menumbuhkan biaya yang tak " +
+      "pernah menyusut sendiri: tak ada kuota per perusahaan, tak ada " +
+      "pembersihan yatim. Batas per BERKAS tidak menjaga apa pun terhadap " +
+      "BANYAK berkas. Di R2 akibatnya tagihan yang tumbuh diam-diam; di " +
+      "penyimpanan lokal ia volume yang penuh — dan saat volumenya penuh, yang " +
+      "berhenti bukan cuma unggahan melainkan basis datanya.",
+    /*
+     * TERUKUR sebelum diperbaiki, sebagai KASIR — peran paling rendah yang
+     * punya token:
+     *
+     *     20 unggahan 5 MB berturut-turut → 100 MB dalam 0,81 detik
+     *     123 MB/detik ≈ 432 GB/jam dari SATU akun, nol 429
+     *
+     * Sesudah dua ember dipasang: 80 percobaan → 60 diterima, 20 × 429,
+     * berhenti di 300 MB.
+     *
+     * `MAX_SIZE` yang sudah ada di rutenya menjaga satu permintaan; ia tak
+     * pernah menjaga berapa banyak permintaan. Bentuk yang sama dengan
+     * `email-berbatas` di bawah: batas per satuan ada, batas lajunya tidak.
+     */
+    tulis: /getStorage\(\)\.put\(/,
+    /*
+     * Yang dicari bentuk PEMAKAIAN, bukan bentuk DEFINISI.
+     *
+     * `rateLimit(|\bbatas[A-Z]\w*` — pola yang dipakai aturan `email-berbatas`
+     * di bawah — tak cukup di sini, dan itu terbukti: mencabut kedua ember dari
+     * `.post()` membiarkan definisinya utuh di berkas yang sama, dan sapuannya
+     * tetap HIJAU. Bukti merah untuk aturan ini gagal pada percobaan pertama.
+     *
+     * `^\s{2,}batasUnggah\w*,$` hanya cocok pada baris ARGUMEN middleware —
+     * yaitu ember yang benar-benar terpasang di rutenya.
+     */
+    penjaga: /^\s{2,}batasUnggah\w*,$/m,
+    dasar: {},
+  },
+  {
+    nama: "email-berbatas",
+    kenapa:
+      "Endpoint yang mengirim surat ke alamat yang DITENTUKAN PEMANGGIL adalah " +
+      "relai email. Tanpa batas laju ia bisa membanjiri korban — dan suratnya " +
+      "keluar lewat SMTP perusahaan sendiri, jadi penyalahgunaan dari SATU akun " +
+      "bisa membuat domain pengirimnya masuk daftar hitam. Yang ikut mati " +
+      "sesudah itu adalah email reset password & verifikasi SELURUH tenant.",
+    /*
+     * Aturannya sudah tertulis dua kali di `auth/routes.ts` — `batasLupa`
+     * ("cegah bom email ke korban") dan `batasVerifikasiKirim` ("cegah bom
+     * email") — lalu pintu ketiga, `POST /karyawan/undang`, dibiarkan terbuka.
+     *
+     * TERUKUR sebelum diperbaiki: putaran undang → batalkan → undang terhadap
+     * korban yang sama menghasilkan 20 dari 20 surat terkirim tanpa satu pun
+     * 429, sementara `/auth/forgot-password` pada server yang sama berhenti di
+     * 6. Pra-cek "sudah ada undangan pending" tak menutupnya, sebab
+     * `DELETE /karyawan/undangan/:id` mencabutnya lagi.
+     *
+     * `await kirimEmail(`, bukan `kirimEmail(` polos: yang terakhir ikut
+     * menuduh DEKLARASI fungsinya sendiri di `mail/service.ts`.
+     */
+    tulis: /await\s+kirimEmail\(/,
+    penjaga: /rateLimit\(|\bbatas[A-Z]\w*/,
+    dasar: {
+      "lib/backup-peringatan.ts": {
+        pintu: 1,
+        alasan:
+          "peringatan cadangan basi — dikirim PENJADWAL, bukan atas permintaan " +
+          "siapa pun, dan tujuannya datang dari setelan platform bukan dari " +
+          "badan permintaan. Bukan relai: tak ada pemanggil yang bisa memilih " +
+          "alamatnya, jadi tak ada yang bisa dibanjiri",
+      },
+      "modules/auth/routes.ts": {
+        pintu: 1,
+        alasan:
+          "`kirimTautanVerifikasi` adalah PEMBANTU, dan penjaganya ada di kedua " +
+          "pemanggilnya: `POST /register` (`batasRegister`) dan `POST " +
+          "/kirim-ulang-verifikasi` (`batasVerifikasiKirim`). Ini persis titik " +
+          "buta yang ditulis di kepala berkas ini — granularitasnya BADAN, jadi " +
+          "penjaga yang sah tapi tinggal di pemanggil terbaca 'tanpa penjaga'. " +
+          "Diperiksa dengan tangan, bukan diasumsikan",
+      },
+      "modules/admin-system/routes.ts": {
+        pintu: 1,
+        alasan:
+          "kirim email UJI dari panel super admin (`/admin/sistem/email-uji`) — " +
+          "digerbang `requireSuperAdmin`, yaitu satu-dua akun operator platform " +
+          "ini sendiri, bukan pemilik warung. Ia juga satu-satunya pemakai yang " +
+          "TUJUANNYA memang mengirim satu surat untuk memastikan SMTP-nya hidup, " +
+          "sehingga batas laju di situ akan menghalangi persis pekerjaan yang " +
+          "sedang dilakukan orangnya. Diukur sebagai utang, bukan dinyatakan " +
+          "aman: bila kelak panel itu dibuka ke peran lain, ia harus ikut " +
+          "dibatasi",
+      },
+    },
   },
 ];
 
@@ -436,9 +592,12 @@ describe("detektornya benar-benar mengenali bentuknya", () => {
     ],
     // …dan yang TIDAK boleh tertuduh:
     ["owner-terakhir", 'await tx.update(memberships).set({ employeeCode: kode }).where(eq(x));', false],
-    ["bentrok-unik", 'await tx.insert(memberships).values({ userId, companyId });', false],
+    ["bentrok-unik", 'await tx.insert(memberships).values({ userId, companyId });', true],
     // `saleItems` bukan `sales`; batas kata harus memisahkannya
-    ["bentrok-unik", 'await tx.insert(menuComponents).values({ menuId, ingredientId });', false],
+    // Sejak daftar dilebarkan ke seluruh 32 tabel unik (2026-08-24), kedua
+    // bentuk ini DIKENALI — dan pintunya yang nyata dibayar lewat `dasar`
+    // beralasan, bukan dengan menyempitkan kosakata sapuannya.
+    ["bentrok-unik", 'await tx.insert(menuComponents).values({ menuId, ingredientId });', true],
   ];
 
   it.each(contoh)("%s mengenali: %s → %s", (nama, kode, harus) => {

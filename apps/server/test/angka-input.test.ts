@@ -1,6 +1,7 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { butaKomentar } from "../src/scripts/buta-komentar";
 
 /**
  * Penjaga SATU PEMBACA ANGKA untuk isian yang diketik orang.
@@ -105,7 +106,9 @@ function semuaTsx(dir: string): string[] {
  * terhitung sebagai cacatnya.
  */
 function jumlahNumber(isi: string): number {
-  const tanpaKomentar = isi.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+  // Salinan lokal pengupas komentar dulu tinggal di sini; ia membuang lebih
+  // banyak dari yang seharusnya karena menilai `/` tanpa tahu ia ada di mana.
+  const tanpaKomentar = butaKomentar(isi);
   return [...tanpaKomentar.matchAll(/type="number"/g)].length;
 }
 

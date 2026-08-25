@@ -25,11 +25,15 @@ export function useKirimanMenggantung() {
     staleTime: 30_000,
   });
 
-  /** faktur mana saja yang punya baris menggantung — dasar tanda di kartu */
-  const fakturBermasalah = useMemo(
-    () => new Set((data?.rows ?? []).map((r) => r.faktur_id)),
-    [data],
-  );
+  /*
+   * Dasar tandanya `faktur_ids`, BUKAN `rows`.
+   *
+   * `rows` berlangit-langit sejak balasan ini bisa mencapai 2,76 MB / 4,17
+   * detik pada 10.000 baris menggantung. Menurunkan tandanya dari `rows` akan
+   * membuat faktur di luar potongan itu kehilangan tandanya tanpa suara —
+   * `faktur_ids` dihitung server atas populasi penuh justru untuk itu.
+   */
+  const fakturBermasalah = useMemo(() => new Set(data?.faktur_ids ?? []), [data]);
 
   return { data, isLoading, fakturBermasalah, jumlah: data?.jumlah ?? 0 };
 }

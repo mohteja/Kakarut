@@ -1,4 +1,4 @@
-import { zValidator } from "@hono/zod-validator";
+import { zValidator } from "../../lib/validator";
 import { aliasedTable, and, asc, desc, eq, gte, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { Hono } from "hono";
@@ -25,7 +25,7 @@ import {
   users,
 } from "../../db/schema";
 import { tanggalDi } from "../../lib/time";
-import { requireRole, terikatCabang, type AppEnv } from "../../middleware/auth";
+import { requireRole, terikatCabang, type AppEnv, cabangDariQuery} from "../../middleware/auth";
 import { bentrokUnik } from "../../lib/pg-galat";
 import { tanggalDalamRentang } from "../pengajuan/routes";
 
@@ -65,17 +65,17 @@ const LaporanBody = z.object({
   sesi: z.enum(KODE_SESI_KEBERSIHAN),
   catatan: z.string().trim().max(500).nullish(),
   items: z.array(ItemBody).min(1, "Checklist tidak boleh kosong").max(MAKS_ITEM),
-});
+}).strict();
 
 /** PATCH hanya mengganti isi; sesi & tanggal tetap seperti saat dibuat. */
 const UbahBody = z.object({
   catatan: z.string().trim().max(500).nullish(),
   items: z.array(ItemBody).min(1, "Checklist tidak boleh kosong").max(MAKS_ITEM),
-});
+}).strict();
 
 const CatatanBody = z.object({
   catatan_owner: z.string().trim().max(1000).nullish(),
-});
+}).strict();
 
 const AreaBody = z.object({
   nama: z.string().trim().min(1, "Nama area wajib diisi").max(120),
@@ -83,7 +83,7 @@ const AreaBody = z.object({
   branch_id: z.string().uuid().nullish(),
   urutan: z.number().int().min(0).max(9999).optional(),
   is_active: z.boolean().optional(),
-});
+}).strict();
 
 const UbahAreaBody = AreaBody.partial();
 
@@ -290,24 +290,6 @@ async function siapkanItems(
   });
 }
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-/**
- * `branch_id` dari query masuk langsung ke klausa WHERE kolom uuid. Nilai yang
- * bukan uuid membuat Postgres melempar `invalid input syntax for type uuid`,
- * yang keluar sebagai **500** — padahal itu murni salah input klien. Disaring
- * lebih dulu jadi 400 yang bisa ditindaklanjuti.
- *
- * Mengembalikan null bila tak ada saringan (`all` / tak dikirim).
- */
-function saringCabang(v: string | undefined): string | null {
-  if (!v || v === "all") return null;
-  if (!UUID_RE.test(v)) {
-    throw new HTTPException(400, { message: "branch_id bukan UUID yang sah" });
-  }
-  return v;
-}
-
 /**
  * Deteksi pelanggaran UNIQUE apa pun tanpa menebak-nebak teks pesannya. Dipakai
  * dua kali dengan arti berbeda: satu laporan per sesi (POST), dan satu area per
@@ -341,11 +323,10 @@ export const kebersihanRoutes = new Hono<AppEnv>()
       }
       syarat.push(eq(cleaningAreas.isActive, true));
     } else {
-      const q = c.req.query("branch_id");
-      const branchId = saringCabang(q);
+      const branchId = await cabangDariQuery(c);
       if (branchId) {
         syarat.push(or(isNull(cleaningAreas.branchId), eq(cleaningAreas.branchId, branchId))!);
-      } else if (q !== "all" && auth.branch_id) {
+      } else if (c.req.query("branch_id") !== "all" && auth.branch_id) {
         // Tak menyebut cabang = bertindak sebagai pelapor di cabangnya sendiri.
         syarat.push(or(isNull(cleaningAreas.branchId), eq(cleaningAreas.branchId, auth.branch_id))!);
       }
@@ -463,7 +444,7 @@ export const kebersihanRoutes = new Hono<AppEnv>()
       gte(cleaningReports.tanggal, dari),
       lte(cleaningReports.tanggal, sampai),
     ];
-    const branchId = saringCabang(c.req.query("branch_id"));
+    const branchId = await cabangDariQuery(c);
     if (branchId) syarat.push(eq(cleaningReports.branchId, branchId));
     const sesi = c.req.query("sesi");
     if (sesi === "pagi" || sesi === "siang" || sesi === "malam") {
@@ -566,7 +547,7 @@ export const kebersihanRoutes = new Hono<AppEnv>()
     if (terikatCabang(auth.role) || c.req.query("saya") === "1") {
       syarat.push(eq(cleaningReports.userId, auth.sub));
     } else {
-      const branchId = saringCabang(c.req.query("branch_id"));
+      const branchId = await cabangDariQuery(c);
       if (branchId) syarat.push(eq(cleaningReports.branchId, branchId));
     }
     const dari = c.req.query("dari");

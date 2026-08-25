@@ -31,6 +31,45 @@ function selCsv(v: string): string {
   return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
 }
 
+/**
+ * Awalan yang membuat Excel/Sheets/LibreOffice memperlakukan isi sel sebagai
+ * RUMUS, bukan teks. Tab dan CR ikut karena keduanya bisa mendahului `=` di
+ * dalam sel yang sudah dikutip.
+ */
+const AWALAN_FORMULA = /^'?[=+\-@\t\r]/;
+
+/**
+ * Netralkan sel TEKS supaya tak dieksekusi program lain.
+ *
+ * `selCsv` di atas benar untuk apa yang dijaganya — PARSING. Yang tak
+ * dijaganya: berkas ini dibangun untuk dibuka Excel, dan sel yang diawali
+ * `=`, `+`, `-`, atau `@` dieksekusi di sana. Alurnya bukan teoretis, ia
+ * tertulis di berkas ini sendiri: "unduh template → buka di Excel → Simpan"
+ * — lalu diimpor balik, jadi yang kembali adalah HASIL rumusnya, bukan nama
+ * yang diketik orang. Terukur sebelum penjaga ini: nama `=1+1`, kategori
+ * `@SUM(1+1)`, satuan `+kg`, catatan `-2+3`, dan muatan DDE
+ * `=cmd|" /C calc"!A0` semuanya keluar apa adanya.
+ *
+ * Bentuknya SENGAJA sebuah pelolosan, bukan pemangkasan: awalan `'` dipasang
+ * di sini dan DILEPAS `lepasLolos` saat impor, jadi ronde ekspor → impor
+ * tetap identik untuk setiap masukan — termasuk nama yang memang diawali
+ * `'` (ia dilolos ganda). Aturan "ronde harus utuh" itu bukan selera; berkas
+ * ini sudah pernah merusak data justru pada ronde ekspor→impor (lihat
+ * `selAngka`), dan penjaga barunya tak boleh mengulanginya.
+ *
+ * Hanya dipakai untuk sel yang isinya TEKS KETIKAN ORANG. Sel angka dibangun
+ * `selAngka` (hanya digit/koma/eksponen — dan angka negatif memang negatif,
+ * bukan rumus), sel boolean oleh `ya`.
+ */
+function selTeks(v: string): string {
+  return AWALAN_FORMULA.test(v) ? `'${v}` : v;
+}
+
+/** Kebalikan `selTeks` — dipakai impor supaya rondenya utuh. */
+function lepasLolos(v: string): string {
+  return v.startsWith("'") && AWALAN_FORMULA.test(v.slice(1)) ? v.slice(1) : v;
+}
+
 const ya = (b: boolean) => (b ? "ya" : "tidak");
 
 /**
@@ -68,14 +107,14 @@ function selAngka(n: number): string {
 export function buatCsvBahan(bahan: BahanDto[]): string {
   const baris = bahan.map((b) =>
     [
-      b.kode ?? "",
-      b.nama,
-      b.kategori,
+      selTeks(b.kode ?? ""),
+      selTeks(b.nama),
+      selTeks(b.kategori),
       b.pengadaan,
       selAngka(b.harga_beli),
       selAngka(b.isi),
-      b.satuan,
-      b.satuan_beli ?? "",
+      selTeks(b.satuan),
+      selTeks(b.satuan_beli ?? ""),
       selAngka(b.stok_minimum),
       selAngka(b.min_beli ?? 0),
       selAngka(b.masa_simpan_hari ?? 0),
@@ -84,7 +123,7 @@ export function buatCsvBahan(bahan: BahanDto[]): string {
       ya(b.track_stok),
       ya(b.is_packaging),
       ya(b.is_complement),
-      b.catatan ?? "",
+      selTeks(b.catatan ?? ""),
     ]
       .map(selCsv)
       .join(","),
@@ -274,7 +313,11 @@ export function keRowsImpor(tabel: string[][]): TerbacaCsv {
   const iKemasan = idx("kemasan");
   const iComplement = idx("complement");
   const iCat = idx("catatan");
-  const amb = (r: string[], i: number) => (i >= 0 ? (r[i] ?? "").trim() : "");
+  // `lepasLolos` mengembalikan sel yang ekspor lolos-kan sebagai anti-rumus
+  // (lihat `selTeks`) — tanpa ini ronde ekspor→impor mengubah `=1+1` jadi
+  // `'=1+1`. Sel angka tak tersentuh: `'` hanya dilepas bila diikuti pemicu
+  // rumus, dan digit bukan pemicu.
+  const amb = (r: string[], i: number) => (i >= 0 ? lepasLolos((r[i] ?? "").trim()) : "");
   /*
    * Inti perbaikannya ada di rangkaian `if (i >= 0)` di bawah: kolom yang absen
    * tak boleh punya nilai sama sekali, supaya `JSON.stringify` membuangnya dan

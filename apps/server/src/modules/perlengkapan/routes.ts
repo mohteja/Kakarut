@@ -5,13 +5,14 @@
  * Semua peran boleh lihat & mencatat pemakaian (kasir/tim terkunci cabang);
  * owner/admin mengelola item, stok masuk, koreksi, aturan, dan belanja.
  */
-import { zValidator } from "@hono/zod-validator";
+import { zValidator } from "../../lib/validator";
+import { BATAS_QTY_STOK, BATAS_UANG } from "../../lib/batas-angka";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import type { RiwayatHargaDto, RiwayatHargaLot } from "@kakarut/shared";
-import { statistikHargaLots } from "../../lib/harga-stats";
+import { statistikHargaLots, hargaPerSatuanLot, lotStatistik, BATAS_LOT_RIWAYAT } from "../../lib/harga-stats";
 import { db } from "../../db/client";
 import {
   dokumenNomor,
@@ -26,9 +27,11 @@ import {
   resolveBranchId,
   terikatCabang,
   type AppEnv,
+  cabangDariQuery,
 } from "../../middleware/auth";
 import { kunciAntrean } from "../../lib/kunci";
 import { tanpaBentrok } from "../../lib/pg-galat";
+import { clientRefField, denganKlaimIdempoten, deviceIdField } from "../sync/idempoten";
 import { terbitkanNomor } from "../dokumen/nomor";
 import {
   batalBeliPerlengkapan,
@@ -65,26 +68,26 @@ const TANGGAL_RE = /^\d{4}-\d{2}-\d{2}$/;
 const ItemBody = z.object({
   nama: z.string().trim().min(1).max(60),
   satuan: z.string().trim().min(1).max(20).default("pcs"),
-  harga_beli: z.number().min(0).default(0),
-  stok_minimum: z.number().min(0).default(0),
+  harga_beli: z.number().min(0).max(BATAS_UANG).default(0),
+  stok_minimum: z.number().min(0).max(BATAS_QTY_STOK).default(0),
   catatan: z.string().max(300).nullish(),
   kategori: z.string().trim().min(1).max(60).nullish(),
   boleh_eceran: z.boolean().default(true),
   dilacak: z.boolean().default(false),
-});
+}).strict();
 
 // PATCH parsial tanpa .default() — lihat catatan BahanPatchBody (zod v4).
 const ItemPatchBody = z.object({
   nama: z.string().trim().min(1).max(60).optional(),
   satuan: z.string().trim().min(1).max(20).optional(),
-  harga_beli: z.number().min(0).optional(),
-  stok_minimum: z.number().min(0).optional(),
+  harga_beli: z.number().min(0).max(BATAS_UANG).optional(),
+  stok_minimum: z.number().min(0).max(BATAS_QTY_STOK).optional(),
   catatan: z.string().max(300).nullish(),
   kategori: z.string().trim().min(1).max(60).nullish(),
   boleh_eceran: z.boolean().optional(),
   dilacak: z.boolean().optional(),
   is_active: z.boolean().optional(),
-});
+}).strict();
 
 const SupplierBody = z.object({
   items: z
@@ -96,7 +99,7 @@ const SupplierBody = z.object({
     )
     .max(50)
     .default([]),
-});
+}).strict();
 
 /**
  * Riwayat harga beli perlengkapan: setiap stok MASUK (se-perusahaan) = satu lot
@@ -107,40 +110,54 @@ async function riwayatHargaPerlengkapan(
   companyId: string,
   item: typeof supplies.$inferSelect,
 ): Promise<RiwayatHargaDto> {
-  const rows = await db
-    .select({
-      id: supplyMutations.id,
-      tanggal: supplyMutations.tanggal,
-      qty: supplyMutations.qty,
-      totalHarga: supplyMutations.totalHarga,
-      nomor: dokumenNomor.nomorTeks,
-    })
-    .from(supplyMutations)
-    .leftJoin(
-      dokumenNomor,
-      and(
-        eq(dokumenNomor.companyId, supplyMutations.companyId),
-        eq(dokumenNomor.refId, supplyMutations.id),
-      ),
-    )
-    .where(
-      and(
-        eq(supplyMutations.companyId, companyId),
-        eq(supplyMutations.supplyId, item.id),
-        eq(supplyMutations.tipe, "masuk"),
-        eq(supplyMutations.status, "disetujui"),
-      ),
-    )
-    .orderBy(desc(supplyMutations.tanggal), desc(supplyMutations.waktu));
+  const milikItem = and(
+    eq(supplyMutations.companyId, companyId),
+    eq(supplyMutations.supplyId, item.id),
+    eq(supplyMutations.tipe, "masuk"),
+    eq(supplyMutations.status, "disetujui"),
+  );
+  const urutan = [desc(supplyMutations.tanggal), desc(supplyMutations.waktu)] as const;
+  // Dua kueri, alasan yang sama persis dengan kartu Riwayat Harga bahan:
+  // statistiknya harus dari SELURUH lot (kueri sempit, tanpa join, tanpa
+  // batas), sementara daftar yang dikirim dibatasi. Lihat catatan panjang di
+  // `riwayatHargaBahan`.
+  const [semuaLot, rows] = await Promise.all([
+    db
+      .select({
+        tanggal: supplyMutations.tanggal,
+        qty: supplyMutations.qty,
+        totalHarga: supplyMutations.totalHarga,
+      })
+      .from(supplyMutations)
+      .where(milikItem)
+      .orderBy(...urutan),
+    db
+      .select({
+        id: supplyMutations.id,
+        tanggal: supplyMutations.tanggal,
+        qty: supplyMutations.qty,
+        totalHarga: supplyMutations.totalHarga,
+        nomor: dokumenNomor.nomorTeks,
+      })
+      .from(supplyMutations)
+      .leftJoin(
+        dokumenNomor,
+        and(
+          eq(dokumenNomor.companyId, supplyMutations.companyId),
+          eq(dokumenNomor.refId, supplyMutations.id),
+        ),
+      )
+      .where(milikItem)
+      .orderBy(...urutan)
+      .limit(BATAS_LOT_RIWAYAT + 1),
+  ]);
+  const terpotong = rows.length > BATAS_LOT_RIWAYAT;
   const lots: RiwayatHargaLot[] = rows.map((r) => ({
     id: r.id,
     tanggal: r.tanggal,
     qty: r.qty,
     total_harga: r.totalHarga,
-    harga_satuan:
-      r.totalHarga != null && r.qty > 0
-        ? Math.round((r.totalHarga / r.qty) * 100) / 100
-        : null,
+    harga_satuan: hargaPerSatuanLot(r.totalHarga, r.qty),
     supplier: null,
     no_faktur: null,
     nomor: r.nomor,
@@ -159,58 +176,81 @@ async function riwayatHargaPerlengkapan(
       satuan_beli: null,
     },
     harga_terkini: item.hargaBeli,
-    ...statistikHargaLots(lots),
-    jumlah_pembelian: lots.length,
-    lots,
+    // Dari SELURUH lot, bukan dari `lots` yang dipotong. `supply_mutations`
+    // tak punya jalur harga tebakan, jadi `hargaTebakan: false` di sini bukan
+    // penyederhanaan — itu memang keadaannya (lihat catatan di bawah).
+    ...statistikHargaLots(
+      lotStatistik(semuaLot.map((r) => ({ ...r, hargaTebakan: false }))),
+    ),
+    jumlah_pembelian: semuaLot.length,
+    lots: terpotong ? lots.slice(0, BATAS_LOT_RIWAYAT) : lots,
+    lots_terpotong: terpotong,
   };
 }
 
 const MasukBody = z.object({
-  qty: z.number().positive(),
-  total_harga: z.number().min(0).nullish(),
+  qty: z.number().positive().max(BATAS_QTY_STOK),
+  total_harga: z.number().min(0).max(BATAS_UANG).nullish(),
   catatan: z.string().max(300).nullish(),
   tanggal: z.string().regex(TANGGAL_RE).optional(),
-});
+}).strict();
 
 const PakaiBody = z.object({
-  qty: z.number().positive(),
+  qty: z.number().positive().max(BATAS_QTY_STOK),
   catatan: z.string().max(300).nullish(),
-});
+  /**
+   * Idempotensi antarjalur (online ↔ /sync) — UUID v4 dari perangkat, opsional.
+   *
+   * Modul ini dulu satu-satunya pemindah stok TANPA medan ini, dan itulah
+   * lubangnya: percobaan online yang COMMIT lalu putus di jaringan diantre
+   * ulang dengan ref BARU, dan sinkron mengeksekusinya lagi. Terukur
+   * (2026-08-25): saldo 100 → online `pakai 7` → 93 → replay via /sync →
+   * **86** — pemakaian ganda dengan balasan "ok".
+   */
+  client_ref: clientRefField,
+  device_id: deviceIdField,
+}).strict();
 
 const KoreksiBody = z.object({
-  qty_fisik: z.number().min(0),
+  qty_fisik: z.number().min(0).max(BATAS_QTY_STOK),
   catatan: z.string().max(300).nullish(),
-});
+}).strict();
 
 const AturanBody = z.object({
   /** "otomatis" = potongan terjadwal; "manual" = pemakaian via stock opname */
   metode: z.enum(["otomatis", "manual"]).default("otomatis"),
   // qty wajib > 0 hanya untuk metode otomatis (divalidasi di handler)
-  qty: z.number().min(0).default(0),
+  qty: z.number().min(0).max(BATAS_QTY_STOK).default(0),
   per_hari: z.number().int().min(1).max(365).default(1),
   aktif: z.boolean().default(true),
   mulai: z.string().regex(TANGGAL_RE).optional(),
-});
+}).strict();
 
 const OpnameBody = z.object({
   items: z
     .array(
-      z.object({ supply_id: z.string().uuid(), qty_fisik: z.number().min(0) }),
+      z.object({ supply_id: z.string().uuid(), qty_fisik: z.number().min(0).max(BATAS_QTY_STOK) }),
     )
-    .min(1),
+    .min(1)
+    .max(1000),
   catatan: z.string().max(300).nullish(),
-});
+  // Idempotensi antarjalur — alasan yang sama dengan `PakaiBody` di atas;
+  // terukur: satu niat opname melahirkan DUA sesi kembar (online + replay).
+  client_ref: clientRefField,
+  device_id: deviceIdField,
+}).strict();
 
 const StokAwalBody = z.object({
   items: z
-    .array(z.object({ supply_id: z.string().uuid(), qty: z.number().min(0) }))
-    .min(1),
-});
+    .array(z.object({ supply_id: z.string().uuid(), qty: z.number().min(0).max(BATAS_QTY_STOK) }))
+    .min(1)
+    .max(500),
+}).strict();
 
 const MintaBody = z.object({
-  qty: z.number().positive(),
+  qty: z.number().positive().max(BATAS_QTY_STOK),
   catatan: z.string().max(300).nullish(),
-});
+}).strict();
 
 export const perlengkapanRoutes = new Hono<AppEnv>()
   .get("/", async (c) => {
@@ -316,20 +356,34 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
   .post("/opname", zValidator("json", OpnameBody), async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");
-    const branchId = await resolveBranchId(c);
-    // jatah otomatis dipotong dulu agar saldo sistem yang dibandingkan jujur
-    await terapkanKonsumsiOtomatis(auth.company_id!, branchId);
-    const hasil = await buatOpnamePerlengkapan({
-      companyId: auth.company_id!,
-      branchId,
-      userId: auth.sub,
-      items: body.items,
-      catatan: body.catatan ?? null,
-    });
-    // semua sesuai sistem → tanpa sesi (tak ada yang perlu di-ACC)
-    if (!hasil)
-      return c.json({ session_id: null, nomor: null, jumlah_selisih: 0 });
-    return c.json(hasil, 201);
+    // Klaim atomik pola /stok/opname: retry ber-`client_ref` sama memutar
+    // ulang hasil tersimpan alih-alih melahirkan sesi kembar (terukur SEBELUM:
+    // online + replay /sync = 2 sesi identik menunggu dua ACC).
+    const { data } = await denganKlaimIdempoten(
+      {
+        companyId: auth.company_id!,
+        clientRef: body.client_ref,
+        userId: auth.sub,
+        deviceId: body.device_id ?? null,
+        tipe: "perlengkapan_opname",
+      },
+      async () => {
+        const branchId = await resolveBranchId(c);
+        // jatah otomatis dipotong dulu agar saldo sistem yang dibandingkan jujur
+        await terapkanKonsumsiOtomatis(auth.company_id!, branchId);
+        const hasil = await buatOpnamePerlengkapan({
+          companyId: auth.company_id!,
+          branchId,
+          userId: auth.sub,
+          items: body.items,
+          catatan: body.catatan ?? null,
+        });
+        // semua sesuai sistem → tanpa sesi (tak ada yang perlu di-ACC)
+        return hasil ?? { session_id: null, nomor: null, jumlah_selisih: 0 };
+      },
+    );
+    const d = data as { session_id: string | null };
+    return d.session_id === null ? c.json(d) : c.json(d, 201);
   })
   .get("/opname/riwayat", async (c) => {
     const auth = c.get("auth");
@@ -452,7 +506,7 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
     const auth = c.get("auth");
     let ckFilter: string | undefined;
     if (terikatCabang(auth.role)) ckFilter = auth.branch_id ?? undefined;
-    else ckFilter = c.req.query("branch_id") || undefined;
+    else ckFilter = (await cabangDariQuery(c)) ?? undefined;
     return c.json(await daftarBeliPerlengkapan(auth.company_id!, ckFilter));
   })
   /**
@@ -470,8 +524,8 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
           .array(
             z.object({
               supply_id: z.string().uuid(),
-              qty: z.number().positive(),
-              total_harga: z.number().min(0).nullish(),
+              qty: z.number().positive().max(BATAS_QTY_STOK),
+              total_harga: z.number().min(0).max(BATAS_UANG).nullish(),
             }),
           )
           .min(1)
@@ -479,12 +533,12 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
           .optional(),
         // bentuk lama (satu item) — dipakai bila `items` tidak dikirim
         supply_id: z.string().uuid().optional(),
-        qty: z.number().positive().optional(),
-        total_harga: z.number().min(0).nullish(),
+        qty: z.number().positive().max(BATAS_QTY_STOK).optional(),
+        total_harga: z.number().min(0).max(BATAS_UANG).nullish(),
         ck_branch_id: z.string().uuid().nullish(),
         tujuan_branch_id: z.string().uuid().nullish(),
         catatan: z.string().nullish(),
-      }),
+      }).strict(),
     ),
     async (c) => {
       const auth = c.get("auth");
@@ -540,13 +594,13 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
           .array(
             z.object({
               id: z.string().uuid(),
-              qty: z.number().positive().optional(),
-              total_harga: z.number().min(0).nullish(),
+              qty: z.number().positive().max(BATAS_QTY_STOK).optional(),
+              total_harga: z.number().min(0).max(BATAS_UANG).nullish(),
             }),
           )
           .max(100)
           .optional(),
-      }),
+      }).strict(),
     ),
     async (c) => {
       const auth = c.get("auth");
@@ -593,7 +647,7 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
    */
   .post("/beli/batal-semua", requireRole("owner", "admin"), async (c) => {
     const auth = c.get("auth");
-    const ckId = c.req.query("branch_id") || undefined;
+    const ckId = (await cabangDariQuery(c)) ?? undefined;
     return c.json(await batalSemuaBeliPerlengkapan(auth.company_id!, ckId));
   })
   /** Batalkan semua baris 'menunggu' satu faktur beli perlengkapan. owner/admin. */
@@ -646,9 +700,9 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
     zValidator(
       "json",
       z.object({
-        qty: z.number().positive().optional(),
-        total_harga: z.number().min(0).nullish(),
-      }),
+        qty: z.number().positive().max(BATAS_QTY_STOK).optional(),
+        total_harga: z.number().min(0).max(BATAS_UANG).nullish(),
+      }).strict(),
     ),
     async (c) => {
       const auth = c.get("auth");
@@ -949,7 +1003,7 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
   .post(
     "/:id/harga",
     requireRole("owner", "admin"),
-    zValidator("json", z.object({ harga_per_unit: z.number().min(0) })),
+    zValidator("json", z.object({ harga_per_unit: z.number().min(0).max(BATAS_UANG) }).strict()),
     async (c) => {
       const auth = c.get("auth");
       const { harga_per_unit } = c.req.valid("json");
@@ -1050,6 +1104,18 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
   .post("/:id/pakai", zValidator("json", PakaiBody), async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");
+    // Klaim atomik pola /stok/opname — lihat pengukuran di `PakaiBody`:
+    // tanpa ini, replay antrean offline atas commit yang balasannya hilang
+    // memotong stok DUA KALI dengan balasan "ok".
+    const { data } = await denganKlaimIdempoten(
+      {
+        companyId: auth.company_id!,
+        clientRef: body.client_ref,
+        userId: auth.sub,
+        deviceId: body.device_id ?? null,
+        tipe: "perlengkapan_pakai",
+      },
+      async () => {
     const branchId = await resolveBranchId(c);
     const item = await muatSupplyAktif(auth.company_id!, c.req.param("id"));
     if (!item)
@@ -1108,7 +1174,10 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
       });
       return saldo - body.qty;
     });
-    return c.json({ ok: true, saldo: sisa });
+        return { ok: true, saldo: sisa };
+      },
+    );
+    return c.json(data);
   })
   .post(
     "/:id/koreksi",

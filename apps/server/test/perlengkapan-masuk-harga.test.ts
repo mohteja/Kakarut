@@ -54,7 +54,7 @@ describe("premis: NaN benar-benar sampai ke DB sebagai 'tanpa biaya'", () => {
   });
 
   it("zod server MENERIMA null, dan server menyimpannya apa adanya", () => {
-    expect(RUTE).toMatch(/total_harga: z\.number\(\)\.min\(0\)\.nullish\(\)/);
+    expect(RUTE).toMatch(/total_harga: z\.number\(\)\.min\(0\)\.max\(BATAS_UANG\)\.nullish\(\)/);
     expect(RUTE).toMatch(/totalHarga: body\.total_harga \?\? null/);
   });
 

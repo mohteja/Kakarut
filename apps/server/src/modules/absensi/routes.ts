@@ -1,4 +1,4 @@
-import { zValidator } from "@hono/zod-validator";
+import { zValidator } from "../../lib/validator";
 import { and, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -19,7 +19,7 @@ import {
 import { db } from "../../db/client";
 import { attendances, branches, companies, memberships, users } from "../../db/schema";
 import { tanggalDi } from "../../lib/time";
-import { requireRole, resolveBranchId, type AppEnv } from "../../middleware/auth";
+import { requireRole, resolveBranchId, type AppEnv, cabangDariQuery} from "../../middleware/auth";
 import {
   jumlahHari,
   pengajuanDisetujuiPadaRentang,
@@ -42,9 +42,9 @@ const KoordinatBody = {
   device_id: deviceIdField,
 };
 /** Absen operator (pindai QR / ketik kode karyawan). */
-export const ClockBody = z.object({ kode: z.string().trim().min(1), ...KoordinatBody });
+export const ClockBody = z.object({ kode: z.string().trim().min(1), ...KoordinatBody }).strict();
 /** Absen SENDIRI (tombol absen di aplikasi) — tanpa kode, atas nama pemanggil. */
-export const SelfBody = z.object(KoordinatBody);
+export const SelfBody = z.object(KoordinatBody).strict();
 
 /** Validasi tanggal YYYY-MM-DD yang benar (menolak bulan/hari di luar rentang). */
 function tanggalValid(s: string): boolean {
@@ -544,8 +544,7 @@ export const absensiRoutes = new Hono<AppEnv>()
     // Batas kanan jendela: hari ini bila bulan berjalan, akhir bulan bila sudah lewat.
     const batasHitung = hariIni < dari ? null : hariIni < sampai ? hariIni : sampai;
 
-    const branchQ = c.req.query("branch_id");
-    const branchId = branchQ && branchQ !== "all" ? branchQ : undefined;
+    const branchId = (await cabangDariQuery(c)) ?? undefined;
 
     // (1) Karyawan mana yang masuk daftar — `?status=`:
     //   aktif (bawaan) : keanggotaan belum diarsipkan — daftar kerja sehari-hari

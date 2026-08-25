@@ -239,3 +239,39 @@ export async function denganKlaimIdempoten<T>(
     .where(kunci);
   return { data, baru: true };
 }
+
+/**
+ * RETENSI LEDGER — saudara `pangkasErrorLog`, `BACKUP_KEEP`, dan pembersih
+ * `rate_limits`: tiga tabel debu operasional lain semuanya dipangkas, dan
+ * ledger ini — ≈ satu baris per transaksi ponsel, membawa `hasil_json` UTUH —
+ * tidak pernah (satu-satunya `delete` di atas hanya melepas klaim gagal).
+ * Terukur: satu run verify-api (118 penjualan) = 108 baris / 136 kB; warung
+ * 200 transaksi/hari ≈ 73 rb baris (~90 MB) per tahun per penyewa, ikut
+ * membengkakkan tiap cadangan selamanya.
+ *
+ * Jendelanya MENGHORMATI kontrak antrean offline, dan itu yang membuat
+ * pemangkasan aman: usia perintah maksimum di /sync adalah 30 hari
+ * (penjualan; tipe lain 7), jadi replay atas ref yang barisnya sudah
+ * terpangkas TIDAK BISA dieksekusi ulang — gerbang usia menolaknya 400
+ * sebelum menyentuh eksekutor. Yang berubah bagi perangkat yang offline
+ * lebih lama dari retensi hanyalah label ("gagal usia" alih-alih
+ * "sudah_ada") — datanya sendiri memang sudah kedaluwarsa. Karena itu
+ * konstanta ini WAJIB ≥ 2× usia maksimum itu; uji retensinya memaku rasio
+ * tersebut.
+ */
+export const RETENSI_LEDGER_HARI = 60;
+
+/**
+ * Buang baris ledger yang lebih tua dari retensi — SEMUA status: baris
+ * `berjalan` seusia itu adalah klaim yatim (ambang basi cuma 15 menit).
+ * Dipanggil lepas-tangan (`void …`) di ekor handler /sync, pola yang sama
+ * dengan `pangkasErrorLog` yang menumpang pada penulisnya.
+ */
+export async function pangkasLedgerSync(): Promise<number> {
+  const batas = new Date(Date.now() - RETENSI_LEDGER_HARI * 86_400_000);
+  const lama = await db
+    .delete(syncCommands)
+    .where(lt(syncCommands.createdAt, batas))
+    .returning({ id: syncCommands.id });
+  return lama.length;
+}

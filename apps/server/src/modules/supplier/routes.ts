@@ -1,4 +1,4 @@
-import { zValidator } from "@hono/zod-validator";
+import { zValidator } from "../../lib/validator";
 import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -22,7 +22,7 @@ const SupplierBody = z.object({
   catatan: z.string().nullish(),
   kategori: z.string().trim().max(30).nullish(),
   is_active: z.boolean().optional(),
-});
+}).strict();
 
 function toDto(row: typeof suppliers.$inferSelect): SupplierDto {
   return {

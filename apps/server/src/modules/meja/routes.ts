@@ -1,4 +1,4 @@
-import { zValidator } from "@hono/zod-validator";
+import { zValidator } from "../../lib/validator";
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -22,8 +22,27 @@ const MejaBody = z.object({
   nama: z.string().trim().min(1),
   tipe: z.enum(["dine_in", "takeaway"]).optional(),
   is_active: z.boolean().optional(),
-});
+}).strict();
 
+/*
+ * SENGAJA TIDAK `.strict()`, dan ini pengecualian BERTANGGAL.
+ *
+ * Ketujuh build ponsel yang pernah rilis (1.0.0+3 … +10) mengirim `branch_id`
+ * di BADAN sini — termasuk build yang terpasang hari ini, karena
+ * perbaikannya (`4e02a0b`, cabang dipindah ke query) belum tayang. Repo ini
+ * tak punya gerbang versi klien, jadi `.strict()` di sini berarti setiap
+ * ponsel lama menerima 400 saat menyimpan denah meja: fitur yang sekarang
+ * jalan, mati pada saat deploy, tanpa peringatan bagi siapa pun.
+ *
+ * Diamnya sendiri sudah pernah menggigit — `branch_id` yang dibuang di sini
+ * membuat `PUT /meja/tata-letak` membalas 200 berisi meja cabang LAIN. Yang
+ * menutup lubang itu bukan skema ini melainkan pemanggilnya, dan penjaga
+ * `cabang-ikut-di-url` yang menjaganya tetap begitu.
+ *
+ * SYARAT CABUT: sesudah build ber-`4e02a0b` tayang DAN build lama habis dari
+ * lapangan. Pengecualian tanpa syarat cabut adalah pengecualian permanen yang
+ * menyamar.
+ */
 const TataLetakBody = z.object({
   items: z
     .array(
@@ -173,7 +192,7 @@ export const mejaRoutes = new Hono<AppEnv>()
   .post(
     "/:id/kosongkan",
     bolehKosongkanMeja,
-    zValidator("json", z.object({ paksa: z.boolean().optional() }).optional()),
+    zValidator("json", z.object({ paksa: z.boolean().optional() }).strict().optional()),
     async (c) => {
       const auth = c.get("auth");
       const branchId = await resolveBranchId(c);
@@ -334,20 +353,34 @@ export const mejaRoutes = new Hono<AppEnv>()
       const auth = c.get("auth");
       const body = c.req.valid("json");
       const branchId = await resolveBranchId(c);
-      await db.transaction(async (tx) => {
-        for (const it of body.items) {
-          await tx
-            .update(meja)
-            .set({ posX: it.pos_x, posY: it.pos_y })
-            .where(
-              and(
-                eq(meja.id, it.id),
-                eq(meja.companyId, auth.company_id!),
-                eq(meja.branchId, branchId),
-              ),
-            );
-        }
-      });
+      /*
+       * SATU pernyataan, bukan satu UPDATE per baris — bentuk yang sama dengan
+       * `PUT /menu/urutan`, dan alasannya sama: loop di dalam transaksi menahan
+       * satu dari sepuluh koneksi kolam selama N round-trip berurutan, dan N
+       * ditentukan pengirim. Diukur pada 2.000 baris terhadap Postgres yang
+       * sama: 289 ms berurutan vs 11 ms satu pernyataan.
+       *
+       * `sql.param(...)` WAJIB di sekeliling lariknya: tanpa itu drizzle
+       * memecah larik JS jadi TUPLE `($1, $2, …)` dan Postgres membalas
+       * "cannot cast type record to uuid[]".
+       *
+       * Transaksinya ikut dibuang — satu pernyataan sudah atomik sendiri.
+       * Pengurungan perusahaan DAN cabang tetap di WHERE.
+       */
+      if (body.items.length > 0) {
+        await db.execute(sql`
+          UPDATE ${meja}
+          SET pos_x = v.x, pos_y = v.y
+          FROM (
+            SELECT unnest(${sql.param(body.items.map((i) => i.id))}::uuid[]) AS id,
+                   unnest(${sql.param(body.items.map((i) => i.pos_x))}::int[]) AS x,
+                   unnest(${sql.param(body.items.map((i) => i.pos_y))}::int[]) AS y
+          ) AS v
+          WHERE ${meja.id} = v.id
+            AND ${meja.companyId} = ${auth.company_id!}
+            AND ${meja.branchId} = ${branchId}
+        `);
+      }
       const rows = await db
         .select()
         .from(meja)

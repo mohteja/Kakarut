@@ -1572,7 +1572,43 @@ export interface CustomerTransaksi {
 
 /** Detail member: profil + riwayat transaksinya. */
 export interface CustomerDetail extends CustomerDto {
+  /** maksimal 300 baris, TERBARU dulu — selebihnya `transaksi_terpotong` */
   transaksi: CustomerTransaksi[];
+  /**
+   * true bila daftar di atas DIPOTONG — member ini punya transaksi lain yang
+   * tak ikut terkirim.
+   *
+   * `jumlah_transaksi`, `total_belanja` dan `terakhir` yang diwarisi dari
+   * `CustomerDto` TIDAK terpengaruh: ketiganya datang dari agregat SQL yang
+   * tak dibatasi, bukan dari menjumlahkan `transaksi` di atas. Itu bagian
+   * pentingnya — memotong daftar tanpa memindahkan agregatnya lebih dulu akan
+   * membuat "Total belanja" seorang member turun diam-diam begitu transaksinya
+   * melewati baris ke-300.
+   */
+  transaksi_terpotong: boolean;
+}
+
+/**
+ * Balasan `GET /customer` — daftar member BERBATAS, bukan seluruhnya.
+ *
+ * Dulu berupa `CustomerDto[]` tanpa batas: satu warung dengan 10.000 member
+ * mengirim 1,61 MB tiap kali halaman Member dibuka, dan pencariannya
+ * dikerjakan di browser atas seluruh larik itu. Sekarang server yang mencari
+ * (`?q=`), server pula yang membatasi.
+ */
+export interface CustomerListDto {
+  /** maksimal 300 member; terbaru bertransaksi dulu */
+  items: CustomerDto[];
+  /**
+   * true bila masih ada member lain di luar daftar ini.
+   *
+   * WAJIB ditampilkan bersama ajakan memakai pencarian: tanpa itu, member
+   * ke-301 tak sekadar tak terlihat — ia tak bisa ditemukan sama sekali, dan
+   * layarnya berbunyi "Belum ada member" untuk orang yang jelas-jelas ada.
+   */
+  terpotong: boolean;
+  /** jumlah member sebenarnya (agregat tanpa batas), untuk judul halaman */
+  total: number;
 }
 
 /** Baris di Tempat Sampah: transaksi yang di-soft-delete (hanya catatan, tak bisa dikembalikan). */
@@ -1619,6 +1655,23 @@ export interface LaporanHarian {
   estimasi_profit: number;
   item_terjual: { menu_nama: string; qty: number; omzet: number }[];
   konsumsi_bahan: { nama: string; slug: string; qty: number }[];
+  /**
+   * Sebaran transaksi per JAM pada rentang, di zona waktu perusahaan.
+   *
+   * Hanya memuat jam dari transaksi PERTAMA sampai TERAKHIR — bukan 00–23.
+   * Warung yang buka jam 10 dan tutup jam 21 tak perlu memandangi sepuluh
+   * kolom kosong untuk menemukan jam ramainya; yang dicari orang di grafik ini
+   * adalah bentuk harinya, dan kolom kosong di kedua ujung justru meratakannya.
+   *
+   * Jam KOSONG DI TENGAH tetap ada dan bernilai 0 — itu jeda sungguhan
+   * (jam sepi selepas makan siang), dan menghapusnya akan memampatkan sumbu
+   * waktu sehingga dua jam yang berjauhan terlihat bersebelahan.
+   *
+   * Untuk rentang lebih dari satu hari, angkanya adalah TOTAL per jam-hari
+   * sepanjang rentang itu (mis. "jam 12" = seluruh transaksi jam 12 pada semua
+   * hari terpilih), bukan rata-rata.
+   */
+  per_jam: { jam: number; jumlah: number; omzet: number }[];
 }
 
 /**
@@ -2625,9 +2678,24 @@ export interface RiwayatPenerimaanFaktur {
 
 /** Ringkasan pendeteksi kiriman menggantung; `jumlah: 0` = sehat. */
 export interface AnomaliKiriman {
+  /** JUMLAH SELURUH baris menggantung — dihitung SQL, bukan `rows.length`. */
   jumlah: number;
+  /** total qty SELURUH baris menggantung — juga dari SQL, bukan dari `rows`. */
   qty_total: number;
+  /** baris yang ditampilkan: yang PALING TUA, berlangit-langit. */
   rows: KirimanMenggantung[];
+  /**
+   * Faktur mana saja yang punya baris menggantung — dasar tanda "barang tidak
+   * sampai" di kartu Beli & Produksi.
+   *
+   * Medan tersendiri, dan itu bukan kemewahan: sejak `rows` berlangit-langit,
+   * menurunkan tandanya dari `rows` membuat faktur ke-101 kehilangan tandanya
+   * diam-diam — kerusakan yang lahir dari perbaikan, tepat saat masalahnya
+   * paling besar.
+   */
+  faktur_ids: string[];
+  /** `rows` dipotong (`jumlah` > yang dikirim). `jumlah` tetap utuh. */
+  terpotong: boolean;
 }
 
 /** Hasil penghapusan kiriman menggantung (id yang tak menggantung dilewati). */
@@ -2800,5 +2868,20 @@ export interface RiwayatHargaDto {
    * angka yang rusak.
    */
   jumlah_harga_nyata: number;
+  /** maksimal 300 lot, TERBARU dulu — selebihnya `lots_terpotong` */
   lots: RiwayatHargaLot[];
+  /**
+   * true bila daftar lot di atas DIPOTONG — masih ada pembelian lain yang tak
+   * ikut terkirim.
+   *
+   * Kelima angka di atas (`harga_terendah`, `harga_tertinggi`, `harga_median`,
+   * `harga_rata`, `jumlah_pembelian`) TIDAK terpengaruh: semuanya dihitung dari
+   * SELURUH lot lewat kueri terpisah yang tak dibatasi, bukan dari daftar ini.
+   *
+   * Itu bagian pentingnya. Median di kartu ini jadi HARGA ACUAN RAB belanja,
+   * dan harga acuan itu dasar HPP setiap menu yang memakai bahannya —
+   * menghitungnya dari 300 lot terbaru saja akan menggeser HPP seluruh menu
+   * tanpa satu pun galat muncul.
+   */
+  lots_terpotong: boolean;
 }

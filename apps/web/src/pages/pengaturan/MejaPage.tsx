@@ -148,9 +148,18 @@ export function MejaPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["meja"] }),
   });
 
+  /*
+   * `PUT /meja/tata-letak` juga ber-`resolveBranchId`, dan kegagalannya di sini
+   * TAK BERWARNA MERAH sama sekali: tanpa `branch_id` server memindahkan meja
+   * di cabang PERTAMA (`WHERE meja.branch_id = branchId` tak cocok satu pun id
+   * yang dikirim → nol baris berubah), lalu **membalas 200** berisi daftar meja
+   * cabang pertama. Terukur: memindahkan satu meja cabang kedua ke (7,9) →
+   * HTTP 200, balasannya 7 meja cabang LAIN, dan mejanya tetap di (0,0).
+   * Dengan `branch_id`: 200 dan posisinya benar-benar (7,9).
+   */
   const simpanTataLetak = useMutation({
     mutationFn: () =>
-      api("/meja/tata-letak", {
+      api(`/meja/tata-letak${branchQuery}`, {
         method: "PUT",
         body: {
           items: (meja ?? []).map((m) => ({

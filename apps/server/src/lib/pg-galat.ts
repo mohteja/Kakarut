@@ -71,11 +71,100 @@ export function bentrokUnikPada(err: unknown, ...namaConstraint: string[]): bool
  * cacat server sungguhan — yang berubah cuma labelnya, bukan keberadaannya di
  * panel.
  */
+/**
+ * Galat yang jelas-jelas milik DATA KLIEN, bukan cacat aplikasi — beserta
+ * kalimatnya. `null` berarti "bukan kelas ini, biarkan 500".
+ *
+ * KENAPA DI PINTU KELUAR BERSAMA, dan kenapa baru sekarang. Argumennya sudah
+ * ditulis di berkas ini untuk `22P02` beberapa baris di atas: menyalin
+ * saringan ke ratusan tempat bukan perbaikan, itu daftar tugas yang tak akan
+ * selesai. Argumen itu disepakati dan dijalankan — **untuk satu kode saja**.
+ * Saudaranya `22003` sudah punya kalimat di `alasanGagalBaris` di bawah, tapi
+ * kalimat itu cuma terpasang di SATU modul (`bahan/routes.ts`, impor per
+ * baris). Di semua pintu lain luapan numerik keluar sebagai
+ * `500 {"error":"Terjadi kesalahan pada server"}`.
+ *
+ * TERUKUR lewat HTTP terhadap Postgres sungguhan, sebelum ini ada:
+ *
+ *   POST /penjualan  menu Rp 20.000 × qty 99.999.999      → **500**
+ *   POST /penjualan  TIGA baris yang masing-masing MUAT    → **500**
+ *   POST /menu       komponen[].qty = 100.000.000          → **500**
+ *
+ * Tetap DICATAT sebagai 400, sama seperti perlakuan `22P02`: yang berubah
+ * labelnya, bukan keberadaannya di panel galat.
+ *
+ * SENGAJA HANYA `22003` untuk sekarang. Saudaranya `22001` ("teks terlalu
+ * panjang") sekelas dan sudah punya kalimatnya, tapi keterjangkauannya belum
+ * kuukur — menerjemahkan yang belum diukur berarti mengubah 500 jadi 400 untuk
+ * jalur yang mungkin tak pernah ada, dan itu menyembunyikan cacat server
+ * sungguhan alih-alih menjelaskan salah ketik pengguna.
+ */
+export function galatDataKlien(err: unknown): string | null {
+  return sqlstate(err) === "22003" ? "Angkanya terlalu besar untuk disimpan" : null;
+}
+
 export function nilaiTakSah(err: unknown): boolean {
   const kode =
     (err as { cause?: { code?: string }; code?: string })?.cause?.code ??
     (err as { code?: string })?.code;
   return kode === "22P02";
+}
+
+/** SQLSTATE galat ini, dari mana pun driver menaruhnya. */
+function sqlstate(err: unknown): string | undefined {
+  return (
+    (err as { cause?: { code?: string }; code?: string })?.cause?.code ??
+    (err as { code?: string })?.code
+  );
+}
+
+/**
+ * Alasan gagal SATU BARIS, dalam bahasa yang bisa dibaca pengirimnya — dan
+ * yang TAK PERNAH memulangkan teks mentah dari driver.
+ *
+ * KENAPA ADA. Jalur massal (impor CSV, unggah daftar) tidak menggagalkan
+ * seluruh permintaan saat satu baris bermasalah; ia melaporkan baris itu dan
+ * meneruskan sisanya. Yang mudah terlewat: "melaporkan barisnya" sempat
+ * berarti `(e as Error).message` apa adanya — dan pesan Drizzle memuat SELURUH
+ * kueri yang gagal beserta parameternya.
+ *
+ * TERUKUR, bukan dikhawatirkan. Mengimpor satu bahan berharga 1e15 (kolomnya
+ * `numeric(14,2)`) memulangkan ke klien: seluruh perintah INSERT lengkap dengan
+ * ke-30 nama kolomnya, ditambah daftar parameternya — termasuk UUID perusahaan.
+ * Pemiliknya cuma salah mengetik nol; yang ia lihat dump SQL.
+ *
+ * Dua kerugian sekaligus, dan yang kedua yang lebih dalam:
+ *   · bocornya bentuk dalam basis data & pengenal internal ke pihak yang cukup
+ *     punya hak mengimpor bahan;
+ *   · pesan yang tak bisa ditindaklanjuti siapa pun. "Failed query: insert
+ *     into…" tidak memberi tahu bahwa yang salah adalah ANGKA HARGANYA.
+ *
+ * Galat yang kita lempar sendiri (`HTTPException`) diteruskan apa adanya —
+ * itu memang kalimat untuk dibaca orang, dan sudah kita tulis.
+ */
+export function alasanGagalBaris(err: unknown, bawaan: string): string {
+  if (err instanceof HTTPException) return err.message || bawaan;
+  switch (sqlstate(err)) {
+    case "23505":
+      return "Sudah ada baris lain dengan nama/kode yang sama";
+    case "22003":
+      return "Angkanya terlalu besar untuk disimpan";
+    case "22001":
+      return "Teksnya terlalu panjang";
+    case "23502":
+      return "Ada kolom wajib yang kosong";
+    case "23503":
+      return "Acuannya tidak ditemukan (kategori/satuan/supplier)";
+    case "23514":
+      return "Nilainya tidak memenuhi aturan yang berlaku";
+    case "22P02":
+      return "Format nilainya tidak sah";
+    default:
+      // SENGAJA tidak menyertakan pesan aslinya. Galat yang belum dikenali
+      // tetap tercatat lengkap di `error_logs` untuk yang berhak melihatnya;
+      // yang tak boleh cuma mengirimkannya ke pengirim permintaan.
+      return bawaan;
+  }
 }
 
 /**

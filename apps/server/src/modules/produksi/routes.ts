@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { zValidator } from "@hono/zod-validator";
+import { BATAS_QTY_STOK, BATAS_UANG } from "../../lib/batas-angka";
+import { zValidator } from "../../lib/validator";
 import {
   and,
   asc,
@@ -77,6 +78,7 @@ import {
 } from "../menu/service";
 import { autoFileRakCabang } from "../penyimpanan/autoFile";
 import {
+  catatHasilIdempoten,
   clientRefField,
   denganKlaimIdempoten,
   deviceIdField,
@@ -116,10 +118,22 @@ const FakturEditBody = z.object({
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/)
     .optional(),
-});
+}).strict();
 
 /** Kirim work-order produksi CK → cabang tujuan (opsional pilih tempat di cabang). */
-const KirimBody = z.object({ tujuan_storage_id: z.string().uuid().nullish() });
+const KirimBody = z.object({
+  tujuan_storage_id: z.string().uuid().nullish(),
+  /**
+   * Idempotensi antarjalur (online ↔ /sync), opsional. Pintu kirim DIJAGA
+   * mesin status (baris `menunggu`/`dikonfirmasi` habis → 400), jadi replay
+   * tak menggandakan stok — tapi tanpa ledger, replay atas commit yang
+   * balasannya hilang dibalas 400 dan antrean menandai `gagal` PALSU untuk
+   * aksi yang sebenarnya sukses. Hasil sukses dicatat ke ledger bersama
+   * (`catatHasilIdempoten`) supaya replay dibalas `sudah_ada`.
+   */
+  client_ref: clientRefField,
+  device_id: deviceIdField,
+}).strict();
 
 /**
  * Kirim hasil produksi: qty per bahan BISA DIATUR — boleh lebih sedikit dari
@@ -128,8 +142,9 @@ const KirimBody = z.object({ tujuan_storage_id: z.string().uuid().nullish() });
  */
 const KirimHasilBody = KirimBody.extend({
   items: z
-    .array(z.object({ ingredient_id: z.string().uuid(), qty: z.number().positive() }))
+    .array(z.object({ ingredient_id: z.string().uuid(), qty: z.number().positive().max(BATAS_QTY_STOK) }))
     .min(1)
+    .max(500)
     .optional(),
 });
 
@@ -144,12 +159,12 @@ const TahapBody = z.object({
     .array(
       z.object({
         id: z.string().uuid(),
-        qty: z.number().positive(),
+        qty: z.number().positive().max(BATAS_QTY_STOK),
         /**
          * Harga riil baris saat maju (harga pasar naik/turun) — menggantikan
          * estimasi RAB pada bagian yang maju; sisa split tetap prorata RAB.
          */
-        harga: z.number().nonnegative().max(1_000_000_000_000).nullish(),
+        harga: z.number().nonnegative().max(BATAS_UANG).nullish(),
         /**
          * Override tanggal EXP lot saat baris MASUK STOK (beli Tiba /
          * produksi Selesai, target ≥ "menunggu"). Kosong = otomatis dari
@@ -163,18 +178,19 @@ const TahapBody = z.object({
       }),
     )
     .min(1)
+    .max(500)
     .optional(),
   /**
    * Dana yang benar-benar cair saat faktur meninggalkan tahap RAB — penuh
    * sesuai RAB atau sebagian. Dicatat sebagai entri faktur_dana (akumulatif).
    */
-  dana_cair: z.number().nonnegative().max(1_000_000_000_000).nullish(),
+  dana_cair: z.number().nonnegative().max(BATAS_UANG).nullish(),
   /**
    * Realisasi biaya saat proses → selesai. Dibandingkan dengan total dana
    * faktur: kurang → entri 'tambahan' (catatan: dari mana uangnya); lebih →
    * entri 'kembali' (catatan: di siapa sisa uangnya); pas → tanpa entri.
    */
-  realisasi: z.number().nonnegative().max(1_000_000_000_000).nullish(),
+  realisasi: z.number().nonnegative().max(BATAS_UANG).nullish(),
   /** keterangan selisih realisasi: sumber dana tambahan / pemegang sisa dana */
   selisih_catatan: z.string().trim().max(300).nullish(),
   /**
@@ -197,7 +213,7 @@ const TahapBody = z.object({
    * proses" di UI setelah melihat daftar bahan yang kurang.
    */
   paksa: z.boolean().optional(),
-});
+}).strict();
 
 /** Total dana efektif satu faktur: cair + tambahan − kembali. */
 const DANA_EFEKTIF = sql<number>`COALESCE(SUM(CASE WHEN ${fakturDana.tipe} = 'kembali' THEN -${fakturDana.nominal} ELSE ${fakturDana.nominal} END)::float8, 0)`;
@@ -283,13 +299,13 @@ const TambahStokBody = z
   .object({
     branch_id: z.string().uuid().optional(),
     ingredient_id: z.string().uuid(),
-    qty: z.number().positive().optional(),
+    qty: z.number().positive().max(BATAS_QTY_STOK).optional(),
     /** true = 1 batch/1 pembelian → qty otomatis = isi bahan saat ini */
     batch: z.boolean().default(false),
     /** khusus jalur beli: total harga pembelian (catatan pengeluaran) */
-    total_harga: z.number().nonnegative().nullish(),
+    total_harga: z.number().nonnegative().max(BATAS_UANG).nullish(),
     catatan: z.string().nullish(),
-  })
+  }).strict()
   .refine((v) => v.batch || v.qty != null, {
     message: "Isi qty, atau set batch=true",
   });
@@ -316,13 +332,14 @@ const FakturBody = z.object({
         ingredient_id: z.string().uuid(),
         /** jumlah dalam pcs, atau dalam batch (dikali isi bahan) */
         mode: z.enum(["pcs", "batch"]),
-        jumlah: z.number().positive(),
+        jumlah: z.number().positive().max(BATAS_QTY_STOK),
         storage_location_id: z.string().uuid().nullish(),
-        total_harga: z.number().nonnegative().nullish(),
+        total_harga: z.number().nonnegative().max(BATAS_UANG).nullish(),
       }),
     )
-    .min(1),
-});
+    .min(1)
+    .max(500),
+}).strict();
 
 const LABEL: Record<JenisPengadaan, { jalur: string }> = {
   produksi: { jalur: "Produksi Bahan Baku" },
@@ -451,8 +468,9 @@ interface BarisHarga {
 
 /** Baris harga yang dilaporkan — dipakai endpoint laporan harga & pratinjaunya. */
 const LaporanHargaItems = z
-  .array(z.object({ id: z.string().uuid(), total_harga: z.number().min(0) }))
-  .min(1);
+  .array(z.object({ id: z.string().uuid(), total_harga: z.number().min(0).max(BATAS_UANG) }))
+  .min(1)
+  .max(500);
 
 /**
  * Muat baris faktur belanja + pastikan semua id yang dilaporkan memang milik
@@ -1649,7 +1667,8 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
      */
     .post("/kirim/:fakturId", zValidator("json", KirimBody), async (c) => {
       const auth = c.get("auth");
-      const { tujuan_storage_id } = c.req.valid("json");
+      const badan = c.req.valid("json");
+      const { tujuan_storage_id } = badan;
       const fakturId = c.req.param("fakturId");
       const conds = [
         eq(productions.companyId, auth.company_id!),
@@ -1749,7 +1768,21 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
           userId: auth.sub,
         });
       });
-      return c.json({ ok: true, tujuan: store.nama, jumlah_baris: siap.length });
+      const hasilKirim = { ok: true, tujuan: store.nama, jumlah_baris: siap.length };
+      // Ledger bersama: replay antrean offline ber-ref sama dibalas
+      // `sudah_ada`, bukan 400 mesin-status yang terbaca "gagal" palsu.
+      if (badan.client_ref) {
+        await catatHasilIdempoten({
+          companyId: auth.company_id!,
+          clientRef: badan.client_ref,
+          userId: auth.sub,
+          deviceId: badan.device_id ?? null,
+          tipe: "faktur_kirim",
+          hasilJson: hasilKirim,
+          kode: 200,
+        });
+      }
+      return c.json(hasilKirim);
     })
     /**
      * KIRIM HASIL PRODUKSI ke cabang peminta (jalur produksi): hasil work-order
@@ -1870,8 +1903,13 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         // dari ledger (tak ada baris yang bisa dikunci), jadi tanpa ini dua
         // pengiriman bersamaan sama-sama membaca saldo lama dan lolos.
         await kunciKirimCabang(tx, auth.company_id!, ckId);
+        // `tx`, bukan `db`: lewat `db` pembacaan ini menyewa koneksi KEDUA dari
+        // kolam yang sama sementara transaksi ini masih memegang yang pertama —
+        // 10 pengiriman serentak cukup untuk memacetkan seluruh proses. Ia juga
+        // membuat `saldo` dan `dalam_jalan` di bawah datang dari dua snapshot
+        // berbeda. Lihat `test/koneksi-bersarang.test.ts`.
         const saldoCk = new Map(
-          (await hitungSaldoCabang(auth.company_id!, ckId)).map((r) => [r.ingredient_id, r]),
+          (await hitungSaldoCabang(auth.company_id!, ckId, tx)).map((r) => [r.ingredient_id, r]),
         );
         // Saldo CK masih memuat barang yang SUDAH dikirim tapi belum diterima
         // cabang tujuan — harus dipotong dulu, kalau tidak stok yang sama bisa
@@ -1968,13 +2006,27 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         });
         return { nomor: nomorBaru };
       });
-      return c.json({
+      const hasilKirim = {
         ok: true,
         faktur_id: kirimFakturId,
         nomor: hasil.nomor,
         tujuan: store.nama,
         jumlah_baris: kirimMap.size,
-      });
+      };
+      // Kembaran pintu /kirim di atas — lihat alasannya di `KirimBody`.
+      const badan = c.req.valid("json");
+      if (badan.client_ref) {
+        await catatHasilIdempoten({
+          companyId: auth.company_id!,
+          clientRef: badan.client_ref,
+          userId: auth.sub,
+          deviceId: badan.device_id ?? null,
+          tipe: "produksi_kirim_hasil",
+          hasilJson: hasilKirim,
+          kode: 200,
+        });
+      }
+      return c.json(hasilKirim);
     })
     /** Buku dana satu faktur: entri pencairan/tambahan/kembali + total efektif. */
     .get("/dana/:fakturId", async (c) => {
@@ -2153,7 +2205,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
      */
     .post(
       "/laporan-harga/:fakturId/dampak",
-      zValidator("json", z.object({ items: LaporanHargaItems })),
+      zValidator("json", z.object({ items: LaporanHargaItems }).strict()),
       async (c) => {
         if (tipe !== "beli") {
           throw new HTTPException(400, {
@@ -2268,7 +2320,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
       "/laporan-harga/:fakturId",
       zValidator(
         "json",
-        z.object({ items: LaporanHargaItems, perbarui_acuan: z.boolean().optional() }),
+        z.object({ items: LaporanHargaItems, perbarui_acuan: z.boolean().optional() }).strict(),
       ),
       async (c) => {
         if (tipe !== "beli") {
@@ -2475,7 +2527,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
       const [ringkas] = await db
         .select({
           total: sql<number>`COUNT(DISTINCT ${keyExpr})::int`,
-          total_pengeluaran: sql<number>`COALESCE(SUM(${productions.totalHarga}) FILTER (WHERE ${productions.status} = 'dikonfirmasi'), 0)`,
+          total_pengeluaran: sql<number>`COALESCE(SUM(${productions.totalHarga}) FILTER (WHERE ${productions.status} = 'dikonfirmasi'), 0)::float8`,
         })
         .from(productions)
         .where(and(...conds));

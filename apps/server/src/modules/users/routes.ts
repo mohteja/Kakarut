@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { zValidator } from "@hono/zod-validator";
+import { zValidator } from "../../lib/validator";
 import bcrypt from "bcryptjs";
 import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { Hono } from "hono";
@@ -21,8 +21,73 @@ import {
   users,
 } from "../../db/schema";
 import { type AppEnv } from "../../middleware/auth";
+import { emailDariBody, lewatiRateLimit, rateLimit } from "../../middleware/rateLimit";
+import { env } from "../../config/env";
 import { kirimEmail } from "../mail/service";
 import { isKodeKaryawanConflict, resolveKodeKaryawan } from "./service";
+
+/**
+ * BOM EMAIL LEWAT UNDANGAN — pintu ketiga yang mengirim surat ke alamat
+ * SEMBARANG, dan satu-satunya yang dulu tak berpenjaga.
+ *
+ * `auth/routes.ts` sudah menuliskan aturannya, dua kali, dengan alasan yang
+ * sama persis:
+ *
+ *     batasLupa          — "cegah bom email ke korban"   6 / 15 mnt
+ *     batasVerifikasiKirim — "cegah bom email"           6 / 15 mnt
+ *
+ * `POST /karyawan/undang` mengirim surat ke alamat yang ditentukan pemanggil,
+ * sama seperti keduanya, dan tak punya batas apa pun. Pra-cek "sudah ada
+ * undangan pending" tak menutupnya: `DELETE /karyawan/undangan/:id` mencabut
+ * undangannya, dan alamat yang sama boleh diundang lagi seketika.
+ *
+ * TERUKUR, bukan diperkirakan: putaran undang → batalkan → undang terhadap
+ * korban yang SAMA menghasilkan 20 dari 20 surat terkirim tanpa satu pun 429,
+ * sementara `/auth/forgot-password` pada server yang sama berhenti di 6.
+ *
+ * Ongkosnya bukan cuma mengganggu korban. Suratnya keluar lewat SMTP
+ * perusahaan sendiri, jadi penyalahgunaan dari satu akun bisa membuat domain
+ * pengirimnya masuk daftar hitam — dan yang ikut mati sesudah itu adalah
+ * email reset password serta verifikasi SELURUH tenant.
+ *
+ * DUA EMBER, sebab ada dua bentuk penyalahgunaannya:
+ *
+ *   · per (perusahaan + alamat tujuan) — membanjiri SATU korban. Angkanya
+ *     disamakan dengan `batasLupa` (6 / 15 mnt): itu bahaya yang sama persis,
+ *     jadi tak ada alasan menaruh angka yang berbeda.
+ *   · per perusahaan — menyapu BANYAK alamat sekaligus (korban+1@, korban+2@…),
+ *     yang lolos dari ember pertama karena tiap alamatnya baru. 30 / 15 mnt:
+ *     longgar untuk warung yang sedang mendaftarkan karyawannya sekaligus,
+ *     tapi memupus pemakaian sebagai relai massal.
+ *
+ * Dikunci ke PERUSAHAAN, bukan ke IP seperti di `auth`: di sini pemanggilnya
+ * sudah terautentikasi, dan identitas yang benar-benar bertanggung jawab atas
+ * surat yang keluar adalah perusahaannya — bukan jaringan tempat ia kebetulan
+ * duduk. IP berganti; tanggung jawabnya tidak.
+ */
+const rlUndang = (mw: ReturnType<typeof rateLimit>) =>
+  env.RATE_LIMIT_ENABLED ? mw : lewatiRateLimit;
+
+/** Satu korban tak boleh dibanjiri — angka & jendela sama dengan `batasLupa`. */
+const batasUndangKorban = rlUndang(
+  rateLimit({
+    windowMs: 15 * 60_000,
+    max: 6,
+    key: async (c) =>
+      `undang:${c.get("auth").company_id ?? "-"}:${await emailDariBody(c)}`,
+    message: "Terlalu banyak undangan ke alamat ini — coba lagi beberapa menit lagi.",
+  }),
+);
+
+/** …dan satu perusahaan tak boleh dipakai jadi relai ke banyak alamat. */
+const batasUndangPerusahaan = rlUndang(
+  rateLimit({
+    windowMs: 15 * 60_000,
+    max: 30,
+    key: (c) => `undang-co:${c.get("auth").company_id ?? "-"}`,
+    message: "Terlalu banyak undangan dikirim — coba lagi beberapa menit lagi.",
+  }),
+);
 
 const KaryawanBody = z.object({
   nama: z.string().trim().min(1),
@@ -30,7 +95,7 @@ const KaryawanBody = z.object({
   password: z.string().min(8, "password minimal 8 karakter"),
   role: z.enum(["owner", "admin", "cashier", "tim", "kitchen", "bar"]),
   branch_id: z.string().uuid().nullish(),
-});
+}).strict();
 
 /** kasir, tim, kitchen & bar terikat ke satu cabang — wajib punya lokasi kerja */
 const WAJIB_CABANG = new Set(["cashier", "tim", "kitchen", "bar"]);
@@ -40,7 +105,7 @@ const UndangBody = z.object({
   email: z.string().trim().toLowerCase().email("Email tidak valid"),
   role: z.enum(["owner", "admin", "cashier", "tim", "kitchen", "bar"]),
   branch_id: z.string().uuid().nullish(),
-});
+}).strict();
 
 const PatchKaryawanBody = z.object({
   nama: z.string().trim().min(1).optional(),
@@ -51,7 +116,7 @@ const PatchKaryawanBody = z.object({
   password: z.string().min(8).optional(),
   /** true = arsipkan (keluar dari daftar, riwayat tetap); false = pulihkan */
   arsip: z.boolean().optional(),
-});
+}).strict();
 
 async function pastikanCabangMilikPerusahaan(branchId: string, companyId: string) {
   const [b] = await db
@@ -185,7 +250,12 @@ export const karyawanRoutes = new Hono<AppEnv>()
    * PENDING. Saat email itu daftar / login lalu menerima, membership otomatis
    * dibuat. Tak perlu set password (mereka set sendiri saat daftar).
    */
-  .post("/undang", zValidator("json", UndangBody), async (c) => {
+  .post(
+    "/undang",
+    batasUndangKorban,
+    batasUndangPerusahaan,
+    zValidator("json", UndangBody),
+    async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");
     if (body.role === "owner" && auth.role !== "owner") {
@@ -262,8 +332,9 @@ export const karyawanRoutes = new Hono<AppEnv>()
     } catch {
       /* abaikan kegagalan email */
     }
-    return c.json({ id: inv.id, email: body.email, role: body.role }, 201);
-  })
+      return c.json({ id: inv.id, email: body.email, role: body.role }, 201);
+    },
+  )
   /** Daftar undangan PENDING perusahaan (yang belum diterima). */
   .get("/undangan", async (c) => {
     const auth = c.get("auth");
@@ -379,7 +450,7 @@ export const karyawanRoutes = new Hono<AppEnv>()
    */
   .put(
     "/:userId/tempat",
-    zValidator("json", z.object({ tempat_ids: z.array(z.string().uuid()) })),
+    zValidator("json", z.object({ tempat_ids: z.array(z.string().uuid()).max(2000) }).strict()),
     async (c) => {
       const auth = c.get("auth");
       const userId = c.req.param("userId");

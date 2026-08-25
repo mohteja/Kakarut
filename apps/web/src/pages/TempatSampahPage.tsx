@@ -22,9 +22,24 @@ const JENIS: Record<SampahRow["jenis"], { label: string; cls: string }> = {
 /** Tempat Sampah: transaksi yang di-soft-delete — bisa DIPULIHKAN kembali. */
 export function TempatSampahPage() {
   const queryClient = useQueryClient();
+  /*
+   * Daftarnya BERLANGIT-LANGIT sejak balasan ini bisa mencapai 2,44 MB pada
+   * 10.000 penjualan yang pernah dihapus. Bentuknya tetap larik (build ponsel
+   * yang sudah terpasang membacanya `as List`), jadi pemotongannya datang
+   * lewat header — dan halaman ini WAJIB mengatakannya. Daftar yang dipotong
+   * diam-diam membuat orang menyimpulkan transaksinya sudah hilang permanen
+   * padahal cuma tak ditampilkan.
+   */
+  const [terpotong, setTerpotong] = useState<number | null>(null);
   const { data, isLoading } = useQuery({
     queryKey: ["sampah"],
-    queryFn: () => api<SampahRow[]>("/sampah"),
+    queryFn: () =>
+      api<SampahRow[]>("/sampah", {
+        bacaHeader: (h) => {
+          const n = Number(h.get("X-Kakarut-Terpotong"));
+          setTerpotong(Number.isFinite(n) && n > 0 ? n : null);
+        },
+      }),
   });
   const list = data ?? [];
   const [konfirmasiKosong, setKonfirmasiKosong] = useState(false);
@@ -79,6 +94,12 @@ export function TempatSampahPage() {
         Transaksi yang dihapus disimpan di sini (soft delete) — stok & laporan sudah
         dikoreksi. Salah hapus? Tekan <b>♻ Pulihkan</b> untuk mengembalikannya.
       </div>
+      {terpotong !== null && (
+        <div className="mb-3 rounded-lg bg-orange-50 px-4 py-2 text-sm text-orange-800">
+          Menampilkan <b>{terpotong} terbaru</b>. Masih ada yang lebih lama di
+          belakangnya — pulihkan atau kosongkan dulu untuk melihat sisanya.
+        </div>
+      )}
       <ErrorText error={pulihkan.error} />
 
       {isLoading ? (

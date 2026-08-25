@@ -1,4 +1,4 @@
-import { zValidator } from "@hono/zod-validator";
+import { zValidator } from "../../lib/validator";
 import { and, eq, isNotNull, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -8,10 +8,37 @@ import { db } from "../../db/client";
 import { productions, sales } from "../../db/schema";
 import type { AppEnv } from "../../middleware/auth";
 
+/**
+ * Langit-langit balasan Tempat Sampah.
+ *
+ * Isinya menumpuk sampai ada yang menekan "Kosongkan" — warung yang tak pernah
+ * mengosongkannya menarik SETIAP penjualan yang pernah dihapus ke satu balasan.
+ * Terukur pada Postgres nyata, sebelum batas ini ada:
+ *
+ *     GET /sampah   10.000 penjualan ter-soft-delete   2.438.895 byte
+ *
+ * Angkanya sama dengan `BATAS_MEMBER`/`BATAS_LOT_RIWAYAT` (300) karena
+ * pemakaiannya sama: daftar yang dibaca manusia di layar, bukan ekspor.
+ */
+const BATAS_SAMPAH = 300;
+
+/**
+ * Header penanda pemotongan.
+ *
+ * SENGAJA header, bukan `{ items, terpotong }` seperti `GET /customer`.
+ * Balasan rute ini LARIK TELANJANG, dan ketujuh build ponsel yang pernah rilis
+ * membacanya `as List` (`sampah_page.dart`). Mengubah bentuknya akan MELEMPAR
+ * di aplikasi yang sudah terpasang hari ini — jadi bentuknya dipertahankan,
+ * batasnya tetap berlaku untuk semua orang, dan yang baru sajalah yang tahu
+ * bahwa daftarnya dipotong. Build lama menerima 300 terbaru tanpa spanduk;
+ * yang tak pernah terjadi: melempar.
+ */
+const HEADER_TERPOTONG = "X-Kakarut-Terpotong";
+
 const PulihkanBody = z.object({
   jenis: z.enum(["penjualan", "pembelian", "produksi"]),
   key: z.string(),
-});
+}).strict();
 
 /**
  * Tempat Sampah — transaksi yang di-SOFT-DELETE (penjualan + pembelian +
@@ -23,6 +50,20 @@ export const sampahRoutes = new Hono<AppEnv>()
     const auth = c.get("auth");
     const companyId = auth.company_id!;
 
+    /*
+     * `ORDER BY … DESC LIMIT` DI SQL, bukan potong sesudah digabung.
+     *
+     * Memotong di JavaScript tak menghemat apa pun — barisnya sudah terlanjur
+     * ditarik. Dan memotong TANPA urutan di SQL membuat "300 terbaru" jadi 300
+     * sembarang: yang dikirim Postgres tanpa ORDER BY adalah urutan apa pun
+     * yang kebetulan paling murah baginya.
+     *
+     * Diambil `BATAS + 1` dari MASING-MASING kueri, bukan dari gabungannya:
+     * 300 teratas sebuah gabungan selalu termuat di dalam (300 teratas A ∪ 300
+     * teratas B), jadi hasilnya persis sama dengan memotong sesudah digabung —
+     * hanya tanpa menarik sisanya. Yang ke-301 dipakai sebagai penanda: ia ada
+     * berarti masih ada lagi di belakangnya.
+     */
     const penjualan = await db.execute(sql`
     SELECT
       s.id::text          AS key,
@@ -36,6 +77,8 @@ export const sampahRoutes = new Hono<AppEnv>()
     LEFT JOIN users pb ON pb.id = s.cashier_user_id
     LEFT JOIN users ph ON ph.id = s.deleted_by
     WHERE s.company_id = ${companyId} AND s.deleted_at IS NOT NULL
+    ORDER BY s.deleted_at DESC
+    LIMIT ${BATAS_SAMPAH + 1}
   `);
 
     const stokMasuk = await db.execute(sql`
@@ -54,6 +97,8 @@ export const sampahRoutes = new Hono<AppEnv>()
     LEFT JOIN users ph ON ph.id = pr.deleted_by
     WHERE pr.company_id = ${companyId} AND pr.deleted_at IS NOT NULL
     GROUP BY COALESCE(pr.faktur_id::text, pr.id::text), pr.tipe
+    ORDER BY MAX(pr.deleted_at) DESC
+    LIMIT ${BATAS_SAMPAH + 1}
   `);
 
     const rows: SampahRow[] = [
@@ -85,7 +130,9 @@ export const sampahRoutes = new Hono<AppEnv>()
       }),
     ].sort((a, b) => (a.dihapus_pada < b.dihapus_pada ? 1 : -1));
 
-    return c.json(rows);
+    const terpotong = rows.length > BATAS_SAMPAH;
+    if (terpotong) c.header(HEADER_TERPOTONG, String(BATAS_SAMPAH));
+    return c.json(terpotong ? rows.slice(0, BATAS_SAMPAH) : rows);
   })
   /**
    * PULIHKAN dari Tempat Sampah: batalkan soft-delete. Penjualan per id;

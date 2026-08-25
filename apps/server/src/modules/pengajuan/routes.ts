@@ -1,4 +1,4 @@
-import { zValidator } from "@hono/zod-validator";
+import { zValidator } from "../../lib/validator";
 import { aliasedTable, and, desc, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -13,7 +13,7 @@ import { db } from "../../db/client";
 import { branches, leaveRequests, memberships, users } from "../../db/schema";
 import { kunciAntrean } from "../../lib/kunci";
 import { tambahHari } from "../../lib/time";
-import { requireRole, terikatCabang, type AppEnv } from "../../middleware/auth";
+import { requireRole, terikatCabang, type AppEnv, cabangDariQuery} from "../../middleware/auth";
 
 /**
  * PENGAJUAN CUTI & LIBUR. Semua peran boleh MENGAJUKAN (gerbang grup di app.ts
@@ -46,13 +46,13 @@ const BuatBody = z.object({
   tanggal_selesai: z.string().refine(tanggalValid, "Tanggal selesai tidak valid"),
   alasan: z.string().trim().max(500).nullish(),
   lampiran_url: z.string().trim().max(500).nullish(),
-});
+}).strict();
 
 const PutusBody = z
   .object({
     status: z.enum(["disetujui", "ditolak"]),
     alasan_tolak: z.string().trim().max(500).nullish(),
-  })
+  }).strict()
   .refine((b) => b.status !== "ditolak" || !!b.alasan_tolak?.trim(), {
     message: "Alasan penolakan wajib diisi",
     path: ["alasan_tolak"],
@@ -154,10 +154,8 @@ export const pengajuanRoutes = new Hono<AppEnv>()
     if (hanyaMilikSendiri(auth.role, c.req.query("saya"))) {
       syarat.push(eq(leaveRequests.userId, auth.sub));
     } else {
-      const branchId = c.req.query("branch_id");
-      if (branchId && branchId !== "all") {
-        syarat.push(eq(leaveRequests.branchId, branchId));
-      }
+      const branchId = await cabangDariQuery(c);
+      if (branchId) syarat.push(eq(leaveRequests.branchId, branchId));
     }
 
     const status = c.req.query("status");

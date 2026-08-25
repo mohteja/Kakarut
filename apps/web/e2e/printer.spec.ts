@@ -100,6 +100,60 @@ test("checkout dengan auto-print merekam byte ESC/POS (init + TOTAL)", async ({ 
   );
 });
 
+test("slip pesanan dicetak dari keranjang — menu & jumlah, TANPA harga", async ({ page, request }) => {
+  /*
+   * Kertas KEDUA di kasir: yang dibawa ke dapur atau ditinggalkan di meja tamu.
+   * Dicetak dari KERANJANG, bukan dari transaksi yang sudah jadi — `simpanBill`
+   * memanggil `resetTransaksi()` saat sukses, jadi sesudah disimpan tak ada
+   * lagi yang bisa dicetak, dan dapur memang menerima pesanan begitu dicatat.
+   *
+   * Meja 3, bukan 1 atau 2: `pos.spec.ts` memakai Meja 1 dan uji auto-print di
+   * atas memakai Meja 2. Dua spec yang berbagi satu meja saling menjatuhkan
+   * lewat keadaan yang ditinggalkan — dan merahnya muncul di spec yang tidak
+   * bersalah.
+   */
+  const token = await absenMasuk(request, KASIR_EMAIL, KASIR_PASS);
+  await kosongkanMeja(request, token, "Meja 3");
+  await masukLewatSesi(page, request, KASIR_EMAIL, KASIR_PASS);
+  await page.goto("/kasir");
+  await pastikanShiftTerbuka(page);
+  await pilihMeja(page, "Meja 3");
+
+  await page.getByRole("button", { name: "Paket Premium" }).click();
+  await page.getByRole("button", { name: /Premium Basooopa A/ }).click();
+  await page.getByRole("button", { name: /Premium Basooopa A/ }).click(); // qty 2
+
+  const tombol = page.getByRole("button", { name: /Cetak Pesanan/ });
+  await expect(tombol).toBeVisible();
+  await tombol.click();
+
+  await page.waitForFunction(() => (window.__kakarutPrintCapture?.length ?? 0) >= 1);
+  const capture = await page.evaluate(() => window.__kakarutPrintCapture![0]);
+  const teks = capture.map((b) => (b >= 0x20 && b <= 0x7e ? String.fromCharCode(b) : "")).join("");
+
+  // INTI: tak ada rupiah di kertas ini, dan tak ada baris uang.
+  expect(teks).not.toContain("Rp");
+  for (const kata of ["Subtotal", "TOTAL", "PB1", "Diskon", "Kembali"]) {
+    expect(teks, `slip memuat baris uang "${kata}"`).not.toContain(kata);
+  }
+  // …tapi menu, jumlah, dan identitas antarnya ADA.
+  expect(teks).toContain("PESANAN");
+  expect(teks).toContain("2x Premium Basooopa A");
+  expect(teks).toContain("Meja 3");
+  expect(teks).toContain("Total porsi");
+
+  /*
+   * PASANGAN: struk pembayaran di uji pertama berkas ini MEMUAT "TOTAL" dan
+   * rupiahnya. Tanpa pasangan itu, seluruh asersi "tidak memuat" di atas juga
+   * hijau seandainya pencetakannya diam-diam berhenti mengirim apa pun —
+   * yaitu kerusakan, bukan keberhasilan. Di sini cukup dibuktikan bahwa
+   * byte-nya memang terkirim dan berupa ESC/POS yang sah.
+   */
+  expect(capture[0]).toBe(0x1b); // ESC
+  expect(capture[1]).toBe(0x40); // @  → init
+  expect(capture.length).toBeGreaterThan(80);
+});
+
 test("halaman pengaturan printer render dan Cetak Tes merekam byte", async ({ page, request }) => {
   await masukLewatSesi(page, request, OWNER_EMAIL, OWNER_PASS);
   // Owner mendarat di /dashboard (lihat catatan di pos.spec.ts).

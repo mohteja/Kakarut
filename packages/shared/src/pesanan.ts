@@ -131,6 +131,23 @@ export type RingkasanPesanan = Pick<
  * kemudian saat polling menimpanya. Satu implementasi, satu perilaku.
  */
 export function ringkasPesanan(items: PesananItemRow[]): RingkasanPesanan {
+  /*
+   * PERBANDINGAN TEKS DI SINI AMAN — DAN DI CERMINAN DART-NYA TIDAK.
+   *
+   * `Date.prototype.toISOString()` SELALU menulis tiga digit pecahan, jadi
+   * urutan teks = urutan waktu untuk setiap stempel yang lahir di JavaScript.
+   * Server maupun web hanya menghasilkan stempel begitu.
+   *
+   * `DateTime.toIso8601String()` di Dart menulis TIGA digit bila mikrodetiknya
+   * nol dan ENAM bila tidak — dan di ponsel kedua sumber itu BERCAMPUR dalam
+   * satu daftar (stempel server + stempel optimistis lokal). `'…239Z'` vs
+   * `'…239001Z'` lalu dibandingkan terbalik, karena `'0'` (48) < `'Z'` (90).
+   *
+   * Karena itu cerminan Dart fungsi ini memakai `bandingStempel` alih-alih
+   * `compareTo`, dan BEDA ITU DISENGAJA. Menyamakannya "supaya rapi" akan
+   * mengembalikan bug yang sudah tiga kali menggigit: urutan batch sinkron
+   * (terukur 400 vs 201), pemilihan penyentuh terakhir, dan urutan kartu papan.
+   */
   // "Terakhir disentuh" = perubahan baris paling baru pada kartu ini.
   let statusOleh: string | null = null;
   let statusPada: string | null = null;
@@ -193,6 +210,8 @@ function durasiKartu(items: PesananItemRow[]): number | null {
 export function kunciUrutPesanan(
   p: Pick<PesananRow, "waktu" | "status_pada">,
 ): string {
+  // Perbandingan teks aman di sini; cerminan Dart-nya WAJIB `bandingStempel`.
+  // Alasannya di `ringkasPesanan` beberapa baris di atas.
   return p.status_pada && p.status_pada > p.waktu ? p.status_pada : p.waktu;
 }
 

@@ -67,10 +67,21 @@ describe("zona waktu: server & web tak boleh berselisih diam-diam", () => {
       .filter((p) => readFileSync(p, "utf8").includes(ZONA_WEB))
       .map((p) => p.slice(WEB.length))
       .sort();
+    /*
+     * Daftar ini MENYUSUT saat slip pesanan lahir, bukan bertambah.
+     *
+     * Slip itu butuh waktu berformat sama dengan struk, dan menyalin
+     * `Intl.DateTimeFormat(... "Asia/Jakarta")` ke pemanggil kedua akan
+     * memperpanjang daftar kerja ini. Rumusannya dipindahkan ke satu rumah
+     * (`lib/format.ts` → `waktuKertasWIB`), yang memang sudah ada di daftar —
+     * jadi `ReceiptModal` KELUAR dan `KasirPage` tak pernah masuk.
+     *
+     * Yang harus dipegang pembaca berikutnya: menambah PEMANGGIL tak
+     * memperpanjang daftar ini; menambah RUMUSAN memperpanjangnya.
+     */
     expect(dipatok, "daftar berkas web yang memaku zona waktu").toEqual([
       "lib/format.ts",
       "pages/bahan/DetailBahanPage.tsx",
-      "pages/kasir/ReceiptModal.tsx",
       "pages/stok/KartuStokPage.tsx",
       "pages/superadmin/BackupPage.tsx",
       "pages/superadmin/ErrorLogPage.tsx",
@@ -117,5 +128,78 @@ describe("zona waktu: server & web tak boleh berselisih diam-diam", () => {
       mengisi.map((p) => p.slice(AKAR.length)),
       "perusahaan dibuat dengan zona waktu sendiri — web masih mematok WIB",
     ).toEqual([]);
+  });
+});
+
+/**
+ * …DAN SKRIP VERIFIKASINYA HARUS IKUT BERSUARA SAMA.
+ *
+ * `verify-api.sh` menembak API sungguhan lalu mengadu hasilnya dengan tanggal
+ * yang dihitungnya sendiri di shell. Server menghitung TANGGAL BISNIS pada zona
+ * perusahaan; kontainer CI berjalan UTC. Setiap `date +%F` tanpa
+ * `TZ=Asia/Jakarta` karena itu mengadu dua kalender berbeda, dan selisihnya
+ * muncul persis di jam 17.00–24.00 UTC — saat Jakarta sudah berganti hari.
+ *
+ * Bukan hipotesis. Saat uji ini ditulis, §218 memakai `date -u -d '6 days ago'`
+ * dan gagal pada pukul 23.18 UTC: tunggakannya terhitung 8×3=24 alih-alih
+ * 7×3=21, jadi sisanya 76 bukan 79. Delapan belas dari dua puluh perhitungan
+ * tanggal-saja di skrip itu sudah benar — dua di antaranya bahkan menuliskan
+ * alasannya di komentar — dan dua pintu terlewat.
+ *
+ * Yang paling mahal bukan kegagalannya, melainkan BENTUKnya: gerbang yang merah
+ * tujuh jam setiap hari tanpa sebab nyata mengajari orang mengabaikan warna
+ * merah. Sesudah itu ia tak menjaga apa pun, termasuk saat tuduhannya benar.
+ */
+describe("verify-api.sh memakai tanggal bisnis, bukan tanggal kontainer", () => {
+  const skrip = baca("scripts/verify-api.sh");
+  const baris = skrip.split("\n");
+
+  /**
+   * Baris yang menghitung TANGGAL-SAJA (`+%F` tanpa jam). Timestamp lengkap
+   * (`+%FT%TZ`) sengaja dikecualikan: ia menyebut satu titik waktu mutlak, dan
+   * dalam UTC memang itu bentuk yang benar.
+   */
+  const tanggalSaja = baris
+    .map((isi, i) => ({ no: i + 1, isi }))
+    .filter((b) => !b.isi.trimStart().startsWith("#"))
+    /*
+     * Dipecah per PERINTAH, bukan per baris.
+     *
+     * Versi pertama memeriksa barisnya utuh, dan bukti-merahnya menemukan
+     * lubangnya: `DARI80=…; SAMPAI80=…` menaruh DUA perhitungan di satu baris,
+     * jadi satu `TZ=` di paruh kedua membuat paruh pertama yang telanjang ikut
+     * lolos. Penjaga yang lolos separuh justru lebih buruk daripada tak ada —
+     * ia menerbitkan kesan sudah diperiksa.
+     */
+    .flatMap((b) => b.isi.split(";").map((isi) => ({ no: b.no, isi })))
+    .filter((b) => /date[^\n|]*\+%F(?!T)/.test(b.isi));
+
+  it("premis: penyapunya benar-benar menemukan perhitungan tanggalnya", () => {
+    // Tanpa ini, regex yang tak lagi cocok membuat uji di bawah hijau tanpa
+    // memeriksa satu baris pun.
+    expect(tanggalSaja.length).toBeGreaterThan(10);
+  });
+
+  it("INTI: tiap perhitungan tanggal-saja memakai TZ=Asia/Jakarta", () => {
+    const menyimpang = tanggalSaja
+      .filter((b) => !b.isi.includes(`TZ=${ZONA_WEB}`))
+      .map((b) => `verify-api.sh:${b.no}  ${b.isi.trim().slice(0, 90)}`);
+    expect(
+      menyimpang,
+      "baris ini mengadu tanggal UTC/kontainer dengan tanggal bisnis server. " +
+        `Awali dengan TZ=${ZONA_WEB} — kalau tidak, gerbangnya merah tiap hari ` +
+        "antara 17.00 dan 24.00 UTC",
+    ).toEqual([]);
+  });
+
+  it("PASANGAN: penyapunya bisa MENUDUH, dan tak menuduh bentuk yang benar", () => {
+    // Tanpa pasangan ini, "daftar kosong" juga hijau seandainya regexnya tak
+    // pernah cocok dengan apa pun.
+    const cocok = (s: string) => /date[^\n|]*\+%F(?!T)/.test(s);
+    expect(cocok("MULAI=$(date -u -d '6 days ago' +%F)")).toBe(true);
+    expect(cocok("HARI=$(TZ=Asia/Jakarta date +%F)")).toBe(true);
+    // timestamp lengkap BUKAN sasarannya — UTC memang benar di sana
+    expect(cocok('W=$(date -u +%FT%TZ)')).toBe(false);
+    expect(cocok("W=$(date -u -d '+2 hours' +%Y-%m-%dT%H:%M:%SZ)")).toBe(false);
   });
 });

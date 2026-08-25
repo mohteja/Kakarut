@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { butaKomentar } from "../src/scripts/buta-komentar";
 
 /**
  * Penjaga GAGAL MEMUAT ≠ SEMUA MENU SEHAT di halaman Analisis Harga.
@@ -21,11 +22,17 @@ import { fileURLToPath } from "node:url";
  */
 const baca = (rel: string) =>
   readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
-const tanpaKomentar = (s: string) =>
-  s
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/\{\/\*[\s\S]*?\*\/\}/g, "")
-    .replace(/\/\/[^\n]*/g, "");
+/**
+ * Pengupas komentar: SATU RUMAH, `src/scripts/buta-komentar.ts`.
+ *
+ * Sebelumnya berkas ini punya salinannya sendiri — tiga `replace` regex yang
+ * menilai `/` tanpa tahu ia ada di mana. Terukur terhadap berkas yang dibaca
+ * uji ini sendiri, salinan itu membuang 2–3 aksara LEBIH BANYAK dari yang
+ * seharusnya. Kecil, dan justru itu masalahnya: salinan yang dibiarkan berbeda
+ * dari saudaranya adalah cara kelas ini tumbuh kembali — vena "pengupas
+ * komentar buta di tujuh salinan" sudah membayarnya sekali.
+ */
+const tanpaKomentar = butaKomentar;
 
 const HAL = tanpaKomentar(baca("../../web/src/pages/menu/AnalisisHargaPage.tsx"));
 

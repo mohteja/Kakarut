@@ -60,9 +60,14 @@ describe("open bill: dikunci saat dibayar", () => {
      * seharusnya tak pernah ada. Membiarkannya lewat persis itulah yang dulu
      * menerbitkan transaksi kedua tanpa jejak.
      */
-    const i = SRC.indexOf("closedAt: new Date(), saleId: sale.id");
+    // Jangkarnya `.set({` milik penutupan bill, bukan teks satu barisnya:
+    // blok itu kini multi-baris sejak `pernahJadiPenjualan` ikut ditulis di
+    // sana (fakta yang tak boleh ikut hilang saat penjualannya dihapus).
+    const i = SRC.indexOf("closedAt: new Date(),");
     expect(i, "penutupan bill tak ditemukan").toBeGreaterThan(0);
-    const sesudah = SRC.slice(i, i + 700);
+    // 1.200, bukan 700: blok `.set({…})` kini memuat catatan tentang
+    // `pernahJadiPenjualan`, dan jendela lamanya berhenti sebelum penjaganya.
+    const sesudah = SRC.slice(i, i + 1_200);
     expect(sesudah).toContain(".returning(");
     expect(sesudah).toMatch(/if \(kunci\.length === 0\)/);
     expect(sesudah).toContain("bill_sudah_dibayar");

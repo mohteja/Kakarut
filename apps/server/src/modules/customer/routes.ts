@@ -1,10 +1,16 @@
-import { zValidator } from "@hono/zod-validator";
+import { zValidator } from "../../lib/validator";
 import { and, desc, eq, ilike, isNull, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import type { CustomerDetail, CustomerDto, MemberCariRow } from "@kakarut/shared";
+import type {
+  CustomerDetail,
+  CustomerDto,
+  CustomerListDto,
+  MemberCariRow,
+} from "@kakarut/shared";
 import { db } from "../../db/client";
+import { tanpaBentrok } from "../../lib/pg-galat";
 import { branches, customers, sales } from "../../db/schema";
 import type { AppEnv } from "../../middleware/auth";
 import { cariCustomerSetara, normalizeWa } from "./service";
@@ -32,31 +38,81 @@ export const memberCariRoutes = new Hono<AppEnv>().get("/", async (c) => {
   return c.json(rows satisfies MemberCariRow[]);
 });
 
+/**
+ * BALASAN YANG TUMBUH SEUMUR WARUNG.
+ *
+ * Kedua pintu di bawah dulu mengirim SEMUANYA. Terukur pada basis data
+ * sungguhan: `GET /customer` dengan 10.002 member → **1,61 MB**; satu
+ * `GET /customer/:id` atas member dengan 20.001 transaksi → **2,97 MB**.
+ * Tak ada galat, tak ada peringatan — hanya balasan yang membesar setiap
+ * bulan sampai halaman Member berhenti bisa dibuka.
+ *
+ * Yang membuat pemotongan tidak sesederhana menempelkan `.limit()`: kedua
+ * pintu itu MENGHITUNG dari larik yang sama yang dikirimnya. `total_belanja`
+ * dan `jumlah_transaksi` dulu dijumlahkan di JavaScript dari seluruh baris,
+ * jadi `.limit(300)` yang polos akan menjawab "Total belanja Rp 3.000.000"
+ * untuk member yang sebenarnya sudah belanja Rp 40.000.000 — angka salah yang
+ * kelihatan wajar. Karena itu agregatnya dipindah ke SQL (tanpa batas) LEBIH
+ * DULU, baru daftarnya dipotong.
+ *
+ * Sisi yang sama pentingnya: memotong daftar TANPA menyediakan pencarian di
+ * server membuat member ke-301 tak bisa ditemukan sama sekali — halaman Member
+ * menyaring di browser, jadi yang tak terkirim tak pernah ada baginya. Pintu
+ * saudaranya di berkas ini, `memberCariRoutes`, sudah mencari di server sejak
+ * awal; `GET /customer` sekarang memakai penyaring yang sama.
+ */
+const BATAS_MEMBER = 300;
+const BATAS_TRANSAKSI_MEMBER = 300;
+
 const CustomerBody = z.object({
   nama: z.string().trim().min(1),
   wa: z.string().trim().min(1),
   catatan: z.string().nullish(),
-});
+}).strict();
 
 export const customerRoutes = new Hono<AppEnv>()
   .get("/", async (c) => {
     const auth = c.get("auth");
-    const rows = await db
-      .select({
-        id: customers.id,
-        nama: customers.nama,
-        wa: customers.wa,
-        catatan: customers.catatan,
-        jumlah_transaksi: sql<number>`COUNT(${sales.id})::int`,
-        total_belanja: sql<number>`COALESCE(SUM(${sales.total}), 0)::float8`,
-        terakhir: sql<string | null>`MAX(${sales.waktu})`,
-      })
-      .from(customers)
-      .leftJoin(sales, and(eq(sales.customerId, customers.id), isNull(sales.deletedAt)))
-      .where(eq(customers.companyId, auth.company_id!))
-      .groupBy(customers.id)
-      .orderBy(sql`MAX(${sales.waktu}) DESC NULLS LAST`);
-    return c.json(rows satisfies CustomerDto[]);
+    const q = (c.req.query("q") ?? "").trim();
+    // Penyaring yang SAMA dengan `memberCariRoutes` di atas — nama ATAU nomor
+    // WA. Disamakan dengan sengaja: dua kotak pencarian member yang menjawab
+    // beda untuk ketikan yang sama adalah cacat tersendiri.
+    const filter = q
+      ? and(
+          eq(customers.companyId, auth.company_id!),
+          or(ilike(customers.nama, `%${q}%`), ilike(customers.wa, `%${q}%`)),
+        )
+      : eq(customers.companyId, auth.company_id!);
+    const [rows, [hitung]] = await Promise.all([
+      db
+        .select({
+          id: customers.id,
+          nama: customers.nama,
+          wa: customers.wa,
+          catatan: customers.catatan,
+          jumlah_transaksi: sql<number>`COUNT(${sales.id})::int`,
+          total_belanja: sql<number>`COALESCE(SUM(${sales.total}), 0)::float8`,
+          terakhir: sql<string | null>`MAX(${sales.waktu})`,
+        })
+        .from(customers)
+        .leftJoin(sales, and(eq(sales.customerId, customers.id), isNull(sales.deletedAt)))
+        .where(filter)
+        .groupBy(customers.id)
+        .orderBy(sql`MAX(${sales.waktu}) DESC NULLS LAST`)
+        .limit(BATAS_MEMBER + 1),
+      // Hitungan sebenarnya, TANPA batas — judul halaman menyebut "Member (N)"
+      // dan N itu harus jumlah member yang cocok, bukan jumlah yang terkirim.
+      db
+        .select({ n: sql<number>`COUNT(*)::int` })
+        .from(customers)
+        .where(filter),
+    ]);
+    const terpotong = rows.length > BATAS_MEMBER;
+    return c.json({
+      items: (terpotong ? rows.slice(0, BATAS_MEMBER) : rows) satisfies CustomerDto[],
+      terpotong,
+      total: hitung?.n ?? 0,
+    } satisfies CustomerListDto);
   })
   .get("/:id", async (c) => {
     const auth = c.get("auth");
@@ -65,41 +121,56 @@ export const customerRoutes = new Hono<AppEnv>()
       .from(customers)
       .where(and(eq(customers.id, c.req.param("id")), eq(customers.companyId, auth.company_id!)));
     if (!cust) throw new HTTPException(404, { message: "Member tidak ditemukan" });
-    const transaksi = await db
-      .select({
-        id: sales.id,
-        nomor: sales.nomor,
-        waktu: sales.waktu,
-        total: sales.total,
-        cabang: branches.nama,
-      })
-      .from(sales)
-      .leftJoin(branches, eq(sales.branchId, branches.id))
-      .where(
-        and(
-          eq(sales.customerId, cust.id),
-          eq(sales.companyId, auth.company_id!),
-          isNull(sales.deletedAt),
-        ),
-      )
-      .orderBy(desc(sales.waktu));
+    const milikMember = and(
+      eq(sales.customerId, cust.id),
+      eq(sales.companyId, auth.company_id!),
+      isNull(sales.deletedAt),
+    );
+    // Agregat DULU, tanpa batas, dari basis data — bukan dari larik di bawah.
+    // Ini yang membuat pemotongan daftar aman: seberapa pun daftarnya dipotong,
+    // ketiga angka ini tetap menghitung seluruh transaksi member.
+    const [ringkas, transaksi] = await Promise.all([
+      db
+        .select({
+          jumlah_transaksi: sql<number>`COUNT(*)::int`,
+          total_belanja: sql<number>`COALESCE(SUM(${sales.total}), 0)::float8`,
+          terakhir: sql<string | null>`MAX(${sales.waktu})`,
+        })
+        .from(sales)
+        .where(milikMember),
+      db
+        .select({
+          id: sales.id,
+          nomor: sales.nomor,
+          waktu: sales.waktu,
+          total: sales.total,
+          cabang: branches.nama,
+        })
+        .from(sales)
+        .leftJoin(branches, eq(sales.branchId, branches.id))
+        .where(milikMember)
+        .orderBy(desc(sales.waktu))
+        .limit(BATAS_TRANSAKSI_MEMBER + 1),
+    ]);
     const iso = (d: Date | string) => (d instanceof Date ? d.toISOString() : String(d));
-    const total_belanja = transaksi.reduce((a, t) => a + Number(t.total), 0);
+    const terpotong = transaksi.length > BATAS_TRANSAKSI_MEMBER;
+    const tampil = terpotong ? transaksi.slice(0, BATAS_TRANSAKSI_MEMBER) : transaksi;
     const detail: CustomerDetail = {
       id: cust.id,
       nama: cust.nama,
       wa: cust.wa,
       catatan: cust.catatan,
-      jumlah_transaksi: transaksi.length,
-      total_belanja,
-      terakhir: transaksi[0] ? iso(transaksi[0].waktu) : null,
-      transaksi: transaksi.map((t) => ({
+      jumlah_transaksi: ringkas[0]?.jumlah_transaksi ?? 0,
+      total_belanja: ringkas[0]?.total_belanja ?? 0,
+      terakhir: ringkas[0]?.terakhir ? iso(ringkas[0].terakhir) : null,
+      transaksi: tampil.map((t) => ({
         id: t.id,
         nomor: t.nomor,
         waktu: iso(t.waktu),
         total: t.total,
         cabang: t.cabang ?? "",
       })),
+      transaksi_terpotong: terpotong,
     };
     return c.json(detail);
   })
@@ -147,16 +218,22 @@ export const customerRoutes = new Hono<AppEnv>()
       }
       waBaru = wa;
     }
-    const [row] = await db
-      .update(customers)
-      .set({
-        ...(body.nama !== undefined && { nama: body.nama }),
-        ...(waBaru !== undefined && { wa: waBaru }),
-        ...(body.catatan !== undefined && { catatan: body.catatan ?? null }),
-        updatedAt: new Date(),
-      })
-      .where(and(eq(customers.id, id), eq(customers.companyId, auth.company_id!)))
-      .returning();
+    // Pra-cek `cariCustomerSetara` di atas menjaga jalur BERURUTAN (terukur:
+    // 409 yang menyebut member pemiliknya). Jeda pra-cek→tulis tetap terbuka
+    // untuk dua permintaan serentak — `customers_company_wa_uq` yang menjaga
+    // keunikannya, dan tanpa terjemahan ini yang kalah menerima 23505 mentah.
+    const [row] = await tanpaBentrok("Nomor ini sudah dipakai member lain", () =>
+      db
+        .update(customers)
+        .set({
+          ...(body.nama !== undefined && { nama: body.nama }),
+          ...(waBaru !== undefined && { wa: waBaru }),
+          ...(body.catatan !== undefined && { catatan: body.catatan ?? null }),
+          updatedAt: new Date(),
+        })
+        .where(and(eq(customers.id, id), eq(customers.companyId, auth.company_id!)))
+        .returning(),
+    );
     if (!row) throw new HTTPException(404, { message: "Member tidak ditemukan" });
     return c.json(row);
   })

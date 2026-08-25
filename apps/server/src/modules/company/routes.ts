@@ -1,4 +1,5 @@
-import { zValidator } from "@hono/zod-validator";
+import { zValidator } from "../../lib/validator";
+import { BATAS_UANG } from "../../lib/batas-angka";
 import { and, eq, isNull } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -22,7 +23,7 @@ const PatchBody = z.object({
   pb1_rate: z.number().min(0).max(100).optional(),
   receipt_footer: z.string().trim().max(200).nullish(),
   receipt_show_alamat: z.boolean().optional(),
-  target_penjualan: z.number().min(0).nullish(),
+  target_penjualan: z.number().min(0).max(BATAS_UANG).nullish(),
   /** batas maks diskon kasir (%) — 0..100 */
   diskon_maks_persen: z.number().min(0).max(100).optional(),
   /** tolak pesanan yang melebihi stok (bawaan mati) */
@@ -31,9 +32,9 @@ const PatchBody = z.object({
   metode_hpp: z.enum(["average", "fifo"]).optional(),
   /** ambang food cost sehat (%) — menu di atasnya ditandai di daftar menu */
   food_cost_maks: z.number().min(0).max(100).optional(),
-});
+}).strict();
 
-const ModeBody = z.object({ mode: z.enum(["lite", "pro"]) });
+const ModeBody = z.object({ mode: z.enum(["lite", "pro"]) }).strict();
 
 export const companyRoutes = new Hono<AppEnv>()
   .get("/", async (c) => {

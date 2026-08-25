@@ -1,3 +1,4 @@
+import { appendFile } from "node:fs/promises";
 import { eq, sql } from "drizzle-orm";
 import { Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
@@ -9,7 +10,7 @@ import { secureHeaders } from "hono/secure-headers";
 import { db } from "./db/client";
 import { branches } from "./db/schema";
 import { getBuildId } from "./lib/build";
-import { nilaiTakSah } from "./lib/pg-galat";
+import { galatDataKlien, nilaiTakSah } from "./lib/pg-galat";
 import { amatiProxy } from "./lib/pengamatan-proxy";
 import {
   requireAuth,
@@ -317,6 +318,45 @@ export function createApp() {
   app.use("*", compress());
   app.use("*", logger());
 
+  /*
+   * JEJAK RUTE — MATI secara bawaan, menyala hanya lewat env `JEJAK_RUTE`.
+   *
+   * Kenapa ia ada. Alat ukur latensi repo ini (`scripts/ukur-latensi.sh`)
+   * mengukur SEBELAS jalur yang ditulis tangan, semuanya `GET`. Dari 263
+   * deklarasi rute, **158 di antaranya jalur TULIS** — transaksi, kunci baris,
+   * N round-trip — dan tak satu pun pernah punya angka. Dua kerusakan terparah
+   * yang pernah ditemukan audit ini justru di sana: `GET /menu` 0,009 → 20,07
+   * dtk saat `PUT /menu/urutan` berjalan, dan 1,47 → 0,012 dtk pada N
+   * round-trip per baris.
+   *
+   * KENAPA DI SERVER DAN BUKAN DI SKRIPNYA. Yang dibutuhkan bukan jalur yang
+   * dikirim klien (`/customer/6f3a…`) melainkan POLA rutenya (`/customer/:id`)
+   * — hanya itu yang bisa dijoin dengan daftar deklarasi. Klien tak
+   * mengetahuinya. Terukur: mencocokkan jalur yang disebut `verify-api.sh`
+   * dengan 263 deklarasi secara statis menghasilkan **2 dari 163**, karena
+   * hampir setiap jalur di skrip itu dirakit dari variabel shell. Angka
+   * cakupan itu memang hanya bisa lahir saat berjalan.
+   *
+   * Yang ditulis cuma metode, POLA rute, status, dan milidetik — tak ada jalur
+   * literal ber-UUID, tak ada badan, tak ada token. Ditulis dengan `appendFile`
+   * yang tak ditunggu: alat ukur tak boleh ikut mengubah yang diukurnya.
+   */
+  const jejakBerkas = process.env.JEJAK_RUTE;
+  if (jejakBerkas) {
+    app.use("*", async (c, next) => {
+      const mulai = performance.now();
+      await next();
+      // `routePath` adalah pola yang COCOK, sudah lengkap dengan prefiks mount
+      // (`.route("/customer", …)` → `/customer/:id`). Untuk permintaan yang tak
+      // cocok rute mana pun ia `/*`, dan itu memang jawaban yang benar.
+      const pola = c.req.routePath;
+      void appendFile(
+        jejakBerkas,
+        `${c.req.method}\t${pola}\t${c.res.status}\t${(performance.now() - mulai).toFixed(1)}\n`,
+      ).catch(() => {});
+    });
+  }
+
   // ETag + 304 untuk endpoint DAFTAR master data. Aplikasi mobile merevalidasi
   // cache-nya di latar belakang; tanpa ini tiap revalidasi menarik badan penuh
   // walau tak ada yang berubah — mahal di sinyal buruk, dan itu justru saat
@@ -394,6 +434,17 @@ export function createApp() {
     if (nilaiTakSah(err)) {
       void catatGalat(c, 400, err);
       return c.json({ error: "Id atau nilai pada alamat tidak valid" }, 400);
+    }
+    // Angka yang tak muat di kolomnya (22003) juga salah data klien — dan
+    // sampai ini ada, ia keluar sebagai 500 di SETIAP pintu kecuali impor
+    // bahan. Terukur: `POST /penjualan` dengan tiga baris yang masing-masing
+    // MUAT di kolomnya tetap 500, karena yang meluap jumlahnya. Alasannya
+    // sama persis dengan 22P02 di atas, dan penanganannya juga: 400 yang bisa
+    // dibaca, tetap dicatat.
+    const alasanKlien = galatDataKlien(err);
+    if (alasanKlien) {
+      void catatGalat(c, 400, err);
+      return c.json({ error: alasanKlien }, 400);
     }
     console.error(err);
     void catatGalat(c, 500, err);
