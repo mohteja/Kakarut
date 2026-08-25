@@ -126,6 +126,46 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## ANTREAN KESEMBILAN — usulan dari celah yang tercatat di ledger — 2026-08-25
+
+Antrean kedelapan (A⁗–B⁗) tuntas. Dua usulan.
+
+### Usulan A⁵ — berkas unggahan YATIM: celah yang ditulis kodenya sendiri tiga kali
+
+`upload/routes.ts`: *"Tak ada yang menghapus berkas ini kelak: tak ada kuota
+per perusahaan, tak ada pembersihan yatim"* — diulang teks aturan
+`unggah-berbatas`. Vena batas-laju menjaga LAJU; STOK tumbuh selamanya.
+Terukur baca-saja: `POST /upload` tak menulis baris DB apa pun (tanpa
+akuntansi); sumber yatim aktif = foto bukti sinkron yang perintahnya ditolak
+per-item (kelas yang baru digarap A‴/A⁗) + form web yang batal; `StorageDriver`
+hanya `put` — `list`/`hapus` dicermin dari `backup-storage.ts` (kedua driver).
+Bentuk kerja: sapuan kolom perujuk (PREMIS memaku vs skema — kolom URL baru →
+merah menuntut keputusan), ukur fraksi yatim pasca-run verify + satu yatim
+lahir hidup, `sapuUnggahanYatim()` bermasa-tenggang ≥ 7 hari menumpang
+penjadwal cadangan, pagar "gagal baca rujukan = tak menghapus apa pun",
+guard + bukti merah + verify-api §253.
+
+### Usulan B⁵ — granularitas badan 5 aturan sisa `penjaga-semua-pintu`
+
+Batas tertulis paling lama yang belum dibayar (ditunda tiga antrean); D′
+membayarnya untuk `bentrok-unik`. Jalankan ulang `owner-terakhir`,
+`ganti-daftar`, `cuti-bertindih`, `unggah-berbatas`, `email-berbatas` pada
+jendela per-PERNYATAAN (mesin D′ dipakai ulang); tiap tuduhan diadjudikasi
+baca + ukur (riwayat 14 tuduhan palsu); hasil = prosa/dasar gerbang atau
+temuan berangka.
+
+### Diperiksa dan TIDAK diusulkan
+
+Idempotensi sisi WEB — pintu inti + tahap sudah ber-`client_ref`
+(`lib/idempoten.ts`); pakai/opname perlengkapan tak ada di web; `kirim` web
+body kosong tapi berpenjaga status (micro-gap dicatat) · `terbitkanNomor`
+bukan kelas #38 (counter atomik, prefiks tetap, idempoten per-ref) · kuota
+simpanan per perusahaan = kebijakan produk, bukan bug (A⁵ memberi fondasinya).
+
+**Rekomendasi: A⁵ → B⁵.**
+
+---
+
 ## Ledger sinkron dipangkas: retensi yang menghormati kontrak antrean — server — 2026-08-25
 
 - **Kenapa**: tiga tabel debu operasional dipangkas (`error_logs`,
