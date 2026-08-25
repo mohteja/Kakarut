@@ -33,3 +33,6 @@ export const SKALA_UANG_KOLOM = 2;
 
 /** Skala desimal kolom HPP tersimpan (`sales.total_hpp`, `sale_items.hpp_satuan` — `numeric(…,4)`). */
 export const SKALA_HPP_KOLOM = 4;
+
+/** Skala desimal qty baris penjualan (`sale_items.qty` — `numeric(10,2)`). */
+export const SKALA_QTY_BARIS_KOLOM = 2;
