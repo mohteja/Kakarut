@@ -126,6 +126,57 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Saldo yang disusun di JS: sisa yang ADA tak bisa dihabiskan — server — 2026-08-25
+
+- **RALAT ATAS PREMIS USULANKU SENDIRI, dan pengukuran yang membetulkannya**:
+  usulan A⁷ menuduh "akumulasi banyak penjumlahan float". Pengukuran pertama
+  **membantahnya** — Postgres menjumlahkan `numeric` EKSAK, jadi satu
+  `SUM(...)::float8` dibulatkan sekali dan tetap sepadan dengan angka kiriman
+  klien: `pakai 0,8` atas saldo 0,7 + 0,1 justru **200**. Tuduhan "pintu
+  telanjang di `perlengkapan:1160`" karena itu **salah sebab**, dan kalau
+  kupasang toleransi di situ aku akan menambal gejala yang tak ada
+- **Yang sebenarnya**: saldo yang **disusun DI JS** dari dua nilai float8
+  yang masing-masing sudah dibulatkan sendiri —
+  `saldoDiRakPerlengkapan = SUM(mutasi)::float8 − SUM(dalam_jalan)::float8`
+- **Terukur SEBELUM** (CK bermutasi 0,3 · kiriman menunggu 0,1 → rak
+  `0.19999999999999998`), DUA gerbang, keduanya lewat HTTP:
+
+  | pintu | balasan |
+  |---|---|
+  | `POST /perlengkapan/:id/pakai` qty 0,2 | **400** "Stok tidak cukup (saldo **0.19999999999999998** pak)" |
+  | `POST /perlengkapan/:id/minta` qty 0,2 | **400** "Stok CK tidak cukup (siap kirim **0.19999999999999998** …)" |
+
+  Dua kerusakan sekaligus: sisa yang ADA tak bisa dihabiskan, dan derau float
+  ikut **tercetak di pesan** — angkanya sama dengan yang diminta petugas,
+  jadi penolakannya tak masuk akal dari layar
+- **Fix**: `keSkalaKolom(nilai, skala)` di rumah angka, dipasang di KEDUA
+  penyusun JS. Bukan toleransi karangan: qty perlengkapan memang
+  `numeric(16,3)` — tiga desimal adalah SELURUH presisi yang pernah ada di
+  data itu, derau digit ke-17 bukan informasi
+- **Terukur SESUDAH** (keadaan sama): `pakai 0,2` → ok · `minta 0,2` → ok ·
+  pasangan `minta 0,25` & `pakai` saat rak habis → tetap 400, **angka bersih**
+- **Distinksi yang TIDAK dihapus**: toleransi `1e-9`/`1e-6` di stok/produksi
+  menjaga kelas LAIN — di sana yang dibandingkan **kebutuhan yang dihitung
+  JS** (resep × batch, konversi satuan). Menyeragamkannya akan merusak yang
+  sudah benar; uji pasangan memaku keduanya tetap ada
+- **Penjaga + bukti merah**: `saldo-skala-kolom.test.ts` (5 uji; detektor
+  dibuktikan lewat masukan sintetis; pembulatan dicabut → menuduh dengan
+  angka pengukurannya) · verify-api **§254** (8 asersi) · gerbang lama
+  `perlengkapan-ck-dijanjikan-sekali` dilonggarkan TEPAT untuk pembungkusnya
+  dan **dibuktikan tetap menuduh** saat pengurangan `dalamJalan` dicabut
+- **Batas, jujur**: `saldoStok()` (`shared/hpp.ts`) menyusun saldo di JS juga
+  (`awal + produksi − terpakai`), TAPI ketiga konsumennya bertoleransi dan
+  penolakan serupa **tak tereproduksi** di sana (jalur waste lewat sesi ACC,
+  saldo tak langsung bergerak) — dicatat sebagai kelas yang sama yang belum
+  bergejala, bukan diperbaiki buta. Perbandingan `=== 0`/`!== 0` atas selisih
+  rak (stok-awal & koreksi) kini aman karena sumbernya dibulatkan, tapi
+  bentuknya tetap rapuh bila kelak nilainya datang dari jalur lain
+- Gerbang: typecheck bersih · `npm test` **2.256** (192 berkas) · verify-api
+  **3.002/0** vs Postgres segar · cakupan identik · `audit:invarian` 26/26
+- Commit: `4dce441`
+
+---
+
 ## ANTREAN KESEBELAS — usulan dari celah yang tercatat di ledger — 2026-08-25
 
 Antrean kesepuluh (A⁶–B⁶) tuntas. Dua usulan; yang teratas adalah tanda
