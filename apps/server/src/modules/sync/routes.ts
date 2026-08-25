@@ -13,6 +13,7 @@ import { pastikanCabang, terikatCabang, type AppEnv } from "../../middleware/aut
 import { lewatiRateLimit, rateLimit } from "../../middleware/rateLimit";
 import { createSale } from "../penjualan/service";
 import { bukaShift } from "../shift/routes";
+import { pangkasLedgerSync } from "./idempoten";
 import { SaleBody } from "../penjualan/routes";
 import { catatAbsen, cekRadius, ClockBody, SelfBody } from "../absensi/routes";
 
@@ -852,6 +853,10 @@ export const syncRoutes = new Hono<AppEnv>().post("/", batasSync, zValidator("js
       );
     hasil.push(item);
   }
+
+  // Retensi ledger menumpang pada penulisnya (pola `pangkasErrorLog`):
+  // lepas-tangan, kegagalannya tak boleh menyentuh balasan sinkron.
+  void pangkasLedgerSync().catch(() => {});
 
   return c.json({ hasil } satisfies SyncResponse);
 });
