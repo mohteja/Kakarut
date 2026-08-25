@@ -126,6 +126,85 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## FIFO: angka firasat terakhir, dan bukti merah yang gagal mendarat — server — 2026-08-25
+
+- **Kenapa**: utang terukur yang ditulis entri di bawah ini — *"`lib/fifo.ts`
+  masih memakai `EPS = 1e-9`, angka firasat yang B⁷ ukur BERHENTI BERARTI pada
+  besaran ≥ 10⁷; keterjangkauannya belum diukur"*. Situs `1e-9` **terakhir**,
+  dan satu-satunya yang bahkan tak menulis asalnya
+- **Populasi**: **14** pemakaian `EPS` di `fifo.ts` (223 baris). `jalankanFifo`
+  **fungsi murni** dengan **satu** pemanggil (`stok/service.ts:821` →
+  `GET /stok/fifo/:id`), jadi instrumennya deterministik penuh; harness ujinya
+  sudah ada (`test/fifo.test.ts`, 18 uji) dan dipakai ulang
+- **Diukur atas fungsinya** (dua lot pecahan sebesar N, lalu keluar seluruhnya):
+
+  | N | sisa lot | saldo | defisit | hpp |
+  |---|---|---|---|---|
+  | 10³ · 10⁶ | 0 | 0 | 0 | terisi |
+  | **10⁷** | **1,86e-9** | 1,86e-9 | 0 | terisi |
+  | **10⁸** | 0 | **−1,49e-8** | **1,49e-8** | **NULL** |
+  | **10⁹** | 0 | −1,19e-7 | 1,19e-7 | **NULL** |
+
+- **Keterjangkauan DIUKUR lewat HTTP** (Aturan 6 — dua faktur beli qty
+  100.000.000,1 & 100.000.000,2 **diterima pintu sungguhan**, dan kedua lot
+  dibuktikan terbaca di kartu sebelum angkanya dipercaya), sesudah dihabiskan
+  lewat opname ke 0:
+
+  | `GET /stok/fifo/:id` | SEBELUM | SESUDAH |
+  |---|---|---|
+  | `saldo` | **−1.4901161193847656E-8** | `0` |
+  | `defisit` | **1.4901161193847656E-8** | `0` |
+  | `pemakaian[0].hpp` | **NULL** ("tidak diketahui") | terisi |
+  | `rincian` | **3 baris** (satu hantu ber-`lot: null`) | 2 baris |
+
+  Kartu FIFO melaporkan **stok minus** dan menolak menyebut HPP untuk pemakaian
+  yang aritmetikanya eksak — kelas B⁷ ("stok yang PERSIS cukup ditolak"),
+  dipindahkan ke jalur biaya
+- **PENGUKURAN MERALAT LANGKAH PERTAMAKU, dan itu bagian dari hasilnya**: bukti
+  merah versi pertama **TIDAK MENDARAT** — mengembalikan `EPS` ke `1e-9`
+  membuat seluruh uji tetap hijau, sebab pembulatan ke skala kolom sudah
+  menghapus gejalanya pada 10⁷–10⁹. Klaim "toleransinya yang memperbaiki"
+  karena itu **belum terbukti dan tak ditulis**. Yang memisahkan keduanya
+  besaran di PUNCAK rentang: pada ≈4,9e9 lantai derau float melewati satu unit
+  kolom, jadi sisa hasil pembulatan mendarat tepat di `0,000001` — bukan nol —
+  dan `1e-9` tak sanggup menyentuhnya:
+
+  | | sisa lot | saldo |
+  |---|---|---|
+  | `1e-9` | **0.000001** (abadi) | 0.000001 |
+  | `toleransiBanding` | 0 | 0 |
+
+  Kedua paruh perbaikan membayar **band yang berbeda**: pembulatan per langkah
+  untuk 10⁷–10⁹, toleransi sadar-besaran untuk puncaknya
+- **Fix**: `toleransiBanding(besaranMaks, SKALA_QTY_STOK_KOLOM)` — lantai
+  deraunya ditentukan angka **TERBESAR yang dilewati walk**, bukan sisa yang
+  sedang diperiksa (sisa itu kecil; derau yang melahirkannya berasal dari
+  besaran operannya) — plus `keSkalaKolom` di tiap langkah konsumsi, defisit,
+  dan saldo. Asal angkanya **ditulis di tempat `EPS` dulu berdiri**, justru itu
+  yang tak dimilikinya
+- **Bukti merah (versi kedua, mendarat)**: `EPS` dikembalikan ke `1e-9` →
+  uji puncak rentang merah: `expected [ +0, 0.000001 ] to deeply equal
+  [ +0, +0 ]`; dipulihkan
+- **Pasangan anti-hijau-palsu**: **18 uji FIFO lama tetap hijau** (perilaku
+  besaran biasa tak bergeser sedikit pun — pasangan terkuat); sisa NYATA
+  sebesar satu unit kolom (1e-6) tak ikut disnap; defisit NYATA tetap tercatat
+  sebagai stok minus; besaran tinggi yang memang bersisa tetap punya sisanya
+- **Tuduhan yang DICABUT**: "lot hantu tanpa harga membuat `rataBergerak`
+  memulangkan null" — tak tereproduksi di skenario mana pun yang kucoba (lot
+  hantunya tersnap lebih dulu). Dicatat, bukan dipaksa jadi temuan
+- **Batas, jujur**: pada besaran ≳10¹⁰ lantai derau (2,3e-6) melewati satu unit
+  kolom, jadi sisa sebesar satu unit di sana ikut dianggap nol — di besaran itu
+  float8 memang tak sanggup membawa skala kolomnya, dan jawabannya berhenti
+  memakai float8, bukan mengecilkan toleransi. Yang diperbaiki juga jalur
+  **tampilan** kartu FIFO; HPP yang TERSIMPAN di penjualan dihitung jalur lain
+  dan tak tersentuh putaran ini
+- Gerbang: typecheck bersih · `npm test` **2.278** (192 berkas) · `verify-api`
+  **3.012 lolos, 0 gagal** vs Postgres SEGAR · cakupan rute **272** identik ·
+  `audit:invarian` 26/26 · build web · Playwright e2e **6/6**
+- Commit: `e55d69e`
+
+---
+
 ## Saldo stok disusun di JS: badge "habis" berhenti berbohong — server — 2026-08-25
 
 - **Kenapa**: batas yang ditulis vena A⁷ tentang dirinya sendiri —
