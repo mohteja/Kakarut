@@ -126,6 +126,86 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Alamat printer tak sah sampai ke soket — mobile — 2026-08-25 (video lapangan)
+
+- **Kenapa**: batas yang ditulis entri di bawah ini sendiri — *"validasi format
+  alamat tetap tak ada — diketik salah tetap tersimpan dan baru ketahuan saat
+  cetak gagal"* — lalu **video lapangan** menunjukkan bentuk persisnya: kotak
+  "IP printer" TERISI di layar, sementara pesannya berbunyi
+  `Gagal mencetak: Dapur (SocketException: Failed host lookup: '' (OS Error: No
+  address associated with hostname, errno = 7))`. Host yang dipakai mencetak
+  **string kosong** — yang dikirim bukan yang terlihat
+- **Dua cacat dipisahkan, dan hanya satu ini kerja baru**:
+  1. build terpasang `1.0.0+10` belum memuat `e072e4c` (IP hilang saat layar
+     ditutup). Yang kurang **rilis**, bukan kode — disebut, tidak diklaim beres
+  2. alamat kosong/salah ketik berjalan lurus ke `Socket.connect('')`, dan itu
+     **tetap hidup walau (1) tayang**
+- **Populasi**: aturannya SUDAH ada — `PrinterState._punyaAlamat`
+  (`printer_controller.dart:63`) — dipasang di **2** gerbang tampilan
+  (`siapCetakStruk`/`siapCetakTiket`, dibaca `receipt_page.dart:67,150` &
+  `bayar_sheet.dart:185`) dan **0** dari **5** pintu tempat byte keluar
+  (`_kirim` → `LanTransport`, dipakai `cetakTes` · `cetakTiket` ·
+  `cetakTiketKe` · `cetakStruk` · `cetakBon`). Gerbangnya pun `.any(...)`:
+  SATU printer beralamat sah membuat perintah cetak berjalan ke seluruh
+  printer, termasuk yang alamatnya kosong
+- **Diukur — dan pengukurannya mengubah bentuk perbaikannya**
+  (`InternetAddress.lookup`, mesin uji Linux):
+
+  | teks | hari ini |
+  |---|---|
+  | `''` | `Failed host lookup: ''` (13 ms) ← persis video |
+  | `192.168.1` | **LOOKUP BERHASIL → 192.168.0.1** (2 ms) |
+  | `192.168.1.500` | `Failed host lookup` |
+  | `192.168.1.5:9100` · `http://192.168.1.5` | `Failed host lookup` |
+  | `192.168.1.50` · `printer.local` | format sah |
+
+  Baris kedua itu kerusakan yang paling sunyi: satu oktet yang kurang bukan
+  membuat cetak gagal, melainkan mengirimnya ke perangkat LAIN di jaringan.
+  Terukur lewat pintu cetak sungguhan (penjaga dicabut): bukan galat cepat,
+  melainkan **`Connection timed out … errno = 110` sesudah 6 detik** ke host
+  yang salah
+- **Sebelum → sesudah** (`cetakTes` atas printer LAN bernama "Dapur"):
+  `Gagal mencetak: Dapur (SocketException: Failed host lookup: '' …)` →
+  `Gagal mencetak: Dapur (IP printer belum diisi)` — seketika, soket tak
+  disentuh; `192.168.1` → ditolak bernama, tak pernah sampai ke 192.168.0.1
+- **Fix**: `alasanHostLanTakSah()` + `PrinterSettings.alasanAlamatTakSah`
+  (satu rumah, dipakai gerbang tampilan DAN `_kirim`); penjaga dipasang di
+  `_kirim` — pintu tempat byte keluar — supaya pemanggil BARU ikut terjaga;
+  `errorText` merah di kotak IP; "Cetak Tes" menyiram ketikan lebih dulu
+  (dulu ia mencetak alamat LAMA — bentuk yang terlihat di video); daftar
+  printer menandai alamat tak sah tanpa membuka editor
+- **Keputusan yang ditulis, bukan didiamkan**: teks tak sah **tetap
+  tersimpan**. Menolak menyimpannya akan menghidupkan lagi persis bug yang
+  baru dibayar (ketikan hilang) — penandanya memberi tahu, bukan menahan.
+  Dan penandanya **ditahan selama ketikan belum tersimpan**: merah yang
+  berkedip di tiap ketukan cepat diabaikan orang
+- **Cacat pada perbaikanku sendiri, ditangkap gerbang lama**: versi pertama
+  memakai bendera yang dinolkan di `_siramLan` — dan `_siramLan` juga
+  berjalan dari `deactivate`, jadi `setState` melempar saat pohon widget
+  dibongkar (`printer_ip_tersimpan_test` merah). Diganti: penandanya
+  diturunkan dari `_lanTersimpan` yang SUDAH ada
+- **Kebocoran kecil yang ikut ketemu lewat instrumen**: `Timer` penyambungan
+  awal di `build()` tak pernah dibatalkan saat provider dilepas — terukur
+  sebagai galat plugin yang muncul di uji BERIKUTNYA, bukan di uji yang
+  membuatnya. Timer koneksi per printer sudah dibatalkan sejak dulu; yang
+  satu ini terlewat — tanda tangan yang sama, skala mikro
+- **Bukti merah**: penjaga di `_kirim` dicabut (suntikan di-assert mendarat)
+  → dua uji merah dengan **persis kalimat video** (`Failed host lookup: ''`)
+  dan `Connection timed out, host: 192.168.1`; dipulihkan
+- **Pasangan anti-hijau-palsu**: soket TCP sungguhan di `127.0.0.1` — cetak
+  tetap sampai & byte diterima; printer Bluetooth berperangkat tak tertolak
+  penjaga alamat; `printer.local`/`kasir`/`10.0.0.7` tetap sah
+- **Batas, jujur**: pemeriksaan ini menangkap salah ketik yang **berbentuk**,
+  bukan alamat yang bentuknya benar tapi tak ada di jaringan — `192.168.1.51`
+  saat printernya di `.50` tetap lolos, dan yang menangkapnya cuma mencetak.
+  Nama host sengaja diterima apa adanya (memaksa empat oktet akan mematikan
+  pemasangan yang hari ini bekerja). Sisi web tak punya soket → tak disentuh
+- Gerbang: `flutter analyze` bersih · `flutter test` **551** (3.44.7) ·
+  server/web tak tersentuh → verify-api tak dijalankan (disebut)
+- Commit: mobile `aec2962`
+
+---
+
 ## IP printer hilang / gagal simpan diam — mobile — 2026-08-25 (laporan lapangan)
 
 - **Kenapa**: laporan pemilik — *"IP printer suka tiba-tiba kosong atau tidak
