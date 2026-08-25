@@ -126,6 +126,46 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Pencadangan pada volume: seluruh DB di memori + gzip sinkron — server — 2026-08-25
+
+- **Kenapa vena ini ada**: `POST /admin/sistem/backup` tak pernah diukur pada
+  volume; `lib/backup.ts` memuat seluruh baris semua tabel ke satu larik
+  string, `join`, lalu `gzipSync` — kompresi SINKRON atas seluruh DB yang
+  menghentikan event loop (kelas #12, sebab berbeda: CPU, bukan kunci)
+- **Populasi/mesin**: 200.015 penjualan + 400.028 baris item = **600.790
+  baris, DB 193 MB**, disuntik SQL dari baris templat API; **dibuktikan
+  terbaca** (aturan 6): `GET /laporan` memulangkan `jumlah_transaksi:
+  200.000`, omzet 3 M — persis suntikan
+- **Terukur SEBELUM** (server dingin, sampler health 50 ms + RSS 100 ms):
+  backup **12,9 dtk** · arsip 21,3 MB · `/api/health` (biasa 2 ms) macet
+  sampai **5.299 ms** — semua permintaan lain ikut berhenti, layar bayar
+  termasuk · RSS **207 MB → 1.786 MB**, lalu **bertahan 1,66 GB** sesudah
+  selesai (heap V8 tak menyusut; run kedua di atasnya memuncak 1.772 MB)
+- **Fix**: ekspor streaming — satu transaksi `REPEATABLE READ` (bonus yang
+  dulu tak ada: semua tabel dipotret SATU snapshot, bukan dibaca pada waktu
+  berbeda), kursor per tabel di koneksi advisory-lock yang sudah dipegang,
+  `FETCH 5000` per batch, tulisan sadar-backpressure ke `createGzip`
+- **Terukur SESUDAH** (keadaan sama, dingin): backup **8,6 dtk** · health
+  MAKS **28 ms** (p50 2 ms) · RSS puncak **392 MB**, idle sesudah **164 MB**
+- **Kompatibilitas format DIBUKTIKAN DIJALANKAN, bukan dibaca**:
+  `restore-backup.ts` atas arsip streaming 600.788 baris ke DB kosong →
+  58 tabel pulih, `sales=200.015`, `items=400.028`, agregat suntikan cocok
+- **Penjaga + bukti merah**: `backup-streaming.test.ts` (4 uji — createGzip +
+  `drain` + kursor + snapshot + ROLLBACK); suntikan `gzipSync` kembali →
+  merah dengan kalimat pengukurannya; dipulihkan
+- **Batas**: volume 200 rb terlalu mahal untuk CI — angka di atas hidup di
+  ledger, CI menjaga BENTUKNYA (uji sumber) dan perilakunya pada volume
+  kecil (verify-api § pemeriksaan sistem: sukses/unduh/retensi). Selisih
+  600.790 → 600.788 antara run = baris retensi/log yang terpangkas di
+  antara pengukuran, bukan kehilangan ekspor (restore menghitung ulang
+  angka arsipnya sendiri, cocok)
+- Gerbang: typecheck bersih · `npm test` **2.225** (186 berkas) · verify-api
+  **2.979/0** · cakupan identik · `audit:invarian` 26/26 · ponsel tak
+  tersentuh (disebut, bukan didiamkan)
+- Commit: `faaa30d`
+
+---
+
 ## Cabang niat di /sync: empat pintu membuangnya, satu temuan sampingan mem-500-kan kasir — server+mobile — 2026-08-24
 
 - **Populasi**: 13 tipe perintah `EKSEKUTOR` · **10 situs enqueue** ponsel ×
