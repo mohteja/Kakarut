@@ -126,6 +126,86 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Saldo stok disusun di JS: badge "habis" berhenti berbohong — server — 2026-08-25
+
+- **Kenapa**: batas yang ditulis vena A⁷ tentang dirinya sendiri —
+  *"`saldoStok()` menyusun saldo di JS juga, tapi gejalanya tak
+  tereproduksi"*. Putaran ini mereproduksinya
+- **Populasi**: sapuan mekanis atas **131** berkas (`apps/server/src` +
+  `packages/shared/src`) — nilai ber-asal-`Number(row.*)` yang **dikombinasikan**
+  (`±`, `±=`) dengan nilai ber-asal-SQL lain, plus pembantu bersama yang
+  MEMULANGKAN komposisi parameternya. **29 tertuduh di 6 berkas**;
+  dipilah tangan → **19 masuk kelas ini, 10 dikecualikan beralasan**
+- **Yang DIKECUALIKAN, dan sebabnya** (menuduh kode benar = cara tercepat
+  membuat gerbangnya diabaikan):
+  · `lib/fifo.ts` (7) — tiap pembandingnya sudah ber-`EPS` dan lot yang habis
+    **disnap ke 0 secara eksplisit**; rancangan lain, sudah berpenjaga
+  · `harga-stats.ts` `sumQty` (1) — pembagi rata-rata harga, hasilnya rupiah
+    ber-`bulat2`; kelas UANG
+  · `produksi/konsumsi.ts` `cur.butuh` (1) — kelas KEBUTUHAN yang B⁷ sengaja
+    beri `toleransiBanding`; menyeragamkannya akan merusak yang sudah benar
+  · sisanya penghitung (`+= 1`) dan penyusun teks
+- **Diukur lewat HTTP** (Aturan 6 — suntikannya dibuktikan terbaca lebih dulu:
+  `stok_awal=0.1`, `produksi=0.2`, `rencana=0.1`, `dikerjakan=0.2` muncul di
+  balasan rutenya):
+
+  | | SEBELUM | SESUDAH |
+  |---|---|---|
+  | `GET /stok` → `saldo` | **0.30000000000000004** | 0.3 |
+  | `GET /stok` → `pembelian_berjalan.qty` | **0.30000000000000004** | 0.3 |
+  | `GET /stok/kartu/:id` → `saldo_akhir` | **0.30000000000000004** | 0.3 |
+
+- **Kerusakan yang lebih dalam daripada angka jelek**, dan bukti merahnya yang
+  menunjukkannya: `statusStok(0,1 · 0,2 · 0,3)` — bahan yang saldonya
+  BENAR-BENAR nol — memulangkan **`"menipis"`**, bukan `"habis"`, karena
+  `0.1 + 0.2 - 0.3 = 5,551e-17 > 0`. Badge "habis" karena itu tak pernah
+  muncul untuk bahan yang habis lewat kombinasi baseline+masuk+keluar, dan
+  `saldo === 0` yang menyembunyikan baris satuan setara ikut gagal
+- **Fix**: pembulatan dipindahkan ke RUMAH ATURANNYA — `keSkalaKolom` +
+  `SKALA_QTY_STOK_KOLOM` kini tinggal di `@kakarut/shared` (`skala.ts`), dan
+  **`saldoStok` sendiri yang membulatkan**, jadi `statusStok` dan tiap
+  pemanggil mewarisinya tanpa aturan kedua yang bisa menyimpang.
+  `lib/batas-angka.ts` mengekspor ulang keduanya → pemanggil server tak
+  berubah dan pin lama tetap hijau. Situs sekelas ikut dibayar: gabungan
+  `terpakai + kirim_keluar`, dua `qtyBerjalan`, saldo awal kartu, **saldo
+  berjalan kartu (dibulatkan TIAP LANGKAH — driftnya tumbuh dengan N)**,
+  kartu perlengkapan, `sisa` pemakaian otomatis perlengkapan (tanpa ini ia
+  mendarat di 1e-17 dan menyisipkan mutasi hantu keesokan harinya), dan
+  balasan `POST /perlengkapan/:id/pakai` yang mengirim 0.19999999999999998 ke
+  layar yang baru menekannya
+- **Sisi klien diperiksa, bukan diandaikan**: `apps/web` tak memakai
+  `saldoStok`/`statusStok` sama sekali, dan ponsel hanya mengurai `saldo`
+  kiriman server (`stok_models.dart`) — tak ada salinan aturan, jadi tak ada
+  kerja klien. Itu keputusan terukur, bukan kelalaian
+- **Gerbang lama yang MEMATOK NOMOR BARIS ikut ketemu**: `pb1-satu-rumus`
+  merah karena komentar pengukuran menggeser `hitungPb1` dari baris 103 ke
+  122 — gerbang merah yang tak menyatakan apa pun tentang PB1. Diperbarui ke
+  NIATNYA (satu situs, dan situs itu di dalam badan `hitungPb1`) lalu
+  dibuktikan **masih bisa menuduh**: salinan rumus kedua disuntikkan ke
+  `KasirPage` → merah menyebut berkasnya. Ini kelas keempat kalinya di sesi
+  ini gerbang lama memaku ejaan alih-alih niat
+- **Bukti merah**: pembulatan di `saldoStok` dicabut (suntikan di-assert
+  mendarat) → 3 uji merah, termasuk `expected 'menipis' to be 'habis'` dan
+  `expected 0.0000010000000000287557 to be 0.000001`; dipulihkan
+- **Pasangan anti-hijau-palsu**: kekurangan/kelebihan **satu unit kolom
+  (1e-6)** tetap terlihat (uji + §256 lewat HTTP: saldo 0,000001 tak ditelan
+  jadi nol); stok yang memang aman tak berubah jadi habis; nilai yang memang
+  muat di kolomnya tak tersentuh
+- **Batas, jujur**: detektornya menilai **nama** (`qty|saldo|sisa|stok|
+  terpakai|masuk|keluar`) untuk memisahkan kelas qty dari kelas uang — kolom
+  qty yang dinamai lain takkan terlihat; ia juga hanya melihat komposisi di
+  SATU baris, jadi komposisi yang dipecah ke beberapa pernyataan lolos.
+  `lib/fifo.ts` masih memakai `EPS = 1e-9` — angka firasat yang B⁷ ukur
+  BERHENTI BERARTI pada besaran ≥ 10⁷; ia dicatat sebagai utang terukur, bukan
+  digarap di putaran ini (keterjangkauannya belum diukur)
+- Gerbang: typecheck bersih · `npm test` **2.270** (192 berkas) ·
+  `verify-api` **3.012 lolos, 0 gagal** vs Postgres SEGAR (§256 baru) ·
+  cakupan rute **272** identik dengan rekaman · `audit:invarian` 26/26 ·
+  build web · Playwright e2e **6/6**
+- Commit: `1cdf132`
+
+---
+
 ## Alamat printer tak sah sampai ke soket — mobile — 2026-08-25 (video lapangan)
 
 - **Kenapa**: batas yang ditulis entri di bawah ini sendiri — *"validasi format
