@@ -126,6 +126,56 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Yang diadili DI DALAM fungsi lain — server — 2026-08-25 — **BERSIH**
+
+- **Kenapa**: batas yang ditulis vena di bawah ini tentang dirinya sendiri —
+  *"sapuannya melihat perbandingan di SATU BARIS; nilai yang dioper ke fungsi
+  lain lalu dibandingkan di dalam fungsi itu tak terlihat"*
+- **Metode**: pemindai **dua tahap**, sebab pertanyaannya memang dua — (1)
+  fungsi mana yang **mengadili** parameter numeriknya (`< > <= >= === !==`,
+  `Math.max/min/round` atas parameter itu), lalu (2) siapa yang mengoper
+  **EKSPRESI aritmetika** ke fungsi seperti itu, bukan identifier polos yang
+  nilainya sudah berskala di tempat lahirnya
+- **Populasi**: **104** fungsi pengadil di `apps/server/src` +
+  `packages/shared/src`; **4** situs mengoper ekspresi
+- **Hasil: BERSIH.** Keempatnya dipilah tangan dan aman, masing-masing dengan
+  alasan yang bisa diperiksa:
+
+  | situs | kenapa aman |
+  |---|---|
+  | `index.ts` ×2 — `jadwalkanSapuUnggahan`/`jadwalkanPangkasToken` | jam bulat, `(BACKUP_HOUR + n) % 24`; aritmetika integer tak berderau |
+  | `scripts/acuan-uang-mobile.ts` — `hitungPb1(sub - dis, rate)` | pembangkit **fikstur**, dan seluruh `sub`/`dis`-nya bilangan bulat (1.000 · 12.345 · 99.999 · 333.333 × 0 · 1 · 500 · 1.234) → selisihnya eksak |
+  | `receipt.ts` — `formatRupiahAscii(Math.max(0, uangDiterima - total))` | `uangDiterima` sudah `Math.round` (rupiah bulat) & `total` sudah berskala kolom sejak vena sebelumnya; hasilnya diformat — deraunya tak pernah sampai ke kertas |
+
+- **Yang dikirim: ratchet-nya**, bukan laporannya —
+  `apps/server/test/diadili-lintas-fungsi.test.ts` berdiri sebagai gerbang,
+  jadi situs **kelima** yang lahir nanti menagih keputusan alih-alih lewat
+  diam-diam. `keSkalaKolom`/`toleransiBanding` sengaja **tidak** dihitung
+  sebagai pengadil: keduanya obatnya, bukan penyakitnya
+- **Sekalian terukur & dipaku**: aturan **KEMBALIAN punya SATU rumah** di
+  seluruh repo (`receipt.ts`). `hitungKembalian` yang pernah diusulkan **tak
+  pernah ada** — dan tak perlu ada, sebab tak ada salinan kedua yang bisa
+  menyimpang; ponsel mengoper `uangDiterima` ke pembangun struk bersama
+  (`receipt_page.dart:128`), bukan menghitung sendiri
+- **Detektor DIBUKTIKAN bisa menuduh, dua lapis**:
+  · sintetis — ekspresi tertuduh; identifier polos **tidak**; argumen yang
+    sudah dibungkus `keSkalaKolom` **tidak**; fungsi yang tak mengadili tak
+    masuk populasi;
+  · **pohon sungguhan** — `hitungPb1(subtotalNet, …)` dibuka jadi
+    `hitungPb1(subtotal - diskon, …)` (suntikan di-assert mendarat) → merah
+    menyebut `modules/penjualan/service.ts:523`; dipulihkan
+- **Uji PREMIS** menahan hijau-palsu: berkas > 100, pengadil > 50, situs > 0 —
+  nol berarti pemindainya rusak, bukan repo yang bersih (sudah pernah terjadi:
+  sapuan larik dikirim dengan regex yang hanya melihat 18 dari 39)
+- **Batas, jujur**: ia melihat pemanggilan **LANGSUNG**; nilai yang mampir ke
+  variabel perantara lalu diteruskan ke pengadil masih di luar jangkauannya —
+  itu bahan bakar putaran berikutnya, bukan janji yang dibuat di sini
+- Gerbang: typecheck bersih · `npm test` **2.293** (193 berkas). **Tak ada kode
+  produk yang berubah → `verify-api` tidak dijalankan ulang**, dan itu disebut
+- Commit: `0841292`
+
+---
+
 ## Angka yang disusun di JS lalu MENGADILI — server — 2026-08-25
 
 - **Kenapa**: pelajaran vena di bawah ini dirumuskan jadi aturan sapuan —
