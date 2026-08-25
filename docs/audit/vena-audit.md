@@ -126,6 +126,52 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## ANTREAN KESEPULUH — usulan dari celah yang tercatat di ledger — 2026-08-25
+
+Antrean kesembilan (A⁵–B⁵) tuntas. Dua usulan; keduanya arah yang belum
+pernah disapu ledger ini sekali pun.
+
+### Usulan A⁶ — sel CSV yang dibuka Excel
+
+Permukaan **ekspor** tak pernah dinilai 53 vena sebelumnya (yang disapu:
+badan MASUK 112 `.strict()`, teks galat KELUAR, daftar tanpa langit-langit).
+Terukur: `web/src/lib/bahanCsv.ts:30` `selCsv()` mengutip untuk PARSING
+(`,`/`"`/newline) tapi tak menetralkan **formula** — sel berawalan `=`, `+`,
+`-`, `@` dieksekusi Excel/Sheets/LibreOffice saat dibuka. Sel berisi teks
+ketikan pengguna: `nama`, `kategori`, `satuan`, `satuan_beli`, `kode`,
+`catatan` (6 dari ~15 kolom). Dua pintu unduh memakai pembangun yang sama
+(`ImporBahanModal:139` template "berisi data lama", `BahanPage:152` Export).
+Alurnya tertulis di berkas itu sendiri: *"unduh template → buka di Excel →
+Simpan"* → impor balik. Bentuk kerja: sapuan pembangun sel (detektor
+dibuktikan menuduh), ukur lewat berkas sungguhan (bahan bernama `=1+1`),
+perbaiki di SATU tempat dengan syarat **round-trip ekspor→impor tetap
+identik** (kelas "0,125 → 125" yang berkas itu sudah pernah alami), gerbang
++ bukti merah; verify-api tak tersentuh (murni web) — disebut.
+
+### Usulan B⁶ — tiga tabel token tak pernah dipangkas (melengkapi B⁗)
+
+B⁗ membayar `sync_commands` dan menyebut tiga saudara yang sudah dipangkas;
+sapuannya berhenti di situ. Dihitung hari ini atas 62 tabel:
+`password_reset_tokens`, `email_verification_tokens` (ber-`expires_at` +
+`used_at`) dan `invitations` (ber-`status`/`accepted_at`) **tak punya satu
+pun penghapus** — hanya `.update()` penanda pakai/cabut; barisnya tinggal
+selamanya, ikut tiap cadangan, memuat hash token (debu bermuatan kredensial
+mati). Bentuk kerja: ukur lewat HTTP, pangkas berpola `pangkasLedgerSync`
+dengan jendela yang menghormati arti tiap tabel (undangan `pending` TAK
+BOLEH disentuh), margin dipaku uji, bukti merah, ukur sesudah.
+
+### Diperiksa dan TIDAK diusulkan
+
+Ekspor ponsel (`SharePlus` berbagi teks/gambar — tak ada permukaan formula) ·
+log berjalan (`pesanan_logs`, `faktur_logs`, `meja_kosong_logs`,
+`menu_price_logs`) tak berpenghapus juga, tapi jejak audit yang dibaca layar
+riwayat — membuangnya keputusan produk, dicatat sebagai populasi · `lib/pdf.ts`
+(HTML→PDF, tanpa mesin formula) dinilai saat A⁶ menyapu.
+
+**Rekomendasi: A⁶ → B⁶.**
+
+---
+
 ## Granularitas badan diadjudikasi untuk keenam aturan — server — 2026-08-25
 
 - **Kenapa**: batas tertulis PALING LAMA `penjaga-semua-pintu` (*"satu
