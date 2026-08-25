@@ -126,6 +126,50 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Angka yang disusun di JS lalu MENGADILI — server — 2026-08-25
+
+- **Kenapa**: pelajaran vena di bawah ini dirumuskan jadi aturan sapuan —
+  angka JS yang cuma **disimpan** atau **ditampilkan** aman (kolomnya
+  membulatkan saat menulis, `formatRupiah` saat mencetak); yang berbahaya
+  angka JS yang **MENGADILI**
+- **Populasi**: **132** berkas (`apps/server/src` + `packages/shared/src`);
+  identifier yang lahir dari komposisi/akumulasi lalu muncul di
+  `< > <= >= === !==` → **36 tertuduh**, dipilah tangan
+- **DIBAYAR (2)**:
+  1. `penjualan/rekalkulasi.ts` — `if (totalHpp !== sale.totalHpp)` mengadu
+     angka JS **mentah** dengan angka yang dibaca dari `numeric(16,4)`. Tanpa
+     skala, jawabannya "berbeda" untuk derau digit ke-17, dan baris
+     penjualannya ditulis ulang tanpa ada yang berubah
+  2. `penjualan/refund.ts` — `if (it.qty > sisa + 1e-9)`: **situs terakhir**
+     dari kelas angka firasat yang B⁷ bayar, dan ia terlewat DUA KALI karena
+     ditulis inline, bukan sebagai konstanta bernama. `BATAS_QTY_BARIS` =
+     99.999.999 menaruh besaran ≥ 10⁷ di dalam rentang yang skema izinkan, dan
+     di sana `1e-9` lebih kecil daripada derau float itu sendiri — "kembalikan
+     sisa yang PERSIS tersisa" bisa ditolak. Diganti
+     `toleransiBanding(sisa, SKALA_QTY_BARIS_KOLOM)`
+- **DICABUT (1), dengan pengukurannya**: `perlengkapan/routes.ts`
+  `if (selisih === 0) continue` pada `POST /perlengkapan/stok-awal` **tidak
+  bermasalah**. Terukur lewat HTTP: mengirim qty yang sama dua kali tak menulis
+  mutasi apa pun (jumlah mutasi 1 → 1, lalu 2 → 2), sebab kedua operannya
+  desimal yang sama pada skala yang sama (`rak` sudah `keSkalaKolom` sejak A⁷).
+  Dicatat, bukan dipaksa jadi temuan
+- **Bukti merah**: toleransi firasat dikembalikan ke `1e-9` (suntikan
+  di-assert mendarat) → pin merah; dipulihkan
+- **Pasangan anti-hijau-palsu**: refund **BERLEBIH** sebesar satu unit kolom
+  (0,01) tetap ditolak pada empat besaran termasuk 10⁷ — toleransi yang
+  kelonggaran berarti uang keluar untuk porsi yang tak pernah ada
+- **Batas, jujur**: sapuannya melihat perbandingan di **satu baris** dan
+  menilai **nama** identifiernya; nilai yang dioper ke fungsi lain lalu
+  dibandingkan di sana tak terlihat. Sisa 33 tertuduh dipilah sebagai
+  perbandingan terhadap **nol/konstanta** pada nilai yang sudah berskala, atau
+  perbandingan tampilan
+- Gerbang: typecheck bersih · `npm test` **2.287** (192 berkas) ·
+  `verify-api` **3.016 lolos, 0 gagal** vs Postgres SEGAR · cakupan rute
+  **272** identik · `audit:invarian` 26/26 · build web · e2e **6/6**
+- Commit: `13ac267`
+
+---
+
 ## Uang yang DIADILI ≠ uang yang dicetak — server — 2026-08-25
 
 - **Kenapa**: kelas **UANG belum pernah disapu sekali pun**. Dua detektor
