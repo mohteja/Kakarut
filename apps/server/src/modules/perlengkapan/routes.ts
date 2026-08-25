@@ -31,6 +31,7 @@ import {
 } from "../../middleware/auth";
 import { kunciAntrean } from "../../lib/kunci";
 import { tanpaBentrok } from "../../lib/pg-galat";
+import { clientRefField, denganKlaimIdempoten, deviceIdField } from "../sync/idempoten";
 import { terbitkanNomor } from "../dokumen/nomor";
 import {
   batalBeliPerlengkapan,
@@ -197,6 +198,17 @@ const MasukBody = z.object({
 const PakaiBody = z.object({
   qty: z.number().positive().max(BATAS_QTY_STOK),
   catatan: z.string().max(300).nullish(),
+  /**
+   * Idempotensi antarjalur (online ↔ /sync) — UUID v4 dari perangkat, opsional.
+   *
+   * Modul ini dulu satu-satunya pemindah stok TANPA medan ini, dan itulah
+   * lubangnya: percobaan online yang COMMIT lalu putus di jaringan diantre
+   * ulang dengan ref BARU, dan sinkron mengeksekusinya lagi. Terukur
+   * (2026-08-25): saldo 100 → online `pakai 7` → 93 → replay via /sync →
+   * **86** — pemakaian ganda dengan balasan "ok".
+   */
+  client_ref: clientRefField,
+  device_id: deviceIdField,
 }).strict();
 
 const KoreksiBody = z.object({
@@ -222,6 +234,10 @@ const OpnameBody = z.object({
     .min(1)
     .max(1000),
   catatan: z.string().max(300).nullish(),
+  // Idempotensi antarjalur — alasan yang sama dengan `PakaiBody` di atas;
+  // terukur: satu niat opname melahirkan DUA sesi kembar (online + replay).
+  client_ref: clientRefField,
+  device_id: deviceIdField,
 }).strict();
 
 const StokAwalBody = z.object({
@@ -340,20 +356,34 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
   .post("/opname", zValidator("json", OpnameBody), async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");
-    const branchId = await resolveBranchId(c);
-    // jatah otomatis dipotong dulu agar saldo sistem yang dibandingkan jujur
-    await terapkanKonsumsiOtomatis(auth.company_id!, branchId);
-    const hasil = await buatOpnamePerlengkapan({
-      companyId: auth.company_id!,
-      branchId,
-      userId: auth.sub,
-      items: body.items,
-      catatan: body.catatan ?? null,
-    });
-    // semua sesuai sistem → tanpa sesi (tak ada yang perlu di-ACC)
-    if (!hasil)
-      return c.json({ session_id: null, nomor: null, jumlah_selisih: 0 });
-    return c.json(hasil, 201);
+    // Klaim atomik pola /stok/opname: retry ber-`client_ref` sama memutar
+    // ulang hasil tersimpan alih-alih melahirkan sesi kembar (terukur SEBELUM:
+    // online + replay /sync = 2 sesi identik menunggu dua ACC).
+    const { data } = await denganKlaimIdempoten(
+      {
+        companyId: auth.company_id!,
+        clientRef: body.client_ref,
+        userId: auth.sub,
+        deviceId: body.device_id ?? null,
+        tipe: "perlengkapan_opname",
+      },
+      async () => {
+        const branchId = await resolveBranchId(c);
+        // jatah otomatis dipotong dulu agar saldo sistem yang dibandingkan jujur
+        await terapkanKonsumsiOtomatis(auth.company_id!, branchId);
+        const hasil = await buatOpnamePerlengkapan({
+          companyId: auth.company_id!,
+          branchId,
+          userId: auth.sub,
+          items: body.items,
+          catatan: body.catatan ?? null,
+        });
+        // semua sesuai sistem → tanpa sesi (tak ada yang perlu di-ACC)
+        return hasil ?? { session_id: null, nomor: null, jumlah_selisih: 0 };
+      },
+    );
+    const d = data as { session_id: string | null };
+    return d.session_id === null ? c.json(d) : c.json(d, 201);
   })
   .get("/opname/riwayat", async (c) => {
     const auth = c.get("auth");
@@ -1074,6 +1104,18 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
   .post("/:id/pakai", zValidator("json", PakaiBody), async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");
+    // Klaim atomik pola /stok/opname — lihat pengukuran di `PakaiBody`:
+    // tanpa ini, replay antrean offline atas commit yang balasannya hilang
+    // memotong stok DUA KALI dengan balasan "ok".
+    const { data } = await denganKlaimIdempoten(
+      {
+        companyId: auth.company_id!,
+        clientRef: body.client_ref,
+        userId: auth.sub,
+        deviceId: body.device_id ?? null,
+        tipe: "perlengkapan_pakai",
+      },
+      async () => {
     const branchId = await resolveBranchId(c);
     const item = await muatSupplyAktif(auth.company_id!, c.req.param("id"));
     if (!item)
@@ -1132,7 +1174,10 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
       });
       return saldo - body.qty;
     });
-    return c.json({ ok: true, saldo: sisa });
+        return { ok: true, saldo: sisa };
+      },
+    );
+    return c.json(data);
   })
   .post(
     "/:id/koreksi",

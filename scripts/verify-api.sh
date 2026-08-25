@@ -13974,6 +13974,55 @@ TKSR250=$(login "kasir250@basooopa.id" "Kasir250Pass!")
 cek "PASANGAN: kasir terikat + niat cabang lain → item gagal 403" "V == 403" \
   "$(sync250 "$TKSR250" absen_stasiun "{\"branch_id\":\"$CB250\",\"kode\":\"$KODE250\",\"foto_url\":\"/u/b250c.jpg\"}" | jq '.hasil[0].kode')"
 
+echo "── §252 Satu kunci idempotensi untuk dua percobaan (online → offline) ──"
+#
+# Terukur SEBELUM (ref TIDAK dibagi): online `pakai 7` commit → replay /sync
+# ber-ref baru → saldo 100→93→86 (potongan GANDA, balasan ok); satu niat
+# opname → DUA sesi kembar; tahap → 400 "Tidak berurutan" = gagal PALSU di
+# antrean untuk aksi yang sukses. Perbaikan: PakaiBody/OpnameBody perlengkapan
+# ber-client_ref + denganKlaimIdempoten; kirim/kirim-hasil mencatat hasil ke
+# ledger bersama; ponsel mencetak ref SEBELUM percobaan online dan membaginya.
+SUP252=$(api "$OWNER" POST /perlengkapan '{"nama":"Lap Sync252","satuan":"pcs"}' | jq -r '.id // ""')
+api "$OWNER" POST "/perlengkapan/stok-awal" "{\"items\":[{\"supply_id\":\"$SUP252\",\"qty\":100}]}" > /dev/null
+saldo252() { api "$OWNER" GET "/perlengkapan" | jq --arg id "$SUP252" '[.[]|select(.id==$id)][0].saldo'; }
+cek "premis: fikstur §252 terbaca (saldo 100)" "V == 100" "$(saldo252)"
+REF252A=$(python3 -c 'import uuid;print(uuid.uuid4())')
+api "$OWNER" POST "/perlengkapan/$SUP252/pakai" "{\"qty\":7,\"catatan\":\"lap\",\"client_ref\":\"$REF252A\"}" > /dev/null
+cek "online pakai ber-ref → saldo 93" "V == 93" "$(saldo252)"
+# replay PERSIS skenario balasan-hilang: perintah antrean ber-REF YANG SAMA
+cek "replay /sync ref SAMA → sudah_ada (diputar ulang, bukan dieksekusi)" "V == 1" \
+  "$(api "$OWNER" POST /sync "$(jq -nc --arg r "$REF252A" --arg s "$SUP252" \
+    '{device_id:"dev-252",commands:[{client_ref:$r,tipe:"perlengkapan_pakai",waktu:(now|todate),payload:{supply_id:$s,qty:7,catatan:"lap"}}]}')" \
+    | jq '(.hasil[0].status=="sudah_ada") | if . then 1 else 0 end')"
+cek "…saldo TETAP 93 — bukan 86 ganda seperti terukur sebelum" "V == 93" "$(saldo252)"
+cek "PASANGAN: ref BARU niat baru tetap dieksekusi (93→92)" "V == 92" \
+  "$( sync250 "$OWNER" perlengkapan_pakai "{\"supply_id\":\"$SUP252\",\"qty\":1}" > /dev/null; saldo252 )"
+# opname: satu niat = satu sesi, replay diputar ulang
+SES252=$(api "$OWNER" GET "/perlengkapan/opname/riwayat" | jq 'length')
+REF252B=$(python3 -c 'import uuid;print(uuid.uuid4())')
+api "$OWNER" POST "/perlengkapan/opname" "{\"catatan\":\"SO 252\",\"client_ref\":\"$REF252B\",\"items\":[{\"supply_id\":\"$SUP252\",\"qty_fisik\":90}]}" > /dev/null
+api "$OWNER" POST /sync "$(jq -nc --arg r "$REF252B" --arg s "$SUP252" \
+  '{device_id:"dev-252",commands:[{client_ref:$r,tipe:"perlengkapan_opname",waktu:(now|todate),payload:{catatan:"SO 252",items:[{supply_id:$s,qty_fisik:90}]}}]}')" > /dev/null
+cek "opname online+replay ref sama → sesi bertambah TEPAT SATU (dulu kembar)" "V == $((SES252 + 1))" \
+  "$(api "$OWNER" GET "/perlengkapan/opname/riwayat" | jq 'length')"
+# tahap: replay atas commit yang balasannya hilang → sudah_ada, bukan gagal palsu
+BH252=$(api "$OWNER" POST /bahan '{"nama":"Bahan Idem 252","harga_beli":1000,"isi":1,"satuan":"pcs"}' | jq -r '.id // ""')
+SUPL252=$(api "$OWNER" POST /supplier '{"nama":"Supplier Idem 252"}' | jq -r '.id // ""')
+FKT252=$(api "$OWNER" POST /pembelian/faktur "{\"supplier_id\":\"$SUPL252\",\"no_faktur\":\"INV-252\",\"items\":[{\"ingredient_id\":\"$BH252\",\"mode\":\"pcs\",\"jumlah\":5}]}" | jq -r '.faktur_id // ""')
+REF252C=$(python3 -c 'import uuid;print(uuid.uuid4())')
+api "$OWNER" POST "/pembelian/tahap/$FKT252" "{\"ke\":\"dikerjakan\",\"client_ref\":\"$REF252C\"}" > /dev/null
+cek "tahap replay ref sama → sudah_ada, bukan 400 'Tidak berurutan' yang tampak gagal" "V == 1" \
+  "$(api "$OWNER" POST /sync "$(jq -nc --arg r "$REF252C" --arg f "$FKT252" \
+    '{device_id:"dev-252",commands:[{client_ref:$r,tipe:"faktur_tahap",waktu:(now|todate),payload:{jalur:"pembelian",faktur_id:$f,ke:"dikerjakan"}}]}')" \
+    | jq '(.hasil[0].status=="sudah_ada") | if . then 1 else 0 end')"
+# PASANGAN anti-hijau-palsu: kegagalan TIDAK di-cache — klaim dilepas saat
+# gagal, jadi retry ber-ref sama benar-benar dieksekusi lagi (dan gagal lagi).
+REF252D=$(python3 -c 'import uuid;print(uuid.uuid4())')
+cek "pakai melebihi saldo ber-ref → 400 (bukan tercatat sukses)" "V == 400" \
+  "$(status_code_body "$OWNER" POST "/perlengkapan/$SUP252/pakai" "{\"qty\":99999,\"client_ref\":\"$REF252D\"}")"
+cek "…retry ref sama dieksekusi lagi → tetap 400 (gagal tak diputar ulang sebagai sukses)" "V == 400" \
+  "$(status_code_body "$OWNER" POST "/perlengkapan/$SUP252/pakai" "{\"qty\":99999,\"client_ref\":\"$REF252D\"}")"
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

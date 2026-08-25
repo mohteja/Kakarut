@@ -26,6 +26,32 @@ tanpa akses repo server.
 ---
 
 
+## Rilis: Kunci idempotensi dibagi antara percobaan online dan antrean offline
+
+> Tidak ada migrasi. Aditif: `client_ref` (+ `device_id`) kini DITERIMA pada
+> `POST /perlengkapan/:id/pakai`, `POST /perlengkapan/opname`,
+> `POST /{jalur}/kirim/:fakturId`, dan `POST /produksi/kirim-hasil/:fakturId`
+> (pintu `/tahap` sudah menerimanya sejak dulu). Badan lama tanpa kunci tetap
+> sah dan berperilaku sama.
+
+🟡 **PERLU DILIHAT** — perilaku build lama tidak berubah, tapi lubangnya nyata
+dan terukur: percobaan online yang **commit di server** lalu balasannya hilang
+di jaringan diantre ulang dengan ref BARU, dan sinkron mengeksekusinya lagi —
+pemakaian perlengkapan terpotong **dua kali** (saldo 100→93→86, balasan "ok"),
+satu niat opname melahirkan **dua sesi kembar**, dan ubah-tahap dibalas 400
+"Tahap tidak berurutan" yang tampak gagal untuk aksi yang sebenarnya sukses.
+
+Ponsel di cabang `claude` kini mencetak `clientRef` SEBELUM percobaan online
+dan mengirim ref yang sama ke badan online (`client_ref`) dan ke antrean
+offline (envelope `/sync`) — server mengenalinya lewat ledger bersama dan
+membalas `sudah_ada` alih-alih mengeksekusi ulang. Enam situs: pakai/opname
+perlengkapan, tahap/kirim/kirim-hasil faktur (pola yang sudah dipakai
+penjualan, opname stok, dan absen). `shift_buka` sengaja tidak: terukur
+toleran (replay dibalas ok + `sudah_terbuka`, shift tetap satu).
+
+---
+
+
 ## Rilis: Perintah sinkron offline membawa CABANG NIAT (`branch_id` di payload)
 
 > Tidak ada migrasi. Aditif: kunci `branch_id` kini DITERIMA (dan dihormati)

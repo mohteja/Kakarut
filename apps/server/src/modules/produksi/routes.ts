@@ -78,6 +78,7 @@ import {
 } from "../menu/service";
 import { autoFileRakCabang } from "../penyimpanan/autoFile";
 import {
+  catatHasilIdempoten,
   clientRefField,
   denganKlaimIdempoten,
   deviceIdField,
@@ -120,7 +121,19 @@ const FakturEditBody = z.object({
 }).strict();
 
 /** Kirim work-order produksi CK → cabang tujuan (opsional pilih tempat di cabang). */
-const KirimBody = z.object({ tujuan_storage_id: z.string().uuid().nullish() }).strict();
+const KirimBody = z.object({
+  tujuan_storage_id: z.string().uuid().nullish(),
+  /**
+   * Idempotensi antarjalur (online ↔ /sync), opsional. Pintu kirim DIJAGA
+   * mesin status (baris `menunggu`/`dikonfirmasi` habis → 400), jadi replay
+   * tak menggandakan stok — tapi tanpa ledger, replay atas commit yang
+   * balasannya hilang dibalas 400 dan antrean menandai `gagal` PALSU untuk
+   * aksi yang sebenarnya sukses. Hasil sukses dicatat ke ledger bersama
+   * (`catatHasilIdempoten`) supaya replay dibalas `sudah_ada`.
+   */
+  client_ref: clientRefField,
+  device_id: deviceIdField,
+}).strict();
 
 /**
  * Kirim hasil produksi: qty per bahan BISA DIATUR — boleh lebih sedikit dari
@@ -1654,7 +1667,8 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
      */
     .post("/kirim/:fakturId", zValidator("json", KirimBody), async (c) => {
       const auth = c.get("auth");
-      const { tujuan_storage_id } = c.req.valid("json");
+      const badan = c.req.valid("json");
+      const { tujuan_storage_id } = badan;
       const fakturId = c.req.param("fakturId");
       const conds = [
         eq(productions.companyId, auth.company_id!),
@@ -1754,7 +1768,21 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
           userId: auth.sub,
         });
       });
-      return c.json({ ok: true, tujuan: store.nama, jumlah_baris: siap.length });
+      const hasilKirim = { ok: true, tujuan: store.nama, jumlah_baris: siap.length };
+      // Ledger bersama: replay antrean offline ber-ref sama dibalas
+      // `sudah_ada`, bukan 400 mesin-status yang terbaca "gagal" palsu.
+      if (badan.client_ref) {
+        await catatHasilIdempoten({
+          companyId: auth.company_id!,
+          clientRef: badan.client_ref,
+          userId: auth.sub,
+          deviceId: badan.device_id ?? null,
+          tipe: "faktur_kirim",
+          hasilJson: hasilKirim,
+          kode: 200,
+        });
+      }
+      return c.json(hasilKirim);
     })
     /**
      * KIRIM HASIL PRODUKSI ke cabang peminta (jalur produksi): hasil work-order
@@ -1978,13 +2006,27 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         });
         return { nomor: nomorBaru };
       });
-      return c.json({
+      const hasilKirim = {
         ok: true,
         faktur_id: kirimFakturId,
         nomor: hasil.nomor,
         tujuan: store.nama,
         jumlah_baris: kirimMap.size,
-      });
+      };
+      // Kembaran pintu /kirim di atas — lihat alasannya di `KirimBody`.
+      const badan = c.req.valid("json");
+      if (badan.client_ref) {
+        await catatHasilIdempoten({
+          companyId: auth.company_id!,
+          clientRef: badan.client_ref,
+          userId: auth.sub,
+          deviceId: badan.device_id ?? null,
+          tipe: "produksi_kirim_hasil",
+          hasilJson: hasilKirim,
+          kode: 200,
+        });
+      }
+      return c.json(hasilKirim);
     })
     /** Buku dana satu faktur: entri pencairan/tambahan/kembali + total efektif. */
     .get("/dana/:fakturId", async (c) => {
