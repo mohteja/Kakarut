@@ -1,4 +1,5 @@
 import type { FifoAmbil, FifoLot, FifoPemakaian } from "@kakarut/shared";
+import { keSkalaKolom, toleransiBanding, SKALA_QTY_STOK_KOLOM } from "./batas-angka";
 
 /** Barang masuk stok → jadi satu lot baru. */
 export interface FifoEventMasuk {
@@ -33,7 +34,38 @@ export interface FifoEventOpname {
 
 export type FifoEvent = FifoEventMasuk | FifoEventKeluar | FifoEventOpname;
 
-const EPS = 1e-9;
+/**
+ * PEMBANDING NOL YANG IKUT BESARAN — bukan konstanta firasat.
+ *
+ * Berkas ini dulu memakai `EPS = 1e-9` telanjang, tanpa satu kalimat tentang
+ * asalnya. Vena B⁷ sudah mengukur bahwa angka itu BERHENTI BERARTI begitu
+ * besarannya ≥ 10⁷: ULP double di sana 1,86e-9 — lebih besar dari EPS-nya
+ * sendiri. Dan `BATAS_QTY_STOK` = 9.999.999.999, jadi besaran itu ada DI DALAM
+ * rentang yang skema izinkan.
+ *
+ * Terukur atas `jalankanFifo` (dua lot pecahan sebesar N, lalu keluar
+ * SELURUHNYA):
+ *
+ *   N=10³ · 10⁶  sisa 0 · saldo 0 · defisit 0 · hpp terisi   ← sehat
+ *   N=10⁷        sisa lot 1,86e-9 · saldo 1,86e-9            ← lot hantu
+ *   N=10⁸        saldo −1,49e-8 · defisit 1,49e-8 · hpp NULL ← stok minus palsu
+ *   N=10⁹        saldo −1,19e-7 · defisit 1,19e-7 · hpp NULL
+ *
+ * Dua baris terakhir kelas yang sama dengan temuan B⁷ ("stok yang PERSIS cukup
+ * ditolak"), dipindahkan ke jalur BIAYA: kartu FIFO melaporkan stok minus dan
+ * menolak menyebut HPP untuk pemakaian yang aritmetikanya eksak.
+ *
+ * Lantai deraunya ditentukan oleh angka TERBESAR yang dilewati walk ini, bukan
+ * oleh sisa yang sedang diperiksa — sisa itu sendiri kecil, sementara derau
+ * yang melahirkannya berasal dari besaran operannya. `toleransiBanding` sudah
+ * merumuskan keduanya: max(½ unit skala kolom, lantai derau float pada besaran
+ * itu).
+ *
+ * BATASNYA, ditulis jujur: pada besaran ≳10¹⁰ lantai deraunya (2,3e-6) melewati
+ * satu unit kolom (1e-6), jadi sisa sebesar satu unit di sana ikut dianggap
+ * nol. Di besaran itu float8 memang tak lagi sanggup membawa skala kolomnya —
+ * jawabannya berhenti memakai float8, bukan mengecilkan toleransi.
+ */
 const bulat2 = (n: number) => Math.round(n * 100) / 100;
 
 /** Metode pembebanan biaya pemakaian (setelan `companies.metode_hpp`). */
@@ -70,6 +102,14 @@ export function jalankanFifo(
   metode: MetodeHpp = "fifo",
 ): { lots: FifoLot[]; pemakaian: FifoPemakaian[]; saldo: number; defisit: number } {
   const lots: FifoLot[] = [];
+  /**
+   * Besaran terbesar yang dilewati walk ini — penentu lantai derau float-nya.
+   * Dimulai dari 1 supaya walk kecil tetap memakai ½ unit skala kolom.
+   */
+  let besaranMaks = 1;
+  const EPS = () => toleransiBanding(besaranMaks, SKALA_QTY_STOK_KOLOM);
+  /** Angka yang dipulangkan dikembalikan ke presisi kolomnya (numeric(16,6)). */
+  const skala = (n: number) => keSkalaKolom(n, SKALA_QTY_STOK_KOLOM);
   const pemakaian: FifoPemakaian[] = [];
   let defisit = 0;
   // penunjuk lot tertua yang masih bersisa — konsumsi maju, tak pernah mundur
@@ -88,12 +128,12 @@ export function jalankanFifo(
     let nilai = 0;
     for (let i = tertua; i < lots.length; i += 1) {
       const lot = lots[i];
-      if (lot.sisa <= EPS) continue;
+      if (lot.sisa <= EPS()) continue;
       if (lot.harga_satuan == null) return null;
       qty += lot.sisa;
       nilai += lot.sisa * lot.harga_satuan;
     }
-    return qty > EPS ? bulat2(nilai / qty) : null;
+    return qty > EPS() ? bulat2(nilai / qty) : null;
   };
 
   /**
@@ -108,33 +148,35 @@ export function jalankanFifo(
     const hargaRata = metode === "average" ? rataBergerak() : null;
     let sisaAmbil = qty;
     let hpp: number | null = 0;
-    while (sisaAmbil > EPS && tertua < lots.length) {
+    while (sisaAmbil > EPS() && tertua < lots.length) {
       const lot = lots[tertua];
-      if (lot.sisa <= EPS) {
+      if (lot.sisa <= EPS()) {
         tertua += 1;
         continue;
       }
       const ambil = Math.min(sisaAmbil, lot.sisa);
-      lot.sisa -= ambil;
-      lot.terpakai += ambil;
-      rincian.push({ lot: tertua, qty: ambil, harga_satuan: lot.harga_satuan });
+      // Tiap langkah dikembalikan ke presisi kolom: tanpa itu sisa yang NYATA
+      // pun keluar sebagai 9.999999992515995e-7 alih-alih 0,000001.
+      lot.sisa = skala(lot.sisa - ambil);
+      lot.terpakai = skala(lot.terpakai + ambil);
+      rincian.push({ lot: tertua, qty: skala(ambil), harga_satuan: lot.harga_satuan });
       if (hpp != null) hpp = lot.harga_satuan != null ? hpp + ambil * lot.harga_satuan : null;
-      sisaAmbil -= ambil;
-      if (lot.sisa <= EPS) {
+      sisaAmbil = skala(sisaAmbil - ambil);
+      if (lot.sisa <= EPS()) {
         lot.sisa = 0;
         tertua += 1;
       }
     }
-    if (sisaAmbil > EPS) {
+    if (sisaAmbil > EPS()) {
       // stok minus: keluar tanpa lot tersedia — tunggu lot masuk berikutnya
-      defisit += sisaAmbil;
-      rincian.push({ lot: null, qty: sisaAmbil, harga_satuan: null });
+      defisit = skala(defisit + sisaAmbil);
+      rincian.push({ lot: null, qty: skala(sisaAmbil), harga_satuan: null });
       hpp = null;
     }
     if (metode === "average") {
       // stok minus tetap "tidak diketahui": sebagian qty tak punya barang yang
       // menanggungnya, jadi rata-rata pun tak boleh dipakai membebankan biaya.
-      const biaya = hargaRata != null && sisaAmbil <= EPS ? bulat2(qty * hargaRata) : null;
+      const biaya = hargaRata != null && sisaAmbil <= EPS() ? bulat2(qty * hargaRata) : null;
       return { rincian, hpp: biaya, hargaRata };
     }
     return { rincian, hpp: hpp != null ? bulat2(hpp) : null, hargaRata: null };
@@ -142,17 +184,19 @@ export function jalankanFifo(
 
   /** Lot baru masuk; defisit lama (stok minus) langsung tertutup lot ini. */
   const masukLot = (lot: FifoLot) => {
-    if (defisit > EPS) {
+    if (defisit > EPS()) {
       const bayar = Math.min(defisit, lot.qty_masuk);
-      lot.terpakai += bayar;
-      lot.sisa -= bayar;
-      defisit -= bayar;
-      if (defisit <= EPS) defisit = 0;
+      lot.terpakai = skala(lot.terpakai + bayar);
+      lot.sisa = skala(lot.sisa - bayar);
+      defisit = skala(defisit - bayar);
+      if (defisit <= EPS()) defisit = 0;
     }
     lots.push(lot);
   };
 
   for (const e of events) {
+    // Lantai derau walk ini ditentukan angka TERBESAR yang dilewatinya.
+    besaranMaks = Math.max(besaranMaks, Math.abs(e.qty));
     if (e.ev === "masuk") {
       masukLot({
         waktu: e.waktu,
@@ -181,7 +225,7 @@ export function jalankanFifo(
       // OPNAME: reset ke hasil hitung fisik
       const saldoKini = sisaTotal() - defisit;
       const delta = e.qty - saldoKini;
-      if (delta < -EPS) {
+      if (delta < -EPS()) {
         const { rincian, hpp, hargaRata } = konsumsi(-delta);
         pemakaian.push({
           waktu: e.waktu,
@@ -192,16 +236,16 @@ export function jalankanFifo(
           harga_rata: hargaRata,
           rincian,
         });
-      } else if (delta > EPS) {
+      } else if (delta > EPS()) {
         // selisih naik: tutup defisit dulu, sisanya jadi lot penyesuaian
         let tambah = delta;
-        if (defisit > EPS) {
+        if (defisit > EPS()) {
           const bayar = Math.min(defisit, tambah);
-          defisit -= bayar;
-          tambah -= bayar;
-          if (defisit <= EPS) defisit = 0;
+          defisit = skala(defisit - bayar);
+          tambah = skala(tambah - bayar);
+          if (defisit <= EPS()) defisit = 0;
         }
-        if (tambah > EPS) {
+        if (tambah > EPS()) {
           masukLot({
             waktu: e.waktu,
             jenis: "opname",
@@ -219,5 +263,5 @@ export function jalankanFifo(
     }
   }
 
-  return { lots, pemakaian, saldo: sisaTotal() - defisit, defisit };
+  return { lots, pemakaian, saldo: skala(sisaTotal() - defisit), defisit: skala(defisit) };
 }

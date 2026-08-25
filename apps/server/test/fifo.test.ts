@@ -214,3 +214,130 @@ describe("jalankanFifo — metode average (rata-rata bergerak)", () => {
     expect(r.pemakaian[0]).toMatchObject({ harga_rata: 1500, hpp: 6000 });
   });
 });
+
+/**
+ * PEMBANDING FIFO YANG DIUKUR, BUKAN DIRASA.
+ *
+ * `fifo.ts` memakai `EPS = 1e-9` — konstanta telanjang, tanpa satu kalimat
+ * tentang asalnya. Vena B⁷ sudah mengukur bahwa angka itu BERHENTI BERARTI
+ * begitu besarannya ≥ 10⁷: ULP double di sana 1,86e-9, lebih besar dari
+ * EPS-nya sendiri. `BATAS_QTY_STOK` = 9.999.999.999, jadi besaran itu ada DI
+ * DALAM rentang yang skema izinkan — bukan angka khayalan.
+ *
+ * Diukur atas `jalankanFifo` langsung (fungsi murni), masuk 2 lot pecahan lalu
+ * keluar SELURUHNYA:
+ *
+ *   N=10³ · 10⁶  sisa 0 · saldo 0 · defisit 0 · hpp terisi   ← sehat
+ *   N=10⁷        sisa lot 1,86e-9 · saldo 1,86e-9            ← lot hantu
+ *   N=10⁸        saldo −1,49e-8 · defisit 1,49e-8 · hpp NULL ← stok minus palsu
+ *   N=10⁹        saldo −1,19e-7 · defisit 1,19e-7 · hpp NULL
+ *
+ * Dua baris terakhir itu kelas yang sama dengan temuan B⁷ ("stok yang PERSIS
+ * cukup ditolak"), dipindahkan ke jalur BIAYA: kartu FIFO melaporkan stok
+ * minus dan menolak menyebut HPP untuk pemakaian yang aritmetikanya eksak.
+ */
+describe("pembanding FIFO ikut besaran, bukan konstanta firasat", () => {
+  /** Dua lot pecahan sebesar N, lalu keluar tepat sejumlah keduanya. */
+  const habiskan = (N: number, metode: "fifo" | "average" = "fifo") => {
+    const a = N + 0.1;
+    const b = N + 0.2;
+    return jalankanFifo(
+      [masuk("t1", a, 1000), masuk("t2", b, 2000), keluar("t3", a + b)],
+      null,
+      metode,
+    );
+  };
+
+  it("DETEKTOR TERBUKTI: `1e-9` memang lebih kecil dari derau float di 10⁷", () => {
+    // Kalau premis ini tak bisa gagal, seluruh vena ini tak menyatakan apa pun.
+    const ulp = (x: number) => 2 ** (Math.ceil(Math.log2(Math.abs(x))) - 53);
+    expect(ulp(1e6)).toBeLessThan(1e-9);
+    expect(ulp(1e7)).toBeGreaterThan(1e-9);
+    // …dan aritmetikanya memang menyisakan derau sebesar itu
+    const a = 1e7 + 0.1;
+    const b = 1e7 + 0.2;
+    expect(a + b - a - b).not.toBe(0);
+  });
+
+  it("KONTROL: besaran biasa (10³ & 10⁶) memang sudah bersih", () => {
+    for (const N of [1e3, 1e6]) {
+      const r = habiskan(N);
+      expect(r.lots.map((l) => l.sisa), `N=${N}`).toEqual([0, 0]);
+      expect(r.saldo, `N=${N}`).toBe(0);
+      expect(r.defisit, `N=${N}`).toBe(0);
+    }
+  });
+
+  it("10⁷: lot yang HABIS tidak boleh menyisakan lot hantu", () => {
+    const r = habiskan(1e7);
+    expect(r.lots.map((l) => l.sisa)).toEqual([0, 0]);
+    expect(r.saldo).toBe(0);
+  });
+
+  it("10⁸ & 10⁹: habis TEPAT bukan stok minus, dan HPP-nya tetap diketahui", () => {
+    for (const N of [1e8, 1e9]) {
+      const r = habiskan(N);
+      expect(r.defisit, `defisit palsu pada N=${N}`).toBe(0);
+      expect(r.saldo, `saldo minus palsu pada N=${N}`).toBe(0);
+      expect(r.pemakaian[0].hpp, `HPP jadi "tidak diketahui" pada N=${N}`).not.toBeNull();
+      // …dan tanpa baris hantu ber-lot null di kartunya
+      expect(r.pemakaian[0].rincian.every((x) => x.lot != null), `baris hantu pada N=${N}`).toBe(
+        true,
+      );
+    }
+  });
+
+  it("PASANGAN: sisa NYATA sebesar satu unit kolom (1e-6) tidak ikut disnap", () => {
+    // Pembanding yang terlalu longgar menelan sisa yang benar-benar ada —
+    // kerusakan yang lebih sunyi daripada yang diperbaiki. ½ unit skala 6 =
+    // 5e-7, jadi 1e-6 harus selamat.
+    const r = jalankanFifo([masuk("t1", 10, 1000), keluar("t2", 10 - 0.000001)], null);
+    expect(r.lots[0].sisa).toBe(0.000001);
+    expect(r.saldo).toBe(0.000001);
+  });
+
+  it("PASANGAN: defisit NYATA tetap tercatat sebagai stok minus", () => {
+    const r = jalankanFifo([masuk("t1", 10, 1000), keluar("t2", 12)], null);
+    expect(r.defisit).toBe(2);
+    expect(r.saldo).toBe(-2);
+    expect(r.pemakaian[0].hpp).toBeNull();
+  });
+
+  it("PUNCAK RENTANG (≈4,9e9): pembulatan saja TIDAK cukup — toleransinya yang membayar", () => {
+    /*
+     * Pengukuran yang meralat langkah pertamaku sendiri.
+     *
+     * Bukti merah versi pertama TIDAK MENDARAT: mengembalikan `EPS` ke `1e-9`
+     * membuat seluruh uji tetap hijau, karena pembulatan ke skala kolom sudah
+     * menghapus gejalanya pada 10⁷–10⁹. Artinya klaim "toleransinya yang
+     * memperbaiki" waktu itu belum terbukti — dan tak boleh ditulis.
+     *
+     * Yang memisahkan keduanya besaran di PUNCAK rentang yang skema izinkan
+     * (`BATAS_QTY_STOK` = 9.999.999.999). Di sana lantai derau float (≈2,3e-6)
+     * MELEWATI satu unit kolom, jadi sisa hasil pembulatan mendarat tepat di
+     * 0,000001 — bukan nol — dan `1e-9` tak sanggup menyentuhnya:
+     *
+     *   dengan `1e-9`              sisa lot 0.000001 · saldo 0.000001 (abadi)
+     *   dengan `toleransiBanding`  keduanya 0
+     *
+     * Jadi kedua paruh perbaikan ini membayar BAND YANG BERBEDA: pembulatan
+     * untuk 10⁷–10⁹, toleransi sadar-besaran untuk puncaknya.
+     */
+    for (const N of [4.9e9, 4.99e9]) {
+      const a = N + 0.1;
+      const b = N + 0.2;
+      const r = jalankanFifo(
+        [masuk("t1", a, 1000), masuk("t2", b, 2000), keluar("t3", a + b)],
+        null,
+      );
+      expect(r.lots.map((l) => l.sisa), `sisa hantu 1 unit kolom pada N=${N}`).toEqual([0, 0]);
+      expect(r.saldo, `saldo hantu pada N=${N}`).toBe(0);
+    }
+  });
+
+  it("PASANGAN: besaran tinggi yang memang bersisa tetap punya sisanya", () => {
+    const r = jalankanFifo([masuk("t1", 1e8, 1000), keluar("t2", 1e8 - 5)], null);
+    expect(r.lots[0].sisa).toBe(5);
+    expect(r.saldo).toBe(5);
+  });
+});
