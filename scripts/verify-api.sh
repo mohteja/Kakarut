@@ -14060,6 +14060,43 @@ cek "PASANGAN: yatim SEGAR selamat (masa tenggang)" "V == 200" \
   "$(curl -s -o /dev/null -w '%{http_code}' "$BASE$URLC253")"
 rm -f "$PNG253"
 
+echo "── §254 Saldo rak disusun di JS: sisa yang ADA harus bisa dihabiskan ──"
+#
+# `saldoDiRakPerlengkapan` = SUM(mutasi)::float8 − SUM(dalam_jalan)::float8,
+# dikurangkan DI JS — dua nilai yang masing-masing sudah dibulatkan sendiri.
+# Terukur SEBELUM (mutasi 0,3 · kiriman menunggu 0,1): rak = 0.19999999999999998,
+# lalu `pakai 0,2` DAN `minta 0,2` sama-sama 400 — dengan angka derau itu ikut
+# tercetak di pesannya ("Stok tidak cukup (saldo 0.19999999999999998 pak)").
+# Perbaikan: kembalikan ke presisi kolomnya (numeric(16,3)) di kedua penyusun.
+# Butuh CK + cabang terhubung; §254 memakai CK254 yang dibuat di sini.
+CK254=$(api "$OWNER" POST /cabang '{"nama":"CK Eps254","tipe":"central_kitchen"}' | jq -r '.id // ""')
+ST254=$(api "$OWNER" GET /cabang | jq -r '[.[]|select(.tipe=="store")][0].id')
+api "$OWNER" PATCH "/cabang/$ST254" "{\"central_kitchen_id\":\"$CK254\"}" > /dev/null
+SUP254=$(api "$OWNER" POST /perlengkapan '{"nama":"Tisu Eps254","satuan":"pak","stok_minimum":0}' | jq -r '.id // ""')
+api "$OWNER" POST "/perlengkapan/stok-awal?branch_id=$CK254" "{\"items\":[{\"supply_id\":\"$SUP254\",\"qty\":0.3}]}" > /dev/null
+cek "premis: fikstur §254 terbuat (CK + perlengkapan 0,3)" "V == 1" \
+  "$( [ -n "$CK254" ] && [ -n "$SUP254" ] && echo 1 || echo 0 )"
+# Kiriman 0,1 menunggu diterima → rak = 0,3 − 0,1 (di JS)
+cek "minta 0,1 dari cabang → kiriman terbit" "V == 1" \
+  "$(api "$OWNER" POST "/perlengkapan/$SUP254/minta?branch_id=$ST254" '{"qty":0.1}' | jq '(.ok == true) | if . then 1 else 0 end')"
+# INTI: minta/pakai SEBESAR SISA harus diterima — dulu keduanya 400.
+cek "minta 0,2 (persis sisa siap kirim) → ok, dulu 400 float" "V == 1" \
+  "$(api "$OWNER" POST "/perlengkapan/$SUP254/minta?branch_id=$ST254" '{"qty":0.2}' | jq '(.ok == true) | if . then 1 else 0 end')"
+# PASANGAN: yang benar-benar melebihi tetap ditolak, dan pesannya tanpa derau.
+TOLAK254=$(api "$OWNER" POST "/perlengkapan/$SUP254/minta?branch_id=$ST254" '{"qty":0.25}')
+cek "PASANGAN: minta melebihi sisa tetap ditolak" "V == 1" \
+  "$(echo "$TOLAK254" | jq '((.error // "") | test("tidak cukup")) | if . then 1 else 0 end')"
+cek "…dan pesannya TANPA derau float (tak ada 999999 / 000000)" "V == 1" \
+  "$(echo "$TOLAK254" | jq '((.error // "") | test("9999999999|0000000000") | not) | if . then 1 else 0 end')"
+# Pintu `pakai` — kembaran yang sama, fikstur sendiri supaya keadaannya jelas.
+SUP254B=$(api "$OWNER" POST /perlengkapan '{"nama":"Sarung Eps254","satuan":"pak","stok_minimum":0}' | jq -r '.id // ""')
+api "$OWNER" POST "/perlengkapan/stok-awal?branch_id=$CK254" "{\"items\":[{\"supply_id\":\"$SUP254B\",\"qty\":0.3}]}" > /dev/null
+api "$OWNER" POST "/perlengkapan/$SUP254B/minta?branch_id=$ST254" '{"qty":0.1}' > /dev/null
+cek "pakai 0,2 di CK (persis sisa rak) → ok, dulu 400 float" "V == 1" \
+  "$(api "$OWNER" POST "/perlengkapan/$SUP254B/pakai?branch_id=$CK254" '{"qty":0.2}' | jq '(.ok == true) | if . then 1 else 0 end')"
+cek "PASANGAN: pakai lagi saat rak habis → 400 bersih" "V == 1" \
+  "$(api "$OWNER" POST "/perlengkapan/$SUP254B/pakai?branch_id=$CK254" '{"qty":0.05}' | jq '((.error // "") | test("Stok tidak cukup \\(saldo 0 ")) | if . then 1 else 0 end')"
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

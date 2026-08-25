@@ -115,3 +115,45 @@ export function pastikanMuat(nilai: number, batas: number, medan: string): void 
     message: `${medan} terlalu besar untuk disimpan (maksimal ${formatAngkaId(batas)})`,
   });
 }
+
+/**
+ * Skala desimal kolom qty perlengkapan (`supply_mutations.qty`,
+ * `supply_transfers.qty` — keduanya `numeric(16,3)` di skema).
+ */
+export const SKALA_QTY_PERLENGKAPAN = 3;
+
+/**
+ * Kembalikan angka ke PRESISI KOLOMNYA sesudah disusun di JS.
+ *
+ * Postgres menjumlahkan `numeric` secara EKSAK, jadi satu `SUM(...)::float8`
+ * hanya dibulatkan sekali dan tetap sepadan dengan nilai yang dikirim klien —
+ * itu sebabnya membandingkan permintaan klien dengan SATU saldo hasil SUM
+ * memang tak butuh toleransi. Yang tidak sepadan: saldo yang DISUSUN DI JS
+ * dari beberapa nilai float8 yang masing-masing sudah dibulatkan sendiri.
+ *
+ * Terukur (2026-08-25, lewat HTTP): saldo rak perlengkapan =
+ * `SUM(mutasi)::float8 − SUM(dalam_jalan)::float8`. Dengan mutasi 0,3 dan
+ * kiriman menunggu 0,1, hasil kurangnya **0.19999999999999998**, dan dua
+ * gerbang menolak permintaan sebesar sisa yang persis itu:
+ *
+ *   POST /perlengkapan/:id/pakai  qty 0,2 → 400
+ *     "Stok tidak cukup (saldo 0.19999999999999998 pak)"
+ *   POST /perlengkapan/:id/minta  qty 0,2 → 400
+ *     "Stok CK tidak cukup (siap kirim 0.19999999999999998 …)"
+ *
+ * Petugas TIDAK BISA menghabiskan sisa yang ada, dan angka di pesannya sama
+ * dengan yang ia minta — jadi dari layar penolakannya tak masuk akal.
+ *
+ * Membulatkan ke skala kolom BUKAN toleransi yang dikarang: qty perlengkapan
+ * memang `numeric(16,3)`, jadi tiga desimal adalah seluruh presisi yang
+ * pernah ada di data ini. Derau di digit ke-17 bukan informasi yang hilang.
+ *
+ * Ini BUKAN pengganti toleransi di pintu lain: `stok`/`produksi` memakai
+ * `1e-9`/`1e-6` karena yang mereka bandingkan adalah KEBUTUHAN yang dihitung
+ * JS (resep × batch, konversi satuan) — kelas yang berbeda, dan tetap benar.
+ */
+export function keSkalaKolom(nilai: number, skala: number): number {
+  if (!Number.isFinite(nilai)) return nilai;
+  const f = 10 ** skala;
+  return Math.round(nilai * f) / f;
+}

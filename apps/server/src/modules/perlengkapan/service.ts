@@ -5,6 +5,7 @@
  * sebelum pakai/koreksi, dan sekali saat boot.
  */
 import { randomUUID } from "node:crypto";
+import { keSkalaKolom, SKALA_QTY_PERLENGKAPAN } from "../../lib/batas-angka";
 import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, sql, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import type {
@@ -936,6 +937,13 @@ export async function saldoDiRakPerlengkapan(
   const peta = new Map<string, number>();
   for (const id of supplyIds) peta.set(id, -(dalamJalan.get(id) ?? 0));
   for (const r of saldo) peta.set(r.supplyId, (peta.get(r.supplyId) ?? 0) + (Number(r.qty) || 0));
+  // Saldo rak DISUSUN DI JS dari dua SUM float8 yang masing-masing sudah
+  // dibulatkan sendiri, jadi hasilnya bisa meleset di digit ke-17 — dan
+  // pintu `pakai`/`minta` membandingkannya dengan permintaan klien. Terukur:
+  // 0,3 − 0,1 = 0.19999999999999998 → "pakai 0,2" ditolak 400 atas stok yang
+  // ADA, dengan angka derau itu ikut tercetak di pesannya. Dikembalikan ke
+  // presisi kolomnya (numeric(16,3)) — lihat `keSkalaKolom`.
+  for (const [id, v] of peta) peta.set(id, keSkalaKolom(v, SKALA_QTY_PERLENGKAPAN));
   return peta;
 }
 
@@ -989,7 +997,10 @@ export async function buatKirimanPerlengkapan(params: {
       (await qtyPerlengkapanDalamJalan(tx, params.companyId, ckId, [params.supplyId])).get(
         params.supplyId,
       ) ?? 0;
-    const siapKirim = saldoCk - dalamJalan;
+    // Kembaran saldo rak: dua SUM float8 dikurangkan di JS (lihat
+    // `keSkalaKolom`) — tanpa ini "minta sebesar sisa yang siap kirim"
+    // ditolak dengan angka 0.19999999999999998 di pesannya.
+    const siapKirim = keSkalaKolom(saldoCk - dalamJalan, SKALA_QTY_PERLENGKAPAN);
     if (params.qty > siapKirim) {
       return {
         error:

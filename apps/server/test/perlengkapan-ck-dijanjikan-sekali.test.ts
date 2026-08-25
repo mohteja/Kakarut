@@ -54,7 +54,12 @@ describe("keputusan kirim diambil DI DALAM transaksi, di belakang kunci", () => 
   });
 
   it("yang dibandingkan saldo DIKURANGI yang masih di jalan", () => {
-    expect(BUAT).toMatch(/const siapKirim = saldoCk - dalamJalan;/);
+    // Pengurangannya yang dijaga, bukan ejaan barisnya: sejak vena "saldo
+    // disusun di JS", hasil kurang itu dikembalikan ke presisi kolomnya
+    // (`keSkalaKolom`, numeric(16,3)) — tanpa itu "minta sebesar sisa yang
+    // siap kirim" ditolak 400 atas 0.19999999999999998. Polanya dilonggarkan
+    // untuk pembungkus itu SAJA; yang tetap wajib: `saldoCk - dalamJalan`.
+    expect(BUAT).toMatch(/const siapKirim = .*saldoCk - dalamJalan/);
     expect(BUAT).toMatch(/if \(params\.qty > siapKirim\)/);
     // Bentuk lama: membandingkan saldo mentah. Dilarang di dalam fungsi ini saja.
     expect(BUAT).not.toMatch(/if \(params\.qty > saldoCk\)/);
