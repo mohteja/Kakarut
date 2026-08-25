@@ -41,6 +41,8 @@ pemakaian perlengkapan terpotong **dua kali** (saldo 100→93→86, balasan "ok"
 satu niat opname melahirkan **dua sesi kembar**, dan ubah-tahap dibalas 400
 "Tahap tidak berurutan" yang tampak gagal untuk aksi yang sebenarnya sukses.
 
+**Sudah di-merge ke production.**
+
 Ponsel di cabang `claude` kini mencetak `clientRef` SEBELUM percobaan online
 dan mengirim ref yang sama ke badan online (`client_ref`) dan ke antrean
 offline (envelope `/sync`) — server mengenalinya lewat ledger bersama dan
@@ -66,6 +68,8 @@ cabang pertama, absen tercatat di cabang pertama. Server tak bisa membaca niat
 yang tak pernah dikirim, jadi fallback lama itu tetap berlaku untuk payload
 tanpa `branch_id` (dipaku di verify-api §250).
 
+**Sudah di-merge ke production.**
+
 Sisi ponsel di cabang `claude` kini mengirim
 `'branch_id': ?ref.read(branchIdQueryProvider)` pada keempat payload — nilai
 yang sama dengan query jalur online. Peran terikat cabang (kasir/tim) tetap
@@ -85,6 +89,8 @@ sebuah **kelas galat berpindah dari 5xx ke 4xx**. Klien yang mencoba-ulang
 otomatis pada 5xx (antrean offline) sebelumnya akan mengulang permintaan yang
 takkan pernah berhasil; sekarang ia menerima 400 dan berhenti — itu perbaikan,
 tapi perilakunya berbeda dan pantas diperiksa sekali.
+
+**Sudah di-merge ke production.**
 
 **Belum tayang.**
 
@@ -117,6 +123,8 @@ Dua lapis, dan keduanya diukur sendiri-sendiri:
 tetap di web), jadi tak ada yang perlu dikerjakan. Dicatat karena ia perubahan
 kontrak: rentang nilai yang diterima menyempit.
 
+**Sudah di-merge ke production.**
+
 **Belum tayang.**
 
 `komponen[].qty` pada `POST/PUT /menu` dan `PUT /bahan/:id/resep` dibatasi
@@ -139,6 +147,8 @@ keterangan menjadi 400 yang menyebut medan dan batasnya.
 > Tidak ada migrasi. Bentuk balasan `GET /sampah` **tidak berubah** — sengaja.
 
 🟡 **PERLU DICEK** — dua layar: Tempat Sampah dan Kiriman Menggantung.
+
+**Sudah di-merge ke production.**
 
 **Belum tayang.**
 
@@ -206,6 +216,8 @@ kecuali tandanya yang kini kurang lengkap bila anomalinya melebihi 100 baris.
 
 🔴 **WAJIB** — tinjau setiap `body:` yang dikirim repositori mobile.
 
+**Sudah di-merge ke production.**
+
 **Belum tayang.**
 
 Sebelumnya, kunci yang tak dikenal di badan JSON **dibuang diam-diam**: kiriman
@@ -240,6 +252,8 @@ huruf kini gagal berbunyi, bukan lolos diam-diam.
 🔴 **WAJIB DICEK** — antrean offline mobile membaca `sebab` untuk memutuskan
 apakah sebuah perintah dibuang atau ditahan. Tak ada medan baru; yang berubah
 **nilai `sebab` pada satu keadaan yang selama ini salah**.
+
+**Sudah di-merge ke production.**
 
 *(Belum di-merge ke production.)*
 
@@ -278,6 +292,8 @@ muncul untuk bill yang memang dibatalkan.
 `uang_diterima` dan sejenisnya. Tak ada medan baru dan tak ada yang dihapus;
 yang berubah **kode galatnya**.
 
+**Sudah di-merge ke production.**
+
 *(Belum di-merge ke production.)*
 
 ### 🟡 Nilai di atas kapasitas kolom kini ditolak **400**, bukan jatuh **500**
@@ -310,6 +326,8 @@ tercatat satu per satu di `apps/server/src/lib/batas-angka.ts`.
 ⚪️ **INFO untuk mobile** — mobile belum memakai kartu Riwayat Harga
 (`GET /bahan/:id/pembelian`, `GET /perlengkapan/:id/pembelian`). Dicatat karena
 bentuk kontraknya berubah.
+
+**Sudah di-merge ke production.**
 
 *(Belum di-merge ke production.)*
 
@@ -350,6 +368,8 @@ berada di luar 300 yang terkirim.
 mobile adalah `GET /member-cari?q=` dan itu **tidak berubah sama sekali**.
 Entri ini ditulis karena bentuk balasannya berubah, dan aturan berkas ini
 adalah setiap perubahan kontrak dicatat — bukan hanya yang menyentuh mobile.
+
+**Sudah di-merge ke production.**
 
 *(Belum di-merge ke production.)*
 
@@ -399,6 +419,8 @@ hilang.
 ## Rilis: Bon tagihan — kertas berharga yang BUKAN bukti pembayaran
 
 🟢 **BARU** — layar kasir, saat Open Bill sedang dibuka.
+
+**Sudah di-merge ke production.**
 
 *(Belum di-merge ke production.)*
 
@@ -459,6 +481,8 @@ Yang perlu diketahui saat memakainya:
 🟢 **BARU** — layar kasir (bayar langsung) dan open bill, bila fiturnya mau
 dibawa ke mobile.
 
+**Sudah di-merge ke production.**
+
 *(Belum di-merge ke production.)*
 
 Kertas KEDUA di kasir, untuk dua hal yang sama-sama bukan bukti pembayaran:
@@ -517,6 +541,8 @@ Yang perlu diketahui saat memakainya:
 ## Rilis: Sebaran transaksi per jam di laporan penjualan
 
 🟢 **BARU** — tab Laporan → Penjualan.
+
+**Sudah di-merge ke production.**
 
 *(Belum di-merge ke production.)*
 

@@ -50,20 +50,6 @@ const BELUM_TAYANG = new Set([
   // bukan rilis
   "## Koreksi kontrak: satuan baris faktur (`qty` vs `satuan_beli` vs `is_batch`)",
   "## Cara memelihara berkas ini",
-  // rilis yang masih di cabang `claude`, belum di-merge ke production
-  "## Rilis: Kunci idempotensi dibagi antara percobaan online dan antrean offline",
-  "## Rilis: Perintah sinkron offline membawa CABANG NIAT (`branch_id` di payload)",
-  "## Rilis: Angka yang meluap dibalas 400 bernama, bukan 500",
-  "## Rilis: Takaran resep berbatas 99.999.999 (dulu 9.999.999.999 lalu 500)",
-  "## Rilis: Tempat Sampah & anomali kiriman BERLANGIT-LANGIT",
-  "## Rilis: Badan permintaan MENOLAK kunci yang tak dikenal (400, bukan dibuang)",
-  "## Rilis: Slip pesanan — cetak menu & jumlah, TANPA harga",
-  "## Rilis: Sebaran transaksi per jam di laporan penjualan",
-  "## Rilis: Bon tagihan — kertas berharga yang BUKAN bukti pembayaran",
-  "## Rilis: Daftar member berbatas — `GET /customer` berganti bentuk balasan",
-  "## Rilis: Kartu Riwayat Harga berbatas — medan baru `lots_terpotong`",
-  "## Rilis: Angka masukan berbatas atas — 500 berubah jadi 400 bernama",
-  "## Rilis: `bill_dibatalkan` tak lagi muncul untuk bill yang sebenarnya DIBAYAR",
 ]);
 
 /** Dua bentuk stempel yang sah — baris mandiri (baru) dan blockquote (lama). */
