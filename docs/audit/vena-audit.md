@@ -126,6 +126,53 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## IP printer hilang / gagal simpan diam — mobile — 2026-08-25 (laporan lapangan)
+
+- **Kenapa**: laporan pemilik — *"IP printer suka tiba-tiba kosong atau tidak
+  tersimpan padahal sudah diinputkan; simpan tidak berhasil terus."* Bukan
+  vena hasil sapuan, melainkan gejala nyata yang direproduksi lebih dulu
+- **Populasi/metode**: 3 tuduhan dari pembacaan `printer_editor_page.dart` +
+  `printer_controller.dart`, masing-masing ditulis sebagai uji widget MERAH
+  sebelum satu baris pun diperbaiki
+- **Hasil — 2 terbukti, 1 DICABUT**:
+  1. **Terbukti**: medan IP hanya tersimpan lewat `onTapOutside`. Ketik IP →
+     tekan Kembali → penyimpanan berisi `""`. Medan **nama** di layar yang
+     sama sudah punya `onSubmitted` sejak awal — tanda tangan yang sama lagi:
+     penjaga di satu pintu, pintu sebelahnya terbuka
+  2. **Terbukti**: Future `_simpan` dibuang SEMUA pemanggilnya → penyimpanan
+     yang gagal berlalu tanpa satu tanda pun
+  3. **DICABUT**: "tulis-balik basi antar-medan" **tak tereproduksi** —
+     editor mem-build ulang lewat `ref.watch`, snapshot berikutnya segar.
+     Ujinya dialihkan jadi PASANGAN anti-regresi, dan **langsung berguna**:
+     penyiraman versi pertamaku memang menulis dari snapshot lama
+- **Fix**: IP & Port tersimpan pada **tiga momen** (ketuk di luar · "selesai"
+  di keyboard · `deactivate` saat layar ditutup); penyiraman lewat
+  `PrinterController.ubahPrinter(id, ubah)` yang baru — `copyWith` berjalan
+  di atas keadaan TERBARU; kegagalan memunculkan SnackBar
+- **TIGA cacat pada perbaikanku sendiri ditangkap uji-uji itu sebelum
+  terkirim**: `UnmountedRefException` (menyentuh provider yang sudah
+  dilepas), galat tak tertangkap dari penyiraman lepas-tangan, dan
+  `ScaffoldMessenger` dipanggil tanpa Scaffold
+- **Instrumen diuji (Aturan 7), dua versi ditolak**: `setMockInitialValues({})`
+  cuma mengganti isi penyimpanan (mengukur ketiadaan data, bukan kegagalan
+  menulis); mock `MethodChannel` **tak pernah menggigit** karena
+  `setMockInitialValues` memasang penyimpanan in-memory yang MELEWATI channel.
+  Yang dipakai: override controller yang simpanannya melempar. Ditambah satu
+  instrumen lagi — `pumpAndSettle` hanya menunggu FRAME, jadi pembacaan
+  penyimpanan sebelum tulisan async rampung sempat gagal di premisnya sendiri
+- **Bukti merah**: penyiraman-saat-tutup dicabut → uji 1 merah; umpan balik
+  kegagalan dicabut → uji 3 merah; keduanya dipulihkan
+- **Batas, jujur**: yang dijamin uji ini perilaku SIMPAN, bukan bahwa
+  IP-nya benar (validasi format alamat tetap tak ada — diketik salah tetap
+  tersimpan dan baru ketahuan saat cetak gagal); sisi **web diperiksa dan
+  aman** (`PrinterContext.updateSettings` menyimpan di dalam updater pada
+  setiap ketikan) jadi sengaja tak disentuh
+- Gerbang: `flutter analyze` bersih · `flutter test` **535** (3.44.7) ·
+  server/web tak tersentuh → verify-api tak dijalankan (disebut)
+- Commit: mobile `e072e4c`
+
+---
+
 ## Toleransi yang DIUKUR: `1e-9` berhenti berarti di 10⁷ — server — 2026-08-25
 
 - **Kenapa**: tiga pintu memakai toleransi firasat (`1e-9` ×2, `1e-6` ×1)
