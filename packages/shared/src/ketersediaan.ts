@@ -113,6 +113,28 @@ export function jumlahFaktur(
 }
 
 /** Toleransi pembanding kuantitas (qty numeric(…,2) → pecahan kecil wajar). */
+/**
+ * Toleransi pembanding qty — dan asalnya DITULIS, sebab konstanta telanjang
+ * adalah kelas yang sudah tiga kali jadi bug di repo ini (`1e-9` di stok,
+ * produksi, FIFO, dan refund).
+ *
+ * Angkanya = SATU unit kolom qty stok (`numeric(16,6)`), dan pembandingnya
+ * `<` STRIK — jadi selisih sebesar satu unit kolom yang NYATA tetap terlihat,
+ * sementara derau di bawahnya tidak. Diukur (2026-08-25):
+ *
+ *   |1e-6| < EPS_QTY → false   ← selisih satu unit kolom TIDAK tertelan
+ *   |5e-7| < EPS_QTY → true    ← setengah unit (derau) tertelan
+ *
+ * Dan ia masih lebih besar daripada derau float di seluruh rentang yang
+ * dipakai praktik — ULP `kemasan = qty / isi` terukur 5,7e-14 (qty 10³),
+ * 3,7e-9 (qty 10⁸), 1,2e-7 (qty 10⁹):
+ *
+ *   qty 10¹⁰ → ULP 1,91e-6 > EPS_QTY  ← DI SINI ia berhenti berarti
+ *
+ * Batas itu ditulis apa adanya: pada besaran ≳10¹⁰ (`BATAS_QTY_STOK` =
+ * 9.999.999.999) float8 tak lagi sanggup membawa skala kolomnya, dan
+ * jawabannya berhenti memakai float8 — bukan mengecilkan toleransi ini.
+ */
 const EPS_QTY = 1e-6;
 
 /**

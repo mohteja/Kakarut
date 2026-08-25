@@ -5,6 +5,7 @@
  * Semua peran boleh lihat & mencatat pemakaian (kasir/tim terkunci cabang);
  * owner/admin mengelola item, stok masuk, koreksi, aturan, dan belanja.
  */
+import { keSkalaKolom, SKALA_QTY_PERLENGKAPAN } from "../../lib/batas-angka";
 import { zValidator } from "../../lib/validator";
 import { BATAS_QTY_STOK, BATAS_UANG } from "../../lib/batas-angka";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
@@ -1172,7 +1173,10 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
         catatan: body.catatan ?? null,
         userId: auth.sub,
       });
-      return saldo - body.qty;
+      // Sisa yang dibalas ke layar disusun DI JS dari saldo hasil SUM dikurangi
+      // qty kiriman klien — tanpa pembulatan, "pakai 0,1 dari 0,3" membalas
+      // 0.19999999999999998 tepat di layar yang baru saja menekan Pakai.
+      return keSkalaKolom(saldo - body.qty, SKALA_QTY_PERLENGKAPAN);
     });
         return { ok: true, saldo: sisa };
       },

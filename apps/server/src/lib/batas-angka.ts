@@ -152,14 +152,13 @@ export const SKALA_QTY_PERLENGKAPAN = 3;
  * `1e-9`/`1e-6` karena yang mereka bandingkan adalah KEBUTUHAN yang dihitung
  * JS (resep × batch, konversi satuan) — kelas yang berbeda, dan tetap benar.
  */
-export function keSkalaKolom(nilai: number, skala: number): number {
-  if (!Number.isFinite(nilai)) return nilai;
-  const f = 10 ** skala;
-  return Math.round(nilai * f) / f;
-}
-
-/** Skala desimal kolom qty stok/produksi (`numeric(16,6)` di skema). */
-export const SKALA_QTY_STOK_KOLOM = 6;
+export {
+  keSkalaKolom,
+  SKALA_QTY_STOK_KOLOM,
+  SKALA_UANG_KOLOM,
+  SKALA_HPP_KOLOM,
+  SKALA_QTY_BARIS_KOLOM,
+} from "@kakarut/shared";
 
 /**
  * Toleransi pembanding untuk angka yang DIHITUNG DI JS lalu diadu dengan

@@ -1,3 +1,4 @@
+import { keSkalaKolom, SKALA_QTY_STOK_KOLOM } from "./skala";
 import { STOK_MENIPIS_THRESHOLD, type StokStatus } from "./constants";
 
 /**
@@ -73,7 +74,25 @@ export function hargaSaranPaket(
 
 /** Saldo stok = stok awal (opname) + produksi − terpakai. */
 export function saldoStok(stokAwal: number, produksi: number, terpakai: number): number {
-  return stokAwal + produksi - terpakai;
+  /*
+   * DIKEMBALIKAN KE SKALA KOLOM, dan itu bukan kosmetik.
+   *
+   * Ketiga sukunya lahir dari `SUM(...)` yang TERPISAH: masing-masing sudah
+   * dibulatkan sekali saat cast, jadi menyusunnya di JS memasukkan derau yang
+   * tak pernah ada di datanya. Terukur lewat HTTP (2026-08-25):
+   *
+   *   stok awal 0,1 + pembelian 0,2 → GET /stok "saldo": 0.30000000000000004
+   *   0,1 + 0,2 − 0,3               → 5.551115123125783e-17, bukan 0
+   *
+   * Baris kedua itu yang berbahaya: `statusStok` di bawah memakai `saldo <= 0`
+   * untuk badge "habis", dan pemanggilnya memakai `saldo === 0` untuk
+   * menyembunyikan baris satuan setara. Bahan yang BENAR-BENAR habis karena
+   * itu terbaca "aman", dan layarnya menampilkan sisa yang tak ada.
+   *
+   * Pembulatannya di SINI supaya `statusStok` dan tiap pemanggil mewarisinya
+   * — bukan aturan yang harus diingat ulang di tiap situs.
+   */
+  return keSkalaKolom(stokAwal + produksi - terpakai, SKALA_QTY_STOK_KOLOM);
 }
 
 /**

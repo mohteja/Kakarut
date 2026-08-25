@@ -231,7 +231,9 @@ export async function terapkanKonsumsiOtomatis(
             .onConflictDoNothing()
             .returning({ id: supplyMutations.id });
           if (dipakai.length > 0) {
-            sisa -= q;
+            // Tanpa pembulatan, `sisa` bisa mendarat di 1e-17 alih-alih 0 dan
+            // hari berikutnya menyisipkan mutasi hantu sebesar derau itu.
+            sisa = keSkalaKolom(sisa - q, SKALA_QTY_PERLENGKAPAN);
             total += 1;
           }
         }
@@ -593,10 +595,14 @@ export async function kartuPerlengkapan(params: {
   let totalMasuk = 0;
   let totalKeluar = 0;
   let totalBelanja = 0;
+  // Saldo berjalan & totalnya dikembalikan ke skala kolom di TIAP langkah —
+  // kartu ini menumpuk baris demi baris sampai `BATAS_MUTASI`, jadi driftnya
+  // tumbuh dengan jumlah barisnya, dan yang dibaca petugas setiap barisnya.
+  const skala = (n: number) => keSkalaKolom(n, SKALA_QTY_PERLENGKAPAN);
   const mutasi = tampil.map((m) => {
-    saldo += m.qty;
-    if (m.qty >= 0) totalMasuk += m.qty;
-    else totalKeluar += -m.qty;
+    saldo = skala(saldo + m.qty);
+    if (m.qty >= 0) totalMasuk = skala(totalMasuk + m.qty);
+    else totalKeluar = skala(totalKeluar + -m.qty);
     if (m.tipe === "masuk") totalBelanja += m.totalHarga ?? 0;
     return {
       id: m.id,

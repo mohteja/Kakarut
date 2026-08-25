@@ -1,4 +1,4 @@
-import { toleransiBanding, SKALA_QTY_STOK_KOLOM } from "../../lib/batas-angka";
+import { keSkalaKolom, toleransiBanding, SKALA_QTY_STOK_KOLOM } from "../../lib/batas-angka";
 import { eq, sql } from "drizzle-orm";
 import { hargaPerSatuanLot } from "../../lib/harga-stats";
 import {
@@ -188,15 +188,40 @@ export async function hitungSaldoCabang(
     const produksi = Number(row.produksi);
     // "terpakai" gabungan: konsumsi penjualan/produksi + kirim keluar (transfer
     // stok jadi ke cabang lain) — semuanya mengurangi saldo cabang ini.
-    const terpakai = Number(row.terpakai) + Number(row.kirim_keluar);
+    //
+    // SETIAP penjumlahan di blok ini DIKEMBALIKAN KE SKALA KOLOM. Tiap komponen
+    // adalah `SUM(...)` tersendiri: Postgres menjumlahkannya EKSAK lalu
+    // membulatkannya SEKALI saat cast, jadi tiap komponen sepadan dengan
+    // desimalnya — tapi menjumlahkan beberapa di antaranya DI JS memasukkan
+    // derau float yang tak pernah ada di datanya. Terukur lewat HTTP
+    // (2026-08-25, stok awal 0,1 + pembelian 0,2):
+    //
+    //   SEBELUM  GET /stok → "saldo": 0.30000000000000004
+    //            GET /stok → "pembelian_berjalan": { "qty": 0.30000000000000004 }
+    //   SESUDAH  keduanya 0.3
+    //
+    // Bukan cuma angka jelek di layar: `saldo` dipakai `saldo === 0` (baris
+    // satuan setara) dan `statusStok(... <= 0)` (badge "habis"), jadi nol yang
+    // jatuh di 5,55e-17 membuat bahan yang benar-benar habis terbaca "aman".
+    // Skalanya bukan karangan — qty stok memang `numeric(16,6)`.
+    const terpakai = keSkalaKolom(
+      Number(row.terpakai) + Number(row.kirim_keluar),
+      SKALA_QTY_STOK_KOLOM,
+    );
     const rencana = Number(row.prod_rencana);
     const dikerjakan = Number(row.prod_dikerjakan);
     const menunggu = Number(row.prod_menunggu);
-    const qtyBerjalan = rencana + dikerjakan + menunggu;
+    const qtyBerjalan = keSkalaKolom(rencana + dikerjakan + menunggu, SKALA_QTY_STOK_KOLOM);
     const beliRencana = Number(row.beli_rencana);
     const beliDikerjakan = Number(row.beli_dikerjakan);
     const beliMenunggu = Number(row.beli_menunggu);
-    const qtyBeliBerjalan = beliRencana + beliDikerjakan + beliMenunggu;
+    const qtyBeliBerjalan = keSkalaKolom(
+      beliRencana + beliDikerjakan + beliMenunggu,
+      SKALA_QTY_STOK_KOLOM,
+    );
+    // Saldo dihitung SEKALI (dulu tiga kali); pembulatan ke skala kolomnya
+    // tinggal di `saldoStok` supaya `statusStok` mewarisinya juga.
+    const saldo = saldoStok(stokAwal, produksi, terpakai);
     const ambangToko = Number(row.stok_minimum_toko);
     const stokMinimum =
       pakaiAmbangToko && ambangToko > 0 ? ambangToko : Number(row.stok_minimum);
@@ -224,10 +249,10 @@ export async function hitungSaldoCabang(
       // nol. Aturannya ditaruh di sini supaya tiap klien tak perlu
       // mengetahuinya sendiri — itu satu aturan lagi yang bisa berbeda.
       saldo_setara:
-        saldoStok(stokAwal, produksi, terpakai) === 0
+        saldo === 0
           ? null
           : qtyTeks({
-              qty: saldoStok(stokAwal, produksi, terpakai),
+              qty: saldo,
               satuan: String(row.satuan),
               isi: Number(row.isi),
               satuanBeli: row.satuan_beli != null ? String(row.satuan_beli) : null,
@@ -237,7 +262,10 @@ export async function hitungSaldoCabang(
       stok_awal: stokAwal,
       produksi,
       terpakai,
-      saldo: saldoStok(stokAwal, produksi, terpakai),
+      saldo,
+      // `statusStok` memanggil `saldoStok` di dalamnya, dan sejak vena ini
+      // `saldoStok` sendiri yang membulatkan — jadi badge dan angka di
+      // sebelahnya mustahil bercerita beda tanpa aturan kedua di sini.
       status: statusStok(stokAwal, produksi, terpakai, stokMinimum),
       stok_minimum: stokMinimum,
       produksi_berjalan:
@@ -365,7 +393,11 @@ export async function kartuStok(params: {
       ), 0) AS keluar
   `);
   const awal = awalRes.rows[0] as Record<string, unknown>;
-  const saldoAwal = Number(awal.baseline_qty) + Number(awal.masuk) - Number(awal.keluar);
+  // Tiga `SUM` terpisah, dikurangkan di JS — sama seperti daftar stok di atas.
+  const saldoAwal = keSkalaKolom(
+    Number(awal.baseline_qty) + Number(awal.masuk) - Number(awal.keluar),
+    SKALA_QTY_STOK_KOLOM,
+  );
 
   // Semua mutasi dalam rentang, urut waktu
   const mutasiRes = await db.execute(sql`
@@ -449,11 +481,14 @@ export async function kartuStok(params: {
   const bjRencana = Number(bj.prod_rencana);
   const bjDikerjakan = Number(bj.prod_dikerjakan);
   const bjMenunggu = Number(bj.prod_menunggu);
-  const qtyBerjalan = bjRencana + bjDikerjakan + bjMenunggu;
+  const qtyBerjalan = keSkalaKolom(bjRencana + bjDikerjakan + bjMenunggu, SKALA_QTY_STOK_KOLOM);
   const bbRencana = Number(bj.beli_rencana);
   const bbDikerjakan = Number(bj.beli_dikerjakan);
   const bbMenunggu = Number(bj.beli_menunggu);
-  const qtyBeliBerjalan = bbRencana + bbDikerjakan + bbMenunggu;
+  const qtyBeliBerjalan = keSkalaKolom(
+    bbRencana + bbDikerjakan + bbMenunggu,
+    SKALA_QTY_STOK_KOLOM,
+  );
 
   const terpotong = mutasiRes.rows.length > BATAS_MUTASI;
   const rows = mutasiRes.rows.slice(0, BATAS_MUTASI) as Record<string, unknown>[];
@@ -461,6 +496,17 @@ export async function kartuStok(params: {
   let saldo = saldoAwal;
   let totalMasuk = 0;
   let totalKeluar = 0;
+  /*
+   * SALDO BERJALAN DIBULATKAN DI TIAP LANGKAH, bukan sekali di akhir.
+   *
+   * Ini satu-satunya situs di jalur stok yang menumpuk baris demi baris
+   * (sampai `BATAS_MUTASI`), jadi driftnya TUMBUH dengan N — kelas yang sudah
+   * terukur di vena toleransi (500 baris × 0,01 × 49.157 meleset 2,53e-9 ke
+   * ATAS). Yang dibaca petugas bukan angka terakhirnya saja melainkan SETIAP
+   * barisnya, jadi membulatkan di ujung akan meninggalkan kolom saldo yang
+   * berisi 0.30000000000000004 di tengah-tengah kartu.
+   */
+  const skala = (n: number) => keSkalaKolom(n, SKALA_QTY_STOK_KOLOM);
   const mutasi: MutasiStok[] = rows.map((r) => {
     const jenis = String(r.jenis) as MutasiJenis;
     const qty = Number(r.qty);
@@ -478,27 +524,27 @@ export async function kartuStok(params: {
         .join(" · ");
     } else if (jenis === "penjualan") {
       keluar = qty;
-      totalKeluar += qty;
-      saldo -= qty;
+      totalKeluar = skala(totalKeluar + qty);
+      saldo = skala(saldo - qty);
       keterangan = r.nomor ? `Struk ${r.nomor}` : null;
     } else if (jenis === "pemakaian") {
       // bahan mentah terpakai resep produksi — mutasi KELUAR
       keluar = qty;
-      totalKeluar += qty;
-      saldo -= qty;
+      totalKeluar = skala(totalKeluar + qty);
+      saldo = skala(saldo - qty);
       keterangan = r.catatan ? String(r.catatan) : "Pemakaian produksi";
     } else if (jenis === "kirim") {
       // kiriman keluar (transfer stok ke cabang lain) — mutasi KELUAR
       keluar = qty;
-      totalKeluar += qty;
-      saldo -= qty;
+      totalKeluar = skala(totalKeluar + qty);
+      saldo = skala(saldo - qty);
       keterangan = [r.catatan ? String(r.catatan) : "Kiriman keluar", r.nomor ? `No. ${r.nomor}` : null]
         .filter(Boolean)
         .join(" · ");
     } else {
       masuk = qty;
-      totalMasuk += qty;
-      saldo += qty;
+      totalMasuk = skala(totalMasuk + qty);
+      saldo = skala(saldo + qty);
       const bagian = [
         r.supplier ? String(r.supplier) : null,
         r.nomor ? `No. ${r.nomor}` : null,

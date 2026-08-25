@@ -23,6 +23,7 @@
  */
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { HTTPException } from "hono/http-exception";
+import { SKALA_QTY_BARIS_KOLOM, toleransiBanding } from "../../lib/batas-angka";
 import { hitungUangSetelahRefund, nominalRefund, qtyDitagih } from "@kakarut/shared";
 import type { Tx } from "../../db/client";
 import { saleItems, saleRefunds, sales, shifts } from "../../db/schema";
@@ -101,7 +102,15 @@ export async function refundSajian(
     }
     const sudah = tambahan.get(it.saleItemId) ?? 0;
     const sisa = qtyDitagih(b) - sudah;
-    if (it.qty > sisa + 1e-9) {
+    /*
+     * Toleransinya DITURUNKAN, bukan dirasa. `1e-9` di sini adalah situs
+     * terakhir dari kelas yang vena B⁷ bayar: ia LEBIH KECIL daripada derau
+     * float itu sendiri begitu besarannya ≥ 10⁷ (ULP 1,86e-9), dan
+     * `BATAS_QTY_BARIS` = 99.999.999 menaruh besaran itu di dalam rentang yang
+     * skema izinkan — jadi "kembalikan sisa yang PERSIS tersisa" bisa ditolak
+     * pada baris berqty besar.
+     */
+    if (it.qty > sisa + toleransiBanding(sisa, SKALA_QTY_BARIS_KOLOM)) {
       throw new HTTPException(400, {
         message:
           sisa <= 0

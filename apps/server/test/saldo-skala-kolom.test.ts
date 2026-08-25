@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { butaKomentar } from "../src/scripts/buta-komentar";
+import { saldoStok, statusStok } from "@kakarut/shared";
 import {
   keSkalaKolom,
   SKALA_QTY_PERLENGKAPAN,
@@ -182,5 +183,129 @@ describe("toleransi banding: diturunkan, bukan dirasa", () => {
       readFileSync(fileURLToPath(new URL("../src/modules/shift/routes.ts", import.meta.url)), "utf8"),
     );
     expect(shift).toContain("EPS_KAS = 0.005");
+  });
+});
+
+/**
+ * SISA KELAS YANG SAMA DI JALUR STOK.
+ *
+ * Entri A⁷ membayar kelas ini untuk perlengkapan lalu menulis batasnya sendiri:
+ * *"`saldoStok()` menyusun saldo di JS juga tapi gejalanya tak tereproduksi."*
+ * Putaran ini mereproduksinya — lewat HTTP, dengan data yang dibuktikan
+ * terbaca lebih dulu (2026-08-25, stok awal 0,1 + pembelian 0,2):
+ *
+ *   SEBELUM  GET /stok            → "saldo": 0.30000000000000004
+ *            GET /stok            → "pembelian_berjalan": {"qty": 0.30000000000000004}
+ *            GET /stok/kartu/:id  → "saldo_akhir": 0.30000000000000004
+ *   SESUDAH  ketiganya 0.3
+ *
+ * Dan jalur stok memuat bentuk yang LEBIH buruk daripada perlengkapan: kartu
+ * stok menumpuk saldo baris demi baris sampai `BATAS_MUTASI`, jadi driftnya
+ * tumbuh dengan jumlah barisnya.
+ */
+describe("saldo stok: disusun di JS, dikembalikan ke skala kolom", () => {
+  it("DETEKTOR TERBUKTI: ketiga suku itu memang meleset tanpa pembulatan", () => {
+    // Kalau premis ini tak bisa gagal, seluruh vena ini tak menyatakan apa pun.
+    expect(0.1 + 0.2).not.toBe(0.3);
+    expect(0.1 + 0.2 - 0.3).not.toBe(0);
+    expect(0.1 + 0.2 - 0.3).toBeGreaterThan(0); // ← inilah yang membunuh badge "habis"
+  });
+
+  it("`saldoStok` memulangkan angka berskala kolom, bukan derau digit ke-17", () => {
+    expect(saldoStok(0.1, 0.2, 0)).toBe(0.3);
+    expect(saldoStok(0.1, 0.2, 0.3)).toBe(0);
+    expect(saldoStok(2, 0, 1.1)).toBe(0.9);
+  });
+
+  it("BADGE: stok yang benar-benar habis terbaca `habis`, bukan `aman`", () => {
+    // Tanpa pembulatan, saldo 5,55e-17 > 0 → `saldo <= 0` gagal, dan bahan yang
+    // habis muncul tanpa penanda apa pun di layar stok.
+    expect(statusStok(0.1, 0.2, 0.3)).toBe("habis");
+    expect(statusStok(0.1, 0.2, 0.3, 5)).toBe("habis");
+  });
+
+  it("PASANGAN: kekurangan/kelebihan SATU unit kolom tetap terlihat", () => {
+    // Pembulatan yang menelan selisih nyata adalah kerusakan yang lebih sunyi
+    // daripada yang diperbaiki. Satu unit kolom qty stok = 1e-6.
+    expect(saldoStok(0.1, 0.2, 0.3 - 1e-6)).toBe(1e-6);
+    expect(saldoStok(1, 0, 1 - 0.000001)).toBe(0.000001);
+    expect(statusStok(1, 0, 1 - 0.000001, 0.5)).toBe("menipis");
+    // …dan stok yang memang aman tak berubah jadi habis
+    expect(statusStok(10, 5, 3)).toBe("aman");
+  });
+
+  it("PASANGAN: nilai yang memang muat tak tersentuh", () => {
+    for (const [a, b, c] of [
+      [0, 0, 0],
+      [12.345678, 1, 0.000001],
+      [9_999_999, 0, 0],
+    ] as const) {
+      expect(saldoStok(a, b, c)).toBe(keSkalaKolom(a + b - c, SKALA_QTY_STOK_KOLOM));
+    }
+  });
+
+  it("AKUMULASI: 30 baris × 0,1 mendarat tepat di 3, bukan 2,9999999999999996", () => {
+    // Kartu stok menumpuk `saldo += qty` per baris; ini bentuk yang driftnya
+    // TUMBUH dengan N, dan yang dibaca petugas setiap barisnya.
+    let mentah = 0;
+    let berskala = 0;
+    for (let i = 0; i < 30; i += 1) {
+      mentah += 0.1;
+      berskala = keSkalaKolom(berskala + 0.1, SKALA_QTY_STOK_KOLOM);
+    }
+    expect(mentah).not.toBe(3); // premis: tanpa pembulatan memang meleset
+    expect(berskala).toBe(3);
+  });
+
+  it("keempat situs komposisi di jalur stok memakai pembulatannya", () => {
+    const STOK = butaKomentar(
+      readFileSync(fileURLToPath(new URL("../src/modules/stok/service.ts", import.meta.url)), "utf8"),
+    );
+    // daftar stok: gabungan terpakai + kirim keluar, dan dua qty berjalan
+    expect(STOK, "terpakai kembali mentah").toMatch(
+      /const terpakai = keSkalaKolom\(\s*Number\(row\.terpakai\) \+ Number\(row\.kirim_keluar\)/,
+    );
+    expect(STOK, "qty berjalan kembali mentah").toMatch(
+      /const qtyBerjalan = keSkalaKolom\(rencana \+ dikerjakan \+ menunggu/,
+    );
+    // kartu stok: saldo awal & saldo berjalan
+    expect(STOK, "saldo awal kartu kembali mentah").toMatch(
+      /const saldoAwal = keSkalaKolom\(/,
+    );
+    expect(STOK, "saldo berjalan kartu kembali mentah").toContain("saldo = skala(saldo - qty)");
+    expect(STOK, "saldo berjalan kartu kembali mentah").toContain("saldo = skala(saldo + qty)");
+  });
+
+  it("kartu perlengkapan & balasan `pakai` ikut — kelas yang sama, modul lain", () => {
+    const PSVC = butaKomentar(
+      readFileSync(
+        fileURLToPath(new URL("../src/modules/perlengkapan/service.ts", import.meta.url)),
+        "utf8",
+      ),
+    );
+    const PRT = butaKomentar(
+      readFileSync(
+        fileURLToPath(new URL("../src/modules/perlengkapan/routes.ts", import.meta.url)),
+        "utf8",
+      ),
+    );
+    expect(PSVC, "saldo berjalan kartu perlengkapan kembali mentah").toContain(
+      "saldo = skala(saldo + m.qty)",
+    );
+    expect(PSVC, "pemakaian otomatis menyisakan derau di `sisa`").toContain(
+      "sisa = keSkalaKolom(sisa - q, SKALA_QTY_PERLENGKAPAN)",
+    );
+    expect(PRT, "balasan `pakai` mengirim sisa mentah ke layar").toContain(
+      "keSkalaKolom(saldo - body.qty, SKALA_QTY_PERLENGKAPAN)",
+    );
+  });
+
+  it("pembulatannya tinggal di SATU rumah — server memakai punya shared", () => {
+    // Dua salinan `Math.round(n * 10**skala)` yang bisa menyimpang diam-diam
+    // adalah bentuk yang berulang jadi bug di repo ini.
+    const BATAS = butaKomentar(
+      readFileSync(fileURLToPath(new URL("../src/lib/batas-angka.ts", import.meta.url)), "utf8"),
+    );
+    expect(BATAS).toMatch(/export \{[^}]*keSkalaKolom[^}]*\} from "@kakarut\/shared"/);
   });
 });

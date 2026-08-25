@@ -126,6 +126,365 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Satu hop: perantara ber-ekspresi — server — 2026-08-25 — **BERSIH**
+
+- **Kenapa**: batas yang ditulis vena di bawah ini — *"ia melihat pemanggilan
+  LANGSUNG; nilai yang mampir ke variabel perantara lalu diteruskan ke pengadil
+  masih di luar jangkauannya"*
+- **Cacat pemindai pertamaku, dan ia ketahuan sebelum dikirim**: versi pertama
+  menuduh **18** situs — **9 PALSU**, sebab ia mencocokkan nama identifier
+  lintas SELURUH berkas (variabel bernama sama di fungsi lain ikut tertuduh).
+  Dibatasi `JARAK_MAKS = 40` baris sebagai pendekatan atas "lingkup yang sama";
+  batasnya **ditulis dan dipaku uji**, bukan disamarkan. Tersisa **9** situs
+- **DUA tuduhan DICABUT OLEH PENGUKURAN, bukan oleh argumen**: `tarifPb1Struk`
+  (`hpp.ts`) dan bon open-bill mengoper `subtotal − diskon` ke `hitungPb1`.
+  Dugaannya: derau bisa mengubah `Math.round` di batas 0,5. Diukur atas
+  **~1,8 juta** pasangan (subtotal, diskon, tarif) berskala-2 → **0 pasangan**
+  berbeda hasil pembulatannya. Deraunya ≈**1e-13**, sementara jaraknya ke batas
+  pembulatan **0,5**. Aman — dan kini bisa ditunjuk angkanya
+- **Sisanya**: penjaga **langit-langit** (`pastikanMuat` — menilai muat/tidak,
+  bukan kesetaraan) dan harga turunan yang dipakai sebagai **nilai**, bukan
+  putusan. Semuanya masuk `DIKECUALIKAN_HOP` dengan alasannya
+- **Yang ikut ketemu dan DIBAYAR**: `EPS_QTY = 1e-6` di
+  `packages/shared/src/ketersediaan.ts` — konstanta **telanjang** tanpa satu
+  kalimat tentang asalnya, kelas yang sudah **tiga kali** jadi bug di repo ini.
+  Ia terlewat sapuan B⁷ karena tinggal di `shared` dan bernama lain. Asalnya
+  kini tertulis, diukur:
+
+  | | hasil |
+  |---|---|
+  | `\|1e-6\| < EPS_QTY` | **false** — selisih SATU unit kolom tak tertelan (`<` strik) |
+  | `\|5e-7\| < EPS_QTY` | true — derau setengah unit tertelan |
+  | ULP(`kemasan`) | 5,7e-14 (qty 10³) · 3,7e-9 (10⁸) · 1,2e-7 (10⁹) |
+  | qty **10¹⁰** | ULP **1,91e-6 > EPS_QTY** ← di sini ia berhenti berarti |
+
+  Batasnya ditulis apa adanya: di ≳10¹⁰ float8 tak sanggup membawa skala
+  kolomnya, dan jawabannya berhenti memakai float8 — bukan mengecilkan
+  toleransi ini
+- **Bukti merah**: alasan `EPS_QTY` dihapus (suntikan di-assert mendarat) →
+  merah; dipulihkan. Detektor satu-hop dibuktikan tiga arah: perantara
+  ber-ekspresi **tertuduh**, identifier polos **tidak**, dan yang berjarak
+  > `JARAK_MAKS` **tidak**
+- **Batas, jujur**: `JARAK_MAKS` adalah pendekatan atas lingkup, bukan lingkup
+  sungguhan; dan pemindainya berhenti di **satu** lompatan — dua lompatan
+  (a → b → pengadil) masih di luar jangkauan
+- Gerbang: typecheck bersih · `npm test` **2.298** (193 berkas). Perubahan di
+  `ketersediaan.ts` **komentar saja** → `verify-api` tidak dijalankan ulang,
+  dan itu disebut
+- Commit: `2791db5`
+
+---
+
+## Yang diadili DI DALAM fungsi lain — server — 2026-08-25 — **BERSIH**
+
+- **Kenapa**: batas yang ditulis vena di bawah ini tentang dirinya sendiri —
+  *"sapuannya melihat perbandingan di SATU BARIS; nilai yang dioper ke fungsi
+  lain lalu dibandingkan di dalam fungsi itu tak terlihat"*
+- **Metode**: pemindai **dua tahap**, sebab pertanyaannya memang dua — (1)
+  fungsi mana yang **mengadili** parameter numeriknya (`< > <= >= === !==`,
+  `Math.max/min/round` atas parameter itu), lalu (2) siapa yang mengoper
+  **EKSPRESI aritmetika** ke fungsi seperti itu, bukan identifier polos yang
+  nilainya sudah berskala di tempat lahirnya
+- **Populasi**: **104** fungsi pengadil di `apps/server/src` +
+  `packages/shared/src`; **4** situs mengoper ekspresi
+- **Hasil: BERSIH.** Keempatnya dipilah tangan dan aman, masing-masing dengan
+  alasan yang bisa diperiksa:
+
+  | situs | kenapa aman |
+  |---|---|
+  | `index.ts` ×2 — `jadwalkanSapuUnggahan`/`jadwalkanPangkasToken` | jam bulat, `(BACKUP_HOUR + n) % 24`; aritmetika integer tak berderau |
+  | `scripts/acuan-uang-mobile.ts` — `hitungPb1(sub - dis, rate)` | pembangkit **fikstur**, dan seluruh `sub`/`dis`-nya bilangan bulat (1.000 · 12.345 · 99.999 · 333.333 × 0 · 1 · 500 · 1.234) → selisihnya eksak |
+  | `receipt.ts` — `formatRupiahAscii(Math.max(0, uangDiterima - total))` | `uangDiterima` sudah `Math.round` (rupiah bulat) & `total` sudah berskala kolom sejak vena sebelumnya; hasilnya diformat — deraunya tak pernah sampai ke kertas |
+
+- **Yang dikirim: ratchet-nya**, bukan laporannya —
+  `apps/server/test/diadili-lintas-fungsi.test.ts` berdiri sebagai gerbang,
+  jadi situs **kelima** yang lahir nanti menagih keputusan alih-alih lewat
+  diam-diam. `keSkalaKolom`/`toleransiBanding` sengaja **tidak** dihitung
+  sebagai pengadil: keduanya obatnya, bukan penyakitnya
+- **Sekalian terukur & dipaku**: aturan **KEMBALIAN punya SATU rumah** di
+  seluruh repo (`receipt.ts`). `hitungKembalian` yang pernah diusulkan **tak
+  pernah ada** — dan tak perlu ada, sebab tak ada salinan kedua yang bisa
+  menyimpang; ponsel mengoper `uangDiterima` ke pembangun struk bersama
+  (`receipt_page.dart:128`), bukan menghitung sendiri
+- **Detektor DIBUKTIKAN bisa menuduh, dua lapis**:
+  · sintetis — ekspresi tertuduh; identifier polos **tidak**; argumen yang
+    sudah dibungkus `keSkalaKolom` **tidak**; fungsi yang tak mengadili tak
+    masuk populasi;
+  · **pohon sungguhan** — `hitungPb1(subtotalNet, …)` dibuka jadi
+    `hitungPb1(subtotal - diskon, …)` (suntikan di-assert mendarat) → merah
+    menyebut `modules/penjualan/service.ts:523`; dipulihkan
+- **Uji PREMIS** menahan hijau-palsu: berkas > 100, pengadil > 50, situs > 0 —
+  nol berarti pemindainya rusak, bukan repo yang bersih (sudah pernah terjadi:
+  sapuan larik dikirim dengan regex yang hanya melihat 18 dari 39)
+- **Batas, jujur**: ia melihat pemanggilan **LANGSUNG**; nilai yang mampir ke
+  variabel perantara lalu diteruskan ke pengadil masih di luar jangkauannya —
+  itu bahan bakar putaran berikutnya, bukan janji yang dibuat di sini
+- Gerbang: typecheck bersih · `npm test` **2.293** (193 berkas). **Tak ada kode
+  produk yang berubah → `verify-api` tidak dijalankan ulang**, dan itu disebut
+- Commit: `0841292`
+
+---
+
+## Angka yang disusun di JS lalu MENGADILI — server — 2026-08-25
+
+- **Kenapa**: pelajaran vena di bawah ini dirumuskan jadi aturan sapuan —
+  angka JS yang cuma **disimpan** atau **ditampilkan** aman (kolomnya
+  membulatkan saat menulis, `formatRupiah` saat mencetak); yang berbahaya
+  angka JS yang **MENGADILI**
+- **Populasi**: **132** berkas (`apps/server/src` + `packages/shared/src`);
+  identifier yang lahir dari komposisi/akumulasi lalu muncul di
+  `< > <= >= === !==` → **36 tertuduh**, dipilah tangan
+- **DIBAYAR (2)**:
+  1. `penjualan/rekalkulasi.ts` — `if (totalHpp !== sale.totalHpp)` mengadu
+     angka JS **mentah** dengan angka yang dibaca dari `numeric(16,4)`. Tanpa
+     skala, jawabannya "berbeda" untuk derau digit ke-17, dan baris
+     penjualannya ditulis ulang tanpa ada yang berubah
+  2. `penjualan/refund.ts` — `if (it.qty > sisa + 1e-9)`: **situs terakhir**
+     dari kelas angka firasat yang B⁷ bayar, dan ia terlewat DUA KALI karena
+     ditulis inline, bukan sebagai konstanta bernama. `BATAS_QTY_BARIS` =
+     99.999.999 menaruh besaran ≥ 10⁷ di dalam rentang yang skema izinkan, dan
+     di sana `1e-9` lebih kecil daripada derau float itu sendiri — "kembalikan
+     sisa yang PERSIS tersisa" bisa ditolak. Diganti
+     `toleransiBanding(sisa, SKALA_QTY_BARIS_KOLOM)`
+- **DICABUT (1), dengan pengukurannya**: `perlengkapan/routes.ts`
+  `if (selisih === 0) continue` pada `POST /perlengkapan/stok-awal` **tidak
+  bermasalah**. Terukur lewat HTTP: mengirim qty yang sama dua kali tak menulis
+  mutasi apa pun (jumlah mutasi 1 → 1, lalu 2 → 2), sebab kedua operannya
+  desimal yang sama pada skala yang sama (`rak` sudah `keSkalaKolom` sejak A⁷).
+  Dicatat, bukan dipaksa jadi temuan
+- **Bukti merah**: toleransi firasat dikembalikan ke `1e-9` (suntikan
+  di-assert mendarat) → pin merah; dipulihkan
+- **Pasangan anti-hijau-palsu**: refund **BERLEBIH** sebesar satu unit kolom
+  (0,01) tetap ditolak pada empat besaran termasuk 10⁷ — toleransi yang
+  kelonggaran berarti uang keluar untuk porsi yang tak pernah ada
+- **Batas, jujur**: sapuannya melihat perbandingan di **satu baris** dan
+  menilai **nama** identifiernya; nilai yang dioper ke fungsi lain lalu
+  dibandingkan di sana tak terlihat. Sisa 33 tertuduh dipilah sebagai
+  perbandingan terhadap **nol/konstanta** pada nilai yang sudah berskala, atau
+  perbandingan tampilan
+- Gerbang: typecheck bersih · `npm test` **2.287** (192 berkas) ·
+  `verify-api` **3.016 lolos, 0 gagal** vs Postgres SEGAR · cakupan rute
+  **272** identik · `audit:invarian` 26/26 · build web · e2e **6/6**
+- Commit: `13ac267`
+
+---
+
+## Uang yang DIADILI ≠ uang yang dicetak — server — 2026-08-25
+
+- **Kenapa**: kelas **UANG belum pernah disapu sekali pun**. Dua detektor
+  terakhir memisahkannya dari kelas qty dan **sengaja melewatinya**; kalimat
+  itu tertulis di dua entri di bawah ini
+- **Populasi**: sapuan mekanis atas **265** berkas (`apps/server/src` +
+  `packages/shared/src` + `apps/web/src`) — uang yang ditumpuk/disusun di JS →
+  **38 tertuduh**, dipilah tangan
+- **Keterjangkauan diukur di skema, bukan dikira**: `qty` baris penjualan
+  `z.number().positive()` — **tanpa `.int()`**, jadi 0,5 porsi sah; dan
+  `menus.harga_jual` `numeric(12,2)` boleh berdesimal
+- **TUDUHAN YANG DICABUT, dengan angkanya**: "yang dicetak beda dengan yang
+  tersimpan" **tak tereproduksi**. Menu Rp 1000,33 × qty 0,5 → balasan rute
+  `subtotal 500.17`, DB `500.17` — sama persis. Sebabnya struktural dan layak
+  ditulis: tiap angka uang mendarat di kolom `numeric(…,2|4)` yang **Postgres
+  bulatkan saat menulis**, dan balasan `createSale` dibaca ulang lewat
+  `.returning()`. Selama angka JS-nya cuma DISIMPAN, ia tak pernah bertengkar
+- **Yang bertengkar: angka JS yang MENGADILI sesuatu sebelum ditulis.**
+  Terukur lewat HTTP (menu Rp 0,01 × qty 0,4):
+
+  | | SEBELUM | SESUDAH |
+  |---|---|---|
+  | nota tersimpan & dibalas rute | `subtotal 0`, `total 0` | sama |
+  | bayar tunai **Rp 0** untuk nota **Rp 0** | **400** "Uang diterima kurang dari total belanja" | **201** |
+  | PASANGAN: kurang bayar 11.999 atas 12.000 | 400 | **tetap 400** |
+
+  Gerbang kasnya mengadili `total = 0.004` — angka yang **tak pernah bisa
+  dilihat siapa pun**, sebab yang tercetak dan tersimpan Rp 0,00. Kelas yang
+  sama dengan "stok yang PERSIS cukup ditolak", dipindahkan ke jalur uang
+- **Fix**: `SKALA_UANG_KOLOM = 2` & `SKALA_HPP_KOLOM = 4` di `@kakarut/shared`
+  (tetangga `SKALA_QTY_STOK_KOLOM` yang lahir putaran lalu), dan `lineTotal` ·
+  `subtotal` · `subtotalNet` · `total` · `totalHpp` dikembalikan ke skala
+  kolomnya **di tiap langkah**. `EPS_KAS` **tidak** disentuh — kelasnya sendiri
+  dan sudah benar; dipaku uji pasangan
+- **Bukti merah**: pembulatan `total` dicabut (suntikan di-assert mendarat) →
+  pin merah menyebut barisnya; dipulihkan
+- **Pasangan anti-hijau-palsu**: selisih **satu unit kolom (Rp 0,01)** tetap
+  terlihat; bayar PAS diterima; kurang bayar tetap ditolak — ketiganya juga
+  lewat HTTP di §257
+- **Gerbang lama ikut menuduh, dan ia benar**: `verify-api-token` menolak
+  cadangan `${REISS105:-$KASIR}` yang sempat kutulis di §257 — token `$KASIR`
+  memang mati sesudah §105 dipakai me-reset passwordnya. Diperbaiki ke
+  `$REISS105` tanpa cadangan, supaya kegagalan re-issue berbunyi alih-alih
+  diam. (Kelima kalinya di sesi ini gerbang lama membetulkanku)
+- **Batas, jujur**: yang dinilai jalur `createSale`. Situs uang lain yang
+  tertuduh dan **dibiarkan beralasan**: agregat yang hanya TAMPIL
+  (`rekomendasi` ×5, `perlengkapan.totalBelanja`, `bep.ts`) — tak mengadili apa
+  pun dan diformat `formatRupiah`; `harga-stats` sudah ber-`bulat2`;
+  `contoh-cetak.ts` fikstur pratinjau. Detektornya juga menilai **nama** untuk
+  memisahkan kelas uang dari qty
+- Gerbang: typecheck bersih · `npm test` **2.282** (192 berkas) · `verify-api`
+  **3.016 lolos, 0 gagal** vs Postgres SEGAR (§257 baru) · cakupan rute **272**
+  identik · `audit:invarian` 26/26 · build web · Playwright e2e **6/6**
+- Commit: `3d96540`
+
+---
+
+## FIFO: angka firasat terakhir, dan bukti merah yang gagal mendarat — server — 2026-08-25
+
+- **Kenapa**: utang terukur yang ditulis entri di bawah ini — *"`lib/fifo.ts`
+  masih memakai `EPS = 1e-9`, angka firasat yang B⁷ ukur BERHENTI BERARTI pada
+  besaran ≥ 10⁷; keterjangkauannya belum diukur"*. Situs `1e-9` **terakhir**,
+  dan satu-satunya yang bahkan tak menulis asalnya
+- **Populasi**: **14** pemakaian `EPS` di `fifo.ts` (223 baris). `jalankanFifo`
+  **fungsi murni** dengan **satu** pemanggil (`stok/service.ts:821` →
+  `GET /stok/fifo/:id`), jadi instrumennya deterministik penuh; harness ujinya
+  sudah ada (`test/fifo.test.ts`, 18 uji) dan dipakai ulang
+- **Diukur atas fungsinya** (dua lot pecahan sebesar N, lalu keluar seluruhnya):
+
+  | N | sisa lot | saldo | defisit | hpp |
+  |---|---|---|---|---|
+  | 10³ · 10⁶ | 0 | 0 | 0 | terisi |
+  | **10⁷** | **1,86e-9** | 1,86e-9 | 0 | terisi |
+  | **10⁸** | 0 | **−1,49e-8** | **1,49e-8** | **NULL** |
+  | **10⁹** | 0 | −1,19e-7 | 1,19e-7 | **NULL** |
+
+- **Keterjangkauan DIUKUR lewat HTTP** (Aturan 6 — dua faktur beli qty
+  100.000.000,1 & 100.000.000,2 **diterima pintu sungguhan**, dan kedua lot
+  dibuktikan terbaca di kartu sebelum angkanya dipercaya), sesudah dihabiskan
+  lewat opname ke 0:
+
+  | `GET /stok/fifo/:id` | SEBELUM | SESUDAH |
+  |---|---|---|
+  | `saldo` | **−1.4901161193847656E-8** | `0` |
+  | `defisit` | **1.4901161193847656E-8** | `0` |
+  | `pemakaian[0].hpp` | **NULL** ("tidak diketahui") | terisi |
+  | `rincian` | **3 baris** (satu hantu ber-`lot: null`) | 2 baris |
+
+  Kartu FIFO melaporkan **stok minus** dan menolak menyebut HPP untuk pemakaian
+  yang aritmetikanya eksak — kelas B⁷ ("stok yang PERSIS cukup ditolak"),
+  dipindahkan ke jalur biaya
+- **PENGUKURAN MERALAT LANGKAH PERTAMAKU, dan itu bagian dari hasilnya**: bukti
+  merah versi pertama **TIDAK MENDARAT** — mengembalikan `EPS` ke `1e-9`
+  membuat seluruh uji tetap hijau, sebab pembulatan ke skala kolom sudah
+  menghapus gejalanya pada 10⁷–10⁹. Klaim "toleransinya yang memperbaiki"
+  karena itu **belum terbukti dan tak ditulis**. Yang memisahkan keduanya
+  besaran di PUNCAK rentang: pada ≈4,9e9 lantai derau float melewati satu unit
+  kolom, jadi sisa hasil pembulatan mendarat tepat di `0,000001` — bukan nol —
+  dan `1e-9` tak sanggup menyentuhnya:
+
+  | | sisa lot | saldo |
+  |---|---|---|
+  | `1e-9` | **0.000001** (abadi) | 0.000001 |
+  | `toleransiBanding` | 0 | 0 |
+
+  Kedua paruh perbaikan membayar **band yang berbeda**: pembulatan per langkah
+  untuk 10⁷–10⁹, toleransi sadar-besaran untuk puncaknya
+- **Fix**: `toleransiBanding(besaranMaks, SKALA_QTY_STOK_KOLOM)` — lantai
+  deraunya ditentukan angka **TERBESAR yang dilewati walk**, bukan sisa yang
+  sedang diperiksa (sisa itu kecil; derau yang melahirkannya berasal dari
+  besaran operannya) — plus `keSkalaKolom` di tiap langkah konsumsi, defisit,
+  dan saldo. Asal angkanya **ditulis di tempat `EPS` dulu berdiri**, justru itu
+  yang tak dimilikinya
+- **Bukti merah (versi kedua, mendarat)**: `EPS` dikembalikan ke `1e-9` →
+  uji puncak rentang merah: `expected [ +0, 0.000001 ] to deeply equal
+  [ +0, +0 ]`; dipulihkan
+- **Pasangan anti-hijau-palsu**: **18 uji FIFO lama tetap hijau** (perilaku
+  besaran biasa tak bergeser sedikit pun — pasangan terkuat); sisa NYATA
+  sebesar satu unit kolom (1e-6) tak ikut disnap; defisit NYATA tetap tercatat
+  sebagai stok minus; besaran tinggi yang memang bersisa tetap punya sisanya
+- **Tuduhan yang DICABUT**: "lot hantu tanpa harga membuat `rataBergerak`
+  memulangkan null" — tak tereproduksi di skenario mana pun yang kucoba (lot
+  hantunya tersnap lebih dulu). Dicatat, bukan dipaksa jadi temuan
+- **Batas, jujur**: pada besaran ≳10¹⁰ lantai derau (2,3e-6) melewati satu unit
+  kolom, jadi sisa sebesar satu unit di sana ikut dianggap nol — di besaran itu
+  float8 memang tak sanggup membawa skala kolomnya, dan jawabannya berhenti
+  memakai float8, bukan mengecilkan toleransi. Yang diperbaiki juga jalur
+  **tampilan** kartu FIFO; HPP yang TERSIMPAN di penjualan dihitung jalur lain
+  dan tak tersentuh putaran ini
+- Gerbang: typecheck bersih · `npm test` **2.278** (192 berkas) · `verify-api`
+  **3.012 lolos, 0 gagal** vs Postgres SEGAR · cakupan rute **272** identik ·
+  `audit:invarian` 26/26 · build web · Playwright e2e **6/6**
+- Commit: `e55d69e`
+
+---
+
+## Saldo stok disusun di JS: badge "habis" berhenti berbohong — server — 2026-08-25
+
+- **Kenapa**: batas yang ditulis vena A⁷ tentang dirinya sendiri —
+  *"`saldoStok()` menyusun saldo di JS juga, tapi gejalanya tak
+  tereproduksi"*. Putaran ini mereproduksinya
+- **Populasi**: sapuan mekanis atas **131** berkas (`apps/server/src` +
+  `packages/shared/src`) — nilai ber-asal-`Number(row.*)` yang **dikombinasikan**
+  (`±`, `±=`) dengan nilai ber-asal-SQL lain, plus pembantu bersama yang
+  MEMULANGKAN komposisi parameternya. **29 tertuduh di 6 berkas**;
+  dipilah tangan → **19 masuk kelas ini, 10 dikecualikan beralasan**
+- **Yang DIKECUALIKAN, dan sebabnya** (menuduh kode benar = cara tercepat
+  membuat gerbangnya diabaikan):
+  · `lib/fifo.ts` (7) — tiap pembandingnya sudah ber-`EPS` dan lot yang habis
+    **disnap ke 0 secara eksplisit**; rancangan lain, sudah berpenjaga
+  · `harga-stats.ts` `sumQty` (1) — pembagi rata-rata harga, hasilnya rupiah
+    ber-`bulat2`; kelas UANG
+  · `produksi/konsumsi.ts` `cur.butuh` (1) — kelas KEBUTUHAN yang B⁷ sengaja
+    beri `toleransiBanding`; menyeragamkannya akan merusak yang sudah benar
+  · sisanya penghitung (`+= 1`) dan penyusun teks
+- **Diukur lewat HTTP** (Aturan 6 — suntikannya dibuktikan terbaca lebih dulu:
+  `stok_awal=0.1`, `produksi=0.2`, `rencana=0.1`, `dikerjakan=0.2` muncul di
+  balasan rutenya):
+
+  | | SEBELUM | SESUDAH |
+  |---|---|---|
+  | `GET /stok` → `saldo` | **0.30000000000000004** | 0.3 |
+  | `GET /stok` → `pembelian_berjalan.qty` | **0.30000000000000004** | 0.3 |
+  | `GET /stok/kartu/:id` → `saldo_akhir` | **0.30000000000000004** | 0.3 |
+
+- **Kerusakan yang lebih dalam daripada angka jelek**, dan bukti merahnya yang
+  menunjukkannya: `statusStok(0,1 · 0,2 · 0,3)` — bahan yang saldonya
+  BENAR-BENAR nol — memulangkan **`"menipis"`**, bukan `"habis"`, karena
+  `0.1 + 0.2 - 0.3 = 5,551e-17 > 0`. Badge "habis" karena itu tak pernah
+  muncul untuk bahan yang habis lewat kombinasi baseline+masuk+keluar, dan
+  `saldo === 0` yang menyembunyikan baris satuan setara ikut gagal
+- **Fix**: pembulatan dipindahkan ke RUMAH ATURANNYA — `keSkalaKolom` +
+  `SKALA_QTY_STOK_KOLOM` kini tinggal di `@kakarut/shared` (`skala.ts`), dan
+  **`saldoStok` sendiri yang membulatkan**, jadi `statusStok` dan tiap
+  pemanggil mewarisinya tanpa aturan kedua yang bisa menyimpang.
+  `lib/batas-angka.ts` mengekspor ulang keduanya → pemanggil server tak
+  berubah dan pin lama tetap hijau. Situs sekelas ikut dibayar: gabungan
+  `terpakai + kirim_keluar`, dua `qtyBerjalan`, saldo awal kartu, **saldo
+  berjalan kartu (dibulatkan TIAP LANGKAH — driftnya tumbuh dengan N)**,
+  kartu perlengkapan, `sisa` pemakaian otomatis perlengkapan (tanpa ini ia
+  mendarat di 1e-17 dan menyisipkan mutasi hantu keesokan harinya), dan
+  balasan `POST /perlengkapan/:id/pakai` yang mengirim 0.19999999999999998 ke
+  layar yang baru menekannya
+- **Sisi klien diperiksa, bukan diandaikan**: `apps/web` tak memakai
+  `saldoStok`/`statusStok` sama sekali, dan ponsel hanya mengurai `saldo`
+  kiriman server (`stok_models.dart`) — tak ada salinan aturan, jadi tak ada
+  kerja klien. Itu keputusan terukur, bukan kelalaian
+- **Gerbang lama yang MEMATOK NOMOR BARIS ikut ketemu**: `pb1-satu-rumus`
+  merah karena komentar pengukuran menggeser `hitungPb1` dari baris 103 ke
+  122 — gerbang merah yang tak menyatakan apa pun tentang PB1. Diperbarui ke
+  NIATNYA (satu situs, dan situs itu di dalam badan `hitungPb1`) lalu
+  dibuktikan **masih bisa menuduh**: salinan rumus kedua disuntikkan ke
+  `KasirPage` → merah menyebut berkasnya. Ini kelas keempat kalinya di sesi
+  ini gerbang lama memaku ejaan alih-alih niat
+- **Bukti merah**: pembulatan di `saldoStok` dicabut (suntikan di-assert
+  mendarat) → 3 uji merah, termasuk `expected 'menipis' to be 'habis'` dan
+  `expected 0.0000010000000000287557 to be 0.000001`; dipulihkan
+- **Pasangan anti-hijau-palsu**: kekurangan/kelebihan **satu unit kolom
+  (1e-6)** tetap terlihat (uji + §256 lewat HTTP: saldo 0,000001 tak ditelan
+  jadi nol); stok yang memang aman tak berubah jadi habis; nilai yang memang
+  muat di kolomnya tak tersentuh
+- **Batas, jujur**: detektornya menilai **nama** (`qty|saldo|sisa|stok|
+  terpakai|masuk|keluar`) untuk memisahkan kelas qty dari kelas uang — kolom
+  qty yang dinamai lain takkan terlihat; ia juga hanya melihat komposisi di
+  SATU baris, jadi komposisi yang dipecah ke beberapa pernyataan lolos.
+  `lib/fifo.ts` masih memakai `EPS = 1e-9` — angka firasat yang B⁷ ukur
+  BERHENTI BERARTI pada besaran ≥ 10⁷; ia dicatat sebagai utang terukur, bukan
+  digarap di putaran ini (keterjangkauannya belum diukur)
+- Gerbang: typecheck bersih · `npm test` **2.270** (192 berkas) ·
+  `verify-api` **3.012 lolos, 0 gagal** vs Postgres SEGAR (§256 baru) ·
+  cakupan rute **272** identik dengan rekaman · `audit:invarian` 26/26 ·
+  build web · Playwright e2e **6/6**
+- Commit: `1cdf132`
+
+---
+
 ## Alamat printer tak sah sampai ke soket — mobile — 2026-08-25 (video lapangan)
 
 - **Kenapa**: batas yang ditulis entri di bawah ini sendiri — *"validasi format

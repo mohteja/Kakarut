@@ -2,7 +2,15 @@ import { describe, expect, it } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { hitungPb1 } from "@kakarut/shared";
+import {
+  hitungPb1,
+  keSkalaKolom,
+  SKALA_UANG_KOLOM,
+  SKALA_HPP_KOLOM,
+  SKALA_QTY_BARIS_KOLOM,
+} from "@kakarut/shared";
+import { toleransiBanding } from "../src/lib/batas-angka";
+import { butaKomentar } from "../src/scripts/buta-komentar";
 
 /**
  * ARITMETIKA UANG PENJUALAN PUNYA SATU RUMAH.
@@ -125,5 +133,123 @@ describe("aritmetika uang penjualan punya satu rumah", () => {
     expect(buat("const maksDiskon = subtotal * maksPersen / 100;"), "batas diskon bukan PB1").toHaveLength(0);
     expect(buat("const pb1 = hitungPb1(subtotalNet, rate);"), "memanggil pembantunya justru yang diminta").toHaveLength(0);
     expect(buat("// pb1 = net * tarif / 100"), "komentar bukan kode").toHaveLength(0);
+  });
+});
+
+/**
+ * ANGKA YANG DIADILI HARUS SAMA DENGAN ANGKA YANG DICETAK.
+ *
+ * `sales.subtotal`/`total` `numeric(14,2)` dan `total_hpp` `numeric(16,4)`:
+ * Postgres MEMBULATKAN saat menulis, JS tidak. Selama angka JS-nya cuma
+ * disimpan, keduanya tak pernah bertengkar — balasan rutenya pun dibaca ulang
+ * lewat `.returning()`. Yang bertengkar: angka JS yang dipakai MENGADILI
+ * sesuatu sebelum ditulis.
+ *
+ * Terukur lewat HTTP (2026-08-25, menu Rp 0,01 × qty 0,4 — `qty` baris
+ * penjualan `z.number().positive()` TANPA `.int()`, jadi pecahan memang sah):
+ *
+ *   SEBELUM  nota tersimpan & dibalas rute → subtotal 0, total 0
+ *            bayar tunai Rp 0 → 400 "Uang diterima kurang dari total belanja"
+ *   SESUDAH  bayar tunai Rp 0 → 201, dan kurang bayar 11.999 atas 12.000
+ *            TETAP 400
+ *
+ * Gerbangnya mengadili `total = 0.004` — angka yang tak pernah bisa dilihat
+ * siapa pun. Kelas yang sama dengan "stok yang PERSIS cukup ditolak", di jalur
+ * uang.
+ */
+describe("uang yang disusun di JS dikembalikan ke skala kolomnya", () => {
+  it("DETEKTOR TERBUKTI: hasil kali pecahan memang tak muat di kolom uang", () => {
+    // Kalau premis ini tak bisa gagal, seluruh vena ini tak menyatakan apa pun.
+    expect(0.01 * 0.4).not.toBe(0);
+    expect(keSkalaKolom(0.01 * 0.4, SKALA_UANG_KOLOM)).toBe(0);
+    expect(SKALA_UANG_KOLOM).toBe(2); // sales.subtotal/total numeric(…,2)
+    expect(SKALA_HPP_KOLOM).toBe(4); // sales.total_hpp numeric(…,4)
+  });
+
+  it("PASANGAN: selisih SATU unit kolom (Rp 0,01) tetap terlihat", () => {
+    // Pembulatan yang menelan selisih nyata adalah kerusakan yang lebih sunyi
+    // daripada yang diperbaiki.
+    expect(keSkalaKolom(0.01, SKALA_UANG_KOLOM)).toBe(0.01);
+    expect(keSkalaKolom(12000 - 0.01, SKALA_UANG_KOLOM)).toBe(11999.99);
+    expect(keSkalaKolom(0.0001, SKALA_HPP_KOLOM)).toBe(0.0001);
+  });
+
+  it("createSale menyusun subtotal/total/HPP pada skala kolomnya", () => {
+    const SVC = butaKomentar(
+      readFileSync(join(SRC, "modules/penjualan/service.ts"), "utf8"),
+    );
+    expect(SVC, "subtotal kembali mentah").toContain(
+      "subtotal = keSkalaKolom(subtotal + lineTotal, SKALA_UANG_KOLOM)",
+    );
+    expect(SVC, "total_hpp kembali mentah").toContain(
+      "totalHpp = keSkalaKolom(totalHpp + hppSatuan * item.qty, SKALA_HPP_KOLOM)",
+    );
+    expect(SVC, "total yang DIADILI kembali mentah").toMatch(
+      /const total = keSkalaKolom\(subtotalNet \+ pb1Amount, SKALA_UANG_KOLOM\)/,
+    );
+    expect(SVC, "baris penjualan kembali mentah").toMatch(
+      /const lineTotal = keSkalaKolom\(hargaSatuan \* item\.qty, SKALA_UANG_KOLOM\)/,
+    );
+  });
+
+  it("PASANGAN: EPS_KAS tidak ikut diseragamkan — sudah benar & kelasnya sendiri", () => {
+    const shift = butaKomentar(readFileSync(join(SRC, "modules/shift/routes.ts"), "utf8"));
+    expect(shift).toContain("EPS_KAS = 0.005");
+  });
+});
+
+/**
+ * NILAI YANG DISUSUN DI JS LALU DIPAKAI **MENGADILI**.
+ *
+ * Pelajaran vena di atas dirumuskan jadi sapuan: angka JS yang cuma DISIMPAN
+ * atau DITAMPILKAN aman (kolomnya membulatkan saat menulis, `formatRupiah`
+ * membulatkan saat mencetak) — yang berbahaya angka JS yang MENGADILI.
+ * Disapu atas 132 berkas (`apps/server/src` + `packages/shared/src`):
+ * **36 tertuduh**, dipilah tangan.
+ *
+ * Dua dibayar di sini; satu DICABUT karena pengukurannya tak mereproduksinya.
+ */
+describe("angka yang disusun di JS lalu mengadili", () => {
+  it("rekalkulasi: total HPP dibandingkan pada skala kolomnya", () => {
+    // `if (totalHpp !== sale.totalHpp)` mengadu angka JS dengan angka yang
+    // dibaca dari `numeric(16,4)`. Tanpa skala, jawabannya "berbeda" untuk
+    // derau digit ke-17 dan barisnya ditulis ulang tanpa ada yang berubah.
+    const REK = butaKomentar(readFileSync(join(SRC, "modules/penjualan/rekalkulasi.ts"), "utf8"));
+    expect(REK, "total HPP kembali mentah sebelum dibandingkan").toContain(
+      "totalHpp = keSkalaKolom(totalHpp + hppSatuan * qtyBayar, SKALA_HPP_KOLOM)",
+    );
+    expect(REK).toContain("if (totalHpp !== sale.totalHpp)");
+  });
+
+  it("refund: toleransinya DITURUNKAN, bukan angka firasat `1e-9`", () => {
+    // Situs terakhir dari kelas yang B⁷ bayar. `BATAS_QTY_BARIS` = 99.999.999
+    // menaruh besaran ≥ 10⁷ di dalam rentang yang skema izinkan, dan di sana
+    // `1e-9` lebih kecil daripada derau float itu sendiri.
+    const RF = butaKomentar(readFileSync(join(SRC, "modules/penjualan/refund.ts"), "utf8"));
+    expect(RF, "toleransi firasat kembali").not.toMatch(/sisa \+ 1e-9/);
+    expect(RF).toContain("toleransiBanding(sisa, SKALA_QTY_BARIS_KOLOM)");
+  });
+
+  it("DETEKTOR TERBUKTI: `1e-9` memang berhenti berarti di rentang yang diizinkan", () => {
+    const ulp = (x: number) => 2 ** (Math.ceil(Math.log2(Math.abs(x))) - 53);
+    expect(ulp(1e7)).toBeGreaterThan(1e-9);
+    expect(toleransiBanding(1e7, SKALA_QTY_BARIS_KOLOM)).toBeGreaterThan(ulp(1e7));
+  });
+
+  it("PASANGAN: refund BERLEBIH sebesar satu unit kolom tetap ditolak", () => {
+    // Toleransi yang terlalu longgar menelan kelebihan refund yang NYATA —
+    // uang keluar untuk porsi yang tak pernah ada. Satu unit kolom qty baris
+    // penjualan = 0,01.
+    for (const sisa of [1, 100, 12_345, 1e7]) {
+      const berlebih = sisa + 0.01;
+      expect(
+        berlebih > sisa + toleransiBanding(sisa, SKALA_QTY_BARIS_KOLOM),
+        `kelebihan 0,01 pada sisa ${sisa} ikut tertelan toleransi`,
+      ).toBe(true);
+    }
+  });
+
+  it("skala qty baris penjualan cocok dengan kolomnya", () => {
+    expect(SKALA_QTY_BARIS_KOLOM).toBe(2); // sale_items.qty numeric(10,2)
   });
 });

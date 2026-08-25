@@ -19,7 +19,7 @@
  * penyajian, atas baris yang basisnya memang berubah (`basisBerubah`). Lihat
  * `hppSatuanBaru`; sifat idempotennya tetap terjaga.
  */
-import { BATAS_HPP, pastikanMuat } from "../../lib/batas-angka";
+import { BATAS_HPP, pastikanMuat, keSkalaKolom, SKALA_HPP_KOLOM } from "../../lib/batas-angka";
 import { and, eq, isNull } from "drizzle-orm";
 import { qtyDitagih, qtyEfektif } from "@kakarut/shared";
 import type { Tx } from "../../db/client";
@@ -201,7 +201,12 @@ export async function hitungUlangBiayaPenjualan(
      * satu petunjuk pun bahwa yang meluap HPP baris itu.
      */
     pastikanMuat(hppSatuan, BATAS_HPP, `HPP satuan "${menu.nama}"`);
-    totalHpp += hppSatuan * qtyBayar;
+    // Skala kolomnya (`sales.total_hpp` numeric(16,4)) — sebab angka ini
+    // DIBANDINGKAN `!==` dengan nilai yang dibaca dari kolom itu di bawah.
+    // Membandingkan angka JS mentah dengan angka kolom membuat perbandingannya
+    // menjawab "berbeda" untuk derau digit ke-17, dan barisnya ditulis ulang
+    // tanpa ada yang berubah.
+    totalHpp = keSkalaKolom(totalHpp + hppSatuan * qtyBayar, SKALA_HPP_KOLOM);
     if (hppSatuan !== b.hppSatuan) {
       await tx.update(saleItems).set({ hppSatuan }).where(eq(saleItems.id, b.id));
     }
