@@ -126,6 +126,55 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Satu hop: perantara ber-ekspresi — server — 2026-08-25 — **BERSIH**
+
+- **Kenapa**: batas yang ditulis vena di bawah ini — *"ia melihat pemanggilan
+  LANGSUNG; nilai yang mampir ke variabel perantara lalu diteruskan ke pengadil
+  masih di luar jangkauannya"*
+- **Cacat pemindai pertamaku, dan ia ketahuan sebelum dikirim**: versi pertama
+  menuduh **18** situs — **9 PALSU**, sebab ia mencocokkan nama identifier
+  lintas SELURUH berkas (variabel bernama sama di fungsi lain ikut tertuduh).
+  Dibatasi `JARAK_MAKS = 40` baris sebagai pendekatan atas "lingkup yang sama";
+  batasnya **ditulis dan dipaku uji**, bukan disamarkan. Tersisa **9** situs
+- **DUA tuduhan DICABUT OLEH PENGUKURAN, bukan oleh argumen**: `tarifPb1Struk`
+  (`hpp.ts`) dan bon open-bill mengoper `subtotal − diskon` ke `hitungPb1`.
+  Dugaannya: derau bisa mengubah `Math.round` di batas 0,5. Diukur atas
+  **~1,8 juta** pasangan (subtotal, diskon, tarif) berskala-2 → **0 pasangan**
+  berbeda hasil pembulatannya. Deraunya ≈**1e-13**, sementara jaraknya ke batas
+  pembulatan **0,5**. Aman — dan kini bisa ditunjuk angkanya
+- **Sisanya**: penjaga **langit-langit** (`pastikanMuat` — menilai muat/tidak,
+  bukan kesetaraan) dan harga turunan yang dipakai sebagai **nilai**, bukan
+  putusan. Semuanya masuk `DIKECUALIKAN_HOP` dengan alasannya
+- **Yang ikut ketemu dan DIBAYAR**: `EPS_QTY = 1e-6` di
+  `packages/shared/src/ketersediaan.ts` — konstanta **telanjang** tanpa satu
+  kalimat tentang asalnya, kelas yang sudah **tiga kali** jadi bug di repo ini.
+  Ia terlewat sapuan B⁷ karena tinggal di `shared` dan bernama lain. Asalnya
+  kini tertulis, diukur:
+
+  | | hasil |
+  |---|---|
+  | `\|1e-6\| < EPS_QTY` | **false** — selisih SATU unit kolom tak tertelan (`<` strik) |
+  | `\|5e-7\| < EPS_QTY` | true — derau setengah unit tertelan |
+  | ULP(`kemasan`) | 5,7e-14 (qty 10³) · 3,7e-9 (10⁸) · 1,2e-7 (10⁹) |
+  | qty **10¹⁰** | ULP **1,91e-6 > EPS_QTY** ← di sini ia berhenti berarti |
+
+  Batasnya ditulis apa adanya: di ≳10¹⁰ float8 tak sanggup membawa skala
+  kolomnya, dan jawabannya berhenti memakai float8 — bukan mengecilkan
+  toleransi ini
+- **Bukti merah**: alasan `EPS_QTY` dihapus (suntikan di-assert mendarat) →
+  merah; dipulihkan. Detektor satu-hop dibuktikan tiga arah: perantara
+  ber-ekspresi **tertuduh**, identifier polos **tidak**, dan yang berjarak
+  > `JARAK_MAKS` **tidak**
+- **Batas, jujur**: `JARAK_MAKS` adalah pendekatan atas lingkup, bukan lingkup
+  sungguhan; dan pemindainya berhenti di **satu** lompatan — dua lompatan
+  (a → b → pengadil) masih di luar jangkauan
+- Gerbang: typecheck bersih · `npm test` **2.298** (193 berkas). Perubahan di
+  `ketersediaan.ts` **komentar saja** → `verify-api` tidak dijalankan ulang,
+  dan itu disebut
+- Commit: `2791db5`
+
+---
+
 ## Yang diadili DI DALAM fungsi lain — server — 2026-08-25 — **BERSIH**
 
 - **Kenapa**: batas yang ditulis vena di bawah ini tentang dirinya sendiri —
