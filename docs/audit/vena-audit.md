@@ -126,6 +126,80 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Tiga tabel token dipangkas — server — 2026-08-25
+
+- **Kenapa**: entri retensi ledger sinkron menyebut tiga saudara yang sudah
+  dipangkas lalu berhenti; sapuan ulang atas **62 tabel** menemukan tiga lagi
+  tanpa satu pun penghapus (hanya `.update()` penanda pakai/cabut) —
+  `password_reset_tokens`, `email_verification_tokens` (keduanya menyimpan
+  **hash token**: debu bermuatan kredensial mati), dan `invitations`
+- **Terukur SEBELUM** (DB verify sesudah satu run penuh): **28 baris** —
+  2 reset (2 mati) · 13 verifikasi (10 mati) · 13 undangan (5 `pending`)
+- **Terukur SESUDAH** (+ backdate): **20 baris mati terpangkas** (2 · 10 · 8);
+  **kelima undangan `pending` SELAMAT** meski di-backdate 100 hari, dan
+  3 token verifikasi yang belum kedaluwarsa tak tersentuh
+- **Jendela menghormati arti tiap tabel**: token hidup ≤ 24 jam (verifikasi) /
+  1 jam (reset) → baris ber-`expires_at` lewat sudah pasti mati; retensi
+  **30 hari = 30× umur terpanjang**. Undangan `pending` **tak punya
+  kedaluwarsa** dan tak pernah disentuh (`ne(status,'pending')` adalah
+  PAGARNYA, bukan filter); yang dibuang hanya `accepted`/`revoked` > 90 hari
+- **Penjaga + bukti merah**: `pangkas-token.test.ts` — rasio retensi vs umur
+  token, pagar `pending`, kolom penyaring benar (`expires_at` token vs
+  `created_at` undangan), penjadwal benar-benar terpasang; pagar `pending`
+  dicabut → merah dengan kalimat kerusakannya
+- **Batas**: pemangkas berjalan per-hari tanpa indeks pada `expires_at` —
+  tabel ini kini selalu kecil, jadi seq-scan-nya murah; bila kelak terukur
+  berat, indeks adalah tuning satu baris. Empat tabel log berjalan
+  (`pesanan_logs`, `faktur_logs`, `meja_kosong_logs`, `menu_price_logs`) juga
+  tanpa penghapus — sengaja tak disentuh: jejak audit yang dibaca layar
+  riwayat, membuangnya keputusan produk (dicatat sebagai populasi terukur)
+- Gerbang: typecheck bersih · `npm test` **2.251** (191 berkas) · verify-api
+  **2.995/0** vs Postgres segar · cakupan identik · `audit:invarian` 26/26
+- Commit: `b30187e`
+
+---
+
+## Sel CSV yang dibuka Excel dinetralkan — web — 2026-08-25
+
+- **Kenapa**: permukaan **ekspor** tak pernah dinilai 53 vena sebelumnya.
+  `selCsv` mengutip untuk PARSING dan benar untuk itu; yang tak dijaganya —
+  berkas ini dibangun untuk dibuka program LAIN, dan sel berawalan `=`, `+`,
+  `-`, `@` dieksekusi Excel/Sheets/LibreOffice. Alurnya tertulis di berkas itu
+  sendiri: *"unduh template → buka di Excel → Simpan"* → impor balik, jadi
+  yang kembali adalah HASIL rumusnya, bukan nama yang diketik orang
+- **Populasi**: 1 pembangun (`web/src/lib/bahanCsv.ts`), 2 pintu unduh
+  (`ImporBahanModal:139`, `BahanPage:152`), **6 kolom teks ketikan pengguna**
+  dari 17 (sisanya `selAngka`/`ya`/enum)
+- **Terukur SEBELUM** (lewat pembangun sungguhan): nama `=1+1`, kategori
+  `@SUM(1+1)`, satuan `+kg`, catatan `-2+3`, dan muatan DDE
+  `=cmd|"/C calc"!A0` semuanya keluar APA ADANYA
+- **Terukur SESUDAH**: keempatnya berawalan `'` (inert), dan ronde
+  ekspor→impor memulangkan teks aslinya PERSIS — termasuk nama yang memang
+  diawali `'` (dilolos ganda `''=merek` → kembali `'=merek`); pecahan
+  `0,125` tetap `0.125` (kelas lama tak tersentuh)
+- **Bentuknya pelolosan, bukan pemangkasan** — dan itu keputusan yang dibayar
+  ledger ini: berkas yang sama sudah pernah merusak data justru pada ronde
+  ekspor→impor (`0,125 → 125`), jadi penjaga barunya wajib berpasangan
+  (`selTeks` ↔ `lepasLolos`)
+- **Penjaga + bukti merah**: `csv-formula-netral.test.ts` — INTI bersifat
+  PERILAKU dan otomatis mencakup kolom baru (isi tiap medan teks dengan
+  muatan rumus → tuntut tak ada sel berawalan pemicu); ronde-utuh; pasangan
+  sel biasa; detektor dibuktikan menuduh lewat masukan sintetis. Penetral
+  dicabut dari kolom `nama` → merah menyebut kolomnya
+- **Catatan gerbang**: `jangkar-iris` menuduh berkas uji baru ini karena
+  memakai `indexOf` berargumen literal — aturan yang BENAR untuk kelasnya
+  (jangkar irisan sumber). Punyaku lookup data, jadi BENTUKNYA yang diganti
+  ke `findIndex`; gerbangnya tidak diberi pengecualian yang bisa basi
+- **Batas**: yang dinilai baru ekspor bahan baku — satu-satunya pembangun CSV
+  di repo hari ini (disapu, bukan diingat). `lib/pdf.ts` dinilai dan bersih
+  (HTML→PDF, tak ada mesin formula). Kesalahan pengukuranku sendiri tercatat:
+  ronde pertama "gagal" ternyata kutipan shell-ku, bukan kode
+- Gerbang: typecheck bersih · `npm test` **2.247** (190 berkas) · `build`
+  web sukses · verify-api TIDAK dijalankan (murni web, tak menyentuh rute)
+- Commit: `d1760c5`
+
+---
+
 ## ANTREAN KESEPULUH — usulan dari celah yang tercatat di ledger — 2026-08-25
 
 Antrean kesembilan (A⁵–B⁵) tuntas. Dua usulan; keduanya arah yang belum
