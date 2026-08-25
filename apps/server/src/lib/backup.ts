@@ -1,4 +1,4 @@
-import { gzipSync } from "node:zlib";
+import { createGzip } from "node:zlib";
 import { desc, eq, sql } from "drizzle-orm";
 import { db, pool } from "../db/client";
 import { backupRuns, companies } from "../db/schema";
@@ -100,9 +100,45 @@ export async function jalankanBackup(opts: {
     })
     .returning({ id: backupRuns.id });
 
+  let dalamTx = false;
   try {
     const tabel = await daftarTabel();
-    const potongan: string[] = [
+    /*
+     * Ekspor STREAMING, bukan tumpuk-semua-lalu-gzipSync.
+     *
+     * Bentuk lama memuat SELURUH baris semua tabel ke satu larik string, me-
+     * `join` (menggandakan memorinya), lalu `gzipSync` — kompresi sinkron atas
+     * seluruh database yang menghentikan event loop. Terukur pada 600.790
+     * baris (DB 193 MB): backup 12,9 dtk, `/api/health` yang biasa 2 ms macet
+     * sampai **5,3 dtk** (setiap permintaan lain ikut berhenti — kasir di
+     * layar bayar juga), dan RSS proses 207 MB → **1.786 MB** — lalu BERTAHAN
+     * ±1,6 GB setelah selesai karena heap V8 tak menyusut.
+     *
+     * Sekarang: satu transaksi REPEATABLE READ (bonus yang dulu tidak ada —
+     * tabel-tabel kini dipotret pada SATU snapshot, bukan dibaca pada waktu
+     * berbeda-beda), kursor per tabel di koneksi lock yang sudah dipegang,
+     * FETCH per-batch, dan tiap potongan JSON ditulis ke `createGzip` dengan
+     * menunggu `drain` — event loop bernapas di antara batch, dan yang
+     * tinggal di memori hanya keluaran terkompresi. Format arsipnya BYTE-
+     * KOMPATIBEL dengan `restore-backup.ts`: baris meta, lalu satu baris
+     * `{"tabel": …, "baris": […]}` per tabel.
+     */
+    const gzStream = createGzip();
+    const keluaran: Buffer[] = [];
+    gzStream.on("data", (c: Buffer) => keluaran.push(c));
+    const gzSelesai = new Promise<void>((res, rej) => {
+      gzStream.on("end", () => res());
+      gzStream.on("error", rej);
+    });
+    const tulis = async (potongan: string) => {
+      if (!gzStream.write(potongan)) {
+        await new Promise<void>((res) => gzStream.once("drain", res));
+      }
+    };
+
+    await lockClient.query("BEGIN ISOLATION LEVEL REPEATABLE READ");
+    dalamTx = true;
+    await tulis(
       JSON.stringify({
         meta: {
           versi: VERSI_ARSIP,
@@ -110,19 +146,35 @@ export async function jalankanBackup(opts: {
           jumlah_tabel: tabel.length,
         },
       }),
-    ];
+    );
     let totalBaris = 0;
     for (const t of tabel) {
+      await tulis(`\n{"tabel":${JSON.stringify(t)},"baris":[`);
       // to_jsonb → tiap baris jadi objek JSON dgn tipe kolom terjaga.
-      const res = await pool.query<{ r: unknown }>(
-        `SELECT to_jsonb(x) AS r FROM ${quoteIdent(t)} x`,
+      await lockClient.query(
+        `DECLARE kursor_backup NO SCROLL CURSOR FOR SELECT to_jsonb(x) AS r FROM ${quoteIdent(t)} x`,
       );
-      const baris = res.rows.map((row) => row.r);
-      totalBaris += baris.length;
-      potongan.push(JSON.stringify({ tabel: t, baris }));
+      let pertama = true;
+      for (;;) {
+        const res = await lockClient.query<{ r: unknown }>(`FETCH 5000 FROM kursor_backup`);
+        if (res.rows.length === 0) break;
+        let buf = "";
+        for (const row of res.rows) {
+          buf += (pertama ? "" : ",") + JSON.stringify(row.r);
+          pertama = false;
+        }
+        totalBaris += res.rows.length;
+        await tulis(buf);
+      }
+      await lockClient.query(`CLOSE kursor_backup`);
+      await tulis(`]}`);
     }
+    await lockClient.query("COMMIT");
+    dalamTx = false;
 
-    const gz = gzipSync(Buffer.from(potongan.join("\n"), "utf8"));
+    gzStream.end();
+    await gzSelesai;
+    const gz = Buffer.concat(keluaran);
     await storage.simpan(key, gz);
 
     const durasi = Date.now() - mulai;
@@ -172,6 +224,11 @@ export async function jalankanBackup(opts: {
       error: pesan,
     };
   } finally {
+    // Transaksi snapshot yang masih menggantung (gagal di tengah ekspor)
+    // di-ROLLBACK dulu — koneksi ini dipakai lagi untuk unlock di bawah.
+    if (dalamTx) {
+      await lockClient.query("ROLLBACK").catch(() => {});
+    }
     // Lepas lock di KONEKSI YANG SAMA lalu kembalikan koneksinya ke pool.
     if (punyaLock) {
       await lockClient
