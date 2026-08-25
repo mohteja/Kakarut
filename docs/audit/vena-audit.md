@@ -126,6 +126,82 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## ANTREAN KESEBELAS — usulan dari celah yang tercatat di ledger — 2026-08-25
+
+Antrean kesepuluh (A⁶–B⁶) tuntas. Dua usulan; yang teratas adalah tanda
+tangan sesi ini dalam bentuknya yang paling telanjang — **empat pintu ke
+keadaan yang sama, tiga berpenjaga dengan TIGA nilai berbeda, satu kosong**.
+
+### Usulan A⁷ — saldo lahir dari `SUM(...)::float8`, lalu dibandingkan tanpa toleransi
+
+**Sumbernya**: bukan batas yang tertulis, melainkan pola yang sapuan hari ini
+temukan utuh. Kolom qty adalah `numeric`, tapi **25 situs** membacanya lewat
+`::float8` — dan nilai float hasil penjumlahan tidak sama dengan nilai
+desimalnya. Terukur di Node hari ini: `0,7 + 0,1 = 0,7999999999999999`,
+`0,3 + 0,6 = 0,8999999999999999`, `4,35 + 0,1 = 4,449999999999999` — ketiganya
+**di BAWAH** nilai sebenarnya.
+
+**Populasi (dihitung hari ini)**: 4 gerbang "cukup tidak stoknya" yang membaca
+saldo float —
+
+| pintu | penjaga |
+|---|---|
+| `stok/routes.ts:335` | `body.qty > saldo + 1e-9` ✔ (komentar di `service.ts:289` menuliskan aturannya) |
+| `stok/service.ts:291` | `r.saldo < perlu - 1e-9` ✔ |
+| `produksi/konsumsi.ts:187` | `req.butuh - tersedia > 1e-6` ✔ (nilai BEDA) |
+| **`perlengkapan/routes.ts:1160`** | **`body.qty > saldo` — tanpa apa pun** |
+
+Plus `EPS_KAS = 0.005` di `shift/routes.ts` (4 pemakaian) — jadi satu kelas,
+**empat nilai**, tanpa rumah bersama.
+
+**Kerusakannya**: petugas TIDAK BISA menghabiskan sisa perlengkapannya
+sendiri. Saldo yang benar 0,8 terbaca 0,7999999999999999; "pakai 0,8" dibalas
+**400 "Stok tidak cukup (saldo 0,8)"** — angka yang ditampilkan sama dengan
+yang diminta, jadi dari layar penolakannya tak masuk akal. Diukur lewat HTTP
+sebelum dituduh (mutasi 0,7 + 0,1 lalu pakai 0,8).
+
+**Bentuk kerjanya**: ukur lewat HTTP; satu pembantu bersama (`cukup(minta,
+saldo)` di rumah yang sudah ada) menggantikan empat toleransi tulisan tangan
+— tanpa mengubah arti `EPS_KAS` (0,005 rupiah adalah toleransi UANG, kelas
+lain, dan itu ditulis, bukan disamakan diam-diam); gerbang mekanis:
+perbandingan atas nilai yang lahir dari `::float8` wajib lewat pembantu itu,
+`DIKECUALIKAN` bernama + beralasan; bukti merah; verify-api §254 (habiskan
+sisa pecahan → 200; minta melebihi → tetap 400).
+
+### Usulan B⁷ — seberapa besar drift itu tumbuh? Toleransi yang DIUKUR, bukan dirasa
+
+Ketiga toleransi yang ada (1e-9, 1e-9, 1e-6) dipilih dengan perasaan; tak ada
+satu pun angka pengukuran di baliknya. Vena pintu FIFO mengukur KECEPATANNYA
+(0,056 dtk pada 20.001 baris) tapi tak pernah ketepatan numeriknya. Bentuk
+kerja: suntik N mutasi pecahan (0,1 · 0,125 · 0,3) sampai 30 rb pada satu
+bahan — mesin yang sudah ada — lalu bandingkan saldo float8 dengan jumlah
+desimal eksak (`numeric` di SQL) pada beberapa titik; laporkan drift
+maksimum terukur; **patok toleransi A⁷ pada angka itu** (dengan marginnya
+ditulis), bukan pada firasat. Bila drift ternyata tumbuh melampaui toleransi
+mana pun pada volume nyata, itu temuan sendiri: pembacaan `::float8` untuk
+saldo harus diganti `numeric`-as-string di jalur gerbangnya.
+
+### Diperiksa dan TIDAK diusulkan
+
+- **Injeksi perintah printer ESC/POS** — `sanitizeAscii` menyaring ke
+  0x20–0x7E (0x1b terbuang) dan dipasang di `text()` maupun `line()`;
+  `pushAscii` hanya dipanggil dari dalam kelasnya, `divider(ch)` selalu
+  literal. **Bersih secara konstruksi.**
+- **Injeksi HTML pada dokumen cetak** — `DokumenBelanjaModal` (satu-satunya
+  pembangun `bodyHtml`) meloloskan SEMUA interpolasinya lewat `esc()`.
+  Bersih; kalau kelak ada pembangun kedua, kelas ini pantas jadi gerbang.
+- **Buntu-mati (deadlock) urutan kunci** — sapuan badan transaksi: hanya
+  **satu** badan yang memegang lebih dari satu kunci (`createSale`, dua
+  `FOR UPDATE` berurutan tetap). Tanpa dua urutan berlawanan, kelasnya tak
+  terjangkau hari ini — dicatat berangka.
+- **Agregat UANG `::float8`** — rupiah di aplikasi ini bilangan bulat, dan
+  double eksak sampai 2⁵³ ≈ 9×10¹⁵; jauh di atas langit-langit kolomnya
+  sendiri (999.999.999.999). Bukan vena, dan alasannya diukur.
+
+**Rekomendasi: A⁷ → B⁷.**
+
+---
+
 ## Tiga tabel token dipangkas — server — 2026-08-25
 
 - **Kenapa**: entri retensi ledger sinkron menyebut tiga saudara yang sudah
