@@ -50,7 +50,22 @@
  *    `onConflictDoNothing` + jalur kalah yang idempoten (terukur: menang=true,
  *    kalah=false, keadaan sehat), tapi GRANULARITAS SAPUAN INI TETAP BADAN —
  *    ia tetap tak akan melihat insert tak berpenjaga yang menumpang badan
- *    panjang. Badan yang panjang tetap titik butanya, bukan titik kuatnya;
+ *    panjang. Badan yang panjang tetap titik butanya, bukan titik kuatnya.
+ *    UTANG INI KEMUDIAN DIADJUDIKASI untuk KEENAM aturan (2026-08-25;
+ *    `bentrok-unik` sudah lebih dulu per-pernyataan atas 32 tabel): kelima
+ *    aturan sisa dijalankan ulang per-TULISAN dengan syarat penjaga hadir
+ *    SEBELUM tiap tulisan di badannya — hasilnya NOL temuan hidup. Kelima
+ *    tuduhannya sudah tertimbang di `dasar`; satu-satunya baris "penjaga
+ *    sesudah tulisan" (konsumsi.ts) adalah cacat jendela pengukurnya sendiri
+ *    (penjaganya DIRANTAI pada pernyataan yang sama:
+ *    `.insert(…).values(…).onConflictDoNothing()`). Untuk dua aturan gaya
+ *    PINTU (unggah/email-berbatas), granularitas badan memang benar secara
+ *    konstruksi — penjaganya middleware pada pendaftaran rute — dan pola
+ *    longgar `\bbatas[A-Z]` diperiksa per nama: yang terpungut hari ini
+ *    semuanya pembatas laju sungguhan (batasUndang*, batasLupa). Batasnya
+ *    yang tersisa: adjudikasi ini SEKALI JALAN — badan baru yang menaruh
+ *    tulisan sebelum penjaganya baru tertangkap adjudikasi berikutnya,
+ *    bukan oleh sapuan badan ini;
  *  · ia hanya melihat bentuk yang ditulis di TypeScript, bukan SQL mentah;
  *  · daftar tabel tiap aturan adalah pilihan, bukan kelengkapan. Untuk
  *    `bentrok-unik`: ada 32 tabel berindeks unik di skema ini, dan menyapu
