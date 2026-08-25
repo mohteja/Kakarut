@@ -126,6 +126,56 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## ANTREAN KEDELAPAN — usulan dari celah yang tercatat di ledger — 2026-08-25
+
+Antrean ketujuh (A‴–B‴) tuntas. Dua usulan; yang teratas lahir dari
+pengintaian A‴ sendiri: sapuan kunci payload menemukan pintu yang kuncinya
+benar tapi tak pernah DIBAGI antara dua percobaan yang menjaga hal yang sama.
+
+### Usulan A⁗ — SATU kunci idempotensi untuk DUA percobaan (online → offline)
+
+Komentar `OpnameBody` stok menulis aturannya (*"jaringan putus SESUDAH server
+menyimpan … sesi kedua lahir"*) dan `sync_queue.tambah()` menulis kegunaannya
+(*"[clientRef] diisi bila sudah dibuat sebelum percobaan ONLINE … server
+dedupe, tak dobel"*). **Populasi (dihitung 25-08)**: 10 situs enqueue —
+**4 membagi ref** (penjualan, stok_opname, absen ×2), **6 tidak** (shift_buka,
+perlengkapan_pakai/opname, faktur_tahap/kirim, produksi_kirim_hasil); dedup
+server ada di **6 modul**, **perlengkapan NOL dari 22 pintu tulis** (skema
+strict-nya bahkan tak punya medan `client_ref`); `TahapBody` punya kuncinya
+dan ponsel tak pernah mengirimnya. Model kerusakan: timeout-setelah-commit →
+antre ber-ref BARU → sinkron mengeksekusi ULANG — pemakaian terpotong dua
+kali tanpa galat. Bentuk kerja: ukur dulu (online + replay via `/sync`),
+fix server (client_ref + `denganKlaimIdempoten` pola `stok/routes.ts:388`) +
+mobile (ref dicetak sebelum online, dibagi — pola `bayar_sheet._clientRef`),
+adjudikasi shift_buka (`sudah_terbuka`), guard dua repo + verify-api §251 +
+bukti merah + CHANGELOG (aditif).
+
+### Usulan B⁗ — `sync_commands` tanpa pemangkasan
+
+Retensi ada di TIGA saudara (`error_logs`, `backup_runs`, `rate_limits`);
+`sync_commands` — ≈ satu baris per transaksi ponsel, ber-`hasil_json` utuh —
+tak pernah dipangkas (satu-satunya `delete` hanya melepas klaim gagal) dan
+ikut membengkakkan tiap cadangan. Ukur dulu (baris & byte per N transaksi —
+Postgres mati saat pengintaian, angka diukur di putaran), pangkas berpola
+`pangkasErrorLog` dengan jendela menghormati kontrak antrean offline
+(30 hari penjualan + 14 hari gagal → retensi ≥ 60–90 hari, alasan di
+konstanta), guard + bukti merah, ukur sesudah.
+
+### Diperiksa dan TIDAK diusulkan
+
+Nomor struk kembar lintas cabang berprefiks sama (`kodeCabang` 10 aksara) —
+`nomor` tak pernah jadi kunci pencarian server, indeks unik per-(cabang,
+nomor); ambiguitas tampilan/ekspor dicatat · granularitas badan 5 aturan
+`penjaga-semua-pintu` sisa (populasi kecil, paling rawan tuduhan palsu,
+aturan berisiko tertinggi sudah dibayar D′) · kelas DB ON DELETE/CHECK
+(tergarap 2026-08-22) · `restore-backup.ts` seluruh arsip di memori (CLI
+admin, bukan rute; terukur jalan utuh di 600 rb baris) · fase-2 mengabaikan
+niat cabang peran terikat (arah aman — tetap cabangnya sendiri).
+
+**Rekomendasi: A⁗ → B⁗.**
+
+---
+
 ## Pencadangan pada volume: seluruh DB di memori + gzip sinkron — server — 2026-08-25
 
 - **Kenapa vena ini ada**: `POST /admin/sistem/backup` tak pernah diukur pada
