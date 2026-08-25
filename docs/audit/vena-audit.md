@@ -126,6 +126,35 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Ledger sinkron dipangkas: retensi yang menghormati kontrak antrean — server — 2026-08-25
+
+- **Kenapa**: tiga tabel debu operasional dipangkas (`error_logs`,
+  `backup_runs`, `rate_limits`); `sync_commands` tidak — ≈ satu baris per
+  transaksi ponsel ber-`hasil_json` utuh, satu-satunya `delete` hanya
+  melepas klaim gagal
+- **Terukur**: **108 baris / 136 kB** per run verify-api (118 penjualan) —
+  ≈ 73 rb baris (~90 MB) per tahun per penyewa aktif, ikut tiap cadangan
+- **Fix**: `pangkasLedgerSync()` (`RETENSI_LEDGER_HARI = 60`), lepas-tangan
+  di ekor `/sync` (pola `pangkasErrorLog` menumpang penulisnya). **Aman
+  karena satu kalimat**: retensi ≥ 2× usia perintah maksimum /sync (30 hari
+  penjualan) — replay atas ref terpangkas tertahan gerbang usia 400 SEBELUM
+  eksekutor; pemangkasan tak pernah membuka jendela eksekusi ganda
+- **Terukur pemangkasnya**: 8 baris, 4 di-backdate 100 hari → terpangkas
+  tepat 4, penyintas baris hari ini
+- **Penjaga + bukti merah**: `sync-ledger-retensi.test.ts` — rasio retensi
+  vs usia dipaku (retensi diciutkan 20 → merah berkalimat jendela-ganda),
+  filter `created_at` (bukan `waktu` kejadian yang bisa 30 hari lebih tua),
+  kaitan `/sync`
+- **Batas**: pemangkasan berjalan per permintaan sinkron tanpa indeks
+  `created_at` — pada tabel yang KINI selalu ≤ ~60 hari isi, seq-scan-nya
+  kecil; bila kelak terukur berat, indeks adalah tuning satu baris
+- Gerbang: typecheck bersih · `npm test` **2.238** (188 berkas) · verify-api
+  **2.988/0** · cakupan identik · `audit:invarian` 26/26 · ponsel tak
+  tersentuh (disebut)
+- Commit: `a8874cb`
+
+---
+
 ## Satu kunci idempotensi untuk dua percobaan — server+mobile — 2026-08-25
 
 - **Kenapa**: `sync_queue.tambah()` menulis kegunaan `clientRef` (*"diisi bila
