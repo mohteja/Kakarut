@@ -126,6 +126,63 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Uang yang DIADILI ≠ uang yang dicetak — server — 2026-08-25
+
+- **Kenapa**: kelas **UANG belum pernah disapu sekali pun**. Dua detektor
+  terakhir memisahkannya dari kelas qty dan **sengaja melewatinya**; kalimat
+  itu tertulis di dua entri di bawah ini
+- **Populasi**: sapuan mekanis atas **265** berkas (`apps/server/src` +
+  `packages/shared/src` + `apps/web/src`) — uang yang ditumpuk/disusun di JS →
+  **38 tertuduh**, dipilah tangan
+- **Keterjangkauan diukur di skema, bukan dikira**: `qty` baris penjualan
+  `z.number().positive()` — **tanpa `.int()`**, jadi 0,5 porsi sah; dan
+  `menus.harga_jual` `numeric(12,2)` boleh berdesimal
+- **TUDUHAN YANG DICABUT, dengan angkanya**: "yang dicetak beda dengan yang
+  tersimpan" **tak tereproduksi**. Menu Rp 1000,33 × qty 0,5 → balasan rute
+  `subtotal 500.17`, DB `500.17` — sama persis. Sebabnya struktural dan layak
+  ditulis: tiap angka uang mendarat di kolom `numeric(…,2|4)` yang **Postgres
+  bulatkan saat menulis**, dan balasan `createSale` dibaca ulang lewat
+  `.returning()`. Selama angka JS-nya cuma DISIMPAN, ia tak pernah bertengkar
+- **Yang bertengkar: angka JS yang MENGADILI sesuatu sebelum ditulis.**
+  Terukur lewat HTTP (menu Rp 0,01 × qty 0,4):
+
+  | | SEBELUM | SESUDAH |
+  |---|---|---|
+  | nota tersimpan & dibalas rute | `subtotal 0`, `total 0` | sama |
+  | bayar tunai **Rp 0** untuk nota **Rp 0** | **400** "Uang diterima kurang dari total belanja" | **201** |
+  | PASANGAN: kurang bayar 11.999 atas 12.000 | 400 | **tetap 400** |
+
+  Gerbang kasnya mengadili `total = 0.004` — angka yang **tak pernah bisa
+  dilihat siapa pun**, sebab yang tercetak dan tersimpan Rp 0,00. Kelas yang
+  sama dengan "stok yang PERSIS cukup ditolak", dipindahkan ke jalur uang
+- **Fix**: `SKALA_UANG_KOLOM = 2` & `SKALA_HPP_KOLOM = 4` di `@kakarut/shared`
+  (tetangga `SKALA_QTY_STOK_KOLOM` yang lahir putaran lalu), dan `lineTotal` ·
+  `subtotal` · `subtotalNet` · `total` · `totalHpp` dikembalikan ke skala
+  kolomnya **di tiap langkah**. `EPS_KAS` **tidak** disentuh — kelasnya sendiri
+  dan sudah benar; dipaku uji pasangan
+- **Bukti merah**: pembulatan `total` dicabut (suntikan di-assert mendarat) →
+  pin merah menyebut barisnya; dipulihkan
+- **Pasangan anti-hijau-palsu**: selisih **satu unit kolom (Rp 0,01)** tetap
+  terlihat; bayar PAS diterima; kurang bayar tetap ditolak — ketiganya juga
+  lewat HTTP di §257
+- **Gerbang lama ikut menuduh, dan ia benar**: `verify-api-token` menolak
+  cadangan `${REISS105:-$KASIR}` yang sempat kutulis di §257 — token `$KASIR`
+  memang mati sesudah §105 dipakai me-reset passwordnya. Diperbaiki ke
+  `$REISS105` tanpa cadangan, supaya kegagalan re-issue berbunyi alih-alih
+  diam. (Kelima kalinya di sesi ini gerbang lama membetulkanku)
+- **Batas, jujur**: yang dinilai jalur `createSale`. Situs uang lain yang
+  tertuduh dan **dibiarkan beralasan**: agregat yang hanya TAMPIL
+  (`rekomendasi` ×5, `perlengkapan.totalBelanja`, `bep.ts`) — tak mengadili apa
+  pun dan diformat `formatRupiah`; `harga-stats` sudah ber-`bulat2`;
+  `contoh-cetak.ts` fikstur pratinjau. Detektornya juga menilai **nama** untuk
+  memisahkan kelas uang dari qty
+- Gerbang: typecheck bersih · `npm test` **2.282** (192 berkas) · `verify-api`
+  **3.016 lolos, 0 gagal** vs Postgres SEGAR (§257 baru) · cakupan rute **272**
+  identik · `audit:invarian` 26/26 · build web · Playwright e2e **6/6**
+- Commit: `3d96540`
+
+---
+
 ## FIFO: angka firasat terakhir, dan bukti merah yang gagal mendarat — server — 2026-08-25
 
 - **Kenapa**: utang terukur yang ditulis entri di bawah ini — *"`lib/fifo.ts`
