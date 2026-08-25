@@ -126,6 +126,45 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Berkas unggahan yatim disapu — server — 2026-08-25
+
+- **Kenapa**: `POST /upload` tak menulis baris DB apa pun, dan komentar
+  pintunya sendiri menulis celahnya sejak vena batas-laju: *"tak ada kuota
+  per perusahaan, tak ada pembersihan yatim"* — LAJU dijaga, STOK tumbuh
+  selamanya. Sumber yatim aktif: foto bukti sinkron yang perintahnya ditolak
+  per-item (kelas A‴/A⁗) + form web yang batal sesudah unggah
+- **Terukur SEBELUM** (mesin dev, akumulasi lintas reset DB — analog
+  produksi "baris dihapus, berkas tinggal"): **2.384 berkas / 12 MB** di
+  direktori unggahan vs **40 rujukan** (20 nama unik) di DB aktif = 98,3 %
+  yatim; ±130 berkas baru per run verify
+- **Terukur SESUDAH** (semua mtime dimundurkan 10 hari + satu berkas
+  ditautkan `menus.image_url`): sapuan menghapus **2.383**, penyintas
+  tunggal = berkas yang DIRUJUK — perlindungannya rujukan, bukan umur
+- **Bentuk**: `StorageDriver` += `list`/`hapus` (lokal rekursif + R2
+  `ListObjectsV2`, cermin backup-storage) · `lib/sapu-unggahan.ts` — 9 kolom
+  perujuk, `namaBasis` kebal bentuk rujukan, `TENGGANG_HARI = 7`, advisory
+  lock, **pagar**: rujukan dikumpulkan LENGKAP dulu (satu kueri gagal = tak
+  menghapus apa pun) dan umur tak terbaca tak dihapus · penjadwal harian
+  sejam sesudah jam cadangan · `POST /admin/sistem/sapu-unggahan`
+  (`?hitung=1` = mode ukur)
+- **Penjaga + bukti merah**: `sapu-unggahan.test.ts` — kelengkapan daftar
+  perujuk ditagih sapuan mekanis `schema.ts` **dihitung per nama** (tabel
+  baru memakai ulang `foto_url` tak lolos); entri `ingredient_steps` dicabut
+  → merah "3 di schema tapi 2 di daftar". verify-api **§253** (8 asersi)
+- **Batas, jujur**: rujukan di DB verify ternyata mayoritas string fikstur
+  (`/u/b250.jpg`) — angka "40 rujukan" adalah lingkungan uji; fraksi yatim
+  produksi akan jauh lebih rendah, tapi arah tumbuhnya sama dan kini
+  terpangkas. Sapuan menilai NAMA BASIS (uuid unik global) — rujukan yang
+  disimpan tanpa nama berkasnya (tak ada hari ini) tak terlihat. Kuota per
+  perusahaan tetap kebijakan produk (fondasi `list` per prefiks kini ada)
+- Gerbang: typecheck bersih · `npm test` **2.243** (189 berkas) · verify-api
+  **2.995/0** vs Postgres segar · cakupan **272/275** (+1 rute baru,
+  rekaman diperbarui dari jejak run) · `audit:invarian` 26/26 · ponsel tak
+  tersentuh (disebut)
+- Commit: `568f91e`
+
+---
+
 ## ANTREAN KESEMBILAN — usulan dari celah yang tercatat di ledger — 2026-08-25
 
 Antrean kedelapan (A⁗–B⁗) tuntas. Dua usulan.
