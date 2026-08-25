@@ -157,3 +157,46 @@ export function keSkalaKolom(nilai: number, skala: number): number {
   const f = 10 ** skala;
   return Math.round(nilai * f) / f;
 }
+
+/** Skala desimal kolom qty stok/produksi (`numeric(16,6)` di skema). */
+export const SKALA_QTY_STOK_KOLOM = 6;
+
+/**
+ * Toleransi pembanding untuk angka yang DIHITUNG DI JS lalu diadu dengan
+ * saldo — diturunkan, bukan dirasa.
+ *
+ * Tiga pintu memakai angka firasat (`1e-9` dua kali, `1e-6` sekali) tanpa
+ * satu pengukuran di baliknya, sementara `EPS_KAS = 0.005` di jalur kas
+ * sudah benar dan MENULIS asalnya: "pembulatan numeric(…,2)" — setengah unit
+ * terkecil kolomnya. Pembantu ini memakai aturan yang sama, ditambah satu
+ * suku yang diperlukan pengukuran:
+ *
+ *   toleransi = max( ½ unit skala kolom , lantai derau float pada besaran itu )
+ *
+ * KENAPA SUKU KEDUA. Toleransi MUTLAK berhenti berarti begitu besarannya
+ * naik: ULP double pada 10⁷ sudah 1,86e-9 — LEBIH BESAR dari `1e-9`. Terukur
+ * lewat HTTP (2026-08-25) pada gerbang `bahanKurang`: kebutuhan ditumpuk di
+ * JS lintas 500 baris penjualan (0,01 × 49.157 per baris) menghasilkan
+ * 245.785,00000000253 sementara saldonya persis 245.785 — dan penjualannya
+ * DITOLAK dengan kalimat yang menelanjangi dirinya sendiri:
+ *
+ *   "Stok tidak cukup: Bumbu B7 (sisa 245.785 gr, butuh 245.785)"
+ *
+ * Angka yang dicetak sama persis, transaksinya tetap ditolak. 187 pasangan
+ * (takaran, qty, baris) yang melampaui `1e-9` ditemukan pada sapuan
+ * aritmetika; yang terukur di atas satu di antaranya.
+ *
+ * KENAPA TAK MENELAN KEKURANGAN NYATA. Suku pertama setengah unit terkecil
+ * kolom, jadi kekurangan sekecil apa pun yang KOLOMNYA sanggup wakili
+ * (1 unit = 10⁻⁶ untuk qty stok) tetap tertangkap. Suku kedua hanya
+ * mengambil alih pada besaran di mana double sendiri sudah tak sanggup
+ * membedakan sebesar itu — di sana "kekurangan" yang lebih halus dari ULP
+ * bukan kekurangan, ia derau.
+ */
+export function toleransiBanding(nilai: number, skala: number): number {
+  const setengahUnit = 0.5 * 10 ** -skala;
+  // 2⁻⁵² = jarak relatif antar-double; ×1024 memberi ruang untuk akumulasi
+  // JS lintas baris (badan penjualan mengizinkan 500 baris).
+  const lantaiDerau = Math.abs(nilai) * 2 ** -52 * 1024;
+  return Math.max(setengahUnit, lantaiDerau);
+}

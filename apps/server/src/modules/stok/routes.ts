@@ -1,3 +1,4 @@
+import { toleransiBanding, SKALA_QTY_STOK_KOLOM } from "../../lib/batas-angka";
 import { randomUUID } from "node:crypto";
 import { BATAS_QTY_STOK } from "../../lib/batas-angka";
 import { zValidator } from "../../lib/validator";
@@ -332,7 +333,8 @@ export const stokRoutes = new Hono<AppEnv>()
 
       const saldoRows = await hitungSaldoCabang(auth.company_id!, branchId);
       const saldo = saldoRows.find((r) => r.ingredient_id === ing.id)?.saldo ?? 0;
-      if (body.qty > saldo + 1e-9) {
+      // Toleransi berbasis skala kolom + besaran — lihat `toleransiBanding`.
+      if (body.qty > saldo + toleransiBanding(body.qty, SKALA_QTY_STOK_KOLOM)) {
         throw new HTTPException(400, {
           message: `Qty waste melebihi saldo (${saldo}) — periksa lagi jumlahnya`,
         });

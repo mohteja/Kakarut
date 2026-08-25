@@ -14097,6 +14097,36 @@ cek "pakai 0,2 di CK (persis sisa rak) → ok, dulu 400 float" "V == 1" \
 cek "PASANGAN: pakai lagi saat rak habis → 400 bersih" "V == 1" \
   "$(api "$OWNER" POST "/perlengkapan/$SUP254B/pakai?branch_id=$CK254" '{"qty":0.05}' | jq '((.error // "") | test("Stok tidak cukup \\(saldo 0 ")) | if . then 1 else 0 end')"
 
+echo "── §255 Toleransi banding: stok yang PERSIS cukup tak boleh ditolak ──"
+#
+# Kebutuhan ditumpuk DI JS lintas baris penjualan (`tambahKebutuhanBahan`),
+# saldo dibaca dari SATU SUM eksak — jadi keduanya bisa meleset satu sama lain
+# pada besaran besar. Toleransi lama `1e-9` LEBIH KECIL daripada ULP double
+# begitu besarannya ≥ 10⁷ (1,86e-9), jadi ia berhenti menoleransi. Terukur
+# SEBELUM: 500 baris × (0,01 × 49.157) = kebutuhan 245.785,00000000253 atas
+# saldo 245.785 → 400 "Stok tidak cukup: … (sisa 245.785 gr, butuh 245.785)"
+# — angka yang dicetak SAMA, transaksinya tetap ditolak.
+api "$OWNER" PATCH /company '{"blokir_jual_minus":true}' > /dev/null
+KAT255=$(api "$OWNER" GET /kategori | jq -r '.[0].id')
+BH255=$(api "$OWNER" POST /bahan '{"nama":"Bumbu 255","harga_beli":1,"isi":1,"satuan":"gr"}' | jq -r '.id // ""')
+MN255=$(api "$OWNER" POST /menu "{\"nama\":\"Menu 255\",\"category_id\":\"$KAT255\",\"harga_jual\":1,\"mult\":1,\"komponen\":[{\"ingredient_id\":\"$BH255\",\"qty\":0.01}]}" | jq -r '.id // ""')
+api "$OWNER" POST /stok/awal "{\"items\":[{\"ingredient_id\":\"$BH255\",\"qty\":245785}]}" > /dev/null
+cek "premis: saldo 245.785 terbaca (kebutuhan 500×49.157×0,01 persis segitu)" "abs(V - 245785) < 0.0001" \
+  "$(api "$OWNER" GET /stok | jq --arg i "$BH255" '[.[]|select(.ingredient_id==$i)][0].saldo')"
+BODY255=$(python3 -c "
+import json,sys
+print(json.dumps({'is_dine_in': True, 'items': [{'menu_id': sys.argv[1], 'qty': 49157} for _ in range(500)]}))
+" "$MN255")
+JUAL255=$(curl -s -X POST "$BASE/api/penjualan" -H "Authorization: Bearer $REISS105" -H 'Content-Type: application/json' -d "$BODY255")
+cek "penjualan yang stoknya PERSIS cukup → 201, bukan 400 derau float" "V == 1" \
+  "$(echo "$JUAL255" | jq '(.sale.id != null) | if . then 1 else 0 end')"
+# PASANGAN anti-hijau-palsu: kekurangan NYATA tetap ditolak, dan pesannya
+# menyebut bahan + sisa + butuh (bukan "stok tidak cukup" yang buntu).
+TOLAK255=$(api "$REISS105" POST /penjualan "{\"is_dine_in\":true,\"items\":[{\"menu_id\":\"$MN255\",\"qty\":1}]}")
+cek "PASANGAN: kekurangan NYATA tetap 400 & menyebut bahannya" "V == 1" \
+  "$(echo "$TOLAK255" | jq '((.error // "") | test("Stok tidak cukup: Bumbu 255")) | if . then 1 else 0 end')"
+api "$OWNER" PATCH /company '{"blokir_jual_minus":false}' > /dev/null
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

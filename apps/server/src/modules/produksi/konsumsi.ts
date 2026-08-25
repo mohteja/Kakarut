@@ -1,4 +1,4 @@
-import { BATAS_QTY_STOK, pastikanMuat } from "../../lib/batas-angka";
+import { BATAS_QTY_STOK, SKALA_QTY_STOK_KOLOM, pastikanMuat, toleransiBanding } from "../../lib/batas-angka";
 import { and, eq, inArray } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { companies, ingredientComponents, ingredients, productionConsumptions } from "../../db/schema";
@@ -184,7 +184,8 @@ export async function bahanKurangUntukProduksi(
     const saldoByIng = new Map(saldo.map((s) => [s.ingredient_id, s.saldo]));
     for (const [inputId, req] of perCabang) {
       const tersedia = saldoByIng.get(inputId) ?? 0;
-      if (req.butuh - tersedia > 1e-6) {
+      // Toleransi berbasis skala kolom + besaran — lihat `toleransiBanding`.
+      if (req.butuh - tersedia > toleransiBanding(req.butuh, SKALA_QTY_STOK_KOLOM)) {
         kurang.push({
           ingredientId: inputId,
           nama: req.nama,
