@@ -13823,11 +13823,29 @@ ganti248 "penyimpanan" "/penyimpanan/$PG248B" '{"nama":"Rak G248A"}' '{"nama":"R
 KBG248A=$(api "$OWNER" POST /kategori-bahan '{"nama":"KB G248A"}' | jq -r .id)
 KBG248B=$(api "$OWNER" POST /kategori-bahan '{"nama":"KB G248B"}' | jq -r .id)
 ganti248 "kategori-bahan" "/kategori-bahan/$KBG248B" '{"nama":"KB G248A"}' '{"nama":"KB G248B v2"}' '{"nama":"KB G248 Rebutan"}' "/kategori-bahan/$KBG248A"
-# cabang: dua yang SUDAH ada (membuat cabang terbentur kuota plan) — dijalankan
-# paling akhir skrip, tak ada seksi lain yang bergantung pada namanya.
+# cabang: dua yang SUDAH ada (membuat cabang terbentur kuota plan).
+#
+# NAMANYA DIPULIHKAN DI AKHIR — dan kalimat yang dulu berdiri di sini
+# ("dijalankan paling akhir skrip, tak ada seksi lain yang bergantung pada
+# namanya") TERBANTAH oleh pengukuran: yang berjalan sesudah skrip ini bukan
+# seksi verify-api melainkan **suite Playwright** di job CI yang sama, dan ia
+# membaca PREFIKS NOMOR STRUK — `PUSAT-20260825-0112`. Prefiks itu diturunkan
+# dari NAMA cabang, jadi meninggalkan cabang seed bernama "Cabang G248 Rebutan"
+# membuat dua spec e2e merah (`pos.spec` & `printer.spec`) — dan job `deploy`
+# digerbangi keduanya. Terukur lokal sebelum merge; di CI ia akan menahan
+# deploy tanpa satu pun uji unit berubah warna.
+#
+# `ganti248` merebutkan SATU nama ke KEDUA cabang (argumen $2 dan $6), jadi
+# yang tersisa tak pasti mana — keduanya karena itu dipulihkan, bukan salah
+# satunya.
 CBG248A=$(api "$OWNER" GET /cabang | jq -r '.[0].id'); CBG248AN=$(api "$OWNER" GET /cabang | jq -r '.[0].nama')
-CBG248B=$(api "$OWNER" GET /cabang | jq -r '.[1].id')
+CBG248B=$(api "$OWNER" GET /cabang | jq -r '.[1].id'); CBG248BN=$(api "$OWNER" GET /cabang | jq -r '.[1].nama')
 ganti248 "cabang" "/cabang/$CBG248B" "{\"nama\":\"$CBG248AN\"}" '{"nama":"Cabang G248B v2"}' '{"nama":"Cabang G248 Rebutan"}' "/cabang/$CBG248A"
+api "$OWNER" PATCH "/cabang/$CBG248A" "{\"nama\":\"$CBG248AN\"}" > /dev/null
+api "$OWNER" PATCH "/cabang/$CBG248B" "{\"nama\":\"$CBG248BN\"}" > /dev/null
+cek "cabang: KEDUA nama seed pulih (prefiks nomor struk dibaca e2e sesudah ini)" "V == 2" \
+  "$(api "$OWNER" GET /cabang | jq --arg a "$CBG248AN" --arg b "$CBG248BN" \
+      '[.[]|select(.nama==$a or .nama==$b)]|length')"
 PLG248A=$(api "$OWNER" POST /perlengkapan '{"nama":"Perlengkapan G248A","satuan":"pcs","harga_beli":5000}' | jq -r .id)
 PLG248B=$(api "$OWNER" POST /perlengkapan '{"nama":"Perlengkapan G248B","satuan":"pcs","harga_beli":5000}' | jq -r .id)
 ganti248 "perlengkapan" "/perlengkapan/$PLG248B" '{"nama":"Perlengkapan G248A"}' '{"nama":"Perlengkapan G248B v2"}' '{"nama":"Perlengkapan G248 Rebutan"}' "/perlengkapan/$PLG248A"
