@@ -126,6 +126,31 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Granularitas badan diadjudikasi untuk keenam aturan — server — 2026-08-25
+
+- **Kenapa**: batas tertulis PALING LAMA `penjaga-semua-pintu` (*"satu
+  penjaga di mana pun dalam satu badan membuat SELURUH tulisan lolos"*),
+  ditunda tiga antrean; `bentrok-unik` sudah dibayar D′ per-pernyataan
+- **Metode**: kelima aturan sisa dijalankan ulang per-TULISAN — penjaga
+  wajib hadir SEBELUM tiap tulisan di badannya; gaya-PINTU (unggah/email:
+  penjaga = middleware pendaftaran rute) diperiksa per NAMA yang terpungut
+  pola longgarnya
+- **Hasil — BERSIH berangka, nol temuan hidup**: 5 tuduhan = `dasar` yang
+  sudah tertimbang · **1 tuduhan palsu jendela pengukurku sendiri**
+  (`konsumsi.ts:100` — penjaga DIRANTAI pada pernyataan yang sama:
+  `.insert(…).values(…).onConflictDoNothing()`; riwayat kelas ini 14 → 15) ·
+  email: semua yang terpungut `\bbatas[A-Z]` adalah pembatas laju sungguhan
+  (`batasUndang*`, `batasLupa`) · upload: 1 badan, kedua middleware hadir
+- **Tindak**: prosa batas gerbang diperbarui — utang granularitas kini
+  tercatat DIADJUDIKASI keenam aturannya, dengan batas jujur: adjudikasi ini
+  sekali jalan (badan baru yang menaruh tulisan sebelum penjaganya menunggu
+  adjudikasi berikutnya, bukan sapuan badan)
+- Gerbang: typecheck bersih · `npm test` **2.243** (189 berkas) · hanya
+  prosa berkas uji tersentuh — verify-api tak dijalankan ulang (disebut)
+- Commit: `f40209b`
+
+---
+
 ## Berkas unggahan yatim disapu — server — 2026-08-25
 
 - **Kenapa**: `POST /upload` tak menulis baris DB apa pun, dan komentar
