@@ -232,3 +232,143 @@ describe("nilai yang diadili di dalam fungsi lain", () => {
     expect(situsKembalian.map((b) => b.nama)).toEqual(["receipt.ts"]);
   });
 });
+
+/**
+ * SATU HOP LEBIH DALAM: identifier yang lahir dari EKSPRESI aritmetika, lalu
+ * dioper ke fungsi pengadil.
+ *
+ * Batas gerbang di atas ("hanya pemanggilan LANGSUNG") ditutup sejauh satu
+ * lompatan. Kedekatannya dibatasi `JARAK_MAKS` baris — pendekatan atas
+ * "lingkup yang sama", dan itu ditulis sebagai batas, bukan disamarkan:
+ * pencocokan lintas-lingkup tanpa batas ini menuduh 18 situs, 9 di antaranya
+ * PALSU (nama yang sama di fungsi lain di berkas yang sama).
+ */
+const JARAK_MAKS = 40;
+
+export function situsSatuHop(
+  berkas: Berkas[],
+  pengadil: Map<string, string[]>,
+): { berkas: string; baris: number; fungsi: string; lewat: string }[] {
+  const out: { berkas: string; baris: number; fungsi: string; lewat: string }[] = [];
+  for (const b of berkas) {
+    const src = bersih(b);
+    const lahir = new Map<string, number>();
+    src.split("\n").forEach((ln, i) => {
+      const m = ln.match(/(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*([^;]+);/);
+      if (!m) return;
+      const rhs = m[2];
+      if (!/[A-Za-z_$)\d]\s*[-+*]\s*[A-Za-z_$(\d]/.test(rhs)) return;
+      if ([...OBAT].some((o) => rhs.includes(`${o}(`))) return;
+      if (/^\s*['"]/.test(rhs) || /\+\s*['"]/.test(rhs)) return; // teks
+      lahir.set(m[1], i + 1);
+    });
+    if (!lahir.size) continue;
+    src.split("\n").forEach((ln, i) => {
+      for (const nama of pengadil.keys()) {
+        if (OBAT.has(nama)) continue;
+        const m = ln.match(new RegExp(`\\b${nama}\\s*\\(([^()]*(?:\\([^()]*\\))?[^()]*)\\)`));
+        if (!m) continue;
+        for (const [id, l] of lahir) {
+          if (new RegExp(`\\b${id}\\b`).test(m[1]) && i + 1 > l && i + 1 - l <= JARAK_MAKS) {
+            out.push({ berkas: b.nama, baris: i + 1, fungsi: nama, lewat: id });
+            return;
+          }
+        }
+      }
+    });
+  }
+  return out;
+}
+
+/**
+ * Situs satu-hop yang sudah dipilah tangan — dan DUA di antaranya dicabut oleh
+ * pengukuran, bukan oleh argumen.
+ */
+const DIKECUALIKAN_HOP = new Map<string, string>([
+  // DIUKUR: 0 dari ~1,8 juta pasangan (subtotal, diskon, tarif) berskala-2
+  // membuat derau `subtotal - diskon` mengubah hasil `Math.round` di
+  // `hitungPb1`. Deraunya ≈1e-13; jarak ke batas pembulatan 0,5.
+  ["modules/open-bill/routes.ts:hitungPb1", "drift 1e-13 tak pernah mengubah pembulatan (diukur)"],
+  ["hpp.ts:hitungPb1", "sama: `net` berskala-2, drift tak mengubah Math.round (diukur)"],
+  // Penjaga LANGIT-LANGIT: yang dinilai apakah angkanya muat di kolom, dan
+  // meleset satu ULP di 10¹⁰ tak mengubah jawabannya.
+  ["modules/produksi/konsumsi.ts:pastikanMuat", "penjaga langit-langit, bukan kesetaraan"],
+  // Harga turunan yang dipakai sebagai NILAI, bukan sebagai putusan.
+  ["modules/produksi/routes.ts:hargaDefault", "harga turunan, bukan putusan"],
+  ["modules/produksi/routes.ts:jumlahFaktur", "jumlah kemasan turunan, ber-EPS_QTY"],
+  ["modules/produksi/routes.ts:wajibKelipatanKemasan", "ber-EPS_QTY yang kini beralasan tertulis"],
+  ["modules/produksi/routes.ts:hargaPerUnit", "harga turunan, bukan putusan"],
+  ["modules/transfer/routes.ts:wajibKelipatanKemasan", "ber-EPS_QTY yang kini beralasan tertulis"],
+]);
+
+describe("satu hop: nilai lewat variabel perantara", () => {
+  const berkas = semuaBerkas();
+  const pengadil = fungsiPengadil(berkas);
+  const situs = situsSatuHop(berkas, pengadil);
+  const kunci = (s: { berkas: string; fungsi: string }) => `${s.berkas}:${s.fungsi}`;
+
+  it("PREMIS: populasinya > 0", () => {
+    expect(situs.length, "tak satu pun situs satu-hop terbaca").toBeGreaterThan(0);
+  });
+
+  it("DETEKTOR TERBUKTI: perantara ber-ekspresi tertuduh, yang polos tidak", () => {
+    const sintetis: Berkas[] = [
+      {
+        nama: "hop.ts",
+        isi: [
+          "export function jagaBatas(nilai: number, batas: number) {",
+          "  if (nilai > batas) throw new Error('lewat');",
+          "}",
+          "const a = 1, b = 2;",
+          "const disusun = a - b;",
+          "const polos = a;",
+          "jagaBatas(disusun, 10);", // ← tertuduh
+          "jagaBatas(polos, 10);", // ← aman
+        ].join("\n"),
+      },
+    ];
+    const p = fungsiPengadil(sintetis);
+    const s = situsSatuHop(sintetis, p);
+    expect(s.map((x) => x.lewat)).toEqual(["disusun"]);
+  });
+
+  it("BATAS pemindainya dipatok: kejauhan lintas-lingkup tak ikut dituduh", () => {
+    // Tanpa `JARAK_MAKS`, nama yang sama di fungsi LAIN di berkas yang sama
+    // ikut tertuduh — 9 dari 18 tuduhan pertama adalah cacat itu.
+    const jauh: Berkas[] = [
+      {
+        nama: "jauh.ts",
+        isi: [
+          "export function jagaBatas(nilai: number, batas: number) {",
+          "  if (nilai > batas) throw new Error('lewat');",
+          "}",
+          "const x = 1 - 2;",
+          ...Array.from({ length: JARAK_MAKS + 2 }, (_, i) => `const pad${i} = 0;`),
+          "jagaBatas(x, 10);",
+        ].join("\n"),
+      },
+    ];
+    expect(situsSatuHop(jauh, fungsiPengadil(jauh))).toEqual([]);
+  });
+
+  it("tiap situs satu-hop sudah dipilah — atau menagih keputusan", () => {
+    const asing = situs.filter((s) => !DIKECUALIKAN_HOP.has(kunci(s)));
+    expect(
+      asing.map((s) => `${s.berkas}:${s.baris} → ${s.fungsi}(lewat ${s.lewat})`),
+      "perantara ber-ekspresi baru dioper ke fungsi yang mengadilinya",
+    ).toEqual([]);
+  });
+
+  it("EPS_QTY kini punya asal yang tertulis, bukan konstanta telanjang", () => {
+    // Konstanta telanjang adalah kelas yang sudah tiga kali jadi bug di repo
+    // ini. Yang dijaga: angkanya masih diturunkan dari skala kolom, dan
+    // batasnya masih tertulis.
+    const K = readFileSync(
+      fileURLToPath(new URL("../../../packages/shared/src/ketersediaan.ts", import.meta.url)),
+      "utf8",
+    );
+    expect(K).toContain("SATU unit kolom qty stok");
+    expect(K).toMatch(/qty 10¹⁰ → ULP 1,91e-6 > EPS_QTY/);
+    expect(K).toContain("const EPS_QTY = 1e-6;");
+  });
+});
