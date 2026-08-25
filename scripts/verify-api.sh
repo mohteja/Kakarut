@@ -14023,6 +14023,43 @@ cek "pakai melebihi saldo ber-ref → 400 (bukan tercatat sukses)" "V == 400" \
 cek "…retry ref sama dieksekusi lagi → tetap 400 (gagal tak diputar ulang sebagai sukses)" "V == 400" \
   "$(status_code_body "$OWNER" POST "/perlengkapan/$SUP252/pakai" "{\"qty\":99999,\"client_ref\":\"$REF252D\"}")"
 
+echo "── §253 Sapuan berkas unggahan yatim ──"
+#
+# POST /upload tak menulis baris DB apa pun, dan komentar pintunya sendiri
+# menulis celahnya: "tak ada pembersihan yatim". Terukur (2026-08-25): 2.384
+# berkas di direktori dev, 40 rujukan DB aktif; sapuan nyata menghapus 2.383
+# dan menyisakan persis satu-satunya yang dirujuk (perlindungan = rujukan,
+# bukan umur). Seksi ini memaku perilakunya: dirujuk selamat · yatim
+# lewat-tenggang terhapus · yatim segar selamat · mode hitung tak menghapus.
+# Umur dimundurkan lewat mtime disk (driver lokal; jalur bawaan repo).
+UP253="$(cd "$(dirname "$0")/.." && pwd)/apps/server/uploads"
+PNG253=$(mktemp --suffix=.png)
+printf 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==' | base64 -d > "$PNG253"
+unggah253() { curl -s -X POST "$BASE/api/upload?tujuan=menu" -H "Authorization: Bearer $OWNER" -F "file=@$PNG253;type=image/png" | jq -r '.url // ""'; }
+URLA253=$(unggah253); URLB253=$(unggah253); URLC253=$(unggah253)
+cek "premis: tiga unggahan §253 hidup" "V == 1" \
+  "$( [ -n "$URLA253" ] && [ -n "$URLB253" ] && [ -n "$URLC253" ] && echo 1 || echo 0 )"
+# A DIRUJUK: menu baru menyimpan image_url-nya. B & C dibiarkan yatim.
+KAT253=$(api "$OWNER" GET /kategori | jq -r '.[0].id')
+api "$OWNER" POST /menu "{\"nama\":\"Menu Sapu 253\",\"category_id\":\"$KAT253\",\"harga_jual\":1000,\"mult\":1,\"image_url\":\"$URLA253\",\"komponen\":[]}" > /dev/null
+# A dan B dituakan LEWAT masa tenggang; C tetap segar.
+touch -d "10 days ago" "$UP253/${URLA253#/uploads/}" "$UP253/${URLB253#/uploads/}"
+# Mode hitung TIDAK menghapus — B masih ada sesudahnya.
+HIT253=$(api "$SA" POST "/admin/sistem/sapu-unggahan?hitung=1" | jq -r '.dihapus')
+cek "mode hitung: dihapus=0" "V == 0" "$HIT253"
+cek "…dan yatim tuanya masih di tempat" "V == 200" \
+  "$(curl -s -o /dev/null -w '%{http_code}' "$BASE$URLB253")"
+# Sapuan sungguhan.
+SAPU253=$(api "$SA" POST "/admin/sistem/sapu-unggahan")
+cek "sapuan berjalan (ok + ada yang dihapus)" "V >= 1" "$(echo "$SAPU253" | jq -r '.dihapus')"
+cek "berkas DIRUJUK selamat meski umurnya sama tua" "V == 200" \
+  "$(curl -s -o /dev/null -w '%{http_code}' "$BASE$URLA253")"
+cek "yatim lewat-tenggang TERHAPUS" "V == 404" \
+  "$(curl -s -o /dev/null -w '%{http_code}' "$BASE$URLB253")"
+cek "PASANGAN: yatim SEGAR selamat (masa tenggang)" "V == 200" \
+  "$(curl -s -o /dev/null -w '%{http_code}' "$BASE$URLC253")"
+rm -f "$PNG253"
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

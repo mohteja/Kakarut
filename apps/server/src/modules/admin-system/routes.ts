@@ -18,6 +18,7 @@ import {
   terapkanRetensi,
   zonaWaktuCadangan,
 } from "../../lib/backup";
+import { sapuUnggahanYatim } from "../../lib/sapu-unggahan";
 import { keadaanCadangan, peringatanTerakhir } from "../../lib/backup-peringatan";
 import { periksaSetelan } from "../../lib/pemeriksaan-setelan";
 import { getSmtpRow, kirimEmail, penyediaEmail, ujiKoneksiSmtp, type SmtpRow } from "../mail/service";
@@ -206,6 +207,18 @@ export const adminSystemRoutes = new Hono<AppEnv>()
   .post("/backup/retensi", async (c) => {
     const dibuang = await terapkanRetensi();
     return c.json({ ok: true, dibuang });
+  })
+  // Sapu berkas unggahan yatim sekarang. ?hitung=1 = mode ukur (tanpa hapus).
+  .post("/sapu-unggahan", async (c) => {
+    try {
+      const h = await sapuUnggahanYatim({ hanyaHitung: c.req.query("hitung") === "1" });
+      return c.json({ ok: true, ...h });
+    } catch (e) {
+      // mis. advisory lock (sapuan lain sedang berjalan)
+      throw new HTTPException(409, {
+        message: e instanceof Error ? e.message : "Sapuan gagal",
+      });
+    }
   })
   // Pengaturan email (SMTP) tingkat platform — dipakai reset password & undangan.
   .get("/smtp", async (c) => {

@@ -149,6 +149,7 @@ POST /api/absensi
 POST /api/absensi/saya
 POST /api/admin/error-log/pangkas
 POST /api/admin/sistem/backup
+POST /api/admin/sistem/sapu-unggahan
 POST /api/admin/sistem/smtp/test-email
 POST /api/admin/tenants
 POST /api/auth/forgot-password
