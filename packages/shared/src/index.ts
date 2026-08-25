@@ -18,3 +18,4 @@ export * from "./satuan";
 export * from "./types";
 export * from "./geo";
 export * from "./angka";
+export * from "./skala";

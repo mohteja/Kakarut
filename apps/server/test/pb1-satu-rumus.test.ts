@@ -68,10 +68,24 @@ describe("tarif PB1 jadi rupiah hanya di satu baris di seluruh repo", () => {
   it("tepat SATU baris, dan baris itu ada di `hitungPb1`", () => {
     // Bukan "≤ 1": nol berarti penyapunya yang rusak, bukan repo yang bersih —
     // dan penjaga yang hijau karena tak menemukan apa pun tidak menjaga apa pun.
+    //
+    // Yang dipatok BERKAS + FUNGSInya, bukan NOMOR BARISnya. Versi lama menulis
+    // "packages/shared/src/hpp.ts:103", dan baris itu bergeser ke 122 begitu
+    // komentar pengukuran ditambahkan di atasnya — gerbang merah yang tak
+    // menyatakan apa pun tentang PB1. Yang dijaga niatnya: satu situs, dan
+    // situs itu di dalam badan `hitungPb1`.
     expect(
-      aritmetika.map((b) => `${b.berkas}:${b.baris}`),
+      aritmetika.map((b) => b.berkas),
       "tarif PB1 diubah jadi rupiah di lebih dari satu tempat (atau penyapunya berhenti cocok)",
-    ).toEqual(["packages/shared/src/hpp.ts:103"]);
+    ).toEqual(["packages/shared/src/hpp.ts"]);
+
+    const HPP = readFileSync(AKAR + "packages/shared/src/hpp.ts", "utf8").split("\n");
+    const i = aritmetika[0].baris - 1;
+    const awal = HPP.slice(0, i).map((b) => b.trim()).reverse()
+      .find((b) => /^export function \w+/.test(b));
+    expect(awal, "aritmetika PB1 pindah keluar dari `hitungPb1`").toMatch(
+      /^export function hitungPb1\(/,
+    );
   });
 
   it("layar kasir MEMANGGIL rumusnya, bukan menyalinnya", () => {

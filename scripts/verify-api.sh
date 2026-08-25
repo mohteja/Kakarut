@@ -14145,6 +14145,48 @@ cek "PASANGAN: kekurangan NYATA tetap 400 & menyebut bahannya" "V == 1" \
   "$(echo "$TOLAK255" | jq '((.error // "") | test("Stok tidak cukup: Bumbu 255")) | if . then 1 else 0 end')"
 api "$OWNER" PATCH /company '{"blokir_jual_minus":false}' > /dev/null
 
+echo "── §256 Saldo stok disusun di JS: angkanya bersih, badge habis benar-benar habis ──"
+#
+# Vena A⁷ membayar kelas ini untuk perlengkapan lalu menulis batasnya sendiri:
+# "`saldoStok()` menyusun saldo di JS juga tapi gejalanya tak tereproduksi."
+# Direproduksi di sini, lewat HTTP: tiap komponen saldo adalah `SUM(...)`
+# tersendiri (dibulatkan SEKALI saat cast), dan menjumlahkannya DI JS
+# memasukkan derau yang tak pernah ada di datanya.
+#
+#   SEBELUM  stok awal 0,1 + pembelian 0,2 → "saldo": 0.30000000000000004
+#            dua faktur 0,1 & 0,2 → "pembelian_berjalan": 0.30000000000000004
+#   SESUDAH  keduanya 0.3
+B256=$(api "$OWNER" POST /bahan '{"nama":"Bahan Skala 256","harga_beli":1000,"isi":1,"satuan":"kg","track_stok":true}' | jq -r .id)
+api "$OWNER" POST /stok/awal "{\"items\":[{\"ingredient_id\":\"$B256\",\"qty\":0.1}]}" > /dev/null
+F256=$(api "$OWNER" POST /pembelian/faktur "{\"items\":[{\"ingredient_id\":\"$B256\",\"mode\":\"pcs\",\"jumlah\":0.2,\"total_harga\":200}]}" | jq -r .faktur_id)
+api "$OWNER" POST "/pembelian/tahap/$F256" '{"ke":"dikerjakan"}' > /dev/null
+api "$OWNER" POST "/pembelian/tahap/$F256" '{"ke":"menunggu"}' > /dev/null
+api "$OWNER" POST "/pembelian/konfirmasi/$F256" > /dev/null
+ROW256=$(api "$OWNER" GET /stok | jq --arg b "$B256" '.[]|select(.ingredient_id==$b)')
+# premis (aturan 6): data suntikannya benar-benar terbaca rutenya
+cek "premis §256: stok awal 0,1 & pembelian 0,2 terbaca" "V == 1" \
+  "$(echo "$ROW256" | jq '((.stok_awal == 0.1) and (.produksi == 0.2)) | if . then 1 else 0 end')"
+cek "saldo 0,1+0,2 BERSIH 0.3 (dulu 0.30000000000000004)" "V == 1" \
+  "$(echo "$ROW256" | jq '(.saldo == 0.3) | if . then 1 else 0 end')"
+cek "kartu stok: saldo akhir sama persis dengan daftar" "V == 1" \
+  "$(api "$OWNER" GET "/stok/kartu/$B256?dari=2020-01-01&sampai=2030-12-31" | jq '(.saldo_akhir == 0.3) | if . then 1 else 0 end')"
+# qty BERJALAN (tiga tahap dijumlahkan di JS) pada bahan kedua
+B256B=$(api "$OWNER" POST /bahan '{"nama":"Bahan Skala 256B","harga_beli":1000,"isi":1,"satuan":"kg","track_stok":true}' | jq -r .id)
+api "$OWNER" POST /pembelian/faktur "{\"items\":[{\"ingredient_id\":\"$B256B\",\"mode\":\"pcs\",\"jumlah\":0.1,\"total_harga\":100}]}" > /dev/null
+FB256=$(api "$OWNER" POST /pembelian/faktur "{\"items\":[{\"ingredient_id\":\"$B256B\",\"mode\":\"pcs\",\"jumlah\":0.2,\"total_harga\":200}]}" | jq -r .faktur_id)
+api "$OWNER" POST "/pembelian/tahap/$FB256" '{"ke":"dikerjakan"}' > /dev/null
+BJ256=$(api "$OWNER" GET /stok | jq --arg b "$B256B" '.[]|select(.ingredient_id==$b)|.pembelian_berjalan')
+cek "premis §256: kedua faktur berjalan terbaca (0,1 rencana + 0,2 dikerjakan)" "V == 1" \
+  "$(echo "$BJ256" | jq '((.rencana == 0.1) and (.dikerjakan == 0.2)) | if . then 1 else 0 end')"
+cek "qty berjalan BERSIH 0.3 (dulu 0.30000000000000004)" "V == 1" \
+  "$(echo "$BJ256" | jq '(.qty == 0.3) | if . then 1 else 0 end')"
+# PASANGAN anti-hijau-palsu: pembulatan TIDAK menelan selisih yang nyata —
+# satu unit kolom qty stok (1e-6) tetap terlihat sebagai saldo, bukan jadi nol.
+B256C=$(api "$OWNER" POST /bahan '{"nama":"Bahan Skala 256C","harga_beli":1000,"isi":1,"satuan":"kg","track_stok":true}' | jq -r .id)
+api "$OWNER" POST /stok/awal "{\"items\":[{\"ingredient_id\":\"$B256C\",\"qty\":0.000001}]}" > /dev/null
+cek "PASANGAN: saldo 1e-6 tetap terlihat, tak ditelan pembulatan" "V == 1" \
+  "$(api "$OWNER" GET /stok | jq --arg b "$B256C" '[.[]|select(.ingredient_id==$b)|.saldo == 0.000001]|first | if . then 1 else 0 end')"
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"
