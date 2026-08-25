@@ -126,6 +126,51 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Satu kunci idempotensi untuk dua percobaan — server+mobile — 2026-08-25
+
+- **Kenapa**: `sync_queue.tambah()` menulis kegunaan `clientRef` (*"diisi bila
+  sudah dibuat sebelum percobaan ONLINE … server dedupe, tak dobel"*) dan
+  komentar `OpnameBody` stok menulis aturannya — lalu 6 dari 10 situs enqueue
+  tak pernah mengisinya, dan modul perlengkapan tak punya medan kuncinya
+  (0 dari 22 pintu tulis; skema strict → mengirimnya = 400). `TahapBody`
+  punya kunci + klaim server, dan ponsel tak pernah mengirimnya
+- **Terukur SEBELUM** (online COMMIT + replay `/sync` ber-ref BARU — persis
+  skenario balasan hilang di jaringan): `pakai 7` → saldo **100→93→86**
+  (potongan GANDA, balasan "ok") · satu niat opname → **2 sesi kembar**
+  menunggu dua ACC · `faktur_tahap` → 400 "Tahap tidak berurutan" = item
+  antrean **gagal PALSU** untuk aksi yang sukses · kirim/kirim-hasil sekelas
+  (penjaga status dibaca: `siap.length === 0` → 400, tak bisa ganda) ·
+  `shift_buka` TOLERAN terukur (replay → ok + `sudah_terbuka`, shift tetap 1)
+- **Fix server**: `PakaiBody`/`OpnameBody` perlengkapan ber-`client_ref` +
+  `denganKlaimIdempoten` (pola stok/routes.ts — pintu pemindah stok butuh
+  klaim SEBELUM eksekusi); `KirimBody` (+turunannya) ber-`client_ref` +
+  `catatHasilIdempoten` (pintu berstatus cukup MENCATAT sukses ke ledger
+  bersama). **Fix mobile**: 6 situs mencetak `refPerintah` SEBELUM percobaan
+  online, dibagi ke badan online (`client_ref`) + envelope antrean
+- **Terukur SESUDAH** (keadaan sama): pakai replay → `sudah_ada`, saldo
+  TETAP; pasangan ref baru tetap dieksekusi (−1) · opname **+1 sesi saja** ·
+  tahap replay → `sudah_ada` · kegagalan TIDAK di-cache (klaim dilepas saat
+  gagal): pakai-melebihi-saldo ber-ref → 400, retry ref sama → tetap 400
+- **Penjaga + bukti merah** (suntikan di-assert mendarat):
+  `idempoten-dua-percobaan.test.ts` (tipe klaim dicabut → menuduh dengan
+  angka pengukurannya) · mobile `sync_ref_dibagi_test.dart` (9 tipe +
+  pasangan badan online; `clientRef` dicabut → merah berkalimat) ·
+  verify-api **§252** (12 asersi perilaku)
+- **Batas, jujur**: pintu kirim/kirim-hasil tidak diukur GANDA lewat HTTP
+  (fikstur CK→cabang mahal) — ketidak-gandaannya dari penjaga status yang
+  DIBACA, dan mekanisme putar-ulangnya persis jalur yang diukur tiga kali
+  (pakai/opname/tahap semua lewat fast-path ledger yang sama); yang dipaku
+  bentuk TULIS ledger-nya. Build lama tetap tanpa ref → perilaku hari ini
+  (terukur di SEBELUM) tak berubah untuk mereka. Satu alarm palsu tercatat:
+  ref pelacak `origin/claude` ponsel basi menunjuk leluhur lama — kukira
+  cabang remote di-reset; GitHub (head PR = commit-ku) membantahnya
+- Gerbang: typecheck bersih · `npm test` **2.235** (187 berkas) · verify-api
+  **2.988/0** vs Postgres segar · cakupan identik · `audit:invarian` 26/26 ·
+  `flutter analyze` bersih · `flutter test` **532**
+- Commit: server `43590f5` · mobile `772f4c7`
+
+---
+
 ## ANTREAN KEDELAPAN — usulan dari celah yang tercatat di ledger — 2026-08-25
 
 Antrean ketujuh (A‴–B‴) tuntas. Dua usulan; yang teratas lahir dari
