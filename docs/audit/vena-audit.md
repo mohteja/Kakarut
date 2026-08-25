@@ -126,6 +126,57 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Toleransi yang DIUKUR: `1e-9` berhenti berarti di 10⁷ — server — 2026-08-25
+
+- **Kenapa**: tiga pintu memakai toleransi firasat (`1e-9` ×2, `1e-6` ×1)
+  tanpa satu angka pengukuran di baliknya, sementara `EPS_KAS = 0.005` di
+  jalur kas sudah **menulis asalnya** ("pembulatan numeric(…,2)" — setengah
+  unit terkecil kolom). Preseden benar ada di satu pintu; tiga lainnya tidak
+- **INSTRUMENNYA DIUJI LEBIH DULU (Aturan 7), dan DUA versi pertama BUTA**:
+  membandingkan `SUM::float8` dengan `SUM(numeric)` membuat Postgres
+  menaikkan numeric ke float8 → selisih **nol secara konstruksi**; lewat
+  `::numeric(40,25)` juga nol karena Postgres memakai representasi terpendek.
+  Uji-mandiri (`drift 0,1` harus terlihat) menolak keduanya; yang dipakai
+  ekspansi desimal eksak Python — drift 0,1 = **5,551e-18 TERLIHAT**
+- **Terukur — drift TIDAK tumbuh dengan N**: `SUM(qty)::float8` atas 30 rb
+  baris pecahan (data dibuktikan terbaca API: saldo 5250) —
+  **1 rb: 5,7e-15 · 10 rb: 4,5e-14 · 30 rb: 0**. Prediksi A⁷ (satu
+  pembulatan di cast, drift fungsi BESARAN bukan N) **terbukti**
+- **Yang tumbuh justru sisi KEBUTUHAN** (ditumpuk di JS lintas baris oleh
+  `tambahKebutuhanBahan`): sapuan aritmetika menemukan **187 pasangan**
+  (takaran, qty, baris) yang driftnya melampaui `1e-9` ke ATAS
+- **Kurva ULP vs angka firasatnya**: pada 10⁷ ULP = **1,86e-9 > `1e-9`**;
+  pada 10¹⁰ ULP = 1,91e-6 > `1e-6`. `BATAS_QTY_STOK` ≈ 10¹⁰ — besaran itu
+  **di dalam** rentang yang skema izinkan, bukan angka khayalan
+- **Tereproduksi lewat HTTP**: 500 baris × (0,01 × 49.157) → kebutuhan
+  245.785,00000000253 atas saldo 245.785 → **400 "Stok tidak cukup: Bumbu B7
+  (sisa 245.785 gr, butuh 245.785)"** — angka yang dicetak SAMA PERSIS,
+  transaksinya tetap ditolak. **SESUDAH: 201**, dan kekurangan nyata tetap
+  400 menyebut bahannya
+- **Fix**: `toleransiBanding(nilai, skala)` = max(½ unit skala kolom, lantai
+  derau float pada besaran itu). Suku pertama menjaga sifat anti-hijau-palsu
+  — kekurangan sekecil **1 unit kolom (1e-6)** tetap tertangkap, dipaku pada
+  lima besaran; suku kedua mengambil alih hanya di besaran tempat double
+  sendiri tak sanggup membedakan sebesar itu. `EPS_KAS` **tidak disentuh**
+  (kelas uang, sudah benar) — dipaku uji pasangan
+- **Penjaga + bukti merah**: `saldo-skala-kolom.test.ts` +5 uji · **dua
+  gerbang lama yang memaku ejaan angka diperbarui ke NIATNYA** (pembanding
+  masih bertoleransi · saldo minus tetap dihitung kurang — kini diuji
+  sebagai PERILAKU pada tiga besaran, bukan disimpulkan dari teks) dan
+  **dibuktikan tetap menuduh**: toleransi dicabut habis → tiga uji merah ·
+  verify-api **§255**
+- **Batas, jujur**: `toleransiBanding` memakai faktor akumulasi tetap (1024,
+  dari batas 500 baris per badan penjualan) — bila kelak ada jalur yang
+  menumpuk jauh lebih banyak, faktornya perlu diukur ulang. Di besaran
+  ≳10¹³ tak ada toleransi yang menolong: double tak lagi sanggup membawa
+  skala kolomnya, dan jawabannya berhenti memakai float8 — di luar rentang
+  masukan hari ini, dicatat bukan dikerjakan
+- Gerbang: typecheck bersih · `npm test` **2.261** (192 berkas) · verify-api
+  **3.005/0** vs Postgres segar · cakupan identik · `audit:invarian` 26/26
+- Commit: `f38c66b`
+
+---
+
 ## Saldo yang disusun di JS: sisa yang ADA tak bisa dihabiskan — server — 2026-08-25
 
 - **RALAT ATAS PREMIS USULANKU SENDIRI, dan pengukuran yang membetulkannya**:
