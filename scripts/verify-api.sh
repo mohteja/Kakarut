@@ -14493,6 +14493,37 @@ cek "bulan tak sah JATUH ke bawaan — dan balasannya MENYEBUTnya" "V == 1" \
 cek "rentang terbalik tetap 200 (nol baris = jawaban benar)" "V == 200" \
   "$(status_code "$OWNER" GET "/laporan?dari=2026-12-31&sampai=2026-01-01")"
 
+echo
+echo "── §263 tautan email tak lahir dari header peminta ──"
+#
+# TEREPRODUKSI, dan ini pengambilalihan akun — bukan phishing:
+#   POST /api/auth/forgot-password  Host: penyerang.example
+#   → {"dev_reset_url":"http://penyerang.example/reset-password?token=a9c078…"}
+# Tokennya HIDUP dan milik korban; surat mendarat di kotak masuknya, tampak
+# sah, dan sekali diklik tokennya berpindah tangan. Sama lewat
+# `X-Forwarded-Host`, dengan protonya ikut ditempa jadi `https`.
+#
+# Penawarnya konfigurasi, dan kode membuat konfigurasi berkuasa. Seksi ini
+# menembak keadaan yang BERLAKU saat verify berjalan: `APP_BASE_URL` kosong,
+# jadi yang diuji lapis pelaporannya — temuan `kritis` di panel super admin.
+# Perilaku daftar-izin & APP_BASE_URL dipaku uji unit
+# (`tautan-email-tak-dari-header.test.ts`), sebab keduanya butuh proses
+# ber-env berbeda yang tak bisa dinyalakan dari dalam satu run.
+cek "keadaan berbahaya dilaporkan ke panel super admin" "V == 1" \
+  "$(api "$SA" GET /admin/sistem | jq '[.pemeriksaan[]|select(.kode=="tautan_email_dari_header" and .tingkat=="kritis")]|length')"
+cek "temuannya menyebut env yang harus disetel" "V == 1" \
+  "$(api "$SA" GET /admin/sistem | jq '[.pemeriksaan[]|select(.kode=="tautan_email_dari_header")][0].tindakan | test("APP_BASE_URL") | if . then 1 else 0 end')"
+# Bukti bahwa lubangnya NYATA di keadaan ini — dan bukan cuma prosa: tautan
+# yang dipulangkan benar-benar mengikuti Host yang dikirim.
+FP263=$(curl -s -X POST "$BASE/api/auth/forgot-password" -H 'Content-Type: application/json' \
+  -H 'X-Forwarded-Host: penyerang.example' -d '{"email":"'"$OWNER_EMAIL"'"}')
+cek "premis §263: tanpa setelan, tautan MEMANG ikut header" "V == 1" \
+  "$(echo "$FP263" | jq '((.dev_reset_url // "") | test("penyerang.example")) | if . then 1 else 0 end')"
+# PASANGAN: alurnya sendiri tetap hidup — reset password yang SAH tak boleh
+# ikut mati oleh perbaikan ini.
+cek "PASANGAN: forgot-password tetap 200 & menerbitkan token" "V == 1" \
+  "$(echo "$FP263" | jq '((.ok == true) and ((.dev_reset_url // "") | test("token="))) | if . then 1 else 0 end')"
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

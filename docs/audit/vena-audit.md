@@ -50,6 +50,88 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Tautan email lahir dari header peminta — server — 2026-08-26
+
+- **Kenapa**: permukaan "apa yang dipakai membangun tautan di surat" tak punya
+  satu pun entri di 76 vena sebelumnya. Ditemukan saat menyapu sisa param
+  query, bukan dicari — `lib/base-url.ts` menurunkan host dari header
+  permintaan
+- **TEREPRODUKSI lewat HTTP, dan ini pengambilalihan akun — bukan phishing**:
+
+  ```
+  POST /api/auth/forgot-password        Host: penyerang.example
+  → {"dev_reset_url":"http://penyerang.example/reset-password?token=a9c078…"}
+
+  POST /api/auth/forgot-password        X-Forwarded-Host: penyerang.example
+                                        X-Forwarded-Proto: https
+  → {"dev_reset_url":"https://penyerang.example/reset-password?token=e7fc51…"}
+  ```
+
+  Tokennya **hidup dan milik korban**. Surat mendarat di kotak masuk KORBAN,
+  tampak sah (domainnya cuma beda di mata yang teliti), dan sekali diklik
+  tokennya berpindah tangan. Protonya pun ikut ditempa
+- **Empat tautan lewat pintu yang sama**: reset password (`auth:285`),
+  verifikasi email (`auth:253`, `auth:436`), undangan karyawan (`users:326`)
+- **Penawarnya KONFIGURASI, dan `APP_BASE_URL` tak di-set di mana pun** yang
+  bisa kubaca — tak ada di `ci.yml`, `Dockerfile`, `docker-compose*`, atau
+  `.env.example`. Env produksi hidup di panel Dokploy yang tak bisa kubaca,
+  jadi **aku tak bisa menyatakan produksi rentan** — yang bisa kunyatakan:
+  bawaannya rentan, dan tak ada apa pun di repo yang menutupnya
+- **Yang diperbaiki**, dan urutannya sengaja:
+  1. `APP_BASE_URL` di-set → dipakai apa adanya, **header diabaikan total**
+     (terukur: `Host: penyerang.example` → `https://kanonik.kakarut.id`);
+  2. `APP_HOST_DIPERCAYA` (env baru, dipisah koma) → host dari header **wajib
+     ada di daftar**; kalau tidak, entri pertama dipakai sebagai domain
+     kanonik. Terukur: host tempaan → `https://app.kakarut.id`, sementara
+     host yang MEMANG sah (`kakarut.id`) tetap dihormati — pemasangan
+     multi-domain tak ikut mati;
+  3. keduanya kosong → perilaku lama **dipertahankan**, tapi dilaporkan
+     `kritis` ke panel super admin lewat `pemeriksaan-setelan`, satu jalur
+     dengan `jwt_bawaan` dan `superadmin_password_bawaan`
+- **Kenapa nomor 3 TIDAK dibuat keras**, dan ini keputusan yang ditulis:
+  bila produksi belum menyetel apa pun, menolak menurunkan dari header membuat
+  SELURUH tautan reset & verifikasi menunjuk `localhost` — surat yang sama
+  sekali tak bisa dipakai. Itu menukar lubang yang **butuh penyerang** dengan
+  kerusakan yang **pasti**. Yang benar: membuatnya TERLIHAT sampai disetel
+- **Terukur bahwa laporannya jujur**: temuan `kritis` muncul saat keduanya
+  kosong, dan **hilang (0)** begitu `APP_BASE_URL` atau `APP_HOST_DIPERCAYA`
+  disetel — bukan omelan permanen yang lalu diabaikan orang
+- **Detektor: DIBUKTIKAN bisa menuduh** — daftar-izin dicabut dari
+  `appBaseUrl` (suntikan di-assert mendarat) → uji merah menyebut nilainya:
+  `expected 'http://penyerang.example' to be 'https://app.kakarut.id'`.
+  Dipulihkan
+- **PASANGAN**: alur reset yang SAH tetap hidup (`ok:true` + token terbit),
+  host multi-domain yang sah tetap dipakai, dan tak ada tautan email lain
+  yang merakit host sendiri (sapuan mekanis atas tiga modul pengirim surat)
+- **Tindak**: `lib/base-url.ts` (daftar-izin + `tautanEmailDariHeader`) ·
+  `config/env.ts` (`APP_HOST_DIPERCAYA`) · `pemeriksaan-setelan.ts` (temuan
+  `kritis`) · `tautan-email-tak-dari-header.test.ts` (6 uji) · verify-api
+  **§263** (4 asersi)
+- **YANG HARUS DILAKUKAN PEMILIK, dan hanya dia yang bisa**: set
+  `APP_BASE_URL` ke domain publik aplikasi di panel Dokploy, lalu restart.
+  Sampai itu terjadi, lubangnya masih terbuka di produksi — kode ini membuat
+  keadaan itu terlihat, bukan hilang
+- **Batas, jujur**:
+  - yang disapu **tautan di surat**; header permintaan yang dipakai untuk hal
+    LAIN (mis. pembangunan URL di balasan API) belum diukur;
+  - daftar-izin membandingkan host **persis**, tanpa wildcard subdomain —
+    pemasangan ber-subdomain-per-tenant harus menyebut semuanya;
+  - aku tak bisa membaca env produksi, jadi status produksi **tak diklaim**
+- **Negatif bersih yang ikut terukur di putaran ini**, dicatat supaya tak
+  terbaca terlupakan: (1) **ETag/cache** — keempat rute daftar ber-ETag sudah
+  `Cache-Control: private, no-cache` + `Vary: Authorization`, jadi `/menu`
+  yang kini berbeda isi per peran tak bisa tersaji silang; (2) **param angka
+  query** — ketiga situsnya berbatas rapi (`Number.isFinite` + `Math.min/max`,
+  atau 400 eksplisit untuk `biaya_tetap`); (3) **error_logs** sengaja tak
+  menyimpan badan permintaan & query string, dan komentarnya menulis alasannya
+- Gerbang: typecheck bersih · `npm test` **2.336** (198 berkas) · `verify-api`
+  **3.131 lolos, 0 gagal** vs Postgres SEGAR (§263 baru) · cakupan rute **273**
+  identik · `audit:invarian` 26/26 · build web · e2e Playwright **6/6** ·
+  `flutter test` **551** (fikstur kontrak status diregenerasi — `types.ts`
+  berubah di vena biaya)
+
+---
+
 ## Tanggal dari query & badan: cabang GAGALNYA tak bertuan — server — 2026-08-26
 
 - **Kenapa**: permukaan yang tak punya satu pun entri di 75 vena sebelumnya.
