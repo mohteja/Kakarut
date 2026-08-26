@@ -1,6 +1,7 @@
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { HTTPException } from "hono/http-exception";
 import {
+  dibatalkanDapur,
   formatAngkaId,
   hitungPb1,
   penandaSajian,
@@ -283,6 +284,7 @@ export async function createSale(params: CreateSaleParams) {
         .select({
           id: openBillItems.id,
           menuId: openBillItems.menuId,
+          menuNama: openBillItems.menuNama,
           hargaSatuan: openBillItems.hargaSatuan,
           pesananStatus: openBillItems.pesananStatus,
           pesananStatusAt: openBillItems.pesananStatusAt,
@@ -300,6 +302,50 @@ export async function createSale(params: CreateSaleParams) {
           throw new HTTPException(400, {
             message: "Baris open bill tidak cocok dengan menu yang dibayar",
           });
+        }
+        /*
+         * SAJIAN YANG DIBATALKAN DAPUR TIDAK BOLEH DITAGIH.
+         *
+         * Aturannya sudah ditulis panjang di `open-bill/routes.ts` dan
+         * ditegakkan di EMPAT tempat — slip dapur, bon tagihan, keranjang
+         * kasir web, keranjang ponsel. Pintu yang benar-benar MENGAMBIL
+         * UANGNYA tak pernah memeriksanya.
+         *
+         * Terukur lewat HTTP sebelum penjaga ini ada, satu bill dua baris
+         * yang salah satunya dibatalkan dapur:
+         *
+         *     bon sesudah pembatalan   Rp1.000
+         *     penjualan yang terbit    Rp6.000   (201)
+         *     sale_items               "Nasi Putih" Rp5.000 pesanan_status="batal"
+         *     stok bahannya            50 → 49
+         *
+         * Baris yang sekaligus `batal` DAN ditagih, plus stok yang terpotong
+         * untuk masakan yang tak pernah dibuat.
+         *
+         * DITOLAK, bukan dilewatkan diam-diam: kasir bisa terlanjur menerima
+         * uang sebesar total lama, dan kembalian yang salah tanpa ada yang
+         * tahu adalah bug yang lebih sunyi daripada yang sedang ditutup ini.
+         * 409 (bukan 400) karena ini konflik KEADAAN — seseorang membatalkan
+         * baris ini saat keranjangnya sudah terbuka — dan karena hanya galat
+         * berkode yang membawa `sebab` yang dibaca antrean offline ponsel.
+         *
+         * BERLAKU JUGA DI `/sync`, dan itu keputusan sadar. Tetangganya —
+         * "tolak melebihi stok" — sengaja TIDAK berlaku di sana, dengan alasan
+         * yang ditulis di `sync/routes.ts`: menolaknya tak mencegah apa pun,
+         * ia hanya menghapus penjualan yang sungguh terjadi. Yang ini berbeda
+         * jenisnya. Stok minus adalah PERINGATAN TENTANG MASA DEPAN; baris
+         * yang dibatalkan adalah FAKTA TENTANG YANG DISAJIKAN — tamunya tak
+         * pernah menerima makanan itu. Memutar ulang tagihannya dari antrean
+         * offline tetap salah, dan antreannya menandainya gagal dengan sebab
+         * yang bisa dibaca kasir (daftar `_sebabSudahTercatat` di ponsel PUTIH,
+         * jadi sebab baru otomatis terlihat, bukan diam-diam dibuang).
+         */
+        if (dibatalkanDapur(baris.pesananStatus)) {
+          throw new PenjualanGagal(
+            409,
+            `"${baris.menuNama}" sudah dibatalkan dapur — muat ulang keranjang sebelum menagih`,
+            "baris_dibatalkan",
+          );
         }
         hargaBill.set(item.open_bill_item_id, baris.hargaSatuan);
         warisBill.set(item.open_bill_item_id, {

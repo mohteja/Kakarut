@@ -1,6 +1,39 @@
 import type { PesananItemRow, PesananRow, PesananStatus } from "./types";
 
 /**
+ * SATU-SATUNYA definisi "status ini adalah BATAL".
+ *
+ * Berlaku untuk status BARIS maupun status KARTU — keduanya `PesananStatus`,
+ * dan keduanya menjawab pertanyaan yang sama.
+ *
+ * Aturannya sudah ditulis panjang di `open-bill/routes.ts`, tepat di atas
+ * penyaring bon: *"Di slip, membawa baris batal berarti menyuruh dapur
+ * memasaknya lagi. Di sini artinya MENAGIH TAMU untuk makanan yang tak pernah
+ * datang. Pembatalan biasanya terjadi karena bahannya habis, jadi tamunya
+ * justru orang yang sudah dikecewakan sekali."*
+ *
+ * Aturan itu lalu ditulis ULANG di empat tempat — slip dapur, bon tagihan,
+ * keranjang kasir web, keranjang ponsel — dan TIDAK ditulis di pintu yang
+ * benar-benar mengambil uangnya. Terukur lewat HTTP: bon Rp1.000, penjualan
+ * yang terbit Rp6.000, dan stok bahan baris yang dibatalkan tetap terpotong.
+ */
+export function dibatalkanDapur(status: string | null | undefined): boolean {
+  return status === "batal";
+}
+
+/**
+ * Baris yang BOLEH ditagih. Bentuk barisnya berbeda-beda antar pemanggil
+ * (`pesanan_status` di DTO server, `pesananStatus` di keranjang web), jadi
+ * status diambil lewat pengakses — yang disatukan aturannya, bukan bentuknya.
+ */
+export function barisDitagih<T>(
+  items: readonly T[],
+  status: (item: T) => string | null | undefined,
+): T[] {
+  return items.filter((it) => !dibatalkanDapur(status(it)));
+}
+
+/**
  * Status KARTU diturunkan dari baris-barisnya, tidak pernah disimpan.
  *
  * `batal` hanya bila SEMUA baris batal — satu porsi yang masih dimasak membuat
@@ -11,7 +44,7 @@ export function turunkanStatusPesanan(
   items: { status: PesananStatus }[],
 ): PesananStatus {
   if (items.length === 0) return "dikerjakan";
-  if (items.every((i) => i.status === "batal")) return "batal";
+  if (items.every((i) => dibatalkanDapur(i.status))) return "batal";
   if (items.every((i) => i.status !== "dikerjakan")) return "selesai";
   return "dikerjakan";
 }
@@ -163,7 +196,7 @@ export function ringkasPesanan(items: PesananItemRow[]): RingkasanPesanan {
     // tetap di tempat sudah cukup membuat pesanan ini bukan pesanan bawa pulang.
     sajian_takeaway: items.length > 0 && items.every((i) => i.sajian_takeaway),
     item_selesai: items.filter((i) => i.status === "selesai").length,
-    item_batal: items.filter((i) => i.status === "batal").length,
+    item_batal: items.filter((i) => dibatalkanDapur(i.status)).length,
     status_oleh: statusOleh,
     status_pada: statusPada,
     durasi_detik: durasiKartu(items),
@@ -183,7 +216,7 @@ export function ringkasPesanan(items: PesananItemRow[]): RingkasanPesanan {
  * batal bernilai `null`: tak ada yang pernah dikerjakan.
  */
 function durasiKartu(items: PesananItemRow[]): number | null {
-  const hidup = items.filter((i) => i.status !== "batal");
+  const hidup = items.filter((i) => !dibatalkanDapur(i.status));
   if (hidup.length === 0) return null;
   if (!hidup.every((i) => i.status === "selesai" && i.status_pada)) return null;
   let mulai = Infinity;

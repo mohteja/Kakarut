@@ -50,6 +50,122 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Sajian yang DIBATALKAN dapur tetap bisa ditagih — server+web+mobile — 2026-08-26
+
+- **Kenapa**: usulan antrean yang ditulis putaran lalu dengan angkanya
+  (`pesanan_status='batal'`). Menyapunya menemukan bentuk yang sama persis
+  dengan tanda tangan sesi ini — kali ini pada **UANG TAMU**
+- **Aturannya sudah ditulis, bahkan dikomentari panjang** di
+  `open-bill/routes.ts`, tepat di atas penyaring bon: *"Di slip, membawa baris
+  batal berarti menyuruh dapur memasaknya lagi. Di sini artinya **MENAGIH TAMU
+  untuk makanan yang tak pernah datang**. Pembatalan biasanya terjadi karena
+  bahannya habis, jadi tamunya justru orang yang sudah dikecewakan sekali."*
+  Ia ditegakkan di **empat** tempat — slip dapur, bon tagihan, keranjang kasir
+  web (`cartTagih`), keranjang ponsel (`lineTagih`) — dan **tidak** di pintu
+  yang benar-benar mengambil uangnya
+- **TEREPRODUKSI lewat HTTP**, satu bill dua baris yang salah satunya
+  dibatalkan dapur:
+
+  | | sebelum | sesudah |
+  |---|---|---|
+  | bon sesudah pembatalan | Rp1.000 | Rp1.000 |
+  | `POST /penjualan` dengan kedua baris | **201** | **409** `baris_dibatalkan` |
+  | total penjualan yang terbit | **Rp6.000** | — |
+  | stok bahan baris yang dibatalkan | **50 → 49** | **50 → 50** |
+
+  Barisnya tersimpan sebagai `"Nasi Putih" Rp5.000 pesanan_status="batal"` —
+  **sekaligus batal DAN ditagih** — dan stok terpotong untuk masakan yang tak
+  pernah dibuat. Bon berkata Rp1.000; pintu bayar menerima Rp6.000
+- **§229 sudah memaku bahwa BON-nya turun** saat baris dibatalkan. Yang tak
+  pernah diuji: apakah **pembayarannya** menghormati bon itu
+- **`createSale` mengiterasi `params.items` yang DIKIRIM KLIEN.** Ia
+  mencocokkan `open_bill_item_id` → `menuId`, mewarisi `pesananStatus` dari
+  baris bill-nya… lalu menagihnya. Tak ada satu pun pemeriksaan status
+- **Populasi** (literal `"batal"`/`'batal'`, komentar dibutakan):
+
+  | akar | literal | pembanding JS | pembanding domain PESANAN |
+  |---|---|---|---|
+  | `apps/server/src` | 19 → **15** | 5 → **1** | 4 → **0** |
+  | `packages/shared/src` | 6 → **4** | 3 → **1** | 3 → **1** (rumahnya) |
+  | `apps/web/src` | 10 → **6** | 8 → **4** | 4 → **0** |
+
+  Aturan pesanan yang ditulis tangan: **11 → 1**. Sisa 4+1 pembanding milik
+  **bendera LAIN** — status faktur beli perlengkapan yang kebetulan memakai
+  kata yang sama; didaftarkan beralasan, tidak disatukan (menyatukannya justru
+  menyesatkan)
+- **Satu rumah**: `dibatalkanDapur(status)` + `barisDitagih(items, status)` di
+  `packages/shared/src/pesanan.ts`. Bentuk barisnya berbeda antar pemanggil
+  (`pesanan_status` di DTO server, `pesananStatus` di keranjang web), jadi
+  statusnya diambil lewat **pengakses** — yang disatukan aturannya, bukan
+  bentuknya
+- **Penjaganya di `createSale`, satu titik untuk DUA pintu**: `POST /penjualan`
+  dan `/sync` sama-sama memanggilnya. Keduanya diuji, bukan disimpulkan —
+  §266 menembak keduanya dan keduanya membalas 409 dengan sebab yang sama
+- **DITOLAK, bukan dilewatkan diam-diam.** Melewatkan barisnya akan membuat
+  kasir menerima uang sebesar total lama dan memberi kembalian yang salah
+  tanpa ada yang tahu — bug yang lebih sunyi daripada yang sedang ditutup
+- **409, bukan 400, dan itu diangkat ke permukaan sebelum dikerjakan**: galat
+  berkode di jalur ini kelas `PenjualanGagal` yang konstruktornya hanya
+  menerima 409; hanya galat berkode yang membawa `sebab`, dan antrean offline
+  ponsel membedakan sebab **hanya** lewat itu. Maknanya pun konflik keadaan,
+  bukan permintaan cacat
+- **Ponsel tak perlu berubah, dan alasannya sudah ditulis di sana**:
+  `_sebabSudahTercatat` adalah daftar **PUTIH**, jadi sebab baru otomatis
+  diperlakukan gagal & terlihat kasir. Yang ditambah cuma fikstur kontrak
+  (regenerasi) dan **uji bernama** untuk `baris_dibatalkan` — perilaku yang
+  benar karena konstruksi tetap layak dipaku
+- **Detektor**: sapuan literal `"batal"` atas ketiga akar, memisahkan yang
+  hidup **di dalam `` sql`…` ``** dari pembanding JS. **Dibuktikan bisa
+  menuduh**: `dibatalkanDapur(l.pesananStatus)` di `KasirPage.tsx`
+  dikembalikan ke `l.pesananStatus === "batal"` (suntikan di-assert
+  **mengubah berkasnya**) → detektor menuduh berkas & barisnya, dan berkasnya
+  tak terdaftar sebagai bendera lain. Berkas UTUH: nol tuduhan
+- **PASANGAN**: bayar hanya baris yang SAH tetap **201** dengan total **persis
+  sama dengan bon** sesudah pembatalan; penjualannya berisi **satu** baris;
+  baris batal **tetap tercatat** di bill-nya (jejak, bukan dihapus); dan
+  `dibatalkanDapur(null/undefined/""/"BATAL")` semuanya **false** — status
+  yang belum terisi tak boleh hilang dari tagihan diam-diam, itu bug yang
+  persis berlawanan arah
+- **Tiga gerbang lama menagih penyesuaian, dan ketiganya dipaku ke NIATNYA**:
+  `bill-dibuka-lagi-meja` memaku ejaan `kartu === "batal"` (dua situs) dan
+  `pb1-satu-rumus` memaku **baris impor apa adanya** — menambah satu nama ke
+  daftar impor yang sama memerahkannya tanpa satu pun rumus berpindah.
+  Ditulis ulang jadi "bill tertutup TEPAT saat kartunya batal" dan "hitungPb1
+  ada di dalam impor dari @kakarut/shared". `lampiran-dto-utuh` &
+  `status-satu-kontrak` menagih regenerasi, dan itu dikerjakan
+- **Batas, jujur**:
+  - **`pesanan_status` pada penjualan yang SUDAH dibayar tidak disentuh.**
+    Membatalkan baris di sana urusan **refund** (`qty_refund`); memotong omzet
+    dari status papan akan menabrak jalur uang yang sudah punya pemiliknya.
+    Diukur, dicatat, tidak diperbaiki;
+  - penjaganya hanya menutup baris yang **berasal dari open bill**
+    (`open_bill_item_id`). Penjualan langsung tak punya baris batal saat
+    dibuat, jadi kelasnya tak terjangkau di sana — tapi itu keadaan hari ini,
+    bukan jaminan;
+  - detektor menilai `=== "batal"` secara **tekstual**. Perbandingan lewat
+    variabel (`const B = "batal"; x === B`) akan terbaca aman — tak ada situs
+    seperti itu hari ini;
+  - empat literal di **SQL mentah** (`okupansi.ts` ×2, `penjualan/routes.ts`
+    ×2) tetap literal: SQL tak bisa memanggil fungsi JS, dan memindahkannya ke
+    JS berarti menarik seluruh baris ke memori untuk menjawab satu boolean
+- **Ketegangan dengan tetangganya, ditulis di kodenya**: "tolak melebihi stok"
+  sengaja **TIDAK** berlaku di `/sync` — menolaknya tak mencegah apa pun, ia
+  hanya menghapus penjualan yang sungguh terjadi. Yang ini berbeda jenisnya:
+  stok minus adalah **peringatan tentang masa depan**, baris yang dibatalkan
+  adalah **fakta tentang yang disajikan**
+- **Tindak**: `packages/shared/src/pesanan.ts` (rumah aturan) · `types.ts`
+  (`SebabPenjualanGagal` +1) · `penjualan/service.ts` (penjaga) ·
+  `open-bill/routes.ts` · `pesanan/routes.ts` · `KasirPage.tsx` ·
+  `PesananPage.tsx` (empat penyaring dipindah) ·
+  `test/batal-tak-ditagih.test.ts` (12 uji) · verify-api **§266** (11 asersi) ·
+  ponsel: fikstur kontrak diregenerasi + `offline_queue_test.dart` (+1 uji)
+- Gerbang: typecheck bersih · `npm test` **2.368** (201 berkas) · `verify-api`
+  **3.163 lolos, 0 gagal** vs Postgres SEGAR (§266 baru) · cakupan rute **273**
+  identik · `audit:invarian` 26/26 · build web · e2e Playwright **6/6** ·
+  `flutter analyze` bersih · `flutter test` **552**
+
+---
+
 ## Baris yang sudah dinyatakan TIDAK BERLAKU, dan empat pintu yang lupa — server — 2026-08-26
 
 - **Kenapa**: 77 vena menyapu *siapa yang boleh masuk*, *perusahaan siapa*,

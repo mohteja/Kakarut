@@ -6,6 +6,7 @@ import { z } from "zod";
 import {
   durasiPesananDetik,
   qtyDitagih,
+  dibatalkanDapur,
   ringkasPesanan,
   turunkanStatusPesanan,
   urutkanPesanan,
@@ -224,7 +225,7 @@ async function selaraskanTutupBill(
     .where(and(eq(openBills.id, billId), isNull(openBills.saleId)));
 
   let lepasMeja = false;
-  if (sebelum?.closedAt && kartu !== "batal" && sebelum.mejaId) {
+  if (sebelum?.closedAt && !dibatalkanDapur(kartu) && sebelum.mejaId) {
     const [m] = await tx
       .select({ tipe: meja.tipe })
       .from(meja)
@@ -250,7 +251,7 @@ async function selaraskanTutupBill(
   await tx
     .update(openBills)
     .set({
-      closedAt: kartu === "batal" ? sekarang : null,
+      closedAt: dibatalkanDapur(kartu) ? sekarang : null,
       ...(lepasMeja ? { mejaId: null, mejaLabel: null } : {}),
     })
     .where(and(eq(openBills.id, billId), isNull(openBills.saleId)));

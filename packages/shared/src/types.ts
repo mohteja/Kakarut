@@ -1522,6 +1522,12 @@ export interface SaleItemInput {
 export type SebabPenjualanGagal =
   | "bill_sudah_dibayar"
   | "bill_dibatalkan"
+  /**
+   * Salah satu baris yang dibayar sudah DIBATALKAN DAPUR sesudah keranjangnya
+   * terbuka. Transaksinya TIDAK tercatat: klien harus memuat ulang keranjang
+   * lalu menagih ulang tanpa baris itu.
+   */
+  | "baris_dibatalkan"
   | "kasir_belum_dibuka"
   | "shift_tidak_cocok";
 

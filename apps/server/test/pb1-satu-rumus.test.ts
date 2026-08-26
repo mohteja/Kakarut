@@ -90,7 +90,14 @@ describe("tarif PB1 jadi rupiah hanya di satu baris di seluruh repo", () => {
 
   it("layar kasir MEMANGGIL rumusnya, bukan menyalinnya", () => {
     expect(KASIR).toContain("hitungPb1(subtotalNet, pb1Conf.pb1_rate)");
-    expect(KASIR).toContain("import { angkaDari, hitungPb1 } from \"@kakarut/shared\";");
+    // Yang dijaga: `hitungPb1` datang dari @kakarut/shared. Dulu barisnya
+    // dipaku APA ADANYA, jadi menambah satu nama lain ke daftar impor yang sama
+    // memerahkan gerbang ini tanpa satu pun rumus berpindah. Yang dipaku kini
+    // niatnya: nama itu ada di dalam impor dari paket bersama.
+    const impor = KASIR.match(/import \{([^}]*)\} from "@kakarut\/shared";/g) ?? [];
+    expect(impor.some((b) => /\bhitungPb1\b/.test(b)), "hitungPb1 tak lagi diimpor dari @kakarut/shared").toBe(
+      true,
+    );
   });
 
   it("server tetap memakai fungsi yang sama — bukan cuma webnya yang dirapikan", () => {

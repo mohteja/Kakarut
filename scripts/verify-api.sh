@@ -14638,6 +14638,86 @@ cek "faktur lama TETAP menyebut pelaksananya (riwayat tak dihapus)" "V == 1" \
 cek "premis §265: /sampah memang melihat baris yang dibuang" "V == 200" \
   "$(status_code "$OWNER" GET /sampah)"
 
+echo
+echo "── §266 sajian yang DIBATALKAN dapur tak boleh DITAGIH ──"
+#
+# Aturannya sudah ditulis panjang di `open-bill/routes.ts`, tepat di atas
+# penyaring bon: "Di slip, membawa baris batal berarti menyuruh dapur
+# memasaknya lagi. Di sini artinya MENAGIH TAMU untuk makanan yang tak pernah
+# datang." Ia lalu ditegakkan di EMPAT tempat — slip dapur, bon tagihan,
+# keranjang kasir web, keranjang ponsel — dan TIDAK di pintu yang benar-benar
+# MENGAMBIL UANGNYA. §229 memaku bahwa BON-nya turun; yang tak pernah diuji:
+# apakah PEMBAYARANNYA menghormati bon itu.
+#
+# TERUKUR lewat HTTP sebelum penjaganya ada, satu bill dua baris yang salah
+# satunya dibatalkan dapur:
+#
+#   bon sesudah pembatalan   Rp1.000
+#   penjualan yang terbit    Rp6.000   (201)
+#   sale_items               "Nasi Putih" Rp5.000  pesanan_status="batal"
+#   stok bahannya            50 → 49
+#
+# Satu baris yang sekaligus `batal` DAN ditagih, plus stok terpotong untuk
+# masakan yang tak pernah dibuat.
+#
+# Tanpa meja: "satu meja satu bill" sudah dipakai §229, dan seksi ini tak
+# butuh mejanya.
+BILL266=$(api "$REISS105" POST /open-bill \
+  "{\"customer_nama\":\"Uji 266\",\"items\":[{\"menu_id\":\"$MENU228\",\"qty\":1},{\"menu_id\":\"$MENU229B\",\"qty\":1}]}")
+BID266=$(echo "$BILL266" | jq -r '.id // empty')
+IT266A=$(echo "$BILL266" | jq -r --arg m "$MENU228" '[.items[]|select(.menu_id==$m)][0].id')
+IT266B=$(echo "$BILL266" | jq -r --arg m "$MENU229B" '[.items[]|select(.menu_id==$m)][0].id')
+cek "premis §266: bill dua baris terbentuk" "V == 1" \
+  "$([ -n "$BID266" ] && [ -n "$IT266A" ] && [ -n "$IT266B" ] && echo 1 || echo 0)"
+BON266A=$(api "$REISS105" GET "/open-bill/$BID266/bon" | jq -r '.teks' \
+  | grep -o 'TOTAL *Rp[0-9.]*' | grep -o '[0-9.]*$' | tr -d '.')
+HRG266B=$(api "$REISS105" GET /menu | jq -r --arg m "$MENU229B" '[.[]|select(.id==$m)][0].harga_jual')
+cek "premis §266: bon MEMANG menagih kedua baris" "V == 1" \
+  "$(python3 -c "print(1 if int('${BON266A:-0}' or 0) >= int(float('$HRG266B')) + int(float('$HRG229')) else 0)")"
+# Dapur membatalkan baris kedua.
+api "$TKIT154" POST "/pesanan/open_bill/$BID266/item/$IT266B/status" '{"status":"batal"}' > /dev/null
+BON266B=$(api "$REISS105" GET "/open-bill/$BID266/bon" | jq -r '.teks' \
+  | grep -o 'TOTAL *Rp[0-9.]*' | grep -o '[0-9.]*$' | tr -d '.')
+cek "premis §266: bon TURUN sesudah pembatalan" "V == 1" \
+  "$(python3 -c "
+a, b = int('${BON266A:-0}' or 0), int('${BON266B:-0}' or 0)
+print(1 if a > b > 0 else 0)")"
+# Baris yang dibatalkan tetap TERCATAT di bill-nya — yang ditutup pintunya,
+# bukan jejaknya. Papan dapur & riwayat membacanya, dan §154 memakukannya.
+cek "baris batal tetap tercatat di bill (jejak, bukan dihapus)" "V == 1" \
+  "$(api "$REISS105" GET "/open-bill/$BID266" | jq --arg i "$IT266B" '[.items[]|select(.id==$i and .pesanan_status=="batal")]|length')"
+# INTI: pintu bayar menolak baris yang sudah dibatalkan — DI KEDUA PINTU.
+BYR266=$(curl -s -w '\n%{http_code}' -X POST "$BASE/api/penjualan" -H "Authorization: Bearer $REISS105" \
+  -H 'Content-Type: application/json' \
+  -d "{\"open_bill_id\":\"$BID266\",\"is_dine_in\":true,\"metode_bayar\":\"tunai\",\"uang_diterima\":1000000,\"items\":[{\"menu_id\":\"$MENU228\",\"qty\":1,\"open_bill_item_id\":\"$IT266A\"},{\"menu_id\":\"$MENU229B\",\"qty\":1,\"open_bill_item_id\":\"$IT266B\"}]}")
+cek "INTI: menagih baris yang dibatalkan → 409" "V == 409" "$(printf '%s' "${BYR266##*$'\n'}")"
+cek "INTI: galatnya berkode 'baris_dibatalkan'" "V == 1" \
+  "$(printf '%s' "${BYR266%$'\n'*}" | jq '((.sebab // "") == "baris_dibatalkan") | if . then 1 else 0 end')"
+# Layar yang cuma bilang "gagal" tak bisa ditindaklanjuti kasir yang sedang
+# berdiri di depan tamunya: galatnya wajib MENYEBUT sajian yang mana.
+cek "INTI: galatnya MENYEBUT nama sajiannya" "V == 1" \
+  "$(printf '%s' "${BYR266%$'\n'*}" | jq --arg n "$(api "$REISS105" GET /menu | jq -r --arg m "$MENU229B" '[.[]|select(.id==$m)][0].nama')" \
+     '((.error // "") | contains($n)) | if . then 1 else 0 end')"
+# Pintu KEDUA: pemutaran ulang antrean offline lewat /sync memakai `createSale`
+# yang sama, jadi penjaganya satu. Diuji, bukan disimpulkan.
+SY266=$(jq -nc --arg r "$(uuid99)" --arg w "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" --arg b "$BID266" \
+  --arg m1 "$MENU228" --arg m2 "$MENU229B" --arg i1 "$IT266A" --arg i2 "$IT266B" \
+  '{device_id:"dev266",commands:[{client_ref:$r,tipe:"penjualan",waktu:$w,payload:{open_bill_id:$b,is_dine_in:true,metode_bayar:"tunai",uang_diterima:1000000,items:[{menu_id:$m1,qty:1,open_bill_item_id:$i1},{menu_id:$m2,qty:1,open_bill_item_id:$i2}]}}]}')
+cek "INTI: pintu /sync menolak dengan sebab yang SAMA" "V == 1" \
+  "$(api "$REISS105" POST /sync "$SY266" | jq '((.hasil[0].kode == 409) and (.hasil[0].sebab == "baris_dibatalkan")) | if . then 1 else 0 end')"
+# PASANGAN: alurnya tetap hidup — bayar HANYA baris yang sah.
+BYR266B=$(api "$REISS105" POST /penjualan \
+  "{\"open_bill_id\":\"$BID266\",\"is_dine_in\":true,\"metode_bayar\":\"tunai\",\"uang_diterima\":1000000,\"items\":[{\"menu_id\":\"$MENU228\",\"qty\":1,\"open_bill_item_id\":\"$IT266A\"}]}")
+SID266=$(echo "$BYR266B" | jq -r '.sale.id // empty')
+cek "PASANGAN: bayar baris SAH saja tetap terbit" "V == 1" \
+  "$([ -n "$SID266" ] && echo 1 || echo 0)"
+cek "PASANGAN: totalnya PERSIS sama dengan bon sesudah pembatalan" "V == 1" \
+  "$(python3 -c "
+import json,sys
+print(1 if int(float('$(echo "$BYR266B" | jq -r '.sale.total')')) == int('${BON266B:-0}' or 0) else 0)")"
+cek "PASANGAN: penjualannya hanya berisi baris yang SAH" "V == 1" \
+  "$(api "$REISS105" GET "/penjualan/$SID266" | jq '(([.items[]] | length) == 1) | if . then 1 else 0 end')"
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

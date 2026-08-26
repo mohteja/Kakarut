@@ -6,7 +6,7 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import type { OpenBillDetail, OpenBillRow } from "@kakarut/shared";
 import { db } from "../../db/client";
-import { formatAngkaId, hitungPb1, waktuKertas } from "@kakarut/shared";
+import { barisDitagih, formatAngkaId, hitungPb1, waktuKertas } from "@kakarut/shared";
 import { opsiKertasDariQuery, responsBon, responsSlip } from "../print/kertas";
 import { loadKatalog, tambahKebutuhanBahan } from "../menu/service";
 import { bahanKurang } from "../stok/service";
@@ -326,9 +326,7 @@ export const openBillRoutes = new Hono<AppEnv>()
            * (bahan habis) menyuruh dapur membuatnya lagi — persis yang
            * pembatalannya hendak cegah.
            */
-          items: detail.items
-            .filter((it) => it.pesanan_status !== "batal")
-            .map((it) => ({
+          items: barisDitagih(detail.items, (it) => it.pesanan_status).map((it) => ({
               nama: it.menu_nama,
               qty: it.qty,
               tag:
@@ -394,9 +392,7 @@ export const openBillRoutes = new Hono<AppEnv>()
      * biasanya terjadi karena bahannya habis, jadi tamunya justru orang yang
      * sudah dikecewakan sekali.
      */
-    const items = detail.items
-      .filter((it) => it.pesanan_status !== "batal")
-      .map((it) => ({
+    const items = barisDitagih(detail.items, (it) => it.pesanan_status).map((it) => ({
         nama: it.menu_nama,
         qty: it.qty,
         hargaSatuan: it.harga_satuan,
