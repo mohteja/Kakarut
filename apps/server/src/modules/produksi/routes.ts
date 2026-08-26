@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { tanggalQuery, zTanggal } from "../../lib/tanggal-query";
 import { BATAS_QTY_STOK, BATAS_UANG } from "../../lib/batas-angka";
 import { zValidator } from "../../lib/validator";
 import {
@@ -114,9 +115,7 @@ const FakturEditBody = z.object({
   storage_location_id: z.string().uuid().nullish(),
   /** ganti pelaksana karyawan (khusus jalur produksi); null = kosongkan */
   worker_id: z.string().uuid().nullish(),
-  prod_date: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/)
+  prod_date: zTanggal
     .optional(),
 }).strict();
 
@@ -171,9 +170,7 @@ const TahapBody = z.object({
          * masa simpan bahan (tanggal masuk + masa_simpan_hari); diabaikan
          * untuk target tahap lain.
          */
-        exp: z
-          .string()
-          .regex(/^\d{4}-\d{2}-\d{2}$/, "Format exp harus YYYY-MM-DD")
+        exp: zTanggal
           .nullish(),
       }),
     )
@@ -283,9 +280,6 @@ class TahapDitolak extends HTTPException {
 const TAHAP_SEBELUM = { dikerjakan: "rencana", menunggu: "dikerjakan" } as const;
 /** urutan pipeline untuk aturan "hanya boleh maju" pada tahap sebagian */
 const URUTAN_TAHAP = { rencana: 0, dikerjakan: 1, menunggu: 2, dikonfirmasi: 3 } as const;
-
-/** Terima hanya tanggal format YYYY-MM-DD; selain itu undefined. */
-const tglValid = (s?: string) => (s && /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : undefined);
 
 /** Cocokkan satu faktur: baris ber-fakturId, atau baris lama (fakturId null) via id. */
 function cocokFaktur(key: string) {
@@ -2448,10 +2442,10 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
       // melihat faktur SEMUA cabang (kasir/tim tetap terkunci cabangnya).
       const semuaCabang = !terikatCabang(auth.role) && c.req.query("branch_id") === "all";
       const branchId = semuaCabang ? null : await resolveBranchId(c);
-      const dari = tglValid(c.req.query("dari"));
-      const sampai = tglValid(c.req.query("sampai"));
+      const dari = tanggalQuery(c, "dari");
+      const sampai = tanggalQuery(c, "sampai");
       // dukung juga ?tanggal= (satu hari) demi kompatibilitas
-      const satuHari = tglValid(c.req.query("tanggal"));
+      const satuHari = tanggalQuery(c, "tanggal");
       const page = Math.max(1, Number(c.req.query("page") ?? "1") || 1);
       const perPage = Math.min(200, Math.max(1, Number(c.req.query("per_page") ?? "20") || 20));
 

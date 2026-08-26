@@ -146,7 +146,29 @@ describe("penjagaan tetangga tetap utuh", () => {
   });
 
   it("bulan wajib 01–12 — pola longgar melahirkan tanggal mustahil lalu 500", () => {
-    expect(ABSENSI_KODE).toMatch(/\/\^\\d\{4\}-\(0\[1-9\]\|1\[0-2\]\)\$\//);
+    /*
+     * Dulu pin ini memaku regexnya di berkas ini. Sejak 2026-08-26 aturannya
+     * pindah ke SATU rumah (`lib/tanggal-query`) — bukan pelonggaran melainkan
+     * pengetatan: `bulanQuery` MENOLAK bulan yang ada tapi tak sah dengan 400
+     * bernama, sementara pola lama diam-diam jatuh ke bulan berjalan (terukur:
+     * `?bulan=NGAWUR` memulangkan jumlah baris yang SAMA dengan bulan yang
+     * benar, jadi tak ada satu pun tanda bahwa pilihannya diabaikan).
+     *
+     * Bulan di rekap SENGAJA tetap jatuh ke bawaan (`bulanQueryAtau`), dan
+     * itu keputusan berdasar: balasan rekap MENYEBUT `bulan`/`dari`/`sampai`
+     * yang dipakai, jadi layar merender dari nilai itu — bawaan yang jujur.
+     * Pengetatanku ke 400 sempat mematahkan empat asersi verify-api yang
+     * memakukannya; gerbang lama menahan perbaikan yang berlebihan.
+     *
+     * Yang dipaku sekarang MAKSUDNYA, dua sisi: absensi memakai rumah itu,
+     * dan rumah itu benar-benar membatasi 01–12.
+     */
+    expect(ABSENSI_KODE).toMatch(/bulanQueryAtau\(c, "bulan", /);
+    const RUMAH = readFileSync(
+      fileURLToPath(new URL("../src/lib/tanggal-query.ts", import.meta.url)),
+      "utf8",
+    );
+    expect(RUMAH).toMatch(/\/\^\\d\{4\}-\(0\[1-9\]\|1\[0-2\]\)\$\//);
   });
 
   it("rekap tetap owner/admin saja walau grupnya terbuka", () => {

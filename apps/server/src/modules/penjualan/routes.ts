@@ -1,3 +1,4 @@
+import { tanggalQuery } from "../../lib/tanggal-query";
 import { zValidator } from "../../lib/validator";
 import { BATAS_QTY_BARIS, BATAS_UANG } from "../../lib/batas-angka";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
@@ -137,11 +138,10 @@ export const penjualanRoutes = new Hono<AppEnv>()
       .select({ timezone: companies.timezone })
       .from(companies)
       .where(eq(companies.id, auth.company_id!));
-    const tanggalQ = c.req.query("tanggal");
-    if (tanggalQ && !/^\d{4}-\d{2}-\d{2}$/.test(tanggalQ)) {
-      throw new HTTPException(400, { message: "Format tanggal tidak valid (YYYY-MM-DD)" });
-    }
-    const tanggal = tanggalQ ?? tanggalDi(company?.timezone ?? "Asia/Jakarta");
+    // Satu-satunya situs (dari 36) yang sudah MENOLAK sejak awal — tapi
+    // regex-saja, jadi `2026-02-30` tetap lolos ke SQL. Rumahnya disatukan.
+    const tanggal =
+      tanggalQuery(c, "tanggal") ?? tanggalDi(company?.timezone ?? "Asia/Jakarta");
     // Riwayat transaksi untuk kasir: cek pesanan / cetak ulang struk.
     const rows = await db
       .select({

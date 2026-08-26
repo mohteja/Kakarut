@@ -1,3 +1,4 @@
+import { tanggalQuery, zTanggal } from "../../lib/tanggal-query";
 import { toleransiBanding, SKALA_QTY_STOK_KOLOM } from "../../lib/batas-angka";
 import { randomUUID } from "node:crypto";
 import { BATAS_QTY_STOK } from "../../lib/batas-angka";
@@ -95,9 +96,7 @@ const StokAwalBody = OpnameBody.omit({ client_ref: true, device_id: true }).exte
    * ditambahkan BERSAMA penanganannya — bukan mendahului.
    */
   /** tanggal berlaku saldo pembuka (YYYY-MM-DD, zona perusahaan). Default hari ini. */
-  tanggal: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/, "Format tanggal harus YYYY-MM-DD")
+  tanggal: zTanggal
     .optional(),
 });
 
@@ -174,14 +173,10 @@ export const stokRoutes = new Hono<AppEnv>()
       .from(companies)
       .where(eq(companies.id, auth.company_id!));
     const tz = company?.timezone ?? "Asia/Jakarta";
-    const tanggalValid = /^\d{4}-\d{2}-\d{2}$/;
-    const sampaiQ = c.req.query("sampai");
-    const dariQ = c.req.query("dari");
-    const sampai = sampaiQ && tanggalValid.test(sampaiQ) ? sampaiQ : tanggalDi(tz);
+    const sampai = tanggalQuery(c, "sampai") ?? tanggalDi(tz);
     const dari =
-      dariQ && tanggalValid.test(dariQ)
-        ? dariQ
-        : tanggalDi(tz, new Date(Date.now() - 29 * 24 * 3600 * 1000));
+      tanggalQuery(c, "dari") ??
+      tanggalDi(tz, new Date(Date.now() - 29 * 24 * 3600 * 1000));
 
     return c.json(
       await kartuStok({

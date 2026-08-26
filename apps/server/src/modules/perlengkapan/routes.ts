@@ -5,6 +5,7 @@
  * Semua peran boleh lihat & mencatat pemakaian (kasir/tim terkunci cabang);
  * owner/admin mengelola item, stok masuk, koreksi, aturan, dan belanja.
  */
+import { tanggalQuery, zTanggal } from "../../lib/tanggal-query";
 import { keSkalaKolom, SKALA_QTY_PERLENGKAPAN } from "../../lib/batas-angka";
 import { zValidator } from "../../lib/validator";
 import { BATAS_QTY_STOK, BATAS_UANG } from "../../lib/batas-angka";
@@ -69,7 +70,6 @@ import {
   tibaFakturBeliPerlengkapan,
 } from "./service";
 
-const TANGGAL_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 const ItemBody = z.object({
   nama: z.string().trim().min(1).max(60),
@@ -198,7 +198,7 @@ const MasukBody = z.object({
   qty: z.number().positive().max(BATAS_QTY_STOK),
   total_harga: z.number().min(0).max(BATAS_UANG).nullish(),
   catatan: z.string().max(300).nullish(),
-  tanggal: z.string().regex(TANGGAL_RE).optional(),
+  tanggal: zTanggal.optional(),
 }).strict();
 
 const PakaiBody = z.object({
@@ -229,7 +229,7 @@ const AturanBody = z.object({
   qty: z.number().min(0).max(BATAS_QTY_STOK).default(0),
   per_hari: z.number().int().min(1).max(365).default(1),
   aktif: z.boolean().default(true),
-  mulai: z.string().regex(TANGGAL_RE).optional(),
+  mulai: zTanggal.optional(),
 }).strict();
 
 const OpnameBody = z.object({
@@ -272,13 +272,9 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
     const branchId = await resolveBranchId(c);
     const hariIni = await tanggalPerusahaan(auth.company_id!);
     const dari =
-      c.req.query("dari") && TANGGAL_RE.test(c.req.query("dari")!)
-        ? c.req.query("dari")!
-        : `${hariIni.slice(0, 8)}01`;
+      tanggalQuery(c, "dari") ?? `${hariIni.slice(0, 8)}01`;
     const sampai =
-      c.req.query("sampai") && TANGGAL_RE.test(c.req.query("sampai")!)
-        ? c.req.query("sampai")!
-        : hariIni;
+      tanggalQuery(c, "sampai") ?? hariIni;
     return c.json(
       await belanjaPerlengkapan({
         companyId: auth.company_id!,
@@ -1345,10 +1341,7 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
     const branchId = await resolveBranchId(c);
     await terapkanKonsumsiOtomatis(auth.company_id!, branchId);
     const hariIni = await tanggalPerusahaan(auth.company_id!);
-    const q = (nama: string) =>
-      c.req.query(nama) && TANGGAL_RE.test(c.req.query(nama)!)
-        ? c.req.query(nama)!
-        : null;
+    const q = (nama: string) => tanggalQuery(c, nama) ?? null;
     const sampai = q("sampai") ?? hariIni;
     const dari =
       q("dari") ??

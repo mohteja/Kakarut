@@ -1,3 +1,4 @@
+import { tanggalQuery } from "../../lib/tanggal-query";
 import { zValidator } from "../../lib/validator";
 import { and, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
@@ -83,7 +84,8 @@ export const rekomendasiRoutes = new Hono<AppEnv>().get("/beli", async (c) => {
     acuanQ === "7hari" ? "7hari" : acuanQ === "rentang" ? "rentang" : "minggu_lalu";
 
   // terima hanya format tanggal YYYY-MM-DD; selain itu diabaikan (default hari ini)
-  const tgl = (s?: string) => (s && /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : undefined);
+  // Regex-saja dihapus: `2026-02-30` lolos bentuknya lalu ditolak Postgres.
+  const tgl = (nama: string) => tanggalQuery(c, nama);
 
   const hasil = await rekomendasiBeli(auth.company_id!, branchId, tz, {
     target,
@@ -92,10 +94,10 @@ export const rekomendasiRoutes = new Hono<AppEnv>().get("/beli", async (c) => {
     // penyaringnya sudah berdiri dua baris di atas — dan dari sini nilainya
     // mendarat di `gte(sales.saleDate, ...)`, pembanding kolom `date`. Yang
     // salah ketik tak ditolak rapi, ia menjatuhkan permintaannya.
-    dari: tgl(c.req.query("dari")),
-    sampai: tgl(c.req.query("sampai")),
-    pakaiDari: tgl(c.req.query("pakai_dari")),
-    pakaiSampai: tgl(c.req.query("pakai_sampai")),
+    dari: tgl("dari"),
+    sampai: tgl("sampai"),
+    pakaiDari: tgl("pakai_dari"),
+    pakaiSampai: tgl("pakai_sampai"),
   });
   return c.json(hasil);
 })

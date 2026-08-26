@@ -1,3 +1,4 @@
+import { bulanQueryAtau, tanggalQuery } from "../../lib/tanggal-query";
 import { zValidator } from "../../lib/validator";
 import { and, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, sql } from "drizzle-orm";
 import { Hono } from "hono";
@@ -45,13 +46,6 @@ const KoordinatBody = {
 export const ClockBody = z.object({ kode: z.string().trim().min(1), ...KoordinatBody }).strict();
 /** Absen SENDIRI (tombol absen di aplikasi) — tanpa kode, atas nama pemanggil. */
 export const SelfBody = z.object(KoordinatBody).strict();
-
-/** Validasi tanggal YYYY-MM-DD yang benar (menolak bulan/hari di luar rentang). */
-function tanggalValid(s: string): boolean {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
-  const d = new Date(`${s}T00:00:00Z`);
-  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
-}
 
 async function timezoneOf(companyId: string): Promise<string> {
   const [company] = await db
@@ -464,11 +458,12 @@ export const absensiRoutes = new Hono<AppEnv>()
   .get("/", async (c) => {
     const auth = c.get("auth");
     const branchId = await resolveBranchId(c);
-    const tanggalQ = c.req.query("tanggal");
-    if (tanggalQ !== undefined && !tanggalValid(tanggalQ)) {
-      throw new HTTPException(400, { message: "Format tanggal harus YYYY-MM-DD" });
-    }
-    const tanggal = tanggalQ ?? tanggalDi(await timezoneOf(auth.company_id!));
+    // Satu rumah dengan seluruh param tanggal lain (`lib/tanggal-query`).
+    // Pemeriksaan lokal di sini sudah BENAR sejak awal — ia salah satu dari
+    // dua situs (dari 36) yang menolak alih-alih diam; yang berubah cuma
+    // rumahnya, supaya tak ada aturan kedua yang bisa menyimpang.
+    const tanggal =
+      tanggalQuery(c, "tanggal") ?? tanggalDi(await timezoneOf(auth.company_id!));
     const rows = await db
       .select({
         user_id: attendances.userId,
@@ -535,8 +530,14 @@ export const absensiRoutes = new Hono<AppEnv>()
     const tz = await timezoneOf(auth.company_id!);
     const hariIni = tanggalDi(tz);
 
-    const bulanQ = c.req.query("bulan");
-    const bulan = bulanQ && /^\d{4}-(0[1-9]|1[0-2])$/.test(bulanQ) ? bulanQ : hariIni.slice(0, 7);
+    // Bulan yang ADA tapi tak sah dibalas 400 bernama, bukan diam-diam
+    // dijatuhkan ke bulan berjalan — terukur `?bulan=NGAWUR` memulangkan
+    // jumlah baris yang SAMA dengan bulan yang benar, jadi tak ada satu pun
+    // tanda bahwa pilihannya diabaikan.
+    // Bawaan yang JUJUR: balasan rekap menyebut `bulan`/`dari`/`sampai` yang
+    // benar-benar dipakai, jadi layar tak pernah memajang bulan yang tak
+    // dipilih. Kontraknya dipaku verify-api sejak lama.
+    const bulan = bulanQueryAtau(c, "bulan", hariIni.slice(0, 7));
     const [th, bl] = bulan.split("-").map(Number);
     const jumlahHariBulan = new Date(Date.UTC(th, bl, 0)).getUTCDate();
     const dari = `${bulan}-01`;

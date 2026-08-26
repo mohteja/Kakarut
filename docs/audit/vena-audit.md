@@ -50,6 +50,104 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Tanggal dari query & badan: cabang GAGALNYA tak bertuan — server — 2026-08-26
+
+- **Kenapa**: permukaan yang tak punya satu pun entri di 75 vena sebelumnya.
+  Badan permintaan sudah disapu (114 skema `.strict()`, `z.number().max()`,
+  larik berbatas); **param query tak pernah**. Terukur: **82** pembacaan
+  `c.req.query("...")`, **NOL** yang lewat skema
+- **Populasi tanggal** (setelah tiga kali memperbaiki pengurainya): **36**
+  pembacaan param tanggal —
+
+  | | jumlah |
+  |---|---|
+  | memeriksa keabsahannya lalu **GAGAL DIAM** (dilewati / jatuh ke bawaan) | **29** |
+  | tak memeriksa sama sekali | **5** |
+  | menolak | **2** |
+
+  Aturannya ada, dipanggil, bahkan dikomentari. Yang tak pernah ada: **apa
+  yang terjadi saat ia bilang "tidak sah"**
+- **Akarnya satu**: aturan "tanggal ini sah" punya **LIMA salinan yang tak
+  sepakat** — `laporan:34`, `rekomendasi:86`, `penerimaan:243`,
+  `perlengkapan:73` (regex-saja) vs `absensi:51`, `pengajuan:29` (regex +
+  tanggalnya benar-benar ada). Yang kedua benar
+- **TEMUAN 1 — 500 pada tanggal yang mungkin diketik orang.** Terukur lewat
+  HTTP: `GET /laporan?dari=2026-02-30` → **500 `"Terjadi kesalahan pada
+  server"`**. Bentuknya lolos regex, isinya ditolak Postgres. Berlaku di
+  **seluruh** rute `/laporan/*`, dan sama untuk `2026-13-45`, `9999-99-99`,
+  `2026-02-29` (2026 bukan kabisat). **SESUDAH: 400 yang MENYEBUT paramnya** —
+  `Tanggal pada "sampai" tidak sah: "2026-02-31" — pakai format YYYY-MM-DD`
+- **TEMUAN 2 — saringan dibuang diam-diam.** `pengajuan:168` memakai
+  `if (dari && tanggalValid(dari))`; cabang gagalnya **melewati** saringannya.
+  Terukur: rentang sah → **4** baris; `?dari=BUKAN&sampai=xxx` → **13**
+  (seluruh tabel); dan **satu paruh ngawur membuang KEDUA saringannya**
+  (`?dari=2026-08-01&sampai=BUKAN` → 13 juga). Balasannya larik telanjang,
+  jadi layar tetap memajang pilihan tanggal yang tak pernah dipakai.
+  **SESUDAH: 400 bernama**
+- **TEMUAN 3 — permukaan BADAN kena penyakit yang sama.** Diukur sesudah dua
+  temuan pertama, bukan diandaikan: `POST /stok/awal` dengan
+  `tanggal: "2026-02-30"` → **500**, sebab `z.string().regex(...)` pun cuma
+  memeriksa bentuk. **SESUDAH: 400.** Ditutup dengan `zTanggal` di rumah yang
+  sama
+- **Aturan yang akhirnya bisa DINAMAI**, dan repo ini sudah memakainya tanpa
+  menamainya: **jatuh ke bawaan itu jujur HANYA bila balasannya menyebut apa
+  yang dipakai.** `/laporan` mengembalikan `dari`/`sampai`; `/absensi/rekap`
+  dan `/kebersihan/rekap` mengembalikan `bulan`/`dari`/`sampai` — layarnya
+  merender dari nilai itu, bukan dari yang diketik orang. `/pengajuan` dan
+  `/kebersihan` memulangkan larik telanjang — di sana bawaan berarti berbohong
+- **Gerbang lama menahan pengetatan yang BERLEBIHAN, lagi.** Membuat `?bulan=`
+  menolak mematahkan **empat asersi verify-api yang sudah ada** (*"rekap:
+  bulan 00 → jatuh ke bulan berjalan (bukan 500)"*). Kontraknya sengaja
+  dipaku, dan pengukuran membenarkannya: rekap MENYEBUT bulan yang dipakai,
+  jadi bawaannya jujur. Dikembalikan lewat `bulanQueryAtau`, dengan alasannya
+  tertulis. Preseden persis §191 (`kasir → POST /penyimpanan`)
+- **Detektor: DIBUKTIKAN bisa menuduh — dan terbukti menuduh PALSU tiga kali
+  lebih dulu.** Jendela tiga-baris pertama menandai 26 situs "telanjang";
+  sebagian besar ternyata dijaga oleh **pembantu bernama** (`bacaHari(...)`,
+  `tglValid(...)`) atau **daftar-izin** (`=== "pagi"`), yang jendelaku tak
+  lihat. Sesudah pengurainya mengenali ketiganya: 33 pembantu · 13 daftar-izin
+  · 10 branch · sisanya. Bukti merah akhir: `tanggalQuery` dicabut dari
+  `/pengajuan` (suntikan di-assert mendarat) → gerbang menuduh **dua barisnya
+  dengan nomor baris**
+- **Hasil**: 36 pembacaan mentah → **0**. Lima salinan aturan → **satu rumah**
+  (`lib/tanggal-query.ts`), dipakai query (`tanggalQuery`/`bulanQuery`/
+  `bulanQueryAtau`) dan badan (`zTanggal`)
+- **PASANGAN, terukur** — pengetatan tanpa pasangan adalah cara mengubah
+  perbaikan jadi kerusakan:
+
+  | pasangan | hasil |
+  |---|---|
+  | `?dari=&sampai=` (form kosong) | tetap **200**, 13 baris — persis sama dengan tanpa param |
+  | 8 rute berentang, dengan & tanpa rentang | **200** semua |
+  | rentang TERBALIK (`dari > sampai`) | **200** — nol baris adalah jawaban yang benar, bukan galat |
+  | rekap `?bulan=NGAWUR` | jatuh ke bawaan **dan balasannya menyebutnya** |
+
+- **Tindak**: `lib/tanggal-query.ts` (rumah) · 9 modul dialihkan ·
+  `tanggal-query-satu-rumah.test.ts` (4 uji: premis kabisat/`2026-02-30`,
+  sapuan mekanis pembacaan mentah, sapuan salinan regex di KEDUA permukaan,
+  pasangan "kosong = tanpa rentang") · verify-api **§262** (39 asersi)
+- **Dua gerbang berdiri lain ikut bereaksi, dan keduanya benar**:
+  `batas-hari-zona` menuntut jembatan `T00:00:00Z` baru terdaftar beralasan
+  (dua entri lama jadi satu, sebab salinannya menyusut), dan
+  `rekap-absen-pindah-cabang` memaku regex bulan yang pindah rumah — pin-nya
+  dipindahkan ke MAKSUDNYA, dua sisi
+- **Batas, jujur**:
+  - yang disapu **param tanggal**; 46 param query lain (`status`, `q`,
+    `sesi`, `page`, `per_page`, `arsip`, …) dipilah tapi **tidak** diubah —
+    semuanya daftar-izin `===` atau teks ber-`trim` yang tak bisa meledak,
+    dan itu dicatat sebagai negatif bersih berangka, bukan kekosongan;
+  - `zTanggal` menutup medan tanggal di badan, **bukan** medan waktu
+    (`timestamptz`) — permukaan lain yang belum diukur;
+  - aturan "bawaan sah bila balasannya menyebutnya" ditulis sebagai prosa dan
+    dipaku per-situs, **belum** jadi sapuan mekanis — rute baru yang jatuh ke
+    bawaan tanpa menyebutkannya takkan tertangkap
+- Gerbang: typecheck bersih · `npm test` **2.330** (197 berkas) · `verify-api`
+  **3.127 lolos, 0 gagal** vs Postgres SEGAR (§262 baru) · cakupan rute **273**
+  identik · `audit:invarian` 26/26 · build web · e2e Playwright **6/6**. Tak
+  ada berkas Dart tersentuh → `flutter analyze`/`flutter test` tidak dijalankan
+
+---
+
 ## Kebijakan BIAYA ditegakkan di pintunya — server+web+mobile — 2026-08-26
 
 - **Kenapa**: bukan bug melainkan **kebijakan yang belum satu**. Aturannya sudah

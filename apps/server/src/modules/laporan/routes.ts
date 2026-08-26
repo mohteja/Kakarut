@@ -25,13 +25,21 @@ import {
 } from "../../db/schema";
 import type { Context } from "hono";
 import { resolveBranchId, type AppEnv } from "../../middleware/auth";
+import { tanggalQuery } from "../../lib/tanggal-query";
 import { tanggalDi } from "../../lib/time";
 import { omzetDitagihSql, sumQtyDitagihSql } from "../../lib/porsi-ditagih";
 import { rataPerPorsi } from "../../lib/bep";
 import { loadKatalog, toMenuDto } from "../menu/service";
 
 /** Terima hanya tanggal format YYYY-MM-DD; selain itu undefined. */
-const tglValid = (s?: string) => (s && /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : undefined);
+/*
+ * DULU: `(s && /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : undefined)` — bentuk saja.
+ * `2026-02-30` lolos, masuk SQL, dan Postgres menolaknya: terukur
+ * `GET /laporan?dari=2026-02-30` → **500 "Terjadi kesalahan pada server"**,
+ * di SELURUH rute `/laporan/*`. Sekarang satu rumah, dan tanggal yang ADA
+ * tapi tak sah dibalas 400 yang menyebut paramnya.
+ */
+const tglValid = (c: Context<AppEnv>, nama: string) => tanggalQuery(c, nama);
 
 /**
  * Kondisi cabang untuk laporan: kasir selalu terkunci ke cabangnya; owner/admin
@@ -62,9 +70,9 @@ export const laporanRoutes = new Hono<AppEnv>()
       .from(companies)
       .where(eq(companies.id, auth.company_id!));
     const today = tanggalDi(company?.timezone ?? "Asia/Jakarta");
-    const satuHari = tglValid(c.req.query("tanggal")); // kompatibilitas ?tanggal=
-    const sampai = tglValid(c.req.query("sampai")) ?? satuHari ?? today;
-    const dari = tglValid(c.req.query("dari")) ?? satuHari ?? sampai;
+    const satuHari = tglValid(c, "tanggal"); // kompatibilitas ?tanggal=
+    const sampai = tglValid(c, "sampai") ?? satuHari ?? today;
+    const dari = tglValid(c, "dari") ?? satuHari ?? sampai;
 
     const saleFilter = and(
       eq(sales.companyId, auth.company_id!),
@@ -239,8 +247,8 @@ export const laporanRoutes = new Hono<AppEnv>()
       .from(companies)
       .where(eq(companies.id, auth.company_id!));
     const today = tanggalDi(company?.timezone ?? "Asia/Jakarta");
-    const sampai = tglValid(c.req.query("sampai")) ?? today;
-    const dari = tglValid(c.req.query("dari")) ?? sampai;
+    const sampai = tglValid(c, "sampai") ?? today;
+    const dari = tglValid(c, "dari") ?? sampai;
 
     const filter = and(
       eq(productions.companyId, auth.company_id!),
@@ -324,8 +332,8 @@ export const laporanRoutes = new Hono<AppEnv>()
       .from(companies)
       .where(eq(companies.id, auth.company_id!));
     const today = tanggalDi(company?.timezone ?? "Asia/Jakarta");
-    const sampai = tglValid(c.req.query("sampai")) ?? today;
-    const dari = tglValid(c.req.query("dari")) ?? sampai;
+    const sampai = tglValid(c, "sampai") ?? today;
+    const dari = tglValid(c, "dari") ?? sampai;
 
     const saleFilter = and(
       eq(sales.companyId, auth.company_id!),
@@ -393,8 +401,8 @@ export const laporanRoutes = new Hono<AppEnv>()
       .from(companies)
       .where(eq(companies.id, auth.company_id!));
     const today = tanggalDi(company?.timezone ?? "Asia/Jakarta");
-    const sampai = tglValid(c.req.query("sampai")) ?? today;
-    const dari = tglValid(c.req.query("dari")) ?? sampai;
+    const sampai = tglValid(c, "sampai") ?? today;
+    const dari = tglValid(c, "dari") ?? sampai;
 
     const filter = and(
       eq(sales.companyId, auth.company_id!),
@@ -545,9 +553,9 @@ export const laporanRoutes = new Hono<AppEnv>()
       .from(companies)
       .where(eq(companies.id, auth.company_id!));
     const tz = company?.timezone ?? "Asia/Jakarta";
-    const sampai = tglValid(c.req.query("sampai")) ?? tanggalDi(tz);
+    const sampai = tglValid(c, "sampai") ?? tanggalDi(tz);
     const dari =
-      tglValid(c.req.query("dari")) ??
+      tglValid(c, "dari") ??
       tanggalDi(tz, new Date(Date.now() - 30 * 24 * 3600 * 1000));
 
     const filterBep = and(

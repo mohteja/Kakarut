@@ -14427,6 +14427,72 @@ cek "/stok/nilai memuat kelima medan ringkasannya" "V == 1" \
 cek "utang bersyarat: /stok MASIH mengirim harga per bahan" "V == 1" \
   "$(api "$BIA_B" GET /stok | jq '(.[0].harga_per_unit != null) | if . then 1 else 0 end')"
 
+echo
+echo "── §262 tanggal dari query: cabang GAGALNYA punya pemilik ──"
+#
+# Terukur atas 36 pembacaan param tanggal: 29 memeriksa keabsahannya lalu
+# GAGAL DIAM, 5 tak memeriksa, 2 menolak. Aturannya ada dan dipanggil; yang tak
+# pernah ada: apa yang terjadi saat ia bilang "tidak sah". Dan sebabnya satu —
+# aturan "tanggal ini sah" punya LIMA salinan yang tak sepakat (tiga regex-saja,
+# dua regex + tanggalnya benar-benar ada).
+#
+# SEBELUM:
+#   GET /laporan?dari=2026-02-30   → 500 "Terjadi kesalahan pada server"
+#                                    (bentuk lolos regex, isinya ditolak Postgres)
+#   GET /pengajuan?dari=BUKAN      → 200 dengan SELURUH tabel (4 baris → 13),
+#                                    dan `sampai=BUKAN` membuang KEDUA saringannya
+#   POST /stok/awal tanggal=2026-02-30 → 500 (badan pun regex-saja)
+# SESUDAH: 400 yang MENYEBUT paramnya, di ketiganya.
+cek "premis §262: rentang SAH tetap 200" "V == 200" \
+  "$(status_code "$OWNER" GET "/laporan?dari=2026-08-01&sampai=2026-08-26")"
+# TEMUAN 1 — tanggal yang BENTUKNYA benar tapi tak ada
+for T262 in "2026-02-30" "2026-13-45" "9999-99-99" "2026-02-29"; do
+  cek "tanggal mustahil $T262 → 400 (dulu 500)" "V == 400" \
+    "$(status_code "$OWNER" GET "/laporan?dari=$T262")"
+done
+cek "galatnya MENYEBUT nama paramnya" "V == 1" \
+  "$(api "$OWNER" GET "/laporan?dari=2026-02-30" | jq '((.error // "") | test("dari")) | if . then 1 else 0 end')"
+# TEMUAN 2 — saringan tak lagi dibuang diam-diam
+N262A=$(api "$OWNER" GET "/pengajuan?dari=2026-01-01&sampai=2026-12-31" | jq 'length')
+N262B=$(api "$OWNER" GET "/pengajuan" | jq 'length')
+cek "premis §262: rentang sah menyaring (lebih sedikit dari tanpa rentang)" "V == 1" \
+  "$([ "$N262A" -le "$N262B" ] && echo 1 || echo 0)"
+cek "pengajuan ?dari=BUKAN → 400 (dulu 200 + seluruh tabel)" "V == 400" \
+  "$(status_code "$OWNER" GET "/pengajuan?dari=BUKAN&sampai=xxx")"
+cek "satu paruh ngawur pun ditolak (dulu membuang KEDUA saringan)" "V == 400" \
+  "$(status_code "$OWNER" GET "/pengajuan?dari=2026-08-01&sampai=BUKAN")"
+# TEMUAN 3 — permukaan BADAN
+BC262=$(api "$OWNER" GET /cabang | jq -r '.[0].id')
+BB262=$(api "$OWNER" GET /bahan | jq -r '.[0].id')
+cek "badan: POST /stok/awal tanggal mustahil → 400 (dulu 500)" "V == 400" \
+  "$(status_code_body "$OWNER" POST /stok/awal "{\"branch_id\":\"$BC262\",\"tanggal\":\"2026-02-30\",\"items\":[{\"ingredient_id\":\"$BB262\",\"qty\":1}]}")"
+# PASANGAN 1: param KOSONG tetap berarti "tanpa rentang" — form yang belum
+# diisi mengirim `?dari=&sampai=`, dan menolaknya mematahkan layar yang jalan.
+cek "PASANGAN: ?dari=&sampai= (kosong) tetap 200" "V == 200" \
+  "$(status_code "$OWNER" GET "/pengajuan?dari=&sampai=")"
+cek "PASANGAN: kosong = TANPA rentang (jumlahnya sama dgn tanpa param)" "V == 1" \
+  "$([ "$(api "$OWNER" GET "/pengajuan?dari=&sampai=" | jq 'length')" = "$N262B" ] && echo 1 || echo 0)"
+# PASANGAN 2: seluruh rute berentang tetap hidup, dengan & tanpa rentang
+for R262 in "/laporan" "/laporan/pembelian" "/laporan/menu-laris" "/laporan/durasi-pesanan" \
+            "/pengajuan" "/kebersihan" "/absensi" "/penerimaan/riwayat"; do
+  cek "PASANGAN: $R262 tanpa rentang → 200" "V == 200" "$(status_code "$OWNER" GET "$R262")"
+  cek "PASANGAN: $R262 rentang sah → 200" "V == 200" \
+    "$(status_code "$OWNER" GET "$R262?dari=2026-08-01&sampai=2026-08-26")"
+done
+# BULAN sengaja TETAP jatuh ke bawaan, dan itu keputusan berdasar: balasan
+# rekap MENYEBUT `bulan`/`dari`/`sampai` yang benar-benar dipakai, jadi layar
+# merender dari nilai itu — bukan dari yang diketik orang. Bawaan yang jujur.
+# Pengetatanku ke 400 sempat mematahkan empat asersi lama yang memakukannya;
+# gerbang lama menahan perbaikan yang berlebihan, persis seperti §191.
+cek "PASANGAN: rekap ?bulan= sah tetap 200" "V == 200" \
+  "$(status_code "$OWNER" GET "/absensi/rekap?bulan=2026-08")"
+cek "bulan tak sah JATUH ke bawaan — dan balasannya MENYEBUTnya" "V == 1" \
+  "$(api "$OWNER" GET "/absensi/rekap?bulan=NGAWUR" | jq '((.bulan | test("^\\d{4}-\\d{2}$")) and (.dari | test("^\\d{4}-\\d{2}-01$"))) | if . then 1 else 0 end')"
+# Rentang TERBALIK sengaja BUKAN galat: nol baris adalah jawaban yang benar
+# untuk rentang kosong.
+cek "rentang terbalik tetap 200 (nol baris = jawaban benar)" "V == 200" \
+  "$(status_code "$OWNER" GET "/laporan?dari=2026-12-31&sampai=2026-01-01")"
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"
