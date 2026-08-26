@@ -18,13 +18,22 @@ const rupiah = new Intl.NumberFormat("id-ID", {
  */
 const TAK_DIKETAHUI = "—";
 
-export function formatRupiah(n: number): string {
-  if (!Number.isFinite(n)) return TAK_DIKETAHUI;
+/*
+ * `null` masuk aturan yang SAMA dengan tak-hingga: "belum diketahui" → "—".
+ *
+ * Ia bukan aturan baru melainkan perluasan yang sudah berdiri di berkas ini,
+ * dan sejak 2026-08-26 ia punya sumber kedua: server MENAHAN angka biaya untuk
+ * peran non-manajemen (`bolehLihatBiaya`) dengan mengirim `null`, bukan 0.
+ * Nol adalah angka — ia tercetak "Rp 0" dan dipercaya orang; "—" mengatakan
+ * yang sebenarnya, yaitu bahwa nilainya tak diberikan.
+ */
+export function formatRupiah(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return TAK_DIKETAHUI;
   return rupiah.format(Math.round(n));
 }
 
-export function formatAngka(n: number, maxDecimals = 2): string {
-  if (!Number.isFinite(n)) return TAK_DIKETAHUI;
+export function formatAngka(n: number | null | undefined, maxDecimals = 2): string {
+  if (n == null || !Number.isFinite(n)) return TAK_DIKETAHUI;
   return new Intl.NumberFormat("id-ID", { maximumFractionDigits: maxDecimals }).format(n);
 }
 

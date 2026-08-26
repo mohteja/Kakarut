@@ -93,7 +93,17 @@ const ya = (b: boolean) => (b ? "ya" : "tidak");
  *   bertabrakan dengan pola ribuan, jadi hanya itu yang perlu diganggu —
  *   tanpa pembulatan, tanpa memaksa semua angka berekor nol.
  */
-function selAngka(n: number): string {
+/*
+ * `null` = harga ditahan server (peran non-manajemen) → sel KOSONG, bukan "0".
+ *
+ * Hari ini cabang itu tak terjangkau: tombol Export CSV di `BahanPage` sudah
+ * berada di dalam blok `bolehUbah`. Ia ditulis begitu justru supaya tetap
+ * benar bila kelak terjangkau — sebab importir membaca sel kosong sebagai
+ * `keAngka(…, 0)`, jadi mengekspor "0" untuk harga yang tak diberikan akan
+ * MENIHILKAN harga aslinya saat berkasnya di-impor balik.
+ */
+function selAngka(n: number | null): string {
+  if (n == null) return "";
   if (!Number.isFinite(n)) return "0";
   if (Number.isInteger(n)) return String(n);
   const s = String(n);

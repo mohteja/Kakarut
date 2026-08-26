@@ -39,7 +39,14 @@
 /** Baris stok minimal yang dibutuhkan untuk menilai — subset `StokRowDto`. */
 export interface BarisNilaiStok {
   saldo: number;
-  harga_per_unit: number;
+  /**
+   * `null` = harganya TIDAK DIBERIKAN server (peran non-manajemen —
+   * `bolehLihatBiaya`), berbeda arti dari 0 ("belum pernah dibeli"). Keduanya
+   * bermuara ke ember yang sama, `tanpa_harga_bahan`, dan itu memang benar:
+   * dua-duanya berarti "nilainya tak bisa dihitung", dan layar sudah punya
+   * kalimat untuk menyebut kekurangannya alih-alih menyembunyikannya.
+   */
+  harga_per_unit: number | null;
 }
 
 export interface NilaiStokRingkas {
@@ -75,7 +82,7 @@ export function ringkasNilaiStok(baris: BarisNilaiStok[]): NilaiStokRingkas {
     tanpa_harga_bahan: 0,
   };
   for (const b of baris) {
-    const harga = Number.isFinite(b.harga_per_unit) ? b.harga_per_unit : 0;
+    const harga = b.harga_per_unit != null && Number.isFinite(b.harga_per_unit) ? b.harga_per_unit : 0;
     if (b.saldo > 0) {
       if (harga > 0) {
         r.nilai += b.saldo * harga;

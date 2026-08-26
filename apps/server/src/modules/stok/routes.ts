@@ -30,7 +30,7 @@ import {
   terikatCabang,
   type AppEnv,
 } from "../../middleware/auth";
-import { hargaPerUnit } from "@kakarut/shared";
+import { hargaPerUnit, ringkasNilaiStok } from "@kakarut/shared";
 import { awalHariDi, tanggalDi } from "../../lib/time";
 import { nomorUntukRefs, terbitkanNomor } from "../dokumen/nomor";
 import { fifoBahan, hitungSaldoCabang, kartuStok, qtyDiJalan } from "./service";
@@ -122,6 +122,31 @@ export const stokRoutes = new Hono<AppEnv>()
     const auth = c.get("auth");
     const branchId = await resolveBranchId(c);
     return c.json(await hitungSaldoCabang(auth.company_id!, branchId));
+  })
+  /**
+   * NILAI RUPIAH stok di rak — agregat, bukan harga per bahan.
+   *
+   * Terbuka semua peran, dan itu keputusan: kartu "Nilai stok" memang sengaja
+   * ditampilkan ke siapa pun yang membuka layar Stok di KEDUA klien, dan ia
+   * menjawab "modal saya yang mengendap di gudang berapa?" — bukan "bahan itu
+   * dibeli berapa".
+   *
+   * Rumusnya `ringkasNilaiStok` dari `@kakarut/shared` — RUMAH YANG SUDAH ADA,
+   * dipakai web `StokPage` dan dicerminkan Dart `nilai_stok.dart`. Menyusun
+   * ulang di sini akan melahirkan rumus kedua yang bisa menyimpang diam-diam,
+   * kelas yang sudah sekali menggigit repo ini pada PB1.
+   *
+   * KENAPA RUTE INI ADA. Sampai sekarang totalnya dihitung KLIEN dari
+   * `harga_per_unit` tiap baris `GET /stok` — jadi selama kartunya hidup,
+   * harga beli tiap bahan wajib ikut terkirim ke semua peran. Rute ini
+   * memisahkan keduanya: totalnya boleh dilihat siapa pun, harga per bahannya
+   * tidak.
+   */
+  .get("/nilai", async (c) => {
+    const auth = c.get("auth");
+    const branchId = await resolveBranchId(c);
+    const baris = await hitungSaldoCabang(auth.company_id!, branchId);
+    return c.json(ringkasNilaiStok(baris));
   })
   /** Kartu stok: buku besar mutasi satu bahan (halaman terpisah di web). */
   .get("/kartu/:ingredientId", async (c) => {

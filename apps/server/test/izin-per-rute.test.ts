@@ -138,7 +138,7 @@ const TERBUKA_SENGAJA = new Map<string, string>([
  *
  * Diukur 2026-08-26 dengan token peran `bar` sungguhan (bukan dibaca): 60 rute
  * BACA terbuka → **7 ditutup** (lihat `peranEfektif` yang dipaku di bawah) →
- * **53** tersisa, masing-masing punya baris di sini.
+ * **53** tersisa (kini **54** sesudah `GET /stok/nilai` lahir), masing-masing punya baris di sini.
  *
  * Daftarnya sengaja PER RUTE, bukan per prefiks seperti `TERBUKA_SENGAJA` di
  * atas: yang ditagih justru keputusan per pintu, dan prefiks `/stok` sendiri
@@ -185,6 +185,7 @@ const TERBUKA_SENGAJA_BACA = new Map<string, string>([
   ["/transfer-stok", "kiriman antar-cabang, terikat cabang pemakainya"],
   ["/transfer-stok/saldo", "saldo yang bisa dikirim dari cabang sendiri"],
   ["/stok", "saldo bahan; opname & waste dikerjakan tiap peran. Membawa `harga_per_unit` — lihat CATATAN BIAYA"],
+  ["/stok/nilai", "AGREGAT nilai rupiah stok cabang — bukan harga per bahan. Kartu \"Nilai stok\" memang sengaja ditampilkan ke tiap peran yang membuka layar Stok di KEDUA klien; rute ini justru yang MEMISAHKAN totalnya dari harga per bahannya, supaya harga per bahan bisa ditahan tanpa memadamkan kartunya"],
   ["/stok/exp", "bahan mendekati kedaluwarsa — dibaca pelaksana rak"],
   ["/stok/penyesuaian", "selisih yang belum tuntas; dibuka dari layar opname"],
   ["/stok/opname", "sesi opname berjalan"],

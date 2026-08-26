@@ -9,8 +9,8 @@ import {
   hitungHpp,
   qtyBahanPerPorsi,
   qtyEfektif,
-  type KomponenDto,
-  type MenuDto,
+  type KomponenDtoPenuh,
+  type MenuDtoPenuh,
   type MenuStokDto,
 } from "@kakarut/shared";
 import { db, type Db, type Tx } from "../../db/client";
@@ -23,7 +23,7 @@ export interface KatalogMenu {
   rows: MenuRow[];
   categoryNameById: Map<string, string>;
   /** komponen per menu, lengkap dengan info bahan */
-  komponenByMenu: Map<string, KomponenDto[]>;
+  komponenByMenu: Map<string, KomponenDtoPenuh[]>;
   /** pembatasan lokasi per menu — TANPA entri/kosong = tampil di semua cabang */
   branchIdsByMenu: Map<string, string[]>;
 }
@@ -38,7 +38,7 @@ export interface KatalogMenu {
  * dasar sebuah paket — HPP dan konsumsi stoknya jadi terlalu kecil tanpa galat
  * apa pun. Cukup satu fungsi.
  */
-export function komponenEfektif(katalog: KatalogMenu, menu: MenuRow): KomponenDto[] {
+export function komponenEfektif(katalog: KatalogMenu, menu: MenuRow): KomponenDtoPenuh[] {
   return [
     ...(katalog.komponenByMenu.get(menu.id) ?? []),
     ...(menu.tipe === "paket" && menu.baseMenuId
@@ -111,7 +111,7 @@ export async function loadKatalog(dbx: Db | Tx, companyId: string): Promise<Kata
   const categoryNameById = new Map(cats.map((c) => [c.id, c.nama]));
 
   const branchIdsByMenu = new Map<string, string[]>();
-  const komponenByMenu = new Map<string, KomponenDto[]>();
+  const komponenByMenu = new Map<string, KomponenDtoPenuh[]>();
   if (rows.length > 0) {
     const batasan = await dbx
       .select({ menuId: menuBranches.menuId, branchId: menuBranches.branchId })
@@ -188,7 +188,7 @@ export function katalogDenganHarga(
   katalog: KatalogMenu,
   hargaPerUnitBaru: Map<string, number>,
 ): KatalogMenu {
-  const komponenByMenu = new Map<string, KomponenDto[]>();
+  const komponenByMenu = new Map<string, KomponenDtoPenuh[]>();
   for (const [menuId, list] of katalog.komponenByMenu) {
     komponenByMenu.set(
       menuId,
@@ -220,7 +220,7 @@ export function menuMemakaiBahan(katalog: KatalogMenu, ingredientId: string): st
   return [...langsung];
 }
 
-function toKomponenHpp(list: KomponenDto[]) {
+function toKomponenHpp(list: KomponenDtoPenuh[]) {
   return list.map((k) => ({
     qty: k.qty,
     hargaPerUnit: k.harga_per_unit,
@@ -389,7 +389,7 @@ export async function ketersediaanMenu(
   });
 }
 
-export function toMenuDto(menu: MenuRow, katalog: KatalogMenu): MenuDto {
+export function toMenuDto(menu: MenuRow, katalog: KatalogMenu): MenuDtoPenuh {
   const hpp = hitungHargaMenu(menu, katalog);
   const hppDineIn = hitungHargaMenu(menu, katalog, true);
 

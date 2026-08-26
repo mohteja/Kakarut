@@ -547,7 +547,10 @@ export function MenuFormPage() {
           <div className="space-y-3">
             {komponen.map((k, i) => {
               const b = k.ingredient_id ? bahanById.get(k.ingredient_id) : undefined;
-              const hargaKomponen = b ? b.harga_per_unit * angkaDari(k.qty || 0) : 0;
+              // Harga bisa `null` bila server menahannya untuk peran ini —
+              // `null` berarti "tak diketahui", bukan nol.
+              const hargaKomponen =
+                b && b.harga_per_unit != null ? b.harga_per_unit * angkaDari(k.qty || 0) : null;
               return (
                 <div key={i} className="rounded-lg border border-stone-200 p-3">
                   <div className="flex items-center gap-2">

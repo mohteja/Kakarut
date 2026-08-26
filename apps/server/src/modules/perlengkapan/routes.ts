@@ -12,7 +12,12 @@ import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import type { RiwayatHargaDto, RiwayatHargaLot } from "@kakarut/shared";
+import {
+  bolehLihatBiaya,
+  tanpaBiayaKartuPerlengkapan,
+  type RiwayatHargaDto,
+  type RiwayatHargaLot,
+} from "@kakarut/shared";
 import { statistikHargaLots, hargaPerSatuanLot, lotStatistik, BATAS_LOT_RIWAYAT } from "../../lib/harga-stats";
 import { db } from "../../db/client";
 import {
@@ -1359,5 +1364,11 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
     });
     if (!kartu)
       throw new HTTPException(404, { message: "Perlengkapan tidak ditemukan" });
-    return c.json(kartu);
+    /*
+     * PINTUNYA sengaja tetap terbuka — `KartuPerlengkapanModal` web dibuka
+     * dari tab Stok → Perlengkapan yang dipakai semua peran untuk pakai &
+     * opname, dan menutupnya menghentikan pekerjaan harian. Yang ditutup
+     * ANGKA belanjanya.
+     */
+    return c.json(bolehLihatBiaya(auth.role) ? kartu : tanpaBiayaKartuPerlengkapan(kartu));
   });

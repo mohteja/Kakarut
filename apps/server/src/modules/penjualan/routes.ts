@@ -6,7 +6,7 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { db } from "../../db/client";
 import { branches, companies, saleItems, sales, shifts, users } from "../../db/schema";
-import { qtyDitagih, waktuKertas } from "@kakarut/shared";
+import { bolehLihatBiaya, qtyDitagih, waktuKertas } from "@kakarut/shared";
 import { opsiKertasDariQuery, responsSlip } from "../print/kertas";
 import {
   branchUntukTulis,
@@ -258,7 +258,24 @@ export const penjualanRoutes = new Hono<AppEnv>()
       .select({ nama: users.nama })
       .from(users)
       .where(eq(users.id, sale.cashierUserId));
-    return c.json({ sale, items, branch_nama: branch?.nama ?? "", kasir: kasirUser?.nama ?? null });
+    /*
+     * BIAYA hanya untuk manajemen. Balasan ini membawa `sale.totalHpp` dan
+     * `items[].hppSatuan` — terukur 2026-08-26 dengan token `bar` dan
+     * `cashier`: keduanya membaca 5662,0314, angka yang sama persis dengan
+     * owner. Barisnya sendiri (`hppSatuan`) ikut dinihilkan; menutup totalnya
+     * saja adalah pagar yang bisa dilangkahi dari balasan yang sama.
+     *
+     * Papan pesanan TIDAK tersentuh: SnackBar "HPP transaksi dihitung ulang"
+     * di ponsel membaca `total_hpp` dari balasan POST
+     * `/pesanan/:jenis/:id/item/:itemId/sajian`, bukan dari sini.
+     */
+    const lihatBiaya = bolehLihatBiaya(auth.role);
+    return c.json({
+      sale: lihatBiaya ? sale : { ...sale, totalHpp: null },
+      items: lihatBiaya ? items : items.map((it) => ({ ...it, hppSatuan: null })),
+      branch_nama: branch?.nama ?? "",
+      kasir: kasirUser?.nama ?? null,
+    });
   })
   /**
    * SLIP PESANAN penjualan ini — menu & jumlah saja, TANPA HARGA.

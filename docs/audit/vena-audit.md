@@ -50,6 +50,116 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Kebijakan BIAYA ditegakkan di pintunya — server+web+mobile — 2026-08-26
+
+- **Kenapa**: bukan bug melainkan **kebijakan yang belum satu**. Aturannya sudah
+  ditulis TIGA KALI di layar, tiap kali dengan nama sendiri — `isManajemen`
+  (`App.tsx`, `Layout.tsx`), `bolehUbah` (`ResepPage`, yang bahkan tak
+  MENGAMBIL datanya lewat `enabled: bolehUbah`), `lihatHarga`
+  (`resep_page.dart`) — dan tak pernah di pintunya. Keputusan pemilik atas tiga
+  pilihan yang disodorkan berangka: **"biaya = manajemen saja"**
+- **Terukur SEBELUM** (token peran `bar` DAN `cashier` sungguhan, DB segar,
+  fikstur dibuktikan terbaca lebih dulu) — ketiganya termasuk owner membaca
+  angka yang **SAMA PERSIS**:
+
+  | rute | yang terbaca `bar` & `cashier` |
+  |---|---|
+  | `GET /menu`, `/menu/:id` | `hpp` **5662,03** · `hpp_dine_in` 4732,03 · `harga_saran` 10820,01 · `harga_jual_bulat` 11000 · `food_cost_persen` 51,47 · `komponen[].harga_per_unit` **357,14** |
+  | `GET /bahan` | `harga_beli` **35.000** · `harga_per_unit` 777,78 |
+  | `GET /penjualan/:id` | `sale.totalHpp` **5662,0314** · `items[].hppSatuan` |
+  | `GET /perlengkapan/:id/kartu` | `total_belanja` |
+
+- **SESUDAH**: `null` untuk keduanya, angka penuh untuk owner/admin —
+  seluruhnya dipaku §261 verify-api (**37 asersi**)
+- **`null`, BUKAN 0**, dan itu keputusan yang ditulis: nol adalah angka; ia
+  tercetak "Rp 0" dan dipercaya orang. Ledger ini sudah sekali menandai `?? 0`
+  sebagai "bentuk diam yang sedang dijaga". Formatter web merendernya `—` lewat
+  `TAK_DIKETAHUI` yang **sudah ada** di berkas itu untuk nilai tak-hingga —
+  perluasan aturan yang berdiri, bukan aturan baru
+- **Penyaringnya di BATAS RUTE, bukan di service** — pagar terpenting putaran
+  ini. `toMenuDto` dipakai juga `laporan/routes.ts` dan DUA situs di berkasnya
+  sendiri yang MEMBACA `harga_jual_bulat` untuk menghitung saran harga;
+  `hitungSaldoCabang` dipakai opname, kartu stok, dan walk FIFO di dalam
+  server. Menihilkan di dalamnya bukan menjaga data — ia merusak perhitungan
+- **Tipe yang membedakan dua keadaan, bukan `!` yang membuangnya**: typechecker
+  menemukan **25** situs yang mengandaikan biaya selalu ada. Menaburkan `!` di
+  sana berarti membuang justru pemeriksaan yang menjaga penyaringnya benar.
+  Yang dibuat: `MenuDtoPenuh`/`BahanDtoPenuh`/`KomponenDtoPenuh` — DI DALAM
+  server angkanya selalu ada, DI KABEL ia boleh ditahan. `AnalisisHargaRow`
+  ikut jadi `MenuDtoPenuh` sebab rutenya sudah `requireRole("owner","admin")`
+- **Detektor: DIBUKTIKAN bisa menuduh — dan terbukti BUTA lebih dulu.** Sapuan
+  versi pertama menuntut argumen `return c.json(...)` menyebut penyaringnya. Ia
+  buta terhadap bentuk yang paling wajar dipakai orang saat mencabut
+  penjaganya:
+
+      const dto = toMenuDto(row, katalog);
+      return c.json(dto);            // ← tak menyebut toMenuDto sama sekali
+
+  Suntikan bukti merahnya persis begitu, **dan gerbangnya hijau**. Diganti
+  jadi hitungan KESEIMBANGAN (tiap `toMenuDto` yang bukan situs perhitungan
+  wajib berpasangan dengan satu `saringMenu`) → suntikan yang sama tertuduh
+  dengan angkanya: *"4 situs keluaran tapi cuma 3 yang disaring"*
+- **Gerbang lama menangkap dua situs yang kulewati sendiri**: `POST /menu` dan
+  `PUT /menu/:id` semula tak kusaring ("balasan tulis, sudah owner/admin").
+  Sapuan kelengkapan menolaknya — dan benar: satu jalan yang sama membuat
+  gerbangnya bisa menuntut kelengkapan alih-alih menghafal pengecualian
+- **Ratchet putaran KEMARIN langsung menagih keputusan atas rute baruku
+  sendiri**: `GET /stok/nilai` lahir → `izin-per-rute.test.ts` merah menuntut
+  ia diadjudikasi di `TERBUKA_SENGAJA_BACA`. Itu bukti gerbang itu hidup
+- **PASANGAN, empat lapis** — pengetatan tanpa pasangan adalah cara mengubah
+  perbaikan jadi kerusakan:
+
+  | pasangan | terukur |
+  |---|---|
+  | `GET /stok/nilai` identik owner & bar | **7.395.611,15** keduanya |
+  | kasir tetap MENJUAL | nota `PUSAT-20260826-0003`, total 11.000 |
+  | papan dapur/bar tetap terima HPP | POST sajian → `total_hpp` **5662,0314** |
+  | `bar` tetap baca menu & harga JUAL | `harga_jual` 11000, `komponen[].qty` 2 |
+
+- **UTANG BERSYARAT — ditulis di kodenya DAN diuji, bukan cuma dikomentari**:
+  `GET /stok` masih mengirim `harga_per_unit` per baris. Sebabnya tanggal
+  rilis, bukan kelalaian: kartu "Nilai stok" ponsel menghitung totalnya sendiri
+  dari baris, build terpasang masih `1.0.0+10`, dan rilis berikutnya tertahan
+  keystore. **Syarat pencabutannya tertulis**; §261 memaku keadaannya hari ini
+  (`utang bersyarat: /stok MASIH mengirim harga per bahan`) supaya pencabutannya
+  jadi keputusan sadar. Kedua klien SUDAH siap — keduanya beralih ke agregat
+  server begitu `harga_per_unit` datang `null`, dan menyebut di layar bahwa
+  cakupannya berubah jadi seluruh cabang
+- **Rumus nilai stok tak digandakan**: `GET /stok/nilai` memakai
+  `ringkasNilaiStok` dari `@kakarut/shared` — rumah yang sudah ada, dipakai web
+  dan dicerminkan Dart. `null` masuk ember `tanpa_harga_bahan` yang **sudah
+  ada** untuk harga 0, jadi build lama pun berdegradasi dengan jujur alih-alih
+  diam
+- **Tindak**: `bolehLihatBiaya` (rumah aturan, `constants.ts`) ·
+  `packages/shared/src/biaya.ts` (penyaring murni) · penyaring di 4 modul rute ·
+  `GET /stok/nilai` · web+ponsel beralih ke agregat · gerbang
+  `biaya-hanya-manajemen.test.ts` (**7 uji**) yang juga memaku ketiga definisi
+  klien tetap sepakat · §261 verify-api · CHANGELOG-API + `BELUM_TAYANG`
+- **Batas, jujur**:
+  - `foodCostMaks`/`targetPenjualan` di `GET /company` **tidak** ditutup —
+    keduanya TARGET, bukan biaya, dan `/company` dibutuhkan POS untuk `pb1Rate`
+    & `receiptFooter`. Keputusan, bukan kelupaan;
+  - pin ketiga definisi klien membaca repo ponsel yang **tak ada di CI** — ia
+    dilewati di sana (pola `kunci-satu-kontrak`), jadi yang menjaganya mesin
+    yang memuat kedua repo;
+  - sapuan kelengkapan menghitung KESEIMBANGAN, bukan menelusuri aliran nilai:
+    situs yang mengeluarkan `MenuDto` lewat variabel perantara berlapis masih
+    bisa lolos bila jumlah `saringMenu`-nya kebetulan cocok;
+  - `/stok` (di atas) belum ditutup, dan itu satu-satunya medan biaya yang
+    tersisa terbuka
+- **Kesalahan lingkungan yang dicatat**: `npm run build -w @kakarut/web` saat
+  server berjalan membuat `index.html` yang di-cache boot menunjuk aset yang
+  sudah tak ada → **404, layar kosong, e2e merah 6/6**. Bukan regresi; server
+  di-restart, e2e hijau. Kelas yang sama ("server basi") sudah sekali menggigit
+  sesi ini
+- Gerbang: typecheck bersih · `npm test` **2.326** (196 berkas) · `verify-api`
+  **3.096 lolos, 0 gagal** vs Postgres SEGAR (§261 baru) · cakupan rute
+  **273** (+1: `/stok/nilai`, rekamannya diperbarui) · `audit:invarian` 26/26 ·
+  build web · e2e Playwright **6/6** · `flutter analyze` bersih ·
+  `flutter test` **551**
+
+---
+
 ## Pengurungan tenant arah BACA — server — 2026-08-26 — **BERSIH**
 
 - **Kenapa**: ledger punya entri "Isolasi tenant pada PENULISAN" (2026-08-22,

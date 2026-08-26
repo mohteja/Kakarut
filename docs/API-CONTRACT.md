@@ -1814,7 +1814,7 @@ export interface BahanDto {
   /** kode produk ringkas (otomatis/manual); null utk bahan lama sebelum backfill */
   kode: string | null;
   nama: string;
-  harga_beli: number;
+  harga_beli: number | null;
   isi: number;
   /** satuan kerja/resep (stok, resep, konsumsi, HPP): pcs, gr, ml, butir, dst */
   satuan: string;
@@ -1828,7 +1828,7 @@ export interface BahanDto {
   stok_minimum_toko: number;
   /** pengali biaya resep → harga per batch bahan produksi (1 = mengikuti biaya resep) */
   overhead_x: number;
-  harga_per_unit: number;
+  harga_per_unit: number | null;
   kategori: BahanKategori;
   pengadaan: JenisPengadaan;
   /**
@@ -1990,7 +1990,7 @@ export interface KomponenDto {
   qty: number;
   satuan: string;
   track_stok: boolean;
-  harga_per_unit: number;
+  harga_per_unit: number | null;
   is_packaging: boolean;
   is_complement: boolean;
 }
@@ -2074,12 +2074,37 @@ export interface MenuDto {
   branch_ids: string[];
   komponen: KomponenDto[];
   /** dihitung live */
+  hpp: number | null;
+  hpp_dine_in: number | null;
+  harga_saran: number | null;
+  harga_jual_bulat: number | null;
+  food_cost_persen: number | null;
+}
+
+/**
+ * Varian `MenuDto` yang angka biayanya PASTI ada — keluaran `toMenuDto`,
+ * sebelum penyaring peran.
+ *
+ * Dua tipe untuk satu bentuk, dan itu disengaja: DI DALAM server angka biaya
+ * selalu ada (analisis harga & "terapkan saran" menghitung dengannya, dan
+ * `hitungHargaMenu` menjumlahkannya), sementara DI KABEL ia boleh ditahan
+ * untuk peran yang tak berhak. Tanpa pembedaan ini pilihannya cuma menaburkan
+ * `!` di situs-situs perhitungan — yang berarti membuang justru pemeriksaan
+ * yang menjaga penyaringnya benar.
+ */
+export type KomponenDtoPenuh = KomponenDto & { harga_per_unit: number };
+export type MenuDtoPenuh = MenuDto & {
   hpp: number;
   hpp_dine_in: number;
   harga_saran: number;
   harga_jual_bulat: number;
   food_cost_persen: number;
-}
+  komponen: KomponenDtoPenuh[];
+};
+
+/** Varian `BahanDto` yang harganya PASTI ada — keluaran `toDto` bahan. */
+export type BahanDtoPenuh = BahanDto & { harga_beli: number; harga_per_unit: number };
+
 
 /**
  * Satu bahan penyumbang HPP sebuah menu — dipakai halaman Analisis Harga untuk
@@ -2105,7 +2130,14 @@ export interface PenyumbangHpp {
  * jauh lebih tua dari `bahan_diperbarui` penyumbang terbesarnya, artinya yang
  * bergerak adalah harga BAHAN, bukan harga jual menu.
  */
-export interface AnalisisHargaRow extends MenuDto {
+/**
+ * Baris analisis harga — `MenuDtoPenuh`, bukan `MenuDto`.
+ *
+ * `GET /menu/analisis-harga` ber-`requireRole("owner","admin")`, jadi barisnya
+ * TAK PERNAH melewati penyaring biaya; angkanya selalu ada, dan layar analisis
+ * memang menghitung dengannya (ambang food cost, selisih harga saran).
+ */
+export interface AnalisisHargaRow extends MenuDtoPenuh {
   /** menus.updated_at — kapan menu (termasuk harga jualnya) terakhir disimpan */
   menu_diperbarui: string;
   /** ambang food cost perusahaan (%) — disalin agar klien tak perlu query lain */
@@ -2400,7 +2432,7 @@ export interface StokRowDto {
    * mengalikannya diam-diam menghasilkan nol dan membuat total kekurangan
    * tanpa jejak apa pun di layar.
    */
-  harga_per_unit: number;
+  harga_per_unit: number | null;
   /**
    * Saldo dalam SATUAN KEMASAN, mis. "\u2248 6,67 dus" \u2014 null bila bahan ini tak
    * dibeli per kemasan (`isi \u2264 1` atau `satuan_beli` kosong), atau saat saldonya
@@ -4331,7 +4363,7 @@ export interface KartuPerlengkapanDto {
   total_masuk: number;
   total_keluar: number;
   /** nilai belanja (SUM total_harga mutasi masuk) dalam rentang */
-  total_belanja: number;
+  total_belanja: number | null;
   /** true bila mutasi melebihi batas tampilan dan dipotong */
   terpotong: boolean;
   mutasi: PerlengkapanMutasiDto[];

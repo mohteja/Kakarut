@@ -14354,6 +14354,79 @@ for J260 in "/bahan/$B260/langkah" "/bahan/$B260/resep" "/bahan/$B260/detail" \
     "$([ "$(status_code "$UJI260" GET "$J260")" != "200" ] && echo 1 || echo 0)"
 done
 
+echo
+echo "── §261 angka BIAYA hanya untuk manajemen ──"
+#
+# Aturannya sudah ditulis TIGA KALI di layar sebelum ada penjaganya, tiap kali
+# dengan nama sendiri: `isManajemen` (web App/Layout), `bolehUbah` (ResepPage —
+# yang bahkan tak MENGAMBIL datanya, `enabled: bolehUbah`), dan `lihatHarga`
+# (resep_page.dart ponsel). Pintunya tidak.
+#
+# SEBELUM (terukur token `bar` DAN `cashier`, DB segar): keduanya membaca
+#   /menu           hpp 5662,03 · hpp_dine_in 4732,03 · harga_saran 10820,01 ·
+#                   food_cost_persen 51,47 · komponen[].harga_per_unit 357,14
+#   /bahan          harga_beli 35.000 · harga_per_unit 777,78
+#   /penjualan/:id  totalHpp 5662,0314 · items[].hppSatuan
+#   /perlengkapan/:id/kartu  total_belanja
+# — angka yang SAMA PERSIS dengan owner.
+#
+# SESUDAH: `null` untuk keduanya, angka penuh untuk owner.
+BIA_B="$BAR258"                       # peran bar (dibuat §258)
+BIA_K=$(login "$KASIR_EMAIL" "$KASIR_PASS")
+cek "premis §261: token bar & kasir hidup" "V == 1" \
+  "$([ -n "$BIA_B" ] && [ -n "$BIA_K" ] && echo 1 || echo 0)"
+BIA_M=$(api "$OWNER" GET /menu | jq -r '.[0].id')
+BIA_BH=$(api "$OWNER" GET /bahan | jq -r '.[0].id')
+BIA_P=$(api "$OWNER" GET /perlengkapan/master | jq -r 'if type=="array" then .[0].id else .items[0].id end')
+BIA_S=$(api "$OWNER" GET /penjualan | jq -r 'if type=="array" then .[0].id else .items[0].id end')
+cek "premis §261: fikstur ada" "V == 1" \
+  "$([ -n "$BIA_M" ] && [ "$BIA_M" != null ] && [ -n "$BIA_BH" ] && [ "$BIA_BH" != null ] && [ -n "$BIA_S" ] && [ "$BIA_S" != null ] && echo 1 || echo 0)"
+# Premis TERPENTING: owner benar-benar MENERIMA angkanya. Tanpa ini `null`
+# milik bar tak menyatakan apa pun — medan yang memang selalu kosong juga null.
+# Dilihat atas SELURUH daftar, bukan baris pertama: menu tanpa resep ber-hpp 0
+# secara sah, dan di DB verify baris pertamanya kebetulan begitu ("Luap243 a").
+# Premis yang menunjuk satu baris menguji urutan sortir, bukan kebijakan.
+cek "premis §261: owner menerima hpp menu (bukan null)" "V == 1" \
+  "$(api "$OWNER" GET /menu | jq '([.[] | select(.hpp != null and .hpp > 0)] | length > 0) | if . then 1 else 0 end')"
+cek "premis §261: owner menerima harga bahan (bukan null)" "V == 1" \
+  "$(api "$OWNER" GET /bahan | jq '(.[0].harga_beli != null) | if . then 1 else 0 end')"
+for TOK260 in "$BIA_B" "$BIA_K"; do
+  # `all`, bukan baris pertama: satu baris yang kebetulan null tak membuktikan
+  # kebijakannya berlaku untuk seluruh katalog.
+  cek "biaya /menu ditahan (hpp, hpp_dine_in, saran, food cost)" "V == 1" \
+    "$(api "$TOK260" GET /menu | jq '(all(.hpp == null and .hpp_dine_in == null and .harga_saran == null and .harga_jual_bulat == null and .food_cost_persen == null)) | if . then 1 else 0 end')"
+  cek "biaya /menu: harga komponen resep ikut ditahan" "V == 1" \
+    "$(api "$TOK260" GET /menu | jq '([.[] | select((.komponen|length) > 0)][0].komponen | all(.harga_per_unit == null)) | if . then 1 else 0 end')"
+  cek "biaya /menu/:id ditahan" "V == 1" \
+    "$(api "$TOK260" GET "/menu/$BIA_M" | jq '(.hpp == null and .food_cost_persen == null) | if . then 1 else 0 end')"
+  cek "biaya /bahan ditahan (harga_beli, harga_per_unit)" "V == 1" \
+    "$(api "$TOK260" GET /bahan | jq '(all(.harga_beli == null and .harga_per_unit == null)) | if . then 1 else 0 end')"
+  cek "biaya /penjualan/:id ditahan (totalHpp, hppSatuan)" "V == 1" \
+    "$(api "$TOK260" GET "/penjualan/$BIA_S" | jq '(.sale.totalHpp == null and (.items | all(.hppSatuan == null))) | if . then 1 else 0 end')"
+  cek "biaya kartu perlengkapan ditahan (total_belanja)" "V == 1" \
+    "$(api "$TOK260" GET "/perlengkapan/$BIA_P/kartu" | jq '(.total_belanja == null and (.mutasi | all(.total_harga == null))) | if . then 1 else 0 end')"
+  # PASANGAN: yang BUKAN biaya tetap utuh — tanpa ini pengetatan jadi kerusakan
+  cek "PASANGAN: harga JUAL & takaran resep tetap terkirim" "V == 1" \
+    "$(api "$TOK260" GET /menu | jq '(.[0].harga_jual > 0 and (.[0].nama | length) > 0) | if . then 1 else 0 end')"
+  cek "PASANGAN: nama & satuan bahan tetap terkirim" "V == 1" \
+    "$(api "$TOK260" GET /bahan | jq '((.[0].nama | length) > 0 and (.[0].satuan | length) > 0) | if . then 1 else 0 end')"
+done
+# PASANGAN: manajemen tetap menerima angka penuh
+cek "PASANGAN: owner tetap menerima hpp & harga bahan" "V == 1" \
+  "$(api "$OWNER" GET /bahan | jq '(.[0].harga_per_unit != null) | if . then 1 else 0 end')"
+# PASANGAN: kartu "Nilai stok" tetap hidup — agregatnya SAMA untuk semua peran
+NIL_O=$(api "$OWNER" GET /stok/nilai | jq -r '.nilai')
+NIL_B=$(api "$BIA_B" GET /stok/nilai | jq -r '.nilai')
+cek "PASANGAN: /stok/nilai identik untuk owner & bar" "V == 1" \
+  "$([ "$NIL_O" = "$NIL_B" ] && [ "$NIL_O" != "null" ] && echo 1 || echo 0)"
+cek "/stok/nilai memuat kelima medan ringkasannya" "V == 1" \
+  "$(api "$BIA_B" GET /stok/nilai | jq '(has("nilai") and has("bahan_bernilai") and has("minus_bahan") and has("minus_nilai") and has("tanpa_harga_bahan")) | if . then 1 else 0 end')"
+# UTANG BERSYARAT yang DIUJI, bukan cuma dikomentari: `/stok` masih mengirim
+# harga per bahan sampai build ponsel ber-`/stok/nilai` tayang (kartu Nilai
+# stok di tablet 1.0.0+10 menghitungnya sendiri dari baris).
+cek "utang bersyarat: /stok MASIH mengirim harga per bahan" "V == 1" \
+  "$(api "$BIA_B" GET /stok | jq '(.[0].harga_per_unit != null) | if . then 1 else 0 end')"
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

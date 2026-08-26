@@ -335,7 +335,10 @@ export function ResepPage() {
   const semuaById = new Map(semua.map((b) => [b.id, b]));
   const biayaResep = resep.reduce((a, r) => {
     const x = semuaById.get(r.ingredient_id);
-    return a + (x ? (angkaDari(r.qty) || 0) * x.harga_per_unit : 0);
+    // Bahan yang harganya tak diketahui tak menyumbang biaya. Untuk peran
+    // non-manajemen kuerinya bahkan tak berjalan (`enabled: bolehUbah`), jadi
+    // `semua` kosong dan totalnya nol — bukan total yang diam-diam kurang.
+    return a + (x && x.harga_per_unit != null ? (angkaDari(r.qty) || 0) * x.harga_per_unit : 0);
   }, 0);
   /**
    * Baris resep yang SUDAH DIISI takarannya tapi tidak akan ikut tersimpan.
@@ -362,7 +365,8 @@ export function ResepPage() {
 
   // Apakah menyimpan akan MENGGESER harga bahan ini? Selisih di bawah 1 rupiah
   // dianggap sama (harga tersimpan dibulatkan, biaya resep tidak).
-  const hargaBerubah = !!dipilih && Math.abs(hargaBatch - dipilih.harga_beli) >= 1;
+  const hargaBerubah =
+    !!dipilih && dipilih.harga_beli != null && Math.abs(hargaBatch - dipilih.harga_beli) >= 1;
   // Menu yang HPP-nya ikut bergerak bila harga bahan ini berubah — angka kasar
   // (pemakaian langsung) supaya user tahu ini bukan perubahan sepele.
   const menuTerdampak = (menuSemua ?? []).filter((m) =>
@@ -835,7 +839,7 @@ export function ResepPage() {
                                 {terpilih ? `× Rp ${formatAngka(terpilih.harga_per_unit, 2)}` : ""}
                               </span>
                               <span className="w-28 shrink-0 text-right text-sm whitespace-nowrap font-medium text-stone-700 tabular-nums">
-                                {terpilih && angkaDari(r.qty) > 0
+                                {terpilih && terpilih.harga_per_unit != null && angkaDari(r.qty) > 0
                                   ? formatRupiah(angkaDari(r.qty) * terpilih.harga_per_unit)
                                   : "—"}
                               </span>

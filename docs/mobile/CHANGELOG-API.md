@@ -26,6 +26,57 @@ tanpa akses repo server.
 ---
 
 
+## Angka BIAYA hanya untuk manajemen (owner/admin)
+
+> Tidak ada migrasi. **Medan biaya kini `null`** untuk peran non-manajemen
+> (`cashier`, `tim`, `kitchen`, `bar`) — sebelumnya bernilai penuh. Aditif:
+> rute baru `GET /stok/nilai`.
+
+🟡 **PERLU DILIHAT** — build lama **tidak pecah**: seluruh parser Dart untuk
+medan ini memakai `as num? ?? 0`, jadi `null` terbaca 0. Tapi layar yang
+menampilkannya akan menulis **"Rp 0"**, dan itu angka yang salah dibaca.
+
+**Medan yang kini bisa `null`:**
+
+| rute | medan |
+| --- | --- |
+| `GET /menu`, `GET /menu/:id` | `hpp` · `hpp_dine_in` · `harga_saran` · `harga_jual_bulat` · `food_cost_persen` · `komponen[].harga_per_unit` |
+| `GET /bahan` (+ turunan) | `harga_beli` · `harga_per_unit` |
+| `GET /penjualan/:id` | `sale.totalHpp` · `items[].hppSatuan` |
+| `GET /perlengkapan/:id/kartu` | `total_belanja` · `mutasi[].total_harga` |
+
+**Yang TIDAK berubah** — dan ini sengaja, bukan kelupaan:
+
+- `harga_jual` (harga yang dibayar tamu) dan `komponen[].qty` (takaran yang
+  dimasak dapur) tetap terkirim ke semua peran;
+- balasan **POST** `/pesanan/:jenis/:id/item/:itemId/sajian` tetap memulangkan
+  `total_hpp` — SnackBar "HPP transaksi dihitung ulang" di papan dapur/bar
+  adalah fitur terkirim dan tidak disentuh;
+- `GET /stok` **masih** mengirim `harga_per_unit` per baris. Ini utang
+  bersyarat yang ditulis di kodenya: kartu "Nilai stok" di build terpasang
+  menghitung totalnya sendiri dari baris, jadi menahannya sekarang akan
+  memadamkan kartu itu di tablet. Ia dicabut sesudah build yang memakai
+  `GET /stok/nilai` tayang.
+
+🟢 **BARU — `GET /stok/nilai`** (semua peran, `?branch_id=` opsional):
+
+```json
+{ "nilai": 7395611.15, "bahan_bernilai": 90, "minus_bahan": 0,
+  "minus_nilai": 0, "tanpa_harga_bahan": 0 }
+```
+
+Agregat nilai rupiah stok cabang, dihitung server dengan rumus yang sama
+(`ringkasNilaiStok`) SEBELUM harga per bahan ditahan. Pakai ini untuk kartu
+"Nilai stok" alih-alih menjumlah `harga_per_unit` per baris. Catat di layar
+bahwa cakupannya **seluruh cabang** — ia tak ikut menyempit saat kotak cari
+terisi.
+
+**Kenapa berubah.** Aturannya sudah ditulis tiga kali di layar
+(`isManajemen`, `bolehUbah`, `lihatHarga`) tapi tak pernah di pintunya:
+terukur dengan token `bar` dan `cashier`, keduanya membaca HPP menu, harga
+beli bahan, dan harga per komponen resep yang **sama persis** dengan owner.
+
+
 ## Rilis: Kunci idempotensi dibagi antara percobaan online dan antrean offline
 
 > Tidak ada migrasi. Aditif: `client_ref` (+ `device_id`) kini DITERIMA pada

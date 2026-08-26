@@ -7,14 +7,18 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import {
   hargaPerUnit,
+  bolehLihatBiaya,
+  tanpaBiayaBahan,
   type BahanDetailDto,
   type BahanDto,
+  type BahanDtoPenuh,
   type BahanLangkahRow,
   type BahanResepRow,
   type BahanSupplierDto,
   type RakLokasi,
   type RiwayatHargaDto,
   type RiwayatHargaLot,
+  type UserRole,
 } from "@kakarut/shared";
 import { kunciAntrean } from "../../lib/kunci";
 import { alasanGagalBaris, bentrokUnikPada, tanpaBentrok } from "../../lib/pg-galat";
@@ -423,7 +427,7 @@ function toDto(
   sup?: { utama: string | null; jumlah: number },
   rakLokasi: RakLokasi[] = [],
   produksiBranchIds: string[] = [],
-): BahanDto {
+): BahanDtoPenuh {
   return {
     id: row.id,
     slug: row.slug,
@@ -563,6 +567,18 @@ async function riwayatHargaBahan(
   };
 }
 
+/**
+ * Harga bahan hanya untuk manajemen.
+ *
+ * Dipanggil di TIAP situs keluaran `toDto`, termasuk balasan rute tulis yang
+ * sudah owner/admin — di sana ia no-op, dan satu jalan yang sama membuat
+ * sapuan gerbang `biaya-hanya-manajemen.test.ts` bisa menuntut kelengkapan
+ * alih-alih menghafal situs mana yang dikecualikan.
+ */
+function saringBahan(role: UserRole | null, d: BahanDtoPenuh): BahanDto {
+  return bolehLihatBiaya(role) ? d : tanpaBiayaBahan(d);
+}
+
 export const bahanRoutes = new Hono<AppEnv>()
   .get("/", async (c) => {
     const auth = c.get("auth");
@@ -578,7 +594,7 @@ export const bahanRoutes = new Hono<AppEnv>()
         .from(ingredients)
         .where(and(eq(ingredients.companyId, auth.company_id!), eq(ingredients.isActive, false)))
         .orderBy(asc(ingredients.nama));
-      return c.json(arsipRows.map((r) => toDto(r, undefined, [], [])));
+      return c.json(arsipRows.map((r) => saringBahan(auth.role, toDto(r, undefined, [], []))));
     }
     const rows = await db
       .select()
@@ -591,7 +607,9 @@ export const bahanRoutes = new Hono<AppEnv>()
     // Bentuk DTO tetap sama: supplier_utama null, jumlah_supplier 0, rak [].
     if (c.req.query("ringkas") === "1") {
       const produsen = await produsenByBahan(auth.company_id!);
-      return c.json(rows.map((r) => toDto(r, undefined, [], produsen.get(r.id) ?? [])));
+      return c.json(
+        rows.map((r) => saringBahan(auth.role, toDto(r, undefined, [], produsen.get(r.id) ?? []))),
+      );
     }
     const [sup, rak, produsen] = await Promise.all([
       infoSupplier(auth.company_id!),
@@ -599,7 +617,9 @@ export const bahanRoutes = new Hono<AppEnv>()
       produsenByBahan(auth.company_id!),
     ]);
     return c.json(
-      rows.map((r) => toDto(r, sup.get(r.id), rak.get(r.id) ?? [], produsen.get(r.id) ?? [])),
+      rows.map((r) =>
+        saringBahan(auth.role, toDto(r, sup.get(r.id), rak.get(r.id) ?? [], produsen.get(r.id) ?? [])),
+      ),
     );
   })
   .post("/", requireRole("owner", "admin"), zValidator("json", BahanBody), async (c) => {
@@ -674,7 +694,7 @@ export const bahanRoutes = new Hono<AppEnv>()
         .where(and(eq(ingredients.id, existing.id), eq(ingredients.companyId, auth.company_id!)))
         .returning();
       await simpanCabangProdusen(row.id, produsenIds);
-      return c.json(toDto(row, undefined, [], produsenIds), 200);
+      return c.json(saringBahan(auth.role, toDto(row, undefined, [], produsenIds)), 200);
     }
     const kode = await resolveKodeBahan(db, auth.company_id!, body.kode, body.nama);
     /*
@@ -726,7 +746,7 @@ export const bahanRoutes = new Hono<AppEnv>()
       "ingredients_company_slug_uq",
     );
     await simpanCabangProdusen(row.id, produsenIds);
-    return c.json(toDto(row, undefined, [], produsenIds), 201);
+    return c.json(saringBahan(auth.role, toDto(row, undefined, [], produsenIds)), 201);
   })
   /**
    * Tambah banyak bahan baku sekaligus (halaman "Tambah Bahan Baku" multi-baris).
@@ -804,7 +824,10 @@ export const bahanRoutes = new Hono<AppEnv>()
         )
         .returning();
     });
-    return c.json({ jumlah: rows.length, bahan: rows.map((r) => toDto(r)) }, 201);
+    return c.json(
+      { jumlah: rows.length, bahan: rows.map((r) => saringBahan(auth.role, toDto(r))) },
+      201,
+    );
   })
   /**
    * IMPOR CSV bahan baku (owner/admin). Web mem-parse CSV → JSON, lalu:
@@ -1187,7 +1210,7 @@ export const bahanRoutes = new Hono<AppEnv>()
         ).map((r) => r.branchId);
       }
       const sup = await infoSupplier(auth.company_id!, [row.id]);
-      return c.json(toDto(row, sup.get(row.id), [], produsenIds));
+      return c.json(saringBahan(auth.role, toDto(row, sup.get(row.id), [], produsenIds)));
     },
   )
   /**
@@ -1343,7 +1366,10 @@ export const bahanRoutes = new Hono<AppEnv>()
       saldoBahanPerCabang(auth.company_id!, c.req.param("id")),
     ]);
     const hasil: BahanDetailDto = {
-      bahan: toDto(ing, sup.get(ing.id), rak.get(ing.id) ?? [], produsen.get(ing.id) ?? []),
+      bahan: saringBahan(
+        auth.role,
+        toDto(ing, sup.get(ing.id), rak.get(ing.id) ?? [], produsen.get(ing.id) ?? []),
+      ),
       metode_hpp: co?.metodeHpp ?? "average",
       total_saldo: saldoCabang.reduce((t, r) => t + r.saldo, 0),
       saldo_cabang: saldoCabang,
