@@ -50,6 +50,104 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## 60 rute BACA terbuka, dipilah satu per satu — server — 2026-08-26
+
+- **Kenapa**: batas yang ditulis entri "Matriks IZIN per rute" sendiri —
+  *"sisanya (60 rute BACA terbuka, termasuk beberapa yang menampilkan
+  HPP/margin) belum diadjudikasi satu per satu."* Vena itu menutup dua pintu
+  TULIS; arah BACA belum pernah disentuh
+- **Populasi**: **274** rute · **105** GET · **60** GET terbuka untuk keenam
+  peran (`owner` `admin` `cashier` `tim` `kitchen` `bar`). Ke-60 dipilah
+  tangan, bukan disamaratakan
+- **Detektor**: penyusun matriks yang sudah ada (`izin-per-rute.test.ts`)
+  dijalankan pada arah GET. **DIBUKTIKAN bisa menuduh, dua lapis, suntikan
+  di-assert mendarat lebih dulu**: (1) `requireRole` dicabut dari
+  `GET /supplier/:id/kartu` → DUA uji merah, keduanya menyebut jalurnya;
+  (2) rute baru `GET /satuan/laba-rahasia` tanpa penjaga disisipkan → tertuduh
+  dengan namanya. Keduanya dipulihkan
+- **Diukur lewat HTTP dengan token peran `bar` SUNGGUHAN** (premis tokennya
+  diperiksa dulu: payload JWT-nya benar-benar `role: "bar"`), DB segar, tiap
+  fikstur dibuktikan terbaca lebih dulu lewat 200 milik owner:
+
+  | rute | yang terbaca peran `bar` SEBELUM |
+  |---|---|
+  | `GET /menu` | `hpp` **5662,03** · `hpp_dine_in` 4732,03 · `harga_saran` 10820,01 · `food_cost_persen` 51,47 · `komponen[].harga_per_unit` 357,14 / 754,55 |
+  | `GET /bahan` | `harga_beli` **35.000** · `harga_per_unit` 777,78 |
+  | `GET /bahan/:id/pembelian` | `harga_terkini` 777,78 + seluruh riwayat lot |
+  | `GET /supplier/:id/kartu` | `total_belanja` + riwayat belanja supplier |
+  | `GET /menu/panduan-markup` | seluruh tabel kebijakan markup perusahaan |
+  | `GET /penjualan/:id` | `sale.totalHpp` **5662,0314** · `items[].hppSatuan` |
+  | `GET /stok` · `GET /perlengkapan/:id/kartu` | `harga_per_unit` · `total_belanja` |
+
+- **Temuan — 7 pintu BACA yang aturannya sudah tertulis di pintu SEBELAHNYA,
+  di berkas yang SAMA.** Ini bukan disimpulkan dari klien; pasangannya bisa
+  ditunjuk barisnya:
+
+  | berkas | pintu TULIS (owner/admin sejak lama) | pintu BACA (terbuka keenam peran) |
+  |---|---|---|
+  | `bahan/routes.ts` | `PUT /:id/supplier` :1208 | `GET /:id/supplier` :1198 — **sepuluh baris di atasnya** |
+  | `bahan/routes.ts` | `POST /:id/harga` | `GET /:id/pembelian` |
+  | `perlengkapan/routes.ts` | `PUT /:id/supplier` | `GET /:id/supplier` |
+  | `perlengkapan/routes.ts` | `POST /:id/harga` | `GET /:id/pembelian` |
+  | `perlengkapan/routes.ts` | `GET /belanja` & `GET /master` (keduanya owner/admin) | `GET /beli` |
+  | `supplier/routes.ts` | `PATCH /:id` | `GET /:id/kartu` |
+  | `menu/routes.ts` | — | `GET /panduan-markup` (**NOL konsumen**: kedua klien mengimpor konstanta `PANDUAN_MARKUP` dari `@kakarut/shared`, tak satu pun lewat HTTP) |
+
+  Dua di antaranya bahkan menulis aturannya utuh di doc-comment-nya sendiri —
+  *"GET terbuka semua peran (info belanja); PUT owner/admin"* — lalu memasang
+  penjaganya di separuh kalimat itu saja
+- **SESUDAH** (terukur, tabel penuh di §259 verify-api): ketujuhnya `bar` →
+  **403**; `owner` → **200**; dan **PASANGAN**: `tim` → **200** di kedua pintu
+  bahan (layar yang membacanya memang dipasang untuk tim/tim-CK, jadi menutup
+  `tim` akan mematikan layar yang hari ini bekerja). Terbuka **60 → 53**
+- **Tindak**: 7 `requireRole` + `TERBUKA_SENGAJA_BACA` **per RUTE** (53 entri
+  bernama & beralasan, bukan per prefiks — prefiks `/stok` sendiri memuat
+  delapan pintu yang artinya berbeda) + uji anti-kuburan + uji PREMIS +
+  uji "pintu yang WAJIB terbuka masih terbuka" (11 rute) + §259 verify-api
+  (28 asersi). `izin-per-rute.test.ts` 6 → **11** uji
+- **Batas — dan ini bagian yang paling penting, ditulis apa adanya**: angka
+  biaya di `GET /menu`, `GET /bahan`, `GET /stok`, `GET /penjualan/:id`, dan
+  `GET /perlengkapan/:id/kartu` **TIDAK ditutup**, dan alasannya hasil
+  pengukuran, bukan kehabisan waktu:
+  1. **Saling terjangkau.** Menutup `hpp` di `/menu` sementara `/stok` dan
+     `/bahan` tetap memberi `harga_per_unit` per bahan (dan `/bahan/:id/resep`
+     memberi takarannya) hanya memindahkan pintunya. Penjaga yang bisa
+     dilewati lewat pintu sebelah persis penyakit yang ledger ini obati —
+     memasangnya akan menambah satu lagi, bukan mengurangi.
+  2. **Ada layar TERKIRIM yang sengaja menampilkannya ke peran non-manajemen**:
+     papan pesanan ponsel memunculkan SnackBar *"HPP transaksi dihitung ulang
+     → Rp …"* untuk dapur/bar, dan kartu "Nilai stok" di layar Stok ponsel
+     dihitung dari `harga_per_unit` **tanpa penjaga peran sama sekali**;
+     `KartuPerlengkapanModal` web (memajang `total_belanja`) dibuka dari tab
+     Stok → Perlengkapan yang juga tak berpenjaga peran.
+
+  Sementara itu KEDUA klien menulis aturan sebaliknya di layar, dengan nama:
+  ponsel `resep_page.dart` memakai `final lihatHarga = user?.isManajemen`,
+  web `ResepPage` bahkan tak mengambil datanya (`enabled: bolehUbah`), dan
+  `MenuListPage`/`AnalisisHargaPage`/`MenuHppPage` semuanya di balik
+  `isManajemen`. Jadi **kebijakannya sendiri belum satu** — menyeragamkannya
+  keputusan PRODUK (siapa boleh melihat biaya), bukan tambalan yang boleh
+  kupasang sendiri. Seluruh pengukurannya tersimpan di CATATAN BIAYA dalam
+  `izin-per-rute.test.ts` supaya keputusan itu punya angkanya saat diambil
+- **Batas kedua**: resolusi statisnya tetap buta pada penjaga yang bergantung
+  **tipe cabang** (`izinkanManajemenAtauKaryawanCk`, `izinkanProduksi`) dan
+  pada pemeriksaan kepemilikan **di dalam handler** — sama seperti putaran
+  lalu. Yang memutuskan tetap tembakan HTTP
+- **Kesalahan proses yang dicatat, bukan didiamkan**: putaran verify-api
+  pertama dibunuh timeout perkakas di menit ke-2, dan putaran kedua kujalankan
+  di atas DB yang sudah tercemar sisanya — **42 "kegagalan"** yang tak satu pun
+  nyata. Ketahuan dari `jumlah menu = 79` (seharusnya 57), bukan dari hasil
+  ujinya. Diulang dari DB yang benar-benar segar. Ditambah: `JEJAK_RUTE`
+  menerima **jalur berkas**, bukan `1` — sekali kuisi `1` dan jejaknya masuk
+  ke berkas bernama `1`
+- Gerbang: typecheck bersih · `npm test` **2.310** (194 berkas) · `verify-api`
+  **3.050 lolos, 0 gagal** vs Postgres SEGAR (§259 baru) · cakupan rute **272**
+  identik · `audit:invarian` 26/26 · build web · e2e Playwright **6/6**.
+  Tak ada berkas Dart tersentuh → `flutter analyze`/`flutter test` tidak
+  dijalankan, dan itu disebutkan
+
+---
+
 ## Jalur tulis KEDUA dibayar: rekalkulasi HPP — server — 2026-08-24
 
 - **Kenapa**: batas gerbang luapan-turunan — *"jalur tulis KEDUA ke kolom

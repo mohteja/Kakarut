@@ -14263,6 +14263,62 @@ cek "PASANGAN: owner tetap bisa membuat supplier" "V == 201" \
 cek "PASANGAN: bar tetap boleh absen sendiri" "V == 1" \
   "$(status_code "$BAR258" GET /absensi/status | awk '{print ($1 == 200) ? 1 : 0}')"
 
+echo
+echo "── §259 kartu & riwayat BIAYA: pintu BACA menyusul pintu TULIS-nya ──"
+#
+# §258 menutup dua pintu BUAT lalu menulis batasnya: "60 rute BACA terbuka,
+# termasuk beberapa yang menampilkan HPP/margin, belum diadjudikasi satu per
+# satu." Ini membayarnya — ke-60 dipilah tangan, 7 ditutup, 53 didaftarkan
+# beralasan di `izin-per-rute.test.ts`.
+#
+# Tiap pintu di bawah punya pasangan di BERKAS YANG SAMA yang sudah
+# owner/admin sejak lama:
+#
+#   bahan/routes.ts         PUT  /:id/supplier   ← GET /:id/supplier (10 baris)
+#   bahan/routes.ts         POST /:id/harga      ← GET /:id/pembelian
+#   perlengkapan/routes.ts  PUT  /:id/supplier   ← GET /:id/supplier
+#   perlengkapan/routes.ts  POST /:id/harga      ← GET /:id/pembelian
+#   perlengkapan/routes.ts  GET  /belanja,/master← GET /beli
+#   supplier/routes.ts      PATCH /:id           ← GET /:id/kartu
+#
+# SEBELUM (token peran `bar`, terukur): ketujuhnya 200, dan angkanya terbaca —
+#   /bahan/:id/pembelian → harga_terkini 777,78 · /supplier/:id/kartu →
+#   total_belanja · /menu/panduan-markup → seluruh tabel kebijakan markup.
+# SESUDAH: 403. Pasangannya: owner tetap 200, `tim` tetap 200 di kedua pintu
+# bahan (layar yang membacanya memang dipasang untuk tim/tim-CK), dan pintu
+# yang WAJIB terbuka tetap terbuka.
+CAB259="$CAB258"
+api "$OWNER" POST /karyawan "{\"nama\":\"Tim Izin 259\",\"email\":\"tim259@basooopa.id\",\"password\":\"TimIzin259!\",\"role\":\"tim\",\"branch_id\":\"$CAB259\"}" > /dev/null
+TIM259=$(login "tim259@basooopa.id" "TimIzin259!")
+cek "premis §259: token berperan tim" "V == 1" \
+  "$(echo "$TIM259" | cut -d. -f2 | base64 -d 2>/dev/null | jq '(.role == "tim") | if . then 1 else 0 end')"
+# Fikstur DIBUKTIKAN TERBACA lebih dulu (aturan 6): owner harus 200 di tiap
+# pintu, kalau tidak angka 403 di bawah tak menyatakan apa-apa (404 pun 4xx).
+BH259=$(api "$OWNER" GET /bahan | jq -r '.[0].id')
+SUP259=$(api "$OWNER" GET /supplier | jq -r '.[0].id')
+PL259=$(api "$OWNER" GET /perlengkapan/master | jq -r 'if type=="array" then .[0].id else .items[0].id end')
+cek "premis §259: fikstur bahan/supplier/perlengkapan ada" "V == 1" \
+  "$([ -n "$BH259" ] && [ "$BH259" != null ] && [ -n "$SUP259" ] && [ "$SUP259" != null ] && [ -n "$PL259" ] && [ "$PL259" != null ] && echo 1 || echo 0)"
+for J in "/menu/panduan-markup" "/supplier/$SUP259/kartu" "/bahan/$BH259/pembelian" \
+         "/bahan/$BH259/supplier" "/perlengkapan/beli" "/perlengkapan/$PL259/pembelian" \
+         "/perlengkapan/$PL259/supplier"; do
+  cek "premis §259: owner membaca $J → 200" "V == 200" "$(status_code "$OWNER" GET "$J")"
+  cek "bar → $J → 403 (dulu 200)" "V == 403" "$(status_code "$BAR258" GET "$J")"
+done
+# PASANGAN 1: `tim` TETAP masuk di kedua pintu bahan — menutupnya akan
+# mematikan `BahanPage` (web `isManajemen || isTim`, ponsel `|| isTimCk`).
+cek "PASANGAN: tim tetap membaca riwayat harga bahan" "V == 200" \
+  "$(status_code "$TIM259" GET "/bahan/$BH259/pembelian")"
+cek "PASANGAN: tim tetap membaca supplier bahan" "V == 200" \
+  "$(status_code "$TIM259" GET "/bahan/$BH259/supplier")"
+# PASANGAN 2: pintu yang WAJIB terbuka tetap terbuka untuk peran terlemah —
+# POS butuh katalog, papan butuh tiket, resep butuh pelaksana cabang, dan
+# kartu perlengkapan dibuka dari tab Stok yang tak berpenjaga peran.
+for J in "/menu" "/menu/ketersediaan" "/bahan" "/bahan/$BH259/resep" "/stok" \
+         "/perlengkapan" "/perlengkapan/$PL259/kartu" "/supplier" "/pesanan" "/meja/status"; do
+  cek "PASANGAN: bar tetap membaca $J" "V == 200" "$(status_code "$BAR258" GET "$J")"
+done
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

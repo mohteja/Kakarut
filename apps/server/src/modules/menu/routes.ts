@@ -279,7 +279,17 @@ async function catatHargaMenu(
 }
 
 export const menuRoutes = new Hono<AppEnv>()
-  .get("/panduan-markup", (c) => c.json(PANDUAN_MARKUP))
+  /**
+   * KEBIJAKAN MARKUP perusahaan — persen per jenis kategori.
+   *
+   * Terukur 2026-08-26 dengan token peran `bar`: 200, dan seluruh tabelnya
+   * terbaca. Rute ini punya **NOL konsumen**: web (`MenuFormPage`) dan ponsel
+   * sama-sama mengimpor konstanta `PANDUAN_MARKUP` dari `@kakarut/shared`
+   * secara langsung, tak satu pun lewat HTTP. Jadi menutupnya tak bisa
+   * mematahkan layar mana pun — dan yang tersisa hanya keuntungannya:
+   * kebijakan harga tak lagi terbaca peran mana pun yang punya token.
+   */
+  .get("/panduan-markup", requireRole("owner", "admin"), (c) => c.json(PANDUAN_MARKUP))
   .get("/", async (c) => {
     const auth = c.get("auth");
     const katalog = await loadKatalog(db, auth.company_id!);

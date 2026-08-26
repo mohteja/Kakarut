@@ -78,9 +78,19 @@ export const supplierRoutes = new Hono<AppEnv>()
    * KARTU SUPPLIER: riwayat transaksi pembelian yang tercatat ke supplier ini
    * (baris faktur beli ber-supplier_id — diisi manual di faktur atau otomatis
    * dari supplier utama bahan saat belanja Diproses) + ringkasan belanja +
-   * bahan yang terhubung. Terbuka semua peran (info belanja).
+   * bahan yang terhubung.
+   *
+   * DULU terbuka semua peran ("info belanja"). Terukur 2026-08-26 dengan token
+   * peran `bar`: 200 berikut `total_belanja` — seluruh riwayat belanja ke
+   * supplier ini. Pintu sebelahnya di berkas yang SAMA (`PATCH /:id`) sudah
+   * `requireRole("owner","admin")` sejak lama; yang membaca angkanya tidak.
+   *
+   * Pasangannya diperiksa sebelum ditutup: satu-satunya pembaca kartu ini
+   * adalah `KartuSupplierPage` web, yang rutenya (`/pengaturan/supplier/:id`)
+   * memang cuma dipasang untuk `isManajemen`. Ponsel tak memanggilnya sama
+   * sekali. Menutupnya tak memutus layar mana pun.
    */
-  .get("/:id/kartu", async (c) => {
+  .get("/:id/kartu", requireRole("owner", "admin"), async (c) => {
     const auth = c.get("auth");
     const id = c.req.param("id");
     const [sup] = await db

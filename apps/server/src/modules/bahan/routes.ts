@@ -1192,10 +1192,19 @@ export const bahanRoutes = new Hono<AppEnv>()
   )
   /**
    * SUPPLIER per bahan: daftar tempat membeli bahan ini + supplier utama.
-   * GET terbuka semua peran (info belanja); PUT owner/admin mengganti seluruh
-   * daftar sekaligus (maksimal satu utama; tanpa penanda → item pertama).
+   *
+   * Komentar ini DULU berbunyi "GET terbuka semua peran (info belanja); PUT
+   * owner/admin" — aturannya ditulis utuh, penjaganya dipasang di separuhnya.
+   * Terukur 2026-08-26 dengan token peran `bar`: 200. `PUT /:id/supplier`
+   * sepuluh baris di bawah sini sudah `requireRole("owner","admin")`.
+   *
+   * Ditutup ke owner/admin/**tim**, bukan owner/admin, dan itu diukur bukan
+   * dikira: layar yang membacanya (`SupplierBahanModal` ← `BahanPage`) dipasang
+   * web untuk `isManajemen || isTim`, dan ponsel membukanya dari `bahan_page`
+   * untuk `isManajemen || isTimCk`. Menutup `tim` akan mematikan layar yang
+   * hari ini bekerja — kerusakan yang lebih cepat terasa daripada yang dibayar.
    */
-  .get("/:id/supplier", async (c) => {
+  .get("/:id/supplier", requireRole("owner", "admin", "tim"), async (c) => {
     const auth = c.get("auth");
     const id = c.req.param("id");
     const [milik] = await db
@@ -1343,9 +1352,18 @@ export const bahanRoutes = new Hono<AppEnv>()
   })
   /**
    * RIWAYAT HARGA beli bahan: daftar lot pembelian + harga terkini & rata-rata
-   * tertimbang (fondasi HPP FIFO/average). Terbuka semua peran (info harga).
+   * tertimbang (fondasi HPP FIFO/average).
+   *
+   * DULU "terbuka semua peran (info harga)". Terukur 2026-08-26 dengan token
+   * peran `bar`: 200 berikut `harga_terkini`/`terendah`/`tertinggi`/`median` —
+   * seluruh sejarah harga beli. Pintu yang MENULIS angka itu
+   * (`POST /:id/harga`) sudah `requireRole("owner","admin")`.
+   *
+   * owner/admin/**tim** dengan alasan yang sama seperti `/:id/supplier`:
+   * `RiwayatHargaSheet` ponsel dibuka dari `bahan_page`, yang laci-nya
+   * `isManajemen || isTimCk`.
    */
-  .get("/:id/pembelian", async (c) => {
+  .get("/:id/pembelian", requireRole("owner", "admin", "tim"), async (c) => {
     const auth = c.get("auth");
     const [ing] = await db
       .select()

@@ -500,10 +500,20 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
     return c.json(hasil);
   })
   /**
-   * Daftar FAKTUR BELI perlengkapan ke CK. owner/admin lihat semua (atau filter
-   * ?branch_id = CK); peran terikat cabang hanya faktur di CK-nya.
+   * Daftar FAKTUR BELI perlengkapan ke CK — berikut harga & totalnya.
+   *
+   * Komentarnya sudah menulis "owner/admin lihat semua … peran terikat cabang
+   * hanya faktur di CK-nya", jadi pembatasannya dipikirkan — sebagai penyaring
+   * BARIS, bukan sebagai penjaga PINTU. Terukur 2026-08-26 token peran `bar`:
+   * 200. Dua saudaranya di berkas yang SAMA — `GET /belanja` dan `GET /master`
+   * — sudah `requireRole("owner","admin")`.
+   *
+   * Pasangannya diperiksa: pembacanya `BeliPerlengkapanPage` (rute web
+   * `isManajemen`), badge nav `Layout` (query-nya ber-`enabled: manajemenGuard`),
+   * dan `beli_perlengkapan_page` ponsel (laci `isManajemen`). Tak ada layar
+   * peran lain yang memanggilnya.
    */
-  .get("/beli", async (c) => {
+  .get("/beli", requireRole("owner", "admin"), async (c) => {
     const auth = c.get("auth");
     let ckFilter: string | undefined;
     if (terikatCabang(auth.role)) ckFilter = auth.branch_id ?? undefined;
@@ -872,8 +882,15 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
       return c.json({ ok: true });
     },
   )
-  /* ===== SUPPLIER per perlengkapan (pola persis /bahan/:id/supplier) ===== */
-  .get("/:id/supplier", async (c) => {
+  /* ===== SUPPLIER per perlengkapan (pola persis /bahan/:id/supplier) =====
+   *
+   * "Pola persis" itu ikut menyalin celahnya: GET tanpa penjaga, `PUT` di
+   * bawahnya `requireRole("owner","admin")`. Terukur token `bar`: 200.
+   * Di sini owner/admin saja (bukan +tim seperti bahan) sebab kedua pembacanya
+   * — `PerlengkapanPage` web dan `perlengkapan_master_page` ponsel — memang
+   * cuma dipasang untuk manajemen.
+   */
+  .get("/:id/supplier", requireRole("owner", "admin"), async (c) => {
     const auth = c.get("auth");
     const item = await muatSupplyAktif(auth.company_id!, c.req.param("id"));
     if (!item)
@@ -988,9 +1005,15 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
   )
   /**
    * RIWAYAT HARGA beli perlengkapan: daftar lot (stok masuk) + harga terkini &
-   * rata-rata tertimbang (fondasi HPP). Terbuka semua peran (info harga).
+   * rata-rata tertimbang (fondasi HPP).
+   *
+   * DULU "terbuka semua peran (info harga)" — kalimat yang sama persis dengan
+   * kembarannya di `bahan/routes.ts`, dan celahnya juga sama. Pintu yang
+   * MENULIS harga itu (`POST /:id/harga`) sudah owner/admin. Pembacanya
+   * `RiwayatHargaModal` web, dibuka HANYA dari `PerlengkapanPage`
+   * (rute `isManajemen`); ponsel tak memanggilnya.
    */
-  .get("/:id/pembelian", async (c) => {
+  .get("/:id/pembelian", requireRole("owner", "admin"), async (c) => {
     const auth = c.get("auth");
     const item = await muatSupplyAktif(auth.company_id!, c.req.param("id"));
     if (!item)
