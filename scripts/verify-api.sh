@@ -14319,6 +14319,41 @@ for J in "/menu" "/menu/ketersediaan" "/bahan" "/bahan/$BH259/resep" "/stok" \
   cek "PASANGAN: bar tetap membaca $J" "V == 200" "$(status_code "$BAR258" GET "$J")"
 done
 
+echo
+echo "── §260 pengurungan tenant arah BACA: id tenant LAIN ditembak ──"
+#
+# Ledger punya entri "Isolasi tenant pada PENULISAN" (162 penulisan, BERSIH),
+# tapi arah BACA tak pernah dihitung sekali pun — dan di SaaS multi-tenant itu
+# kelas kerusakan tertinggi: satu warung membaca data warung lain.
+#
+# Sapuan statis (`kueri-terkurung-tenant.test.ts`) memilah 627 kueri; 48 di
+# antaranya tak bisa diputuskan mekanis dan dipilah tangan. Seksi ini yang
+# MEMUTUSKAN — pembacaan statis sudah dua kali membantah dirinya sendiri di
+# repo ini.
+#
+# `$UJI` = tenant KEDUA (dibuat super admin di §5). Tiap id di bawah milik
+# tenant PERTAMA dan DIBUKTIKAN TERBACA olehnya lebih dulu — tanpa itu 404
+# milik tenant kedua tak menyatakan apa pun (id yang salah juga 404).
+UJI260="$UJI"
+cek "premis §260: token tenant kedua hidup & beda perusahaan" "V == 1" \
+  "$([ -n "$UJI260" ] && [ "$(echo "$UJI260" | cut -d. -f2 | base64 -d 2>/dev/null | jq -r .company_id)" != "$(echo "$OWNER" | cut -d. -f2 | base64 -d 2>/dev/null | jq -r .company_id)" ] && echo 1 || echo 0)"
+B260=$(api "$OWNER" GET /bahan | jq -r '.[0].id')
+M260=$(api "$OWNER" GET /meja | jq -r '.[0].id')
+S260=$(api "$OWNER" GET /penjualan | jq -r 'if type=="array" then .[0].id else .items[0].id end')
+P260=$(api "$OWNER" GET /perlengkapan/master | jq -r 'if type=="array" then .[0].id else .items[0].id end')
+cek "premis §260: fikstur tenant pertama ada" "V == 1" \
+  "$([ -n "$B260" ] && [ "$B260" != null ] && [ -n "$M260" ] && [ "$M260" != null ] && [ -n "$S260" ] && [ "$S260" != null ] && [ -n "$P260" ] && [ "$P260" != null ] && echo 1 || echo 0)"
+for J260 in "/bahan/$B260/langkah" "/bahan/$B260/resep" "/bahan/$B260/detail" \
+            "/meja/$M260/log" "/stok/kartu/$B260" "/stok/fifo/$B260" \
+            "/penjualan/$S260" "/penjualan/$S260/slip" "/pesanan/penjualan/$S260/log" \
+            "/perlengkapan/$P260/kartu"; do
+  # Premis per rute: pemiliknya BENAR-BENAR membacanya. 404 tenant kedua hanya
+  # berarti sesuatu bila 200 tenant pertama lebih dulu terbukti.
+  cek "premis §260: pemilik membaca $J260 → 200" "V == 200" "$(status_code "$OWNER" GET "$J260")"
+  cek "tenant lain membaca $J260 → BUKAN 200" "V == 1" \
+    "$([ "$(status_code "$UJI260" GET "$J260")" != "200" ] && echo 1 || echo 0)"
+done
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

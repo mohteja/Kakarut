@@ -50,6 +50,110 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Pengurungan tenant arah BACA — server — 2026-08-26 — **BERSIH**
+
+- **Kenapa**: ledger punya entri "Isolasi tenant pada PENULISAN" (2026-08-22,
+  162 penulisan, BERSIH) — tapi entri itu meninggalkan DUA lubang, dan
+  keduanya dibayar di sini: (1) sapuannya hidup di scratchpad, **tak ada
+  gerbang berdiri**, jadi penulisan baru tanpa pengurungan bisa lahir hari ini
+  tanpa satu uji pun berubah warna; (2) **arah BACA tak pernah dihitung sekali
+  pun**. Di SaaS multi-tenant itu kelas kerusakan tertinggi: satu warung
+  membaca data warung lain
+- **Populasi** (kode TANPA komentar — prosa yang menyebut `companyId` akan
+  menyatakan aman untuk kueri yang tak pernah mengurungnya): **627** kueri
+  `db|tx .select|update|delete` — **469 baca + 158 tulis**
+
+  | kelas | jumlah | arti |
+  |---|---|---|
+  | A | **391** | mengurung `companyId`/`companies.id` di rantainya sendiri |
+  | A2 | **53** | lewat variabel atau `and(...conds)` — satu tingkat |
+  | B | **22** | lewat `branchId` (cabangnya lahir dari `resolveBranchId`) |
+  | C | **45** | kunci saringnya ikut dioper ke pemanggilan ber-`company_id` |
+  | E | **68** | memang LINTAS perusahaan: auth, panel super admin, cadangan, seed |
+  | F | **48** | tak teresolusi mekanis → **dipilah tangan satu per satu** |
+
+- **Detektor: DIBUKTIKAN bisa menuduh — dan tiga kali terbukti BUTA lebih
+  dulu.** Ini bagian yang paling mahal dan paling berharga dari putaran ini:
+
+  1. **Rantai terpotong di `;`** — rantai drizzle yang tersebar di banyak baris
+     terbaca separuh. Diperbaiki dengan kurung berimbang.
+  2. **Kurung buka dihitung GANDA** saat melompati `.metode(` — rantainya
+     menelan rute BERIKUTNYA dan meminjam `companyId` milik tetangganya.
+     Akibatnya angkanya **382 aman / 87 tidak**, dan **suntikan bukti merah pun
+     dinyatakan bersih**. Sesudah diperbaiki: **280 / 189**. Seratus tiga kueri
+     tak terkurung sempat terbaca "aman".
+  3. **Kelas C terlalu longgar** — "lingkupnya menyebut tenant di suatu tempat"
+     menyatakan aman untuk suntikan yang lingkupnya menyebut tenant untuk tabel
+     **LAIN**. Diperketat jadi "kunci yang MENYARING kueri ini ikut dioper ke
+     pemanggilan ber-`company_id`" (pola `pastikanKartu(jenis, id,
+     auth.company_id!)`): kelas C **51 → 24**.
+  4. **`lingkup()` memakai `indexOf`** — dua kueri berteks identik sama-sama
+     menunjuk situs PERTAMA. Kelas kesalahan yang sudah menggigit repo ini
+     (`re.search` memungut pembantu senama pertama). Diperbaiki: lokasi dari
+     nomor baris.
+
+  Sesudah keempatnya: suntikan telanjang **dan** suntikan tersamar sama-sama
+  tertuduh, dan **pasangannya** — variabel yang MEMANG mengurung `companyId` —
+  tidak tertuduh
+- **Pilahan tangan atas ke-48**, dan tak satu pun bocor. Empat bentuk, semuanya
+  bisa diperiksa:
+  1. **induk diverifikasi lebih dulu di handler yang sama** —
+     `pastikanKartu(jenis, id, auth.company_id!)`, `eq(ingredients.id, id) AND
+     eq(ingredients.companyId, …)` sepuluh baris di atasnya;
+  2. **kunci lahir dari kueri terkurung tepat di atasnya** — `billIds`,
+     `saleIds`, `fakturIds`, `kirimMap`, `batchByProd`;
+  3. **diperiksa di JS SESUDAH dibaca** — `bill.companyId !== companyId`
+     (`loadDetail`), `row.companyId !== companyId` (`getCustomer`). Sah, tapi
+     rapuh: WHERE-nya tak melindungi apa pun, yang melindungi baris `if`-nya;
+  4. **tabel `users` yang memang global**, kuncinya dari baris terkurung
+     (`users.id = sale.cashierUserId`) — venanya sendiri sudah pernah disapu
+- **Diukur lewat HTTP dengan DUA tenant sungguhan** (Aturan 6 — tiap id milik
+  tenant A dibuktikan terbaca oleh A lebih dulu; tanpa itu 404 milik tenant B
+  tak menyatakan apa pun, sebab id ngawur juga 404): **sepuluh rute detail
+  ber-`:id`** ditembak — `/bahan/:id/langkah` · `/resep` · `/detail` ·
+  `/meja/:id/log` · `/stok/kartu/:id` · `/stok/fifo/:id` · `/penjualan/:id` ·
+  `/slip` · `/pesanan/penjualan/:id/log` · `/perlengkapan/:id/kartu`.
+
+  | | tenant A (pemilik) | tenant B |
+  |---|---|---|
+  | kesepuluh rute | **200** | **404** |
+
+- **BUKTI MERAH atas pengukurannya sendiri** — sebab tembakan yang tak bisa
+  merah tak membuktikan apa-apa: pengurungan dicabut dari
+  `GET /bahan/:id/langkah` (suntikan di-assert mendarat), server dijalankan
+  ulang, lalu **tenant B membaca resep tenant A dengan 200**. Sapuan statisnya
+  ikut menuduh berkas & barisnya (`bahan/routes.ts:1660`). Dipulihkan
+- **Hasil: BERSIH** — 627 kueri, nol kebocoran, dan untuk pertama kalinya
+  angkanya ada
+- **Tindak**: instrumennya **pindah ke repo sebagai gerbang** —
+  `test/util/kueri-terkurung.ts` (dipakai bersama) +
+  `test/kueri-terkurung-tenant.test.ts` (7 uji): `DIPILAH_TANGAN` per BERKAS +
+  JUMLAH (bukan nomor baris — gerbang di repo ini sudah sekali patah karena
+  memaku baris yang bergeser oleh komentar), uji anti-kuburan, uji PREMIS, uji
+  yang menahan daftar GLOBAL agar tak dilonggarkan diam-diam, dan empat bukti
+  detektor sintetis yang masing-masing memaku satu dari empat kebutaan di atas.
+  **Ini juga menutup lubang (1) vena arah TULIS**: gerbangnya menilai
+  `.update`/`.delete` sekaligus. verify-api **§260** (22 asersi)
+- **Batas, jujur**:
+  - resolusi variabelnya **satu tingkat** di berkas yang sama; `conds` yang
+    dioper sebagai PARAMETER ke fungsi lain tak ditelusuri — itu sebagian dari
+    48 yang dipilah tangan;
+  - kelas B percaya `branchId` sudah lahir dari `resolveBranchId`; itu
+    **tidak** diverifikasi ulang oleh gerbang ini (vena "cabang ikut di URL"
+    yang menjaganya);
+  - bentuk ke-3 (diperiksa di JS sesudah dibaca) **lolos gerbang ini** karena
+    ia memang aman hari ini — tapi ia rapuh: mencabut satu baris `if` membuka
+    kebocoran tanpa WHERE-nya berubah. Gerbang ini takkan melihatnya;
+  - yang ditembak sepuluh rute detail; **rute daftar** (yang membalas larik)
+    tak ditembak lintas-tenant — daftarnya memang tersaring `companyId` di
+    kelas A, tapi itu pembacaan, bukan tembakan
+- Gerbang: typecheck bersih · `npm test` **2.317** (195 berkas) · `verify-api`
+  **3.072 lolos, 0 gagal** vs Postgres SEGAR (§260 baru) · cakupan rute **272**
+  identik · `audit:invarian` 26/26 · build web · e2e Playwright **6/6**. Tak
+  ada berkas Dart tersentuh → `flutter analyze`/`flutter test` tidak dijalankan
+
+---
+
 ## 60 rute BACA terbuka, dipilah satu per satu — server — 2026-08-26
 
 - **Kenapa**: batas yang ditulis entri "Matriks IZIN per rute" sendiri —
