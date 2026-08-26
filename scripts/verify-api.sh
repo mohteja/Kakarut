@@ -14225,6 +14225,44 @@ cek "PASANGAN: bayar PAS 12.000 diterima" "V == 1" \
 cek "PASANGAN: KURANG bayar 11.999 tetap 400" "V == 1" \
   "$(api "$JUAL257" POST /penjualan "{\"is_dine_in\":true,\"metode_bayar\":\"tunai\",\"uang_diterima\":11999,\"items\":[{\"menu_id\":\"$MW257\",\"qty\":1}]}" | jq '((.error // "") | test("kurang dari total")) | if . then 1 else 0 end')"
 
+echo "── §258 MEMBUAT master data terkunci sama seperti MENGUBAHnya ──"
+#
+# Matriks izin per rute belum pernah disapu sekali pun. Disusun dari tiga
+# sumber (penjaga prefiks `app.ts`, `requireRole` di rantai rute, dan ALIAS
+# tingkat modul), lalu DITEMBAK dengan token peran sungguhan — sebab pembacaan
+# statis membantah dirinya sendiri dua arah: empat pintu meja "terlihat
+# terbuka" padahal dijaga alias, dan dua pintu di bawah ini benar-benar
+# terbuka.
+#
+# Bentuknya tanda tangan repo ini: di KEDUA modul, `PATCH /:id` sudah
+# ber-`requireRole("owner","admin")` sejak awal, sementara pintu BUAT-nya
+# tidak.
+#
+#   SEBELUM (token peran `bar`)  POST /penyimpanan → 201, baris ADA di DB
+#                                POST /supplier    → 201, baris ADA di DB
+#   SESUDAH                      keduanya 403; owner tetap 201
+CAB258=$(api "$OWNER" GET /cabang | jq -r '.[0].id')
+api "$OWNER" POST /karyawan "{\"nama\":\"Bar Izin 258\",\"email\":\"bar258@basooopa.id\",\"password\":\"BarIzin258!\",\"role\":\"bar\",\"branch_id\":\"$CAB258\"}" > /dev/null
+BAR258=$(login "bar258@basooopa.id" "BarIzin258!")
+# premis: tokennya benar-benar berperan `bar` (kalau perannya null, SETIAP
+# `requireRole` menolak dan seluruh seksi ini tak menyatakan apa pun)
+cek "premis §258: token berperan bar" "V == 1" \
+  "$(echo "$BAR258" | cut -d. -f2 | base64 -d 2>/dev/null | jq '(.role == "bar") | if . then 1 else 0 end')"
+cek "POST /penyimpanan oleh bar → 403 (dulu 201)" "V == 403" \
+  "$(status_code_body "$BAR258" POST /penyimpanan '{"nama":"Rak 258 Bar"}')"
+cek "POST /supplier oleh bar → 403 (dulu 201)" "V == 403" \
+  "$(status_code_body "$BAR258" POST /supplier '{"nama":"Supplier 258 Bar"}')"
+# PASANGAN anti-hijau-palsu: manajemen TETAP bisa membuat keduanya
+cek "PASANGAN: owner tetap bisa membuat penyimpanan" "V == 201" \
+  "$(status_code_body "$OWNER" POST /penyimpanan '{"nama":"Rak 258 Owner"}')"
+cek "PASANGAN: owner tetap bisa membuat supplier" "V == 201" \
+  "$(status_code_body "$OWNER" POST /supplier '{"nama":"Supplier 258 Owner"}')"
+# PASANGAN: pintu yang memang terbuka untuk semua peran tetap terbuka —
+# menutupnya akan menghentikan operasional, kerusakan yang jauh lebih cepat
+# terasa daripada yang diperbaiki.
+cek "PASANGAN: bar tetap boleh absen sendiri" "V == 1" \
+  "$(status_code "$BAR258" GET /absensi/status | awk '{print ($1 == 200) ? 1 : 0}')"
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

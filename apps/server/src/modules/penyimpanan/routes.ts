@@ -150,7 +150,26 @@ export const penyimpananRoutes = new Hono<AppEnv>()
     );
   })
   // POST boleh semua peran — dipakai quick-add saat mengisi faktur
-  .post("/", zValidator("json", PenyimpananBody), async (c) => {
+  /*
+   * MEMBUAT master data terkunci sama seperti MENGUBAHnya.
+   *
+   * `PATCH /:id` dan `PUT /:id/petugas` di bawah sudah ber-`requireRole("owner",
+   * "admin")` sejak awal; pintu BUAT-nya tidak. Terukur lewat HTTP dengan token
+   * peran `bar` (2026-08-25): `POST /penyimpanan` → **201**, dan barisnya
+   * benar-benar ada di `storage_locations`.
+   *
+   * KASIR sengaja tetap boleh, dan itu BUKAN kelalaian: §191 verify-api sudah
+   * memaku kontraknya berpasangan — "kasir → POST /penyimpanan cabang SENDIRI
+   * tetap boleh" & "cabang lain = 403". Pengetatan pertamaku ke owner/admin
+   * saja MEMATAHKAN asersi itu, dan gerbang lamanya yang menahannya. Himpunan
+   * di bawah karena itu mencerminkan `bolehAturMeja` di modul meja — peran yang
+   * mengatur lantai — sambil tetap menutup `tim`/`kitchen`/`bar`.
+   */
+  .post(
+    "/",
+    requireRole("owner", "admin", "cashier"),
+    zValidator("json", PenyimpananBody),
+    async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");
     const branchId = await branchUntukTulis(

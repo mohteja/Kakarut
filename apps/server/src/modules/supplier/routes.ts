@@ -47,7 +47,12 @@ export const supplierRoutes = new Hono<AppEnv>()
     return c.json(rows.map(toDto));
   })
   // POST boleh semua peran — dipakai quick-add saat mengisi faktur
-  .post("/", zValidator("json", SupplierBody), async (c) => {
+  /*
+   * Sama seperti tempat penyimpanan: `PATCH /:id` sudah ber-`requireRole
+   * ("owner", "admin")`, pintu BUAT-nya tidak. Terukur dengan token peran
+   * `bar`: `POST /supplier` → **201**, barisnya ada di `suppliers`.
+   */
+  .post("/", requireRole("owner", "admin"), zValidator("json", SupplierBody), async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");
     const [row] = await db
