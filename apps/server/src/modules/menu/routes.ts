@@ -7,6 +7,7 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import {
   PANDUAN_MARKUP,
+  bagiAtauNull,
   bolehLihatBiaya,
   tanpaBiayaMenu,
   type AnalisisHargaRow,
@@ -410,10 +411,18 @@ export const menuRoutes = new Hono<AppEnv>()
           });
         }
         const penyumbang = [...gabung.values()]
-          .map((p) => ({
-            ...p,
-            persen_hpp: dto.hpp > 0 ? (p.kontribusi / dto.hpp) * 100 : 0,
-          }))
+          .map((p) => {
+            // `null`, bukan 0: HPP nol berarti tak ada biaya untuk dibagi.
+            // "0%" di sana menjawab pertanyaan yang tak pernah bisa dijawab —
+            // dan menyembunyikan bahwa seluruh resepnya berbahan nol rupiah.
+            //
+            // Rasionya dihitung dulu, dikali 100 SESUDAHNYA: mengoper
+            // `kontribusi * 100` sebagai argumen berarti menyusun angka di JS
+            // lalu menyerahkannya ke fungsi yang memutuskan — kelas yang sudah
+            // dipaku `diadili-lintas-fungsi`.
+            const rasio = bagiAtauNull(p.kontribusi, dto.hpp);
+            return { ...p, persen_hpp: rasio === null ? null : rasio * 100 };
+          })
           .sort((a, b) => b.kontribusi - a.kontribusi)
           .slice(0, 5);
         return {
@@ -423,8 +432,25 @@ export const menuRoutes = new Hono<AppEnv>()
           penyumbang,
         };
       })
-      // Food cost tertinggi dulu — yang paling perlu dijelaskan ada di atas.
-      .sort((a, b) => b.food_cost_persen - a.food_cost_persen);
+      /*
+       * Food cost tertinggi dulu — yang paling perlu dijelaskan ada di atas.
+       *
+       * Yang TAK BISA dihitung (menu komplimen, harga jual nol) diurut TERPISAH
+       * di ekor, bukan diperlakukan sebagai 0%. Menyamakannya dengan nol
+       * membuatnya mengendap di antara menu-menu tersehat — terukur: posisi 77
+       * dari 93 — padahal ia justru menu yang biayanya keluar tanpa pemasukan.
+       * Ia ditaruh di ekor karena memang tak punya tempat dalam urutan "paling
+       * perlu dijelaskan menurut angkanya"; yang membuatnya terlihat adalah
+       * `food_cost_persen: null` yang dirender "—", bukan posisinya.
+       */
+      .sort((a, b) => {
+        const x = a.food_cost_persen;
+        const y = b.food_cost_persen;
+        if (x === null && y === null) return 0;
+        if (x === null) return 1;
+        if (y === null) return -1;
+        return y - x;
+      });
     return c.json(rows);
   })
   /**

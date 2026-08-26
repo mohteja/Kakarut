@@ -537,7 +537,16 @@ export type MenuDtoPenuh = MenuDto & {
   hpp_dine_in: number;
   harga_saran: number;
   harga_jual_bulat: number;
-  food_cost_persen: number;
+  /**
+   * TETAP nullable meski varian ini "pasti punya angka biaya".
+   *
+   * Bedanya bukan izin melainkan KETERHITUNGAN: `hpp` selalu ada karena ia
+   * jumlah komponen, sementara food cost adalah PEMBAGIAN dan penyebutnya
+   * (`harga_jual`) boleh nol — menu komplimen itu sah. Menuliskannya `number`
+   * di sini adalah janji yang tak bisa ditepati, dan janji itulah yang dulu
+   * membuat menu gratis dinilai 0% hijau.
+   */
+  food_cost_persen: number | null;
   komponen: KomponenDtoPenuh[];
 };
 
@@ -557,7 +566,12 @@ export interface PenyumbangHpp {
   harga_per_unit: number;
   /** qty × harga_per_unit — rupiah yang bahan ini sumbangkan ke HPP */
   kontribusi: number;
-  persen_hpp: number;
+  /**
+   * Porsi bahan ini terhadap HPP menu. `null` bila HPP-nya NOL: tak ada biaya
+   * untuk dibagi, dan "0%" di sana menjawab pertanyaan yang tak pernah bisa
+   * dijawab.
+   */
+  persen_hpp: number | null;
   /** ingredients.updated_at — kapan harga bahan ini terakhir bergerak */
   bahan_diperbarui: string;
   /** MAX(productions.laporan_harga_at) — kapan harganya terakhir DILAPORKAN */

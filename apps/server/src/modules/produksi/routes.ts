@@ -2270,6 +2270,13 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
           const baru = toMenuDto(m, katalogBaru).food_cost_persen;
           // Hanya yang MENYEBERANG ambang — menu yang sudah tinggi sejak awal
           // bukan kabar baru dan cuma membuat panel ini ramai.
+          //
+          // Food cost yang TAK BISA dihitung (harga jual nol) tak bisa
+          // menyeberang ambang mana pun: tak ada angka untuk dibandingkan.
+          // Dilewati DENGAN SENGAJA, bukan lewat `?? 0` — nol palsu di sini
+          // akan membuat tiap menu komplimen tampak baru saja jatuh ke bawah
+          // ambang setiap kali harga bahan naik.
+          if (lama === null || baru === null) continue;
           if (lama <= foodCostMaks && baru > foodCostMaks) {
             menuLewat.push({
               menu_id: m.id,

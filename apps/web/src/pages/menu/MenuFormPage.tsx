@@ -690,9 +690,17 @@ export function MenuFormPage() {
             <div>
               <div className="text-stone-500">Food cost</div>
               <div className="text-lg font-bold">
-                {angkaDari(hargaJual) > 0
-                  ? `${foodCostPersen(preview.hpp, angkaDari(hargaJual)).toFixed(1)}%`
-                  : "—"}
+                {/*
+                  Penjaga "harga jual > 0" dulu ditulis di sini, dan ia BENAR —
+                  layar ini sudah menulis "—" sejak awal. Yang dulu tak benar
+                  rumusnya, yang memulangkan 0 dan membuat layar LAIN memajang
+                  "0,0% hijau". Sesudah `foodCostPersen` bisa berkata `null`,
+                  penjaganya tinggal satu: aturannya di rumusnya, bukan di
+                  tiap layar yang memanggilnya.
+                */}
+                {((p) => (p == null ? "—" : `${p.toFixed(1)}%`))(
+                  foodCostPersen(preview.hpp, angkaDari(hargaJual)),
+                )}
               </div>
             </div>
           </div>

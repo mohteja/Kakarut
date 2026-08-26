@@ -50,6 +50,106 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Pembagi nol dijawab NOL, dan nol itu dipercaya — server+web+mobile — 2026-08-26
+
+- **Kenapa**: sembilan putaran menyapu *siapa yang boleh*, *punya siapa*, *apa
+  yang dirakit*, dan *apa yang berhenti berlaku*. Yang belum pernah disapu:
+  **apa yang dijawab ketika sebuah angka TAK BISA dihitung**
+- **Aturannya sudah dinamai & dibayar sesi ini** — vena biaya menetapkan
+  **`null`, bukan `0`** (*"nol tercetak 'Rp 0' dan dipercaya"*), ditegakkan di
+  DTO dan di layar (`TAK_DIKETAHUI = "—"`). Ia **tidak** ditegakkan di rumus
+  intinya: `foodCostPersen(hpp, hargaJual) = hargaJual > 0 ? … : 0`
+- **Dan lencana penerimanya sudah menuliskan kerusakannya lebih dulu**,
+  `MenuListPage.tsx:26-28`: *"'—' adalah jawaban yang benar, dan **0% akan
+  terbaca sebagai food cost sempurna**."* Aturannya ada, penjaganya dipasang di
+  layar, rumusnya dibiarkan tak bisa berkata "tak tahu"
+- **TERUKUR lewat HTTP** — menu komplimen (`harga_jual = 0`, sah menurut
+  skemanya: `z.number().nonnegative()`) ber-resep Rp2.083:
+
+  | | sebelum | sesudah |
+  |---|---|---|
+  | `food_cost_persen` | **0** → layar **HIJAU "0,0%"** | **`null`** → "—" |
+  | posisi di Analisis Harga (urut food cost tertinggi dulu) | **77 dari 93** — di antara menu tersehat | **94 dari 94** — ekor, dengan "—" |
+  | `penyumbang[].persen_hpp` saat HPP menunya nol | **0** | **`null`** |
+  | **PASANGAN** HPP 0 tapi dijual Rp15.000 | 0 | **0** (nol yang SAH tetap nol) |
+  | **PASANGAN** porsi penyumbang menu komplimen | 100 | **100** (tak menular) |
+
+  Kau mengeluarkan Rp2.083 per porsi dan tak menerima apa pun, dan layarnya
+  memuji menu itu sebagai yang paling sehat di katalog
+- **Populasi** (pembagian ber-fallback literal `0`, komentar dibutakan, di
+  `packages/shared` + `apps/server`): **10 situs** →
+
+  | kelas | jumlah | dasar |
+  |---|---|---|
+  | dijaga **CHECK basis data** | **6** | `ingredients_isi_ck` di migrasi `0000` — cabang nolnya tak pernah menyala |
+  | **PENJAGA_AWAL** | **1** | `hariTerjadwal()` dibuka `if (perHari < 1) return []` |
+  | **NOL yang BENAR** | **1** | `refund.ts` — nota tanpa PB1 memang mengembalikan nol rupiah |
+  | **NOL yang dipercaya, TERJANGKAU** | **2** | `foodCostPersen` · `persen_hpp` — keduanya diperbaiki |
+
+  Sisa **8** setelah perbaikan, semuanya terdaftar dengan kelas + alasan
+- **Premisnya DIPERIKSA, bukan diyakini**: gerbangnya membaca
+  `apps/server/drizzle/*.sql` dan menuntut `ingredients_isi_ck` benar-benar ada
+  di sana. "Dijaga basis data" tak boleh jadi mantra — kalau migrasi kelak
+  mencabutnya, keenam situs itu kehilangan dasarnya dan gerbang ini yang merah
+- **Dua PRESEDEN yang sudah benar, dan itu yang membuat sisanya jadi cacat**:
+  `produksi/routes.ts:540` sudah memulangkan `null` (`b.qty > 0 ? … : (… ?? null)`),
+  dan `MenuFormPage.tsx` sudah menulis `"—"` lewat penjaga tulisan tangannya
+  sendiri. **Ralat atas rencanaku**: rencana menyebut layar itu memajang
+  "0.0%" — membacanya utuh, ia SUDAH benar. Yang salah rumusnya, dan penjaga
+  di layar itu kini dilepas karena aturannya sudah tinggal di rumusnya
+- **Satu rumah**: `bagiAtauNull(pembilang, penyebut)` di
+  `packages/shared/src/angka.ts` — rumah yang sudah menampung
+  `angkaDari`/`angkaAtauNull`. `null` = **tak bisa dihitung**; ia BUKAN
+  pengganti nol yang sah
+- **Typechecker yang mengenumerasi populasinya**, bukan tebakan:
+  `MenuDtoPenuh.food_cost_persen` diubah `number` → `number | null` — dan
+  justru *itulah* kebohongannya, sebab `hpp` selalu ada (ia jumlah) sementara
+  food cost adalah PEMBAGIAN yang penyebutnya boleh nol. Typechecker lalu
+  menunjuk **11 situs** di server (6) & web (5): pengurutan analisis, dampak
+  harga, tiga situs ambang/warna, dan porsi penyumbang
+- **Keputusan yang ditulis eksplisit, bukan lewat `?? 0`**:
+  - pengurutan analisis: yang tak terhitung diurut **terpisah di ekor** —
+    menyamakannya dengan 0% membuatnya mengendap di antara menu tersehat;
+  - dampak harga: yang tak terhitung **tak bisa menyeberang ambang** (`continue`),
+    sebab `?? 0` akan membuat tiap menu komplimen tampak baru jatuh ke bawah
+    ambang setiap kali harga bahan naik;
+  - ponsel: `_warnaFoodCost(null)` → **abu**, bukan hijau; `lewatAmbang` →
+    `false` karena tak ada angka, dan itu ditulis di komentarnya supaya tak
+    terbaca sebagai "aman"
+- **Gerbang lama menagih dua penyesuaian, keduanya sah**:
+  `diadili-lintas-fungsi` menuduh `bagiAtauNull(p.kontribusi * 100, dto.hpp)` —
+  ekspresi aritmetika yang dioper ke fungsi yang memutuskan. Diperbaiki dengan
+  **merestrukturisasi** (rasio dihitung dulu, dikali 100 sesudahnya), bukan
+  dengan pengecualian; `lampiran-dto-utuh` menagih regenerasi Lampiran A
+- **Bukti merah, dua sisi**: bentuk LAMA direkonstruksi apa adanya di dalam uji
+  dan dibuktikan menjawab **0** untuk kasus yang sama — tanpa itu tak ada
+  yang membuktikan temuannya nyata. Dan keduanya di-assert **SEPAKAT** di jalur
+  wajar (tiga pasang angka), jadi perbaikannya tak menggeser satu angka pun
+- **Batas, jujur**:
+  - detektornya melihat bentuk **ternary → literal 0**. Pembagian yang **sama
+    sekali tanpa penjaga** (menghasilkan `Infinity`/`NaN`) tak terlihat olehnya
+    — populasi itu belum disapu, dan satu-satunya yang kutemui
+    (`perlengkapan/service.ts`) ketahuan karena kebetulan berbentuk ternary;
+  - sapuannya berhenti di `packages/shared` + `apps/server`; pembagian di
+    `apps/web` dan di Dart **tidak** disapu putaran ini;
+  - `foodCostPersen` kini `number | null`, tapi `hpp`/`harga_saran` tetap
+    `number` — keduanya penjumlahan, bukan pembagian, dan menulari mereka
+    dengan `null` akan menyebarkan ketidaktahuan ke angka yang diketahui;
+  - `MenuDto.food_cost_persen` sudah `number | null` sejak vena biaya, jadi
+    **kabelnya tak berubah bentuk** — yang berubah artinya: `null` kini berarti
+    "ditahan **atau** tak terhitung". Klien lama membacanya sama
+- **Tindak**: `packages/shared/src/angka.ts` (`bagiAtauNull`) · `hpp.ts` ·
+  `types.ts` (`MenuDtoPenuh`, `PenyumbangHpp`) · `menu/routes.ts` ·
+  `produksi/routes.ts` · `AnalisisHargaPage.tsx` · `MenuFormPage.tsx` ·
+  `pembagi-nol-tak-jadi-nol.test.ts` (9 uji) · verify-api **§267** (10 asersi) ·
+  ponsel: `format.dart` (`formatPersen`) · dua model · dua layar · `harga_test.dart` (+5 uji)
+- Gerbang: typecheck bersih · `npm test` **2.377** (202 berkas) · `verify-api`
+  **3.173 lolos, 0 gagal** vs Postgres SEGAR (§267 baru) · cakupan rute **273**
+  identik · `audit:invarian` 26/26 · build web · e2e Playwright **6/6** ·
+  `flutter analyze` bersih · `flutter test` **557**
+
+---
+
 ## Sajian yang DIBATALKAN dapur tetap bisa ditagih — server+web+mobile — 2026-08-26
 
 - **Kenapa**: usulan antrean yang ditulis putaran lalu dengan angkanya

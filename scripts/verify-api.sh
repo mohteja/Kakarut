@@ -14718,6 +14718,65 @@ print(1 if int(float('$(echo "$BYR266B" | jq -r '.sale.total')')) == int('${BON2
 cek "PASANGAN: penjualannya hanya berisi baris yang SAH" "V == 1" \
   "$(api "$REISS105" GET "/penjualan/$SID266" | jq '(([.items[]] | length) == 1) | if . then 1 else 0 end')"
 
+echo
+echo "── §267 pembagi nol dijawab NOL, dan nol itu dipercaya ──"
+#
+# Aturan "`null`, bukan 0" sudah dinamai & dibayar vena biaya: "nol tercetak
+# 'Rp 0' dan dipercaya". Ia ditegakkan di DTO dan di layar (`TAK_DIKETAHUI`),
+# dan TIDAK di rumus intinya — `foodCostPersen` memulangkan 0 saat harga
+# jualnya nol.
+#
+# Lencana penerimanya SUDAH menuliskan kerusakannya lebih dulu
+# (`MenuListPage.tsx`): "'—' adalah jawaban yang benar, dan 0% akan terbaca
+# sebagai food cost sempurna."
+#
+# TERUKUR lewat HTTP sebelum diperbaiki — menu komplimen (harga jual 0, sah
+# menurut skemanya) ber-HPP Rp2.083:
+#
+#   food_cost_persen            0     → layar HIJAU "0,0%", paling sehat
+#   posisi di Analisis Harga    77/93 → mengendap di antara menu tersehat
+#   persen_hpp saat HPP nol     0     → "bahan ini menyumbang 0% biaya"
+#
+# Kau mengeluarkan Rp2.083 per porsi dan tak menerima apa pun, dan layarnya
+# memuji menu itu.
+KAT267=$(api "$OWNER" POST /kategori '{"nama":"Kategori Nol 267","sort_order":95}' | jq -r .id)
+BHR267=$(api "$OWNER" POST /bahan '{"nama":"air kemasan 267","harga_beli":24000,"isi":12,"satuan":"pcs","pengadaan":"beli","kategori":"lain"}' | jq -r .id)
+BH0267=$(api "$OWNER" POST /bahan '{"nama":"bahan gratis 267","harga_beli":0,"isi":10,"satuan":"gr","pengadaan":"beli","kategori":"lain"}' | jq -r .id)
+cek "premis §267: kategori & dua bahan uji terbentuk" "V == 1" \
+  "$([ -n "$KAT267" ] && [ -n "$BHR267" ] && [ -n "$BH0267" ] && [ "$KAT267" != "null" ] && echo 1 || echo 0)"
+# (a) menu KOMPLIMEN: harga jual 0, tapi bahannya berharga.
+MK267=$(api "$OWNER" POST /menu "{\"nama\":\"Air Komplimen 267\",\"category_id\":\"$KAT267\",\"tipe\":\"regular\",\"mult\":3,\"harga_jual\":0,\"komponen\":[{\"ingredient_id\":\"$BHR267\",\"qty\":1}]}" | jq -r .id)
+# (b) menu ber-HPP NOL yang tetap DIJUAL — pasangan yang menentukan.
+MN267=$(api "$OWNER" POST /menu "{\"nama\":\"Menu HPP Nol 267\",\"category_id\":\"$KAT267\",\"tipe\":\"regular\",\"mult\":3,\"harga_jual\":15000,\"komponen\":[{\"ingredient_id\":\"$BH0267\",\"qty\":2}]}" | jq -r .id)
+cek "premis §267: kedua menu uji terbentuk" "V == 1" \
+  "$([ -n "$MK267" ] && [ -n "$MN267" ] && [ "$MK267" != "null" ] && [ "$MN267" != "null" ] && echo 1 || echo 0)"
+MENU267=$(api "$OWNER" GET /menu)
+# Premisnya: biayanya memang KELUAR — HPP-nya bukan nol.
+cek "premis §267: menu komplimen memang ber-HPP > 0" "V == 1" \
+  "$(echo "$MENU267" | jq --arg m "$MK267" '([.[]|select(.id==$m)][0].hpp > 0) | if . then 1 else 0 end')"
+cek "INTI: food cost menu komplimen NULL, bukan 0" "V == 1" \
+  "$(echo "$MENU267" | jq --arg m "$MK267" '([.[]|select(.id==$m)][0].food_cost_persen == null) | if . then 1 else 0 end')"
+# PASANGAN yang menentukan: nol yang SAH tetap nol. HPP nol dengan harga jual
+# wajar memang 0% — mengubahnya jadi "—" akan menukar satu kebohongan dengan
+# kebohongan yang berlawanan arah.
+cek "PASANGAN: menu ber-HPP nol yang DIJUAL tetap 0 (bukan null)" "V == 1" \
+  "$(echo "$MENU267" | jq --arg m "$MN267" '([.[]|select(.id==$m)][0].food_cost_persen == 0) | if . then 1 else 0 end')"
+cek "PASANGAN: menu berharga wajar tetap berangka > 0" "V == 1" \
+  "$(echo "$MENU267" | jq '[.[]|select(.harga_jual > 0 and (.hpp // 0) > 0 and .food_cost_persen != null and .food_cost_persen > 0)] | length > 0 | if . then 1 else 0 end')"
+# Analisis Harga mengurutkan food cost TERTINGGI dulu. Yang tak terhitung tak
+# boleh menyamar sebagai 0% di antara menu tersehat: ia diurut terpisah di ekor
+# dan dirender "—".
+AN267=$(api "$OWNER" GET /menu/analisis-harga)
+cek "INTI: menu komplimen tetap ADA di analisis (bukan hilang)" "V == 1" \
+  "$(echo "$AN267" | jq --arg m "$MK267" '[.[]|select(.id==$m)]|length')"
+cek "INTI: yang tak terhitung diurut di EKOR, bukan di antara yang sehat" "V == 1" \
+  "$(echo "$AN267" | jq --arg m "$MK267" '((map(.id)|index($m)) == (length - 1)) | if . then 1 else 0 end')"
+cek "INTI: porsi penyumbang NULL saat HPP menunya nol" "V == 1" \
+  "$(echo "$AN267" | jq --arg m "$MN267" '([.[]|select(.id==$m)][0].penyumbang[0].persen_hpp == null) | if . then 1 else 0 end')"
+# …dan porsi yang SAH tetap terbaca: ketidaktahuan tak menular.
+cek "PASANGAN: porsi penyumbang menu komplimen tetap 100%" "V == 1" \
+  "$(echo "$AN267" | jq --arg m "$MK267" '([.[]|select(.id==$m)][0].penyumbang[0].persen_hpp == 100) | if . then 1 else 0 end')"
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"
