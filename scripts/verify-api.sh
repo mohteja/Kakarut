@@ -14524,6 +14524,46 @@ cek "premis §263: tanpa setelan, tautan MEMANG ikut header" "V == 1" \
 cek "PASANGAN: forgot-password tetap 200 & menerbitkan token" "V == 1" \
   "$(echo "$FP263" | jq '((.ok == true) and ((.dev_reset_url // "") | test("token="))) | if . then 1 else 0 end')"
 
+echo
+echo "── §264 HTML surat dirakit dari data pengguna ──"
+#
+# Nama perusahaan divalidasi `z.string().trim().min(1)` — TANPA batasan aksara —
+# lalu dulu disisipkan mentah ke badan HTML surat undangan. Terukur dari keluaran
+# perakit yang sungguhan (`html-surat-dilolos.test.ts`), nama perusahaan
+# `</b></p><p><a href="https://penyerang.example">…</a></p><p>` membuat suratnya
+# memuat DUA `<a`: satu milik Kakarut, satu milik penyerang. Di jalur ini
+# penyerang memilih KEDUANYA — isi yang disuntik (nama perusahaannya sendiri)
+# dan penerimanya (`body.email`) — dan suratnya berangkat dari domain produk,
+# lolos SPF/DKIM.
+#
+# Beratnya ditulis apa adanya: transport (nodemailer & Resend) menyandikan
+# header, jadi injeksi `Subject` TIDAK terjangkau; klien surat menyaring skrip,
+# jadi ini BUKAN XSS. Yang nyata: penyuntikan tautan & pemalsuan isi.
+#
+# Badan suratnya sendiri tak bisa ditembak dari luar (di dev tak ada SMTP/Resend,
+# `kirimEmail` melempar dan ditangkap diam-diam) — itu dipaku uji unit. Yang
+# DIUJI di sini dua hal yang menentukan benar-tidaknya perbaikan: alurnya tetap
+# hidup, dan pelolosan tidak merembes ke PENYIMPANAN.
+NAMA264_ASLI=$(api "$OWNER" GET /company | jq -r '.nama')
+NAMA264='</b></p><p><a href="https://penyerang.example">Klik</a></p><p>'
+api "$OWNER" PATCH /company "$(jq -nc --arg n "$NAMA264" '{nama:$n}')" > /dev/null
+cek "nama perusahaan ber-HTML diterima apa adanya (tak ditolak, tak dipotong)" "V == 1" \
+  "$(api "$OWNER" GET /company | jq --arg n "$NAMA264" '(.nama == $n) | if . then 1 else 0 end')"
+UND264=$(api "$OWNER" POST /karyawan/undang '{"email":"suntik264@example.com","role":"admin"}')
+cek "PASANGAN: undangan tetap dibuat meski nama perusahaan ber-HTML" "V == 1" \
+  "$(echo "$UND264" | jq '((.id|length)>0)|if . then 1 else 0 end')"
+cek "PASANGAN: undangannya benar-benar ada di daftar pending" "V == 1" \
+  "$(api "$OWNER" GET /karyawan/undangan | jq '[.[]|select(.email=="suntik264@example.com")]|length')"
+# Pelolosan milik tempat data DIRENDER, bukan tempat data DISIMPAN. Menyimpan
+# bentuk terlolos akan memajang `&amp;` di layar dan di CSV — menukar satu bug
+# dengan bug yang lebih sunyi. Karena itu nama sah ber-`&` diperiksa tetap mentah.
+api "$OWNER" PATCH /company '{"nama":"Warung Bu Ani & Anak"}' > /dev/null
+cek "nama ber-& tersimpan MENTAH — pelolosan bukan milik penyimpanan" "V == 1" \
+  "$(api "$OWNER" GET /company | jq '((.nama == "Warung Bu Ani & Anak") and ((.nama|test("&amp;"))|not)) | if . then 1 else 0 end')"
+api "$OWNER" PATCH /company "$(jq -nc --arg n "$NAMA264_ASLI" '{nama:$n}')" > /dev/null
+cek "nama perusahaan dipulihkan seperti semula" "V == 1" \
+  "$(api "$OWNER" GET /company | jq --arg n "$NAMA264_ASLI" '(.nama == $n) | if . then 1 else 0 end')"
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

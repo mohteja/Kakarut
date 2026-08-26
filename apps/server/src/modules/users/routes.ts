@@ -24,6 +24,7 @@ import { type AppEnv } from "../../middleware/auth";
 import { emailDariBody, lewatiRateLimit, rateLimit } from "../../middleware/rateLimit";
 import { env } from "../../config/env";
 import { kirimEmail } from "../mail/service";
+import { suratUndangan } from "../mail/surat";
 import { isKodeKaryawanConflict, resolveKodeKaryawan } from "./service";
 
 /**
@@ -326,8 +327,10 @@ export const karyawanRoutes = new Hono<AppEnv>()
       const url = `${appBaseUrl(c)}/daftar`;
       await kirimEmail({
         to: body.email,
+        // `subject` sengaja TIDAK dilolos: ia teks biasa, bukan HTML — dan
+        // transport (nodemailer/Resend) sudah menyandikan headernya.
         subject: `Undangan bergabung ${co?.nama ?? "perusahaan"} di Terakasir`,
-        html: `<p>Anda diundang bergabung ke <b>${co?.nama ?? "sebuah perusahaan"}</b> di Terakasir.</p><p>Daftar dengan email ini untuk otomatis bergabung: <a href="${url}">${url}</a></p><p>Bila sudah punya akun, cukup login — undangan muncul untuk diterima.</p>`,
+        html: suratUndangan(co?.nama ?? "sebuah perusahaan", url),
       });
     } catch {
       /* abaikan kegagalan email */

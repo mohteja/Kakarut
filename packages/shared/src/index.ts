@@ -4,6 +4,7 @@ export * from "./constants";
 export * from "./contoh-cetak";
 export * from "./escpos";
 export * from "./hpp";
+export * from "./html";
 export * from "./isi-menu";
 export * from "./ketersediaan";
 export * from "./biaya";

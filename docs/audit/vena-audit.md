@@ -50,6 +50,119 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## HTML surat dirakit dari data pengguna, tanpa satu pun pelolos — server+web — 2026-08-26
+
+- **Kenapa**: putaran lalu menutup *ke mana* tautan surat menunjuk. Menyapu
+  sekitarnya menemukan saudara kandungnya di berkas yang sama — *apa* yang
+  dirakit di sekelilingnya
+- **Populasi** (literal templat ber-tag-HTML **dan** ber-interpolasi, dihitung
+  pengurai templat, bukan grep):
+
+  | akar | literal | melolos SEBELUM | melolos SESUDAH |
+  |---|---|---|---|
+  | `apps/server/src` | 12 → 13 | **0** | **7** |
+  | `packages/shared/src` | 0 | 0 | 0 |
+  | `apps/web/src` | 11 | 3 | 3 |
+
+  (Angka sebelum diukur dengan pengurai yang SAMA terhadap `HEAD`, lewat
+  `git show`, supaya keduanya sebanding. Server bertambah satu literal karena
+  perakit suratnya dipecah jadi fungsi murni.)
+
+  Delapan "tidak" di web adalah situs **penggabungan** (`${kepala}`, `${tabel}`,
+  `${opts.bodyHtml}`) yang tiap sisipan **datanya** sudah lewat `esc()` di hulu
+  — web memang sudah benar, dan angkanya karena itu tak berubah. Yang tak punya
+  pelolos sama sekali: **server**. Sesudah: enam sisa di server semuanya
+  terdaftar beralasan (satu `index.ts` + lima `backup-peringatan.ts`)
+- **Yang paling tajam**: `modules/users/routes.ts:330` merakit surat undangan
+  dari `co.nama`. Nama perusahaan divalidasi `z.string().trim().min(1)` — tanpa
+  batasan aksara — dan di jalur ini penyerang memilih **keduanya**: isi yang
+  disuntik (nama perusahaannya sendiri, bebas didaftarkan) dan penerimanya
+  (`body.email`, alamat mana pun). Suratnya berangkat dari domain produk dan
+  lolos SPF/DKIM
+- **UKURAN, dari keluaran perakit yang sungguhan** (bukan dari membaca; badan
+  surat tak terkirim di dev, jadi perakitnya diekstrak dulu **tanpa mengubah
+  isinya**, baru diukur — "sebelum" dan "sesudah" datang dari fungsi yang sama):
+
+  | kasus | `<a` sebelum | `<a` sesudah |
+  |---|---|---|
+  | undangan, nama = `</b></p><p><a href="https://penyerang.example">…` | **2** | **1** |
+  | verifikasi, nama sama | **2** | **1** |
+  | undangan, url = `https://kakarut.app" onmouseover="jahat()" x="` | 1 tag ber-**3 atribut** | 1 tag ber-**1 atribut** (`href`) |
+
+  Satu `<a` itu milik Kakarut; yang kedua milik penyerang. Sesudah: suntikannya
+  jadi teks yang terlihat (`&lt;/b&gt;…`), bukan tag
+- **Vektor kedua menumpuk di atas putaran lalu**: `${url}` duduk **di dalam
+  atribut** (`<a href="${url}">`), dan `url` lahir dari `appBaseUrl(c)` — yang
+  tanpa `APP_BASE_URL`/`APP_HOST_DIPERCAYA` masih diturunkan dari
+  `X-Forwarded-Host`. Putaran lalu menutup *tujuan*-nya; ini menutup
+  *keluar-dari-atribut*-nya
+- **Beratnya dinilai jujur, bukan dibesarkan** — dua klaim yang sengaja TIDAK
+  dibuat, karena masing-masing diperiksa dan ternyata tak terjangkau:
+  - **bukan injeksi header `Subject`**: nodemailer dan Resend sama-sama
+    menyandikan header (`modules/mail/service.ts`);
+  - **bukan XSS**: klien surat menyaring `<script>` dan atribut peristiwa.
+  Yang NYATA dan tak disaring: **penyuntikan tautan & pemalsuan isi**
+- **Detektor**: pengurai templat literal (backtick, `${}` bersarang, kutip,
+  dan **literal regex**) atas ketiga akar. **Bisa menuduh, dibuktikan**:
+  `lolosHtml` dicabut dari `surat.ts` (suntikan di-assert **mengubah berkasnya**,
+  bukan sekadar dijalankan) → detektor menyebut berkas, baris, dan nama
+  ekspresinya (`namaPerusahaan`); berkas yang UTUH tak dituduh sama sekali
+- **Detektornya sendiri sempat salah, dan itu terukur**: versi pertama tak
+  mengenal literal regex, jadi `${name.replace(/"/g, '""')}` di `lib/backup.ts`
+  membuat `"` di dalam regex terbaca sebagai pembuka string — satu "templat"
+  menelan **141 baris sisa berkasnya**. Sesudah `lewatiRegex`: 24 templat,
+  tak ada yang kabur
+- **PASANGAN**: nama wajar ber-`&` dan ber-apostrof tetap **TERBACA** —
+  `Warung Bu Ani & Anak` → `&amp;` (bukan `&amp;amp;`, bukan dibuang),
+  `D'Rasa "Enak"` utuh; tautan sah `<a href="…/daftar">…</a>` tetap satu tag
+  utuh; undangan tetap **201** dan barisnya muncul di daftar pending
+- **Yang TIDAK dilolos, dengan alasan yang bisa diperiksa** (daftar bernama,
+  per-ekspresi, ber-anti-kuburan): `index.ts` `${buildId}` (heksa dari
+  `computeBuildId`) · lima situs `backup-peringatan.ts` (surat ke super admin
+  yang seluruh isinya dirakit server; zona waktunya dari `companies.timezone`
+  yang **tak punya satu pun jalur tulis**) · `web/lib/pdf.ts` dan tiga belas
+  ekspresi `DokumenBelanjaModal.tsx` (angka, dua ternary yang kedua cabangnya
+  literal, konstanta, dan potongan yang dirakit di berkas yang sama)
+- **Satu rumah, bukan salinan**: `esc` **dipindah** dari
+  `DokumenBelanjaModal.tsx:225` ke `packages/shared/src/html.ts` sebagai
+  `lolosHtml`/`lolosAtribut`, dan berkas web itu mengimpornya. Menyalinnya akan
+  melahirkan aturan kedua — kelas yang baru saja dibayar putaran lalu (lima
+  salinan validasi tanggal). Gerbangnya memaku itu: berkas mana pun di luar
+  `shared/html.ts` yang memuat literal `"&lt;"` dituduh
+- **Menyimpang dari rencana, disengaja**: rencana menyebut `subject` ikut
+  dilolos. Tidak dilakukan — `subject` dirender sebagai **teks biasa**, bukan
+  HTML, dan transportnya sudah menyandikan header. Melolosnya justru akan
+  memajang `Undangan bergabung Warung Bu Ani &amp;amp; Anak` di judul surat:
+  menukar satu bug dengan bug yang lebih sunyi
+- **Tindak**: `packages/shared/src/html.ts` (baru) ·
+  `modules/mail/surat.ts` (baru — perakit surat jadi fungsi murni yang bisa
+  diuji) · `modules/auth/routes.ts` · `modules/users/routes.ts` ·
+  `DokumenBelanjaModal.tsx` (esc dipindah) ·
+  `test/util/templat-html.ts` (baru) · `test/html-surat-dilolos.test.ts`
+  (12 uji) · verify-api **§264** (5 asersi)
+- **Batas, jujur**:
+  - **badan suratnya tak pernah diuji lewat HTTP.** Di dev tak ada SMTP/Resend,
+    `kirimEmail` melempar dan ditangkap diam-diam — jadi HTML-nya tak terlihat
+    dari luar. Yang diukur keluaran **perakitnya**; §264 hanya membuktikan
+    alurnya hidup dan pelolosan tak merembes ke penyimpanan;
+  - detektornya melihat **literal templat**, bukan HTML yang dirakit lewat
+    `+` antar string biasa atau `Array.join` — populasi itu belum disapu;
+  - "melolos" dinilai per-ekspresi secara tekstual (`lolosHtml(`/`esc(` muncul
+    di dalamnya). Sisipan yang memanggil pelolos di CABANG saja
+    (`x ? lolosHtml(a) : b`) akan terbaca aman — tak ada situs seperti itu
+    hari ini, tapi detektornya tak akan menangkapnya bila lahir;
+  - klien surat tak diuji satu per satu; klaim "skrip disaring" bersandar pada
+    perilaku umum, dan justru karena itu **tak dijadikan alasan menurunkan**
+    tingkat temuannya
+- **Negatif bersih yang ikut terukur**: `packages/shared/src` **nol** literal
+  HTML ber-interpolasi — perakit struk & ESC/POS di sana bekerja dengan bita,
+  bukan markup, jadi tak ada permukaan yang perlu dijaga
+- Gerbang: typecheck bersih · `npm test` **2.348** (199 berkas) · `verify-api`
+  **3.136 lolos, 0 gagal** vs Postgres SEGAR (§264 baru) · cakupan rute **273**
+  identik · `audit:invarian` 26/26 · build web · e2e Playwright **6/6**
+
+---
+
 ## Tautan email lahir dari header peminta — server — 2026-08-26
 
 - **Kenapa**: permukaan "apa yang dipakai membangun tautan di surat" tak punya
