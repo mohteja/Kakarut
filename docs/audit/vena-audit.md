@@ -126,6 +126,72 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Matriks IZIN per rute — server — 2026-08-25
+
+- **Kenapa**: pertanyaan paling dasar tentang sebuah pintu — **peran mana yang
+  efektif bisa masuk, dan apakah itu disengaja** — belum pernah dijawab ledger
+  ini sekali pun. Tenant, cabang, langit-langit daftar, presisi angka: sudah;
+  izin: belum
+- **Metode**: jawabannya tak bisa dibaca dari satu baris. Disusun dari **tiga**
+  sumber — penjaga prefiks `app.ts`, `requireRole` di rantai rutenya, dan
+  **ALIAS tingkat modul** (`const bolehAturMeja = requireRole(…)`) — lalu
+  **ditembak** dengan token peran sungguhan
+- **Populasi**: **274** rute · **15** penjaga prefiks · **101** rute terbuka
+  untuk keenam peran, **41** di antaranya TULIS · **14** yang mencurigakan
+  ditembak satu per satu
+- **Pengukuran membantah pembacaan statis DUA ARAH** (token peran `bar`):
+
+  | | hasil |
+  |---|---|
+  | `POST`/`PATCH`/`PUT`/`DELETE /meja` | **403** — dijaga alias `bolehAturMeja`; pemindai versi pertamaku menuduhnya **palsu** |
+  | `POST /penyimpanan` | **201**, dan barisnya **ADA** di `storage_locations` |
+  | `POST /supplier` | **201**, dan barisnya **ADA** di `suppliers` |
+
+- **Temuan**, dan bentuknya tanda tangan repo ini: di KEDUA modul, **mengubah**
+  master data sudah `requireRole("owner","admin")` (`PATCH /:id`,
+  `PUT /:id/petugas`), sementara **membuatnya** terbuka untuk keenam peran.
+  Aturannya sudah ditulis di pintu sebelah
+- **PENGETATAN PERTAMAKU TERLALU JAUH, dan gerbang lama yang menahannya**:
+  §191 verify-api sudah memaku kontraknya **berpasangan** — *"kasir →
+  `POST /penyimpanan` cabang SENDIRI tetap boleh"* & *"cabang lain = 403"*.
+  Menutupnya ke owner/admin saja mematahkan asersi itu. Himpunan akhirnya
+  mencerminkan `bolehAturMeja` (peran yang mengatur lantai) sambil tetap
+  menutup `tim`/`kitchen`/`bar`; `/supplier` tetap owner/admin sebab tak ada
+  kontrak yang menyatakan sebaliknya. **Inilah gunanya pasangan**: ia menahan
+  perbaikan yang berlebihan, bukan cuma perbaikan yang kurang
+- **SESUDAH**: `bar` → **403** di keduanya · `owner` tetap **201** · kasir
+  tetap bisa membuat penyimpanan di cabangnya sendiri
+- **Dua cacat pemindaiku sendiri, ketahuan lewat ANGKANYA**:
+  · `[^)]*` berhenti di `)` pertama → **3 dari 15** penjaga terbaca, dan
+    `/laporan/*` tercatat "terbuka untuk keenam peran";
+  · alias tingkat modul tak terlihat → **4** pintu meja tertuduh palsu.
+  Keduanya diperbaiki dan **dipaku uji PREMIS** supaya kebutaannya tak bisa
+  kembali diam-diam
+- **Satu rumah**: `semuaRute()` **dipindah** (bukan disalin) ke
+  `test/util/rute.ts`, pola yang sama dengan `test/util/kolom-numerik.ts`,
+  begitu gerbang kedua membutuhkannya
+- **Ratchet**: `izin-per-rute.test.ts` — pintu TULIS baru yang terbuka untuk
+  keenam peran menagih keputusan. Uji **anti-kuburan** langsung berguna: ia
+  menolak entri `/meja` yang sudah tak berlaku
+- **Bukti merah**: penjaga `POST /supplier` dicabut (suntikan di-assert
+  mendarat) → **dua** uji merah menyebut rutenya; dipulihkan
+- **Batas, jujur**: resolusi statis tak melihat penjaga **di dalam handler**
+  (mis. `terikatCabang` + perbandingan `branch_id`) maupun penjaga yang
+  bergantung **tipe cabang** (`izinkanManajemenAtauKaryawanCk` hanya
+  meloloskan `tim` bila cabangnya central kitchen). Karena itu tiap tuduhan
+  **ditembak** sebelum disebut temuan — dan justru tembakan itu yang
+  membebaskan empat pintu meja
+- **Cacat lingkungan yang sempat menyesatkan, dicatat supaya tak terulang**:
+  proses server lama (jam 07:01) masih memegang port 3000 sementara
+  `npm start` yang baru mati diam-diam, jadi satu putaran verify-api menguji
+  **kode lama**. Ketahuan dari `ps` — bukan dari hasil ujinya
+- Gerbang: typecheck bersih · `npm test` **2.305** (194 berkas) · `verify-api`
+  **3.022 lolos, 0 gagal** vs Postgres SEGAR (§258 baru) · cakupan rute **272**
+  identik · `audit:invarian` 26/26 · build web · e2e **6/6**
+- Commit: `e95cbb4`
+
+---
+
 ## Satu hop: perantara ber-ekspresi — server — 2026-08-25 — **BERSIH**
 
 - **Kenapa**: batas yang ditulis vena di bawah ini — *"ia melihat pemanggilan
