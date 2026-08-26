@@ -63,6 +63,7 @@ import { kolomBarisPindah, kolomPindahCabang } from "./pindah";
 import { nomorUntukRefs, terbitkanNomor } from "../dokumen/nomor";
 import {
   branchUntukTulis,
+  pastikanAnggotaAktif,
   pastikanCabang,
   resolveBranchId,
   terikatCabang,
@@ -443,13 +444,15 @@ function pesanBahanKurang(kurang: BahanKurangProduksi[]) {
   return `Bahan baku belum cukup untuk mulai produksi: ${detail}. Penuhi/terima stok bahan di cabang dulu.`;
 }
 
-/** Pastikan user adalah anggota (karyawan) perusahaan — untuk penugasan produksi. */
+/**
+ * Pastikan user adalah anggota (karyawan) perusahaan yang MASIH BEKERJA.
+ *
+ * Dulu memeriksa keanggotaannya saja: karyawan yang sudah diarsipkan (keluar)
+ * tetap bisa dijadikan pelaksana, dan namanya muncul di faktur yang lahir
+ * sesudah ia berhenti. Terukur 201 lewat HTTP sebelum diperbaiki.
+ */
 async function pastikanKaryawan(userId: string, companyId: string) {
-  const [m] = await db
-    .select({ userId: memberships.userId })
-    .from(memberships)
-    .where(and(eq(memberships.userId, userId), eq(memberships.companyId, companyId)));
-  if (!m) throw new HTTPException(400, { message: "Karyawan bukan anggota perusahaan" });
+  await pastikanAnggotaAktif(userId, companyId);
 }
 
 /** Satu baris faktur beli, secukupnya untuk menghitung harga acuan baru. */

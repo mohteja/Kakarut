@@ -459,10 +459,25 @@ export const karyawanRoutes = new Hono<AppEnv>()
       const userId = c.req.param("userId");
       const body = c.req.valid("json");
       const [member] = await db
-        .select({ branchId: memberships.branchId })
+        .select({ branchId: memberships.branchId, archivedAt: memberships.archivedAt })
         .from(memberships)
         .where(and(eq(memberships.userId, userId), eq(memberships.companyId, auth.company_id!)));
       if (!member) throw new HTTPException(404, { message: "Karyawan tidak ditemukan" });
+      /*
+       * MEMBERI tugas kepada karyawan yang sudah keluar ditolak; MENGOSONGKAN
+       * daftarnya tidak.
+       *
+       * Mengarsipkan karyawan TIDAK menghapus penugasan tempat SO-nya, dan
+       * pintu inilah satu-satunya cara membersihkannya dari sisi karyawan.
+       * Menolak seluruh permintaan akan mengunci penugasan orang yang sudah
+       * berhenti di sana selamanya — pengetatan yang menciptakan keadaan buntu
+       * bukan pengetatan, ia bug kedua.
+       */
+      if (member.archivedAt && body.tempat_ids.length > 0) {
+        throw new HTTPException(400, {
+          message: "Karyawan sudah diarsipkan (keluar) — tak bisa ditugaskan tempat SO",
+        });
+      }
       if (!member.branchId) {
         throw new HTTPException(400, {
           message: "Karyawan tanpa cabang tak bisa ditugaskan tempat SO",

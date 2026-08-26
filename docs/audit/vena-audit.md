@@ -50,6 +50,126 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Baris yang sudah dinyatakan TIDAK BERLAKU, dan empat pintu yang lupa — server — 2026-08-26
+
+- **Kenapa**: 77 vena menyapu *siapa yang boleh masuk*, *perusahaan siapa*,
+  *angka siapa*, dan *apa yang dirakit dari masukan*. Yang tak pernah disapu
+  sekali pun: apakah baris yang sudah dinyatakan **tidak berlaku** benar-benar
+  berhenti dihitung. Ada empat benderanya, dan tak satu pun punya rumah —
+  aturannya ditulis ulang di tiap situs
+- **Populasi** (sapuan menyentuh rantai drizzle **dan** SQL mentah, dua cara
+  hitung dilaporkan terpisah): **134 situs** menyentuh tabel berbendera atau
+  anaknya —
+
+  | induk | MENYARING | lewat variabel/pembantu | menulis | TELANJANG |
+  |---|---|---|---|---|
+  | `sales` (+ `sale_items`, `sale_consumptions`) | 23 | 12 | 5 | 9 |
+  | `productions` (+ `production_consumptions`) | 26 | 19 | 2 | 6 |
+  | `memberships` | 22 | 0 | 0 | 10 |
+
+  Bentuknya: **107 drizzle · 27 SQL mentah**; sisa TELANJANG-nya 23 drizzle +
+  2 SQL mentah, dipilah tangan dan didaftarkan beralasan
+- **EMPAT TEMUAN, satu aturan, dan semuanya menugaskan PEKERJAAN.** Aturan
+  "anggota = keanggotaan yang **belum diarsipkan**" ditulis eksplisit di
+  `auth/session.ts` (*"keanggotaan AKTIF: perusahaan aktif + belum diarsip"*)
+  dan ditegakkan di **sebelas** tempat. Empat pintu memakai aturan yang sama
+  tanpa bagian terakhirnya. Terukur lewat HTTP terhadap DB dev, dengan
+  karyawan yang benar-benar diarsipkan lebih dulu:
+
+  | pintu | sebelum | sesudah |
+  |---|---|---|
+  | `POST /produksi/faktur` (`worker_id`) | **201** | **400** |
+  | `PATCH /produksi/faktur/:key` (`worker_id`) | **200** | **400** |
+  | `POST /rekomendasi/menu/faktur` (`worker_id`) | **201** | **400** |
+  | `PUT /penyimpanan/:id/petugas` (`user_ids`) | **200** | **400** |
+  | `PUT /karyawan/:id/tempat` (memberi) | 200 | **400** |
+
+  Bukan teori: faktur **PR-0054** terbit pukul 13.46 dengan
+  `dikerjakan_oleh: "Keluar Uji 143"` — karyawan yang diarsipkan pukul 11.42
+  hari yang sama
+- **Yang paling telanjang**: balasan `PUT /penyimpanan/:id/petugas` memuat
+  `{"user_id":"…","nama":"Keluar Uji 143","role":"admin","aktif":false}` —
+  **`"aktif": false` tepat di sebelah penugasan yang baru saja diterimanya.**
+  Layarnya tahu; pintunya tidak
+- **Beratnya ditulis apa adanya**: yang rusak **bukan aksesnya**. Orang itu
+  sudah tak bisa login — `session.ts` menyaringnya, dan §54 memakukannya
+  (401). Yang rusak **pembukuannya**: dokumen yang lahir sesudah ia berhenti
+  menyebut namanya sebagai pelaksana, dan tak ada satu pun galat yang muncul
+- **Satu rumah**: `pastikanAnggotaAktif(userId, companyId)` di
+  `middleware/auth.ts`, tempat `pastikanCabang`/`resolveBranchId` sudah
+  tinggal. **Dua sebab dijawab dua kalimat** — *"bukan anggota perusahaan"*
+  dan *"sudah diarsipkan (keluar)"* menuntut tindakan berbeda dari orang yang
+  membaca layarnya, dan menjawab keduanya dengan satu kalimat adalah temuan
+  yang sudah pernah ditulis ledger ini
+- **PASANGAN, dan yang satu ini menentukan**: mengarsipkan karyawan **tidak**
+  menghapus penugasan tempat SO-nya, dan pintu itu satu-satunya cara
+  membersihkannya dari sisi karyawan. Karena itu yang diperiksa hanya nama
+  yang **DIMASUKKAN**: memberi → **400**, **mengosongkan → 200** (diuji pada
+  tiga karyawan terarsip). Pengetatan yang mengunci daftarnya selamanya bukan
+  pengetatan, ia bug kedua. Ditambah: karyawan aktif tetap 201/200 di ketiga
+  pintu, arsipnya tetap terbaca di `?arsip=true`, dan faktur lama **tetap**
+  menyebut pelaksananya — yang ditutup pintunya, bukan masa lalunya
+- **Detektor**: rantai drizzle (`.from`/`join` + ekor pernyataan) **dan**
+  pernyataan `` sql`…` `` yang benar-benar `.execute(`. **Dibuktikan bisa
+  menuduh, dua kelas berbeda**: (1) empat `isNull(sales.deletedAt)` dicabut
+  dari `laporan/routes.ts` (suntikan di-assert **mengubah berkasnya**) → **11
+  situs** berubah jadi TELANJANG dengan berkas, baris, dan nama tabelnya —
+  termasuk `saleItems` & `saleConsumptions`, tempat uangnya; (2) saringan
+  dicabut dari **pembantu bernama** `kondisiFaktur()` di `penerimaan` →
+  pemakainya ikut merah, jadi penelusuran pembantu bukan pemaaf buta. Berkas
+  yang UTUH: nol tuduhan di kedua kasus
+- **Detektornya sendiri salah tiga kali, dan ketiganya terukur** — semuanya
+  ditemukan sebelum satu tuduhan pun ditulis:
+  1. **pembantu bernama tak ditelusuri** → dua pintu `penerimaan` tertuduh
+     keliru (saringannya hidup di `kondisiFaktur()`). Kelas yang sama memakan
+     26 tuduhan pada sapuan tanggal putaran lalu;
+  2. **literal larik terpotong** — `ekorPernyataan` hanya menghitung KURUNG,
+     jadi `const conds = [a, b]` terputus di koma pertama dan `isNull(...)` di
+     baris berikutnya tak terlihat: **10 pintu produksi** tertuduh keliru;
+  3. **batas pernyataan berhenti di `{` mana pun** → daftar SELECT-nya sendiri
+     terpotong, jadi `db.select({ archivedAt: … }).from(memberships)` terbaca
+     telanjang. Kurungnya kini diseimbangkan MUNDUR
+  Angka TELANJANG bergerak 41 → 35 → 29 → 25 karena ketiganya, bukan karena
+  aturannya dilonggarkan
+- **Satu rumah untuk instrumennya juga**: pemindai SQL mentah
+  (`templateSql`/`tanpaSubkueri`/`badanPembantu`) hidup privat di
+  `daftar-tanpa-langit-langit.test.ts`. **Dipindah** ke
+  `test/util/sql-mentah.ts`; berkas lama mengimpornya dan tetap 10/10 hijau
+- **Batas, jujur**:
+  - **`users.deletedAt` sengaja DI LUAR populasi**, dan alasannya diukur: enam
+    jalur auth sudah menyaringnya, sementara ~20 sentuhan sisanya adalah JOIN
+    UNTUK NAMA (`deletedBy`, `dikerjakan_oleh`) — di situ menyaring justru
+    SALAH. Menariknya masuk akan menenggelamkan gerbangnya dalam 20
+    pengecualian dan membuatnya tak berarti;
+  - daftar pengecualiannya berkunci **berkas + JUMLAH**, bukan nomor baris —
+    stabil terhadap penyuntingan, tapi situs telanjang baru di berkas yang
+    sama hanya menagih keputusan lewat kenaikan hitungannya, tak menyebut
+    barisnya;
+  - kelas `LEWAT_VARIABEL` menilai nama yang **terdekat sebelum** situsnya
+    (fungsi di-hoist). Nama yang dibentuk ulang di tengah rantai — atau
+    saringan yang datang lewat argumen dari berkas LAIN — masih terbaca aman;
+  - **`sales.deleted_at` & `productions.deleted_at` tak menghasilkan satu pun
+    temuan.** Jalur uang & stok memang sudah rapi, dan itu ditulis sebagai
+    negatif bersih berangka: 23+26 situs menyaring, 31 lewat variabel bernama,
+    15 sisanya satu-hop/penomoran/penulisan yang terdaftar beralasan
+- **Usulan antrean berikutnya, dengan angkanya** (diukur di putaran ini,
+  sengaja TIDAK dikerjakan): **`pesanan_status = 'batal'`** — baris pesanan
+  yang DIBATALKAN dapur. **86 sebutan** di 6 berkas; hanya **4** menyaring di
+  SQL dan **2** menyaring di JS (`.filter(it => it.pesanan_status !== "batal")`).
+  Sebagian besar 86 itu memang cuma memajang status, jadi populasinya harus
+  dipersempit ke kueri yang MENGHITUNG uang/stok sebelum ada tuduhan
+- **Tindak**: `middleware/auth.ts` (`pastikanAnggotaAktif`) ·
+  `produksi/routes.ts` · `rekomendasi/rencana.ts` · `penyimpanan/routes.ts` ·
+  `users/routes.ts` · `test/util/sql-mentah.ts` (baru, dipindah) ·
+  `test/util/bendera-hapus.ts` (baru) ·
+  `test/bendera-hapus-disaring.test.ts` (8 uji) · verify-api **§265**
+  (16 asersi)
+- Gerbang: typecheck bersih · `npm test` **2.356** (200 berkas) · `verify-api`
+  **3.152 lolos, 0 gagal** vs Postgres SEGAR (§265 baru) · cakupan rute **273**
+  identik · `audit:invarian` 26/26 · build web · e2e Playwright **6/6**
+
+---
+
 ## HTML surat dirakit dari data pengguna, tanpa satu pun pelolos — server+web — 2026-08-26
 
 - **Kenapa**: putaran lalu menutup *ke mana* tautan surat menunjuk. Menyapu

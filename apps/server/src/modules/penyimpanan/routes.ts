@@ -1,5 +1,5 @@
 import { zValidator } from "../../lib/validator";
-import { and, asc, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
@@ -256,6 +256,20 @@ export const penyimpananRoutes = new Hono<AppEnv>()
 
       const uniqueIds = [...new Set(body.user_ids)];
       if (uniqueIds.length > 0) {
+        /*
+         * ANGGOTA yang MASIH BEKERJA — dulu cuma "anggota".
+         *
+         * Terukur lewat HTTP: karyawan yang sudah diarsipkan (keluar) diterima
+         * sebagai petugas opname dengan 200, dan balasan rutenya sendiri
+         * memuat `"aktif": false` tepat di sebelah penugasan yang baru saja
+         * diterimanya — layar tahu, pintunya tidak.
+         *
+         * Yang diperiksa hanya nama yang DIMASUKKAN. Menghapus penugasan
+         * berarti namanya tak ada di daftar ini, jadi membersihkan petugas
+         * yang sudah keluar tetap bisa dilakukan — pengetatan yang mengunci
+         * daftarnya selamanya akan menukar satu bug dengan bug yang lebih
+         * menjengkelkan.
+         */
         const members = await db
           .select({ userId: memberships.userId })
           .from(memberships)
@@ -263,11 +277,12 @@ export const penyimpananRoutes = new Hono<AppEnv>()
             and(
               eq(memberships.companyId, auth.company_id!),
               inArray(memberships.userId, uniqueIds),
+              isNull(memberships.archivedAt),
             ),
           );
         if (members.length !== uniqueIds.length) {
           throw new HTTPException(400, {
-            message: "Ada akun yang bukan anggota perusahaan",
+            message: "Ada akun yang bukan anggota aktif perusahaan (bukan anggota / sudah keluar)",
           });
         }
       }

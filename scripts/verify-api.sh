@@ -14564,6 +14564,80 @@ api "$OWNER" PATCH /company "$(jq -nc --arg n "$NAMA264_ASLI" '{nama:$n}')" > /d
 cek "nama perusahaan dipulihkan seperti semula" "V == 1" \
   "$(api "$OWNER" GET /company | jq --arg n "$NAMA264_ASLI" '(.nama == $n) | if . then 1 else 0 end')"
 
+echo
+echo "── §265 baris yang sudah dinyatakan TIDAK BERLAKU ──"
+#
+# Aturan "anggota = keanggotaan yang BELUM diarsipkan" ditulis eksplisit di
+# `auth/session.ts` dan ditegakkan di sebelas tempat. EMPAT pintu memakai
+# aturan yang sama tanpa bagian "belum diarsipkan" — dan keempatnya bukan
+# pintu BACA melainkan pintu yang MENUGASKAN PEKERJAAN. Terukur lewat HTTP
+# sebelum diperbaiki:
+#
+#   POST  /produksi/faktur          worker = karyawan yang sudah keluar → 201
+#   PATCH /produksi/faktur/:key                                         → 200
+#   POST  /rekomendasi/menu/faktur                                      → 201
+#   PUT   /penyimpanan/:id/petugas                                      → 200
+#
+# Yang terakhir paling telanjang: balasannya sendiri memuat `"aktif": false`
+# tepat di sebelah penugasan yang baru saja diterimanya. Layarnya tahu;
+# pintunya tidak.
+#
+# Yang rusak BUKAN aksesnya — orang itu sudah tak bisa login (§54 memakukannya).
+# Yang rusak PEMBUKUANNYA: faktur yang lahir sesudah ia berhenti menyebut
+# namanya sebagai pelaksana, dan tak ada satu pun galat yang muncul.
+api "$OWNER" POST /karyawan "{\"nama\":\"Petugas Keluar 265\",\"email\":\"keluar265@basooopa.id\",\"password\":\"PwKeluar265!\",\"role\":\"cashier\",\"branch_id\":\"$PUSAT51_ID\"}" > /dev/null
+U265=$(api "$OWNER" GET /karyawan | jq -r '[.[] | select(.email=="keluar265@basooopa.id")][0].user_id')
+RAK265=$(api "$OWNER" POST /penyimpanan "{\"nama\":\"Rak Keluar 265\",\"branch_id\":\"$PUSAT51_ID\"}" | jq -r .id)
+cek "premis §265: karyawan uji & raknya ada" "V == 1" \
+  "$([ -n "$U265" ] && [ "$U265" != "null" ] && [ -n "$RAK265" ] && [ "$RAK265" != "null" ] && echo 1 || echo 0)"
+# PASANGAN dijalankan SAAT MASIH AKTIF: ketiga pintunya memang menerima orang
+# yang masih bekerja, jadi 400 nanti benar-benar datang dari arsipnya.
+FK265=$(api "$OWNER" POST /produksi/faktur "{\"worker_id\":\"$U265\",\"items\":[{\"ingredient_id\":\"$URATB_ID\",\"mode\":\"batch\",\"jumlah\":1}]}")
+cek "PASANGAN: karyawan AKTIF jadi pelaksana produksi → faktur terbit" "V == 1" \
+  "$(echo "$FK265" | jq '((.faktur_id // "") | length > 0) | if . then 1 else 0 end')"
+FK265_ID=$(echo "$FK265" | jq -r .faktur_id)
+cek "PASANGAN: karyawan AKTIF jadi petugas opname (200)" "V == 200" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/penyimpanan/$RAK265/petugas" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"user_ids\":[\"$U265\"]}")"
+cek "PASANGAN: karyawan AKTIF ditugaskan tempat SO (200)" "V == 200" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/karyawan/$U265/tempat" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"tempat_ids\":[\"$RAK265\"]}")"
+# … lalu dia KELUAR.
+api "$OWNER" PATCH "/karyawan/$U265" '{"arsip":true}' > /dev/null
+cek "premis §265: dia benar-benar terarsip" "V == 1" \
+  "$(api "$OWNER" GET "/karyawan?arsip=true" | jq --arg id "$U265" '([.[] | select(.user_id==$id)][0] | (.archived_at != null)) | if . then 1 else 0 end')"
+cek "pelaksana produksi yang sudah keluar → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/produksi/faktur" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"worker_id\":\"$U265\",\"items\":[{\"ingredient_id\":\"$URATB_ID\",\"mode\":\"batch\",\"jumlah\":1}]}")"
+# Dua sebab, dua kalimat: "bukan anggota" menuntut tindakan yang berbeda dari
+# "sudah keluar", dan layar yang menjawab keduanya sama tak bisa ditindaklanjuti.
+cek "galatnya menyebut ARSIPNYA, bukan 'bukan anggota'" "V == 1" \
+  "$(curl -s -X POST "$BASE/api/produksi/faktur" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"worker_id\":\"$U265\",\"items\":[{\"ingredient_id\":\"$URATB_ID\",\"mode\":\"batch\",\"jumlah\":1}]}" | jq '(.error | test("diarsipkan")) | if . then 1 else 0 end')"
+cek "ganti pelaksana faktur lama ke yang sudah keluar → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PATCH "$BASE/api/produksi/faktur/$FK265_ID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"password\":\"$OWNER_PASS\",\"worker_id\":\"$U265\"}")"
+cek "pelaksana rencana (dari menu) yang sudah keluar → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/rekomendasi/menu/faktur" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"items\":[{\"menu_id\":\"$PBA_ID\",\"porsi\":500}],\"worker_id\":\"$U265\"}")"
+cek "petugas opname yang sudah keluar → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/penyimpanan/$RAK265/petugas" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"user_ids\":[\"$U265\"]}")"
+cek "tempat SO untuk yang sudah keluar → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/karyawan/$U265/tempat" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"tempat_ids\":[\"$RAK265\"]}")"
+# PASANGAN yang menentukan: mengarsipkan karyawan TIDAK menghapus penugasan
+# tempat SO-nya, dan pintu ini satu-satunya cara membersihkannya dari sisi
+# karyawan. Pengetatan yang mengunci daftarnya selamanya bukan pengetatan —
+# ia bug kedua.
+cek "PASANGAN: MENGOSONGKAN tempat SO orang yang sudah keluar tetap 200" "V == 200" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/karyawan/$U265/tempat" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"tempat_ids":[]}')"
+cek "PASANGAN: petugas opname bisa DIGANTI ke daftar kosong (200)" "V == 200" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/penyimpanan/$RAK265/petugas" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"user_ids":[]}')"
+# Arsip adalah CATATAN, bukan penghapusan — dan faktur yang terlanjur dibuat
+# saat dia masih bekerja tetap menyebut namanya. Yang ditutup pintunya, bukan
+# masa lalunya.
+cek "arsip tetap terbaca di ?arsip=true sesudah semua penolakan" "V == 1" \
+  "$(api "$OWNER" GET "/karyawan?arsip=true" | jq --arg id "$U265" '[.[] | select(.user_id==$id)] | length')"
+cek "faktur lama TETAP menyebut pelaksananya (riwayat tak dihapus)" "V == 1" \
+  "$(api "$OWNER" GET /produksi | jq --arg f "$FK265_ID" '[.rows[] | select(.faktur_id==$f and .dikerjakan_oleh=="Petugas Keluar 265")] | length > 0 | if . then 1 else 0 end')"
+# Yang DIHAPUS ke Tempat Sampah juga berhenti dihitung — sisi kedua bendera
+# yang sama, dan sapuan mekaniknya dipaku `bendera-hapus-disaring.test.ts`.
+cek "premis §265: /sampah memang melihat baris yang dibuang" "V == 200" \
+  "$(status_code "$OWNER" GET /sampah)"
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

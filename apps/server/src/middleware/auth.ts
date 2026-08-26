@@ -160,6 +160,41 @@ export async function pastikanCabang(branchId: string, companyId: string): Promi
   return b.id;
 }
 
+/**
+ * ANGGOTA YANG MASIH BEKERJA — satu-satunya pintu untuk "boleh ditugaskan".
+ *
+ * Aturannya sudah ditulis di `auth/session.ts` ("keanggotaan AKTIF: perusahaan
+ * aktif + belum diarsip") dan ditegakkan di sebelas tempat. Empat pintu yang
+ * MENUGASKAN pekerjaan menulis ulang aturan itu tanpa bagian "belum diarsip",
+ * dan semuanya terukur lewat HTTP: karyawan yang sudah keluar tetap bisa
+ * dijadikan pelaksana faktur produksi (201) dan petugas opname (200 — dengan
+ * balasannya sendiri memuat `"aktif": false` di sebelah penugasan yang baru
+ * saja diterimanya).
+ *
+ * Yang rusak bukan aksesnya: orang itu sudah tak bisa login, `session.ts`
+ * menyaringnya. Yang rusak PEMBUKUANNYA — dokumen yang lahir sesudah ia
+ * berhenti menyebut namanya, dan tak ada satu pun galat yang muncul.
+ *
+ * Dua sebab dijawab dua kalimat, bukan satu: "bukan anggota" dan "sudah
+ * keluar" menuntut tindakan yang berbeda dari orang yang membaca layarnya.
+ *
+ * MENGHAPUS penugasan tidak lewat sini — pintunya hanya memeriksa nama yang
+ * DIMASUKKAN. Tanpa itu, mengarsipkan karyawan akan mengunci penugasan lamanya
+ * selamanya.
+ */
+export async function pastikanAnggotaAktif(userId: string, companyId: string): Promise<void> {
+  const [m] = await db
+    .select({ archivedAt: memberships.archivedAt })
+    .from(memberships)
+    .where(and(eq(memberships.userId, userId), eq(memberships.companyId, companyId)));
+  if (!m) throw new HTTPException(400, { message: "Karyawan bukan anggota perusahaan" });
+  if (m.archivedAt) {
+    throw new HTTPException(400, {
+      message: "Karyawan sudah diarsipkan (keluar) — tak bisa ditugaskan",
+    });
+  }
+}
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**

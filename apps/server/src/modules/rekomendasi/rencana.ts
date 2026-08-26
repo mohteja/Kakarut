@@ -19,6 +19,7 @@ import {
   type RencanaMenuRingkas,
 } from "@kakarut/shared";
 import { db } from "../../db/client";
+import { pastikanAnggotaAktif } from "../../middleware/auth";
 import {
   branches,
   companies,
@@ -494,14 +495,10 @@ export async function buatFakturDariRencana(
       message: "Pelaksana (karyawan/supplier) wajib dipilih untuk faktur produksi",
     });
   }
+  // Salinan kedua aturan "pelaksana harus anggota" dulu tinggal di sini, dan
+  // seperti saudaranya di modul produksi ia lupa bagian "belum diarsipkan".
   if (params.workerId) {
-    const [m] = await db
-      .select({ userId: memberships.userId })
-      .from(memberships)
-      .where(
-        and(eq(memberships.userId, params.workerId), eq(memberships.companyId, params.companyId)),
-      );
-    if (!m) throw new HTTPException(400, { message: "Karyawan bukan anggota perusahaan" });
+    await pastikanAnggotaAktif(params.workerId, params.companyId);
   }
   for (const supplierId of [params.supplierId, params.supplierBeliId]) {
     if (!supplierId) continue;

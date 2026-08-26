@@ -1,8 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { butaKomentar } from "../src/scripts/buta-komentar";
+// Pemindai SQL mentah PINDAH ke rumah bersama saat vena bendera-hapus
+// (2026-08-26) membutuhkan pemindai yang sama persis; menyalinnya akan
+// melahirkan pengurai template kedua.
+import {
+  SRC,
+  badanPembantu,
+  berkasTs,
+  ekorPernyataan,
+  tanpaSubkueri,
+  templateSql,
+} from "./util/sql-mentah";
 
 /**
  * BACAAN DAFTAR TANPA LANGIT-LANGIT ATAS TABEL YANG TUMBUH — RATCHET.
@@ -40,7 +51,6 @@ import { butaKomentar } from "../src/scripts/buta-komentar";
  *     hanya melihat rantai SESUDAH `.from()` — padahal daftar SELECT ada
  *     SEBELUMNYA, jadi hampir semua agregat luput dan hitungannya 78, bukan 63.
  */
-const SRC = fileURLToPath(new URL("../src", import.meta.url));
 
 /**
  * Tabel yang barisnya bertambah seumur pemakaian — bukan data master yang
@@ -89,50 +99,6 @@ const AGREGAT = /\b(count|sum|avg)\s*\(/i;
  * dengan alasan di pesan commit.
  */
 const DASAR = 63;
-
-function berkasTs(dir: string): string[] {
-  const keluar: string[] = [];
-  for (const nama of readdirSync(dir)) {
-    const p = join(dir, nama);
-    if (statSync(p).isDirectory()) keluar.push(...berkasTs(p));
-    else if (nama.endsWith(".ts")) keluar.push(p);
-  }
-  return keluar;
-}
-
-/**
- * Rantai sesudah `.from(...)` sampai ujung pernyataannya.
- *
- * BERHENTI DI `,` KEDALAMAN NOL, BUKAN CUMA DI `;`.
- *
- * Dua kueri berdampingan di dalam `Promise.all([a, b])` tak pernah menurunkan
- * kedalaman kurung ke nol sampai `]);` di ujungnya. Tanpa berhenti di koma
- * pemisahnya, ekor kueri PERTAMA menelan seluruh kueri kedua — dan `.limit()`
- * milik yang kedua memaafkan yang pertama.
- *
- * Bukan kemungkinan teoretis: bentuk itulah yang dipakai kartu Riwayat Harga
- * (kueri sempit tanpa batas + kueri daftar berbatas), dan versi pertama
- * penjaga ini menghitungnya 61 — DUA LEBIH SEDIKIT dari yang sebenarnya, tepat
- * pada dua kueri tanpa batas yang baru ditambahkan. Diperiksa juga ke
- * belakang: pada `HEAD` sebelum perubahan itu, kedua versi sama-sama
- * menghitung 63, jadi kebutaan ini tak pernah menyembunyikan apa pun di masa
- * lalu — ia hanya akan menyembunyikan yang baru.
- *
- * Koma di dalam `and(a, b)` atau `.select({ x: 1, y: 2 })` selalu berada di
- * kedalaman > 0, jadi tak ikut memotong.
- */
-function ekorPernyataan(s: string, mulai: number): string {
-  let ekor = "";
-  let dalam = 0;
-  for (let j = mulai; j < s.length && ekor.length < 4000; j += 1) {
-    const c = s[j];
-    if (c === "(") dalam += 1;
-    else if (c === ")") dalam -= 1;
-    else if ((c === ";" || c === ",") && dalam <= 0) break;
-    ekor += c;
-  }
-  return ekor;
-}
 
 export function situs(kode?: { nama: string; isi: string }[]): string[] {
   const berkas =
@@ -192,79 +158,6 @@ const TUMBUH_SQL = [...TUMBUH].map((camel) => ({
   camel,
   snake: camel.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`),
 }));
-
-/** Akhir template literal yang dimulai TEPAT SESUDAH backtick pembukanya. */
-function akhirTemplate(s: string, mulai: number): number {
-  let j = mulai;
-  while (j < s.length) {
-    const c = s[j];
-    if (c === "\\") {
-      j += 2;
-      continue;
-    }
-    if (c === "$" && s[j + 1] === "{") {
-      let dalam = 1;
-      j += 2;
-      while (j < s.length && dalam > 0) {
-        const ch = s[j];
-        if (ch === "\\") {
-          j += 2;
-          continue;
-        }
-        if (ch === "{") dalam += 1;
-        else if (ch === "}") dalam -= 1;
-        else if (ch === "`") j = akhirTemplate(s, j + 1);
-        j += 1;
-      }
-      continue;
-    }
-    if (c === "`") break;
-    j += 1;
-  }
-  return j;
-}
-
-/** Tiap template `sql`…`` / `sql<T>`…`` beserta posisinya. Menghormati `${}` bersarang. */
-function templateSql(s: string): { pos: number; isi: string }[] {
-  const keluar: { pos: number; isi: string }[] = [];
-  for (const m of s.matchAll(/\bsql(?:<[^`>]*>)?\s*`/g)) {
-    const awal = m.index! + m[0].length;
-    keluar.push({ pos: m.index!, isi: s.slice(awal, akhirTemplate(s, awal)) });
-  }
-  return keluar;
-}
-
-/**
- * Kosongkan ISI tiap kurung berkedalaman ≥ 1, kurungnya sendiri dipertahankan.
- *
- * Dengan begini `SUM(pr.qty)` tetap terbaca agregat (`SUM()`), sementara
- * `(SELECT COUNT(*) FROM sales …)` menjadi `()` — subkueri tak lagi bisa
- * menyamar sebagai kueri luar, ke dua arah sekaligus: `LIMIT`-nya tak
- * memaafkan induknya, dan `FROM`-nya tak membuat `SELECT (…), (…)` yang
- * sebenarnya satu baris terlihat seperti daftar.
- */
-function tanpaSubkueri(s: string): string {
-  let dalam = 0;
-  let keluar = "";
-  for (const c of s) {
-    if (c === "(") {
-      dalam += 1;
-      keluar += c;
-    } else if (c === ")") {
-      dalam -= 1;
-      keluar += c;
-    } else keluar += dalam > 0 ? " " : c;
-  }
-  return keluar;
-}
-
-/** Isi template `sql` pertama di dalam definisi `nama` pada berkas yang sama. */
-function badanPembantu(s: string, nama: string): string {
-  const def = new RegExp(`(?:function\\s+${nama}\\b|const\\s+${nama}\\s*[=:])`).exec(s);
-  if (!def) return "";
-  const t = templateSql(s.slice(def.index, def.index + 4000))[0];
-  return t ? t.isi : "";
-}
 
 export function situsSql(kode?: { nama: string; isi: string }[]): string[] {
   const berkas =
