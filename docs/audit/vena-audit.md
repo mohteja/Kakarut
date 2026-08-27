@@ -50,6 +50,119 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Pengurungan CABANG: saudara kandung tenant yang tak pernah punya gerbang — server — 2026-08-27
+
+- **Kenapa vena ini ada**: pengurungan TENANT sudah dijaga dua arah — baca (626
+  kueri) dan tulis (101 insert), keduanya AST. Pertanyaan yang **sama persis
+  satu tingkat ke bawah** tak pernah disapu sekali pun: *dalam SATU perusahaan,
+  bisakah peran terikat cabang A menyentuh baris cabang B?*
+  `cakupan-cabang.test.ts` yang ada bukan gerbang untuk itu, dan batasnya
+  tertulis di berkasnya sendiri — *"ia menangkap KELALAIAN …, bukan
+  PENYALAHGUNAAN"*. Ia berbasis TEKS, populasinya **8 berkas tulisan tangan**
+  (padahal `resolveBranchId` dipanggil **85 kali di 18 berkas**), dan ia
+  menyapu **satu arah**: "cabang datang dari PEMANGGIL". Ia tak pernah bertanya
+  apakah kuerinya mengurung.
+
+- **Populasi, dihitung**: 59 tabel → **24 ber-`branchId`** (22 juga
+  ber-`companyId`). 626 kueri → **272** menyentuh tabel ber-cabang, 117
+  menyebut `branchId`, **155 tidak**. 275 rute → **144** dimasuki peran terikat
+  cabang → **78** menyentuh tabel ber-cabang.
+
+- **Instrumen**: `test/util/cabang-terkurung.ts` (AST), memakai kembali
+  `ast.ts`, `rute.ts`, `panggilan.ts`, dan matriks izin. Delapan kelas:
+  `LUAR` · `E` · `KOSONG` · `KURUNG` · `HOP` · `MILIK` · `AKTOR` · `TELANJANG`.
+  `peranEfektif`/`penjagaPrefiks`/`aliasPeran` **pindah** dari dalam
+  `izin-per-rute.test.ts` ke `test/util/izin.ts` — sebabnya bukan estetika:
+  berkas uji tak bisa diimpor berkas lain (`tsx`: *"Vitest cannot be imported
+  in a CommonJS module"*), jadi gerbang kedua yang butuh matriks itu hanya
+  punya pilihan menyalinnya. Suite izin tetap **11 lolos** dengan angka yang
+  sama — itu buktinya pindahan ini tak mengubah perilaku.
+
+- **Dua kebutaan detektorku sendiri, ditemukan oleh PENGUKURAN, bukan bacaan**:
+  1. **Sentuhan tabel harus MENULAR lewat pembantu.** `GET /open-bill/:id`
+     badan rutenya tak menyebut `openBills` sama sekali — kuerinya di
+     `loadDetail`. Versi pertama menyebutnya `KOSONG` sementara HTTP
+     membalas **200 berisi bill cabang lain**. Populasi yang menyusut
+     diam-diam adalah kebutaan yang menyamar jadi kabar baik: `TELANJANG`
+     10 → **18** setelah diperbaiki.
+  2. **Gerbang peran INLINE** (`if (auth.role !== "owner" && …) 403`) tak
+     terbaca `peranEfektif`. Tanpa itu `POST /penerimaan/anomali/tutup` jadi
+     tuduhan palsu.
+
+- **Tuduhan yang DICABUT sebelum satu baris diubah**: 5 rute `penerimaan` —
+  kurungannya ADA, satu lompatan jauhnya di `kondisiFaktur`
+  (`penerimaan/routes.ts:120`). Itulah kelas `HOP`, dan uji PREMIS menuntut
+  kelas itu **tidak kosong**: kalau kosong, lompatannya tak terpakai dan angka
+  `KURUNG` bohong.
+
+- **TEMUAN — 14 pintu, tujuh ditembak lewat HTTP** (satu perusahaan, dua
+  cabang; kasir & kitchen terikat "Pusat" atas baris "Cabang Uji 46"), tiap
+  akibatnya dibuktikan di DB, bukan dari status code:
+
+  | pintu | peran | sebelum | bukti di basis data |
+  |---|---|---|---|
+  | `GET /open-bill/:id` | cashier | **200** | nama pelanggan + itemnya terbaca |
+  | `PUT /open-bill/:id` | cashier | **200** | `customer_nama` ditimpa, qty 2 → 9 |
+  | `DELETE /open-bill/:id` | cashier | **200** | bill ditutup, **semua** barisnya `batal`, dan `pesanan_logs` mencatatnya **atas nama cabang korban** |
+  | `GET /stok/opname/sesi/:id` | cashier | **200** | selisih −3, catatan, pelakunya |
+  | `GET /penyimpanan/:id/bahan` | cashier+kitchen | **200** | isi rak cabang lain |
+  | `PATCH /produksi/faktur/:key` | kitchen | **200** | `catatan` ditimpa di baris cabang lain |
+  | `DELETE /produksi/faktur/:key` | kitchen | **200** | `deleted_at` terisi |
+
+  Sesudah: **ketujuhnya 404**, dan barisnya terbukti **utuh** (`Milik Cabang
+  A`, qty 2, masih hidup; faktur masih ada).
+
+- **Perbaikan — satu pintu, bukan tujuh salinan**: `cabangTerikat(c)` +
+  `syaratCabang(c, kolom)` di `middleware/auth.ts`, bersebelahan dengan
+  `pastikanCabang`/`resolveBranchId`/`branchUntukTulis`. Dua bentuk dari SATU
+  keputusan (nilai untuk pembanding JS, `SQL` untuk `.where`).
+
+- **Regresi yang ditangkap uji PASANGAN, bukan oleh pembacaan ulang**: versi
+  pertama memakai `syaratCabang` apa adanya di `/produksi`+`/pembelian` dan
+  **menutup jalur Central Kitchen** — §93 berubah dari 200 jadi 404 (*"karyawan
+  CK menyimpan laporan harga"*). Aturannya sudah tertulis di `app.ts`: kedua
+  prefiks itu digerbang `izinkanManajemenAtauKaryawanCk`, jadi `tim` yang
+  SAMPAI ke sana pasti `tim` Central Kitchen — merekalah yang belanja dan
+  memegang notanya, untuk cabang mana pun. Lahirlah `syaratCabangDivisi`, yang
+  hanya mengurung `kitchen`/`bar` (dua divisi produksi cabang store, dan
+  komentar gerbangnya sendiri sudah menyebut *"kunci per-request tetap lewat
+  `terikatCabang`"*). **`/pembelian` bukan lubang cabang** — itu diukur, bukan
+  diasumsikan.
+
+- **TEMUAN SAMPINGAN — penjaga yang JATUH TERBUKA**: `kondisiFaktur` menulis
+  `terikatCabang(role) && auth.branch_id`, jadi peran terikat yang tak punya
+  cabang lolos ke SELURUH perusahaan, sementara `resolveBranchId` pada keadaan
+  yang sama menjawab 403. Dua pintu ke keadaan yang sama, dua jawaban. Jangkar
+  ujinya menemukan **salinan kedua** di `penerimaan/routes.ts:465` (SQL mentah,
+  di luar jangkauan drizzle). Keduanya kini lewat pembantu yang **melempar**.
+  **Batasnya ditulis**: keadaan itu **tak terjangkau hari ini** — 0 dari 34
+  keanggotaan peran terikat tanpa cabang, dijaga `WAJIB_CABANG` di
+  `users/routes.ts:184` dan FK `memberships.branch_id` ber-`NO ACTION`. Jadi
+  ini pertahanan berlapis, **bukan lubang terukur**, dan tak dibesarkan jadi
+  temuan. Sembilan salinan bentuk yang sama di `produksi`/`transfer`/`meja`
+  **tetap utang yang diukur**, tak disentuh putaran ini.
+
+- **Sisa 4 `TELANJANG`, diadjudikasi beralasan** — dan yang menyatukannya satu
+  kalimat: baris yang DIALAMATI `:id`-nya milik **perusahaan**, bukan cabang;
+  tabel ber-cabang yang tersentuh cuma satelit. `GET /bahan/:id/detail` ·
+  `GET /bahan/:id/pembelian` (kolam yang melahirkan `ingredients.harga_beli`,
+  kolom perusahaan) · `GET /menu/:id` · `POST /profil/password`. Daftarnya
+  ditagih dua arah: entri yang sudah berpenjaga wajib **dihapus**.
+
+- **Angka akhir**: `TELANJANG` **18 → 4** · `KURUNG` 68 → **80** · `HOP` 5 → 7.
+  Bukti merah mendarat di enam bentuk (rute telanjang, pasangannya berpenjaga,
+  tabel tanpa cabang, gerbang `requireRole`, gerbang inline, penjaga di
+  pembantu) **dan** pada penularan sentuhan tabel.
+
+- **Gerbang**: `typecheck` bersih (server+web) · `npm test` **2.441** (206
+  berkas) · `verify-api` **3.210 lolos, 0 gagal** (§269, 22 asersi) · rekaman
+  cakupan rute **identik, 274** · `audit:invarian` 26/26 · build web ✔ ·
+  Playwright e2e **6/6**. Satu jangkar irisan ikut bergeser
+  (`open-bill-tutup.test.ts:104`) dan `jangkar-iris.test.ts` yang
+  menemukannya — instrumen yang menjaga instrumen.
+
+---
+
 ## "Diputuskan pemanggil" berhenti jadi janji — server (uji) — 2026-08-27
 
 - **Kenapa vena ini ada**: dua putaran terakhir menutup dua arah gerbang tenant,

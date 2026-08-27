@@ -14846,6 +14846,95 @@ cek "sapuan unggahan melaporkan medan gagal_hapus tersendiri" "V == 1" \
 cek "…mode hitung tetap tak menghapus apa pun" "V == 0" \
   "$(echo "$SAPU268" | jq -r '.dihapus')"
 
+echo "── §269 pengurungan CABANG: baris cabang lain tak terjangkau peran terikat ──"
+#
+# Pengurungan TENANT dijaga dua arah; pertanyaan yang sama satu tingkat ke bawah
+# tak pernah punya gerbang: dalam SATU perusahaan, bisakah peran terikat cabang
+# A menyentuh baris cabang B? Sapuan menemukan 18 pintu menyentuh tabel
+# ber-branch_id tanpa penjaga apa pun. Tujuh ditembak lewat HTTP lebih dulu
+# (2026-08-27, kasir & kitchen terikat "Pusat" atas baris "Cabang Uji 46"):
+#
+#   GET    /open-bill/:id         -> 200 berisi nama pelanggan + itemnya
+#   PUT    /open-bill/:id         -> 200; customer_nama ditimpa, qty 2 jadi 9
+#   DELETE /open-bill/:id         -> 200; bill ditutup, SEMUA barisnya batal,
+#                                   dan pesanan_logs mencatatnya atas nama
+#                                   cabang KORBAN
+#   GET    /stok/opname/sesi/:id  -> 200 berisi selisih, catatan, pelakunya
+#   GET    /penyimpanan/:id/bahan -> 200 berisi isi rak cabang lain
+#   PATCH  /produksi/faktur/:key  -> 200 (peran kitchen terikat cabang)
+#   DELETE /produksi/faktur/:key  -> 200; deleted_at terisi
+#
+# Di sini arahnya DIBALIK: KASIR46 terikat "Cabang Uji 46" menembak baris
+# "Pusat". Tiap tuduhan berpasangan dengan jalur SAH-nya, sebab penjaga yang
+# menutup pintunya sendiri tak menyelesaikan apa pun.
+# Token `$KASIR` dari baris 181 sudah BASI di ekor skrip: `token_version`
+# akun itu naik tiga kali sepanjang jalannya (ganti password di seksi lain),
+# dan sesi lama memang dibatalkan by design. Login ulang, bukan memakai yang
+# basi lalu membaca 401 sebagai "penjaga bekerja".
+KASIR269=$(login "$KASIR_EMAIL" "$KASIR_PASS")
+cek "premis §269: kasir cabang Pusat bisa login ulang" "V == 1" \
+  "$([ -n "$KASIR269" ] && [ "$KASIR269" != "null" ] && echo 1 || echo 0)"
+BILL269=$(api "$KASIR269" POST /open-bill "{\"items\":[{\"menu_id\":\"$MENU_ID\",\"qty\":2}],\"customer_nama\":\"Milik Pusat\"}")
+BILL269_ID=$(echo "$BILL269" | jq -r '.id // ""')
+cek "premis §269: bill uji di cabang PUSAT terbentuk" "V == 1" \
+  "$([ -n "$BILL269_ID" ] && [ "$BILL269_ID" != "null" ] && echo 1 || echo 0)"
+cek "premis §269: pemiliknya sendiri MEMANG bisa membacanya" "V == 200" \
+  "$(status_code "$KASIR269" GET "/open-bill/$BILL269_ID")"
+
+cek "GET /open-bill/:id oleh kasir cabang lain" "V == 404" \
+  "$(status_code "$KASIR46" GET "/open-bill/$BILL269_ID")"
+cek "PUT /open-bill/:id oleh kasir cabang lain" "V == 404" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/open-bill/$BILL269_ID" -H "Authorization: Bearer $KASIR46" -H 'Content-Type: application/json' -d "{\"customer_nama\":\"DIRAMPAS\",\"items\":[{\"menu_id\":\"$MENU_ID\",\"qty\":9}]}")"
+cek "…dan barisnya TETAP utuh, bukan cuma balasannya yang berubah" "V == 1" \
+  "$(api "$KASIR269" GET "/open-bill/$BILL269_ID" | jq '((.customer_nama == "Milik Pusat") and (.items[0].qty == 2)) | if . then 1 else 0 end')"
+cek "DELETE /open-bill/:id oleh kasir cabang lain" "V == 404" \
+  "$(status_code "$KASIR46" DELETE "/open-bill/$BILL269_ID")"
+cek "…dan billnya MASIH HIDUP" "V == 200" \
+  "$(status_code "$KASIR269" GET "/open-bill/$BILL269_ID")"
+# PASANGAN: pemiliknya tetap boleh menyunting & menutup bill CABANGNYA SENDIRI.
+cek "PASANGAN: pemiliknya tetap boleh menyunting bill cabangnya" "V == 200" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/open-bill/$BILL269_ID" -H "Authorization: Bearer $KASIR269" -H 'Content-Type: application/json' -d "{\"customer_nama\":\"SAH\",\"items\":[{\"menu_id\":\"$MENU_ID\",\"qty\":5}]}")"
+cek "…dan suntingannya benar-benar mendarat" "V == 1" \
+  "$(api "$KASIR269" GET "/open-bill/$BILL269_ID" | jq '((.customer_nama == "SAH") and (.items[0].qty == 5)) | if . then 1 else 0 end')"
+cek "PASANGAN: pemiliknya tetap boleh membatalkan bill cabangnya" "V == 200" \
+  "$(status_code "$KASIR269" DELETE "/open-bill/$BILL269_ID")"
+
+# Sesi opname & rak: baris cabang Pusat, ditembak kasir Cabang Uji 46.
+cek "GET /stok/opname/sesi/:id oleh kasir cabang lain" "V == 404" \
+  "$(status_code "$KASIR46" GET "/stok/opname/sesi/$SESI")"
+cek "PASANGAN: sesi yang sama tetap terbaca pemiliknya" "V == 200" \
+  "$(status_code "$KASIR269" GET "/stok/opname/sesi/$SESI")"
+cek "GET /penyimpanan/:id/bahan (rak Pusat) oleh kasir cabang lain" "V == 404" \
+  "$(status_code "$KASIR46" GET "/penyimpanan/$GD46P_ID/bahan")"
+cek "PASANGAN: rak CABANGNYA SENDIRI tetap terbaca" "V == 200" \
+  "$(status_code "$KASIR46" GET "/penyimpanan/$GD46_ID/bahan")"
+
+# Faktur ber-:key — peran `kitchen` juga terikat cabang, dan modul produksi
+# meloloskannya. Faktur uji dibuat di PUSAT, penyerangnya di Cabang Uji 46.
+api "$OWNER" POST /karyawan "{\"nama\":\"Kitchen 269\",\"email\":\"kitchen269@basooopa.id\",\"password\":\"Kitchen269Pass!\",\"role\":\"kitchen\",\"branch_id\":\"$CB46_ID\"}" > /dev/null
+KIT269=$(login "kitchen269@basooopa.id" "Kitchen269Pass!")
+cek "premis §269: kitchen terikat Cabang Uji 46 bisa login" "V == 1" \
+  "$([ -n "$KIT269" ] && [ "$KIT269" != "null" ] && echo 1 || echo 0)"
+# Pintu faktur ber-:key. `/pembelian` BUKAN lubang cabang dan itu diukur, bukan
+# diasumsikan: gerbangnya hanya meloloskan owner/admin dan `tim` yang lokasi
+# kerjanya Central Kitchen — ketiganya memang bekerja lintas cabang, dan §93 di
+# atas memaku hak CK itu. Yang bocor `/produksi/faktur/:key`, lewat kitchen/bar.
+FK269=$(api "$OWNER" POST /produksi/faktur "{\"branch_id\":\"$PUSAT46_ID\",\"items\":[{\"ingredient_id\":\"$URATB_ID\",\"mode\":\"batch\",\"jumlah\":1}]}")
+FK269_ID=$(echo "$FK269" | jq -r '.faktur_id // ""')
+cek "premis §269: faktur produksi uji di PUSAT terbentuk" "V == 1" \
+  "$([ -n "$FK269_ID" ] && [ "$FK269_ID" != "null" ] && echo 1 || echo 0)"
+cek "PATCH /produksi/faktur/:key oleh kitchen cabang lain" "V == 404" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PATCH "$BASE/api/produksi/faktur/$FK269_ID" -H "Authorization: Bearer $KIT269" -H 'Content-Type: application/json' -d "{\"password\":\"Kitchen269Pass!\",\"catatan\":\"DIRAMPAS\"}")"
+cek "DELETE /produksi/faktur/:key oleh kitchen cabang lain" "V == 404" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X DELETE "$BASE/api/produksi/faktur/$FK269_ID" -H "Authorization: Bearer $KIT269")"
+cek "…dan fakturnya MASIH ADA, tak ikut terhapus" "V == 1" \
+  "$(api "$OWNER" GET "/produksi?branch_id=$PUSAT46_ID&per_page=500" | jq --arg f "$FK269_ID" '([.rows[] | select(.faktur_id==$f)] | length > 0) | if . then 1 else 0 end')"
+# PASANGAN: karyawan Central Kitchen TETAP boleh melaporkan harga faktur cabang
+# mana pun — hak yang §93 pakukan, dan yang versi pertama pengurungan ini
+# hampir dicabut diam-diam.
+cek "PASANGAN: CK tetap boleh pratinjau dampak faktur cabang lain" "V == 200" \
+  "$(status_code_body "$TCK58" POST "/pembelian/laporan-harga/$FKL93_ID/dampak" "{\"items\":[{\"id\":\"$ROWL93\",\"total_harga\":42000}]}")"
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

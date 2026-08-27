@@ -23,7 +23,7 @@ import { awalHariDi, tambahHari } from "../../lib/time";
 
 /** penerima kiriman — siapa yang menekan Terima/Tolak */
 const penerima = alias(users, "penerima_kiriman");
-import { resolveBranchId, terikatCabang, type AppEnv } from "../../middleware/auth";
+import { cabangTerikat, resolveBranchId, syaratCabang, terikatCabang, type AppEnv } from "../../middleware/auth";
 import { catatLogFaktur } from "../produksi/log";
 import { autoFileRakCabang } from "../penyimpanan/autoFile";
 
@@ -125,9 +125,15 @@ function kondisiFaktur(c: Context<AppEnv>, fakturId: string) {
     KIRIMAN_MASUK,
     isNull(productions.deletedAt),
   ];
-  if (terikatCabang(auth.role) && auth.branch_id) {
-    conds.push(eq(productions.branchId, auth.branch_id));
-  }
+  /*
+   * Dulu `terikatCabang(auth.role) && auth.branch_id` — dan bagian kedua itu
+   * membuatnya JATUH TERBUKA: peran terikat yang kebetulan tak punya cabang
+   * lolos ke SELURUH perusahaan, sementara `resolveBranchId` pada keadaan yang
+   * persis sama menjawab 403 "Akun tanpa cabang". Dua pintu ke keadaan yang
+   * sama, dua jawaban. Sekarang keduanya memakai `syaratCabang`.
+   */
+  const kurung = syaratCabang(c, productions.branchId);
+  if (kurung) conds.push(kurung);
   return conds;
 }
 
@@ -455,10 +461,10 @@ export const penerimaanRoutes = new Hono<AppEnv>()
      * tanpa cabang asal di sini, tandanya tak akan pernah muncul untuk mereka.
      * Owner/admin melihat semuanya.
      */
-    const kunciCabang =
-      terikatCabang(auth.role) && auth.branch_id
-        ? sql`AND (g.branch_id = ${auth.branch_id} OR g.asal_faktur = ${auth.branch_id})`
-        : sql``;
+    const terikat = cabangTerikat(c);
+    const kunciCabang = terikat
+      ? sql`AND (g.branch_id = ${terikat} OR g.asal_faktur = ${terikat})`
+      : sql``;
     /*
      * BERLANGIT-LANGIT, DAN AGREGATNYA TETAP ATAS POPULASI PENUH.
      *

@@ -101,7 +101,7 @@ describe("PUT /open-bill/:id ikut menolak bill yang sudah ditutup", () => {
     // memulangkan null di sini adalah bill yang tertutup — dan itu kini sudah
     // dicegat di atas.
     const iGuard = PUT.indexOf("if (existing.closedAt) {");
-    const iAkhir = PUT.indexOf("return c.json(await loadDetail(auth.company_id!, id));");
+    const iAkhir = PUT.indexOf("return c.json(await loadDetail(auth.company_id!, id, cabangTerikat(c)));");
     expect(iGuard, "penjaga tak ditemukan di PUT").toBeGreaterThan(0);
     expect(iAkhir).toBeGreaterThan(iGuard);
   });

@@ -803,7 +803,12 @@ export async function riwayatOpnamePerlengkapan(companyId: string, branchId: str
 }
 
 /** Detail baris satu sesi opname perlengkapan. */
-export async function detailOpnamePerlengkapan(companyId: string, sessionId: string) {
+export async function detailOpnamePerlengkapan(
+  companyId: string,
+  sessionId: string,
+  /** Syarat cabang pemanggil — sesi opname milik SATU cabang. */
+  kurung: SQL | undefined,
+) {
   const rows = await db
     .select({
       supplyId: supplyMutations.supplyId,
@@ -817,7 +822,11 @@ export async function detailOpnamePerlengkapan(companyId: string, sessionId: str
     .from(supplyMutations)
     .innerJoin(supplies, eq(supplyMutations.supplyId, supplies.id))
     .where(
-      and(eq(supplyMutations.companyId, companyId), eq(supplyMutations.sessionId, sessionId)),
+      and(
+        eq(supplyMutations.companyId, companyId),
+        kurung,
+        eq(supplyMutations.sessionId, sessionId),
+      ),
     )
     .orderBy(asc(supplies.nama));
   if (rows.length === 0) return null;

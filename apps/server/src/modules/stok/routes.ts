@@ -25,6 +25,7 @@ import {
 } from "../../db/schema";
 import {
   branchUntukTulis,
+  syaratCabang,
   pastikanCabang,
   requireRole,
   resolveBranchId,
@@ -1045,6 +1046,9 @@ export const stokRoutes = new Hono<AppEnv>()
       .where(
         and(
           eq(stockOpnames.companyId, auth.company_id!),
+          // Sesi opname MILIK satu cabang: tanpa syarat ini, kasir cabang lain
+          // membaca selisih, catatan, dan pelakunya (terukur 200).
+          syaratCabang(c, stockOpnames.branchId),
           eq(stockOpnames.sessionId, c.req.param("sessionId")),
         ),
       )

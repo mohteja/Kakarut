@@ -63,6 +63,7 @@ import { kolomBarisPindah, kolomPindahCabang } from "./pindah";
 import { nomorUntukRefs, terbitkanNomor } from "../dokumen/nomor";
 import {
   branchUntukTulis,
+  syaratCabangDivisi,
   pastikanAnggotaAktif,
   pastikanCabang,
   resolveBranchId,
@@ -478,6 +479,15 @@ async function bacaBarisLaporan(
   companyId: string,
   fakturId: string,
   items: { id: string; total_harga: number }[],
+  /**
+   * Syarat cabang pemanggil (undefined untuk owner/admin).
+   *
+   * Dioper, bukan dibaca sendiri: pembantu ini tak punya `Context`. Tanpanya,
+   * peran `kitchen`/`bar`/`tim` yang terikat satu cabang melaporkan harga
+   * faktur cabang LAIN — dan harga itu menggerakkan `hitungAcuanBaru`, yang
+   * mengubah harga acuan seluruh perusahaan.
+   */
+  kurung: SQL | undefined,
 ) {
   if (!/^[0-9a-f-]{36}$/i.test(fakturId)) {
     throw new HTTPException(404, { message: "Faktur tidak ditemukan" });
@@ -496,6 +506,7 @@ async function bacaBarisLaporan(
     .where(
       and(
         eq(productions.companyId, companyId),
+        kurung,
         eq(productions.fakturId, fakturId),
         eq(productions.tipe, "beli"),
         isNull(productions.deletedAt),
@@ -2215,6 +2226,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
           auth.company_id!,
           c.req.param("fakturId"),
           items,
+          syaratCabangDivisi(c, productions.branchId),
         );
         const acuanBaru = await hitungAcuanBaru(db, auth.company_id!, byId, target);
         const idBahan = [...acuanBaru.keys()];
@@ -2340,6 +2352,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
           auth.company_id!,
           c.req.param("fakturId"),
           items,
+          syaratCabangDivisi(c, productions.branchId),
         );
         await db.transaction(async (tx) => {
           for (const [id, totalHarga] of target) {
@@ -2769,6 +2782,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
             eq(productions.companyId, auth.company_id!),
             eq(productions.tipe, tipe),
             isNull(productions.deletedAt),
+            syaratCabangDivisi(c, productions.branchId),
             cocokFaktur(key),
           ),
         );
@@ -2822,6 +2836,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
             eq(productions.companyId, auth.company_id!),
             eq(productions.tipe, tipe),
             isNull(productions.deletedAt),
+            syaratCabangDivisi(c, productions.branchId),
             cocokFaktur(key),
           ),
         )
@@ -2846,6 +2861,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
             eq(productions.companyId, auth.company_id!),
             eq(productions.tipe, tipe),
             isNull(productions.deletedAt),
+            syaratCabangDivisi(c, productions.branchId),
             cocokFaktur(key),
           ),
         )

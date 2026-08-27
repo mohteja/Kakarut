@@ -32,6 +32,7 @@ import {
 import {
   requireRole,
   resolveBranchId,
+  syaratCabang,
   terikatCabang,
   type AppEnv,
   cabangDariQuery,
@@ -397,6 +398,7 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
     const detail = await detailOpnamePerlengkapan(
       auth.company_id!,
       c.req.param("sessionId"),
+      syaratCabang(c, supplyMutations.branchId),
     );
     if (!detail)
       throw new HTTPException(404, { message: "Sesi opname tidak ditemukan" });
