@@ -50,6 +50,175 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## `.value` polos: antrean offline yang tak terbaca — mobile — 2026-08-27
+
+- **Kenapa vena ini ada**: utang yang kucatat sendiri berangka putaran lalu —
+  *"`.value` polos pada `AsyncValue` membuang galat dengan cara yang persis
+  sama dan belum disapu; 102 situs di 39 berkas."* Putaran ini membayarnya, dan
+  yang ditemukan letaknya **lebih dalam** dari situs-situs itu.
+
+- **PREMISNYA DIJALANKAN, BUKAN DIINGAT (Aturan 7).** Seluruh penggolongan
+  vena ini berdiri di atas satu perbedaan yang **tak terlihat dari bentuk
+  kodenya**. Dibaca dari sumber riverpod 3.3.2 lalu **dijalankan** di
+  `ProviderContainer` sungguhan:
+
+  | keadaan | `.value ?? kosong` | `asData?.value ?? kosong` | `hasError` |
+  |---|---|---|---|
+  | muat PERTAMA gagal | **kosong** | **kosong** | true |
+  | refresh gagal, data lama ada | data **BASI** | **kosong** | true |
+
+  Jadi `asData` runtuh pada SETIAP kegagalan; `.value` runtuh hanya pada muat
+  pertama, dan pada refresh yang gagal ia menyajikan data basi tanpa ada yang
+  diberi tahu. Dua kebohongan, satu kelas — dan angkanya sekarang dipaku
+  `test/nilai_async_semantik_test.dart`, jadi riverpod yang berubah (atau
+  ingatanku yang salah sejak awal) memerahkan uji, bukan diam-diam
+  menggeser kesimpulan.
+  Ikut terukur di situ: **`is AsyncError` salah** — sesudah muat pertama yang
+  gagal kelas konkretnya `AsyncLoading` dengan `hasError` true. `lib/` memang
+  tak memakai bentuk itu sekali pun (0 dari 104), dan sekarang itu punya
+  alasan, bukan kebetulan.
+
+- **Populasi**: `.value` polos pada provider yang **TERBUKTI** ber-`AsyncValue`
+  — 78 provider dibaca dari deklarasinya sendiri, bukan ditebak dari namanya —
+  **101 situs**, ber-`??` **44**, bawaannya runtuh **40**.
+  Sebarannya: `authControllerProvider` 63 · `cabangListProvider` 12 ·
+  `printerControllerProvider` 6 · `syncQueueProvider` 5 · `companyProvider` 4 ·
+  `ketersediaanProvider` 4.
+
+- **TEMUAN — dan ia tak ada di satu pun dari 40 situs itu.**
+  `SyncQueueController.build()` menjawab blob antrean yang tak bisa didekripsi
+  dengan `catch (_) { return []; }`. Blob itu dienkripsi dengan kunci di secure
+  storage; **kunci itu terikat perangkat, SharedPreferences tidak**. Restore
+  backup Android, keystore yang direset, atau pemasangan ulang yang menyisakan
+  preferensi meninggalkan pasangan yang tak cocok — dan `SecureBox._kunci()`
+  menjawab kunci yang hilang dengan **MEMBUAT KUNCI BARU**.
+
+  Terukur, satu penjualan **Rp150.000** berstatus `pending` di penyimpanan:
+
+  | | sebelum | sesudah |
+  |---|---|---|
+  | antrean terbaca | **0 perintah** | 0 perintah |
+  | `hasError` | **false** | false |
+  | blob aslinya | ditimpa `_persist` berikutnya | **diselamatkan** |
+  | dialog logout | **diam** | memperingatkan |
+
+  Dialog itu ada **justru** untuk memperingatkan bahwa antrean offline DIBUANG
+  saat keluar — komentarnya menuliskan aturannya. Ia membaca `pending == 0`,
+  dan nol itu punya dua sebab yang di layar terlihat sama.
+
+- **Dan `hasError` yang tetap `false` adalah bagian yang pantas dinamai.**
+  Penjaga yang kupasang putaran lalu memaafkan situs yang membawa `hasError`
+  penerima yang sama. Di sini kegagalannya **tak pernah sampai ke
+  `AsyncValue`** — ia sudah ditelan satu lapis di bawah. Ini kali **keempat
+  berturut-turut** sebuah gerbang yang jujur buta pada bentuk yang dilewatkan
+  catatan pengecualiannya sendiri, dan kali ini gerbangnya milikku sendiri,
+  berumur satu putaran. Gerbang `galat_ditelan` juga tak melihatnya: badan
+  `catch`-nya **tidak kosong** (`return [];`), dan gerbang itu hanya menyapu
+  yang kosong.
+
+- **Perbaikannya**: blob yang tak terbaca **dipindahkan** ke
+  `kakarut.sync_queue.rusak` (bukan ditimpa) dan tanggalnya dicatat;
+  `antreanRusakProvider` membuatnya bisa ditanyai layar; `SyncBanner` melukis
+  pita merah `_PitaAntreanRusak`; dialog logout menolak diam. Tetap
+  memulangkan daftar **kosong** dengan sengaja: melempar akan mematikan
+  seluruh antrean — perintah BARU pun tak bisa masuk, dan kasir kehilangan
+  mode offline sepenuhnya. Kosong + penanda yang terlihat lebih baik daripada
+  macet total ATAU diam.
+
+- **Tiga perbaikan lain, semuanya "kalimat yang salah", bukan sekadar angka
+  yang hilang**: gerbang buka-kasir offline memisahkan *"tidak ada bukti
+  absen"* dari *"status absen tak terbaca"* — kalimat lamanya menyuruh orang
+  yang SUDAH absen untuk absen lagi, di jam paling sibuk, dengan jalan keluar
+  yang tak akan menolongnya · kartu pengajuan cuti tak lagi menulis kalimat
+  ajakan biasa saat hitungannya gagal · kedua `.value` di `sync_banner`
+  lewat `baca()`.
+
+- **Rumah bersama**: `lib/core/nilai_async.dart` — `baca(v, kosong)`
+  memulangkan `(nilai, gagal, basi)`. `gagal` = bawaannya benar-benar dipakai;
+  `basi` = ada data lama tapi penyegaran terakhirnya gagal. Kedua keadaan itu
+  yang selama ini hilang, dan keduanya lahir langsung dari tabel premis di
+  atas.
+
+- **TUDUHAN YANG DICABUT, dan pencabutannya lebih berguna dari tuduhannya.**
+  `openBillListProvider` ×2 — gerbang *"satu meja dine-in = satu bill"* —
+  awalnya kubaca sebagai temuan paling mahal putaran ini: daftar yang gagal
+  terbaca ⇒ gerbang lolos ⇒ bill kedua di meja yang sudah terisi ⇒ satu
+  tertinggal tak tertagih. Dibaca ke server: `open-bill/routes.ts:509`
+  menguncinya di dalam transaksi (`SELECT … FOR UPDATE`) lalu membalas **409
+  berkode `bill_berjalan` beserta `bill_id`**, dan klien menangkapnya di
+  `kasir_page:2740` untuk langsung menggabungkan pesanan ke bill itu. Yang
+  hilang percakapan yang lebih enak, bukan bill yang tak tertagih. Bukan
+  temuan.
+
+- **Detektor**: gerbang `as_data` digabung jadi SATU rumah `nilai_async` yang
+  menyapu **kedua pintu** — salinan yang dibiarkan berbeda dari saudaranya
+  adalah cara kelas ini tumbuh kembali (pelajaran `buta_komentar` di repo yang
+  sama). Tiap situs yang tersisa runtuh wajib terdaftar dengan **KELAS**-nya:
+  `sah` (alasannya struktural dan bisa **ditunjuk**) atau `utang` (masih
+  runtuh, diakui). Utangnya **dihitung** dan dipaku `maksUtang = 8`, dan
+  batasnya wajib turun begitu terbayar — batas yang tak pernah turun berhenti
+  jadi batas.
+
+- **Pengecualian terbesar dipaku pada PREMISNYA, bukan disalin 18 kali.**
+  18 situs `authControllerProvider` bersandar pada satu fakta: `main.dart`
+  menggerbangi seluruh aplikasi dengan `.when(data:, loading:, error:)` dan
+  hanya memulangkan layar dalam pada cabang `data:` dengan sesi bukan-null.
+  Fakta itu punya ujinya sendiri — mengubah bentuk gerbang itu memerahkan
+  suite, yang berarti seseorang harus membaca ulang ke-18 pengecualian itu.
+  Menyalin kalimat yang sama ke 18 berkas tak membuat adjudikasinya lebih
+  teliti, hanya lebih panjang.
+
+- **KELOLOSAN PEMINDAI, ditemukan dan diukur**: bawaan
+  `const <String, MenuStokDto>{}` terpotong di koma **di dalam `<>`** —
+  `_operan` berhenti di `,` kedalaman nol dan `<`/`>` bukan kurung — sehingga
+  terbaca `const <String`, tak cocok pola runtuh, dan situsnya lolos
+  **diam-diam**. Satu situs (`tambah_stok_menu_page.dart:294`), tanpa apa pun
+  yang memberi tahu. Sesudah lompatan generik dipasang: **44 → 46 tertuduh**.
+  Ini bentuk yang sama dengan under-report putaran 19 & 21: daftar pola selalu
+  kurang panjang, dan yang menemukannya bukan pembacaan melainkan
+  ketidakcocokan angka antara dua cara hitung.
+
+- **Angka sebelum → sesudah**: tertuduh pintu `.value` **46 → 40** (6 dibawa
+  ke `baca()` / `hasError`) · tertuduh pintu `asData` tetap **10** · dari 40
+  yang terdaftar, **32 `sah`** dan **8 `utang`** yang jumlahnya kini dipaku.
+
+- **Utang yang DIAKUI, berangka, dengan nama** (8 situs): peta sisa porsi
+  `ketersediaanProvider` ×4 + `ketersediaanCabangProvider` ×1 — hilangnya
+  menghapus badge stok DAN peringatan *"⚠️ Melebihi sisa stok"*; `mejaStatus`
+  ×1 — semua meja tampak bebas; `statusBarisPesanan` ×1 — tiap baris tampak
+  belum dikerjakan; `printerController` ×1 — daftar printer tiket menghilang.
+
+- **Bukti merah, pada pohon SUNGGUHAN, tiga arah**: situs `.value` baru yang
+  tak terdaftar → merah menyebut berkas & barisnya; salinan **KETIGA** dari
+  penerima yang terdaftar 2 kali → merah (`terdaftar 2, sekarang 3`); dan
+  **mengubah bentuk gerbang sesi di `main.dart`** → merah. **PASANGAN**: idiom
+  `.when(error:)` tak tersentuh · `.value` pada provider BUKAN-`AsyncValue`
+  (`cartProvider`, `apiClientProvider`) tak dituduh · situs yang membawa
+  `hasError`-nya hijau (lewat `.`, `?.`, `!.`) · bawaan yang menyebutkan
+  dirinya (`-1`, sebuah pesan) bukan keruntuhan · antrean yang SEHAT terbaca
+  utuh dan tak menyalakan penanda rusak. **CAKUPAN** dipaku: ≥30 situs
+  `asData`, ≥80 situs `.value`, ≥25 berkas, ≥60 provider terdeteksi.
+
+- **Gerbang keempat ikut menangkap perubahanku**: `galat_ditelan_test.dart`
+  memerah begitu `_simpanRusak` menambah satu `catch` di `sync_queue.dart`
+  (2 → 3) — dan entrinya diperbarui **beserta alasannya**: menyimpan catatan
+  bahwa penyimpanan gagal, lalu penyimpanan catatan itu sendiri gagal.
+
+- **Batas yang ditulis**: pencarian `hasError` berlingkup satu **berkas**,
+  bukan satu fungsi · hanya bentuk `?? …` yang dituduh · `.value` polos hanya
+  terlihat bila penerimanya `ref.watch(P)`/`ref.read(P)` — `.value` pada
+  variabel lokal ber-`AsyncValue` dan pada provider yang dirakit lewat
+  perantara **tidak terlihat** · pemindai leksikal, bukan pengurai Dart.
+
+- **Gerbang**: `flutter analyze lib test` **bersih** · `flutter test --no-pub`
+  **599 hijau** (dari 585; 14 uji baru). **Repo server tak tersentuh** kecuali
+  ledger ini — jadi `typecheck`, `npm test`, dan `verify-api` tidak dijalankan,
+  dengan `git status` sebagai buktinya.
+
+- **Commit**: `mohteja/kakarut-mobile@cbb0aa5` di cabang `claude`.
+
+---
+
 ## `asData`: pintu keluar yang membuang galat — mobile — 2026-08-27
 
 - **Kenapa vena ini ada**: tiga putaran terakhir menutup satu kelas di web —
@@ -6503,7 +6672,11 @@ berlaku di situ).
       di atas. 40 situs / 12 berkas; 35 berbawaan yang runtuh, 13 tanpa
       keadaan gagal yang terbaca → 10 terdaftar beralasan. Terukur di layar:
       provider gagal → teks `[Pengajuan]`, NOL lencana
-- [ ] **`.value` polos pada `AsyncValue`** (tanpa `asData`) — membuang galat
-      dengan cara yang persis sama, dan gerbang `as_data.dart` sengaja tidak
-      melihatnya. **102 situs di 39 berkas** (`ref.watch(…).value` /
-      `ref.read(…).value`). Dicatat berangka sebagai utang, bukan diklaim bersih
+- [x] ~~**`.value` polos pada `AsyncValue`**~~ — TEMUAN, lihat entri di atas.
+      101 situs / 44 ber-`??` / 40 runtuh; yang mahal justru BUKAN di situs
+      itu melainkan di `catch (_) { return []; }` milik antrean offline —
+      Rp150.000 pending terbaca 0 perintah dengan `hasError` tetap false
+- [ ] **Bacaan `AsyncValue` yang penerimanya variabel lokal** — gerbang
+      `nilai_async` hanya melihat `ref.watch(P)`/`ref.read(P)`, jadi
+      `final v = ref.watch(p); … v.value ?? kosong` di luar berkas yang sama
+      tak terhitung. Belum diukur; dicatat sebagai batas yang diketahui
