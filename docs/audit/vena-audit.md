@@ -50,6 +50,82 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Gerbang ISOLASI TENANT: vonis "aman" yang buktinya tak pernah terbaca — server (uji) — 2026-08-27
+
+- **Kenapa vena ini ada**: putaran lalu mencatat penyapu yang masih berbasis
+  teks sebagai **utang yang diukur**. Yang teratas bukan sekadar utang
+  instrumen — ia gerbang **isolasi tenant**, kelas kerusakan tertinggi di produk
+  ini: satu warung membaca data warung lain.
+
+- **Populasi**: **626 kueri** `db|tx .select|update|delete` di **60 berkas**.
+  **98 di antaranya divonis "aman" oleh dua aturan terlemah** — `A2` (lewat
+  konstanta) dan `C` (lewat induk yang memverifikasi) — dan keduanya menebak:
+  `nilaiKonstan()` mencari `const <nama> =` dengan regex atas SELURUH berkas dan
+  memungut **kecocokan pertama**; `lingkup()` menelusuri kurawal mundur lalu
+  menemukan-kembali kuerinya dengan `indexOf(isi.slice(0, 24))`; `rantai()`
+  penelusur kurung tulisan tangan yang komentarnya sendiri mencatat versi
+  keduanya membuat **103 kueri tak terkurung terbaca "aman"** — *"dan suntikan
+  bukti merah pun dinyatakan bersih."*
+
+- **ENAM vonis `A2` berdiri di atas deklarasi yang TAK ADA dalam lingkupnya**,
+  dan bentuknya bermacam-macam — semuanya nyata:
+
+  | situs | yang dikreditkan aturan lama |
+  |---|---|
+  | `produksi/routes.ts:630`, `:1258` | `conds` di sana **parameter** (`tahapSebagian(k: KonteksTahap)`); yang dikreditkan `const conds = [` **900+ baris DI BAWAHNYA**, milik rute lain |
+  | `kebersihan/routes.ts:167` | `syarat` **parameter** `selectLaporan(syarat: SQL[])`; yang dikreditkan konstanta untuk **TABEL LAIN** (`cleaningAreas`, sementara kuerinya membaca `cleaningReports`) |
+  | `perlengkapan/service.ts:545` · `bahan/routes.ts:662` | nama yang dideklarasikan 4×/2×, salah satunya **variabel perulangan** |
+
+  **Keenamnya dibaca tangan sampai ke pemanggilnya, dan TAK SATU PUN BOCOR**:
+  satu-satunya perakit `conds` (`produksi:1642`) memuat
+  `eq(productions.companyId, …)`; ketiga pemanggil `selectLaporan` mengurung;
+  `bahan:662` menyaring `existing.id` yang lahir dari baca ber-`companyId` di
+  `:638`. **Yang rusak BUKTINYA, bukan pengurungannya** — dan vonis yang benar
+  karena mujur tak bisa dibedakan dari vonis yang benar karena terbaca.
+
+- **Diadu, dan penukarannya menagih TIGA pengetatan**, masing-masing terukur:
+
+  | pengetatan | kenapa | akibatnya |
+  |---|---|---|
+  | `B` menuntut `branchId` **di dalam `.where`** | versi teks menguji seluruh rantai, jadi kolom `branchId` yang cuma DIPILIH ikut dihitung sebagai pengurungan | 22 → 21 |
+  | `C` menuntut **panggilan BERNAMA** | `and(eq(t.id, id), eq(t.companyId, …))` adalah bagian dari KUERI LAIN, bukan langkah verifikasi; argumen berupa closure juga tak dihitung | enam kueri berhenti keluar dari F |
+  | verifikator dicari di fungsi **TERLUAR** | verifikasi sah dilakukan SEBELUM transaksi dibuka: `pastikanKartu(...)` hidup di penangan rute, kuerinya di dalam `db.transaction(async (tx) => …)` | 16 kueri mendapat kembali penjaganya yang nyata |
+
+- **Sebelum → sesudah**, dan tak satu angka pun bergerak karena aturannya
+  dilonggarkan:
+
+  | | A | A2 | B | C | E | **F** |
+  |---|---|---|---|---|---|---|
+  | teks | 390 | 53 | 22 | 45 | 68 | **48** |
+  | pohon | 390 | 56 | 21 | 35 | 68 | **56** |
+
+  **602 dari 626 sepakat sejak penukaran pertama.** Kelas F NAIK — itu arah
+  yang benar: F berarti "tak teresolusi mekanis → ditagih keputusan tertulis".
+  Tiap entri baru terdaftar beralasan; **tiga berkas justru KELUAR** dari daftar
+  pilah-tangan (`penerimaan/routes.ts`, `perlengkapan/service.ts`,
+  `sync/routes.ts`) karena buktinya kini benar-benar terbaca.
+
+- **Gerbangnya**: tiga uji PREMIS baru di `ast-instrumen.test.ts`, semuanya
+  mendarat di kode NYATA dengan angkanya dihitung di dalam ujinya — jarak
+  900+ baris antara situs dan deklarasi yang dikreditkan; konstanta untuk tabel
+  lain; dan pasangan "kueri tetangga → F" vs "panggilan bernama → C".
+
+- **Batas & utang, ditulis jujur**:
+  - **kelas PARAMETER belum ada.** Enam situs di atas aman karena pemanggilnya
+    mengurung, dan itu diverifikasi TANGAN, bukan mesin. Membuktikannya mekanis
+    menuntut penelusuran antar-fungsi (parameter → destrukturisasi → tiap situs
+    panggil). Diusulkan sebagai putaran tersendiri, dengan populasinya:
+    **6 situs, 3 fungsi pembantu**;
+  - penyapu yang masih berbasis teks: `galat-ditelan.ts`, `templat-html.ts`,
+    `kolom-numerik.ts`, `rute.ts` — tetap utang yang diukur;
+  - putaran ini **tak menyentuh satu baris pun** `src`, jadi `verify-api` &
+    cakupan rute tak bisa terpengaruh dan tidak dijalankan.
+
+- **Gerbang**: `typecheck` bersih · `npm test` **2.414** (204 berkas, +6 uji) ·
+  gerbang `kueri-terkurung-tenant` tetap hijau dengan kontrak yang sama.
+
+---
+
 ## Instrumennya naik ke POHON SINTAKS — server (uji) — 2026-08-27
 
 - **Kenapa vena ini ada**: enam kelas kusapu hari ini dan **semuanya bersih**

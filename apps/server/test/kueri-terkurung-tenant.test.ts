@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { daftarSumber, kelas, petaKelas, rantai, semuaKueri, type Kueri } from "./util/kueri-terkurung";
+import { daftarSumber, kelas, petaKelas, semuaKueri, type Kueri } from "./util/kueri-terkurung";
 
 /**
  * SETIAP KUERI TERKURUNG PERUSAHAANNYA — arah BACA dan TULIS.
@@ -16,12 +16,16 @@ import { daftarSumber, kelas, petaKelas, rantai, semuaKueri, type Kueri } from "
  *
  * Populasi terukur 2026-08-26: **627** kueri (469 baca + 158 tulis).
  *
- *   A   389  mengurung `companyId` (atau `companies.id`) di rantainya sendiri
- *   A2   51  lewat variabel/`and(...conds)` — satu tingkat
- *   B    23  lewat `branchId` (cabangnya sendiri lahir dari `resolveBranchId`)
- *   C    46  kunci saringnya ikut dioper ke pemanggilan ber-`company_id`
+ *   A   390  mengurung `companyId` (atau `companies.id`) di rantainya sendiri
+ *   A2   56  lewat variabel — diresolusi PER LINGKUP, bukan kecocokan pertama
+ *   B    21  lewat `branchId` DI DALAM `.where` (bukan sekadar kolom terpilih)
+ *   C    35  kunci saringnya ikut dioper ke PANGGILAN BERNAMA ber-`company_id`
  *   E    68  memang LINTAS perusahaan: auth, panel super admin, cadangan, seed
- *   F    50  tak teresolusi mekanis → DIPILAH TANGAN, daftarnya di bawah
+ *   F    56  tak teresolusi mekanis → DIPILAH TANGAN, daftarnya di bawah
+ *
+ * Angka-angka itu bergerak 2026-08-27 ketika instrumennya pindah ke pohon
+ * sintaks — bukan karena aturannya berubah, melainkan karena BUKTINYA akhirnya
+ * terbaca. Rinciannya di `docs/audit/vena-audit.md`.
  *
  * Diukur juga lewat HTTP dengan DUA tenant sungguhan (id milik tenant A
  * dibuktikan terbaca oleh A lebih dulu): sebelas rute detail ber-`:id`
@@ -30,32 +34,34 @@ import { daftarSumber, kelas, petaKelas, rantai, semuaKueri, type Kueri } from "
  */
 
 /**
- * Ke-50 situs kelas F, dipilah TANGAN — bukan "belum sempat".
+ * Situs kelas F, dipilah TANGAN — bukan "belum sempat".
  *
  * Kuncinya BERKAS + JUMLAH, bukan nomor baris: gerbang di repo ini sudah
  * sekali patah karena memaku baris yang bergeser gara-gara komentar. Situs
  * baru di berkas yang sama menaikkan jumlahnya → merah, dan menagih keputusan.
  */
 const DIPILAH_TANGAN = new Map<string, { situs: number; alasan: string }>([
-  ["modules/produksi/routes.ts", { situs: 8, alasan:
-    "kunci `inArray` lahir dari baris yang SUDAH terkurung (`byId`, `rows`, `kirimMap`, `batchByProd`); sisanya menulis ke `productions.id` hasil select ber-`conds` yang memuat companyId" }],
-  ["modules/bahan/routes.ts", { situs: 5, alasan:
-    "`id` diverifikasi `eq(ingredients.companyId, auth.company_id!)` lebih dulu di handler yang sama (mis. :1663), lalu anak-anaknya (`ingredientSteps`, `ingredientComponents`, `ingredientProduksiBranches`) dibaca/dihapus lewat id itu" }],
-  ["modules/pesanan/routes.ts", { situs: 5, alasan:
-    "`pastikanKartu(jenis, id, auth.company_id!, branchId)` dipanggil sebelum baris anak disentuh; `billIds`/`saleIds` daftar papan lahir dari query ber-companyId tepat di atasnya" }],
-  ["modules/open-bill/routes.ts", { situs: 3, alasan:
-    "`loadDetail` membaca bill lalu MENOLAK di JS (`bill.companyId !== companyId`) sebelum apa pun dipakai; anaknya dibaca lewat `billId` yang sudah lolos itu" }],
+  ["modules/produksi/routes.ts", { situs: 10, alasan:
+    "kunci `inArray` lahir dari baris yang SUDAH terkurung (`byId`, `rows`, `kirimMap`, `batchByProd`); sisanya menulis ke `productions.id` hasil select ber-`conds` yang memuat companyId. DUA situs baru sejak pemindainya memakai lingkup: `.where(and(...conds))` di `tahapSebagian`/`tahapSeluruhFaktur` — `conds` di sana PARAMETER, dan satu-satunya perakitnya (:1642) memuat `eq(productions.companyId, auth.company_id!)`. Vonis lamanya A2 mengkredit `const conds` di :1642 itu juga, tapi lewat kecocokan-pertama-di-berkas — benar karena mujur, bukan karena terbaca" }],
+  ["modules/bahan/routes.ts", { situs: 9, alasan:
+    "`id` diverifikasi `eq(ingredients.companyId, auth.company_id!)` lebih dulu di handler yang sama (mis. :638, :1062, :1663) yang membalas 404, lalu anak-anaknya (`ingredientSteps`, `ingredientComponents`, `ingredientSuppliers`, `menuComponents`) dibaca/dihapus lewat id yang sudah lolos itu. Empat situs baru: pembuktinya kueri lain, bukan panggilan bernama — dan kueri tetangga bukan verifikasi" }],
+  ["modules/pesanan/routes.ts", { situs: 8, alasan:
+    "`pastikanKartu(jenis, id, auth.company_id!, branchId)` dipanggil sebelum baris anak disentuh; `billIds`/`saleIds` daftar papan lahir dari query ber-companyId tepat di atasnya. TIGA situs baru ada di `selaraskanTutupBill(tx, billId, sekarang, ctx)` — `billId` PARAMETER, dan ketiga pemanggilnya mengoper bill yang sudah lolos `pastikanKartu`" }],
+  ["modules/open-bill/routes.ts", { situs: 4, alasan:
+    "`loadDetail` membaca bill lalu MENOLAK di JS (`bill.companyId !== companyId`) sebelum apa pun dipakai; anaknya dibaca lewat `billId` yang sudah lolos itu. Satu situs baru (`.update(openBillItems)` pembatalan) berada di dalam transaksi yang dibuka SESUDAH penolakan itu" }],
+  ["modules/penjualan/refund.ts", { situs: 1, alasan:
+    "`refundSajian(tx, params)` — barisnya disaring `saleItems.id` milik nota yang sudah diverifikasi pemanggilnya (`penjualan/routes.ts` membaca sale ber-companyId lalu 404) sebelum refund dijalankan" }],
+  ["modules/profil/routes.ts", { situs: 1, alasan:
+    "`eq(users.id, auth.sub)` — profil MILIK PEMANGGIL SENDIRI. Tak ada tenant yang bisa dilanggar: kuncinya identitas di token, bukan id yang datang dari permintaan" }],
   ["modules/penjualan/routes.ts", { situs: 4, alasan:
     "`sale` datang dari select ber-companyId; `saleItems.saleId = sale.id` dan `users.id = sale.cashierUserId` mengikutinya (tabel `users` memang global — venanya sendiri)" }],
   ["modules/kebersihan/routes.ts", { situs: 3, alasan:
     "`ids` laporan lahir dari query ber-`syarat` yang memuat companyId; itemnya dibaca/dihapus per `reportId` dari daftar itu" }],
-  ["modules/penerimaan/routes.ts", { situs: 3, alasan:
-    "`kondisiFaktur(c, fakturId)` menyusun `eq(productions.companyId, auth.company_id!)` — pengurungannya ada, cuma tinggal di pembantu" }],
-  ["modules/menu/routes.ts", { situs: 2, alasan:
+    ["modules/menu/routes.ts", { situs: 2, alasan:
     "`menuId` diverifikasi milik perusahaan sebelum `menuComponents`/`menuBranches` diganti isi" }],
-  ["modules/penjualan/rekalkulasi.ts", { situs: 2, alasan:
-    "`saleId` dioper dari pemanggil yang sudah memuat notanya terkurung; `saleItems.id` dari baris nota itu" }],
-  ["modules/penjualan/service.ts", { situs: 2, alasan:
+  ["modules/penjualan/rekalkulasi.ts", { situs: 4, alasan:
+    "`hitungUlangBiayaPenjualan(tx, saleId, companyId, …)` menerima companyId sebagai PARAMETER dan memakainya di kueri pertamanya; dua situs baru menyaring `saleId` yang sudah lolos kueri itu di fungsi yang sama" }],
+  ["modules/penjualan/service.ts", { situs: 1, alasan:
     "bill dimuat `eq(openBills.companyId, params.companyId)` + `.for(\"update\")`, baru barisnya dibaca & bill-nya ditutup lewat id itu" }],
   ["modules/shift/routes.ts", { situs: 2, alasan:
     "`row` shift datang dari query terkurung; pembacaan/penulisan lanjutan memakai `row.id` sebagai penjaga balapan" }],
@@ -69,13 +75,9 @@ const DIPILAH_TANGAN = new Map<string, { situs: number; alasan: string }>([
     "menulis `storageLocationId` ke `productions.id` yang dioper pemanggil terkurung, dan hanya bila kolomnya masih NULL" }],
   ["modules/perlengkapan/routes.ts", { situs: 1, alasan:
     "master perlengkapan diperbarui lewat id yang sudah lolos `muatSupplyAktif(auth.company_id!, …)`" }],
-  ["modules/perlengkapan/service.ts", { situs: 1, alasan:
-    "`supplyPurchases.id` dari `params.id` milik faktur yang pemanggilnya sudah kurung" }],
-  ["modules/sync/idempoten.ts", { situs: 1, alasan:
+    ["modules/sync/idempoten.ts", { situs: 1, alasan:
     "klaim idempotensi dikunci per (device, client_ref) — barisnya milik perintah yang sedang diproses, bukan pencarian lintas perusahaan" }],
-  ["modules/sync/routes.ts", { situs: 1, alasan:
-    "pemangkas retensi `syncCommands` memang LINTAS perusahaan by design (venanya sendiri: retensi yang menghormati kontrak antrean offline)" }],
-]);
+  ]);
 
 describe("tiap kueri terkurung perusahaannya", () => {
   const daftar = daftarSumber();
@@ -138,9 +140,12 @@ describe("tiap kueri terkurung perusahaannya", () => {
   });
 
   it("DETEKTOR TERBUKTI: rantainya tak menelan kueri tetangga", () => {
-    // Versi kedua `rantai()` menghitung ganda kurung buka saat melompati
-    // `.metode(`, sehingga rantainya menelan rute BERIKUTNYA dan meminjam
-    // `companyId` milik tetangganya — 103 kueri tak terkurung terbaca "aman".
+    // Versi kedua `rantai()` — penelusur kurung tulisan tangan — menghitung
+    // ganda kurung buka saat melompati `.metode(`, sehingga rantainya menelan
+    // rute BERIKUTNYA dan meminjam `companyId` milik tetangganya: 103 kueri tak
+    // terkurung terbaca "aman". Penelusur itu sudah TIDAK ADA lagi (batas
+    // rantai kini simpul pohon), dan uji ini tetap berdiri sebagai kontrak
+    // perilakunya — bukan sebagai pin ke implementasinya.
     const isi = `
       const a = db.select().from(t).limit(5);
       const b = db.select().from(u).where(eq(u.companyId, x));

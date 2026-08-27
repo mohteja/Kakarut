@@ -20,6 +20,7 @@ import {
   templateSql,
 } from "./util/sql-mentah";
 import { situsBendera } from "./util/bendera-hapus";
+import { petaKelas } from "./util/kueri-terkurung";
 
 /**
  * INSTRUMENNYA SENDIRI YANG DIUJI — Aturan 7, dibayar sekali lagi.
@@ -242,5 +243,69 @@ describe("primitif: rantai & baris", () => {
     expect(barisDi(isi, 0)).toBe(1);
     expect(barisDi(isi, 2)).toBe(2);
     expect(barisDi(isi, 4)).toBe(3);
+  });
+});
+
+describe("BUKTI BUTA #4 — gerbang ISOLASI TENANT: vonis 'aman' dari bukti yang tak terlihat", () => {
+  it("`conds` di `produksi/routes.ts` PARAMETER, dikreditkan `const` seribu baris di bawah", () => {
+    const isi = baca("modules/produksi/routes.ts");
+    // Premis, dihitung di sini — bukan diklaim: situsnya memakai `and(...conds)`
+    // sementara SETIAP `const conds =` di berkas ini berada JAUH DI BAWAHNYA.
+    const situs = isi.indexOf("await db\n    .select()\n    .from(productions)\n    .where(and(...conds))");
+    expect(situs, "premis hilang: bentuk kuerinya sudah berubah").toBeGreaterThan(0);
+    const dekl = [...isi.matchAll(/\bconst conds\s*=/g)].map((m) => m.index!);
+    expect(dekl.length, "premis hilang: `conds` tak lagi dideklarasikan berkali-kali").toBeGreaterThan(3);
+    expect(
+      dekl.filter((d) => d < situs).length,
+      "ada deklarasi conds SEBELUM situsnya — premisnya patah",
+    ).toBe(0);
+    // Aturan lama memungut kecocokan PERTAMA di berkas, ke arah mana pun.
+    const jarakBaris =
+      isi.slice(situs, dekl[0]).split("\n").length - 1;
+    expect(jarakBaris, "yang dikreditkan ternyata berdekatan").toBeGreaterThan(900);
+
+    // Dan pohonnya: `conds` di sini datang dari destrukturisasi PARAMETER,
+    // jadi tak ada nilai yang bisa dibaca — vonisnya F, dan F menagih
+    // keputusan yang tertulis.
+    const peta = petaKelas([{ nama: "modules/produksi/routes.ts", isi }]);
+    const q = peta.find((x) => x.isi.includes(".from(productions)") && x.isi.includes("and(...conds)"));
+    expect(q?.kelas).toBe("F");
+  });
+
+  it("`selectLaporan(syarat)` dikreditkan konstanta untuk TABEL LAIN", () => {
+    const isi = baca("modules/kebersihan/routes.ts");
+    // `syarat` di sini parameter; `const syarat` pertama di berkas menyaring
+    // `cleaningAreas`, sementara kuerinya membaca `cleaningReports`.
+    const pertama = isi.indexOf("const syarat");
+    expect(pertama).toBeGreaterThan(0);
+    const potongan = isi.slice(pertama, pertama + 120);
+    expect(potongan, "premis hilang").toContain("cleaningAreas.companyId");
+    expect(isi.indexOf("async function selectLaporan")).toBeLessThan(pertama);
+  });
+
+  it("PANGGILAN BERNAMA vs kueri tetangga: yang kedua bukan verifikasi", () => {
+    // Kelas C berarti "kunci saringnya ikut dioper ke pemanggilan ber-company_id".
+    // Kueri LAIN yang kebetulan menyaring dengan nama yang sama bukan bukti apa
+    // pun — dan itu yang membedakan gerbang ini dari versi yang pernah
+    // menyatakan bersih sebuah suntikan bukti merah.
+    const tetangga = `async function h(c) {
+      const auth = c.get("auth");
+      const id = c.req.param("id");
+      const [x] = await db.select().from(t).where(and(eq(t.id, id), eq(t.companyId, auth.company_id!)));
+      const y = await db.select().from(u).where(eq(u.tId, id));
+    }`;
+    const kelasnya = petaKelas([{ nama: "modules/palsu/routes.ts", isi: tetangga }]);
+    const kedua = kelasnya.find((q) => q.isi.includes(".from(u)"));
+    expect(kedua?.kelas, "kueri tetangga dihitung sebagai verifikasi").toBe("F");
+
+    // …sementara PANGGILAN BERNAMA yang menerima kunci + company_id memang C.
+    const bernama = `async function h(c) {
+      const auth = c.get("auth");
+      const id = c.req.param("id");
+      await pastikanKartu("bill", id, auth.company_id!);
+      const y = await db.select().from(u).where(eq(u.tId, id));
+    }`;
+    const k2 = petaKelas([{ nama: "modules/palsu/routes.ts", isi: bernama }]);
+    expect(k2.find((q) => q.isi.includes(".from(u)"))?.kelas).toBe("C");
   });
 });
